@@ -11,22 +11,4 @@ if [ -z "${subject}" ]; then
   exit 1
 fi
 
-# Allow git-generated merge/revert commits.
-if [[ "${subject}" =~ ^Merge\  ]] || [[ "${subject}" =~ ^Revert\  ]]; then
-  exit 0
-fi
-
-pattern='^(feat|fix|chore|ci|build|docs|refactor|test|perf)\([a-z0-9][a-z0-9._/-]*\): .+'
-if [[ ! "${subject}" =~ ${pattern} ]]; then
-  cat >&2 <<'EOF'
-commit-msg: invalid subject format.
-Expected: type(scope): summary
-Examples:
-  feat(qwen35): add multimodal streaming decode path
-  fix(torch-ffi): guard null tensor in scatter op
-EOF
-  echo "Got: ${subject}" >&2
-  exit 1
-fi
-
-exit 0
+exec "$(dirname "$0")/check-commit-message.sh" "${subject}"

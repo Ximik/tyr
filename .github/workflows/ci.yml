@@ -202,31 +202,16 @@ jobs:
           fetch-depth: 0
 
       - name: Check commit subject format
-        if: github.event_name == 'push' || github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request'
         run: |
           set -euo pipefail
-          zero40="0000000000000000000000000000000000000000"
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            base="${{ github.event.pull_request.base.sha }}"
-            head="${{ github.event.pull_request.head.sha }}"
-          else
-            base="${{ github.event.before }}"
-            head="${{ github.sha }}"
-          fi
-          if [ -z "${base}" ] || [ "${base}" = "${zero40}" ]; then
-            echo "No base SHA available; validating full ancestry of ${head}"
-            mapfile -t commits < <(git rev-list --reverse "${head}")
-          else
-            echo "Validating commits in ${base}..${head}"
-            mapfile -t commits < <(git rev-list --reverse "${base}..${head}")
-          fi
-          if [ "${#commits[@]}" -eq 0 ]; then
-            echo "No commits to validate."
-            exit 0
-          fi
-          for commit in "${commits[@]}"; do
-            ./scripts/check-commit-messages.sh "${commit}^!"
-          done
+          range="${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}"
+          echo "Validating commit subjects in ${range}"
+          invalid=0
+          while IFS= read -r subject; do
+            ./.githooks/check-commit-message.sh "${subject}" || invalid=1
+          done < <(git log --reverse --format=%s "${range}")
+          exit "${invalid}"
 
       - uses: actions/setup-python@v6
         with:

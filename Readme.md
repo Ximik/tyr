@@ -351,27 +351,22 @@ This repo uses scoped conventional commit subjects:
 type(scope): summary
 ```
 
-A commit message template is included at `.gitmessage`. Enable it locally:
+Enable the git hooks in `.githooks/` and the commit message template
+`.gitmessage` for your clone:
 
 ```bash
-./scripts/setup-git-hooks.sh
+git config core.hooksPath .githooks
+git config commit.template .gitmessage
 ```
-
-This sets:
-- `commit.template=.gitmessage`
-- `core.hooksPath=.githooks`
 
 Included hooks:
 - `pre-commit`: fails on staged whitespace errors and conflict markers
 - `commit-msg`: enforces `type(scope): summary` (e.g. `feat(qwen35): add video stream patchify`)
-- `pre-push`: validates pushed commit subjects with `scripts/check-commit-messages.sh`
+- `pre-push`: validates the subjects of commits being pushed
 
-CI also enforces commit subjects using `scripts/check-commit-messages.sh`.
-
-Manual check examples:
+All subject checks, including CI on pull requests, use one checker:
 ```bash
-./scripts/check-commit-messages.sh HEAD~20..HEAD
-COMMIT_MSG_ENFORCE_FROM=<commit> ./scripts/check-commit-messages.sh HEAD~20..HEAD
+./.githooks/check-commit-message.sh "feat(qwen35): add video stream patchify"
 ```
 
 ## License

@@ -251,8 +251,8 @@ hidden-symbol behavior at lld speed).
   `RUNPOD_API_KEY` never enters tracked files.
 - `scripts/nanochat/` — `torchrun` launchers for distributed NanoChat training
   (`run_train_torchrun.sh`, `bench_distributed.sh`) and `ENV_INVENTORY.md`.
-- `scripts/lean_cc_wrapper.sh`, `check-commit-messages.sh`,
-  `setup-git-hooks.sh` — toolchain wrapper and conventional-commit hooks.
+- `scripts/lean_cc_wrapper.sh` — toolchain wrapper. Conventional-commit hooks
+  and their checker live in `.githooks/`.
 - Python converters — `kokoro_to_safetensors.py`,
   `qm9_{sdf,xyz}_to_branching_jsonl.py`, `qwen3tts_*.py`,
   `kittentts_reference_synthesize.py` (dataset prep and parity references;

@@ -3,13 +3,7 @@ set -euo pipefail
 
 # Validate commit subjects before push using the same checker as CI.
 
-repo_root="$(git rev-parse --show-toplevel)"
-checker="${repo_root}/scripts/check-commit-messages.sh"
-
-if [ ! -x "${checker}" ]; then
-  echo "pre-push: missing executable checker at ${checker}" >&2
-  exit 1
-fi
+checker="$(dirname "$0")/check-commit-message.sh"
 
 remote_name="${1:-}"
 zero40="0000000000000000000000000000000000000000"
@@ -60,18 +54,15 @@ while read -r local_ref local_sha remote_ref remote_sha; do
   fi
 done
 
-validated_any=0
+invalid=0
 while IFS= read -r commit; do
   if [[ -z "${commit}" ]]; then
     continue
   fi
-  echo "pre-push: validating commit subject for ${commit}"
-  "${checker}" "${commit}^!"
-  validated_any=1
+  if ! "${checker}" "$(git log -1 --format=%s "${commit}")"; then
+    echo "pre-push: in commit ${commit}" >&2
+    invalid=1
+  fi
 done < <(awk '!seen[$0]++' "${pending_file}")
 
-if [[ "${validated_any}" -eq 0 ]]; then
-  echo "pre-push: no commits to validate."
-fi
-
-exit 0
+exit "${invalid}"
