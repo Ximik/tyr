@@ -4,7 +4,7 @@
   Fused LayerNorm kernels.
 
   `tkFusedLayerNormResidual1024` is the canonical ThunderKittens-aligned port of
-  `thirdparty/ThunderKittens/kernels/layernorm/layernorm.cu`.
+  `external/ThunderKittens/kernels/layernorm/layernorm.cu`.
 -/
 
 import Tyr.GPU.Kernels.Prelude

@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-TK_ROOT = REPO_ROOT / "thirdparty" / "ThunderKittens"
+TK_ROOT = REPO_ROOT / "external" / "ThunderKittens"
 TORCH_EXTENSIONS_DIR = REPO_ROOT / ".cache" / "torch_extensions"
 
 

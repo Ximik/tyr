@@ -7,7 +7,7 @@ import Tyr.GPU.Kernels.Support
   ThunderKittens-shaped decayed linear attention kernels.
 
   This module now mirrors the actual structure of
-  `thirdparty/ThunderKittens/kernels/linear_attention/linear_attention.cu` much
+  `external/ThunderKittens/kernels/linear_attention/linear_attention.cu` much
   more closely:
 
   - `Q/K` are `64x128` chunk tiles,

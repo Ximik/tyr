@@ -13,7 +13,7 @@ struct DummyPybindModule {
 #endif
 #define PYBIND11_MODULE(name, variable) static void ignored_pybind_module(DummyPybindModule& variable)
 
-#include "../../thirdparty/ThunderKittens/kernels/attention/mha_h100/mha_h100.cu"
+#include "../../external/ThunderKittens/kernels/attention/mha_h100/mha_h100.cu"
 
 #undef PYBIND11_MODULE
 #undef TORCH_EXTENSION_NAME

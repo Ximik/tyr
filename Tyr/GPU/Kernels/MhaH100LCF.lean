@@ -5,7 +5,7 @@ import Tyr.GPU.Kernels.Prelude
 # Tyr.GPU.Kernels.MhaH100LCF
 
 ThunderKittens-style load-compute-finish attention kernels based on
-`thirdparty/ThunderKittens/kernels/attention/mha_h100_lcf/mha_h100_lcf.cu`.
+`external/ThunderKittens/kernels/attention/mha_h100_lcf/mha_h100_lcf.cu`.
 
 The vendored CUDA kernel uses the ThunderKittens `lcf` pipeline template with:
 

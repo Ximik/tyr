@@ -287,7 +287,7 @@ Makefile targets: `all` (default; static and shared libraries), `lib`, `dylib`,
 `bench-flash-attn` (standalone C++ attention benchmark from
 `cc/tools/bench_flash_attn.cpp`), `soxr`, `clean`. `check-submodules` runs
 first and fails early with the `git submodule update --init --recursive` hint
-when `external/soxr`, `thirdparty/ThunderKittens`, or `external/libtorch` are
+when `external/soxr`, `external/ThunderKittens`, or `external/libtorch` are
 missing.
 
 ## Usage example

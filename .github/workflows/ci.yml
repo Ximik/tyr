@@ -22,7 +22,6 @@ concurrency:
 jobs:
   build-and-test:
     env:
-      LIBTORCH_VERSION: 2.9.1
       # Main remains a clean project/dependency/native compilation gate.
       TYR_CI_CLEAN: ${{ github.event_name == 'push' || inputs.clean_build }}
     strategy:
@@ -57,54 +56,14 @@ jobs:
           fi
           elan default "$toolchain"
 
-      - name: Install system dependencies (macOS)
-        if: runner.os == 'macOS'
-        run: brew install libomp apache-arrow libsoxr
-
-      - name: Install system dependencies (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ca-certificates lsb-release wget
-          codename="$(lsb_release --codename --short)"
-          arrow_repo_pkg="apache-arrow-apt-source-latest-${codename}.deb"
-          wget "https://packages.apache.org/artifactory/arrow/ubuntu/${arrow_repo_pkg}"
-          sudo apt-get install -y -V "./${arrow_repo_pkg}"
-          rm -f "${arrow_repo_pkg}"
-          sudo apt-get update
-          sudo apt-get install -y libomp-dev libarrow-dev libparquet-dev libsoxr-dev unzip
-
-      - name: Cache LibTorch
-        id: cache-libtorch
+      - name: Cache dependency wheels
         uses: actions/cache@v4
         with:
-          path: external/libtorch
-          key: libtorch-${{ runner.os }}-${{ runner.arch }}-${{ env.LIBTORCH_VERSION }}
+          path: external/.cache
+          key: deps-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('dependencies.lock') }}
 
-      - name: Download LibTorch
-        if: steps.cache-libtorch.outputs.cache-hit != 'true'
-        run: |
-          mkdir -p external
-          if [ "${{ runner.os }}" = "macOS" ]; then
-            if [ "${{ runner.arch }}" = "ARM64" ]; then
-              LIBTORCH_URL="https://download.pytorch.org/libtorch/cpu/libtorch-macos-arm64-${LIBTORCH_VERSION}.zip"
-            else
-              LIBTORCH_URL="https://download.pytorch.org/libtorch/cpu/libtorch-macos-x86_64-${LIBTORCH_VERSION}.zip"
-            fi
-          else
-            LIBTORCH_URL="https://download.pytorch.org/libtorch/cpu/libtorch-shared-with-deps-${LIBTORCH_VERSION}%2Bcpu.zip"
-          fi
-          echo "Downloading ${LIBTORCH_URL}"
-          curl --fail --location --retry 5 --retry-all-errors --show-error -o libtorch.zip "${LIBTORCH_URL}"
-          unzip -tq libtorch.zip
-          unzip -q libtorch.zip -d external/
-          rm libtorch.zip
-
-      - name: Verify LibTorch version
-        run: |
-          cfg="external/libtorch/share/cmake/Torch/TorchConfigVersion.cmake"
-          test -f "${cfg}"
-          grep -F "set(PACKAGE_VERSION \"${LIBTORCH_VERSION}\")" "${cfg}"
+      - name: Fetch pinned native dependencies
+        run: ./fetch_dependencies.sh
 
       - name: Compute binary compatibility keys
         id: cache-key

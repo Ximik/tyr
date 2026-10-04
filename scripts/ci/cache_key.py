@@ -58,7 +58,7 @@ def identity():
         "native_packages": native_packages,
         "environment": {key: os.environ.get(key, "") for key in BUILD_ENV},
         "files": {path: hashlib.sha256((REPO / path).read_bytes()).hexdigest() for path in files},
-        "submodules": command("git", "ls-files", "--stage", "external/soxr", "thirdparty/ThunderKittens"),
+        "submodules": command("git", "ls-files", "--stage", "external/soxr", "external/ThunderKittens"),
     }
     if platform.system() == "Darwin":
         result["sdk"] = command("xcrun", "--show-sdk-version")

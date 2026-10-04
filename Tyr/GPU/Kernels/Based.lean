@@ -4,7 +4,7 @@
   ThunderKittens-shaped "Based" linear attention kernels.
 
   The canonical forward surface tracks the three recurrent state components used
-  by `thirdparty/ThunderKittens/kernels/based/linear_attn.cu`:
+  by `external/ThunderKittens/kernels/based/linear_attn.cu`:
 
   - `a0`: cumulative value bias term
   - `a1`: first-order recurrent `VᵀK` state

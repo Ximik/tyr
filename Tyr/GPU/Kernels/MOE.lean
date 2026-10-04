@@ -2,7 +2,7 @@
   Tyr/GPU/Kernels/MOE.lean
 
   Mixture-of-Experts dispatch + GEMM kernels aligned to
-  `thirdparty/ThunderKittens/kernels/parallel/moe_dispatch_gemm/moe_dispatch_gemm_h100.cu`.
+  `external/ThunderKittens/kernels/parallel/moe_dispatch_gemm/moe_dispatch_gemm_h100.cu`.
 
   The vendored ThunderKittens kernel is a fused multi-GPU dispatch and grouped
   GEMM pipeline. The Lean DSL still lacks integer global layouts and the exact

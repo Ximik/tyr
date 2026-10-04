@@ -63,7 +63,7 @@ def parseCommonArgs (args : List String) : CommonArgs := {
 }
 
 def vendoredThunderKittensAvailable : IO Bool := do
-  (⟨"thirdparty/ThunderKittens/kernels"⟩ : System.FilePath).pathExists
+  (⟨"external/ThunderKittens/kernels"⟩ : System.FilePath).pathExists
 
 def runWithFixtures
     (args : List String)

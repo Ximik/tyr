@@ -104,7 +104,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Initialize required submodules
-        run: git submodule update --init --depth 1 external/soxr thirdparty/ThunderKittens
+        run: git submodule update --init --depth 1 external/soxr external/ThunderKittens
       - name: Install pinned Lean toolchain
         run: |
           export PATH="$HOME/.elan/bin:$PATH"
