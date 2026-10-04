@@ -35,7 +35,7 @@ if [[ -e "$output_dir" ]]; then
 fi
 
 mkdir -p "$output_dir"
-export LD_LIBRARY_PATH="$repo_root/external/libtorch/lib:$repo_root/cc/build:${LD_LIBRARY_PATH:-}"
+export LD_LIBRARY_PATH="$repo_root/external/python/torch/lib:$repo_root/cc/build:${LD_LIBRARY_PATH:-}"
 
 cmd=(
   "$binary"

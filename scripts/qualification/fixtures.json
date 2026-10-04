@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
-  "libtorch_version": "2.9.0",
+  "libtorch_version": "2.10.0",
   "python_packages": {
-    "torch": "2.9.0+cu130",
+    "torch": "2.10.0+cu130",
     "transformers": "4.57.3",
     "accelerate": "1.12.0",
     "numpy": "2.2.6",
@@ -146,10 +146,10 @@
   "cuda_version": "13.0",
   "python_packages_by_arch": {
     "aarch64": {
-      "torchaudio": "2.9.0"
+      "torchaudio": "2.10.0"
     },
     "x86_64": {
-      "torchaudio": "2.9.0+cu130"
+      "torchaudio": "2.10.0+cu130"
     }
   }
 }

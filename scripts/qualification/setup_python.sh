@@ -1,16 +1,29 @@
 #!/usr/bin/env bash
 set -euo pipefail
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 qualification_root=${TYR_QUALIFICATION_ROOT:-"$HOME/tyr-qualification"}
-bootstrap_python=${TYR_QUALIFICATION_BOOTSTRAP_PYTHON:-/home/pehle/dev/tyr/.venv-gpu/bin/python}
+# The torch wheel in external/python is built for CPython 3.12 (WHEEL_PYTHON in
+# scripts/lock_dependencies.py), so the venv must use the same version.
+bootstrap_python=${TYR_QUALIFICATION_BOOTSTRAP_PYTHON:-python3.12}
+venv_python="$qualification_root/venv/bin/python"
 mkdir -p "$qualification_root"
-if [[ ! -x "$qualification_root/venv/bin/python" ]]; then
+if [[ ! -x "$venv_python" ]]; then
   "$bootstrap_python" -m venv "$qualification_root/venv"
 fi
-# Reuse the runner's immutable CUDA Torch wheel without altering its environment.
-# Pinned reference dependencies installed below take precedence in the new venv.
-torch_site=$("$bootstrap_python" -c 'import pathlib,torch; print(pathlib.Path(torch.__file__).resolve().parent.parent)')
-purelib=$("$qualification_root/venv/bin/python" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')
-printf '%s\n' "$torch_site" > "$purelib/spark-existing-runtime.pth"
-"$qualification_root/venv/bin/python" -m pip install \
+if [[ "$("$venv_python" -c 'import sys; print(f"{sys.version_info[0]}.{sys.version_info[1]}")')" != 3.12 ]]; then
+  echo "$qualification_root/venv must use Python 3.12 to load external/python; delete it and rerun" >&2
+  exit 1
+fi
+if [[ ! -d "$repo_root/external/python/torch" ]]; then
+  echo "external/python/torch is missing; run ./fetch_dependencies.sh" >&2
+  exit 1
+fi
+# Import the exact torch the Lean build links against (fetch_dependencies.sh).
+# Its *.dist-info lets pip treat torch and the nvidia-* wheels as installed, so
+# the pinned requirements below only add the remaining reference packages.
+purelib=$("$venv_python" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')
+rm -f "$purelib/spark-existing-runtime.pth"
+printf '%s\n' "$repo_root/external/python" > "$purelib/tyr-external.pth"
+"$venv_python" -m pip install \
   --extra-index-url https://download.pytorch.org/whl/cu130 \
-  -r scripts/qualification/requirements.txt
+  -r "$repo_root/scripts/qualification/requirements.txt"

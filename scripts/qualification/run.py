@@ -91,9 +91,9 @@ print(json.dumps({'torch':torch.__version__, 'cuda':torch.version.cuda,
         raise ValueError("CUDA is unavailable in the selected Python reference runtime")
     if info["torch"] != manifest["python_packages"]["torch"] or info["cuda"] != manifest["cuda_version"]:
         raise ValueError(f"Expected pinned Torch/CUDA versions; found {info['torch']}/{info['cuda']}")
-    if (REPO / "external/libtorch").resolve() != Path(info["torch_dir"]).resolve():
+    if (REPO / "external/python/torch").resolve() != Path(info["torch_dir"]).resolve():
         raise ValueError("Lean LibTorch and Python reference must use the same pinned Torch installation")
-    config = (REPO / "external/libtorch/share/cmake/Torch/TorchConfigVersion.cmake").read_text()
+    config = (REPO / "external/python/torch/share/cmake/Torch/TorchConfigVersion.cmake").read_text()
     if f'set(PACKAGE_VERSION "{manifest["libtorch_version"]}")' not in config:
         raise ValueError("LibTorch version does not match qualification manifest")
     nvcc = subprocess.check_output(["nvcc", "--version"], text=True, env=env)
@@ -132,10 +132,10 @@ def main():
     env = dict(os.environ, TYR_GPU_TEST_STRICT="1", TYR_QUALIFICATION_STRICT="1",
                TYR_QUALIFICATION_PYTHON=args.python, TYR_SKIP_QUALIFICATION_BUILD="1",
                TYR_DEVICE="cuda", QWEN3_TTS_DEVICE_MAP="cuda:0", PYTHONHASHSEED="0")
-    env["LIBTORCH_DIR"] = str(REPO / "external/libtorch")
+    env["LIBTORCH_DIR"] = str(REPO / "external/python/torch")
     env["TYR_LAGUNA_CACHE_BENCH"] = "1"
     env["PATH"] = str(Path(args.python).parent) + os.pathsep + env.get("PATH", "")
-    env["LD_LIBRARY_PATH"] = library_path(REPO / "external/libtorch",
+    env["LD_LIBRARY_PATH"] = library_path(REPO / "external/python/torch",
         Path(env.get("CUDA_HOME", "/usr/local/cuda")), env.get("LD_LIBRARY_PATH", ""))
     try:
         if report["source_status"]:

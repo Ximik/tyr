@@ -59,9 +59,17 @@ This checks out `external/soxr` (audio resampling, built from source) and
 This downloads the wheels pinned in `dependencies.lock`, verifies their sha256
 checksums, and unpacks:
 
-- `external/libtorch`: libtorch, including its OpenMP runtime
-- `external/arrow`: Arrow/Parquet
-- `external/nvidia`: CUDA runtime libraries, only when `nvcc` is on `PATH`
+- `external/python/torch`: the torch wheel, which is libtorch (`lib/`,
+  `include/`, `share/cmake/`, including its OpenMP runtime) plus its Python
+  package
+- `external/python/nvidia`: CUDA runtime libraries, only when `nvcc` is on `PATH`
+- `external/python/pyarrow`: the pyarrow wheel, which is Arrow/Parquet
+  (`include/` and `libarrow`/`libparquet`) plus its Python package
+
+Every wheel is unpacked whole, so `external/python` is a complete Python
+`site-packages` directory: the GPU reference tools
+(`scripts/gpu/setup_python_venv.sh`, which needs Python 3.12) import the same
+torch and pyarrow the C++ build links against.
 
 Set `TYR_DEPS_VARIANT=cpu` or `cuda` to override that choice. Re-running the
 script does nothing if nothing changed. To bump a version, edit the pins in

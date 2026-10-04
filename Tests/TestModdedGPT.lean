@@ -13,7 +13,7 @@
 
   Usage:
     ninja test-modded
-    export DYLD_LIBRARY_PATH=external/libtorch/lib:/opt/homebrew/opt/libomp/lib
+    export DYLD_LIBRARY_PATH=external/python/torch/lib:/opt/homebrew/opt/libomp/lib
     out/exe/TestModdedGPT
 -/
 import Tyr

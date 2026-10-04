@@ -79,7 +79,7 @@ def main():
         variants = ["cpu", "cuda"] if arch else ["cpu"]
         for variant in variants:
             url, sha = torch_wheel(variant, tag)
-            lines.append(f"{platform} {variant} libtorch {sha} {url}")
+            lines.append(f"{platform} {variant} torch {sha} {url}")
             if variant == "cuda":
                 for package, version in nvidia_pins(url):
                     nv_url, nv_sha = pypi_wheel(

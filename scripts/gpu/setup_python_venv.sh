@@ -1,109 +1,53 @@
 #!/usr/bin/env bash
-# Create the .venv-gpu Python environment (torch, numpy, ninja) used by the
-# Python reference and benchmark tools. The Lean build does not use it: its
-# libtorch comes from ./fetch_dependencies.sh.
+# Create the .venv-gpu Python environment used by the Python reference and
+# benchmark tools. It imports the torch that ./fetch_dependencies.sh put in
+# external/python (the same files the Lean build links against) through a .pth
+# file, and adds only numpy, ninja and torch's pure-Python dependencies.
+#
+# The fetched torch wheel is built for CPython 3.12 (WHEEL_PYTHON in
+# scripts/lock_dependencies.py). Set TYR_GPU_PYTHON to a 3.12 interpreter; if
+# none is found and uv is installed, uv provides one.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "${repo_root}"
 
-uv_bin="${UV_BIN:-$(command -v uv)}"
-python_bin="${TYR_GPU_BOOTSTRAP_PYTHON:-python3}"
-managed_python="${TYR_GPU_MANAGED_PYTHON:-3.12.13}"
 venv_dir="${TYR_GPU_VENV:-.venv-gpu}"
-torch_channel="${TYR_GPU_TORCH_CHANNEL:-}"
-torch_version="${TYR_GPU_TORCH_VERSION:-}"
+python_bin="${TYR_GPU_PYTHON:-python3.12}"
 
-ensure_python_headers() {
-  local candidate="$1"
-  local has_headers
-  if ! command -v "${candidate}" >/dev/null 2>&1; then
-    echo "${candidate}"
-    return
+if [[ ! -d external/python/torch ]]; then
+  echo "external/python/torch is missing; run ./fetch_dependencies.sh" >&2
+  exit 1
+fi
+if ! command -v "${python_bin}" >/dev/null 2>&1; then
+  if command -v uv >/dev/null 2>&1; then
+    uv python install 3.12
+    python_bin="$(uv python find 3.12)"
+  else
+    echo "no Python 3.12 found; set TYR_GPU_PYTHON or install uv" >&2
+    exit 1
   fi
-  has_headers="$("${candidate}" -c 'import sysconfig; from pathlib import Path; include = sysconfig.get_config_var("INCLUDEPY") or sysconfig.get_path("include") or ""; print("yes" if include and Path(include, "Python.h").exists() else "no")' 2>/dev/null || echo no)"
-  if [[ "${has_headers}" == "yes" ]]; then
-    echo "${candidate}"
-    return
-  fi
-  echo "python headers missing for ${candidate}; installing uv-managed CPython ${managed_python}" >&2
-  "${uv_bin}" python install "${managed_python}"
-  echo "${managed_python}"
-}
-
-detect_torch_channel() {
-  if [[ -n "${torch_channel}" ]]; then
-    echo "${torch_channel}"
-    return
-  fi
-  if ! command -v nvidia-smi >/dev/null 2>&1; then
-    echo "cpu"
-    return
-  fi
-  local gpu_name
-  gpu_name="$(nvidia-smi --query-gpu=name --format=csv,noheader | head -n1 | tr -d '\r')"
-  case "${gpu_name}" in
-    *GB10*|*B200*|*B300*|*H100*|*A100*) echo "cu130" ;;
-    *) echo "cpu" ;;
-  esac
-}
-
-detect_torch_version() {
-  if [[ -n "${torch_version}" ]]; then
-    echo "${torch_version}"
-    return
-  fi
-  local channel="$1"
-  if [[ "${channel}" == "cpu" ]]; then
-    echo "2.9.1"
-    return
-  fi
-  case "${python_mm}" in
-    3.12)
-      # As of April 5, 2026, this is the latest official cu130 aarch64 wheel
-      # available for CPython 3.12 in the PyTorch index.
-      echo "2.9.0+cu130"
-      ;;
-    *)
-      echo "2.9.0+cu130"
-      ;;
-  esac
-}
-
-channel="$(detect_torch_channel)"
-python_spec="$(ensure_python_headers "${python_bin}")"
-
-"${uv_bin}" venv "${venv_dir}" --python "${python_spec}" --clear
-
-python_mm="$("${venv_dir}/bin/python" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
-version="$(detect_torch_version "${channel}")"
-
-echo "uv=${uv_bin}"
-echo "python=${python_spec} (${python_mm})"
-echo "torch_channel=${channel}"
-echo "torch_version=${version}"
-
-if [[ "${channel}" == "cpu" ]]; then
-  "${uv_bin}" pip install \
-    --python "${venv_dir}/bin/python" \
-    torch=="${version}" \
-    numpy \
-    ninja
-else
-  "${uv_bin}" pip install \
-    --python "${venv_dir}/bin/python" \
-    --index-strategy unsafe-best-match \
-    --index-url "https://download.pytorch.org/whl/${channel}" \
-    --extra-index-url https://pypi.org/simple \
-    "torch==${version}" \
-    numpy \
-    ninja
 fi
 
-python_include="$("${venv_dir}/bin/python" -c 'import sysconfig; print(sysconfig.get_config_var("INCLUDEPY") or sysconfig.get_path("include") or "")')"
-if [[ -z "${python_include}" || ! -f "${python_include}/Python.h" ]]; then
-  echo "missing Python headers after venv creation: ${python_include}/Python.h" >&2
+"${python_bin}" -m venv --clear "${venv_dir}"
+venv_python="${venv_dir}/bin/python"
+if [[ "$("${venv_python}" -c 'import sys; print(f"{sys.version_info[0]}.{sys.version_info[1]}")')" != 3.12 ]]; then
+  echo "${python_bin} is not Python 3.12" >&2
   exit 1
 fi
 
-"${venv_dir}/bin/python" -c 'import torch; print(torch.__version__); print(torch.version.cuda); print(torch.cuda.is_available())'
+purelib="$("${venv_python}" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')"
+printf '%s\n' "${repo_root}/external/python" > "${purelib}/tyr-external.pth"
+
+# torch is already satisfied through the .pth; pip installs only what it lacks.
+torch_version="$("${venv_python}" -c 'import importlib.metadata as m; print(m.version("torch"))')"
+"${venv_python}" -m pip install "torch==${torch_version}" numpy ninja
+
+# Building the vendored ThunderKittens reference as a torch extension needs Python.h.
+python_include="$("${venv_python}" -c 'import sysconfig; print(sysconfig.get_config_var("INCLUDEPY") or sysconfig.get_path("include") or "")')"
+if [[ -z "${python_include}" || ! -f "${python_include}/Python.h" ]]; then
+  echo "missing Python headers: ${python_include}/Python.h" >&2
+  exit 1
+fi
+
+"${venv_python}" -c 'import torch; print(torch.__version__, torch.__file__); print(torch.version.cuda); print(torch.cuda.is_available())'

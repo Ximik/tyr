@@ -12,7 +12,7 @@
 
   Usage:
     ninja modded
-    export DYLD_LIBRARY_PATH=external/libtorch/lib:/opt/homebrew/opt/libomp/lib
+    export DYLD_LIBRARY_PATH=external/python/torch/lib:/opt/homebrew/opt/libomp/lib
     out/exe/ModdedTrainGPT
 
   For distributed training (multi-GPU):

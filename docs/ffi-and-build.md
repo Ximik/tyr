@@ -163,9 +163,9 @@ clean/incremental output agreement, and launcher additions/removals. It does
 not compile LibTorch or CUDA and does not modify workspace build artifacts.
 
 The Makefile takes every native dependency from `external/` — libtorch
-(`external/libtorch`), soxr (built from the `external/soxr` submodule without
-cmake), Arrow/Parquet (`external/arrow`, linked by exact file name via
-`ARROW_SOVERSION`), and the CUDA runtime and NCCL (`external/nvidia`, CUDA
+(`external/python/torch`), soxr (built from the `external/soxr` submodule without
+cmake), Arrow/Parquet (`external/python/pyarrow`, linked by exact file name via
+`ARROW_SOVERSION`), and the CUDA runtime and NCCL (`external/python/nvidia`, CUDA
 variant only); `./fetch_dependencies.sh` populates them. It probes only Lean
 (`lean --print-prefix`) and the CUDA toolkit (`nvcc`). GPU targets are a matrix
 (`cc/Makefile:127-196`): `GPU` selects SASS, `GPU_FAMILY` selects the
@@ -289,7 +289,7 @@ Makefile targets: `all` (default; static and shared libraries), `lib`, `dylib`,
 `bench-flash-attn` (standalone C++ attention benchmark from
 `cc/tools/bench_flash_attn.cpp`), `soxr`, `clean`. `check-deps` runs first and
 fails early when the `external/soxr` or `external/ThunderKittens` submodules
-are missing (`git submodule update --init`) or `external/libtorch` or the Arrow
+are missing (`git submodule update --init`) or `external/python/torch` or the Arrow
 libraries are missing (`./fetch_dependencies.sh`).
 
 ## Usage example

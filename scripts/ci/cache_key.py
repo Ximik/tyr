@@ -49,7 +49,7 @@ def identity():
     torch_files = ["share/cmake/Torch/TorchConfigVersion.cmake",
                    "share/cmake/Torch/TorchConfig.cmake",
                    "include/torch/csrc/api/include/torch/version.h"]
-    files += ["external/libtorch/" + path for path in torch_files]
+    files += ["external/python/torch/" + path for path in torch_files]
     result = {
         "schema": 2, "workspace": str(REPO.resolve()),
         "os": platform.system(), "arch": platform.machine(), "release": platform.release(),

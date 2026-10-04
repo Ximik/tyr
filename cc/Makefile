@@ -14,10 +14,10 @@ LEAN_INCLUDE := $(LEAN_HOME)/include
 
 
 # TORCH FLAGS
-TORCHDIR=../external/libtorch
+TORCHDIR=../external/python/torch
 TORCH_INC_FLAGS=-I$(TORCHDIR)/include -I$(TORCHDIR)/include/torch/csrc/api/include  -I$(TORCHDIR)/include/TH  -I$(TORCHDIR)/include/THC
 TORCH_LIBPATH=$(TORCHDIR)/lib
-TORCH_CUDA_VENDOR_LIBPATH=../external/nvidia/cu13/lib
+TORCH_CUDA_VENDOR_LIBPATH=../external/python/nvidia/cu13/lib
 # Python.h is only needed by tk_vendor_mha_h100.cu (it includes torch's pybind.h).
 PYTHON ?= python3
 PYTHON_INCLUDE := $(shell "$(PYTHON)" -c 'import sysconfig; print(sysconfig.get_config_var("INCLUDEPY") or sysconfig.get_path("include") or "")' 2>/dev/null)
@@ -40,15 +40,15 @@ SOXR_CFLAGS := -std=gnu89 -O3 -fPIC -I$(SOXR_DIR)/src -I$(SOXR_BUILD_DIR) -DSOXR
 # linked by exact file name; bump ARROW_SOVERSION together with the pyarrow pin
 # in scripts/lock_dependencies.py.
 UNAME_S := $(shell uname -s)
-ARROW_DIR := ../external/arrow
+ARROW_DIR := ../external/python/pyarrow
 ARROW_SOVERSION := 2500
 ifeq ($(UNAME_S),Darwin)
-ARROW_LIBS := $(ARROW_DIR)/lib/libarrow.$(ARROW_SOVERSION).dylib $(ARROW_DIR)/lib/libparquet.$(ARROW_SOVERSION).dylib
+ARROW_LIBS := $(ARROW_DIR)/libarrow.$(ARROW_SOVERSION).dylib $(ARROW_DIR)/libparquet.$(ARROW_SOVERSION).dylib
 else
-ARROW_LIBS := $(ARROW_DIR)/lib/libarrow.so.$(ARROW_SOVERSION) $(ARROW_DIR)/lib/libparquet.so.$(ARROW_SOVERSION)
+ARROW_LIBS := $(ARROW_DIR)/libarrow.so.$(ARROW_SOVERSION) $(ARROW_DIR)/libparquet.so.$(ARROW_SOVERSION)
 endif
 ARROW_INC_FLAGS := -I$(ARROW_DIR)/include
-ARROW_LINK_FLAGS := $(ARROW_LIBS) -Wl,-rpath,$(abspath $(ARROW_DIR)/lib)
+ARROW_LINK_FLAGS := $(ARROW_LIBS) -Wl,-rpath,$(abspath $(ARROW_DIR))
 
 
 
@@ -95,7 +95,7 @@ endif
 ifeq ($(HAS_CUDA_TOOLKIT),1)
 CUDA_LIB_FLAGS += $(CUBLASLT_LINK_FLAG)
 endif
-NCCL_ROOT ?= ../external/nvidia/nccl
+NCCL_ROOT ?= ../external/python/nvidia/nccl
 NCCL_INC_FLAGS :=
 ifneq ($(wildcard $(NCCL_ROOT)/include/nccl.h),)
 NCCL_INC_FLAGS += -I$(NCCL_ROOT)/include

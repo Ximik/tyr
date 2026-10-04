@@ -56,7 +56,7 @@ jobs:
           export LEAN_CC="$PWD/scripts/lean_cc_wrapper.sh"
           export LEAN_CC_GCC="/usr/bin/gcc"
           export LIBRARY_PATH="${multiarch_dir}:${gomp_dir}:/usr/lib:${LIBRARY_PATH:-}"
-          export LD_LIBRARY_PATH="$PWD/external/libtorch/lib:${lean_prefix}/lib:${lean_prefix}/lib/glibc:${multiarch_dir}:${gomp_dir}:/usr/lib:${LD_LIBRARY_PATH:-}"
+          export LD_LIBRARY_PATH="$PWD/external/python/torch/lib:${lean_prefix}/lib:${lean_prefix}/lib/glibc:${multiarch_dir}:${gomp_dir}:/usr/lib:${LD_LIBRARY_PATH:-}"
           lake -R build ffi_crash_probe
 
       - name: Audit dynamic symbol exports (interposition diagnostics)
@@ -83,7 +83,7 @@ jobs:
           lean_prefix="$(lean --print-prefix)"
           multiarch_dir="/usr/lib/$(gcc -print-multiarch)"
           gomp_dir="$(dirname "$(gcc -print-file-name=libgomp.so)")"
-          export LD_LIBRARY_PATH="$PWD/external/libtorch/lib:${lean_prefix}/lib:${lean_prefix}/lib/glibc:${multiarch_dir}:${gomp_dir}:/usr/lib:${LD_LIBRARY_PATH:-}"
+          export LD_LIBRARY_PATH="$PWD/external/python/torch/lib:${lean_prefix}/lib:${lean_prefix}/lib/glibc:${multiarch_dir}:${gomp_dir}:/usr/lib:${LD_LIBRARY_PATH:-}"
           set +e
           ./.lake/build/bin/ffi_crash_probe
           code=$?

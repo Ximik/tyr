@@ -1,17 +1,24 @@
 #!/usr/bin/env bash
 # Fetch the pinned native dependencies listed in dependencies.lock into external/:
-#   external/libtorch  libtorch (from the torch wheel)
-#   external/nvidia    CUDA runtime libraries (only when nvcc is on PATH)
-#   external/arrow     Arrow/Parquet headers and libraries (from the pyarrow wheel)
+#   external/python/torch    the torch wheel: libtorch (lib/, include/, share/)
+#                            plus its Python package
+#   external/python/nvidia   CUDA runtime wheels (only when nvcc is on PATH)
+#   external/python/pyarrow  the pyarrow wheel: Arrow/Parquet headers (include/)
+#                            and libraries, plus its Python package
+#
+# Every wheel is unpacked whole, so external/python is a complete site-packages
+# directory (with *.dist-info): a Python 3.12 venv can import the same torch and
+# pyarrow the C++ build links against by adding it with a .pth file.
 #
 # Usage: ./fetch_dependencies.sh [--dry-run]
 # TYR_DEPS_VARIANT=cpu|cuda overrides the nvcc-based CPU/CUDA choice.
+# TYR_DEPS_CACHE=<dir> keeps downloaded wheels outside external/.cache.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")" && pwd)"
 lock="${root}/dependencies.lock"
 external="${root}/external"
-cache="${external}/.cache"
+cache="${TYR_DEPS_CACHE:-${external}/.cache}"
 stamp="${external}/.deps-stamp"
 
 dry_run=0
@@ -60,7 +67,9 @@ if [[ "${dry_run}" == 1 ]]; then
   exit 0
 fi
 
-selection_id="$(printf '%s\n' "${selected}" | cksum | cut -d' ' -f1)"
+# Bump layout when the unpacking below changes, so existing checkouts re-unpack.
+layout=2
+selection_id="$(printf 'layout=%s\n%s\n' "${layout}" "${selected}" | cksum | cut -d' ' -f1)"
 if [[ -f "${stamp}" && "$(cat "${stamp}")" == "${selection_id}" ]]; then
   echo "external/ is up to date"
   exit 0
@@ -87,20 +96,8 @@ while read -r _ _ target sha url; do
   fi
 
   case "${target}" in
-    libtorch)
-      unzip -q "${wheel}" 'torch/lib/*' 'torch/include/*' 'torch/share/*' \
-        -x 'torch/lib/libtorch_python*' -d "${staging}/torch"
-      mv "${staging}/torch/torch" "${staging}/libtorch"
-      ;;
-    nvidia)
-      unzip -q -o "${wheel}" 'nvidia/*' -x '*.py' '*/__pycache__/*' -d "${staging}"
-      ;;
-    arrow)
-      unzip -q "${wheel}" 'pyarrow/include/arrow/*' 'pyarrow/include/parquet/*' \
-        'pyarrow/libarrow.*' 'pyarrow/libparquet.*' -d "${staging}/pyarrow"
-      mkdir -p "${staging}/arrow/lib"
-      mv "${staging}/pyarrow/pyarrow/include" "${staging}/arrow/include"
-      mv "${staging}/pyarrow/pyarrow/"lib* "${staging}/arrow/lib/"
+    torch | nvidia | arrow)
+      unzip -q -o "${wheel}" -d "${staging}/python"
       ;;
     *)
       echo "unknown target in dependencies.lock: ${target}" >&2
@@ -110,11 +107,12 @@ while read -r _ _ target sha url; do
 done <<< "${selected}"
 
 # Swap in the new trees only after every wheel extracted successfully.
-for dir in libtorch nvidia arrow; do
+# arrow, libtorch and nvidia are the pre-external/python layout; remove them.
+for dir in python arrow libtorch nvidia; do
   rm -rf "${external:?}/${dir}"
   if [[ -d "${staging}/${dir}" ]]; then
     mv "${staging}/${dir}" "${external}/${dir}"
   fi
 done
 echo "${selection_id}" > "${stamp}"
-echo "installed into external/: $(cd "${external}" && ls -d libtorch nvidia arrow 2>/dev/null | tr '\n' ' ')"
+echo "installed into external/: $(cd "${external}" && ls -d python/torch python/nvidia python/pyarrow 2>/dev/null | tr '\n' ' ')"

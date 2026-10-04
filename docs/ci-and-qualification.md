@@ -3,13 +3,14 @@
 Required CPU CI continues to build and run the suite manifest on Linux and
 macOS. Main pushes compile project, dependencies and native code without
 restoring compiled outputs. Manual CI runs default to the same clean build;
-clear the `clean_build` input to exercise incremental reuse. LibTorch downloads
-and the pinned Lean toolchain can be cached in either mode.
+clear the `clean_build` input to exercise incremental reuse. The dependency
+wheels (`./fetch_dependencies.sh`) and the pinned Lean toolchain can be cached
+in either mode.
 
 Pull requests restore compatible `.lake/packages`, `.lake/build`, `cc/build`
 and generated CUDA sources. `scripts/ci/cache_key.py` separates caches by OS,
-architecture, runner image, workspace path, compiler/SDK, installed native
-package versions, Lean version, dependency manifest, submodule revisions,
+architecture, runner image, workspace path, compiler/SDK, Lean version,
+dependency manifests (including `dependencies.lock`), submodule revisions,
 LibTorch configuration, and explicit native/GPU build flags. The exact build
 key also includes the source tree. An older source tree can supply an
 incremental base only inside that compatibility boundary. Restoring a cache
@@ -45,18 +46,21 @@ Configure these repository variables for the runner that actually serves it:
 
 | Variable | Spark setting |
 | --- | --- |
-| `TYR_LIBTORCH_DIR` | `/home/pehle/dev/tyr/.venv-gpu/lib/python3.12/site-packages/torch` |
 | `TYR_QUALIFICATION_RUNNER_LABELS` | JSON label array; upstream dedicated runner: `["self-hosted","Linux","ARM64","tyr-qualification","gb10"]` |
 | `TYR_GPU` | `GB10` |
 | `TYR_QUALIFICATION_ROOT` | `/home/pehle/tyr-qualification` |
 | `TYR_QUALIFICATION_BOOTSTRAP_PYTHON` | `/home/pehle/dev/tyr/.venv-gpu/bin/python` |
 | `TYR_CUDA_HOME` | `/usr/local/cuda` |
 
-The runner needs elan, a C++ compiler, CMake, Arrow/Parquet, OpenMP, NVCC 13.0,
-`flock`, and CUDA LibTorch 2.9.0. Qualification uses Spark's existing
-`torch==2.9.0+cu130` installation through a separate Python venv and verifies
-that Lean and Python resolve the same LibTorch directory. It does not replace
-the existing checkout, Python environment or global elan default. Numerical
+The runner needs elan, a C++ compiler, NVCC 13.0, `flock`, and a Python 3.12
+interpreter (`TYR_QUALIFICATION_BOOTSTRAP_PYTHON`). The job fetches the CUDA
+variant of the pinned dependencies (`TYR_DEPS_VARIANT=cuda
+./fetch_dependencies.sh`, wheels cached in `$TYR_QUALIFICATION_ROOT/wheel-cache`):
+torch `2.10.0+cu130` and its NVIDIA wheels land in `external/python`. The
+qualification venv imports that same directory through a `.pth` file, so Lean
+links against and Python imports one torch installation; `run.py` verifies they
+resolve to the same directory. It does not replace the existing checkout,
+Python environment or global elan default. Numerical
 reference dependencies are pinned in `scripts/qualification/requirements.txt`;
 the report records all resolved package versions. TorchAudio is pinned by
 architecture because its official ARM64 and x86_64 wheel version strings differ.
@@ -127,7 +131,7 @@ Lean waveform decode and rejects the optional Python decoder fallback. Tokenizer
 comparison rejects empty or malformed code matrices and invalid thresholds.
 
 For an isolated **clean committed candidate**, after setting the variables above
-and linking `external/libtorch` to the configured runtime:
+and running `TYR_DEPS_VARIANT=cuda ./fetch_dependencies.sh`:
 
 ```bash
 export TYR_QUALIFY_MODELS=true

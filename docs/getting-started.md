@@ -65,7 +65,7 @@ macOS arm64.
 
 ```bash
 git submodule update --init       # external/soxr, external/ThunderKittens
-./fetch_dependencies.sh           # external/libtorch, external/arrow (+ external/nvidia with nvcc)
+./fetch_dependencies.sh           # external/python/{torch,pyarrow} (+ external/python/nvidia with nvcc)
 source scripts/ci/environment.sh  # Linux: LEAN_CC=scripts/lean_cc_wrapper.sh
 ```
 

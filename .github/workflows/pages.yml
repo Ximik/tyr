@@ -136,7 +136,7 @@ jobs:
           export LEAN_CC="$GITHUB_WORKSPACE/scripts/lean_cc_wrapper.sh"
           export LEAN_CC_GCC="/usr/bin/gcc"
           export LIBRARY_PATH="${multiarch_dir}:${gomp_dir}:/usr/lib:${LIBRARY_PATH:-}"
-          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/external/libtorch/lib:${lean_prefix}/lib:${lean_prefix}/lib/glibc:${multiarch_dir}:${gomp_dir}:/usr/lib:${LD_LIBRARY_PATH:-}"
+          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/external/python/torch/lib:${lean_prefix}/lib:${lean_prefix}/lib/glibc:${multiarch_dir}:${gomp_dir}:/usr/lib:${LD_LIBRARY_PATH:-}"
           cd docbuild
           lake build Tyr:docs
 

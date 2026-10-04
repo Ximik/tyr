@@ -187,12 +187,10 @@ class QualificationTests(unittest.TestCase):
 
     def test_runner_association_is_explicit(self):
         with self.assertRaises(ValueError):
-            configuration("ranvier-labs/tyr", "", "")
-        with self.assertRaises(ValueError):
-            configuration("ranvier-labs/tyr", "/torch", "")
-        labels = configuration("cpehle/tyr", "/torch", "")
+            configuration("ranvier-labs/tyr", "")
+        labels = configuration("cpehle/tyr", "")
         self.assertIn("gb10", json.loads(labels))
-        self.assertIn("tyr-qualification", json.loads(configuration("ranvier-labs/tyr", "/torch",
+        self.assertIn("tyr-qualification", json.loads(configuration("ranvier-labs/tyr",
             '["self-hosted", "Linux", "ARM64", "tyr-qualification", "gb10"]')))
 
     def test_final_summary_fails_missing_runtime_only_or_skipped_reports(self):
