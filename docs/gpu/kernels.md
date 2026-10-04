@@ -348,7 +348,7 @@ parts:
 - **Vendored reference.** If `TYR_GPU_VENDORED_REF_RUNNER` is set (default:
   `scripts/gpu/run_vendored_reference.sh` when executable), each suite also
   diffs against the vendored ThunderKittens CUDA reference in
-  `external/ThunderKittens`.
+  `external/git/ThunderKittens`.
 - **LeanTest suites.** `Tests/TestGPUE2E.lean` (executable `TestGPUE2E`)
   wraps the torch-parity runs (copy, rotary, layernorm f32/bf16, rmsnorm
   f32/bf16, flashattn, mha_h100) plus the vendored-parity checks, printing

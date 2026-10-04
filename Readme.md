@@ -41,41 +41,44 @@ Supported platforms: Linux x86_64, Linux aarch64, macOS arm64.
 - `python3`, `curl`, `unzip` and `make`.
 - Optional, Linux only: the CUDA toolkit (`nvcc`) for GPU builds.
 
-### 2. Submodules
+### 2. Pinned dependencies
 
 ```bash
-git submodule update --init
+deps/fetch.sh
 ```
 
-This checks out `external/soxr` (audio resampling, built from source) and
-`external/ThunderKittens` (CUDA kernel headers).
+All dependency pins and scripts live in `deps/`. There are two kinds:
 
-### 3. Native libraries
+**Git repos** (`deps/git.lock`, fetched by `deps/fetch_git.sh`). Each repo is
+pinned to a commit and fetched as that single commit (`git fetch --depth 1`),
+so git verifies the content against the hash:
 
-```bash
-./fetch_dependencies.sh
-```
+- `external/git/soxr`: audio resampling, built from source
+- `external/git/ThunderKittens`: CUDA kernel headers
 
-This downloads the wheels pinned in `dependencies.lock`, verifies their sha256
-checksums, and unpacks:
+**Wheels** (`deps/wheels.lock`, fetched by `deps/fetch_wheels.sh`). These are
+downloaded from PyPI and PyTorch's package index, checked against their pinned
+sha256, and unpacked into `external/wheels`:
 
-- `external/python/torch`: the torch wheel, which is libtorch (`lib/`,
+- `external/wheels/torch`: the torch wheel, which is libtorch (`lib/`,
   `include/`, `share/cmake/`, including its OpenMP runtime) plus its Python
   package
-- `external/python/nvidia`: CUDA runtime libraries, only when `nvcc` is on `PATH`
-- `external/python/pyarrow`: the pyarrow wheel, which is Arrow/Parquet
+- `external/wheels/nvidia`: CUDA runtime libraries, only when `nvcc` is on `PATH`
+  (override with `TYR_DEPS_VARIANT=cpu` or `cuda`)
+- `external/wheels/pyarrow`: the pyarrow wheel, which is Arrow/Parquet
   (`include/` and `libarrow`/`libparquet`) plus its Python package
 
-Every wheel is unpacked whole, so `external/python` is a complete Python
+Every wheel is unpacked whole, so `external/wheels` is a complete Python
 `site-packages` directory: the GPU reference tools
 (`scripts/gpu/setup_python_venv.sh`, which needs Python 3.12) import the same
 torch and pyarrow the C++ build links against.
 
-Set `TYR_DEPS_VARIANT=cpu` or `cuda` to override that choice. Re-running the
-script does nothing if nothing changed. To bump a version, edit the pins in
-`scripts/lock_dependencies.py` and run it to regenerate the lock.
+Re-running `deps/fetch.sh` does nothing if nothing changed. To bump a git
+dependency, change its commit in `deps/git.lock`. To bump a wheel, edit the
+version pins in `deps/lock_wheels.py` and run it to regenerate
+`deps/wheels.lock`.
 
-### 4. Linux: link with the system compiler
+### 3. Linux: link with the system compiler
 
 ```bash
 source scripts/ci/environment.sh

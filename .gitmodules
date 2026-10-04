@@ -1,6 +1,0 @@
-[submodule "external/ThunderKittens"]
-	path = external/ThunderKittens
-	url = https://github.com/HazyResearch/ThunderKittens.git
-[submodule "external/soxr"]
-	path = external/soxr
-	url = https://github.com/steinbergmedia/soxr.git

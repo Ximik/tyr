@@ -42,7 +42,7 @@ export TYR_GPU_FAMILY
 gpu_runner=$(python3 scripts/qualification/gpu_plan.py "$GPU" --field runner)
 mapfile -t modules < <(python3 scripts/qualification/gpu_plan.py "$GPU" --field modules)
 export TYR_GPU_CODEGEN_MODULE="${modules[*]}"
-cuda_libraries=$(python3 scripts/qualification/cuda_runtime.py --libtorch external/python/torch --cuda-home "${CUDA_HOME:-/usr/local/cuda}" --previous="${LD_LIBRARY_PATH:-}")
+cuda_libraries=$(python3 scripts/qualification/cuda_runtime.py --libtorch external/wheels/torch --cuda-home "${CUDA_HOME:-/usr/local/cuda}" --previous="${LD_LIBRARY_PATH:-}")
 export LD_LIBRARY_PATH="$cuda_libraries"
 source scripts/ci/environment.sh
 

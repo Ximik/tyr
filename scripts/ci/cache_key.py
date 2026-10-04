@@ -42,14 +42,14 @@ def keys(identity, source_tree):
 
 
 def identity():
-    # dependencies.lock pins every native dependency; the libtorch files below
-    # additionally record which variant (cpu/cuda) was fetched.
-    files = ["lean-toolchain", "lake-manifest.json", ".gitmodules", "dependencies.lock",
+    # deps/git.lock and deps/wheels.lock pin every native dependency; the libtorch
+    # files below additionally record which variant (cpu/cuda) was fetched.
+    files = ["lean-toolchain", "lake-manifest.json", "deps/git.lock", "deps/wheels.lock",
              "scripts/lean_cc_wrapper.sh", "scripts/ci/environment.sh"]
     torch_files = ["share/cmake/Torch/TorchConfigVersion.cmake",
                    "share/cmake/Torch/TorchConfig.cmake",
                    "include/torch/csrc/api/include/torch/version.h"]
-    files += ["external/python/torch/" + path for path in torch_files]
+    files += ["external/wheels/torch/" + path for path in torch_files]
     result = {
         "schema": 2, "workspace": str(REPO.resolve()),
         "os": platform.system(), "arch": platform.machine(), "release": platform.release(),
@@ -57,7 +57,6 @@ def identity():
         "compiler": command("c++", "--version"), "lean": command("lean", "--version"),
         "environment": {key: os.environ.get(key, "") for key in BUILD_ENV},
         "files": {path: hashlib.sha256((REPO / path).read_bytes()).hexdigest() for path in files},
-        "submodules": command("git", "ls-files", "--stage", "external/soxr", "external/ThunderKittens"),
     }
     if platform.system() == "Darwin":
         result["sdk"] = command("xcrun", "--show-sdk-version")

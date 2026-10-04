@@ -125,7 +125,7 @@ if [[ -f "$training_manifest" ]] &&
   fi
 fi
 
-export LD_LIBRARY_PATH="$repo_root/external/python/torch/lib:$repo_root/cc/build:${LD_LIBRARY_PATH:-}"
+export LD_LIBRARY_PATH="$repo_root/external/wheels/torch/lib:$repo_root/cc/build:${LD_LIBRARY_PATH:-}"
 
 cmd=(
   "$binary"

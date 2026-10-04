@@ -1,0 +1,4 @@
+# Git dependencies, checked out into external/git/<name> by deps/fetch_git.sh.
+# <name> <commit> <url>
+soxr 8db9067a3d5f2a6777ac54eea08ecca78835419f https://github.com/steinbergmedia/soxr.git
+ThunderKittens 9df1476fe54d56fcb255aa7cf3128cc9222827f3 https://github.com/HazyResearch/ThunderKittens.git

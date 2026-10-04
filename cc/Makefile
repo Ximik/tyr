@@ -14,17 +14,17 @@ LEAN_INCLUDE := $(LEAN_HOME)/include
 
 
 # TORCH FLAGS
-TORCHDIR=../external/python/torch
+TORCHDIR=../external/wheels/torch
 TORCH_INC_FLAGS=-I$(TORCHDIR)/include -I$(TORCHDIR)/include/torch/csrc/api/include  -I$(TORCHDIR)/include/TH  -I$(TORCHDIR)/include/THC
 TORCH_LIBPATH=$(TORCHDIR)/lib
-TORCH_CUDA_VENDOR_LIBPATH=../external/python/nvidia/cu13/lib
+TORCH_CUDA_VENDOR_LIBPATH=../external/wheels/nvidia/cu13/lib
 # Python.h is only needed by tk_vendor_mha_h100.cu (it includes torch's pybind.h).
 PYTHON ?= python3
 PYTHON_INCLUDE := $(shell "$(PYTHON)" -c 'import sysconfig; print(sysconfig.get_config_var("INCLUDEPY") or sysconfig.get_path("include") or "")' 2>/dev/null)
 PYTHON_INC_FLAGS := $(if $(strip $(PYTHON_INCLUDE)),-I$(PYTHON_INCLUDE),)
-TKDIR=../external/ThunderKittens
+TKDIR=../external/git/ThunderKittens
 TK_INC_FLAGS=-I$(TKDIR)/include -I$(TKDIR)/prototype
-SOXR_DIR=../external/soxr
+SOXR_DIR=../external/git/soxr
 SOXR_BUILD_DIR=build/soxr
 SOXR_INC_FLAGS=-I$(SOXR_DIR)/src -I$(SOXR_BUILD_DIR)
 SOXR_LIBPATH=$(SOXR_BUILD_DIR)/src
@@ -36,11 +36,11 @@ SOXR_OBJS := $(addprefix $(SOXR_OBJ_DIR)/,$(addsuffix .o,$(SOXR_SRCS)))
 SOXR_CFLAGS := -std=gnu89 -O3 -fPIC -I$(SOXR_DIR)/src -I$(SOXR_BUILD_DIR) -DSOXR_LIB
 
 # ARROW/PARQUET FLAGS
-# Fetched by fetch_dependencies.sh from the pinned pyarrow wheel. Libraries are
+# Fetched by deps/fetch.sh from the pinned pyarrow wheel. Libraries are
 # linked by exact file name; bump ARROW_SOVERSION together with the pyarrow pin
-# in scripts/lock_dependencies.py.
+# in deps/lock_wheels.py.
 UNAME_S := $(shell uname -s)
-ARROW_DIR := ../external/python/pyarrow
+ARROW_DIR := ../external/wheels/pyarrow
 ARROW_SOVERSION := 2500
 ifeq ($(UNAME_S),Darwin)
 ARROW_LIBS := $(ARROW_DIR)/libarrow.$(ARROW_SOVERSION).dylib $(ARROW_DIR)/libparquet.$(ARROW_SOVERSION).dylib
@@ -95,7 +95,7 @@ endif
 ifeq ($(HAS_CUDA_TOOLKIT),1)
 CUDA_LIB_FLAGS += $(CUBLASLT_LINK_FLAG)
 endif
-NCCL_ROOT ?= ../external/python/nvidia/nccl
+NCCL_ROOT ?= ../external/wheels/nvidia/nccl
 NCCL_INC_FLAGS :=
 ifneq ($(wildcard $(NCCL_ROOT)/include/nccl.h),)
 NCCL_INC_FLAGS += -I$(NCCL_ROOT)/include
@@ -375,20 +375,20 @@ $(NATIVE_CONFIG): FORCE $(TOOLS_DIR)/write_build_config.py $(TYR_MAKEFILE)
 
 check-deps:
 	@if [ ! -f "$(SOXR_DIR)/CMakeLists.txt" ]; then \
-		echo "Missing populated submodule at $(SOXR_DIR). Run: git submodule update --init --recursive"; \
+		echo "Missing $(SOXR_DIR). Run: deps/fetch.sh"; \
 		exit 1; \
 	fi
 	@if [ "$(REQUIRES_TK)" = "1" ] && [ ! -d "$(TKDIR)/include" ]; then \
-		echo "Missing populated submodule at $(TKDIR). Run: git submodule update --init --recursive"; \
+		echo "Missing $(TKDIR). Run: deps/fetch.sh"; \
 		exit 1; \
 	fi
 	@if [ ! -f "$(TORCHDIR)/include/torch/csrc/api/include/torch/torch.h" ] || [ ! -d "$(TORCH_LIBPATH)" ]; then \
-		echo "Missing LibTorch at $(TORCHDIR). Run: ./fetch_dependencies.sh"; \
+		echo "Missing LibTorch at $(TORCHDIR). Run: deps/fetch.sh"; \
 		exit 1; \
 	fi
 	@for lib in $(ARROW_LIBS); do \
 		if [ ! -f "$$lib" ]; then \
-			echo "Missing Arrow library $$lib. Run: ./fetch_dependencies.sh"; \
+			echo "Missing Arrow library $$lib. Run: deps/fetch.sh"; \
 			exit 1; \
 		fi; \
 	done
@@ -405,7 +405,7 @@ soxr: check-deps $(SOXR_LIB)
 
 $(SOXR_LIB): $(SOXR_OBJS) | check-deps
 	@if [ ! -f "$(SOXR_DIR)/CMakeLists.txt" ]; then \
-		echo "Missing $(SOXR_DIR). Initialize submodules: git submodule update --init --recursive"; \
+		echo "Missing $(SOXR_DIR). Run: deps/fetch.sh"; \
 		exit 1; \
 	fi
 	$(MKPATH) $(SOXR_LIBPATH)

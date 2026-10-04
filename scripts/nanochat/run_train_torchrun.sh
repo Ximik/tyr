@@ -9,7 +9,7 @@ source ./load_modules.sh >/dev/null
 
 export LEAN_CC="${REPO_ROOT}/scripts/lean_cc_wrapper.sh"
 export LEAN_CC_FAST="${LEAN_CC_FAST:-1}"
-export LD_LIBRARY_PATH="${REPO_ROOT}/external/python/torch/lib:${REPO_ROOT}/cc/build:${EBROOTGCCCORE:+${EBROOTGCCCORE}/lib64:}${LD_LIBRARY_PATH:-}"
+export LD_LIBRARY_PATH="${REPO_ROOT}/external/wheels/torch/lib:${REPO_ROOT}/cc/build:${EBROOTGCCCORE:+${EBROOTGCCCORE}/lib64:}${LD_LIBRARY_PATH:-}"
 
 TORCHRUN_BIN="${TORCHRUN_BIN:-/grid/it/data/elzar/easybuild/software/Anaconda3/2023.07-2/bin/torchrun}"
 if [[ ! -x "${TORCHRUN_BIN}" ]]; then

@@ -61,13 +61,13 @@ def linuxCudaDriverStubLinkArgs : Array String := run_io do
   return #[]
 
 /-- CUDA link flags for Linux: `libtorch_cuda` / `libc10_cuda` plus the CUDA
-    runtime libraries fetched into `external/python/nvidia` are needed because
+    runtime libraries fetched into `external/wheels/nvidia` are needed because
     `cc/build/libTyrC.a` whole-archives CUDA-using objects (TK kernels).
     Returns `#[]` for a CPU libtorch, which keeps CPU-only checkouts linking. -/
 def linuxCudaLinkArgs : Array String := run_io do
-  let torchCuda : FilePath := __dir__ / "external" / "python" / "torch" / "lib" / "libtorch_cuda.so"
+  let torchCuda : FilePath := __dir__ / "external" / "wheels" / "torch" / "lib" / "libtorch_cuda.so"
   if ← torchCuda.pathExists then
-    let cuDir : FilePath := __dir__ / "external" / "python" / "nvidia" / "cu13" / "lib"
+    let cuDir : FilePath := __dir__ / "external" / "wheels" / "nvidia" / "cu13" / "lib"
     pure (#["-ltorch_cuda", "-lc10_cuda", s!"-L{cuDir}", "-l:libcudart.so.13",
       "-l:libcublasLt.so.13", s!"-Wl,-rpath,{cuDir}"] ++ linuxCudaDriverStubLinkArgs)
   else
@@ -82,12 +82,12 @@ def linuxGlibc234CompatLinkArgs : Array String :=
   if System.Platform.isOSX then #[] else
     #["-Wl,--defsym=__libc_csu_init=0", "-Wl,--defsym=__libc_csu_fini=0"]
 
-/-- Arrow/Parquet from the pinned pyarrow wheel in `external/python/pyarrow`, linked by
+/-- Arrow/Parquet from the pinned pyarrow wheel in `external/wheels/pyarrow`, linked by
     exact file name. Bump `arrowSoVersion` with the pyarrow pin in
-    `scripts/lock_dependencies.py` (and `ARROW_SOVERSION` in `cc/Makefile`). -/
+    `deps/lock_wheels.py` (and `ARROW_SOVERSION` in `cc/Makefile`). -/
 def arrowSoVersion : String := "2500"
 
-def arrowLibDir : FilePath := __dir__ / "external" / "python" / "pyarrow"
+def arrowLibDir : FilePath := __dir__ / "external" / "wheels" / "pyarrow"
 
 def arrowLinkArgs : Array String :=
   let libs :=
@@ -193,32 +193,32 @@ def macOSFrameworkArgs : Array String :=
     "-framework", "AudioToolbox"
   ]
 
-/-- Prefer the locally built libsoxr from submodule source. -/
+/-- libsoxr, built from the pinned `external/git/soxr` checkout (deps/git.lock). -/
 def soxrLinkArgs : Array String :=
   #[s!"-L{__dir__ / "cc" / "build" / "soxr" / "src"}", "-lsoxr"]
 
 /-- Vendored LibTorch directory used by both Lean dynlibs and `cc/build/libTyrC.so`. -/
 def linuxTorchLibDir : String :=
-  (__dir__ / "external" / "python" / "torch" / "lib").toString
+  (__dir__ / "external" / "wheels" / "torch" / "lib").toString
 
 /-- Common Linux link tail shared by `packageLinkArgs` and `commonLinkArgs`:
     libtorch (with its bundled libgomp) + CUDA (for a CUDA libtorch) + arrow/soxr
     + glibc-2.34 compat + rpath. -/
 def linuxLinkTail : Array String :=
   #[
-    s!"-L{__dir__ / "external" / "python" / "torch" / "lib"}",
+    s!"-L{__dir__ / "external" / "wheels" / "torch" / "lib"}",
     "-ltorch", "-ltorch_cpu", "-lc10"
   ] ++ linuxCudaLinkArgs ++ linuxCompilerLibDirArgs ++ soxrLinkArgs ++ arrowLinkArgs
     ++ linuxGlibc234CompatLinkArgs ++ #[
     "-l:libgomp.so.1", "-l:libstdc++.so.6",
     s!"-Wl,-rpath,{linuxTorchLibDir}",
-    "-Wl,-rpath,$ORIGIN/../../../external/python/torch/lib"
+    "-Wl,-rpath,$ORIGIN/../../../external/wheels/torch/lib"
   ]
 
 /-- macOS: libtorch ships its own `libomp.dylib`, so `-lomp` resolves there. -/
 def macOSTorchLinkArgs : Array String :=
   #[
-    s!"-L{__dir__ / "external" / "python" / "torch" / "lib"}",
+    s!"-L{__dir__ / "external" / "wheels" / "torch" / "lib"}",
     "-ltorch", "-ltorch_cpu", "-lc10", "-lomp"
   ] ++ arrowLinkArgs ++ soxrLinkArgs ++ macOSSDKLinkArgs ++ macOSDeploymentLinkArgs
     ++ macOSFrameworkArgs
@@ -226,9 +226,9 @@ def macOSTorchLinkArgs : Array String :=
 def packageLinkArgs : Array String :=
   if System.Platform.isOSX then
     macOSTorchLinkArgs ++ #[
-      "-Wl,-rpath,@loader_path/../../external/python/torch/lib",
-      "-Wl,-rpath,@loader_path/../../../external/python/torch/lib",
-      "-Wl,-rpath,@executable_path/../../../external/python/torch/lib",
+      "-Wl,-rpath,@loader_path/../../external/wheels/torch/lib",
+      "-Wl,-rpath,@loader_path/../../../external/wheels/torch/lib",
+      "-Wl,-rpath,@executable_path/../../../external/wheels/torch/lib",
       s!"-Wl,-rpath,{tyrLeanSharedLibRPath}"
     ]
   else
@@ -237,7 +237,7 @@ def packageLinkArgs : Array String :=
 def commonLinkArgs : Array String :=
   if System.Platform.isOSX then
     #[s!"{__dir__ / "cc" / "build" / "libTyrC.a"}"] ++ macOSTorchLinkArgs ++ #[
-      "-Wl,-rpath,@executable_path/../../../external/python/torch/lib"
+      "-Wl,-rpath,@executable_path/../../../external/wheels/torch/lib"
     ]
   else
     #[s!"{__dir__ / "cc" / "build" / "libTyrC.a"}"] ++ linuxLinkTail
@@ -1103,8 +1103,8 @@ def leanRuntimeLibDir : IO FilePath := do
 def runtimeLibPath (rootPath : FilePath) : IO String := do
   let tyrCLib := rootPath / "cc" / "build"
   let lakeLib := rootPath / ".lake" / "build" / "lib"
-  let libtorchPath := rootPath / "external" / "python" / "torch" / "lib"
-  let arrowPath := rootPath / "external" / "python" / "pyarrow"
+  let libtorchPath := rootPath / "external" / "wheels" / "torch" / "lib"
+  let arrowPath := rootPath / "external" / "wheels" / "pyarrow"
   let leanLib ← leanRuntimeLibDir
   -- The compiler's libstdc++ must win over an older system copy at run time.
   let compilerLibDirs := linuxCompilerLibDirArgs.map (·.drop 2 |>.toString)

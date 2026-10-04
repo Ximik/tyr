@@ -26,9 +26,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Initialize required submodules
-        run: git submodule update --init --depth 1 external/soxr
-
       - name: Install elan
         run: |
           curl https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -sSf | sh -s -- -y --default-toolchain none
@@ -43,10 +40,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: external/.cache
-          key: deps-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('dependencies.lock') }}
+          key: deps-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('deps/wheels.lock') }}
 
-      - name: Fetch pinned native dependencies
-        run: ./fetch_dependencies.sh
+      - name: Fetch pinned dependencies
+        run: deps/fetch.sh
 
       - name: Build crash probe
         run: |
@@ -56,7 +53,7 @@ jobs:
           export LEAN_CC="$PWD/scripts/lean_cc_wrapper.sh"
           export LEAN_CC_GCC="/usr/bin/gcc"
           export LIBRARY_PATH="${multiarch_dir}:${gomp_dir}:/usr/lib:${LIBRARY_PATH:-}"
-          export LD_LIBRARY_PATH="$PWD/external/python/torch/lib:${lean_prefix}/lib:${lean_prefix}/lib/glibc:${multiarch_dir}:${gomp_dir}:/usr/lib:${LD_LIBRARY_PATH:-}"
+          export LD_LIBRARY_PATH="$PWD/external/wheels/torch/lib:${lean_prefix}/lib:${lean_prefix}/lib/glibc:${multiarch_dir}:${gomp_dir}:/usr/lib:${LD_LIBRARY_PATH:-}"
           lake -R build ffi_crash_probe
 
       - name: Audit dynamic symbol exports (interposition diagnostics)
@@ -83,7 +80,7 @@ jobs:
           lean_prefix="$(lean --print-prefix)"
           multiarch_dir="/usr/lib/$(gcc -print-multiarch)"
           gomp_dir="$(dirname "$(gcc -print-file-name=libgomp.so)")"
-          export LD_LIBRARY_PATH="$PWD/external/python/torch/lib:${lean_prefix}/lib:${lean_prefix}/lib/glibc:${multiarch_dir}:${gomp_dir}:/usr/lib:${LD_LIBRARY_PATH:-}"
+          export LD_LIBRARY_PATH="$PWD/external/wheels/torch/lib:${lean_prefix}/lib:${lean_prefix}/lib/glibc:${multiarch_dir}:${gomp_dir}:/usr/lib:${LD_LIBRARY_PATH:-}"
           set +e
           ./.lake/build/bin/ffi_crash_probe
           code=$?

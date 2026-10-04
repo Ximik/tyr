@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Create the .venv-gpu Python environment used by the Python reference and
-# benchmark tools. It imports the torch that ./fetch_dependencies.sh put in
-# external/python (the same files the Lean build links against) through a .pth
+# benchmark tools. It imports the torch that deps/fetch.sh put in
+# external/wheels (the same files the Lean build links against) through a .pth
 # file, and adds only numpy, ninja and torch's pure-Python dependencies.
 #
 # The fetched torch wheel is built for CPython 3.12 (WHEEL_PYTHON in
-# scripts/lock_dependencies.py). Set TYR_GPU_PYTHON to a 3.12 interpreter; if
+# deps/lock_wheels.py). Set TYR_GPU_PYTHON to a 3.12 interpreter; if
 # none is found and uv is installed, uv provides one.
 set -euo pipefail
 
@@ -15,8 +15,8 @@ cd "${repo_root}"
 venv_dir="${TYR_GPU_VENV:-.venv-gpu}"
 python_bin="${TYR_GPU_PYTHON:-python3.12}"
 
-if [[ ! -d external/python/torch ]]; then
-  echo "external/python/torch is missing; run ./fetch_dependencies.sh" >&2
+if [[ ! -d external/wheels/torch ]]; then
+  echo "external/wheels/torch is missing; run deps/fetch.sh" >&2
   exit 1
 fi
 if ! command -v "${python_bin}" >/dev/null 2>&1; then
@@ -37,7 +37,7 @@ if [[ "$("${venv_python}" -c 'import sys; print(f"{sys.version_info[0]}.{sys.ver
 fi
 
 purelib="$("${venv_python}" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')"
-printf '%s\n' "${repo_root}/external/python" > "${purelib}/tyr-external.pth"
+printf '%s\n' "${repo_root}/external/wheels" > "${purelib}/tyr-external.pth"
 
 # torch is already satisfied through the .pth; pip installs only what it lacks.
 torch_version="$("${venv_python}" -c 'import importlib.metadata as m; print(m.version("torch"))')"

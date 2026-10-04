@@ -4,7 +4,7 @@
   ThunderKittens-shaped distributed communication and communication+GEMM
   surfaces. These kernels still operate within the current Lean DSL limits,
   but the public entrypoints now mirror the real collective families and
-  producer/consumer structure from `external/ThunderKittens/kernels/parallel`.
+  producer/consumer structure from `external/git/ThunderKittens/kernels/parallel`.
 -/
 
 import Tyr.GPU.Kernels.Prelude

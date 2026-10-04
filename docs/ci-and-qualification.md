@@ -4,13 +4,13 @@ Required CPU CI continues to build and run the suite manifest on Linux and
 macOS. Main pushes compile project, dependencies and native code without
 restoring compiled outputs. Manual CI runs default to the same clean build;
 clear the `clean_build` input to exercise incremental reuse. The dependency
-wheels (`./fetch_dependencies.sh`) and the pinned Lean toolchain can be cached
+wheels (`deps/fetch_wheels.sh`) and the pinned Lean toolchain can be cached
 in either mode.
 
 Pull requests restore compatible `.lake/packages`, `.lake/build`, `cc/build`
 and generated CUDA sources. `scripts/ci/cache_key.py` separates caches by OS,
 architecture, runner image, workspace path, compiler/SDK, Lean version,
-dependency manifests (including `dependencies.lock`), submodule revisions,
+dependency manifests (including `deps/git.lock` and `deps/wheels.lock`),
 LibTorch configuration, and explicit native/GPU build flags. The exact build
 key also includes the source tree. An older source tree can supply an
 incremental base only inside that compatibility boundary. Restoring a cache
@@ -55,8 +55,8 @@ Configure these repository variables for the runner that actually serves it:
 The runner needs elan, a C++ compiler, NVCC 13.0, `flock`, and a Python 3.12
 interpreter (`TYR_QUALIFICATION_BOOTSTRAP_PYTHON`). The job fetches the CUDA
 variant of the pinned dependencies (`TYR_DEPS_VARIANT=cuda
-./fetch_dependencies.sh`, wheels cached in `$TYR_QUALIFICATION_ROOT/wheel-cache`):
-torch `2.10.0+cu130` and its NVIDIA wheels land in `external/python`. The
+deps/fetch.sh`, wheels cached in `$TYR_QUALIFICATION_ROOT/wheel-cache`):
+torch `2.10.0+cu130` and its NVIDIA wheels land in `external/wheels`. The
 qualification venv imports that same directory through a `.pth` file, so Lean
 links against and Python imports one torch installation; `run.py` verifies they
 resolve to the same directory. It does not replace the existing checkout,
@@ -131,7 +131,7 @@ Lean waveform decode and rejects the optional Python decoder fallback. Tokenizer
 comparison rejects empty or malformed code matrices and invalid thresholds.
 
 For an isolated **clean committed candidate**, after setting the variables above
-and running `TYR_DEPS_VARIANT=cuda ./fetch_dependencies.sh`:
+and running `TYR_DEPS_VARIANT=cuda deps/fetch.sh`:
 
 ```bash
 export TYR_QUALIFY_MODELS=true

@@ -2,7 +2,7 @@
   Tyr/GPU/Kernels/Hedgehog.lean
 
   Hedgehog hybrid attention kernels aligned to
-  `external/ThunderKittens/kernels/hedgehog/hedgehog.cu`.
+  `external/git/ThunderKittens/kernels/hedgehog/hedgehog.cu`.
 
   This module now provides a canonical surface:
 

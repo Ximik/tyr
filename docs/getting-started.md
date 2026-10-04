@@ -64,15 +64,17 @@ CUDA toolkit on Linux. Supported platforms are Linux x86_64, Linux aarch64 and
 macOS arm64.
 
 ```bash
-git submodule update --init       # external/soxr, external/ThunderKittens
-./fetch_dependencies.sh           # external/python/{torch,pyarrow} (+ external/python/nvidia with nvcc)
+deps/fetch.sh                     # external/{soxr,ThunderKittens}, external/wheels/{torch,pyarrow}
 source scripts/ci/environment.sh  # Linux: LEAN_CC=scripts/lean_cc_wrapper.sh
 ```
 
-`fetch_dependencies.sh` unpacks the wheels pinned with sha256 in
-`dependencies.lock` (torch 2.10.0, pyarrow 25.0.1). It picks the CUDA variant
-when `nvcc` is on `PATH` (override with `TYR_DEPS_VARIANT=cpu|cuda`).
-`scripts/lock_dependencies.py` regenerates the lock after a version bump.
+`deps/fetch.sh` runs two fetchers. `deps/fetch_git.sh` checks out the git
+repos pinned by commit in `deps/git.lock` (soxr, ThunderKittens), fetching only
+that commit. `deps/fetch_wheels.sh` unpacks the wheels pinned with sha256 in
+`deps/wheels.lock` (torch 2.10.0, pyarrow 25.0.1) into `external/wheels`; it
+picks the CUDA variant, adding `external/wheels/nvidia`, when `nvcc` is on
+`PATH` (override with `TYR_DEPS_VARIANT=cpu|cuda`). `deps/lock_wheels.py`
+regenerates the wheel lock after a version bump.
 
 Lake-level requirements are declared in `lakefile.lean`: `LeanTest`,
 `LeanBenchmark`, and `LeanUrdfTypeProvider`, all pinned git revisions that Lake
@@ -238,7 +240,7 @@ Reconstructed example (from `Examples/TrainGPT.lean`) — the minimal
 build-and-train loop a new user runs, first in shell:
 
 ```bash
-./fetch_dependencies.sh                     # once: fetch libtorch + Arrow
+deps/fetch.sh                               # once: fetch all pinned dependencies
 lake build test_runner && lake run          # sanity: test suite passes
 lake build TrainGPT && lake run train       # trains, then generates from "ROMEO:"
 ```

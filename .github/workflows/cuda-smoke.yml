@@ -101,8 +101,6 @@ jobs:
       CUDA_HOME: ${{ vars.TYR_CUDA_HOME || '/usr/local/cuda' }}
     steps:
       - uses: actions/checkout@v4
-      - name: Initialize required submodules
-        run: git submodule update --init --depth 1 external/soxr external/ThunderKittens
       - name: Install pinned Lean toolchain
         run: |
           export PATH="$HOME/.elan/bin:$PATH"
@@ -113,9 +111,9 @@ jobs:
           toolchain="$(cat lean-toolchain)"
           if ! elan toolchain list | grep -Fxq "$toolchain"; then elan toolchain install "$toolchain"; fi
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
-      - name: Fetch pinned native dependencies (CUDA)
+      - name: Fetch pinned dependencies (CUDA)
         # The wheel cache lives outside the workspace, which checkout cleans.
-        run: TYR_DEPS_VARIANT=cuda TYR_DEPS_CACHE="$TYR_QUALIFICATION_ROOT/wheel-cache" ./fetch_dependencies.sh
+        run: TYR_DEPS_VARIANT=cuda TYR_DEPS_CACHE="$TYR_QUALIFICATION_ROOT/wheel-cache" deps/fetch.sh
       - name: Build and run strict qualification with exclusive GPU access
         run: |
           mkdir -p "$TYR_QUALIFICATION_ROOT"

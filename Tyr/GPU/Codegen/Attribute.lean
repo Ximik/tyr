@@ -396,7 +396,7 @@ def generateCppLauncherCode (kernel : Kernel) : String :=
   let archMsg := toString kernel.arch
   let familyMsg := toString kernel.family
   -- ThunderKittens' `tma_swizzle_allocator` aligns each allocation to 1024
-  -- bytes (see `external/ThunderKittens/include/common/util.cuh`'s
+  -- bytes (see `external/git/ThunderKittens/include/common/util.cuh`'s
   -- `tma_allocator = shared_allocator<1024>`). The Lean-side
   -- `sharedMemBytes` accounting (in `Tyr/GPU/Codegen/Primitives.lean`)
   -- sums `rows*cols*dtype.bytes` without alignment padding. For kernels

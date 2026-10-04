@@ -237,18 +237,18 @@ lake exe Gemma4RunHF --source google/gemma-4-E4B \
 
 # Single-image captioning
 lake exe Gemma4RunHF --source google/gemma-4-E2B-it \
-  --image external/ThunderKittens/assets/kittens.png \
+  --image external/git/ThunderKittens/assets/kittens.png \
   --prompt "Describe this image."
 
 # Multiple images with explicit placeholders
 lake exe Gemma4RunHF --source google/gemma-4-E2B-it \
-  --image external/ThunderKittens/assets/kittens.png \
-  --image external/ThunderKittens/assets/attn.png \
+  --image external/git/ThunderKittens/assets/kittens.png \
+  --image external/git/ThunderKittens/assets/attn.png \
   --prompt "Image A: <|image|> Image B: <|image|> Compare them briefly."
 
 # Larger multimodal checkpoint
 lake exe Gemma4RunHF --source google/gemma-4-26B-A4B-it \
-  --image external/ThunderKittens/assets/kittens.png \
+  --image external/git/ThunderKittens/assets/kittens.png \
   --prompt "Describe this image."
 ```
 
