@@ -162,11 +162,12 @@ in a temporary checkout: header edits, architecture switches, renamed headers,
 clean/incremental output agreement, and launcher additions/removals. It does
 not compile LibTorch or CUDA and does not modify workspace build artifacts.
 
-The Makefile probes everything at parse time — Lean (`lean --print-prefix`),
-vendored libtorch (`external/libtorch`), soxr (built from the
-`external/soxr` submodule without cmake, `cc/Makefile:366-402`), Arrow/Parquet
-(`cc/Makefile:31-62`), CUDA toolkit, and NCCL headers (probed under
-`.venv-gpu/.../nvidia/nccl`, `cc/Makefile:99`). GPU targets are a matrix
+The Makefile takes every native dependency from `external/` — libtorch
+(`external/libtorch`), soxr (built from the `external/soxr` submodule without
+cmake), Arrow/Parquet (`external/arrow`, linked by exact file name via
+`ARROW_SOVERSION`), and the CUDA runtime and NCCL (`external/nvidia`, CUDA
+variant only); `./fetch_dependencies.sh` populates them. It probes only Lean
+(`lean --print-prefix`) and the CUDA toolkit (`nvcc`). GPU targets are a matrix
 (`cc/Makefile:127-196`): `GPU` selects SASS, `GPU_FAMILY` selects the
 ThunderKittens arch guards —
 
@@ -187,7 +188,7 @@ Link arguments are computed in Lean and probed at runtime, never assumed:
 prepends the absolute path to `cc/build/libTyrC.a`. They assemble from
 `linuxLinkTail`, `linuxCudaLinkArgs`, `linuxCudaDriverStubLinkArgs`,
 `linuxGlibc234CompatLinkArgs` (defines `__libc_csu_init/fini=0` for glibc ≥
-2.34), `linuxArrowLinkArgs`, `macOSSDKLinkArgs`, `macOSDeploymentLinkArgs`,
+2.34), `linuxCompilerLibDirArgs` (the system gcc's libstdc++ dir), `arrowLinkArgs`, `macOSSDKLinkArgs`, `macOSDeploymentLinkArgs`,
 `macOSFrameworkArgs`, and `soxrLinkArgs`. If the vendored libtorch has no CUDA,
 `linuxCudaLinkArgs` returns `#[]` and a CPU-only checkout still links. The five
 `lean_lib`s are `TyrCodegen` (pure-Lean GPU codegen, `precompileModules := false`
@@ -197,8 +198,8 @@ targets that each take `moreLinkArgs := commonLinkArgs`.
 
 ### Running executables
 
-Executables land in `.lake/build/bin/` and need `DYLD_LIBRARY_PATH` /
-`LD_LIBRARY_PATH` pointing at libtorch, the Lean runtime, OpenMP, and Arrow.
+Executables land in `.lake/build/bin/` and find libtorch and Arrow through
+rpaths into `external/`.
 The eight `lake run` scripts (`lakefile.lean:1166-1232`) all go through
 `runBuiltExecutable` (`lakefile.lean:1076`): it assembles the path via
 `runtimeLibPath` (`lakefile.lean:1039`), validates the binary with `file`,
@@ -231,20 +232,21 @@ Build behavior is controlled entirely through the environment:
 | `CUDA_HOME`, `NCCL_ROOT` | CUDA/NCCL discovery hints |
 | `LEAN_CC_FAST=1` | `-O0` for Lean-generated C (fast local iteration) |
 | `LEAN_CC_GCC`, `LEAN_CC_LINKER` | compiler/linker selection in the wrapper |
-| `LEAN_CC_LIBTORCH_DIR`, `LEAN_CC_LUSTRE_CACHE` | redirect `-L` paths to a local cache (slow-networked-FS clusters) |
 
-`scripts/lean_cc_wrapper.sh` is the `LEAN_CC` wrapper CI and HPC environments
-point at (`.github/workflows/ci.yml`, `ffi-probe.yml`, `pages.yml`): it picks a
-gcc, rewrites Lean's `-lc++/-lgmp/-luv` to the sysroot's static archives,
-appends missing CUDA libs at link time, strips heavy libtorch/Arrow flags for
-binaries that don't need them, and defaults executables to lld (bfd-compatible
-hidden-symbol behavior at lld speed).
+`scripts/lean_cc_wrapper.sh` is the `LEAN_CC` wrapper used on Linux (set by
+`scripts/ci/environment.sh`). Lean's bundled clang links against the old glibc
+inside the Lean toolchain, while `cc/` and libtorch are built with the system
+gcc against the system glibc/libstdc++, so the link fails with undefined glibc
+symbols. The wrapper runs the system gcc instead, maps Lean's `-lc++`,
+`-lc++abi`, `-lgmp` and `-luv` to the toolchain's static archives, and links
+with the toolchain's lld. Lake reads the compiler only from `LEAN_CC`; there is
+no lakefile option for it.
 
 ### `scripts/` overview
 
 - `scripts/gpu/` — ~20 shell harnesses for H100/GB10/B200 E2E parity and
   benchmarks (`test_*_e2e.sh`, `bench_flash_attn_matrix.sh`), plus
-  `setup_libtorch_uv.sh` and a vendored-PyTorch reference runner.
+  `setup_python_venv.sh` and a vendored-PyTorch reference runner.
 - `scripts/runpod/` — disposable-pod workflow (`create_or_resume.sh`,
   `sync_repo.sh`, `bootstrap.sh`, `run_bench.sh`); see its `README.md`. Pods
   are disposable, repo and network volume are the durable state, and
@@ -285,10 +287,10 @@ opaque manual_seed (seed : UInt64) : IO Unit
 Makefile targets: `all` (default; static and shared libraries), `lib`, `dylib`,
 `native-config`, `gpu-stubs`,
 `bench-flash-attn` (standalone C++ attention benchmark from
-`cc/tools/bench_flash_attn.cpp`), `soxr`, `clean`. `check-submodules` runs
-first and fails early with the `git submodule update --init --recursive` hint
-when `external/soxr`, `external/ThunderKittens`, or `external/libtorch` are
-missing.
+`cc/tools/bench_flash_attn.cpp`), `soxr`, `clean`. `check-deps` runs first and
+fails early when the `external/soxr` or `external/ThunderKittens` submodules
+are missing (`git submodule update --init`) or `external/libtorch` or the Arrow
+libraries are missing (`./fetch_dependencies.sh`).
 
 ## Usage example
 

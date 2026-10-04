@@ -57,30 +57,22 @@ fetched automatically on the first build:
 curl https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -sSf | sh
 ```
 
-Native dependencies:
-
-| Dependency | macOS | Linux | Notes |
-|---|---|---|---|
-| LibTorch 2.10.0 | `bash dependencies_macos.sh` | manual download (below) | unpacked to `external/libtorch` |
-| OpenMP | `brew install libomp` | `sudo apt install libomp-dev` (or GCC's libgomp) | required |
-| Apache Arrow + Parquet | `brew install apache-arrow` | `sudo apt install libarrow-dev libparquet-dev` | required for data loading |
-| C++17 toolchain | `xcode-select --install` | GCC 9+ / Clang 10+ (`build-essential`) | builds `cc/` |
-
-`dependencies_macos.sh` handles both Apple Silicon and Intel
-(`libtorch-macos-arm64-2.10.0.zip` / `libtorch-macos-x86_64-2.10.0.zip`);
-override with `LIBTORCH_VERSION=x.y.z`. On Linux, download manually into
-`external/`:
+Native dependencies are pinned and live in `external/`; nothing else is
+installed system-wide. You need a C++20 compiler (GCC on Linux, Xcode command
+line tools on macOS), `python3`, `curl`, `unzip`, `make`, and optionally the
+CUDA toolkit on Linux. Supported platforms are Linux x86_64, Linux aarch64 and
+macOS arm64.
 
 ```bash
-# CPU
-curl --fail --location --retry 5 --retry-all-errors --show-error \
-  -o libtorch.zip "https://download.pytorch.org/libtorch/cpu/libtorch-shared-with-deps-2.10.0%2Bcpu.zip"
-unzip -q libtorch.zip && rm libtorch.zip
-
-# CUDA 12.6 (nightly, cxx11 ABI)
-curl -O https://download.pytorch.org/libtorch/nightly/cu126/libtorch-cxx11-abi-shared-with-deps-latest.zip
-unzip libtorch-cxx11-abi-shared-with-deps-latest.zip && rm libtorch-cxx11-abi-shared-with-deps-latest.zip
+git submodule update --init       # external/soxr, external/ThunderKittens
+./fetch_dependencies.sh           # external/libtorch, external/arrow (+ external/nvidia with nvcc)
+source scripts/ci/environment.sh  # Linux: LEAN_CC=scripts/lean_cc_wrapper.sh
 ```
+
+`fetch_dependencies.sh` unpacks the wheels pinned with sha256 in
+`dependencies.lock` (torch 2.10.0, pyarrow 25.0.1). It picks the CUDA variant
+when `nvcc` is on `PATH` (override with `TYR_DEPS_VARIANT=cpu|cuda`).
+`scripts/lock_dependencies.py` regenerates the lock after a version bump.
 
 Lake-level requirements are declared in `lakefile.lean`: `LeanTest`,
 `LeanBenchmark`, and `LeanUrdfTypeProvider`, all pinned git revisions that Lake
@@ -106,22 +98,10 @@ GPU-related build knobs, read by `extern_lib libtyr` (`lakefile.lean:426-435`):
 
 ## Runtime environment
 
-Every executable needs libtorch (and on macOS, libomp) on the dynamic loader
-path:
-
-```bash
-# macOS (Apple Silicon)
-export DYLD_LIBRARY_PATH=external/libtorch/lib:/opt/homebrew/opt/libomp/lib:/opt/homebrew/lib
-# macOS (Intel)
-export DYLD_LIBRARY_PATH=external/libtorch/lib:/usr/local/opt/libomp/lib:/usr/local/lib
-# Linux
-export LD_LIBRARY_PATH=external/libtorch/lib:/usr/lib
-```
-
-The Lake scripts set a superset of this automatically — `runtimeLibPath`
-(`lakefile.lean:1039`) prepends `cc/build`, `.lake/build/lib`, the OpenMP path,
-Lean's own `lib/lean`, and EasyBuild roots (`EBROOTGCCCORE`, `EBROOTARROW`) when
-present — so prefer them when available:
+Executables find libtorch and Arrow in `external/` through their embedded
+library search paths (rpath), so no `LD_LIBRARY_PATH`/`DYLD_LIBRARY_PATH` setup
+is needed. The Lake scripts also set the library path themselves
+(`runtimeLibPath` in `lakefile.lean`):
 
 ```bash
 lake run                                   # test_runner
@@ -207,8 +187,8 @@ fixtures, and run the parity check. Useful knobs:
   runner, invoked as `runner <suite-name> <fixture-dir>` after each suite;
   defaults to `scripts/gpu/run_vendored_reference.sh` when executable.
 
-These scripts source `load_modules.sh` (EasyBuild module stack: Arrow, CUDA;
-overridable via `TYR_ARROW_MODULE`, `TYR_CUDA_MODULE`, `TYR_NCCL_MODULE`) and
+These scripts source `load_modules.sh` (EasyBuild module stack: CUDA;
+overridable via `TYR_CUDA_MODULE`, `TYR_NCCL_MODULE`) and
 expect a CUDA toolchain (`nvcc`). They are cluster scripts — on a plain macOS or
 CPU-only Linux checkout, skip this section.
 
@@ -258,7 +238,7 @@ Reconstructed example (from `Examples/TrainGPT.lean`) — the minimal
 build-and-train loop a new user runs, first in shell:
 
 ```bash
-bash dependencies_macos.sh                  # once: fetch libtorch
+./fetch_dependencies.sh                     # once: fetch libtorch + Arrow
 lake build test_runner && lake run          # sanity: test suite passes
 lake build TrainGPT && lake run train       # trains, then generates from "ROMEO:"
 ```

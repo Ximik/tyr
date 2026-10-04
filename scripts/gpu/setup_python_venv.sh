@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Create the .venv-gpu Python environment (torch, numpy, ninja) used by the
+# Python reference and benchmark tools. The Lean build does not use it: its
+# libtorch comes from ./fetch_dependencies.sh.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -103,11 +106,4 @@ if [[ -z "${python_include}" || ! -f "${python_include}/Python.h" ]]; then
   exit 1
 fi
 
-site_packages="$("${venv_dir}/bin/python" -c 'import site; print(next(p for p in site.getsitepackages() if p.endswith("site-packages")) )')"
-torch_dir="${site_packages}/torch"
-
-mkdir -p external
-ln -sfn "../${torch_dir#${repo_root}/}" external/libtorch
-
-echo "external/libtorch -> ${torch_dir}"
 "${venv_dir}/bin/python" -c 'import torch; print(torch.__version__); print(torch.version.cuda); print(torch.cuda.is_available())'

@@ -24,90 +24,61 @@ def forward : DTensor #[32, 512] .Float32 :=
 
 ## Dependencies
 
-### Lean 4
+Apart from the toolchain below, nothing is installed system-wide: every native
+dependency is pinned and lives in `external/`.
 
-Install [elan](https://github.com/leanprover/elan) (the Lean version manager):
+Supported platforms: Linux x86_64, Linux aarch64, macOS arm64.
+
+### 1. Toolchain
+
+- [elan](https://github.com/leanprover/elan), the Lean version manager. The
+  Lean version pinned in `lean-toolchain` is installed on the first `lake build`.
+  ```bash
+  curl https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -sSf | sh
+  ```
+- A C++20 compiler: GCC on Linux, Xcode command line tools on macOS
+  (`xcode-select --install`).
+- `python3`, `curl`, `unzip` and `make`.
+- Optional, Linux only: the CUDA toolkit (`nvcc`) for GPU builds.
+
+### 2. Submodules
 
 ```bash
-curl https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -sSf | sh
+git submodule update --init
 ```
 
-The correct Lean nightly is pinned in `lean-toolchain` and will be installed
-automatically on first `lake build`.
+This checks out `external/soxr` (audio resampling, built from source) and
+`external/ThunderKittens` (CUDA kernel headers).
 
-### URDF type provider (automatic)
+### 3. Native libraries
 
-The URDF-backed event-skeleton example uses the `lean-urdf-typeprovider`
-package, which `lakefile.lean` requires from a pinned GitHub revision
-(`github.com/ranvier-labs/lean-urdf-typeprovider`). Like the other git
-dependencies, Lake fetches it automatically — no extra setup is needed.
-
-### LibTorch (required)
-
-**macOS:**
 ```bash
-cd external
-LIBTORCH_VERSION=2.10.0
-curl --fail --location --retry 5 --retry-all-errors --show-error \
-  -o libtorch.zip "https://download.pytorch.org/libtorch/cpu/libtorch-macos-arm64-${LIBTORCH_VERSION}.zip"
-unzip -tq libtorch.zip
-unzip -q libtorch.zip && rm libtorch.zip
-cd ..
+./fetch_dependencies.sh
 ```
 
-Or run the helper script:
+This downloads the wheels pinned in `dependencies.lock`, verifies their sha256
+checksums, and unpacks:
+
+- `external/libtorch`: libtorch, including its OpenMP runtime
+- `external/arrow`: Arrow/Parquet
+- `external/nvidia`: CUDA runtime libraries, only when `nvcc` is on `PATH`
+
+Set `TYR_DEPS_VARIANT=cpu` or `cuda` to override that choice. Re-running the
+script does nothing if nothing changed. To bump a version, edit the pins in
+`scripts/lock_dependencies.py` and run it to regenerate the lock.
+
+### 4. Linux: link with the system compiler
+
 ```bash
-bash dependencies_macos.sh
+source scripts/ci/environment.sh
 ```
 
-**Linux (CPU):**
-```bash
-cd external
-LIBTORCH_VERSION=2.10.0
-curl --fail --location --retry 5 --retry-all-errors --show-error \
-  -o libtorch.zip "https://download.pytorch.org/libtorch/cpu/libtorch-shared-with-deps-${LIBTORCH_VERSION}%2Bcpu.zip"
-unzip -tq libtorch.zip
-unzip -q libtorch.zip && rm libtorch.zip
-cd ..
-```
+This sets `LEAN_CC=scripts/lean_cc_wrapper.sh`. Lean's bundled clang links
+against an old glibc that lacks symbols the system-built C++ code needs; see
+[docs/ffi-and-build.md](docs/ffi-and-build.md).
 
-**Linux (CUDA 12.6):**
-```bash
-cd external
-curl -O https://download.pytorch.org/libtorch/nightly/cu126/libtorch-cxx11-abi-shared-with-deps-latest.zip
-unzip libtorch-cxx11-abi-shared-with-deps-latest.zip && rm libtorch-cxx11-abi-shared-with-deps-latest.zip
-cd ..
-```
-
-### OpenMP (required)
-
-**macOS (Homebrew):**
-```bash
-brew install libomp
-```
-
-**Linux:**
-OpenMP is typically included with GCC. Install if needed:
-```bash
-sudo apt install libomp-dev   # Debian/Ubuntu
-```
-
-### Apache Arrow & Parquet (required for data loading)
-
-**macOS:**
-```bash
-brew install apache-arrow
-```
-
-**Linux:**
-```bash
-sudo apt install libarrow-dev libparquet-dev
-```
-
-### C++17 Compiler (required)
-
-- macOS: Xcode command line tools (`xcode-select --install`)
-- Linux: GCC 9+ or Clang 10+ (`sudo apt install build-essential`)
+Lean dependencies such as `lean-urdf-typeprovider` are git requirements in
+`lakefile.lean`; Lake fetches them automatically.
 
 ## Quick Start
 
@@ -125,26 +96,10 @@ lake build TrainNanoChat
 lake build FluxDemo
 ```
 
-### Environment Setup
+Executables find libtorch and Arrow in `external/` through their embedded
+library search paths, so no `LD_LIBRARY_PATH`/`DYLD_LIBRARY_PATH` setup is
+needed. The Lake helper scripts also run them directly:
 
-All executables need the native library paths set at runtime:
-
-**macOS (Apple Silicon):**
-```bash
-export DYLD_LIBRARY_PATH=external/libtorch/lib:/opt/homebrew/opt/libomp/lib:/opt/homebrew/lib
-```
-
-**macOS (Intel):**
-```bash
-export DYLD_LIBRARY_PATH=external/libtorch/lib:/usr/local/opt/libomp/lib:/usr/local/lib
-```
-
-**Linux:**
-```bash
-export LD_LIBRARY_PATH=external/libtorch/lib:/usr/lib
-```
-
-Or use the Lake helper scripts which set these automatically:
 ```bash
 lake run           # runs test_runner
 lake run train     # runs TrainGPT
@@ -230,7 +185,7 @@ Notes:
 - A vendored ThunderKittens reference runner is called as
   `runner <suite-name> <fixture-dir>` after each suite and should exit nonzero
   on mismatch. It defaults to `scripts/gpu/run_vendored_reference.sh` (needs a
-  Python env; see `./scripts/gpu/setup_libtorch_uv.sh`) and can be overridden
+  Python env; see `./scripts/gpu/setup_python_venv.sh`) and can be overridden
   with `TYR_GPU_VENDORED_REF_RUNNER=/path/to/runner`.
 
 ## Key Concepts

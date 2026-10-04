@@ -9,7 +9,7 @@ from cache_key import keys
 class CacheKeyTests(unittest.TestCase):
     def setUp(self):
         self.identity = {"os": "Linux", "arch": "aarch64", "workspace": "/work/tyr",
-                         "compiler": "gcc 12", "lean": "4.29.0", "native_packages": "arrow=23",
+                         "compiler": "gcc 12", "lean": "4.29.0",
                          "files": {"lake-manifest.json": "a", "torch/version.h": "2.10"},
                          "environment": {"GPU_CODE": "sm_121", "CXXFLAGS": "-O2"}}
 

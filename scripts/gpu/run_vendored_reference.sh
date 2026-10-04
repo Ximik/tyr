@@ -4,7 +4,7 @@ set -euo pipefail
 venv_python="${TYR_GPU_PYTHON:-$PWD/.venv-gpu/bin/python}"
 if [[ ! -x "${venv_python}" ]]; then
   echo "vendored_ref missing Python env: expected ${venv_python}" >&2
-  echo "hint: run ./scripts/gpu/setup_libtorch_uv.sh" >&2
+  echo "hint: run ./scripts/gpu/setup_python_venv.sh" >&2
   exit 1
 fi
 

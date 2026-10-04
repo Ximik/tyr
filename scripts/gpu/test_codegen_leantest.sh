@@ -15,7 +15,7 @@ if [[ ! -x "${uv_bin}" ]]; then
 fi
 
 if [[ ! -x "${venv_python}" ]]; then
-  echo "missing ${venv_python}; run ./scripts/gpu/setup_libtorch_uv.sh first." >&2
+  echo "missing ${venv_python}; run ./scripts/gpu/setup_python_venv.sh first." >&2
   exit 1
 fi
 
