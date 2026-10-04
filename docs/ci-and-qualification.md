@@ -49,7 +49,7 @@ Configure these repository variables for the runner that actually serves it:
 | `TYR_QUALIFICATION_RUNNER_LABELS` | JSON label array; upstream dedicated runner: `["self-hosted","Linux","ARM64","tyr-qualification","gb10"]` |
 | `TYR_GPU` | `GB10` |
 | `TYR_QUALIFICATION_ROOT` | `/home/pehle/tyr-qualification` |
-| `TYR_QUALIFICATION_BOOTSTRAP_PYTHON` | `/home/pehle/dev/tyr/.venv-gpu/bin/python` |
+| `TYR_QUALIFICATION_BOOTSTRAP_PYTHON` | `python3.12` (any Python 3.12 interpreter) |
 | `TYR_CUDA_HOME` | `/usr/local/cuda` |
 
 The runner needs elan, a C++ compiler, NVCC 13.0, `flock`, and a Python 3.12

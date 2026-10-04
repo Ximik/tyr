@@ -27,6 +27,12 @@ while read -r name commit url; do
     continue
   fi
 
+  # Never discard edits to a checkout; untracked files (build outputs) are fine.
+  if [[ -d "${dest}/.git" && -n "$(git -C "${dest}" status --porcelain --untracked-files=no)" ]]; then
+    echo "${name} has local changes in external/git/${name}; commit or stash them, or delete the directory, then rerun" >&2
+    exit 1
+  fi
+
   echo "fetching ${name} at ${commit:0:12}"
   tmp="${dest}.tmp"
   rm -rf "${tmp}"

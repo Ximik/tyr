@@ -58,13 +58,14 @@ curl https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -sSf 
 ```
 
 Native dependencies are pinned and live in `external/`; nothing else is
-installed system-wide. You need a C++20 compiler (GCC on Linux, Xcode command
-line tools on macOS), `python3`, `curl`, `unzip`, `make`, and optionally the
-CUDA toolkit on Linux. Supported platforms are Linux x86_64, Linux aarch64 and
-macOS arm64.
+installed system-wide. You need a C++20 compiler (GCC with C++ (`g++`) on
+Linux, Xcode command line tools on macOS), `python3`, `curl`, `unzip`, `make`,
+and optionally the CUDA toolkit on Linux. On Debian/Ubuntu:
+`sudo apt install g++ make curl unzip git python3`. Supported platforms are
+Linux x86_64, Linux aarch64 and macOS arm64.
 
 ```bash
-deps/fetch.sh                     # external/{soxr,ThunderKittens}, external/wheels/{torch,pyarrow}
+deps/fetch.sh                     # external/{git,wheels}/...
 source scripts/ci/environment.sh  # Linux: LEAN_CC=scripts/lean_cc_wrapper.sh
 ```
 

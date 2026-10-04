@@ -19,7 +19,9 @@ TORCH_INC_FLAGS=-I$(TORCHDIR)/include -I$(TORCHDIR)/include/torch/csrc/api/inclu
 TORCH_LIBPATH=$(TORCHDIR)/lib
 TORCH_CUDA_VENDOR_LIBPATH=../external/wheels/nvidia/cu13/lib
 # Python.h is only needed by tk_vendor_mha_h100.cu (it includes torch's pybind.h).
-PYTHON ?= python3
+# Prefer CPython 3.12, the version the fetched wheels target (WHEEL_PYTHON in
+# deps/lock_wheels.py).
+PYTHON ?= $(shell command -v python3.12 2>/dev/null || echo python3)
 PYTHON_INCLUDE := $(shell "$(PYTHON)" -c 'import sysconfig; print(sysconfig.get_config_var("INCLUDEPY") or sysconfig.get_path("include") or "")' 2>/dev/null)
 PYTHON_INC_FLAGS := $(if $(strip $(PYTHON_INCLUDE)),-I$(PYTHON_INCLUDE),)
 TKDIR=../external/git/ThunderKittens
@@ -374,6 +376,12 @@ $(NATIVE_CONFIG): FORCE $(TOOLS_DIR)/write_build_config.py $(TYR_MAKEFILE)
 -include $(DEP_FILES)
 
 check-deps:
+	@for compiler in $(firstword $(CC)) $(firstword $(CXX)); do \
+		if ! command -v "$$compiler" >/dev/null 2>&1; then \
+			echo "Missing C/C++ compiler $$compiler. On Debian/Ubuntu: sudo apt install g++"; \
+			exit 1; \
+		fi; \
+	done
 	@if [ ! -f "$(SOXR_DIR)/CMakeLists.txt" ]; then \
 		echo "Missing $(SOXR_DIR). Run: deps/fetch.sh"; \
 		exit 1; \

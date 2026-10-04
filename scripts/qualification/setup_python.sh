@@ -6,13 +6,16 @@ qualification_root=${TYR_QUALIFICATION_ROOT:-"$HOME/tyr-qualification"}
 # deps/lock_wheels.py), so the venv must use the same version.
 bootstrap_python=${TYR_QUALIFICATION_BOOTSTRAP_PYTHON:-python3.12}
 venv_python="$qualification_root/venv/bin/python"
-mkdir -p "$qualification_root"
-if [[ ! -x "$venv_python" ]]; then
-  "$bootstrap_python" -m venv "$qualification_root/venv"
-fi
-if [[ "$("$venv_python" -c 'import sys; print(f"{sys.version_info[0]}.{sys.version_info[1]}")')" != 3.12 ]]; then
-  echo "$qualification_root/venv must use Python 3.12 to load external/wheels; delete it and rerun" >&2
+python_version() { "$1" -c 'import sys; print(f"{sys.version_info[0]}.{sys.version_info[1]}")'; }
+if [[ "$(python_version "$bootstrap_python")" != 3.12 ]]; then
+  echo "$bootstrap_python is not Python 3.12; set TYR_QUALIFICATION_BOOTSTRAP_PYTHON" >&2
   exit 1
+fi
+mkdir -p "$qualification_root"
+# The venv holds only pinned pip packages, so one left over from another Python
+# version is recreated rather than reused.
+if [[ ! -x "$venv_python" || "$(python_version "$venv_python")" != 3.12 ]]; then
+  "$bootstrap_python" -m venv --clear "$qualification_root/venv"
 fi
 if [[ ! -d "$repo_root/external/wheels/torch" ]]; then
   echo "external/wheels/torch is missing; run deps/fetch.sh" >&2

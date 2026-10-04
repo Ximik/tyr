@@ -36,9 +36,11 @@ Supported platforms: Linux x86_64, Linux aarch64, macOS arm64.
   ```bash
   curl https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -sSf | sh
   ```
-- A C++20 compiler: GCC on Linux, Xcode command line tools on macOS
-  (`xcode-select --install`).
+- A C++20 compiler: GCC with C++ (`g++`) on Linux, Xcode command line tools
+  on macOS (`xcode-select --install`).
 - `python3`, `curl`, `unzip` and `make`.
+
+  On Debian/Ubuntu: `sudo apt install g++ make curl unzip git python3`.
 - Optional, Linux only: the CUDA toolkit (`nvcc`) for GPU builds.
 
 ### 2. Pinned dependencies
