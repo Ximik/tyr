@@ -32,13 +32,14 @@ Install [elan](https://github.com/leanprover/elan) (the Lean version manager):
 curl https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -sSf | sh
 ```
 
-The correct Lean nightly is pinned in `lean-toolchain` and will be installed
+Open a new shell (or run `source ~/.elan/env`) so `lake` is on `PATH`. The
+correct Lean nightly is pinned in `lean-toolchain` and will be installed
 automatically on first `lake build`.
 
-### C++17 Compiler
+### C++20 Compiler
 
 - macOS: Xcode command line tools (`xcode-select --install`)
-- Linux: GCC 9+ or Clang 10+ (`sudo apt install build-essential`)
+- Linux: GCC 10+ (`sudo apt install build-essential`)
 
 ### Native dependencies
 
@@ -55,17 +56,19 @@ deps/fetch.sh
 
 ```bash
 # Linux: link with the system GCC (no-op on macOS); once per shell
-source scripts/ci/environment.sh
+source ./env.sh
 
-# Build all targets with Lake
-lake build
+# Build the test runner (a good first build)
+lake build test_runner
 
 # Build specific executables
-lake build test_runner
 lake build TrainGPT
 lake build TrainDiffusion
 lake build TrainNanoChat
 lake build FluxDemo
+
+# Build everything (slow: every example and benchmark executable)
+lake build
 ```
 
 ### Running
@@ -105,7 +108,7 @@ All optional.
 
 | Variable | Effect |
 |---|---|
-| `LEAN_CC` | Linux: set to `scripts/lean_cc_wrapper.sh` to link with the system GCC (`source scripts/ci/environment.sh` does this) |
+| `LEAN_CC` | Linux: set to `scripts/lean_cc_wrapper.sh` to link with the system GCC (`source ./env.sh` does this) |
 | `LEAN_CC_FAST=1` | compile Lean-generated C with `-O0` for faster iteration |
 | `NVCC`, `CUDA_HOME` | CUDA compiler and toolkit; without `nvcc`, CUDA kernels are replaced by CPU stubs |
 | `TYR_GPU_TARGET` | GPU to build kernels for: `H100` (default), `A100`, `B200`, `B300`, `GB10` |

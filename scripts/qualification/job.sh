@@ -44,7 +44,7 @@ mapfile -t modules < <(python3 scripts/qualification/gpu_plan.py "$GPU" --field 
 export TYR_GPU_CODEGEN_MODULE="${modules[*]}"
 cuda_libraries=$(python3 scripts/qualification/cuda_runtime.py --libtorch external/wheels/torch --cuda-home "${CUDA_HOME:-/usr/local/cuda}" --previous="${LD_LIBRARY_PATH:-}")
 export LD_LIBRARY_PATH="$cuda_libraries"
-source scripts/ci/environment.sh
+source ./env.sh
 
 python3 scripts/qualification/run.py --kind gpu --python "$python_bin" \
   --check-runtime --report output/qualification/runtime.json

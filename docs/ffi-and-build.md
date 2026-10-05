@@ -234,7 +234,7 @@ Build behavior is controlled entirely through the environment:
 | `LEAN_CC_GCC`, `LEAN_CC_LINKER` | compiler/linker selection in the wrapper |
 
 `scripts/lean_cc_wrapper.sh` is the `LEAN_CC` wrapper used on Linux (set by
-`scripts/ci/environment.sh`). Lean's bundled clang links against the old glibc
+`env.sh`). Lean's bundled clang links against the old glibc
 inside the Lean toolchain, while `cc/` and libtorch are built with the system
 gcc against the system glibc/libstdc++, so the link fails with undefined glibc
 symbols. The wrapper runs the system gcc instead, maps Lean's `-lc++`,

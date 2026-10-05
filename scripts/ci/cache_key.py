@@ -45,7 +45,7 @@ def identity():
     # deps/git.lock and deps/wheels.lock pin every native dependency; the libtorch
     # files below additionally record which variant (cpu/cuda) was fetched.
     files = ["lean-toolchain", "lake-manifest.json", "deps/git.lock", "deps/wheels.lock",
-             "scripts/lean_cc_wrapper.sh", "scripts/ci/environment.sh"]
+             "scripts/lean_cc_wrapper.sh", "env.sh"]
     torch_files = ["share/cmake/Torch/TorchConfigVersion.cmake",
                    "share/cmake/Torch/TorchConfig.cmake",
                    "include/torch/csrc/api/include/torch/version.h"]

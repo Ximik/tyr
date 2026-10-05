@@ -66,7 +66,7 @@ Linux x86_64, Linux aarch64 and macOS arm64.
 
 ```bash
 deps/fetch.sh                     # external/{git,wheels}/...
-source scripts/ci/environment.sh  # Linux: LEAN_CC=scripts/lean_cc_wrapper.sh
+source ./env.sh                   # Linux: LEAN_CC=scripts/lean_cc_wrapper.sh
 ```
 
 `deps/fetch.sh` runs two fetchers. `deps/fetch_git.sh` checks out the git
