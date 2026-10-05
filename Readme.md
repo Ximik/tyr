@@ -24,80 +24,39 @@ def forward : DTensor #[32, 512] .Float32 :=
 
 ## Dependencies
 
-Apart from the toolchain below, nothing is installed system-wide: every native
-dependency is pinned and lives in `external/`.
+### Lean 4
 
-Supported platforms: Linux x86_64, Linux aarch64, macOS arm64.
+Install [elan](https://github.com/leanprover/elan) (the Lean version manager):
 
-### 1. Toolchain
+```bash
+curl https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -sSf | sh
+```
 
-- [elan](https://github.com/leanprover/elan), the Lean version manager. The
-  Lean version pinned in `lean-toolchain` is installed on the first `lake build`.
-  ```bash
-  curl https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -sSf | sh
-  ```
-- A C++20 compiler: GCC with C++ (`g++`) on Linux, Xcode command line tools
-  on macOS (`xcode-select --install`).
-- `python3`, `curl`, `unzip` and `make`.
+The correct Lean nightly is pinned in `lean-toolchain` and will be installed
+automatically on first `lake build`.
 
-  On Debian/Ubuntu: `sudo apt install g++ make curl unzip git python3`.
-- Optional, Linux only: the CUDA toolkit (`nvcc`) for GPU builds.
+### C++17 Compiler
 
-### 2. Pinned dependencies
+- macOS: Xcode command line tools (`xcode-select --install`)
+- Linux: GCC 9+ or Clang 10+ (`sudo apt install build-essential`)
+
+### Native dependencies
+
+Third-party libraries and sources are pinned in `deps/` and fetched into
+`external/`. This needs `curl` and `unzip`:
 
 ```bash
 deps/fetch.sh
 ```
-
-All dependency pins and scripts live in `deps/`. There are two kinds:
-
-**Git repos** (`deps/git.lock`, fetched by `deps/fetch_git.sh`). Each repo is
-pinned to a commit and fetched as that single commit (`git fetch --depth 1`),
-so git verifies the content against the hash:
-
-- `external/git/soxr`: audio resampling, built from source
-- `external/git/ThunderKittens`: CUDA kernel headers
-
-**Wheels** (`deps/wheels.lock`, fetched by `deps/fetch_wheels.sh`). These are
-downloaded from PyPI and PyTorch's package index, checked against their pinned
-sha256, and unpacked into `external/wheels`:
-
-- `external/wheels/torch`: the torch wheel, which is libtorch (`lib/`,
-  `include/`, `share/cmake/`, including its OpenMP runtime) plus its Python
-  package
-- `external/wheels/nvidia`: CUDA runtime libraries, only when `nvcc` is on `PATH`
-  (override with `TYR_DEPS_VARIANT=cpu` or `cuda`)
-- `external/wheels/pyarrow`: the pyarrow wheel, which is Arrow/Parquet
-  (`include/` and `libarrow`/`libparquet`) plus its Python package
-
-Every wheel is unpacked whole, so `external/wheels` is a complete Python
-`site-packages` directory: the GPU reference tools
-(`scripts/gpu/setup_python_venv.sh`, which needs Python 3.12) import the same
-torch and pyarrow the C++ build links against.
-
-Re-running `deps/fetch.sh` does nothing if nothing changed. To bump a git
-dependency, change its commit in `deps/git.lock`. To bump a wheel, edit the
-version pins in `deps/lock_wheels.py` and run it to regenerate
-`deps/wheels.lock`.
-
-### 3. Linux: link with the system compiler
-
-```bash
-source scripts/ci/environment.sh
-```
-
-This sets `LEAN_CC=scripts/lean_cc_wrapper.sh`. Lean's bundled clang links
-against an old glibc that lacks symbols the system-built C++ code needs; see
-[docs/ffi-and-build.md](docs/ffi-and-build.md).
-
-Lean dependencies such as `lean-urdf-typeprovider` are git requirements in
-`lakefile.lean`; Lake fetches them automatically.
 
 ## Quick Start
 
 ### Building
 
 ```bash
+# Linux: link with the system GCC (no-op on macOS); once per shell
+source scripts/ci/environment.sh
+
 # Build all targets with Lake
 lake build
 
@@ -109,10 +68,9 @@ lake build TrainNanoChat
 lake build FluxDemo
 ```
 
-Executables find libtorch and Arrow in `external/` through their embedded
-library search paths, so no `LD_LIBRARY_PATH`/`DYLD_LIBRARY_PATH` setup is
-needed. The Lake helper scripts also run them directly:
+### Running
 
+Use the Lake helper scripts:
 ```bash
 lake run           # runs test_runner
 lake run train     # runs TrainGPT
@@ -131,6 +89,40 @@ lake run
 lake build test_runner_experimental
 .lake/build/bin/test_runner_experimental
 ```
+
+## Environment Variables
+
+All optional.
+
+**Dependencies** (`deps/fetch.sh`):
+
+| Variable | Effect |
+|---|---|
+| `TYR_DEPS_VARIANT` | `cpu` or `cuda`; by default `cuda` on Linux when `nvcc` is on `PATH`, otherwise `cpu` |
+| `TYR_DEPS_CACHE` | download cache directory (default `external/.cache`) |
+
+**Build:**
+
+| Variable | Effect |
+|---|---|
+| `LEAN_CC` | Linux: set to `scripts/lean_cc_wrapper.sh` to link with the system GCC (`source scripts/ci/environment.sh` does this) |
+| `LEAN_CC_FAST=1` | compile Lean-generated C with `-O0` for faster iteration |
+| `NVCC`, `CUDA_HOME` | CUDA compiler and toolkit; without `nvcc`, CUDA kernels are replaced by CPU stubs |
+| `TYR_GPU_TARGET` | GPU to build kernels for: `H100` (default), `A100`, `B200`, `B300`, `GB10` |
+| `TYR_GPU_CODEGEN_MODULE` | kernel module(s) to generate CUDA for, space-separated (default `Tyr.GPU.Kernels.MhaH100`) |
+| `TYR_SKIP_GPU_CODEGEN=1` | skip kernel generation and reuse `cc/src/generated` |
+| `TYR_BUILD_TYRC_DYLIB=0` | build only the static `libTyrC.a` |
+| `TYR_MACOS_DEPLOYMENT_TARGET` | macOS deployment target (default `14.0`) |
+
+See [docs/ffi-and-build.md](docs/ffi-and-build.md) for finer GPU and compiler overrides.
+
+**Runtime:**
+
+| Variable | Effect |
+|---|---|
+| `TYR_DEVICE` | `cpu`, `cuda`, `mps` or `auto`; device used by the examples and model loaders |
+| `TYR_VERBOSE_ERRORS=1` | print the full libtorch report when a libtorch error crashes the program |
+| `TYR_DEBUG_MPS=1` | print MPS (Apple GPU) availability diagnostics |
 
 ## Documentation
 
@@ -319,20 +311,23 @@ This repo uses scoped conventional commit subjects:
 type(scope): summary
 ```
 
-Enable the git hooks in `.githooks/` and the commit message template
-`.gitmessage` for your clone:
+A commit message template is included at `.gitmessage`. Enable it and the
+hooks locally:
 
 ```bash
-git config core.hooksPath .githooks
 git config commit.template .gitmessage
+git config core.hooksPath .githooks
 ```
 
 Included hooks:
 - `pre-commit`: fails on staged whitespace errors and conflict markers
 - `commit-msg`: enforces `type(scope): summary` (e.g. `feat(qwen35): add video stream patchify`)
-- `pre-push`: validates the subjects of commits being pushed
+- `pre-push`: validates pushed commit subjects with `.githooks/check-commit-message.sh`
 
-All subject checks, including CI on pull requests, use one checker:
+CI also enforces this format on pull requests, for both commit subjects and the
+PR title (a squash merge uses it as the commit subject), using the same checker.
+
+Manual check example:
 ```bash
 ./.githooks/check-commit-message.sh "feat(qwen35): add video stream patchify"
 ```
