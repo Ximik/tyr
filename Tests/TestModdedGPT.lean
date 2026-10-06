@@ -10,11 +10,6 @@
   4. Sharding tests
   5. Model forward tests
   6. Training step tests
-
-  Usage:
-    ninja test-modded
-    export DYLD_LIBRARY_PATH=external/wheels/torch/lib:/opt/homebrew/opt/libomp/lib
-    out/exe/TestModdedGPT
 -/
 import Tyr
 import Tyr.Distributed

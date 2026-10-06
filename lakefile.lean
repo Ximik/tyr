@@ -215,11 +215,10 @@ def linuxLinkTail : Array String :=
     "-Wl,-rpath,$ORIGIN/../../../external/wheels/torch/lib"
   ]
 
-/-- macOS: libtorch ships its own `libomp.dylib`, so `-lomp` resolves there. -/
 def macOSTorchLinkArgs : Array String :=
   #[
     s!"-L{__dir__ / "external" / "wheels" / "torch" / "lib"}",
-    "-ltorch", "-ltorch_cpu", "-lc10", "-lomp"
+    "-ltorch", "-ltorch_cpu", "-lc10"
   ] ++ arrowLinkArgs ++ soxrLinkArgs ++ macOSSDKLinkArgs ++ macOSDeploymentLinkArgs
     ++ macOSFrameworkArgs
 

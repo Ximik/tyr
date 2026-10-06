@@ -7,13 +7,6 @@ TYR_SKIP_GPU_CODEGEN=1 lake -R build mctx_bench
 lake -R env ./.lake/build/bin/mctx_bench
 ```
 
-On macOS, use the project's native library paths when running:
-
-```sh
-DYLD_LIBRARY_PATH="$PWD/external/wheels/torch/lib:/opt/homebrew/opt/libomp/lib:$(lean --print-prefix)/lib/lean" \
-  lake -R env ./.lake/build/bin/mctx_bench
-```
-
 The executable checks correctness before reporting CSV timings. It contains two
 separate comparisons:
 

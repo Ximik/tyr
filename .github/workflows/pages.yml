@@ -126,13 +126,7 @@ jobs:
 
       - name: Build docs
         run: |
-          lean_prefix="$(lean --print-prefix)"
-          multiarch_dir="/usr/lib/$(gcc -print-multiarch)"
-          gomp_dir="$(dirname "$(gcc -print-file-name=libgomp.so)")"
-          export LEAN_CC="$GITHUB_WORKSPACE/scripts/lean_cc_wrapper.sh"
-          export LEAN_CC_GCC="/usr/bin/gcc"
-          export LIBRARY_PATH="${multiarch_dir}:${gomp_dir}:/usr/lib:${LIBRARY_PATH:-}"
-          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/external/wheels/torch/lib:${lean_prefix}/lib:${lean_prefix}/lib/glibc:${multiarch_dir}:${gomp_dir}:/usr/lib:${LD_LIBRARY_PATH:-}"
+          source ./env.sh
           cd docbuild
           lake build Tyr:docs
 

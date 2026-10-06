@@ -11,12 +11,11 @@
   - Document-aware data loading
 
   Usage:
-    ninja modded
-    export DYLD_LIBRARY_PATH=external/wheels/torch/lib:/opt/homebrew/opt/libomp/lib
-    out/exe/ModdedTrainGPT
+    lake build TrainNanoChat
+    .lake/build/bin/TrainNanoChat
 
   For distributed training (multi-GPU):
-    torchrun --nproc_per_node=8 out/exe/ModdedTrainGPT
+    scripts/nanochat/run_train_torchrun.sh
 -/
 import Tyr.Torch
 import Tyr.Distributed
