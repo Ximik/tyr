@@ -605,7 +605,7 @@ private def runCacheBenchmark (device : Device) : IO Unit := autograd.no_grad do
     IO.println s!"CACHE_BENCH device={deviceLabel device} capacity={capacity} tokens=24 functional_ms={functionalMs} owned_ms={ownedMs} functional_cache_bytes={capacity * cfg.num_hidden_layers * bytesPerPosition} owned_cache_bytes={ownedCapacity * bytesPerPosition}"
 
 def main : IO Unit := do
-  for name in #["OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "TYR_LIBTORCH_DIR"] do
+  for name in #["OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS"] do
     IO.println s!"runtime {name}={(← IO.getEnv name).getD "<unset>"}"
   checkComparisonFailures
   IO.println "-- (a) KV-cache parity: full forward vs prefill + decode"

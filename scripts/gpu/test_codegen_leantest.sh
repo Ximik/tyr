@@ -15,7 +15,7 @@ if [[ ! -x "${uv_bin}" ]]; then
 fi
 
 if [[ ! -x "${venv_python}" ]]; then
-  echo "missing ${venv_python}; run ./scripts/gpu/setup_libtorch_uv.sh first." >&2
+  echo "missing ${venv_python}; run ./scripts/gpu/setup_python_venv.sh first." >&2
   exit 1
 fi
 
@@ -24,7 +24,7 @@ if [[ ! -x "${lake_bin}" || ! -x "${lean_bin}" ]]; then
   exit 1
 fi
 
-export LD_LIBRARY_PATH="${repo_root}/external/libtorch/lib:${repo_root}/cc/build:${EBROOTGCCCORE:+${EBROOTGCCCORE}/lib64:}${LD_LIBRARY_PATH:-}"
+export LD_LIBRARY_PATH="${repo_root}/external/wheels/torch/lib:${repo_root}/cc/build:${EBROOTGCCCORE:+${EBROOTGCCCORE}/lib64:}${LD_LIBRARY_PATH:-}"
 
 echo "[1/4] Build GPU kernel LeanTest module"
 "${uv_bin}" run --python "${venv_python}" env LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" \

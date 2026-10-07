@@ -17,7 +17,7 @@ import torch
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_TK_DIR = ROOT / "thirdparty" / "ThunderKittens" / "kernels" / "attention" / "mha_h100"
+DEFAULT_TK_DIR = ROOT / "external" / "git" / "ThunderKittens" / "kernels" / "attention" / "mha_h100"
 
 
 CASES = {

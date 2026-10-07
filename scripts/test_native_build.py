@@ -24,15 +24,19 @@ class NativeBuildTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.cc = self.root / "cc"
         for directory in ("cc/src", "cc/include/nested", "cc/tools",
-                          "external/soxr", "external/libtorch/lib",
-                          "external/libtorch/include/torch/csrc/api/include/torch",
+                          "external/git/soxr", "external/wheels/torch/lib", "external/wheels/pyarrow",
+                          "external/wheels/torch/include/torch/csrc/api/include/torch",
                           "Tyr/GPU/Kernels", ".lake/build/ir/Tyr/GPU/Kernels", "lean/include"):
             (self.root / directory).mkdir(parents=True, exist_ok=True)
         shutil.copy(REPO / "cc/Makefile", self.cc / "Makefile")
         for script in ("write_build_config.py", "generate_gpu_kernel_stubs.py"):
             shutil.copy(REPO / "cc/tools" / script, self.cc / "tools" / script)
-        (self.root / "external/soxr/CMakeLists.txt").touch()
-        (self.root / "external/libtorch/include/torch/csrc/api/include/torch/torch.h").touch()
+        (self.root / "external/git/soxr/CMakeLists.txt").touch()
+        (self.root / "external/wheels/torch/include/torch/csrc/api/include/torch/torch.h").touch()
+        arrow_libs = (("libarrow.2500.dylib", "libparquet.2500.dylib") if sys.platform == "darwin"
+                      else ("libarrow.so.2500", "libparquet.so.2500"))
+        for lib in arrow_libs:
+            (self.root / "external/wheels/pyarrow" / lib).touch()
         self.header = self.cc / "include/nested/config.h"
         self.header.write_text("#define VALUE 3\n")
         (self.cc / "src/probe.cpp").write_text(

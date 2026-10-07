@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
-torch_dir=${LIBTORCH_DIR:-"$repo_root/external/libtorch"}
+torch_dir=${LIBTORCH_DIR:-"$repo_root/external/wheels/torch"}
 test_dir=$(mktemp -d "${TMPDIR:-/tmp}/tyr-native-attention.XXXXXX")
 trap 'rm -rf -- "$test_dir"' EXIT
 

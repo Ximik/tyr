@@ -1,9 +1,9 @@
 # Numerical/reference dependencies for the Spark (CUDA 13) qualification venv.
 # Use --extra-index-url https://download.pytorch.org/whl/cu130.
 # Qwen reference Python source is loaded from the exact Git revision in fixtures.json.
-torch==2.9.0+cu130
-torchaudio==2.9.0; platform_machine == "aarch64"
-torchaudio==2.9.0+cu130; platform_machine == "x86_64"
+torch==2.10.0+cu130
+torchaudio==2.10.0+cu130; platform_machine == "aarch64"
+torchaudio==2.10.0+cu130; platform_machine == "x86_64"
 transformers==4.57.3
 accelerate==1.12.0
 numpy==2.2.6

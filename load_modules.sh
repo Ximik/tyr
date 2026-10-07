@@ -1,5 +1,5 @@
 #!/bin/bash
-# Load required modules for ThunderKittens development.
+# Load the CUDA toolchain module for ThunderKittens development.
 # Uses GCCcore/12.3.0 to match locally compiled Lean 4.
 
 if ! type module >/dev/null 2>&1; then
@@ -16,7 +16,6 @@ if ! type module >/dev/null 2>&1; then
   return 0 2>/dev/null || exit 0
 fi
 
-TYR_ARROW_MODULE="${TYR_ARROW_MODULE:-Arrow/14.0.1-gfbf-2023a}"
 TYR_CUDA_MODULE="${TYR_CUDA_MODULE:-CUDA/12.9.1}"
 if [[ -z "${TYR_NCCL_MODULE+x}" ]]; then
   TYR_NCCL_MODULE=""
@@ -26,7 +25,6 @@ module purge
 module load EB5
 module load EB5Modules
 module load EBModules
-module load "${TYR_ARROW_MODULE}"
 module load "${TYR_CUDA_MODULE}"
 if [[ -n "${TYR_NCCL_MODULE}" ]]; then
   module load "${TYR_NCCL_MODULE}"

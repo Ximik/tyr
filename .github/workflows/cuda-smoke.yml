@@ -16,7 +16,7 @@ on:
       - 'Tyr/Model/Laguna/**'
       - 'Tests/RunLagunaModel.lean'
       - 'scripts/qualification/**'
-      - 'scripts/ci/environment.sh'
+      - 'env.sh'
       - 'scripts/test_native_attention.sh'
       - 'scripts/gpu/**'
       - 'cc/include/**'
@@ -40,7 +40,7 @@ on:
       - 'Tyr/Model/Laguna/**'
       - 'Tests/RunLagunaModel.lean'
       - 'scripts/qualification/**'
-      - 'scripts/ci/environment.sh'
+      - 'env.sh'
       - 'scripts/test_native_attention.sh'
       - 'scripts/gpu/**'
       - 'cc/include/**'
@@ -79,7 +79,6 @@ jobs:
       - name: Verify repository runner configuration
         id: configuration
         env:
-          TYR_LIBTORCH_DIR: ${{ vars.TYR_LIBTORCH_DIR }}
           TYR_QUALIFICATION_RUNNER_LABELS: ${{ vars.TYR_QUALIFICATION_RUNNER_LABELS }}
         run: python3 scripts/qualification/readiness.py
       - name: Upload readiness evidence
@@ -96,15 +95,12 @@ jobs:
     timeout-minutes: 180
     env:
       GPU: ${{ vars.TYR_GPU || 'GB10' }}
-      TYR_LIBTORCH_DIR: ${{ vars.TYR_LIBTORCH_DIR }}
       TYR_QUALIFICATION_ROOT: ${{ vars.TYR_QUALIFICATION_ROOT || '/home/pehle/tyr-qualification' }}
-      TYR_QUALIFICATION_BOOTSTRAP_PYTHON: ${{ vars.TYR_QUALIFICATION_BOOTSTRAP_PYTHON || '/home/pehle/dev/tyr/.venv-gpu/bin/python' }}
+      TYR_QUALIFICATION_BOOTSTRAP_PYTHON: ${{ vars.TYR_QUALIFICATION_BOOTSTRAP_PYTHON || 'python3.12' }}
       TYR_QUALIFY_MODELS: ${{ github.event_name == 'schedule' || inputs.real_models }}
       CUDA_HOME: ${{ vars.TYR_CUDA_HOME || '/usr/local/cuda' }}
     steps:
       - uses: actions/checkout@v4
-      - name: Initialize required submodules
-        run: git submodule update --init --depth 1 external/soxr thirdparty/ThunderKittens
       - name: Install pinned Lean toolchain
         run: |
           export PATH="$HOME/.elan/bin:$PATH"
@@ -115,21 +111,9 @@ jobs:
           toolchain="$(cat lean-toolchain)"
           if ! elan toolchain list | grep -Fxq "$toolchain"; then elan toolchain install "$toolchain"; fi
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
-      - name: Link runner-provided pinned CUDA runtime
-        run: |
-          python3 - <<'PYTHON'
-          import os
-          from pathlib import Path
-          source = Path(os.environ['TYR_LIBTORCH_DIR'])
-          if not (source / 'share/cmake/Torch/TorchConfigVersion.cmake').is_file():
-              raise SystemExit('Configured CUDA LibTorch directory is missing')
-          target = Path('external/libtorch')
-          if target.is_symlink():
-              target.unlink()
-          elif target.exists():
-              raise SystemExit('Refusing to replace an existing LibTorch directory; use a clean checkout')
-          target.symlink_to(source.resolve(), target_is_directory=True)
-          PYTHON
+      - name: Fetch pinned dependencies (CUDA)
+        # The wheel cache lives outside the workspace, which checkout cleans.
+        run: TYR_DEPS_VARIANT=cuda TYR_DEPS_CACHE="$TYR_QUALIFICATION_ROOT/wheel-cache" deps/fetch.sh
       - name: Build and run strict qualification with exclusive GPU access
         run: |
           mkdir -p "$TYR_QUALIFICATION_ROOT"

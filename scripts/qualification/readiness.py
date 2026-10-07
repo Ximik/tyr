@@ -5,11 +5,7 @@ import os
 from pathlib import Path
 
 
-def configuration(repository, libtorch_dir, labels):
-    if not libtorch_dir:
-        raise ValueError("TYR_LIBTORCH_DIR is not configured. The existing Spark runner "
-                         "spark-e626-gb10 belongs to cpehle/tyr. Register/allow a dedicated runner for this repository "
-                         "and set its runtime path before qualification can execute.")
+def configuration(repository, labels):
     if not labels:
         if repository != "cpehle/tyr":
             raise ValueError("Set TYR_QUALIFICATION_RUNNER_LABELS for this repository; "
@@ -26,7 +22,7 @@ def main():
     report = {"status": "blocked", "executed": 0, "skipped": 0,
               "repository": os.environ.get("GITHUB_REPOSITORY", "")}
     try:
-        labels = configuration(report["repository"], os.environ.get("TYR_LIBTORCH_DIR", ""),
+        labels = configuration(report["repository"],
                                os.environ.get("TYR_QUALIFICATION_RUNNER_LABELS", ""))
         report.update(status="configured", runner_labels=json.loads(labels))
         if os.environ.get("GITHUB_OUTPUT"):

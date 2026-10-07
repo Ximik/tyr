@@ -15,7 +15,7 @@ The GPU catalog is grouped into logical family entrypoints:
 ## Coverage
 
 Every vendored ThunderKittens `.cu` source under
-[thirdparty/ThunderKittens/kernels](/Users/pehle/dev/tyr/thirdparty/ThunderKittens/kernels)
+[external/git/ThunderKittens/kernels](/Users/pehle/dev/tyr/external/git/ThunderKittens/kernels)
 now has a built Lean counterpart in the catalog.
 
 The important distinction now is not coverage vs missing families. It is:
@@ -32,23 +32,23 @@ The working exhaustive source-to-Lean matrix lives in
 
 | Tyr module | Vendored ThunderKittens source | Notes |
 | --- | --- | --- |
-| `Tyr/GPU/Kernels/FusedLayerNorm.lean` (`tkFusedLayerNormResidual1024`) | `thirdparty/ThunderKittens/kernels/layernorm/layernorm.cu` | Canonical fused residual + layernorm port. |
-| `Tyr/GPU/Kernels/MhaH100.lean` | `thirdparty/ThunderKittens/kernels/attention/mha_h100/mha_h100.cu` | Canonical Hopper MHA surface. |
-| `Tyr/GPU/Kernels/MhaH100LCF.lean` (`tkMhaH100LCFFwd64`, `tkMhaH100LCFFwd128`) | `thirdparty/ThunderKittens/kernels/attention/mha_h100_lcf/mha_h100_lcf.cu` | Dedicated LCF load-compute-finish counterparts, now fully typed as stationary-Q / streamed-KV shells. |
-| `Tyr/GPU/Kernels/Based.lean` (`tkBasedLinearAttnFwd`) | `thirdparty/ThunderKittens/kernels/based/linear_attn.cu` | Source-backed forward owns the local polynomial/state contract. |
-| `Tyr/GPU/Kernels/LinearAttn.lean` (`tkLinearAttnFwd`) | `thirdparty/ThunderKittens/kernels/linear_attention/linear_attention.cu` | Canonical decayed recurrent/local forward surface. |
-| `Tyr/GPU/Kernels/FFTConv.lean` (`tkFFTConvPC1024`, `tkFFTConvNonPC64`) | `thirdparty/ThunderKittens/kernels/fftconv/*.cu` | Persistent and non-persistent FFTConv counterparts. |
-| `Tyr/GPU/Kernels/Hedgehog.lean` (`tkHedgehogFwd`) | `thirdparty/ThunderKittens/kernels/hedgehog/hedgehog.cu` | Canonical chunk/state surface. |
-| `Tyr/GPU/Kernels/Mamba2.lean` (`mamba2Fwd`) | `thirdparty/ThunderKittens/kernels/mamba2/mamba2.cu` | Dedicated typed chunk/state counterpart with runtime-bounded chunk loops and recurrent state updates. |
-| `Tyr/GPU/Kernels/Flux.lean` (`tkFluxMatmulGeluFwd`, `tkFluxMatmulGateFwd`) | `thirdparty/ThunderKittens/kernels/flux/flux_*.cu` | Dedicated source-facing flux surfaces. |
-| `Tyr/GPU/Kernels/Bf16Gemm.lean` (`tkH100Bf16GemmFwd`, `tkB200Bf16GemmFwd`) | `thirdparty/ThunderKittens/kernels/gemm/bf16_*/*.cu` | Hopper and Blackwell BF16 GEMM counterparts. |
-| `Tyr/GPU/Kernels/PrecisionGemm.lean` (`tkH100Fp8E4M3GemmFwd`, `tkH100Fp8ScaledGemmFwd`, `tkB200Fp8E4M3Gemm1CtaFwd`, `tkB200Fp8E4M3Gemm2CtaFwd`, `tkB200MxFp8GemmFwd`) | `thirdparty/ThunderKittens/kernels/gemm/fp8_*`, `thirdparty/ThunderKittens/kernels/gemm/mxfp8_b200/*` | H100 and Blackwell FP8/MXFP8 GEMM surfaces. |
-| `Tyr/GPU/Kernels/NvFp4Gemm.lean` (`tkB200NvFp4GemmFwd`) | `thirdparty/ThunderKittens/kernels/gemm/nvfp4_b200/nvfp4_b200_gemm.cu` | Dedicated NVFP4 Blackwell GEMM counterpart. |
-| `Tyr/GPU/Kernels/Distributed.lean` (`allGatherFwd`, `allReduceFwd`, `allReduceEducationalFwd`, `reduceScatterFwd`, `agGemmFwd`, `agGemmB200Fwd`, `agGemmFp8B200Fwd`, `gemmArFwd`, `gemmArH100LcscFwd`, `gemmRsFwd`, `gemmRsB200Fwd`, `gemmRsFp8B200Fwd`) | `thirdparty/ThunderKittens/kernels/parallel/*` | Collective and communication+compute counterparts for the distributed family. |
-| `Tyr/GPU/Kernels/RingAttn.lean` (`ringAttnPartial`, `ringAttnComm`, `ringAttnReduce`) | `thirdparty/ThunderKittens/kernels/parallel/ring_attn/ring_attn_h100.cu` | Forward ring-attention phases are represented directly, with the partial phase now using a typed runtime-bounded KV-shard loop. |
-| `Tyr/GPU/Kernels/UlyssesAttn.lean` (`allToAllFwd`, `ulyssesQkvAllToAll`, `ulyssesAttnFwd`) | `thirdparty/ThunderKittens/kernels/parallel/ulysses_attn/ulysses_attn.cu` | Ulysses transport/orchestration family built on the typed shared all-to-all surface. |
-| `Tyr/GPU/Kernels/MOE.lean` (`tkMoeDispatchGemm`) | `thirdparty/ThunderKittens/kernels/parallel/moe_dispatch_gemm/moe_dispatch_gemm_h100.cu` | Canonical fused dispatch/grouped-GEMM surface. |
-| `Tyr/GPU/Kernels/Rotary.lean` | `thirdparty/ThunderKittens/kernels/rotary/rotary.cu` | Canonical rotary position kernel. |
+| `Tyr/GPU/Kernels/FusedLayerNorm.lean` (`tkFusedLayerNormResidual1024`) | `external/git/ThunderKittens/kernels/layernorm/layernorm.cu` | Canonical fused residual + layernorm port. |
+| `Tyr/GPU/Kernels/MhaH100.lean` | `external/git/ThunderKittens/kernels/attention/mha_h100/mha_h100.cu` | Canonical Hopper MHA surface. |
+| `Tyr/GPU/Kernels/MhaH100LCF.lean` (`tkMhaH100LCFFwd64`, `tkMhaH100LCFFwd128`) | `external/git/ThunderKittens/kernels/attention/mha_h100_lcf/mha_h100_lcf.cu` | Dedicated LCF load-compute-finish counterparts, now fully typed as stationary-Q / streamed-KV shells. |
+| `Tyr/GPU/Kernels/Based.lean` (`tkBasedLinearAttnFwd`) | `external/git/ThunderKittens/kernels/based/linear_attn.cu` | Source-backed forward owns the local polynomial/state contract. |
+| `Tyr/GPU/Kernels/LinearAttn.lean` (`tkLinearAttnFwd`) | `external/git/ThunderKittens/kernels/linear_attention/linear_attention.cu` | Canonical decayed recurrent/local forward surface. |
+| `Tyr/GPU/Kernels/FFTConv.lean` (`tkFFTConvPC1024`, `tkFFTConvNonPC64`) | `external/git/ThunderKittens/kernels/fftconv/*.cu` | Persistent and non-persistent FFTConv counterparts. |
+| `Tyr/GPU/Kernels/Hedgehog.lean` (`tkHedgehogFwd`) | `external/git/ThunderKittens/kernels/hedgehog/hedgehog.cu` | Canonical chunk/state surface. |
+| `Tyr/GPU/Kernels/Mamba2.lean` (`mamba2Fwd`) | `external/git/ThunderKittens/kernels/mamba2/mamba2.cu` | Dedicated typed chunk/state counterpart with runtime-bounded chunk loops and recurrent state updates. |
+| `Tyr/GPU/Kernels/Flux.lean` (`tkFluxMatmulGeluFwd`, `tkFluxMatmulGateFwd`) | `external/git/ThunderKittens/kernels/flux/flux_*.cu` | Dedicated source-facing flux surfaces. |
+| `Tyr/GPU/Kernels/Bf16Gemm.lean` (`tkH100Bf16GemmFwd`, `tkB200Bf16GemmFwd`) | `external/git/ThunderKittens/kernels/gemm/bf16_*/*.cu` | Hopper and Blackwell BF16 GEMM counterparts. |
+| `Tyr/GPU/Kernels/PrecisionGemm.lean` (`tkH100Fp8E4M3GemmFwd`, `tkH100Fp8ScaledGemmFwd`, `tkB200Fp8E4M3Gemm1CtaFwd`, `tkB200Fp8E4M3Gemm2CtaFwd`, `tkB200MxFp8GemmFwd`) | `external/git/ThunderKittens/kernels/gemm/fp8_*`, `external/git/ThunderKittens/kernels/gemm/mxfp8_b200/*` | H100 and Blackwell FP8/MXFP8 GEMM surfaces. |
+| `Tyr/GPU/Kernels/NvFp4Gemm.lean` (`tkB200NvFp4GemmFwd`) | `external/git/ThunderKittens/kernels/gemm/nvfp4_b200/nvfp4_b200_gemm.cu` | Dedicated NVFP4 Blackwell GEMM counterpart. |
+| `Tyr/GPU/Kernels/Distributed.lean` (`allGatherFwd`, `allReduceFwd`, `allReduceEducationalFwd`, `reduceScatterFwd`, `agGemmFwd`, `agGemmB200Fwd`, `agGemmFp8B200Fwd`, `gemmArFwd`, `gemmArH100LcscFwd`, `gemmRsFwd`, `gemmRsB200Fwd`, `gemmRsFp8B200Fwd`) | `external/git/ThunderKittens/kernels/parallel/*` | Collective and communication+compute counterparts for the distributed family. |
+| `Tyr/GPU/Kernels/RingAttn.lean` (`ringAttnPartial`, `ringAttnComm`, `ringAttnReduce`) | `external/git/ThunderKittens/kernels/parallel/ring_attn/ring_attn_h100.cu` | Forward ring-attention phases are represented directly, with the partial phase now using a typed runtime-bounded KV-shard loop. |
+| `Tyr/GPU/Kernels/UlyssesAttn.lean` (`allToAllFwd`, `ulyssesQkvAllToAll`, `ulyssesAttnFwd`) | `external/git/ThunderKittens/kernels/parallel/ulysses_attn/ulysses_attn.cu` | Ulysses transport/orchestration family built on the typed shared all-to-all surface. |
+| `Tyr/GPU/Kernels/MOE.lean` (`tkMoeDispatchGemm`) | `external/git/ThunderKittens/kernels/parallel/moe_dispatch_gemm/moe_dispatch_gemm_h100.cu` | Canonical fused dispatch/grouped-GEMM surface. |
+| `Tyr/GPU/Kernels/Rotary.lean` | `external/git/ThunderKittens/kernels/rotary/rotary.cu` | Canonical rotary position kernel. |
 
 ## Derived Tyr Kernels
 
@@ -1383,7 +1383,7 @@ ThunderKittens counterparts instead of parallel educational shims.
 ### 2026-04-22 Store-Add Accumulation Pass
 
 - New direction after comparing Tyr's generated CUDA with
-  `thirdparty/ThunderKittens/kernels/attention/mha_h100/mha_h100.cu`:
+  `external/git/ThunderKittens/kernels/attention/mha_h100/mha_h100.cu`:
   - ThunderKittens accumulates `kg_reg` / `vg_reg` across query tiles inside
     the backward kernel and emits final KV gradients with
     `warp::tma::store_add_async`,

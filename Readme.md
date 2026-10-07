@@ -32,119 +32,48 @@ Install [elan](https://github.com/leanprover/elan) (the Lean version manager):
 curl https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -sSf | sh
 ```
 
-The correct Lean nightly is pinned in `lean-toolchain` and will be installed
+Open a new shell (or run `source ~/.elan/env`) so `lake` is on `PATH`. The
+correct Lean nightly is pinned in `lean-toolchain` and will be installed
 automatically on first `lake build`.
 
-### URDF type provider (automatic)
-
-The URDF-backed event-skeleton example uses the `lean-urdf-typeprovider`
-package, which `lakefile.lean` requires from a pinned GitHub revision
-(`github.com/ranvier-labs/lean-urdf-typeprovider`). Like the other git
-dependencies, Lake fetches it automatically — no extra setup is needed.
-
-### LibTorch (required)
-
-**macOS:**
-```bash
-cd external
-LIBTORCH_VERSION=2.10.0
-curl --fail --location --retry 5 --retry-all-errors --show-error \
-  -o libtorch.zip "https://download.pytorch.org/libtorch/cpu/libtorch-macos-arm64-${LIBTORCH_VERSION}.zip"
-unzip -tq libtorch.zip
-unzip -q libtorch.zip && rm libtorch.zip
-cd ..
-```
-
-Or run the helper script:
-```bash
-bash dependencies_macos.sh
-```
-
-**Linux (CPU):**
-```bash
-cd external
-LIBTORCH_VERSION=2.10.0
-curl --fail --location --retry 5 --retry-all-errors --show-error \
-  -o libtorch.zip "https://download.pytorch.org/libtorch/cpu/libtorch-shared-with-deps-${LIBTORCH_VERSION}%2Bcpu.zip"
-unzip -tq libtorch.zip
-unzip -q libtorch.zip && rm libtorch.zip
-cd ..
-```
-
-**Linux (CUDA 12.6):**
-```bash
-cd external
-curl -O https://download.pytorch.org/libtorch/nightly/cu126/libtorch-cxx11-abi-shared-with-deps-latest.zip
-unzip libtorch-cxx11-abi-shared-with-deps-latest.zip && rm libtorch-cxx11-abi-shared-with-deps-latest.zip
-cd ..
-```
-
-### OpenMP (required)
-
-**macOS (Homebrew):**
-```bash
-brew install libomp
-```
-
-**Linux:**
-OpenMP is typically included with GCC. Install if needed:
-```bash
-sudo apt install libomp-dev   # Debian/Ubuntu
-```
-
-### Apache Arrow & Parquet (required for data loading)
-
-**macOS:**
-```bash
-brew install apache-arrow
-```
-
-**Linux:**
-```bash
-sudo apt install libarrow-dev libparquet-dev
-```
-
-### C++17 Compiler (required)
+### C++20 Compiler
 
 - macOS: Xcode command line tools (`xcode-select --install`)
-- Linux: GCC 9+ or Clang 10+ (`sudo apt install build-essential`)
+- Linux: GCC 10+ (`sudo apt install build-essential`)
+
+### Native dependencies
+
+Third-party libraries and sources are pinned in `deps/` and fetched into
+`external/`. This needs `curl` and `unzip`:
+
+```bash
+deps/fetch.sh
+```
 
 ## Quick Start
 
 ### Building
 
 ```bash
-# Build all targets with Lake
-lake build
+# Linux: link with the system GCC (no-op on macOS); once per shell
+source ./env.sh
+
+# Build the test runner (a good first build)
+lake build test_runner
 
 # Build specific executables
-lake build test_runner
 lake build TrainGPT
 lake build TrainDiffusion
 lake build TrainNanoChat
 lake build FluxDemo
+
+# Build everything (slow: every example and benchmark executable)
+lake build
 ```
 
-### Environment Setup
+### Running
 
-All executables need the native library paths set at runtime:
-
-**macOS (Apple Silicon):**
-```bash
-export DYLD_LIBRARY_PATH=external/libtorch/lib:/opt/homebrew/opt/libomp/lib:/opt/homebrew/lib
-```
-
-**macOS (Intel):**
-```bash
-export DYLD_LIBRARY_PATH=external/libtorch/lib:/usr/local/opt/libomp/lib:/usr/local/lib
-```
-
-**Linux:**
-```bash
-export LD_LIBRARY_PATH=external/libtorch/lib:/usr/lib
-```
-
-Or use the Lake helper scripts which set these automatically:
+Use the Lake helper scripts:
 ```bash
 lake run           # runs test_runner
 lake run train     # runs TrainGPT
@@ -163,6 +92,40 @@ lake run
 lake build test_runner_experimental
 .lake/build/bin/test_runner_experimental
 ```
+
+## Environment Variables
+
+All optional.
+
+**Dependencies** (`deps/fetch.sh`):
+
+| Variable | Effect |
+|---|---|
+| `TYR_DEPS_VARIANT` | `cpu` or `cuda`; by default `cuda` on Linux when `nvcc` is on `PATH`, otherwise `cpu` |
+| `TYR_DEPS_CACHE` | download cache directory (default `external/.cache`) |
+
+**Build:**
+
+| Variable | Effect |
+|---|---|
+| `LEAN_CC` | Linux: set to `scripts/lean_cc_wrapper.sh` to link with the system GCC (`source ./env.sh` does this) |
+| `LEAN_CC_FAST=1` | compile Lean-generated C with `-O0` for faster iteration |
+| `NVCC`, `CUDA_HOME` | CUDA compiler and toolkit; without `nvcc`, CUDA kernels are replaced by CPU stubs |
+| `TYR_GPU_TARGET` | GPU to build kernels for: `H100` (default), `A100`, `B200`, `B300`, `GB10` |
+| `TYR_GPU_CODEGEN_MODULE` | kernel module(s) to generate CUDA for, space-separated (default `Tyr.GPU.Kernels.MhaH100`) |
+| `TYR_SKIP_GPU_CODEGEN=1` | skip kernel generation and reuse `cc/src/generated` |
+| `TYR_BUILD_TYRC_DYLIB=0` | build only the static `libTyrC.a` |
+| `TYR_MACOS_DEPLOYMENT_TARGET` | macOS deployment target (default `14.0`) |
+
+See [docs/ffi-and-build.md](docs/ffi-and-build.md) for finer GPU and compiler overrides.
+
+**Runtime:**
+
+| Variable | Effect |
+|---|---|
+| `TYR_DEVICE` | `cpu`, `cuda`, `mps` or `auto`; device used by the examples and model loaders |
+| `TYR_VERBOSE_ERRORS=1` | print the full libtorch report when a libtorch error crashes the program |
+| `TYR_DEBUG_MPS=1` | print MPS (Apple GPU) availability diagnostics |
 
 ## Documentation
 
@@ -230,7 +193,7 @@ Notes:
 - A vendored ThunderKittens reference runner is called as
   `runner <suite-name> <fixture-dir>` after each suite and should exit nonzero
   on mismatch. It defaults to `scripts/gpu/run_vendored_reference.sh` (needs a
-  Python env; see `./scripts/gpu/setup_libtorch_uv.sh`) and can be overridden
+  Python env; see `./scripts/gpu/setup_python_venv.sh`) and can be overridden
   with `TYR_GPU_VENDORED_REF_RUNNER=/path/to/runner`.
 
 ## Key Concepts
@@ -351,27 +314,25 @@ This repo uses scoped conventional commit subjects:
 type(scope): summary
 ```
 
-A commit message template is included at `.gitmessage`. Enable it locally:
+A commit message template is included at `.gitmessage`. Enable it and the
+hooks locally:
 
 ```bash
-./scripts/setup-git-hooks.sh
+git config commit.template .gitmessage
+git config core.hooksPath .githooks
 ```
-
-This sets:
-- `commit.template=.gitmessage`
-- `core.hooksPath=.githooks`
 
 Included hooks:
 - `pre-commit`: fails on staged whitespace errors and conflict markers
 - `commit-msg`: enforces `type(scope): summary` (e.g. `feat(qwen35): add video stream patchify`)
-- `pre-push`: validates pushed commit subjects with `scripts/check-commit-messages.sh`
+- `pre-push`: validates pushed commit subjects with `.githooks/check-commit-message.sh`
 
-CI also enforces commit subjects using `scripts/check-commit-messages.sh`.
+CI also enforces this format on pull requests, for both commit subjects and the
+PR title (a squash merge uses it as the commit subject), using the same checker.
 
-Manual check examples:
+Manual check example:
 ```bash
-./scripts/check-commit-messages.sh HEAD~20..HEAD
-COMMIT_MSG_ENFORCE_FROM=<commit> ./scripts/check-commit-messages.sh HEAD~20..HEAD
+./.githooks/check-commit-message.sh "feat(qwen35): add video stream patchify"
 ```
 
 ## License

@@ -47,7 +47,7 @@ at the bottom.
 
 ```bash
 cd ~/dev/tyr-qm9-perf
-LD_LIBRARY_PATH=external/libtorch/lib \
+LD_LIBRARY_PATH=external/wheels/torch/lib \
   .lake/build/bin/BranchingFlowsMoleculeTrainGenerate \
   --profile paper-qm9-main --device cuda \
   --steps 300 --total-steps 300 --no-generate --no-checkpoint \
@@ -338,7 +338,7 @@ of which the small-op latency share is now the main attack surface
 - spark-e626 reachable via SSH: aarch64, 1× NVIDIA GB10. Existing
   `~/dev/tyr` checkout belongs to other GPU work (dirty, different branch) —
   left untouched; using dedicated worktree `~/dev/tyr-qm9-perf` tracking
-  `origin/ranvier-labs/event-skeleton`, `external/libtorch` symlinked from the
+  `origin/ranvier-labs/event-skeleton`, `external/wheels/torch` symlinked from the
   main checkout (CUDA build), `~/dev/lean-urdf-typeprovider` present.
 
 ### 2026-07-17 — in-flight Muon work verified and committed

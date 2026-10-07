@@ -20,16 +20,11 @@ on:
 
 jobs:
   ffi-probe:
-    env:
-      LIBTORCH_VERSION: 2.10.0
     runs-on: ubuntu-22.04
     timeout-minutes: 60
 
     steps:
       - uses: actions/checkout@v4
-
-      - name: Initialize required submodules
-        run: git submodule update --init --depth 1 external/soxr
 
       - name: Install elan
         run: |
@@ -41,44 +36,18 @@ jobs:
           elan toolchain install $(cat lean-toolchain)
           elan default $(cat lean-toolchain)
 
-      - name: Install system dependencies (Linux)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ca-certificates lsb-release wget
-          codename="$(lsb_release --codename --short)"
-          arrow_repo_pkg="apache-arrow-apt-source-latest-${codename}.deb"
-          wget "https://packages.apache.org/artifactory/arrow/ubuntu/${arrow_repo_pkg}"
-          sudo apt-get install -y -V "./${arrow_repo_pkg}"
-          rm -f "${arrow_repo_pkg}"
-          sudo apt-get update
-          sudo apt-get install -y libomp-dev libarrow-dev libparquet-dev libsoxr-dev unzip binutils
-
-      - name: Cache LibTorch
-        id: cache-libtorch
+      - name: Cache dependency wheels
         uses: actions/cache@v4
         with:
-          path: external/libtorch
-          key: libtorch-${{ runner.os }}-${{ runner.arch }}-${{ env.LIBTORCH_VERSION }}
+          path: external/.cache
+          key: deps-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('deps/wheels.lock') }}
 
-      - name: Download LibTorch
-        if: steps.cache-libtorch.outputs.cache-hit != 'true'
-        run: |
-          mkdir -p external
-          LIBTORCH_URL="https://download.pytorch.org/libtorch/cpu/libtorch-shared-with-deps-${LIBTORCH_VERSION}%2Bcpu.zip"
-          curl --fail --location --retry 5 --retry-all-errors --show-error -o libtorch.zip "${LIBTORCH_URL}"
-          unzip -tq libtorch.zip
-          unzip -q libtorch.zip -d external/
-          rm libtorch.zip
+      - name: Fetch pinned dependencies
+        run: deps/fetch.sh
 
       - name: Build crash probe
         run: |
-          lean_prefix="$(lean --print-prefix)"
-          multiarch_dir="/usr/lib/$(gcc -print-multiarch)"
-          gomp_dir="$(dirname "$(gcc -print-file-name=libgomp.so)")"
-          export LEAN_CC="$PWD/scripts/lean_cc_wrapper.sh"
-          export LEAN_CC_GCC="/usr/bin/gcc"
-          export LIBRARY_PATH="${multiarch_dir}:${gomp_dir}:/usr/lib:${LIBRARY_PATH:-}"
-          export LD_LIBRARY_PATH="$PWD/external/libtorch/lib:${lean_prefix}/lib:${lean_prefix}/lib/glibc:${multiarch_dir}:${gomp_dir}:/usr/lib:${LD_LIBRARY_PATH:-}"
+          source ./env.sh
           lake -R build ffi_crash_probe
 
       - name: Audit dynamic symbol exports (interposition diagnostics)
@@ -102,10 +71,6 @@ jobs:
 
       - name: Run crash probe (informational)
         run: |
-          lean_prefix="$(lean --print-prefix)"
-          multiarch_dir="/usr/lib/$(gcc -print-multiarch)"
-          gomp_dir="$(dirname "$(gcc -print-file-name=libgomp.so)")"
-          export LD_LIBRARY_PATH="$PWD/external/libtorch/lib:${lean_prefix}/lib:${lean_prefix}/lib/glibc:${multiarch_dir}:${gomp_dir}:/usr/lib:${LD_LIBRARY_PATH:-}"
           set +e
           ./.lake/build/bin/ffi_crash_probe
           code=$?

@@ -87,7 +87,7 @@ Key computation flow:
 -/
 
 /-- Source-faithful Mamba2 forward surface aligned with
-`thirdparty/ThunderKittens/kernels/mamba2/mamba2.cu`. -/
+`external/git/ThunderKittens/kernels/mamba2/mamba2.cu`. -/
 @[gpu_kernel .SM90]
 def mamba2Fwd (Q_ptr : GPtr GpuFloat.BFloat16) (K_ptr : GPtr GpuFloat.BFloat16)
     (V_ptr : GPtr GpuFloat.BFloat16) (A_ptr : GPtr GpuFloat.Float32)

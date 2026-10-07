@@ -21,7 +21,7 @@ BUILD_ENV = (
     "TYR_MACOS_SDKROOT", "TYR_MACOS_DEPLOYMENT_TARGET", "GPU", "GPU_FAMILY",
     "GPU_COMPUTE", "GPU_CODE", "TYR_GPU_TARGET", "TYR_GPU_FAMILY",
     "TYR_GPU_COMPUTE", "TYR_GPU_CODE", "TYR_GPU_CODEGEN_MODULE",
-    "TYR_SKIP_GPU_CODEGEN", "TYR_BUILD_TYRC_DYLIB", "LIBTORCH_VERSION",
+    "TYR_SKIP_GPU_CODEGEN", "TYR_BUILD_TYRC_DYLIB",
 )
 
 
@@ -42,23 +42,21 @@ def keys(identity, source_tree):
 
 
 def identity():
-    files = ["lean-toolchain", "lake-manifest.json", ".gitmodules",
-             "scripts/lean_cc_wrapper.sh", "scripts/ci/environment.sh"]
+    # deps/git.lock and deps/wheels.lock pin every native dependency; the libtorch
+    # files below additionally record which variant (cpu/cuda) was fetched.
+    files = ["lean-toolchain", "lake-manifest.json", "deps/git.lock", "deps/wheels.lock",
+             "scripts/lean_cc_wrapper.sh", "env.sh"]
     torch_files = ["share/cmake/Torch/TorchConfigVersion.cmake",
                    "share/cmake/Torch/TorchConfig.cmake",
                    "include/torch/csrc/api/include/torch/version.h"]
-    files += ["external/libtorch/" + path for path in torch_files]
-    native_packages = (command("brew", "list", "--versions") if platform.system() == "Darwin"
-                       else command("dpkg-query", "-W", "-f=${binary:Package}=${Version}\n"))
+    files += ["external/wheels/torch/" + path for path in torch_files]
     result = {
-        "schema": 1, "workspace": str(REPO.resolve()),
+        "schema": 2, "workspace": str(REPO.resolve()),
         "os": platform.system(), "arch": platform.machine(), "release": platform.release(),
         "runner_image": {key: os.environ.get(key, "") for key in ("ImageOS", "ImageVersion")},
         "compiler": command("c++", "--version"), "lean": command("lean", "--version"),
-        "native_packages": native_packages,
         "environment": {key: os.environ.get(key, "") for key in BUILD_ENV},
         "files": {path: hashlib.sha256((REPO / path).read_bytes()).hexdigest() for path in files},
-        "submodules": command("git", "ls-files", "--stage", "external/soxr", "thirdparty/ThunderKittens"),
     }
     if platform.system() == "Darwin":
         result["sdk"] = command("xcrun", "--show-sdk-version")

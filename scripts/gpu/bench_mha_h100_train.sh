@@ -5,7 +5,7 @@ source ./load_modules.sh
 
 export LEAN_CC="$PWD/scripts/lean_cc_wrapper.sh"
 export LEAN_CC_FAST=1
-export LD_LIBRARY_PATH="$PWD/external/libtorch/lib:$PWD/cc/build:${EBROOTGCCCORE:+${EBROOTGCCCORE}/lib64:}${LD_LIBRARY_PATH:-}"
+export LD_LIBRARY_PATH="$PWD/external/wheels/torch/lib:$PWD/cc/build:${EBROOTGCCCORE:+${EBROOTGCCCORE}/lib64:}${LD_LIBRARY_PATH:-}"
 LEAN_BIN="${TYR_LEAN_BIN:-$HOME/.elan/bin/lean}"
 if [[ ! -x "$LEAN_BIN" ]]; then
   LEAN_BIN="$(command -v lean || true)"

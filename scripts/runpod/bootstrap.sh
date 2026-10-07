@@ -69,13 +69,13 @@ cd "${repo_root}"
 toolchain="$(< lean-toolchain)"
 elan toolchain install "${toolchain}" >/dev/null
 
-if [[ ! -d "${repo_root}/external/libtorch/lib" ]]; then
-  echo "[runpod-bootstrap] external/libtorch is missing under ${repo_root}. Run sync_repo.sh first." >&2
+if [[ ! -d "${repo_root}/external/wheels/torch/lib" ]]; then
+  echo "[runpod-bootstrap] external/wheels/torch is missing under ${repo_root}. Run sync_repo.sh first." >&2
   exit 1
 fi
 
-if [[ ! -d "${repo_root}/external/soxr/src" ]]; then
-  echo "[runpod-bootstrap] external/soxr is missing under ${repo_root}. Run sync_repo.sh first." >&2
+if [[ ! -d "${repo_root}/external/git/soxr/src" ]]; then
+  echo "[runpod-bootstrap] external/git/soxr is missing under ${repo_root}. Run sync_repo.sh first." >&2
   exit 1
 fi
 

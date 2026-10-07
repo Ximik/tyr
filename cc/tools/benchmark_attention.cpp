@@ -1,10 +1,10 @@
 // Optional CPU inference benchmark; run each case in a fresh process so the
 // process-wide peak RSS values are comparable. Not part of normal CI.
 // From the repository root (add LibTorch's C++ ABI flag if its package needs one):
-//   c++ -std=c++20 -O2 -Icc/include -Iexternal/libtorch/include \
-//     -Iexternal/libtorch/include/torch/csrc/api/include \
-//     cc/tools/benchmark_attention.cpp -Lexternal/libtorch/lib \
-//     -Wl,-rpath,"$PWD/external/libtorch/lib" -ltorch -ltorch_cpu -lc10 \
+//   c++ -std=c++20 -O2 -Icc/include -Iexternal/wheels/torch/include \
+//     -Iexternal/wheels/torch/include/torch/csrc/api/include \
+//     cc/tools/benchmark_attention.cpp -Lexternal/wheels/torch/lib \
+//     -Wl,-rpath,"$PWD/external/wheels/torch/lib" -ltorch -ltorch_cpu -lc10 \
 //     -o /tmp/benchmark_attention
 //   /tmp/benchmark_attention old window 8192
 //   /tmp/benchmark_attention new window 8192

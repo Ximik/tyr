@@ -2,7 +2,7 @@
   Tyr/GPU/Kernels/FFTConv.lean
 
   FFT-based convolution kernels aligned to the structure of
-  `thirdparty/ThunderKittens/kernels/fftconv/fftconv_pc.cu`.
+  `external/git/ThunderKittens/kernels/fftconv/fftconv_pc.cu`.
 
   This module now has a canonical surface:
 

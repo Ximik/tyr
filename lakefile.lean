@@ -21,20 +21,23 @@ def tyrLeanSharedLibRPath : String := run_io do
   else
     pure "@loader_path"
 
-def linuxSystemLinkDirs : Array String :=
-  #[
-    "-L/usr/lib/x86_64-linux-gnu",
-    "-L/lib/x86_64-linux-gnu",
-    "-L/usr/lib/gcc/x86_64-linux-gnu/13",
-    "-L/usr/lib/gcc/x86_64-linux-gnu/14",
-    "-L/usr/lib/aarch64-linux-gnu",
-    "-L/lib/aarch64-linux-gnu",
-    "-L/usr/lib/gcc/aarch64-linux-gnu/13",
-    "-L/usr/lib/gcc/aarch64-linux-gnu/14",
-    "-L/usr/local/cuda/lib64",
-    "-L/usr/local/cuda/targets/aarch64-linux/lib",
-    "-L/usr/lib"
-  ]
+/-- Directories holding the system compiler's `libstdc++.so.6` and `libgcc_s.so.1`,
+    as reported by `gcc -print-file-name` (e.g. `/usr/lib/gcc/x86_64-pc-linux-gnu/15`
+    on Gentoo, the multiarch dir on Debian). Lean's bundled linker does not search
+    them on its own. -/
+def linuxCompilerLibDirArgs : Array String := run_io do
+  if System.Platform.isOSX then return #[]
+  let mut dirs : Array String := #[]
+  for lib in ["libstdc++.so.6", "libgcc_s.so.1"] do
+    try
+      let out ← IO.Process.output { cmd := "gcc", args := #[s!"-print-file-name={lib}"] }
+      let path : FilePath := out.stdout.trimAscii.toString
+      if out.exitCode == 0 && path.isAbsolute then
+        if let some dir := path.parent then
+          let arg := s!"-L{dir}"
+          if !dirs.contains arg then dirs := dirs.push arg
+    catch _ => pure ()
+  return dirs
 
 /-- CUDA driver stub link flags. Hosted CI usually has CUDA-enabled LibTorch
     but no CUDA driver stub, so only link `-lcuda` when the stub is present. -/
@@ -57,29 +60,16 @@ def linuxCudaDriverStubLinkArgs : Array String := run_io do
       return #[s!"-L{stubsDir}", "-lcuda"]
   return #[]
 
-/-- CUDA link flags for Linux: vendored `libtorch_cuda` / `libc10_cuda` and the
-    system `libcudart` are needed because `cc/build/libTyrC.a` whole-archives
-    CUDA-using objects (TK kernels). Returns `#[]` if the vendored libtorch
-    doesn't ship CUDA support — this keeps a CPU-only checkout linking. -/
+/-- CUDA link flags for Linux: `libtorch_cuda` / `libc10_cuda` plus the CUDA
+    runtime libraries fetched into `external/wheels/nvidia` are needed because
+    `cc/build/libTyrC.a` whole-archives CUDA-using objects (TK kernels).
+    Returns `#[]` for a CPU libtorch, which keeps CPU-only checkouts linking. -/
 def linuxCudaLinkArgs : Array String := run_io do
-  let torchCudaCandidates : Array System.FilePath := #[
-    ⟨(__dir__ / "external" / "libtorch" / "lib" / "libtorch_cuda.so").toString⟩,
-    ⟨(__dir__ / "external" / "libtorch" / "lib" / "libtorch_cuda.dylib").toString⟩
-  ]
-  let hasTorchCuda ← torchCudaCandidates.anyM (·.pathExists)
-  if hasTorchCuda then
-    let vendorCuDir : FilePath :=
-      __dir__ / "external" / "libtorch" / "lib" / ".." / ".." /
-        "nvidia" / "cu13" / "lib"
-    let vendorCublasLt := vendorCuDir / "libcublasLt.so.13"
-    let cublasLtArgs :=
-      if ← vendorCublasLt.pathExists then
-        #[s!"-L{vendorCuDir}", "-l:libcublasLt.so.13",
-          s!"-Wl,-rpath,{vendorCuDir}"]
-      else
-        #["-lcublasLt"]
-    pure (#["-ltorch_cuda", "-lc10_cuda", "-lcudart"] ++ cublasLtArgs ++
-      linuxCudaDriverStubLinkArgs)
+  let torchCuda : FilePath := __dir__ / "external" / "wheels" / "torch" / "lib" / "libtorch_cuda.so"
+  if ← torchCuda.pathExists then
+    let cuDir : FilePath := __dir__ / "external" / "wheels" / "nvidia" / "cu13" / "lib"
+    pure (#["-ltorch_cuda", "-lc10_cuda", s!"-L{cuDir}", "-l:libcudart.so.13",
+      "-l:libcublasLt.so.13", s!"-Wl,-rpath,{cuDir}"] ++ linuxCudaDriverStubLinkArgs)
   else
     pure #[]
 
@@ -92,25 +82,21 @@ def linuxGlibc234CompatLinkArgs : Array String :=
   if System.Platform.isOSX then #[] else
     #["-Wl,--defsym=__libc_csu_init=0", "-Wl,--defsym=__libc_csu_fini=0"]
 
-def linuxArrowLinkArgs : Array String := run_io do
-  let candidates : Array System.FilePath := #[
-    ⟨"/usr/lib/aarch64-linux-gnu/libarrow.so"⟩,
-    ⟨"/usr/lib/x86_64-linux-gnu/libarrow.so"⟩,
-    ⟨"/usr/lib/libarrow.so"⟩,
-    ⟨"/usr/local/lib/libarrow.so"⟩
-  ]
-  let hasArrow ← candidates.anyM (·.pathExists)
-  let parquetCandidates : Array System.FilePath := #[
-      ⟨"/usr/lib/aarch64-linux-gnu/libparquet.so"⟩,
-      ⟨"/usr/lib/x86_64-linux-gnu/libparquet.so"⟩,
-      ⟨"/usr/lib/libparquet.so"⟩,
-      ⟨"/usr/local/lib/libparquet.so"⟩
-    ]
-  let hasParquet ← parquetCandidates.anyM (·.pathExists)
-  if hasArrow && hasParquet then
-    pure #["-larrow", "-lparquet"]
-  else
-    pure #[]
+/-- Arrow/Parquet from the pinned pyarrow wheel in `external/wheels/pyarrow`, linked by
+    exact file name. Bump `arrowSoVersion` with the pyarrow pin in
+    `deps/lock_wheels.py` (and `ARROW_SOVERSION` in `cc/Makefile`). -/
+def arrowSoVersion : String := "2500"
+
+def arrowLibDir : FilePath := __dir__ / "external" / "wheels" / "pyarrow"
+
+def arrowLinkArgs : Array String :=
+  let libs :=
+    if System.Platform.isOSX then
+      #[s!"libarrow.{arrowSoVersion}.dylib", s!"libparquet.{arrowSoVersion}.dylib"]
+    else
+      #[s!"libarrow.so.{arrowSoVersion}", s!"libparquet.so.{arrowSoVersion}"]
+  libs.map (fun (lib : String) => (arrowLibDir / lib).toString) ++
+    #[s!"-Wl,-rpath,{arrowLibDir}"]
 
 /-- Return `none` for blank strings after trimming whitespace. -/
 def nonEmptyTrimmed? (s : String) : Option String :=
@@ -207,40 +193,41 @@ def macOSFrameworkArgs : Array String :=
     "-framework", "AudioToolbox"
   ]
 
-/-- Prefer the locally built libsoxr from submodule source. -/
+/-- libsoxr, built from the pinned `external/git/soxr` checkout (deps/git.lock). -/
 def soxrLinkArgs : Array String :=
   #[s!"-L{__dir__ / "cc" / "build" / "soxr" / "src"}", "-lsoxr"]
 
 /-- Vendored LibTorch directory used by both Lean dynlibs and `cc/build/libTyrC.so`. -/
 def linuxTorchLibDir : String :=
-  (__dir__ / "external" / "libtorch" / "lib").toString
+  (__dir__ / "external" / "wheels" / "torch" / "lib").toString
 
 /-- Common Linux link tail shared by `packageLinkArgs` and `commonLinkArgs`:
-    libtorch + CUDA (if vendored) + arrow/soxr + glibc-2.34 compat + rpath. -/
+    libtorch (with its bundled libgomp) + CUDA (for a CUDA libtorch) + arrow/soxr
+    + glibc-2.34 compat + rpath. -/
 def linuxLinkTail : Array String :=
   #[
-    s!"-L{__dir__ / "external" / "libtorch" / "lib"}",
+    s!"-L{__dir__ / "external" / "wheels" / "torch" / "lib"}",
     "-ltorch", "-ltorch_cpu", "-lc10"
-  ] ++ linuxCudaLinkArgs ++ linuxSystemLinkDirs ++ soxrLinkArgs ++ linuxArrowLinkArgs
+  ] ++ linuxCudaLinkArgs ++ linuxCompilerLibDirArgs ++ soxrLinkArgs ++ arrowLinkArgs
     ++ linuxGlibc234CompatLinkArgs ++ #[
     "-l:libgomp.so.1", "-l:libstdc++.so.6",
     s!"-Wl,-rpath,{linuxTorchLibDir}",
-    "-Wl,-rpath,$ORIGIN/../../../external/libtorch/lib"
+    "-Wl,-rpath,$ORIGIN/../../../external/wheels/torch/lib"
   ]
+
+def macOSTorchLinkArgs : Array String :=
+  #[
+    s!"-L{__dir__ / "external" / "wheels" / "torch" / "lib"}",
+    "-ltorch", "-ltorch_cpu", "-lc10"
+  ] ++ arrowLinkArgs ++ soxrLinkArgs ++ macOSSDKLinkArgs ++ macOSDeploymentLinkArgs
+    ++ macOSFrameworkArgs
 
 def packageLinkArgs : Array String :=
   if System.Platform.isOSX then
-    #[
-      s!"-L{__dir__ / "external" / "libtorch" / "lib"}",
-      "-ltorch", "-ltorch_cpu", "-lc10",
-      "-L/opt/homebrew/opt/libomp/lib", "-lomp",
-      "-L/opt/homebrew/lib", "-larrow", "-lparquet"
-    ] ++ soxrLinkArgs ++ macOSSDKLinkArgs ++ macOSDeploymentLinkArgs ++ macOSFrameworkArgs ++ #[
-      "-Wl,-rpath,@loader_path/../../external/libtorch/lib",
-      "-Wl,-rpath,@loader_path/../../../external/libtorch/lib",
-      "-Wl,-rpath,@executable_path/../../../external/libtorch/lib",
-      "-Wl,-rpath,/opt/homebrew/opt/libomp/lib",
-      "-Wl,-rpath,/opt/homebrew/lib",
+    macOSTorchLinkArgs ++ #[
+      "-Wl,-rpath,@loader_path/../../external/wheels/torch/lib",
+      "-Wl,-rpath,@loader_path/../../../external/wheels/torch/lib",
+      "-Wl,-rpath,@executable_path/../../../external/wheels/torch/lib",
       s!"-Wl,-rpath,{tyrLeanSharedLibRPath}"
     ]
   else
@@ -248,16 +235,8 @@ def packageLinkArgs : Array String :=
 
 def commonLinkArgs : Array String :=
   if System.Platform.isOSX then
-    #[
-      s!"{__dir__ / "cc" / "build" / "libTyrC.a"}",
-      s!"-L{__dir__ / "external" / "libtorch" / "lib"}",
-      "-ltorch", "-ltorch_cpu", "-lc10",
-      "-L/opt/homebrew/opt/libomp/lib", "-lomp",
-      "-L/opt/homebrew/lib", "-larrow", "-lparquet"
-    ] ++ soxrLinkArgs ++ macOSSDKLinkArgs ++ macOSDeploymentLinkArgs ++ macOSFrameworkArgs ++ #[
-      "-Wl,-rpath,@executable_path/../../../external/libtorch/lib",
-      "-Wl,-rpath,/opt/homebrew/opt/libomp/lib",
-      "-Wl,-rpath,/opt/homebrew/lib"
+    #[s!"{__dir__ / "cc" / "build" / "libTyrC.a"}"] ++ macOSTorchLinkArgs ++ #[
+      "-Wl,-rpath,@executable_path/../../../external/wheels/torch/lib"
     ]
   else
     #[s!"{__dir__ / "cc" / "build" / "libTyrC.a"}"] ++ linuxLinkTail
@@ -284,27 +263,6 @@ runtime environment setup in scripts.
 /-- Check if we're on macOS. -/
 def isMacOS : Bool :=
   System.Platform.isOSX
-
-/-- OpenMP library path - macOS uses Homebrew, Linux uses system path -/
-def getOmpLibPath : IO FilePath := do
-  if isMacOS then
-    let armPath : FilePath := "/opt/homebrew/opt/libomp/lib"
-    if ← armPath.pathExists then
-      return armPath
-    let intelPath : FilePath := "/usr/local/opt/libomp/lib"
-    if ← intelPath.pathExists then
-      return intelPath
-    return armPath
-  else
-    match (← IO.getEnv "EBROOTGCCCORE") with
-    | some root =>
-      let p : FilePath := root / "lib64"
-      if (← p.pathExists) then
-        return p
-      else
-        return "/usr/lib"
-    | none =>
-      return "/usr/lib"
 
 def builtExecutablePath (rootPath : FilePath) (exeName : String) : FilePath :=
   rootPath / ".lake" / "build" / "bin" / exeName
@@ -1129,24 +1087,6 @@ lean_exe RunB200Bf16Gemm where
 
 /-! ## Scripts -/
 
-def gccCoreRuntimeLibPath? : IO (Option FilePath) := do
-  match (← IO.getEnv "EBROOTGCCCORE") with
-  | none => pure none
-  | some root =>
-    let p : FilePath := root / "lib64"
-    if (← p.pathExists) then pure (some p) else pure none
-
-def arrowRuntimeLibPath? : IO (Option FilePath) := do
-  match (← IO.getEnv "EBROOTARROW") with
-  | none => pure none
-  | some root =>
-    let p : FilePath := root / "lib"
-    if (← p.pathExists) then
-      pure (some p)
-    else
-      let p64 : FilePath := root / "lib64"
-      if (← p64.pathExists) then pure (some p64) else pure none
-
 def runtimeLibEnvVar : String :=
   if isMacOS then "DYLD_LIBRARY_PATH" else "LD_LIBRARY_PATH"
 
@@ -1162,23 +1102,16 @@ def leanRuntimeLibDir : IO FilePath := do
 def runtimeLibPath (rootPath : FilePath) : IO String := do
   let tyrCLib := rootPath / "cc" / "build"
   let lakeLib := rootPath / ".lake" / "build" / "lib"
-  let libtorchPath := rootPath / "external" / "libtorch" / "lib"
+  let libtorchPath := rootPath / "external" / "wheels" / "torch" / "lib"
+  let arrowPath := rootPath / "external" / "wheels" / "pyarrow"
   let leanLib ← leanRuntimeLibDir
-  let ompPath ← getOmpLibPath
-  let gccCoreLibPath? ← gccCoreRuntimeLibPath?
-  let arrowLibPath? ← arrowRuntimeLibPath?
-  let inheritedLibPath := (← IO.getEnv runtimeLibEnvVar)
-  let baseLibPath := s!"{tyrCLib}:{lakeLib}:{libtorchPath}:{ompPath}:{leanLib}"
-  let baseLibPath :=
-    match arrowLibPath? with
-    | some p => s!"{baseLibPath}:{p}"
-    | none => baseLibPath
-  let libPathPrefix :=
-    match gccCoreLibPath? with
-    | some p => s!"{baseLibPath}:{p}"
-    | none => baseLibPath
+  -- The compiler's libstdc++ must win over an older system copy at run time.
+  let compilerLibDirs := linuxCompilerLibDirArgs.map (·.drop 2 |>.toString)
+  let dirs := #[tyrCLib.toString, lakeLib.toString, libtorchPath.toString,
+    arrowPath.toString, leanLib.toString] ++ compilerLibDirs
+  let libPathPrefix := ":".intercalate dirs.toList
   pure <|
-    match inheritedLibPath with
+    match (← IO.getEnv runtimeLibEnvVar) with
     | some v => s!"{libPathPrefix}:{v}"
     | none => libPathPrefix
 

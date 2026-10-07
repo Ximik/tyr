@@ -14,16 +14,19 @@ LEAN_INCLUDE := $(LEAN_HOME)/include
 
 
 # TORCH FLAGS
-TORCHDIR=../external/libtorch
+TORCHDIR=../external/wheels/torch
 TORCH_INC_FLAGS=-I$(TORCHDIR)/include -I$(TORCHDIR)/include/torch/csrc/api/include  -I$(TORCHDIR)/include/TH  -I$(TORCHDIR)/include/THC
 TORCH_LIBPATH=$(TORCHDIR)/lib
-TORCH_CUDA_VENDOR_LIBPATH=$(TORCH_LIBPATH)/../../nvidia/cu13/lib
-PYTHON ?= ../.venv-gpu/bin/python
-PYTHON_INCLUDE := $(shell test -x "$(PYTHON)" && "$(PYTHON)" -c 'import sysconfig; print(sysconfig.get_config_var("INCLUDEPY") or sysconfig.get_path("include") or "")' 2>/dev/null)
+TORCH_CUDA_VENDOR_LIBPATH=../external/wheels/nvidia/cu13/lib
+# Python.h is only needed by tk_vendor_mha_h100.cu (it includes torch's pybind.h).
+# Prefer CPython 3.12, the version the fetched wheels target (WHEEL_PYTHON in
+# deps/lock_wheels.py).
+PYTHON ?= $(shell command -v python3.12 2>/dev/null || echo python3)
+PYTHON_INCLUDE := $(shell "$(PYTHON)" -c 'import sysconfig; print(sysconfig.get_config_var("INCLUDEPY") or sysconfig.get_path("include") or "")' 2>/dev/null)
 PYTHON_INC_FLAGS := $(if $(strip $(PYTHON_INCLUDE)),-I$(PYTHON_INCLUDE),)
-TKDIR=../thirdparty/ThunderKittens
+TKDIR=../external/git/ThunderKittens
 TK_INC_FLAGS=-I$(TKDIR)/include -I$(TKDIR)/prototype
-SOXR_DIR=../external/soxr
+SOXR_DIR=../external/git/soxr
 SOXR_BUILD_DIR=build/soxr
 SOXR_INC_FLAGS=-I$(SOXR_DIR)/src -I$(SOXR_BUILD_DIR)
 SOXR_LIBPATH=$(SOXR_BUILD_DIR)/src
@@ -35,37 +38,19 @@ SOXR_OBJS := $(addprefix $(SOXR_OBJ_DIR)/,$(addsuffix .o,$(SOXR_SRCS)))
 SOXR_CFLAGS := -std=gnu89 -O3 -fPIC -I$(SOXR_DIR)/src -I$(SOXR_BUILD_DIR) -DSOXR_LIB
 
 # ARROW/PARQUET FLAGS
-# Apache Arrow installed via: brew install apache-arrow (macOS) or apt install libarrow-dev libparquet-dev (Linux)
+# Fetched by deps/fetch.sh from the pinned pyarrow wheel. Libraries are
+# linked by exact file name; bump ARROW_SOVERSION together with the pyarrow pin
+# in deps/lock_wheels.py.
 UNAME_S := $(shell uname -s)
+ARROW_DIR := ../external/wheels/pyarrow
+ARROW_SOVERSION := 2500
 ifeq ($(UNAME_S),Darwin)
-    # macOS - check for Apple Silicon first, then Intel
-    ifneq ($(wildcard /opt/homebrew/include/arrow),)
-        ARROW_PREFIX := /opt/homebrew
-    else ifneq ($(wildcard /usr/local/include/arrow),)
-        ARROW_PREFIX := /usr/local
-    else
-        ARROW_PREFIX := /opt/homebrew
-    endif
+ARROW_LIBS := $(ARROW_DIR)/libarrow.$(ARROW_SOVERSION).dylib $(ARROW_DIR)/libparquet.$(ARROW_SOVERSION).dylib
 else
-    # Linux
-    ARROW_PREFIX := /usr
+ARROW_LIBS := $(ARROW_DIR)/libarrow.so.$(ARROW_SOVERSION) $(ARROW_DIR)/libparquet.so.$(ARROW_SOVERSION)
 endif
-ARROW_LIBPATH := $(ARROW_PREFIX)/lib
-HAS_ARROW := 0
-ifneq ($(wildcard $(ARROW_PREFIX)/include/arrow/api.h),)
-ifneq ($(wildcard $(ARROW_LIBPATH)/libarrow.*),)
-ifneq ($(wildcard $(ARROW_LIBPATH)/libparquet.*),)
-HAS_ARROW := 1
-endif
-endif
-endif
-ifeq ($(HAS_ARROW),1)
-ARROW_INC_FLAGS := -I$(ARROW_PREFIX)/include
-ARROW_LINK_FLAGS := -L$(ARROW_LIBPATH) -larrow -lparquet
-else
-ARROW_INC_FLAGS :=
-ARROW_LINK_FLAGS :=
-endif
+ARROW_INC_FLAGS := -I$(ARROW_DIR)/include
+ARROW_LINK_FLAGS := $(ARROW_LIBS) -Wl,-rpath,$(abspath $(ARROW_DIR))
 
 
 
@@ -112,7 +97,7 @@ endif
 ifeq ($(HAS_CUDA_TOOLKIT),1)
 CUDA_LIB_FLAGS += $(CUBLASLT_LINK_FLAG)
 endif
-NCCL_ROOT ?= $(firstword $(wildcard ../.venv-gpu/lib/python*/site-packages/nvidia/nccl))
+NCCL_ROOT ?= ../external/wheels/nvidia/nccl
 NCCL_INC_FLAGS :=
 ifneq ($(wildcard $(NCCL_ROOT)/include/nccl.h),)
 NCCL_INC_FLAGS += -I$(NCCL_ROOT)/include
@@ -376,7 +361,7 @@ NATIVE_CONFIG_KEYS := CC CXX NVCC LEAN_HOME TORCHDIR SOXR_DIR TKDIR \
 	CUDA_HOME CUDA_MAJOR_VERSION GPU_CODEGEN_MODULES OBJ_FILES DYLIB_LINK_FLAGS \
 	MACOSX_DEPLOYMENT_TARGET SDKROOT
 
-.PHONY: check-submodules native-config gpu-stubs FORCE
+.PHONY: check-deps native-config gpu-stubs FORCE
 FORCE:
 
 # Lake refreshes these inexpensive manifests before checking its native trace.
@@ -390,44 +375,52 @@ $(NATIVE_CONFIG): FORCE $(TOOLS_DIR)/write_build_config.py $(TYR_MAKEFILE)
 
 -include $(DEP_FILES)
 
-check-submodules:
+check-deps:
+	@for compiler in $(firstword $(CC)) $(firstword $(CXX)); do \
+		if ! command -v "$$compiler" >/dev/null 2>&1; then \
+			echo "Missing C/C++ compiler $$compiler. On Debian/Ubuntu: sudo apt install g++"; \
+			exit 1; \
+		fi; \
+	done
 	@if [ ! -f "$(SOXR_DIR)/CMakeLists.txt" ]; then \
-		echo "Missing populated submodule at $(SOXR_DIR). Run: git submodule update --init --recursive"; \
+		echo "Missing $(SOXR_DIR). Run: deps/fetch.sh"; \
 		exit 1; \
 	fi
 	@if [ "$(REQUIRES_TK)" = "1" ] && [ ! -d "$(TKDIR)/include" ]; then \
-		echo "Missing populated submodule at $(TKDIR). Run: git submodule update --init --recursive"; \
+		echo "Missing $(TKDIR). Run: deps/fetch.sh"; \
 		exit 1; \
 	fi
-	@if [ ! -f "$(TORCHDIR)/include/torch/csrc/api/include/torch/torch.h" ]; then \
-		echo "Missing LibTorch headers at $(TORCHDIR). Install external/libtorch (see dependencies_macos.sh or Readme.md)."; \
+	@if [ ! -f "$(TORCHDIR)/include/torch/csrc/api/include/torch/torch.h" ] || [ ! -d "$(TORCH_LIBPATH)" ]; then \
+		echo "Missing LibTorch at $(TORCHDIR). Run: deps/fetch.sh"; \
 		exit 1; \
 	fi
-	@if [ ! -d "$(TORCH_LIBPATH)" ]; then \
-		echo "Missing LibTorch libraries at $(TORCH_LIBPATH). Install external/libtorch (see dependencies_macos.sh or Readme.md)."; \
-		exit 1; \
-	fi
+	@for lib in $(ARROW_LIBS); do \
+		if [ ! -f "$$lib" ]; then \
+			echo "Missing Arrow library $$lib. Run: deps/fetch.sh"; \
+			exit 1; \
+		fi; \
+	done
 
 all: lib dylib
 
-lib: check-submodules soxr $(OUT_DIR)/$(LIB)
+lib: check-deps soxr $(OUT_DIR)/$(LIB)
 
-dylib: check-submodules soxr $(OUT_DIR)/$(DYLIB)
+dylib: check-deps soxr $(OUT_DIR)/$(DYLIB)
 
-bench-flash-attn: check-submodules soxr $(OUT_DIR)/$(DYLIB) $(BENCH_FLASH_ATTN)
+bench-flash-attn: check-deps soxr $(OUT_DIR)/$(DYLIB) $(BENCH_FLASH_ATTN)
 
-soxr: check-submodules $(SOXR_LIB)
+soxr: check-deps $(SOXR_LIB)
 
-$(SOXR_LIB): $(SOXR_OBJS) | check-submodules
+$(SOXR_LIB): $(SOXR_OBJS) | check-deps
 	@if [ ! -f "$(SOXR_DIR)/CMakeLists.txt" ]; then \
-		echo "Missing $(SOXR_DIR). Initialize submodules: git submodule update --init --recursive"; \
+		echo "Missing $(SOXR_DIR). Run: deps/fetch.sh"; \
 		exit 1; \
 	fi
 	$(MKPATH) $(SOXR_LIBPATH)
 	$(RMPATH) $@
 	$(AR) rcs $@ $(SOXR_OBJS)
 
-$(SOXR_CONFIG): | check-submodules
+$(SOXR_CONFIG): | check-deps
 	$(MKPATH) $(SOXR_BUILD_DIR)
 	@printf '%s\n' \
 		'#if !defined soxr_config_included' \
@@ -450,33 +443,33 @@ $(SOXR_CONFIG): | check-submodules
 		'#define WITH_DEV_TRACE 0' \
 		'#endif' > $@
 
-$(SOXR_OBJ_DIR)/%.o: $(SOXR_DIR)/src/%.c $(SOXR_CONFIG) $(NATIVE_CONFIG) $(TYR_MAKEFILE) | check-submodules
+$(SOXR_OBJ_DIR)/%.o: $(SOXR_DIR)/src/%.c $(SOXR_CONFIG) $(NATIVE_CONFIG) $(TYR_MAKEFILE) | check-deps
 	$(MKPATH) $(SOXR_OBJ_DIR)
 	$(CC) -MMD -MP -MF $(@:.o=.d) -MT $@ -o $@ -c $< $(SOXR_CFLAGS)
 
 $(OUT_DIR):
 	$(MKPATH) $@
 
-$(OUT_DIR)/$(LIB) : $(OBJ_FILES) $(NATIVE_CONFIG) $(TYR_MAKEFILE) | check-submodules $(OUT_DIR)
+$(OUT_DIR)/$(LIB) : $(OBJ_FILES) $(NATIVE_CONFIG) $(TYR_MAKEFILE) | check-deps $(OUT_DIR)
 	$(RMPATH) $@
 	${AR} rcs $@ $(OBJ_FILES)
 
-$(OUT_DIR)/$(DYLIB) : $(OBJ_FILES) $(SOXR_LIB) $(NATIVE_CONFIG) $(TYR_MAKEFILE) | check-submodules $(OUT_DIR)
+$(OUT_DIR)/$(DYLIB) : $(OBJ_FILES) $(SOXR_LIB) $(NATIVE_CONFIG) $(TYR_MAKEFILE) | check-deps $(OUT_DIR)
 	$(CXX) $(SHARED_FLAG) -o $@ $(OBJ_FILES) $(DYLIB_LINK_FLAGS)
 
-$(BENCH_FLASH_ATTN): $(TOOLS_DIR)/bench_flash_attn.cpp $(OUT_DIR)/$(DYLIB) $(NATIVE_CONFIG) $(TYR_MAKEFILE) | check-submodules $(OUT_DIR)
+$(BENCH_FLASH_ATTN): $(TOOLS_DIR)/bench_flash_attn.cpp $(OUT_DIR)/$(DYLIB) $(NATIVE_CONFIG) $(TYR_MAKEFILE) | check-deps $(OUT_DIR)
 	@mkdir -p $(dir $@)
-	$(CXX) $(CXX_STD_FLAG) -MMD -MP -MF $@.d -MT $@ -o $@ $< -I$(HDR_DIR) -I$(LEAN_INCLUDE) $(TORCH_INC_FLAGS) $(PYTHON_INC_FLAGS) $(CUDA_INC_FLAGS) $(NCCL_INC_FLAGS) $(ARROW_INC_FLAGS) $(SOXR_INC_FLAGS) $(EXTRA_CXX_FLAGS) -L$(OUT_DIR) -l$(LIB_NAME) $(DYLIB_LINK_FLAGS) -Wl,-rpath,$(abspath $(OUT_DIR))
+	$(CXX) $(CXX_STD_FLAG) -MMD -MP -MF $@.d -MT $@ -o $@ $< -I$(HDR_DIR) -I$(LEAN_INCLUDE) $(TORCH_INC_FLAGS) $(CUDA_INC_FLAGS) $(NCCL_INC_FLAGS) $(ARROW_INC_FLAGS) $(SOXR_INC_FLAGS) $(EXTRA_CXX_FLAGS) -L$(OUT_DIR) -l$(LIB_NAME) $(DYLIB_LINK_FLAGS) -Wl,-rpath,$(abspath $(OUT_DIR))
 
-$(OUT_DIR)/%.o : $(SRC_DIR)/%.cpp $(NATIVE_CONFIG) $(TYR_MAKEFILE) | check-submodules $(OUT_DIR)
+$(OUT_DIR)/%.o : $(SRC_DIR)/%.cpp $(NATIVE_CONFIG) $(TYR_MAKEFILE) | check-deps $(OUT_DIR)
 	@mkdir -p $(dir $@)
-	$(CXX) $(CXX_STD_FLAG) -MMD -MP -MF $(@:.o=.d) -MT $@ -o $@ -c $< -I$(HDR_DIR) -I$(LEAN_INCLUDE) $(TORCH_INC_FLAGS) $(PYTHON_INC_FLAGS) $(CUDA_INC_FLAGS) $(NCCL_INC_FLAGS) $(ARROW_INC_FLAGS) $(SOXR_INC_FLAGS) $(CPP_CUDA_FLAGS) $(EXTRA_CXX_FLAGS) -fPIC
+	$(CXX) $(CXX_STD_FLAG) -MMD -MP -MF $(@:.o=.d) -MT $@ -o $@ -c $< -I$(HDR_DIR) -I$(LEAN_INCLUDE) $(TORCH_INC_FLAGS) $(CUDA_INC_FLAGS) $(NCCL_INC_FLAGS) $(ARROW_INC_FLAGS) $(SOXR_INC_FLAGS) $(CPP_CUDA_FLAGS) $(EXTRA_CXX_FLAGS) -fPIC
 
-$(OUT_DIR)/%.o : $(SRC_DIR)/%.mm $(NATIVE_CONFIG) $(TYR_MAKEFILE) | check-submodules $(OUT_DIR)
+$(OUT_DIR)/%.o : $(SRC_DIR)/%.mm $(NATIVE_CONFIG) $(TYR_MAKEFILE) | check-deps $(OUT_DIR)
 	@mkdir -p $(dir $@)
-	$(CXX) -x objective-c++ $(CXX_STD_FLAG) -MMD -MP -MF $(@:.o=.d) -MT $@ -o $@ -c $< -I$(HDR_DIR) -I$(LEAN_INCLUDE) $(TORCH_INC_FLAGS) $(PYTHON_INC_FLAGS) $(CUDA_INC_FLAGS) $(NCCL_INC_FLAGS) $(ARROW_INC_FLAGS) $(SOXR_INC_FLAGS) $(CPP_CUDA_FLAGS) $(EXTRA_CXX_FLAGS) -fPIC -fobjc-arc
+	$(CXX) -x objective-c++ $(CXX_STD_FLAG) -MMD -MP -MF $(@:.o=.d) -MT $@ -o $@ -c $< -I$(HDR_DIR) -I$(LEAN_INCLUDE) $(TORCH_INC_FLAGS) $(CUDA_INC_FLAGS) $(NCCL_INC_FLAGS) $(ARROW_INC_FLAGS) $(SOXR_INC_FLAGS) $(CPP_CUDA_FLAGS) $(EXTRA_CXX_FLAGS) -fPIC -fobjc-arc
 
-$(OUT_DIR)/%.o : $(SRC_DIR)/%.cu $(NATIVE_CONFIG) $(TYR_MAKEFILE) | check-submodules $(OUT_DIR)
+$(OUT_DIR)/%.o : $(SRC_DIR)/%.cu $(NATIVE_CONFIG) $(TYR_MAKEFILE) | check-deps $(OUT_DIR)
 	@mkdir -p $(dir $@)
 	@if [ "$(GPU)" = "GB10" ] && grep -Eq 'tcgen05|tensor_allocator<|warpgroup::(mma_|mm_)|mma_async_wait|mma_commit_group' "$<"; then \
 		echo "error: $< requires Hopper WGMMA or SM100a tcgen05/TMEM, neither of which is supported by GB10 sm_121" >&2; \
@@ -485,7 +478,7 @@ $(OUT_DIR)/%.o : $(SRC_DIR)/%.cu $(NATIVE_CONFIG) $(TYR_MAKEFILE) | check-submod
 	$(NVCC) -MMD -MP -MF $(@:.o=.d) -MT $@ -o $@ -c $< -I$(HDR_DIR) -I$(LEAN_INCLUDE) $(TORCH_INC_FLAGS) $(PYTHON_INC_FLAGS) $(CUDA_INC_FLAGS) $(TK_INC_FLAGS) $(NVCCFLAGS)
 
 # No-CUDA-toolkit builds: compile the stub branch of tyr_laguna_moe.cu as C++.
-$(OUT_DIR)/tyr_laguna_moe_stub.o : $(SRC_DIR)/tyr_laguna_moe.cu $(NATIVE_CONFIG) $(TYR_MAKEFILE) | check-submodules $(OUT_DIR)
+$(OUT_DIR)/tyr_laguna_moe_stub.o : $(SRC_DIR)/tyr_laguna_moe.cu $(NATIVE_CONFIG) $(TYR_MAKEFILE) | check-deps $(OUT_DIR)
 	$(CXX) $(CXX_STD_FLAG) -x c++ -MMD -MP -MF $(@:.o=.d) -MT $@ -o $@ -c $< -I$(LEAN_INCLUDE) $(EXTRA_CXX_FLAGS) -fPIC
 
 $(GPU_STUB_SRC): FORCE $(GPU_STUB_SCRIPT)
