@@ -146,7 +146,7 @@
   "cuda_version": "13.0",
   "python_packages_by_arch": {
     "aarch64": {
-      "torchaudio": "2.10.0"
+      "torchaudio": "2.10.0+cu130"
     },
     "x86_64": {
       "torchaudio": "2.10.0+cu130"
