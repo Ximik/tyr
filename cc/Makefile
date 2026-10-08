@@ -69,6 +69,10 @@ CUDA_MAJOR_VERSION := $(shell $(NVCC) --version 2>/dev/null | sed -n 's/.*releas
 else
 HAS_NVCC := 0
 endif
+TORCH_HAS_CUDA := $(if $(wildcard $(TORCH_LIBPATH)/libtorch_cuda.so),1,0)
+ifneq ($(HAS_NVCC),$(TORCH_HAS_CUDA))
+$(error external/ has the $(if $(filter 1,$(TORCH_HAS_CUDA)),CUDA,CPU) libtorch but CUDA_HOME is $(if $(filter 1,$(HAS_NVCC)),set,unset); run deps/fetch.sh with the same CUDA_HOME)
+endif
 CUDA_INC_FLAGS :=
 ifneq ($(wildcard $(CUDA_HOME)/include/cuda_runtime.h),)
 CUDA_INC_FLAGS += -I$(CUDA_HOME)/include

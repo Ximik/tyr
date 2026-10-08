@@ -362,6 +362,9 @@ def gpuMakeEnv : IO (Array (String × Option String)) := do
     This wraps the Makefile build for now - a future enhancement could
     use Lake's native C++ compilation. -/
 extern_lib libtyr pkg := do
+  let torchHasCuda ← (pkg.dir / "external" / "wheels" / "torch" / "lib" / "libtorch_cuda.so").pathExists
+  if torchHasCuda == linuxCudaLinkArgs.isEmpty then
+    error "external/ switched between the CPU and CUDA libtorch since the lakefile was configured; run `lake -R build`"
   let tyrCLib := pkg.dir / "cc" / "build" / "libTyrC.a"
   let gpuIrRoot := pkg.buildDir / "ir" / "Tyr" / "GPU"
   let generatedCudaDir := pkg.dir / "cc" / "src" / "generated"
