@@ -23,67 +23,6 @@ jobs:
 
       - uses: ./.github/actions/setup
 
-      - name: Prepare doc-gen4 path dependency
-        run: |
-          rm -rf "$GITHUB_WORKSPACE/../doc-gen4"
-          git clone --depth 1 https://github.com/cpehle/doc-gen4.git "$GITHUB_WORKSPACE/../doc-gen4"
-          cd "$GITHUB_WORKSPACE/../doc-gen4"
-          lake update BibtexQuery
-          python3 - <<PY
-          from pathlib import Path
-
-          path = Path("DocGen4/Output/Bibtex.lean")
-          source = path.read_text()
-          block = r"""
-          namespace BibtexXml
-
-          def attrsToStringEscaped (as : BibtexQuery.Xml.Attributes) : String :=
-            as.foldl (init := "") fun acc k v => acc ++ s!" {k}=\"{Html.escape v}\""
-
-          mutual
-
-          partial def eToStringEscaped : BibtexQuery.Xml.Element -> String
-            | .Element n a c =>
-                let inner := c.map cToStringEscaped |>.foldl (fun acc x => acc ++ x) ""
-                s!"<{n}{attrsToStringEscaped a}>{inner}</{n}>"
-
-          partial def cToStringEscaped : BibtexQuery.Xml.Content -> String
-            | .Element e => eToStringEscaped e
-            | .Comment c => s!"<!--{c}-->"
-            | .Character c => Html.escape c
-
-          end
-
-          mutual
-
-          partial def eToPlaintext : BibtexQuery.Xml.Element -> String
-            | .Element _ _ c => c.map cToPlaintext |>.foldl (fun acc x => acc ++ x) ""
-
-          partial def cToPlaintext : BibtexQuery.Xml.Content -> String
-            | .Element e => eToPlaintext e
-            | .Comment _ => ""
-            | .Character c => c
-
-          end
-
-          end BibtexXml
-          """
-          source = source.replace(
-              "namespace DocGen4.Bibtex\n\n",
-              "namespace DocGen4.Bibtex\n" + block + "\n",
-              1,
-          )
-          source = source.replace(
-              "html := html.map cToStringEscaped |>.toList |> String.join",
-              "html := html.map BibtexXml.cToStringEscaped |>.toList |> String.join",
-          )
-          source = source.replace(
-              "plaintext := html.map cToPlaintext |>.toList |> String.join",
-              "plaintext := html.map BibtexXml.cToPlaintext |>.toList |> String.join",
-          )
-          path.write_text(source)
-          PY
-
       - name: Create docbuild package
         run: |
           mkdir -p docbuild
@@ -104,7 +43,8 @@ jobs:
 
           [[require]]
           name = "doc-gen4"
-          path = "../../doc-gen4"
+          git = "https://github.com/cpehle/doc-gen4"
+          rev = "9808750c02cc0ad0ce9d67917250ec029283745e"
           EOF
 
       - name: Build docs
