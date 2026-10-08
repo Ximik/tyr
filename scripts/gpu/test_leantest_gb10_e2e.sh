@@ -2,26 +2,15 @@
 set -euo pipefail
 
 source ./load_modules.sh
+source ./env.sh
 
-# Noninteractive GPU hosts may have the CUDA toolkit installed without putting
-# nvcc on PATH. Prefer an explicit CUDA_HOME, then the conventional install
-# root. This suite must not silently use CPU stubs.
-if ! command -v nvcc >/dev/null 2>&1; then
-  cuda_candidates=("${CUDA_HOME:-}" /usr/local/cuda)
-  for cuda_dir in "${cuda_candidates[@]}"; do
-    if [[ -n "$cuda_dir" && -x "$cuda_dir/bin/nvcc" ]]; then
-      export CUDA_HOME="$cuda_dir"
-      export PATH="$CUDA_HOME/bin:$PATH"
-      break
-    fi
-  done
-fi
-if ! command -v nvcc >/dev/null 2>&1; then
-  echo "nvcc not found; the GB10 parity suite requires a CUDA toolkit" >&2
+# This suite must not silently use CPU stubs.
+if [[ -z "${CUDA_HOME:-}" ]]; then
+  echo "CUDA_HOME is not set; the GB10 parity suite requires a CUDA toolkit" >&2
   exit 127
 fi
+export PATH="$CUDA_HOME/bin:$PATH"
 
-export LEAN_CC="$PWD/scripts/lean_cc_wrapper.sh"
 export LEAN_CC_FAST=1
 export TYR_GPU_FAMILY=BLACKWELL
 export TYR_GPU_VENDORED_REF_RUNNER="${TYR_GPU_VENDORED_REF_RUNNER:-$PWD/scripts/gpu/run_vendored_reference.sh}"

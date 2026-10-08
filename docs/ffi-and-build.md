@@ -150,7 +150,7 @@ after a runtime Hopper check (`device_supports_tk_hopper`,
    existing paths are tracked by Lake, including vendor headers.
 4. Runs `lake build GenerateGpuKernels` and executes it into
    `cc/src/generated/`, unless `TYR_SKIP_GPU_CODEGEN=1`, or it is unset and
-   `native-build.json` reports `HAS_NVCC=0` (without `nvcc` the Makefile ignores
+   `native-build.json` reports `HAS_NVCC=0` (without `CUDA_HOME` the Makefile ignores
    generated `.cu` files and links the weak launcher stubs, so codegen would be
    wasted). `TYR_SKIP_GPU_CODEGEN=0` forces codegen.
 5. Runs `make -jN -C cc lib [dylib]` (`N` = `TYR_MAKE_JOBS`, which `env.sh` sets to the CPU count; no `-j` if unset) with `gpuMakeEnv` forwarding
@@ -234,7 +234,8 @@ Build behavior is controlled entirely through the environment:
 | `TYR_BUILD_TYRC_DYLIB=0` | build only `libTyrC.a`, skip `libTyrC.so/.dylib` |
 | `GPU` (or `TYR_GPU_TARGET`), `GPU_FAMILY`, `GPU_COMPUTE`, `GPU_CODE` | override the Makefile GPU matrix |
 | `TYR_MACOS_SDKROOT`, `TYR_MACOS_DEPLOYMENT_TARGET` | macOS SDK/deployment overrides |
-| `CUDA_HOME`, `NCCL_ROOT` | CUDA/NCCL discovery hints |
+| `CUDA_HOME` | the only CUDA switch (set by `env.sh` from `nvcc`); must contain `bin/nvcc` |
+| `NCCL_ROOT` | NCCL discovery hint |
 | `LEAN_CC_FAST=1` | `-O0` for Lean-generated C (fast local iteration) |
 | `LEAN_CC_GCC`, `LEAN_CC_LINKER` | compiler/linker selection in the wrapper |
 

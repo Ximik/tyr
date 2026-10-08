@@ -78,7 +78,7 @@ jobs:
       TYR_QUALIFICATION_ROOT: ${{ vars.TYR_QUALIFICATION_ROOT }}
       TYR_QUALIFICATION_BOOTSTRAP_PYTHON: ${{ vars.TYR_QUALIFICATION_BOOTSTRAP_PYTHON || 'python3.12' }}
       TYR_QUALIFY_MODELS: ${{ github.event_name == 'schedule' || inputs.real_models }}
-      CUDA_HOME: ${{ vars.TYR_CUDA_HOME || '/usr/local/cuda' }}
+      CUDA_HOME: ${{ vars.TYR_CUDA_HOME }}
     steps:
       - uses: actions/checkout@v4
       - name: Default qualification root

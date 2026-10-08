@@ -96,7 +96,7 @@ print(json.dumps({'torch':torch.__version__, 'cuda':torch.version.cuda,
     config = (REPO / "external/wheels/torch/share/cmake/Torch/TorchConfigVersion.cmake").read_text()
     if f'set(PACKAGE_VERSION "{manifest["libtorch_version"]}")' not in config:
         raise ValueError("LibTorch version does not match qualification manifest")
-    nvcc = subprocess.check_output(["nvcc", "--version"], text=True, env=env)
+    nvcc = subprocess.check_output([os.path.join(env["CUDA_HOME"], "bin", "nvcc"), "--version"], text=True, env=env)
     if f'release {manifest["cuda_version"]},' not in nvcc:
         raise ValueError("NVCC does not match the pinned CUDA version")
     info["nvcc"] = nvcc.strip()
@@ -136,7 +136,7 @@ def main():
     env["TYR_LAGUNA_CACHE_BENCH"] = "1"
     env["PATH"] = str(Path(args.python).parent) + os.pathsep + env.get("PATH", "")
     env["LD_LIBRARY_PATH"] = library_path(REPO / "external/wheels/torch",
-        Path(env.get("CUDA_HOME", "/usr/local/cuda")), env.get("LD_LIBRARY_PATH", ""))
+        Path(env["CUDA_HOME"]), env.get("LD_LIBRARY_PATH", ""))
     try:
         if report["source_status"]:
             raise ValueError("Strict qualification requires a clean committed candidate checkout")

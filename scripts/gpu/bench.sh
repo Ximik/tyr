@@ -180,7 +180,7 @@ gpu_name="${gpu_name# }"; gpu_name="${gpu_name% }"
 gpu_uuid="${gpu_uuid# }"; gpu_uuid="${gpu_uuid% }"
 compute_capability="${compute_capability# }"; compute_capability="${compute_capability% }"
 driver_version="${driver_version# }"; driver_version="${driver_version% }"
-cuda_compiler="$(nvcc --version | tail -n 1)"
+cuda_compiler="$("$CUDA_HOME/bin/nvcc" --version | tail -n 1)"
 resource_usage="$(cuobjdump --dump-resource-usage "$generated_object" 2>&1)"
 jq -nc \
   --arg runId "$run_id" --arg module "$module" \

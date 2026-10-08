@@ -50,7 +50,7 @@ Configure these repository variables for the runner that actually serves it:
 | `TYR_GPU` | `GB10` |
 | `TYR_QUALIFICATION_ROOT` | optional; defaults to `$HOME/tyr-qualification` |
 | `TYR_QUALIFICATION_BOOTSTRAP_PYTHON` | `python3.12` (any Python 3.12 interpreter) |
-| `TYR_CUDA_HOME` | `/usr/local/cuda` |
+| `TYR_CUDA_HOME` | required; CUDA toolkit root on the runner, e.g. `/usr/local/cuda` |
 
 The runner needs elan, a C++ compiler, NVCC 13.0, `flock`, and a Python 3.12
 interpreter (`TYR_QUALIFICATION_BOOTSTRAP_PYTHON`). The job fetches the CUDA

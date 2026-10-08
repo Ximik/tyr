@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Invoke under the host-wide GPU flock (see .github/workflows/gpu.yml).
 set -euo pipefail
+: "${CUDA_HOME:?CUDA_HOME must point at the CUDA toolkit}"
 qualification_root=${TYR_QUALIFICATION_ROOT:-"$HOME/tyr-qualification"}
 python_bin="$qualification_root/venv/bin/python"
 reports=(gpu)
@@ -22,7 +23,7 @@ if [[ -n "$active" ]]; then
   echo "GPU is occupied by an unrelated workload; retry after it finishes." >&2
   exit 1
 fi
-export PATH="$(dirname "$python_bin"):$HOME/.elan/bin:${CUDA_HOME:-/usr/local/cuda}/bin:$PATH"
+export PATH="$(dirname "$python_bin"):$HOME/.elan/bin:$CUDA_HOME/bin:$PATH"
 # Preparation shares the GPU lock too: another repository job cannot replace
 # the venv or partially download a fixture while this run uses those inputs.
 bash scripts/qualification/setup_python.sh
@@ -42,7 +43,7 @@ export TYR_GPU_FAMILY
 gpu_runner=$(python3 scripts/qualification/gpu_plan.py "$GPU" --field runner)
 mapfile -t modules < <(python3 scripts/qualification/gpu_plan.py "$GPU" --field modules)
 export TYR_GPU_CODEGEN_MODULE="${modules[*]}"
-cuda_libraries=$(python3 scripts/qualification/cuda_runtime.py --libtorch external/wheels/torch --cuda-home "${CUDA_HOME:-/usr/local/cuda}" --previous="${LD_LIBRARY_PATH:-}")
+cuda_libraries=$(python3 scripts/qualification/cuda_runtime.py --libtorch external/wheels/torch --cuda-home "$CUDA_HOME" --previous="${LD_LIBRARY_PATH:-}")
 export LD_LIBRARY_PATH="$cuda_libraries"
 source ./env.sh
 

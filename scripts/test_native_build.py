@@ -46,7 +46,7 @@ class NativeBuildTests(unittest.TestCase):
 
     def make(self, target="build/libTyrC.a", jobs=1, **variables):
         defaults = {
-            "LEAN_HOME": str(self.root / "lean"), "NVCC": "/missing/tyr-test-nvcc",
+            "LEAN_HOME": str(self.root / "lean"), "CUDA_HOME": "",
             "OBJ_FILES": "build/probe.o", "SRCS": "probe.cpp", "CU_SRCS": "",
             "MM_SRCS": "", "SOXR_SRCS": "", "GPU": "H100",
             "DEP_FILES": "build/probe.d", "PYTHON": "/missing/tyr-test-python",
