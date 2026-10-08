@@ -18,9 +18,8 @@ extra_build_targets=("$@")
 # architecture-incompatible generated translation unit.
 export TYR_GPU_CODEGEN_MODULE="${kernel_module}"
 
-source ./load_modules.sh
+source ./env.sh
 
-export LEAN_CC="$PWD/scripts/lean_cc_wrapper.sh"
 export LEAN_CC_FAST=1
 export LD_LIBRARY_PATH="$PWD/external/wheels/torch/lib:$PWD/cc/build:${EBROOTGCCCORE:+${EBROOTGCCCORE}/lib64:}${LD_LIBRARY_PATH:-}"
 if [[ -z "${TYR_GPU_VENDORED_REF_RUNNER:-}" ]] && [[ -x "$PWD/scripts/gpu/run_vendored_reference.sh" ]]; then

@@ -108,7 +108,7 @@ All optional.
 
 | Variable | Effect |
 |---|---|
-| `LEAN_CC` | Linux: set to `scripts/lean_cc_wrapper.sh` to link with the system GCC (`source ./env.sh` does this) |
+| `LEAN_CC` | Linux: set to `lean-cc` to build and link with the system GCC (`source ./env.sh` does this) |
 | `LEAN_CC_FAST=1` | compile Lean-generated C with `-O0` for faster iteration |
 | `CUDA_HOME` | CUDA toolkit; `env.sh` sets it from `nvcc` on `PATH` and fails if it has no `bin/nvcc`. Empty or unset: CPU build (CUDA kernels replaced by stubs) |
 | `TYR_GPU_TARGET` | GPU to build kernels for: `H100` (default), `A100`, `B200`, `B300`, `GB10` |

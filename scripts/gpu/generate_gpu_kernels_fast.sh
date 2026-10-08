@@ -22,7 +22,6 @@ Options:
   --help             Show this help
 
 Environment:
-  LEAN_CC            C compiler wrapper for Lake (default: scripts/lean_cc_wrapper.sh)
   LEAN_CC_FAST       Add the wrapper's fast C compile flags (default: 1)
   LAKE_NUM_JOBS      Lake parallelism (default: 1)
 
@@ -85,12 +84,7 @@ if [[ ${#modules[@]} -eq 0 ]]; then
   modules=("Tyr.GPU.Kernels.MhaH100")
 fi
 
-if [[ -f ./load_modules.sh ]]; then
-  # shellcheck source=/dev/null
-  source ./load_modules.sh
-fi
-
-export LEAN_CC="${LEAN_CC:-$repo_root/scripts/lean_cc_wrapper.sh}"
+source ./env.sh
 export LEAN_CC_FAST="${LEAN_CC_FAST:-1}"
 export LAKE_NUM_JOBS="${LAKE_NUM_JOBS:-1}"
 export TYR_SKIP_GPU_CODEGEN=1

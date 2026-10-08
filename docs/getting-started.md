@@ -191,10 +191,9 @@ fixtures, and run the parity check. Useful knobs:
   runner, invoked as `runner <suite-name> <fixture-dir>` after each suite;
   defaults to `scripts/gpu/run_vendored_reference.sh` when executable.
 
-These scripts source `load_modules.sh` (EasyBuild module stack: CUDA;
-overridable via `TYR_CUDA_MODULE`, `TYR_NCCL_MODULE`) and
-expect a CUDA toolchain (`nvcc`). They are cluster scripts — on a plain macOS or
-CPU-only Linux checkout, skip this section.
+These scripts source `env.sh` and need `CUDA_HOME` (which `env.sh` derives from
+`nvcc` on `PATH` when unset). On a plain macOS or CPU-only Linux checkout, skip
+this section.
 
 ## Distributed NanoChat scripts
 

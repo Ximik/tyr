@@ -239,7 +239,7 @@ Build behavior is controlled entirely through the environment:
 | `LEAN_CC_FAST=1` | `-O0` for Lean-generated C (fast local iteration) |
 | `LEAN_CC_GCC`, `LEAN_CC_LINKER` | compiler/linker selection in the wrapper |
 
-`scripts/lean_cc_wrapper.sh` is the `LEAN_CC` wrapper used on Linux (set by
+`lean-cc` (repository root) is the `LEAN_CC` wrapper used on Linux (set by
 `env.sh`). Lean's bundled clang links against the old glibc
 inside the Lean toolchain, while `cc/` and libtorch are built with the system
 gcc against the system glibc/libstdc++, so the link fails with undefined glibc
@@ -259,8 +259,7 @@ no lakefile option for it.
   `RUNPOD_API_KEY` never enters tracked files.
 - `scripts/nanochat/` — `torchrun` launchers for distributed NanoChat training
   (`run_train_torchrun.sh`, `bench_distributed.sh`) and `ENV_INVENTORY.md`.
-- `scripts/lean_cc_wrapper.sh` — toolchain wrapper. Conventional-commit hooks
-  and their checker live in `.githooks/`.
+- Conventional-commit hooks and their checker live in `.githooks/`.
 - Python converters — `kokoro_to_safetensors.py`,
   `qm9_{sdf,xyz}_to_branching_jsonl.py`, `qwen3tts_*.py`,
   `kittentts_reference_synthesize.py` (dataset prep and parity references;

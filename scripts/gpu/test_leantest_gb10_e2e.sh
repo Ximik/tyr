@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-source ./load_modules.sh
 source ./env.sh
 
 # This suite must not silently use CPU stubs.

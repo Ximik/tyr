@@ -5,9 +5,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 cd "${REPO_ROOT}"
 
-source ./load_modules.sh >/dev/null
+source ./env.sh
 
-export LEAN_CC="${REPO_ROOT}/scripts/lean_cc_wrapper.sh"
 export LEAN_CC_FAST="${LEAN_CC_FAST:-1}"
 export LD_LIBRARY_PATH="${REPO_ROOT}/external/wheels/torch/lib:${REPO_ROOT}/cc/build:${EBROOTGCCCORE:+${EBROOTGCCCORE}/lib64:}${LD_LIBRARY_PATH:-}"
 

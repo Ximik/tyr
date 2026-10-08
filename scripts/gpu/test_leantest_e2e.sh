@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-source ./load_modules.sh
+source ./env.sh
 
-export LEAN_CC="$PWD/scripts/lean_cc_wrapper.sh"
 export LEAN_CC_FAST=1
 export TYR_GPU_VENDORED_REF_RUNNER="${TYR_GPU_VENDORED_REF_RUNNER:-$PWD/scripts/gpu/run_vendored_reference.sh}"
 export LD_LIBRARY_PATH="$PWD/external/wheels/torch/lib:$PWD/cc/build:${EBROOTGCCCORE:+${EBROOTGCCCORE}/lib64:}${LD_LIBRARY_PATH:-}"

@@ -5,7 +5,7 @@
 # Lean's bundled clang links against the old glibc inside the Lean toolchain,
 # but Tyr's C++ (cc/) and libtorch are built with the system gcc and need the
 # system glibc/libstdc++. Lake has no lakefile option for the C compiler, so
-# this is selected with `export LEAN_CC=$PWD/scripts/lean_cc_wrapper.sh`.
+# this is selected with `export LEAN_CC=$PWD/lean-cc` (`source ./env.sh` does it).
 #
 # With a custom LEAN_CC, Lake still passes Lean's runtime link flags
 # (-lc++, -lc++abi, -lgmp, -luv). Those libraries exist only inside the Lean

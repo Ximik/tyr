@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-source ./load_modules.sh
+source ./env.sh
 
-export LEAN_CC="${LEAN_CC:-$PWD/scripts/lean_cc_wrapper.sh}"
 export LEAN_CC_FAST="${LEAN_CC_FAST:-1}"
 export LAKE_NUM_JOBS="${LAKE_NUM_JOBS:-1}"
 export TYR_BUILD_TYRC_DYLIB="${TYR_BUILD_TYRC_DYLIB:-0}"
