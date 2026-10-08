@@ -34,39 +34,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install elan
-        run: |
-          curl https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -sSf | sh -s -- -y --default-toolchain none
-          echo "$HOME/.elan/bin" >> $GITHUB_PATH
-
-      - name: Cache pinned Lean toolchain
-        uses: actions/cache@v4
-        with:
-          path: ~/.elan/toolchains
-          key: lean-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('lean-toolchain') }}
-
-      - name: Set up Lean toolchain
-        run: |
-          toolchain="$(cat lean-toolchain)"
-          if ! elan toolchain list | grep -Fxq "$toolchain"; then
-            elan toolchain install "$toolchain"
-          fi
-          elan default "$toolchain"
-
-      - name: Cache dependency wheels
-        uses: actions/cache@v4
-        with:
-          path: external/.cache
-          key: deps-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('deps/wheels.lock') }}
-
-      - name: Fetch pinned dependencies
-        run: deps/fetch.sh
+      - uses: ./.github/actions/setup
 
       - name: Compute binary compatibility keys
         id: cache-key
         run: |
           source ./env.sh
-          python3 scripts/ci/cache_key.py --output output/ci/cache-identity.json >> "$GITHUB_OUTPUT"
+          python3 .github/scripts/cache_key.py --output output/ci/cache-identity.json >> "$GITHUB_OUTPUT"
 
       - name: Restore compatible dependency builds
         id: dependency-cache
@@ -111,8 +85,7 @@ jobs:
           lake env lean Examples/NanoChat/Generator/TypedState.lean
           lake env lean Examples/BranchingFlows/BranchingFlowsDemo.lean
 
-      # Save before tests: retrying a failed CPU suite can reuse its successful
-      # build, even when the preceding workflow's test step failed.
+      # Save before tests, so re-running a failed test step reuses this build.
       - name: Save compatible dependency builds
         if: steps.dependency-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
@@ -145,9 +118,6 @@ jobs:
           path: output/ci/
           if-no-files-found: warn
           retention-days: 14
-
-      # Real-model Qwen tests are provisioned and required in cuda-smoke.yml's
-      # scheduled/manual qualification tier, rather than silently skipped here.
 
   lint:
     runs-on: ubuntu-latest
@@ -183,7 +153,8 @@ jobs:
         run: |
           python3 scripts/test_inventory.py
           python3 scripts/test_test_inventory.py
-          python3 scripts/ci/test_cache_key.py
+          python3 .github/scripts/test_cache_key.py
+          python3 .github/scripts/test_readiness.py
           python3 scripts/qualification/test_qualification.py
           python3 scripts/test_qwen3tts_asr_wrapper.py
           "$RUNNER_TEMP/qualification-tests/bin/python" scripts/test_qwen3tts_parity_wrapper.py

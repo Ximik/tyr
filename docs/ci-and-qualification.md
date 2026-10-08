@@ -8,7 +8,7 @@ wheels (`deps/fetch_wheels.sh`) and the pinned Lean toolchain can be cached
 in either mode.
 
 Pull requests restore compatible `.lake/packages`, `.lake/build`, `cc/build`
-and generated CUDA sources. `scripts/ci/cache_key.py` separates caches by OS,
+and generated CUDA sources. `.github/scripts/cache_key.py` separates caches by OS,
 architecture, runner image, workspace path, compiler/SDK, Lean version,
 dependency manifests (including `deps/git.lock` and `deps/wheels.lock`),
 LibTorch configuration, and explicit native/GPU build flags. The exact build

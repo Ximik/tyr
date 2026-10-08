@@ -6,7 +6,7 @@ name: CUDA smoke
 on:
   push:
     branches: [main]
-    paths:
+    paths: &cuda-smoke-paths
       - 'Tyr/GPU/**'
       - 'Tyr/Torch.lean'
       - 'Tests/*GPU*.lean'
@@ -16,7 +16,9 @@ on:
       - 'Tyr/Model/Laguna/**'
       - 'Tests/RunLagunaModel.lean'
       - 'scripts/qualification/**'
+      - '.github/scripts/readiness.py'
       - 'env.sh'
+      - 'deps/**'
       - 'scripts/test_native_attention.sh'
       - 'scripts/gpu/**'
       - 'cc/include/**'
@@ -30,28 +32,7 @@ on:
       - '.github/workflows/cuda-smoke.yml'
   pull_request:
     types: [labeled, opened, synchronize, reopened]
-    paths:
-      - 'Tyr/GPU/**'
-      - 'Tyr/Torch.lean'
-      - 'Tests/*GPU*.lean'
-      - 'Examples/GPU/**'
-      - 'Examples/NanoChat/Generator/KVCache.lean'
-      - 'Tyr/Inference/**'
-      - 'Tyr/Model/Laguna/**'
-      - 'Tests/RunLagunaModel.lean'
-      - 'scripts/qualification/**'
-      - 'env.sh'
-      - 'scripts/test_native_attention.sh'
-      - 'scripts/gpu/**'
-      - 'cc/include/**'
-      - 'cc/tools/**'
-      - 'cc/src/tyr*'
-      - 'cc/src/tk_*'
-      - 'cc/src/generated/**'
-      - 'cc/Makefile'
-      - 'lakefile.lean'
-      - 'lean-toolchain'
-      - '.github/workflows/cuda-smoke.yml'
+    paths: *cuda-smoke-paths
   schedule:
     - cron: '23 5 * * 1'
   workflow_dispatch:
@@ -80,7 +61,7 @@ jobs:
         id: configuration
         env:
           TYR_QUALIFICATION_RUNNER_LABELS: ${{ vars.TYR_QUALIFICATION_RUNNER_LABELS }}
-        run: python3 scripts/qualification/readiness.py
+        run: python3 .github/scripts/readiness.py
       - name: Upload readiness evidence
         if: always()
         uses: actions/upload-artifact@v4
