@@ -86,10 +86,10 @@ export TYR_GPU_TARGET="${TYR_GPU_TARGET:-${gpu_target}}"
 export TYR_GPU_FAMILY="${TYR_GPU_FAMILY:-${gpu_family}}"
 
 echo "[1/5] Build Lean targets"
-lake -R --quiet build +Tyr.GPU.Codegen.GenerateMain +Tyr.GPU.Kernels.MhaH100
+lake --quiet build +Tyr.GPU.Codegen.GenerateMain +Tyr.GPU.Kernels.MhaH100
 
 echo "[2/5] Generate CUDA translation unit"
-lake -R env "$LEAN_BIN" --run Tyr/GPU/Codegen/GenerateMain.lean Tyr.GPU.Kernels.MhaH100 --out-dir cc/src/generated
+lake env "$LEAN_BIN" --run Tyr/GPU/Codegen/GenerateMain.lean Tyr.GPU.Kernels.MhaH100 --out-dir cc/src/generated
 
 echo "[3/5] Build C++/CUDA runtime library (GPU=${TYR_GPU_TARGET}, family=${TYR_GPU_FAMILY})"
 invalidate_generated_gpu_objects
@@ -98,4 +98,4 @@ make -C cc -j"$(cpu_count)" GPU="${TYR_GPU_TARGET}" GPU_FAMILY="${TYR_GPU_FAMILY
 echo "[4/5] Use Lean source runner (Examples/GPU/RunMhaH100Train.lean)"
 
 echo "[5/5] Run benchmark"
-lake -R env "$LEAN_BIN" --run Examples/GPU/RunMhaH100Train.lean --benchmark --warmup 20 --bench-iters 500 --lr 200.0 --noise 0.5 "$@"
+lake env "$LEAN_BIN" --run Examples/GPU/RunMhaH100Train.lean --benchmark --warmup 20 --bench-iters 500 --lr 200.0 --noise 0.5 "$@"

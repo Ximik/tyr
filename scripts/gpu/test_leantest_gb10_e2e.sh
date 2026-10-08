@@ -96,17 +96,17 @@ generator_targets=(
 )
 
 echo "[1/5] Build Lean kernel generator inputs"
-lake -R --quiet build "${generator_targets[@]}"
+lake --quiet build "${generator_targets[@]}"
 
 echo "[2/5] Generate CUDA translation units"
-lake -R env "$LEAN_BIN" --run Tyr/GPU/Codegen/GenerateMain.lean "${modules[@]}" --out-dir cc/src/generated
+lake env "$LEAN_BIN" --run Tyr/GPU/Codegen/GenerateMain.lean "${modules[@]}" --out-dir cc/src/generated
 
 echo "[3/5] Build C++/CUDA runtime library (GPU=${TYR_GPU_TARGET}, family=${TYR_GPU_FAMILY})"
 invalidate_generated_gpu_objects
 make -C cc -j"$(cpu_count)" GPU="${TYR_GPU_TARGET}" GPU_FAMILY="${TYR_GPU_FAMILY}"
 
 echo "[4/5] Build LeanTest GB10 executable"
-lake -R --quiet build TestGPUGB10E2E
+lake --quiet build TestGPUGB10E2E
 
 echo "[5/5] Run LeanTest GB10 suite"
-lake -R env ./.lake/build/bin/TestGPUGB10E2E "$@"
+lake env ./.lake/build/bin/TestGPUGB10E2E "$@"

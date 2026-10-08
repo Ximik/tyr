@@ -48,7 +48,7 @@ jobs:
       - name: Build crash probe
         run: |
           source ./env.sh
-          lake -R build ffi_crash_probe
+          lake build ffi_crash_probe
 
       - name: Audit dynamic symbol exports (interposition diagnostics)
         run: |

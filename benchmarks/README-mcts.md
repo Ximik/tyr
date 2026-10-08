@@ -3,8 +3,8 @@
 Build and run from the repository root:
 
 ```sh
-TYR_SKIP_GPU_CODEGEN=1 lake -R build mctx_bench
-lake -R env ./.lake/build/bin/mctx_bench
+TYR_SKIP_GPU_CODEGEN=1 lake build mctx_bench
+lake env ./.lake/build/bin/mctx_bench
 ```
 
 The executable checks correctness before reporting CSV timings. It contains two

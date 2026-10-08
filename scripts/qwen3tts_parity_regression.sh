@@ -93,11 +93,11 @@ rm -f "$LEAN_CODES" "$PY_CODES"
 
 echo "[qwen3tts-parity] building Lean executable"
 if [[ "${TYR_SKIP_QUALIFICATION_BUILD:-0}" != 1 ]]; then
-  "${RUN_ENV[@]}" lake -R build Qwen3TTSEndToEnd >/dev/null
+  "${RUN_ENV[@]}" lake build Qwen3TTSEndToEnd >/dev/null
 fi
 
 echo "[qwen3tts-parity] Lean encode"
-TYR_DEVICE="$TYR_DEVICE" "${RUN_ENV[@]}" lake -R env ./.lake/build/bin/Qwen3TTSEndToEnd \
+TYR_DEVICE="$TYR_DEVICE" "${RUN_ENV[@]}" lake env ./.lake/build/bin/Qwen3TTSEndToEnd \
   --model-dir "$MODEL_DIR" \
   --seed "${TYR_QUALIFICATION_SEED:-0}" \
   --encode-audio-path "$AUDIO_PATH" \

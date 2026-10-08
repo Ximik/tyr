@@ -107,9 +107,9 @@ jobs:
       - name: Typecheck required example surfaces
         run: |
           source ./env.sh
-          lake -R build Examples BranchingFlowsMoleculeTrainGenerate mctx_bench
-          lake -R env lean Examples/NanoChat/Generator/TypedState.lean
-          lake -R env lean Examples/BranchingFlows/BranchingFlowsDemo.lean
+          lake build Examples BranchingFlowsMoleculeTrainGenerate mctx_bench
+          lake env lean Examples/NanoChat/Generator/TypedState.lean
+          lake env lean Examples/BranchingFlows/BranchingFlowsDemo.lean
 
       # Save before tests: retrying a failed CPU suite can reuse its successful
       # build, even when the preceding workflow's test step failed.
@@ -133,9 +133,9 @@ jobs:
       - name: Run required CPU test suites
         run: |
           source ./env.sh
-          lake -R env python3 scripts/test_inventory.py --run --report output/ci/suites.json
-          lake -R env python3 scripts/test_branching_checkpoint_resume.py
-          lake -R env ./.lake/build/bin/mctx_bench
+          lake env python3 scripts/test_inventory.py --run --report output/ci/suites.json
+          lake env python3 scripts/test_branching_checkpoint_resume.py
+          lake env ./.lake/build/bin/mctx_bench
 
       - name: Upload CPU test diagnostics
         if: always()

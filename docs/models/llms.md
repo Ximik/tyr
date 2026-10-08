@@ -108,7 +108,7 @@ views, and sequence advancement now return IO results. This cache remains
 shared and mutable: callers serialize access and discard earlier cache values
 after updates. Use Laguna sessions for locking and independent forks.
 
-`TYR_LAGUNA_CACHE_BENCH=1 lake -R exe LagunaModelTest` runs an optional
+`TYR_LAGUNA_CACHE_BENCH=1 lake exe LagunaModelTest` runs an optional
 functional/session comparison at capacities 128 and 8192, reporting synchronized
 decode timings and cache tensor bytes. The normal model gate covers ring wrap,
 forks, functional snapshots, and FP32/BF16 parity.

@@ -103,7 +103,7 @@ def nonEmptyTrimmed? (s : String) : Option String :=
   let trimmed := s.trimAscii.toString
   if trimmed.isEmpty then none else some trimmed
 
-/-- Resolve the macOS SDK root from env or `xcrun` without hard-coded Xcode/CLT paths. -/
+/-- Prefer the version-independent `MacOSX.sdk` sibling of a versioned SDK path. -/
 def normalizeMacOSSDKRoot (sdk : String) : IO String := do
   let sdkPath : FilePath := ⟨sdk⟩
   match sdkPath.parent with
@@ -116,7 +116,7 @@ def normalizeMacOSSDKRoot (sdk : String) : IO String := do
   | none =>
       pure sdk
 
-/-- Resolve the macOS SDK root from env or `xcrun` without hard-coded Xcode/CLT paths. -/
+/-- Resolve the macOS SDK root from `TYR_MACOS_SDKROOT` or `SDKROOT` (exported by `env.sh`). -/
 def macOSSDKRoot? : Option String := run_io do
   let envSdk? ← do
     match (← IO.getEnv "TYR_MACOS_SDKROOT") with
@@ -129,22 +129,7 @@ def macOSSDKRoot? : Option String := run_io do
         pure (some normalized)
       else
         pure none
-  | none =>
-    try
-      let out ← IO.Process.output {
-        cmd := "xcrun"
-        args := #["--sdk", "macosx", "--show-sdk-path"]
-      }
-      if out.exitCode == 0 then
-        match nonEmptyTrimmed? out.stdout with
-        | some sdk =>
-            pure (some (← normalizeMacOSSDKRoot sdk))
-        | none =>
-            pure none
-      else
-        pure none
-    catch _ =>
-      pure none
+  | none => pure none
 
 /-- Optional macOS SDK search flags when an SDK root can be discovered. -/
 def macOSSDKLinkArgs : Array String :=
@@ -497,12 +482,21 @@ extern_lib libtyr pkg := do
     |>.mix srcJob |>.mix headerJob |>.mix toolJob |>.mix gpuIrJob
 
   buildFileAfterDep tyrCLib depJob fun _ => do
-    let skipGpuCodegen? ← IO.getEnv "TYR_SKIP_GPU_CODEGEN"
-    if skipGpuCodegen?.getD "" != "1" then
+    -- TYR_SKIP_GPU_CODEGEN: "1" skips, "0" forces; unset skips when make found
+    -- no nvcc, since the Makefile then drops generated .cu files and links the
+    -- weak launcher stubs (refreshed by `gpu-stubs` above) instead.
+    let hasNvcc := (← IO.FS.readFile (pkg.dir / "cc" / "build" / "native-build.json")).contains
+      "\"HAS_NVCC\": \"1\""
+    let skipGpuCodegen :=
+      match (← IO.getEnv "TYR_SKIP_GPU_CODEGEN").bind nonEmptyTrimmed? with
+      | some "1" => true
+      | some "0" => false
+      | _ => !hasNvcc
+    if !skipGpuCodegen then
       let generatorExe := pkg.dir / ".lake" / "build" / "bin" / "GenerateGpuKernels"
       proc {
         cmd := "lake"
-        args := #["-R", "build", "GenerateGpuKernels"]
+        args := #["build", "GenerateGpuKernels"]
         cwd := pkg.dir
         env := #[
           ("LEAN_HOME", some sysroot.toString),
@@ -526,7 +520,7 @@ extern_lib libtyr pkg := do
           relinkBuiltExecutableToTmp pkg.dir "GenerateGpuKernels"
       proc {
         cmd := "lake"
-        args := #["-R", "env", runnableGeneratorExe.toString]
+        args := #["env", runnableGeneratorExe.toString]
                   ++ gpuCodegenModules
                   ++ #["--out-dir", generatedCudaDir.toString]
         cwd := pkg.dir
@@ -540,11 +534,16 @@ extern_lib libtyr pkg := do
       match (← IO.getEnv "TYR_BUILD_TYRC_DYLIB") with
       | some "0" => false
       | _ => true
+    -- `env.sh` exports TYR_MAKE_JOBS (CPU count by default).
+    let jobsArgs :=
+      match (← IO.getEnv "TYR_MAKE_JOBS").bind nonEmptyTrimmed? with
+      | some jobs => #[s!"-j{jobs}"]
+      | none => #[]
     let makeArgs :=
       if buildTyrCDylib then
-        #["-C", (pkg.dir / "cc").toString, "lib", "dylib"]
+        jobsArgs ++ #["-C", (pkg.dir / "cc").toString, "lib", "dylib"]
       else
-        #["-C", (pkg.dir / "cc").toString, "lib"]
+        jobsArgs ++ #["-C", (pkg.dir / "cc").toString, "lib"]
     proc {
       cmd := "make"
       args := makeArgs
@@ -1132,7 +1131,7 @@ def ensureExecutable (path : FilePath) : IO Unit := do
 def runBuiltExecutable (rootPath : FilePath) (exeName : String) (args : Array String) : IO UInt32 := do
   let exe := builtExecutablePath rootPath exeName
   if !(← exe.pathExists) then
-    throw <| IO.userError s!"Missing compiled executable {exe}. Build it first with `lake -R build {exeName}`."
+    throw <| IO.userError s!"Missing compiled executable {exe}. Build it first with `lake build {exeName}`."
   ensureExecutable exe
   let runnableExe ←
     if (← builtExecutableLooksValid exe) && !(← builtExecutableLooksStale rootPath exeName exe) then
@@ -1205,7 +1204,7 @@ def buildNamedExecutables (rootPath : FilePath) (targets : Array String) : IO UI
 def buildGpuBackedTargets (rootPath : FilePath) (kernelModule : String) (targets : Array String) : IO UInt32 := do
   let child ← IO.Process.spawn {
     cmd := "lake"
-    args := #["-R", "build"] ++ targets
+    args := #["build"] ++ targets
     cwd := rootPath
     env := #[
       ("TYR_GPU_CODEGEN_MODULE", some kernelModule),
@@ -1240,7 +1239,7 @@ script buildMhaH100Examples (_args) do
     `extern_lib libtyr` build flow instead of manually invoking `GenerateGpuKernels`
     and `make`.
     Usage:
-      `lake -R run buildGpuTarget <KernelModule> <BuildTarget> [ExtraBuildTarget ...]`
+      `lake run buildGpuTarget <KernelModule> <BuildTarget> [ExtraBuildTarget ...]`
 
     Lake versions differ on whether a script-level `--` separator is consumed or
     forwarded. Accept it in either position so the documented helper cannot
@@ -1248,7 +1247,7 @@ script buildMhaH100Examples (_args) do
 script buildGpuTarget (args) do
   let args := if args.head? == some "--" then args.drop 1 else args
   if args.length < 2 then
-    IO.eprintln "Usage: lake -R run buildGpuTarget <KernelModule> <BuildTarget> [ExtraBuildTarget ...]"
+    IO.eprintln "Usage: lake run buildGpuTarget <KernelModule> <BuildTarget> [ExtraBuildTarget ...]"
     pure 2
   else
     let rootPath := (← getWorkspace).root.dir

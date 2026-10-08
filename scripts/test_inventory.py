@@ -82,7 +82,7 @@ def main() -> int:
     targets = manifest["required"]
     print(f"Test inventory: {len(targets)} required, {len(manifest['optional'])} optional suites", flush=True)
     if args.build:
-        return subprocess.call(["lake", "-R", "build", *targets], cwd=REPO)
+        return subprocess.call(["lake", "build", *targets], cwd=REPO)
     if args.run:
         report = {"suites": {target: {"status": "not_run"} for target in targets}}
         if args.report:

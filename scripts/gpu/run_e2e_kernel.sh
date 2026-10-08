@@ -107,10 +107,10 @@ if ! [[ "$trials" =~ ^[0-9]+$ ]] || [[ "$trials" -lt 1 ]]; then
 fi
 
 echo "[1/6] Build Lean kernel + generator (${label})"
-lake -R --quiet build +Tyr.GPU.Codegen.GenerateMain "+${kernel_module}"
+lake --quiet build +Tyr.GPU.Codegen.GenerateMain "+${kernel_module}"
 
 echo "[2/6] Generate CUDA translation unit (${label})"
-lake -R env "$LEAN_BIN" --run Tyr/GPU/Codegen/GenerateMain.lean "$kernel_module" --out-dir cc/src/generated
+lake env "$LEAN_BIN" --run Tyr/GPU/Codegen/GenerateMain.lean "$kernel_module" --out-dir cc/src/generated
 
 gpu_target="$(detect_gpu_target)"
 gpu_family="$(detect_gpu_family)"
@@ -127,7 +127,7 @@ invalidate_generated_gpu_objects
 make -C cc -j"$(cpu_count)" GPU="${TYR_GPU_TARGET}" GPU_FAMILY="${TYR_GPU_FAMILY}"
 
 echo "[4/6] Build Lean executable (${runner_exe})"
-if ! lake -R --quiet build "$runner_exe" "${extra_build_targets[@]}"; then
+if ! lake --quiet build "$runner_exe" "${extra_build_targets[@]}"; then
   if [[ -f "${runner_source}" ]]; then
     echo "[4/6] Falling back to Lean source runner (${runner_source})"
     use_source_runner=1
@@ -139,15 +139,15 @@ fi
 for i in $(seq 1 "$trials"); do
   echo "[5/6] (${i}/${trials}) Regenerate fixture tensors (${label})"
   if [[ "${use_source_runner}" -eq 1 ]]; then
-    lake -R env "$LEAN_BIN" --run "${runner_source}" --gen-only --regen
+    lake env "$LEAN_BIN" --run "${runner_source}" --gen-only --regen
   else
-    lake -R env ./.lake/build/bin/"${runner_exe}" --gen-only --regen
+    lake env ./.lake/build/bin/"${runner_exe}" --gen-only --regen
   fi
 
   echo "[6/6] (${i}/${trials}) Run end-to-end check (${label})"
   if [[ "${use_source_runner}" -eq 1 ]]; then
-    lake -R env "$LEAN_BIN" --run "${runner_source}"
+    lake env "$LEAN_BIN" --run "${runner_source}"
   else
-    lake -R env ./.lake/build/bin/"${runner_exe}"
+    lake env ./.lake/build/bin/"${runner_exe}"
   fi
 done

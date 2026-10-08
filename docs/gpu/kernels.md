@@ -102,7 +102,7 @@ variables — `TYR_GPU_CODEGEN_MODULE` (space-separated module list, default
 `Tyr.GPU.Kernels.MhaH100`) and `TYR_SKIP_GPU_CODEGEN=1` to reuse the checked-in
 generated tree. On a fresh checkout the codegen step needs the kernel modules'
 own `.oleans`, so CI does a two-phase build: first `TYR_SKIP_GPU_CODEGEN=1
-lake -R build <kernel modules>`, then the real build
+lake build <kernel modules>`, then the real build
 (`.github/workflows/cuda-smoke.yml:149-171`). The full variable table is in
 [Getting started](../getting-started.md).
 

@@ -16,7 +16,7 @@ import json, os, pathlib, sys
 args = sys.argv[1:]
 root = pathlib.Path(os.environ["TYR_PARITY_TEST_ROOT"])
 if pathlib.Path(sys.argv[0]).name == "lake":
-    if len(args) < 3 or args[:3] != ["-R", "env", "./.lake/build/bin/Qwen3TTSEndToEnd"]:
+    if len(args) < 2 or args[:2] != ["env", "./.lake/build/bin/Qwen3TTSEndToEnd"]:
         raise SystemExit("Unexpected Lake command: " + repr(args))
     side, flag = "lean", "--encode-out-codes-path"
     device = os.environ["TYR_PARITY_TEST_DEVICE"]

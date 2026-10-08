@@ -148,9 +148,12 @@ after a runtime Hopper check (`device_supports_tk_hopper`,
    `cc/include`, `cc/tools`, and the active kernel module's `.c.o.export` IR.
    Compiler-generated `.d` files also feed `native-dependencies.txt`, whose
    existing paths are tracked by Lake, including vendor headers.
-4. Unless `TYR_SKIP_GPU_CODEGEN=1`, runs `lake -R build GenerateGpuKernels` and
-   executes it into `cc/src/generated/`.
-5. Runs `make -C cc lib [dylib]` with `gpuMakeEnv` forwarding
+4. Runs `lake build GenerateGpuKernels` and executes it into
+   `cc/src/generated/`, unless `TYR_SKIP_GPU_CODEGEN=1`, or it is unset and
+   `native-build.json` reports `HAS_NVCC=0` (without `nvcc` the Makefile ignores
+   generated `.cu` files and links the weak launcher stubs, so codegen would be
+   wasted). `TYR_SKIP_GPU_CODEGEN=0` forces codegen.
+5. Runs `make -jN -C cc lib [dylib]` (`N` = `TYR_MAKE_JOBS`, which `env.sh` sets to the CPU count; no `-j` if unset) with `gpuMakeEnv` forwarding
    `GPU`/`GPU_FAMILY`/`GPU_COMPUTE`/`GPU_CODE`.
 
 Make uses compiler dependency files for C, C++, Objective-C++, and CUDA.
@@ -225,7 +228,8 @@ Build behavior is controlled entirely through the environment:
 | Variable | Effect |
 |---|---|
 | `TYR_GPU_CODEGEN_MODULE` | kernel module(s) to emit CUDA for (space-separated; default `Tyr.GPU.Kernels.MhaH100`) |
-| `TYR_SKIP_GPU_CODEGEN=1` | skip the generator step in `extern_lib libtyr` |
+| `TYR_SKIP_GPU_CODEGEN` | `1` skips the generator step in `extern_lib libtyr`, `0` forces it; unset skips it only when `nvcc` is missing |
+| `TYR_MAKE_JOBS` | parallel jobs for the native `make` build; `source ./env.sh` sets it to the CPU count if unset (unset: serial) |
 | `TYR_BUILD_TYRC_DYLIB=0` | build only `libTyrC.a`, skip `libTyrC.so/.dylib` |
 | `GPU` (or `TYR_GPU_TARGET`), `GPU_FAMILY`, `GPU_COMPUTE`, `GPU_CODE` | override the Makefile GPU matrix |
 | `TYR_MACOS_SDKROOT`, `TYR_MACOS_DEPLOYMENT_TARGET` | macOS SDK/deployment overrides |
@@ -332,7 +336,7 @@ Build and run through Lake so the native library and runtime paths are right:
 lake build                                  # extern_lib libtyr → codegen → make -C cc lib dylib
 lake run runBuiltTarget -- TrainGPT         # sets DYLD/LD_LIBRARY_PATH for you
 # GPU build for a specific kernel module and target:
-TYR_GPU_CODEGEN_MODULE=Tyr.GPU.Kernels.MhaH100 GPU=H100 lake -R build RunMhaH100
+TYR_GPU_CODEGEN_MODULE=Tyr.GPU.Kernels.MhaH100 GPU=H100 lake build RunMhaH100
 # Manual probe of the FFI failure mode:
 lake build ffi_crash_probe && lake run runBuiltTarget -- ffi_crash_probe
 ```

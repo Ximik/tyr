@@ -153,10 +153,10 @@ def main():
                 raise ValueError(f"Configured GPU {gpu} does not match the detected devices")
             suite = plan["runner"]
             arguments = ["--filter", "TorchParity", "--fail-fast"] if gpu == "H100" else ["--fail-fast"]
-            commands = [("gpu", ["lake", "-R", "env", f"./.lake/build/bin/{suite}", *arguments]),
-                        ("decode", ["lake", "-R", "env", "./.lake/build/bin/RunMhaH100Decode", "--regen"]),
+            commands = [("gpu", ["lake", "env", f"./.lake/build/bin/{suite}", *arguments]),
+                        ("decode", ["lake", "env", "./.lake/build/bin/RunMhaH100Decode", "--regen"]),
                         ("native", ["bash", "scripts/test_native_attention.sh", "cuda"]),
-                        ("laguna", ["lake", "-R", "env", "./.lake/build/bin/LagunaModelTest"])]
+                        ("laguna", ["lake", "env", "./.lake/build/bin/LagunaModelTest"])]
         else:
             if args.cache is None:
                 raise ValueError("--cache is required for pinned model qualification")

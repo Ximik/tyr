@@ -49,12 +49,12 @@ source ./env.sh
 python3 scripts/qualification/run.py --kind gpu --python "$python_bin" \
   --check-runtime --report output/qualification/runtime.json
 # Keep the known codegen bootstrap explicit on a fresh checkout.
-TYR_SKIP_GPU_CODEGEN=1 lake -R build "${modules[@]}"
+TYR_SKIP_GPU_CODEGEN=1 lake build "${modules[@]}"
 targets=("$gpu_runner" RunMhaH100Decode LagunaModelTest)
 if [[ "${TYR_QUALIFY_MODELS:-false}" == true ]]; then
   targets+=(Qwen3TTSEndToEnd Qwen3ASRTranscribe)
 fi
-lake -R build "${targets[@]}"
+lake build "${targets[@]}"
 python3 scripts/check_ffi_abi.py
 python3 scripts/check_ffi_abi.py --header cc/src/tyr_owned_kv_abi.h --generated .lake/build/ir/Tyr/Inference/OwnedKV.c
 python3 scripts/qualification/run.py --kind gpu --python "$python_bin" \
