@@ -166,8 +166,6 @@ NPROC_PER_NODE=4 ./scripts/nanochat/run_train_torchrun.sh \
 ```
 
 Notes:
-- `run_train_torchrun.sh` defaults `TORCHRUN_BIN` to `/grid/it/data/elzar/easybuild/software/Anaconda3/2023.07-2/bin/torchrun`.
-- Override launcher path with `TORCHRUN_BIN=/path/to/torchrun`.
 - Override process counts in the benchmark script with `SIZES="2 4"` (or any space-separated list).
 
 ### GPU Kernel Parity

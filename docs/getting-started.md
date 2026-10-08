@@ -215,9 +215,7 @@ NPROC_PER_NODE=4 ./scripts/nanochat/run_train_torchrun.sh \
 
 Knobs (all verified in the scripts):
 
-- `TORCHRUN_BIN` — torchrun path; the default
-  (`/grid/it/data/elzar/easybuild/software/Anaconda3/2023.07-2/bin/torchrun`) is
-  site-specific, so override it on any other host.
+- `TORCHRUN_BIN` — torchrun launcher (default: `torchrun` from `PATH`).
 - `NPROC_PER_NODE` (default 2), `SKIP_BUILD=1` (skip the `lake build
   TrainNanoChat` step), `TYR_DEVICE` (default `cuda` in these wrappers).
 - `bench_distributed.sh`: `SIZES="1 2 4"`, `RUN_ARGS`, `LOG_DIR` (default

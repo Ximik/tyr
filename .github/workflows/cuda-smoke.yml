@@ -95,12 +95,14 @@ jobs:
     timeout-minutes: 180
     env:
       GPU: ${{ vars.TYR_GPU || 'GB10' }}
-      TYR_QUALIFICATION_ROOT: ${{ vars.TYR_QUALIFICATION_ROOT || '/home/pehle/tyr-qualification' }}
+      TYR_QUALIFICATION_ROOT: ${{ vars.TYR_QUALIFICATION_ROOT }}
       TYR_QUALIFICATION_BOOTSTRAP_PYTHON: ${{ vars.TYR_QUALIFICATION_BOOTSTRAP_PYTHON || 'python3.12' }}
       TYR_QUALIFY_MODELS: ${{ github.event_name == 'schedule' || inputs.real_models }}
       CUDA_HOME: ${{ vars.TYR_CUDA_HOME || '/usr/local/cuda' }}
     steps:
       - uses: actions/checkout@v4
+      - name: Default qualification root
+        run: echo "TYR_QUALIFICATION_ROOT=${TYR_QUALIFICATION_ROOT:-$HOME/tyr-qualification}" >> "$GITHUB_ENV"
       - name: Install pinned Lean toolchain
         run: |
           export PATH="$HOME/.elan/bin:$PATH"

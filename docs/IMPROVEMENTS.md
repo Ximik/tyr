@@ -228,9 +228,6 @@ pass (scope, semantics risk, or hardware requirements).
   decision.
 - **[docs]** SM100 capability constants are marked "estimated" — needs
   confirmation against hardware documentation.
-- **[docs]** The pre-existing `docs/gpu/thunderkittens-porting-status.md`
-  links to machine-specific absolute paths (`/grid/zador/...`). → Convert to
-  relative links.
 
 ### DiffEq
 

@@ -27,8 +27,8 @@ Generated 5 CUDA translation unit(s) in cc/src/generated
   cc/src/generated/Tyr_GPU_Kernels_MhaGB10.cu
   cc/src/generated/Tyr_GPU_Kernels_BrownianSample.cu
 [3/5] Build C++/CUDA runtime library (GPU=GB10, family=BLACKWELL)
-make: Entering directory '/home/pehle/dev/tyr-launch-demo/cc'
-make: Leaving directory '/home/pehle/dev/tyr-launch-demo/cc'
+make: Entering directory '<repo>/cc'
+make: Leaving directory '<repo>/cc'
 [4/5] Build LeanTest GB10 executable
 ⚠ [37/874] Replayed Tyr.Typed.Ops
 warning: Tyr/Typed/Ops.lean:376:14: @Tensor.addB does not have a doc string

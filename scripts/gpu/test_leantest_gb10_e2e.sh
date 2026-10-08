@@ -5,9 +5,9 @@ source ./load_modules.sh
 
 # Noninteractive GPU hosts may have the CUDA toolkit installed without putting
 # nvcc on PATH. Prefer an explicit CUDA_HOME, then the conventional install
-# roots used by Spark/GB10 machines. This suite must not silently use CPU stubs.
+# root. This suite must not silently use CPU stubs.
 if ! command -v nvcc >/dev/null 2>&1; then
-  cuda_candidates=("${CUDA_HOME:-}" /usr/local/cuda /usr/local/cuda-13.0 /usr/local/cuda-12.6)
+  cuda_candidates=("${CUDA_HOME:-}" /usr/local/cuda)
   for cuda_dir in "${cuda_candidates[@]}"; do
     if [[ -n "$cuda_dir" && -x "$cuda_dir/bin/nvcc" ]]; then
       export CUDA_HOME="$cuda_dir"

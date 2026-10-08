@@ -53,7 +53,7 @@ TYR_RUNPOD_CONFIG=.runpod-state/h100.env \
 ```
 
 You can forward extra arguments to
-[`scripts/gpu/bench_mha_h100_train.sh`](/Users/pehle/dev/tyr/scripts/gpu/bench_mha_h100_train.sh),
+[`scripts/gpu/bench_mha_h100_train.sh`](../gpu/bench_mha_h100_train.sh),
 for example:
 
 ```bash

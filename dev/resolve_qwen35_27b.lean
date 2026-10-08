@@ -5,7 +5,7 @@ open torch.qwen35
 def main : IO Unit := do
   let opts : hub.DownloadOptions := {
     revision := "main"
-    cacheDir := "/Users/pehle/dev/tyr/.model-cache/qwen35"
+    cacheDir := ".model-cache/qwen35"
     includeTokenizer := true
   }
   let dir ← hub.resolvePretrainedDir "Qwen/Qwen3.5-27B" opts

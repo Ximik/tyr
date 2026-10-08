@@ -43,21 +43,10 @@ def linuxCompilerLibDirArgs : Array String := run_io do
     but no CUDA driver stub, so only link `-lcuda` when the stub is present. -/
 def linuxCudaDriverStubLinkArgs : Array String := run_io do
   if System.Platform.isOSX then return #[] else
-  let envCandidates ←
-    match (← IO.getEnv "CUDA_HOME") with
-    | some home => pure #[s!"{home}/lib64/stubs"]
-    | none => pure #[]
-  let fallbackCandidates := #[
-    "/usr/local/cuda/lib64/stubs",
-    "/usr/local/cuda-13.0/lib64/stubs",
-    "/usr/local/cuda-12.6/lib64/stubs",
-    "/grid/it/easybuild/easybuild5/software/CUDA/12.9.1/stubs/lib64"
-  ]
-  let candidates := envCandidates ++ fallbackCandidates
-  for stubsDir in candidates do
-    let libcuda : FilePath := ⟨stubsDir⟩ / "libcuda.so"
-    if ← libcuda.pathExists then
-      return #[s!"-L{stubsDir}", "-lcuda"]
+  let cudaHome := ((← IO.getEnv "CUDA_HOME").filter (!·.isEmpty)).getD "/usr/local/cuda"
+  let stubsDir : FilePath := cudaHome / "lib64" / "stubs"
+  if ← (stubsDir / "libcuda.so").pathExists then
+    return #[s!"-L{stubsDir}", "-lcuda"]
   return #[]
 
 /-- CUDA link flags for Linux: `libtorch_cuda` / `libc10_cuda` plus the CUDA
