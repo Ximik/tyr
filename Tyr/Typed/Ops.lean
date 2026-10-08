@@ -265,24 +265,28 @@ At runtime libtorch broadcasts natively; the operands are passed through a
 `reshape #[]` type-erasure (a same-handle no-op in the C++ bridge), so no
 expansion is materialized and the FFI surface is unchanged. -/
 
+/-- Broadcasting elementwise addition (`a +ᵇ b`). -/
 def addB {σ₁ σ₂ : StaticSpec} (a : Tensor σ₁) (b : Tensor σ₂)
     (_h : (TensorSpec.broadcastShapes? σ₁.shape σ₂.shape).isSome = true := by rfl) :
     Tensor (σ₁.pointwise σ₂) :=
   .assumeSpec (torch.reshape (torch.add (torch.reshape a.raw #[]) (torch.reshape b.raw #[]))
     (TensorSpec.broadcastShape σ₁.shape σ₂.shape))
 
+/-- Broadcasting elementwise subtraction (`a -ᵇ b`). -/
 def subB {σ₁ σ₂ : StaticSpec} (a : Tensor σ₁) (b : Tensor σ₂)
     (_h : (TensorSpec.broadcastShapes? σ₁.shape σ₂.shape).isSome = true := by rfl) :
     Tensor (σ₁.pointwise σ₂) :=
   .assumeSpec (torch.reshape (torch.sub (torch.reshape a.raw #[]) (torch.reshape b.raw #[]))
     (TensorSpec.broadcastShape σ₁.shape σ₂.shape))
 
+/-- Broadcasting elementwise multiplication (`a *ᵇ b`). -/
 def mulB {σ₁ σ₂ : StaticSpec} (a : Tensor σ₁) (b : Tensor σ₂)
     (_h : (TensorSpec.broadcastShapes? σ₁.shape σ₂.shape).isSome = true := by rfl) :
     Tensor (σ₁.pointwise σ₂) :=
   .assumeSpec (torch.reshape (torch.mul (torch.reshape a.raw #[]) (torch.reshape b.raw #[]))
     (TensorSpec.broadcastShape σ₁.shape σ₂.shape))
 
+/-- Broadcasting elementwise division (`a /ᵇ b`). -/
 def divB {σ₁ σ₂ : StaticSpec} (a : Tensor σ₁) (b : Tensor σ₂)
     (_h : (TensorSpec.broadcastShapes? σ₁.shape σ₂.shape).isSome = true := by rfl) :
     Tensor (σ₁.division σ₂) :=

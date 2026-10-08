@@ -66,7 +66,7 @@ jobs:
       - name: Build required test runners
         run: |
           source ./env.sh
-          python3 scripts/test_inventory.py --build
+          python3 scripts/test_inventory.py --build --wfail
 
       - name: Verify audited FFI ABI declarations
         run: |
@@ -81,7 +81,7 @@ jobs:
       - name: Typecheck required example surfaces
         run: |
           source ./env.sh
-          lake build Examples BranchingFlowsMoleculeTrainGenerate mctx_bench
+          lake build --wfail Examples BranchingFlowsMoleculeTrainGenerate mctx_bench
           lake env lean Examples/NanoChat/Generator/TypedState.lean
           lake env lean Examples/BranchingFlows/BranchingFlowsDemo.lean
 
@@ -161,21 +161,3 @@ jobs:
           python3 scripts/test_native_build.py
           python3 scripts/test_branching_checkpoint_snapshot.py
           bash scripts/nanochat/test_checkpoint_paths.sh
-
-      - name: Check for TODO/FIXME comments
-        run: |
-          echo "Checking for TODO/FIXME comments..."
-          if rg -n "(--|/-).*\\b(TODO|FIXME)\\b" Tyr/ Examples/ Tests/ -g "*.lean"; then
-            echo "Found TODO/FIXME comments in Lean sources"
-          else
-            echo "No TODO/FIXME found"
-          fi
-
-      - name: Check for sorry
-        run: |
-          echo "Checking for sorry (incomplete proofs)..."
-          if rg -n "\\bsorry\\b" Tyr/ Examples/ Tests/ -g "*.lean" -g "!Tyr/Tokenizer/SpecialTokens.lean"; then
-            echo "Found sorry in Lean sources"
-          else
-            echo "No sorry found"
-          fi

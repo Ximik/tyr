@@ -473,7 +473,7 @@ def trainStepMoleculeMuonCoreT {batch maxLen vocab : UInt64} {Params : Type} [Te
     (optState : MoleculeMuonState Params)
     (packed : BranchingMoleculeBatch batch maxLen)
     (lrT : T #[])
-    (labelDFM : Option DistNoisyDiscreteConfig := none)
+    (_labelDFM : Option DistNoisyDiscreteConfig := none)
     (momentumCoeff : Float := 0.95)
     (numIters : UInt64 := 5)
     (clipGrads : Params → Float → IO Unit := fun params maxNorm => do

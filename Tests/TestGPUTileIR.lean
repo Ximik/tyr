@@ -826,7 +826,7 @@ def testBadTypedWhereKernelElabFailure : IO Unit := do
   assertTrue (result.exitCode != 0)
     "Mismatched ct.where kernels should fail during elaboration"
   assertTrue
-    (!output.trim.isEmpty)
+    (!output.trimAscii.toString.isEmpty)
     "Mismatched ct.where failures should emit an elaboration diagnostic"
 
 end Tests.GPUTileIR

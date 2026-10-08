@@ -26,19 +26,19 @@ class DiffEqSpace (α : Type) where
 namespace DiffEqArithmetic
 
 /-- `+` operator instance derived from `DiffEqSpace`. Use via `local instance`. -/
-def hAddInst [DiffEqSpace α] : HAdd α α α where
+@[reducible] def hAddInst [DiffEqSpace α] : HAdd α α α where
   hAdd := DiffEqSpace.add
 
 /-- `-` operator instance derived from `DiffEqSpace`. Use via `local instance`. -/
-def hSubInst [DiffEqSpace α] : HSub α α α where
+@[reducible] def hSubInst [DiffEqSpace α] : HSub α α α where
   hSub := DiffEqSpace.sub
 
 /-- Left scalar multiplication `a * x` derived from `DiffEqSpace.scale`. -/
-def hMulInst [DiffEqSpace α] : HMul Scalar α α where
+@[reducible] def hMulInst [DiffEqSpace α] : HMul Scalar α α where
   hMul := DiffEqSpace.scale
 
 /-- SMul (`a • x`) instance derived from `DiffEqSpace.scale`. -/
-def smulInst [DiffEqSpace α] : SMul Scalar α where
+@[reducible] def smulInst [DiffEqSpace α] : SMul Scalar α where
   smul := DiffEqSpace.scale
 
 end DiffEqArithmetic

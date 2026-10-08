@@ -74,25 +74,16 @@ instance {inDim outDim batch : UInt64} :
 
 /-- A pure module: a parameterized function with no side effects.
     The module type `M` must have a `torch.TensorStruct` instance for parameter traversal. -/
-class Module (M : Type) (In : Type) (Out : Type) where
-  [toTensorStruct : TensorStruct M]
+class Module (M : Type) (In : Type) (Out : Type) extends TensorStruct M where
   forward : M → In → Out
 
-attribute [instance] Module.toTensorStruct
-
 /-- A module with IO effects (dropout, random sampling, etc.) -/
-class ModuleIO (M : Type) (In : Type) (Out : Type) where
-  [toTensorStruct : TensorStruct M]
+class ModuleIO (M : Type) (In : Type) (Out : Type) extends TensorStruct M where
   forward : M → In → IO Out
 
-attribute [instance] ModuleIO.toTensorStruct
-
 /-- A module that takes additional context (training flag, cache, etc.) -/
-class ModuleCtx (M : Type) (Ctx : Type) (In : Type) (Out : Type) where
-  [toTensorStruct : TensorStruct M]
+class ModuleCtx (M : Type) (Ctx : Type) (In : Type) (Out : Type) extends TensorStruct M where
   forward : M → Ctx → In → IO Out
-
-attribute [instance] ModuleCtx.toTensorStruct
 
 /-! ## Lifting Instances
 

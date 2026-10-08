@@ -38,8 +38,8 @@ def floatToCLiteral (value : Float) : String :=
     let sign := if bits >>> 63 == 1 then "-" else ""
     let expBits : Int := ((bits >>> 52) &&& 0x7FF).toNat
     let mant := (bits &&& 0xFFFFFFFFFFFFF).toNat
-    let hexDigits := String.mk ((Nat.toDigits 16 mant))
-    let pad := String.mk (List.replicate (13 - hexDigits.length) '0')
+    let hexDigits := String.ofList ((Nat.toDigits 16 mant))
+    let pad := String.ofList (List.replicate (13 - hexDigits.length) '0')
     if expBits == 0 then
       s!"{sign}0x0.{pad}{hexDigits}p-1022"
     else

@@ -177,7 +177,7 @@ instance : RootFinder NormRatioFixedPoint where
     loop 0 y0 none
 
 instance : RootFinder RootFindMethod where
-  solve {Y} _ _ _ cfg step y0 :=
+  solve {_Y} _ _ _ cfg step y0 :=
     match cfg with
     | .fixedPoint fp => RootFinder.solve fp step y0
     | .normRatioFixedPoint n => RootFinder.solve n step y0
