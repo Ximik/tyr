@@ -103,7 +103,7 @@ variables — `TYR_GPU_CODEGEN_MODULE` (space-separated module list, default
 generated tree. On a fresh checkout the codegen step needs the kernel modules'
 own `.oleans`, so CI does a two-phase build: first `TYR_SKIP_GPU_CODEGEN=1
 lake build <kernel modules>`, then the real build
-(`.github/workflows/cuda-smoke.yml:149-171`). The full variable table is in
+(`.github/workflows/gpu.yml`). The full variable table is in
 [Getting started](../getting-started.md).
 
 Only the modules passed to the generator get `.cu` files, so a `.launch`
@@ -356,7 +356,7 @@ parts:
   Blackwell-family kernels on GB10. `Tests/TestGPUKernels.lean` is the
   CPU-side complement: codegen invariants and
   `AttentionProblem.currentSpecialization` selection.
-- **CI.** `.github/workflows/cuda-smoke.yml` runs on a self-hosted GPU
+- **CI.** `.github/workflows/gpu.yml` runs on a self-hosted GPU
   runner (GB10 by default; opt a PR in with the `gpu-ci` label), does the
   two-phase codegen build, and runs `TestGPUGB10E2E --fail-fast`, plus
   `RunMhaH100Decode` on Hopper hardware.

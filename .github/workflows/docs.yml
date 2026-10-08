@@ -1,4 +1,6 @@
-name: Docs Pages
+name: Docs
+
+# Builds the API docs with doc-gen4 and deploys them to GitHub Pages.
 
 on:
   push:

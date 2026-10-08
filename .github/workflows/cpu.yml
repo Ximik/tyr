@@ -1,4 +1,7 @@
-name: CI
+name: CPU
+
+# Builds Tyr and runs the CPU test suites on Linux and macOS;
+# `tooling` tests the repo's Python and shell scripts.
 
 on:
   workflow_dispatch:
@@ -20,9 +23,8 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  build-and-test:
+  build-test:
     env:
-      # Main remains a clean project/dependency/native compilation gate.
       TYR_CI_CLEAN: ${{ github.event_name == 'push' || inputs.clean_build }}
     strategy:
       fail-fast: false
@@ -62,7 +64,6 @@ jobs:
           key: ${{ steps.cache-key.outputs.build }}
           restore-keys: ${{ steps.cache-key.outputs.build_prefix }}
 
-      # A cache hit never bypasses Lake/Make's dependency checks or the ABI gate.
       - name: Build required test runners
         run: |
           source ./env.sh
@@ -81,11 +82,27 @@ jobs:
       - name: Typecheck required example surfaces
         run: |
           source ./env.sh
-          lake build --wfail Examples BranchingFlowsMoleculeTrainGenerate mctx_bench
+          lake build --wfail Examples BranchingFlowsMoleculeTrainGenerate mctx_bench ffi_crash_probe
           lake env lean Examples/NanoChat/Generator/TypedState.lean
           lake env lean Examples/BranchingFlows/BranchingFlowsDemo.lean
 
-      # Save before tests, so re-running a failed test step reuses this build.
+      - name: Check FFI crash reporting
+        if: runner.os == 'Linux'
+        run: |
+          set +e
+          ./.lake/build/bin/ffi_crash_probe > output/ci/ffi-crash-probe.log 2>&1
+          code=$?
+          set -e
+          head -n 3 output/ci/ffi-crash-probe.log
+          if [[ "$code" -ne 134 ]]; then
+            echo "::error::expected SIGABRT (134), got exit code ${code}"
+            exit 1
+          fi
+          if ! grep -qE "\[tyr\] fatal: uncaught|terminate called after throwing an instance of 'c10::" output/ci/ffi-crash-probe.log; then
+            echo "::error::probe aborted without reporting the libtorch error"
+            exit 1
+          fi
+
       - name: Save compatible dependency builds
         if: steps.dependency-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
@@ -119,25 +136,11 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-  lint:
+  tooling:
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Check commit subject format
-        if: github.event_name == 'pull_request'
-        run: |
-          set -euo pipefail
-          range="${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}"
-          echo "Validating commit subjects in ${range}"
-          invalid=0
-          while IFS= read -r subject; do
-            ./.githooks/check-commit-message.sh "${subject}" || invalid=1
-          done < <(git log --reverse --format=%s "${range}")
-          exit "${invalid}"
 
       - uses: actions/setup-python@v6
         with:

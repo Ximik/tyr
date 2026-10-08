@@ -26,7 +26,7 @@ not runtime weights, test fixtures or source files tracked by Git.
 
 ## Spark qualification
 
-The `CUDA smoke` workflow retains labelled-PR and GPU-path push triggers and
+The `GPU` workflow retains labelled-PR and GPU-path push triggers and
 adds a weekly Monday schedule. Scheduled runs require both GPU and real-model
 qualification; manual runs default to both, with a `real_models` input for a
 GPU-only diagnostic. Missing prerequisites fail the selected qualification.
@@ -39,7 +39,7 @@ Spark's existing `spark-e626-gb10` runner belongs to `cpehle/tyr`, with labels
 `self-hosted,Linux,ARM64,gpu,gb10,aarch64`. A separate upstream runner can use
 `tyr-qualification` instead of generic `gpu`, so it cannot unexpectedly consume
 older queued workflows. Repository registration and runner labels must match;
-the hosted readiness job cannot substitute one repository's runner for another.
+the hosted `select-runner` job cannot substitute one repository's runner for another.
 It reports `configured` or `blocked`, never an executed qualification.
 
 Configure these repository variables for the runner that actually serves it:

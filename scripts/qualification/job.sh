@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Invoke under the host-wide GPU flock (see cuda-smoke.yml).
+# Invoke under the host-wide GPU flock (see .github/workflows/gpu.yml).
 set -euo pipefail
 qualification_root=${TYR_QUALIFICATION_ROOT:-"$HOME/tyr-qualification"}
 python_bin="$qualification_root/venv/bin/python"

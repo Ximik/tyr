@@ -1,12 +1,11 @@
-name: CUDA smoke
+name: GPU
 
-# Spark has independent cpehle/tyr and ranvier-labs/tyr runner registrations.
-# The dedicated upstream label avoids consuming old generic GPU jobs. Every
-# qualification acquires the same host-wide lock; see docs/ci-and-qualification.md.
+# Builds the CUDA kernels and runs GPU qualification on the self-hosted runner.
+# See docs/ci-and-qualification.md.
 on:
   push:
     branches: [main]
-    paths: &cuda-smoke-paths
+    paths: &gpu-paths
       - 'Tyr/GPU/**'
       - 'Tyr/Torch.lean'
       - 'Tests/*GPU*.lean'
@@ -29,10 +28,10 @@ on:
       - 'cc/Makefile'
       - 'lakefile.lean'
       - 'lean-toolchain'
-      - '.github/workflows/cuda-smoke.yml'
+      - '.github/workflows/gpu.yml'
   pull_request:
     types: [labeled, opened, synchronize, reopened]
-    paths: *cuda-smoke-paths
+    paths: *gpu-paths
   schedule:
     - cron: '23 5 * * 1'
   workflow_dispatch:
@@ -46,11 +45,11 @@ permissions:
   contents: read
 
 concurrency:
-  group: cuda-smoke-${{ github.workflow }}-${{ github.ref }}
+  group: gpu-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  readiness:
+  select-runner:
     if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'gpu-ci')
     runs-on: ubuntu-latest
     outputs:
@@ -70,9 +69,9 @@ jobs:
           path: output/qualification/readiness.json
           retention-days: 14
 
-  gpu-smoke:
-    needs: readiness
-    runs-on: ${{ fromJSON(needs.readiness.outputs.runner_labels) }}
+  qualify:
+    needs: select-runner
+    runs-on: ${{ fromJSON(needs.select-runner.outputs.runner_labels) }}
     timeout-minutes: 180
     env:
       GPU: ${{ vars.TYR_GPU || 'GB10' }}
@@ -95,7 +94,6 @@ jobs:
           if ! elan toolchain list | grep -Fxq "$toolchain"; then elan toolchain install "$toolchain"; fi
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
       - name: Fetch pinned dependencies (CUDA)
-        # The wheel cache lives outside the workspace, which checkout cleans.
         run: TYR_DEPS_VARIANT=cuda TYR_DEPS_CACHE="$TYR_QUALIFICATION_ROOT/wheel-cache" deps/fetch.sh
       - name: Build and run strict qualification with exclusive GPU access
         run: |
