@@ -97,7 +97,7 @@ def BlockParams.init (n_embd : UInt64) (scale : Float := 0.02) (device : Device 
   let v_proj ← randn #[n_embd, n_embd] false device
   let c_proj ← randn #[n_embd, n_embd] false device
   let mlp_fc ← randn #[4*n_embd, n_embd] false device
-  let mlp_proj ← randn #[n_embd, 4*n_embd] false device
+  let mlp_proj ← randn #[n_embd, 4*n_embd + 1] false device
   return {
     ln1_weight := makeLeafParam (ones #[n_embd] false device)
     ln1_bias := makeLeafParam (zeros #[n_embd] false device)
