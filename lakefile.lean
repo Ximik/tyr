@@ -58,7 +58,7 @@ def linuxCudaLinkArgs : Array String := run_io do
   if ← torchCuda.pathExists then
     let cuDir : FilePath := __dir__ / "external" / "wheels" / "nvidia" / "cu13" / "lib"
     pure (#["-ltorch_cuda", "-lc10_cuda", s!"-L{cuDir}", "-l:libcudart.so.13",
-      "-l:libcublasLt.so.13", s!"-Wl,-rpath,{cuDir}"] ++ linuxCudaDriverStubLinkArgs)
+      "-l:libcublasLt.so.13"] ++ linuxCudaDriverStubLinkArgs)
   else
     pure #[]
 
@@ -84,8 +84,7 @@ def arrowLinkArgs : Array String :=
       #[s!"libarrow.{arrowSoVersion}.dylib", s!"libparquet.{arrowSoVersion}.dylib"]
     else
       #[s!"libarrow.so.{arrowSoVersion}", s!"libparquet.so.{arrowSoVersion}"]
-  libs.map (fun (lib : String) => (arrowLibDir / lib).toString) ++
-    #[s!"-Wl,-rpath,{arrowLibDir}"]
+  libs.map (fun (lib : String) => (arrowLibDir / lib).toString)
 
 /-- Return `none` for blank strings after trimming whitespace. -/
 def nonEmptyTrimmed? (s : String) : Option String :=
@@ -171,23 +170,32 @@ def macOSFrameworkArgs : Array String :=
 def soxrLinkArgs : Array String :=
   #[s!"-L{__dir__ / "cc" / "build" / "soxr" / "src"}", "-lsoxr"]
 
-/-- Vendored LibTorch directory used by both Lean dynlibs and `cc/build/libTyrC.so`. -/
-def linuxTorchLibDir : String :=
-  (__dir__ / "external" / "wheels" / "torch" / "lib").toString
-
 /-- Common Linux link tail shared by `packageLinkArgs` and `commonLinkArgs`:
     libtorch (with its bundled libgomp) + CUDA (for a CUDA libtorch) + arrow/soxr
-    + glibc-2.34 compat + rpath. -/
+    + glibc-2.34 compat. -/
 def linuxLinkTail : Array String :=
   #[
     s!"-L{__dir__ / "external" / "wheels" / "torch" / "lib"}",
     "-ltorch", "-ltorch_cpu", "-lc10"
   ] ++ linuxCudaLinkArgs ++ linuxCompilerLibDirArgs ++ soxrLinkArgs ++ arrowLinkArgs
     ++ linuxGlibc234CompatLinkArgs ++ #[
-    "-l:libgomp.so.1", "-l:libstdc++.so.6",
-    s!"-Wl,-rpath,{linuxTorchLibDir}",
-    "-Wl,-rpath,$ORIGIN/../../../external/wheels/torch/lib"
+    "-l:libgomp.so.1", "-l:libstdc++.so.6"
   ]
+
+/-- Runtime search paths for the vendored shared libraries, relative to the
+    loading binary so the checkout can move. Binaries sit two to four levels
+    below the repo root: the extern lib's shared `cc/build/libTyrC.so`,
+    executables in `.lake/build/bin`, module libraries in `.lake/build/lib/lean`.
+    Each path appears once: macOS 15.4+ dyld rejects duplicate `LC_RPATH`s. -/
+def vendoredRPathArgs : Array String :=
+  let (origin, dirs) :=
+    if System.Platform.isOSX then
+      ("@loader_path", #["external/wheels/torch/lib", "external/wheels/pyarrow"])
+    else
+      ("$ORIGIN", #["external/wheels/torch/lib", "external/wheels/pyarrow",
+        "external/wheels/nvidia/cu13/lib"])
+  dirs.flatMap fun dir =>
+    #["../..", "../../..", "../../../.."].map fun up => s!"-Wl,-rpath,{origin}/{up}/{dir}"
 
 def macOSTorchLinkArgs : Array String :=
   #[
@@ -198,20 +206,13 @@ def macOSTorchLinkArgs : Array String :=
 
 def packageLinkArgs : Array String :=
   if System.Platform.isOSX then
-    macOSTorchLinkArgs ++ #[
-      "-Wl,-rpath,@loader_path/../../external/wheels/torch/lib",
-      "-Wl,-rpath,@loader_path/../../../external/wheels/torch/lib",
-      "-Wl,-rpath,@executable_path/../../../external/wheels/torch/lib",
-      s!"-Wl,-rpath,{tyrLeanSharedLibRPath}"
-    ]
+    macOSTorchLinkArgs ++ vendoredRPathArgs ++ #[s!"-Wl,-rpath,{tyrLeanSharedLibRPath}"]
   else
-    linuxLinkTail
+    linuxLinkTail ++ vendoredRPathArgs
 
 def commonLinkArgs : Array String :=
   if System.Platform.isOSX then
-    #[s!"{__dir__ / "cc" / "build" / "libTyrC.a"}"] ++ macOSTorchLinkArgs ++ #[
-      "-Wl,-rpath,@executable_path/../../../external/wheels/torch/lib"
-    ]
+    #[s!"{__dir__ / "cc" / "build" / "libTyrC.a"}"] ++ macOSTorchLinkArgs
   else
     #[s!"{__dir__ / "cc" / "build" / "libTyrC.a"}"] ++ linuxLinkTail
 

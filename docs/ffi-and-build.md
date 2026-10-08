@@ -202,7 +202,8 @@ targets that each take `moreLinkArgs := commonLinkArgs`.
 ### Running executables
 
 Executables land in `.lake/build/bin/` and find libtorch and Arrow through
-rpaths into `external/`.
+rpaths relative to the binary (`$ORIGIN/...` on Linux, `@loader_path/...` on
+macOS), so the checkout can move as long as `external/` moves with it.
 The eight `lake run` scripts (`lakefile.lean:1166-1232`) all go through
 `runBuiltExecutable` (`lakefile.lean:1076`): it assembles the path via
 `runtimeLibPath` (`lakefile.lean:1039`), validates the binary with `file`,
