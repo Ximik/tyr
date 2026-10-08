@@ -23,7 +23,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: ./.github/actions/setup
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Set up Lean and dependencies
+        uses: ./.github/actions/setup
 
       - name: Create docbuild package
         run: |
@@ -54,9 +58,6 @@ jobs:
           source ./env.sh
           cd docbuild
           lake build Tyr:docs
-
-      - name: Setup Pages
-        uses: actions/configure-pages@v5
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3

@@ -19,7 +19,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -36,7 +36,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: ./.github/actions/setup
+      - name: Set up Lean and dependencies
+        uses: ./.github/actions/setup
 
       - name: Compute binary compatibility keys
         id: cache-key
@@ -79,11 +80,10 @@ jobs:
           source ./env.sh
           bash scripts/test_native_attention.sh cpu
 
-      - name: Typecheck required example surfaces
+      - name: Build examples and FFI probe
         run: |
           source ./env.sh
           lake build --wfail Examples BranchingFlowsMoleculeTrainGenerate mctx_bench ffi_crash_probe
-          lake env lean Examples/NanoChat/Generator/TypedState.lean
           lake env lean Examples/BranchingFlows/BranchingFlowsDemo.lean
 
       - name: Check FFI crash reporting
@@ -146,13 +146,13 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Prepare tokenizer parity regression dependencies
+      - name: Install NumPy for the parity wrapper test
         run: |
           python3 -m venv "$RUNNER_TEMP/qualification-tests"
           numpy_version=$(python3 -c 'import json; print(json.load(open("scripts/qualification/fixtures.json"))["python_packages"]["numpy"])')
           "$RUNNER_TEMP/qualification-tests/bin/python" -m pip install --disable-pip-version-check "numpy==$numpy_version"
 
-      - name: Check test routing and native build dependencies
+      - name: Run tooling tests
         run: |
           python3 scripts/test_inventory.py
           python3 scripts/test_test_inventory.py

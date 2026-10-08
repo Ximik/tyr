@@ -2,6 +2,7 @@ name: GPU
 
 # Builds the CUDA kernels and runs GPU qualification on the self-hosted runner.
 # See docs/ci-and-qualification.md.
+
 on:
   push:
     branches: [main]
@@ -45,7 +46,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: gpu-${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
