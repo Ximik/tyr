@@ -138,9 +138,7 @@ run_id="${case_id}_bench_$(date -u +%Y%m%dT%H%M%SZ)_$$"
 export TYR_GPU_CODEGEN_MODULE="$module"
 export TYR_GPU_TARGET="${TYR_GPU_TARGET:-GB10}"
 export TYR_GPU_FAMILY="${TYR_GPU_FAMILY:-$family}"
-export TYR_BUILD_TYRC_DYLIB=0
 export TORCHINDUCTOR_CACHE_DIR="${TORCHINDUCTOR_CACHE_DIR:-/tmp/tyr_torchinductor_cache}"
-export LD_LIBRARY_PATH="$PWD/external/wheels/torch/lib:$PWD/cc/build:${LD_LIBRARY_PATH:-}"
 # Build the selected registration before generation, then replace the native
 # archive deliberately. The normal extern-lib dependency currently has a cycle
 # through the kernel registration dynlib and can otherwise emit CUDA from the

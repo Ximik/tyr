@@ -25,11 +25,9 @@ day one:
   executable and precompiled module library.
 - **Executables** — `lean_exe` targets rooted in `Tests.*` and `Examples.*`;
   binaries land in `.lake/build/bin/`.
-- **Lake scripts** (`lakefile.lean:1164-1232`) — thin wrappers that compute the
-  runtime library path (`runtimeLibPath`, `lakefile.lean:1039`) and launch a
-  compiled binary with it: `lake run` (test_runner), `lake run train`
-  (TrainGPT), `lake run runBuiltTarget -- <ExeName> [args]`,
-  `lake run buildGpuTarget -- <KernelModule> <Target>...`.
+- **Lake scripts** — `lake run buildGpuTarget -- <KernelModule> <Target>...`
+  builds targets with one GPU kernel module; `lake run buildMhaH100Examples`
+  builds the raw H100 MHA binaries.
 
 The runtime types a first program touches:
 
@@ -105,15 +103,15 @@ GPU-related build knobs, read by `target libtyr` in `lakefile.lean`:
 
 ## Runtime environment
 
-Executables find libtorch and Arrow in `external/` through their embedded
-library search paths (rpath), so no `LD_LIBRARY_PATH`/`DYLD_LIBRARY_PATH` setup
-is needed. The Lake scripts also set the library path themselves
-(`runtimeLibPath` in `lakefile.lean`):
+Executables find `libTyrC`, libtorch and Arrow through their embedded library
+search paths (rpath), so no `LD_LIBRARY_PATH`/`DYLD_LIBRARY_PATH` setup is
+needed. Executables that run the Lean interpreter (most of them) also need Lean's
+module search path, which Lake sets:
 
 ```bash
-lake run                                   # test_runner
-lake run train                             # TrainGPT
-lake run runBuiltTarget -- FluxDemo        # any compiled executable, with args
+lake test                                  # build and run test_runner
+lake exe FluxDemo --help                   # build and run any executable, with args
+lake env .lake/build/bin/FluxDemo          # run without rebuilding
 ```
 
 Runtime variables a user actually sets:
@@ -130,13 +128,11 @@ Runtime variables a user actually sets:
 `@[test_driver]` (`lakefile.lean:598`), so `lake test` also works:
 
 ```bash
-lake build test_runner
-.lake/build/bin/test_runner                 # with the library path set, or:
-lake run                                    # same thing, env handled
+lake test                                   # build and run the suite
 
-.lake/build/bin/test_runner --filter GPT    # only tests matching a pattern
-.lake/build/bin/test_runner --ignored       # include tests marked ignored
-.lake/build/bin/test_runner --fail-fast     # stop at first failure
+lake exe test_runner --filter GPT           # only tests matching a pattern
+lake exe test_runner --ignored              # include tests marked ignored
+lake exe test_runner --fail-fast            # stop at first failure
 ```
 
 The experimental suite tracks in-progress modules and is expected to be less
@@ -151,17 +147,16 @@ Focused suites exist as separate executables (`lakefile.lean:761-825`):
 `TestDataLoader`, `TestDiffusion`, `TestDiffEq`, `TestDiffEqAdjoint`,
 `TestGPUDSL`, `TestGPUKernels`, `TestGPUE2E`, `TestGPUGB10E2E`,
 `TestGPUTileIR`, plus `RunRiemannianNanoGPTTests`. Build and run them the same
-way (`lake build <name>`, then run from `.lake/build/bin/` with the library
-path, or via `lake run runBuiltTarget -- <name>`).
+way (`lake exe <name>`).
 
 ## Running examples
 
 Per-example details live in `Examples/README.md`; the common pattern is
-`lake build <Exe>` then run with the library path set. Highlights:
+`lake exe <Exe> [args]`. Highlights:
 
 | Executable | What it does | Notes |
 |---|---|---|
-| `TrainGPT` | char-level GPT on Shakespeare | `lake run train`; reads `data/shakespeare_char/{train,val}.bin` (in repo), falls back to random tokens; checkpoints to `checkpoints/gpt` |
+| `TrainGPT` | char-level GPT on Shakespeare | `lake exe TrainGPT`; reads `data/shakespeare_char/{train,val}.bin` (in repo), falls back to random tokens; checkpoints to `checkpoints/gpt` |
 | `TrainDiffusion` | discrete masked diffusion on ASCII text | flags `--generate/-g`, `--checkpoint/-c`, `--prompt/-p`, `--blocks/-n`, `--temperature/-t` |
 | `TrainNanoChat` | modded-nanogpt distributed training | flags `--data`, `--val`, `--checkpoint-dir`, `--resume`, `--debug` |
 | `NanoChatPipeline` / `NanoChatChat` | multi-stage pipeline / checkpoint chat | configured via env, see `scripts/nanochat/ENV_INVENTORY.md` |
@@ -243,8 +238,8 @@ build-and-train loop a new user runs, first in shell:
 
 ```bash
 deps/fetch.sh cpu                           # once: fetch all pinned dependencies
-lake -R build test_runner && lake run       # once: configure; sanity: test suite passes
-lake build TrainGPT && lake run train       # trains, then generates from "ROMEO:"
+lake -R build test_runner && lake test      # once: configure; sanity: test suite passes
+lake exe TrainGPT                           # trains, then generates from "ROMEO:"
 ```
 
 and the corresponding Lean-side flow, condensed from the real `main`:

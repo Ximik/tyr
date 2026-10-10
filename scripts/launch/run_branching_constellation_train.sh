@@ -35,7 +35,6 @@ if [[ -e "$output_dir" ]]; then
 fi
 
 mkdir -p "$output_dir"
-export LD_LIBRARY_PATH="$repo_root/external/wheels/torch/lib:$repo_root/cc/build:${LD_LIBRARY_PATH:-}"
 
 cmd=(
   "$binary"

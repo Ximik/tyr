@@ -16,7 +16,6 @@ Source: `scripts/nanochat/run_pipeline_torchrun.sh:14`
   - `MODULES_PAGER`
   - `PAGER`
 - Build and binary selection:
-  - `LD_LIBRARY_PATH`
   - `TORCHRUN_BIN`
   - `PIPELINE_EXE`
   - `SKIP_BUILD`

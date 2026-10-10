@@ -47,8 +47,7 @@ at the bottom.
 
 ```bash
 cd ~/dev/tyr-qm9-perf
-LD_LIBRARY_PATH=external/wheels/torch/lib \
-  .lake/build/bin/BranchingFlowsMoleculeTrainGenerate \
+.lake/build/bin/BranchingFlowsMoleculeTrainGenerate \
   --profile paper-qm9-main --device cuda \
   --steps 300 --total-steps 300 --no-generate --no-checkpoint \
   --out-prefix /tmp/qm9_perf/base

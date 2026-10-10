@@ -220,24 +220,21 @@ to avoid the `.so` cascade), `Tyr` (default target, precompiled), `Tests`,
 Executables land in `.lake/build/bin/` and find `libTyrC` through a run path
 relative to the binary (`$ORIGIN/...` on Linux, `@loader_path/...` on macOS);
 `libTyrC` finds libtorch and Arrow the same way, so the checkout can move as
-long as `external/` moves with it.
-The eight `lake run` scripts (`lakefile.lean:1166-1232`) all go through
-`runBuiltExecutable` (`lakefile.lean:1076`): it assembles the path via
-`runtimeLibPath` (`lakefile.lean:1039`), validates the binary with `file`,
-checks staleness against `.c.o.export` IR, and — if the binary is broken or
-stale — relinks it into `/tmp/tyr_relinked` by replaying the link command
-extracted from Lake's `.trace` file (`relinkBuiltExecutableToTmp`,
-`lakefile.lean:364-383`).
+long as `external/` moves with it. No `LD_LIBRARY_PATH` is needed, with one
+exception: a compiler newer than the system's (e.g. a gcc loaded as a cluster
+module) builds `libTyrC` against its own libstdc++, which the loader finds only
+while that module is loaded. `cc/tools/check_libstdcxx.sh` warns about this
+right after linking `libTyrC`.
+
+Run executables with `lake exe <Exe> [args]` (builds it if needed) or
+`lake env .lake/build/bin/<Exe> [args]` (no rebuild); both set Lean's module
+search path, which executables using the interpreter need. Two Lake scripts
+remain:
 
 | Script | What it does |
 |---|---|
-| `lake run` | run `test_runner` |
-| `lake run train` | run `TrainGPT` |
-| `lake run runBuiltTarget -- <Exe> [args]` | run any compiled exe |
 | `lake run buildGpuTarget -- <KernelModule> <Target>...` | build exe(s) with one GPU kernel module |
 | `lake run buildMhaH100Examples` | build `RunMhaH100` + `RunMhaH100Seq768` |
-| `lake run runMhaH100Exe` / `runMhaH100Seq768Exe` | run those with lib paths set |
-| `lake run validateMhaH100Examples` | build both, then run back-to-back |
 
 ### Environment variables
 
@@ -335,15 +332,15 @@ def main : IO Unit := do
   torch.dist.destroyProcessGroup
 ```
 
-Build and run through Lake so the native library and runtime paths are right:
+Build and run through Lake:
 
 ```bash
 lake build                                  # target libtyr → codegen → make -C cc dylib
-lake run runBuiltTarget -- TrainGPT         # sets DYLD/LD_LIBRARY_PATH for you
+lake exe TrainGPT                           # build if needed, then run
 # GPU build for a specific kernel module and target:
 TYR_GPU_CODEGEN_MODULE=Tyr.GPU.Kernels.MhaH100 GPU=H100 lake build RunMhaH100
 # Manual probe of the FFI failure mode:
-lake build ffi_crash_probe && lake run runBuiltTarget -- ffi_crash_probe
+lake exe ffi_crash_probe
 ```
 
 ## Related guides

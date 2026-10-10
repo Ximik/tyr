@@ -351,8 +351,7 @@ DYLIB_LEAN_FLAGS :=
 RPATH_ORIGIN := \$$ORIGIN
 endif
 # Vendored libraries, relative to $(OUT_DIR) so the checkout can move.
-DYLIB_RPATH_FLAGS := $(foreach dir,torch/lib pyarrow nvidia/cu13/lib,-Wl,-rpath,$(RPATH_ORIGIN)/../../external/wheels/$(dir))
-# tk_vendor_mha_h100.cu calls the CUDA driver API (cuTensorMapEncodeTiled).
+DYLIB_RPATH_FLAGS := $(foreach dir,torch/lib pyarrow nvidia/cu13/lib,-Wl,-rpath,$(RPATH_ORIGIN)/../../external/wheels/$(dir))# tk_vendor_mha_h100.cu calls the CUDA driver API (cuTensorMapEncodeTiled).
 CUDA_DRIVER_LINK_FLAGS :=
 ifneq ($(wildcard $(CUDA_HOME)/lib64/stubs/libcuda.so),)
 CUDA_DRIVER_LINK_FLAGS := -L$(CUDA_HOME)/lib64/stubs -lcuda
@@ -471,6 +470,7 @@ $(OUT_DIR)/$(LIB) : $(OBJ_FILES) $(NATIVE_CONFIG) $(TYR_MAKEFILE) | check-deps $
 
 $(OUT_DIR)/$(DYLIB) : $(OBJ_FILES) $(SOXR_LIB) $(NATIVE_CONFIG) $(TYR_MAKEFILE) | check-deps $(OUT_DIR)
 	$(CXX) $(SHARED_FLAG) -o $@ $(OBJ_FILES) $(DYLIB_LINK_FLAGS)
+	@$(TOOLS_DIR)/check_libstdcxx.sh $(CXX) $@
 
 $(BENCH_FLASH_ATTN): $(TOOLS_DIR)/bench_flash_attn.cpp $(OUT_DIR)/$(DYLIB) $(NATIVE_CONFIG) $(TYR_MAKEFILE) | check-deps $(OUT_DIR)
 	@mkdir -p $(dir $@)

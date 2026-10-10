@@ -1287,7 +1287,7 @@ ThunderKittens counterparts instead of parallel educational shims.
 - The current compiled raw `RunMhaH100` path was revalidated after the concern
   that the mismatch may have moved from `dV` to `dK`.
 - Trusted command:
-  - `source ./load_modules.sh && lake -R run runMhaH100Exe --dump-partials`
+  - `source ./load_modules.sh && lake exe RunMhaH100 --dump-partials`
 - Result:
   - `overall_ok=true`
   - `kernel_ref_ok=true`
@@ -1309,7 +1309,7 @@ ThunderKittens counterparts instead of parallel educational shims.
 - A fresh compiled-object relink and the hardened compiled-run helper now
   validate the 12-block path:
   - command:
-    - `source ./load_modules.sh && CUDA_VISIBLE_DEVICES=0 lake -R run runMhaH100Seq768Exe --dump-partials`
+    - `source ./load_modules.sh && CUDA_VISIBLE_DEVICES=0 lake exe RunMhaH100Seq768 --dump-partials`
   - result:
     - `overall_ok=true`
     - `kernel_ref_ok=true`

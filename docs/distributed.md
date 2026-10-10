@@ -373,7 +373,7 @@ A lighter-weight path for tests — no distributed init, no report — is
 
 The binaries read torchrun's environment directly; launch them with
 `torchrun --no_python` so env vars are set per process. The wrappers in
-`scripts/nanochat/` handle the module stack and `LD_LIBRARY_PATH`:
+`scripts/nanochat/` handle the module stack:
 
 ```bash
 ./scripts/nanochat/run_train_torchrun.sh        # TrainNanoChat, NPROC_PER_NODE=2 default

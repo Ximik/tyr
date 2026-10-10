@@ -21,24 +21,6 @@ def tyrLeanSharedLibRPath : String := run_io do
   else
     pure "@loader_path"
 
-/-- Directories holding the system compiler's `libstdc++.so.6` and `libgcc_s.so.1`,
-    as reported by `gcc -print-file-name` (e.g. `/usr/lib/gcc/x86_64-pc-linux-gnu/15`
-    on Gentoo, the multiarch dir on Debian). `libTyrC` is built with this compiler,
-    so its runtime must win over an older system copy at run time. -/
-def linuxCompilerLibDirArgs : Array String := run_io do
-  if System.Platform.isOSX then return #[]
-  let mut dirs : Array String := #[]
-  for lib in ["libstdc++.so.6", "libgcc_s.so.1"] do
-    try
-      let out ← IO.Process.output { cmd := "gcc", args := #[s!"-print-file-name={lib}"] }
-      let path : FilePath := out.stdout.trimAscii.toString
-      if out.exitCode == 0 && path.isAbsolute then
-        if let some dir := path.parent then
-          let arg := s!"-L{dir}"
-          if !dirs.contains arg then dirs := dirs.push arg
-    catch _ => pure ()
-  return dirs
-
 /-- Return `none` for blank strings after trimming whitespace. -/
 def nonEmptyTrimmed? (s : String) : Option String :=
   let trimmed := s.trimAscii.toString
@@ -113,107 +95,6 @@ require LeanBenchmark from git "https://github.com/cpehle/lean-benchmark.git" @
 require LeanUrdfTypeProvider from git
   "https://github.com/ranvier-labs/lean-urdf-typeprovider.git" @
   "5712c1fcdf4462d1e7a216f12159651381410149"
-
-/-! ## Platform Detection
-
-Use `System.Platform` for compile-time platform-specific link arguments and
-runtime environment setup in scripts.
--/
-
-/-- Check if we're on macOS. -/
-def isMacOS : Bool :=
-  System.Platform.isOSX
-
-def builtExecutablePath (rootPath : FilePath) (exeName : String) : FilePath :=
-  rootPath / ".lake" / "build" / "bin" / exeName
-
-def builtExecutableTracePath (rootPath : FilePath) (exeName : String) : FilePath :=
-  rootPath / ".lake" / "build" / "bin" / s!"{exeName}.trace"
-
-def ensureExecutablePath (path : FilePath) : IO Unit := do
-  let chmod := if System.Platform.isWindows then "cmd" else "chmod"
-  let chmodArgs :=
-    if System.Platform.isWindows then
-      #["/c", "exit", "0"]
-    else
-      #["+x", path.toString]
-  let out ← IO.Process.output {
-    cmd := chmod
-    args := chmodArgs
-  }
-  if out.exitCode != 0 then
-    throw <| IO.userError s!"Failed to mark {path} executable: {out.stderr}"
-
-def builtExecutableLooksValid (path : FilePath) : IO Bool := do
-  if !(← path.pathExists) then
-    pure false
-  else
-    let out ← IO.Process.output {
-      cmd := "file"
-      args := #[path.toString]
-    }
-    if out.exitCode != 0 then
-      pure false
-    else
-      let desc := out.stdout
-      pure <|
-        desc.contains "ELF " ||
-        desc.contains "Mach-O " ||
-        desc.contains "PE32" ||
-        desc.contains "script text executable"
-
-def builtExecutableLooksStale (rootPath : FilePath) (exeName : String) (exe : FilePath) : IO Bool := do
-  let irRoot := rootPath / ".lake" / "build" / "ir"
-  if !(← irRoot.pathExists) then
-    pure false
-  else
-    let out ← IO.Process.output {
-      cmd := "find"
-      args := #[
-        irRoot.toString,
-        "-name", s!"{exeName}.c.o.export",
-        "-newer", exe.toString,
-        "-print",
-        "-quit"
-      ]
-    }
-    pure (out.exitCode == 0 && !out.stdout.trimAscii.isEmpty)
-
-def extractTraceLinkCommand? (tracePath : FilePath) : IO (Option String) := do
-  if !(← tracePath.pathExists) then
-    pure none
-  else
-    let traceText ← IO.FS.readFile tracePath
-    match traceText.splitOn ".> " with
-    | _prefix :: after :: _rest =>
-        match after.splitOn "\",\n" with
-        | cmd :: _ => pure <| some cmd
-        | [] =>
-            match after.splitOn "\",\r\n" with
-            | cmd :: _ => pure <| some cmd
-            | [] => pure none
-    | _ => pure none
-
-def relinkBuiltExecutableToTmp (rootPath : FilePath) (exeName : String) : IO FilePath := do
-  let originalExe := builtExecutablePath rootPath exeName
-  let tracePath := builtExecutableTracePath rootPath exeName
-  let some linkCmd ← extractTraceLinkCommand? tracePath
-    | throw <| IO.userError s!"Missing relink trace for {exeName}: {tracePath}"
-  let repairDir : FilePath := "/tmp/tyr_relinked"
-  IO.FS.createDirAll repairDir
-  let repairedExe := repairDir / exeName
-  let patchedCmd := linkCmd.replace originalExe.toString repairedExe.toString
-  let out ← IO.Process.output {
-    cmd := "bash"
-    args := #["-lc", patchedCmd]
-    cwd := rootPath
-  }
-  if out.exitCode != 0 then
-    throw <| IO.userError s!"Failed to relink {exeName} to {repairedExe}:\n{out.stderr}"
-  ensureExecutablePath repairedExe
-  if !(← builtExecutableLooksValid repairedExe) then
-    throw <| IO.userError s!"Relinked executable is still invalid: {repairedExe}"
-  pure repairedExe
 
 /-! ## C++ Library Build -/
 
@@ -394,23 +275,9 @@ target libtyr pkg : Dynlib := do
           ("TYR_GPU_CODEGEN_MODULE", some gpuCodegenModule)
         ] ++ gpuEnv ++ extraEnv
       }
-      let chmod := if System.Platform.isWindows then "cmd" else "chmod"
-      let chmodArgs :=
-        if System.Platform.isWindows then
-          #["/c", "exit", "0"]
-        else
-          #["+x", generatorExe.toString]
-      let chmodOut ← IO.Process.output { cmd := chmod, args := chmodArgs }
-      if chmodOut.exitCode != 0 then
-        IO.eprintln s!"warning: failed to mark {generatorExe} executable: {chmodOut.stderr}"
-      let runnableGeneratorExe ←
-        if ← builtExecutableLooksValid generatorExe then
-          pure generatorExe
-        else
-          relinkBuiltExecutableToTmp pkg.dir "GenerateGpuKernels"
       proc {
         cmd := "lake"
-        args := #["env", runnableGeneratorExe.toString]
+        args := #["env", generatorExe.toString]
                   ++ gpuCodegenModules
                   ++ #["--out-dir", generatedCudaDir.toString]
         cwd := pkg.dir
@@ -878,69 +745,6 @@ lean_exe RunB200Bf16Gemm where
 
 /-! ## Scripts -/
 
-def runtimeLibEnvVar : String :=
-  if isMacOS then "DYLD_LIBRARY_PATH" else "LD_LIBRARY_PATH"
-
-def leanRuntimeLibDir : IO FilePath := do
-  let out ← IO.Process.output {
-    cmd := "lean"
-    args := #["--print-prefix"]
-  }
-  if out.exitCode != 0 then
-    throw <| IO.userError s!"Failed to resolve Lean sysroot: {out.stderr}"
-  pure <| (FilePath.mk out.stdout.trimAscii.toString) / "lib" / "lean"
-
-def runtimeLibPath (rootPath : FilePath) : IO String := do
-  let tyrCLib := rootPath / "cc" / "build"
-  let lakeLib := rootPath / ".lake" / "build" / "lib"
-  let libtorchPath := rootPath / "external" / "wheels" / "torch" / "lib"
-  let arrowPath := rootPath / "external" / "wheels" / "pyarrow"
-  let leanLib ← leanRuntimeLibDir
-  -- The compiler's libstdc++ must win over an older system copy at run time.
-  let compilerLibDirs := linuxCompilerLibDirArgs.map (·.drop 2 |>.toString)
-  let dirs := #[tyrCLib.toString, lakeLib.toString, libtorchPath.toString,
-    arrowPath.toString, leanLib.toString] ++ compilerLibDirs
-  let libPathPrefix := ":".intercalate dirs.toList
-  pure <|
-    match (← IO.getEnv runtimeLibEnvVar) with
-    | some v => s!"{libPathPrefix}:{v}"
-    | none => libPathPrefix
-
-def ensureExecutable (path : FilePath) : IO Unit := do
-  let chmod := if System.Platform.isWindows then "cmd" else "chmod"
-  let chmodArgs :=
-    if System.Platform.isWindows then
-      #["/c", "exit", "0"]
-    else
-      #["+x", path.toString]
-  let out ← IO.Process.output {
-    cmd := chmod
-    args := chmodArgs
-  }
-  if out.exitCode != 0 then
-    throw <| IO.userError s!"Failed to mark {path} executable: {out.stderr}"
-
-def runBuiltExecutable (rootPath : FilePath) (exeName : String) (args : Array String) : IO UInt32 := do
-  let exe := builtExecutablePath rootPath exeName
-  if !(← exe.pathExists) then
-    throw <| IO.userError s!"Missing compiled executable {exe}. Build it first with `lake build {exeName}`."
-  ensureExecutable exe
-  let runnableExe ←
-    if (← builtExecutableLooksValid exe) && !(← builtExecutableLooksStale rootPath exeName exe) then
-      pure exe
-    else
-      relinkBuiltExecutableToTmp rootPath exeName
-  let libPath ← runtimeLibPath rootPath
-  let child ← IO.Process.spawn {
-    cmd := runnableExe.toString
-    args := args
-    env := #[(runtimeLibEnvVar, some libPath)]
-    stdin := .inherit
-    stdout := .inherit
-    stderr := .inherit
-  }
-  child.wait
-
 private def lakeBuildArgs (targets : Array String) (reconfigure : Bool) : Array String :=
   (if reconfigure then #["-R", "build"] else #["build"]) ++ targets
 
@@ -982,13 +786,6 @@ def buildNamedExecutables (rootPath : FilePath) (targets : Array String) : IO UI
       child.wait
     else
       pure firstExitCode
-  if exitCode == 0 then
-    targets.forM fun exeName => do
-      let exe := rootPath / ".lake" / "build" / "bin" / FilePath.mk exeName
-      if ← exe.pathExists then
-        ensureExecutable exe
-  else
-    pure ()
   pure exitCode
 
 def buildGpuBackedTargets (rootPath : FilePath) (kernelModule : String) (targets : Array String) : IO UInt32 := do
@@ -1003,18 +800,6 @@ def buildGpuBackedTargets (rootPath : FilePath) (kernelModule : String) (targets
   }
   child.wait
 
-/-- Script to run the test executable with proper environment.
-    Usage: lake run -/
-script run (args) do
-  let rootPath := (← getWorkspace).root.dir
-  return ← runBuiltExecutable rootPath "test_runner" args.toArray
-
-/-- Script to run TrainGPT with proper environment.
-    Usage: lake run train -/
-script train (args) do
-  let rootPath := (← getWorkspace).root.dir
-  return ← runBuiltExecutable rootPath "TrainGPT" args.toArray
-
 /-- Reconfigure once and build the raw H100 MHA example binaries together.
     This avoids paying the Lake replay twice. -/
 script buildMhaH100Examples (_args) do
@@ -1022,7 +807,7 @@ script buildMhaH100Examples (_args) do
   buildNamedExecutables rootPath #["RunMhaH100", "RunMhaH100Seq768"]
 
 /-- Build GPU-backed Lake targets by requesting one kernel module through the normal
-    `extern_lib libtyr` build flow instead of manually invoking `GenerateGpuKernels`
+    `target libtyr` build flow instead of manually invoking `GenerateGpuKernels`
     and `make`.
     Usage:
       `lake run buildGpuTarget <KernelModule> <BuildTarget> [ExtraBuildTarget ...]`
@@ -1040,39 +825,3 @@ script buildGpuTarget (args) do
     let kernelModule := args[0]!
     let targets := args.drop 1 |>.toArray
     buildGpuBackedTargets rootPath kernelModule targets
-
-/-- Run a compiled Lake executable from `.lake/build/bin` with the required runtime
-    library path.
-    Usage:
-      `lake run runBuiltTarget -- <ExeName> [ExeArg ...]` -/
-script runBuiltTarget (args) do
-  if args.isEmpty then
-    IO.eprintln "Usage: lake run runBuiltTarget -- <ExeName> [ExeArg ...]"
-    pure 2
-  else
-    let rootPath := (← getWorkspace).root.dir
-    let exeName := args[0]!
-    runBuiltExecutable rootPath exeName (args.drop 1 |>.toArray)
-
-/-- Run the compiled `RunMhaH100` executable with the correct runtime library path. -/
-script runMhaH100Exe (args) do
-  let rootPath := (← getWorkspace).root.dir
-  return ← runBuiltExecutable rootPath "RunMhaH100" args.toArray
-
-/-- Run the compiled `RunMhaH100Seq768` executable with the correct runtime library path. -/
-script runMhaH100Seq768Exe (args) do
-  let rootPath := (← getWorkspace).root.dir
-  return ← runBuiltExecutable rootPath "RunMhaH100Seq768" args.toArray
-
-/-- Build both raw H100 MHA example binaries, then run them back-to-back. -/
-script validateMhaH100Examples (args) do
-  let rootPath := (← getWorkspace).root.dir
-  let buildExitCode ← buildNamedExecutables rootPath #["RunMhaH100", "RunMhaH100Seq768"]
-  if buildExitCode != 0 then
-    pure buildExitCode
-  else
-    let firstExitCode ← runBuiltExecutable rootPath "RunMhaH100" args.toArray
-    if firstExitCode != 0 then
-      pure firstExitCode
-    else
-      runBuiltExecutable rootPath "RunMhaH100Seq768" args.toArray

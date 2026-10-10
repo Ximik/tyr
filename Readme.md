@@ -74,24 +74,19 @@ lake build
 
 ### Running
 
-Use the Lake helper scripts:
+`lake exe` builds an executable if needed and runs it; arguments follow its name:
 ```bash
-lake run           # runs test_runner
-lake run train     # runs TrainGPT
+lake exe TrainGPT
 ```
 
 ### Running Tests
 
 ```bash
-lake build test_runner
-.lake/build/bin/test_runner
-
-# Or use the helper script
-lake run
+lake test                            # builds and runs test_runner
+lake exe test_runner --filter GPT    # with arguments
 
 # Experimental/in-progress suites
-lake build test_runner_experimental
-.lake/build/bin/test_runner_experimental
+lake exe test_runner_experimental
 ```
 
 ## Environment Variables

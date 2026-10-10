@@ -11,9 +11,7 @@ Character-level GPT training on Shakespeare, matching [nanoGPT](https://github.c
 **Data:** `data/shakespeare_char/{train,val}.bin` (nanoGPT format). Falls back to random tokens if data is missing.
 
 ```bash
-lake build TrainGPT
-lake run train
-# or manually: .lake/build/bin/TrainGPT
+lake exe TrainGPT
 ```
 
 Configs available in `Examples/GPT/GPT.lean`: `nanogpt_cpu_shakespeare`, `gpt2_micro`, `gpt2_mini`, `gpt2_small`.

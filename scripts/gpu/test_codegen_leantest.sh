@@ -24,20 +24,18 @@ if [[ ! -x "${lake_bin}" || ! -x "${lean_bin}" ]]; then
   exit 1
 fi
 
-export LD_LIBRARY_PATH="${repo_root}/external/wheels/torch/lib:${repo_root}/cc/build:${EBROOTGCCCORE:+${EBROOTGCCCORE}/lib64:}${LD_LIBRARY_PATH:-}"
-
 echo "[1/4] Build GPU kernel LeanTest module"
-"${uv_bin}" run --python "${venv_python}" env LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" \
+"${uv_bin}" run --python "${venv_python}" \
   "${lake_bin}" --quiet build Tests.TestGPUKernels
 
 echo "[2/4] Build GPU DSL LeanTest module"
-"${uv_bin}" run --python "${venv_python}" env LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" \
+"${uv_bin}" run --python "${venv_python}" \
   "${lake_bin}" --quiet build Tests.TestGPUDSL
 
 echo "[3/4] Run GPU kernel LeanTest suite"
-"${uv_bin}" run --python "${venv_python}" env LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" \
+"${uv_bin}" run --python "${venv_python}" \
   "${lake_bin}" env "${lean_bin}" --run Tests/RunTestGPUKernels.lean "$@"
 
 echo "[4/4] Run GPU DSL LeanTest suite"
-"${uv_bin}" run --python "${venv_python}" env LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" \
+"${uv_bin}" run --python "${venv_python}" \
   "${lake_bin}" env "${lean_bin}" --run Tests/RunTestGPUDSL.lean "$@"
