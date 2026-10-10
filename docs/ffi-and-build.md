@@ -142,11 +142,13 @@ after a runtime Hopper check (`device_supports_tk_hopper`,
    Lake keeps it until the next `lake -R`, and the lakefile reads it as
    `cudaHome?`. If it disagrees with `external/wheels/torch` (fetched by
    `deps/fetch.sh cpu|cuda`), or the toolkit has no `bin/nvcc`, the build stops
-   with the command to run. It then passes `CUDA_HOME` to every `make` call
-   (unset for CPU); the Makefile does no CUDA detection of its own.
-1. Writes `.lake/build/libtyr_gpu_codegen.env` recording
-   `TYR_GPU_CODEGEN_MODULE` / `TYR_SKIP_GPU_CODEGEN`,
-   so changing any of them invalidates the native build.
+   with the command to run. `-Kgpu` is required with `-Kcuda` and rejected
+   without it. It then passes `CUDA_HOME` and `GPU` to every `make` call
+   (unset for CPU); the Makefile does no CUDA detection of its own and derives
+   the GPU family and architecture flags from `GPU`.
+1. Writes `.lake/build/libtyr_gpu_codegen.env` recording the `-Kkernels`
+   module list and `TYR_SKIP_GPU_CODEGEN`, so changing either invalidates the
+   native build.
 2. Runs `make -s -C cc native-config gpu-stubs` to refresh content-stable
    native configuration and symbol inventories. `cc/build/native-build.json`
    records effective compilers, flags, GPU target/family/compute/code, library
@@ -160,8 +162,7 @@ after a runtime Hopper check (`device_supports_tk_hopper`,
    `native-build.json` reports `HAS_NVCC=0` (in a CPU build the Makefile ignores
    generated `.cu` files and links the weak launcher stubs, so codegen would be
    wasted). `TYR_SKIP_GPU_CODEGEN=0` forces codegen.
-5. Runs `make -jN -C cc dylib` (`N` = `TYR_MAKE_JOBS`, or the CPU count) with `gpuMakeEnv` forwarding
-   `GPU`/`GPU_FAMILY`/`GPU_COMPUTE`/`GPU_CODE`.
+5. Runs `make -jN -C cc dylib` (`N` = `TYR_MAKE_JOBS`, or the CPU count).
 
 Make uses compiler dependency files for C, C++, Objective-C++, and CUDA.
 Header changes rebuild their consumers; native configuration changes rebuild
@@ -228,26 +229,27 @@ right after linking `libTyrC`.
 
 Run executables with `lake exe <Exe> [args]` (builds it if needed) or
 `lake env .lake/build/bin/<Exe> [args]` (no rebuild); both set Lean's module
-search path, which executables using the interpreter need. Two Lake scripts
-remain:
+search path, which executables using the interpreter need.
 
-| Script | What it does |
+### Configuration
+
+Build configuration is a set of Lake options (`get_config?` in the lakefile),
+given together on `lake -R`. Lake keeps them until the next `lake -R`, which
+replaces all of them:
+
+| Option | Effect |
 |---|---|
-| `lake run buildGpuTarget -- <KernelModule> <Target>...` | build exe(s) with one GPU kernel module |
-| `lake run buildMhaH100Examples` | build `RunMhaH100` + `RunMhaH100Seq768` |
+| `-Kcuda=<toolkit>` | CUDA build with this toolkit, which must contain `bin/nvcc`. Without it: CPU build (CUDA kernels replaced by stubs). Checked against the libtorch from `deps/fetch.sh` |
+| `-Kgpu=<name>` | with `-Kcuda`, required: GPU to build kernels for, `H100`, `A100`, `B200`, `B300` or `GB10` |
+| `-Kkernels="<module> ..."` | kernel module(s) to generate CUDA for, space-separated (default `Tyr.GPU.Kernels.MhaH100`) |
 
-### Environment variables
-
-Build behavior is controlled entirely through the environment:
+Environment variables for a single build:
 
 | Variable | Effect |
 |---|---|
-| `TYR_GPU_CODEGEN_MODULE` | kernel module(s) to emit CUDA for (space-separated; default `Tyr.GPU.Kernels.MhaH100`) |
-| `TYR_SKIP_GPU_CODEGEN` | `1` skips the generator step in `target libtyr`, `0` forces it; unset skips it only when `nvcc` is missing |
 | `TYR_MAKE_JOBS` | parallel jobs for the native `make` build (default: CPU count) |
-| `GPU` (or `TYR_GPU_TARGET`), `GPU_FAMILY`, `GPU_COMPUTE`, `GPU_CODE` | override the Makefile GPU matrix |
-| `TYR_MACOS_DEPLOYMENT_TARGET` | macOS deployment target |
-| `NCCL_ROOT` | NCCL discovery hint |
+| `TYR_SKIP_GPU_CODEGEN` | `1` skips the generator step in `target libtyr`, `0` forces it; unset skips it only when `nvcc` is missing. Internal: the nested `lake build GenerateGpuKernels` sets it to break the codegen cycle |
+| `NCCL_ROOT` | NCCL discovery hint (Makefile) |
 
 ### `scripts/` overview
 
@@ -338,7 +340,7 @@ Build and run through Lake:
 lake build                                  # target libtyr → codegen → make -C cc dylib
 lake exe TrainGPT                           # build if needed, then run
 # GPU build for a specific kernel module and target:
-TYR_GPU_CODEGEN_MODULE=Tyr.GPU.Kernels.MhaH100 GPU=H100 lake build RunMhaH100
+lake -R -Kcuda=/usr/local/cuda -Kgpu=H100 -Kkernels=Tyr.GPU.Kernels.MhaH100 build RunMhaH100
 # Manual probe of the FFI failure mode:
 lake exe ffi_crash_probe
 ```

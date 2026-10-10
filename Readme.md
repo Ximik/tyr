@@ -99,16 +99,21 @@ All optional.
 |---|---|
 | `TYR_DEPS_CACHE` | download cache directory (default `external/.cache`) |
 
+**Build configuration** (Lake options, given together on `lake -R`; Lake keeps
+them until the next `lake -R`, which replaces all of them):
+
+| Option | Effect |
+|---|---|
+| `-Kcuda=<toolkit>` | CUDA build with this toolkit, which must contain `bin/nvcc`. Without it: CPU build (CUDA kernels replaced by stubs). Checked against the libtorch from `deps/fetch.sh` |
+| `-Kgpu=<name>` | with `-Kcuda`, required: GPU to build kernels for, `H100`, `A100`, `B200`, `B300` or `GB10` |
+| `-Kkernels="<module> ..."` | kernel module(s) to generate CUDA for, space-separated (default `Tyr.GPU.Kernels.MhaH100`) |
+
 **Build:**
 
 | Variable | Effect |
 |---|---|
-| `lake -R -Kcuda=<toolkit>` | (Lake option, not a variable) CUDA build with this toolkit, which must contain `bin/nvcc`. Without it: CPU build (CUDA kernels replaced by stubs). Checked against the libtorch from `deps/fetch.sh` |
-| `TYR_GPU_TARGET` | GPU to build kernels for: `H100` (default), `A100`, `B200`, `B300`, `GB10` |
-| `TYR_GPU_CODEGEN_MODULE` | kernel module(s) to generate CUDA for, space-separated (default `Tyr.GPU.Kernels.MhaH100`) |
-| `TYR_SKIP_GPU_CODEGEN` | `1` skips kernel generation and reuses `cc/src/generated`; `0` forces it; unset skips it only when `nvcc` is missing |
 | `TYR_MAKE_JOBS` | parallel jobs for the native `make` build (default: CPU count) |
-| `TYR_MACOS_DEPLOYMENT_TARGET` | macOS deployment target (default `14.0`) |
+| `TYR_SKIP_GPU_CODEGEN` | `1` skips kernel generation and reuses `cc/src/generated`; `0` forces it; unset skips it only when `nvcc` is missing |
 
 See [docs/ffi-and-build.md](docs/ffi-and-build.md) for finer GPU and compiler overrides.
 

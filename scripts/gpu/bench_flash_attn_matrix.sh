@@ -84,14 +84,16 @@ if (( ! skip_build )); then
   echo "[1/3] Build benchmark executable"
   if (( ensure_native )); then
     echo "        codegen module: ${gpu_codegen_module}"
-    lake run buildGpuTarget -- "${gpu_codegen_module}" RunFlashAttnBench
+    : "${CUDA_HOME:?set CUDA_HOME to the CUDA toolkit}"
+    lake -R -Kcuda="$CUDA_HOME" -Kgpu="${TYR_GPU_TARGET:-H100}" -Kkernels="${gpu_codegen_module}" \
+      build RunFlashAttnBench
   else
     lake --quiet build RunFlashAttnBench
   fi
 fi
 
 if (( ensure_native )); then
-  echo "[2/3] Native runtime regeneration was included in the buildGpuTarget step"
+  echo "[2/3] Native runtime regeneration was included in the build step"
 else
   echo "[2/3] Native runtime rebuild skipped"
 fi

@@ -2,25 +2,6 @@ import Lake
 open Lake DSL
 open System (FilePath)
 
-def tyrLeanSharedLibRPath : String := run_io do
-  let out ← IO.Process.output {
-    cmd := "lean"
-    args := #["--print-prefix"]
-  }
-  let leanPrefix := out.stdout.trimAscii.toString
-  if out.exitCode == 0 && !leanPrefix.isEmpty then
-    let leanSharedDir : FilePath := leanPrefix / "lib" / "lean"
-    if ← leanSharedDir.pathExists then
-      pure leanSharedDir.toString
-    else
-      let leanLibDir : FilePath := leanPrefix / "lib"
-      if ← leanLibDir.pathExists then
-        pure leanLibDir.toString
-      else
-        pure "@loader_path"
-  else
-    pure "@loader_path"
-
 /-- Return `none` for blank strings after trimming whitespace. -/
 def nonEmptyTrimmed? (s : String) : Option String :=
   let trimmed := s.trimAscii.toString
@@ -31,26 +12,13 @@ def nonEmptyTrimmed? (s : String) : Option String :=
     next `lake -R`. The `libtyr` target checks it against the fetched wheels. -/
 def cudaHome? : Option String := get_config? cuda
 
-/-- Resolve macOS deployment target:
-    `TYR_MACOS_DEPLOYMENT_TARGET` > `MACOSX_DEPLOYMENT_TARGET` > `14.0`.
+/-- GPU to build CUDA kernels for, with `-Kcuda`: `-Kgpu=H100` (or `A100`,
+    `B200`, `B300`, `GB10`). cc/Makefile maps it to the architecture flags. -/
+def gpu? : Option String := get_config? gpu
 
-Using the active SDK version here can overshoot the locally supported deployment
-target when Xcode ships a newer SDK than the installed linker/runtime stack. -/
-def macOSDeploymentTarget : String := run_io do
-  let envTarget? ← do
-    match (← IO.getEnv "TYR_MACOS_DEPLOYMENT_TARGET") with
-    | some t => pure (some t)
-    | none => IO.getEnv "MACOSX_DEPLOYMENT_TARGET"
-  match envTarget?.bind nonEmptyTrimmed? with
-  | some t => pure t
-  | none => pure "14.0"
-
-/-- macOS deployment-target link args to keep linker target aligned with local SDK/libs. -/
-def macOSDeploymentLinkArgs : Array String :=
-  if System.Platform.isOSX then
-    #[s!"-mmacosx-version-min={macOSDeploymentTarget}"]
-  else
-    #[]
+/-- Kernel modules to generate CUDA for, space-separated:
+    `-Kkernels="Tyr.GPU.Kernels.MhaH100 Tyr.GPU.Kernels.MhaH100Decode"`. -/
+def gpuKernels : String := (get_config? kernels).getD "Tyr.GPU.Kernels.MhaH100"
 
 /-- Runtime search path for `cc/build/libTyrC`, relative to the loading binary
     so the checkout can move. Binaries sit two to four levels below the repo
@@ -76,8 +44,7 @@ def linuxRuntimeIsolationLinkArgs : Array String :=
 
 def packageLinkArgs : Array String :=
   if System.Platform.isOSX then
-    macOSDeploymentLinkArgs ++ tyrCRPathArgs
-      ++ #[s!"-Wl,-rpath,{tyrLeanSharedLibRPath}"]
+    tyrCRPathArgs
   else
     linuxRuntimeIsolationLinkArgs ++ tyrCRPathArgs
 
@@ -98,32 +65,6 @@ require LeanUrdfTypeProvider from git
 
 /-! ## C++ Library Build -/
 
-/-- Forward GPU build overrides from the outer environment into the C++ runtime
-build so Lake and shell scripts compile `libTyrC` for the same target/family. -/
-def gpuMakeEnv : IO (Array (String × Option String)) := do
-  let gpuTarget? ← do
-    match (← IO.getEnv "TYR_GPU_TARGET") with
-    | some v => pure (some v)
-    | none => IO.getEnv "GPU"
-  let gpuFamily? ← do
-    match (← IO.getEnv "TYR_GPU_FAMILY") with
-    | some v => pure (some v)
-    | none => IO.getEnv "GPU_FAMILY"
-  let gpuCompute? ← do
-    match (← IO.getEnv "TYR_GPU_COMPUTE") with
-    | some v => pure (some v)
-    | none => IO.getEnv "GPU_COMPUTE"
-  let gpuCode? ← do
-    match (← IO.getEnv "TYR_GPU_CODE") with
-    | some v => pure (some v)
-    | none => IO.getEnv "GPU_CODE"
-  pure <| #[
-    ("GPU", gpuTarget?.bind nonEmptyTrimmed?),
-    ("GPU_FAMILY", gpuFamily?.bind nonEmptyTrimmed?),
-    ("GPU_COMPUTE", gpuCompute?.bind nonEmptyTrimmed?),
-    ("GPU_CODE", gpuCode?.bind nonEmptyTrimmed?)
-  ]
-
 /-- Shared library holding the C++ bindings, built by `cc/Makefile` with the
     system compiler. It carries libtorch, Arrow, soxr and the CUDA libraries as
     its own dependencies, so Lean code links against it with Lake's bundled
@@ -141,19 +82,16 @@ target libtyr pkg : Dynlib := do
     unless ← (FilePath.mk cuda / "bin" / "nvcc").pathExists do
       error s!"-Kcuda={cuda} has no bin/nvcc"
   | none, false => pure ()
+  match cudaHome?, gpu? with
+  | some cuda, none => error s!"-Kcuda={cuda} needs -Kgpu (H100, A100, B200, B300 or GB10)"
+  | none, some gpu => error s!"-Kgpu={gpu} needs -Kcuda=<toolkit>"
+  | _, _ => pure ()
 
   let tyrCLib := pkg.dir / "cc" / "build" / nameToSharedLib "TyrC"
   let gpuIrRoot := pkg.buildDir / "ir" / "Tyr" / "GPU"
   let generatedCudaDir := pkg.dir / "cc" / "src" / "generated"
   let gpuCodegenConfigPath := pkg.buildDir / "libtyr_gpu_codegen.env"
-  -- TYR_GPU_CODEGEN_MODULE may be a single module name OR a space-separated
-  -- list of module names. The latter is convenient when a build needs more
-  -- than one kernel module's CUDA emitted, e.g.
-  -- `TYR_GPU_CODEGEN_MODULE="Tyr.GPU.Kernels.MhaH100 Tyr.GPU.Kernels.MhaH100Decode"`.
-  let gpuCodegenModule :=
-    match (← IO.getEnv "TYR_GPU_CODEGEN_MODULE") with
-    | some moduleName => (nonEmptyTrimmed? moduleName).getD "Tyr.GPU.Kernels.MhaH100"
-    | none => "Tyr.GPU.Kernels.MhaH100"
+  let gpuCodegenModule := gpuKernels
   let gpuCodegenModules : Array String :=
     (gpuCodegenModule.splitOn " ").toArray.filterMap (fun s => nonEmptyTrimmed? s)
   let skipGpuCodegenValue := (← IO.getEnv "TYR_SKIP_GPU_CODEGEN").getD ""
@@ -171,18 +109,13 @@ target libtyr pkg : Dynlib := do
     IO.FS.writeFile gpuCodegenConfigPath gpuCodegenConfig
 
   let sysroot ← getLeanSysroot
-  let gpuEnv ← gpuMakeEnv
-  let extraEnv :=
-    if System.Platform.isOSX then
-      #[("MACOSX_DEPLOYMENT_TARGET", some macOSDeploymentTarget)]
-    else
-      #[]
   let nativeEnv := #[
     ("LEAN_HOME", some sysroot.toString),
     -- Unset for a CPU build, so a `CUDA_HOME` in the caller's shell is ignored.
     ("CUDA_HOME", cudaHome?),
+    ("GPU", gpu?),
     ("TYR_GPU_CODEGEN_MODULE", some gpuCodegenModule)
-  ] ++ gpuEnv ++ extraEnv
+  ]
   -- Refresh content-stable manifests before Lake checks its native trace. Make
   -- owns effective compiler/GPU detection; the stub inventory also notices new
   -- kernel declarations without invalidating every native object on body edits.
@@ -269,11 +202,12 @@ target libtyr pkg : Dynlib := do
         cmd := "lake"
         args := #["build", "GenerateGpuKernels"]
         cwd := pkg.dir
+        -- The nested Lake reads the same stored -K options; it only has to
+        -- skip codegen to break the cycle (see `TYR_SKIP_GPU_CODEGEN` above).
         env := #[
           ("LEAN_HOME", some sysroot.toString),
-          ("TYR_SKIP_GPU_CODEGEN", some "1"),
-          ("TYR_GPU_CODEGEN_MODULE", some gpuCodegenModule)
-        ] ++ gpuEnv ++ extraEnv
+          ("TYR_SKIP_GPU_CODEGEN", some "1")
+        ]
       }
       proc {
         cmd := "lake"
@@ -283,9 +217,8 @@ target libtyr pkg : Dynlib := do
         cwd := pkg.dir
         env := #[
           ("LEAN_HOME", some sysroot.toString),
-          ("TYR_SKIP_GPU_CODEGEN", some "1"),
-          ("TYR_GPU_CODEGEN_MODULE", some gpuCodegenModule)
-        ] ++ gpuEnv ++ extraEnv
+          ("TYR_SKIP_GPU_CODEGEN", some "1")
+        ]
       }
     -- Parallel jobs for make: TYR_MAKE_JOBS, or the CPU count.
     let jobs ← match (← IO.getEnv "TYR_MAKE_JOBS").bind nonEmptyTrimmed? with
@@ -742,86 +675,3 @@ lean_exe RunMhaH100Seq768 where
 lean_exe RunB200Bf16Gemm where
   root := `Examples.GPU.RunB200Bf16Gemm
   supportInterpreter := true
-
-/-! ## Scripts -/
-
-private def lakeBuildArgs (targets : Array String) (reconfigure : Bool) : Array String :=
-  (if reconfigure then #["-R", "build"] else #["build"]) ++ targets
-
-private def lakeFailureLooksLikeReconfigure (stdout stderr : String) : Bool :=
-  let text := (stdout ++ "\n" ++ stderr).toLower
-  (text.contains "compiled configuration") ||
-    (text.contains "package configuration") ||
-    (text.contains "reconfigure") ||
-    (text.contains "run again with -r")
-
-private def runLakeBuildCapture (rootPath : FilePath) (targets : Array String)
-    (reconfigure : Bool) : IO (UInt32 × String × String) := do
-  let out ← IO.Process.output {
-    cmd := "lake"
-    args := lakeBuildArgs targets reconfigure
-    cwd := rootPath
-  }
-  if !out.stdout.isEmpty then
-    IO.print out.stdout
-  if !out.stderr.isEmpty then
-    IO.eprint out.stderr
-  pure (out.exitCode, out.stdout, out.stderr)
-
-def buildNamedExecutables (rootPath : FilePath) (targets : Array String) : IO UInt32 := do
-  let (firstExitCode, stdout, stderr) ← runLakeBuildCapture rootPath targets false
-  let exitCode ←
-    if firstExitCode == 0 then
-      pure firstExitCode
-    else if lakeFailureLooksLikeReconfigure stdout stderr then
-      IO.eprintln "lake build requested reconfigure; retrying with `lake -R build`."
-      let child ← IO.Process.spawn {
-        cmd := "lake"
-        args := lakeBuildArgs targets true
-        cwd := rootPath
-        stdin := .inherit
-        stdout := .inherit
-        stderr := .inherit
-      }
-      child.wait
-    else
-      pure firstExitCode
-  pure exitCode
-
-def buildGpuBackedTargets (rootPath : FilePath) (kernelModule : String) (targets : Array String) : IO UInt32 := do
-  let child ← IO.Process.spawn {
-    cmd := "lake"
-    args := #["build"] ++ targets
-    cwd := rootPath
-    env := #[("TYR_GPU_CODEGEN_MODULE", some kernelModule)]
-    stdin := .inherit
-    stdout := .inherit
-    stderr := .inherit
-  }
-  child.wait
-
-/-- Reconfigure once and build the raw H100 MHA example binaries together.
-    This avoids paying the Lake replay twice. -/
-script buildMhaH100Examples (_args) do
-  let rootPath := (← getWorkspace).root.dir
-  buildNamedExecutables rootPath #["RunMhaH100", "RunMhaH100Seq768"]
-
-/-- Build GPU-backed Lake targets by requesting one kernel module through the normal
-    `target libtyr` build flow instead of manually invoking `GenerateGpuKernels`
-    and `make`.
-    Usage:
-      `lake run buildGpuTarget <KernelModule> <BuildTarget> [ExtraBuildTarget ...]`
-
-    Lake versions differ on whether a script-level `--` separator is consumed or
-    forwarded. Accept it in either position so the documented helper cannot
-    accidentally request a kernel module literally named `--`. -/
-script buildGpuTarget (args) do
-  let args := if args.head? == some "--" then args.drop 1 else args
-  if args.length < 2 then
-    IO.eprintln "Usage: lake run buildGpuTarget <KernelModule> <BuildTarget> [ExtraBuildTarget ...]"
-    pure 2
-  else
-    let rootPath := (← getWorkspace).root.dir
-    let kernelModule := args[0]!
-    let targets := args.drop 1 |>.toArray
-    buildGpuBackedTargets rootPath kernelModule targets
