@@ -27,7 +27,9 @@ class NativeBuildTests(unittest.TestCase):
                           "external/wheels/torch/include/torch/csrc/api/include/torch",
                           "Tyr/GPU/Kernels", ".lake/build/ir/Tyr/GPU/Kernels", "lean/include"):
             (self.root / directory).mkdir(parents=True, exist_ok=True)
-        shutil.copy(REPO / "cc/Makefile", self.cc / "Makefile")
+        (self.cc / "map").mkdir()
+        for name in ("Makefile", "map/libTyrC.map", "map/libTyrC.exports"):
+            shutil.copy(REPO / "cc" / name, self.cc / name)
         for script in ("generate_gpu_kernel_stubs.py", "check_libstdcxx.sh"):
             shutil.copy(REPO / "cc/tools" / script, self.cc / "tools" / script)
         (self.root / "external/git/soxr/CMakeLists.txt").touch()
@@ -39,7 +41,7 @@ class NativeBuildTests(unittest.TestCase):
         self.header = self.cc / "include/nested/config.h"
         self.header.write_text("#define VALUE 3\n")
         (self.cc / "src/probe.cpp").write_text(
-            '#include "nested/config.h"\nextern "C" int probe() { return VALUE; }\n')
+            '#include "nested/config.h"\nextern "C" int lean_probe() { return VALUE; }\n')
         self.obj = self.cc / "build/probe.o"
         self.archive = self.cc / "build/libTyrC.a"
 
@@ -59,7 +61,7 @@ class NativeBuildTests(unittest.TestCase):
 
     def probe(self, library=None):
         (self.root / "main.cpp").write_text(
-            '#include <cstdio>\nextern "C" int probe();\nint main() { std::printf("%d", probe()); }\n')
+            '#include <cstdio>\nextern "C" int lean_probe();\nint main() { std::printf("%d", lean_probe()); }\n')
         subprocess.run(["c++", str(self.root / "main.cpp"), str(library or self.archive),
                         "-o", str(self.root / "probe")], check=True, capture_output=True)
         return subprocess.check_output([str(self.root / "probe")], cwd=self.cc, text=True)
@@ -67,7 +69,7 @@ class NativeBuildTests(unittest.TestCase):
     def test_shared_library_tracks_its_dependency_archive(self):
         (self.cc / "src/probe.cpp").write_text(
             'extern "C" int fixture_dependency();\n'
-            'extern "C" int probe() { return fixture_dependency(); }\n')
+            'extern "C" int lean_probe() { return fixture_dependency(); }\n')
         dependency_source = self.cc / "src/dependency.cpp"
         dependency_source.write_text('extern "C" int fixture_dependency() { return 3; }\n')
         dependency_archive = self.cc / "build/dependency/libfixture.a"
@@ -131,7 +133,7 @@ class NativeBuildTests(unittest.TestCase):
         time.sleep(1.05)
         self.header.rename(self.header.with_name("renamed.h"))
         (self.cc / "src/probe.cpp").write_text(
-            '#include "nested/renamed.h"\nextern "C" int probe() { return VALUE; }\n')
+            '#include "nested/renamed.h"\nextern "C" int lean_probe() { return VALUE; }\n')
         self.make(GPU="GB10")
         incremental = self.probe()
         shutil.rmtree(self.cc / "build")

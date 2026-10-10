@@ -1,0 +1,3 @@
+# Symbols libTyrC.dylib exports on macOS; see libTyrC.map for why.
+_lean_*
+__ZN7tyr_ops*

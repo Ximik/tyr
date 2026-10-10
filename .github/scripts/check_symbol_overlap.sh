@@ -1,36 +1,30 @@
 #!/usr/bin/env bash
-# Fail when two files loaded into the same process define the same C symbol.
+# Check that no C symbol is defined twice in a process and that libTyrC exports
+# only `lean_*` and `tyr_ops::*`. Fails if:
 #
-# The dynamic loader binds every call to the first definition it finds, so a
-# duplicate silently replaces one library's copy with another's.
+# 1. For an executable in .lake/build/bin or a module library in
+#    .lake/build/lib/lean, a C symbol (name not starting with `_Z`) is defined
+#    by two of: the binary itself and the libraries it loads (`ldd`).
+#    Not compared: glibc's libc, libm, libdl, librt and libpthread, and the
+#    symbol `free_sized`.
 #
-# Not checked:
-#   - C++ symbols (`_Z...`): identical template/inline copies in every C++
-#     library are normal.
-#   - glibc's own libraries, which share some symbols among themselves.
-#   - `free_sized`: the Lean runtime's fallback, which just calls glibc's `free`.
-#
-# Checks every built executable and precompiled module library under .lake/build.
+# 2. cc/build/libTyrC.so exports a symbol other than `lean_*` or `tyr_ops::*`.
 #
 # Usage: .github/scripts/check_symbol_overlap.sh   (Linux only, from the repo root)
 set -euo pipefail
 
 binaries=()
-
-# Every built executable.
 for file in .lake/build/bin/*; do
   if [[ -x "${file}" ]]; then
     binaries+=("${file}")
   fi
 done
-
-# Every precompiled module library.
 binaries+=(.lake/build/lib/lean/*.so)
 
 cache="$(mktemp -d)"
 trap 'rm -rf "${cache}"' EXIT
 
-# Plain C symbols a file defines (cached: the same libraries repeat).
+# C symbols a file defines, cached because the same libraries repeat.
 symbols() {
   local file key
   file="$(readlink -f "$1")"
@@ -45,18 +39,17 @@ symbols() {
 }
 
 failed=0
+
+# Check 1
 for binary in "${binaries[@]}"; do
   libraries="$(ldd "${binary}" | awk '$3 ~ /^\// { print $3 }' \
     | grep -vE '/lib(c|m|dl|rt|pthread)\.so')"
-
-  # "<symbol> <file>" for the binary and each library, then any symbol seen twice.
   duplicates="$(
     for file in "${binary}" ${libraries}; do
       symbols "${file}" | awk -v file="$(basename "${file}")" '{ print $1, file }'
     done | awk '{ files[$1] = files[$1] " " $2; count[$1]++ }
                 END { for (s in count) if (count[s] > 1) print "  " s ":" files[s] }'
   )"
-
   if [[ -n "${duplicates}" ]]; then
     echo "error: ${binary}: symbols defined more than once:"
     echo "${duplicates}"
@@ -64,7 +57,17 @@ for binary in "${binaries[@]}"; do
   fi
 done
 
+# Check 2
+unexpected="$(nm -D --defined-only --demangle --format=just-symbols cc/build/libTyrC.so \
+  | grep -vE '^(lean_|tyr_ops::)' || true)"
+if [[ -n "${unexpected}" ]]; then
+  echo "error: cc/build/libTyrC.so exports symbols besides lean_* and tyr_ops:: (see cc/map/libTyrC.map):"
+  echo "${unexpected}" | sed 's/^/  /'
+  failed=1
+fi
+
 if [[ "${failed}" -eq 0 ]]; then
-  echo "No duplicate C symbols in ${#binaries[@]} binaries or the libraries they load."
+  echo "No duplicate C symbols in ${#binaries[@]} binaries or the libraries they load;"
+  echo "libTyrC exports only lean_* and tyr_ops::."
 fi
 exit "${failed}"
