@@ -97,10 +97,9 @@ before the shared body, e.g. `dopri5Combine64Blackwell`
 `GenerateGpuKernels` executable over the configured kernel modules, emitting
 CUDA into `cc/src/generated/` (e.g. `Tyr_GPU_Kernels_MhaH100.cu` plus
 `tyr_gpu_kernel_stubs.cpp`), then rebuilds `cc/build/libTyrC.a` via
-`make -C cc`. Which modules get emitted is controlled by environment
-variables — `TYR_GPU_CODEGEN_MODULE` (space-separated module list, default
-`Tyr.GPU.Kernels.MhaH100`) and `TYR_SKIP_GPU_CODEGEN=1` to reuse the checked-in
-generated tree. On a fresh checkout the codegen step needs the kernel modules'
+`make -C cc`. Which modules get emitted is the `-Kkernels` Lake option
+(space-separated module list, default `Tyr.GPU.Kernels.MhaH100`, set with
+`lake -R`); `TYR_SKIP_GPU_CODEGEN=1` reuses the checked-in generated tree. On a fresh checkout the codegen step needs the kernel modules'
 own `.oleans`, so CI does a two-phase build: first `TYR_SKIP_GPU_CODEGEN=1
 lake build <kernel modules>`, then the real build
 (`.github/workflows/gpu.yml`). The full variable table is in
@@ -385,7 +384,7 @@ parts:
 ## Related guides
 
 - [GPU DSL and codegen](dsl-codegen.md) — the `KernelM` DSL, tile IR, and C++ emission these kernels are written in
-- [Getting started](../getting-started.md) — build knobs (`TYR_GPU_CODEGEN_MODULE`, `TYR_SKIP_GPU_CODEGEN`) and the parity-script flow
+- [Getting started](../getting-started.md) — build options (`-Kkernels`, `TYR_SKIP_GPU_CODEGEN`) and the parity-script flow
 - [Examples and testing](../examples-and-testing.md) — building and running the `Examples/GPU/Run*` harnesses and test suites
 - [FFI and build](../ffi-and-build.md) — `cc/`, `libTyrC.a`, and how generated CUDA reaches the linker
 - [Core tensors](../core/tensors.md) — `T s`, `Device`, the `torch.*` FFI used at the launch boundary

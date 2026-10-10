@@ -171,13 +171,9 @@ Shared infrastructure:
   (`Examples/GPT/GPT.lean:16`).
 
 Run any executable with `lake exe <Exe> [args...]` (builds it if needed) or,
-without rebuilding, `lake env .lake/build/bin/<Exe> [args...]`. Two Lake scripts
-cover the GPU builds:
-
-| Script | What it does |
-|---|---|
-| `lake run buildGpuTarget -- <KernelModule> <Target>...` | build GPU-backed targets with one kernel module |
-| `lake run buildMhaH100Examples` | build the raw H100 MHA binaries |
+without rebuilding, `lake env .lake/build/bin/<Exe> [args...]`. GPU-backed
+targets build with the kernel modules chosen at configure time, e.g.
+`lake -R -Kcuda=/usr/local/cuda -Kgpu=H100 -Kkernels=Tyr.GPU.Kernels.MhaH100 build RunMhaH100 RunMhaH100Seq768`.
 
 ## Key APIs: the example tour
 

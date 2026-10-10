@@ -66,9 +66,8 @@ modules=(
   Tyr.GPU.Kernels.RKCombine
   Tyr.GPU.Kernels.BrownianSample
 )
-# Keep Lake's extern-lib rebuild on the same generated kernel set.  Without
-# this, building TestGPUGB10E2E regenerates/relinks libtyr with Lake's default
-# single MhaH100 module and drops the GB10/RK/Brownian symbols generated above.
+# The Makefile compiles only these modules' generated CUDA (step 3); Lake gets
+# the same set through -Kkernels below.
 export TYR_GPU_CODEGEN_MODULE="${modules[*]}"
 generator_targets=(
   +Tyr.GPU.Codegen.GenerateMain
@@ -79,15 +78,16 @@ generator_targets=(
   +Tyr.GPU.Kernels.BrownianSample
 )
 
-echo "[1/5] Build Lean kernel generator inputs"
-lake --quiet build "${generator_targets[@]}"
+echo "[1/5] Configure Lake, build Lean kernel generator inputs"
+lake -R -Kcuda="$CUDA_HOME" -Kgpu="$TYR_GPU_TARGET" -Kkernels="${modules[*]}" \
+  --quiet build "${generator_targets[@]}"
 
 echo "[2/5] Generate CUDA translation units"
 lake env "$LEAN_BIN" --run Tyr/GPU/Codegen/GenerateMain.lean "${modules[@]}" --out-dir cc/src/generated
 
 echo "[3/5] Build C++/CUDA runtime library (GPU=${TYR_GPU_TARGET}, family=${TYR_GPU_FAMILY})"
 invalidate_generated_gpu_objects
-make -C cc -j"$(cpu_count)" GPU="${TYR_GPU_TARGET}" GPU_FAMILY="${TYR_GPU_FAMILY}"
+make -C cc -j"$(cpu_count)" CUDA_HOME="$CUDA_HOME" GPU="${TYR_GPU_TARGET}"
 
 echo "[4/5] Build LeanTest GB10 executable"
 lake --quiet build TestGPUGB10E2E

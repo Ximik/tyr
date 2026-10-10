@@ -13,9 +13,9 @@ label="$3"
 shift 3
 extra_build_targets=("$@")
 
-# Preserve the requested module through nested Lake/Make builds. Otherwise the
-# generator build falls back to MhaH100 and may compile an unrelated,
-# architecture-incompatible generated translation unit.
+: "${CUDA_HOME:?set CUDA_HOME to the CUDA toolkit}"
+# The Makefile compiles only this module's generated CUDA (step 3); Lake gets
+# the same module through -Kkernels below.
 export TYR_GPU_CODEGEN_MODULE="${kernel_module}"
 
 if [[ -z "${TYR_GPU_VENDORED_REF_RUNNER:-}" ]] && [[ -x "$PWD/scripts/gpu/run_vendored_reference.sh" ]]; then
@@ -101,16 +101,18 @@ if ! [[ "$trials" =~ ^[0-9]+$ ]] || [[ "$trials" -lt 1 ]]; then
   exit 2
 fi
 
-echo "[1/6] Build Lean kernel + generator (${label})"
-lake --quiet build +Tyr.GPU.Codegen.GenerateMain "+${kernel_module}"
-
-echo "[2/6] Generate CUDA translation unit (${label})"
-lake env "$LEAN_BIN" --run Tyr/GPU/Codegen/GenerateMain.lean "$kernel_module" --out-dir cc/src/generated
-
 gpu_target="$(detect_gpu_target)"
 gpu_family="$(detect_gpu_family)"
 export TYR_GPU_TARGET="${TYR_GPU_TARGET:-${gpu_target}}"
 export TYR_GPU_FAMILY="${TYR_GPU_FAMILY:-${gpu_family}}"
+
+echo "[1/6] Configure Lake, build Lean kernel + generator (${label})"
+lake -R -Kcuda="$CUDA_HOME" -Kgpu="$TYR_GPU_TARGET" -Kkernels="$kernel_module" \
+  --quiet build +Tyr.GPU.Codegen.GenerateMain "+${kernel_module}"
+
+echo "[2/6] Generate CUDA translation unit (${label})"
+lake env "$LEAN_BIN" --run Tyr/GPU/Codegen/GenerateMain.lean "$kernel_module" --out-dir cc/src/generated
+
 runner_source="Examples/GPU/${runner_exe}.lean"
 if [[ -f "Examples/GPU/${runner_exe}Exe.lean" ]]; then
   runner_source="Examples/GPU/${runner_exe}Exe.lean"
@@ -119,7 +121,7 @@ use_source_runner=0
 
 echo "[3/6] Build C++/CUDA runtime library (${label}, GPU=${TYR_GPU_TARGET}, family=${TYR_GPU_FAMILY})"
 invalidate_generated_gpu_objects
-make -C cc -j"$(cpu_count)" GPU="${TYR_GPU_TARGET}" GPU_FAMILY="${TYR_GPU_FAMILY}"
+make -C cc -j"$(cpu_count)" CUDA_HOME="$CUDA_HOME" GPU="${TYR_GPU_TARGET}"
 
 echo "[4/6] Build Lean executable (${runner_exe})"
 if ! lake --quiet build "$runner_exe" "${extra_build_targets[@]}"; then

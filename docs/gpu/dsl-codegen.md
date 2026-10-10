@@ -237,11 +237,11 @@ lake exe GenerateGpuKernels [--out-dir cc/src/generated] [--no-clean] <Module>�
 The normal build does this for you: the `extern_lib libtyr` target
 (`lakefile.lean:501-531`) builds the `GenerateGpuKernels` executable
 (`lakefile.lean:622`), runs it over the configured modules, then invokes
-`make -C cc`. Two environment variables control it (see
+`make -C cc`. Two settings control it (see
 [Getting started](../getting-started.md) for the full table):
 
-- `TYR_GPU_CODEGEN_MODULE` — kernel module(s) to emit CUDA for; a single name
-  or a space-separated list (default `Tyr.GPU.Kernels.MhaH100`).
+- `-Kkernels="<module> ..."` (Lake option, set with `lake -R`) — kernel
+  module(s) to emit CUDA for (default `Tyr.GPU.Kernels.MhaH100`).
 - `TYR_SKIP_GPU_CODEGEN` — set to `1` to skip generation and reuse whatever is
   in `cc/src/generated` (useful for CPU-only builds).
 
@@ -317,7 +317,7 @@ Codegen/build surface:
 | `generateKernel` | `Codegen/EmitNew.lean:1654` | `Kernel → String` ThunderKittens CUDA |
 | `writeKernelCudaUnitsByModuleFrom` | `Codegen/FFI.lean:282` | Per-module `.cu` emission with change detection |
 | `lake exe GenerateGpuKernels` | `Codegen/GenerateMain.lean` | CLI driver used by the Lake build |
-| `TYR_GPU_CODEGEN_MODULE`, `TYR_SKIP_GPU_CODEGEN` | `lakefile.lean:426-435,501` | Build-time module selection / skip switch |
+| `-Kkernels`, `TYR_SKIP_GPU_CODEGEN` | `lakefile.lean` (`gpuKernels`, `target libtyr`) | Build-time module selection / skip switch |
 
 ## Usage example
 
@@ -358,7 +358,7 @@ def simpleGemm
 end Tyr.GPU.Kernels.Examples
 ```
 
-Build side — emit CUDA for the module (or set `TYR_GPU_CODEGEN_MODULE` and let
+Build side — emit CUDA for the module (or configure `-Kkernels` and let
 `lake build` do it):
 
 ```bash
@@ -390,7 +390,7 @@ through CSE — see the caveat in `Tyr/GPU/Ops/RKFused.lean`.
 
 - [GPU kernels and ops](kernels.md) — the kernel catalog built with this DSL and the typed ops layer above the raw launchers
 - [ThunderKittens porting status](thunderkittens-porting-status.md) — source-to-Lean parity matrix and codegen build notes
-- [Getting started](../getting-started.md) — build instructions, including `TYR_GPU_CODEGEN_MODULE` / `TYR_SKIP_GPU_CODEGEN`
+- [Getting started](../getting-started.md) — build instructions, including `-Kkernels` / `TYR_SKIP_GPU_CODEGEN`
 - [Autodiff](../autodiff.md) — the host-side `Tyr.AutoGrad` engine that `Tyr/GPU/AutoGrad.lean` plugs into
 - [FFI and build](../ffi-and-build.md) — the `cc/` C++ layer the generated `.cu` files compile into
 - [Examples and testing](../examples-and-testing.md) — `Examples/GPU/Run*.lean` harnesses and GPU test entry points

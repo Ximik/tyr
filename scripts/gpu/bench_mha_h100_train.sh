@@ -75,20 +75,23 @@ detect_gpu_family() {
   esac
 }
 
+: "${CUDA_HOME:?set CUDA_HOME to the CUDA toolkit}"
 gpu_target="$(detect_gpu_target)"
 gpu_family="$(detect_gpu_family)"
 export TYR_GPU_TARGET="${TYR_GPU_TARGET:-${gpu_target}}"
 export TYR_GPU_FAMILY="${TYR_GPU_FAMILY:-${gpu_family}}"
 
-echo "[1/5] Build Lean targets"
-lake --quiet build +Tyr.GPU.Codegen.GenerateMain +Tyr.GPU.Kernels.MhaH100
+echo "[1/5] Configure Lake, build Lean targets"
+lake -R -Kcuda="$CUDA_HOME" -Kgpu="$TYR_GPU_TARGET" -Kkernels=Tyr.GPU.Kernels.MhaH100 \
+  --quiet build +Tyr.GPU.Codegen.GenerateMain +Tyr.GPU.Kernels.MhaH100
 
 echo "[2/5] Generate CUDA translation unit"
 lake env "$LEAN_BIN" --run Tyr/GPU/Codegen/GenerateMain.lean Tyr.GPU.Kernels.MhaH100 --out-dir cc/src/generated
 
 echo "[3/5] Build C++/CUDA runtime library (GPU=${TYR_GPU_TARGET}, family=${TYR_GPU_FAMILY})"
 invalidate_generated_gpu_objects
-make -C cc -j"$(cpu_count)" GPU="${TYR_GPU_TARGET}" GPU_FAMILY="${TYR_GPU_FAMILY}"
+TYR_GPU_CODEGEN_MODULE=Tyr.GPU.Kernels.MhaH100 \
+  make -C cc -j"$(cpu_count)" CUDA_HOME="$CUDA_HOME" GPU="${TYR_GPU_TARGET}"
 
 echo "[4/5] Use Lean source runner (Examples/GPU/RunMhaH100Train.lean)"
 

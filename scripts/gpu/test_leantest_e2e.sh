@@ -69,6 +69,7 @@ detect_gpu_family() {
   esac
 }
 
+: "${CUDA_HOME:?set CUDA_HOME to the CUDA toolkit}"
 gpu_target="$(detect_gpu_target)"
 gpu_family="$(detect_gpu_family)"
 export TYR_GPU_TARGET="${TYR_GPU_TARGET:-${gpu_target}}"
@@ -103,15 +104,17 @@ for module in "${modules[@]}"; do
   generator_targets+=("+${module}")
 done
 
-echo "[1/5] Build Lean kernel generator inputs"
-lake --quiet build "${generator_targets[@]}"
+echo "[1/5] Configure Lake, build Lean kernel generator inputs"
+lake -R -Kcuda="$CUDA_HOME" -Kgpu="$TYR_GPU_TARGET" -Kkernels="${modules[*]}" \
+  --quiet build "${generator_targets[@]}"
 
 echo "[2/5] Generate CUDA translation units"
 lake env "$LEAN_BIN" --run Tyr/GPU/Codegen/GenerateMain.lean "${modules[@]}" --out-dir cc/src/generated
 
 echo "[3/5] Build C++/CUDA runtime library (GPU=${TYR_GPU_TARGET}, family=${TYR_GPU_FAMILY})"
 invalidate_generated_gpu_objects
-make -C cc -j"$(cpu_count)" GPU="${TYR_GPU_TARGET}" GPU_FAMILY="${TYR_GPU_FAMILY}"
+TYR_GPU_CODEGEN_MODULE="${modules[*]}" \
+  make -C cc -j"$(cpu_count)" CUDA_HOME="$CUDA_HOME" GPU="${TYR_GPU_TARGET}"
 
 echo "[4/5] Build LeanTest GPU executable"
 lake --quiet build TestGPUE2E

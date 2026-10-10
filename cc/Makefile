@@ -126,74 +126,31 @@ endif
 # physical Blackwell-family targets are not instruction-compatible: GB10 uses
 # SM121 warp MMA, Hopper uses WGMMA, and B200/B300 use architecture-specific
 # tcgen05/TMEM instructions.
+# Set by lakefile.lean from `-Kgpu`; H100 when building without CUDA.
 GPU ?= H100
-GPU_FAMILY ?=
-GPU_COMPUTE ?=
-GPU_CODE ?=
 
-ifeq ($(GPU),GB10)
-ifeq ($(strip $(GPU_FAMILY)),)
-GPU_FAMILY := BLACKWELL
-endif
-ifeq ($(strip $(GPU_COMPUTE)),)
-GPU_COMPUTE := compute_121
-endif
-ifeq ($(strip $(GPU_CODE)),)
-GPU_CODE := sm_121
-endif
-else ifeq ($(GPU),B300)
-ifeq ($(strip $(GPU_FAMILY)),)
-GPU_FAMILY := BLACKWELL
-endif
-ifeq ($(strip $(GPU_COMPUTE)),)
-GPU_COMPUTE := compute_103a
-endif
-ifeq ($(strip $(GPU_CODE)),)
-GPU_CODE := sm_103a
-endif
-else ifeq ($(GPU),B200)
-ifeq ($(strip $(GPU_FAMILY)),)
-GPU_FAMILY := BLACKWELL
-endif
-ifeq ($(strip $(GPU_COMPUTE)),)
-GPU_COMPUTE := compute_100a
-endif
-ifeq ($(strip $(GPU_CODE)),)
-GPU_CODE := sm_100a
-endif
-else ifeq ($(GPU),A100)
-ifeq ($(strip $(GPU_FAMILY)),)
-GPU_FAMILY := AMPERE
-endif
-ifeq ($(strip $(GPU_COMPUTE)),)
-GPU_COMPUTE := compute_80a
-endif
-ifeq ($(strip $(GPU_CODE)),)
-GPU_CODE := sm_80a
-endif
-else ifeq ($(GPU),H100)
-ifeq ($(strip $(GPU_FAMILY)),)
+ifeq ($(GPU),H100)
 GPU_FAMILY := HOPPER
-endif
-ifeq ($(strip $(GPU_COMPUTE)),)
-GPU_COMPUTE := compute_90a
-endif
-ifeq ($(strip $(GPU_CODE)),)
-GPU_CODE := sm_90a
-endif
+GPU_ARCH := 90a
+else ifeq ($(GPU),A100)
+GPU_FAMILY := AMPERE
+GPU_ARCH := 80a
+else ifeq ($(GPU),B200)
+GPU_FAMILY := BLACKWELL
+GPU_ARCH := 100a
+else ifeq ($(GPU),B300)
+GPU_FAMILY := BLACKWELL
+GPU_ARCH := 103a
+else ifeq ($(GPU),GB10)
+GPU_FAMILY := BLACKWELL
+GPU_ARCH := 121
 else
-$(error Unsupported GPU: $(GPU). Please set GPU to A100, H100, B200, B300, or GB10)
+$(error Unsupported GPU: $(GPU). Use -Kgpu=H100, A100, B200, B300 or GB10)
 endif
+GPU_COMPUTE := compute_$(GPU_ARCH)
+GPU_CODE := sm_$(GPU_ARCH)
 
-ifeq ($(GPU_FAMILY),BLACKWELL)
-NVCCFLAGS += -DKITTENS_BLACKWELL
-else ifeq ($(GPU_FAMILY),AMPERE)
-NVCCFLAGS += -DKITTENS_AMPERE
-else ifeq ($(GPU_FAMILY),HOPPER)
-NVCCFLAGS += -DKITTENS_HOPPER
-else
-$(error Unsupported GPU_FAMILY: $(GPU_FAMILY). Please set GPU_FAMILY to AMPERE, HOPPER, or BLACKWELL)
-endif
+NVCCFLAGS += -DKITTENS_$(GPU_FAMILY)
 
 NVCCFLAGS += -gencode arch=$(GPU_COMPUTE),code=$(GPU_CODE)
 
@@ -372,8 +329,7 @@ NATIVE_CONFIG_KEYS := CC CXX NVCC LEAN_HOME TORCHDIR SOXR_DIR TKDIR \
 	CXX_STD_FLAG EXTRA_CXX_FLAGS CPP_CUDA_FLAGS NVCCFLAGS SOXR_CFLAGS \
 	TORCH_INC_FLAGS PYTHON_INC_FLAGS CUDA_INC_FLAGS NCCL_INC_FLAGS ARROW_INC_FLAGS \
 	GPU GPU_FAMILY GPU_COMPUTE GPU_CODE HAS_NVCC HAS_CUDA_TOOLKIT \
-	CUDA_HOME CUDA_MAJOR_VERSION GPU_CODEGEN_MODULES OBJ_FILES DYLIB_LINK_FLAGS \
-	MACOSX_DEPLOYMENT_TARGET SDKROOT
+	CUDA_HOME CUDA_MAJOR_VERSION GPU_CODEGEN_MODULES OBJ_FILES DYLIB_LINK_FLAGS
 
 .PHONY: check-deps native-config gpu-stubs FORCE
 FORCE:

@@ -25,9 +25,6 @@ day one:
   executable and precompiled module library.
 - **Executables** — `lean_exe` targets rooted in `Tests.*` and `Examples.*`;
   binaries land in `.lake/build/bin/`.
-- **Lake scripts** — `lake run buildGpuTarget -- <KernelModule> <Target>...`
-  builds targets with one GPU kernel module; `lake run buildMhaH100Examples`
-  builds the raw H100 MHA binaries.
 
 The runtime types a first program touches:
 
@@ -91,15 +88,19 @@ lake build test_runner      # specific executables are built on demand
 lake build TrainGPT TrainDiffusion TrainNanoChat FluxDemo
 ```
 
-GPU-related build knobs, read by `target libtyr` in `lakefile.lean`:
+Build configuration is a set of Lake options, given together on `lake -R`. Lake
+keeps them until the next `lake -R`, which replaces all of them, e.g.
+`lake -R -Kcuda=/usr/local/cuda -Kgpu=GB10 -Kkernels="Tyr.GPU.Kernels.MhaGB10" build`:
 
-| Variable | Default | Effect |
-|---|---|---|
-| `TYR_GPU_CODEGEN_MODULE` | `Tyr.GPU.Kernels.MhaH100` | Kernel module(s) (space-separated) to emit CUDA for |
-| `TYR_SKIP_GPU_CODEGEN` | unset (skip if no `nvcc`) | `1` skips the codegen step and reuses `cc/src/generated`; `0` forces it |
-| `TYR_MAKE_JOBS` | CPU count | Parallel jobs for `make -C cc dylib` |
-| `TYR_GPU_TARGET` / `TYR_GPU_FAMILY` | auto | Forwarded to `make -C cc` as `GPU=` / `GPU_FAMILY=` |
-| `TYR_MACOS_DEPLOYMENT_TARGET` | `14.0` | macOS deployment target |
+| Option | Effect |
+|---|---|
+| `-Kcuda=<toolkit>` | CUDA build with this toolkit, which must contain `bin/nvcc`. Without it: CPU build (CUDA kernels replaced by stubs). Checked against the libtorch from `deps/fetch.sh` |
+| `-Kgpu=<name>` | with `-Kcuda`, required: GPU to build kernels for, `H100`, `A100`, `B200`, `B300` or `GB10` |
+| `-Kkernels="<module> ..."` | kernel module(s) to generate CUDA for, space-separated (default `Tyr.GPU.Kernels.MhaH100`) |
+
+Environment variables for a single build: `TYR_MAKE_JOBS` (parallel jobs for
+`make -C cc dylib`, default CPU count) and `TYR_SKIP_GPU_CODEGEN` (`1` skips
+the codegen step and reuses `cc/src/generated`; `0` forces it).
 
 ## Runtime environment
 
@@ -177,13 +178,15 @@ Per-kernel scripts (`test_copy_e2e.sh`, `test_rotary_e2e.sh`,
 `test_layernorm_e2e.sh`, `test_flashattn_e2e.sh`, `test_mha_h100_e2e.sh`,
 `test_mha_h100_768_e2e.sh`, `test_b200_bf16_gemm_e2e.sh`, ...) all delegate to
 `scripts/gpu/run_e2e_kernel.sh <KernelModule> <RunnerExe> <Label>`, which runs a
-six-step flow: build the codegen executable and kernel module, emit CUDA into
-`cc/src/generated`, rebuild `cc/build/libTyrC.so` with `make -C cc
-GPU=$TYR_GPU_TARGET GPU_FAMILY=$TYR_GPU_FAMILY`, build the runner, regenerate
-fixtures, and run the parity check. Useful knobs:
+six-step flow: configure Lake (`-Kcuda=$CUDA_HOME -Kgpu -Kkernels`) and build
+the codegen executable and kernel module, emit CUDA into `cc/src/generated`,
+rebuild `cc/build/libTyrC.so` with `make -C cc GPU=$TYR_GPU_TARGET`, build the
+runner, regenerate fixtures, and run the parity check. Useful knobs:
 
+- `CUDA_HOME` — the CUDA toolkit (required).
 - `TYR_GPU_TARGET` / `TYR_GPU_FAMILY` — override the `nvidia-smi`-based
-  detection (`H100`/`GB10`/`B200`/`B300`/`A100`; `HOPPER`/`BLACKWELL`/`AMPERE`).
+  detection (`H100`/`GB10`/`B200`/`B300`/`A100`; `HOPPER`/`BLACKWELL`/`AMPERE`);
+  the tests also read them at run time.
 - `E2E_TRIALS` — repeat the fixture-regenerate + check loop N times.
 - `TYR_GPU_VENDORED_REF_RUNNER` — optional vendored ThunderKittens reference
   runner, invoked as `runner <suite-name> <fixture-dir>` after each suite;
