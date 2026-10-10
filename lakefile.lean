@@ -23,8 +23,8 @@ def tyrLeanSharedLibRPath : String := run_io do
 
 /-- Directories holding the system compiler's `libstdc++.so.6` and `libgcc_s.so.1`,
     as reported by `gcc -print-file-name` (e.g. `/usr/lib/gcc/x86_64-pc-linux-gnu/15`
-    on Gentoo, the multiarch dir on Debian). Lean's bundled linker does not search
-    them on its own. -/
+    on Gentoo, the multiarch dir on Debian). `libTyrC` is built with this compiler,
+    so its runtime must win over an older system copy at run time. -/
 def linuxCompilerLibDirArgs : Array String := run_io do
   if System.Platform.isOSX then return #[]
   let mut dirs : Array String := #[]
@@ -38,53 +38,6 @@ def linuxCompilerLibDirArgs : Array String := run_io do
           if !dirs.contains arg then dirs := dirs.push arg
     catch _ => pure ()
   return dirs
-
-/-- CUDA driver stub link flags. Hosted CI usually has CUDA-enabled LibTorch
-    but no CUDA driver stub, so only link `-lcuda` when the stub is present. -/
-def linuxCudaDriverStubLinkArgs : Array String := run_io do
-  if System.Platform.isOSX then return #[] else
-  let some cudaHome := (← IO.getEnv "CUDA_HOME").filter (!·.isEmpty) | return #[]
-  let stubsDir : FilePath := cudaHome / "lib64" / "stubs"
-  if ← (stubsDir / "libcuda.so").pathExists then
-    return #[s!"-L{stubsDir}", "-lcuda"]
-  return #[]
-
-/-- CUDA link flags for Linux: `libtorch_cuda` / `libc10_cuda` plus the CUDA
-    runtime libraries fetched into `external/wheels/nvidia` are needed because
-    `cc/build/libTyrC.a` whole-archives CUDA-using objects (TK kernels).
-    Returns `#[]` for a CPU libtorch, which keeps CPU-only checkouts linking. -/
-def linuxCudaLinkArgs : Array String := run_io do
-  let torchCuda : FilePath := __dir__ / "external" / "wheels" / "torch" / "lib" / "libtorch_cuda.so"
-  if ← torchCuda.pathExists then
-    let cuDir : FilePath := __dir__ / "external" / "wheels" / "nvidia" / "cu13" / "lib"
-    pure (#["-ltorch_cuda", "-lc10_cuda", s!"-L{cuDir}", "-l:libcudart.so.13",
-      "-l:libcublasLt.so.13"] ++ linuxCudaDriverStubLinkArgs)
-  else
-    pure #[]
-
-/-- Lean v4.29's bundled `Scrt1.o` references `__libc_csu_init` / `__libc_csu_fini`,
-    which were removed from glibc 2.34 (Ubuntu 24.04 ships glibc 2.39). Define
-    both as zero so the link succeeds; glibc 2.34+ `__libc_start_main` ignores
-    the legacy init/fini function-pointer arguments, so the symbols are never
-    actually dereferenced. Scoped to Linux. -/
-def linuxGlibc234CompatLinkArgs : Array String :=
-  if System.Platform.isOSX then #[] else
-    #["-Wl,--defsym=__libc_csu_init=0", "-Wl,--defsym=__libc_csu_fini=0"]
-
-/-- Arrow/Parquet from the pinned pyarrow wheel in `external/wheels/pyarrow`, linked by
-    exact file name. Bump `arrowSoVersion` with the pyarrow pin in
-    `deps/lock_wheels.py` (and `ARROW_SOVERSION` in `cc/Makefile`). -/
-def arrowSoVersion : String := "2500"
-
-def arrowLibDir : FilePath := __dir__ / "external" / "wheels" / "pyarrow"
-
-def arrowLinkArgs : Array String :=
-  let libs :=
-    if System.Platform.isOSX then
-      #[s!"libarrow.{arrowSoVersion}.dylib", s!"libparquet.{arrowSoVersion}.dylib"]
-    else
-      #[s!"libarrow.so.{arrowSoVersion}", s!"libparquet.so.{arrowSoVersion}"]
-  libs.map (fun (lib : String) => (arrowLibDir / lib).toString)
 
 /-- Return `none` for blank strings after trimming whitespace. -/
 def nonEmptyTrimmed? (s : String) : Option String :=
@@ -150,77 +103,42 @@ def macOSDeploymentLinkArgs : Array String :=
   else
     #[]
 
-/-- Apple system frameworks used by the C++ bridge/runtime on macOS. -/
-def macOSFrameworkArgs : Array String :=
-  #[
-    "-framework", "Foundation",
-    "-framework", "CoreFoundation",
-    "-framework", "Metal",
-    "-framework", "CoreGraphics",
-    "-framework", "ImageIO",
-    "-framework", "AVFoundation",
-    "-framework", "CoreMedia",
-    "-framework", "CoreVideo",
-    "-framework", "VideoToolbox",
-    "-framework", "Accelerate",
-    "-framework", "AudioToolbox"
-  ]
+/-- Runtime search path for `cc/build/libTyrC`, relative to the loading binary
+    so the checkout can move. Binaries sit two to four levels below the repo
+    root: executables in `.lake/build/bin`, module libraries in
+    `.lake/build/lib/lean`. libtorch and the other vendored libraries are found
+    through `libTyrC`'s own run path. -/
+def tyrCRPathArgs : Array String :=
+  let origin := if System.Platform.isOSX then "@loader_path" else "$ORIGIN"
+  #["../..", "../../..", "../../../.."].map fun up => s!"-Wl,-rpath,{origin}/{up}/cc/build"
 
-/-- libsoxr, built from the pinned `external/git/soxr` checkout (deps/git.lock). -/
-def soxrLinkArgs : Array String :=
-  #[s!"-L{__dir__ / "cc" / "build" / "soxr" / "src"}", "-lsoxr"]
+/-- Keep the Lean runtime's private copies of shared libraries out of the
+    executable's exported symbols, where they would override the copies that
+    libtorch uses (Lean links with `-rdynamic`):
 
-/-- Common Linux link tail shared by `packageLinkArgs` and `commonLinkArgs`:
-    libtorch (with its bundled libgomp) + CUDA (for a CUDA libtorch) + arrow/soxr
-    + glibc-2.34 compat. -/
-def linuxLinkTail : Array String :=
-  #[
-    s!"-L{__dir__ / "external" / "wheels" / "torch" / "lib"}",
-    "-ltorch", "-ltorch_cpu", "-lc10"
-  ] ++ linuxCudaLinkArgs ++ linuxCompilerLibDirArgs ++ soxrLinkArgs ++ arrowLinkArgs
-    ++ linuxGlibc234CompatLinkArgs ++ #[
-    "-l:libgomp.so.1", "-l:libstdc++.so.6"
-  ]
-
-/-- Runtime search paths for the vendored shared libraries, relative to the
-    loading binary so the checkout can move. Binaries sit two to four levels
-    below the repo root: the extern lib's shared `cc/build/libTyrC.so`,
-    executables in `.lake/build/bin`, module libraries in `.lake/build/lib/lean`.
-    Each path appears once: macOS 15.4+ dyld rejects duplicate `LC_RPATH`s. -/
-def vendoredRPathArgs : Array String :=
-  let (origin, dirs) :=
-    if System.Platform.isOSX then
-      ("@loader_path", #["external/wheels/torch/lib", "external/wheels/pyarrow"])
-    else
-      ("$ORIGIN", #["external/wheels/torch/lib", "external/wheels/pyarrow",
-        "external/wheels/nvidia/cu13/lib"])
-  dirs.flatMap fun dir =>
-    #["../..", "../../..", "../../../.."].map fun up => s!"-Wl,-rpath,{origin}/{up}/{dir}"
-
-def macOSTorchLinkArgs : Array String :=
-  #[
-    s!"-L{__dir__ / "external" / "wheels" / "torch" / "lib"}",
-    "-ltorch", "-ltorch_cpu", "-lc10"
-  ] ++ arrowLinkArgs ++ soxrLinkArgs ++ macOSSDKLinkArgs ++ macOSDeploymentLinkArgs
-    ++ macOSFrameworkArgs
+    * Lake appends `-lunwind` (LLVM's static unwinder) to the bundled clang's
+      link. libtorch and `libTyrC` unwind with libgcc's, and a C++ exception
+      thrown from libtorch crashes in LLVM's. Linking `libgcc_s` first
+      satisfies the `_Unwind_*` symbols, so no libunwind member is pulled in.
+    * Lean's static libuv would replace the libuv bundled in `libtorch_cpu`
+      (used by its TCPStore) symbol by symbol. -/
+def linuxRuntimeIsolationLinkArgs : Array String :=
+  #["-l:libgcc_s.so.1", "-Wl,--exclude-libs,libuv.a"]
 
 def packageLinkArgs : Array String :=
   if System.Platform.isOSX then
-    macOSTorchLinkArgs ++ vendoredRPathArgs ++ #[s!"-Wl,-rpath,{tyrLeanSharedLibRPath}"]
+    macOSSDKLinkArgs ++ macOSDeploymentLinkArgs ++ tyrCRPathArgs
+      ++ #[s!"-Wl,-rpath,{tyrLeanSharedLibRPath}"]
   else
-    linuxLinkTail ++ vendoredRPathArgs
-
-def commonLinkArgs : Array String :=
-  if System.Platform.isOSX then
-    #[s!"{__dir__ / "cc" / "build" / "libTyrC.a"}"] ++ macOSTorchLinkArgs
-  else
-    #[s!"{__dir__ / "cc" / "build" / "libTyrC.a"}"] ++ linuxLinkTail
+    linuxRuntimeIsolationLinkArgs ++ tyrCRPathArgs
 
 package tyr where
   srcDir := "."
   buildDir := ".lake/build"
   moreServerArgs := #["-Dpp.unicode.fun=true"]
   moreLinkArgs := packageLinkArgs
+  -- Linked into every executable and precompiled module library.
+  moreLinkLibs := #[`@/libtyr]
 
 require LeanTest from git "https://github.com/cpehle/lean_test.git" @ "b42cd3d78716e5a2de5b640ac82d7fe3f05f2a4c"
 require LeanBenchmark from git "https://github.com/cpehle/lean-benchmark.git" @
@@ -358,14 +276,12 @@ def gpuMakeEnv : IO (Array (String × Option String)) := do
     ("GPU_CODE", gpuCode?.bind nonEmptyTrimmed?)
   ]
 
-/-- External library target for the C++ bindings.
-    This wraps the Makefile build for now - a future enhancement could
-    use Lake's native C++ compilation. -/
-extern_lib libtyr pkg := do
-  let torchHasCuda ← (pkg.dir / "external" / "wheels" / "torch" / "lib" / "libtorch_cuda.so").pathExists
-  if torchHasCuda == linuxCudaLinkArgs.isEmpty then
-    error "external/ switched between the CPU and CUDA libtorch since the lakefile was configured; run `lake -R build`"
-  let tyrCLib := pkg.dir / "cc" / "build" / "libTyrC.a"
+/-- Shared library holding the C++ bindings, built by `cc/Makefile` with the
+    system compiler. It carries libtorch, Arrow, soxr and the CUDA libraries as
+    its own dependencies, so Lean code links against it with Lake's bundled
+    toolchain (see `moreLinkLibs` on the package). -/
+target libtyr pkg : Dynlib := do
+  let tyrCLib := pkg.dir / "cc" / "build" / nameToSharedLib "TyrC"
   let gpuIrRoot := pkg.buildDir / "ir" / "Tyr" / "GPU"
   let generatedCudaDir := pkg.dir / "cc" / "src" / "generated"
   let gpuCodegenConfigPath := pkg.buildDir / "libtyr_gpu_codegen.env"
@@ -380,9 +296,8 @@ extern_lib libtyr pkg := do
   let gpuCodegenModules : Array String :=
     (gpuCodegenModule.splitOn " ").toArray.filterMap (fun s => nonEmptyTrimmed? s)
   let skipGpuCodegenValue := (← IO.getEnv "TYR_SKIP_GPU_CODEGEN").getD ""
-  let buildTyrCDylibValue := (← IO.getEnv "TYR_BUILD_TYRC_DYLIB").getD ""
   let gpuCodegenConfig :=
-    s!"TYR_GPU_CODEGEN_MODULE={gpuCodegenModule}\nTYR_SKIP_GPU_CODEGEN={skipGpuCodegenValue}\nTYR_BUILD_TYRC_DYLIB={buildTyrCDylibValue}\n"
+    s!"TYR_GPU_CODEGEN_MODULE={gpuCodegenModule}\nTYR_SKIP_GPU_CODEGEN={skipGpuCodegenValue}\n"
   let shouldWriteConfig ← do
     if ← gpuCodegenConfigPath.pathExists then
       pure ((← IO.FS.readFile gpuCodegenConfigPath) != gpuCodegenConfig)
@@ -474,7 +389,7 @@ extern_lib libtyr pkg := do
   let depJob := makefileJob.mix gpuCodegenConfigJob |>.mix nativeConfigJob |>.mix nativeDependenciesJob
     |>.mix srcJob |>.mix headerJob |>.mix toolJob |>.mix gpuIrJob
 
-  buildFileAfterDep tyrCLib depJob fun _ => do
+  let libJob ← buildFileAfterDep tyrCLib depJob fun _ => do
     -- TYR_SKIP_GPU_CODEGEN: "1" skips, "0" forces; unset skips when make found
     -- no nvcc, since the Makefile then drops generated .cu files and links the
     -- weak launcher stubs (refreshed by `gpu-stubs` above) instead.
@@ -523,25 +438,17 @@ extern_lib libtyr pkg := do
           ("TYR_GPU_CODEGEN_MODULE", some gpuCodegenModule)
         ] ++ gpuEnv ++ extraEnv
       }
-    let buildTyrCDylib :=
-      match (← IO.getEnv "TYR_BUILD_TYRC_DYLIB") with
-      | some "0" => false
-      | _ => true
     -- `env.sh` exports TYR_MAKE_JOBS (CPU count by default).
     let jobsArgs :=
       match (← IO.getEnv "TYR_MAKE_JOBS").bind nonEmptyTrimmed? with
       | some jobs => #[s!"-j{jobs}"]
       | none => #[]
-    let makeArgs :=
-      if buildTyrCDylib then
-        jobsArgs ++ #["-C", (pkg.dir / "cc").toString, "lib", "dylib"]
-      else
-        jobsArgs ++ #["-C", (pkg.dir / "cc").toString, "lib"]
     proc {
       cmd := "make"
-      args := makeArgs
+      args := jobsArgs ++ #["-C", (pkg.dir / "cc").toString, "dylib"]
       env := nativeEnv
     }
+  return libJob.map fun path => { path, name := "TyrC" }
 
 /-! ## Lean Library -/
 
@@ -595,77 +502,54 @@ lean_lib Examples where
 lean_exe test_runner where
   root := `Tests.RunTests
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- Native tensor-free MCTS search and allocation microbenchmarks. -/
 lean_exe mctx_bench where
   root := `benchmarks.Mctx
-  moreLinkArgs := commonLinkArgs
-
-/-- Extra link args for `GenerateGpuKernels`. The auto-attached
-    `libtyr.static` references CUDA driver API symbols
-    (`cuTensorMapEncodeTiled`, `cuGetErrorString`) via `tk_vendor_mha_h100.o`,
-    which the package-default flags don't pick up. CUDA toolchains ship a
-    link-time stub for `libcuda.so` at `$CUDA_HOME/lib64/stubs`. Return no
-    CUDA driver flags when the stub is absent, which is the normal hosted-CI
-    CPU-stub path. -/
-def codegenExeLinkArgs : Array String :=
-  linuxCudaDriverStubLinkArgs ++ linuxGlibc234CompatLinkArgs
 
 /-- Generate CUDA translation units from registered @[gpu_kernel] declarations.
 
     Its root `Tyr.GPU.Codegen.GenerateMain` lives in the codegen-only sub-lib
     `TyrCodegen` (above) so the per-module `.so` cascade across `Tyr.*` is
-    skipped. `moreLinkArgs := codegenExeLinkArgs` overrides the package
-    default — drops the heavy libtorch/arrow/parquet flags (we don't need
-    them in a pure-Lean codegen tool) but keeps `-lcuda` when a CUDA driver
-    stub is available for auto-attached `libtyr.static` CUDA references. -/
+    skipped. -/
 lean_exe GenerateGpuKernels where
   root := `Tyr.GPU.Codegen.GenerateMain
   supportInterpreter := true
-  moreLinkArgs := codegenExeLinkArgs
 
 /-- Compile registered @[tileir_kernel] declarations through NVIDIA TileIR tooling. -/
 lean_exe GenerateTileIRKernels where
   root := `Tyr.GPU.Codegen.TileIR.GenerateMain
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- Experimental test runner for unstable/in-progress modules. -/
 lean_exe test_runner_experimental where
   root := `Tests.RunTestsExperimental
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- BranchingFlows continuous overfit training check. -/
 lean_exe BranchingFlowsContinuousTrain where
   root := `Examples.BranchingFlows.ContinuousTrainDemo
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- BranchingFlows molecule overfit training check. -/
 lean_exe BranchingFlowsMoleculeTrain where
   root := `Examples.BranchingFlows.MoleculeTrainDemo
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- Molecule-shaped oracle generation with branch-event trajectory export. -/
 lean_exe BranchingFlowsMoleculeGenerate where
   root := `Examples.BranchingFlows.MoleculeGenerationDemo
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- BranchingFlows molecule transformer overfit training check. -/
 lean_exe BranchingFlowsMoleculeTransformerTrain where
   root := `Examples.BranchingFlows.MoleculeTransformerTrainDemo
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- Dataset-backed BranchingFlows molecule transformer training and generation. -/
 lean_exe BranchingFlowsMoleculeTrainGenerate where
   root := `Examples.BranchingFlows.MoleculeTrainGenerate
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- Manual FFI failure-mode probe (intentionally crashes; not in the suite).
     Run it to check that an uncaught libtorch exception terminates with an
@@ -673,352 +557,293 @@ lean_exe BranchingFlowsMoleculeTrainGenerate where
 lean_exe ffi_crash_probe where
   root := `Tests.FfiCrashProbe
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- Focused LeanTest runner for the Riemannian nanoGPT tests. -/
 lean_exe RunRiemannianNanoGPTTests where
   root := `Tests.RunRiemannianNanoGPTTests
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- GPT training executable -/
 lean_exe TrainGPT where
   root := `Examples.TrainGPT
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- Exact-VJP Riemannian nanoGPT prototype runner. -/
 lean_exe RunRiemannianNanoGPT where
   root := `Examples.GPT.RunRiemannianNanoGPT
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- Diffusion training executable -/
 lean_exe TrainDiffusion where
   root := `Examples.TrainDiffusion
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- URDF-backed hybrid contact event-skeleton simulation demo. -/
 lean_exe RunUrdfContactExample where
   root := `Examples.EventSkeleton.RunUrdfContactExample
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- AlphaGrad-style RoeFlux_1d elimination planning port demo. -/
 lean_exe AlphaGradRoeFlux1dA0 where
   root := `Examples.AlphaGradPort.RoeFlux1dA0
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- AlphaGrad port task sweep runner (targets tasks one-by-one). -/
 lean_exe AlphaGradPortSweep where
   root := `Examples.AlphaGradPort.TaskSweep
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- AlphaGrad policy-training runner with real parameter updates. -/
 lean_exe AlphaGradPolicyTrain where
   root := `Examples.AlphaGradPort.PolicyTrainMain
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- AlphaGrad policy-training sweep runner across tasks and training modes. -/
 lean_exe AlphaGradPolicySweep where
   root := `Examples.AlphaGradPort.PolicySweepMain
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- NanoChat training executable (modded GPT + distributed) -/
 lean_exe TrainNanoChat where
   root := `Examples.NanoChat.TrainNanoChat
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- NanoChat multi-stage pipeline executable. -/
 lean_exe NanoChatPipeline where
   root := `Examples.NanoChat.Pipeline
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- NanoChat checkpoint-backed chat/inference executable. -/
 lean_exe NanoChatChat where
   root := `Examples.NanoChat.RunChat
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- Live microphone streaming Qwen3-ASR demo (macOS AudioToolbox input). -/
 lean_exe Qwen3ASRLiveMic where
   root := `Examples.Qwen3ASR.LiveMic
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- Separate streaming-native ASR session executable (parallel path). -/
 lean_exe Qwen3ASRLiveMicTrueStream where
   root := `Examples.Qwen3ASR.LiveMicTrueStream
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- Diffusion tests executable -/
 lean_exe TestDiffusion where
   root := `Tests.RunTestDiffusion
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- DataLoader test executable -/
 lean_exe TestDataLoader where
   root := `Tests.RunTestDataLoader
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- Differential equation baseline test executable. -/
 lean_exe TestDiffEq where
   root := `Tests.RunTestDiffEq
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- Adjoint differential equation test executable. -/
 lean_exe TestDiffEqAdjoint where
   root := `Tests.RunTestDiffEqAdjoint
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- Core adjoint differential equation test executable. -/
 lean_exe TestDiffEqAdjointCore where
   root := `Tests.RunTestDiffEqAdjointCore
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- GPU DSL regression test executable. -/
 lean_exe TestGPUDSL where
   root := `Tests.RunTestGPUDSL
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- GPU kernel fixture test executable. -/
 lean_exe TestGPUKernels where
   root := `Tests.RunTestGPUKernels
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- End-to-end GPU parity tests (Tyr vs PyTorch, with optional vendored references). -/
 lean_exe TestGPUE2E where
   root := `Tests.RunGPUE2E
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- GB10/Blackwell-specific end-to-end GPU parity tests. -/
 lean_exe TestGPUGB10E2E where
   root := `Tests.RunGPUGB10E2E
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- Laguna config.json parsing tests. -/
 lean_exe LagunaConfigTest where
   root := `Tests.RunLagunaConfig
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- Laguna tokenizer encode/decode tests. -/
 lean_exe LagunaTokenizerTest where
   root := `Tests.RunLagunaTokenizer
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- Laguna NVFP4 dequantization tests. -/
 lean_exe LagunaNvFp4Test where
   root := `Tests.RunLagunaNvFp4
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- Laguna MoE block (router + packed experts) tests. -/
 lean_exe LagunaMoeTest where
   root := `Tests.RunLagunaMoe
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- Laguna attention/model forward tests. -/
 lean_exe LagunaModelTest where
   root := `Tests.RunLagunaModel
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- Laguna end-to-end parity test vs the HF reference (tiny fixture). -/
 lean_exe LagunaParityTest where
   root := `Tests.RunLagunaParity
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- Laguna fused NVFP4 MoE kernel tests. -/
 lean_exe LagunaFusedTest where
   root := `Tests.RunLagunaFused
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- Laguna rotary (YaRN + plain) table tests. -/
 lean_exe LagunaRopeTest where
   root := `Tests.RunLagunaRope
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- Laguna-S-2.1 model loader/generation demo with HF repo-id resolution. -/
 lean_exe LagunaRunHF where
   root := `Examples.Laguna.RunHF
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- NVIDIA TileIR rendering and toolchain driver tests. -/
 lean_exe TestGPUTileIR where
   root := `Tests.RunTestGPUTileIR
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- TileIR export driver regression tests. -/
 lean_exe TestTileIRGenerateMain where
   root := `Tests.RunTestTileIRGenerateMain
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- Flux image generation demo -/
 lean_exe FluxDemo where
   root := `Examples.Flux.FluxDemo
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- End-to-end Qwen3-TTS demo (Lean talker + Python speech-tokenizer decode). -/
 lean_exe Qwen3TTSEndToEnd where
   root := `Examples.Qwen3TTS.EndToEnd
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- Offline KittenTTS / Kokoro synthesis demo using converted safetensors checkpoints. -/
 lean_exe KittenTTSPretrained where
   root := `Examples.KittenTTSPretrained
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 lean_exe KittenTTSDurations where
   root := `Examples.KittenTTSDurations
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 lean_exe KittenTTSDebug where
   root := `Examples.KittenTTSDebug
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 lean_exe KittenTTSCompare where
   root := `Examples.KittenTTSCompare
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- Offline Qwen3-ASR transcription demo (fully Lean pipeline). -/
 lean_exe Qwen3ASRTranscribe where
   root := `Examples.Qwen3ASR.Transcribe
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- Offline Whisper transcription demo (native Tyr encoder-decoder implementation). -/
 lean_exe WhisperTranscribe where
   root := `Examples.Whisper.Transcribe
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- Interactive Whisper voice mode with microphone input and silence detection. -/
 lean_exe WhisperVoiceMode where
   root := `Examples.Whisper.VoiceMode
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- Isolated test: in-memory Whisper transcription (no WAV round-trip). -/
 lean_exe WhisperTranscribeInMem where
   root := `Examples.Whisper.TranscribeInMem
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- Qwen3.5 model loader/generation demo with HF repo-id resolution. -/
 lean_exe Qwen35RunHF where
   root := `Examples.Qwen35.RunHF
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- Qwen2.5-Omni thinker text loader/generation demo (3B/7B). -/
 lean_exe Qwen25OmniRunHF where
   root := `Examples.Qwen25Omni.RunHF
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- Gemma 4 text loader/generation demo with HF repo-id resolution. -/
 lean_exe Gemma4RunHF where
   root := `Examples.Gemma4.RunHF
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- Flux debug harness (saves intermediate tensors) -/
 lean_exe FluxDebug where
   root := `Examples.Flux.FluxDebug
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- End-to-end demo for a minimal ThunderKittens-style copy kernel. -/
 lean_exe RunCopy where
   root := `Examples.GPU.RunCopyExe
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- End-to-end rotary fixture validation using a ThunderKittens-style kernel. -/
 lean_exe RunRotary where
   root := `Examples.GPU.RunRotaryExe
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- End-to-end ThunderKittens layernorm fixture validation. -/
 lean_exe RunLayerNorm where
   root := `Examples.GPU.RunLayerNormExe
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- End-to-end fused residual + RMSNorm fixture validation. -/
 lean_exe RunRMSNorm where
   root := `Examples.GPU.RunRMSNormExe
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- Fused BF16 cross-entropy training benchmark. -/
 lean_exe RunLoss where
   root := `Examples.GPU.RunLoss
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- Fused mixed-precision AdamW training benchmark. -/
 lean_exe RunOptimizer where
   root := `Examples.GPU.RunOptimizer
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- End-to-end ThunderKittens flash attention fixture validation. -/
 lean_exe RunFlashAttn where
   root := `Examples.GPU.RunFlashAttnExe
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- End-to-end FlashAttention3 validation. -/
 lean_exe RunFlashAttn3 where
   root := `Examples.GPU.RunFlashAttn3
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- Runtime validation for the high-level `tyr::flash_attn` bridge. -/
 lean_exe RunFlashAttnOp where
   root := `Examples.GPU.RunFlashAttnOp
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- One-H100 benchmark scaffold for the `tyr::flash_attn` bring-up. -/
 lean_exe RunFlashAttnBench where
   root := `Examples.GPU.RunFlashAttnBench
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- Numerical correctness harness for the TK-style decode kernel.
 
@@ -1032,7 +857,6 @@ lean_exe RunFlashAttnBench where
 lean_exe RunMhaH100Decode where
   root := `Examples.GPU.RunMhaH100Decode
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- Decode-specific perf benchmark: timed forward over the same shape
     matrix as `RunMhaH100Decode`, reporting p50 latency vs PyTorch SDPA
@@ -1045,37 +869,31 @@ lean_exe RunMhaH100Decode where
 lean_exe RunDecodeBench where
   root := `Examples.GPU.RunDecodeBench
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- End-to-end ThunderKittens `mha_h100` forward/backward fixture validation. -/
 lean_exe RunMhaH100 where
   root := `Examples.GPU.RunMhaH100Exe
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- End-to-end `mha_h100` training/benchmark demo (kernel + optional torch baseline). -/
 lean_exe RunMhaH100Train where
   root := `Examples.GPU.RunMhaH100Train
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- End-to-end GB10 MHA validation and synchronized benchmark. -/
 lean_exe RunMhaGB10 where
   root := `Examples.GPU.RunMhaGB10Exe
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- End-to-end multi-block `mha_h100` validation (`seq=768`, `d=64`). -/
 lean_exe RunMhaH100Seq768 where
   root := `Examples.GPU.RunMhaH100Seq768
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-- End-to-end Blackwell/B200 BF16 GEMM validation. -/
 lean_exe RunB200Bf16Gemm where
   root := `Examples.GPU.RunB200Bf16Gemm
   supportInterpreter := true
-  moreLinkArgs := commonLinkArgs
 
 /-! ## Scripts -/
 
@@ -1158,7 +976,6 @@ private def runLakeBuildCapture (rootPath : FilePath) (targets : Array String)
     cmd := "lake"
     args := lakeBuildArgs targets reconfigure
     cwd := rootPath
-    env := #[("TYR_BUILD_TYRC_DYLIB", some "0")]
   }
   if !out.stdout.isEmpty then
     IO.print out.stdout
@@ -1177,7 +994,6 @@ def buildNamedExecutables (rootPath : FilePath) (targets : Array String) : IO UI
         cmd := "lake"
         args := lakeBuildArgs targets true
         cwd := rootPath
-        env := #[("TYR_BUILD_TYRC_DYLIB", some "0")]
         stdin := .inherit
         stdout := .inherit
         stderr := .inherit
@@ -1199,10 +1015,7 @@ def buildGpuBackedTargets (rootPath : FilePath) (kernelModule : String) (targets
     cmd := "lake"
     args := #["build"] ++ targets
     cwd := rootPath
-    env := #[
-      ("TYR_GPU_CODEGEN_MODULE", some kernelModule),
-      ("TYR_BUILD_TYRC_DYLIB", some "0")
-    ]
+    env := #[("TYR_GPU_CODEGEN_MODULE", some kernelModule)]
     stdin := .inherit
     stdout := .inherit
     stderr := .inherit
@@ -1222,8 +1035,7 @@ script train (args) do
   return ← runBuiltExecutable rootPath "TrainGPT" args.toArray
 
 /-- Reconfigure once and build the raw H100 MHA example binaries together.
-    This avoids paying the Lake replay twice and skips `libTyrC.so` because the
-    compiled examples link `cc/build/libTyrC.a` directly. -/
+    This avoids paying the Lake replay twice. -/
 script buildMhaH100Examples (_args) do
   let rootPath := (← getWorkspace).root.dir
   buildNamedExecutables rootPath #["RunMhaH100", "RunMhaH100Seq768"]

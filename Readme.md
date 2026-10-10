@@ -108,13 +108,10 @@ All optional.
 
 | Variable | Effect |
 |---|---|
-| `LEAN_CC` | Linux: set to `lean-cc` to build and link with the system GCC (`source ./env.sh` does this) |
-| `LEAN_CC_FAST=1` | compile Lean-generated C with `-O0` for faster iteration |
 | `CUDA_HOME` | CUDA toolkit; `env.sh` sets it from `nvcc` on `PATH` and fails if it has no `bin/nvcc`. Empty or unset: CPU build (CUDA kernels replaced by stubs) |
 | `TYR_GPU_TARGET` | GPU to build kernels for: `H100` (default), `A100`, `B200`, `B300`, `GB10` |
 | `TYR_GPU_CODEGEN_MODULE` | kernel module(s) to generate CUDA for, space-separated (default `Tyr.GPU.Kernels.MhaH100`) |
 | `TYR_SKIP_GPU_CODEGEN` | `1` skips kernel generation and reuses `cc/src/generated`; `0` forces it; unset skips it only when `nvcc` is missing |
-| `TYR_BUILD_TYRC_DYLIB=0` | build only the static `libTyrC.a` |
 | `TYR_MAKE_JOBS` | parallel jobs for the native `make` build; `source ./env.sh` sets it to the CPU count if unset (unset: serial) |
 | `SDKROOT` | macOS SDK path for linking; `source ./env.sh` sets it from `xcrun` if unset |
 | `TYR_MACOS_DEPLOYMENT_TARGET` | macOS deployment target (default `14.0`) |

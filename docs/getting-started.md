@@ -17,12 +17,12 @@ day one:
 - **Lean libraries** — `Tyr` (`@[default_target]`, precompiled; everything under
   `Tyr.*`), `TyrCodegen` (pure-Lean GPU codegen modules, no FFI), `Tests`,
   `TestsExperimental`, and `Examples` (`lakefile.lean:560-593`).
-- **C++ bridge** — `extern_lib libtyr` (`lakefile.lean:416`) wraps the Makefile
+- **C++ bridge** — `target libtyr` in `lakefile.lean` wraps the Makefile
   build: it runs the GPU kernel codegen executable and then
-  `make -C cc lib dylib`, producing `cc/build/libTyrC.a` (and `libTyrC.so`
-  unless `TYR_BUILD_TYRC_DYLIB=0`). Every executable statically links
-  `libTyrC.a` plus libtorch, OpenMP, Arrow/Parquet, and soxr via
-  `commonLinkArgs` (`lakefile.lean:238`).
+  `make -C cc dylib`, producing the shared library `cc/build/libTyrC.so`
+  (`.dylib` on macOS), which carries libtorch, OpenMP, Arrow/Parquet and soxr
+  as its own dependencies. The package's `moreLinkLibs` links it into every
+  executable and precompiled module library.
 - **Executables** — `lean_exe` targets rooted in `Tests.*` and `Examples.*`;
   binaries land in `.lake/build/bin/`.
 - **Lake scripts** (`lakefile.lean:1164-1232`) — thin wrappers that compute the
@@ -89,14 +89,13 @@ lake build test_runner      # specific executables are built on demand
 lake build TrainGPT TrainDiffusion TrainNanoChat FluxDemo
 ```
 
-GPU-related build knobs, read by `extern_lib libtyr` in `lakefile.lean`:
+GPU-related build knobs, read by `target libtyr` in `lakefile.lean`:
 
 | Variable | Default | Effect |
 |---|---|---|
 | `TYR_GPU_CODEGEN_MODULE` | `Tyr.GPU.Kernels.MhaH100` | Kernel module(s) (space-separated) to emit CUDA for |
 | `TYR_SKIP_GPU_CODEGEN` | unset (skip if no `nvcc`) | `1` skips the codegen step and reuses `cc/src/generated`; `0` forces it |
-| `TYR_BUILD_TYRC_DYLIB` | unset (on) | `0` skips building `cc/build/libTyrC.so` |
-| `TYR_MAKE_JOBS` | CPU count (set by `env.sh`) | Parallel jobs for `make -C cc lib [dylib]`; unset runs serially |
+| `TYR_MAKE_JOBS` | CPU count (set by `env.sh`) | Parallel jobs for `make -C cc dylib`; unset runs serially |
 | `TYR_GPU_TARGET` / `TYR_GPU_FAMILY` | auto | Forwarded to `make -C cc` as `GPU=` / `GPU_FAMILY=` |
 | `TYR_MACOS_SDKROOT` / `TYR_MACOS_DEPLOYMENT_TARGET` | `SDKROOT` (set by `env.sh`) / `14.0` | macOS SDK and deployment-target overrides |
 
@@ -180,7 +179,7 @@ Per-kernel scripts (`test_copy_e2e.sh`, `test_rotary_e2e.sh`,
 `test_mha_h100_768_e2e.sh`, `test_b200_bf16_gemm_e2e.sh`, ...) all delegate to
 `scripts/gpu/run_e2e_kernel.sh <KernelModule> <RunnerExe> <Label>`, which runs a
 six-step flow: build the codegen executable and kernel module, emit CUDA into
-`cc/src/generated`, rebuild `cc/build/libTyrC.a` with `make -C cc
+`cc/src/generated`, rebuild `cc/build/libTyrC.so` with `make -C cc
 GPU=$TYR_GPU_TARGET GPU_FAMILY=$TYR_GPU_FAMILY`, build the runner, regenerate
 fixtures, and run the parity check. Useful knobs:
 

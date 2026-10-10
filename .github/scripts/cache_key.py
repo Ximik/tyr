@@ -17,11 +17,11 @@ import subprocess
 REPO = Path(__file__).resolve().parents[2]
 BUILD_ENV = (
     "CC", "CXX", "CFLAGS", "CXXFLAGS", "CPPFLAGS", "LDFLAGS", "LEAN_CC",
-    "LEAN_CC_GCC", "LEAN_CC_FAST", "LIBRARY_PATH", "SDKROOT", "MACOSX_DEPLOYMENT_TARGET",
+    "LIBRARY_PATH", "SDKROOT", "MACOSX_DEPLOYMENT_TARGET",
     "TYR_MACOS_SDKROOT", "TYR_MACOS_DEPLOYMENT_TARGET", "GPU", "GPU_FAMILY",
     "GPU_COMPUTE", "GPU_CODE", "TYR_GPU_TARGET", "TYR_GPU_FAMILY",
     "TYR_GPU_COMPUTE", "TYR_GPU_CODE", "TYR_GPU_CODEGEN_MODULE",
-    "TYR_SKIP_GPU_CODEGEN", "TYR_BUILD_TYRC_DYLIB",
+    "TYR_SKIP_GPU_CODEGEN",
 )
 
 
@@ -45,7 +45,7 @@ def identity():
     # deps/git.lock and deps/wheels.lock pin every native dependency; the libtorch
     # files below additionally record which variant (cpu/cuda) was fetched.
     files = ["lean-toolchain", "lake-manifest.json", "deps/git.lock", "deps/wheels.lock",
-             "lean-cc", "env.sh"]
+             "env.sh"]
     torch_files = ["share/cmake/Torch/TorchConfigVersion.cmake",
                    "share/cmake/Torch/TorchConfig.cmake",
                    "include/torch/csrc/api/include/torch/version.h"]

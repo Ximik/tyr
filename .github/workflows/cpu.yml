@@ -88,20 +88,11 @@ jobs:
 
       - name: Check FFI crash reporting
         if: runner.os == 'Linux'
-        run: |
-          set +e
-          ./.lake/build/bin/ffi_crash_probe > output/ci/ffi-crash-probe.log 2>&1
-          code=$?
-          set -e
-          head -n 3 output/ci/ffi-crash-probe.log
-          if [[ "$code" -ne 134 ]]; then
-            echo "::error::expected SIGABRT (134), got exit code ${code}"
-            exit 1
-          fi
-          if ! grep -qE "\[tyr\] fatal: uncaught|terminate called after throwing an instance of 'c10::" output/ci/ffi-crash-probe.log; then
-            echo "::error::probe aborted without reporting the libtorch error"
-            exit 1
-          fi
+        run: .github/scripts/check_ffi_crash_probe.sh
+
+      - name: Check no C symbol is defined twice in a process
+        if: runner.os == 'Linux'
+        run: .github/scripts/check_symbol_overlap.sh
 
       - name: Save compatible dependency builds
         if: steps.dependency-cache.outputs.cache-hit != 'true'
