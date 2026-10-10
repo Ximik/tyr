@@ -100,7 +100,7 @@ keeps them until the next `lake -R`, which replaces all of them, e.g.
 
 Environment variables for a single build: `TYR_MAKE_JOBS` (parallel jobs for
 `make -C cc dylib`, default CPU count) and `TYR_SKIP_GPU_CODEGEN` (`1` skips
-the codegen step and reuses `cc/src/generated`; `0` forces it).
+the codegen step of a CUDA build and reuses `cc/src/generated`).
 
 ## Runtime environment
 

@@ -113,7 +113,7 @@ them until the next `lake -R`, which replaces all of them):
 | Variable | Effect |
 |---|---|
 | `TYR_MAKE_JOBS` | parallel jobs for the native `make` build (default: CPU count) |
-| `TYR_SKIP_GPU_CODEGEN` | `1` skips kernel generation and reuses `cc/src/generated`; `0` forces it; unset skips it only when `nvcc` is missing |
+| `TYR_SKIP_GPU_CODEGEN` | `1` skips kernel generation (CUDA builds) and reuses `cc/src/generated` |
 
 See [docs/ffi-and-build.md](docs/ffi-and-build.md) for finer GPU and compiler overrides.
 

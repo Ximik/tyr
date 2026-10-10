@@ -146,28 +146,23 @@ after a runtime Hopper check (`device_supports_tk_hopper`,
    without it. It then passes `CUDA_HOME` and `GPU` to every `make` call
    (unset for CPU); the Makefile does no CUDA detection of its own and derives
    the GPU family and architecture flags from `GPU`.
-1. Writes `.lake/build/libtyr_gpu_codegen.env` recording the `-Kkernels`
-   module list and `TYR_SKIP_GPU_CODEGEN`, so changing either invalidates the
-   native build.
-2. Runs `make -s -C cc native-config gpu-stubs` to refresh content-stable
-   native configuration and symbol inventories. `cc/build/native-build.json`
-   records effective compilers, flags, GPU target/family/compute/code, library
-   paths, and selected objects, including values discovered by Make.
-3. Mixes Lake jobs over those manifests, `cc/Makefile`, `cc/src`,
-   `cc/include`, `cc/tools`, and the active kernel module's `.c.o.export` IR.
-   Compiler-generated `.d` files also feed `native-dependencies.txt`, whose
-   existing paths are tracked by Lake, including vendor headers.
-4. Runs `lake build GenerateGpuKernels` and executes it into
-   `cc/src/generated/`, unless `TYR_SKIP_GPU_CODEGEN=1`, or it is unset and
-   `native-build.json` reports `HAS_NVCC=0` (in a CPU build the Makefile ignores
-   generated `.cu` files and links the weak launcher stubs, so codegen would be
-   wasted). `TYR_SKIP_GPU_CODEGEN=0` forces codegen.
-5. Runs `make -jN -C cc dylib` (`N` = `TYR_MAKE_JOBS`, or the CPU count).
+1. GPU codegen, CUDA builds only: runs `lake build GenerateGpuKernels` and
+   executes it into `cc/src/generated/`. Lake reruns it only when the compiled
+   IR (`.c.o.export`) of the `Tyr.GPU.Codegen` modules, `Tyr.GPU.Types`,
+   `Tyr.GPU.Kernels.Prelude` or the `-Kkernels` modules changes, or the
+   `-Kkernels` list does. `TYR_SKIP_GPU_CODEGEN=1` skips it; the nested Lake
+   sets it, because the generator itself links `libTyrC`. Without CUDA the
+   Makefile ignores generated `.cu` files and links the weak launcher stubs.
+2. Runs `make -jN -C cc dylib` on every build (`N` = `TYR_MAKE_JOBS`, or the
+   CPU count); a no-op run takes well under a second. Make alone decides what
+   to recompile. The target's trace is the content of `libTyrC`, so if it is
+   unchanged (e.g. after a comment-only edit) nothing downstream relinks.
 
-Make uses compiler dependency files for C, C++, Objective-C++, and CUDA.
-Header changes rebuild their consumers; native configuration changes rebuild
-the selected objects and relink the archives/libraries. No-op manifest refreshes
-leave existing object timestamps unchanged. The inexpensive regression command
+Make uses compiler dependency files for C, C++, Objective-C++, and CUDA, so
+header changes rebuild their consumers. `cc/build/build-flags.txt` lists every
+value that affects compiled output (compilers, flags, GPU, kernel set, selected
+objects); objects depend on it, and it is rewritten only when its content
+changes, so a changed flag rebuilds and an unchanged one does not. The inexpensive regression command
 `python3 scripts/test_native_build.py` exercises these rules with tiny sources
 in a temporary checkout: header edits, architecture switches, renamed headers,
 clean/incremental output agreement, and launcher additions/removals. It does
@@ -248,7 +243,7 @@ Environment variables for a single build:
 | Variable | Effect |
 |---|---|
 | `TYR_MAKE_JOBS` | parallel jobs for the native `make` build (default: CPU count) |
-| `TYR_SKIP_GPU_CODEGEN` | `1` skips the generator step in `target libtyr`, `0` forces it; unset skips it only when `nvcc` is missing. Internal: the nested `lake build GenerateGpuKernels` sets it to break the codegen cycle |
+| `TYR_SKIP_GPU_CODEGEN` | `1` skips the generator step in `target libtyr` (CUDA builds). Internal: the nested `lake build GenerateGpuKernels` sets it to break the codegen cycle |
 | `NCCL_ROOT` | NCCL discovery hint (Makefile) |
 
 ### `scripts/` overview
@@ -293,7 +288,6 @@ opaque manual_seed (seed : UInt64) : IO Unit
 ```
 
 Makefile targets: `all` (default; static and shared libraries), `lib`, `dylib`,
-`native-config`, `gpu-stubs`,
 `bench-flash-attn` (standalone C++ attention benchmark from
 `cc/tools/bench_flash_attn.cpp`), `soxr`, `clean`. `check-deps` runs first and
 fails early, pointing at `deps/fetch.sh`, when `external/git/soxr`,

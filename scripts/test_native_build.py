@@ -5,7 +5,6 @@ No LibTorch, Lean, CUDA compilation, or workspace build artifacts are needed.
 """
 
 from pathlib import Path
-import json
 import shutil
 import subprocess
 import sys
@@ -29,7 +28,7 @@ class NativeBuildTests(unittest.TestCase):
                           "Tyr/GPU/Kernels", ".lake/build/ir/Tyr/GPU/Kernels", "lean/include"):
             (self.root / directory).mkdir(parents=True, exist_ok=True)
         shutil.copy(REPO / "cc/Makefile", self.cc / "Makefile")
-        for script in ("write_build_config.py", "generate_gpu_kernel_stubs.py", "check_libstdcxx.sh"):
+        for script in ("generate_gpu_kernel_stubs.py", "check_libstdcxx.sh"):
             shutil.copy(REPO / "cc/tools" / script, self.cc / "tools" / script)
         (self.root / "external/git/soxr/CMakeLists.txt").touch()
         (self.root / "external/wheels/torch/include/torch/csrc/api/include/torch/torch.h").touch()
@@ -110,7 +109,6 @@ class NativeBuildTests(unittest.TestCase):
         first = self.obj.stat().st_mtime_ns
         self.make()
         self.assertEqual(self.obj.stat().st_mtime_ns, first, "unchanged build recompiled")
-        self.assertIn(str(self.header), (self.cc / "build/native-dependencies.txt").read_text())
 
         # Apple's bundled GNU Make 3.81 compares mtimes at whole-second
         # precision. Separate edits from the preceding successful compile.
@@ -123,8 +121,7 @@ class NativeBuildTests(unittest.TestCase):
         time.sleep(1.05)
         self.make(GPU="GB10")
         self.assertNotEqual(self.obj.stat().st_mtime_ns, second)
-        config = json.loads((self.cc / "build/native-build.json").read_text())
-        self.assertEqual(config["GPU_CODE"], "sm_121")
+        self.assertIn("GPU_CODE=sm_121\n", (self.cc / "build/build-flags.txt").read_text())
         third = self.obj.stat().st_mtime_ns
         self.make(GPU="GB10")
         self.assertEqual(self.obj.stat().st_mtime_ns, third)
@@ -145,32 +142,32 @@ class NativeBuildTests(unittest.TestCase):
         source = self.root / "Tyr/GPU/Kernels/Fixture.lean"
         source.write_text("namespace Tyr.GPU.Kernels\nnamespace Nested\nend Nested\n"
                           "@[gpu_kernel .SM90]\ndef first := 0\nend Tyr.GPU.Kernels\n")
-        self.make("gpu-stubs")
+        self.make("src/generated/tyr_gpu_kernel_stubs.cpp")
         output = self.cc / "src/generated/tyr_gpu_kernel_stubs.cpp"
         self.assertIn("lean_launch_Tyr_GPU_Kernels_first", output.read_text())
         self.assertNotIn("Nested_first", output.read_text())
         first = output.stat().st_mtime_ns
-        self.make("gpu-stubs")
+        self.make("src/generated/tyr_gpu_kernel_stubs.cpp")
         self.assertEqual(output.stat().st_mtime_ns, first)
         ir = self.root / ".lake/build/ir/Tyr/GPU/Kernels/Fixture.c.o.export"
         ir.write_bytes(b"lean_launch_Tyr_GPU_Kernels_first\x00")
         source.write_text("/- @[gpu_kernel .SM90]\ndef fake := 0 -/\n"
                           "namespace Tyr.GPU.Kernels\n@[gpu_kernel .SM90] def second := 0\n"
                           "end Tyr.GPU.Kernels\n")
-        self.make("gpu-stubs")
+        self.make("src/generated/tyr_gpu_kernel_stubs.cpp")
         text = output.read_text()
         self.assertIn("lean_launch_Tyr_GPU_Kernels_second", text)
         self.assertNotIn("lean_launch_Tyr_GPU_Kernels_first", text)
         self.assertNotIn("lean_launch_fake", text)
         source.unlink()
-        self.make("gpu-stubs")
+        self.make("src/generated/tyr_gpu_kernel_stubs.cpp")
         self.assertNotIn("lean_launch_Tyr_GPU_Kernels_", output.read_text())
 
     def test_configuration_values_are_shell_quoted(self):
         value = "-DNAME='quoted value' -DOTHER=literal"
-        self.make("native-config", EXTRA_CXX_FLAGS=value)
-        config = json.loads((self.cc / "build/native-build.json").read_text())
-        self.assertEqual(config["EXTRA_CXX_FLAGS"], value)
+        self.make("build/build-flags.txt", EXTRA_CXX_FLAGS=value)
+        flags = (self.cc / "build/build-flags.txt").read_text().splitlines()
+        self.assertIn("EXTRA_CXX_FLAGS=" + value, flags)
 
 
 if __name__ == "__main__":
