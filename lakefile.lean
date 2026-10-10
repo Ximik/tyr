@@ -88,147 +88,64 @@ target libtyr pkg : Dynlib := do
   | _, _ => pure ()
 
   let tyrCLib := pkg.dir / "cc" / "build" / nameToSharedLib "TyrC"
-  let gpuIrRoot := pkg.buildDir / "ir" / "Tyr" / "GPU"
-  let generatedCudaDir := pkg.dir / "cc" / "src" / "generated"
-  let gpuCodegenConfigPath := pkg.buildDir / "libtyr_gpu_codegen.env"
-  let gpuCodegenModule := gpuKernels
-  let gpuCodegenModules : Array String :=
-    (gpuCodegenModule.splitOn " ").toArray.filterMap (fun s => nonEmptyTrimmed? s)
-  let skipGpuCodegenValue := (← IO.getEnv "TYR_SKIP_GPU_CODEGEN").getD ""
-  let gpuCodegenConfig :=
-    s!"TYR_GPU_CODEGEN_MODULE={gpuCodegenModule}\nTYR_SKIP_GPU_CODEGEN={skipGpuCodegenValue}\n"
-  let shouldWriteConfig ← do
-    if ← gpuCodegenConfigPath.pathExists then
-      pure ((← IO.FS.readFile gpuCodegenConfigPath) != gpuCodegenConfig)
-    else
-      pure true
-  if shouldWriteConfig then
-    -- On a fresh checkout (e.g. CI runner) `pkg.buildDir` may not yet
-    -- exist; `writeFile` won't create it.
-    IO.FS.createDirAll pkg.buildDir
-    IO.FS.writeFile gpuCodegenConfigPath gpuCodegenConfig
-
   let sysroot ← getLeanSysroot
-  let nativeEnv := #[
-    ("LEAN_HOME", some sysroot.toString),
-    -- Unset for a CPU build, so a `CUDA_HOME` in the caller's shell is ignored.
-    ("CUDA_HOME", cudaHome?),
-    ("GPU", gpu?),
-    ("TYR_GPU_CODEGEN_MODULE", some gpuCodegenModule)
-  ]
-  -- Refresh content-stable manifests before Lake checks its native trace. Make
-  -- owns effective compiler/GPU detection; the stub inventory also notices new
-  -- kernel declarations without invalidating every native object on body edits.
-  let nativeConfigOut ← IO.Process.output {
-    cmd := "make"
-    args := #["-s", "-C", (pkg.dir / "cc").toString, "native-config", "gpu-stubs"]
-    env := nativeEnv
-  }
-  if nativeConfigOut.exitCode != 0 then
-    error s!"Failed to refresh native build inputs:\n{nativeConfigOut.stderr}"
+  let kernelModules := (gpuKernels.splitOn " ").toArray.filterMap nonEmptyTrimmed?
 
-  -- Track Makefile plus C/CUDA sources/headers so Lake reruns `make` when FFI changes.
-  let makefileJob ← inputTextFile <| pkg.dir / "cc" / "Makefile"
-  let gpuCodegenConfigJob ← inputTextFile gpuCodegenConfigPath
-  let nativeConfigJob ← inputTextFile <| pkg.dir / "cc" / "build" / "native-build.json"
-  let nativeDependenciesPath := pkg.dir / "cc" / "build" / "native-dependencies.txt"
-  let nativeDependenciesManifestJob ← inputTextFile nativeDependenciesPath
-  let mut nativeDependenciesJob := Job.mixArray #[nativeDependenciesManifestJob]
-  -- Consume compiler-discovered dependencies too (including vendor headers).
-  -- Make exports absolute, existing paths; removed headers change this manifest.
-  for path in (← IO.FS.readFile nativeDependenciesPath).splitOn "\n" do
-    if !path.isEmpty then
-      let header ← inputTextFile (FilePath.mk path)
-      nativeDependenciesJob := nativeDependenciesJob.mix header
-  let srcJob ← inputDir (pkg.dir / "cc" / "src") (text := true) fun p =>
-    p.toString.endsWith ".cpp" || p.toString.endsWith ".mm" ||
-      p.toString.endsWith ".cu" || p.toString.endsWith ".h" || p.toString.endsWith ".hpp"
-  let headerJob ← inputDir (pkg.dir / "cc" / "include") (text := true) fun p =>
-    p.toString.endsWith ".h" || p.toString.endsWith ".hpp"
-  let toolJob ← inputDir (pkg.dir / "cc" / "tools") (text := true) fun p =>
-    p.toString.endsWith ".py"
-  -- Note: we deliberately do NOT watch the kernel `.lean`
-  -- source tree). Changes to a kernel `.lean` file flow through Lean
-  -- compilation to its `.c.o.export`, which `gpuIrJob` already watches with
-  -- the right scope (only the active codegen module's IR triggers a rebuild).
-  -- Watching the whole `Tyr/GPU/Kernels/` directory caused every kernel-edit
-  -- in the workspace to invalidate the libtyr build cascade.
-  -- Fresh checkouts do not have the generated GPU IR tree yet.
-  -- Create it so the optional IR scan can track later `.c.o.export` files instead of failing early.
-  IO.FS.createDirAll gpuIrRoot
-  let gpuIrJob ←
-    if gpuCodegenModule == "Tyr.GPU.Kernels.MhaH100" then
-      let mhaH100IrSuffixes : Array String := #[
-        "Kernels/MhaH100.c.o.export",
-        "Kernels/Prelude.c.o.export",
-        "Types.c.o.export",
-        "Codegen/Macros.c.o.export",
-        "Codegen/Var.c.o.export",
-        "Codegen/TileTypes.c.o.export",
-        "Codegen/IR.c.o.export",
-        "Codegen/Monad.c.o.export",
-        "Codegen/AST.c.o.export",
-        "Codegen/Primitives.c.o.export",
-        "Codegen/Loop.c.o.export",
-        "Codegen/GlobalLayout.c.o.export",
-        "Codegen/EmitNew.c.o.export",
-        "Codegen/Attribute.c.o.export",
-        "Codegen/FFI.c.o.export",
-        "Codegen/GenerateMain.c.o.export",
-        "Codegen/Arch/Level.c.o.export"
-      ]
-      inputDir gpuIrRoot (text := false) fun p =>
-        mhaH100IrSuffixes.any fun suffix => p.toString.endsWith suffix
-    else
-      inputDir gpuIrRoot (text := false) fun p =>
-        p.toString.endsWith ".c.o.export"
-  let depJob := makefileJob.mix gpuCodegenConfigJob |>.mix nativeConfigJob |>.mix nativeDependenciesJob
-    |>.mix srcJob |>.mix headerJob |>.mix toolJob |>.mix gpuIrJob
+  -- 1. GPU codegen, CUDA builds only. It reruns when the compiled IR of the
+  --    codegen modules or of the configured kernels changes, or `-Kkernels`
+  --    does. Without CUDA, the Makefile links the weak launcher stubs instead.
+  --    TYR_SKIP_GPU_CODEGEN=1 is set by the nested Lake below.
+  let skipCodegen := cudaHome?.isNone || (← IO.getEnv "TYR_SKIP_GPU_CODEGEN") == some "1"
+  let codegenJob ← if skipCodegen then pure (Job.pure ()) else do
+    let irRoot := pkg.buildDir / "ir" / "Tyr" / "GPU"
+    let kernelIr := kernelModules.map fun m =>
+      (m.stripPrefix "Tyr.GPU.").replace "." "/" ++ ".c.o.export"
+    let isCodegenInput (p : FilePath) : Bool :=
+      let rel := p.toString.drop (irRoot.toString.length + 1) |>.toString
+      rel.startsWith "Codegen/" && rel.endsWith ".c.o.export" ||
+        rel == "Types.c.o.export" || rel == "Kernels/Prelude.c.o.export" ||
+        kernelIr.contains rel
+    -- A fresh checkout has no IR yet; scan whatever exists at this point.
+    IO.FS.createDirAll irRoot
+    let irJob ← inputDir irRoot (text := false) isCodegenInput
+    let stamp := pkg.buildDir / "gpu-codegen.stamp"
+    let job ← buildFileAfterDep stamp irJob
+      (extraDepTrace := pure (BuildTrace.ofHash (Hash.ofString gpuKernels) "-Kkernels"))
+      fun _ => do
+        -- The generator links libTyrC itself, so it is built by a nested Lake
+        -- that skips this codegen step (the cycle to be cut separately).
+        let nestedEnv := #[("LEAN_HOME", some sysroot.toString), ("TYR_SKIP_GPU_CODEGEN", some "1")]
+        let generatorExe := pkg.dir / ".lake" / "build" / "bin" / "GenerateGpuKernels"
+        proc { cmd := "lake", args := #["build", "GenerateGpuKernels"], cwd := pkg.dir, env := nestedEnv }
+        proc {
+          cmd := "lake"
+          args := #["env", generatorExe.toString] ++ kernelModules
+            ++ #["--out-dir", (pkg.dir / "cc" / "src" / "generated").toString]
+          cwd := pkg.dir
+          env := nestedEnv
+        }
+        IO.FS.writeFile stamp gpuKernels
+    pure (job.map fun _ => ())
 
-  let libJob ← buildFileAfterDep tyrCLib depJob fun _ => do
-    -- TYR_SKIP_GPU_CODEGEN: "1" skips, "0" forces; unset skips when make found
-    -- no nvcc, since the Makefile then drops generated .cu files and links the
-    -- weak launcher stubs (refreshed by `gpu-stubs` above) instead.
-    let hasNvcc := (← IO.FS.readFile (pkg.dir / "cc" / "build" / "native-build.json")).contains
-      "\"HAS_NVCC\": \"1\""
-    let skipGpuCodegen :=
-      match (← IO.getEnv "TYR_SKIP_GPU_CODEGEN").bind nonEmptyTrimmed? with
-      | some "1" => true
-      | some "0" => false
-      | _ => !hasNvcc
-    if !skipGpuCodegen then
-      let generatorExe := pkg.dir / ".lake" / "build" / "bin" / "GenerateGpuKernels"
-      proc {
-        cmd := "lake"
-        args := #["build", "GenerateGpuKernels"]
-        cwd := pkg.dir
-        -- The nested Lake reads the same stored -K options; it only has to
-        -- skip codegen to break the cycle (see `TYR_SKIP_GPU_CODEGEN` above).
-        env := #[
-          ("LEAN_HOME", some sysroot.toString),
-          ("TYR_SKIP_GPU_CODEGEN", some "1")
-        ]
-      }
-      proc {
-        cmd := "lake"
-        args := #["env", generatorExe.toString]
-                  ++ gpuCodegenModules
-                  ++ #["--out-dir", generatedCudaDir.toString]
-        cwd := pkg.dir
-        env := #[
-          ("LEAN_HOME", some sysroot.toString),
-          ("TYR_SKIP_GPU_CODEGEN", some "1")
-        ]
-      }
-    -- Parallel jobs for make: TYR_MAKE_JOBS, or the CPU count.
+  -- 2. make, on every build: Make decides what to recompile. The library's
+  --    content is its trace, so an unchanged library rebuilds nothing else.
+  let libJob ← codegenJob.mapM fun _ => do
     let jobs ← match (← IO.getEnv "TYR_MAKE_JOBS").bind nonEmptyTrimmed? with
       | some jobs => pure jobs
       | none => captureProc { cmd := "getconf", args := #["_NPROCESSORS_ONLN"] }
     proc {
       cmd := "make"
       args := #[s!"-j{jobs}", "-C", (pkg.dir / "cc").toString, "dylib"]
-      env := nativeEnv
+      env := #[
+        ("LEAN_HOME", some sysroot.toString),
+        -- Unset for a CPU build, so a `CUDA_HOME` in the caller's shell is ignored.
+        ("CUDA_HOME", cudaHome?),
+        ("GPU", gpu?),
+        ("TYR_GPU_CODEGEN_MODULE", some gpuKernels)
+      ]
     }
+    setTrace (← computeTrace tyrCLib)
+    return tyrCLib
   return libJob.map fun path => { path, name := "TyrC" }
 
 /-! ## Lean Library -/

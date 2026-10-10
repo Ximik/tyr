@@ -6,7 +6,14 @@ import argparse
 import pathlib
 import re
 
-from write_build_config import write_if_changed
+
+
+def write_if_changed(path: pathlib.Path, text: str) -> None:
+    """Keep the timestamp when nothing changed, so Make does not recompile."""
+    if path.exists() and path.read_text() == text:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
 
 
 PATTERN = re.compile(rb"lean_launch_[A-Za-z0-9_]+")
