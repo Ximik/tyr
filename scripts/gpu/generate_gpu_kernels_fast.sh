@@ -83,7 +83,6 @@ if [[ ${#modules[@]} -eq 0 ]]; then
   modules=("Tyr.GPU.Kernels.MhaH100")
 fi
 
-source ./env.sh
 export LAKE_NUM_JOBS="${LAKE_NUM_JOBS:-1}"
 export TYR_SKIP_GPU_CODEGEN=1
 

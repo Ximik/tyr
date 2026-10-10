@@ -137,6 +137,13 @@ after a runtime Hopper check (`device_supports_tk_hopper`,
 
 `target libtyr` in `lakefile.lean` is the hub. It:
 
+0. Checks the configured CUDA choice against the fetched wheels. The choice is
+   made once with `lake -R -Kcuda=<toolkit>` (CUDA) or plain `lake -R` (CPU);
+   Lake keeps it until the next `lake -R`, and the lakefile reads it as
+   `cudaHome?`. If it disagrees with `external/wheels/torch` (fetched by
+   `deps/fetch.sh cpu|cuda`), or the toolkit has no `bin/nvcc`, the build stops
+   with the command to run. It then passes `CUDA_HOME` to every `make` call
+   (unset for CPU); the Makefile does no CUDA detection of its own.
 1. Writes `.lake/build/libtyr_gpu_codegen.env` recording
    `TYR_GPU_CODEGEN_MODULE` / `TYR_SKIP_GPU_CODEGEN`,
    so changing any of them invalidates the native build.
@@ -150,10 +157,10 @@ after a runtime Hopper check (`device_supports_tk_hopper`,
    existing paths are tracked by Lake, including vendor headers.
 4. Runs `lake build GenerateGpuKernels` and executes it into
    `cc/src/generated/`, unless `TYR_SKIP_GPU_CODEGEN=1`, or it is unset and
-   `native-build.json` reports `HAS_NVCC=0` (without `CUDA_HOME` the Makefile ignores
+   `native-build.json` reports `HAS_NVCC=0` (in a CPU build the Makefile ignores
    generated `.cu` files and links the weak launcher stubs, so codegen would be
    wasted). `TYR_SKIP_GPU_CODEGEN=0` forces codegen.
-5. Runs `make -jN -C cc dylib` (`N` = `TYR_MAKE_JOBS`, which `env.sh` sets to the CPU count; no `-j` if unset) with `gpuMakeEnv` forwarding
+5. Runs `make -jN -C cc dylib` (`N` = `TYR_MAKE_JOBS`, or the CPU count) with `gpuMakeEnv` forwarding
    `GPU`/`GPU_FAMILY`/`GPU_COMPUTE`/`GPU_CODE`.
 
 Make uses compiler dependency files for C, C++, Objective-C++, and CUDA.
@@ -240,10 +247,9 @@ Build behavior is controlled entirely through the environment:
 |---|---|
 | `TYR_GPU_CODEGEN_MODULE` | kernel module(s) to emit CUDA for (space-separated; default `Tyr.GPU.Kernels.MhaH100`) |
 | `TYR_SKIP_GPU_CODEGEN` | `1` skips the generator step in `target libtyr`, `0` forces it; unset skips it only when `nvcc` is missing |
-| `TYR_MAKE_JOBS` | parallel jobs for the native `make` build; `source ./env.sh` sets it to the CPU count if unset (unset: serial) |
+| `TYR_MAKE_JOBS` | parallel jobs for the native `make` build (default: CPU count) |
 | `GPU` (or `TYR_GPU_TARGET`), `GPU_FAMILY`, `GPU_COMPUTE`, `GPU_CODE` | override the Makefile GPU matrix |
-| `TYR_MACOS_SDKROOT`, `TYR_MACOS_DEPLOYMENT_TARGET` | macOS SDK/deployment overrides |
-| `CUDA_HOME` | the only CUDA switch (set by `env.sh` from `nvcc`); must contain `bin/nvcc` |
+| `TYR_MACOS_DEPLOYMENT_TARGET` | macOS deployment target |
 | `NCCL_ROOT` | NCCL discovery hint |
 
 ### `scripts/` overview

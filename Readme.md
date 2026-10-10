@@ -44,10 +44,10 @@ automatically on first `lake build`.
 ### Native dependencies
 
 Third-party libraries and sources are pinned in `deps/` and fetched into
-`external/`. This needs `git`, `curl` and `unzip`:
+`external/`. This needs `git`, `curl` and `unzip`. Pick the CPU or CUDA build:
 
 ```bash
-deps/fetch.sh
+deps/fetch.sh cpu     # or: deps/fetch.sh cuda
 ```
 
 ## Quick Start
@@ -55,8 +55,9 @@ deps/fetch.sh
 ### Building
 
 ```bash
-# Once per shell
-source ./env.sh
+# Configure once (Lake keeps it until the next `lake -R`); must match deps/fetch.sh:
+lake -R build test_runner                             # CPU
+# lake -R -Kcuda=/usr/local/cuda build test_runner    # CUDA, with this toolkit
 
 # Build the test runner (a good first build)
 lake build test_runner
@@ -101,19 +102,17 @@ All optional.
 
 | Variable | Effect |
 |---|---|
-| `TYR_DEPS_VARIANT` | `cpu` or `cuda`; by default `cuda` on Linux when `nvcc` is on `PATH`, otherwise `cpu` |
 | `TYR_DEPS_CACHE` | download cache directory (default `external/.cache`) |
 
 **Build:**
 
 | Variable | Effect |
 |---|---|
-| `CUDA_HOME` | CUDA toolkit; `env.sh` sets it from `nvcc` on `PATH` and fails if it has no `bin/nvcc`. Empty or unset: CPU build (CUDA kernels replaced by stubs) |
+| `lake -R -Kcuda=<toolkit>` | (Lake option, not a variable) CUDA build with this toolkit, which must contain `bin/nvcc`. Without it: CPU build (CUDA kernels replaced by stubs). Checked against the libtorch from `deps/fetch.sh` |
 | `TYR_GPU_TARGET` | GPU to build kernels for: `H100` (default), `A100`, `B200`, `B300`, `GB10` |
 | `TYR_GPU_CODEGEN_MODULE` | kernel module(s) to generate CUDA for, space-separated (default `Tyr.GPU.Kernels.MhaH100`) |
 | `TYR_SKIP_GPU_CODEGEN` | `1` skips kernel generation and reuses `cc/src/generated`; `0` forces it; unset skips it only when `nvcc` is missing |
-| `TYR_MAKE_JOBS` | parallel jobs for the native `make` build; `source ./env.sh` sets it to the CPU count if unset (unset: serial) |
-| `SDKROOT` | macOS SDK path for linking; `source ./env.sh` sets it from `xcrun` if unset |
+| `TYR_MAKE_JOBS` | parallel jobs for the native `make` build (default: CPU count) |
 | `TYR_MACOS_DEPLOYMENT_TARGET` | macOS deployment target (default `14.0`) |
 
 See [docs/ffi-and-build.md](docs/ffi-and-build.md) for finer GPU and compiler overrides.

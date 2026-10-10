@@ -62,16 +62,14 @@ RMPATH := rm -rf
 AR := ar
 CC := gcc
 CXX := c++
+# CUDA_HOME is passed by lakefile.lean from `lake -R -Kcuda=...`, which also
+# checks it against the fetched libtorch. Unset or empty: CPU build.
 ifneq ($(strip $(CUDA_HOME)),)
 NVCC := $(CUDA_HOME)/bin/nvcc
 HAS_NVCC := 1
 CUDA_MAJOR_VERSION := $(shell $(NVCC) --version 2>/dev/null | sed -n 's/.*release \([0-9][0-9]*\)\..*/\1/p' | head -n1)
 else
 HAS_NVCC := 0
-endif
-TORCH_HAS_CUDA := $(if $(wildcard $(TORCH_LIBPATH)/libtorch_cuda.so),1,0)
-ifneq ($(HAS_NVCC),$(TORCH_HAS_CUDA))
-$(error external/ has the $(if $(filter 1,$(TORCH_HAS_CUDA)),CUDA,CPU) libtorch but CUDA_HOME is $(if $(filter 1,$(HAS_NVCC)),set,unset); run deps/fetch.sh with the same CUDA_HOME)
 endif
 CUDA_INC_FLAGS :=
 ifneq ($(wildcard $(CUDA_HOME)/include/cuda_runtime.h),)
@@ -287,10 +285,8 @@ GPU_CODEGEN_CU_NAMES := $(addsuffix .cu,$(subst .,_,$(GPU_CODEGEN_MODULES)))
 # need any kernel symbols and tolerate missing .cu files.
 CU_SRCS := $(STATIC_CU_SRCS) $(foreach name,$(GPU_CODEGEN_CU_NAMES),$(wildcard $(SRC_DIR)/generated/$(name)))
 endif
+# CPU build: no CUDA kernels; the weak launcher stubs stand in for them.
 ifneq ($(HAS_NVCC),1)
-ifneq ($(strip $(CU_SRCS)),)
-$(warning CUDA_HOME not set; disabling CUDA kernel compilation and using CPU stubs)
-endif
 CU_SRCS :=
 endif
 ifeq ($(filter $(SRC_DIR)/tk_vendor_mha_h100.cu,$(CU_SRCS)),)

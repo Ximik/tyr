@@ -3,14 +3,12 @@
 # their sha256, and unzip them into external/wheels.
 #
 # Lock lines are `<platform> <variant> <sha256> <url>`. A line applies when its
-# platform matches this machine and its variant is `any` or the selected one:
-# `cuda` when CUDA_HOME is set (Linux, see env.sh), otherwise `cpu`.
+# platform matches this machine and its variant is `any` or the selected one.
 #
 # external/wheels/.stamp records which lock lines (and which version of this
 # script) produced external/wheels; when it matches, the script does nothing.
 #
-# Usage: deps/fetch_wheels.sh [--dry-run]
-# TYR_DEPS_VARIANT=cpu|cuda overrides the CUDA_HOME-based CPU/CUDA choice.
+# Usage: deps/fetch_wheels.sh cpu|cuda [--dry-run]
 # TYR_DEPS_CACHE=<dir> keeps downloaded wheels in <dir> instead of
 # external/.cache, e.g. on a CI runner whose checkout wipes the workspace.
 set -euo pipefail
@@ -22,11 +20,18 @@ external="${root}/external"
 cache="${TYR_DEPS_CACHE:-${external}/.cache}"
 stamp="${external}/wheels/.stamp"
 
+usage="usage: $0 cpu|cuda [--dry-run]"
+variant="${1:-}"
+if [[ "${variant}" != cpu && "${variant}" != cuda ]]; then
+  echo "${usage}" >&2
+  exit 2
+fi
+
 dry_run=0
-case "${1:-}" in
+case "${2:-}" in
   --dry-run) dry_run=1 ;;
   "") ;;
-  *) echo "usage: $0 [--dry-run]" >&2; exit 2 ;;
+  *) echo "${usage}" >&2; exit 2 ;;
 esac
 
 case "$(uname -s)-$(uname -m)" in
@@ -35,19 +40,6 @@ case "$(uname -s)-$(uname -m)" in
   Darwin-arm64) platform=macos-arm64 ;;
   *) echo "unsupported platform: $(uname -s) $(uname -m)" >&2; exit 1 ;;
 esac
-
-variant="${TYR_DEPS_VARIANT:-}"
-if [[ -z "${variant}" ]]; then
-  if [[ "${platform}" == linux-* && -n "${CUDA_HOME:-}" ]]; then
-    variant=cuda
-  else
-    variant=cpu
-  fi
-fi
-if [[ "${variant}" != cpu && "${variant}" != cuda ]]; then
-  echo "TYR_DEPS_VARIANT must be cpu or cuda, got: ${variant}" >&2
-  exit 1
-fi
 
 # `any` lines alone are not enough: the selected variant must exist for this
 # platform (there is no cuda variant on macOS, for example).

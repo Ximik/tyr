@@ -44,43 +44,10 @@ def nonEmptyTrimmed? (s : String) : Option String :=
   let trimmed := s.trimAscii.toString
   if trimmed.isEmpty then none else some trimmed
 
-/-- Prefer the version-independent `MacOSX.sdk` sibling of a versioned SDK path. -/
-def normalizeMacOSSDKRoot (sdk : String) : IO String := do
-  let sdkPath : FilePath := ⟨sdk⟩
-  match sdkPath.parent with
-  | some parent =>
-      let stablePath := parent / "MacOSX.sdk"
-      if ← stablePath.pathExists then
-        pure stablePath.toString
-      else
-        pure sdk
-  | none =>
-      pure sdk
-
-/-- Resolve the macOS SDK root from `TYR_MACOS_SDKROOT` or `SDKROOT` (exported by `env.sh`). -/
-def macOSSDKRoot? : Option String := run_io do
-  let envSdk? ← do
-    match (← IO.getEnv "TYR_MACOS_SDKROOT") with
-    | some p => pure (some p)
-    | none => IO.getEnv "SDKROOT"
-  match envSdk?.bind nonEmptyTrimmed? with
-  | some p =>
-      let normalized ← normalizeMacOSSDKRoot p
-      if ← (⟨normalized⟩ : FilePath).pathExists then
-        pure (some normalized)
-      else
-        pure none
-  | none => pure none
-
-/-- Optional macOS SDK search flags when an SDK root can be discovered. -/
-def macOSSDKLinkArgs : Array String :=
-  match macOSSDKRoot? with
-  | some sdk =>
-    #[
-      s!"-F{sdk}/System/Library/Frameworks",
-      s!"-Wl,-syslibroot,{sdk}"
-    ]
-  | none => #[]
+/-- CUDA toolkit chosen when configuring: `lake -R -Kcuda=/usr/local/cuda` builds
+    with CUDA, plain `lake -R` builds for CPU. Lake keeps the choice until the
+    next `lake -R`. The `libtyr` target checks it against the fetched wheels. -/
+def cudaHome? : Option String := get_config? cuda
 
 /-- Resolve macOS deployment target:
     `TYR_MACOS_DEPLOYMENT_TARGET` > `MACOSX_DEPLOYMENT_TARGET` > `14.0`.
@@ -127,7 +94,7 @@ def linuxRuntimeIsolationLinkArgs : Array String :=
 
 def packageLinkArgs : Array String :=
   if System.Platform.isOSX then
-    macOSSDKLinkArgs ++ macOSDeploymentLinkArgs ++ tyrCRPathArgs
+    macOSDeploymentLinkArgs ++ tyrCRPathArgs
       ++ #[s!"-Wl,-rpath,{tyrLeanSharedLibRPath}"]
   else
     linuxRuntimeIsolationLinkArgs ++ tyrCRPathArgs
@@ -281,6 +248,19 @@ def gpuMakeEnv : IO (Array (String × Option String)) := do
     its own dependencies, so Lean code links against it with Lake's bundled
     toolchain (see `moreLinkLibs` on the package). -/
 target libtyr pkg : Dynlib := do
+  -- The configured CUDA choice (`-Kcuda`) must match what `deps/fetch.sh`
+  -- put in external/; Make then builds exactly what it is told.
+  let fetchedCuda ← (pkg.dir / "external" / "wheels" / "torch" / "lib" / "libtorch_cuda.so").pathExists
+  match cudaHome?, fetchedCuda with
+  | some cuda, false =>
+    error s!"configured for CUDA (-Kcuda={cuda}) but external/ has the CPU libtorch; run: deps/fetch.sh cuda"
+  | none, true =>
+    error "configured for CPU but external/ has the CUDA libtorch; run: deps/fetch.sh cpu"
+  | some cuda, true =>
+    unless ← (FilePath.mk cuda / "bin" / "nvcc").pathExists do
+      error s!"-Kcuda={cuda} has no bin/nvcc"
+  | none, false => pure ()
+
   let tyrCLib := pkg.dir / "cc" / "build" / nameToSharedLib "TyrC"
   let gpuIrRoot := pkg.buildDir / "ir" / "Tyr" / "GPU"
   let generatedCudaDir := pkg.dir / "cc" / "src" / "generated"
@@ -318,6 +298,8 @@ target libtyr pkg : Dynlib := do
       #[]
   let nativeEnv := #[
     ("LEAN_HOME", some sysroot.toString),
+    -- Unset for a CPU build, so a `CUDA_HOME` in the caller's shell is ignored.
+    ("CUDA_HOME", cudaHome?),
     ("TYR_GPU_CODEGEN_MODULE", some gpuCodegenModule)
   ] ++ gpuEnv ++ extraEnv
   -- Refresh content-stable manifests before Lake checks its native trace. Make
@@ -438,14 +420,13 @@ target libtyr pkg : Dynlib := do
           ("TYR_GPU_CODEGEN_MODULE", some gpuCodegenModule)
         ] ++ gpuEnv ++ extraEnv
       }
-    -- `env.sh` exports TYR_MAKE_JOBS (CPU count by default).
-    let jobsArgs :=
-      match (← IO.getEnv "TYR_MAKE_JOBS").bind nonEmptyTrimmed? with
-      | some jobs => #[s!"-j{jobs}"]
-      | none => #[]
+    -- Parallel jobs for make: TYR_MAKE_JOBS, or the CPU count.
+    let jobs ← match (← IO.getEnv "TYR_MAKE_JOBS").bind nonEmptyTrimmed? with
+      | some jobs => pure jobs
+      | none => captureProc { cmd := "getconf", args := #["_NPROCESSORS_ONLN"] }
     proc {
       cmd := "make"
-      args := jobsArgs ++ #["-C", (pkg.dir / "cc").toString, "dylib"]
+      args := #[s!"-j{jobs}", "-C", (pkg.dir / "cc").toString, "dylib"]
       env := nativeEnv
     }
   return libJob.map fun path => { path, name := "TyrC" }

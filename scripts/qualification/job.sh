@@ -45,12 +45,12 @@ mapfile -t modules < <(python3 scripts/qualification/gpu_plan.py "$GPU" --field 
 export TYR_GPU_CODEGEN_MODULE="${modules[*]}"
 cuda_libraries=$(python3 scripts/qualification/cuda_runtime.py --libtorch external/wheels/torch --cuda-home "$CUDA_HOME" --previous="${LD_LIBRARY_PATH:-}")
 export LD_LIBRARY_PATH="$cuda_libraries"
-source ./env.sh
 
 python3 scripts/qualification/run.py --kind gpu --python "$python_bin" \
   --check-runtime --report output/qualification/runtime.json
-# Keep the known codegen bootstrap explicit on a fresh checkout.
-TYR_SKIP_GPU_CODEGEN=1 lake build "${modules[@]}"
+# Configure Lake for CUDA (kept for later `lake` calls), and keep the known
+# codegen bootstrap explicit on a fresh checkout.
+TYR_SKIP_GPU_CODEGEN=1 lake -R -Kcuda="$CUDA_HOME" build "${modules[@]}"
 targets=("$gpu_runner" RunMhaH100Decode LagunaModelTest)
 if [[ "${TYR_QUALIFY_MODELS:-false}" == true ]]; then
   targets+=(Qwen3TTSEndToEnd Qwen3ASRTranscribe)
