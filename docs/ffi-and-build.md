@@ -196,7 +196,11 @@ run paths relative to `cc/build`. It does not link the Lean runtime; its
 `lean_*` references resolve from the executable or the `lean` process that
 loads it (`-undefined dynamic_lookup` on macOS). Because the system glibc and
 libstdc++ stay behind `libTyrC`, the Lean toolchain's older glibc never has to
-resolve them.
+resolve them. It exports only the functions Lean calls (`lean_*`, including the
+GPU kernel launchers) and the `tyr_ops::` dispatch API used by
+`cc/tools/bench_flash_attn.cpp` (`cc/map/libTyrC.map`, `cc/map/libTyrC.exports` on
+macOS). Its copies of C++ template code and of soxr stay private, so they never
+stand in for libtorch's own.
 
 The package lists `` `@/libtyr `` in `moreLinkLibs`, so Lake links it into
 every executable and precompiled module library. `packageLinkArgs` adds only a

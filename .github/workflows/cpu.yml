@@ -86,7 +86,7 @@ jobs:
         if: runner.os == 'Linux'
         run: .github/scripts/check_ffi_crash_probe.sh
 
-      - name: Check no C symbol is defined twice in a process
+      - name: Check no library replaces another library's code
         if: runner.os == 'Linux'
         run: .github/scripts/check_symbol_overlap.sh
 

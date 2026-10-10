@@ -303,9 +303,13 @@ LEAN_LIB := $(LEAN_HOME)/lib/lean
 ifeq ($(UNAME_S),Darwin)
 DYLIB_LEAN_FLAGS := -undefined dynamic_lookup -install_name @rpath/$(DYLIB)
 RPATH_ORIGIN := @loader_path
+DYLIB_EXPORTS := map/libTyrC.exports
+DYLIB_EXPORT_FLAGS := -Wl,-exported_symbols_list,$(DYLIB_EXPORTS)
 else
 DYLIB_LEAN_FLAGS :=
 RPATH_ORIGIN := \$$ORIGIN
+DYLIB_EXPORTS := map/libTyrC.map
+DYLIB_EXPORT_FLAGS := -Wl,--version-script=$(DYLIB_EXPORTS)
 endif
 # Vendored libraries, relative to $(OUT_DIR) so the checkout can move.
 DYLIB_RPATH_FLAGS := $(foreach dir,torch/lib pyarrow nvidia/cu13/lib,-Wl,-rpath,$(RPATH_ORIGIN)/../../external/wheels/$(dir))# tk_vendor_mha_h100.cu calls the CUDA driver API (cuTensorMapEncodeTiled).
@@ -423,8 +427,8 @@ $(OUT_DIR)/$(LIB) : $(OBJ_FILES) $(BUILD_FLAGS) $(TYR_MAKEFILE) | check-deps $(O
 	$(RMPATH) $@
 	${AR} rcs $@ $(OBJ_FILES)
 
-$(OUT_DIR)/$(DYLIB) : $(OBJ_FILES) $(SOXR_LIB) $(BUILD_FLAGS) $(TYR_MAKEFILE) | check-deps $(OUT_DIR)
-	$(CXX) $(SHARED_FLAG) -o $@ $(OBJ_FILES) $(DYLIB_LINK_FLAGS)
+$(OUT_DIR)/$(DYLIB) : $(OBJ_FILES) $(SOXR_LIB) $(DYLIB_EXPORTS) $(BUILD_FLAGS) $(TYR_MAKEFILE) | check-deps $(OUT_DIR)
+	$(CXX) $(SHARED_FLAG) -o $@ $(OBJ_FILES) $(DYLIB_LINK_FLAGS) $(DYLIB_EXPORT_FLAGS)
 	@$(TOOLS_DIR)/check_libstdcxx.sh $(CXX) $@
 
 $(BENCH_FLASH_ATTN): $(TOOLS_DIR)/bench_flash_attn.cpp $(OUT_DIR)/$(DYLIB) $(BUILD_FLAGS) $(TYR_MAKEFILE) | check-deps $(OUT_DIR)
