@@ -4,7 +4,7 @@
 
 Tyr executes tensors through a hand-written C++ bridge in `cc/` that wraps
 libtorch (`torch::Tensor`) in Lean external objects, and a `lakefile.lean` that
-compiles that bridge into `cc/build/libTyrC.a` and links every Lean executable
+compiles that bridge into `cc/build/libTyrC.so` and links every Lean executable
 against it plus libtorch. Read this chapter when you add a new `@[extern]`
 binding, debug a link or runtime-library failure, hunt a tensor leak, or port
 the build to a new platform or GPU target. Day-to-day usage of the resulting
@@ -117,7 +117,7 @@ referenced by neither the Makefile nor the lakefile.
 ### The GPU kernel linking trick
 
 Generated CUDA kernels export `lean_launch_Tyr_GPU_Kernels_*` symbols, but the
-generator itself is a Lean executable that must link `libTyrC.a` — a
+generator itself is a Lean executable that must link `libTyrC` — a
 chicken-and-egg problem. The Makefile breaks it by always archiving
 `generated/tyr_gpu_kernel_stubs.o`, which defines every launcher as
 `__attribute__((weak))` throwing stubs, **last** in the archive
@@ -135,10 +135,10 @@ after a runtime Hopper check (`device_supports_tk_hopper`,
 
 ### Build orchestration in `lakefile.lean`
 
-`extern_lib libtyr` in `lakefile.lean` is the hub. It:
+`target libtyr` in `lakefile.lean` is the hub. It:
 
 1. Writes `.lake/build/libtyr_gpu_codegen.env` recording
-   `TYR_GPU_CODEGEN_MODULE` / `TYR_SKIP_GPU_CODEGEN` / `TYR_BUILD_TYRC_DYLIB`,
+   `TYR_GPU_CODEGEN_MODULE` / `TYR_SKIP_GPU_CODEGEN`,
    so changing any of them invalidates the native build.
 2. Runs `make -s -C cc native-config gpu-stubs` to refresh content-stable
    native configuration and symbol inventories. `cc/build/native-build.json`
@@ -153,7 +153,7 @@ after a runtime Hopper check (`device_supports_tk_hopper`,
    `native-build.json` reports `HAS_NVCC=0` (without `CUDA_HOME` the Makefile ignores
    generated `.cu` files and links the weak launcher stubs, so codegen would be
    wasted). `TYR_SKIP_GPU_CODEGEN=0` forces codegen.
-5. Runs `make -jN -C cc lib [dylib]` (`N` = `TYR_MAKE_JOBS`, which `env.sh` sets to the CPU count; no `-j` if unset) with `gpuMakeEnv` forwarding
+5. Runs `make -jN -C cc dylib` (`N` = `TYR_MAKE_JOBS`, which `env.sh` sets to the CPU count; no `-j` if unset) with `gpuMakeEnv` forwarding
    `GPU`/`GPU_FAMILY`/`GPU_COMPUTE`/`GPU_CODE`.
 
 Make uses compiler dependency files for C, C++, Objective-C++, and CUDA.
@@ -185,25 +185,35 @@ ThunderKittens arch guards —
 `tk_vendor_mha_h100.cu` (which emits sm_90a-only `wgmma`) is compiled only when
 `GPU=H100`; other targets get `tk_vendor_stubs.cpp` instead.
 
-Link arguments are computed in Lean and probed at runtime, never assumed:
-`packageLinkArgs` (`lakefile.lean:220`) is the package-wide `moreLinkArgs`, and
-`commonLinkArgs` (`lakefile.lean:238`) is the per-executable version that
-prepends the absolute path to `cc/build/libTyrC.a`. They assemble from
-`linuxLinkTail`, `linuxCudaLinkArgs`, `linuxCudaDriverStubLinkArgs`,
-`linuxGlibc234CompatLinkArgs` (defines `__libc_csu_init/fini=0` for glibc ≥
-2.34), `linuxCompilerLibDirArgs` (the system gcc's libstdc++ dir), `arrowLinkArgs`, `macOSSDKLinkArgs`, `macOSDeploymentLinkArgs`,
-`macOSFrameworkArgs`, and `soxrLinkArgs`. If the vendored libtorch has no CUDA,
-`linuxCudaLinkArgs` returns `#[]` and a CPU-only checkout still links. The five
+Lean code is compiled and linked with Lake's bundled clang, and `cc/` is
+built with the system compiler. The two meet at a shared library:
+`make -C cc dylib` links `cc/build/libTyrC.so` (`.dylib` on macOS) against
+libtorch, Arrow/Parquet, soxr and, for a CUDA build, the CUDA runtime, with
+run paths relative to `cc/build`. It does not link the Lean runtime; its
+`lean_*` references resolve from the executable or the `lean` process that
+loads it (`-undefined dynamic_lookup` on macOS). Because the system glibc and
+libstdc++ stay behind `libTyrC`, the Lean toolchain's older glibc never has to
+resolve them.
+
+The package lists `` `@/libtyr `` in `moreLinkLibs`, so Lake links it into
+every executable and precompiled module library. `packageLinkArgs` adds only a
+run path to `cc/build` (`tyrCRPathArgs`) and, on Linux,
+`linuxRuntimeIsolationLinkArgs`. Lean links executables with `-rdynamic`, so
+every library the Lean runtime links statically is exported and would override
+libtorch's copy: `-l:libgcc_s.so.1` ahead of the bundled linker's `-lunwind`
+keeps libgcc's exception unwinder (LLVM's crashes on libtorch exceptions), and
+`-Wl,--exclude-libs,libuv.a` keeps Lean's libuv from replacing the one bundled
+in `libtorch_cpu` (its TCPStore). The five
 `lean_lib`s are `TyrCodegen` (pure-Lean GPU codegen, `precompileModules := false`
 to avoid the `.so` cascade), `Tyr` (default target, precompiled), `Tests`,
-`TestsExperimental`, `Examples` (`lakefile.lean:560-593`), plus 64 `lean_exe`
-targets that each take `moreLinkArgs := commonLinkArgs`.
+`TestsExperimental` and `Examples`, plus the `lean_exe` targets.
 
 ### Running executables
 
-Executables land in `.lake/build/bin/` and find libtorch and Arrow through
-rpaths relative to the binary (`$ORIGIN/...` on Linux, `@loader_path/...` on
-macOS), so the checkout can move as long as `external/` moves with it.
+Executables land in `.lake/build/bin/` and find `libTyrC` through a run path
+relative to the binary (`$ORIGIN/...` on Linux, `@loader_path/...` on macOS);
+`libTyrC` finds libtorch and Arrow the same way, so the checkout can move as
+long as `external/` moves with it.
 The eight `lake run` scripts (`lakefile.lean:1166-1232`) all go through
 `runBuiltExecutable` (`lakefile.lean:1076`): it assembles the path via
 `runtimeLibPath` (`lakefile.lean:1039`), validates the binary with `file`,
@@ -229,24 +239,12 @@ Build behavior is controlled entirely through the environment:
 | Variable | Effect |
 |---|---|
 | `TYR_GPU_CODEGEN_MODULE` | kernel module(s) to emit CUDA for (space-separated; default `Tyr.GPU.Kernels.MhaH100`) |
-| `TYR_SKIP_GPU_CODEGEN` | `1` skips the generator step in `extern_lib libtyr`, `0` forces it; unset skips it only when `nvcc` is missing |
+| `TYR_SKIP_GPU_CODEGEN` | `1` skips the generator step in `target libtyr`, `0` forces it; unset skips it only when `nvcc` is missing |
 | `TYR_MAKE_JOBS` | parallel jobs for the native `make` build; `source ./env.sh` sets it to the CPU count if unset (unset: serial) |
-| `TYR_BUILD_TYRC_DYLIB=0` | build only `libTyrC.a`, skip `libTyrC.so/.dylib` |
 | `GPU` (or `TYR_GPU_TARGET`), `GPU_FAMILY`, `GPU_COMPUTE`, `GPU_CODE` | override the Makefile GPU matrix |
 | `TYR_MACOS_SDKROOT`, `TYR_MACOS_DEPLOYMENT_TARGET` | macOS SDK/deployment overrides |
 | `CUDA_HOME` | the only CUDA switch (set by `env.sh` from `nvcc`); must contain `bin/nvcc` |
 | `NCCL_ROOT` | NCCL discovery hint |
-| `LEAN_CC_FAST=1` | `-O0` for Lean-generated C (fast local iteration) |
-| `LEAN_CC_GCC`, `LEAN_CC_LINKER` | compiler/linker selection in the wrapper |
-
-`lean-cc` (repository root) is the `LEAN_CC` wrapper used on Linux (set by
-`env.sh`). Lean's bundled clang links against the old glibc
-inside the Lean toolchain, while `cc/` and libtorch are built with the system
-gcc against the system glibc/libstdc++, so the link fails with undefined glibc
-symbols. The wrapper runs the system gcc instead, maps Lean's `-lc++`,
-`-lc++abi`, `-lgmp` and `-luv` to the toolchain's static archives, and links
-with the toolchain's lld. Lake reads the compiler only from `LEAN_CC`; there is
-no lakefile option for it.
 
 ### `scripts/` overview
 
@@ -334,7 +332,7 @@ def main : IO Unit := do
 Build and run through Lake so the native library and runtime paths are right:
 
 ```bash
-lake build                                  # extern_lib libtyr → codegen → make -C cc lib dylib
+lake build                                  # target libtyr → codegen → make -C cc dylib
 lake run runBuiltTarget -- TrainGPT         # sets DYLD/LD_LIBRARY_PATH for you
 # GPU build for a specific kernel module and target:
 TYR_GPU_CODEGEN_MODULE=Tyr.GPU.Kernels.MhaH100 GPU=H100 lake build RunMhaH100

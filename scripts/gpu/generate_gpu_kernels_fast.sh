@@ -22,7 +22,6 @@ Options:
   --help             Show this help
 
 Environment:
-  LEAN_CC_FAST       Add the wrapper's fast C compile flags (default: 1)
   LAKE_NUM_JOBS      Lake parallelism (default: 1)
 
 Examples:
@@ -85,10 +84,8 @@ if [[ ${#modules[@]} -eq 0 ]]; then
 fi
 
 source ./env.sh
-export LEAN_CC_FAST="${LEAN_CC_FAST:-1}"
 export LAKE_NUM_JOBS="${LAKE_NUM_JOBS:-1}"
 export TYR_SKIP_GPU_CODEGEN=1
-export TYR_BUILD_TYRC_DYLIB="${TYR_BUILD_TYRC_DYLIB:-0}"
 
 lean_prefix="$(lean --print-prefix)"
 lean_include="$lean_prefix/include"
@@ -158,7 +155,7 @@ compile_module() {
   if [[ -f "$setup" ]]; then
     echo "  lean+cc $module"
     lean "$src" -o "$olean" -i "$ilean" -c "$c" --setup "$setup" --json >/dev/null
-    "$LEAN_CC" -c -o "$obj" "$c" -I "$lean_include" \
+    "$lean_prefix/bin/leanc" -c -o "$obj" "$c" -I "$lean_include" \
       -fstack-clash-protection -fdata-sections -ffunction-sections -fPIC \
       -fvisibility=hidden -Wno-unused-command-line-argument \
       -O3 -DNDEBUG -DLEAN_EXPORTING

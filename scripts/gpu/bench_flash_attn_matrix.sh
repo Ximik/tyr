@@ -3,7 +3,6 @@ set -euo pipefail
 
 source ./env.sh
 
-export LEAN_CC_FAST="${LEAN_CC_FAST:-1}"
 export LAKE_NUM_JOBS="${LAKE_NUM_JOBS:-1}"
 export TYR_BUILD_TYRC_DYLIB="${TYR_BUILD_TYRC_DYLIB:-0}"
 export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"

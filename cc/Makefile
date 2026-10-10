@@ -50,7 +50,7 @@ else
 ARROW_LIBS := $(ARROW_DIR)/libarrow.so.$(ARROW_SOVERSION) $(ARROW_DIR)/libparquet.so.$(ARROW_SOVERSION)
 endif
 ARROW_INC_FLAGS := -I$(ARROW_DIR)/include
-ARROW_LINK_FLAGS := $(ARROW_LIBS) -Wl,-rpath,$(abspath $(ARROW_DIR))
+ARROW_LINK_FLAGS := $(ARROW_LIBS)
 
 
 
@@ -85,11 +85,9 @@ endif
 endif
 CPP_CUDA_FLAGS := -DTYR_OPS_HAS_CUDA_TOOLKIT=$(HAS_CUDA_TOOLKIT)
 CUDA_LIB_FLAGS :=
-TORCH_CUDA_VENDOR_RPATH :=
 CUBLASLT_LINK_FLAG := -lcublasLt
 ifneq ($(wildcard $(TORCH_CUDA_VENDOR_LIBPATH)/libcublasLt.so*),)
 CUDA_LIB_FLAGS += -L$(TORCH_CUDA_VENDOR_LIBPATH)
-TORCH_CUDA_VENDOR_RPATH := -Wl,-rpath,$(abspath $(TORCH_CUDA_VENDOR_LIBPATH))
 CUBLASLT_LINK_FLAG := -l:libcublasLt.so.13
 endif
 ifneq ($(wildcard $(CUDA_HOME)/lib64),)
@@ -343,15 +341,32 @@ DEP_FILES := $(OBJ_FILES:.o=.d) $(SOXR_OBJS:.o=.d) $(BENCH_FLASH_ATTN).d
 # Lean runtime library
 LEAN_LIB := $(LEAN_HOME)/lib/lean
 
-# Shared library link flags
-DYLIB_LINK_FLAGS := -L$(LEAN_LIB) -lleanshared \
+# Shared library link flags. libTyrC is linked into Lean executables and
+# precompiled Lean modules, which already contain the Lean runtime, so it does
+# not link libleanshared: its `lean_*` references resolve from the loading
+# process. Linking it here with the system toolchain keeps the system glibc and
+# libstdc++ behind this library, so Lake can link Lean code with its bundled
+# clang.
+ifeq ($(UNAME_S),Darwin)
+DYLIB_LEAN_FLAGS := -undefined dynamic_lookup -install_name @rpath/$(DYLIB)
+RPATH_ORIGIN := @loader_path
+else
+DYLIB_LEAN_FLAGS :=
+RPATH_ORIGIN := \$$ORIGIN
+endif
+# Vendored libraries, relative to $(OUT_DIR) so the checkout can move.
+DYLIB_RPATH_FLAGS := $(foreach dir,torch/lib pyarrow nvidia/cu13/lib,-Wl,-rpath,$(RPATH_ORIGIN)/../../external/wheels/$(dir))
+# tk_vendor_mha_h100.cu calls the CUDA driver API (cuTensorMapEncodeTiled).
+CUDA_DRIVER_LINK_FLAGS :=
+ifneq ($(wildcard $(CUDA_HOME)/lib64/stubs/libcuda.so),)
+CUDA_DRIVER_LINK_FLAGS := -L$(CUDA_HOME)/lib64/stubs -lcuda
+endif
+DYLIB_LINK_FLAGS := $(DYLIB_LEAN_FLAGS) \
 	-L$(TORCH_LIBPATH) -ltorch -ltorch_cpu -lc10 $(TORCH_CUDA_LINK_FLAGS) \
 	$(ARROW_LINK_FLAGS) \
 	-L$(SOXR_LIBPATH) -lsoxr \
-	$(CUDA_LIB_FLAGS) $(NCCL_LIB_FLAGS) \
-	-Wl,-rpath,$(LEAN_LIB) \
-	-Wl,-rpath,$(abspath $(TORCH_LIBPATH)) \
-	$(TORCH_CUDA_VENDOR_RPATH) \
+	$(CUDA_LIB_FLAGS) $(CUDA_DRIVER_LINK_FLAGS) $(NCCL_LIB_FLAGS) \
+	$(DYLIB_RPATH_FLAGS) \
 	$(APPLE_FRAMEWORK_FLAGS)
 
 # Build Rules
@@ -463,7 +478,7 @@ $(OUT_DIR)/$(DYLIB) : $(OBJ_FILES) $(SOXR_LIB) $(NATIVE_CONFIG) $(TYR_MAKEFILE) 
 
 $(BENCH_FLASH_ATTN): $(TOOLS_DIR)/bench_flash_attn.cpp $(OUT_DIR)/$(DYLIB) $(NATIVE_CONFIG) $(TYR_MAKEFILE) | check-deps $(OUT_DIR)
 	@mkdir -p $(dir $@)
-	$(CXX) $(CXX_STD_FLAG) -MMD -MP -MF $@.d -MT $@ -o $@ $< -I$(HDR_DIR) -I$(LEAN_INCLUDE) $(TORCH_INC_FLAGS) $(CUDA_INC_FLAGS) $(NCCL_INC_FLAGS) $(ARROW_INC_FLAGS) $(SOXR_INC_FLAGS) $(EXTRA_CXX_FLAGS) -L$(OUT_DIR) -l$(LIB_NAME) $(DYLIB_LINK_FLAGS) -Wl,-rpath,$(abspath $(OUT_DIR))
+	$(CXX) $(CXX_STD_FLAG) -MMD -MP -MF $@.d -MT $@ -o $@ $< -I$(HDR_DIR) -I$(LEAN_INCLUDE) $(TORCH_INC_FLAGS) $(CUDA_INC_FLAGS) $(NCCL_INC_FLAGS) $(ARROW_INC_FLAGS) $(SOXR_INC_FLAGS) $(EXTRA_CXX_FLAGS) -L$(OUT_DIR) -l$(LIB_NAME) $(DYLIB_LINK_FLAGS) $(foreach dir,$(OUT_DIR) $(TORCH_LIBPATH) $(ARROW_DIR) $(LEAN_LIB),-Wl,-rpath,$(abspath $(dir))) -L$(LEAN_LIB) -lleanshared
 
 $(OUT_DIR)/%.o : $(SRC_DIR)/%.cpp $(NATIVE_CONFIG) $(TYR_MAKEFILE) | check-deps $(OUT_DIR)
 	@mkdir -p $(dir $@)

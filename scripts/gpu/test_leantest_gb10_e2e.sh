@@ -10,7 +10,6 @@ if [[ -z "${CUDA_HOME:-}" ]]; then
 fi
 export PATH="$CUDA_HOME/bin:$PATH"
 
-export LEAN_CC_FAST=1
 export TYR_GPU_FAMILY=BLACKWELL
 export TYR_GPU_VENDORED_REF_RUNNER="${TYR_GPU_VENDORED_REF_RUNNER:-$PWD/scripts/gpu/run_vendored_reference.sh}"
 export LD_LIBRARY_PATH="$PWD/external/wheels/torch/lib:$PWD/cc/build:${EBROOTGCCCORE:+${EBROOTGCCCORE}/lib64:}${LD_LIBRARY_PATH:-}"

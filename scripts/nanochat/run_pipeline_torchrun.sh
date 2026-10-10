@@ -18,7 +18,6 @@ export PAGER="${PAGER:-cat}"
 
 source ./env.sh
 
-export LEAN_CC_FAST="${LEAN_CC_FAST:-1}"
 export LD_LIBRARY_PATH="${REPO_ROOT}/external/wheels/torch/lib:${REPO_ROOT}/cc/build:${EBROOTGCCCORE:+${EBROOTGCCCORE}/lib64:}${LD_LIBRARY_PATH:-}"
 
 TORCHRUN_BIN="${TORCHRUN_BIN:-torchrun}"

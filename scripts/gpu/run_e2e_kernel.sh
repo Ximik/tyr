@@ -20,7 +20,6 @@ export TYR_GPU_CODEGEN_MODULE="${kernel_module}"
 
 source ./env.sh
 
-export LEAN_CC_FAST=1
 export LD_LIBRARY_PATH="$PWD/external/wheels/torch/lib:$PWD/cc/build:${EBROOTGCCCORE:+${EBROOTGCCCORE}/lib64:}${LD_LIBRARY_PATH:-}"
 if [[ -z "${TYR_GPU_VENDORED_REF_RUNNER:-}" ]] && [[ -x "$PWD/scripts/gpu/run_vendored_reference.sh" ]]; then
   export TYR_GPU_VENDORED_REF_RUNNER="$PWD/scripts/gpu/run_vendored_reference.sh"

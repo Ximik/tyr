@@ -3,7 +3,6 @@ set -euo pipefail
 
 source ./env.sh
 
-export LEAN_CC_FAST=1
 export LD_LIBRARY_PATH="$PWD/external/wheels/torch/lib:$PWD/cc/build:${EBROOTGCCCORE:+${EBROOTGCCCORE}/lib64:}${LD_LIBRARY_PATH:-}"
 LEAN_BIN="${TYR_LEAN_BIN:-$HOME/.elan/bin/lean}"
 if [[ ! -x "$LEAN_BIN" ]]; then

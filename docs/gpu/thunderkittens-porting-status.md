@@ -268,9 +268,6 @@ in progress. The execution order is:
 
 - Load the expected toolchain before GPU runs:
   - `source ./load_modules.sh`
-  - Set `LEAN_CC=$PWD/scripts/lean_cc_wrapper.sh` on this cluster before
-    running `lake build`; this is currently required for Lean native shared
-    library links.
   - Override module selections when needed with `TYR_CUDA_MODULE=...`,
     `TYR_NCCL_MODULE=...`, and `TYR_ARROW_MODULE=...`.
   - The default one-H100 path now uses `CUDA/12.9.1` and skips NCCL unless
@@ -902,9 +899,8 @@ but they should not define the long-term specialization policy.
     because of a glibc mismatch,
   - plain GCC cannot satisfy Lean's static `libc++` / `libc++abi` / `libgmp` /
     `libuv` link expectations by itself,
-  - `scripts/lean_cc_wrapper.sh` remains necessary as a compatibility bridge
-    for `LEAN_CC`, even though the build flow itself is otherwise the standard
-    direct `lake` path.
+  - this was later resolved by linking `libTyrC` as a shared library, so no
+    `LEAN_CC` wrapper is needed (see `docs/ffi-and-build.md`).
 - The current build-time bottleneck is not Lean elaboration anymore; it is the
   final link step for large executables such as `GenerateGpuKernels`,
   `RunFlashAttn`, and `RunMhaH100Train` once the broad graph has already been
@@ -1291,7 +1287,7 @@ ThunderKittens counterparts instead of parallel educational shims.
 - The current compiled raw `RunMhaH100` path was revalidated after the concern
   that the mismatch may have moved from `dV` to `dK`.
 - Trusted command:
-  - `source ./load_modules.sh && LEAN_CC=$PWD/scripts/lean_cc_wrapper.sh LEAN_CC_LINKER=bfd lake -R run runMhaH100Exe --dump-partials`
+  - `source ./load_modules.sh && lake -R run runMhaH100Exe --dump-partials`
 - Result:
   - `overall_ok=true`
   - `kernel_ref_ok=true`
@@ -1313,7 +1309,7 @@ ThunderKittens counterparts instead of parallel educational shims.
 - A fresh compiled-object relink and the hardened compiled-run helper now
   validate the 12-block path:
   - command:
-    - `source ./load_modules.sh && LEAN_CC=$PWD/scripts/lean_cc_wrapper.sh LEAN_CC_LINKER=bfd CUDA_VISIBLE_DEVICES=0 lake -R run runMhaH100Seq768Exe --dump-partials`
+    - `source ./load_modules.sh && CUDA_VISIBLE_DEVICES=0 lake -R run runMhaH100Seq768Exe --dump-partials`
   - result:
     - `overall_ok=true`
     - `kernel_ref_ok=true`
@@ -1377,8 +1373,6 @@ ThunderKittens counterparts instead of parallel educational shims.
     `GLIBCXX_3.4.29`,
   - even after forcing the GCCcore runtime library path, `gold` fails with
     hidden-symbol errors (`_ZdlPvm`).
-- No linker-selector shim is kept in `scripts/lean_cc_wrapper.sh`; the
-  known-working BFD path remains the only supported path on this host.
 
 ### 2026-04-22 Store-Add Accumulation Pass
 

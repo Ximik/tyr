@@ -6,7 +6,6 @@ if [[ "$(uname -s)" == Darwin ]]; then
     export SDKROOT="$(xcrun --sdk macosx --show-sdk-path)"
   fi
 else
-  export LEAN_CC="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/lean-cc"
   if [[ -z "${CUDA_HOME+x}" ]] && nvcc_path="$(readlink -f "$(command -v nvcc)")"; then
     export CUDA_HOME="${nvcc_path%/*/*}"
   fi

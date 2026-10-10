@@ -9,7 +9,7 @@ Branch: `feat_flash_attn_runtime_bridge`
 - Current long-running validation build in the main worktree:
 
 ```bash
-source ./load_modules.sh && LEAN_CC=$PWD/scripts/lean_cc_wrapper.sh LEAN_CC_FAST=1 lake -R build Tyr.GPU.Kernels.MhaH100 GenerateGpuKernels
+source ./load_modules.sh && lake -R build Tyr.GPU.Kernels.MhaH100 GenerateGpuKernels
 ```
 
 - That build is not hung in Lean. It is in the known heavy Lake link path and is currently linking `GenerateGpuKernels` with libtorch/CUDA/Arrow/Parquet.
