@@ -55,7 +55,6 @@ jobs:
 
       - name: Build docs
         run: |
-          source ./env.sh
           cd docbuild
           lake build Tyr:docs
 

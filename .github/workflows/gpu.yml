@@ -17,7 +17,6 @@ on:
       - 'Tests/RunLagunaModel.lean'
       - 'scripts/qualification/**'
       - '.github/scripts/readiness.py'
-      - 'env.sh'
       - 'deps/**'
       - 'scripts/test_native_attention.sh'
       - 'scripts/gpu/**'
@@ -95,7 +94,7 @@ jobs:
           if ! elan toolchain list | grep -Fxq "$toolchain"; then elan toolchain install "$toolchain"; fi
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
       - name: Fetch pinned dependencies (CUDA)
-        run: TYR_DEPS_VARIANT=cuda TYR_DEPS_CACHE="$TYR_QUALIFICATION_ROOT/wheel-cache" deps/fetch.sh
+        run: TYR_DEPS_CACHE="$TYR_QUALIFICATION_ROOT/wheel-cache" deps/fetch.sh cuda
       - name: Build and run strict qualification with exclusive GPU access
         run: |
           mkdir -p "$TYR_QUALIFICATION_ROOT"

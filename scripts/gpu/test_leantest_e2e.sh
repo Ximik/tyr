@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-source ./env.sh
-
 export TYR_GPU_VENDORED_REF_RUNNER="${TYR_GPU_VENDORED_REF_RUNNER:-$PWD/scripts/gpu/run_vendored_reference.sh}"
 export LD_LIBRARY_PATH="$PWD/external/wheels/torch/lib:$PWD/cc/build:${EBROOTGCCCORE:+${EBROOTGCCCORE}/lib64:}${LD_LIBRARY_PATH:-}"
 LEAN_BIN="${TYR_LEAN_BIN:-$HOME/.elan/bin/lean}"

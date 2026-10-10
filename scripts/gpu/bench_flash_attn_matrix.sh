@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-source ./env.sh
-
 export LAKE_NUM_JOBS="${LAKE_NUM_JOBS:-1}"
 export TYR_BUILD_TYRC_DYLIB="${TYR_BUILD_TYRC_DYLIB:-0}"
 export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"

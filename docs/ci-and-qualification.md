@@ -54,8 +54,7 @@ Configure these repository variables for the runner that actually serves it:
 
 The runner needs elan, a C++ compiler, NVCC 13.0, `flock`, and a Python 3.12
 interpreter (`TYR_QUALIFICATION_BOOTSTRAP_PYTHON`). The job fetches the CUDA
-variant of the pinned dependencies (`TYR_DEPS_VARIANT=cuda
-deps/fetch.sh`, wheels cached in `$TYR_QUALIFICATION_ROOT/wheel-cache`):
+variant of the pinned dependencies (`deps/fetch.sh cuda`, wheels cached in `$TYR_QUALIFICATION_ROOT/wheel-cache`):
 torch `2.10.0+cu130` and its NVIDIA wheels land in `external/wheels`. The
 qualification venv imports that same directory through a `.pth` file, so Lean
 links against and Python imports one torch installation; `run.py` verifies they
@@ -131,7 +130,7 @@ Lean waveform decode and rejects the optional Python decoder fallback. Tokenizer
 comparison rejects empty or malformed code matrices and invalid thresholds.
 
 For an isolated **clean committed candidate**, after setting the variables above
-and running `TYR_DEPS_VARIANT=cuda deps/fetch.sh`:
+and running `deps/fetch.sh cuda`:
 
 ```bash
 export TYR_QUALIFY_MODELS=true

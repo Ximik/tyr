@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 set -euo pipefail
-source ./env.sh
 
 gpu_index="${BENCH_GPU_INDEX:-0}"
 idle_wait_seconds="${BENCH_IDLE_WAIT_SECONDS:-30}"

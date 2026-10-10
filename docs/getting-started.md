@@ -65,16 +65,20 @@ and optionally the CUDA toolkit on Linux. On Debian/Ubuntu:
 Linux x86_64, Linux aarch64 and macOS arm64.
 
 ```bash
-deps/fetch.sh
-source ./env.sh
+deps/fetch.sh cpu                       # or: deps/fetch.sh cuda
+lake -R build test_runner               # or: lake -R -Kcuda=/usr/local/cuda build test_runner
 ```
+
+The `lake -R` call configures the build once; Lake keeps the choice until the
+next `lake -R`. The CPU/CUDA choice must match the fetched wheels, and the
+build stops with the command to run if it does not.
 
 `deps/fetch.sh` runs two fetchers. `deps/fetch_git.sh` checks out the git
 repos pinned by commit in `deps/git.lock` (soxr, ThunderKittens), fetching only
 that commit. `deps/fetch_wheels.sh` unpacks the wheels pinned with sha256 in
 `deps/wheels.lock` (torch 2.10.0, pyarrow 25.0.1) into `external/wheels`; it
-picks the CUDA variant, adding `external/wheels/nvidia`, when `nvcc` is on
-`PATH` (override with `TYR_DEPS_VARIANT=cpu|cuda`). `deps/lock_wheels.py`
+fetches the variant named on the command line; `cuda` adds
+`external/wheels/nvidia`. `deps/lock_wheels.py`
 regenerates the wheel lock after a version bump.
 
 Lake-level requirements are declared in `lakefile.lean`: `LeanTest`,
@@ -95,9 +99,9 @@ GPU-related build knobs, read by `target libtyr` in `lakefile.lean`:
 |---|---|---|
 | `TYR_GPU_CODEGEN_MODULE` | `Tyr.GPU.Kernels.MhaH100` | Kernel module(s) (space-separated) to emit CUDA for |
 | `TYR_SKIP_GPU_CODEGEN` | unset (skip if no `nvcc`) | `1` skips the codegen step and reuses `cc/src/generated`; `0` forces it |
-| `TYR_MAKE_JOBS` | CPU count (set by `env.sh`) | Parallel jobs for `make -C cc dylib`; unset runs serially |
+| `TYR_MAKE_JOBS` | CPU count | Parallel jobs for `make -C cc dylib` |
 | `TYR_GPU_TARGET` / `TYR_GPU_FAMILY` | auto | Forwarded to `make -C cc` as `GPU=` / `GPU_FAMILY=` |
-| `TYR_MACOS_SDKROOT` / `TYR_MACOS_DEPLOYMENT_TARGET` | `SDKROOT` (set by `env.sh`) / `14.0` | macOS SDK and deployment-target overrides |
+| `TYR_MACOS_DEPLOYMENT_TARGET` | `14.0` | macOS deployment target |
 
 ## Runtime environment
 
@@ -190,8 +194,8 @@ fixtures, and run the parity check. Useful knobs:
   runner, invoked as `runner <suite-name> <fixture-dir>` after each suite;
   defaults to `scripts/gpu/run_vendored_reference.sh` when executable.
 
-These scripts source `env.sh` and need `CUDA_HOME` (which `env.sh` derives from
-`nvcc` on `PATH` when unset). On a plain macOS or CPU-only Linux checkout, skip
+These scripts need a CUDA build (`deps/fetch.sh cuda` and
+`lake -R -Kcuda=<toolkit>`). On a plain macOS or CPU-only Linux checkout, skip
 this section.
 
 ## Distributed NanoChat scripts
@@ -238,8 +242,8 @@ Reconstructed example (from `Examples/TrainGPT.lean`) — the minimal
 build-and-train loop a new user runs, first in shell:
 
 ```bash
-deps/fetch.sh                               # once: fetch all pinned dependencies
-lake build test_runner && lake run          # sanity: test suite passes
+deps/fetch.sh cpu                           # once: fetch all pinned dependencies
+lake -R build test_runner && lake run       # once: configure; sanity: test suite passes
 lake build TrainGPT && lake run train       # trains, then generates from "ROMEO:"
 ```
 

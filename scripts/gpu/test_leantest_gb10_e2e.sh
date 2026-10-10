@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-source ./env.sh
-
 # This suite must not silently use CPU stubs.
 if [[ -z "${CUDA_HOME:-}" ]]; then
   echo "CUDA_HOME is not set; the GB10 parity suite requires a CUDA toolkit" >&2

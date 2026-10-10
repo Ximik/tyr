@@ -42,7 +42,6 @@ jobs:
       - name: Compute binary compatibility keys
         id: cache-key
         run: |
-          source ./env.sh
           python3 .github/scripts/cache_key.py --output output/ci/cache-identity.json >> "$GITHUB_OUTPUT"
 
       - name: Restore compatible dependency builds
@@ -67,7 +66,6 @@ jobs:
 
       - name: Build required test runners
         run: |
-          source ./env.sh
           python3 scripts/test_inventory.py --build --wfail
 
       - name: Verify audited FFI ABI declarations
@@ -77,12 +75,10 @@ jobs:
 
       - name: Test native attention CPU semantics
         run: |
-          source ./env.sh
           bash scripts/test_native_attention.sh cpu
 
       - name: Build examples and FFI probe
         run: |
-          source ./env.sh
           lake build --wfail Examples BranchingFlowsMoleculeTrainGenerate mctx_bench ffi_crash_probe
           lake env lean Examples/BranchingFlows/BranchingFlowsDemo.lean
 
@@ -113,7 +109,6 @@ jobs:
 
       - name: Run required CPU test suites
         run: |
-          source ./env.sh
           lake env python3 scripts/test_inventory.py --run --report output/ci/suites.json
           lake env python3 scripts/test_branching_checkpoint_resume.py
           lake env ./.lake/build/bin/mctx_bench
