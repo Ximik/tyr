@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-export LD_LIBRARY_PATH="$PWD/external/wheels/torch/lib:$PWD/cc/build:${EBROOTGCCCORE:+${EBROOTGCCCORE}/lib64:}${LD_LIBRARY_PATH:-}"
 LEAN_BIN="${TYR_LEAN_BIN:-$HOME/.elan/bin/lean}"
 if [[ ! -x "$LEAN_BIN" ]]; then
   LEAN_BIN="$(command -v lean || true)"

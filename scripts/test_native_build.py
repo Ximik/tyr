@@ -29,7 +29,7 @@ class NativeBuildTests(unittest.TestCase):
                           "Tyr/GPU/Kernels", ".lake/build/ir/Tyr/GPU/Kernels", "lean/include"):
             (self.root / directory).mkdir(parents=True, exist_ok=True)
         shutil.copy(REPO / "cc/Makefile", self.cc / "Makefile")
-        for script in ("write_build_config.py", "generate_gpu_kernel_stubs.py"):
+        for script in ("write_build_config.py", "generate_gpu_kernel_stubs.py", "check_libstdcxx.sh"):
             shutil.copy(REPO / "cc/tools" / script, self.cc / "tools" / script)
         (self.root / "external/git/soxr/CMakeLists.txt").touch()
         (self.root / "external/wheels/torch/include/torch/csrc/api/include/torch/torch.h").touch()

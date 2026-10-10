@@ -71,7 +71,7 @@ standalone test executables for a `main` and an assigned suite.
 
 Tests are organized in three tiers:
 
-1. **Main suite** — `lake test` (alias: `lake run`). `test_runner`'s root is
+1. **Main suite** — `lake test`. `test_runner`'s root is
    `Tests/RunTests.lean`, which imports the umbrella module `Tests.lean`
    plus `Tests.TestAdditionalManifolds` (special-cased there, not
    in `Tests.lean`). It parses `--filter PATTERN`, `--ignored`, `--fail-fast`,
@@ -170,17 +170,14 @@ Shared infrastructure:
   `BlockParams (n_embd : UInt64)` whose fields are `T #[n_embd]`
   (`Examples/GPT/GPT.lean:16`).
 
-Lake scripts (`lakefile.lean:1166`–`1232`) wrap the common invocations so the
-runtime library path is set correctly:
+Run any executable with `lake exe <Exe> [args...]` (builds it if needed) or,
+without rebuilding, `lake env .lake/build/bin/<Exe> [args...]`. Two Lake scripts
+cover the GPU builds:
 
 | Script | What it does |
 |---|---|
-| `lake run` | run `test_runner` |
-| `lake run train` | run `TrainGPT` |
 | `lake run buildGpuTarget -- <KernelModule> <Target>...` | build GPU-backed targets with one kernel module |
-| `lake run runBuiltTarget -- <Exe> [args...]` | run a compiled exe from `.lake/build/bin` |
-| `lake run buildMhaH100Examples` / `validateMhaH100Examples` | build / build+run the raw H100 MHA binaries |
-| `lake run runMhaH100Exe` / `runMhaH100Seq768Exe` | run those binaries directly |
+| `lake run buildMhaH100Examples` | build the raw H100 MHA binaries |
 
 ## Key APIs: the example tour
 
@@ -248,10 +245,10 @@ python3 scripts/test_inventory.py --build # build every required CPU suite
 lake env python3 scripts/test_inventory.py --run # run that same suite list
 TYR_GPU_TEST_STRICT=1 lake exe TestGPUGB10E2E --fail-fast
 
-lake build TrainGPT && lake run train      # char-GPT on Shakespeare
+lake exe TrainGPT                          # char-GPT on Shakespeare
 lake exe Qwen35RunHF --source Qwen/Qwen3.5-0.8B --prompt "Summarize dependent types." --stream
 lake exe BranchingFlowsMoleculeTrainGenerate
-lake run validateMhaH100Examples           # build + run H100 MHA fixture checks
+lake exe RunMhaH100 && lake exe RunMhaH100Seq768   # H100 MHA fixture checks
 ```
 
 ## What is covered vs uncovered

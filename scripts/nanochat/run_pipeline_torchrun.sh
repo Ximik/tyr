@@ -16,8 +16,6 @@ export LMOD_PAGER="${LMOD_PAGER:-none}"
 export MODULES_PAGER="${MODULES_PAGER:-cat}"
 export PAGER="${PAGER:-cat}"
 
-export LD_LIBRARY_PATH="${REPO_ROOT}/external/wheels/torch/lib:${REPO_ROOT}/cc/build:${EBROOTGCCCORE:+${EBROOTGCCCORE}/lib64:}${LD_LIBRARY_PATH:-}"
-
 TORCHRUN_BIN="${TORCHRUN_BIN:-torchrun}"
 if ! command -v "${TORCHRUN_BIN}" >/dev/null 2>&1; then
   echo "error: torchrun launcher not found at ${TORCHRUN_BIN}" >&2
