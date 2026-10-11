@@ -43,14 +43,16 @@ class NativeBuildTests(unittest.TestCase):
         (self.cc / "src/probe.cpp").write_text(
             '#include "nested/config.h"\nextern "C" int lean_probe() { return VALUE; }\n')
         self.obj = self.cc / "build/probe.o"
-        self.archive = self.cc / "build/libTyrC.a"
+        extension = "dylib" if sys.platform == "darwin" else "so"
+        self.library = self.cc / f"build/libTyrC.{extension}"
 
-    def make(self, target="build/libTyrC.a", jobs=1, **variables):
+    def make(self, target=None, jobs=1, **variables):
+        target = target or str(self.library.relative_to(self.cc))
         defaults = {
             "LEAN_HOME": str(self.root / "lean"), "CUDA_HOME": "",
             "OBJ_FILES": "build/probe.o", "SRCS": "probe.cpp", "CU_SRCS": "",
             "MM_SRCS": "", "SOXR_SRCS": "", "GPU": "H100",
-            "DEP_FILES": "build/probe.d",
+            "DEP_FILES": "build/probe.d", "DYLIB_LINK_FLAGS": "",
         }
         defaults.update(variables)
         result = subprocess.run(["make", "--no-print-directory", f"-j{jobs}", target] +
@@ -62,7 +64,7 @@ class NativeBuildTests(unittest.TestCase):
     def probe(self, library=None):
         (self.root / "main.cpp").write_text(
             '#include <cstdio>\nextern "C" int lean_probe();\nint main() { std::printf("%d", lean_probe()); }\n')
-        subprocess.run(["c++", str(self.root / "main.cpp"), str(library or self.archive),
+        subprocess.run(["c++", str(self.root / "main.cpp"), str(library or self.library),
                         "-o", str(self.root / "probe")], check=True, capture_output=True)
         return subprocess.check_output([str(self.root / "probe")], cwd=self.cc, text=True)
 
@@ -73,8 +75,7 @@ class NativeBuildTests(unittest.TestCase):
         dependency_source = self.cc / "src/dependency.cpp"
         dependency_source.write_text('extern "C" int fixture_dependency() { return 3; }\n')
         dependency_archive = self.cc / "build/dependency/libfixture.a"
-        extension = "dylib" if sys.platform == "darwin" else "so"
-        shared = self.cc / f"build/libTyrC.{extension}"
+        shared = self.library
         settings = {
             "SOXR_OBJS": "build/dependency.o",
             "SOXR_LIB": "build/dependency/libfixture.a",
@@ -88,19 +89,19 @@ class NativeBuildTests(unittest.TestCase):
         self.make(str(shared.relative_to(self.cc)), jobs=4, **settings)
         self.assertEqual(self.probe(shared), "3")
         self.make("all", jobs=4, **settings)
-        artifacts = [self.obj, self.archive, dependency_archive, shared]
+        artifacts = [self.obj, dependency_archive, shared]
         original = [path.stat().st_mtime_ns for path in artifacts]
         self.make("all", jobs=4, **settings)
         self.assertEqual([path.stat().st_mtime_ns for path in artifacts], original,
-                         "unchanged objects/archives/shared library must not rebuild")
+                         "unchanged objects/archive/shared library must not rebuild")
 
         time.sleep(1.05)  # Whole-second mtime precision in Apple's Make 3.81.
         dependency_source.write_text('extern "C" int fixture_dependency() { return 17; }\n')
         self.make("all", jobs=4, **settings)
         changed = [path.stat().st_mtime_ns for path in artifacts]
-        self.assertEqual(changed[:2], original[:2], "unrelated primary objects/archive rebuilt")
-        self.assertNotEqual(changed[2], original[2], "dependency archive was not rebuilt")
-        self.assertNotEqual(changed[3], original[3], "shared library did not relink")
+        self.assertEqual(changed[0], original[0], "unrelated primary object rebuilt")
+        self.assertNotEqual(changed[1], original[1], "dependency archive was not rebuilt")
+        self.assertNotEqual(changed[2], original[2], "shared library did not relink")
         self.assertEqual(self.probe(shared), "17", "shared library retained old dependency code")
         self.make("all", jobs=4, **settings)
         self.assertEqual([path.stat().st_mtime_ns for path in artifacts], changed)

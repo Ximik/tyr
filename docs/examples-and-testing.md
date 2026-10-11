@@ -16,14 +16,14 @@ test or example of your own.
 
 Everything is declared in `lakefile.lean`:
 
-- `lean_lib Tests` (`lakefile.lean:581`, roots `Tests`, no precompile),
+- `lean_lib Tests` (roots `Tests`, no precompile),
   `lean_lib TestsExperimental` (`:586`), `lean_lib Examples` (`:591`).
 - Test-side `lean_exe` targets root under `Tests/`, example
   executables root under `Examples/`.
 - `@[test_driver] lean_exe test_runner` (`:598`) is Lake's test driver, so
   `lake test` builds and runs it.
 - The test framework is an external dependency
-  (`lakefile.lean:260`): `require LeanTest from git "https://github.com/cpehle/lean_test.git"`.
+  (`lakefile.lean`): `require LeanTest from git "https://github.com/cpehle/lean_test.git"`.
 
 ### The LeanTest framework
 
@@ -113,7 +113,7 @@ to `TorchParity`, then `RunMhaH100Decode` including cache parity. GPU test and
 example changes are included in the workflow path filters. Local GPU runs
 without strict mode retain optional skips and print executed/skipped counts.
 
-There is also `lean_exe ffi_crash_probe` (`lakefile.lean:672`, root
+There is also `lean_exe ffi_crash_probe` (root
 `Tests/FfiCrashProbe.lean`): a manual probe that intentionally triggers a
 libtorch CUDA error to check the process dies with an intelligible `c10::Error`
 message instead of a bare SIGABRT. It is deliberately not part of any suite;

@@ -21,7 +21,7 @@ Three layers sit between a Lean `def` and a running CUDA kernel:
 foo.kernel : Kernel            foo.launch : … → IO Unit   -- IR record + FFI launcher
         │  lake build: GenerateGpuKernels → cc/src/generated/*.cu, then make -C cc
         ▼
-extern "C" lean_object* lean_launch_Tyr_GPU_Kernels_foo(…)   -- C++ launcher in libTyrC.a
+extern "C" lean_object* lean_launch_Tyr_GPU_Kernels_foo(…)   -- C++ launcher in libTyrC
         ▲
 Tyr.GPU.Ops.*  (typed wrappers, AttentionProblem dispatch, portable fallback)
 ```
@@ -93,10 +93,10 @@ before the shared body, e.g. `dopri5Combine64Blackwell`
 
 ### Build integration
 
-`extern_lib libtyr` in `lakefile.lean:416-548` runs the
+`target libtyr` in `lakefile.lean` runs the
 `GenerateGpuKernels` executable over the configured kernel modules, emitting
 CUDA into `cc/src/generated/` (e.g. `Tyr_GPU_Kernels_MhaH100.cu` plus
-`tyr_gpu_kernel_stubs.cpp`), then rebuilds `cc/build/libTyrC.a` via
+`tyr_gpu_kernel_stubs.cpp`), then rebuilds `cc/build/libTyrC.so` via
 `make -C cc`. Which modules get emitted is the `-Kkernels` Lake option
 (space-separated module list, default `Tyr.GPU.Kernels.MhaH100`, set with
 `lake -R`); `TYR_SKIP_GPU_CODEGEN=1` reuses the checked-in generated tree. On a fresh checkout the codegen step needs the kernel modules'
@@ -341,7 +341,7 @@ parts:
   `reportTensorComparison`, allclose with rtol/atol).
 - **Shell harnesses.** `scripts/gpu/test_<kernel>_e2e.sh` all delegate to
   `scripts/gpu/run_e2e_kernel.sh <KernelModule> <RunnerExe> <Label>`, which
-  emits CUDA for the module, rebuilds `libTyrC.a`, regenerates fixtures, and
+  emits CUDA for the module, rebuilds `libTyrC`, regenerates fixtures, and
   runs the parity check; `scripts/gpu/test_parity_suite.sh` is the umbrella.
   See [Getting started — GPU parity scripts](../getting-started.md).
 - **Vendored reference.** If `TYR_GPU_VENDORED_REF_RUNNER` is set (default:
@@ -386,7 +386,7 @@ parts:
 - [GPU DSL and codegen](dsl-codegen.md) — the `KernelM` DSL, tile IR, and C++ emission these kernels are written in
 - [Getting started](../getting-started.md) — build options (`-Kkernels`, `TYR_SKIP_GPU_CODEGEN`) and the parity-script flow
 - [Examples and testing](../examples-and-testing.md) — building and running the `Examples/GPU/Run*` harnesses and test suites
-- [FFI and build](../ffi-and-build.md) — `cc/`, `libTyrC.a`, and how generated CUDA reaches the linker
+- [FFI and build](../ffi-and-build.md) — `cc/`, `libTyrC`, and how generated CUDA reaches the linker
 - [Core tensors](../core/tensors.md) — `T s`, `Device`, the `torch.*` FFI used at the launch boundary
 - [Autodiff](../autodiff.md) — `torch.autograd`, which is what makes `tyr::flash_attn` differentiable
 - [diffeq.md](../diffeq.md) — the generic solvers the fused RK/SDE ops accelerate

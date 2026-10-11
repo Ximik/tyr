@@ -118,11 +118,10 @@ referenced by neither the Makefile nor the lakefile.
 
 Generated CUDA kernels export `lean_launch_Tyr_GPU_Kernels_*` symbols, but the
 generator itself is a Lean executable that must link `libTyrC` — a
-chicken-and-egg problem. The Makefile breaks it by always archiving
-`generated/tyr_gpu_kernel_stubs.o`, which defines every launcher as
-`__attribute__((weak))` throwing stubs, **last** in the archive
-(`cc/Makefile:290-297, 310-320`): strong definitions from real `.cu` files win
-when present, and links succeed when they are not. The stubs are regenerated
+chicken-and-egg problem. The Makefile breaks it by always compiling
+`generated/tyr_gpu_kernel_stubs.cpp` into `libTyrC`, which defines every
+launcher as an `__attribute__((weak))` throwing stub: strong definitions from
+real `.cu` files win when present, and links succeed when they are not. The stubs are regenerated
 by `cc/tools/generate_gpu_kernel_stubs.py`, which scans `.c.o.export` IR and
 `@[gpu_kernel]` sources for launcher names. The inventory is refreshed before
 Lake checks the native build trace and on every Make invocation that needs
@@ -170,12 +169,12 @@ not compile LibTorch or CUDA and does not modify workspace build artifacts.
 
 The Makefile takes every native dependency from `external/` — libtorch
 (`external/wheels/torch`), soxr (built from the `external/git/soxr` checkout without
-cmake), Arrow/Parquet (`external/wheels/pyarrow`, linked by exact file name via
-`ARROW_SOVERSION`), and the CUDA runtime and NCCL (`external/wheels/nvidia`, CUDA
+cmake), Arrow/Parquet (`external/wheels/pyarrow`, linked by the file names the
+wheel provides, e.g. `libarrow.so.2500`), and the CUDA runtime and NCCL (`external/wheels/nvidia`, CUDA
 variant only); `deps/fetch.sh` populates them. It probes only Lean
-(`lean --print-prefix`) and the CUDA toolkit (`nvcc`). GPU targets are a matrix
-(`cc/Makefile:127-196`): `GPU` selects SASS, `GPU_FAMILY` selects the
-ThunderKittens arch guards —
+(`lean --print-prefix`) and the CUDA toolkit (`nvcc`). GPU targets are a table
+in `cc/Makefile`: `GPU` (from `-Kgpu`) selects SASS and the family, which
+selects the ThunderKittens arch guards —
 
 | `GPU` | family | compute / sm |
 |---|---|---|
@@ -291,7 +290,7 @@ opaque get_live_tensors : IO UInt64
 opaque manual_seed (seed : UInt64) : IO Unit
 ```
 
-Makefile targets: `all` (default; static and shared libraries), `lib`, `dylib`,
+Makefile targets: `all` (default) and `dylib` (both build `libTyrC`),
 `bench-flash-attn` (standalone C++ attention benchmark from
 `cc/tools/bench_flash_attn.cpp`), `soxr`, `clean`. `check-deps` runs first and
 fails early, pointing at `deps/fetch.sh`, when `external/git/soxr`,
