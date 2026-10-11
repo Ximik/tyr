@@ -237,13 +237,9 @@ lake exe GenerateGpuKernels [--out-dir cc/src/generated] [--no-clean] <Module>�
 The normal build does this for you: the `target libtyr` in `lakefile.lean`
 builds the `GenerateGpuKernels` executable, runs it over the configured
 modules, then invokes
-`make -C cc`. Two settings control it (see
-[Getting started](../getting-started.md) for the full table):
-
-- `-Kkernels="<module> ..."` (Lake option, set with `lake -R`) — kernel
-  module(s) to emit CUDA for (default `Tyr.GPU.Kernels.MhaH100`).
-- `TYR_SKIP_GPU_CODEGEN` — set to `1` to skip generation and reuse whatever is
-  in `cc/src/generated` (useful for CPU-only builds).
+`make -C cc`. `-Kkernels="<module> ..."` (Lake option, set with `lake -R`)
+selects the kernel module(s) to emit CUDA for (default
+`Tyr.GPU.Kernels.MhaH100`); see [Getting started](../getting-started.md).
 
 ### Kernel-level autodiff (`Tyr/GPU/AutoGrad.lean`)
 
@@ -317,7 +313,7 @@ Codegen/build surface:
 | `generateKernel` | `Codegen/EmitNew.lean:1654` | `Kernel → String` ThunderKittens CUDA |
 | `writeKernelCudaUnitsByModuleFrom` | `Codegen/FFI.lean:282` | Per-module `.cu` emission with change detection |
 | `lake exe GenerateGpuKernels` | `Tyr/GPU/GenerateGpuKernels.lean` | CLI driver used by the Lake build |
-| `-Kkernels`, `TYR_SKIP_GPU_CODEGEN` | `lakefile.lean` (`gpuKernels`, `target libtyr`) | Build-time module selection / skip switch |
+| `-Kkernels` | `lakefile.lean` (`gpuKernels`, `target libtyr`) | Build-time kernel module selection |
 
 ## Usage example
 
@@ -390,7 +386,7 @@ through CSE — see the caveat in `Tyr/GPU/Ops/RKFused.lean`.
 
 - [GPU kernels and ops](kernels.md) — the kernel catalog built with this DSL and the typed ops layer above the raw launchers
 - [ThunderKittens porting status](thunderkittens-porting-status.md) — source-to-Lean parity matrix and codegen build notes
-- [Getting started](../getting-started.md) — build instructions, including `-Kkernels` / `TYR_SKIP_GPU_CODEGEN`
+- [Getting started](../getting-started.md) — build instructions, including `-Kkernels`
 - [Autodiff](../autodiff.md) — the host-side `Tyr.AutoGrad` engine that `Tyr/GPU/AutoGrad.lean` plugs into
 - [FFI and build](../ffi-and-build.md) — the `cc/` C++ layer the generated `.cu` files compile into
 - [Examples and testing](../examples-and-testing.md) — `Examples/GPU/Run*.lean` harnesses and GPU test entry points

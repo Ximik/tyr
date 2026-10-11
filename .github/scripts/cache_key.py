@@ -17,7 +17,7 @@ import subprocess
 REPO = Path(__file__).resolve().parents[2]
 BUILD_ENV = (
     "CC", "CXX", "CFLAGS", "CXXFLAGS", "CPPFLAGS", "LDFLAGS", "LEAN_CC",
-    "LIBRARY_PATH", "TYR_SKIP_GPU_CODEGEN",
+    "LIBRARY_PATH",
 )
 
 

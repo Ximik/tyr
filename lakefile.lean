@@ -89,38 +89,28 @@ target libtyr pkg : Dynlib := do
   let sysroot ← getLeanSysroot
   let kernelModules := (gpuKernels.splitOn " ").toArray.filterMap nonEmptyTrimmed?
 
-  -- 1. GPU codegen, CUDA builds only. It reruns when the compiled IR of the
-  --    codegen modules or of the configured kernels changes, or `-Kkernels`
-  --    does. Without CUDA, the Makefile links the weak launcher stubs instead.
-  --    TYR_SKIP_GPU_CODEGEN=1 is set by the nested Lake below.
-  let skipCodegen := cudaHome?.isNone || (← IO.getEnv "TYR_SKIP_GPU_CODEGEN") == some "1"
-  let codegenJob ← if skipCodegen then pure (Job.pure ()) else do
-    let irRoot := pkg.buildDir / "ir" / "Tyr" / "GPU"
-    let kernelIr := kernelModules.map fun m =>
-      (m.dropPrefix "Tyr.GPU.").toString.replace "." "/" ++ ".c.o.export"
-    let isCodegenInput (p : FilePath) : Bool :=
-      let rel := p.toString.drop (irRoot.toString.length + 1) |>.toString
-      rel.startsWith "Codegen/" && rel.endsWith ".c.o.export" ||
-        rel == "Types.c.o.export" || rel == "Kernels/Prelude.c.o.export" ||
-        kernelIr.contains rel
-    -- A fresh checkout has no IR yet; scan whatever exists at this point.
-    IO.FS.createDirAll irRoot
-    let irJob ← inputDir irRoot (text := false) isCodegenInput
+  -- 1. GPU codegen, CUDA builds only: run the generator over the `-Kkernels`
+  --    modules. Lake reruns it when the generator, a kernel module's compiled
+  --    `.olean`, or `-Kkernels` changes. Without CUDA, the Makefile links the
+  --    weak launcher stubs instead.
+  let codegenJob ← if cudaHome?.isNone then pure (Job.pure ()) else do
+    let some generator ← findLeanExe? `GenerateGpuKernels
+      | error "lakefile.lean: no GenerateGpuKernels executable"
+    let mut inputs := (← generator.exe.fetch).map fun _ => ()
+    for name in kernelModules do
+      let some mod ← findModule? name.toName
+        | error s!"-Kkernels: unknown module {name}"
+      inputs := inputs.mix (← mod.olean.fetch)
+    -- The generator imports the kernel modules, so it needs Lean's module path.
+    let generatorEnv ← getAugmentedEnv
     let stamp := pkg.buildDir / "gpu-codegen.stamp"
-    let job ← buildFileAfterDep stamp irJob
+    let job ← buildFileAfterDep stamp inputs
       (extraDepTrace := pure (BuildTrace.ofHash (Hash.ofString gpuKernels) "-Kkernels"))
       fun _ => do
-        -- The generator links libTyrC itself, so it is built by a nested Lake
-        -- that skips this codegen step (the cycle to be cut separately).
-        let nestedEnv := #[("LEAN_HOME", some sysroot.toString), ("TYR_SKIP_GPU_CODEGEN", some "1")]
-        let generatorExe := pkg.dir / ".lake" / "build" / "bin" / "GenerateGpuKernels"
-        proc { cmd := "lake", args := #["build", "GenerateGpuKernels"], cwd := pkg.dir, env := nestedEnv }
         proc {
-          cmd := "lake"
-          args := #["env", generatorExe.toString] ++ kernelModules
-            ++ #["--out-dir", (pkg.dir / "cc" / "src" / "generated").toString]
-          cwd := pkg.dir
-          env := nestedEnv
+          cmd := generator.file.toString
+          args := kernelModules ++ #["--out-dir", (pkg.dir / "cc" / "src" / "generated").toString]
+          env := generatorEnv
         }
         IO.FS.writeFile stamp gpuKernels
     pure (job.map fun _ => ())
@@ -179,6 +169,16 @@ lean_lib TyrCodegen where
   globs := #[.submodules `Tyr.GPU.Codegen, .one `Tyr.GPU.Types,
     .one `Tyr.GPU.Capabilities, .one `Tyr.GPU.Tile, .one `Tyr.Basic.Types]
   precompileModules := false
+
+/-- The GPU kernels written in Lean (`Tyr.GPU.Kernels.*`). Declared after `Tyr`
+    (see `TyrCodegen`). Not precompiled, so their `.olean` files build without
+    `libTyrC`: the `libtyr` target needs them to generate the kernels' CUDA. The
+    kernels' launch functions are in `libTyrC`, so linking needs it. -/
+lean_lib TyrKernels where
+  roots := #[`Tyr.GPU.Kernels]
+  globs := #[.andSubmodules `Tyr.GPU.Kernels]
+  precompileModules := false
+  moreLinkLibs := #[`@/libtyr]
 
 /-- Test library containing all tests -/
 lean_lib Tests where

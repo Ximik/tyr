@@ -84,7 +84,6 @@ if [[ ${#modules[@]} -eq 0 ]]; then
 fi
 
 export LAKE_NUM_JOBS="${LAKE_NUM_JOBS:-1}"
-export TYR_SKIP_GPU_CODEGEN=1
 
 lean_prefix="$(lean --print-prefix)"
 lean_include="$lean_prefix/include"

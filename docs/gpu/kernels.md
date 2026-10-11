@@ -99,10 +99,8 @@ CUDA into `cc/src/generated/` (e.g. `Tyr_GPU_Kernels_MhaH100.cu` plus
 `tyr_gpu_kernel_stubs.cpp`), then rebuilds `cc/build/libTyrC.so` via
 `make -C cc`. Which modules get emitted is the `-Kkernels` Lake option
 (space-separated module list, default `Tyr.GPU.Kernels.MhaH100`, set with
-`lake -R`); `TYR_SKIP_GPU_CODEGEN=1` reuses the checked-in generated tree. On a fresh checkout the codegen step needs the kernel modules'
-own `.oleans`, so CI does a two-phase build: first `TYR_SKIP_GPU_CODEGEN=1
-lake build <kernel modules>`, then the real build
-(`.github/workflows/gpu.yml`). The full variable table is in
+`lake -R`). The generator needs the kernel modules' `.olean` files, which Lake
+builds first as ordinary dependencies. The full option table is in
 [Getting started](../getting-started.md).
 
 Only the modules passed to the generator get `.cu` files, so a `.launch`
@@ -383,7 +381,7 @@ parts:
 ## Related guides
 
 - [GPU DSL and codegen](dsl-codegen.md) — the `KernelM` DSL, tile IR, and C++ emission these kernels are written in
-- [Getting started](../getting-started.md) — build options (`-Kkernels`, `TYR_SKIP_GPU_CODEGEN`) and the parity-script flow
+- [Getting started](../getting-started.md) — build options (`-Kkernels`) and the parity-script flow
 - [Examples and testing](../examples-and-testing.md) — building and running the `Examples/GPU/Run*` harnesses and test suites
 - [FFI and build](../ffi-and-build.md) — `cc/`, `libTyrC`, and how generated CUDA reaches the linker
 - [Core tensors](../core/tensors.md) — `T s`, `Device`, the `torch.*` FFI used at the launch boundary

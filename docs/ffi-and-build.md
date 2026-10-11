@@ -145,12 +145,12 @@ after a runtime Hopper check (`device_supports_tk_hopper`,
    without it. It then passes `CUDA_HOME` and `GPU` to every `make` call
    (unset for CPU); the Makefile does no CUDA detection of its own and derives
    the GPU family and architecture flags from `GPU`.
-1. GPU codegen, CUDA builds only: runs `lake build GenerateGpuKernels` and
-   executes it into `cc/src/generated/`. Lake reruns it only when the compiled
-   IR (`.c.o.export`) of the `Tyr.GPU.Codegen` modules, `Tyr.GPU.Types`,
-   `Tyr.GPU.Kernels.Prelude` or the `-Kkernels` modules changes, or the
-   `-Kkernels` list does. `TYR_SKIP_GPU_CODEGEN=1` skips it; the nested Lake
-   sets it, because the generator itself links `libTyrC`. Without CUDA the
+1. GPU codegen, CUDA builds only: runs the `GenerateGpuKernels` executable over
+   the `-Kkernels` modules, writing `cc/src/generated/`. Both are ordinary
+   Lake dependencies of the target: the generator links no `libTyrC`
+   (`TyrCodegen`), and the kernel modules (`TyrKernels`) are not precompiled,
+   so their `.olean` files build without it. Lake reruns the generator when
+   it, a kernel module's `.olean` or `-Kkernels` changes. Without CUDA the
    Makefile ignores generated `.cu` files and links the weak launcher stubs.
 2. Runs `make -jN -C cc dylib` on every build (`N` = `TYR_MAKE_JOBS`, or the
    CPU count); a no-op run takes well under a second. Make alone decides what
@@ -249,7 +249,6 @@ Environment variables for a single build:
 | Variable | Effect |
 |---|---|
 | `TYR_MAKE_JOBS` | parallel jobs for the native `make` build (default: CPU count) |
-| `TYR_SKIP_GPU_CODEGEN` | `1` skips the generator step in `target libtyr` (CUDA builds). Internal: the nested `lake build GenerateGpuKernels` sets it to break the codegen cycle |
 | `NCCL_ROOT` | NCCL discovery hint (Makefile) |
 
 ### `scripts/` overview
