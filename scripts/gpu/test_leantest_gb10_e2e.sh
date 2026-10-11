@@ -10,34 +10,6 @@ export PATH="$CUDA_HOME/bin:$PATH"
 
 export TYR_GPU_FAMILY=BLACKWELL
 export TYR_GPU_VENDORED_REF_RUNNER="${TYR_GPU_VENDORED_REF_RUNNER:-$PWD/scripts/gpu/run_vendored_reference.sh}"
-LEAN_BIN="${TYR_LEAN_BIN:-$HOME/.elan/bin/lean}"
-if [[ ! -x "$LEAN_BIN" ]]; then
-  LEAN_BIN="$(command -v lean || true)"
-fi
-if [[ -z "${LEAN_BIN:-}" || ! -x "$LEAN_BIN" ]]; then
-  echo "lean binary not found; set TYR_LEAN_BIN or install elan" >&2
-  exit 127
-fi
-
-cpu_count() {
-  local count
-  if command -v nproc >/dev/null 2>&1; then
-    nproc
-    return
-  fi
-  if command -v getconf >/dev/null 2>&1; then
-    count="$(getconf _NPROCESSORS_ONLN 2>/dev/null || true)"
-    if [[ "$count" =~ ^[0-9]+$ ]] && [[ "$count" -gt 0 ]]; then
-      echo "$count"
-      return
-    fi
-  fi
-  echo 1
-}
-
-invalidate_generated_gpu_objects() {
-  rm -f "$PWD"/cc/build/generated/*.o "$PWD"/cc/build/libTyrC.so
-}
 
 detect_gpu_target() {
   if [[ -n "${TYR_GPU_TARGET:-}" ]]; then
@@ -66,31 +38,8 @@ modules=(
   Tyr.GPU.Kernels.RKCombine
   Tyr.GPU.Kernels.BrownianSample
 )
-# The Makefile compiles only these modules' generated CUDA (step 3); Lake gets
-# the same set through -Kkernels below.
-export TYR_GPU_CODEGEN_MODULE="${modules[*]}"
-generator_targets=(
-  +Tyr.GPU.GenerateGpuKernels
-  +Tyr.GPU.Kernels.MhaGB10
-  +Tyr.GPU.Kernels.FusedLayerNorm
-  +Tyr.GPU.Kernels.FusedRMSNorm
-  +Tyr.GPU.Kernels.RKCombine
-  +Tyr.GPU.Kernels.BrownianSample
-)
+echo "[1/2] Configure Lake and build TestGPUGB10E2E with the kernels' CUDA (GPU=${TYR_GPU_TARGET})"
+lake -R -Kcuda="$CUDA_HOME" -Kgpu="$TYR_GPU_TARGET" -Kkernels="${modules[*]}" --quiet build TestGPUGB10E2E
 
-echo "[1/5] Configure Lake, build Lean kernel generator inputs"
-lake -R -Kcuda="$CUDA_HOME" -Kgpu="$TYR_GPU_TARGET" -Kkernels="${modules[*]}" \
-  --quiet build "${generator_targets[@]}"
-
-echo "[2/5] Generate CUDA translation units"
-lake env "$LEAN_BIN" --run Tyr/GPU/GenerateGpuKernels.lean "${modules[@]}" --out-dir cc/src/generated
-
-echo "[3/5] Build C++/CUDA runtime library (GPU=${TYR_GPU_TARGET}, family=${TYR_GPU_FAMILY})"
-invalidate_generated_gpu_objects
-make -C cc -j"$(cpu_count)" CUDA_HOME="$CUDA_HOME" GPU="${TYR_GPU_TARGET}"
-
-echo "[4/5] Build LeanTest GB10 executable"
-lake --quiet build TestGPUGB10E2E
-
-echo "[5/5] Run LeanTest GB10 suite"
+echo "[2/2] Run LeanTest GB10 suite"
 lake env ./.lake/build/bin/TestGPUGB10E2E "$@"

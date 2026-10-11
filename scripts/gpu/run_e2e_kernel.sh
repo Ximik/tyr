@@ -14,9 +14,6 @@ shift 3
 extra_build_targets=("$@")
 
 : "${CUDA_HOME:?set CUDA_HOME to the CUDA toolkit}"
-# The Makefile compiles only this module's generated CUDA (step 3); Lake gets
-# the same module through -Kkernels below.
-export TYR_GPU_CODEGEN_MODULE="${kernel_module}"
 
 if [[ -z "${TYR_GPU_VENDORED_REF_RUNNER:-}" ]] && [[ -x "$PWD/scripts/gpu/run_vendored_reference.sh" ]]; then
   export TYR_GPU_VENDORED_REF_RUNNER="$PWD/scripts/gpu/run_vendored_reference.sh"
@@ -65,36 +62,6 @@ detect_gpu_family() {
   esac
 }
 
-cpu_count() {
-  local count
-  if command -v nproc >/dev/null 2>&1; then
-    nproc
-    return
-  fi
-  if command -v getconf >/dev/null 2>&1; then
-    count="$(getconf _NPROCESSORS_ONLN 2>/dev/null || true)"
-    if [[ "$count" =~ ^[0-9]+$ ]] && [[ "$count" -gt 0 ]]; then
-      echo "$count"
-      return
-    fi
-  fi
-  if command -v sysctl >/dev/null 2>&1; then
-    count="$(sysctl -n hw.logicalcpu 2>/dev/null || true)"
-    if ! [[ "$count" =~ ^[0-9]+$ ]] || [[ "$count" -lt 1 ]]; then
-      count="$(sysctl -n hw.ncpu 2>/dev/null || true)"
-    fi
-    if [[ "$count" =~ ^[0-9]+$ ]] && [[ "$count" -gt 0 ]]; then
-      echo "$count"
-      return
-    fi
-  fi
-  echo 1
-}
-
-invalidate_generated_gpu_objects() {
-  rm -f "$PWD"/cc/build/generated/*.o "$PWD"/cc/build/libTyrC.so
-}
-
 trials="${E2E_TRIALS:-1}"
 if ! [[ "$trials" =~ ^[0-9]+$ ]] || [[ "$trials" -lt 1 ]]; then
   echo "E2E_TRIALS must be a positive integer (got: $trials)" >&2
@@ -106,12 +73,8 @@ gpu_family="$(detect_gpu_family)"
 export TYR_GPU_TARGET="${TYR_GPU_TARGET:-${gpu_target}}"
 export TYR_GPU_FAMILY="${TYR_GPU_FAMILY:-${gpu_family}}"
 
-echo "[1/6] Configure Lake, build Lean kernel + generator (${label})"
-lake -R -Kcuda="$CUDA_HOME" -Kgpu="$TYR_GPU_TARGET" -Kkernels="$kernel_module" \
-  --quiet build +Tyr.GPU.GenerateGpuKernels "+${kernel_module}"
-
-echo "[2/6] Generate CUDA translation unit (${label})"
-lake env "$LEAN_BIN" --run Tyr/GPU/GenerateGpuKernels.lean "$kernel_module" --out-dir cc/src/generated
+echo "[1/4] Configure Lake and build libTyrC with the kernel's CUDA (${label}, GPU=${TYR_GPU_TARGET})"
+lake -R -Kcuda="$CUDA_HOME" -Kgpu="$TYR_GPU_TARGET" -Kkernels="$kernel_module" --quiet build libtyr
 
 runner_source="Examples/GPU/${runner_exe}.lean"
 if [[ -f "Examples/GPU/${runner_exe}Exe.lean" ]]; then
@@ -119,14 +82,10 @@ if [[ -f "Examples/GPU/${runner_exe}Exe.lean" ]]; then
 fi
 use_source_runner=0
 
-echo "[3/6] Build C++/CUDA runtime library (${label}, GPU=${TYR_GPU_TARGET}, family=${TYR_GPU_FAMILY})"
-invalidate_generated_gpu_objects
-make -C cc -j"$(cpu_count)" CUDA_HOME="$CUDA_HOME" GPU="${TYR_GPU_TARGET}"
-
-echo "[4/6] Build Lean executable (${runner_exe})"
+echo "[2/4] Build Lean executable (${runner_exe})"
 if ! lake --quiet build "$runner_exe" "${extra_build_targets[@]}"; then
   if [[ -f "${runner_source}" ]]; then
-    echo "[4/6] Falling back to Lean source runner (${runner_source})"
+    echo "[2/4] Falling back to Lean source runner (${runner_source})"
     use_source_runner=1
   else
     exit 1
@@ -134,14 +93,14 @@ if ! lake --quiet build "$runner_exe" "${extra_build_targets[@]}"; then
 fi
 
 for i in $(seq 1 "$trials"); do
-  echo "[5/6] (${i}/${trials}) Regenerate fixture tensors (${label})"
+  echo "[3/4] (${i}/${trials}) Regenerate fixture tensors (${label})"
   if [[ "${use_source_runner}" -eq 1 ]]; then
     lake env "$LEAN_BIN" --run "${runner_source}" --gen-only --regen
   else
     lake env ./.lake/build/bin/"${runner_exe}" --gen-only --regen
   fi
 
-  echo "[6/6] (${i}/${trials}) Run end-to-end check (${label})"
+  echo "[4/4] (${i}/${trials}) Run end-to-end check (${label})"
   if [[ "${use_source_runner}" -eq 1 ]]; then
     lake env "$LEAN_BIN" --run "${runner_source}"
   else

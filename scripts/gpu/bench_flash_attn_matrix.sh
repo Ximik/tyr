@@ -5,14 +5,6 @@ export LAKE_NUM_JOBS="${LAKE_NUM_JOBS:-1}"
 export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
 gpu_codegen_module="${TYR_GPU_CODEGEN_MODULE:-Tyr.GPU.Kernels.MhaH100}"
 
-cpu_count() {
-  if command -v nproc >/dev/null 2>&1; then
-    nproc
-    return
-  fi
-  echo 1
-}
-
 usage() {
   cat <<'EOF'
 Usage: scripts/gpu/bench_flash_attn_matrix.sh [wrapper flags] [-- benchmark flags]
