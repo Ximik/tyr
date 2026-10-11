@@ -1,16 +1,15 @@
-#include <torch/csrc/utils/pybind.h>
+#include <ATen/ATen.h>
 
 #define TORCH_COMPILE
 #define TORCH_EXTENSION_NAME tyr_tk_vendor_unused
 
+// The upstream file ends with a PYBIND11_MODULE block registering its
+// functions with Python; this turns it into an unused function.
 struct DummyPybindModule {
   template <typename... Args>
   void def(Args&&...) const {}
 };
 
-#ifdef PYBIND11_MODULE
-#undef PYBIND11_MODULE
-#endif
 #define PYBIND11_MODULE(name, variable) static void ignored_pybind_module(DummyPybindModule& variable)
 
 #include "../../external/git/ThunderKittens/kernels/attention/mha_h100/mha_h100.cu"

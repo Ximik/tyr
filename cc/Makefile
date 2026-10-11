@@ -18,12 +18,6 @@ TORCHDIR=../external/wheels/torch
 TORCH_INC_FLAGS=-I$(TORCHDIR)/include -I$(TORCHDIR)/include/torch/csrc/api/include  -I$(TORCHDIR)/include/TH  -I$(TORCHDIR)/include/THC
 TORCH_LIBPATH=$(TORCHDIR)/lib
 TORCH_CUDA_VENDOR_LIBPATH=../external/wheels/nvidia/cu13/lib
-# Python.h is only needed by tk_vendor_mha_h100.cu (it includes torch's pybind.h).
-# Prefer CPython 3.12, the version the fetched wheels target (WHEEL_PYTHON in
-# deps/lock_wheels.py).
-PYTHON ?= $(shell command -v python3.12 2>/dev/null || echo python3)
-PYTHON_INCLUDE := $(shell "$(PYTHON)" -c 'import sysconfig; print(sysconfig.get_config_var("INCLUDEPY") or sysconfig.get_path("include") or "")' 2>/dev/null)
-PYTHON_INC_FLAGS := $(if $(strip $(PYTHON_INCLUDE)),-I$(PYTHON_INCLUDE),)
 TKDIR=../external/git/ThunderKittens
 TK_INC_FLAGS=-I$(TKDIR)/include -I$(TKDIR)/prototype
 SOXR_DIR=../external/git/soxr
@@ -334,7 +328,7 @@ DYLIB_LINK_FLAGS := $(DYLIB_LEAN_FLAGS) \
 shell_quote = '$(subst ','"'"',$(1))'
 BUILD_FLAGS_KEYS := CC CXX NVCC LEAN_HOME TORCHDIR SOXR_DIR TKDIR \
 	CXX_STD_FLAG EXTRA_CXX_FLAGS CPP_CUDA_FLAGS NVCCFLAGS SOXR_CFLAGS \
-	TORCH_INC_FLAGS PYTHON_INC_FLAGS CUDA_INC_FLAGS NCCL_INC_FLAGS ARROW_INC_FLAGS \
+	TORCH_INC_FLAGS CUDA_INC_FLAGS NCCL_INC_FLAGS ARROW_INC_FLAGS \
 	GPU GPU_FAMILY GPU_COMPUTE GPU_CODE HAS_NVCC HAS_CUDA_TOOLKIT \
 	CUDA_HOME CUDA_MAJOR_VERSION GPU_CODEGEN_MODULES OBJ_FILES DYLIB_LINK_FLAGS
 
@@ -449,7 +443,7 @@ $(OUT_DIR)/%.o : $(SRC_DIR)/%.cu $(BUILD_FLAGS) $(TYR_MAKEFILE) | check-deps $(O
 		echo "error: $< requires Hopper WGMMA or SM100a tcgen05/TMEM, neither of which is supported by GB10 sm_121" >&2; \
 		exit 2; \
 	fi
-	$(NVCC) -MMD -MP -MF $(@:.o=.d) -MT $@ -o $@ -c $< -I$(HDR_DIR) -I$(LEAN_INCLUDE) $(TORCH_INC_FLAGS) $(PYTHON_INC_FLAGS) $(CUDA_INC_FLAGS) $(TK_INC_FLAGS) $(NVCCFLAGS)
+	$(NVCC) -MMD -MP -MF $(@:.o=.d) -MT $@ -o $@ -c $< -I$(HDR_DIR) -I$(LEAN_INCLUDE) $(TORCH_INC_FLAGS) $(CUDA_INC_FLAGS) $(TK_INC_FLAGS) $(NVCCFLAGS)
 
 # No-CUDA-toolkit builds: compile the stub branch of tyr_laguna_moe.cu as C++.
 $(OUT_DIR)/tyr_laguna_moe_stub.o : $(SRC_DIR)/tyr_laguna_moe.cu $(BUILD_FLAGS) $(TYR_MAKEFILE) | check-deps $(OUT_DIR)
