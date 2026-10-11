@@ -116,7 +116,7 @@ call (`MhaGB10`, `FusedRMSNorm`, `FusedLayerNorm`, `MhaH100Decode`,
 `Tyr/GPU/Kernels.lean` is the umbrella: it imports the six family entrypoints
 (`Attention`, `StateSpace`, `Parallel`, `Gemm`, `Normalization`,
 `Experimental`) plus `BrownianSample` and `RKCombine` directly. Notably absent
-from the umbrella: `AttentionFactory`, `MhaGB10`, and `FlashAttnCausal64` —
+from the umbrella: `MhaGB10` and `FlashAttnCausal64` —
 import those leaf modules explicitly. `Tyr/GPU/Kernels/Examples.lean` (via
 `Experimental`) holds small teaching kernels (`simpleGemm`, `flashAttnFwd`,
 `layerNorm`, …). Family entrypoints re-export selected leaf kernels as
@@ -144,7 +144,6 @@ generated `.launch`.
 | `Tyr/GPU/Kernels/MhaH100LCF.lean` | `tkMhaH100LCFFwd64`, `tkMhaH100LCFFwd128` | load-compute-finish forward variants |
 | `Tyr/GPU/Kernels/MhaGB10.lean` | `tkFlashAttnGb10Fwd2Block[Lse]`, `tkMhaGb10Fwd2Block`, `tkMhaGb10BwdPrep2Block`, `tkMhaGb10Bwd2BlockPartials` | GB10 (Blackwell-consumer) 2-block MHA |
 | `Tyr/GPU/Kernels/FlashAttn3.lean` | `flashAttn3Fwd`, `flashAttn3FwdGQA`, `flashAttn3FwdPersistent`, `flashAttn3BwdPrep`, `flashAttn3Bwd` | FA3-style warp-specialized producer/consumer |
-| `Tyr/GPU/Kernels/AttentionFactory.lean` | `tkFlashAttnFwd2BlockFactory`, … (12 `…Factory` kernels) | parameterized `FAVariantConfig` template (`mkFlashAttnFwdBody`, `mkFlashAttnBwdPrep`, `mkFlashAttnBwdPartials`) mirroring the hand-written MhaH100 kernels |
 | `Tyr/GPU/Kernels/RKCombine.lean` | `dopri5Stage{2..7}[Blackwell]`, `dopri5Combine64[Blackwell]` | tableau-driven generators `rkStageSumBody` / `rkCombineBody` instantiate any explicit RK tableau |
 | `Tyr/GPU/Kernels/BrownianSample.lean` | `keyedNormal[Blackwell]`, `vbtIncrement[Blackwell]`, `emStepVbt[Blackwell]` | device PRNG replicating the CPU `PRNGKey` LCG + Box-Muller per element |
 | `Tyr/GPU/Kernels/{Bf16Gemm,PrecisionGemm,NvFp4Gemm}.lean` | `tkH100Bf16GemmFwd`, `tkB200Bf16GemmFwd`, `tkH100Fp8E4M3GemmFwd`, `tkB200NvFp4GemmFwd`, … | re-exported via `Kernels/Gemm.lean` |
