@@ -34,7 +34,8 @@ def simpleTileKernel : Kernel :=
     let _t : RT GpuFloat.BFloat16 64 64 ← allocRT .BFloat16 64 64
 
 /--
-info: #include <kittens.cuh>
+info: #include <type_traits>
+#include <kittens.cuh>
 using namespace kittens;
 
 #if defined(KITTENS_HOPPER)
@@ -55,13 +56,16 @@ def multiTileKernel : Kernel :=
     let _sv : SV GpuFloat.BFloat16 128 ← allocSV .BFloat16 128
 
 /--
-info: #include <kittens.cuh>
+info: #include <type_traits>
+#include <kittens.cuh>
 using namespace kittens;
 
 #if defined(KITTENS_HOPPER)
 __global__ void multi_tile(/* empty parameter list */) {
+  extern __shared__ int __shm[];
+  tma_swizzle_allocator al(__shm);
   rt<bf16, 64, 64, row_l> v0;
-  __shared__ st<float, 32, 64> v1;
+  auto &v1 = al.allocate<st<float, 32, 64>>(); // layout: col_l (Tyr .Col; TK has no col-layout ST, traversed transposed)
   rv<float, 64> v2;
   __shared__ sv<bf16, 128> v3;
 }
@@ -81,7 +85,8 @@ def mmaABKernel : Kernel :=
     mma c a b c
 
 /--
-info: #include <kittens.cuh>
+info: #include <type_traits>
+#include <kittens.cuh>
 using namespace kittens;
 
 #if defined(KITTENS_HOPPER)
@@ -106,7 +111,8 @@ def mmaABtKernel : Kernel :=
     mmaT c a b c
 
 /--
-info: #include <kittens.cuh>
+info: #include <type_traits>
+#include <kittens.cuh>
 using namespace kittens;
 
 #if defined(KITTENS_HOPPER)
@@ -131,7 +137,8 @@ def simpleLoopKernel : Kernel :=
       sync
 
 /--
-info: #include <kittens.cuh>
+info: #include <type_traits>
+#include <kittens.cuh>
 using namespace kittens;
 
 #if defined(KITTENS_HOPPER)
@@ -153,7 +160,8 @@ def nestedLoopKernel : Kernel :=
         sync 1
 
 /--
-info: #include <kittens.cuh>
+info: #include <type_traits>
+#include <kittens.cuh>
 using namespace kittens;
 
 #if defined(KITTENS_HOPPER)
@@ -177,7 +185,8 @@ def sm80Kernel : Kernel :=
     let _t : RT GpuFloat.BFloat16 64 64 ← allocRT .BFloat16 64 64
 
 /--
-info: #include <kittens.cuh>
+info: #include <type_traits>
+#include <kittens.cuh>
 using namespace kittens;
 
 #if defined(KITTENS_AMPERE)
@@ -195,7 +204,8 @@ def sm100Kernel : Kernel :=
     let _t : RT GpuFloat.BFloat16 64 64 ← allocRT .BFloat16 64 64
 
 /--
-info: #include <kittens.cuh>
+info: #include <type_traits>
+#include <kittens.cuh>
 using namespace kittens;
 
 #if defined(KITTENS_BLACKWELL)
@@ -219,7 +229,8 @@ def rowReductionKernel : Kernel :=
     rowSumAccum v t v
 
 /--
-info: #include <kittens.cuh>
+info: #include <type_traits>
+#include <kittens.cuh>
 using namespace kittens;
 
 #if defined(KITTENS_HOPPER)
@@ -275,7 +286,8 @@ def colBroadcastKernel : Kernel :=
     divCol t t v
 
 /--
-info: #include <kittens.cuh>
+info: #include <type_traits>
+#include <kittens.cuh>
 using namespace kittens;
 
 #if defined(KITTENS_HOPPER)
@@ -302,7 +314,8 @@ def maskKernel : Kernel :=
     triu t t 1 (some 0.0)
 
 /--
-info: #include <kittens.cuh>
+info: #include <type_traits>
+#include <kittens.cuh>
 using namespace kittens;
 
 #if defined(KITTENS_HOPPER)
@@ -331,7 +344,8 @@ def memoryKernel : Kernel :=
     storeAdd sF rF
 
 /--
-info: #include <kittens.cuh>
+info: #include <type_traits>
+#include <kittens.cuh>
 using namespace kittens;
 
 template<typename Dst, typename Src>
@@ -345,12 +359,14 @@ __device__ inline void store_add(Dst &dst, const Src &src, const Offset &offset)
 
 #if defined(KITTENS_HOPPER)
 __global__ void memory_ops(/* empty parameter list */) {
+  extern __shared__ int __shm[];
+  tma_swizzle_allocator al(__shm);
   rt<bf16, 64, 64, row_l> v0;
-  __shared__ st<bf16, 64, 64> v1;
+  auto &v1 = al.allocate<st<bf16, 64, 64>>(); // layout: row_l
   warp::load(v0, v1);
   warp::store(v1, v0);
   rt<float, 64, 64, row_l> v2;
-  __shared__ st<float, 64, 64> v3;
+  auto &v3 = al.allocate<st<float, 64, 64>>(); // layout: row_l
   store_add(v3, v2);
 }
 #endif
@@ -370,11 +386,12 @@ def paramKernel : Kernel :=
     let _t : RT GpuFloat.BFloat16 64 64 ← allocRT .BFloat16 64 64
 
 /--
-info: #include <kittens.cuh>
+info: #include <type_traits>
+#include <kittens.cuh>
 using namespace kittens;
 
 #if defined(KITTENS_HOPPER)
-__global__ void with_params(gl<bf16, 1, 1, -1, -1> v0, gl<float, 1, 1, -1, -1> v1, uint64_t v2) {
+__global__ void with_params(gl<bf16, -1, -1, -1, -1> v0, gl<float, -1, -1, -1, -1> v1, uint64_t v2) {
   rt<bf16, 64, 64, row_l> v3;
 }
 #endif
@@ -423,11 +440,14 @@ def miniFlashAttn : Kernel :=
     divCol o o rowSum
 
 /--
-info: #include <kittens.cuh>
+info: #include <type_traits>
+#include <kittens.cuh>
 using namespace kittens;
 
 #if defined(KITTENS_HOPPER)
-__global__ void mini_flash_attn(gl<bf16, 1, 1, -1, -1> v0, gl<bf16, 1, 1, -1, -1> v1, gl<bf16, 1, 1, -1, -1> v2, gl<bf16, 1, 1, -1, -1> v3) {
+__global__ void mini_flash_attn(gl<bf16, -1, -1, -1, -1> v0, gl<bf16, -1, -1, -1, -1> v1, gl<bf16, -1, -1, -1, -1> v2, gl<bf16, -1, -1, -1, -1> v3) {
+  extern __shared__ int __shm[];
+  tma_swizzle_allocator al(__shm);
   // Tiles
   rt<bf16, 64, 64, row_l> v4;
   rt<bf16, 64, 64, row_l> v5;
@@ -441,9 +461,9 @@ __global__ void mini_flash_attn(gl<bf16, 1, 1, -1, -1> v0, gl<bf16, 1, 1, -1, -1
   warp::neg_infty(v10);
   rv<float, 64, ducks::rv_layout::ortho> v11;
   // Shared
-  __shared__ st<bf16, 64, 64> v12;
-  __shared__ st<bf16, 64, 64> v13;
-  __shared__ st<bf16, 64, 64> v14;
+  auto &v12 = al.allocate<st<bf16, 64, 64>>(); // layout: row_l
+  auto &v13 = al.allocate<st<bf16, 64, 64>>(); // layout: row_l
+  auto &v14 = al.allocate<st<bf16, 64, 64>>(); // layout: col_l (Tyr .Col; TK has no col-layout ST, traversed transposed)
   warp::load(v4, v12);
   for (int v15 = 0; v15 < 4; v15++) {
     warp::load(v5, v13);
@@ -540,11 +560,12 @@ def polyKernelSM80 : Kernel :=
       (GPtr.mk ⟨2⟩ "C")).run
 
 /--
-info: #include <kittens.cuh>
+info: #include <type_traits>
+#include <kittens.cuh>
 using namespace kittens;
 
 #if defined(KITTENS_AMPERE)
-__global__ void examplePolyMatmul_SM80(gl<bf16, 1, 1, -1, -1> v0, gl<bf16, 1, 1, -1, -1> v1, gl<bf16, 1, 1, -1, -1> v2) {
+__global__ void examplePolyMatmul_SM80(gl<bf16, -1, -1, -1, -1> v0, gl<bf16, -1, -1, -1, -1> v1, gl<bf16, -1, -1, -1, -1> v2) {
   // Tile: 16x16, TMA: false, WGMMA: false
   rt<bf16, 64, 64, row_l> v3;
   rt<bf16, 64, 64, col_l> v4;
@@ -570,11 +591,12 @@ def polyKernelSM90 : Kernel :=
       (GPtr.mk ⟨2⟩ "C")).run
 
 /--
-info: #include <kittens.cuh>
+info: #include <type_traits>
+#include <kittens.cuh>
 using namespace kittens;
 
 #if defined(KITTENS_HOPPER)
-__global__ void examplePolyMatmul_SM90(gl<bf16, 1, 1, -1, -1> v0, gl<bf16, 1, 1, -1, -1> v1, gl<bf16, 1, 1, -1, -1> v2) {
+__global__ void examplePolyMatmul_SM90(gl<bf16, -1, -1, -1, -1> v0, gl<bf16, -1, -1, -1, -1> v1, gl<bf16, -1, -1, -1, -1> v2) {
   // Tile: 64x64, TMA: true, WGMMA: true
   rt<bf16, 64, 64, row_l> v3;
   rt<bf16, 64, 64, col_l> v4;
@@ -602,12 +624,13 @@ def polyKernelSM100 : Kernel :=
       (GPtr.mk ⟨2⟩ "C")).run
 
 /--
-info: #include <kittens.cuh>
+info: #include <type_traits>
+#include <kittens.cuh>
 using namespace kittens;
 
 #if defined(KITTENS_BLACKWELL)
-__global__ void examplePolyMatmul_SM100(gl<bf16, 1, 1, -1, -1> v0, gl<bf16, 1, 1, -1, -1> v1, gl<bf16, 1, 1, -1, -1> v2) {
-  // Tile: 64x64, TMA: true, WGMMA: true
+__global__ void examplePolyMatmul_SM100(gl<bf16, -1, -1, -1, -1> v0, gl<bf16, -1, -1, -1, -1> v1, gl<bf16, -1, -1, -1, -1> v2) {
+  // Tile: 64x64, TMA: true, WGMMA: false
   rt<bf16, 64, 64, row_l> v3;
   rt<bf16, 64, 64, col_l> v4;
   rt<float, 64, 64, row_l> v5;
@@ -657,7 +680,8 @@ def tmemAllocKernel : Kernel :=
     let _accZ : TT GpuFloat.Float32 64 64 ← zeroTT .Float32 64 64
 
 /--
-info: #include <kittens.cuh>
+info: #include <type_traits>
+#include <kittens.cuh>
 using namespace kittens;
 
 #if defined(KITTENS_BLACKWELL)
@@ -677,7 +701,8 @@ def clusterIdxKernel : Kernel :=
     let _cidx ← clusterIdx 0
 
 /--
-info: #include <kittens.cuh>
+info: #include <type_traits>
+#include <kittens.cuh>
 using namespace kittens;
 
 #if defined(KITTENS_BLACKWELL)
@@ -701,14 +726,17 @@ def tcgen05MmaKernel : Kernel :=
     tcgen05Commit sem 2
 
 /--
-info: #include <kittens.cuh>
+info: #include <type_traits>
+#include <kittens.cuh>
 using namespace kittens;
 
 #if defined(KITTENS_BLACKWELL)
 __global__ void tcgen05_mma(/* empty parameter list */) {
+  extern __shared__ int __shm[];
+  tma_swizzle_allocator al(__shm);
   tt<float, 64, 64> v0;
-  __shared__ st<bf16, 64, 64> v1;
-  __shared__ st<bf16, 64, 64> v2;
+  auto &v1 = al.allocate<st<bf16, 64, 64>>(); // layout: row_l
+  auto &v2 = al.allocate<st<bf16, 64, 64>>(); // layout: col_l (Tyr .Col; TK has no col-layout ST, traversed transposed)
   warpgroup::mm2_ABt(v0, v1, v2);
   warpgroup::mma2_ABt(v0, v1, v2, v0);
   __shared__ semaphore v3;
@@ -729,11 +757,12 @@ def clusterTmaKernel : Kernel :=
     clusterWait sem
 
 /--
-info: #include <kittens.cuh>
+info: #include <type_traits>
+#include <kittens.cuh>
 using namespace kittens;
 
 #if defined(KITTENS_BLACKWELL)
-__global__ void cluster_tma(gl<bf16, 1, 1, -1, -1> v0) {
+__global__ void cluster_tma(gl<bf16, -1, -1, -1, -1> v0) {
   __shared__ semaphore v1;
   cluster::arrive(v1);
   cluster::wait(v1);
@@ -754,7 +783,8 @@ def tmemPoolKernel : Kernel :=
     tmemDeprovision pool
 
 /--
-info: #include <kittens.cuh>
+info: #include <type_traits>
+#include <kittens.cuh>
 using namespace kittens;
 
 #if defined(KITTENS_BLACKWELL)
@@ -832,20 +862,29 @@ def ringBuffer3StageKernel : Kernel :=
     let _rb ← allocRingBuffer .BFloat16 64 64 .Row 3
 
 /--
-info: #include <kittens.cuh>
+info: #include <type_traits>
+#include <kittens.cuh>
 using namespace kittens;
 
 #if defined(KITTENS_HOPPER)
 __global__ void ring_buffer_3(/* empty parameter list */) {
-  __shared__ st<bf16, 64, 64> v0;
+  extern __shared__ int __shm[];
+  tma_swizzle_allocator al(__shm);
+  auto &v0 = al.allocate<st<bf16, 64, 64>>(); // layout: row_l
   __shared__ semaphore v1;
-  __shared__ st<bf16, 64, 64> v2;
+  auto &v2 = al.allocate<st<bf16, 64, 64>>(); // layout: row_l
   __shared__ semaphore v3;
-  __shared__ st<bf16, 64, 64> v4;
+  auto &v4 = al.allocate<st<bf16, 64, 64>>(); // layout: row_l
   __shared__ semaphore v5;
-  init_semaphore(v1, 1);
-  init_semaphore(v3, 0);
-  init_semaphore(v5, 0);
+  if (threadIdx.x == 0) {
+    init_semaphore(v1, 1, 0);
+  }
+  if (threadIdx.x == 0) {
+    init_semaphore(v3, 0, 0);
+  }
+  if (threadIdx.x == 0) {
+    init_semaphore(v5, 0, 0);
+  }
 }
 #endif
 -/
@@ -860,7 +899,8 @@ def warpSpecPipelineKernel : Kernel :=
       (fun _ => sync 1)
 
 /--
-info: #include <kittens.cuh>
+info: #include <type_traits>
+#include <kittens.cuh>
 using namespace kittens;
 
 #if defined(KITTENS_HOPPER)
@@ -910,16 +950,18 @@ def fixedStrideKernel : Kernel :=
       comment "work item body"
 
 /--
-info: #include <kittens.cuh>
+info: #include <type_traits>
+#include <kittens.cuh>
 using namespace kittens;
 
 #if defined(KITTENS_HOPPER)
 __global__ void fixed_stride(uint32_t v0) {
   // Persistent loop (fixed stride)
   int v1 = blockIdx.x;
+  int v2 = gridDim.x;
   int v3 = 1;
-  for (int v2 = v1; v2 < v0; v2 += gridDim.x) {
-  // work item body
+  for (auto v4 = v1; v4 < v0; v4 += v2) {
+    // work item body
   }
 }
 #endif
@@ -937,7 +979,8 @@ def swizzleCoordKernel : Kernel :=
     let (_row, _col) ← workIdToSwizzledCoord wid ncols 8
 
 /--
-info: #include <kittens.cuh>
+info: #include <type_traits>
+#include <kittens.cuh>
 using namespace kittens;
 
 #if defined(KITTENS_HOPPER)
@@ -980,7 +1023,8 @@ def twoPhaseKernel : Kernel :=
   tmpl.build
 
 /--
-info: #include <kittens.cuh>
+info: #include <type_traits>
+#include <kittens.cuh>
 using namespace kittens;
 
 #if defined(KITTENS_HOPPER)
@@ -1006,13 +1050,16 @@ def fusedGemmTestKernel : Kernel :=
       convert out accum
 
 /--
-info: #include <kittens.cuh>
+info: #include <type_traits>
+#include <kittens.cuh>
 using namespace kittens;
 
 #if defined(KITTENS_HOPPER)
 __global__ void fused_gemm(/* empty parameter list */) {
-  __shared__ st<bf16, 64, 64> v0;
-  __shared__ st<bf16, 64, 64> v1;
+  extern __shared__ int __shm[];
+  tma_swizzle_allocator al(__shm);
+  auto &v0 = al.allocate<st<bf16, 64, 64>>(); // layout: row_l
+  auto &v1 = al.allocate<st<bf16, 64, 64>>(); // layout: col_l (Tyr .Col; TK has no col-layout ST, traversed transposed)
   // Fused GEMM: 64x64x64, 4 K-blocks
   rt<float, 64, 64, row_l> v2;
   warp::zero(v2);

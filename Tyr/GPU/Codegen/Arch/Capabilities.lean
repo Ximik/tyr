@@ -109,7 +109,7 @@ instance : ArchConfig .Blackwell where
   typicalSMs := 160         -- B200 (estimated)
 
 /-- Get architecture config for a runtime ArchLevel -/
-def ArchConfig.get (arch : ArchLevel) : ArchConfig arch :=
+@[reducible] def ArchConfig.get (arch : ArchLevel) : ArchConfig arch :=
   match arch with
   | .Ampere => inferInstance
   | .Hopper => inferInstance

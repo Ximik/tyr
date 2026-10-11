@@ -99,7 +99,7 @@ target libtyr pkg : Dynlib := do
   let codegenJob ← if skipCodegen then pure (Job.pure ()) else do
     let irRoot := pkg.buildDir / "ir" / "Tyr" / "GPU"
     let kernelIr := kernelModules.map fun m =>
-      (m.stripPrefix "Tyr.GPU.").replace "." "/" ++ ".c.o.export"
+      (m.dropPrefix "Tyr.GPU.").toString.replace "." "/" ++ ".c.o.export"
     let isCodegenInput (p : FilePath) : Bool :=
       let rel := p.toString.drop (irRoot.toString.length + 1) |>.toString
       rel.startsWith "Codegen/" && rel.endsWith ".c.o.export" ||
