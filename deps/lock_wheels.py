@@ -13,8 +13,6 @@ from pathlib import Path
 
 TORCH_VERSION = "2.10.0"
 TORCH_CUDA = "cu130"
-# Arrow libraries are linked by exact file name (libarrow.so.<major>00): when the
-# major version changes, update ARROW_SOVERSION in cc/Makefile too.
 PYARROW_VERSION = "25.0.1"
 # Python tag of the torch and pyarrow wheels. Their Python packages only load in
 # this CPython version, so the venvs that import external/wheels

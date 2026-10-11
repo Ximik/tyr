@@ -16,7 +16,7 @@ day one:
 
 - **Lean libraries** — `Tyr` (`@[default_target]`, precompiled; everything under
   `Tyr.*`), `TyrCodegen` (pure-Lean GPU codegen modules, no FFI), `Tests`,
-  `TestsExperimental`, and `Examples` (`lakefile.lean:560-593`).
+  `TestsExperimental`, and `Examples`.
 - **C++ bridge** — `target libtyr` in `lakefile.lean` wraps the Makefile
   build: it runs the GPU kernel codegen executable and then
   `make -C cc dylib`, producing the shared library `cc/build/libTyrC.so`
@@ -126,7 +126,7 @@ Runtime variables a user actually sets:
 ## Running tests
 
 `test_runner` (`Tests/RunTests.lean`) is the main LeanTest suite and is marked
-`@[test_driver]` (`lakefile.lean:598`), so `lake test` also works:
+`@[test_driver]` in `lakefile.lean`, so `lake test` also works:
 
 ```bash
 lake test                                   # build and run the suite
@@ -144,7 +144,7 @@ lake build test_runner_experimental
 .lake/build/bin/test_runner_experimental
 ```
 
-Focused suites exist as separate executables (`lakefile.lean:761-825`):
+Focused suites exist as separate executables:
 `TestDataLoader`, `TestDiffusion`, `TestDiffEq`, `TestDiffEqAdjoint`,
 `TestGPUDSL`, `TestGPUKernels`, `TestGPUE2E`, `TestGPUGB10E2E`,
 `TestGPUTileIR`, plus `RunRiemannianNanoGPTTests`. Build and run them the same

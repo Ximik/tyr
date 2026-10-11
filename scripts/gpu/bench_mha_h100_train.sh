@@ -37,7 +37,7 @@ cpu_count() {
 }
 
 invalidate_generated_gpu_objects() {
-  rm -f "$PWD"/cc/build/generated/*.o "$PWD"/cc/build/libTyrC.a "$PWD"/cc/build/libTyrC.so
+  rm -f "$PWD"/cc/build/generated/*.o "$PWD"/cc/build/libTyrC.so
 }
 
 detect_gpu_target() {

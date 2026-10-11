@@ -29,7 +29,7 @@ The pipeline has four stages:
    the companion constants, lowers each `Kernel` to guarded ThunderKittens C++
    via `generateKernel` (`Tyr/GPU/Codegen/EmitNew.lean:1654`), and writes one
    `.cu` file per Lean module (default `cc/src/generated`). The C++ side is
-   then compiled by `make -C cc` as part of the `extern_lib libtyr` build.
+   then compiled by `make -C cc` as part of the `target libtyr` build.
 
 ### Shared enums (`Tyr/GPU/Types.lean`)
 
@@ -234,9 +234,9 @@ not rewritten; stale `.cu` files are removed unless `--no-clean`).
 lake exe GenerateGpuKernels [--out-dir cc/src/generated] [--no-clean] <Module>…
 ```
 
-The normal build does this for you: the `extern_lib libtyr` target
-(`lakefile.lean:501-531`) builds the `GenerateGpuKernels` executable
-(`lakefile.lean:622`), runs it over the configured modules, then invokes
+The normal build does this for you: the `target libtyr` in `lakefile.lean`
+builds the `GenerateGpuKernels` executable, runs it over the configured
+modules, then invokes
 `make -C cc`. Two settings control it (see
 [Getting started](../getting-started.md) for the full table):
 
@@ -283,7 +283,7 @@ that shells out to `cuda-tile-opt`, `cuda-tile-translate`, and `tileiras`
 environment variables). Declarations whose result type is
 `Tyr.GPU.Codegen.TileIR.Module` can be marked `@[tileir_kernel]`
 (`TileIR/Attribute.lean:37`) and compiled with
-`lake exe GenerateTileIRKernels` (`lakefile.lean:628`). This path does not
+`lake exe GenerateTileIRKernels`. This path does not
 share the `KStmt` IR or the `KernelM` surface above.
 
 ## Key APIs

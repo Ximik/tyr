@@ -26,8 +26,8 @@ AudioQueue, a sample FIFO, lifecycle mutexes) lives in C++:
 | `Tyr/Audio/AppleInput.lean` | `cc/src/apple_audio_input.mm` | `start` raises `IO.userError`; `read`/`readBuffer` return empty, `stop` is a no-op |
 | `Tyr/Audio/AppleOutput.lean` | `cc/src/apple_audio_output.mm` | silent no-ops |
 
-`AudioToolbox` is linked by the lakefile (`lakefile.lean:196`), so no extra
-build flags are needed on macOS.
+`AudioToolbox` is linked into `libTyrC` by `cc/Makefile`, so no extra build
+flags are needed on macOS.
 
 Capture is a **global singleton**: `AppleInput.start` opens an AudioQueue whose
 callback pushes interleaved Float32 frames onto a `std::deque` FIFO, and

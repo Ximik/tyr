@@ -1,8 +1,8 @@
-# Detect Lean
-# Lake tracks this file hash for extern_lib invalidation.
+# Objects depend on this Makefile, so editing it rebuilds them.
 TYR_MAKEFILE := $(lastword $(MAKEFILE_LIST))
 .DEFAULT_GOAL := all
 
+# Detect Lean
 ifndef LEAN_HOME
 LEAN ?= lean
 LEAN_HOME := $(shell $(LEAN) --print-prefix)
@@ -32,16 +32,14 @@ SOXR_OBJS := $(addprefix $(SOXR_OBJ_DIR)/,$(addsuffix .o,$(SOXR_SRCS)))
 SOXR_CFLAGS := -std=gnu89 -O3 -fPIC -I$(SOXR_DIR)/src -I$(SOXR_BUILD_DIR) -DSOXR_LIB
 
 # ARROW/PARQUET FLAGS
-# Fetched by deps/fetch.sh from the pinned pyarrow wheel. Libraries are
-# linked by exact file name; bump ARROW_SOVERSION together with the pyarrow pin
-# in deps/lock_wheels.py.
+# The Arrow and Parquet libraries of the pyarrow wheel fetched by deps/fetch.sh,
+# linked by file name (they carry the version, e.g. libarrow.so.2500).
 UNAME_S := $(shell uname -s)
 ARROW_DIR := ../external/wheels/pyarrow
-ARROW_SOVERSION := 2500
 ifeq ($(UNAME_S),Darwin)
-ARROW_LIBS := $(ARROW_DIR)/libarrow.$(ARROW_SOVERSION).dylib $(ARROW_DIR)/libparquet.$(ARROW_SOVERSION).dylib
+ARROW_LIBS := $(wildcard $(ARROW_DIR)/libarrow.*.dylib $(ARROW_DIR)/libparquet.*.dylib)
 else
-ARROW_LIBS := $(ARROW_DIR)/libarrow.so.$(ARROW_SOVERSION) $(ARROW_DIR)/libparquet.so.$(ARROW_SOVERSION)
+ARROW_LIBS := $(wildcard $(ARROW_DIR)/libarrow.so.* $(ARROW_DIR)/libparquet.so.*)
 endif
 ARROW_INC_FLAGS := -I$(ARROW_DIR)/include
 ARROW_LINK_FLAGS := $(ARROW_LIBS)
@@ -243,13 +241,11 @@ endif
 ifeq ($(filter $(SRC_DIR)/tk_vendor_mha_h100.cu,$(CU_SRCS)),)
 SRCS += tk_vendor_stubs.cpp
 endif
-# Always include the kernel-launcher stubs in libTyrC.a. The stubs declare
-# every `lean_launch_Tyr_GPU_Kernels_...` symbol with `__attribute__((weak))`,
-# so when the corresponding generated .cu compiles to a strong definition,
-# that wins; otherwise the weak stub provides the symbol so any link
-# referencing it (e.g. `tyr_ops.cpp`) succeeds. This breaks the
-# chicken-and-egg between `GenerateGpuKernels` (needs libTyrC.a to link, but
-# is also what produces the kernels' .cu files) without any conditional.
+# Always compile the kernel-launcher stubs. They define every
+# `lean_launch_Tyr_GPU_Kernels_...` symbol with `__attribute__((weak))`: a
+# generated .cu linked into the same library defines it strongly, which wins;
+# otherwise the stub keeps links that reference it working (CPU builds, and
+# `GenerateGpuKernels`, which links libTyrC before the kernels are generated).
 SRCS += generated/tyr_gpu_kernel_stubs.cpp
 REQUIRES_TK := $(if $(strip $(CU_SRCS)),1,0)
 # Without NVCC, src/tyr_laguna_moe.cu is not compiled (CU_SRCS is cleared
@@ -263,7 +259,6 @@ LAGUNA_MOE_STUB_OBJ :=
 endif
 
 LIB_NAME := TyrC
-LIB := lib${LIB_NAME}.a
 ifeq ($(UNAME_S),Darwin)
 DYLIB := lib${LIB_NAME}.dylib
 SHARED_FLAG := -dynamiclib
@@ -273,16 +268,9 @@ SHARED_FLAG := -shared
 endif
 
 CPP_OBJ_FILES := $(addprefix $(OUT_DIR)/,$(SRCS:.cpp=.o))
-# Pull the stubs object out of CPP_OBJ_FILES so we can put it LAST in the
-# archive. Static-archive symbol resolution scans members in order; the
-# stubs declare weak versions of every kernel launcher, so if they appear
-# before the strong definitions emitted from generated CUDA, the stubs
-# would be picked first and the real kernels never linked.
-GPU_STUB_OBJ := $(OUT_DIR)/generated/tyr_gpu_kernel_stubs.o
-CPP_OBJ_FILES_NO_STUBS := $(filter-out $(GPU_STUB_OBJ),$(CPP_OBJ_FILES))
 MM_OBJ_FILES := $(addprefix $(OUT_DIR)/,$(MM_SRCS:.mm=.o))
 CU_OBJ_FILES := $(patsubst $(SRC_DIR)/%.cu,$(OUT_DIR)/%.o,$(CU_SRCS))
-OBJ_FILES := $(CPP_OBJ_FILES_NO_STUBS) $(MM_OBJ_FILES) $(CU_OBJ_FILES) $(GPU_STUB_OBJ) $(LAGUNA_MOE_STUB_OBJ)
+OBJ_FILES := $(CPP_OBJ_FILES) $(MM_OBJ_FILES) $(CU_OBJ_FILES) $(LAGUNA_MOE_STUB_OBJ)
 DEP_FILES := $(OBJ_FILES:.o=.d) $(SOXR_OBJS:.o=.d) $(BENCH_FLASH_ATTN).d
 
 # Lean runtime library
@@ -361,16 +349,12 @@ check-deps:
 		echo "Missing LibTorch at $(TORCHDIR). Run: deps/fetch.sh"; \
 		exit 1; \
 	fi
-	@for lib in $(ARROW_LIBS); do \
-		if [ ! -f "$$lib" ]; then \
-			echo "Missing Arrow library $$lib. Run: deps/fetch.sh"; \
-			exit 1; \
-		fi; \
-	done
+	@if [ "$(words $(ARROW_LIBS))" != 2 ]; then \
+		echo "Missing the Arrow and Parquet libraries in $(ARROW_DIR). Run: deps/fetch.sh"; \
+		exit 1; \
+	fi
 
-all: lib dylib
-
-lib: check-deps soxr $(OUT_DIR)/$(LIB)
+all: dylib
 
 dylib: check-deps soxr $(OUT_DIR)/$(DYLIB)
 
@@ -416,10 +400,6 @@ $(SOXR_OBJ_DIR)/%.o: $(SOXR_DIR)/src/%.c $(SOXR_CONFIG) $(BUILD_FLAGS) $(TYR_MAK
 
 $(OUT_DIR):
 	$(MKPATH) $@
-
-$(OUT_DIR)/$(LIB) : $(OBJ_FILES) $(BUILD_FLAGS) $(TYR_MAKEFILE) | check-deps $(OUT_DIR)
-	$(RMPATH) $@
-	${AR} rcs $@ $(OBJ_FILES)
 
 $(OUT_DIR)/$(DYLIB) : $(OBJ_FILES) $(SOXR_LIB) $(DYLIB_EXPORTS) $(BUILD_FLAGS) $(TYR_MAKEFILE) | check-deps $(OUT_DIR)
 	$(CXX) $(SHARED_FLAG) -o $@ $(OBJ_FILES) $(DYLIB_LINK_FLAGS) $(DYLIB_EXPORT_FLAGS)
