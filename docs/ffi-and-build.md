@@ -210,9 +210,12 @@ libtorch's copy: `-l:libgcc_s.so.1` ahead of the bundled linker's `-lunwind`
 keeps libgcc's exception unwinder (LLVM's crashes on libtorch exceptions), and
 `-Wl,--exclude-libs,libuv.a` keeps Lean's libuv from replacing the one bundled
 in `libtorch_cpu` (its TCPStore). The five
-`lean_lib`s are `TyrCodegen` (pure-Lean GPU codegen, `precompileModules := false`
-to avoid the `.so` cascade), `Tyr` (default target, precompiled), `Tests`,
-`TestsExperimental` and `Examples`, plus the `lean_exe` targets.
+`lean_lib`s are `Tyr` (default target, precompiled, links `libTyrC`),
+`TyrCodegen` (the GPU code generator: `Tyr.GPU.Codegen.*` and the pure modules
+it needs, including `Tyr.Basic.Types`; it does not link `libTyrC`, so neither do
+the generator executables), `Tests`, `TestsExperimental` and `Examples`, plus
+the `lean_exe` targets. `TyrCodegen` is declared after `Tyr` because Lake gives
+a module to the last declared library whose roots match it.
 
 ### Running executables
 

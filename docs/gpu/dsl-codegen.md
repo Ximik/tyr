@@ -25,7 +25,7 @@ The pipeline has four stages:
    a `Kernel`-valued constant `<decl>.kernel` and an opaque FFI launcher
    `<decl>.launch`.
 4. **Emission and build** — `lake exe GenerateGpuKernels <Module>…`
-   (`Tyr/GPU/Codegen/GenerateMain.lean`) imports kernel modules, `evalExpr`s
+   (`Tyr/GPU/GenerateGpuKernels.lean`) imports kernel modules, `evalExpr`s
    the companion constants, lowers each `Kernel` to guarded ThunderKittens C++
    via `generateKernel` (`Tyr/GPU/Codegen/EmitNew.lean:1654`), and writes one
    `.cu` file per Lean module (default `cc/src/generated`). The C++ side is
@@ -316,7 +316,7 @@ Codegen/build surface:
 | `#generate_gpu_kernels` | `Codegen/Attribute.lean:775` | List companion constants in the environment |
 | `generateKernel` | `Codegen/EmitNew.lean:1654` | `Kernel → String` ThunderKittens CUDA |
 | `writeKernelCudaUnitsByModuleFrom` | `Codegen/FFI.lean:282` | Per-module `.cu` emission with change detection |
-| `lake exe GenerateGpuKernels` | `Codegen/GenerateMain.lean` | CLI driver used by the Lake build |
+| `lake exe GenerateGpuKernels` | `Tyr/GPU/GenerateGpuKernels.lean` | CLI driver used by the Lake build |
 | `-Kkernels`, `TYR_SKIP_GPU_CODEGEN` | `lakefile.lean` (`gpuKernels`, `target libtyr`) | Build-time module selection / skip switch |
 
 ## Usage example

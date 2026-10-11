@@ -108,10 +108,10 @@ export TYR_GPU_FAMILY="${TYR_GPU_FAMILY:-${gpu_family}}"
 
 echo "[1/6] Configure Lake, build Lean kernel + generator (${label})"
 lake -R -Kcuda="$CUDA_HOME" -Kgpu="$TYR_GPU_TARGET" -Kkernels="$kernel_module" \
-  --quiet build +Tyr.GPU.Codegen.GenerateMain "+${kernel_module}"
+  --quiet build +Tyr.GPU.GenerateGpuKernels "+${kernel_module}"
 
 echo "[2/6] Generate CUDA translation unit (${label})"
-lake env "$LEAN_BIN" --run Tyr/GPU/Codegen/GenerateMain.lean "$kernel_module" --out-dir cc/src/generated
+lake env "$LEAN_BIN" --run Tyr/GPU/GenerateGpuKernels.lean "$kernel_module" --out-dir cc/src/generated
 
 runner_source="Examples/GPU/${runner_exe}.lean"
 if [[ -f "Examples/GPU/${runner_exe}Exe.lean" ]]; then

@@ -99,7 +99,7 @@ select_modules_from_filter() {
 
 test_filter="$(extract_test_filter "$@")"
 mapfile -t modules < <(select_modules_from_filter "${test_filter}")
-generator_targets=(+Tyr.GPU.Codegen.GenerateMain)
+generator_targets=(+Tyr.GPU.GenerateGpuKernels)
 for module in "${modules[@]}"; do
   generator_targets+=("+${module}")
 done
@@ -109,7 +109,7 @@ lake -R -Kcuda="$CUDA_HOME" -Kgpu="$TYR_GPU_TARGET" -Kkernels="${modules[*]}" \
   --quiet build "${generator_targets[@]}"
 
 echo "[2/5] Generate CUDA translation units"
-lake env "$LEAN_BIN" --run Tyr/GPU/Codegen/GenerateMain.lean "${modules[@]}" --out-dir cc/src/generated
+lake env "$LEAN_BIN" --run Tyr/GPU/GenerateGpuKernels.lean "${modules[@]}" --out-dir cc/src/generated
 
 echo "[3/5] Build C++/CUDA runtime library (GPU=${TYR_GPU_TARGET}, family=${TYR_GPU_FAMILY})"
 invalidate_generated_gpu_objects
