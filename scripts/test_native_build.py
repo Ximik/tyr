@@ -50,7 +50,7 @@ class NativeBuildTests(unittest.TestCase):
             "LEAN_HOME": str(self.root / "lean"), "CUDA_HOME": "",
             "OBJ_FILES": "build/probe.o", "SRCS": "probe.cpp", "CU_SRCS": "",
             "MM_SRCS": "", "SOXR_SRCS": "", "GPU": "H100",
-            "DEP_FILES": "build/probe.d", "PYTHON": "/missing/tyr-test-python",
+            "DEP_FILES": "build/probe.d",
         }
         defaults.update(variables)
         result = subprocess.run(["make", "--no-print-directory", f"-j{jobs}", target] +

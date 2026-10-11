@@ -32,9 +32,6 @@ if [[ "${TYR_QUALIFY_MODELS:-false}" == true ]]; then
     --download --paths-output output/qualification/fixture-paths.json
 fi
 export TYR_QUALIFICATION_PYTHON="$python_bin"
-# The Hopper vendor kernel includes Python.h through Torch's pybind header.
-# Make must discover headers from this prepared runtime on a fresh checkout.
-export PYTHON="$python_bin"
 export GPU=${GPU:-GB10}
 export TYR_GPU_TARGET="$GPU"
 python3 scripts/qualification/gpu_plan.py "$GPU" > output/qualification/gpu-plan.json
