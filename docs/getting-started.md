@@ -98,9 +98,8 @@ keeps them until the next `lake -R`, which replaces all of them, e.g.
 | `-Kgpu=<name>` | with `-Kcuda`, required: GPU to build kernels for, `H100`, `A100`, `B200`, `B300` or `GB10` |
 | `-Kkernels="<module> ..."` | kernel module(s) to generate CUDA for, space-separated (default `Tyr.GPU.Kernels.MhaH100`) |
 
-Environment variables for a single build: `TYR_MAKE_JOBS` (parallel jobs for
-`make -C cc dylib`, default CPU count) and `TYR_SKIP_GPU_CODEGEN` (`1` skips
-the codegen step of a CUDA build and reuses `cc/src/generated`).
+`TYR_MAKE_JOBS` sets the parallel jobs for `make -C cc dylib` (default: CPU
+count).
 
 ## Runtime environment
 

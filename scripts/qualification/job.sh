@@ -44,9 +44,8 @@ export LD_LIBRARY_PATH="$cuda_libraries"
 
 python3 scripts/qualification/run.py --kind gpu --python "$python_bin" \
   --check-runtime --report output/qualification/runtime.json
-# Configure Lake for this CUDA build (kept for later `lake` calls), and keep
-# the known codegen bootstrap explicit on a fresh checkout.
-TYR_SKIP_GPU_CODEGEN=1 lake -R -Kcuda="$CUDA_HOME" -Kgpu="$GPU" -Kkernels="${modules[*]}" \
+# Configure Lake for this CUDA build (kept for later `lake` calls).
+lake -R -Kcuda="$CUDA_HOME" -Kgpu="$GPU" -Kkernels="${modules[*]}" \
   build "${modules[@]}"
 targets=("$gpu_runner" RunMhaH100Decode LagunaModelTest)
 if [[ "${TYR_QUALIFY_MODELS:-false}" == true ]]; then

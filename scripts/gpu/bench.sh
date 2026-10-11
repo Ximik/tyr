@@ -147,12 +147,12 @@ LEAN_BIN="${LEAN_BIN:-$(lake env lean --print-prefix)/bin/lean}"
 if [[ "${BENCH_SKIP_BUILD:-0}" == "1" ]]; then build_skipped=true; else build_skipped=false; fi
 if [[ "${BENCH_SKIP_BUILD:-0}" != "1" ]]; then
   : "${CUDA_HOME:?set CUDA_HOME to the CUDA toolkit}"
-  TYR_SKIP_GPU_CODEGEN=1 lake -R -Kcuda="$CUDA_HOME" -Kgpu="$TYR_GPU_TARGET" -Kkernels="$module" \
+  lake -R -Kcuda="$CUDA_HOME" -Kgpu="$TYR_GPU_TARGET" -Kkernels="$module" \
     --quiet build +Tyr.GPU.GenerateGpuKernels "$module:dynlib"
   lake env "$LEAN_BIN" --run Tyr/GPU/GenerateGpuKernels.lean "$module" --out-dir cc/src/generated
   rm -f cc/build/generated/*.o cc/build/libTyrC.so
   make -C cc -j"${TYR_GPU_BUILD_JOBS:-$(getconf _NPROCESSORS_ONLN)}" CUDA_HOME="$CUDA_HOME" GPU="$TYR_GPU_TARGET"
-  TYR_SKIP_GPU_CODEGEN=1 lake build "$exe"
+  lake build "$exe"
 else
   test -x "./.lake/build/bin/$exe"
   test -f "cc/src/generated/${module//./_}.cu"
