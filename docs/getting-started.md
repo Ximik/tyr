@@ -15,7 +15,7 @@ Everything is driven by `lakefile.lean` (Lake DSL). The pieces that matter on
 day one:
 
 - **Lean libraries** — `Tyr` (`@[default_target]`, precompiled; everything under
-  `Tyr.*`), `TyrCodegen` (pure-Lean GPU codegen modules, no FFI), `Tests`,
+  `Tyr.*`), `TyrCodegen` (the GPU code generator; does not link `libTyrC`), `Tests`,
   `TestsExperimental`, and `Examples`.
 - **C++ bridge** — `target libtyr` in `lakefile.lean` wraps the Makefile
   build: it runs the GPU kernel codegen executable and then

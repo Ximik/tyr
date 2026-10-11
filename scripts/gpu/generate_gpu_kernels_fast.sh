@@ -200,7 +200,7 @@ if [[ "$skip_build" -eq 0 ]]; then
       Tyr.GPU.Codegen.EmitNew
       Tyr.GPU.Codegen.Attribute
       Tyr.GPU.Codegen.FFI
-      Tyr.GPU.Codegen.GenerateMain
+      Tyr.GPU.GenerateGpuKernels
       Tyr.GPU.Codegen.Macros
       Tyr.GPU.Kernels.Prelude
     )

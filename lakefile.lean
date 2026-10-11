@@ -53,8 +53,6 @@ package tyr where
   buildDir := ".lake/build"
   moreServerArgs := #["-Dpp.unicode.fun=true"]
   moreLinkArgs := packageLinkArgs
-  -- Linked into every executable and precompiled module library.
-  moreLinkLibs := #[`@/libtyr]
 
 require LeanTest from git "https://github.com/cpehle/lean_test.git" @ "b42cd3d78716e5a2de5b640ac82d7fe3f05f2a4c"
 require LeanBenchmark from git "https://github.com/cpehle/lean-benchmark.git" @
@@ -150,33 +148,37 @@ target libtyr pkg : Dynlib := do
 
 /-! ## Lean Library -/
 
-/-- Codegen-only sub-library.
+/-- Main Lean library: every `Tyr.*` module not claimed by `TyrCodegen`. -/
+@[default_target]
+lean_lib Tyr where
+  roots := #[`Tyr]
+  precompileModules := true
+  -- Linked into every executable that imports a Tyr module and into the
+  -- precompiled module libraries; not into the codegen executables.
+  moreLinkLibs := #[`@/libtyr]
 
-    Owns `Tyr.GPU.Codegen.*` plus the small set of `Tyr.GPU.*` modules they
-    depend on (Types, Capabilities, Tile) and `Tyr.Basic`. These modules are
-    pure Lean — no FFI, no libtorch — so we explicitly disable
-    `precompileModules`. That way `lean_exe GenerateGpuKernels` (whose root
-    is `Tyr.GPU.Codegen.GenerateMain`) doesn't trigger the per-module `.so`
-    cascade across all of `Tyr.*` whenever a kernel `.lean` file is touched. -/
+/-- Codegen-only sub-library. Declared after `Tyr`: Lake gives a module to the
+    last declared library whose roots match it, and `Tyr` matches every `Tyr.*`.
+
+    Owns `Tyr.GPU.Codegen.*` plus the small set of modules they depend on
+    (`Tyr.GPU.Types`, `Capabilities`, `Tile`, `Tyr.Basic.Types`). These are
+    pure Lean with no native functions, so unlike `Tyr` the library does not
+    link `libTyrC`, and neither do the codegen executables. Their `main`
+    modules (`Tyr.GPU.GenerateGpuKernels`, `Tyr.GPU.GenerateTileIRKernels`)
+    stay outside this library: precompiled `Tyr` modules load it as one
+    shared library, which must not contain `main`s. -/
 lean_lib TyrCodegen where
   roots := #[
     `Tyr.GPU.Codegen,
     `Tyr.GPU.Types,
     `Tyr.GPU.Capabilities,
     `Tyr.GPU.Tile,
-    `Tyr.Basic
+    `Tyr.Basic.Types
   ]
+  -- `Tyr.GPU.Codegen` has no file of its own, only submodules.
+  globs := #[.submodules `Tyr.GPU.Codegen, .one `Tyr.GPU.Types,
+    .one `Tyr.GPU.Capabilities, .one `Tyr.GPU.Tile, .one `Tyr.Basic.Types]
   precompileModules := false
-
-/-- Main Lean library containing all Tyr modules.
-
-    `roots := #[\`Tyr]` claims everything under `Tyr.*` that isn't already
-    owned by `TyrCodegen` (a more specific match for `Tyr.GPU.Codegen.*`
-    etc. wins per Lake's lib resolution). -/
-@[default_target]
-lean_lib Tyr where
-  roots := #[`Tyr]
-  precompileModules := true
 
 /-- Test library containing all tests -/
 lean_lib Tests where
@@ -206,17 +208,14 @@ lean_exe mctx_bench where
   root := `benchmarks.Mctx
 
 /-- Generate CUDA translation units from registered @[gpu_kernel] declarations.
-
-    Its root `Tyr.GPU.Codegen.GenerateMain` lives in the codegen-only sub-lib
-    `TyrCodegen` (above) so the per-module `.so` cascade across `Tyr.*` is
-    skipped. -/
+    Imports only `TyrCodegen`, so it does not link `libTyrC`. -/
 lean_exe GenerateGpuKernels where
-  root := `Tyr.GPU.Codegen.GenerateMain
+  root := `Tyr.GPU.GenerateGpuKernels
   supportInterpreter := true
 
 /-- Compile registered @[tileir_kernel] declarations through NVIDIA TileIR tooling. -/
 lean_exe GenerateTileIRKernels where
-  root := `Tyr.GPU.Codegen.TileIR.GenerateMain
+  root := `Tyr.GPU.GenerateTileIRKernels
   supportInterpreter := true
 
 /-- Experimental test runner for unstable/in-progress modules. -/

@@ -83,10 +83,10 @@ export TYR_GPU_FAMILY="${TYR_GPU_FAMILY:-${gpu_family}}"
 
 echo "[1/5] Configure Lake, build Lean targets"
 lake -R -Kcuda="$CUDA_HOME" -Kgpu="$TYR_GPU_TARGET" -Kkernels=Tyr.GPU.Kernels.MhaH100 \
-  --quiet build +Tyr.GPU.Codegen.GenerateMain +Tyr.GPU.Kernels.MhaH100
+  --quiet build +Tyr.GPU.GenerateGpuKernels +Tyr.GPU.Kernels.MhaH100
 
 echo "[2/5] Generate CUDA translation unit"
-lake env "$LEAN_BIN" --run Tyr/GPU/Codegen/GenerateMain.lean Tyr.GPU.Kernels.MhaH100 --out-dir cc/src/generated
+lake env "$LEAN_BIN" --run Tyr/GPU/GenerateGpuKernels.lean Tyr.GPU.Kernels.MhaH100 --out-dir cc/src/generated
 
 echo "[3/5] Build C++/CUDA runtime library (GPU=${TYR_GPU_TARGET}, family=${TYR_GPU_FAMILY})"
 invalidate_generated_gpu_objects
