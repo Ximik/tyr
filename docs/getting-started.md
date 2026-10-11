@@ -176,11 +176,10 @@ RANDOMIZED_MHA_TRIALS=10 ./scripts/gpu/test_parity_suite.sh   # add N randomized
 Per-kernel scripts (`test_copy_e2e.sh`, `test_rotary_e2e.sh`,
 `test_layernorm_e2e.sh`, `test_flashattn_e2e.sh`, `test_mha_h100_e2e.sh`,
 `test_mha_h100_768_e2e.sh`, `test_b200_bf16_gemm_e2e.sh`, ...) all delegate to
-`scripts/gpu/run_e2e_kernel.sh <KernelModule> <RunnerExe> <Label>`, which runs a
-six-step flow: configure Lake (`-Kcuda=$CUDA_HOME -Kgpu -Kkernels`) and build
-the codegen executable and kernel module, emit CUDA into `cc/src/generated`,
-rebuild `cc/build/libTyrC.so` with `make -C cc GPU=$TYR_GPU_TARGET`, build the
-runner, regenerate fixtures, and run the parity check. Useful knobs:
+`scripts/gpu/run_e2e_kernel.sh <KernelModule> <RunnerExe> <Label>`, which
+configures Lake (`-Kcuda=$CUDA_HOME -Kgpu -Kkernels=<KernelModule>`) and builds
+`libtyr` (generating the kernel's CUDA), builds the runner, regenerates
+fixtures, and runs the parity check. Useful knobs:
 
 - `CUDA_HOME` — the CUDA toolkit (required).
 - `TYR_GPU_TARGET` / `TYR_GPU_FAMILY` — override the `nvidia-smi`-based

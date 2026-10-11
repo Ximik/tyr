@@ -135,24 +135,14 @@ iters="${BENCH_ITERS:-$default_iters}"
 repeats="${BENCH_REPEATS:-7}"
 out="${BENCH_JSONL_OUT:-/tmp/tyr_${case_id}_bench.jsonl}"
 run_id="${case_id}_bench_$(date -u +%Y%m%dT%H%M%SZ)_$$"
-export TYR_GPU_CODEGEN_MODULE="$module"
 export TYR_GPU_TARGET="${TYR_GPU_TARGET:-GB10}"
 export TYR_GPU_FAMILY="${TYR_GPU_FAMILY:-$family}"
 export TORCHINDUCTOR_CACHE_DIR="${TORCHINDUCTOR_CACHE_DIR:-/tmp/tyr_torchinductor_cache}"
-# Build the selected registration before generation, then replace the native
-# archive deliberately. The normal extern-lib dependency currently has a cycle
-# through the kernel registration dynlib and can otherwise emit CUDA from the
-# previous source revision; keep this explicit sequence until that graph is cut.
-LEAN_BIN="${LEAN_BIN:-$(lake env lean --print-prefix)/bin/lean}"
 if [[ "${BENCH_SKIP_BUILD:-0}" == "1" ]]; then build_skipped=true; else build_skipped=false; fi
 if [[ "${BENCH_SKIP_BUILD:-0}" != "1" ]]; then
   : "${CUDA_HOME:?set CUDA_HOME to the CUDA toolkit}"
-  lake -R -Kcuda="$CUDA_HOME" -Kgpu="$TYR_GPU_TARGET" -Kkernels="$module" \
-    --quiet build +Tyr.GPU.GenerateGpuKernels "$module:dynlib"
-  lake env "$LEAN_BIN" --run Tyr/GPU/GenerateGpuKernels.lean "$module" --out-dir cc/src/generated
-  rm -f cc/build/generated/*.o cc/build/libTyrC.so
-  make -C cc -j"${TYR_GPU_BUILD_JOBS:-$(getconf _NPROCESSORS_ONLN)}" CUDA_HOME="$CUDA_HOME" GPU="$TYR_GPU_TARGET"
-  lake build "$exe"
+  # Generates the kernel's CUDA, builds libTyrC and the benchmark executable.
+  lake -R -Kcuda="$CUDA_HOME" -Kgpu="$TYR_GPU_TARGET" -Kkernels="$module" --quiet build "$exe"
 else
   test -x "./.lake/build/bin/$exe"
   test -f "cc/src/generated/${module//./_}.cu"
