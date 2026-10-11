@@ -25,13 +25,12 @@ class NativeBuildTests(unittest.TestCase):
         for directory in ("cc/src", "cc/include/nested", "cc/tools",
                           "external/git/soxr", "external/wheels/torch/lib", "external/wheels/pyarrow",
                           "external/wheels/torch/include/torch/csrc/api/include/torch",
-                          "Tyr/GPU/Kernels", ".lake/build/ir/Tyr/GPU/Kernels", "lean/include"):
+                          "lean/include"):
             (self.root / directory).mkdir(parents=True, exist_ok=True)
         (self.cc / "map").mkdir()
         for name in ("Makefile", "map/libTyrC.map", "map/libTyrC.exports"):
             shutil.copy(REPO / "cc" / name, self.cc / name)
-        for script in ("generate_gpu_kernel_stubs.py", "check_libstdcxx.sh"):
-            shutil.copy(REPO / "cc/tools" / script, self.cc / "tools" / script)
+        shutil.copy(REPO / "cc/tools/check_libstdcxx.sh", self.cc / "tools/check_libstdcxx.sh")
         (self.root / "external/git/soxr/CMakeLists.txt").touch()
         (self.root / "external/wheels/torch/include/torch/csrc/api/include/torch/torch.h").touch()
         arrow_libs = (("libarrow.2500.dylib", "libparquet.2500.dylib") if sys.platform == "darwin"
@@ -140,31 +139,6 @@ class NativeBuildTests(unittest.TestCase):
         shutil.rmtree(self.cc / "build")
         self.make(GPU="GB10")
         self.assertEqual(self.probe(), incremental)
-
-    def test_stub_add_remove_and_noop_with_stale_ir(self):
-        source = self.root / "Tyr/GPU/Kernels/Fixture.lean"
-        source.write_text("namespace Tyr.GPU.Kernels\nnamespace Nested\nend Nested\n"
-                          "@[gpu_kernel .SM90]\ndef first := 0\nend Tyr.GPU.Kernels\n")
-        self.make("src/generated/tyr_gpu_kernel_stubs.cpp")
-        output = self.cc / "src/generated/tyr_gpu_kernel_stubs.cpp"
-        self.assertIn("lean_launch_Tyr_GPU_Kernels_first", output.read_text())
-        self.assertNotIn("Nested_first", output.read_text())
-        first = output.stat().st_mtime_ns
-        self.make("src/generated/tyr_gpu_kernel_stubs.cpp")
-        self.assertEqual(output.stat().st_mtime_ns, first)
-        ir = self.root / ".lake/build/ir/Tyr/GPU/Kernels/Fixture.c.o.export"
-        ir.write_bytes(b"lean_launch_Tyr_GPU_Kernels_first\x00")
-        source.write_text("/- @[gpu_kernel .SM90]\ndef fake := 0 -/\n"
-                          "namespace Tyr.GPU.Kernels\n@[gpu_kernel .SM90] def second := 0\n"
-                          "end Tyr.GPU.Kernels\n")
-        self.make("src/generated/tyr_gpu_kernel_stubs.cpp")
-        text = output.read_text()
-        self.assertIn("lean_launch_Tyr_GPU_Kernels_second", text)
-        self.assertNotIn("lean_launch_Tyr_GPU_Kernels_first", text)
-        self.assertNotIn("lean_launch_fake", text)
-        source.unlink()
-        self.make("src/generated/tyr_gpu_kernel_stubs.cpp")
-        self.assertNotIn("lean_launch_Tyr_GPU_Kernels_", output.read_text())
 
     def test_configuration_values_are_shell_quoted(self):
         value = "-DNAME='quoted value' -DOTHER=literal"

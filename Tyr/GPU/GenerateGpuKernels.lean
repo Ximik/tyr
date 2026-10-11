@@ -9,6 +9,7 @@ structure CliConfig where
   outDir : System.FilePath := ⟨"cc/src/generated"⟩
   clean : Bool := true
   modules : Array Name := #[]
+  stubsOut : Option System.FilePath := none
   deriving Inhabited
 
 def usage : String :=
@@ -21,6 +22,8 @@ def usage : String :=
     "Options:",
     "  --out-dir <path>         Output directory for generated .cu files (default: cc/src/generated)",
     "  --no-clean               Keep existing generated .cu files in output directory",
+    "  --stubs <path>           Instead of CUDA, write placeholder launchers for every",
+    "                           kernel in the modules (used by builds without the kernels' CUDA)",
     "  --help                   Show this help"
   ]
 
@@ -42,6 +45,10 @@ partial def parseArgs (cfg : CliConfig) : List String → Except String CliConfi
     throw "--out-dir expects a path argument."
   | "--no-clean" :: rest =>
     parseArgs { cfg with clean := false } rest
+  | "--stubs" :: path :: rest =>
+    parseArgs { cfg with stubsOut := some ⟨path⟩ } rest
+  | "--stubs" :: [] =>
+    throw "--stubs expects a path argument."
   | "--help" :: _ =>
     return cfg
   | arg :: rest =>
@@ -81,6 +88,46 @@ unsafe def materializeKernelRefs (env : Environment)
       catch e =>
         throwError "Failed to evaluate kernel '{r.kernelConst}' for '{r.name}': {e.toMessageData}"
 
+/-- The C symbols of all GPU kernel launchers (`@[extern "lean_launch_…"]`) in
+    `env`, sorted. -/
+def kernelLauncherSymbols (env : Environment) : Array String :=
+  let symbols := env.constants.fold (init := #[]) fun acc name _ =>
+    match getExternNameFor env `c name with
+    | some sym => if sym.startsWith "lean_launch_" then acc.push sym else acc
+    | none => acc
+  (symbols.qsort (· < ·)).foldl (init := #[]) fun acc sym =>
+    if acc.back? == some sym then acc else acc.push sym
+
+/-- Placeholder launchers, linked when a kernel's CUDA is not compiled (CPU
+    builds, or kernels not in `-Kkernels`). They are weak, so a compiled
+    kernel's launcher replaces them. -/
+def renderLauncherStubs (symbols : Array String) : String :=
+  let header := [
+    "#include <lean/lean.h>",
+    "#include <string>",
+    "",
+    "static lean_object* gpuKernelUnavailable(const char* launcher) {",
+    "  std::string msg = \"GPU kernel launcher unavailable in this build (missing NVCC/CUDA): \";",
+    "  msg += launcher;",
+    "  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string(msg.c_str())));",
+    "}",
+    "",
+    "extern \"C\" {",
+    ""]
+  let stubs := symbols.toList.flatMap fun sym => [
+    s!"__attribute__((weak)) lean_object* {sym}(...) \{",
+    s!"  return gpuKernelUnavailable(\"{sym}\");",
+    "}",
+    ""]
+  "\n".intercalate (header ++ stubs ++ ["} // extern \"C\"", ""])
+
+/-- Write `text` unless the file already has it, so Make does not recompile. -/
+def writeIfChanged (path : System.FilePath) (text : String) : IO Unit := do
+  if (← path.pathExists) then
+    if (← IO.FS.readFile path) == text then return
+  if let some dir := path.parent then IO.FS.createDirAll dir
+  IO.FS.writeFile path text
+
 unsafe def main (args : List String) : IO UInt32 := do
   if args.contains "--help" then
     IO.println usage
@@ -100,6 +147,11 @@ unsafe def main (args : List String) : IO UInt32 := do
       Lean.enableInitializersExecution
       let imports := cfg.modules.map (fun m => ({ module := m } : Import))
       let env ← Lean.importModules imports {} (loadExts := true)
+      if let some stubsOut := cfg.stubsOut then
+        let symbols := kernelLauncherSymbols env
+        writeIfChanged stubsOut (renderLauncherStubs symbols)
+        IO.println s!"Wrote {symbols.size} kernel launcher stub(s) to {stubsOut}"
+        return (0 : UInt32)
       let refs := collectKernelCompanionRefsFromEnvModules env cfg.modules
       let regs ← materializeKernelRefs env refs
       setRegisteredKernels regs

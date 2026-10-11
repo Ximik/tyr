@@ -169,9 +169,6 @@ OUT_DIR := build
 TOOLS_DIR := tools
 BENCH_FLASH_ATTN := $(OUT_DIR)/tools/bench_flash_attn
 GPU_STUB_SRC := $(SRC_DIR)/generated/tyr_gpu_kernel_stubs.cpp
-GPU_STUB_SCRIPT := $(TOOLS_DIR)/generate_gpu_kernel_stubs.py
-GPU_STUB_IR_ROOT := ../.lake/build/ir/Tyr/GPU
-GPU_KERNEL_SRC_ROOT := ../Tyr/GPU/Kernels
 BUILD_FLAGS := $(OUT_DIR)/build-flags.txt
 
 SRCS := \
@@ -241,11 +238,11 @@ endif
 ifeq ($(filter $(SRC_DIR)/tk_vendor_mha_h100.cu,$(CU_SRCS)),)
 SRCS += tk_vendor_stubs.cpp
 endif
-# Always compile the kernel-launcher stubs. They define every
-# `lean_launch_Tyr_GPU_Kernels_...` symbol with `__attribute__((weak))`: a
-# generated .cu linked into the same library defines it strongly, which wins;
-# otherwise the stub keeps links that reference it working (CPU builds, and
-# `GenerateGpuKernels`, which links libTyrC before the kernels are generated).
+# Always compile the kernel-launcher stubs, written by the Lean build
+# (`GenerateGpuKernels --stubs`). They define every `lean_launch_...` symbol
+# with `__attribute__((weak))`: a generated .cu linked into the same library
+# defines it strongly, which wins; otherwise the stub keeps links that
+# reference it working (CPU builds, and kernels not in -Kkernels).
 SRCS += generated/tyr_gpu_kernel_stubs.cpp
 REQUIRES_TK := $(if $(strip $(CU_SRCS)),1,0)
 # Without NVCC, src/tyr_laguna_moe.cu is not compiled (CU_SRCS is cleared
@@ -331,6 +328,10 @@ $(BUILD_FLAGS): FORCE
 -include $(DEP_FILES)
 
 check-deps:
+	@if [ -n "$(filter generated/tyr_gpu_kernel_stubs.cpp,$(SRCS))" ] && [ ! -f "$(GPU_STUB_SRC)" ]; then \
+		echo "Missing $(GPU_STUB_SRC); it is written by the Lean build. Run: lake build"; \
+		exit 1; \
+	fi
 	@for compiler in $(firstword $(CC)) $(firstword $(CXX)); do \
 		if ! command -v "$$compiler" >/dev/null 2>&1; then \
 			echo "Missing C/C++ compiler $$compiler. On Debian/Ubuntu: sudo apt install g++"; \
@@ -428,9 +429,6 @@ $(OUT_DIR)/%.o : $(SRC_DIR)/%.cu $(BUILD_FLAGS) $(TYR_MAKEFILE) | check-deps $(O
 # No-CUDA-toolkit builds: compile the stub branch of tyr_laguna_moe.cu as C++.
 $(OUT_DIR)/tyr_laguna_moe_stub.o : $(SRC_DIR)/tyr_laguna_moe.cu $(BUILD_FLAGS) $(TYR_MAKEFILE) | check-deps $(OUT_DIR)
 	$(CXX) $(CXX_STD_FLAG) -x c++ -MMD -MP -MF $(@:.o=.d) -MT $@ -o $@ -c $< -I$(LEAN_INCLUDE) $(EXTRA_CXX_FLAGS) -fPIC
-
-$(GPU_STUB_SRC): FORCE $(GPU_STUB_SCRIPT)
-	@python3 $(GPU_STUB_SCRIPT) --ir-root $(GPU_STUB_IR_ROOT) --kernel-src-root $(GPU_KERNEL_SRC_ROOT) --output $@
 
 clean:
 	$(RMPATH) $(OUT_DIR)
