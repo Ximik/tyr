@@ -89,33 +89,54 @@ target libtyr pkg : Dynlib := do
   let sysroot ← getLeanSysroot
   let kernelModules := (gpuKernels.splitOn " ").toArray.filterMap nonEmptyTrimmed?
 
-  -- 1. GPU codegen, CUDA builds only: run the generator over the `-Kkernels`
-  --    modules. Lake reruns it when the generator, a kernel module's compiled
-  --    `.olean`, or `-Kkernels` changes. Without CUDA, the Makefile links the
-  --    weak launcher stubs instead.
-  let codegenJob ← if cudaHome?.isNone then pure (Job.pure ()) else do
-    let some generator ← findLeanExe? `GenerateGpuKernels
-      | error "lakefile.lean: no GenerateGpuKernels executable"
+  -- The kernel code generator. It imports kernel modules, so it runs with
+  -- Lean's module path, and its inputs are the generator itself plus the
+  -- modules' compiled `.olean` files.
+  let some generator ← findLeanExe? `GenerateGpuKernels
+    | error "lakefile.lean: no GenerateGpuKernels executable"
+  let generatorEnv ← getAugmentedEnv
+  let generatedDir := pkg.dir / "cc" / "src" / "generated"
+  let generatorInputs (modules : Array Module) : FetchM (Job Unit) := do
     let mut inputs := (← generator.exe.fetch).map fun _ => ()
+    for mod in modules do
+      inputs := inputs.mix (← mod.olean.fetch)
+    return inputs
+
+  -- 1. Placeholder launchers for every kernel in `TyrKernels` (all builds):
+  --    kernels whose CUDA is not compiled still link.
+  let some kernelLib ← findLeanLib? `TyrKernels
+    | error "lakefile.lean: no TyrKernels library"
+  let allKernels ← kernelLib.getModuleArray
+  let stubsFile := generatedDir / "tyr_gpu_kernel_stubs.cpp"
+  let stubsJob ← buildFileAfterDep stubsFile (← generatorInputs allKernels) fun _ =>
+    proc {
+      cmd := generator.file.toString
+      args := #["--stubs", stubsFile.toString] ++ allKernels.map (·.name.toString)
+      env := generatorEnv
+    }
+
+  -- 2. CUDA for the `-Kkernels` modules (CUDA builds only). Lake reruns it when
+  --    the generator, one of those modules or `-Kkernels` changes.
+  let cudaJob ← if cudaHome?.isNone then pure (Job.pure ()) else do
+    let mut modules := #[]
     for name in kernelModules do
       let some mod ← findModule? name.toName
         | error s!"-Kkernels: unknown module {name}"
-      inputs := inputs.mix (← mod.olean.fetch)
-    -- The generator imports the kernel modules, so it needs Lean's module path.
-    let generatorEnv ← getAugmentedEnv
+      modules := modules.push mod
     let stamp := pkg.buildDir / "gpu-codegen.stamp"
-    let job ← buildFileAfterDep stamp inputs
+    let job ← buildFileAfterDep stamp (← generatorInputs modules)
       (extraDepTrace := pure (BuildTrace.ofHash (Hash.ofString gpuKernels) "-Kkernels"))
       fun _ => do
         proc {
           cmd := generator.file.toString
-          args := kernelModules ++ #["--out-dir", (pkg.dir / "cc" / "src" / "generated").toString]
+          args := kernelModules ++ #["--out-dir", generatedDir.toString]
           env := generatorEnv
         }
         IO.FS.writeFile stamp gpuKernels
     pure (job.map fun _ => ())
+  let codegenJob := stubsJob.mix cudaJob
 
-  -- 2. make, on every build: Make decides what to recompile. The library's
+  -- 3. make, on every build: Make decides what to recompile. The library's
   --    content is its trace, so an unchanged library rebuilds nothing else.
   let libJob ← codegenJob.mapM fun _ => do
     let jobs ← match (← IO.getEnv "TYR_MAKE_JOBS").bind nonEmptyTrimmed? with

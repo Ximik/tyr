@@ -114,22 +114,18 @@ In total the tree exports ~280 `extern "C"` entry points; the Lean side has
 themselves. `cc/lxla.cpp` (0 bytes) and `cc/plugin_init.cpp` are dead files,
 referenced by neither the Makefile nor the lakefile.
 
-### The GPU kernel linking trick
+### Kernel launcher stubs
 
-Generated CUDA kernels export `lean_launch_Tyr_GPU_Kernels_*` symbols, but the
-generator itself is a Lean executable that must link `libTyrC` — a
-chicken-and-egg problem. The Makefile breaks it by always compiling
-`generated/tyr_gpu_kernel_stubs.cpp` into `libTyrC`, which defines every
-launcher as an `__attribute__((weak))` throwing stub: strong definitions from
-real `.cu` files win when present, and links succeed when they are not. The stubs are regenerated
-by `cc/tools/generate_gpu_kernel_stubs.py`, which scans `.c.o.export` IR and
-`@[gpu_kernel]` sources for launcher names. The inventory is refreshed before
-Lake checks the native build trace and on every Make invocation that needs
-stubs. It preserves the output timestamp when symbols are unchanged. Source
-declarations take precedence over stale IR when a kernel is removed; nested
-namespaces and comments are handled during source scanning.
-`tyr_ops.cpp` calls launchers only
-after a runtime Hopper check (`device_supports_tk_hopper`,
+Every Lean GPU kernel declares a launcher, `@[extern "lean_launch_…"]`, which
+Lean code calls. Its real definition exists only when the kernel's generated
+CUDA is compiled, i.e. in a CUDA build and for the `-Kkernels` modules.
+Everywhere else, `libTyrC` provides a placeholder: the Lean build runs
+`GenerateGpuKernels --stubs` over every module of `TyrKernels`, which writes
+`cc/src/generated/tyr_gpu_kernel_stubs.cpp` with an `__attribute__((weak))`
+stub per launcher that returns a "kernel unavailable" error. A compiled
+kernel's strong definition replaces its stub. The launcher names come from the
+kernels' `@[extern]` declarations, and the file is rewritten only when they
+change. `tyr_ops.cpp` calls launchers only after a runtime Hopper check (`device_supports_tk_hopper`,
 `cc/src/tyr_ops.cpp:39-48`), routing everything else to portable SDPA.
 
 ### Build orchestration in `lakefile.lean`
@@ -145,14 +141,16 @@ after a runtime Hopper check (`device_supports_tk_hopper`,
    without it. It then passes `CUDA_HOME` and `GPU` to every `make` call
    (unset for CPU); the Makefile does no CUDA detection of its own and derives
    the GPU family and architecture flags from `GPU`.
-1. GPU codegen, CUDA builds only: runs the `GenerateGpuKernels` executable over
+1. Writes the kernel launcher stubs (all builds; see "Kernel launcher stubs"
+   above), rerun when the generator or a `TyrKernels` module changes.
+2. GPU codegen, CUDA builds only: runs the `GenerateGpuKernels` executable over
    the `-Kkernels` modules, writing `cc/src/generated/`. Both are ordinary
    Lake dependencies of the target: the generator links no `libTyrC`
    (`TyrCodegen`), and the kernel modules (`TyrKernels`) are not precompiled,
    so their `.olean` files build without it. Lake reruns the generator when
    it, a kernel module's `.olean` or `-Kkernels` changes. Without CUDA the
    Makefile ignores generated `.cu` files and links the weak launcher stubs.
-2. Runs `make -jN -C cc dylib` on every build (`N` = `TYR_MAKE_JOBS`, or the
+3. Runs `make -jN -C cc dylib` on every build (`N` = `TYR_MAKE_JOBS`, or the
    CPU count); a no-op run takes well under a second. Make alone decides what
    to recompile. The target's trace is the content of `libTyrC`, so if it is
    unchanged (e.g. after a comment-only edit) nothing downstream relinks.
