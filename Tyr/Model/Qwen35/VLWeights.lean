@@ -3,7 +3,7 @@
 
   Pretrained weight loading for Qwen3.5 multimodal wrapper.
 -/
-import Tyr.Torch
+import Tyr.Typed.Neural
 import Tyr.Log
 import Tyr.SafeTensors.Load
 import Tyr.Model.Utils
@@ -133,8 +133,8 @@ private def loadVisionModelSharded (modelDir : String) (cfg : VisionConfig)
     (visionNameCandidates "model.visual.patch_embed.proj.bias")
     #[cfg.hidden_size]
     device
-  let patchW : T #[cfg.hidden_size, VisionConfig.patchDim cfg] :=
-    reshape convW #[cfg.hidden_size, VisionConfig.patchDim cfg]
+  let patchW : STensor #[cfg.hidden_size, VisionConfig.patchDim cfg] :=
+    Tensor.reshapeChecked convW #[cfg.hidden_size, VisionConfig.patchDim cfg]
   let patchEmbed : Qwen35VisionPatchEmbed cfg := {
     weight := reqGradFalse patchW
     bias := reqGradFalse convB
@@ -202,8 +202,8 @@ private def loadVisionModel (path : String) (cfg : VisionConfig)
     (visionNameCandidates "model.visual.patch_embed.proj.bias")
     #[cfg.hidden_size]
     device
-  let patchW : T #[cfg.hidden_size, VisionConfig.patchDim cfg] :=
-    reshape convW #[cfg.hidden_size, VisionConfig.patchDim cfg]
+  let patchW : STensor #[cfg.hidden_size, VisionConfig.patchDim cfg] :=
+    Tensor.reshapeChecked convW #[cfg.hidden_size, VisionConfig.patchDim cfg]
   let patchEmbed : Qwen35VisionPatchEmbed cfg := {
     weight := reqGradFalse patchW
     bias := reqGradFalse convB

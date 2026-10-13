@@ -380,6 +380,30 @@ remains active.
 - GitHub CI remains green at `05304ff`, not at these local migration commits.
   Full aggregate tests/examples and hardware qualification remain outstanding.
 
+## 2026-10-13 Qwen3.5 / Qwen3.6 continuation
+
+- Qwen3.5 text, vision, media and checkpoint interfaces now use indexed tensors;
+  Qwen3.6's shared interfaces build against them. Floating weights preserve
+  checkpoint dtype, token/routing indices are Int64, finish masks are Bool,
+  rotary tables are Float32, and GatedDeltaNet recurrent state is Float32 even
+  for BF16 activations. No legacy `T` applications remain in either family.
+- Explicit native adapters validate einsum outputs, top-k indices, recurrent
+  kernel outputs and media patch shape/dtype. Their seven declarations are
+  audited in CI. The audit corrected UInt64 dimension parameters on the recurrent
+  kernels and obsolete IO-world arguments on Apple media loaders and stubs.
+- **207 native CPU tests pass with zero failures, skips or runtime panics**.
+  Coverage includes dense/MoE forwards, attention gate layout, cached/uncached
+  and streaming parity, per-row EOS, multimodal fusion and a real PNG decoded to
+  indexed Float32 patches on macOS. BF16 hybrid-cache tests verify Float32
+  recurrent state and cached/uncached token parity.
+- Sixteen generated checkpoint combinations cover dense/MoE, Float32/BF16,
+  single-file/indexed-shard loading, and present/absent optional LM-head and
+  convolution-bias weights. Loaded forwards and generation run successfully;
+  tied embeddings and fallback bias retain the checkpoint dtype.
+- Full pretrained-model numerical qualification, video decode success, and GPU
+  execution remain unverified. KittenTTS and other legacy callers are still
+  part of the active full-migration goal.
+
 ## Remaining acceptance criteria
 
 Remove the `T` declaration and all model, generator, reflection, documentation,

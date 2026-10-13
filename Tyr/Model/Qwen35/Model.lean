@@ -9,7 +9,7 @@
   - Linear GatedDeltaNet with depthwise causal conv and recurrent state cache
   - Cached and uncached generation
 -/
-import Tyr.Torch
+import Tyr.Model.Qwen35.TypedOps
 import Tyr.TensorStruct
 import Tyr.Module.Core
 import Tyr.Module.Derive
@@ -24,245 +24,224 @@ open torch
 open torch.Model
 
 private def l2NormLast4d {b s h d : UInt64}
-    (x : T #[b, s, h, d])
+    (x : STensor #[b, s, h, d])
     (eps : Float := 1e-6)
-    : T #[b, s, h, d] :=
-  let flat : T #[b * s * h, d] := reshape x #[b * s * h, d]
-  let n2 : T #[b * s * h, 1] := nn.sumDim (flat * flat) 1 true
-  let inv : T #[b * s * h, 1] := nn.rsqrt (n2 + eps)
-  let inv : T #[b * s * h, d] := nn.expand inv #[b * s * h, d]
-  reshape (flat * inv) #[b, s, h, d]
+    : STensor #[b, s, h, d] :=
+  let flat : STensor #[b * s * h, d] := Tensor.reshapeChecked x #[b * s * h, d]
+  let n2 : STensor #[b * s * h, 1] := Tensor.Preserving.sumDim (flat * flat) 1 true
+  let inv : STensor #[b * s * h, 1] := rsqrtDynamic (n2 + eps)
+  let inv : STensor #[b * s * h, d] := Tensor.expand inv #[b * s * h, d]
+  Tensor.reshapeChecked (flat * inv) #[b, s, h, d]
 
 private def applyMaskToPaddingStates {batch seq hidden : UInt64}
-    (x : T #[batch, seq, hidden])
-    (attentionMask : Option (T #[batch, seq]))
-    : T #[batch, seq, hidden] :=
+    (x : STensor #[batch, seq, hidden])
+    (attentionMask : Option (DTensor #[batch, seq] .Int64))
+    : STensor #[batch, seq, hidden] :=
   if batch <= 1 || seq <= 1 then
     x
   else
     match attentionMask with
     | none => x
     | some m =>
-      let mf : T #[batch, seq] := toFloat' m
-      let me : T #[batch, seq, hidden] := nn.expand (reshape mf #[batch, seq, 1]) #[batch, seq, hidden]
+      let mf : STensor #[batch, seq] := floatDynamic m
+      let me : STensor #[batch, seq, hidden] := Tensor.expand (Tensor.reshapeChecked mf #[batch, seq, 1]) #[batch, seq, hidden]
       x * me
-
-@[extern "lean_torch_qwen35_chunk_gated_delta_rule"]
-private opaque chunkGatedDeltaRule
-    {batch seq n_head kdim vdim : UInt64}
-    (query : @& T #[batch, seq, n_head, kdim])
-    (key : @& T #[batch, seq, n_head, kdim])
-    (value : @& T #[batch, seq, n_head, vdim])
-    (g : @& T #[batch, seq, n_head])
-    (beta : @& T #[batch, seq, n_head])
-    : T #[batch, seq, n_head, vdim] × T #[batch, n_head, kdim, vdim]
-
-@[extern "lean_torch_qwen35_recurrent_gated_delta_rule"]
-private opaque recurrentGatedDeltaRule
-    {batch seq n_head kdim vdim : UInt64}
-    (query : @& T #[batch, seq, n_head, kdim])
-    (key : @& T #[batch, seq, n_head, kdim])
-    (value : @& T #[batch, seq, n_head, vdim])
-    (g : @& T #[batch, seq, n_head])
-    (beta : @& T #[batch, seq, n_head])
-    (initialState : @& T #[batch, n_head, kdim, vdim])
-    : T #[batch, seq, n_head, vdim] × T #[batch, n_head, kdim, vdim]
 
 /-- Qwen3.5 RMSNorm with `(1 + weight)` scaling. -/
 structure Qwen35RMSNorm (dim : UInt64) where
-  weight : T #[dim]
+  weight : STensor #[dim]
   eps : Float := 1e-6
   deriving TensorStruct
 
 namespace Qwen35RMSNorm
 
 def initZeroCentered (dim : UInt64) (eps : Float := 1e-6) : Qwen35RMSNorm dim :=
-  { weight := autograd.set_requires_grad (torch.zeros #[dim]) true, eps }
+  { weight := Tensor.setRequiresGrad (zerosDynamic #[dim]) true, eps }
 
 def initOneCentered (dim : UInt64) (eps : Float := 1e-6) : Qwen35RMSNorm dim :=
-  { weight := autograd.set_requires_grad (torch.ones #[dim]) true, eps }
+  { weight := Tensor.setRequiresGrad (onesDynamic #[dim]) true, eps }
 
 /-- HuggingFace Qwen3.5 checkpoints already store the zero-centered RMSNorm
     parameter used by the `(1 + weight)` formulation, so the raw tensor should
     be preserved as-is. -/
 def fromCheckpointWeight {dim : UInt64}
-    (weight : T #[dim])
+    (weight : STensor #[dim])
     (eps : Float := 1e-6)
     : Qwen35RMSNorm dim :=
   { weight := weight, eps }
 
 def forward2d {n dim : UInt64}
     (m : Qwen35RMSNorm dim)
-    (x : T #[n, dim])
-    : T #[n, dim] :=
-  let xf : T #[n, dim] := toFloat' x
-  let var : T #[n, 1] := nn.meanDim (xf * xf) 1 true
-  let inv : T #[n, 1] := nn.rsqrt (var + m.eps)
-  let inv : T #[n, dim] := nn.expand inv #[n, dim]
-  let normed : T #[n, dim] := xf * inv
-  let scale1 : T #[dim] := add_scalar (toFloat' m.weight) 1.0
-  let scale : T #[n, dim] := nn.expand (reshape scale1 #[1, dim]) #[n, dim]
-  restoreInputDType x (normed * scale)
+    (x : STensor #[n, dim])
+    : STensor #[n, dim] :=
+  let xf : STensor #[n, dim] := floatDynamic x
+  let var : STensor #[n, 1] := Tensor.Preserving.meanDim (xf * xf) 1 true
+  let inv : STensor #[n, 1] := rsqrtDynamic (var + m.eps)
+  let inv : STensor #[n, dim] := Tensor.expand inv #[n, dim]
+  let normed : STensor #[n, dim] := xf * inv
+  let scale1 : STensor #[dim] := Tensor.Preserving.addScalar (floatDynamic m.weight) 1.0
+  let scale : STensor #[n, dim] := Tensor.expand (Tensor.reshapeChecked scale1 #[1, dim]) #[n, dim]
+  Tensor.castLike x (normed * scale)
 
 def forward3d {batch seq dim : UInt64}
     (m : Qwen35RMSNorm dim)
-    (x : T #[batch, seq, dim])
-    : T #[batch, seq, dim] :=
-  let flat : T #[batch * seq, dim] := reshape x #[batch * seq, dim]
-  reshape (forward2d m flat) #[batch, seq, dim]
+    (x : STensor #[batch, seq, dim])
+    : STensor #[batch, seq, dim] :=
+  let flat : STensor #[batch * seq, dim] := Tensor.reshapeChecked x #[batch * seq, dim]
+  Tensor.reshapeChecked (forward2d m flat) #[batch, seq, dim]
 
 end Qwen35RMSNorm
 
 /-- Gated RMSNorm used at linear-attention output. -/
 structure Qwen35RMSNormGated (dim : UInt64) where
-  weight : T #[dim]
+  weight : STensor #[dim]
   eps : Float := 1e-6
   deriving TensorStruct
 
 namespace Qwen35RMSNormGated
 
 def init (dim : UInt64) (eps : Float := 1e-6) : Qwen35RMSNormGated dim :=
-  { weight := autograd.set_requires_grad (torch.ones #[dim]) true, eps }
+  { weight := Tensor.setRequiresGrad (onesDynamic #[dim]) true, eps }
 
 def forward2d {n dim : UInt64}
     (m : Qwen35RMSNormGated dim)
-    (x : T #[n, dim])
-    (gate : T #[n, dim])
-    : T #[n, dim] :=
-  let xf : T #[n, dim] := toFloat' x
-  let var : T #[n, 1] := nn.meanDim (xf * xf) 1 true
-  let inv : T #[n, 1] := nn.rsqrt (var + m.eps)
-  let inv : T #[n, dim] := nn.expand inv #[n, dim]
-  let normed : T #[n, dim] := xf * inv
-  let scale : T #[n, dim] := nn.expand (reshape (toFloat' m.weight) #[1, dim]) #[n, dim]
-  let g : T #[n, dim] := nn.silu (toFloat' gate)
-  restoreInputDType x (normed * scale * g)
+    (x : STensor #[n, dim])
+    (gate : STensor #[n, dim])
+    : STensor #[n, dim] :=
+  let xf : STensor #[n, dim] := floatDynamic x
+  let var : STensor #[n, 1] := Tensor.Preserving.meanDim (xf * xf) 1 true
+  let inv : STensor #[n, 1] := rsqrtDynamic (var + m.eps)
+  let inv : STensor #[n, dim] := Tensor.expand inv #[n, dim]
+  let normed : STensor #[n, dim] := xf * inv
+  let scale : STensor #[n, dim] := Tensor.expand (Tensor.reshapeChecked (floatDynamic m.weight) #[1, dim]) #[n, dim]
+  let g : STensor #[n, dim] := Tensor.Preserving.silu (floatDynamic gate)
+  Tensor.castLike x (normed * scale * g)
 
 end Qwen35RMSNormGated
 
 /-- SwiGLU MLP block (dense FFN). -/
 structure Qwen35MLP (hidden_size intermediate_size : UInt64) where
-  gate_proj : T #[intermediate_size, hidden_size]
-  up_proj : T #[intermediate_size, hidden_size]
-  down_proj : T #[hidden_size, intermediate_size]
+  gate_proj : STensor #[intermediate_size, hidden_size]
+  up_proj : STensor #[intermediate_size, hidden_size]
+  down_proj : STensor #[hidden_size, intermediate_size]
   deriving TensorStruct
 
 namespace Qwen35MLP
 
 def init (hidden_size intermediate_size : UInt64) : IO (Qwen35MLP hidden_size intermediate_size) := do
-  let gate ← initWeight #[intermediate_size, hidden_size] hidden_size
-  let up ← initWeight #[intermediate_size, hidden_size] hidden_size
-  let down ← initWeight #[hidden_size, intermediate_size] intermediate_size
+  let gate ← initDynamicWeight #[intermediate_size, hidden_size] hidden_size
+  let up ← initDynamicWeight #[intermediate_size, hidden_size] hidden_size
+  let down ← initDynamicWeight #[hidden_size, intermediate_size] intermediate_size
   pure { gate_proj := gate, up_proj := up, down_proj := down }
 
 def forward2d {tokens hidden inter : UInt64}
     (m : Qwen35MLP hidden inter)
-    (x : T #[tokens, hidden])
-    : T #[tokens, hidden] :=
-  let gateDyn : T #[] := torch.einsum2 "oh,th->to" m.gate_proj x
-  let upDyn : T #[] := torch.einsum2 "oh,th->to" m.up_proj x
-  let gate : T #[tokens, inter] := reshape gateDyn #[tokens, inter]
-  let up : T #[tokens, inter] := reshape upDyn #[tokens, inter]
-  let hid : T #[tokens, inter] := nn.silu gate * up
-  let outDyn : T #[] := torch.einsum2 "ho,to->th" m.down_proj hid
-  reshape outDyn #[tokens, hidden]
+    (x : STensor #[tokens, hidden])
+    : STensor #[tokens, hidden] :=
+  let gateDyn : STensor #[tokens, inter] := einsumChecked "oh,th->to" m.gate_proj x
+  let upDyn : STensor #[tokens, inter] := einsumChecked "oh,th->to" m.up_proj x
+  let gate : STensor #[tokens, inter] := Tensor.reshapeChecked gateDyn #[tokens, inter]
+  let up : STensor #[tokens, inter] := Tensor.reshapeChecked upDyn #[tokens, inter]
+  let hid : STensor #[tokens, inter] := Tensor.Preserving.silu gate * up
+  let outDyn : STensor #[tokens, hidden] := einsumChecked "ho,to->th" m.down_proj hid
+  Tensor.reshapeChecked outDyn #[tokens, hidden]
 
 def forward {batch seq hidden inter : UInt64}
     (m : Qwen35MLP hidden inter)
-    (x : T #[batch, seq, hidden])
-    : T #[batch, seq, hidden] :=
-  linear3d (nn.silu (linear3d x m.gate_proj) * linear3d x m.up_proj) m.down_proj
+    (x : STensor #[batch, seq, hidden])
+    : STensor #[batch, seq, hidden] :=
+  Tensor.linear3d (Tensor.Preserving.silu (Tensor.linear3d x m.gate_proj) * Tensor.linear3d x m.up_proj) m.down_proj
 
 end Qwen35MLP
 
 /-- Top-k router for Qwen3.5 MoE. -/
 structure Qwen35TopKRouter (cfg : Config) where
-  weight : T #[cfg.num_experts, cfg.hidden_size]
+  weight : STensor #[cfg.num_experts, cfg.hidden_size]
   deriving TensorStruct
 
 namespace Qwen35TopKRouter
 
 def init (cfg : Config) : IO (Qwen35TopKRouter cfg) := do
-  let w ← initWeight #[cfg.num_experts, cfg.hidden_size] cfg.hidden_size
+  let w ← initDynamicWeight #[cfg.num_experts, cfg.hidden_size] cfg.hidden_size
   pure { weight := w }
 
 def forward {tokens : UInt64}
     (cfg : Config)
     (m : Qwen35TopKRouter cfg)
-    (hidden : T #[tokens, cfg.hidden_size])
-    : T #[tokens, cfg.num_experts] × T #[tokens, cfg.num_experts_per_tok] × T #[tokens, cfg.num_experts_per_tok] :=
-  let logitsDyn : T #[] := torch.einsum2 "eh,th->te" m.weight hidden
-  let logits : T #[tokens, cfg.num_experts] := reshape logitsDyn #[tokens, cfg.num_experts]
-  let probs : T #[tokens, cfg.num_experts] := nn.softmax logits (-1)
-  let (topValsRaw, topIdx) := torch.topk_2d probs cfg.num_experts_per_tok 1
-  let denom : T #[tokens, 1] := nn.sumDim topValsRaw 1 true
-  let denom : T #[tokens, cfg.num_experts_per_tok] := nn.expand denom #[tokens, cfg.num_experts_per_tok]
-  let topVals : T #[tokens, cfg.num_experts_per_tok] := nn.div topValsRaw denom
+    (hidden : STensor #[tokens, cfg.hidden_size])
+    : STensor #[tokens, cfg.num_experts] × STensor #[tokens, cfg.num_experts_per_tok] × DTensor #[tokens, cfg.num_experts_per_tok] .Int64 :=
+  let logitsDyn : STensor #[tokens, cfg.num_experts] := einsumChecked "eh,th->te" m.weight hidden
+  let logits : STensor #[tokens, cfg.num_experts] := Tensor.reshapeChecked logitsDyn #[tokens, cfg.num_experts]
+  let probs : STensor #[tokens, cfg.num_experts] := Tensor.Preserving.softmax logits (-1)
+  let (topValsRaw, topIdx) := topK2d probs cfg.num_experts_per_tok 1
+  let denom : STensor #[tokens, 1] := Tensor.Preserving.sumDim topValsRaw 1 true
+  let denom : STensor #[tokens, cfg.num_experts_per_tok] := Tensor.expand denom #[tokens, cfg.num_experts_per_tok]
+  let topVals : STensor #[tokens, cfg.num_experts_per_tok] := Tensor.Preserving.div topValsRaw denom
   (probs, topVals, topIdx)
 
 end Qwen35TopKRouter
 
 /-- Expert weight bank for Qwen3.5 MoE FFN. -/
 structure Qwen35MoeExperts (cfg : Config) where
-  gate_up_proj : T #[cfg.num_experts, 2 * cfg.moe_intermediate_size, cfg.hidden_size]
-  down_proj : T #[cfg.num_experts, cfg.hidden_size, cfg.moe_intermediate_size]
+  gate_up_proj : STensor #[cfg.num_experts, 2 * cfg.moe_intermediate_size, cfg.hidden_size]
+  down_proj : STensor #[cfg.num_experts, cfg.hidden_size, cfg.moe_intermediate_size]
   deriving TensorStruct
 
 namespace Qwen35MoeExperts
 
 def init (cfg : Config) : IO (Qwen35MoeExperts cfg) := do
-  let gu ← initWeight #[cfg.num_experts, 2 * cfg.moe_intermediate_size, cfg.hidden_size] cfg.hidden_size
-  let down ← initWeight #[cfg.num_experts, cfg.hidden_size, cfg.moe_intermediate_size] cfg.moe_intermediate_size
+  let gu ← initDynamicWeight #[cfg.num_experts, 2 * cfg.moe_intermediate_size, cfg.hidden_size] cfg.hidden_size
+  let down ← initDynamicWeight #[cfg.num_experts, cfg.hidden_size, cfg.moe_intermediate_size] cfg.moe_intermediate_size
   pure { gate_up_proj := gu, down_proj := down }
 
 def forward2d {tokens : UInt64}
     (cfg : Config)
     (m : Qwen35MoeExperts cfg)
-    (hidden : T #[tokens, cfg.hidden_size])
-    (topVals : T #[tokens, cfg.num_experts_per_tok])
-    (topIdx : T #[tokens, cfg.num_experts_per_tok])
-    : T #[tokens, cfg.hidden_size] :=
+    (hidden : STensor #[tokens, cfg.hidden_size])
+    (topVals : STensor #[tokens, cfg.num_experts_per_tok])
+    (topIdx : DTensor #[tokens, cfg.num_experts_per_tok] .Int64)
+    : STensor #[tokens, cfg.hidden_size] :=
   Id.run do
     let device := hidden.device
-    let mut acc : T #[tokens, cfg.hidden_size] := zerosOn device
+    let mut acc : STensor #[tokens, cfg.hidden_size] := zerosDynamicOn device
 
     for slot in [:cfg.num_experts_per_tok.toNat] do
       -- Gather ONLY the routed expert's weights per token (an embedding row
       -- lookup) instead of a one-hot contraction over all `num_experts`. This is
       -- numerically identical to the one-hot selection but ~num_experts x cheaper.
-      let idx2d : T #[tokens, 1] := data.slice topIdx 1 slot.toUInt64 1
-      let idxRow : T #[1, tokens] := reshape idx2d #[1, tokens]
-      let gateUp2d : T #[cfg.num_experts, 2 * cfg.moe_intermediate_size * cfg.hidden_size] :=
-        reshape m.gate_up_proj #[cfg.num_experts, 2 * cfg.moe_intermediate_size * cfg.hidden_size]
-      let tokGateUpE : T #[1, tokens, 2 * cfg.moe_intermediate_size * cfg.hidden_size] :=
-        nn.embedding idxRow gateUp2d
-      let tokGateUp : T #[tokens, 2 * cfg.moe_intermediate_size, cfg.hidden_size] :=
-        reshape tokGateUpE #[tokens, 2 * cfg.moe_intermediate_size, cfg.hidden_size]
+      let idx2d : DTensor #[tokens, 1] .Int64 := typedSlice topIdx 1 slot.toUInt64 1
+      let idxRow : DTensor #[1, tokens] .Int64 := Tensor.reshapeChecked idx2d #[1, tokens]
+      let gateUp2d : STensor #[cfg.num_experts, 2 * cfg.moe_intermediate_size * cfg.hidden_size] :=
+        Tensor.reshapeChecked m.gate_up_proj #[cfg.num_experts, 2 * cfg.moe_intermediate_size * cfg.hidden_size]
+      let tokGateUpE : STensor #[1, tokens, 2 * cfg.moe_intermediate_size * cfg.hidden_size] :=
+        Tensor.embedding idxRow gateUp2d
+      let tokGateUp : STensor #[tokens, 2 * cfg.moe_intermediate_size, cfg.hidden_size] :=
+        Tensor.reshapeChecked tokGateUpE #[tokens, 2 * cfg.moe_intermediate_size, cfg.hidden_size]
 
-      let guDyn : T #[] := torch.einsum2 "tih,th->ti" tokGateUp hidden
-      let gu : T #[tokens, 2 * cfg.moe_intermediate_size] := reshape guDyn #[tokens, 2 * cfg.moe_intermediate_size]
+      let guDyn : STensor #[tokens, 2 * cfg.moe_intermediate_size] := einsumChecked "tih,th->ti" tokGateUp hidden
+      let gu : STensor #[tokens, 2 * cfg.moe_intermediate_size] := Tensor.reshapeChecked guDyn #[tokens, 2 * cfg.moe_intermediate_size]
 
-      let gate : T #[tokens, cfg.moe_intermediate_size] := data.slice gu 1 0 cfg.moe_intermediate_size
-      let up : T #[tokens, cfg.moe_intermediate_size] :=
-        data.slice gu 1 cfg.moe_intermediate_size cfg.moe_intermediate_size
-      let inter : T #[tokens, cfg.moe_intermediate_size] := nn.silu gate * up
+      let gate : STensor #[tokens, cfg.moe_intermediate_size] := typedSlice gu 1 0 cfg.moe_intermediate_size
+      let up : STensor #[tokens, cfg.moe_intermediate_size] :=
+        typedSlice gu 1 cfg.moe_intermediate_size cfg.moe_intermediate_size
+      let inter : STensor #[tokens, cfg.moe_intermediate_size] := Tensor.Preserving.silu gate * up
 
-      let down2d : T #[cfg.num_experts, cfg.hidden_size * cfg.moe_intermediate_size] :=
-        reshape m.down_proj #[cfg.num_experts, cfg.hidden_size * cfg.moe_intermediate_size]
-      let tokDownE : T #[1, tokens, cfg.hidden_size * cfg.moe_intermediate_size] :=
-        nn.embedding idxRow down2d
-      let tokDown : T #[tokens, cfg.hidden_size, cfg.moe_intermediate_size] :=
-        reshape tokDownE #[tokens, cfg.hidden_size, cfg.moe_intermediate_size]
+      let down2d : STensor #[cfg.num_experts, cfg.hidden_size * cfg.moe_intermediate_size] :=
+        Tensor.reshapeChecked m.down_proj #[cfg.num_experts, cfg.hidden_size * cfg.moe_intermediate_size]
+      let tokDownE : STensor #[1, tokens, cfg.hidden_size * cfg.moe_intermediate_size] :=
+        Tensor.embedding idxRow down2d
+      let tokDown : STensor #[tokens, cfg.hidden_size, cfg.moe_intermediate_size] :=
+        Tensor.reshapeChecked tokDownE #[tokens, cfg.hidden_size, cfg.moe_intermediate_size]
 
-      let outDyn : T #[] := torch.einsum2 "thi,ti->th" tokDown inter
-      let out : T #[tokens, cfg.hidden_size] := reshape outDyn #[tokens, cfg.hidden_size]
+      let outDyn : STensor #[tokens, cfg.hidden_size] := einsumChecked "thi,ti->th" tokDown inter
+      let out : STensor #[tokens, cfg.hidden_size] := Tensor.reshapeChecked outDyn #[tokens, cfg.hidden_size]
 
-      let w2d : T #[tokens, 1] := data.slice topVals 1 slot.toUInt64 1
-      let w : T #[tokens, cfg.hidden_size] := nn.expand w2d #[tokens, cfg.hidden_size]
+      let w2d : STensor #[tokens, 1] := typedSlice topVals 1 slot.toUInt64 1
+      let w : STensor #[tokens, cfg.hidden_size] := Tensor.expand w2d #[tokens, cfg.hidden_size]
       acc := acc + out * w
 
     -- Restore the model dtype so downstream layers see consistent dtypes.
-    return castLike hidden acc
+    return Tensor.castLike hidden acc
 
 end Qwen35MoeExperts
 
@@ -271,7 +250,7 @@ structure Qwen35SparseMoeBlock (cfg : Config) where
   router : Qwen35TopKRouter cfg
   experts : Qwen35MoeExperts cfg
   shared_expert : Qwen35MLP cfg.hidden_size cfg.shared_expert_intermediate_size
-  shared_expert_gate : T #[1, cfg.hidden_size]
+  shared_expert_gate : STensor #[1, cfg.hidden_size]
   deriving TensorStruct
 
 namespace Qwen35SparseMoeBlock
@@ -280,7 +259,7 @@ def init (cfg : Config) : IO (Qwen35SparseMoeBlock cfg) := do
   let router ← Qwen35TopKRouter.init cfg
   let experts ← Qwen35MoeExperts.init cfg
   let sharedExpert ← Qwen35MLP.init cfg.hidden_size cfg.shared_expert_intermediate_size
-  let sharedGate ← initWeight #[1, cfg.hidden_size] cfg.hidden_size
+  let sharedGate ← initDynamicWeight #[1, cfg.hidden_size] cfg.hidden_size
   pure {
     router := router
     experts := experts
@@ -291,33 +270,33 @@ def init (cfg : Config) : IO (Qwen35SparseMoeBlock cfg) := do
 def forward {batch seq : UInt64}
     (cfg : Config)
     (m : Qwen35SparseMoeBlock cfg)
-    (hidden : T #[batch, seq, cfg.hidden_size])
-    : T #[batch, seq, cfg.hidden_size] :=
+    (hidden : STensor #[batch, seq, cfg.hidden_size])
+    : STensor #[batch, seq, cfg.hidden_size] :=
   let tokens := batch * seq
-  let hidden2d : T #[tokens, cfg.hidden_size] := reshape hidden #[tokens, cfg.hidden_size]
+  let hidden2d : STensor #[tokens, cfg.hidden_size] := Tensor.reshapeChecked hidden #[tokens, cfg.hidden_size]
 
   let (_routerProbs, topVals, topIdx) := m.router.forward cfg hidden2d
-  let expertOut : T #[tokens, cfg.hidden_size] :=
+  let expertOut : STensor #[tokens, cfg.hidden_size] :=
     m.experts.forward2d cfg hidden2d topVals topIdx
 
-  let sharedOut : T #[tokens, cfg.hidden_size] :=
+  let sharedOut : STensor #[tokens, cfg.hidden_size] :=
     m.shared_expert.forward2d hidden2d
 
-  let gateDyn : T #[] := torch.einsum2 "oh,th->to" m.shared_expert_gate hidden2d
-  let gate1 : T #[tokens, 1] := reshape gateDyn #[tokens, 1]
-  let gate : T #[tokens, cfg.hidden_size] :=
-    nn.expand (nn.sigmoid gate1) #[tokens, cfg.hidden_size]
+  let gateDyn : STensor #[tokens, 1] := einsumChecked "oh,th->to" m.shared_expert_gate hidden2d
+  let gate1 : STensor #[tokens, 1] := Tensor.reshapeChecked gateDyn #[tokens, 1]
+  let gate : STensor #[tokens, cfg.hidden_size] :=
+    Tensor.expand (Tensor.Preserving.sigmoid gate1) #[tokens, cfg.hidden_size]
 
-  reshape (expertOut + sharedOut * gate) #[batch, seq, cfg.hidden_size]
+  Tensor.reshapeChecked (expertOut + sharedOut * gate) #[batch, seq, cfg.hidden_size]
 
 end Qwen35SparseMoeBlock
 
 /-- Full-attention token mixer for Qwen3.5 (Q-gate + Q/K RMSNorm + partial RoPE). -/
 structure Qwen35Attention (cfg : Config) where
-  q_proj : T #[cfg.num_attention_heads * cfg.head_dim * 2, cfg.hidden_size]
-  k_proj : T #[cfg.num_key_value_heads * cfg.head_dim, cfg.hidden_size]
-  v_proj : T #[cfg.num_key_value_heads * cfg.head_dim, cfg.hidden_size]
-  o_proj : T #[cfg.hidden_size, cfg.num_attention_heads * cfg.head_dim]
+  q_proj : STensor #[cfg.num_attention_heads * cfg.head_dim * 2, cfg.hidden_size]
+  k_proj : STensor #[cfg.num_key_value_heads * cfg.head_dim, cfg.hidden_size]
+  v_proj : STensor #[cfg.num_key_value_heads * cfg.head_dim, cfg.hidden_size]
+  o_proj : STensor #[cfg.hidden_size, cfg.num_attention_heads * cfg.head_dim]
   q_norm : Qwen35RMSNorm cfg.head_dim
   k_norm : Qwen35RMSNorm cfg.head_dim
   deriving TensorStruct
@@ -325,13 +304,13 @@ structure Qwen35Attention (cfg : Config) where
 namespace Qwen35Attention
 
 abbrev KVCache (cfg : Config) (batch : UInt64) :=
-  qwen.QwenAttention.KVCache batch cfg.num_key_value_heads cfg.head_dim
+  qwen.QwenAttention.KVCache batch cfg.num_key_value_heads cfg.head_dim (.Unknown "dynamic")
 
 def init (cfg : Config) : IO (Qwen35Attention cfg) := do
-  let q ← initWeight #[cfg.num_attention_heads * cfg.head_dim * 2, cfg.hidden_size] cfg.hidden_size
-  let k ← initWeight #[cfg.num_key_value_heads * cfg.head_dim, cfg.hidden_size] cfg.hidden_size
-  let v ← initWeight #[cfg.num_key_value_heads * cfg.head_dim, cfg.hidden_size] cfg.hidden_size
-  let o ← initWeight #[cfg.hidden_size, cfg.num_attention_heads * cfg.head_dim] (cfg.num_attention_heads * cfg.head_dim)
+  let q ← initDynamicWeight #[cfg.num_attention_heads * cfg.head_dim * 2, cfg.hidden_size] cfg.hidden_size
+  let k ← initDynamicWeight #[cfg.num_key_value_heads * cfg.head_dim, cfg.hidden_size] cfg.hidden_size
+  let v ← initDynamicWeight #[cfg.num_key_value_heads * cfg.head_dim, cfg.hidden_size] cfg.hidden_size
+  let o ← initDynamicWeight #[cfg.hidden_size, cfg.num_attention_heads * cfg.head_dim] (cfg.num_attention_heads * cfg.head_dim)
   pure {
     q_proj := q
     k_proj := k
@@ -343,56 +322,56 @@ def init (cfg : Config) : IO (Qwen35Attention cfg) := do
 
 private def applyHeadNorm {batch seq n_heads head_dim : UInt64}
     (norm : Qwen35RMSNorm head_dim)
-    (x : T #[batch, seq, n_heads, head_dim])
-    : T #[batch, seq, n_heads, head_dim] :=
-  let flat : T #[batch * seq * n_heads, head_dim] := reshape x #[batch * seq * n_heads, head_dim]
-  reshape (norm.forward2d flat) #[batch, seq, n_heads, head_dim]
+    (x : STensor #[batch, seq, n_heads, head_dim])
+    : STensor #[batch, seq, n_heads, head_dim] :=
+  let flat : STensor #[batch * seq * n_heads, head_dim] := Tensor.reshapeChecked x #[batch * seq * n_heads, head_dim]
+  Tensor.reshapeChecked (norm.forward2d flat) #[batch, seq, n_heads, head_dim]
 
 private def applyRotaryPartial {batch seq n_head head_dim rotary_dim : UInt64}
-    (x : T #[batch, seq, n_head, head_dim])
-    (cos : T #[seq, rotary_dim / 2])
-    (sin : T #[seq, rotary_dim / 2])
-    : T #[batch, seq, n_head, head_dim] :=
-  let xRot : T #[batch, seq, n_head, rotary_dim] := data.slice x 3 0 rotary_dim
-  let xRot : T #[batch, seq, n_head, rotary_dim] := rotary.applyRotaryEmb xRot cos sin
+    (x : STensor #[batch, seq, n_head, head_dim])
+    (cos : DTensor #[seq, rotary_dim / 2] .Float32)
+    (sin : DTensor #[seq, rotary_dim / 2] .Float32)
+    : STensor #[batch, seq, n_head, head_dim] :=
+  let xRot : STensor #[batch, seq, n_head, rotary_dim] := typedSlice x 3 0 rotary_dim
+  let xRot : STensor #[batch, seq, n_head, rotary_dim] := Tensor.applyRotary xRot cos sin
   let xPassLen : UInt64 := head_dim - rotary_dim
-  let xPass : T #[batch, seq, n_head, xPassLen] := data.slice x 3 rotary_dim xPassLen
-  nn.cat xRot xPass 3
+  let xPass : STensor #[batch, seq, n_head, xPassLen] := typedSlice x 3 rotary_dim xPassLen
+  typedCat xRot xPass 3
 
 private def splitQProjAndGate {batch seq : UInt64}
     (cfg : Config)
-    (qgFlat : T #[batch, seq, cfg.num_attention_heads * cfg.head_dim * 2])
-    : T #[batch, seq, cfg.num_attention_heads, cfg.head_dim]
-      × T #[batch, seq, cfg.num_attention_heads * cfg.head_dim] :=
-  let qg : T #[batch, seq, cfg.num_attention_heads, cfg.head_dim * 2] :=
-    reshape qgFlat #[batch, seq, cfg.num_attention_heads, cfg.head_dim * 2]
-  let q : T #[batch, seq, cfg.num_attention_heads, cfg.head_dim] :=
-    data.slice qg 3 0 cfg.head_dim
-  let gate : T #[batch, seq, cfg.num_attention_heads, cfg.head_dim] :=
-    data.slice qg 3 cfg.head_dim cfg.head_dim
-  let gateFlat : T #[batch, seq, cfg.num_attention_heads * cfg.head_dim] :=
-    reshape gate #[batch, seq, cfg.num_attention_heads * cfg.head_dim]
+    (qgFlat : STensor #[batch, seq, cfg.num_attention_heads * cfg.head_dim * 2])
+    : STensor #[batch, seq, cfg.num_attention_heads, cfg.head_dim]
+      × STensor #[batch, seq, cfg.num_attention_heads * cfg.head_dim] :=
+  let qg : STensor #[batch, seq, cfg.num_attention_heads, cfg.head_dim * 2] :=
+    Tensor.reshapeChecked qgFlat #[batch, seq, cfg.num_attention_heads, cfg.head_dim * 2]
+  let q : STensor #[batch, seq, cfg.num_attention_heads, cfg.head_dim] :=
+    typedSlice qg 3 0 cfg.head_dim
+  let gate : STensor #[batch, seq, cfg.num_attention_heads, cfg.head_dim] :=
+    typedSlice qg 3 cfg.head_dim cfg.head_dim
+  let gateFlat : STensor #[batch, seq, cfg.num_attention_heads * cfg.head_dim] :=
+    Tensor.reshapeChecked gate #[batch, seq, cfg.num_attention_heads * cfg.head_dim]
   (q, gateFlat)
 
 def forward {batch seq : UInt64}
     (cfg : Config)
     (m : Qwen35Attention cfg)
-    (x : T #[batch, seq, cfg.hidden_size])
-    (cos : T #[seq, Config.rotaryHalfDim cfg])
-    (sin : T #[seq, Config.rotaryHalfDim cfg])
+    (x : STensor #[batch, seq, cfg.hidden_size])
+    (cos : DTensor #[seq, Config.rotaryHalfDim cfg] .Float32)
+    (sin : DTensor #[seq, Config.rotaryHalfDim cfg] .Float32)
     (is_causal : Bool := true)
-    : T #[batch, seq, cfg.hidden_size] :=
-  let qg : T #[batch, seq, cfg.num_attention_heads * cfg.head_dim * 2] := linear3d x m.q_proj
+    : STensor #[batch, seq, cfg.hidden_size] :=
+  let qg : STensor #[batch, seq, cfg.num_attention_heads * cfg.head_dim * 2] := Tensor.linear3d x m.q_proj
   let qLen : UInt64 := cfg.num_attention_heads * cfg.head_dim
   let (q, gateFlat) := splitQProjAndGate cfg qg
 
-  let kFlat : T #[batch, seq, cfg.num_key_value_heads * cfg.head_dim] := linear3d x m.k_proj
-  let vFlat : T #[batch, seq, cfg.num_key_value_heads * cfg.head_dim] := linear3d x m.v_proj
+  let kFlat : STensor #[batch, seq, cfg.num_key_value_heads * cfg.head_dim] := Tensor.linear3d x m.k_proj
+  let vFlat : STensor #[batch, seq, cfg.num_key_value_heads * cfg.head_dim] := Tensor.linear3d x m.v_proj
 
-  let k : T #[batch, seq, cfg.num_key_value_heads, cfg.head_dim] :=
-    reshape kFlat #[batch, seq, cfg.num_key_value_heads, cfg.head_dim]
-  let v : T #[batch, seq, cfg.num_key_value_heads, cfg.head_dim] :=
-    reshape vFlat #[batch, seq, cfg.num_key_value_heads, cfg.head_dim]
+  let k : STensor #[batch, seq, cfg.num_key_value_heads, cfg.head_dim] :=
+    Tensor.reshapeChecked kFlat #[batch, seq, cfg.num_key_value_heads, cfg.head_dim]
+  let v : STensor #[batch, seq, cfg.num_key_value_heads, cfg.head_dim] :=
+    Tensor.reshapeChecked vFlat #[batch, seq, cfg.num_key_value_heads, cfg.head_dim]
 
   let q := applyHeadNorm m.q_norm q
   let k := applyHeadNorm m.k_norm k
@@ -400,38 +379,38 @@ def forward {batch seq : UInt64}
   let q := applyRotaryPartial q cos sin
   let k := applyRotaryPartial k cos sin
 
-  let qh : T #[batch, cfg.num_attention_heads, seq, cfg.head_dim] := nn.transpose_for_attention q
-  let kh : T #[batch, cfg.num_key_value_heads, seq, cfg.head_dim] := nn.transpose_for_attention k
-  let vh : T #[batch, cfg.num_key_value_heads, seq, cfg.head_dim] := nn.transpose_for_attention v
+  let qh : STensor #[batch, cfg.num_attention_heads, seq, cfg.head_dim] := Tensor.splitHeads q
+  let kh : STensor #[batch, cfg.num_key_value_heads, seq, cfg.head_dim] := Tensor.splitHeads k
+  let vh : STensor #[batch, cfg.num_key_value_heads, seq, cfg.head_dim] := Tensor.splitHeads v
 
-  let attn : T #[batch, cfg.num_attention_heads, seq, cfg.head_dim] :=
-    nn.scaledDotProductAttentionGQA qh kh vh 0.0 is_causal true
+  let attn : STensor #[batch, cfg.num_attention_heads, seq, cfg.head_dim] :=
+    Tensor.attentionGQA qh kh vh 0.0 is_causal true
 
-  let attn : T #[batch, seq, cfg.num_attention_heads, cfg.head_dim] := nn.transpose_from_attention attn
-  let attnFlat : T #[batch, seq, qLen] := reshape attn #[batch, seq, qLen]
-  let gated : T #[batch, seq, qLen] := attnFlat * nn.sigmoid gateFlat
-  linear3d gated m.o_proj
+  let attn : STensor #[batch, seq, cfg.num_attention_heads, cfg.head_dim] := Tensor.joinHeads attn
+  let attnFlat : STensor #[batch, seq, qLen] := Tensor.reshapeChecked attn #[batch, seq, qLen]
+  let gated : STensor #[batch, seq, qLen] := attnFlat * Tensor.Preserving.sigmoid gateFlat
+  Tensor.linear3d gated m.o_proj
 
 /-- Forward pass with optional KV-cache update (for batch prefill). -/
 def forwardWithCache {batch seq : UInt64}
     (cfg : Config)
     (m : Qwen35Attention cfg)
-    (x : T #[batch, seq, cfg.hidden_size])
-    (cos : T #[seq, Config.rotaryHalfDim cfg])
-    (sin : T #[seq, Config.rotaryHalfDim cfg])
+    (x : STensor #[batch, seq, cfg.hidden_size])
+    (cos : DTensor #[seq, Config.rotaryHalfDim cfg] .Float32)
+    (sin : DTensor #[seq, Config.rotaryHalfDim cfg] .Float32)
     (cache : KVCache cfg batch)
-    : T #[batch, seq, cfg.hidden_size] × KVCache cfg batch :=
-  let qg : T #[batch, seq, cfg.num_attention_heads * cfg.head_dim * 2] := linear3d x m.q_proj
+    : STensor #[batch, seq, cfg.hidden_size] × KVCache cfg batch :=
+  let qg : STensor #[batch, seq, cfg.num_attention_heads * cfg.head_dim * 2] := Tensor.linear3d x m.q_proj
   let qLen : UInt64 := cfg.num_attention_heads * cfg.head_dim
   let (q, gateFlat) := splitQProjAndGate cfg qg
 
-  let kFlat : T #[batch, seq, cfg.num_key_value_heads * cfg.head_dim] := linear3d x m.k_proj
-  let vFlat : T #[batch, seq, cfg.num_key_value_heads * cfg.head_dim] := linear3d x m.v_proj
+  let kFlat : STensor #[batch, seq, cfg.num_key_value_heads * cfg.head_dim] := Tensor.linear3d x m.k_proj
+  let vFlat : STensor #[batch, seq, cfg.num_key_value_heads * cfg.head_dim] := Tensor.linear3d x m.v_proj
 
-  let k : T #[batch, seq, cfg.num_key_value_heads, cfg.head_dim] :=
-    reshape kFlat #[batch, seq, cfg.num_key_value_heads, cfg.head_dim]
-  let v : T #[batch, seq, cfg.num_key_value_heads, cfg.head_dim] :=
-    reshape vFlat #[batch, seq, cfg.num_key_value_heads, cfg.head_dim]
+  let k : STensor #[batch, seq, cfg.num_key_value_heads, cfg.head_dim] :=
+    Tensor.reshapeChecked kFlat #[batch, seq, cfg.num_key_value_heads, cfg.head_dim]
+  let v : STensor #[batch, seq, cfg.num_key_value_heads, cfg.head_dim] :=
+    Tensor.reshapeChecked vFlat #[batch, seq, cfg.num_key_value_heads, cfg.head_dim]
 
   let q := applyHeadNorm m.q_norm q
   let k := applyHeadNorm m.k_norm k
@@ -440,53 +419,53 @@ def forwardWithCache {batch seq : UInt64}
   let k := applyRotaryPartial k cos sin
 
   -- Update cache with full sequence
-  let kh_new := nn.transpose_for_attention k
-  let vh_new := nn.transpose_for_attention v
-  let kStore : T #[batch, cfg.num_key_value_heads, cache.maxLen, cfg.head_dim] :=
-    castLike kh_new (reshape cache.kStoreDyn #[batch, cfg.num_key_value_heads, cache.maxLen, cfg.head_dim])
-  let vStore : T #[batch, cfg.num_key_value_heads, cache.maxLen, cfg.head_dim] :=
-    castLike vh_new (reshape cache.vStoreDyn #[batch, cfg.num_key_value_heads, cache.maxLen, cfg.head_dim])
+  let kh_new := Tensor.splitHeads k
+  let vh_new := Tensor.splitHeads v
+  let kStore : STensor #[batch, cfg.num_key_value_heads, cache.maxLen, cfg.head_dim] :=
+    Tensor.castLike kh_new (Tensor.reshapeChecked cache.kStoreDyn.2 #[batch, cfg.num_key_value_heads, cache.maxLen, cfg.head_dim])
+  let vStore : STensor #[batch, cfg.num_key_value_heads, cache.maxLen, cfg.head_dim] :=
+    Tensor.castLike vh_new (Tensor.reshapeChecked cache.vStoreDyn.2 #[batch, cfg.num_key_value_heads, cache.maxLen, cfg.head_dim])
 
-  let kStore' := data.sliceScatter kStore 2 0 kh_new
-  let vStore' := data.sliceScatter vStore 2 0 vh_new
+  let kStore' := Tensor.sliceScatter kStore 2 0 kh_new
+  let vStore' := Tensor.sliceScatter vStore 2 0 vh_new
 
   let cache' : KVCache cfg batch := { cache with
-    kStoreDyn := nn.eraseShape kStore'
-    vStoreDyn := nn.eraseShape vStore'
+    kStoreDyn := Tensor.packShape kStore'
+    vStoreDyn := Tensor.packShape vStore'
     seq := seq
   }
 
-  let qh : T #[batch, cfg.num_attention_heads, seq, cfg.head_dim] := nn.transpose_for_attention q
-  let kh : T #[batch, cfg.num_key_value_heads, seq, cfg.head_dim] := data.slice kStore' 2 0 seq
-  let vh : T #[batch, cfg.num_key_value_heads, seq, cfg.head_dim] := data.slice vStore' 2 0 seq
-  let attn : T #[batch, cfg.num_attention_heads, seq, cfg.head_dim] :=
-    nn.scaledDotProductAttentionGQA qh kh vh 0.0 true true
+  let qh : STensor #[batch, cfg.num_attention_heads, seq, cfg.head_dim] := Tensor.splitHeads q
+  let kh : STensor #[batch, cfg.num_key_value_heads, seq, cfg.head_dim] := typedSlice kStore' 2 0 seq
+  let vh : STensor #[batch, cfg.num_key_value_heads, seq, cfg.head_dim] := typedSlice vStore' 2 0 seq
+  let attn : STensor #[batch, cfg.num_attention_heads, seq, cfg.head_dim] :=
+    Tensor.attentionGQA qh kh vh 0.0 true true
 
-  let attn : T #[batch, seq, cfg.num_attention_heads, cfg.head_dim] := nn.transpose_from_attention attn
-  let attnFlat : T #[batch, seq, qLen] := reshape attn #[batch, seq, qLen]
-  let gated : T #[batch, seq, qLen] := attnFlat * nn.sigmoid gateFlat
-  (linear3d gated m.o_proj, cache')
+  let attn : STensor #[batch, seq, cfg.num_attention_heads, cfg.head_dim] := Tensor.joinHeads attn
+  let attnFlat : STensor #[batch, seq, qLen] := Tensor.reshapeChecked attn #[batch, seq, qLen]
+  let gated : STensor #[batch, seq, qLen] := attnFlat * Tensor.Preserving.sigmoid gateFlat
+  (Tensor.linear3d gated m.o_proj, cache')
 
 def forwardMasked {batch seq : UInt64}
     (cfg : Config)
     (m : Qwen35Attention cfg)
-    (x : T #[batch, seq, cfg.hidden_size])
-    (cos : T #[seq, Config.rotaryHalfDim cfg])
-    (sin : T #[seq, Config.rotaryHalfDim cfg])
-    (attn_mask : T #[batch, seq])
+    (x : STensor #[batch, seq, cfg.hidden_size])
+    (cos : DTensor #[seq, Config.rotaryHalfDim cfg] .Float32)
+    (sin : DTensor #[seq, Config.rotaryHalfDim cfg] .Float32)
+    (attn_mask : DTensor #[batch, seq] .Int64)
     (is_causal : Bool := true)
-    : T #[batch, seq, cfg.hidden_size] :=
-  let qg : T #[batch, seq, cfg.num_attention_heads * cfg.head_dim * 2] := linear3d x m.q_proj
+    : STensor #[batch, seq, cfg.hidden_size] :=
+  let qg : STensor #[batch, seq, cfg.num_attention_heads * cfg.head_dim * 2] := Tensor.linear3d x m.q_proj
   let qLen : UInt64 := cfg.num_attention_heads * cfg.head_dim
   let (q, gateFlat) := splitQProjAndGate cfg qg
 
-  let kFlat : T #[batch, seq, cfg.num_key_value_heads * cfg.head_dim] := linear3d x m.k_proj
-  let vFlat : T #[batch, seq, cfg.num_key_value_heads * cfg.head_dim] := linear3d x m.v_proj
+  let kFlat : STensor #[batch, seq, cfg.num_key_value_heads * cfg.head_dim] := Tensor.linear3d x m.k_proj
+  let vFlat : STensor #[batch, seq, cfg.num_key_value_heads * cfg.head_dim] := Tensor.linear3d x m.v_proj
 
-  let k : T #[batch, seq, cfg.num_key_value_heads, cfg.head_dim] :=
-    reshape kFlat #[batch, seq, cfg.num_key_value_heads, cfg.head_dim]
-  let v : T #[batch, seq, cfg.num_key_value_heads, cfg.head_dim] :=
-    reshape vFlat #[batch, seq, cfg.num_key_value_heads, cfg.head_dim]
+  let k : STensor #[batch, seq, cfg.num_key_value_heads, cfg.head_dim] :=
+    Tensor.reshapeChecked kFlat #[batch, seq, cfg.num_key_value_heads, cfg.head_dim]
+  let v : STensor #[batch, seq, cfg.num_key_value_heads, cfg.head_dim] :=
+    Tensor.reshapeChecked vFlat #[batch, seq, cfg.num_key_value_heads, cfg.head_dim]
 
   let q := applyHeadNorm m.q_norm q
   let k := applyHeadNorm m.k_norm k
@@ -494,37 +473,37 @@ def forwardMasked {batch seq : UInt64}
   let q := applyRotaryPartial q cos sin
   let k := applyRotaryPartial k cos sin
 
-  let qh : T #[batch, cfg.num_attention_heads, seq, cfg.head_dim] := nn.transpose_for_attention q
-  let kh : T #[batch, cfg.num_key_value_heads, seq, cfg.head_dim] := nn.transpose_for_attention k
-  let vh : T #[batch, cfg.num_key_value_heads, seq, cfg.head_dim] := nn.transpose_for_attention v
+  let qh : STensor #[batch, cfg.num_attention_heads, seq, cfg.head_dim] := Tensor.splitHeads q
+  let kh : STensor #[batch, cfg.num_key_value_heads, seq, cfg.head_dim] := Tensor.splitHeads k
+  let vh : STensor #[batch, cfg.num_key_value_heads, seq, cfg.head_dim] := Tensor.splitHeads v
 
-  let attn : T #[batch, cfg.num_attention_heads, seq, cfg.head_dim] :=
-    nn.scaledDotProductAttentionGQAMask qh kh vh attn_mask 0.0 is_causal true
+  let attn : STensor #[batch, cfg.num_attention_heads, seq, cfg.head_dim] :=
+    Tensor.attentionGQAMask qh kh vh attn_mask 0.0 is_causal true
 
-  let attn : T #[batch, seq, cfg.num_attention_heads, cfg.head_dim] := nn.transpose_from_attention attn
-  let attnFlat : T #[batch, seq, qLen] := reshape attn #[batch, seq, qLen]
-  let gated : T #[batch, seq, qLen] := attnFlat * nn.sigmoid gateFlat
-  linear3d gated m.o_proj
+  let attn : STensor #[batch, seq, cfg.num_attention_heads, cfg.head_dim] := Tensor.joinHeads attn
+  let attnFlat : STensor #[batch, seq, qLen] := Tensor.reshapeChecked attn #[batch, seq, qLen]
+  let gated : STensor #[batch, seq, qLen] := attnFlat * Tensor.Preserving.sigmoid gateFlat
+  Tensor.linear3d gated m.o_proj
 
 def forwardStep {batch : UInt64}
     (cfg : Config)
     (m : Qwen35Attention cfg)
-    (x : T #[batch, 1, cfg.hidden_size])
-    (cos : T #[1, Config.rotaryHalfDim cfg])
-    (sin : T #[1, Config.rotaryHalfDim cfg])
+    (x : STensor #[batch, 1, cfg.hidden_size])
+    (cos : DTensor #[1, Config.rotaryHalfDim cfg] .Float32)
+    (sin : DTensor #[1, Config.rotaryHalfDim cfg] .Float32)
     (cache : KVCache cfg batch)
-    : T #[batch, 1, cfg.hidden_size] × KVCache cfg batch :=
-  let qg : T #[batch, 1, cfg.num_attention_heads * cfg.head_dim * 2] := linear3d x m.q_proj
+    : STensor #[batch, 1, cfg.hidden_size] × KVCache cfg batch :=
+  let qg : STensor #[batch, 1, cfg.num_attention_heads * cfg.head_dim * 2] := Tensor.linear3d x m.q_proj
   let qLen : UInt64 := cfg.num_attention_heads * cfg.head_dim
   let (q, gateFlat) := splitQProjAndGate cfg qg
 
-  let kFlat : T #[batch, 1, cfg.num_key_value_heads * cfg.head_dim] := linear3d x m.k_proj
-  let vFlat : T #[batch, 1, cfg.num_key_value_heads * cfg.head_dim] := linear3d x m.v_proj
+  let kFlat : STensor #[batch, 1, cfg.num_key_value_heads * cfg.head_dim] := Tensor.linear3d x m.k_proj
+  let vFlat : STensor #[batch, 1, cfg.num_key_value_heads * cfg.head_dim] := Tensor.linear3d x m.v_proj
 
-  let k : T #[batch, 1, cfg.num_key_value_heads, cfg.head_dim] :=
-    reshape kFlat #[batch, 1, cfg.num_key_value_heads, cfg.head_dim]
-  let v : T #[batch, 1, cfg.num_key_value_heads, cfg.head_dim] :=
-    reshape vFlat #[batch, 1, cfg.num_key_value_heads, cfg.head_dim]
+  let k : STensor #[batch, 1, cfg.num_key_value_heads, cfg.head_dim] :=
+    Tensor.reshapeChecked kFlat #[batch, 1, cfg.num_key_value_heads, cfg.head_dim]
+  let v : STensor #[batch, 1, cfg.num_key_value_heads, cfg.head_dim] :=
+    Tensor.reshapeChecked vFlat #[batch, 1, cfg.num_key_value_heads, cfg.head_dim]
 
   let q := applyHeadNorm m.q_norm q
   let k := applyHeadNorm m.k_norm k
@@ -532,54 +511,54 @@ def forwardStep {batch : UInt64}
   let q := applyRotaryPartial q cos sin
   let k := applyRotaryPartial k cos sin
 
-  let qh : T #[batch, cfg.num_attention_heads, 1, cfg.head_dim] := nn.transpose_for_attention q
-  let kNew : T #[batch, cfg.num_key_value_heads, 1, cfg.head_dim] := nn.transpose_for_attention k
-  let vNew : T #[batch, cfg.num_key_value_heads, 1, cfg.head_dim] := nn.transpose_for_attention v
+  let qh : STensor #[batch, cfg.num_attention_heads, 1, cfg.head_dim] := Tensor.splitHeads q
+  let kNew : STensor #[batch, cfg.num_key_value_heads, 1, cfg.head_dim] := Tensor.splitHeads k
+  let vNew : STensor #[batch, cfg.num_key_value_heads, 1, cfg.head_dim] := Tensor.splitHeads v
 
-  let kStore : T #[batch, cfg.num_key_value_heads, cache.maxLen, cfg.head_dim] :=
-    castLike kNew (reshape cache.kStoreDyn #[batch, cfg.num_key_value_heads, cache.maxLen, cfg.head_dim])
-  let vStore : T #[batch, cfg.num_key_value_heads, cache.maxLen, cfg.head_dim] :=
-    castLike vNew (reshape cache.vStoreDyn #[batch, cfg.num_key_value_heads, cache.maxLen, cfg.head_dim])
+  let kStore : STensor #[batch, cfg.num_key_value_heads, cache.maxLen, cfg.head_dim] :=
+    Tensor.castLike kNew (Tensor.reshapeChecked cache.kStoreDyn.2 #[batch, cfg.num_key_value_heads, cache.maxLen, cfg.head_dim])
+  let vStore : STensor #[batch, cfg.num_key_value_heads, cache.maxLen, cfg.head_dim] :=
+    Tensor.castLike vNew (Tensor.reshapeChecked cache.vStoreDyn.2 #[batch, cfg.num_key_value_heads, cache.maxLen, cfg.head_dim])
 
   if cache.seq < cache.maxLen then
-    let kStore' : T #[batch, cfg.num_key_value_heads, cache.maxLen, cfg.head_dim] :=
-      data.sliceScatter kStore 2 cache.seq kNew
-    let vStore' : T #[batch, cfg.num_key_value_heads, cache.maxLen, cfg.head_dim] :=
-      data.sliceScatter vStore 2 cache.seq vNew
+    let kStore' : STensor #[batch, cfg.num_key_value_heads, cache.maxLen, cfg.head_dim] :=
+      Tensor.sliceScatter kStore 2 cache.seq kNew
+    let vStore' : STensor #[batch, cfg.num_key_value_heads, cache.maxLen, cfg.head_dim] :=
+      Tensor.sliceScatter vStore 2 cache.seq vNew
     let kvLen : UInt64 := cache.seq + 1
-    let kAll : T #[batch, cfg.num_key_value_heads, kvLen, cfg.head_dim] := data.slice kStore' 2 0 kvLen
-    let vAll : T #[batch, cfg.num_key_value_heads, kvLen, cfg.head_dim] := data.slice vStore' 2 0 kvLen
-    let attn : T #[batch, cfg.num_attention_heads, 1, cfg.head_dim] :=
-      nn.scaledDotProductAttentionGQAQKV qh kAll vAll 0.0 false true
-    let attn : T #[batch, 1, cfg.num_attention_heads, cfg.head_dim] := nn.transpose_from_attention attn
-    let attnFlat : T #[batch, 1, qLen] := reshape attn #[batch, 1, qLen]
-    let gated : T #[batch, 1, qLen] := attnFlat * nn.sigmoid gateFlat
-    let out : T #[batch, 1, cfg.hidden_size] := linear3d gated m.o_proj
+    let kAll : STensor #[batch, cfg.num_key_value_heads, kvLen, cfg.head_dim] := typedSlice kStore' 2 0 kvLen
+    let vAll : STensor #[batch, cfg.num_key_value_heads, kvLen, cfg.head_dim] := typedSlice vStore' 2 0 kvLen
+    let attn : STensor #[batch, cfg.num_attention_heads, 1, cfg.head_dim] :=
+      Tensor.attentionGQAQKV qh kAll vAll 0.0 false true
+    let attn : STensor #[batch, 1, cfg.num_attention_heads, cfg.head_dim] := Tensor.joinHeads attn
+    let attnFlat : STensor #[batch, 1, qLen] := Tensor.reshapeChecked attn #[batch, 1, qLen]
+    let gated : STensor #[batch, 1, qLen] := attnFlat * Tensor.Preserving.sigmoid gateFlat
+    let out : STensor #[batch, 1, cfg.hidden_size] := Tensor.linear3d gated m.o_proj
     let cache' : KVCache cfg batch := {
-      kStoreDyn := nn.eraseShape kStore'
-      vStoreDyn := nn.eraseShape vStore'
+      kStoreDyn := Tensor.packShape kStore'
+      vStoreDyn := Tensor.packShape vStore'
       seq := kvLen
       maxLen := cache.maxLen
     }
     (out, cache')
   else
     let writePos : UInt64 := if cache.maxLen == 0 then 0 else cache.maxLen - 1
-    let kStore' : T #[batch, cfg.num_key_value_heads, cache.maxLen, cfg.head_dim] :=
-      data.sliceScatter kStore 2 writePos kNew
-    let vStore' : T #[batch, cfg.num_key_value_heads, cache.maxLen, cfg.head_dim] :=
-      data.sliceScatter vStore 2 writePos vNew
+    let kStore' : STensor #[batch, cfg.num_key_value_heads, cache.maxLen, cfg.head_dim] :=
+      Tensor.sliceScatter kStore 2 writePos kNew
+    let vStore' : STensor #[batch, cfg.num_key_value_heads, cache.maxLen, cfg.head_dim] :=
+      Tensor.sliceScatter vStore 2 writePos vNew
     let kvLen : UInt64 := cache.maxLen
-    let kAll : T #[batch, cfg.num_key_value_heads, kvLen, cfg.head_dim] := data.slice kStore' 2 0 kvLen
-    let vAll : T #[batch, cfg.num_key_value_heads, kvLen, cfg.head_dim] := data.slice vStore' 2 0 kvLen
-    let attn : T #[batch, cfg.num_attention_heads, 1, cfg.head_dim] :=
-      nn.scaledDotProductAttentionGQAQKV qh kAll vAll 0.0 false true
-    let attn : T #[batch, 1, cfg.num_attention_heads, cfg.head_dim] := nn.transpose_from_attention attn
-    let attnFlat : T #[batch, 1, qLen] := reshape attn #[batch, 1, qLen]
-    let gated : T #[batch, 1, qLen] := attnFlat * nn.sigmoid gateFlat
-    let out : T #[batch, 1, cfg.hidden_size] := linear3d gated m.o_proj
+    let kAll : STensor #[batch, cfg.num_key_value_heads, kvLen, cfg.head_dim] := typedSlice kStore' 2 0 kvLen
+    let vAll : STensor #[batch, cfg.num_key_value_heads, kvLen, cfg.head_dim] := typedSlice vStore' 2 0 kvLen
+    let attn : STensor #[batch, cfg.num_attention_heads, 1, cfg.head_dim] :=
+      Tensor.attentionGQAQKV qh kAll vAll 0.0 false true
+    let attn : STensor #[batch, 1, cfg.num_attention_heads, cfg.head_dim] := Tensor.joinHeads attn
+    let attnFlat : STensor #[batch, 1, qLen] := Tensor.reshapeChecked attn #[batch, 1, qLen]
+    let gated : STensor #[batch, 1, qLen] := attnFlat * Tensor.Preserving.sigmoid gateFlat
+    let out : STensor #[batch, 1, cfg.hidden_size] := Tensor.linear3d gated m.o_proj
     let cache' : KVCache cfg batch := {
-      kStoreDyn := nn.eraseShape kStore'
-      vStoreDyn := nn.eraseShape vStore'
+      kStoreDyn := Tensor.packShape kStore'
+      vStoreDyn := Tensor.packShape vStore'
       seq := cache.maxLen
       maxLen := cache.maxLen
     }
@@ -589,39 +568,39 @@ end Qwen35Attention
 
 /-- Linear token mixer for Qwen3.5 (`GatedDeltaNet`). -/
 structure Qwen35GatedDeltaNet (cfg : Config) where
-  in_proj_qkv : T #[Config.linearConvDim cfg, cfg.hidden_size]
-  in_proj_z : T #[Config.linearValueDim cfg, cfg.hidden_size]
-  in_proj_b : T #[cfg.linear_num_value_heads, cfg.hidden_size]
-  in_proj_a : T #[cfg.linear_num_value_heads, cfg.hidden_size]
+  in_proj_qkv : STensor #[Config.linearConvDim cfg, cfg.hidden_size]
+  in_proj_z : STensor #[Config.linearValueDim cfg, cfg.hidden_size]
+  in_proj_b : STensor #[cfg.linear_num_value_heads, cfg.hidden_size]
+  in_proj_a : STensor #[cfg.linear_num_value_heads, cfg.hidden_size]
 
-  conv1d_weight : T #[Config.linearConvDim cfg, 1, cfg.linear_conv_kernel_dim]
-  conv1d_bias : T #[Config.linearConvDim cfg]
+  conv1d_weight : STensor #[Config.linearConvDim cfg, 1, cfg.linear_conv_kernel_dim]
+  conv1d_bias : STensor #[Config.linearConvDim cfg]
 
-  dt_bias : T #[cfg.linear_num_value_heads]
-  a_log : T #[cfg.linear_num_value_heads]
+  dt_bias : STensor #[cfg.linear_num_value_heads]
+  a_log : STensor #[cfg.linear_num_value_heads]
 
   norm : Qwen35RMSNormGated cfg.linear_value_head_dim
-  out_proj : T #[cfg.hidden_size, Config.linearValueDim cfg]
+  out_proj : STensor #[cfg.hidden_size, Config.linearValueDim cfg]
   deriving TensorStruct
 
 namespace Qwen35GatedDeltaNet
 
 def init (cfg : Config) : IO (Qwen35GatedDeltaNet cfg) := do
-  let inQKV ← initWeight #[Config.linearConvDim cfg, cfg.hidden_size] cfg.hidden_size
-  let inZ ← initWeight #[Config.linearValueDim cfg, cfg.hidden_size] cfg.hidden_size
-  let inB ← initWeight #[cfg.linear_num_value_heads, cfg.hidden_size] cfg.hidden_size
-  let inA ← initWeight #[cfg.linear_num_value_heads, cfg.hidden_size] cfg.hidden_size
+  let inQKV ← initDynamicWeight #[Config.linearConvDim cfg, cfg.hidden_size] cfg.hidden_size
+  let inZ ← initDynamicWeight #[Config.linearValueDim cfg, cfg.hidden_size] cfg.hidden_size
+  let inB ← initDynamicWeight #[cfg.linear_num_value_heads, cfg.hidden_size] cfg.hidden_size
+  let inA ← initDynamicWeight #[cfg.linear_num_value_heads, cfg.hidden_size] cfg.hidden_size
 
-  let convW ← initWeight #[Config.linearConvDim cfg, 1, cfg.linear_conv_kernel_dim] cfg.linear_conv_kernel_dim
-  let convB := initBias #[Config.linearConvDim cfg]
+  let convW ← initDynamicWeight #[Config.linearConvDim cfg, 1, cfg.linear_conv_kernel_dim] cfg.linear_conv_kernel_dim
+  let convB := initDynamicBias #[Config.linearConvDim cfg]
 
-  let dtBias := autograd.set_requires_grad (torch.ones #[cfg.linear_num_value_heads]) true
+  let dtBias := Tensor.setRequiresGrad (onesDynamic #[cfg.linear_num_value_heads]) true
 
-  let aRand ← torch.rand #[cfg.linear_num_value_heads]
-  let aScaled : T #[cfg.linear_num_value_heads] := add_scalar (mul_scalar aRand 16.0) 1e-6
-  let aLog := autograd.set_requires_grad (nn.log aScaled) true
+  let aRand ← randDynamic #[cfg.linear_num_value_heads]
+  let aScaled : STensor #[cfg.linear_num_value_heads] := Tensor.Preserving.addScalar (Tensor.Preserving.mulScalar aRand 16.0) 1e-6
+  let aLog := Tensor.setRequiresGrad (logDynamic aScaled) true
 
-  let outProj ← initWeight #[cfg.hidden_size, Config.linearValueDim cfg] (Config.linearValueDim cfg)
+  let outProj ← initDynamicWeight #[cfg.hidden_size, Config.linearValueDim cfg] (Config.linearValueDim cfg)
   pure {
     in_proj_qkv := inQKV
     in_proj_z := inZ
@@ -636,115 +615,115 @@ def init (cfg : Config) : IO (Qwen35GatedDeltaNet cfg) := do
   }
 
 private def repeatHeads {batch seq n_head head_dim rep : UInt64}
-    (x : T #[batch, seq, n_head, head_dim])
-    : T #[batch, seq, n_head * rep, head_dim] :=
+    (x : STensor #[batch, seq, n_head, head_dim])
+    : STensor #[batch, seq, n_head * rep, head_dim] :=
   if rep == 1 then
-    reshape x #[batch, seq, n_head * rep, head_dim]
+    Tensor.reshapeChecked x #[batch, seq, n_head * rep, head_dim]
   else
-    let x5 : T #[batch, seq, n_head, 1, head_dim] := nn.unsqueeze x 3
-    let x5 : T #[batch, seq, n_head, rep, head_dim] := nn.expand x5 #[batch, seq, n_head, rep, head_dim]
-    reshape x5 #[batch, seq, n_head * rep, head_dim]
+    let x5 : STensor #[batch, seq, n_head, 1, head_dim] := x.reshapeChecked #[batch, seq, n_head, 1, head_dim]
+    let x5 : STensor #[batch, seq, n_head, rep, head_dim] := Tensor.expand x5 #[batch, seq, n_head, rep, head_dim]
+    Tensor.reshapeChecked x5 #[batch, seq, n_head * rep, head_dim]
 
 /-- Run linear token mixer. If `cacheConv`/`cacheRec` are provided and
     `usePrecomputedState=true`, performs incremental one-step update. -/
 def forward {batch seq : UInt64}
     (cfg : Config)
     (m : Qwen35GatedDeltaNet cfg)
-    (hidden : T #[batch, seq, cfg.hidden_size])
-    (attentionMask : Option (T #[batch, seq]) := none)
-    (cacheConv : Option (T #[batch, Config.linearConvDim cfg, cfg.linear_conv_kernel_dim]) := none)
-    (cacheRec : Option (T #[batch, cfg.linear_num_value_heads, cfg.linear_key_head_dim, cfg.linear_value_head_dim]) := none)
+    (hidden : STensor #[batch, seq, cfg.hidden_size])
+    (attentionMask : Option (DTensor #[batch, seq] .Int64) := none)
+    (cacheConv : Option (STensor #[batch, Config.linearConvDim cfg, cfg.linear_conv_kernel_dim]) := none)
+    (cacheRec : Option (DTensor #[batch, cfg.linear_num_value_heads, cfg.linear_key_head_dim, cfg.linear_value_head_dim] .Float32) := none)
     (usePrecomputedState : Bool := false)
-    : T #[batch, seq, cfg.hidden_size]
-      × Option (T #[batch, Config.linearConvDim cfg, cfg.linear_conv_kernel_dim])
-      × Option (T #[batch, cfg.linear_num_value_heads, cfg.linear_key_head_dim, cfg.linear_value_head_dim]) :=
+    : STensor #[batch, seq, cfg.hidden_size]
+      × Option (STensor #[batch, Config.linearConvDim cfg, cfg.linear_conv_kernel_dim])
+      × Option (DTensor #[batch, cfg.linear_num_value_heads, cfg.linear_key_head_dim, cfg.linear_value_head_dim] .Float32) :=
   let hidden := applyMaskToPaddingStates hidden attentionMask
   let device := hidden.device
 
-  let mixedQKV : T #[batch, seq, Config.linearConvDim cfg] := linear3d hidden m.in_proj_qkv
-  let mixedQKVc : T #[batch, Config.linearConvDim cfg, seq] := nn.transpose3d_12 mixedQKV
+  let mixedQKV : STensor #[batch, seq, Config.linearConvDim cfg] := Tensor.linear3d hidden m.in_proj_qkv
+  let mixedQKVc : STensor #[batch, Config.linearConvDim cfg, seq] := transposeSeq mixedQKV
 
-  let zFlat : T #[batch, seq, Config.linearValueDim cfg] := linear3d hidden m.in_proj_z
-  let z : T #[batch, seq, cfg.linear_num_value_heads, cfg.linear_value_head_dim] :=
-    reshape zFlat #[batch, seq, cfg.linear_num_value_heads, cfg.linear_value_head_dim]
+  let zFlat : STensor #[batch, seq, Config.linearValueDim cfg] := Tensor.linear3d hidden m.in_proj_z
+  let z : STensor #[batch, seq, cfg.linear_num_value_heads, cfg.linear_value_head_dim] :=
+    Tensor.reshapeChecked zFlat #[batch, seq, cfg.linear_num_value_heads, cfg.linear_value_head_dim]
 
-  let b : T #[batch, seq, cfg.linear_num_value_heads] := linear3d hidden m.in_proj_b
-  let a : T #[batch, seq, cfg.linear_num_value_heads] := linear3d hidden m.in_proj_a
+  let b : STensor #[batch, seq, cfg.linear_num_value_heads] := Tensor.linear3d hidden m.in_proj_b
+  let a : STensor #[batch, seq, cfg.linear_num_value_heads] := Tensor.linear3d hidden m.in_proj_a
 
   let (convOut, nextConvState) :
-      T #[batch, Config.linearConvDim cfg, seq]
-        × Option (T #[batch, Config.linearConvDim cfg, cfg.linear_conv_kernel_dim]) :=
+      STensor #[batch, Config.linearConvDim cfg, seq]
+        × Option (STensor #[batch, Config.linearConvDim cfg, cfg.linear_conv_kernel_dim]) :=
     if usePrecomputedState && seq == 1 then
       match cacheConv with
       | some st =>
-        let catIn : T #[batch, Config.linearConvDim cfg, cfg.linear_conv_kernel_dim + 1] := nn.cat st mixedQKVc 2
-        let convIn : T #[batch, Config.linearConvDim cfg, cfg.linear_conv_kernel_dim + 1] :=
-          castLike m.conv1d_weight catIn
-        let stNext : T #[batch, Config.linearConvDim cfg, cfg.linear_conv_kernel_dim] :=
-          data.slice catIn 2 1 cfg.linear_conv_kernel_dim
-        let raw : T #[batch, Config.linearConvDim cfg, 2] :=
-          nn.conv1d_group_bias convIn m.conv1d_weight m.conv1d_bias 1 0 1 (Config.linearConvDim cfg)
-        let y : T #[batch, Config.linearConvDim cfg, 1] := data.slice raw 2 1 1
-        (nn.silu y, some stNext)
+        let catIn : STensor #[batch, Config.linearConvDim cfg, cfg.linear_conv_kernel_dim + 1] := typedCat st mixedQKVc 2
+        let convIn : STensor #[batch, Config.linearConvDim cfg, cfg.linear_conv_kernel_dim + 1] :=
+          Tensor.castLike m.conv1d_weight catIn
+        let stNext : STensor #[batch, Config.linearConvDim cfg, cfg.linear_conv_kernel_dim] :=
+          typedSlice catIn 2 1 cfg.linear_conv_kernel_dim
+        let raw : STensor #[batch, Config.linearConvDim cfg, 2] :=
+          convGroups convIn m.conv1d_weight m.conv1d_bias 1 0 1 (Config.linearConvDim cfg)
+        let y : STensor #[batch, Config.linearConvDim cfg, 1] := typedSlice raw 2 1 1
+        ((Tensor.Preserving.silu y).reshapeChecked #[batch, Config.linearConvDim cfg, seq], some stNext)
       | none =>
-        let convIn : T #[batch, Config.linearConvDim cfg, seq] :=
-          castLike m.conv1d_weight mixedQKVc
-        let raw : T #[batch, Config.linearConvDim cfg, seq + cfg.linear_conv_kernel_dim - 1] :=
-          nn.conv1d_group_bias convIn m.conv1d_weight m.conv1d_bias 1 (cfg.linear_conv_kernel_dim - 1) 1 (Config.linearConvDim cfg)
-        let y : T #[batch, Config.linearConvDim cfg, seq] := data.slice raw 2 0 seq
+        let convIn : STensor #[batch, Config.linearConvDim cfg, seq] :=
+          Tensor.castLike m.conv1d_weight mixedQKVc
+        let raw : STensor #[batch, Config.linearConvDim cfg, seq + cfg.linear_conv_kernel_dim - 1] :=
+          convGroups convIn m.conv1d_weight m.conv1d_bias 1 (cfg.linear_conv_kernel_dim - 1) 1 (Config.linearConvDim cfg)
+        let y : STensor #[batch, Config.linearConvDim cfg, seq] := typedSlice raw 2 0 seq
         let nextState :=
           if seq >= cfg.linear_conv_kernel_dim then
-            some (data.slice mixedQKVc 2 (seq - cfg.linear_conv_kernel_dim) cfg.linear_conv_kernel_dim)
+            some (typedSlice mixedQKVc 2 (seq - cfg.linear_conv_kernel_dim) cfg.linear_conv_kernel_dim)
           else
             let padLen : UInt64 := cfg.linear_conv_kernel_dim - seq
-            let z0 : T #[batch, Config.linearConvDim cfg, padLen] := zerosOn device
-            some (nn.cat z0 mixedQKVc 2)
-        (nn.silu y, nextState)
+            let z0 : STensor #[batch, Config.linearConvDim cfg, padLen] := zerosDynamicOn device
+            some (typedCat z0 mixedQKVc 2)
+        (Tensor.Preserving.silu y, nextState)
     else
-      let convIn : T #[batch, Config.linearConvDim cfg, seq] :=
-        castLike m.conv1d_weight mixedQKVc
-      let raw : T #[batch, Config.linearConvDim cfg, seq + cfg.linear_conv_kernel_dim - 1] :=
-        nn.conv1d_group_bias convIn m.conv1d_weight m.conv1d_bias 1 (cfg.linear_conv_kernel_dim - 1) 1 (Config.linearConvDim cfg)
-      let y : T #[batch, Config.linearConvDim cfg, seq] := data.slice raw 2 0 seq
+      let convIn : STensor #[batch, Config.linearConvDim cfg, seq] :=
+        Tensor.castLike m.conv1d_weight mixedQKVc
+      let raw : STensor #[batch, Config.linearConvDim cfg, seq + cfg.linear_conv_kernel_dim - 1] :=
+        convGroups convIn m.conv1d_weight m.conv1d_bias 1 (cfg.linear_conv_kernel_dim - 1) 1 (Config.linearConvDim cfg)
+      let y : STensor #[batch, Config.linearConvDim cfg, seq] := typedSlice raw 2 0 seq
       let nextState :=
         if seq >= cfg.linear_conv_kernel_dim then
-          some (data.slice mixedQKVc 2 (seq - cfg.linear_conv_kernel_dim) cfg.linear_conv_kernel_dim)
+          some (typedSlice mixedQKVc 2 (seq - cfg.linear_conv_kernel_dim) cfg.linear_conv_kernel_dim)
         else
           let padLen : UInt64 := cfg.linear_conv_kernel_dim - seq
-          let z0 : T #[batch, Config.linearConvDim cfg, padLen] := zerosOn device
-          some (nn.cat z0 mixedQKVc 2)
-      (nn.silu y, nextState)
+          let z0 : STensor #[batch, Config.linearConvDim cfg, padLen] := zerosDynamicOn device
+          some (typedCat z0 mixedQKVc 2)
+      (Tensor.Preserving.silu y, nextState)
 
-  let mixed : T #[batch, seq, Config.linearConvDim cfg] := nn.transpose3d_12 convOut
+  let mixed : STensor #[batch, seq, Config.linearConvDim cfg] := transposeSeq convOut
 
   let keyDim : UInt64 := Config.linearKeyDim cfg
   let valDim : UInt64 := Config.linearValueDim cfg
 
-  let qRaw : T #[batch, seq, keyDim] := data.slice mixed 2 0 keyDim
-  let kRaw : T #[batch, seq, keyDim] := data.slice mixed 2 keyDim keyDim
-  let vRaw : T #[batch, seq, valDim] := data.slice mixed 2 (keyDim * 2) valDim
+  let qRaw : STensor #[batch, seq, keyDim] := typedSlice mixed 2 0 keyDim
+  let kRaw : STensor #[batch, seq, keyDim] := typedSlice mixed 2 keyDim keyDim
+  let vRaw : STensor #[batch, seq, valDim] := typedSlice mixed 2 (keyDim * 2) valDim
 
-  let q0 : T #[batch, seq, cfg.linear_num_key_heads, cfg.linear_key_head_dim] :=
-    reshape qRaw #[batch, seq, cfg.linear_num_key_heads, cfg.linear_key_head_dim]
-  let k0 : T #[batch, seq, cfg.linear_num_key_heads, cfg.linear_key_head_dim] :=
-    reshape kRaw #[batch, seq, cfg.linear_num_key_heads, cfg.linear_key_head_dim]
-  let v : T #[batch, seq, cfg.linear_num_value_heads, cfg.linear_value_head_dim] :=
-    reshape vRaw #[batch, seq, cfg.linear_num_value_heads, cfg.linear_value_head_dim]
+  let q0 : STensor #[batch, seq, cfg.linear_num_key_heads, cfg.linear_key_head_dim] :=
+    Tensor.reshapeChecked qRaw #[batch, seq, cfg.linear_num_key_heads, cfg.linear_key_head_dim]
+  let k0 : STensor #[batch, seq, cfg.linear_num_key_heads, cfg.linear_key_head_dim] :=
+    Tensor.reshapeChecked kRaw #[batch, seq, cfg.linear_num_key_heads, cfg.linear_key_head_dim]
+  let v : STensor #[batch, seq, cfg.linear_num_value_heads, cfg.linear_value_head_dim] :=
+    Tensor.reshapeChecked vRaw #[batch, seq, cfg.linear_num_value_heads, cfg.linear_value_head_dim]
 
-  let beta : T #[batch, seq, cfg.linear_num_value_heads] := nn.sigmoid b
+  let beta : STensor #[batch, seq, cfg.linear_num_value_heads] := Tensor.Preserving.sigmoid b
 
-  let dt : T #[batch, seq, cfg.linear_num_value_heads] :=
-    nn.expand (reshape m.dt_bias #[1, 1, cfg.linear_num_value_heads]) #[batch, seq, cfg.linear_num_value_heads]
-  let aExp : T #[batch, seq, cfg.linear_num_value_heads] :=
-    nn.expand (reshape (nn.exp (toFloat' m.a_log)) #[1, 1, cfg.linear_num_value_heads]) #[batch, seq, cfg.linear_num_value_heads]
-  let gPos : T #[batch, seq, cfg.linear_num_value_heads] := nn.softplus (toFloat' (a + dt))
-  let g : T #[batch, seq, cfg.linear_num_value_heads] := mul_scalar (gPos * aExp) (-1.0)
+  let dt : STensor #[batch, seq, cfg.linear_num_value_heads] :=
+    Tensor.expand (Tensor.reshapeChecked m.dt_bias #[1, 1, cfg.linear_num_value_heads]) #[batch, seq, cfg.linear_num_value_heads]
+  let aExp : STensor #[batch, seq, cfg.linear_num_value_heads] :=
+    Tensor.expand (Tensor.reshapeChecked (Tensor.Preserving.exp (floatDynamic m.a_log)) #[1, 1, cfg.linear_num_value_heads]) #[batch, seq, cfg.linear_num_value_heads]
+  let gPos : STensor #[batch, seq, cfg.linear_num_value_heads] := softplusDynamic (floatDynamic (a + dt))
+  let g : STensor #[batch, seq, cfg.linear_num_value_heads] := Tensor.Preserving.mulScalar (gPos * aExp) (-1.0)
 
   let rep := Config.linearKVRepeat cfg
-  let q : T #[batch, seq, cfg.linear_num_value_heads, cfg.linear_key_head_dim] :=
-    repeatHeads (rep := rep) q0
-  let k : T #[batch, seq, cfg.linear_num_value_heads, cfg.linear_key_head_dim] :=
-    repeatHeads (rep := rep) k0
+  let q : STensor #[batch, seq, cfg.linear_num_value_heads, cfg.linear_key_head_dim] :=
+    (repeatHeads (rep := rep) q0).reshapeChecked #[batch, seq, cfg.linear_num_value_heads, cfg.linear_key_head_dim]
+  let k : STensor #[batch, seq, cfg.linear_num_value_heads, cfg.linear_key_head_dim] :=
+    (repeatHeads (rep := rep) k0).reshapeChecked #[batch, seq, cfg.linear_num_value_heads, cfg.linear_key_head_dim]
 
   let (core, finalState) :=
     if usePrecomputedState then
@@ -756,14 +735,14 @@ def forward {batch seq : UInt64}
     else
       chunkGatedDeltaRule q k v g beta
 
-  let core2d : T #[batch * seq * cfg.linear_num_value_heads, cfg.linear_value_head_dim] :=
-    reshape core #[batch * seq * cfg.linear_num_value_heads, cfg.linear_value_head_dim]
-  let z2d : T #[batch * seq * cfg.linear_num_value_heads, cfg.linear_value_head_dim] :=
-    reshape z #[batch * seq * cfg.linear_num_value_heads, cfg.linear_value_head_dim]
+  let core2d : STensor #[batch * seq * cfg.linear_num_value_heads, cfg.linear_value_head_dim] :=
+    Tensor.reshapeChecked core #[batch * seq * cfg.linear_num_value_heads, cfg.linear_value_head_dim]
+  let z2d : STensor #[batch * seq * cfg.linear_num_value_heads, cfg.linear_value_head_dim] :=
+    Tensor.reshapeChecked z #[batch * seq * cfg.linear_num_value_heads, cfg.linear_value_head_dim]
   let core2d := m.norm.forward2d core2d z2d
-  let core3d : T #[batch, seq, valDim] := reshape core2d #[batch, seq, valDim]
+  let core3d : STensor #[batch, seq, valDim] := Tensor.reshapeChecked core2d #[batch, seq, valDim]
 
-  let out : T #[batch, seq, cfg.hidden_size] := linear3d core3d m.out_proj
+  let out : STensor #[batch, seq, cfg.hidden_size] := Tensor.linear3d core3d m.out_proj
   (out, nextConvState, some finalState)
 
 end Qwen35GatedDeltaNet
@@ -771,8 +750,8 @@ end Qwen35GatedDeltaNet
 /-- Layer-local cache bundle for hybrid token mixers. -/
 structure HybridCache (cfg : Config) (batch : UInt64) where
   attnCaches : Array (Option (Qwen35Attention.KVCache cfg batch))
-  convStates : Array (Option (T #[batch, Config.linearConvDim cfg, cfg.linear_conv_kernel_dim]))
-  recurrentStates : Array (Option (T #[batch, cfg.linear_num_value_heads, cfg.linear_key_head_dim, cfg.linear_value_head_dim]))
+  convStates : Array (Option (STensor #[batch, Config.linearConvDim cfg, cfg.linear_conv_kernel_dim]))
+  recurrentStates : Array (Option (DTensor #[batch, cfg.linear_num_value_heads, cfg.linear_key_head_dim, cfg.linear_value_head_dim] .Float32))
   lastLinearLayer : Option Nat := none
 
 namespace HybridCache
@@ -845,11 +824,11 @@ def init (cfg : Config) (layerType : LayerType) : IO (Qwen35Layer cfg) := do
 def forward {batch seq : UInt64}
     (cfg : Config)
     (layer : Qwen35Layer cfg)
-    (x : T #[batch, seq, cfg.hidden_size])
-    (cos : T #[seq, Config.rotaryHalfDim cfg])
-    (sin : T #[seq, Config.rotaryHalfDim cfg])
-    (attnMask : Option (T #[batch, seq]) := none)
-    : T #[batch, seq, cfg.hidden_size] :=
+    (x : STensor #[batch, seq, cfg.hidden_size])
+    (cos : DTensor #[seq, Config.rotaryHalfDim cfg] .Float32)
+    (sin : DTensor #[seq, Config.rotaryHalfDim cfg] .Float32)
+    (attnMask : Option (DTensor #[batch, seq] .Int64) := none)
+    : STensor #[batch, seq, cfg.hidden_size] :=
   let residual1 := x
   let h1 := layer.input_layernorm.forward3d x
   let mixed :=
@@ -875,12 +854,12 @@ def forward {batch seq : UInt64}
 def forwardWithCache {batch seq : UInt64}
     (cfg : Config)
     (layer : Qwen35Layer cfg)
-    (x : T #[batch, seq, cfg.hidden_size])
-    (cos : T #[seq, Config.rotaryHalfDim cfg])
-    (sin : T #[seq, Config.rotaryHalfDim cfg])
+    (x : STensor #[batch, seq, cfg.hidden_size])
+    (cos : DTensor #[seq, Config.rotaryHalfDim cfg] .Float32)
+    (sin : DTensor #[seq, Config.rotaryHalfDim cfg] .Float32)
     (cache : HybridCache cfg batch)
     (layerIdx : Nat)
-    : T #[batch, seq, cfg.hidden_size] × HybridCache cfg batch :=
+    : STensor #[batch, seq, cfg.hidden_size] × HybridCache cfg batch :=
   let residual1 := x
   let h1 := layer.input_layernorm.forward3d x
 
@@ -920,12 +899,12 @@ def forwardWithCache {batch seq : UInt64}
 def forwardStep {batch : UInt64}
     (cfg : Config)
     (layer : Qwen35Layer cfg)
-    (x : T #[batch, 1, cfg.hidden_size])
-    (cos : T #[1, Config.rotaryHalfDim cfg])
-    (sin : T #[1, Config.rotaryHalfDim cfg])
+    (x : STensor #[batch, 1, cfg.hidden_size])
+    (cos : DTensor #[1, Config.rotaryHalfDim cfg] .Float32)
+    (sin : DTensor #[1, Config.rotaryHalfDim cfg] .Float32)
     (cache : HybridCache cfg batch)
     (layerIdx : Nat)
-    : T #[batch, 1, cfg.hidden_size] × HybridCache cfg batch :=
+    : STensor #[batch, 1, cfg.hidden_size] × HybridCache cfg batch :=
   let residual1 := x
   let h1 := layer.input_layernorm.forward3d x
 
@@ -968,7 +947,7 @@ end Qwen35Layer
 
 /-- Text-only Qwen3.5 base model. -/
 structure Qwen35Model (cfg : Config) where
-  embed_tokens : T #[cfg.vocab_size, cfg.hidden_size]
+  embed_tokens : STensor #[cfg.vocab_size, cfg.hidden_size]
   layers : Array (Qwen35Layer cfg)
   norm : Qwen35RMSNorm cfg.hidden_size
   deriving TensorStruct
@@ -976,8 +955,8 @@ structure Qwen35Model (cfg : Config) where
 namespace Qwen35Model
 
 def init (cfg : Config) : IO (Qwen35Model cfg) := do
-  let embRaw ← torch.randn #[cfg.vocab_size, cfg.hidden_size]
-  let embedTokens := autograd.set_requires_grad (mul_scalar embRaw 0.02) true
+  let embRaw := (← Tensor.randn #[cfg.vocab_size, cfg.hidden_size]).forgetDType
+  let embedTokens := Tensor.setRequiresGrad (Tensor.Preserving.mulScalar embRaw 0.02) true
 
   let layerTypes := Config.normalizedLayerTypes cfg
   let mut layers : Array (Qwen35Layer cfg) := #[]
@@ -998,8 +977,8 @@ def initCache {batch : UInt64}
   Id.run do
     let layerTypes := Config.normalizedLayerTypes cfg
     let mut attn : Array (Option (Qwen35Attention.KVCache cfg batch)) := #[]
-    let mut conv : Array (Option (T #[batch, Config.linearConvDim cfg, cfg.linear_conv_kernel_dim])) := #[]
-    let mut recStates : Array (Option (T #[batch, cfg.linear_num_value_heads, cfg.linear_key_head_dim, cfg.linear_value_head_dim])) := #[]
+    let mut conv : Array (Option (STensor #[batch, Config.linearConvDim cfg, cfg.linear_conv_kernel_dim])) := #[]
+    let mut recStates : Array (Option (DTensor #[batch, cfg.linear_num_value_heads, cfg.linear_key_head_dim, cfg.linear_value_head_dim] .Float32)) := #[]
     let mut lastLinear : Option Nat := none
 
     for i in [:m.layers.size] do
@@ -1011,7 +990,7 @@ def initCache {batch : UInt64}
           (batch := batch)
           (num_kv_heads := cfg.num_key_value_heads)
           (head_dim := cfg.head_dim)
-          device
+          device (.Unknown "dynamic")
         attn := attn.push (some kv)
         conv := conv.push none
         recStates := recStates.push none
@@ -1031,11 +1010,11 @@ def initCache {batch : UInt64}
 def forward {batch seq : UInt64}
     (cfg : Config)
     (m : Qwen35Model cfg)
-    (inputIds : T #[batch, seq])
-    (attnMask : Option (T #[batch, seq]) := none)
-    : T #[batch, seq, cfg.hidden_size] :=
-  let x0 : T #[batch, seq, cfg.hidden_size] := nn.embedding inputIds m.embed_tokens
-  let (cos, sin) := rotary.computeFreqsOnDevicePure seq (Config.rotaryDim cfg) cfg.rope_theta x0.device
+    (inputIds : DTensor #[batch, seq] .Int64)
+    (attnMask : Option (DTensor #[batch, seq] .Int64) := none)
+    : STensor #[batch, seq, cfg.hidden_size] :=
+  let x0 : STensor #[batch, seq, cfg.hidden_size] := Tensor.embedding inputIds m.embed_tokens
+  let (cos, sin) := Tensor.rotaryFreqs seq (Config.rotaryDim cfg) cfg.rope_theta x0.device
   let h :=
     m.layers.foldl
       (fun h layer => layer.forward cfg h cos sin attnMask)
@@ -1045,11 +1024,11 @@ def forward {batch seq : UInt64}
 def forwardWithCache {batch seq : UInt64}
     (cfg : Config)
     (m : Qwen35Model cfg)
-    (x0 : T #[batch, seq, cfg.hidden_size])
-    (cos : T #[seq, Config.rotaryHalfDim cfg])
-    (sin : T #[seq, Config.rotaryHalfDim cfg])
+    (x0 : STensor #[batch, seq, cfg.hidden_size])
+    (cos : DTensor #[seq, Config.rotaryHalfDim cfg] .Float32)
+    (sin : DTensor #[seq, Config.rotaryHalfDim cfg] .Float32)
     (cache : HybridCache cfg batch)
-    : IO (T #[batch, seq, cfg.hidden_size] × HybridCache cfg batch) := do
+    : IO (STensor #[batch, seq, cfg.hidden_size] × HybridCache cfg batch) := do
   let mut h := x0
   let mut c := cache
   for i in [:m.layers.size] do
@@ -1066,12 +1045,12 @@ end Qwen35Model
 
 /-- Causal-LM output container. -/
 structure CausalLMOutput (cfg : Config) (batch seq : UInt64) where
-  logits : T #[batch, seq, cfg.vocab_size]
+  logits : STensor #[batch, seq, cfg.vocab_size]
 
 /-- Full standalone Qwen3.5 causal language model (dense or MoE depending on config). -/
 structure Qwen35ForCausalLM (cfg : Config) where
   model : Qwen35Model cfg
-  lmHead : T #[cfg.vocab_size, cfg.hidden_size]
+  lmHead : STensor #[cfg.vocab_size, cfg.hidden_size]
   tieWordEmbeddings : Bool := true
   deriving TensorStruct
 
@@ -1083,40 +1062,40 @@ def init (cfg : Config) (tieWordEmbeddings : Bool := true) : IO (Qwen35ForCausal
     if tieWordEmbeddings then
       pure model.embed_tokens
     else
-      initWeight #[cfg.vocab_size, cfg.hidden_size] cfg.hidden_size
+      initDynamicWeight #[cfg.vocab_size, cfg.hidden_size] cfg.hidden_size
   pure { model := model, lmHead := lmHead, tieWordEmbeddings := tieWordEmbeddings }
 
 def embedTokens {batch seq : UInt64}
     (m : Qwen35ForCausalLM cfg)
-    (inputIds : T #[batch, seq])
-    : T #[batch, seq, cfg.hidden_size] :=
-  nn.embedding inputIds m.model.embed_tokens
+    (inputIds : DTensor #[batch, seq] .Int64)
+    : STensor #[batch, seq, cfg.hidden_size] :=
+  Tensor.embedding inputIds m.model.embed_tokens
 
 def forwardEmbeds {batch seq : UInt64}
     (cfg : Config)
     (m : Qwen35ForCausalLM cfg)
-    (inputsEmbeds : T #[batch, seq, cfg.hidden_size])
-    (attnMask : Option (T #[batch, seq]) := none)
-    : T #[batch, seq, cfg.vocab_size] :=
-  let (cos, sin) := rotary.computeFreqsOnDevicePure seq (Config.rotaryDim cfg) cfg.rope_theta inputsEmbeds.device
+    (inputsEmbeds : STensor #[batch, seq, cfg.hidden_size])
+    (attnMask : Option (DTensor #[batch, seq] .Int64) := none)
+    : STensor #[batch, seq, cfg.vocab_size] :=
+  let (cos, sin) := Tensor.rotaryFreqs seq (Config.rotaryDim cfg) cfg.rope_theta inputsEmbeds.device
   let hidden := m.model.layers.foldl (fun h layer => layer.forward cfg h cos sin attnMask) inputsEmbeds
   let hidden := m.model.norm.forward3d hidden
-  linear3d hidden m.lmHead
+  Tensor.linear3d hidden m.lmHead
 
 def forward {batch seq : UInt64}
     (cfg : Config)
     (m : Qwen35ForCausalLM cfg)
-    (inputIds : T #[batch, seq])
-    (attnMask : Option (T #[batch, seq]) := none)
-    : T #[batch, seq, cfg.vocab_size] :=
+    (inputIds : DTensor #[batch, seq] .Int64)
+    (attnMask : Option (DTensor #[batch, seq] .Int64) := none)
+    : STensor #[batch, seq, cfg.vocab_size] :=
   let embeds := m.embedTokens inputIds
   m.forwardEmbeds cfg embeds attnMask
 
 private def precomputeDecodeRotary {maxLen : UInt64}
     (cfg : Config)
     (device : Device)
-    : T #[maxLen, Config.rotaryHalfDim cfg] × T #[maxLen, Config.rotaryHalfDim cfg] :=
-  rotary.computeFreqsOnDevicePure
+    : DTensor #[maxLen, Config.rotaryHalfDim cfg] .Float32 × DTensor #[maxLen, Config.rotaryHalfDim cfg] .Float32 :=
+  Tensor.rotaryFreqs
     maxLen
     (Config.rotaryDim cfg)
     cfg.rope_theta
@@ -1126,34 +1105,34 @@ private def precomputeDecodeRotary {maxLen : UInt64}
 private def prefillCachesFromEmbeds {batch seq maxLen : UInt64}
     (cfg : Config)
     (m : Qwen35ForCausalLM cfg)
-    (cosAll : T #[maxLen, Config.rotaryHalfDim cfg])
-    (sinAll : T #[maxLen, Config.rotaryHalfDim cfg])
-    (inputsEmbeds : T #[batch, seq, cfg.hidden_size])
+    (cosAll : DTensor #[maxLen, Config.rotaryHalfDim cfg] .Float32)
+    (sinAll : DTensor #[maxLen, Config.rotaryHalfDim cfg] .Float32)
+    (inputsEmbeds : STensor #[batch, seq, cfg.hidden_size])
     (cache : HybridCache cfg batch)
-    : IO (T #[batch, cfg.vocab_size] × HybridCache cfg batch) := do
-  let cos : T #[seq, Config.rotaryHalfDim cfg] := data.slice cosAll 0 0 seq
-  let sin : T #[seq, Config.rotaryHalfDim cfg] := data.slice sinAll 0 0 seq
+    : IO (STensor #[batch, cfg.vocab_size] × HybridCache cfg batch) := do
+  let cos : DTensor #[seq, Config.rotaryHalfDim cfg] .Float32 := typedSlice cosAll 0 0 seq
+  let sin : DTensor #[seq, Config.rotaryHalfDim cfg] .Float32 := typedSlice sinAll 0 0 seq
 
   let (hidden, cache') ← Qwen35Model.forwardWithCache cfg m.model inputsEmbeds cos sin cache
 
-  let lastHidden : T #[batch, 1, cfg.hidden_size] := data.slice hidden 1 (seq - 1) 1
-  let logits3 : T #[batch, 1, cfg.vocab_size] := linear3d lastHidden m.lmHead
-  let logits : T #[batch, cfg.vocab_size] := reshape logits3 #[batch, cfg.vocab_size]
+  let lastHidden : STensor #[batch, 1, cfg.hidden_size] := typedSlice hidden 1 (seq - 1) 1
+  let logits3 : STensor #[batch, 1, cfg.vocab_size] := Tensor.linear3d lastHidden m.lmHead
+  let logits : STensor #[batch, cfg.vocab_size] := Tensor.reshapeChecked logits3 #[batch, cfg.vocab_size]
   pure (logits, cache')
 
 private def decodeStepFromEmbedWithCache {batch maxLen : UInt64}
     (cfg : Config)
     (m : Qwen35ForCausalLM cfg)
-    (cosAll : T #[maxLen, Config.rotaryHalfDim cfg])
-    (sinAll : T #[maxLen, Config.rotaryHalfDim cfg])
-    (tokenEmbed : T #[batch, 1, cfg.hidden_size])
+    (cosAll : DTensor #[maxLen, Config.rotaryHalfDim cfg] .Float32)
+    (sinAll : DTensor #[maxLen, Config.rotaryHalfDim cfg] .Float32)
+    (tokenEmbed : STensor #[batch, 1, cfg.hidden_size])
     (position : UInt64)
     (cache : HybridCache cfg batch)
-    : IO (T #[batch, cfg.vocab_size] × HybridCache cfg batch) := do
-  let cos : T #[1, Config.rotaryHalfDim cfg] := data.slice cosAll 0 position 1
-  let sin : T #[1, Config.rotaryHalfDim cfg] := data.slice sinAll 0 position 1
+    : IO (STensor #[batch, cfg.vocab_size] × HybridCache cfg batch) := do
+  let cos : DTensor #[1, Config.rotaryHalfDim cfg] .Float32 := typedSlice cosAll 0 position 1
+  let sin : DTensor #[1, Config.rotaryHalfDim cfg] .Float32 := typedSlice sinAll 0 position 1
 
-  let mut hidden : T #[batch, 1, cfg.hidden_size] := tokenEmbed
+  let mut hidden : STensor #[batch, 1, cfg.hidden_size] := tokenEmbed
   let mut cache' := cache
 
   for i in [:m.model.layers.size] do
@@ -1166,36 +1145,36 @@ private def decodeStepFromEmbedWithCache {batch maxLen : UInt64}
     cache' := cNext
 
   let hiddenNorm := m.model.norm.forward3d hidden
-  let logits3 : T #[batch, 1, cfg.vocab_size] := linear3d hiddenNorm m.lmHead
-  let logits2 : T #[batch, cfg.vocab_size] := reshape logits3 #[batch, cfg.vocab_size]
+  let logits3 : STensor #[batch, 1, cfg.vocab_size] := Tensor.linear3d hiddenNorm m.lmHead
+  let logits2 : STensor #[batch, cfg.vocab_size] := Tensor.reshapeChecked logits3 #[batch, cfg.vocab_size]
   pure (logits2, cache')
 
 private partial def decodeLoopCached {batch maxLen : UInt64}
     (cfg : Config)
     (m : Qwen35ForCausalLM cfg)
-    (cosAll : T #[maxLen, Config.rotaryHalfDim cfg])
-    (sinAll : T #[maxLen, Config.rotaryHalfDim cfg])
+    (cosAll : DTensor #[maxLen, Config.rotaryHalfDim cfg] .Float32)
+    (sinAll : DTensor #[maxLen, Config.rotaryHalfDim cfg] .Float32)
     (strategy : SamplingStrategy)
     (eosTokenIds : Array UInt64)
-    (finished : T #[batch])
+    (finished : DTensor #[batch] .Bool)
     (remaining : Nat)
     (cache : HybridCache cfg batch)
-    (lastLogits : T #[batch, cfg.vocab_size])
+    (lastLogits : STensor #[batch, cfg.vocab_size])
     (onStep : Option (StreamCallback batch))
     (generatedSoFar : UInt64)
     {curSeq : UInt64}
-    (curIds : T #[batch, curSeq])
-    : IO (Sigma (fun outSeq => T #[batch, outSeq])) := do
+    (curIds : DTensor #[batch, curSeq] .Int64)
+    : IO (Sigma (fun outSeq => DTensor #[batch, outSeq] .Int64)) := do
   if remaining == 0 then
     return ⟨curSeq, curIds⟩
 
-  let nextTokRaw ← sampleFromLogits lastLogits strategy
-  let finished' : T #[batch] :=
+  let nextTokRaw ← sampleFromLogits lastLogits.toFloat32 strategy
+  let finished' : DTensor #[batch] .Bool :=
     if eosTokenIds.isEmpty then
       finished
     else
-      logicalOr finished (tokenInSet nextTokRaw eosTokenIds)
-  let nextTok : T #[batch] :=
+      Tensor.logicalOr finished (tokenInSet nextTokRaw eosTokenIds)
+  let nextTok : DTensor #[batch] .Int64 :=
     if eosTokenIds.isEmpty then
       nextTokRaw
     else
@@ -1205,18 +1184,18 @@ private partial def decodeLoopCached {batch maxLen : UInt64}
   | some cb => cb generatedSoFar nextTok
   | none => pure ()
 
-  let nextCol : T #[batch, 1] := reshape nextTok #[batch, 1]
-  let appended : T #[batch, curSeq + 1] := nn.cat curIds nextCol 1
+  let nextCol : DTensor #[batch, 1] .Int64 := Tensor.reshapeChecked nextTok #[batch, 1]
+  let appended : DTensor #[batch, curSeq + 1] .Int64 := typedCat curIds nextCol 1
 
   let stop :=
     if eosTokenIds.isEmpty then
       false
     else
-      !(any (logical_not finished'))
+      !(Tensor.any (Tensor.logicalNot finished'))
   if stop then
     return ⟨curSeq + 1, appended⟩
   else
-    let nextEmb : T #[batch, 1, cfg.hidden_size] := m.embedTokens nextCol
+    let nextEmb : STensor #[batch, 1, cfg.hidden_size] := m.embedTokens nextCol
     let (nextLogits, cache') ← decodeStepFromEmbedWithCache cfg m cosAll sinAll nextEmb curSeq cache
     decodeLoopCached cfg m cosAll sinAll strategy eosTokenIds finished' (remaining - 1) cache' nextLogits onStep (generatedSoFar + 1) appended
 
@@ -1225,11 +1204,11 @@ private partial def decodeLoopUncached {batch : UInt64}
     (m : Qwen35ForCausalLM cfg)
     (strategy : SamplingStrategy)
     (eosTokenIds : Array UInt64)
-    (finished : T #[batch])
+    (finished : DTensor #[batch] .Bool)
     (remaining : Nat)
     {curSeq : UInt64}
-    (curIds : T #[batch, curSeq])
-    : IO (Sigma (fun outSeq => T #[batch, outSeq])) := do
+    (curIds : DTensor #[batch, curSeq] .Int64)
+    : IO (Sigma (fun outSeq => DTensor #[batch, outSeq] .Int64)) := do
   if remaining == 0 then
     return ⟨curSeq, curIds⟩
   if curSeq == 0 then
@@ -1237,29 +1216,29 @@ private partial def decodeLoopUncached {batch : UInt64}
 
   let logits := m.forward cfg curIds none
   let lastPos := curSeq - 1
-  let last3 : T #[batch, 1, cfg.vocab_size] := reshape (data.slice logits 1 lastPos 1) #[batch, 1, cfg.vocab_size]
-  let last2 : T #[batch, cfg.vocab_size] := reshape last3 #[batch, cfg.vocab_size]
+  let last3 : STensor #[batch, 1, cfg.vocab_size] := typedSlice logits 1 lastPos 1
+  let last2 : STensor #[batch, cfg.vocab_size] := Tensor.reshapeChecked last3 #[batch, cfg.vocab_size]
 
-  let nextTokRaw ← sampleFromLogits last2 strategy
-  let finished' : T #[batch] :=
+  let nextTokRaw ← sampleFromLogits last2.toFloat32 strategy
+  let finished' : DTensor #[batch] .Bool :=
     if eosTokenIds.isEmpty then
       finished
     else
-      logicalOr finished (tokenInSet nextTokRaw eosTokenIds)
-  let nextTok : T #[batch] :=
+      Tensor.logicalOr finished (tokenInSet nextTokRaw eosTokenIds)
+  let nextTok : DTensor #[batch] .Int64 :=
     if eosTokenIds.isEmpty then
       nextTokRaw
     else
       applyFinishedEos nextTokRaw finished (eosTokenIds.getD 0 0)
 
-  let nextCol : T #[batch, 1] := reshape nextTok #[batch, 1]
-  let appended : T #[batch, curSeq + 1] := nn.cat curIds nextCol 1
+  let nextCol : DTensor #[batch, 1] .Int64 := Tensor.reshapeChecked nextTok #[batch, 1]
+  let appended : DTensor #[batch, curSeq + 1] .Int64 := typedCat curIds nextCol 1
 
   let stop :=
     if eosTokenIds.isEmpty then
       false
     else
-      !(any (logical_not finished'))
+      !(Tensor.any (Tensor.logicalNot finished'))
   if stop then
     return ⟨curSeq + 1, appended⟩
   else
@@ -1270,14 +1249,14 @@ private partial def decodeLoopUncachedEmbeds {batch : UInt64}
     (m : Qwen35ForCausalLM cfg)
     (strategy : SamplingStrategy)
     (eosTokenIds : Array UInt64)
-    (finished : T #[batch])
+    (finished : DTensor #[batch] .Bool)
     (remaining : Nat)
     {curSeq : UInt64}
-    (curIds : T #[batch, curSeq])
-    (curEmbeds : T #[batch, curSeq, cfg.hidden_size])
+    (curIds : DTensor #[batch, curSeq] .Int64)
+    (curEmbeds : STensor #[batch, curSeq, cfg.hidden_size])
     (onStep : Option (StreamCallback batch))
     (generatedSoFar : UInt64)
-    : IO (Sigma (fun outSeq => T #[batch, outSeq])) := do
+    : IO (Sigma (fun outSeq => DTensor #[batch, outSeq] .Int64)) := do
   if remaining == 0 then
     return ⟨curSeq, curIds⟩
   if curSeq == 0 then
@@ -1285,17 +1264,17 @@ private partial def decodeLoopUncachedEmbeds {batch : UInt64}
 
   let logits := m.forwardEmbeds cfg curEmbeds none
   let lastPos := curSeq - 1
-  let last3 : T #[batch, 1, cfg.vocab_size] :=
-    reshape (data.slice logits 1 lastPos 1) #[batch, 1, cfg.vocab_size]
-  let last2 : T #[batch, cfg.vocab_size] := reshape last3 #[batch, cfg.vocab_size]
+  let last3 : STensor #[batch, 1, cfg.vocab_size] :=
+    typedSlice logits 1 lastPos 1
+  let last2 : STensor #[batch, cfg.vocab_size] := Tensor.reshapeChecked last3 #[batch, cfg.vocab_size]
 
-  let nextTokRaw ← sampleFromLogits last2 strategy
-  let finished' : T #[batch] :=
+  let nextTokRaw ← sampleFromLogits last2.toFloat32 strategy
+  let finished' : DTensor #[batch] .Bool :=
     if eosTokenIds.isEmpty then
       finished
     else
-      logicalOr finished (tokenInSet nextTokRaw eosTokenIds)
-  let nextTok : T #[batch] :=
+      Tensor.logicalOr finished (tokenInSet nextTokRaw eosTokenIds)
+  let nextTok : DTensor #[batch] .Int64 :=
     if eosTokenIds.isEmpty then
       nextTokRaw
     else
@@ -1305,19 +1284,19 @@ private partial def decodeLoopUncachedEmbeds {batch : UInt64}
   | some cb => cb generatedSoFar nextTok
   | none => pure ()
 
-  let nextCol : T #[batch, 1] := reshape nextTok #[batch, 1]
-  let appendedIds : T #[batch, curSeq + 1] := nn.cat curIds nextCol 1
+  let nextCol : DTensor #[batch, 1] .Int64 := Tensor.reshapeChecked nextTok #[batch, 1]
+  let appendedIds : DTensor #[batch, curSeq + 1] .Int64 := typedCat curIds nextCol 1
 
   let stop :=
     if eosTokenIds.isEmpty then
       false
     else
-      !(any (logical_not finished'))
+      !(Tensor.any (Tensor.logicalNot finished'))
   if stop then
     return ⟨curSeq + 1, appendedIds⟩
   else
-    let nextEmb : T #[batch, 1, cfg.hidden_size] := m.embedTokens nextCol
-    let appendedEmbeds : T #[batch, curSeq + 1, cfg.hidden_size] := nn.cat curEmbeds nextEmb 1
+    let nextEmb : STensor #[batch, 1, cfg.hidden_size] := m.embedTokens nextCol
+    let appendedEmbeds : STensor #[batch, curSeq + 1, cfg.hidden_size] := typedCat curEmbeds nextEmb 1
     decodeLoopUncachedEmbeds
       cfg
       m
@@ -1334,27 +1313,27 @@ private partial def decodeLoopUncachedEmbeds {batch : UInt64}
 private def generateFromEmbedsCore {batch seq : UInt64}
     (cfg : Config)
     (m : Qwen35ForCausalLM cfg)
-    (inputIds : T #[batch, seq])
-    (inputsEmbeds : T #[batch, seq, cfg.hidden_size])
+    (inputIds : DTensor #[batch, seq] .Int64)
+    (inputsEmbeds : STensor #[batch, seq, cfg.hidden_size])
     (maxNewTokens : UInt64 := 256)
     (strategy : SamplingStrategy := .greedy)
     (eosTokenIds : Array UInt64 := #[])
     (onStep : Option (StreamCallback batch) := none)
-    : IO (Sigma (fun outSeq => T #[batch, outSeq])) := do
+    : IO (Sigma (fun outSeq => DTensor #[batch, outSeq] .Int64)) := do
   if seq == 0 then
     throw <| IO.userError "generate requires non-empty prompt sequence"
   if maxNewTokens == 0 then
     return ⟨seq, inputIds⟩
 
   let maxLen := seq + maxNewTokens
-  let (cosAll, sinAll) := rotary.computeFreqsOnDevicePure maxLen (Config.rotaryDim cfg) cfg.rope_theta inputsEmbeds.device
+  let (cosAll, sinAll) := Tensor.rotaryFreqs maxLen (Config.rotaryDim cfg) cfg.rope_theta inputsEmbeds.device
   let cache := Qwen35Model.initCache cfg m.model maxLen inputsEmbeds.device
 
   -- 1) Prefill caches and get last prompt logits
   let (logits, caches) ← prefillCachesFromEmbeds cfg m cosAll sinAll inputsEmbeds cache
 
   -- 2) Start incremental decode loop
-  let finished0 : T #[batch] := falseMask (n := batch) inputIds.device
+  let finished0 : DTensor #[batch] .Bool := falseMaskTyped (n := batch) inputIds.device
   let finalIds ← decodeLoopCached
     (maxLen := maxLen)
     cfg m cosAll sinAll strategy eosTokenIds finished0 maxNewTokens.toNat
@@ -1368,36 +1347,36 @@ private def generateFromEmbedsCore {batch seq : UInt64}
 def generateFromEmbeds {batch seq : UInt64}
     (cfg : Config)
     (m : Qwen35ForCausalLM cfg)
-    (inputIds : T #[batch, seq])
-    (inputsEmbeds : T #[batch, seq, cfg.hidden_size])
+    (inputIds : DTensor #[batch, seq] .Int64)
+    (inputsEmbeds : STensor #[batch, seq, cfg.hidden_size])
     (maxNewTokens : UInt64 := 256)
     (strategy : SamplingStrategy := .greedy)
     (eosTokenIds : Array UInt64 := #[])
-    : IO (Sigma (fun outSeq => T #[batch, outSeq])) :=
+    : IO (Sigma (fun outSeq => DTensor #[batch, outSeq] .Int64)) :=
   generateFromEmbedsCore cfg m inputIds inputsEmbeds maxNewTokens strategy eosTokenIds none
 
 /-- Exact generation from explicit input embeddings with per-step token callback. -/
 def generateFromEmbedsStream {batch seq : UInt64}
     (cfg : Config)
     (m : Qwen35ForCausalLM cfg)
-    (inputIds : T #[batch, seq])
-    (inputsEmbeds : T #[batch, seq, cfg.hidden_size])
+    (inputIds : DTensor #[batch, seq] .Int64)
+    (inputsEmbeds : STensor #[batch, seq, cfg.hidden_size])
     (onStep : StreamCallback batch)
     (maxNewTokens : UInt64 := 256)
     (strategy : SamplingStrategy := .greedy)
     (eosTokenIds : Array UInt64 := #[])
-    : IO (Sigma (fun outSeq => T #[batch, outSeq])) :=
+    : IO (Sigma (fun outSeq => DTensor #[batch, outSeq] .Int64)) :=
   generateFromEmbedsCore cfg m inputIds inputsEmbeds maxNewTokens strategy eosTokenIds (some onStep)
 
 /-- Exact generation entry point for token IDs. -/
 def generate {batch seq : UInt64}
     (cfg : Config)
     (m : Qwen35ForCausalLM cfg)
-    (inputIds : T #[batch, seq])
+    (inputIds : DTensor #[batch, seq] .Int64)
     (maxNewTokens : UInt64 := 256)
     (strategy : SamplingStrategy := .greedy)
     (eosTokenIds : Array UInt64 := #[])
-    : IO (Sigma (fun outSeq => T #[batch, outSeq])) := do
+    : IO (Sigma (fun outSeq => DTensor #[batch, outSeq] .Int64)) := do
   let inputsEmbeds := m.embedTokens inputIds
   generateFromEmbedsCore cfg m inputIds inputsEmbeds maxNewTokens strategy eosTokenIds none
 
@@ -1405,12 +1384,12 @@ def generate {batch seq : UInt64}
 def generateStream {batch seq : UInt64}
     (cfg : Config)
     (m : Qwen35ForCausalLM cfg)
-    (inputIds : T #[batch, seq])
+    (inputIds : DTensor #[batch, seq] .Int64)
     (onStep : StreamCallback batch)
     (maxNewTokens : UInt64 := 256)
     (strategy : SamplingStrategy := .greedy)
     (eosTokenIds : Array UInt64 := #[])
-    : IO (Sigma (fun outSeq => T #[batch, outSeq])) := do
+    : IO (Sigma (fun outSeq => DTensor #[batch, outSeq] .Int64)) := do
   let inputsEmbeds := m.embedTokens inputIds
   generateFromEmbedsCore cfg m inputIds inputsEmbeds maxNewTokens strategy eosTokenIds (some onStep)
 
@@ -1418,22 +1397,22 @@ def generateStream {batch seq : UInt64}
 def generateUncached {batch seq : UInt64}
     (cfg : Config)
     (m : Qwen35ForCausalLM cfg)
-    (inputIds : T #[batch, seq])
+    (inputIds : DTensor #[batch, seq] .Int64)
     (maxNewTokens : UInt64 := 256)
     (strategy : SamplingStrategy := .greedy)
     (eosTokenIds : Array UInt64 := #[])
-    : IO (Sigma (fun outSeq => T #[batch, outSeq])) := do
-  let finished0 : T #[batch] := falseMask (n := batch) inputIds.device
+    : IO (Sigma (fun outSeq => DTensor #[batch, outSeq] .Int64)) := do
+  let finished0 : DTensor #[batch] .Bool := falseMaskTyped (n := batch) inputIds.device
   decodeLoopUncached cfg m strategy eosTokenIds finished0 maxNewTokens.toNat inputIds
 
 /-- Convenience wrapper for greedy generation. -/
 def generateGreedy {batch seq : UInt64}
     (cfg : Config)
     (m : Qwen35ForCausalLM cfg)
-    (inputIds : T #[batch, seq])
+    (inputIds : DTensor #[batch, seq] .Int64)
     (maxNewTokens : UInt64 := 256)
     (eosTokenIds : Array UInt64 := #[])
-    : IO (Sigma (fun outSeq => T #[batch, outSeq])) :=
+    : IO (Sigma (fun outSeq => DTensor #[batch, outSeq] .Int64)) :=
   generate cfg m inputIds maxNewTokens .greedy eosTokenIds
 
 end Qwen35ForCausalLM

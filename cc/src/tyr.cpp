@@ -1,3 +1,4 @@
+#include "tyr_qwen35_abi.h"
 /*
  * tyr.cpp - Lean 4 ↔ LibTorch FFI Bindings
  *

@@ -55,6 +55,7 @@ lake build "${targets[@]}"
 python3 scripts/check_ffi_abi.py
 python3 scripts/check_ffi_abi.py --header cc/src/tyr_owned_kv_abi.h --generated .lake/build/ir/Tyr/Inference/OwnedKV.c
 python3 scripts/check_ffi_abi.py --header cc/src/tyr_neural_abi.h --generated .lake/build/ir/Tyr/RawTensor/Neural.c
+python3 scripts/check_ffi_abi.py --header cc/src/tyr_qwen35_abi.h --generated .lake/build/ir/Tyr/RawTensor/Qwen35.c
 python3 scripts/qualification/run.py --kind gpu --python "$python_bin" \
   --report output/qualification/gpu.json
 if [[ "${TYR_QUALIFY_MODELS:-false}" == true ]]; then

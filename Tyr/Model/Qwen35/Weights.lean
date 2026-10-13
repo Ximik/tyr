@@ -5,7 +5,7 @@
   Supports dense and MoE checkpoints from HuggingFace SafeTensors
   (single-file and sharded).
 -/
-import Tyr.Torch
+import Tyr.Typed.Neural
 import Tyr.Log
 import Tyr.SafeTensors.Load
 import Tyr.Model.Utils
@@ -19,11 +19,11 @@ open torch.safetensors (pushUnique tryLoadTensor tryLoadTensorSharded
   loadTensorCandidates loadTensorShardedCandidates
   tryLoadTensorCandidates tryLoadTensorShardedCandidates)
 
-private def finalizeDequantizedForDevice {s : Shape} (device : Device) (t : T s) : T s :=
+private def finalizeDequantizedForDevice {s : Shape} (device : Device) (t : DTensor s .Float32) : STensor s :=
   match device with
-  | .CPU => t
-  | .MPS => toBFloat16' t
-  | .CUDA _ => toBFloat16' t
+  | .CPU => t.forgetDType
+  | .MPS => t.toBFloat16.forgetDType
+  | .CUDA _ => t.toBFloat16.forgetDType
 
 private def nameCandidates (name : String) : Array String :=
   let out : Array String := #[]
@@ -44,7 +44,7 @@ private def loadLinearWeightSharded
     (baseName : String)
     (outDim inDim : UInt64)
     (device : Device := Device.CPU)
-    : IO (T #[outDim, inDim]) := do
+    : IO (STensor #[outDim, inDim]) := do
   let bases := nameCandidates baseName
   for b in bases do
     let wName := s!"{b}.weight"
@@ -61,7 +61,7 @@ private def loadLinearWeight
     (baseName : String)
     (outDim inDim : UInt64)
     (device : Device := Device.CPU)
-    : IO (T #[outDim, inDim]) := do
+    : IO (STensor #[outDim, inDim]) := do
   let bases := nameCandidates baseName
   for b in bases do
     let wName := s!"{b}.weight"
@@ -78,7 +78,7 @@ private def loadMoeExpertWeightSharded
     (baseName : String)
     (experts outDim inDim : UInt64)
     (device : Device := Device.CPU)
-    : IO (T #[experts, outDim, inDim]) := do
+    : IO (STensor #[experts, outDim, inDim]) := do
   let bases := nameCandidates baseName
   for b in bases do
     -- BF16-style checkpoints often store experts tensors directly (no ".weight").
@@ -103,7 +103,7 @@ private def loadMoeExpertWeight
     (baseName : String)
     (experts outDim inDim : UInt64)
     (device : Device := Device.CPU)
-    : IO (T #[experts, outDim, inDim]) := do
+    : IO (STensor #[experts, outDim, inDim]) := do
   let bases := nameCandidates baseName
   for b in bases do
     if let some w ← tryLoadTensor path b #[experts, outDim, inDim] device then
@@ -202,7 +202,7 @@ private def loadLinearMixerSharded (modelDir : String) (cfg : Config) (layerIdx 
   let convB ←
     match convBOpt with
     | some b => pure b
-    | none => pure (castLike convW (torch.zeros #[Config.linearConvDim cfg] false device))
+    | none => pure (Tensor.castLike convW (Tensor.zeros #[Config.linearConvDim cfg] false device))
 
   let dtBias ← loadTensorShardedCandidates modelDir (nameCandidates s!"{p}.dt_bias") #[cfg.linear_num_value_heads] device
   let aLog ← loadTensorShardedCandidates modelDir (nameCandidates s!"{p}.A_log") #[cfg.linear_num_value_heads] device
@@ -238,7 +238,7 @@ private def loadLinearMixer (path : String) (cfg : Config) (layerIdx : UInt64)
   let convB ←
     match convBOpt with
     | some b => pure b
-    | none => pure (castLike convW (torch.zeros #[Config.linearConvDim cfg] false device))
+    | none => pure (Tensor.castLike convW (Tensor.zeros #[Config.linearConvDim cfg] false device))
 
   let dtBias ← loadTensorCandidates path (nameCandidates s!"{p}.dt_bias") #[cfg.linear_num_value_heads] device
   let aLog ← loadTensorCandidates path (nameCandidates s!"{p}.A_log") #[cfg.linear_num_value_heads] device

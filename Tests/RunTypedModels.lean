@@ -1,3 +1,8 @@
+import Tests.TestQwen36Pretrained
+import Tests.TestQwen36Model
+import Tests.TestQwen35Pretrained
+import Tests.TestQwen35Multimodal
+import Tests.TestQwen35Model
 import Tests.TestModelIO
 import Tests.TestCheckpoint
 import Tests.TestModdedGPT
@@ -33,6 +38,11 @@ import Tests.TestDiffEqContainerBrownian
 unsafe def main : IO UInt32 := do
   Lean.initSearchPath (← Lean.findSysroot)
   let env ← Lean.importModules #[
+    { module := `Tests.TestQwen36Pretrained },
+    { module := `Tests.TestQwen36Model },
+    { module := `Tests.TestQwen35Pretrained },
+    { module := `Tests.TestQwen35Multimodal },
+    { module := `Tests.TestQwen35Model },
     { module := `Tests.TestModelIO },
     { module := `Tests.TestCheckpoint },
     { module := `Tests.TestModdedGPT },

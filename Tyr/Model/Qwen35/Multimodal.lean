@@ -6,7 +6,7 @@
   - Placeholder-based fusion into text embeddings
   - Conditional generation wrapper over existing Qwen35 text model
 -/
-import Tyr.Torch
+import Tyr.Typed.Neural
 import Tyr.TensorStruct
 import Tyr.Module.Core
 import Tyr.Module.Derive
@@ -19,37 +19,33 @@ namespace torch.qwen35
 open torch
 open torch.Model
 
-private def arangeOn (start stop : UInt64) (step : UInt64 := 1) (device : Device) :
-    T #[(stop - start) / step] :=
-  (torch.arange start stop step).to device
-
 private def addBias2d {n d : UInt64}
-    (x : T #[n, d])
-    (b : T #[d])
-    : T #[n, d] :=
-  x + nn.expand (reshape b #[1, d]) #[n, d]
+    (x : STensor #[n, d])
+    (b : STensor #[d])
+    : STensor #[n, d] :=
+  x + Tensor.expand (Tensor.reshapeChecked b #[1, d]) #[n, d]
 
 private def linear2d {tokens in_dim out_dim : UInt64}
-    (x : T #[tokens, in_dim])
-    (w : T #[out_dim, in_dim])
-    (b : T #[out_dim])
-    : T #[tokens, out_dim] :=
-  let yDyn : T #[] := torch.einsum2 "oh,th->to" w x
-  let y : T #[tokens, out_dim] := reshape yDyn #[tokens, out_dim]
+    (x : STensor #[tokens, in_dim])
+    (w : STensor #[out_dim, in_dim])
+    (b : STensor #[out_dim])
+    : STensor #[tokens, out_dim] :=
+  let yDyn : STensor #[tokens, out_dim] := einsumChecked "oh,th->to" w x
+  let y : STensor #[tokens, out_dim] := Tensor.reshapeChecked yDyn #[tokens, out_dim]
   addBias2d y b
 
 private def allInSet (xs : Array UInt64) (allow : Array UInt64) : Bool :=
   xs.all (fun x => allow.contains x)
 
-private def countMask2d {batch seq : UInt64} (mask : T #[batch, seq]) : IO UInt64 := do
-  let row : T #[batch] := reshape (nn.sumDim (data.toLong mask) 1 false) #[batch]
-  let counts ← data.tensorToUInt64Array row
+private def countMask2d {batch seq : UInt64} (mask : DTensor #[batch, seq] .Bool) : IO UInt64 := do
+  let row : DTensor #[batch] .Int64 := Tensor.reshapeChecked (Tensor.sumDim (mask.toInt64) 1 false) #[batch]
+  let counts ← Tensor.toUInt64Array row
   pure (counts.foldl (· + ·) 0)
 
 /-- LayerNorm for vision stack. -/
 structure Qwen35VisionLayerNorm (dim : UInt64) where
-  weight : T #[dim]
-  bias : T #[dim]
+  weight : STensor #[dim]
+  bias : STensor #[dim]
   eps : Float := 1e-6
   deriving TensorStruct
 
@@ -57,36 +53,36 @@ namespace Qwen35VisionLayerNorm
 
 def init (dim : UInt64) (eps : Float := 1e-6) : Qwen35VisionLayerNorm dim :=
   {
-    weight := autograd.set_requires_grad (torch.ones #[dim]) true
-    bias := autograd.set_requires_grad (torch.zeros #[dim]) true
+    weight := Tensor.setRequiresGrad (onesDynamic #[dim]) true
+    bias := Tensor.setRequiresGrad (zerosDynamic #[dim]) true
     eps := eps
   }
 
 def forward2d {tokens dim : UInt64}
     (m : Qwen35VisionLayerNorm dim)
-    (x : T #[tokens, dim])
-    : T #[tokens, dim] :=
-  let x3 : T #[1, tokens, dim] := reshape x #[1, tokens, dim]
-  let y3 : T #[1, tokens, dim] := nn.layer_norm x3 m.weight m.bias m.eps
-  reshape y3 #[tokens, dim]
+    (x : STensor #[tokens, dim])
+    : STensor #[tokens, dim] :=
+  let x3 : STensor #[1, tokens, dim] := Tensor.reshapeChecked x #[1, tokens, dim]
+  let y3 : STensor #[1, tokens, dim] := Tensor.layerNorm x3 m.weight m.bias m.eps
+  Tensor.reshapeChecked y3 #[tokens, dim]
 
 end Qwen35VisionLayerNorm
 
 /-- Vision MLP block. -/
 structure Qwen35VisionMLP (cfg : VisionConfig) where
-  linear_fc1_weight : T #[cfg.intermediate_size, cfg.hidden_size]
-  linear_fc1_bias : T #[cfg.intermediate_size]
-  linear_fc2_weight : T #[cfg.hidden_size, cfg.intermediate_size]
-  linear_fc2_bias : T #[cfg.hidden_size]
+  linear_fc1_weight : STensor #[cfg.intermediate_size, cfg.hidden_size]
+  linear_fc1_bias : STensor #[cfg.intermediate_size]
+  linear_fc2_weight : STensor #[cfg.hidden_size, cfg.intermediate_size]
+  linear_fc2_bias : STensor #[cfg.hidden_size]
   deriving TensorStruct
 
 namespace Qwen35VisionMLP
 
 def init (cfg : VisionConfig) : IO (Qwen35VisionMLP cfg) := do
-  let w1 ← initWeight #[cfg.intermediate_size, cfg.hidden_size] cfg.hidden_size
-  let b1 := initBias #[cfg.intermediate_size]
-  let w2 ← initWeight #[cfg.hidden_size, cfg.intermediate_size] cfg.intermediate_size
-  let b2 := initBias #[cfg.hidden_size]
+  let w1 ← initDynamicWeight #[cfg.intermediate_size, cfg.hidden_size] cfg.hidden_size
+  let b1 := initDynamicBias #[cfg.intermediate_size]
+  let w2 ← initDynamicWeight #[cfg.hidden_size, cfg.intermediate_size] cfg.intermediate_size
+  let b2 := initDynamicBias #[cfg.hidden_size]
   pure {
     linear_fc1_weight := w1
     linear_fc1_bias := b1
@@ -97,11 +93,11 @@ def init (cfg : VisionConfig) : IO (Qwen35VisionMLP cfg) := do
 def forward {tokens : UInt64}
     (cfg : VisionConfig)
     (m : Qwen35VisionMLP cfg)
-    (x : T #[tokens, cfg.hidden_size])
-    : T #[tokens, cfg.hidden_size] :=
-  let h : T #[tokens, cfg.intermediate_size] :=
+    (x : STensor #[tokens, cfg.hidden_size])
+    : STensor #[tokens, cfg.hidden_size] :=
+  let h : STensor #[tokens, cfg.intermediate_size] :=
     linear2d x m.linear_fc1_weight m.linear_fc1_bias
-  linear2d (nn.gelu h) m.linear_fc2_weight m.linear_fc2_bias
+  linear2d (Tensor.Preserving.gelu h) m.linear_fc2_weight m.linear_fc2_bias
 
 end Qwen35VisionMLP
 
@@ -109,41 +105,41 @@ end Qwen35VisionMLP
     Input is expected to already be patchified to
     `[num_patches, in_channels * temporal_patch_size * patch_size * patch_size]`. -/
 structure Qwen35VisionPatchEmbed (cfg : VisionConfig) where
-  weight : T #[cfg.hidden_size, VisionConfig.patchDim cfg]
-  bias : T #[cfg.hidden_size]
+  weight : STensor #[cfg.hidden_size, VisionConfig.patchDim cfg]
+  bias : STensor #[cfg.hidden_size]
   deriving TensorStruct
 
 namespace Qwen35VisionPatchEmbed
 
 def init (cfg : VisionConfig) : IO (Qwen35VisionPatchEmbed cfg) := do
-  let w ← initWeight #[cfg.hidden_size, VisionConfig.patchDim cfg] (VisionConfig.patchDim cfg)
-  let b := initBias #[cfg.hidden_size]
+  let w ← initDynamicWeight #[cfg.hidden_size, VisionConfig.patchDim cfg] (VisionConfig.patchDim cfg)
+  let b := initDynamicBias #[cfg.hidden_size]
   pure { weight := w, bias := b }
 
 def forward {nPatches : UInt64}
     (cfg : VisionConfig)
     (m : Qwen35VisionPatchEmbed cfg)
-    (x : T #[nPatches, VisionConfig.patchDim cfg])
-    : T #[nPatches, cfg.hidden_size] :=
+    (x : STensor #[nPatches, VisionConfig.patchDim cfg])
+    : STensor #[nPatches, cfg.hidden_size] :=
   linear2d x m.weight m.bias
 
 end Qwen35VisionPatchEmbed
 
 /-- Vision multi-head self-attention. -/
 structure Qwen35VisionAttention (cfg : VisionConfig) where
-  qkv_weight : T #[cfg.hidden_size * 3, cfg.hidden_size]
-  qkv_bias : T #[cfg.hidden_size * 3]
-  proj_weight : T #[cfg.hidden_size, cfg.hidden_size]
-  proj_bias : T #[cfg.hidden_size]
+  qkv_weight : STensor #[cfg.hidden_size * 3, cfg.hidden_size]
+  qkv_bias : STensor #[cfg.hidden_size * 3]
+  proj_weight : STensor #[cfg.hidden_size, cfg.hidden_size]
+  proj_bias : STensor #[cfg.hidden_size]
   deriving TensorStruct
 
 namespace Qwen35VisionAttention
 
 def init (cfg : VisionConfig) : IO (Qwen35VisionAttention cfg) := do
-  let qkvW ← initWeight #[cfg.hidden_size * 3, cfg.hidden_size] cfg.hidden_size
-  let qkvB := initBias #[cfg.hidden_size * 3]
-  let projW ← initWeight #[cfg.hidden_size, cfg.hidden_size] cfg.hidden_size
-  let projB := initBias #[cfg.hidden_size]
+  let qkvW ← initDynamicWeight #[cfg.hidden_size * 3, cfg.hidden_size] cfg.hidden_size
+  let qkvB := initDynamicBias #[cfg.hidden_size * 3]
+  let projW ← initDynamicWeight #[cfg.hidden_size, cfg.hidden_size] cfg.hidden_size
+  let projB := initDynamicBias #[cfg.hidden_size]
   pure {
     qkv_weight := qkvW
     qkv_bias := qkvB
@@ -154,33 +150,33 @@ def init (cfg : VisionConfig) : IO (Qwen35VisionAttention cfg) := do
 def forward {tokens : UInt64}
     (cfg : VisionConfig)
     (m : Qwen35VisionAttention cfg)
-    (x : T #[tokens, cfg.hidden_size])
-    : T #[tokens, cfg.hidden_size] :=
-  let qkv : T #[tokens, cfg.hidden_size * 3] := linear2d x m.qkv_weight m.qkv_bias
-  let q : T #[tokens, cfg.hidden_size] := data.slice qkv 1 0 cfg.hidden_size
-  let k : T #[tokens, cfg.hidden_size] := data.slice qkv 1 cfg.hidden_size cfg.hidden_size
-  let v : T #[tokens, cfg.hidden_size] := data.slice qkv 1 (cfg.hidden_size * 2) cfg.hidden_size
+    (x : STensor #[tokens, cfg.hidden_size])
+    : STensor #[tokens, cfg.hidden_size] :=
+  let qkv : STensor #[tokens, cfg.hidden_size * 3] := linear2d x m.qkv_weight m.qkv_bias
+  let q : STensor #[tokens, cfg.hidden_size] := typedSlice qkv 1 0 cfg.hidden_size
+  let k : STensor #[tokens, cfg.hidden_size] := typedSlice qkv 1 cfg.hidden_size cfg.hidden_size
+  let v : STensor #[tokens, cfg.hidden_size] := typedSlice qkv 1 (cfg.hidden_size * 2) cfg.hidden_size
 
-  let q : T #[1, tokens, cfg.num_heads, VisionConfig.headDim cfg] :=
-    reshape q #[1, tokens, cfg.num_heads, VisionConfig.headDim cfg]
-  let k : T #[1, tokens, cfg.num_heads, VisionConfig.headDim cfg] :=
-    reshape k #[1, tokens, cfg.num_heads, VisionConfig.headDim cfg]
-  let v : T #[1, tokens, cfg.num_heads, VisionConfig.headDim cfg] :=
-    reshape v #[1, tokens, cfg.num_heads, VisionConfig.headDim cfg]
+  let q : STensor #[1, tokens, cfg.num_heads, VisionConfig.headDim cfg] :=
+    Tensor.reshapeChecked q #[1, tokens, cfg.num_heads, VisionConfig.headDim cfg]
+  let k : STensor #[1, tokens, cfg.num_heads, VisionConfig.headDim cfg] :=
+    Tensor.reshapeChecked k #[1, tokens, cfg.num_heads, VisionConfig.headDim cfg]
+  let v : STensor #[1, tokens, cfg.num_heads, VisionConfig.headDim cfg] :=
+    Tensor.reshapeChecked v #[1, tokens, cfg.num_heads, VisionConfig.headDim cfg]
 
   -- Qwen3.5-VL uses 2D rotary; this keeps a deterministic 1D rotary signal for now.
-  let (cos, sin) := rotary.computeFreqsOnDevicePure tokens (VisionConfig.headDim cfg) 10000.0 x.device
-  let q : T #[1, tokens, cfg.num_heads, VisionConfig.headDim cfg] := rotary.applyRotaryEmb q cos sin
-  let k : T #[1, tokens, cfg.num_heads, VisionConfig.headDim cfg] := rotary.applyRotaryEmb k cos sin
+  let (cos, sin) := Tensor.rotaryFreqs tokens (VisionConfig.headDim cfg) 10000.0 x.device
+  let q : STensor #[1, tokens, cfg.num_heads, VisionConfig.headDim cfg] := Tensor.applyRotary q cos sin
+  let k : STensor #[1, tokens, cfg.num_heads, VisionConfig.headDim cfg] := Tensor.applyRotary k cos sin
 
-  let qh : T #[1, cfg.num_heads, tokens, VisionConfig.headDim cfg] := nn.transpose_for_attention q
-  let kh : T #[1, cfg.num_heads, tokens, VisionConfig.headDim cfg] := nn.transpose_for_attention k
-  let vh : T #[1, cfg.num_heads, tokens, VisionConfig.headDim cfg] := nn.transpose_for_attention v
+  let qh : STensor #[1, cfg.num_heads, tokens, VisionConfig.headDim cfg] := Tensor.splitHeads q
+  let kh : STensor #[1, cfg.num_heads, tokens, VisionConfig.headDim cfg] := Tensor.splitHeads k
+  let vh : STensor #[1, cfg.num_heads, tokens, VisionConfig.headDim cfg] := Tensor.splitHeads v
 
-  let attn : T #[1, cfg.num_heads, tokens, VisionConfig.headDim cfg] :=
-    nn.scaledDotProductAttentionGQA qh kh vh 0.0 false true
-  let out : T #[1, tokens, cfg.num_heads, VisionConfig.headDim cfg] := nn.transpose_from_attention attn
-  let outFlat : T #[tokens, cfg.hidden_size] := reshape out #[tokens, cfg.hidden_size]
+  let attn : STensor #[1, cfg.num_heads, tokens, VisionConfig.headDim cfg] :=
+    Tensor.attentionGQA qh kh vh 0.0 false true
+  let out : STensor #[1, tokens, cfg.num_heads, VisionConfig.headDim cfg] := Tensor.joinHeads attn
+  let outFlat : STensor #[tokens, cfg.hidden_size] := Tensor.reshapeChecked out #[tokens, cfg.hidden_size]
   linear2d outFlat m.proj_weight m.proj_bias
 
 end Qwen35VisionAttention
@@ -208,8 +204,8 @@ def init (cfg : VisionConfig) : IO (Qwen35VisionBlock cfg) := do
 def forward {tokens : UInt64}
     (cfg : VisionConfig)
     (m : Qwen35VisionBlock cfg)
-    (x : T #[tokens, cfg.hidden_size])
-    : T #[tokens, cfg.hidden_size] :=
+    (x : STensor #[tokens, cfg.hidden_size])
+    : STensor #[tokens, cfg.hidden_size] :=
   let h1 := x + m.attn.forward cfg (m.norm1.forward2d x)
   h1 + m.mlp.forward cfg (m.norm2.forward2d h1)
 
@@ -218,20 +214,20 @@ end Qwen35VisionBlock
 /-- Vision patch merger from patch tokens to LLM-width tokens. -/
 structure Qwen35VisionPatchMerger (cfg : VisionConfig) where
   norm : Qwen35VisionLayerNorm cfg.hidden_size
-  linear_fc1_weight : T #[cfg.hidden_size * VisionConfig.mergeUnit cfg, cfg.hidden_size * VisionConfig.mergeUnit cfg]
-  linear_fc1_bias : T #[cfg.hidden_size * VisionConfig.mergeUnit cfg]
-  linear_fc2_weight : T #[cfg.out_hidden_size, cfg.hidden_size * VisionConfig.mergeUnit cfg]
-  linear_fc2_bias : T #[cfg.out_hidden_size]
+  linear_fc1_weight : STensor #[cfg.hidden_size * VisionConfig.mergeUnit cfg, cfg.hidden_size * VisionConfig.mergeUnit cfg]
+  linear_fc1_bias : STensor #[cfg.hidden_size * VisionConfig.mergeUnit cfg]
+  linear_fc2_weight : STensor #[cfg.out_hidden_size, cfg.hidden_size * VisionConfig.mergeUnit cfg]
+  linear_fc2_bias : STensor #[cfg.out_hidden_size]
   deriving TensorStruct
 
 namespace Qwen35VisionPatchMerger
 
 def init (cfg : VisionConfig) : IO (Qwen35VisionPatchMerger cfg) := do
   let mergedHidden := cfg.hidden_size * VisionConfig.mergeUnit cfg
-  let fc1W ← initWeight #[mergedHidden, mergedHidden] mergedHidden
-  let fc1B := initBias #[mergedHidden]
-  let fc2W ← initWeight #[cfg.out_hidden_size, mergedHidden] mergedHidden
-  let fc2B := initBias #[cfg.out_hidden_size]
+  let fc1W ← initDynamicWeight #[mergedHidden, mergedHidden] mergedHidden
+  let fc1B := initDynamicBias #[mergedHidden]
+  let fc2W ← initDynamicWeight #[cfg.out_hidden_size, mergedHidden] mergedHidden
+  let fc2B := initDynamicBias #[cfg.out_hidden_size]
   pure {
     norm := Qwen35VisionLayerNorm.init cfg.hidden_size 1e-6
     linear_fc1_weight := fc1W
@@ -243,8 +239,8 @@ def init (cfg : VisionConfig) : IO (Qwen35VisionPatchMerger cfg) := do
 def forward {tokens : UInt64}
     (cfg : VisionConfig)
     (m : Qwen35VisionPatchMerger cfg)
-    (x : T #[tokens, cfg.hidden_size])
-    : IO (T #[VisionConfig.mergedTokenCount cfg tokens, cfg.out_hidden_size]) := do
+    (x : STensor #[tokens, cfg.hidden_size])
+    : IO (STensor #[VisionConfig.mergedTokenCount cfg tokens, cfg.out_hidden_size]) := do
   let mergeUnit := VisionConfig.mergeUnit cfg
   if mergeUnit == 0 then
     throw <| IO.userError "vision spatial_merge_size must be > 0"
@@ -253,20 +249,20 @@ def forward {tokens : UInt64}
       s!"vision token count ({tokens}) must be divisible by merge unit ({mergeUnit})"
 
   let mergedTokens := VisionConfig.mergedTokenCount cfg tokens
-  let xNorm : T #[tokens, cfg.hidden_size] := m.norm.forward2d x
-  let grouped : T #[mergedTokens, cfg.hidden_size * mergeUnit] :=
-    reshape xNorm #[mergedTokens, cfg.hidden_size * mergeUnit]
-  let h : T #[mergedTokens, cfg.hidden_size * mergeUnit] :=
+  let xNorm : STensor #[tokens, cfg.hidden_size] := m.norm.forward2d x
+  let grouped : STensor #[mergedTokens, cfg.hidden_size * mergeUnit] :=
+    Tensor.reshapeChecked xNorm #[mergedTokens, cfg.hidden_size * mergeUnit]
+  let h : STensor #[mergedTokens, cfg.hidden_size * mergeUnit] :=
     linear2d grouped m.linear_fc1_weight m.linear_fc1_bias
   pure <|
-    linear2d (nn.gelu h) m.linear_fc2_weight m.linear_fc2_bias
+    linear2d (Tensor.Preserving.gelu h) m.linear_fc2_weight m.linear_fc2_bias
 
 end Qwen35VisionPatchMerger
 
 /-- Qwen3.5 vision backbone (without DeepStack branches). -/
 structure Qwen35VisionModel (cfg : VisionConfig) where
   patch_embed : Qwen35VisionPatchEmbed cfg
-  pos_embed : T #[cfg.num_position_embeddings, cfg.hidden_size]
+  pos_embed : STensor #[cfg.num_position_embeddings, cfg.hidden_size]
   blocks : Array (Qwen35VisionBlock cfg)
   merger : Qwen35VisionPatchMerger cfg
   deriving TensorStruct
@@ -275,8 +271,8 @@ namespace Qwen35VisionModel
 
 def init (cfg : VisionConfig) : IO (Qwen35VisionModel cfg) := do
   let patchEmbed ← Qwen35VisionPatchEmbed.init cfg
-  let posRaw ← torch.randn #[cfg.num_position_embeddings, cfg.hidden_size]
-  let posEmbed := autograd.set_requires_grad (mul_scalar posRaw 0.02) true
+  let posRaw := (← Tensor.randn #[cfg.num_position_embeddings, cfg.hidden_size]).forgetDType
+  let posEmbed := Tensor.setRequiresGrad (Tensor.Preserving.mulScalar posRaw 0.02) true
 
   let mut blocks : Array (Qwen35VisionBlock cfg) := #[]
   for _ in [:cfg.depth.toNat] do
@@ -293,16 +289,16 @@ def init (cfg : VisionConfig) : IO (Qwen35VisionModel cfg) := do
 def forward {nPatches : UInt64}
     (cfg : VisionConfig)
     (m : Qwen35VisionModel cfg)
-    (patchifiedPixels : T #[nPatches, VisionConfig.patchDim cfg])
-    : IO (T #[VisionConfig.mergedTokenCount cfg nPatches, cfg.out_hidden_size]) := do
+    (patchifiedPixels : STensor #[nPatches, VisionConfig.patchDim cfg])
+    : IO (STensor #[VisionConfig.mergedTokenCount cfg nPatches, cfg.out_hidden_size]) := do
   if nPatches > cfg.num_position_embeddings then
     throw <| IO.userError
       s!"vision patch count ({nPatches}) exceeds num_position_embeddings ({cfg.num_position_embeddings})"
 
-  let x0 : T #[nPatches, cfg.hidden_size] := m.patch_embed.forward cfg patchifiedPixels
-  let posIds : T #[nPatches] := arangeOn 0 nPatches 1 patchifiedPixels.device
-  let pos : T #[nPatches, cfg.hidden_size] := nn.embedding1d posIds m.pos_embed
-  let mut x : T #[nPatches, cfg.hidden_size] := x0 + pos
+  let x0 : STensor #[nPatches, cfg.hidden_size] := m.patch_embed.forward cfg patchifiedPixels
+  let posIds : DTensor #[nPatches] .Int64 := (Tensor.arange nPatches).to patchifiedPixels.device
+  let pos : STensor #[nPatches, cfg.hidden_size] := Tensor.embedding1d posIds m.pos_embed
+  let mut x : STensor #[nPatches, cfg.hidden_size] := x0 + pos
 
   for i in [:m.blocks.size] do
     match m.blocks[i]? with
@@ -334,55 +330,55 @@ def init (cfg : VLConfig) : IO (Qwen35ForConditionalGeneration cfg) := do
 def getImageFeatures {nPatches : UInt64}
     (cfg : VLConfig)
     (m : Qwen35ForConditionalGeneration cfg)
-    (pixelValues : T #[nPatches, VisionConfig.patchDim cfg.vision_config])
-    : IO (T #[VisionConfig.mergedTokenCount cfg.vision_config nPatches, cfg.vision_config.out_hidden_size]) :=
+    (pixelValues : STensor #[nPatches, VisionConfig.patchDim cfg.vision_config])
+    : IO (STensor #[VisionConfig.mergedTokenCount cfg.vision_config nPatches, cfg.vision_config.out_hidden_size]) :=
   m.visual.forward cfg.vision_config pixelValues
 
 def getVideoFeatures {nPatches : UInt64}
     (cfg : VLConfig)
     (m : Qwen35ForConditionalGeneration cfg)
-    (pixelValuesVideos : T #[nPatches, VisionConfig.patchDim cfg.vision_config])
-    : IO (T #[VisionConfig.mergedTokenCount cfg.vision_config nPatches, cfg.vision_config.out_hidden_size]) :=
+    (pixelValuesVideos : STensor #[nPatches, VisionConfig.patchDim cfg.vision_config])
+    : IO (STensor #[VisionConfig.mergedTokenCount cfg.vision_config nPatches, cfg.vision_config.out_hidden_size]) :=
   -- Qwen3.5 reference uses the same path for video/image features.
   getImageFeatures cfg m pixelValuesVideos
 
 private def scatterFeaturesIntoToken {batch seq hidden featTokens featDim : UInt64}
-    (inputIds : T #[batch, seq])
-    (inputsEmbeds : T #[batch, seq, hidden])
+    (inputIds : DTensor #[batch, seq] .Int64)
+    (inputsEmbeds : STensor #[batch, seq, hidden])
     (tokenId : UInt64)
-    (features : T #[featTokens, featDim])
-    : IO (T #[batch, seq, hidden]) := do
+    (features : STensor #[featTokens, featDim])
+    : IO (STensor #[batch, seq, hidden]) := do
   if featDim != hidden then
     throw <| IO.userError
       s!"feature hidden size ({featDim}) does not match text hidden size ({hidden})"
 
-  let tokenMask2d : T #[batch, seq] := eq_scalar inputIds (Int64.ofNat tokenId.toNat)
+  let tokenMask2d : DTensor #[batch, seq] .Bool := Tensor.eqScalar inputIds (Int64.ofNat tokenId.toNat)
   let nTokens ← countMask2d tokenMask2d
   if nTokens != featTokens then
     throw <| IO.userError
       s!"placeholder token count mismatch for token={tokenId}: ids={nTokens} features={featTokens}"
 
-  let tokenMask : T #[batch, seq, hidden] :=
-    nn.expand (reshape tokenMask2d #[batch, seq, 1]) #[batch, seq, hidden]
-  let src : T #[featTokens * featDim] := reshape features #[featTokens * featDim]
-  pure (nn.masked_scatter inputsEmbeds tokenMask src)
+  let tokenMask : DTensor #[batch, seq, hidden] .Bool :=
+    Tensor.expand (Tensor.reshapeChecked tokenMask2d #[batch, seq, 1]) #[batch, seq, hidden]
+  let src : STensor #[featTokens * featDim] := Tensor.reshapeChecked features #[featTokens * featDim]
+  pure (Tensor.maskedScatter inputsEmbeds tokenMask src)
 
 def forwardText {batch seq : UInt64}
     (cfg : VLConfig)
     (m : Qwen35ForConditionalGeneration cfg)
-    (inputIds : T #[batch, seq])
-    (attnMask : Option (T #[batch, seq]) := none)
-    : T #[batch, seq, cfg.text_config.vocab_size] :=
+    (inputIds : DTensor #[batch, seq] .Int64)
+    (attnMask : Option (DTensor #[batch, seq] .Int64) := none)
+    : STensor #[batch, seq, cfg.text_config.vocab_size] :=
   m.language_model.forward cfg.text_config inputIds attnMask
 
 def forwardWithImageFeatures {batch seq featTokens : UInt64}
     (cfg : VLConfig)
     (m : Qwen35ForConditionalGeneration cfg)
-    (inputIds : T #[batch, seq])
-    (imageFeatures : T #[featTokens, cfg.vision_config.out_hidden_size])
-    (attnMask : Option (T #[batch, seq]) := none)
-    : IO (T #[batch, seq, cfg.text_config.vocab_size]) := do
-  let embeds0 : T #[batch, seq, cfg.text_config.hidden_size] := m.language_model.embedTokens inputIds
+    (inputIds : DTensor #[batch, seq] .Int64)
+    (imageFeatures : STensor #[featTokens, cfg.vision_config.out_hidden_size])
+    (attnMask : Option (DTensor #[batch, seq] .Int64) := none)
+    : IO (STensor #[batch, seq, cfg.text_config.vocab_size]) := do
+  let embeds0 : STensor #[batch, seq, cfg.text_config.hidden_size] := m.language_model.embedTokens inputIds
   let embeds ← scatterFeaturesIntoToken
     (inputIds := inputIds)
     (inputsEmbeds := embeds0)
@@ -393,12 +389,12 @@ def forwardWithImageFeatures {batch seq featTokens : UInt64}
 def forwardWithImageAndVideoFeatures {batch seq imageTokens videoTokens : UInt64}
     (cfg : VLConfig)
     (m : Qwen35ForConditionalGeneration cfg)
-    (inputIds : T #[batch, seq])
-    (imageFeatures : T #[imageTokens, cfg.vision_config.out_hidden_size])
-    (videoFeatures : T #[videoTokens, cfg.vision_config.out_hidden_size])
-    (attnMask : Option (T #[batch, seq]) := none)
-    : IO (T #[batch, seq, cfg.text_config.vocab_size]) := do
-  let embeds0 : T #[batch, seq, cfg.text_config.hidden_size] := m.language_model.embedTokens inputIds
+    (inputIds : DTensor #[batch, seq] .Int64)
+    (imageFeatures : STensor #[imageTokens, cfg.vision_config.out_hidden_size])
+    (videoFeatures : STensor #[videoTokens, cfg.vision_config.out_hidden_size])
+    (attnMask : Option (DTensor #[batch, seq] .Int64) := none)
+    : IO (STensor #[batch, seq, cfg.text_config.vocab_size]) := do
+  let embeds0 : STensor #[batch, seq, cfg.text_config.hidden_size] := m.language_model.embedTokens inputIds
   let embeds1 ← scatterFeaturesIntoToken
     (inputIds := inputIds)
     (inputsEmbeds := embeds0)
@@ -414,21 +410,21 @@ def forwardWithImageAndVideoFeatures {batch seq imageTokens videoTokens : UInt64
 def forwardWithImagePatches {batch seq nPatches : UInt64}
     (cfg : VLConfig)
     (m : Qwen35ForConditionalGeneration cfg)
-    (inputIds : T #[batch, seq])
-    (pixelValues : T #[nPatches, VisionConfig.patchDim cfg.vision_config])
-    (attnMask : Option (T #[batch, seq]) := none)
-    : IO (T #[batch, seq, cfg.text_config.vocab_size]) := do
+    (inputIds : DTensor #[batch, seq] .Int64)
+    (pixelValues : STensor #[nPatches, VisionConfig.patchDim cfg.vision_config])
+    (attnMask : Option (DTensor #[batch, seq] .Int64) := none)
+    : IO (STensor #[batch, seq, cfg.text_config.vocab_size]) := do
   let imageFeatures ← m.getImageFeatures cfg pixelValues
   m.forwardWithImageFeatures cfg inputIds imageFeatures attnMask
 
 def forwardWithImageAndVideoPatches {batch seq nImagePatches nVideoPatches : UInt64}
     (cfg : VLConfig)
     (m : Qwen35ForConditionalGeneration cfg)
-    (inputIds : T #[batch, seq])
-    (pixelValues : T #[nImagePatches, VisionConfig.patchDim cfg.vision_config])
-    (pixelValuesVideos : T #[nVideoPatches, VisionConfig.patchDim cfg.vision_config])
-    (attnMask : Option (T #[batch, seq]) := none)
-    : IO (T #[batch, seq, cfg.text_config.vocab_size]) := do
+    (inputIds : DTensor #[batch, seq] .Int64)
+    (pixelValues : STensor #[nImagePatches, VisionConfig.patchDim cfg.vision_config])
+    (pixelValuesVideos : STensor #[nVideoPatches, VisionConfig.patchDim cfg.vision_config])
+    (attnMask : Option (DTensor #[batch, seq] .Int64) := none)
+    : IO (STensor #[batch, seq, cfg.text_config.vocab_size]) := do
   let imageFeatures ← m.getImageFeatures cfg pixelValues
   let videoFeatures ← m.getVideoFeatures cfg pixelValuesVideos
   m.forwardWithImageAndVideoFeatures cfg inputIds imageFeatures videoFeatures attnMask
@@ -436,11 +432,11 @@ def forwardWithImageAndVideoPatches {batch seq nImagePatches nVideoPatches : UIn
 private def buildInputEmbedsWithFeatures {batch seq : UInt64}
     (cfg : VLConfig)
     (m : Qwen35ForConditionalGeneration cfg)
-    (inputIds : T #[batch, seq])
-    (imageFeatures : Option (Sigma (fun n => T #[n, cfg.vision_config.out_hidden_size])) := none)
-    (videoFeatures : Option (Sigma (fun n => T #[n, cfg.vision_config.out_hidden_size])) := none)
-    : IO (T #[batch, seq, cfg.text_config.hidden_size]) := do
-  let embeds0 : T #[batch, seq, cfg.text_config.hidden_size] := m.language_model.embedTokens inputIds
+    (inputIds : DTensor #[batch, seq] .Int64)
+    (imageFeatures : Option (Sigma (fun n => STensor #[n, cfg.vision_config.out_hidden_size])) := none)
+    (videoFeatures : Option (Sigma (fun n => STensor #[n, cfg.vision_config.out_hidden_size])) := none)
+    : IO (STensor #[batch, seq, cfg.text_config.hidden_size]) := do
+  let embeds0 : STensor #[batch, seq, cfg.text_config.hidden_size] := m.language_model.embedTokens inputIds
   let embeds1 ←
     match imageFeatures with
     | some ⟨_ni, ifeat⟩ =>
@@ -465,13 +461,13 @@ private def buildInputEmbedsWithFeatures {batch seq : UInt64}
 def generate {batch seq : UInt64}
     (cfg : VLConfig)
     (m : Qwen35ForConditionalGeneration cfg)
-    (inputIds : T #[batch, seq])
+    (inputIds : DTensor #[batch, seq] .Int64)
     (maxNewTokens : UInt64 := 256)
     (strategy : SamplingStrategy := .greedy)
     (eosTokenIds : Array UInt64 := #[])
-    (imageFeatures : Option (Sigma (fun n => T #[n, cfg.vision_config.out_hidden_size])) := none)
-    (videoFeatures : Option (Sigma (fun n => T #[n, cfg.vision_config.out_hidden_size])) := none)
-    : IO (Sigma (fun outSeq => T #[batch, outSeq])) := do
+    (imageFeatures : Option (Sigma (fun n => STensor #[n, cfg.vision_config.out_hidden_size])) := none)
+    (videoFeatures : Option (Sigma (fun n => STensor #[n, cfg.vision_config.out_hidden_size])) := none)
+    : IO (Sigma (fun outSeq => DTensor #[batch, outSeq] .Int64)) := do
   let inputsEmbeds ← buildInputEmbedsWithFeatures cfg m inputIds imageFeatures videoFeatures
   m.language_model.generateFromEmbeds
     cfg.text_config
@@ -485,14 +481,14 @@ def generate {batch seq : UInt64}
 def generateStream {batch seq : UInt64}
     (cfg : VLConfig)
     (m : Qwen35ForConditionalGeneration cfg)
-    (inputIds : T #[batch, seq])
+    (inputIds : DTensor #[batch, seq] .Int64)
     (onStep : StreamCallback batch)
     (maxNewTokens : UInt64 := 256)
     (strategy : SamplingStrategy := .greedy)
     (eosTokenIds : Array UInt64 := #[])
-    (imageFeatures : Option (Sigma (fun n => T #[n, cfg.vision_config.out_hidden_size])) := none)
-    (videoFeatures : Option (Sigma (fun n => T #[n, cfg.vision_config.out_hidden_size])) := none)
-    : IO (Sigma (fun outSeq => T #[batch, outSeq])) := do
+    (imageFeatures : Option (Sigma (fun n => STensor #[n, cfg.vision_config.out_hidden_size])) := none)
+    (videoFeatures : Option (Sigma (fun n => STensor #[n, cfg.vision_config.out_hidden_size])) := none)
+    : IO (Sigma (fun outSeq => DTensor #[batch, outSeq] .Int64)) := do
   let inputsEmbeds ← buildInputEmbedsWithFeatures cfg m inputIds imageFeatures videoFeatures
   m.language_model.generateFromEmbedsStream
     cfg.text_config
@@ -508,18 +504,18 @@ def generateStream {batch seq : UInt64}
 partial def generateUncached {batch seq : UInt64}
     (cfg : VLConfig)
     (m : Qwen35ForConditionalGeneration cfg)
-    (inputIds : T #[batch, seq])
+    (inputIds : DTensor #[batch, seq] .Int64)
     (maxNewTokens : UInt64 := 256)
     (strategy : SamplingStrategy := .greedy)
     (eosTokenIds : Array UInt64 := #[])
-    (imageFeatures : Option (Sigma (fun n => T #[n, cfg.vision_config.out_hidden_size])) := none)
-    (videoFeatures : Option (Sigma (fun n => T #[n, cfg.vision_config.out_hidden_size])) := none)
-    : IO (Sigma (fun outSeq => T #[batch, outSeq])) := do
+    (imageFeatures : Option (Sigma (fun n => STensor #[n, cfg.vision_config.out_hidden_size])) := none)
+    (videoFeatures : Option (Sigma (fun n => STensor #[n, cfg.vision_config.out_hidden_size])) := none)
+    : IO (Sigma (fun outSeq => DTensor #[batch, outSeq] .Int64)) := do
   let rec loop
       (remaining : Nat)
       {curSeq : UInt64}
-      (cur : T #[batch, curSeq])
-      : IO (Sigma (fun outSeq => T #[batch, outSeq])) := do
+      (cur : DTensor #[batch, curSeq] .Int64)
+      : IO (Sigma (fun outSeq => DTensor #[batch, outSeq] .Int64)) := do
     if remaining == 0 then
       return ⟨curSeq, cur⟩
 
@@ -531,7 +527,7 @@ partial def generateUncached {batch seq : UInt64}
         m.forwardWithImageFeatures cfg cur ifeat none
       | none, some ⟨_nv, vfeat⟩ =>
         -- Reuse image path helper for single-modality scatter by token id.
-        let embeds0 : T #[batch, curSeq, cfg.text_config.hidden_size] := m.language_model.embedTokens cur
+        let embeds0 : STensor #[batch, curSeq, cfg.text_config.hidden_size] := m.language_model.embedTokens cur
         let embeds ← scatterFeaturesIntoToken
           (inputIds := cur)
           (inputsEmbeds := embeds0)
@@ -545,24 +541,14 @@ partial def generateUncached {batch seq : UInt64}
       throw <| IO.userError "generateUncached requires non-empty prompt sequence"
 
     let lastPos := curSeq - 1
-    let last3 : T #[batch, 1, cfg.text_config.vocab_size] :=
-      reshape (data.slice logits 1 lastPos 1) #[batch, 1, cfg.text_config.vocab_size]
-    let last2 : T #[batch, cfg.text_config.vocab_size] := reshape last3 #[batch, cfg.text_config.vocab_size]
-    let nextTok ←
-      match strategy with
-      | .greedy => pure (reshape (nn.argmax last2 1) #[batch])
-      | .multinomial temperature topK topP =>
-        let scaled :=
-          if temperature == 1.0 then last2 else mul_scalar last2 (1.0 / temperature)
-        let filtered := if topK == 0 then scaled else nn.topKFilter scaled topK
-        let filtered := if topP >= 1.0 then filtered else nn.topPFilter filtered topP
-        let probs := nn.softmax filtered (-1)
-        let sampled ← nn.multinomial probs 1 false
-        pure (reshape (nn.squeezeDim sampled (-1)) #[batch])
+    let last3 : STensor #[batch, 1, cfg.text_config.vocab_size] :=
+      typedSlice logits 1 lastPos 1
+    let last2 : STensor #[batch, cfg.text_config.vocab_size] := Tensor.reshapeChecked last3 #[batch, cfg.text_config.vocab_size]
+    let nextTok ← sampleFromLogits last2.toFloat32 strategy
 
-    let nextVals ← data.tensorToUInt64Array nextTok
-    let nextCol : T #[batch, 1] := reshape nextTok #[batch, 1]
-    let appended : T #[batch, curSeq + 1] := nn.cat cur nextCol 1
+    let nextVals ← Tensor.toUInt64Array nextTok
+    let nextCol : DTensor #[batch, 1] .Int64 := Tensor.reshapeChecked nextTok #[batch, 1]
+    let appended : DTensor #[batch, curSeq + 1] .Int64 := typedCat cur nextCol 1
     let stop := eosTokenIds.size > 0 && allInSet nextVals eosTokenIds
     if stop then
       pure ⟨curSeq + 1, appended⟩
