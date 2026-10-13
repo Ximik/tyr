@@ -6,7 +6,7 @@
   - talker (codec generation)
   - optional speaker encoder (base model mode)
 -/
-import Tyr.Torch
+import Tyr.Typed.Neural
 import Tyr.Model.Qwen3TTS.Config
 import Tyr.Model.Qwen3TTS.SpeakerEncoder
 import Tyr.Model.Qwen3TTS.Talker
@@ -15,8 +15,8 @@ namespace torch.qwen3tts
 
 /-- Voice clone prompt payload for one sample. -/
 structure VoiceClonePromptItem (cfg : Qwen3TTSConfig) where
-  refCode : Option (T #[]) := none
-  refSpeakerEmbedding : T #[cfg.speakerEncoderConfig.encDim]
+  refCode : Option (Sigma fun shape => DTensor shape .Int64) := none
+  refSpeakerEmbedding : STensor #[cfg.speakerEncoderConfig.encDim]
   xVectorOnlyMode : Bool := false
   iclMode : Bool := false
   deriving Inhabited
@@ -49,18 +49,12 @@ def getSupportedSpeakers (_m : Qwen3TTSForConditionalGeneration cfg) : Array Str
     The caller is responsible for mel preprocessing and sample-rate alignment. -/
 def extractSpeakerEmbedding {batch frames : UInt64}
     (m : Qwen3TTSForConditionalGeneration cfg)
-    (mel : T #[batch, frames, cfg.speakerEncoderConfig.melDim])
-    : IO (T #[batch, cfg.speakerEncoderConfig.encDim]) := do
+    (mel : STensor #[batch, frames, cfg.speakerEncoderConfig.melDim])
+    : IO (STensor #[batch, cfg.speakerEncoderConfig.encDim]) := do
   match m.speakerEncoder with
   | some enc => do
-      let targetDType := enc.tdnn0.weight.dtype
-      let mel ←
-        if mel.dtype == targetDType then pure mel
-        else match targetDType with
-          | .Float32 => pure (toFloat' mel)
-          | .BFloat16 => pure (toBFloat16' mel)
-          | _ => throw <| IO.userError s!"Qwen3-TTS speaker encoder cannot convert mel dtype {mel.dtype} to weight dtype {targetDType}; provide matching features"
-      let mel : T #[batch, frames, cfg.speakerEncoderConfig.melDim] :=
+      let mel := Tensor.castLike enc.tdnn0.weight mel
+      let mel : STensor #[batch, frames, cfg.speakerEncoderConfig.melDim] :=
         if mel.device == enc.tdnn0.weight.device then mel else mel.to enc.tdnn0.weight.device
       pure (enc.forward mel)
   | none => throw (IO.userError "Speaker encoder is unavailable for this Qwen3-TTS model type")
@@ -69,29 +63,29 @@ def extractSpeakerEmbedding {batch frames : UInt64}
     Prepends codec BOS embedding. -/
 def buildTalkerInputsFromText {batch textSeq : UInt64}
     (m : Qwen3TTSForConditionalGeneration cfg)
-    (textIds : T #[batch, textSeq])
-    : T #[batch, 1 + textSeq, cfg.talkerConfig.hiddenSize] :=
+    (textIds : DTensor #[batch, textSeq] .Int64)
+    : STensor #[batch, 1 + textSeq, cfg.talkerConfig.hiddenSize] :=
   TalkerModel.buildInputsFromText cfg.talkerConfig m.talker.model textIds
 
 /-- Build talker input embeddings from instruct + text token IDs.
     Prepends codec BOS embedding. -/
 def buildTalkerInputsFromInstructText {batch instructSeq textSeq : UInt64}
     (m : Qwen3TTSForConditionalGeneration cfg)
-    (instructIds : T #[batch, instructSeq])
-    (textIds : T #[batch, textSeq])
-    : T #[batch, 1 + (instructSeq + textSeq), cfg.talkerConfig.hiddenSize] :=
+    (instructIds : DTensor #[batch, instructSeq] .Int64)
+    (textIds : DTensor #[batch, textSeq] .Int64)
+    : STensor #[batch, 1 + (instructSeq + textSeq), cfg.talkerConfig.hiddenSize] :=
   TalkerModel.buildInputsFromInstructText cfg.talkerConfig m.talker.model instructIds textIds
 
 /-- Generate one codec frame (`numCodeGroups` tokens per sample) from talker inputs.
     Inputs are already-projected talker embeddings. -/
 def generateFrame {batch seq : UInt64}
     (m : Qwen3TTSForConditionalGeneration cfg)
-    (talkerInputs : T #[batch, seq, cfg.talkerConfig.hiddenSize])
-    (attnMask : Option (T #[batch, seq]) := none)
+    (talkerInputs : STensor #[batch, seq, cfg.talkerConfig.hiddenSize])
+    (attnMask : Option (DTensor #[batch, seq] .Int64) := none)
     (temperature : Float := 0.9)
     (topK : UInt64 := 50)
     (topP : Float := 1.0)
-    : IO (T #[batch, cfg.talkerConfig.numCodeGroups]) :=
+    : IO (DTensor #[batch, cfg.talkerConfig.numCodeGroups] .Int64) :=
   return (← TalkerForConditionalGeneration.generateFrame
     cfg.talkerConfig m.talker talkerInputs attnMask
     none true temperature topK topP).codes
@@ -100,13 +94,13 @@ def generateFrame {batch seq : UInt64}
     Returns `[batch, maxFrames, numCodeGroups]`. -/
 def generateCodes {batch seq : UInt64}
     (m : Qwen3TTSForConditionalGeneration cfg)
-    (talkerInputs : T #[batch, seq, cfg.talkerConfig.hiddenSize])
+    (talkerInputs : STensor #[batch, seq, cfg.talkerConfig.hiddenSize])
     (maxFrames : UInt64 := 256)
     (minNewTokens : UInt64 := 2)
     (temperature : Float := 0.9)
     (topK : UInt64 := 50)
     (topP : Float := 1.0)
-    : IO (T #[batch, maxFrames, cfg.talkerConfig.numCodeGroups]) :=
+    : IO (DTensor #[batch, maxFrames, cfg.talkerConfig.numCodeGroups] .Int64) :=
   TalkerForConditionalGeneration.generateCodes
     cfg.talkerConfig m.talker talkerInputs maxFrames minNewTokens temperature topK topP
 
@@ -115,7 +109,7 @@ def generateCodes {batch seq : UInt64}
     `lengths` stores the first EOS step per sample (or `maxFrames` if no EOS). -/
 def generateCodesWithLengths {batch seq : UInt64}
     (m : Qwen3TTSForConditionalGeneration cfg)
-    (talkerInputs : T #[batch, seq, cfg.talkerConfig.hiddenSize])
+    (talkerInputs : STensor #[batch, seq, cfg.talkerConfig.hiddenSize])
     (maxFrames : UInt64 := 256)
     (minNewTokens : UInt64 := 2)
     (temperature : Float := 0.9)
@@ -129,7 +123,7 @@ def generateCodesWithLengths {batch seq : UInt64}
     Internally builds talker inputs and runs EOS-aware codec generation. -/
 def generateFromText {batch textSeq : UInt64}
     (m : Qwen3TTSForConditionalGeneration cfg)
-    (textIds : T #[batch, textSeq])
+    (textIds : DTensor #[batch, textSeq] .Int64)
     (maxFrames : UInt64 := 256)
     (minNewTokens : UInt64 := 2)
     (temperature : Float := 0.9)
@@ -143,8 +137,8 @@ def generateFromText {batch textSeq : UInt64}
     Internally builds talker inputs and runs EOS-aware codec generation. -/
 def generateFromInstructText {batch instructSeq textSeq : UInt64}
     (m : Qwen3TTSForConditionalGeneration cfg)
-    (instructIds : T #[batch, instructSeq])
-    (textIds : T #[batch, textSeq])
+    (instructIds : DTensor #[batch, instructSeq] .Int64)
+    (textIds : DTensor #[batch, textSeq] .Int64)
     (maxFrames : UInt64 := 256)
     (minNewTokens : UInt64 := 2)
     (temperature : Float := 0.9)

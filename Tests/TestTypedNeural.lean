@@ -54,3 +54,14 @@ open torch
       LeanTest.assertEqual actual.actualSpec.dtype x.actualSpec.dtype
       LeanTest.assertEqual (← actual.toFloatArray) (← expected.toFloatArray)
         "RMSNorm restores activation dtype before multiplying non-unit weights"
+
+@[test] def testTypedGroupedAndTransposeConvolution : IO Unit := do
+  let x := (Tensor.fromFloatArray #[1, 2, 3, 4, 5, 6]).reshapeChecked #[1, 2, 3]
+  let w := (Tensor.fromFloatArray #[2, 3]).reshapeChecked #[2, 1, 1]
+  let grouped := Tensor.conv1dGroups x w (Tensor.zeros #[2]) 1 0 1 2
+  LeanTest.assertEqual (← grouped.toFloatArray) #[2, 4, 6, 12, 15, 18]
+  let z := (Tensor.fromFloatArray #[1, 2]).reshapeChecked #[1, 1, 2]
+  let kernel := (Tensor.fromFloatArray #[1, 2]).reshapeChecked #[1, 1, 2]
+  let expanded := Tensor.convTranspose1d z kernel (Tensor.zeros #[1]) 2
+  LeanTest.assertEqual expanded.runtimeShape #[1, 1, 4]
+  LeanTest.assertEqual (← expanded.toFloatArray) #[1, 2, 2, 4]

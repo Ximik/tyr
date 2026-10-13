@@ -24,6 +24,16 @@ lean_object* lean_torch_hann_window(uint64_t);
 lean_object* lean_torch_stft_1d(uint64_t, lean_object*, uint64_t, uint64_t, uint64_t, lean_object*, uint8_t, uint8_t);
 lean_object* lean_torch_tensor_log10(lean_object*, lean_object*);
 lean_object* lean_torch_save_wav(lean_object*, lean_object*, lean_object*, uint64_t);
+lean_object* lean_torch_lt(lean_object*, lean_object*, lean_object*);
+lean_object* lean_torch_ge(lean_object*, lean_object*, lean_object*);
+lean_object* lean_torch_lt_scalar(lean_object*, lean_object*, double);
+lean_object* lean_torch_masked_fill(lean_object*, lean_object*, lean_object*, double);
+lean_object* lean_torch_conv1d_group_bias(lean_object*, lean_object*, lean_object*, lean_object*, lean_object*, lean_object*, uint64_t, uint64_t, uint64_t, uint64_t);
+lean_object* lean_torch_conv_transpose1d_bias(lean_object*, lean_object*, lean_object*, lean_object*, lean_object*, lean_object*, uint64_t, uint64_t, uint64_t, uint64_t);
+lean_object* lean_torch_sdpa_gqa_window(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, lean_object*, lean_object*, lean_object*, double, uint8_t, uint8_t, uint64_t);
+lean_object* lean_torch_tensor_elu(lean_object*, lean_object*);
+lean_object* lean_torch_tensor_log(lean_object*, lean_object*);
+lean_object* lean_torch_safetensors_save(lean_object*, lean_object*, lean_object*, lean_object*);
 #ifdef __cplusplus
 }
 #endif

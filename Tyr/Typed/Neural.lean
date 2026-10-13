@@ -81,6 +81,12 @@ def meanDim {σ : StaticSpec} (t : Tensor σ) (dim : Nat) (keepdim : Bool := fal
   match Tensor.ofRaw (RawTensor.mean σ.shape t.raw (some #[dim.toUInt64]) keepdim) with
   | .ok result => result
   | .error message => panic! s!"Tensor.meanDim: {message}"
+def exp {σ : StaticSpec} (t : Tensor σ) : Tensor σ :=
+  t.checkedReplacement (RawTensor.exp σ.shape t.raw)
+def sin {σ : StaticSpec} (t : Tensor σ) : Tensor σ :=
+  t.checkedReplacement (RawTensor.sin σ.shape t.raw)
+def elu {σ : StaticSpec} (t : Tensor σ) : Tensor σ :=
+  t.checkedReplacement (RawTensor.elu σ.shape t.raw)
 end Preserving
 
 /-- Spatial extent computed without fixed-width arithmetic wrapping. -/
@@ -202,5 +208,50 @@ def log10 {σ : StaticSpec} (input : Tensor σ)
 
 def saveWav {σ : StaticSpec} (input : Tensor σ) (path : String) (sampleRate : UInt64 := 24000) : IO Unit :=
   RawTensor.saveWav σ.shape input.raw path sampleRate
+
+def lt {s : Shape} {d : DType} {dev : DevicePolicy} (a b : Tensor ⟨s, d, dev⟩) :
+    Tensor ⟨s, .Bool, dev⟩ := .assumeSpec (RawTensor.lt s a.raw b.raw)
+def ge {s : Shape} {d : DType} {dev : DevicePolicy} (a b : Tensor ⟨s, d, dev⟩) :
+    Tensor ⟨s, .Bool, dev⟩ := .assumeSpec (RawTensor.ge s a.raw b.raw)
+def ltScalar {s : Shape} {d : DType} {dev : DevicePolicy} (input : Tensor ⟨s, d, dev⟩) (value : Float) :
+    Tensor ⟨s, .Bool, dev⟩ := .assumeSpec (RawTensor.ltScalar s input.raw value)
+def maskedFill {s : Shape} {d : DType} {dev : DevicePolicy}
+    (input : Tensor ⟨s, d, dev⟩) (mask : Tensor ⟨s, .Bool, dev⟩) (value : Float) : Tensor ⟨s, d, dev⟩ :=
+  input.checkedReplacement (RawTensor.maskedFill s input.raw mask.raw value)
+
+/-- Grouped convolution checks channel grouping at the native boundary. -/
+def conv1dGroups {batch cin cout cinPerGroup length kernel : UInt64} {d : DType} {dev : DevicePolicy}
+    (input : Tensor ⟨#[batch, cin, length], d, dev⟩)
+    (weight : Tensor ⟨#[cout, cinPerGroup, kernel], d, dev⟩) (bias : Tensor ⟨#[cout], d, dev⟩)
+    (stride : UInt64 := 1) (padding : UInt64 := 0) (dilation : UInt64 := 1) (groups : UInt64 := 1) :
+    Tensor ⟨#[batch, cout, convExtent length kernel stride padding dilation], d, dev⟩ :=
+  match Tensor.ofRaw (RawTensor.conv1dGroups input.shape weight.shape bias.shape
+      input.raw weight.raw bias.raw stride padding dilation groups) with
+  | .ok result => result
+  | .error message => panic! s!"Tensor.conv1dGroups: {message}"
+
+def convTranspose1d {batch cin cout length kernel : UInt64} {d : DType} {dev : DevicePolicy}
+    (input : Tensor ⟨#[batch, cin, length], d, dev⟩)
+    (weight : Tensor ⟨#[cin, cout, kernel], d, dev⟩) (bias : Tensor ⟨#[cout], d, dev⟩)
+    (stride : UInt64 := 1) (padding : UInt64 := 0) (outputPadding : UInt64 := 0) (dilation : UInt64 := 1) :
+    Tensor ⟨#[batch, cout, ((length.toNat - 1) * stride.toNat + dilation.toNat * (kernel.toNat - 1)
+      + outputPadding.toNat + 1 - 2 * padding.toNat).toUInt64], d, dev⟩ :=
+  match Tensor.ofRaw (RawTensor.convTranspose1d input.shape weight.shape bias.shape
+      input.raw weight.raw bias.raw stride padding outputPadding dilation) with
+  | .ok result => result
+  | .error message => panic! s!"Tensor.convTranspose1d: {message}"
+
+def attentionWindow {batch heads kvHeads seq dim : UInt64} {d : DType} {dev : DevicePolicy}
+    (q : Tensor ⟨#[batch, heads, seq, dim], d, dev⟩)
+    (k v : Tensor ⟨#[batch, kvHeads, seq, dim], d, dev⟩)
+    (dropout : Float := 0.0) (causal : Bool := true) (gqa : Bool := false) (window : UInt64 := 0) :=
+  q.checkedReplacement (RawTensor.attentionWindow batch heads kvHeads seq dim q.raw k.raw v.raw dropout causal gqa window)
+
+def log {σ : StaticSpec} (input : Tensor σ)
+    (_float : σ.dtype.isFloating = true := by first | rfl | decide) : Tensor σ :=
+  input.checkedReplacement (RawTensor.log σ.shape input.raw)
+
+def saveSafeTensor {σ : StaticSpec} (input : Tensor σ) (path name : String) : IO Unit :=
+  RawTensor.saveSafeTensor σ.shape path name input.raw
 
 end torch.Tensor

@@ -13,7 +13,8 @@
     `Qwen3TTSTokenizerV1Encoder`.
   - Decoder-side 25Hz architecture (DiT + BigVGAN) is handled separately.
 -/
-import Tyr.Torch
+import Tyr.Typed.Neural
+import Tyr.SafeTensors.Load
 import Tyr.TensorStruct
 import Tyr.Module.Derive
 import Tyr.Model.Qwen3ASR.Frontend
@@ -133,53 +134,53 @@ end SpeechTokenizer25HzEncoderConfig
 
 /-! ## Parameters -/
 
-private def freeze {s : Shape} (t : T s) : T s :=
-  autograd.set_requires_grad t false
+private def freeze {s : Shape} (t : STensor s) : STensor s :=
+  Tensor.setRequiresGrad t false
 
-private def loadFrozen (path : String) (name : String) (s : Shape) : IO (T s) := do
-  let t ← safetensors.loadTensor path name s
+private def loadFrozen (path : String) (name : String) (s : Shape) : IO (STensor s) := do
+  let t ← safetensors.loadTensorCandidates path #[name] s
   pure (freeze t)
 
-private def loadFrozenOrZeros (path : String) (name : String) (s : Shape) : IO (T s) := do
+private def loadFrozenOrZeros (path : String) (name : String) (s : Shape) : IO (STensor s) := do
   try
     loadFrozen path name s
   catch _ =>
-    pure (freeze (torch.zeros s))
+    pure (freeze (Tensor.zeros s).forgetDType)
 
 private def addBias2d {n d : UInt64}
-    (x : T #[n, d])
-    (bias : T #[d]) : T #[n, d] :=
-  let b : T #[1, d] := reshape bias #[1, d]
-  x + nn.expand b #[n, d]
+    (x : STensor #[n, d])
+    (bias : STensor #[d]) : STensor #[n, d] :=
+  let b : STensor #[1, d] := Tensor.reshapeChecked bias #[1, d]
+  x + Tensor.expand b #[n, d]
 
 private def addBias3d {batch channels frames : UInt64}
-    (x : T #[batch, channels, frames])
-    (bias : T #[channels]) : T #[batch, channels, frames] :=
-  let b : T #[1, channels, 1] := reshape bias #[1, channels, 1]
-  x + nn.expand b #[batch, channels, frames]
+    (x : STensor #[batch, channels, frames])
+    (bias : STensor #[channels]) : STensor #[batch, channels, frames] :=
+  let b : STensor #[1, channels, 1] := Tensor.reshapeChecked bias #[1, channels, 1]
+  x + Tensor.expand b #[batch, channels, frames]
 
 private def conv1dWithBias {batch inC outC inFrames outFrames kernel : UInt64}
-    (x : T #[batch, inC, inFrames])
-    (w : T #[outC, inC, kernel])
-    (b : T #[outC])
-    (stride pad dilation : UInt64) : T #[batch, outC, outFrames] :=
-  let y0 : T #[batch, outC, outFrames] := reshape (nn.conv1d x w stride pad dilation) #[batch, outC, outFrames]
+    (x : STensor #[batch, inC, inFrames])
+    (w : STensor #[outC, inC, kernel])
+    (b : STensor #[outC])
+    (stride pad dilation : UInt64) : STensor #[batch, outC, outFrames] :=
+  let y0 : STensor #[batch, outC, outFrames] := Tensor.reshapeChecked (Tensor.conv1d x w stride pad dilation) #[batch, outC, outFrames]
   addBias3d y0 b
 
 private def affine3d {batch seq inDim outDim : UInt64}
-    (x : T #[batch, seq, inDim])
-    (w : T #[outDim, inDim])
-    (b : T #[outDim]) : T #[batch, seq, outDim] :=
-  let x2 : T #[batch * seq, inDim] := reshape x #[batch * seq, inDim]
-  let y0 : T #[batch * seq, outDim] := nn.mm x2 (nn.transpose2d w)
-  let y1 : T #[batch * seq, outDim] := addBias2d y0 b
-  reshape y1 #[batch, seq, outDim]
+    (x : STensor #[batch, seq, inDim])
+    (w : STensor #[outDim, inDim])
+    (b : STensor #[outDim]) : STensor #[batch, seq, outDim] :=
+  let x2 : STensor #[batch * seq, inDim] := Tensor.reshapeChecked x #[batch * seq, inDim]
+  let y0 : STensor #[batch * seq, outDim] := Tensor.mm x2 (Tensor.transpose2d w)
+  let y1 : STensor #[batch * seq, outDim] := addBias2d y0 b
+  Tensor.reshapeChecked y1 #[batch, seq, outDim]
 
 private def scale3d {batch seq dim : UInt64}
-    (x : T #[batch, seq, dim])
-    (scale : T #[dim]) : T #[batch, seq, dim] :=
-  let s : T #[1, 1, dim] := reshape scale #[1, 1, dim]
-  x * nn.expand s #[batch, seq, dim]
+    (x : STensor #[batch, seq, dim])
+    (scale : STensor #[dim]) : STensor #[batch, seq, dim] :=
+  let s : STensor #[1, 1, dim] := Tensor.reshapeChecked scale #[1, 1, dim]
+  x * Tensor.expand s #[batch, seq, dim]
 
 private def conv2Frames (melFrames : UInt64) : UInt64 :=
   (melFrames + 1) / 2
@@ -188,34 +189,34 @@ private def vqFrames (melFrames : UInt64) : UInt64 :=
   (conv2Frames melFrames) / 2
 
 structure EncoderBlock25Hz where
-  attnLnWeight : T #[1280]
-  attnLnBias : T #[1280]
-  qWeight : T #[1280, 1280]
-  qBias : T #[1280]
-  kWeight : T #[1280, 1280]
-  kBias : T #[1280]
-  vWeight : T #[1280, 1280]
-  vBias : T #[1280]
-  oWeight : T #[1280, 1280]
-  oBias : T #[1280]
-  mlpLnWeight : T #[1280]
-  mlpLnBias : T #[1280]
-  fc1Weight : T #[5120, 1280]
-  fc1Bias : T #[5120]
-  fc2Weight : T #[1280, 5120]
-  fc2Bias : T #[1280]
+  attnLnWeight : STensor #[1280]
+  attnLnBias : STensor #[1280]
+  qWeight : STensor #[1280, 1280]
+  qBias : STensor #[1280]
+  kWeight : STensor #[1280, 1280]
+  kBias : STensor #[1280]
+  vWeight : STensor #[1280, 1280]
+  vBias : STensor #[1280]
+  oWeight : STensor #[1280, 1280]
+  oBias : STensor #[1280]
+  mlpLnWeight : STensor #[1280]
+  mlpLnBias : STensor #[1280]
+  fc1Weight : STensor #[5120, 1280]
+  fc1Bias : STensor #[5120]
+  fc2Weight : STensor #[1280, 5120]
+  fc2Bias : STensor #[1280]
   deriving TensorStruct
 
 structure SpeechTokenizer25HzEncoder where
-  conv1Weight : T #[1280, 128, 3]
-  conv1Bias : T #[1280]
-  conv2Weight : T #[1280, 1280, 3]
-  conv2Bias : T #[1280]
-  positionalEmbedding : T #[1500, 1280]
+  conv1Weight : STensor #[1280, 128, 3]
+  conv1Bias : STensor #[1280]
+  conv2Weight : STensor #[1280, 1280, 3]
+  conv2Bias : STensor #[1280]
+  positionalEmbedding : STensor #[1500, 1280]
   blocks : Array EncoderBlock25Hz
-  vqDownWeight : T #[1280, 1280, 2]
-  vqDownBias : T #[1280]
-  vqCodebook : T #[32768, 1280]
+  vqDownWeight : STensor #[1280, 1280, 2]
+  vqDownBias : STensor #[1280]
+  vqCodebook : STensor #[32768, 1280]
   inputSampleRate : UInt64 := 24000
   encodeDownsampleRate : UInt64 := 1920
   deriving TensorStruct
@@ -281,8 +282,8 @@ def loadFromDir (speechTokenizerDir : String) (device : Device := Device.CPU) : 
   let vqDownWeight ← loadFrozen weightsPath "encoder.tokenizer.audio_vq_downsample.weight" #[1280, 1280, 2]
   let vqDownBias ← loadFrozen weightsPath "encoder.tokenizer.audio_vq_downsample.bias" #[1280]
   let vqEmbedRaw ← loadFrozen weightsPath "encoder.tokenizer.audio_quantizer.rvqs.0.embed" #[1, 32768, 1280]
-  let vqEmbed3 : T #[1, 32768, 1280] := data.slice vqEmbedRaw 0 0 1
-  let vqCodebook : T #[32768, 1280] := reshape vqEmbed3 #[32768, 1280]
+  let vqEmbed3 : STensor #[1, 32768, 1280] := Tensor.sliceChecked vqEmbedRaw 0 0 1 #[1, 32768, 1280]
+  let vqCodebook : STensor #[32768, 1280] := Tensor.reshapeChecked vqEmbed3 #[32768, 1280]
 
   let enc : SpeechTokenizer25HzEncoder := {
     conv1Weight
@@ -301,74 +302,74 @@ def loadFromDir (speechTokenizerDir : String) (device : Device := Device.CPU) : 
 
 private def forwardAttention {seq : UInt64}
     (blk : EncoderBlock25Hz)
-    (x : T #[1, seq, 1280]) : T #[1, seq, 1280] :=
-  let q0 : T #[1, seq, 1280] := affine3d x blk.qWeight blk.qBias
-  let k0 : T #[1, seq, 1280] := affine3d x blk.kWeight blk.kBias
-  let v0 : T #[1, seq, 1280] := affine3d x blk.vWeight blk.vBias
+    (x : STensor #[1, seq, 1280]) : STensor #[1, seq, 1280] :=
+  let q0 : STensor #[1, seq, 1280] := affine3d x blk.qWeight blk.qBias
+  let k0 : STensor #[1, seq, 1280] := affine3d x blk.kWeight blk.kBias
+  let v0 : STensor #[1, seq, 1280] := affine3d x blk.vWeight blk.vBias
 
-  let q : T #[1, seq, 20, 64] := reshape q0 #[1, seq, 20, 64]
-  let k : T #[1, seq, 20, 64] := reshape k0 #[1, seq, 20, 64]
-  let v : T #[1, seq, 20, 64] := reshape v0 #[1, seq, 20, 64]
+  let q : STensor #[1, seq, 20, 64] := Tensor.reshapeChecked q0 #[1, seq, 20, 64]
+  let k : STensor #[1, seq, 20, 64] := Tensor.reshapeChecked k0 #[1, seq, 20, 64]
+  let v : STensor #[1, seq, 20, 64] := Tensor.reshapeChecked v0 #[1, seq, 20, 64]
 
-  let qh : T #[1, 20, seq, 64] := nn.transpose_for_attention q
-  let kh : T #[1, 20, seq, 64] := nn.transpose_for_attention k
-  let vh : T #[1, 20, seq, 64] := nn.transpose_for_attention v
+  let qh : STensor #[1, 20, seq, 64] := Tensor.splitHeads q
+  let kh : STensor #[1, 20, seq, 64] := Tensor.splitHeads k
+  let vh : STensor #[1, 20, seq, 64] := Tensor.splitHeads v
 
-  let attn : T #[1, 20, seq, 64] := nn.scaled_dot_product_attention qh kh vh 0.0 false
-  let attn2 : T #[1, seq, 20, 64] := nn.transpose_from_attention attn
-  let attn3 : T #[1, seq, 1280] := reshape attn2 #[1, seq, 1280]
+  let attn : STensor #[1, 20, seq, 64] := Tensor.attentionGQA qh kh vh 0.0 false
+  let attn2 : STensor #[1, seq, 20, 64] := Tensor.joinHeads attn
+  let attn3 : STensor #[1, seq, 1280] := Tensor.reshapeChecked attn2 #[1, seq, 1280]
   affine3d attn3 blk.oWeight blk.oBias
 
 private def forwardBlock {seq : UInt64}
     (blk : EncoderBlock25Hz)
-    (x : T #[1, seq, 1280]) : T #[1, seq, 1280] :=
-  let h0 : T #[1, seq, 1280] := nn.layer_norm x blk.attnLnWeight blk.attnLnBias 1e-5
-  let a : T #[1, seq, 1280] := forwardAttention blk h0
-  let x1 : T #[1, seq, 1280] := x + a
+    (x : STensor #[1, seq, 1280]) : STensor #[1, seq, 1280] :=
+  let h0 : STensor #[1, seq, 1280] := Tensor.layerNorm x blk.attnLnWeight blk.attnLnBias 1e-5
+  let a : STensor #[1, seq, 1280] := forwardAttention blk h0
+  let x1 : STensor #[1, seq, 1280] := x + a
 
-  let h1 : T #[1, seq, 1280] := nn.layer_norm x1 blk.mlpLnWeight blk.mlpLnBias 1e-5
-  let m0 : T #[1, seq, 5120] := affine3d h1 blk.fc1Weight blk.fc1Bias
-  let m1 : T #[1, seq, 5120] := nn.gelu m0
-  let m2 : T #[1, seq, 1280] := affine3d m1 blk.fc2Weight blk.fc2Bias
+  let h1 : STensor #[1, seq, 1280] := Tensor.layerNorm x1 blk.mlpLnWeight blk.mlpLnBias 1e-5
+  let m0 : STensor #[1, seq, 5120] := affine3d h1 blk.fc1Weight blk.fc1Bias
+  let m1 : STensor #[1, seq, 5120] := Tensor.Preserving.gelu m0
+  let m2 : STensor #[1, seq, 1280] := affine3d m1 blk.fc2Weight blk.fc2Bias
   x1 + m2
 
 private def encodeMelChunk {melFrames : UInt64}
     (m : SpeechTokenizer25HzEncoder)
-    (mel : T #[128, melFrames]) : T #[vqFrames melFrames] :=
+    (mel : STensor #[128, melFrames]) : DTensor #[vqFrames melFrames] .Int64 :=
   let c2Frames : UInt64 := conv2Frames melFrames
   let qFrames : UInt64 := vqFrames melFrames
   if melFrames < 2 || qFrames == 0 then
-    reshape (torch.full_int #[0] 0) #[qFrames]
+    Tensor.reshapeChecked (Tensor.fullInt #[0] 0) #[qFrames]
   else
     Id.run do
-      let x0 : T #[1, 128, melFrames] := reshape mel #[1, 128, melFrames]
-      let h1 : T #[1, 1280, melFrames] :=
-        nn.gelu (conv1dWithBias x0 m.conv1Weight m.conv1Bias 1 1 1)
-      let h2 : T #[1, 1280, c2Frames] :=
-        nn.gelu (conv1dWithBias h1 m.conv2Weight m.conv2Bias 2 1 1)
+      let x0 : STensor #[1, 128, melFrames] := Tensor.reshapeChecked mel #[1, 128, melFrames]
+      let h1 : STensor #[1, 1280, melFrames] :=
+        Tensor.Preserving.gelu (conv1dWithBias x0 m.conv1Weight m.conv1Bias 1 1 1)
+      let h2 : STensor #[1, 1280, c2Frames] :=
+        Tensor.Preserving.gelu (conv1dWithBias h1 m.conv2Weight m.conv2Bias 2 1 1)
 
-      let xSeq0 : T #[1, c2Frames, 1280] := reshape (nn.transpose h2 1 2) #[1, c2Frames, 1280]
-      let pos : T #[c2Frames, 1280] := data.slice m.positionalEmbedding 0 0 c2Frames
-      let pos3 : T #[1, c2Frames, 1280] := reshape pos #[1, c2Frames, 1280]
-      let mut xSeq : T #[1, c2Frames, 1280] := xSeq0 + pos3
+      let xSeq0 : STensor #[1, c2Frames, 1280] := Tensor.reshapeChecked (Tensor.transpose h2 1 2) #[1, c2Frames, 1280]
+      let pos : STensor #[c2Frames, 1280] := Tensor.sliceChecked m.positionalEmbedding 0 0 c2Frames #[c2Frames, 1280]
+      let pos3 : STensor #[1, c2Frames, 1280] := Tensor.reshapeChecked pos #[1, c2Frames, 1280]
+      let mut xSeq : STensor #[1, c2Frames, 1280] := xSeq0 + pos3
 
       for blk in m.blocks do
         xSeq := forwardBlock blk xSeq
 
-      let vqIn : T #[1, 1280, c2Frames] := reshape (nn.transpose xSeq 1 2) #[1, 1280, c2Frames]
-      let vqDown : T #[1, 1280, qFrames] :=
+      let vqIn : STensor #[1, 1280, c2Frames] := Tensor.reshapeChecked (Tensor.transpose xSeq 1 2) #[1, 1280, c2Frames]
+      let vqDown : STensor #[1, 1280, qFrames] :=
         conv1dWithBias vqIn m.vqDownWeight m.vqDownBias 2 0 1
-      let vqSeq : T #[qFrames, 1280] :=
-        reshape (nn.transpose (reshape vqDown #[1, 1280, qFrames]) 1 2) #[qFrames, 1280]
+      let vqSeq : STensor #[qFrames, 1280] :=
+        Tensor.reshapeChecked (Tensor.transpose (Tensor.reshapeChecked vqDown #[1, 1280, qFrames]) 1 2) #[qFrames, 1280]
 
-      let x2 : T #[qFrames, 1] := nn.sumDim (nn.pow vqSeq 2.0) 1 true
-      let e2 : T #[32768, 1] := nn.sumDim (nn.pow m.vqCodebook 2.0) 1 true
-      let dot : T #[qFrames, 32768] := nn.mm vqSeq (nn.transpose2d m.vqCodebook)
-      let x2e : T #[qFrames, 32768] := nn.expand x2 #[qFrames, 32768]
-      let e2Row : T #[1, 32768] := reshape (nn.transpose2d e2) #[1, 32768]
-      let e2e : T #[qFrames, 32768] := nn.expand e2Row #[qFrames, 32768]
-      let dist : T #[qFrames, 32768] := x2e + e2e - mul_scalar dot 2.0
-      nn.argmax (mul_scalar dist (-1.0)) 1
+      let x2 : STensor #[qFrames, 1] := Tensor.reshapeChecked (Tensor.Preserving.sumDim (vqSeq * vqSeq) 1 true) #[qFrames, 1]
+      let e2 : STensor #[32768, 1] := Tensor.reshapeChecked (Tensor.Preserving.sumDim (m.vqCodebook * m.vqCodebook) 1 true) #[32768, 1]
+      let dot : STensor #[qFrames, 32768] := Tensor.mm vqSeq (Tensor.transpose2d m.vqCodebook)
+      let x2e : STensor #[qFrames, 32768] := Tensor.expand x2 #[qFrames, 32768]
+      let e2Row : STensor #[1, 32768] := Tensor.reshapeChecked (Tensor.transpose2d e2) #[1, 32768]
+      let e2e : STensor #[qFrames, 32768] := Tensor.expand e2Row #[qFrames, 32768]
+      let dist : STensor #[qFrames, 32768] := x2e + e2e - Tensor.Preserving.mulScalar dot 2.0
+      Tensor.reshapeChecked (Tensor.argmax (Tensor.Preserving.mulScalar dist (-1.0)) 1) #[vqFrames melFrames]
 
 private def appendAll (dst src : Array UInt64) : Array UInt64 :=
   Id.run do
@@ -398,7 +399,7 @@ def encodeWaveToCodes
   }
 
   let ⟨melFrames, frontendOut⟩ ← waveformToWhisperFeaturesDynamic preCfg wave 0.0 none
-  let feats : T #[1, 128, melFrames] := frontendOut.inputFeatures
+  let feats : STensor #[1, 128, melFrames] := Tensor.castLike m.conv1Weight frontendOut.inputFeatures
 
   let chunkMel : UInt64 := 200
   let mut start : UInt64 := 0
@@ -407,10 +408,10 @@ def encodeWaveToCodes
     let remaining := melFrames - start
     let cur := if remaining < chunkMel then remaining else chunkMel
     if cur >= 2 then
-      let melChunk3 : T #[1, 128, cur] := data.slice feats 2 start cur
-      let melChunk : T #[128, cur] := reshape melChunk3 #[128, cur]
-      let idx : T #[vqFrames cur] := encodeMelChunk m melChunk
-      let vals ← data.tensorToUInt64Array idx
+      let melChunk3 : STensor #[1, 128, cur] := Tensor.sliceChecked feats 2 start cur #[1, 128, cur]
+      let melChunk : STensor #[128, cur] := Tensor.reshapeChecked melChunk3 #[128, cur]
+      let idx : DTensor #[vqFrames cur] .Int64 := encodeMelChunk m melChunk
+      let vals ← Tensor.toUInt64Array idx
       outVals := appendAll outVals vals
     start := start + cur
 

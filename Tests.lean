@@ -152,3 +152,5 @@ import Tests.TestFLM
 -- `TestsExperimental.lean` until `Tyr/Model/BranchingFlows.lean` is stabilized.
 
 import Tests.TestTypedNeural
+
+import Tests.TestTTSTypedLoading

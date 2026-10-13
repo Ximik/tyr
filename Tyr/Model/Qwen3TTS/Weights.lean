@@ -5,7 +5,7 @@
   Loads talker and code-predictor weights from HuggingFace-style sharded
   SafeTensors directories so generation can use real checkpoint tensors.
 -/
-import Tyr.Torch
+import Tyr.Typed.Neural
 import Tyr.TensorStruct
 import Tyr.Log
 import Tyr.SafeTensors.Load
@@ -22,11 +22,11 @@ open torch.safetensors (tryLoadTensorSharded)
 
 /-- Local alias for sharded tensor loading.
     Device placement is performed once in `loadSharded`. -/
-private def loadTensorShardedTarget (modelDir : String) (name : String) (s : Shape) : IO (T s) := do
-  safetensors.loadTensorSharded modelDir name s
+private def loadTensorShardedTarget (modelDir : String) (name : String) (s : Shape) : IO (STensor s) := do
+  safetensors.loadTensorShardedCandidates modelDir #[name] s
 
 private def loadRMSNormSharded (modelDir : String) (name : String) (dim : UInt64) (eps : Float)
-    : IO (RMSNorm dim) := do
+    : IO (RMSNorm dim (.Unknown "dynamic")) := do
   let w ← loadTensorShardedTarget modelDir s!"{name}.weight" #[dim]
   pure { weight := reqGradFalse w, eps := ⟨eps⟩ }
 
@@ -58,7 +58,7 @@ private def loadTalkerLayerSharded (modelDir : String) (layerIdx : UInt64) (cfg 
   let input_layernorm ← loadRMSNormSharded modelDir s!"{p}.input_layernorm" cfg.hiddenSize cfg.rmsNormEps
   let post_attention_layernorm ← loadRMSNormSharded modelDir s!"{p}.post_attention_layernorm" cfg.hiddenSize cfg.rmsNormEps
 
-  let self_attn : qwen.QwenAttention cfg.hiddenSize cfg.numAttentionHeads cfg.numKeyValueHeads cfg.headDim := {
+  let self_attn : qwen.QwenAttention cfg.hiddenSize cfg.numAttentionHeads cfg.numKeyValueHeads cfg.headDim (.Unknown "dynamic") := {
     q_proj := reqGradFalse q_proj
     k_proj := reqGradFalse k_proj
     v_proj := reqGradFalse v_proj
@@ -66,7 +66,7 @@ private def loadTalkerLayerSharded (modelDir : String) (layerIdx : UInt64) (cfg 
     q_norm := q_norm.map reqGradFalse
     k_norm := k_norm.map reqGradFalse
   }
-  let mlp : qwen.QwenMLP cfg.hiddenSize cfg.intermediateSize := {
+  let mlp : qwen.QwenMLP cfg.hiddenSize cfg.intermediateSize (.Unknown "dynamic") := {
     gate_proj := reqGradFalse gate_proj
     up_proj := reqGradFalse up_proj
     down_proj := reqGradFalse down_proj
@@ -102,7 +102,7 @@ private def loadCodePredictorLayerSharded (modelDir : String) (layerIdx : UInt64
   let input_layernorm ← loadRMSNormSharded modelDir s!"{p}.input_layernorm" cp.hiddenSize cp.rmsNormEps
   let post_attention_layernorm ← loadRMSNormSharded modelDir s!"{p}.post_attention_layernorm" cp.hiddenSize cp.rmsNormEps
 
-  let self_attn : qwen.QwenAttention cp.hiddenSize cp.numAttentionHeads cp.numKeyValueHeads cp.headDim := {
+  let self_attn : qwen.QwenAttention cp.hiddenSize cp.numAttentionHeads cp.numKeyValueHeads cp.headDim (.Unknown "dynamic") := {
     q_proj := reqGradFalse q_proj
     k_proj := reqGradFalse k_proj
     v_proj := reqGradFalse v_proj
@@ -110,7 +110,7 @@ private def loadCodePredictorLayerSharded (modelDir : String) (layerIdx : UInt64
     q_norm := q_norm.map reqGradFalse
     k_norm := k_norm.map reqGradFalse
   }
-  let mlp : qwen.QwenMLP cp.hiddenSize cp.intermediateSize := {
+  let mlp : qwen.QwenMLP cp.hiddenSize cp.intermediateSize (.Unknown "dynamic") := {
     gate_proj := reqGradFalse gate_proj
     up_proj := reqGradFalse up_proj
     down_proj := reqGradFalse down_proj
@@ -118,7 +118,7 @@ private def loadCodePredictorLayerSharded (modelDir : String) (layerIdx : UInt64
   pure { input_layernorm, self_attn, post_attention_layernorm, mlp }
 
 private def loadCodePredictorProjectionSharded (modelDir : String) (cfg : TalkerConfig)
-    : IO (T #[cfg.codePredictorConfig.hiddenSize, cfg.hiddenSize] × T #[cfg.codePredictorConfig.hiddenSize]) := do
+    : IO (STensor #[cfg.codePredictorConfig.hiddenSize, cfg.hiddenSize] × STensor #[cfg.codePredictorConfig.hiddenSize]) := do
   let cp := cfg.codePredictorConfig
   try
     let w ← loadTensorShardedTarget modelDir "talker.code_predictor.small_to_mtp_projection.weight"
@@ -130,9 +130,9 @@ private def loadCodePredictorProjectionSharded (modelDir : String) (cfg : Talker
     if cp.hiddenSize == cfg.hiddenSize then
       let reference ← loadTensorShardedTarget modelDir "talker.model.codec_embedding.weight"
         #[cfg.vocabSize, cfg.hiddenSize]
-      let w := castLike reference (reqGradFalse (torch.eye cp.hiddenSize false))
-      let b := castLike reference (reqGradFalse (torch.zeros #[cp.hiddenSize]))
-      pure (w, b)
+      let w := Tensor.castLike reference (reqGradFalse (Tensor.eye cp.hiddenSize))
+      let b := Tensor.castLike reference (reqGradFalse (Tensor.zeros #[cp.hiddenSize]))
+      pure (w.reshapeChecked #[cfg.codePredictorConfig.hiddenSize, cfg.hiddenSize], b)
     else
       throw <| IO.userError
         "Missing talker.code_predictor.small_to_mtp_projection.* and hidden sizes differ; cannot build projection."
@@ -175,7 +175,7 @@ private def loadCodePredictorSharded (modelDir : String) (cfg : TalkerConfig)
   let cp := cfg.codePredictorConfig
   let nCodebooks := if cfg.numCodeGroups.toNat == 0 then 0 else cfg.numCodeGroups.toNat - 1
 
-  let mut inputEmbeddings : Array (T #[cp.vocabSize, cfg.hiddenSize]) := #[]
+  let mut inputEmbeddings : Array (STensor #[cp.vocabSize, cfg.hiddenSize]) := #[]
   for i in [:nCodebooks] do
     let emb ← loadTensorShardedTarget modelDir
       s!"talker.code_predictor.model.codec_embedding.{i}.weight"
@@ -191,7 +191,7 @@ private def loadCodePredictorSharded (modelDir : String) (cfg : TalkerConfig)
 
   let norm ← loadRMSNormSharded modelDir "talker.code_predictor.model.norm" cp.hiddenSize cp.rmsNormEps
 
-  let mut lmHeads : Array (T #[cp.vocabSize, cp.hiddenSize]) := #[]
+  let mut lmHeads : Array (STensor #[cp.vocabSize, cp.hiddenSize]) := #[]
   for i in [:nCodebooks] do
     let head ← loadTensorShardedTarget modelDir
       s!"talker.code_predictor.lm_head.{i}.weight"

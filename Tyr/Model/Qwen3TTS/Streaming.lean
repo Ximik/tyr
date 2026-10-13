@@ -24,8 +24,8 @@ structure StreamingOptions (cfg : Qwen3TTSConfig) where
   subtalkerTopP : Float := 1.0
   repetitionPenalty : Float := 1.05
   suppressTail : UInt64 := 1024
-  trailingTextHidden : Option (Sigma fun trailingSeq => T #[1, trailingSeq, cfg.talkerConfig.hiddenSize]) := none
-  ttsPadEmbed : Option (T #[1, 1, cfg.talkerConfig.hiddenSize]) := none
+  trailingTextHidden : Option (Sigma fun trailingSeq => STensor #[1, trailingSeq, cfg.talkerConfig.hiddenSize]) := none
+  ttsPadEmbed : Option (STensor #[1, 1, cfg.talkerConfig.hiddenSize]) := none
   subtalkerTemperaturesByGroup : Option (Array Float) := none
   subtalkerTopKsByGroup : Option (Array UInt64) := none
   subtalkerTopPsByGroup : Option (Array Float) := none
@@ -36,7 +36,7 @@ structure StreamingOptions (cfg : Qwen3TTSConfig) where
 /-- Streaming callbacks for generated codec rows and decoded audio chunks. -/
 structure StreamingCallbacks where
   onCodeFrame : UInt64 → Array UInt64 → IO Unit := fun _ _ => pure ()
-  onAudioChunk : T #[] → IO Unit := fun _ => pure ()
+  onAudioChunk : (Sigma fun samples => STensor #[1, 1, samples]) → IO Unit := fun _ => pure ()
 
 /-- Final metadata for one streaming run. -/
 structure StreamingResult where
@@ -52,7 +52,7 @@ structure StreamingResult where
     (upstream 12Hz tokenizer). -/
 def streamFromTalkerInputs {seq : UInt64}
     (m : Qwen3TTSForConditionalGeneration cfg)
-    (talkerInputs : T #[1, seq, cfg.talkerConfig.hiddenSize])
+    (talkerInputs : STensor #[1, seq, cfg.talkerConfig.hiddenSize])
     (opts : StreamingOptions cfg := {})
     (speechDecoder? : Option SpeechTokenizer12HzDecoder := none)
     (callbacks : StreamingCallbacks := {})
@@ -75,9 +75,9 @@ def streamFromTalkerInputs {seq : UInt64}
     else
       pure none
 
-  let onFrame : UInt64 → T #[1, cfg.talkerConfig.numCodeGroups] → IO Unit := fun step frame => do
-    let frameRow : T #[cfg.talkerConfig.numCodeGroups] := reshape frame #[cfg.talkerConfig.numCodeGroups]
-    let rowVals ← data.tensorToUInt64Array frameRow
+  let onFrame : UInt64 → DTensor #[1, cfg.talkerConfig.numCodeGroups] .Int64 → IO Unit := fun step frame => do
+    let frameRow : DTensor #[cfg.talkerConfig.numCodeGroups] .Int64 := Tensor.reshapeChecked frame #[cfg.talkerConfig.numCodeGroups]
+    let rowVals ← Tensor.toUInt64Array frameRow
     let firstTok := rowVals.getD 0 cfg.talkerConfig.codecEosTokenId
     let keepRow := opts.emitEosFrame || firstTok != cfg.talkerConfig.codecEosTokenId
     if keepRow then
@@ -85,8 +85,8 @@ def streamFromTalkerInputs {seq : UInt64}
       callbacks.onCodeFrame step rowVals
       match speechDecoder?, decodeStateRef? with
       | some dec, some stRef =>
-          let frame16a : T #[1, 16, 1] := reshape frame #[1, 16, 1]
-          let frame16 : T #[1, 16, 1] :=
+          let frame16a : DTensor #[1, 16, 1] .Int64 := Tensor.reshapeChecked frame #[1, 16, 1]
+          let frame16 : DTensor #[1, 16, 1] .Int64 :=
             if frame16a.device == dec.preConvWeight.device then frame16a else frame16a.to dec.preConvWeight.device
           let st ← stRef.get
           let (st', chunks) := dec.pushDecodeStream st frame16

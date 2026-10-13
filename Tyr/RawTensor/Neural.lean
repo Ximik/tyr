@@ -39,4 +39,22 @@ namespace torch.RawTensor
 @[extern "lean_torch_save_wav"] opaque saveWav (shape : Shape) (input : @& RawTensor)
     (path : @& String) (sampleRate : UInt64) : IO Unit
 
+@[extern "lean_torch_lt"] opaque lt (shape : Shape) (a b : @& RawTensor) : RawTensor
+@[extern "lean_torch_ge"] opaque ge (shape : Shape) (a b : @& RawTensor) : RawTensor
+@[extern "lean_torch_lt_scalar"] opaque ltScalar (shape : Shape) (input : @& RawTensor) (value : Float) : RawTensor
+@[extern "lean_torch_masked_fill"] opaque maskedFill (shape : Shape) (input mask : @& RawTensor) (value : Float) : RawTensor
+
+@[extern "lean_torch_conv1d_group_bias"] opaque conv1dGroups (inputShape weightShape biasShape : Shape)
+    (input weight bias : @& RawTensor) (stride padding dilation groups : UInt64) : RawTensor
+@[extern "lean_torch_conv_transpose1d_bias"] opaque convTranspose1d (inputShape weightShape biasShape : Shape)
+    (input weight bias : @& RawTensor) (stride padding outputPadding dilation : UInt64) : RawTensor
+@[extern "lean_torch_sdpa_gqa_window"] opaque attentionWindow (batch heads kvHeads seq dim : UInt64)
+    (q k v : @& RawTensor) (dropout : Float) (causal gqa : Bool) (window : UInt64) : RawTensor
+
+@[extern "lean_torch_tensor_elu"] opaque elu (shape : Shape) (input : @& RawTensor) : RawTensor
+
+@[extern "lean_torch_tensor_log"] opaque log (shape : Shape) (input : @& RawTensor) : RawTensor
+@[extern "lean_torch_safetensors_save"] opaque saveSafeTensor (shape : Shape)
+    (path name : @& String) (input : @& RawTensor) : IO Unit
+
 end torch.RawTensor

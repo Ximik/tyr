@@ -329,6 +329,34 @@ loader now build. TTS and other model families, remaining callers and legacy
 infrastructure still require migration, followed by the full CPU/experimental,
 example, checkpoint, AD, and hardware GPU gates below.
 
+## 2026-10-13 TTS continuation
+
+- Qwen3-TTS talker, residual code predictor, speaker encoder, 12 Hz encoder and
+  decoder, 25 Hz encoder, checkpoint loading, bridge and streaming interfaces
+  now use indexed tensors. Codec IDs are Int64; floating parameters retain
+  checkpoint-dependent dtype. Dynamic waveform chunks carry sample counts and
+  decoder state retains its total-frame tensor index. No legacy `T` applications
+  remain in `Tyr/Model/Qwen3TTS`.
+- Typed grouped/transposed convolutions, sliding-window attention, comparison,
+  masking, ELU and SafeTensors saving extend the audited native adapters.
+  The neural ABI audit now covers 29 declarations, including correction of the
+  obsolete single-tensor SafeTensors IO-world parameter.
+- Native acceptance passes **154 tests, zero failures or skips**. Added coverage
+  includes BF16 talker generation, cached/full Qwen parity and immutable cache
+  snapshots, speaker dtype alignment, streaming callbacks, grouped/transposed
+  convolution, and Int64 empty-generation outputs.
+- Eight generated SafeTensors fixtures cover TTS Float32/BFloat16 storage,
+  single-file/indexed-shard loading, and explicit/missing optional code-predictor
+  projections. Loaded models retain their dtype, execute finite-logit forwards,
+  and generate codec frames. Missing projections use a dtype-matched identity.
+  This does not qualify full pretrained speech-tokenizer numerical parity or GPU
+  execution; those remain part of final acceptance.
+
+The last full `lake build Tests Examples` exposed Qwen35, KittenTTS, NanoChat
+CORE/ModdedTrain and TTS prerequisites. The TTS family now builds, but downstream
+callers and other model families still require work. The full migration goal
+remains active.
+
 ## Remaining acceptance criteria
 
 Remove the `T` declaration and all model, generator, reflection, documentation,

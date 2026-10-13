@@ -3571,8 +3571,7 @@ lean_object* lean_torch_safetensors_save(
   lean_obj_arg /*shape*/,
   b_lean_obj_arg path_obj,
   b_lean_obj_arg name_obj,
-  b_lean_obj_arg tensor_obj,
-  lean_object* /*w*/
+  b_lean_obj_arg tensor_obj
 ) {
   const char* path = lean_string_cstr(path_obj);
   const char* tensor_name = lean_string_cstr(name_obj);

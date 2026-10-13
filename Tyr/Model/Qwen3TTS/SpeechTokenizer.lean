@@ -13,17 +13,13 @@
   Note: this implementation currently targets the released 12Hz config
   (16 quantizers, 1024 latent dim, 2x convnext upsample, 4 decoder blocks).
 -/
-import Tyr.Torch
+import Tyr.Typed.Neural
+import Tyr.SafeTensors.Load
 import Tyr.TensorStruct
 import Tyr.Module.RMSNorm
 import Tyr.Model.Qwen.RoPE
 import Lean.Data.Json
 import Lean.Data.Json.FromToJson.Basic
-
-/-- Migration boundary: wrap a legacy runtime handle for the typed module
-    interface, claiming Float32 (the legacy runtime dtype). Removed when this
-    module migrates to indexed tensors. -/
-private def typedF32 {s : Shape} (t : T s) : DTensor s .Float32 := .assumeSpec t
 
 namespace torch.qwen3tts
 
@@ -252,94 +248,91 @@ end SpeechTokenizer12HzConfig
 
 /-! ## Decoder parameters -/
 
-private def freeze {s : Shape} (t : T s) : T s :=
-  autograd.set_requires_grad t false
+private def freeze {s : Shape} (t : STensor s) : STensor s :=
+  Tensor.setRequiresGrad t false
 
-private def loadFrozen (path : String) (name : String) (s : Shape) : IO (T s) := do
-  let t ← safetensors.loadTensor path name s
+private def loadFrozen (path : String) (name : String) (s : Shape) : IO (STensor s) := do
+  let t ← safetensors.loadTensorCandidates path #[name] s
   pure (freeze t)
 
 private def addBias3d {batch channels frames : UInt64}
-    (x : T #[batch, channels, frames])
-    (bias : T #[channels]) : T #[batch, channels, frames] :=
-  let b : T #[1, channels, 1] := reshape bias #[1, channels, 1]
-  x + nn.expand b #[batch, channels, frames]
+    (x : STensor #[batch, channels, frames])
+    (bias : STensor #[channels]) : STensor #[batch, channels, frames] :=
+  let b : STensor #[1, channels, 1] := Tensor.reshapeChecked bias #[1, channels, 1]
+  x + Tensor.expand b #[batch, channels, frames]
 
 private def scale3d {batch seq dim : UInt64}
-    (x : T #[batch, seq, dim])
-    (scale : T #[dim]) : T #[batch, seq, dim] :=
-  let s : T #[1, 1, dim] := reshape scale #[1, 1, dim]
-  x * nn.expand s #[batch, seq, dim]
+    (x : STensor #[batch, seq, dim])
+    (scale : STensor #[dim]) : STensor #[batch, seq, dim] :=
+  let s : STensor #[1, 1, dim] := Tensor.reshapeChecked scale #[1, 1, dim]
+  x * Tensor.expand s #[batch, seq, dim]
 
-private def clampWave {s : Shape} (x : T s) : T s :=
-  let minT : T s := torch.full s (-1.0) false x.device
-  let maxT : T s := torch.full s 1.0 false x.device
-  let x1 : T s := where_ (lt_scalar x (-1.0)) minT x
-  where_ (gt x1 maxT) maxT x1
+private def clampWave {s : Shape} (x : STensor s) : STensor s :=
+  Tensor.Preserving.clampFloat x (-1.0) 1.0
 
-private def clampMin1d {n : UInt64} (x : T #[n]) (minVal : Float) : T #[n] :=
-  let minT : T #[n] := torch.full #[n] minVal false x.device
-  where_ (lt_scalar x minVal) minT x
+private def clampMin1d {n : UInt64} (x : STensor #[n]) (minVal : Float) : STensor #[n] :=
+  let minT := Tensor.castLike x (Tensor.full #[n] minVal false x.device)
+  Tensor.whereSelect (Tensor.ltScalar x minVal) minT x
 
 structure QuantizerCodebook where
-  clusterUsage : T #[2048]
-  embeddingSum : T #[2048, 256]
+  clusterUsage : STensor #[2048]
+  embeddingSum : STensor #[2048, 256]
   deriving TensorStruct
 
 structure RVQDecode where
-  outputProj : T #[512, 256, 1]
+  outputProj : STensor #[512, 256, 1]
   codebooks : Array QuantizerCodebook
   deriving TensorStruct
 
 structure DecoderTransformerLayer where
-  inputLayernormWeight : T #[512]
-  qProj : T #[1024, 512]
-  kProj : T #[1024, 512]
-  vProj : T #[1024, 512]
-  oProj : T #[512, 1024]
-  selfAttnLayerScale : T #[512]
-  postAttentionLayernormWeight : T #[512]
-  gateProj : T #[1024, 512]
-  upProj : T #[1024, 512]
-  downProj : T #[512, 1024]
-  mlpLayerScale : T #[512]
+  inputLayernormWeight : STensor #[512]
+  qProj : STensor #[1024, 512]
+  kProj : STensor #[1024, 512]
+  vProj : STensor #[1024, 512]
+  oProj : STensor #[512, 1024]
+  selfAttnLayerScale : STensor #[512]
+  postAttentionLayernormWeight : STensor #[512]
+  gateProj : STensor #[1024, 512]
+  upProj : STensor #[1024, 512]
+  downProj : STensor #[512, 1024]
+  mlpLayerScale : STensor #[512]
   deriving TensorStruct
 
 structure UpsampleConvNeXtBlock where
-  dwconvWeight : T #[1024, 1, 7]
-  dwconvBias : T #[1024]
-  normWeight : T #[1024]
-  normBias : T #[1024]
-  pwconv1Weight : T #[4096, 1024]
-  pwconv1Bias : T #[4096]
-  pwconv2Weight : T #[1024, 4096]
-  pwconv2Bias : T #[1024]
-  gamma : T #[1024]
+  dwconvWeight : STensor #[1024, 1, 7]
+  dwconvBias : STensor #[1024]
+  normWeight : STensor #[1024]
+  normBias : STensor #[1024]
+  pwconv1Weight : STensor #[4096, 1024]
+  pwconv1Bias : STensor #[4096]
+  pwconv2Weight : STensor #[1024, 4096]
+  pwconv2Bias : STensor #[1024]
+  gamma : STensor #[1024]
   deriving TensorStruct
 
 structure UpsampleStage where
-  transConvWeight : T #[1024, 1024, 2]
-  transConvBias : T #[1024]
+  transConvWeight : STensor #[1024, 1024, 2]
+  transConvBias : STensor #[1024]
   convNeXt : UpsampleConvNeXtBlock
   deriving TensorStruct
 
 structure DecoderResidualUnit (dim : UInt64) where
   conv1Dilation : UInt64 := 1
-  act1Alpha : T #[dim]
-  act1Beta : T #[dim]
-  conv1Weight : T #[dim, dim, 7]
-  conv1Bias : T #[dim]
-  act2Alpha : T #[dim]
-  act2Beta : T #[dim]
-  conv2Weight : T #[dim, dim, 1]
-  conv2Bias : T #[dim]
+  act1Alpha : STensor #[dim]
+  act1Beta : STensor #[dim]
+  conv1Weight : STensor #[dim, dim, 7]
+  conv1Bias : STensor #[dim]
+  act2Alpha : STensor #[dim]
+  act2Beta : STensor #[dim]
+  conv2Weight : STensor #[dim, dim, 1]
+  conv2Bias : STensor #[dim]
   deriving TensorStruct
 
 structure DecoderBlock (inDim outDim upRate : UInt64) where
-  snakeAlpha : T #[inDim]
-  snakeBeta : T #[inDim]
-  transWeight : T #[inDim, outDim, 2 * upRate]
-  transBias : T #[outDim]
+  snakeAlpha : STensor #[inDim]
+  snakeBeta : STensor #[inDim]
+  transWeight : STensor #[inDim, outDim, 2 * upRate]
+  transBias : STensor #[outDim]
   res1 : DecoderResidualUnit outDim
   res2 : DecoderResidualUnit outDim
   res3 : DecoderResidualUnit outDim
@@ -349,31 +342,31 @@ structure SpeechTokenizer12HzDecoder where
   rvqFirst : RVQDecode
   rvqRest : RVQDecode
 
-  preConvWeight : T #[1024, 512, 3]
-  preConvBias : T #[1024]
+  preConvWeight : STensor #[1024, 512, 3]
+  preConvBias : STensor #[1024]
 
-  preTransformerInputProj : T #[512, 1024]
-  preTransformerInputBias : T #[512]
+  preTransformerInputProj : STensor #[512, 1024]
+  preTransformerInputBias : STensor #[512]
   preTransformerLayers : Array DecoderTransformerLayer
-  preTransformerNormWeight : T #[512]
-  preTransformerOutputProj : T #[1024, 512]
-  preTransformerOutputBias : T #[1024]
+  preTransformerNormWeight : STensor #[512]
+  preTransformerOutputProj : STensor #[1024, 512]
+  preTransformerOutputBias : STensor #[1024]
 
   upsample0 : UpsampleStage
   upsample1 : UpsampleStage
 
-  decoderConv0Weight : T #[1536, 1024, 7]
-  decoderConv0Bias : T #[1536]
+  decoderConv0Weight : STensor #[1536, 1024, 7]
+  decoderConv0Bias : STensor #[1536]
 
   decoderBlock1 : DecoderBlock 1536 768 8
   decoderBlock2 : DecoderBlock 768 384 5
   decoderBlock3 : DecoderBlock 384 192 4
   decoderBlock4 : DecoderBlock 192 96 3
 
-  finalSnakeAlpha : T #[96]
-  finalSnakeBeta : T #[96]
-  finalConvWeight : T #[1, 96, 7]
-  finalConvBias : T #[1]
+  finalSnakeAlpha : STensor #[96]
+  finalSnakeBeta : STensor #[96]
+  finalConvWeight : STensor #[1, 96, 7]
+  finalConvBias : STensor #[1]
 
   outputSampleRate : UInt64 := 24000
   decodeUpsampleRate : UInt64 := 1920
@@ -558,165 +551,165 @@ def loadFromDir (speechTokenizerDir : String) (device : Device := Device.CPU) : 
 
 private def decodeCodebook {batch frames : UInt64}
     (cb : QuantizerCodebook)
-    (codes : T #[batch, frames]) : T #[batch, 256, frames] :=
-  let usage : T #[2048] := clampMin1d cb.clusterUsage 1e-5
-  let usage2d : T #[2048, 256] := nn.expand (reshape usage #[2048, 1]) #[2048, 256]
-  let embedding : T #[2048, 256] := nn.div cb.embeddingSum usage2d
-  let q : T #[batch, frames, 256] := nn.embedding codes embedding
-  reshape (nn.transpose q 1 2) #[batch, 256, frames]
+    (codes : DTensor #[batch, frames] .Int64) : STensor #[batch, 256, frames] :=
+  let usage : STensor #[2048] := clampMin1d cb.clusterUsage 1e-5
+  let usage2d : STensor #[2048, 256] := Tensor.expand (Tensor.reshapeChecked usage #[2048, 1]) #[2048, 256]
+  let embedding : STensor #[2048, 256] := Tensor.Preserving.div cb.embeddingSum usage2d
+  let q : STensor #[batch, frames, 256] := Tensor.embedding codes embedding
+  Tensor.reshapeChecked (Tensor.transpose q 1 2) #[batch, 256, frames]
 
 private def decodeRVQSlice {batch groups frames : UInt64}
     (rvq : RVQDecode)
-    (codes : T #[batch, groups, frames])
+    (codes : DTensor #[batch, groups, frames] .Int64)
     (start : UInt64)
-    : T #[batch, 512, frames] :=
+    : STensor #[batch, 512, frames] :=
   Id.run do
-    let mut quantized : T #[batch, 256, frames] := torch.zeros #[batch, 256, frames] false codes.device
+    let mut quantized : STensor #[batch, 256, frames] := Tensor.castLike rvq.outputProj (Tensor.zeros #[batch, 256, frames] false codes.device)
     let mut off : UInt64 := 0
     for cb in rvq.codebooks do
       let idx := start + off
-      let code3 : T #[batch, 1, frames] := data.slice codes 1 idx 1
-      let code2 : T #[batch, frames] := reshape code3 #[batch, frames]
+      let code3 : DTensor #[batch, 1, frames] .Int64 := Tensor.sliceChecked codes 1 idx 1 #[batch, 1, frames]
+      let code2 : DTensor #[batch, frames] .Int64 := Tensor.reshapeChecked code3 #[batch, frames]
       let q := decodeCodebook cb code2
       quantized := quantized + q
       off := off + 1
-    let out : T #[batch, 512, frames] :=
-      reshape (nn.conv1d quantized rvq.outputProj 1 0 1) #[batch, 512, frames]
+    let out : STensor #[batch, 512, frames] :=
+      Tensor.reshapeChecked (Tensor.conv1d quantized rvq.outputProj 1 0 1) #[batch, 512, frames]
     out
 
 private def decodeSplitRVQ {batch frames : UInt64}
     (m : SpeechTokenizer12HzDecoder)
-    (codes : T #[batch, 16, frames]) : T #[batch, 512, frames] :=
+    (codes : DTensor #[batch, 16, frames] .Int64) : STensor #[batch, 512, frames] :=
   let first := decodeRVQSlice m.rvqFirst codes 0
   let rest := decodeRVQSlice m.rvqRest codes 1
   first + rest
 
 private def causalConv1d {batch inC outC frames kernel : UInt64}
-    (x : T #[batch, inC, frames])
-    (weight : T #[outC, inC, kernel])
-    (bias : T #[outC])
+    (x : STensor #[batch, inC, frames])
+    (weight : STensor #[outC, inC, kernel])
+    (bias : STensor #[outC])
     (dilation : UInt64 := 1)
-    : T #[batch, outC, frames] :=
+    : STensor #[batch, outC, frames] :=
   let leftPad : UInt64 := dilation * (kernel - 1)
-  let left : T #[batch, inC, leftPad] := torch.zeros #[batch, inC, leftPad] false x.device
-  let xPad : T #[batch, inC, frames + leftPad] := nn.cat left x 2
-  let y0 : T #[batch, outC, frames] := reshape (nn.conv1d xPad weight 1 0 dilation) #[batch, outC, frames]
+  let left : STensor #[batch, inC, leftPad] := Tensor.castLike x (Tensor.zeros #[batch, inC, leftPad] false x.device)
+  let xPad : STensor #[batch, inC, frames + leftPad] := Tensor.reshapeChecked (Tensor.cat left x 2) #[batch, inC, frames + leftPad]
+  let y0 : STensor #[batch, outC, frames] := Tensor.reshapeChecked (Tensor.conv1d xPad weight 1 0 dilation) #[batch, outC, frames]
   addBias3d y0 bias
 
 private def causalDepthwiseConv1d {batch channels frames : UInt64}
-    (x : T #[batch, channels, frames])
-    (weight : T #[channels, 1, 7])
-    (bias : T #[channels])
-    : T #[batch, channels, frames] :=
-  let left : T #[batch, channels, 6] := torch.zeros #[batch, channels, 6] false x.device
-  let xPad : T #[batch, channels, frames + 6] := nn.cat left x 2
-  let y : T #[batch, channels, frames] :=
-    reshape (nn.conv1d_group_bias xPad weight bias 1 0 1 channels) #[batch, channels, frames]
+    (x : STensor #[batch, channels, frames])
+    (weight : STensor #[channels, 1, 7])
+    (bias : STensor #[channels])
+    : STensor #[batch, channels, frames] :=
+  let left : STensor #[batch, channels, 6] := Tensor.castLike x (Tensor.zeros #[batch, channels, 6] false x.device)
+  let xPad : STensor #[batch, channels, frames + 6] := Tensor.reshapeChecked (Tensor.cat left x 2) #[batch, channels, frames + 6]
+  let y : STensor #[batch, channels, frames] :=
+    Tensor.reshapeChecked (Tensor.conv1dGroups xPad weight bias 1 0 1 channels) #[batch, channels, frames]
   y
 
 private def causalTransConv1d {batch inC outC frames kernel stride rightPad : UInt64}
-    (x : T #[batch, inC, frames])
-    (weight : T #[inC, outC, kernel])
-    (bias : T #[outC])
-    : T #[batch, outC, ((frames - 1) * stride + kernel) - rightPad] :=
+    (x : STensor #[batch, inC, frames])
+    (weight : STensor #[inC, outC, kernel])
+    (bias : STensor #[outC])
+    : STensor #[batch, outC, ((frames - 1) * stride + kernel) - rightPad] :=
   let outLen : UInt64 := (frames - 1) * stride + kernel
-  let y0 : T #[batch, outC, outLen] :=
-    reshape (nn.conv_transpose1d_bias x weight bias stride 0 0 1) #[batch, outC, outLen]
-  reshape (data.slice y0 2 0 (outLen - rightPad)) #[batch, outC, outLen - rightPad]
+  let y0 : STensor #[batch, outC, outLen] :=
+    Tensor.reshapeChecked (Tensor.convTranspose1d x weight bias stride 0 0 1) #[batch, outC, outLen]
+  Tensor.sliceChecked y0 2 0 (outLen - rightPad) #[batch, outC, outLen - rightPad]
 
 private def snakeBeta {batch channels frames : UInt64}
-    (x : T #[batch, channels, frames])
-    (alpha : T #[channels])
-    (beta : T #[channels]) : T #[batch, channels, frames] :=
-  let alphaE : T #[batch, channels, frames] :=
-    nn.expand (reshape (nn.exp alpha) #[1, channels, 1]) #[batch, channels, frames]
-  let betaE : T #[batch, channels, frames] :=
-    nn.expand (reshape (nn.exp beta) #[1, channels, 1]) #[batch, channels, frames]
-  let sin2 : T #[batch, channels, frames] :=
-    nn.pow (nn.sin (x * alphaE)) 2.0
-  let eps : T #[batch, channels, frames] := torch.full #[batch, channels, frames] 0.000000001 false x.device
+    (x : STensor #[batch, channels, frames])
+    (alpha : STensor #[channels])
+    (beta : STensor #[channels]) : STensor #[batch, channels, frames] :=
+  let alphaE : STensor #[batch, channels, frames] :=
+    Tensor.expand (Tensor.reshapeChecked (Tensor.Preserving.exp alpha) #[1, channels, 1]) #[batch, channels, frames]
+  let betaE : STensor #[batch, channels, frames] :=
+    Tensor.expand (Tensor.reshapeChecked (Tensor.Preserving.exp beta) #[1, channels, 1]) #[batch, channels, frames]
+  let sin2 : STensor #[batch, channels, frames] :=
+    let z := Tensor.Preserving.sin (x * alphaE); z * z
+  let eps : STensor #[batch, channels, frames] := Tensor.castLike x (Tensor.full #[batch, channels, frames] 0.000000001 false x.device)
   let denom := betaE + eps
-  let invDenom : T #[batch, channels, frames] := nn.div (torch.ones #[batch, channels, frames] false x.device) denom
+  let invDenom : STensor #[batch, channels, frames] := Tensor.Preserving.div (Tensor.castLike x (Tensor.ones #[batch, channels, frames] false x.device)) denom
   x + invDenom * sin2
 
 private def forwardConvNeXt {batch frames : UInt64}
     (blk : UpsampleConvNeXtBlock)
-    (x : T #[batch, 1024, frames]) : T #[batch, 1024, frames] :=
+    (x : STensor #[batch, 1024, frames]) : STensor #[batch, 1024, frames] :=
   let residual := x
   let h0 := causalDepthwiseConv1d x blk.dwconvWeight blk.dwconvBias
-  let h1 : T #[batch, frames, 1024] := reshape (nn.transpose h0 1 2) #[batch, frames, 1024]
-  let h2 : T #[batch, frames, 1024] := nn.layer_norm h1 blk.normWeight blk.normBias 1e-6
-  let h3 : T #[batch, frames, 4096] := affine3d h2 blk.pwconv1Weight blk.pwconv1Bias
-  let h4 : T #[batch, frames, 4096] := nn.gelu h3
-  let h5 : T #[batch, frames, 1024] := affine3d h4 blk.pwconv2Weight blk.pwconv2Bias
-  let h6 : T #[batch, frames, 1024] := scale3d h5 blk.gamma
-  let h7 : T #[batch, 1024, frames] := reshape (nn.transpose h6 1 2) #[batch, 1024, frames]
+  let h1 : STensor #[batch, frames, 1024] := Tensor.reshapeChecked (Tensor.transpose h0 1 2) #[batch, frames, 1024]
+  let h2 : STensor #[batch, frames, 1024] := Tensor.layerNorm h1 blk.normWeight blk.normBias 1e-6
+  let h3 : STensor #[batch, frames, 4096] := Tensor.affine3d h2 blk.pwconv1Weight blk.pwconv1Bias
+  let h4 : STensor #[batch, frames, 4096] := Tensor.Preserving.gelu h3
+  let h5 : STensor #[batch, frames, 1024] := Tensor.affine3d h4 blk.pwconv2Weight blk.pwconv2Bias
+  let h6 : STensor #[batch, frames, 1024] := scale3d h5 blk.gamma
+  let h7 : STensor #[batch, 1024, frames] := Tensor.reshapeChecked (Tensor.transpose h6 1 2) #[batch, 1024, frames]
   residual + h7
 
 private def forwardAttention {batch seq : UInt64}
     (layer : DecoderTransformerLayer)
-    (x : T #[batch, seq, 512])
-    (cos sin : T #[seq, 32]) : T #[batch, seq, 512] :=
-  let q0 : T #[batch, seq, 1024] := linear3d x layer.qProj
-  let k0 : T #[batch, seq, 1024] := linear3d x layer.kProj
-  let v0 : T #[batch, seq, 1024] := linear3d x layer.vProj
+    (x : STensor #[batch, seq, 512])
+    (cos sin : DTensor #[seq, 32] .Float32) : STensor #[batch, seq, 512] :=
+  let q0 : STensor #[batch, seq, 1024] := Tensor.linear3d x layer.qProj
+  let k0 : STensor #[batch, seq, 1024] := Tensor.linear3d x layer.kProj
+  let v0 : STensor #[batch, seq, 1024] := Tensor.linear3d x layer.vProj
 
-  let q : T #[batch, seq, 16, 64] := reshape q0 #[batch, seq, 16, 64]
-  let k : T #[batch, seq, 16, 64] := reshape k0 #[batch, seq, 16, 64]
-  let v : T #[batch, seq, 16, 64] := reshape v0 #[batch, seq, 16, 64]
+  let q : STensor #[batch, seq, 16, 64] := Tensor.reshapeChecked q0 #[batch, seq, 16, 64]
+  let k : STensor #[batch, seq, 16, 64] := Tensor.reshapeChecked k0 #[batch, seq, 16, 64]
+  let v : STensor #[batch, seq, 16, 64] := Tensor.reshapeChecked v0 #[batch, seq, 16, 64]
 
-  let q := rotary.applyRotaryEmb q cos sin
-  let k := rotary.applyRotaryEmb k cos sin
+  let q := Tensor.applyRotary q cos sin
+  let k := Tensor.applyRotary k cos sin
 
-  let qh : T #[batch, 16, seq, 64] := nn.transpose_for_attention q
-  let kh : T #[batch, 16, seq, 64] := nn.transpose_for_attention k
-  let vh : T #[batch, 16, seq, 64] := nn.transpose_for_attention v
+  let qh : STensor #[batch, 16, seq, 64] := Tensor.splitHeads q
+  let kh : STensor #[batch, 16, seq, 64] := Tensor.splitHeads k
+  let vh : STensor #[batch, 16, seq, 64] := Tensor.splitHeads v
 
-  let attn : T #[batch, 16, seq, 64] :=
-    nn.scaledDotProductAttentionGQAWindow qh kh vh 0.0 true true 72
-  let attn : T #[batch, seq, 16, 64] := nn.transpose_from_attention attn
-  let attn : T #[batch, seq, 1024] := reshape attn #[batch, seq, 1024]
-  linear3d attn layer.oProj
+  let attn : STensor #[batch, 16, seq, 64] :=
+    Tensor.attentionWindow qh kh vh 0.0 true true 72
+  let attn : STensor #[batch, seq, 16, 64] := Tensor.joinHeads attn
+  let attn : STensor #[batch, seq, 1024] := Tensor.reshapeChecked attn #[batch, seq, 1024]
+  Tensor.linear3d attn layer.oProj
 
 private def forwardTransformerLayer {batch seq : UInt64}
     (layer : DecoderTransformerLayer)
-    (x : T #[batch, seq, 512])
-    (cos sin : T #[seq, 32])
-    : T #[batch, seq, 512] :=
+    (x : STensor #[batch, seq, 512])
+    (cos sin : DTensor #[seq, 32] .Float32)
+    : STensor #[batch, seq, 512] :=
   let residual1 := x
-  let norm1 : RMSNorm 512 := { weight := typedF32 layer.inputLayernormWeight, eps := ⟨1e-5⟩ }
-  let h1 : T #[batch, seq, 512] := norm1.forward3d x
-  let h2 : T #[batch, seq, 512] := forwardAttention layer h1 cos sin
-  let h3 : T #[batch, seq, 512] := residual1 + scale3d h2 layer.selfAttnLayerScale
+  let norm1 : RMSNorm 512 (.Unknown "dynamic") := { weight := layer.inputLayernormWeight, eps := ⟨1e-5⟩ }
+  let h1 : STensor #[batch, seq, 512] := norm1.forward3d x
+  let h2 : STensor #[batch, seq, 512] := forwardAttention layer h1 cos sin
+  let h3 : STensor #[batch, seq, 512] := residual1 + scale3d h2 layer.selfAttnLayerScale
 
   let residual2 := h3
-  let norm2 : RMSNorm 512 := { weight := typedF32 layer.postAttentionLayernormWeight, eps := ⟨1e-5⟩ }
-  let h4 : T #[batch, seq, 512] := norm2.forward3d h3
-  let gate : T #[batch, seq, 1024] := linear3d h4 layer.gateProj
-  let up : T #[batch, seq, 1024] := linear3d h4 layer.upProj
-  let mlpIn : T #[batch, seq, 1024] := nn.silu gate * up
-  let mlpOut : T #[batch, seq, 512] := linear3d mlpIn layer.downProj
+  let norm2 : RMSNorm 512 (.Unknown "dynamic") := { weight := layer.postAttentionLayernormWeight, eps := ⟨1e-5⟩ }
+  let h4 : STensor #[batch, seq, 512] := norm2.forward3d h3
+  let gate : STensor #[batch, seq, 1024] := Tensor.linear3d h4 layer.gateProj
+  let up : STensor #[batch, seq, 1024] := Tensor.linear3d h4 layer.upProj
+  let mlpIn : STensor #[batch, seq, 1024] := Tensor.Preserving.silu gate * up
+  let mlpOut : STensor #[batch, seq, 512] := Tensor.linear3d mlpIn layer.downProj
   residual2 + scale3d mlpOut layer.mlpLayerScale
 
 private def forwardPreTransformer {batch frames : UInt64}
     (m : SpeechTokenizer12HzDecoder)
-    (x : T #[batch, 1024, frames]) : T #[batch, 1024, frames] :=
+    (x : STensor #[batch, 1024, frames]) : STensor #[batch, 1024, frames] :=
   Id.run do
-    let x0 : T #[batch, frames, 1024] := reshape (nn.transpose x 1 2) #[batch, frames, 1024]
-    let mut h : T #[batch, frames, 512] := affine3d x0 m.preTransformerInputProj m.preTransformerInputBias
-    let (cos0, sin0) := rotary.computeFreqsPure frames 64 10000.0
-    let cos : T #[frames, 32] := if cos0.device == h.device then cos0 else cos0.to h.device
-    let sin : T #[frames, 32] := if sin0.device == h.device then sin0 else sin0.to h.device
+    let x0 : STensor #[batch, frames, 1024] := Tensor.reshapeChecked (Tensor.transpose x 1 2) #[batch, frames, 1024]
+    let mut h : STensor #[batch, frames, 512] := Tensor.affine3d x0 m.preTransformerInputProj m.preTransformerInputBias
+    let (cos0, sin0) := Tensor.rotaryFreqs frames 64 10000.0
+    let cos : DTensor #[frames, 32] .Float32 := if cos0.device == h.device then cos0 else cos0.to h.device
+    let sin : DTensor #[frames, 32] .Float32 := if sin0.device == h.device then sin0 else sin0.to h.device
     for layer in m.preTransformerLayers do
       h := forwardTransformerLayer layer h cos sin
-    let norm : RMSNorm 512 := { weight := typedF32 m.preTransformerNormWeight, eps := ⟨1e-5⟩ }
-    let hNorm : T #[batch, frames, 512] := norm.forward3d h
-    let hOut : T #[batch, frames, 1024] := affine3d hNorm m.preTransformerOutputProj m.preTransformerOutputBias
-    reshape (nn.transpose hOut 1 2) #[batch, 1024, frames]
+    let norm : RMSNorm 512 (.Unknown "dynamic") := { weight := m.preTransformerNormWeight, eps := ⟨1e-5⟩ }
+    let hNorm : STensor #[batch, frames, 512] := norm.forward3d h
+    let hOut : STensor #[batch, frames, 1024] := Tensor.affine3d hNorm m.preTransformerOutputProj m.preTransformerOutputBias
+    Tensor.reshapeChecked (Tensor.transpose hOut 1 2) #[batch, 1024, frames]
 
 private def forwardResidualUnit {batch frames dim : UInt64}
     (u : DecoderResidualUnit dim)
-    (x : T #[batch, dim, frames]) : T #[batch, dim, frames] :=
+    (x : STensor #[batch, dim, frames]) : STensor #[batch, dim, frames] :=
   let residual := x
   let h1 := snakeBeta x u.act1Alpha u.act1Beta
   let h2 := causalConv1d h1 u.conv1Weight u.conv1Bias u.conv1Dilation
@@ -726,10 +719,10 @@ private def forwardResidualUnit {batch frames dim : UInt64}
 
 private def forwardDecoderBlock {batch frames inDim outDim upRate : UInt64}
     (blk : DecoderBlock inDim outDim upRate)
-    (x : T #[batch, inDim, frames]) : T #[batch, outDim, frames * upRate] :=
+    (x : STensor #[batch, inDim, frames]) : STensor #[batch, outDim, frames * upRate] :=
   let h0 := snakeBeta x blk.snakeAlpha blk.snakeBeta
-  let h1 : T #[batch, outDim, frames * upRate] :=
-    reshape (causalTransConv1d (batch := batch) (inC := inDim) (outC := outDim)
+  let h1 : STensor #[batch, outDim, frames * upRate] :=
+    Tensor.reshapeChecked (causalTransConv1d (batch := batch) (inC := inDim) (outC := outDim)
       (frames := frames) (kernel := 2 * upRate) (stride := upRate) (rightPad := upRate)
       h0 blk.transWeight blk.transBias) #[batch, outDim, frames * upRate]
   let h2 := forwardResidualUnit blk.res1 h1
@@ -738,9 +731,9 @@ private def forwardDecoderBlock {batch frames inDim outDim upRate : UInt64}
 
 private def forwardUpsampleStage {batch frames : UInt64}
     (stage : UpsampleStage)
-    (x : T #[batch, 1024, frames]) : T #[batch, 1024, frames * 2] :=
-  let h0 : T #[batch, 1024, frames * 2] :=
-    reshape (causalTransConv1d (batch := batch) (inC := 1024) (outC := 1024)
+    (x : STensor #[batch, 1024, frames]) : STensor #[batch, 1024, frames * 2] :=
+  let h0 : STensor #[batch, 1024, frames * 2] :=
+    Tensor.reshapeChecked (causalTransConv1d (batch := batch) (inC := 1024) (outC := 1024)
       (frames := frames) (kernel := 2) (stride := 2) (rightPad := 0)
       x stage.transConvWeight stage.transConvBias) #[batch, 1024, frames * 2]
   forwardConvNeXt stage.convNeXt h0
@@ -748,26 +741,26 @@ private def forwardUpsampleStage {batch frames : UInt64}
 /-- Decode quantizer codes `[batch, 16, frames]` to waveform `[batch, 1, frames*1920]`. -/
 def decode {batch frames : UInt64}
     (m : SpeechTokenizer12HzDecoder)
-    (codes : T #[batch, 16, frames]) : T #[batch, 1, frames * 1920] :=
-  let q : T #[batch, 512, frames] := decodeSplitRVQ m codes
-  let h0 : T #[batch, 1024, frames] := causalConv1d q m.preConvWeight m.preConvBias
-  let h1 : T #[batch, 1024, frames] := forwardPreTransformer m h0
+    (codes : DTensor #[batch, 16, frames] .Int64) : STensor #[batch, 1, frames * 1920] :=
+  let q : STensor #[batch, 512, frames] := decodeSplitRVQ m codes
+  let h0 : STensor #[batch, 1024, frames] := causalConv1d q m.preConvWeight m.preConvBias
+  let h1 : STensor #[batch, 1024, frames] := forwardPreTransformer m h0
 
-  let u0 : T #[batch, 1024, frames * 2] := forwardUpsampleStage m.upsample0 h1
-  let u1 : T #[batch, 1024, frames * 4] := forwardUpsampleStage m.upsample1 u0
+  let u0 : STensor #[batch, 1024, frames * 2] := forwardUpsampleStage m.upsample0 h1
+  let u1 : STensor #[batch, 1024, frames * 4] := Tensor.reshapeChecked (forwardUpsampleStage m.upsample1 u0) #[batch, 1024, frames * 4]
 
-  let d0 : T #[batch, 1536, frames * 4] := causalConv1d u1 m.decoderConv0Weight m.decoderConv0Bias
-  let d1 : T #[batch, 768, frames * 32] :=
-    reshape (forwardDecoderBlock m.decoderBlock1 d0) #[batch, 768, frames * 32]
-  let d2 : T #[batch, 384, frames * 160] :=
-    reshape (forwardDecoderBlock m.decoderBlock2 d1) #[batch, 384, frames * 160]
-  let d3 : T #[batch, 192, frames * 640] :=
-    reshape (forwardDecoderBlock m.decoderBlock3 d2) #[batch, 192, frames * 640]
-  let d4 : T #[batch, 96, frames * 1920] :=
-    reshape (forwardDecoderBlock m.decoderBlock4 d3) #[batch, 96, frames * 1920]
+  let d0 : STensor #[batch, 1536, frames * 4] := causalConv1d u1 m.decoderConv0Weight m.decoderConv0Bias
+  let d1 : STensor #[batch, 768, frames * 32] :=
+    Tensor.reshapeChecked (forwardDecoderBlock m.decoderBlock1 d0) #[batch, 768, frames * 32]
+  let d2 : STensor #[batch, 384, frames * 160] :=
+    Tensor.reshapeChecked (forwardDecoderBlock m.decoderBlock2 d1) #[batch, 384, frames * 160]
+  let d3 : STensor #[batch, 192, frames * 640] :=
+    Tensor.reshapeChecked (forwardDecoderBlock m.decoderBlock3 d2) #[batch, 192, frames * 640]
+  let d4 : STensor #[batch, 96, frames * 1920] :=
+    Tensor.reshapeChecked (forwardDecoderBlock m.decoderBlock4 d3) #[batch, 96, frames * 1920]
 
-  let f0 : T #[batch, 96, frames * 1920] := snakeBeta d4 m.finalSnakeAlpha m.finalSnakeBeta
-  let f1 : T #[batch, 1, frames * 1920] := causalConv1d f0 m.finalConvWeight m.finalConvBias
+  let f0 : STensor #[batch, 96, frames * 1920] := snakeBeta d4 m.finalSnakeAlpha m.finalSnakeBeta
+  let f1 : STensor #[batch, 1, frames * 1920] := causalConv1d f0 m.finalConvWeight m.finalConvBias
   clampWave f1
 
 /-- Chunked decoder for long-form/streaming inference.
@@ -777,37 +770,37 @@ def decode {batch frames : UInt64}
     - drop context samples from each chunk output before concatenation -/
 def decodeChunked {batch frames : UInt64}
     (m : SpeechTokenizer12HzDecoder)
-    (codes : T #[batch, 16, frames])
+    (codes : DTensor #[batch, 16, frames] .Int64)
     (chunkSize : UInt64 := 300)
     (leftContextSize : UInt64 := 25)
-    : T #[batch, 1, frames * 1920] :=
+    : STensor #[batch, 1, frames * 1920] :=
   if frames == 0 then
-    reshape (torch.zeros #[batch, 1, 0] false codes.device) #[batch, 1, frames * 1920]
+    Tensor.reshapeChecked (Tensor.castLike m.finalConvWeight (Tensor.zeros #[batch, 1, 0] false codes.device)) #[batch, 1, frames * 1920]
   else
     Id.run do
       let chunkSize := if chunkSize == 0 then 1 else chunkSize
       let mut start : UInt64 := 0
-      let mut chunks : Array (T #[]) := #[]
+      let mut chunks : Array (Sigma STensor) := #[]
       while start < frames do
         let remaining := frames - start
         let curChunk := if remaining < chunkSize then remaining else chunkSize
         let context := if start < leftContextSize then start else leftContextSize
         let chunkStart := start - context
         let chunkFrames := context + curChunk
-        let codesChunk : T #[batch, 16, chunkFrames] := data.slice codes 2 chunkStart chunkFrames
-        let wavChunk : T #[batch, 1, chunkFrames * 1920] := decode m codesChunk
+        let codesChunk : DTensor #[batch, 16, chunkFrames] .Int64 := Tensor.sliceChecked codes 2 chunkStart chunkFrames #[batch, 16, chunkFrames]
+        let wavChunk : STensor #[batch, 1, chunkFrames * 1920] := decode m codesChunk
         let keepStart : UInt64 := context * 1920
         let keepSamples : UInt64 := curChunk * 1920
-        let wavKeep : T #[batch, 1, keepSamples] := data.slice wavChunk 2 keepStart keepSamples
-        chunks := chunks.push (nn.eraseShape wavKeep)
+        let wavKeep : STensor #[batch, 1, keepSamples] := Tensor.sliceChecked wavChunk 2 keepStart keepSamples #[batch, 1, keepSamples]
+        chunks := chunks.push wavKeep.packShape
         start := start + curChunk
-      let wavDyn : T #[] := nn.cat_dyn chunks 2
-      reshape wavDyn #[batch, 1, frames * 1920]
+      let wavDyn := Tensor.catManyChecked chunks 2 #[batch, 1, frames * 1920]
+      Tensor.reshapeChecked wavDyn #[batch, 1, frames * 1920]
 
 /-- Streaming decoder state for incremental 12Hz codec-frame ingestion. -/
 structure DecodeStreamState (batch : UInt64) where
-  codesDyn : T #[]
   totalFrames : UInt64 := 0
+  codesDyn : DTensor #[batch, 16, totalFrames] .Int64
   emittedFrames : UInt64 := 0
   chunkSize : UInt64 := 1
   leftContextSize : UInt64 := 25
@@ -818,10 +811,10 @@ def initDecodeStreamState {batch : UInt64}
     (leftContextSize : UInt64 := 25)
     (device : Device := Device.CPU)
     : DecodeStreamState batch :=
-  let emptyCodes0 : T #[batch, 16, 0] := torch.full_int #[batch, 16, 0] 0
-  let emptyCodes : T #[batch, 16, 0] := if emptyCodes0.device == device then emptyCodes0 else emptyCodes0.to device
+  let emptyCodes0 : DTensor #[batch, 16, 0] .Int64 := Tensor.fullInt #[batch, 16, 0] 0
+  let emptyCodes : DTensor #[batch, 16, 0] .Int64 := if emptyCodes0.device == device then emptyCodes0 else emptyCodes0.to device
   {
-    codesDyn := nn.eraseShape emptyCodes
+    codesDyn := emptyCodes
     totalFrames := 0
     emittedFrames := 0
     chunkSize := if chunkSize == 0 then 1 else chunkSize
@@ -832,7 +825,7 @@ private def decodeOneStreamingChunk {batch : UInt64}
     (m : SpeechTokenizer12HzDecoder)
     (st : DecodeStreamState batch)
     (force : Bool := false)
-    : DecodeStreamState batch × Option (T #[]) :=
+    : DecodeStreamState batch × Option (Sigma fun samples => STensor #[batch, 1, samples]) :=
   let remaining := st.totalFrames - st.emittedFrames
   if remaining == 0 then
     (st, none)
@@ -844,31 +837,31 @@ private def decodeOneStreamingChunk {batch : UInt64}
     let context := if start < st.leftContextSize then start else st.leftContextSize
     let chunkStart := start - context
     let chunkFrames := context + curChunk
-    let allCodes : T #[batch, 16, st.totalFrames] := reshape st.codesDyn #[batch, 16, st.totalFrames]
-    let codesChunk : T #[batch, 16, chunkFrames] := data.slice allCodes 2 chunkStart chunkFrames
-    let wavChunk : T #[batch, 1, chunkFrames * 1920] := decode m codesChunk
+    let allCodes : DTensor #[batch, 16, st.totalFrames] .Int64 := Tensor.reshapeChecked st.codesDyn #[batch, 16, st.totalFrames]
+    let codesChunk : DTensor #[batch, 16, chunkFrames] .Int64 := Tensor.sliceChecked allCodes 2 chunkStart chunkFrames #[batch, 16, chunkFrames]
+    let wavChunk : STensor #[batch, 1, chunkFrames * 1920] := decode m codesChunk
     let keepStart : UInt64 := context * 1920
     let keepSamples : UInt64 := curChunk * 1920
-    let wavKeep : T #[batch, 1, keepSamples] := data.slice wavChunk 2 keepStart keepSamples
+    let wavKeep : STensor #[batch, 1, keepSamples] := Tensor.sliceChecked wavChunk 2 keepStart keepSamples #[batch, 1, keepSamples]
     let st' := { st with emittedFrames := st.emittedFrames + curChunk }
-    (st', some (nn.eraseShape wavKeep))
+    (st', some ⟨keepSamples, wavKeep⟩)
 
 /-- Push new codec frames into decoder state and emit all ready waveform chunks.
     `newCodes` has shape `[batch, 16, newFrames]`. -/
 def pushDecodeStream {batch newFrames : UInt64}
     (m : SpeechTokenizer12HzDecoder)
     (st : DecodeStreamState batch)
-    (newCodes : T #[batch, 16, newFrames])
-    : DecodeStreamState batch × Array (T #[]) :=
+    (newCodes : DTensor #[batch, 16, newFrames] .Int64)
+    : DecodeStreamState batch × Array (Sigma fun samples => STensor #[batch, 1, samples]) :=
   Id.run do
-    let curCodes : T #[batch, 16, st.totalFrames] := reshape st.codesDyn #[batch, 16, st.totalFrames]
-    let allCodes : T #[batch, 16, st.totalFrames + newFrames] := nn.cat curCodes newCodes 2
+    let curCodes : DTensor #[batch, 16, st.totalFrames] .Int64 := Tensor.reshapeChecked st.codesDyn #[batch, 16, st.totalFrames]
+    let allCodes : DTensor #[batch, 16, st.totalFrames + newFrames] .Int64 := Tensor.cat curCodes newCodes 2
     let mut st : DecodeStreamState batch := {
       st with
-      codesDyn := nn.eraseShape allCodes
+      codesDyn := allCodes
       totalFrames := st.totalFrames + newFrames
     }
-    let mut out : Array (T #[]) := #[]
+    let mut out : Array (Sigma fun samples => STensor #[batch, 1, samples]) := #[]
     let mut done := false
     while !done do
       let (stNext, chunk?) := decodeOneStreamingChunk m st false
@@ -882,10 +875,10 @@ def pushDecodeStream {batch newFrames : UInt64}
 def flushDecodeStream {batch : UInt64}
     (m : SpeechTokenizer12HzDecoder)
     (st : DecodeStreamState batch)
-    : DecodeStreamState batch × Array (T #[]) :=
+    : DecodeStreamState batch × Array (Sigma fun samples => STensor #[batch, 1, samples]) :=
   Id.run do
     let mut st := st
-    let mut out : Array (T #[]) := #[]
+    let mut out : Array (Sigma fun samples => STensor #[batch, 1, samples]) := #[]
     let mut done := false
     while !done do
       let (stNext, chunk?) := decodeOneStreamingChunk m st true
@@ -898,41 +891,41 @@ def flushDecodeStream {batch : UInt64}
 /-- Convenience decode for frame-major codec tensor `[frames, 16]`. -/
 def decodeFrameMajor {frames : UInt64}
     (m : SpeechTokenizer12HzDecoder)
-    (codes : T #[frames, 16]) : T #[1, 1, frames * 1920] :=
-  let c0 : T #[1, frames, 16] := reshape codes #[1, frames, 16]
-  let c1 : T #[1, 16, frames] := reshape (nn.transpose c0 1 2) #[1, 16, frames]
+    (codes : DTensor #[frames, 16] .Int64) : STensor #[1, 1, frames * 1920] :=
+  let c0 : DTensor #[1, frames, 16] .Int64 := Tensor.reshapeChecked codes #[1, frames, 16]
+  let c1 : DTensor #[1, 16, frames] .Int64 := Tensor.reshapeChecked (Tensor.transpose c0 1 2) #[1, 16, frames]
   decode m c1
 
 /-- Chunked convenience decode for frame-major codec tensor `[frames, 16]`. -/
 def decodeFrameMajorChunked {frames : UInt64}
     (m : SpeechTokenizer12HzDecoder)
-    (codes : T #[frames, 16])
+    (codes : DTensor #[frames, 16] .Int64)
     (chunkSize : UInt64 := 300)
     (leftContextSize : UInt64 := 25)
-    : T #[1, 1, frames * 1920] :=
-  let c0 : T #[1, frames, 16] := reshape codes #[1, frames, 16]
-  let c1 : T #[1, 16, frames] := reshape (nn.transpose c0 1 2) #[1, 16, frames]
+    : STensor #[1, 1, frames * 1920] :=
+  let c0 : DTensor #[1, frames, 16] .Int64 := Tensor.reshapeChecked codes #[1, frames, 16]
+  let c1 : DTensor #[1, 16, frames] .Int64 := Tensor.reshapeChecked (Tensor.transpose c0 1 2) #[1, 16, frames]
   decodeChunked m c1 chunkSize leftContextSize
 
 /-- Decode `[frames,16]` codec tensor and write mono WAV. -/
 def decodeFrameMajorToWav {frames : UInt64}
     (m : SpeechTokenizer12HzDecoder)
-    (codes : T #[frames, 16])
+    (codes : DTensor #[frames, 16] .Int64)
     (wavPath : String)
     : IO Unit := do
-  let wav : T #[1, 1, frames * 1920] := decodeFrameMajor m codes
-  data.saveWav wav wavPath m.outputSampleRate
+  let wav : STensor #[1, 1, frames * 1920] := decodeFrameMajor m codes
+  Tensor.saveWav wav wavPath m.outputSampleRate
 
 /-- Chunked decode `[frames,16]` codec tensor and write mono WAV. -/
 def decodeFrameMajorChunkedToWav {frames : UInt64}
     (m : SpeechTokenizer12HzDecoder)
-    (codes : T #[frames, 16])
+    (codes : DTensor #[frames, 16] .Int64)
     (wavPath : String)
     (chunkSize : UInt64 := 300)
     (leftContextSize : UInt64 := 25)
     : IO Unit := do
-  let wav : T #[1, 1, frames * 1920] := decodeFrameMajorChunked m codes chunkSize leftContextSize
-  data.saveWav wav wavPath m.outputSampleRate
+  let wav : STensor #[1, 1, frames * 1920] := decodeFrameMajorChunked m codes chunkSize leftContextSize
+  Tensor.saveWav wav wavPath m.outputSampleRate
 
 end SpeechTokenizer12HzDecoder
 
