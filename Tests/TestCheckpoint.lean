@@ -3,7 +3,8 @@
 
   Tests for checkpointing functionality and TensorStruct integration.
 -/
-import Tyr
+import Tyr.Typed.Neural
+import Tyr.Checkpoint
 import Examples.GPT.GPT
 import Examples.NanoChat.ModdedGPT
 import Examples.NanoChat.ModdedTrain
@@ -94,7 +95,7 @@ def testCheckpointCreation : IO Unit := do
 def testDistAdamCheckpointing : IO Unit := do
   -- Test that DistAdam.ParamState implements TensorStruct correctly
   let shape : Shape := #[10, 10]
-  let param := zeros shape
+  let param := Tensor.zeros shape
   let state := DistAdam.initParamState param
   
   -- Verify structure traversal
@@ -106,14 +107,14 @@ def testDistAdamCheckpointing : IO Unit := do
 
   -- Verify map works
   let stateOnes := TensorStruct.map (fun t => Tensor.Preserving.addScalar t 1.0) state
-  let sumOnes := TensorStruct.fold (fun {_s} t acc => acc + nn.item (s := #[]) (Tensor.sumAll t).raw) 0.0 stateOnes
+  let sumOnes := TensorStruct.fold (fun {_s} t acc => acc + Tensor.item (Tensor.sumAll t)) 0.0 stateOnes
   LeanTest.assertEqual sumOnes 200.0 "Mapped state should sum to 200"
 
 @[test]
 def testNorMuonCheckpointing : IO Unit := do
   -- Test that NorMuon.ParamState implements TensorStruct correctly
   let shape : Shape := #[10, 10]
-  let param := zeros shape
+  let param := Tensor.zeros shape
   let state := NorMuon.initParamState param
   
   -- Initial state has no tensors (Options are none)
@@ -121,9 +122,9 @@ def testNorMuonCheckpointing : IO Unit := do
   LeanTest.assertEqual numTensors 0 "Initial NorMuon state should have 0 tensors"
   
   -- Simulate state update
-  let momentum := ones shape
-  let secondMoment := ones #[]
-  let stateWithData : NorMuon.ParamState shape := {
+  let momentum := Tensor.ones shape
+  let secondMoment := Tensor.ones #[]
+  let stateWithData : NorMuon.ParamState ⟨shape, .Float32, .any⟩ := {
     momentumBuffer := some momentum
     secondMoment := some secondMoment
     step := 1

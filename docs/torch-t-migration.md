@@ -371,10 +371,10 @@ remains active.
   converting to the parameter dtype for subtraction. A regression checks the
   exact rounding order. A model dimension below 12 is rejected before slicing
   the smear-gate input.
-- All **172 native CPU tests pass with zero failures, skips or runtime panics**,
+- All **180 native CPU tests pass with zero failures, skips or runtime panics**,
   including forward/backward with clipping and optimizer updates, checkpoint
   replacement/corruption, legacy checkpoint loading, and a seven-token CORE
-  model. The NanoChat pipeline and generator engine build. The neural ABI audit
+  model and the remaining serialization fixtures. The NanoChat pipeline and generator engine build. The neural ABI audit
   covers 32 declarations; gradient clipping and tensor saving no longer carry
   obsolete native IO-world arguments.
 - GitHub CI remains green at `05304ff`, not at these local migration commits.

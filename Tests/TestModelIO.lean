@@ -3,7 +3,8 @@
 
   Tests for Model Parameter serialization and structure traversal using TensorStruct.
 -/
-import Tyr
+import Tyr.Typed.Neural
+import Tyr.Checkpoint
 import Examples.NanoChat.ModdedGPT
 import LeanTest
 
@@ -77,8 +78,8 @@ def testParameterUpdate : IO Unit := do
   let updatedParams := TensorStruct.map (fun t => Tensor.Preserving.addScalar t 1.0) params
   
   -- Check one tensor to verify update
-  let embedSumOriginal := nn.item (nn.sumAll params.embed)
-  let embedSumUpdated := nn.item (nn.sumAll updatedParams.embed)
+  let embedSumOriginal := Tensor.item (Tensor.sumAll params.embed)
+  let embedSumUpdated := Tensor.item (Tensor.sumAll updatedParams.embed)
   
   let diff := embedSumUpdated - embedSumOriginal
   let expectedDiff := (cfg.vocabSize * cfg.modelDim).toFloat -- adding 1.0 to each element
@@ -127,6 +128,6 @@ def testStateDictSimulation : IO Unit := do
   
   -- Verify loaded matches original
   let diff := TensorStruct.zipWith Sub.sub params loadedParams
-  let totalDiff := TensorStruct.fold (fun {_s} t acc => acc + nn.item (s := #[]) (Tensor.sumAll (Tensor.abs t)).raw) 0.0 diff
+  let totalDiff := TensorStruct.fold (fun {_s} t acc => acc + Tensor.item (Tensor.sumAll (Tensor.abs t))) 0.0 diff
   
   LeanTest.assertTrue (totalDiff < 1e-6) "Loaded parameters should match saved ones"

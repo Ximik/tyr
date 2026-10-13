@@ -1,3 +1,5 @@
+import Tests.TestModelIO
+import Tests.TestCheckpoint
 import Tests.TestModdedGPT
 import Tests.TestNanoChatCheckpoint
 import Tests.TestCORETyped
@@ -31,6 +33,8 @@ import Tests.TestDiffEqContainerBrownian
 unsafe def main : IO UInt32 := do
   Lean.initSearchPath (← Lean.findSysroot)
   let env ← Lean.importModules #[
+    { module := `Tests.TestModelIO },
+    { module := `Tests.TestCheckpoint },
     { module := `Tests.TestModdedGPT },
     { module := `Tests.TestNanoChatCheckpoint },
     { module := `Tests.TestCORETyped },
