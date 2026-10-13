@@ -1,3 +1,4 @@
+#include "tyr_vae_abi.h"
 #include "tyr_gemma4_abi.h"
 #include "tyr_branching_abi.h"
 #include "tyr_laguna_abi.h"

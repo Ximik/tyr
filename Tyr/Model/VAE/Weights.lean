@@ -15,7 +15,8 @@
   - conv_shortcut instead of nin_shortcut
   - up_blocks numbered 0→3 (low index = low res), opposite of BFL's 3→0
 -/
-import Tyr.Torch
+import Tyr.Model.VAE.TypedOps
+import Tyr.SafeTensors.Load
 import Tyr.Log
 import Tyr.Model.VAE.Decoder
 
@@ -26,22 +27,22 @@ open torch.Log
 /-- Load GroupNorm parameters -/
 def loadGroupNorm (path : String) (name : String) (num_groups channels : UInt64)
     : IO (GroupNormParams num_groups channels) := do
-  let weight ← safetensors.loadTensor path s!"{name}.weight" #[channels]
-  let bias ← safetensors.loadTensor path s!"{name}.bias" #[channels]
+  let weight ← safetensors.loadTensorCandidates path #[s!"{name}.weight"] #[channels]
+  let bias ← safetensors.loadTensorCandidates path #[s!"{name}.bias"] #[channels]
   pure {
-    weight := autograd.set_requires_grad weight false
-    bias := autograd.set_requires_grad bias false
+    weight := Tensor.setRequiresGrad weight false
+    bias := Tensor.setRequiresGrad bias false
   }
 
 /-- Load Conv2d parameters -/
 def loadConv2d (path : String) (name : String)
     (in_ch out_ch kernel_size padding : UInt64)
     : IO (Conv2dParams in_ch out_ch kernel_size padding) := do
-  let weight ← safetensors.loadTensor path s!"{name}.weight" #[out_ch, in_ch, kernel_size, kernel_size]
-  let bias ← safetensors.loadTensor path s!"{name}.bias" #[out_ch]
+  let weight ← safetensors.loadTensorCandidates path #[s!"{name}.weight"] #[out_ch, in_ch, kernel_size, kernel_size]
+  let bias ← safetensors.loadTensorCandidates path #[s!"{name}.bias"] #[out_ch]
   pure {
-    weight := autograd.set_requires_grad weight false
-    bias := autograd.set_requires_grad bias false
+    weight := Tensor.setRequiresGrad weight false
+    bias := Tensor.setRequiresGrad bias false
   }
 
 /-- Load ResnetBlock (same in/out channels) from Diffusers format -/

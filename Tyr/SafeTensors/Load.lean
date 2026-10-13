@@ -16,7 +16,9 @@ import Tyr.Typed.Tensor
 
 namespace torch.safetensors
 
-/-- Validate a freshly loaded raw handle against the requested shape. -/
+/-- Validate a freshly loaded raw handle against the requested shape. Loaders below
+request the stored layout: passing the expected shape to the legacy native loader
+would reshape equal-numel tensors before this check, hiding layout mismatches. -/
 private def checkLoadedShape (name : String) (s : Shape) (raw : RawTensor) : IO (STensor s) :=
   match Tensor.ofRaw (σ := { shape := s }) raw with
   | .ok tensor => pure tensor
@@ -31,7 +33,7 @@ def tryLoadTensor (path : String) (name : String) (s : Shape)
     (device : Device := Device.CPU)
     : IO (Option (STensor s)) := do
   try
-    let raw ← loadTensorOnDevice path name s device
+    let raw ← loadTensorOnDevice path name #[] device
     pure (some (← checkLoadedShape name s raw))
   catch _ =>
     pure none
@@ -44,7 +46,7 @@ def tryLoadTensorSharded (dir : String) (name : String) (s : Shape)
     (device : Device := Device.CPU)
     : IO (Option (STensor s)) := do
   try
-    let raw ← loadTensorShardedOnDevice dir name s device
+    let raw ← loadTensorShardedOnDevice dir name #[] device
     pure (some (← checkLoadedShape name s raw))
   catch _ =>
     pure none
@@ -61,7 +63,7 @@ def tryLoadOptionalTensor (path : String) (name : String) (s : Shape)
     (device : Device := Device.CPU)
     : IO (Option (STensor s)) := do
   try
-    let raw ← loadTensorOnDevice path name s device
+    let raw ← loadTensorOnDevice path name #[] device
     pure (some (← checkLoadedShape name s raw))
   catch e =>
     if isMissingTensorError (toString e) name then
@@ -75,7 +77,7 @@ def tryLoadOptionalTensorSharded (dir : String) (name : String) (s : Shape)
     (device : Device := Device.CPU)
     : IO (Option (STensor s)) := do
   try
-    let raw ← loadTensorShardedOnDevice dir name s device
+    let raw ← loadTensorShardedOnDevice dir name #[] device
     pure (some (← checkLoadedShape name s raw))
   catch e =>
     if isMissingTensorError (toString e) name then

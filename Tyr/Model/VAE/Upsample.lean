@@ -4,7 +4,7 @@
   Upsampling block for VAE decoder.
   Nearest-neighbor 2× upsample + 3×3 convolution.
 -/
-import Tyr.Torch
+import Tyr.Model.VAE.TypedOps
 import Tyr.TensorStruct
 import Tyr.Module.Core
 import Tyr.Module.Derive
@@ -29,15 +29,15 @@ def init (channels : UInt64) : IO (Upsample channels) := do
     Output: [batch, channels, height*2, width*2] -/
 def forward {batch channels height width : UInt64}
     (up : Upsample channels)
-    (x : T #[batch, channels, height, width])
-    : T #[batch, channels, height * 2, width * 2] :=
+    (x : STensor #[batch, channels, height, width])
+    : STensor #[batch, channels, height * 2, width * 2] :=
   -- 2× nearest-neighbor upsample
-  let x_up := interpolate_scale x #[2.0, 2.0] "nearest"
-  let x_up := reshape x_up #[batch, channels, height * 2, width * 2]
+  let x_up := upsample2 x
+  let x_up := Tensor.reshapeChecked x_up #[batch, channels, height * 2, width * 2]
 
   -- 3×3 conv with padding=1 to maintain size
-  let out := nn.conv2d_bias x_up up.conv.weight up.conv.bias #[1, 1] #[1, 1]
-  reshape out #[batch, channels, height * 2, width * 2]
+  let out := Tensor.conv2dBias x_up up.conv.weight up.conv.bias #[1, 1] #[1, 1]
+  Tensor.reshapeChecked out #[batch, channels, height * 2, width * 2]
 
 end Upsample
 
@@ -55,15 +55,15 @@ def init (channels : UInt64) : IO (Downsample channels) := do
 
 /-- Forward pass: strided conv for 2× downsample.
     Input: [batch, channels, height, width]
-    Output: [batch, channels, height/2, width/2] -/
+    Output: [batch, channels, ceil(height/2), ceil(width/2)] -/
 def forward {batch channels height width : UInt64}
     (down : Downsample channels)
-    (x : T #[batch, channels, height, width])
-    : T #[batch, channels, height / 2, width / 2] :=
+    (x : STensor #[batch, channels, height, width])
+    : STensor #[batch, channels, Tensor.convExtent height 3 2 1 1, Tensor.convExtent width 3 2 1 1] :=
   -- Pad input for proper strided conv
   -- Note: In VAE encoder, asymmetric padding may be needed
-  let out := nn.conv2d x down.conv.weight #[2, 2] #[1, 1]
-  reshape out #[batch, channels, height / 2, width / 2]
+  let out := Tensor.conv2dBias x down.conv.weight (Tensor.castLike down.conv.weight (Tensor.zeros #[channels] false down.conv.weight.device)) #[2, 2] #[1, 1]
+  Tensor.reshapeChecked out #[batch, channels, Tensor.convExtent height 3 2 1 1, Tensor.convExtent width 3 2 1 1]
 
 end Downsample
 

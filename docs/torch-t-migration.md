@@ -562,6 +562,37 @@ Validation completed:
 These synthetic model tests do not qualify a downloaded Gemma4 checkpoint or
 GPU execution. The full migration remains active under the criteria below.
 
+## 2026-10-13 VAE continuation
+
+VAE parameters, residual and attention blocks, up/downsampling, checkpoint
+loaders, latent unpacking, and decoder outputs now carry indexed shapes. Floating
+checkpoint dtype remains dynamic. Convolution output dimensions use the actual
+stride/padding formula, including odd downsample sizes. The decoder accepts
+indexed spatial dimensions; its existing batch-one entry point delegates to that
+implementation. Group normalization has an audited raw boundary; nearest-neighbor
+upsampling reuses the indexed interpolation boundary.
+
+A negative checkpoint fixture exposed implicit reshaping in the legacy native
+SafeTensors loader. Shared indexed loading now requests the stored layout before
+validating the requested shape, rejecting equal-numel layout mismatches for both
+single-file and sharded checkpoints. Explicit model reshapes must be visible in
+model code rather than hidden inside checkpoint loading.
+
+Validation completed:
+
+- All 226 focused indexed-model tests pass, with zero failures/skips. Six VAE
+  tests cover analytical normalization gradients, FP32/BF16 blocks, exact latent
+  unpacking, odd downsample dimensions, complete decoder execution at 2x3 latent
+  resolution, and single-file/sharded checkpoint layout rejection.
+- All nine required CPU suites build under `--wfail` (1,720 jobs) and pass.
+  Main: 1,450 tests; experimental: 49; both have zero failures/skips. Standalone
+  Laguna checkpoint parity also passes with strict stored-layout loading.
+- The group-normalization ABI audit and qualification shell syntax check pass.
+  CUDA-only portions of standalone suites remain skipped on this CPU host.
+
+Flux and its VAE demo callers still need migration; this subsystem work does not
+complete the full migration or qualify actual GPU execution.
+
 ## Remaining acceptance criteria
 
 Remove the `T` declaration and all model, generator, reflection, documentation,

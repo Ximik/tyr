@@ -4,7 +4,7 @@
   Self-attention block for VAE decoder.
   Single-head spatial attention.
 -/
-import Tyr.Torch
+import Tyr.Model.VAE.TypedOps
 import Tyr.TensorStruct
 import Tyr.Module.Core
 import Tyr.Module.Derive
@@ -45,42 +45,42 @@ def init (channels : UInt64) : IO (AttnBlock channels) := do
     Applies single-head spatial self-attention. -/
 def forward {batch channels height width : UInt64}
     (attn : AttnBlock channels)
-    (x : T #[batch, channels, height, width])
-    : T #[batch, channels, height, width] :=
+    (x : STensor #[batch, channels, height, width])
+    : STensor #[batch, channels, height, width] :=
   let h := attn.norm.forward x
 
   -- Project to Q, K, V
-  let q := nn.conv2d_bias h attn.q.weight attn.q.bias #[1, 1] #[0, 0]
-  let k := nn.conv2d_bias h attn.k.weight attn.k.bias #[1, 1] #[0, 0]
-  let v := nn.conv2d_bias h attn.v.weight attn.v.bias #[1, 1] #[0, 0]
+  let q := Tensor.conv2dBias h attn.q.weight attn.q.bias #[1, 1] #[0, 0]
+  let k := Tensor.conv2dBias h attn.k.weight attn.k.bias #[1, 1] #[0, 0]
+  let v := Tensor.conv2dBias h attn.v.weight attn.v.bias #[1, 1] #[0, 0]
 
   -- Reshape to [batch, channels, height*width]
   let spatial := height * width
-  let q := reshape q #[batch, channels, spatial]
-  let k := reshape k #[batch, channels, spatial]
-  let v := reshape v #[batch, channels, spatial]
+  let q := Tensor.reshapeChecked q #[batch, channels, spatial]
+  let k := Tensor.reshapeChecked k #[batch, channels, spatial]
+  let v := Tensor.reshapeChecked v #[batch, channels, spatial]
 
-  -- Compute attention: softmax(Q^T K / sqrt(channels)) V
+  -- Compute attention: softmax(Q^STensor K / sqrt(channels)) V
   -- Q: [batch, channels, spatial], K: [batch, channels, spatial]
-  -- Q^T K: [batch, spatial, spatial]
-  let q_t := nn.transpose q 1 2  -- [batch, spatial, channels]
+  -- Q^STensor K: [batch, spatial, spatial]
+  let q_t := Tensor.transpose q 1 2  -- [batch, spatial, channels]
   let scale := Float.sqrt channels.toFloat
-  let attn_weights := nn.bmm q_t k  -- [batch, spatial, spatial]
+  let attn_weights := bmm q_t k  -- [batch, spatial, spatial]
   let attn_weights := attn_weights / scale
-  let attn_weights := nn.softmax attn_weights (-1)
+  let attn_weights := Tensor.Preserving.softmax attn_weights (-1)
 
   -- V: [batch, channels, spatial]
-  -- attn_weights @ V^T = [batch, spatial, spatial] @ [batch, spatial, channels]
-  let v_t := nn.transpose v 1 2  -- [batch, spatial, channels]
-  let out := nn.bmm attn_weights v_t  -- [batch, spatial, channels]
-  let out := nn.transpose out 1 2  -- [batch, channels, spatial]
+  -- attn_weights @ V^STensor = [batch, spatial, spatial] @ [batch, spatial, channels]
+  let v_t := Tensor.transpose v 1 2  -- [batch, spatial, channels]
+  let out := bmm attn_weights v_t  -- [batch, spatial, channels]
+  let out := Tensor.transpose out 1 2  -- [batch, channels, spatial]
 
   -- Reshape back to spatial
-  let out := reshape out #[batch, channels, height, width]
+  let out := Tensor.reshapeChecked out #[batch, channels, height, width]
 
   -- Output projection + residual
-  let out := nn.conv2d_bias out attn.proj_out.weight attn.proj_out.bias #[1, 1] #[0, 0]
-  let out := reshape out #[batch, channels, height, width]
+  let out := Tensor.conv2dBias out attn.proj_out.weight attn.proj_out.bias #[1, 1] #[0, 0]
+  let out := Tensor.reshapeChecked out #[batch, channels, height, width]
 
   x + out
 
