@@ -56,13 +56,11 @@ jobs:
 
       - name: Build patched doc-gen4
         run: |
-          source ./env.sh
           cd docbuild
           lake build doc-gen4
 
       - name: Build docs
         run: |
-          source ./env.sh
           cd docbuild
           lake build Tyr:docs
 

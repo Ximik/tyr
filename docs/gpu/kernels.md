@@ -21,7 +21,7 @@ Three layers sit between a Lean `def` and a running CUDA kernel:
 foo.kernel : Kernel            foo.launch : … → IO Unit   -- IR record + FFI launcher
         │  lake build: GenerateGpuKernels → cc/src/generated/*.cu, then make -C cc
         ▼
-extern "C" lean_object* lean_launch_Tyr_GPU_Kernels_foo(…)   -- C++ launcher in libTyrC.a
+extern "C" lean_object* lean_launch_Tyr_GPU_Kernels_foo(…)   -- C++ launcher in libTyrC
         ▲
 Tyr.GPU.Ops.*  (typed wrappers, AttentionProblem dispatch, portable fallback)
 ```
@@ -93,17 +93,14 @@ before the shared body, e.g. `dopri5Combine64Blackwell`
 
 ### Build integration
 
-`extern_lib libtyr` in `lakefile.lean:416-548` runs the
+`target libtyr` in `lakefile.lean` runs the
 `GenerateGpuKernels` executable over the configured kernel modules, emitting
 CUDA into `cc/src/generated/` (e.g. `Tyr_GPU_Kernels_MhaH100.cu` plus
-`tyr_gpu_kernel_stubs.cpp`), then rebuilds `cc/build/libTyrC.a` via
-`make -C cc`. Which modules get emitted is controlled by environment
-variables — `TYR_GPU_CODEGEN_MODULE` (space-separated module list, default
-`Tyr.GPU.Kernels.MhaH100`) and `TYR_SKIP_GPU_CODEGEN=1` to reuse the checked-in
-generated tree. On a fresh checkout the codegen step needs the kernel modules'
-own `.oleans`, so CI does a two-phase build: first `TYR_SKIP_GPU_CODEGEN=1
-lake build <kernel modules>`, then the real build
-(`.github/workflows/gpu.yml`). The full variable table is in
+`tyr_gpu_kernel_stubs.cpp`), then rebuilds `cc/build/libTyrC.so` via
+`make -C cc`. Which modules get emitted is the `-Kkernels` Lake option
+(space-separated module list, default `Tyr.GPU.Kernels.MhaH100`, set with
+`lake -R`). The generator needs the kernel modules' `.olean` files, which Lake
+builds first as ordinary dependencies. The full option table is in
 [Getting started](../getting-started.md).
 
 Only the modules passed to the generator get `.cu` files, so a `.launch`
@@ -117,7 +114,7 @@ call (`MhaGB10`, `FusedRMSNorm`, `FusedLayerNorm`, `MhaH100Decode`,
 `Tyr/GPU/Kernels.lean` is the umbrella: it imports the six family entrypoints
 (`Attention`, `StateSpace`, `Parallel`, `Gemm`, `Normalization`,
 `Experimental`) plus `BrownianSample` and `RKCombine` directly. Notably absent
-from the umbrella: `AttentionFactory`, `MhaGB10`, and `FlashAttnCausal64` —
+from the umbrella: `MhaGB10` and `FlashAttnCausal64` —
 import those leaf modules explicitly. `Tyr/GPU/Kernels/Examples.lean` (via
 `Experimental`) holds small teaching kernels (`simpleGemm`, `flashAttnFwd`,
 `layerNorm`, …). Family entrypoints re-export selected leaf kernels as
@@ -145,7 +142,6 @@ generated `.launch`.
 | `Tyr/GPU/Kernels/MhaH100LCF.lean` | `tkMhaH100LCFFwd64`, `tkMhaH100LCFFwd128` | load-compute-finish forward variants |
 | `Tyr/GPU/Kernels/MhaGB10.lean` | `tkFlashAttnGb10Fwd2Block[Lse]`, `tkMhaGb10Fwd2Block`, `tkMhaGb10BwdPrep2Block`, `tkMhaGb10Bwd2BlockPartials` | GB10 (Blackwell-consumer) 2-block MHA |
 | `Tyr/GPU/Kernels/FlashAttn3.lean` | `flashAttn3Fwd`, `flashAttn3FwdGQA`, `flashAttn3FwdPersistent`, `flashAttn3BwdPrep`, `flashAttn3Bwd` | FA3-style warp-specialized producer/consumer |
-| `Tyr/GPU/Kernels/AttentionFactory.lean` | `tkFlashAttnFwd2BlockFactory`, … (12 `…Factory` kernels) | parameterized `FAVariantConfig` template (`mkFlashAttnFwdBody`, `mkFlashAttnBwdPrep`, `mkFlashAttnBwdPartials`) mirroring the hand-written MhaH100 kernels |
 | `Tyr/GPU/Kernels/RKCombine.lean` | `dopri5Stage{2..7}[Blackwell]`, `dopri5Combine64[Blackwell]` | tableau-driven generators `rkStageSumBody` / `rkCombineBody` instantiate any explicit RK tableau |
 | `Tyr/GPU/Kernels/BrownianSample.lean` | `keyedNormal[Blackwell]`, `vbtIncrement[Blackwell]`, `emStepVbt[Blackwell]` | device PRNG replicating the CPU `PRNGKey` LCG + Box-Muller per element |
 | `Tyr/GPU/Kernels/{Bf16Gemm,PrecisionGemm,NvFp4Gemm}.lean` | `tkH100Bf16GemmFwd`, `tkB200Bf16GemmFwd`, `tkH100Fp8E4M3GemmFwd`, `tkB200NvFp4GemmFwd`, … | re-exported via `Kernels/Gemm.lean` |
@@ -342,7 +338,7 @@ parts:
   `reportTensorComparison`, allclose with rtol/atol).
 - **Shell harnesses.** `scripts/gpu/test_<kernel>_e2e.sh` all delegate to
   `scripts/gpu/run_e2e_kernel.sh <KernelModule> <RunnerExe> <Label>`, which
-  emits CUDA for the module, rebuilds `libTyrC.a`, regenerates fixtures, and
+  emits CUDA for the module, rebuilds `libTyrC`, regenerates fixtures, and
   runs the parity check; `scripts/gpu/test_parity_suite.sh` is the umbrella.
   See [Getting started — GPU parity scripts](../getting-started.md).
 - **Vendored reference.** If `TYR_GPU_VENDORED_REF_RUNNER` is set (default:
@@ -385,9 +381,9 @@ parts:
 ## Related guides
 
 - [GPU DSL and codegen](dsl-codegen.md) — the `KernelM` DSL, tile IR, and C++ emission these kernels are written in
-- [Getting started](../getting-started.md) — build knobs (`TYR_GPU_CODEGEN_MODULE`, `TYR_SKIP_GPU_CODEGEN`) and the parity-script flow
+- [Getting started](../getting-started.md) — build options (`-Kkernels`) and the parity-script flow
 - [Examples and testing](../examples-and-testing.md) — building and running the `Examples/GPU/Run*` harnesses and test suites
-- [FFI and build](../ffi-and-build.md) — `cc/`, `libTyrC.a`, and how generated CUDA reaches the linker
+- [FFI and build](../ffi-and-build.md) — `cc/`, `libTyrC`, and how generated CUDA reaches the linker
 - [Core tensors](../core/tensors.md) — `T s`, `Device`, the `torch.*` FFI used at the launch boundary
 - [Autodiff](../autodiff.md) — `torch.autograd`, which is what makes `tyr::flash_attn` differentiable
 - [diffeq.md](../diffeq.md) — the generic solvers the fused RK/SDE ops accelerate

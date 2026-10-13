@@ -1,22 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-source ./env.sh
-
-export LEAN_CC_FAST="${LEAN_CC_FAST:-1}"
 export LAKE_NUM_JOBS="${LAKE_NUM_JOBS:-1}"
-export TYR_BUILD_TYRC_DYLIB="${TYR_BUILD_TYRC_DYLIB:-0}"
 export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
-export LD_LIBRARY_PATH="$PWD/external/wheels/torch/lib:$PWD/cc/build:${EBROOTGCCCORE:+${EBROOTGCCCORE}/lib64:}${LD_LIBRARY_PATH:-}"
 gpu_codegen_module="${TYR_GPU_CODEGEN_MODULE:-Tyr.GPU.Kernels.MhaH100}"
-
-cpu_count() {
-  if command -v nproc >/dev/null 2>&1; then
-    nproc
-    return
-  fi
-  echo 1
-}
 
 usage() {
   cat <<'EOF'
@@ -89,14 +76,16 @@ if (( ! skip_build )); then
   echo "[1/3] Build benchmark executable"
   if (( ensure_native )); then
     echo "        codegen module: ${gpu_codegen_module}"
-    lake run buildGpuTarget -- "${gpu_codegen_module}" RunFlashAttnBench
+    : "${CUDA_HOME:?set CUDA_HOME to the CUDA toolkit}"
+    lake -R -Kcuda="$CUDA_HOME" -Kgpu="${TYR_GPU_TARGET:-H100}" -Kkernels="${gpu_codegen_module}" \
+      build RunFlashAttnBench
   else
     lake --quiet build RunFlashAttnBench
   fi
 fi
 
 if (( ensure_native )); then
-  echo "[2/3] Native runtime regeneration was included in the buildGpuTarget step"
+  echo "[2/3] Native runtime regeneration was included in the build step"
 else
   echo "[2/3] Native runtime rebuild skipped"
 fi
@@ -107,4 +96,4 @@ if (( build_only )); then
 fi
 
 echo "[3/3] Run benchmark scaffold"
-lake run runBuiltTarget -- RunFlashAttnBench "${bench_args[@]}"
+lake env .lake/build/bin/RunFlashAttnBench "${bench_args[@]}"

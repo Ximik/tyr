@@ -3,7 +3,7 @@
 Build and run from the repository root:
 
 ```sh
-TYR_SKIP_GPU_CODEGEN=1 lake build mctx_bench
+lake build mctx_bench
 lake env ./.lake/build/bin/mctx_bench
 ```
 

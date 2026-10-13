@@ -15,21 +15,16 @@ Everything is driven by `lakefile.lean` (Lake DSL). The pieces that matter on
 day one:
 
 - **Lean libraries** — `Tyr` (`@[default_target]`, precompiled; everything under
-  `Tyr.*`), `TyrCodegen` (pure-Lean GPU codegen modules, no FFI), `Tests`,
-  `TestsExperimental`, and `Examples` (`lakefile.lean:560-593`).
-- **C++ bridge** — `extern_lib libtyr` (`lakefile.lean:416`) wraps the Makefile
+  `Tyr.*`), `TyrCodegen` (the GPU code generator; does not link `libTyrC`), `Tests`,
+  `TestsExperimental`, and `Examples`.
+- **C++ bridge** — `target libtyr` in `lakefile.lean` wraps the Makefile
   build: it runs the GPU kernel codegen executable and then
-  `make -C cc lib dylib`, producing `cc/build/libTyrC.a` (and `libTyrC.so`
-  unless `TYR_BUILD_TYRC_DYLIB=0`). Every executable statically links
-  `libTyrC.a` plus libtorch, OpenMP, Arrow/Parquet, and soxr via
-  `commonLinkArgs` (`lakefile.lean:238`).
+  `make -C cc dylib`, producing the shared library `cc/build/libTyrC.so`
+  (`.dylib` on macOS), which carries libtorch, OpenMP, Arrow/Parquet and soxr
+  as its own dependencies. The package's `moreLinkLibs` links it into every
+  executable and precompiled module library.
 - **Executables** — `lean_exe` targets rooted in `Tests.*` and `Examples.*`;
   binaries land in `.lake/build/bin/`.
-- **Lake scripts** (`lakefile.lean:1164-1232`) — thin wrappers that compute the
-  runtime library path (`runtimeLibPath`, `lakefile.lean:1039`) and launch a
-  compiled binary with it: `lake run` (test_runner), `lake run train`
-  (TrainGPT), `lake run runBuiltTarget -- <ExeName> [args]`,
-  `lake run buildGpuTarget -- <KernelModule> <Target>...`.
 
 The runtime types a first program touches:
 
@@ -65,16 +60,20 @@ and optionally the CUDA toolkit on Linux. On Debian/Ubuntu:
 Linux x86_64, Linux aarch64 and macOS arm64.
 
 ```bash
-deps/fetch.sh
-source ./env.sh
+deps/fetch.sh cpu                       # or: deps/fetch.sh cuda
+lake -R build test_runner               # or: lake -R -Kcuda=/usr/local/cuda build test_runner
 ```
+
+The `lake -R` call configures the build once; Lake keeps the choice until the
+next `lake -R`. The CPU/CUDA choice must match the fetched wheels, and the
+build stops with the command to run if it does not.
 
 `deps/fetch.sh` runs two fetchers. `deps/fetch_git.sh` checks out the git
 repos pinned by commit in `deps/git.lock` (soxr, ThunderKittens), fetching only
 that commit. `deps/fetch_wheels.sh` unpacks the wheels pinned with sha256 in
 `deps/wheels.lock` (torch 2.10.0, pyarrow 25.0.1) into `external/wheels`; it
-picks the CUDA variant, adding `external/wheels/nvidia`, when `nvcc` is on
-`PATH` (override with `TYR_DEPS_VARIANT=cpu|cuda`). `deps/lock_wheels.py`
+fetches the variant named on the command line; `cuda` adds
+`external/wheels/nvidia`. `deps/lock_wheels.py`
 regenerates the wheel lock after a version bump.
 
 Lake-level requirements are declared in `lakefile.lean`: `LeanTest`,
@@ -89,28 +88,30 @@ lake build test_runner      # specific executables are built on demand
 lake build TrainGPT TrainDiffusion TrainNanoChat FluxDemo
 ```
 
-GPU-related build knobs, read by `extern_lib libtyr` in `lakefile.lean`:
+Build configuration is a set of Lake options, given together on `lake -R`. Lake
+keeps them until the next `lake -R`, which replaces all of them, e.g.
+`lake -R -Kcuda=/usr/local/cuda -Kgpu=GB10 -Kkernels="Tyr.GPU.Kernels.MhaGB10" build`:
 
-| Variable | Default | Effect |
-|---|---|---|
-| `TYR_GPU_CODEGEN_MODULE` | `Tyr.GPU.Kernels.MhaH100` | Kernel module(s) (space-separated) to emit CUDA for |
-| `TYR_SKIP_GPU_CODEGEN` | unset (skip if no `nvcc`) | `1` skips the codegen step and reuses `cc/src/generated`; `0` forces it |
-| `TYR_BUILD_TYRC_DYLIB` | unset (on) | `0` skips building `cc/build/libTyrC.so` |
-| `TYR_MAKE_JOBS` | CPU count (set by `env.sh`) | Parallel jobs for `make -C cc lib [dylib]`; unset runs serially |
-| `TYR_GPU_TARGET` / `TYR_GPU_FAMILY` | auto | Forwarded to `make -C cc` as `GPU=` / `GPU_FAMILY=` |
-| `TYR_MACOS_SDKROOT` / `TYR_MACOS_DEPLOYMENT_TARGET` | `SDKROOT` (set by `env.sh`) / `14.0` | macOS SDK and deployment-target overrides |
+| Option | Effect |
+|---|---|
+| `-Kcuda=<toolkit>` | CUDA build with this toolkit, which must contain `bin/nvcc`. Without it: CPU build (CUDA kernels replaced by stubs). Checked against the libtorch from `deps/fetch.sh` |
+| `-Kgpu=<name>` | with `-Kcuda`, required: GPU to build kernels for, `H100`, `A100`, `B200`, `B300` or `GB10` |
+| `-Kkernels="<module> ..."` | kernel module(s) to generate CUDA for, space-separated (default `Tyr.GPU.Kernels.MhaH100`) |
+
+`TYR_MAKE_JOBS` sets the parallel jobs for `make -C cc dylib` (default: CPU
+count).
 
 ## Runtime environment
 
-Executables find libtorch and Arrow in `external/` through their embedded
-library search paths (rpath), so no `LD_LIBRARY_PATH`/`DYLD_LIBRARY_PATH` setup
-is needed. The Lake scripts also set the library path themselves
-(`runtimeLibPath` in `lakefile.lean`):
+Executables find `libTyrC`, libtorch and Arrow through their embedded library
+search paths (rpath), so no `LD_LIBRARY_PATH`/`DYLD_LIBRARY_PATH` setup is
+needed. Executables that run the Lean interpreter (most of them) also need Lean's
+module search path, which Lake sets:
 
 ```bash
-lake run                                   # test_runner
-lake run train                             # TrainGPT
-lake run runBuiltTarget -- FluxDemo        # any compiled executable, with args
+lake test                                  # build and run test_runner
+lake exe FluxDemo --help                   # build and run any executable, with args
+lake env .lake/build/bin/FluxDemo          # run without rebuilding
 ```
 
 Runtime variables a user actually sets:
@@ -124,16 +125,14 @@ Runtime variables a user actually sets:
 ## Running tests
 
 `test_runner` (`Tests/RunTests.lean`) is the main LeanTest suite and is marked
-`@[test_driver]` (`lakefile.lean:598`), so `lake test` also works:
+`@[test_driver]` in `lakefile.lean`, so `lake test` also works:
 
 ```bash
-lake build test_runner
-.lake/build/bin/test_runner                 # with the library path set, or:
-lake run                                    # same thing, env handled
+lake test                                   # build and run the suite
 
-.lake/build/bin/test_runner --filter GPT    # only tests matching a pattern
-.lake/build/bin/test_runner --ignored       # include tests marked ignored
-.lake/build/bin/test_runner --fail-fast     # stop at first failure
+lake exe test_runner --filter GPT           # only tests matching a pattern
+lake exe test_runner --ignored              # include tests marked ignored
+lake exe test_runner --fail-fast            # stop at first failure
 ```
 
 The experimental suite tracks in-progress modules and is expected to be less
@@ -144,21 +143,20 @@ lake build test_runner_experimental
 .lake/build/bin/test_runner_experimental
 ```
 
-Focused suites exist as separate executables (`lakefile.lean:761-825`):
+Focused suites exist as separate executables:
 `TestDataLoader`, `TestDiffusion`, `TestDiffEq`, `TestDiffEqAdjoint`,
 `TestGPUDSL`, `TestGPUKernels`, `TestGPUE2E`, `TestGPUGB10E2E`,
 `TestGPUTileIR`, plus `RunRiemannianNanoGPTTests`. Build and run them the same
-way (`lake build <name>`, then run from `.lake/build/bin/` with the library
-path, or via `lake run runBuiltTarget -- <name>`).
+way (`lake exe <name>`).
 
 ## Running examples
 
 Per-example details live in `Examples/README.md`; the common pattern is
-`lake build <Exe>` then run with the library path set. Highlights:
+`lake exe <Exe> [args]`. Highlights:
 
 | Executable | What it does | Notes |
 |---|---|---|
-| `TrainGPT` | char-level GPT on Shakespeare | `lake run train`; reads `data/shakespeare_char/{train,val}.bin` (in repo), falls back to random tokens; checkpoints to `checkpoints/gpt` |
+| `TrainGPT` | char-level GPT on Shakespeare | `lake exe TrainGPT`; reads `data/shakespeare_char/{train,val}.bin` (in repo), falls back to random tokens; checkpoints to `checkpoints/gpt` |
 | `TrainDiffusion` | discrete masked diffusion on ASCII text | flags `--generate/-g`, `--checkpoint/-c`, `--prompt/-p`, `--blocks/-n`, `--temperature/-t` |
 | `TrainNanoChat` | modded-nanogpt distributed training | flags `--data`, `--val`, `--checkpoint-dir`, `--resume`, `--debug` |
 | `NanoChatPipeline` / `NanoChatChat` | multi-stage pipeline / checkpoint chat | configured via env, see `scripts/nanochat/ENV_INVENTORY.md` |
@@ -178,21 +176,22 @@ RANDOMIZED_MHA_TRIALS=10 ./scripts/gpu/test_parity_suite.sh   # add N randomized
 Per-kernel scripts (`test_copy_e2e.sh`, `test_rotary_e2e.sh`,
 `test_layernorm_e2e.sh`, `test_flashattn_e2e.sh`, `test_mha_h100_e2e.sh`,
 `test_mha_h100_768_e2e.sh`, `test_b200_bf16_gemm_e2e.sh`, ...) all delegate to
-`scripts/gpu/run_e2e_kernel.sh <KernelModule> <RunnerExe> <Label>`, which runs a
-six-step flow: build the codegen executable and kernel module, emit CUDA into
-`cc/src/generated`, rebuild `cc/build/libTyrC.a` with `make -C cc
-GPU=$TYR_GPU_TARGET GPU_FAMILY=$TYR_GPU_FAMILY`, build the runner, regenerate
-fixtures, and run the parity check. Useful knobs:
+`scripts/gpu/run_e2e_kernel.sh <KernelModule> <RunnerExe> <Label>`, which
+configures Lake (`-Kcuda=$CUDA_HOME -Kgpu -Kkernels=<KernelModule>`) and builds
+`libtyr` (generating the kernel's CUDA), builds the runner, regenerates
+fixtures, and runs the parity check. Useful knobs:
 
+- `CUDA_HOME` — the CUDA toolkit (required).
 - `TYR_GPU_TARGET` / `TYR_GPU_FAMILY` — override the `nvidia-smi`-based
-  detection (`H100`/`GB10`/`B200`/`B300`/`A100`; `HOPPER`/`BLACKWELL`/`AMPERE`).
+  detection (`H100`/`GB10`/`B200`/`B300`/`A100`; `HOPPER`/`BLACKWELL`/`AMPERE`);
+  the tests also read them at run time.
 - `E2E_TRIALS` — repeat the fixture-regenerate + check loop N times.
 - `TYR_GPU_VENDORED_REF_RUNNER` — optional vendored ThunderKittens reference
   runner, invoked as `runner <suite-name> <fixture-dir>` after each suite;
   defaults to `scripts/gpu/run_vendored_reference.sh` when executable.
 
-These scripts source `env.sh` and need `CUDA_HOME` (which `env.sh` derives from
-`nvcc` on `PATH` when unset). On a plain macOS or CPU-only Linux checkout, skip
+These scripts need a CUDA build (`deps/fetch.sh cuda` and
+`lake -R -Kcuda=<toolkit>`). On a plain macOS or CPU-only Linux checkout, skip
 this section.
 
 ## Distributed NanoChat scripts
@@ -239,9 +238,9 @@ Reconstructed example (from `Examples/TrainGPT.lean`) — the minimal
 build-and-train loop a new user runs, first in shell:
 
 ```bash
-deps/fetch.sh                               # once: fetch all pinned dependencies
-lake build test_runner && lake run          # sanity: test suite passes
-lake build TrainGPT && lake run train       # trains, then generates from "ROMEO:"
+deps/fetch.sh cpu                           # once: fetch all pinned dependencies
+lake -R build test_runner && lake test      # once: configure; sanity: test suite passes
+lake exe TrainGPT                           # trains, then generates from "ROMEO:"
 ```
 
 and the corresponding Lean-side flow, condensed from the real `main`:

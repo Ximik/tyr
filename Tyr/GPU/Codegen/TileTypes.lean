@@ -1,7 +1,7 @@
 import Tyr.GPU.Types
 import Tyr.GPU.Tile
 import Tyr.GPU.Codegen.Var
-import Tyr.Basic
+import Tyr.Basic.Types
 
 /-!
 # Tyr.GPU.Codegen.TileTypes

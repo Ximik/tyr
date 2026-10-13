@@ -33,7 +33,6 @@ scripts/__pycache__/
 .nanochat_*/
 logs/
 data/
-cc/src/generated/
 .model-cache/
 .claude/
 .codex/

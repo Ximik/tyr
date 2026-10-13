@@ -34,4 +34,4 @@ runs:
 
     - name: Fetch pinned dependencies
       shell: bash
-      run: deps/fetch.sh
+      run: deps/fetch.sh cpu

@@ -1,39 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-source ./env.sh
-
-export LEAN_CC_FAST=1
 export TYR_GPU_VENDORED_REF_RUNNER="${TYR_GPU_VENDORED_REF_RUNNER:-$PWD/scripts/gpu/run_vendored_reference.sh}"
-export LD_LIBRARY_PATH="$PWD/external/wheels/torch/lib:$PWD/cc/build:${EBROOTGCCCORE:+${EBROOTGCCCORE}/lib64:}${LD_LIBRARY_PATH:-}"
-LEAN_BIN="${TYR_LEAN_BIN:-$HOME/.elan/bin/lean}"
-if [[ ! -x "$LEAN_BIN" ]]; then
-  LEAN_BIN="$(command -v lean || true)"
-fi
-if [[ -z "${LEAN_BIN:-}" || ! -x "$LEAN_BIN" ]]; then
-  echo "lean binary not found; set TYR_LEAN_BIN or install elan" >&2
-  exit 127
-fi
-
-cpu_count() {
-  local count
-  if command -v nproc >/dev/null 2>&1; then
-    nproc
-    return
-  fi
-  if command -v getconf >/dev/null 2>&1; then
-    count="$(getconf _NPROCESSORS_ONLN 2>/dev/null || true)"
-    if [[ "$count" =~ ^[0-9]+$ ]] && [[ "$count" -gt 0 ]]; then
-      echo "$count"
-      return
-    fi
-  fi
-  echo 1
-}
-
-invalidate_generated_gpu_objects() {
-  rm -f "$PWD"/cc/build/generated/*.o "$PWD"/cc/build/libTyrC.a "$PWD"/cc/build/libTyrC.so
-}
 
 detect_gpu_target() {
   if [[ -n "${TYR_GPU_TARGET:-}" ]]; then
@@ -73,6 +41,7 @@ detect_gpu_family() {
   esac
 }
 
+: "${CUDA_HOME:?set CUDA_HOME to the CUDA toolkit}"
 gpu_target="$(detect_gpu_target)"
 gpu_family="$(detect_gpu_family)"
 export TYR_GPU_TARGET="${TYR_GPU_TARGET:-${gpu_target}}"
@@ -102,23 +71,8 @@ select_modules_from_filter() {
 
 test_filter="$(extract_test_filter "$@")"
 mapfile -t modules < <(select_modules_from_filter "${test_filter}")
-generator_targets=(+Tyr.GPU.Codegen.GenerateMain)
-for module in "${modules[@]}"; do
-  generator_targets+=("+${module}")
-done
+echo "[1/2] Configure Lake and build TestGPUE2E with the kernels' CUDA (GPU=${TYR_GPU_TARGET})"
+lake -R -Kcuda="$CUDA_HOME" -Kgpu="$TYR_GPU_TARGET" -Kkernels="${modules[*]}" --quiet build TestGPUE2E
 
-echo "[1/5] Build Lean kernel generator inputs"
-lake --quiet build "${generator_targets[@]}"
-
-echo "[2/5] Generate CUDA translation units"
-lake env "$LEAN_BIN" --run Tyr/GPU/Codegen/GenerateMain.lean "${modules[@]}" --out-dir cc/src/generated
-
-echo "[3/5] Build C++/CUDA runtime library (GPU=${TYR_GPU_TARGET}, family=${TYR_GPU_FAMILY})"
-invalidate_generated_gpu_objects
-make -C cc -j"$(cpu_count)" GPU="${TYR_GPU_TARGET}" GPU_FAMILY="${TYR_GPU_FAMILY}"
-
-echo "[4/5] Build LeanTest GPU executable"
-lake --quiet build TestGPUE2E
-
-echo "[5/5] Run LeanTest GPU suite"
+echo "[2/2] Run LeanTest GPU suite"
 lake env ./.lake/build/bin/TestGPUE2E "$@"

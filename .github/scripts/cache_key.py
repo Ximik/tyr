@@ -15,13 +15,11 @@ import platform
 import subprocess
 
 REPO = Path(__file__).resolve().parents[2]
+# The build itself never sets LEAN_CC; it is listed because a user can set it
+# in their own environment, and Lake then compiles with it.
 BUILD_ENV = (
     "CC", "CXX", "CFLAGS", "CXXFLAGS", "CPPFLAGS", "LDFLAGS", "LEAN_CC",
-    "LEAN_CC_GCC", "LEAN_CC_FAST", "LIBRARY_PATH", "SDKROOT", "MACOSX_DEPLOYMENT_TARGET",
-    "TYR_MACOS_SDKROOT", "TYR_MACOS_DEPLOYMENT_TARGET", "GPU", "GPU_FAMILY",
-    "GPU_COMPUTE", "GPU_CODE", "TYR_GPU_TARGET", "TYR_GPU_FAMILY",
-    "TYR_GPU_COMPUTE", "TYR_GPU_CODE", "TYR_GPU_CODEGEN_MODULE",
-    "TYR_SKIP_GPU_CODEGEN", "TYR_BUILD_TYRC_DYLIB",
+    "LIBRARY_PATH",
 )
 
 
@@ -44,8 +42,7 @@ def keys(identity, source_tree):
 def identity():
     # deps/git.lock and deps/wheels.lock pin every native dependency; the libtorch
     # files below additionally record which variant (cpu/cuda) was fetched.
-    files = ["lean-toolchain", "lake-manifest.json", "deps/git.lock", "deps/wheels.lock",
-             "lean-cc", "env.sh"]
+    files = ["lean-toolchain", "lake-manifest.json", "deps/git.lock", "deps/wheels.lock"]
     torch_files = ["share/cmake/Torch/TorchConfigVersion.cmake",
                    "share/cmake/Torch/TorchConfig.cmake",
                    "include/torch/csrc/api/include/torch/version.h"]

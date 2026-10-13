@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 set -euo pipefail
-source ./env.sh
 
 gpu_index="${BENCH_GPU_INDEX:-0}"
 idle_wait_seconds="${BENCH_IDLE_WAIT_SECONDS:-30}"
@@ -136,24 +135,14 @@ iters="${BENCH_ITERS:-$default_iters}"
 repeats="${BENCH_REPEATS:-7}"
 out="${BENCH_JSONL_OUT:-/tmp/tyr_${case_id}_bench.jsonl}"
 run_id="${case_id}_bench_$(date -u +%Y%m%dT%H%M%SZ)_$$"
-export TYR_GPU_CODEGEN_MODULE="$module"
 export TYR_GPU_TARGET="${TYR_GPU_TARGET:-GB10}"
 export TYR_GPU_FAMILY="${TYR_GPU_FAMILY:-$family}"
-export TYR_BUILD_TYRC_DYLIB=0
 export TORCHINDUCTOR_CACHE_DIR="${TORCHINDUCTOR_CACHE_DIR:-/tmp/tyr_torchinductor_cache}"
-export LD_LIBRARY_PATH="$PWD/external/wheels/torch/lib:$PWD/cc/build:${LD_LIBRARY_PATH:-}"
-# Build the selected registration before generation, then replace the native
-# archive deliberately. The normal extern-lib dependency currently has a cycle
-# through the kernel registration dynlib and can otherwise emit CUDA from the
-# previous source revision; keep this explicit sequence until that graph is cut.
-LEAN_BIN="${LEAN_BIN:-$(lake env lean --print-prefix)/bin/lean}"
 if [[ "${BENCH_SKIP_BUILD:-0}" == "1" ]]; then build_skipped=true; else build_skipped=false; fi
 if [[ "${BENCH_SKIP_BUILD:-0}" != "1" ]]; then
-  TYR_SKIP_GPU_CODEGEN=1 lake --quiet build +Tyr.GPU.Codegen.GenerateMain "$module:dynlib"
-  lake env "$LEAN_BIN" --run Tyr/GPU/Codegen/GenerateMain.lean "$module" --out-dir cc/src/generated
-  rm -f cc/build/generated/*.o cc/build/libTyrC.a cc/build/libTyrC.so
-  make -C cc -j"${TYR_GPU_BUILD_JOBS:-$(getconf _NPROCESSORS_ONLN)}" GPU="$TYR_GPU_TARGET" GPU_FAMILY="$TYR_GPU_FAMILY"
-  TYR_SKIP_GPU_CODEGEN=1 lake build "$exe"
+  : "${CUDA_HOME:?set CUDA_HOME to the CUDA toolkit}"
+  # Generates the kernel's CUDA, builds libTyrC and the benchmark executable.
+  lake -R -Kcuda="$CUDA_HOME" -Kgpu="$TYR_GPU_TARGET" -Kkernels="$module" --quiet build "$exe"
 else
   test -x "./.lake/build/bin/$exe"
   test -f "cc/src/generated/${module//./_}.cu"

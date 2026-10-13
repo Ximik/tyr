@@ -330,7 +330,7 @@ let result := searchEpisodeDagGumbelFromGraph?   -- or searchEpisodeFromGraph? /
 -- result : Except String AlphaGradEpisodeResult
 ```
 
-Runnable front ends (registered in `lakefile.lean:707-727`):
+Runnable front ends (registered in `lakefile.lean`):
 
 ```bash
 lake exe AlphaGradRoeFlux1dA0 [episodes]     # RoeFlux_1d elimination-planning demo
