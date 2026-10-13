@@ -430,6 +430,23 @@ remains active.
   GPT test passes alone and in the focused suite. This requires isolation of
   preceding-test state or native memory corruption before acceptance.
 
+## 2026-10-13 native stack ownership correction
+
+- The main-suite native crash was caused by a borrowed/owned mismatch in
+  `RawTensor.stack1d`: C++ consumes its tensor array, but the indexed declaration
+  marked it borrowed, causing Lean to release the temporary array again.
+  The declaration now transfers ownership, matching the existing native and
+  legacy contracts.
+- A repeated-stack regression reproduced SIGSEGV before the correction and
+  passes afterward. All four RiemannianSGD tests, including the isolated
+  Jacobian reproducer, also pass. Temporary diagnostic runner changes were
+  removed. The 111-declaration raw ABI audit remains green; C type signatures
+  alone cannot detect this ownership mismatch.
+- The rebuilt main CPU suite passes **1,436 tests with zero failures, skips or
+  runtime panics**. The focused 212-test suite also passes. `Tests`, `Examples`
+  and both native test executables build. The experimental BranchingFlows
+  build errors and the remaining legacy callers are still outstanding.
+
 ## Remaining acceptance criteria
 
 Remove the `T` declaration and all model, generator, reflection, documentation,

@@ -315,4 +315,20 @@ def testDevicePinnedSpec : IO Unit := do
   | .ok () => LeanTest.fail "CUDA pin on a CPU tensor should fail validation"
   | .error err => LeanTest.assertTrue (err.containsSubstr "device") s!"got: {err}"
 
+/-- The stack bridge consumes the temporary raw array; Lean must not release it twice. -/
+@[test]
+def testTypedStackArrayOwnership : IO Unit := do
+  for i in [:128] do
+    let a := Tensor.fromFloatArray #[i.toFloat, 2, 3]
+    let b := Tensor.fromFloatArray #[4, 5, 6]
+    let vectors := #[a, b]
+    let stacked := Tensor.stack1d vectors
+    LeanTest.assertEqual (← stacked.toFloatArray) #[i.toFloat, 2, 3, 4, 5, 6]
+    -- Allocate additional shape arrays and reuse the original tensor handles.
+    let reshaped := stacked.reshapeChecked #[3, 2]
+    LeanTest.assertEqual reshaped.runtimeShape #[3, 2]
+    LeanTest.assertEqual (← vectors[0]!.toFloatArray) #[i.toFloat, 2, 3]
+    LeanTest.assertEqual (← (Tensor.stack1d vectors).toFloatArray)
+      #[i.toFloat, 2, 3, 4, 5, 6]
+
 end Tests.TestTyped

@@ -200,8 +200,9 @@ namespace torch.RawTensor
     shape argument, so none is passed. -/
 @[extern "lean_torch_max_all"] opaque maxAll (t : @& RawTensor) : RawTensor
 
-/-- Stack a runtime list of equal vectors along a new leading axis. -/
-@[extern "lean_torch_stack_1d"] opaque stack1d (k n : UInt64) (tensors : @& Array RawTensor)
+/-- Stack a runtime list of equal vectors along a new leading axis.
+    The native bridge consumes the array (but retains shared tensor handles). -/
+@[extern "lean_torch_stack_1d"] opaque stack1d (k n : UInt64) (tensors : Array RawTensor)
     (dim : Int64 := 0) : RawTensor
 
 /-- Vector-Jacobian product: gradient of `y` w.r.t. `x` under cotangent `dy`. -/
