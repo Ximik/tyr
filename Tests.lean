@@ -150,3 +150,5 @@ import Tests.TestFLM
 
 -- Note: `Tests.TestBranchingFlows` is currently routed through
 -- `TestsExperimental.lean` until `Tyr/Model/BranchingFlows.lean` is stabilized.
+
+import Tests.TestTypedNeural

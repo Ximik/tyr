@@ -3,7 +3,7 @@
 
   Pretrained weight loading for Lean Qwen3-ASR port.
 -/
-import Tyr.Torch
+import Tyr.Typed.Neural
 import Tyr.TensorStruct
 import Tyr.Log
 import Tyr.SafeTensors.Load
@@ -17,25 +17,29 @@ open torch.Log
 open torch.Model (reqGradFalse)
 open torch.safetensors (tryLoadTensorSharded)
 
+private def loadWeight (modelDir name : String) (shape : Shape) : IO (STensor shape) :=
+  safetensors.loadTensorShardedCandidates modelDir #[name] shape
+
+
 private def loadLayerNormSharded (modelDir : String) (name : String) (dim : UInt64)
-    : IO (LayerNorm dim) := do
-  let w ← safetensors.loadTensorSharded modelDir s!"{name}.weight" #[dim]
-  let b ← safetensors.loadTensorSharded modelDir s!"{name}.bias" #[dim]
+    : IO (LayerNorm dim (.Unknown "dynamic")) := do
+  let w ← loadWeight modelDir s!"{name}.weight" #[dim]
+  let b ← loadWeight modelDir s!"{name}.bias" #[dim]
   pure { weight := reqGradFalse w, bias := reqGradFalse b, eps := ⟨1e-5⟩ }
 
 private def loadAudioAttentionSharded (modelDir : String) (namePrefix : String) (cfg : AudioEncoderConfig)
     : IO (AudioAttention cfg) := do
   let headDim := AudioEncoderConfig.headDim cfg
   let projDim := cfg.encoderAttentionHeads * headDim
-  let qProjWeight ← safetensors.loadTensorSharded modelDir s!"{namePrefix}.q_proj.weight" #[projDim, cfg.dModel]
-  let qProjBias ← safetensors.loadTensorSharded modelDir s!"{namePrefix}.q_proj.bias" #[projDim]
-  let kProjWeight ← safetensors.loadTensorSharded modelDir s!"{namePrefix}.k_proj.weight" #[projDim, cfg.dModel]
-  let kProjBias ← safetensors.loadTensorSharded modelDir s!"{namePrefix}.k_proj.bias" #[projDim]
-  let vProjWeight ← safetensors.loadTensorSharded modelDir s!"{namePrefix}.v_proj.weight" #[projDim, cfg.dModel]
-  let vProjBias ← safetensors.loadTensorSharded modelDir s!"{namePrefix}.v_proj.bias" #[projDim]
-  let outProjWeight ← safetensors.loadTensorSharded modelDir s!"{namePrefix}.out_proj.weight"
+  let qProjWeight ← loadWeight modelDir s!"{namePrefix}.q_proj.weight" #[projDim, cfg.dModel]
+  let qProjBias ← loadWeight modelDir s!"{namePrefix}.q_proj.bias" #[projDim]
+  let kProjWeight ← loadWeight modelDir s!"{namePrefix}.k_proj.weight" #[projDim, cfg.dModel]
+  let kProjBias ← loadWeight modelDir s!"{namePrefix}.k_proj.bias" #[projDim]
+  let vProjWeight ← loadWeight modelDir s!"{namePrefix}.v_proj.weight" #[projDim, cfg.dModel]
+  let vProjBias ← loadWeight modelDir s!"{namePrefix}.v_proj.bias" #[projDim]
+  let outProjWeight ← loadWeight modelDir s!"{namePrefix}.out_proj.weight"
     #[cfg.dModel, projDim]
-  let outProjBias ← safetensors.loadTensorSharded modelDir s!"{namePrefix}.out_proj.bias" #[cfg.dModel]
+  let outProjBias ← loadWeight modelDir s!"{namePrefix}.out_proj.bias" #[cfg.dModel]
   pure {
     qProjWeight := reqGradFalse qProjWeight
     qProjBias := reqGradFalse qProjBias
@@ -52,10 +56,10 @@ private def loadAudioLayerSharded (modelDir : String) (layerIdx : UInt64) (cfg :
   let p := s!"thinker.audio_tower.layers.{layerIdx}"
   let selfAttn ← loadAudioAttentionSharded modelDir s!"{p}.self_attn" cfg
   let selfAttnLayerNorm ← loadLayerNormSharded modelDir s!"{p}.self_attn_layer_norm" cfg.dModel
-  let fc1Weight ← safetensors.loadTensorSharded modelDir s!"{p}.fc1.weight" #[cfg.encoderFfnDim, cfg.dModel]
-  let fc1Bias ← safetensors.loadTensorSharded modelDir s!"{p}.fc1.bias" #[cfg.encoderFfnDim]
-  let fc2Weight ← safetensors.loadTensorSharded modelDir s!"{p}.fc2.weight" #[cfg.dModel, cfg.encoderFfnDim]
-  let fc2Bias ← safetensors.loadTensorSharded modelDir s!"{p}.fc2.bias" #[cfg.dModel]
+  let fc1Weight ← loadWeight modelDir s!"{p}.fc1.weight" #[cfg.encoderFfnDim, cfg.dModel]
+  let fc1Bias ← loadWeight modelDir s!"{p}.fc1.bias" #[cfg.encoderFfnDim]
+  let fc2Weight ← loadWeight modelDir s!"{p}.fc2.weight" #[cfg.dModel, cfg.encoderFfnDim]
+  let fc2Bias ← loadWeight modelDir s!"{p}.fc2.bias" #[cfg.dModel]
   let finalLayerNorm ← loadLayerNormSharded modelDir s!"{p}.final_layer_norm" cfg.dModel
   pure {
     selfAttn
@@ -69,20 +73,20 @@ private def loadAudioLayerSharded (modelDir : String) (layerIdx : UInt64) (cfg :
 
 private def loadAudioEncoderSharded (modelDir : String) (cfg : AudioEncoderConfig)
     : IO (AudioEncoder cfg) := do
-  let conv2d1Weight ← safetensors.loadTensorSharded modelDir "thinker.audio_tower.conv2d1.weight"
+  let conv2d1Weight ← loadWeight modelDir "thinker.audio_tower.conv2d1.weight"
     #[cfg.downsampleHiddenSize, 1, 3, 3]
-  let conv2d1Bias ← safetensors.loadTensorSharded modelDir "thinker.audio_tower.conv2d1.bias"
+  let conv2d1Bias ← loadWeight modelDir "thinker.audio_tower.conv2d1.bias"
     #[cfg.downsampleHiddenSize]
-  let conv2d2Weight ← safetensors.loadTensorSharded modelDir "thinker.audio_tower.conv2d2.weight"
+  let conv2d2Weight ← loadWeight modelDir "thinker.audio_tower.conv2d2.weight"
     #[cfg.downsampleHiddenSize, cfg.downsampleHiddenSize, 3, 3]
-  let conv2d2Bias ← safetensors.loadTensorSharded modelDir "thinker.audio_tower.conv2d2.bias"
+  let conv2d2Bias ← loadWeight modelDir "thinker.audio_tower.conv2d2.bias"
     #[cfg.downsampleHiddenSize]
-  let conv2d3Weight ← safetensors.loadTensorSharded modelDir "thinker.audio_tower.conv2d3.weight"
+  let conv2d3Weight ← loadWeight modelDir "thinker.audio_tower.conv2d3.weight"
     #[cfg.downsampleHiddenSize, cfg.downsampleHiddenSize, 3, 3]
-  let conv2d3Bias ← safetensors.loadTensorSharded modelDir "thinker.audio_tower.conv2d3.bias"
+  let conv2d3Bias ← loadWeight modelDir "thinker.audio_tower.conv2d3.bias"
     #[cfg.downsampleHiddenSize]
 
-  let convOutWeight ← safetensors.loadTensorSharded modelDir "thinker.audio_tower.conv_out.weight"
+  let convOutWeight ← loadWeight modelDir "thinker.audio_tower.conv_out.weight"
     #[cfg.dModel, AudioEncoderConfig.convOutInDim cfg]
 
   let mut layers : Array (AudioEncoderLayer cfg) := #[]
@@ -92,13 +96,13 @@ private def loadAudioEncoderSharded (modelDir : String) (cfg : AudioEncoderConfi
 
   let lnPost ← loadLayerNormSharded modelDir "thinker.audio_tower.ln_post" cfg.dModel
 
-  let proj1Weight ← safetensors.loadTensorSharded modelDir "thinker.audio_tower.proj1.weight"
+  let proj1Weight ← loadWeight modelDir "thinker.audio_tower.proj1.weight"
     #[cfg.dModel, cfg.dModel]
-  let proj1Bias ← safetensors.loadTensorSharded modelDir "thinker.audio_tower.proj1.bias"
+  let proj1Bias ← loadWeight modelDir "thinker.audio_tower.proj1.bias"
     #[cfg.dModel]
-  let proj2Weight ← safetensors.loadTensorSharded modelDir "thinker.audio_tower.proj2.weight"
+  let proj2Weight ← loadWeight modelDir "thinker.audio_tower.proj2.weight"
     #[cfg.outputDim, cfg.dModel]
-  let proj2Bias ← safetensors.loadTensorSharded modelDir "thinker.audio_tower.proj2.bias"
+  let proj2Bias ← loadWeight modelDir "thinker.audio_tower.proj2.bias"
     #[cfg.outputDim]
 
   pure {
@@ -118,17 +122,17 @@ private def loadAudioEncoderSharded (modelDir : String) (cfg : AudioEncoderConfi
   }
 
 private def loadRMSNormSharded (modelDir : String) (name : String) (dim : UInt64) (eps : Float)
-    : IO (RMSNorm dim) := do
-  let w ← safetensors.loadTensorSharded modelDir s!"{name}.weight" #[dim]
+    : IO (RMSNorm dim (.Unknown "dynamic")) := do
+  let w ← loadWeight modelDir s!"{name}.weight" #[dim]
   pure { weight := reqGradFalse w, eps := ⟨eps⟩ }
 
 private def loadQwenAttentionSharded (modelDir : String) (namePrefix : String)
     (hiddenSize numHeads numKVHeads headDim : UInt64)
-    : IO (qwen.QwenAttention hiddenSize numHeads numKVHeads headDim) := do
-  let qProj ← safetensors.loadTensorSharded modelDir s!"{namePrefix}.q_proj.weight" #[numHeads * headDim, hiddenSize]
-  let kProj ← safetensors.loadTensorSharded modelDir s!"{namePrefix}.k_proj.weight" #[numKVHeads * headDim, hiddenSize]
-  let vProj ← safetensors.loadTensorSharded modelDir s!"{namePrefix}.v_proj.weight" #[numKVHeads * headDim, hiddenSize]
-  let oProj ← safetensors.loadTensorSharded modelDir s!"{namePrefix}.o_proj.weight" #[hiddenSize, numHeads * headDim]
+    : IO (qwen.QwenAttention hiddenSize numHeads numKVHeads headDim (.Unknown "dynamic")) := do
+  let qProj ← loadWeight modelDir s!"{namePrefix}.q_proj.weight" #[numHeads * headDim, hiddenSize]
+  let kProj ← loadWeight modelDir s!"{namePrefix}.k_proj.weight" #[numKVHeads * headDim, hiddenSize]
+  let vProj ← loadWeight modelDir s!"{namePrefix}.v_proj.weight" #[numKVHeads * headDim, hiddenSize]
+  let oProj ← loadWeight modelDir s!"{namePrefix}.o_proj.weight" #[hiddenSize, numHeads * headDim]
   let qNorm ← tryLoadTensorSharded modelDir s!"{namePrefix}.q_norm.weight" #[headDim]
   let kNorm ← tryLoadTensorSharded modelDir s!"{namePrefix}.k_norm.weight" #[headDim]
   pure {
@@ -136,18 +140,18 @@ private def loadQwenAttentionSharded (modelDir : String) (namePrefix : String)
     k_proj := reqGradFalse kProj
     v_proj := reqGradFalse vProj
     o_proj := reqGradFalse oProj
-    q_norm := qNorm.map reqGradFalse
-    k_norm := kNorm.map reqGradFalse
+    q_norm := qNorm.map (fun w => reqGradFalse w)
+    k_norm := kNorm.map (fun w => reqGradFalse w)
   }
 
 private def loadQwenMLPSharded (modelDir : String) (namePrefix : String)
     (hiddenSize intermediateSize : UInt64)
-    : IO (qwen.QwenMLP hiddenSize intermediateSize) := do
-  let gateProj ← safetensors.loadTensorSharded modelDir s!"{namePrefix}.gate_proj.weight"
+    : IO (qwen.QwenMLP hiddenSize intermediateSize (.Unknown "dynamic")) := do
+  let gateProj ← loadWeight modelDir s!"{namePrefix}.gate_proj.weight"
     #[intermediateSize, hiddenSize]
-  let upProj ← safetensors.loadTensorSharded modelDir s!"{namePrefix}.up_proj.weight"
+  let upProj ← loadWeight modelDir s!"{namePrefix}.up_proj.weight"
     #[intermediateSize, hiddenSize]
-  let downProj ← safetensors.loadTensorSharded modelDir s!"{namePrefix}.down_proj.weight"
+  let downProj ← loadWeight modelDir s!"{namePrefix}.down_proj.weight"
     #[hiddenSize, intermediateSize]
   pure {
     gate_proj := reqGradFalse gateProj
@@ -156,7 +160,7 @@ private def loadQwenMLPSharded (modelDir : String) (namePrefix : String)
   }
 
 private def loadQwenLayerSharded (modelDir : String) (layerIdx : UInt64) (cfg : TextConfig)
-    : IO (qwen.QwenLayer cfg.hiddenSize cfg.numAttentionHeads cfg.numKeyValueHeads cfg.headDim cfg.intermediateSize) := do
+    : IO (qwen.QwenLayer cfg.hiddenSize cfg.numAttentionHeads cfg.numKeyValueHeads cfg.headDim cfg.intermediateSize (.Unknown "dynamic")) := do
   let p := s!"thinker.model.layers.{layerIdx}"
   let inputLayernorm ← loadRMSNormSharded modelDir s!"{p}.input_layernorm" cfg.hiddenSize cfg.rmsNormEps
   let selfAttn ← loadQwenAttentionSharded modelDir s!"{p}.self_attn"
@@ -166,10 +170,10 @@ private def loadQwenLayerSharded (modelDir : String) (layerIdx : UInt64) (cfg : 
   pure { input_layernorm := inputLayernorm, self_attn := selfAttn, post_attention_layernorm := postAttentionLayernorm, mlp }
 
 private def loadTextModelSharded (modelDir : String) (cfg : TextConfig)
-    : IO (qwen.Qwen3Model (TextConfig.toQwenConfig cfg)) := do
-  let embedTokens ← safetensors.loadTensorSharded modelDir "thinker.model.embed_tokens.weight"
+    : IO (qwen.Qwen3Model (TextConfig.toQwenConfig cfg) (.Unknown "dynamic")) := do
+  let embedTokens ← loadWeight modelDir "thinker.model.embed_tokens.weight"
     #[cfg.vocabSize, cfg.hiddenSize]
-  let mut layers : Array (qwen.QwenLayer cfg.hiddenSize cfg.numAttentionHeads cfg.numKeyValueHeads cfg.headDim cfg.intermediateSize) := #[]
+  let mut layers : Array (qwen.QwenLayer cfg.hiddenSize cfg.numAttentionHeads cfg.numKeyValueHeads cfg.headDim cfg.intermediateSize (.Unknown "dynamic")) := #[]
   for i in [:cfg.numHiddenLayers.toNat] do
     let layer ← loadQwenLayerSharded modelDir i.toUInt64 cfg
     layers := layers.push layer
@@ -187,18 +191,18 @@ private def loadThinkerSharded (modelDir : String) (cfg : ThinkerConfig)
 
   let audioProjectionWeight ←
     if h : cfg.audioConfig.outputDim = cfg.textConfig.hiddenSize then
-      let eye : T #[cfg.textConfig.hiddenSize, cfg.textConfig.hiddenSize] :=
-        castLike audioTower.proj2Weight (reqGradFalse (torch.eye cfg.textConfig.hiddenSize false))
-      let eye' : T #[cfg.textConfig.hiddenSize, cfg.audioConfig.outputDim] := by
+      let eye : STensor #[cfg.textConfig.hiddenSize, cfg.textConfig.hiddenSize] :=
+        Tensor.castLike audioTower.proj2Weight (reqGradFalse (Tensor.eye cfg.textConfig.hiddenSize))
+      let eye' : STensor #[cfg.textConfig.hiddenSize, cfg.audioConfig.outputDim] := by
         simpa [h] using eye
       pure eye'
     else
       throw <| IO.userError
         s!"Qwen3-ASR checkpoint expects audio output dim == text hidden dim, got {cfg.audioConfig.outputDim} and {cfg.textConfig.hiddenSize}"
   let audioProjectionBias :=
-    castLike audioTower.proj2Weight (reqGradFalse (torch.zeros #[cfg.textConfig.hiddenSize]))
+    Tensor.castLike audioTower.proj2Weight (reqGradFalse (Tensor.zeros #[cfg.textConfig.hiddenSize]))
 
-  let lmHead ← safetensors.loadTensorSharded modelDir "thinker.lm_head.weight"
+  let lmHead ← loadWeight modelDir "thinker.lm_head.weight"
     #[ThinkerConfig.lmHeadOutDim cfg, cfg.textConfig.hiddenSize]
 
   pure {

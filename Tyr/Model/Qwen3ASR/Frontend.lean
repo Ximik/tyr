@@ -8,7 +8,7 @@
   - feature attention-mask generation
 -/
 import Tyr.Torch
-import Tyr.Typed.Ops
+import Tyr.Typed.Neural
 import Tyr.Model.Qwen3ASR.PreprocessorConfig
 
 namespace torch.qwen3asr
@@ -486,38 +486,6 @@ private def adjustMaskLength (vals : Array Int64) (target : Nat) : Array Int64 :
         out := out.push 0
       out
 
-/-! ## FFI-edge adapters
-
-`hannWindow`, `stft1d` and `log10` have no wrapper in `Tyr/Typed/Ops.lean` yet.
-The adapters below reuse the existing `lean_torch_*` externs (no new FFI) and
-validate every returned handle with `Tensor.ofRaw`/`Tensor.checkedReplacement`,
-so no untyped handle escapes into the typed pipeline. -/
-
-/-- Hann window (Float32, CPU), validated against the claimed length. -/
-private def hannWindowF32 (n : UInt64) : DTensor #[n] .Float32 :=
-  match Tensor.ofRaw (signal.hannWindow n) with
-  | .ok t => t
-  | .error msg => panic! s!"hannWindowF32: {msg}"
-
-/-- 1-D STFT with real/imag packed in the last dimension. The frame count is a
-    runtime value, so the result is a dynamic boundary: a shape-indexed tensor
-    whose shape index was validated against the native handle. -/
-private def stft1dF32 {n winLength : UInt64}
-    (input : DTensor #[n] .Float32) (nFft hopLength : UInt64)
-    (window : DTensor #[winLength] .Float32) (center normalized : Bool)
-    : IO (Sigma fun shape : Shape => DTensor shape .Float32) := do
-  let raw := signal.stft1d (n := n) input.raw nFft hopLength winLength window.raw center normalized
-  let shape := raw.runtimeShape
-  match Tensor.ofRaw (σ := { shape, dtype := .Float32 }) raw with
-  | .ok t => pure ⟨shape, t⟩
-  | .error msg => throw <| IO.userError s!"stft1dF32: {msg}"
-
-/-- Base-10 logarithm, preserving shape, Float32 dtype and placement;
-    the native result is validated against the input spec. -/
-private def log10F32 {s : Shape} {dev : DevicePolicy}
-    (t : Tensor ⟨s, .Float32, dev⟩) : Tensor ⟨s, .Float32, dev⟩ :=
-  t.checkedReplacement (nn.log10 (s := s) t.raw)
-
 /-- Faithful Whisper-style feature extraction on one waveform.
     This mirrors the reference path:
     Hann + STFT -> power -> Slaney mel -> log10 -> dynamic range clamp -> normalize. -/
@@ -552,8 +520,8 @@ def waveformToWhisperFeatures
       let noise ← Tensor.randn #[targetSamples]
       pure (wav0 + noise * cfg.dither)
 
-  let window : DTensor #[nFft] .Float32 := hannWindowF32 nFft
-  let ⟨_, stftDyn⟩ ← stft1dF32 wav nFft hop window true false
+  let window : DTensor #[nFft] .Float32 := Tensor.hannWindow nFft
+  let ⟨_, stftDyn⟩ ← Tensor.stft wav nFft hop window true false
   let stftShape := stftDyn.runtimeShape
   if stftShape.size < 3 then
     throw <| IO.userError s!"Unexpected STFT rank {stftShape.size}, expected 3"
@@ -569,7 +537,7 @@ def waveformToWhisperFeatures
     throw <| IO.userError
       s!"STFT frames mismatch: got={droppedFrames}, expected={expectedFrames} (stft_frames={stftFrames})"
 
-  let stftVals := (stftDyn.raw.getValues (freqBins * stftFrames * packed)).toList.toArray
+  let stftVals ← stftDyn.toFloatArray
   let freqNat := freqBins.toNat
   let stftFramesNat := stftFrames.toNat
   let framesNat := expectedFrames.toNat
@@ -591,7 +559,7 @@ def waveformToWhisperFeatures
   let melPower : DTensor #[melBins, expectedFrames] .Float32 :=
     Tensor.mm (Tensor.transpose2d melFilter) powerSpec
   let logSpec : DTensor #[melBins, expectedFrames] .Float32 :=
-    log10F32 (Tensor.Preserving.clampFloat melPower (1e-10 : Float) (1e10 : Float))
+    Tensor.log10 (Tensor.Preserving.clampFloat melPower (1e-10 : Float) (1e10 : Float))
   let maxVal := Tensor.item (Tensor.maxAll logSpec)
   let floored : DTensor #[melBins, expectedFrames] .Float32 :=
     Tensor.Preserving.clampFloat logSpec (maxVal - (8.0 : Float)) (1e10 : Float)
@@ -661,20 +629,20 @@ def waveformToWhisperFeaturesDynamic
     let wav0Cpu : DTensor #[targetSamples] .Float32 :=
       Tensor.reshapeChecked (Tensor.fromFloatArray prepared) #[targetSamples]
     let wav0 : DTensor #[targetSamples] .Float32 :=
-      if wav0Cpu.raw.device == runDevice then wav0Cpu else Tensor.to wav0Cpu runDevice
+      if wav0Cpu.device == runDevice then wav0Cpu else Tensor.to wav0Cpu runDevice
     let wav ←
       if cfg.dither == 0.0 then
         pure wav0
       else
         let noise0 ← Tensor.randn #[targetSamples]
         let noise : DTensor #[targetSamples] .Float32 :=
-          if noise0.raw.device == wav0.raw.device then noise0 else Tensor.to noise0 wav0.raw.device
+          if noise0.device == wav0.device then noise0 else Tensor.to noise0 wav0.device
         pure (wav0 + noise * cfg.dither)
 
-    let windowCpu : DTensor #[nFft] .Float32 := hannWindowF32 nFft
+    let windowCpu : DTensor #[nFft] .Float32 := Tensor.hannWindow nFft
     let window : DTensor #[nFft] .Float32 :=
-      if windowCpu.raw.device == wav.raw.device then windowCpu else Tensor.to windowCpu wav.raw.device
-    let ⟨_, stftDyn⟩ ← stft1dF32 wav nFft hop window true false
+      if windowCpu.device == wav.device then windowCpu else Tensor.to windowCpu wav.device
+    let ⟨_, stftDyn⟩ ← Tensor.stft wav nFft hop window true false
     let stftShape := stftDyn.runtimeShape
     if stftShape.size < 3 then
       throw <| IO.userError s!"Unexpected STFT rank {stftShape.size}, expected 3"
@@ -702,12 +670,12 @@ def waveformToWhisperFeaturesDynamic
     let melFilterCpu : DTensor #[freqBins, melBins] .Float32 :=
       Tensor.reshapeChecked (Tensor.fromFloatArray melFilterFlat) #[freqBins, melBins]
     let melFilter : DTensor #[freqBins, melBins] .Float32 :=
-      if melFilterCpu.raw.device == powerSpec.raw.device then melFilterCpu
-      else Tensor.to melFilterCpu powerSpec.raw.device
+      if melFilterCpu.device == powerSpec.device then melFilterCpu
+      else Tensor.to melFilterCpu powerSpec.device
     let melPower : DTensor #[melBins, frames] .Float32 :=
       Tensor.mm (Tensor.transpose2d melFilter) powerSpec
     let logSpec : DTensor #[melBins, frames] .Float32 :=
-      log10F32 (Tensor.Preserving.clampFloat melPower (1e-10 : Float) (1e10 : Float))
+      Tensor.log10 (Tensor.Preserving.clampFloat melPower (1e-10 : Float) (1e10 : Float))
     let maxVal := Tensor.item (Tensor.maxAll logSpec)
     let floored : DTensor #[melBins, frames] .Float32 :=
       Tensor.Preserving.clampFloat logSpec (maxVal - (8.0 : Float)) (1e10 : Float)
@@ -720,10 +688,10 @@ def waveformToWhisperFeaturesDynamic
     let featureAttentionMaskCpu : DTensor #[1, frames] .Int64 :=
       Tensor.reshapeChecked (Tensor.fromInt64Array maskVals) #[1, frames]
     let featureAttentionMask : DTensor #[1, frames] .Int64 :=
-      if featureAttentionMaskCpu.raw.device == inputFeatures.raw.device then
+      if featureAttentionMaskCpu.device == inputFeatures.device then
         featureAttentionMaskCpu
       else
-        Tensor.to featureAttentionMaskCpu inputFeatures.raw.device
+        Tensor.to featureAttentionMaskCpu inputFeatures.device
 
     pure ⟨frames, { inputFeatures, featureAttentionMask }⟩
 

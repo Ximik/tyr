@@ -1,3 +1,4 @@
+#include "tyr_neural_abi.h"
 #include <cmath>
 #include <iostream>
 #include <limits>
@@ -762,12 +763,12 @@ TORCH_LIBRARY_IMPL(tyr, CompositeImplicitAutograd, m) {
 }
 
 extern "C" LEAN_EXPORT lean_object* lean_torch_tyr_flash_attn_4d(
-    lean_obj_arg /*batch*/,
-    lean_obj_arg /*n_head*/,
-    lean_obj_arg /*n_kv_head*/,
-    lean_obj_arg /*q_seq*/,
-    lean_obj_arg /*kv_seq*/,
-    lean_obj_arg /*head_dim*/,
+    uint64_t /*batch*/,
+    uint64_t /*n_head*/,
+    uint64_t /*n_kv_head*/,
+    uint64_t /*q_seq*/,
+    uint64_t /*kv_seq*/,
+    uint64_t /*head_dim*/,
     b_lean_obj_arg query,
     b_lean_obj_arg key,
     b_lean_obj_arg value,

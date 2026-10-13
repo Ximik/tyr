@@ -53,6 +53,7 @@
  * ============================================================================
  */
 
+#include <bit>
 #include <iostream>
 #include <fstream>
 #include <filesystem>
@@ -78,6 +79,7 @@
 #include "tyr_ffi_abi.h"
 #include "tyr_raw_tensor_abi.h"
 #include "tyr_owned_kv_abi.h"
+#include "tyr_neural_abi.h"
 #include <torch/torch.h>
 #include <ATen/ATen.h>
 #include "tyr_attention.h"
@@ -519,7 +521,9 @@ lean_object* lean_torch_uniform_like(lean_obj_arg shape, b_lean_obj_arg referenc
   }
 }
 
-lean_object* lean_torch_randint(int64_t low, int64_t high, lean_obj_arg s, int /*requires_grad*/, lean_obj_arg device) {
+lean_object* lean_torch_randint(uint64_t lowBits, uint64_t highBits, lean_obj_arg s, uint8_t /*requires_grad*/, lean_obj_arg device) {
+  const auto low = std::bit_cast<int64_t>(lowBits);
+  const auto high = std::bit_cast<int64_t>(highBits);
   auto device_ = getDevice(device);
   lean_dec(device);
   // randint always returns Long (int64) dtype - integral types don't support requires_grad.
@@ -3114,8 +3118,7 @@ lean_object* lean_torch_save_wav(
   lean_obj_arg /*shape*/,
   b_lean_obj_arg tensor_obj,
   b_lean_obj_arg path_obj,
-  uint64_t sample_rate,
-  lean_object* /*w*/
+  uint64_t sample_rate
 ) {
   const char* path = lean_string_cstr(path_obj);
   try {
@@ -4427,10 +4430,10 @@ lean_object* lean_torch_compute_rotary_freqs_on_device_pure(
 // x: [batch, seq, n_head, head_dim]
 // cos, sin: [seq, head_dim/2] (will be broadcast)
 lean_object* lean_torch_apply_rotary_emb(
-  lean_obj_arg /*batch*/,
-  lean_obj_arg /*seq*/,
-  lean_obj_arg /*n_head*/,
-  lean_obj_arg /*head_dim*/,
+  uint64_t /*batch*/,
+  uint64_t /*seq*/,
+  uint64_t /*n_head*/,
+  uint64_t /*head_dim*/,
   b_lean_obj_arg x,
   b_lean_obj_arg cos,
   b_lean_obj_arg sin
@@ -5063,7 +5066,8 @@ lean_object* lean_torch_nll_loss_none(
 // Gather along dimension
 lean_object* lean_torch_gather(
     lean_obj_arg /*input_shape*/, lean_obj_arg /*index_shape*/,
-    b_lean_obj_arg input, int64_t dim, b_lean_obj_arg indices) {
+    b_lean_obj_arg input, uint64_t dimBits, b_lean_obj_arg indices) {
+  const auto dim = std::bit_cast<int64_t>(dimBits);
   auto input_ = borrowTensor(input);
   auto indices_ = borrowTensor(indices);
   auto result_ = torch::gather(input_, dim, indices_);

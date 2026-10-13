@@ -279,4 +279,7 @@ namespace torch.RawTensor
 @[extern "lean_torch_any"] opaque any (shape : Shape) (t : @& RawTensor) : Bool
 @[extern "lean_torch_tensor_to_uint64_array_dynamic"] opaque toUInt64Array
     (t : @& RawTensor) : IO (Array UInt64)
+@[extern "lean_torch_randint"] opaque randint (low high : Int64) (shape : Shape)
+    (requiresGrad : Bool) (device : Device) : IO RawTensor
+
 end torch.RawTensor

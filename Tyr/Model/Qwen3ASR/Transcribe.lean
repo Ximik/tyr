@@ -200,7 +200,7 @@ private def preparePromptInputIds
     (tok : tokenizer.qwen3.QwenTokenizer)
     (prompt : String)
     (audioLen : UInt64)
-    : IO (Sigma (fun seq => T #[1, seq])) := do
+    : IO (Sigma (fun seq => DTensor #[1, seq] .Int64)) := do
   let processor : Qwen3ASRProcessor := {}
   let promptIds ←
     match processor.encodeWithExpandedAudioTokenIds
@@ -215,22 +215,22 @@ private def preparePromptInputIds
   let seq : UInt64 := idsVals.size.toUInt64
   if seq == 0 then
     throw <| IO.userError "ASR prompt/input sequence is empty"
-  let inputIds : T #[1, seq] := reshape (data.fromInt64Array idsVals) #[1, seq]
+  let inputIds : DTensor #[1, seq] .Int64 := Tensor.reshapeChecked (Tensor.fromInt64Array idsVals) #[1, seq]
   pure ⟨seq, inputIds⟩
 
 private def decodeGeneratedText
     (tok : tokenizer.qwen3.QwenTokenizer)
     {seq : UInt64}
     (outSeq : UInt64)
-    (outIds : T #[1, outSeq])
+    (outIds : DTensor #[1, outSeq] .Int64)
     : IO String := do
   if outSeq <= seq then
     pure ""
   else
     let newSeq := outSeq - seq
-    let newOnly : T #[1, newSeq] := data.slice outIds 1 seq newSeq
-    let flat : T #[newSeq] := reshape newOnly #[newSeq]
-    let idsU64 ← data.tensorToUInt64Array flat
+    let newOnly : DTensor #[1, newSeq] .Int64 := Tensor.sliceChecked outIds 1 seq newSeq #[1, newSeq]
+    let flat : DTensor #[newSeq] .Int64 := Tensor.reshapeChecked newOnly #[newSeq]
+    let idsU64 ← Tensor.toUInt64Array flat
     let ids := idsU64.map (fun x => x.toUInt32)
     pure (tokenizer.qwen3.decodeText tok ids)
 
@@ -238,7 +238,7 @@ private def decodeGeneratedTextsBatch
     (tok : tokenizer.qwen3.QwenTokenizer)
     {batch seq : UInt64}
     (outSeq : UInt64)
-    (outIds : T #[batch, outSeq])
+    (outIds : DTensor #[batch, outSeq] .Int64)
     : IO (Array String) := do
   if batch == 0 then
     pure #[]
@@ -246,9 +246,9 @@ private def decodeGeneratedTextsBatch
     pure (Array.replicate batch.toNat "")
   else
     let newSeq := outSeq - seq
-    let newOnly : T #[batch, newSeq] := data.slice outIds 1 seq newSeq
-    let flat : T #[batch * newSeq] := reshape newOnly #[batch * newSeq]
-    let idsU64 ← data.tensorToUInt64Array flat
+    let newOnly : DTensor #[batch, newSeq] .Int64 := Tensor.sliceChecked outIds 1 seq newSeq #[batch, newSeq]
+    let flat : DTensor #[batch * newSeq] .Int64 := Tensor.reshapeChecked newOnly #[batch * newSeq]
+    let idsU64 ← Tensor.toUInt64Array flat
     let rowWidth := newSeq.toNat
     let mut out : Array String := Array.mkEmpty batch.toNat
     for b in [:batch.toNat] do
@@ -259,10 +259,10 @@ private def decodeGeneratedTextsBatch
     pure out
 
 private def extractAudioLenFromFeatureMask {cfg : Qwen3ASRConfig} {frames : UInt64}
-    (featureAttentionMask : T #[1, frames])
+    (featureAttentionMask : DTensor #[1, frames] .Int64)
     : IO UInt64 := do
-  let validFramesTensor : T #[1] := nn.sumDim (data.toLong featureAttentionMask) 1 false
-  let validFrames := (nn.item validFramesTensor).toUInt64
+  let validFramesTensor := Tensor.sumAll featureAttentionMask
+  let validFrames := validFramesTensor.itemInt.toInt.toNat.toUInt64
   let audioLenRaw := AudioEncoderConfig.featExtractOutputLength validFrames
   let audioLenCap := AudioEncoderConfig.framesAfterConv3 cfg.thinkerConfig.audioConfig frames
   pure (if audioLenRaw <= audioLenCap then audioLenRaw else audioLenCap)
@@ -293,18 +293,18 @@ private def alignSingleWithModel
   else
     let dev := modelDevice alignModel
     let alignVals := alignIdsArr.map (fun id => Int64.ofNat id.toNat)
-    let inputIdsAlignCpu : T #[1, seqAlign] := reshape (data.fromInt64Array alignVals) #[1, seqAlign]
-    let inputIdsAlign : T #[1, seqAlign] := inputIdsAlignCpu.to dev
-    let inputFeaturesDev : T #[1, melBins, frames] := frontendOut.inputFeatures.to dev
-    let featureAttentionMaskDev : T #[1, frames] := frontendOut.featureAttentionMask.to dev
+    let inputIdsAlignCpu : DTensor #[1, seqAlign] .Int64 := Tensor.reshapeChecked (Tensor.fromInt64Array alignVals) #[1, seqAlign]
+    let inputIdsAlign : DTensor #[1, seqAlign] .Int64 := inputIdsAlignCpu.to dev
+    let inputFeaturesDev : DTensor #[1, melBins, frames] .Float32 := frontendOut.inputFeatures.to dev
+    let featureAttentionMaskDev : DTensor #[1, frames] .Int64 := frontendOut.featureAttentionMask.to dev
     let results ←
       autograd.no_grad do
         alignModel.alignPrepared
           inputIdsAlign
           #[wordList]
-          (inputFeatures := some inputFeaturesDev)
+          (inputFeatures := some (Tensor.reshapeChecked inputFeaturesDev #[1, alignCfg.thinkerConfig.audioConfig.numMelBins, frames]).forgetDType)
           (featureAttentionMask := some featureAttentionMaskDev)
-          (attentionMask := (none : Option (T #[1, seqAlign])))
+          (attentionMask := (none : Option (DTensor #[1, seqAlign] .Int64)))
           (timestampTokenId := alignCfg.timestampTokenId)
           (timestampSegmentTime := alignCfg.timestampSegmentTime)
     pure (results[0]?)
@@ -380,14 +380,14 @@ private def transcribeWithFrontend
   let promptPack ← preparePromptInputIds (cfg := cfg) tok prompt audioLen
   let dev := modelDevice model
   let seq := promptPack.1
-  let inputIds : T #[1, seq] := promptPack.2.to dev
-  let inputFeaturesDev : T #[1, melBins, frames] := frontendOut.inputFeatures.to dev
-  let featureAttentionMaskDev : T #[1, frames] := frontendOut.featureAttentionMask.to dev
+  let inputIds : DTensor #[1, seq] .Int64 := promptPack.2.to dev
+  let inputFeaturesDev : DTensor #[1, melBins, frames] .Float32 := frontendOut.inputFeatures.to dev
+  let featureAttentionMaskDev : DTensor #[1, frames] .Int64 := frontendOut.featureAttentionMask.to dev
   let generated ←
     autograd.no_grad do
       model.generateGreedy
         inputIds
-        (inputFeatures := some inputFeaturesDev)
+        (inputFeatures := some (Tensor.reshapeChecked inputFeaturesDev #[1, cfg.thinkerConfig.audioConfig.numMelBins, frames]).forgetDType)
         (featureAttentionMask := some featureAttentionMaskDev)
         (maxNewTokens := maxNewTokens)
         (eosTokenIds := eosTokenIds)
@@ -491,9 +491,12 @@ private def effectiveBatchStep (n : Nat) (maxInferenceBatchSize : Int) : Nat :=
 private structure BatchedDecodeRow where
   idx : Nat
   forceLanguage : Option String
-  inputIdsRow : T #[]
-  inputFeaturesRow : T #[]
-  featureAttentionMaskRow : T #[]
+  seq : UInt64
+  frames : UInt64
+  melBins : UInt64
+  inputIdsRow : DTensor #[1, seq] .Int64
+  inputFeaturesRow : DTensor #[1, melBins, frames] .Float32
+  featureAttentionMaskRow : DTensor #[1, frames] .Int64
   deriving Inhabited
 
 private structure BatchedDecodeBucket where
@@ -575,11 +578,14 @@ private def tryTranscribeWaveformsBatchedChunk
     let audioLen ← extractAudioLenFromFeatureMask (cfg := cfg) (frames := frames) frontendOut.featureAttentionMask
     let promptPack ← preparePromptInputIds (cfg := cfg) tok prompt audioLen
     let seq := promptPack.1
-    let inputIdsRowDyn : T #[] := reshape promptPack.2 #[1, seq]
-    let inputFeaturesRowDyn : T #[] :=
-      reshape frontendOut.inputFeatures #[1, preprocessor.featureSize, frames]
-    let featureAttentionMaskRowDyn : T #[] := reshape frontendOut.featureAttentionMask #[1, frames]
+    let inputIdsRowDyn : DTensor #[1, seq] .Int64 := Tensor.reshapeChecked promptPack.2 #[1, seq]
+    let inputFeaturesRowDyn : DTensor #[1, preprocessor.featureSize, frames] .Float32 :=
+      Tensor.reshapeChecked frontendOut.inputFeatures #[1, preprocessor.featureSize, frames]
+    let featureAttentionMaskRowDyn : DTensor #[1, frames] .Int64 := Tensor.reshapeChecked frontendOut.featureAttentionMask #[1, frames]
     buckets := addRowToBuckets buckets frames seq {
+      seq := seq
+      frames := frames
+      melBins := preprocessor.featureSize
       idx := i
       forceLanguage := forceLanguage
       inputIdsRow := inputIdsRowDyn
@@ -595,19 +601,19 @@ private def tryTranscribeWaveformsBatchedChunk
       let batch := bucket.rows.size.toUInt64
       let seq := bucket.seq
       let frames := bucket.frames
-      let inputRows := bucket.rows.map (fun r => r.inputIdsRow)
-      let featRows := bucket.rows.map (fun r => r.inputFeaturesRow)
-      let fmaskRows := bucket.rows.map (fun r => r.featureAttentionMaskRow)
-      let inputIdsCpu : T #[batch, seq] := reshape (nn.cat_dyn inputRows 0) #[batch, seq]
-      let inputFeaturesCpu : T #[batch, preprocessor.featureSize, frames] :=
-        reshape (nn.cat_dyn featRows 0) #[batch, preprocessor.featureSize, frames]
-      let featureAttentionMaskCpu : T #[batch, frames] :=
-        reshape (nn.cat_dyn fmaskRows 0) #[batch, frames]
+      let inputRows := bucket.rows.map (fun r => r.inputIdsRow.packShape)
+      let featRows := bucket.rows.map (fun r => r.inputFeaturesRow.packShape)
+      let fmaskRows := bucket.rows.map (fun r => r.featureAttentionMaskRow.packShape)
+      let inputIdsCpu : DTensor #[batch, seq] .Int64 := Tensor.catManyChecked inputRows 0 #[batch, seq]
+      let inputFeaturesCpu : DTensor #[batch, preprocessor.featureSize, frames] .Float32 :=
+        Tensor.catManyChecked featRows 0 #[batch, preprocessor.featureSize, frames]
+      let featureAttentionMaskCpu : DTensor #[batch, frames] .Int64 :=
+        Tensor.catManyChecked fmaskRows 0 #[batch, frames]
       let generated ←
         autograd.no_grad do
           model.generateGreedy
             (inputIdsCpu.to dev)
-            (inputFeatures := some (inputFeaturesCpu.to dev))
+            (inputFeatures := some (Tensor.reshapeChecked (inputFeaturesCpu.to dev) #[batch, cfg.thinkerConfig.audioConfig.numMelBins, frames]).forgetDType)
             (featureAttentionMask := some (featureAttentionMaskCpu.to dev))
             (maxNewTokens := maxNewTokens)
             (eosTokenIds := eosTokenIds)

@@ -356,39 +356,39 @@ Requires `σ.dtype.isFloating`; the proof is found by `decide` when the
 dtype is a literal. Integer tensors must cast explicitly (`.toFloat32`). -/
 
 def exp {σ : StaticSpec} (t : Tensor σ)
-    (_float : σ.dtype.isFloating = true := by decide) : Tensor σ :=
+    (_float : σ.dtype.isFloating = true := by first | rfl | decide) : Tensor σ :=
   .assumeSpec (RawTensor.exp t.shape t.raw)
 
 def sqrt {σ : StaticSpec} (t : Tensor σ)
-    (_float : σ.dtype.isFloating = true := by decide) : Tensor σ :=
+    (_float : σ.dtype.isFloating = true := by first | rfl | decide) : Tensor σ :=
   .assumeSpec (RawTensor.sqrt t.shape t.raw)
 
 def rsqrt {σ : StaticSpec} (t : Tensor σ)
-    (_float : σ.dtype.isFloating = true := by decide) : Tensor σ :=
+    (_float : σ.dtype.isFloating = true := by first | rfl | decide) : Tensor σ :=
   .assumeSpec (RawTensor.rsqrt t.shape t.raw)
 
 def sigmoid {σ : StaticSpec} (t : Tensor σ)
-    (_float : σ.dtype.isFloating = true := by decide) : Tensor σ :=
+    (_float : σ.dtype.isFloating = true := by first | rfl | decide) : Tensor σ :=
   .assumeSpec (RawTensor.sigmoid t.shape t.raw)
 
 def tanh {σ : StaticSpec} (t : Tensor σ)
-    (_float : σ.dtype.isFloating = true := by decide) : Tensor σ :=
+    (_float : σ.dtype.isFloating = true := by first | rfl | decide) : Tensor σ :=
   .assumeSpec (RawTensor.tanh t.shape t.raw)
 
 def gelu {σ : StaticSpec} (t : Tensor σ)
-    (_float : σ.dtype.isFloating = true := by decide) : Tensor σ :=
+    (_float : σ.dtype.isFloating = true := by first | rfl | decide) : Tensor σ :=
   .assumeSpec (RawTensor.gelu t.shape t.raw)
 
 def silu {σ : StaticSpec} (t : Tensor σ)
-    (_float : σ.dtype.isFloating = true := by decide) : Tensor σ :=
+    (_float : σ.dtype.isFloating = true := by first | rfl | decide) : Tensor σ :=
   .assumeSpec (RawTensor.silu t.shape t.raw)
 
 def pow {σ : StaticSpec} (t : Tensor σ) (exponent : Float)
-    (_float : σ.dtype.isFloating = true := by decide) : Tensor σ :=
+    (_float : σ.dtype.isFloating = true := by first | rfl | decide) : Tensor σ :=
   .assumeSpec (RawTensor.pow t.shape t.raw exponent)
 
 def softmax {σ : StaticSpec} (t : Tensor σ) (dim : Int32 := -1)
-    (_float : σ.dtype.isFloating = true := by decide) : Tensor σ :=
+    (_float : σ.dtype.isFloating = true := by first | rfl | decide) : Tensor σ :=
   .assumeSpec (RawTensor.softmax t.shape t.raw dim)
 
 /-! ## Matmul family (operands must share dtype and device policy) -/
@@ -496,7 +496,7 @@ def sumDim {σ : StaticSpec} (t : Tensor σ) (dim : Nat) (keepdim : Bool := fals
   .assumeSpec (RawTensor.sum t.shape t.raw (some #[dim.toUInt64]) keepdim)
 
 def meanAll {σ : StaticSpec} (t : Tensor σ)
-    (_float : σ.dtype.isFloating = true := by decide) :
+    (_float : σ.dtype.isFloating = true := by first | rfl | decide) :
     Tensor (σ.withShape #[]) :=
   .assumeSpec (RawTensor.meanAll t.shape t.raw)
 
@@ -676,7 +676,7 @@ def isLeaf {σ : StaticSpec} (t : Tensor σ) : Bool :=
 
 /-- Log-softmax along a dimension, spec-preserving (float-only). -/
 def logSoftmax {σ : StaticSpec} (t : Tensor σ) (dim : Int32 := -1)
-    (_float : σ.dtype.isFloating = true := by decide) : Tensor σ :=
+    (_float : σ.dtype.isFloating = true := by first | rfl | decide) : Tensor σ :=
   .assumeSpec (RawTensor.logSoftmax t.raw dim)
 
 /-- Backward pass from a scalar loss (gradient = 1.0). -/
@@ -762,7 +762,7 @@ def layerNorm {batch seq n : UInt64} {d : DType} {dev : DevicePolicy}
     restoration. -/
 def rmsNormWeighted {σ : StaticSpec} {w : Shape}
     (x : Tensor σ) (weight : Tensor (σ.withShape w)) (eps : Float := 1e-6)
-    (_float : σ.dtype.isFloating = true := by decide) :
+    (_float : σ.dtype.isFloating = true := by first | rfl | decide) :
     Tensor (σ.withDType (DType.promote .Float32 σ.dtype)) :=
   .assumeSpec (RawTensor.rmsNormWeighted σ.shape w x.raw weight.raw eps)
 
@@ -813,4 +813,9 @@ def any {s : Shape} {dev : DevicePolicy} (t : Tensor ⟨s, .Bool, dev⟩) : Bool
 def toUInt64Array {s : Shape} {dev : DevicePolicy}
     (t : Tensor ⟨s, .Int64, dev⟩) : IO (Array UInt64) :=
   RawTensor.toUInt64Array t.raw
+/-- Uniform integral samples in the half-open interval `[low, high)`. -/
+def randint (low high : Int64) (shape : Shape) (device : Device := .CPU) :
+    IO (DTensor shape .Int64) := do
+  pure (.assumeSpec (← RawTensor.randint low high shape false device))
+
 end torch.Tensor

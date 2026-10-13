@@ -13,8 +13,8 @@ private def writeTokens (path : System.FilePath) (tokens : Array UInt64) : IO Un
     bytes := bytes.push (token >>> 8).toUInt8
   IO.FS.writeBinFile path bytes
 
-private def readTokens (tokens : T #[]) : IO (Array UInt64) :=
-  data.tensorToUInt64Array' (reshape tokens #[])
+private def readTokens {s : Shape} (tokens : DTensor s .Int64) : IO (Array UInt64) :=
+  tokens.toUInt64Array
 
 private def withSmallFixture (action : String → IO Unit) : IO Unit :=
   IO.FS.withTempDir fun dir => do
@@ -33,8 +33,8 @@ private def assertRejected (action : IO Unit) (label : String) : IO Unit := do
 @[test] def testRandomBatchSampling : IO Unit := withSmallFixture fun path => do
   let ⟨_, loader⟩ ← SequentialLoader.fromFile path
   let (input, target) ← loader.sampleRandomBatch 4 32
-  LeanTest.assertTrue (nn.itemInt (nn.sumAll input) > 0) "Nonempty input"
-  LeanTest.assertEqual (← readTokens (input.slice 1 1 32))
+  LeanTest.assertTrue (Tensor.itemInt (Tensor.sumAll input) > 0) "Nonempty input"
+  LeanTest.assertEqual (← readTokens (input.slice 1 1 31))
     (← readTokens (target.slice 1 0 31)) "Targets are shifted inputs"
 
 @[test] def testSequentialBatchIterator : IO Unit := withSmallFixture fun path => do
@@ -62,13 +62,13 @@ private def documentTokens : Array UInt64 :=
   #[91, 92, 0, 101, 102, 0, 201, 202, 203, 0, 301, 302, 0, 401, 402, 0, 501, 502]
 
 @[test] def testBosFinderInit : IO Unit := do
-  let tokens : T #[documentTokens.size.toUInt64] := data.fromInt64Array (documentTokens.map UInt64.toInt64)
+  let tokens : DTensor #[documentTokens.size.toUInt64] .Int64 := (Tensor.fromInt64Array (documentTokens.map UInt64.toInt64)).reshapeChecked #[documentTokens.size.toUInt64]
   let finder ← BOSFinder.init tokens 0
   LeanTest.assertEqual finder.bosPositions #[0, 2, 5, 9, 12, 15]
     "BOS boundaries include the initial partition fragment"
 
 @[test] def testDocumentAwareLoader : IO Unit := do
-  let tokens : T #[documentTokens.size.toUInt64] := data.fromInt64Array (documentTokens.map UInt64.toInt64)
+  let tokens : DTensor #[documentTokens.size.toUInt64] .Int64 := (Tensor.fromInt64Array (documentTokens.map UInt64.toInt64)).reshapeChecked #[documentTokens.size.toUInt64]
   let finder := (← BOSFinder.init tokens 0).shuffle 42
   let (batch, next) ← finder.getBatch tokens 1 documentTokens.size.toUInt64
   let some batch := batch | throw <| IO.userError "Missing document batch"
@@ -81,7 +81,7 @@ private def documentTokens : Array UInt64 :=
   LeanTest.assertEqual next.currentPos documentTokens.size.toUInt64
 
 @[test] def testShuffleDeterminism : IO Unit := do
-  let tokens : T #[documentTokens.size.toUInt64] := data.fromInt64Array (documentTokens.map UInt64.toInt64)
+  let tokens : DTensor #[documentTokens.size.toUInt64] .Int64 := (Tensor.fromInt64Array (documentTokens.map UInt64.toInt64)).reshapeChecked #[documentTokens.size.toUInt64]
   let finder ← BOSFinder.init tokens 0
   let (a, _) ← (finder.shuffle 42).take tokens finder.dataLen
   let (b, _) ← (finder.shuffle 42).take tokens finder.dataLen
@@ -194,3 +194,13 @@ private def documentTokens : Array UInt64 :=
   let extraOverflow := { gen with iterator := { gen.iterator with seqLen := huge } }
   assertRejected (do let _ ← extraOverflow.nextBatchGPT; pure ()) "GPT extra target token cannot wrap sequence length"
   assertRejected (do let _ ← extraOverflow.iterator.nextGPT; pure ()) "Finite GPT iterators reject target-token overflow"
+
+@[test] def testRandomBatchExactFitAndOversized : IO Unit := IO.FS.withTempDir fun dir => do
+  let path := dir / "tokens.bin"
+  writeTokens path #[1, 2, 3, 4, 5, 6]
+  let ⟨_, loader⟩ ← SequentialLoader.fromFile path.toString
+  let (input, target) ← loader.sampleRandomBatch 2 2
+  LeanTest.assertEqual (← readTokens input) #[1, 2, 4, 5]
+  LeanTest.assertEqual (← readTokens target) #[2, 3, 5, 6]
+  assertRejected (do let _ ← loader.sampleRandomBatch 3 2; pure ())
+    "Random batches validate the whole batch before choosing an offset"

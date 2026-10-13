@@ -286,6 +286,49 @@ legacy bridges remain; full CPU/experimental and GPU qualification are still
 outstanding. GitHub CLI reports successful CI for older commit
 `05304ff22a1cf5f17df15eef372fc2a4bdf9f74c`; that run does not cover this branch.
 
+## 2026-10-13 ASR and training-data continuation
+
+- FLM states, losses, token inputs and generated IDs are indexed. GPT sequential
+  loaders and batch iterators retain their batch/sequence indices. Random batches
+  validate the full requested window and sample an integral offset, including
+  the exact-fit case, instead of routing the index through floating point.
+- Qwen3-ASR audio encoding, thinker, checkpoint loading, forced alignment,
+  streaming caches and offline transcription use indexed tensors. Variable
+  shape collections carry existential indices; frontend features are Float32,
+  masks/IDs Int64, and checkpoint-dependent activations retain dynamic dtype
+  claims rather than being forcibly converted to Float32.
+- Shared Qwen blocks now parameterize dtype so ASR BF16 checkpoints remain
+  usable. RMSNorm restores activation dtype before multiplying learned weights,
+  preserving HF inference rounding. KV stores align with the projected key/value
+  dtype before append. Rotary and attention operations use typed adapters over
+  explicit raw FFI declarations rather than legacy `T` wrappers.
+- `Tyr.Typed.Neural` provides checked convolution, heterogeneous concatenation,
+  gather, masked selection/scatter, attention, rotary, and audio operations.
+  Its 19 native declarations have a compiled header and generated-C ABI audit,
+  now included in CPU CI and GPU qualification. This caught incorrect native
+  dimension widths in rotary/FlashAttention and the obsolete WAV IO-world
+  argument. The core raw-tensor audit now covers 111 declarations.
+- The native runner passes **134 tests, zero failures or skips** on local CPU.
+  This includes BF16 ASR feature conversion and variable-length generation,
+  streaming reuse, exact BF16 RMSNorm rounding, FLM, token loaders, signed
+  randint/gather, masked selection/scatter, and convolution/concatenation.
+  Four formerly skipped WAV regressions now run, including offline transcription
+  and generation. Their platform skips have been removed.
+
+```sh
+lake build test_typed_models
+lake env .lake/build/bin/test_typed_models
+python3 scripts/check_ffi_abi.py --header cc/src/tyr_neural_abi.h --generated .lake/build/ir/Tyr/RawTensor/Neural.c
+python3 scripts/check_ffi_abi.py --header cc/src/tyr_raw_tensor_abi.h --generated .lake/build/ir/Tyr/RawTensor.c
+python3 scripts/check_ffi_abi.py
+```
+
+This is a verified continuation checkpoint, not full migration acceptance.
+The preceding ten-target failure list is historical: FLM, ASR, and the GPT
+loader now build. TTS and other model families, remaining callers and legacy
+infrastructure still require migration, followed by the full CPU/experimental,
+example, checkpoint, AD, and hardware GPU gates below.
+
 ## Remaining acceptance criteria
 
 Remove the `T` declaration and all model, generator, reflection, documentation,

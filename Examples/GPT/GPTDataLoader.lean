@@ -17,11 +17,11 @@ open torch
 
 /-! ## GPT Batching -/
 
-/-- Get the next batch of (input, target) pairs with erased types.
+/-- Get the next batch of (input, target) pairs with indexed shapes and integral dtype.
     For causal language modeling, target is input shifted by 1.
 -/
 def BatchIterator.nextGPT (iter : BatchIterator)
-    : IO (Option (T #[] × T #[]) × BatchIterator) := do
+    : IO (Option (DTensor #[iter.batchSize, iter.seqLen] .Int64 × DTensor #[iter.batchSize, iter.seqLen] .Int64) × BatchIterator) := do
   let _ ← checkedBatchTokens iter.batchSize iter.seqLen 1
   -- Get batch from BOS finder
   -- We need seqLen + 1 to split into input and target
@@ -37,14 +37,8 @@ def BatchIterator.nextGPT (iter : BatchIterator)
   | some batch =>
     -- Split into input and target (target is shifted by 1)
     -- batch is [batchSize, seqLen+1]
-    let input := batch.slice 1 0 iter.seqLen.toInt64
-    let target := batch.slice 1 1 (iter.seqLen.toInt64 + 1)
-    -- Reshape to dynamic types for flexibility
-    let input := reshape input #[iter.batchSize, iter.seqLen]
-    let target := reshape target #[iter.batchSize, iter.seqLen]
-    -- Erase types for simpler return type
-    let input := reshape input #[]
-    let target := reshape target #[]
+    let input := batch.sliceChecked 1 0 iter.seqLen #[iter.batchSize, iter.seqLen]
+    let target := batch.sliceChecked 1 1 iter.seqLen #[iter.batchSize, iter.seqLen]
     let newShard := { iter.shard with bosFinder := newBosFinder }
     let newIter := { iter with
       shard := newShard
@@ -54,14 +48,14 @@ def BatchIterator.nextGPT (iter : BatchIterator)
 
 /-- Get the next batch for GPT training. -/
 def DistributedDataGenerator.nextBatchGPT (gen : DistributedDataGenerator)
-    : IO (Option (T #[] × T #[]) × DistributedDataGenerator) := do
+    : IO (Option (DTensor #[gen.iterator.batchSize, gen.iterator.seqLen] .Int64 × DTensor #[gen.iterator.batchSize, gen.iterator.seqLen] .Int64) × DistributedDataGenerator) := do
   let b := gen.iterator.batchSize
   let s := gen.iterator.seqLen
   let count ← checkedBatchTokens b s 1
   let (tokens, gen') ← gen.nextTokens count
-  let batch := reshape tokens #[b, s + 1]
-  let input := reshape (batch.slice 1 0 s.toInt64) #[b, s]
-  let target := reshape (batch.slice 1 1 (s.toInt64 + 1)) #[b, s]
+  let batch := tokens.reshapeChecked #[b, s + 1]
+  let input := batch.sliceChecked 1 0 s #[b, s]
+  let target := batch.sliceChecked 1 1 s #[b, s]
   return (some (input, target), gen')
 
 /-- Update batch and sequence parameters based on training step for modded-nanogpt. -/
@@ -95,43 +89,47 @@ def tokensPerStep (batchSize seqLen worldSize : UInt64) : UInt64 :=
 
 /-- Sequential data loader for simple datasets like Shakespeare. -/
 structure SequentialLoader (n : UInt64) where
-  tokens : T #[n]
+  tokens : DTensor #[n] .Int64
   currentPos : UInt64
   deriving Repr
 
 def SequentialLoader.fromFile (path : String) : IO (Σ n, SequentialLoader n) := do
   let n ← data.binFileTokenCount path
-  let tokens ← data.loadU16Bin n path
+  let raw ← data.loadU16Bin n path
+  let tokens ← match Tensor.ofRaw (σ := ⟨#[n], .Int64, .any⟩) raw with
+    | .ok t => pure t
+    | .error message => throw <| IO.userError s!"SequentialLoader: {message}"
   return ⟨n, { tokens := tokens, currentPos := 0 }⟩
 
 def SequentialLoader.reset {n : UInt64} (loader : SequentialLoader n) : SequentialLoader n :=
   { loader with currentPos := 0 }
 
 def SequentialLoader.getBatch {n : UInt64} (loader : SequentialLoader n)
-    (batchSize seqLen : UInt64) : Option (T #[batchSize, seqLen + 1] × SequentialLoader n) :=
-  let requiredLen := batchSize * (seqLen + 1)
-  if loader.currentPos + requiredLen > n then
+    (batchSize seqLen : UInt64) : Option (DTensor #[batchSize, seqLen + 1] .Int64 × SequentialLoader n) :=
+  let required := batchSize.toNat * (seqLen.toNat + 1)
+  if batchSize == 0 || seqLen == 0 || loader.currentPos.toNat + required > n.toNat then
     none
   else
-    let startPos := loader.currentPos
-    let endPos := startPos + requiredLen
-    let sliced := loader.tokens.slice 0 startPos.toInt64 endPos.toInt64
-    let batch := reshape sliced #[batchSize, seqLen + 1]
-    let newLoader := { loader with currentPos := endPos }
+    let requiredLen := required.toUInt64
+    let batch := (loader.tokens.sliceChecked 0 loader.currentPos requiredLen #[requiredLen]).reshapeChecked
+      #[batchSize, seqLen + 1]
+    let newLoader := { loader with currentPos := loader.currentPos + requiredLen }
     some (batch, newLoader)
 
 def SequentialLoader.sampleRandomBatch {n : UInt64} (loader : SequentialLoader n)
-    (batchSize blockSize : UInt64) : IO (T #[batchSize, blockSize] × T #[batchSize, blockSize]) := do
-  let maxStart := n - blockSize - 1
-  let startIdx ← randint 0 (maxStart - batchSize * blockSize).toInt64 #[1]
-  let startPos := nn.item startIdx
-  let requiredLen := batchSize * (blockSize + 1)
-  let sliced := loader.tokens.slice 0 startPos.toInt64 (startPos + requiredLen.toFloat).toInt64
-  let batch := reshape sliced #[batchSize, blockSize + 1]
-  let input := batch.slice 1 0 blockSize.toInt64
-  let target := batch.slice 1 1 (blockSize.toInt64 + 1)
-  let input := reshape input #[batchSize, blockSize]
-  let target := reshape target #[batchSize, blockSize]
+    (batchSize blockSize : UInt64) : IO (DTensor #[batchSize, blockSize] .Int64 × DTensor #[batchSize, blockSize] .Int64) := do
+  let requiredLen ← checkedBatchTokens batchSize blockSize 1
+  if requiredLen > n then
+    throw <| IO.userError "SequentialLoader: batch exceeds available tokens"
+  let choices := n.toNat - requiredLen.toNat + 1
+  if choices > 9223372036854775807 then
+    throw <| IO.userError "SequentialLoader: random range exceeds Int64 capacity"
+  let startIdx ← Tensor.randint 0 (Int64.ofNat choices) #[]
+  let startPos := startIdx.itemInt.toInt.toNat.toUInt64
+  let sliced := loader.tokens.sliceChecked 0 startPos requiredLen #[requiredLen]
+  let batch := sliced.reshapeChecked #[batchSize, blockSize + 1]
+  let input := batch.sliceChecked 1 0 blockSize #[batchSize, blockSize]
+  let target := batch.sliceChecked 1 1 blockSize #[batchSize, blockSize]
   return (input, target)
 
 structure SequentialBatchIterator (n b s : UInt64) where
@@ -148,7 +146,7 @@ def SequentialBatchIterator.new {n : UInt64} (loader : SequentialLoader n)
 }
 
 def SequentialBatchIterator.next {n b s : UInt64} (iter : SequentialBatchIterator n b s)
-    : Option (T #[b, s] × T #[b, s]) × SequentialBatchIterator n b s :=
+    : Option (DTensor #[b, s] .Int64 × DTensor #[b, s] .Int64) × SequentialBatchIterator n b s :=
   match iter.loader.getBatch b s with
   | none =>
     let newLoader := iter.loader.reset
@@ -159,10 +157,8 @@ def SequentialBatchIterator.next {n b s : UInt64} (iter : SequentialBatchIterato
     }
     (none, newIter)
   | some (batch, newLoader) =>
-    let input := batch.slice 1 0 s.toInt64
-    let target := batch.slice 1 1 (s.toInt64 + 1)
-    let input := reshape input #[b, s]
-    let target := reshape target #[b, s]
+    let input := batch.sliceChecked 1 0 s #[b, s]
+    let target := batch.sliceChecked 1 1 s #[b, s]
     let newIter := { iter with
       loader := newLoader
       batchCount := iter.batchCount + 1

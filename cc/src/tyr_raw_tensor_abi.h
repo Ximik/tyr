@@ -121,6 +121,8 @@ uint8_t lean_torch_any(lean_object*, lean_object*);
 
 lean_object* lean_torch_tensor_to_uint64_array_dynamic(lean_object*);
 
+lean_object* lean_torch_randint(uint64_t, uint64_t, lean_object*, uint8_t, lean_object*);
+
 #ifdef __cplusplus
 }
 #endif
