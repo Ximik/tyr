@@ -774,6 +774,32 @@ runners, plus all seven standalone Laguna CPU suites. CUDA-only portions remain
 skipped. Upstream main CI is green at `05304ff`; it does not validate these local
 commits.
 
+## GPU ODE/SDE runner migration
+
+The RK combination, fused Dopri5 solve, Brownian descent, and fused
+Euler-Maruyama parity runners now use indexed Float32 states and typed CPU
+references. Raw handles are extracted only for the generated RK launch ABI.
+RK combination scratch outputs are allocated through IO, avoiding accidental
+sharing of pure allocation expressions under compiler common-subexpression
+elimination.
+
+`Examples/GPU/IndexedParity.lean` compares equal indexed shapes across storage
+dtypes with Float32 metrics. CPU tests check mixed Float32/BF16 metrics,
+tolerance failures, NaN rejection, compile-time shape rejection, and all four
+runners' explicit failure result when CUDA is unavailable. The older parity
+helper remains for GPU runners still awaiting migration.
+
+The four modules and main test executable build under `--wfail` (1,712 jobs).
+This is not GPU execution evidence. The latest upstream CUDA smoke run
+`29984516285` failed while building its GB10 test runner, before parity ran;
+it cannot qualify this local migration. Upstream main CI remains green at
+`05304ff`, also unrelated to these local edits.
+The current `TestGPUE2E` and `TestGPUGB10E2E` targets also build under
+`--wfail` (1,072 jobs). The main CPU runner passes 1,476 tests with no
+failures/skips, including the new indexed metric and CUDA-unavailable checks.
+The test inventory still validates all nine required and four optional suites.
+No CUDA numerical run was performed on this host.
+
 ## Remaining acceptance criteria
 
 Remove the `T` declaration and all model, generator, reflection, documentation,

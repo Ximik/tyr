@@ -132,6 +132,7 @@ import Tests.TestDiffEqSteadyStateEventParity
 import Tests.TestGPUDSL
 import Tests.TestGPUKernels
 import Tests.TestGPUCoverage
+import Tests.TestGPUIndexedParity
 import Tests.TestGPUTileIR
 import Tests.TestTileIRGenerateMain
 import Tests.TestDiffusion
