@@ -84,9 +84,9 @@ private def runBatches
     let ⟨batch, ⟨seq, (inputIds, promptLens)⟩⟩ ←
       buildBatchInput tok.padToken.toUInt64 chunk (encodePromptToIds tok)
     pure ⟨batch, ⟨seq, (inputIds.to device, promptLens)⟩⟩
-  let decodeBatch (promptLens : Array Nat) {b os : UInt64} (ids : T #[b, os]) : IO (Array String) :=
+  let decodeBatch (promptLens : Array Nat) {b os : UInt64} (ids : DTensor #[b, os] .Int64) : IO (Array String) :=
     decodeGeneratedBatch promptLens ids (fun xs => tokenizer.qwen3.decodeText tok xs)
-  let runGen (b : UInt64) {s : UInt64} (ids : T #[b, s]) :=
+  let runGen (b : UInt64) {s : UInt64} (ids : DTensor #[b, s] .Int64) :=
     model.generateGreedy ids args.maxNewTokens eos
   runGreedyBatches prompts args.batchSize args.maxNewTokens (prompts.size == 1)
     buildBatch runGen decodeBatch

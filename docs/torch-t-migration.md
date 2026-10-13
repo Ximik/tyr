@@ -676,6 +676,19 @@ GPU execution remain unqualified. Executable `torch.T` uses are gone from model
 families; legacy infrastructure, generators, remaining examples/tests, and final
 hardware acceptance are still outstanding.
 
+## Qwen generation CLI migration
+
+`Examples/Qwen35/RunHF.lean` and `Examples/Qwen25Omni/RunHF.lean` now
+use indexed Int64 token tensors. Qwen3.5 image/video feature values retain
+shape witnesses, and Float32 media inputs explicitly enter the model's
+dynamic-dtype API. Neither executable depends on the legacy `T` alias.
+
+Both executables build under `--wfail` (956 jobs), print native `--help`, and
+exit successfully. This validates compilation and startup; downloaded-model
+inference and actual GPU execution remain unqualified. GitHub CLI reports
+green upstream main CI at `05304ff`, which does not validate these local edits.
+The Qwen3TTS end-to-end CLI still needs migration.
+
 ## Remaining acceptance criteria
 
 Remove the `T` declaration and all model, generator, reflection, documentation,
