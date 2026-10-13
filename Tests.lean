@@ -1,3 +1,4 @@
+import Tests.TestShapePackedTensor
 import Tests.TestCORETyped
 import Tests.Test
 import Tests.TestDataLoader

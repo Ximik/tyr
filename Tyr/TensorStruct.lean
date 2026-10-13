@@ -271,6 +271,20 @@ instance {σ : StaticSpec} : TensorStruct (Tensor σ) where
   zipWith f lhs rhs := f lhs rhs
   fold f init tensor := f tensor init
 
+/-- A heterogeneous shape carrier whose leaves retain an indexed dtype. -/
+abbrev ShapePackedTensor (dtype : DType) := Sigma fun shape : Shape => DTensor shape dtype
+
+instance {dtype : DType} : Inhabited (ShapePackedTensor dtype) := ⟨⟨#[], default⟩⟩
+
+instance {dtype : DType} : TensorStruct (ShapePackedTensor dtype) where
+  map f x := ⟨x.1, f x.2⟩
+  mapM f x := do pure ⟨x.1, ← f x.2⟩
+  zipWith f x y :=
+    letI : Inhabited (ShapePackedTensor dtype) := ⟨x⟩
+    if h : y.1 = x.1 then ⟨x.1, f x.2 (h ▸ y.2)⟩
+    else panic! s!"TensorStruct shape mismatch: {x.1} vs {y.1}"
+  fold f initial x := f x.2 initial
+
 /-!
 ## Container Instances
 

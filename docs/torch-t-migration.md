@@ -53,10 +53,9 @@ It is an inventory aid, not the completion criterion.
   `DTensor shape dtype`, just like its explicit `Typed` loaders. The previous
   defaults still returned `T` and bypassed dtype validation. Single-file,
   sharded, indexed and nonuniform hierarchy fixtures cover the generator.
-- KittenTTS still consumes legacy model structures. Its checkpoint loader has
-  a local conversion from typed weights to that interface; this is a migration
-  boundary to remove with the KittenTTS model/layer migration, not a public
-  coercion back to `T`.
+- KittenTTS uses indexed Float32 weights/activations and Int64 tokens. Its
+  checkpoint loader checks runtime configuration dimensions and reports
+  incompatible weights through IO errors; the local legacy coercion is gone.
 - CUDA codegen's untyped launcher alias now explicitly uses `RawTensor`.
 - The indexed `Tensor` carrier, `StaticSpec` and device policy now live in
   `Tyr.Basic`. The legacy alias and its metadata adapters are isolated in
@@ -403,6 +402,33 @@ remains active.
 - Full pretrained-model numerical qualification, video decode success, and GPU
   execution remain unverified. KittenTTS and other legacy callers are still
   part of the active full-migration goal.
+
+## 2026-10-13 KittenTTS continuation
+
+- The complete KittenTTS model, vocoder, pretrained interface and checkpoint
+  loader use indexed tensors. Dynamic vocoder weights and audio outputs carry
+  their real shapes in `ShapePackedTensor`; they no longer pretend to be scalar
+  tensors. TensorStruct traversal and AD rebuild preserve and validate these
+  shapes, including rejection of a different shape with the same element count.
+- Native adapter declarations are checked against a dedicated six-function ABI
+  header in CPU CI and hardware qualification. The cumulative-sum argument now
+  matches Lean's unsigned ABI representation of Int64 and explicitly recovers
+  the signed axis; a negative-axis regression covers it.
+- **212 focused native CPU tests pass with no failures, skips or runtime
+  panics**. Tiny-model synthesis agrees with debug synthesis, and saving and
+  reloading all indexed/shape-packed parameters reproduces exact durations
+  and audio with a fixed seed. This is not full pretrained Kokoro numerical
+  qualification.
+- The aggregate `lake build Tests Examples`, KittenTTS family and all four
+  standalone KittenTTS examples typecheck. Full migration is still active:
+  optional model families, reflection/code generation and other legacy callers
+  remain, and real GPU qualification is outstanding.
+- Broad validation is not green: the experimental executable cannot build
+  because `BranchingFlows/MoleculeTrain` still passes legacy tensors to indexed
+  optimizer/traversal interfaces. The rebuilt main CPU runner terminates with
+  SIGBUS/SIGSEGV during GPT optimizer validation after hundreds of tests; that same
+  GPT test passes alone and in the focused suite. This requires isolation of
+  preceding-test state or native memory corruption before acceptance.
 
 ## Remaining acceptance criteria
 

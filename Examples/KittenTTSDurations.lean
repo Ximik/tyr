@@ -47,27 +47,27 @@ def main (args : List String) : IO UInt32 := do
     let ids := bundle.inputIdsFromPhonemes phonemes
     let seq := ids.size.toUInt64
     let modelDevice := bundle.model.bert.embeddings.wordEmbeddings.device
-    let inputIdsCpu : T #[1, seq] := reshape (data.fromInt64Array (ids.map (·.toInt64))) #[1, seq]
-    let inputIds : T #[1, seq] := inputIdsCpu.to modelDevice
+    let inputIdsCpu : DTensor #[1, seq] .Int64 := Tensor.reshapeChecked (Tensor.fromInt64Array (ids.map (·.toInt64))) #[1, seq]
+    let inputIds : DTensor #[1, seq] .Int64 := inputIdsCpu.to modelDevice
     let refStyleCpu ← bundle.loadVoiceStyle voice phonemes.toList.length.toUInt64
     let refStyle := refStyleCpu.to modelDevice
     IO.println s!"loaded_bundle=true"
     IO.println s!"input_ids={ids}"
     let (bertOut, _pooled) := bundle.model.bert.forward inputIds
     IO.println s!"bert_shape={bertOut.runtimeShape}"
-    let dEnSeq : T #[1, seq, bundle.cfg.hiddenDim] := bundle.model.bertEncoder.forward3d bertOut
+    let dEnSeq : DTensor #[1, seq, bundle.cfg.hiddenDim] .Float32 := bundle.model.bertEncoder.forward3d bertOut
     IO.println s!"bert_encoder_shape={dEnSeq.runtimeShape}"
-    let dEn : T #[1, bundle.cfg.hiddenDim, seq] := reshape (nn.transpose dEnSeq 1 2) #[1, bundle.cfg.hiddenDim, seq]
+    let dEn : DTensor #[1, bundle.cfg.hiddenDim, seq] .Float32 := Tensor.reshapeChecked (Tensor.transpose dEnSeq 1 2) #[1, bundle.cfg.hiddenDim, seq]
     IO.println s!"d_en_cf_shape={dEn.runtimeShape}"
-    let predictorStyle : T #[1, bundle.cfg.styleDim] :=
-      data.slice refStyle 1 bundle.cfg.styleDim bundle.cfg.styleDim
-    let durEnc : T #[1, bundle.cfg.hiddenDim + bundle.cfg.styleDim, seq] :=
+    let predictorStyle : DTensor #[1, bundle.cfg.styleDim] .Float32 :=
+      sliceTensor refStyle 1 bundle.cfg.styleDim bundle.cfg.styleDim
+    let durEnc : DTensor #[1, bundle.cfg.hiddenDim + bundle.cfg.styleDim, seq] .Float32 :=
       bundle.model.predictor.durationEncoding dEn predictorStyle
     IO.println s!"duration_encoder_shape={durEnc.runtimeShape}"
-    let durLogits : T #[1, seq, bundle.cfg.maxDur] := bundle.model.predictor.durationLogits durEnc
+    let durLogits : DTensor #[1, seq, bundle.cfg.maxDur] .Float32 := bundle.model.predictor.durationLogits durEnc
     IO.println s!"duration_logits_shape={durLogits.runtimeShape}"
-    let durSig : T #[1, seq, bundle.cfg.maxDur] := nn.sigmoid durLogits
-    let durSum : T #[1, seq] := reshape (nn.sumDim durSig 2 false) #[1, seq]
+    let durSig : DTensor #[1, seq, bundle.cfg.maxDur] .Float32 := Tensor.sigmoid durLogits
+    let durSum : DTensor #[1, seq] .Float32 := Tensor.reshapeChecked (Tensor.sumDim durSig 2 false) #[1, seq]
     IO.println s!"duration_sum_shape={durSum.runtimeShape}"
     let pred ← bundle.model.predictDurations inputIds refStyle speed
     IO.println s!"dur_vals={pred.durVals}"

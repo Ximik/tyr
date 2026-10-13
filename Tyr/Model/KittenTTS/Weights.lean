@@ -5,7 +5,7 @@
   Loads converted SafeTensors checkpoints produced from upstream PyTorch
   checkpoints so single-utterance synthesis can use real weights.
 -/
-import Tyr.Torch
+import Tyr.Typed.Neural
 import Tyr.TensorStruct
 import Tyr.Log
 import Tyr.Model.KittenTTS.Checkpoint
@@ -15,13 +15,6 @@ namespace torch.kittentts
 
 open torch.Log
 
--- Transitional boundary: generated checkpoint records are indexed Tensor values,
--- while KittenTTS.Model still uses the legacy API. Keep this conversion local
--- to loading; remove it when the model and its layers migrate to Tensor.
-local instance {σ : StaticSpec} {s : Shape} (tensor : Tensor σ) :
-    CoeDep (Tensor σ) tensor (T s) where
-  coe := tensor.raw
-
 private structure LoadedCheckpointWeights where
   bert : KokoroCheckpoint.WeightsBert
   bertEncoder : KokoroCheckpoint.WeightsBertencoder
@@ -29,8 +22,14 @@ private structure LoadedCheckpointWeights where
   textEncoder : KokoroCheckpoint.WeightsTextencoder
   decoder : KokoroCheckpoint.WeightsDecoder
 
-private def reqGradFalse {s : Shape} (t : T s) : T s :=
-  autograd.set_requires_grad t false
+/-- Check fixed-schema weights against the runtime model dimensions without reshaping them. -/
+private def checkedWeight {source target : Shape} (tensor : DTensor source .Float32) : IO (DTensor target .Float32) :=
+  match Tensor.ofRaw tensor.raw with
+  | .ok tensor => pure tensor
+  | .error message => throw <| IO.userError s!"KittenTTS checkpoint shape: {message}"
+
+private def reqGradFalse {s : Shape} (t : DTensor s .Float32) : DTensor s .Float32 :=
+  Tensor.setRequiresGrad t false
 
 private def getOrThrow {α} (xs : Array α) (idx : Nat) (msg : String) : IO α :=
   match xs[idx]? with
@@ -46,40 +45,40 @@ private def warnShapeOverride (log : Handlers) (field : String) (cfgValue actual
   pure ()
 
 private def normDim0_3d {d0 d1 d2 : UInt64}
-    (x : T #[d0, d1, d2])
-    : T #[d0] :=
-  let sq : T #[d0, d1, d2] := x * x
-  let s2 : T #[d0, d1, 1] := nn.sumDim sq 2 true
-  let s1 : T #[d0, 1, 1] := nn.sumDim s2 1 true
-  reshape (nn.sqrt (s1 + (1e-12 : Float))) #[d0]
+    (x : DTensor #[d0, d1, d2] .Float32)
+    : DTensor #[d0] .Float32 :=
+  let sq : DTensor #[d0, d1, d2] .Float32 := x * x
+  let s2 : DTensor #[d0, d1, 1] .Float32 := Tensor.sumDim sq 2 true
+  let s1 : DTensor #[d0, 1, 1] .Float32 := Tensor.sumDim s2 1 true
+  Tensor.reshapeChecked (Tensor.sqrt (s1 + (1e-12 : Float))) #[d0]
 
 private def materializeWeightNormConv1d {outC inC kernel : UInt64}
-    (weightV : T #[outC, inC, kernel])
-    (weightG : T #[outC])
-    : T #[outC, inC, kernel] :=
-  let denom : T #[outC, 1, 1] := reshape (normDim0_3d weightV) #[outC, 1, 1]
-  let denomE : T #[outC, inC, kernel] := nn.expand denom #[outC, inC, kernel]
-  let gain : T #[outC, 1, 1] := reshape weightG #[outC, 1, 1]
-  let gainE : T #[outC, inC, kernel] := nn.expand gain #[outC, inC, kernel]
-  nn.div (weightV * gainE) denomE
+    (weightV : DTensor #[outC, inC, kernel] .Float32)
+    (weightG : DTensor #[outC] .Float32)
+    : DTensor #[outC, inC, kernel] .Float32 :=
+  let denom : DTensor #[outC, 1, 1] .Float32 := Tensor.reshapeChecked (normDim0_3d weightV) #[outC, 1, 1]
+  let denomE : DTensor #[outC, inC, kernel] .Float32 := Tensor.expand denom #[outC, inC, kernel]
+  let gain : DTensor #[outC, 1, 1] .Float32 := Tensor.reshapeChecked weightG #[outC, 1, 1]
+  let gainE : DTensor #[outC, inC, kernel] .Float32 := Tensor.expand gain #[outC, inC, kernel]
+  Tensor.div (weightV * gainE) denomE
 
 private def linearFromTensors {inDim outDim : UInt64}
-    (weight : T #[outDim, inDim])
-    (bias : T #[outDim])
+    (weight : DTensor #[outDim, inDim] .Float32)
+    (bias : DTensor #[outDim] .Float32)
     : LinearNorm inDim outDim := {
       weight := reqGradFalse weight
       bias := reqGradFalse bias
     }
 
 private def biLSTMFromTensors {inputSize hiddenSize : UInt64}
-    (wxForward : T #[4 * hiddenSize, inputSize])
-    (whForward : T #[4 * hiddenSize, hiddenSize])
-    (biasIHForward : T #[4 * hiddenSize])
-    (biasHHForward : T #[4 * hiddenSize])
-    (wxBackward : T #[4 * hiddenSize, inputSize])
-    (whBackward : T #[4 * hiddenSize, hiddenSize])
-    (biasIHBackward : T #[4 * hiddenSize])
-    (biasHHBackward : T #[4 * hiddenSize])
+    (wxForward : DTensor #[4 * hiddenSize, inputSize] .Float32)
+    (whForward : DTensor #[4 * hiddenSize, hiddenSize] .Float32)
+    (biasIHForward : DTensor #[4 * hiddenSize] .Float32)
+    (biasHHForward : DTensor #[4 * hiddenSize] .Float32)
+    (wxBackward : DTensor #[4 * hiddenSize, inputSize] .Float32)
+    (whBackward : DTensor #[4 * hiddenSize, hiddenSize] .Float32)
+    (biasIHBackward : DTensor #[4 * hiddenSize] .Float32)
+    (biasHHBackward : DTensor #[4 * hiddenSize] .Float32)
     : BiLSTM inputSize hiddenSize := {
       wxForward := reqGradFalse wxForward
       whForward := reqGradFalse whForward
@@ -92,81 +91,81 @@ private def biLSTMFromTensors {inputSize hiddenSize : UInt64}
     }
 
 private def conv1dFromWeightNorm {inC outC kernel stride padding dilation : UInt64}
-    (weightV : T #[outC, inC, kernel])
-    (weightG3 : T #[outC, 1, 1])
-    (bias : T #[outC])
+    (weightV : DTensor #[outC, inC, kernel] .Float32)
+    (weightG3 : DTensor #[outC, 1, 1] .Float32)
+    (bias : DTensor #[outC] .Float32)
     : Conv1dParams inC outC kernel stride padding dilation := {
-      weight := reqGradFalse <| materializeWeightNormConv1d weightV (reshape weightG3 #[outC])
+      weight := reqGradFalse <| materializeWeightNormConv1d weightV (Tensor.reshapeChecked weightG3 #[outC])
       bias := reqGradFalse bias
     }
 
 private def wnConv1dFromWeightNorm {inC outC kernel stride padding dilation : UInt64}
-    (weightV : T #[outC, inC, kernel])
-    (weightG3 : T #[outC, 1, 1])
-    (bias : T #[outC])
+    (weightV : DTensor #[outC, inC, kernel] .Float32)
+    (weightG3 : DTensor #[outC, 1, 1] .Float32)
+    (bias : DTensor #[outC] .Float32)
     : WNConv1dParams inC outC kernel stride padding dilation := {
       weightV := reqGradFalse weightV
-      weightG := reqGradFalse (reshape weightG3 #[outC])
+      weightG := reqGradFalse (Tensor.reshapeChecked weightG3 #[outC])
       bias := reqGradFalse bias
     }
 
 private def wnDepthwiseTransConv1dFromWeightNorm
     {channels kernel stride padding outputPadding dilation : UInt64}
-    (weightV : T #[channels, 1, kernel])
-    (weightG3 : T #[channels, 1, 1])
-    (bias : T #[channels])
+    (weightV : DTensor #[channels, 1, kernel] .Float32)
+    (weightG3 : DTensor #[channels, 1, 1] .Float32)
+    (bias : DTensor #[channels] .Float32)
     : WNDepthwiseTransConv1dParams channels kernel stride padding outputPadding dilation := {
       weightV := reqGradFalse weightV
-      weightG := reqGradFalse (reshape weightG3 #[channels])
+      weightG := reqGradFalse (Tensor.reshapeChecked weightG3 #[channels])
       bias := reqGradFalse bias
     }
 
 private def wnConvTranspose1dFromWeightNorm
     {inC outC kernel stride padding outputPadding dilation : UInt64}
-    (weightV : T #[inC, outC, kernel])
-    (weightG3 : T #[inC, 1, 1])
-    (bias : T #[outC])
+    (weightV : DTensor #[inC, outC, kernel] .Float32)
+    (weightG3 : DTensor #[inC, 1, 1] .Float32)
+    (bias : DTensor #[outC] .Float32)
     : WNConvTranspose1dParams inC outC kernel stride padding outputPadding dilation := {
       weightV := reqGradFalse weightV
-      weightG := reqGradFalse (reshape weightG3 #[inC])
+      weightG := reqGradFalse (Tensor.reshapeChecked weightG3 #[inC])
       bias := reqGradFalse bias
     }
 
 private def adaLayerNormFromLinear {styleDim channels : UInt64}
-    (weight : T #[2 * channels, styleDim])
-    (bias : T #[2 * channels])
+    (weight : DTensor #[2 * channels, styleDim] .Float32)
+    (bias : DTensor #[2 * channels] .Float32)
     : AdaLayerNorm styleDim channels := {
       fc := linearFromTensors weight bias
     }
 
 private def adaIN1dFromLinear {styleDim channels : UInt64}
-    (weight : T #[2 * channels, styleDim])
-    (bias : T #[2 * channels])
+    (weight : DTensor #[2 * channels, styleDim] .Float32)
+    (bias : DTensor #[2 * channels] .Float32)
     : AdaIN1d styleDim channels := {
       fc := linearFromTensors weight bias
-      normWeight := castLike weight (reqGradFalse (torch.ones #[channels] false Device.CPU))
-      normBias := castLike weight (reqGradFalse (torch.zeros #[channels] false Device.CPU))
+      normWeight := Tensor.castLike weight (reqGradFalse (Tensor.ones #[channels] false Device.CPU))
+      normBias := Tensor.castLike weight (reqGradFalse (Tensor.zeros #[channels] false Device.CPU))
     }
 
 private def adaIN1dDynFromLinear {styleDim channels : UInt64}
-    (weight : T #[2 * channels, styleDim])
-    (bias : T #[2 * channels])
+    (weight : DTensor #[2 * channels, styleDim] .Float32)
+    (bias : DTensor #[2 * channels] .Float32)
     : AdaIN1dDyn styleDim := {
-      fcWeight := nn.eraseShape (reqGradFalse weight)
-      fcBias := nn.eraseShape (reqGradFalse bias)
-      normWeight := nn.eraseShape (castLike weight (torch.ones #[channels] false Device.CPU))
-      normBias := nn.eraseShape (castLike weight (torch.zeros #[channels] false Device.CPU))
+      fcWeight := Tensor.packShape (reqGradFalse weight)
+      fcBias := Tensor.packShape (reqGradFalse bias)
+      normWeight := Tensor.packShape (Tensor.castLike weight (Tensor.ones #[channels] false Device.CPU))
+      normBias := Tensor.packShape (Tensor.castLike weight (Tensor.zeros #[channels] false Device.CPU))
     }
 
 private def wnConv1dDynFromWeightNorm {inC outC kernel : UInt64}
-    (weightV : T #[outC, inC, kernel])
-    (weightG3 : T #[outC, 1, 1])
-    (bias : T #[outC])
+    (weightV : DTensor #[outC, inC, kernel] .Float32)
+    (weightG3 : DTensor #[outC, 1, 1] .Float32)
+    (bias : DTensor #[outC] .Float32)
     (stride padding dilation : UInt64)
     : WNConv1dDyn := {
-      weightV := nn.eraseShape (reqGradFalse weightV)
-      weightG := nn.eraseShape (reqGradFalse (reshape weightG3 #[outC]))
-      bias := nn.eraseShape (reqGradFalse bias)
+      weightV := Tensor.packShape (reqGradFalse weightV)
+      weightG := Tensor.packShape (reqGradFalse (Tensor.reshapeChecked weightG3 #[outC]))
+      bias := Tensor.packShape (reqGradFalse bias)
       kernel := kernel
       stride := stride
       padding := padding
@@ -174,13 +173,13 @@ private def wnConv1dDynFromWeightNorm {inC outC kernel : UInt64}
     }
 
 private def wnConv1dDynFromPlain {inC outC kernel : UInt64}
-    (weight : T #[outC, inC, kernel])
-    (bias : T #[outC])
+    (weight : DTensor #[outC, inC, kernel] .Float32)
+    (bias : DTensor #[outC] .Float32)
     (stride padding dilation : UInt64)
     : WNConv1dDyn := {
-      weightV := nn.eraseShape (reqGradFalse weight)
-      weightG := nn.eraseShape (reqGradFalse (normDim0_3d weight))
-      bias := nn.eraseShape (reqGradFalse bias)
+      weightV := Tensor.packShape (reqGradFalse weight)
+      weightG := Tensor.packShape (reqGradFalse (normDim0_3d weight))
+      bias := Tensor.packShape (reqGradFalse bias)
       kernel := kernel
       stride := stride
       padding := padding
@@ -188,14 +187,14 @@ private def wnConv1dDynFromPlain {inC outC kernel : UInt64}
     }
 
 private def wnConvTranspose1dDynFromWeightNorm {inC outC kernel : UInt64}
-    (weightV : T #[inC, outC, kernel])
-    (weightG3 : T #[inC, 1, 1])
-    (bias : T #[outC])
+    (weightV : DTensor #[inC, outC, kernel] .Float32)
+    (weightG3 : DTensor #[inC, 1, 1] .Float32)
+    (bias : DTensor #[outC] .Float32)
     (stride padding outputPadding dilation : UInt64)
     : WNConvTranspose1dDyn := {
-      weightV := nn.eraseShape (reqGradFalse weightV)
-      weightG := nn.eraseShape (reqGradFalse (reshape weightG3 #[inC]))
-      bias := nn.eraseShape (reqGradFalse bias)
+      weightV := Tensor.packShape (reqGradFalse weightV)
+      weightG := Tensor.packShape (reqGradFalse (Tensor.reshapeChecked weightG3 #[inC]))
+      bias := Tensor.packShape (reqGradFalse bias)
       kernel := kernel
       stride := stride
       padding := padding
@@ -203,16 +202,16 @@ private def wnConvTranspose1dDynFromWeightNorm {inC outC kernel : UInt64}
       dilation := dilation
     }
 
-private def alphaDyn {σ : StaticSpec} (x : Tensor σ) : T #[] :=
-  nn.eraseShape (reqGradFalse (s := σ.shape) x.raw)
+private def alphaDyn {shape : Shape} (x : DTensor shape .Float32) : ShapePackedTensor .Float32 :=
+  Tensor.packShape (reqGradFalse x)
 
 private def generatorAdaINResBlockFromParts {styleDim : UInt64}
     (convs1 : Array WNConv1dDyn)
     (convs2 : Array WNConv1dDyn)
     (norms1 : Array (AdaIN1dDyn styleDim))
     (norms2 : Array (AdaIN1dDyn styleDim))
-    (alpha1 : Array (T #[]))
-    (alpha2 : Array (T #[]))
+    (alpha1 : Array (ShapePackedTensor .Float32))
+    (alpha2 : Array (ShapePackedTensor .Float32))
     : GeneratorAdaINResBlock styleDim := {
       convs1, convs2, norms1, norms2, alpha1, alpha2
     }
@@ -240,21 +239,21 @@ private def loadGeneratorAdaINResBlockFromCheckpointArrays
     (alpha2 : Array ζ)
     (kernel : UInt64)
     (dilations : Array UInt64)
-    (mkConv1 : α → UInt64 → UInt64 → WNConv1dDyn)
-    (mkConv2 : β → WNConv1dDyn)
-    (mkAdaIN1 : γ → AdaIN1dDyn styleDim)
-    (mkAdaIN2 : δ → AdaIN1dDyn styleDim)
-    (mkAlpha1 : ε → T #[])
-    (mkAlpha2 : ζ → T #[])
+    (mkConv1 : α → UInt64 → UInt64 → IO WNConv1dDyn)
+    (mkConv2 : β → IO WNConv1dDyn)
+    (mkAdaIN1 : γ → IO (AdaIN1dDyn styleDim))
+    (mkAdaIN2 : δ → IO (AdaIN1dDyn styleDim))
+    (mkAlpha1 : ε → ShapePackedTensor .Float32)
+    (mkAlpha2 : ζ → ShapePackedTensor .Float32)
     : IO (GeneratorAdaINResBlock styleDim) := do
   let convs1 ←
     mapArrayIdxM convs1 fun i node => do
       let dilation := dilations.getD i 1
       let padding := (kernel * dilation - dilation) / 2
-      pure (mkConv1 node padding dilation)
-  let convs2 ← mapArrayM convs2 fun node => pure (mkConv2 node)
-  let norms1 ← mapArrayM adain1 fun node => pure (mkAdaIN1 node)
-  let norms2 ← mapArrayM adain2 fun node => pure (mkAdaIN2 node)
+      mkConv1 node padding dilation
+  let convs2 ← mapArrayM convs2 mkConv2
+  let norms1 ← mapArrayM adain1 mkAdaIN1
+  let norms2 ← mapArrayM adain2 mkAdaIN2
   pure <|
     generatorAdaINResBlockFromParts
       convs1
@@ -269,62 +268,62 @@ private def loadKittenAlbertFromCheckpoint
     (cfg : KittenTTSConfig)
     : IO (KittenAlbert cfg.nToken cfg.plbert) := do
   let embeddings : AlbertEmbeddings cfg.nToken cfg.plbert := {
-    wordEmbeddings := reqGradFalse weights.embeddings.word_embeddings.weight
-    positionEmbeddings := reqGradFalse weights.embeddings.position_embeddings.weight
-    tokenTypeEmbeddings := reqGradFalse weights.embeddings.token_type_embeddings.weight
-    layerNormWeight := reqGradFalse weights.embeddings.layernorm.weight
-    layerNormBias := reqGradFalse weights.embeddings.layernorm.bias
+    wordEmbeddings := reqGradFalse (← checkedWeight weights.embeddings.word_embeddings.weight)
+    positionEmbeddings := reqGradFalse (← checkedWeight weights.embeddings.position_embeddings.weight)
+    tokenTypeEmbeddings := reqGradFalse (← checkedWeight weights.embeddings.token_type_embeddings.weight)
+    layerNormWeight := reqGradFalse (← checkedWeight weights.embeddings.layernorm.weight)
+    layerNormBias := reqGradFalse (← checkedWeight weights.embeddings.layernorm.bias)
   }
-  let groups : Array (KittenAlbertLayerGroup cfg.plbert) :=
-    weights.encoder.albert_layer_groups.map fun group => {
-      layers := group.albert_layers.map fun layer => {
+  let groups : Array (KittenAlbertLayerGroup cfg.plbert) ←
+    weights.encoder.albert_layer_groups.mapM fun group => do
+      let layers ← group.albert_layers.mapM fun layer => do pure {
         attention := {
-          query := linearFromTensors layer.attention.query.weight layer.attention.query.bias
-          key := linearFromTensors layer.attention.key.weight layer.attention.key.bias
-          value := linearFromTensors layer.attention.value.weight layer.attention.value.bias
-          dense := linearFromTensors layer.attention.dense.weight layer.attention.dense.bias
-          layerNormWeight := reqGradFalse layer.attention.layernorm.weight
-          layerNormBias := reqGradFalse layer.attention.layernorm.bias
+          query := linearFromTensors (← checkedWeight layer.attention.query.weight) (← checkedWeight layer.attention.query.bias)
+          key := linearFromTensors (← checkedWeight layer.attention.key.weight) (← checkedWeight layer.attention.key.bias)
+          value := linearFromTensors (← checkedWeight layer.attention.value.weight) (← checkedWeight layer.attention.value.bias)
+          dense := linearFromTensors (← checkedWeight layer.attention.dense.weight) (← checkedWeight layer.attention.dense.bias)
+          layerNormWeight := reqGradFalse (← checkedWeight layer.attention.layernorm.weight)
+          layerNormBias := reqGradFalse (← checkedWeight layer.attention.layernorm.bias)
         }
-        fullLayerNormWeight := reqGradFalse layer.full_layer_layer_norm.weight
-        fullLayerNormBias := reqGradFalse layer.full_layer_layer_norm.bias
-        ffn := linearFromTensors layer.ffn.weight layer.ffn.bias
-        ffnOutput := linearFromTensors layer.ffn_output.weight layer.ffn_output.bias
+        fullLayerNormWeight := reqGradFalse (← checkedWeight layer.full_layer_layer_norm.weight)
+        fullLayerNormBias := reqGradFalse (← checkedWeight layer.full_layer_layer_norm.bias)
+        ffn := linearFromTensors (← checkedWeight layer.ffn.weight) (← checkedWeight layer.ffn.bias)
+        ffnOutput := linearFromTensors (← checkedWeight layer.ffn_output.weight) (← checkedWeight layer.ffn_output.bias)
       }
-    }
+      pure { layers }
   let encoder : KittenAlbertEncoder cfg.plbert := {
     embeddingHiddenMappingIn :=
       linearFromTensors
-        weights.encoder.embedding_hidden_mapping_in.weight
-        weights.encoder.embedding_hidden_mapping_in.bias
+        (← checkedWeight weights.encoder.embedding_hidden_mapping_in.weight)
+        (← checkedWeight weights.encoder.embedding_hidden_mapping_in.bias)
     groups := groups
   }
   let pooler : LinearNorm cfg.plbert.hiddenSize cfg.plbert.hiddenSize :=
-    linearFromTensors weights.pooler.weight weights.pooler.bias
+    linearFromTensors (← checkedWeight weights.pooler.weight) (← checkedWeight weights.pooler.bias)
   pure { embeddings, encoder, pooler }
 
 private def loadTextEncoderFromCheckpoint
     (weights : KokoroCheckpoint.WeightsTextencoder)
     (cfg : KittenTTSConfig)
     : IO (TextEncoder cfg) := do
-  let convs : Array (TextConvLayer cfg) :=
-    weights.cnn.map fun layer => {
-      conv := conv1dFromWeightNorm layer.i0.weight_v layer.i0.weight_g layer.i0.bias
-      lnWeight := reqGradFalse layer.i1.gamma
-      lnBias := reqGradFalse layer.i1.beta
+  let convs : Array (TextConvLayer cfg) ←
+    weights.cnn.mapM fun layer => do pure {
+      conv := conv1dFromWeightNorm (← checkedWeight layer.i0.weight_v) (← checkedWeight layer.i0.weight_g) (← checkedWeight layer.i0.bias)
+      lnWeight := reqGradFalse (← checkedWeight layer.i1.gamma)
+      lnBias := reqGradFalse (← checkedWeight layer.i1.beta)
     }
   let lstm :=
     biLSTMFromTensors
-      weights.lstm.weight_ih_l0
-      weights.lstm.weight_hh_l0
-      weights.lstm.bias_ih_l0
-      weights.lstm.bias_hh_l0
-      weights.lstm.weight_ih_l0_reverse
-      weights.lstm.weight_hh_l0_reverse
-      weights.lstm.bias_ih_l0_reverse
-      weights.lstm.bias_hh_l0_reverse
+      (← checkedWeight weights.lstm.weight_ih_l0)
+      (← checkedWeight weights.lstm.weight_hh_l0)
+      (← checkedWeight weights.lstm.bias_ih_l0)
+      (← checkedWeight weights.lstm.bias_hh_l0)
+      (← checkedWeight weights.lstm.weight_ih_l0_reverse)
+      (← checkedWeight weights.lstm.weight_hh_l0_reverse)
+      (← checkedWeight weights.lstm.bias_ih_l0_reverse)
+      (← checkedWeight weights.lstm.bias_hh_l0_reverse)
   pure {
-    embedding := reqGradFalse weights.embedding.weight
+    embedding := reqGradFalse (← checkedWeight weights.embedding.weight)
     convs
     lstm
   }
@@ -332,40 +331,40 @@ private def loadTextEncoderFromCheckpoint
 private def loadDurationEncoderFromCheckpoint
     (weights : KokoroCheckpoint.WeightsPredictorTextencoder)
     (cfg : KittenTTSConfig)
-    : DurationEncoder cfg := {
+    : IO (DurationEncoder cfg) := do pure {
       lstms := #[
         biLSTMFromTensors
-          weights.lstms.i0.weight_ih_l0
-          weights.lstms.i0.weight_hh_l0
-          weights.lstms.i0.bias_ih_l0
-          weights.lstms.i0.bias_hh_l0
-          weights.lstms.i0.weight_ih_l0_reverse
-          weights.lstms.i0.weight_hh_l0_reverse
-          weights.lstms.i0.bias_ih_l0_reverse
-          weights.lstms.i0.bias_hh_l0_reverse,
+          (← checkedWeight weights.lstms.i0.weight_ih_l0)
+          (← checkedWeight weights.lstms.i0.weight_hh_l0)
+          (← checkedWeight weights.lstms.i0.bias_ih_l0)
+          (← checkedWeight weights.lstms.i0.bias_hh_l0)
+          (← checkedWeight weights.lstms.i0.weight_ih_l0_reverse)
+          (← checkedWeight weights.lstms.i0.weight_hh_l0_reverse)
+          (← checkedWeight weights.lstms.i0.bias_ih_l0_reverse)
+          (← checkedWeight weights.lstms.i0.bias_hh_l0_reverse),
         biLSTMFromTensors
-          weights.lstms.i2.weight_ih_l0
-          weights.lstms.i2.weight_hh_l0
-          weights.lstms.i2.bias_ih_l0
-          weights.lstms.i2.bias_hh_l0
-          weights.lstms.i2.weight_ih_l0_reverse
-          weights.lstms.i2.weight_hh_l0_reverse
-          weights.lstms.i2.bias_ih_l0_reverse
-          weights.lstms.i2.bias_hh_l0_reverse,
+          (← checkedWeight weights.lstms.i2.weight_ih_l0)
+          (← checkedWeight weights.lstms.i2.weight_hh_l0)
+          (← checkedWeight weights.lstms.i2.bias_ih_l0)
+          (← checkedWeight weights.lstms.i2.bias_hh_l0)
+          (← checkedWeight weights.lstms.i2.weight_ih_l0_reverse)
+          (← checkedWeight weights.lstms.i2.weight_hh_l0_reverse)
+          (← checkedWeight weights.lstms.i2.bias_ih_l0_reverse)
+          (← checkedWeight weights.lstms.i2.bias_hh_l0_reverse),
         biLSTMFromTensors
-          weights.lstms.i4.weight_ih_l0
-          weights.lstms.i4.weight_hh_l0
-          weights.lstms.i4.bias_ih_l0
-          weights.lstms.i4.bias_hh_l0
-          weights.lstms.i4.weight_ih_l0_reverse
-          weights.lstms.i4.weight_hh_l0_reverse
-          weights.lstms.i4.bias_ih_l0_reverse
-          weights.lstms.i4.bias_hh_l0_reverse
+          (← checkedWeight weights.lstms.i4.weight_ih_l0)
+          (← checkedWeight weights.lstms.i4.weight_hh_l0)
+          (← checkedWeight weights.lstms.i4.bias_ih_l0)
+          (← checkedWeight weights.lstms.i4.bias_hh_l0)
+          (← checkedWeight weights.lstms.i4.weight_ih_l0_reverse)
+          (← checkedWeight weights.lstms.i4.weight_hh_l0_reverse)
+          (← checkedWeight weights.lstms.i4.bias_ih_l0_reverse)
+          (← checkedWeight weights.lstms.i4.bias_hh_l0_reverse)
       ]
       norms := #[
-        adaLayerNormFromLinear weights.lstms.i1.fc.weight weights.lstms.i1.fc.bias,
-        adaLayerNormFromLinear weights.lstms.i3.fc.weight weights.lstms.i3.fc.bias,
-        adaLayerNormFromLinear weights.lstms.i5.fc.weight weights.lstms.i5.fc.bias
+        adaLayerNormFromLinear (← checkedWeight weights.lstms.i1.fc.weight) (← checkedWeight weights.lstms.i1.fc.bias),
+        adaLayerNormFromLinear (← checkedWeight weights.lstms.i3.fc.weight) (← checkedWeight weights.lstms.i3.fc.bias),
+        adaLayerNormFromLinear (← checkedWeight weights.lstms.i5.fc.weight) (← checkedWeight weights.lstms.i5.fc.bias)
       ]
     }
 
@@ -375,78 +374,78 @@ private def loadProsodyPredictorFromCheckpoint
     (log : Handlers := {})
     : IO (ProsodyPredictor cfg) := do
   log.onInfo "  predictor.text_encoder..."
-  let durationEncoder := loadDurationEncoderFromCheckpoint weights.text_encoder cfg
+  let durationEncoder ← loadDurationEncoderFromCheckpoint weights.text_encoder cfg
   log.onInfo "  predictor.lstm..."
   let lstm :=
     biLSTMFromTensors
-      weights.lstm.weight_ih_l0
-      weights.lstm.weight_hh_l0
-      weights.lstm.bias_ih_l0
-      weights.lstm.bias_hh_l0
-      weights.lstm.weight_ih_l0_reverse
-      weights.lstm.weight_hh_l0_reverse
-      weights.lstm.bias_ih_l0_reverse
-      weights.lstm.bias_hh_l0_reverse
+      (← checkedWeight weights.lstm.weight_ih_l0)
+      (← checkedWeight weights.lstm.weight_hh_l0)
+      (← checkedWeight weights.lstm.bias_ih_l0)
+      (← checkedWeight weights.lstm.bias_hh_l0)
+      (← checkedWeight weights.lstm.weight_ih_l0_reverse)
+      (← checkedWeight weights.lstm.weight_hh_l0_reverse)
+      (← checkedWeight weights.lstm.bias_ih_l0_reverse)
+      (← checkedWeight weights.lstm.bias_hh_l0_reverse)
   log.onInfo "  predictor.duration_proj..."
   let durationProj : LinearNorm cfg.hiddenDim cfg.maxDur :=
     linearFromTensors
-      weights.duration_proj.linear_layer.weight
-      weights.duration_proj.linear_layer.bias
+      (← checkedWeight weights.duration_proj.linear_layer.weight)
+      (← checkedWeight weights.duration_proj.linear_layer.bias)
   log.onInfo "  predictor.shared..."
   let shared :=
     biLSTMFromTensors
-      weights.shared.weight_ih_l0
-      weights.shared.weight_hh_l0
-      weights.shared.bias_ih_l0
-      weights.shared.bias_hh_l0
-      weights.shared.weight_ih_l0_reverse
-      weights.shared.weight_hh_l0_reverse
-      weights.shared.bias_ih_l0_reverse
-      weights.shared.bias_hh_l0_reverse
+      (← checkedWeight weights.shared.weight_ih_l0)
+      (← checkedWeight weights.shared.weight_hh_l0)
+      (← checkedWeight weights.shared.bias_ih_l0)
+      (← checkedWeight weights.shared.bias_hh_l0)
+      (← checkedWeight weights.shared.weight_ih_l0_reverse)
+      (← checkedWeight weights.shared.weight_hh_l0_reverse)
+      (← checkedWeight weights.shared.bias_ih_l0_reverse)
+      (← checkedWeight weights.shared.bias_hh_l0_reverse)
   log.onInfo "  predictor.F0 blocks..."
   let f0Blk0 : AdainResBlk1dSame cfg.hiddenDim cfg.hiddenDim cfg.styleDim := {
-    conv1 := wnConv1dFromWeightNorm weights.f0.i0.conv1.weight_v weights.f0.i0.conv1.weight_g weights.f0.i0.conv1.bias
-    conv2 := wnConv1dFromWeightNorm weights.f0.i0.conv2.weight_v weights.f0.i0.conv2.weight_g weights.f0.i0.conv2.bias
-    norm1 := adaIN1dFromLinear weights.f0.i0.norm1.fc.weight weights.f0.i0.norm1.fc.bias
-    norm2 := adaIN1dFromLinear weights.f0.i0.norm2.fc.weight weights.f0.i0.norm2.fc.bias
+    conv1 := wnConv1dFromWeightNorm (← checkedWeight weights.f0.i0.conv1.weight_v) (← checkedWeight weights.f0.i0.conv1.weight_g) (← checkedWeight weights.f0.i0.conv1.bias)
+    conv2 := wnConv1dFromWeightNorm (← checkedWeight weights.f0.i0.conv2.weight_v) (← checkedWeight weights.f0.i0.conv2.weight_g) (← checkedWeight weights.f0.i0.conv2.bias)
+    norm1 := adaIN1dFromLinear (← checkedWeight weights.f0.i0.norm1.fc.weight) (← checkedWeight weights.f0.i0.norm1.fc.bias)
+    norm2 := adaIN1dFromLinear (← checkedWeight weights.f0.i0.norm2.fc.weight) (← checkedWeight weights.f0.i0.norm2.fc.bias)
     shortcut := none
   }
   let f0Blk1 : AdainResBlk1dUp cfg.hiddenDim (cfg.hiddenDim / 2) cfg.styleDim := {
-    pool := wnDepthwiseTransConv1dFromWeightNorm weights.f0.i1.pool.weight_v weights.f0.i1.pool.weight_g weights.f0.i1.pool.bias
-    conv1 := wnConv1dFromWeightNorm weights.f0.i1.conv1.weight_v weights.f0.i1.conv1.weight_g weights.f0.i1.conv1.bias
-    conv2 := wnConv1dFromWeightNorm weights.f0.i1.conv2.weight_v weights.f0.i1.conv2.weight_g weights.f0.i1.conv2.bias
-    norm1 := adaIN1dFromLinear weights.f0.i1.norm1.fc.weight weights.f0.i1.norm1.fc.bias
-    norm2 := adaIN1dFromLinear weights.f0.i1.norm2.fc.weight weights.f0.i1.norm2.fc.bias
-    shortcut := some <| wnConv1dFromWeightNorm weights.f0.i1.conv1x1.weight_v weights.f0.i1.conv1x1.weight_g (castLike (sRef := weights.f0.i1.conv1x1.weight_v.shape) weights.f0.i1.conv1x1.weight_v (torch.zeros #[cfg.hiddenDim / 2] false Device.CPU))
+    pool := wnDepthwiseTransConv1dFromWeightNorm (← checkedWeight weights.f0.i1.pool.weight_v) (← checkedWeight weights.f0.i1.pool.weight_g) (← checkedWeight weights.f0.i1.pool.bias)
+    conv1 := wnConv1dFromWeightNorm (← checkedWeight weights.f0.i1.conv1.weight_v) (← checkedWeight weights.f0.i1.conv1.weight_g) (← checkedWeight weights.f0.i1.conv1.bias)
+    conv2 := wnConv1dFromWeightNorm (← checkedWeight weights.f0.i1.conv2.weight_v) (← checkedWeight weights.f0.i1.conv2.weight_g) (← checkedWeight weights.f0.i1.conv2.bias)
+    norm1 := adaIN1dFromLinear (← checkedWeight weights.f0.i1.norm1.fc.weight) (← checkedWeight weights.f0.i1.norm1.fc.bias)
+    norm2 := adaIN1dFromLinear (← checkedWeight weights.f0.i1.norm2.fc.weight) (← checkedWeight weights.f0.i1.norm2.fc.bias)
+    shortcut := some <| wnConv1dFromWeightNorm (← checkedWeight weights.f0.i1.conv1x1.weight_v) (← checkedWeight weights.f0.i1.conv1x1.weight_g) (Tensor.castLike weights.f0.i1.conv1x1.weight_v (Tensor.zeros #[cfg.hiddenDim / 2] false Device.CPU))
   }
   let f0Blk2 : AdainResBlk1dSame (cfg.hiddenDim / 2) (cfg.hiddenDim / 2) cfg.styleDim := {
-    conv1 := wnConv1dFromWeightNorm weights.f0.i2.conv1.weight_v weights.f0.i2.conv1.weight_g weights.f0.i2.conv1.bias
-    conv2 := wnConv1dFromWeightNorm weights.f0.i2.conv2.weight_v weights.f0.i2.conv2.weight_g weights.f0.i2.conv2.bias
-    norm1 := adaIN1dFromLinear weights.f0.i2.norm1.fc.weight weights.f0.i2.norm1.fc.bias
-    norm2 := adaIN1dFromLinear weights.f0.i2.norm2.fc.weight weights.f0.i2.norm2.fc.bias
+    conv1 := wnConv1dFromWeightNorm (← checkedWeight weights.f0.i2.conv1.weight_v) (← checkedWeight weights.f0.i2.conv1.weight_g) (← checkedWeight weights.f0.i2.conv1.bias)
+    conv2 := wnConv1dFromWeightNorm (← checkedWeight weights.f0.i2.conv2.weight_v) (← checkedWeight weights.f0.i2.conv2.weight_g) (← checkedWeight weights.f0.i2.conv2.bias)
+    norm1 := adaIN1dFromLinear (← checkedWeight weights.f0.i2.norm1.fc.weight) (← checkedWeight weights.f0.i2.norm1.fc.bias)
+    norm2 := adaIN1dFromLinear (← checkedWeight weights.f0.i2.norm2.fc.weight) (← checkedWeight weights.f0.i2.norm2.fc.bias)
     shortcut := none
   }
   log.onInfo "  predictor.N blocks..."
   let nBlk0 : AdainResBlk1dSame cfg.hiddenDim cfg.hiddenDim cfg.styleDim := {
-    conv1 := wnConv1dFromWeightNorm weights.n.i0.conv1.weight_v weights.n.i0.conv1.weight_g weights.n.i0.conv1.bias
-    conv2 := wnConv1dFromWeightNorm weights.n.i0.conv2.weight_v weights.n.i0.conv2.weight_g weights.n.i0.conv2.bias
-    norm1 := adaIN1dFromLinear weights.n.i0.norm1.fc.weight weights.n.i0.norm1.fc.bias
-    norm2 := adaIN1dFromLinear weights.n.i0.norm2.fc.weight weights.n.i0.norm2.fc.bias
+    conv1 := wnConv1dFromWeightNorm (← checkedWeight weights.n.i0.conv1.weight_v) (← checkedWeight weights.n.i0.conv1.weight_g) (← checkedWeight weights.n.i0.conv1.bias)
+    conv2 := wnConv1dFromWeightNorm (← checkedWeight weights.n.i0.conv2.weight_v) (← checkedWeight weights.n.i0.conv2.weight_g) (← checkedWeight weights.n.i0.conv2.bias)
+    norm1 := adaIN1dFromLinear (← checkedWeight weights.n.i0.norm1.fc.weight) (← checkedWeight weights.n.i0.norm1.fc.bias)
+    norm2 := adaIN1dFromLinear (← checkedWeight weights.n.i0.norm2.fc.weight) (← checkedWeight weights.n.i0.norm2.fc.bias)
     shortcut := none
   }
   let nBlk1 : AdainResBlk1dUp cfg.hiddenDim (cfg.hiddenDim / 2) cfg.styleDim := {
-    pool := wnDepthwiseTransConv1dFromWeightNorm weights.n.i1.pool.weight_v weights.n.i1.pool.weight_g weights.n.i1.pool.bias
-    conv1 := wnConv1dFromWeightNorm weights.n.i1.conv1.weight_v weights.n.i1.conv1.weight_g weights.n.i1.conv1.bias
-    conv2 := wnConv1dFromWeightNorm weights.n.i1.conv2.weight_v weights.n.i1.conv2.weight_g weights.n.i1.conv2.bias
-    norm1 := adaIN1dFromLinear weights.n.i1.norm1.fc.weight weights.n.i1.norm1.fc.bias
-    norm2 := adaIN1dFromLinear weights.n.i1.norm2.fc.weight weights.n.i1.norm2.fc.bias
-    shortcut := some <| wnConv1dFromWeightNorm weights.n.i1.conv1x1.weight_v weights.n.i1.conv1x1.weight_g (castLike (sRef := weights.n.i1.conv1x1.weight_v.shape) weights.n.i1.conv1x1.weight_v (torch.zeros #[cfg.hiddenDim / 2] false Device.CPU))
+    pool := wnDepthwiseTransConv1dFromWeightNorm (← checkedWeight weights.n.i1.pool.weight_v) (← checkedWeight weights.n.i1.pool.weight_g) (← checkedWeight weights.n.i1.pool.bias)
+    conv1 := wnConv1dFromWeightNorm (← checkedWeight weights.n.i1.conv1.weight_v) (← checkedWeight weights.n.i1.conv1.weight_g) (← checkedWeight weights.n.i1.conv1.bias)
+    conv2 := wnConv1dFromWeightNorm (← checkedWeight weights.n.i1.conv2.weight_v) (← checkedWeight weights.n.i1.conv2.weight_g) (← checkedWeight weights.n.i1.conv2.bias)
+    norm1 := adaIN1dFromLinear (← checkedWeight weights.n.i1.norm1.fc.weight) (← checkedWeight weights.n.i1.norm1.fc.bias)
+    norm2 := adaIN1dFromLinear (← checkedWeight weights.n.i1.norm2.fc.weight) (← checkedWeight weights.n.i1.norm2.fc.bias)
+    shortcut := some <| wnConv1dFromWeightNorm (← checkedWeight weights.n.i1.conv1x1.weight_v) (← checkedWeight weights.n.i1.conv1x1.weight_g) (Tensor.castLike weights.n.i1.conv1x1.weight_v (Tensor.zeros #[cfg.hiddenDim / 2] false Device.CPU))
   }
   let nBlk2 : AdainResBlk1dSame (cfg.hiddenDim / 2) (cfg.hiddenDim / 2) cfg.styleDim := {
-    conv1 := wnConv1dFromWeightNorm weights.n.i2.conv1.weight_v weights.n.i2.conv1.weight_g weights.n.i2.conv1.bias
-    conv2 := wnConv1dFromWeightNorm weights.n.i2.conv2.weight_v weights.n.i2.conv2.weight_g weights.n.i2.conv2.bias
-    norm1 := adaIN1dFromLinear weights.n.i2.norm1.fc.weight weights.n.i2.norm1.fc.bias
-    norm2 := adaIN1dFromLinear weights.n.i2.norm2.fc.weight weights.n.i2.norm2.fc.bias
+    conv1 := wnConv1dFromWeightNorm (← checkedWeight weights.n.i2.conv1.weight_v) (← checkedWeight weights.n.i2.conv1.weight_g) (← checkedWeight weights.n.i2.conv1.bias)
+    conv2 := wnConv1dFromWeightNorm (← checkedWeight weights.n.i2.conv2.weight_v) (← checkedWeight weights.n.i2.conv2.weight_g) (← checkedWeight weights.n.i2.conv2.bias)
+    norm1 := adaIN1dFromLinear (← checkedWeight weights.n.i2.norm1.fc.weight) (← checkedWeight weights.n.i2.norm1.fc.bias)
+    norm2 := adaIN1dFromLinear (← checkedWeight weights.n.i2.norm2.fc.weight) (← checkedWeight weights.n.i2.norm2.fc.bias)
     shortcut := none
   }
   log.onInfo "  predictor output projections..."
@@ -462,12 +461,12 @@ private def loadProsodyPredictorFromCheckpoint
     nBlk1
     nBlk2
     f0Proj := {
-      weight := reqGradFalse weights.f0_proj.weight
-      bias := reqGradFalse weights.f0_proj.bias
+      weight := reqGradFalse (← checkedWeight weights.f0_proj.weight)
+      bias := reqGradFalse (← checkedWeight weights.f0_proj.bias)
     }
     nProj := {
-      weight := reqGradFalse weights.n_proj.weight
-      bias := reqGradFalse weights.n_proj.bias
+      weight := reqGradFalse (← checkedWeight weights.n_proj.weight)
+      bias := reqGradFalse (← checkedWeight weights.n_proj.bias)
     }
   }
 
@@ -476,7 +475,7 @@ private def loadGeneratorFromCheckpoint
     (cfg : KittenTTSConfig)
     : IO (Generator cfg) := do
   let source : SourceModuleHnNSF cfg := {
-    linear := linearFromTensors weights.m_source.l_linear.weight weights.m_source.l_linear.bias
+    linear := linearFromTensors (← checkedWeight weights.m_source.l_linear.weight) (← checkedWeight weights.m_source.l_linear.bias)
   }
   let noiseRes0Dilations : Array UInt64 := #[1, 3, 5]
   let noiseRes1Dilations : Array UInt64 := #[1, 3, 5]
@@ -502,20 +501,20 @@ private def loadGeneratorFromCheckpoint
       weights.noise_res.i0.alpha2
       (if 0 + 1 < cfg.generator.upsampleRates.size then 7 else 11)
       noiseRes0Dilations
-      (fun node padding dilation =>
-        wnConv1dDynFromWeightNorm (inC := node.weight_v.shape[1]!) (outC := node.weight_v.shape[0]!) (kernel := node.weight_v.shape[2]!) node.weight_v node.weight_g node.bias 1 padding dilation)
-      (fun node =>
-        wnConv1dDynFromWeightNorm (inC := node.weight_v.shape[1]!) (outC := node.weight_v.shape[0]!) (kernel := node.weight_v.shape[2]!)
-          node.weight_v
-          node.weight_g
-          node.bias
+      (fun node padding dilation => do
+        pure <| wnConv1dDynFromWeightNorm (inC := node.weight_v.shape[1]!) (outC := node.weight_v.shape[0]!) (kernel := node.weight_v.shape[2]!) (← checkedWeight node.weight_v) (← checkedWeight node.weight_g) (← checkedWeight node.bias) 1 padding dilation)
+      (fun node => do
+        pure <| wnConv1dDynFromWeightNorm (inC := node.weight_v.shape[1]!) (outC := node.weight_v.shape[0]!) (kernel := node.weight_v.shape[2]!)
+          (← checkedWeight node.weight_v)
+          (← checkedWeight node.weight_g)
+          (← checkedWeight node.bias)
           1
           (((if 0 + 1 < cfg.generator.upsampleRates.size then 7 else 11) - 1) / 2)
           1)
-      (fun node =>
-        adaIN1dDynFromLinear (channels := stage0Out) node.fc.weight node.fc.bias)
-      (fun node =>
-        adaIN1dDynFromLinear (channels := stage0Out) node.fc.weight node.fc.bias)
+      (fun node => do
+        pure <| adaIN1dDynFromLinear (channels := stage0Out) (← checkedWeight node.fc.weight) (← checkedWeight node.fc.bias))
+      (fun node => do
+        pure <| adaIN1dDynFromLinear (channels := stage0Out) (← checkedWeight node.fc.weight) (← checkedWeight node.fc.bias))
       alphaDyn
       alphaDyn
   let noiseRes1 ←
@@ -528,20 +527,20 @@ private def loadGeneratorFromCheckpoint
       weights.noise_res.i1.alpha2
       (if 1 + 1 < cfg.generator.upsampleRates.size then 7 else 11)
       noiseRes1Dilations
-      (fun node padding dilation =>
-        wnConv1dDynFromWeightNorm (inC := node.weight_v.shape[1]!) (outC := node.weight_v.shape[0]!) (kernel := node.weight_v.shape[2]!) node.weight_v node.weight_g node.bias 1 padding dilation)
-      (fun node =>
-        wnConv1dDynFromWeightNorm (inC := node.weight_v.shape[1]!) (outC := node.weight_v.shape[0]!) (kernel := node.weight_v.shape[2]!)
-          node.weight_v
-          node.weight_g
-          node.bias
+      (fun node padding dilation => do
+        pure <| wnConv1dDynFromWeightNorm (inC := node.weight_v.shape[1]!) (outC := node.weight_v.shape[0]!) (kernel := node.weight_v.shape[2]!) (← checkedWeight node.weight_v) (← checkedWeight node.weight_g) (← checkedWeight node.bias) 1 padding dilation)
+      (fun node => do
+        pure <| wnConv1dDynFromWeightNorm (inC := node.weight_v.shape[1]!) (outC := node.weight_v.shape[0]!) (kernel := node.weight_v.shape[2]!)
+          (← checkedWeight node.weight_v)
+          (← checkedWeight node.weight_g)
+          (← checkedWeight node.bias)
           1
           (((if 1 + 1 < cfg.generator.upsampleRates.size then 7 else 11) - 1) / 2)
           1)
-      (fun node =>
-        adaIN1dDynFromLinear (channels := stage1Out) node.fc.weight node.fc.bias)
-      (fun node =>
-        adaIN1dDynFromLinear (channels := stage1Out) node.fc.weight node.fc.bias)
+      (fun node => do
+        pure <| adaIN1dDynFromLinear (channels := stage1Out) (← checkedWeight node.fc.weight) (← checkedWeight node.fc.bias))
+      (fun node => do
+        pure <| adaIN1dDynFromLinear (channels := stage1Out) (← checkedWeight node.fc.weight) (← checkedWeight node.fc.bias))
       alphaDyn
       alphaDyn
   let res0 ←
@@ -554,14 +553,14 @@ private def loadGeneratorFromCheckpoint
       weights.resblocks.i0.alpha2
       resblockKernel0
       resblockDilations0
-      (fun node padding dilation =>
-        wnConv1dDynFromWeightNorm (inC := node.weight_v.shape[1]!) (outC := node.weight_v.shape[0]!) (kernel := node.weight_v.shape[2]!) node.weight_v node.weight_g node.bias 1 padding dilation)
-      (fun node =>
-        wnConv1dDynFromWeightNorm (inC := node.weight_v.shape[1]!) (outC := node.weight_v.shape[0]!) (kernel := node.weight_v.shape[2]!) node.weight_v node.weight_g node.bias 1 ((resblockKernel0 - 1) / 2) 1)
-      (fun node =>
-        adaIN1dDynFromLinear (channels := stage0Out) node.fc.weight node.fc.bias)
-      (fun node =>
-        adaIN1dDynFromLinear (channels := stage0Out) node.fc.weight node.fc.bias)
+      (fun node padding dilation => do
+        pure <| wnConv1dDynFromWeightNorm (inC := node.weight_v.shape[1]!) (outC := node.weight_v.shape[0]!) (kernel := node.weight_v.shape[2]!) (← checkedWeight node.weight_v) (← checkedWeight node.weight_g) (← checkedWeight node.bias) 1 padding dilation)
+      (fun node => do
+        pure <| wnConv1dDynFromWeightNorm (inC := node.weight_v.shape[1]!) (outC := node.weight_v.shape[0]!) (kernel := node.weight_v.shape[2]!) (← checkedWeight node.weight_v) (← checkedWeight node.weight_g) (← checkedWeight node.bias) 1 ((resblockKernel0 - 1) / 2) 1)
+      (fun node => do
+        pure <| adaIN1dDynFromLinear (channels := stage0Out) (← checkedWeight node.fc.weight) (← checkedWeight node.fc.bias))
+      (fun node => do
+        pure <| adaIN1dDynFromLinear (channels := stage0Out) (← checkedWeight node.fc.weight) (← checkedWeight node.fc.bias))
       alphaDyn
       alphaDyn
   let res1 ←
@@ -574,14 +573,14 @@ private def loadGeneratorFromCheckpoint
       weights.resblocks.i1.alpha2
       resblockKernel1
       resblockDilations1
-      (fun node padding dilation =>
-        wnConv1dDynFromWeightNorm (inC := node.weight_v.shape[1]!) (outC := node.weight_v.shape[0]!) (kernel := node.weight_v.shape[2]!) node.weight_v node.weight_g node.bias 1 padding dilation)
-      (fun node =>
-        wnConv1dDynFromWeightNorm (inC := node.weight_v.shape[1]!) (outC := node.weight_v.shape[0]!) (kernel := node.weight_v.shape[2]!) node.weight_v node.weight_g node.bias 1 ((resblockKernel1 - 1) / 2) 1)
-      (fun node =>
-        adaIN1dDynFromLinear (channels := stage0Out) node.fc.weight node.fc.bias)
-      (fun node =>
-        adaIN1dDynFromLinear (channels := stage0Out) node.fc.weight node.fc.bias)
+      (fun node padding dilation => do
+        pure <| wnConv1dDynFromWeightNorm (inC := node.weight_v.shape[1]!) (outC := node.weight_v.shape[0]!) (kernel := node.weight_v.shape[2]!) (← checkedWeight node.weight_v) (← checkedWeight node.weight_g) (← checkedWeight node.bias) 1 padding dilation)
+      (fun node => do
+        pure <| wnConv1dDynFromWeightNorm (inC := node.weight_v.shape[1]!) (outC := node.weight_v.shape[0]!) (kernel := node.weight_v.shape[2]!) (← checkedWeight node.weight_v) (← checkedWeight node.weight_g) (← checkedWeight node.bias) 1 ((resblockKernel1 - 1) / 2) 1)
+      (fun node => do
+        pure <| adaIN1dDynFromLinear (channels := stage0Out) (← checkedWeight node.fc.weight) (← checkedWeight node.fc.bias))
+      (fun node => do
+        pure <| adaIN1dDynFromLinear (channels := stage0Out) (← checkedWeight node.fc.weight) (← checkedWeight node.fc.bias))
       alphaDyn
       alphaDyn
   let res2 ←
@@ -594,14 +593,14 @@ private def loadGeneratorFromCheckpoint
       weights.resblocks.i2.alpha2
       resblockKernel2
       resblockDilations2
-      (fun node padding dilation =>
-        wnConv1dDynFromWeightNorm (inC := node.weight_v.shape[1]!) (outC := node.weight_v.shape[0]!) (kernel := node.weight_v.shape[2]!) node.weight_v node.weight_g node.bias 1 padding dilation)
-      (fun node =>
-        wnConv1dDynFromWeightNorm (inC := node.weight_v.shape[1]!) (outC := node.weight_v.shape[0]!) (kernel := node.weight_v.shape[2]!) node.weight_v node.weight_g node.bias 1 ((resblockKernel2 - 1) / 2) 1)
-      (fun node =>
-        adaIN1dDynFromLinear (channels := stage0Out) node.fc.weight node.fc.bias)
-      (fun node =>
-        adaIN1dDynFromLinear (channels := stage0Out) node.fc.weight node.fc.bias)
+      (fun node padding dilation => do
+        pure <| wnConv1dDynFromWeightNorm (inC := node.weight_v.shape[1]!) (outC := node.weight_v.shape[0]!) (kernel := node.weight_v.shape[2]!) (← checkedWeight node.weight_v) (← checkedWeight node.weight_g) (← checkedWeight node.bias) 1 padding dilation)
+      (fun node => do
+        pure <| wnConv1dDynFromWeightNorm (inC := node.weight_v.shape[1]!) (outC := node.weight_v.shape[0]!) (kernel := node.weight_v.shape[2]!) (← checkedWeight node.weight_v) (← checkedWeight node.weight_g) (← checkedWeight node.bias) 1 ((resblockKernel2 - 1) / 2) 1)
+      (fun node => do
+        pure <| adaIN1dDynFromLinear (channels := stage0Out) (← checkedWeight node.fc.weight) (← checkedWeight node.fc.bias))
+      (fun node => do
+        pure <| adaIN1dDynFromLinear (channels := stage0Out) (← checkedWeight node.fc.weight) (← checkedWeight node.fc.bias))
       alphaDyn
       alphaDyn
   let res3 ←
@@ -614,14 +613,14 @@ private def loadGeneratorFromCheckpoint
       weights.resblocks.i3.alpha2
       resblockKernel0
       resblockDilations0
-      (fun node padding dilation =>
-        wnConv1dDynFromWeightNorm (inC := node.weight_v.shape[1]!) (outC := node.weight_v.shape[0]!) (kernel := node.weight_v.shape[2]!) node.weight_v node.weight_g node.bias 1 padding dilation)
-      (fun node =>
-        wnConv1dDynFromWeightNorm (inC := node.weight_v.shape[1]!) (outC := node.weight_v.shape[0]!) (kernel := node.weight_v.shape[2]!) node.weight_v node.weight_g node.bias 1 ((resblockKernel0 - 1) / 2) 1)
-      (fun node =>
-        adaIN1dDynFromLinear (channels := stage1Out) node.fc.weight node.fc.bias)
-      (fun node =>
-        adaIN1dDynFromLinear (channels := stage1Out) node.fc.weight node.fc.bias)
+      (fun node padding dilation => do
+        pure <| wnConv1dDynFromWeightNorm (inC := node.weight_v.shape[1]!) (outC := node.weight_v.shape[0]!) (kernel := node.weight_v.shape[2]!) (← checkedWeight node.weight_v) (← checkedWeight node.weight_g) (← checkedWeight node.bias) 1 padding dilation)
+      (fun node => do
+        pure <| wnConv1dDynFromWeightNorm (inC := node.weight_v.shape[1]!) (outC := node.weight_v.shape[0]!) (kernel := node.weight_v.shape[2]!) (← checkedWeight node.weight_v) (← checkedWeight node.weight_g) (← checkedWeight node.bias) 1 ((resblockKernel0 - 1) / 2) 1)
+      (fun node => do
+        pure <| adaIN1dDynFromLinear (channels := stage1Out) (← checkedWeight node.fc.weight) (← checkedWeight node.fc.bias))
+      (fun node => do
+        pure <| adaIN1dDynFromLinear (channels := stage1Out) (← checkedWeight node.fc.weight) (← checkedWeight node.fc.bias))
       alphaDyn
       alphaDyn
   let res4 ←
@@ -634,14 +633,14 @@ private def loadGeneratorFromCheckpoint
       weights.resblocks.i4.alpha2
       resblockKernel1
       resblockDilations1
-      (fun node padding dilation =>
-        wnConv1dDynFromWeightNorm (inC := node.weight_v.shape[1]!) (outC := node.weight_v.shape[0]!) (kernel := node.weight_v.shape[2]!) node.weight_v node.weight_g node.bias 1 padding dilation)
-      (fun node =>
-        wnConv1dDynFromWeightNorm (inC := node.weight_v.shape[1]!) (outC := node.weight_v.shape[0]!) (kernel := node.weight_v.shape[2]!) node.weight_v node.weight_g node.bias 1 ((resblockKernel1 - 1) / 2) 1)
-      (fun node =>
-        adaIN1dDynFromLinear (channels := stage1Out) node.fc.weight node.fc.bias)
-      (fun node =>
-        adaIN1dDynFromLinear (channels := stage1Out) node.fc.weight node.fc.bias)
+      (fun node padding dilation => do
+        pure <| wnConv1dDynFromWeightNorm (inC := node.weight_v.shape[1]!) (outC := node.weight_v.shape[0]!) (kernel := node.weight_v.shape[2]!) (← checkedWeight node.weight_v) (← checkedWeight node.weight_g) (← checkedWeight node.bias) 1 padding dilation)
+      (fun node => do
+        pure <| wnConv1dDynFromWeightNorm (inC := node.weight_v.shape[1]!) (outC := node.weight_v.shape[0]!) (kernel := node.weight_v.shape[2]!) (← checkedWeight node.weight_v) (← checkedWeight node.weight_g) (← checkedWeight node.bias) 1 ((resblockKernel1 - 1) / 2) 1)
+      (fun node => do
+        pure <| adaIN1dDynFromLinear (channels := stage1Out) (← checkedWeight node.fc.weight) (← checkedWeight node.fc.bias))
+      (fun node => do
+        pure <| adaIN1dDynFromLinear (channels := stage1Out) (← checkedWeight node.fc.weight) (← checkedWeight node.fc.bias))
       alphaDyn
       alphaDyn
   let res5 ←
@@ -654,30 +653,30 @@ private def loadGeneratorFromCheckpoint
       weights.resblocks.i5.alpha2
       resblockKernel2
       resblockDilations2
-      (fun node padding dilation =>
-        wnConv1dDynFromWeightNorm (inC := node.weight_v.shape[1]!) (outC := node.weight_v.shape[0]!) (kernel := node.weight_v.shape[2]!) node.weight_v node.weight_g node.bias 1 padding dilation)
-      (fun node =>
-        wnConv1dDynFromWeightNorm (inC := node.weight_v.shape[1]!) (outC := node.weight_v.shape[0]!) (kernel := node.weight_v.shape[2]!) node.weight_v node.weight_g node.bias 1 ((resblockKernel2 - 1) / 2) 1)
-      (fun node =>
-        adaIN1dDynFromLinear (channels := stage1Out) node.fc.weight node.fc.bias)
-      (fun node =>
-        adaIN1dDynFromLinear (channels := stage1Out) node.fc.weight node.fc.bias)
+      (fun node padding dilation => do
+        pure <| wnConv1dDynFromWeightNorm (inC := node.weight_v.shape[1]!) (outC := node.weight_v.shape[0]!) (kernel := node.weight_v.shape[2]!) (← checkedWeight node.weight_v) (← checkedWeight node.weight_g) (← checkedWeight node.bias) 1 padding dilation)
+      (fun node => do
+        pure <| wnConv1dDynFromWeightNorm (inC := node.weight_v.shape[1]!) (outC := node.weight_v.shape[0]!) (kernel := node.weight_v.shape[2]!) (← checkedWeight node.weight_v) (← checkedWeight node.weight_g) (← checkedWeight node.bias) 1 ((resblockKernel2 - 1) / 2) 1)
+      (fun node => do
+        pure <| adaIN1dDynFromLinear (channels := stage1Out) (← checkedWeight node.fc.weight) (← checkedWeight node.fc.bias))
+      (fun node => do
+        pure <| adaIN1dDynFromLinear (channels := stage1Out) (← checkedWeight node.fc.weight) (← checkedWeight node.fc.bias))
       alphaDyn
       alphaDyn
   let stage0 : GeneratorStage cfg.styleDim := {
     up :=
       wnConvTranspose1dDynFromWeightNorm (inC := weights.ups.i0.weight_v.shape[0]!) (outC := weights.ups.i0.weight_v.shape[1]!) (kernel := weights.ups.i0.weight_v.shape[2]!)
-        weights.ups.i0.weight_v
-        weights.ups.i0.weight_g
-        weights.ups.i0.bias
+        (← checkedWeight weights.ups.i0.weight_v)
+        (← checkedWeight weights.ups.i0.weight_g)
+        (← checkedWeight weights.ups.i0.bias)
         stage0Stride
         ((stage0Kernel - stage0Stride) / 2)
         0
         1
     noiseConv :=
       wnConv1dDynFromPlain (inC := weights.noise_convs.i0.weight.shape[1]!) (outC := weights.noise_convs.i0.weight.shape[0]!) (kernel := weights.noise_convs.i0.weight.shape[2]!)
-        weights.noise_convs.i0.weight
-        weights.noise_convs.i0.bias
+        (← checkedWeight weights.noise_convs.i0.weight)
+        (← checkedWeight weights.noise_convs.i0.bias)
         (GeneratorConfig.noiseStride cfg.generator 0)
         (GeneratorConfig.noisePadding cfg.generator 0)
         1
@@ -687,29 +686,29 @@ private def loadGeneratorFromCheckpoint
   let stage1 : GeneratorStage cfg.styleDim := {
     up :=
       wnConvTranspose1dDynFromWeightNorm (inC := weights.ups.i1.weight_v.shape[0]!) (outC := weights.ups.i1.weight_v.shape[1]!) (kernel := weights.ups.i1.weight_v.shape[2]!)
-        weights.ups.i1.weight_v
-        weights.ups.i1.weight_g
-        weights.ups.i1.bias
+        (← checkedWeight weights.ups.i1.weight_v)
+        (← checkedWeight weights.ups.i1.weight_g)
+        (← checkedWeight weights.ups.i1.bias)
         stage1Stride
         ((stage1Kernel - stage1Stride) / 2)
         0
         1
     noiseConv :=
       wnConv1dDynFromPlain (inC := weights.noise_convs.i1.weight.shape[1]!) (outC := weights.noise_convs.i1.weight.shape[0]!) (kernel := weights.noise_convs.i1.weight.shape[2]!)
-        weights.noise_convs.i1.weight
-        weights.noise_convs.i1.bias
+        (← checkedWeight weights.noise_convs.i1.weight)
+        (← checkedWeight weights.noise_convs.i1.bias)
         (GeneratorConfig.noiseStride cfg.generator 1)
         (GeneratorConfig.noisePadding cfg.generator 1)
         1
     noiseRes := noiseRes1
     resBlocks := #[res3, res4, res5]
   }
-  let convPost := wnConv1dDynFromWeightNorm (inC := weights.conv_post.weight_v.shape[1]!) (outC := weights.conv_post.weight_v.shape[0]!) (kernel := weights.conv_post.weight_v.shape[2]!) weights.conv_post.weight_v weights.conv_post.weight_g weights.conv_post.bias 1 3 1
+  let convPost := wnConv1dDynFromWeightNorm (inC := weights.conv_post.weight_v.shape[1]!) (outC := weights.conv_post.weight_v.shape[0]!) (kernel := weights.conv_post.weight_v.shape[2]!) (← checkedWeight weights.conv_post.weight_v) (← checkedWeight weights.conv_post.weight_g) (← checkedWeight weights.conv_post.bias) 1 3 1
   pure {
     source
     stages := #[stage0, stage1]
     convPost
-    window := signal.hannWindow cfg.generator.genIstftNFft
+    window := Tensor.hannWindow cfg.generator.genIstftNFft
   }
 
 private def loadDecoderFromCheckpoint
@@ -719,46 +718,46 @@ private def loadDecoderFromCheckpoint
   let asrResNode ← getOrThrow weights.asr_res 0 "Missing decoder.asr_res.0"
   let generator ← loadGeneratorFromCheckpoint weights.generator cfg
   let encode : AdainResBlk1dSame (cfg.hiddenDim + 2) cfg.maxConvDim cfg.styleDim := {
-    conv1 := wnConv1dFromWeightNorm weights.encode.conv1.weight_v weights.encode.conv1.weight_g weights.encode.conv1.bias
-    conv2 := wnConv1dFromWeightNorm weights.encode.conv2.weight_v weights.encode.conv2.weight_g weights.encode.conv2.bias
-    norm1 := adaIN1dFromLinear weights.encode.norm1.fc.weight weights.encode.norm1.fc.bias
-    norm2 := adaIN1dFromLinear weights.encode.norm2.fc.weight weights.encode.norm2.fc.bias
-    shortcut := some <| wnConv1dFromWeightNorm weights.encode.conv1x1.weight_v weights.encode.conv1x1.weight_g (castLike (sRef := weights.encode.conv1x1.weight_v.shape) weights.encode.conv1x1.weight_v (torch.zeros #[cfg.maxConvDim] false Device.CPU))
+    conv1 := wnConv1dFromWeightNorm (← checkedWeight weights.encode.conv1.weight_v) (← checkedWeight weights.encode.conv1.weight_g) (← checkedWeight weights.encode.conv1.bias)
+    conv2 := wnConv1dFromWeightNorm (← checkedWeight weights.encode.conv2.weight_v) (← checkedWeight weights.encode.conv2.weight_g) (← checkedWeight weights.encode.conv2.bias)
+    norm1 := adaIN1dFromLinear (← checkedWeight weights.encode.norm1.fc.weight) (← checkedWeight weights.encode.norm1.fc.bias)
+    norm2 := adaIN1dFromLinear (← checkedWeight weights.encode.norm2.fc.weight) (← checkedWeight weights.encode.norm2.fc.bias)
+    shortcut := some <| wnConv1dFromWeightNorm (← checkedWeight weights.encode.conv1x1.weight_v) (← checkedWeight weights.encode.conv1x1.weight_g) (Tensor.castLike weights.encode.conv1x1.weight_v (Tensor.zeros #[cfg.maxConvDim] false Device.CPU))
   }
   let decode0 : AdainResBlk1dSame (cfg.maxConvDim + cfg.asrResDim + 2) cfg.maxConvDim cfg.styleDim := {
-    conv1 := wnConv1dFromWeightNorm weights.decode.i0.conv1.weight_v weights.decode.i0.conv1.weight_g weights.decode.i0.conv1.bias
-    conv2 := wnConv1dFromWeightNorm weights.decode.i0.conv2.weight_v weights.decode.i0.conv2.weight_g weights.decode.i0.conv2.bias
-    norm1 := adaIN1dFromLinear weights.decode.i0.norm1.fc.weight weights.decode.i0.norm1.fc.bias
-    norm2 := adaIN1dFromLinear weights.decode.i0.norm2.fc.weight weights.decode.i0.norm2.fc.bias
-    shortcut := some <| wnConv1dFromWeightNorm weights.decode.i0.conv1x1.weight_v weights.decode.i0.conv1x1.weight_g (castLike (sRef := weights.decode.i0.conv1x1.weight_v.shape) weights.decode.i0.conv1x1.weight_v (torch.zeros #[cfg.maxConvDim] false Device.CPU))
+    conv1 := wnConv1dFromWeightNorm (← checkedWeight weights.decode.i0.conv1.weight_v) (← checkedWeight weights.decode.i0.conv1.weight_g) (← checkedWeight weights.decode.i0.conv1.bias)
+    conv2 := wnConv1dFromWeightNorm (← checkedWeight weights.decode.i0.conv2.weight_v) (← checkedWeight weights.decode.i0.conv2.weight_g) (← checkedWeight weights.decode.i0.conv2.bias)
+    norm1 := adaIN1dFromLinear (← checkedWeight weights.decode.i0.norm1.fc.weight) (← checkedWeight weights.decode.i0.norm1.fc.bias)
+    norm2 := adaIN1dFromLinear (← checkedWeight weights.decode.i0.norm2.fc.weight) (← checkedWeight weights.decode.i0.norm2.fc.bias)
+    shortcut := some <| wnConv1dFromWeightNorm (← checkedWeight weights.decode.i0.conv1x1.weight_v) (← checkedWeight weights.decode.i0.conv1x1.weight_g) (Tensor.castLike weights.decode.i0.conv1x1.weight_v (Tensor.zeros #[cfg.maxConvDim] false Device.CPU))
   }
   let decode1 : AdainResBlk1dSame (cfg.maxConvDim + cfg.asrResDim + 2) cfg.maxConvDim cfg.styleDim := {
-    conv1 := wnConv1dFromWeightNorm weights.decode.i1.conv1.weight_v weights.decode.i1.conv1.weight_g weights.decode.i1.conv1.bias
-    conv2 := wnConv1dFromWeightNorm weights.decode.i1.conv2.weight_v weights.decode.i1.conv2.weight_g weights.decode.i1.conv2.bias
-    norm1 := adaIN1dFromLinear weights.decode.i1.norm1.fc.weight weights.decode.i1.norm1.fc.bias
-    norm2 := adaIN1dFromLinear weights.decode.i1.norm2.fc.weight weights.decode.i1.norm2.fc.bias
-    shortcut := some <| wnConv1dFromWeightNorm weights.decode.i1.conv1x1.weight_v weights.decode.i1.conv1x1.weight_g (castLike (sRef := weights.decode.i1.conv1x1.weight_v.shape) weights.decode.i1.conv1x1.weight_v (torch.zeros #[cfg.maxConvDim] false Device.CPU))
+    conv1 := wnConv1dFromWeightNorm (← checkedWeight weights.decode.i1.conv1.weight_v) (← checkedWeight weights.decode.i1.conv1.weight_g) (← checkedWeight weights.decode.i1.conv1.bias)
+    conv2 := wnConv1dFromWeightNorm (← checkedWeight weights.decode.i1.conv2.weight_v) (← checkedWeight weights.decode.i1.conv2.weight_g) (← checkedWeight weights.decode.i1.conv2.bias)
+    norm1 := adaIN1dFromLinear (← checkedWeight weights.decode.i1.norm1.fc.weight) (← checkedWeight weights.decode.i1.norm1.fc.bias)
+    norm2 := adaIN1dFromLinear (← checkedWeight weights.decode.i1.norm2.fc.weight) (← checkedWeight weights.decode.i1.norm2.fc.bias)
+    shortcut := some <| wnConv1dFromWeightNorm (← checkedWeight weights.decode.i1.conv1x1.weight_v) (← checkedWeight weights.decode.i1.conv1x1.weight_g) (Tensor.castLike weights.decode.i1.conv1x1.weight_v (Tensor.zeros #[cfg.maxConvDim] false Device.CPU))
   }
   let decode2 : AdainResBlk1dSame (cfg.maxConvDim + cfg.asrResDim + 2) cfg.maxConvDim cfg.styleDim := {
-    conv1 := wnConv1dFromWeightNorm weights.decode.i2.conv1.weight_v weights.decode.i2.conv1.weight_g weights.decode.i2.conv1.bias
-    conv2 := wnConv1dFromWeightNorm weights.decode.i2.conv2.weight_v weights.decode.i2.conv2.weight_g weights.decode.i2.conv2.bias
-    norm1 := adaIN1dFromLinear weights.decode.i2.norm1.fc.weight weights.decode.i2.norm1.fc.bias
-    norm2 := adaIN1dFromLinear weights.decode.i2.norm2.fc.weight weights.decode.i2.norm2.fc.bias
-    shortcut := some <| wnConv1dFromWeightNorm weights.decode.i2.conv1x1.weight_v weights.decode.i2.conv1x1.weight_g (castLike (sRef := weights.decode.i2.conv1x1.weight_v.shape) weights.decode.i2.conv1x1.weight_v (torch.zeros #[cfg.maxConvDim] false Device.CPU))
+    conv1 := wnConv1dFromWeightNorm (← checkedWeight weights.decode.i2.conv1.weight_v) (← checkedWeight weights.decode.i2.conv1.weight_g) (← checkedWeight weights.decode.i2.conv1.bias)
+    conv2 := wnConv1dFromWeightNorm (← checkedWeight weights.decode.i2.conv2.weight_v) (← checkedWeight weights.decode.i2.conv2.weight_g) (← checkedWeight weights.decode.i2.conv2.bias)
+    norm1 := adaIN1dFromLinear (← checkedWeight weights.decode.i2.norm1.fc.weight) (← checkedWeight weights.decode.i2.norm1.fc.bias)
+    norm2 := adaIN1dFromLinear (← checkedWeight weights.decode.i2.norm2.fc.weight) (← checkedWeight weights.decode.i2.norm2.fc.bias)
+    shortcut := some <| wnConv1dFromWeightNorm (← checkedWeight weights.decode.i2.conv1x1.weight_v) (← checkedWeight weights.decode.i2.conv1x1.weight_g) (Tensor.castLike weights.decode.i2.conv1x1.weight_v (Tensor.zeros #[cfg.maxConvDim] false Device.CPU))
   }
   let decode3 : AdainResBlk1dUp (cfg.maxConvDim + cfg.asrResDim + 2) (KittenTTSConfig.decoderChannels cfg) cfg.styleDim := {
-    pool := wnDepthwiseTransConv1dFromWeightNorm weights.decode.i3.pool.weight_v weights.decode.i3.pool.weight_g weights.decode.i3.pool.bias
-    conv1 := wnConv1dFromWeightNorm weights.decode.i3.conv1.weight_v weights.decode.i3.conv1.weight_g weights.decode.i3.conv1.bias
-    conv2 := wnConv1dFromWeightNorm weights.decode.i3.conv2.weight_v weights.decode.i3.conv2.weight_g weights.decode.i3.conv2.bias
-    norm1 := adaIN1dFromLinear weights.decode.i3.norm1.fc.weight weights.decode.i3.norm1.fc.bias
-    norm2 := adaIN1dFromLinear weights.decode.i3.norm2.fc.weight weights.decode.i3.norm2.fc.bias
-    shortcut := some <| wnConv1dFromWeightNorm weights.decode.i3.conv1x1.weight_v weights.decode.i3.conv1x1.weight_g (castLike (sRef := weights.decode.i3.conv1x1.weight_v.shape) weights.decode.i3.conv1x1.weight_v (torch.zeros #[KittenTTSConfig.decoderChannels cfg] false Device.CPU))
+    pool := wnDepthwiseTransConv1dFromWeightNorm (← checkedWeight weights.decode.i3.pool.weight_v) (← checkedWeight weights.decode.i3.pool.weight_g) (← checkedWeight weights.decode.i3.pool.bias)
+    conv1 := wnConv1dFromWeightNorm (← checkedWeight weights.decode.i3.conv1.weight_v) (← checkedWeight weights.decode.i3.conv1.weight_g) (← checkedWeight weights.decode.i3.conv1.bias)
+    conv2 := wnConv1dFromWeightNorm (← checkedWeight weights.decode.i3.conv2.weight_v) (← checkedWeight weights.decode.i3.conv2.weight_g) (← checkedWeight weights.decode.i3.conv2.bias)
+    norm1 := adaIN1dFromLinear (← checkedWeight weights.decode.i3.norm1.fc.weight) (← checkedWeight weights.decode.i3.norm1.fc.bias)
+    norm2 := adaIN1dFromLinear (← checkedWeight weights.decode.i3.norm2.fc.weight) (← checkedWeight weights.decode.i3.norm2.fc.bias)
+    shortcut := some <| wnConv1dFromWeightNorm (← checkedWeight weights.decode.i3.conv1x1.weight_v) (← checkedWeight weights.decode.i3.conv1x1.weight_g) (Tensor.castLike weights.decode.i3.conv1x1.weight_v (Tensor.zeros #[KittenTTSConfig.decoderChannels cfg] false Device.CPU))
   }
   pure {
-    f0Conv := wnConv1dFromWeightNorm weights.f0_conv.weight_v weights.f0_conv.weight_g weights.f0_conv.bias
-    nConv := wnConv1dFromWeightNorm weights.n_conv.weight_v weights.n_conv.weight_g weights.n_conv.bias
+    f0Conv := wnConv1dFromWeightNorm (← checkedWeight weights.f0_conv.weight_v) (← checkedWeight weights.f0_conv.weight_g) (← checkedWeight weights.f0_conv.bias)
+    nConv := wnConv1dFromWeightNorm (← checkedWeight weights.n_conv.weight_v) (← checkedWeight weights.n_conv.weight_g) (← checkedWeight weights.n_conv.bias)
     encode
-    asrRes := wnConv1dFromWeightNorm asrResNode.weight_v asrResNode.weight_g asrResNode.bias
+    asrRes := wnConv1dFromWeightNorm (← checkedWeight asrResNode.weight_v) (← checkedWeight asrResNode.weight_g) (← checkedWeight asrResNode.bias)
     decode0
     decode1
     decode2
@@ -866,7 +865,7 @@ private def buildModelFromCheckpointWeights
     : IO (Model cfg) := do
   let bert ← loadKittenAlbertFromCheckpoint weights.bert cfg
   let bertEncoder : LinearNorm cfg.plbert.hiddenSize cfg.hiddenDim :=
-    linearFromTensors weights.bertEncoder.weight weights.bertEncoder.bias
+    linearFromTensors (← checkedWeight weights.bertEncoder.weight) (← checkedWeight weights.bertEncoder.bias)
   let predictor ← loadProsodyPredictorFromCheckpoint weights.predictor cfg log
   let textEncoder ← loadTextEncoderFromCheckpoint weights.textEncoder cfg
   let decoder ← loadDecoderFromCheckpoint weights.decoder cfg

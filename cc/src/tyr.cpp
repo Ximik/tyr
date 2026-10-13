@@ -1,3 +1,4 @@
+#include "tyr_kittentts_abi.h"
 #include "tyr_qwen35_abi.h"
 /*
  * tyr.cpp - Lean 4 ↔ LibTorch FFI Bindings
@@ -1736,7 +1737,8 @@ lean_object* lean_torch_softmax_dim(lean_obj_arg /*s*/, b_lean_obj_arg input, in
 }
 
 // Cumulative sum along a dimension.
-lean_object* lean_torch_cumsum(lean_obj_arg /*s*/, b_lean_obj_arg input, int64_t dim) {
+lean_object* lean_torch_cumsum(lean_obj_arg /*s*/, b_lean_obj_arg input, uint64_t dimBits) {
+  const auto dim = std::bit_cast<int64_t>(dimBits);
   auto input_ = borrowTensor(input);
   auto result_ = torch::cumsum(input_, dim);
   return fromTorchTensor(result_);
