@@ -1,3 +1,5 @@
-# Symbols libTyrC.dylib exports on macOS; see libTyrC.map for why.
+# Symbols libTyrC.dylib exports on macOS; see libTyrC.map for why. The Makefile
+# exports only the symbols matching these patterns that libTyrC defines
+# (build/libTyrC.exports); keep its grep in sync with this file.
 _lean_*
 __ZN7tyr_ops*
