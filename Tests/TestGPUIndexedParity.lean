@@ -1,5 +1,6 @@
 import Examples.GPU.IndexedParity
 import Examples.GPU.LossReference
+import Examples.GPU.OptimizerReference
 import Examples.GPU.RunRMSNorm
 import Examples.GPU.RunLayerNorm
 import Examples.GPU.RunRotary
@@ -132,3 +133,40 @@ example (inputs : Examples.GPU.RunLayerNorm.LayerNormInputs .Float32) : True := 
     ((1.0 / 3072.0) - (if i == 0 || i == 6143 then 1.0 else 0.0)) / 2.0)
     |>.reshapeChecked #[2, 3072] |>.toBFloat16
   LeanTest.assertTrue (Tensor.allclose gradient.toFloat32 expected.toFloat32 0 0)
+
+@[test] def testGPUOptimizerIndexedReference : IO Unit := do
+  let master := Tensor.fromFloatArray #[1.0, -2.0, 3.0]
+  let grad := (Tensor.fromFloatArray #[2.0, -2.0, 0.0]).toBFloat16
+  for prior in #[false, true] do
+    let m0 := if prior then 0.25 else 0.0
+    let v0 := if prior then 0.5 else 0.0
+    let m := Tensor.full #[3] m0
+    let v := Tensor.full #[3] v0
+    let (updated, model, m1, v1) := Examples.GPU.RunOptimizer.referenceUpdate
+      master grad m v 0.01 0.5 0.75 1e-8 0.1 2.0 4.0
+    let gradients := #[2.0, -2.0, 0.0]
+    let masters := #[1.0, -2.0, 3.0]
+    let expectedM := gradients.map (fun g => 0.5 * m0 + 0.5 * g)
+    let expectedV := gradients.map (fun g => 0.75 * v0 + 0.25 * g * g)
+    let expected := Tensor.fromFloatArray ((Array.range 3).map fun i =>
+      masters[i]! - 0.01 * (2.0 * expectedM[i]! / (Float.sqrt (4.0 * expectedV[i]!) + 1e-8)
+        + 0.1 * masters[i]!)) |>.reshapeChecked #[3]
+    LeanTest.assertTrue (Tensor.allclose updated expected 0 1e-6)
+    LeanTest.assertTrue (Tensor.allclose model.toFloat32 expected.toBFloat16.toFloat32 0 0)
+    LeanTest.assertTrue (Tensor.allclose m1 ((Tensor.fromFloatArray expectedM).reshapeChecked #[3]) 0 1e-6)
+    LeanTest.assertTrue (Tensor.allclose v1 ((Tensor.fromFloatArray expectedV).reshapeChecked #[3]) 0 1e-6)
+  let dst ← Tensor.uniformLike master 0 0
+  Tensor.copyInto dst master
+  LeanTest.assertTrue (Tensor.allclose dst master 0 0)
+  Tensor.copyInto dst (Tensor.zerosLike master)
+  LeanTest.assertTrue (Tensor.allclose master (Tensor.fromFloatArray #[1.0, -2.0, 3.0]) 0 0)
+  LeanTest.assertTrue (Tensor.allclose dst (Tensor.zerosLike master) 0 0)
+
+set_option linter.unusedVariables false in
+example (a : DTensor #[2] .Float32) (b : DTensor #[2] .BFloat16)
+    (c : DTensor #[3] .Float32) : True := by
+  fail_if_success
+    have _ := Tensor.copyInto a b
+  fail_if_success
+    have _ := Tensor.copyInto a c
+  trivial

@@ -578,7 +578,7 @@ lean_object* lean_torch_ones_like(lean_obj_arg /*s*/, b_lean_obj_arg self) {
 }
 
 lean_object* lean_torch_copy_(lean_obj_arg /*s*/, b_lean_obj_arg dst,
-                              b_lean_obj_arg src, lean_object* /*w*/) {
+                              b_lean_obj_arg src) {
   try {
     borrowTensor(dst).copy_(borrowTensor(src));
     return lean_io_result_mk_ok(lean_box(0));

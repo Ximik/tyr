@@ -843,6 +843,26 @@ The inventory validates nine required and four optional suites. The loss
 executable returns failure on this CUDA-unavailable host as expected. GitHub
 CLI reports green upstream main CI; this does not validate the local commits.
 
+## Optimizer GPU runner migration
+
+The AdamW benchmark now carries Float32 master weights and moments separately
+from BF16 model weights and gradients. Its reference update is importable
+without the executable entry point, and parity checks require indexed shapes.
+The IO copy adapter requires matching shape/dtype indices for state resets;
+its native signature now matches Lean's generated three-argument declaration.
+The neural ABI audit covers all 40 declarations, including this copy boundary.
+
+CPU regression coverage includes positive, negative, and zero gradients,
+nonzero prior moments, weight decay, BF16 rounding, copy storage independence,
+and compile-time rejection of shape/dtype mismatches. Actual optimizer CUDA
+parity and benchmark timings remain unqualified.
+The main runner and both GPU targets build under `--wfail` (1,753 jobs),
+and all 1,481 main CPU tests pass with zero failures/skips. The native build
+retains its existing unused-function warning in `tyr_ops.cpp`. The optimizer
+executable correctly fails on this CUDA-unavailable host. Test inventory
+validation still finds nine required and four optional suites. Upstream main
+CI remains green, independently of these local changes.
+
 ## Remaining acceptance criteria
 
 Remove the `T` declaration and all model, generator, reflection, documentation,

@@ -1,6 +1,8 @@
 import Tyr.Torch
 import Tyr.GPU.Kernels.Optimizer
-import Examples.GPU.Parity
+import Examples.GPU.IndexedParity
+import Tyr.Typed.Neural
+import Examples.GPU.OptimizerReference
 import Examples.GPU.Benchmark
 
 namespace Examples.GPU.RunOptimizer
@@ -34,20 +36,20 @@ private def optimizerMatrix : LeanBenchmark.Matrix OptimizerShape := {
 private def benchmarkShape (cfg : Benchmark.Config) (stream : UInt64)
     (caseLabel : String) (elements : UInt64) : IO (String × Bool) := do
   let device := Device.CUDA 0
-  let master : T #[elements] ← torch.randn #[elements] false device
-  let masterOriginal : T #[elements] ← torch.randn #[elements] false device
-  torch.copy_ masterOriginal master
-  let gradF : T #[elements] ← torch.randn #[elements] false device
-  let grad : T #[elements] := torch.toBFloat16' gradF
-  let gradBackupF : T #[elements] ← torch.randn #[elements] false device
-  let gradBackup : T #[elements] := torch.toBFloat16' gradBackupF
-  torch.copy_ gradBackup grad
-  let model : T #[elements] := torch.toBFloat16' master
-  let moment1 : T #[elements] ← torch.randn #[elements] false device
-  let moment2 : T #[elements] ← torch.randn #[elements] false device
-  let zeroMoment : T #[elements] := torch.zeros_like master
-  torch.copy_ moment1 zeroMoment
-  torch.copy_ moment2 zeroMoment
+  let master : DTensor #[elements] .Float32 ← Tensor.randn #[elements] false device
+  let masterOriginal : DTensor #[elements] .Float32 ← Tensor.randn #[elements] false device
+  Tensor.copyInto masterOriginal master
+  let gradF : DTensor #[elements] .Float32 ← Tensor.randn #[elements] false device
+  let grad : DTensor #[elements] .BFloat16 := gradF.toBFloat16
+  let gradBackupF : DTensor #[elements] .Float32 ← Tensor.randn #[elements] false device
+  let gradBackup : DTensor #[elements] .BFloat16 := gradBackupF.toBFloat16
+  Tensor.copyInto gradBackup grad
+  let model : DTensor #[elements] .BFloat16 := master.toBFloat16
+  let moment1 : DTensor #[elements] .Float32 ← Tensor.randn #[elements] false device
+  let moment2 : DTensor #[elements] .Float32 ← Tensor.randn #[elements] false device
+  let zeroMoment : DTensor #[elements] .Float32 := Tensor.zerosLike master
+  Tensor.copyInto moment1 zeroMoment
+  Tensor.copyInto moment2 zeroMoment
   let learningRate : Float := 3.0e-4
   let beta1 : Float := 0.9
   let beta2 : Float := 0.95
@@ -55,64 +57,55 @@ private def benchmarkShape (cfg : Benchmark.Config) (stream : UInt64)
   let weightDecay : Float := 0.1
   let invBias1 : Float := 1.0 / (1.0 - beta1)
   let invBias2 : Float := 1.0 / (1.0 - beta2)
-  let grad32 := torch.toFloat' grad
-  let expectedM : T #[elements] :=
-    torch.add (moment1 * beta1) (grad32 * (1.0 - beta1))
-  let expectedV : T #[elements] :=
-    torch.add (moment2 * beta2) ((torch.mul grad32 grad32) * (1.0 - beta2))
-  let mHat := expectedM * invBias1
-  let vHat := expectedV * invBias2
-  let invDenom := torch.nn.pow (torch.nn.sqrt vHat + epsilon) (-1.0)
-  let update : T #[elements] :=
-    torch.add (torch.mul mHat invDenom) (masterOriginal * weightDecay)
-  let expectedMaster : T #[elements] := torch.sub masterOriginal (update * learningRate)
-  let expectedModel := torch.toBFloat16' expectedMaster
+  let (expectedMaster, expectedModel, expectedM, expectedV) :=
+    referenceUpdate masterOriginal grad moment1 moment2 learningRate beta1 beta2 epsilon
+      weightDecay invBias1 invBias2
   let blocks := (elements + 255) / 256
   let launch : IO Unit :=
-    adamWMasterBf16.launch master model grad moment1 moment2 elements
+    adamWMasterBf16.launch master.raw model.raw grad.raw moment1.raw moment2.raw elements
       learningRate.toFloat32 beta1.toFloat32 beta2.toFloat32 epsilon.toFloat32
       weightDecay.toFloat32 invBias1.toFloat32 invBias2.toFloat32
       blocks 1 1 256 1 1 0 stream
 
   launch
   torch.cuda_synchronize
-  let preMaster := compareTensors s!"optimizer.{caseLabel}.master" expectedMaster master 2e-5 2e-5
-  let preModel := compareTensors s!"optimizer.{caseLabel}.model" expectedModel model 2e-3 2e-3
-  let preM := compareTensors s!"optimizer.{caseLabel}.moment1" expectedM moment1 2e-5 2e-5
-  let preV := compareTensors s!"optimizer.{caseLabel}.moment2" expectedV moment2 2e-5 2e-5
+  let preMaster := IndexedParity.compareTensors s!"optimizer.{caseLabel}.master" expectedMaster master 2e-5 2e-5
+  let preModel := IndexedParity.compareTensors s!"optimizer.{caseLabel}.model" expectedModel model 2e-3 2e-3
+  let preM := IndexedParity.compareTensors s!"optimizer.{caseLabel}.moment1" expectedM moment1 2e-5 2e-5
+  let preV := IndexedParity.compareTensors s!"optimizer.{caseLabel}.moment2" expectedV moment2 2e-5 2e-5
   for check in #[preMaster, preModel, preM, preV] do logTensorCheck check
 
-  let zeroMaster : T #[elements] ← torch.randn #[elements] false device
-  torch.copy_ master zeroMaster
-  torch.copy_ model (torch.toBFloat16' zeroMaster)
-  torch.copy_ grad (torch.zeros_like grad)
-  torch.copy_ moment1 zeroMoment
-  torch.copy_ moment2 zeroMoment
+  let zeroMaster : DTensor #[elements] .Float32 ← Tensor.randn #[elements] false device
+  Tensor.copyInto master zeroMaster
+  Tensor.copyInto model (zeroMaster.toBFloat16)
+  Tensor.copyInto grad (Tensor.zerosLike grad)
+  Tensor.copyInto moment1 zeroMoment
+  Tensor.copyInto moment2 zeroMoment
   launch
   torch.cuda_synchronize
-  let zeroExpectedMaster : T #[elements] :=
+  let zeroExpectedMaster : DTensor #[elements] .Float32 :=
     zeroMaster * (1.0 - learningRate * weightDecay)
-  let zeroExpectedModel := torch.toBFloat16' zeroExpectedMaster
+  let zeroExpectedModel := zeroExpectedMaster.toBFloat16
   let zeroMasterCheck :=
-    compareTensors s!"optimizer.{caseLabel}.zero_grad.master" zeroExpectedMaster master 2e-5 2e-5
+    IndexedParity.compareTensors s!"optimizer.{caseLabel}.zero_grad.master" zeroExpectedMaster master 2e-5 2e-5
   let zeroModelCheck :=
-    compareTensors s!"optimizer.{caseLabel}.zero_grad.model" zeroExpectedModel model 2e-3 2e-3
+    IndexedParity.compareTensors s!"optimizer.{caseLabel}.zero_grad.model" zeroExpectedModel model 2e-3 2e-3
   let zeroMCheck :=
-    compareTensors s!"optimizer.{caseLabel}.zero_grad.moment1" zeroMoment moment1 0 0
+    IndexedParity.compareTensors s!"optimizer.{caseLabel}.zero_grad.moment1" zeroMoment moment1 0 0
   let zeroVCheck :=
-    compareTensors s!"optimizer.{caseLabel}.zero_grad.moment2" zeroMoment moment2 0 0
+    IndexedParity.compareTensors s!"optimizer.{caseLabel}.zero_grad.moment2" zeroMoment moment2 0 0
   for check in #[zeroMasterCheck, zeroModelCheck, zeroMCheck, zeroVCheck] do
     logTensorCheck check
 
-  let resetMaster : T #[elements] ← torch.randn #[elements] false device
-  torch.copy_ master resetMaster
-  torch.copy_ model (torch.toBFloat16' resetMaster)
-  torch.copy_ grad gradBackup
-  torch.copy_ moment1 zeroMoment
-  torch.copy_ moment2 zeroMoment
+  let resetMaster : DTensor #[elements] .Float32 ← Tensor.randn #[elements] false device
+  Tensor.copyInto master resetMaster
+  Tensor.copyInto model (resetMaster.toBFloat16)
+  Tensor.copyInto grad gradBackup
+  Tensor.copyInto moment1 zeroMoment
+  Tensor.copyInto moment2 zeroMoment
   let samples ← Benchmark.timeCudaEvents cfg stream launch
-  let finiteMaster := compareTensors s!"optimizer.{caseLabel}.master.self" master master 0 0
-  let finiteModel := compareTensors s!"optimizer.{caseLabel}.model.self" model model 0 0
+  let finiteMaster := IndexedParity.compareTensors s!"optimizer.{caseLabel}.master.self" master master 0 0
+  let finiteModel := IndexedParity.compareTensors s!"optimizer.{caseLabel}.model.self" model model 0 0
   let correct := preMaster.ok && preModel.ok && preM.ok && preV.ok &&
     zeroMasterCheck.ok && zeroModelCheck.ok && zeroMCheck.ok && zeroVCheck.ok &&
     finiteMaster.ok && finiteModel.ok

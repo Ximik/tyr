@@ -3,6 +3,8 @@ import Tyr.RawTensor
 /-! Native neural-network operations. Only typed adapters consume these handles. -/
 namespace torch.RawTensor
 
+@[extern "lean_torch_copy_"] opaque copyInto (shape : Shape) (dst src : @& RawTensor) : IO Unit
+
 @[extern "lean_torch_conv2d_bias"] opaque conv2dBias (inputShape weightShape biasShape : Shape)
     (input weight bias : @& RawTensor) (stride padding dilation : Array UInt64) : RawTensor
 @[extern "lean_torch_cat_dyn"] opaque catMany (tensors : @& Array RawTensor) (dim : Int) : RawTensor

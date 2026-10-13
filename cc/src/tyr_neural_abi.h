@@ -5,6 +5,7 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+lean_object* lean_torch_copy_(lean_object*, lean_object*, lean_object*);
 lean_object* lean_torch_conv2d_bias(lean_object*, lean_object*, lean_object*, lean_object*, lean_object*, lean_object*, lean_object*, lean_object*, lean_object*);
 lean_object* lean_torch_cat_dyn(lean_object*, lean_object*);
 lean_object* lean_torch_arange(uint64_t, uint64_t, uint64_t);

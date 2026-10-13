@@ -3,6 +3,10 @@ import Tyr.RawTensor.Neural
 
 namespace torch.Tensor
 
+/-- Copy into existing storage; source and destination must share shape and dtype. -/
+def copyInto {σ : StaticSpec} (dst src : Tensor σ) : IO Unit :=
+  RawTensor.copyInto σ.shape dst.raw src.raw
+
 /-- Forget only the dtype claim. Shape and placement remain indexed. -/
 def forgetDType {σ : StaticSpec} (t : Tensor σ) : Tensor { σ with dtype := .Unknown "dynamic" } :=
   .assumeSpec t.raw
