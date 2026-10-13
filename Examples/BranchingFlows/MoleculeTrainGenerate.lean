@@ -440,7 +440,7 @@ private def loadMuonOptimState [TensorStruct Params]
   let count ← match countRaw.trimAscii.toString.toNat? with
     | some n => pure n
     | none => throw (IO.userError s!"invalid Muon optimizer count in {muonCountPath dir}")
-  pure { momentum := TensorStruct.map autograd.detach momentum, step := count }
+  pure { momentum := TensorStruct.map Tensor.detach momentum, step := count }
 
 private def runWithModel {Params : Type} [TensorStruct Params] {maxLen vocab : UInt64}
     (opts : RunOptions)
@@ -469,7 +469,7 @@ private def runWithModel {Params : Type} [TensorStruct Params] {maxLen vocab : U
         IO.println s!"loaded molecule checkpoint from {checkpointDir} at iteration={checkpointMeta.iteration} trainLoss={checkpointMeta.trainLoss}"
         pure (loadedParams, checkpointMeta.iteration, some checkpointMeta)
   let initParams := TensorStruct.map (fun t => t.to opts.device) initParams
-  let initParams := if opts.bf16 then TensorStruct.map torch.toBFloat16' initParams else initParams
+  let initParams ← if opts.bf16 then castTreeBFloat16 initParams else pure initParams
   let mut params := initParams
   let mut rng : Rng := { state := opts.seed + 17 }
 
@@ -530,9 +530,9 @@ private def runWithModel {Params : Type} [TensorStruct Params] {maxLen vocab : U
     let mut graphAttempted := false
     let mut graphed := false
     let mut staticBatch? : Option (BranchingMoleculeBatch batchU maxLen) := none
-    let mut lrBuf? : Option (T #[]) := none
+    let mut lrBuf? : Option (STensor #[]) := none
     let mut graphOut? : Option
-      (Params × MoleculeMuonState Params × (T #[] × T #[] × T #[] × T #[] × T #[])) := none
+      (Params × MoleculeMuonState Params × (STensor #[] × STensor #[] × STensor #[] × STensor #[] × STensor #[])) := none
 
     for step in [:opts.steps] do
       let globalStep := startIteration + step
@@ -546,13 +546,13 @@ private def runWithModel {Params : Type} [TensorStruct Params] {maxLen vocab : U
         graphAttempted := true
         try
           let ⟨_batch, packedCpu⟩ ← packBranchingMolecule trainCfg bridgeBatch labelDFM
-          let sb : BranchingMoleculeBatch batchU maxLen :=
+          let sb : BranchingMoleculeBatch batchU maxLen ←
             BranchingMoleculeBatch.zeros batchU maxLen opts.device opts.bf16
           -- Force the lazy staging (alloc + in-place copies) to run *before*
           -- capture begins; pure lets would otherwise evaluate inside it.
           let sb ← (sb.copyInto (packedCpu.toDevice opts.device)).eval
-          let lrT : T #[] := torch.full #[] lr false opts.device
-          torch.touch lrT
+          let lrT : STensor #[] ← data.cloneInferenceIO (fullDynamic #[] lr false opts.device)
+          touchTensor lrT
           torch.cudaGraphCaptureBegin
           let (outP, outM, losses) ←
             trainStepMoleculeMuonCoreT (batch := batchU) (maxLen := maxLen) (vocab := vocab) trainCfg
@@ -569,11 +569,11 @@ private def runWithModel {Params : Type} [TensorStruct Params] {maxLen vocab : U
           -- no_grad: the canonical params are requires-grad leaves, and
           -- in-place copy_ into them is only legal with autograd off.
           params ← torch.autograd.no_grad do
-            TensorStruct.mapM (fun t => do torch.touch t; pure t)
-              (TensorStruct.zipWith (fun d s => copyInplace d s) params outP)
+            TensorStruct.mapM (fun t => do touchTensor t; pure t)
+              (TensorStruct.zipWith (fun d s => copyIntoChecked d s) params outP)
           let momentum' ← torch.autograd.no_grad do
-            TensorStruct.mapM (fun t => do torch.touch t; pure t)
-              (TensorStruct.zipWith (fun d s => copyInplace d s) optState.momentum outM.momentum)
+            TensorStruct.mapM (fun t => do touchTensor t; pure t)
+              (TensorStruct.zipWith (fun d s => copyIntoChecked d s) optState.momentum outM.momentum)
           optState := { momentum := momentum', step := outM.step }
           let (tl, cl, ll, sl, dl) := losses
           lastReport := moleculeLossReport tl cl ll sl dl
@@ -599,14 +599,14 @@ private def runWithModel {Params : Type} [TensorStruct Params] {maxLen vocab : U
         -- Force input staging before the replay launches, and the fold-back
         -- copies before the next replay reads the canonical storage.
         let _ ← (sb.copyInto (packedCpu.toDevice opts.device)).eval
-        torch.touch (copyInplace lrT (torch.full #[] lr))
+        touchTensor (copyIntoChecked lrT (fullDynamic #[] lr))
         torch.cudaGraphReplay
         params ← torch.autograd.no_grad do
-          TensorStruct.mapM (fun t => do torch.touch t; pure t)
-            (TensorStruct.zipWith (fun d s => copyInplace d s) params outP)
+          TensorStruct.mapM (fun t => do touchTensor t; pure t)
+            (TensorStruct.zipWith (fun d s => copyIntoChecked d s) params outP)
         let momentum' ← torch.autograd.no_grad do
-          TensorStruct.mapM (fun t => do torch.touch t; pure t)
-            (TensorStruct.zipWith (fun d s => copyInplace d s) optState.momentum outM.momentum)
+          TensorStruct.mapM (fun t => do touchTensor t; pure t)
+            (TensorStruct.zipWith (fun d s => copyIntoChecked d s) optState.momentum outM.momentum)
         optState := { momentum := momentum', step := outM.step }
                 let (tl, cl, ll, sl, dl) := losses
         lastReport := moleculeLossReport tl cl ll sl dl
@@ -828,13 +828,13 @@ def run (opts : RunOptions) : IO Unit := do
     -- capture region (`forward` recomputes them per call with a host→device
     -- copy, which is illegal during CUDA stream capture).
     let (ropeCos, ropeSin) :=
-      rotary.computeFreqsOnDevicePure opts.maxLen opts.headDim 10000.0 opts.device
+      Tensor.rotaryFreqs opts.maxLen opts.headDim 10000.0 opts.device
     let graphModel : BranchingMoleculeModel opts.maxLen vocab
         (FullMoleculeTransformerParams vocab opts.hiddenDim opts.heads opts.headDim
           opts.mlp opts.rffDim opts.layers) :=
       { forward := fun {batch} params coord label t padmask =>
           FullMoleculeTransformerParams.forwardFreqs (batch := batch) params coord label t
-            padmask ropeCos ropeSin
+            padmask ropeCos.forgetDType ropeSin.forgetDType
             (coordUpdateLayers := opts.coordUpdateLayers)
             (coordTargetCap? := opts.coordTargetCap?) }
     runWithModel (maxLen := opts.maxLen) (vocab := vocab)

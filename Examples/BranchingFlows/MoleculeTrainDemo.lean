@@ -17,17 +17,17 @@ open torch
 open torch.branching
 
 structure MoleculeToyParams (vocab : UInt64) where
-  coordW : T #[3, 3]
-  coordB : T #[3]
-  labelTable : T #[vocab, vocab]
+  coordW : STensor #[3, 3]
+  coordB : STensor #[3]
+  labelTable : STensor #[vocab, vocab]
   deriving TensorStruct
 
 namespace MoleculeToyParams
 
 def init (vocab : UInt64) : IO (MoleculeToyParams vocab) := do
-  let coordW := torch.zeros #[3, 3]
-  let coordB := torch.zeros #[3]
-  let labelTable := torch.zeros #[vocab, vocab]
+  let coordW := zerosDynamic #[3, 3]
+  let coordB := zerosDynamic #[3]
+  let labelTable := zerosDynamic #[vocab, vocab]
   pure { coordW, coordB, labelTable }
 
 end MoleculeToyParams
@@ -35,12 +35,12 @@ end MoleculeToyParams
 def moleculeToyModel {maxLen vocab : UInt64} :
     BranchingMoleculeModel maxLen vocab (MoleculeToyParams vocab) :=
   { forward := fun {batch} params coord label _t _padmask => do
-      let coordPred := torch.affine3d coord params.coordW params.coordB
+      let coordPred := Tensor.affine3d coord params.coordW params.coordB
       let labelLogits :=
-        torch.nn.embedding (batch := batch) (seq := maxLen) (vocab := vocab) (embed := vocab)
+        Tensor.embedding (batch := batch) (seq := maxLen) (vocab := vocab) (embed := vocab)
           label params.labelTable
-      let splitLogits := torch.zeros #[batch, maxLen]
-      let delLogits := torch.zeros #[batch, maxLen]
+      let splitLogits := zerosDynamic #[batch, maxLen]
+      let delLogits := zerosDynamic #[batch, maxLen]
       pure (coordPred, labelLogits, splitLogits, delLogits) }
 
 private def demoJson : String :=

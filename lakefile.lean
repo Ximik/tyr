@@ -244,6 +244,16 @@ lean_exe test_runner_experimental where
   root := `Tests.RunTestsExperimental
   supportInterpreter := true
 
+/-- BranchingFlows discrete-token training demonstration. -/
+lean_exe BranchingFlowsDiscreteTrain where
+  root := `Examples.BranchingFlows.DiscreteTrainDemo
+  supportInterpreter := true
+
+/-- BranchingFlows mixed continuous/token training demonstration. -/
+lean_exe BranchingFlowsMixedTrain where
+  root := `Examples.BranchingFlows.MixedTrainDemo
+  supportInterpreter := true
+
 /-- BranchingFlows continuous overfit training check. -/
 lean_exe BranchingFlowsContinuousTrain where
   root := `Examples.BranchingFlows.ContinuousTrainDemo

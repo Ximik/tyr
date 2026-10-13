@@ -1,3 +1,4 @@
+#include "tyr_branching_abi.h"
 #include "tyr_kittentts_abi.h"
 #include "tyr_qwen35_abi.h"
 /*
@@ -2771,10 +2772,10 @@ lean_object* lean_torch_sdpa_4d(
 // Replaces the manual matmul -> bias add -> masked_fill -> softmax -> matmul
 // pipeline (and its un-fused backward) for the molecule transformers.
 lean_object* lean_torch_sdpa_4d_bias(
-  lean_obj_arg /*batch*/,
-  lean_obj_arg /*n_head*/,
-  lean_obj_arg /*seq*/,
-  lean_obj_arg /*head_dim*/,
+  uint64_t /*batch*/,
+  uint64_t /*n_head*/,
+  uint64_t /*seq*/,
+  uint64_t /*head_dim*/,
   b_lean_obj_arg query,
   b_lean_obj_arg key,
   b_lean_obj_arg value,
@@ -2825,7 +2826,7 @@ lean_object* lean_torch_copy_inplace(
 // No-op that forces its tensor argument at the FFI boundary. Used to force
 // lazy Lean staging computations (static buffers, in-place copies) to run
 // eagerly *before* a CUDA graph capture/replay instead of inside it.
-lean_object* lean_torch_touch(lean_obj_arg /*s*/, b_lean_obj_arg /*t*/, lean_object* w) {
+lean_object* lean_torch_touch(lean_obj_arg /*s*/, b_lean_obj_arg /*t*/) {
   return lean_io_result_mk_ok(lean_box(0));
 }
 

@@ -25,35 +25,35 @@ private def uniformTimeDist : TimeDist :=
     quantile := fun p => clamp01 p }
 
 private def linBridge {dim : UInt64} (_ : Unit)
-    (x0 x1 : T #[dim]) (t0 t1 : Float) : T #[dim] :=
+    (x0 x1 : STensor #[dim]) (t0 t1 : Float) : STensor #[dim] :=
   let dt := t1 - t0
   x0 + (x1 - x0) * dt
 
 structure ToyParams (dim : UInt64) where
-  W : T #[dim, dim]
-  b : T #[dim]
+  W : STensor #[dim, dim]
+  b : STensor #[dim]
   deriving TensorStruct
 
 namespace ToyParams
 
 def init (dim : UInt64) : IO (ToyParams dim) := do
-  let W := torch.zeros #[dim, dim]
-  let b := torch.zeros #[dim]
+  let W := zerosDynamic #[dim, dim]
+  let b := zerosDynamic #[dim]
   pure { W, b }
 
 end ToyParams
 
 def toyModel {maxLen dim : UInt64} : BranchingModelContinuous maxLen dim (ToyParams dim) :=
   { forward := fun {batch} params state _t => do
-      let anchorPred := torch.affine3d state params.W params.b
-      let splitLogits := torch.zeros #[batch, maxLen]
-      let delLogits := torch.zeros #[batch, maxLen]
+      let anchorPred := Tensor.affine3d state params.W params.b
+      let splitLogits := zerosDynamic #[batch, maxLen]
+      let delLogits := zerosDynamic #[batch, maxLen]
       pure (anchorPred, splitLogits, delLogits) }
 
-private def mkVec2 (x y : Float) : T #[2] :=
-  reshape (torch.data.fromFloatArray #[x, y]) #[2]
+private def mkVec2 (x y : Float) : STensor #[2] :=
+  Tensor.reshapeChecked (floatsDynamic #[x, y]) #[2]
 
-private def fixedState : BranchingState (T #[2]) :=
+private def fixedState : BranchingState (STensor #[2]) :=
   BranchingState.mkDefault
     #[mkVec2 1.0 2.0, mkVec2 (-1.0) 0.5, mkVec2 0.25 (-0.75), mkVec2 2.0 (-1.0)]
     #[0, 0, 0, 0]
@@ -66,11 +66,11 @@ def runDemo : IO Unit := do
   let x1 := fixedState
   let x1s := #[x1]
   let times := #[0.5]
-  let x0Sampler : FlowNode (T #[dim]) → T #[dim] := fun _node => torch.zeros #[dim]
+  let x0Sampler : FlowNode (STensor #[dim]) → STensor #[dim] := fun _node => zerosDynamic #[dim]
 
   let (bridgeResult, _rng) :=
     branchingBridge (linBridge (dim := dim)) () x0Sampler x1s times
-      uniformTimeDist uniformTimeDist (sequentialUniformPolicy (T #[dim]))
+      uniformTimeDist uniformTimeDist (sequentialUniformPolicy (STensor #[dim]))
       canonicalAnchorMerge
       (coalescenceFactor := 0.0)
       (maxLen := some maxLen.toNat)

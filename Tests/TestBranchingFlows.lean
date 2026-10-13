@@ -207,14 +207,14 @@ def testBranchingLossHelpers : IO Unit := do
 
 @[test]
 def testBranchingTensorTrainingLosses : IO Unit := do
-  let logits : T #[1, 2] := reshape (data.fromFloatArray #[0.0, 0.0]) #[1, 2]
-  let splitTarget : T #[1, 2] := reshape (data.fromFloatArray #[1.0, 0.0]) #[1, 2]
-  let firstOnly : T #[1, 2] := reshape (data.fromFloatArray #[1.0, 0.0]) #[1, 2]
-  let splitLoss := nn.item (maskedSplitPoissonLoss logits splitTarget firstOnly)
+  let logits : STensor #[1, 2] := Tensor.reshapeChecked (floatsDynamic #[0.0, 0.0]) #[1, 2]
+  let splitTarget : STensor #[1, 2] := Tensor.reshapeChecked (floatsDynamic #[1.0, 0.0]) #[1, 2]
+  let firstOnly : STensor #[1, 2] := Tensor.reshapeChecked (floatsDynamic #[1.0, 0.0]) #[1, 2]
+  let splitLoss := Tensor.item (maskedSplitPoissonLoss logits splitTarget firstOnly)
   LeanTest.assertTrue (Float.abs splitLoss < 1.0e-6)
     s!"Unit split intensity should have zero tensor Poisson loss for count one, got {splitLoss}"
-  let delTarget : T #[1, 2] := reshape (data.fromFloatArray #[1.0, 0.0]) #[1, 2]
-  let delLoss := nn.item (maskedBCEWithLogits logits delTarget firstOnly)
+  let delTarget : STensor #[1, 2] := Tensor.reshapeChecked (floatsDynamic #[1.0, 0.0]) #[1, 2]
+  let delLoss := Tensor.item (maskedBCEWithLogits logits delTarget firstOnly)
   LeanTest.assertTrue (Float.abs (delLoss - Float.log 2.0) < 1.0e-6)
     s!"Zero-logit tensor deletion BCE should equal log(2), got {delLoss}"
 
@@ -844,29 +844,29 @@ def testBranchingMoleculePackingAndLosses : IO Unit := do
   let cfg : BranchingTrainConfig := { maxLen := 2, padToken := 0 }
   let ⟨batch, packed⟩ ← packBranchingMolecule cfg result
   LeanTest.assertEqual batch (1 : UInt64) "Packed molecule batch should preserve batch size"
-  LeanTest.assertTrue (Float.abs (nn.item (nn.sumAll packed.coord) - 6.0) < 1.0e-6)
+  LeanTest.assertTrue (Float.abs (Tensor.item (Tensor.sumAll packed.coord) - 6.0) < 1.0e-6)
     "Packed molecule coordinates should contain the bridge state coordinates"
-  LeanTest.assertTrue (Float.abs (nn.item (nn.sumAll packed.coordAnchor) - 15.0) < 1.0e-6)
+  LeanTest.assertTrue (Float.abs (Tensor.item (Tensor.sumAll packed.coordAnchor) - 15.0) < 1.0e-6)
     "Packed molecule anchor coordinates should contain endpoint coordinates"
-  LeanTest.assertTrue (Float.abs (nn.item (nn.sumAll (toFloat' packed.label)) - 9.0) < 1.0e-6)
+  LeanTest.assertTrue (Float.abs (Tensor.item (Tensor.sumAll (floatDynamic packed.label)) - 9.0) < 1.0e-6)
     "Packed molecule labels should contain atom labels and pad with the configured pad token"
-  LeanTest.assertTrue (Float.abs (nn.item (nn.sumAll (toFloat' packed.labelAnchor)) - 6.0) < 1.0e-6)
+  LeanTest.assertTrue (Float.abs (Tensor.item (Tensor.sumAll (floatDynamic packed.labelAnchor)) - 6.0) < 1.0e-6)
     "Packed molecule anchor labels should contain atom-label targets"
-  LeanTest.assertTrue (Float.abs (nn.item (nn.sumAll packed.padmask) - 1.0) < 1.0e-6)
+  LeanTest.assertTrue (Float.abs (Tensor.item (Tensor.sumAll packed.padmask) - 1.0) < 1.0e-6)
     "Packed molecule pad mask should mark only real atoms"
-  LeanTest.assertTrue (Float.abs (nn.item (nn.sumAll packed.splitsTarget) - 2.0) < 1.0e-6)
+  LeanTest.assertTrue (Float.abs (Tensor.item (Tensor.sumAll packed.splitsTarget) - 2.0) < 1.0e-6)
     "Packed molecule split targets should preserve BranchingBridgeResult targets"
-  LeanTest.assertTrue (Float.abs (nn.item (nn.sumAll packed.delTarget) - 1.0) < 1.0e-6)
+  LeanTest.assertTrue (Float.abs (Tensor.item (Tensor.sumAll packed.delTarget) - 1.0) < 1.0e-6)
     "Packed molecule deletion targets should preserve BranchingBridgeResult targets"
 
   let totalLogits := batch.toNat * cfg.maxLen.toNat * 10
-  let labelLogits : T #[batch, cfg.maxLen, 10] :=
-    reshape (data.fromFloatArray (Array.replicate totalLogits 0.0)) #[batch, cfg.maxLen, 10]
+  let labelLogits : STensor #[batch, cfg.maxLen, 10] :=
+    Tensor.reshapeChecked (floatsDynamic (Array.replicate totalLogits 0.0)) #[batch, cfg.maxLen, 10]
   let flat := batch.toNat * cfg.maxLen.toNat
-  let splitLogits : T #[batch, cfg.maxLen] :=
-    reshape (data.fromFloatArray (Array.replicate flat 0.0)) #[batch, cfg.maxLen]
-  let delLogits : T #[batch, cfg.maxLen] :=
-    reshape (data.fromFloatArray (Array.replicate flat 0.0)) #[batch, cfg.maxLen]
+  let splitLogits : STensor #[batch, cfg.maxLen] :=
+    Tensor.reshapeChecked (floatsDynamic (Array.replicate flat 0.0)) #[batch, cfg.maxLen]
+  let delLogits : STensor #[batch, cfg.maxLen] :=
+    Tensor.reshapeChecked (floatsDynamic (Array.replicate flat 0.0)) #[batch, cfg.maxLen]
   let (_loss, report) := moleculeLosses cfg packed packed.coordAnchor labelLogits splitLogits delLogits
   LeanTest.assertTrue (Float.abs report.coord < 1.0e-6)
     s!"Coordinate loss should be zero when prediction equals anchor, got {report.coord}"
@@ -878,17 +878,17 @@ def testBranchingMoleculePackingAndLosses : IO Unit := do
   let labelDFM := DistNoisyDiscreteConfig.qm9 10 9
   let ⟨batchDfm, packedDfm⟩ ← packBranchingMoleculeWithDFM cfg labelDFM result
   LeanTest.assertEqual batchDfm (1 : UInt64) "DFM-packed molecule batch should preserve batch size"
-  let scaleSum := nn.item (nn.sumAll packedDfm.labelLossScale)
+  let scaleSum := Tensor.item (Tensor.sumAll packedDfm.labelLossScale)
   LeanTest.assertTrue (Float.abs (scaleSum - (1.0 / 0.95)) < 1.0e-5)
     s!"DFM-packed molecule batch should carry Flowfusion label scale at t=0.25, got {scaleSum}"
   let totalDfmLogits := batchDfm.toNat * cfg.maxLen.toNat * 10
-  let labelLogitsDfm : T #[batchDfm, cfg.maxLen, 10] :=
-    reshape (data.fromFloatArray (Array.replicate totalDfmLogits 0.0)) #[batchDfm, cfg.maxLen, 10]
+  let labelLogitsDfm : STensor #[batchDfm, cfg.maxLen, 10] :=
+    Tensor.reshapeChecked (floatsDynamic (Array.replicate totalDfmLogits 0.0)) #[batchDfm, cfg.maxLen, 10]
   let flatDfm := batchDfm.toNat * cfg.maxLen.toNat
-  let splitLogitsDfm : T #[batchDfm, cfg.maxLen] :=
-    reshape (data.fromFloatArray (Array.replicate flatDfm 0.0)) #[batchDfm, cfg.maxLen]
-  let delLogitsDfm : T #[batchDfm, cfg.maxLen] :=
-    reshape (data.fromFloatArray (Array.replicate flatDfm 0.0)) #[batchDfm, cfg.maxLen]
+  let splitLogitsDfm : STensor #[batchDfm, cfg.maxLen] :=
+    Tensor.reshapeChecked (floatsDynamic (Array.replicate flatDfm 0.0)) #[batchDfm, cfg.maxLen]
+  let delLogitsDfm : STensor #[batchDfm, cfg.maxLen] :=
+    Tensor.reshapeChecked (floatsDynamic (Array.replicate flatDfm 0.0)) #[batchDfm, cfg.maxLen]
   let (_dfmLoss, dfmReport) :=
     moleculeLosses cfg packedDfm packedDfm.coordAnchor labelLogitsDfm splitLogitsDfm delLogitsDfm
   LeanTest.assertTrue (dfmReport.label > report.label)
@@ -925,14 +925,14 @@ def testMoleculeLossUsesJuliaTimeScalingAndIndependentWeights : IO Unit := do
   }
   let ⟨batchEarly, early⟩ ← packBranchingMolecule cfg (singleAtomMoleculeLossFixture 0.0)
   let ⟨batchLate, late⟩ ← packBranchingMolecule cfg (singleAtomMoleculeLossFixture 0.9)
-  let labelEarly : T #[batchEarly, cfg.maxLen, 1] := torch.zeros #[batchEarly, cfg.maxLen, 1]
-  let splitEarly : T #[batchEarly, cfg.maxLen] := torch.zeros #[batchEarly, cfg.maxLen]
-  let delEarly : T #[batchEarly, cfg.maxLen] := torch.zeros #[batchEarly, cfg.maxLen]
+  let labelEarly : STensor #[batchEarly, cfg.maxLen, 1] := zerosDynamic #[batchEarly, cfg.maxLen, 1]
+  let splitEarly : STensor #[batchEarly, cfg.maxLen] := zerosDynamic #[batchEarly, cfg.maxLen]
+  let delEarly : STensor #[batchEarly, cfg.maxLen] := zerosDynamic #[batchEarly, cfg.maxLen]
   let (totalEarly, reportEarly) :=
     moleculeLosses cfg early early.coord labelEarly splitEarly delEarly
-  let labelLate : T #[batchLate, cfg.maxLen, 1] := torch.zeros #[batchLate, cfg.maxLen, 1]
-  let splitLate : T #[batchLate, cfg.maxLen] := torch.zeros #[batchLate, cfg.maxLen]
-  let delLate : T #[batchLate, cfg.maxLen] := torch.zeros #[batchLate, cfg.maxLen]
+  let labelLate : STensor #[batchLate, cfg.maxLen, 1] := zerosDynamic #[batchLate, cfg.maxLen, 1]
+  let splitLate : STensor #[batchLate, cfg.maxLen] := zerosDynamic #[batchLate, cfg.maxLen]
+  let delLate : STensor #[batchLate, cfg.maxLen] := zerosDynamic #[batchLate, cfg.maxLen]
   let (_, reportLate) :=
     moleculeLosses cfg late late.coord labelLate splitLate delLate
   LeanTest.assertTrue (Float.abs (reportLate.coord / reportEarly.coord - 4.0) < 1.0e-4)
@@ -942,19 +942,19 @@ def testMoleculeLossUsesJuliaTimeScalingAndIndependentWeights : IO Unit := do
   LeanTest.assertTrue (Float.abs (reportLate.del / reportEarly.del - 4.0) < 1.0e-4)
     s!"Late deletion supervision should receive Julia scalefloss amplification, early={reportEarly.del}, late={reportLate.del}"
   let expectedTotal := reportEarly.coord * 2.0 + reportEarly.splits + reportEarly.del
-  LeanTest.assertTrue (Float.abs (nn.item totalEarly - expectedTotal) < 1.0e-5)
-    s!"Independent molecule loss weights should determine total loss, expected={expectedTotal}, got={nn.item totalEarly}"
+  LeanTest.assertTrue (Float.abs (Tensor.item totalEarly - expectedTotal) < 1.0e-5)
+    s!"Independent molecule loss weights should determine total loss, expected={expectedTotal}, got={Tensor.item totalEarly}"
 
 @[test]
 def testMoleculeMuonUpdatesMatrixAndVectorLeaves : IO Unit := do
-  let matrix : T #[2, 2] := reshape (data.fromFloatArray #[1.0, 2.0, 3.0, 4.0]) #[2, 2]
-  let vector : T #[2] := data.fromFloatArray #[1.0, -1.0]
-  let grads : T #[2, 2] × T #[2] := (torch.ones #[2, 2], torch.ones #[2])
-  let params : T #[2, 2] × T #[2] := (matrix, vector)
+  let matrix : STensor #[2, 2] := Tensor.reshapeChecked (floatsDynamic #[1.0, 2.0, 3.0, 4.0]) #[2, 2]
+  let vector : STensor #[2] := floatsDynamic #[1.0, -1.0]
+  let grads : STensor #[2, 2] × STensor #[2] := (onesDynamic #[2, 2], onesDynamic #[2])
+  let params : STensor #[2, 2] × STensor #[2] := (matrix, vector)
   let state := initMoleculeMuonState params
   let (updated, state') ← moleculeMuonStep params grads state 0.01 0.0 0.95 5
-  let matrixDelta := nn.item (nn.sumAll (nn.abs (updated.1 - params.1)))
-  let vectorDelta := nn.item (nn.sumAll (nn.abs (updated.2 - params.2)))
+  let matrixDelta := Tensor.item (Tensor.sumAll (Tensor.abs (updated.1 - params.1)))
+  let vectorDelta := Tensor.item (Tensor.sumAll (Tensor.abs (updated.2 - params.2)))
   LeanTest.assertTrue (Float.isFinite matrixDelta && matrixDelta > 0.0)
     s!"Muon should update matrix leaves, delta={matrixDelta}"
   LeanTest.assertTrue (Float.isFinite vectorDelta && vectorDelta > 0.0)
@@ -962,10 +962,10 @@ def testMoleculeMuonUpdatesMatrixAndVectorLeaves : IO Unit := do
   LeanTest.assertEqual state'.step 1 "Muon optimizer state should advance one step"
 
 private def moleculeCoordCell {maxLen : UInt64}
-    (coord : T #[1, maxLen, 3]) (j k : Nat) : Float :=
-  let row : T #[1, 1, 3] := data.slice coord 1 j.toUInt64 1
-  let cell : T #[1, 1, 1] := data.slice row 2 k.toUInt64 1
-  nn.item cell
+    (coord : STensor #[1, maxLen, 3]) (j k : Nat) : Float :=
+  let row : STensor #[1, 1, 3] := sliceTyped coord 1 j.toUInt64 1
+  let cell : STensor #[1, 1, 1] := sliceTyped row 2 k.toUInt64 1
+  Tensor.item (cell.reshapeChecked #[])
 
 @[test]
 def testMoleculeTransformerCoordTargetCapAppliesInTrainingAndInference : IO Unit := do
@@ -978,14 +978,14 @@ def testMoleculeTransformerCoordTargetCapAppliesInTrainingAndInference : IO Unit
   torch.manualSeed 20260709
   let initialized ← MoleculeTransformerParams.init vocab heads headDim mlp
   let params := { initialized with
-    coordHeadW := torch.zeros #[3, heads * headDim]
-    coordHeadB := data.fromFloatArray #[100.0, -100.0, 4.0]
+    coordHeadW := zerosDynamic #[3, heads * headDim]
+    coordHeadB := floatsDynamic #[100.0, -100.0, 4.0]
   }
 
-  let coord : T #[1, maxLen, 3] := torch.zeros #[1, maxLen, 3]
-  let label : T #[1, maxLen] := reshape (data.fromInt64Array #[0]) #[1, maxLen]
-  let time : T #[1] := torch.zeros #[1]
-  let padmask : T #[1, maxLen] := torch.ones #[1, maxLen]
+  let coord : STensor #[1, maxLen, 3] := zerosDynamic #[1, maxLen, 3]
+  let label : DTensor #[1, maxLen] .Int64 := Tensor.reshapeChecked (Tensor.fromInt64Array #[0]) #[1, maxLen]
+  let time : STensor #[1] := zerosDynamic #[1]
+  let padmask : DTensor #[1, maxLen] .Int64 := Tensor.fullInt #[1, maxLen] 1
   let trainingModel :=
     moleculeTransformerModel (maxLen := maxLen) (vocab := vocab)
       (heads := heads) (headDim := headDim) (mlp := mlp)
@@ -1170,8 +1170,8 @@ def testGeodesicInterpolateFloat : IO Unit := do
 @[test]
 def testOrthogonalLogExp : IO Unit := do
   let Y ← Orthogonal.random 2
-  let prod := torch.nn.mm (torch.nn.transpose2d Y.matrix) Y.matrix
-  LeanTest.assertTrue (torch.allclose prod (torch.eye 2) 1.0e-4 1.0e-4) "exp preserves orthogonality"
+  let prod := Tensor.mm (Tensor.transpose2d Y.matrix) Y.matrix
+  LeanTest.assertTrue (Tensor.allclose prod (Tensor.eye 2) 1.0e-4 1.0e-4) "exp preserves orthogonality"
 
 @[test]
 def testGrassmannDistanceSelf : IO Unit := do

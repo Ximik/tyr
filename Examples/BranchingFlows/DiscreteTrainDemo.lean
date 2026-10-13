@@ -27,32 +27,32 @@ private def discreteBridge (_ : Unit) (_x0 x1 : Nat) (_t0 _t1 : Float) : Nat :=
   x1
 
 structure ToyParams (vocab hidden : UInt64) where
-  embed : T #[vocab, hidden]
-  proj : T #[hidden, vocab]
-  splitW : T #[1, hidden]
-  delW : T #[1, hidden]
+  embed : STensor #[vocab, hidden]
+  proj : STensor #[vocab, hidden]
+  splitW : STensor #[1, hidden]
+  delW : STensor #[1, hidden]
   deriving TensorStruct
 
 namespace ToyParams
 
 def init (vocab hidden : UInt64) : IO (ToyParams vocab hidden) := do
-  let embed ← torch.randn #[vocab, hidden]
-  let proj ← torch.randn #[hidden, vocab]
-  let splitW ← torch.randn #[1, hidden]
-  let delW ← torch.randn #[1, hidden]
+  let embed ← randnDynamic #[vocab, hidden]
+  let proj ← randnDynamic #[vocab, hidden]
+  let splitW ← randnDynamic #[1, hidden]
+  let delW ← randnDynamic #[1, hidden]
   pure { embed, proj, splitW, delW }
 
 end ToyParams
 
 def toyModel {maxLen vocab hidden : UInt64} : BranchingModel maxLen vocab (ToyParams vocab hidden) :=
   { forward := fun {batch} params state _t => do
-      let emb := torch.nn.embedding (batch := batch) (seq := maxLen) (vocab := vocab) (embed := hidden) state params.embed
-      let bias : T #[vocab] := torch.zeros #[vocab]
-      let logits := torch.affine3d emb params.proj bias
-      let split3 := torch.linear3d (x := emb) (weight := params.splitW)
-      let del3 := torch.linear3d (x := emb) (weight := params.delW)
-      let splitLogits := nn.squeeze split3 2
-      let delLogits := nn.squeeze del3 2
+      let emb := Tensor.embedding (batch := batch) (seq := maxLen) (vocab := vocab) (embed := hidden) state params.embed
+      let bias : STensor #[vocab] := zerosDynamic #[vocab]
+      let logits := Tensor.affine3d emb params.proj bias
+      let split3 := Tensor.linear3d (x := emb) (weight := params.splitW)
+      let del3 := Tensor.linear3d (x := emb) (weight := params.delW)
+      let splitLogits := split3.reshapeChecked #[batch, maxLen]
+      let delLogits := del3.reshapeChecked #[batch, maxLen]
       pure (logits, splitLogits, delLogits) }
 
 def runDemo : IO Unit := do

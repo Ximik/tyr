@@ -447,6 +447,40 @@ remains active.
   and both native test executables build. The experimental BranchingFlows
   build errors and the remaining legacy callers are still outstanding.
 
+## 2026-10-13 BranchingFlows continuation
+
+- Discrete/continuous/molecule batches, both molecule transformers, their
+  training and prediction interfaces, and all BranchingFlows examples use
+  indexed tensors. Labels and molecule masks are Int64. Floating tensors keep
+  their shape indices while preserving Float32/BF16 runtime dtype. Public
+  forwards match floating inputs to the model weights, including BF16 inference.
+- Model/config maximum-length mismatches now return IO errors. The indexed
+  interfaces exposed reversed affine weight dimensions in the discrete and
+  mixed toy demos; their declarations and initializers now agree with the native
+  output-by-input convention.
+- Muon preserves native BF16 scaling before restoring the parameter dtype.
+  Scalar and tensor learning-rate paths retain their respective rounding order.
+  Tests check both against native BF16 directions rather than assuming that
+  the two multiplication orders always round identically.
+- Static molecule buffers and the mutable learning-rate scalar allocate through
+  effectful clones. A regression exposed shared pure zero allocations: copying
+  masks could overwrite labels. Each buffer now has independent storage.
+- All **49 experimental CPU tests** and **1,436 main CPU tests** pass with zero
+  failures, skips or runtime panics. Coverage includes Float32/BF16 forwards,
+  backward/Muon updates, rotary parity, parameter checkpoint round trips,
+  buffer independence, and rejection of incompatible static dtype conversions.
+  All six BranchingFlows native declarations pass the dedicated ABI audit;
+  additive-attention dimensions and the touch IO signature were corrected.
+- All training examples build and run. Continuous overfit loss decreased from
+  1.484375 to 0.000481; molecule loss from 3.579090 to 0.032313; transformer loss
+  from 4.179966 to 0.000094. The mixed demo writes its four plotting tensors.
+  The discrete and mixed demos now have native Lake executable targets.
+- The full-architecture BF16 dataset CLI completed 80 CPU steps, checkpointed
+  parameters and Muon state, and generated finite XYZ/JSONL artifacts. Resuming
+  from step 80 loaded both states, completed two further steps, and generated
+  again. This small fixture run is not QM9 replication or CUDA-graph
+  qualification; actual GPU capture/replay remains unverified.
+
 ## Remaining acceptance criteria
 
 Remove the `T` declaration and all model, generator, reflection, documentation,

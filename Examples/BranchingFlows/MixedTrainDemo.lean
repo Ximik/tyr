@@ -23,7 +23,7 @@ private def uniformTimeDist : TimeDist :=
     pdf := fun t => if t < 0.0 || t > 1.0 then 0.0 else 1.0,
     quantile := fun p => clamp01 p }
 
-private def linBridge2d (_ : Unit) (x0 x1 : T #[2]) (t0 t1 : Float) : T #[2] :=
+private def linBridge2d (_ : Unit) (x0 x1 : STensor #[2]) (t0 t1 : Float) : STensor #[2] :=
   let dt := t1 - t0
   x0 + (x1 - x0) * dt
 
@@ -31,37 +31,37 @@ private def discreteBridge (_ : Unit) (_x0 x1 : Nat) (_t0 _t1 : Float) : Nat :=
   x1
 
 structure MixParams (vocab hidden : UInt64) where
-  contW : T #[2, hidden]
-  contB : T #[hidden]
-  timeW : T #[1, hidden]
-  timeB : T #[hidden]
-  embed : T #[vocab, hidden]
-  locW : T #[hidden, 2]
-  locB : T #[2]
-  proj : T #[hidden, vocab]
-  tokB : T #[vocab]
-  splitW : T #[1, hidden]
-  splitB : T #[1]
-  delW : T #[1, hidden]
-  delB : T #[1]
+  contW : STensor #[hidden, 2]
+  contB : STensor #[hidden]
+  timeW : STensor #[hidden, 1]
+  timeB : STensor #[hidden]
+  embed : STensor #[vocab, hidden]
+  locW : STensor #[2, hidden]
+  locB : STensor #[2]
+  proj : STensor #[vocab, hidden]
+  tokB : STensor #[vocab]
+  splitW : STensor #[1, hidden]
+  splitB : STensor #[1]
+  delW : STensor #[1, hidden]
+  delB : STensor #[1]
   deriving TensorStruct
 
 namespace MixParams
 
 def init (vocab hidden : UInt64) : IO (MixParams vocab hidden) := do
-  let contW ← torch.randn #[2, hidden]
-  let contB := torch.zeros #[hidden]
-  let timeW ← torch.randn #[1, hidden]
-  let timeB := torch.zeros #[hidden]
-  let embed ← torch.randn #[vocab, hidden]
-  let locW ← torch.randn #[hidden, 2]
-  let locB := torch.zeros #[2]
-  let proj ← torch.randn #[hidden, vocab]
-  let tokB := torch.zeros #[vocab]
-  let splitW ← torch.randn #[1, hidden]
-  let splitB := torch.zeros #[1]
-  let delW ← torch.randn #[1, hidden]
-  let delB := torch.zeros #[1]
+  let contW ← randnDynamic #[hidden, 2]
+  let contB := zerosDynamic #[hidden]
+  let timeW ← randnDynamic #[hidden, 1]
+  let timeB := zerosDynamic #[hidden]
+  let embed ← randnDynamic #[vocab, hidden]
+  let locW ← randnDynamic #[2, hidden]
+  let locB := zerosDynamic #[2]
+  let proj ← randnDynamic #[vocab, hidden]
+  let tokB := zerosDynamic #[vocab]
+  let splitW ← randnDynamic #[1, hidden]
+  let splitB := zerosDynamic #[1]
+  let delW ← randnDynamic #[1, hidden]
+  let delB := zerosDynamic #[1]
   pure { contW, contB, timeW, timeB, embed, locW, locB, proj, tokB, splitW, splitB, delW, delB }
 
 end MixParams
@@ -85,14 +85,14 @@ private def randBounds (rng : Rng) : (Float × Float) × Rng := Id.run do
 private def f (x : Float) : Float :=
   x + Float.sin (3.0 * x)
 
-private def mkPoint (x y : Float) : T #[2] :=
-  reshape (torch.data.fromFloatArray #[x, y]) #[2]
+private def mkPoint (x y : Float) : STensor #[2] :=
+  Tensor.reshapeChecked (floatsDynamic #[x, y]) #[2]
 
-private def X1target (rng : Rng) : BranchingState (T #[2] × Nat) × Rng := Id.run do
+private def X1target (rng : Rng) : BranchingState (STensor #[2] × Nat) × Rng := Id.run do
   let (n, rng') := randLen rng
   let ((left, right), rng'') := randBounds rng'
   let step := (right - left) / (n.toFloat)
-  let mut points : Array (T #[2]) := #[]
+  let mut points : Array (STensor #[2]) := #[]
   for i in [:n] do
     let x := left + step * i.toFloat
     let y := f x
@@ -109,17 +109,17 @@ private def X1target (rng : Rng) : BranchingState (T #[2] × Nat) × Rng := Id.r
      ids := (Array.range n).map (fun i => Int.ofNat (i + 1)),
      branchmask := Array.replicate n true, flowmask := Array.replicate n true, padmask := Array.replicate n true }, rng''')
 
-private def mergeTuple (a b : (T #[2] × Nat)) (w1 w2 : Nat) : (T #[2] × Nat) :=
+private def mergeTuple (a b : (STensor #[2] × Nat)) (w1 w2 : Nat) : (STensor #[2] × Nat) :=
   let cont := canonicalAnchorMerge a.1 b.1 w1 w2
   (cont, 0)
 
 private def splitResult
-    (res : BranchingBridgeResult (T #[2] × Nat))
-    : BranchingBridgeResult (T #[2]) × BranchingBridgeResult Nat := Id.run do
-  let mapSegCont := fun (s : Segment (T #[2] × Nat)) =>
+    (res : BranchingBridgeResult (STensor #[2] × Nat))
+    : BranchingBridgeResult (STensor #[2]) × BranchingBridgeResult Nat := Id.run do
+  let mapSegCont := fun (s : Segment (STensor #[2] × Nat)) =>
     { Xt := s.Xt.1, t := s.t, anchor := s.anchor.1, descendants := s.descendants, del := s.del,
       branchable := s.branchable, flowable := s.flowable, group := s.group, lastCoalescence := s.lastCoalescence, id := s.id }
-  let mapSegDisc := fun (s : Segment (T #[2] × Nat)) =>
+  let mapSegDisc := fun (s : Segment (STensor #[2] × Nat)) =>
     { Xt := s.Xt.2, t := s.t, anchor := s.anchor.2, descendants := s.descendants, del := s.del,
       branchable := s.branchable, flowable := s.flowable, group := s.group, lastCoalescence := s.lastCoalescence, id := s.id }
   let segsCont := res.segments.map (fun arr => arr.map mapSegCont)
@@ -132,7 +132,7 @@ private def splitResult
       branchmask := x.branchmask, flowmask := x.flowmask, padmask := x.padmask })
   let anchorCont := res.X1anchor.map (fun arr => arr.map (fun v => v.1))
   let anchorDisc := res.X1anchor.map (fun arr => arr.map (fun v => v.2))
-  let resCont : BranchingBridgeResult (T #[2]) :=
+  let resCont : BranchingBridgeResult (STensor #[2]) :=
     { t := res.t, segments := segsCont, Xt := XtCont, X1anchor := anchorCont,
       descendants := res.descendants, del := res.del, splitsTarget := res.splitsTarget, prevCoalescence := res.prevCoalescence }
   let resDisc : BranchingBridgeResult Nat :=
@@ -141,41 +141,41 @@ private def splitResult
   (resCont, resDisc)
 
 private def maskedCrossEntropy {batch maxLen vocab : UInt64}
-    (logits : T #[batch, maxLen, vocab])
-    (targets : T #[batch, maxLen])
-    (mask : T #[batch, maxLen]) : T #[] :=
+    (logits : STensor #[batch, maxLen, vocab])
+    (targets : DTensor #[batch, maxLen] .Int64)
+    (mask : STensor #[batch, maxLen]) : STensor #[] :=
   let n : UInt64 := batch * maxLen
-  let logits2 := reshape logits #[n, vocab]
-  let targets2 := reshape targets #[n]
-  let mask2 := reshape mask #[n]
-  let per := torch.nn.cross_entropy_none logits2 targets2
+  let logits2 := Tensor.reshapeChecked logits #[n, vocab]
+  let targets2 := Tensor.reshapeChecked targets #[n]
+  let mask2 := Tensor.reshapeChecked mask #[n]
+  let per := Tensor.crossEntropyNone logits2 targets2
   let masked := per * mask2
-  let denom := torch.nn.sumAll mask2
-  nn.div (torch.nn.sumAll masked) (denom + (1.0e-8 : Float))
+  let denom := Tensor.sumAll mask2
+  Tensor.Preserving.div (Tensor.sumAll masked) (denom + (1.0e-8 : Float))
 
 private def maskedMSE {batch maxLen : UInt64}
-    (pred target mask : T #[batch, maxLen]) : T #[] :=
+    (pred target mask : STensor #[batch, maxLen]) : STensor #[] :=
   let diff := pred - target
   let sq := diff * diff
   let masked := sq * mask
-  let denom := torch.nn.sumAll mask
-  nn.div (torch.nn.sumAll masked) (denom + (1.0e-8 : Float))
+  let denom := Tensor.sumAll mask
+  Tensor.Preserving.div (Tensor.sumAll masked) (denom + (1.0e-8 : Float))
 
 private def maskedMSE3d {batch maxLen dim : UInt64}
-    (pred target : T #[batch, maxLen, dim]) (mask : T #[batch, maxLen]) : T #[] :=
-  let mask3 := nn.expand (nn.unsqueeze mask 2) #[batch, maxLen, dim]
+    (pred target : STensor #[batch, maxLen, dim]) (mask : STensor #[batch, maxLen]) : STensor #[] :=
+  let mask3 := Tensor.expand (Tensor.unsqueeze mask 2) #[batch, maxLen, dim]
   let diff := pred - target
   let sq := diff * diff
   let masked := sq * mask3
-  let denom := torch.nn.sumAll mask3
-  nn.div (torch.nn.sumAll masked) (denom + (1.0e-8 : Float))
+  let denom := Tensor.sumAll mask3
+  Tensor.Preserving.div (Tensor.sumAll masked) (denom + (1.0e-8 : Float))
 
 private def maskedBCEWithLogits {batch maxLen : UInt64}
-    (logits target mask : T #[batch, maxLen]) : T #[] :=
-  let probs := torch.nn.sigmoid logits
-  let loss := torch.nn.binary_cross_entropy probs target (some mask) "sum"
-  let denom := torch.nn.sumAll mask
-  nn.div loss (denom + (1.0e-8 : Float))
+    (logits target mask : STensor #[batch, maxLen]) : STensor #[] :=
+  let probs := Tensor.Preserving.sigmoid logits
+  let loss := binaryCrossEntropySum probs target mask
+  let denom := Tensor.sumAll mask
+  Tensor.Preserving.div loss (denom + (1.0e-8 : Float))
 
 def runDemo : IO Unit := do
   let vocab : UInt64 := 3
@@ -201,7 +201,7 @@ def runDemo : IO Unit := do
   let mut rng : Rng := { state := 0 }
 
   for i in [:steps] do
-    let mut batchStates : Array (BranchingState (T #[2] × Nat)) := #[]
+    let mut batchStates : Array (BranchingState (STensor #[2] × Nat)) := #[]
     for _ in [:batch] do
       let (x1, rng') := X1target rng
       rng := rng'
@@ -219,7 +219,7 @@ def runDemo : IO Unit := do
         (fun root => (root.data.1, 0))
         batchStates times
         uniformTimeDist uniformTimeDist
-        (sequentialUniformPolicy (T #[2] × Nat))
+        (sequentialUniformPolicy (STensor #[2] × Nat))
         mergeTuple
         (useBranchingTimeProb := 0.5)
         (deletionPad := 1.5)
@@ -229,24 +229,27 @@ def runDemo : IO Unit := do
 
     let (resCont, resDisc) := splitResult bridgeRes
     let ⟨batchU, packedCont⟩ ← packBranchingTensor (dim := 2) cfg resCont
-    let ⟨_, packedDisc⟩ ← packBranchingNat cfg resDisc
+    let ⟨batchD, packedDisc0⟩ ← packBranchingNat cfg resDisc
+    let packedDisc : BranchingBatch batchU cfg.maxLen ←
+      if h : batchD = batchU then pure (h ▸ packedDisc0)
+      else throw <| IO.userError "Mixed bridge batch sizes differ"
 
     let paramsTrain := TensorStruct.zeroGrads (TensorStruct.makeLeafParams params)
     let t := packedDisc.t
-    let contEmb := torch.affine3d packedCont.state paramsTrain.contW paramsTrain.contB
-    let discEmb := torch.nn.embedding (batch := batchU) (seq := maxLen) (vocab := vocab) (embed := hidden) packedDisc.state paramsTrain.embed
-    let t1 := nn.unsqueeze t 1
-    let t2 := nn.unsqueeze t1 1
-    let tExp := nn.expand t2 #[batchU, maxLen, 1]
-    let timeEmb := torch.affine3d tExp paramsTrain.timeW paramsTrain.timeB
-    let hiddenState := nn.tanh (contEmb + discEmb + timeEmb)
+    let contEmb := Tensor.affine3d packedCont.state paramsTrain.contW paramsTrain.contB
+    let discEmb := Tensor.embedding (batch := batchU) (seq := maxLen) (vocab := vocab) (embed := hidden) packedDisc.state paramsTrain.embed
+    let t1 := Tensor.unsqueeze t 1
+    let t2 := Tensor.unsqueeze t1 1
+    let tExp := Tensor.expand t2 #[batchU, maxLen, 1]
+    let timeEmb := Tensor.affine3d tExp paramsTrain.timeW paramsTrain.timeB
+    let hiddenState := Tensor.Preserving.tanh (contEmb + discEmb + timeEmb)
 
-    let predLoc := torch.affine3d hiddenState paramsTrain.locW paramsTrain.locB
-    let predTok := torch.affine3d hiddenState paramsTrain.proj paramsTrain.tokB
-    let split3 := torch.affine3d hiddenState paramsTrain.splitW paramsTrain.splitB
-    let del3 := torch.affine3d hiddenState paramsTrain.delW paramsTrain.delB
-    let splitLogits := nn.squeeze split3 2
-    let delLogits := nn.squeeze del3 2
+    let predLoc := Tensor.affine3d hiddenState paramsTrain.locW paramsTrain.locB
+    let predTok := Tensor.affine3d hiddenState paramsTrain.proj paramsTrain.tokB
+    let split3 := Tensor.affine3d hiddenState paramsTrain.splitW paramsTrain.splitB
+    let del3 := Tensor.affine3d hiddenState paramsTrain.delW paramsTrain.delB
+    let splitLogits := split3.reshapeChecked #[batchU, maxLen]
+    let delLogits := del3.reshapeChecked #[batchU, maxLen]
 
     let mask := packedDisc.padmask * packedDisc.flowmask
     let contLoss := maskedMSE3d predLoc packedCont.anchor mask
@@ -255,7 +258,7 @@ def runDemo : IO Unit := do
     let delLoss := maskedBCEWithLogits delLogits packedDisc.delTarget mask
     let total := contLoss + discLoss + splitLoss + delLoss
 
-    torch.autograd.backwardLoss total
+    torch.Tensor.backwardLoss total
     if cfg.gradClip > 0 then
       pure ()
 
@@ -265,7 +268,7 @@ def runDemo : IO Unit := do
     optState := optState'
 
     if i % 20 == 0 then
-      let tl := torch.nn.item total
+      let tl := torch.Tensor.item total
       IO.println s!"step {i}: loss={tl}"
 
   -- Write plotting tensors for one batch
@@ -276,27 +279,30 @@ def runDemo : IO Unit := do
       (fun root => (root.data.1, 0))
       #[(X1target rng).1] #[0.5]
       uniformTimeDist uniformTimeDist
-      (sequentialUniformPolicy (T #[2] × Nat))
+      (sequentialUniformPolicy (STensor #[2] × Nat))
       mergeTuple
       (maxLen := some maxLen.toNat)
       (rng := rng)
   let (resCont, resDisc) := splitResult bridgeRes
   let ⟨batchU, packedCont⟩ ← packBranchingTensor (dim := 2) cfg resCont
-  let ⟨_, packedDisc⟩ ← packBranchingNat cfg resDisc
-  let contEmb := torch.affine3d packedCont.state params.contW params.contB
-  let discEmb := torch.nn.embedding (batch := batchU) (seq := maxLen) (vocab := vocab) (embed := hidden) packedDisc.state params.embed
-  let t1 := nn.unsqueeze packedDisc.t 1
-  let t2 := nn.unsqueeze t1 1
-  let tExp := nn.expand t2 #[batchU, maxLen, 1]
-  let timeEmb := torch.affine3d tExp params.timeW params.timeB
-  let hiddenState := nn.tanh (contEmb + discEmb + timeEmb)
-  let predLoc := torch.affine3d hiddenState params.locW params.locB
+  let ⟨batchD, packedDisc0⟩ ← packBranchingNat cfg resDisc
+  let packedDisc : BranchingBatch batchU cfg.maxLen ←
+    if h : batchD = batchU then pure (h ▸ packedDisc0)
+    else throw <| IO.userError "Mixed bridge batch sizes differ"
+  let contEmb := Tensor.affine3d packedCont.state params.contW params.contB
+  let discEmb := Tensor.embedding (batch := batchU) (seq := maxLen) (vocab := vocab) (embed := hidden) packedDisc.state params.embed
+  let t1 := Tensor.unsqueeze packedDisc.t 1
+  let t2 := Tensor.unsqueeze t1 1
+  let tExp := Tensor.expand t2 #[batchU, maxLen, 1]
+  let timeEmb := Tensor.affine3d tExp params.timeW params.timeB
+  let hiddenState := Tensor.Preserving.tanh (contEmb + discEmb + timeEmb)
+  let predLoc := Tensor.affine3d hiddenState params.locW params.locB
 
-  torch.data.saveTensor predLoc "examples_branching_mixed_pred.pt"
-  torch.data.saveTensor packedCont.anchor "examples_branching_mixed_anchor.pt"
-  torch.data.saveTensor packedDisc.anchor "examples_branching_mixed_tokens.pt"
+  Tensor.saveTensor predLoc "examples_branching_mixed_pred.pt"
+  Tensor.saveTensor packedCont.anchor "examples_branching_mixed_anchor.pt"
+  Tensor.saveTensor packedDisc.anchor "examples_branching_mixed_tokens.pt"
   let plotMask := packedDisc.padmask * packedDisc.flowmask
-  torch.data.saveTensor plotMask "examples_branching_mixed_mask.pt"
+  Tensor.saveTensor plotMask "examples_branching_mixed_mask.pt"
   IO.println "Wrote examples_branching_mixed_pred.pt, examples_branching_mixed_anchor.pt, examples_branching_mixed_tokens.pt, examples_branching_mixed_mask.pt"
 
 def _root_.main (_args : List String) : IO UInt32 := do
