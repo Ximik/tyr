@@ -101,6 +101,16 @@ lean_object* lean_torch_transpose_from_attention(uint64_t, uint64_t, uint64_t, u
 lean_object* lean_torch_unsqueeze(lean_object*, lean_object*, lean_object*);
 lean_object* lean_torch_zeros(lean_object*, uint8_t, lean_object*);
 lean_object* lean_torch_zeros_like(lean_object*, lean_object*);
+lean_object* lean_torch_argmax(lean_object*, lean_object*, uint64_t);
+lean_object* lean_torch_topk_filter(lean_object*, lean_object*, uint64_t);
+lean_object* lean_torch_topp_filter(lean_object*, lean_object*, double);
+lean_object* lean_torch_eq_scalar(lean_object*, lean_object*, uint64_t);
+lean_object* lean_torch_from_int64_array(lean_object*);
+lean_object* lean_torch_index_select(uint64_t, uint64_t, lean_object*, uint64_t, lean_object*);
+lean_object* lean_torch_cross_entropy_none(uint64_t, uint64_t, lean_object*, lean_object*);
+uint64_t lean_torch_item_int(lean_object*, lean_object*);
+lean_object* lean_torch_set_grad_enabled(uint8_t);
+lean_object* lean_torch_is_grad_enabled();
 
 #ifdef __cplusplus
 }

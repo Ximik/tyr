@@ -925,7 +925,7 @@ lean_object* lean_torch_tensor_cross_entropy(lean_obj_arg s, b_lean_obj_arg a, b
 }
 
 // Cross entropy with no reduction (per-element loss)
-lean_object* lean_torch_cross_entropy_none(lean_obj_arg /*n*/, lean_obj_arg /*c*/, b_lean_obj_arg logits, b_lean_obj_arg targets) {
+lean_object* lean_torch_cross_entropy_none(uint64_t /*n*/, uint64_t /*c*/, b_lean_obj_arg logits, b_lean_obj_arg targets) {
   auto logits_ = borrowTensor(logits);
   auto targets_ = borrowTensor(targets);
   auto options = torch::nn::functional::CrossEntropyFuncOptions().reduction(torch::kNone);
@@ -2100,10 +2100,10 @@ double lean_torch_item(lean_obj_arg /*s*/, b_lean_obj_arg input) {
 }
 
 // Item extraction as int64
-int64_t lean_torch_item_int(lean_obj_arg /*s*/, b_lean_obj_arg input) {
+uint64_t lean_torch_item_int(lean_obj_arg /*s*/, b_lean_obj_arg input) {
   auto input_ = borrowTensor(input);
   int64_t result = input_.item<int64_t>();
-  return result;
+  return static_cast<uint64_t>(result);
 }
 
 // Argmax
@@ -2313,10 +2313,10 @@ lean_object* lean_torch_load_f32_bin(lean_obj_arg shape, b_lean_obj_arg path_obj
 
 // Index select: gather elements along a dimension
 lean_object* lean_torch_index_select(
-  lean_obj_arg /*s*/,
-  lean_obj_arg /*k*/,
+  uint64_t /*s*/,
+  uint64_t /*k*/,
   b_lean_obj_arg input,
-  int64_t dim,
+  uint64_t dim,
   b_lean_obj_arg indices
 ) {
   auto input_ = borrowTensor(input);
@@ -2325,7 +2325,7 @@ lean_object* lean_torch_index_select(
   if (indices_.dtype() != torch::kInt64 && indices_.dtype() != torch::kInt32) {
     indices_ = indices_.to(torch::kInt64);
   }
-  auto result_ = torch::index_select(input_, dim, indices_);
+  auto result_ = torch::index_select(input_, static_cast<int64_t>(dim), indices_);
   return fromTorchTensor(result_);
 }
 
@@ -4688,9 +4688,9 @@ lean_object* lean_torch_eq(lean_obj_arg /*s*/, b_lean_obj_arg a, b_lean_obj_arg 
 }
 
 // Equality with scalar comparison
-lean_object* lean_torch_eq_scalar(lean_obj_arg /*s*/, b_lean_obj_arg input, int64_t scalar) {
+lean_object* lean_torch_eq_scalar(lean_obj_arg /*s*/, b_lean_obj_arg input, uint64_t scalar) {
   auto input_ = borrowTensor(input);
-  auto result_ = input_ == scalar;
+  auto result_ = input_ == static_cast<int64_t>(scalar);
   return fromTorchTensor(result_);
 }
 

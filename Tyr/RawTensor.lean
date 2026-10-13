@@ -233,4 +233,37 @@ namespace torch.RawTensor
 /-- Backward pass from a scalar loss (gradient = 1.0). -/
 @[extern "lean_torch_backward_loss"] opaque backwardLoss (loss : @& RawTensor) : IO Unit
 
+/-- Argmax along a dimension (Int64 indices). The shape argument is unread natively. -/
+@[extern "lean_torch_argmax"] opaque argmax (shape : Shape) (t : @& RawTensor) (dim : UInt64) : RawTensor
+
+/-- Top-k logit filter (entries outside the top k become -inf), shape-preserving. -/
+@[extern "lean_torch_topk_filter"] opaque topKFilter (shape : Shape) (logits : @& RawTensor) (k : UInt64) : RawTensor
+
+/-- Top-p (nucleus) logit filter, shape-preserving. -/
+@[extern "lean_torch_topp_filter"] opaque topPFilter (shape : Shape) (logits : @& RawTensor) (p : Float) : RawTensor
+
+/-- Elementwise equality with a scalar; result is a Bool tensor of the same shape. -/
+@[extern "lean_torch_eq_scalar"] opaque eqScalar (shape : Shape) (input : @& RawTensor) (scalar : Int64) : RawTensor
+
+/-- 1-D Int64 tensor from a host array. -/
+@[extern "lean_torch_from_int64_array"] opaque fromInt64Array (arr : @& Array Int64) : RawTensor
+
+/-- Select entries of a 1-D tensor by Int64 indices along `dim` (0). The
+    dimension arguments mirror the C ABI and are unread natively. -/
+@[extern "lean_torch_index_select"] opaque indexSelect (n k : UInt64) (data : @& RawTensor)
+    (dim : Int64) (indices : @& RawTensor) : RawTensor
+
+/-- Per-element cross entropy (no reduction): logits [n, c], Int64 targets [n]. -/
+@[extern "lean_torch_cross_entropy_none"] opaque crossEntropyNone (n c : UInt64)
+    (logits : @& RawTensor) (targets : @& RawTensor) : RawTensor
+
+/-- Extract an Int64 scalar. The shape argument is unread natively. -/
+@[extern "lean_torch_item_int"] opaque itemInt (shape : Shape) (t : @& RawTensor) : Int64
+
+/-- Enable/disable autograd graph construction globally. -/
+@[extern "lean_torch_set_grad_enabled"] opaque setGradEnabled (enabled : Bool) : IO Unit
+
+/-- Whether autograd graph construction is enabled. -/
+@[extern "lean_torch_is_grad_enabled"] opaque isGradEnabled : IO Bool
+
 end torch.RawTensor

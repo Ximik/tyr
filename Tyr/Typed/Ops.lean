@@ -576,6 +576,54 @@ def grad {σ τ : StaticSpec} (y : Tensor τ) (x : Tensor σ) (dy : Tensor τ) :
 def fromFloatArray (arr : Array Float) : Tensor ⟨#[arr.size.toUInt64], .Float32, .any⟩ :=
   .assumeSpec (RawTensor.fromFloatArray arr)
 
+/-- 1-D Int64 tensor from a host array; the result shape records the actual
+    array length. -/
+def fromInt64Array (arr : Array Int64) : Tensor ⟨#[arr.size.toUInt64], .Int64, .any⟩ :=
+  .assumeSpec (RawTensor.fromInt64Array arr)
+
+/-- Argmax along `dim`: Int64 indices with that dimension removed. -/
+def argmax {s : Shape} {d : DType} {dev : DevicePolicy} (t : Tensor ⟨s, d, dev⟩) (dim : UInt64) :
+    Tensor ⟨reduceShape s dim.toNat false, .Int64, dev⟩ :=
+  .assumeSpec (RawTensor.argmax s t.raw dim)
+
+/-- Top-k filter over logits (entries outside the top k become -inf), spec-preserving. -/
+def topKFilter {σ : StaticSpec} (logits : Tensor σ) (k : UInt64) : Tensor σ :=
+  .assumeSpec (RawTensor.topKFilter σ.shape logits.raw k)
+
+/-- Top-p (nucleus) filter over logits, spec-preserving. -/
+def topPFilter {σ : StaticSpec} (logits : Tensor σ) (p : Float) : Tensor σ :=
+  .assumeSpec (RawTensor.topPFilter σ.shape logits.raw p)
+
+/-- Elementwise equality with a scalar: Bool tensor of the same shape. -/
+def eqScalar {s : Shape} {d : DType} {dev : DevicePolicy} (t : Tensor ⟨s, d, dev⟩) (scalar : Int64) :
+    Tensor ⟨s, .Bool, dev⟩ :=
+  .assumeSpec (RawTensor.eqScalar s t.raw scalar)
+
+/-- Select entries of a 1-D tensor by Int64 indices. -/
+def indexSelect {n k : UInt64} {d : DType} {dev : DevicePolicy}
+    (data : Tensor ⟨#[n], d, dev⟩) (indices : Tensor ⟨#[k], .Int64, dev⟩) :
+    Tensor ⟨#[k], d, dev⟩ :=
+  .assumeSpec (RawTensor.indexSelect n k data.raw 0 indices.raw)
+
+/-- Per-element cross entropy (no reduction) over a 2-D logits matrix with Int64 targets. -/
+def crossEntropyNone {n c : UInt64} {d : DType} {dev : DevicePolicy}
+    (logits : Tensor ⟨#[n, c], d, dev⟩) (targets : Tensor ⟨#[n], .Int64, dev⟩) :
+    Tensor ⟨#[n], d, dev⟩ :=
+  .assumeSpec (RawTensor.crossEntropyNone n c logits.raw targets.raw)
+
+/-- Extract an Int64 scalar. -/
+def itemInt {d : DType} {dev : DevicePolicy} (t : Tensor ⟨#[], d, dev⟩) : Int64 :=
+  RawTensor.itemInt #[] t.raw
+
+/-- Run an IO action with autograd graph construction disabled. -/
+def noGrad {α : Type} (action : IO α) : IO α := do
+  let wasEnabled ← RawTensor.isGradEnabled
+  RawTensor.setGradEnabled false
+  try
+    action
+  finally
+    RawTensor.setGradEnabled wasEnabled
+
 /-- Cross-entropy loss over a 2-D logits matrix with Int64 targets. -/
 def crossEntropy {n c : UInt64} {d : DType} {dev : DevicePolicy}
     (logits : Tensor ⟨#[n, c], d, dev⟩) (targets : Tensor ⟨#[n], .Int64, dev⟩) :
