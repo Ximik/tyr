@@ -371,15 +371,15 @@ def benchmarkLocalStep {m n : UInt64}
   let mut p := retractStiefel p0
   let mut st := initParamState p
 
-  let t0 ← IO.monoMsNow
+  let t0 ← IO.monoNanosNow
   for _ in [:numSteps] do
     let g ← Tensor.randn #[m, n]
     let (p', st') ← stepSingle p g st cfg
     p := p'
     st := st'
-  let t1 ← IO.monoMsNow
+  let t1 ← IO.monoNanosNow
 
-  let elapsed := (t1 - t0).toFloat
+  let elapsed := (t1 - t0).toFloat / 1000000.0
   if numSteps == 0 then
     return elapsed
   else
