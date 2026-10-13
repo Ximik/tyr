@@ -157,6 +157,9 @@ def ofQKV
     (windowSize : Option UInt64 := none)
     (arch : GpuArch := .SM90)
     : AttentionProblem :=
+    -- K/V carry the shared layout indices; only Q supplies runtime metadata.
+    let _ := k
+    let _ := v
     {
       batch := batch
       numQHeads := nHead
