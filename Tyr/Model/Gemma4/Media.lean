@@ -3,7 +3,8 @@
 
   Apple-only image preprocessing helpers for Gemma 4 multimodal inputs.
 -/
-import Tyr.Torch
+import Tyr.Typed.Neural
+import Tyr.RawTensor.Gemma4
 import Tyr.Model.Gemma4.VLConfig
 
 namespace torch.gemma4.media
@@ -16,8 +17,8 @@ open torch.gemma4
 def loadImagePatchGrid (cfg : VLConfig) (path : String)
     : IO (Sigma (fun patchRows =>
         Sigma (fun patchCols =>
-          T #[patchRows, patchCols, VisionConfig.patchDim cfg.vision_config]))) := do
-  let dyn ← data.loadGemma4ImagePatchGrid
+          STensor #[patchRows, patchCols, VisionConfig.patchDim cfg.vision_config]))) := do
+  let dyn ← RawTensor.gemma4LoadImage
     path
     cfg.vision_config.patch_size
     cfg.vision_config.pooling_kernel_size
@@ -32,6 +33,8 @@ def loadImagePatchGrid (cfg : VLConfig) (path : String)
   if patchDim != VisionConfig.patchDim cfg.vision_config then
     throw <| IO.userError
       s!"Gemma4 image patch dim mismatch: expected {VisionConfig.patchDim cfg.vision_config}, got {patchDim}"
-  pure ⟨patchRows, ⟨patchCols, reshape dyn #[patchRows, patchCols, VisionConfig.patchDim cfg.vision_config]⟩⟩
+  match Tensor.ofRaw (σ := { shape := #[patchRows, patchCols, VisionConfig.patchDim cfg.vision_config] }) dyn with
+  | .ok grid => pure ⟨patchRows, ⟨patchCols, grid⟩⟩
+  | .error message => throw <| IO.userError s!"Gemma4 image tensor: {message}"
 
 end torch.gemma4.media

@@ -8,7 +8,7 @@
   - Per-layer input embeddings/projections (E2B/E4B)
   - Dense and MoE feed-forward variants
 -/
-import Tyr.Torch
+import Tyr.Model.Gemma4.TypedOps
 import Tyr.TensorStruct
 import Tyr.Module.Core
 import Tyr.Module.Derive
@@ -19,105 +19,95 @@ import Tyr.Model.Generation
 namespace torch.gemma4
 
 open torch
-open torch.Model
+open torch.Model torch.qwen35
 
-private def reqGradFalse {s : Shape} (t : T s) : T s :=
-  autograd.set_requires_grad t false
-
-@[extern "lean_torch_gemma4_text_experts_forward"]
-private opaque routedTextExpertsForward
-    {tokens numExperts topK inter hidden : UInt64}
-    (hiddenStates : @& T #[tokens, hidden])
-    (gateUpProj : @& T #[numExperts, 2 * inter, hidden])
-    (downProj : @& T #[numExperts, hidden, inter])
-    (topVals : @& T #[tokens, topK])
-    (topIdx : @& T #[tokens, topK])
-    : T #[tokens, hidden]
+private def reqGradFalse {s : Shape} (t : STensor s) : STensor s :=
+  Tensor.setRequiresGrad t false
 
 /-- Gemma 4 RMSNorm with standard learned scale. -/
 structure Gemma4RMSNorm (dim : UInt64) where
-  weight : T #[dim]
+  weight : STensor #[dim]
   eps : Float := 1e-6
   deriving TensorStruct
 
 namespace Gemma4RMSNorm
 
 def fromCheckpointWeight {dim : UInt64}
-    (weight : T #[dim])
+    (weight : STensor #[dim])
     (eps : Float := 1e-6)
     : Gemma4RMSNorm dim :=
   { weight := weight, eps }
 
 def forward2d {n dim : UInt64}
     (m : Gemma4RMSNorm dim)
-    (x : T #[n, dim])
-    : T #[n, dim] :=
-  let xf : T #[n, dim] := toFloat' x
-  let var : T #[n, 1] := nn.meanDim (xf * xf) 1 true
-  let inv : T #[n, 1] := nn.rsqrt (var + m.eps)
-  let inv : T #[n, dim] := nn.expand inv #[n, dim]
-  let scale : T #[n, dim] := nn.expand (reshape (toFloat' m.weight) #[1, dim]) #[n, dim]
-  restoreInputDType x (xf * inv * scale)
+    (x : STensor #[n, dim])
+    : STensor #[n, dim] :=
+  let xf : STensor #[n, dim] := floatDynamic x
+  let var : STensor #[n, 1] := Tensor.Preserving.meanDim (xf * xf) 1 true
+  let inv : STensor #[n, 1] := rsqrtDynamic (var + m.eps)
+  let inv : STensor #[n, dim] := Tensor.expand inv #[n, dim]
+  let scale : STensor #[n, dim] := Tensor.expand (Tensor.reshapeChecked (floatDynamic m.weight) #[1, dim]) #[n, dim]
+  Tensor.castLike x (xf * inv * scale)
 
 def forward3d {batch seq dim : UInt64}
     (m : Gemma4RMSNorm dim)
-    (x : T #[batch, seq, dim])
-    : T #[batch, seq, dim] :=
-  let flat : T #[batch * seq, dim] := reshape x #[batch * seq, dim]
-  reshape (forward2d m flat) #[batch, seq, dim]
+    (x : STensor #[batch, seq, dim])
+    : STensor #[batch, seq, dim] :=
+  let flat : STensor #[batch * seq, dim] := Tensor.reshapeChecked x #[batch * seq, dim]
+  Tensor.reshapeChecked (forward2d m flat) #[batch, seq, dim]
 
 def forward4d {a b c dim : UInt64}
     (m : Gemma4RMSNorm dim)
-    (x : T #[a, b, c, dim])
-    : T #[a, b, c, dim] :=
-  let flat : T #[a * b * c, dim] := reshape x #[a * b * c, dim]
-  reshape (forward2d m flat) #[a, b, c, dim]
+    (x : STensor #[a, b, c, dim])
+    : STensor #[a, b, c, dim] :=
+  let flat : STensor #[a * b * c, dim] := Tensor.reshapeChecked x #[a * b * c, dim]
+  Tensor.reshapeChecked (forward2d m flat) #[a, b, c, dim]
 
 end Gemma4RMSNorm
 
 private def rmsNormNoScale2d {n dim : UInt64}
-    (x : T #[n, dim])
+    (x : STensor #[n, dim])
     (eps : Float := 1e-6)
-    : T #[n, dim] :=
-  let xf : T #[n, dim] := toFloat' x
-  let var : T #[n, 1] := nn.meanDim (xf * xf) 1 true
-  let inv : T #[n, 1] := nn.rsqrt (var + eps)
-  let inv : T #[n, dim] := nn.expand inv #[n, dim]
-  restoreInputDType x (xf * inv)
+    : STensor #[n, dim] :=
+  let xf : STensor #[n, dim] := floatDynamic x
+  let var : STensor #[n, 1] := Tensor.Preserving.meanDim (xf * xf) 1 true
+  let inv : STensor #[n, 1] := rsqrtDynamic (var + eps)
+  let inv : STensor #[n, dim] := Tensor.expand inv #[n, dim]
+  Tensor.castLike x (xf * inv)
 
 private def rmsNormNoScale4d {a b c dim : UInt64}
-    (x : T #[a, b, c, dim])
+    (x : STensor #[a, b, c, dim])
     (eps : Float := 1e-6)
-    : T #[a, b, c, dim] :=
-  let flat : T #[a * b * c, dim] := reshape x #[a * b * c, dim]
-  reshape (rmsNormNoScale2d flat eps) #[a, b, c, dim]
+    : STensor #[a, b, c, dim] :=
+  let flat : STensor #[a * b * c, dim] := Tensor.reshapeChecked x #[a * b * c, dim]
+  Tensor.reshapeChecked (rmsNormNoScale2d flat eps) #[a, b, c, dim]
 
 private def rmsNormWeighted4dSlice {a b c dim maxDim : UInt64}
-    (weight : T #[maxDim])
-    (x : T #[a, b, c, dim])
+    (weight : STensor #[maxDim])
+    (x : STensor #[a, b, c, dim])
     (eps : Float := 1e-6)
-    : T #[a, b, c, dim] :=
-  let w : T #[dim] := data.slice weight 0 0 dim
-  let xf : T #[a * b * c, dim] := reshape x #[a * b * c, dim]
-  let var : T #[a * b * c, 1] := nn.meanDim (xf * xf) 1 true
-  let inv : T #[a * b * c, 1] := nn.rsqrt (var + eps)
-  let inv : T #[a * b * c, dim] := nn.expand inv #[a * b * c, dim]
-  let scale : T #[a * b * c, dim] := nn.expand (reshape (toFloat' w) #[1, dim]) #[a * b * c, dim]
-  restoreInputDType x (reshape (xf * inv * scale) #[a, b, c, dim])
+    : STensor #[a, b, c, dim] :=
+  let w : STensor #[dim] := sliceTyped weight 0 0 dim
+  let xf : STensor #[a * b * c, dim] := Tensor.reshapeChecked x #[a * b * c, dim]
+  let var : STensor #[a * b * c, 1] := Tensor.Preserving.meanDim (xf * xf) 1 true
+  let inv : STensor #[a * b * c, 1] := rsqrtDynamic (var + eps)
+  let inv : STensor #[a * b * c, dim] := Tensor.expand inv #[a * b * c, dim]
+  let scale : STensor #[a * b * c, dim] := Tensor.expand (Tensor.reshapeChecked (floatDynamic w) #[1, dim]) #[a * b * c, dim]
+  Tensor.castLike x (Tensor.reshapeChecked (xf * inv * scale) #[a, b, c, dim])
 
 private def rmsNormNoScale4dSlice {a b c dim : UInt64}
-    (x : T #[a, b, c, dim])
+    (x : STensor #[a, b, c, dim])
     (eps : Float := 1e-6)
-    : T #[a, b, c, dim] :=
+    : STensor #[a, b, c, dim] :=
   rmsNormNoScale4d x eps
 
 /-- Dense Gemma 4 MLP.
     Layers whose checkpoint width is smaller than `Config.maxIntermediateSize`
     are zero-padded during load. -/
 structure Gemma4MLP (cfg : Config) where
-  gate_proj : T #[Config.maxIntermediateSize cfg, cfg.hidden_size]
-  up_proj : T #[Config.maxIntermediateSize cfg, cfg.hidden_size]
-  down_proj : T #[cfg.hidden_size, Config.maxIntermediateSize cfg]
+  gate_proj : STensor #[Config.maxIntermediateSize cfg, cfg.hidden_size]
+  up_proj : STensor #[Config.maxIntermediateSize cfg, cfg.hidden_size]
+  down_proj : STensor #[cfg.hidden_size, Config.maxIntermediateSize cfg]
   deriving TensorStruct
 
 namespace Gemma4MLP
@@ -125,16 +115,16 @@ namespace Gemma4MLP
 def forward {batch seq : UInt64}
     (cfg : Config)
     (m : Gemma4MLP cfg)
-    (x : T #[batch, seq, cfg.hidden_size])
-    : T #[batch, seq, cfg.hidden_size] :=
-  linear3d (nn.gelu (linear3d x m.gate_proj) * linear3d x m.up_proj) m.down_proj
+    (x : STensor #[batch, seq, cfg.hidden_size])
+    : STensor #[batch, seq, cfg.hidden_size] :=
+  Tensor.linear3d (Tensor.Preserving.gelu (Tensor.linear3d x m.gate_proj) * Tensor.linear3d x m.up_proj) m.down_proj
 
 end Gemma4MLP
 
 structure Gemma4TextRouter (cfg : Config) where
-  proj : T #[cfg.num_experts, cfg.hidden_size]
-  scale : T #[cfg.hidden_size]
-  per_expert_scale : T #[cfg.num_experts]
+  proj : STensor #[cfg.num_experts, cfg.hidden_size]
+  scale : STensor #[cfg.hidden_size]
+  per_expert_scale : STensor #[cfg.num_experts]
   deriving TensorStruct
 
 namespace Gemma4TextRouter
@@ -142,33 +132,33 @@ namespace Gemma4TextRouter
 def forward {tokens : UInt64}
     (cfg : Config)
     (m : Gemma4TextRouter cfg)
-    (hidden : T #[tokens, cfg.hidden_size])
-    : T #[tokens, cfg.num_experts]
-      × T #[tokens, cfg.top_k_experts]
-      × T #[tokens, cfg.top_k_experts] :=
-  let normed : T #[tokens, cfg.hidden_size] := rmsNormNoScale2d hidden cfg.rms_norm_eps
+    (hidden : STensor #[tokens, cfg.hidden_size])
+    : STensor #[tokens, cfg.num_experts]
+      × STensor #[tokens, cfg.top_k_experts]
+      × DTensor #[tokens, cfg.top_k_experts] .Int64 :=
+  let normed : STensor #[tokens, cfg.hidden_size] := rmsNormNoScale2d hidden cfg.rms_norm_eps
   let scaleRoot := 1.0 / Float.sqrt cfg.hidden_size.toFloat
-  let scale : T #[tokens, cfg.hidden_size] :=
-    nn.expand (reshape (toFloat' m.scale) #[1, cfg.hidden_size]) #[tokens, cfg.hidden_size]
-  let normed : T #[tokens, cfg.hidden_size] := mul_scalar (normed * scale) scaleRoot
-  let logitsDyn : T #[] := torch.einsum2 "eh,th->te" m.proj normed
-  let logits : T #[tokens, cfg.num_experts] := reshape logitsDyn #[tokens, cfg.num_experts]
-  let probs : T #[tokens, cfg.num_experts] := nn.softmax logits (-1)
-  let (topValsRaw, topIdx) := torch.topk_2d probs cfg.top_k_experts 1
-  let denom : T #[tokens, 1] := nn.sumDim topValsRaw 1 true
-  let denom : T #[tokens, cfg.top_k_experts] := nn.expand denom #[tokens, cfg.top_k_experts]
-  let topVals : T #[tokens, cfg.top_k_experts] := nn.div topValsRaw denom
-  let flatIdx : T #[tokens * cfg.top_k_experts] := reshape topIdx #[tokens * cfg.top_k_experts]
-  let scalesFlat : T #[tokens * cfg.top_k_experts] :=
-    data.indexSelect (reshape m.per_expert_scale #[cfg.num_experts]) 0 flatIdx
-  let scales : T #[tokens, cfg.top_k_experts] := reshape scalesFlat #[tokens, cfg.top_k_experts]
+  let scale : STensor #[tokens, cfg.hidden_size] :=
+    Tensor.expand (Tensor.reshapeChecked (floatDynamic m.scale) #[1, cfg.hidden_size]) #[tokens, cfg.hidden_size]
+  let normed : STensor #[tokens, cfg.hidden_size] := Tensor.Preserving.mulScalar (normed * scale) scaleRoot
+  let logitsDyn : STensor #[tokens, cfg.num_experts] := einsumChecked "eh,th->te" (floatDynamic m.proj) normed
+  let logits : STensor #[tokens, cfg.num_experts] := Tensor.reshapeChecked logitsDyn #[tokens, cfg.num_experts]
+  let probs : STensor #[tokens, cfg.num_experts] := Tensor.Preserving.softmax logits (-1)
+  let (topValsRaw, topIdx) := topK2d probs cfg.top_k_experts 1
+  let denom : STensor #[tokens, 1] := Tensor.Preserving.sumDim topValsRaw 1 true
+  let denom : STensor #[tokens, cfg.top_k_experts] := Tensor.expand denom #[tokens, cfg.top_k_experts]
+  let topVals : STensor #[tokens, cfg.top_k_experts] := Tensor.Preserving.div topValsRaw denom
+  let flatIdx : DTensor #[tokens * cfg.top_k_experts] .Int64 := Tensor.reshapeChecked topIdx #[tokens * cfg.top_k_experts]
+  let scalesFlat : STensor #[tokens * cfg.top_k_experts] :=
+    Tensor.indexSelect m.per_expert_scale flatIdx
+  let scales : STensor #[tokens, cfg.top_k_experts] := Tensor.reshapeChecked scalesFlat #[tokens, cfg.top_k_experts]
   (probs, topVals * scales, topIdx)
 
 end Gemma4TextRouter
 
 structure Gemma4TextExperts (cfg : Config) where
-  gate_up_proj : T #[cfg.num_experts, 2 * cfg.moe_intermediate_size, cfg.hidden_size]
-  down_proj : T #[cfg.num_experts, cfg.hidden_size, cfg.moe_intermediate_size]
+  gate_up_proj : STensor #[cfg.num_experts, 2 * cfg.moe_intermediate_size, cfg.hidden_size]
+  down_proj : STensor #[cfg.num_experts, cfg.hidden_size, cfg.moe_intermediate_size]
   deriving TensorStruct
 
 namespace Gemma4TextExperts
@@ -176,10 +166,10 @@ namespace Gemma4TextExperts
 def forward2d {tokens : UInt64}
     (cfg : Config)
     (m : Gemma4TextExperts cfg)
-    (hidden : T #[tokens, cfg.hidden_size])
-    (topVals : T #[tokens, cfg.top_k_experts])
-    (topIdx : T #[tokens, cfg.top_k_experts])
-    : T #[tokens, cfg.hidden_size] :=
+    (hidden : STensor #[tokens, cfg.hidden_size])
+    (topVals : STensor #[tokens, cfg.top_k_experts])
+    (topIdx : DTensor #[tokens, cfg.top_k_experts] .Int64)
+    : STensor #[tokens, cfg.hidden_size] :=
   routedTextExpertsForward hidden m.gate_up_proj m.down_proj topVals topIdx
 
 end Gemma4TextExperts
@@ -193,16 +183,16 @@ structure Gemma4MoeBranch (cfg : Config) where
   deriving TensorStruct
 
 structure Gemma4PerLayerInputBlock (cfg : Config) where
-  per_layer_input_gate : T #[cfg.hidden_size_per_layer_input, cfg.hidden_size]
-  per_layer_projection : T #[cfg.hidden_size, cfg.hidden_size_per_layer_input]
+  per_layer_input_gate : STensor #[cfg.hidden_size_per_layer_input, cfg.hidden_size]
+  per_layer_projection : STensor #[cfg.hidden_size, cfg.hidden_size_per_layer_input]
   post_per_layer_input_norm : Gemma4RMSNorm cfg.hidden_size
   deriving TensorStruct
 
 structure Gemma4Attention (cfg : Config) where
-  q_proj : T #[Config.maxAttentionDim cfg, cfg.hidden_size]
-  k_proj : T #[Config.maxKVProjDim cfg, cfg.hidden_size]
-  v_proj : T #[Config.maxKVProjDim cfg, cfg.hidden_size]
-  o_proj : T #[cfg.hidden_size, Config.maxAttentionDim cfg]
+  q_proj : STensor #[Config.maxAttentionDim cfg, cfg.hidden_size]
+  k_proj : STensor #[Config.maxKVProjDim cfg, cfg.hidden_size]
+  v_proj : STensor #[Config.maxKVProjDim cfg, cfg.hidden_size]
+  o_proj : STensor #[cfg.hidden_size, Config.maxAttentionDim cfg]
   q_norm : Gemma4RMSNorm (Config.maxHeadDim cfg)
   k_norm : Gemma4RMSNorm (Config.maxHeadDim cfg)
   deriving TensorStruct
@@ -210,134 +200,134 @@ structure Gemma4Attention (cfg : Config) where
 namespace Gemma4Attention
 
 abbrev KVCache (cfg : Config) (batch : UInt64) :=
-  qwen.QwenAttention.KVCache batch (Config.maxKVHeads cfg) (Config.maxHeadDim cfg)
+  qwen.QwenAttention.KVCache batch (Config.maxKVHeads cfg) (Config.maxHeadDim cfg) (.Unknown "dynamic")
 
 private def qProjSliding {batch seq : UInt64}
     (cfg : Config)
     (m : Gemma4Attention cfg)
-    (x : T #[batch, seq, cfg.hidden_size])
-    : T #[batch, seq, cfg.num_attention_heads, cfg.head_dim] :=
-  let qW : T #[cfg.num_attention_heads * cfg.head_dim, cfg.hidden_size] :=
-    data.slice m.q_proj 0 0 (cfg.num_attention_heads * cfg.head_dim)
-  reshape (linear3d x qW) #[batch, seq, cfg.num_attention_heads, cfg.head_dim]
+    (x : STensor #[batch, seq, cfg.hidden_size])
+    : STensor #[batch, seq, cfg.num_attention_heads, cfg.head_dim] :=
+  let qW : STensor #[cfg.num_attention_heads * cfg.head_dim, cfg.hidden_size] :=
+    sliceTyped m.q_proj 0 0 (cfg.num_attention_heads * cfg.head_dim)
+  Tensor.reshapeChecked (Tensor.linear3d x qW) #[batch, seq, cfg.num_attention_heads, cfg.head_dim]
 
 private def qProjFull {batch seq : UInt64}
     (cfg : Config)
     (m : Gemma4Attention cfg)
-    (x : T #[batch, seq, cfg.hidden_size])
-    : T #[batch, seq, cfg.num_attention_heads, Config.fullHeadDim cfg] :=
+    (x : STensor #[batch, seq, cfg.hidden_size])
+    : STensor #[batch, seq, cfg.num_attention_heads, Config.fullHeadDim cfg] :=
   let dim := cfg.num_attention_heads * Config.fullHeadDim cfg
-  let qW : T #[dim, cfg.hidden_size] := data.slice m.q_proj 0 0 dim
-  reshape (linear3d x qW) #[batch, seq, cfg.num_attention_heads, Config.fullHeadDim cfg]
+  let qW : STensor #[dim, cfg.hidden_size] := sliceTyped m.q_proj 0 0 dim
+  Tensor.reshapeChecked (Tensor.linear3d x qW) #[batch, seq, cfg.num_attention_heads, Config.fullHeadDim cfg]
 
 private def kProjSliding {batch seq : UInt64}
     (cfg : Config)
     (m : Gemma4Attention cfg)
-    (x : T #[batch, seq, cfg.hidden_size])
-    : T #[batch, seq, cfg.num_key_value_heads, cfg.head_dim] :=
+    (x : STensor #[batch, seq, cfg.hidden_size])
+    : STensor #[batch, seq, cfg.num_key_value_heads, cfg.head_dim] :=
   let rows := cfg.num_key_value_heads * cfg.head_dim
-  let kW : T #[rows, cfg.hidden_size] := data.slice m.k_proj 0 0 rows
-  reshape (linear3d x kW) #[batch, seq, cfg.num_key_value_heads, cfg.head_dim]
+  let kW : STensor #[rows, cfg.hidden_size] := sliceTyped m.k_proj 0 0 rows
+  Tensor.reshapeChecked (Tensor.linear3d x kW) #[batch, seq, cfg.num_key_value_heads, cfg.head_dim]
 
 private def kProjFull {batch seq : UInt64}
     (cfg : Config)
     (m : Gemma4Attention cfg)
-    (x : T #[batch, seq, cfg.hidden_size])
-    : T #[batch, seq, Config.fullNumKVHeads cfg, Config.fullHeadDim cfg] :=
+    (x : STensor #[batch, seq, cfg.hidden_size])
+    : STensor #[batch, seq, Config.fullNumKVHeads cfg, Config.fullHeadDim cfg] :=
   let rows := Config.fullNumKVHeads cfg * Config.fullHeadDim cfg
-  let kW : T #[rows, cfg.hidden_size] := data.slice m.k_proj 0 0 rows
-  reshape (linear3d x kW) #[batch, seq, Config.fullNumKVHeads cfg, Config.fullHeadDim cfg]
+  let kW : STensor #[rows, cfg.hidden_size] := sliceTyped m.k_proj 0 0 rows
+  Tensor.reshapeChecked (Tensor.linear3d x kW) #[batch, seq, Config.fullNumKVHeads cfg, Config.fullHeadDim cfg]
 
 private def vProjSliding {batch seq : UInt64}
     (cfg : Config)
     (m : Gemma4Attention cfg)
-    (x : T #[batch, seq, cfg.hidden_size])
-    : T #[batch, seq, cfg.num_key_value_heads, cfg.head_dim] :=
+    (x : STensor #[batch, seq, cfg.hidden_size])
+    : STensor #[batch, seq, cfg.num_key_value_heads, cfg.head_dim] :=
   let rows := cfg.num_key_value_heads * cfg.head_dim
-  let vW : T #[rows, cfg.hidden_size] := data.slice m.v_proj 0 0 rows
-  reshape (linear3d x vW) #[batch, seq, cfg.num_key_value_heads, cfg.head_dim]
+  let vW : STensor #[rows, cfg.hidden_size] := sliceTyped m.v_proj 0 0 rows
+  Tensor.reshapeChecked (Tensor.linear3d x vW) #[batch, seq, cfg.num_key_value_heads, cfg.head_dim]
 
 private def vProjFull {batch seq : UInt64}
     (cfg : Config)
     (m : Gemma4Attention cfg)
-    (x : T #[batch, seq, cfg.hidden_size])
-    : T #[batch, seq, Config.fullNumKVHeads cfg, Config.fullHeadDim cfg] :=
+    (x : STensor #[batch, seq, cfg.hidden_size])
+    : STensor #[batch, seq, Config.fullNumKVHeads cfg, Config.fullHeadDim cfg] :=
   let rows := Config.fullNumKVHeads cfg * Config.fullHeadDim cfg
-  let vW : T #[rows, cfg.hidden_size] := data.slice m.v_proj 0 0 rows
-  reshape (linear3d x vW) #[batch, seq, Config.fullNumKVHeads cfg, Config.fullHeadDim cfg]
+  let vW : STensor #[rows, cfg.hidden_size] := sliceTyped m.v_proj 0 0 rows
+  Tensor.reshapeChecked (Tensor.linear3d x vW) #[batch, seq, Config.fullNumKVHeads cfg, Config.fullHeadDim cfg]
 
 private def oProjSliding {batch seq : UInt64}
     (cfg : Config)
     (m : Gemma4Attention cfg)
-    (x : T #[batch, seq, cfg.num_attention_heads * cfg.head_dim])
-    : T #[batch, seq, cfg.hidden_size] :=
+    (x : STensor #[batch, seq, cfg.num_attention_heads * cfg.head_dim])
+    : STensor #[batch, seq, cfg.hidden_size] :=
   let cols := cfg.num_attention_heads * cfg.head_dim
-  let oW : T #[cfg.hidden_size, cols] := data.slice m.o_proj 1 0 cols
-  linear3d x oW
+  let oW : STensor #[cfg.hidden_size, cols] := sliceTyped m.o_proj 1 0 cols
+  Tensor.linear3d x oW
 
 private def oProjFull {batch seq : UInt64}
     (cfg : Config)
     (m : Gemma4Attention cfg)
-    (x : T #[batch, seq, cfg.num_attention_heads * Config.fullHeadDim cfg])
-    : T #[batch, seq, cfg.hidden_size] :=
+    (x : STensor #[batch, seq, cfg.num_attention_heads * Config.fullHeadDim cfg])
+    : STensor #[batch, seq, cfg.hidden_size] :=
   let cols := cfg.num_attention_heads * Config.fullHeadDim cfg
-  let oW : T #[cfg.hidden_size, cols] := data.slice m.o_proj 1 0 cols
-  linear3d x oW
+  let oW : STensor #[cfg.hidden_size, cols] := sliceTyped m.o_proj 1 0 cols
+  Tensor.linear3d x oW
 
 private def padSlidingKVForCache {batch seq : UInt64}
     (cfg : Config)
-    (x : T #[batch, cfg.num_key_value_heads, seq, cfg.head_dim])
-    : T #[batch, Config.maxKVHeads cfg, seq, Config.maxHeadDim cfg] :=
+    (x : STensor #[batch, cfg.num_key_value_heads, seq, cfg.head_dim])
+    : STensor #[batch, Config.maxKVHeads cfg, seq, Config.maxHeadDim cfg] :=
   let padDim : UInt64 := Config.maxHeadDim cfg - cfg.head_dim
-  let xDim : T #[batch, cfg.num_key_value_heads, seq, Config.maxHeadDim cfg] :=
-    nn.cat x (zerosOn x.device : T #[batch, cfg.num_key_value_heads, seq, padDim]) 3
+  let xDim : STensor #[batch, cfg.num_key_value_heads, seq, Config.maxHeadDim cfg] :=
+    typedCat x (Tensor.castLike x (zerosDynamicOn x.device : STensor #[batch, cfg.num_key_value_heads, seq, padDim])) 3
   let padHeads : UInt64 := Config.maxKVHeads cfg - cfg.num_key_value_heads
-  nn.cat xDim (zerosOn x.device : T #[batch, padHeads, seq, Config.maxHeadDim cfg]) 1
+  typedCat xDim (Tensor.castLike x (zerosDynamicOn x.device : STensor #[batch, padHeads, seq, Config.maxHeadDim cfg])) 1
 
 private def padFullKVForCache {batch seq : UInt64}
     (cfg : Config)
-    (x : T #[batch, Config.fullNumKVHeads cfg, seq, Config.fullHeadDim cfg])
-    : T #[batch, Config.maxKVHeads cfg, seq, Config.maxHeadDim cfg] :=
+    (x : STensor #[batch, Config.fullNumKVHeads cfg, seq, Config.fullHeadDim cfg])
+    : STensor #[batch, Config.maxKVHeads cfg, seq, Config.maxHeadDim cfg] :=
   let padDim : UInt64 := Config.maxHeadDim cfg - Config.fullHeadDim cfg
-  let xDim : T #[batch, Config.fullNumKVHeads cfg, seq, Config.maxHeadDim cfg] :=
-    nn.cat x (zerosOn x.device : T #[batch, Config.fullNumKVHeads cfg, seq, padDim]) 3
+  let xDim : STensor #[batch, Config.fullNumKVHeads cfg, seq, Config.maxHeadDim cfg] :=
+    typedCat x (Tensor.castLike x (zerosDynamicOn x.device : STensor #[batch, Config.fullNumKVHeads cfg, seq, padDim])) 3
   let padHeads : UInt64 := Config.maxKVHeads cfg - Config.fullNumKVHeads cfg
-  nn.cat xDim (zerosOn x.device : T #[batch, padHeads, seq, Config.maxHeadDim cfg]) 1
+  typedCat xDim (Tensor.castLike x (zerosDynamicOn x.device : STensor #[batch, padHeads, seq, Config.maxHeadDim cfg])) 1
 
 private def cacheSliceSliding {batch kvLen : UInt64}
     (cfg : Config)
     (cache : KVCache cfg batch)
-    : T #[batch, cfg.num_key_value_heads, kvLen, cfg.head_dim]
-      × T #[batch, cfg.num_key_value_heads, kvLen, cfg.head_dim] :=
-  let kStore : T #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg] :=
-    reshape cache.kStoreDyn #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg]
-  let vStore : T #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg] :=
-    reshape cache.vStoreDyn #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg]
-  let k0 : T #[batch, cfg.num_key_value_heads, kvLen, Config.maxHeadDim cfg] :=
-    data.slice (data.slice kStore 1 0 cfg.num_key_value_heads) 2 0 kvLen
-  let v0 : T #[batch, cfg.num_key_value_heads, kvLen, Config.maxHeadDim cfg] :=
-    data.slice (data.slice vStore 1 0 cfg.num_key_value_heads) 2 0 kvLen
-  let k : T #[batch, cfg.num_key_value_heads, kvLen, cfg.head_dim] := data.slice k0 3 0 cfg.head_dim
-  let v : T #[batch, cfg.num_key_value_heads, kvLen, cfg.head_dim] := data.slice v0 3 0 cfg.head_dim
+    : STensor #[batch, cfg.num_key_value_heads, kvLen, cfg.head_dim]
+      × STensor #[batch, cfg.num_key_value_heads, kvLen, cfg.head_dim] :=
+  let kStore : STensor #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg] :=
+    Tensor.reshapeChecked cache.kStoreDyn.2 #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg]
+  let vStore : STensor #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg] :=
+    Tensor.reshapeChecked cache.vStoreDyn.2 #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg]
+  let k0 : STensor #[batch, cfg.num_key_value_heads, kvLen, Config.maxHeadDim cfg] :=
+    sliceTyped (sliceTyped kStore 1 0 cfg.num_key_value_heads) 2 0 kvLen
+  let v0 : STensor #[batch, cfg.num_key_value_heads, kvLen, Config.maxHeadDim cfg] :=
+    sliceTyped (sliceTyped vStore 1 0 cfg.num_key_value_heads) 2 0 kvLen
+  let k : STensor #[batch, cfg.num_key_value_heads, kvLen, cfg.head_dim] := sliceTyped k0 3 0 cfg.head_dim
+  let v : STensor #[batch, cfg.num_key_value_heads, kvLen, cfg.head_dim] := sliceTyped v0 3 0 cfg.head_dim
   (k, v)
 
 private def cacheSliceFull {batch kvLen : UInt64}
     (cfg : Config)
     (cache : KVCache cfg batch)
-    : T #[batch, Config.fullNumKVHeads cfg, kvLen, Config.fullHeadDim cfg]
-      × T #[batch, Config.fullNumKVHeads cfg, kvLen, Config.fullHeadDim cfg] :=
-  let kStore : T #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg] :=
-    reshape cache.kStoreDyn #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg]
-  let vStore : T #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg] :=
-    reshape cache.vStoreDyn #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg]
-  let k0 : T #[batch, Config.fullNumKVHeads cfg, kvLen, Config.maxHeadDim cfg] :=
-    data.slice (data.slice kStore 1 0 (Config.fullNumKVHeads cfg)) 2 0 kvLen
-  let v0 : T #[batch, Config.fullNumKVHeads cfg, kvLen, Config.maxHeadDim cfg] :=
-    data.slice (data.slice vStore 1 0 (Config.fullNumKVHeads cfg)) 2 0 kvLen
-  let k : T #[batch, Config.fullNumKVHeads cfg, kvLen, Config.fullHeadDim cfg] :=
-    data.slice k0 3 0 (Config.fullHeadDim cfg)
-  let v : T #[batch, Config.fullNumKVHeads cfg, kvLen, Config.fullHeadDim cfg] :=
-    data.slice v0 3 0 (Config.fullHeadDim cfg)
+    : STensor #[batch, Config.fullNumKVHeads cfg, kvLen, Config.fullHeadDim cfg]
+      × STensor #[batch, Config.fullNumKVHeads cfg, kvLen, Config.fullHeadDim cfg] :=
+  let kStore : STensor #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg] :=
+    Tensor.reshapeChecked cache.kStoreDyn.2 #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg]
+  let vStore : STensor #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg] :=
+    Tensor.reshapeChecked cache.vStoreDyn.2 #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg]
+  let k0 : STensor #[batch, Config.fullNumKVHeads cfg, kvLen, Config.maxHeadDim cfg] :=
+    sliceTyped (sliceTyped kStore 1 0 (Config.fullNumKVHeads cfg)) 2 0 kvLen
+  let v0 : STensor #[batch, Config.fullNumKVHeads cfg, kvLen, Config.maxHeadDim cfg] :=
+    sliceTyped (sliceTyped vStore 1 0 (Config.fullNumKVHeads cfg)) 2 0 kvLen
+  let k : STensor #[batch, Config.fullNumKVHeads cfg, kvLen, Config.fullHeadDim cfg] :=
+    sliceTyped k0 3 0 (Config.fullHeadDim cfg)
+  let v : STensor #[batch, Config.fullNumKVHeads cfg, kvLen, Config.fullHeadDim cfg] :=
+    sliceTyped v0 3 0 (Config.fullHeadDim cfg)
   (k, v)
 
 private def attentionScale (d : UInt64) : Float :=
@@ -346,39 +336,39 @@ private def attentionScale (d : UInt64) : Float :=
 private def attentionSlidingPrefillWithMask {batch seq : UInt64}
     (cfg : Config)
     (m : Gemma4Attention cfg)
-    (x : T #[batch, seq, cfg.hidden_size])
-    (cos : T #[seq, cfg.head_dim / 2])
-    (sin : T #[seq, cfg.head_dim / 2])
-    (attnMask : T #[batch, seq, seq])
+    (x : STensor #[batch, seq, cfg.hidden_size])
+    (cos : DTensor #[seq, cfg.head_dim / 2] .Float32)
+    (sin : DTensor #[seq, cfg.head_dim / 2] .Float32)
+    (attnMask : DTensor #[batch, seq, seq] .Int64)
     (cache : KVCache cfg batch)
-    : T #[batch, seq, cfg.hidden_size] × KVCache cfg batch :=
+    : STensor #[batch, seq, cfg.hidden_size] × KVCache cfg batch :=
   let q0 := qProjSliding cfg m x
   let kRaw := kProjSliding cfg m x
   let vRaw := vProjSliding cfg m x
   let q1 := rmsNormWeighted4dSlice m.q_norm.weight q0 m.q_norm.eps
   let k1 := rmsNormWeighted4dSlice m.k_norm.weight kRaw m.k_norm.eps
-  let q2 : T #[batch, seq, cfg.num_attention_heads, cfg.head_dim] := rotary.applyRotaryEmb q1 cos sin
-  let k2 : T #[batch, seq, cfg.num_key_value_heads, cfg.head_dim] := rotary.applyRotaryEmb k1 cos sin
-  let v2 : T #[batch, seq, cfg.num_key_value_heads, cfg.head_dim] := rmsNormNoScale4dSlice vRaw cfg.rms_norm_eps
-  let qh : T #[batch, cfg.num_attention_heads, seq, cfg.head_dim] :=
-    mul_scalar (nn.transpose_for_attention q2) (attentionScale cfg.head_dim)
-  let kh : T #[batch, cfg.num_key_value_heads, seq, cfg.head_dim] := nn.transpose_for_attention k2
-  let vh : T #[batch, cfg.num_key_value_heads, seq, cfg.head_dim] := nn.transpose_for_attention v2
-  let attn : T #[batch, cfg.num_attention_heads, seq, cfg.head_dim] :=
-    nn.scaledDotProductAttentionGQAMaskQKV qh kh vh attnMask 0.0 true
-  let out : T #[batch, seq, cfg.num_attention_heads * cfg.head_dim] :=
-    reshape (nn.transpose_from_attention attn) #[batch, seq, cfg.num_attention_heads * cfg.head_dim]
-  let paddedK : T #[batch, Config.maxKVHeads cfg, seq, Config.maxHeadDim cfg] := padSlidingKVForCache cfg kh
-  let paddedV : T #[batch, Config.maxKVHeads cfg, seq, Config.maxHeadDim cfg] := padSlidingKVForCache cfg vh
-  let kStore : T #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg] :=
-    reshape cache.kStoreDyn #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg]
-  let vStore : T #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg] :=
-    reshape cache.vStoreDyn #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg]
-  let kStore' := data.sliceScatter kStore 2 0 paddedK
-  let vStore' := data.sliceScatter vStore 2 0 paddedV
+  let q2 : STensor #[batch, seq, cfg.num_attention_heads, cfg.head_dim] := Tensor.applyRotary q1 cos sin
+  let k2 : STensor #[batch, seq, cfg.num_key_value_heads, cfg.head_dim] := Tensor.applyRotary k1 cos sin
+  let v2 : STensor #[batch, seq, cfg.num_key_value_heads, cfg.head_dim] := rmsNormNoScale4dSlice vRaw cfg.rms_norm_eps
+  let qh : STensor #[batch, cfg.num_attention_heads, seq, cfg.head_dim] :=
+    Tensor.Preserving.mulScalar (transposeAttention q2) (attentionScale cfg.head_dim)
+  let kh : STensor #[batch, cfg.num_key_value_heads, seq, cfg.head_dim] := transposeAttention k2
+  let vh : STensor #[batch, cfg.num_key_value_heads, seq, cfg.head_dim] := transposeAttention v2
+  let attn : STensor #[batch, cfg.num_attention_heads, seq, cfg.head_dim] :=
+    maskedAttention qh kh vh attnMask 0.0 true
+  let out : STensor #[batch, seq, cfg.num_attention_heads * cfg.head_dim] :=
+    Tensor.reshapeChecked (transposeAttention attn) #[batch, seq, cfg.num_attention_heads * cfg.head_dim]
+  let paddedK : STensor #[batch, Config.maxKVHeads cfg, seq, Config.maxHeadDim cfg] := padSlidingKVForCache cfg kh
+  let paddedV : STensor #[batch, Config.maxKVHeads cfg, seq, Config.maxHeadDim cfg] := padSlidingKVForCache cfg vh
+  let kStore : STensor #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg] :=
+    Tensor.reshapeChecked cache.kStoreDyn.2 #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg]
+  let vStore : STensor #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg] :=
+    Tensor.reshapeChecked cache.vStoreDyn.2 #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg]
+  let kStore' := Tensor.sliceScatter kStore 2 0 paddedK
+  let vStore' := Tensor.sliceScatter vStore 2 0 paddedV
   let cache' : KVCache cfg batch := {
-    kStoreDyn := nn.eraseShape kStore'
-    vStoreDyn := nn.eraseShape vStore'
+    kStoreDyn := kStore'.packShape
+    vStoreDyn := vStore'.packShape
     seq := seq
     maxLen := cache.maxLen
   }
@@ -387,12 +377,12 @@ private def attentionSlidingPrefillWithMask {batch seq : UInt64}
 private def attentionFullPrefillWithMask {batch seq : UInt64}
     (cfg : Config)
     (m : Gemma4Attention cfg)
-    (x : T #[batch, seq, cfg.hidden_size])
-    (cos : T #[seq, Config.fullHeadDim cfg / 2])
-    (sin : T #[seq, Config.fullHeadDim cfg / 2])
-    (attnMask : T #[batch, seq, seq])
+    (x : STensor #[batch, seq, cfg.hidden_size])
+    (cos : DTensor #[seq, Config.fullHeadDim cfg / 2] .Float32)
+    (sin : DTensor #[seq, Config.fullHeadDim cfg / 2] .Float32)
+    (attnMask : DTensor #[batch, seq, seq] .Int64)
     (cache : KVCache cfg batch)
-    : T #[batch, seq, cfg.hidden_size] × KVCache cfg batch :=
+    : STensor #[batch, seq, cfg.hidden_size] × KVCache cfg batch :=
   let q0 := qProjFull cfg m x
   let kRaw := kProjFull cfg m x
   let vRaw :=
@@ -402,28 +392,28 @@ private def attentionFullPrefillWithMask {batch seq : UInt64}
       vProjFull cfg m x
   let q1 := rmsNormWeighted4dSlice m.q_norm.weight q0 m.q_norm.eps
   let k1 := rmsNormWeighted4dSlice m.k_norm.weight kRaw m.k_norm.eps
-  let q2 : T #[batch, seq, cfg.num_attention_heads, Config.fullHeadDim cfg] := rotary.applyRotaryEmb q1 cos sin
-  let k2 : T #[batch, seq, Config.fullNumKVHeads cfg, Config.fullHeadDim cfg] := rotary.applyRotaryEmb k1 cos sin
-  let v2 : T #[batch, seq, Config.fullNumKVHeads cfg, Config.fullHeadDim cfg] := rmsNormNoScale4dSlice vRaw cfg.rms_norm_eps
-  let qh : T #[batch, cfg.num_attention_heads, seq, Config.fullHeadDim cfg] :=
-    mul_scalar (nn.transpose_for_attention q2) (attentionScale (Config.fullHeadDim cfg))
-  let kh : T #[batch, Config.fullNumKVHeads cfg, seq, Config.fullHeadDim cfg] := nn.transpose_for_attention k2
-  let vh : T #[batch, Config.fullNumKVHeads cfg, seq, Config.fullHeadDim cfg] := nn.transpose_for_attention v2
-  let attn : T #[batch, cfg.num_attention_heads, seq, Config.fullHeadDim cfg] :=
-    nn.scaledDotProductAttentionGQAMaskQKV qh kh vh attnMask 0.0 true
-  let out : T #[batch, seq, cfg.num_attention_heads * Config.fullHeadDim cfg] :=
-    reshape (nn.transpose_from_attention attn) #[batch, seq, cfg.num_attention_heads * Config.fullHeadDim cfg]
-  let paddedK : T #[batch, Config.maxKVHeads cfg, seq, Config.maxHeadDim cfg] := padFullKVForCache cfg kh
-  let paddedV : T #[batch, Config.maxKVHeads cfg, seq, Config.maxHeadDim cfg] := padFullKVForCache cfg vh
-  let kStore : T #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg] :=
-    reshape cache.kStoreDyn #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg]
-  let vStore : T #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg] :=
-    reshape cache.vStoreDyn #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg]
-  let kStore' := data.sliceScatter kStore 2 0 paddedK
-  let vStore' := data.sliceScatter vStore 2 0 paddedV
+  let q2 : STensor #[batch, seq, cfg.num_attention_heads, Config.fullHeadDim cfg] := Tensor.applyRotary q1 cos sin
+  let k2 : STensor #[batch, seq, Config.fullNumKVHeads cfg, Config.fullHeadDim cfg] := Tensor.applyRotary k1 cos sin
+  let v2 : STensor #[batch, seq, Config.fullNumKVHeads cfg, Config.fullHeadDim cfg] := rmsNormNoScale4dSlice vRaw cfg.rms_norm_eps
+  let qh : STensor #[batch, cfg.num_attention_heads, seq, Config.fullHeadDim cfg] :=
+    Tensor.Preserving.mulScalar (transposeAttention q2) (attentionScale (Config.fullHeadDim cfg))
+  let kh : STensor #[batch, Config.fullNumKVHeads cfg, seq, Config.fullHeadDim cfg] := transposeAttention k2
+  let vh : STensor #[batch, Config.fullNumKVHeads cfg, seq, Config.fullHeadDim cfg] := transposeAttention v2
+  let attn : STensor #[batch, cfg.num_attention_heads, seq, Config.fullHeadDim cfg] :=
+    maskedAttention qh kh vh attnMask 0.0 true
+  let out : STensor #[batch, seq, cfg.num_attention_heads * Config.fullHeadDim cfg] :=
+    Tensor.reshapeChecked (transposeAttention attn) #[batch, seq, cfg.num_attention_heads * Config.fullHeadDim cfg]
+  let paddedK : STensor #[batch, Config.maxKVHeads cfg, seq, Config.maxHeadDim cfg] := padFullKVForCache cfg kh
+  let paddedV : STensor #[batch, Config.maxKVHeads cfg, seq, Config.maxHeadDim cfg] := padFullKVForCache cfg vh
+  let kStore : STensor #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg] :=
+    Tensor.reshapeChecked cache.kStoreDyn.2 #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg]
+  let vStore : STensor #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg] :=
+    Tensor.reshapeChecked cache.vStoreDyn.2 #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg]
+  let kStore' := Tensor.sliceScatter kStore 2 0 paddedK
+  let vStore' := Tensor.sliceScatter vStore 2 0 paddedV
   let cache' : KVCache cfg batch := {
-    kStoreDyn := nn.eraseShape kStore'
-    vStoreDyn := nn.eraseShape vStore'
+    kStoreDyn := kStore'.packShape
+    vStoreDyn := vStore'.packShape
     seq := seq
     maxLen := cache.maxLen
   }
@@ -432,35 +422,35 @@ private def attentionFullPrefillWithMask {batch seq : UInt64}
 private def attentionSlidingNoCache {batch seq : UInt64}
     (cfg : Config)
     (m : Gemma4Attention cfg)
-    (x : T #[batch, seq, cfg.hidden_size])
-    (cos : T #[seq, cfg.head_dim / 2])
-    (sin : T #[seq, cfg.head_dim / 2])
-    : T #[batch, seq, cfg.hidden_size] :=
+    (x : STensor #[batch, seq, cfg.hidden_size])
+    (cos : DTensor #[seq, cfg.head_dim / 2] .Float32)
+    (sin : DTensor #[seq, cfg.head_dim / 2] .Float32)
+    : STensor #[batch, seq, cfg.hidden_size] :=
   let q0 := qProjSliding cfg m x
   let k0 := kProjSliding cfg m x
   let v0 := vProjSliding cfg m x
   let q1 := rmsNormWeighted4dSlice m.q_norm.weight q0 m.q_norm.eps
   let k1 := rmsNormWeighted4dSlice m.k_norm.weight k0 m.k_norm.eps
-  let q2 : T #[batch, seq, cfg.num_attention_heads, cfg.head_dim] := rotary.applyRotaryEmb q1 cos sin
-  let k2 : T #[batch, seq, cfg.num_key_value_heads, cfg.head_dim] := rotary.applyRotaryEmb k1 cos sin
-  let v2 : T #[batch, seq, cfg.num_key_value_heads, cfg.head_dim] := rmsNormNoScale4dSlice v0 cfg.rms_norm_eps
-  let qh : T #[batch, cfg.num_attention_heads, seq, cfg.head_dim] :=
-    mul_scalar (nn.transpose_for_attention q2) (attentionScale cfg.head_dim)
-  let kh : T #[batch, cfg.num_key_value_heads, seq, cfg.head_dim] := nn.transpose_for_attention k2
-  let vh : T #[batch, cfg.num_key_value_heads, seq, cfg.head_dim] := nn.transpose_for_attention v2
-  let attn : T #[batch, cfg.num_attention_heads, seq, cfg.head_dim] :=
-    nn.scaledDotProductAttentionGQAWindow qh kh vh 0.0 true true cfg.sliding_window
-  let out : T #[batch, seq, cfg.num_attention_heads * cfg.head_dim] :=
-    reshape (nn.transpose_from_attention attn) #[batch, seq, cfg.num_attention_heads * cfg.head_dim]
+  let q2 : STensor #[batch, seq, cfg.num_attention_heads, cfg.head_dim] := Tensor.applyRotary q1 cos sin
+  let k2 : STensor #[batch, seq, cfg.num_key_value_heads, cfg.head_dim] := Tensor.applyRotary k1 cos sin
+  let v2 : STensor #[batch, seq, cfg.num_key_value_heads, cfg.head_dim] := rmsNormNoScale4dSlice v0 cfg.rms_norm_eps
+  let qh : STensor #[batch, cfg.num_attention_heads, seq, cfg.head_dim] :=
+    Tensor.Preserving.mulScalar (transposeAttention q2) (attentionScale cfg.head_dim)
+  let kh : STensor #[batch, cfg.num_key_value_heads, seq, cfg.head_dim] := transposeAttention k2
+  let vh : STensor #[batch, cfg.num_key_value_heads, seq, cfg.head_dim] := transposeAttention v2
+  let attn : STensor #[batch, cfg.num_attention_heads, seq, cfg.head_dim] :=
+    Tensor.attentionWindow qh kh vh 0.0 true true cfg.sliding_window
+  let out : STensor #[batch, seq, cfg.num_attention_heads * cfg.head_dim] :=
+    Tensor.reshapeChecked (transposeAttention attn) #[batch, seq, cfg.num_attention_heads * cfg.head_dim]
   oProjSliding cfg m out
 
 private def attentionFullNoCache {batch seq : UInt64}
     (cfg : Config)
     (m : Gemma4Attention cfg)
-    (x : T #[batch, seq, cfg.hidden_size])
-    (cos : T #[seq, Config.fullHeadDim cfg / 2])
-    (sin : T #[seq, Config.fullHeadDim cfg / 2])
-    : T #[batch, seq, cfg.hidden_size] :=
+    (x : STensor #[batch, seq, cfg.hidden_size])
+    (cos : DTensor #[seq, Config.fullHeadDim cfg / 2] .Float32)
+    (sin : DTensor #[seq, Config.fullHeadDim cfg / 2] .Float32)
+    : STensor #[batch, seq, cfg.hidden_size] :=
   let q0 := qProjFull cfg m x
   let kRaw := kProjFull cfg m x
   let vRaw :=
@@ -470,90 +460,90 @@ private def attentionFullNoCache {batch seq : UInt64}
       vProjFull cfg m x
   let q1 := rmsNormWeighted4dSlice m.q_norm.weight q0 m.q_norm.eps
   let k1 := rmsNormWeighted4dSlice m.k_norm.weight kRaw m.k_norm.eps
-  let q2 : T #[batch, seq, cfg.num_attention_heads, Config.fullHeadDim cfg] := rotary.applyRotaryEmb q1 cos sin
-  let k2 : T #[batch, seq, Config.fullNumKVHeads cfg, Config.fullHeadDim cfg] := rotary.applyRotaryEmb k1 cos sin
-  let v2 : T #[batch, seq, Config.fullNumKVHeads cfg, Config.fullHeadDim cfg] := rmsNormNoScale4dSlice vRaw cfg.rms_norm_eps
-  let qh : T #[batch, cfg.num_attention_heads, seq, Config.fullHeadDim cfg] :=
-    mul_scalar (nn.transpose_for_attention q2) (attentionScale (Config.fullHeadDim cfg))
-  let kh : T #[batch, Config.fullNumKVHeads cfg, seq, Config.fullHeadDim cfg] := nn.transpose_for_attention k2
-  let vh : T #[batch, Config.fullNumKVHeads cfg, seq, Config.fullHeadDim cfg] := nn.transpose_for_attention v2
-  let attn : T #[batch, cfg.num_attention_heads, seq, Config.fullHeadDim cfg] :=
-    nn.scaledDotProductAttentionGQA qh kh vh 0.0 true true
-  let out : T #[batch, seq, cfg.num_attention_heads * Config.fullHeadDim cfg] :=
-    reshape (nn.transpose_from_attention attn) #[batch, seq, cfg.num_attention_heads * Config.fullHeadDim cfg]
+  let q2 : STensor #[batch, seq, cfg.num_attention_heads, Config.fullHeadDim cfg] := Tensor.applyRotary q1 cos sin
+  let k2 : STensor #[batch, seq, Config.fullNumKVHeads cfg, Config.fullHeadDim cfg] := Tensor.applyRotary k1 cos sin
+  let v2 : STensor #[batch, seq, Config.fullNumKVHeads cfg, Config.fullHeadDim cfg] := rmsNormNoScale4dSlice vRaw cfg.rms_norm_eps
+  let qh : STensor #[batch, cfg.num_attention_heads, seq, Config.fullHeadDim cfg] :=
+    Tensor.Preserving.mulScalar (transposeAttention q2) (attentionScale (Config.fullHeadDim cfg))
+  let kh : STensor #[batch, Config.fullNumKVHeads cfg, seq, Config.fullHeadDim cfg] := transposeAttention k2
+  let vh : STensor #[batch, Config.fullNumKVHeads cfg, seq, Config.fullHeadDim cfg] := transposeAttention v2
+  let attn : STensor #[batch, cfg.num_attention_heads, seq, Config.fullHeadDim cfg] :=
+    Tensor.attentionGQA qh kh vh 0.0 true true
+  let out : STensor #[batch, seq, cfg.num_attention_heads * Config.fullHeadDim cfg] :=
+    Tensor.reshapeChecked (transposeAttention attn) #[batch, seq, cfg.num_attention_heads * Config.fullHeadDim cfg]
   oProjFull cfg m out
 
 private def attentionSlidingWithCache {batch seq : UInt64}
     (cfg : Config)
     (m : Gemma4Attention cfg)
-    (x : T #[batch, seq, cfg.hidden_size])
-    (cos : T #[seq, cfg.head_dim / 2])
-    (sin : T #[seq, cfg.head_dim / 2])
+    (x : STensor #[batch, seq, cfg.hidden_size])
+    (cos : DTensor #[seq, cfg.head_dim / 2] .Float32)
+    (sin : DTensor #[seq, cfg.head_dim / 2] .Float32)
     (cache : KVCache cfg batch)
     (sharedSource : Option (KVCache cfg batch) := none)
-    : T #[batch, seq, cfg.hidden_size] × KVCache cfg batch :=
+    : STensor #[batch, seq, cfg.hidden_size] × KVCache cfg batch :=
   let q0 := qProjSliding cfg m x
   let q1 := rmsNormWeighted4dSlice m.q_norm.weight q0 m.q_norm.eps
-  let q2 : T #[batch, seq, cfg.num_attention_heads, cfg.head_dim] := rotary.applyRotaryEmb q1 cos sin
-  let qh : T #[batch, cfg.num_attention_heads, seq, cfg.head_dim] :=
-    mul_scalar (nn.transpose_for_attention q2) (attentionScale cfg.head_dim)
+  let q2 : STensor #[batch, seq, cfg.num_attention_heads, cfg.head_dim] := Tensor.applyRotary q1 cos sin
+  let qh : STensor #[batch, cfg.num_attention_heads, seq, cfg.head_dim] :=
+    Tensor.Preserving.mulScalar (transposeAttention q2) (attentionScale cfg.head_dim)
   match sharedSource with
   | some src =>
     let (kAll0, vAll0) := cacheSliceSliding (kvLen := seq) cfg src
-    let attn : T #[batch, cfg.num_attention_heads, seq, cfg.head_dim] :=
-      nn.scaledDotProductAttentionGQAWindow qh kAll0 vAll0 0.0 true true cfg.sliding_window
-    let out : T #[batch, seq, cfg.num_attention_heads * cfg.head_dim] :=
-      reshape (nn.transpose_from_attention attn) #[batch, seq, cfg.num_attention_heads * cfg.head_dim]
+    let attn : STensor #[batch, cfg.num_attention_heads, seq, cfg.head_dim] :=
+      Tensor.attentionWindow qh kAll0 vAll0 0.0 true true cfg.sliding_window
+    let out : STensor #[batch, seq, cfg.num_attention_heads * cfg.head_dim] :=
+      Tensor.reshapeChecked (transposeAttention attn) #[batch, seq, cfg.num_attention_heads * cfg.head_dim]
     (oProjSliding cfg m out, cache)
   | none =>
     let kRaw := kProjSliding cfg m x
     let vRaw := vProjSliding cfg m x
     let k1 := rmsNormWeighted4dSlice m.k_norm.weight kRaw m.k_norm.eps
-    let k2 : T #[batch, seq, cfg.num_key_value_heads, cfg.head_dim] := rotary.applyRotaryEmb k1 cos sin
-    let v2 : T #[batch, seq, cfg.num_key_value_heads, cfg.head_dim] := rmsNormNoScale4dSlice vRaw cfg.rms_norm_eps
-    let kh : T #[batch, cfg.num_key_value_heads, seq, cfg.head_dim] := nn.transpose_for_attention k2
-    let vh : T #[batch, cfg.num_key_value_heads, seq, cfg.head_dim] := nn.transpose_for_attention v2
+    let k2 : STensor #[batch, seq, cfg.num_key_value_heads, cfg.head_dim] := Tensor.applyRotary k1 cos sin
+    let v2 : STensor #[batch, seq, cfg.num_key_value_heads, cfg.head_dim] := rmsNormNoScale4dSlice vRaw cfg.rms_norm_eps
+    let kh : STensor #[batch, cfg.num_key_value_heads, seq, cfg.head_dim] := transposeAttention k2
+    let vh : STensor #[batch, cfg.num_key_value_heads, seq, cfg.head_dim] := transposeAttention v2
     let paddedK := padSlidingKVForCache cfg kh
     let paddedV := padSlidingKVForCache cfg vh
-    let kStore : T #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg] :=
-      reshape cache.kStoreDyn #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg]
-    let vStore : T #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg] :=
-      reshape cache.vStoreDyn #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg]
-    let kStore' := data.sliceScatter kStore 2 0 paddedK
-    let vStore' := data.sliceScatter vStore 2 0 paddedV
+    let kStore : STensor #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg] :=
+      Tensor.reshapeChecked cache.kStoreDyn.2 #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg]
+    let vStore : STensor #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg] :=
+      Tensor.reshapeChecked cache.vStoreDyn.2 #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg]
+    let kStore' := Tensor.sliceScatter kStore 2 0 paddedK
+    let vStore' := Tensor.sliceScatter vStore 2 0 paddedV
     let cache' : KVCache cfg batch := {
-      kStoreDyn := nn.eraseShape kStore'
-      vStoreDyn := nn.eraseShape vStore'
+      kStoreDyn := kStore'.packShape
+      vStoreDyn := vStore'.packShape
       seq := seq
       maxLen := cache.maxLen
     }
-    let attn : T #[batch, cfg.num_attention_heads, seq, cfg.head_dim] :=
-      nn.scaledDotProductAttentionGQAWindow qh kh vh 0.0 true true cfg.sliding_window
-    let out : T #[batch, seq, cfg.num_attention_heads * cfg.head_dim] :=
-      reshape (nn.transpose_from_attention attn) #[batch, seq, cfg.num_attention_heads * cfg.head_dim]
+    let attn : STensor #[batch, cfg.num_attention_heads, seq, cfg.head_dim] :=
+      Tensor.attentionWindow qh kh vh 0.0 true true cfg.sliding_window
+    let out : STensor #[batch, seq, cfg.num_attention_heads * cfg.head_dim] :=
+      Tensor.reshapeChecked (transposeAttention attn) #[batch, seq, cfg.num_attention_heads * cfg.head_dim]
     (oProjSliding cfg m out, cache')
 
 private def attentionFullWithCache {batch seq : UInt64}
     (cfg : Config)
     (m : Gemma4Attention cfg)
-    (x : T #[batch, seq, cfg.hidden_size])
-    (cos : T #[seq, Config.fullHeadDim cfg / 2])
-    (sin : T #[seq, Config.fullHeadDim cfg / 2])
+    (x : STensor #[batch, seq, cfg.hidden_size])
+    (cos : DTensor #[seq, Config.fullHeadDim cfg / 2] .Float32)
+    (sin : DTensor #[seq, Config.fullHeadDim cfg / 2] .Float32)
     (cache : KVCache cfg batch)
     (sharedSource : Option (KVCache cfg batch) := none)
-    : T #[batch, seq, cfg.hidden_size] × KVCache cfg batch :=
+    : STensor #[batch, seq, cfg.hidden_size] × KVCache cfg batch :=
   let q0 := qProjFull cfg m x
   let q1 := rmsNormWeighted4dSlice m.q_norm.weight q0 m.q_norm.eps
-  let q2 : T #[batch, seq, cfg.num_attention_heads, Config.fullHeadDim cfg] := rotary.applyRotaryEmb q1 cos sin
-  let qh : T #[batch, cfg.num_attention_heads, seq, Config.fullHeadDim cfg] :=
-    mul_scalar (nn.transpose_for_attention q2) (attentionScale (Config.fullHeadDim cfg))
+  let q2 : STensor #[batch, seq, cfg.num_attention_heads, Config.fullHeadDim cfg] := Tensor.applyRotary q1 cos sin
+  let qh : STensor #[batch, cfg.num_attention_heads, seq, Config.fullHeadDim cfg] :=
+    Tensor.Preserving.mulScalar (transposeAttention q2) (attentionScale (Config.fullHeadDim cfg))
   match sharedSource with
   | some src =>
     let (kAll, vAll) := cacheSliceFull (kvLen := seq) cfg src
-    let attn : T #[batch, cfg.num_attention_heads, seq, Config.fullHeadDim cfg] :=
-      nn.scaledDotProductAttentionGQA qh kAll vAll 0.0 true true
-    let out : T #[batch, seq, cfg.num_attention_heads * Config.fullHeadDim cfg] :=
-      reshape (nn.transpose_from_attention attn) #[batch, seq, cfg.num_attention_heads * Config.fullHeadDim cfg]
+    let attn : STensor #[batch, cfg.num_attention_heads, seq, Config.fullHeadDim cfg] :=
+      Tensor.attentionGQA qh kAll vAll 0.0 true true
+    let out : STensor #[batch, seq, cfg.num_attention_heads * Config.fullHeadDim cfg] :=
+      Tensor.reshapeChecked (transposeAttention attn) #[batch, seq, cfg.num_attention_heads * Config.fullHeadDim cfg]
     (oProjFull cfg m out, cache)
   | none =>
     let kRaw := kProjFull cfg m x
@@ -563,90 +553,90 @@ private def attentionFullWithCache {batch seq : UInt64}
       else
         vProjFull cfg m x
     let k1 := rmsNormWeighted4dSlice m.k_norm.weight kRaw m.k_norm.eps
-    let k2 : T #[batch, seq, Config.fullNumKVHeads cfg, Config.fullHeadDim cfg] := rotary.applyRotaryEmb k1 cos sin
-    let v2 : T #[batch, seq, Config.fullNumKVHeads cfg, Config.fullHeadDim cfg] := rmsNormNoScale4dSlice vRaw cfg.rms_norm_eps
-    let kh : T #[batch, Config.fullNumKVHeads cfg, seq, Config.fullHeadDim cfg] := nn.transpose_for_attention k2
-    let vh : T #[batch, Config.fullNumKVHeads cfg, seq, Config.fullHeadDim cfg] := nn.transpose_for_attention v2
+    let k2 : STensor #[batch, seq, Config.fullNumKVHeads cfg, Config.fullHeadDim cfg] := Tensor.applyRotary k1 cos sin
+    let v2 : STensor #[batch, seq, Config.fullNumKVHeads cfg, Config.fullHeadDim cfg] := rmsNormNoScale4dSlice vRaw cfg.rms_norm_eps
+    let kh : STensor #[batch, Config.fullNumKVHeads cfg, seq, Config.fullHeadDim cfg] := transposeAttention k2
+    let vh : STensor #[batch, Config.fullNumKVHeads cfg, seq, Config.fullHeadDim cfg] := transposeAttention v2
     let paddedK := padFullKVForCache cfg kh
     let paddedV := padFullKVForCache cfg vh
-    let kStore : T #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg] :=
-      reshape cache.kStoreDyn #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg]
-    let vStore : T #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg] :=
-      reshape cache.vStoreDyn #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg]
-    let kStore' := data.sliceScatter kStore 2 0 paddedK
-    let vStore' := data.sliceScatter vStore 2 0 paddedV
+    let kStore : STensor #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg] :=
+      Tensor.reshapeChecked cache.kStoreDyn.2 #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg]
+    let vStore : STensor #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg] :=
+      Tensor.reshapeChecked cache.vStoreDyn.2 #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg]
+    let kStore' := Tensor.sliceScatter kStore 2 0 paddedK
+    let vStore' := Tensor.sliceScatter vStore 2 0 paddedV
     let cache' : KVCache cfg batch := {
-      kStoreDyn := nn.eraseShape kStore'
-      vStoreDyn := nn.eraseShape vStore'
+      kStoreDyn := kStore'.packShape
+      vStoreDyn := vStore'.packShape
       seq := seq
       maxLen := cache.maxLen
     }
-    let attn : T #[batch, cfg.num_attention_heads, seq, Config.fullHeadDim cfg] :=
-      nn.scaledDotProductAttentionGQA qh kh vh 0.0 true true
-    let out : T #[batch, seq, cfg.num_attention_heads * Config.fullHeadDim cfg] :=
-      reshape (nn.transpose_from_attention attn) #[batch, seq, cfg.num_attention_heads * Config.fullHeadDim cfg]
+    let attn : STensor #[batch, cfg.num_attention_heads, seq, Config.fullHeadDim cfg] :=
+      Tensor.attentionGQA qh kh vh 0.0 true true
+    let out : STensor #[batch, seq, cfg.num_attention_heads * Config.fullHeadDim cfg] :=
+      Tensor.reshapeChecked (transposeAttention attn) #[batch, seq, cfg.num_attention_heads * Config.fullHeadDim cfg]
     (oProjFull cfg m out, cache')
 
 private def attentionSlidingStep {batch : UInt64}
     (cfg : Config)
     (m : Gemma4Attention cfg)
-    (x : T #[batch, 1, cfg.hidden_size])
-    (cos : T #[1, cfg.head_dim / 2])
-    (sin : T #[1, cfg.head_dim / 2])
+    (x : STensor #[batch, 1, cfg.hidden_size])
+    (cos : DTensor #[1, cfg.head_dim / 2] .Float32)
+    (sin : DTensor #[1, cfg.head_dim / 2] .Float32)
     (cache : KVCache cfg batch)
     (sharedSource : Option (KVCache cfg batch) := none)
-    : T #[batch, 1, cfg.hidden_size] × KVCache cfg batch :=
+    : STensor #[batch, 1, cfg.hidden_size] × KVCache cfg batch :=
   let q0 := qProjSliding cfg m x
   let q1 := rmsNormWeighted4dSlice m.q_norm.weight q0 m.q_norm.eps
-  let q2 : T #[batch, 1, cfg.num_attention_heads, cfg.head_dim] := rotary.applyRotaryEmb q1 cos sin
-  let qh : T #[batch, cfg.num_attention_heads, 1, cfg.head_dim] :=
-    mul_scalar (nn.transpose_for_attention q2) (attentionScale cfg.head_dim)
+  let q2 : STensor #[batch, 1, cfg.num_attention_heads, cfg.head_dim] := Tensor.applyRotary q1 cos sin
+  let qh : STensor #[batch, cfg.num_attention_heads, 1, cfg.head_dim] :=
+    Tensor.Preserving.mulScalar (transposeAttention q2) (attentionScale cfg.head_dim)
   match sharedSource with
   | some src =>
     let kvLen := src.seq
     let useLen := if kvLen > cfg.sliding_window then cfg.sliding_window else kvLen
     let start := kvLen - useLen
     let (kAll0, vAll0) := cacheSliceSliding (kvLen := kvLen) cfg src
-    let kAll : T #[batch, cfg.num_key_value_heads, useLen, cfg.head_dim] := data.slice kAll0 2 start useLen
-    let vAll : T #[batch, cfg.num_key_value_heads, useLen, cfg.head_dim] := data.slice vAll0 2 start useLen
-    let attn : T #[batch, cfg.num_attention_heads, 1, cfg.head_dim] :=
-      nn.scaledDotProductAttentionGQAQKV qh kAll vAll 0.0 false true
-    let out : T #[batch, 1, cfg.num_attention_heads * cfg.head_dim] :=
-      reshape (nn.transpose_from_attention attn) #[batch, 1, cfg.num_attention_heads * cfg.head_dim]
+    let kAll : STensor #[batch, cfg.num_key_value_heads, useLen, cfg.head_dim] := sliceTyped kAll0 2 start useLen
+    let vAll : STensor #[batch, cfg.num_key_value_heads, useLen, cfg.head_dim] := sliceTyped vAll0 2 start useLen
+    let attn : STensor #[batch, cfg.num_attention_heads, 1, cfg.head_dim] :=
+      Tensor.attentionGQAQKV qh kAll vAll 0.0 false true
+    let out : STensor #[batch, 1, cfg.num_attention_heads * cfg.head_dim] :=
+      Tensor.reshapeChecked (transposeAttention attn) #[batch, 1, cfg.num_attention_heads * cfg.head_dim]
     (oProjSliding cfg m out, cache)
   | none =>
     let kRaw := kProjSliding cfg m x
     let vRaw := vProjSliding cfg m x
     let k1 := rmsNormWeighted4dSlice m.k_norm.weight kRaw m.k_norm.eps
-    let k2 : T #[batch, 1, cfg.num_key_value_heads, cfg.head_dim] := rotary.applyRotaryEmb k1 cos sin
-    let v2 : T #[batch, 1, cfg.num_key_value_heads, cfg.head_dim] := rmsNormNoScale4dSlice vRaw cfg.rms_norm_eps
-    let kNew : T #[batch, cfg.num_key_value_heads, 1, cfg.head_dim] := nn.transpose_for_attention k2
-    let vNew : T #[batch, cfg.num_key_value_heads, 1, cfg.head_dim] := nn.transpose_for_attention v2
-    let paddedK : T #[batch, Config.maxKVHeads cfg, 1, Config.maxHeadDim cfg] := padSlidingKVForCache cfg kNew
-    let paddedV : T #[batch, Config.maxKVHeads cfg, 1, Config.maxHeadDim cfg] := padSlidingKVForCache cfg vNew
-    let kStore : T #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg] :=
-      reshape cache.kStoreDyn #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg]
-    let vStore : T #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg] :=
-      reshape cache.vStoreDyn #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg]
+    let k2 : STensor #[batch, 1, cfg.num_key_value_heads, cfg.head_dim] := Tensor.applyRotary k1 cos sin
+    let v2 : STensor #[batch, 1, cfg.num_key_value_heads, cfg.head_dim] := rmsNormNoScale4dSlice vRaw cfg.rms_norm_eps
+    let kNew : STensor #[batch, cfg.num_key_value_heads, 1, cfg.head_dim] := transposeAttention k2
+    let vNew : STensor #[batch, cfg.num_key_value_heads, 1, cfg.head_dim] := transposeAttention v2
+    let paddedK : STensor #[batch, Config.maxKVHeads cfg, 1, Config.maxHeadDim cfg] := padSlidingKVForCache cfg kNew
+    let paddedV : STensor #[batch, Config.maxKVHeads cfg, 1, Config.maxHeadDim cfg] := padSlidingKVForCache cfg vNew
+    let kStore : STensor #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg] :=
+      Tensor.reshapeChecked cache.kStoreDyn.2 #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg]
+    let vStore : STensor #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg] :=
+      Tensor.reshapeChecked cache.vStoreDyn.2 #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg]
     let writePos := if cache.seq < cache.maxLen then cache.seq else cache.maxLen - 1
-    let kStore' := data.sliceScatter kStore 2 writePos paddedK
-    let vStore' := data.sliceScatter vStore 2 writePos paddedV
+    let kStore' := Tensor.sliceScatter kStore 2 writePos paddedK
+    let vStore' := Tensor.sliceScatter vStore 2 writePos paddedV
     let kvLen := if cache.seq < cache.maxLen then cache.seq + 1 else cache.maxLen
     let useLen := if kvLen > cfg.sliding_window then cfg.sliding_window else kvLen
     let start := kvLen - useLen
-    let kAll0 : T #[batch, cfg.num_key_value_heads, kvLen, cfg.head_dim] :=
-      (cacheSliceSliding (kvLen := kvLen) cfg { cache with kStoreDyn := nn.eraseShape kStore', vStoreDyn := nn.eraseShape vStore', seq := kvLen }) |>.1
-    let vAll0 : T #[batch, cfg.num_key_value_heads, kvLen, cfg.head_dim] :=
-      (cacheSliceSliding (kvLen := kvLen) cfg { cache with kStoreDyn := nn.eraseShape kStore', vStoreDyn := nn.eraseShape vStore', seq := kvLen }) |>.2
-    let kAll : T #[batch, cfg.num_key_value_heads, useLen, cfg.head_dim] := data.slice kAll0 2 start useLen
-    let vAll : T #[batch, cfg.num_key_value_heads, useLen, cfg.head_dim] := data.slice vAll0 2 start useLen
-    let attn : T #[batch, cfg.num_attention_heads, 1, cfg.head_dim] :=
-      nn.scaledDotProductAttentionGQAQKV qh kAll vAll 0.0 false true
-    let out : T #[batch, 1, cfg.num_attention_heads * cfg.head_dim] :=
-      reshape (nn.transpose_from_attention attn) #[batch, 1, cfg.num_attention_heads * cfg.head_dim]
+    let kAll0 : STensor #[batch, cfg.num_key_value_heads, kvLen, cfg.head_dim] :=
+      (cacheSliceSliding (kvLen := kvLen) cfg { cache with kStoreDyn := kStore'.packShape, vStoreDyn := vStore'.packShape, seq := kvLen }) |>.1
+    let vAll0 : STensor #[batch, cfg.num_key_value_heads, kvLen, cfg.head_dim] :=
+      (cacheSliceSliding (kvLen := kvLen) cfg { cache with kStoreDyn := kStore'.packShape, vStoreDyn := vStore'.packShape, seq := kvLen }) |>.2
+    let kAll : STensor #[batch, cfg.num_key_value_heads, useLen, cfg.head_dim] := sliceTyped kAll0 2 start useLen
+    let vAll : STensor #[batch, cfg.num_key_value_heads, useLen, cfg.head_dim] := sliceTyped vAll0 2 start useLen
+    let attn : STensor #[batch, cfg.num_attention_heads, 1, cfg.head_dim] :=
+      Tensor.attentionGQAQKV qh kAll vAll 0.0 false true
+    let out : STensor #[batch, 1, cfg.num_attention_heads * cfg.head_dim] :=
+      Tensor.reshapeChecked (transposeAttention attn) #[batch, 1, cfg.num_attention_heads * cfg.head_dim]
     let cache' : KVCache cfg batch := {
-      kStoreDyn := nn.eraseShape kStore'
-      vStoreDyn := nn.eraseShape vStore'
+      kStoreDyn := kStore'.packShape
+      vStoreDyn := vStore'.packShape
       seq := kvLen
       maxLen := cache.maxLen
     }
@@ -655,25 +645,25 @@ private def attentionSlidingStep {batch : UInt64}
 private def attentionFullStep {batch : UInt64}
     (cfg : Config)
     (m : Gemma4Attention cfg)
-    (x : T #[batch, 1, cfg.hidden_size])
-    (cos : T #[1, Config.fullHeadDim cfg / 2])
-    (sin : T #[1, Config.fullHeadDim cfg / 2])
+    (x : STensor #[batch, 1, cfg.hidden_size])
+    (cos : DTensor #[1, Config.fullHeadDim cfg / 2] .Float32)
+    (sin : DTensor #[1, Config.fullHeadDim cfg / 2] .Float32)
     (cache : KVCache cfg batch)
     (sharedSource : Option (KVCache cfg batch) := none)
-    : T #[batch, 1, cfg.hidden_size] × KVCache cfg batch :=
+    : STensor #[batch, 1, cfg.hidden_size] × KVCache cfg batch :=
   let q0 := qProjFull cfg m x
   let q1 := rmsNormWeighted4dSlice m.q_norm.weight q0 m.q_norm.eps
-  let q2 : T #[batch, 1, cfg.num_attention_heads, Config.fullHeadDim cfg] := rotary.applyRotaryEmb q1 cos sin
-  let qh : T #[batch, cfg.num_attention_heads, 1, Config.fullHeadDim cfg] :=
-    mul_scalar (nn.transpose_for_attention q2) (attentionScale (Config.fullHeadDim cfg))
+  let q2 : STensor #[batch, 1, cfg.num_attention_heads, Config.fullHeadDim cfg] := Tensor.applyRotary q1 cos sin
+  let qh : STensor #[batch, cfg.num_attention_heads, 1, Config.fullHeadDim cfg] :=
+    Tensor.Preserving.mulScalar (transposeAttention q2) (attentionScale (Config.fullHeadDim cfg))
   match sharedSource with
   | some src =>
     let kvLen := src.seq
     let (kAll, vAll) := cacheSliceFull (kvLen := kvLen) cfg src
-    let attn : T #[batch, cfg.num_attention_heads, 1, Config.fullHeadDim cfg] :=
-      nn.scaledDotProductAttentionGQAQKV qh kAll vAll 0.0 false true
-    let out : T #[batch, 1, cfg.num_attention_heads * Config.fullHeadDim cfg] :=
-      reshape (nn.transpose_from_attention attn) #[batch, 1, cfg.num_attention_heads * Config.fullHeadDim cfg]
+    let attn : STensor #[batch, cfg.num_attention_heads, 1, Config.fullHeadDim cfg] :=
+      Tensor.attentionGQAQKV qh kAll vAll 0.0 false true
+    let out : STensor #[batch, 1, cfg.num_attention_heads * Config.fullHeadDim cfg] :=
+      Tensor.reshapeChecked (transposeAttention attn) #[batch, 1, cfg.num_attention_heads * Config.fullHeadDim cfg]
     (oProjFull cfg m out, cache)
   | none =>
     let kRaw := kProjFull cfg m x
@@ -683,31 +673,31 @@ private def attentionFullStep {batch : UInt64}
       else
         vProjFull cfg m x
     let k1 := rmsNormWeighted4dSlice m.k_norm.weight kRaw m.k_norm.eps
-    let k2 : T #[batch, 1, Config.fullNumKVHeads cfg, Config.fullHeadDim cfg] := rotary.applyRotaryEmb k1 cos sin
-    let v2 : T #[batch, 1, Config.fullNumKVHeads cfg, Config.fullHeadDim cfg] := rmsNormNoScale4dSlice vRaw cfg.rms_norm_eps
-    let kNew : T #[batch, Config.fullNumKVHeads cfg, 1, Config.fullHeadDim cfg] := nn.transpose_for_attention k2
-    let vNew : T #[batch, Config.fullNumKVHeads cfg, 1, Config.fullHeadDim cfg] := nn.transpose_for_attention v2
+    let k2 : STensor #[batch, 1, Config.fullNumKVHeads cfg, Config.fullHeadDim cfg] := Tensor.applyRotary k1 cos sin
+    let v2 : STensor #[batch, 1, Config.fullNumKVHeads cfg, Config.fullHeadDim cfg] := rmsNormNoScale4dSlice vRaw cfg.rms_norm_eps
+    let kNew : STensor #[batch, Config.fullNumKVHeads cfg, 1, Config.fullHeadDim cfg] := transposeAttention k2
+    let vNew : STensor #[batch, Config.fullNumKVHeads cfg, 1, Config.fullHeadDim cfg] := transposeAttention v2
     let paddedK := padFullKVForCache cfg kNew
     let paddedV := padFullKVForCache cfg vNew
-    let kStore : T #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg] :=
-      reshape cache.kStoreDyn #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg]
-    let vStore : T #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg] :=
-      reshape cache.vStoreDyn #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg]
+    let kStore : STensor #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg] :=
+      Tensor.reshapeChecked cache.kStoreDyn.2 #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg]
+    let vStore : STensor #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg] :=
+      Tensor.reshapeChecked cache.vStoreDyn.2 #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg]
     let writePos := if cache.seq < cache.maxLen then cache.seq else cache.maxLen - 1
-    let kStore' := data.sliceScatter kStore 2 writePos paddedK
-    let vStore' := data.sliceScatter vStore 2 writePos paddedV
+    let kStore' := Tensor.sliceScatter kStore 2 writePos paddedK
+    let vStore' := Tensor.sliceScatter vStore 2 writePos paddedV
     let kvLen := if cache.seq < cache.maxLen then cache.seq + 1 else cache.maxLen
-    let kAll : T #[batch, Config.fullNumKVHeads cfg, kvLen, Config.fullHeadDim cfg] :=
-      (cacheSliceFull (kvLen := kvLen) cfg { cache with kStoreDyn := nn.eraseShape kStore', vStoreDyn := nn.eraseShape vStore', seq := kvLen }) |>.1
-    let vAll : T #[batch, Config.fullNumKVHeads cfg, kvLen, Config.fullHeadDim cfg] :=
-      (cacheSliceFull (kvLen := kvLen) cfg { cache with kStoreDyn := nn.eraseShape kStore', vStoreDyn := nn.eraseShape vStore', seq := kvLen }) |>.2
-    let attn : T #[batch, cfg.num_attention_heads, 1, Config.fullHeadDim cfg] :=
-      nn.scaledDotProductAttentionGQAQKV qh kAll vAll 0.0 false true
-    let out : T #[batch, 1, cfg.num_attention_heads * Config.fullHeadDim cfg] :=
-      reshape (nn.transpose_from_attention attn) #[batch, 1, cfg.num_attention_heads * Config.fullHeadDim cfg]
+    let kAll : STensor #[batch, Config.fullNumKVHeads cfg, kvLen, Config.fullHeadDim cfg] :=
+      (cacheSliceFull (kvLen := kvLen) cfg { cache with kStoreDyn := kStore'.packShape, vStoreDyn := vStore'.packShape, seq := kvLen }) |>.1
+    let vAll : STensor #[batch, Config.fullNumKVHeads cfg, kvLen, Config.fullHeadDim cfg] :=
+      (cacheSliceFull (kvLen := kvLen) cfg { cache with kStoreDyn := kStore'.packShape, vStoreDyn := vStore'.packShape, seq := kvLen }) |>.2
+    let attn : STensor #[batch, cfg.num_attention_heads, 1, Config.fullHeadDim cfg] :=
+      Tensor.attentionGQAQKV qh kAll vAll 0.0 false true
+    let out : STensor #[batch, 1, cfg.num_attention_heads * Config.fullHeadDim cfg] :=
+      Tensor.reshapeChecked (transposeAttention attn) #[batch, 1, cfg.num_attention_heads * Config.fullHeadDim cfg]
     let cache' : KVCache cfg batch := {
-      kStoreDyn := nn.eraseShape kStore'
-      vStoreDyn := nn.eraseShape vStore'
+      kStoreDyn := kStore'.packShape
+      vStoreDyn := vStore'.packShape
       seq := kvLen
       maxLen := cache.maxLen
     }
@@ -717,12 +707,12 @@ def forward {batch seq : UInt64}
     (cfg : Config)
     (m : Gemma4Attention cfg)
     (layerType : LayerType)
-    (x : T #[batch, seq, cfg.hidden_size])
-    (slidingCos : T #[seq, cfg.head_dim / 2])
-    (slidingSin : T #[seq, cfg.head_dim / 2])
-    (fullCos : T #[seq, Config.fullHeadDim cfg / 2])
-    (fullSin : T #[seq, Config.fullHeadDim cfg / 2])
-    : T #[batch, seq, cfg.hidden_size] :=
+    (x : STensor #[batch, seq, cfg.hidden_size])
+    (slidingCos : DTensor #[seq, cfg.head_dim / 2] .Float32)
+    (slidingSin : DTensor #[seq, cfg.head_dim / 2] .Float32)
+    (fullCos : DTensor #[seq, Config.fullHeadDim cfg / 2] .Float32)
+    (fullSin : DTensor #[seq, Config.fullHeadDim cfg / 2] .Float32)
+    : STensor #[batch, seq, cfg.hidden_size] :=
   match layerType with
   | .slidingAttention => attentionSlidingNoCache cfg m x slidingCos slidingSin
   | .fullAttention => attentionFullNoCache cfg m x fullCos fullSin
@@ -731,14 +721,14 @@ def forwardWithCache {batch seq : UInt64}
     (cfg : Config)
     (m : Gemma4Attention cfg)
     (layerType : LayerType)
-    (x : T #[batch, seq, cfg.hidden_size])
-    (slidingCos : T #[seq, cfg.head_dim / 2])
-    (slidingSin : T #[seq, cfg.head_dim / 2])
-    (fullCos : T #[seq, Config.fullHeadDim cfg / 2])
-    (fullSin : T #[seq, Config.fullHeadDim cfg / 2])
+    (x : STensor #[batch, seq, cfg.hidden_size])
+    (slidingCos : DTensor #[seq, cfg.head_dim / 2] .Float32)
+    (slidingSin : DTensor #[seq, cfg.head_dim / 2] .Float32)
+    (fullCos : DTensor #[seq, Config.fullHeadDim cfg / 2] .Float32)
+    (fullSin : DTensor #[seq, Config.fullHeadDim cfg / 2] .Float32)
     (cache : KVCache cfg batch)
     (sharedSource : Option (KVCache cfg batch) := none)
-    : T #[batch, seq, cfg.hidden_size] × KVCache cfg batch :=
+    : STensor #[batch, seq, cfg.hidden_size] × KVCache cfg batch :=
   match layerType with
   | .slidingAttention => attentionSlidingWithCache cfg m x slidingCos slidingSin cache sharedSource
   | .fullAttention => attentionFullWithCache cfg m x fullCos fullSin cache sharedSource
@@ -747,14 +737,14 @@ def forwardStep {batch : UInt64}
     (cfg : Config)
     (m : Gemma4Attention cfg)
     (layerType : LayerType)
-    (x : T #[batch, 1, cfg.hidden_size])
-    (slidingCos : T #[1, cfg.head_dim / 2])
-    (slidingSin : T #[1, cfg.head_dim / 2])
-    (fullCos : T #[1, Config.fullHeadDim cfg / 2])
-    (fullSin : T #[1, Config.fullHeadDim cfg / 2])
+    (x : STensor #[batch, 1, cfg.hidden_size])
+    (slidingCos : DTensor #[1, cfg.head_dim / 2] .Float32)
+    (slidingSin : DTensor #[1, cfg.head_dim / 2] .Float32)
+    (fullCos : DTensor #[1, Config.fullHeadDim cfg / 2] .Float32)
+    (fullSin : DTensor #[1, Config.fullHeadDim cfg / 2] .Float32)
     (cache : KVCache cfg batch)
     (sharedSource : Option (KVCache cfg batch) := none)
-    : T #[batch, 1, cfg.hidden_size] × KVCache cfg batch :=
+    : STensor #[batch, 1, cfg.hidden_size] × KVCache cfg batch :=
   match layerType with
   | .slidingAttention => attentionSlidingStep cfg m x slidingCos slidingSin cache sharedSource
   | .fullAttention => attentionFullStep cfg m x fullCos fullSin cache sharedSource
@@ -763,15 +753,15 @@ def forwardPrefillWithMask {batch seq : UInt64}
     (cfg : Config)
     (m : Gemma4Attention cfg)
     (layerType : LayerType)
-    (x : T #[batch, seq, cfg.hidden_size])
-    (slidingCos : T #[seq, cfg.head_dim / 2])
-    (slidingSin : T #[seq, cfg.head_dim / 2])
-    (fullCos : T #[seq, Config.fullHeadDim cfg / 2])
-    (fullSin : T #[seq, Config.fullHeadDim cfg / 2])
-    (slidingAttnMask : T #[batch, seq, seq])
-    (fullAttnMask : T #[batch, seq, seq])
+    (x : STensor #[batch, seq, cfg.hidden_size])
+    (slidingCos : DTensor #[seq, cfg.head_dim / 2] .Float32)
+    (slidingSin : DTensor #[seq, cfg.head_dim / 2] .Float32)
+    (fullCos : DTensor #[seq, Config.fullHeadDim cfg / 2] .Float32)
+    (fullSin : DTensor #[seq, Config.fullHeadDim cfg / 2] .Float32)
+    (slidingAttnMask : DTensor #[batch, seq, seq] .Int64)
+    (fullAttnMask : DTensor #[batch, seq, seq] .Int64)
     (cache : KVCache cfg batch)
-    : T #[batch, seq, cfg.hidden_size] × KVCache cfg batch :=
+    : STensor #[batch, seq, cfg.hidden_size] × KVCache cfg batch :=
   match layerType with
   | .slidingAttention =>
     attentionSlidingPrefillWithMask cfg m x slidingCos slidingSin slidingAttnMask cache
@@ -791,7 +781,7 @@ structure Gemma4Layer (cfg : Config) where
   post_feedforward_layernorm : Gemma4RMSNorm cfg.hidden_size
   per_layer_input : Option (Gemma4PerLayerInputBlock cfg) := none
   moe : Option (Gemma4MoeBranch cfg) := none
-  layer_scalar : T #[1]
+  layer_scalar : STensor #[1]
   deriving TensorStruct
 
 structure Gemma4Cache (cfg : Config) (batch : UInt64) where
@@ -801,36 +791,36 @@ namespace Gemma4Layer
 
 private def applyLayerScalar {batch seq : UInt64}
     (cfg : Config)
-    (scale : T #[1])
-    (x : T #[batch, seq, cfg.hidden_size])
-    : T #[batch, seq, cfg.hidden_size] :=
-  let s : T #[batch, seq, cfg.hidden_size] := nn.expand (reshape scale #[1, 1, 1]) #[batch, seq, cfg.hidden_size]
+    (scale : STensor #[1])
+    (x : STensor #[batch, seq, cfg.hidden_size])
+    : STensor #[batch, seq, cfg.hidden_size] :=
+  let s : STensor #[batch, seq, cfg.hidden_size] := Tensor.expand (Tensor.reshapeChecked scale #[1, 1, 1]) #[batch, seq, cfg.hidden_size]
   x * s
 
 private def applyPerLayerInput {batch seq : UInt64}
     (cfg : Config)
     (block : Gemma4PerLayerInputBlock cfg)
-    (hidden : T #[batch, seq, cfg.hidden_size])
-    (perLayerInput : T #[batch, seq, cfg.hidden_size_per_layer_input])
-    : T #[batch, seq, cfg.hidden_size] :=
+    (hidden : STensor #[batch, seq, cfg.hidden_size])
+    (perLayerInput : STensor #[batch, seq, cfg.hidden_size_per_layer_input])
+    : STensor #[batch, seq, cfg.hidden_size] :=
   let residual := hidden
-  let gated : T #[batch, seq, cfg.hidden_size_per_layer_input] :=
-    nn.gelu (linear3d hidden block.per_layer_input_gate)
+  let gated : STensor #[batch, seq, cfg.hidden_size_per_layer_input] :=
+    Tensor.Preserving.gelu (Tensor.linear3d hidden block.per_layer_input_gate)
   let mixed := gated * perLayerInput
-  let projected : T #[batch, seq, cfg.hidden_size] := linear3d mixed block.per_layer_projection
+  let projected : STensor #[batch, seq, cfg.hidden_size] := Tensor.linear3d mixed block.per_layer_projection
   let projected := block.post_per_layer_input_norm.forward3d projected
   residual + projected
 
 def forward {batch seq : UInt64}
     (cfg : Config)
     (layer : Gemma4Layer cfg)
-    (x : T #[batch, seq, cfg.hidden_size])
-    (slidingCos : T #[seq, cfg.head_dim / 2])
-    (slidingSin : T #[seq, cfg.head_dim / 2])
-    (fullCos : T #[seq, Config.fullHeadDim cfg / 2])
-    (fullSin : T #[seq, Config.fullHeadDim cfg / 2])
-    (perLayerInput : Option (T #[batch, seq, cfg.hidden_size_per_layer_input]) := none)
-    : T #[batch, seq, cfg.hidden_size] :=
+    (x : STensor #[batch, seq, cfg.hidden_size])
+    (slidingCos : DTensor #[seq, cfg.head_dim / 2] .Float32)
+    (slidingSin : DTensor #[seq, cfg.head_dim / 2] .Float32)
+    (fullCos : DTensor #[seq, Config.fullHeadDim cfg / 2] .Float32)
+    (fullSin : DTensor #[seq, Config.fullHeadDim cfg / 2] .Float32)
+    (perLayerInput : Option (STensor #[batch, seq, cfg.hidden_size_per_layer_input]) := none)
+    : STensor #[batch, seq, cfg.hidden_size] :=
   let residual1 := x
   let h1 := layer.input_layernorm.forward3d x
   let attn := layer.self_attn.forward cfg layer.layerType h1 slidingCos slidingSin fullCos fullSin
@@ -844,12 +834,12 @@ def forward {batch seq : UInt64}
     | some moe =>
       let denseBranch := moe.post_feedforward_layernorm_1.forward3d mlpOut
       let tokens := batch * seq
-      let routerInput : T #[tokens, cfg.hidden_size] := reshape residual2 #[tokens, cfg.hidden_size]
+      let routerInput : STensor #[tokens, cfg.hidden_size] := Tensor.reshapeChecked residual2 #[tokens, cfg.hidden_size]
       let (_routerProbs, topVals, topIdx) := moe.router.forward cfg routerInput
-      let expertInput2d : T #[tokens, cfg.hidden_size] :=
+      let expertInput2d : STensor #[tokens, cfg.hidden_size] :=
         moe.pre_feedforward_layernorm_2.forward2d routerInput
       let expert2d := moe.experts.forward2d cfg expertInput2d topVals topIdx
-      let expert3d : T #[batch, seq, cfg.hidden_size] := reshape expert2d #[batch, seq, cfg.hidden_size]
+      let expert3d : STensor #[batch, seq, cfg.hidden_size] := Tensor.reshapeChecked expert2d #[batch, seq, cfg.hidden_size]
       denseBranch + moe.post_feedforward_layernorm_2.forward3d expert3d
     | none =>
       mlpOut
@@ -863,15 +853,15 @@ def forward {batch seq : UInt64}
 def forwardWithCache {batch seq : UInt64}
     (cfg : Config)
     (layer : Gemma4Layer cfg)
-    (x : T #[batch, seq, cfg.hidden_size])
-    (slidingCos : T #[seq, cfg.head_dim / 2])
-    (slidingSin : T #[seq, cfg.head_dim / 2])
-    (fullCos : T #[seq, Config.fullHeadDim cfg / 2])
-    (fullSin : T #[seq, Config.fullHeadDim cfg / 2])
+    (x : STensor #[batch, seq, cfg.hidden_size])
+    (slidingCos : DTensor #[seq, cfg.head_dim / 2] .Float32)
+    (slidingSin : DTensor #[seq, cfg.head_dim / 2] .Float32)
+    (fullCos : DTensor #[seq, Config.fullHeadDim cfg / 2] .Float32)
+    (fullSin : DTensor #[seq, Config.fullHeadDim cfg / 2] .Float32)
     (layerCache : Gemma4Attention.KVCache cfg batch)
     (sharedSource : Option (Gemma4Attention.KVCache cfg batch) := none)
-    (perLayerInput : Option (T #[batch, seq, cfg.hidden_size_per_layer_input]) := none)
-    : T #[batch, seq, cfg.hidden_size] × Gemma4Attention.KVCache cfg batch :=
+    (perLayerInput : Option (STensor #[batch, seq, cfg.hidden_size_per_layer_input]) := none)
+    : STensor #[batch, seq, cfg.hidden_size] × Gemma4Attention.KVCache cfg batch :=
   let residual1 := x
   let h1 := layer.input_layernorm.forward3d x
   let (attn, layerCache') :=
@@ -895,12 +885,12 @@ def forwardWithCache {batch seq : UInt64}
     | some moe =>
       let denseBranch := moe.post_feedforward_layernorm_1.forward3d mlpOut
       let tokens := batch * seq
-      let routerInput : T #[tokens, cfg.hidden_size] := reshape residual2 #[tokens, cfg.hidden_size]
+      let routerInput : STensor #[tokens, cfg.hidden_size] := Tensor.reshapeChecked residual2 #[tokens, cfg.hidden_size]
       let (_routerProbs, topVals, topIdx) := moe.router.forward cfg routerInput
-      let expertInput2d : T #[tokens, cfg.hidden_size] :=
+      let expertInput2d : STensor #[tokens, cfg.hidden_size] :=
         moe.pre_feedforward_layernorm_2.forward2d routerInput
       let expert2d := moe.experts.forward2d cfg expertInput2d topVals topIdx
-      let expert3d : T #[batch, seq, cfg.hidden_size] := reshape expert2d #[batch, seq, cfg.hidden_size]
+      let expert3d : STensor #[batch, seq, cfg.hidden_size] := Tensor.reshapeChecked expert2d #[batch, seq, cfg.hidden_size]
       denseBranch + moe.post_feedforward_layernorm_2.forward3d expert3d
     | none =>
       mlpOut
@@ -914,15 +904,15 @@ def forwardWithCache {batch seq : UInt64}
 def forwardStep {batch : UInt64}
     (cfg : Config)
     (layer : Gemma4Layer cfg)
-    (x : T #[batch, 1, cfg.hidden_size])
-    (slidingCos : T #[1, cfg.head_dim / 2])
-    (slidingSin : T #[1, cfg.head_dim / 2])
-    (fullCos : T #[1, Config.fullHeadDim cfg / 2])
-    (fullSin : T #[1, Config.fullHeadDim cfg / 2])
+    (x : STensor #[batch, 1, cfg.hidden_size])
+    (slidingCos : DTensor #[1, cfg.head_dim / 2] .Float32)
+    (slidingSin : DTensor #[1, cfg.head_dim / 2] .Float32)
+    (fullCos : DTensor #[1, Config.fullHeadDim cfg / 2] .Float32)
+    (fullSin : DTensor #[1, Config.fullHeadDim cfg / 2] .Float32)
     (layerCache : Gemma4Attention.KVCache cfg batch)
     (sharedSource : Option (Gemma4Attention.KVCache cfg batch) := none)
-    (perLayerInput : Option (T #[batch, 1, cfg.hidden_size_per_layer_input]) := none)
-    : T #[batch, 1, cfg.hidden_size] × Gemma4Attention.KVCache cfg batch :=
+    (perLayerInput : Option (STensor #[batch, 1, cfg.hidden_size_per_layer_input]) := none)
+    : STensor #[batch, 1, cfg.hidden_size] × Gemma4Attention.KVCache cfg batch :=
   let residual1 := x
   let h1 := layer.input_layernorm.forward3d x
   let (attn, layerCache') :=
@@ -945,12 +935,12 @@ def forwardStep {batch : UInt64}
     match layer.moe with
     | some moe =>
       let denseBranch := moe.post_feedforward_layernorm_1.forward3d mlpOut
-      let routerInput : T #[batch, cfg.hidden_size] := reshape residual2 #[batch, cfg.hidden_size]
+      let routerInput : STensor #[batch, cfg.hidden_size] := Tensor.reshapeChecked residual2 #[batch, cfg.hidden_size]
       let (_routerProbs, topVals, topIdx) := moe.router.forward cfg routerInput
-      let expertInput2d : T #[batch, cfg.hidden_size] :=
+      let expertInput2d : STensor #[batch, cfg.hidden_size] :=
         moe.pre_feedforward_layernorm_2.forward2d routerInput
       let expert2d := moe.experts.forward2d cfg expertInput2d topVals topIdx
-      let expert3d : T #[batch, 1, cfg.hidden_size] := reshape expert2d #[batch, 1, cfg.hidden_size]
+      let expert3d : STensor #[batch, 1, cfg.hidden_size] := Tensor.reshapeChecked expert2d #[batch, 1, cfg.hidden_size]
       denseBranch + moe.post_feedforward_layernorm_2.forward3d expert3d
     | none =>
       mlpOut
@@ -964,16 +954,16 @@ def forwardStep {batch : UInt64}
 def forwardPrefillWithMask {batch seq : UInt64}
     (cfg : Config)
     (layer : Gemma4Layer cfg)
-    (x : T #[batch, seq, cfg.hidden_size])
-    (slidingCos : T #[seq, cfg.head_dim / 2])
-    (slidingSin : T #[seq, cfg.head_dim / 2])
-    (fullCos : T #[seq, Config.fullHeadDim cfg / 2])
-    (fullSin : T #[seq, Config.fullHeadDim cfg / 2])
-    (slidingAttnMask : T #[batch, seq, seq])
-    (fullAttnMask : T #[batch, seq, seq])
+    (x : STensor #[batch, seq, cfg.hidden_size])
+    (slidingCos : DTensor #[seq, cfg.head_dim / 2] .Float32)
+    (slidingSin : DTensor #[seq, cfg.head_dim / 2] .Float32)
+    (fullCos : DTensor #[seq, Config.fullHeadDim cfg / 2] .Float32)
+    (fullSin : DTensor #[seq, Config.fullHeadDim cfg / 2] .Float32)
+    (slidingAttnMask : DTensor #[batch, seq, seq] .Int64)
+    (fullAttnMask : DTensor #[batch, seq, seq] .Int64)
     (layerCache : Gemma4Attention.KVCache cfg batch)
-    (perLayerInput : Option (T #[batch, seq, cfg.hidden_size_per_layer_input]) := none)
-    : T #[batch, seq, cfg.hidden_size] × Gemma4Attention.KVCache cfg batch :=
+    (perLayerInput : Option (STensor #[batch, seq, cfg.hidden_size_per_layer_input]) := none)
+    : STensor #[batch, seq, cfg.hidden_size] × Gemma4Attention.KVCache cfg batch :=
   let residual1 := x
   let h1 := layer.input_layernorm.forward3d x
   let (attn, layerCache') :=
@@ -998,12 +988,12 @@ def forwardPrefillWithMask {batch seq : UInt64}
     | some moe =>
       let denseBranch := moe.post_feedforward_layernorm_1.forward3d mlpOut
       let tokens := batch * seq
-      let routerInput : T #[tokens, cfg.hidden_size] := reshape residual2 #[tokens, cfg.hidden_size]
+      let routerInput : STensor #[tokens, cfg.hidden_size] := Tensor.reshapeChecked residual2 #[tokens, cfg.hidden_size]
       let (_routerProbs, topVals, topIdx) := moe.router.forward cfg routerInput
-      let expertInput2d : T #[tokens, cfg.hidden_size] :=
+      let expertInput2d : STensor #[tokens, cfg.hidden_size] :=
         moe.pre_feedforward_layernorm_2.forward2d routerInput
       let expert2d := moe.experts.forward2d cfg expertInput2d topVals topIdx
-      let expert3d : T #[batch, seq, cfg.hidden_size] := reshape expert2d #[batch, seq, cfg.hidden_size]
+      let expert3d : STensor #[batch, seq, cfg.hidden_size] := Tensor.reshapeChecked expert2d #[batch, seq, cfg.hidden_size]
       denseBranch + moe.post_feedforward_layernorm_2.forward3d expert3d
     | none =>
       mlpOut
@@ -1017,11 +1007,11 @@ def forwardPrefillWithMask {batch seq : UInt64}
 end Gemma4Layer
 
 structure Gemma4Model (cfg : Config) where
-  embed_tokens : T #[cfg.vocab_size, cfg.hidden_size]
+  embed_tokens : STensor #[cfg.vocab_size, cfg.hidden_size]
   embed_tokens_per_layer :
-    Option (T #[cfg.vocab_size_per_layer_input, cfg.num_hidden_layers * cfg.hidden_size_per_layer_input]) := none
+    Option (STensor #[cfg.vocab_size_per_layer_input, cfg.num_hidden_layers * cfg.hidden_size_per_layer_input]) := none
   per_layer_model_projection :
-    Option (T #[cfg.num_hidden_layers * cfg.hidden_size_per_layer_input, cfg.hidden_size]) := none
+    Option (STensor #[cfg.num_hidden_layers * cfg.hidden_size_per_layer_input, cfg.hidden_size]) := none
   per_layer_projection_norm : Option (Gemma4RMSNorm cfg.hidden_size_per_layer_input) := none
   layers : Array (Gemma4Layer cfg)
   norm : Gemma4RMSNorm cfg.hidden_size
@@ -1031,65 +1021,65 @@ namespace Gemma4Model
 
 private def extractPerLayerInput? {batch seq : UInt64}
     (cfg : Config)
-    (perLayerInputs : Option (T #[batch, seq, cfg.num_hidden_layers, cfg.hidden_size_per_layer_input]))
+    (perLayerInputs : Option (STensor #[batch, seq, cfg.num_hidden_layers, cfg.hidden_size_per_layer_input]))
     (layerIdx : UInt64)
-    : Option (T #[batch, seq, cfg.hidden_size_per_layer_input]) :=
+    : Option (STensor #[batch, seq, cfg.hidden_size_per_layer_input]) :=
   match perLayerInputs with
   | some t =>
-    let one : T #[batch, seq, 1, cfg.hidden_size_per_layer_input] := data.slice t 2 layerIdx 1
-    some (reshape one #[batch, seq, cfg.hidden_size_per_layer_input])
+    let one : STensor #[batch, seq, 1, cfg.hidden_size_per_layer_input] := sliceTyped t 2 layerIdx 1
+    some (Tensor.reshapeChecked one #[batch, seq, cfg.hidden_size_per_layer_input])
   | none => none
 
 def embedTokens {batch seq : UInt64}
     (cfg : Config)
     (m : Gemma4Model cfg)
-    (inputIds : T #[batch, seq])
-    : T #[batch, seq, cfg.hidden_size] :=
-  mul_scalar (nn.embedding inputIds m.embed_tokens) (Float.sqrt cfg.hidden_size.toFloat)
+    (inputIds : DTensor #[batch, seq] .Int64)
+    : STensor #[batch, seq, cfg.hidden_size] :=
+  Tensor.Preserving.mulScalar (Tensor.embedding inputIds m.embed_tokens) (Float.sqrt cfg.hidden_size.toFloat)
 
 def computePerLayerInputs {batch seq : UInt64}
     (cfg : Config)
     (m : Gemma4Model cfg)
-    (inputIds : T #[batch, seq])
-    (inputsEmbeds : T #[batch, seq, cfg.hidden_size])
-    : Option (T #[batch, seq, cfg.num_hidden_layers, cfg.hidden_size_per_layer_input]) :=
+    (inputIds : DTensor #[batch, seq] .Int64)
+    (inputsEmbeds : STensor #[batch, seq, cfg.hidden_size])
+    : Option (STensor #[batch, seq, cfg.num_hidden_layers, cfg.hidden_size_per_layer_input]) :=
   match m.embed_tokens_per_layer, m.per_layer_model_projection, m.per_layer_projection_norm with
   | some tokEmbTable, some projW, some projNorm =>
-    let tokEmbFlat : T #[batch, seq, cfg.num_hidden_layers * cfg.hidden_size_per_layer_input] :=
-      mul_scalar
-        (nn.embedding inputIds tokEmbTable)
+    let tokEmbFlat : STensor #[batch, seq, cfg.num_hidden_layers * cfg.hidden_size_per_layer_input] :=
+      Tensor.Preserving.mulScalar
+        (Tensor.embedding inputIds tokEmbTable)
         (Float.sqrt cfg.hidden_size_per_layer_input.toFloat)
-    let tokEmb : T #[batch, seq, cfg.num_hidden_layers, cfg.hidden_size_per_layer_input] :=
-      reshape tokEmbFlat #[batch, seq, cfg.num_hidden_layers, cfg.hidden_size_per_layer_input]
+    let tokEmb : STensor #[batch, seq, cfg.num_hidden_layers, cfg.hidden_size_per_layer_input] :=
+      Tensor.reshapeChecked tokEmbFlat #[batch, seq, cfg.num_hidden_layers, cfg.hidden_size_per_layer_input]
     let projScale := 1.0 / Float.sqrt cfg.hidden_size.toFloat
-    let projFlat : T #[batch, seq, cfg.num_hidden_layers * cfg.hidden_size_per_layer_input] :=
-      mul_scalar (linear3d inputsEmbeds projW) projScale
-    let proj4d : T #[batch, seq, cfg.num_hidden_layers, cfg.hidden_size_per_layer_input] :=
-      reshape projFlat #[batch, seq, cfg.num_hidden_layers, cfg.hidden_size_per_layer_input]
+    let projFlat : STensor #[batch, seq, cfg.num_hidden_layers * cfg.hidden_size_per_layer_input] :=
+      Tensor.Preserving.mulScalar (Tensor.linear3d inputsEmbeds projW) projScale
+    let proj4d : STensor #[batch, seq, cfg.num_hidden_layers, cfg.hidden_size_per_layer_input] :=
+      Tensor.reshapeChecked projFlat #[batch, seq, cfg.num_hidden_layers, cfg.hidden_size_per_layer_input]
     let proj4d := projNorm.forward4d proj4d
-    some (mul_scalar (proj4d + tokEmb) (Float.sqrt 0.5))
+    some (Tensor.Preserving.mulScalar (proj4d + tokEmb) (Float.sqrt 0.5))
   | _, _, _ =>
     none
 
 private def precomputeSlidingRotary {seq : UInt64}
     (cfg : Config)
     (device : Device)
-    : T #[seq, cfg.head_dim / 2] × T #[seq, cfg.head_dim / 2] :=
-  rotary.computeFreqsOnDevicePure seq cfg.head_dim cfg.sliding_rope_theta device
+    : DTensor #[seq, cfg.head_dim / 2] .Float32 × DTensor #[seq, cfg.head_dim / 2] .Float32 :=
+  Tensor.rotaryFreqs seq cfg.head_dim cfg.sliding_rope_theta device
 
 private def precomputeFullRotary {seq : UInt64}
     (cfg : Config)
     (device : Device)
-    : T #[seq, Config.fullHeadDim cfg / 2] × T #[seq, Config.fullHeadDim cfg / 2] :=
+    : DTensor #[seq, Config.fullHeadDim cfg / 2] .Float32 × DTensor #[seq, Config.fullHeadDim cfg / 2] .Float32 :=
   let fullHalf := Config.fullHeadDim cfg / 2
   let rotHalf := Config.fullRotaryHalfDim cfg
-  let (cos0, sin0) := rotary.computeFreqsOnDevicePure seq (Config.fullHeadDim cfg) cfg.full_rope_theta device
-  let cosRot : T #[seq, rotHalf] := data.slice cos0 1 0 rotHalf
-  let sinRot : T #[seq, rotHalf] := data.slice sin0 1 0 rotHalf
+  let (cos0, sin0) := Tensor.rotaryFreqs seq (Config.fullHeadDim cfg) cfg.full_rope_theta device
+  let cosRot : DTensor #[seq, rotHalf] .Float32 := sliceTyped cos0 1 0 rotHalf
+  let sinRot : DTensor #[seq, rotHalf] .Float32 := sliceTyped sin0 1 0 rotHalf
   let passHalf : UInt64 := fullHalf - rotHalf
-  let cosPass : T #[seq, passHalf] := onesOn device
-  let sinPass : T #[seq, passHalf] := zerosOn device
-  (nn.cat cosRot cosPass 1, nn.cat sinRot sinPass 1)
+  let cosPass : DTensor #[seq, passHalf] .Float32 := onesFloatOn device
+  let sinPass : DTensor #[seq, passHalf] .Float32 := zerosFloatOn device
+  (typedCat cosRot cosPass 1, typedCat sinRot sinPass 1)
 
 def initCache {batch : UInt64}
     (cfg : Config)
@@ -1105,85 +1095,79 @@ def initCache {batch : UInt64}
         (batch := batch)
         (num_kv_heads := Config.maxKVHeads cfg)
         (head_dim := Config.maxHeadDim cfg)
-        device
+        device (.Unknown "dynamic")
+      let kv := { kv with
+        kStoreDyn := (Tensor.castLike m.embed_tokens kv.kStoreDyn.2).packShape
+        vStoreDyn := (Tensor.castLike m.embed_tokens kv.vStoreDyn.2).packShape }
       caches := caches.push kv
     return { attnCaches := caches }
 
-def forward {batch seq : UInt64}
-    (cfg : Config)
-    (m : Gemma4Model cfg)
-    (inputIds : T #[batch, seq])
-    : T #[batch, seq, cfg.hidden_size] :=
-  Id.run do
-    let inputsEmbeds := embedTokens cfg m inputIds
-    let perLayerInputs := computePerLayerInputs cfg m inputIds inputsEmbeds
-    let (slidingCos, slidingSin) := precomputeSlidingRotary cfg inputsEmbeds.device
-    let (fullCos, fullSin) := precomputeFullRotary cfg inputsEmbeds.device
-    let mut hidden := inputsEmbeds
-    for i in [:m.layers.size] do
-      match m.layers[i]? with
-      | some layer =>
-        let perLayer := extractPerLayerInput? cfg perLayerInputs i.toUInt64
+/-- Full-sequence evaluation keeps temporary per-layer K/V when the configured
+architecture shares them. This gives uncached evaluation the same layer inputs
+as prefill and decode, while ordinary models avoid allocating cache storage. -/
+private def forwardEmbedsCore {batch seq : UInt64}
+    (cfg : Config) (m : Gemma4Model cfg)
+    (inputsEmbeds : STensor #[batch, seq, cfg.hidden_size])
+    (perLayerInputs : Option (STensor #[batch, seq, cfg.num_hidden_layers, cfg.hidden_size_per_layer_input]))
+    : STensor #[batch, seq, cfg.hidden_size] := Id.run do
+  let (slidingCos, slidingSin) := precomputeSlidingRotary cfg inputsEmbeds.device
+  let (fullCos, fullSin) := precomputeFullRotary cfg inputsEmbeds.device
+  let mut caches := if cfg.num_kv_shared_layers > 0 then
+      (initCache cfg m seq inputsEmbeds.device).attnCaches else #[]
+  let mut hidden := inputsEmbeds
+  for i in [:m.layers.size] do
+    match m.layers[i]? with
+    | some layer =>
+      let perLayer := extractPerLayerInput? cfg perLayerInputs i.toUInt64
+      match caches[i]? with
+      | some layerCache =>
+        let sharedSource := (Config.sharedSourceLayer? cfg i.toUInt64).bind fun src => caches[src.toNat]?
+        let (next, nextCache) := Gemma4Layer.forwardWithCache cfg layer hidden
+          slidingCos slidingSin fullCos fullSin layerCache sharedSource perLayer
+        hidden := next
+        if sharedSource.isNone then caches := caches.set! i nextCache
+      | none =>
         hidden := Gemma4Layer.forward cfg layer hidden slidingCos slidingSin fullCos fullSin perLayer
-      | none => pure ()
-    return m.norm.forward3d hidden
+    | none => pure ()
+  return m.norm.forward3d hidden
+
+def forward {batch seq : UInt64}
+    (cfg : Config) (m : Gemma4Model cfg) (inputIds : DTensor #[batch, seq] .Int64)
+    : STensor #[batch, seq, cfg.hidden_size] :=
+  let inputsEmbeds := embedTokens cfg m inputIds
+  forwardEmbedsCore cfg m inputsEmbeds (computePerLayerInputs cfg m inputIds inputsEmbeds)
 
 def forwardEmbeds {batch seq : UInt64}
-    (cfg : Config)
-    (m : Gemma4Model cfg)
-    (inputIds : T #[batch, seq])
-    (inputsEmbeds : T #[batch, seq, cfg.hidden_size])
-    : T #[batch, seq, cfg.hidden_size] :=
-  Id.run do
-    let perLayerInputs := computePerLayerInputs cfg m inputIds inputsEmbeds
-    let (slidingCos, slidingSin) := precomputeSlidingRotary cfg inputsEmbeds.device
-    let (fullCos, fullSin) := precomputeFullRotary cfg inputsEmbeds.device
-    let mut hidden := inputsEmbeds
-    for i in [:m.layers.size] do
-      match m.layers[i]? with
-      | some layer =>
-        let perLayer := extractPerLayerInput? cfg perLayerInputs i.toUInt64
-        hidden := Gemma4Layer.forward cfg layer hidden slidingCos slidingSin fullCos fullSin perLayer
-      | none => pure ()
-    return m.norm.forward3d hidden
+    (cfg : Config) (m : Gemma4Model cfg) (inputIds : DTensor #[batch, seq] .Int64)
+    (inputsEmbeds : STensor #[batch, seq, cfg.hidden_size])
+    : STensor #[batch, seq, cfg.hidden_size] :=
+  forwardEmbedsCore cfg m inputsEmbeds (computePerLayerInputs cfg m inputIds inputsEmbeds)
 
 def forwardEmbedsWithPerLayerInputs {batch seq : UInt64}
-    (cfg : Config)
-    (m : Gemma4Model cfg)
-    (inputIds : T #[batch, seq])
-    (inputsEmbeds : T #[batch, seq, cfg.hidden_size])
-    (perLayerInputs : Option (T #[batch, seq, cfg.num_hidden_layers, cfg.hidden_size_per_layer_input]))
-    : T #[batch, seq, cfg.hidden_size] :=
-  Id.run do
-    let _ := inputIds
-    let (slidingCos, slidingSin) := precomputeSlidingRotary cfg inputsEmbeds.device
-    let (fullCos, fullSin) := precomputeFullRotary cfg inputsEmbeds.device
-    let mut hidden := inputsEmbeds
-    for i in [:m.layers.size] do
-      match m.layers[i]? with
-      | some layer =>
-        let perLayer := extractPerLayerInput? cfg perLayerInputs i.toUInt64
-        hidden := Gemma4Layer.forward cfg layer hidden slidingCos slidingSin fullCos fullSin perLayer
-      | none => pure ()
-    return m.norm.forward3d hidden
+    (cfg : Config) (m : Gemma4Model cfg) (inputIds : DTensor #[batch, seq] .Int64)
+    (inputsEmbeds : STensor #[batch, seq, cfg.hidden_size])
+    (perLayerInputs : Option (STensor #[batch, seq, cfg.num_hidden_layers, cfg.hidden_size_per_layer_input]))
+    : STensor #[batch, seq, cfg.hidden_size] :=
+  let _ := inputIds
+  forwardEmbedsCore cfg m inputsEmbeds perLayerInputs
 
 def forwardWithCache {batch seq maxLen : UInt64}
     (cfg : Config)
     (m : Gemma4Model cfg)
-    (inputIds : T #[batch, seq])
+    (inputIds : DTensor #[batch, seq] .Int64)
     (cache : Gemma4Cache cfg batch)
-    (slidingCosAll : T #[maxLen, cfg.head_dim / 2])
-    (slidingSinAll : T #[maxLen, cfg.head_dim / 2])
-    (fullCosAll : T #[maxLen, Config.fullHeadDim cfg / 2])
-    (fullSinAll : T #[maxLen, Config.fullHeadDim cfg / 2])
-    : T #[batch, seq, cfg.hidden_size] × Gemma4Cache cfg batch :=
+    (slidingCosAll : DTensor #[maxLen, cfg.head_dim / 2] .Float32)
+    (slidingSinAll : DTensor #[maxLen, cfg.head_dim / 2] .Float32)
+    (fullCosAll : DTensor #[maxLen, Config.fullHeadDim cfg / 2] .Float32)
+    (fullSinAll : DTensor #[maxLen, Config.fullHeadDim cfg / 2] .Float32)
+    : STensor #[batch, seq, cfg.hidden_size] × Gemma4Cache cfg batch :=
   Id.run do
     let inputsEmbeds := embedTokens cfg m inputIds
     let perLayerInputs := computePerLayerInputs cfg m inputIds inputsEmbeds
-    let slidingCos : T #[seq, cfg.head_dim / 2] := data.slice slidingCosAll 0 0 seq
-    let slidingSin : T #[seq, cfg.head_dim / 2] := data.slice slidingSinAll 0 0 seq
-    let fullCos : T #[seq, Config.fullHeadDim cfg / 2] := data.slice fullCosAll 0 0 seq
-    let fullSin : T #[seq, Config.fullHeadDim cfg / 2] := data.slice fullSinAll 0 0 seq
+    let slidingCos : DTensor #[seq, cfg.head_dim / 2] .Float32 := sliceTyped slidingCosAll 0 0 seq
+    let slidingSin : DTensor #[seq, cfg.head_dim / 2] .Float32 := sliceTyped slidingSinAll 0 0 seq
+    let fullCos : DTensor #[seq, Config.fullHeadDim cfg / 2] .Float32 := sliceTyped fullCosAll 0 0 seq
+    let fullSin : DTensor #[seq, Config.fullHeadDim cfg / 2] .Float32 := sliceTyped fullSinAll 0 0 seq
     let mut hidden := inputsEmbeds
     let mut cache' := cache
     for i in [:m.layers.size] do
@@ -1215,20 +1199,20 @@ def forwardWithCache {batch seq maxLen : UInt64}
 def forwardWithCacheEmbeds {batch seq maxLen : UInt64}
     (cfg : Config)
     (m : Gemma4Model cfg)
-    (inputIds : T #[batch, seq])
-    (inputsEmbeds : T #[batch, seq, cfg.hidden_size])
+    (inputIds : DTensor #[batch, seq] .Int64)
+    (inputsEmbeds : STensor #[batch, seq, cfg.hidden_size])
     (cache : Gemma4Cache cfg batch)
-    (slidingCosAll : T #[maxLen, cfg.head_dim / 2])
-    (slidingSinAll : T #[maxLen, cfg.head_dim / 2])
-    (fullCosAll : T #[maxLen, Config.fullHeadDim cfg / 2])
-    (fullSinAll : T #[maxLen, Config.fullHeadDim cfg / 2])
-    : T #[batch, seq, cfg.hidden_size] × Gemma4Cache cfg batch :=
+    (slidingCosAll : DTensor #[maxLen, cfg.head_dim / 2] .Float32)
+    (slidingSinAll : DTensor #[maxLen, cfg.head_dim / 2] .Float32)
+    (fullCosAll : DTensor #[maxLen, Config.fullHeadDim cfg / 2] .Float32)
+    (fullSinAll : DTensor #[maxLen, Config.fullHeadDim cfg / 2] .Float32)
+    : STensor #[batch, seq, cfg.hidden_size] × Gemma4Cache cfg batch :=
   Id.run do
     let perLayerInputs := computePerLayerInputs cfg m inputIds inputsEmbeds
-    let slidingCos : T #[seq, cfg.head_dim / 2] := data.slice slidingCosAll 0 0 seq
-    let slidingSin : T #[seq, cfg.head_dim / 2] := data.slice slidingSinAll 0 0 seq
-    let fullCos : T #[seq, Config.fullHeadDim cfg / 2] := data.slice fullCosAll 0 0 seq
-    let fullSin : T #[seq, Config.fullHeadDim cfg / 2] := data.slice fullSinAll 0 0 seq
+    let slidingCos : DTensor #[seq, cfg.head_dim / 2] .Float32 := sliceTyped slidingCosAll 0 0 seq
+    let slidingSin : DTensor #[seq, cfg.head_dim / 2] .Float32 := sliceTyped slidingSinAll 0 0 seq
+    let fullCos : DTensor #[seq, Config.fullHeadDim cfg / 2] .Float32 := sliceTyped fullCosAll 0 0 seq
+    let fullSin : DTensor #[seq, Config.fullHeadDim cfg / 2] .Float32 := sliceTyped fullSinAll 0 0 seq
     let mut hidden := inputsEmbeds
     let mut cache' := cache
     for i in [:m.layers.size] do
@@ -1260,21 +1244,21 @@ def forwardWithCacheEmbeds {batch seq maxLen : UInt64}
 def forwardWithCacheEmbedsWithPerLayerInputs {batch seq maxLen : UInt64}
     (cfg : Config)
     (m : Gemma4Model cfg)
-    (inputIds : T #[batch, seq])
-    (inputsEmbeds : T #[batch, seq, cfg.hidden_size])
-    (perLayerInputs : Option (T #[batch, seq, cfg.num_hidden_layers, cfg.hidden_size_per_layer_input]))
+    (inputIds : DTensor #[batch, seq] .Int64)
+    (inputsEmbeds : STensor #[batch, seq, cfg.hidden_size])
+    (perLayerInputs : Option (STensor #[batch, seq, cfg.num_hidden_layers, cfg.hidden_size_per_layer_input]))
     (cache : Gemma4Cache cfg batch)
-    (slidingCosAll : T #[maxLen, cfg.head_dim / 2])
-    (slidingSinAll : T #[maxLen, cfg.head_dim / 2])
-    (fullCosAll : T #[maxLen, Config.fullHeadDim cfg / 2])
-    (fullSinAll : T #[maxLen, Config.fullHeadDim cfg / 2])
-    : T #[batch, seq, cfg.hidden_size] × Gemma4Cache cfg batch :=
+    (slidingCosAll : DTensor #[maxLen, cfg.head_dim / 2] .Float32)
+    (slidingSinAll : DTensor #[maxLen, cfg.head_dim / 2] .Float32)
+    (fullCosAll : DTensor #[maxLen, Config.fullHeadDim cfg / 2] .Float32)
+    (fullSinAll : DTensor #[maxLen, Config.fullHeadDim cfg / 2] .Float32)
+    : STensor #[batch, seq, cfg.hidden_size] × Gemma4Cache cfg batch :=
   Id.run do
     let _ := inputIds
-    let slidingCos : T #[seq, cfg.head_dim / 2] := data.slice slidingCosAll 0 0 seq
-    let slidingSin : T #[seq, cfg.head_dim / 2] := data.slice slidingSinAll 0 0 seq
-    let fullCos : T #[seq, Config.fullHeadDim cfg / 2] := data.slice fullCosAll 0 0 seq
-    let fullSin : T #[seq, Config.fullHeadDim cfg / 2] := data.slice fullSinAll 0 0 seq
+    let slidingCos : DTensor #[seq, cfg.head_dim / 2] .Float32 := sliceTyped slidingCosAll 0 0 seq
+    let slidingSin : DTensor #[seq, cfg.head_dim / 2] .Float32 := sliceTyped slidingSinAll 0 0 seq
+    let fullCos : DTensor #[seq, Config.fullHeadDim cfg / 2] .Float32 := sliceTyped fullCosAll 0 0 seq
+    let fullSin : DTensor #[seq, Config.fullHeadDim cfg / 2] .Float32 := sliceTyped fullSinAll 0 0 seq
     let mut hidden := inputsEmbeds
     let mut cache' := cache
     for i in [:m.layers.size] do
@@ -1306,23 +1290,23 @@ def forwardWithCacheEmbedsWithPerLayerInputs {batch seq maxLen : UInt64}
 def forwardWithCacheEmbedsWithPerLayerInputsBidirectionalVision {batch seq maxLen : UInt64}
     (cfg : Config)
     (m : Gemma4Model cfg)
-    (inputIds : T #[batch, seq])
-    (inputsEmbeds : T #[batch, seq, cfg.hidden_size])
-    (perLayerInputs : Option (T #[batch, seq, cfg.num_hidden_layers, cfg.hidden_size_per_layer_input]))
+    (inputIds : DTensor #[batch, seq] .Int64)
+    (inputsEmbeds : STensor #[batch, seq, cfg.hidden_size])
+    (perLayerInputs : Option (STensor #[batch, seq, cfg.num_hidden_layers, cfg.hidden_size_per_layer_input]))
     (cache : Gemma4Cache cfg batch)
-    (slidingCosAll : T #[maxLen, cfg.head_dim / 2])
-    (slidingSinAll : T #[maxLen, cfg.head_dim / 2])
-    (fullCosAll : T #[maxLen, Config.fullHeadDim cfg / 2])
-    (fullSinAll : T #[maxLen, Config.fullHeadDim cfg / 2])
-    (slidingAttnMask : T #[batch, seq, seq])
-    (fullAttnMask : T #[batch, seq, seq])
-    : T #[batch, seq, cfg.hidden_size] × Gemma4Cache cfg batch :=
+    (slidingCosAll : DTensor #[maxLen, cfg.head_dim / 2] .Float32)
+    (slidingSinAll : DTensor #[maxLen, cfg.head_dim / 2] .Float32)
+    (fullCosAll : DTensor #[maxLen, Config.fullHeadDim cfg / 2] .Float32)
+    (fullSinAll : DTensor #[maxLen, Config.fullHeadDim cfg / 2] .Float32)
+    (slidingAttnMask : DTensor #[batch, seq, seq] .Int64)
+    (fullAttnMask : DTensor #[batch, seq, seq] .Int64)
+    : STensor #[batch, seq, cfg.hidden_size] × Gemma4Cache cfg batch :=
   Id.run do
     let _ := inputIds
-    let slidingCos : T #[seq, cfg.head_dim / 2] := data.slice slidingCosAll 0 0 seq
-    let slidingSin : T #[seq, cfg.head_dim / 2] := data.slice slidingSinAll 0 0 seq
-    let fullCos : T #[seq, Config.fullHeadDim cfg / 2] := data.slice fullCosAll 0 0 seq
-    let fullSin : T #[seq, Config.fullHeadDim cfg / 2] := data.slice fullSinAll 0 0 seq
+    let slidingCos : DTensor #[seq, cfg.head_dim / 2] .Float32 := sliceTyped slidingCosAll 0 0 seq
+    let slidingSin : DTensor #[seq, cfg.head_dim / 2] .Float32 := sliceTyped slidingSinAll 0 0 seq
+    let fullCos : DTensor #[seq, Config.fullHeadDim cfg / 2] .Float32 := sliceTyped fullCosAll 0 0 seq
+    let fullSin : DTensor #[seq, Config.fullHeadDim cfg / 2] .Float32 := sliceTyped fullSinAll 0 0 seq
     let mut hidden := inputsEmbeds
     let mut cache' := cache
     for i in [:m.layers.size] do
@@ -1350,21 +1334,21 @@ def forwardWithCacheEmbedsWithPerLayerInputsBidirectionalVision {batch seq maxLe
 def forwardStep {batch : UInt64} {maxLen : UInt64}
     (cfg : Config)
     (m : Gemma4Model cfg)
-    (inputIds : T #[batch, 1])
+    (inputIds : DTensor #[batch, 1] .Int64)
     (position : UInt64)
     (cache : Gemma4Cache cfg batch)
-    (slidingCosAll : T #[maxLen, cfg.head_dim / 2])
-    (slidingSinAll : T #[maxLen, cfg.head_dim / 2])
-    (fullCosAll : T #[maxLen, Config.fullHeadDim cfg / 2])
-    (fullSinAll : T #[maxLen, Config.fullHeadDim cfg / 2])
-    : T #[batch, 1, cfg.hidden_size] × Gemma4Cache cfg batch :=
+    (slidingCosAll : DTensor #[maxLen, cfg.head_dim / 2] .Float32)
+    (slidingSinAll : DTensor #[maxLen, cfg.head_dim / 2] .Float32)
+    (fullCosAll : DTensor #[maxLen, Config.fullHeadDim cfg / 2] .Float32)
+    (fullSinAll : DTensor #[maxLen, Config.fullHeadDim cfg / 2] .Float32)
+    : STensor #[batch, 1, cfg.hidden_size] × Gemma4Cache cfg batch :=
   Id.run do
     let inputsEmbeds := embedTokens cfg m inputIds
     let perLayerInputs := computePerLayerInputs cfg m inputIds inputsEmbeds
-    let slidingCos : T #[1, cfg.head_dim / 2] := data.slice slidingCosAll 0 position 1
-    let slidingSin : T #[1, cfg.head_dim / 2] := data.slice slidingSinAll 0 position 1
-    let fullCos : T #[1, Config.fullHeadDim cfg / 2] := data.slice fullCosAll 0 position 1
-    let fullSin : T #[1, Config.fullHeadDim cfg / 2] := data.slice fullSinAll 0 position 1
+    let slidingCos : DTensor #[1, cfg.head_dim / 2] .Float32 := sliceTyped slidingCosAll 0 position 1
+    let slidingSin : DTensor #[1, cfg.head_dim / 2] .Float32 := sliceTyped slidingSinAll 0 position 1
+    let fullCos : DTensor #[1, Config.fullHeadDim cfg / 2] .Float32 := sliceTyped fullCosAll 0 position 1
+    let fullSin : DTensor #[1, Config.fullHeadDim cfg / 2] .Float32 := sliceTyped fullSinAll 0 position 1
     let mut hidden := inputsEmbeds
     let mut cache' := cache
     for i in [:m.layers.size] do
@@ -1373,8 +1357,8 @@ def forwardStep {batch : UInt64} {maxLen : UInt64}
         let perLayer :=
           match perLayerInputs with
           | some p =>
-            let one : T #[batch, 1, 1, cfg.hidden_size_per_layer_input] := data.slice p 2 i.toUInt64 1
-            some (reshape one #[batch, 1, cfg.hidden_size_per_layer_input])
+            let one : STensor #[batch, 1, 1, cfg.hidden_size_per_layer_input] := sliceTyped p 2 i.toUInt64 1
+            some (Tensor.reshapeChecked one #[batch, 1, cfg.hidden_size_per_layer_input])
           | none => none
         let sharedSource :=
           match Config.sharedSourceLayer? cfg i.toUInt64 with
@@ -1402,7 +1386,7 @@ end Gemma4Model
 
 structure Gemma4ForCausalLM (cfg : Config) where
   model : Gemma4Model cfg
-  lmHead : T #[cfg.vocab_size, cfg.hidden_size]
+  lmHead : STensor #[cfg.vocab_size, cfg.hidden_size]
   tieWordEmbeddings : Bool := true
   deriving TensorStruct
 
@@ -1411,46 +1395,46 @@ namespace Gemma4ForCausalLM
 def embedTokens {batch seq : UInt64}
     (cfg : Config)
     (m : Gemma4ForCausalLM cfg)
-    (inputIds : T #[batch, seq])
-    : T #[batch, seq, cfg.hidden_size] :=
+    (inputIds : DTensor #[batch, seq] .Int64)
+    : STensor #[batch, seq, cfg.hidden_size] :=
   m.model.embedTokens cfg inputIds
 
 def forward {batch seq : UInt64}
     (cfg : Config)
     (m : Gemma4ForCausalLM cfg)
-    (inputIds : T #[batch, seq])
-    : T #[batch, seq, cfg.vocab_size] :=
+    (inputIds : DTensor #[batch, seq] .Int64)
+    : STensor #[batch, seq, cfg.vocab_size] :=
   let hidden := m.model.forward cfg inputIds
-  nn.softcap (linear3d hidden m.lmHead) cfg.final_logit_softcapping
+  softcap (Tensor.linear3d hidden m.lmHead) cfg.final_logit_softcapping
 
 def forwardEmbeds {batch seq : UInt64}
     (cfg : Config)
     (m : Gemma4ForCausalLM cfg)
-    (inputIds : T #[batch, seq])
-    (inputsEmbeds : T #[batch, seq, cfg.hidden_size])
-    : T #[batch, seq, cfg.vocab_size] :=
+    (inputIds : DTensor #[batch, seq] .Int64)
+    (inputsEmbeds : STensor #[batch, seq, cfg.hidden_size])
+    : STensor #[batch, seq, cfg.vocab_size] :=
   let hidden := m.model.forwardEmbeds cfg inputIds inputsEmbeds
-  nn.softcap (linear3d hidden m.lmHead) cfg.final_logit_softcapping
+  softcap (Tensor.linear3d hidden m.lmHead) cfg.final_logit_softcapping
 
 def forwardEmbedsWithPerLayerInputs {batch seq : UInt64}
     (cfg : Config)
     (m : Gemma4ForCausalLM cfg)
-    (inputIds : T #[batch, seq])
-    (inputsEmbeds : T #[batch, seq, cfg.hidden_size])
-    (perLayerInputs : Option (T #[batch, seq, cfg.num_hidden_layers, cfg.hidden_size_per_layer_input]))
-    : T #[batch, seq, cfg.vocab_size] :=
+    (inputIds : DTensor #[batch, seq] .Int64)
+    (inputsEmbeds : STensor #[batch, seq, cfg.hidden_size])
+    (perLayerInputs : Option (STensor #[batch, seq, cfg.num_hidden_layers, cfg.hidden_size_per_layer_input]))
+    : STensor #[batch, seq, cfg.vocab_size] :=
   let hidden := m.model.forwardEmbedsWithPerLayerInputs cfg inputIds inputsEmbeds perLayerInputs
-  nn.softcap (linear3d hidden m.lmHead) cfg.final_logit_softcapping
+  softcap (Tensor.linear3d hidden m.lmHead) cfg.final_logit_softcapping
 
 def forwardEmbedsWithPerLayerInputsBidirectionalVision {batch seq : UInt64}
     (cfg : Config)
     (m : Gemma4ForCausalLM cfg)
-    (inputIds : T #[batch, seq])
-    (inputsEmbeds : T #[batch, seq, cfg.hidden_size])
-    (perLayerInputs : Option (T #[batch, seq, cfg.num_hidden_layers, cfg.hidden_size_per_layer_input]))
-    (slidingAttnMask : T #[batch, seq, seq])
-    (fullAttnMask : T #[batch, seq, seq])
-    : T #[batch, seq, cfg.vocab_size] :=
+    (inputIds : DTensor #[batch, seq] .Int64)
+    (inputsEmbeds : STensor #[batch, seq, cfg.hidden_size])
+    (perLayerInputs : Option (STensor #[batch, seq, cfg.num_hidden_layers, cfg.hidden_size_per_layer_input]))
+    (slidingAttnMask : DTensor #[batch, seq, seq] .Int64)
+    (fullAttnMask : DTensor #[batch, seq, seq] .Int64)
+    : STensor #[batch, seq, cfg.vocab_size] :=
   let cache := Gemma4Model.initCache cfg m.model seq inputsEmbeds.device
   let (slidingCosAll, slidingSinAll) := Gemma4Model.precomputeSlidingRotary cfg inputsEmbeds.device
   let (fullCosAll, fullSinAll) := Gemma4Model.precomputeFullRotary cfg inputsEmbeds.device
@@ -1468,15 +1452,15 @@ def forwardEmbedsWithPerLayerInputsBidirectionalVision {batch seq : UInt64}
       fullSinAll
       slidingAttnMask
       fullAttnMask
-  nn.softcap (linear3d hidden m.lmHead) cfg.final_logit_softcapping
+  softcap (Tensor.linear3d hidden m.lmHead) cfg.final_logit_softcapping
 
 private def precomputeDecodeRotary {maxLen : UInt64}
     (cfg : Config)
     (device : Device)
-    : T #[maxLen, cfg.head_dim / 2]
-      × T #[maxLen, cfg.head_dim / 2]
-      × T #[maxLen, Config.fullHeadDim cfg / 2]
-      × T #[maxLen, Config.fullHeadDim cfg / 2] :=
+    : DTensor #[maxLen, cfg.head_dim / 2] .Float32
+      × DTensor #[maxLen, cfg.head_dim / 2] .Float32
+      × DTensor #[maxLen, Config.fullHeadDim cfg / 2] .Float32
+      × DTensor #[maxLen, Config.fullHeadDim cfg / 2] .Float32 :=
   let (slCos, slSin) := Gemma4Model.precomputeSlidingRotary cfg device
   let (fullCos, fullSin) := Gemma4Model.precomputeFullRotary cfg device
   (slCos, slSin, fullCos, fullSin)
@@ -1484,13 +1468,13 @@ private def precomputeDecodeRotary {maxLen : UInt64}
 private def prefillCaches {batch seq maxLen : UInt64}
     (cfg : Config)
     (m : Gemma4ForCausalLM cfg)
-    (inputIds : T #[batch, seq])
+    (inputIds : DTensor #[batch, seq] .Int64)
     (cache : Gemma4Cache cfg batch)
-    (slidingCosAll : T #[maxLen, cfg.head_dim / 2])
-    (slidingSinAll : T #[maxLen, cfg.head_dim / 2])
-    (fullCosAll : T #[maxLen, Config.fullHeadDim cfg / 2])
-    (fullSinAll : T #[maxLen, Config.fullHeadDim cfg / 2])
-    : IO (T #[batch, cfg.vocab_size] × Gemma4Cache cfg batch) := do
+    (slidingCosAll : DTensor #[maxLen, cfg.head_dim / 2] .Float32)
+    (slidingSinAll : DTensor #[maxLen, cfg.head_dim / 2] .Float32)
+    (fullCosAll : DTensor #[maxLen, Config.fullHeadDim cfg / 2] .Float32)
+    (fullSinAll : DTensor #[maxLen, Config.fullHeadDim cfg / 2] .Float32)
+    : IO (STensor #[batch, cfg.vocab_size] × Gemma4Cache cfg batch) := do
   let (hidden, cache') :=
     Gemma4Model.forwardWithCache
       (maxLen := maxLen)
@@ -1502,21 +1486,21 @@ private def prefillCaches {batch seq maxLen : UInt64}
       slidingSinAll
       fullCosAll
       fullSinAll
-  let lastHidden : T #[batch, 1, cfg.hidden_size] := data.slice hidden 1 (seq - 1) 1
-  let logits3 : T #[batch, 1, cfg.vocab_size] := nn.softcap (linear3d lastHidden m.lmHead) cfg.final_logit_softcapping
-  pure (reshape logits3 #[batch, cfg.vocab_size], cache')
+  let lastHidden : STensor #[batch, 1, cfg.hidden_size] := sliceTyped hidden 1 (seq - 1) 1
+  let logits3 : STensor #[batch, 1, cfg.vocab_size] := softcap (Tensor.linear3d lastHidden m.lmHead) cfg.final_logit_softcapping
+  pure (Tensor.reshapeChecked logits3 #[batch, cfg.vocab_size], cache')
 
 private def prefillCachesFromEmbeds {batch seq maxLen : UInt64}
     (cfg : Config)
     (m : Gemma4ForCausalLM cfg)
-    (inputIds : T #[batch, seq])
-    (inputsEmbeds : T #[batch, seq, cfg.hidden_size])
+    (inputIds : DTensor #[batch, seq] .Int64)
+    (inputsEmbeds : STensor #[batch, seq, cfg.hidden_size])
     (cache : Gemma4Cache cfg batch)
-    (slidingCosAll : T #[maxLen, cfg.head_dim / 2])
-    (slidingSinAll : T #[maxLen, cfg.head_dim / 2])
-    (fullCosAll : T #[maxLen, Config.fullHeadDim cfg / 2])
-    (fullSinAll : T #[maxLen, Config.fullHeadDim cfg / 2])
-    : IO (T #[batch, cfg.vocab_size] × Gemma4Cache cfg batch) := do
+    (slidingCosAll : DTensor #[maxLen, cfg.head_dim / 2] .Float32)
+    (slidingSinAll : DTensor #[maxLen, cfg.head_dim / 2] .Float32)
+    (fullCosAll : DTensor #[maxLen, Config.fullHeadDim cfg / 2] .Float32)
+    (fullSinAll : DTensor #[maxLen, Config.fullHeadDim cfg / 2] .Float32)
+    : IO (STensor #[batch, cfg.vocab_size] × Gemma4Cache cfg batch) := do
   let (hidden, cache') :=
     Gemma4Model.forwardWithCacheEmbeds
       (maxLen := maxLen)
@@ -1529,22 +1513,22 @@ private def prefillCachesFromEmbeds {batch seq maxLen : UInt64}
       slidingSinAll
       fullCosAll
       fullSinAll
-  let lastHidden : T #[batch, 1, cfg.hidden_size] := data.slice hidden 1 (seq - 1) 1
-  let logits3 : T #[batch, 1, cfg.vocab_size] := nn.softcap (linear3d lastHidden m.lmHead) cfg.final_logit_softcapping
-  pure (reshape logits3 #[batch, cfg.vocab_size], cache')
+  let lastHidden : STensor #[batch, 1, cfg.hidden_size] := sliceTyped hidden 1 (seq - 1) 1
+  let logits3 : STensor #[batch, 1, cfg.vocab_size] := softcap (Tensor.linear3d lastHidden m.lmHead) cfg.final_logit_softcapping
+  pure (Tensor.reshapeChecked logits3 #[batch, cfg.vocab_size], cache')
 
 private def prefillCachesFromEmbedsWithPerLayerInputs {batch seq maxLen : UInt64}
     (cfg : Config)
     (m : Gemma4ForCausalLM cfg)
-    (inputIds : T #[batch, seq])
-    (inputsEmbeds : T #[batch, seq, cfg.hidden_size])
-    (perLayerInputs : Option (T #[batch, seq, cfg.num_hidden_layers, cfg.hidden_size_per_layer_input]))
+    (inputIds : DTensor #[batch, seq] .Int64)
+    (inputsEmbeds : STensor #[batch, seq, cfg.hidden_size])
+    (perLayerInputs : Option (STensor #[batch, seq, cfg.num_hidden_layers, cfg.hidden_size_per_layer_input]))
     (cache : Gemma4Cache cfg batch)
-    (slidingCosAll : T #[maxLen, cfg.head_dim / 2])
-    (slidingSinAll : T #[maxLen, cfg.head_dim / 2])
-    (fullCosAll : T #[maxLen, Config.fullHeadDim cfg / 2])
-    (fullSinAll : T #[maxLen, Config.fullHeadDim cfg / 2])
-    : IO (T #[batch, cfg.vocab_size] × Gemma4Cache cfg batch) := do
+    (slidingCosAll : DTensor #[maxLen, cfg.head_dim / 2] .Float32)
+    (slidingSinAll : DTensor #[maxLen, cfg.head_dim / 2] .Float32)
+    (fullCosAll : DTensor #[maxLen, Config.fullHeadDim cfg / 2] .Float32)
+    (fullSinAll : DTensor #[maxLen, Config.fullHeadDim cfg / 2] .Float32)
+    : IO (STensor #[batch, cfg.vocab_size] × Gemma4Cache cfg batch) := do
   let (hidden, cache') :=
     Gemma4Model.forwardWithCacheEmbedsWithPerLayerInputs
       (maxLen := maxLen)
@@ -1558,24 +1542,24 @@ private def prefillCachesFromEmbedsWithPerLayerInputs {batch seq maxLen : UInt64
       slidingSinAll
       fullCosAll
       fullSinAll
-  let lastHidden : T #[batch, 1, cfg.hidden_size] := data.slice hidden 1 (seq - 1) 1
-  let logits3 : T #[batch, 1, cfg.vocab_size] := nn.softcap (linear3d lastHidden m.lmHead) cfg.final_logit_softcapping
-  pure (reshape logits3 #[batch, cfg.vocab_size], cache')
+  let lastHidden : STensor #[batch, 1, cfg.hidden_size] := sliceTyped hidden 1 (seq - 1) 1
+  let logits3 : STensor #[batch, 1, cfg.vocab_size] := softcap (Tensor.linear3d lastHidden m.lmHead) cfg.final_logit_softcapping
+  pure (Tensor.reshapeChecked logits3 #[batch, cfg.vocab_size], cache')
 
 private def prefillCachesFromEmbedsWithPerLayerInputsBidirectionalVision {batch seq maxLen : UInt64}
     (cfg : Config)
     (m : Gemma4ForCausalLM cfg)
-    (inputIds : T #[batch, seq])
-    (inputsEmbeds : T #[batch, seq, cfg.hidden_size])
-    (perLayerInputs : Option (T #[batch, seq, cfg.num_hidden_layers, cfg.hidden_size_per_layer_input]))
+    (inputIds : DTensor #[batch, seq] .Int64)
+    (inputsEmbeds : STensor #[batch, seq, cfg.hidden_size])
+    (perLayerInputs : Option (STensor #[batch, seq, cfg.num_hidden_layers, cfg.hidden_size_per_layer_input]))
     (cache : Gemma4Cache cfg batch)
-    (slidingCosAll : T #[maxLen, cfg.head_dim / 2])
-    (slidingSinAll : T #[maxLen, cfg.head_dim / 2])
-    (fullCosAll : T #[maxLen, Config.fullHeadDim cfg / 2])
-    (fullSinAll : T #[maxLen, Config.fullHeadDim cfg / 2])
-    (slidingAttnMask : T #[batch, seq, seq])
-    (fullAttnMask : T #[batch, seq, seq])
-    : IO (T #[batch, cfg.vocab_size] × Gemma4Cache cfg batch) := do
+    (slidingCosAll : DTensor #[maxLen, cfg.head_dim / 2] .Float32)
+    (slidingSinAll : DTensor #[maxLen, cfg.head_dim / 2] .Float32)
+    (fullCosAll : DTensor #[maxLen, Config.fullHeadDim cfg / 2] .Float32)
+    (fullSinAll : DTensor #[maxLen, Config.fullHeadDim cfg / 2] .Float32)
+    (slidingAttnMask : DTensor #[batch, seq, seq] .Int64)
+    (fullAttnMask : DTensor #[batch, seq, seq] .Int64)
+    : IO (STensor #[batch, cfg.vocab_size] × Gemma4Cache cfg batch) := do
   let (hidden, cache') :=
     Gemma4Model.forwardWithCacheEmbedsWithPerLayerInputsBidirectionalVision
       (maxLen := maxLen)
@@ -1591,21 +1575,21 @@ private def prefillCachesFromEmbedsWithPerLayerInputsBidirectionalVision {batch 
       fullSinAll
       slidingAttnMask
       fullAttnMask
-  let lastHidden : T #[batch, 1, cfg.hidden_size] := data.slice hidden 1 (seq - 1) 1
-  let logits3 : T #[batch, 1, cfg.vocab_size] := nn.softcap (linear3d lastHidden m.lmHead) cfg.final_logit_softcapping
-  pure (reshape logits3 #[batch, cfg.vocab_size], cache')
+  let lastHidden : STensor #[batch, 1, cfg.hidden_size] := sliceTyped hidden 1 (seq - 1) 1
+  let logits3 : STensor #[batch, 1, cfg.vocab_size] := softcap (Tensor.linear3d lastHidden m.lmHead) cfg.final_logit_softcapping
+  pure (Tensor.reshapeChecked logits3 #[batch, cfg.vocab_size], cache')
 
 private def decodeStep {batch maxLen : UInt64}
     (cfg : Config)
     (m : Gemma4ForCausalLM cfg)
-    (inputIds : T #[batch, 1])
+    (inputIds : DTensor #[batch, 1] .Int64)
     (position : UInt64)
     (cache : Gemma4Cache cfg batch)
-    (slidingCosAll : T #[maxLen, cfg.head_dim / 2])
-    (slidingSinAll : T #[maxLen, cfg.head_dim / 2])
-    (fullCosAll : T #[maxLen, Config.fullHeadDim cfg / 2])
-    (fullSinAll : T #[maxLen, Config.fullHeadDim cfg / 2])
-    : IO (T #[batch, cfg.vocab_size] × Gemma4Cache cfg batch) := do
+    (slidingCosAll : DTensor #[maxLen, cfg.head_dim / 2] .Float32)
+    (slidingSinAll : DTensor #[maxLen, cfg.head_dim / 2] .Float32)
+    (fullCosAll : DTensor #[maxLen, Config.fullHeadDim cfg / 2] .Float32)
+    (fullSinAll : DTensor #[maxLen, Config.fullHeadDim cfg / 2] .Float32)
+    : IO (STensor #[batch, cfg.vocab_size] × Gemma4Cache cfg batch) := do
   let (hidden, cache') :=
     Gemma4Model.forwardStep
       (maxLen := maxLen)
@@ -1618,37 +1602,37 @@ private def decodeStep {batch maxLen : UInt64}
       slidingSinAll
       fullCosAll
       fullSinAll
-  let logits3 : T #[batch, 1, cfg.vocab_size] := nn.softcap (linear3d hidden m.lmHead) cfg.final_logit_softcapping
-  pure (reshape logits3 #[batch, cfg.vocab_size], cache')
+  let logits3 : STensor #[batch, 1, cfg.vocab_size] := softcap (Tensor.linear3d hidden m.lmHead) cfg.final_logit_softcapping
+  pure (Tensor.reshapeChecked logits3 #[batch, cfg.vocab_size], cache')
 
 private partial def decodeLoopCached {batch maxLen : UInt64}
     (cfg : Config)
     (m : Gemma4ForCausalLM cfg)
     (strategy : SamplingStrategy)
     (eosTokenIds : Array UInt64)
-    (finished : T #[batch])
+    (finished : DTensor #[batch] .Bool)
     (remaining : Nat)
     (cache : Gemma4Cache cfg batch)
-    (lastLogits : T #[batch, cfg.vocab_size])
-    (slidingCosAll : T #[maxLen, cfg.head_dim / 2])
-    (slidingSinAll : T #[maxLen, cfg.head_dim / 2])
-    (fullCosAll : T #[maxLen, Config.fullHeadDim cfg / 2])
-    (fullSinAll : T #[maxLen, Config.fullHeadDim cfg / 2])
+    (lastLogits : STensor #[batch, cfg.vocab_size])
+    (slidingCosAll : DTensor #[maxLen, cfg.head_dim / 2] .Float32)
+    (slidingSinAll : DTensor #[maxLen, cfg.head_dim / 2] .Float32)
+    (fullCosAll : DTensor #[maxLen, Config.fullHeadDim cfg / 2] .Float32)
+    (fullSinAll : DTensor #[maxLen, Config.fullHeadDim cfg / 2] .Float32)
     (onStep : Option (StreamCallback batch))
     (generatedSoFar : UInt64)
     {curSeq : UInt64}
-    (curIds : T #[batch, curSeq])
-    : IO (Sigma (fun outSeq => T #[batch, outSeq])) := do
+    (curIds : DTensor #[batch, curSeq] .Int64)
+    : IO (Sigma (fun outSeq => DTensor #[batch, outSeq] .Int64)) := do
   if remaining == 0 then
     return ⟨curSeq, curIds⟩
 
-  let nextTokRaw ← sampleFromLogits lastLogits strategy
-  let finished' : T #[batch] :=
+  let nextTokRaw ← sampleFromLogits lastLogits.toFloat32 strategy
+  let finished' : DTensor #[batch] .Bool :=
     if eosTokenIds.isEmpty then
       finished
     else
-      logicalOr finished (tokenInSet nextTokRaw eosTokenIds)
-  let nextTok : T #[batch] :=
+      Tensor.logicalOr finished (tokenInSet nextTokRaw eosTokenIds)
+  let nextTok : DTensor #[batch] .Int64 :=
     if eosTokenIds.isEmpty then
       nextTokRaw
     else
@@ -1658,14 +1642,14 @@ private partial def decodeLoopCached {batch maxLen : UInt64}
   | some cb => cb generatedSoFar nextTok
   | none => pure ()
 
-  let nextCol : T #[batch, 1] := reshape nextTok #[batch, 1]
-  let appended : T #[batch, curSeq + 1] := nn.cat curIds nextCol 1
+  let nextCol : DTensor #[batch, 1] .Int64 := Tensor.reshapeChecked nextTok #[batch, 1]
+  let appended : DTensor #[batch, curSeq + 1] .Int64 := typedCat curIds nextCol 1
 
   let stop :=
     if eosTokenIds.isEmpty then
       false
     else
-      !(any (logical_not finished'))
+      !(Tensor.any (Tensor.logicalNot finished'))
   if stop then
     return ⟨curSeq + 1, appended⟩
   else
@@ -1700,12 +1684,12 @@ private partial def decodeLoopCached {batch maxLen : UInt64}
 private def generateCore {batch seq : UInt64}
     (cfg : Config)
     (m : Gemma4ForCausalLM cfg)
-    (inputIds : T #[batch, seq])
+    (inputIds : DTensor #[batch, seq] .Int64)
     (maxNewTokens : UInt64 := 256)
     (strategy : SamplingStrategy := .greedy)
     (eosTokenIds : Array UInt64 := #[])
     (onStep : Option (StreamCallback batch) := none)
-    : IO (Sigma (fun outSeq => T #[batch, outSeq])) := do
+    : IO (Sigma (fun outSeq => DTensor #[batch, outSeq] .Int64)) := do
   if seq == 0 then
     throw <| IO.userError "generate requires non-empty prompt sequence"
   if maxNewTokens == 0 then
@@ -1720,7 +1704,7 @@ private def generateCore {batch seq : UInt64}
       (maxLen := maxLen)
       cfg m inputIds cache
       slidingCosAll slidingSinAll fullCosAll fullSinAll
-  let finished0 : T #[batch] := falseMask (n := batch) inputIds.device
+  let finished0 : DTensor #[batch] .Bool := falseMaskTyped (n := batch) inputIds.device
   decodeLoopCached
     (maxLen := maxLen)
     cfg
@@ -1742,13 +1726,13 @@ private def generateCore {batch seq : UInt64}
 private def generateFromEmbedsCore {batch seq : UInt64}
     (cfg : Config)
     (m : Gemma4ForCausalLM cfg)
-    (inputIds : T #[batch, seq])
-    (inputsEmbeds : T #[batch, seq, cfg.hidden_size])
+    (inputIds : DTensor #[batch, seq] .Int64)
+    (inputsEmbeds : STensor #[batch, seq, cfg.hidden_size])
     (maxNewTokens : UInt64 := 256)
     (strategy : SamplingStrategy := .greedy)
     (eosTokenIds : Array UInt64 := #[])
     (onStep : Option (StreamCallback batch) := none)
-    : IO (Sigma (fun outSeq => T #[batch, outSeq])) := do
+    : IO (Sigma (fun outSeq => DTensor #[batch, outSeq] .Int64)) := do
   if seq == 0 then
     throw <| IO.userError "generate requires non-empty prompt sequence"
   if maxNewTokens == 0 then
@@ -1770,7 +1754,7 @@ private def generateFromEmbedsCore {batch seq : UInt64}
       slidingSinAll
       fullCosAll
       fullSinAll
-  let finished0 : T #[batch] := falseMask (n := batch) inputIds.device
+  let finished0 : DTensor #[batch] .Bool := falseMaskTyped (n := batch) inputIds.device
   decodeLoopCached
     (maxLen := maxLen)
     cfg
@@ -1792,15 +1776,15 @@ private def generateFromEmbedsCore {batch seq : UInt64}
 private def generateFromEmbedsCoreWithPerLayerInputs {batch seq : UInt64}
     (cfg : Config)
     (m : Gemma4ForCausalLM cfg)
-    (inputIds : T #[batch, seq])
-    (inputsEmbeds : T #[batch, seq, cfg.hidden_size])
-    (perLayerInputs : Option (T #[batch, seq, cfg.num_hidden_layers, cfg.hidden_size_per_layer_input]))
+    (inputIds : DTensor #[batch, seq] .Int64)
+    (inputsEmbeds : STensor #[batch, seq, cfg.hidden_size])
+    (perLayerInputs : Option (STensor #[batch, seq, cfg.num_hidden_layers, cfg.hidden_size_per_layer_input]))
     (maxNewTokens : UInt64 := 256)
     (strategy : SamplingStrategy := .greedy)
     (eosTokenIds : Array UInt64 := #[])
     (onStep : Option (StreamCallback batch) := none)
-    (prefillMasks : Option (T #[batch, seq, seq] × T #[batch, seq, seq]) := none)
-    : IO (Sigma (fun outSeq => T #[batch, outSeq])) := do
+    (prefillMasks : Option (DTensor #[batch, seq, seq] .Int64 × DTensor #[batch, seq, seq] .Int64) := none)
+    : IO (Sigma (fun outSeq => DTensor #[batch, outSeq] .Int64)) := do
   if seq == 0 then
     throw <| IO.userError "generate requires non-empty prompt sequence"
   if maxNewTokens == 0 then
@@ -1840,7 +1824,7 @@ private def generateFromEmbedsCoreWithPerLayerInputs {batch seq : UInt64}
         slidingSinAll
         fullCosAll
         fullSinAll
-  let finished0 : T #[batch] := falseMask (n := batch) inputIds.device
+  let finished0 : DTensor #[batch] .Bool := falseMaskTyped (n := batch) inputIds.device
   decodeLoopCached
     (maxLen := maxLen)
     cfg
@@ -1862,73 +1846,73 @@ private def generateFromEmbedsCoreWithPerLayerInputs {batch seq : UInt64}
 def generate {batch seq : UInt64}
     (cfg : Config)
     (m : Gemma4ForCausalLM cfg)
-    (inputIds : T #[batch, seq])
+    (inputIds : DTensor #[batch, seq] .Int64)
     (maxNewTokens : UInt64 := 256)
     (strategy : SamplingStrategy := .greedy)
     (eosTokenIds : Array UInt64 := #[])
-    : IO (Sigma (fun outSeq => T #[batch, outSeq])) :=
+    : IO (Sigma (fun outSeq => DTensor #[batch, outSeq] .Int64)) :=
   generateCore cfg m inputIds maxNewTokens strategy eosTokenIds none
 
 def generateFromEmbeds {batch seq : UInt64}
     (cfg : Config)
     (m : Gemma4ForCausalLM cfg)
-    (inputIds : T #[batch, seq])
-    (inputsEmbeds : T #[batch, seq, cfg.hidden_size])
+    (inputIds : DTensor #[batch, seq] .Int64)
+    (inputsEmbeds : STensor #[batch, seq, cfg.hidden_size])
     (maxNewTokens : UInt64 := 256)
     (strategy : SamplingStrategy := .greedy)
     (eosTokenIds : Array UInt64 := #[])
-    : IO (Sigma (fun outSeq => T #[batch, outSeq])) :=
+    : IO (Sigma (fun outSeq => DTensor #[batch, outSeq] .Int64)) :=
   generateFromEmbedsCore cfg m inputIds inputsEmbeds maxNewTokens strategy eosTokenIds none
 
 def generateFromEmbedsWithPerLayerInputs {batch seq : UInt64}
     (cfg : Config)
     (m : Gemma4ForCausalLM cfg)
-    (inputIds : T #[batch, seq])
-    (inputsEmbeds : T #[batch, seq, cfg.hidden_size])
-    (perLayerInputs : Option (T #[batch, seq, cfg.num_hidden_layers, cfg.hidden_size_per_layer_input]))
+    (inputIds : DTensor #[batch, seq] .Int64)
+    (inputsEmbeds : STensor #[batch, seq, cfg.hidden_size])
+    (perLayerInputs : Option (STensor #[batch, seq, cfg.num_hidden_layers, cfg.hidden_size_per_layer_input]))
     (maxNewTokens : UInt64 := 256)
     (strategy : SamplingStrategy := .greedy)
     (eosTokenIds : Array UInt64 := #[])
-    (prefillMasks : Option (T #[batch, seq, seq] × T #[batch, seq, seq]) := none)
-    : IO (Sigma (fun outSeq => T #[batch, outSeq])) :=
+    (prefillMasks : Option (DTensor #[batch, seq, seq] .Int64 × DTensor #[batch, seq, seq] .Int64) := none)
+    : IO (Sigma (fun outSeq => DTensor #[batch, outSeq] .Int64)) :=
   generateFromEmbedsCoreWithPerLayerInputs
     cfg m inputIds inputsEmbeds perLayerInputs maxNewTokens strategy eosTokenIds none prefillMasks
 
 def generateStream {batch seq : UInt64}
     (cfg : Config)
     (m : Gemma4ForCausalLM cfg)
-    (inputIds : T #[batch, seq])
+    (inputIds : DTensor #[batch, seq] .Int64)
     (onStep : StreamCallback batch)
     (maxNewTokens : UInt64 := 256)
     (strategy : SamplingStrategy := .greedy)
     (eosTokenIds : Array UInt64 := #[])
-    : IO (Sigma (fun outSeq => T #[batch, outSeq])) :=
+    : IO (Sigma (fun outSeq => DTensor #[batch, outSeq] .Int64)) :=
   generateCore cfg m inputIds maxNewTokens strategy eosTokenIds (some onStep)
 
 def generateFromEmbedsStream {batch seq : UInt64}
     (cfg : Config)
     (m : Gemma4ForCausalLM cfg)
-    (inputIds : T #[batch, seq])
-    (inputsEmbeds : T #[batch, seq, cfg.hidden_size])
+    (inputIds : DTensor #[batch, seq] .Int64)
+    (inputsEmbeds : STensor #[batch, seq, cfg.hidden_size])
     (onStep : StreamCallback batch)
     (maxNewTokens : UInt64 := 256)
     (strategy : SamplingStrategy := .greedy)
     (eosTokenIds : Array UInt64 := #[])
-    : IO (Sigma (fun outSeq => T #[batch, outSeq])) :=
+    : IO (Sigma (fun outSeq => DTensor #[batch, outSeq] .Int64)) :=
   generateFromEmbedsCore cfg m inputIds inputsEmbeds maxNewTokens strategy eosTokenIds (some onStep)
 
 def generateFromEmbedsStreamWithPerLayerInputs {batch seq : UInt64}
     (cfg : Config)
     (m : Gemma4ForCausalLM cfg)
-    (inputIds : T #[batch, seq])
-    (inputsEmbeds : T #[batch, seq, cfg.hidden_size])
-    (perLayerInputs : Option (T #[batch, seq, cfg.num_hidden_layers, cfg.hidden_size_per_layer_input]))
+    (inputIds : DTensor #[batch, seq] .Int64)
+    (inputsEmbeds : STensor #[batch, seq, cfg.hidden_size])
+    (perLayerInputs : Option (STensor #[batch, seq, cfg.num_hidden_layers, cfg.hidden_size_per_layer_input]))
     (onStep : StreamCallback batch)
     (maxNewTokens : UInt64 := 256)
     (strategy : SamplingStrategy := .greedy)
     (eosTokenIds : Array UInt64 := #[])
-    (prefillMasks : Option (T #[batch, seq, seq] × T #[batch, seq, seq]) := none)
-    : IO (Sigma (fun outSeq => T #[batch, outSeq])) :=
+    (prefillMasks : Option (DTensor #[batch, seq, seq] .Int64 × DTensor #[batch, seq, seq] .Int64) := none)
+    : IO (Sigma (fun outSeq => DTensor #[batch, outSeq] .Int64)) :=
   generateFromEmbedsCoreWithPerLayerInputs
     cfg m inputIds inputsEmbeds perLayerInputs maxNewTokens strategy eosTokenIds (some onStep) prefillMasks
 

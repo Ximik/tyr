@@ -1,3 +1,4 @@
+#include "tyr_gemma4_abi.h"
 #include "tyr_qwen35_abi.h"
 /*
  * apple_vl_processor.mm
@@ -625,8 +626,7 @@ LEAN_EXPORT lean_object* lean_torch_media_load_image_patch_grid_gemma4(
     uint64_t patch_size,
     uint64_t pooling_kernel_size,
     uint64_t max_soft_tokens,
-    double rescale_factor,
-    lean_object* /*w*/) {
+    double rescale_factor) {
   const char* path_c = lean_string_cstr(path_obj);
   std::string path(path_c);
 

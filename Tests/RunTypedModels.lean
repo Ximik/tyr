@@ -1,3 +1,4 @@
+import Tests.TestGemma4Typed
 import Tests.TestShapePackedTensor
 import Tests.TestKittenTTS
 import Tests.TestQwen36Pretrained
@@ -40,6 +41,7 @@ import Tests.TestDiffEqContainerBrownian
 unsafe def main : IO UInt32 := do
   Lean.initSearchPath (← Lean.findSysroot)
   let env ← Lean.importModules #[
+    { module := `Tests.TestGemma4Typed },
     { module := `Tests.TestShapePackedTensor },
     { module := `Tests.TestKittenTTS },
     { module := `Tests.TestQwen36Pretrained },

@@ -524,6 +524,44 @@ The full migration remains active: other model families, legacy reflection and
 GPU generators, remaining examples/tests/docs, and actual GPU qualification
 still need their final acceptance checks before removing `torch.T`.
 
+## 2026-10-13 Gemma4 continuation
+
+Gemma4's text and image models, checkpoint loaders, image preprocessing boundary,
+cache and generation APIs, and CLI now use indexed tensors. Floating parameters
+retain checkpoint dtype; token IDs and routing indices are Int64, finished masks
+are Bool, and rotary tables are Float32. Image grids and variable feature counts
+carry existential dimensions. Five native declarations have explicit audited
+prototypes, including the corrected image-loader IO signature on both platforms.
+
+The new cache parity test exposed an existing discrepancy: uncached evaluation
+ignored configured KV sharing. Full-sequence evaluation now retains source-layer
+K/V and supplies it to shared layers, matching prefill and incremental decoding.
+BF16 cache storage and padding preserve model dtype; vision projections convert
+fresh Float32 image patches to their weight dtype. Router projections explicitly
+use Float32 alongside the existing Float32 normalization scale.
+
+Validation completed:
+
+- The focused indexed-model runner passes 220 tests, with zero failures or skips.
+  Eight Gemma4 tests cover shared-cache parity and per-layer inputs, FP32/BF16
+  generation and streaming, checkpoint round trips, expert reference numerics,
+  BF16 routing, vision clipping and feature repetition, multimodal dtype and
+  placeholder checks, and real native image patch loading.
+- All nine required CPU suites build under `--wfail` (1,695 build jobs) and
+  pass. The main runner passes 1,444 tests and the experimental runner passes
+  49, both with zero failures/skips; all seven standalone Laguna CPU suites
+  also succeed. CUDA-only cases remain skipped on this CPU host.
+- Broad validation exposed millisecond timer truncation in the existing
+  ManifoldMuon benchmark. Its separate fix measures nanoseconds and returns
+  milliseconds, preserving the positive-duration assertion.
+- `Gemma4RunHF` and the focused runner build under `--wfail`; the CLI's native
+  `--help` invocation succeeds.
+- The five-declaration Gemma4 ABI audit, core and raw-tensor ABI audits, and
+  qualification shell syntax check pass.
+
+These synthetic model tests do not qualify a downloaded Gemma4 checkpoint or
+GPU execution. The full migration remains active under the criteria below.
+
 ## Remaining acceptance criteria
 
 Remove the `T` declaration and all model, generator, reflection, documentation,

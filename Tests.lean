@@ -1,3 +1,4 @@
+import Tests.TestGemma4Typed
 import Tests.TestShapePackedTensor
 import Tests.TestCORETyped
 import Tests.Test

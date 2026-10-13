@@ -7,7 +7,6 @@
   - small-model per-layer input blocks (E2B/E4B)
   - dense and MoE feed-forward branches
 -/
-import Tyr.Torch
 import Tyr.Log
 import Tyr.SafeTensors.Load
 import Tyr.Model.Utils
@@ -57,42 +56,42 @@ private def parameterNameCandidates (name : String) : Array String :=
         out := pushUnique out cand
     out
 
-private def loadParameterSharded (modelDir : String) (name : String) (s : Shape) : IO (T s) :=
+private def loadParameterSharded (modelDir : String) (name : String) (s : Shape) : IO (STensor s) :=
   loadTensorShardedCandidates modelDir (parameterNameCandidates name) s
 
-private def tryLoadParameterSharded (modelDir : String) (name : String) (s : Shape) : IO (Option (T s)) :=
+private def tryLoadParameterSharded (modelDir : String) (name : String) (s : Shape) : IO (Option (STensor s)) :=
   tryLoadTensorShardedCandidates modelDir (parameterNameCandidates name) s
 
-private def loadParameter (path : String) (name : String) (s : Shape) : IO (T s) :=
+private def loadParameter (path : String) (name : String) (s : Shape) : IO (STensor s) :=
   loadTensorCandidates path (parameterNameCandidates name) s
 
-private def tryLoadParameter (path : String) (name : String) (s : Shape) : IO (Option (T s)) :=
+private def tryLoadParameter (path : String) (name : String) (s : Shape) : IO (Option (STensor s)) :=
   tryLoadTensorCandidates path (parameterNameCandidates name) s
 
-private def zeros1dOn {n : UInt64} (device : Device) : T #[n] :=
-  torch.zeros #[n] false device
+private def zeros1dOn {n : UInt64} (device : Device) : STensor #[n] :=
+  qwen35.zerosDynamic #[n] false device
 
-private def zeros2dOn {rows cols : UInt64} (device : Device) : T #[rows, cols] :=
-  torch.zeros #[rows, cols] false device
+private def zeros2dOn {rows cols : UInt64} (device : Device) : STensor #[rows, cols] :=
+  qwen35.zerosDynamic #[rows, cols] false device
 
 private def pad1dTo {srcDim dstDim : UInt64}
-    (x : T #[srcDim])
-    : T #[dstDim] :=
-  let base : T #[dstDim] := castLike x (zeros1dOn x.device)
-  data.sliceScatter base 0 0 x
+    (x : STensor #[srcDim])
+    : STensor #[dstDim] :=
+  let base : STensor #[dstDim] := Tensor.castLike x (zeros1dOn x.device)
+  Tensor.sliceScatter base 0 0 x
 
 private def pad2dTo {srcRows srcCols dstRows dstCols : UInt64}
-    (x : T #[srcRows, srcCols])
-    : T #[dstRows, dstCols] :=
-  let colsPadded : T #[srcRows, dstCols] :=
-    data.sliceScatter (castLike x (zeros2dOn x.device : T #[srcRows, dstCols])) 1 0 x
-  data.sliceScatter (castLike x (zeros2dOn x.device : T #[dstRows, dstCols])) 0 0 colsPadded
+    (x : STensor #[srcRows, srcCols])
+    : STensor #[dstRows, dstCols] :=
+  let colsPadded : STensor #[srcRows, dstCols] :=
+    Tensor.sliceScatter (Tensor.castLike x (zeros2dOn x.device : STensor #[srcRows, dstCols])) 1 0 x
+  Tensor.sliceScatter (Tensor.castLike x (zeros2dOn x.device : STensor #[dstRows, dstCols])) 0 0 colsPadded
 
 private def loadPadded1DSharded
     (modelDir : String)
     (name : String)
     (srcDim dstDim : UInt64)
-    : IO (T #[dstDim]) := do
+    : IO (STensor #[dstDim]) := do
   let t ← loadParameterSharded modelDir name #[srcDim]
   pure (pad1dTo t)
 
@@ -100,7 +99,7 @@ private def loadPadded1D
     (path : String)
     (name : String)
     (srcDim dstDim : UInt64)
-    : IO (T #[dstDim]) := do
+    : IO (STensor #[dstDim]) := do
   let t ← loadParameter path name #[srcDim]
   pure (pad1dTo t)
 
@@ -108,7 +107,7 @@ private def loadPadded2DSharded
     (modelDir : String)
     (name : String)
     (srcRows srcCols dstRows dstCols : UInt64)
-    : IO (T #[dstRows, dstCols]) := do
+    : IO (STensor #[dstRows, dstCols]) := do
   let t ← loadParameterSharded modelDir name #[srcRows, srcCols]
   pure (pad2dTo t)
 
@@ -116,7 +115,7 @@ private def loadPadded2D
     (path : String)
     (name : String)
     (srcRows srcCols dstRows dstCols : UInt64)
-    : IO (T #[dstRows, dstCols]) := do
+    : IO (STensor #[dstRows, dstCols]) := do
   let t ← loadParameter path name #[srcRows, srcCols]
   pure (pad2dTo t)
 
@@ -176,7 +175,7 @@ private def loadAttentionSharded (modelDir : String) (cfg : Config) (layerIdx : 
       (Config.maxKVProjDim cfg) cfg.hidden_size
   let vProj ←
     if cfg.attention_k_eq_v && layerType == .fullAttention then
-      pure (zeros2dOn Device.CPU : T #[Config.maxKVProjDim cfg, cfg.hidden_size])
+      pure (zeros2dOn Device.CPU : STensor #[Config.maxKVProjDim cfg, cfg.hidden_size])
     else
       loadPadded2DSharded
         modelDir
@@ -224,7 +223,7 @@ private def loadAttention (path : String) (cfg : Config) (layerIdx : UInt64)
       (Config.maxKVProjDim cfg) cfg.hidden_size
   let vProj ←
     if cfg.attention_k_eq_v && layerType == .fullAttention then
-      pure (zeros2dOn Device.CPU : T #[Config.maxKVProjDim cfg, cfg.hidden_size])
+      pure (zeros2dOn Device.CPU : STensor #[Config.maxKVProjDim cfg, cfg.hidden_size])
     else
       loadPadded2D
         path
