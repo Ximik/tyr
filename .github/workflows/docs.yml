@@ -36,6 +36,7 @@ jobs:
           ln -sfn ../external docbuild/external
           ln -sfn ../cc docbuild/cc
           ln -sfn ../docs docbuild/docs
+          ln -sfn ../Tyr docbuild/Tyr
           cat > docbuild/lakefile.toml <<'EOF'
           name = "docbuild"
           reservoir = false
