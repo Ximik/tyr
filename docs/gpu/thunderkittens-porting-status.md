@@ -381,7 +381,7 @@ in progress. The execution order is:
     `unsupported`, not a silent fallback.
 - `Phase 2: broaden along the near-term kernel family`
   - add benchmark rows only after a native kernel surface exists for them, for
-    example through `MhaH100LCF` or `AttentionFactory`.
+    example through `MhaH100LCF`.
   - this is where `headDim = 128` and additional KV-tile counts should enter.
 - `Phase 3: generality sweep`
   - run a broader matrix whose goal is coverage reporting:
@@ -539,9 +539,7 @@ that broader package-native issue remains open.
 The current direct H100 path proves that Tyr can run generated TK-style
 attention kernels on one H100, but it is still a narrow benchmark surface:
 
-- `AttentionFactory` is already parameterized by `seq`, `headDim`, `kvBlocks`,
-  `tileSize`, `dtype`, `arch`, `isCausal`, and `enableGqa`.
-- The published wrapper/op layer is not yet parameterized in the same way:
+- The published wrapper/op layer is not parameterized by shape:
   [MhaH100.lean](../../Tyr/GPU/Ops/MhaH100.lean)
   still hard-codes `[1, 1, seq, 64]` with manual dispatch for `seq=128` and
   `seq=768`, and
@@ -823,10 +821,7 @@ but they should not define the long-term specialization policy.
   making the TK/codegen backend accept varying `seq` and `headDim` through one
   stable calling convention.
 - Current state in-tree:
-  - [AttentionFactory.lean](../../Tyr/GPU/Kernels/AttentionFactory.lean)
-    already carries `seq`, `headDim`, `kvBlocks`, `tileSize`, `dtype`,
-    `accDtype`, `scale`, and `isCausal` in `FAVariantConfig`,
-  - but [MhaH100.lean](../../Tyr/GPU/Ops/MhaH100.lean)
+  - [MhaH100.lean](../../Tyr/GPU/Ops/MhaH100.lean)
     still publishes only a small fixed set of runtime variants (`seq=128` and
     `seq=768`, `headDim=64`),
   - and [FlashAttn.lean](../../Tyr/GPU/Ops/FlashAttn.lean)

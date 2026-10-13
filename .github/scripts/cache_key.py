@@ -15,6 +15,8 @@ import platform
 import subprocess
 
 REPO = Path(__file__).resolve().parents[2]
+# The build itself never sets LEAN_CC; it is listed because a user can set it
+# in their own environment, and Lake then compiles with it.
 BUILD_ENV = (
     "CC", "CXX", "CFLAGS", "CXXFLAGS", "CPPFLAGS", "LDFLAGS", "LEAN_CC",
     "LIBRARY_PATH",

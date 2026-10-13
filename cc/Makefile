@@ -64,17 +64,16 @@ else
 HAS_NVCC := 0
 endif
 CUDA_INC_FLAGS :=
+HAS_CUDA_TOOLKIT := 0
+CUDA_LIB_FLAGS :=
+CUDA_DRIVER_LINK_FLAGS :=
+ifeq ($(HAS_NVCC),1)
 ifneq ($(wildcard $(CUDA_HOME)/include/cuda_runtime.h),)
 CUDA_INC_FLAGS += -I$(CUDA_HOME)/include
 endif
-HAS_CUDA_TOOLKIT := 0
-ifeq ($(HAS_NVCC),1)
 ifneq ($(wildcard $(CUDA_HOME)/include/cuda_runtime_api.h),)
 HAS_CUDA_TOOLKIT := 1
 endif
-endif
-CPP_CUDA_FLAGS := -DTYR_OPS_HAS_CUDA_TOOLKIT=$(HAS_CUDA_TOOLKIT)
-CUDA_LIB_FLAGS :=
 CUBLASLT_LINK_FLAG := -lcublasLt
 ifneq ($(wildcard $(TORCH_CUDA_VENDOR_LIBPATH)/libcublasLt.so*),)
 CUDA_LIB_FLAGS += -L$(TORCH_CUDA_VENDOR_LIBPATH)
@@ -89,6 +88,12 @@ endif
 ifeq ($(HAS_CUDA_TOOLKIT),1)
 CUDA_LIB_FLAGS += $(CUBLASLT_LINK_FLAG)
 endif
+# tk_vendor_mha_h100.cu calls the CUDA driver API (cuTensorMapEncodeTiled).
+ifneq ($(wildcard $(CUDA_HOME)/lib64/stubs/libcuda.so),)
+CUDA_DRIVER_LINK_FLAGS := -L$(CUDA_HOME)/lib64/stubs -lcuda
+endif
+endif
+CPP_CUDA_FLAGS := -DTYR_OPS_HAS_CUDA_TOOLKIT=$(HAS_CUDA_TOOLKIT)
 NCCL_ROOT ?= ../external/wheels/nvidia/nccl
 NCCL_INC_FLAGS :=
 ifneq ($(wildcard $(NCCL_ROOT)/include/nccl.h),)
@@ -217,20 +222,9 @@ endif
 # vendored kernel above.
 STATIC_CU_SRCS += $(SRC_DIR)/tyr_laguna_moe.cu
 GPU_CODEGEN_MODULES := $(strip $(TYR_GPU_CODEGEN_MODULE))
-ifeq ($(GPU_CODEGEN_MODULES),)
-CU_SRCS := $(STATIC_CU_SRCS) $(wildcard $(SRC_DIR)/generated/*.cu)
-else ifeq ($(GPU_CODEGEN_MODULES),all)
-CU_SRCS := $(STATIC_CU_SRCS) $(wildcard $(SRC_DIR)/generated/*.cu)
-else
 GPU_CODEGEN_CU_NAMES := $(addsuffix .cu,$(subst .,_,$(GPU_CODEGEN_MODULES)))
-# Use $(wildcard ...) so that .cu files which haven't been generated yet are
-# silently dropped from CU_SRCS rather than producing "no rule to make target"
-# errors. The outer libtyr build orchestrates codegen *before* this make runs,
-# so all expected .cu files exist by the time we need them. Inner sub-builds
-# (those that skip codegen, used to build GenerateGpuKernels itself) don't
-# need any kernel symbols and tolerate missing .cu files.
-CU_SRCS := $(STATIC_CU_SRCS) $(foreach name,$(GPU_CODEGEN_CU_NAMES),$(wildcard $(SRC_DIR)/generated/$(name)))
-endif
+# A module that registers no kernels of its own generates no .cu file.
+CU_SRCS := $(STATIC_CU_SRCS) $(wildcard $(addprefix $(SRC_DIR)/generated/,$(GPU_CODEGEN_CU_NAMES)))
 # CPU build: no CUDA kernels; the weak launcher stubs stand in for them.
 ifneq ($(HAS_NVCC),1)
 CU_SRCS :=
@@ -291,11 +285,7 @@ DYLIB_EXPORTS := map/libTyrC.map
 DYLIB_EXPORT_FLAGS := -Wl,--version-script=$(DYLIB_EXPORTS)
 endif
 # Vendored libraries, relative to $(OUT_DIR) so the checkout can move.
-DYLIB_RPATH_FLAGS := $(foreach dir,torch/lib pyarrow nvidia/cu13/lib,-Wl,-rpath,$(RPATH_ORIGIN)/../../external/wheels/$(dir))# tk_vendor_mha_h100.cu calls the CUDA driver API (cuTensorMapEncodeTiled).
-CUDA_DRIVER_LINK_FLAGS :=
-ifneq ($(wildcard $(CUDA_HOME)/lib64/stubs/libcuda.so),)
-CUDA_DRIVER_LINK_FLAGS := -L$(CUDA_HOME)/lib64/stubs -lcuda
-endif
+DYLIB_RPATH_FLAGS := $(foreach dir,torch/lib pyarrow nvidia/cu13/lib,-Wl,-rpath,$(RPATH_ORIGIN)/../../external/wheels/$(dir))
 DYLIB_LINK_FLAGS := $(DYLIB_LEAN_FLAGS) \
 	-L$(TORCH_LIBPATH) -ltorch -ltorch_cpu -lc10 $(TORCH_CUDA_LINK_FLAGS) \
 	$(ARROW_LINK_FLAGS) \

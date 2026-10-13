@@ -89,7 +89,7 @@ while read -r _ _ sha url; do
     echo "checksum mismatch for ${url##*/}; deleted the cached file" >&2
     exit 1
   fi
-  unzip -q -o "${wheel}" -d "${staging}/wheels"
+  unzip -q -o -DD "${wheel}" -d "${staging}/wheels"
 done <<< "${selected}"
 
 # Replace external/wheels only after every wheel extracted successfully.

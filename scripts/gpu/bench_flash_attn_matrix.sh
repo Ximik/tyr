@@ -96,5 +96,4 @@ if (( build_only )); then
 fi
 
 echo "[3/3] Run benchmark scaffold"
-# Run the binary just built (`lake exe` would rebuild without the kernel module).
 lake env .lake/build/bin/RunFlashAttnBench "${bench_args[@]}"
