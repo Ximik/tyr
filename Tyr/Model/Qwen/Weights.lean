@@ -4,8 +4,14 @@
   Weight loading for Qwen3-4B from SafeTensors format.
   Maps HuggingFace weight names to Tyr structure.
   Supports both single-file and sharded HuggingFace models.
+
+  Consumes the typed `Tyr/SafeTensors/Load` API: loads arrive as
+  shape-indexed `STensor s` (dtype follows the file), and are bridged into
+  the Float32-pinned structure fields with `Tensor.toFloat32`. The cast
+  also covers BF16 checkpoints, which the legacy pipeline only survived
+  when weights happened to be Float32 on disk.
 -/
-import Tyr.Torch
+import Tyr.Typed
 import Tyr.Log
 import Tyr.SafeTensors.Load
 import Tyr.Model.Utils
@@ -19,25 +25,39 @@ open torch.Log
 open torch.Model (dequantizeFP8)
 open torch.safetensors (tryLoadTensor tryLoadTensorSharded)
 
+/-- Load a required tensor from a sharded checkpoint, throwing if absent. -/
+private def loadRequiredSharded (modelDir : String) (name : String) (s : Shape) : IO (STensor s) := do
+  match (← tryLoadTensorSharded modelDir name s) with
+  | some t => pure t
+  | none => throw <| IO.userError s!"Failed to load tensor (sharded): {name}"
+
+/-- Load a required tensor from a single SafeTensors file, throwing if absent. -/
+private def loadRequired (path : String) (name : String) (s : Shape) : IO (STensor s) := do
+  match (← tryLoadTensor path name s) with
+  | some t => pure t
+  | none => throw <| IO.userError s!"Failed to load tensor: {name}"
+
 /-- Load a (potentially FP8-quantized) linear weight from sharded SafeTensors.
-    If a matching weight_scale_inv exists, dequantize to float32. -/
+    If a matching weight_scale_inv exists, dequantize to float32;
+    otherwise cast the loaded weights to float32. -/
 private def loadLinearWeightSharded (modelDir : String) (name : String) (outDim inDim : UInt64)
-    : IO (T #[outDim, inDim]) := do
-  let w ← safetensors.loadTensorSharded modelDir s!"{name}.weight" #[outDim, inDim]
+    : IO (DTensor #[outDim, inDim] .Float32) := do
+  let w ← loadRequiredSharded modelDir s!"{name}.weight" #[outDim, inDim]
   let scaleInvOpt ← tryLoadTensorSharded modelDir s!"{name}.weight_scale_inv" #[outDim / 128, inDim / 128]
-  pure <| match scaleInvOpt with
-    | some s => dequantizeFP8 w s
-    | none => w
+  match scaleInvOpt with
+  | some s => pure (dequantizeFP8 w s)
+  | none => pure w.toFloat32
 
 /-- Load a (potentially FP8-quantized) linear weight from a single SafeTensors file.
-    If a matching weight_scale_inv exists, dequantize to float32. -/
+    If a matching weight_scale_inv exists, dequantize to float32;
+    otherwise cast the loaded weights to float32. -/
 private def loadLinearWeight (path : String) (name : String) (outDim inDim : UInt64)
-    : IO (T #[outDim, inDim]) := do
-  let w ← safetensors.loadTensor path s!"{name}.weight" #[outDim, inDim]
+    : IO (DTensor #[outDim, inDim] .Float32) := do
+  let w ← loadRequired path s!"{name}.weight" #[outDim, inDim]
   let scaleInv ← tryLoadTensor path s!"{name}.weight_scale_inv" #[outDim / 128, inDim / 128]
-  pure <| match scaleInv with
-    | some s => dequantizeFP8 w s
-    | none => w
+  match scaleInv with
+  | some s => pure (dequantizeFP8 w s)
+  | none => pure w.toFloat32
 
 /-- Load a single attention layer from sharded SafeTensors.
     Optionally loads Q/K norms if present (for Flux Klein text encoder). -/
@@ -65,12 +85,12 @@ def loadAttentionSharded (modelDir : String) (layerIdx : UInt64)
     pure none
 
   pure {
-    q_proj := autograd.set_requires_grad q_proj false
-    k_proj := autograd.set_requires_grad k_proj false
-    v_proj := autograd.set_requires_grad v_proj false
-    o_proj := autograd.set_requires_grad o_proj false
-    q_norm := q_norm.map (autograd.set_requires_grad · false)
-    k_norm := k_norm.map (autograd.set_requires_grad · false)
+    q_proj := Tensor.setRequiresGrad q_proj false
+    k_proj := Tensor.setRequiresGrad k_proj false
+    v_proj := Tensor.setRequiresGrad v_proj false
+    o_proj := Tensor.setRequiresGrad o_proj false
+    q_norm := q_norm.map (fun t => Tensor.setRequiresGrad t.toFloat32 false)
+    k_norm := k_norm.map (fun t => Tensor.setRequiresGrad t.toFloat32 false)
   }
 
 /-- Load a single MLP layer from sharded SafeTensors -/
@@ -84,16 +104,16 @@ def loadMLPSharded (modelDir : String) (layerIdx : UInt64)
   let down_proj ← loadLinearWeightSharded modelDir s!"{layerPrefix}.down_proj" hidden_size intermediate_size
 
   pure {
-    gate_proj := autograd.set_requires_grad gate_proj false
-    up_proj := autograd.set_requires_grad up_proj false
-    down_proj := autograd.set_requires_grad down_proj false
+    gate_proj := Tensor.setRequiresGrad gate_proj false
+    up_proj := Tensor.setRequiresGrad up_proj false
+    down_proj := Tensor.setRequiresGrad down_proj false
   }
 
 /-- Load RMSNorm weights from sharded SafeTensors -/
 def loadRMSNormSharded (modelDir : String) (name : String) (dim : UInt64)
     : IO (RMSNorm dim) := do
-  let scale ← safetensors.loadTensorSharded modelDir s!"{name}.weight" #[dim]
-  pure { weight := autograd.set_requires_grad scale false, eps := ⟨1e-6⟩ }
+  let scale ← loadRequiredSharded modelDir s!"{name}.weight" #[dim]
+  pure { weight := Tensor.setRequiresGrad scale.toFloat32 false, eps := ⟨1e-6⟩ }
 
 /-- Load a single transformer layer from sharded SafeTensors -/
 def loadLayerSharded (modelDir : String) (layerIdx : UInt64) (cfg : QwenConfig)
@@ -118,8 +138,8 @@ def loadQwen3ModelSharded (modelDir : String) (cfg : QwenConfig := QwenConfig.qw
   log.onInfo s!"Loading Qwen3 model from {modelDir}..."
 
   -- Token embeddings
-  let embed_tokens ← safetensors.loadTensorSharded modelDir "model.embed_tokens.weight" #[cfg.vocab_size, cfg.hidden_size]
-  let embed_tokens := autograd.set_requires_grad embed_tokens false
+  let embed_tokens ← loadRequiredSharded modelDir "model.embed_tokens.weight" #[cfg.vocab_size, cfg.hidden_size]
+  let embed_tokens := Tensor.setRequiresGrad embed_tokens.toFloat32 false
   log.onInfo "  Loaded embed_tokens"
 
   -- Layers
@@ -153,10 +173,10 @@ def loadAttention (path : String) (layerIdx : UInt64)
   let o_proj ← loadLinearWeight path s!"{layerPrefix}.o_proj" hidden_size (num_heads * head_dim)
 
   pure {
-    q_proj := autograd.set_requires_grad q_proj false
-    k_proj := autograd.set_requires_grad k_proj false
-    v_proj := autograd.set_requires_grad v_proj false
-    o_proj := autograd.set_requires_grad o_proj false
+    q_proj := Tensor.setRequiresGrad q_proj false
+    k_proj := Tensor.setRequiresGrad k_proj false
+    v_proj := Tensor.setRequiresGrad v_proj false
+    o_proj := Tensor.setRequiresGrad o_proj false
   }
 
 /-- Load a single MLP layer from SafeTensors (single file) -/
@@ -170,16 +190,16 @@ def loadMLP (path : String) (layerIdx : UInt64)
   let down_proj ← loadLinearWeight path s!"{layerPrefix}.down_proj" hidden_size intermediate_size
 
   pure {
-    gate_proj := autograd.set_requires_grad gate_proj false
-    up_proj := autograd.set_requires_grad up_proj false
-    down_proj := autograd.set_requires_grad down_proj false
+    gate_proj := Tensor.setRequiresGrad gate_proj false
+    up_proj := Tensor.setRequiresGrad up_proj false
+    down_proj := Tensor.setRequiresGrad down_proj false
   }
 
 /-- Load RMSNorm weights from SafeTensors (single file) -/
 def loadRMSNorm (path : String) (name : String) (dim : UInt64)
     : IO (RMSNorm dim) := do
-  let scale ← safetensors.loadTensor path s!"{name}.weight" #[dim]
-  pure { weight := autograd.set_requires_grad scale false, eps := ⟨1e-6⟩ }
+  let scale ← loadRequired path s!"{name}.weight" #[dim]
+  pure { weight := Tensor.setRequiresGrad scale.toFloat32 false, eps := ⟨1e-6⟩ }
 
 /-- Load a single transformer layer from SafeTensors (single file) -/
 def loadLayer (path : String) (layerIdx : UInt64) (cfg : QwenConfig)
@@ -200,8 +220,8 @@ def loadQwen3Model (path : String) (cfg : QwenConfig := QwenConfig.qwen3_4B)
   log.onInfo s!"Loading Qwen3 model from {path}..."
 
   -- Token embeddings
-  let embed_tokens ← safetensors.loadTensor path "model.embed_tokens.weight" #[cfg.vocab_size, cfg.hidden_size]
-  let embed_tokens := autograd.set_requires_grad embed_tokens false
+  let embed_tokens ← loadRequired path "model.embed_tokens.weight" #[cfg.vocab_size, cfg.hidden_size]
+  let embed_tokens := Tensor.setRequiresGrad embed_tokens.toFloat32 false
   log.onInfo "  Loaded embed_tokens"
 
   -- Layers

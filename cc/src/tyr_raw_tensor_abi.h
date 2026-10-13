@@ -111,6 +111,8 @@ lean_object* lean_torch_cross_entropy_none(uint64_t, uint64_t, lean_object*, lea
 uint64_t lean_torch_item_int(lean_object*, lean_object*);
 lean_object* lean_torch_set_grad_enabled(uint8_t);
 lean_object* lean_torch_is_grad_enabled();
+lean_object* lean_torch_logical_not(lean_object*, lean_object*);
+lean_object* lean_torch_logical_and(lean_object*, lean_object*, lean_object*);
 
 #ifdef __cplusplus
 }

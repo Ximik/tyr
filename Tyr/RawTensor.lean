@@ -266,4 +266,10 @@ namespace torch.RawTensor
 /-- Whether autograd graph construction is enabled. -/
 @[extern "lean_torch_is_grad_enabled"] opaque isGradEnabled : IO Bool
 
+/-- Elementwise logical negation of a Bool tensor. The shape argument is unread natively. -/
+@[extern "lean_torch_logical_not"] opaque logicalNot (shape : Shape) (t : @& RawTensor) : RawTensor
+
+/-- Elementwise logical conjunction of two Bool tensors. The shape argument is unread natively. -/
+@[extern "lean_torch_logical_and"] opaque logicalAnd (shape : Shape) (a b : @& RawTensor) : RawTensor
+
 end torch.RawTensor

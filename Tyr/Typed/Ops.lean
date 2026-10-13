@@ -624,6 +624,27 @@ def noGrad {α : Type} (action : IO α) : IO α := do
   finally
     RawTensor.setGradEnabled wasEnabled
 
+/-- Select between two same-spec tensors elementwise by a Bool condition. -/
+def whereSelect {s : Shape} {d : DType} {dev : DevicePolicy}
+    (condition : Tensor ⟨s, .Bool, dev⟩) (x y : Tensor ⟨s, d, dev⟩) :
+    Tensor ⟨s, d, dev⟩ :=
+  .assumeSpec (RawTensor.whereSelect s condition.raw x.raw y.raw)
+
+/-- Elementwise logical negation of a Bool tensor. -/
+def logicalNot {s : Shape} {dev : DevicePolicy} (t : Tensor ⟨s, .Bool, dev⟩) :
+    Tensor ⟨s, .Bool, dev⟩ :=
+  .assumeSpec (RawTensor.logicalNot s t.raw)
+
+/-- Elementwise logical conjunction of two Bool tensors. -/
+def logicalAnd {s : Shape} {dev : DevicePolicy} (a b : Tensor ⟨s, .Bool, dev⟩) :
+    Tensor ⟨s, .Bool, dev⟩ :=
+  .assumeSpec (RawTensor.logicalAnd s a.raw b.raw)
+
+/-- Elementwise logical disjunction of two Bool tensors. -/
+def logicalOr {s : Shape} {dev : DevicePolicy} (a b : Tensor ⟨s, .Bool, dev⟩) :
+    Tensor ⟨s, .Bool, dev⟩ :=
+  logicalNot (logicalAnd (logicalNot a) (logicalNot b))
+
 /-- Cross-entropy loss over a 2-D logits matrix with Int64 targets. -/
 def crossEntropy {n c : UInt64} {d : DType} {dev : DevicePolicy}
     (logits : Tensor ⟨#[n, c], d, dev⟩) (targets : Tensor ⟨#[n], .Int64, dev⟩) :

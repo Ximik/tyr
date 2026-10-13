@@ -3,8 +3,13 @@
 
   Transformer layer for Qwen3.
   Pre-norm architecture with RMSNorm.
+
+  Fully typed: the legacy `typedF32` boundary bridge is gone. The forward
+  math is Float32-pinned (`DTensor s .Float32`) because the typed RMSNorm
+  upcasts to Float32 (`promote Float32 dtype`) and `linear3d` requires
+  matching dtypes.
 -/
-import Tyr.Torch
+import Tyr.Typed
 import Tyr.TensorStruct
 import Tyr.Module.Core
 import Tyr.Module.Derive
@@ -40,11 +45,6 @@ def init (hidden_size num_heads num_kv_heads head_dim intermediate_size : UInt64
   let mlp ← QwenMLP.init hidden_size intermediate_size
   pure { input_layernorm, self_attn, post_attention_layernorm, mlp }
 
-/-- Migration boundary: wrap a legacy runtime handle for the typed module
-    interface, claiming Float32 (the legacy runtime dtype). Removed when this
-    module migrates to indexed tensors. -/
-private def typedF32 {s : Shape} (t : T s) : DTensor s .Float32 := .assumeSpec t
-
 /-- Forward pass for a transformer layer.
     Input: [batch, seq, hidden_size]
     Output: [batch, seq, hidden_size]
@@ -52,20 +52,20 @@ private def typedF32 {s : Shape} (t : T s) : DTensor s .Float32 := .assumeSpec t
     Pre-norm: x + attn(norm1(x)) + mlp(norm2(x + attn(...))) -/
 def forward {batch seq hidden_size num_heads num_kv_heads head_dim intermediate_size : UInt64}
     (layer : QwenLayer hidden_size num_heads num_kv_heads head_dim intermediate_size)
-    (x : T #[batch, seq, hidden_size])
-    (cos : T #[seq, head_dim / 2])
-    (sin : T #[seq, head_dim / 2])
+    (x : DTensor #[batch, seq, hidden_size] .Float32)
+    (cos : DTensor #[seq, head_dim / 2] .Float32)
+    (sin : DTensor #[seq, head_dim / 2] .Float32)
     (is_causal : Bool := true)
-    : T #[batch, seq, hidden_size] :=
+    : DTensor #[batch, seq, hidden_size] .Float32 :=
   -- Pre-norm attention
   let residual := x
-  let x := (layer.input_layernorm.forward3d (typedF32 x) rfl).raw
+  let x : DTensor #[batch, seq, hidden_size] .Float32 := layer.input_layernorm.forward3d x
   let x := layer.self_attn.forward x cos sin is_causal
-  let x := residual + x
+  let x : DTensor #[batch, seq, hidden_size] .Float32 := residual + x
 
   -- Pre-norm MLP
   let residual := x
-  let x := (layer.post_attention_layernorm.forward3d (typedF32 x) rfl).raw
+  let x : DTensor #[batch, seq, hidden_size] .Float32 := layer.post_attention_layernorm.forward3d x
   let x := layer.mlp.forward x
   residual + x
 
@@ -73,40 +73,41 @@ def forward {batch seq hidden_size num_heads num_kv_heads head_dim intermediate_
     Input/output: `[batch, 1, hidden_size]`. -/
 def forwardStep {batch hidden_size num_heads num_kv_heads head_dim intermediate_size : UInt64}
     (layer : QwenLayer hidden_size num_heads num_kv_heads head_dim intermediate_size)
-    (x : T #[batch, 1, hidden_size])
-    (cos : T #[1, head_dim / 2])
-    (sin : T #[1, head_dim / 2])
+    (x : DTensor #[batch, 1, hidden_size] .Float32)
+    (cos : DTensor #[1, head_dim / 2] .Float32)
+    (sin : DTensor #[1, head_dim / 2] .Float32)
     (cache : QwenAttention.KVCache batch num_kv_heads head_dim)
-    : T #[batch, 1, hidden_size] × QwenAttention.KVCache batch num_kv_heads head_dim :=
+    : DTensor #[batch, 1, hidden_size] .Float32 × QwenAttention.KVCache batch num_kv_heads head_dim :=
   -- Pre-norm attention.
   let residual1 := x
-  let x1 := (layer.input_layernorm.forward3d (typedF32 x) rfl).raw
+  let x1 : DTensor #[batch, 1, hidden_size] .Float32 := layer.input_layernorm.forward3d x
   let (attnOut, cache') := layer.self_attn.forwardStep x1 cos sin cache
-  let h1 := residual1 + attnOut
+  let h1 : DTensor #[batch, 1, hidden_size] .Float32 := residual1 + attnOut
 
   -- Pre-norm MLP.
   let residual2 := h1
-  let h2 := (layer.post_attention_layernorm.forward3d (typedF32 h1) rfl).raw
+  let h2 : DTensor #[batch, 1, hidden_size] .Float32 := layer.post_attention_layernorm.forward3d h1
   let h3 := layer.mlp.forward h2
   (residual2 + h3, cache')
 
 def forwardMasked {batch seq hidden_size num_heads num_kv_heads head_dim intermediate_size : UInt64}
+    {maskDtype : DType}
     (layer : QwenLayer hidden_size num_heads num_kv_heads head_dim intermediate_size)
-    (x : T #[batch, seq, hidden_size])
-    (cos : T #[seq, head_dim / 2])
-    (sin : T #[seq, head_dim / 2])
-    (attn_mask : T #[batch, seq])
+    (x : DTensor #[batch, seq, hidden_size] .Float32)
+    (cos : DTensor #[seq, head_dim / 2] .Float32)
+    (sin : DTensor #[seq, head_dim / 2] .Float32)
+    (attn_mask : Tensor ⟨#[batch, seq], maskDtype, .any⟩)
     (is_causal : Bool := true)
-    : T #[batch, seq, hidden_size] :=
+    : DTensor #[batch, seq, hidden_size] .Float32 :=
   -- Pre-norm attention
   let residual := x
-  let x := (layer.input_layernorm.forward3d (typedF32 x) rfl).raw
+  let x : DTensor #[batch, seq, hidden_size] .Float32 := layer.input_layernorm.forward3d x
   let x := layer.self_attn.forwardMasked x cos sin attn_mask is_causal
-  let x := residual + x
+  let x : DTensor #[batch, seq, hidden_size] .Float32 := residual + x
 
   -- Pre-norm MLP
   let residual := x
-  let x := (layer.post_attention_layernorm.forward3d (typedF32 x) rfl).raw
+  let x : DTensor #[batch, seq, hidden_size] .Float32 := layer.post_attention_layernorm.forward3d x
   let x := layer.mlp.forward x
   residual + x
 

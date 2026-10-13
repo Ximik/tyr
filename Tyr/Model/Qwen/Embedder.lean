@@ -3,8 +3,11 @@
 
   Flux text embedder using Qwen3.
   Extracts hidden states from specific layers and concatenates them.
+
+  Fully typed: token ids are Int64, hidden states Float32.
 -/
 import Tyr.Torch
+import Tyr.Typed
 import Tyr.Model.Qwen.Config
 import Tyr.Model.Qwen.Model
 import Tyr.Model.Qwen.RoPE
@@ -43,6 +46,16 @@ def fromModel (cfg : QwenConfig) (max_seq : UInt64) (model : Qwen3Model cfg)
   let ropeCache ← RoPECache.init max_seq cfg.head_dim cfg.rope_theta
   pure { model, ropeCache, outputLayers }
 
+/-- Concatenate equal-spec tensors along `dim`, validating the runtime
+    result against the claimed output shape (the legacy code reshaped the
+    shape-erased cat result, which libtorch validated with a throw). -/
+private def catAlong {s : Shape} {d : DType} {dev : DevicePolicy}
+    (tensors : Array (Tensor ⟨s, d, dev⟩)) (dim : Int) (out : Shape)
+    : Tensor ⟨out, d, dev⟩ :=
+  match Tensor.ofRaw (nn.cat_impl (s := s) (tensors.map Tensor.toTensor) dim) with
+  | .ok t => t
+  | .error message => panic! s!"QwenFluxEmbedder cat: {message}"
+
 /-- Encode text tokens to Flux-compatible embeddings.
     Input: [batch, seq] token IDs
     Output: [batch, seq, output_dim] where output_dim = num_layers * hidden_size
@@ -50,68 +63,62 @@ def fromModel (cfg : QwenConfig) (max_seq : UInt64) (model : Qwen3Model cfg)
     For Qwen3-4B with layers [8, 17, 26]:
     output_dim = 3 * 2560 = 7680
 
-    Rewritten in functional style to avoid Id.run issues with FFI shape tracking. -/
+    If `outputLayers` names a layer index that produced no hidden state, the
+    concatenated tensor is smaller than the return type claims; `catAlong`
+    panics on the mismatch, exactly where the legacy `reshape` threw. -/
 def encode {batch seq : UInt64} (cfg : QwenConfig) (max_seq : UInt64)
     (embedder : QwenFluxEmbedder cfg max_seq)
-    (input_ids : T #[batch, seq])
-    : T #[batch, seq, embedder.outputLayers.size.toUInt64 * cfg.hidden_size] :=
+    (input_ids : DTensor #[batch, seq] .Int64)
+    : DTensor #[batch, seq, embedder.outputLayers.size.toUInt64 * cfg.hidden_size] .Float32 :=
   -- Slice RoPE cache to current sequence length
-  let cos := data.slice embedder.ropeCache.cos 0 0 seq
-  let sin := data.slice embedder.ropeCache.sin 0 0 seq
+  let cos := embedder.ropeCache.cos.sliceChecked 0 0 seq #[seq, cfg.head_dim / 2]
+  let sin := embedder.ropeCache.sin.sliceChecked 0 0 seq #[seq, cfg.head_dim / 2]
 
   -- Get hidden states from all layers
   let allHiddenStates := embedder.model.forwardWithHiddenStates cfg input_ids cos sin
 
   -- Extract specified layers using filterMap
-  let selectedStates : Array (T #[batch, seq, cfg.hidden_size]) :=
+  let selectedStates : Array (DTensor #[batch, seq, cfg.hidden_size] .Float32) :=
     embedder.outputLayers.filterMap fun layerIdx =>
       if h : layerIdx.toNat < allHiddenStates.size then
         some (allHiddenStates[layerIdx.toNat]'h)
       else
         none
 
-  -- Concatenate along the last dimension
-  let numLayers := selectedStates.size.toUInt64
-  let outputDim := numLayers * cfg.hidden_size
-
   -- Concatenate selected states along dim 2
   if selectedStates.size > 0 then
-    let concatenated := nn.cat_impl selectedStates 2
-    reshape concatenated #[batch, seq, outputDim]
+    catAlong selectedStates 2 #[batch, seq, embedder.outputLayers.size.toUInt64 * cfg.hidden_size]
   else
     -- Fallback: return zeros if no layers specified
-    torch.zeros #[batch, seq, outputDim]
+    Tensor.zeros #[batch, seq, embedder.outputLayers.size.toUInt64 * cfg.hidden_size]
 
 def encodeMasked {batch seq : UInt64} (cfg : QwenConfig) (max_seq : UInt64)
+    {maskDtype : DType}
     (embedder : QwenFluxEmbedder cfg max_seq)
-    (input_ids : T #[batch, seq])
-    (attn_mask : T #[batch, seq])
-    : T #[batch, seq, embedder.outputLayers.size.toUInt64 * cfg.hidden_size] :=
+    (input_ids : DTensor #[batch, seq] .Int64)
+    (attn_mask : Tensor ⟨#[batch, seq], maskDtype, .any⟩)
+    : DTensor #[batch, seq, embedder.outputLayers.size.toUInt64 * cfg.hidden_size] .Float32 :=
   -- Slice RoPE cache to current sequence length
-  let cos := data.slice embedder.ropeCache.cos 0 0 seq
-  let sin := data.slice embedder.ropeCache.sin 0 0 seq
+  let cos := embedder.ropeCache.cos.sliceChecked 0 0 seq #[seq, cfg.head_dim / 2]
+  let sin := embedder.ropeCache.sin.sliceChecked 0 0 seq #[seq, cfg.head_dim / 2]
 
   -- Get hidden states from all layers
   let allHiddenStates := embedder.model.forwardWithHiddenStatesMasked cfg input_ids cos sin attn_mask
 
   -- Extract specified layers using filterMap
-  let selectedStates : Array (T #[batch, seq, cfg.hidden_size]) :=
+  let selectedStates : Array (DTensor #[batch, seq, cfg.hidden_size] .Float32) :=
     embedder.outputLayers.filterMap fun layerIdx =>
       if h : layerIdx.toNat < allHiddenStates.size then
         some (allHiddenStates[layerIdx.toNat]'h)
       else
         none
-  -- Concatenate along the last dimension
-  let numLayers := selectedStates.size.toUInt64
-  let outputDim := numLayers * cfg.hidden_size
 
   -- Concatenate selected states along dim 2
   if selectedStates.size > 0 then
-    let concatenated := nn.cat_impl selectedStates 2
-    reshape concatenated #[batch, seq, outputDim]
+    catAlong selectedStates 2 #[batch, seq, embedder.outputLayers.size.toUInt64 * cfg.hidden_size]
   else
     -- Fallback: return zeros if no layers specified
-    torch.zeros #[batch, seq, outputDim]
+    Tensor.zeros #[batch, seq, embedder.outputLayers.size.toUInt64 * cfg.hidden_size]
 
 end QwenFluxEmbedder
 

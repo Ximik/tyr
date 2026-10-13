@@ -5,16 +5,31 @@
   Standard 2D rotation (different from Flux's 4-axis RoPE).
 -/
 import Tyr.Torch
+import Tyr.Typed
 
 namespace torch.qwen
 
+/-- Typed adapter over the `lean_torch_apply_rotary_emb` extern.
+    x: [batch, seq, n_head, head_dim]; cos/sin: [seq, head_dim/2].
+    The runtime moves cos/sin onto x's device if needed and casts the result
+    back to x's dtype, so the output honestly re-asserts x's spec. -/
+def applyRotaryEmb {batch seq n_head head_dim : UInt64} {d : DType} {dev : DevicePolicy}
+    (x : Tensor ⟨#[batch, seq, n_head, head_dim], d, dev⟩)
+    (cos : Tensor ⟨#[seq, head_dim / 2], d, dev⟩)
+    (sin : Tensor ⟨#[seq, head_dim / 2], d, dev⟩)
+    : Tensor ⟨#[batch, seq, n_head, head_dim], d, dev⟩ :=
+  Tensor.assumeSpec (rotary.applyRotaryEmb
+    (batch := batch) (seq := seq) (n_head := n_head) (head_dim := head_dim)
+    x.raw cos.raw sin.raw)
+
 /-- Precomputed RoPE cos/sin embeddings for a given sequence length.
-    These are cached and reused across forward passes. -/
+    These are cached and reused across forward passes.
+    The runtime computes them in Float32. -/
 structure RoPECache (max_seq : UInt64) (head_dim : UInt64) where
   /-- Cosine values: [max_seq, head_dim/2] -/
-  cos : T #[max_seq, head_dim / 2]
+  cos : DTensor #[max_seq, head_dim / 2] .Float32
   /-- Sine values: [max_seq, head_dim/2] -/
-  sin : T #[max_seq, head_dim / 2]
+  sin : DTensor #[max_seq, head_dim / 2] .Float32
 
 namespace RoPECache
 
@@ -22,7 +37,7 @@ namespace RoPECache
     Uses theta base for frequency computation. -/
 def init (max_seq head_dim : UInt64) (theta : Float := 10000.0) : IO (RoPECache max_seq head_dim) := do
   let (cos, sin) ← rotary.computeFreqs max_seq head_dim theta
-  pure { cos, sin }
+  pure { cos := .assumeSpec cos, sin := .assumeSpec sin }
 
 end RoPECache
 
@@ -30,14 +45,14 @@ end RoPECache
     x: [batch, seq, n_head, head_dim]
     Returns: [batch, seq, n_head, head_dim] with positions encoded -/
 def applyRoPE {batch seq n_head head_dim max_seq : UInt64}
-    (x : T #[batch, seq, n_head, head_dim])
+    (x : DTensor #[batch, seq, n_head, head_dim] .Float32)
     (cache : RoPECache max_seq head_dim)
     (start_pos : UInt64 := 0)
-    : T #[batch, seq, n_head, head_dim] :=
-  -- Slice cos/sin to current sequence length
-  let cos := data.slice cache.cos 0 start_pos seq
-  let sin := data.slice cache.sin 0 start_pos seq
+    : DTensor #[batch, seq, n_head, head_dim] .Float32 :=
+  -- Slice cos/sin to current sequence length (runtime bounds, validated)
+  let cos := cache.cos.sliceChecked 0 start_pos seq #[seq, head_dim / 2]
+  let sin := cache.sin.sliceChecked 0 start_pos seq #[seq, head_dim / 2]
   -- Apply rotation
-  rotary.applyRotaryEmb x cos sin
+  applyRotaryEmb x cos sin
 
 end torch.qwen
