@@ -55,9 +55,9 @@ def loadFromPretrained
     revision
     cacheDir
     hub.tokenizerFiles
-    Config.loadFromPretrainedDir
+    (fun modelDir cfg => Config.loadFromPretrainedDir modelDir cfg)
     defaults
-    Gemma4ForCausalLM.loadSharded
+    (fun modelDir cfg => Gemma4ForCausalLM.loadSharded modelDir cfg)
     (fun path cfg => Gemma4ForCausalLM.load path cfg)
 
 end Gemma4ForCausalLM
