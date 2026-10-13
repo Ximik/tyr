@@ -8,21 +8,13 @@ namespace DiffEq
 
 open _root_.torch
 
-private def numel (s : Shape) : Float :=
-  s.foldl (fun acc d => acc * d.toFloat) 1.0
-
-private def sumAllCompat {s : Shape} (t : T s) : T #[] :=
-  let mean := nn.meanAll t
-  let scale := numel (T.shape t)
-  mul_scalar mean scale
-
 private def dotStruct [TensorStruct Y] (x y : Y) : T #[] :=
-  let prod := TensorStruct.zipWith (fun a b => mul a b) x y
-  TensorStruct.fold (fun t acc => add acc (sumAllCompat t)) (zeros #[]) prod
+  let prod := TensorStruct.zipWith Mul.mul x y
+  TensorStruct.fold (fun t acc => add acc (nn.sumAll (s := t.shape) t.raw)) (zeros #[]) prod
 
 private def gradStruct [TensorStruct α] (loss : T #[]) (x : α) : α :=
   let one := ones #[]
-  TensorStruct.map (fun t => autograd.grad loss t one) x
+  TensorStruct.map (fun t => t.checkedReplacement (autograd.grad (sx := t.shape) (sy := #[]) loss t.raw one)) x
 
 private def vjp
     [TensorStruct Y] [TensorStruct Args]

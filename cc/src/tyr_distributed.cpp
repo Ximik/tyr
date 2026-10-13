@@ -284,12 +284,9 @@ lean_object* lean_torch_dist_barrier(lean_object* w) {
  * @param w - Lean world token
  */
 lean_object* lean_torch_dist_all_reduce(
-    lean_obj_arg /*s*/,
     b_lean_obj_arg tensor,
     uint8_t op,
-    uint8_t async_op,
-    lean_object* w
-) {
+    uint8_t async_op) {
     std::lock_guard<std::mutex> lock(g_dist_mutex);
 
     if (!g_initialized) {
@@ -329,11 +326,8 @@ lean_object* lean_torch_dist_all_reduce(
  * @param w - Lean world token
  */
 lean_object* lean_torch_dist_broadcast(
-    lean_obj_arg /*s*/,
     b_lean_obj_arg tensor,
-    uint64_t src_rank,
-    lean_object* w
-) {
+    uint64_t src_rank) {
     std::lock_guard<std::mutex> lock(g_dist_mutex);
 
     if (!g_initialized) {
@@ -370,14 +364,10 @@ lean_object* lean_torch_dist_broadcast(
  * @param w - Lean world token
  */
 lean_object* lean_torch_dist_reduce_scatter_tensor(
-    lean_obj_arg /*s_out*/,
-    lean_obj_arg /*s_in*/,
     b_lean_obj_arg output,
     b_lean_obj_arg input,
     uint8_t op,
-    uint8_t async_op,
-    lean_object* w
-) {
+    uint8_t async_op) {
     std::lock_guard<std::mutex> lock(g_dist_mutex);
 
     if (!g_initialized) {
@@ -434,12 +424,9 @@ lean_object* lean_torch_dist_reduce_scatter_tensor(
  * @param w - Lean world token
  */
 lean_object* lean_torch_dist_reduce_scatter_list(
-    lean_obj_arg /*s*/,
     b_lean_obj_arg output,
     b_lean_obj_arg inputs,
-    uint8_t op,
-    lean_object* w
-) {
+    uint8_t op) {
     std::lock_guard<std::mutex> lock(g_dist_mutex);
 
     if (!g_initialized) {
@@ -491,13 +478,9 @@ lean_object* lean_torch_dist_reduce_scatter_list(
  * @param w - Lean world token
  */
 lean_object* lean_torch_dist_all_gather_into_tensor(
-    lean_obj_arg /*s_out*/,
-    lean_obj_arg /*s_in*/,
     b_lean_obj_arg output,
     b_lean_obj_arg input,
-    uint8_t async_op,
-    lean_object* w
-) {
+    uint8_t async_op) {
     std::lock_guard<std::mutex> lock(g_dist_mutex);
 
     if (!g_initialized) {
@@ -548,11 +531,8 @@ lean_object* lean_torch_dist_all_gather_into_tensor(
  * @param w - Lean world token
  */
 lean_object* lean_torch_dist_all_gather_list(
-    lean_obj_arg /*s*/,
     b_lean_obj_arg outputs,
-    b_lean_obj_arg input,
-    lean_object* w
-) {
+    b_lean_obj_arg input) {
     std::lock_guard<std::mutex> lock(g_dist_mutex);
 
     if (!g_initialized) {

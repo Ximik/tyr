@@ -99,7 +99,7 @@ def testQwen3TTSBFloat16IncrementalCache : IO Unit := autograd.no_grad do
     (mul_scalar (nn.sin (toFloat' (torch.arange 0 40 1))) 0.5) #[1, 5, 8]
   let (cos, sin) := rotary.computeFreqsPure 5 4 10000
   for bf16 in #[false, true] do
-    let layer := if bf16 then TensorStruct.map (fun t => toBFloat16' t) base else base
+    let layer := if bf16 then TensorStruct.map (fun t => t.checkedReplacement (RawTensor.toBFloat16 t.shape t.raw)) base else base
     let x := if bf16 then toBFloat16' inputs else inputs
     let full := layer.forward x cos sin
     LeanTest.assertEqual full.dtype x.dtype "Full Qwen layer retains model dtype"
@@ -141,7 +141,7 @@ def testQwen3TTSBFloat16IncrementalCache : IO Unit := autograd.no_grad do
 def testQwen3TTSBFloat16Generation : IO Unit := do
   let cfg := tinyCfg.talkerConfig
   let original ← TalkerForConditionalGeneration.init cfg
-  let talker := TensorStruct.map (fun t => toBFloat16' t) original
+  let talker := TensorStruct.map (fun t => t.checkedReplacement (RawTensor.toBFloat16 t.shape t.raw)) original
   let ids : T #[1, 3] := torch.full_int #[1, 3] 1
   let prompt := TalkerModel.buildInputsFromText cfg talker.model ids
   LeanTest.assertEqual prompt.dtype DType.BFloat16 "Text conditioning follows BF16 weights"
@@ -262,7 +262,7 @@ def testQwen3TTSSpeakerEmbeddingAlignsFeatureDType : IO Unit := do
   let features : T #[2, 12, cfg.speakerEncoderConfig.melDim] ←
     randn #[2, 12, cfg.speakerEncoderConfig.melDim]
   for bf16Weights in #[false, true] do
-    let enc := if bf16Weights then TensorStruct.map (fun t => toBFloat16' t) baseEncoder else baseEncoder
+    let enc := if bf16Weights then TensorStruct.map (fun t => t.checkedReplacement (RawTensor.toBFloat16 t.shape t.raw)) baseEncoder else baseEncoder
     let model := { original with speakerEncoder := some enc }
     for bf16Features in #[false, true] do
       let mel := if bf16Features then toBFloat16' features else features

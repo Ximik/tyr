@@ -83,28 +83,28 @@ def getBatch (trainData : T #[n]) (batchSize blockSize : UInt64) (device : Devic
 
 /-- Clip gradients for a single block's parameters -/
 def clipBlockGrads {n_embd : UInt64} (params : BlockParams n_embd) (maxNorm : Float) : IO Unit := do
-  let _ ← nn.clip_grad_norm_ params.ln1_weight maxNorm
-  let _ ← nn.clip_grad_norm_ params.ln1_bias maxNorm
-  let _ ← nn.clip_grad_norm_ params.q_proj maxNorm
-  let _ ← nn.clip_grad_norm_ params.k_proj maxNorm
-  let _ ← nn.clip_grad_norm_ params.v_proj maxNorm
-  let _ ← nn.clip_grad_norm_ params.c_proj maxNorm
-  let _ ← nn.clip_grad_norm_ params.c_proj_bias maxNorm
-  let _ ← nn.clip_grad_norm_ params.ln2_weight maxNorm
-  let _ ← nn.clip_grad_norm_ params.ln2_bias maxNorm
-  let _ ← nn.clip_grad_norm_ params.mlp_fc maxNorm
-  let _ ← nn.clip_grad_norm_ params.mlp_fc_bias maxNorm
-  let _ ← nn.clip_grad_norm_ params.mlp_proj maxNorm
-  let _ ← nn.clip_grad_norm_ params.mlp_proj_bias maxNorm
+  let _ ← nn.clip_grad_norm_ (s := params.ln1_weight.shape) params.ln1_weight.raw maxNorm
+  let _ ← nn.clip_grad_norm_ (s := params.ln1_bias.shape) params.ln1_bias.raw maxNorm
+  let _ ← nn.clip_grad_norm_ (s := params.q_proj.shape) params.q_proj.raw maxNorm
+  let _ ← nn.clip_grad_norm_ (s := params.k_proj.shape) params.k_proj.raw maxNorm
+  let _ ← nn.clip_grad_norm_ (s := params.v_proj.shape) params.v_proj.raw maxNorm
+  let _ ← nn.clip_grad_norm_ (s := params.c_proj.shape) params.c_proj.raw maxNorm
+  let _ ← nn.clip_grad_norm_ (s := params.c_proj_bias.shape) params.c_proj_bias.raw maxNorm
+  let _ ← nn.clip_grad_norm_ (s := params.ln2_weight.shape) params.ln2_weight.raw maxNorm
+  let _ ← nn.clip_grad_norm_ (s := params.ln2_bias.shape) params.ln2_bias.raw maxNorm
+  let _ ← nn.clip_grad_norm_ (s := params.mlp_fc.shape) params.mlp_fc.raw maxNorm
+  let _ ← nn.clip_grad_norm_ (s := params.mlp_fc_bias.shape) params.mlp_fc_bias.raw maxNorm
+  let _ ← nn.clip_grad_norm_ (s := params.mlp_proj.shape) params.mlp_proj.raw maxNorm
+  let _ ← nn.clip_grad_norm_ (s := params.mlp_proj_bias.shape) params.mlp_proj_bias.raw maxNorm
 
 /-- Clip gradients for all GPT parameters -/
 def clipGPTGrads {cfg : Config} (params : GPTParams cfg) (maxNorm : Float) : IO Unit := do
-  let _ ← nn.clip_grad_norm_ params.wte maxNorm
-  let _ ← nn.clip_grad_norm_ params.wpe maxNorm
+  let _ ← nn.clip_grad_norm_ (s := params.wte.shape) params.wte.raw maxNorm
+  let _ ← nn.clip_grad_norm_ (s := params.wpe.shape) params.wpe.raw maxNorm
   for block in params.blocks do
     clipBlockGrads block maxNorm
-  let _ ← nn.clip_grad_norm_ params.ln_f_weight maxNorm
-  let _ ← nn.clip_grad_norm_ params.ln_f_bias maxNorm
+  let _ ← nn.clip_grad_norm_ (s := params.ln_f_weight.shape) params.ln_f_weight.raw maxNorm
+  let _ ← nn.clip_grad_norm_ (s := params.ln_f_bias.shape) params.ln_f_bias.raw maxNorm
 
 /-- Single training step using Optax-style optimizer -/
 def trainStep {modelCfg : Config} {batch seq : UInt64}
@@ -119,7 +119,7 @@ def trainStep {modelCfg : Config} {batch seq : UInt64}
   let params := TensorStruct.zeroGrads params
 
   -- Forward pass: compute loss (training=true enables dropout)
-  let lossT ← gpt.loss params x y true
+  let lossT ← gpt.lossRaw params x y true
 
   -- Backward pass
   autograd.backwardLoss lossT
@@ -166,7 +166,7 @@ def trainStepWithAccum {modelCfg : Config} {batch seq : UInt64}
     let (x, y) ← getBatchFn
 
     -- Forward pass
-    let lossT ← gpt.loss params x y true
+    let lossT ← gpt.lossRaw params x y true
 
     -- Scale loss for averaging (backward will scale gradients accordingly)
     let scaledLoss := mul_scalar lossT lossScale
@@ -208,7 +208,7 @@ def evalLoss {modelCfg : Config}
   for _ in [:numBatches] do
     let (x, y) ← getBatch valData batchSize blockSize device
     -- Forward pass with training=false (disables dropout)
-    let lossT ← gpt.loss params x y false
+    let lossT ← gpt.lossRaw params x y false
     let lossVal := nn.item lossT
     totalLoss := totalLoss + lossVal
   return totalLoss / numBatches.toFloat

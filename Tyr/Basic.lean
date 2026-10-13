@@ -8,57 +8,69 @@ It is the lowest-level shared layer used across runtime bindings, model code, an
 
 ## Major Components
 
-- Core aliases/types: `Shape`, `DType`, `Device`, and opaque tensor carrier `T`,
-  with DType parsing and pure shape-transform utilities (all in `Tyr.Basic.Types`).
+- Core types (in `Tyr.Basic.Types`): `Shape`, `DType`, `Device`, the native
+  `RawTensor` carrier, `DevicePolicy`, `StaticSpec`, and the indexed `Tensor`,
+  with DType parsing and pure shape-transform utilities — no native functions,
+  so the GPU code generator can use them without linking `libTyrC`.
 - Tensor metadata extraction hooks (`runtimeShape`, dtype/device introspection,
-  stats/values), implemented in `libTyrC`.
+  stats/values), implemented in `libTyrC` (this module).
 
 ## Scope
 
 This module is intentionally kernel-agnostic.
-Numerical tensor operations and backend FFI bindings live in `Tyr.Torch`.
+Typed numerical operations live in `Tyr.Typed.Ops`; native adapters live in
+`Tyr.RawTensor`. Legacy shape-erasing declarations are isolated in
+`Tyr.Legacy.Tensor`.
 -/
 
 namespace torch
 
-@[extern "lean_torch_to_string"] opaque T.toString {s : Shape} (t : @& T s) : String
-@[extern "lean_torch_tensor_print"] opaque T.print {s : Shape} (t : @& T s) : IO Unit
+namespace RawTensor
 
-/-! ## Tensor Metadata Extraction (for visualization widgets) -/
+-- Preserve the existing C ABI's shape argument without exposing a shape-indexed
+-- raw type. Metadata queries inspect the native tensor, never this argument.
+@[extern "lean_torch_to_string"] private opaque toStringImpl
+    (shape : Shape) (t : @& RawTensor) : String
 
-/-- Get the runtime shape of a tensor (useful for widgets/visualization) -/
-@[extern "lean_torch_get_shape"]
-opaque T.runtimeShape {s : Shape} (t : @& T s) : Array UInt64
+def toString (t : RawTensor) : String := toStringImpl #[] t
 
-/-- Get the dtype of a tensor as a backend string token. -/
-@[extern "lean_torch_get_dtype"]
-opaque T.dtypeStr {s : Shape} (t : @& T s) : String
+instance : ToString RawTensor := ⟨RawTensor.toString⟩
+instance : Repr RawTensor where
+  reprPrec t _ := RawTensor.toString t
 
-/-- Get the dtype of a tensor as the core `DType`. -/
-def T.dtype {s : Shape} (t : @& T s) : DType :=
-  DType.parse (t.dtypeStr)
+@[extern "lean_torch_get_shape"] private opaque runtimeShapeImpl
+    (shape : Shape) (t : @& RawTensor) : Shape
+@[extern "lean_torch_get_dtype"] private opaque dtypeStrImpl
+    (shape : Shape) (t : @& RawTensor) : String
+@[extern "lean_torch_get_device_enum"] private opaque deviceImpl
+    (shape : Shape) (t : @& RawTensor) : Device
+@[extern "lean_torch_get_device"] private opaque deviceStrImpl
+    (shape : Shape) (t : @& RawTensor) : String
+@[extern "lean_torch_get_values"] private opaque getValuesImpl
+    (shape : Shape) (t : @& RawTensor) (maxElements : UInt64) : FloatArray
+@[extern "lean_torch_get_stats"] private opaque statsImpl
+    (shape : Shape) (t : @& RawTensor) : String
 
-/-- Get the device of a tensor as a Device enum -/
-@[extern "lean_torch_get_device_enum"]
-opaque T.device {s : Shape} (t : @& T s) : Device
+/-- Native metadata, independent of any static tensor specification. -/
+def runtimeShape (t : RawTensor) : Shape := runtimeShapeImpl #[] t
+def dtypeStr (t : RawTensor) : String := dtypeStrImpl #[] t
+def dtype (t : RawTensor) : DType := DType.parse t.dtypeStr
+def device (t : RawTensor) : Device := deviceImpl #[] t
+def deviceStr (t : RawTensor) : String := deviceStrImpl #[] t
+def getValues (t : RawTensor) (maxElements : UInt64 := 1000) : FloatArray :=
+  getValuesImpl #[] t maxElements
+def stats (t : RawTensor) : String := statsImpl #[] t
 
-/-- Get the device of a tensor as a string (e.g., "cpu", "cuda:0", "mps") -/
-@[extern "lean_torch_get_device"]
-opaque T.deviceStr {s : Shape} (t : @& T s) : String
+end RawTensor
 
-/-- Get tensor values as a flat array of floats (up to maxElements).
-    Values are converted to Float for uniform access. -/
-@[extern "lean_torch_get_values"]
-opaque T.getValues {s : Shape} (t : @& T s) (maxElements : UInt64 := 1000) : FloatArray
+namespace Tensor
 
-/-- Get tensor statistics as a JSON string: {min, max, mean, std} -/
-@[extern "lean_torch_get_stats"]
-opaque T.stats {s : Shape} (t : @& T s) : String
+instance {σ : StaticSpec} : ToString (Tensor σ) where
+  toString t := RawTensor.toString t.raw
 
-instance {s : Shape} : ToString (T s) where
-  toString t := t.toString
+instance {σ : StaticSpec} : Repr (Tensor σ) where
+  reprPrec t _ := RawTensor.toString t.raw
 
-def T.shape {s : Shape} (_t : T s) : Shape := s
+end Tensor
 
-instance {s : Shape} : Repr (T s) where
-  reprPrec t _ := t.toString
+end torch

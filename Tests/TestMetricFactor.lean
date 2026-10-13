@@ -9,56 +9,61 @@ open torch
 open Tyr.Modular
 open Tyr.AD
 
-private def vectorToColumn {n : UInt64} (v : T #[n]) : T #[n, 1] :=
-  reshape v #[n, 1]
+private def vectorToColumn {n : UInt64} (v : DTensor #[n] .Float32) : DTensor #[n, 1] .Float32 :=
+  Tensor.reshape v #[n, 1] (by simp [TensorSpec.numelOfShape])
 
-private def columnToVector {n : UInt64} (v : T #[n, 1]) : T #[n] :=
-  reshape v #[n]
+private def columnToVector {n : UInt64} (v : DTensor #[n, 1] .Float32) : DTensor #[n] .Float32 :=
+  Tensor.reshape v #[n] (by simp [TensorSpec.numelOfShape])
 
 @[test]
 def testMetricFactorPullbackMatchesExplicitMatmul : IO Unit := do
-  let lMat ← randn #[3, 4] false
-  let a ← randn #[4, 2] false
+  let lMat ← Tensor.randn #[3, 4]
+  let a ← Tensor.randn #[4, 2]
   let factor : MetricFactor 3 4 := { matrix := lMat }
   let pulled := MetricFactor.pullback factor a
-  let expected := nn.mm lMat a
-  LeanTest.assertTrue (allclose pulled.matrix expected (rtol := 1e-4) (atol := 1e-5))
+  let expected := Tensor.mm lMat a
+  LeanTest.assertTrue (Tensor.allclose pulled.matrix expected (rtol := 1e-4) (atol := 1e-5))
     "MetricFactor.pullback should match explicit matrix multiplication"
 
 @[test]
 def testWoodburySolveMatchesDenseInverse : IO Unit := do
-  let kMat ← randn #[3, 5] false
-  let rawDiag ← randn #[5] false
-  let diag := add_scalar (nn.abs rawDiag) 1.0
-  let g ← randn #[5] false
+  let kMat ← Tensor.randn #[3, 5]
+  let rawDiag ← Tensor.randn #[5]
+  let diag := Tensor.Preserving.addScalar (Tensor.abs rawDiag) 1.0
+  let g ← Tensor.randn #[5]
   let factor : MetricFactor 3 5 := { matrix := kMat }
   let mass : DiagonalMass 5 := { diag := diag }
 
   let woodbury := MetricFactor.solveWoodbury mass factor g
-  let denseInv := linalg.inv (MetricFactor.denseMetric mass factor)
-  let dense := columnToVector (nn.mm denseInv (vectorToColumn g))
+  let denseInv := Tensor.inv (MetricFactor.denseMetric mass factor)
+  let dense := columnToVector (Tensor.mm denseInv (vectorToColumn g))
 
-  LeanTest.assertTrue (allclose woodbury dense (rtol := 1e-4) (atol := 1e-5))
+  LeanTest.assertTrue (Tensor.allclose woodbury dense (rtol := 1e-4) (atol := 1e-5))
     "Woodbury solve should match dense inverse solve on small problems"
 
 @[test]
 def testEmbeddedEuclideanRetractAmbientStepMatchesEuclideanUpdate : IO Unit := do
-  let x ← randn #[4] false
-  let g ← randn #[4] false
+  let x ← Tensor.randn #[4] false
+  let g ← Tensor.randn #[4] false
   let lr : Float := 0.1
   let x' := EmbeddedManifold.retractAmbientStep x g lr
-  let expected := x - mul_scalar g lr
-  LeanTest.assertTrue (allclose x' expected (rtol := 1e-5) (atol := 1e-6))
+  let expected := x - Tensor.mulScalar g lr
+  LeanTest.assertTrue (Tensor.l2Norm (x' - expected) < 1e-6)
     "EmbeddedManifold.retractAmbientStep should reduce to Euclidean GD in flat space"
 
 @[test]
 def testEmbeddedStiefelRetractAmbientStepPreservesConstraint : IO Unit := do
   let x ← Stiefel.random 6 3
-  let g ← randn #[6, 3] false
+  let g ← Tensor.randn #[6, 3]
   let x' := EmbeddedManifold.retractAmbientStep x g 0.05
-  let wtW := nn.mm (nn.transpose2d x'.matrix) x'.matrix
-  let I := eye 3
-  LeanTest.assertTrue (allclose wtW I (rtol := 1e-4) (atol := 1e-5))
+  let wtW := Tensor.mm (Tensor.transpose2d x'.matrix) x'.matrix
+  let I := Tensor.eye 3
+  LeanTest.assertTrue (Tensor.allclose wtW I (rtol := 1e-4) (atol := 1e-5))
     "Embedded ambient-step retraction should preserve the Stiefel constraint"
+
+example (_x : DTensor #[4] .Float32) (_g : DTensor #[5] .Float32) : True := by
+  fail_if_success
+    have _ := EmbeddedManifold.retractAmbientStep _x _g 0.1
+  trivial
 
 end Tests.MetricFactor

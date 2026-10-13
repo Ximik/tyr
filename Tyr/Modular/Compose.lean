@@ -16,7 +16,7 @@ import Tyr.Modular.Norm
 
 namespace Tyr.Modular
 
-open torch (T TensorStruct)
+open torch (TensorStruct)
 
 /-! ## Product Types
 

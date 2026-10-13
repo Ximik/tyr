@@ -50,13 +50,13 @@ structure RMSNorm (dim : UInt64) where
 
 `Linear.init` uses Kaiming/He initialization (`std = sqrt(2 / in_dim)`) and marks every parameter as a trainable autograd leaf (`Linear.lean:23-35`); `LayerNorm.init` / `RMSNorm.init` do the same with ones/zeros. Each layer exposes explicit `forwardNd` functions plus `Module` instances for the common arities (see the API table below).
 
-Two legacy files also live under `Tyr/Module/`: `Affine.lean` (uses the old lowercase `differentiable` class, no `TensorStruct`/`Module` instance) and `Conv2d.lean` (runtime rather than type-level hyperparameters). Neither has call sites in the repository; new code should use `Linear` or model-specific convolution parameters.
+`Affine.lean` provides an indexed affine map with `[input, output]` weights, `TensorStruct` and `Module` instances, and typed gradient extraction. Its forward operation is `input @ weight + bias`; `Linear` uses the transposed weight convention instead. `Conv2d.lean` has runtime hyperparameters with indexed weight and bias fields; initialization validates grouped-channel dimensions and retains dtype and device. It currently has no model call sites.
 
 ### Deriving parameter-tree instances
 
 `Tyr/Module/Derive.lean` registers two deriving handlers (`Derive.lean:212-216`):
 
-- `deriving TensorStruct` — generates field-wise `map` / `mapM` / `zipWith` / `fold` for a structure. Every field type must already have a `TensorStruct` instance; `Tyr/TensorStruct.lean` provides them for `T s`, `Option α`, `Array α`, `List α`, `Vector n α`, `Static α`, and `Frozen s`, and `Derive.lean:89` adds the pair instance `α × β`. Parametric structures (shape or type parameters) are supported.
+- `deriving TensorStruct` — generates field-wise `map` / `mapM` / `zipWith` / `fold` for a structure. Every field type must already have a `TensorStruct` instance; `Tyr/TensorStruct.lean` provides them for `Tensor σ`, `Option α`, `Array α`, `List α`, `Vector n α`, `Static α`, and `Frozen σ`; `Derive.lean` adds the pair instance `α × β` and a temporary legacy `T` bridge. Parametric structures (shape or type parameters) are supported.
 - `deriving Model` — one-shot derivation of `TensorStruct` + `ToTensorStructSchema` + `TensorStructFlatten` (`Derive.lean:200-210`; `Model` is a marker class at `Tyr/TensorStruct.lean:243`, the two schema handlers come from `Tyr/AD/TensorStructSchema.lean`). Use it when the structure should also serialize/flatten, e.g. for checkpointing.
 
 For hand-written instances, `mapTensor` / `mapFrozen` / `mapStatic` (`Derive.lean:64-71`) are small helpers for the common field kinds.
@@ -289,8 +289,8 @@ let wtW := nn.mm (nn.transpose2d w) w   -- ≈ eye 8
 
 - The `Module` / `ModuleIO` / `ModuleCtx` classes are thinly adopted: instances exist for the three built-in layers and two audio encoders (`Tyr/Model/Qwen3ASR/AudioEncoder.lean:470`, `Tyr/Model/Qwen3TTS/SpeakerEncoder.lean:314`), and the `|>` / `|>!` notations and `TrainingCtx` have no production call sites. Most model code calls `Linear.forward2d`-style functions directly, as in the examples above.
 - The `Tyr/Module.lean` umbrella re-exports `Core`, `Derive`, `Linear`, `LayerNorm`, `Affine`, and `Conv2d` — but **not** `RMSNorm`. Write `import Tyr.Module.RMSNorm` explicitly (this is what `Tyr/Model/Qwen/Model.lean:10` and others do).
-- `Affine` and `Conv2d` are legacy: no `TensorStruct`/`Module` instances, no call sites.
-- There is no shared `Embedding` in `Tyr/Module`; the `Embedding` used for modular norms is `Tyr.Modular.Embedding` (`Atomic.lean:128`) and is currently only exercised by tests. There is no `NormedModule` instance for `RMSNorm`.
+- `Affine` has indexed parameters and typed module/gradient interfaces, currently exercised by tests. `Conv2d` has indexed parameters and checked initialization, but no `TensorStruct`/`Module` instances or model call sites.
+- There is no shared `Embedding` in `Tyr/Module`; the embedding table used for modular norms is `Tyr.Modular.Embedding` and is currently only exercised by tests. Its indexed weights preserve dtype and device policy, and `Embedding.forward` requires Int64 token tensors. The underlying typed `Tensor.embedding` and `Tensor.embedding1d` operations are also used by GPT. There is no `NormedModule` instance for `RMSNorm`.
 
 ## Related guides
 

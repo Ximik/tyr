@@ -31,10 +31,7 @@ extern "C" {
  * @return Output tensor [batch?, rows, rows]
  */
 lean_object* lean_torch_xxt(
-    lean_obj_arg /*s*/,
-    b_lean_obj_arg A_obj,
-    lean_object* w
-) {
+    b_lean_obj_arg A_obj) {
     try {
         auto A = borrowTensor(A_obj);
 
@@ -74,12 +71,9 @@ lean_object* lean_torch_xxt(
  * @return Output tensor [batch?, n, n]
  */
 lean_object* lean_torch_ba_plus_cAA(
-    lean_obj_arg /*s*/,
     b_lean_obj_arg A_obj,
     double alpha,
-    double beta,
-    lean_object* w
-) {
+    double beta) {
     try {
         auto A = borrowTensor(A_obj);
 
@@ -130,13 +124,10 @@ lean_object* lean_torch_ba_plus_cAA(
  * @return Output matrix [batch?, m, n]
  */
 lean_object* lean_torch_newton_schulz_step(
-    lean_obj_arg /*s*/,
     b_lean_obj_arg X_obj,
     double a,
     double b,
-    double c,
-    lean_object* w
-) {
+    double c) {
     try {
         auto X = borrowTensor(X_obj);
 
@@ -195,11 +186,8 @@ lean_object* lean_torch_newton_schulz_step(
  * @return Orthogonalized matrix [batch?, m, n]
  */
 lean_object* lean_torch_polar_express(
-    lean_obj_arg /*s*/,
     b_lean_obj_arg G_obj,
-    uint64_t num_iters,
-    lean_object* w
-) {
+    uint64_t num_iters) {
     try {
         auto G = borrowTensor(G_obj);
 
@@ -270,11 +258,8 @@ lean_object* lean_torch_polar_express(
  * @return Orthogonalized gradient
  */
 lean_object* lean_torch_muon_orthogonalize(
-    lean_obj_arg /*s*/,
     b_lean_obj_arg G_obj,
-    uint64_t num_iters,
-    lean_object* w
-) {
+    uint64_t num_iters) {
     try {
         auto G = borrowTensor(G_obj);
         if (G.dim() < 2) {
@@ -336,13 +321,10 @@ lean_object* lean_torch_muon_orthogonalize(
  * @return Updated parameter tensor
  */
 lean_object* lean_torch_cautious_update(
-    lean_obj_arg /*s*/,
     b_lean_obj_arg param_obj,
     b_lean_obj_arg update_obj,
     double lr,
-    double wd,
-    lean_object* w
-) {
+    double wd) {
     try {
         auto param = borrowTensor(param_obj);
         auto update = borrowTensor(update_obj);

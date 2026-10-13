@@ -8,7 +8,7 @@ import Tyr.TensorStruct
 
 namespace Tyr.AD
 
-open torch (Static TensorStruct T)
+open torch (Static TensorStruct)
 
 /-! ## DifferentiableManifold Typeclass
 
@@ -121,12 +121,12 @@ instance staticManifold {α : Type} : DifferentiableManifold (Static α) where
     tangent = cotangent = primal type, using TensorStruct.zipWith for operations. -/
 instance tensorStructEuclidean [s : TensorStruct α] [Inhabited α] : EuclideanSpace α where
   zero := default
-  add := TensorStruct.zipWith torch.add
-  smul scalar m := TensorStruct.map (torch.mul_scalar · scalar) m
+  add := TensorStruct.zipWith Add.add
+  smul scalar m := TensorStruct.map (torch.Tensor.Preserving.mulScalar · scalar) m
   -- Inner product: sum of all element-wise products across tensors
   inner a b :=
-    let product := TensorStruct.zipWith torch.mul a b
-    TensorStruct.fold (fun t acc => acc + torch.nn.item (torch.nn.sumAll t)) 0.0 product
+    let product := TensorStruct.zipWith Mul.mul a b
+    TensorStruct.fold (fun t acc => acc + torch.Tensor.item (torch.Tensor.sumAll t)) 0.0 product
 
 /-- Gradient descent step using exponential map / retraction.
     For Euclidean spaces: x' = x - lr * grad

@@ -19,11 +19,6 @@ def render : Device → String
 
 end Device
 
-inductive DevicePolicy where
-  | any
-  | exact (device : Device)
-deriving Repr, BEq
-
 namespace DevicePolicy
 
 def check (policy : DevicePolicy) (actual : Device) : Except String Unit :=

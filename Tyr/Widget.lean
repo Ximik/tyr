@@ -42,8 +42,8 @@ import Tyr.Widget
 
 open torch
 
-#tensor (zeros #[8, 8])
-#tensor (torch.randn #[16, 32])   -- IO tensor expression also works
+#tensor (Tensor.zeros #[8, 8])
+#tensor (Tensor.randn #[16, 32])   -- IO tensor expression also works
 ```
 
 For module trees, pass `ModuleDisplayProps` (or `IO ModuleDisplayProps`):
@@ -770,28 +770,28 @@ export default function Widget(props) {
 "
 
 /-- Convert a tensor to widget props -/
-def tensorToProps {s : Shape} (t : T s) : TensorDisplayProps :=
+def tensorToProps {σ : StaticSpec} (t : Tensor σ) : TensorDisplayProps :=
   let shape := t.runtimeShape
   let dtype := toString t.dtype
-  let device := t.deviceStr
-  let requiresGrad := t.requires_grad
-  let stats := t.stats
-  let values := t.getValues 10000  -- Get up to 10k values
+  let device := t.raw.deviceStr
+  let requiresGrad := t.requiresGrad
+  let stats := t.raw.stats
+  let values := t.raw.getValues 10000  -- Get up to 10k values
   let numel := shape.foldl (· * ·) 1
   let gradValues : Option (Array Float) :=
     if requiresGrad then
-      let g := autograd.grad_of t
-      some (g.getValues 10000).toList.toArray
+      let g := Tensor.gradOf t
+      some (g.raw.getValues 10000).toList.toArray
     else none
   let gradStats : Option String :=
     if requiresGrad then
-      let g := autograd.grad_of t
-      some g.stats
+      let g := Tensor.gradOf t
+      some g.raw.stats
     else none
   { shape, dtype, device, requiresGrad, numel, stats, values := values.toList.toArray, gradValues, gradStats }
 
 /-- Convert a tensor with name and axis labels -/
-def tensorToPropsNamed {s : Shape} (t : T s) (name : String) (axisNames : Array String := #[]) : TensorDisplayProps :=
+def tensorToPropsNamed {σ : StaticSpec} (t : Tensor σ) (name : String) (axisNames : Array String := #[]) : TensorDisplayProps :=
   let base := tensorToProps t
   { base with name := some name, axisNames := if axisNames.isEmpty then none else some axisNames }
 
@@ -811,10 +811,17 @@ def toModuleDisplayProps [ToModuleDisplay α] (value : α) (name : String := "ro
   { root := ToModuleDisplay.toModuleNode value name }
 
 /-- Instance for single tensors -/
+instance {σ : StaticSpec} : ToModuleDisplay (Tensor σ) where
+  toModuleNode t name :=
+    ModuleNode.tensor (tensorToPropsNamed t name)
+
+-- Compatibility for remaining legacy model fields. The display specification
+-- comes from native metadata, never from the unchecked legacy shape annotation.
 instance {s : Shape} : ToModuleDisplay (T s) where
   toModuleNode t name :=
-    let props := tensorToPropsNamed t name
-    ModuleNode.tensor props
+    let tensor := Tensor.assumeSpec
+      (σ := { shape := t.runtimeShape, dtype := t.dtype }) t
+    ModuleNode.tensor (tensorToPropsNamed tensor name)
 
 /-- Instance for Optional values -/
 instance [ToModuleDisplay α] : ToModuleDisplay (Option α) where
@@ -897,8 +904,8 @@ Works with both pure tensors and `IO` tensor expressions.
 
 Examples:
 ```lean
-#tensor (zeros #[4, 4])
-#tensor (torch.randn #[3, 8])
+#tensor (Tensor.zeros #[4, 4])
+#tensor (Tensor.randn #[3, 8])
 ```
 
 Tip: place your cursor on the `#tensor` line in VS Code to show the widget panel.

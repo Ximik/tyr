@@ -122,7 +122,7 @@ def trainStep (cfg : torch.gpt.Config)
   let params := TensorStruct.zeroGrads params
 
   -- Forward pass and compute loss
-  let lossT ← torch.gpt.loss params x y true
+  let lossT ← torch.gpt.lossRaw params x y true
 
   -- Backward pass
   autograd.backwardLoss lossT

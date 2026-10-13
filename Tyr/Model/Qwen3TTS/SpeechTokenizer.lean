@@ -20,6 +20,11 @@ import Tyr.Model.Qwen.RoPE
 import Lean.Data.Json
 import Lean.Data.Json.FromToJson.Basic
 
+/-- Migration boundary: wrap a legacy runtime handle for the typed module
+    interface, claiming Float32 (the legacy runtime dtype). Removed when this
+    module migrates to indexed tensors. -/
+private def typedF32 {s : Shape} (t : T s) : DTensor s .Float32 := .assumeSpec t
+
 namespace torch.qwen3tts
 
 open Lean
@@ -679,13 +684,13 @@ private def forwardTransformerLayer {batch seq : UInt64}
     (cos sin : T #[seq, 32])
     : T #[batch, seq, 512] :=
   let residual1 := x
-  let norm1 : RMSNorm 512 := { weight := layer.inputLayernormWeight, eps := ⟨1e-5⟩ }
+  let norm1 : RMSNorm 512 := { weight := typedF32 layer.inputLayernormWeight, eps := ⟨1e-5⟩ }
   let h1 : T #[batch, seq, 512] := norm1.forward3d x
   let h2 : T #[batch, seq, 512] := forwardAttention layer h1 cos sin
   let h3 : T #[batch, seq, 512] := residual1 + scale3d h2 layer.selfAttnLayerScale
 
   let residual2 := h3
-  let norm2 : RMSNorm 512 := { weight := layer.postAttentionLayernormWeight, eps := ⟨1e-5⟩ }
+  let norm2 : RMSNorm 512 := { weight := typedF32 layer.postAttentionLayernormWeight, eps := ⟨1e-5⟩ }
   let h4 : T #[batch, seq, 512] := norm2.forward3d h3
   let gate : T #[batch, seq, 1024] := linear3d h4 layer.gateProj
   let up : T #[batch, seq, 1024] := linear3d h4 layer.upProj
@@ -704,7 +709,7 @@ private def forwardPreTransformer {batch frames : UInt64}
     let sin : T #[frames, 32] := if sin0.device == h.device then sin0 else sin0.to h.device
     for layer in m.preTransformerLayers do
       h := forwardTransformerLayer layer h cos sin
-    let norm : RMSNorm 512 := { weight := m.preTransformerNormWeight, eps := ⟨1e-5⟩ }
+    let norm : RMSNorm 512 := { weight := typedF32 m.preTransformerNormWeight, eps := ⟨1e-5⟩ }
     let hNorm : T #[batch, frames, 512] := norm.forward3d h
     let hOut : T #[batch, frames, 1024] := affine3d hNorm m.preTransformerOutputProj m.preTransformerOutputBias
     reshape (nn.transpose hOut 1 2) #[batch, 1024, frames]

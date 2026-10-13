@@ -11,10 +11,10 @@ open Tyr.AD
 
 /-- Local linearization data for one module at one forward point. -/
 structure LocalLinearization (inDim paramDim outDim : UInt64) where
-  applyA : T #[inDim] → T #[outDim]
-  applyAT : T #[outDim] → T #[inDim]
-  applyB : T #[paramDim] → T #[outDim]
-  applyBT : T #[outDim] → T #[paramDim]
+  applyA : AmbientVector inDim → AmbientVector outDim
+  applyAT : AmbientVector outDim → AmbientVector inDim
+  applyB : AmbientVector paramDim → AmbientVector outDim
+  applyBT : AmbientVector outDim → AmbientVector paramDim
 
 /-- Basic diagnostics for one layerwise Riemannian update. -/
 structure LayerStepDiagnostics where
@@ -32,53 +32,58 @@ metric-factor propagation.
 class RiemannianModule (M : Type) (inDim outDim : UInt64) where
   paramDim : UInt64
   Tape : Type
-  forwardWithTape : M → T #[inDim] → T #[outDim] × Tape
+  forwardWithTape : M → AmbientVector inDim → AmbientVector outDim × Tape
   localLinearization : M → Tape → LocalLinearization inDim paramDim outDim
   paramMass : M → DiagonalMass paramDim
-  applyAmbientUpdate : M → T #[paramDim] → Float → M
+  applyAmbientUpdate : M → AmbientVector paramDim → Float → M
 
 namespace RiemannianModule
 
-private def vectorToColumn {n : UInt64} (v : T #[n]) : T #[n, 1] :=
-  reshape v #[n, 1]
+private def vectorToColumn {n : UInt64} {d : DType} {dev : DevicePolicy}
+    (v : Tensor ⟨#[n], d, dev⟩) : Tensor ⟨#[n, 1], d, dev⟩ :=
+  Tensor.reshape v #[n, 1] (by simp [TensorSpec.numelOfShape])
 
-private def columnToVector {n : UInt64} (v : T #[n, 1]) : T #[n] :=
-  reshape v #[n]
+private def columnToVector {n : UInt64} {d : DType} {dev : DevicePolicy}
+    (v : Tensor ⟨#[n, 1], d, dev⟩) : Tensor ⟨#[n], d, dev⟩ :=
+  Tensor.reshape v #[n] (by simp [TensorSpec.numelOfShape])
 
-private def splitLinearUpdate {inDim outDim : UInt64}
-    (update : T #[outDim * inDim + outDim]) : T #[outDim, inDim] × T #[outDim] :=
+private def splitLinearUpdate {inDim outDim : UInt64} {d : DType} {dev : DevicePolicy}
+    (update : Tensor ⟨#[outDim * inDim + outDim], d, dev⟩) :
+    Tensor ⟨#[outDim, inDim], d, dev⟩ × Tensor ⟨#[outDim], d, dev⟩ :=
   let weightSize := outDim * inDim
-  let dwVec : T #[weightSize] := data.slice1d update 0 weightSize.toInt64
-  let dbVec : T #[outDim] :=
-    data.slice1d update weightSize.toInt64 (weightSize + outDim).toInt64
-  (reshape dwVec #[outDim, inDim], dbVec)
+  let dwVec : Tensor ⟨#[weightSize], d, dev⟩ := Tensor.sliceChecked update 0 0 weightSize #[weightSize]
+  let dbVec : Tensor ⟨#[outDim], d, dev⟩ := Tensor.sliceChecked update 0 weightSize outDim #[outDim]
+  (Tensor.reshapeChecked dwVec #[outDim, inDim], dbVec)
 
 namespace LocalLinearization
 
-private def rowAt {rows cols : UInt64} (matrix : T #[rows, cols]) (idx : UInt64) : T #[cols] :=
-  reshape (data.slice2d matrix idx 1) #[cols]
+private def rowAt {rows cols : UInt64} {d : DType} {dev : DevicePolicy}
+    (matrix : Tensor ⟨#[rows, cols], d, dev⟩) (idx : UInt64) : Tensor ⟨#[cols], d, dev⟩ :=
+  Tensor.reshapeChecked (Tensor.sliceChecked matrix 0 idx 1 #[1, cols]) #[cols]
 
-private def mapRows {rows inDim outDim : UInt64}
-    (matrix : T #[rows, inDim])
-    (f : T #[inDim] → T #[outDim]) : T #[rows, outDim] :=
-  let mapped : Array (T #[outDim]) := Id.run do
-    let mut acc : Array (T #[outDim]) := #[]
+private def mapRows {rows inDim outDim : UInt64} {d : DType} {dev : DevicePolicy}
+    (matrix : Tensor ⟨#[rows, inDim], d, dev⟩)
+    (f : Tensor ⟨#[inDim], d, dev⟩ → Tensor ⟨#[outDim], d, dev⟩) :
+    Tensor ⟨#[rows, outDim], d, dev⟩ :=
+  let mapped : Array (Tensor ⟨#[outDim], d, dev⟩) := Id.run do
+    let mut acc : Array (Tensor ⟨#[outDim], d, dev⟩) := #[]
     for i in [:rows.toNat] do
       acc := acc.push (f (rowAt matrix (UInt64.ofNat i)))
     pure acc
-  torch.stack1d mapped
+  let stacked := Tensor.stack1d mapped
+  Tensor.reshapeChecked stacked #[rows, outDim]
 
 /-- Materialize the dense input Jacobian for debugging/tests. -/
 def materializeA {inDim paramDim outDim : UInt64}
-    (lin : LocalLinearization inDim paramDim outDim) : T #[outDim, inDim] :=
-  let basis : T #[inDim, inDim] := eye inDim
-  nn.transpose2d (mapRows basis lin.applyA)
+    (lin : LocalLinearization inDim paramDim outDim) : AmbientMatrix outDim inDim :=
+  let basis : AmbientMatrix inDim inDim := Tensor.eye inDim
+  Tensor.transpose2d (mapRows basis lin.applyA)
 
 /-- Materialize the dense parameter Jacobian for debugging/tests. -/
 def materializeB {inDim paramDim outDim : UInt64}
-    (lin : LocalLinearization inDim paramDim outDim) : T #[outDim, paramDim] :=
-  let basis : T #[paramDim, paramDim] := eye paramDim
-  nn.transpose2d (mapRows basis lin.applyB)
+    (lin : LocalLinearization inDim paramDim outDim) : AmbientMatrix outDim paramDim :=
+  let basis : AmbientMatrix paramDim paramDim := Tensor.eye paramDim
+  Tensor.transpose2d (mapRows basis lin.applyB)
 
 /-- Pull a metric factor back through the input Jacobian using rowwise adjoints. -/
 def pullbackInputFactor {rank inDim paramDim outDim : UInt64}
@@ -94,39 +99,42 @@ def pullbackParamFactor {rank inDim paramDim outDim : UInt64}
 
 end LocalLinearization
 
-private def linearApplyInput {inDim outDim : UInt64}
-    (weight : T #[outDim, inDim]) (x : T #[inDim]) : T #[outDim] :=
-  columnToVector (nn.mm weight (vectorToColumn x))
+private def linearApplyInput {inDim outDim : UInt64} {d : DType} {dev : DevicePolicy}
+    (weight : Tensor ⟨#[outDim, inDim], d, dev⟩) (x : Tensor ⟨#[inDim], d, dev⟩) :
+    Tensor ⟨#[outDim], d, dev⟩ :=
+  columnToVector (Tensor.mm weight (vectorToColumn x))
 
-private def linearApplyInputAdjoint {inDim outDim : UInt64}
-    (weight : T #[outDim, inDim]) (y : T #[outDim]) : T #[inDim] :=
-  columnToVector (nn.mm (nn.transpose2d weight) (vectorToColumn y))
+private def linearApplyInputAdjoint {inDim outDim : UInt64} {d : DType} {dev : DevicePolicy}
+    (weight : Tensor ⟨#[outDim, inDim], d, dev⟩) (y : Tensor ⟨#[outDim], d, dev⟩) :
+    Tensor ⟨#[inDim], d, dev⟩ :=
+  columnToVector (Tensor.mm (Tensor.transpose2d weight) (vectorToColumn y))
 
-private def linearApplyParam {inDim outDim : UInt64}
-    (x : T #[inDim])
+private def linearApplyParam {inDim outDim : UInt64} {d : DType} {dev : DevicePolicy}
+    (x : Tensor ⟨#[inDim], d, dev⟩)
     (useBias : Bool)
-    (update : T #[outDim * inDim + outDim]) : T #[outDim] :=
+    (update : Tensor ⟨#[outDim * inDim + outDim], d, dev⟩) : Tensor ⟨#[outDim], d, dev⟩ :=
   let (dW, dB) := splitLinearUpdate (inDim := inDim) (outDim := outDim) update
   let weightPart := linearApplyInput dW x
   if useBias then
-    weightPart + dB
+    Add.add weightPart dB
   else
     weightPart
 
-private def linearApplyParamAdjoint {inDim outDim : UInt64}
-    (x : T #[inDim])
+private def linearApplyParamAdjoint {inDim outDim : UInt64} {d : DType} {dev : DevicePolicy}
+    (x : Tensor ⟨#[inDim], d, dev⟩)
     (useBias : Bool)
-    (y : T #[outDim]) : T #[outDim * inDim + outDim] :=
-  let outer : T #[outDim, inDim] := nn.mm (vectorToColumn y) (reshape x #[1, inDim])
-  let weightPart : T #[outDim * inDim] := reshape outer #[outDim * inDim]
-  let biasPart : T #[outDim] := if useBias then y else zeros #[outDim]
-  nn.cat weightPart biasPart 0
+    (y : Tensor ⟨#[outDim], d, dev⟩) : Tensor ⟨#[outDim * inDim + outDim], d, dev⟩ :=
+  let outer : Tensor ⟨#[outDim, inDim], d, dev⟩ :=
+    Tensor.mm (vectorToColumn y) (Tensor.reshape x #[1, inDim] (by simp [TensorSpec.numelOfShape]))
+  let weightPart : Tensor ⟨#[outDim * inDim], d, dev⟩ := Tensor.reshapeChecked outer #[outDim * inDim]
+  let biasPart : Tensor ⟨#[outDim], d, dev⟩ := if useBias then y else Tensor.zerosFor _
+  let joined := Tensor.cat weightPart biasPart 0
+  Tensor.reshapeChecked joined #[outDim * inDim + outDim]
 
 private def makeManifoldLeaf [MatrixManifoldCarrier M] {m n : UInt64}
-    [Tyr.Modular.ShapeFact (MatrixManifoldCarrier.ShapeOK (M := M) m n)]
     (w : M m n) : M m n :=
-  MatrixManifoldCarrier.fromAmbientUnchecked
-    (autograd.set_requires_grad (autograd.detach (MatrixManifoldCarrier.toMatrix w)) true)
+  MatrixManifoldCarrier.reAmbient w
+    (Tensor.setRequiresGrad (Tensor.detach (MatrixManifoldCarrier.toMatrix w)) true)
 
 /-- Single leaf backward step: metric solve, parameter update, and propagation. -/
 def backwardLeafStep {M : Type} {inDim outDim : UInt64} [RiemannianModule M inDim outDim]
@@ -134,9 +142,9 @@ def backwardLeafStep {M : Type} {inDim outDim : UInt64} [RiemannianModule M inDi
     (m : M)
     (tape : RiemannianModule.Tape (M := M) (inDim := inDim) (outDim := outDim))
     (L : MetricFactor rank outDim)
-    (lambda : T #[outDim])
+    (lambda : AmbientVector outDim)
     (lr : Float)
-    : M × MetricFactor rank inDim × T #[inDim] × LayerStepDiagnostics := by
+    : M × MetricFactor rank inDim × AmbientVector inDim × LayerStepDiagnostics := by
   let lin := RiemannianModule.localLinearization (M := M) (inDim := inDim) (outDim := outDim) m tape
   let g := lin.applyBT lambda
   let K := LocalLinearization.pullbackParamFactor lin L
@@ -146,28 +154,29 @@ def backwardLeafStep {M : Type} {inDim outDim : UInt64} [RiemannianModule M inDi
   let LPrev := LocalLinearization.pullbackInputFactor lin L
   let lambdaPrev := lin.applyAT lambda
   let inner := MetricFactor.woodburyInner mass K
-  let innerInv := linalg.inv inner
-  let residual := MetricFactor.applyRegularized mass K update - g
+  let innerInv := Tensor.inv inner
+  let residual := Sub.sub (MetricFactor.applyRegularized mass K update) g
   let stats : LayerStepDiagnostics := {
-    gradientNorm := linalg.l2Norm g
+    gradientNorm := Tensor.l2Norm g
     factorRank := rank
-    innerConditionEstimate := linalg.spectralNorm inner * linalg.spectralNorm innerInv
-    residualNorm := linalg.l2Norm residual
-    updateNorm := linalg.l2Norm update
+    innerConditionEstimate := Tensor.spectralNorm inner * Tensor.spectralNorm innerInv
+    residualNorm := Tensor.l2Norm residual
+    updateNorm := Tensor.l2Norm update
   }
   exact (m', LPrev, lambdaPrev, stats)
 
 instance linearRiemannianModule (inDim outDim : UInt64) :
     RiemannianModule (torch.Linear inDim outDim) inDim outDim where
   paramDim := outDim * inDim + outDim
-  Tape := T #[inDim]
+  Tape := AmbientVector inDim
   forwardWithTape lin x :=
-    let x2 : T #[1, inDim] := reshape x #[1, inDim]
-    let y2 : T #[1, outDim] :=
+    let x2 : AmbientMatrix 1 inDim :=
+      Tensor.reshape x #[1, inDim] (by simp [TensorSpec.numelOfShape])
+    let y2 : AmbientMatrix 1 outDim :=
       match lin.bias with
-      | some b => affine x2 lin.weight b
-      | none => linear x2 lin.weight
-    (reshape y2 #[outDim], x)
+      | some b => Add.add (Tensor.linear x2 lin.weight) (Tensor.expand b #[1, outDim])
+      | none => Tensor.linear x2 lin.weight
+    (Tensor.reshape y2 #[outDim] (by simp [TensorSpec.numelOfShape]), x)
   localLinearization lin x := {
     applyA := linearApplyInput lin.weight
     applyAT := linearApplyInputAdjoint lin.weight
@@ -177,11 +186,13 @@ instance linearRiemannianModule (inDim outDim : UInt64) :
   paramMass _ := DiagonalMass.ones (outDim * inDim + outDim)
   applyAmbientUpdate lin update lr :=
     let (dW, dB) := splitLinearUpdate (inDim := inDim) (outDim := outDim) update
-    let weight' := autograd.set_requires_grad (autograd.detach (lin.weight - mul_scalar dW lr)) true
+    let weight' := Tensor.setRequiresGrad
+      (Tensor.detach (Sub.sub lin.weight (Tensor.Preserving.mulScalar dW lr))) true
     let bias' :=
       match lin.bias with
       | some b =>
-        some (autograd.set_requires_grad (autograd.detach (b - mul_scalar dB lr)) true)
+        some (Tensor.setRequiresGrad
+          (Tensor.detach (Sub.sub b (Tensor.Preserving.mulScalar dB lr))) true)
       | none => none
     { lin with weight := weight', bias := bias' }
 
@@ -189,19 +200,19 @@ instance manifoldLinearRiemannianModule
     (M : UInt64 → UInt64 → Type)
     [MatrixManifoldCarrier M]
     {inDim outDim : UInt64}
-    [Tyr.Modular.ShapeFact (MatrixManifoldCarrier.ShapeOK (M := M) outDim inDim)]
     :
     RiemannianModule (ManifoldLinear M inDim outDim) inDim outDim where
   paramDim := outDim * inDim + outDim
-  Tape := T #[inDim]
+  Tape := AmbientVector inDim
   forwardWithTape lin x :=
     let weight := MatrixManifoldCarrier.toMatrix lin.weight
-    let x2 : T #[1, inDim] := reshape x #[1, inDim]
-    let y2 : T #[1, outDim] :=
+    let x2 : AmbientMatrix 1 inDim :=
+      Tensor.reshape x #[1, inDim] (by simp [TensorSpec.numelOfShape])
+    let y2 : AmbientMatrix 1 outDim :=
       match lin.bias with
-      | some b => affine x2 weight b
-      | none => linear x2 weight
-    (reshape y2 #[outDim], x)
+      | some b => Add.add (Tensor.linear x2 weight) (Tensor.expand b #[1, outDim])
+      | none => Tensor.linear x2 weight
+    (Tensor.reshape y2 #[outDim] (by simp [TensorSpec.numelOfShape]), x)
   localLinearization lin x := {
     applyA := linearApplyInput (MatrixManifoldCarrier.toMatrix lin.weight)
     applyAT := linearApplyInputAdjoint (MatrixManifoldCarrier.toMatrix lin.weight)
@@ -211,13 +222,15 @@ instance manifoldLinearRiemannianModule
   paramMass _ := DiagonalMass.ones (outDim * inDim + outDim)
   applyAmbientUpdate lin update lr :=
     let (dW, dB) := splitLinearUpdate (inDim := inDim) (outDim := outDim) update
-    let updatedMatrix := MatrixManifoldCarrier.toMatrix lin.weight - mul_scalar dW lr
-    let weight' := MatrixManifoldCarrier.project updatedMatrix
+    let updatedMatrix := Sub.sub (MatrixManifoldCarrier.toMatrix lin.weight)
+      (Tensor.Preserving.mulScalar dW lr)
+    let weight' := MatrixManifoldCarrier.projectLike lin.weight updatedMatrix
     let weight' := makeManifoldLeaf weight'
     let bias' :=
       match lin.bias with
       | some b =>
-        some (autograd.set_requires_grad (autograd.detach (b - mul_scalar dB lr)) true)
+        some (Tensor.setRequiresGrad
+          (Tensor.detach (Sub.sub b (Tensor.Preserving.mulScalar dB lr))) true)
       | none => none
     { lin with weight := weight', bias := bias' }
 
@@ -227,12 +240,12 @@ namespace LocalLinearization
 
 /-- Materialize the dense input Jacobian for debugging/tests. -/
 def materializeA {inDim paramDim outDim : UInt64}
-    (lin : LocalLinearization inDim paramDim outDim) : T #[outDim, inDim] :=
+    (lin : LocalLinearization inDim paramDim outDim) : AmbientMatrix outDim inDim :=
   RiemannianModule.LocalLinearization.materializeA lin
 
 /-- Materialize the dense parameter Jacobian for debugging/tests. -/
 def materializeB {inDim paramDim outDim : UInt64}
-    (lin : LocalLinearization inDim paramDim outDim) : T #[outDim, paramDim] :=
+    (lin : LocalLinearization inDim paramDim outDim) : AmbientMatrix outDim paramDim :=
   RiemannianModule.LocalLinearization.materializeB lin
 
 /-- Pull a metric factor back through the input Jacobian using rowwise adjoints. -/
@@ -266,8 +279,8 @@ def sequentialForwardWithTape
     [RiemannianModule M₁ inDim midDim]
     [RiemannianModule M₂ midDim outDim]
     (net : Sequential M₁ M₂)
-    (x : T #[inDim])
-    : T #[outDim] × SequentialTape M₁ inDim midDim M₂ outDim := by
+    (x : AmbientVector inDim)
+    : AmbientVector outDim × SequentialTape M₁ inDim midDim M₂ outDim := by
   let (mid, tape₁) :=
     RiemannianModule.forwardWithTape (M := M₁) (inDim := inDim) (outDim := midDim) net.first x
   let (y, tape₂) :=
@@ -283,9 +296,9 @@ def sequentialBackwardMetricStep
     (net : Sequential M₁ M₂)
     (tape : SequentialTape M₁ inDim midDim M₂ outDim)
     (L : MetricFactor rank outDim)
-    (lambda : T #[outDim])
+    (lambda : AmbientVector outDim)
     (lr : Float)
-    : Sequential M₁ M₂ × MetricFactor rank inDim × T #[inDim] × Array LayerStepDiagnostics := by
+    : Sequential M₁ M₂ × MetricFactor rank inDim × AmbientVector inDim × Array LayerStepDiagnostics := by
   let (tape₁, tape₂) := tape
   let (second', midFactor, midCotangent, stats₂) :=
     RiemannianModule.backwardLeafStep net.second tape₂ L lambda lr

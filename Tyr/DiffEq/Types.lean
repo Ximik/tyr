@@ -1,4 +1,5 @@
 import Tyr.TensorStruct
+import Tyr.Torch
 
 namespace torch
 namespace DiffEq
@@ -253,13 +254,14 @@ instance {s : Shape} : DiffEqSeminorm (T s) where
   rms := rmsTensor
 
 instance (priority := 50) [TensorStruct α] : DiffEqElem α where
-  abs := TensorStruct.map (fun t => nn.abs t)
-  max := TensorStruct.zipWith tensorMaximum
-  addScalar s := TensorStruct.map (fun t => add_scalar t s)
-  div := TensorStruct.zipWith nn.div
+  abs := TensorStruct.map Tensor.abs
+  max := TensorStruct.zipWith Tensor.maximum
+  addScalar s := TensorStruct.map (fun t => Tensor.Preserving.addScalar t s)
+  div := TensorStruct.zipWith Tensor.Preserving.div
 
 instance (priority := 50) [TensorStruct α] : DiffEqSeminorm α where
-  rms x := TensorStruct.fold (fun t acc => max acc (DiffEqSeminorm.rms t)) 0.0 x
+  rms x := TensorStruct.fold (fun t acc => max acc (Float.sqrt (
+    Tensor.item (Tensor.sumAll (Mul.mul t t)) / (TensorSpec.numelOfShape t.shape).toFloat))) 0.0 x
 
 @[inline] def axpy [DiffEqSpace α] (a : Scalar) (x y : α) : α :=
   DiffEqSpace.add (DiffEqSpace.scale a x) y

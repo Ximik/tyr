@@ -34,6 +34,7 @@
 import Tyr.Torch
 import Tyr.Inference.OwnedKV
 import Tyr.TensorStruct
+import Tyr.Module.Derive
 
 namespace torch.Generator.KVCache
 
@@ -220,10 +221,10 @@ def Cache.attendLayer
 /-- TensorStruct instance for LayerCache -/
 instance {batch maxSeqLen numKvHeads headDim : UInt64}
     : TensorStruct (LayerCache batch maxSeqLen numKvHeads headDim) where
-  map f c := { keys := f c.keys, values := f c.values }
-  mapM f c := do pure { keys := ← f c.keys, values := ← f c.values }
-  zipWith f c1 c2 := { keys := f c1.keys c2.keys, values := f c1.values c2.values }
-  fold f init c := f c.values (f c.keys init)
+  map f c := { keys := TensorStruct.map f c.keys, values := TensorStruct.map f c.values }
+  mapM f c := do pure { keys := ← TensorStruct.mapM f c.keys, values := ← TensorStruct.mapM f c.values }
+  zipWith f c1 c2 := { keys := TensorStruct.zipWith f c1.keys c2.keys, values := TensorStruct.zipWith f c1.values c2.values }
+  fold f init c := TensorStruct.fold f (TensorStruct.fold f init c.keys) c.values
 
 /-- TensorStruct instance for Cache -/
 instance {numLayers batch maxSeqLen numKvHeads headDim : UInt64}

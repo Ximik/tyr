@@ -114,7 +114,7 @@ structure GradientTransformation (α : Type) (S : Type) where
 def scale [TensorStruct α] (stepSize : Float) : GradientTransformation α EmptyState where
   init _ := {}
   update _params grads state :=
-    (TensorStruct.map (fun t => mul_scalar t stepSize) grads, state)
+    (TensorStruct.map (fun t => Tensor.Preserving.mulScalar t stepSize) grads, state)
 
 /-- Scale by Adam: EMA of gradients and squared gradients with bias correction -/
 def scale_by_adam [TensorStruct α] (b1 : Float := 0.9) (b2 : Float := 0.999) (eps : Float := 1e-8)
@@ -122,29 +122,29 @@ def scale_by_adam [TensorStruct α] (b1 : Float := 0.9) (b2 : Float := 0.999) (e
   init model := {
     count := 0
     -- Use zeros_like to create state tensors on same device as model
-    mu := TensorStruct.map torch.zeros_like model
-    nu := TensorStruct.map torch.zeros_like model
+    mu := TensorStruct.map Tensor.zerosLike model
+    nu := TensorStruct.map Tensor.zerosLike model
   }
   update _params grads state :=
     let count := state.count + 1
     -- Update biased first moment estimate: mu = b1 * mu + (1 - b1) * g
     let mu := TensorStruct.zipWith (fun m g =>
-      let g_d := autograd.detach g
-      add (mul_scalar m b1) (mul_scalar g_d (1.0 - b1))
+      let g_d := Tensor.detach g
+      Add.add (Tensor.Preserving.mulScalar m b1) (Tensor.Preserving.mulScalar g_d (1.0 - b1))
     ) state.mu grads
     -- Update biased second moment estimate: nu = b2 * nu + (1 - b2) * g^2
     let nu := TensorStruct.zipWith (fun v g =>
-      let g_d := autograd.detach g
-      add (mul_scalar v b2) (mul_scalar (mul g_d g_d) (1.0 - b2))
+      let g_d := Tensor.detach g
+      Add.add (Tensor.Preserving.mulScalar v b2) (Tensor.Preserving.mulScalar (Mul.mul g_d g_d) (1.0 - b2))
     ) state.nu grads
     -- Bias correction
     let bc1 := 1.0 - Float.pow b1 count.toFloat
     let bc2 := 1.0 - Float.pow b2 count.toFloat
     -- Compute updates: mu_hat / (sqrt(nu_hat) + eps)
     let updates := TensorStruct.zipWith (fun m v =>
-      let m_hat := div_scalar m bc1
-      let v_hat := div_scalar v bc2
-      nn.div m_hat (add_scalar (nn.sqrt v_hat) eps)
+      let m_hat := Tensor.Preserving.divScalar m bc1
+      let v_hat := Tensor.Preserving.divScalar v bc2
+      Tensor.Preserving.div m_hat (Tensor.Preserving.addScalar (Tensor.Preserving.sqrt v_hat) eps)
     ) mu nu
     (updates, { count, mu, nu })
 
@@ -153,17 +153,17 @@ def add_decayed_weights [TensorStruct α] (decay : Float) : GradientTransformati
   init _ := {}
   update params grads state :=
     let updates := TensorStruct.zipWith (fun p g =>
-      let p_d := autograd.detach p
-      add g (mul_scalar p_d decay)
+      let p_d := Tensor.detach p
+      Add.add g (Tensor.Preserving.mulScalar p_d decay)
     ) params grads
     (updates, state)
 
 /-- Accumulate momentum trace: trace = decay * trace + g -/
 def trace [TensorStruct α] (decay : Float) : GradientTransformation α (TraceState α) where
-  init model := { trace := TensorStruct.map torch.zeros_like model }
+  init model := { trace := TensorStruct.map Tensor.zerosLike model }
   update _params grads state :=
     let new_trace := TensorStruct.zipWith (fun t g =>
-      add (mul_scalar t decay) g
+      Add.add (Tensor.Preserving.mulScalar t decay) g
     ) state.trace grads
     (new_trace, { trace := new_trace })
 
@@ -212,9 +212,9 @@ def sgd [TensorStruct α] (lr : Float) : GradientTransformation α EmptyState :=
     Handles detaching and re-enabling requires_grad for training. -/
 def apply_updates [TensorStruct α] (params : α) (updates : α) : α :=
   TensorStruct.zipWith (fun p u =>
-    let p_d := autograd.detach p
-    let p_new := add p_d u
-    autograd.set_requires_grad p_new true
+    let p_d := Tensor.detach p
+    let p_new := Add.add p_d u
+    Tensor.setRequiresGrad p_new true
   ) params updates
 
 /-- Full optimizer step: transform gradients and apply to parameters
@@ -257,7 +257,7 @@ def scale_by_schedule [TensorStruct α] (schedule : Schedule)
   init _ := { count := 0 }
   update _params grads state :=
     let s := schedule state.count
-    let updates := TensorStruct.map (fun t => mul_scalar t s) grads
+    let updates := TensorStruct.map (fun t => Tensor.Preserving.mulScalar t s) grads
     (updates, { count := state.count + 1 })
 
 /-! ## Schedule-Aware High-Level Optimizers -/

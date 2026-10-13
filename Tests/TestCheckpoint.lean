@@ -74,7 +74,7 @@ def testCheckpointCreation : IO Unit := do
   IO.FS.removeDirAll ckptDir
 
   -- Verify TensorStruct on params directly
-  let numParams := TensorStruct.fold (fun {s} _t acc => acc + s.foldl (· * ·) 1) 0 params
+  let numParams := TensorStruct.fold (fun {s} _t acc => acc + s.shape.foldl (· * ·) 1) 0 params
   LeanTest.assertTrue (numParams > 0) "Parameter count should be positive"
   
   -- Rough calculation: 
@@ -101,12 +101,12 @@ def testDistAdamCheckpointing : IO Unit := do
   let numTensors := TensorStruct.fold (fun {_s} _t acc => acc + 1) 0 state
   LeanTest.assertEqual numTensors 2 "DistAdam state should have 2 tensors (expAvg, expAvgSq)"
   
-  let totalElements := TensorStruct.fold (fun {s} _t acc => acc + s.foldl (· * ·) 1) 0 state
+  let totalElements := TensorStruct.fold (fun {s} _t acc => acc + s.shape.foldl (· * ·) 1) 0 state
   LeanTest.assertEqual totalElements 200 "DistAdam state should have 200 elements"
 
   -- Verify map works
-  let stateOnes := TensorStruct.map (fun t => add_scalar t 1.0) state
-  let sumOnes := TensorStruct.fold (fun {_s} t acc => acc + nn.item (nn.sumAll t)) 0.0 stateOnes
+  let stateOnes := TensorStruct.map (fun t => Tensor.Preserving.addScalar t 1.0) state
+  let sumOnes := TensorStruct.fold (fun {_s} t acc => acc + nn.item (s := #[]) (Tensor.sumAll t).raw) 0.0 stateOnes
   LeanTest.assertEqual sumOnes 200.0 "Mapped state should sum to 200"
 
 @[test]
@@ -133,7 +133,7 @@ def testNorMuonCheckpointing : IO Unit := do
   let numTensorsFilled := TensorStruct.fold (fun {_s} _t acc => acc + 1) 0 stateWithData
   LeanTest.assertEqual numTensorsFilled 2 "Filled NorMuon state should have 2 tensors"
   
-  let totalElements := TensorStruct.fold (fun {s} _t acc => acc + s.foldl (· * ·) 1) 0 stateWithData
+  let totalElements := TensorStruct.fold (fun {s} _t acc => acc + s.shape.foldl (· * ·) 1) 0 stateWithData
   LeanTest.assertEqual totalElements 101 "Filled NorMuon state should have 101 elements (100 + 1)"
 
 @[test]

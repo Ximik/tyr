@@ -11,7 +11,6 @@
 
   Based on modded-nanogpt's NorMuon implementation.
 -/
-import Tyr.Torch
 import Tyr.TensorStruct
 import Tyr.Distributed
 import Tyr.Optim.PolarExpress
@@ -33,9 +32,9 @@ inductive ParamLabel where
   deriving Repr, BEq, Hashable, Inhabited
 
 /-- Labeled parameter with metadata for optimization -/
-structure LabeledParam (s : Shape) where
+structure LabeledParam (σ : StaticSpec) where
   /-- The parameter tensor -/
-  tensor : T s
+  tensor : Tensor σ
   /-- Parameter label for grouping -/
   label : ParamLabel
   /-- Learning rate multiplier (1.0 = base LR) -/
@@ -68,58 +67,58 @@ instance : Inhabited Config where
                numIters := 5, distributed := false, worldSize := 1 }
 
 /-- State for a single parameter in NorMuon -/
-structure ParamState (s : Shape) where
+structure ParamState (σ : StaticSpec) where
   /-- Momentum buffer (EMA of orthogonalized gradients) -/
-  momentumBuffer : Option (T s) := none
-  /-- Second moment for variance reduction (low-rank approximation) -/
-  secondMoment : Option (T #[]) := none  -- Reduced dimension
+  momentumBuffer : Option (Tensor σ) := none
+  /-- Second moment for variance reduction (scalar; mean of squared gradients) -/
+  secondMoment : Option (Tensor σ.sumSpec) := none
   /-- Step count for bias correction -/
   step : Nat := 0
   deriving Repr
 
 /-- Initialize state for a parameter. -/
-def initParamState {s : Shape} (_param : T s) : ParamState s := {
+def initParamState {σ : StaticSpec} (_param : Tensor σ) : ParamState σ := {
   momentumBuffer := none
   secondMoment := none
   step := 0
 }
 
-instance {s : Shape} : TensorStruct (ParamState s) where
+instance {σ : StaticSpec} : TensorStruct (ParamState σ) where
   map f ps := { ps with
-    momentumBuffer := ps.momentumBuffer.map f,
-    secondMoment := ps.secondMoment.map f
+    momentumBuffer := ps.momentumBuffer.map (TensorStruct.map f),
+    secondMoment := ps.secondMoment.map (TensorStruct.map f)
   }
   mapM f ps := do
     let momentumBuffer ← match ps.momentumBuffer with
-      | some t => some <$> f t
+      | some t => some <$> TensorStruct.mapM f t
       | none => pure none
     let secondMoment ← match ps.secondMoment with
-      | some t => some <$> f t
+      | some t => some <$> TensorStruct.mapM f t
       | none => pure none
     return { ps with momentumBuffer, secondMoment }
   zipWith f ps1 ps2 := {
     momentumBuffer := match ps1.momentumBuffer, ps2.momentumBuffer with
-      | some t1, some t2 => some (f t1 t2)
+      | some t1, some t2 => some (TensorStruct.zipWith f t1 t2)
       | _, _ => none
     secondMoment := match ps1.secondMoment, ps2.secondMoment with
-      | some t1, some t2 => some (f t1 t2)
+      | some t1, some t2 => some (TensorStruct.zipWith f t1 t2)
       | _, _ => none
     step := ps1.step
   }
   fold f acc ps :=
     let acc := match ps.momentumBuffer with
-      | some t => f t acc
+      | some t => TensorStruct.fold f acc t
       | none => acc
     match ps.secondMoment with
-      | some t => f t acc
+      | some t => TensorStruct.fold f acc t
       | none => acc
 
 /-- Full NorMuon optimizer state -/
 structure State where
   /-- Configuration -/
   config : Config
-  /-- Per-parameter states stored by a hash of their identity -/
-  paramStates : Array (ParamState #[])  -- Type-erased states
+  /-- Per-parameter states, existentially packed over their specs -/
+  paramStates : Array (Sigma ParamState)
   /-- Global step count -/
   globalStep : Nat := 0
   deriving Repr
@@ -135,34 +134,37 @@ def State.init (cfg : Config) : IO State := do
 /-- Apply variance reduction to orthogonalized gradient.
 
     Uses low-rank second moment estimation (Adafactor-style):
-    v_t = beta2 * v_{t-1} + (1 - beta2) * mean(g^2, dim=reduce_dim)
+    v_t = beta2 * v_{t-1} + (1 - beta2) * mean(g^2)
     g_normalized = g / sqrt(v_t + eps)
 
     This reduces variance of the update while maintaining direction.
 -/
-def applyVarianceReduction {s : Shape} (grad : T s) (secondMoment : Option (T #[]))
-    (beta2 : Float) (step : Nat) : IO (T s × T #[]) := do
+def applyVarianceReduction {σ : StaticSpec} (grad : Tensor σ)
+    (secondMoment : Option (Tensor σ.sumSpec))
+    (beta2 : Float) (step : Nat) : IO (Tensor σ × Tensor σ.sumSpec) := do
   let eps : Float := 1e-8
 
-  -- Compute mean of squared gradients along last dimension
-  let gradSquared := grad * grad
-  let newSecondMoment := nn.meanAll gradSquared  -- Simplified: mean over all
+  -- Compute mean of squared gradients over all entries
+  let gradSquared := Mul.mul grad grad
+  let numel := (TensorSpec.numelOfShape σ.shape).toFloat
+  let newSecondMoment :=
+    Tensor.Preserving.divScalar (Tensor.sumAll gradSquared) numel
 
   -- Update EMA of second moment
   let updatedSecondMoment ← match secondMoment with
     | some sm =>
-      let b2 := mul_scalar sm beta2
-      let g2 := mul_scalar newSecondMoment (1.0 - beta2)
-      pure (b2 + g2)
+      let b2 := Tensor.Preserving.mulScalar sm beta2
+      let g2 := Tensor.Preserving.mulScalar newSecondMoment (1.0 - beta2)
+      pure (Add.add b2 g2)
     | none => pure newSecondMoment
 
   -- Bias correction
   let biasCorrection := 1.0 - Float.pow beta2 (step + 1).toFloat
-  let correctedMoment := div_scalar updatedSecondMoment biasCorrection
+  let correctedMoment := Tensor.Preserving.divScalar updatedSecondMoment biasCorrection
 
   -- Normalize gradient by sqrt(second moment)
-  let scale := 1.0 / Float.sqrt (nn.item correctedMoment + eps)
-  let normalizedGrad := mul_scalar grad scale
+  let scale := 1.0 / Float.sqrt (Tensor.item correctedMoment + eps)
+  let normalizedGrad := Tensor.Preserving.mulScalar grad scale
 
   return (normalizedGrad, updatedSecondMoment)
 
@@ -174,7 +176,8 @@ def applyVarianceReduction {s : Shape} (grad : T s) (secondMoment : Option (T #[
 
     This prevents weight decay from fighting the gradient.
 -/
-def applyCautiousWeightDecay {s : Shape} (param grad : T s) (wd : Float) : IO (T s) := do
+def applyCautiousWeightDecay {σ : StaticSpec} (param grad : Tensor σ) (wd : Float) :
+    IO (Tensor σ) := do
   if wd == 0.0 then
     return grad
   else
@@ -185,14 +188,14 @@ def applyCautiousWeightDecay {s : Shape} (param grad : T s) (wd : Float) : IO (T
     Matches nanochat Muon:
     buf_t = momentum * buf_{t-1} + (1 - momentum) * g
 -/
-def updateMomentum {s : Shape} (orthGrad : T s) (momentumBuffer : Option (T s))
-    (momentum : Float) : T s :=
+def updateMomentum {σ : StaticSpec} (orthGrad : Tensor σ)
+    (momentumBuffer : Option (Tensor σ)) (momentum : Float) : Tensor σ :=
   match momentumBuffer with
   | some buf =>
-    let decayed := mul_scalar buf momentum
-    let scaled := mul_scalar orthGrad (1.0 - momentum)
-    decayed + scaled
-  | none => mul_scalar orthGrad (1.0 - momentum)
+    let decayed := Tensor.Preserving.mulScalar buf momentum
+    let scaled := Tensor.Preserving.mulScalar orthGrad (1.0 - momentum)
+    Add.add decayed scaled
+  | none => Tensor.Preserving.mulScalar orthGrad (1.0 - momentum)
 
 /-- Compute aspect ratio scaling for a tensor shape.
     For 2D matrices: sqrt(max(1, height/width))
@@ -221,38 +224,39 @@ def aspectRatioScale (shape : Shape) : Float :=
     5. Apply decoupled weight decay (AdamW-style, matching DistAdam):
        `param ← param - effectiveLr * weightDecay * wdMul * param`
 -/
-def stepSingle {s : Shape} (param : T s) (grad : T s) (state : ParamState s)
-    (cfg : Config) (lrMul wdMul : Float) : IO (T s × ParamState s) := do
+def stepSingle {σ : StaticSpec} (param : Tensor σ) (grad : Tensor σ) (state : ParamState σ)
+    (cfg : Config) (lrMul wdMul : Float) : IO (Tensor σ × ParamState σ) := do
   -- Match nanochat ordering:
   -- 1) momentum buffer update on raw gradients
   -- 2) Nesterov blend
   -- 3) orthogonalize blended update
-  let gRaw := autograd.detach grad
+  let gRaw := Tensor.detach grad
   let newMomentum := updateMomentum gRaw state.momentumBuffer cfg.momentum
-  let nesterovGrad := mul_scalar gRaw (1.0 - cfg.momentum) + mul_scalar newMomentum cfg.momentum
+  let nesterovGrad := Add.add (Tensor.Preserving.mulScalar gRaw (1.0 - cfg.momentum))
+    (Tensor.Preserving.mulScalar newMomentum cfg.momentum)
   -- Zero gradients should stay zero; this avoids entering Newton-Schulz on
   -- exact zeros while preserving reference Muon semantics.
-  let nesterovAbsMax := nn.item (nn.maxAll (nn.abs nesterovGrad))
+  let nesterovAbsMax := Tensor.item (Tensor.maxAll (Tensor.abs nesterovGrad))
   let orthGrad ←
     if nesterovAbsMax == 0.0 then
       pure nesterovGrad
     else
       PolarExpress.muonOrthogonalize nesterovGrad cfg.numIters
-  let g := autograd.detach orthGrad
-  let aspectScale := aspectRatioScale s
+  let g := Tensor.detach orthGrad
+  let aspectScale := aspectRatioScale σ.shape
   let effectiveLr := cfg.lr * lrMul * aspectScale
   let wd := cfg.weightDecay * wdMul
   -- Apply weight decay (decoupled, AdamW-style), matching DistAdam.
   let paramDecayed := if wd > 0.0 then
-      let decay := mul_scalar (autograd.detach param) (effectiveLr * wd)
-      autograd.detach param - decay
+      let decay := Tensor.Preserving.mulScalar (Tensor.detach param) (effectiveLr * wd)
+      Sub.sub (Tensor.detach param) decay
     else
-      autograd.detach param
-  let update := mul_scalar g effectiveLr
-  let newParam := paramDecayed - update
-  let newParam := autograd.set_requires_grad (autograd.detach newParam) true
+      Tensor.detach param
+  let update := Tensor.Preserving.mulScalar g effectiveLr
+  let newParam := Sub.sub paramDecayed update
+  let newParam := Tensor.setRequiresGrad (Tensor.detach newParam) true
 
-  let newState : ParamState s := {
+  let newState : ParamState σ := {
     momentumBuffer := some newMomentum
     secondMoment := none
     step := state.step + 1
@@ -267,8 +271,10 @@ def stepSingle {s : Shape} (param : T s) (grad : T s) (state : ParamState s)
     2. Only `ownerRank` computes the Muon update and advances state.
     3. Broadcast updated parameter (and momentum buffer) from owner.
 -/
-def stepDistributedOwner {s : Shape} (param : T s) (grad : T s) (state : ParamState s)
-    (cfg : Config) (lrMul wdMul : Float) (ownerRank : UInt64) : IO (T s × ParamState s) := do
+def stepDistributedOwner {σ : StaticSpec} (param : Tensor σ) (grad : Tensor σ)
+    (state : ParamState σ)
+    (cfg : Config) (lrMul wdMul : Float) (ownerRank : UInt64) :
+    IO (Tensor σ × ParamState σ) := do
   let isDist ← dist.isInitialized
   if !cfg.distributed || !isDist then
     return (← stepSingle param grad state cfg lrMul wdMul)
@@ -278,7 +284,7 @@ def stepDistributedOwner {s : Shape} (param : T s) (grad : T s) (state : ParamSt
     return (← stepSingle param grad state cfg lrMul wdMul)
 
   let rank ← dist.getRank
-  let gradAvg := autograd.detach grad
+  let gradAvg := Tensor.detach grad
   dist.allReduce gradAvg .avg
 
   let (ownerParam, ownerState) ←
@@ -287,18 +293,18 @@ def stepDistributedOwner {s : Shape} (param : T s) (grad : T s) (state : ParamSt
     else
       pure (param, state)
 
-  let paramSynced := if rank == ownerRank then ownerParam else autograd.detach param
+  let paramSynced := if rank == ownerRank then ownerParam else Tensor.detach param
   dist.broadcast paramSynced ownerRank
 
   let momentumSynced :=
     if rank == ownerRank then
-      ownerState.momentumBuffer.getD (zeros_like paramSynced)
+      ownerState.momentumBuffer.getD (Tensor.zerosLike paramSynced)
     else
-      zeros_like paramSynced
+      Tensor.zerosLike paramSynced
   dist.broadcast momentumSynced ownerRank
 
-  let newParam := autograd.set_requires_grad (autograd.detach paramSynced) true
-  let newState : ParamState s := {
+  let newParam := Tensor.setRequiresGrad (Tensor.detach paramSynced) true
+  let newState : ParamState σ := {
     momentumBuffer := some momentumSynced
     secondMoment := ownerState.secondMoment
     step := state.step + 1
@@ -306,17 +312,17 @@ def stepDistributedOwner {s : Shape} (param : T s) (grad : T s) (state : ParamSt
   return (newParam, newState)
 
 /-- Local (non-distributed) Muon step for a homogeneous parameter group. -/
-private def stepGroupLocal {s : Shape}
-    (params : Array (T s))
-    (grads : Array (T s))
-    (states : Array (ParamState s))
+private def stepGroupLocal {σ : StaticSpec}
+    (params : Array (Tensor σ))
+    (grads : Array (Tensor σ))
+    (states : Array (ParamState σ))
     (cfg : Config) (lrMul wdMul : Float)
-    : IO (Array (T s) × Array (ParamState s)) := do
-  let mut outParams : Array (T s) := #[]
-  let mut outStates : Array (ParamState s) := #[]
+    : IO (Array (Tensor σ) × Array (ParamState σ)) := do
+  let mut outParams : Array (Tensor σ) := #[]
+  let mut outStates : Array (ParamState σ) := #[]
   for i in [:params.size] do
     let p := params[i]!
-    let g := grads[i]?.getD (zeros_like p)
+    let g := grads[i]?.getD (Tensor.zerosLike p)
     let st := states[i]?.getD (initParamState p)
     let (p', st') ← stepSingle p g st cfg lrMul wdMul
     outParams := outParams.push p'
@@ -331,12 +337,12 @@ private def stepGroupLocal {s : Shape}
     - Gradients are averaged with `reduce_scatter` over explicit per-rank lists.
     - Updated owner parameters are replicated with `all_gather`.
 -/
-def stepDistributedGroup {s : Shape}
-    (params : Array (T s))
-    (grads : Array (T s))
-    (states : Array (ParamState s))
+def stepDistributedGroup {σ : StaticSpec}
+    (params : Array (Tensor σ))
+    (grads : Array (Tensor σ))
+    (states : Array (ParamState σ))
     (cfg : Config) (lrMul wdMul : Float := 1.0)
-    : IO (Array (T s) × Array (ParamState s)) := do
+    : IO (Array (Tensor σ) × Array (ParamState σ)) := do
   if params.isEmpty then
     return (params, states)
 
@@ -351,21 +357,22 @@ def stepDistributedGroup {s : Shape}
   let rank ← dist.getRank
   let ws := worldSize.toNat
   let rankNat := rank.toNat
-  let zeroBuf := zeros_like params[0]!
+  let zeroBuf := Tensor.zerosLike params[0]!
   let mut outParams := params
   let mut outStates := states
   let mut base : Nat := 0
 
   while base < params.size do
     -- Build per-rank inputs for reduce-scatter (pad with zeros for short tails).
-    let mut rsInputs : Array (T s) := #[]
+    let mut rsInputs : Array (Tensor σ) := #[]
     for j in [:ws] do
       let idx := base + j
       let g := grads[idx]?.getD zeroBuf
       rsInputs := rsInputs.push g
 
     let ownerIdx := base + rankNat
-    let gradOwner := if ownerIdx < params.size then zeros_like params[ownerIdx]! else zeros_like zeroBuf
+    let gradOwner := if ownerIdx < params.size then Tensor.zerosLike params[ownerIdx]!
+      else Tensor.zerosLike zeroBuf
     dist.reduceScatterList gradOwner rsInputs .avg
 
     let mut ownerParam := if ownerIdx < params.size then params[ownerIdx]! else zeroBuf
@@ -376,31 +383,31 @@ def stepDistributedGroup {s : Shape}
       ownerState := st'
 
     -- Gather updated owner parameters back to all ranks for this block.
-    let mut gatherParams : Array (T s) := #[]
+    let mut gatherParams : Array (Tensor σ) := #[]
     for j in [:ws] do
       let idx := base + j
       let t := if idx < params.size then params[idx]! else zeroBuf
-      gatherParams := gatherParams.push (autograd.detach t)
+      gatherParams := gatherParams.push (Tensor.detach t)
     let agInput := if ownerIdx < params.size then ownerParam else zeroBuf
     dist.allGatherList gatherParams agInput
 
     -- Gather owner momentum buffers to keep replicated checkpoint-compatible state.
-    let mut gatherMomentum : Array (T s) := #[]
+    let mut gatherMomentum : Array (Tensor σ) := #[]
     for j in [:ws] do
       let idx := base + j
       let t := if idx < params.size then params[idx]! else zeroBuf
-      gatherMomentum := gatherMomentum.push (zeros_like t)
-    let agMomentum := ownerState.momentumBuffer.getD (zeros_like agInput)
+      gatherMomentum := gatherMomentum.push (Tensor.zerosLike t)
+    let agMomentum := ownerState.momentumBuffer.getD (Tensor.zerosLike agInput)
     dist.allGatherList gatherMomentum agMomentum
 
     for j in [:ws] do
       let idx := base + j
       if idx < params.size then
-        let pSynced := autograd.set_requires_grad (autograd.detach gatherParams[j]!) true
+        let pSynced := Tensor.setRequiresGrad (Tensor.detach gatherParams[j]!) true
         outParams := outParams.set! idx pSynced
         let prevState := outStates[idx]?.getD (initParamState pSynced)
-        let stSynced : ParamState s := {
-          momentumBuffer := some (autograd.detach gatherMomentum[j]!)
+        let stSynced : ParamState σ := {
+          momentumBuffer := some (Tensor.detach gatherMomentum[j]!)
           secondMoment := prevState.secondMoment
           step := prevState.step + 1
         }
@@ -422,12 +429,12 @@ def stepDistributedGroup {s : Shape}
     paths therefore apply `weightDecay` inconsistently; the coupled form also
     interacts with momentum, unlike true AdamW.
 -/
-def stepAdamLike {s : Shape} (param : T s) (grad : T s) (state : ParamState s)
-    (cfg : Config) (lrMul wdMul : Float) : IO (T s × ParamState s) := do
+def stepAdamLike {σ : StaticSpec} (param : Tensor σ) (grad : Tensor σ) (state : ParamState σ)
+    (cfg : Config) (lrMul wdMul : Float) : IO (Tensor σ × ParamState σ) := do
   -- Simple SGD with momentum for non-matrix params
   let effectiveWd := cfg.weightDecay * wdMul
   let gradWithWd := if effectiveWd > 0 then
-      grad + mul_scalar param effectiveWd
+      Add.add grad (Tensor.Preserving.mulScalar param effectiveWd)
     else
       grad
 
@@ -436,11 +443,11 @@ def stepAdamLike {s : Shape} (param : T s) (grad : T s) (state : ParamState s)
 
   -- Apply update
   let effectiveLr := cfg.lr * lrMul
-  let update := mul_scalar newMomentum effectiveLr
-  let newParam := param - update
-  let newParam := autograd.set_requires_grad (autograd.detach newParam) true
+  let update := Tensor.Preserving.mulScalar newMomentum effectiveLr
+  let newParam := Sub.sub param update
+  let newParam := Tensor.setRequiresGrad (Tensor.detach newParam) true
 
-  let newState : ParamState s := {
+  let newState : ParamState σ := {
     momentumBuffer := some newMomentum
     secondMoment := state.secondMoment
     step := state.step + 1

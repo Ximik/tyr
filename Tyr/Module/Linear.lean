@@ -12,9 +12,10 @@ namespace torch
 
 /-- Linear layer: y = xW^T (+ b optionally)
     Weight shape is [out_features, in_features] following PyTorch convention. -/
-structure Linear (in_dim out_dim : UInt64) where
-  weight : T #[out_dim, in_dim]
-  bias : Option (T #[out_dim]) := none
+structure Linear (in_dim out_dim : UInt64) (dtype : DType := .Float32)
+    (device : DevicePolicy := .any) where
+  weight : Tensor ⟨#[out_dim, in_dim], dtype, device⟩
+  bias : Option (Tensor ⟨#[out_dim], dtype, device⟩) := none
   deriving TensorStruct, ToModuleDisplay
 
 namespace Linear
@@ -23,42 +24,45 @@ namespace Linear
 def init (in_dim out_dim : UInt64) (withBias : Bool := true) : IO (Linear in_dim out_dim) := do
   -- Kaiming/He initialization: std = sqrt(2 / in_dim)
   let std := Float.sqrt (2.0 / in_dim.toFloat)
-  let w ← torch.randn #[out_dim, in_dim]
-  let weight := mul_scalar w std
-  let weight := autograd.set_requires_grad weight true
+  let w ← Tensor.randn #[out_dim, in_dim]
+  let weight := Tensor.Preserving.mulScalar w std
+  let weight := Tensor.setRequiresGrad weight true
   let bias ← if withBias then do
-    let b := torch.zeros #[out_dim]
-    let b := autograd.set_requires_grad b true
+    let b := Tensor.zeros #[out_dim] true
     pure (some b)
   else
     pure none
   pure { weight, bias }
 
 /-- Forward pass for 2D input [batch, in_dim] -> [batch, out_dim] -/
-def forward2d {in_dim out_dim batch : UInt64} (lin : Linear in_dim out_dim)
-    (x : T #[batch, in_dim]) : T #[batch, out_dim] :=
-  let y := linear x lin.weight
+def forward2d {in_dim out_dim batch : UInt64} {d : DType} {dev : DevicePolicy}
+    (lin : Linear in_dim out_dim d dev)
+    (x : Tensor ⟨#[batch, in_dim], d, dev⟩) : Tensor ⟨#[batch, out_dim], d, dev⟩ :=
+  let y := Tensor.linear x lin.weight
   match lin.bias with
-  | some b => add y (nn.expand b #[batch, out_dim])
+  | some b => Add.add y (Tensor.expand b #[batch, out_dim])
   | none => y
 
 /-- Forward pass for 3D input [batch, seq, in_dim] -> [batch, seq, out_dim] -/
-def forward3d {in_dim out_dim batch seq : UInt64} (lin : Linear in_dim out_dim)
-    (x : T #[batch, seq, in_dim]) : T #[batch, seq, out_dim] :=
+def forward3d {in_dim out_dim batch seq : UInt64} {d : DType} {dev : DevicePolicy}
+    (lin : Linear in_dim out_dim d dev)
+    (x : Tensor ⟨#[batch, seq, in_dim], d, dev⟩) : Tensor ⟨#[batch, seq, out_dim], d, dev⟩ :=
   match lin.bias with
-  | some b => affine3d x lin.weight b
-  | none => linear3d x lin.weight
+  | some b => Tensor.affine3d x lin.weight b
+  | none => Tensor.linear3d x lin.weight
 
 end Linear
 
 /-- Module instance for 2D forward pass -/
-instance {in_dim out_dim batch : UInt64} :
-    Module (Linear in_dim out_dim) (T #[batch, in_dim]) (T #[batch, out_dim]) where
+instance {in_dim out_dim batch : UInt64} {d : DType} {dev : DevicePolicy} :
+    Module (Linear in_dim out_dim d dev) (Tensor ⟨#[batch, in_dim], d, dev⟩)
+      (Tensor ⟨#[batch, out_dim], d, dev⟩) where
   forward := Linear.forward2d
 
 /-- Module instance for 3D forward pass -/
-instance {in_dim out_dim batch seq : UInt64} :
-    Module (Linear in_dim out_dim) (T #[batch, seq, in_dim]) (T #[batch, seq, out_dim]) where
+instance {in_dim out_dim batch seq : UInt64} {d : DType} {dev : DevicePolicy} :
+    Module (Linear in_dim out_dim d dev) (Tensor ⟨#[batch, seq, in_dim], d, dev⟩)
+      (Tensor ⟨#[batch, seq, out_dim], d, dev⟩) where
   forward := Linear.forward3d
 
 end torch

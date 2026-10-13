@@ -121,20 +121,22 @@ private def prototypeTrainBatch (cfg : PrototypeConfig)
   let (x, y) ←
     torch.train.getBatch
       stream cfg.trainConfig.batchSize cfg.trainConfig.blockSize cfg.trainConfig.device
+  let xT ← TensorOps.checked (s := #[cfg.trainConfig.batchSize, cfg.trainConfig.blockSize]) .Int64 x
+  let yT ← TensorOps.checked (s := #[cfg.trainConfig.batchSize, cfg.trainConfig.blockSize]) .Int64 y
   let step ←
     match cfg.pullbackMetric.mode with
     | .exact =>
       torch.Optim.RiemannianTreeSGD.stepCrossEntropy
         params
-        (fun p => gpt.forward p x true)
-        y
+        (fun p => gpt.forward p xT true)
+        yT
         lr
         cfg.trainConfig.gradClip
     | .sampledFisher =>
       torch.Optim.RiemannianTreeSGD.stepCrossEntropySampledFisher
         params
-        (fun p => gpt.forward p x true)
-        y
+        (fun p => gpt.forward p xT true)
+        yT
         cfg.pullbackMetric.fisherProbeCount
         lr
         cfg.trainConfig.gradClip
@@ -302,20 +304,22 @@ private def riemannianTrainStep {modelCfg : Config} {batch seq : UInt64}
     (y : T #[batch, seq])
     (lr : Float)
     : IO (GPTParams modelCfg × torch.Optim.RiemannianTreeSGD.StepDiagnostics × Float) := do
+  let xT ← TensorOps.checked (s := #[batch, seq]) .Int64 x
+  let yT ← TensorOps.checked (s := #[batch, seq]) .Int64 y
   let step ←
     match pullbackMetric.mode with
     | .exact =>
       torch.Optim.RiemannianTreeSGD.stepCrossEntropy
         params
-        (fun p => gpt.forward p x true)
-        y
+        (fun p => gpt.forward p xT true)
+        yT
         lr
         trainCfg.gradClip
     | .sampledFisher =>
       torch.Optim.RiemannianTreeSGD.stepCrossEntropySampledFisher
         params
-        (fun p => gpt.forward p x true)
-        y
+        (fun p => gpt.forward p xT true)
+        yT
         pullbackMetric.fisherProbeCount
         lr
         trainCfg.gradClip

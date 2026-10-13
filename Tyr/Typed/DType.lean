@@ -7,7 +7,7 @@ LeanMLX-style dtype algebra for Tyr's typed facade.
 
 This module is intentionally pure: it does not change the runtime tensor
 representation.  It gives higher layers a single place to ask what dtype an
-operation should produce before they wrap or validate existing `T s` values.
+operation should produce before they wrap or validate native tensor handles.
 -/
 
 namespace torch

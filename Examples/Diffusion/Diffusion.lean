@@ -12,6 +12,7 @@
 -/
 import Tyr.Torch
 import Tyr.TensorStruct
+import Tyr.Module.Derive
 import Examples.Diffusion.Parameters
 
 namespace torch.diffusion
@@ -61,31 +62,7 @@ structure DiffusionParams (cfg : Config) where
   -- Output head (NOT tied to token_emb)
   output_head : T #[cfg.vocab_size, cfg.n_embd]
 
--- Manual TensorStruct instance for DiffusionParams
-instance {cfg : Config} : TensorStruct (DiffusionParams cfg) where
-  map f p := {
-    token_emb := f p.token_emb
-    time_emb := f p.time_emb
-    blocks := p.blocks.map (TensorStruct.map f)
-    output_head := f p.output_head
-  }
-  mapM f p := do
-    let token_emb ← f p.token_emb
-    let time_emb ← f p.time_emb
-    let blocks ← p.blocks.mapM (TensorStruct.mapM f)
-    let output_head ← f p.output_head
-    pure { token_emb, time_emb, blocks, output_head }
-  zipWith f p1 p2 := {
-    token_emb := f p1.token_emb p2.token_emb
-    time_emb := f p1.time_emb p2.time_emb
-    blocks := Array.zipWith (TensorStruct.zipWith f) p1.blocks p2.blocks
-    output_head := f p1.output_head p2.output_head
-  }
-  fold f init p :=
-    let acc := f p.token_emb init
-    let acc := f p.time_emb acc
-    let acc := p.blocks.foldl (fun acc block => TensorStruct.fold f acc block) acc
-    f p.output_head acc
+  deriving TensorStruct
 
 /-- Initialize diffusion model parameters -/
 def DiffusionParams.init (cfg : Config) : IO (DiffusionParams cfg) := do

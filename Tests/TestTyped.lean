@@ -1,9 +1,33 @@
 import LeanTest
 import Tyr.Typed
+import Tyr.Torch
 
 open torch
 
 namespace Tests.TestTyped
+
+@[test]
+def testTypedDefaultsAndPlacement : IO Unit := do
+  for dtype in #[DType.UInt8, .Int8, .Int16, .Int32, .Int64, .Float16, .BFloat16,
+      .Float32, .Float64, .Bool, .Float8E4M3FN, .Float8E5M2, .Unknown "dynamic"] do
+    let spec : StaticSpec := { shape := #[2, 3], dtype, device := .exact .CPU }
+    let tensor : Tensor spec := default
+    match tensor.validate with
+    | .ok () => pure ()
+    | .error message => LeanTest.fail s!"Invalid default for {dtype}: {message}"
+    let moved := tensor.to .CPU
+    match moved.validate with
+    | .ok () => pure ()
+    | .error message => LeanTest.fail s!"CPU move lost {dtype} contract: {message}"
+    LeanTest.assertTrue (!moved.requiresGrad) "Defaults should not track gradients."
+  let scalar := (Tensor.full #[] 2.5).setRequiresGrad true
+  LeanTest.assertTrue scalar.requiresGrad "Typed autograd metadata should reflect requires_grad."
+  LeanTest.assertEqual scalar.item 2.5 "Typed scalar extraction should preserve the value."
+
+example (_matrix : DTensor #[2, 3] .Float32) : True := by
+  fail_if_success
+    have _ := Tensor.item _matrix
+  trivial
 
 /- Compile-time rejection tests. `fail_if_success` checks elaboration failure
    without inserting sorry-backed declarations into the runtime test module. -/

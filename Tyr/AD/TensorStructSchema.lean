@@ -1,5 +1,6 @@
 import Lean
 import Tyr.TensorStruct
+import Tyr.Legacy.Tensor
 
 /-!
 # Tyr.AD.TensorStructSchema
@@ -63,6 +64,7 @@ structure TensorLeafSpec where
   path : TensorLeafPath := {}
   role : TensorLeafRole := .diff
   shape : Option (Array Nat) := none
+  dtype : Option String := none
   deriving Repr, BEq, Inhabited, DecidableEq
 
 /-- Structural schema for a `TensorStruct` value. -/
@@ -117,16 +119,18 @@ end TensorLeafSelection
 /-- Runtime tensor payload for one flattened structured leaf. -/
 structure TensorLeafValue where
   role : TensorLeafRole := .diff
-  payload : Sigma T
-  deriving Repr
+  payload : Sigma Tensor
+
+instance : Repr TensorLeafValue where
+  reprPrec leaf _ := s!"TensorLeafValue({reprStr leaf.role}, {reprStr leaf.payload.1})"
 
 namespace TensorLeafValue
 
-def ofTensor {s : Shape} (role : TensorLeafRole) (t : T s) : TensorLeafValue :=
-  { role := role, payload := ⟨s, t⟩ }
+def ofTensor {σ : StaticSpec} (role : TensorLeafRole) (t : Tensor σ) : TensorLeafValue :=
+  { role := role, payload := ⟨σ, t⟩ }
 
 def typedShape (leaf : TensorLeafValue) : Shape :=
-  leaf.payload.1
+  leaf.payload.1.shape
 
 def shape (leaf : TensorLeafValue) : Array Nat :=
   shapeToNatArray leaf.typedShape
@@ -135,6 +139,11 @@ def dtype (leaf : TensorLeafValue) : DType :=
   leaf.payload.2.dtype
 
 end TensorLeafValue
+
+-- Compatibility boundary for models that have not yet migrated to Tensor.
+-- The runtime dtype is retained; rebuild checks the actual native metadata.
+private def legacyLeaf {s : Shape} (role : TensorLeafRole) (t : T s) : TensorLeafValue :=
+  TensorLeafValue.ofTensor role (Tensor.assumeSpec (σ := { shape := s, dtype := t.dtype }) t)
 
 /--
 Schema-oriented structural view of a value. Unlike `TensorStruct`, this is
@@ -215,20 +224,44 @@ private def takeLeaf
         s!"needed leaf #{idx}, but only {leaves.size} were provided."
 
 private def expectLeaf
-    {s : Shape}
+    {σ : StaticSpec}
     (expectedRole : TensorLeafRole)
     (path : TensorLeafPath)
     (leaf : TensorLeafValue) :
-    Except String (T s) := do
+    Except String (Tensor σ) := do
   if leaf.role != expectedRole then
     throw <| s!"Tensor leaf role mismatch at {renderPath path}: " ++
       s!"expected {reprStr expectedRole}, got {reprStr leaf.role}."
-  let ⟨leafShape, leafTensor⟩ := leaf.payload
-  if h : leafShape = s then
-    pure (h ▸ leafTensor)
-  else
+  let ⟨leafSpec, leafTensor⟩ := leaf.payload
+  if leafSpec.shape != σ.shape then
     throw <| s!"Tensor leaf shape mismatch at {renderPath path}: " ++
-      s!"expected {shapeToString s}, got {shapeToString leafShape}."
+      s!"expected {shapeToString σ.shape}, got {shapeToString leafSpec.shape}."
+  -- Validate both the incoming claim and the destination contract. This also
+  -- catches malformed handles constructed through unsafe native adapters.
+  match leafTensor.validate *> Tensor.ofRaw (σ := σ) leafTensor.raw with
+  | .ok tensor => pure tensor
+  | .error message => throw s!"Tensor leaf mismatch at {renderPath path}: {message}"
+
+private def knownDType : DType → Option String
+  | .Unknown _ => none
+  | dtype => some dtype.canonicalName
+
+instance {σ : StaticSpec} : ToTensorStructSchema (Tensor σ) where
+  describeLeaves _ path := #[{
+    path, role := .diff, shape := some (shapeToNatArray σ.shape), dtype := knownDType σ.dtype
+  }]
+
+instance {σ : StaticSpec} : TensorStructFlatten (Tensor σ) where
+  flattenAt tensor _ selection :=
+    if selection.includesRole .diff then #[TensorLeafValue.ofTensor .diff tensor] else #[]
+  rebuildAt _ path selection leaves := do
+    if selection.includesRole .diff then
+      let leaf ← takeLeaf path leaves
+      match expectLeaf .diff path leaf with
+      | .ok tensor => pure tensor
+      | .error message => throw message
+    else
+      throw s!"Internal error: selection {reprStr selection} excluded diff leaf at {renderPath path}."
 
 private def describeListLeaves
     [ToTensorStructSchema α]
@@ -253,27 +286,28 @@ instance {s : Shape} : ToTensorStructSchema (T s) where
 instance {s : Shape} : TensorStructFlatten (T s) where
   flattenAt t _ selection :=
     if TensorLeafSelection.includesRole selection .diff then
-      #[TensorLeafValue.ofTensor .diff t]
+      #[legacyLeaf .diff t]
     else
       #[]
-  rebuildAt _ path selection leaves := do
+  rebuildAt template path selection leaves := do
     if TensorLeafSelection.includesRole selection .diff then
       let leaf ← takeLeaf path leaves
-      match expectLeaf (s := s) .diff path leaf with
-      | .ok t => pure t
+      match expectLeaf (σ := { shape := s, dtype := template.dtype }) .diff path leaf with
+      | .ok t => pure t.raw
       | .error err => throw err
     else
       throw <| s!"Internal error: selection {reprStr selection} excluded diff leaf at {renderPath path}."
 
-instance {s : Shape} : ToTensorStructSchema (Frozen s) where
+instance {σ : StaticSpec} : ToTensorStructSchema (Frozen σ) where
   typeName := Name.anonymous
   describeLeaves _ path := #[{
     path := path
     role := .frozen
-    shape := some (shapeToNatArray s)
+    shape := some (shapeToNatArray σ.shape)
+    dtype := knownDType σ.dtype
   }]
 
-instance {s : Shape} : TensorStructFlatten (Frozen s) where
+instance {σ : StaticSpec} : TensorStructFlatten (Frozen σ) where
   flattenAt fr _ selection :=
     if TensorLeafSelection.includesRole selection .frozen then
       #[TensorLeafValue.ofTensor .frozen fr.tensor]
@@ -282,7 +316,7 @@ instance {s : Shape} : TensorStructFlatten (Frozen s) where
   rebuildAt fr path selection leaves := do
     if TensorLeafSelection.includesRole selection .frozen then
       let leaf ← takeLeaf path leaves
-      match expectLeaf (s := s) .frozen path leaf with
+      match expectLeaf (σ := σ) .frozen path leaf with
       | .ok t => pure { tensor := t }
       | .error err => throw err
     else

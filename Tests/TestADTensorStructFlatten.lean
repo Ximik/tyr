@@ -1,4 +1,5 @@
-import Tyr
+import Tyr.Module.Derive
+import Tyr.Typed.Ops
 import LeanTest
 
 namespace Tests.ADTensorStructFlatten
@@ -7,45 +8,61 @@ open torch
 open LeanTest
 
 structure Inner where
-  bias : T #[4]
+  bias : DTensor #[4] .Float32
   tag : Static String
-  cache : Frozen #[4]
+  cache : Frozen { shape := #[4], dtype := .Float32 }
   deriving Model
 
 structure Outer where
-  weight : T #[2, 4]
+  weight : DTensor #[2, 4] .Float32
   inner : Inner
-  gates : torch.Vector 2 (Frozen #[1])
-  optScale : Option (T #[3])
+  gates : torch.Vector 2 (Frozen { shape := #[1], dtype := .Float32 })
+  optScale : Option (DTensor #[3] .Float32)
   flag : Bool
   deriving Model
 
+set_option linter.unusedVariables false in
+example (wrongShape : DTensor #[3] .Float32) (wrongDType : DTensor #[4] .Int64) : True := by
+  fail_if_success
+    have _ : Frozen { shape := #[4], dtype := .Float32 } := ⟨wrongShape⟩
+  fail_if_success
+    have _ : Frozen { shape := #[4], dtype := .Float32 } := ⟨wrongDType⟩
+  trivial
+
+set_option linter.unusedVariables false in
+example (params : DTensor #[4] .Float32) : True := by
+  fail_if_success
+    have _ := TensorStruct.map (fun _ => Tensor.zeros #[3]) params
+  fail_if_success
+    have _ := TensorStruct.map (fun tensor => Tensor.toInt64 tensor) params
+  trivial
+
 private def templateOuter : Outer :=
-  { weight := zeros #[2, 4]
+  { weight := Tensor.zeros #[2, 4]
     inner := {
-      bias := zeros #[4]
+      bias := Tensor.zeros #[4]
       tag := "template-tag"
-      cache := (full #[4] 7.0 : Frozen #[4])
+      cache := (Tensor.full #[4] 7.0 : Frozen { shape := #[4], dtype := .Float32 })
     }
     gates := ⟨#[
-      (full #[1] 10.0 : Frozen #[1]),
-      (full #[1] 20.0 : Frozen #[1])
+      (Tensor.full #[1] 10.0 : Frozen { shape := #[1], dtype := .Float32 }),
+      (Tensor.full #[1] 20.0 : Frozen { shape := #[1], dtype := .Float32 })
     ], rfl⟩
-    optScale := some (zeros #[3])
+    optScale := some (Tensor.zeros #[3])
     flag := true }
 
 private def replacementOuter : Outer :=
-  { weight := full #[2, 4] 3.0
+  { weight := Tensor.full #[2, 4] 3.0
     inner := {
-      bias := full #[4] 4.0
+      bias := Tensor.full #[4] 4.0
       tag := "replacement-tag"
-      cache := (full #[4] 8.0 : Frozen #[4])
+      cache := (Tensor.full #[4] 8.0 : Frozen { shape := #[4], dtype := .Float32 })
     }
     gates := ⟨#[
-      (full #[1] 30.0 : Frozen #[1]),
-      (full #[1] 40.0 : Frozen #[1])
+      (Tensor.full #[1] 30.0 : Frozen { shape := #[1], dtype := .Float32 }),
+      (Tensor.full #[1] 40.0 : Frozen { shape := #[1], dtype := .Float32 })
     ], rfl⟩
-    optScale := some (full #[3] 5.0)
+    optScale := some (Tensor.full #[3] 5.0)
     flag := false }
 
 private def expectedDiffOnlyRebuild : Outer :=
@@ -86,9 +103,8 @@ private def leavesAllclose (lhs rhs : Array TensorLeafValue) : Bool := Id.run do
       return false
     match l.payload, r.payload with
     | ⟨ls, lt⟩, ⟨rs, rt⟩ =>
-        if hshape : ls = rs then
-          let rt' : T ls := hshape ▸ rt
-          if !(allclose lt rt') then
+        if ls == rs then
+          if !(allclose (s := ls.shape) lt.raw rt.raw) then
             return false
         else
           return false
@@ -172,7 +188,7 @@ def testTensorStructRebuildFromDiffAndFrozenReplacesAllSelectedLeaves : IO Unit 
 @[test]
 def testTensorStructRebuildRejectsShapeMismatch : IO Unit := do
   let diffLeaves := TensorStructFlatten.flatten replacementOuter .diffOnly
-  let badLeaves := diffLeaves.set! 0 (TensorLeafValue.ofTensor .diff (full #[8] 1.0))
+  let badLeaves := diffLeaves.set! 0 (TensorLeafValue.ofTensor .diff (Tensor.full #[8] 1.0))
   match TensorStructFlatten.rebuildFrom templateOuter badLeaves .diffOnly with
   | .ok _ =>
       LeanTest.fail "Rebuild should reject tensor leaves whose shapes do not match the template."
@@ -191,12 +207,75 @@ def testTensorStructRebuildRejectsMissingAndExtraLeaves : IO Unit := do
       LeanTest.assertTrue (err.containsSubstr "optScale")
         s!"Missing-leaf diagnostics should point at the first missing path, got: {err}"
 
-  let extraLeaves := diffLeaves.push (TensorLeafValue.ofTensor .diff (full #[1] 0.0))
+  let extraLeaves := diffLeaves.push (TensorLeafValue.ofTensor .diff (Tensor.full #[1] 0.0))
   match TensorStructFlatten.rebuildFrom templateOuter extraLeaves .diffOnly with
   | .ok _ =>
       LeanTest.fail "Rebuild should reject extra tensor leaves after consuming the template shape."
   | .error err =>
       LeanTest.assertTrue (err.containsSubstr "Unexpected extra tensor leaves")
         s!"Extra-leaf diagnostics should explain the unused suffix, got: {err}"
+
+structure MixedParams where
+  weight : Tensor { shape := #[2], dtype := .Float32, device := .exact .CPU }
+  indices : DTensor #[2] .Int64
+  deriving Model
+
+private def mixedParams : MixedParams := {
+  weight := Tensor.assumeSpec (Tensor.full #[2] 3.0).raw
+  indices := Tensor.fullInt #[2] 7
+}
+
+@[test]
+def testTypedModelTraversalAndRebuildPreserveFullSpec : IO Unit := do
+  let original := mixedParams
+  let mapped ← TensorStruct.mapM (fun tensor => pure tensor) original
+  let zipped := TensorStruct.zipWith (fun left _ => left) mapped original
+  LeanTest.assertEqual (TensorStruct.count zipped) 2
+    "Generic typed leaves should participate in the derived Model traversal."
+  let leaves := TensorStructFlatten.flatten zipped
+  LeanTest.assertTrue ((leaves.map (·.dtype)) == #[.Float32, .Int64])
+    "Flattening must retain each leaf's dtype."
+  let some first := leaves[0]? | LeanTest.fail "Missing first typed parameter leaf."
+  LeanTest.assertTrue (first.payload.1.device == .exact .CPU)
+    "Flattening must retain the pinned device policy."
+  let rebuilt ← unwrapOrFail (TensorStructFlatten.rebuildFrom original leaves)
+  let _ ← unwrapOrFail rebuilt.weight.validate
+  let _ ← unwrapOrFail rebuilt.indices.validate
+  LeanTest.assertTrue (leavesAllclose leaves (TensorStructFlatten.flatten rebuilt))
+    "Typed heterogeneous parameters must round-trip through flatten/rebuild."
+
+private def expectWeightRebuildError (leaf : TensorLeafValue) (detail : String) : IO Unit := do
+  let leaves := (TensorStructFlatten.flatten mixedParams).set! 0 leaf
+  match TensorStructFlatten.rebuildFrom mixedParams leaves with
+  | .ok _ => LeanTest.fail s!"Rebuild accepted invalid {detail}."
+  | .error message =>
+      LeanTest.assertTrue (message.containsSubstr "weight" && message.containsSubstr detail)
+        s!"Rebuild diagnostic should identify the field and {detail}: {message}"
+
+@[test]
+def testFrozenRebuildRejectsDTypeMismatch : IO Unit := do
+  let leaves := (TensorStructFlatten.flatten templateOuter).set! 2
+    (TensorLeafValue.ofTensor .frozen (Tensor.fullInt #[4] 1))
+  match TensorStructFlatten.rebuildFrom templateOuter leaves with
+  | .ok _ => LeanTest.fail "Frozen tensor reconstruction accepted a different dtype."
+  | .error message =>
+      LeanTest.assertTrue (message.containsSubstr "inner.cache" && message.containsSubstr "dtype")
+        s!"Frozen mismatch diagnostic should identify the field and dtype: {message}"
+
+@[test]
+def testTypedRebuildRejectsDTypeRoleAndMalformedHandles : IO Unit := do
+  expectWeightRebuildError
+    (TensorLeafValue.ofTensor .diff (Tensor.fullInt #[2] 1)) "dtype"
+  expectWeightRebuildError
+    (TensorLeafValue.ofTensor .frozen mixedParams.weight) "role"
+  let malformedShape : DTensor #[2] .Float32 :=
+    Tensor.assumeSpec (Tensor.zeros #[3]).raw
+  expectWeightRebuildError (TensorLeafValue.ofTensor .diff malformedShape) "shape"
+  let malformedDType : DTensor #[2] .Float32 :=
+    Tensor.assumeSpec (Tensor.fullInt #[2] 1).raw
+  expectWeightRebuildError (TensorLeafValue.ofTensor .diff malformedDType) "dtype"
+  let malformedDevice : Tensor { shape := #[2], dtype := .Float32, device := .exact .MPS } :=
+    Tensor.assumeSpec (Tensor.zeros #[2]).raw
+  expectWeightRebuildError (TensorLeafValue.ofTensor .diff malformedDevice) "device"
 
 end Tests.ADTensorStructFlatten

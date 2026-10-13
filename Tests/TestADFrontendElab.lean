@@ -23,15 +23,24 @@ def runCoreM (x : CoreM α) : IO α := do
   | .error msg =>
       throw (IO.userError (← msg.toMessageData.toString))
 
-opaque frontendPadPrimitive (base : torch.T #[2]) (padv : torch.T #[1]) : torch.T #[6]
+opaque frontendPadPrimitive (_base : torch.DTensor #[2] .Float32) (_padv : torch.DTensor #[1] .Float32) : torch.DTensor #[6] .Float32 :=
+  torch.Tensor.assumeSpec (torch.zeros #[6])
 
-def ordinaryPadWrapper (base : torch.T #[2]) (padv : torch.T #[1]) : torch.T #[6] :=
+def ordinaryPadWrapper (base : torch.DTensor #[2] .Float32) (padv : torch.DTensor #[1] .Float32) : torch.DTensor #[6] .Float32 :=
   frontendPadPrimitive base padv
 
-opaque frontendReshapePrimitive (x : torch.T #[6]) : torch.T #[6]
+opaque frontendReshapePrimitive (x : torch.DTensor #[6] .Float32) : torch.DTensor #[6] .Float32 := x
 
-def unsupportedCompositeWrapper (base : torch.T #[2]) (padv : torch.T #[1]) : torch.T #[6] :=
+def unsupportedCompositeWrapper (base : torch.DTensor #[2] .Float32) (padv : torch.DTensor #[1] .Float32) : torch.DTensor #[6] .Float32 :=
   frontendReshapePrimitive (frontendPadPrimitive base padv)
+
+opaque frontendFrozenPadPrimitive (_base : torch.DTensor #[2] .Float32)
+    (_padv : torch.Frozen { shape := #[1], dtype := .Float32 }) : torch.DTensor #[6] .Float32 :=
+  torch.Tensor.assumeSpec (torch.zeros #[6])
+
+def frozenPadWrapper (base : torch.DTensor #[2] .Float32)
+    (padv : torch.Frozen { shape := #[1], dtype := .Float32 }) : torch.DTensor #[6] .Float32 :=
+  frontendFrozenPadPrimitive base padv
 
 private def padPrimitiveSpecs : Array PrimitiveFrontendSpec := #[
   {
@@ -82,6 +91,21 @@ unsafe def testDeriveSinglePrimitiveFrontendRegistration : IO Unit := do
     "Derived frontend equation should preserve fixed primitive params."
   LeanTest.assertEqual (eqn.params.findNats? .padInterior) (some #[1])
     "Derived frontend equation should preserve fixed primitive params."
+
+@[test]
+unsafe def testDeriveFrontendFrozenTensorSpec : IO Unit := do
+  let specs := padPrimitiveSpecs.map fun spec =>
+    if spec.leanConst == ``Tests.ADFrontendElab.frontendPadPrimitive then
+      { spec with leanConst := ``Tests.ADFrontendElab.frontendFrozenPadPrimitive }
+    else spec
+  let registration ← runCoreM <|
+    deriveSinglePrimitiveFrontendRegistration ``Tests.ADFrontendElab.frozenPadWrapper specs
+  LeanTest.assertTrue ((registration.jaxpr.invars.map (·.metaInfo.shape)) == #[some #[2], some #[1]])
+    "Frozen parameter shapes must come from their tensor specification."
+  LeanTest.assertTrue ((registration.jaxpr.invars.map (·.metaInfo.participation)) == #[.diff, .frozen])
+    "Frozen typed parameters must keep their AD participation role."
+  LeanTest.assertTrue ((registration.jaxpr.invars.map (·.metaInfo.dtype)) == #[some "Float32", some "Float32"])
+    "Typed and frozen parameters must retain their dtype in frontend metadata."
 
 /--
 Registration itself currently trips a Lean IR interpreter assertion under

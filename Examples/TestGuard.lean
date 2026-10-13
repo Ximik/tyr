@@ -8,8 +8,8 @@ open torch
 
 -- Example: Visualize a Linear layer's parameters
 def exampleModule : IO ModuleDisplayProps := do
-  let weight ← torch.randn #[64, 128]
-  let bias ← torch.randn #[64]
+  let weight ← Tensor.randn #[64, 128]
+  let bias ← Tensor.randn #[64]
   let weightNode := ModuleNode.tensor (tensorToPropsNamed weight "weight" #["out", "in"])
   let biasNode := ModuleNode.tensor (tensorToPropsNamed bias "bias" #["out"])
 
@@ -22,10 +22,10 @@ def exampleModule : IO ModuleDisplayProps := do
 
 -- Nested example: A small MLP
 def mlpModule : IO ModuleDisplayProps := do
-  let w1 ← torch.randn #[128, 64]
-  let b1 ← torch.randn #[128]
-  let w2 ← torch.randn #[10, 128]
-  let b2 ← torch.randn #[10]
+  let w1 ← Tensor.randn #[128, 64]
+  let b1 ← Tensor.randn #[128]
+  let w2 ← Tensor.randn #[10, 128]
+  let b2 ← Tensor.randn #[10]
   let layer1 := ModuleNode.group "layer1" #[
     ("weight", ModuleNode.tensor (tensorToPropsNamed w1 "weight" #["out", "in"])),
     ("bias", ModuleNode.tensor (tensorToPropsNamed b1 "bias" #["out"]))
@@ -45,11 +45,11 @@ def mlpModule : IO ModuleDisplayProps := do
 
 
 
-#eval torch.randn #[3, 4]
-#tensor torch.randn #[10,49]
-#tensor torch.randn #[20,10]
+#eval Tensor.randn #[3, 4]
+#tensor Tensor.randn #[10,49]
+#tensor Tensor.randn #[20,10]
 
-#tensor torch.randn #[20,100,4]
+#tensor Tensor.randn #[20,100,4]
 
 
  /-- Example: Custom structure with deriving -/

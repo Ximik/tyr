@@ -40,6 +40,11 @@ def init (hidden_size num_heads num_kv_heads head_dim intermediate_size : UInt64
   let mlp ← QwenMLP.init hidden_size intermediate_size
   pure { input_layernorm, self_attn, post_attention_layernorm, mlp }
 
+/-- Migration boundary: wrap a legacy runtime handle for the typed module
+    interface, claiming Float32 (the legacy runtime dtype). Removed when this
+    module migrates to indexed tensors. -/
+private def typedF32 {s : Shape} (t : T s) : DTensor s .Float32 := .assumeSpec t
+
 /-- Forward pass for a transformer layer.
     Input: [batch, seq, hidden_size]
     Output: [batch, seq, hidden_size]
@@ -54,13 +59,13 @@ def forward {batch seq hidden_size num_heads num_kv_heads head_dim intermediate_
     : T #[batch, seq, hidden_size] :=
   -- Pre-norm attention
   let residual := x
-  let x := layer.input_layernorm.forward3d x
+  let x := (layer.input_layernorm.forward3d (typedF32 x) rfl).raw
   let x := layer.self_attn.forward x cos sin is_causal
   let x := residual + x
 
   -- Pre-norm MLP
   let residual := x
-  let x := layer.post_attention_layernorm.forward3d x
+  let x := (layer.post_attention_layernorm.forward3d (typedF32 x) rfl).raw
   let x := layer.mlp.forward x
   residual + x
 
@@ -75,13 +80,13 @@ def forwardStep {batch hidden_size num_heads num_kv_heads head_dim intermediate_
     : T #[batch, 1, hidden_size] × QwenAttention.KVCache batch num_kv_heads head_dim :=
   -- Pre-norm attention.
   let residual1 := x
-  let x1 := layer.input_layernorm.forward3d x
+  let x1 := (layer.input_layernorm.forward3d (typedF32 x) rfl).raw
   let (attnOut, cache') := layer.self_attn.forwardStep x1 cos sin cache
   let h1 := residual1 + attnOut
 
   -- Pre-norm MLP.
   let residual2 := h1
-  let h2 := layer.post_attention_layernorm.forward3d h1
+  let h2 := (layer.post_attention_layernorm.forward3d (typedF32 h1) rfl).raw
   let h3 := layer.mlp.forward h2
   (residual2 + h3, cache')
 
@@ -95,13 +100,13 @@ def forwardMasked {batch seq hidden_size num_heads num_kv_heads head_dim interme
     : T #[batch, seq, hidden_size] :=
   -- Pre-norm attention
   let residual := x
-  let x := layer.input_layernorm.forward3d x
+  let x := (layer.input_layernorm.forward3d (typedF32 x) rfl).raw
   let x := layer.self_attn.forwardMasked x cos sin attn_mask is_causal
   let x := residual + x
 
   -- Pre-norm MLP
   let residual := x
-  let x := layer.post_attention_layernorm.forward3d x
+  let x := (layer.post_attention_layernorm.forward3d (typedF32 x) rfl).raw
   let x := layer.mlp.forward x
   residual + x
 

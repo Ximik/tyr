@@ -1,4 +1,3 @@
-import Tyr.Torch
 import Tyr.TensorStruct
 
 /-!
@@ -97,95 +96,101 @@ opaque barrier : IO Unit
     Returns work ID if async, 0 otherwise.
 -/
 @[extern "lean_torch_dist_all_reduce"]
-private opaque allReduceImpl {s : Shape} (tensor : @& T s) (op : UInt8) (asyncOp : UInt8) : IO UInt64
+private opaque allReduceImpl (tensor : @& RawTensor) (op : UInt8) (asyncOp : UInt8) : IO UInt64
 
-/-- All-reduce (synchronous) -/
-def allReduce {s : Shape} (tensor : T s) (op : ReduceOp := .sum) : IO Unit := do
-  let _ ← allReduceImpl tensor op.toUInt8 0
+/-- All-reduce (synchronous). The buffer is reduced in place; the static spec
+    is untouched by the collective. -/
+def allReduce {σ : StaticSpec} (tensor : Tensor σ) (op : ReduceOp := .sum) : IO Unit := do
+  let _ ← allReduceImpl tensor.raw op.toUInt8 0
   return ()
 
 /-- All-reduce (asynchronous) -/
-def allReduceAsync {s : Shape} (tensor : T s) (op : ReduceOp := .sum) : IO WorkHandle := do
-  let id ← allReduceImpl tensor op.toUInt8 1
+def allReduceAsync {σ : StaticSpec} (tensor : Tensor σ) (op : ReduceOp := .sum) : IO WorkHandle := do
+  let id ← allReduceImpl tensor.raw op.toUInt8 1
   return ⟨id⟩
 
-/-- Broadcast tensor from source rank to all processes.
+/-- Broadcast tensor from source rank to all processes (in-place).
 
     Args:
     - tensor: Input/output tensor
     - srcRank: Source rank to broadcast from
 -/
 @[extern "lean_torch_dist_broadcast"]
-opaque broadcast {s : Shape} (tensor : @& T s) (srcRank : UInt64) : IO Unit
+private opaque broadcastImpl (tensor : @& RawTensor) (srcRank : UInt64) : IO Unit
+
+/-- Broadcast a tensor from `srcRank` (in-place buffer update). -/
+def broadcast {σ : StaticSpec} (tensor : Tensor σ) (srcRank : UInt64) : IO Unit :=
+  broadcastImpl tensor.raw srcRank
 
 /-- Reduce-scatter: reduce tensors and scatter results to all processes.
 
     Each process gets a different portion of the reduced tensor.
     Input is split into worldSize chunks, reduced, and each rank gets one chunk.
-
-    Args:
-    - output: Output tensor (this rank's portion)
-    - input: Input tensor (full size, will be chunked)
-    - op: Reduce operation
-    - asyncOp: If true, returns work handle
+    The output buffer is written in place.
 
     Returns work ID if async, 0 otherwise.
 -/
 @[extern "lean_torch_dist_reduce_scatter_tensor"]
-private opaque reduceScatterImpl {sOut sIn : Shape} (output : @& T sOut) (input : @& T sIn)
+private opaque reduceScatterImpl (output : @& RawTensor) (input : @& RawTensor)
     (op : UInt8) (asyncOp : UInt8) : IO UInt64
 
-/-- Reduce-scatter (synchronous) -/
-def reduceScatter {sOut sIn : Shape} (output : T sOut) (input : T sIn)
-    (op : ReduceOp := .sum) : IO Unit := do
-  let _ ← reduceScatterImpl output input op.toUInt8 0
-  return ()
-
-/-- Reduce-scatter (asynchronous) -/
-def reduceScatterAsync {sOut sIn : Shape} (output : T sOut) (input : T sIn)
-    (op : ReduceOp := .sum) : IO WorkHandle := do
-  let id ← reduceScatterImpl output input op.toUInt8 1
-  return ⟨id⟩
+/-- Reduce-scatter (synchronous), return-allocated: the input's leading axis is
+    chunked across `worldSize` ranks, so the result spec is computed from the
+    input spec — no independent output shape can be claimed. -/
+def reduceScatter {σ : StaticSpec} (worldSize : UInt64) (input : Tensor σ)
+    (op : ReduceOp := .sum)
+    : IO (Tensor (σ.withShape (σ.shape.set! 0 (σ.shape.getD 0 0 / worldSize)))) := do
+  let output := Tensor.zerosFor (σ.withShape (σ.shape.set! 0 (σ.shape.getD 0 0 / worldSize)))
+  let _ ← reduceScatterImpl output.raw input.raw op.toUInt8 0
+  return output
 
 /-- Reduce-scatter from an explicit list of per-rank inputs.
 
     This mirrors `torch.distributed.reduce_scatter` where each rank contributes
-    a list of tensors (one per rank). The list length must equal world size.
+    a list of tensors (one per rank). Every contribution and the output share
+    one spec; the list length must equal world size.
 -/
 @[extern "lean_torch_dist_reduce_scatter_list"]
-opaque reduceScatterList {s : Shape} (output : @& T s) (inputs : @& Array (T s))
-    (op : ReduceOp := .sum) : IO Unit
+private opaque reduceScatterListImpl (output : @& RawTensor) (inputs : @& Array RawTensor)
+    (op : UInt8) : IO Unit
+
+/-- Reduce-scatter from an explicit list of per-rank inputs (one per rank),
+    all sharing the output's spec. -/
+def reduceScatterList {σ : StaticSpec} (output : Tensor σ) (inputs : Array (Tensor σ))
+    (op : ReduceOp := .sum) : IO Unit :=
+  reduceScatterListImpl output.raw (inputs.map Tensor.toTensor) op.toUInt8
 
 /-- All-gather: gather tensors from all processes to all processes.
-
-    Args:
-    - output: Output tensor (concatenated from all ranks)
-    - input: Input tensor from this rank
-    - asyncOp: If true, returns work handle
+    The output buffer (leading axis = worldSize × input's) is written in place.
 
     Returns work ID if async, 0 otherwise.
 -/
 @[extern "lean_torch_dist_all_gather_into_tensor"]
-private opaque allGatherImpl {sOut sIn : Shape} (output : @& T sOut) (input : @& T sIn)
+private opaque allGatherImpl (output : @& RawTensor) (input : @& RawTensor)
     (asyncOp : UInt8) : IO UInt64
 
-/-- All-gather (synchronous) -/
-def allGather {sOut sIn : Shape} (output : T sOut) (input : T sIn) : IO Unit := do
-  let _ ← allGatherImpl output input 0
-  return ()
-
-/-- All-gather (asynchronous) -/
-def allGatherAsync {sOut sIn : Shape} (output : T sOut) (input : T sIn) : IO WorkHandle := do
-  let id ← allGatherImpl output input 1
-  return ⟨id⟩
+/-- All-gather (synchronous), return-allocated: the result concatenates the
+    `worldSize` per-rank contributions along the leading axis, so its spec is
+    computed from the input spec — no independent output shape can be claimed. -/
+def allGather {σ : StaticSpec} (worldSize : UInt64) (input : Tensor σ)
+    : IO (Tensor (σ.withShape (σ.shape.set! 0 (σ.shape.getD 0 0 * worldSize)))) := do
+  let output := Tensor.zerosFor (σ.withShape (σ.shape.set! 0 (σ.shape.getD 0 0 * worldSize)))
+  let _ ← allGatherImpl output.raw input.raw 0
+  return output
 
 /-- All-gather into an explicit list of output tensors.
 
     This mirrors `torch.distributed.all_gather` where each rank provides one
-    input tensor and receives the gathered outputs in a list.
+    input tensor and receives the gathered outputs in a list; every output
+    shares the input's spec.
 -/
 @[extern "lean_torch_dist_all_gather_list"]
-opaque allGatherList {s : Shape} (outputs : @& Array (T s)) (input : @& T s) : IO Unit
+private opaque allGatherListImpl (outputs : @& Array RawTensor) (input : @& RawTensor) : IO Unit
+
+/-- All-gather into an explicit list of output tensor buffers sharing the
+    input's spec. -/
+def allGatherList {σ : StaticSpec} (outputs : Array (Tensor σ)) (input : Tensor σ) : IO Unit :=
+  allGatherListImpl (outputs.map Tensor.toTensor) input.raw
 
 /-! ## Async Operation Handling -/
 
@@ -207,53 +212,81 @@ def waitAll (handles : Array WorkHandle) : IO Unit := do
 
 /-! ## Polar Express Operations -/
 
-/-- Symmetric matrix multiplication: C = A @ A.T
+/-- Symmetric matrix multiplication: C = A @ A.T (raw handle boundary).
 
     For batched input [batch, rows, cols], output is [batch, rows, rows]
     For 2D input [rows, cols], output is [rows, rows]
 -/
 @[extern "lean_torch_xxt"]
-opaque xxt {s : Shape} (A : @& T s) : IO (T #[])
+private opaque xxtImpl (A : @& RawTensor) : IO RawTensor
+
+/-- `A @ Aᵀ` for an indexed matrix: the result shape is computed from the
+    input, not claimed independently. -/
+def xxt {m n : UInt64} {d : DType} {dev : DevicePolicy}
+    (A : Tensor ⟨#[m, n], d, dev⟩) : IO (Tensor ⟨#[m, m], d, dev⟩) := do
+  pure (.assumeSpec (← xxtImpl A.raw))
 
 /-- Fused operation: C = beta * A + alpha * (A @ A.T)
 
     Used in Newton-Schulz iteration. Input must be square (last two dims equal).
 -/
 @[extern "lean_torch_ba_plus_cAA"]
-opaque baPlusCaa {s : Shape} (A : @& T s) (alpha beta : Float) : IO (T s)
+private opaque baPlusCaaImpl (A : @& RawTensor) (alpha beta : Float) : IO RawTensor
 
-/-- Single Newton-Schulz iteration step.
+/-- `beta * A + alpha * (A @ Aᵀ)`, spec-preserving. -/
+def baPlusCaa {σ : StaticSpec} (A : Tensor σ) (alpha beta : Float) : IO (Tensor σ) := do
+  pure (.assumeSpec (← baPlusCaaImpl A.raw alpha beta))
+
+/-- Single Newton-Schulz iteration step (raw handle boundary).
 
     Computes: Y = a*X + b*X@X.T@X + c*X@X.T@X@X.T@X
 -/
 @[extern "lean_torch_newton_schulz_step"]
-opaque newtonSchulzStep {s : Shape} (X : @& T s) (a b c : Float) : IO (T s)
+private opaque newtonSchulzStepImpl (X : @& RawTensor) (a b c : Float) : IO RawTensor
 
-/-- Polar Express orthogonalization via Newton-Schulz iterations.
+/-- Single Newton-Schulz iteration step, spec-preserving. -/
+def newtonSchulzStep {σ : StaticSpec} (X : Tensor σ) (a b c : Float) : IO (Tensor σ) := do
+  pure (.assumeSpec (← newtonSchulzStepImpl X.raw a b c))
+
+/-- Polar Express orthogonalization via Newton-Schulz iterations (raw boundary).
 
     Approximates the matrix sign function for orthogonalization.
     Typically uses 5 iterations with precomputed stable coefficients.
 -/
 @[extern "lean_torch_polar_express"]
-opaque polarExpress {s : Shape} (G : @& T s) (numIters : UInt64 := 5) : IO (T s)
+private opaque polarExpressImpl (G : @& RawTensor) (numIters : UInt64) : IO RawTensor
 
-/-- Muon-style orthogonalized gradient.
+/-- Polar Express orthogonalization via Newton-Schulz iterations,
+    spec-preserving. -/
+def polarExpress {σ : StaticSpec} (G : Tensor σ) (numIters : UInt64 := 5) : IO (Tensor σ) := do
+  pure (.assumeSpec (← polarExpressImpl G.raw numIters))
+
+/-- Muon-style orthogonalized gradient (raw boundary).
 
     For [out, in] gradient:
     - If out > in: orthogonalize along rows (transpose, orthogonalize, transpose back)
     - If out <= in: orthogonalize directly
 -/
 @[extern "lean_torch_muon_orthogonalize"]
-opaque muonOrthogonalize {s : Shape} (G : @& T s) (numIters : UInt64 := 5) : IO (T s)
+private opaque muonOrthogonalizeImpl (G : @& RawTensor) (numIters : UInt64) : IO RawTensor
 
-/-- Cautious weight decay update.
+/-- Muon-style orthogonalized gradient, spec-preserving (handles tall and wide
+    matrices internally via transposition). -/
+def muonOrthogonalize {σ : StaticSpec} (G : Tensor σ) (numIters : UInt64 := 5) : IO (Tensor σ) := do
+  pure (.assumeSpec (← muonOrthogonalizeImpl G.raw numIters))
+
+/-- Cautious weight decay update (raw boundary).
 
     Only applies weight decay when update and parameter have the same sign:
     mask = sign(update) == sign(param)
     newParam = param - lr * (update + wd * mask * param)
 -/
 @[extern "lean_torch_cautious_update"]
-opaque cautiousUpdate {s : Shape} (param update : @& T s) (lr wd : Float) : IO (T s)
+private opaque cautiousUpdateImpl (param update : @& RawTensor) (lr wd : Float) : IO RawTensor
+
+/-- Cautious weight decay update, spec-preserving. -/
+def cautiousUpdate {σ : StaticSpec} (param update : Tensor σ) (lr wd : Float) : IO (Tensor σ) := do
+  pure (.assumeSpec (← cautiousUpdateImpl param.raw update.raw lr wd))
 
 /-! ## Helper Functions -/
 

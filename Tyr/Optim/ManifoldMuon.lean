@@ -9,7 +9,6 @@
     spectral-style updates.
   - Keep API shape close to NorMuon for easy experimentation.
 -/
-import Tyr.Torch
 import Tyr.TensorStruct
 import Tyr.Distributed
 import Tyr.Optim.PolarExpress
@@ -19,6 +18,8 @@ import Tyr.Manifolds.Optimizer
 namespace torch.Optim.ManifoldMuon
 
 open torch
+
+variable {d : DType} {dev : DevicePolicy}
 
 /-- Dual solve backend used inside manifold-Muon. -/
 inductive SolverKind where
@@ -63,73 +64,78 @@ structure SolveDiagnostics where
   deriving Repr, Inhabited
 
 /-- Result of solving for a constrained manifold update direction. -/
-structure SolveResult (m n : UInt64) where
-  direction : T #[m, n]
-  dualVar : T #[n, n]
+structure SolveResult (m n : UInt64) (dtype : DType := .Float32)
+    (device : DevicePolicy := .any) where
+  direction : Tensor ⟨#[m, n], dtype, device⟩
+  dualVar : Tensor ⟨#[n, n], dtype, device⟩
   diagnostics : SolveDiagnostics
   deriving Repr
 
 /-- Per-parameter state for Stiefel Manifold-Muon. -/
-structure ParamState (m n : UInt64) where
+structure ParamState (m n : UInt64) (dtype : DType := .Float32)
+    (device : DevicePolicy := .any) where
   /-- Momentum buffer in ambient space. -/
-  momentumBuffer : Option (T #[m, n]) := none
+  momentumBuffer : Option (Tensor ⟨#[m, n], dtype, device⟩) := none
   /-- Dual variable for tangent-constrained solve. -/
-  dualVar : Option (T #[n, n]) := none
+  dualVar : Option (Tensor ⟨#[n, n], dtype, device⟩) := none
   /-- Step counter. -/
   step : Nat := 0
   deriving Repr
 
 /-- Initialize per-parameter state. -/
-def initParamState {m n : UInt64} (_param : T #[m, n]) : ParamState m n := {
+def initParamState {m n : UInt64} (_param : Tensor ⟨#[m, n], d, dev⟩) : ParamState m n d dev := {
   momentumBuffer := none
   dualVar := none
   step := 0
 }
 
-instance {m n : UInt64} : TensorStruct (ParamState m n) where
+instance {m n : UInt64} {d : DType} {dev : DevicePolicy} :
+    TensorStruct (ParamState m n d dev) where
   map f s := {
-    momentumBuffer := s.momentumBuffer.map f
-    dualVar := s.dualVar.map f
+    momentumBuffer := s.momentumBuffer.map (TensorStruct.map f)
+    dualVar := s.dualVar.map (TensorStruct.map f)
     step := s.step
   }
   mapM f s := do
     let momentumBuffer ← match s.momentumBuffer with
-      | some t => some <$> f t
+      | some t => some <$> TensorStruct.mapM f t
       | none => pure none
     let dualVar ← match s.dualVar with
-      | some t => some <$> f t
+      | some t => some <$> TensorStruct.mapM f t
       | none => pure none
     pure { s with momentumBuffer, dualVar }
   zipWith f a b := {
     momentumBuffer := match a.momentumBuffer, b.momentumBuffer with
-      | some t1, some t2 => some (f t1 t2)
+      | some t1, some t2 => some (TensorStruct.zipWith f t1 t2)
       | _, _ => none
     dualVar := match a.dualVar, b.dualVar with
-      | some t1, some t2 => some (f t1 t2)
+      | some t1, some t2 => some (TensorStruct.zipWith f t1 t2)
       | _, _ => none
     step := a.step
   }
   fold f init s :=
     let acc := match s.momentumBuffer with
-      | some t => f t init
+      | some t => TensorStruct.fold f init t
       | none => init
     match s.dualVar with
-    | some t => f t acc
+    | some t => TensorStruct.fold f acc t
     | none => acc
 
 /-- Symmetric part of a square matrix. -/
-def sym {n : UInt64} (A : T #[n, n]) : T #[n, n] :=
-  mul_scalar (A + nn.transpose2d A) 0.5
+def sym {n : UInt64} (A : Tensor ⟨#[n, n], d, dev⟩) : Tensor ⟨#[n, n], d, dev⟩ :=
+  Tensor.Preserving.mulScalar (Add.add A (Tensor.transpose2d A)) 0.5
 
 /-- Project an ambient matrix to the Stiefel tangent space at W. -/
-def tangentProject {m n : UInt64} (W : T #[m, n]) (G : T #[m, n]) : T #[m, n] :=
-  let XtG := nn.mm (nn.transpose2d W) G
-  let correction := nn.mm W (sym XtG)
-  G - correction
+def tangentProject {m n : UInt64} (W : Tensor ⟨#[m, n], d, dev⟩) (G : Tensor ⟨#[m, n], d, dev⟩) :
+    Tensor ⟨#[m, n], d, dev⟩ :=
+  let XtG := Tensor.mm (Tensor.transpose2d W) G
+  let correction := Tensor.mm W (sym XtG)
+  Sub.sub G correction
 
 /-- Tangent-constraint residual matrix: `WᵀA + AᵀW`. -/
-def tangentResidual {m n : UInt64} (W : T #[m, n]) (A : T #[m, n]) : T #[n, n] :=
-  nn.mm (nn.transpose2d W) A + nn.mm (nn.transpose2d A) W
+def tangentResidual {m n : UInt64} (W : Tensor ⟨#[m, n], d, dev⟩) (A : Tensor ⟨#[m, n], d, dev⟩) :
+    Tensor ⟨#[n, n], d, dev⟩ :=
+  Add.add (Tensor.mm (Tensor.transpose2d W) A) (Tensor.mm (Tensor.transpose2d A) W)
 
 private def solveConverged (cfg : Config) (iter residual dualDelta : Float) : Bool :=
   iter >= cfg.minSolveSteps.toFloat &&
@@ -137,17 +143,19 @@ private def solveConverged (cfg : Config) (iter residual dualDelta : Float) : Bo
     dualDelta <= cfg.solveDualDeltaTol
 
 /-- Dual objective estimate used for diagnostics. -/
-private def dualObjectiveEstimate {m n : UInt64} (W G : T #[m, n]) (lambda : T #[n, n]) : Float :=
-  let lambdaPlus := lambda + nn.transpose2d lambda
-  let adjusted := G + mul_scalar (nn.mm W lambdaPlus) 2.0
-  0.0 - linalg.nuclearNorm adjusted
+private def dualObjectiveEstimate {m n : UInt64} (W G : Tensor ⟨#[m, n], d, dev⟩)
+    (lambda : Tensor ⟨#[n, n], d, dev⟩) : Float :=
+  let lambdaPlus := Add.add lambda (Tensor.transpose2d lambda)
+  let adjusted := Add.add G (Tensor.Preserving.mulScalar (Tensor.mm W lambdaPlus) 2.0)
+  0.0 - Tensor.nuclearNorm adjusted
 
 /--
 Run lightweight dual ascent and return matrix-sign direction plus updated dual var.
 -/
 def solveDirectionDualAscent {m n : UInt64}
-    (W : T #[m, n]) (G : T #[m, n]) (dual0 : T #[n, n]) (cfg : Config)
-    : IO (SolveResult m n) := do
+    (W : Tensor ⟨#[m, n], d, dev⟩) (G : Tensor ⟨#[m, n], d, dev⟩)
+    (dual0 : Tensor ⟨#[n, n], d, dev⟩) (cfg : Config)
+    : IO (SolveResult m n d dev) := do
   let mut lambda := dual0
   let mut signedDir := G
   let mut residual := 1e30
@@ -157,13 +165,13 @@ def solveDirectionDualAscent {m n : UInt64}
   for i in [:cfg.dualAscentSteps] do
     if !converged then
       let lambdaPrev := lambda
-      let lambdaPlus := lambda + nn.transpose2d lambda
-      let adjusted := G + mul_scalar (nn.mm W lambdaPlus) 2.0
+      let lambdaPlus := Add.add lambda (Tensor.transpose2d lambda)
+      let adjusted := Add.add G (Tensor.Preserving.mulScalar (Tensor.mm W lambdaPlus) 2.0)
       signedDir ← PolarExpress.apply adjusted { numIters := cfg.numIters }
       let h := tangentResidual W signedDir
-      lambda := lambda + mul_scalar h cfg.dualAscentLr
-      residual := linalg.frobeniusNorm h
-      dualDelta := linalg.frobeniusNorm (lambda - lambdaPrev)
+      lambda := Add.add lambda (Tensor.Preserving.mulScalar h cfg.dualAscentLr)
+      residual := Tensor.frobeniusNorm h
+      dualDelta := Tensor.frobeniusNorm (Sub.sub lambda lambdaPrev)
       iterations := i + 1
       converged := solveConverged cfg iterations.toFloat residual dualDelta
   let diag : SolveDiagnostics := {
@@ -180,26 +188,29 @@ def solveDirectionDualAscent {m n : UInt64}
 Fixed-point solver variant for `H(Λ)=0` style updates with damping.
 -/
 def solveDirectionFixedPoint {m n : UInt64}
-    (W : T #[m, n]) (G : T #[m, n]) (dual0 : T #[n, n]) (cfg : Config)
-    : IO (SolveResult m n) := do
+    (W : Tensor ⟨#[m, n], d, dev⟩) (G : Tensor ⟨#[m, n], d, dev⟩)
+    (dual0 : Tensor ⟨#[n, n], d, dev⟩) (cfg : Config)
+    : IO (SolveResult m n d dev) := do
   let mut lambda := dual0
   let mut signedDir := G
   let mut residual := 1e30
   let mut dualDelta := 1e30
   let mut iterations : Nat := 0
   let mut converged := false
-  let damp := if cfg.fixedPointDamping < 0.0 then 0.0 else if cfg.fixedPointDamping > 1.0 then 1.0 else cfg.fixedPointDamping
+  let damp := if cfg.fixedPointDamping < 0.0 then 0.0
+    else if cfg.fixedPointDamping > 1.0 then 1.0 else cfg.fixedPointDamping
   for i in [:cfg.dualAscentSteps] do
     if !converged then
       let lambdaPrev := lambda
-      let lambdaPlus := lambda + nn.transpose2d lambda
-      let adjusted := G + mul_scalar (nn.mm W lambdaPlus) 2.0
+      let lambdaPlus := Add.add lambda (Tensor.transpose2d lambda)
+      let adjusted := Add.add G (Tensor.Preserving.mulScalar (Tensor.mm W lambdaPlus) 2.0)
       signedDir ← PolarExpress.apply adjusted { numIters := cfg.numIters }
       let h := tangentResidual W signedDir
-      let candidate := lambda - mul_scalar h cfg.dualAscentLr
-      lambda := mul_scalar lambda (1.0 - damp) + mul_scalar candidate damp
-      residual := linalg.frobeniusNorm h
-      dualDelta := linalg.frobeniusNorm (lambda - lambdaPrev)
+      let candidate := Sub.sub lambda (Tensor.Preserving.mulScalar h cfg.dualAscentLr)
+      lambda := Add.add (Tensor.Preserving.mulScalar lambda (1.0 - damp))
+        (Tensor.Preserving.mulScalar candidate damp)
+      residual := Tensor.frobeniusNorm h
+      dualDelta := Tensor.frobeniusNorm (Sub.sub lambda lambdaPrev)
       iterations := i + 1
       converged := solveConverged cfg iterations.toFloat residual dualDelta
   let diag : SolveDiagnostics := {
@@ -214,38 +225,46 @@ def solveDirectionFixedPoint {m n : UInt64}
 
 /-- Solve for direction using the configured inner solver backend. -/
 def solveDirection {m n : UInt64}
-    (W : T #[m, n]) (G : T #[m, n]) (dual0 : T #[n, n]) (cfg : Config)
-    : IO (SolveResult m n) := do
+    (W : Tensor ⟨#[m, n], d, dev⟩) (G : Tensor ⟨#[m, n], d, dev⟩)
+    (dual0 : Tensor ⟨#[n, n], d, dev⟩) (cfg : Config)
+    : IO (SolveResult m n d dev) := do
   match cfg.solver with
   | .dualAscent => solveDirectionDualAscent W G dual0 cfg
   | .fixedPoint => solveDirectionFixedPoint W G dual0 cfg
 
-/-- Retraction onto Stiefel using reduced QR. -/
-def retractStiefel {m n : UInt64} (W : T #[m, n]) : T #[m, n] :=
-  (Tyr.AD.Stiefel.project m n W).matrix
+/-- Retraction onto Stiefel using reduced QR. Tall matrices (`n ≤ m`) retract
+    column-wise; wide matrices retract row-wise via the transposed projection,
+    matching Muon's usual tall/wide handling. -/
+def retractStiefel {m n : UInt64} (W : Tensor ⟨#[m, n], d, dev⟩) : Tensor ⟨#[m, n], d, dev⟩ :=
+  if h : n.toNat ≤ m.toNat then
+    (Tyr.AD.Stiefel.project m n W h).matrix
+  else
+    let h' : m.toNat ≤ n.toNat := Nat.le_of_lt (Nat.lt_of_not_le h)
+    Tensor.transpose2d (Tyr.AD.Stiefel.project n m (Tensor.transpose2d W) h').matrix
 
 /-- Single update step with inner-solver diagnostics. -/
 def stepSingleWithDiagnostics {m n : UInt64}
-    (param : T #[m, n])
-    (grad : T #[m, n])
-    (state : ParamState m n)
+    (param : Tensor ⟨#[m, n], d, dev⟩)
+    (grad : Tensor ⟨#[m, n], d, dev⟩)
+    (state : ParamState m n d dev)
     (cfg : Config)
     (lrMul : Float := 1.0)
-    : IO (T #[m, n] × ParamState m n × SolveDiagnostics) := do
-  let gRaw := autograd.detach grad
+    : IO (Tensor ⟨#[m, n], d, dev⟩ × ParamState m n d dev × SolveDiagnostics) := do
+  let gRaw := Tensor.detach grad
 
   -- Nesterov-style blend (aligned with NorMuon's momentum semantics).
   let newMomentum := NorMuon.updateMomentum gRaw state.momentumBuffer cfg.momentum
-  let nesterovGrad := mul_scalar gRaw (1.0 - cfg.momentum) + mul_scalar newMomentum cfg.momentum
+  let nesterovGrad := Add.add (Tensor.Preserving.mulScalar gRaw (1.0 - cfg.momentum))
+    (Tensor.Preserving.mulScalar newMomentum cfg.momentum)
 
   -- Optional dual-ascent solve in ambient space.
-  let dual0 := state.dualVar.getD (zeros #[n, n])
+  let dual0 := state.dualVar.getD (Tensor.zerosFor ⟨#[n, n], d, dev⟩)
   let (signedDir, dualVar', solveDiag) ←
     if cfg.dualAscentSteps == 0 then
       let signed ← PolarExpress.apply nesterovGrad { numIters := cfg.numIters }
       let diag : SolveDiagnostics := {
         iterations := 0
-        residual := linalg.frobeniusNorm (tangentResidual param signed)
+        residual := Tensor.frobeniusNorm (tangentResidual param signed)
         dualDelta := 0.0
         dualObjective := dualObjectiveEstimate param nesterovGrad dual0
         converged := true
@@ -260,22 +279,22 @@ def stepSingleWithDiagnostics {m n : UInt64}
   let tangentDir := tangentProject param signedDir
 
   -- Keep step magnitude predictable.
-  let fnorm := linalg.frobeniusNorm tangentDir
+  let fnorm := Tensor.frobeniusNorm tangentDir
   let tangentUnit :=
     if fnorm == 0.0 then
       tangentDir
     else
-      mul_scalar tangentDir (1.0 / fnorm)
+      Tensor.Preserving.mulScalar tangentDir (1.0 / fnorm)
 
   let aspectScale := NorMuon.aspectRatioScale #[m, n]
   let effectiveLr := cfg.lr * lrMul * aspectScale
 
   -- Ambient update + Stiefel retraction.
-  let updated := param - mul_scalar tangentUnit effectiveLr
+  let updated := Sub.sub param (Tensor.Preserving.mulScalar tangentUnit effectiveLr)
   let retracted := retractStiefel updated
-  let newParam := autograd.set_requires_grad (autograd.detach retracted) true
+  let newParam := Tensor.setRequiresGrad (Tensor.detach retracted) true
 
-  let newState : ParamState m n := {
+  let newState : ParamState m n d dev := {
     momentumBuffer := some newMomentum
     dualVar := some dualVar'
     step := state.step + 1
@@ -284,28 +303,28 @@ def stepSingleWithDiagnostics {m n : UInt64}
 
 /-- Single local update step for a Stiefel-constrained matrix parameter. -/
 def stepSingle {m n : UInt64}
-    (param : T #[m, n])
-    (grad : T #[m, n])
-    (state : ParamState m n)
+    (param : Tensor ⟨#[m, n], d, dev⟩)
+    (grad : Tensor ⟨#[m, n], d, dev⟩)
+    (state : ParamState m n d dev)
     (cfg : Config)
     (lrMul : Float := 1.0)
-    : IO (T #[m, n] × ParamState m n) := do
+    : IO (Tensor ⟨#[m, n], d, dev⟩ × ParamState m n d dev) := do
   let (param', state', _) ← stepSingleWithDiagnostics param grad state cfg lrMul
   return (param', state')
 
 /-- Local group update for homogeneous matrix shapes. -/
 def stepGroupLocal {m n : UInt64}
-    (params : Array (T #[m, n]))
-    (grads : Array (T #[m, n]))
-    (states : Array (ParamState m n))
+    (params : Array (Tensor ⟨#[m, n], d, dev⟩))
+    (grads : Array (Tensor ⟨#[m, n], d, dev⟩))
+    (states : Array (ParamState m n d dev))
     (cfg : Config)
     (lrMul : Float := 1.0)
-    : IO (Array (T #[m, n]) × Array (ParamState m n)) := do
-  let mut outParams : Array (T #[m, n]) := #[]
-  let mut outStates : Array (ParamState m n) := #[]
+    : IO (Array (Tensor ⟨#[m, n], d, dev⟩) × Array (ParamState m n d dev)) := do
+  let mut outParams : Array (Tensor ⟨#[m, n], d, dev⟩) := #[]
+  let mut outStates : Array (ParamState m n d dev) := #[]
   for i in [:params.size] do
     let p := params[i]!
-    let g := grads[i]?.getD (zeros_like p)
+    let g := grads[i]?.getD (Tensor.zerosLike p)
     let st := states[i]?.getD (initParamState p)
     let (p', st') ← stepSingle p g st cfg lrMul
     outParams := outParams.push p'
@@ -316,12 +335,12 @@ def stepGroupLocal {m n : UInt64}
 Distributed group update (prototype): all-reduce gradients then local manifold step.
 -/
 def stepDistributedGroup {m n : UInt64}
-    (params : Array (T #[m, n]))
-    (grads : Array (T #[m, n]))
-    (states : Array (ParamState m n))
+    (params : Array (Tensor ⟨#[m, n], d, dev⟩))
+    (grads : Array (Tensor ⟨#[m, n], d, dev⟩))
+    (states : Array (ParamState m n d dev))
     (cfg : Config)
     (lrMul : Float := 1.0)
-    : IO (Array (T #[m, n]) × Array (ParamState m n)) := do
+    : IO (Array (Tensor ⟨#[m, n], d, dev⟩) × Array (ParamState m n d dev)) := do
   if params.isEmpty then
     return (params, states)
 
@@ -333,10 +352,10 @@ def stepDistributedGroup {m n : UInt64}
   if worldSize <= 1 then
     return (← stepGroupLocal params grads states cfg lrMul)
 
-  let mut reducedGrads : Array (T #[m, n]) := #[]
+  let mut reducedGrads : Array (Tensor ⟨#[m, n], d, dev⟩) := #[]
   for i in [:params.size] do
     let p := params[i]!
-    let g := autograd.detach (grads[i]?.getD (zeros_like p))
+    let g := Tensor.detach (grads[i]?.getD (Tensor.zerosLike p))
     dist.allReduce g .avg
     reducedGrads := reducedGrads.push g
 
@@ -347,14 +366,14 @@ def benchmarkLocalStep {m n : UInt64}
     (numSteps : Nat := 5)
     (cfg : Config := {})
     : IO Float := do
-  let p0 ← randn #[m, n] false
-  let p0 := autograd.set_requires_grad p0 true
+  let p0 ← Tensor.randn #[m, n]
+  let p0 := Tensor.setRequiresGrad p0 true
   let mut p := retractStiefel p0
   let mut st := initParamState p
 
   let t0 ← IO.monoMsNow
   for _ in [:numSteps] do
-    let g ← randn #[m, n] false
+    let g ← Tensor.randn #[m, n]
     let (p', st') ← stepSingle p g st cfg
     p := p'
     st := st'

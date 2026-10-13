@@ -71,6 +71,7 @@ jobs:
       - name: Verify audited FFI ABI declarations
         run: |
           python3 scripts/check_ffi_abi.py
+          python3 scripts/check_ffi_abi.py --header cc/src/tyr_raw_tensor_abi.h --generated .lake/build/ir/Tyr/RawTensor.c
           python3 scripts/check_ffi_abi.py --header cc/src/tyr_owned_kv_abi.h --generated .lake/build/ir/Tyr/Inference/OwnedKV.c
 
       - name: Test native attention CPU semantics

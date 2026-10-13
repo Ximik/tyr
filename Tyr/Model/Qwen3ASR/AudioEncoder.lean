@@ -15,6 +15,11 @@ import Tyr.Module.LayerNorm
 import Tyr.Model.Qwen3ASR.Config
 import Tyr.Model.Utils
 
+/-- Migration boundary: wrap a legacy runtime handle for the typed module
+    interface, claiming Float32 (the legacy runtime dtype). Removed when this
+    module migrates to indexed tensors. -/
+private def typedF32 {s : Shape} (t : T s) : DTensor s .Float32 := .assumeSpec t
+
 namespace torch.qwen3asr
 
 open torch.Model
@@ -146,12 +151,12 @@ def forward {batch seq : UInt64}
     (attnMask : Option (T #[batch, seq]) := none)
     : T #[batch, seq, cfg.dModel] :=
   let residual0 := x
-  let h0 := m.selfAttnLayerNorm.forward3d x
+  let h0 := m.selfAttnLayerNorm.forward3d (typedF32 x)
   let h1 := m.selfAttn.forward h0 attnMask
   let h2 := residual0 + h1
 
   let residual1 := h2
-  let h3 := m.finalLayerNorm.forward3d h2
+  let h3 := m.finalLayerNorm.forward3d (typedF32 h2)
   let h4 : T #[batch, seq, cfg.encoderFfnDim] := affine3d h3 m.fc1Weight m.fc1Bias
   let h5 := activate cfg.activationFunction h4
   let h6 : T #[batch, seq, cfg.dModel] := affine3d h5 m.fc2Weight m.fc2Bias
@@ -403,7 +408,7 @@ private def encodeOneSampleVarLen {frames : UInt64}
     let attnChunkLens := chunkLensFromCumsum cuCumsum
     let hiddenChunked := runLayersChunkLocal m hiddenValid attnChunkLens
 
-    let hidden := m.lnPost.forward3d hiddenChunked
+    let hidden := m.lnPost.forward3d (typedF32 hiddenChunked)
     let hidden : T #[1, totalValid, cfg.dModel] := affine3d hidden m.proj1Weight m.proj1Bias
     let hidden := activate cfg.activationFunction hidden
     let hidden : T #[1, totalValid, cfg.outputDim] := affine3d hidden m.proj2Weight m.proj2Bias
@@ -476,7 +481,7 @@ def forward {batch frames : UInt64}
     | some mask => m.layers.foldl (fun h layer => layer.forward h (some mask)) hidden0
     | none => m.layers.foldl (fun h layer => layer.forward h none) hidden0
 
-  let hidden := m.lnPost.forward3d hidden
+  let hidden := m.lnPost.forward3d (typedF32 hidden)
   let hidden : T #[batch, t3, cfg.dModel] := affine3d hidden m.proj1Weight m.proj1Bias
   let hidden := activate cfg.activationFunction hidden
   affine3d hidden m.proj2Weight m.proj2Bias

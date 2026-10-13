@@ -1,10 +1,12 @@
 /-!
 # Tyr.Basic.Types
 
-The pure part of `Tyr.Basic`: `Shape`, `DType`, `Device`, the opaque tensor
-carrier `T`, and shape-transform utilities. It declares no native functions, so
-the GPU code generator can use it without linking `libTyrC`. `Tyr.Basic` adds
-the tensor metadata functions implemented in `libTyrC`.
+The pure part of `Tyr.Basic`: `Shape`, `DType`, `Device`, the native tensor
+carrier `RawTensor`, the indexed `Tensor` over `StaticSpec`, and shape-transform
+utilities. It declares no native functions, so the GPU code generator can use it
+without linking `libTyrC`. `Tyr.Basic` adds the tensor metadata functions
+implemented in `libTyrC`. The legacy shape-erasing `torch.T` alias is isolated
+in `Tyr.Legacy.Tensor` and intentionally absent here.
 -/
 
 namespace torch
@@ -94,7 +96,50 @@ inductive Device where
 deriving Repr, Inhabited, BEq
 
 opaque TSpec : NonemptyType
-def T (_ : Shape) : Type :=  TSpec.type
+
+/-- Native libtorch handle. It makes no static shape, dtype, or device claim.
+Use `torch.Tensor` for model code; this carrier belongs at FFI boundaries. -/
+def RawTensor : Type := TSpec.type
+
+instance : Nonempty RawTensor := TSpec.property
+
+inductive DevicePolicy where
+  | any
+  | exact (device : Device)
+deriving Repr, BEq
+
+/-- Static specification carried by a typed tensor: shape always; dtype and
+    device policy graded, with defaults meaning "dynamic" / "anywhere". -/
+structure StaticSpec where
+  shape : Shape
+  dtype : DType := .Unknown "dynamic"
+  device : DevicePolicy := .any
+deriving Repr, BEq
+
+/-- Typed tensor: enforced `StaticSpec` index over a native handle. -/
+structure Tensor (σ : StaticSpec) where
+  private mk ::
+  raw : RawTensor
+
+/-- Shape+dtype instantiation of the graded tensor (device unconstrained). -/
+abbrev DTensor (shape : Shape) (dtype : DType) : Type :=
+  Tensor { shape, dtype }
+
+abbrev TT (shape : Shape) (dtype : DType) : Type :=
+  DTensor shape dtype
+
+/-- Shape-only instantiation of the graded tensor: dtype and device policy
+    stay dynamic, matching runtime buffers whose dtype follows the parameter. -/
+abbrev STensor (shape : Shape) : Type :=
+  Tensor { shape }
+
+namespace Tensor
+
+/-- Wrap a raw tensor, assuming the full static spec holds. -/
+def assumeSpec {σ : StaticSpec} (raw : RawTensor) : Tensor σ :=
+  .mk raw
+
+end Tensor
 
 /-! ## Shape Manipulation Helpers -/
 
@@ -189,5 +234,3 @@ def matmulShape (s1 s2 : Shape) : Shape :=
     let m := s1.getD (n1 - 2) 0
     let n := s2.getD (n2 - 1) 0
     batchOut ++ #[m, n]
-instance (s : Shape) : Nonempty (T s) :=
-  TSpec.property

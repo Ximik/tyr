@@ -16,7 +16,7 @@ import Tyr.TensorStruct
 
 namespace Tyr.Modular
 
-open torch (T TensorStruct)
+open torch (TensorStruct)
 
 /-- Maximum of two floats -/
 def floatMax (a b : Float) : Float := if a > b then a else b
@@ -80,7 +80,7 @@ def lipschitzConstant [NormedModule M] (m : M) : Float :=
 
 /-- Scale weights by a constant factor -/
 def scale [NormedModule M] (s : Float) (m : M) : M :=
-  TensorStruct.map (fun t => torch.mul_scalar t s) m
+  TensorStruct.map (fun t => torch.Tensor.Preserving.mulScalar t s) m
 
 /-- Normalize a gradient update and apply with learning rate.
     Δw = -lr · normalizeDual(grad)

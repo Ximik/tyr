@@ -5,6 +5,7 @@
   Provides `derive_tensor_struct` command for simple structures.
 -/
 import Lean
+import Tyr.Torch
 import Tyr.TensorStruct
 import Tyr.AD.TensorStructSchema
 
@@ -33,9 +34,9 @@ Current limits:
 
 When generating a TensorStruct instance, each field is handled based on its type:
 
-- `T s` → apply function directly: `f field`
+- `Tensor σ` → delegate to the checked tensor leaf instance
 - `Static α` → pass through: `field`
-- `Frozen s` → apply to tensor: `{ tensor := f field.tensor }`
+- `Frozen σ` → delegate to the indexed frozen leaf instance
 - `Array α` → recursive: `field.map (TensorStruct.map f)`
 - `Option α` → recursive: `field.map (TensorStruct.map f)`
 - Nested `TensorStruct` → recursive: `TensorStruct.map f field`
@@ -45,41 +46,56 @@ When generating a TensorStruct instance, each field is handled based on its type
 ```lean
 -- Define your structure
 structure MyLayer where
-  weight : T #[n, m]
-  bias : T #[n]
+  weight : DTensor #[n, m] .Float32
+  bias : DTensor #[n] .Float32
   config : Static Config
 
 -- Manually create instance (the macro would generate this)
 instance : TensorStruct MyLayer where
-  map f l := { weight := f l.weight, bias := f l.bias, config := l.config }
-  mapM f l := do pure { weight := ← f l.weight, bias := ← f l.bias, config := l.config }
-  zipWith f l1 l2 := { weight := f l1.weight l2.weight, bias := f l1.bias l2.bias, config := l1.config }
-  fold f init l := f l.weight (f l.bias init)
+  map f l := { weight := TensorStruct.map f l.weight, bias := TensorStruct.map f l.bias, config := l.config }
+  mapM f l := do pure { weight := ← TensorStruct.mapM f l.weight, bias := ← TensorStruct.mapM f l.bias, config := l.config }
+  zipWith f l1 l2 := { weight := TensorStruct.zipWith f l1.weight l2.weight, bias := TensorStruct.zipWith f l1.bias l2.bias, config := l1.config }
+  fold f init l := TensorStruct.fold f (TensorStruct.fold f init l.bias) l.weight
 ```
 -/
 
 /-! ## Helper Functions for Manual Instances -/
 
 /-- Helper: map a function over a tensor field -/
-@[inline] def mapTensor {s : Shape} (f : ∀ {s}, T s → T s) (t : T s) : T s := f t
+@[inline] def mapTensor {σ : StaticSpec}
+    (f : ∀ {σ}, Tensor σ → Tensor σ) (t : Tensor σ) : Tensor σ := f t
 
 /-- Helper: map a function over a frozen field -/
-@[inline] def mapFrozen {s : Shape} (f : ∀ {s}, T s → T s) (fr : Frozen s) : Frozen s :=
-  { tensor := f fr.tensor }
+@[inline] def mapFrozen {σ : StaticSpec}
+    (f : ∀ {σ}, Tensor σ → Tensor σ) (fr : Frozen σ) : Frozen σ :=
+  Frozen.map f fr
 
 /-- Helper: skip a static field -/
-@[inline] def mapStatic {α : Type} (_ : ∀ {s}, T s → T s) (s : Static α) : Static α := s
+@[inline] def mapStatic {α : Type} (_ : ∀ {σ}, Tensor σ → Tensor σ) (s : Static α) : Static α := s
 
 /-! ## Instance for Single Tensor
 
 A single tensor is trivially a TensorStruct.
 -/
 
+-- Transitional adapter for models that still have legacy tensor fields.
+-- Remove this instance once all fields are indexed Tensor values.
+-- Legacy annotations may use #[] for arbitrarily shaped buffers. Read the
+-- actual shape and leave dtype dynamic; only migrated Tensor fields impose
+-- a static dtype contract.
+private def legacyChecked {s : Shape} (raw : T s) : Tensor { shape := raw.runtimeShape } :=
+  letI : Inhabited (Tensor { shape := raw.runtimeShape }) := ⟨Tensor.assumeSpec raw⟩
+  match Tensor.ofRaw raw with
+  | .ok tensor => tensor
+  | .error message => panic! s!"Legacy tensor field: {message}"
+
 instance {s : Shape} : TensorStruct (T s) where
-  map f t := f t
-  mapM f t := f t
-  zipWith f t1 t2 := f t1 t2
-  fold f init t := f t init
+  map f t := (f (legacyChecked t)).raw
+  mapM f t := do pure (← f (legacyChecked t)).raw
+  zipWith f lhs rhs :=
+    let left := legacyChecked lhs
+    (f left (left.checkedReplacement rhs)).raw
+  fold f init t := f (legacyChecked t) init
 
 /-! ## Tuple Instances
 

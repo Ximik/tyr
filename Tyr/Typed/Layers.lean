@@ -2,7 +2,7 @@
   Tyr/Typed/Layers.lean
 
   Fully typed model layers — the migration template for writing model code
-  against the graded `Tensor (σ : StaticSpec)` instead of raw `T`. Mirrors
+  against the graded `Tensor (σ : StaticSpec)` instead of raw handles. Mirrors
   `Tyr/Module/Linear.lean` and `Tyr/Module/RMSNorm.lean`, with shape, dtype,
   AND device policy tracked end to end: weights and activations must agree
   on dtype and device policy or the layer does not compile.

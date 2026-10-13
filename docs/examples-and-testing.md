@@ -167,8 +167,15 @@ Shared infrastructure:
   `torch.gpt.Config` with presets `Config.gpt2_small`, `gpt2_mini`,
   `gpt2_micro`, `tiny_shakespeare`, `nanogpt_cpu_shakespeare`,
   `nanogpt_gpu_shakespeare`, and shape-indexed parameters such as
-  `BlockParams (n_embd : UInt64)` whose fields are `T #[n_embd]`
-  (`Examples/GPT/GPT.lean:16`).
+  `BlockParams (n_embd : UInt64)` whose fields use `torch.Tensor` through
+  `Activation shape` (Float32). `Tokens shape` carries Int64 inputs. The typed
+  `forward` and `loss` APIs preserve these indices throughout the model;
+  `forwardRaw` and `lossRaw` validate legacy loader shapes/dtypes on entry.
+  `Examples/GPT/TensorOps.lean` contains FFI adapters and checked optimizer
+  traversal. Dynamic head reshapes validate element counts; the embedding width
+  must be divisible by a nonzero head count. `Tests/TestGPTTyped.lean` covers
+  compile-time rejection of malformed projection weights, CPU training and
+  generation, and rejection of invalid raw inputs.
 
 Run any executable with `lake exe <Exe> [args...]` (builds it if needed) or,
 without rebuilding, `lake env .lake/build/bin/<Exe> [args...]`. GPU-backed

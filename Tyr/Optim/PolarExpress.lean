@@ -9,7 +9,6 @@
   - Supports batched and unbatched matrices
   - Handles tall vs wide matrices differently
 -/
-import Tyr.Torch
 import Tyr.Distributed
 
 namespace torch.Optim.PolarExpress
@@ -49,9 +48,9 @@ structure Config where
     - G: Gradient matrix [batch?, m, n]
     - cfg: Configuration with numIters
 
-    Returns: Orthogonalized gradient of same shape
+    Returns: Orthogonalized gradient of the same spec
 -/
-def apply {s : Shape} (G : T s) (cfg : Config := {}) : IO (T s) := do
+def apply {σ : StaticSpec} (G : Tensor σ) (cfg : Config := {}) : IO (Tensor σ) := do
   dist.polarExpress G cfg.numIters
 
 /-- Muon-style orthogonalization that handles tall vs wide matrices.
@@ -62,7 +61,7 @@ def apply {s : Shape} (G : T s) (cfg : Config := {}) : IO (T s) := do
 
     This ensures the orthogonalization is always applied to the "short" dimension.
 -/
-def muonOrthogonalize {s : Shape} (G : T s) (numIters : UInt64 := 5) : IO (T s) := do
+def muonOrthogonalize {σ : StaticSpec} (G : Tensor σ) (numIters : UInt64 := 5) : IO (Tensor σ) := do
   dist.muonOrthogonalize G numIters
 
 /-- Apply Polar Express to a batch of gradient matrices in parallel.
@@ -76,7 +75,8 @@ def muonOrthogonalize {s : Shape} (G : T s) (numIters : UInt64 := 5) : IO (T s) 
 
     Returns: Array of orthogonalized gradients
 -/
-def applyBatch {s : Shape} (grads : Array (T s)) (cfg : Config := {}) : IO (Array (T s)) := do
+def applyBatch {σ : StaticSpec} (grads : Array (Tensor σ)) (cfg : Config := {}) :
+    IO (Array (Tensor σ)) := do
   grads.mapM (apply · cfg)
 
 /-- In-place orthogonalization (for memory efficiency).
@@ -84,7 +84,7 @@ def applyBatch {s : Shape} (grads : Array (T s)) (cfg : Config := {}) : IO (Arra
     Note: This returns a new tensor but can be assigned back to the same variable.
     The original tensor is not modified in-place at the memory level.
 -/
-def applyInPlace {s : Shape} (G : T s) (cfg : Config := {}) : IO (T s) := do
+def applyInPlace {σ : StaticSpec} (G : Tensor σ) (cfg : Config := {}) : IO (Tensor σ) := do
   apply G cfg
 
 /-- Compute the XXT product efficiently.
@@ -92,14 +92,15 @@ def applyInPlace {s : Shape} (G : T s) (cfg : Config := {}) : IO (T s) := do
     This is used in Newton-Schulz iterations: C = A @ A.T
     Optimized for symmetric output.
 -/
-def computeXXT {s : Shape} (A : T s) : IO (T #[]) := do
+def computeXXT {m n : UInt64} {d : DType} {dev : DevicePolicy}
+    (A : Tensor ⟨#[m, n], d, dev⟩) : IO (Tensor ⟨#[m, m], d, dev⟩) := do
   dist.xxt A
 
 /-- Fused operation for Newton-Schulz: C = beta * A + alpha * (A @ A.T)
 
     More efficient than separate matmul and add operations.
 -/
-def fusedBaPlusCaa {s : Shape} (A : T s) (alpha beta : Float) : IO (T s) := do
+def fusedBaPlusCaa {σ : StaticSpec} (A : Tensor σ) (alpha beta : Float) : IO (Tensor σ) := do
   dist.baPlusCaa A alpha beta
 
 end torch.Optim.PolarExpress

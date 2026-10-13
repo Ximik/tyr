@@ -1,4 +1,5 @@
 import Tyr.TensorStruct
+import Tyr.Torch
 import Tyr.Log
 import Lean.Data.Json
 import Lean.Data.Json.FromToJson
@@ -170,11 +171,11 @@ def saveParams [TensorStruct α]
     : IO Unit := do
   IO.FS.createDirAll dir
   let indexRef ← IO.mkRef 0
-  let _ ← TensorStruct.fold (fun {s} (t : T s) (acc : IO Unit) => do
+  let _ ← TensorStruct.fold (fun {σ} (t : Tensor σ) (acc : IO Unit) => do
     acc
     let idx ← indexRef.get
     let path := s!"{dir}/{namePrefix}_{idx}.pt"
-    data.saveTensor t path
+    data.saveTensor (s := σ.shape) t.raw path
     indexRef.set (idx + 1)
   ) (pure ()) params
   let finalIdx ← indexRef.get
@@ -199,10 +200,13 @@ def loadParams [TensorStruct α]
     if storedCount != expectedCount then
       throw <| IO.userError s!"Checkpoint tensor count mismatch: expected {expectedCount}, stored {storedCount}"
   let indexRef ← IO.mkRef 0
-  let result ← TensorStruct.mapM (fun {s} (expected : T s) => do
+  let result ← TensorStruct.mapM (fun {σ} (_expected : Tensor σ) => do
     let idx ← indexRef.get
     let path := s!"{dir}/{namePrefix}_{idx}.pt"
-    let t ← data.loadTensorExact expected.runtimeShape path
+    let raw ← data.loadTensorExact σ.shape path
+    let t ← match Tensor.ofRaw (σ := σ) raw with
+      | .ok tensor => pure tensor
+      | .error message => throw <| IO.userError s!"Invalid checkpoint tensor {path}: {message}"
     indexRef.set (idx + 1)
     pure t
   ) template

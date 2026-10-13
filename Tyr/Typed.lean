@@ -10,6 +10,7 @@ import Tyr.Typed.Layers
 
 LeanMLX-inspired typed facade for Tyr.
 
-The facade keeps the existing `T s` runtime tensor and adds a dtype-aware layer
-for operation specs, strict boundary checks, and optional typed wrappers.
+The public tensor type is `Tensor σ`, backed by a native `RawTensor` handle.
+Shape, dtype, and device specifications survive typechecking. Native operations
+are isolated in `Tyr.RawTensor`; checked constructors validate external handles.
 -/

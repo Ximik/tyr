@@ -1,4 +1,5 @@
-import Tyr.Basic
+import Tyr.Legacy.Tensor
+import Tyr.Differentiable
 
 /-!
 # Tyr.Torch
@@ -328,7 +329,7 @@ def pullback {sx sy : Shape} (f : T sx → T sy) (x : T sx) (dy : T sy) : T sx :
 @[extern "lean_torch_detach"] opaque detach {s : Shape} (x : @& T s) : T s
 @[extern "lean_torch_clone"] opaque clone {s : Shape} (x : @& T s) : T s
 @[extern "lean_torch_retain_grad"] opaque retain_grad {s : Shape} (x : @& T s) : T s
-@[extern "lean_torch_is_leaf"] opaque is_leaf {s : Shape} (x : @& T s) : Bool
+@[extern "lean_torch_is_leaf"] opaque is_leaf (x : @& T #[]) : Bool
 @[extern "lean_torch_has_grad_fn"] opaque has_grad_fn {s : Shape} (x : @& T s) : Bool
 @[extern "lean_torch_accumulate_grad"] opaque accumulate_grad {s : Shape} (x : @& T s) (grad : @& T s) : T s
 @[extern "lean_torch_set_grad"] opaque set_grad {s : Shape} (x : @& T s) (grad : @& T s) : T s
@@ -353,11 +354,7 @@ end autograd
 --
 universe u
 
-class differentiable (α : Type u) where
-    cotangent_space : Type u
-    grad : α → cotangent_space
 
-instance {s : Shape} : differentiable (torch.T s) := ⟨torch.T s, fun (t : (torch.T s)) => torch.autograd.grad_of t⟩
 --
 --
 --
@@ -391,7 +388,7 @@ def permuteShape (s : Shape) (permutation : Array UInt64) : Shape :=
     (t : @& T s) (s' : @& Shape) : T s'
 
 -- comparison
-@[extern "lean_torch_allclose"] opaque allclose {s : Shape} (a b : @& T s) (rtol : Float := 1e-05) (atol : Float := 1e-08): Bool
+@[extern "lean_torch_allclose"] opaque allclose (a b : @& T #[]) (rtol : Float := 1e-05) (atol : Float := 1e-08): Bool
 
 namespace nn
 -- torch::nn::functional::adaptive_avg_pool1d
@@ -556,7 +553,7 @@ opaque layer_norm_silu {batch seq n : UInt64}
 @[extern "lean_torch_leaky_relu"] opaque leaky_relu {s : Shape} (input : @& T s) (negative_slope : Float := 0.01) : T s
 -- torch::nn::functional::linear
 -- torch::nn::functional::local_response_norm
-@[extern "lean_torch_log_softmax"] opaque log_softmax {s : Shape} (input : @& T s) (dim : Int := -1) : T s
+@[extern "lean_torch_log_softmax"] opaque log_softmax (input : @& T #[]) (dim : Int32 := -1) : T #[]
 -- torch::nn::functional::logsigmoid
 -- torch::nn::functional::lp_pool1d
 -- torch::nn::functional::lp_pool2d
@@ -797,8 +794,10 @@ def sumAll {s : Shape} (t : T s) : T #[] := sum_impl t none false
 def meanAll {s : Shape} (t : T s) : T #[] := mean_impl t none false
 
 -- Max/Min reductions
-@[extern "lean_torch_max_all"] private opaque max_all_impl {s : Shape} (t : @& T s) : T #[]
-@[extern "lean_torch_min_all"] private opaque min_all_impl {s : Shape} (t : @& T s) : T #[]
+-- The shape argument was never read by the native side; the alias is
+-- shape-erased, so `T #[]` at the boundary accepts any input.
+@[extern "lean_torch_max_all"] private opaque max_all_impl (t : @& T #[]) : T #[]
+@[extern "lean_torch_min_all"] private opaque min_all_impl (t : @& T #[]) : T #[]
 
 def maxAll {s : Shape} (t : T s) : T #[] := max_all_impl t
 def minAll {s : Shape} (t : T s) : T #[] := min_all_impl t
@@ -1161,7 +1160,7 @@ namespace autograd
 
 /-- Backward pass from scalar loss (gradient = 1.0) -/
 @[extern "lean_torch_backward_loss"]
-opaque backwardLoss {s : Shape} (loss : @& T s) : IO Unit
+opaque backwardLoss (loss : @& T #[]) : IO Unit
 end autograd
 
 @[extern "lean_torch_get_live_tensors"]

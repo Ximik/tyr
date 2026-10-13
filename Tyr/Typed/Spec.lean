@@ -16,6 +16,14 @@ deriving Repr, BEq, DecidableEq
 
 namespace TensorSpec
 
+/-- Reorder dimensions for a permutation. -/
+def permuteShape (s : Shape) (permutation : Array UInt64) : Shape :=
+  permutation.map fun p => s.getD p.toNat 0
+
+/-- Shape after concatenation along `dim`; libtorch checks compatibility. -/
+def catShape (s1 s2 : Shape) (dim : Nat) : Shape :=
+  s1.set! dim (s1.getD dim 0 + s2.getD dim 0)
+
 def scalar (dtype : DType) : TensorSpec :=
   { shape := #[], dtype }
 

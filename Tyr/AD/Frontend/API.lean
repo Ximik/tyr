@@ -1,4 +1,5 @@
 import Tyr.AD.Frontend.Companion
+import Tyr.Typed.Ops
 
 /-!
 # Tyr.AD.Frontend.API
@@ -91,7 +92,7 @@ private def buildScalarUnitCotangent
     throw <| s!"Structured scalar grad requires scalar output shape [], got {reprStr outputLeaf.shape}."
   let unitLeaf :=
     match outputLeaf.payload with
-    | ⟨_, t⟩ => TensorLeafValue.ofTensor .diff (ones_like t)
+    | ⟨_, t⟩ => TensorLeafValue.ofTensor .diff (Tensor.onesLike t)
   boundary.rebuildValue outputTemplate #[unitLeaf]
 
 /-- Execute the frontend and rebuild the structured primal output. -/

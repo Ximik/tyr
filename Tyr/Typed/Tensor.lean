@@ -1,13 +1,13 @@
-import Tyr.Torch
+import Tyr.RawTensor
 import Tyr.Typed.Device
 
 /-!
 # Typed tensor facade
 
 `Tensor (σ : StaticSpec)` is a lightweight typed view over Tyr's existing
-`T shape`, graded by ONE struct index carrying shape, dtype, and device
-policy. The index is phantom: a `Tensor σ` contains exactly a `T σ.shape`
-handle, so wrappers cost nothing at runtime and the FFI surface is
+`RawTensor`, indexed by shape, dtype, and device policy. The index is
+preserved during typechecking: a `Tensor σ` contains one native handle,
+so wrappers cost nothing at runtime and the FFI surface is
 untouched.
 
 Grading: `dtype` and `device` have "dynamic" defaults, so
@@ -23,14 +23,6 @@ parity tests in `Tests/TestTyped.lean`).
 -/
 
 namespace torch
-
-/-- Static specification carried by a typed tensor: shape always; dtype and
-    device policy graded, with defaults meaning "dynamic" / "anywhere". -/
-structure StaticSpec where
-  shape : Shape
-  dtype : DType := .Unknown "dynamic"
-  device : DevicePolicy := .any
-deriving Repr, BEq
 
 namespace StaticSpec
 
@@ -61,35 +53,19 @@ namespace StaticSpec
 
 end StaticSpec
 
-/-- Typed tensor: phantom `StaticSpec` index over the runtime `T` handle. -/
-structure Tensor (σ : StaticSpec) where
-  private mk ::
-  raw : T σ.shape
-
-/-- Shape+dtype instantiation of the graded tensor (device unconstrained). -/
-abbrev DTensor (shape : Shape) (dtype : DType) : Type :=
-  Tensor { shape, dtype }
-
-abbrev TT (shape : Shape) (dtype : DType) : Type :=
-  DTensor shape dtype
-
 abbrev SomeDTensor :=
   Sigma fun spec : TensorSpec => DTensor spec.shape spec.dtype
 
 namespace Tensor
 
-/-- Wrap a raw tensor, assuming the full static spec holds. -/
-def assumeSpec {σ : StaticSpec} (raw : T σ.shape) : Tensor σ :=
-  .mk raw
-
 /-- Compat alias for `assumeSpec` (the shape+dtype reading). -/
-abbrev assumeDType {σ : StaticSpec} (raw : T σ.shape) : Tensor σ :=
+abbrev assumeDType {σ : StaticSpec} (raw : RawTensor) : Tensor σ :=
   assumeSpec raw
 
-def toTensor {σ : StaticSpec} (t : Tensor σ) : T σ.shape :=
+def toTensor {σ : StaticSpec} (t : Tensor σ) : RawTensor :=
   t.raw
 
-instance {σ : StaticSpec} : CoeOut (Tensor σ) (T σ.shape) where
+instance {σ : StaticSpec} : CoeOut (Tensor σ) (RawTensor) where
   coe := toTensor
 
 /-- The static spec, as runtime metadata (shape + dtype). -/
@@ -105,6 +81,10 @@ def dtype {σ : StaticSpec} (_t : Tensor σ) : DType :=
 
 def shape {σ : StaticSpec} (_t : Tensor σ) : Shape :=
   σ.shape
+
+/-- Actual native shape, as distinct from the static `shape` index. -/
+def runtimeShape {σ : StaticSpec} (t : Tensor σ) : Shape :=
+  t.raw.runtimeShape
 
 /-- Runtime metadata actually carried by the handle. -/
 def actualSpec {σ : StaticSpec} (t : Tensor σ) : TensorSpec :=
@@ -122,23 +102,38 @@ def validate {σ : StaticSpec} (t : Tensor σ) : Except String Unit := do
   | d => TensorSpec.checkDType d t.raw.dtype
   σ.device.check t.raw.device
 
-def ofTensor? {shape : Shape} (dtype : DType) (raw : T shape) : Option (DTensor shape dtype) :=
+/-- Validate a native handle against every component of the destination index. -/
+def ofRaw {σ : StaticSpec} (raw : RawTensor) : Except String (Tensor σ) := do
+  let tensor : Tensor σ := assumeSpec raw
+  tensor.validate
+  pure tensor
+
+/-- Native adapter for operations whose output must preserve an existing
+specification. A metadata mismatch is a runtime error; the original tensor is
+the well-typed fallback used by Lean's panic mechanism. -/
+def checkedReplacement {σ : StaticSpec} (original : Tensor σ) (raw : RawTensor) : Tensor σ :=
+  letI : Inhabited (Tensor σ) := ⟨original⟩
+  match ofRaw raw with
+  | .ok tensor => tensor
+  | .error message => panic! s!"Tensor replacement: {message}"
+
+def ofTensor? {shape : Shape} (dtype : DType) (raw : RawTensor) : Option (DTensor shape dtype) :=
   if raw.runtimeShape == shape && raw.dtype == dtype then
-    some (.mk raw)
+    some (assumeSpec raw)
   else
     none
 
-def ofTensor {shape : Shape} (dtype : DType) (raw : T shape) : Except String (DTensor shape dtype) := do
+def ofTensor {shape : Shape} (dtype : DType) (raw : RawTensor) : Except String (DTensor shape dtype) := do
   TensorSpec.checkShape shape raw.runtimeShape
   TensorSpec.checkDType dtype raw.dtype
-  pure (.mk raw)
+  pure (assumeSpec raw)
 
-def ofTensorWithContract {shape : Shape} (contract : TensorContract) (raw : T shape) :
+def ofTensorWithContract {shape : Shape} (contract : TensorContract) (raw : RawTensor) :
     Except String (DTensor shape contract.spec.dtype) := do
   let actual : TensorSpec := { shape := raw.runtimeShape, dtype := raw.dtype }
   contract.check actual raw.device
   if h : contract.spec.shape = shape then
-    pure (h ▸ .mk raw)
+    pure (h ▸ assumeSpec raw)
   else
     .error s!"Expected static shape {reprStr contract.spec.shape}, got {reprStr shape}"
 

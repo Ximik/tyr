@@ -1,4 +1,5 @@
 import Lean
+import Tyr.Typed.Tensor
 import Tyr.AD.JaxprLike.Elab
 
 /-!
@@ -37,7 +38,7 @@ private def shapeToNatArray (shape : Shape) : Array Nat :=
   Array.map UInt64.toNat shape
 
 private unsafe def evalClosedShapeExpr? (shapeExpr : Expr) : MetaM (Option (Array Nat)) := do
-  let shapeExpr ← instantiateMVars shapeExpr
+  let shapeExpr ← whnf (← instantiateMVars shapeExpr)
   if !shapeExpr.hasFVar then
     try
       let shape ← evalExpr Shape (mkConst ``torch.Shape) shapeExpr
@@ -47,19 +48,31 @@ private unsafe def evalClosedShapeExpr? (shapeExpr : Expr) : MetaM (Option (Arra
   else
     return none
 
+private unsafe def indexedVarMeta (spec : Expr) (participation : DiffParticipation) : MetaM VarMeta := do
+  let shape? ← evalClosedShapeExpr? (mkProj ``torch.StaticSpec 0 spec)
+  let dtypeExpr ← whnf (← instantiateMVars (mkProj ``torch.StaticSpec 1 spec))
+  let dtype? ← if dtypeExpr.hasFVar then pure none else do
+    try
+      let dtype ← evalExpr torch.DType (mkConst ``torch.DType) dtypeExpr
+      pure <| match dtype with
+        | .Unknown _ => none
+        | dtype => some dtype.canonicalName
+    catch _ => pure none
+  return { participation, shape := shape?, dtype := dtype? }
+
 private unsafe def tensorLikeVarMeta? (type : Expr) : MetaM (Option VarMeta) := do
   let rawType := type.consumeMData
   if rawType.isAppOfArity ``torch.T 1 then
     let shape? ← evalClosedShapeExpr? (rawType.getArg! 0)
     return some { participation := .diff, shape := shape? }
   else if rawType.isAppOfArity ``torch.Frozen 1 then
-    let shape? ← evalClosedShapeExpr? (rawType.getArg! 0)
-    return some { participation := .frozen, shape := shape? }
+    return some (← indexedVarMeta (rawType.getArg! 0) .frozen)
   else
     let type ← whnf type
-    if type.isAppOfArity ``torch.Frozen 1 then
-      let shape? ← evalClosedShapeExpr? (type.getArg! 0)
-      return some { participation := .frozen, shape := shape? }
+    if type.isAppOfArity ``torch.Tensor 1 then
+      return some (← indexedVarMeta (type.getArg! 0) .diff)
+    else if type.isAppOfArity ``torch.Frozen 1 then
+      return some (← indexedVarMeta (type.getArg! 0) .frozen)
     else
       return none
 
@@ -129,7 +142,7 @@ private def argsToJVars
 Derive a direct `FrontendRegistration` from an ordinary Lean definition in the
 initial supported subset:
 
-- tensor-like parameters only (`torch.T` / `torch.Frozen`)
+- tensor-like parameters only (`torch.Tensor` / `torch.Frozen`; legacy `torch.T` during migration)
 - body is a single registered primitive call
 - result type is tensor-like
 -/

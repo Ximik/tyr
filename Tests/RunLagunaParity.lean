@@ -152,7 +152,7 @@ private def runFixture (device : Device) : IO Unit := do
   -- top-5 sets at 4 positions of logits_b and diverges from gen_ids at step 4.
   -- FP32 compute tests the math itself (which is what parity means here);
   -- the BF16 pass below is informational.
-  let model : LagunaForCausalLM cfg := TensorStruct.map (fun t => toFloat' t) modelB16
+  let model : LagunaForCausalLM cfg := TensorStruct.map (fun t => t.checkedReplacement (RawTensor.toFloat32 t.shape t.raw)) modelB16
   let layer0 ←
     match model.model.layers[0]? with
     | some l => pure l

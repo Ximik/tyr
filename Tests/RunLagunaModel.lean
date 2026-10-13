@@ -104,7 +104,7 @@ private def deviceLabel : Device → String
 
 /-- Move all tensors of a model to `device`, optionally casting to bf16. -/
 private def moveModel {α : Type} [TensorStruct α] (m : α) (device : Device) (bf16 : Bool) : α :=
-  TensorStruct.map (fun t => (if bf16 then toBFloat16' t else t).to device) m
+  TensorStruct.map (fun t => (if bf16 then t.checkedReplacement (RawTensor.toBFloat16 t.shape t.raw) else t).to device) m
 
 /-- Validate before aggregating: NaN must not disappear in `if d > max`. -/
 private def maxAbsDiff (a b : T #[]) : IO Float := do
@@ -267,7 +267,7 @@ private def floatReference (cfg : Config) (m : LagunaForCausalLM cfg) : IO (Lagu
         cfg.num_experts cfg.hidden_size cfg.moe_intermediate_size
       pure { moe with denseExperts := some { gateProj, upProj, downProj } }
     pure { layer with sparseMoe }
-  pure (TensorStruct.map (fun t => toFloat' t) { m with model := { m.model with layers } })
+  pure (TensorStruct.map (fun t => t.checkedReplacement (RawTensor.toFloat32 t.shape t.raw)) { m with model := { m.model with layers } })
 
 private def runCacheParityModel (cfg : Config) (device : Device) (lbl : String)
     (model : LagunaForCausalLM cfg) (tol : Float) (bf16Diagnostic := false) : IO Unit := do

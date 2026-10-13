@@ -7,8 +7,10 @@ import Tyr.Manifolds.Basic
 
 namespace Tyr.AD
 
-open torch (T)
+open torch
 open DifferentiableManifold
+
+variable {d : DType} {dev : DevicePolicy}
 
 /-! ## Stiefel Manifold St(n, p)
 
@@ -25,75 +27,79 @@ The tangent space at X is the horizontal space:
 -/
 
 /-- Stiefel manifold St(n, p): n×p matrices with orthonormal columns.
-    Constraint: XᵀX = Iₚ (p×p identity) -/
-structure Stiefel (n p : UInt64) where
+    Constraint: XᵀX = Iₚ (p×p identity).
+    The `tall` witness records that orthonormal p-column frames need n ≥ p. -/
+structure Stiefel (n p : UInt64) (dtype : DType := .Float32)
+    (device : DevicePolicy := .any) where
   /-- The underlying n×p matrix -/
-  matrix : T #[n, p]
+  matrix : Tensor ⟨#[n, p], dtype, device⟩
+  /-- Orthonormal p-column frames in ℝⁿ require p ≤ n. -/
+  tall : p.toNat ≤ n.toNat
 
 namespace Stiefel
 
 /-- Create a Stiefel element from the first p columns of a random matrix via QR.
     Uses QR decomposition of a random n×p matrix. -/
-def random (n p : UInt64) : IO (Stiefel n p) := do
-  let mat ← torch.randn #[n, p]
+def random (n p : UInt64) (h : p.toNat ≤ n.toNat := by decide) : IO (Stiefel n p) := do
+  let mat ← Tensor.randn #[n, p]
   -- QR decomposition gives Q with orthonormal columns
-  let (Q, _R) := torch.linalg.qr_reduced mat
-  return ⟨Q⟩
+  let (Q, _R) := Tensor.qrReduced mat h
+  return ⟨Q, h⟩
 
 /-- Identity element for St(n, n) = O(n) -/
-def identity (n : UInt64) : Stiefel n n :=
-  ⟨torch.eye n⟩
+def identity (n : UInt64) : Stiefel n n d dev :=
+  ⟨Tensor.eyeFor d dev, Nat.le_refl _⟩
 
 /-- Project a general matrix to the Stiefel manifold using QR decomposition.
     The Q factor of QR has orthonormal columns. -/
-def project (n p : UInt64) (mat : T #[n, p]) : Stiefel n p :=
-  let (Q, _R) := torch.linalg.qr_reduced mat
-  ⟨Q⟩
+def project (n p : UInt64) (mat : Tensor ⟨#[n, p], d, dev⟩)
+    (h : p.toNat ≤ n.toNat := by decide) : Stiefel n p d dev :=
+  let (Q, _R) := Tensor.qrReduced mat h
+  ⟨Q, h⟩
 
 end Stiefel
 
 /-- Tangent vector on the Stiefel manifold.
     Z ∈ TₓSt(n,p) satisfies: XᵀZ + ZᵀX = 0 (XᵀZ is skew-symmetric) -/
-structure StiefelTangent (n p : UInt64) where
+structure StiefelTangent (n p : UInt64) (dtype : DType := .Float32)
+    (device : DevicePolicy := .any) where
   /-- The tangent vector as an n×p matrix -/
-  vec : T #[n, p]
+  vec : Tensor ⟨#[n, p], dtype, device⟩
 
 namespace StiefelTangent
 
 /-- Zero tangent vector -/
-def zero (n p : UInt64) : StiefelTangent n p :=
-  ⟨torch.zeros #[n, p]⟩
+def zero (n p : UInt64) : StiefelTangent n p d dev :=
+  ⟨Tensor.zerosFor ⟨#[n, p], d, dev⟩⟩
 
 /-- Add two tangent vectors -/
-def add (v w : StiefelTangent n p) : StiefelTangent n p :=
-  ⟨torch.add v.vec w.vec⟩
+def add (v w : StiefelTangent n p d dev) : StiefelTangent n p d dev :=
+  ⟨Add.add v.vec w.vec⟩
 
 /-- Scale a tangent vector -/
-def smul (s : Float) (v : StiefelTangent n p) : StiefelTangent n p :=
-  ⟨torch.mul_scalar v.vec s⟩
+def smul (s : Float) (v : StiefelTangent n p d dev) : StiefelTangent n p d dev :=
+  ⟨Tensor.Preserving.mulScalar v.vec s⟩
 
 /-- Project an ambient space vector to the tangent space at X.
     Π_X(Z) = Z - X sym(XᵀZ)
     where sym(A) = (A + Aᵀ)/2 -/
-def project (X : Stiefel n p) (Z : T #[n, p]) : StiefelTangent n p :=
+def project (X : Stiefel n p d dev) (Z : Tensor ⟨#[n, p], d, dev⟩) : StiefelTangent n p d dev :=
   -- X^T @ Z : [p, p]
-  let Xt := torch.nn.transpose2d X.matrix
-  let XtZ := torch.nn.mm Xt Z
+  let XtZ := Tensor.mm (Tensor.transpose2d X.matrix) Z
   -- sym(X^T Z) = (X^T Z + (X^T Z)^T) / 2
-  let sym := torch.mul_scalar (torch.add XtZ (torch.nn.transpose2d XtZ)) 0.5
+  let sym := Tensor.Preserving.mulScalar (Add.add XtZ (Tensor.transpose2d XtZ)) 0.5
   -- Z - X @ sym(X^T Z)
-  let projected := torch.sub Z (torch.nn.mm X.matrix sym)
-  ⟨projected⟩
+  ⟨Sub.sub Z (Tensor.mm X.matrix sym)⟩
 
 end StiefelTangent
 
 /-- Stiefel manifold as a DifferentiableManifold.
     Uses QR retraction: R(X, Z) = qr(X + Z).Q -/
-instance stiefelManifold (n p : UInt64) : DifferentiableManifold (Stiefel n p) where
-  Tangent _ := StiefelTangent n p
-  Cotangent _ := StiefelTangent n p
-  zeroTangent _ := StiefelTangent.zero n p
-  zeroCotangent _ := StiefelTangent.zero n p
+instance stiefelManifold (n p : UInt64) : DifferentiableManifold (Stiefel n p d dev) where
+  Tangent _ := StiefelTangent n p d dev
+  Cotangent _ := StiefelTangent n p d dev
+  zeroTangent x := ⟨Tensor.zerosLike x.matrix⟩
+  zeroCotangent x := ⟨Tensor.zerosLike x.matrix⟩
   addTangent v w := StiefelTangent.add v w
   addCotangent v w := StiefelTangent.add v w
   scaleTangent s v := StiefelTangent.smul s v
@@ -101,8 +107,7 @@ instance stiefelManifold (n p : UInt64) : DifferentiableManifold (Stiefel n p) w
   flat := id
   exp X Z :=
     -- QR retraction: R(X, Z) = qr(X + Z).Q
-    let newMat := torch.add X.matrix Z.vec
-    let (Q, _R) := torch.linalg.qr_reduced newMat
-    ⟨Q⟩
+    let (Q, _R) := Tensor.qrReduced (Add.add X.matrix Z.vec) X.tall
+    ⟨Q, X.tall⟩
 
 end Tyr.AD

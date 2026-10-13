@@ -26,8 +26,8 @@ private abbrev YSpec : StaticSpec := { shape := #[2], dtype := .Float32 }
     Heun.solver
       (Term := ODETerm (Tensor YSpec) Unit)
       (Y := Tensor YSpec) (VF := Tensor YSpec) (Args := Unit)
-  let y0 : Tensor YSpec := Tensor.assumeSpec (torch.full #[2] 1.0)
-  let y0 := DiffEqSpace.add y0 (Tensor.assumeSpec (torch.full #[2] 0.0))
+  let y0 : Tensor YSpec := Tensor.full #[2] 1.0
+  let y0 := DiffEqSpace.add y0 (Tensor.full #[2] 0.0)
   let sol :=
     diffeqsolve
       (Term := ODETerm (Tensor YSpec) Unit)
@@ -59,7 +59,7 @@ private abbrev YSpec : StaticSpec := { shape := #[2], dtype := .Float32 }
     Dopri5.solver
       (Term := ODETerm (Tensor YSpec) Unit)
       (Y := Tensor YSpec) (VF := Tensor YSpec) (Args := Unit)
-  let y0 : Tensor YSpec := Tensor.assumeSpec (torch.full #[2] 1.0)
+  let y0 : Tensor YSpec := Tensor.full #[2] 1.0
   let controller : PIDController := { rtol := 1.0e-6, atol := 1.0e-8 }
   let sol :=
     diffeqsolve
@@ -88,18 +88,18 @@ private abbrev YSpec : StaticSpec := { shape := #[2], dtype := .Float32 }
   let steps := 500
   let dt := 1.0 / steps.toFloat
   -- tensor state, n = 64
-  let tTerm : ODETerm (T #[64]) Unit :=
-    { vectorField := fun _t y _ => mul_scalar y (-1.0) }
+  let tTerm : ODETerm (DTensor #[64] .Float32) Unit :=
+    { vectorField := fun _t y _ => Tensor.Preserving.mulScalar y (-1.0) }
   let tSolver :=
-    Dopri5.solver (Term := ODETerm (T #[64]) Unit)
-      (Y := T #[64]) (VF := T #[64]) (Args := Unit)
+    Dopri5.solver (Term := ODETerm (DTensor #[64] .Float32) Unit)
+      (Y := DTensor #[64] .Float32) (VF := DTensor #[64] .Float32) (Args := Unit)
   let t0 ← IO.monoMsNow
   let tSol :=
-    diffeqsolve (Term := ODETerm (T #[64]) Unit)
-      (Y := T #[64]) (VF := T #[64]) (Control := Time) (Args := Unit)
+    diffeqsolve (Term := ODETerm (DTensor #[64] .Float32) Unit)
+      (Y := DTensor #[64] .Float32) (VF := DTensor #[64] .Float32) (Control := Time) (Args := Unit)
       (Controller := ConstantStepSize)
-      tTerm tSolver 0.0 1.0 (some dt) (torch.ones #[64]) () (saveat := { t1 := true })
-  let tFinal := nn.item (nn.sumAll ((tSol.ys.getD #[]).getD 0 (torch.ones #[64])))
+      tTerm tSolver 0.0 1.0 (some dt) (Tensor.ones #[64]) () (saveat := { t1 := true })
+  let tFinal := Tensor.item (Tensor.sumAll ((tSol.ys.getD #[]).getD 0 (Tensor.ones #[64])))
   let tensorMs := (← IO.monoMsNow) - t0
   -- Float state (pure Lean, no FFI)
   let fTerm : ODETerm Float Unit := { vectorField := fun _t y _ => -y }

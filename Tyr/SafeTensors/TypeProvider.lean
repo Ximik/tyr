@@ -148,19 +148,19 @@ private def renderTensorDecls (sourceIsDirectory : Bool) (tensor : TensorSchema)
     s!"def {declName}TensorSpec : _root_.torch.TensorSpec :=\n" ++
     s!"  {declName}Spec.toSpec\n"
   let loadFromHandleDecl :=
-    s!"/-- Load `{tensor.name}` from an open SafeTensors handle with a type-safe shape. -/\n" ++
-    s!"def load_{declName}FromHandle (handle : _root_.torch.safetensors.SafeTensorsHandle) : IO (_root_.torch.T {declName}Shape) :=\n" ++
-    s!"  _root_.torch.safetensors.loadFromHandle handle {declName}Spec.name {declName}Shape\n"
+    s!"/-- Load `{tensor.name}` from an open SafeTensors handle with checked shape and dtype. -/\n" ++
+    s!"def load_{declName}FromHandle (handle : _root_.torch.safetensors.SafeTensorsHandle) : IO {typedReturnType} :=\n" ++
+    s!"  _root_.torch.safetensors.loadFromHandleWithSpec handle {declName}Spec.name {declName}TensorSpec\n"
   let loadDecl :=
     if sourceIsDirectory then
-      s!"/-- Load `{tensor.name}` with a type-safe shape. -/\n" ++
-      s!"def load_{declName} (source : String := defaultSource) : IO (_root_.torch.T {declName}Shape) := do\n" ++
+      s!"/-- Load `{tensor.name}` with checked shape and dtype. -/\n" ++
+      s!"def load_{declName} (source : String := defaultSource) : IO {typedReturnType} := do\n" ++
       "  let filePath : String :=\n" ++
       "    if " ++ declName ++ "Spec.sourceFile.isEmpty then source else source ++ \"/\" ++ " ++ declName ++ "Spec.sourceFile\n" ++
-      s!"  _root_.torch.safetensors.loadTensor filePath {declName}Spec.name {declName}Shape\n"
+      s!"  _root_.torch.safetensors.loadTensorWithSpec filePath {declName}Spec.name {declName}TensorSpec\n"
     else
-      s!"/-- Load `{tensor.name}` with a type-safe shape. -/\n" ++
-      s!"def load_{declName} (source : String := defaultSource) : IO (_root_.torch.T {declName}Shape) := do\n" ++
+      s!"/-- Load `{tensor.name}` with checked shape and dtype. -/\n" ++
+      s!"def load_{declName} (source : String := defaultSource) : IO {typedReturnType} := do\n" ++
       "  let handle ← _root_.torch.safetensors.openHandle source\n" ++
       s!"  load_{declName}FromHandle handle\n"
   let typedLoadFromHandleOnDeviceDecl :=
@@ -298,7 +298,7 @@ private inductive TypeRepr where
   | struct (typeName : String) (fields : Array (String × FieldSource × TypeRepr))
 
 private partial def TypeRepr.typeExpr : TypeRepr → String
-  | .leaf declName => s!"_root_.torch.T {declName}Shape"
+  | .leaf declName => s!"_root_.torch.DTensor {declName}Shape {declName}Spec.dtype"
   | .array elem _ => s!"Array ({elem.typeExpr})"
   | .struct typeName _ => typeName
 

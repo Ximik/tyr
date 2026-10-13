@@ -16,6 +16,15 @@ safetensors_type_provider "Tests/fixtures/safetensors/indexed.safetensors" as In
 safetensors_type_provider "Tests/fixtures/safetensors/indexed_dir" as IndexedDirSafe
 safetensors_type_provider "Tests/fixtures/safetensors/provider_errors/nonuniform.safetensors" as NonUniformSafe
 
+-- Default loaders and aggregate records must preserve the generated indices.
+example : IO (DTensor #[2, 3] .Float32) := SingleSafe.load_linear_weight
+example (_weights : SingleSafe.Weights) : True := by
+  fail_if_success
+    have _badShape : DTensor #[2, 4] .Float32 := _weights.linear.weight
+  fail_if_success
+    have _badDtype : DTensor #[2, 3] .Int64 := _weights.linear.weight
+  trivial
+
 private def writeBinCopy (src dst : String) : IO Unit := do
   let bytes ← IO.FS.readBinFile src
   IO.FS.writeBinFile ⟨dst⟩ bytes
@@ -26,7 +35,7 @@ private def writeIndexDir (name indexJson : String) : IO String := do
   IO.FS.writeFile s!"{dir}/model.safetensors.index.json" indexJson
   pure dir
 
-private def tensorValues {s : Shape} (t : T s) : Array Float :=
+private def tensorValues (t : RawTensor) : Array Float :=
   t.getValues 1024 |>.toList.toArray
 
 private def headerPrefix (size : UInt64) : ByteArray := Id.run do
@@ -245,8 +254,8 @@ def testSafeTensorsTypeProviderIndexedHierarchy : IO Unit := do
   LeanTest.assertEqual IndexedSafe.tensorCount 2 "indexed fixture should have two tensors"
   let direct0 ← IndexedSafe.load_layers_0_weight
   let direct1 ← IndexedSafe.load_layers_1_weight
-  let directVals0 := tensorValues direct0
-  let directVals1 := tensorValues direct1
+  let directVals0 := tensorValues direct0.raw
+  let directVals1 := tensorValues direct1.raw
   LeanTest.assertTrue (directVals0 != directVals1)
     "indexed fixture should use distinct tensor values across numeric siblings"
   let weights ← IndexedSafe.loadAll
@@ -259,9 +268,9 @@ def testSafeTensorsTypeProviderIndexedHierarchy : IO Unit := do
     "first indexed subtree should expose typed nested tensor"
   LeanTest.assertTrue (layer1.weight.runtimeShape == #[2])
     "second indexed subtree should expose typed nested tensor"
-  LeanTest.assertTrue (tensorValues layer0.weight == directVals0)
+  LeanTest.assertTrue (tensorValues layer0.weight.raw == directVals0)
     "loadAll should preserve the first indexed tensor values"
-  LeanTest.assertTrue (tensorValues layer1.weight == directVals1)
+  LeanTest.assertTrue (tensorValues layer1.weight.raw == directVals1)
     "loadAll should preserve later indexed tensor values instead of repeating the first"
   let handle ← safetensors.openHandle "Tests/fixtures/safetensors/indexed.safetensors"
   let weightsFromHandle ← IndexedSafe.loadAllFromHandle handle
@@ -269,9 +278,9 @@ def testSafeTensorsTypeProviderIndexedHierarchy : IO Unit := do
     | throw <| IO.userError "expected first indexed layer from loadAllFromHandle"
   let some handleLayer1 := weightsFromHandle.layers[1]?
     | throw <| IO.userError "expected second indexed layer from loadAllFromHandle"
-  LeanTest.assertTrue (tensorValues handleLayer0.weight == directVals0)
+  LeanTest.assertTrue (tensorValues handleLayer0.weight.raw == directVals0)
     "loadAllFromHandle should preserve the first indexed tensor values"
-  LeanTest.assertTrue (tensorValues handleLayer1.weight == directVals1)
+  LeanTest.assertTrue (tensorValues handleLayer1.weight.raw == directVals1)
     "loadAllFromHandle should preserve later indexed tensor values"
   let layers ← IndexedSafe.layers.load
   LeanTest.assertEqual layers.size 2 "hierarchical namespace loader should load array subtree"
@@ -279,18 +288,18 @@ def testSafeTensorsTypeProviderIndexedHierarchy : IO Unit := do
     | throw <| IO.userError "expected first indexed layer from namespace loader"
   let some nsLayer1 := layers[1]?
     | throw <| IO.userError "expected second indexed layer from namespace loader"
-  LeanTest.assertTrue (tensorValues nsLayer0.weight == directVals0)
+  LeanTest.assertTrue (tensorValues nsLayer0.weight.raw == directVals0)
     "namespace array loader should preserve the first indexed tensor values"
-  LeanTest.assertTrue (tensorValues nsLayer1.weight == directVals1)
+  LeanTest.assertTrue (tensorValues nsLayer1.weight.raw == directVals1)
     "namespace array loader should preserve later indexed tensor values"
   let layersFromHandle ← IndexedSafe.layers.loadFromHandle handle
   let some nsHandleLayer0 := layersFromHandle[0]?
     | throw <| IO.userError "expected first indexed layer from namespace handle loader"
   let some nsHandleLayer1 := layersFromHandle[1]?
     | throw <| IO.userError "expected second indexed layer from namespace handle loader"
-  LeanTest.assertTrue (tensorValues nsHandleLayer0.weight == directVals0)
+  LeanTest.assertTrue (tensorValues nsHandleLayer0.weight.raw == directVals0)
     "namespace handle loader should preserve the first indexed tensor values"
-  LeanTest.assertTrue (tensorValues nsHandleLayer1.weight == directVals1)
+  LeanTest.assertTrue (tensorValues nsHandleLayer1.weight.raw == directVals1)
     "namespace handle loader should preserve later indexed tensor values"
 
 @[test]
@@ -319,3 +328,12 @@ def testSafeTensorsTypeProviderNonUniformIndexedHierarchy : IO Unit := do
   let layers ← NonUniformSafe.layers.load
   LeanTest.assertTrue (layers.i0.weight.runtimeShape == #[1])
     "hierarchical namespace loader should work for non-uniform subtree"
+
+/-- The default generated loader enforces dtype, not just its header shape. -/
+@[test]
+def testSafeTensorsDefaultLoaderRejectsDtype : IO Unit := IO.FS.withTempDir fun dir => do
+  let path := (dir / "wrong-dtype.safetensors").toString
+  let header := "{\"linear.weight\":{\"dtype\":\"I32\",\"shape\":[2,3],\"data_offsets\":[0,24]}}".toUTF8
+  IO.FS.writeBinFile path
+    (headerPrefix header.size.toUInt64 ++ header ++ ByteArray.mk (Array.replicate 24 0))
+  LeanTest.assertThrows (SingleSafe.load_linear_weight path) (some "dtype")

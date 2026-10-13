@@ -1020,7 +1020,7 @@ def testQwen3ASRAudioEncoderFeatureDType : IO Unit := autograd.no_grad do
   let features : T #[3, cfg.numMelBins, 32] := reshape
     (nn.sin (toFloat' (torch.arange 0 (3 * cfg.numMelBins * 32) 1))) #[3, cfg.numMelBins, 32]
   for bf16Weights in #[false, true] do
-    let encoder := if bf16Weights then TensorStruct.map (fun t => toBFloat16' t) original else original
+    let encoder := if bf16Weights then TensorStruct.map (fun t => t.checkedReplacement (RawTensor.toBFloat16 t.shape t.raw)) original else original
     for bf16Features in #[false, true] do
       let mel := if bf16Features then toBFloat16' features else features
       let expectedInput := if bf16Weights then toBFloat16' mel else toFloat' mel
@@ -1055,7 +1055,7 @@ def testQwen3ASRBFloat16VariableLengthGeneration : IO Unit := autograd.no_grad d
     tinyChunkedCfg.thinkerConfig with audioConfig := {
       tinyChunkedCfg.thinkerConfig.audioConfig with nWindow := 8, nWindowInfer := 32 } } }
   let original ← Qwen3ASRForConditionalGeneration.init cfg
-  let model := TensorStruct.map (fun t => toBFloat16' t) original
+  let model := TensorStruct.map (fun t => t.checkedReplacement (RawTensor.toBFloat16 t.shape t.raw)) original
   let aTok := Int64.ofNat cfg.thinkerConfig.audioTokenId.toNat
   let ids : T #[2, 6] := reshape (data.fromInt64Array
     #[aTok, aTok, aTok, aTok, 7, 9, aTok, aTok, 3, 5, 7, 9]) #[2, 6]
