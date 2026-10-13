@@ -1,5 +1,4 @@
 import Tyr.TensorStruct
-import Tyr.Torch
 
 namespace torch
 namespace DiffEq
@@ -70,11 +69,6 @@ instance (priority := 50) [TensorStruct α] : DiffEqSpace α where
   add := TensorStruct.add
   sub := TensorStruct.sub
   scale s x := TensorStruct.scale x s
-
-instance {s : Shape} : DiffEqSpace (T s) where
-  add := torch.add
-  sub := torch.sub
-  scale s x := torch.mul_scalar x s
 
 instance : DiffEqSpace Float where
   add := (· + ·)
@@ -234,24 +228,6 @@ instance [DiffEqElem α] : DiffEqElem (Option α) where
     | some x, some y => some (DiffEqElem.div x y)
     | none, none => none
     | _, _ => panic! "DiffEqElem.div: Option mismatch (some vs none)"
-
-private def tensorMaximum {s : Shape} (a b : T s) : T s :=
-  where_ (gt a b) a b
-
-instance {s : Shape} : DiffEqElem (T s) where
-  abs := nn.abs
-  max := tensorMaximum
-  addScalar s x := add_scalar x s
-  div := nn.div
-
-private def rmsTensor {s : Shape} (t : T s) : Float :=
-  let sq := mul t t
-  let mean := nn.meanAll sq
-  let root := nn.sqrt mean
-  nn.item root
-
-instance {s : Shape} : DiffEqSeminorm (T s) where
-  rms := rmsTensor
 
 instance (priority := 50) [TensorStruct α] : DiffEqElem α where
   abs := TensorStruct.map Tensor.abs

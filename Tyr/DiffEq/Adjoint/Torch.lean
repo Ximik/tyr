@@ -1,5 +1,4 @@
 import Tyr.DiffEq.Adjoint.Core
-import Tyr.Module.Derive
 
 namespace torch
 namespace DiffEq
@@ -8,13 +7,15 @@ namespace DiffEq
 
 open _root_.torch
 
-private def dotStruct [TensorStruct Y] (x y : Y) : T #[] :=
+/-- Differentiable scalar pairing of two tensor trees: the tree dot product as
+    a Float32 scalar tensor, kept in the autograd graph. -/
+private def dotStruct [TensorStruct Y] (x y : Y) : DTensor #[] .Float32 :=
   let prod := TensorStruct.zipWith Mul.mul x y
-  TensorStruct.fold (fun t acc => add acc (nn.sumAll (s := t.shape) t.raw)) (zeros #[]) prod
+  TensorStruct.fold (fun t acc => Add.add acc (Tensor.toFloat32 (Tensor.sumAll t)))
+    (Tensor.zeros #[]) prod
 
-private def gradStruct [TensorStruct α] (loss : T #[]) (x : α) : α :=
-  let one := ones #[]
-  TensorStruct.map (fun t => t.checkedReplacement (autograd.grad (sx := t.shape) (sy := #[]) loss t.raw one)) x
+private def gradStruct [TensorStruct α] (loss : DTensor #[] .Float32) (x : α) : α :=
+  TensorStruct.map (fun t => Tensor.grad loss t (Tensor.onesLike loss)) x
 
 private def vjp
     [TensorStruct Y] [TensorStruct Args]
