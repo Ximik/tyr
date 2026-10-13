@@ -2076,7 +2076,7 @@ lean_object* lean_torch_multinomial(lean_obj_arg /*s*/, b_lean_obj_arg input, ui
 }
 
 // Gradient clipping (in-place, returns norm)
-lean_object* lean_torch_clip_grad_norm_(lean_obj_arg /*s*/, b_lean_obj_arg param, double max_norm, lean_object* w) {
+lean_object* lean_torch_clip_grad_norm_(lean_obj_arg /*s*/, b_lean_obj_arg param, double max_norm) {
   try {
     auto param_ = borrowTensor(param);
     double total_norm = 0.0;
@@ -2929,7 +2929,7 @@ lean_object* lean_torch_cuda_graph_reset(lean_object* w) {
 } // anonymous namespace
 
 // Save tensor to a binary file
-lean_object* lean_torch_save_tensor(lean_obj_arg /*s*/, b_lean_obj_arg tensor, b_lean_obj_arg path_obj, lean_object* w) {
+lean_object* lean_torch_save_tensor(lean_obj_arg /*s*/, b_lean_obj_arg tensor, b_lean_obj_arg path_obj) {
   auto tensor_ = borrowTensor(tensor);
   const char* path = lean_string_cstr(path_obj);
 

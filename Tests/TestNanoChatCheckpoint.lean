@@ -6,7 +6,7 @@ namespace Tests.NanoChatCheckpoint
 open torch torch.ModdedTrain LeanTest
 
 private def tinyConfig : moddedGpt.Config := {
-  vocabSize := 16, nLayer := 7, nHead := 1, headDim := 4, modelDim := 4,
+  vocabSize := 16, nLayer := 7, nHead := 1, headDim := 12, modelDim := 12,
   maxSeqLen := 8, blockSize := 8, numValueEmbeds := 1
 }
 
@@ -18,10 +18,10 @@ private def assertTreeEqual [TensorStruct α] (actual expected : α) : IO Unit :
   let error := TensorStruct.fold (fun {_s} t acc => acc + Tensor.item (Tensor.sumAll t)) 0.0 errors
   assertTrue (error.isFinite && error < 1e-6) s!"checkpoint tensor difference {error}"
 
-private def markedMuon {s : Shape} (step : Nat) : Optim.NorMuon.ParamState s := {
-  momentumBuffer := some (full s (step.toFloat / 128.0))
-  -- A genuine rank-zero reduction, unlike legacy full #[] scalar construction.
-  secondMoment := some (nn.meanAll (full #[1] (step.toFloat / 64.0)))
+private def markedMuon {s : Shape} (step : Nat) : Optim.NorMuon.ParamState ⟨s, .Float32, .any⟩ := {
+  momentumBuffer := some (Tensor.full s (step.toFloat / 128.0))
+  -- The second moment is a genuine rank-zero tensor.
+  secondMoment := some (Tensor.full #[] (step.toFloat / 64.0))
   step
 }
 
@@ -46,7 +46,7 @@ private def trainedCheckpoint : IO (Checkpoint tinyConfig) := do
         wV := markedMuon (10 * i + 9), wO := markedMuon (10 * i + 10) }
       cFc := markedMuon (10 * i + 11)
       cProj := {
-        momentumBuffer := some (full _ ((10 * i + 12).toFloat / 128.0))
+        momentumBuffer := some (Tensor.full _ ((10 * i + 12).toFloat / 128.0))
         secondMoment := none
         step := 10 * i + 12
       }
@@ -191,6 +191,21 @@ private def metadata (tokens : UInt64) : CheckpointMetadata := {
   assertEqual loaded.step 7
   assertEqual loaded.bestValLoss.toBits (0.5 : Float).toBits
   assertEqual savedMeta.totalTokens 33
+
+@[test] def testNanoChatIndexedTrainingStep : IO Unit := do
+  let params ← moddedGpt.ModdedGPTParams.init tinyConfig
+  let yarn ← moddedGpt.YarnRotary.init tinyConfig.headDim tinyConfig.maxSeqLen
+  let input := (Tensor.fromInt64Array #[0, 1, 2, 3]).reshapeChecked #[1, 4]
+  let target := (Tensor.fromInt64Array #[1, 2, 3, 4]).reshapeChecked #[1, 4]
+  let opt := OptimizerState.init tinyConfig params
+  let (updated, nextOpt, result) ← trainStep params yarn input target opt
+    { numIterations := 10 } 1.0
+  assertTrue result.loss.isFinite "Indexed NanoChat forward/backward produces a finite loss"
+  assertEqual result.tokensProcessed 4
+  assertEqual nextOpt.step 1
+  let change := Tensor.item (Tensor.sumAll (Tensor.abs (updated.lmHead.weight - params.lmHead.weight)))
+  assertTrue (change.isFinite && change > 0) "Optimizer updates the output head"
+
 
 def run : IO Unit := do
   testNanoChatSnapshotRestoresOptimizerUpdate

@@ -16,12 +16,17 @@
   - Common prefix/suffix detection for efficient batching
   - Distributed evaluation support
 -/
-import Tyr.Torch
+import Tyr.Typed.Neural
 import Tyr.Distributed
 
 namespace torch.Eval.CORE
 
 open torch
+
+/-- Evaluation models preserve the supplied batch and sequence dimensions and
+expose their actual vocabulary size in the result type. -/
+abbrev ModelRunner (vocab : UInt64) := {batch seq : UInt64} →
+  DTensor #[batch, seq] .Int64 → IO (DTensor #[batch, seq, vocab] .Float32)
 
 /-! ## Task Types -/
 
@@ -172,11 +177,11 @@ def padSequences (sequences : Array (Array UInt64)) (padToken : UInt64) : Array 
 
 /-- Convert padded sequences to input tensor -/
 def sequencesToTensor {batch seq : UInt64} (sequences : Array (Array UInt64))
-    : T #[batch, seq] :=
+    : DTensor #[batch, seq] .Int64 :=
   -- Flatten and convert to int64 array
   let flat := sequences.foldl (fun acc seq => acc ++ seq.map (·.toInt64)) #[]
-  let tensor := data.fromInt64Array flat
-  reshape tensor #[batch, seq]
+  let tensor := Tensor.fromInt64Array flat
+  Tensor.reshapeChecked tensor #[batch, seq]
 
 /-! ## Batching -/
 
@@ -240,16 +245,16 @@ structure EvalResult where
 
 /-- Compute per-token losses from model output.
     Returns losses tensor where losses[i] is loss for predicting token i+1 from position i. -/
-def computeLosses {batch seq vocab : UInt64} (logits : T #[batch, seq, vocab])
-    (targetIds : T #[batch, seq]) : T #[batch, seq] :=
+def computeLosses {batch seq vocab : UInt64} (logits : DTensor #[batch, seq, vocab] .Float32)
+    (targetIds : DTensor #[batch, seq] .Int64) : DTensor #[batch, seq] .Float32 :=
   -- Compute cross-entropy at each position
   -- logits: [batch, seq, vocab], targets: [batch, seq]
   -- Result: [batch, seq] (loss at each position)
   let batchSeq := batch * seq
-  let logitsFlat := reshape logits #[batchSeq, vocab]
-  let targetsFlat := reshape targetIds #[batchSeq]
-  let lossesFlat := nn.cross_entropy_none logitsFlat targetsFlat
-  reshape lossesFlat #[batch, seq]
+  let logitsFlat := Tensor.reshapeChecked logits #[batchSeq, vocab]
+  let targetsFlat := Tensor.reshapeChecked targetIds #[batchSeq]
+  let lossesFlat := Tensor.crossEntropyNone logitsFlat targetsFlat
+  Tensor.reshapeChecked lossesFlat #[batch, seq]
 
 /-- Evaluate multiple choice example.
     Returns index of choice with lowest average continuation loss.
@@ -260,8 +265,8 @@ def computeLosses {batch seq vocab : UInt64} (logits : T #[batch, seq, vocab])
     3. Average the losses over the continuation region (startIdx to endIdx)
     4. Pick the option with lowest average loss -/
 def evaluateMC {batch seq vocab : UInt64}
-    (logits : T #[batch, seq, vocab])
-    (targetIds : T #[batch, seq])
+    (logits : DTensor #[batch, seq, vocab] .Float32)
+    (targetIds : DTensor #[batch, seq] .Int64)
     (batchInfo : BatchInfo)
     (goldIdx : Nat) : IO EvalResult := do
   -- Compute per-position losses: [batch, seq]
@@ -286,15 +291,14 @@ def evaluateMC {batch seq vocab : UInt64}
       let endLossIdx := if ei > 0 then ei - 1 else 0
 
       -- Compute mean via tensor operations
-      let lossesFlat := reshape losses2d #[batch * seq]
+      let lossesFlat := Tensor.reshapeChecked losses2d #[batch * seq]
       let rowOffset := rowIdx * seq
       let startIdx := rowOffset + startLossIdx.toUInt64
       let numTokens := (endLossIdx - startLossIdx).toUInt64
 
       if numTokens > 0 then
-        let endIdxSlice := (startIdx + numTokens).toInt64
-        let segmentLosses := data.slice1d' lossesFlat startIdx.toInt64 endIdxSlice
-        let meanLoss := nn.item (nn.meanAll segmentLosses)
+        let segmentLosses := Tensor.sliceChecked lossesFlat 0 startIdx numTokens #[numTokens]
+        let meanLoss := Tensor.item (Tensor.meanAll segmentLosses)
         meanLosses := meanLosses.push meanLoss
       else
         meanLosses := meanLosses.push 1e30
@@ -319,8 +323,8 @@ def evaluateMC {batch seq vocab : UInt64}
     2. Compare predictions[start-1:end-1] with target tokens[start:end]
     3. Return correct=true if all predictions match -/
 def evaluateLM {seq vocab : UInt64}
-    (logits : T #[1, seq, vocab])
-    (targetIds : T #[1, seq])
+    (logits : DTensor #[1, seq, vocab] .Float32)
+    (targetIds : DTensor #[1, seq] .Int64)
     (batchInfo : BatchInfo) : IO EvalResult := do
   let startIdx := batchInfo.startIndices[0]!
   let endIdx := batchInfo.endIndices[0]!
@@ -330,11 +334,11 @@ def evaluateLM {seq vocab : UInt64}
 
   -- Get argmax predictions at each position: [1, seq]
   -- predictions[i] is the predicted token for position i+1
-  let (_, predictions) := torch.max_dim_3d logits 2
+  let predictions := Tensor.argmax logits 2
 
   -- Flatten to 1D for easier slicing
-  let predsFlat := reshape predictions #[seq]
-  let targetFlat := reshape targetIds #[seq]
+  let predsFlat := Tensor.reshapeChecked predictions #[seq]
+  let targetFlat := Tensor.reshapeChecked targetIds #[seq]
 
   -- Compare predictions[start-1:end-1] with targets[start:end]
   -- This checks if the model correctly predicts each continuation token
@@ -345,16 +349,9 @@ def evaluateLM {seq vocab : UInt64}
   if numTokens == 0 then
     return { correct := false, losses := #[], prediction := 0 }
 
-  -- Slice predictions and targets using slice1d' (start, stop)
-  let predStopIdx := (predStartIdx + numTokens).toInt64
-  let targetStopIdx := (startIdx.toUInt64 + numTokens).toInt64
-  let predSlice := data.slice1d' predsFlat predStartIdx.toInt64 predStopIdx
-  let targetSlice := data.slice1d' targetFlat startIdx.toUInt64.toInt64 targetStopIdx
-
-  -- Compare element-wise and check all match
-  let matchTensor := torch.eq predSlice targetSlice
-  let numMatches := nn.item (nn.sumAll (toFloat' matchTensor))
-  let allCorrect := numMatches == numTokens.toFloat
+  let predSlice := Tensor.sliceChecked predsFlat 0 predStartIdx numTokens #[numTokens]
+  let targetSlice := Tensor.sliceChecked targetFlat 0 startIdx.toUInt64 numTokens #[numTokens]
+  let allCorrect := (← predSlice.toUInt64Array) == (← targetSlice.toUInt64Array)
 
   return { correct := allCorrect
            losses := #[]
@@ -385,11 +382,11 @@ def stackAndPad (tokens : Array (Array UInt64)) (padToken : UInt64) : Array UInt
   return result
 
 /-- Evaluate a single example and return whether it's correct -/
-def evaluateSingleExample
+def evaluateSingleExample {vocab : UInt64}
     (item : EvalItem)
     (taskMeta : TaskMeta)
     (tokenize : String → Array UInt64)
-    (runModel : T #[] → IO (T #[]))
+    (runModel : ModelRunner vocab)
     (config : EvalConfig)
     : IO (Option Bool) := do
   let bosToken := config.bosToken
@@ -409,6 +406,7 @@ def evaluateSingleExample
   match maybeBatchAndGold with
   | none => return none
   | some (batchInfo, goldIdx) =>
+    if batchInfo.tokens.isEmpty then return none
     -- Prepare input tensor
     let paddedTokens := stackAndPad batchInfo.tokens bosToken
     let batchSize := batchInfo.tokens.size.toUInt64
@@ -417,27 +415,23 @@ def evaluateSingleExample
                     (batchInfo.tokens.foldl (fun acc (seq : Array UInt64) => max acc seq.size) 0).toUInt64
 
     -- Convert to tensor
-    let inputTensor := data.fromInt64Array (paddedTokens.map (·.toInt64))
-    let inputReshaped := reshape inputTensor #[batchSize, seqLen]
+    let inputTensor := Tensor.fromInt64Array (paddedTokens.map (·.toInt64))
+    let inputReshaped := Tensor.reshapeChecked inputTensor #[batchSize, seqLen]
 
     -- Run model forward
-    let logits ← runModel ((reshape inputReshaped #[]).to config.device)
+    let logits ← runModel (inputReshaped.to config.device)
 
     -- Create target IDs tensor (same as input for loss computation)
-    let targetTensor := data.fromInt64Array (paddedTokens.map (·.toInt64))
-    let targetReshaped := (reshape targetTensor #[batchSize, seqLen]).to logits.device
+    let targetTensor := Tensor.fromInt64Array (paddedTokens.map (·.toInt64))
+    let targetReshaped := (Tensor.reshapeChecked targetTensor #[batchSize, seqLen]).to logits.device
 
-    -- Evaluate based on task type
     let result ← match taskMeta.taskType with
-    | .multipleChoice | .schema =>
-      -- Get logits shape dynamically
-      let logitsTyped : T #[batchSize, seqLen, 65536] := cast rfl logits  -- Assume vocab size
-      let targetTyped : T #[batchSize, seqLen] := cast rfl targetReshaped
-      evaluateMC logitsTyped targetTyped batchInfo goldIdx
+    | .multipleChoice | .schema => evaluateMC logits targetReshaped batchInfo goldIdx
     | .languageModeling =>
-      let logitsTyped : T #[1, seqLen, 65536] := cast rfl logits
-      let targetTyped : T #[1, seqLen] := cast rfl targetReshaped
-      evaluateLM logitsTyped targetTyped batchInfo
+      if h : batchSize = 1 then
+        evaluateLM (seq := seqLen) (by simpa only [h] using logits) (by simpa only [h] using targetReshaped) batchInfo
+      else
+        throw <| IO.userError "Language-model evaluation requires exactly one sequence"
 
     return some result.correct
 
@@ -449,11 +443,11 @@ def evaluateSingleExample
     2. Tokenize and batch
     3. Run model forward
     4. Use evaluateMC/evaluateLM/evaluateSchema to determine correctness -/
-def evaluateTask
+def evaluateTask {vocab : UInt64}
     (examples : Array EvalItem)
     (taskMeta : TaskMeta)
     (tokenize : String → Array UInt64)
-    (runModel : T #[] → IO (T #[]))
+    (runModel : ModelRunner vocab)
     (config : EvalConfig)
     : IO Float := do
   if examples.isEmpty then return 0.0
@@ -485,12 +479,12 @@ def evaluateTask
   if useDistributed && worldSize > 1 then
     dist.barrier
     -- All-reduce numCorrect and numTotal (allReduce modifies in-place)
-    let correctTensor := data.fromInt64Array #[numCorrect.toInt64]
-    let totalTensor := data.fromInt64Array #[numTotal.toInt64]
+    let correctTensor := Tensor.fromInt64Array #[numCorrect.toInt64]
+    let totalTensor := Tensor.fromInt64Array #[numTotal.toInt64]
     dist.allReduce correctTensor .sum
     dist.allReduce totalTensor .sum
-    numCorrect := (nn.itemInt correctTensor).toInt.toNat
-    numTotal := (nn.itemInt totalTensor).toInt.toNat
+    numCorrect := (Tensor.itemInt (correctTensor.reshapeChecked #[])).toInt.toNat
+    numTotal := (Tensor.itemInt (totalTensor.reshapeChecked #[])).toInt.toNat
 
   if numTotal == 0 then return 0.0
   return numCorrect.toFloat / numTotal.toFloat

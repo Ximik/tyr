@@ -61,7 +61,8 @@ def apply {σ : StaticSpec} (G : Tensor σ) (cfg : Config := {}) : IO (Tensor σ
 
     This ensures the orthogonalization is always applied to the "short" dimension.
 -/
-def muonOrthogonalize {σ : StaticSpec} (G : Tensor σ) (numIters : UInt64 := 5) : IO (Tensor σ) := do
+def muonOrthogonalize {σ : StaticSpec} (G : Tensor σ) (numIters : UInt64 := 5) :
+    IO (Tensor (σ.withDType .BFloat16)) := do
   dist.muonOrthogonalize G numIters
 
 /-- Apply Polar Express to a batch of gradient matrices in parallel.

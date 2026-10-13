@@ -12,6 +12,7 @@
   Based on modded-nanogpt's NorMuon implementation.
 -/
 import Tyr.TensorStruct
+import Tyr.Typed.Neural
 import Tyr.Distributed
 import Tyr.Optim.PolarExpress
 
@@ -237,12 +238,6 @@ def stepSingle {σ : StaticSpec} (param : Tensor σ) (grad : Tensor σ) (state :
   -- Zero gradients should stay zero; this avoids entering Newton-Schulz on
   -- exact zeros while preserving reference Muon semantics.
   let nesterovAbsMax := Tensor.item (Tensor.maxAll (Tensor.abs nesterovGrad))
-  let orthGrad ←
-    if nesterovAbsMax == 0.0 then
-      pure nesterovGrad
-    else
-      PolarExpress.muonOrthogonalize nesterovGrad cfg.numIters
-  let g := Tensor.detach orthGrad
   let aspectScale := aspectRatioScale σ.shape
   let effectiveLr := cfg.lr * lrMul * aspectScale
   let wd := cfg.weightDecay * wdMul
@@ -252,7 +247,13 @@ def stepSingle {σ : StaticSpec} (param : Tensor σ) (grad : Tensor σ) (state :
       Sub.sub (Tensor.detach param) decay
     else
       Tensor.detach param
-  let update := Tensor.Preserving.mulScalar g effectiveLr
+  let update ← if nesterovAbsMax == 0.0 then
+      pure nesterovGrad
+    else do
+      let orthGrad ← PolarExpress.muonOrthogonalize nesterovGrad cfg.numIters
+      -- Match native Muon: scale in BF16, then restore the parameter dtype
+      -- for subtraction. Never claim the BF16 kernel result has the input dtype.
+      pure (Tensor.castLike param (Tensor.mulScalar (Tensor.detach orthGrad) effectiveLr))
   let newParam := Sub.sub paramDecayed update
   let newParam := Tensor.setRequiresGrad (Tensor.detach newParam) true
 

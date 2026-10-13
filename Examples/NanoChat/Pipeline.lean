@@ -960,11 +960,11 @@ private def ParquetTokenStream.nextBatch
   | some (window, st') =>
     let inputIds := window.extract 0 (needed - 1)
     let targetIds := window.extract 1 needed
-    let inputTensor := data.fromInt64Array (inputIds.map (·.toInt64))
-    let inputTensor := reshape inputTensor #[batchSize, seqLen]
-    let targetTensor := data.fromInt64Array (targetIds.map (·.toInt64))
-    let targetTensor := reshape targetTensor #[batchSize, seqLen]
-    pure (some (reshape inputTensor #[], reshape targetTensor #[]), st')
+    let inputTensor := Tensor.fromInt64Array (inputIds.map (·.toInt64))
+    let inputTensor := inputTensor.reshapeChecked #[batchSize, seqLen]
+    let targetTensor := Tensor.fromInt64Array (targetIds.map (·.toInt64))
+    let targetTensor := targetTensor.reshapeChecked #[batchSize, seqLen]
+    pure (some { batch := batchSize, seq := seqLen, input := inputTensor, target := targetTensor }, st')
 
 /-- Use model config captured in checkpoint metadata when available. -/
 private def resolveModelConfigFromCheckpoint
@@ -1156,13 +1156,10 @@ def evalBaseModel (cfg : NanoChatConfig) : PipelineM Unit := runOnMaster do
     let yarn := moveYarnToDevice yarn evalDevice
 
     -- Create model forward function for evaluation
-    let runModel := fun (input : T #[]) => do
-      let shape := input.runtimeShape
-      let batch := shape.getD 0 1
-      let seq := shape.getD 1 1
-      let inputTyped : T #[batch, seq] := cast rfl (input.to evalDevice)
+    let runModel : ModelRunner modelCfg.vocabSize := fun {batch seq} input => do
+      let inputTyped := input.to evalDevice
       let logits ← moddedGpt.forward (batch := batch) (seq := seq) ckpt.params yarn inputTyped
-      pure (cast rfl logits : T #[])
+      pure logits
 
     -- Evaluate on CORE tasks
     let evalConfig : EvalConfig := {
@@ -1448,13 +1445,15 @@ def midtrain (cfg : NanoChatConfig) : PipelineM Unit := do
     let stream ← trainStreamRef.get
     let (batch?, stream') ← stream.nextGPTBatch
     trainStreamRef.set stream'
-    pure batch?
+    pure (batch?.map fun (input, target) =>
+      { batch := stream.batchSize.toUInt64, seq := stream.seqLen.toUInt64, input, target })
 
   let valProvider : DynamicGPTBatchProvider := do
     let stream ← valStreamRef.get
     let (batch?, stream') ← stream.nextGPTBatch
     valStreamRef.set stream'
-    pure batch?
+    pure (batch?.map fun (input, target) =>
+      { batch := stream.batchSize.toUInt64, seq := stream.seqLen.toUInt64, input, target })
 
   let evalTokens := midEnv.evalTokens
   let tokensPerValBatch := max 1 (hp.deviceBatchSize * hp.maxSeqLen * worldSize)
@@ -1527,13 +1526,10 @@ def evalChat (cfg : NanoChatConfig) (checkpoint : String) : PipelineM Unit := ru
     let yarn := moveYarnToDevice yarn evalDevice
 
     -- Create model forward function for evaluation
-    let runModel := fun (input : T #[]) => do
-      let shape := input.runtimeShape
-      let batch := shape.getD 0 1
-      let seq := shape.getD 1 1
-      let inputTyped : T #[batch, seq] := cast rfl (input.to evalDevice)
+    let runModel : ModelRunner modelCfg.vocabSize := fun {batch seq} input => do
+      let inputTyped := input.to evalDevice
       let logits ← moddedGpt.forward (batch := batch) (seq := seq) ckpt.params yarn inputTyped
-      pure (cast rfl logits : T #[])
+      pure logits
 
     -- Evaluate on multiple task categories
     let evalConfig : EvalConfig := {
@@ -1634,27 +1630,16 @@ def supervisedFineTune (cfg : NanoChatConfig) : PipelineM Unit := do
     let yarn ← YarnRotary.init modelCfg.headDim modelCfg.maxSeqLen modelCfg.ropeBase
     let yarn := moveYarnToDevice yarn trainDevice
 
-    -- Create forward function for SFT
-    -- Note: T s is the same type for all s (TSpec.type), so we can cast between shapes
-    let forwardFn := fun (params : ModdedGPTParams modelCfg) (input : T #[]) => do
-      -- Get runtime shape to determine batch and sequence length
-      let shape := input.runtimeShape
-      let batch := shape.getD 0 1
-      let seq := shape.getD 1 1
-      -- Call forward with explicit shape parameters using cast
-      let inputTyped : T #[batch, seq] := cast rfl (input.to trainDevice)
-      let logits ← moddedGpt.forward (batch := batch) (seq := seq) params yarn inputTyped
-      pure (cast rfl logits : T #[])
+    -- Keep batch and sequence indices across the SFT callback boundary.
+    let forwardFn : ModdedGPTParams modelCfg → {batch seq : UInt64} →
+        DTensor #[batch, seq] .Int64 → IO (Σ vocab : UInt64, DTensor #[batch, seq, vocab] .Float32) :=
+      fun params {batch seq} input => do
+        let logits ← moddedGpt.forward (batch := batch) (seq := seq) params yarn (input.to trainDevice)
+        pure ⟨modelCfg.vocabSize, logits⟩
 
-    -- Create masked loss function
-    let lossFn := fun (logits : T #[]) (targets : T #[]) (mask : T #[]) =>
-      let shape := targets.runtimeShape
-      let batch := shape.getD 0 1
-      let seq := shape.getD 1 1
-      let logitsReshaped : T #[batch, seq, modelCfg.vocabSize] := cast rfl logits
-      let targetsReshaped : T #[batch, seq] := cast rfl targets
-      let maskReshaped : T #[batch, seq] := cast rfl mask
-      maskedCrossEntropy logitsReshaped targetsReshaped maskReshaped
+    let lossFn : {batch seq vocab : UInt64} → DTensor #[batch, seq, vocab] .Float32 →
+        DTensor #[batch, seq] .Int64 → DTensor #[batch, seq] .Float32 → DTensor #[] .Float32 :=
+      fun logits targets mask => maskedCrossEntropy logits targets mask
 
     -- Initialize AdamW optimizer
     let opt := Optim.adamw (lr := sftCfg.embeddingLr) (b1 := 0.9) (b2 := 0.999)
@@ -1813,33 +1798,32 @@ def reinforcementLearning (cfg : NanoChatConfig) : PipelineM Unit := do
 
     -- Create generation function (single token sampling)
     let generateOneFn := fun (params : ModdedGPTParams modelCfg) (context : Array UInt64) => do
-      let inputTensor := data.fromInt64Array (context.map (·.toInt64))
-      let inputReshaped := (reshape inputTensor #[1, context.size.toUInt64]).to trainDevice
+      let inputTensor := Tensor.fromInt64Array (context.map (·.toInt64))
+      let inputReshaped := (inputTensor.reshapeChecked #[1, context.size.toUInt64]).to trainDevice
       let logits ← moddedGpt.forward params yarn inputReshaped
       -- Flatten logits and extract last position's vocab slice
-      let logitsFlat := reshape logits #[context.size.toUInt64 * modelCfg.vocabSize]
-      let startIdx := ((context.size - 1).toUInt64 * modelCfg.vocabSize).toInt64
-      let endIdx := (context.size.toUInt64 * modelCfg.vocabSize).toInt64
-      let lastLogits := data.slice1d' logitsFlat startIdx endIdx
-      let rowLogits := reshape lastLogits #[1, modelCfg.vocabSize]
+      let logitsFlat := logits.reshapeChecked #[context.size.toUInt64 * modelCfg.vocabSize]
+      let startIdx := (context.size - 1).toUInt64 * modelCfg.vocabSize
+      let lastLogits := logitsFlat.sliceChecked 0 startIdx modelCfg.vocabSize #[modelCfg.vocabSize]
+      let rowLogits := lastLogits.reshapeChecked #[1, modelCfg.vocabSize]
       let scaled := if grpoCfg.temperature == 1.0 then rowLogits
-                    else mul_scalar rowLogits (1.0 / grpoCfg.temperature)
+                    else Tensor.mulScalar rowLogits (1.0 / grpoCfg.temperature)
       let filtered := if grpoCfg.topK == 0 then scaled
-                      else nn.topKFilter scaled grpoCfg.topK.toUInt64
-      let probs := nn.softmax filtered (-1)
-      let sampled ← nn.multinomial probs 1
-      let sampled := nn.squeezeDim sampled (-1)
-      return (nn.itemInt sampled).toUInt64
+                      else Tensor.topKFilter scaled grpoCfg.topK.toUInt64
+      let probs := Tensor.softmax filtered (-1)
+      let sampled ← Tensor.multinomial probs 1
+      let sampled := sampled.reshapeChecked #[]
+      return (Tensor.itemInt sampled).toUInt64
 
     -- Create forward function for policy gradient
     -- Returns per-token NLL: (input, target) → nll_per_token
-    let forwardFn := fun (params : ModdedGPTParams modelCfg) (input : T #[1, 256]) (target : T #[1, 256]) => do
+    let forwardFn := fun (params : ModdedGPTParams modelCfg) (input : DTensor #[1, 256] .Int64) (target : DTensor #[1, 256] .Int64) => do
       let logits ← moddedGpt.forward params yarn (input.to trainDevice)
       -- Compute per-token cross-entropy (NLL)
-      let logitsFlat := reshape logits #[256, modelCfg.vocabSize]
-      let targetFlat := reshape (target.to trainDevice) #[256]
-      let nllFlat := nn.cross_entropy_none logitsFlat targetFlat
-      return reshape nllFlat #[1, 256]
+      let logitsFlat := logits.reshapeChecked #[256, modelCfg.vocabSize]
+      let targetFlat := (target.to trainDevice).reshapeChecked #[256]
+      let nllFlat := Tensor.crossEntropyNone logitsFlat targetFlat
+      return nllFlat.reshapeChecked #[1, 256]
 
     -- Load GSM8K prompts from HuggingFace
     let cacheDir := cfg.baseDir.replace "~" (← IO.getEnv "HOME" |>.map (·.getD ""))

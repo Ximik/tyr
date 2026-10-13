@@ -57,4 +57,11 @@ namespace torch.RawTensor
 @[extern "lean_torch_safetensors_save"] opaque saveSafeTensor (shape : Shape)
     (path name : @& String) (input : @& RawTensor) : IO Unit
 
+@[extern "lean_torch_clip_grad_norm_"] opaque clipGradNorm (shape : Shape)
+    (input : @& RawTensor) (maxNorm : Float) : IO Float
+@[extern "lean_torch_save_tensor"] opaque saveTensor (shape : Shape)
+    (input : @& RawTensor) (path : @& String) : IO Unit
+@[extern "lean_torch_load_tensor_exact"] opaque loadTensorExact (shape : Shape)
+    (path : @& String) : IO RawTensor
+
 end torch.RawTensor

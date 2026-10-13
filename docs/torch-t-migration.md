@@ -357,6 +357,29 @@ CORE/ModdedTrain and TTS prerequisites. The TTS family now builds, but downstrea
 callers and other model families still require work. The full migration goal
 remains active.
 
+## 2026-10-13 NanoChat continuation
+
+- NanoChat's ModdedGPT, trainer, pipeline, CORE evaluator and sampling engine
+  now use indexed Float32 activations and Int64 tokens. Streaming batches carry
+  their batch and sequence dimensions; SFT callbacks retain them and carry the
+  vocabulary size explicitly. CORE no longer assumes a 65,536-token vocabulary.
+- Optimizer checkpoint state uses Float32 specifications and genuine scalar
+  second moments. Loading rejects malformed nonscalar Muon moment metadata.
+  Tensor-file loading validates both stored shape and dtype.
+- Native Muon orthogonalization returns BF16 regardless of input dtype. Its
+  interface now states that fact; NorMuon scales the result in BF16 before
+  converting to the parameter dtype for subtraction. A regression checks the
+  exact rounding order. A model dimension below 12 is rejected before slicing
+  the smear-gate input.
+- All **172 native CPU tests pass with zero failures, skips or runtime panics**,
+  including forward/backward with clipping and optimizer updates, checkpoint
+  replacement/corruption, legacy checkpoint loading, and a seven-token CORE
+  model. The NanoChat pipeline and generator engine build. The neural ABI audit
+  covers 32 declarations; gradient clipping and tensor saving no longer carry
+  obsolete native IO-world arguments.
+- GitHub CI remains green at `05304ff`, not at these local migration commits.
+  Full aggregate tests/examples and hardware qualification remain outstanding.
+
 ## Remaining acceptance criteria
 
 Remove the `T` declaration and all model, generator, reflection, documentation,

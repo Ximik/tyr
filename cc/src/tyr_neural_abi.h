@@ -34,6 +34,9 @@ lean_object* lean_torch_sdpa_gqa_window(uint64_t, uint64_t, uint64_t, uint64_t, 
 lean_object* lean_torch_tensor_elu(lean_object*, lean_object*);
 lean_object* lean_torch_tensor_log(lean_object*, lean_object*);
 lean_object* lean_torch_safetensors_save(lean_object*, lean_object*, lean_object*, lean_object*);
+lean_object* lean_torch_clip_grad_norm_(lean_object*, lean_object*, double);
+lean_object* lean_torch_save_tensor(lean_object*, lean_object*, lean_object*);
+lean_object* lean_torch_load_tensor_exact(lean_object*, lean_object*);
 #ifdef __cplusplus
 }
 #endif

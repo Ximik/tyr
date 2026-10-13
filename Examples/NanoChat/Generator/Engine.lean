@@ -11,7 +11,7 @@
 
   Based on nanochat's engine.py implementation.
 -/
-import Tyr.Torch
+import Tyr.Typed.Neural
 import Examples.NanoChat.Generator.State
 import Examples.NanoChat.Generator.TypedState
 import Examples.NanoChat.Generator.KVCache
@@ -20,7 +20,6 @@ import Examples.NanoChat.Generator.Tools
 namespace torch.Generator.Engine
 
 open torch
-open torch.data
 open State
 open KVCache
 open Tools
@@ -50,35 +49,35 @@ structure Engine where
   deriving Inhabited
 
 /-- Apply temperature scaling to logits -/
-def applyTemperature {s : Shape} (logits : T s) (temp : Float) : T s :=
+def applyTemperature {s : Shape} (logits : DTensor s .Float32) (temp : Float) : DTensor s .Float32 :=
   if temp == 1.0 then logits
-  else mul_scalar logits (1.0 / temp)
+  else Tensor.mulScalar logits (1.0 / temp)
 
 /-- Sample from logits using argmax (greedy).
     Returns array of token IDs, one per batch element. -/
-def sampleGreedy {batch vocabSize : UInt64} (logits : T #[batch, vocabSize])
+def sampleGreedy {batch vocabSize : UInt64} (logits : DTensor #[batch, vocabSize] .Float32)
     : IO (Array TokenId) := do
   -- Get argmax along vocab dimension - returns [batch] tensor of indices
-  let indices := nn.argmax logits (1 : UInt64)
+  let indices := Tensor.argmax logits (1 : UInt64)
   -- Convert tensor to array of token IDs (use dynamic version since shape is computed)
-  tensorToUInt64Array' (reshape indices #[])
+  indices.toUInt64Array
 
 /-- Apply top-k filtering to logits.
     Sets all logits outside the top k to -infinity. -/
-def applyTopK {s : Shape} (logits : T s) (k : Nat) : T s :=
+def applyTopK {s : Shape} (logits : DTensor s .Float32) (k : Nat) : DTensor s .Float32 :=
   if k == 0 then logits
-  else nn.topKFilter logits k.toUInt64
+  else Tensor.topKFilter logits k.toUInt64
 
 /-- Apply top-p (nucleus) filtering to logits.
     Sets logits outside the nucleus (cumulative prob > p) to -infinity. -/
-def applyTopP {s : Shape} (logits : T s) (p : Float) : T s :=
+def applyTopP {s : Shape} (logits : DTensor s .Float32) (p : Float) : DTensor s .Float32 :=
   if p >= 1.0 then logits
-  else nn.topPFilter logits p
+  else Tensor.topPFilter logits p
 
 /-- Sample from logits with temperature, top-k, and top-p.
     Returns array of token IDs, one per batch element. -/
 def sampleWithConfig {batch vocabSize : UInt64}
-    (logits : T #[batch, vocabSize]) (cfg : SamplingConfig)
+    (logits : DTensor #[batch, vocabSize] .Float32) (cfg : SamplingConfig)
     : IO (Array TokenId) := do
   -- Apply temperature
   let scaled := applyTemperature logits cfg.temperature
@@ -87,12 +86,12 @@ def sampleWithConfig {batch vocabSize : UInt64}
   -- Apply top-p filtering
   let filtered := applyTopP filtered cfg.topP
   -- Convert to probabilities
-  let probs := nn.softmax filtered (-1)
+  let probs := Tensor.softmax filtered (-1)
   -- Sample from distribution
-  let samples ← nn.multinomial probs 1
+  let samples ← Tensor.multinomial probs 1
   -- Squeeze to remove the sample dimension and convert to token IDs
-  let squeezed := nn.squeezeDim samples (-1)
-  tensorToUInt64Array' squeezed
+  let squeezed := samples.reshapeChecked #[batch]
+  squeezed.toUInt64Array
 
 /-- Process a single generated token for a row, handling tool invocation -/
 def processToken (engine : Engine) (state : RowState) (token : TokenId)
@@ -204,7 +203,7 @@ def processTokenTyped (engine : Engine) (state : BoxedRowState) (token : TokenId
     integrates with the generation loop. -/
 unsafe def generateTyped (engine : Engine) (batch vocabSize : UInt64)
     (promptTokens : Array (Array TokenId))
-    (runModel : Array TokenId → IO (T #[batch, vocabSize]))
+    (runModel : Array TokenId → IO (DTensor #[batch, vocabSize] .Float32))
     (decode : Array TokenId → String)
     (encode : String → Array TokenId)
     : IO (Array (Array TokenId)) := do
@@ -266,7 +265,7 @@ unsafe def generateTyped (engine : Engine) (batch vocabSize : UInt64)
     - encode: Encoder function for tool output injection -/
 def generate (engine : Engine) (batch vocabSize : UInt64)
     (promptTokens : Array (Array TokenId))
-    (runModel : Array TokenId → IO (T #[batch, vocabSize]))
+    (runModel : Array TokenId → IO (DTensor #[batch, vocabSize] .Float32))
     (decode : Array TokenId → String)
     (encode : String → Array TokenId)
     : IO (Array (Array TokenId)) := do
@@ -307,7 +306,7 @@ def generate (engine : Engine) (batch vocabSize : UInt64)
 /-- Generate a single completion from a prompt -/
 def generateOne (engine : Engine) (vocabSize : UInt64)
     (promptTokens : Array TokenId)
-    (runModel : Array TokenId → IO (T #[1, vocabSize]))
+    (runModel : Array TokenId → IO (DTensor #[1, vocabSize] .Float32))
     (decode : Array TokenId → String)
     (encode : String → Array TokenId)
     : IO (Array TokenId) := do
@@ -342,7 +341,7 @@ def generateText (engine : Engine) (vocabSize : UInt64)
     (prompt : String)
     (encode : String → Array TokenId)
     (decode : Array TokenId → String)
-    (runModel : Array TokenId → IO (T #[1, vocabSize]))
+    (runModel : Array TokenId → IO (DTensor #[1, vocabSize] .Float32))
     : IO String := do
   let promptTokens := encode prompt
   let outputTokens ← generateOne engine vocabSize promptTokens runModel decode encode

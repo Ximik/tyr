@@ -26,17 +26,22 @@ def castLike {σ τ : StaticSpec} (reference : Tensor τ) (t : Tensor σ) :
   | .ok result => result
   | .error message => panic! s!"Tensor.castLike: {message}"
 
-/-- RMS normalization with Float32 accumulation and explicit restoration of the input dtype. -/
-def rmsNormPreserving {σ : StaticSpec} {w : Shape}
-    (x : Tensor σ) (weight : Tensor (σ.withShape w)) (eps : Float := 1e-6) : Tensor σ :=
+/-- RMS normalization accumulated in Float32, with the output dtype indexed. -/
+def rmsNorm {σ : StaticSpec} (x : Tensor σ) (eps : Float := 1e-6) : Tensor (σ.withDType .Float32) :=
   let xf := RawTensor.toFloat32 σ.shape x.raw
   let variance := RawTensor.mean σ.shape (RawTensor.mul σ.shape xf xf)
     (some #[(σ.shape.size - 1).toUInt64]) true
   let reduced := reduceShape σ.shape (σ.shape.size - 1) true
-  let normalized : STensor σ.shape := .assumeSpec
-    (RawTensor.mul σ.shape xf (RawTensor.rsqrt reduced (RawTensor.addScalar reduced variance eps)))
+  match Tensor.ofRaw
+      (RawTensor.mul σ.shape xf (RawTensor.rsqrt reduced (RawTensor.addScalar reduced variance eps))) with
+  | .ok result => result
+  | .error message => panic! s!"Tensor.rmsNorm: {message}"
+
+/-- RMS normalization with Float32 accumulation and explicit restoration of the input dtype. -/
+def rmsNormPreserving {σ : StaticSpec} {w : Shape}
+    (x : Tensor σ) (weight : Tensor (σ.withShape w)) (eps : Float := 1e-6) : Tensor σ :=
   -- HF checkpoints round the normalized activation before multiplying weights.
-  let restored := Tensor.castLike x normalized
+  let restored := Tensor.castLike x (rmsNorm x eps)
   x.checkedReplacement (RawTensor.mul σ.shape restored.raw weight.raw)
 
 /-- Package a tensor's shape existentially; this does not erase its shape claim. -/
@@ -253,5 +258,19 @@ def log {σ : StaticSpec} (input : Tensor σ)
 
 def saveSafeTensor {σ : StaticSpec} (input : Tensor σ) (path name : String) : IO Unit :=
   RawTensor.saveSafeTensor σ.shape path name input.raw
+
+/-- Clip the parameter's accumulated gradient in place, returning its pre-clip norm. -/
+def clipGradNorm {σ : StaticSpec} (input : Tensor σ) (maxNorm : Float) : IO Float :=
+  RawTensor.clipGradNorm σ.shape input.raw maxNorm
+
+def saveTensor {σ : StaticSpec} (input : Tensor σ) (path : String) : IO Unit :=
+  RawTensor.saveTensor σ.shape input.raw path
+
+/-- Load a tensor with exact stored shape and validate its dtype and placement. -/
+def loadTensorExact (σ : StaticSpec) (path : String) : IO (Tensor σ) := do
+  let raw ← RawTensor.loadTensorExact σ.shape path
+  match Tensor.ofRaw raw with
+  | .ok tensor => pure tensor
+  | .error message => throw (IO.userError s!"Tensor.loadTensorExact: {message}")
 
 end torch.Tensor

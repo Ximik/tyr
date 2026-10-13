@@ -270,10 +270,13 @@ def polarExpress {σ : StaticSpec} (G : Tensor σ) (numIters : UInt64 := 5) : IO
 @[extern "lean_torch_muon_orthogonalize"]
 private opaque muonOrthogonalizeImpl (G : @& RawTensor) (numIters : UInt64) : IO RawTensor
 
-/-- Muon-style orthogonalized gradient, spec-preserving (handles tall and wide
-    matrices internally via transposition). -/
-def muonOrthogonalize {σ : StaticSpec} (G : Tensor σ) (numIters : UInt64 := 5) : IO (Tensor σ) := do
-  pure (.assumeSpec (← muonOrthogonalizeImpl G.raw numIters))
+/-- Muon orthogonalization runs and returns BF16, including for Float32 inputs.
+    Shape and placement are preserved; the output dtype is explicit. -/
+def muonOrthogonalize {σ : StaticSpec} (G : Tensor σ) (numIters : UInt64 := 5) :
+    IO (Tensor (σ.withDType .BFloat16)) := do
+  match Tensor.ofRaw (← muonOrthogonalizeImpl G.raw numIters) with
+  | .ok tensor => pure tensor
+  | .error message => throw (IO.userError s!"muonOrthogonalize: {message}")
 
 /-- Cautious weight decay update (raw boundary).
 
