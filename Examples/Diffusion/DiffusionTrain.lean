@@ -50,39 +50,34 @@ def getLr (cfg : TrainConfig) (iterNum : Nat) : Float :=
 /-- Get a random batch of data from token array.
     For diffusion, we just need contiguous sequences (no shifting).
     Returns tokens of shape [batchSize, seqLen] -/
-def getBatch {n : UInt64} (trainData : T #[n]) (batchSize seqLen : UInt64)
-    : IO (T #[batchSize, seqLen]) := do
-  -- Pick random starting positions for each sequence in the batch
-  let totalTokens := batchSize * seqLen
-  let maxStart := n - totalTokens
-  let startTensor ← randint 0 maxStart.toInt64 #[1]
-  let start := nn.itemInt startTensor
-
-  -- Slice contiguous block from data
-  let block : T #[totalTokens] := data.slice1d trainData start (start + totalTokens.toInt64)
-
-  -- Reshape to [batchSize, seqLen]
-  let batch := reshape block #[batchSize, seqLen]
-  return batch
+def getBatch {n : UInt64} (trainData : Tokens #[n]) (batchSize seqLen : UInt64)
+    : IO (Tokens #[batchSize, seqLen]) := do
+  let required := batchSize.toNat * seqLen.toNat
+  if batchSize == 0 || seqLen == 0 || required > n.toNat then
+    throw <| IO.userError "Diffusion batch requires positive dimensions and enough tokens"
+  let totalTokens := required.toUInt64
+  let startTensor ← Tensor.randint 0 (n - totalTokens + 1).toInt64 #[]
+  let start := startTensor.itemInt.toUInt64
+  return (trainData.sliceChecked 0 start totalTokens #[totalTokens]).reshapeChecked #[batchSize, seqLen]
 
 /-- Clip gradients for a diffusion transformer block. -/
 def clipBlockGrads {n_embd n_head n_kv_head : UInt64}
     (params : BlockParams n_embd n_head n_kv_head)
     (maxNorm : Float) : IO Unit := do
-  let _ ← nn.clip_grad_norm_ params.attn.c_q maxNorm
-  let _ ← nn.clip_grad_norm_ params.attn.c_k maxNorm
-  let _ ← nn.clip_grad_norm_ params.attn.c_v maxNorm
-  let _ ← nn.clip_grad_norm_ params.attn.c_proj maxNorm
-  let _ ← nn.clip_grad_norm_ params.mlp.c_fc maxNorm
-  let _ ← nn.clip_grad_norm_ params.mlp.c_proj maxNorm
+  let _ ← Tensor.clipGradNorm params.attn.c_q maxNorm
+  let _ ← Tensor.clipGradNorm params.attn.c_k maxNorm
+  let _ ← Tensor.clipGradNorm params.attn.c_v maxNorm
+  let _ ← Tensor.clipGradNorm params.attn.c_proj maxNorm
+  let _ ← Tensor.clipGradNorm params.mlp.c_fc maxNorm
+  let _ ← Tensor.clipGradNorm params.mlp.c_proj maxNorm
 
 /-- Clip gradients for all diffusion model parameters -/
 def clipDiffusionGrads {cfg : Config} (params : DiffusionParams cfg) (maxNorm : Float) : IO Unit := do
-  let _ ← nn.clip_grad_norm_ params.token_emb maxNorm
-  let _ ← nn.clip_grad_norm_ params.time_emb maxNorm
+  let _ ← Tensor.clipGradNorm params.token_emb maxNorm
+  let _ ← Tensor.clipGradNorm params.time_emb maxNorm
   for block in params.blocks do
     clipBlockGrads block maxNorm
-  let _ ← nn.clip_grad_norm_ params.output_head maxNorm
+  let _ ← Tensor.clipGradNorm params.output_head maxNorm
 
 /-- Single diffusion training step -/
 def trainStep {modelCfg : Config} {batch seq num_timesteps : UInt64}
@@ -90,7 +85,7 @@ def trainStep {modelCfg : Config} {batch seq num_timesteps : UInt64}
     (params : DiffusionParams modelCfg)
     (optState : Optim.AdamWState (DiffusionParams modelCfg))
     (schedule : MaskedDiffusionSchedule num_timesteps)
-    (x_0 : T #[batch, seq])  -- Clean tokens
+    (x_0 : Tokens #[batch, seq])  -- Clean tokens
     (rotaryCache : RotaryCache rotaryLen modelCfg.headDim)
     (lr : Float)
     : IO (DiffusionParams modelCfg × Optim.AdamWState (DiffusionParams modelCfg) × Float) := do
@@ -98,7 +93,7 @@ def trainStep {modelCfg : Config} {batch seq num_timesteps : UInt64}
   let params := TensorStruct.zeroGrads params
 
   -- Sample random timesteps for each sample in batch
-  let t ← randint 0 num_timesteps.toInt64 #[batch]
+  let t ← Tensor.randint 0 num_timesteps.toInt64 #[batch]
 
   -- Add masks to get noisy input
   let x_t ← schedule.addMasks x_0 t
@@ -110,14 +105,14 @@ def trainStep {modelCfg : Config} {batch seq num_timesteps : UInt64}
   let lossT := maskedCrossEntropyLoss logits x_0 x_t schedule.mask_token_id
 
   -- Backward pass
-  autograd.backwardLoss lossT
+  Tensor.backwardLoss lossT
 
   -- Gradient clipping
   if trainCfg.gradClip > 0 then
     clipDiffusionGrads params trainCfg.gradClip
 
   -- Get loss value for logging
-  let lossVal := nn.item lossT
+  let lossVal := Tensor.item lossT
 
   -- Extract gradients from parameters
   let grads := TensorStruct.grads params
@@ -133,19 +128,19 @@ def trainStep {modelCfg : Config} {batch seq num_timesteps : UInt64}
 def evalLoss {modelCfg : Config} {num_timesteps : UInt64}
     (params : DiffusionParams modelCfg)
     (schedule : MaskedDiffusionSchedule num_timesteps)
-    (valData : T #[n])
+    (valData : Tokens #[n])
     (batchSize seqLen : UInt64)
     (rotaryCache : RotaryCache rotaryLen modelCfg.headDim)
     (numBatches : Nat)
-    : IO Float := autograd.no_grad do
+    : IO Float := Tensor.noGrad do
   let mut totalLoss : Float := 0.0
   for _ in [:numBatches] do
     let x_0 ← getBatch valData batchSize seqLen
-    let t ← randint 0 num_timesteps.toInt64 #[batchSize]
+    let t ← Tensor.randint 0 num_timesteps.toInt64 #[batchSize]
     let x_t ← schedule.addMasks x_0 t
     let logits := forward params x_t t rotaryCache
     let lossT := maskedCrossEntropyLoss logits x_0 x_t schedule.mask_token_id
-    let lossVal := nn.item lossT
+    let lossVal := Tensor.item lossT
     totalLoss := totalLoss + lossVal
   return totalLoss / numBatches.toFloat
 
@@ -155,8 +150,8 @@ def trainLoop {modelCfg : Config} {num_timesteps : UInt64}
     (initParams : DiffusionParams modelCfg)
     (initOptState : Optim.AdamWState (DiffusionParams modelCfg))
     (schedule : MaskedDiffusionSchedule num_timesteps)
-    (trainData : T #[nTrain])
-    (valData : T #[nVal])
+    (trainData : Tokens #[nTrain])
+    (valData : Tokens #[nVal])
     (rotaryCache : RotaryCache rotaryLen modelCfg.headDim)
     (evalBatches : Nat := 10)
     : IO (DiffusionParams modelCfg × Float) := do

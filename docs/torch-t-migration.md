@@ -746,6 +746,34 @@ with no failures/skips in those runners, plus all seven standalone Laguna CPU
 suites. CUDA-only portions remain skipped. GitHub reports green upstream main
 CI at `05304ff`; those runs do not validate this local migration.
 
+## Discrete diffusion example migration
+
+The diffusion parameters, rotary cache, schedule, forward/loss paths, training,
+checkpoint/optimizer persistence, and terminal sampler now use indexed tensors.
+Float32 activations, Int64 tokens/indices, and Boolean masks are distinct. The
+new native max/top-k adapters validate both value and index metadata. All
+non-GPU examples are now free of executable legacy `T` uses.
+
+Checkpoint loading requires exact stored shapes and Float32 dtype instead of
+silently reshaping equal-sized tensors. Exact-fit training batches work, while
+invalid sampling dimensions, temperatures, and top-k values return IO errors.
+The core samplers preserve every supplied context token, including the mask
+value, and confidence fallback cannot overwrite already-decoded positions.
+
+Nine native diffusion tests pass, covering forward/training/masked loss, both
+samplers, exact optimizer checkpoint resume, wrong-layout rejection, and
+mask-valued context preservation. Compile-time regressions reject wrong matrix
+shapes and floating token IDs. The TrainDiffusion executable, TestDiffusion,
+aggregate examples, and aggregate tests build under `--wfail` (1,513 jobs).
+Native TrainDiffusion help exits successfully. The neural/core ABI audits pass
+39/11 declarations. Real trained-checkpoint text quality, terminal-animation
+interaction, and GPU execution remain unqualified.
+All nine required CPU suites build under `--wfail` (1,783 jobs) and pass:
+1,474 main tests and 49 experimental tests with no failures/skips in those
+runners, plus all seven standalone Laguna CPU suites. CUDA-only portions remain
+skipped. Upstream main CI is green at `05304ff`; it does not validate these local
+commits.
+
 ## Remaining acceptance criteria
 
 Remove the `T` declaration and all model, generator, reflection, documentation,

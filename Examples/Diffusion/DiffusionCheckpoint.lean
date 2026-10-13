@@ -27,18 +27,18 @@ def saveAttentionParams {n_embd n_head n_kv_head : UInt64}
     (params : AttentionParams n_embd n_head n_kv_head)
     (dir : String) (blockIdx : Nat) : IO Unit := do
   let pfx := s!"{dir}/block_{blockIdx}_attn_"
-  data.saveTensor params.c_q (pfx ++ "c_q.pt")
-  data.saveTensor params.c_k (pfx ++ "c_k.pt")
-  data.saveTensor params.c_v (pfx ++ "c_v.pt")
-  data.saveTensor params.c_proj (pfx ++ "c_proj.pt")
+  Tensor.saveTensor params.c_q (pfx ++ "c_q.pt")
+  Tensor.saveTensor params.c_k (pfx ++ "c_k.pt")
+  Tensor.saveTensor params.c_v (pfx ++ "c_v.pt")
+  Tensor.saveTensor params.c_proj (pfx ++ "c_proj.pt")
 
 /-- Save NanoProof-style MLPParams -/
 def saveMLPParams {n_embd : UInt64}
     (params : MLPParams n_embd)
     (dir : String) (blockIdx : Nat) : IO Unit := do
   let pfx := s!"{dir}/block_{blockIdx}_mlp_"
-  data.saveTensor params.c_fc (pfx ++ "c_fc.pt")
-  data.saveTensor params.c_proj (pfx ++ "c_proj.pt")
+  Tensor.saveTensor params.c_fc (pfx ++ "c_fc.pt")
+  Tensor.saveTensor params.c_proj (pfx ++ "c_proj.pt")
 
 /-- Save NanoProof-style BlockParams (attention + MLP) -/
 def saveDiffusionBlockParams {n_embd n_head n_kv_head : UInt64}
@@ -48,41 +48,41 @@ def saveDiffusionBlockParams {n_embd n_head n_kv_head : UInt64}
   saveMLPParams params.mlp dir blockIdx
 
 /-- Load AttentionParams from directory -/
-private def loadAttentionParamsRaw (n_embd n_head n_kv_head : UInt64)
+private def loadAttentionParams (n_embd n_head n_kv_head : UInt64)
     (dir : String) (blockIdx : Nat) : IO (AttentionParams n_embd n_head n_kv_head) := do
   let pfx := s!"{dir}/block_{blockIdx}_attn_"
   let head_dim := n_embd / n_head
   let q_dim := n_head * head_dim
   let kv_dim := n_kv_head * head_dim
   return {
-    c_q := ← data.loadTensor #[q_dim, n_embd] (pfx ++ "c_q.pt")
-    c_k := ← data.loadTensor #[kv_dim, n_embd] (pfx ++ "c_k.pt")
-    c_v := ← data.loadTensor #[kv_dim, n_embd] (pfx ++ "c_v.pt")
-    c_proj := ← data.loadTensor #[n_embd, n_embd] (pfx ++ "c_proj.pt")
+    c_q := ← Tensor.loadTensorExact { shape := #[q_dim, n_embd], dtype := .Float32 } (pfx ++ "c_q.pt")
+    c_k := ← Tensor.loadTensorExact { shape := #[kv_dim, n_embd], dtype := .Float32 } (pfx ++ "c_k.pt")
+    c_v := ← Tensor.loadTensorExact { shape := #[kv_dim, n_embd], dtype := .Float32 } (pfx ++ "c_v.pt")
+    c_proj := ← Tensor.loadTensorExact { shape := #[n_embd, n_embd], dtype := .Float32 } (pfx ++ "c_proj.pt")
   }
 
 /-- Load MLPParams from directory -/
-private def loadMLPParamsRaw (n_embd : UInt64)
+private def loadMLPParams (n_embd : UInt64)
     (dir : String) (blockIdx : Nat) : IO (MLPParams n_embd) := do
   let pfx := s!"{dir}/block_{blockIdx}_mlp_"
   return {
-    c_fc := ← data.loadTensor #[4 * n_embd, n_embd] (pfx ++ "c_fc.pt")
-    c_proj := ← data.loadTensor #[n_embd, 4 * n_embd] (pfx ++ "c_proj.pt")
+    c_fc := ← Tensor.loadTensorExact { shape := #[4 * n_embd, n_embd], dtype := .Float32 } (pfx ++ "c_fc.pt")
+    c_proj := ← Tensor.loadTensorExact { shape := #[n_embd, 4 * n_embd], dtype := .Float32 } (pfx ++ "c_proj.pt")
   }
 
 /-- Load BlockParams from directory -/
-private def loadDiffusionBlockParamsRaw (n_embd n_head n_kv_head : UInt64)
+private def loadDiffusionBlockParams (n_embd n_head n_kv_head : UInt64)
     (dir : String) (blockIdx : Nat) : IO (BlockParams n_embd n_head n_kv_head) := do
-  let attn ← loadAttentionParamsRaw n_embd n_head n_kv_head dir blockIdx
-  let mlp ← loadMLPParamsRaw n_embd dir blockIdx
+  let attn ← loadAttentionParams n_embd n_head n_kv_head dir blockIdx
+  let mlp ← loadMLPParams n_embd dir blockIdx
   return { attn, mlp }
 
 /-- Save full DiffusionParams to a directory -/
 def saveDiffusionParams {cfg : Config} (params : DiffusionParams cfg) (dir : String) : IO Unit := do
   -- Save embeddings
-  data.saveTensor params.token_emb (dir ++ "/token_emb.pt")
-  data.saveTensor params.time_emb (dir ++ "/time_emb.pt")
-  data.saveTensor params.output_head (dir ++ "/output_head.pt")
+  Tensor.saveTensor params.token_emb (dir ++ "/token_emb.pt")
+  Tensor.saveTensor params.time_emb (dir ++ "/time_emb.pt")
+  Tensor.saveTensor params.output_head (dir ++ "/output_head.pt")
   -- Save blocks
   let mut idx := 0
   for block in params.blocks do
@@ -93,13 +93,13 @@ def saveDiffusionParams {cfg : Config} (params : DiffusionParams cfg) (dir : Str
 /-- Load DiffusionParams from a directory -/
 def loadDiffusionParams (cfg : Config) (dir : String) : IO (DiffusionParams cfg) := do
   -- Load embeddings
-  let token_emb ← data.loadTensor #[cfg.vocab_size, cfg.n_embd] (dir ++ "/token_emb.pt")
-  let time_emb ← data.loadTensor #[cfg.diffusion_steps, cfg.n_embd] (dir ++ "/time_emb.pt")
-  let output_head ← data.loadTensor #[cfg.vocab_size, cfg.n_embd] (dir ++ "/output_head.pt")
+  let token_emb ← Tensor.loadTensorExact { shape := #[cfg.vocab_size, cfg.n_embd], dtype := .Float32 } (dir ++ "/token_emb.pt")
+  let time_emb ← Tensor.loadTensorExact { shape := #[cfg.diffusion_steps, cfg.n_embd], dtype := .Float32 } (dir ++ "/time_emb.pt")
+  let output_head ← Tensor.loadTensorExact { shape := #[cfg.vocab_size, cfg.n_embd], dtype := .Float32 } (dir ++ "/output_head.pt")
   -- Load blocks
   let mut blocks : Array (BlockParams cfg.n_embd cfg.n_head cfg.n_head) := #[]
   for i in [:cfg.n_layer.toNat] do
-    let block ← loadDiffusionBlockParamsRaw cfg.n_embd cfg.n_head cfg.n_head dir i
+    let block ← loadDiffusionBlockParams cfg.n_embd cfg.n_head cfg.n_head dir i
     blocks := blocks.push block
   IO.println s!"Diffusion model loaded from {dir}"
   -- Apply makeLeafParams
@@ -173,24 +173,24 @@ private def saveAttentionAdamState {n_embd n_head n_kv_head : UInt64}
     (mu nu : AttentionParams n_embd n_head n_kv_head)
     (dir : String) (blockIdx : Nat) : IO Unit := do
   let pfx := s!"{dir}/optim_block_{blockIdx}_attn_"
-  data.saveTensor mu.c_q (pfx ++ "mu_c_q.pt")
-  data.saveTensor mu.c_k (pfx ++ "mu_c_k.pt")
-  data.saveTensor mu.c_v (pfx ++ "mu_c_v.pt")
-  data.saveTensor mu.c_proj (pfx ++ "mu_c_proj.pt")
-  data.saveTensor nu.c_q (pfx ++ "nu_c_q.pt")
-  data.saveTensor nu.c_k (pfx ++ "nu_c_k.pt")
-  data.saveTensor nu.c_v (pfx ++ "nu_c_v.pt")
-  data.saveTensor nu.c_proj (pfx ++ "nu_c_proj.pt")
+  Tensor.saveTensor mu.c_q (pfx ++ "mu_c_q.pt")
+  Tensor.saveTensor mu.c_k (pfx ++ "mu_c_k.pt")
+  Tensor.saveTensor mu.c_v (pfx ++ "mu_c_v.pt")
+  Tensor.saveTensor mu.c_proj (pfx ++ "mu_c_proj.pt")
+  Tensor.saveTensor nu.c_q (pfx ++ "nu_c_q.pt")
+  Tensor.saveTensor nu.c_k (pfx ++ "nu_c_k.pt")
+  Tensor.saveTensor nu.c_v (pfx ++ "nu_c_v.pt")
+  Tensor.saveTensor nu.c_proj (pfx ++ "nu_c_proj.pt")
 
 /-- Helper: Save Adam state for MLPParams -/
 private def saveMLPAdamState {n_embd : UInt64}
     (mu nu : MLPParams n_embd)
     (dir : String) (blockIdx : Nat) : IO Unit := do
   let pfx := s!"{dir}/optim_block_{blockIdx}_mlp_"
-  data.saveTensor mu.c_fc (pfx ++ "mu_c_fc.pt")
-  data.saveTensor mu.c_proj (pfx ++ "mu_c_proj.pt")
-  data.saveTensor nu.c_fc (pfx ++ "nu_c_fc.pt")
-  data.saveTensor nu.c_proj (pfx ++ "nu_c_proj.pt")
+  Tensor.saveTensor mu.c_fc (pfx ++ "mu_c_fc.pt")
+  Tensor.saveTensor mu.c_proj (pfx ++ "mu_c_proj.pt")
+  Tensor.saveTensor nu.c_fc (pfx ++ "nu_c_fc.pt")
+  Tensor.saveTensor nu.c_proj (pfx ++ "nu_c_proj.pt")
 
 /-- Helper: Save Adam state for BlockParams -/
 private def saveDiffusionBlockAdamState {n_embd n_head n_kv_head : UInt64}
@@ -200,7 +200,7 @@ private def saveDiffusionBlockAdamState {n_embd n_head n_kv_head : UInt64}
   saveMLPAdamState mu.mlp nu.mlp dir blockIdx
 
 /-- Helper: Load Adam state for AttentionParams -/
-private def loadAttentionAdamStateRaw (n_embd n_head n_kv_head : UInt64)
+private def loadAttentionAdamState (n_embd n_head n_kv_head : UInt64)
     (dir : String) (blockIdx : Nat)
     : IO (AttentionParams n_embd n_head n_kv_head × AttentionParams n_embd n_head n_kv_head) := do
   let pfx := s!"{dir}/optim_block_{blockIdx}_attn_"
@@ -208,39 +208,39 @@ private def loadAttentionAdamStateRaw (n_embd n_head n_kv_head : UInt64)
   let q_dim := n_head * head_dim
   let kv_dim := n_kv_head * head_dim
   let mu : AttentionParams n_embd n_head n_kv_head := {
-    c_q := ← data.loadTensor #[q_dim, n_embd] (pfx ++ "mu_c_q.pt")
-    c_k := ← data.loadTensor #[kv_dim, n_embd] (pfx ++ "mu_c_k.pt")
-    c_v := ← data.loadTensor #[kv_dim, n_embd] (pfx ++ "mu_c_v.pt")
-    c_proj := ← data.loadTensor #[n_embd, n_embd] (pfx ++ "mu_c_proj.pt")
+    c_q := ← Tensor.loadTensorExact { shape := #[q_dim, n_embd], dtype := .Float32 } (pfx ++ "mu_c_q.pt")
+    c_k := ← Tensor.loadTensorExact { shape := #[kv_dim, n_embd], dtype := .Float32 } (pfx ++ "mu_c_k.pt")
+    c_v := ← Tensor.loadTensorExact { shape := #[kv_dim, n_embd], dtype := .Float32 } (pfx ++ "mu_c_v.pt")
+    c_proj := ← Tensor.loadTensorExact { shape := #[n_embd, n_embd], dtype := .Float32 } (pfx ++ "mu_c_proj.pt")
   }
   let nu : AttentionParams n_embd n_head n_kv_head := {
-    c_q := ← data.loadTensor #[q_dim, n_embd] (pfx ++ "nu_c_q.pt")
-    c_k := ← data.loadTensor #[kv_dim, n_embd] (pfx ++ "nu_c_k.pt")
-    c_v := ← data.loadTensor #[kv_dim, n_embd] (pfx ++ "nu_c_v.pt")
-    c_proj := ← data.loadTensor #[n_embd, n_embd] (pfx ++ "nu_c_proj.pt")
+    c_q := ← Tensor.loadTensorExact { shape := #[q_dim, n_embd], dtype := .Float32 } (pfx ++ "nu_c_q.pt")
+    c_k := ← Tensor.loadTensorExact { shape := #[kv_dim, n_embd], dtype := .Float32 } (pfx ++ "nu_c_k.pt")
+    c_v := ← Tensor.loadTensorExact { shape := #[kv_dim, n_embd], dtype := .Float32 } (pfx ++ "nu_c_v.pt")
+    c_proj := ← Tensor.loadTensorExact { shape := #[n_embd, n_embd], dtype := .Float32 } (pfx ++ "nu_c_proj.pt")
   }
   return (mu, nu)
 
 /-- Helper: Load Adam state for MLPParams -/
-private def loadMLPAdamStateRaw (n_embd : UInt64) (dir : String) (blockIdx : Nat)
+private def loadMLPAdamState (n_embd : UInt64) (dir : String) (blockIdx : Nat)
     : IO (MLPParams n_embd × MLPParams n_embd) := do
   let pfx := s!"{dir}/optim_block_{blockIdx}_mlp_"
   let mu : MLPParams n_embd := {
-    c_fc := ← data.loadTensor #[4 * n_embd, n_embd] (pfx ++ "mu_c_fc.pt")
-    c_proj := ← data.loadTensor #[n_embd, 4 * n_embd] (pfx ++ "mu_c_proj.pt")
+    c_fc := ← Tensor.loadTensorExact { shape := #[4 * n_embd, n_embd], dtype := .Float32 } (pfx ++ "mu_c_fc.pt")
+    c_proj := ← Tensor.loadTensorExact { shape := #[n_embd, 4 * n_embd], dtype := .Float32 } (pfx ++ "mu_c_proj.pt")
   }
   let nu : MLPParams n_embd := {
-    c_fc := ← data.loadTensor #[4 * n_embd, n_embd] (pfx ++ "nu_c_fc.pt")
-    c_proj := ← data.loadTensor #[n_embd, 4 * n_embd] (pfx ++ "nu_c_proj.pt")
+    c_fc := ← Tensor.loadTensorExact { shape := #[4 * n_embd, n_embd], dtype := .Float32 } (pfx ++ "nu_c_fc.pt")
+    c_proj := ← Tensor.loadTensorExact { shape := #[n_embd, 4 * n_embd], dtype := .Float32 } (pfx ++ "nu_c_proj.pt")
   }
   return (mu, nu)
 
 /-- Helper: Load Adam state for BlockParams -/
-private def loadDiffusionBlockAdamStateRaw (n_embd n_head n_kv_head : UInt64)
+private def loadDiffusionBlockAdamState (n_embd n_head n_kv_head : UInt64)
     (dir : String) (blockIdx : Nat)
     : IO (BlockParams n_embd n_head n_kv_head × BlockParams n_embd n_head n_kv_head) := do
-  let (muAttn, nuAttn) ← loadAttentionAdamStateRaw n_embd n_head n_kv_head dir blockIdx
-  let (muMLP, nuMLP) ← loadMLPAdamStateRaw n_embd dir blockIdx
+  let (muAttn, nuAttn) ← loadAttentionAdamState n_embd n_head n_kv_head dir blockIdx
+  let (muMLP, nuMLP) ← loadMLPAdamState n_embd dir blockIdx
   return ({ attn := muAttn, mlp := muMLP }, { attn := nuAttn, mlp := nuMLP })
 
 /-- Save AdamW optimizer state for DiffusionParams -/
@@ -252,12 +252,12 @@ def saveDiffusionAdamWState {cfg : Config}
   -- Save count
   IO.FS.writeFile (pfx ++ "count.txt") (toString adamState.count)
   -- Save embedding mu/nu
-  data.saveTensor adamState.mu.token_emb (pfx ++ "mu_token_emb.pt")
-  data.saveTensor adamState.mu.time_emb (pfx ++ "mu_time_emb.pt")
-  data.saveTensor adamState.mu.output_head (pfx ++ "mu_output_head.pt")
-  data.saveTensor adamState.nu.token_emb (pfx ++ "nu_token_emb.pt")
-  data.saveTensor adamState.nu.time_emb (pfx ++ "nu_time_emb.pt")
-  data.saveTensor adamState.nu.output_head (pfx ++ "nu_output_head.pt")
+  Tensor.saveTensor adamState.mu.token_emb (pfx ++ "mu_token_emb.pt")
+  Tensor.saveTensor adamState.mu.time_emb (pfx ++ "mu_time_emb.pt")
+  Tensor.saveTensor adamState.mu.output_head (pfx ++ "mu_output_head.pt")
+  Tensor.saveTensor adamState.nu.token_emb (pfx ++ "nu_token_emb.pt")
+  Tensor.saveTensor adamState.nu.time_emb (pfx ++ "nu_time_emb.pt")
+  Tensor.saveTensor adamState.nu.output_head (pfx ++ "nu_output_head.pt")
   -- Save block states
   let mut idx := 0
   for (muBlock, nuBlock) in adamState.mu.blocks.zip adamState.nu.blocks do
@@ -275,17 +275,17 @@ def loadDiffusionAdamWState (cfg : Config) (dir : String)
     | some n => n
     | none => 0
   -- Load embedding mu/nu
-  let mu_token_emb ← data.loadTensor #[cfg.vocab_size, cfg.n_embd] (pfx ++ "mu_token_emb.pt")
-  let mu_time_emb ← data.loadTensor #[cfg.diffusion_steps, cfg.n_embd] (pfx ++ "mu_time_emb.pt")
-  let mu_output_head ← data.loadTensor #[cfg.vocab_size, cfg.n_embd] (pfx ++ "mu_output_head.pt")
-  let nu_token_emb ← data.loadTensor #[cfg.vocab_size, cfg.n_embd] (pfx ++ "nu_token_emb.pt")
-  let nu_time_emb ← data.loadTensor #[cfg.diffusion_steps, cfg.n_embd] (pfx ++ "nu_time_emb.pt")
-  let nu_output_head ← data.loadTensor #[cfg.vocab_size, cfg.n_embd] (pfx ++ "nu_output_head.pt")
+  let mu_token_emb ← Tensor.loadTensorExact { shape := #[cfg.vocab_size, cfg.n_embd], dtype := .Float32 } (pfx ++ "mu_token_emb.pt")
+  let mu_time_emb ← Tensor.loadTensorExact { shape := #[cfg.diffusion_steps, cfg.n_embd], dtype := .Float32 } (pfx ++ "mu_time_emb.pt")
+  let mu_output_head ← Tensor.loadTensorExact { shape := #[cfg.vocab_size, cfg.n_embd], dtype := .Float32 } (pfx ++ "mu_output_head.pt")
+  let nu_token_emb ← Tensor.loadTensorExact { shape := #[cfg.vocab_size, cfg.n_embd], dtype := .Float32 } (pfx ++ "nu_token_emb.pt")
+  let nu_time_emb ← Tensor.loadTensorExact { shape := #[cfg.diffusion_steps, cfg.n_embd], dtype := .Float32 } (pfx ++ "nu_time_emb.pt")
+  let nu_output_head ← Tensor.loadTensorExact { shape := #[cfg.vocab_size, cfg.n_embd], dtype := .Float32 } (pfx ++ "nu_output_head.pt")
   -- Load block states
   let mut muBlocks : Array (BlockParams cfg.n_embd cfg.n_head cfg.n_head) := #[]
   let mut nuBlocks : Array (BlockParams cfg.n_embd cfg.n_head cfg.n_head) := #[]
   for i in [:cfg.n_layer.toNat] do
-    let (muBlock, nuBlock) ← loadDiffusionBlockAdamStateRaw cfg.n_embd cfg.n_head cfg.n_head dir i
+    let (muBlock, nuBlock) ← loadDiffusionBlockAdamState cfg.n_embd cfg.n_head cfg.n_head dir i
     muBlocks := muBlocks.push muBlock
     nuBlocks := nuBlocks.push nuBlock
   let mu : DiffusionParams cfg := {

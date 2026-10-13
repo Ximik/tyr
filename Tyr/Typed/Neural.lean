@@ -291,4 +291,25 @@ def loadU16Bin (count : UInt64) (path : String) : IO (DTensor #[count] .Int64) :
   | .ok tensor => pure tensor
   | .error message => throw <| IO.userError s!"Tensor.loadU16Bin: {message}"
 
+def linspace (start stop : Float) (count : UInt64) : DTensor #[count] .Float32 :=
+  .assumeSpec (RawTensor.linspace start stop count false)
+
+/-- Reduce the last axis, preserving floating values and Int64 index metadata. -/
+def maxLast3d {batch seq vocab : UInt64} {d : DType} {dev : DevicePolicy}
+    (input : Tensor ⟨#[batch, seq, vocab], d, dev⟩) :
+    Tensor ⟨#[batch, seq], d, dev⟩ × Tensor ⟨#[batch, seq], .Int64, dev⟩ :=
+  let (values, indices) := RawTensor.maxLast3d batch seq vocab input.raw 2
+  match Tensor.ofRaw values, Tensor.ofRaw indices with
+  | .ok values, .ok indices => (values, indices)
+  | .error message, _ | _, .error message => panic! s!"Tensor.maxLast3d: {message}"
+
+/-- Select the largest `k` entries in each row. -/
+def topKLast2d {rows cols : UInt64} {d : DType} {dev : DevicePolicy}
+    (input : Tensor ⟨#[rows, cols], d, dev⟩) (k : UInt64) :
+    Tensor ⟨#[rows, k], d, dev⟩ × Tensor ⟨#[rows, k], .Int64, dev⟩ :=
+  let (values, indices) := RawTensor.topKLast2d rows cols input.raw k 1
+  match Tensor.ofRaw values, Tensor.ofRaw indices with
+  | .ok values, .ok indices => (values, indices)
+  | .error message, _ | _, .error message => panic! s!"Tensor.topKLast2d: {message}"
+
 end torch.Tensor

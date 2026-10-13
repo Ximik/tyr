@@ -41,6 +41,9 @@ lean_object* lean_torch_wav_begin(lean_object*, uint64_t);
 lean_object* lean_torch_wav_append(lean_object*, lean_object*, lean_object*);
 lean_object* lean_torch_wav_finalize(lean_object*);
 lean_object* lean_torch_load_u16_bin(uint64_t, lean_object*);
+lean_object* lean_torch_linspace(double, double, uint64_t, uint8_t);
+lean_object* lean_torch_max_dim_3d(uint64_t, uint64_t, uint64_t, lean_object*, uint64_t);
+lean_object* lean_torch_topk_2d(uint64_t, uint64_t, lean_object*, uint64_t, uint64_t);
 #ifdef __cplusplus
 }
 #endif
