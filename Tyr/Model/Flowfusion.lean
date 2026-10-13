@@ -1,4 +1,4 @@
-import Tyr.Torch
+import Tyr.Typed.Neural
 import Tyr.TensorStruct
 
 /-!
@@ -13,15 +13,17 @@ import Tyr.TensorStruct
 
 namespace torch.flowfusion
 
+variable {cmaskSpec lmaskSpec : StaticSpec}
+
 /-- Wrap a state with conditioning and loss masks. Masks are stored as `Static`
     so they are skipped by tensor traversal utilities. -/
-structure MaskedState (α : Type) where
+structure MaskedState (α : Type) (cmaskSpec lmaskSpec : StaticSpec) where
   state : α
-  cmask : Static (T #[])
-  lmask : Static (T #[])
+  cmask : Static (Tensor cmaskSpec)
+  lmask : Static (Tensor lmaskSpec)
   deriving Repr
 
-instance [TensorStruct α] : TensorStruct (MaskedState α) where
+instance [TensorStruct α] : TensorStruct (MaskedState α cmaskSpec lmaskSpec) where
   map f x := { x with state := TensorStruct.map f x.state }
   mapM f x := do
     let state' ← TensorStruct.mapM f x.state
@@ -31,24 +33,24 @@ instance [TensorStruct α] : TensorStruct (MaskedState α) where
 
 namespace MaskedState
 
-/-- Convenience constructor from raw masks. -/
-def ofMasks (state : α) (cmask lmask : T #[]) : MaskedState α :=
-  { state, cmask := (cmask : Static (T #[])), lmask := (lmask : Static (T #[])) }
+/-- Convenience constructor preserving both mask specifications. -/
+def ofMasks (state : α) (cmask : Tensor cmaskSpec) (lmask : Tensor lmaskSpec) : MaskedState α cmaskSpec lmaskSpec :=
+  { state, cmask := (cmask : Static (Tensor cmaskSpec)), lmask := (lmask : Static (Tensor lmaskSpec)) }
 
-def getCmask (m : MaskedState α) : T #[] := m.cmask.val
-def getLmask (m : MaskedState α) : T #[] := m.lmask.val
+def getCmask (m : MaskedState α cmaskSpec lmaskSpec) : Tensor cmaskSpec := m.cmask.val
+def getLmask (m : MaskedState α cmaskSpec lmaskSpec) : Tensor lmaskSpec := m.lmask.val
 
 end MaskedState
 
 /-- Wrapper for alternative prediction targets (e.g., tangent vectors).
     Masks are optional and stored as `Static`. -/
-structure Guide (α : Type) where
+structure Guide (α : Type) (cmaskSpec lmaskSpec : StaticSpec) where
   value : α
-  cmask : Option (Static (T #[])) := none
-  lmask : Option (Static (T #[])) := none
+  cmask : Option (Static (Tensor cmaskSpec)) := none
+  lmask : Option (Static (Tensor lmaskSpec)) := none
   deriving Repr
 
-instance [TensorStruct α] : TensorStruct (Guide α) where
+instance [TensorStruct α] : TensorStruct (Guide α cmaskSpec lmaskSpec) where
   map f x := { x with value := TensorStruct.map f x.value }
   mapM f x := do
     let value' ← TensorStruct.mapM f x.value
@@ -58,16 +60,16 @@ instance [TensorStruct α] : TensorStruct (Guide α) where
 
 namespace Guide
 
-def getCmask (g : Guide α) : Option (T #[]) := g.cmask.map (·.val)
-def getLmask (g : Guide α) : Option (T #[]) := g.lmask.map (·.val)
+def getCmask (g : Guide α cmaskSpec lmaskSpec) : Option (Tensor cmaskSpec) := g.cmask.map (·.val)
+def getLmask (g : Guide α cmaskSpec lmaskSpec) : Option (Tensor lmaskSpec) := g.lmask.map (·.val)
 
 end Guide
 
 /-- Unwrap a masked state to its underlying state. -/
-def unmask (m : MaskedState α) : α := m.state
+def unmask (m : MaskedState α cmaskSpec lmaskSpec) : α := m.state
 
 /-- Wrap a state with the masks from another masked state. -/
-def maskLike (x : α) (m : MaskedState α) : MaskedState α :=
+def maskLike (x : α) (m : MaskedState α cmaskSpec lmaskSpec) : MaskedState α cmaskSpec lmaskSpec :=
   MaskedState.ofMasks x (MaskedState.getCmask m) (MaskedState.getLmask m)
 
 end torch.flowfusion

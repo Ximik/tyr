@@ -341,7 +341,8 @@ instance [AnchorMerge α] [AnchorMerge β] : AnchorMerge (α × β) where
   merge a b w1 w2 :=
     (AnchorMerge.merge a.1 b.1 w1 w2, AnchorMerge.merge a.2 b.2 w1 w2)
 
-instance [AnchorMerge α] : AnchorMerge (torch.flowfusion.MaskedState α) where
+instance [AnchorMerge α] {cmaskSpec lmaskSpec : StaticSpec} :
+    AnchorMerge (torch.flowfusion.MaskedState α cmaskSpec lmaskSpec) where
   merge a b w1 w2 :=
     torch.flowfusion.maskLike (AnchorMerge.merge a.state b.state w1 w2) a
 

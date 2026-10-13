@@ -1,3 +1,4 @@
+import Tests.TestFlowfusionTyped
 import Tests.TestFluxTyped
 import Tests.TestVAETyped
 import Tests.TestGemma4Typed

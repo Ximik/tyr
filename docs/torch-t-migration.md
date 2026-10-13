@@ -627,6 +627,20 @@ Downloaded Klein checkpoints, full-resolution image quality, and actual GPU
 execution remain unqualified. Other legacy models, reflection/generators, and
 remaining examples/tests/docs still need migration before removing `torch.T`.
 
+## 2026-10-13 Flowfusion continuation
+
+`MaskedState` and `Guide` now carry separate `StaticSpec` parameters for their
+conditioning and loss masks. Constructors/getters preserve each mask's shape,
+dtype, and device policy. Masks remain static during tensor-tree traversal;
+BranchingFlows anchor merging preserves the first state's mask specifications
+and values while combining the state.
+
+The focused indexed runner builds under `--wfail` and passes 237 tests, including
+three new checks for map/mapM/zip/fold behavior, optional guide masks, and weighted
+anchor merging with differently shaped Float32 and Bool masks. All 49
+experimental BranchingFlows tests also pass with zero failures/skips. This
+change does not claim a fresh full CPU or GPU qualification run.
+
 ## Remaining acceptance criteria
 
 Remove the `T` declaration and all model, generator, reflection, documentation,
