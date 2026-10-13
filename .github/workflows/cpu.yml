@@ -80,6 +80,7 @@ jobs:
           python3 scripts/check_ffi_abi.py --header cc/src/tyr_laguna_abi.h --generated .lake/build/ir/Tyr/RawTensor/Laguna.c
           python3 scripts/check_ffi_abi.py --header cc/src/tyr_gemma4_abi.h --generated .lake/build/ir/Tyr/RawTensor/Gemma4.c
           python3 scripts/check_ffi_abi.py --header cc/src/tyr_vae_abi.h --generated .lake/build/ir/Tyr/RawTensor/VAE.c
+          python3 scripts/check_ffi_abi.py --header cc/src/tyr_flux_abi.h --generated .lake/build/ir/Tyr/RawTensor/Flux.c
 
       - name: Test native attention CPU semantics
         run: |

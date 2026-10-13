@@ -1,3 +1,4 @@
+#include "tyr_flux_abi.h"
 #include "tyr_vae_abi.h"
 #include "tyr_gemma4_abi.h"
 #include "tyr_branching_abi.h"
@@ -3018,8 +3019,7 @@ lean_object* lean_torch_file_exists(b_lean_obj_arg path_obj, lean_object* w) {
 lean_object* lean_torch_save_ppm(
   lean_obj_arg shape,
   b_lean_obj_arg tensor_obj,
-  b_lean_obj_arg path_obj,
-  lean_object* w
+  b_lean_obj_arg path_obj
 ) {
   const char* path = lean_string_cstr(path_obj);
   lean_dec(shape);

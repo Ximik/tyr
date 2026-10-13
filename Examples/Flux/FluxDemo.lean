@@ -21,7 +21,7 @@ open torch.vae
 open torch.flux
 
 private def toFloat32 {α : Type} [TensorStruct α] (x : α) : α :=
-  TensorStruct.map toFloat' x
+  TensorStruct.map (fun t => t.checkedReplacement t.toFloat32.raw) x
 
 private def toFloat32Embedder {cfg : QwenConfig} {max_seq : UInt64}
     (e : QwenFluxEmbedder cfg max_seq) : QwenFluxEmbedder cfg max_seq :=
@@ -114,6 +114,32 @@ private def loadMaskIds (path : String) (maxLen : UInt64) : IO (Array Int64) := 
     ids := padded
   pure ids
 
+/-- Construct indexed token IDs and attention masks from a prompt or token files. -/
+private def promptTokens (cfg : DemoConfig) (prompt : String) : IO (DTensor #[1, maxSeqLen] .Int64 × DTensor #[1, maxSeqLen] .Int64 × UInt64) := do
+  if cfg.useTokenFiles then
+    if !(← data.fileExists cfg.tokensPath) then
+      throw (IO.userError s!"Token file not found: {cfg.tokensPath}")
+    IO.println s!"    Loading tokens from {cfg.tokensPath}"
+    let ids ← loadTokenIds cfg.tokensPath maxSeqLen
+    let tokenCount := ids.size.toUInt64
+    let (padded, defaultMask) := padTokens ids maxSeqLen qwenPadId
+    let mask ←
+      if (← data.fileExists cfg.attnMaskPath) then
+        IO.println s!"    Loading attention mask from {cfg.attnMaskPath}"
+        loadMaskIds cfg.attnMaskPath maxSeqLen
+      else
+        pure defaultMask
+    let tokens := Tensor.reshapeChecked (Tensor.fromInt64Array padded) #[1, maxSeqLen]
+    let attnMask := Tensor.reshapeChecked (Tensor.fromInt64Array mask) #[1, maxSeqLen]
+    pure (tokens, attnMask, tokenCount)
+  else
+    let tok ← tokenizer.qwen3.loadTokenizer cfg.qwenDir
+    let (tokIds, maskIds) := tokenizer.qwen3.encodePrompt tok prompt maxSeqLen.toNat
+    let tokenCount := maskIds.foldl (fun acc v => if v != 0 then acc + 1 else acc) (0 : UInt64)
+    let tokens := Tensor.reshapeChecked (Tensor.fromInt64Array (tokenizer.qwen3.toInt64Array tokIds)) #[1, maxSeqLen]
+    let attnMask := Tensor.reshapeChecked (Tensor.fromInt64Array (tokenizer.qwen3.toInt64Array maskIds)) #[1, maxSeqLen]
+    pure (tokens, attnMask, tokenCount)
+
 /-- Main demo: generate an image from a text prompt -/
 def runDemo (cfg : DemoConfig) (prompt : String) : IO Unit := do
   IO.println "=== Flux Klein 4B Demo ==="
@@ -146,32 +172,10 @@ def runDemo (cfg : DemoConfig) (prompt : String) : IO Unit := do
 
   -- Step 1: Tokenize and encode text
   IO.println "  [1/4] Encoding text..."
-  let (tokens, attnMask, tokenCount) ←
-    if cfg.useTokenFiles then
-      if !(← data.fileExists cfg.tokensPath) then
-        throw (IO.userError s!"Token file not found: {cfg.tokensPath}")
-      IO.println s!"    Loading tokens from {cfg.tokensPath}"
-      let ids ← loadTokenIds cfg.tokensPath maxSeqLen
-      let tokenCount := ids.size.toUInt64
-      let (padded, defaultMask) := padTokens ids maxSeqLen qwenPadId
-      let mask ←
-        if (← data.fileExists cfg.attnMaskPath) then
-          IO.println s!"    Loading attention mask from {cfg.attnMaskPath}"
-          loadMaskIds cfg.attnMaskPath maxSeqLen
-        else
-          pure defaultMask
-      let tokens := reshape (data.fromInt64Array padded) #[1, maxSeqLen]
-      let attnMask := reshape (data.fromInt64Array mask) #[1, maxSeqLen]
-      pure (tokens, attnMask, tokenCount)
-    else
-      let tok ← tokenizer.qwen3.loadTokenizer cfg.qwenDir
-      let (tokIds, maskIds) := tokenizer.qwen3.encodePrompt tok prompt maxSeqLen.toNat
-      let tokenCount := maskIds.foldl (fun acc v => if v != 0 then acc + 1 else acc) (0 : UInt64)
-      let tokens := reshape (data.fromInt64Array (tokenizer.qwen3.toInt64Array tokIds)) #[1, maxSeqLen]
-      let attnMask := reshape (data.fromInt64Array (tokenizer.qwen3.toInt64Array maskIds)) #[1, maxSeqLen]
-      pure (tokens, attnMask, tokenCount)
-
-  let txtEmb := qwen.encodeMasked qwenCfg maxSeqLen tokens attnMask
+  let (tokens, attnMask, tokenCount) ← promptTokens cfg prompt
+  let txtEmb := qwen.encodeMasked (batch := 1) (seq := maxSeqLen) (maskDtype := .Int64) qwenCfg maxSeqLen tokens attnMask
+  let txtEmb : STensor #[1, maxSeqLen, fluxCfg.context_in_dim] :=
+    (txtEmb.reshapeChecked #[1, maxSeqLen, fluxCfg.context_in_dim]).forgetDType
   IO.println s!"    Text token count: {tokenCount}"
   IO.println s!"    Text embedding shape: {txtEmb.runtimeShape}"
   IO.println s!"    Text embedding dtype: {txtEmb.dtype}"
@@ -179,9 +183,9 @@ def runDemo (cfg : DemoConfig) (prompt : String) : IO Unit := do
   -- Step 2: Prepare latent space
   IO.println "  [2/4] Preparing latent space..."
   let imgSeq := cfg.latentH * cfg.latentW
-  let noiseSpatial ← torch.randn #[1, 128, cfg.latentH, cfg.latentW]
-  let noiseSeq := permute noiseSpatial #[0, 2, 3, 1]
-  let noise : T #[1, imgSeq, 128] := reshape noiseSeq #[1, imgSeq, 128]
+  let noiseSpatial ← randomWeight #[1, 128, cfg.latentH, cfg.latentW]
+  let noiseSeq := Tensor.permute noiseSpatial #[0, 2, 3, 1]
+  let noise : STensor #[1, imgSeq, 128] := Tensor.reshapeChecked noiseSeq #[1, imgSeq, 128]
 
   -- Compute position IDs for RoPE
   let imgIds ← computeImagePositionIds cfg.latentH cfg.latentW
@@ -192,24 +196,27 @@ def runDemo (cfg : DemoConfig) (prompt : String) : IO Unit := do
   let latents := denoise fluxCfg flux noise txtEmb imgIds txtIds cfg.numSteps
   IO.println s!"    Denoised with {cfg.numSteps} steps"
   -- Transform latents for VAE (inverse of flattening)
-  let latentsHW : T #[1, cfg.latentH, cfg.latentW, 128] :=
-    reshape latents #[1, cfg.latentH, cfg.latentW, 128]
-  let packedLatents : T #[1, 128, cfg.latentH, cfg.latentW] :=
-    permute latentsHW #[0, 3, 1, 2]
+  let latentsHW : STensor #[1, cfg.latentH, cfg.latentW, 128] :=
+    Tensor.reshapeChecked latents #[1, cfg.latentH, cfg.latentW, 128]
+  let packedLatents : STensor #[1, 128, cfg.latentH, cfg.latentW] :=
+    (Tensor.permute latentsHW #[0, 3, 1, 2]).reshapeChecked #[1, 128, cfg.latentH, cfg.latentW]
 
   -- Step 4: Decode with VAE and save
   IO.println "  [4/4] Decoding with VAE..."
 
   -- Run VAE decode pipeline
-  let z := vae.invNormalize packedLatents
+  let z := vae.invNormalize (packedLatents.reshapeChecked #[1, 128, 16, 16])
   let z := torch.vae.AutoEncoder.unpackLatents16x16 z
   let image := vae.decoder.forward1 z
-  torch.data.savePPMExplicit #[1, 3, 256, 256] image cfg.outputPath
+  saveImagePPM image cfg.outputPath
   IO.println s!"  ✓ Image saved to {cfg.outputPath}"
 
 
 /-- Main entry point -/
 def _root_.main (args : List String) : IO UInt32 := do
+  if args == ["--help"] then
+    IO.println "Usage: FluxDemo [prompt]\nUses local Flux, Qwen, and VAE checkpoints under weights/."
+    return 0
   let prompt := match args with
     | arg :: _ => arg
     | [] => "a cat sitting on a windowsill, photorealistic"

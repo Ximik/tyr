@@ -593,6 +593,40 @@ Validation completed:
 Flux and its VAE demo callers still need migration; this subsystem work does not
 complete the full migration or qualify actual GPU execution.
 
+## 2026-10-13 Flux continuation
+
+Flux weights, modulation, double/single attention blocks, rotary embeddings,
+sampling, position IDs, latent packing, checkpoint loading, and both Flux/VAE
+CLI demos now use indexed tensors. Position IDs are Int64; timesteps and rotary
+matrices are Float32. Image and text rotary tables have separate sequence
+indices. Axis dimensions are checked for an even four-axis split summing to the
+head dimension. Rotary arithmetic runs in Float32 and restores the activation
+dtype before attention, allowing BF16 checkpoints to run end to end.
+
+The two-declaration native boundary covers timestep embedding and PPM output.
+PPM's obsolete IO-world parameter was removed, and the typed image-output helper
+moves pixels to CPU before native file writing. Demo token helpers return indexed
+IDs/masks, check text embedding width, and explicitly reshape the known VAE
+layout. Both CLIs provide a native `--help` path.
+
+Validation completed:
+
+- The focused indexed-model runner passes 234 tests, with zero failures/skips.
+  Eight Flux tests cover exact position IDs, rotary and timestep references,
+  FP32/BF16 forward and denoising, latent pack/unpack ordering, PPM bytes,
+  generic checkpoint round trips, and complete generated Flux-format checkpoint
+  loading in FP32/BF16 with forward execution.
+- Both Flux demos and aggregate `Examples` build under `--wfail`, and both
+  native CLI `--help` paths run.
+- All nine required CPU suites build under `--wfail` (1,757 jobs) and pass:
+  1,458 main tests and 49 experimental tests, each with zero failures/skips,
+  plus all seven standalone Laguna CPU suites. CUDA-only cases remain skipped.
+- The timestep/PPM ABI audit passes.
+
+Downloaded Klein checkpoints, full-resolution image quality, and actual GPU
+execution remain unqualified. Other legacy models, reflection/generators, and
+remaining examples/tests/docs still need migration before removing `torch.T`.
+
 ## Remaining acceptance criteria
 
 Remove the `T` declaration and all model, generator, reflection, documentation,

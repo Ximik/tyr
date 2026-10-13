@@ -1,3 +1,4 @@
+import Tests.TestFluxTyped
 import Tests.TestVAETyped
 import Tests.TestGemma4Typed
 import Tests.TestShapePackedTensor
@@ -42,6 +43,7 @@ import Tests.TestDiffEqContainerBrownian
 unsafe def main : IO UInt32 := do
   Lean.initSearchPath (← Lean.findSysroot)
   let env ← Lean.importModules #[
+    { module := `Tests.TestFluxTyped },
     { module := `Tests.TestVAETyped },
     { module := `Tests.TestGemma4Typed },
     { module := `Tests.TestShapePackedTensor },

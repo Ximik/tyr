@@ -4,7 +4,7 @@
   Sampling / denoising loop for Flux diffusion.
   Implements flow matching / rectified flow sampling.
 -/
-import Tyr.Torch
+import Tyr.Model.Flux.TypedOps
 import Tyr.Model.Flux.Config
 import Tyr.Model.Flux.Model
 
@@ -59,10 +59,10 @@ def computeTimesteps (image_seq_len : UInt64) (num_steps : Nat) : Array (Float �
     t_curr, t_next: timestep boundaries
     Returns: next state -/
 def eulerStep {s : Shape}
-    (x : T s)
-    (pred : T s)
+    (x : STensor s)
+    (pred : STensor s)
     (t_curr t_next : Float)
-    : T s :=
+    : STensor s :=
   let dt := t_next - t_curr
   x + (pred * dt)
 
@@ -73,17 +73,17 @@ def eulerStep {s : Shape}
     Returns: [batch, seq, dim] - denoised latents -/
 def denoise {batch img_seq txt_seq : UInt64} (cfg : FluxConfig)
     (model : FluxModel cfg)
-    (noise : T #[batch, img_seq, cfg.in_channels])
-    (txt : T #[batch, txt_seq, cfg.context_in_dim])
-    (img_ids : T #[batch, img_seq, 4])
-    (txt_ids : T #[batch, txt_seq, 4])
+    (noise : STensor #[batch, img_seq, cfg.in_channels])
+    (txt : STensor #[batch, txt_seq, cfg.context_in_dim])
+    (img_ids : DTensor #[batch, img_seq, 4] .Int64)
+    (txt_ids : DTensor #[batch, txt_seq, 4] .Int64)
     (num_steps : Nat := 4)
-    : T #[batch, img_seq, cfg.in_channels] :=
+    : STensor #[batch, img_seq, cfg.in_channels] :=
   let timesteps := computeTimesteps img_seq num_steps
   -- Use fold instead of Id.run do with for loop to avoid runtime bug
   timesteps.foldl (init := noise) fun x (t_curr, t_next) =>
     -- Create timestep tensor
-    let t := torch.full #[batch] t_curr
+    let t := Tensor.full #[batch] t_curr false x.device
     -- Model prediction
     let pred := model.forward cfg x txt t img_ids txt_ids
     -- Euler step
@@ -93,52 +93,35 @@ def denoise {batch img_seq txt_seq : UInt64} (cfg : FluxConfig)
     Returns denoised latents ready for VAE decoding. -/
 def sample {batch img_seq txt_seq : UInt64} (cfg : FluxConfig)
     (model : FluxModel cfg)
-    (txt : T #[batch, txt_seq, cfg.context_in_dim])
-    (img_ids : T #[batch, img_seq, 4])
-    (txt_ids : T #[batch, txt_seq, 4])
+    (txt : STensor #[batch, txt_seq, cfg.context_in_dim])
+    (img_ids : DTensor #[batch, img_seq, 4] .Int64)
+    (txt_ids : DTensor #[batch, txt_seq, 4] .Int64)
     (num_steps : Nat := 4)
-    : IO (T #[batch, img_seq, cfg.in_channels]) := do
+    : IO (STensor #[batch, img_seq, cfg.in_channels]) := do
   -- Start from pure noise
-  let noise ← torch.randn #[batch, img_seq, cfg.in_channels]
+  let noise ← randomWeight #[batch, img_seq, cfg.in_channels]
+  let noise := Tensor.castLike model.img_in (noise.to model.img_in.device)
   pure (denoise cfg model noise txt img_ids txt_ids num_steps)
 
 /-- Compute image position IDs for RoPE.
     For a 32x32 latent, returns position IDs with 4 axes: [t, h, w, l]
     where t=0 (timestep), h/w are spatial coordinates, l=0 (layer).
-    Returns: [1, seq, 4] tensor (shape-erased to T #[] at compile time) -/
-def computeImagePositionIds (height width : UInt64) : IO (T #[1, height * width, 4]) := do
-  let seq := height * width
-  let h := torch.arange 0 height
-  let w := torch.arange 0 width
-  let h_grid := reshape h #[height, 1]
-  let h_grid := nn.expand h_grid #[height, width]
-  let w_grid := reshape w #[1, width]
-  let w_grid := nn.expand w_grid #[height, width]
-  let h_flat := reshape h_grid #[seq]
-  let w_flat := reshape w_grid #[seq]
-  let t_flat := torch.full_int #[seq] 0
-  let l_flat := torch.full_int #[seq] 0
-  let t_col := reshape t_flat #[seq, 1]
-  let h_col := reshape h_flat #[seq, 1]
-  let w_col := reshape w_flat #[seq, 1]
-  let l_col := reshape l_flat #[seq, 1]
-  let ids := nn.cat (nn.cat (nn.cat t_col h_col 1) w_col 1) l_col 1
-  pure (reshape ids #[1, seq, 4])
+    Returns: an indexed Int64 [1, seq, 4] tensor -/
+def computeImagePositionIds (height width : UInt64) : IO (DTensor #[1, height * width, 4] .Int64) := do
+  let values := Array.ofFn (n := (height * width * 4).toNat) fun i =>
+    let index := i.val / 4
+    let value := match i.val % 4 with
+      | 1 => index / width.toNat
+      | 2 => index % width.toNat
+      | _ => 0
+    value.toUInt64.toInt64
+  return (Tensor.fromInt64Array values).reshapeChecked #[1, height * width, 4]
 
-/-- Compute text position IDs for RoPE.
-    Text positions are simple sequential IDs.
-    Returns: [1, seq_len, 4] tensor -/
-def computeTextPositionIds (seq_len : UInt64) : IO (T #[1, seq_len, 4]) := do
-  let t := torch.full_int #[seq_len] 0
-  let h := torch.full_int #[seq_len] 0
-  let w := torch.full_int #[seq_len] 0
-  let l := torch.arange 0 seq_len
-  let t_col := reshape t #[seq_len, 1]
-  let h_col := reshape h #[seq_len, 1]
-  let w_col := reshape w #[seq_len, 1]
-  let l_col := reshape l #[seq_len, 1]
-  let ids := nn.cat (nn.cat (nn.cat t_col h_col 1) w_col 1) l_col 1
-  pure (reshape ids #[1, seq_len, 4])
+/-- Text position IDs use the fourth axis for token position. -/
+def computeTextPositionIds (seq_len : UInt64) : IO (DTensor #[1, seq_len, 4] .Int64) := do
+  let values := Array.ofFn (n := (seq_len * 4).toNat) fun i =>
+    (if i.val % 4 == 3 then i.val / 4 else 0).toUInt64.toInt64
+  return (Tensor.fromInt64Array values).reshapeChecked #[1, seq_len, 4]
 
 /-- Unpack Flux latents from sequence format to VAE spatial format.
     Flux uses 2×2 spatial patchification, packing 32 channels into 128-dim patches.
@@ -154,17 +137,17 @@ def computeTextPositionIds (seq_len : UInt64) : IO (T #[1, seq_len, 4]) := do
     - VAE input becomes [batch, 32, 32, 32]
     - VAE outputs [batch, 3, 256, 256] (8× upscaling) -/
 def unpackLatents {batch packed_H packed_W : UInt64}
-    (z : T #[batch, packed_H * packed_W, 128])
-    : T #[batch, 32, packed_H * 2, packed_W * 2] :=
+    (z : STensor #[batch, packed_H * packed_W, 128])
+    : STensor #[batch, 32, packed_H * 2, packed_W * 2] :=
   -- Step 1: Reshape sequence to spatial grid with packed channels
   -- [batch, seq, 128] → [batch, packed_H, packed_W, 32, 2, 2]
-  let z := reshape z #[batch, packed_H, packed_W, 32, 2, 2]
+  let z := Tensor.reshapeChecked z #[batch, packed_H, packed_W, 32, 2, 2]
   -- Step 2: Permute to interleave spatial patches
   -- [batch, packed_H, packed_W, 32, 2, 2] → [batch, 32, packed_H, 2, packed_W, 2]
-  let z := permute z #[0, 3, 1, 4, 2, 5]
+  let z := Tensor.permute z #[0, 3, 1, 4, 2, 5]
   -- Step 3: Reshape to final VAE format
   -- [batch, 32, packed_H, 2, packed_W, 2] → [batch, 32, packed_H*2, packed_W*2]
-  reshape z #[batch, 32, packed_H * 2, packed_W * 2]
+  Tensor.reshapeChecked z #[batch, 32, packed_H * 2, packed_W * 2]
 
 /-- Pack VAE spatial format back to Flux sequence format (inverse of unpackLatents).
     Used when encoding images to latents for img2img or inpainting.
@@ -172,18 +155,18 @@ def unpackLatents {batch packed_H packed_W : UInt64}
     Input: [batch, 32, H, W] where H and W are divisible by 2
     Output: [batch, (H/2) × (W/2), 128] -/
 def packLatents {batch H W : UInt64}
-    (z : T #[batch, 32, H, W])
-    : T #[batch, (H / 2) * (W / 2), 128] :=
+    (z : STensor #[batch, 32, H, W])
+    : STensor #[batch, (H / 2) * (W / 2), 128] :=
   let packed_H := H / 2
   let packed_W := W / 2
   -- Step 1: Reshape to expose 2×2 patches
   -- [batch, 32, H, W] → [batch, 32, packed_H, 2, packed_W, 2]
-  let z := reshape z #[batch, 32, packed_H, 2, packed_W, 2]
+  let z := Tensor.reshapeChecked z #[batch, 32, packed_H, 2, packed_W, 2]
   -- Step 2: Permute to group patches with channels
   -- [batch, 32, packed_H, 2, packed_W, 2] → [batch, packed_H, packed_W, 32, 2, 2]
-  let z := permute z #[0, 2, 4, 1, 3, 5]
+  let z := Tensor.permute z #[0, 2, 4, 1, 3, 5]
   -- Step 3: Flatten to sequence format
   -- [batch, packed_H, packed_W, 32, 2, 2] → [batch, packed_H*packed_W, 128]
-  reshape z #[batch, packed_H * packed_W, 128]
+  Tensor.reshapeChecked z #[batch, packed_H * packed_W, 128]
 
 end torch.flux

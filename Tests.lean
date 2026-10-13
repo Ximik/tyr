@@ -1,3 +1,4 @@
+import Tests.TestFluxTyped
 import Tests.TestVAETyped
 import Tests.TestGemma4Typed
 import Tests.TestShapePackedTensor
