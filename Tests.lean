@@ -6,6 +6,9 @@ import Tests.TestCheckpoint
 import Tests.TestCheckpointPersistence
 import Tests.TestNanoChatCheckpoint
 import Tests.TestFFIBoundary
+import Tests.TestWidgetTyped
+import Tests.TestTypedStandalone
+import Tests.TestModuleTyped
 import Tests.TestCoreSmoke
 import Tests.TestModelIO
 import Tests.TestPipeline
@@ -24,6 +27,7 @@ import Tests.TestADJaxprLikeExtract
 import Tests.TestADTensorStructSchema
 import Tests.TestADTensorStructFlatten
 import Tests.TestTyped
+import Tests.TestGPTTyped
 import Tests.TestADFrontendSignature
 import Tests.TestADFrontendElab
 import Tests.TestADGraphaxAlphaGradParity
