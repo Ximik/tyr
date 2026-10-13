@@ -35,7 +35,7 @@
   Build: lake build Tests.RunLagunaParity
   Run:   lake exe LagunaParityTest
 -/
-import Tyr.Torch
+import Tyr.SafeTensors.Load
 import Tyr.Model.Laguna.Config
 import Tyr.Model.Laguna.ConfigIO
 import Tyr.Model.Laguna.Rope
@@ -59,32 +59,38 @@ private def deviceLabel : Device → String
   | .MPS => "mps"
 
 /-- Deterministic int64 token-id tensor `[1, seq]` on `device`. -/
-private def mkIds (vals : Array Int64) (device : Device) : T #[1, vals.size.toUInt64] :=
-  reshape ((data.fromInt64Array vals).to device) #[1, vals.size.toUInt64]
+private def mkIds (vals : Array Int64) (device : Device) : DTensor #[1, vals.size.toUInt64] .Int64 :=
+  Tensor.reshapeChecked ((Tensor.fromInt64Array vals).to device) #[1, vals.size.toUInt64]
 
 /-- Max abs / max rel (denominator clamped by 1e-3) error in FP32. -/
-private def maxErrors (got expected : T #[]) : IO (Float × Float) := do
-  let ad : T #[] := nn.abs (sub (toFloat' got) (toFloat' expected))
-  let maxAbs := nn.item (nn.maxAll ad)
-  let denom : T #[] := add_scalar (nn.abs (toFloat' expected)) 1e-3
-  let maxRel := nn.item (nn.maxAll (nn.div ad denom))
+private def maxErrors {σ τ : StaticSpec} (got : Tensor σ) (expected : Tensor τ) : IO (Float × Float) := do
+  let a ← Tensor.toFloatArray got.toFloat32
+  let b ← Tensor.toFloatArray expected.toFloat32
+  if a.size != b.size then throw <| IO.userError "comparison element count mismatch"
+  let mut maxAbs := 0.0
+  let mut maxRel := 0.0
+  for i in [:a.size] do
+    let diff := (a[i]! - b[i]!).abs
+    if !diff.isFinite then throw <| IO.userError "non-finite comparison"
+    maxAbs := max maxAbs diff
+    maxRel := max maxRel (diff / (b[i]!.abs + 1e-3))
   pure (maxAbs, maxRel)
 
-/-- Sorted top-k id set per row of an erased logits tensor (`[n, vocab]`, or
+/-- Sorted top-k id set per row of a shape-indexed logits tensor (`[n, vocab]`, or
     `[vocab]` which is treated as one row). -/
-private def topkIdSets (logits : T #[]) (k : UInt64) : IO (Array (Array UInt64)) := do
-  let sh := T.runtimeShape logits
+private def topkIdSets {s : Shape} (logits : STensor s) (k : UInt64) : IO (Array (Array UInt64)) := do
+  let sh := Tensor.runtimeShape logits
   let (n, v) :=
     if sh.size == 1 then (1, sh.getD 0 0)
     else (sh.getD 0 0, sh.getD 1 0)
-  let l2 : T #[n, v] := reshape logits #[n, v]
-  let (_, idx) := torch.topk_2d l2 k 1
-  let flat ← data.tensorToUInt64Array' (nn.eraseShape idx)
+  let l2 : STensor #[n, v] := Tensor.reshapeChecked logits #[n, v]
+  let (_, idx) := qwen35.topK2d l2 k 1
+  let flat ← Tensor.toUInt64Array (idx)
   pure (Array.ofFn (n := n.toNat) fun r =>
     (flat.extract (r.val * k.toNat) (r.val * k.toNat + k.toNat)).qsort (fun a b => a < b))
 
 /-- Abs-diff gate + top-5-set gate for one logits tensor. -/
-private def checkLogits (lbl name : String) (got ref : T #[]) (tol : Float) : IO Unit := do
+private def checkLogits {s t : Shape} (lbl name : String) (got : STensor s) (ref : STensor t) (tol : Float) : IO Unit := do
   let (maxAbs, maxRel) ← maxErrors got ref
   IO.println s!"  [{lbl}] {name}: maxAbs={maxAbs} maxRel={maxRel} (tol={tol})"
   check (maxAbs ≤ tol) s!"[{lbl}] {name} maxAbs={maxAbs} ≤ {tol}"
@@ -93,7 +99,7 @@ private def checkLogits (lbl name : String) (got ref : T #[]) (tol : Float) : IO
   check (gotSets == refSets) s!"[{lbl}] {name} top-5 id sets match at every position"
 
 /-- Abs-diff report + gate for hidden-state diagnostics. -/
-private def checkClose (lbl name : String) (got ref : T #[]) (tol : Float) : IO Unit := do
+private def checkClose {s t : Shape} (lbl name : String) (got : STensor s) (ref : STensor t) (tol : Float) : IO Unit := do
   let (maxAbs, maxRel) ← maxErrors got ref
   IO.println s!"  [{lbl}] {name}: maxAbs={maxAbs} maxRel={maxRel} (tol={tol})"
   check (maxAbs ≤ tol) s!"[{lbl}] {name} maxAbs={maxAbs} ≤ {tol}"
@@ -152,7 +158,7 @@ private def runFixture (device : Device) : IO Unit := do
   -- top-5 sets at 4 positions of logits_b and diverges from gen_ids at step 4.
   -- FP32 compute tests the math itself (which is what parity means here);
   -- the BF16 pass below is informational.
-  let model : LagunaForCausalLM cfg := TensorStruct.map (fun t => t.checkedReplacement (RawTensor.toFloat32 t.shape t.raw)) modelB16
+  let model : LagunaForCausalLM cfg := TensorStruct.map (fun t => t.checkedReplacement (t.toFloat32.raw)) modelB16
   let layer0 ←
     match model.model.layers[0]? with
     | some l => pure l
@@ -160,38 +166,38 @@ private def runFixture (device : Device) : IO Unit := do
 
   -- References (fp32, CPU) moved to the comparison device.
   let refPath := s!"{fixtureDir}/reference.safetensors"
-  let logitsARef ← torch.safetensors.loadTensor refPath "logits_a" #[7, 1024]
-  let logitsBRef ← torch.safetensors.loadTensor refPath "logits_b" #[20, 1024]
-  let genLastRef ← torch.safetensors.loadTensor refPath "gen_logits_last" #[1024]
-  let hiddenL0Ref ← torch.safetensors.loadTensor refPath "hidden_a_l0" #[7, 256]
-  let hiddenFinRef ← torch.safetensors.loadTensor refPath "hidden_a_final" #[7, 256]
+  let logitsARef ← torch.safetensors.loadTensorCandidates refPath #["logits_a"] #[7, 1024]
+  let logitsBRef ← torch.safetensors.loadTensorCandidates refPath #["logits_b"] #[20, 1024]
+  let genLastRef ← torch.safetensors.loadTensorCandidates refPath #["gen_logits_last"] #[1024]
+  let hiddenL0Ref ← torch.safetensors.loadTensorCandidates refPath #["hidden_a_l0"] #[7, 256]
+  let hiddenFinRef ← torch.safetensors.loadTensorCandidates refPath #["hidden_a_final"] #[7, 256]
 
-  let idsA : T #[1, 7] := mkIds promptA device
-  let idsB : T #[1, 20] := mkIds promptB device
+  let idsA : DTensor #[1, 7] .Int64 := mkIds promptA device
+  let idsB : DTensor #[1, 20] .Int64 := mkIds promptB device
 
   -- Hidden-state diagnostics for input A (layer-0 output, final hidden).
-  let x0 : T #[1, 7, cfg.hidden_size] := nn.embedding idsA model.model.embed_tokens
+  let x0 : STensor #[1, 7, cfg.hidden_size] := Tensor.embedding idsA model.model.embed_tokens
   let tables ← precomputeRotaryTables cfg 7 x0.device
   let h0 ← layer0.forward cfg x0 tables
-  checkClose lbl "hidden_a_l0" (nn.eraseShape h0)
-    (nn.eraseShape (hiddenL0Ref.to device)) 0.05
+  checkClose lbl "hidden_a_l0" (h0)
+    ((hiddenL0Ref.to device)) 0.05
   let hFin ← model.model.forward cfg idsA
-  checkClose lbl "hidden_a_final" (nn.eraseShape hFin)
-    (nn.eraseShape (hiddenFinRef.to device)) 0.05
+  checkClose lbl "hidden_a_final" (hFin)
+    ((hiddenFinRef.to device)) 0.05
 
   -- 3. Full-forward logits vs fp32 references.
   let logitsA ← model.forward cfg idsA
-  checkLogits lbl "logits_a" (nn.eraseShape (reshape logitsA #[7, cfg.vocab_size]))
-    (nn.eraseShape (logitsARef.to device)) 0.05
+  checkLogits lbl "logits_a" ((Tensor.reshapeChecked logitsA #[7, cfg.vocab_size]))
+    ((logitsARef.to device)) 0.05
   let logitsB ← model.forward cfg idsB
-  checkLogits lbl "logits_b" (nn.eraseShape (reshape logitsB #[20, cfg.vocab_size]))
-    (nn.eraseShape (logitsBRef.to device)) 0.05
+  checkLogits lbl "logits_b" ((Tensor.reshapeChecked logitsB #[20, cfg.vocab_size]))
+    ((logitsBRef.to device)) 0.05
 
   -- 4. Greedy generation: 16 tokens from A, exact id match (EOS disabled,
   --    budget termination; the HF reference used its KV-cache path).
   let r ← model.generate cfg idsA 16 .greedy #[]
   check (r.1 == 23) s!"[{lbl}] generate produced 7 + 16 tokens (outSeq={r.1})"
-  let genGot ← data.tensorToUInt64Array' (nn.eraseShape (data.slice r.2 1 7 16))
+  let genGot ← Tensor.toUInt64Array ((sliceTyped r.2 1 7 16))
   check (genGot == genRef) s!"[{lbl}] greedy gen ids EXACTLY match reference gen_ids"
 
   -- 5. Final-step logits: the logits that produced gen_ids[15] come from the
@@ -199,9 +205,9 @@ private def runFixture (device : Device) : IO Unit := do
   --    A ++ gen_ids[0..15)).
   let idsFull := mkIds (promptA ++ (genRef.extract 0 15).map (fun t => Int64.ofNat t.toNat)) device
   let logitsFull ← model.forward cfg idsFull
-  let lastLogits : T #[1024] := reshape (data.slice logitsFull 1 21 1) #[1024]
-  checkLogits lbl "gen_logits_last" (nn.eraseShape lastLogits)
-    (nn.eraseShape (genLastRef.to device)) 0.05
+  let lastLogits : STensor #[1024] := Tensor.reshapeChecked (sliceTyped logitsFull 1 21 1) #[1024]
+  checkLogits lbl "gen_logits_last" (lastLogits)
+    ((genLastRef.to device)) 0.05
 
   -- Informational BF16 pass (the checkpoint's storage dtype): report diffs
   -- only. Bf16 rounding alone (HF bf16 vs HF fp32: logits_b maxAbs ≈ 0.102)
@@ -209,15 +215,15 @@ private def runFixture (device : Device) : IO Unit := do
   IO.println (s!"  [{lbl}] -- informational BF16 pass (no gates; HF bf16 self-noise: " ++
     "logits_a 0.0137, logits_b 0.1021, gen diverges at step 4)")
   let logitsAb ← modelB16.forward cfg idsA
-  let (abAbs, abRel) ← maxErrors (nn.eraseShape (reshape logitsAb #[7, cfg.vocab_size]))
-    (nn.eraseShape (logitsARef.to device))
+  let (abAbs, abRel) ← maxErrors ((Tensor.reshapeChecked logitsAb #[7, cfg.vocab_size]))
+    ((logitsARef.to device))
   IO.println s!"  [{lbl}] bf16 logits_a: maxAbs={abAbs} maxRel={abRel}"
   let logitsBb ← modelB16.forward cfg idsB
-  let (bbAbs, bbRel) ← maxErrors (nn.eraseShape (reshape logitsBb #[20, cfg.vocab_size]))
-    (nn.eraseShape (logitsBRef.to device))
+  let (bbAbs, bbRel) ← maxErrors ((Tensor.reshapeChecked logitsBb #[20, cfg.vocab_size]))
+    ((logitsBRef.to device))
   IO.println s!"  [{lbl}] bf16 logits_b: maxAbs={bbAbs} maxRel={bbRel}"
   let rb ← modelB16.generate cfg idsA 16 .greedy #[]
-  let genB ← data.tensorToUInt64Array' (nn.eraseShape (data.slice rb.2 1 7 16))
+  let genB ← Tensor.toUInt64Array ((sliceTyped rb.2 1 7 16))
   IO.println s!"  [{lbl}] bf16 greedy ids: {genB} (exact match vs fp32 ref: {genB == genRef})"
 
 /-- Real NVFP4-checkpoint smoke load: config + first `numLayers` layers via
@@ -257,20 +263,20 @@ private def runRealSmoke (modelDir : String) (numLayers : UInt64) (device : Devi
       check moe.denseExperts.isNone "layer 1 uses NVFP4-packed expert banks"
       check (moe.router.eScoreCorrectionBias.isSome)
         "layer 1 router e_score_correction_bias loaded (experts.* key)"
-      let sh := T.runtimeShape moe.experts.gatePacked
+      let sh := Tensor.runtimeShape moe.experts.gatePacked
       check (sh == #[cfg.num_experts, cfg.moe_intermediate_size, cfg.hidden_size / 2])
         s!"layer 1 gatePacked bank shape {sh} == [{cfg.num_experts}, {cfg.moe_intermediate_size}, {cfg.hidden_size / 2}]"
-      let shD := T.runtimeShape moe.experts.downPacked
+      let shD := Tensor.runtimeShape moe.experts.downPacked
       check (shD == #[cfg.num_experts, cfg.hidden_size, cfg.moe_intermediate_size / 2])
         s!"layer 1 downPacked bank shape {shD}"
-      let shG := T.runtimeShape moe.experts.gateGlobal
+      let shG := Tensor.runtimeShape moe.experts.gateGlobal
       check (shG == #[cfg.num_experts]) s!"layer 1 gateGlobal bank shape {shG}"
     | none => throw (IO.userError "layer 1 missing sparse MoE block")
 
   -- Forward smoke on the truncated model (numerics meaningless by design).
-  let ids : T #[1, 8] := mkIds #[2, 100, 200, 300, 400, 500, 600, 700] device
+  let ids : DTensor #[1, 8] .Int64 := mkIds #[2, 100, 200, 300, 400, 500, 600, 700] device
   let logits ← model.forward cfg ids
-  let shL := T.runtimeShape (nn.eraseShape logits)
+  let shL := Tensor.runtimeShape (logits)
   check (shL == #[1, 8, cfg.vocab_size]) s!"forward ok: logits shape {shL}"
   IO.println s!"Real-checkpoint smoke [{lbl}] passed."
 

@@ -74,8 +74,8 @@ def loadPrompts (promptFile : Option String) (defaultPrompt : String) : IO (Arra
 def moveModelToDevice [TensorStruct α] (device : Device) (x : α) : IO α :=
   TensorStruct.mapM (fun t => pure (t.to device)) x
 
-def moveSigmaTensorTo {d : UInt64} (device : Device)
-    (x : Sigma (fun n => T #[n, d])) : Sigma (fun n => T #[n, d]) :=
+def moveSigmaTensorTo {d : UInt64} {dtype : DType} (device : Device)
+    (x : Sigma (fun n => DTensor #[n, d] dtype)) : Sigma (fun n => DTensor #[n, d] dtype) :=
   match x with
   | ⟨n, t⟩ => ⟨n, t.to device⟩
 
@@ -85,7 +85,7 @@ def buildBatchInputWithEncoder
     (padToken : UInt64)
     (prompts : Array String)
     (encode : String → IO (Array UInt64))
-    : IO (Sigma (fun batch => Sigma (fun seq => T #[batch, seq] × Array Nat))) := do
+    : IO (Sigma (fun batch => Sigma (fun seq => DTensor #[batch, seq] .Int64 × Array Nat))) := do
   let mut encoded : Array (Array UInt64) := #[]
   for prompt in prompts do
     encoded := encoded.push (← encode prompt)
@@ -107,14 +107,14 @@ def buildBatchInputWithEncoder
       row := row.push padToken.toInt64
     flat := flat ++ row
 
-  let inputIds : T #[batch, seq] := reshape (data.fromInt64Array flat) #[batch, seq]
+  let inputIds : DTensor #[batch, seq] .Int64 := Tensor.reshapeChecked (Tensor.fromInt64Array flat) #[batch, seq]
   pure ⟨batch, ⟨seq, (inputIds, promptLens)⟩⟩
 
 def buildBatchInput
     (padToken : UInt64)
     (prompts : Array String)
     (encode : String → Array UInt64)
-    : IO (Sigma (fun batch => Sigma (fun seq => T #[batch, seq] × Array Nat))) := do
+    : IO (Sigma (fun batch => Sigma (fun seq => DTensor #[batch, seq] .Int64 × Array Nat))) := do
   buildBatchInputWithEncoder padToken prompts (fun s => pure (encode s))
 
 /-! ## Generation output formatting -/
@@ -122,13 +122,13 @@ def buildBatchInput
 def generatedIdsFromBatch
     (promptLens : Array Nat)
     {batch outSeq : UInt64}
-    (ids : T #[batch, outSeq])
+    (ids : DTensor #[batch, outSeq] .Int64)
     : IO (Array (Array UInt64)) := do
   let mut out : Array (Array UInt64) := #[]
   for i in [:batch.toNat] do
-    let row2 : T #[1, outSeq] := data.slice ids 0 i.toUInt64 1
-    let row1 : T #[outSeq] := reshape (data.toLong row2) #[outSeq]
-    let vals ← data.tensorToUInt64Array row1
+    let row2 : DTensor #[1, outSeq] .Int64 := ids.sliceChecked 0 i.toUInt64 1 #[1, outSeq]
+    let row1 : DTensor #[outSeq] .Int64 := Tensor.reshapeChecked row2 #[outSeq]
+    let vals ← Tensor.toUInt64Array row1
     let promptLen := promptLens.getD i 0
     let gen :=
       if vals.size <= promptLen then
@@ -169,7 +169,7 @@ def printGeneratedIds
 def decodeGeneratedBatch
     (promptLens : Array Nat)
     {batch outSeq : UInt64}
-    (ids : T #[batch, outSeq])
+    (ids : DTensor #[batch, outSeq] .Int64)
     (decodeText : Array UInt32 → String)
     : IO (Array String) := do
   let generatedIds ← generatedIdsFromBatch promptLens ids
@@ -182,8 +182,8 @@ def makeStreamCallback
     {batch : UInt64}
     (chunkStart : Nat)
     : StreamCallback batch := fun _step nextTok => do
-  let flat : T #[batch] := reshape (data.toLong nextTok) #[batch]
-  let vals ← data.tensorToUInt64Array flat
+  let flat : DTensor #[batch] .Int64 := Tensor.reshapeChecked nextTok #[batch]
+  let vals ← Tensor.toUInt64Array flat
   if batch == 1 then
     match vals[0]? with
     | some v => IO.print (decodeOne v.toUInt32)
@@ -202,10 +202,10 @@ def runGenerationBatches
     (stream : Bool)
     (debugIds : Bool)
     (singleOnly : Bool)
-    (buildBatch : Array String → IO (Sigma (fun b => Sigma (fun s => T #[b, s] × Array Nat))))
-    (runGenerate : (b : UInt64) → {s : UInt64} → T #[b, s] → IO (Sigma (fun os => T #[b, os])))
-    (runGenerateStream : (b : UInt64) → {s : UInt64} → T #[b, s] → StreamCallback b → IO (Sigma (fun os => T #[b, os])))
-    (decodeBatch : Array Nat → {b os : UInt64} → T #[b, os] → IO (Array String))
+    (buildBatch : Array String → IO (Sigma (fun b => Sigma (fun s => DTensor #[b, s] .Int64 × Array Nat))))
+    (runGenerate : (b : UInt64) → {s : UInt64} → DTensor #[b, s] .Int64 → IO (Sigma (fun os => DTensor #[b, os] .Int64)))
+    (runGenerateStream : (b : UInt64) → {s : UInt64} → DTensor #[b, s] .Int64 → StreamCallback b → IO (Sigma (fun os => DTensor #[b, os] .Int64)))
+    (decodeBatch : Array Nat → {b os : UInt64} → DTensor #[b, os] .Int64 → IO (Array String))
     (makeStreamCallback : {b : UInt64} → Nat → StreamCallback b)
     : IO Unit := do
   let chunkSize := Nat.max 1 batchSize.toNat
@@ -241,9 +241,9 @@ def runGreedyBatches
     (batchSize : UInt64)
     (_maxNewTokens : UInt64)
     (singleOnly : Bool)
-    (buildBatch : Array String → IO (Sigma (fun b => Sigma (fun s => T #[b, s] × Array Nat))))
-    (runGenerate : (b : UInt64) → {s : UInt64} → T #[b, s] → IO (Sigma (fun os => T #[b, os])))
-    (decodeBatch : Array Nat → {b os : UInt64} → T #[b, os] → IO (Array String))
+    (buildBatch : Array String → IO (Sigma (fun b => Sigma (fun s => DTensor #[b, s] .Int64 × Array Nat))))
+    (runGenerate : (b : UInt64) → {s : UInt64} → DTensor #[b, s] .Int64 → IO (Sigma (fun os => DTensor #[b, os] .Int64)))
+    (decodeBatch : Array Nat → {b os : UInt64} → DTensor #[b, os] .Int64 → IO (Array String))
     : IO Unit := do
   let chunkSize := Nat.max 1 batchSize.toNat
   let mut start : Nat := 0

@@ -10,7 +10,7 @@
 
   Ground truth generator: Tests/fixtures/laguna/gen_moe_fixtures.py
 -/
-import Tyr.Torch
+import Tyr.SafeTensors.Load
 import Tyr.Model.Laguna.Config
 import Tyr.Model.Laguna.MoE
 
@@ -46,20 +46,20 @@ private def findFixture : IO String := do
 
 /-- Build the MoE block from the fixture, moving all tensors to `device`. -/
 private def loadBlock (path : String) (device : Device) : IO (LagunaSparseMoeBlock testCfg) := do
-  let routerW ← torch.safetensors.loadTensor path "router_weight" #[8, 64]
-  let routerB ← torch.safetensors.loadTensor path "router_bias" #[8]
+  let routerW ← torch.safetensors.loadTensorCandidates path #["router_weight"] #[8, 64]
+  let routerB ← torch.safetensors.loadTensorCandidates path #["router_bias"] #[8]
   let router : LagunaTopKRouter testCfg := {
     weight := routerW.to device
     eScoreCorrectionBias := some (routerB.to device) }
-  let gatePacked ← torch.safetensors.loadTensor path "gate_packed" #[8, 32, 32]
-  let gateScale ← torch.safetensors.loadTensor path "gate_scales" #[8, 32, 4]
-  let gateGlobal ← torch.safetensors.loadTensor path "gate_global" #[8]
-  let upPacked ← torch.safetensors.loadTensor path "up_packed" #[8, 32, 32]
-  let upScale ← torch.safetensors.loadTensor path "up_scales" #[8, 32, 4]
-  let upGlobal ← torch.safetensors.loadTensor path "up_global" #[8]
-  let downPacked ← torch.safetensors.loadTensor path "down_packed" #[8, 64, 16]
-  let downScale ← torch.safetensors.loadTensor path "down_scales" #[8, 64, 2]
-  let downGlobal ← torch.safetensors.loadTensor path "down_global" #[8]
+  let gatePacked ← torch.safetensors.loadTensorCandidates path #["gate_packed"] #[8, 32, 32]
+  let gateScale ← torch.safetensors.loadTensorCandidates path #["gate_scales"] #[8, 32, 4]
+  let gateGlobal ← torch.safetensors.loadTensorCandidates path #["gate_global"] #[8]
+  let upPacked ← torch.safetensors.loadTensorCandidates path #["up_packed"] #[8, 32, 32]
+  let upScale ← torch.safetensors.loadTensorCandidates path #["up_scales"] #[8, 32, 4]
+  let upGlobal ← torch.safetensors.loadTensorCandidates path #["up_global"] #[8]
+  let downPacked ← torch.safetensors.loadTensorCandidates path #["down_packed"] #[8, 64, 16]
+  let downScale ← torch.safetensors.loadTensorCandidates path #["down_scales"] #[8, 64, 2]
+  let downGlobal ← torch.safetensors.loadTensorCandidates path #["down_global"] #[8]
   let experts : LagunaPackedExperts testCfg := {
     gatePacked := gatePacked.to device
     gateScale := gateScale.to device
@@ -70,9 +70,9 @@ private def loadBlock (path : String) (device : Device) : IO (LagunaSparseMoeBlo
     downPacked := downPacked.to device
     downScale := downScale.to device
     downGlobal := downGlobal.to device }
-  let sharedGate ← torch.safetensors.loadTensor path "shared_gate" #[32, 64]
-  let sharedUp ← torch.safetensors.loadTensor path "shared_up" #[32, 64]
-  let sharedDown ← torch.safetensors.loadTensor path "shared_down" #[64, 32]
+  let sharedGate ← torch.safetensors.loadTensorCandidates path #["shared_gate"] #[32, 64]
+  let sharedUp ← torch.safetensors.loadTensorCandidates path #["shared_up"] #[32, 64]
+  let sharedDown ← torch.safetensors.loadTensorCandidates path #["shared_down"] #[64, 32]
   pure {
     router := router
     experts := experts
@@ -81,19 +81,29 @@ private def loadBlock (path : String) (device : Device) : IO (LagunaSparseMoeBlo
     sharedDownProj := sharedDown.to device }
 
 /-- Max abs / max rel (denominator clamped by 1e-3) error in FP32. -/
-private def maxErrors (got expected : T #[]) : IO (Float × Float) := do
-  let ad : T #[] := nn.abs (sub (toFloat' got) (toFloat' expected))
-  let maxAbs := nn.item (nn.maxAll ad)
-  let denom : T #[] := add_scalar (nn.abs (toFloat' expected)) 1e-3
-  let maxRel := nn.item (nn.maxAll (nn.div ad denom))
+private def maxErrors {s : Shape} {d e : DType}
+    (got : DTensor s d) (expected : DTensor s e) : IO (Float × Float) := do
+  let a ← Tensor.toFloatArray got.toFloat32
+  let b ← Tensor.toFloatArray expected.toFloat32
+  let mut maxAbs := 0.0
+  let mut maxRel := 0.0
+  for i in [:a.size] do
+    let diff := (a[i]! - b[i]!).abs
+    if !a[i]!.isFinite || !b[i]!.isFinite || !diff.isFinite then
+      throw <| IO.userError "non-finite tensor comparison"
+    maxAbs := max maxAbs diff
+    maxRel := max maxRel (diff / (b[i]!.abs + 1e-3))
   pure (maxAbs, maxRel)
 
-/-- Count elements violating `|got - exp| > atol + rtol * |exp|` (FP32). -/
-private def countViolations (got expected : T #[]) (rtol atol : Float) : IO Float := do
-  let ad : T #[] := nn.abs (sub (toFloat' got) (toFloat' expected))
-  let thr : T #[] := add_scalar (mul_scalar (nn.abs (toFloat' expected)) rtol) atol
-  let viol : T #[] := gt ad thr
-  pure (nn.item (nn.sumAll (toFloat' viol)))
+private def countViolations {s : Shape} {d e : DType}
+    (got : DTensor s d) (expected : DTensor s e) (rtol atol : Float) : IO Float := do
+  let a ← Tensor.toFloatArray got.toFloat32
+  let b ← Tensor.toFloatArray expected.toFloat32
+  let mut violations := 0.0
+  for i in [:a.size] do
+    if !(a[i]! - b[i]!).abs.isFinite || (a[i]! - b[i]!).abs > atol + rtol * b[i]!.abs then
+      violations := violations + 1.0
+  pure violations
 
 private def deviceLabel : Device → String
   | .CPU => "cpu"
@@ -103,21 +113,23 @@ private def deviceLabel : Device → String
 private def runCase (path : String) (device : Device) : IO Unit := do
   let lbl := deviceLabel device
   let block ← loadBlock path device
-  let x ← torch.safetensors.loadTensor path "x" #[5, 64]
-  let xD : T #[5, 64] := x.to device
-  let yExp ← torch.safetensors.loadTensor path "y_expected" #[5, 64]
-  let idxExp ← torch.safetensors.loadTensor path "top_idx_expected" #[5, 2]
-  let wExp ← torch.safetensors.loadTensor path "weights_expected" #[5, 2]
+  let x ← torch.safetensors.loadTensorCandidates path #["x"] #[5, 64]
+  let xD : STensor #[5, 64] := x.to device
+  let yExp ← torch.safetensors.loadTensorCandidates path #["y_expected"] #[5, 64]
+  let idxExp ← torch.safetensors.loadTensorCandidates path #["top_idx_expected"] #[5, 2]
+  let wExp ← torch.safetensors.loadTensorCandidates path #["weights_expected"] #[5, 2]
 
   -- Router unit check: selected expert SETS match (order-insensitive via
   -- descending sort), routing-weight multisets match within tolerance.
   let (idx, w) ← block.router.route testCfg xD
-  let (sortedGot, _) := torch.topk_2d idx 2 1
-  let (sortedExp, _) := torch.topk_2d (idxExp.to device) 2 1
-  let idxMismatch := nn.item (nn.sumAll (toFloat' (logical_not (eq sortedGot sortedExp))))
-  check (idxMismatch == 0.0) s!"router [{lbl}] selected expert sets match (mismatches={idxMismatch})"
-  let (wGotSorted, _) := torch.topk_2d (toFloat' w) 2 1
-  let (wExpSorted, _) := torch.topk_2d (wExp.to device) 2 1
+  let (sortedGot, _) := qwen35.topK2d idx.forgetDType 2 1
+  let (sortedExp, _) := qwen35.topK2d (idxExp.to device) 2 1
+  let gotIds ← Tensor.toUInt64Array sortedGot.toInt64
+  let expectedIds ← Tensor.toUInt64Array sortedExp.toInt64
+  let idxMismatch := (gotIds.zip expectedIds).foldl (fun n (a, b) => n + if a == b then 0 else 1) (0 : Nat)
+  check (idxMismatch == 0) s!"router [{lbl}] selected expert sets match (mismatches={idxMismatch})"
+  let (wGotSorted, _) := qwen35.topK2d (qwen35.floatDynamic w) 2 1
+  let (wExpSorted, _) := qwen35.topK2d (wExp.to device) 2 1
   let (wAbs, wRel) ← maxErrors wGotSorted wExpSorted
   IO.println s!"  router [{lbl}]: weights maxAbs={wAbs} maxRel={wRel}"
   check (wAbs <= 0.02) s!"router [{lbl}] weights maxAbs={wAbs} <= 0.02"
@@ -138,7 +150,16 @@ private def runCase (path : String) (device : Device) : IO Unit := do
     IO.println s!"  forward2d(fused) [{lbl}]: maxAbs={fAbs} violations={violF}"
     check (violF == 0.0) s!"forward2d(fused) [{lbl}] within rtol=2% atol=0.5 (violations={violF})"
 
+private def checkSignedScatterDimension : IO Unit := do
+  let input := qwen35.zerosDynamic #[2, 3]
+  let indices := (Tensor.fromInt64Array #[2, 0]).reshapeChecked #[2, 1]
+  let values := (Tensor.fromFloatArray #[5.0, 7.0]).reshapeChecked #[2, 1]
+  let out := scatterAdd input (-1) indices values.forgetDType
+  check ((← Tensor.toFloatArray out) == #[0.0, 0.0, 5.0, 7.0, 0.0, 0.0])
+    "scatter-add preserves signed negative dimension across the native ABI"
+
 def main : IO Unit := do
+  checkSignedScatterDimension
   let path ← findFixture
   IO.println s!"Using fixture: {path}"
   IO.println "-- router + MoE block on CPU"

@@ -54,6 +54,8 @@
  * the Lean symbol resolvable.
  */
 
+#include "tyr_laguna_abi.h"
+
 #ifndef __CUDACC__
 
 /* ---------------- CPU stub (no CUDA toolkit): satisfy the Lean extern. --- */
@@ -64,8 +66,7 @@ extern "C" lean_object* lean_torch_laguna_moe_fp4_forward(
     lean_object* /*gatePacked*/, lean_object* /*gateScale*/, lean_object* /*gateGlobal*/,
     lean_object* /*upPacked*/, lean_object* /*upScale*/, lean_object* /*upGlobal*/,
     lean_object* /*downPacked*/, lean_object* /*downScale*/, lean_object* /*downGlobal*/,
-    uint64_t /*numExperts*/, uint64_t /*moeInt*/, uint64_t /*hidden*/,
-    lean_object* /*world*/) {
+    uint64_t /*numExperts*/, uint64_t /*moeInt*/, uint64_t /*hidden*/) {
   return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string(
       "laguna_moe_fp4_forward: libTyrC was built without CUDA support")));
 }
@@ -1232,8 +1233,7 @@ extern "C" lean_object* lean_torch_laguna_moe_fp4_forward(
     b_lean_obj_arg gatePacked, b_lean_obj_arg gateScale, b_lean_obj_arg gateGlobal,
     b_lean_obj_arg upPacked, b_lean_obj_arg upScale, b_lean_obj_arg upGlobal,
     b_lean_obj_arg downPacked, b_lean_obj_arg downScale, b_lean_obj_arg downGlobal,
-    uint64_t numExperts, uint64_t moeInt, uint64_t hidden,
-    lean_object* /*world*/) {
+    uint64_t numExperts, uint64_t moeInt, uint64_t hidden) {
   try {
     auto x_ = borrowTensor(x);
     auto topIdx_ = borrowTensor(topIdx);

@@ -49,7 +49,7 @@ lake -R -Kcuda="$CUDA_HOME" -Kgpu="$GPU" -Kkernels="${modules[*]}" \
   build "${modules[@]}"
 targets=("$gpu_runner" RunMhaH100Decode LagunaModelTest
   Tyr.Torch:c Tyr.Inference.OwnedKV:c Tyr.RawTensor.Neural:c
-  Tyr.RawTensor.Qwen35:c Tyr.RawTensor.KittenTTS:c Tyr.RawTensor.BranchingFlows:c)
+  Tyr.RawTensor.Qwen35:c Tyr.RawTensor.KittenTTS:c Tyr.RawTensor.BranchingFlows:c Tyr.RawTensor.Laguna:c)
 if [[ "${TYR_QUALIFY_MODELS:-false}" == true ]]; then
   targets+=(Qwen3TTSEndToEnd Qwen3ASRTranscribe)
 fi
@@ -60,6 +60,7 @@ python3 scripts/check_ffi_abi.py --header cc/src/tyr_neural_abi.h --generated .l
 python3 scripts/check_ffi_abi.py --header cc/src/tyr_qwen35_abi.h --generated .lake/build/ir/Tyr/RawTensor/Qwen35.c
 python3 scripts/check_ffi_abi.py --header cc/src/tyr_kittentts_abi.h --generated .lake/build/ir/Tyr/RawTensor/KittenTTS.c
 python3 scripts/check_ffi_abi.py --header cc/src/tyr_branching_abi.h --generated .lake/build/ir/Tyr/RawTensor/BranchingFlows.c
+python3 scripts/check_ffi_abi.py --header cc/src/tyr_laguna_abi.h --generated .lake/build/ir/Tyr/RawTensor/Laguna.c
 python3 scripts/qualification/run.py --kind gpu --python "$python_bin" \
   --report output/qualification/gpu.json
 if [[ "${TYR_QUALIFY_MODELS:-false}" == true ]]; then

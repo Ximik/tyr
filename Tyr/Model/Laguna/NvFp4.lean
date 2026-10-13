@@ -25,7 +25,7 @@
     (`e2m1 * (scale / global)`), then rounded once to BF16, so results are
     bitwise-identical to a PyTorch F32 dequant followed by `.to(bfloat16)`.
 -/
-import Tyr.Torch
+import Tyr.Typed.Neural
 
 namespace torch.laguna.nvfp4
 
@@ -39,12 +39,12 @@ private def e2m1Value (nibble : Nat) : Float :=
   if nibble >= 8 then -mag else mag
 
 /-- F32 lookup table for the LOW nibble (element `2i`) of each byte. -/
-private def e2m1LutLo : T #[] :=
-  data.fromFloatArray (Array.ofFn (n := 256) fun b => e2m1Value (b.val % 16))
+private def e2m1LutLo : DTensor #[256] .Float32 :=
+  (Tensor.fromFloatArray (Array.ofFn (n := 256) fun b => e2m1Value (b.val % 16))).reshapeChecked #[256]
 
 /-- F32 lookup table for the HIGH nibble (element `2i+1`) of each byte. -/
-private def e2m1LutHi : T #[] :=
-  data.fromFloatArray (Array.ofFn (n := 256) fun b => e2m1Value (b.val / 16))
+private def e2m1LutHi : DTensor #[256] .Float32 :=
+  (Tensor.fromFloatArray (Array.ofFn (n := 256) fun b => e2m1Value (b.val / 16))).reshapeChecked #[256]
 
 /-- Shared dequant kernel.
 
@@ -55,60 +55,65 @@ private def e2m1LutHi : T #[] :=
 
     Returns BF16 tensor of runtime shape `[lead, out, in]`. -/
 private def dequantCore
-    (packed scales globalB : T #[])
     (lead outFeatures inFeatures : UInt64)
-    : IO (T #[]) := do
+    (packed : STensor #[lead, outFeatures, inFeatures / 2])
+    (scales : STensor #[lead, outFeatures, inFeatures / 16])
+    (globalB : DTensor #[lead, 1, 1, 1] .Float32)
+    : IO (DTensor #[lead, outFeatures, inFeatures] .BFloat16) := do
   if inFeatures % 16 != 0 then
     throw <| IO.userError
       s!"nvfp4.dequantCore: inFeatures={inFeatures} not divisible by 16"
   let numGroups := inFeatures / 16
   let numPacked := lead * outFeatures * (inFeatures / 2)
   let device := packed.device
-  -- Byte LUTs on the same device as the packed weights.
-  -- NOTE: `index_select_1d` would be the natural gather, but its FFI binding
-  -- is ABI-mismatched (one C++ shape parameter for two Lean shape implicits)
-  -- and segfaults; `nn.embedding1d` performs the same row gather.
-  let lutLo : T #[256, 1] := reshape (e2m1LutLo.to device) #[256, 1]
-  let lutHi : T #[256, 1] := reshape (e2m1LutHi.to device) #[256, 1]
-  -- Unpack nibbles via LUT gathers.
-  let idx : T #[numPacked] := data.toLong (reshape packed #[numPacked])
-  let lo : T #[] := reshape (nn.embedding1d idx lutLo) #[numPacked]
-  let hi : T #[] := reshape (nn.embedding1d idx lutHi) #[numPacked]
-  -- Interleave low/high: byte i holds elements 2i (low) and 2i+1 (high).
-  let pairs : T #[] := nn.cat_dyn #[reshape lo #[numPacked, 1], reshape hi #[numPacked, 1]] 1
-  let vals4 : T #[] := reshape pairs #[lead, outFeatures, numGroups, 16]
-  -- Per-group scales in F32, broadcast against the 16 elements of each group.
-  let scalesF : T #[] := reshape (toFloat' scales) #[lead, outFeatures, numGroups, 1]
-  -- Reference op order: divide scale by global first, then multiply by e2m1.
-  let scaleDiv : T #[] := nn.div scalesF globalB
-  let prod4 : T #[] := mul' scaleDiv vals4
-  pure (toBFloat16' (reshape prod4 #[lead, outFeatures, inFeatures]))
+  let lutLo := (e2m1LutLo.to device).reshapeChecked #[256, 1]
+  let lutHi := (e2m1LutHi.to device).reshapeChecked #[256, 1]
+  let idx := (packed.reshapeChecked #[numPacked]).toInt64
+  let lo := (Tensor.embedding1d idx lutLo).reshapeChecked #[numPacked, 1]
+  let hi := (Tensor.embedding1d idx lutHi).reshapeChecked #[numPacked, 1]
+  let pairs := Tensor.catManyChecked #[lo.packShape, hi.packShape] 1 #[numPacked, 2]
+  let vals4 := pairs.reshapeChecked #[lead, outFeatures, numGroups, 16]
+  let scalesF := scales.toFloat32.reshapeChecked #[lead, outFeatures, numGroups, 1]
+  -- Preserve reference rounding: divide in F32, multiply in F32, then cast once.
+  let globalExpanded := Tensor.expand globalB #[lead, outFeatures, numGroups, 1]
+  let scaleDiv := scalesF / globalExpanded
+  let prod4 := (Tensor.expand scaleDiv #[lead, outFeatures, numGroups, 16]) * vals4
+  pure (prod4.reshapeChecked #[lead, outFeatures, inFeatures]).toBFloat16
 
-/-- Dequantize a single NVFP4-packed matrix.
-    - `packed`: U8 `[outFeatures, inFeatures/2]`
-    - `scales`: F8_E4M3 `[outFeatures, inFeatures/16]`
-    - `globalScale`: F32 scalar (0- or 1-element tensor)
-    Returns BF16 `[outFeatures, inFeatures]`. -/
-def dequantMatrix
-    (packed scales globalScale : T #[])
+/-- Validate the caller's indexed input shape before reshaping a packed bank. -/
+private def checkShape {s : Shape} {d : DType}
+    (name : String) (_tensor : DTensor s d) (expected : Shape) : IO Unit := do
+  if s != expected then
+    throw <| IO.userError s!"nvfp4: {name} must have shape {expected}, got {s}"
+
+/-- Dequantize an NVFP4 matrix into a shape- and BF16-indexed result.
+Packed bytes and float8 scales retain their actual checkpoint dtype; their
+shapes are validated before any reshape. Global scale must contain one value. -/
+def dequantMatrix {ps ss gs : Shape} {pd sd gd : DType}
+    (packed : DTensor ps pd) (scales : DTensor ss sd) (globalScale : DTensor gs gd)
     (outFeatures inFeatures : UInt64)
-    : IO (T #[]) := do
-  let globalB : T #[] := reshape (toFloat' globalScale) #[1, 1, 1, 1]
-  let packed3 : T #[] := reshape packed #[1, outFeatures, inFeatures / 2]
-  let scales3 : T #[] := reshape scales #[1, outFeatures, inFeatures / 16]
-  let out3 ← dequantCore packed3 scales3 globalB 1 outFeatures inFeatures
-  pure (reshape out3 #[outFeatures, inFeatures])
+    : IO (DTensor #[outFeatures, inFeatures] .BFloat16) := do
+  checkShape "packed" packed #[outFeatures, inFeatures / 2]
+  checkShape "scales" scales #[outFeatures, inFeatures / 16]
+  if gs != #[] && gs != #[1] then
+    throw <| IO.userError s!"nvfp4: global scale must be scalar or [1], got {gs}"
+  let globalB := globalScale.toFloat32.reshapeChecked #[1, 1, 1, 1]
+  let packed3 := packed.forgetDType.reshapeChecked #[1, outFeatures, inFeatures / 2]
+  let scales3 := scales.forgetDType.reshapeChecked #[1, outFeatures, inFeatures / 16]
+  let out3 ← dequantCore 1 outFeatures inFeatures packed3 scales3 globalB
+  pure (out3.reshapeChecked #[outFeatures, inFeatures])
 
-/-- Dequantize a stacked NVFP4 expert bank.
-    - `packed`: U8 `[numExperts, outFeatures, inFeatures/2]`
-    - `scales`: F8_E4M3 `[numExperts, outFeatures, inFeatures/16]`
-    - `globalScale`: F32 `[numExperts]`
-    Returns BF16 `[numExperts, outFeatures, inFeatures]`. -/
-def dequantBank
-    (packed scales globalScale : T #[])
+/-- Dequantize an NVFP4 expert bank, preserving expert and matrix dimensions. -/
+def dequantBank {ps ss gs : Shape} {pd sd gd : DType}
+    (packed : DTensor ps pd) (scales : DTensor ss sd) (globalScale : DTensor gs gd)
     (numExperts outFeatures inFeatures : UInt64)
-    : IO (T #[]) := do
-  let globalB : T #[] := reshape (toFloat' globalScale) #[numExperts, 1, 1, 1]
-  dequantCore packed scales globalB numExperts outFeatures inFeatures
+    : IO (DTensor #[numExperts, outFeatures, inFeatures] .BFloat16) := do
+  checkShape "packed" packed #[numExperts, outFeatures, inFeatures / 2]
+  checkShape "scales" scales #[numExperts, outFeatures, inFeatures / 16]
+  checkShape "global scale" globalScale #[numExperts]
+  let globalB := globalScale.toFloat32.reshapeChecked #[numExperts, 1, 1, 1]
+  dequantCore numExperts outFeatures inFeatures
+    (packed.forgetDType.reshapeChecked #[numExperts, outFeatures, inFeatures / 2])
+    (scales.forgetDType.reshapeChecked #[numExperts, outFeatures, inFeatures / 16]) globalB
 
 end torch.laguna.nvfp4

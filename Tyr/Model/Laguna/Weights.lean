@@ -42,7 +42,6 @@
   NVFP4 checkpoint is ~145k tensors; loading is dominated by reading ~53 GB
   of packed expert bytes from disk, not by lookup overhead.
 -/
-import Tyr.Torch
 import Tyr.Log
 import Tyr.SafeTensors.Load
 import Tyr.Model.Utils
@@ -81,15 +80,15 @@ namespace WeightSource
 
 /-- Load `name` with expected shape `s` (numel-checked, reshaped in C++). -/
 def load (src : WeightSource) (name : String) (s : Shape)
-    (device : Device := Device.CPU) : IO (T s) :=
+    (device : Device := Device.CPU) : IO (STensor s) :=
   match src with
-  | .single path => torch.safetensors.loadTensorOnDevice path name s device
-  | .sharded dir => torch.safetensors.loadTensorShardedOnDevice dir name s device
+  | .single path => torch.safetensors.loadTensorCandidates path #[name] s device
+  | .sharded dir => torch.safetensors.loadTensorShardedCandidates dir #[name] s device
 
 /-- Try to load `name`; `none` on any failure (missing tensor, shape
     mismatch, unreadable file). Used for layout probes and optional tensors. -/
 def tryLoad (src : WeightSource) (name : String) (s : Shape)
-    (device : Device := Device.CPU) : IO (Option (T s)) := do
+    (device : Device := Device.CPU) : IO (Option (STensor s)) := do
   try
     pure (some (← src.load name s device))
   catch _ =>
@@ -97,7 +96,7 @@ def tryLoad (src : WeightSource) (name : String) (s : Shape)
 
 /-- Try each of `names` in order; `none` if none loads. -/
 def tryLoadCandidates (src : WeightSource) (names : Array String) (s : Shape)
-    (device : Device := Device.CPU) : IO (Option (T s)) := do
+    (device : Device := Device.CPU) : IO (Option (STensor s)) := do
   for n in names do
     if let some t ← src.tryLoad n s device then
       return some t
@@ -106,7 +105,7 @@ def tryLoadCandidates (src : WeightSource) (names : Array String) (s : Shape)
 /-- Load the first of `names` that resolves; throws listing all candidates
     if none loads. -/
 def loadCandidates (src : WeightSource) (names : Array String) (s : Shape)
-    (device : Device := Device.CPU) : IO (T s) := do
+    (device : Device := Device.CPU) : IO (STensor s) := do
   match (← src.tryLoadCandidates names s device) with
   | some t => pure t
   | none => throw <| IO.userError s!"Failed to load tensor: {names}"
@@ -159,10 +158,22 @@ private def loadDenseMLP (src : WeightSource) (cfg : Config) (layerIdx : UInt64)
 /-- Unused placeholder packed banks for the dense-BF16 expert layout
     (`forward2d` reads `denseExperts` instead). -/
 private def placeholderPackedExperts (cfg : Config) (device : Device) : LagunaPackedExperts cfg :=
-  let z : T #[] := nn.eraseShape (torch.zeros #[1] false device)
-  { gatePacked := z, gateScale := z, gateGlobal := z,
-    upPacked := z, upScale := z, upGlobal := z,
-    downPacked := z, downScale := z, downGlobal := z }
+  let e := cfg.num_experts
+  let mi := cfg.moe_intermediate_size
+  let h := cfg.hidden_size
+  -- Broadcast views keep the unused placeholders small while retaining true shapes.
+  let z := qwen35.zerosDynamic #[] false device
+  {
+    gatePacked := Tensor.expand z #[e, mi, h / 2]
+    gateScale := Tensor.expand z #[e, mi, h / 16]
+    gateGlobal := Tensor.expand z #[e]
+    upPacked := Tensor.expand z #[e, mi, h / 2]
+    upScale := Tensor.expand z #[e, mi, h / 16]
+    upGlobal := Tensor.expand z #[e]
+    downPacked := Tensor.expand z #[e, h, mi / 2]
+    downScale := Tensor.expand z #[e, h, mi / 16]
+    downGlobal := Tensor.expand z #[e]
+  }
 
 /-- Load and stack the per-expert NVFP4-packed banks of one MoE layer
     (layout B). Expert tensors load on CPU, are stacked into `[E, ...]`
@@ -173,15 +184,15 @@ private def loadPackedExpertBanks (src : WeightSource) (p : String) (cfg : Confi
   let e := cfg.num_experts
   let mi := cfg.moe_intermediate_size
   let h := cfg.hidden_size
-  let mut gateP : Array (T #[]) := Array.mkEmpty e.toNat
-  let mut gateS : Array (T #[]) := Array.mkEmpty e.toNat
-  let mut gateG : Array (T #[]) := Array.mkEmpty e.toNat
-  let mut upP : Array (T #[]) := Array.mkEmpty e.toNat
-  let mut upS : Array (T #[]) := Array.mkEmpty e.toNat
-  let mut upG : Array (T #[]) := Array.mkEmpty e.toNat
-  let mut downP : Array (T #[]) := Array.mkEmpty e.toNat
-  let mut downS : Array (T #[]) := Array.mkEmpty e.toNat
-  let mut downG : Array (T #[]) := Array.mkEmpty e.toNat
+  let mut gateP : Array (ShapePackedTensor (.Unknown "dynamic")) := Array.mkEmpty e.toNat
+  let mut gateS : Array (ShapePackedTensor (.Unknown "dynamic")) := Array.mkEmpty e.toNat
+  let mut gateG : Array (ShapePackedTensor (.Unknown "dynamic")) := Array.mkEmpty e.toNat
+  let mut upP : Array (ShapePackedTensor (.Unknown "dynamic")) := Array.mkEmpty e.toNat
+  let mut upS : Array (ShapePackedTensor (.Unknown "dynamic")) := Array.mkEmpty e.toNat
+  let mut upG : Array (ShapePackedTensor (.Unknown "dynamic")) := Array.mkEmpty e.toNat
+  let mut downP : Array (ShapePackedTensor (.Unknown "dynamic")) := Array.mkEmpty e.toNat
+  let mut downS : Array (ShapePackedTensor (.Unknown "dynamic")) := Array.mkEmpty e.toNat
+  let mut downG : Array (ShapePackedTensor (.Unknown "dynamic")) := Array.mkEmpty e.toNat
   for i in [:e.toNat] do
     let ep := s!"{p}.experts.{i}"
     -- gate_proj / up_proj: packed [mi, h/2], scales [mi, h/16], global scalar.
@@ -195,25 +206,25 @@ private def loadPackedExpertBanks (src : WeightSource) (p : String) (cfg : Confi
     let dp ← src.load s!"{ep}.down_proj.weight_packed" #[h, mi / 2] Device.CPU
     let ds ← src.load s!"{ep}.down_proj.weight_scale" #[h, mi / 16] Device.CPU
     let dg ← src.load s!"{ep}.down_proj.weight_global_scale" #[1] Device.CPU
-    gateP := gateP.push (nn.eraseShape (reshape gp #[1, mi, h / 2]))
-    gateS := gateS.push (nn.eraseShape (reshape gs #[1, mi, h / 16]))
-    gateG := gateG.push (nn.eraseShape gg)
-    upP := upP.push (nn.eraseShape (reshape up #[1, mi, h / 2]))
-    upS := upS.push (nn.eraseShape (reshape us #[1, mi, h / 16]))
-    upG := upG.push (nn.eraseShape ug)
-    downP := downP.push (nn.eraseShape (reshape dp #[1, h, mi / 2]))
-    downS := downS.push (nn.eraseShape (reshape ds #[1, h, mi / 16]))
-    downG := downG.push (nn.eraseShape dg)
+    gateP := gateP.push ((Tensor.reshapeChecked gp #[1, mi, h / 2]).packShape)
+    gateS := gateS.push ((Tensor.reshapeChecked gs #[1, mi, h / 16]).packShape)
+    gateG := gateG.push gg.packShape
+    upP := upP.push ((Tensor.reshapeChecked up #[1, mi, h / 2]).packShape)
+    upS := upS.push ((Tensor.reshapeChecked us #[1, mi, h / 16]).packShape)
+    upG := upG.push ug.packShape
+    downP := downP.push ((Tensor.reshapeChecked dp #[1, h, mi / 2]).packShape)
+    downS := downS.push ((Tensor.reshapeChecked ds #[1, h, mi / 16]).packShape)
+    downG := downG.push dg.packShape
   pure {
-    gatePacked := reqGradFalse ((nn.cat_dyn gateP 0).to device)
-    gateScale := reqGradFalse ((nn.cat_dyn gateS 0).to device)
-    gateGlobal := reqGradFalse ((nn.cat_dyn gateG 0).to device)
-    upPacked := reqGradFalse ((nn.cat_dyn upP 0).to device)
-    upScale := reqGradFalse ((nn.cat_dyn upS 0).to device)
-    upGlobal := reqGradFalse ((nn.cat_dyn upG 0).to device)
-    downPacked := reqGradFalse ((nn.cat_dyn downP 0).to device)
-    downScale := reqGradFalse ((nn.cat_dyn downS 0).to device)
-    downGlobal := reqGradFalse ((nn.cat_dyn downG 0).to device)
+    gatePacked := reqGradFalse ((Tensor.catManyChecked gateP 0 #[e, mi, h / 2]).to device)
+    gateScale := reqGradFalse ((Tensor.catManyChecked gateS 0 #[e, mi, h / 16]).to device)
+    gateGlobal := reqGradFalse ((Tensor.catManyChecked gateG 0 #[e]).to device)
+    upPacked := reqGradFalse ((Tensor.catManyChecked upP 0 #[e, mi, h / 2]).to device)
+    upScale := reqGradFalse ((Tensor.catManyChecked upS 0 #[e, mi, h / 16]).to device)
+    upGlobal := reqGradFalse ((Tensor.catManyChecked upG 0 #[e]).to device)
+    downPacked := reqGradFalse ((Tensor.catManyChecked downP 0 #[e, h, mi / 2]).to device)
+    downScale := reqGradFalse ((Tensor.catManyChecked downS 0 #[e, h, mi / 16]).to device)
+    downGlobal := reqGradFalse ((Tensor.catManyChecked downG 0 #[e]).to device)
   }
 
 /-- Load one sparse MoE block, auto-detecting the expert serialization:
@@ -248,12 +259,12 @@ private def loadSparseMoe (src : WeightSource) (cfg : Config) (layerIdx : UInt64
     | some gu => do
       -- Layout A: fused dense banks; dim-1 first half gate, second half up.
       let down ← src.loadCandidates (nameCandidates s!"{p}.experts.down_proj") #[e, h, mi] device
-      let gate3 : T #[e, mi, h] := reshape (data.slice gu 1 0 mi) #[e, mi, h]
-      let up3 : T #[e, mi, h] := reshape (data.slice gu 1 mi mi) #[e, mi, h]
+      let gate3 : STensor #[e, mi, h] := Tensor.reshapeChecked (sliceTyped gu 1 0 mi) #[e, mi, h]
+      let up3 : STensor #[e, mi, h] := Tensor.reshapeChecked (sliceTyped gu 1 mi mi) #[e, mi, h]
       let dense : LagunaDenseExperts cfg := {
-        gateProj := nn.eraseShape (reqGradFalse gate3)
-        upProj := nn.eraseShape (reqGradFalse up3)
-        downProj := nn.eraseShape (reqGradFalse down)
+        gateProj := reqGradFalse gate3
+        upProj := reqGradFalse up3
+        downProj := reqGradFalse down
       }
       pure (placeholderPackedExperts cfg device, some dense)
     | none => do

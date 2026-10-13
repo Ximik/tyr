@@ -1,4 +1,5 @@
 #include "tyr_branching_abi.h"
+#include "tyr_laguna_abi.h"
 #include "tyr_kittentts_abi.h"
 #include "tyr_qwen35_abi.h"
 /*
@@ -5091,11 +5092,11 @@ lean_object* lean_torch_scatter(
 // Scatter with add reduction
 lean_object* lean_torch_scatter_add(
     lean_obj_arg /*s*/,
-    b_lean_obj_arg input, int64_t dim, b_lean_obj_arg indices, b_lean_obj_arg src) {
+    b_lean_obj_arg input, uint64_t dim, b_lean_obj_arg indices, b_lean_obj_arg src) {
   auto input_ = borrowTensor(input);
   auto indices_ = borrowTensor(indices);
   auto src_ = borrowTensor(src);
-  auto result_ = input_.clone().scatter_add_(dim, indices_, src_);
+  auto result_ = input_.clone().scatter_add_(static_cast<int64_t>(dim), indices_, src_);
   return fromTorchTensor(result_);
 }
 

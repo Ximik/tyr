@@ -481,6 +481,49 @@ remains active.
   again. This small fixture run is not QM9 replication or CUDA-graph
   qualification; actual GPU capture/replay remains unverified.
 
+## 2026-10-13 Laguna continuation
+
+Laguna's model, MoE router and expert banks, rotary tables, NVFP4 dequantizer,
+checkpoint loader, generation APIs, standalone example, and six numerical
+runners now use indexed tensors. The shared `Examples.ModelRunner` batching,
+decoding, and streaming helpers carry Int64 token IDs. Floating weights retain
+their checkpoint dtype through `STensor`; routing indices are Int64, finished
+masks are Bool, rotary tables are Float32, and dequantized weights are BF16.
+Runtime table and cache dimensions are existential indices rather than scalar
+shape claims. Dense-checkpoint placeholder banks use broadcast views with true
+bank shapes, so unused placeholders do not allocate full packed-bank storage.
+
+The native Laguna boundary has four audited declarations. The fused kernel's
+obsolete IO-world parameter was removed from both CPU and CUDA definitions.
+Scatter-add now uses Lean's generated UInt64 C representation for Int64 and
+converts it back to a signed dimension at the libtorch call; a negative-axis
+regression checks the resulting values. NVFP4 validation rejects equal-numel
+packed layouts with the wrong shape and non-scalar global-scale layouts.
+
+Validation completed:
+
+- All nine required CPU suites build under `--wfail` (1,668 build jobs) and
+  pass via `lake env python3 scripts/test_inventory.py --run`. The main runner
+  passes 1,436 tests and the experimental runner passes 49, each with zero
+  failures/skips. All seven standalone Laguna CPU suites exit successfully.
+- Rotary tables and partial/full rotary applications pass the existing Python
+  reference comparisons, including decoding at position five.
+- NVFP4 matrix/bank dequantization and the MoE fixture output match exactly on CPU.
+- Full model tests pass FP32/BF16 cache checks, erased-history negative controls,
+  sliding-window invariance, generation, ring wraparound, independent forks,
+  snapshot preservation, capacity rejection, and failed-session invalidation.
+- HuggingFace fixture parity passes all top-five sets and all 16 exact generated
+  IDs. Final generation logits differ by about `1e-6`. BF16-versus-FP32 outputs
+  remain diagnostic under the existing policy; no tolerance was relaxed.
+- `LagunaFusedTest`, `LagunaRunHF`, and aggregate `Examples` build under `--wfail`;
+  the native example's `--help` runs. CUDA-only execution is skipped on this CPU
+  host, so neither fused CUDA numerics nor GPU performance is qualified here.
+- The four-declaration ABI audit and qualification shell syntax check pass.
+
+The full migration remains active: other model families, legacy reflection and
+GPU generators, remaining examples/tests/docs, and actual GPU qualification
+still need their final acceptance checks before removing `torch.T`.
+
 ## Remaining acceptance criteria
 
 Remove the `T` declaration and all model, generator, reflection, documentation,
