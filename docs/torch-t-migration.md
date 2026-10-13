@@ -641,6 +641,41 @@ anchor merging with differently shaped Float32 and Bool masks. All 49
 experimental BranchingFlows tests also pass with zero failures/skips. This
 change does not claim a fresh full CPU or GPU qualification run.
 
+## 2026-10-13 Whisper continuation
+
+Whisper attention, encoder/decoder parameters and activations, KV and cross
+caches, checkpoint loading, and transcription now use indexed tensors. Token IDs
+and sampled indices are Int64; sampling probabilities are Float32; floating
+checkpoint parameters retain their dtype. Dynamic cache storage carries actual
+shape witnesses. Fresh frontend features are cast to the encoder weight dtype.
+
+Cached decode rejects exhausted capacity or a cache position that disagrees
+with the requested token position. Empty encoder inputs fail with an IO error.
+Optional checkpoint weights now distinguish absence from malformed shape: a
+missing key bias gets a correctly typed zero tensor and a missing output head
+ties to token embeddings, while a malformed stored tensor is rejected.
+
+Validation completed:
+
+- The focused indexed-model runner builds under `--wfail` and passes 243 tests,
+  with zero failures/skips. Six Whisper tests cover FP32/BF16 cached/full decode
+  parity, preserved cache snapshots, capacity and position errors, head/length
+  validation, generic checkpoint round trips, generated sharded FP32/BF16
+  checkpoints with optional weights, and waveform-to-text greedy/beam/sampling
+  execution through the native audio frontend.
+- All nine required CPU suites build under `--wfail` (1,781 jobs) and pass:
+  1,467 main tests and 49 experimental tests with zero failures/skips, plus all
+  seven standalone Laguna CPU suites. CUDA-only portions remain skipped.
+- Aggregate `Examples` and all three Whisper executables build under `--wfail`.
+  Transcribe and VoiceMode print native help and exit successfully; their
+  existing empty-error help path was corrected in a separate CLI fix.
+- The core FFI ABI audit passes.
+
+Downloaded Whisper checkpoint accuracy, live microphone interaction, and actual
+GPU execution remain unqualified. Executable `torch.T` uses are gone from model
+families; legacy infrastructure, generators, remaining examples/tests, and final
+hardware acceptance are still outstanding.
+
 ## Remaining acceptance criteria
 
 Remove the `T` declaration and all model, generator, reflection, documentation,

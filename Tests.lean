@@ -1,3 +1,4 @@
+import Tests.TestWhisperTyped
 import Tests.TestFlowfusionTyped
 import Tests.TestFluxTyped
 import Tests.TestVAETyped

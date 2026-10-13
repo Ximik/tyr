@@ -3,7 +3,7 @@
 
   Pretrained weight loading for native Whisper model in Tyr.
 -/
-import Tyr.Torch
+import Tyr.Model.Whisper.TypedOps
 import Tyr.TensorStruct
 import Tyr.Log
 import Tyr.SafeTensors.Load
@@ -14,12 +14,12 @@ namespace torch.whisper
 
 open torch.Log
 open torch.Model (reqGradFalse)
-open torch.safetensors (tryLoadTensorSharded)
+open torch.safetensors (tryLoadOptionalTensorSharded)
 
 private def loadLayerNormSharded (modelDir : String) (namePrefix : String) (dim : UInt64) (eps : Float)
-    : IO (LayerNorm dim) := do
-  let weight ← safetensors.loadTensorSharded modelDir s!"{namePrefix}.weight" #[dim]
-  let bias ← safetensors.loadTensorSharded modelDir s!"{namePrefix}.bias" #[dim]
+    : IO (LayerNorm dim (.Unknown "dynamic")) := do
+  let weight ← safetensors.loadTensorShardedCandidates modelDir #[s!"{namePrefix}.weight"] #[dim]
+  let bias ← safetensors.loadTensorShardedCandidates modelDir #[s!"{namePrefix}.bias"] #[dim]
   pure { weight := reqGradFalse weight, bias := reqGradFalse bias, eps := ⟨eps⟩ }
 
 private def loadAttentionSharded
@@ -27,26 +27,26 @@ private def loadAttentionSharded
     (namePrefix : String)
     (dModel nHeads : UInt64)
     : IO (WhisperAttention dModel nHeads) := do
-  let qProjWeight ← safetensors.loadTensorSharded modelDir s!"{namePrefix}.q_proj.weight" #[dModel, dModel]
-  let kProjWeight ← safetensors.loadTensorSharded modelDir s!"{namePrefix}.k_proj.weight" #[dModel, dModel]
-  let vProjWeight ← safetensors.loadTensorSharded modelDir s!"{namePrefix}.v_proj.weight" #[dModel, dModel]
-  let outProjWeight ← safetensors.loadTensorSharded modelDir s!"{namePrefix}.out_proj.weight" #[dModel, dModel]
+  let qProjWeight ← safetensors.loadTensorShardedCandidates modelDir #[s!"{namePrefix}.q_proj.weight"] #[dModel, dModel]
+  let kProjWeight ← safetensors.loadTensorShardedCandidates modelDir #[s!"{namePrefix}.k_proj.weight"] #[dModel, dModel]
+  let vProjWeight ← safetensors.loadTensorShardedCandidates modelDir #[s!"{namePrefix}.v_proj.weight"] #[dModel, dModel]
+  let outProjWeight ← safetensors.loadTensorShardedCandidates modelDir #[s!"{namePrefix}.out_proj.weight"] #[dModel, dModel]
   let qProjBias ←
-    match (← tryLoadTensorSharded modelDir s!"{namePrefix}.q_proj.bias" #[dModel]) with
+    match (← tryLoadOptionalTensorSharded modelDir s!"{namePrefix}.q_proj.bias" #[dModel]) with
     | some b => pure b
-    | none => pure (castLike qProjWeight (torch.zeros #[dModel]))
+    | none => pure (Tensor.castLike qProjWeight (zerosDynamic #[dModel]))
   let kProjBias ←
-    match (← tryLoadTensorSharded modelDir s!"{namePrefix}.k_proj.bias" #[dModel]) with
+    match (← tryLoadOptionalTensorSharded modelDir s!"{namePrefix}.k_proj.bias" #[dModel]) with
     | some b => pure b
-    | none => pure (castLike kProjWeight (torch.zeros #[dModel]))
+    | none => pure (Tensor.castLike kProjWeight (zerosDynamic #[dModel]))
   let vProjBias ←
-    match (← tryLoadTensorSharded modelDir s!"{namePrefix}.v_proj.bias" #[dModel]) with
+    match (← tryLoadOptionalTensorSharded modelDir s!"{namePrefix}.v_proj.bias" #[dModel]) with
     | some b => pure b
-    | none => pure (castLike vProjWeight (torch.zeros #[dModel]))
+    | none => pure (Tensor.castLike vProjWeight (zerosDynamic #[dModel]))
   let outProjBias ←
-    match (← tryLoadTensorSharded modelDir s!"{namePrefix}.out_proj.bias" #[dModel]) with
+    match (← tryLoadOptionalTensorSharded modelDir s!"{namePrefix}.out_proj.bias" #[dModel]) with
     | some b => pure b
-    | none => pure (castLike outProjWeight (torch.zeros #[dModel]))
+    | none => pure (Tensor.castLike outProjWeight (zerosDynamic #[dModel]))
   pure {
     qProjWeight := reqGradFalse qProjWeight
     qProjBias := reqGradFalse qProjBias
@@ -63,10 +63,10 @@ private def loadEncoderLayerSharded (modelDir : String) (layerIdx : UInt64) (cfg
   let p := s!"model.encoder.layers.{layerIdx}"
   let selfAttn ← loadAttentionSharded modelDir s!"{p}.self_attn" cfg.dModel cfg.encoderAttentionHeads
   let selfAttnLayerNorm ← loadLayerNormSharded modelDir s!"{p}.self_attn_layer_norm" cfg.dModel cfg.layerNormEps
-  let fc1Weight ← safetensors.loadTensorSharded modelDir s!"{p}.fc1.weight" #[cfg.encoderFfnDim, cfg.dModel]
-  let fc1Bias ← safetensors.loadTensorSharded modelDir s!"{p}.fc1.bias" #[cfg.encoderFfnDim]
-  let fc2Weight ← safetensors.loadTensorSharded modelDir s!"{p}.fc2.weight" #[cfg.dModel, cfg.encoderFfnDim]
-  let fc2Bias ← safetensors.loadTensorSharded modelDir s!"{p}.fc2.bias" #[cfg.dModel]
+  let fc1Weight ← safetensors.loadTensorShardedCandidates modelDir #[s!"{p}.fc1.weight"] #[cfg.encoderFfnDim, cfg.dModel]
+  let fc1Bias ← safetensors.loadTensorShardedCandidates modelDir #[s!"{p}.fc1.bias"] #[cfg.encoderFfnDim]
+  let fc2Weight ← safetensors.loadTensorShardedCandidates modelDir #[s!"{p}.fc2.weight"] #[cfg.dModel, cfg.encoderFfnDim]
+  let fc2Bias ← safetensors.loadTensorShardedCandidates modelDir #[s!"{p}.fc2.bias"] #[cfg.dModel]
   let finalLayerNorm ← loadLayerNormSharded modelDir s!"{p}.final_layer_norm" cfg.dModel cfg.layerNormEps
   pure {
     selfAttn
@@ -85,10 +85,10 @@ private def loadDecoderLayerSharded (modelDir : String) (layerIdx : UInt64) (cfg
   let selfAttnLayerNorm ← loadLayerNormSharded modelDir s!"{p}.self_attn_layer_norm" cfg.dModel cfg.layerNormEps
   let encoderAttn ← loadAttentionSharded modelDir s!"{p}.encoder_attn" cfg.dModel cfg.decoderAttentionHeads
   let encoderAttnLayerNorm ← loadLayerNormSharded modelDir s!"{p}.encoder_attn_layer_norm" cfg.dModel cfg.layerNormEps
-  let fc1Weight ← safetensors.loadTensorSharded modelDir s!"{p}.fc1.weight" #[cfg.decoderFfnDim, cfg.dModel]
-  let fc1Bias ← safetensors.loadTensorSharded modelDir s!"{p}.fc1.bias" #[cfg.decoderFfnDim]
-  let fc2Weight ← safetensors.loadTensorSharded modelDir s!"{p}.fc2.weight" #[cfg.dModel, cfg.decoderFfnDim]
-  let fc2Bias ← safetensors.loadTensorSharded modelDir s!"{p}.fc2.bias" #[cfg.dModel]
+  let fc1Weight ← safetensors.loadTensorShardedCandidates modelDir #[s!"{p}.fc1.weight"] #[cfg.decoderFfnDim, cfg.dModel]
+  let fc1Bias ← safetensors.loadTensorShardedCandidates modelDir #[s!"{p}.fc1.bias"] #[cfg.decoderFfnDim]
+  let fc2Weight ← safetensors.loadTensorShardedCandidates modelDir #[s!"{p}.fc2.weight"] #[cfg.dModel, cfg.decoderFfnDim]
+  let fc2Bias ← safetensors.loadTensorShardedCandidates modelDir #[s!"{p}.fc2.bias"] #[cfg.dModel]
   let finalLayerNorm ← loadLayerNormSharded modelDir s!"{p}.final_layer_norm" cfg.dModel cfg.layerNormEps
   pure {
     selfAttn
@@ -103,12 +103,12 @@ private def loadDecoderLayerSharded (modelDir : String) (layerIdx : UInt64) (cfg
   }
 
 private def loadModelSharded (modelDir : String) (cfg : WhisperConfig) : IO (WhisperModel cfg) := do
-  let encoderConv1Weight ← safetensors.loadTensorSharded modelDir "model.encoder.conv1.weight" #[cfg.dModel, cfg.numMelBins, 3]
-  let encoderConv1Bias ← safetensors.loadTensorSharded modelDir "model.encoder.conv1.bias" #[cfg.dModel]
-  let encoderConv2Weight ← safetensors.loadTensorSharded modelDir "model.encoder.conv2.weight" #[cfg.dModel, cfg.dModel, 3]
-  let encoderConv2Bias ← safetensors.loadTensorSharded modelDir "model.encoder.conv2.bias" #[cfg.dModel]
+  let encoderConv1Weight ← safetensors.loadTensorShardedCandidates modelDir #["model.encoder.conv1.weight"] #[cfg.dModel, cfg.numMelBins, 3]
+  let encoderConv1Bias ← safetensors.loadTensorShardedCandidates modelDir #["model.encoder.conv1.bias"] #[cfg.dModel]
+  let encoderConv2Weight ← safetensors.loadTensorShardedCandidates modelDir #["model.encoder.conv2.weight"] #[cfg.dModel, cfg.dModel, 3]
+  let encoderConv2Bias ← safetensors.loadTensorShardedCandidates modelDir #["model.encoder.conv2.bias"] #[cfg.dModel]
   let encoderPositionalEmbedding ←
-    safetensors.loadTensorSharded modelDir "model.encoder.embed_positions.weight" #[cfg.maxSourcePositions, cfg.dModel]
+    safetensors.loadTensorShardedCandidates modelDir #["model.encoder.embed_positions.weight"] #[cfg.maxSourcePositions, cfg.dModel]
 
   let mut encoderLayers : Array (WhisperEncoderLayer cfg) := #[]
   for i in [:cfg.encoderLayers.toNat] do
@@ -116,9 +116,9 @@ private def loadModelSharded (modelDir : String) (cfg : WhisperConfig) : IO (Whi
   let encoderLayerNorm ← loadLayerNormSharded modelDir "model.encoder.layer_norm" cfg.dModel cfg.layerNormEps
 
   let decoderTokenEmbedding ←
-    safetensors.loadTensorSharded modelDir "model.decoder.embed_tokens.weight" #[cfg.vocabSize, cfg.dModel]
+    safetensors.loadTensorShardedCandidates modelDir #["model.decoder.embed_tokens.weight"] #[cfg.vocabSize, cfg.dModel]
   let decoderPositionalEmbedding ←
-    safetensors.loadTensorSharded modelDir "model.decoder.embed_positions.weight" #[cfg.maxTargetPositions, cfg.dModel]
+    safetensors.loadTensorShardedCandidates modelDir #["model.decoder.embed_positions.weight"] #[cfg.maxTargetPositions, cfg.dModel]
 
   let mut decoderLayers : Array (WhisperDecoderLayer cfg) := #[]
   for i in [:cfg.decoderLayers.toNat] do
@@ -161,7 +161,7 @@ def loadSharded (modelDir : String) (cfg : WhisperConfig := {}) (log : Handlers 
   log.onInfo s!"Loading Whisper weights from {modelDir}..."
   let model ← loadModelSharded modelDir cfg
   let projOut ←
-    match (← tryLoadTensorSharded modelDir "proj_out.weight" #[cfg.vocabSize, cfg.dModel]) with
+    match (← tryLoadOptionalTensorSharded modelDir "proj_out.weight" #[cfg.vocabSize, cfg.dModel]) with
     | some w => pure (reqGradFalse w)
     | none =>
       log.onInfo "  proj_out.weight not found; tying output projection to decoder token embeddings."

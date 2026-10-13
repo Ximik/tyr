@@ -1,3 +1,4 @@
+import Tests.TestWhisperTyped
 import Tests.TestFlowfusionTyped
 import Tests.TestFluxTyped
 import Tests.TestVAETyped
@@ -44,6 +45,7 @@ import Tests.TestDiffEqContainerBrownian
 unsafe def main : IO UInt32 := do
   Lean.initSearchPath (← Lean.findSysroot)
   let env ← Lean.importModules #[
+    { module := `Tests.TestWhisperTyped },
     { module := `Tests.TestFlowfusionTyped },
     { module := `Tests.TestFluxTyped },
     { module := `Tests.TestVAETyped },
