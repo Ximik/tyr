@@ -1,5 +1,6 @@
 /- High-level FlashAttention/SDPA wrappers with typed dispatch and dynamic adapters. -/
 import Tyr.Torch
+import Tyr.Typed.Ops
 import Tyr.GPU.Ops.AttentionProblem
 import Tyr.GPU.Ops.MhaH100
 
@@ -8,9 +9,15 @@ namespace Tyr.GPU.Ops.FlashAttn
 open torch
 open Tyr.GPU.Ops
 
-abbrev Query (batch nHead qSeq headDim : UInt64) : Type := T #[batch, nHead, qSeq, headDim]
-abbrev KeyValue (batch nKvHead kvSeq headDim : UInt64) : Type := T #[batch, nKvHead, kvSeq, headDim]
-abbrev PaddingMask (batch kvSeq : UInt64) : Type := T #[batch, kvSeq]
+/-- Query layout for the typed FlashAttention surface: `[batch, nHead, qSeq, headDim]`
+    with the dtype tracked statically. -/
+abbrev Query (batch nHead qSeq headDim : UInt64) (d : DType) : Type :=
+  DTensor #[batch, nHead, qSeq, headDim] d
+/-- Key/value layout: `[batch, nKvHead, kvSeq, headDim]`, sharing the query dtype. -/
+abbrev KeyValue (batch nKvHead kvSeq headDim : UInt64) (d : DType) : Type :=
+  DTensor #[batch, nKvHead, kvSeq, headDim] d
+/-- Padding-mask layout: `[batch, kvSeq]`; the mask dtype stays dynamic. -/
+abbrev PaddingMask (batch kvSeq : UInt64) : Type := STensor #[batch, kvSeq]
 
 inductive DispatchRoute where
   | tkKernel
@@ -19,10 +26,10 @@ inductive DispatchRoute where
 
 /-- Reusable runtime problem descriptor for the typed FlashAttention surface. -/
 def attentionProblem
-    {batch nHead nKvHead qSeq kvSeq headDim : UInt64}
-    (q : Query batch nHead qSeq headDim)
-    (k : KeyValue batch nKvHead kvSeq headDim)
-    (v : KeyValue batch nKvHead kvSeq headDim)
+    {batch nHead nKvHead qSeq kvSeq headDim : UInt64} {d : DType}
+    (q : Query batch nHead qSeq headDim d)
+    (k : KeyValue batch nKvHead kvSeq headDim d)
+    (v : KeyValue batch nKvHead kvSeq headDim d)
     (attnMask : Option (PaddingMask batch kvSeq) := none)
     (dropoutP : Float := 0.0)
     (isCausal : Bool := false)
@@ -33,10 +40,10 @@ def attentionProblem
 
 /-- Current native specialization eligibility for the typed FlashAttention surface. -/
 def currentSpecialization
-    {batch nHead nKvHead qSeq kvSeq headDim : UInt64}
-    (q : Query batch nHead qSeq headDim)
-    (k : KeyValue batch nKvHead kvSeq headDim)
-    (v : KeyValue batch nKvHead kvSeq headDim)
+    {batch nHead nKvHead qSeq kvSeq headDim : UInt64} {d : DType}
+    (q : Query batch nHead qSeq headDim d)
+    (k : KeyValue batch nKvHead kvSeq headDim d)
+    (v : KeyValue batch nKvHead kvSeq headDim d)
     (attnMask : Option (PaddingMask batch kvSeq) := none)
     (dropoutP : Float := 0.0)
     (isCausal : Bool := false)
@@ -48,10 +55,10 @@ def currentSpecialization
 
 /-- Typed route classifier for current TK-backed coverage. -/
 def supportsTkMhaKernel
-    {batch nHead nKvHead qSeq kvSeq headDim : UInt64}
-    (q : Query batch nHead qSeq headDim)
-    (k : KeyValue batch nKvHead kvSeq headDim)
-    (v : KeyValue batch nKvHead kvSeq headDim)
+    {batch nHead nKvHead qSeq kvSeq headDim : UInt64} {d : DType}
+    (q : Query batch nHead qSeq headDim d)
+    (k : KeyValue batch nKvHead kvSeq headDim d)
+    (v : KeyValue batch nKvHead kvSeq headDim d)
     (attnMask : Option (PaddingMask batch kvSeq) := none)
     (dropoutP : Float := 0.0)
     (isCausal : Bool := false)
@@ -62,10 +69,10 @@ def supportsTkMhaKernel
 
 /-- Typed dispatch route (kernel vs portable) for observability/debugging. -/
 def dispatchRoute
-    {batch nHead nKvHead qSeq kvSeq headDim : UInt64}
-    (q : Query batch nHead qSeq headDim)
-    (k : KeyValue batch nKvHead kvSeq headDim)
-    (v : KeyValue batch nKvHead kvSeq headDim)
+    {batch nHead nKvHead qSeq kvSeq headDim : UInt64} {d : DType}
+    (q : Query batch nHead qSeq headDim d)
+    (k : KeyValue batch nKvHead kvSeq headDim d)
+    (v : KeyValue batch nKvHead kvSeq headDim d)
     (attnMask : Option (PaddingMask batch kvSeq) := none)
     (dropoutP : Float := 0.0)
     (isCausal : Bool := false)
@@ -77,46 +84,52 @@ def dispatchRoute
   | _ => .tkKernel
 
 /-- Main typed FlashAttention/SDPA API.
-    This routes through a torch-registered op (`tyr::flash_attn`) so autograd remains native. -/
+    This routes through a torch-registered op (`tyr::flash_attn`) so autograd remains native.
+    There is no typed wrapper for that registered op, so the raw handles cross at
+    this FFI edge; the result is re-graded at the statically known spec. -/
 @[inline] def flashAttn
-    {batch nHead nKvHead qSeq kvSeq headDim : UInt64}
-    (query : Query batch nHead qSeq headDim)
-    (key : KeyValue batch nKvHead kvSeq headDim)
-    (value : KeyValue batch nKvHead kvSeq headDim)
+    {batch nHead nKvHead qSeq kvSeq headDim : UInt64} {d : DType}
+    (query : Query batch nHead qSeq headDim d)
+    (key : KeyValue batch nKvHead kvSeq headDim d)
+    (value : KeyValue batch nKvHead kvSeq headDim d)
     (attnMask : Option (PaddingMask batch kvSeq) := none)
     (dropoutP : Float := 0.0)
     (isCausal : Bool := false)
     (scale : Option Float := none)
     (enableGqa : Bool := false)
-    : Query batch nHead qSeq headDim :=
-  torch.nn.tyrFlashAttn4d query key value attnMask dropoutP isCausal scale enableGqa
+    : Query batch nHead qSeq headDim d :=
+  Tensor.assumeSpec <|
+    torch.nn.tyrFlashAttn4d
+      (batch := batch) (n_head := nHead) (n_kv_head := nKvHead)
+      (q_seq := qSeq) (kv_seq := kvSeq) (head_dim := headDim)
+      query.raw key.raw value.raw (attnMask.map Tensor.raw) dropoutP isCausal scale enableGqa
 
 /-- Alias matching PyTorch naming. -/
 @[inline] def scaledDotProductAttention
-    {batch nHead nKvHead qSeq kvSeq headDim : UInt64}
-    (query : Query batch nHead qSeq headDim)
-    (key : KeyValue batch nKvHead kvSeq headDim)
-    (value : KeyValue batch nKvHead kvSeq headDim)
+    {batch nHead nKvHead qSeq kvSeq headDim : UInt64} {d : DType}
+    (query : Query batch nHead qSeq headDim d)
+    (key : KeyValue batch nKvHead kvSeq headDim d)
+    (value : KeyValue batch nKvHead kvSeq headDim d)
     (attnMask : Option (PaddingMask batch kvSeq) := none)
     (dropoutP : Float := 0.0)
     (isCausal : Bool := false)
     (scale : Option Float := none)
     (enableGqa : Bool := false)
-    : Query batch nHead qSeq headDim :=
+    : Query batch nHead qSeq headDim d :=
   flashAttn query key value attnMask dropoutP isCausal scale enableGqa
 
 /-- Typed API returning both the dispatch route and the output. -/
 def flashAttnWithRoute
-    {batch nHead nKvHead qSeq kvSeq headDim : UInt64}
-    (query : Query batch nHead qSeq headDim)
-    (key : KeyValue batch nKvHead kvSeq headDim)
-    (value : KeyValue batch nKvHead kvSeq headDim)
+    {batch nHead nKvHead qSeq kvSeq headDim : UInt64} {d : DType}
+    (query : Query batch nHead qSeq headDim d)
+    (key : KeyValue batch nKvHead kvSeq headDim d)
+    (value : KeyValue batch nKvHead kvSeq headDim d)
     (attnMask : Option (PaddingMask batch kvSeq) := none)
     (dropoutP : Float := 0.0)
     (isCausal : Bool := false)
     (scale : Option Float := none)
     (enableGqa : Bool := false)
-    : DispatchRoute × Query batch nHead qSeq headDim :=
+    : DispatchRoute × Query batch nHead qSeq headDim d :=
   let route := dispatchRoute query key value attnMask dropoutP isCausal scale enableGqa
   let out := flashAttn query key value attnMask dropoutP isCausal scale enableGqa
   (route, out)
@@ -128,18 +141,18 @@ structure PackedQKV where
   qSeq : UInt64
   kvSeq : UInt64
   headDim : UInt64
-  q : Query batch nHead qSeq headDim
-  k : KeyValue batch nKvHead kvSeq headDim
-  v : KeyValue batch nKvHead kvSeq headDim
+  q : STensor #[batch, nHead, qSeq, headDim]
+  k : STensor #[batch, nKvHead, kvSeq, headDim]
+  v : STensor #[batch, nKvHead, kvSeq, headDim]
 
 abbrev DynOut :=
   Sigma (fun batch =>
     Sigma (fun nHead =>
       Sigma (fun qSeq =>
         Sigma (fun headDim =>
-          Query batch nHead qSeq headDim))))
+          STensor #[batch, nHead, qSeq, headDim]))))
 
-private def parseQKVDyn (qDyn kDyn vDyn : T #[]) : IO PackedQKV := do
+private def parseQKVDyn (qDyn kDyn vDyn : RawTensor) : IO PackedQKV := do
   let qShape := qDyn.runtimeShape
   if qShape.size != 4 then
     throw <| IO.userError s!"flashAttnDyn: query must be rank-4, got shape={qShape}"
@@ -172,9 +185,11 @@ private def parseQKVDyn (qDyn kDyn vDyn : T #[]) : IO PackedQKV := do
   if !(kHeadDim == headDim && vHeadDim == headDim) then
     throw <| IO.userError s!"flashAttnDyn: head_dim mismatch q={headDim} k={kHeadDim} v={vHeadDim}"
 
-  let q : Query batch nHead qSeq headDim := torch.reshape qDyn #[batch, nHead, qSeq, headDim]
-  let k : KeyValue batch nKvHead kvSeq headDim := torch.reshape kDyn #[batch, nKvHead, kvSeq, headDim]
-  let v : KeyValue batch nKvHead kvSeq headDim := torch.reshape vDyn #[batch, nKvHead, kvSeq, headDim]
+  -- The runtime shapes were just validated above, so the erased handles carry
+  -- exactly the shapes the specs claim.
+  let q : STensor #[batch, nHead, qSeq, headDim] := Tensor.assumeSpec qDyn
+  let k : STensor #[batch, nKvHead, kvSeq, headDim] := Tensor.assumeSpec kDyn
+  let v : STensor #[batch, nKvHead, kvSeq, headDim] := Tensor.assumeSpec vDyn
   pure {
     batch := batch
     nHead := nHead
@@ -189,7 +204,7 @@ private def parseQKVDyn (qDyn kDyn vDyn : T #[]) : IO PackedQKV := do
 
 private def parseMaskDyn
     (batch kvSeq : UInt64)
-    (attnMask : Option (T #[]))
+    (attnMask : Option RawTensor)
     : IO (Option (PaddingMask batch kvSeq)) := do
   match attnMask with
   | none => pure none
@@ -202,15 +217,15 @@ private def parseMaskDyn
       if !(gotBatch == batch && gotKvSeq == kvSeq) then
         throw <| IO.userError
           s!"flashAttnDyn: attn_mask shape mismatch expected=[{batch},{kvSeq}] got=[{gotBatch},{gotKvSeq}]"
-      let mask : PaddingMask batch kvSeq := torch.reshape maskDyn #[batch, kvSeq]
+      let mask : PaddingMask batch kvSeq := Tensor.assumeSpec maskDyn
       pure (some mask)
 
 /-- Fully general existential adapter:
-    accepts shape-erased 4D tensors, validates runtime shapes, dispatches through the
+    accepts shape-erased 4D raw tensors, validates runtime shapes, dispatches through the
     typed API, and returns a shape-indexed existential output. -/
 def flashAttnDyn
-    (qDyn kDyn vDyn : T #[])
-    (attnMask : Option (T #[]) := none)
+    (qDyn kDyn vDyn : RawTensor)
+    (attnMask : Option RawTensor := none)
     (dropoutP : Float := 0.0)
     (isCausal : Bool := false)
     (scale : Option Float := none)
@@ -218,7 +233,7 @@ def flashAttnDyn
     : IO DynOut := do
   let packed ← parseQKVDyn qDyn kDyn vDyn
   let typedMask ← parseMaskDyn packed.batch packed.kvSeq attnMask
-  let out : Query packed.batch packed.nHead packed.qSeq packed.headDim :=
+  let out : STensor #[packed.batch, packed.nHead, packed.qSeq, packed.headDim] :=
     flashAttn packed.q packed.k packed.v typedMask dropoutP isCausal scale enableGqa
   pure ⟨packed.batch, ⟨packed.nHead, ⟨packed.qSeq, ⟨packed.headDim, out⟩⟩⟩⟩
 

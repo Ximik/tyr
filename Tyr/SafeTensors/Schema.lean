@@ -63,21 +63,20 @@ private def checkLoadedWithContractCore
     {shape : Shape}
     (context : String)
     (contract : TensorContract)
-    (raw : T shape)
+    (raw : RawTensor)
     : IO (DTensor shape contract.spec.dtype) := do
-  let actual : TensorSpec := { shape := raw.runtimeShape, dtype := raw.dtype }
-  match contract.check actual raw.device with
-  | .ok () => pure (Tensor.assumeDType raw)
+  match Tensor.ofTensorWithContract contract raw with
+  | .ok tensor => pure tensor
   | .error err => throw <| IO.userError s!"{context}: {err}"
 
 /--
-Check a loaded tensor against a shape/dtype/device contract and return a
+Check a loaded raw tensor against a shape/dtype/device contract and return a
 dtype-indexed view over the same runtime tensor.
 -/
 def checkLoadedWithContract
     (context : String)
     (contract : TensorContract)
-    (raw : T contract.spec.shape)
+    (raw : RawTensor)
     : IO (DTensor contract.spec.shape contract.spec.dtype) :=
   checkLoadedWithContractCore context contract raw
 

@@ -29,7 +29,6 @@
     otherwise; gradients are accumulated sample-by-sample under that
     constraint.
 -/
-import Tyr.Torch
 import Tyr.TensorStruct
 import Tyr.Optim
 import Tyr.Distributed
@@ -98,9 +97,9 @@ def computeAdvantages (rewards : Array Float) : Array Float :=
     rewards.map (· - mu)
 
 /-- Compute advantages from a tensor of rewards -/
-def computeAdvantagesTensor (rewards : T #[b]) : T #[b] :=
-  let mu := nn.meanAll rewards
-  let muExpanded := nn.expand mu #[b]
+def computeAdvantagesTensor (rewards : DTensor #[b] .Float32) : DTensor #[b] .Float32 :=
+  let mu := Tensor.meanAll rewards rfl
+  let muExpanded := Tensor.expand mu #[b]
   rewards - muExpanded
 
 /-! ## Reward Functions -/
@@ -181,19 +180,19 @@ structure RolloutBatch where
 
     Returns the loss (negated pg_objective). -/
 def computePGLoss
-    (logProbs : T #[b, t])
-    (advantages : T #[b])
-    (mask : T #[b, t])
+    (logProbs : DTensor #[b, t] .Float32)
+    (advantages : DTensor #[b] .Float32)
+    (mask : DTensor #[b, t] .Float32)
     (numPasses : UInt64 := 1)
     (examplesPerRank : UInt64 := 1)
-    : T #[] :=
-  let device := logProbs.device
+    : DTensor #[] .Float32 :=
+  let device := logProbs.raw.device
   let advantages := advantages.to device
   let mask := mask.to device
 
   -- Expand advantages to [B, T] for broadcasting
-  let advExpanded := nn.unsqueeze advantages 1  -- [B, 1]
-  let advExpanded := nn.expand advExpanded #[b, t]  -- [B, T]
+  let advExpanded := Tensor.unsqueeze advantages 1  -- [B, 1]
+  let advExpanded := Tensor.expand advExpanded #[b, t]  -- [B, T]
 
   -- Compute per-token policy gradient: logp * A
   let perTokenPG := logProbs * advExpanded  -- [B, T]
@@ -202,24 +201,24 @@ def computePGLoss
   let maskedPG := perTokenPG * mask  -- [B, T]
 
   -- Sum to get policy gradient objective
-  let pgObj := nn.sumAll maskedPG
+  let pgObj := Tensor.sumAll maskedPG
 
   -- Normalize by valid tokens, passes, and examples
   -- Add small epsilon to avoid division by zero (equivalent to clamp(min=1))
-  let numValid := nn.sumAll mask
-  let numValidSafe := add_scalar numValid 1e-8
-  let pgObjNorm := nn.div pgObj numValidSafe
-  let pgObjNorm := div_scalar pgObjNorm (numPasses.toFloat * examplesPerRank.toFloat)
+  let numValid := Tensor.sumAll mask
+  let numValidSafe := Tensor.Preserving.addScalar numValid 1e-8
+  let pgObjNorm := Tensor.Preserving.div pgObj numValidSafe
+  let pgObjNorm := Tensor.Preserving.divScalar pgObjNorm (numPasses.toFloat * examplesPerRank.toFloat)
 
   -- Return negative (we minimize loss, not maximize objective)
-  mul_scalar pgObjNorm (-1.0)
+  Tensor.Preserving.mulScalar pgObjNorm (-1.0)
 
 /-- Get log probabilities from model cross-entropy output.
     In nanochat: logp = -model(inputs, targets, loss_reduction='none')
 
     The model returns NLL = -log(p), so we negate to get log(p). -/
-def negateToLogProb (nllPerToken : T s) : T s :=
-  mul_scalar nllPerToken (-1.0)
+def negateToLogProb {σ : StaticSpec} (nllPerToken : Tensor σ) : Tensor σ :=
+  Tensor.Preserving.mulScalar nllPerToken (-1.0)
 
 /-! ## Training State -/
 
@@ -397,7 +396,7 @@ def grpoStep
     - padToken: Padding token ID (default 0) -/
 def grpoStepWithModel (b t : UInt64)
     (rollouts : Array RolloutBatch)
-    (forwardFn : T #[b, t] → T #[b, t] → IO (T #[b, t]))  -- (input, target) → nll_per_token
+    (forwardFn : DTensor #[b, t] .Int64 → DTensor #[b, t] .Int64 → IO (DTensor #[b, t] .Float32))  -- (input, target) → nll_per_token
     (config : GRPOConfig)
     (state : GRPOState)
     (padToken : UInt64 := 0)
@@ -434,28 +433,24 @@ def grpoStepWithModel (b t : UInt64)
     targetSeqs := targetSeqs.push targetSeq
     shiftedMasks := shiftedMasks.push shiftedMask
 
-  -- Convert to tensors
-  -- Note: These conversions would use appropriate tensor creation functions
-  -- For now, we use fromInt64Array which expects Int64
-  let inputFlat : Array Int64 := inputSeqs.foldl (fun acc seq => acc ++ seq.map (·.toInt64)) #[]
-  let targetFlat : Array Int64 := targetSeqs.foldl (fun acc seq => acc ++ seq.map (·.toInt64)) #[]
+  -- Convert to host arrays. Token IDs are staged through Float because the
+  -- typed surface has no Int64 host-array factory; values below 2^24
+  -- round-trip exactly, which covers every vocab in use.
+  let inputFlat : Array Float := inputSeqs.foldl (fun acc seq => acc ++ seq.map (·.toFloat)) #[]
+  let targetFlat : Array Float := targetSeqs.foldl (fun acc seq => acc ++ seq.map (·.toFloat)) #[]
   let maskFlat : Array Float := shiftedMasks.foldl (fun acc m => acc ++ m) #[]
-  let advFlat : Array Float := advantages.toList.toArray
 
-  -- Create tensors
-  let inputTensor1d := data.fromInt64Array inputFlat
-  let targetTensor1d := data.fromInt64Array targetFlat
-  -- Reshape to [B, T-1]
-  let inputTensor : T #[b, t] := reshape inputTensor1d #[b, t]
-  let targetTensor : T #[b, t] := reshape targetTensor1d #[b, t]
+  -- Create tensors, validating the runtime shape against the claimed [B, T]
+  let inputTensor : DTensor #[b, t] .Int64 :=
+    Tensor.reshapeChecked (Tensor.toInt64 (Tensor.fromFloatArray inputFlat)) #[b, t]
+  let targetTensor : DTensor #[b, t] .Int64 :=
+    Tensor.reshapeChecked (Tensor.toInt64 (Tensor.fromFloatArray targetFlat)) #[b, t]
 
-  -- Create mask and advantage tensors using fromInt64Array and converting
-  -- This is a workaround since we don't have fromFloatArray
-  let maskTensor1d := data.fromInt64Array (maskFlat.map (fun f => if f > 0.5 then 1 else 0))
-  let maskTensor : T #[b, t] := reshape (toFloat' maskTensor1d) #[b, t]
+  let maskTensor : DTensor #[b, t] .Float32 :=
+    Tensor.reshapeChecked (Tensor.fromFloatArray maskFlat) #[b, t]
 
-  let advTensor1d := data.fromInt64Array (advFlat.map (fun f => (f * 1000).toInt64))
-  let advTensor : T #[b] := reshape (div_scalar (toFloat' advTensor1d) 1000.0) #[b]
+  let advTensor : DTensor #[b] .Float32 :=
+    Tensor.reshapeChecked (Tensor.fromFloatArray advantages) #[b]
 
   -- Forward pass: get per-token NLL
   let nllPerToken ← forwardFn inputTensor targetTensor  -- [B, T-1]
@@ -467,7 +462,7 @@ def grpoStepWithModel (b t : UInt64)
   let pgLoss := computePGLoss logProbs advTensor maskTensor config.examplesPerStep.toUInt64 1
 
   -- Backward pass
-  autograd.backwardLoss pgLoss
+  Tensor.backwardLoss pgLoss
 
   -- Compute statistics
   let meanReward := batched.rewards.foldl (· + ·) 0.0 / batched.batchSize.toFloat
@@ -475,7 +470,7 @@ def grpoStepWithModel (b t : UInt64)
   let meanGenLen := totalGenLen.toFloat / batched.batchSize.toFloat
 
   -- Get loss value for logging
-  let lossValue := nn.item pgLoss
+  let lossValue := Tensor.item pgLoss
 
   -- Update state
   let newState := { state with
@@ -709,7 +704,7 @@ structure TrainResult where
 def trainLoop (b t : UInt64)
     (getPromptFn : Nat → IO (Array UInt64 × String × String))  -- step → (tokens, text, answer)
     (generateOneFn : Array UInt64 → IO UInt64)
-    (forwardFn : T #[b, t] → T #[b, t] → IO (T #[b, t]))
+    (forwardFn : DTensor #[b, t] .Int64 → DTensor #[b, t] .Int64 → IO (DTensor #[b, t] .Float32))
     (decodeFn : Array UInt64 → String)
     (rewardFn : String → String → Float)
     (config : GRPOConfig)
@@ -776,7 +771,7 @@ def grpoStepWithModelUpdate (b t : UInt64) [TensorStruct P]
     (params : P)
     (optState : Optim.AdamWState P)
     (rollouts : Array RolloutBatch)
-    (forwardFn : P → T #[b, t] → T #[b, t] → IO (T #[b, t]))  -- (params, input, target) → nll_per_token
+    (forwardFn : P → DTensor #[b, t] .Int64 → DTensor #[b, t] .Int64 → IO (DTensor #[b, t] .Float32))  -- (params, input, target) → nll_per_token
     (config : GRPOConfig)
     (state : GRPOState)
     (padToken : UInt64 := 0)
@@ -804,7 +799,7 @@ def grpoStepWithModelUpdate (b t : UInt64) [TensorStruct P]
   let advantages := computeAdvantages rewards
   let tNat := t.toNat
   let mut sampleIdx := 0
-  let mut totalLoss? : Option (T #[]) := none
+  let mut totalLoss? : Option (DTensor #[] .Float32) := none
 
   -- Accumulate gradients across all rollout samples.
   let workingParams := TensorStruct.zeroGrads (TensorStruct.makeLeafParams params)
@@ -828,24 +823,24 @@ def grpoStepWithModelUpdate (b t : UInt64) [TensorStruct P]
       let targetSeq := fullSeq.extract 1 (tNat + 1)
       let maskSeq := createValidMask validTargets tNat
 
-      let inputTensor1d := data.fromInt64Array (inputSeq.map (·.toInt64))
-      let targetTensor1d := data.fromInt64Array (targetSeq.map (·.toInt64))
-      let maskTensor1d := data.fromInt64Array (maskSeq.map (fun f => if f > 0.5 then 1 else 0))
-
-      let inputTensor : T #[b, t] := reshape inputTensor1d #[b, t]
-      let targetTensor : T #[b, t] := reshape targetTensor1d #[b, t]
-      let maskTensor : T #[b, t] := reshape (toFloat' maskTensor1d) #[b, t]
+      -- Token IDs are staged through Float (see grpoStepWithModel); values
+      -- below 2^24 round-trip exactly, which covers every vocab in use.
+      let inputTensor : DTensor #[b, t] .Int64 :=
+        Tensor.reshapeChecked (Tensor.toInt64 (Tensor.fromFloatArray (inputSeq.map (·.toFloat)))) #[b, t]
+      let targetTensor : DTensor #[b, t] .Int64 :=
+        Tensor.reshapeChecked (Tensor.toInt64 (Tensor.fromFloatArray (targetSeq.map (·.toFloat)))) #[b, t]
+      let maskTensor : DTensor #[b, t] .Float32 :=
+        Tensor.reshapeChecked (Tensor.fromFloatArray maskSeq) #[b, t]
 
       let adv := advantages[sampleIdx]!
-      let advScaled : Int64 := (adv * 1000.0).toInt64
-      let advTensor1d := data.fromInt64Array #[advScaled]
-      let advTensor : T #[b] := reshape (div_scalar (toFloat' advTensor1d) 1000.0) #[b]
+      let advTensor : DTensor #[b] .Float32 :=
+        Tensor.reshapeChecked (Tensor.fromFloatArray #[adv]) #[b]
 
       let nllPerToken ← forwardFn workingParams inputTensor targetTensor
       let logProbs := negateToLogProb nllPerToken
       let pgLoss := computePGLoss logProbs advTensor maskTensor 1 1
       totalLoss? := some <| match totalLoss? with
-        | some lossSoFar => torch.add lossSoFar pgLoss
+        | some lossSoFar => lossSoFar + pgLoss
         | none => pgLoss
       sampleIdx := sampleIdx + 1
 
@@ -853,8 +848,8 @@ def grpoStepWithModelUpdate (b t : UInt64) [TensorStruct P]
     | some loss => pure loss
     | none => throw <| IO.userError "grpoStepWithModelUpdate: no losses accumulated"
 
-  let meanLossTensor := div_scalar totalLoss rewards.size.toFloat
-  autograd.backwardLoss meanLossTensor
+  let meanLossTensor := Tensor.Preserving.divScalar totalLoss rewards.size.toFloat
+  Tensor.backwardLoss meanLossTensor
 
   -- Synchronize gradients in distributed runs.
   let isDistributed ← dist.isInitialized
@@ -870,7 +865,7 @@ def grpoStepWithModelUpdate (b t : UInt64) [TensorStruct P]
 
   let meanReward := rewards.foldl (· + ·) 0.0 / rewards.size.toFloat
   let meanGenLen := totalGenLen.toFloat / rewards.size.toFloat
-  let meanLoss := nn.item meanLossTensor
+  let meanLoss := Tensor.item meanLossTensor
 
   let newState := { state with
     step := state.step + 1
@@ -891,7 +886,7 @@ def grpoStepWithModelUpdate (b t : UInt64) [TensorStruct P]
 def trainLoopWithUpdates (b t : UInt64) [TensorStruct P]
     (getPromptFn : Nat → IO (Array UInt64 × String × String))  -- step → (tokens, text, answer)
     (generateOneFn : P → Array UInt64 → IO UInt64)
-    (forwardFn : P → T #[b, t] → T #[b, t] → IO (T #[b, t]))
+    (forwardFn : P → DTensor #[b, t] .Int64 → DTensor #[b, t] .Int64 → IO (DTensor #[b, t] .Float32))
     (params : P)
     (optState : Optim.AdamWState P)
     (decodeFn : Array UInt64 → String)
@@ -960,7 +955,7 @@ def trainLoopWithUpdates (b t : UInt64) [TensorStruct P]
 def trainOnPrompts (b t : UInt64)
     (prompts : Array (Array UInt64 × String × String))  -- (tokens, text, answer)
     (generateOneFn : Array UInt64 → IO UInt64)
-    (forwardFn : T #[b, t] → T #[b, t] → IO (T #[b, t]))
+    (forwardFn : DTensor #[b, t] .Int64 → DTensor #[b, t] .Int64 → IO (DTensor #[b, t] .Float32))
     (decodeFn : Array UInt64 → String)
     (rewardFn : String → String → Float)
     (config : GRPOConfig)
@@ -981,7 +976,7 @@ def trainOnPrompts (b t : UInt64)
 def trainOnPromptsWithUpdates (b t : UInt64) [TensorStruct P]
     (prompts : Array (Array UInt64 × String × String))  -- (tokens, text, answer)
     (generateOneFn : P → Array UInt64 → IO UInt64)
-    (forwardFn : P → T #[b, t] → T #[b, t] → IO (T #[b, t]))
+    (forwardFn : P → DTensor #[b, t] .Int64 → DTensor #[b, t] .Int64 → IO (DTensor #[b, t] .Float32))
     (params : P)
     (optState : Optim.AdamWState P)
     (decodeFn : Array UInt64 → String)

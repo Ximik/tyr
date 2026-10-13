@@ -15,7 +15,7 @@
    The key design point is that the public API is now centered on a runtime
    problem descriptor rather than a handful of ad hoc fixed-shape predicates.
 -/
-import Tyr.Torch
+import Tyr.Typed.Ops
 import Tyr.GPU.Types
 
 namespace Tyr.GPU.Ops
@@ -141,13 +141,15 @@ def inferMode (qSeq kvSeq : UInt64) (windowSize : Option UInt64 := none) : Atten
       else
         .densePrefill
 
-/-- Construct a runtime problem descriptor from typed Q/K/V tensors. -/
+/-- Construct a runtime problem descriptor from typed Q/K/V tensors.
+    The Q/K/V dtype is shared statically; the descriptor still records the
+    runtime dtype/device of the query handle, as before. -/
 def ofQKV
-    {batch nHead nKvHead qSeq kvSeq headDim : UInt64}
-    (q : T #[batch, nHead, qSeq, headDim])
-    (k : T #[batch, nKvHead, kvSeq, headDim])
-    (v : T #[batch, nKvHead, kvSeq, headDim])
-    (attnMask : Option (T #[batch, kvSeq]) := none)
+    {batch nHead nKvHead qSeq kvSeq headDim : UInt64} {d : DType}
+    (q : DTensor #[batch, nHead, qSeq, headDim] d)
+    (k : DTensor #[batch, nKvHead, kvSeq, headDim] d)
+    (v : DTensor #[batch, nKvHead, kvSeq, headDim] d)
+    (attnMask : Option (STensor #[batch, kvSeq]) := none)
     (dropoutP : Float := 0.0)
     (isCausal : Bool := false)
     (scale : Option Float := none)
@@ -155,8 +157,6 @@ def ofQKV
     (windowSize : Option UInt64 := none)
     (arch : GpuArch := .SM90)
     : AttentionProblem :=
-    let _sameDType := q.dtype == k.dtype && k.dtype == v.dtype
-    let _sameDevice := q.device == k.device && k.device == v.device
     {
       batch := batch
       numQHeads := nHead
@@ -164,8 +164,8 @@ def ofQKV
       qSeq := qSeq
       kvSeq := kvSeq
       headDim := headDim
-      dtype := q.dtype
-      device := q.device
+      dtype := q.raw.dtype
+      device := q.raw.device
       arch := arch
       mode := inferMode qSeq kvSeq windowSize
       maskKind := if attnMask.isSome then .padding else .none

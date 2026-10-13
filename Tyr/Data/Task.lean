@@ -15,6 +15,7 @@
   - TaskMixture: Combines multiple tasks with deterministic interleaving
 -/
 import Tyr.Torch
+import Tyr.Typed
 
 namespace torch.Data.Task
 
@@ -325,12 +326,23 @@ def renderConversation
 
 /-! ## Batch Collation -/
 
+/-- Build an Int64 token tensor from host data over the raw FFI boundary.
+    The runtime shape is the array length; `reshapeChecked` validates the
+    result metadata (shape and Int64 dtype) against the static spec. -/
+private def int64TensorFromArray (arr : Array Int64) : DTensor #[arr.size.toUInt64] .Int64 :=
+  Tensor.reshapeChecked (.assumeSpec (data.fromInt64Array arr) : DTensor #[] .Int64)
+    #[arr.size.toUInt64]
+
 /-- A batch of tokenized conversations -/
 structure ConversationBatch where
-  /-- Token IDs: [batch, seqLen] -/
-  tokens : T #[]
-  /-- Training mask: [batch, seqLen], 1 = train, 0 = ignore -/
-  mask : T #[]
+  /-- Batch size (number of conversations) -/
+  batchSize : UInt64
+  /-- Sequence length after padding -/
+  seqLen : UInt64
+  /-- Token IDs: [batchSize, seqLen] -/
+  tokens : DTensor #[batchSize, seqLen] .Int64
+  /-- Training mask: [batchSize, seqLen], 1 = train, 0 = ignore -/
+  mask : DTensor #[batchSize, seqLen] .Float32
   /-- Actual lengths before padding -/
   lengths : Array Nat
   deriving Repr
@@ -353,7 +365,10 @@ def collate (convs : Array TokenizedConversation) (maxLen : Nat) (padToken : UIn
     : IO ConversationBatch := do
   let batchSize := convs.size
   if batchSize == 0 then
-    return { tokens := zeros #[], mask := zeros #[], lengths := #[] }
+    return { batchSize := 0, seqLen := 0
+             tokens := Tensor.fullInt #[0, 0] 0
+             mask := Tensor.zeros #[0, 0]
+             lengths := #[] }
 
   -- Find max length in batch (capped at maxLen)
   let actualMaxLen := convs.foldl (fun acc c => max acc (min c.tokens.size maxLen)) 0
@@ -371,17 +386,17 @@ def collate (convs : Array TokenizedConversation) (maxLen : Nat) (padToken : UIn
     lengths := lengths.push (min conv.tokens.size actualMaxLen)
 
   -- Convert to tensors
-  let tokensTensor := data.fromInt64Array (allTokens.map (·.toInt64))
-  let tokensTensor := reshape tokensTensor #[batchSize.toUInt64, actualMaxLen.toUInt64]
+  let tokensFlat := int64TensorFromArray (allTokens.map (·.toInt64))
+  let tokensTensor := tokensFlat.reshapeChecked #[batchSize.toUInt64, actualMaxLen.toUInt64]
 
-  -- Convert mask to Int64, then to tensor, then cast to float
-  let maskInt := allMasks.map (fun m => if m == 1 then (1 : Int64) else 0)
-  let maskTensor := data.fromInt64Array maskInt
-  let maskTensor := toFloat' (reshape maskTensor #[batchSize.toUInt64, actualMaxLen.toUInt64])
+  let maskFlat := Tensor.fromFloatArray (allMasks.map fun m => m.toNat.toFloat)
+  let maskTensor := maskFlat.reshapeChecked #[batchSize.toUInt64, actualMaxLen.toUInt64]
 
   return {
-    tokens := reshape tokensTensor #[]
-    mask := reshape maskTensor #[]
+    batchSize := batchSize.toUInt64
+    seqLen := actualMaxLen.toUInt64
+    tokens := tokensTensor
+    mask := maskTensor
     lengths
   }
 
@@ -517,9 +532,11 @@ private def TaskTokenStream.popWindow? (s : TaskTokenStream) (n : Nat)
     some (window, s'.compact)
 
 /-- Consume one GPT batch from the stream.
-    Returns dynamic tensors shaped `[batchSize, seqLen]` for input and target. -/
+    Returns input/target tensors shaped `[batchSize, seqLen]`. -/
 def TaskTokenStream.nextGPTBatch (stream : TaskTokenStream)
-    : IO (Option (T #[] × T #[]) × TaskTokenStream) := do
+    : IO (Option (DTensor #[stream.batchSize.toUInt64, stream.seqLen.toUInt64] .Int64 ×
+                  DTensor #[stream.batchSize.toUInt64, stream.seqLen.toUInt64] .Int64) ×
+          TaskTokenStream) := do
   if stream.batchSize == 0 || stream.seqLen == 0 || stream.mixture.size == 0 then
     return (none, stream)
 
@@ -547,10 +564,12 @@ def TaskTokenStream.nextGPTBatch (stream : TaskTokenStream)
     let inputIds := window.extract 0 (needed - 1)
     let targetIds := window.extract 1 needed
 
-    let inputTensor := data.fromInt64Array (inputIds.map (·.toInt64))
-    let inputTensor := reshape inputTensor #[s.batchSize.toUInt64, s.seqLen.toUInt64]
-    let targetTensor := data.fromInt64Array (targetIds.map (·.toInt64))
-    let targetTensor := reshape targetTensor #[s.batchSize.toUInt64, s.seqLen.toUInt64]
+    let inputFlat := int64TensorFromArray (inputIds.map (·.toInt64))
+    let inputTensor := inputFlat.reshapeChecked
+      #[stream.batchSize.toUInt64, stream.seqLen.toUInt64]
+    let targetFlat := int64TensorFromArray (targetIds.map (·.toInt64))
+    let targetTensor := targetFlat.reshapeChecked
+      #[stream.batchSize.toUInt64, stream.seqLen.toUInt64]
 
     let progress :=
       if sWindow.mixture.size == 0 then
@@ -562,7 +581,7 @@ def TaskTokenStream.nextGPTBatch (stream : TaskTokenStream)
       steps := sWindow.steps + 1
       lastProgress := progress
     }
-    return (some (reshape inputTensor #[], reshape targetTensor #[]), sOut)
+    return (some (inputTensor, targetTensor), sOut)
 
 /-- Stream progress over current mixed dataset epoch. -/
 def TaskTokenStream.progress (s : TaskTokenStream) : Float :=

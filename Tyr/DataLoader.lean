@@ -1,4 +1,5 @@
 import Tyr.Torch
+import Tyr.Typed
 import Tyr.Distributed
 import Lean.Data.Json.FromToJson
 
@@ -127,9 +128,10 @@ structure BOSFinder where
   orderedEnds : Array UInt64 := #[]
   deriving Repr
 
-def BOSFinder.init (tokens : T #[n]) (bosToken : UInt64) : IO BOSFinder := do
+def BOSFinder.init {n : UInt64} (tokens : DTensor #[n] .Int64) (bosToken : UInt64)
+    : IO BOSFinder := do
   let dataLen := n
-  let positionsTensor ← data.findBosPositions tokens bosToken.toInt64
+  let positionsTensor ← data.findBosPositions (n := n) tokens.raw bosToken.toInt64
   let positions ← data.tensorToUInt64Array' positionsTensor
   -- Preserve a prefix before the first BOS as a document fragment. Rank
   -- partitions may begin inside a document; no tokens are discarded.
@@ -145,17 +147,19 @@ def BOSFinder.findNextValidStart (finder : BOSFinder) (after : UInt64) : Option 
   finder.bosPositions.find? (· >= after)
 
 /-- Consume up to `count` real tokens in document order. Documents are packed
-    across batch boundaries, never padded or repeated inside a shard. -/
-def BOSFinder.take (finder : BOSFinder) (tokens : T #[n]) (count : UInt64)
-    : IO (T #[] × BOSFinder) := do
+    across batch boundaries, never padded or repeated inside a shard.
+    The result holds exactly `min count (remaining)` Int64 tokens. -/
+def BOSFinder.take (finder : BOSFinder) {n : UInt64} (tokens : DTensor #[n] .Int64)
+    (count : UInt64)
+    : IO (DTensor #[min count (finder.dataLen - finder.currentPos)] .Int64 × BOSFinder) := do
   if finder.currentPos > finder.dataLen then
     throw <| IO.userError "Data cursor position exceeds shard length"
   let count := min count (finder.dataLen - finder.currentPos)
   if count == 0 then
-    return (reshape (tokens.slice 0 0 0) #[], finder)
+    return (tokens.sliceChecked 0 0 0 #[count], finder)
   let endPos := finder.currentPos + count
   if finder.orderedStarts.isEmpty then
-    return (reshape (tokens.slice 0 finder.currentPos.toInt64 endPos.toInt64) #[],
+    return (tokens.sliceChecked 0 finder.currentPos count #[count],
       { finder with currentPos := endPos })
   -- Binary search avoids rescanning every earlier document for each batch.
   let mut lo := 0
@@ -165,25 +169,31 @@ def BOSFinder.take (finder : BOSFinder) (tokens : T #[n]) (count : UInt64)
     if finder.orderedEnds[mid]! <= finder.currentPos then lo := mid + 1 else hi := mid
   let mut doc := lo
   let mut pos := finder.currentPos
-  let mut chunks : Array (T #[]) := #[]
+  let mut chunks : Array RawTensor := #[]
   while pos < endPos do
     let docEnd := finder.orderedEnds[doc]!
     let docStart := if doc == 0 then 0 else finder.orderedEnds[doc - 1]!
     let sourceStart := finder.orderedStarts[doc]! + (pos - docStart)
     let len := min (endPos - pos) (docEnd - pos)
-    chunks := chunks.push (reshape (tokens.slice 0 sourceStart.toInt64 (sourceStart + len).toInt64) #[])
+    chunks := chunks.push (tokens.sliceChecked 0 sourceStart len #[len]).raw
     pos := pos + len
     doc := doc + 1
-  return (nn.cat_dyn chunks 0, { finder with currentPos := endPos })
+  -- Concatenating the document slices yields exactly `count` tokens.
+  let chunk ← match Tensor.ofRaw (σ := ⟨#[count], .Int64, .any⟩) (nn.cat_dyn chunks 0) with
+    | .ok tensor => pure tensor
+    | .error message => throw <| IO.userError s!"BOS document batch: {message}"
+  return (chunk, { finder with currentPos := endPos })
 
-def BOSFinder.getBatch (finder : BOSFinder) (tokens : T #[n])
-    (batchSize seqLen : UInt64) : IO (Option (T #[batchSize, seqLen]) × BOSFinder) := do
+def BOSFinder.getBatch (finder : BOSFinder) {n : UInt64} (tokens : DTensor #[n] .Int64)
+    (batchSize seqLen : UInt64)
+    : IO (Option (DTensor #[batchSize, seqLen] .Int64) × BOSFinder) := do
   let requiredLen ← checkedBatchTokens batchSize seqLen
   if finder.currentPos > finder.dataLen then
     throw <| IO.userError "Data cursor position exceeds shard length"
   if requiredLen > finder.dataLen - finder.currentPos then return (none, finder)
   let (batch, finder) ← finder.take tokens requiredLen
-  return (some (reshape batch #[batchSize, seqLen]), finder)
+  -- `take` returned exactly `requiredLen = batchSize * seqLen` tokens here.
+  return (some (batch.reshapeChecked #[batchSize, seqLen]), finder)
 
 def BOSFinder.reset (finder : BOSFinder) : BOSFinder :=
   { finder with currentPos := 0 }
@@ -225,7 +235,7 @@ def BOSFinder.shuffle (finder : BOSFinder) (seed : UInt64) : BOSFinder :=
 def defaultShardSize : UInt64 := 1000000
 
 structure DataShard (n : UInt64 := defaultShardSize) where
-  tokens : T #[n]
+  tokens : DTensor #[n] .Int64
   bosFinder : BOSFinder
   shardIdx : UInt64
   numShards : UInt64
@@ -252,12 +262,13 @@ structure FinewebHeader where
   deriving Repr
 
 /-- Parse the leading modded-nanogpt header values (magic, version, tokenCount). -/
-def parseFinewebHeader? {n : UInt64} (tokens : T #[n]) : IO (Option FinewebHeader) := do
+def parseFinewebHeader? {n : UInt64} (tokens : DTensor #[n] .Int64)
+    : IO (Option FinewebHeader) := do
   if n < 6 then
     return none
 
-  let hdr6 : T #[6] := tokens.slice 0 0 6
-  let vals ← data.tensorToUInt64Array' hdr6
+  let hdr6 : DTensor #[6] .Int64 := tokens.sliceChecked 0 0 6 #[6]
+  let vals ← data.tensorToUInt64Array' hdr6.raw
   if vals.size < 6 then
     return none
 
@@ -267,7 +278,8 @@ def parseFinewebHeader? {n : UInt64} (tokens : T #[n]) : IO (Option FinewebHeade
   return some { magic, version, tokenCount }
 
 /-- Split a tensor loaded from .bin into payload tokens, parsing fineweb header when present. -/
-def splitFinewebPayload {n : UInt64} (tokens : T #[n]) : IO (Σ m, T #[m]) := do
+def splitFinewebPayload {n : UInt64} (tokens : DTensor #[n] .Int64)
+    : IO (Σ m, DTensor #[m] .Int64) := do
   if n < finewebHeaderU16Words then
     return ⟨n, tokens⟩
 
@@ -290,10 +302,7 @@ def splitFinewebPayload {n : UInt64} (tokens : T #[n]) : IO (Σ m, T #[m]) := do
     else
       min header.tokenCount payloadWords
 
-  let payloadStart := finewebHeaderU16Words
-  let payloadEnd := payloadStart + payloadCount
-  let payloadRaw := tokens.slice 0 payloadStart.toInt64 payloadEnd.toInt64
-  let payload : T #[payloadCount] := reshape payloadRaw #[payloadCount]
+  let payload := tokens.sliceChecked 0 finewebHeaderU16Words payloadCount #[payloadCount]
   return ⟨payloadCount, payload⟩
 
 def DataShard.loadFromFile (path : String) (shardIdx numShards : UInt64)
@@ -302,13 +311,18 @@ def DataShard.loadFromFile (path : String) (shardIdx numShards : UInt64)
     throw <| IO.userError "Invalid data-loader rank/world size"
   let rawTokensCount ← data.binFileTokenCount path
   let rawTokens ← data.loadU16Bin rawTokensCount path
-  let ⟨totalTokens, allTokens⟩ ← splitFinewebPayload rawTokens
+  -- The loader produces a 1-D Int64 tensor of `rawTokensCount` entries;
+  -- validate the claim at this FFI boundary.
+  let allTokens : DTensor #[rawTokensCount] .Int64 ←
+    match Tensor.ofRaw (σ := ⟨#[rawTokensCount], .Int64, .any⟩) rawTokens with
+    | .ok tensor => pure tensor
+    | .error message => throw <| IO.userError s!"Data shard {path}: {message}"
+  let ⟨totalTokens, allTokens⟩ ← splitFinewebPayload allTokens
   let tokensPerShard := totalTokens / numShards
   let startToken := tokensPerShard * shardIdx
   let endToken := if shardIdx == numShards - 1 then totalTokens else startToken + tokensPerShard
   let shardSize := endToken - startToken
-  let shardTokens := allTokens.slice 0 startToken.toInt64 endToken.toInt64
-  let shardTokens := reshape shardTokens #[shardSize]
+  let shardTokens := allTokens.sliceChecked 0 startToken shardSize #[shardSize]
   let bosFinder ← BOSFinder.init shardTokens bosToken
   return ⟨shardSize, { tokens := shardTokens, bosFinder, shardIdx, numShards }⟩
 
@@ -341,7 +355,7 @@ def BatchIterator.new {n : UInt64} (shard : DataShard n) (batchSize seqLen : UIn
     batchCount := 0, epoch, shuffleSeed }
 
 def BatchIterator.next (iter : BatchIterator)
-    : IO (Option (T #[] ) × BatchIterator) := do
+    : IO (Option (DTensor #[iter.batchSize, iter.seqLen] .Int64) × BatchIterator) := do
   let (maybeBatch, newBosFinder) ← iter.shard.bosFinder.getBatch
     iter.shard.tokens iter.batchSize iter.seqLen
   match maybeBatch with
@@ -350,10 +364,9 @@ def BatchIterator.next (iter : BatchIterator)
       iter.batchSize iter.seqLen iter.shuffleSeed (iter.epoch + 1)
     return (none, newIter)
   | some batch =>
-    let batchDynamic := reshape batch #[]
     let newShard := { iter.shard with bosFinder := newBosFinder }
     let newIter := { iter with shard := newShard, batchCount := iter.batchCount + 1 }
-    return (some batchDynamic, newIter)
+    return (some batch, newIter)
 
 def BatchIterator.updateParams (iter : BatchIterator)
     (batchSize seqLen : UInt64) : IO BatchIterator := do
@@ -439,13 +452,14 @@ def DistributedDataGenerator.restoreCursor (gen : DistributedDataGenerator) (cur
 
 /-- Read a continuous training stream, preserving incomplete document/file
     tails across batches. Crossing the final file starts a new seeded epoch;
-    it does not pad individual files to an artificial working-shard size. -/
+    it does not pad individual files to an artificial working-shard size.
+    The result holds exactly `count` Int64 tokens. -/
 def DistributedDataGenerator.nextTokens (gen : DistributedDataGenerator) (count : UInt64)
-    : IO (T #[] × DistributedDataGenerator) := do
+    : IO (DTensor #[count] .Int64 × DistributedDataGenerator) := do
   if count == 0 then throw <| IO.userError "Batch token count must be positive"
   let mut gen := gen
   let mut remaining := count
-  let mut chunks : Array (T #[]) := #[]
+  let mut chunks : Array RawTensor := #[]
   let mut emptyFiles := 0
   while remaining > 0 do
     let iter := gen.iterator
@@ -453,7 +467,7 @@ def DistributedDataGenerator.nextTokens (gen : DistributedDataGenerator) (count 
     let len := min remaining available
     if len > 0 then
       let (chunk, finder) ← iter.shard.bosFinder.take iter.shard.tokens len
-      chunks := chunks.push chunk
+      chunks := chunks.push chunk.raw
       gen := { gen with iterator := { iter with shard := { iter.shard with bosFinder := finder } } }
       remaining := remaining - len
       emptyFiles := 0
@@ -471,13 +485,18 @@ def DistributedDataGenerator.nextTokens (gen : DistributedDataGenerator) (count 
   gen := { gen with
     globalStep := gen.globalStep + 1
     iterator := { gen.iterator with batchCount := gen.iterator.batchCount + 1 } }
-  return (nn.cat_dyn chunks 0, gen)
+  -- The chunks consumed exactly `count` tokens in total.
+  let tokens ← match Tensor.ofRaw (σ := ⟨#[count], .Int64, .any⟩) (nn.cat_dyn chunks 0) with
+    | .ok tensor => pure tensor
+    | .error message => throw <| IO.userError s!"Training stream batch: {message}"
+  return (tokens, gen)
 
 def DistributedDataGenerator.nextBatch (gen : DistributedDataGenerator)
-    : IO (Option (T #[]) × DistributedDataGenerator) := do
+    : IO (Option (DTensor #[gen.iterator.batchSize, gen.iterator.seqLen] .Int64) ×
+          DistributedDataGenerator) := do
   let count ← checkedBatchTokens gen.iterator.batchSize gen.iterator.seqLen
   let (tokens, gen') ← gen.nextTokens count
-  return (some (reshape tokens #[gen.iterator.batchSize, gen.iterator.seqLen]), gen')
+  return (some (tokens.reshapeChecked #[gen.iterator.batchSize, gen.iterator.seqLen]), gen')
 
 def DistributedDataGenerator.batchSize (gen : DistributedDataGenerator) : UInt64 :=
   gen.iterator.batchSize

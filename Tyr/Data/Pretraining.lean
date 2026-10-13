@@ -11,6 +11,7 @@
   - Supports approximate resume via state dict
 -/
 import Tyr.Torch
+import Tyr.Typed
 import Tyr.Distributed
 import Tyr.Log
 
@@ -295,10 +296,18 @@ def createInputTarget (tokens : Array UInt64) : (Array UInt64 × Array UInt64) :
   let target := tokens.extract 1 tokens.size
   (input, target)
 
+/-- Build an Int64 token tensor from host data over the raw FFI boundary.
+    `reshapeChecked` validates the result metadata (shape and Int64 dtype). -/
+private def int64TensorFromArray (arr : Array Int64) : DTensor #[arr.size.toUInt64] .Int64 :=
+  Tensor.reshapeChecked (.assumeSpec (data.fromInt64Array arr) : DTensor #[] .Int64)
+    #[arr.size.toUInt64]
+
 /-- Get next batch of (input, target) pairs.
-    Returns tensors of shape [batchSize, seqLen]. -/
+    Returns Int64 tensors of shape [batchSize, seqLen]. -/
 def PretrainingLoader.nextBatch (loader : PretrainingLoader)
-    : IO (Option (T #[] × T #[]) × PretrainingLoader) := do
+    : IO (Option (DTensor #[loader.config.batchSize, loader.config.seqLen] .Int64 ×
+                  DTensor #[loader.config.batchSize, loader.config.seqLen] .Int64) ×
+          PretrainingLoader) := do
   let tokensNeeded := (loader.config.batchSize * loader.config.seqLen + 1).toNat
 
   -- Check if we have enough tokens
@@ -307,18 +316,17 @@ def PretrainingLoader.nextBatch (loader : PretrainingLoader)
     let (inputs, targets) := createInputTarget batchTokens
 
     -- Convert to tensors
-    let inputTensor := data.fromInt64Array (inputs.map (·.toInt64))
-    let inputTensor := reshape inputTensor #[loader.config.batchSize, loader.config.seqLen]
-
-    let targetTensor := data.fromInt64Array (targets.map (·.toInt64))
-    let targetTensor := reshape targetTensor #[loader.config.batchSize, loader.config.seqLen]
+    let inputTensor := (int64TensorFromArray (inputs.map (·.toInt64))).reshapeChecked
+      #[loader.config.batchSize, loader.config.seqLen]
+    let targetTensor := (int64TensorFromArray (targets.map (·.toInt64))).reshapeChecked
+      #[loader.config.batchSize, loader.config.seqLen]
 
     let newLoader := { loader with
       buffer := newBuffer.compact
       state := { loader.state with totalTokens := loader.state.totalTokens + tokensNeeded.toUInt64 }
     }
 
-    return (some (reshape inputTensor #[], reshape targetTensor #[]), newLoader)
+    return (some (inputTensor, targetTensor), newLoader)
   else
     -- Need more tokens - in real implementation would load from parquet
     -- For now, return none indicating end of data
@@ -340,19 +348,21 @@ def PretrainingLoader.resume (loader : PretrainingLoader) (state : LoaderState)
 
 /-- Load validation data (typically last shard of training data) -/
 structure ValidationLoader where
-  /-- All validation tokens -/
-  tokens : T #[]
+  /-- All validation tokens (runtime length) -/
+  tokens : Σ n : UInt64, DTensor #[n] .Int64
   /-- Current position -/
   position : Nat
   /-- Sequence length -/
   seqLen : UInt64
   deriving Repr
 
-def ValidationLoader.init (tokens : T #[]) (seqLen : UInt64) : ValidationLoader :=
+def ValidationLoader.init (tokens : Σ n : UInt64, DTensor #[n] .Int64) (seqLen : UInt64)
+    : ValidationLoader :=
   { tokens, position := 0, seqLen }
 
-def ValidationLoader.nextBatch (loader : ValidationLoader) (_batchSize : UInt64)
-    : IO (Option (T #[] × T #[]) × ValidationLoader) := do
+def ValidationLoader.nextBatch (loader : ValidationLoader) (batchSize : UInt64)
+    : IO (Option (DTensor #[batchSize, loader.seqLen] .Int64 ×
+                  DTensor #[batchSize, loader.seqLen] .Int64) × ValidationLoader) := do
   -- Implementation would slice tokens and create batches
   -- Placeholder for now
   return (none, loader)
@@ -490,13 +500,16 @@ def fillBuffer (state : StreamingLoaderState) (config : StreamingLoaderConfig) (
   return st
 
 /-- Get next batch from the streaming loader.
-    Returns (input, target) tensors of shape [batchSize, seqLen].
+    Returns (input, target) Int64 tensors of shape
+    `[batchTokens / seqLen, seqLen]`.
 
     Following nanochat's pattern:
     - input = tokens[:-1]
     - target = tokens[1:] -/
 def StreamingLoaderState.nextBatch (state : StreamingLoaderState) (config : StreamingLoaderConfig)
-    : IO (Option (T #[] × T #[]) × StreamingLoaderState) := do
+    : IO (Option (DTensor #[config.batchTokens / config.seqLen, config.seqLen] .Int64 ×
+                  DTensor #[config.batchTokens / config.seqLen, config.seqLen] .Int64) ×
+          StreamingLoaderState) := do
   let batchSize := config.batchTokens / config.seqLen
   let tokensNeeded := (batchSize * config.seqLen + 1).toNat
 
@@ -512,11 +525,10 @@ def StreamingLoaderState.nextBatch (state : StreamingLoaderState) (config : Stre
   let (inputs, targets) := createInputTarget batchTokens
 
   -- Convert to tensors
-  let inputTensor := data.fromInt64Array (inputs.map (·.toInt64))
-  let inputTensor := reshape inputTensor #[batchSize, config.seqLen]
-
-  let targetTensor := data.fromInt64Array (targets.map (·.toInt64))
-  let targetTensor := reshape targetTensor #[batchSize, config.seqLen]
+  let inputTensor := (int64TensorFromArray (inputs.map (·.toInt64))).reshapeChecked
+    #[batchSize, config.seqLen]
+  let targetTensor := (int64TensorFromArray (targets.map (·.toInt64))).reshapeChecked
+    #[batchSize, config.seqLen]
 
   let newState := { st with
     tokenBuffer := newBuffer.compact
@@ -530,7 +542,7 @@ def StreamingLoaderState.nextBatch (state : StreamingLoaderState) (config : Stre
     }
   }
 
-  return (some (reshape inputTensor #[], reshape targetTensor #[]), newState)
+  return (some (inputTensor, targetTensor), newState)
 
 /-- Get checkpoint state for saving -/
 def StreamingLoaderState.getCheckpoint (state : StreamingLoaderState) : LoaderState :=
