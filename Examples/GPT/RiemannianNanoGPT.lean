@@ -94,8 +94,8 @@ def isFiniteFloat (x : Float) : Bool :=
   !x.isNaN && !x.isInf
 
 /-- Synthetic Shakespeare-sized token stream. -/
-def mkShakespeareLikeStream (cfg : PrototypeConfig) : IO (T #[cfg.streamTokens]) := do
-  randint 0 cfg.modelConfig.vocab_size.toInt64 #[cfg.streamTokens]
+def mkShakespeareLikeStream (cfg : PrototypeConfig) : IO (Tokens #[cfg.streamTokens]) := do
+  Tensor.randint 0 cfg.modelConfig.vocab_size.toInt64 #[cfg.streamTokens]
 
 private def validateConfig (cfg : PrototypeConfig) : IO Unit := do
   let needed := cfg.trainConfig.batchSize * (cfg.trainConfig.blockSize + 1)
@@ -115,28 +115,26 @@ private def pullbackMetricLabel (cfg : PullbackMetricConfig) : String :=
 
 private def prototypeTrainBatch (cfg : PrototypeConfig)
     (params : GPTParams cfg.modelConfig)
-    (stream : T #[cfg.streamTokens])
+    (stream : Tokens #[cfg.streamTokens])
     (lr : Float)
     : IO (GPTParams cfg.modelConfig × Float × torch.Optim.RiemannianTreeSGD.StepDiagnostics) := do
   let (x, y) ←
     torch.train.getBatch
       stream cfg.trainConfig.batchSize cfg.trainConfig.blockSize cfg.trainConfig.device
-  let xT ← TensorOps.checked (s := #[cfg.trainConfig.batchSize, cfg.trainConfig.blockSize]) .Int64 x
-  let yT ← TensorOps.checked (s := #[cfg.trainConfig.batchSize, cfg.trainConfig.blockSize]) .Int64 y
   let step ←
     match cfg.pullbackMetric.mode with
     | .exact =>
       torch.Optim.RiemannianTreeSGD.stepCrossEntropy
         params
-        (fun p => gpt.forward p xT true)
-        yT
+        (fun p => gpt.forward p x true)
+        y
         lr
         cfg.trainConfig.gradClip
     | .sampledFisher =>
       torch.Optim.RiemannianTreeSGD.stepCrossEntropySampledFisher
         params
-        (fun p => gpt.forward p xT true)
-        yT
+        (fun p => gpt.forward p x true)
+        y
         cfg.pullbackMetric.fisherProbeCount
         lr
         cfg.trainConfig.gradClip
@@ -300,26 +298,24 @@ private def riemannianTrainStep {modelCfg : Config} {batch seq : UInt64}
     (trainCfg : TrainConfig)
     (pullbackMetric : PullbackMetricConfig)
     (params : GPTParams modelCfg)
-    (x : T #[batch, seq])
-    (y : T #[batch, seq])
+    (x : Tokens #[batch, seq])
+    (y : Tokens #[batch, seq])
     (lr : Float)
     : IO (GPTParams modelCfg × torch.Optim.RiemannianTreeSGD.StepDiagnostics × Float) := do
-  let xT ← TensorOps.checked (s := #[batch, seq]) .Int64 x
-  let yT ← TensorOps.checked (s := #[batch, seq]) .Int64 y
   let step ←
     match pullbackMetric.mode with
     | .exact =>
       torch.Optim.RiemannianTreeSGD.stepCrossEntropy
         params
-        (fun p => gpt.forward p xT true)
-        yT
+        (fun p => gpt.forward p x true)
+        y
         lr
         trainCfg.gradClip
     | .sampledFisher =>
       torch.Optim.RiemannianTreeSGD.stepCrossEntropySampledFisher
         params
-        (fun p => gpt.forward p xT true)
-        yT
+        (fun p => gpt.forward p x true)
+        y
         pullbackMetric.fisherProbeCount
         lr
         trainCfg.gradClip
@@ -328,7 +324,7 @@ private def riemannianTrainStep {modelCfg : Config} {batch seq : UInt64}
 /-- Train with data of known size (legacy, no validation). -/
 def runTraining {n : UInt64} (modelCfg : Config) (trainCfg : TrainConfig)
     (pullbackMetric : PullbackMetricConfig := { mode := .sampledFisher, fisherProbeCount := 32 })
-    (trainData : T #[n]) : IO (GPTParams modelCfg) := do
+    (trainData : Tokens #[n]) : IO (GPTParams modelCfg) := do
   IO.println ""
   IO.println "Initializing model..."
   let mut params ← GPTParams.init modelCfg trainCfg.device
@@ -368,7 +364,7 @@ def runTraining {n : UInt64} (modelCfg : Config) (trainCfg : TrainConfig)
 /-- Train with validation data and checkpointing. -/
 def runTrainingWithVal {nTrain nVal : UInt64} (modelCfg : Config) (trainCfg : TrainConfig)
     (pullbackMetric : PullbackMetricConfig := { mode := .sampledFisher, fisherProbeCount := 32 })
-    (trainData : T #[nTrain]) (valData : T #[nVal])
+    (trainData : Tokens #[nTrain]) (valData : Tokens #[nVal])
     (checkpointDir : Option String := none) : IO (GPTParams modelCfg) := do
   IO.println ""
   IO.println "Initializing model..."
@@ -467,11 +463,11 @@ def main : IO Unit := do
     IO.println "Found Shakespeare data..."
     let nTrain ← data.binFileTokenCount "data/shakespeare_char/train.bin"
     IO.println s!"Training set: {nTrain} tokens"
-    let trainData ← data.loadU16Bin nTrain "data/shakespeare_char/train.bin"
+    let trainData ← Tensor.loadU16Bin nTrain "data/shakespeare_char/train.bin"
     if valFileExists then
       let nVal ← data.binFileTokenCount "data/shakespeare_char/val.bin"
       IO.println s!"Validation set: {nVal} tokens"
-      let valData ← data.loadU16Bin nVal "data/shakespeare_char/val.bin"
+      let valData ← Tensor.loadU16Bin nVal "data/shakespeare_char/val.bin"
       IO.println "Training with validation..."
       runTrainingWithVal modelCfg trainCfg pullbackMetric trainData valData (some checkpointDir)
     else
@@ -480,7 +476,7 @@ def main : IO Unit := do
   else
     IO.println "Shakespeare data not found, using random tokens for testing..."
     let numTokens : UInt64 := 10000
-    let tokens ← randint 0 modelCfg.vocab_size.toInt64 #[numTokens]
+    let tokens ← Tensor.randint 0 modelCfg.vocab_size.toInt64 #[numTokens]
     runTraining modelCfg trainCfg pullbackMetric tokens
 
   IO.println ""

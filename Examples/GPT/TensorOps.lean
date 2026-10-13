@@ -2,7 +2,7 @@ import Tyr.Typed.Ops
 import Tyr.TensorStruct
 
 /-! Typed GPT primitives. Raw FFI handles are confined to these adapters.
-Dynamic reshapes and legacy input/optimizer boundaries validate their claims. -/
+Dynamic reshapes and native tensor inputs validate their claims. -/
 namespace torch.gpt
 
 abbrev Activation (s : Shape) := DTensor s .Float32

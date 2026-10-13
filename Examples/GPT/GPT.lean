@@ -5,6 +5,7 @@
   Shapes are tracked at compile time to catch dimension mismatches.
 -/
 import Examples.GPT.TensorOps
+import Tyr.Typed.Neural
 import Tyr.TensorStruct
 import Tyr.Module.Core
 import Tyr.Module.Derive
@@ -182,7 +183,7 @@ def forward {cfg : Config} {batch seq : UInt64}
   let tok_emb := TensorOps.embedding idx params.wte
   -- Position embeddings (create position indices): [seq] -> [seq, n_embd]
   -- Move positions to the same device as the embedding weights
-  let positions ← TensorOps.checked (s := #[seq]) .Int64 ((arange 0 seq 1).to params.wpe.raw.device)
+  let positions := (Tensor.arange seq).to params.wpe.device
   let pos_emb := TensorOps.embedding1d positions params.wpe
   -- Expand pos_emb to match batch: [seq, n_embd] -> [batch, seq, n_embd]
   let pos_emb_expanded := Tensor.expand pos_emb #[batch, seq, cfg.n_embd]
@@ -211,19 +212,6 @@ def loss {cfg : Config} {batch seq : UInt64}
   let targets_flat ← TensorOps.reshape targets #[batch * seq]
   return TensorOps.crossEntropy logits_flat targets_flat
 
-/-- Checked compatibility boundary for legacy raw-token data loaders. -/
-def forwardRaw {cfg : Config} {batch seq : UInt64} (params : GPTParams cfg)
-    (idx : T #[batch, seq]) (training : Bool := true) : IO (T #[batch, seq, cfg.vocab_size]) := do
-  let idx ← TensorOps.checked (s := #[batch, seq]) .Int64 idx
-  return (← forward params idx training).raw
-
-/-- Checked compatibility boundary for legacy training loops. -/
-def lossRaw {cfg : Config} {batch seq : UInt64} (params : GPTParams cfg)
-    (idx targets : T #[batch, seq]) (training : Bool := true) : IO (T #[]) := do
-  let idx ← TensorOps.checked (s := #[batch, seq]) .Int64 idx
-  let targets ← TensorOps.checked (s := #[batch, seq]) .Int64 targets
-  return (← loss params idx targets training).raw
-
 /-- Training state using Optax-style optimizer -/
 structure TrainState (cfg : Config) where
   params : GPTParams cfg
@@ -248,6 +236,10 @@ def generate {cfg : Config}
     (maxNewTokens : Nat)
     (temperature : Float := 1.0)
     : IO (Array Int64) := do
+  if maxNewTokens > 0 && (context.isEmpty || cfg.block_size == 0) then
+    throw <| IO.userError "GPT generation requires nonempty context and positive block size"
+  if temperature <= 0 || temperature.isNaN || temperature.isInf then
+    throw <| IO.userError "GPT generation requires finite positive temperature"
   let mut tokens := context
 
   for _ in [:maxNewTokens] do
@@ -258,9 +250,7 @@ def generate {cfg : Config}
 
     -- Create input tensor [1, seq] from token array and move to model's device
     let seq : UInt64 := ctxLen.toUInt64
-    let inputFlat := torch.data.fromInt64Array ctx
-    let inputTensor ← TensorOps.checked (s := #[1, seq]) .Int64
-      ((torch.reshapeExact inputFlat #[1, seq]).to params.wte.raw.device)
+    let inputTensor := ((Tensor.fromInt64Array ctx).reshapeChecked #[1, seq]).to params.wte.device
 
     -- Forward pass to get logits [1, seq, vocab] (training=false disables dropout)
     let logits ← forward params inputTensor false
@@ -268,15 +258,15 @@ def generate {cfg : Config}
     -- Get logits for last position: logits[:, -1, :] -> [1, vocab]
     -- Reshape to [1 * seq * vocab] then slice last vocab elements
     let flat ← TensorOps.reshape logits #[seq * cfg.vocab_size]
-    let lastLogits := torch.data.slice1d' (n := seq * cfg.vocab_size) flat.raw ((seq - 1) * cfg.vocab_size).toInt64 (seq * cfg.vocab_size).toInt64
+    let lastLogits := (flat.sliceChecked 0 ((seq - 1) * cfg.vocab_size) cfg.vocab_size #[cfg.vocab_size]).reshapeChecked #[1, cfg.vocab_size]
 
     -- Apply temperature and convert to probabilities
-    let scaledLogits := div_scalar lastLogits temperature
-    let probs := nn.softmax scaledLogits
+    let scaledLogits := lastLogits / temperature
+    let probs := Tensor.softmax scaledLogits
 
     -- Sample from the distribution using multinomial
-    let sampled ← nn.multinomial probs 1 false
-    let nextTokenId := nn.itemInt sampled
+    let sampled ← Tensor.multinomial probs 1 false
+    let nextTokenId := (sampled.reshapeChecked #[]).itemInt
 
     tokens := tokens.push nextTokenId
 

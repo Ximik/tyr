@@ -69,4 +69,6 @@ namespace torch.RawTensor
     (input : @& RawTensor) (path : @& String) : IO Unit
 @[extern "lean_torch_wav_finalize"] opaque wavFinalize (path : @& String) : IO Unit
 
+@[extern "lean_torch_load_u16_bin"] opaque loadU16Bin (count : UInt64) (path : @& String) : IO RawTensor
+
 end torch.RawTensor

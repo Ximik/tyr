@@ -2250,7 +2250,7 @@ lean_object* lean_torch_bin_file_token_count(b_lean_obj_arg path_obj, lean_objec
 }
 
 // Load binary file of uint16 tokens into a 1D tensor with known size
-lean_object* lean_torch_load_u16_bin(uint64_t n, b_lean_obj_arg path_obj, lean_object* w) {
+lean_object* lean_torch_load_u16_bin(uint64_t n, b_lean_obj_arg path_obj) {
   const char* path = lean_string_cstr(path_obj);
   uint64_t expected_tokens = n;
 

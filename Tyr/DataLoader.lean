@@ -1,5 +1,6 @@
 import Tyr.Torch
 import Tyr.Typed
+import Tyr.Typed.Neural
 import Tyr.Distributed
 import Lean.Data.Json.FromToJson
 
@@ -310,13 +311,7 @@ def DataShard.loadFromFile (path : String) (shardIdx numShards : UInt64)
   if numShards == 0 || shardIdx >= numShards then
     throw <| IO.userError "Invalid data-loader rank/world size"
   let rawTokensCount ← data.binFileTokenCount path
-  let rawTokens ← data.loadU16Bin rawTokensCount path
-  -- The loader produces a 1-D Int64 tensor of `rawTokensCount` entries;
-  -- validate the claim at this FFI boundary.
-  let allTokens : DTensor #[rawTokensCount] .Int64 ←
-    match Tensor.ofRaw (σ := ⟨#[rawTokensCount], .Int64, .any⟩) rawTokens with
-    | .ok tensor => pure tensor
-    | .error message => throw <| IO.userError s!"Data shard {path}: {message}"
+  let allTokens ← Tensor.loadU16Bin rawTokensCount path
   let ⟨totalTokens, allTokens⟩ ← splitFinewebPayload allTokens
   let tokensPerShard := totalTokens / numShards
   let startToken := tokensPerShard * shardIdx

@@ -284,4 +284,11 @@ def wavAppend {σ : StaticSpec} (input : Tensor σ) (path : String) : IO Unit :=
 /-- Patch the streaming WAV header to match the final sample count. -/
 def wavFinalize (path : String) : IO Unit := RawTensor.wavFinalize path
 
+/-- Load UInt16 token data as an indexed Int64 tensor, validating native metadata. -/
+def loadU16Bin (count : UInt64) (path : String) : IO (DTensor #[count] .Int64) := do
+  let raw ← RawTensor.loadU16Bin count path
+  match Tensor.ofRaw raw with
+  | .ok tensor => pure tensor
+  | .error message => throw <| IO.userError s!"Tensor.loadU16Bin: {message}"
+
 end torch.Tensor

@@ -95,10 +95,7 @@ structure SequentialLoader (n : UInt64) where
 
 def SequentialLoader.fromFile (path : String) : IO (Σ n, SequentialLoader n) := do
   let n ← data.binFileTokenCount path
-  let raw ← data.loadU16Bin n path
-  let tokens ← match Tensor.ofRaw (σ := ⟨#[n], .Int64, .any⟩) raw with
-    | .ok t => pure t
-    | .error message => throw <| IO.userError s!"SequentialLoader: {message}"
+  let tokens ← Tensor.loadU16Bin n path
   return ⟨n, { tokens := tokens, currentPos := 0 }⟩
 
 def SequentialLoader.reset {n : UInt64} (loader : SequentialLoader n) : SequentialLoader n :=

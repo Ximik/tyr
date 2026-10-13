@@ -717,6 +717,35 @@ with no failures/skips in those runners, plus the seven standalone Laguna CPU
 suites. CUDA-only portions remain skipped. Upstream CI is green at `05304ff`,
 which does not validate these local commits.
 
+## GPT training-example migration
+
+The GPT training, pretraining, NanoGPT copy, Riemannian NanoGPT, and TrainGPT
+paths now keep Int64 token shapes through batching, loss computation, and
+updates. `forwardRaw` and `lossRaw` are removed. Generation uses indexed
+positions, logits, probabilities, and sampled indices throughout. Gradient
+clipping and scalar loss operations use the typed API.
+
+Batch sampling accepts an exactly sized dataset and includes the last valid
+starting offset. Empty dimensions and undersized datasets fail before native
+sampling. Generation rejects empty active contexts and nonpositive/nonfinite
+temperatures. Tests cover these boundaries, shifted token values, accumulated
+updates, evaluation, and one-step pretraining on an exactly sized stream.
+
+The audited UInt16 file loader returns indexed Int64 tensors and replaces the
+legacy adapter in both GPT's sequential loader and the shared data-shard loader.
+Its obsolete native IO-world argument is removed. A generated binary fixture
+checks token values and rejection of short reads.
+
+The strict build passes across aggregate examples, TrainGPT,
+RunRiemannianNanoGPT, the focused runner, and all required CPU executables
+(1,805 jobs). The focused runner passes 248 tests with no failures/skips. Both
+ABI audits pass: 36 neural declarations and 11 core declarations. Actual GPU
+training remains unqualified.
+All nine required CPU suites pass: 1,472 main tests and 49 experimental tests
+with no failures/skips in those runners, plus all seven standalone Laguna CPU
+suites. CUDA-only portions remain skipped. GitHub reports green upstream main
+CI at `05304ff`; those runs do not validate this local migration.
+
 ## Remaining acceptance criteria
 
 Remove the `T` declaration and all model, generator, reflection, documentation,

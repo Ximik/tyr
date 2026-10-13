@@ -115,20 +115,20 @@ def trainStep (cfg : torch.gpt.Config)
     (params : GPTParams cfg)
     (opt : GradientTransformation (GPTParams cfg) (AdamWState (GPTParams cfg)))
     (optState : AdamWState (GPTParams cfg))
-    (x : T #[batchSize, seqLen])
-    (y : T #[batchSize, seqLen])
+    (x : Tokens #[batchSize, seqLen])
+    (y : Tokens #[batchSize, seqLen])
     : IO (GPTParams cfg × AdamWState (GPTParams cfg) × Float) := do
   -- Zero gradients
   let params := TensorStruct.zeroGrads params
 
   -- Forward pass and compute loss
-  let lossT ← torch.gpt.lossRaw params x y true
+  let lossT ← torch.gpt.loss params x y true
 
   -- Backward pass
-  autograd.backwardLoss lossT
+  Tensor.backwardLoss lossT
 
   -- Get loss value for logging
-  let lossVal := nn.item lossT
+  let lossVal := Tensor.item lossT
 
   -- Extract gradients from parameters
   let grads := TensorStruct.grads params
@@ -143,8 +143,8 @@ def trainStep (cfg : torch.gpt.Config)
 /-- Run the main pretraining loop using simple in-memory data -/
 def runPretraining (cfg : PretrainingConfig)
     (numTokens : UInt64)
-    (trainData : T #[numTokens])
-    (valData : Option (T #[numTokens]))
+    (trainData : Tokens #[numTokens])
+    (valData : Option (Tokens #[numTokens]))
     : IO (GPTParams cfg.modelConfig) := do
   IO.println "Initializing model..."
   let params ← GPTParams.init cfg.modelConfig Device.CPU
@@ -164,17 +164,19 @@ def runPretraining (cfg : PretrainingConfig)
 
     -- Sample random batch from training data
     let batchTokens := cfg.deviceBatchSize * cfg.seqLen + 1
+    if batchTokens > numTokens || cfg.deviceBatchSize == 0 || cfg.seqLen == 0 then
+      throw <| IO.userError "GPT pretraining requires positive dimensions and enough tokens"
     let maxStart := numTokens - batchTokens
-    let startTensor ← randint 0 maxStart.toInt64 #[1]
-    let startIdx := nn.itemInt startTensor
+    let startTensor ← Tensor.randint 0 (maxStart + 1).toInt64 #[]
+    let startIdx := startTensor.itemInt.toUInt64
 
     -- Get batch: x = tokens[start:start+seq], y = tokens[start+1:start+seq+1]
     let batchLen := cfg.deviceBatchSize * cfg.seqLen
-    let xFlat : T #[batchLen] := torch.data.slice1d trainData startIdx (startIdx + batchLen.toInt64)
-    let yFlat : T #[batchLen] := torch.data.slice1d trainData (startIdx + 1) (startIdx + batchLen.toInt64 + 1)
+    let xFlat : Tokens #[batchLen] := trainData.sliceChecked 0 startIdx batchLen #[batchLen]
+    let yFlat : Tokens #[batchLen] := trainData.sliceChecked 0 (startIdx + 1) batchLen #[batchLen]
 
-    let x := reshape xFlat #[cfg.deviceBatchSize, cfg.seqLen]
-    let y := reshape yFlat #[cfg.deviceBatchSize, cfg.seqLen]
+    let x := Tensor.reshapeChecked xFlat #[cfg.deviceBatchSize, cfg.seqLen]
+    let y := Tensor.reshapeChecked yFlat #[cfg.deviceBatchSize, cfg.seqLen]
 
     -- Training step
     let (newParams, newOptState, loss) ←
@@ -225,10 +227,10 @@ def main : IO Unit := do
   -- Generate random training data for testing
   IO.println "Generating random training data..."
   let numTokens : UInt64 := 50000
-  let trainData ← randint 0 cfg.modelConfig.vocab_size.toInt64 #[numTokens]
+  let trainData ← Tensor.randint 0 cfg.modelConfig.vocab_size.toInt64 #[numTokens]
 
   -- No validation data for simple test
-  let valData : Option (T #[numTokens]) := none
+  let valData : Option (Tokens #[numTokens]) := none
 
   -- Run training
   IO.println "Starting training..."

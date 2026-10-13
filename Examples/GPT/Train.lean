@@ -50,79 +50,62 @@ def getLr (cfg : TrainConfig) (iterNum : Nat) : Float :=
 /-- Get a random batch of data from token array
     Returns (x, y) where y = x shifted by 1 position
     Uses a random starting position with batchSize consecutive sequences -/
-def getBatch (trainData : T #[n]) (batchSize blockSize : UInt64) (device : Device := Device.CPU) : IO (T #[batchSize, blockSize] × T #[batchSize, blockSize]) := do
-  -- Pick a random starting position
-  -- We need batchSize consecutive sequences of length blockSize+1
-  let totalTokens := batchSize * (blockSize + 1)
+def getBatch (trainData : Tokens #[n]) (batchSize blockSize : UInt64) (device : Device := Device.CPU) : IO (Tokens #[batchSize, blockSize] × Tokens #[batchSize, blockSize]) := do
+  let required := batchSize.toNat * (blockSize.toNat + 1)
+  if batchSize == 0 || blockSize == 0 || required > n.toNat then
+    throw <| IO.userError "GPT batch requires positive dimensions and enough tokens"
+  let totalTokens := required.toUInt64
   let maxStart := n - totalTokens
-  let startTensor ← randint 0 maxStart.toInt64 #[1]
-  let start := nn.itemInt startTensor
-
-  -- Slice contiguous block from data using slice1d with type annotation
-  let block : T #[totalTokens] := torch.data.slice1d trainData start (start + totalTokens.toInt64)
-
-  -- Reshape to [batchSize, blockSize+1]
-  let reshaped := reshape block #[batchSize, blockSize + 1]
-
-  -- x = reshaped[:, :-1], y = reshaped[:, 1:]
-  -- Using slice on dim 1 (second dimension)
-  let xRaw := reshaped.slice 1 0 blockSize.toInt64 1
-  let yRaw := reshaped.slice 1 1 (blockSize + 1).toInt64 1
-
-  -- Reshape to ensure correct types
-  let x := reshape xRaw #[batchSize, blockSize]
-  let y := reshape yRaw #[batchSize, blockSize]
-
-  -- Move to target device
-  match device with
-  | Device.CPU => return (x, y)
-  | _ =>
-    let x_dev := autograd.clone (x.to device)
-    let y_dev := autograd.clone (y.to device)
-    return (x_dev, y_dev)
+  let startTensor ← Tensor.randint 0 (maxStart + 1).toInt64 #[]
+  let start := startTensor.itemInt.toUInt64
+  let block := trainData.sliceChecked 0 start totalTokens #[totalTokens]
+  let reshaped := block.reshapeChecked #[batchSize, blockSize + 1]
+  let x := reshaped.sliceChecked 1 0 blockSize #[batchSize, blockSize]
+  let y := reshaped.sliceChecked 1 1 blockSize #[batchSize, blockSize]
+  return (x.to device, y.to device)
 
 /-- Clip gradients for a single block's parameters -/
 def clipBlockGrads {n_embd : UInt64} (params : BlockParams n_embd) (maxNorm : Float) : IO Unit := do
-  let _ ← nn.clip_grad_norm_ (s := params.ln1_weight.shape) params.ln1_weight.raw maxNorm
-  let _ ← nn.clip_grad_norm_ (s := params.ln1_bias.shape) params.ln1_bias.raw maxNorm
-  let _ ← nn.clip_grad_norm_ (s := params.q_proj.shape) params.q_proj.raw maxNorm
-  let _ ← nn.clip_grad_norm_ (s := params.k_proj.shape) params.k_proj.raw maxNorm
-  let _ ← nn.clip_grad_norm_ (s := params.v_proj.shape) params.v_proj.raw maxNorm
-  let _ ← nn.clip_grad_norm_ (s := params.c_proj.shape) params.c_proj.raw maxNorm
-  let _ ← nn.clip_grad_norm_ (s := params.c_proj_bias.shape) params.c_proj_bias.raw maxNorm
-  let _ ← nn.clip_grad_norm_ (s := params.ln2_weight.shape) params.ln2_weight.raw maxNorm
-  let _ ← nn.clip_grad_norm_ (s := params.ln2_bias.shape) params.ln2_bias.raw maxNorm
-  let _ ← nn.clip_grad_norm_ (s := params.mlp_fc.shape) params.mlp_fc.raw maxNorm
-  let _ ← nn.clip_grad_norm_ (s := params.mlp_fc_bias.shape) params.mlp_fc_bias.raw maxNorm
-  let _ ← nn.clip_grad_norm_ (s := params.mlp_proj.shape) params.mlp_proj.raw maxNorm
-  let _ ← nn.clip_grad_norm_ (s := params.mlp_proj_bias.shape) params.mlp_proj_bias.raw maxNorm
+  let _ ← Tensor.clipGradNorm params.ln1_weight maxNorm
+  let _ ← Tensor.clipGradNorm params.ln1_bias maxNorm
+  let _ ← Tensor.clipGradNorm params.q_proj maxNorm
+  let _ ← Tensor.clipGradNorm params.k_proj maxNorm
+  let _ ← Tensor.clipGradNorm params.v_proj maxNorm
+  let _ ← Tensor.clipGradNorm params.c_proj maxNorm
+  let _ ← Tensor.clipGradNorm params.c_proj_bias maxNorm
+  let _ ← Tensor.clipGradNorm params.ln2_weight maxNorm
+  let _ ← Tensor.clipGradNorm params.ln2_bias maxNorm
+  let _ ← Tensor.clipGradNorm params.mlp_fc maxNorm
+  let _ ← Tensor.clipGradNorm params.mlp_fc_bias maxNorm
+  let _ ← Tensor.clipGradNorm params.mlp_proj maxNorm
+  let _ ← Tensor.clipGradNorm params.mlp_proj_bias maxNorm
 
 /-- Clip gradients for all GPT parameters -/
 def clipGPTGrads {cfg : Config} (params : GPTParams cfg) (maxNorm : Float) : IO Unit := do
-  let _ ← nn.clip_grad_norm_ (s := params.wte.shape) params.wte.raw maxNorm
-  let _ ← nn.clip_grad_norm_ (s := params.wpe.shape) params.wpe.raw maxNorm
+  let _ ← Tensor.clipGradNorm params.wte maxNorm
+  let _ ← Tensor.clipGradNorm params.wpe maxNorm
   for block in params.blocks do
     clipBlockGrads block maxNorm
-  let _ ← nn.clip_grad_norm_ (s := params.ln_f_weight.shape) params.ln_f_weight.raw maxNorm
-  let _ ← nn.clip_grad_norm_ (s := params.ln_f_bias.shape) params.ln_f_bias.raw maxNorm
+  let _ ← Tensor.clipGradNorm params.ln_f_weight maxNorm
+  let _ ← Tensor.clipGradNorm params.ln_f_bias maxNorm
 
 /-- Single training step using Optax-style optimizer -/
 def trainStep {modelCfg : Config} {batch seq : UInt64}
     (trainCfg : TrainConfig)
     (params : GPTParams modelCfg)
     (optState : Optim.AdamWState (GPTParams modelCfg))
-    (x : T #[batch, seq])
-    (y : T #[batch, seq])
+    (x : Tokens #[batch, seq])
+    (y : Tokens #[batch, seq])
     (lr : Float)
     : IO (GPTParams modelCfg × Optim.AdamWState (GPTParams modelCfg) × Float) := do
   -- Zero gradients BEFORE forward/backward to prevent gradient accumulation
   let params := TensorStruct.zeroGrads params
 
   -- Forward pass: compute loss (training=true enables dropout)
-  let lossT ← gpt.lossRaw params x y true
+  let lossT ← gpt.loss params x y true
 
   -- Backward pass
-  autograd.backwardLoss lossT
+  Tensor.backwardLoss lossT
 
   -- Gradient clipping (only if gradClip > 0)
   if trainCfg.gradClip > 0 then
@@ -133,7 +116,7 @@ def trainStep {modelCfg : Config} {batch seq : UInt64}
     pure ()
 
   -- Get loss value for logging
-  let lossVal := nn.item lossT
+  let lossVal := Tensor.item lossT
 
   -- Extract gradients from parameters
   let grads := TensorStruct.grads params
@@ -151,7 +134,7 @@ def trainStepWithAccum {modelCfg : Config} {batch seq : UInt64}
     (trainCfg : TrainConfig)
     (params : GPTParams modelCfg)
     (optState : Optim.AdamWState (GPTParams modelCfg))
-    (getBatchFn : IO (T #[batch, seq] × T #[batch, seq]))
+    (getBatchFn : IO (Tokens #[batch, seq] × Tokens #[batch, seq]))
     (lr : Float)
     : IO (GPTParams modelCfg × Optim.AdamWState (GPTParams modelCfg) × Float) := do
   let accumSteps := trainCfg.gradAccumSteps
@@ -166,15 +149,15 @@ def trainStepWithAccum {modelCfg : Config} {batch seq : UInt64}
     let (x, y) ← getBatchFn
 
     -- Forward pass
-    let lossT ← gpt.lossRaw params x y true
+    let lossT ← gpt.loss params x y true
 
     -- Scale loss for averaging (backward will scale gradients accordingly)
-    let scaledLoss := mul_scalar lossT lossScale
+    let scaledLoss := lossT * lossScale
 
     -- Backward pass (gradients accumulate since we didn't zero them)
-    autograd.backwardLoss scaledLoss
+    Tensor.backwardLoss scaledLoss
 
-    totalLoss := totalLoss + nn.item lossT
+    totalLoss := totalLoss + Tensor.item lossT
 
   -- Gradient clipping after accumulation
   if trainCfg.gradClip > 0 then
@@ -199,17 +182,17 @@ def perplexity (loss : Float) : Float := Float.exp loss
     Uses no_grad context to avoid building computation graphs. -/
 def evalLoss {modelCfg : Config}
     (params : GPTParams modelCfg)
-    (valData : T #[n])
+    (valData : Tokens #[n])
     (batchSize blockSize : UInt64)
     (numBatches : Nat)
     (device : Device := Device.CPU)
-    : IO Float := autograd.no_grad do
+    : IO Float := Tensor.noGrad do
   let mut totalLoss : Float := 0.0
   for _ in [:numBatches] do
     let (x, y) ← getBatch valData batchSize blockSize device
     -- Forward pass with training=false (disables dropout)
-    let lossT ← gpt.lossRaw params x y false
-    let lossVal := nn.item lossT
+    let lossT ← gpt.loss params x y false
+    let lossVal := Tensor.item lossT
     totalLoss := totalLoss + lossVal
   return totalLoss / numBatches.toFloat
 
@@ -218,7 +201,7 @@ def trainLoop {modelCfg : Config}
     (trainCfg : TrainConfig)
     (initParams : GPTParams modelCfg)
     (initOptState : Optim.AdamWState (GPTParams modelCfg))
-    (trainData : T #[n])
+    (trainData : Tokens #[n])
     : IO (GPTParams modelCfg) := do
   let device := trainCfg.device
   -- Move model and optimizer state to device
@@ -266,8 +249,8 @@ def trainLoopWithVal {modelCfg : Config}
     (trainCfg : TrainConfig)
     (initParams : GPTParams modelCfg)
     (initOptState : Optim.AdamWState (GPTParams modelCfg))
-    (trainData : T #[nTrain])
-    (valData : T #[nVal])
+    (trainData : Tokens #[nTrain])
+    (valData : Tokens #[nVal])
     (evalBatches : Nat := 10)
     : IO (GPTParams modelCfg × Float) := do
   let device := trainCfg.device
