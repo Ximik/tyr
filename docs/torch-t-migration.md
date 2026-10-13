@@ -687,7 +687,35 @@ Both executables build under `--wfail` (956 jobs), print native `--help`, and
 exit successfully. This validates compilation and startup; downloaded-model
 inference and actual GPU execution remain unqualified. GitHub CLI reports
 green upstream main CI at `05304ff`, which does not validate these local edits.
-The Qwen3TTS end-to-end CLI still needs migration.
+The subsequent TTS CLI migration is described below.
+
+## Qwen3TTS end-to-end CLI migration
+
+The TTS CLI now uses indexed Int64 token/code tensors and shape-indexed floating
+embeddings. Variable prompt lengths carry a `Sigma` witness through optional
+speaker concatenation. Speaker embedding files must have their exact expected
+stored shape. Streaming audio callbacks unpack their sample-count witness before
+appending through the typed WAV API.
+
+The WAV begin/append/finalize declarations are audited native boundaries. Their
+obsolete IO-world arguments were removed, and append releases its owned shape
+argument. A native test verifies RIFF/data sizes, sample rate, empty chunks, and
+exact PCM16 samples across Float32 and BF16 input chunks.
+
+`scripts/check_qwen3tts_cli.py` builds tiny sharded FP32/BF16 checkpoint fixtures
+without downloads or Python ML packages. It exercises native help and twenty
+codec-generation cases covering every language/think-mode branch and ordinary
+versus true-streaming generation. This does not qualify real speech quality,
+external speaker embeddings, a downloaded speech decoder, or actual GPU use.
+
+The final strict build covers the TTS executable, focused runner, all required
+CPU executables, and aggregate examples (1,801 jobs). The rebuilt focused runner
+passes 244 tests with no failures or skips; the twenty native CLI cases pass.
+The neural and core ABI audits pass 35 and 11 declarations respectively.
+All nine required CPU suites pass: 1,468 main tests and 49 experimental tests
+with no failures/skips in those runners, plus the seven standalone Laguna CPU
+suites. CUDA-only portions remain skipped. Upstream CI is green at `05304ff`,
+which does not validate these local commits.
 
 ## Remaining acceptance criteria
 

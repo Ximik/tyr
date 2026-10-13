@@ -273,4 +273,15 @@ def loadTensorExact (σ : StaticSpec) (path : String) : IO (Tensor σ) := do
   | .ok tensor => pure tensor
   | .error message => throw (IO.userError s!"Tensor.loadTensorExact: {message}")
 
+/-- Start a mono streaming WAV file with a placeholder header. -/
+def wavBegin (path : String) (sampleRate : UInt64 := 24000) : IO Unit :=
+  RawTensor.wavBegin path sampleRate
+
+/-- Append samples, converting to CPU Float32 PCM at the native file boundary. -/
+def wavAppend {σ : StaticSpec} (input : Tensor σ) (path : String) : IO Unit :=
+  RawTensor.wavAppend σ.shape input.raw path
+
+/-- Patch the streaming WAV header to match the final sample count. -/
+def wavFinalize (path : String) : IO Unit := RawTensor.wavFinalize path
+
 end torch.Tensor

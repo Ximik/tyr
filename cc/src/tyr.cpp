@@ -3173,8 +3173,7 @@ lean_object* lean_torch_save_wav(
 // Start a streaming mono WAV file with a placeholder header.
 lean_object* lean_torch_wav_begin(
   b_lean_obj_arg path_obj,
-  uint64_t sample_rate,
-  lean_object* /*w*/
+  uint64_t sample_rate
 ) {
   const char* path = lean_string_cstr(path_obj);
   try {
@@ -3197,11 +3196,11 @@ lean_object* lean_torch_wav_begin(
 
 // Append float waveform samples to an existing streaming WAV and patch sizes.
 lean_object* lean_torch_wav_append(
-  lean_obj_arg /*shape*/,
+  lean_obj_arg shape,
   b_lean_obj_arg tensor_obj,
-  b_lean_obj_arg path_obj,
-  lean_object* /*w*/
+  b_lean_obj_arg path_obj
 ) {
+  lean_dec(shape);
   const char* path = lean_string_cstr(path_obj);
   try {
     auto tensor = borrowTensor(tensor_obj);
@@ -3265,8 +3264,7 @@ lean_object* lean_torch_wav_append(
 
 // Finalize a streaming WAV file by recomputing and patching header sizes.
 lean_object* lean_torch_wav_finalize(
-  b_lean_obj_arg path_obj,
-  lean_object* /*w*/
+  b_lean_obj_arg path_obj
 ) {
   const char* path = lean_string_cstr(path_obj);
   try {

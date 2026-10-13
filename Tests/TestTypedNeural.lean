@@ -65,3 +65,23 @@ open torch
   let expanded := Tensor.convTranspose1d z kernel (Tensor.zeros #[1]) 2
   LeanTest.assertEqual expanded.runtimeShape #[1, 1, 4]
   LeanTest.assertEqual (← expanded.toFloatArray) #[1, 2, 2, 4]
+
+@[test] def testTypedStreamingWav : IO Unit := IO.FS.withTempDir fun dir => do
+  let path := (dir / "stream.wav").toString
+  Tensor.wavBegin path 16000
+  let emit (chunk : Sigma fun n => STensor #[1, 1, n]) : IO Unit :=
+    Tensor.wavAppend chunk.2 path
+  emit ⟨3, (Tensor.fromFloatArray #[-1, 0, 1]).reshapeChecked #[1, 1, 3] |>.forgetDType⟩
+  emit ⟨0, (Tensor.zeros #[1, 1, 0]).forgetDType⟩
+  emit ⟨2, (Tensor.fromFloatArray #[0.5, -0.5]).reshapeChecked #[1, 1, 2] |>.toBFloat16 |>.forgetDType⟩
+  Tensor.wavFinalize path
+  let bytes ← IO.FS.readBinFile path
+  LeanTest.assertEqual bytes.size 54 "Five mono PCM16 samples plus the WAV header"
+  let read32 (offset : Nat) : Nat :=
+    (bytes[offset]!).toNat + 256 * (bytes[offset + 1]!).toNat +
+      65536 * (bytes[offset + 2]!).toNat + 16777216 * (bytes[offset + 3]!).toNat
+  LeanTest.assertEqual (read32 4) 46 "RIFF size reflects both chunks"
+  LeanTest.assertEqual (read32 24) 16000 "Requested sample rate survives the native ABI"
+  LeanTest.assertEqual (read32 40) 10 "Data size excludes the header"
+  LeanTest.assertEqual (bytes.extract 44 54).data #[1, 128, 0, 0, 255, 127, 0, 64, 0, 192]
+    "FP32 and BF16 chunks are converted to signed PCM16 in order"

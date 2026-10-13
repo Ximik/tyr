@@ -64,4 +64,9 @@ namespace torch.RawTensor
 @[extern "lean_torch_load_tensor_exact"] opaque loadTensorExact (shape : Shape)
     (path : @& String) : IO RawTensor
 
+@[extern "lean_torch_wav_begin"] opaque wavBegin (path : @& String) (sampleRate : UInt64) : IO Unit
+@[extern "lean_torch_wav_append"] opaque wavAppend (shape : Shape)
+    (input : @& RawTensor) (path : @& String) : IO Unit
+@[extern "lean_torch_wav_finalize"] opaque wavFinalize (path : @& String) : IO Unit
+
 end torch.RawTensor
