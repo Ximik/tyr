@@ -272,4 +272,11 @@ namespace torch.RawTensor
 /-- Elementwise logical conjunction of two Bool tensors. The shape argument is unread natively. -/
 @[extern "lean_torch_logical_and"] opaque logicalAnd (shape : Shape) (a b : @& RawTensor) : RawTensor
 
+@[extern "lean_torch_conv1d"] opaque conv1d (inputShape weightShape : Shape)
+    (input weight : @& RawTensor) (stride padding dilation : UInt64) : RawTensor
+@[extern "lean_torch_tensor_to_float_array_dynamic"] opaque toFloatArray
+    (t : @& RawTensor) : IO (Array Float)
+@[extern "lean_torch_any"] opaque any (shape : Shape) (t : @& RawTensor) : Bool
+@[extern "lean_torch_tensor_to_uint64_array_dynamic"] opaque toUInt64Array
+    (t : @& RawTensor) : IO (Array UInt64)
 end torch.RawTensor

@@ -1066,9 +1066,9 @@ lean_object* lean_torch_conv1d(
   lean_obj_arg /*weight_shape*/,
   b_lean_obj_arg input,
   b_lean_obj_arg weight,
-  int stride,
-  int padding,
-  int dilation
+  uint64_t stride,
+  uint64_t padding,
+  uint64_t dilation
 ) {
   auto input_ = borrowTensor(input);
   auto weight_ = borrowTensor(weight);
@@ -4160,9 +4160,8 @@ lean_object* lean_torch_find_bos_positions(
 
 // Convert a 1D int64 tensor to a Lean Array UInt64
 lean_object* lean_torch_tensor_to_uint64_array(
-    lean_obj_arg /*n*/,
-    b_lean_obj_arg tensor,
-    lean_object* w
+    uint64_t /*n*/,
+    b_lean_obj_arg tensor
 ) {
   try {
     auto t = borrowTensor(tensor);
@@ -4195,16 +4194,14 @@ lean_object* lean_torch_tensor_to_uint64_array(
 // Convert a dynamically-shaped int64 tensor to a Lean Array UInt64
 // (Same implementation, but without the n parameter for shape-erased tensors)
 lean_object* lean_torch_tensor_to_uint64_array_dynamic(
-    b_lean_obj_arg tensor,
-    lean_object* w
+    b_lean_obj_arg tensor
 ) {
-  return lean_torch_tensor_to_uint64_array(lean_box(0), tensor, w);
+  return lean_torch_tensor_to_uint64_array(0, tensor);
 }
 
 // Convert a dynamically-shaped float tensor to a Lean Array Float
 lean_object* lean_torch_tensor_to_float_array_dynamic(
-    b_lean_obj_arg tensor,
-    lean_object* w
+    b_lean_obj_arg tensor
 ) {
   try {
     auto t = borrowTensor(tensor);

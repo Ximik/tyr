@@ -114,6 +114,13 @@ lean_object* lean_torch_is_grad_enabled();
 lean_object* lean_torch_logical_not(lean_object*, lean_object*);
 lean_object* lean_torch_logical_and(lean_object*, lean_object*, lean_object*);
 
+lean_object* lean_torch_conv1d(lean_object*, lean_object*, lean_object*, lean_object*, uint64_t, uint64_t, uint64_t);
+lean_object* lean_torch_tensor_to_float_array_dynamic(lean_object*);
+
+uint8_t lean_torch_any(lean_object*, lean_object*);
+
+lean_object* lean_torch_tensor_to_uint64_array_dynamic(lean_object*);
+
 #ifdef __cplusplus
 }
 #endif

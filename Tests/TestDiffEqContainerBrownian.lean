@@ -59,44 +59,44 @@ private def approx (a b tol : Float) : Bool :=
     t0 := 0.0, t1 := 1.0, tol := 1.0e-3, seed := 4242
     shape := #[0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
   }
-  let mkTen : VirtualBrownianTree (T #[2, 3]) := {
+  let mkTen : VirtualBrownianTree (DTensor #[2, 3] .Float32) := {
     t0 := 0.0, t1 := 1.0, tol := 1.0e-3, seed := 4242
-    shape := torch.zeros #[2, 3]
+    shape := Tensor.zeros #[2, 3]
   }
   for (a, b) in [(0.0, 1.0), (0.1, 0.7), (0.25, 0.5)] do
     let wArr := (VirtualBrownianTree.increment mkArr a b).W
-    let wTen ← data.tensorToFloatArray' (VirtualBrownianTree.increment mkTen a b).W
+    let wTen ← Tensor.toFloatArray (VirtualBrownianTree.increment mkTen a b).W
     LeanTest.assertEqual wTen.size 6 "tensor increment should have 6 elements"
     for i in [:6] do
       LeanTest.assertTrue (approx wArr[i]! wTen[i]! 1e-6)
         s!"tensor[{i}] = {wTen[i]!} ≠ array[{i}] = {wArr[i]!} on [{a}, {b}]"
 
 @[test] def testBrownianTensorIncrementsAdditive : IO Unit := do
-  let tree : VirtualBrownianTree (T #[4]) := {
+  let tree : VirtualBrownianTree (DTensor #[4] .Float32) := {
     t0 := 0.0, t1 := 1.0, tol := 1.0e-3, seed := 99
-    shape := torch.zeros #[4]
+    shape := Tensor.zeros #[4]
   }
-  let w01 ← data.tensorToFloatArray' (VirtualBrownianTree.increment tree 0.0 1.0).W
-  let w05 ← data.tensorToFloatArray' (VirtualBrownianTree.increment tree 0.0 0.5).W
-  let w51 ← data.tensorToFloatArray' (VirtualBrownianTree.increment tree 0.5 1.0).W
+  let w01 ← Tensor.toFloatArray (VirtualBrownianTree.increment tree 0.0 1.0).W
+  let w05 ← Tensor.toFloatArray (VirtualBrownianTree.increment tree 0.0 0.5).W
+  let w51 ← Tensor.toFloatArray (VirtualBrownianTree.increment tree 0.5 1.0).W
   for i in [:4] do
     LeanTest.assertTrue (approx w01[i]! (w05[i]! + w51[i]!) 1e-5)
       s!"tensor Brownian component {i} not additive"
 
 @[test] def testBrownianTensorLevyAreasAndReplay : IO Unit := do
-  let tree : VirtualBrownianTree (T #[3]) := {
+  let tree : VirtualBrownianTree (DTensor #[3] .Float32) := {
     t0 := 0.0, t1 := 2.0, tol := 1.0e-3, seed := 7
-    shape := torch.zeros #[3]
+    shape := Tensor.zeros #[3]
   }
   -- replay determinism: identical queries give identical samples
   let i1 := VirtualBrownianTree.incrementSpaceTimeTime tree 0.3 1.4
   let i2 := VirtualBrownianTree.incrementSpaceTimeTime tree 0.3 1.4
-  let w1 ← data.tensorToFloatArray' i1.W
-  let w2 ← data.tensorToFloatArray' i2.W
-  let h1 ← data.tensorToFloatArray' i1.H
-  let h2 ← data.tensorToFloatArray' i2.H
-  let k1 ← data.tensorToFloatArray' i1.K
-  let k2 ← data.tensorToFloatArray' i2.K
+  let w1 ← Tensor.toFloatArray i1.W
+  let w2 ← Tensor.toFloatArray i2.W
+  let h1 ← Tensor.toFloatArray i1.H
+  let h2 ← Tensor.toFloatArray i2.H
+  let k1 ← Tensor.toFloatArray i1.K
+  let k2 ← Tensor.toFloatArray i2.K
   for i in [:3] do
     LeanTest.assertTrue (w1[i]! == w2[i]! && h1[i]! == h2[i]! && k1[i]! == k2[i]!)
       s!"tensor VBT replay should be deterministic (component {i})"
@@ -121,15 +121,15 @@ private def approx (a b tol : Float) : Bool :=
   -- CPU rewrite was measured 5x SLOWER (allocation-bound), so the scalable
   -- path for large noise dims is device-side counter-based sampling.
   for n in ([64, 1024] : List Nat) do
-    let tree : VirtualBrownianTree (T #[n.toUInt64]) := {
+    let tree : VirtualBrownianTree (DTensor #[n.toUInt64] .Float32) := {
       t0 := 0.0, t1 := 1.0, tol := 1.0e-4, seed := 11
-      shape := torch.zeros #[n.toUInt64]
+      shape := Tensor.zeros #[n.toUInt64]
     }
     let start ← IO.monoMsNow
     let mut acc := 0.0
     for k in [:16] do
       let inc := VirtualBrownianTree.increment tree 0.0 (0.03 + 0.06 * k.toFloat)
-      acc := acc + nn.item (nn.sumAll inc.W)
+      acc := acc + Tensor.item (Tensor.sumAll inc.W)
     let elapsed := (← IO.monoMsNow) - start
     IO.eprintln s!"  [vbt-timing] n={n}: 16 increments in {elapsed}ms (acc={acc})"
 

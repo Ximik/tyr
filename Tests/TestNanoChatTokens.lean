@@ -189,8 +189,8 @@ def testTaskTokenStreamWindowShift : IO Unit := do
   let expectedInputs := expectedWindow.extract 0 (needed - 1)
   let expectedTargets := expectedWindow.extract 1 needed
 
-  let inputFlat ← data.tensorToUInt64Array' (reshape inputs #[])
-  let targetFlat ← data.tensorToUInt64Array' (reshape targets #[])
+  let inputFlat ← Tensor.toUInt64Array inputs.toInt64
+  let targetFlat ← Tensor.toUInt64Array targets.toInt64
   LeanTest.assertEqual inputFlat expectedInputs
   LeanTest.assertEqual targetFlat expectedTargets
   LeanTest.assertEqual stream'.steps 1
@@ -219,7 +219,7 @@ def testTaskTokenStreamRankStrideCursor : IO Unit := do
   let (batch?, stream') ← stream.nextGPTBatch
   let some (inputs, _targets) := batch?
     | LeanTest.fail "Expected first rank-strided batch"
-  let inputFlat ← data.tensorToUInt64Array' (reshape inputs #[])
+  let inputFlat ← Tensor.toUInt64Array inputs.toInt64
   let gotThird := inputFlat[2]?.getD 0
 
   LeanTest.assertEqual gotThird expectedThird

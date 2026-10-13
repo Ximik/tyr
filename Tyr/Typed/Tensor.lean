@@ -82,6 +82,14 @@ def dtype {σ : StaticSpec} (_t : Tensor σ) : DType :=
 def shape {σ : StaticSpec} (_t : Tensor σ) : Shape :=
   σ.shape
 
+/-- Weaken the placement policy without changing shape, dtype or storage. -/
+def forgetDevice {σ : StaticSpec} (t : Tensor σ) : Tensor { σ with device := .any } :=
+  .assumeSpec t.raw
+
+/-- Actual native device, including for an unrestricted placement policy. -/
+def device {σ : StaticSpec} (t : Tensor σ) : Device :=
+  t.raw.device
+
 /-- Actual native shape, as distinct from the static `shape` index. -/
 def runtimeShape {σ : StaticSpec} (t : Tensor σ) : Shape :=
   t.raw.runtimeShape

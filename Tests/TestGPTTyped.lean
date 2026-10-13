@@ -40,7 +40,7 @@ private def config : Config :=
   let lossValue := nn.item (s := #[]) loss.raw
   if lossValue.isNaN || lossValue.isInf then
     throw (IO.userError "nonfinite GPT loss")
-  autograd.backwardLoss (s := #[]) loss.raw
+  Tensor.backwardLoss loss
   let opt := Optim.adamw (α := GPTParams config) (lr := 0.001)
   let (updated, _) := Optim.step opt params (TensorStruct.grads params) (opt.init params)
   let some block := updated.blocks[0]? | throw (IO.userError "missing GPT block")

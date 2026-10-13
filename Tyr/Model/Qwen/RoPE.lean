@@ -55,4 +55,11 @@ def applyRoPE {batch seq n_head head_dim max_seq : UInt64}
   -- Apply rotation
   applyRotaryEmb x cos sin
 
+/-- Pure typed frequency table used by full and cached decoding. -/
+def computeFreqsOnDevice (seq headDim : UInt64) (theta : Float := 10000.0)
+    (device : Device := .CPU) :
+    DTensor #[seq, headDim / 2] .Float32 × DTensor #[seq, headDim / 2] .Float32 :=
+  let (cos, sin) := rotary.computeFreqsOnDevicePure seq headDim theta device
+  (.assumeSpec cos, .assumeSpec sin)
+
 end torch.qwen

@@ -150,9 +150,13 @@ def LayerCache.append (lc : LayerCache batch maxSeqLen numKvHeads headDim dtype 
     (newK newV : Tensor ⟨#[batch, numKvHeads, 1, headDim], dtype, device⟩) (pos : UInt64)
     : IO (LayerCache batch maxSeqLen numKvHeads headDim dtype device) := do
   if pos >= maxSeqLen then throw <| IO.userError "KV cache append exceeds capacity"
-  -- Shapes are static in the specs; the physical device/dtype equality is
-  -- still checked at runtime so dynamically-graded specs (`Unknown`, `.any`)
-  -- keep the old failure mode.
+  -- Validate both sources and destinations before either in-place write.
+  -- Interoperability can introduce handles whose metadata violates an index.
+  for result in [lc.keys.validate, lc.values.validate, newK.validate, newV.validate] do
+    match result with
+    | .ok () => pure ()
+    | .error message => throw <| IO.userError s!"KV cache append: {message}"
+  -- Dynamic dtype/device policies also require physical equality.
   if lc.keys.raw.device != lc.values.raw.device || lc.keys.raw.dtype != lc.values.raw.dtype ||
       newK.raw.device != lc.keys.raw.device || newV.raw.device != lc.values.raw.device ||
       newK.raw.dtype != lc.keys.raw.dtype || newV.raw.dtype != lc.values.raw.dtype then
@@ -225,7 +229,7 @@ private def flashAttn4d {batch nHead nKvHead qSeq kvSeq headDim : UInt64}
 
     Rejects invalid head counts, layer indices, capacity and (at runtime, for
     dynamically-graded specs) query device/dtype mismatches before writing;
-    shapes are enforced statically by the `Tensor` specs.
+    native shapes are revalidated before either cache buffer is written.
 
     Does NOT advance `seqLens` — call `cache.incrementSeqLens` once per
     generated token after all layers have been processed for the step. -/
@@ -244,6 +248,9 @@ def Cache.attendLayer
       (if enableGqa then numQHeads % numKvHeads != 0 else numQHeads != numKvHeads) ||
       newQ.raw.device != lc.keys.raw.device || newQ.raw.dtype != lc.keys.raw.dtype then
     throw <| IO.userError "KV cache query heads, device or dtype mismatch"
+  match newQ.validate with
+  | .ok () => pure ()
+  | .error message => throw <| IO.userError s!"KV cache query: {message}"
   let cache' ← cache.appendLayer layerIdx newK newV
   let validLen := cache.currentLen + 1
   let (kView, vView) ← lc.attentionView validLen

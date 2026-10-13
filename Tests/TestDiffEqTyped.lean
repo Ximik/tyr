@@ -43,7 +43,7 @@ private abbrev YSpec : StaticSpec := { shape := #[2], dtype := .Float32 }
       match yT.validate with
       | .ok () => pure ()
       | .error err => LeanTest.fail s!"typed state failed validation after solve: {err}"
-      let vals ← data.tensorToFloatArray' yT.raw
+      let vals ← Tensor.toFloatArray yT
       LeanTest.assertEqual vals.size 2 "state keeps its shape"
       let expected := Float.exp (-1.0)
       for v in vals do
@@ -76,7 +76,7 @@ private abbrev YSpec : StaticSpec := { shape := #[2], dtype := .Float32 }
       match yT.validate with
       | .ok () => pure ()
       | .error err => LeanTest.fail s!"typed state failed validation: {err}"
-      let vals ← data.tensorToFloatArray' yT.raw
+      let vals ← Tensor.toFloatArray yT
       for v in vals do
         LeanTest.assertTrue (approx v (Float.exp (-1.0)) 1.0e-4)
           s!"adaptive y(1) expected ≈ {Float.exp (-1.0)}, got {v}"

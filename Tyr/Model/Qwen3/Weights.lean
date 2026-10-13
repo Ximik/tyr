@@ -3,7 +3,7 @@
 
   Pretrained weight loading for standalone Qwen3 causal-LM.
 -/
-import Tyr.Torch
+import Tyr.Typed
 import Tyr.Log
 import Tyr.SafeTensors.Load
 import Tyr.Model.Utils
@@ -29,7 +29,7 @@ def loadSharded (modelDir : String) (cfg : Config := Config.qwen3_4B)
   let lmHeadOpt ← tryLoadOptionalTensorSharded modelDir "lm_head.weight" #[cfg.vocab_size, cfg.hidden_size]
   let (lmHead, tieWordEmbeddings) ←
     match lmHeadOpt with
-    | some w => pure (reqGradFalse w, false)
+    | some w => pure (reqGradFalse w.toFloat32, false)
     | none => do
       log.onInfo "  lm_head.weight not found; using tied embeddings."
       pure (model.embed_tokens, true)
@@ -48,7 +48,7 @@ def load (path : String) (cfg : Config := Config.qwen3_4B)
   let lmHeadOpt ← tryLoadOptionalTensor path "lm_head.weight" #[cfg.vocab_size, cfg.hidden_size]
   let (lmHead, tieWordEmbeddings) ←
     match lmHeadOpt with
-    | some w => pure (reqGradFalse w, false)
+    | some w => pure (reqGradFalse w.toFloat32, false)
     | none => do
       log.onInfo "  lm_head.weight not found; using tied embeddings."
       pure (model.embed_tokens, true)

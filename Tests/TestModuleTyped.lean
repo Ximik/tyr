@@ -67,7 +67,7 @@ def testAffineNonSquareForwardAndGradient : IO Unit := do
     (Tensor.frobeniusNorm (Sub.sub output (Tensor.Preserving.mulScalar (Tensor.onesLike output) 23.0)) < 1e-10)
     "Affine must compute input @ weight + bias with distinct input/output dimensions"
   let loss := Tensor.sumAll output
-  autograd.backwardLoss (s := #[]) loss.raw
+  Tensor.backwardLoss loss
   let gradient : @Affine 2 3 .Float64 (.exact .CPU) := differentiable.grad a
   LeanTest.assertTrue
     (Tensor.frobeniusNorm (Sub.sub gradient.w (Tensor.Preserving.mulScalar weight 8.0)) < 1e-10)

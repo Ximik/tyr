@@ -15,7 +15,7 @@ def testIndexedTensorWidgetMetadataAndGradients : IO Unit := do
   let weight : Tensor ⟨#[2, 3], .Float64, .exact .CPU⟩ :=
     (Tensor.onesLike (Tensor.zerosFor _)).setRequiresGrad true
   let loss := Tensor.sumAll (Tensor.Preserving.mulScalar weight 3.0)
-  autograd.backwardLoss (s := #[]) loss.raw
+  Tensor.backwardLoss loss
   let props := tensorToPropsNamed weight "weight" #["out", "in"]
   LeanTest.assertEqual props.shape #[2, 3] "Widget shape"
   LeanTest.assertEqual props.dtype "Float64" "Widget dtype"

@@ -1,4 +1,4 @@
-import Tyr
+import Tyr.Typed
 import Tyr.Model.SileroVAD
 import LeanTest
 

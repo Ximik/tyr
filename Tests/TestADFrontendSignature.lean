@@ -9,7 +9,7 @@ open LeanTest
 open Tyr.AD.Frontend
 
 private def allclose {σ : StaticSpec} (lhs rhs : Tensor σ) : Bool :=
-  torch.allclose (s := σ.shape) lhs.raw rhs.raw
+  Tensor.allclose lhs rhs
 
 structure Model where
   weight : DTensor #[2, 4] .Float32

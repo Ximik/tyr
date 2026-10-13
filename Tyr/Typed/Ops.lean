@@ -783,3 +783,34 @@ resolution never runs auto-param tactics.) -/
 @[inherit_doc Tensor.divB] scoped infixl:70 " /ᵇ " => Tensor.divB
 
 end torch
+
+namespace torch.Tensor
+
+/-- One-dimensional convolution with matching input channels, dtype and device.
+The spatial result is computed using natural arithmetic and checked at the ABI
+boundary, so overflowing UInt64 arithmetic cannot claim an incorrect shape. -/
+def conv1d {batch inChannels outChannels length kernel : UInt64}
+    {d : DType} {dev : DevicePolicy}
+    (input : Tensor ⟨#[batch, inChannels, length], d, dev⟩)
+    (weight : Tensor ⟨#[outChannels, inChannels, kernel], d, dev⟩)
+    (stride : UInt64 := 1) (padding : UInt64 := 0) (dilation : UInt64 := 1) :
+    Tensor ⟨#[batch, outChannels,
+      ((length.toNat + 2 * padding.toNat - (dilation.toNat * (kernel.toNat - 1) + 1)) /
+        stride.toNat + 1).toUInt64], d, dev⟩ :=
+  match Tensor.ofRaw (RawTensor.conv1d input.shape weight.shape input.raw weight.raw
+      stride padding dilation) with
+  | .ok result => result
+  | .error message => panic! s!"Tensor.conv1d: {message}"
+
+/-- Copy tensor values to a host Float array through the native conversion. -/
+def toFloatArray {σ : StaticSpec} (t : Tensor σ) : IO (Array Float) :=
+  RawTensor.toFloatArray t.raw
+
+/-- Whether any Boolean entry is true. -/
+def any {s : Shape} {dev : DevicePolicy} (t : Tensor ⟨s, .Bool, dev⟩) : Bool :=
+  RawTensor.any s t.raw
+/-- Copy integral tensor values to host UInt64 values. -/
+def toUInt64Array {s : Shape} {dev : DevicePolicy}
+    (t : Tensor ⟨s, .Int64, dev⟩) : IO (Array UInt64) :=
+  RawTensor.toUInt64Array t.raw
+end torch.Tensor

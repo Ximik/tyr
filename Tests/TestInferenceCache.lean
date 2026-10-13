@@ -6,8 +6,8 @@ namespace Tests.InferenceCache
 open torch
 open torch.Generator.KVCache
 
-private def values {s : Shape} (t : T s) : IO (Array UInt64) :=
-  data.tensorToUInt64Array' (reshape t #[])
+private def values {σ : StaticSpec} (t : Tensor σ) : IO (Array UInt64) :=
+  Tensor.toUInt64Array t.toInt64
 
 private def layer {n b len h d : UInt64} (cache : Cache n b len h d) (i : Nat)
     : IO (LayerCache b len h d) :=
@@ -15,8 +15,8 @@ private def layer {n b len h d : UInt64} (cache : Cache n b len h d) (i : Nat)
   | some value => pure value
   | none => throw <| IO.userError "Missing test cache layer"
 
-private def token (x : Float) : T #[1, 1, 1, 2] :=
-  toBFloat16' (full #[1, 1, 1, 2] x)
+private def token (x : Float) : DTensor #[1, 1, 1, 2] .BFloat16 :=
+  (Tensor.full #[1, 1, 1, 2] x).toBFloat16
 
 private def rejected (action : IO α) (label : String) : IO Unit := do
   let failed ← try let _ ← action; pure false catch _ => pure true
@@ -49,9 +49,15 @@ private def rejected (action : IO α) (label : String) : IO Unit := do
 @[test] def testInferenceCacheRejectsInvalidWritesBeforeMutation : IO Unit := do
   rejected (Cache.init 1 1 0 1 2) "Zero capacity is rejected"
   let cache ← Cache.init 1 1 1 1 2
-  let wrongShape : T #[1, 1, 1, 2] := toBFloat16' (full #[1, 1, 1, 3] 9)
+  let wrongShape : DTensor #[1, 1, 1, 2] .BFloat16 := Tensor.assumeSpec ((Tensor.full #[1, 1, 1, 3] 9).toBFloat16.raw)
   rejected (cache.appendLayer 0 (token 3) wrongShape) "Invalid V shape is rejected before writing K"
   LeanTest.assertEqual (← values (← layer cache 0).keys) #[0, 0] "Rejected pair leaves K unchanged"
+  rejected (cache.attendLayer 0 wrongShape (token 3) (token 7))
+    "Invalid query metadata is rejected before either write"
+  LeanTest.assertEqual (← values (← layer cache 0).keys) #[0, 0]
+    "Rejected query leaves K unchanged"
+  LeanTest.assertEqual (← values (← layer cache 0).values) #[0, 0]
+    "Rejected query leaves V unchanged"
   rejected (cache.appendLayer 1 (token 3) (token 7)) "Invalid layer is rejected"
   rejected ((← layer cache 0).attentionView 2) "Views cannot exceed capacity"
   let cache ← cache.appendLayer 0 (token 3) (token 7)
@@ -64,11 +70,11 @@ private def rejected (action : IO α) (label : String) : IO Unit := do
 
 @[test] def testInferenceCacheOrderedAttentionHasNoGraph : IO Unit := do
   let cache ← Cache.init 1 1 2 1 2
-  let q := autograd.set_requires_grad (token 0) true
+  let q := Tensor.setRequiresGrad (token 0) true
   let enabled ← autograd.is_grad_enabled
   let (cache, first) ← cache.attendLayer 0 q (token 3) (token 7)
   LeanTest.assertEqual (← values first) #[7, 7] "One-token attention reads the value after both writes"
-  LeanTest.assertTrue (!autograd.has_grad_fn first) "Inference attention has no autograd graph"
+  LeanTest.assertTrue (!autograd.has_grad_fn (s := first.shape) first.raw) "Inference attention has no autograd graph"
   LeanTest.assertEqual (← autograd.is_grad_enabled) enabled "Inference restores caller grad mode"
   let cache ← cache.incrementSeqLens
   let (_, second) ← cache.attendLayer 0 q (token 5) (token 11)

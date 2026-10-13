@@ -226,6 +226,66 @@ It is an inventory aid, not the completion criterion.
   or skips. Separate experimental, model qualification and GPU suites remain
   outside this result.
 
+## 2026-10-13 continuation checkpoint
+
+This is a validated migration slice, **not completion of the migration**. The
+older full-suite pass above describes an earlier checkpoint; it is not the
+current status after the intervening model and shared-API changes.
+
+- SileroVAD weights, recurrent state, convolution, and streaming input use
+  indexed Float32 tensors. Its existing pretrained checkpoint test executed
+  against the locally available Silero checkpoint.
+- Standalone Qwen3 carries Int64 token IDs, Boolean masks, and Float32 model
+  activations. Its cached/uncached and batched EOS regressions pass. Qwen3 and
+  Qwen2.5-Omni thinker loaders explicitly convert checkpoint storage to the
+  Float32 specification already required by the shared Qwen blocks.
+- Generated SafeTensors fixtures exercise 16 combinations: Qwen3/Omni,
+  Float32/BFloat16 storage, single-file/indexed-shard loading, and tied/separate
+  LM heads. Each loaded model validates and executes a finite-logit forward.
+  This is loader coverage, not large-model numerical or GPU qualification.
+- Typed convolution computes its spatial index using natural arithmetic and
+  validates native result metadata. Numerical tests cover padding, stride,
+  and dilation; negative compilation tests reject channel and dtype mismatches.
+- The native convolution argument widths and host-array-copy signatures now
+  agree with Lean's generated C. Raw-tensor ABI validation passes for 110
+  declarations; the existing general ABI audit passes for 11 declarations.
+- Typed cache tests exposed partial mutation on malformed value handles:
+  keys were written before the value shape was rejected. Append now validates
+  both inputs and both buffers before either write. Attention validates query
+  metadata before append as well. Rejection tests verify unchanged buffers.
+- AD, gradient/widget, cache, token-stream, Brownian, and ODE/SDE adjoint
+  fixtures now consume typed APIs. Adjoint tree reduction explicitly weakens
+  the placement policy of scalar leaves while retaining shape and dtype.
+
+Reproducible focused acceptance:
+
+```sh
+lake build test_typed_models
+lake env .lake/build/bin/test_typed_models
+python3 scripts/check_ffi_abi.py --header cc/src/tyr_raw_tensor_abi.h --generated .lake/build/ir/Tyr/RawTensor.c
+python3 scripts/check_ffi_abi.py
+```
+
+The native runner passes **69 tests, zero failures or skips** on the local CPU.
+`lake build Tests Examples` still fails in these ten prerequisite targets:
+
+- `Tyr.Model.FLM`
+- `Tyr.Model.Qwen3TTS.SpeechTokenizer25HzEncoder`
+- `Tyr.Model.Qwen3TTS.SpeakerEncoder`
+- `Tyr.Model.Qwen3TTS.Talker`
+- `Tyr.Model.Qwen3TTS.SpeechTokenizer`
+- `Tyr.Model.Qwen3ASR.AudioEncoder`
+- `Tyr.Model.Qwen35.Model`
+- `Tyr.Model.KittenTTS.Model`
+- `Examples.GPT.GPTDataLoader`
+- `Examples.NanoChat.Eval.CORE`
+
+These are the currently exposed build failures, not an exhaustive inventory of
+unmigrated modules. Fixing them can expose downstream callers. `torch.T` and
+legacy bridges remain; full CPU/experimental and GPU qualification are still
+outstanding. GitHub CLI reports successful CI for older commit
+`05304ff22a1cf5f17df15eef372fc2a4bdf9f74c`; that run does not cover this branch.
+
 ## Remaining acceptance criteria
 
 Remove the `T` declaration and all model, generator, reflection, documentation,

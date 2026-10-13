@@ -133,6 +133,7 @@ import Tests.TestNanoChatTasks
 import Tests.TestNanoGPTCopy
 import Tests.TestQwen3ASR
 import Tests.TestSileroVAD
+import Tests.TestQwenTypedLoading
 import Tests.TestQwen3Model
 import Tests.TestQwen3TTS
 import Tests.TestSpeechTokenizerConfig

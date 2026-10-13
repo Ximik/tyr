@@ -11,7 +11,7 @@ open _root_.torch
     a Float32 scalar tensor, kept in the autograd graph. -/
 private def dotStruct [TensorStruct Y] (x y : Y) : DTensor #[] .Float32 :=
   let prod := TensorStruct.zipWith Mul.mul x y
-  TensorStruct.fold (fun t acc => Add.add acc (Tensor.toFloat32 (Tensor.sumAll t)))
+  TensorStruct.fold (fun t acc => Add.add acc (Tensor.toFloat32 (Tensor.sumAll t)).forgetDevice)
     (Tensor.zeros #[]) prod
 
 private def gradStruct [TensorStruct α] (loss : DTensor #[] .Float32) (x : α) : α :=

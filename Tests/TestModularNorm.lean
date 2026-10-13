@@ -212,7 +212,7 @@ def testIndexedEmbeddingLookupGradientAndNorms : IO Unit := do
   | .error message => LeanTest.fail message
   let loss := torch.Tensor.sumAll output
   LeanTest.assertEqual loss.item 24.0 "Embedding should return all six selected rows"
-  torch.autograd.backwardLoss (s := #[]) loss.raw
+  torch.Tensor.backwardLoss loss
   let gradient := weight.gradOf
   let selected := torch.Tensor.slice gradient 0 1 1
   LeanTest.assertEqual (torch.Tensor.item (torch.Tensor.sumAll selected)) 12.0

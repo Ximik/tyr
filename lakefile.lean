@@ -612,3 +612,8 @@ lean_exe RunMhaH100Seq768 where
 lean_exe RunB200Bf16Gemm where
   root := `Examples.GPU.RunB200Bf16Gemm
   supportInterpreter := true
+
+/-- Focused native acceptance path while model tensor migration is in progress. -/
+lean_exe test_typed_models where
+  root := `Tests.RunTypedModels
+  supportInterpreter := true

@@ -104,7 +104,7 @@ private def leavesAllclose (lhs rhs : Array TensorLeafValue) : Bool := Id.run do
     match l.payload, r.payload with
     | ⟨ls, lt⟩, ⟨rs, rt⟩ =>
         if ls == rs then
-          if !(allclose (s := ls.shape) lt.raw rt.raw) then
+          if !(RawTensor.allclose lt.raw rt.raw 1e-05 1e-08) then
             return false
         else
           return false
