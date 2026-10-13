@@ -13,9 +13,6 @@ REPO = Path(__file__).resolve().parents[1]
 MOCK_LAKE = r'''#!/usr/bin/env python3
 import json, os, pathlib, struct, sys, wave
 args = sys.argv[1:]
-if not args or args[0] != "-R":
-    raise SystemExit("Model wrapper must reconfigure Lake: " + repr(args))
-args = args[1:]
 if len(args) < 2 or args[0] != "env":
     raise SystemExit("Unexpected Lake command: " + repr(args))
 binary = pathlib.Path(args[1]).name

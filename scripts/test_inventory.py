@@ -73,6 +73,7 @@ def main() -> int:
     mode.add_argument("--build", action="store_true")
     mode.add_argument("--run", action="store_true")
     parser.add_argument("--report", type=Path, help="Write per-suite status, timing and logs (with --run)")
+    parser.add_argument("--wfail", action="store_true", help="Fail the build on any warning (with --build)")
     args = parser.parse_args()
     manifest = json.loads((REPO / "scripts/test_suites.json").read_text())
     errors = validate(REPO, manifest)
@@ -82,7 +83,7 @@ def main() -> int:
     targets = manifest["required"]
     print(f"Test inventory: {len(targets)} required, {len(manifest['optional'])} optional suites", flush=True)
     if args.build:
-        return subprocess.call(["lake", "-R", "build", *targets], cwd=REPO)
+        return subprocess.call(["lake", "build", *(["--wfail"] if args.wfail else []), *targets], cwd=REPO)
     if args.run:
         report = {"suites": {target: {"status": "not_run"} for target in targets}}
         if args.report:

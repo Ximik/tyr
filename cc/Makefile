@@ -62,12 +62,16 @@ RMPATH := rm -rf
 AR := ar
 CC := gcc
 CXX := c++
-NVCC ?= nvcc
-HAS_NVCC := $(shell command -v $(NVCC) >/dev/null 2>&1 && echo 1 || echo 0)
+ifneq ($(strip $(CUDA_HOME)),)
+NVCC := $(CUDA_HOME)/bin/nvcc
+HAS_NVCC := 1
 CUDA_MAJOR_VERSION := $(shell $(NVCC) --version 2>/dev/null | sed -n 's/.*release \([0-9][0-9]*\)\..*/\1/p' | head -n1)
-CUDA_HOME ?= $(patsubst %/bin/nvcc,%,$(shell command -v $(NVCC) 2>/dev/null))
-ifeq ($(strip $(CUDA_HOME)),)
-CUDA_HOME := /usr/local/cuda
+else
+HAS_NVCC := 0
+endif
+TORCH_HAS_CUDA := $(if $(wildcard $(TORCH_LIBPATH)/libtorch_cuda.so),1,0)
+ifneq ($(HAS_NVCC),$(TORCH_HAS_CUDA))
+$(error external/ has the $(if $(filter 1,$(TORCH_HAS_CUDA)),CUDA,CPU) libtorch but CUDA_HOME is $(if $(filter 1,$(HAS_NVCC)),set,unset); run deps/fetch.sh with the same CUDA_HOME)
 endif
 CUDA_INC_FLAGS :=
 ifneq ($(wildcard $(CUDA_HOME)/include/cuda_runtime.h),)
@@ -287,7 +291,7 @@ CU_SRCS := $(STATIC_CU_SRCS) $(foreach name,$(GPU_CODEGEN_CU_NAMES),$(wildcard $
 endif
 ifneq ($(HAS_NVCC),1)
 ifneq ($(strip $(CU_SRCS)),)
-$(warning NVCC not found; disabling CUDA kernel compilation and using CPU stubs)
+$(warning CUDA_HOME not set; disabling CUDA kernel compilation and using CPU stubs)
 endif
 CU_SRCS :=
 endif

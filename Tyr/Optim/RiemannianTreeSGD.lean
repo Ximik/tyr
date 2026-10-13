@@ -64,7 +64,7 @@ namespace TreeMetricFactor
 
 private def rowAt {Params : Type} {rank : UInt64}
     (K : TreeMetricFactor Params rank) (i : Fin rank.toNat) : Params :=
-  K.rows[i.val]'(by simpa [K.rows_size] using i.isLt)
+  K.rows[i.val]'(by simp [K.rows_size])
 
 def apply {Params : Type} [TensorStruct Params] {rank : UInt64}
     (K : TreeMetricFactor Params rank)
@@ -273,7 +273,7 @@ private def sampledFisherCotangentRows
   let ⟨rowsList, hRowsList⟩ ← sampleRows probeCount.toNat
   let rows := rowsList.toArray
   have hRows : rows.size = probeCount.toNat := by
-    simpa [rows, hRowsList]
+    simp [rows, hRowsList]
   pure ⟨rows, hRows⟩
 
 private def sampledFisherTreeFactor

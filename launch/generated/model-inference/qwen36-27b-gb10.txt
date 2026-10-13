@@ -1,4 +1,4 @@
-Model directory: /home/pehle/.cache/huggingface/tyr-models/Qwen__Qwen3.6-27B/main
+Model directory: ~/.cache/huggingface/tyr-models/Qwen__Qwen3.6-27B/main
 Using device: CUDA:0
 GEN_BEGIN
 Based on the principles of computer science and type theory, here is the logical deduction regarding the advantages of expressing tensor shapes in a type system, followed by the specific

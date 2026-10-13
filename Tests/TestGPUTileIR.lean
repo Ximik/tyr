@@ -171,7 +171,7 @@ private def runLeanScriptExpectingError
   IO.FS.writeFile script scriptText
   IO.Process.output {
     cmd := "lake"
-    args := #["-R", "env", "lean", toString script]
+    args := #["env", "lean", toString script]
   }
 
 @[test]
@@ -560,7 +560,7 @@ def testCutileStyleStaticAssertFailure : IO Unit := do
   IO.FS.writeFile script scriptText
   let result ← IO.Process.output {
     cmd := "lake"
-    args := #["-R", "env", "lean", toString script]
+    args := #["env", "lean", toString script]
   }
   let output := result.stdout ++ result.stderr
   assertTrue (output.containsSubstr "TileIR static assertion failed")
@@ -826,7 +826,7 @@ def testBadTypedWhereKernelElabFailure : IO Unit := do
   assertTrue (result.exitCode != 0)
     "Mismatched ct.where kernels should fail during elaboration"
   assertTrue
-    (!output.trim.isEmpty)
+    (!output.trimAscii.toString.isEmpty)
     "Mismatched ct.where failures should emit an elaboration diagnostic"
 
 end Tests.GPUTileIR

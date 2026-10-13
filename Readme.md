@@ -44,7 +44,7 @@ automatically on first `lake build`.
 ### Native dependencies
 
 Third-party libraries and sources are pinned in `deps/` and fetched into
-`external/`. This needs `curl` and `unzip`:
+`external/`. This needs `git`, `curl` and `unzip`:
 
 ```bash
 deps/fetch.sh
@@ -55,7 +55,7 @@ deps/fetch.sh
 ### Building
 
 ```bash
-# Linux: link with the system GCC (no-op on macOS); once per shell
+# Once per shell
 source ./env.sh
 
 # Build the test runner (a good first build)
@@ -108,13 +108,15 @@ All optional.
 
 | Variable | Effect |
 |---|---|
-| `LEAN_CC` | Linux: set to `scripts/lean_cc_wrapper.sh` to link with the system GCC (`source ./env.sh` does this) |
+| `LEAN_CC` | Linux: set to `lean-cc` to build and link with the system GCC (`source ./env.sh` does this) |
 | `LEAN_CC_FAST=1` | compile Lean-generated C with `-O0` for faster iteration |
-| `NVCC`, `CUDA_HOME` | CUDA compiler and toolkit; without `nvcc`, CUDA kernels are replaced by CPU stubs |
+| `CUDA_HOME` | CUDA toolkit; `env.sh` sets it from `nvcc` on `PATH` and fails if it has no `bin/nvcc`. Empty or unset: CPU build (CUDA kernels replaced by stubs) |
 | `TYR_GPU_TARGET` | GPU to build kernels for: `H100` (default), `A100`, `B200`, `B300`, `GB10` |
 | `TYR_GPU_CODEGEN_MODULE` | kernel module(s) to generate CUDA for, space-separated (default `Tyr.GPU.Kernels.MhaH100`) |
-| `TYR_SKIP_GPU_CODEGEN=1` | skip kernel generation and reuse `cc/src/generated` |
+| `TYR_SKIP_GPU_CODEGEN` | `1` skips kernel generation and reuses `cc/src/generated`; `0` forces it; unset skips it only when `nvcc` is missing |
 | `TYR_BUILD_TYRC_DYLIB=0` | build only the static `libTyrC.a` |
+| `TYR_MAKE_JOBS` | parallel jobs for the native `make` build; `source ./env.sh` sets it to the CPU count if unset (unset: serial) |
+| `SDKROOT` | macOS SDK path for linking; `source ./env.sh` sets it from `xcrun` if unset |
 | `TYR_MACOS_DEPLOYMENT_TARGET` | macOS deployment target (default `14.0`) |
 
 See [docs/ffi-and-build.md](docs/ffi-and-build.md) for finer GPU and compiler overrides.
@@ -164,8 +166,6 @@ NPROC_PER_NODE=4 ./scripts/nanochat/run_train_torchrun.sh \
 ```
 
 Notes:
-- `run_train_torchrun.sh` defaults `TORCHRUN_BIN` to `/grid/it/data/elzar/easybuild/software/Anaconda3/2023.07-2/bin/torchrun`.
-- Override launcher path with `TORCHRUN_BIN=/path/to/torchrun`.
 - Override process counts in the benchmark script with `SIZES="2 4"` (or any space-separated list).
 
 ### GPU Kernel Parity

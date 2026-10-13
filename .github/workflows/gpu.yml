@@ -1,8 +1,8 @@
-name: CUDA smoke
+name: GPU
 
-# Spark has independent cpehle/tyr and ranvier-labs/tyr runner registrations.
-# The dedicated upstream label avoids consuming old generic GPU jobs. Every
-# qualification acquires the same host-wide lock; see docs/ci-and-qualification.md.
+# Builds the CUDA kernels and runs GPU qualification on the self-hosted runner.
+# See docs/ci-and-qualification.md.
+
 on:
   push:
     branches: [main]
@@ -16,7 +16,9 @@ on:
       - 'Tyr/Model/Laguna/**'
       - 'Tests/RunLagunaModel.lean'
       - 'scripts/qualification/**'
+      - '.github/scripts/readiness.py'
       - 'env.sh'
+      - 'deps/**'
       - 'scripts/test_native_attention.sh'
       - 'scripts/gpu/**'
       - 'cc/include/**'
@@ -27,31 +29,7 @@ on:
       - 'cc/Makefile'
       - 'lakefile.lean'
       - 'lean-toolchain'
-      - '.github/workflows/cuda-smoke.yml'
-  pull_request:
-    types: [labeled, opened, synchronize, reopened]
-    paths:
-      - 'Tyr/GPU/**'
-      - 'Tyr/Torch.lean'
-      - 'Tests/*GPU*.lean'
-      - 'Examples/GPU/**'
-      - 'Examples/NanoChat/Generator/KVCache.lean'
-      - 'Tyr/Inference/**'
-      - 'Tyr/Model/Laguna/**'
-      - 'Tests/RunLagunaModel.lean'
-      - 'scripts/qualification/**'
-      - 'env.sh'
-      - 'scripts/test_native_attention.sh'
-      - 'scripts/gpu/**'
-      - 'cc/include/**'
-      - 'cc/tools/**'
-      - 'cc/src/tyr*'
-      - 'cc/src/tk_*'
-      - 'cc/src/generated/**'
-      - 'cc/Makefile'
-      - 'lakefile.lean'
-      - 'lean-toolchain'
-      - '.github/workflows/cuda-smoke.yml'
+      - '.github/workflows/gpu.yml'
   schedule:
     - cron: '23 5 * * 1'
   workflow_dispatch:
@@ -65,12 +43,36 @@ permissions:
   contents: read
 
 concurrency:
-  group: cuda-smoke-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  readiness:
-    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'gpu-ci')
+  authorize:
+    # Keep untrusted PR code off the persistent runner. This job uses no checkout.
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      contains(fromJSON('["push", "schedule", "workflow_dispatch"]'), github.event_name)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require repository write access for initiator and rerun actor
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const actors = new Set([context.actor, process.env.GITHUB_TRIGGERING_ACTOR]);
+            for (const username of actors) {
+              if (!username) {
+                throw new Error('Missing workflow actor; refusing custom runner access');
+              }
+              const { data } = await github.rest.repos.getCollaboratorPermissionLevel({
+                ...context.repo, username,
+              });
+              if (!['admin', 'maintain', 'write'].includes(data.permission)) {
+                throw new Error(`${username} needs repository write access for CUDA qualification`);
+              }
+            }
+
+  select-runner:
+    needs: authorize
     runs-on: ubuntu-latest
     outputs:
       runner_labels: ${{ steps.configuration.outputs.runner_labels }}
@@ -80,7 +82,7 @@ jobs:
         id: configuration
         env:
           TYR_QUALIFICATION_RUNNER_LABELS: ${{ vars.TYR_QUALIFICATION_RUNNER_LABELS }}
-        run: python3 scripts/qualification/readiness.py
+        run: python3 .github/scripts/readiness.py
       - name: Upload readiness evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -89,18 +91,20 @@ jobs:
           path: output/qualification/readiness.json
           retention-days: 14
 
-  gpu-smoke:
-    needs: readiness
-    runs-on: ${{ fromJSON(needs.readiness.outputs.runner_labels) }}
+  qualify:
+    needs: select-runner
+    runs-on: ${{ fromJSON(needs.select-runner.outputs.runner_labels) }}
     timeout-minutes: 180
     env:
       GPU: ${{ vars.TYR_GPU || 'GB10' }}
-      TYR_QUALIFICATION_ROOT: ${{ vars.TYR_QUALIFICATION_ROOT || '/home/pehle/tyr-qualification' }}
+      TYR_QUALIFICATION_ROOT: ${{ vars.TYR_QUALIFICATION_ROOT }}
       TYR_QUALIFICATION_BOOTSTRAP_PYTHON: ${{ vars.TYR_QUALIFICATION_BOOTSTRAP_PYTHON || 'python3.12' }}
       TYR_QUALIFY_MODELS: ${{ github.event_name == 'schedule' || inputs.real_models }}
-      CUDA_HOME: ${{ vars.TYR_CUDA_HOME || '/usr/local/cuda' }}
+      CUDA_HOME: ${{ vars.TYR_CUDA_HOME }}
     steps:
       - uses: actions/checkout@v4
+      - name: Default qualification root
+        run: echo "TYR_QUALIFICATION_ROOT=${TYR_QUALIFICATION_ROOT:-$HOME/tyr-qualification}" >> "$GITHUB_ENV"
       - name: Install pinned Lean toolchain
         run: |
           export PATH="$HOME/.elan/bin:$PATH"
@@ -112,7 +116,6 @@ jobs:
           if ! elan toolchain list | grep -Fxq "$toolchain"; then elan toolchain install "$toolchain"; fi
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
       - name: Fetch pinned dependencies (CUDA)
-        # The wheel cache lives outside the workspace, which checkout cleans.
         run: TYR_DEPS_VARIANT=cuda TYR_DEPS_CACHE="$TYR_QUALIFICATION_ROOT/wheel-cache" deps/fetch.sh
       - name: Build and run strict qualification with exclusive GPU access
         run: |

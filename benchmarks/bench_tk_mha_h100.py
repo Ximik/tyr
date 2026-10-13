@@ -20,6 +20,11 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_TK_DIR = ROOT / "external" / "git" / "ThunderKittens" / "kernels" / "attention" / "mha_h100"
 
 
+def repo_relative(path: Path) -> str:
+    resolved = path.resolve()
+    return str(resolved.relative_to(ROOT)) if resolved.is_relative_to(ROOT) else str(path)
+
+
 CASES = {
     "native_dense_128x64": (1, 1, 1, 128, 64),
     "native_dense_768x64": (1, 1, 1, 768, 64),
@@ -159,7 +164,7 @@ def main() -> int:
         "tool": "benchmarks/bench_tk_mha_h100.py",
         "device": "cuda:0",
         "timer": "cuda_event",
-        "tkDir": str(args.tk_dir),
+        "tkDir": repo_relative(args.tk_dir),
         "torchVersion": torch.__version__,
         "torchCuda": torch.version.cuda,
     })

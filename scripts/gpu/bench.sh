@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-source ./load_modules.sh
+source ./env.sh
 
 gpu_index="${BENCH_GPU_INDEX:-0}"
 idle_wait_seconds="${BENCH_IDLE_WAIT_SECONDS:-30}"
@@ -146,14 +146,14 @@ export LD_LIBRARY_PATH="$PWD/external/wheels/torch/lib:$PWD/cc/build:${LD_LIBRAR
 # archive deliberately. The normal extern-lib dependency currently has a cycle
 # through the kernel registration dynlib and can otherwise emit CUDA from the
 # previous source revision; keep this explicit sequence until that graph is cut.
-LEAN_BIN="${LEAN_BIN:-$(lake -R env lean --print-prefix)/bin/lean}"
+LEAN_BIN="${LEAN_BIN:-$(lake env lean --print-prefix)/bin/lean}"
 if [[ "${BENCH_SKIP_BUILD:-0}" == "1" ]]; then build_skipped=true; else build_skipped=false; fi
 if [[ "${BENCH_SKIP_BUILD:-0}" != "1" ]]; then
-  TYR_SKIP_GPU_CODEGEN=1 lake -R --quiet build +Tyr.GPU.Codegen.GenerateMain "$module:dynlib"
-  lake -R env "$LEAN_BIN" --run Tyr/GPU/Codegen/GenerateMain.lean "$module" --out-dir cc/src/generated
+  TYR_SKIP_GPU_CODEGEN=1 lake --quiet build +Tyr.GPU.Codegen.GenerateMain "$module:dynlib"
+  lake env "$LEAN_BIN" --run Tyr/GPU/Codegen/GenerateMain.lean "$module" --out-dir cc/src/generated
   rm -f cc/build/generated/*.o cc/build/libTyrC.a cc/build/libTyrC.so
   make -C cc -j"${TYR_GPU_BUILD_JOBS:-$(getconf _NPROCESSORS_ONLN)}" GPU="$TYR_GPU_TARGET" GPU_FAMILY="$TYR_GPU_FAMILY"
-  TYR_SKIP_GPU_CODEGEN=1 lake -R build "$exe"
+  TYR_SKIP_GPU_CODEGEN=1 lake build "$exe"
 else
   test -x "./.lake/build/bin/$exe"
   test -f "cc/src/generated/${module//./_}.cu"
@@ -180,7 +180,7 @@ gpu_name="${gpu_name# }"; gpu_name="${gpu_name% }"
 gpu_uuid="${gpu_uuid# }"; gpu_uuid="${gpu_uuid% }"
 compute_capability="${compute_capability# }"; compute_capability="${compute_capability% }"
 driver_version="${driver_version# }"; driver_version="${driver_version% }"
-cuda_compiler="$(nvcc --version | tail -n 1)"
+cuda_compiler="$("$CUDA_HOME/bin/nvcc" --version | tail -n 1)"
 resource_usage="$(cuobjdump --dump-resource-usage "$generated_object" 2>&1)"
 jq -nc \
   --arg runId "$run_id" --arg module "$module" \

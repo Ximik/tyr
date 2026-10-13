@@ -114,7 +114,7 @@ def ParseState.atEnd (s : ParseState) : Bool :=
 
 /-- Peek at current character -/
 def ParseState.peek (s : ParseState) : Option Char :=
-  if s.atEnd then none else some (s.input.get ⟨s.pos⟩)
+  if s.atEnd then none else some (String.Pos.Raw.get s.input ⟨s.pos⟩)
 
 /-- Advance by one character -/
 def ParseState.advance (s : ParseState) : ParseState :=
@@ -284,7 +284,7 @@ def formatFloat (f : Float) : String :=
     s
 
 /-- Calculator tool: evaluates safe mathematical expressions -/
-def calculatorTool : Tool String := {
+@[reducible] def calculatorTool : Tool String := {
   name := "calculator"
   canExecute := fun input =>
     isCalcSafe input && !stringContains input "**"
@@ -295,7 +295,7 @@ def calculatorTool : Tool String := {
 }
 
 /-- Lean prover tool: verifies theorem proofs -/
-def leanProverTool : Tool String := {
+@[reducible] def leanProverTool : Tool String := {
   name := "prover"
   canExecute := fun input =>
     stringContains input "theorem" ||
@@ -307,7 +307,7 @@ def leanProverTool : Tool String := {
 }
 
 /-- Lean eval tool: evaluates #eval expressions -/
-def leanEvalTool : Tool String := {
+@[reducible] def leanEvalTool : Tool String := {
   name := "eval"
   canExecute := fun input =>
     input.startsWith "#eval" || input.startsWith "#reduce"
@@ -339,7 +339,7 @@ def ToolRegistry.execute (registry : ToolRegistry) (toolName input : String)
   | none => return ExecResult.fail s!"Unknown tool: {toolName}"
 
 /-- Dispatch tool execution based on input content -/
-def ToolRegistry.dispatch (registry : ToolRegistry) (input : String)
+def ToolRegistry.dispatch (_registry : ToolRegistry) (input : String)
     : IO ExecResult := do
   -- Try each tool's canExecute in order
   if calculatorTool.canExecute input then

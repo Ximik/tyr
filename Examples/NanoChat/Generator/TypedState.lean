@@ -131,7 +131,7 @@ Invalid transitions (e.g., exiting a tool block from normal phase) are type erro
 /-- Append a token to the sequence (valid in any non-completed phase) -/
 def TypedRowState.appendToken {phase : GenerationPhase}
     (state : TypedRowState phase) (token : TokenId)
-    (h : phase ≠ .completed := by trivial)
+    (_h : phase ≠ .completed := by trivial)
     : TypedRowState phase :=
   { state with
     tokens := state.tokens.push token
@@ -327,7 +327,7 @@ mutual
   unsafe def boxNormal (state : TypedRowState .normal) : BoxedRowState := {
     ops := RowStateOps.ofTyped state
     appendTokenFn := fun tok =>
-      boxNormal (state.appendToken tok (h := by
+      boxNormal (state.appendToken tok (_h := by
         intro hEq
         cases hEq))
     enterToolBlockFn := fun tool => some (boxInToolBlock (state.enterToolBlock tool))

@@ -14,7 +14,6 @@ from prepare import ensure_file, ensure_pcm16, safe_path, verify
 from audio_fixture import TRANSFORM, pcm16_wav
 from gpu_plan import configuration as gpu_configuration
 from cuda_runtime import library_path, loader_libraries
-from readiness import configuration
 from run import validate_result, wait_for_idle_gpu
 from summarize import summarize
 
@@ -184,14 +183,6 @@ class QualificationTests(unittest.TestCase):
                 ensure_file(path, spec, "https://invalid.example/unused", False)
             with self.assertRaises(ValueError):
                 safe_path(root, "../escape")
-
-    def test_runner_association_is_explicit(self):
-        with self.assertRaises(ValueError):
-            configuration("ranvier-labs/tyr", "")
-        labels = configuration("cpehle/tyr", "")
-        self.assertIn("gb10", json.loads(labels))
-        self.assertIn("tyr-qualification", json.loads(configuration("ranvier-labs/tyr",
-            '["self-hosted", "Linux", "ARM64", "tyr-qualification", "gb10"]')))
 
     def test_final_summary_fails_missing_runtime_only_or_skipped_reports(self):
         with tempfile.TemporaryDirectory() as directory:

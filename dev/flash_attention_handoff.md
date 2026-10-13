@@ -5,7 +5,6 @@ Branch: `feat_flash_attn_runtime_bridge`
 
 ## Current State
 
-- Main worktree: `/grid/zador/home/pehle/dev/tyr`
 - Temporary worktree: `/tmp/tyr_fused_dq_wip`
 - Current long-running validation build in the main worktree:
 

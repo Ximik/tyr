@@ -381,7 +381,7 @@ def scale_fwd (x dx : Float) (n : Nat) : Float × Float :=
 -- VJP rule: only x gets a cotangent, n is static
 -- Note: returns only dx, not (dx, dn)
 @[vjp scale, static := [1]]
-def scale_bwd (x : Float) (n : Nat) (dy : Float) : Float :=
+def scale_bwd (_x : Float) (n : Nat) (dy : Float) : Float :=
   dy * n.toFloat
 
 def objKeep (x : Nat) (_tag : String) : Nat := x
@@ -436,7 +436,7 @@ def weightedAdd_fwd (x dx : Float) (weight : Nat) (y dy : Float) : Float × Floa
 
 -- VJP: returns (dx, dy), no gradient for weight
 @[vjp weightedAdd, static := [1]]
-def weightedAdd_bwd (x : Float) (weight : Nat) (y : Float) (dz : Float) : Float × Float :=
+def weightedAdd_bwd (_x : Float) (weight : Nat) (_y : Float) (dz : Float) : Float × Float :=
   (dz, dz * weight.toFloat)
 
 @[test]

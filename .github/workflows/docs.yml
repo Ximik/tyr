@@ -1,0 +1,77 @@
+name: Docs
+
+# Builds the API docs with doc-gen4 and deploys them to GitHub Pages.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Set up Lean and dependencies
+        uses: ./.github/actions/setup
+
+      - name: Create docbuild package
+        run: |
+          mkdir -p docbuild
+          cp lean-toolchain docbuild/lean-toolchain
+          ln -sfn ../external docbuild/external
+          ln -sfn ../cc docbuild/cc
+          ln -sfn ../docs docbuild/docs
+          cat > docbuild/lakefile.toml <<'EOF'
+          name = "docbuild"
+          reservoir = false
+          version = "0.1.0"
+          srcDir = "."
+          packagesDir = "../.lake/packages"
+
+          [[require]]
+          name = "tyr"
+          path = "../"
+
+          [[require]]
+          name = "doc-gen4"
+          git = "https://github.com/cpehle/doc-gen4"
+          rev = "9808750c02cc0ad0ce9d67917250ec029283745e"
+          EOF
+
+      - name: Build docs
+        run: |
+          source ./env.sh
+          cd docbuild
+          lake build Tyr:docs
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docbuild/.lake/build/doc
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

@@ -374,7 +374,7 @@ private def pairAttentionBiasFrom {batch maxLen hidden heads headDim mlp rff : U
   nn.transpose bias1 1 2
 
 private def spatialAttention {batch maxLen vocab hidden heads headDim mlp rff layers : UInt64}
-    (params : FullMoleculeTransformerParams vocab hidden heads headDim mlp rff layers)
+    (_params : FullMoleculeTransformerParams vocab hidden heads headDim mlp rff layers)
     (layer : FullMoleculeTransformerLayerParams hidden heads headDim mlp rff)
     (pairFeatures : T #[batch * maxLen * maxLen, rff * 2])
     (padmask : T #[batch, maxLen])

@@ -27,7 +27,7 @@ echo "data=$jsonl steps=$steps batch_size=$batch_size device=$device"
 # shorter follow-up sampling schedule cannot inherit stale storyboard panels.
 rm -f "${prefix}"_step_*.xyz "${prefix}"_step_*.svg
 
-lake -R exe BranchingFlowsMoleculeTrainGenerate \
+lake exe BranchingFlowsMoleculeTrainGenerate \
   --profile smoke \
   --require-data \
   --data "$jsonl" \

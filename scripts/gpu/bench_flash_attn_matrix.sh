@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-source ./load_modules.sh
+source ./env.sh
 
-export LEAN_CC="${LEAN_CC:-$PWD/scripts/lean_cc_wrapper.sh}"
 export LEAN_CC_FAST="${LEAN_CC_FAST:-1}"
 export LAKE_NUM_JOBS="${LAKE_NUM_JOBS:-1}"
 export TYR_BUILD_TYRC_DYLIB="${TYR_BUILD_TYRC_DYLIB:-0}"
@@ -90,9 +89,9 @@ if (( ! skip_build )); then
   echo "[1/3] Build benchmark executable"
   if (( ensure_native )); then
     echo "        codegen module: ${gpu_codegen_module}"
-    lake -R run buildGpuTarget -- "${gpu_codegen_module}" RunFlashAttnBench
+    lake run buildGpuTarget -- "${gpu_codegen_module}" RunFlashAttnBench
   else
-    lake -R --quiet build RunFlashAttnBench
+    lake --quiet build RunFlashAttnBench
   fi
 fi
 
@@ -108,4 +107,4 @@ if (( build_only )); then
 fi
 
 echo "[3/3] Run benchmark scaffold"
-lake -R run runBuiltTarget -- RunFlashAttnBench "${bench_args[@]}"
+lake run runBuiltTarget -- RunFlashAttnBench "${bench_args[@]}"

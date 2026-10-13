@@ -32,8 +32,8 @@
   runs a forward (truncated model ⇒ numerics are meaningless; this proves
   the loading path and reports timing).
 
-  Build: lake build -R Tests.RunLagunaParity
-  Run:   lake -R exe LagunaParityTest
+  Build: lake build Tests.RunLagunaParity
+  Run:   lake exe LagunaParityTest
 -/
 import Tyr.Torch
 import Tyr.Model.Laguna.Config

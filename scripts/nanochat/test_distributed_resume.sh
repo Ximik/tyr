@@ -5,14 +5,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 cd "${REPO_ROOT}"
 
-source ./load_modules.sh >/dev/null
+source ./env.sh
 
-export LEAN_CC="${REPO_ROOT}/scripts/lean_cc_wrapper.sh"
 export LEAN_CC_FAST="${LEAN_CC_FAST:-1}"
 export LD_LIBRARY_PATH="${REPO_ROOT}/external/wheels/torch/lib:${REPO_ROOT}/cc/build:${EBROOTGCCCORE:+${EBROOTGCCCORE}/lib64:}${LD_LIBRARY_PATH:-}"
 
-TORCHRUN_BIN="${TORCHRUN_BIN:-/grid/it/data/elzar/easybuild/software/Anaconda3/2023.07-2/bin/torchrun}"
-if [[ ! -x "${TORCHRUN_BIN}" ]]; then
+TORCHRUN_BIN="${TORCHRUN_BIN:-torchrun}"
+if ! command -v "${TORCHRUN_BIN}" >/dev/null 2>&1; then
   echo "error: torchrun launcher not found at ${TORCHRUN_BIN}" >&2
   exit 2
 fi

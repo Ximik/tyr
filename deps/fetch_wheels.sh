@@ -4,13 +4,13 @@
 #
 # Lock lines are `<platform> <variant> <sha256> <url>`. A line applies when its
 # platform matches this machine and its variant is `any` or the selected one:
-# `cuda` when nvcc is on PATH (Linux), otherwise `cpu`.
+# `cuda` when CUDA_HOME is set (Linux, see env.sh), otherwise `cpu`.
 #
 # external/wheels/.stamp records which lock lines (and which version of this
 # script) produced external/wheels; when it matches, the script does nothing.
 #
 # Usage: deps/fetch_wheels.sh [--dry-run]
-# TYR_DEPS_VARIANT=cpu|cuda overrides the nvcc-based CPU/CUDA choice.
+# TYR_DEPS_VARIANT=cpu|cuda overrides the CUDA_HOME-based CPU/CUDA choice.
 # TYR_DEPS_CACHE=<dir> keeps downloaded wheels in <dir> instead of
 # external/.cache, e.g. on a CI runner whose checkout wipes the workspace.
 set -euo pipefail
@@ -38,7 +38,7 @@ esac
 
 variant="${TYR_DEPS_VARIANT:-}"
 if [[ -z "${variant}" ]]; then
-  if [[ "${platform}" == linux-* ]] && command -v "${NVCC:-nvcc}" >/dev/null 2>&1; then
+  if [[ "${platform}" == linux-* && -n "${CUDA_HOME:-}" ]]; then
     variant=cuda
   else
     variant=cpu

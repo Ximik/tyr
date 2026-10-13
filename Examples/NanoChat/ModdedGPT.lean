@@ -76,7 +76,7 @@ def getWindowSizeForLayer (pattern : String) (layerIdx : Nat) (nLayers : Nat) (s
   else
     -- Get character for this layer (tiled)
     let charIdx := layerIdx % pattern.length
-    let c := pattern.get! ⟨charIdx⟩
+    let c := String.Pos.Raw.get! pattern ⟨charIdx⟩
     if c == 'L' || c == 'l' then
       none  -- Full context
     else if c == 'S' || c == 's' then

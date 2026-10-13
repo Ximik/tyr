@@ -31,7 +31,7 @@ mkdir -p "$run_dir"
   echo "commit=$(git rev-parse HEAD)"
   echo "branch=$(git branch --show-current)"
   nvidia-smi --query-gpu=name,driver_version,pci.bus_id --format=csv,noheader
-  nvcc --version 2>/dev/null || true
+  "$CUDA_HOME/bin/nvcc" --version 2>/dev/null || true
 } | tee "$run_dir/provenance.txt"
 
 echo

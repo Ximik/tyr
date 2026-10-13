@@ -115,7 +115,7 @@ def layoutTag : TermTree → String
 end TermTree
 
 /-- Default `TermShape` for a single (non-composite) term. -/
-def defaultSingleTermShape (τ : Type) : TermShape τ where
+@[reducible] def defaultSingleTermShape (τ : Type) : TermShape τ where
   arity? _ := some 1
   layoutTag? _ := some "single"
   tree? _ := some TermTree.single

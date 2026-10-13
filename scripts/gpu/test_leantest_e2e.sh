@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-source ./load_modules.sh
+source ./env.sh
 
-export LEAN_CC="$PWD/scripts/lean_cc_wrapper.sh"
 export LEAN_CC_FAST=1
 export TYR_GPU_VENDORED_REF_RUNNER="${TYR_GPU_VENDORED_REF_RUNNER:-$PWD/scripts/gpu/run_vendored_reference.sh}"
 export LD_LIBRARY_PATH="$PWD/external/wheels/torch/lib:$PWD/cc/build:${EBROOTGCCCORE:+${EBROOTGCCCORE}/lib64:}${LD_LIBRARY_PATH:-}"
@@ -109,17 +108,17 @@ for module in "${modules[@]}"; do
 done
 
 echo "[1/5] Build Lean kernel generator inputs"
-lake -R --quiet build "${generator_targets[@]}"
+lake --quiet build "${generator_targets[@]}"
 
 echo "[2/5] Generate CUDA translation units"
-lake -R env "$LEAN_BIN" --run Tyr/GPU/Codegen/GenerateMain.lean "${modules[@]}" --out-dir cc/src/generated
+lake env "$LEAN_BIN" --run Tyr/GPU/Codegen/GenerateMain.lean "${modules[@]}" --out-dir cc/src/generated
 
 echo "[3/5] Build C++/CUDA runtime library (GPU=${TYR_GPU_TARGET}, family=${TYR_GPU_FAMILY})"
 invalidate_generated_gpu_objects
 make -C cc -j"$(cpu_count)" GPU="${TYR_GPU_TARGET}" GPU_FAMILY="${TYR_GPU_FAMILY}"
 
 echo "[4/5] Build LeanTest GPU executable"
-lake -R --quiet build TestGPUE2E
+lake --quiet build TestGPUE2E
 
 echo "[5/5] Run LeanTest GPU suite"
-lake -R env ./.lake/build/bin/TestGPUE2E "$@"
+lake env ./.lake/build/bin/TestGPUE2E "$@"

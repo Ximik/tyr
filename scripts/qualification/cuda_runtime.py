@@ -81,7 +81,7 @@ def library_versions(paths):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--libtorch", type=Path, required=True)
-    parser.add_argument("--cuda-home", type=Path, default=Path("/usr/local/cuda"))
+    parser.add_argument("--cuda-home", type=Path, required=True)
     parser.add_argument("--previous", default="")
     args = parser.parse_args()
     print(library_path(args.libtorch, args.cuda_home, args.previous))

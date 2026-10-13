@@ -65,8 +65,8 @@ and optionally the CUDA toolkit on Linux. On Debian/Ubuntu:
 Linux x86_64, Linux aarch64 and macOS arm64.
 
 ```bash
-deps/fetch.sh                     # external/{git,wheels}/...
-source ./env.sh                   # Linux: LEAN_CC=scripts/lean_cc_wrapper.sh
+deps/fetch.sh
+source ./env.sh
 ```
 
 `deps/fetch.sh` runs two fetchers. `deps/fetch_git.sh` checks out the git
@@ -89,15 +89,16 @@ lake build test_runner      # specific executables are built on demand
 lake build TrainGPT TrainDiffusion TrainNanoChat FluxDemo
 ```
 
-GPU-related build knobs, read by `extern_lib libtyr` (`lakefile.lean:426-435`):
+GPU-related build knobs, read by `extern_lib libtyr` in `lakefile.lean`:
 
 | Variable | Default | Effect |
 |---|---|---|
 | `TYR_GPU_CODEGEN_MODULE` | `Tyr.GPU.Kernels.MhaH100` | Kernel module(s) (space-separated) to emit CUDA for |
-| `TYR_SKIP_GPU_CODEGEN` | unset | `1` skips the codegen step and reuses `cc/src/generated` |
+| `TYR_SKIP_GPU_CODEGEN` | unset (skip if no `nvcc`) | `1` skips the codegen step and reuses `cc/src/generated`; `0` forces it |
 | `TYR_BUILD_TYRC_DYLIB` | unset (on) | `0` skips building `cc/build/libTyrC.so` |
+| `TYR_MAKE_JOBS` | CPU count (set by `env.sh`) | Parallel jobs for `make -C cc lib [dylib]`; unset runs serially |
 | `TYR_GPU_TARGET` / `TYR_GPU_FAMILY` | auto | Forwarded to `make -C cc` as `GPU=` / `GPU_FAMILY=` |
-| `TYR_MACOS_SDKROOT` / `TYR_MACOS_DEPLOYMENT_TARGET` | auto / `14.0` | macOS SDK and deployment-target overrides |
+| `TYR_MACOS_SDKROOT` / `TYR_MACOS_DEPLOYMENT_TARGET` | `SDKROOT` (set by `env.sh`) / `14.0` | macOS SDK and deployment-target overrides |
 
 ## Runtime environment
 
@@ -190,10 +191,9 @@ fixtures, and run the parity check. Useful knobs:
   runner, invoked as `runner <suite-name> <fixture-dir>` after each suite;
   defaults to `scripts/gpu/run_vendored_reference.sh` when executable.
 
-These scripts source `load_modules.sh` (EasyBuild module stack: CUDA;
-overridable via `TYR_CUDA_MODULE`, `TYR_NCCL_MODULE`) and
-expect a CUDA toolchain (`nvcc`). They are cluster scripts — on a plain macOS or
-CPU-only Linux checkout, skip this section.
+These scripts source `env.sh` and need `CUDA_HOME` (which `env.sh` derives from
+`nvcc` on `PATH` when unset). On a plain macOS or CPU-only Linux checkout, skip
+this section.
 
 ## Distributed NanoChat scripts
 
@@ -214,9 +214,7 @@ NPROC_PER_NODE=4 ./scripts/nanochat/run_train_torchrun.sh \
 
 Knobs (all verified in the scripts):
 
-- `TORCHRUN_BIN` — torchrun path; the default
-  (`/grid/it/data/elzar/easybuild/software/Anaconda3/2023.07-2/bin/torchrun`) is
-  site-specific, so override it on any other host.
+- `TORCHRUN_BIN` — torchrun launcher (default: `torchrun` from `PATH`).
 - `NPROC_PER_NODE` (default 2), `SKIP_BUILD=1` (skip the `lake build
   TrainNanoChat` step), `TYR_DEVICE` (default `cuda` in these wrappers).
 - `bench_distributed.sh`: `SIZES="1 2 4"`, `RUN_ARGS`, `LOG_DIR` (default

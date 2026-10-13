@@ -8,5 +8,6 @@
 set -euo pipefail
 
 deps="$(cd "$(dirname "$0")" && pwd)"
+source "${deps}/../env.sh"
 "${deps}/fetch_git.sh"
 "${deps}/fetch_wheels.sh"

@@ -1,4 +1,7 @@
-name: CI
+name: CPU
+
+# Builds Tyr and runs the CPU test suites on Linux and macOS;
+# `tooling` tests the repo's Python and shell scripts.
 
 on:
   workflow_dispatch:
@@ -16,13 +19,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  build-and-test:
+  build-test:
     env:
-      # Main remains a clean project/dependency/native compilation gate.
       TYR_CI_CLEAN: ${{ github.event_name == 'push' || inputs.clean_build }}
     strategy:
       fail-fast: false
@@ -34,39 +36,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install elan
-        run: |
-          curl https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -sSf | sh -s -- -y --default-toolchain none
-          echo "$HOME/.elan/bin" >> $GITHUB_PATH
-
-      - name: Cache pinned Lean toolchain
-        uses: actions/cache@v4
-        with:
-          path: ~/.elan/toolchains
-          key: lean-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('lean-toolchain') }}
-
-      - name: Set up Lean toolchain
-        run: |
-          toolchain="$(cat lean-toolchain)"
-          if ! elan toolchain list | grep -Fxq "$toolchain"; then
-            elan toolchain install "$toolchain"
-          fi
-          elan default "$toolchain"
-
-      - name: Cache dependency wheels
-        uses: actions/cache@v4
-        with:
-          path: external/.cache
-          key: deps-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('deps/wheels.lock') }}
-
-      - name: Fetch pinned dependencies
-        run: deps/fetch.sh
+      - name: Set up Lean and dependencies
+        uses: ./.github/actions/setup
 
       - name: Compute binary compatibility keys
         id: cache-key
         run: |
           source ./env.sh
-          python3 scripts/ci/cache_key.py --output output/ci/cache-identity.json >> "$GITHUB_OUTPUT"
+          python3 .github/scripts/cache_key.py --output output/ci/cache-identity.json >> "$GITHUB_OUTPUT"
 
       - name: Restore compatible dependency builds
         id: dependency-cache
@@ -88,11 +65,10 @@ jobs:
           key: ${{ steps.cache-key.outputs.build }}
           restore-keys: ${{ steps.cache-key.outputs.build_prefix }}
 
-      # A cache hit never bypasses Lake/Make's dependency checks or the ABI gate.
       - name: Build required test runners
         run: |
           source ./env.sh
-          python3 scripts/test_inventory.py --build
+          python3 scripts/test_inventory.py --build --wfail
 
       - name: Verify audited FFI ABI declarations
         run: |
@@ -104,15 +80,29 @@ jobs:
           source ./env.sh
           bash scripts/test_native_attention.sh cpu
 
-      - name: Typecheck required example surfaces
+      - name: Build examples and FFI probe
         run: |
           source ./env.sh
-          lake -R build Examples BranchingFlowsMoleculeTrainGenerate mctx_bench
-          lake -R env lean Examples/NanoChat/Generator/TypedState.lean
-          lake -R env lean Examples/BranchingFlows/BranchingFlowsDemo.lean
+          lake build --wfail Examples BranchingFlowsMoleculeTrainGenerate mctx_bench ffi_crash_probe
+          lake env lean Examples/BranchingFlows/BranchingFlowsDemo.lean
 
-      # Save before tests: retrying a failed CPU suite can reuse its successful
-      # build, even when the preceding workflow's test step failed.
+      - name: Check FFI crash reporting
+        if: runner.os == 'Linux'
+        run: |
+          set +e
+          ./.lake/build/bin/ffi_crash_probe > output/ci/ffi-crash-probe.log 2>&1
+          code=$?
+          set -e
+          head -n 3 output/ci/ffi-crash-probe.log
+          if [[ "$code" -ne 134 ]]; then
+            echo "::error::expected SIGABRT (134), got exit code ${code}"
+            exit 1
+          fi
+          if ! grep -qE "\[tyr\] fatal: uncaught|terminate called after throwing an instance of 'c10::" output/ci/ffi-crash-probe.log; then
+            echo "::error::probe aborted without reporting the libtorch error"
+            exit 1
+          fi
+
       - name: Save compatible dependency builds
         if: steps.dependency-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
@@ -133,9 +123,9 @@ jobs:
       - name: Run required CPU test suites
         run: |
           source ./env.sh
-          lake -R env python3 scripts/test_inventory.py --run --report output/ci/suites.json
-          lake -R env python3 scripts/test_branching_checkpoint_resume.py
-          lake -R env ./.lake/build/bin/mctx_bench
+          lake env python3 scripts/test_inventory.py --run --report output/ci/suites.json
+          lake env python3 scripts/test_branching_checkpoint_resume.py
+          lake env ./.lake/build/bin/mctx_bench
 
       - name: Upload CPU test diagnostics
         if: always()
@@ -146,65 +136,31 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      # Real-model Qwen tests are provisioned and required in cuda-smoke.yml's
-      # scheduled/manual qualification tier, rather than silently skipped here.
-
-  lint:
+  tooling:
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Check commit subject format
-        if: github.event_name == 'pull_request'
-        run: |
-          set -euo pipefail
-          range="${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}"
-          echo "Validating commit subjects in ${range}"
-          invalid=0
-          while IFS= read -r subject; do
-            ./.githooks/check-commit-message.sh "${subject}" || invalid=1
-          done < <(git log --reverse --format=%s "${range}")
-          exit "${invalid}"
 
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
 
-      - name: Prepare tokenizer parity regression dependencies
+      - name: Install NumPy for the parity wrapper test
         run: |
           python3 -m venv "$RUNNER_TEMP/qualification-tests"
           numpy_version=$(python3 -c 'import json; print(json.load(open("scripts/qualification/fixtures.json"))["python_packages"]["numpy"])')
           "$RUNNER_TEMP/qualification-tests/bin/python" -m pip install --disable-pip-version-check "numpy==$numpy_version"
 
-      - name: Check test routing and native build dependencies
+      - name: Run tooling tests
         run: |
           python3 scripts/test_inventory.py
           python3 scripts/test_test_inventory.py
-          python3 scripts/ci/test_cache_key.py
+          python3 .github/scripts/test_cache_key.py
+          python3 .github/scripts/test_readiness.py
           python3 scripts/qualification/test_qualification.py
           python3 scripts/test_qwen3tts_asr_wrapper.py
           "$RUNNER_TEMP/qualification-tests/bin/python" scripts/test_qwen3tts_parity_wrapper.py
           python3 scripts/test_native_build.py
           python3 scripts/test_branching_checkpoint_snapshot.py
           bash scripts/nanochat/test_checkpoint_paths.sh
-
-      - name: Check for TODO/FIXME comments
-        run: |
-          echo "Checking for TODO/FIXME comments..."
-          if rg -n "(--|/-).*\\b(TODO|FIXME)\\b" Tyr/ Examples/ Tests/ -g "*.lean"; then
-            echo "Found TODO/FIXME comments in Lean sources"
-          else
-            echo "No TODO/FIXME found"
-          fi
-
-      - name: Check for sorry
-        run: |
-          echo "Checking for sorry (incomplete proofs)..."
-          if rg -n "\\bsorry\\b" Tyr/ Examples/ Tests/ -g "*.lean" -g "!Tyr/Tokenizer/SpecialTokens.lean"; then
-            echo "Found sorry in Lean sources"
-          else
-            echo "No sorry found"
-          fi

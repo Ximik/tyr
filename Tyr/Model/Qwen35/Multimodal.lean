@@ -525,11 +525,11 @@ partial def generateUncached {batch seq : UInt64}
 
     let logits ←
       match imageFeatures, videoFeatures with
-      | some ⟨ni, ifeat⟩, some ⟨nv, vfeat⟩ =>
+      | some ⟨_ni, ifeat⟩, some ⟨_nv, vfeat⟩ =>
         m.forwardWithImageAndVideoFeatures cfg cur ifeat vfeat none
-      | some ⟨ni, ifeat⟩, none =>
+      | some ⟨_ni, ifeat⟩, none =>
         m.forwardWithImageFeatures cfg cur ifeat none
-      | none, some ⟨nv, vfeat⟩ =>
+      | none, some ⟨_nv, vfeat⟩ =>
         -- Reuse image path helper for single-modality scatter by token id.
         let embeds0 : T #[batch, curSeq, cfg.text_config.hidden_size] := m.language_model.embedTokens cur
         let embeds ← scatterFeaturesIntoToken

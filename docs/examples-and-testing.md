@@ -92,7 +92,7 @@ Tests are organized in three tiers:
    (`Tests/RunDiffEqSDEOrderParity.lean`, `RunDiffEqUnderdampedOrderParity.lean`)
    which just call a `run` function.
 
-Hosted CI (`.github/workflows/ci.yml`) builds and runs the manifest in
+Hosted CI (`.github/workflows/cpu.yml`) builds and runs the manifest in
 `scripts/test_suites.json`: the main and experimental runners plus Laguna's
 config, tokenizer, NVFP4, MoE, model, reference parity, and rotary suites.
 These Laguna suites run CPU checks against tracked fixtures; their CUDA branches
@@ -105,7 +105,7 @@ regression checks save/resume counts, retained snapshots, and rejection of
 missing or mismatched optimizer state. NanoChat checkpoint tests in the main
 suite compare the next optimizer update after restoring a snapshot.
 
-GPU suites run on self-hosted hardware via `.github/workflows/cuda-smoke.yml`.
+GPU suites run on self-hosted hardware via `.github/workflows/gpu.yml`.
 That workflow sets `TYR_GPU_TEST_STRICT=1`: the linked LibTorch must have CUDA,
 the configured family must match, and the selected suite must execute tests
 with no skips. Blackwell uses `TestGPUGB10E2E`; Hopper runs `TestGPUE2E` filtered
@@ -117,7 +117,8 @@ There is also `lean_exe ffi_crash_probe` (`lakefile.lean:672`, root
 `Tests/FfiCrashProbe.lean`): a manual probe that intentionally triggers a
 libtorch CUDA error to check the process dies with an intelligible `c10::Error`
 message instead of a bare SIGABRT. It is deliberately not part of any suite;
-`.github/workflows/ffi-probe.yml` runs it on Linux for diagnostics.
+the Linux CI job runs it and fails unless it aborts (SIGABRT) with the
+libtorch error message.
 
 ### Fixtures
 

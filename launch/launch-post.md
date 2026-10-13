@@ -33,7 +33,7 @@ contracts from runtime tests and numerical comparison.
 I would be interested in talking to people working on compilers, automatic
 differentiation, hybrid systems, scientific machine learning, and GPU runtimes.
 
-Repository: https://github.com/cpehle/tyr
+Repository: https://github.com/ranvier-labs/tyr
 
 Article: [article URL]
 
@@ -49,7 +49,7 @@ practical numerical backends.
 The article contains the examples, commands, raw outputs, and present
 limitations.
 
-https://github.com/cpehle/tyr
+https://github.com/ranvier-labs/tyr
 
 ## Thread
 
@@ -57,7 +57,7 @@ https://github.com/cpehle/tyr
 machine-learning and scientific-computing system written in Lean 4.
 
 The starting question is which structural assumptions in an ML program can be
-made part of the program itself. https://github.com/cpehle/tyr
+made part of the program itself. https://github.com/ranvier-labs/tyr
 
 **2/** The small example is a tensor projection. Its batch and feature
 dimensions occur in the type. A transposed weight is rejected during Lean

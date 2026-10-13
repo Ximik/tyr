@@ -42,8 +42,8 @@
   (c) Greedy generate (bf16 MoE model): budget termination, EOS termination
       (forced EOS), stream callback count, output shapes. CPU + CUDA.
 
-  Build: lake build -R Tests.RunLagunaModel
-  Run:   lake -R exe LagunaModelTest
+  Build: lake build Tests.RunLagunaModel
+  Run:   lake exe LagunaModelTest
 -/
 import Tyr.Torch
 import Tyr.Model.Laguna.Config

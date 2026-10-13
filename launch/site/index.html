@@ -15,7 +15,7 @@
       <a href="#hybrid">Hybrid systems</a>
       <a href="#runtime">Runtime</a>
       <a href="#evidence">Evidence</a>
-      <a href="https://github.com/cpehle/tyr">Source</a>
+      <a href="https://github.com/ranvier-labs/tyr">Source</a>
     </nav>
   </header>
 
@@ -88,7 +88,7 @@
           <i>→</i>
           <div><em>4 · execution</em><b>torch::linear</b><span>LibTorch dispatches on the runtime device</span></div>
         </div>
-        <figcaption><strong>Compilation path for the projection example.</strong> Dimensions, dtype, and device policy constrain the Lean program. The accepted value still wraps the same native tensor handle, and the numerical operation is executed by LibTorch. Source: <a href="https://github.com/cpehle/tyr/blob/main/Tyr/Typed/Ops.lean">typed operation</a> and <a href="https://github.com/cpehle/tyr/blob/main/cc/src/tyr.cpp">native bridge</a>.</figcaption>
+        <figcaption><strong>Compilation path for the projection example.</strong> Dimensions, dtype, and device policy constrain the Lean program. The accepted value still wraps the same native tensor handle, and the numerical operation is executed by LibTorch. Source: <a href="https://github.com/ranvier-labs/tyr/blob/main/Tyr/Typed/Ops.lean">typed operation</a> and <a href="https://github.com/ranvier-labs/tyr/blob/main/cc/src/tyr.cpp">native bridge</a>.</figcaption>
       </figure>
 
       <section class="prose" id="hybrid">
@@ -193,7 +193,7 @@ a type system, followed by the specific …</code></pre>
         <p>Tyr is an attempt to use Lean as part of an ML system rather than only as a language in which isolated tensor identities are proved. The useful question is not whether every numerical property can be encoded in a type. It is which contracts become clearer or cheaper to enforce when the model, compiler, solver, checkpoint schema, and kernel description share one language.</p>
         <p class="related-demo">Related technical demonstration: <a href="branchingflows-water.html">a lineage-aware BranchingFlows trajectory</a>, presented as a target-conditioned mechanism trace rather than a learned sample.</p>
         <p>I am particularly interested in collaborators working on compilers, automatic differentiation, hybrid systems, scientific machine learning, and GPU runtimes.</p>
-        <p><a href="https://github.com/cpehle/tyr">Source and reproduction instructions</a></p>
+        <p><a href="https://github.com/ranvier-labs/tyr">Source and reproduction instructions</a></p>
       </section>
     </article>
   </main>
