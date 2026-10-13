@@ -823,6 +823,26 @@ CLI still reports green upstream main CI at `05304ff`, not these local changes.
 The main CPU runner passes all 1,478 tests with zero failures/skips. The test
 inventory continues to validate nine required and four optional suites.
 
+## RMSNorm and loss GPU runner migration
+
+RMSNorm now uses dtype-indexed inputs, exact fixture metadata checks, and
+indexed forward/backward references. BF16 residuals, outputs, and input
+gradients remain distinct from Float32 saved inverse RMS and weight gradients.
+The loss benchmark uses Int64 targets, Float32 cross-entropy accumulation,
+and a BF16 logits cotangent. Both runners allocate writable buffers through IO
+and expose raw handles only at native kernel launches.
+
+CPU regressions cover RMSNorm gradient cancellation, an orthogonal gradient,
+residual-gradient addition, and the analytic uniform-logit cross-entropy loss
+and gradient. RMSNorm also participates in the CUDA-unavailable runner check.
+The loss reference lives in an importable module separate from the executable
+entry point. Actual CUDA parity and performance remain unqualified.
+The main runner, both GPU test targets, and the loss executable build under
+`--wfail` (1,754 jobs). All 1,480 main CPU tests pass without failures or skips.
+The inventory validates nine required and four optional suites. The loss
+executable returns failure on this CUDA-unavailable host as expected. GitHub
+CLI reports green upstream main CI; this does not validate the local commits.
+
 ## Remaining acceptance criteria
 
 Remove the `T` declaration and all model, generator, reflection, documentation,

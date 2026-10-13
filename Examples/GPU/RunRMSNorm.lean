@@ -1,7 +1,8 @@
 /- End-to-end fused residual + RMSNorm validation. -/
 import Tyr.Torch
 import Tyr.GPU.Kernels.FusedRMSNorm
-import Examples.GPU.Parity
+import Examples.GPU.IndexedParity
+import Tyr.Typed.Neural
 import Examples.GPU.FixtureRunner
 import Examples.GPU.Benchmark
 
@@ -25,102 +26,93 @@ def fixtureSpec : FixtureSpec := {
 def fixtureFile (name : String) : System.FilePath :=
   Examples.GPU.fixturePath fixtureSpec name
 
-private abbrev RMSNormInput := T #[1, seqLen, hiddenDim]
-private abbrev RMSNormWeight := T #[hiddenDim]
+abbrev RMSNormInput (dtype : DType) := DTensor #[1, 64, 1024] dtype
+abbrev RMSNormWeight (dtype : DType) := DTensor #[1024] dtype
 
-private structure RMSNormInputs where
-  x : RMSNormInput
-  residual : RMSNormInput
-  weight : RMSNormWeight
+structure RMSNormInputs (dtype : DType) where
+  x : RMSNormInput dtype
+  residual : RMSNormInput dtype
+  weight : RMSNormWeight dtype
 
-private def rmsNormReference
-    (inputs : RMSNormInputs)
-    : RMSNormInput × RMSNormInput :=
+def rmsNormReference
+    (inputs : RMSNormInputs .Float32)
+    : RMSNormInput .Float32 × RMSNormInput .Float32 :=
+  let eps := rmsNormEps
   let expectedResid := inputs.x + inputs.residual
-  let expectedOut := torch.nn.rmsNormWeighted expectedResid inputs.weight rmsNormEps
+  let expectedOut := Tensor.rmsNormWeighted expectedResid inputs.weight eps
   (expectedOut, expectedResid)
 
-private def rmsNormReferenceBFloat16
-    (inputs : RMSNormInputs)
-    : RMSNormInput × RMSNormInput :=
+def rmsNormReferenceBFloat16
+    (inputs : RMSNormInputs .BFloat16)
+    : RMSNormInput .BFloat16 × RMSNormInput .BFloat16 :=
+  let eps := rmsNormEps
   let expectedResid := inputs.x + inputs.residual
-  let expectedOut32 : RMSNormInput :=
-    torch.nn.rmsNormWeighted
-      (torch.toFloat' expectedResid)
-      (torch.toFloat' inputs.weight)
-      rmsNormEps
-  let expectedOut := torch.toBFloat16' expectedOut32
+  let expectedOut32 : RMSNormInput .Float32 :=
+    Tensor.rmsNormWeighted
+      (expectedResid.toFloat32)
+      (inputs.weight.toFloat32)
+      eps
+  let expectedOut := expectedOut32.toBFloat16
   (expectedOut, expectedResid)
 
-private def asBFloat16Inputs (inputs : RMSNormInputs) : RMSNormInputs := {
-  x := torch.toBFloat16' inputs.x
-  residual := torch.toBFloat16' inputs.residual
-  weight := torch.toBFloat16' inputs.weight
+def asBFloat16Inputs (inputs : RMSNormInputs .Float32) : RMSNormInputs .BFloat16 := {
+  x := inputs.x.toBFloat16
+  residual := inputs.residual.toBFloat16
+  weight := inputs.weight.toBFloat16
 }
 
-private def inputDType? (inputs : RMSNormInputs) : Except String DType := do
-  let dtype := inputs.x.dtype
-  if inputs.residual.dtype != dtype then
-    throw s!"residual dtype {inputs.residual.dtype} does not match x dtype {dtype}"
-  if inputs.weight.dtype != dtype then
-    throw s!"weight dtype {inputs.weight.dtype} does not match x dtype {dtype}"
-  pure dtype
-
-private def logInputDTypes (label : String) (inputs : RMSNormInputs) : IO Unit := do
+private def logInputDTypes {dtype : DType} (label : String) (inputs : RMSNormInputs dtype) : IO Unit := do
   IO.println <|
     s!"[{suiteName}:{label}] input_dtypes x={inputs.x.dtype} residual={inputs.residual.dtype} " ++
     s!"weight={inputs.weight.dtype}"
 
-private def compareResults
+private def compareResults {dtype : DType}
     (mode : String)
-    (expectedOut : RMSNormInput)
-    (expectedResid : RMSNormInput)
-    (out : RMSNormInput)
-    (outResid : RMSNormInput)
+    (expectedOut : RMSNormInput dtype)
+    (expectedResid : RMSNormInput dtype)
+    (out : RMSNormInput dtype)
+    (outResid : RMSNormInput dtype)
     (rtol atol : Float)
     : IO Bool := do
-  let outCheck := compareTensors s!"rmsnorm.{mode}.output" (torch.toFloat' expectedOut) (torch.toFloat' out) rtol atol
-  let residCheck := compareTensors s!"rmsnorm.{mode}.residual" (torch.toFloat' expectedResid) (torch.toFloat' outResid) rtol atol
+  let outCheck := IndexedParity.compareTensors s!"rmsnorm.{mode}.output" (expectedOut.toFloat32) (out.toFloat32) rtol atol
+  let residCheck := IndexedParity.compareTensors s!"rmsnorm.{mode}.residual" (expectedResid.toFloat32) (outResid.toFloat32) rtol atol
   logTensorCheck outCheck
   logTensorCheck residCheck
   pure (outCheck.ok && residCheck.ok)
 
-private def runInputs (label : String) (inputs : RMSNormInputs) : IO Bool := do
+private def runInputs {dtype : DType} (label : String) (inputs : RMSNormInputs dtype) : IO Bool := do
   logInputDTypes label inputs
   let stream ← torch.cuda_current_stream
   let blackwell ← isBlackwellFamily
-  match inputDType? inputs with
-  | .error msg =>
-      IO.eprintln s!"[{suiteName}:{label}] unsupported_dtype_mix error={msg}"
-      pure false
-  | .ok .Float32 => do
+  match dtype, inputs with
+  | .Float32, inputs => do
       let (expectedOut, expectedResid) := rmsNormReference inputs
-      let out := torch.zeros_like inputs.x
-      let outResid := torch.zeros_like inputs.residual
+      let out ← Tensor.uniformLike inputs.x 0 0
+      let outResid ← Tensor.uniformLike inputs.residual 0 0
       fusedRMSNormResidual64x1024F32Direct.launch
-        inputs.x inputs.residual inputs.weight out outResid
+        inputs.x.raw inputs.residual.raw inputs.weight.raw out.raw outResid.raw
         64 1 1 256 1 1 0 stream
-      let _ ← torch.cuda_synchronize
+      torch.cuda_synchronize
       compareResults (if blackwell then "blackwell.f32" else "f32") expectedOut expectedResid out outResid 5e-3 5e-3
-  | .ok .BFloat16 => do
+  | .BFloat16, inputs => do
       let (expectedOut, expectedResid) := rmsNormReferenceBFloat16 inputs
-      let out := torch.zeros_like inputs.x
-      let outResid := torch.zeros_like inputs.residual
+      let out ← Tensor.uniformLike inputs.x 0 0
+      let outResid ← Tensor.uniformLike inputs.residual 0 0
       fusedRMSNormResidual64x1024Bf16Direct.launch
-        inputs.x inputs.residual inputs.weight out outResid
+        inputs.x.raw inputs.residual.raw inputs.weight.raw out.raw outResid.raw
         64 1 1 256 1 1 0 stream
-      let _ ← torch.cuda_synchronize
+      torch.cuda_synchronize
       compareResults (if blackwell then "blackwell.bf16" else "bf16") expectedOut expectedResid out outResid 2e-2 2e-2
-  | .ok dtype =>
+  | dtype, _ =>
       IO.eprintln s!"[{suiteName}:{label}] unsupported_dtype dtype={dtype}"
       pure false
 
-private def randomInputs (dtype : DType) : IO RMSNormInputs := do
+private def randomInputs (dtype : DType) : IO (RMSNormInputs dtype) := do
   let device := Device.CUDA 0
-  let base : RMSNormInputs := {
-    x := ← torch.rand #[1, seqLen, hiddenDim] false device
-    residual := ← torch.rand #[1, seqLen, hiddenDim] false device
-    weight := ← torch.rand #[hiddenDim] false device
+  let base : RMSNormInputs .Float32 := {
+    x := ← Tensor.uniformLike (Tensor.zeros #[1, 64, 1024] false device)
+    residual := ← Tensor.uniformLike (Tensor.zeros #[1, 64, 1024] false device)
+    weight := ← Tensor.uniformLike (Tensor.zeros #[1024] false device)
   }
   match dtype with
   | .Float32 => pure base
@@ -136,14 +128,14 @@ def generateFixtures : IO Unit := do
   let vendoredInputs := asBFloat16Inputs inputs
   let (expectedOut, expectedResid) := rmsNormReferenceBFloat16 vendoredInputs
 
-  torch.data.saveTensor inputs.x (fixtureFile "x").toString
-  torch.data.saveTensor inputs.residual (fixtureFile "residual").toString
-  torch.data.saveTensor inputs.weight (fixtureFile "weight").toString
-  torch.data.saveTensor expectedOut (fixtureFile "expected_out").toString
-  torch.data.saveTensor expectedResid (fixtureFile "expected_resid").toString
+  Tensor.saveTensor inputs.x (fixtureFile "x").toString
+  Tensor.saveTensor inputs.residual (fixtureFile "residual").toString
+  Tensor.saveTensor inputs.weight (fixtureFile "weight").toString
+  Tensor.saveTensor expectedOut (fixtureFile "expected_out").toString
+  Tensor.saveTensor expectedResid (fixtureFile "expected_resid").toString
 
-  let outMean := torch.nn.item (torch.nn.meanAll expectedOut)
-  let residMean := torch.nn.item (torch.nn.meanAll expectedResid)
+  let outMean := Tensor.item (Tensor.meanAll expectedOut)
+  let residMean := Tensor.item (Tensor.meanAll expectedResid)
   IO.println <|
     s!"Generated rmsnorm fixtures in {fixtureSpec.dir} " ++
     s!"input_dtype={inputs.x.dtype} ref_dtype={vendoredInputs.x.dtype} " ++
@@ -168,10 +160,13 @@ def runOnce : IO Bool := do
   if !(← fixturesPresent fixtureSpec) then
     generateFixtures
 
-  let inputs : RMSNormInputs := {
-    x := ← torch.data.loadTensor #[1, seqLen, hiddenDim] (fixtureFile "x").toString
-    residual := ← torch.data.loadTensor #[1, seqLen, hiddenDim] (fixtureFile "residual").toString
-    weight := ← torch.data.loadTensor #[hiddenDim] (fixtureFile "weight").toString
+  let x ← Tensor.loadTensorExact { shape := #[1, 64, 1024], dtype := .Unknown "dynamic" }
+    (fixtureFile "x").toString
+  let dtype := x.actualSpec.dtype
+  let inputs : RMSNormInputs dtype := {
+    x := x.castDType dtype
+    residual := ← Tensor.loadTensorExact { shape := #[1, 64, 1024], dtype } (fixtureFile "residual").toString
+    weight := ← Tensor.loadTensorExact { shape := #[1024], dtype } (fixtureFile "weight").toString
   }
   runInputs "fixtures" inputs
 
@@ -180,13 +175,14 @@ private def benchmarkFloat32 (cfg : Benchmark.Config) (stream : UInt64)
     (_blackwell : Bool) : IO (String × Bool) := do
   let inputs ← randomInputs .Float32
   let (expectedOut, expectedResid) := rmsNormReference inputs
-  let out := torch.zeros_like inputs.x
-  let outResid := torch.zeros_like inputs.residual
+  let out ← Tensor.uniformLike inputs.x 0 0
+  let outResid ← Tensor.uniformLike inputs.residual 0 0
   let launch := do
     fusedRMSNormResidual64x1024F32Direct.launch
-      inputs.x inputs.residual inputs.weight out outResid
+      inputs.x.raw inputs.residual.raw inputs.weight.raw out.raw outResid.raw
       64 1 1 256 1 1 0 stream
-  launch; torch.cuda_synchronize
+  launch
+  torch.cuda_synchronize
   let correct ← compareResults "bench.f32" expectedOut expectedResid out outResid 5e-3 5e-3
   let samples ← Benchmark.timeCudaEvents cfg stream launch
   let route := "generated_direct_row_cta_256x4"
@@ -196,17 +192,19 @@ private def benchmarkBFloat16 (cfg : Benchmark.Config) (stream : UInt64)
     (_blackwell : Bool) : IO (String × Bool) := do
   let inputs ← randomInputs .BFloat16
   let (expectedOut, expectedResid) := rmsNormReferenceBFloat16 inputs
-  let out := torch.zeros_like inputs.x
-  let outResid := torch.zeros_like inputs.residual
+  let out ← Tensor.uniformLike inputs.x 0 0
+  let outResid ← Tensor.uniformLike inputs.residual 0 0
   let launch := do
     fusedRMSNormResidual64x1024Bf16Direct.launch
-      inputs.x inputs.residual inputs.weight out outResid
+      inputs.x.raw inputs.residual.raw inputs.weight.raw out.raw outResid.raw
       64 1 1 256 1 1 0 stream
-  launch; torch.cuda_synchronize
+  launch
+  torch.cuda_synchronize
   let correct ← compareResults "bench.bf16" expectedOut expectedResid out outResid 2e-2 2e-2
   let samples ← Benchmark.timeCudaEvents cfg stream launch
   let route := "generated_direct_row_cta_256x4"
   pure (Benchmark.summaryJson cfg "rmsnorm_residual_bf16_64x1024" "tyr" route samples correct, correct)
+
 
 private inductive RMSNormBenchPayload where
   | micro
@@ -233,64 +231,74 @@ private def rmsNormMatrix : LeanBenchmark.Matrix RMSNormBenchPayload := {
   ]
 }
 
+/-- BF16 residual/output/input-gradient reference with Float32 saved inverse RMS and weight gradient. -/
+def referenceTraining {rows : UInt64}
+    (x residual : DTensor #[rows, hiddenDim] .BFloat16)
+    (weight : DTensor #[hiddenDim] .BFloat16)
+    (gradOut gradOutResid : DTensor #[rows, hiddenDim] .BFloat16) := Id.run do
+  let expectedResid : DTensor #[rows, hiddenDim] .BFloat16 := x + residual
+  let residF : DTensor #[rows, hiddenDim] .Float32 := expectedResid.toFloat32
+  let weightF : DTensor #[hiddenDim] .Float32 := weight.toFloat32
+  let gradOutF : DTensor #[rows, hiddenDim] .Float32 := gradOut.toFloat32
+  let gradOutResidF : DTensor #[rows, hiddenDim] .Float32 := gradOutResid.toFloat32
+  let inv2d : DTensor #[rows, 1] .Float32 :=
+    Tensor.rsqrt (Tensor.Preserving.meanDim (residF * residF) 1 true + rmsNormEps)
+  let expectedInv : DTensor #[rows] .Float32 := Tensor.reshapeChecked inv2d #[rows]
+  let invFull : DTensor #[rows, hiddenDim] .Float32 := Tensor.expand inv2d #[rows, hiddenDim]
+  let weight2d : DTensor #[1, hiddenDim] .Float32 := Tensor.reshapeChecked weightF #[1, hiddenDim]
+  let weightFull : DTensor #[rows, hiddenDim] .Float32 :=
+    Tensor.expand weight2d #[rows, hiddenDim]
+  let normalized : DTensor #[rows, hiddenDim] .Float32 := residF * invFull
+  let expectedOut : DTensor #[rows, hiddenDim] .BFloat16 :=
+    (normalized * weightFull).toBFloat16
+  let weightedGrad : DTensor #[rows, hiddenDim] .Float32 := gradOutF * weightFull
+  let dot : DTensor #[rows, 1] .Float32 :=
+    Tensor.sumDim (weightedGrad * residF) 1 true
+  let correction : DTensor #[rows, 1] .Float32 :=
+    Tensor.Preserving.mulScalar (dot * inv2d * inv2d * inv2d) 0.0009765625
+  let correctionFull : DTensor #[rows, hiddenDim] .Float32 :=
+    Tensor.expand correction #[rows, hiddenDim]
+  let expectedGradInput : DTensor #[rows, hiddenDim] .BFloat16 :=
+    (weightedGrad * invFull - residF * correctionFull + gradOutResidF).toBFloat16
+  let expectedGradWeight : DTensor #[hiddenDim] .Float32 :=
+    (Tensor.sumDim (gradOutF * normalized) 0 false).reshapeChecked #[hiddenDim]
+
+  return (expectedOut, expectedResid, expectedInv, expectedGradInput, expectedGradWeight)
+
 private def benchmarkTrainingShape (cfg : Benchmark.Config) (stream : UInt64)
     (caseLabel : String) (rows : UInt64) : IO (Array String × Bool) := do
   let device := Device.CUDA 0
-  let x : T #[rows, hiddenDim] :=
-    torch.toBFloat16' (← torch.randn #[rows, hiddenDim] false device)
-  let residual : T #[rows, hiddenDim] :=
-    torch.toBFloat16' (← torch.randn #[rows, hiddenDim] false device)
-  let weight : T #[hiddenDim] :=
-    torch.toBFloat16' (← torch.randn #[hiddenDim] false device)
-  let gradOut : T #[rows, hiddenDim] :=
-    torch.toBFloat16' (← torch.randn #[rows, hiddenDim] false device)
-  let gradOutResid : T #[rows, hiddenDim] :=
-    torch.toBFloat16' (← torch.randn #[rows, hiddenDim] false device)
+  let x : DTensor #[rows, hiddenDim] .BFloat16 :=
+    (← Tensor.randn #[rows, hiddenDim] false device).toBFloat16
+  let residual : DTensor #[rows, hiddenDim] .BFloat16 :=
+    (← Tensor.randn #[rows, hiddenDim] false device).toBFloat16
+  let weight : DTensor #[hiddenDim] .BFloat16 :=
+    (← Tensor.randn #[hiddenDim] false device).toBFloat16
+  let gradOut : DTensor #[rows, hiddenDim] .BFloat16 :=
+    (← Tensor.randn #[rows, hiddenDim] false device).toBFloat16
+  let gradOutResid : DTensor #[rows, hiddenDim] .BFloat16 :=
+    (← Tensor.randn #[rows, hiddenDim] false device).toBFloat16
 
-  let expectedResid : T #[rows, hiddenDim] := x + residual
-  let residF : T #[rows, hiddenDim] := torch.toFloat' expectedResid
-  let weightF : T #[hiddenDim] := torch.toFloat' weight
-  let gradOutF : T #[rows, hiddenDim] := torch.toFloat' gradOut
-  let gradOutResidF : T #[rows, hiddenDim] := torch.toFloat' gradOutResid
-  let inv2d : T #[rows, 1] :=
-    torch.rsqrt (torch.nn.meanDim (residF * residF) 1 true + rmsNormEps)
-  let expectedInv : T #[rows] := torch.reshape inv2d #[rows]
-  let invFull : T #[rows, hiddenDim] := torch.nn.expand inv2d #[rows, hiddenDim]
-  let weight2d : T #[1, hiddenDim] := torch.reshape weightF #[1, hiddenDim]
-  let weightFull : T #[rows, hiddenDim] :=
-    torch.nn.expand weight2d #[rows, hiddenDim]
-  let normalized : T #[rows, hiddenDim] := residF * invFull
-  let expectedOut : T #[rows, hiddenDim] :=
-    torch.toBFloat16' (normalized * weightFull)
-  let weightedGrad : T #[rows, hiddenDim] := gradOutF * weightFull
-  let dot : T #[rows, 1] :=
-    torch.nn.sumDim (weightedGrad * residF) 1 true
-  let correction : T #[rows, 1] :=
-    torch.mul_scalar (dot * inv2d * inv2d * inv2d) 0.0009765625
-  let correctionFull : T #[rows, hiddenDim] :=
-    torch.nn.expand correction #[rows, hiddenDim]
-  let expectedGradInput : T #[rows, hiddenDim] :=
-    torch.toBFloat16' (weightedGrad * invFull - residF * correctionFull + gradOutResidF)
-  let expectedGradWeight : T #[hiddenDim] :=
-    torch.nn.sumDim (gradOutF * normalized) 0 false
+  let (expectedOut, expectedResid, expectedInv, expectedGradInput, expectedGradWeight) :=
+    referenceTraining x residual weight gradOut gradOutResid
 
-  let out := torch.zeros_like x
-  let outResid := torch.zeros_like residual
-  let invRms : T #[rows] := torch.zeros #[rows] false device
-  let gradInput := torch.zeros_like x
-  let gradWeight : T #[hiddenDim] := torch.zeros #[hiddenDim] false device
+  let out ← Tensor.uniformLike x 0 0
+  let outResid ← Tensor.uniformLike residual 0 0
+  let invRms ← Tensor.uniformLike (Tensor.zeros #[rows] false device) 0 0
+  let gradInput ← Tensor.uniformLike x 0 0
+  let gradWeight ← Tensor.uniformLike (Tensor.zeros #[hiddenDim] false device) 0 0
 
   let launchForward : IO Unit :=
     fusedRMSNormResidualRows1024Bf16TrainFwd.launch
-      x residual weight out outResid invRms rows
+      x.raw residual.raw weight.raw out.raw outResid.raw invRms.raw rows
       rows 1 1 256 1 1 0 stream
   let launchBwdInput : IO Unit :=
     fusedRMSNormResidualRows1024Bf16BwdInput.launch
-      gradOut gradOutResid outResid weight invRms gradInput rows
+      gradOut.raw gradOutResid.raw outResid.raw weight.raw invRms.raw gradInput.raw rows
       rows 1 1 256 1 1 0 stream
   let launchBwdWeight : IO Unit :=
     fusedRMSNormResidualRows1024Bf16BwdWeight.launch
-      gradOut outResid invRms gradWeight rows
+      gradOut.raw outResid.raw invRms.raw gradWeight.raw rows
       4 1 1 256 1 1 0 stream
   let launchTraining : IO Unit := do
     launchForward
@@ -299,11 +307,11 @@ private def benchmarkTrainingShape (cfg : Benchmark.Config) (stream : UInt64)
 
   launchTraining
   torch.cuda_synchronize
-  let outCheck := compareTensors s!"rmsnorm.{caseLabel}.out" expectedOut out 3e-2 3e-2
-  let residCheck := compareTensors s!"rmsnorm.{caseLabel}.resid" expectedResid outResid 0.0 0.0
-  let invCheck := compareTensors s!"rmsnorm.{caseLabel}.inv" expectedInv invRms 2e-4 2e-4
-  let dxCheck := compareTensors s!"rmsnorm.{caseLabel}.dx" expectedGradInput gradInput 3e-2 3e-2
-  let dwCheck := compareTensors s!"rmsnorm.{caseLabel}.dw" expectedGradWeight gradWeight 3e-3 0.25
+  let outCheck := IndexedParity.compareTensors s!"rmsnorm.{caseLabel}.out" expectedOut out 3e-2 3e-2
+  let residCheck := IndexedParity.compareTensors s!"rmsnorm.{caseLabel}.resid" expectedResid outResid 0.0 0.0
+  let invCheck := IndexedParity.compareTensors s!"rmsnorm.{caseLabel}.inv" expectedInv invRms 2e-4 2e-4
+  let dxCheck := IndexedParity.compareTensors s!"rmsnorm.{caseLabel}.dx" expectedGradInput gradInput 3e-2 3e-2
+  let dwCheck := IndexedParity.compareTensors s!"rmsnorm.{caseLabel}.dw" expectedGradWeight gradWeight 3e-3 0.25
   for check in #[outCheck, residCheck, invCheck, dxCheck, dwCheck] do
     logTensorCheck check
 
@@ -312,11 +320,11 @@ private def benchmarkTrainingShape (cfg : Benchmark.Config) (stream : UInt64)
   let dwSamples ← Benchmark.timeCudaEvents cfg stream launchBwdWeight
   let trainingSamples ← Benchmark.timeCudaEvents cfg stream launchTraining
 
-  let postOut := compareTensors s!"rmsnorm.{caseLabel}.out.post" expectedOut out 3e-2 3e-2
-  let postResid := compareTensors s!"rmsnorm.{caseLabel}.resid.post" expectedResid outResid 0.0 0.0
-  let postInv := compareTensors s!"rmsnorm.{caseLabel}.inv.post" expectedInv invRms 2e-4 2e-4
-  let postDx := compareTensors s!"rmsnorm.{caseLabel}.dx.post" expectedGradInput gradInput 3e-2 3e-2
-  let postDw := compareTensors s!"rmsnorm.{caseLabel}.dw.post" expectedGradWeight gradWeight 3e-3 0.25
+  let postOut := IndexedParity.compareTensors s!"rmsnorm.{caseLabel}.out.post" expectedOut out 3e-2 3e-2
+  let postResid := IndexedParity.compareTensors s!"rmsnorm.{caseLabel}.resid.post" expectedResid outResid 0.0 0.0
+  let postInv := IndexedParity.compareTensors s!"rmsnorm.{caseLabel}.inv.post" expectedInv invRms 2e-4 2e-4
+  let postDx := IndexedParity.compareTensors s!"rmsnorm.{caseLabel}.dx.post" expectedGradInput gradInput 3e-2 3e-2
+  let postDw := IndexedParity.compareTensors s!"rmsnorm.{caseLabel}.dw.post" expectedGradWeight gradWeight 3e-3 0.25
   for check in #[postOut, postResid, postInv, postDx, postDw] do
     logTensorCheck check
 
