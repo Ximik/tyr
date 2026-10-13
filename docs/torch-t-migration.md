@@ -800,6 +800,29 @@ failures/skips, including the new indexed metric and CUDA-unavailable checks.
 The test inventory still validates all nine required and four optional suites.
 No CUDA numerical run was performed on this host.
 
+## Rotary and LayerNorm GPU runner migration
+
+The rotary runner now keeps Float32 fixture tables and explicit BF16 training
+inputs through forward/adjoint references, metrics, and launch boundaries.
+Query and key head counts remain separate shape indices. Its fixture loader
+requires the exact stored Float32 shapes.
+
+LayerNorm inputs are parameterized by one dtype shared by activation, residual,
+weight, and bias. Mixed-dtype construction is rejected at compile time; fixture
+loading validates exact shapes and dtype agreement. Float32 and BF16 dispatch
+branches use corresponding typed references. Mutable output buffers are
+allocated through IO rather than pure factories.
+
+Both runners use indexed parity metrics and expose raw handles only at their
+native launch calls. CPU regressions exercise analytic normalization values,
+BF16 residual/output metadata, and forward/adjoint quarter-turn rotations with
+unequal query/key head counts. CUDA-unavailable checks cover these runners too.
+The main runner and both GPU test targets build under `--wfail` (1,749 jobs).
+Actual CUDA kernel parity and benchmark timings remain unqualified. The GitHub
+CLI still reports green upstream main CI at `05304ff`, not these local changes.
+The main CPU runner passes all 1,478 tests with zero failures/skips. The test
+inventory continues to validate nine required and four optional suites.
+
 ## Remaining acceptance criteria
 
 Remove the `T` declaration and all model, generator, reflection, documentation,

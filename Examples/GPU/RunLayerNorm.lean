@@ -1,7 +1,8 @@
 /- End-to-end ThunderKittens-style layernorm validation. -/
 import Tyr.Torch
 import Tyr.GPU.Kernels.FusedLayerNorm
-import Examples.GPU.Parity
+import Examples.GPU.IndexedParity
+import Tyr.Typed.Neural
 import Examples.GPU.FixtureRunner
 import Examples.GPU.Benchmark
 
@@ -22,110 +23,97 @@ def fixtureSpec : FixtureSpec := {
 def fixtureFile (name : String) : System.FilePath :=
   Examples.GPU.fixturePath fixtureSpec name
 
-private abbrev LayerNormInput := T #[1, 64, 1024]
-private abbrev LayerNormWeight := T #[1024]
+abbrev LayerNormInput (dtype : DType) := DTensor #[1, 64, 1024] dtype
+abbrev LayerNormWeight (dtype : DType) := DTensor #[1024] dtype
 
-private structure LayerNormInputs where
-  x : LayerNormInput
-  residual : LayerNormInput
-  weight : LayerNormWeight
-  bias : LayerNormWeight
+structure LayerNormInputs (dtype : DType) where
+  x : LayerNormInput dtype
+  residual : LayerNormInput dtype
+  weight : LayerNormWeight dtype
+  bias : LayerNormWeight dtype
 
-private def layerNormReference
-    (inputs : LayerNormInputs)
-    : LayerNormInput × LayerNormInput :=
+def layerNormReference
+    (inputs : LayerNormInputs .Float32)
+    : LayerNormInput .Float32 × LayerNormInput .Float32 :=
   let eps : Float := 1.0e-5
   let expectedResid := inputs.x + inputs.residual
-  let expectedOut := torch.nn.layer_norm expectedResid inputs.weight inputs.bias eps
+  let expectedOut := Tensor.layerNorm expectedResid inputs.weight inputs.bias eps
   (expectedOut, expectedResid)
 
-private def layerNormReferenceBFloat16
-    (inputs : LayerNormInputs)
-    : LayerNormInput × LayerNormInput :=
+def layerNormReferenceBFloat16
+    (inputs : LayerNormInputs .BFloat16)
+    : LayerNormInput .BFloat16 × LayerNormInput .BFloat16 :=
   let eps : Float := 1.0e-5
   let expectedResid := inputs.x + inputs.residual
-  let expectedOut32 : LayerNormInput :=
-    torch.nn.layer_norm
-      (torch.toFloat' expectedResid)
-      (torch.toFloat' inputs.weight)
-      (torch.toFloat' inputs.bias)
+  let expectedOut32 : LayerNormInput .Float32 :=
+    Tensor.layerNorm
+      (expectedResid.toFloat32)
+      (inputs.weight.toFloat32)
+      (inputs.bias.toFloat32)
       eps
-  let expectedOut := torch.toBFloat16' expectedOut32
+  let expectedOut := expectedOut32.toBFloat16
   (expectedOut, expectedResid)
 
-private def asBFloat16Inputs (inputs : LayerNormInputs) : LayerNormInputs := {
-  x := torch.toBFloat16' inputs.x
-  residual := torch.toBFloat16' inputs.residual
-  weight := torch.toBFloat16' inputs.weight
-  bias := torch.toBFloat16' inputs.bias
+def asBFloat16Inputs (inputs : LayerNormInputs .Float32) : LayerNormInputs .BFloat16 := {
+  x := inputs.x.toBFloat16
+  residual := inputs.residual.toBFloat16
+  weight := inputs.weight.toBFloat16
+  bias := inputs.bias.toBFloat16
 }
 
-private def inputDType? (inputs : LayerNormInputs) : Except String DType := do
-  let dtype := inputs.x.dtype
-  if inputs.residual.dtype != dtype then
-    throw s!"residual dtype {inputs.residual.dtype} does not match x dtype {dtype}"
-  if inputs.weight.dtype != dtype then
-    throw s!"weight dtype {inputs.weight.dtype} does not match x dtype {dtype}"
-  if inputs.bias.dtype != dtype then
-    throw s!"bias dtype {inputs.bias.dtype} does not match x dtype {dtype}"
-  pure dtype
-
-private def logInputDTypes (label : String) (inputs : LayerNormInputs) : IO Unit := do
+private def logInputDTypes {dtype : DType} (label : String) (inputs : LayerNormInputs dtype) : IO Unit := do
   IO.println <|
     s!"[{suiteName}:{label}] input_dtypes x={inputs.x.dtype} residual={inputs.residual.dtype} " ++
     s!"weight={inputs.weight.dtype} bias={inputs.bias.dtype}"
 
-private def compareResults
+private def compareResults {dtype : DType}
     (mode : String)
-    (expectedOut : LayerNormInput)
-    (expectedResid : LayerNormInput)
-    (out : LayerNormInput)
-    (outResid : LayerNormInput)
+    (expectedOut : LayerNormInput dtype)
+    (expectedResid : LayerNormInput dtype)
+    (out : LayerNormInput dtype)
+    (outResid : LayerNormInput dtype)
     (rtol atol : Float)
     : IO Bool := do
-  let outCheck := compareTensors s!"layernorm.{mode}.output" (torch.toFloat' expectedOut) (torch.toFloat' out) rtol atol
-  let residCheck := compareTensors s!"layernorm.{mode}.residual" (torch.toFloat' expectedResid) (torch.toFloat' outResid) rtol atol
+  let outCheck := IndexedParity.compareTensors s!"layernorm.{mode}.output" (expectedOut.toFloat32) (out.toFloat32) rtol atol
+  let residCheck := IndexedParity.compareTensors s!"layernorm.{mode}.residual" (expectedResid.toFloat32) (outResid.toFloat32) rtol atol
   logTensorCheck outCheck
   logTensorCheck residCheck
   pure (outCheck.ok && residCheck.ok)
 
-private def runInputs (label : String) (inputs : LayerNormInputs) : IO Bool := do
+private def runInputs {dtype : DType} (label : String) (inputs : LayerNormInputs dtype) : IO Bool := do
   logInputDTypes label inputs
   let stream ← torch.cuda_current_stream
   let blackwell ← isBlackwellFamily
-  match inputDType? inputs with
-  | .error msg =>
-      IO.eprintln s!"[{suiteName}:{label}] unsupported_dtype_mix error={msg}"
-      pure false
-  | .ok .Float32 => do
+  match dtype, inputs with
+  | .Float32, inputs => do
       let (expectedOut, expectedResid) := layerNormReference inputs
-      let out := torch.zeros_like inputs.x
-      let outResid := torch.zeros_like inputs.residual
+      let out ← Tensor.uniformLike inputs.x
+      let outResid ← Tensor.uniformLike inputs.residual
       fusedLayerNormResidual64x1024F32Direct.launch
-        inputs.x inputs.residual inputs.weight inputs.bias out outResid
+        inputs.x.raw inputs.residual.raw inputs.weight.raw inputs.bias.raw out.raw outResid.raw
         64 1 1 256 1 1 0 stream
-      let _ ← torch.cuda_synchronize
+      torch.cuda_synchronize
       compareResults (if blackwell then "blackwell.f32" else "f32") expectedOut expectedResid out outResid 5e-3 5e-3
-  | .ok .BFloat16 => do
+  | .BFloat16, inputs => do
       let (expectedOut, expectedResid) := layerNormReferenceBFloat16 inputs
-      let out := torch.zeros_like inputs.x
-      let outResid := torch.zeros_like inputs.residual
+      let out ← Tensor.uniformLike inputs.x
+      let outResid ← Tensor.uniformLike inputs.residual
       fusedLayerNormResidual64x1024Bf16Direct.launch
-        inputs.x inputs.residual inputs.weight inputs.bias out outResid
+        inputs.x.raw inputs.residual.raw inputs.weight.raw inputs.bias.raw out.raw outResid.raw
         64 1 1 256 1 1 0 stream
-      let _ ← torch.cuda_synchronize
+      torch.cuda_synchronize
       compareResults (if blackwell then "blackwell.bf16" else "bf16") expectedOut expectedResid out outResid 2e-2 2e-2
-  | .ok dtype =>
+  | dtype, _ =>
       IO.eprintln s!"[{suiteName}:{label}] unsupported_dtype dtype={dtype}"
       pure false
 
-private def randomInputs (dtype : DType) : IO LayerNormInputs := do
+private def randomInputs (dtype : DType) : IO (LayerNormInputs dtype) := do
   let device := Device.CUDA 0
-  let base : LayerNormInputs := {
-    x := ← torch.rand #[1, 64, 1024] false device
-    residual := ← torch.rand #[1, 64, 1024] false device
-    weight := ← torch.rand #[1024] false device
-    bias := ← torch.rand #[1024] false device
+  let base : LayerNormInputs .Float32 := {
+    x := ← Tensor.uniformLike (Tensor.zeros #[1, 64, 1024] false device)
+    residual := ← Tensor.uniformLike (Tensor.zeros #[1, 64, 1024] false device)
+    weight := ← Tensor.uniformLike (Tensor.zeros #[1024] false device)
+    bias := ← Tensor.uniformLike (Tensor.zeros #[1024] false device)
   }
   match dtype with
   | .Float32 => pure base
@@ -141,15 +129,15 @@ def generateFixtures : IO Unit := do
   let vendoredInputs := asBFloat16Inputs inputs
   let (expectedOut, expectedResid) := layerNormReferenceBFloat16 vendoredInputs
 
-  torch.data.saveTensor inputs.x (fixtureFile "x").toString
-  torch.data.saveTensor inputs.residual (fixtureFile "residual").toString
-  torch.data.saveTensor inputs.weight (fixtureFile "weight").toString
-  torch.data.saveTensor inputs.bias (fixtureFile "bias").toString
-  torch.data.saveTensor expectedOut (fixtureFile "expected_out").toString
-  torch.data.saveTensor expectedResid (fixtureFile "expected_resid").toString
+  Tensor.saveTensor inputs.x (fixtureFile "x").toString
+  Tensor.saveTensor inputs.residual (fixtureFile "residual").toString
+  Tensor.saveTensor inputs.weight (fixtureFile "weight").toString
+  Tensor.saveTensor inputs.bias (fixtureFile "bias").toString
+  Tensor.saveTensor expectedOut (fixtureFile "expected_out").toString
+  Tensor.saveTensor expectedResid (fixtureFile "expected_resid").toString
 
-  let outMean := torch.nn.item (torch.nn.meanAll expectedOut)
-  let residMean := torch.nn.item (torch.nn.meanAll expectedResid)
+  let outMean := Tensor.item (Tensor.meanAll expectedOut)
+  let residMean := Tensor.item (Tensor.meanAll expectedResid)
   IO.println <|
     s!"Generated layernorm fixtures in {fixtureSpec.dir} " ++
     s!"input_dtype={inputs.x.dtype} vendored_ref_dtype={vendoredInputs.x.dtype} " ++
@@ -174,11 +162,14 @@ def runOnce : IO Bool := do
   if !(← fixturesPresent fixtureSpec) then
     generateFixtures
 
-  let inputs : LayerNormInputs := {
-    x := ← torch.data.loadTensor #[1, 64, 1024] (fixtureFile "x").toString
-    residual := ← torch.data.loadTensor #[1, 64, 1024] (fixtureFile "residual").toString
-    weight := ← torch.data.loadTensor #[1024] (fixtureFile "weight").toString
-    bias := ← torch.data.loadTensor #[1024] (fixtureFile "bias").toString
+  let x ← Tensor.loadTensorExact { shape := #[1, 64, 1024], dtype := .Unknown "dynamic" }
+    (fixtureFile "x").toString
+  let dtype := x.actualSpec.dtype
+  let inputs : LayerNormInputs dtype := {
+    x := x.castDType dtype
+    residual := ← Tensor.loadTensorExact { shape := #[1, 64, 1024], dtype } (fixtureFile "residual").toString
+    weight := ← Tensor.loadTensorExact { shape := #[1024], dtype } (fixtureFile "weight").toString
+    bias := ← Tensor.loadTensorExact { shape := #[1024], dtype } (fixtureFile "bias").toString
   }
   runInputs "fixtures" inputs
 
@@ -187,11 +178,11 @@ private def benchmarkFloat32 (cfg : Benchmark.Config) (stream : UInt64)
     (_blackwell : Bool) : IO (String × Bool) := do
   let inputs ← randomInputs .Float32
   let (expectedOut, expectedResid) := layerNormReference inputs
-  let out := torch.zeros_like inputs.x
-  let outResid := torch.zeros_like inputs.residual
+  let out ← Tensor.uniformLike inputs.x
+  let outResid ← Tensor.uniformLike inputs.residual
   let launch := do
     fusedLayerNormResidual64x1024F32Direct.launch
-      inputs.x inputs.residual inputs.weight inputs.bias out outResid
+      inputs.x.raw inputs.residual.raw inputs.weight.raw inputs.bias.raw out.raw outResid.raw
       64 1 1 256 1 1 0 stream
   launch
   torch.cuda_synchronize
@@ -204,11 +195,11 @@ private def benchmarkBFloat16 (cfg : Benchmark.Config) (stream : UInt64)
     (_blackwell : Bool) : IO (String × Bool) := do
   let inputs ← randomInputs .BFloat16
   let (expectedOut, expectedResid) := layerNormReferenceBFloat16 inputs
-  let out := torch.zeros_like inputs.x
-  let outResid := torch.zeros_like inputs.residual
+  let out ← Tensor.uniformLike inputs.x
+  let outResid ← Tensor.uniformLike inputs.residual
   let launch := do
     fusedLayerNormResidual64x1024Bf16Direct.launch
-      inputs.x inputs.residual inputs.weight inputs.bias out outResid
+      inputs.x.raw inputs.residual.raw inputs.weight.raw inputs.bias.raw out.raw outResid.raw
       64 1 1 256 1 1 0 stream
   launch
   torch.cuda_synchronize
