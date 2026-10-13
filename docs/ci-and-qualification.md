@@ -26,8 +26,9 @@ not runtime weights, test fixtures or source files tracked by Git.
 
 ## Spark qualification
 
-The `GPU` workflow retains labelled-PR and GPU-path push triggers and
-adds a weekly Monday schedule. Scheduled runs require both GPU and real-model
+The `GPU` workflow runs on GPU-path pushes to `main`, a weekly Monday
+schedule, and manual dispatches on `main`. Pull requests and the `gpu-ci` label
+do not start GPU qualification. Scheduled runs require both GPU and real-model
 qualification; manual runs default to both, with a `real_models` input for a
 GPU-only diagnostic. Missing prerequisites fail the selected qualification.
 Optional pretrained-model runners are a separate tier. Four existing ASR WAV
@@ -41,6 +42,24 @@ Spark's existing `spark-e626-gb10` runner belongs to `cpehle/tyr`, with labels
 older queued workflows. Repository registration and runner labels must match;
 the hosted `select-runner` job cannot substitute one repository's runner for another.
 It reports `configured` or `blocked`, never an executed qualification.
+
+### Custom runner access
+
+Before readiness or any self-hosted job is scheduled, a GitHub-hosted job checks
+that both the original actor and the rerun actor currently have repository
+write, maintain, or admin access. Read/triage access, previous contributions,
+and PR labels do not grant access. Missing actors or failed permission lookups
+fail closed. To qualify contributed code, review and merge it into `main`, then
+use the push run or dispatch `GPU` on `main`.
+
+Every repository registering this persistent runner must also set **Settings →
+Actions → General → Fork pull request workflows from outside collaborators →
+Require approval for all outside collaborators** (`all_external_contributors`).
+This setting is essential: a fork can change workflow YAML, including removing
+job conditions or adding another self-hosted job. Before approving any outside
+workflow run, review its exact code and workflow changes for execution on the
+host. Labels and YAML checks alone are not a runner access boundary. See
+[GitHub's self-hosted runner security guidance](https://docs.github.com/en/actions/reference/security/secure-use).
 
 Configure these repository variables for the runner that actually serves it:
 

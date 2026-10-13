@@ -6,7 +6,7 @@ name: GPU
 on:
   push:
     branches: [main]
-    paths: &gpu-paths
+    paths:
       - 'Tyr/GPU/**'
       - 'Tyr/Torch.lean'
       - 'Tests/*GPU*.lean'
@@ -30,9 +30,6 @@ on:
       - 'lakefile.lean'
       - 'lean-toolchain'
       - '.github/workflows/gpu.yml'
-  pull_request:
-    types: [labeled, opened, synchronize, reopened]
-    paths: *gpu-paths
   schedule:
     - cron: '23 5 * * 1'
   workflow_dispatch:
@@ -47,11 +44,35 @@ permissions:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: false
 
 jobs:
+  authorize:
+    # Keep untrusted PR code off the persistent runner. This job uses no checkout.
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      contains(fromJSON('["push", "schedule", "workflow_dispatch"]'), github.event_name)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require repository write access for initiator and rerun actor
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const actors = new Set([context.actor, process.env.GITHUB_TRIGGERING_ACTOR]);
+            for (const username of actors) {
+              if (!username) {
+                throw new Error('Missing workflow actor; refusing custom runner access');
+              }
+              const { data } = await github.rest.repos.getCollaboratorPermissionLevel({
+                ...context.repo, username,
+              });
+              if (!['admin', 'maintain', 'write'].includes(data.permission)) {
+                throw new Error(`${username} needs repository write access for CUDA qualification`);
+              }
+            }
+
   select-runner:
-    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'gpu-ci')
+    needs: authorize
     runs-on: ubuntu-latest
     outputs:
       runner_labels: ${{ steps.configuration.outputs.runner_labels }}

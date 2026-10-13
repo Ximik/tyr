@@ -357,7 +357,7 @@ parts:
   CPU-side complement: codegen invariants and
   `AttentionProblem.currentSpecialization` selection.
 - **CI.** `.github/workflows/gpu.yml` runs on a self-hosted GPU
-  runner (GB10 by default; opt a PR in with the `gpu-ci` label), does the
+  runner (GB10 by default; trusted users on `main` only), does the
   two-phase codegen build, and runs `TestGPUGB10E2E --fail-fast`, plus
   `RunMhaH100Decode` on Hopper hardware.
 
