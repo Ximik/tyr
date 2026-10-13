@@ -53,6 +53,12 @@ jobs:
           rev = "9808750c02cc0ad0ce9d67917250ec029283745e"
           EOF
 
+      - name: Build patched doc-gen4
+        run: |
+          source ./env.sh
+          cd docbuild
+          lake build doc-gen4
+
       - name: Build docs
         run: |
           source ./env.sh
