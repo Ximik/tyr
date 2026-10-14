@@ -1171,6 +1171,16 @@ replacement/projection methods. Policy-network and manifold-update examples
 use indexed arithmetic; both complete examples typecheck, including the explicit
 carrier argument needed for matrix extraction.
 
+## Update starter and widget guides
+
+The getting-started example and documentation index now introduce indexed
+tensors. The utilities guide uses indexed widget inputs and effectful random
+creation. The starter example typechecks; the complete widget example builds
+with `--wfail` as a temporary Lake example module, including native-backed
+`#tensor` evaluation. This validates elaboration, not browser rendering.
+The improvements inventory no longer describes the removed carrier or its
+obsolete broadcast/literal limitations.
+
 ## Remaining acceptance criteria
 
 Remove the `T` declaration and all model, generator, reflection, documentation,

@@ -20,9 +20,9 @@ Items fixed in the improvement pass, with their commits.
 - **[docs]** `Tyr/Torch.lean` module docstring referenced a nonexistent
   `torch.nanoproof` submodule; `focal_loss` docstring pointed at nonexistent
   `nn.cross_entropy_loss`. Both fixed (`177e7e2 docs(core)`).
-- **[docs]** `TensorStruct.lean` docstring now states that
-  `deriving TensorStruct` and the `T s` leaf instance require
-  `import Tyr.Module.Derive` (`06bbf9c docs(core)`).
+- **[docs]** The earlier deriving-import clarification (`06bbf9c docs(core)`)
+  is superseded by indexed tensor migration: the `Tensor σ` leaf instance lives
+  in `Tyr.TensorStruct`; deriving still requires `Tyr.Module.Derive`.
 
 ### Modules and modular
 
@@ -179,10 +179,9 @@ pass (scope, semantics risk, or hardware requirements).
 
 ### Core
 
-- **[correctness]** The broadcast `HMul (T s1) (T s2) (T s2)` instance captures
-  bare numeric literals (`w * 0.02` fails with `OfScientific (T …)`);
-  documented in `docs/core/tensors.md` — an `OfScientific` instance or
-  dedicated literal path would remove the papercut.
+- The legacy broadcast-instance/literal issue is closed by removal of the
+  shape-erasing tensor API (`530e2f6`). Indexed operations use explicit
+  specification and dtype-promotion rules.
 - **[cleanup]** `class differentiable` was *not* removed: it has a real
   instance in `Tyr/Module/Affine.lean:10` (imported via `Tyr/Module.lean`).
   The correct cleanup deletes/rewrites legacy `Affine.lean` together with the

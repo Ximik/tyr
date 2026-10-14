@@ -26,21 +26,20 @@ day one:
 - **Executables** — `lean_exe` targets rooted in `Tests.*` and `Examples.*`;
   binaries land in `.lake/build/bin/`.
 
-The runtime types a first program touches:
+A first program uses indexed tensors:
 
 ```lean
--- Tyr/Basic.lean:101
-inductive Device where
-  | CUDA : UInt64 → Device
-  | CPU
-  | MPS
+import Tyr.Typed
+open torch
 
--- Tyr/Basic.lean:108  -- the shape-indexed tensor type
-def T (_ : Shape) : Type := TSpec.type
-
--- Tyr/Torch.lean:152  -- MPS > CUDA > CPU
-def getBestDevice : IO Device
+def exampleTensor : DTensor #[2, 3] .Float32 :=
+  Tensor.ones #[2, 3]
 ```
+
+`Tensor σ` records shape, dtype, and device policy. `DTensor` fixes shape and
+dtype while leaving placement unrestricted. `Device` supports CPU, CUDA, and
+MPS; `getBestDevice` from `Tyr.Torch` selects MPS, then CUDA, then CPU based on
+availability. Native handles are confined to adapters behind the indexed API.
 
 ## Dependencies
 
@@ -283,7 +282,7 @@ framework.
 
 ## Related guides
 
-- [Core tensors](core/tensors.md) — `T s`, shapes, devices, and the ops you call next
+- [Core tensors](core/tensors.md) — `Tensor σ`, shapes, dtypes, devices, and the ops you call next
 - [Data loading](data.md) — batch iterators and file formats beyond raw `.bin`
 - [FFI and build internals](ffi-and-build.md) — `cc/` reference counting and link layout
 - [Examples and testing](examples-and-testing.md) — full example catalog and test conventions
