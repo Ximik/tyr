@@ -204,12 +204,11 @@ def project {m k n : UInt64}
   x.mm w
 ```
 
-The underlying `T s` is a reducible alias for one opaque tensor handle type;
-different shape annotations on raw tensors are definitionally equal. Use
-`Tensor.ofTensor` at raw boundaries and `Tensor.validate` when auditing a
-typed value. `Tensor.reshape` requires equal element counts and treats `#[]`
-as a scalar. Legacy raw `reshape t #[]` retains its shape-erasure behavior;
-`reshapeExact` provides real scalar reshaping at the raw level.
+The native carrier is `RawTensor`; model code uses indexed `Tensor σ` values.
+Use `Tensor.ofRaw` at native boundaries and `Tensor.validate` when auditing an
+indexed value. `Tensor.reshape` requires equal element counts and treats `#[]`
+as a scalar. Runtime-dependent shapes can be packaged existentially without
+losing the tensor's shape index.
 
 ### TensorStruct Typeclass
 

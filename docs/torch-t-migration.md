@@ -1227,6 +1227,15 @@ contracts. The complete Flux example typechecks, including checked conversion
 from the runtime-selected text-encoder layers to the diffusion context shape.
 This does not execute checkpoint-backed image generation.
 
+## Repository reference and ABI audit
+
+The repository-wide legacy-reference scan found and corrected stale carrier
+descriptions in the umbrella module, TensorStruct docstring, README, and issue
+inventory. The standalone test intentionally still checks that `torch.T` is
+absent. All twelve ABI commands from the CPU workflow pass against generated
+Lean C output, covering core, raw tensor, owned KV, neural, SafeTensors, Qwen35,
+KittenTTS, branching, Laguna, Gemma4, VAE, and Flux declarations.
+
 ## Remaining acceptance criteria
 
 Remove the `T` declaration and all model, generator, reflection, documentation,

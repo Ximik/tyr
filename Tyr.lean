@@ -105,10 +105,9 @@ def toyForward : DTensor #[2, 4] .Float32 :=
   x.linear w
 ```
 
-`import Tyr` re-exports both the typed facade and the legacy raw API. Use
-`Tensor` for static shape checks: the raw `T s` alias does not enforce its
-shape annotation. `Tensor.ofTensor` checks runtime shape and dtype when
-crossing from raw handles into the facade.
+`import Tyr` re-exports the indexed tensor API and runtime services.
+`Tensor σ` retains shape, dtype, and device-policy claims. Native adapters use
+`RawTensor`; `Tensor.ofRaw` checks metadata when crossing that boundary.
 
 ## Scope
 

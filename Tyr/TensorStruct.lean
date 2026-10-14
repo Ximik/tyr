@@ -48,7 +48,7 @@ This module defines the `TensorStruct` class and instances for containers
 (`Array`, `List`, `Vector`, `Option`), wrappers (`Static`, `Frozen`), and
 scalars, including indexed `Tensor σ` leaves. The `deriving TensorStruct`
 handler lives in `Tyr.Module.Derive`, so import that module when deriving
-instances. The old `T s` leaf instance remains there during migration.
+instances.
 Traversal callbacks preserve each leaf's complete `StaticSpec` index. A map
 cannot change a leaf's shape, dtype or pinned device policy. Use an explicit
 model conversion when changing those contracts.
