@@ -1,4 +1,5 @@
 import Examples.GPU.IndexedParity
+import Examples.GPU.DecodeReference
 import Examples.GPU.MhaTrainingReference
 import Examples.GPU.GemmReference
 import Examples.GPU.AttentionReference
@@ -246,3 +247,7 @@ example (a : DTensor #[2, 3] .BFloat16) (b : DTensor #[4, 5] .BFloat16) : True :
     LeanTest.assertTrue (Tensor.allclose vn
       (Tensor.full #[1, 1, 128, 64] (3.0 - 2.0 / 8192.0)) 0 1e-6)
     LeanTest.assertTrue (Tensor.allclose v (Tensor.full #[1, 1, 128, 64] 3.0) 0 0)
+
+@[test] def testGPUDecodeIndexedCacheReference : IO Unit := do
+  torch.manualSeed 42
+  LeanTest.assertTrue (← Examples.GPU.runDecodeCacheParity .CPU)

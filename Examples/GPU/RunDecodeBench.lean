@@ -19,6 +19,7 @@ import Lean.Data.Json.Basic
 import Lean.Data.Json.Printer
 import Lean.Data.Json.FromToJson
 import Tyr.Torch
+import Tyr.Typed.Neural
 import Examples.GPU.Benchmark
 
 namespace Examples.GPU
@@ -182,25 +183,25 @@ private def runOne (runId : String) (warmup iters repeats : Nat)
   let stream ← torch.cuda_current_stream
   let qShape : Shape := #[c.batch, c.qHeads, 1, c.headDim]
   let kvShape : Shape := #[c.batch, c.kvHeads, c.kvSeq, c.headDim]
-  let qBase ← torch.randn qShape false device
-  let kBase ← torch.randn kvShape false device
-  let vBase ← torch.randn kvShape false device
-  let q := torch.toBFloat16' qBase
-  let k := torch.toBFloat16' kBase
-  let v := torch.toBFloat16' vBase
+  let qBase ← Tensor.randn qShape false device
+  let kBase ← Tensor.randn kvShape false device
+  let vBase ← Tensor.randn kvShape false device
+  let q := qBase.toBFloat16
+  let k := kBase.toBFloat16
+  let v := vBase.toBFloat16
 
   -- SDPA reference output (BF16 in / BF16 out, same as kernel) for parity.
-  let outRef : T #[c.batch, c.qHeads, 1, c.headDim] :=
-    nn.scaledDotProductAttentionGQAQKV
-      (torch.toFloat' q) (torch.toFloat' k) (torch.toFloat' v) 0.0 false true
-      |> torch.toBFloat16'
+  let outRef : DTensor #[c.batch, c.qHeads, 1, c.headDim] .BFloat16 :=
+    Tensor.attentionGQAQKV
+      (q.toFloat32) (k.toFloat32) (v.toFloat32) 0.0 false true
+      |> Tensor.toBFloat16
 
   match backend with
   | .torchSdpa =>
-      let sink : T #[c.batch, c.qHeads, 1, c.headDim] := torch.zeros_like q
+      let sink : DTensor #[c.batch, c.qHeads, 1, c.headDim] .BFloat16 ← Tensor.uniformLike q 0 0
       let action : IO Unit := do
-        let out := nn.scaledDotProductAttentionGQAQKV q k v 0.0 false true
-        torch.copy_ sink out
+        let out := Tensor.attentionGQAQKV q k v 0.0 false true
+        Tensor.copyInto sink out
       let lats ← benchmarkAction runId warmup iters repeats stream action
       pure {
         runId := runId, caseId := c.caseId, backend := "torch_sdpa",
@@ -216,17 +217,17 @@ private def runOne (runId : String) (warmup iters repeats : Nat)
   | .tyrRuntime =>
       let routeActual := expectedRouteFor c
       -- Correctness once before timing.
-      let outActual : T #[c.batch, c.qHeads, 1, c.headDim] :=
-        nn.tyrFlashAttn4d q k v none 0.0 false none true
+      let outActual : DTensor #[c.batch, c.qHeads, 1, c.headDim] .BFloat16 :=
+        Tensor.flashAttention q k v true
       let _ ← torch.cuda_synchronize
-      let outMae := torch.nn.item (torch.nn.meanAll (torch.nn.abs (outActual - outRef)))
-      let outMax := torch.nn.item (torch.nn.maxAll (torch.nn.abs (outActual - outRef)))
+      let outMae := Tensor.item (Tensor.meanAll (Tensor.abs (outActual - outRef)))
+      let outMax := Tensor.item (Tensor.maxAll (Tensor.abs (outActual - outRef)))
       let okRoute := routeActual == c.expectedTyrRoute
-      let okOut := torch.allclose outRef outActual 5.0e-2 5.0e-2
-      let sink : T #[c.batch, c.qHeads, 1, c.headDim] := torch.zeros_like q
+      let okOut := Tensor.allclose outRef outActual 5.0e-2 5.0e-2
+      let sink : DTensor #[c.batch, c.qHeads, 1, c.headDim] .BFloat16 ← Tensor.uniformLike q 0 0
       let action : IO Unit := do
-        let out := nn.tyrFlashAttn4d q k v none 0.0 false none true
-        torch.copy_ sink out
+        let out := Tensor.flashAttention q k v true
+        Tensor.copyInto sink out
       let lats ← benchmarkAction runId warmup iters repeats stream action
       pure {
         runId := runId, caseId := c.caseId, backend := "tyr_runtime",

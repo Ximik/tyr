@@ -924,6 +924,26 @@ tests pass with zero failures/skips. Inventory validation still covers nine
 required and four optional suites. GitHub CLI reports green upstream main CI,
 which is separate from these local commits.
 
+## Decode runner and benchmark migration
+
+The decode fixture runner and benchmark now use indexed BF16 Q/K/V, Float32
+reference attention, and exact BF16 fixture loading. Production dispatch uses
+the typed FlashAttention adapter. Benchmark sinks are independent IO
+allocations and use the audited typed copy operation.
+
+The token-by-token cache parity path is shared with a CPU regression. It uses
+32 query heads, eight KV heads, head dimension 128, and ten appended tokens,
+comparing every cached output with the matching full causal attention slice.
+This exercises the real indexed KV-cache API, checked slices, sequence-length
+updates, and GQA dispatch. CPU parity does not qualify CUDA decode kernels,
+tail masking on hardware, or benchmark timings.
+The main runner, both GPU targets, and both decode executables build under
+`--wfail` (1,767 jobs). All 1,486 main CPU tests pass with zero failures/skips;
+the cache check reports maximum absolute error zero over all ten steps. Both
+executables correctly return failure without CUDA. The inventory validates
+nine required and four optional suites. Upstream main CI remains green and
+is separate from this local migration.
+
 ## Remaining acceptance criteria
 
 Remove the `T` declaration and all model, generator, reflection, documentation,
