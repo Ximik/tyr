@@ -1212,6 +1212,14 @@ FlashAttention and simulation types. Complete MHA forward-launch and attention
 gradient examples typecheck. Backward launch details point to the full maintained
 runner. These checks do not execute CUDA kernels or establish GPU qualification.
 
+## Update the LLM guide
+
+The LLM guide now describes indexed generation, Bool completion masks,
+existential KV buffers, dtype-aware utilities, and Float32 flow denoisers.
+Model tables distinguish token forwards from embedding forwards. Complete
+tiny-Qwen3 and FLM examples typecheck against the migrated API. Checkpoint
+inference and CUDA execution are not implied by these documentation checks.
+
 ## Remaining acceptance criteria
 
 Remove the `T` declaration and all model, generator, reflection, documentation,

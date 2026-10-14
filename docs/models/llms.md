@@ -40,12 +40,12 @@ The model itself is a structure over a config value (Qwen3 shown, `Tyr/Model/Qwe
 ```lean
 structure Qwen3ForCausalLM (cfg : Config) where
   model : qwen.Qwen3Model cfg
-  lmHead : T #[cfg.vocab_size, cfg.hidden_size]
+  lmHead : DTensor #[cfg.vocab_size, cfg.hidden_size] .Float32
   tieWordEmbeddings : Bool := true
   deriving TensorStruct
 ```
 
-Because `cfg` is a value parameter, one implementation serves every checkpoint size — the preset just picks the shapes. `deriving TensorStruct` makes the whole model traversable for device moves, checkpointing, and optimizers (see [TensorStruct](../core/tensorstruct.md)). Every family also follows the same decode convention: generation returns `IO (Sigma (fun outSeq => T #[batch, outSeq]))` because the output length is runtime-determined (EOS early stop), and batched per-row EOS masking happens on-device via `tokenInSet` / `applyFinishedEos`.
+Because `cfg` is a value parameter, one implementation serves every checkpoint size — the preset just picks the shapes. `deriving TensorStruct` makes the whole model traversable for device moves, checkpointing, and optimizers (see [TensorStruct](../core/tensorstruct.md)). Every family also follows the same decode convention: generation returns `IO (Sigma (fun outSeq => DTensor #[batch, outSeq] .Int64))` because the output length is runtime-determined (EOS early stop), and batched per-row EOS masking happens on-device via `tokenInSet` / `applyFinishedEos`.
 
 ### Shared generation infrastructure
 
@@ -57,30 +57,38 @@ inductive SamplingStrategy where
   | multinomial (temperature : Float := 1.0) (topK : UInt64 := 0) (topP : Float := 1.0)
 
 /-- Callback invoked on every generated token during streaming decode. -/
-abbrev StreamCallback (batch : UInt64) := UInt64 → T #[batch] → IO Unit
+abbrev StreamCallback (batch : UInt64) := UInt64 → DTensor #[batch] .Int64 → IO Unit
 
-def sampleFromLogits (logits : T #[batch, vocab]) (strategy : SamplingStrategy) : IO (T #[batch])
-def tokenInSet (tokens : T #[n]) (values : Array UInt64) : T #[n]
-def applyFinishedEos (tokens : T #[n]) (finished : T #[n]) (eosToken : UInt64) : T #[n]
+def sampleFromLogits (logits : DTensor #[batch, vocab] .Float32)
+    (strategy : SamplingStrategy) : IO (DTensor #[batch] .Int64)
+def tokenInSet (tokens : DTensor #[n] .Int64)
+    (values : Array UInt64) : DTensor #[n] .Bool
+def applyFinishedEos (tokens : DTensor #[n] .Int64) (finished : DTensor #[n] .Bool)
+    (eosToken : UInt64) : DTensor #[n] .Int64
 ```
 
-`sampleFromLogits` semantics (`Generation.lean:26-47`): greedy is `nn.argmax`; multinomial throws unless `temperature > 0`, scales logits by `1/temperature` (skipped at exactly 1.0), applies a top-K filter unless `topK == 0`, then a top-P filter unless `topP >= 1.0`, then softmax + `nn.multinomial`. Qwen3.5 and Gemma 4 decode through this; Qwen3 (and therefore Qwen2.5-Omni) has its own private greedy loops and supports **greedy decoding only** — no temperature/top-k/top-p.
+`sampleFromLogits` semantics (`Generation.lean:26-47`): greedy is `Tensor.argmax`; multinomial throws unless `temperature > 0`, scales logits by `1/temperature` (skipped at exactly 1.0), applies a top-K filter unless `topK == 0`, then a top-P filter unless `topP >= 1.0`, then softmax + `Tensor.multinomial`. Qwen3.5 and Gemma 4 decode through this; Qwen3 (and therefore Qwen2.5-Omni) has its own private greedy loops and supports **greedy decoding only** — no temperature/top-k/top-p.
 
 ### KV caches
 
 The shared incremental cache is `qwen.QwenAttention.KVCache` (`Tyr/Model/Qwen/Attention.lean:54`):
 
 ```lean
-structure KVCache (batch num_kv_heads head_dim : UInt64) where
-  kStoreDyn : T #[]
-  vStoreDyn : T #[]
+structure KVCache (batch num_kv_heads head_dim : UInt64) (dtype : DType := .Float32) where
+  kStoreDyn : Σ (s : Shape), DTensor s dtype
+  vStoreDyn : Σ (s : Shape), DTensor s dtype
   seq : UInt64 := 0
   maxLen : UInt64 := 0
 ```
 
-Buffers are preallocated at `[batch, num_kv_heads, maxLen, head_dim]` (`initKVCache maxLen device`) and stored shape-erased (`nn.eraseShape` → `T #[]`) so the cache *type* does not change as the sequence grows; each step restores the static shape with `reshape` + `castLike`, writes the new K/V via `data.sliceScatter`, attends over the filled prefix, and re-erases. This sidesteps dependent-shape bookkeeping inside IO decode loops.
+Buffers are preallocated at `[batch, num_kv_heads, maxLen, head_dim]`
+(`initKVCache maxLen device dtype`) and packaged with their actual shape as
+existential indexed tensors. The cache retains dtype while its outer type stays
+stable as the sequence grows. Decode restores the capacity shape with checked
+reshape adapters, writes K/V with indexed slice-scatter, and attends over the
+filled prefix. No scalar shape is used as a stand-in for an unknown shape.
 
-Two families extend it: Qwen3.5's `HybridCache` (`Qwen35/Model.lean:765`) adds per-layer depthwise-conv states `[batch, convDim, kernel]` and recurrent states `[batch, vHeads, kDim, vDim]` for the gated-delta linear-attention layers; Gemma 4's `Gemma4Cache` (`Gemma4/Model.lean:797`) is one KV cache per layer. `QwenAttention.forwardStep` takes a `useTyrFlashAttn : Bool := false` flag that routes eligible decode shapes (BF16, qSeq = 1, head_dim 64 or 128, GQA-valid) through `nn.tyrFlashAttn4d` to a ThunderKittens H100 kernel and falls back to PyTorch SDPA otherwise (`Qwen/Attention.lean:149-157`).
+Two families extend it: Qwen3.5's `HybridCache` (`Qwen35/Model.lean:765`) adds per-layer depthwise-conv states `[batch, convDim, kernel]` and recurrent states `[batch, vHeads, kDim, vDim]` for the gated-delta linear-attention layers; Gemma 4's `Gemma4Cache` (`Gemma4/Model.lean:797`) is one KV cache per layer. `QwenAttention.forwardStep` takes a `useTyrFlashAttn : Bool := false` flag that routes eligible decode shapes (BF16, qSeq = 1, head_dim 64 or 128, GQA-valid) through `Tensor.flashAttention` to a ThunderKittens H100 kernel and falls back to PyTorch SDPA otherwise (`Qwen/Attention.lean:149-157`).
 
 Laguna generation uses `LagunaCacheSession`, an inference-only cache with private
 storage and serialized IO updates. Full-attention layers reserve `maxLen`
@@ -117,6 +125,9 @@ forks, functional snapshots, and FP32/BF16 parity.
 
 `Tyr/Model/Qwen/` contains the shared transformer: `QwenConfig` (defaults are Qwen3-4B; `QwenConfig.fluxKleinTextEncoder` is the 36-layer Flux 2 Klein variant with Q/K norms), `QwenAttention` (GQA with optional per-head Q/K RMSNorm), `QwenMLP` (SwiGLU), `QwenLayer`, and `Qwen3Model cfg` (embedding + `Array QwenLayer` + final `RMSNorm`). `QwenFluxEmbedder` (`Qwen/Embedder.lean:25`) extracts hidden states from selected layers (default `#[8, 17, 26]`) and concatenates them into Flux text embeddings; `loadQwenFluxEmbedderSharded` (`Qwen/Weights.lean:233`) loads it from a sharded checkpoint.
 
+`forwardEmbeds` instead accepts Float32 embeddings shaped
+`#[batch, seq, cfg.hidden_size]`; both forwards accept an optional Bool mask.
+
 ### Qwen3.5 / Qwen3.6 (`torch.qwen35`, `torch.qwen36`)
 
 `Qwen35Config` (`Tyr/Model/Qwen35/Config.lean:45`) covers dense and MoE checkpoints (`num_experts == 0` means dense — see presets below) and the hybrid layer schedule:
@@ -133,7 +144,7 @@ Presets: `Config.qwen35_0_8B`, `Config.qwen35_9B`, `Config.qwen35_35B_A3B`, `Con
 
 ### Gemma 4 (`torch.gemma4`)
 
-`Gemma4Config` (`Tyr/Model/Gemma4/Config.lean:42`) uses a sliding/full attention schedule (`LayerType.slidingAttention | .fullAttention`), separate RoPE thetas and head dims for the two kinds, KV-shared layers, per-layer input projections, optional MoE, and final logit softcapping (`final_logit_softcapping`, default 30.0, applied via `nn.softcap`). Presets: `Config.gemma4_E2B`, `gemma4_E4B`, `gemma4_26B_A4B`, `gemma4_31B`. Embeddings are scaled by `sqrt(hidden_size)` (`Gemma4/Model.lean:1048`). Unlike the other families the MoE path is a fused C++ extern (`routedTextExpertsForward`). The generate family is `generate` / `generateStream` / `generateFromEmbeds(Stream)` (+ per-layer-input variants) — there is no `generateUncached` reference loop. `Gemma4ForConditionalGeneration` (`Gemma4/Multimodal.lean:350`) adds the vision tower. Note there are currently no Gemma 4 tests in `Tests/`.
+`Gemma4Config` (`Tyr/Model/Gemma4/Config.lean:42`) uses a sliding/full attention schedule (`LayerType.slidingAttention | .fullAttention`), separate RoPE thetas and head dims for the two kinds, KV-shared layers, per-layer input projections, optional MoE, and final logit softcapping (`final_logit_softcapping`, default 30.0, applied via the model softcap helper). Presets: `Config.gemma4_E2B`, `gemma4_E4B`, `gemma4_26B_A4B`, `gemma4_31B`. Embeddings are scaled by `sqrt(hidden_size)` (`Gemma4/Model.lean:1048`). Unlike the other families the MoE path is a fused C++ extern (`routedTextExpertsForward`). The generate family is `generate` / `generateStream` / `generateFromEmbeds(Stream)` (+ per-layer-input variants) — there is no `generateUncached` reference loop. `Gemma4ForConditionalGeneration` (`Gemma4/Multimodal.lean:350`) adds the vision tower. Note there are currently no Gemma 4 tests in `Tests/`.
 
 ### FFI-backed kernels
 
@@ -152,12 +163,12 @@ Three `@[extern]` opaque kernels sit inside this component (declared `private`, 
 
 ```lean
 structure FlowDenoiser (seq vocab : UInt64) (Params : Type) where
-  forward : {batch : UInt64} → Params → T #[batch, seq, vocab] → T #[batch]
-    → Option (T #[batch]) → IO (T #[batch, seq, vocab])
-  forwardPure : Option ({batch : UInt64} → Params → T #[batch, seq, vocab] → T #[batch]
-    → Option (T #[batch]) → T #[batch, seq, vocab]) := none
-  lossWeight : Option ({batch : UInt64} → Params → T #[batch] → Option (T #[batch])
-    → IO (T #[batch])) := none
+  forward : {batch : UInt64} → Params → DTensor #[batch, seq, vocab] .Float32 → DTensor #[batch] .Float32
+    → Option (DTensor #[batch] .Float32) → IO (DTensor #[batch, seq, vocab] .Float32)
+  forwardPure : Option ({batch : UInt64} → Params → DTensor #[batch, seq, vocab] .Float32 → DTensor #[batch] .Float32
+    → Option (DTensor #[batch] .Float32) → DTensor #[batch, seq, vocab] .Float32) := none
+  lossWeight : Option ({batch : UInt64} → Params → DTensor #[batch] .Float32 → Option (DTensor #[batch] .Float32)
+    → IO (DTensor #[batch] .Float32)) := none
 ```
 
 `forwardPure` is required for generation because `Tyr.DiffEq` vector fields are pure functions; `generateFLM` throws if it is absent. Sampling treats the flow as an ODE from Gaussian noise to one-hot data and integrates it with `DiffEq.Euler` (`generateFLM`) or any `DiffEq.AbstractSolver` you supply (`generateFLMWithSolver`). FLM is currently library-only: its sole consumer in the repo is `Tests/TestFLM.lean`.
@@ -169,20 +180,20 @@ structure FlowDenoiser (seq vocab : UInt64) (Params : Type) where
 | Symbol | Signature / meaning |
 |---|---|
 | `SamplingStrategy` | `.greedy` or `.multinomial (temperature := 1.0) (topK := 0) (topP := 1.0)`; `topK = 0` / `topP >= 1` disable those filters |
-| `StreamCallback batch` | `UInt64 → T #[batch] → IO Unit`, invoked per decode step |
-| `sampleFromLogits` | `T #[batch, vocab] → SamplingStrategy → IO (T #[batch])` |
-| `tokenInSet` | `T #[n] → Array UInt64 → T #[n]` boolean membership mask |
-| `applyFinishedEos` | `T #[n] → T #[n] → UInt64 → T #[n]` overwrite finished rows with EOS |
+| `StreamCallback batch` | `UInt64 → DTensor #[batch] .Int64 → IO Unit`, invoked per decode step |
+| `sampleFromLogits` | `DTensor #[batch, vocab] .Float32 → SamplingStrategy → IO (DTensor #[batch] .Int64)` |
+| `tokenInSet` | `DTensor #[n] .Int64 → Array UInt64 → DTensor #[n] .Bool` boolean membership mask |
+| `applyFinishedEos` | `DTensor #[n] .Int64 → DTensor #[n] .Bool → UInt64 → DTensor #[n] .Int64` overwrite finished rows with EOS |
 
 ### Model utils (`Tyr/Model/Utils.lean`, `torch.Model`)
 
 | Symbol | Signature |
 |---|---|
-| `initWeight` | `(shape : Shape) → (fanIn : UInt64) → IO (T shape)` |
-| `initBias` | `(shape : Shape) → T shape` |
-| `reqGradFalse` | `T s → T s` |
-| `dequantizeFP8` | `T #[out, in] → T #[out/128, in/128] → T #[out, in]` |
-| `dequantizeFP8Experts` | `T #[e, out, in] → T #[e, out/128, in/128] → T #[e, out, in]` |
+| `initWeight` | `(shape : Shape) → (fanIn : UInt64) → (dtype : DType := .Float32) → IO (DTensor shape dtype)` |
+| `initBias` | `(shape : Shape) → (dtype : DType := .Float32) → DTensor shape dtype` |
+| `reqGradFalse` | `Tensor σ → Tensor σ` |
+| `dequantizeFP8` | `STensor #[out, in] → STensor #[out/128, in/128] → DTensor #[out, in] .Float32` |
+| `dequantizeFP8Experts` | `STensor #[e, out, in] → STensor #[e, out/128, in/128] → DTensor #[e, out, in] .Float32` |
 
 ### Qwen3 (`torch.qwen3`)
 
@@ -191,18 +202,21 @@ structure FlowDenoiser (seq vocab : UInt64) (Params : Type) where
 | `Config` | `abbrev Config := qwen.QwenConfig`; preset `Config.qwen3_4B` |
 | `Config.loadFromFile` / `Config.loadFromPretrainedDir` | `(pathOrDir : String) (defaults := Config.qwen3_4B) : IO Config`, with invariant validation |
 | `Qwen3ForCausalLM.init` | `(cfg : Config) (tieWordEmbeddings := true) : IO (Qwen3ForCausalLM cfg)` |
-| `forward` / `forwardEmbeds` | `(m) (inputIds : T #[batch, seq]) (attnMask := none) : T #[batch, seq, cfg.vocab_size]` |
-| `generateGreedy` | `(m) (inputIds) (maxNewTokens := 512) (eosTokenIds := #[]) : IO (Sigma (fun outSeq => T #[batch, outSeq]))`, KV-cached |
+| `forward` | `(m) (inputIds : DTensor #[batch, seq] .Int64) (attnMask := none) : DTensor #[batch, seq, cfg.vocab_size] .Float32` |
+| `generateGreedy` | `(m) (inputIds) (maxNewTokens := 512) (eosTokenIds := #[]) : IO (Sigma (fun outSeq => DTensor #[batch, outSeq] .Int64))`, KV-cached |
 | `generateGreedyUncached` | same signature; full re-forward per step, used as the parity reference |
 | `Qwen3ForCausalLM.loadSharded` / `load` | `(dirOrPath : String) (cfg := Config.qwen3_4B) (log := {}) : IO (Qwen3ForCausalLM cfg)`; ties embeddings when `lm_head.weight` is absent |
+
+`forwardEmbeds` instead accepts Float32 embeddings shaped
+`#[batch, seq, cfg.hidden_size]`; both forwards accept an optional Bool mask.
 
 ### Qwen3.5 / Qwen3.6 (`torch.qwen35`, `torch.qwen36`)
 
 ```lean
 -- all in namespace Qwen35ForCausalLM; called as `model.generate cfg …`
-def generate (cfg : Config) (m : Qwen35ForCausalLM cfg) (inputIds : T #[batch, seq])
+def generate (cfg : Config) (m : Qwen35ForCausalLM cfg) (inputIds : DTensor #[batch, seq] .Int64)
     (maxNewTokens : UInt64 := 256) (strategy : SamplingStrategy := .greedy)
-    (eosTokenIds : Array UInt64 := #[]) : IO (Sigma (fun outSeq => T #[batch, outSeq]))
+    (eosTokenIds : Array UInt64 := #[]) : IO (Sigma (fun outSeq => DTensor #[batch, outSeq] .Int64))
 def generateStream      -- same, plus `(onStep : StreamCallback batch)` after `inputIds`
 def generateFromEmbeds  -- same as `generate`, plus precomputed `inputsEmbeds`
 def generateUncached    -- same as `generate`; full re-forward reference
@@ -229,9 +243,9 @@ Same pattern: `Gemma4ForCausalLM.generate` / `generateStream` / `generateFromEmb
 | `FlowConfig` | `tMin`/`tMax`/`softcap`/`eps`/`weightDecay`/`gradClip` knobs |
 | `TimeMap.identity` | linear tau↔t map (plug LUT-based conversions in here) |
 | `corruptContinuous` | `x_t = (1 - t)·noise + t·oneHot(x)` corruption, returns `(x_t, target)` |
-| `flowLoss` / `flowLossGivenTau` | per-token flow-matching loss, `IO (T #[batch, seq])` |
+| `flowLoss` / `flowLossGivenTau` | per-token flow-matching loss, `IO (DTensor #[batch, seq] .Float32)` |
 | `trainStep` | full AdamW step; returns `(Params × Optim.AdamWState Params × LossReport)` |
-| `generateFLM` | ODE sampling with DiffEq Euler, `(steps : Nat) → IO (T #[batch, seq])` |
+| `generateFLM` | ODE sampling with DiffEq Euler, `(steps : Nat) → IO (DTensor #[batch, seq] .Int64)` |
 | `generateFLMWithSolver` | same with a caller-supplied `DiffEq.AbstractSolver` |
 | `psdLossGivenTau` / `diagonalLossGivenTau` / `samplePsdTimes` | FMLM semigroup losses and time sampling |
 
@@ -292,8 +306,8 @@ private def tinyCfg : Config := {
 
 def main : IO Unit := do
   let model ← Qwen3ForCausalLM.init tinyCfg
-  let ids : T #[1, 3] := reshape (data.fromInt64Array #[3, 2, 1]) #[1, 3]
-  let logits := model.forward ids                 -- T #[1, 3, 64]
+  let ids := Tensor.reshape (Tensor.fromInt64Array #[3, 2, 1]) #[1, 3]
+  let logits := model.forward ids                 -- DTensor #[1, 3, 64] .Float32
   let ⟨outSeq, _out⟩ ← model.generateGreedy ids 4 #[]
   IO.println s!"logits: {logits.runtimeShape}, generated {outSeq} tokens total"
 ```
@@ -307,9 +321,9 @@ Reconstructed example (from `Examples/Flux/FluxDemo.lean:128-174`):
 ```lean
 let qwenCfg := QwenConfig.fluxKleinTextEncoder
 let qwen ← loadQwenFluxEmbedderSharded qwenDir qwenCfg maxSeqLen #[8, 17, 26]
--- tokens, attnMask : T #[1, maxSeqLen]
+-- tokens : DTensor #[1, maxSeqLen] .Int64; attnMask has the same shape
 let txtEmb := qwen.encodeMasked qwenCfg maxSeqLen tokens attnMask
--- txtEmb : T #[1, maxSeqLen, 3 * qwenCfg.hidden_size]
+-- txtEmb : DTensor #[1, maxSeqLen, qwen.outputLayers.size.toUInt64 * qwenCfg.hidden_size] .Float32
 ```
 
 ### FLM training loss and ODE sampling
@@ -326,11 +340,11 @@ def identityDenoiser : FlowDenoiser 3 5 Unit :=
     forwardPure := some (fun {_batch} _ x _ _ => x) }
 
 def main : IO Unit := do
-  let tokens : T #[2, 3] := reshape (data.fromInt64Array #[0, 1, 2, 3, 4, 0]) #[2, 3]
+  let tokens := Tensor.reshape (Tensor.fromInt64Array #[0, 1, 2, 3, 4, 0]) #[2, 3]
   let loss ← flowLoss (cfg := {}) TimeMap.identity identityDenoiser () tokens
-  IO.println s!"mean loss: {nn.item (nn.meanAll loss)}"
+  IO.println s!"mean loss: {(Tensor.meanAll loss).item}"
   let out ← generateFLM (batch := 2) (cfg := {}) TimeMap.identity identityDenoiser () 8
-  IO.println s!"sampled tokens: {out.runtimeShape}"  -- T #[2, 3] after argmax
+  IO.println s!"sampled tokens: {out.runtimeShape}"  -- DTensor #[2, 3] .Int64 after argmax
 ```
 
 ## Caveats
@@ -343,7 +357,7 @@ def main : IO Unit := do
 ## Related guides
 
 - [Getting started](../getting-started.md) — build, FFI setup, first model run
-- [Tensors](../core/tensors.md) — `T s`, shapes, and the ops used in forwards
+- [Tensors](../core/tensors.md) — `Tensor σ`, shapes, and the ops used in forwards
 - [TensorStruct](../core/tensorstruct.md) — the parameter-tree class behind `deriving TensorStruct`
 - [Modules](../modules.md) — `Linear`/`RMSNorm` and the `Module` classes these models build on
 - [Serialization](../serialization.md) — SafeTensors loading and `Tyr.Hub` downloads
