@@ -283,7 +283,7 @@ Caveats to be aware of when extending the suite:
 ## Related guides
 
 - [getting-started.md](getting-started.md) — environment setup required before any example
-- [core/tensors.md](core/tensors.md) — the `T #[...]` shape-tracked tensors used throughout
+- [core/tensors.md](core/tensors.md) — the indexed `Tensor` specifications used throughout
 - [serialization.md](serialization.md) — SafeTensors provider and fixtures used by the tests
 - [data.md](data.md) — datasets and tokenizers behind TrainGPT/NanoChat
 - [autodiff.md](autodiff.md), [modules.md](modules.md), [optimization.md](optimization.md) — subsystems under test

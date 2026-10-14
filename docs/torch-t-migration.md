@@ -1154,6 +1154,15 @@ The audio guide documents indexed KV buffers, effectful initialization/appends/
 position advances, explicit mutation ownership, and IO validation errors. Its
 BF16 cached-decode example typechecks against the current API.
 
+## Update optimizer and differential-equation guides
+
+The optimization guide uses full tensor specifications for parameter states,
+Float32 logits, and Int64 targets, with indexed gradient calls. Its complete
+NorMuon wrapper typechecks. The differential-equation guide describes indexed
+solver algebra and preserving scalar operations; its complete example block,
+including scalar-tensor backsolve adjoints, typechecks. The testing guide links
+to the indexed tensor surface.
+
 ## Remaining acceptance criteria
 
 Remove the `T` declaration and all model, generator, reflection, documentation,
