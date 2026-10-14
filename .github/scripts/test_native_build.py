@@ -41,6 +41,9 @@ class NativeBuildTests(unittest.TestCase):
         self.header.write_text("#define VALUE 3\n")
         (self.cc / "src/probe.cpp").write_text(
             '#include "nested/config.h"\nextern "C" int lean_tyr_probe() { return VALUE; }\n')
+        # Apple's ar requires at least one member even for this unused fixture archive.
+        (self.cc / "src/soxr_stub.cpp").write_text(
+            'extern "C" int fixture_soxr_stub() { return 0; }\n')
         self.obj = self.cc / "build/probe.o"
         extension = "dylib" if sys.platform == "darwin" else "so"
         self.library = self.cc / f"build/libTyrC.{extension}"
@@ -50,8 +53,8 @@ class NativeBuildTests(unittest.TestCase):
         defaults = {
             "LEAN_HOME": str(self.root / "lean"), "CUDA_HOME": "",
             "OBJ_FILES": "build/probe.o", "SRCS": "probe.cpp", "CU_SRCS": "",
-            "MM_SRCS": "", "SOXR_SRCS": "", "GPU": "H100",
-            "DEP_FILES": "build/probe.d", "DYLIB_LINK_FLAGS": "",
+            "MM_SRCS": "", "SOXR_SRCS": "", "SOXR_OBJS": "build/soxr_stub.o", "GPU": "H100",
+            "DEP_FILES": "build/probe.d build/soxr_stub.d", "DYLIB_LINK_FLAGS": "",
         }
         defaults.update(variables)
         result = subprocess.run(["make", "--no-print-directory", f"-j{jobs}", target] +
