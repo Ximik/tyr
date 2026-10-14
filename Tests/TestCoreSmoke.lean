@@ -78,8 +78,8 @@ def testLogHandlersCombineReachesBothSinks : IO Unit := do
 /-! ## TensorStruct smoke tests -/
 
 structure SmokeParams where
-  weight : DTensor #[2, 3] .Float32
-  bias : DTensor #[2] .Float32
+  weight : Tensor { shape := #[2, 3], dtype := .Float32 }
+  bias : Tensor { shape := #[2], dtype := .Float32 }
   tag : Static String
   deriving TensorStruct
 

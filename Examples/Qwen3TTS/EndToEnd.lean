@@ -340,7 +340,7 @@ private def lookupLanguageId? (cfg : Qwen3TTSConfig) (language : String) : Optio
       return some v
   none
 
-private def idsTensor1 (ids : Array UInt64) : DTensor #[1, ids.size.toUInt64] .Int64 :=
+private def idsTensor1 (ids : Array UInt64) : Tensor { shape := #[1, ids.size.toUInt64], dtype := .Int64 } :=
   Tensor.reshapeChecked (Tensor.fromInt64Array (ids.map (Int64.ofNat ∘ UInt64.toNat))) #[1, ids.size.toUInt64]
 
 private def saveTokenIds (path : String) (ids : Array UInt64) : IO Unit := do
@@ -349,7 +349,7 @@ private def saveTokenIds (path : String) (ids : Array UInt64) : IO Unit := do
   IO.FS.writeFile path (text ++ "\n")
 
 private def loadSpeakerEmbedding? (cfg : Qwen3TTSConfig) (path? : Option String)
-    : IO (Option (STensor #[1, 1, cfg.talkerConfig.hiddenSize])) := do
+    : IO (Option (Tensor { shape := #[1, 1, cfg.talkerConfig.hiddenSize] })) := do
   match path? with
   | none => pure none
   | some p =>
@@ -357,7 +357,7 @@ private def loadSpeakerEmbedding? (cfg : Qwen3TTSConfig) (path? : Option String)
         throw <| IO.userError
           s!"speaker embedding dim mismatch: speaker enc_dim={cfg.speakerEncoderConfig.encDim}, talker hidden={cfg.talkerConfig.hiddenSize}"
       let path ← expandHome p
-      let emb : STensor #[cfg.speakerEncoderConfig.encDim] ← Tensor.loadTensorExact { shape := #[cfg.speakerEncoderConfig.encDim], dtype := .Unknown "dynamic" } path
+      let emb : Tensor { shape := #[cfg.speakerEncoderConfig.encDim] } ← Tensor.loadTensorExact { shape := #[cfg.speakerEncoderConfig.encDim], dtype := .Unknown "dynamic" } path
       pure (some (Tensor.reshapeChecked emb #[1, 1, cfg.talkerConfig.hiddenSize]))
 
 private def buildTalkerInputsEquivalent
@@ -366,8 +366,8 @@ private def buildTalkerInputsEquivalent
     (inputIds : Array UInt64)
     (languageId : Option UInt64)
     (thinkMode : ThinkMode := .auto)
-    (speakerEmbed : Option (STensor #[1, 1, cfg.talkerConfig.hiddenSize]) := none)
-    : IO ((Sigma fun seq => STensor #[1, seq, cfg.talkerConfig.hiddenSize]) × STensor #[1, 1, cfg.talkerConfig.hiddenSize]) := do
+    (speakerEmbed : Option (Tensor { shape := #[1, 1, cfg.talkerConfig.hiddenSize] }) := none)
+    : IO ((Sigma fun seq => Tensor { shape := #[1, seq, cfg.talkerConfig.hiddenSize] }) × Tensor { shape := #[1, 1, cfg.talkerConfig.hiddenSize] }) := do
   if inputIds.size < 8 then
     throw <| IO.userError s!"Tokenized assistant input is too short ({inputIds.size}); expected at least 8 tokens."
 
@@ -378,18 +378,18 @@ private def buildTalkerInputsEquivalent
   let textMainLen : UInt64 := textMainIds.size.toUInt64
   let hidden : UInt64 := cfg.talkerConfig.hiddenSize
 
-  let roleTensor : DTensor #[1, 3] .Int64 := Tensor.reshapeChecked (idsTensor1 roleIds) #[1, 3]
-  let roleEmbed : STensor #[1, 3, hidden] := TalkerModel.embedText model.talker.model roleTensor
+  let roleTensor : Tensor { shape := #[1, 3], dtype := .Int64 } := Tensor.reshapeChecked (idsTensor1 roleIds) #[1, 3]
+  let roleEmbed : Tensor { shape := #[1, 3, hidden] } := TalkerModel.embedText model.talker.model roleTensor
 
-  let ttsSpecialIds : DTensor #[1, 3] .Int64 := Tensor.reshapeChecked (Tensor.fromInt64Array #[
+  let ttsSpecialIds : Tensor { shape := #[1, 3], dtype := .Int64 } := Tensor.reshapeChecked (Tensor.fromInt64Array #[
     Int64.ofNat cfg.ttsBosTokenId.toNat,
     Int64.ofNat cfg.ttsEosTokenId.toNat,
     Int64.ofNat cfg.ttsPadTokenId.toNat
   ]) #[1, 3]
-  let ttsSpecialEmb : STensor #[1, 3, hidden] := TalkerModel.embedText model.talker.model ttsSpecialIds
-  let ttsBosEmbed : STensor #[1, 1, hidden] := qwen35.typedSlice ttsSpecialEmb 1 0 1
-  let ttsEosEmbed : STensor #[1, 1, hidden] := qwen35.typedSlice ttsSpecialEmb 1 1 1
-  let ttsPadEmbed : STensor #[1, 1, hidden] := qwen35.typedSlice ttsSpecialEmb 1 2 1
+  let ttsSpecialEmb : Tensor { shape := #[1, 3, hidden] } := TalkerModel.embedText model.talker.model ttsSpecialIds
+  let ttsBosEmbed : Tensor { shape := #[1, 1, hidden] } := qwen35.typedSlice ttsSpecialEmb 1 0 1
+  let ttsEosEmbed : Tensor { shape := #[1, 1, hidden] } := qwen35.typedSlice ttsSpecialEmb 1 1 1
+  let ttsPadEmbed : Tensor { shape := #[1, 1, hidden] } := qwen35.typedSlice ttsSpecialEmb 1 2 1
 
   let codecPrefillIds : Array UInt64 :=
     match thinkMode, languageId with
@@ -426,49 +426,49 @@ private def buildTalkerInputsEquivalent
           cfg.talkerConfig.codecThinkEosId
         ]
   let codecPrefillLen : UInt64 := codecPrefillIds.size.toUInt64
-  let codecPrefillTensor : DTensor #[1, codecPrefillLen] .Int64 := idsTensor1 codecPrefillIds
-  let codecEmb0 : STensor #[1, codecPrefillLen, hidden] := TalkerModel.embedCodec model.talker.model codecPrefillTensor
+  let codecPrefillTensor : Tensor { shape := #[1, codecPrefillLen], dtype := .Int64 } := idsTensor1 codecPrefillIds
+  let codecEmb0 : Tensor { shape := #[1, codecPrefillLen, hidden] } := TalkerModel.embedCodec model.talker.model codecPrefillTensor
 
-  let codecPadBosIds : DTensor #[1, 2] .Int64 := Tensor.reshapeChecked (Tensor.fromInt64Array #[
+  let codecPadBosIds : Tensor { shape := #[1, 2], dtype := .Int64 } := Tensor.reshapeChecked (Tensor.fromInt64Array #[
     Int64.ofNat cfg.talkerConfig.codecPadId.toNat,
     Int64.ofNat cfg.talkerConfig.codecBosId.toNat
   ]) #[1, 2]
-  let codecEmb1 : STensor #[1, 2, hidden] := TalkerModel.embedCodec model.talker.model codecPadBosIds
+  let codecEmb1 : Tensor { shape := #[1, 2, hidden] } := TalkerModel.embedCodec model.talker.model codecPadBosIds
 
-  let codecInputResult : (Sigma fun n => STensor #[1, n, hidden]) :=
+  let codecInputResult : (Sigma fun n => Tensor { shape := #[1, n, hidden] }) :=
     match speakerEmbed with
     | some spk =>
-        let codecWithSpeaker : STensor #[1, codecPrefillLen + 1, hidden] := qwen35.typedCat codecEmb0 spk 1
-        let codecInput : STensor #[1, (codecPrefillLen + 1) + 2, hidden] := qwen35.typedCat codecWithSpeaker codecEmb1 1
+        let codecWithSpeaker : Tensor { shape := #[1, codecPrefillLen + 1, hidden] } := qwen35.typedCat codecEmb0 spk 1
+        let codecInput : Tensor { shape := #[1, (codecPrefillLen + 1) + 2, hidden] } := qwen35.typedCat codecWithSpeaker codecEmb1 1
         ⟨((codecPrefillLen + 1) + 2), codecInput⟩
     | none =>
-        let codecInput : STensor #[1, codecPrefillLen + 2, hidden] := qwen35.typedCat codecEmb0 codecEmb1 1
+        let codecInput : Tensor { shape := #[1, codecPrefillLen + 2, hidden] } := qwen35.typedCat codecEmb0 codecEmb1 1
         ⟨(codecPrefillLen + 2), codecInput⟩
 
   let ⟨codecInputLen, codecInput⟩ := codecInputResult
-  let codecPrefix : STensor #[1, codecInputLen - 1, hidden] := qwen35.typedSlice codecInput 1 0 (codecInputLen - 1)
-  let padScaffold : STensor #[1, codecInputLen - 2, hidden] := Tensor.expand ttsPadEmbed #[1, codecInputLen - 2, hidden]
-  let scaffold0 : STensor #[1, codecInputLen - 1, hidden] :=
+  let codecPrefix : Tensor { shape := #[1, codecInputLen - 1, hidden] } := qwen35.typedSlice codecInput 1 0 (codecInputLen - 1)
+  let padScaffold : Tensor { shape := #[1, codecInputLen - 2, hidden] } := Tensor.expand ttsPadEmbed #[1, codecInputLen - 2, hidden]
+  let scaffold0 : Tensor { shape := #[1, codecInputLen - 1, hidden] } :=
     qwen35.typedCat padScaffold ttsBosEmbed 1
-  let scaffold : STensor #[1, codecInputLen - 1, hidden] := scaffold0 + codecPrefix
-  let partA : STensor #[1, 3 + (codecInputLen - 1), hidden] := qwen35.typedCat roleEmbed scaffold 1
+  let scaffold : Tensor { shape := #[1, codecInputLen - 1, hidden] } := scaffold0 + codecPrefix
+  let partA : Tensor { shape := #[1, 3 + (codecInputLen - 1), hidden] } := qwen35.typedCat roleEmbed scaffold 1
 
-  let textMainTensor : DTensor #[1, textMainLen] .Int64 := idsTensor1 textMainIds
-  let textMainEmbed : STensor #[1, textMainLen, hidden] := TalkerModel.embedText model.talker.model textMainTensor
-  let textPlusEos : STensor #[1, textMainLen + 1, hidden] := qwen35.typedCat textMainEmbed ttsEosEmbed 1
-  let codecPadIds : DTensor #[1, textMainLen + 1] .Int64 :=
+  let textMainTensor : Tensor { shape := #[1, textMainLen], dtype := .Int64 } := idsTensor1 textMainIds
+  let textMainEmbed : Tensor { shape := #[1, textMainLen, hidden] } := TalkerModel.embedText model.talker.model textMainTensor
+  let textPlusEos : Tensor { shape := #[1, textMainLen + 1, hidden] } := qwen35.typedCat textMainEmbed ttsEosEmbed 1
+  let codecPadIds : Tensor { shape := #[1, textMainLen + 1], dtype := .Int64 } :=
     Tensor.fullInt #[1, textMainLen + 1] (Int64.ofNat cfg.talkerConfig.codecPadId.toNat)
-  let codecPadEmbed : STensor #[1, textMainLen + 1, hidden] := TalkerModel.embedCodec model.talker.model codecPadIds
-  let partB : STensor #[1, textMainLen + 1, hidden] := textPlusEos + codecPadEmbed
+  let codecPadEmbed : Tensor { shape := #[1, textMainLen + 1, hidden] } := TalkerModel.embedCodec model.talker.model codecPadIds
+  let partB : Tensor { shape := #[1, textMainLen + 1, hidden] } := textPlusEos + codecPadEmbed
 
-  let codecBosOnlyIds : DTensor #[1, 1] .Int64 := Tensor.fullInt #[1, 1] (Int64.ofNat cfg.talkerConfig.codecBosId.toNat)
-  let codecBosEmbed : STensor #[1, 1, hidden] := TalkerModel.embedCodec model.talker.model codecBosOnlyIds
-  let partC : STensor #[1, 1, hidden] := ttsPadEmbed + codecBosEmbed
+  let codecBosOnlyIds : Tensor { shape := #[1, 1], dtype := .Int64 } := Tensor.fullInt #[1, 1] (Int64.ofNat cfg.talkerConfig.codecBosId.toNat)
+  let codecBosEmbed : Tensor { shape := #[1, 1, hidden] } := TalkerModel.embedCodec model.talker.model codecBosOnlyIds
+  let partC : Tensor { shape := #[1, 1, hidden] } := ttsPadEmbed + codecBosEmbed
 
   let partABLen : UInt64 := (3 + (codecInputLen - 1)) + (textMainLen + 1)
-  let partAB : STensor #[1, partABLen, hidden] := qwen35.typedCat partA partB 1
+  let partAB : Tensor { shape := #[1, partABLen, hidden] } := qwen35.typedCat partA partB 1
   let outLen : UInt64 := partABLen + 1
-  let talkerInputs : STensor #[1, outLen, hidden] := qwen35.typedCat partAB partC 1
+  let talkerInputs : Tensor { shape := #[1, outLen, hidden] } := qwen35.typedCat partAB partC 1
   pure ((⟨outLen, talkerInputs⟩), ttsPadEmbed)
 
 private def buildBridgeConfig (args : Args) : SpeechTokenizerBridgeConfig := {
@@ -697,11 +697,11 @@ def runEndToEnd (args : Args) : IO Unit := do
       args.subtalkerTemperaturesByGroup subtalkerTopKsByGroup args.subtalkerTopPsByGroup
     let codeLen := out.lengths.getD 0 maxFrames
 
-    let codes3 : DTensor #[1, maxFrames, cfg.talkerConfig.numCodeGroups] .Int64 := qwen35.typedSlice out.codes 0 0 1
-    let codes2 : DTensor #[maxFrames, cfg.talkerConfig.numCodeGroups] .Int64 :=
+    let codes3 : Tensor { shape := #[1, maxFrames, cfg.talkerConfig.numCodeGroups], dtype := .Int64 } := qwen35.typedSlice out.codes 0 0 1
+    let codes2 : Tensor { shape := #[maxFrames, cfg.talkerConfig.numCodeGroups], dtype := .Int64 } :=
       Tensor.reshapeChecked codes3 #[maxFrames, cfg.talkerConfig.numCodeGroups]
-    let trimmed : DTensor #[codeLen, cfg.talkerConfig.numCodeGroups] .Int64 := qwen35.typedSlice codes2 0 0 codeLen
-    let flat : DTensor #[codeLen * cfg.talkerConfig.numCodeGroups] .Int64 :=
+    let trimmed : Tensor { shape := #[codeLen, cfg.talkerConfig.numCodeGroups], dtype := .Int64 } := qwen35.typedSlice codes2 0 0 codeLen
+    let flat : Tensor { shape := #[codeLen * cfg.talkerConfig.numCodeGroups], dtype := .Int64 } :=
       Tensor.reshapeChecked trimmed #[codeLen * cfg.talkerConfig.numCodeGroups]
     let codeVals ← Tensor.toUInt64Array flat
 
@@ -729,7 +729,7 @@ def runEndToEnd (args : Args) : IO Unit := do
             | none => pure s!"{modelDir}/speech_tokenizer"
           IO.println s!"Loading Lean speech-tokenizer decoder from {speechTokenizerDir}..."
           let speechDecoder ← SpeechTokenizer12HzDecoder.loadFromDir speechTokenizerDir targetDevice
-          let trimmed16 : DTensor #[codeLen, 16] .Int64 := Tensor.reshapeChecked trimmed #[codeLen, 16]
+          let trimmed16 : Tensor { shape := #[codeLen, 16], dtype := .Int64 } := Tensor.reshapeChecked trimmed #[codeLen, 16]
           if args.streamingDecode then
             speechDecoder.decodeFrameMajorChunkedToWav
               trimmed16 wavPath args.decodeChunkSize.toUInt64 args.decodeLeftContext.toUInt64

@@ -74,12 +74,12 @@ def testFixedRankProjectionFinite : IO Unit := do
   LeanTest.assertTrue (Float.isFinite fn && fn > 0.0)
     s!"Expected finite non-zero fixed-rank projection norm, got {fn}"
 
-example (_x : Sphere 3) (_v : DTensor #[4] .Float32) : True := by
+example (_x : Sphere 3) (_v : Tensor { shape := #[4], dtype := .Float32 }) : True := by
   fail_if_success
     have _ := SphereTangent.project _x _v
   trivial
 
-example (_x : Sphere 3) (_v : DTensor #[3] .Float64) : True := by
+example (_x : Sphere 3) (_v : Tensor { shape := #[3], dtype := .Float64 }) : True := by
   fail_if_success
     have _ := SphereTangent.project _x _v
   trivial
@@ -141,7 +141,7 @@ private def assertValid {σ : StaticSpec} (t : Tensor σ) : IO Unit := do
   | .ok () => pure ()
   | .error message => LeanTest.fail message
 
-example (_x : Oblique 2 3) (_v : DTensor #[3, 2] .Float32) : True := by
+example (_x : Oblique 2 3) (_v : Tensor { shape := #[3, 2], dtype := .Float32 }) : True := by
   fail_if_success
     have _ := ObliqueTangent.project _x _v
   trivial
@@ -252,7 +252,7 @@ def testIndexedPSDFactorShapeAndUpdate : IO Unit := do
     (Tensor.frobeniusNorm (Sub.sub y.toPSD (Tensor.Preserving.mulScalar (Tensor.onesLike ambient) 6.75)) < 1e-10)
     "PSD update must retain its factor dimensions and produce the expected Gram matrix"
 
-example (_a : DTensor #[2, 3] .Float32) : True := by
+example (_a : Tensor { shape := #[2, 3], dtype := .Float32 }) : True := by
   fail_if_success
     have _ := FixedRankEmbedded.project 2 3 4 _a
   fail_if_success

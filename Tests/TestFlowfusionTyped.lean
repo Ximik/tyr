@@ -4,8 +4,8 @@ import LeanTest
 open torch torch.flowfusion
 namespace Tests.FlowfusionTyped
 
-private def condition : DTensor #[2, 1] .Float32 := Tensor.full #[2, 1] 0.25
-private def lossMask : DTensor #[2, 3] .Bool := Tensor.ltScalar (Tensor.zeros #[2, 3]) 1.0
+private def condition : Tensor { shape := #[2, 1], dtype := .Float32 } := Tensor.full #[2, 1] 0.25
+private def lossMask : Tensor { shape := #[2, 3], dtype := .Bool } := Tensor.ltScalar (Tensor.zeros #[2, 3]) 1.0
 
 @[test] def testFlowfusionStaticMaskTraversal : IO Unit := do
   let wrapped := MaskedState.ofMasks (Tensor.full #[2] 2) condition lossMask
@@ -27,7 +27,7 @@ private def lossMask : DTensor #[2, 3] .Bool := Tensor.ltScalar (Tensor.zeros #[
   LeanTest.assertEqual (← added.getCmask.toFloatArray) #[0.25, 0.25]
 
 @[test] def testFlowfusionGuideOptionalMasks : IO Unit := do
-  let guide : Guide (DTensor #[2] .Float32) { shape := #[2, 1], dtype := .Float32 }
+  let guide : Guide (Tensor { shape := #[2], dtype := .Float32 }) { shape := #[2, 1], dtype := .Float32 }
       { shape := #[2, 3], dtype := .Bool } := {
     value := Tensor.ones #[2], cmask := some ⟨condition⟩, lmask := some ⟨lossMask⟩ }
   let transformed := TensorStruct.scale guide 4
@@ -35,7 +35,7 @@ private def lossMask : DTensor #[2, 3] .Bool := Tensor.ltScalar (Tensor.zeros #[
   LeanTest.assertEqual (← transformed.value.toFloatArray) #[4, 4]
   let some mask := transformed.getCmask | throw (IO.userError "missing condition mask")
   LeanTest.assertEqual (← mask.toFloatArray) #[0.25, 0.25]
-  let absent : Guide (DTensor #[2] .Float32) { shape := #[2, 1], dtype := .Float32 }
+  let absent : Guide (Tensor { shape := #[2], dtype := .Float32 }) { shape := #[2, 1], dtype := .Float32 }
       { shape := #[2, 3], dtype := .Bool } := { guide with cmask := none, lmask := none }
   let absent := TensorStruct.add absent absent
   LeanTest.assertTrue absent.getCmask.isNone

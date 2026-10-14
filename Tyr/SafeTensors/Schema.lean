@@ -64,7 +64,7 @@ private def checkLoadedWithContractCore
     (context : String)
     (contract : TensorContract)
     (raw : RawTensor)
-    : IO (DTensor shape contract.spec.dtype) := do
+    : IO (Tensor { shape := shape, dtype := contract.spec.dtype }) := do
   match Tensor.ofTensorWithContract contract raw with
   | .ok tensor => pure tensor
   | .error err => throw <| IO.userError s!"{context}: {err}"
@@ -77,7 +77,7 @@ def checkLoadedWithContract
     (context : String)
     (contract : TensorContract)
     (raw : RawTensor)
-    : IO (DTensor contract.spec.shape contract.spec.dtype) :=
+    : IO (Tensor { shape := contract.spec.shape, dtype := contract.spec.dtype }) :=
   checkLoadedWithContractCore context contract raw
 
 /-- Load from an open SafeTensors handle and check against an explicit contract. -/
@@ -86,7 +86,7 @@ def loadFromHandleWithContract
     (name : String)
     (contract : TensorContract)
     (device : Device := Device.CPU)
-    : IO (DTensor contract.spec.shape contract.spec.dtype) := do
+    : IO (Tensor { shape := contract.spec.shape, dtype := contract.spec.dtype }) := do
   let raw ← RawTensor.safeTensorsLoadFromHandleOnDevice handle name device
   checkLoadedWithContract s!"SafeTensors tensor '{name}'" contract raw
 
@@ -96,7 +96,7 @@ def loadTensorWithContract
     (name : String)
     (contract : TensorContract)
     (device : Device := Device.CPU)
-    : IO (DTensor contract.spec.shape contract.spec.dtype) := do
+    : IO (Tensor { shape := contract.spec.shape, dtype := contract.spec.dtype }) := do
   let raw ← RawTensor.safeTensorsLoadOnDevice path name device
   checkLoadedWithContract s!"SafeTensors tensor '{name}'" contract raw
 
@@ -106,7 +106,7 @@ def loadTensorShardedWithContract
     (name : String)
     (contract : TensorContract)
     (device : Device := Device.CPU)
-    : IO (DTensor contract.spec.shape contract.spec.dtype) := do
+    : IO (Tensor { shape := contract.spec.shape, dtype := contract.spec.dtype }) := do
   let raw ← RawTensor.safeTensorsLoadShardedOnDevice dir name device
   checkLoadedWithContract s!"SafeTensors tensor '{name}'" contract raw
 
@@ -116,7 +116,7 @@ def loadFromHandleWithSpec
     (name : String)
     (spec : TensorSpec)
     (device : Device := Device.CPU)
-    : IO (DTensor spec.shape spec.dtype) :=
+    : IO (Tensor { shape := spec.shape, dtype := spec.dtype }) :=
   loadFromHandleWithContract handle name
     { spec, role := .parameter, devicePolicy := .exact device }
     device
@@ -127,7 +127,7 @@ def loadTensorWithSpec
     (name : String)
     (spec : TensorSpec)
     (device : Device := Device.CPU)
-    : IO (DTensor spec.shape spec.dtype) :=
+    : IO (Tensor { shape := spec.shape, dtype := spec.dtype }) :=
   loadTensorWithContract path name
     { spec, role := .parameter, devicePolicy := .exact device }
     device
@@ -138,7 +138,7 @@ def loadTensorShardedWithSpec
     (name : String)
     (spec : TensorSpec)
     (device : Device := Device.CPU)
-    : IO (DTensor spec.shape spec.dtype) :=
+    : IO (Tensor { shape := spec.shape, dtype := spec.dtype }) :=
   loadTensorShardedWithContract dir name
     { spec, role := .parameter, devicePolicy := .exact device }
     device
@@ -148,7 +148,7 @@ def loadFromHandleWithSchema
     (handle : @& SafeTensorsHandle)
     (schema : TensorSchema)
     (device : Device := Device.CPU)
-    : IO (DTensor schema.shape schema.dtype) :=
+    : IO (Tensor { shape := schema.shape, dtype := schema.dtype }) :=
   loadFromHandleWithSpec handle schema.name schema.toSpec device
 
 /-- Load using a discovered tensor schema from a SafeTensors file. -/
@@ -156,7 +156,7 @@ def loadTensorWithSchema
     (path : String)
     (schema : TensorSchema)
     (device : Device := Device.CPU)
-    : IO (DTensor schema.shape schema.dtype) :=
+    : IO (Tensor { shape := schema.shape, dtype := schema.dtype }) :=
   loadTensorWithSpec path schema.name schema.toSpec device
 
 /-- Load using a discovered tensor schema from a sharded SafeTensors directory. -/
@@ -164,7 +164,7 @@ def loadTensorShardedWithSchema
     (dir : String)
     (schema : TensorSchema)
     (device : Device := Device.CPU)
-    : IO (DTensor schema.shape schema.dtype) :=
+    : IO (Tensor { shape := schema.shape, dtype := schema.dtype }) :=
   loadTensorShardedWithSpec dir schema.name schema.toSpec device
 
 private def getObjVal? (j : Json) (key : String) : Option Json :=

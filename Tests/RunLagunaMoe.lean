@@ -82,7 +82,7 @@ private def loadBlock (path : String) (device : Device) : IO (LagunaSparseMoeBlo
 
 /-- Max abs / max rel (denominator clamped by 1e-3) error in FP32. -/
 private def maxErrors {s : Shape} {d e : DType}
-    (got : DTensor s d) (expected : DTensor s e) : IO (Float × Float) := do
+    (got : Tensor { shape := s, dtype := d }) (expected : Tensor { shape := s, dtype := e }) : IO (Float × Float) := do
   let a ← Tensor.toFloatArray got.toFloat32
   let b ← Tensor.toFloatArray expected.toFloat32
   let mut maxAbs := 0.0
@@ -96,7 +96,7 @@ private def maxErrors {s : Shape} {d e : DType}
   pure (maxAbs, maxRel)
 
 private def countViolations {s : Shape} {d e : DType}
-    (got : DTensor s d) (expected : DTensor s e) (rtol atol : Float) : IO Float := do
+    (got : Tensor { shape := s, dtype := d }) (expected : Tensor { shape := s, dtype := e }) (rtol atol : Float) : IO Float := do
   let a ← Tensor.toFloatArray got.toFloat32
   let b ← Tensor.toFloatArray expected.toFloat32
   let mut violations := 0.0
@@ -114,7 +114,7 @@ private def runCase (path : String) (device : Device) : IO Unit := do
   let lbl := deviceLabel device
   let block ← loadBlock path device
   let x ← torch.safetensors.loadTensorCandidates path #["x"] #[5, 64]
-  let xD : STensor #[5, 64] := x.to device
+  let xD : Tensor { shape := #[5, 64] } := x.to device
   let yExp ← torch.safetensors.loadTensorCandidates path #["y_expected"] #[5, 64]
   let idxExp ← torch.safetensors.loadTensorCandidates path #["top_idx_expected"] #[5, 2]
   let wExp ← torch.safetensors.loadTensorCandidates path #["weights_expected"] #[5, 2]

@@ -19,7 +19,7 @@ open torch.safetensors (pushUnique tryLoadTensor tryLoadTensorSharded
   loadTensorCandidates loadTensorShardedCandidates
   tryLoadTensorCandidates tryLoadTensorShardedCandidates)
 
-private def finalizeDequantizedForDevice {s : Shape} (device : Device) (t : DTensor s .Float32) : STensor s :=
+private def finalizeDequantizedForDevice {s : Shape} (device : Device) (t : Tensor { shape := s, dtype := .Float32 }) : Tensor { shape := s } :=
   match device with
   | .CPU => t.forgetDType
   | .MPS => t.toBFloat16.forgetDType
@@ -44,7 +44,7 @@ private def loadLinearWeightSharded
     (baseName : String)
     (outDim inDim : UInt64)
     (device : Device := Device.CPU)
-    : IO (STensor #[outDim, inDim]) := do
+    : IO (Tensor { shape := #[outDim, inDim] }) := do
   let bases := nameCandidates baseName
   for b in bases do
     let wName := s!"{b}.weight"
@@ -61,7 +61,7 @@ private def loadLinearWeight
     (baseName : String)
     (outDim inDim : UInt64)
     (device : Device := Device.CPU)
-    : IO (STensor #[outDim, inDim]) := do
+    : IO (Tensor { shape := #[outDim, inDim] }) := do
   let bases := nameCandidates baseName
   for b in bases do
     let wName := s!"{b}.weight"
@@ -78,7 +78,7 @@ private def loadMoeExpertWeightSharded
     (baseName : String)
     (experts outDim inDim : UInt64)
     (device : Device := Device.CPU)
-    : IO (STensor #[experts, outDim, inDim]) := do
+    : IO (Tensor { shape := #[experts, outDim, inDim] }) := do
   let bases := nameCandidates baseName
   for b in bases do
     -- BF16-style checkpoints often store experts tensors directly (no ".weight").
@@ -103,7 +103,7 @@ private def loadMoeExpertWeight
     (baseName : String)
     (experts outDim inDim : UInt64)
     (device : Device := Device.CPU)
-    : IO (STensor #[experts, outDim, inDim]) := do
+    : IO (Tensor { shape := #[experts, outDim, inDim] }) := do
   let bases := nameCandidates baseName
   for b in bases do
     if let some w ← tryLoadTensor path b #[experts, outDim, inDim] device then

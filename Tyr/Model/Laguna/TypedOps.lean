@@ -8,31 +8,31 @@ private def checked {σ : StaticSpec} (raw : RawTensor) : Tensor σ :=
   | .ok tensor => tensor
   | .error message => panic! s!"Laguna tensor boundary: {message}"
 
-def mulBroadcast {s t out : Shape} (a : STensor s) (b : STensor t) : STensor out :=
+def mulBroadcast {s t out : Shape} (a : Tensor { shape := s }) (b : Tensor { shape := t }) : Tensor { shape := out } :=
   checked (RawTensor.mul s a.raw b.raw)
 
-def bmm {b m n k : UInt64} (x : STensor #[b, m, k]) (y : STensor #[b, k, n]) :
-    STensor #[b, m, n] :=
+def bmm {b m n k : UInt64} (x : Tensor { shape := #[b, m, k] }) (y : Tensor { shape := #[b, k, n] }) :
+    Tensor { shape := #[b, m, n] } :=
   checked (RawTensor.lagunaBmm b m n k x.raw y.raw)
 
-def scatterAdd {s t : Shape} (input : STensor s) (dim : Int64)
-    (indices : DTensor t .Int64) (src : STensor t) : STensor s :=
+def scatterAdd {s t : Shape} (input : Tensor { shape := s }) (dim : Int64)
+    (indices : Tensor { shape := t, dtype := .Int64 }) (src : Tensor { shape := t }) : Tensor { shape := s } :=
   input.checkedReplacement (RawTensor.lagunaScatterAdd s input.raw dim indices.raw src.raw)
 
 def transposeMatrixBatch {b m n : UInt64} {d : DType}
-    (x : DTensor #[b, m, n] d) : DTensor #[b, n, m] d := x.transpose 1 2
+    (x : Tensor { shape := #[b, m, n], dtype := d }) : Tensor { shape := #[b, n, m], dtype := d } := x.transpose 1 2
 
-def mulSame {s : Shape} (x y : STensor s) : STensor s := x * y
-def addSame {s : Shape} (x y : STensor s) : STensor s := x + y
+def mulSame {s : Shape} (x y : Tensor { shape := s }) : Tensor { shape := s } := x * y
+def addSame {s : Shape} (x y : Tensor { shape := s }) : Tensor { shape := s } := x + y
 
 def transposeAttention {b s h d : UInt64} {dt : DType}
-    (x : DTensor #[b, s, h, d] dt) : DTensor #[b, h, s, d] dt := x.transpose 1 2
+    (x : Tensor { shape := #[b, s, h, d], dtype := dt }) : Tensor { shape := #[b, h, s, d], dtype := dt } := x.transpose 1 2
 
-def sliceTyped {s : Shape} {d : DType} (x : DTensor s d)
-    (dim : Nat) (start len : UInt64) : DTensor (s.set! dim len) d :=
+def sliceTyped {s : Shape} {d : DType} (x : Tensor { shape := s, dtype := d })
+    (dim : Nat) (start len : UInt64) : Tensor { shape := (s.set! dim len), dtype := d } :=
   x.sliceChecked dim start len (s.set! dim len)
 
-def randnDynamic (shape : Shape) : IO (STensor shape) := do
+def randnDynamic (shape : Shape) : IO (Tensor { shape := shape }) := do
   return (← Tensor.randn shape).forgetDType
 
 def hasGradFn {σ : StaticSpec} (x : Tensor σ) : Bool :=

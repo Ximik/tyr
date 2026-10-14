@@ -72,7 +72,7 @@ partial def buildValueSchedule (T0 T1 tol : Float) (maxDepth : Nat)
 /-- Upload a schedule to the device as a flat Float32 tensor; the result
     shape records the schedule length. -/
 def uploadSchedule (sched : Array Float) (device : Device) :
-    DTensor #[sched.size.toUInt64] .Float32 :=
+    Tensor { shape := #[sched.size.toUInt64], dtype := .Float32 } :=
   (Tensor.fromFloatArray sched).to device
 
 /-- Per-element key-root for a tensor-valued tree: the same derivation as
@@ -86,7 +86,7 @@ def tensorRootState (treeSeed : UInt64) : UInt64 :=
 def vbtIncrementDevice {s : Shape}
     (treeSeed : UInt64) (T0 T1 tol : Float) (maxDepth : Nat)
     (tA tB : Float)
-    (out : DTensor s .Float32) (n : UInt64)
+    (out : Tensor { shape := s, dtype := .Float32 }) (n : UInt64)
     (blackwell : Bool) (stream : UInt64)
     (device : Device := Device.CUDA 0) : IO Unit := do
   let schedA := buildValueSchedule T0 T1 tol maxDepth tA

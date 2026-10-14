@@ -11,8 +11,8 @@ open torch.DiffEq
 private def approx (a b tol : Float) : Bool :=
   Float.abs (a - b) < tol
 
-private def getY1 {S C : Type} (label : String) (sol : Solution (DTensor #[] .Float32) S C) (fallback : DTensor #[] .Float32) :
-    IO (DTensor #[] .Float32) := do
+private def getY1 {S C : Type} (label : String) (sol : Solution (Tensor { shape := #[], dtype := .Float32 }) S C) (fallback : Tensor { shape := #[], dtype := .Float32 }) :
+    IO (Tensor { shape := #[], dtype := .Float32 }) := do
   match sol.ys with
   | some ys =>
       if ys.size == 0 then
@@ -25,19 +25,19 @@ private def getY1 {S C : Type} (label : String) (sol : Solution (DTensor #[] .Fl
       return fallback
 
 @[test] def testBacksolveAdjointLinearODE : IO Unit := do
-  let term : ODETerm (DTensor #[] .Float32) (DTensor #[] .Float32) := { vectorField := fun _t y a => Tensor.mul a y }
+  let term : ODETerm (Tensor { shape := #[], dtype := .Float32 }) (Tensor { shape := #[], dtype := .Float32 }) := { vectorField := fun _t y a => Tensor.mul a y }
   let solver :=
     RK4.solver
-      (Term := ODETerm (DTensor #[] .Float32) (DTensor #[] .Float32))
-      (Y := DTensor #[] .Float32)
-      (VF := DTensor #[] .Float32)
-      (Args := DTensor #[] .Float32)
+      (Term := ODETerm (Tensor { shape := #[], dtype := .Float32 }) (Tensor { shape := #[], dtype := .Float32 }))
+      (Y := Tensor { shape := #[], dtype := .Float32 })
+      (VF := Tensor { shape := #[], dtype := .Float32 })
+      (Args := Tensor { shape := #[], dtype := .Float32 })
   let adjSolver :=
     RK4.solver
-      (Term := ODETerm (AdjointState (DTensor #[] .Float32) (DTensor #[] .Float32)) (DTensor #[] .Float32))
-      (Y := AdjointState (DTensor #[] .Float32) (DTensor #[] .Float32))
-      (VF := AdjointState (DTensor #[] .Float32) (DTensor #[] .Float32))
-      (Args := DTensor #[] .Float32)
+      (Term := ODETerm (AdjointState (Tensor { shape := #[], dtype := .Float32 }) (Tensor { shape := #[], dtype := .Float32 })) (Tensor { shape := #[], dtype := .Float32 }))
+      (Y := AdjointState (Tensor { shape := #[], dtype := .Float32 }) (Tensor { shape := #[], dtype := .Float32 }))
+      (VF := AdjointState (Tensor { shape := #[], dtype := .Float32 }) (Tensor { shape := #[], dtype := .Float32 }))
+      (Args := Tensor { shape := #[], dtype := .Float32 })
   let y0 := Tensor.full #[] 2.0
   let a := Tensor.full #[] 0.3
   let t0 := 0.0
@@ -45,11 +45,11 @@ private def getY1 {S C : Type} (label : String) (sol : Solution (DTensor #[] .Fl
   let dt0 := some 0.01
   let sol :=
     diffeqsolve
-      (Term := ODETerm (DTensor #[] .Float32) (DTensor #[] .Float32))
-      (Y := DTensor #[] .Float32)
-      (VF := DTensor #[] .Float32)
+      (Term := ODETerm (Tensor { shape := #[], dtype := .Float32 }) (Tensor { shape := #[], dtype := .Float32 }))
+      (Y := Tensor { shape := #[], dtype := .Float32 })
+      (VF := Tensor { shape := #[], dtype := .Float32 })
       (Control := Time)
-      (Args := DTensor #[] .Float32)
+      (Args := Tensor { shape := #[], dtype := .Float32 })
       (Controller := ConstantStepSize)
       term solver t0 t1 dt0 y0 a (saveat := { steps := true })
   let adjY1 := Tensor.ones #[]
@@ -61,20 +61,20 @@ private def getY1 {S C : Type} (label : String) (sol : Solution (DTensor #[] .Fl
       let y0m := Tensor.addScalar y0 (-eps)
       let solp :=
         diffeqsolve
-          (Term := ODETerm (DTensor #[] .Float32) (DTensor #[] .Float32))
-          (Y := DTensor #[] .Float32)
-          (VF := DTensor #[] .Float32)
+          (Term := ODETerm (Tensor { shape := #[], dtype := .Float32 }) (Tensor { shape := #[], dtype := .Float32 }))
+          (Y := Tensor { shape := #[], dtype := .Float32 })
+          (VF := Tensor { shape := #[], dtype := .Float32 })
           (Control := Time)
-          (Args := DTensor #[] .Float32)
+          (Args := Tensor { shape := #[], dtype := .Float32 })
           (Controller := ConstantStepSize)
           term solver t0 t1 dt0 y0p a (saveat := { t1 := true })
       let solm :=
         diffeqsolve
-          (Term := ODETerm (DTensor #[] .Float32) (DTensor #[] .Float32))
-          (Y := DTensor #[] .Float32)
-          (VF := DTensor #[] .Float32)
+          (Term := ODETerm (Tensor { shape := #[], dtype := .Float32 }) (Tensor { shape := #[], dtype := .Float32 }))
+          (Y := Tensor { shape := #[], dtype := .Float32 })
+          (VF := Tensor { shape := #[], dtype := .Float32 })
           (Control := Time)
-          (Args := DTensor #[] .Float32)
+          (Args := Tensor { shape := #[], dtype := .Float32 })
           (Controller := ConstantStepSize)
           term solver t0 t1 dt0 y0m a (saveat := { t1 := true })
       let y1p ← getY1 "y0+eps" solp y0
@@ -87,20 +87,20 @@ private def getY1 {S C : Type} (label : String) (sol : Solution (DTensor #[] .Fl
       let am := Tensor.addScalar a (-eps)
       let solap :=
         diffeqsolve
-          (Term := ODETerm (DTensor #[] .Float32) (DTensor #[] .Float32))
-          (Y := DTensor #[] .Float32)
-          (VF := DTensor #[] .Float32)
+          (Term := ODETerm (Tensor { shape := #[], dtype := .Float32 }) (Tensor { shape := #[], dtype := .Float32 }))
+          (Y := Tensor { shape := #[], dtype := .Float32 })
+          (VF := Tensor { shape := #[], dtype := .Float32 })
           (Control := Time)
-          (Args := DTensor #[] .Float32)
+          (Args := Tensor { shape := #[], dtype := .Float32 })
           (Controller := ConstantStepSize)
           term solver t0 t1 dt0 y0 ap (saveat := { t1 := true })
       let solam :=
         diffeqsolve
-          (Term := ODETerm (DTensor #[] .Float32) (DTensor #[] .Float32))
-          (Y := DTensor #[] .Float32)
-          (VF := DTensor #[] .Float32)
+          (Term := ODETerm (Tensor { shape := #[], dtype := .Float32 }) (Tensor { shape := #[], dtype := .Float32 }))
+          (Y := Tensor { shape := #[], dtype := .Float32 })
+          (VF := Tensor { shape := #[], dtype := .Float32 })
           (Control := Time)
-          (Args := DTensor #[] .Float32)
+          (Args := Tensor { shape := #[], dtype := .Float32 })
           (Controller := ConstantStepSize)
           term solver t0 t1 dt0 y0 am (saveat := { t1 := true })
       let y1ap ← getY1 "a+eps" solap y0
@@ -117,13 +117,13 @@ private def getY1 {S C : Type} (label : String) (sol : Solution (DTensor #[] .Fl
         s!"adjoint da expected {fdA}, got {adjA}"
 
 @[test] def testDirectAdjointLinearODE : IO Unit := do
-  let term : ODETerm (DTensor #[] .Float32) (DTensor #[] .Float32) := { vectorField := fun _t y a => Tensor.mul a y }
+  let term : ODETerm (Tensor { shape := #[], dtype := .Float32 }) (Tensor { shape := #[], dtype := .Float32 }) := { vectorField := fun _t y a => Tensor.mul a y }
   let solver :=
     Euler.solver
-      (Term := ODETerm (DTensor #[] .Float32) (DTensor #[] .Float32))
-      (Y := DTensor #[] .Float32)
-      (VF := DTensor #[] .Float32)
-      (Args := DTensor #[] .Float32)
+      (Term := ODETerm (Tensor { shape := #[], dtype := .Float32 }) (Tensor { shape := #[], dtype := .Float32 }))
+      (Y := Tensor { shape := #[], dtype := .Float32 })
+      (VF := Tensor { shape := #[], dtype := .Float32 })
+      (Args := Tensor { shape := #[], dtype := .Float32 })
   let y0 := Tensor.full #[] 2.0
   let a := Tensor.full #[] 0.3
   let t0 := 0.0
@@ -140,20 +140,20 @@ private def getY1 {S C : Type} (label : String) (sol : Solution (DTensor #[] .Fl
       let y0m := Tensor.addScalar y0 (-eps)
       let solp :=
         diffeqsolve
-          (Term := ODETerm (DTensor #[] .Float32) (DTensor #[] .Float32))
-          (Y := DTensor #[] .Float32)
-          (VF := DTensor #[] .Float32)
+          (Term := ODETerm (Tensor { shape := #[], dtype := .Float32 }) (Tensor { shape := #[], dtype := .Float32 }))
+          (Y := Tensor { shape := #[], dtype := .Float32 })
+          (VF := Tensor { shape := #[], dtype := .Float32 })
           (Control := Time)
-          (Args := DTensor #[] .Float32)
+          (Args := Tensor { shape := #[], dtype := .Float32 })
           (Controller := ConstantStepSize)
           term solver t0 t1 dt0 y0p a (saveat := { t1 := true })
       let solm :=
         diffeqsolve
-          (Term := ODETerm (DTensor #[] .Float32) (DTensor #[] .Float32))
-          (Y := DTensor #[] .Float32)
-          (VF := DTensor #[] .Float32)
+          (Term := ODETerm (Tensor { shape := #[], dtype := .Float32 }) (Tensor { shape := #[], dtype := .Float32 }))
+          (Y := Tensor { shape := #[], dtype := .Float32 })
+          (VF := Tensor { shape := #[], dtype := .Float32 })
           (Control := Time)
-          (Args := DTensor #[] .Float32)
+          (Args := Tensor { shape := #[], dtype := .Float32 })
           (Controller := ConstantStepSize)
           term solver t0 t1 dt0 y0m a (saveat := { t1 := true })
       let y1p ← getY1 "y0+eps" solp y0
@@ -166,20 +166,20 @@ private def getY1 {S C : Type} (label : String) (sol : Solution (DTensor #[] .Fl
       let am := Tensor.addScalar a (-eps)
       let solap :=
         diffeqsolve
-          (Term := ODETerm (DTensor #[] .Float32) (DTensor #[] .Float32))
-          (Y := DTensor #[] .Float32)
-          (VF := DTensor #[] .Float32)
+          (Term := ODETerm (Tensor { shape := #[], dtype := .Float32 }) (Tensor { shape := #[], dtype := .Float32 }))
+          (Y := Tensor { shape := #[], dtype := .Float32 })
+          (VF := Tensor { shape := #[], dtype := .Float32 })
           (Control := Time)
-          (Args := DTensor #[] .Float32)
+          (Args := Tensor { shape := #[], dtype := .Float32 })
           (Controller := ConstantStepSize)
           term solver t0 t1 dt0 y0 ap (saveat := { t1 := true })
       let solam :=
         diffeqsolve
-          (Term := ODETerm (DTensor #[] .Float32) (DTensor #[] .Float32))
-          (Y := DTensor #[] .Float32)
-          (VF := DTensor #[] .Float32)
+          (Term := ODETerm (Tensor { shape := #[], dtype := .Float32 }) (Tensor { shape := #[], dtype := .Float32 }))
+          (Y := Tensor { shape := #[], dtype := .Float32 })
+          (VF := Tensor { shape := #[], dtype := .Float32 })
           (Control := Time)
-          (Args := DTensor #[] .Float32)
+          (Args := Tensor { shape := #[], dtype := .Float32 })
           (Controller := ConstantStepSize)
           term solver t0 t1 dt0 y0 am (saveat := { t1 := true })
       let y1ap ← getY1 "a+eps" solap y0

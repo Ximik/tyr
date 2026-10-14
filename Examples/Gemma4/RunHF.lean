@@ -163,11 +163,11 @@ private def runTextBatches
     let ⟨batch, ⟨seq, (inputIds, promptLens)⟩⟩ ←
       buildBatchInputWithEncoder tok.padToken.toUInt64 chunk (fun p => pure (encodePromptToIds tok args.enableThinking p))
     pure ⟨batch, ⟨seq, (inputIds.to device, promptLens)⟩⟩
-  let decodeBatch (promptLens : Array Nat) {b os : UInt64} (ids : DTensor #[b, os] .Int64) : IO (Array String) :=
+  let decodeBatch (promptLens : Array Nat) {b os : UInt64} (ids : Tensor { shape := #[b, os], dtype := .Int64 }) : IO (Array String) :=
     decodeGeneratedBatch promptLens ids (fun xs => tokenizer.gemma4.decodeText tok xs)
-  let runGen (b : UInt64) {s : UInt64} (ids : DTensor #[b, s] .Int64) :=
+  let runGen (b : UInt64) {s : UInt64} (ids : Tensor { shape := #[b, s], dtype := .Int64 }) :=
     model.generate cfg ids args.maxNewTokens .greedy generationStopIds
-  let runGenStream (b : UInt64) {s : UInt64} (ids : DTensor #[b, s] .Int64) (cb : StreamCallback b) :=
+  let runGenStream (b : UInt64) {s : UInt64} (ids : Tensor { shape := #[b, s], dtype := .Int64 }) (cb : StreamCallback b) :=
     model.generateStream cfg ids cb args.maxNewTokens .greedy generationStopIds
   runGenerationBatches prompts args.batchSize args.maxNewTokens args.stream args.debugIds
     (prompts.size == 1) buildBatch runGen runGenStream decodeBatch
@@ -189,15 +189,15 @@ private def runMultimodalBatches
       buildBatchInputWithEncoder tok.padToken.toUInt64 chunk
         (encodePromptToIdsMultimodal tok args.enableThinking imageSoftTokenCounts)
     pure ⟨batch, ⟨seq, (inputIds.to device, promptLens)⟩⟩
-  let decodeBatch (promptLens : Array Nat) {b os : UInt64} (ids : DTensor #[b, os] .Int64) : IO (Array String) :=
+  let decodeBatch (promptLens : Array Nat) {b os : UInt64} (ids : Tensor { shape := #[b, os], dtype := .Int64 }) : IO (Array String) :=
     decodeGeneratedBatch promptLens ids (fun xs => tokenizer.gemma4.decodeText tok xs)
-  let runGen (b : UInt64) {s : UInt64} (ids : DTensor #[b, s] .Int64) :=
+  let runGen (b : UInt64) {s : UInt64} (ids : Tensor { shape := #[b, s], dtype := .Int64 }) :=
     let imageFeaturesChunk :=
       match imageFeatures with
       | some ⟨_nTok, feats⟩ => some <| Gemma4ForConditionalGeneration.repeatFeaturesForBatch (batch := b) cfg feats
       | none => none
     model.generate cfg ids args.maxNewTokens .greedy generationStopIds imageFeaturesChunk
-  let runGenStream (b : UInt64) {s : UInt64} (ids : DTensor #[b, s] .Int64) (cb : StreamCallback b) :=
+  let runGenStream (b : UInt64) {s : UInt64} (ids : Tensor { shape := #[b, s], dtype := .Int64 }) (cb : StreamCallback b) :=
     let imageFeaturesChunk :=
       match imageFeatures with
       | some ⟨_nTok, feats⟩ => some <| Gemma4ForConditionalGeneration.repeatFeaturesForBatch (batch := b) cfg feats

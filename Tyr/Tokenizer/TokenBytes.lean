@@ -24,15 +24,15 @@ structure TokenBytes where
   /-- Vocabulary size -/
   vocabSize : UInt32
   /-- Bytes per token ID as Int64 tensor of shape [vocabSize] -/
-  bytes : DTensor #[vocabSize.toUInt64] .Int64
+  bytes : Tensor { shape := #[vocabSize.toUInt64], dtype := .Int64 }
   deriving Repr
 
 /-- Construct the requested Int64 vector, checking its length. -/
-private def int64VectorFromArray (arr : Array Int64) (n : UInt64) : DTensor #[n] .Int64 :=
+private def int64VectorFromArray (arr : Array Int64) (n : UInt64) : Tensor { shape := #[n], dtype := .Int64 } :=
   (Tensor.fromInt64Array arr).reshapeChecked #[n]
 
-private def indexSelect1d {n k : UInt64} (t : DTensor #[n] .Int64)
-    (indices : DTensor #[k] .Int64) : DTensor #[k] .Int64 :=
+private def indexSelect1d {n k : UInt64} (t : Tensor { shape := #[n], dtype := .Int64 })
+    (indices : Tensor { shape := #[k], dtype := .Int64 }) : Tensor { shape := #[k], dtype := .Int64 } :=
   Tensor.indexSelect t indices
 
 /-- Build token bytes mapping from a BPE tokenizer.
@@ -69,7 +69,7 @@ def TokenBytes.totalBytes (tb : TokenBytes) (tokenIds : Array UInt32) : IO UInt6
 
 /-- Compute total bytes for a 1D tensor of token IDs.
     More efficient than array-based version for tensor inputs. -/
-def TokenBytes.totalBytesFromTensor (tb : TokenBytes) (tokenIds : DTensor #[n] .Int64)
+def TokenBytes.totalBytesFromTensor (tb : TokenBytes) (tokenIds : Tensor { shape := #[n], dtype := .Int64 })
     : IO UInt64 := do
   -- Index into bytes to get byte counts per token
   let bytesPerToken := indexSelect1d tb.bytes tokenIds
@@ -81,7 +81,7 @@ def TokenBytes.totalBytesFromTensor (tb : TokenBytes) (tokenIds : DTensor #[n] .
     Only counts bytes for tokens where mask > 0.
     Used in BPB evaluation where we only count trained tokens. -/
 def TokenBytes.totalBytesWithMask (tb : TokenBytes)
-    (tokenIds : DTensor #[b, s] .Int64) (mask : DTensor #[b, s] .Float32)
+    (tokenIds : Tensor { shape := #[b, s], dtype := .Int64 }) (mask : Tensor { shape := #[b, s], dtype := .Float32 })
     : IO UInt64 := do
   -- Flatten for indexing
   let numTokens := b * s
@@ -102,8 +102,8 @@ def TokenBytes.totalBytesWithMask (tb : TokenBytes)
     dimensions named explicitly. -/
 def TokenBytes.totalBytesWithMask' (tb : TokenBytes)
     {batchSize seqLen : UInt64}
-    (tokenIds : DTensor #[batchSize, seqLen] .Int64)
-    (mask : DTensor #[batchSize, seqLen] .Float32)
+    (tokenIds : Tensor { shape := #[batchSize, seqLen], dtype := .Int64 })
+    (mask : Tensor { shape := #[batchSize, seqLen], dtype := .Float32 })
     : IO UInt64 :=
   tb.totalBytesWithMask tokenIds mask
 

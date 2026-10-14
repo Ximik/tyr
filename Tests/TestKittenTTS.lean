@@ -44,8 +44,8 @@ private def tinyCfg : KittenTTSConfig :=
 def testKittenTTSInitAndForward : IO Unit := do
   let cfg := tinyCfg
   let model ← Model.init cfg
-  let inputIds : DTensor #[1, 5] .Int64 ← Tensor.randint 0 cfg.nToken.toInt64 #[1, 5]
-  let refStyle : DTensor #[1, KittenTTSConfig.fullStyleDim cfg] .Float32 ← Tensor.randn #[1, KittenTTSConfig.fullStyleDim cfg]
+  let inputIds : Tensor { shape := #[1, 5], dtype := .Int64 } ← Tensor.randint 0 cfg.nToken.toInt64 #[1, 5]
+  let refStyle : Tensor { shape := #[1, KittenTTSConfig.fullStyleDim cfg], dtype := .Float32 } ← Tensor.randn #[1, KittenTTSConfig.fullStyleDim cfg]
   torch.manualSeed 12345
   let out ← model.synthesizeIds inputIds refStyle
   torch.manualSeed 12345
@@ -100,7 +100,7 @@ def testKittenTTSIndexedCheckpointRoundTrip : IO Unit := IO.FS.withTempDir fun d
   let template ← Model.init tinyCfg
   let loaded ← roundTripParams model template dir.toString
   let inputIds := (Tensor.fromInt64Array #[1, 2, 3]).reshapeChecked #[1, 3]
-  let style : DTensor #[1, KittenTTSConfig.fullStyleDim tinyCfg] .Float32 := Tensor.zeros _
+  let style : Tensor { shape := #[1, KittenTTSConfig.fullStyleDim tinyCfg], dtype := .Float32 } := Tensor.zeros _
   torch.manualSeed 42
   let expected ← model.synthesizeIds inputIds style
   torch.manualSeed 42

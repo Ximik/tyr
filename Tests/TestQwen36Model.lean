@@ -28,7 +28,7 @@ private def tinyCfg : Config := Config.normalize {
 @[test]
 def testQwen36InitAndForward : IO Unit := do
   let model ← Qwen36ForCausalLM.init tinyCfg false
-  let ids : DTensor #[1, 4] .Int64 := (Tensor.fromInt64Array #[1, 2, 3, 4]).reshapeChecked #[1, 4]
+  let ids : Tensor { shape := #[1, 4], dtype := .Int64 } := (Tensor.fromInt64Array #[1, 2, 3, 4]).reshapeChecked #[1, 4]
   let logits := model.forward tinyCfg ids
   LeanTest.assertEqual logits.runtimeShape #[1, 4, tinyCfg.vocab_size]
     "Qwen3.6 forward should return [batch, seq, vocab]"

@@ -8,21 +8,21 @@ open torch
 open LeanTest
 
 structure Inner where
-  bias : DTensor #[4] .Float32
+  bias : Tensor { shape := #[4], dtype := .Float32 }
   tag : Static String
   cache : Frozen { shape := #[4], dtype := .Float32 }
   deriving TensorStruct, ToTensorStructSchema
 
 structure Outer where
-  weight : DTensor #[2, 4] .Float32
+  weight : Tensor { shape := #[2, 4], dtype := .Float32 }
   inner : Inner
   gates : torch.Vector 2 (Frozen { shape := #[1], dtype := .Float32 })
-  optScale : Option (DTensor #[3] .Float32)
+  optScale : Option (Tensor { shape := #[3], dtype := .Float32 })
   flag : Bool
   deriving TensorStruct, ToTensorStructSchema
 
 structure IndexedContainer where
-  blocks : Array (DTensor #[2] .Float32)
+  blocks : Array (Tensor { shape := #[2], dtype := .Float32 })
   labels : List (Static String)
   maybeFrozen : Option (Frozen { shape := #[2], dtype := .Float32 })
   deriving TensorStruct, ToTensorStructSchema

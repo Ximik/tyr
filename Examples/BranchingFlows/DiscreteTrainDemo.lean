@@ -27,10 +27,10 @@ private def discreteBridge (_ : Unit) (_x0 x1 : Nat) (_t0 _t1 : Float) : Nat :=
   x1
 
 structure ToyParams (vocab hidden : UInt64) where
-  embed : STensor #[vocab, hidden]
-  proj : STensor #[vocab, hidden]
-  splitW : STensor #[1, hidden]
-  delW : STensor #[1, hidden]
+  embed : Tensor { shape := #[vocab, hidden] }
+  proj : Tensor { shape := #[vocab, hidden] }
+  splitW : Tensor { shape := #[1, hidden] }
+  delW : Tensor { shape := #[1, hidden] }
   deriving TensorStruct
 
 namespace ToyParams
@@ -47,7 +47,7 @@ end ToyParams
 def toyModel {maxLen vocab hidden : UInt64} : BranchingModel maxLen vocab (ToyParams vocab hidden) :=
   { forward := fun {batch} params state _t => do
       let emb := Tensor.embedding (batch := batch) (seq := maxLen) (vocab := vocab) (embed := hidden) state params.embed
-      let bias : STensor #[vocab] := zerosDynamic #[vocab]
+      let bias : Tensor { shape := #[vocab] } := zerosDynamic #[vocab]
       let logits := Tensor.affine3d emb params.proj bias
       let split3 := Tensor.linear3d (x := emb) (weight := params.splitW)
       let del3 := Tensor.linear3d (x := emb) (weight := params.delW)

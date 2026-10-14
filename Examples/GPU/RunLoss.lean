@@ -37,7 +37,7 @@ private def lossMatrix : LeanBenchmark.Matrix LossShape := {
 private def benchmarkShape (cfg : Benchmark.Config) (stream : UInt64)
     (caseLabel : String) (rows : UInt64) : IO (Array String × Bool) := do
   let device := Device.CUDA 0
-  let logitsBase : DTensor #[rows, vocab] .BFloat16 :=
+  let logitsBase : Tensor { shape := #[rows, vocab], dtype := .BFloat16 } :=
     (← Tensor.randn #[rows, vocab] false device).toBFloat16
   let targets ← Tensor.randint 0 vocab.toInt64 #[rows] device
   let (expectedLosses, expectedMean, expectedGrad) := referenceTraining logitsBase targets

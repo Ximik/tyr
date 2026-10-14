@@ -22,7 +22,7 @@ open torch.safetensors (tryLoadTensorSharded)
 
 /-- Local alias for sharded tensor loading.
     Device placement is performed once in `loadSharded`. -/
-private def loadTensorShardedTarget (modelDir : String) (name : String) (s : Shape) : IO (STensor s) := do
+private def loadTensorShardedTarget (modelDir : String) (name : String) (s : Shape) : IO (Tensor { shape := s }) := do
   safetensors.loadTensorShardedCandidates modelDir #[name] s
 
 private def loadRMSNormSharded (modelDir : String) (name : String) (dim : UInt64) (eps : Float)
@@ -118,7 +118,7 @@ private def loadCodePredictorLayerSharded (modelDir : String) (layerIdx : UInt64
   pure { input_layernorm, self_attn, post_attention_layernorm, mlp }
 
 private def loadCodePredictorProjectionSharded (modelDir : String) (cfg : TalkerConfig)
-    : IO (STensor #[cfg.codePredictorConfig.hiddenSize, cfg.hiddenSize] × STensor #[cfg.codePredictorConfig.hiddenSize]) := do
+    : IO (Tensor { shape := #[cfg.codePredictorConfig.hiddenSize, cfg.hiddenSize] } × Tensor { shape := #[cfg.codePredictorConfig.hiddenSize] }) := do
   let cp := cfg.codePredictorConfig
   try
     let w ← loadTensorShardedTarget modelDir "talker.code_predictor.small_to_mtp_projection.weight"
@@ -175,7 +175,7 @@ private def loadCodePredictorSharded (modelDir : String) (cfg : TalkerConfig)
   let cp := cfg.codePredictorConfig
   let nCodebooks := if cfg.numCodeGroups.toNat == 0 then 0 else cfg.numCodeGroups.toNat - 1
 
-  let mut inputEmbeddings : Array (STensor #[cp.vocabSize, cfg.hiddenSize]) := #[]
+  let mut inputEmbeddings : Array (Tensor { shape := #[cp.vocabSize, cfg.hiddenSize] }) := #[]
   for i in [:nCodebooks] do
     let emb ← loadTensorShardedTarget modelDir
       s!"talker.code_predictor.model.codec_embedding.{i}.weight"
@@ -191,7 +191,7 @@ private def loadCodePredictorSharded (modelDir : String) (cfg : TalkerConfig)
 
   let norm ← loadRMSNormSharded modelDir "talker.code_predictor.model.norm" cp.hiddenSize cp.rmsNormEps
 
-  let mut lmHeads : Array (STensor #[cp.vocabSize, cp.hiddenSize]) := #[]
+  let mut lmHeads : Array (Tensor { shape := #[cp.vocabSize, cp.hiddenSize] }) := #[]
   for i in [:nCodebooks] do
     let head ← loadTensorShardedTarget modelDir
       s!"talker.code_predictor.lm_head.{i}.weight"

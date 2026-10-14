@@ -17,7 +17,7 @@ open torch.Log
 open torch.Model (reqGradFalse)
 open torch.safetensors (tryLoadTensorSharded)
 
-private def loadWeight (modelDir name : String) (shape : Shape) : IO (STensor shape) :=
+private def loadWeight (modelDir name : String) (shape : Shape) : IO (Tensor { shape := shape }) :=
   safetensors.loadTensorShardedCandidates modelDir #[name] shape
 
 
@@ -191,9 +191,9 @@ private def loadThinkerSharded (modelDir : String) (cfg : ThinkerConfig)
 
   let audioProjectionWeight ←
     if h : cfg.audioConfig.outputDim = cfg.textConfig.hiddenSize then
-      let eye : STensor #[cfg.textConfig.hiddenSize, cfg.textConfig.hiddenSize] :=
+      let eye : Tensor { shape := #[cfg.textConfig.hiddenSize, cfg.textConfig.hiddenSize] } :=
         Tensor.castLike audioTower.proj2Weight (reqGradFalse (Tensor.eye cfg.textConfig.hiddenSize))
-      let eye' : STensor #[cfg.textConfig.hiddenSize, cfg.audioConfig.outputDim] := by
+      let eye' : Tensor { shape := #[cfg.textConfig.hiddenSize, cfg.audioConfig.outputDim] } := by
         simpa [h] using eye
       pure eye'
     else

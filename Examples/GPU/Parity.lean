@@ -59,7 +59,7 @@ def requireCuda (suite : String) : IO Bool := do
 
 /-- Compare equal shapes across storage dtypes, computing GPU parity metrics in Float32. -/
 def compareTensors {s : Shape} {expectedDtype actualDtype : DType}
-    (label : String) (expected : DTensor s expectedDtype) (actual : DTensor s actualDtype)
+    (label : String) (expected : Tensor { shape := s, dtype := expectedDtype }) (actual : Tensor { shape := s, dtype := actualDtype })
     (rtol atol : Float) : TensorCheck :=
   let expected := expected.toFloat32
   let actual := actual.toFloat32
@@ -76,7 +76,7 @@ def logTensorCheck (check : TensorCheck) : IO Unit := do
 
 /-- Report allclose plus mean/max absolute error for one tensor comparison. -/
 def reportTensorComparison {s : Shape} {expectedDtype actualDtype : DType}
-    (label : String) (expected : DTensor s expectedDtype) (actual : DTensor s actualDtype) (rtol atol : Float) : IO Bool := do
+    (label : String) (expected : Tensor { shape := s, dtype := expectedDtype }) (actual : Tensor { shape := s, dtype := actualDtype }) (rtol atol : Float) : IO Bool := do
   let check := compareTensors label expected actual rtol atol
   logTensorCheck check
   pure check.ok

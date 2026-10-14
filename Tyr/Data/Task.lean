@@ -329,7 +329,7 @@ def renderConversation
 /-- Build an Int64 token tensor from host data over the raw FFI boundary.
     The runtime shape is the array length; `reshapeChecked` validates the
     result metadata (shape and Int64 dtype) against the static spec. -/
-private def int64TensorFromArray (arr : Array Int64) : DTensor #[arr.size.toUInt64] .Int64 :=
+private def int64TensorFromArray (arr : Array Int64) : Tensor { shape := #[arr.size.toUInt64], dtype := .Int64 } :=
   Tensor.fromInt64Array arr
 
 /-- A batch of tokenized conversations -/
@@ -339,9 +339,9 @@ structure ConversationBatch where
   /-- Sequence length after padding -/
   seqLen : UInt64
   /-- Token IDs: [batchSize, seqLen] -/
-  tokens : DTensor #[batchSize, seqLen] .Int64
+  tokens : Tensor { shape := #[batchSize, seqLen], dtype := .Int64 }
   /-- Training mask: [batchSize, seqLen], 1 = train, 0 = ignore -/
-  mask : DTensor #[batchSize, seqLen] .Float32
+  mask : Tensor { shape := #[batchSize, seqLen], dtype := .Float32 }
   /-- Actual lengths before padding -/
   lengths : Array Nat
   deriving Repr
@@ -533,8 +533,8 @@ private def TaskTokenStream.popWindow? (s : TaskTokenStream) (n : Nat)
 /-- Consume one GPT batch from the stream.
     Returns input/target tensors shaped `[batchSize, seqLen]`. -/
 def TaskTokenStream.nextGPTBatch (stream : TaskTokenStream)
-    : IO (Option (DTensor #[stream.batchSize.toUInt64, stream.seqLen.toUInt64] .Int64 ×
-                  DTensor #[stream.batchSize.toUInt64, stream.seqLen.toUInt64] .Int64) ×
+    : IO (Option (Tensor { shape := #[stream.batchSize.toUInt64, stream.seqLen.toUInt64], dtype := .Int64 } ×
+                  Tensor { shape := #[stream.batchSize.toUInt64, stream.seqLen.toUInt64], dtype := .Int64 }) ×
           TaskTokenStream) := do
   if stream.batchSize == 0 || stream.seqLen == 0 || stream.mixture.size == 0 then
     return (none, stream)

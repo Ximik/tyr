@@ -21,7 +21,7 @@ open torch
     For causal language modeling, target is input shifted by 1.
 -/
 def BatchIterator.nextGPT (iter : BatchIterator)
-    : IO (Option (DTensor #[iter.batchSize, iter.seqLen] .Int64 × DTensor #[iter.batchSize, iter.seqLen] .Int64) × BatchIterator) := do
+    : IO (Option (Tensor { shape := #[iter.batchSize, iter.seqLen], dtype := .Int64 } × Tensor { shape := #[iter.batchSize, iter.seqLen], dtype := .Int64 }) × BatchIterator) := do
   let _ ← checkedBatchTokens iter.batchSize iter.seqLen 1
   -- Get batch from BOS finder
   -- We need seqLen + 1 to split into input and target
@@ -48,7 +48,7 @@ def BatchIterator.nextGPT (iter : BatchIterator)
 
 /-- Get the next batch for GPT training. -/
 def DistributedDataGenerator.nextBatchGPT (gen : DistributedDataGenerator)
-    : IO (Option (DTensor #[gen.iterator.batchSize, gen.iterator.seqLen] .Int64 × DTensor #[gen.iterator.batchSize, gen.iterator.seqLen] .Int64) × DistributedDataGenerator) := do
+    : IO (Option (Tensor { shape := #[gen.iterator.batchSize, gen.iterator.seqLen], dtype := .Int64 } × Tensor { shape := #[gen.iterator.batchSize, gen.iterator.seqLen], dtype := .Int64 }) × DistributedDataGenerator) := do
   let b := gen.iterator.batchSize
   let s := gen.iterator.seqLen
   let count ← checkedBatchTokens b s 1
@@ -89,7 +89,7 @@ def tokensPerStep (batchSize seqLen worldSize : UInt64) : UInt64 :=
 
 /-- Sequential data loader for simple datasets like Shakespeare. -/
 structure SequentialLoader (n : UInt64) where
-  tokens : DTensor #[n] .Int64
+  tokens : Tensor { shape := #[n], dtype := .Int64 }
   currentPos : UInt64
   deriving Repr
 
@@ -102,7 +102,7 @@ def SequentialLoader.reset {n : UInt64} (loader : SequentialLoader n) : Sequenti
   { loader with currentPos := 0 }
 
 def SequentialLoader.getBatch {n : UInt64} (loader : SequentialLoader n)
-    (batchSize seqLen : UInt64) : Option (DTensor #[batchSize, seqLen + 1] .Int64 × SequentialLoader n) :=
+    (batchSize seqLen : UInt64) : Option (Tensor { shape := #[batchSize, seqLen + 1], dtype := .Int64 } × SequentialLoader n) :=
   let required := batchSize.toNat * (seqLen.toNat + 1)
   if batchSize == 0 || seqLen == 0 || loader.currentPos.toNat + required > n.toNat then
     none
@@ -114,7 +114,7 @@ def SequentialLoader.getBatch {n : UInt64} (loader : SequentialLoader n)
     some (batch, newLoader)
 
 def SequentialLoader.sampleRandomBatch {n : UInt64} (loader : SequentialLoader n)
-    (batchSize blockSize : UInt64) : IO (DTensor #[batchSize, blockSize] .Int64 × DTensor #[batchSize, blockSize] .Int64) := do
+    (batchSize blockSize : UInt64) : IO (Tensor { shape := #[batchSize, blockSize], dtype := .Int64 } × Tensor { shape := #[batchSize, blockSize], dtype := .Int64 }) := do
   let requiredLen ← checkedBatchTokens batchSize blockSize 1
   if requiredLen > n then
     throw <| IO.userError "SequentialLoader: batch exceeds available tokens"
@@ -143,7 +143,7 @@ def SequentialBatchIterator.new {n : UInt64} (loader : SequentialLoader n)
 }
 
 def SequentialBatchIterator.next {n b s : UInt64} (iter : SequentialBatchIterator n b s)
-    : Option (DTensor #[b, s] .Int64 × DTensor #[b, s] .Int64) × SequentialBatchIterator n b s :=
+    : Option (Tensor { shape := #[b, s], dtype := .Int64 } × Tensor { shape := #[b, s], dtype := .Int64 }) × SequentialBatchIterator n b s :=
   match iter.loader.getBatch b s with
   | none =>
     let newLoader := iter.loader.reset

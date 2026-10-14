@@ -80,7 +80,7 @@ namespace WeightSource
 
 /-- Load `name` with expected shape `s` (numel-checked, reshaped in C++). -/
 def load (src : WeightSource) (name : String) (s : Shape)
-    (device : Device := Device.CPU) : IO (STensor s) :=
+    (device : Device := Device.CPU) : IO (Tensor { shape := s }) :=
   match src with
   | .single path => torch.safetensors.loadTensorCandidates path #[name] s device
   | .sharded dir => torch.safetensors.loadTensorShardedCandidates dir #[name] s device
@@ -88,7 +88,7 @@ def load (src : WeightSource) (name : String) (s : Shape)
 /-- Try to load `name`; `none` on any failure (missing tensor, shape
     mismatch, unreadable file). Used for layout probes and optional tensors. -/
 def tryLoad (src : WeightSource) (name : String) (s : Shape)
-    (device : Device := Device.CPU) : IO (Option (STensor s)) := do
+    (device : Device := Device.CPU) : IO (Option (Tensor { shape := s })) := do
   try
     pure (some (← src.load name s device))
   catch _ =>
@@ -96,7 +96,7 @@ def tryLoad (src : WeightSource) (name : String) (s : Shape)
 
 /-- Try each of `names` in order; `none` if none loads. -/
 def tryLoadCandidates (src : WeightSource) (names : Array String) (s : Shape)
-    (device : Device := Device.CPU) : IO (Option (STensor s)) := do
+    (device : Device := Device.CPU) : IO (Option (Tensor { shape := s })) := do
   for n in names do
     if let some t ← src.tryLoad n s device then
       return some t
@@ -105,7 +105,7 @@ def tryLoadCandidates (src : WeightSource) (names : Array String) (s : Shape)
 /-- Load the first of `names` that resolves; throws listing all candidates
     if none loads. -/
 def loadCandidates (src : WeightSource) (names : Array String) (s : Shape)
-    (device : Device := Device.CPU) : IO (STensor s) := do
+    (device : Device := Device.CPU) : IO (Tensor { shape := s }) := do
   match (← src.tryLoadCandidates names s device) with
   | some t => pure t
   | none => throw <| IO.userError s!"Failed to load tensor: {names}"
@@ -259,8 +259,8 @@ private def loadSparseMoe (src : WeightSource) (cfg : Config) (layerIdx : UInt64
     | some gu => do
       -- Layout A: fused dense banks; dim-1 first half gate, second half up.
       let down ← src.loadCandidates (nameCandidates s!"{p}.experts.down_proj") #[e, h, mi] device
-      let gate3 : STensor #[e, mi, h] := Tensor.reshapeChecked (sliceTyped gu 1 0 mi) #[e, mi, h]
-      let up3 : STensor #[e, mi, h] := Tensor.reshapeChecked (sliceTyped gu 1 mi mi) #[e, mi, h]
+      let gate3 : Tensor { shape := #[e, mi, h] } := Tensor.reshapeChecked (sliceTyped gu 1 0 mi) #[e, mi, h]
+      let up3 : Tensor { shape := #[e, mi, h] } := Tensor.reshapeChecked (sliceTyped gu 1 mi mi) #[e, mi, h]
       let dense : LagunaDenseExperts cfg := {
         gateProj := reqGradFalse gate3
         upProj := reqGradFalse up3

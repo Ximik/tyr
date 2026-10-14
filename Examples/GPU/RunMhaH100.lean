@@ -10,9 +10,9 @@ namespace Examples.GPU.RunMhaH100
 open torch
 open Tyr.GPU.Kernels
 
-private abbrev MhaTensor := DTensor #[1, 1, 128, 64] .Float32
-private abbrev LTensor := DTensor #[2, 64] .Float32
-private abbrev GradTiles := DTensor #[2, 64, 64] .Float32
+private abbrev MhaTensor := Tensor { shape := #[1, 1, 128, 64], dtype := .Float32 }
+private abbrev LTensor := Tensor { shape := #[2, 64], dtype := .Float32 }
+private abbrev GradTiles := Tensor { shape := #[2, 64, 64], dtype := .Float32 }
 
 private def contractLabel : String := "dq_direct_kv_sweep_store_add"
 private def seqLen : Nat := 128

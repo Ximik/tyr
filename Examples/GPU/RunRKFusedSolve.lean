@@ -33,15 +33,15 @@ def runOnce : IO Bool := do
   let dt := 1.0 / steps.toFloat
 
   -- generic pure solver path
-  let term : ODETerm (DTensor S .Float32) Unit :=
+  let term : ODETerm (Tensor { shape := S, dtype := .Float32 }) Unit :=
     { vectorField := fun _t y _ => Tensor.Preserving.mulScalar y (-1.0) }
   let solver :=
-    Dopri5.solver (Term := ODETerm (DTensor S .Float32) Unit)
-      (Y := DTensor S .Float32) (VF := DTensor S .Float32) (Args := Unit)
+    Dopri5.solver (Term := ODETerm (Tensor { shape := S, dtype := .Float32 }) Unit)
+      (Y := Tensor { shape := S, dtype := .Float32 }) (VF := Tensor { shape := S, dtype := .Float32 }) (Args := Unit)
   let tg0 ← IO.monoMsNow
   let sol :=
-    diffeqsolve (Term := ODETerm (DTensor S .Float32) Unit)
-      (Y := DTensor S .Float32) (VF := DTensor S .Float32) (Control := Time) (Args := Unit)
+    diffeqsolve (Term := ODETerm (Tensor { shape := S, dtype := .Float32 }) Unit)
+      (Y := Tensor { shape := S, dtype := .Float32 }) (VF := Tensor { shape := S, dtype := .Float32 }) (Control := Time) (Args := Unit)
       (Controller := ConstantStepSize)
       term solver 0.0 1.0 (some dt) y0 () (saveat := { t1 := true })
   let yGeneric :=

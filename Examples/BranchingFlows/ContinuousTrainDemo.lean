@@ -25,13 +25,13 @@ private def uniformTimeDist : TimeDist :=
     quantile := fun p => clamp01 p }
 
 private def linBridge {dim : UInt64} (_ : Unit)
-    (x0 x1 : STensor #[dim]) (t0 t1 : Float) : STensor #[dim] :=
+    (x0 x1 : Tensor { shape := #[dim] }) (t0 t1 : Float) : Tensor { shape := #[dim] } :=
   let dt := t1 - t0
   x0 + (x1 - x0) * dt
 
 structure ToyParams (dim : UInt64) where
-  W : STensor #[dim, dim]
-  b : STensor #[dim]
+  W : Tensor { shape := #[dim, dim] }
+  b : Tensor { shape := #[dim] }
   deriving TensorStruct
 
 namespace ToyParams
@@ -50,10 +50,10 @@ def toyModel {maxLen dim : UInt64} : BranchingModelContinuous maxLen dim (ToyPar
       let delLogits := zerosDynamic #[batch, maxLen]
       pure (anchorPred, splitLogits, delLogits) }
 
-private def mkVec2 (x y : Float) : STensor #[2] :=
+private def mkVec2 (x y : Float) : Tensor { shape := #[2] } :=
   Tensor.reshapeChecked (floatsDynamic #[x, y]) #[2]
 
-private def fixedState : BranchingState (STensor #[2]) :=
+private def fixedState : BranchingState (Tensor { shape := #[2] }) :=
   BranchingState.mkDefault
     #[mkVec2 1.0 2.0, mkVec2 (-1.0) 0.5, mkVec2 0.25 (-0.75), mkVec2 2.0 (-1.0)]
     #[0, 0, 0, 0]
@@ -66,11 +66,11 @@ def runDemo : IO Unit := do
   let x1 := fixedState
   let x1s := #[x1]
   let times := #[0.5]
-  let x0Sampler : FlowNode (STensor #[dim]) → STensor #[dim] := fun _node => zerosDynamic #[dim]
+  let x0Sampler : FlowNode (Tensor { shape := #[dim] }) → Tensor { shape := #[dim] } := fun _node => zerosDynamic #[dim]
 
   let (bridgeResult, _rng) :=
     branchingBridge (linBridge (dim := dim)) () x0Sampler x1s times
-      uniformTimeDist uniformTimeDist (sequentialUniformPolicy (STensor #[dim]))
+      uniformTimeDist uniformTimeDist (sequentialUniformPolicy (Tensor { shape := #[dim] }))
       canonicalAnchorMerge
       (coalescenceFactor := 0.0)
       (maxLen := some maxLen.toNat)

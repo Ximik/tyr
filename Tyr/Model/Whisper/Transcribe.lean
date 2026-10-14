@@ -69,7 +69,7 @@ private structure BeamState (cfg : WhisperConfig) where
   measuredNoSpeech : Bool := false
   finished : Bool := false
   caches : Array (WhisperForConditionalGeneration.LayerKVCache cfg 1) := #[]
-  lastLogits? : Option (STensor #[1, cfg.vocabSize]) := none
+  lastLogits? : Option (Tensor { shape := #[1, cfg.vocabSize] }) := none
   nextPos : UInt64 := 0
   deriving Inhabited
 
@@ -460,9 +460,9 @@ private def isNoSpeechChunk (opts : WhisperDecodeOptions) (cand : WhisperDecodeC
 private def buildSingleTokenOnDevice
     (id : UInt32)
     (device : Device)
-    : DTensor #[1, 1] .Int64 :=
+    : Tensor { shape := #[1, 1], dtype := .Int64 } :=
   let idsVals : Array Int64 := #[Int64.ofNat id.toNat]
-  let inputIdsCpu : DTensor #[1, 1] .Int64 := Tensor.reshapeChecked (Tensor.fromInt64Array idsVals) #[1, 1]
+  let inputIdsCpu : Tensor { shape := #[1, 1], dtype := .Int64 } := Tensor.reshapeChecked (Tensor.fromInt64Array idsVals) #[1, 1]
   if inputIdsCpu.device == device then
     inputIdsCpu
   else
@@ -551,7 +551,7 @@ private def topKLogProbPairs (logProbs : Array Float) (k : Nat) : Array (Nat × 
       sorted.extract 0 (Nat.min k sorted.size)
 
 private def tokenLogProbFromLogits {vocab : UInt64}
-    (logits : STensor #[1, vocab])
+    (logits : Tensor { shape := #[1, vocab] })
     (tokenId : UInt32)
     : IO Float := do
   let vals ← Tensor.toFloatArray logits
@@ -559,7 +559,7 @@ private def tokenLogProbFromLogits {vocab : UInt64}
   pure (logProbs.getD tokenId.toNat (-100.0))
 
 private def tokenProbFromLogits {vocab : UInt64}
-    (logits : STensor #[1, vocab])
+    (logits : Tensor { shape := #[1, vocab] })
     (tokenId : UInt32)
     : IO Float := do
   let vals ← Tensor.toFloatArray logits
@@ -575,11 +575,11 @@ private def clampTopK (topK vocab : UInt64) : UInt64 :=
     topK
 
 private def filteredSamplingLogits {vocab : UInt64}
-    (logits : STensor #[1, vocab])
+    (logits : Tensor { shape := #[1, vocab] })
     (temperature : Float)
     (topK : UInt64)
     (topP : Float)
-    : STensor #[1, vocab] :=
+    : Tensor { shape := #[1, vocab] } :=
   let scaled :=
     if temperature == 1.0 then
       logits
@@ -604,7 +604,7 @@ private def filteredSamplingLogits {vocab : UInt64}
     Tensor.topPFilter filtered topP'
 
 private def argmaxTokenFromLogits {vocab : UInt64}
-    (logits : STensor #[1, vocab])
+    (logits : Tensor { shape := #[1, vocab] })
     (fallback : UInt64)
     (rules : DecodeTokenRules := {})
     : IO UInt32 := do
@@ -615,22 +615,22 @@ private def argmaxTokenFromLogits {vocab : UInt64}
     let id := p.1.toUInt32
     if !(isForbiddenToken rules id) then
       return id
-  let nextTokRaw : DTensor #[1] .Int64 := (Tensor.argmax logits 1).reshapeChecked #[1]
+  let nextTokRaw : Tensor { shape := #[1], dtype := .Int64 } := (Tensor.argmax logits 1).reshapeChecked #[1]
   let nextVals ← Tensor.toUInt64Array nextTokRaw
   pure (nextVals.getD 0 fallback).toUInt32
 
 private def sampleTokenFromLogits {vocab : UInt64}
-    (logits : STensor #[1, vocab])
+    (logits : Tensor { shape := #[1, vocab] })
     (rules : DecodeTokenRules := {})
     (fallback : UInt64 := 0)
     : IO UInt32 := do
   let vals ← Tensor.toFloatArray logits
   let probsVals := (logProbsFromLogitsArray vals).map Float.exp
-  let probs : DTensor #[1, vocab] .Float32 := Tensor.reshapeChecked (Tensor.fromFloatArray probsVals) #[1, vocab]
+  let probs : Tensor { shape := #[1, vocab], dtype := .Float32 } := Tensor.reshapeChecked (Tensor.fromFloatArray probsVals) #[1, vocab]
   let mut tries : Nat := 0
   while tries < 8 do
     let sampled ← Tensor.multinomial probs 1 false
-    let sampledFlat : DTensor #[1] .Int64 := Tensor.reshapeChecked sampled #[1]
+    let sampledFlat : Tensor { shape := #[1], dtype := .Int64 } := Tensor.reshapeChecked sampled #[1]
     let sampledVals ← Tensor.toUInt64Array sampledFlat
     let id := (sampledVals.getD 0 0).toUInt32
     if !isForbiddenToken rules id then
@@ -645,12 +645,12 @@ private def prefillPromptCaches
     (device : Device)
     (crossCaches : Array (WhisperForConditionalGeneration.LayerCrossCache cfg))
     (promptIds : Array UInt32)
-    : IO (STensor #[1, cfg.vocabSize] × Array (WhisperForConditionalGeneration.LayerKVCache cfg 1) × UInt64) := do
+    : IO (Tensor { shape := #[1, cfg.vocabSize] } × Array (WhisperForConditionalGeneration.LayerKVCache cfg 1) × UInt64) := do
   if promptIds.isEmpty then
     throw <| IO.userError "Whisper cached decode prompt is empty"
   let mut caches : Array (WhisperForConditionalGeneration.LayerKVCache cfg 1) :=
     model.initLayerKVCaches cfg.maxTargetPositions device
-  let mut last? : Option (STensor #[1, cfg.vocabSize]) := none
+  let mut last? : Option (Tensor { shape := #[1, cfg.vocabSize] }) := none
   let mut pos : UInt64 := 0
   for i in [:promptIds.size] do
     let tok := buildSingleTokenOnDevice promptIds[i]! device
@@ -678,7 +678,7 @@ private partial def decodeLoopCached
     (remaining : Nat)
     (state : DecodeState)
     (caches : Array (WhisperForConditionalGeneration.LayerKVCache cfg 1))
-    (lastLogits : STensor #[1, cfg.vocabSize])
+    (lastLogits : Tensor { shape := #[1, cfg.vocabSize] })
     (nextPos : UInt64)
     : IO DecodeState := do
   if remaining == 0 then
@@ -892,7 +892,7 @@ private def decodeBeamCached
     {cfg : WhisperConfig}
     {encSeq : UInt64}
     (model : WhisperForConditionalGeneration cfg)
-    (encoderHidden : STensor #[1, encSeq, cfg.dModel])
+    (encoderHidden : Tensor { shape := #[1, encSeq, cfg.dModel] })
     (crossCaches : Array (WhisperForConditionalGeneration.LayerCrossCache cfg))
     (promptIds : Array UInt32)
     (noSpeechTokenId : Option UInt32)
@@ -966,7 +966,7 @@ private def decodeAtTemperature
     {encSeq : UInt64}
     (model : WhisperForConditionalGeneration cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
-    (encoderHidden : STensor #[1, encSeq, cfg.dModel])
+    (encoderHidden : Tensor { shape := #[1, encSeq, cfg.dModel] })
     (crossCaches : Array (WhisperForConditionalGeneration.LayerCrossCache cfg))
     (promptIds : Array UInt32)
     (noSpeechTokenId : Option UInt32)
@@ -1042,7 +1042,7 @@ private partial def decodeWithFallbackLoop
     {encSeq : UInt64}
     (model : WhisperForConditionalGeneration cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
-    (encoderHidden : STensor #[1, encSeq, cfg.dModel])
+    (encoderHidden : Tensor { shape := #[1, encSeq, cfg.dModel] })
     (crossCaches : Array (WhisperForConditionalGeneration.LayerCrossCache cfg))
     (promptIds : Array UInt32)
     (promptIdsFallback : Array UInt32)
@@ -1096,7 +1096,7 @@ private def decodeWithFallback
     {encSeq : UInt64}
     (model : WhisperForConditionalGeneration cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
-    (encoderHidden : STensor #[1, encSeq, cfg.dModel])
+    (encoderHidden : Tensor { shape := #[1, encSeq, cfg.dModel] })
     (promptIds : Array UInt32)
     (promptIdsFallback : Array UInt32)
     (noSpeechTokenId : Option UInt32)
@@ -1153,9 +1153,9 @@ private def maybeAppendTailRescue
         (device := model.model.decoderTokenEmbedding.device)
     match pack with
     | ⟨frames, out⟩ =>
-      let inputFeatures : STensor #[1, cfg.numMelBins, frames] :=
+      let inputFeatures : Tensor { shape := #[1, cfg.numMelBins, frames] } :=
         (Tensor.reshapeChecked out.inputFeatures #[1, cfg.numMelBins, frames]).forgetDType
-      let encoderHidden : STensor #[1, WhisperConfig.conv2OutputSeq frames, cfg.dModel] ←
+      let encoderHidden : Tensor { shape := #[1, WhisperConfig.conv2OutputSeq frames, cfg.dModel] } ←
         model.encode (frames := frames) inputFeatures
       let maxNewCapPrompt :=
         if maxTarget <= basePrompt.size + 1 then
@@ -1315,9 +1315,9 @@ private def transcribeWavCore
           (device := frontendDevice)
       match pack with
       | ⟨frames, out⟩ =>
-        let inputFeatures : STensor #[1, cfg.numMelBins, frames] :=
+        let inputFeatures : Tensor { shape := #[1, cfg.numMelBins, frames] } :=
           (Tensor.reshapeChecked out.inputFeatures #[1, cfg.numMelBins, frames]).forgetDType
-        let encoderHidden : STensor #[1, WhisperConfig.conv2OutputSeq frames, cfg.dModel] ←
+        let encoderHidden : Tensor { shape := #[1, WhisperConfig.conv2OutputSeq frames, cfg.dModel] } ←
           model.encode (frames := frames) inputFeatures
         let promptIds :=
           composePromptIds

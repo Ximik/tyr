@@ -6,8 +6,8 @@ open torch
 
 /-- Float32 loss accumulation and a BF16 cotangent for BF16 training logits. -/
 def referenceTraining {rows : UInt64}
-    (logitsBase : DTensor #[rows, 3072] .BFloat16)
-    (targets : DTensor #[rows] .Int64) := Id.run do
+    (logitsBase : Tensor { shape := #[rows, 3072], dtype := .BFloat16 })
+    (targets : Tensor { shape := #[rows], dtype := .Int64 }) := Id.run do
   let logits := Tensor.setRequiresGrad logitsBase true
   let logitsF := logits.toFloat32
   let losses := Tensor.crossEntropyNone logitsF targets

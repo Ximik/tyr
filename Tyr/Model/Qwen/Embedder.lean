@@ -69,8 +69,8 @@ private def catAlong {s : Shape} {d : DType} {dev : DevicePolicy}
     panics on the mismatch, exactly where the legacy `reshape` threw. -/
 def encode {batch seq : UInt64} (cfg : QwenConfig) (max_seq : UInt64)
     (embedder : QwenFluxEmbedder cfg max_seq)
-    (input_ids : DTensor #[batch, seq] .Int64)
-    : DTensor #[batch, seq, embedder.outputLayers.size.toUInt64 * cfg.hidden_size] .Float32 :=
+    (input_ids : Tensor { shape := #[batch, seq], dtype := .Int64 })
+    : Tensor { shape := #[batch, seq, embedder.outputLayers.size.toUInt64 * cfg.hidden_size], dtype := .Float32 } :=
   -- Slice RoPE cache to current sequence length
   let cos := embedder.ropeCache.cos.sliceChecked 0 0 seq #[seq, cfg.head_dim / 2]
   let sin := embedder.ropeCache.sin.sliceChecked 0 0 seq #[seq, cfg.head_dim / 2]
@@ -79,7 +79,7 @@ def encode {batch seq : UInt64} (cfg : QwenConfig) (max_seq : UInt64)
   let allHiddenStates := embedder.model.forwardWithHiddenStates cfg input_ids cos sin
 
   -- Extract specified layers using filterMap
-  let selectedStates : Array (DTensor #[batch, seq, cfg.hidden_size] .Float32) :=
+  let selectedStates : Array (Tensor { shape := #[batch, seq, cfg.hidden_size], dtype := .Float32 }) :=
     embedder.outputLayers.filterMap fun layerIdx =>
       if h : layerIdx.toNat < allHiddenStates.size then
         some (allHiddenStates[layerIdx.toNat]'h)
@@ -96,9 +96,9 @@ def encode {batch seq : UInt64} (cfg : QwenConfig) (max_seq : UInt64)
 def encodeMasked {batch seq : UInt64} (cfg : QwenConfig) (max_seq : UInt64)
     {maskDtype : DType}
     (embedder : QwenFluxEmbedder cfg max_seq)
-    (input_ids : DTensor #[batch, seq] .Int64)
+    (input_ids : Tensor { shape := #[batch, seq], dtype := .Int64 })
     (attn_mask : Tensor ⟨#[batch, seq], maskDtype, .any⟩)
-    : DTensor #[batch, seq, embedder.outputLayers.size.toUInt64 * cfg.hidden_size] .Float32 :=
+    : Tensor { shape := #[batch, seq, embedder.outputLayers.size.toUInt64 * cfg.hidden_size], dtype := .Float32 } :=
   -- Slice RoPE cache to current sequence length
   let cos := embedder.ropeCache.cos.sliceChecked 0 0 seq #[seq, cfg.head_dim / 2]
   let sin := embedder.ropeCache.sin.sliceChecked 0 0 seq #[seq, cfg.head_dim / 2]
@@ -107,7 +107,7 @@ def encodeMasked {batch seq : UInt64} (cfg : QwenConfig) (max_seq : UInt64)
   let allHiddenStates := embedder.model.forwardWithHiddenStatesMasked cfg input_ids cos sin attn_mask
 
   -- Extract specified layers using filterMap
-  let selectedStates : Array (DTensor #[batch, seq, cfg.hidden_size] .Float32) :=
+  let selectedStates : Array (Tensor { shape := #[batch, seq, cfg.hidden_size], dtype := .Float32 }) :=
     embedder.outputLayers.filterMap fun layerIdx =>
       if h : layerIdx.toNat < allHiddenStates.size then
         some (allHiddenStates[layerIdx.toNat]'h)

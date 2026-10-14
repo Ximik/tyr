@@ -272,13 +272,13 @@ def parseTimestamp (wordList : Array String) (timestampMs : Array UInt64) : Forc
 end Qwen3ForceAlignProcessor
 
 private def extractTimestampRows {batch seq : UInt64}
-    (inputIds : DTensor #[batch, seq] .Int64)
-    (outputIds : DTensor #[batch, seq] .Int64)
+    (inputIds : Tensor { shape := #[batch, seq], dtype := .Int64 })
+    (outputIds : Tensor { shape := #[batch, seq], dtype := .Int64 })
     (timestampTokenId : UInt64)
     (timestampSegmentTime : Float)
     : IO (Array (Array UInt64)) := do
-  let inFlat : DTensor #[batch * seq] .Int64 := Tensor.reshapeChecked (Tensor.toInt64 inputIds) #[batch * seq]
-  let outFlat : DTensor #[batch * seq] .Int64 := Tensor.reshapeChecked (Tensor.toInt64 outputIds) #[batch * seq]
+  let inFlat : Tensor { shape := #[batch * seq], dtype := .Int64 } := Tensor.reshapeChecked (Tensor.toInt64 inputIds) #[batch * seq]
+  let outFlat : Tensor { shape := #[batch * seq], dtype := .Int64 } := Tensor.reshapeChecked (Tensor.toInt64 outputIds) #[batch * seq]
   let inVals ← Tensor.toUInt64Array inFlat
   let outVals ← Tensor.toUInt64Array outFlat
   let mut rows : Array (Array UInt64) := Array.mkEmpty batch.toNat
@@ -294,8 +294,8 @@ private def extractTimestampRows {batch seq : UInt64}
   pure rows
 
 def alignFromOutputIds {batch seq : UInt64}
-    (inputIds : DTensor #[batch, seq] .Int64)
-    (outputIds : DTensor #[batch, seq] .Int64)
+    (inputIds : Tensor { shape := #[batch, seq], dtype := .Int64 })
+    (outputIds : Tensor { shape := #[batch, seq], dtype := .Int64 })
     (wordLists : Array (Array String))
     (timestampTokenId : UInt64)
     (timestampSegmentTime : Float := 1.0)
@@ -309,8 +309,8 @@ def alignFromOutputIds {batch seq : UInt64}
   pure out
 
 def alignFromLogits {batch seq vocab : UInt64} {dtype : DType}
-    (inputIds : DTensor #[batch, seq] .Int64)
-    (logits : DTensor #[batch, seq, vocab] dtype)
+    (inputIds : Tensor { shape := #[batch, seq], dtype := .Int64 })
+    (logits : Tensor { shape := #[batch, seq, vocab], dtype := dtype })
     (wordLists : Array (Array String))
     (timestampTokenId : UInt64)
     (timestampSegmentTime : Float := 1.0)

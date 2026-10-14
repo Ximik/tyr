@@ -39,13 +39,13 @@ private def visionParameterNameCandidates (name : String) : Array String :=
 private def loadVisionParameterSharded {s : Shape}
     (modelDir : String)
     (name : String)
-    : IO (STensor s) :=
+    : IO (Tensor { shape := s }) :=
   loadTensorShardedCandidates modelDir (visionParameterNameCandidates name) s
 
 private def loadVisionParameter {s : Shape}
     (path : String)
     (name : String)
-    : IO (STensor s) :=
+    : IO (Tensor { shape := s }) :=
   loadTensorCandidates path (visionParameterNameCandidates name) s
 
 private def tryLoadVisionScalarSharded (modelDir : String) (name : String) : IO (Option Float) := do
@@ -69,13 +69,13 @@ private def tryLoadVisionScalar (path : String) (name : String) : IO (Option Flo
 private def tryLoadVisionParameterSharded {s : Shape}
     (modelDir : String)
     (name : String)
-    : IO (Option (STensor s)) :=
+    : IO (Option (Tensor { shape := s })) :=
   tryLoadTensorShardedCandidates modelDir (visionParameterNameCandidates name) s
 
 private def tryLoadVisionParameter {s : Shape}
     (path : String)
     (name : String)
-    : IO (Option (STensor s)) :=
+    : IO (Option (Tensor { shape := s })) :=
   tryLoadTensorCandidates path (visionParameterNameCandidates name) s
 
 private def loadVisionLinearSharded (modelDir : String) (name : String) (outDim inDim : UInt64)

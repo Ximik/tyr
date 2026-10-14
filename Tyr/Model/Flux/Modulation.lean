@@ -17,9 +17,9 @@ namespace torch.flux
     dim: output dimension
     Returns: [batch, dim] positional embedding -/
 def timestepEmbedding {batch : UInt64}
-    (t : DTensor #[batch] .Float32) (dim : UInt64)
+    (t : Tensor { shape := #[batch], dtype := .Float32 }) (dim : UInt64)
     (max_period : Float := 10000.0) (time_factor : Float := 1000.0)
-    : DTensor #[batch, dim] .Float32 :=
+    : Tensor { shape := #[batch, dim], dtype := .Float32 } :=
   match Tensor.ofRaw (RawTensor.timestepEmbedding batch t.raw dim max_period time_factor) with
   | .ok value => value
   | .error message => panic! s!"Flux timestep embedding: {message}"
@@ -28,14 +28,14 @@ def timestepEmbedding {batch : UInt64}
     For double blocks: 6 values (2 triplets for img and txt)
     For single blocks: 3 values (1 triplet) -/
 structure ModulationOutput (batch num_mods hidden_size : UInt64) where
-  values : STensor #[batch, num_mods, hidden_size]
+  values : Tensor { shape := #[batch, num_mods, hidden_size] }
 
 /-- Modulation layer: projects timestep embedding to shift/scale/gate.
     For double blocks: outputs 6 modulation vectors
     For single blocks: outputs 3 modulation vectors -/
 structure Modulation (hidden_size : UInt64) (isDouble : Bool) where
   /-- Linear projection from hidden_size to num_mods * hidden_size -/
-  lin : STensor #[if isDouble then 6 * hidden_size else 3 * hidden_size, hidden_size]
+  lin : Tensor { shape := #[if isDouble then 6 * hidden_size else 3 * hidden_size, hidden_size] }
   deriving TensorStruct
 
 namespace Modulation
@@ -62,8 +62,8 @@ def initZero (hidden_size : UInt64) (isDouble : Bool := false) : Modulation hidd
     Output: [batch, num_mods, hidden_size] -/
 def forward {batch hidden_size : UInt64} (isDouble : Bool)
     (mod : Modulation hidden_size isDouble)
-    (vec : STensor #[batch, hidden_size])
-    : STensor #[batch, if isDouble then 6 else 3, hidden_size] :=
+    (vec : Tensor { shape := #[batch, hidden_size] })
+    : Tensor { shape := #[batch, if isDouble then 6 else 3, hidden_size] } :=
   -- Apply SiLU activation first
   let vec := Tensor.Preserving.silu vec
   -- Project to modulation vectors
@@ -79,10 +79,10 @@ end Modulation
     scale, shift: [batch, hidden_size]
     Returns: scale * x + shift -/
 def applyModulation {batch seq hidden_size : UInt64}
-    (x : STensor #[batch, seq, hidden_size])
-    (scale : STensor #[batch, hidden_size])
-    (shift : STensor #[batch, hidden_size])
-    : STensor #[batch, seq, hidden_size] :=
+    (x : Tensor { shape := #[batch, seq, hidden_size] })
+    (scale : Tensor { shape := #[batch, hidden_size] })
+    (shift : Tensor { shape := #[batch, hidden_size] })
+    : Tensor { shape := #[batch, seq, hidden_size] } :=
   -- Expand scale and shift to match sequence dimension
   let scale := Tensor.unsqueeze scale 1  -- [batch, 1, hidden_size]
   let shift := Tensor.unsqueeze shift 1  -- [batch, 1, hidden_size]

@@ -19,19 +19,19 @@ namespace torch.flux
 /-- Self-attention layer for double-stream block -/
 structure SelfAttention (hidden_size num_heads head_dim : UInt64) where
   /-- QKV projection: [hidden * 3, hidden] -/
-  qkv : STensor #[num_heads * head_dim * 3, hidden_size]
+  qkv : Tensor { shape := #[num_heads * head_dim * 3, hidden_size] }
   /-- QK normalization -/
   norm : QKNorm head_dim
   /-- Output projection: [hidden, hidden] -/
-  proj : STensor #[hidden_size, num_heads * head_dim]
+  proj : Tensor { shape := #[hidden_size, num_heads * head_dim] }
   deriving TensorStruct
 
 /-- SwiGLU MLP for double-stream block -/
 structure SwiGLUMLP (hidden_size mlp_hidden : UInt64) where
   /-- Linear in: gate and up projection fused -/
-  w1 : STensor #[mlp_hidden * 2, hidden_size]
+  w1 : Tensor { shape := #[mlp_hidden * 2, hidden_size] }
   /-- Linear out: down projection -/
-  w2 : STensor #[hidden_size, mlp_hidden]
+  w2 : Tensor { shape := #[hidden_size, mlp_hidden] }
   deriving TensorStruct
 
 /-- Double-stream transformer block.
@@ -109,13 +109,13 @@ def init (hidden_size num_heads head_dim mlp_hidden : UInt64)
     Returns: (img_out, txt_out) -/
 def forward {batch img_seq txt_seq hidden_size num_heads head_dim mlp_hidden : UInt64}
     (block : DoubleStreamBlock hidden_size num_heads head_dim mlp_hidden)
-    (img : STensor #[batch, img_seq, hidden_size])
-    (txt : STensor #[batch, txt_seq, hidden_size])
-    (img_pe : DTensor #[batch, 1, img_seq, head_dim / 2, 2, 2] .Float32)
-    (txt_pe : DTensor #[batch, 1, txt_seq, head_dim / 2, 2, 2] .Float32)  -- RoPE for image and text
-    (mod_img : STensor #[batch, 6, hidden_size])
-    (mod_txt : STensor #[batch, 6, hidden_size])
-    : STensor #[batch, img_seq, hidden_size] × STensor #[batch, txt_seq, hidden_size] :=
+    (img : Tensor { shape := #[batch, img_seq, hidden_size] })
+    (txt : Tensor { shape := #[batch, txt_seq, hidden_size] })
+    (img_pe : Tensor { shape := #[batch, 1, img_seq, head_dim / 2, 2, 2], dtype := .Float32 })
+    (txt_pe : Tensor { shape := #[batch, 1, txt_seq, head_dim / 2, 2, 2], dtype := .Float32 })  -- RoPE for image and text
+    (mod_img : Tensor { shape := #[batch, 6, hidden_size] })
+    (mod_txt : Tensor { shape := #[batch, 6, hidden_size] })
+    : Tensor { shape := #[batch, img_seq, hidden_size] } × Tensor { shape := #[batch, txt_seq, hidden_size] } :=
   -- Split modulation into two triplets for attention and MLP
   let img_mod1 := sliceTyped mod_img 1 0 3
   let img_mod2 := sliceTyped mod_img 1 3 3
@@ -173,9 +173,9 @@ def forward {batch img_seq txt_seq hidden_size num_heads head_dim mlp_hidden : U
 
   -- Concatenate for joint attention
   -- q: [batch, img_seq + txt_seq, num_heads, head_dim]
-  let q : STensor #[batch, txt_seq + img_seq, num_heads, head_dim] := qwen35.typedCat txt_q img_q 1
-  let k : STensor #[batch, txt_seq + img_seq, num_heads, head_dim] := qwen35.typedCat txt_k img_k 1
-  let v : STensor #[batch, txt_seq + img_seq, num_heads, head_dim] := qwen35.typedCat txt_v img_v 1
+  let q : Tensor { shape := #[batch, txt_seq + img_seq, num_heads, head_dim] } := qwen35.typedCat txt_q img_q 1
+  let k : Tensor { shape := #[batch, txt_seq + img_seq, num_heads, head_dim] } := qwen35.typedCat txt_k img_k 1
+  let v : Tensor { shape := #[batch, txt_seq + img_seq, num_heads, head_dim] } := qwen35.typedCat txt_v img_v 1
 
   -- Transpose for attention
   let q := transposeAttention q

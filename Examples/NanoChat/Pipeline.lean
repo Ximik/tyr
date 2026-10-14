@@ -1632,13 +1632,13 @@ def supervisedFineTune (cfg : NanoChatConfig) : PipelineM Unit := do
 
     -- Keep batch and sequence indices across the SFT callback boundary.
     let forwardFn : ModdedGPTParams modelCfg → {batch seq : UInt64} →
-        DTensor #[batch, seq] .Int64 → IO (Σ vocab : UInt64, DTensor #[batch, seq, vocab] .Float32) :=
+        Tensor { shape := #[batch, seq], dtype := .Int64 } → IO (Σ vocab : UInt64, Tensor { shape := #[batch, seq, vocab], dtype := .Float32 }) :=
       fun params {batch seq} input => do
         let logits ← moddedGpt.forward (batch := batch) (seq := seq) params yarn (input.to trainDevice)
         pure ⟨modelCfg.vocabSize, logits⟩
 
-    let lossFn : {batch seq vocab : UInt64} → DTensor #[batch, seq, vocab] .Float32 →
-        DTensor #[batch, seq] .Int64 → DTensor #[batch, seq] .Float32 → DTensor #[] .Float32 :=
+    let lossFn : {batch seq vocab : UInt64} → Tensor { shape := #[batch, seq, vocab], dtype := .Float32 } →
+        Tensor { shape := #[batch, seq], dtype := .Int64 } → Tensor { shape := #[batch, seq], dtype := .Float32 } → Tensor { shape := #[], dtype := .Float32 } :=
       fun logits targets mask => maskedCrossEntropy logits targets mask
 
     -- Initialize AdamW optimizer
@@ -1817,7 +1817,7 @@ def reinforcementLearning (cfg : NanoChatConfig) : PipelineM Unit := do
 
     -- Create forward function for policy gradient
     -- Returns per-token NLL: (input, target) → nll_per_token
-    let forwardFn := fun (params : ModdedGPTParams modelCfg) (input : DTensor #[1, 256] .Int64) (target : DTensor #[1, 256] .Int64) => do
+    let forwardFn := fun (params : ModdedGPTParams modelCfg) (input : Tensor { shape := #[1, 256], dtype := .Int64 }) (target : Tensor { shape := #[1, 256], dtype := .Int64 }) => do
       let logits ← moddedGpt.forward params yarn (input.to trainDevice)
       -- Compute per-token cross-entropy (NLL)
       let logitsFlat := logits.reshapeChecked #[256, modelCfg.vocabSize]

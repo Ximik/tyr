@@ -23,23 +23,23 @@ def runCoreM (x : CoreM α) : IO α := do
   | .error msg =>
       throw (IO.userError (← msg.toMessageData.toString))
 
-opaque frontendPadPrimitive (_base : torch.DTensor #[2] .Float32) (_padv : torch.DTensor #[1] .Float32) : torch.DTensor #[6] .Float32 :=
+opaque frontendPadPrimitive (_base : torch.Tensor { shape := #[2], dtype := .Float32 }) (_padv : torch.Tensor { shape := #[1], dtype := .Float32 }) : torch.Tensor { shape := #[6], dtype := .Float32 } :=
   torch.Tensor.zeros #[6]
 
-def ordinaryPadWrapper (base : torch.DTensor #[2] .Float32) (padv : torch.DTensor #[1] .Float32) : torch.DTensor #[6] .Float32 :=
+def ordinaryPadWrapper (base : torch.Tensor { shape := #[2], dtype := .Float32 }) (padv : torch.Tensor { shape := #[1], dtype := .Float32 }) : torch.Tensor { shape := #[6], dtype := .Float32 } :=
   frontendPadPrimitive base padv
 
-opaque frontendReshapePrimitive (x : torch.DTensor #[6] .Float32) : torch.DTensor #[6] .Float32 := x
+opaque frontendReshapePrimitive (x : torch.Tensor { shape := #[6], dtype := .Float32 }) : torch.Tensor { shape := #[6], dtype := .Float32 } := x
 
-def unsupportedCompositeWrapper (base : torch.DTensor #[2] .Float32) (padv : torch.DTensor #[1] .Float32) : torch.DTensor #[6] .Float32 :=
+def unsupportedCompositeWrapper (base : torch.Tensor { shape := #[2], dtype := .Float32 }) (padv : torch.Tensor { shape := #[1], dtype := .Float32 }) : torch.Tensor { shape := #[6], dtype := .Float32 } :=
   frontendReshapePrimitive (frontendPadPrimitive base padv)
 
-opaque frontendFrozenPadPrimitive (_base : torch.DTensor #[2] .Float32)
-    (_padv : torch.Frozen { shape := #[1], dtype := .Float32 }) : torch.DTensor #[6] .Float32 :=
+opaque frontendFrozenPadPrimitive (_base : torch.Tensor { shape := #[2], dtype := .Float32 })
+    (_padv : torch.Frozen { shape := #[1], dtype := .Float32 }) : torch.Tensor { shape := #[6], dtype := .Float32 } :=
   torch.Tensor.zeros #[6]
 
-def frozenPadWrapper (base : torch.DTensor #[2] .Float32)
-    (padv : torch.Frozen { shape := #[1], dtype := .Float32 }) : torch.DTensor #[6] .Float32 :=
+def frozenPadWrapper (base : torch.Tensor { shape := #[2], dtype := .Float32 })
+    (padv : torch.Frozen { shape := #[1], dtype := .Float32 }) : torch.Tensor { shape := #[6], dtype := .Float32 } :=
   frontendFrozenPadPrimitive base padv
 
 private def padPrimitiveSpecs : Array PrimitiveFrontendSpec := #[

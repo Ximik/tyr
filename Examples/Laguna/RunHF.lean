@@ -90,7 +90,7 @@ private def runBench
     (cfg : Config)
     (model : LagunaForCausalLM cfg)
     {b seq : UInt64}
-    (inputIds : DTensor #[b, seq] .Int64)
+    (inputIds : Tensor { shape := #[b, seq], dtype := .Int64 })
     (promptLen : UInt64)
     (maxNewTokens : UInt64)
     (eos : Array UInt64)
@@ -131,7 +131,7 @@ private def runTextBatches
     let prompt := prompts[0]?.getD args.prompt
     let ⟨batch, ⟨seq, (inputIds0, promptLens)⟩⟩ ←
       buildBatchInputWithEncoder tokenizer.laguna.padTokenId.toUInt64 #[prompt] (fun p => pure (encodePromptToIds tok args.enableThinking p))
-    let inputIds : DTensor #[batch, seq] .Int64 := inputIds0.to device
+    let inputIds : Tensor { shape := #[batch, seq], dtype := .Int64 } := inputIds0.to device
     let promptLen := (promptLens[0]?.getD 0).toUInt64
     -- warmup (also builds rope tables / caches), then measured run
     IO.println "Warming up..."
@@ -143,11 +143,11 @@ private def runTextBatches
       let ⟨batch, ⟨seq, (inputIds, promptLens)⟩⟩ ←
         buildBatchInputWithEncoder tokenizer.laguna.padTokenId.toUInt64 chunk (fun p => pure (encodePromptToIds tok args.enableThinking p))
       pure ⟨batch, ⟨seq, (inputIds.to device, promptLens)⟩⟩
-    let decodeBatch (promptLens : Array Nat) {b os : UInt64} (ids : DTensor #[b, os] .Int64) : IO (Array String) :=
+    let decodeBatch (promptLens : Array Nat) {b os : UInt64} (ids : Tensor { shape := #[b, os], dtype := .Int64 }) : IO (Array String) :=
       decodeGeneratedBatch promptLens ids (fun xs => tokenizer.laguna.decodeTokens tok xs)
-    let runGen (b : UInt64) {s : UInt64} (ids : DTensor #[b, s] .Int64) :=
+    let runGen (b : UInt64) {s : UInt64} (ids : Tensor { shape := #[b, s], dtype := .Int64 }) :=
       model.generate cfg ids args.maxNewTokens .greedy eos
-    let runGenStream (b : UInt64) {s : UInt64} (ids : DTensor #[b, s] .Int64) (cb : StreamCallback b) :=
+    let runGenStream (b : UInt64) {s : UInt64} (ids : Tensor { shape := #[b, s], dtype := .Int64 }) (cb : StreamCallback b) :=
       model.generateStream cfg ids cb args.maxNewTokens .greedy eos
     runGenerationBatches prompts args.batchSize args.maxNewTokens args.stream args.debugIds
       (prompts.size == 1) buildBatch runGen runGenStream decodeBatch

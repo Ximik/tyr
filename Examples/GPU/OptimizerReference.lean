@@ -5,8 +5,8 @@ open torch
 
 /-- AdamW update with Float32 master weights/moments and BF16 model weights/gradients. -/
 def referenceUpdate {elements : UInt64}
-    (master : DTensor #[elements] .Float32) (grad : DTensor #[elements] .BFloat16)
-    (moment1 moment2 : DTensor #[elements] .Float32)
+    (master : Tensor { shape := #[elements], dtype := .Float32 }) (grad : Tensor { shape := #[elements], dtype := .BFloat16 })
+    (moment1 moment2 : Tensor { shape := #[elements], dtype := .Float32 })
     (learningRate beta1 beta2 epsilon weightDecay invBias1 invBias2 : Float) := Id.run do
   let grad32 := grad.toFloat32
   let expectedM := Tensor.Preserving.mulScalar moment1 beta1 +

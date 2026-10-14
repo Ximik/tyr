@@ -52,20 +52,20 @@ def init (hidden_size num_heads num_kv_heads head_dim intermediate_size : UInt64
     Pre-norm: x + attn(norm1(x)) + mlp(norm2(x + attn(...))) -/
 def forward {batch seq hidden_size num_heads num_kv_heads head_dim intermediate_size : UInt64}
     (layer : QwenLayer hidden_size num_heads num_kv_heads head_dim intermediate_size dtype)
-    (x : DTensor #[batch, seq, hidden_size] dtype)
-    (cos : DTensor #[seq, head_dim / 2] .Float32)
-    (sin : DTensor #[seq, head_dim / 2] .Float32)
+    (x : Tensor { shape := #[batch, seq, hidden_size], dtype := dtype })
+    (cos : Tensor { shape := #[seq, head_dim / 2], dtype := .Float32 })
+    (sin : Tensor { shape := #[seq, head_dim / 2], dtype := .Float32 })
     (is_causal : Bool := true)
-    : DTensor #[batch, seq, hidden_size] dtype :=
+    : Tensor { shape := #[batch, seq, hidden_size], dtype := dtype } :=
   -- Pre-norm attention
   let residual := x
-  let x : DTensor #[batch, seq, hidden_size] dtype := layer.input_layernorm.forward3dPreserving x
+  let x : Tensor { shape := #[batch, seq, hidden_size], dtype := dtype } := layer.input_layernorm.forward3dPreserving x
   let x := layer.self_attn.forward x cos sin is_causal
-  let x : DTensor #[batch, seq, hidden_size] dtype := Add.add residual x
+  let x : Tensor { shape := #[batch, seq, hidden_size], dtype := dtype } := Add.add residual x
 
   -- Pre-norm MLP
   let residual := x
-  let x : DTensor #[batch, seq, hidden_size] dtype := layer.post_attention_layernorm.forward3dPreserving x
+  let x : Tensor { shape := #[batch, seq, hidden_size], dtype := dtype } := layer.post_attention_layernorm.forward3dPreserving x
   let x := layer.mlp.forward x
   Add.add residual x
 
@@ -73,41 +73,41 @@ def forward {batch seq hidden_size num_heads num_kv_heads head_dim intermediate_
     Input/output: `[batch, 1, hidden_size]`. -/
 def forwardStep {batch hidden_size num_heads num_kv_heads head_dim intermediate_size : UInt64}
     (layer : QwenLayer hidden_size num_heads num_kv_heads head_dim intermediate_size dtype)
-    (x : DTensor #[batch, 1, hidden_size] dtype)
-    (cos : DTensor #[1, head_dim / 2] .Float32)
-    (sin : DTensor #[1, head_dim / 2] .Float32)
+    (x : Tensor { shape := #[batch, 1, hidden_size], dtype := dtype })
+    (cos : Tensor { shape := #[1, head_dim / 2], dtype := .Float32 })
+    (sin : Tensor { shape := #[1, head_dim / 2], dtype := .Float32 })
     (cache : QwenAttention.KVCache batch num_kv_heads head_dim dtype)
-    : DTensor #[batch, 1, hidden_size] dtype × QwenAttention.KVCache batch num_kv_heads head_dim dtype :=
+    : Tensor { shape := #[batch, 1, hidden_size], dtype := dtype } × QwenAttention.KVCache batch num_kv_heads head_dim dtype :=
   -- Pre-norm attention.
   let residual1 := x
-  let x1 : DTensor #[batch, 1, hidden_size] dtype := layer.input_layernorm.forward3dPreserving x
+  let x1 : Tensor { shape := #[batch, 1, hidden_size], dtype := dtype } := layer.input_layernorm.forward3dPreserving x
   let (attnOut, cache') := layer.self_attn.forwardStep x1 cos sin cache
-  let h1 : DTensor #[batch, 1, hidden_size] dtype := Add.add residual1 attnOut
+  let h1 : Tensor { shape := #[batch, 1, hidden_size], dtype := dtype } := Add.add residual1 attnOut
 
   -- Pre-norm MLP.
   let residual2 := h1
-  let h2 : DTensor #[batch, 1, hidden_size] dtype := layer.post_attention_layernorm.forward3dPreserving h1
+  let h2 : Tensor { shape := #[batch, 1, hidden_size], dtype := dtype } := layer.post_attention_layernorm.forward3dPreserving h1
   let h3 := layer.mlp.forward h2
   (Add.add residual2 h3, cache')
 
 def forwardMasked {batch seq hidden_size num_heads num_kv_heads head_dim intermediate_size : UInt64}
     {maskDtype : DType}
     (layer : QwenLayer hidden_size num_heads num_kv_heads head_dim intermediate_size dtype)
-    (x : DTensor #[batch, seq, hidden_size] dtype)
-    (cos : DTensor #[seq, head_dim / 2] .Float32)
-    (sin : DTensor #[seq, head_dim / 2] .Float32)
+    (x : Tensor { shape := #[batch, seq, hidden_size], dtype := dtype })
+    (cos : Tensor { shape := #[seq, head_dim / 2], dtype := .Float32 })
+    (sin : Tensor { shape := #[seq, head_dim / 2], dtype := .Float32 })
     (attn_mask : Tensor ⟨#[batch, seq], maskDtype, .any⟩)
     (is_causal : Bool := true)
-    : DTensor #[batch, seq, hidden_size] dtype :=
+    : Tensor { shape := #[batch, seq, hidden_size], dtype := dtype } :=
   -- Pre-norm attention
   let residual := x
-  let x : DTensor #[batch, seq, hidden_size] dtype := layer.input_layernorm.forward3dPreserving x
+  let x : Tensor { shape := #[batch, seq, hidden_size], dtype := dtype } := layer.input_layernorm.forward3dPreserving x
   let x := layer.self_attn.forwardMasked x cos sin attn_mask is_causal
-  let x : DTensor #[batch, seq, hidden_size] dtype := Add.add residual x
+  let x : Tensor { shape := #[batch, seq, hidden_size], dtype := dtype } := Add.add residual x
 
   -- Pre-norm MLP
   let residual := x
-  let x : DTensor #[batch, seq, hidden_size] dtype := layer.post_attention_layernorm.forward3dPreserving x
+  let x : Tensor { shape := #[batch, seq, hidden_size], dtype := dtype } := layer.post_attention_layernorm.forward3dPreserving x
   let x := layer.mlp.forward x
   Add.add residual x
 

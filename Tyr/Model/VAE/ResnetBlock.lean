@@ -14,8 +14,8 @@ namespace torch.vae
 /-- GroupNorm parameters for VAE.
     Weight and bias for affine transformation. -/
 structure GroupNormParams (num_groups channels : UInt64) where
-  weight : STensor #[channels]
-  bias : STensor #[channels]
+  weight : Tensor { shape := #[channels] }
+  bias : Tensor { shape := #[channels] }
   deriving TensorStruct
 
 namespace GroupNormParams
@@ -29,9 +29,9 @@ def init (num_groups channels : UInt64) : GroupNormParams num_groups channels :=
 /-- Apply GroupNorm to input tensor [batch, channels, height, width] -/
 def forward {batch channels height width num_groups : UInt64}
     (gn : GroupNormParams num_groups channels)
-    (x : STensor #[batch, channels, height, width])
+    (x : Tensor { shape := #[batch, channels, height, width] })
     (eps : Float := 1e-6)
-    : STensor #[batch, channels, height, width] :=
+    : Tensor { shape := #[batch, channels, height, width] } :=
   groupNorm x num_groups gn.weight gn.bias eps
 
 end GroupNormParams
@@ -39,8 +39,8 @@ end GroupNormParams
 /-- Conv2d parameters for VAE.
     Weight and bias for standard conv2d. -/
 structure Conv2dParams (in_ch out_ch kernel_size : UInt64) (padding : UInt64 := 0) where
-  weight : STensor #[out_ch, in_ch, kernel_size, kernel_size]
-  bias : STensor #[out_ch]
+  weight : Tensor { shape := #[out_ch, in_ch, kernel_size, kernel_size] }
+  bias : Tensor { shape := #[out_ch] }
   deriving TensorStruct
 
 namespace Conv2dParams
@@ -59,15 +59,15 @@ def init (in_ch out_ch kernel_size : UInt64) (padding : UInt64 := 0) : IO (Conv2
 /-- Apply convolution -/
 def forward {batch in_ch out_ch kernel_size padding height width : UInt64}
     (conv : Conv2dParams in_ch out_ch kernel_size padding)
-    (x : STensor #[batch, in_ch, height, width])
-    : STensor #[batch, out_ch, Tensor.convExtent height kernel_size 1 padding 1,
-        Tensor.convExtent width kernel_size 1 padding 1] :=
+    (x : Tensor { shape := #[batch, in_ch, height, width] })
+    : Tensor { shape := #[batch, out_ch, Tensor.convExtent height kernel_size 1 padding 1,
+        Tensor.convExtent width kernel_size 1 padding 1] } :=
   Tensor.conv2dBias x conv.weight (Tensor.castLike conv.weight (Tensor.zeros #[out_ch] false conv.weight.device)) #[1, 1] #[padding, padding]
 
 end Conv2dParams
 
 /-- Swish activation: x * sigmoid(x) -/
-def swish {s : Shape} (x : STensor s) : STensor s :=
+def swish {s : Shape} (x : Tensor { shape := s }) : Tensor { shape := s } :=
   x * Tensor.Preserving.sigmoid x
 
 /-- Residual block for VAE decoder.
@@ -105,8 +105,8 @@ def init (in_ch out_ch : UInt64) : IO (ResnetBlock in_ch out_ch) := do
     Output: [batch, out_ch, height, width] -/
 def forward {batch in_ch out_ch height width : UInt64}
     (block : ResnetBlock in_ch out_ch)
-    (x : STensor #[batch, in_ch, height, width])
-    : STensor #[batch, out_ch, height, width] :=
+    (x : Tensor { shape := #[batch, in_ch, height, width] })
+    : Tensor { shape := #[batch, out_ch, height, width] } :=
   -- Main path
   let h := block.norm1.forward x
   let h := swish h

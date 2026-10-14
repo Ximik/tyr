@@ -22,17 +22,17 @@ namespace torch.qwen
     Each KV head is shared across multiple query heads. -/
 structure QwenAttention (hidden_size num_heads num_kv_heads head_dim : UInt64) (dtype : DType := .Float32) where
   /-- Query projection: [hidden_size, hidden_size] -/
-  q_proj : DTensor #[num_heads * head_dim, hidden_size] dtype
+  q_proj : Tensor { shape := #[num_heads * head_dim, hidden_size], dtype := dtype }
   /-- Key projection: [kv_dim, hidden_size] -/
-  k_proj : DTensor #[num_kv_heads * head_dim, hidden_size] dtype
+  k_proj : Tensor { shape := #[num_kv_heads * head_dim, hidden_size], dtype := dtype }
   /-- Value projection: [kv_dim, hidden_size] -/
-  v_proj : DTensor #[num_kv_heads * head_dim, hidden_size] dtype
+  v_proj : Tensor { shape := #[num_kv_heads * head_dim, hidden_size], dtype := dtype }
   /-- Output projection: [hidden_size, hidden_size] -/
-  o_proj : DTensor #[hidden_size, num_heads * head_dim] dtype
+  o_proj : Tensor { shape := #[hidden_size, num_heads * head_dim], dtype := dtype }
   /-- Optional Q norm (per-head normalization for Flux Klein text encoder) -/
-  q_norm : Option (DTensor #[head_dim] dtype) := none
+  q_norm : Option (Tensor { shape := #[head_dim], dtype := dtype }) := none
   /-- Optional K norm (per-head normalization for Flux Klein text encoder) -/
-  k_norm : Option (DTensor #[head_dim] dtype) := none
+  k_norm : Option (Tensor { shape := #[head_dim], dtype := dtype }) := none
   deriving TensorStruct
 
 namespace QwenAttention
@@ -67,8 +67,8 @@ def init (hidden_size num_heads num_kv_heads head_dim : UInt64) (dtype : DType :
     cache metadata by `expectStore` at every decode step — the typed
     adapter for rank changes without erasing the tensor specification. -/
 structure KVCache (batch num_kv_heads head_dim : UInt64) (dtype : DType := .Float32) where
-  kStoreDyn : Σ (s : Shape), DTensor s dtype
-  vStoreDyn : Σ (s : Shape), DTensor s dtype
+  kStoreDyn : Σ (s : Shape), Tensor { shape := s, dtype := dtype }
+  vStoreDyn : Σ (s : Shape), Tensor { shape := s, dtype := dtype }
   seq : UInt64 := 0
   maxLen : UInt64 := 0
 
@@ -76,17 +76,17 @@ structure KVCache (batch num_kv_heads head_dim : UInt64) (dtype : DType := .Floa
 def initKVCache {batch num_kv_heads head_dim : UInt64}
     (maxLen : UInt64)
     (device : Device := Device.CPU) (dtype : DType := .Float32) : KVCache batch num_kv_heads head_dim dtype :=
-  let k0 : DTensor #[batch, num_kv_heads, maxLen, head_dim] dtype :=
+  let k0 : Tensor { shape := #[batch, num_kv_heads, maxLen, head_dim], dtype := dtype } :=
     (Tensor.zeros #[batch, num_kv_heads, maxLen, head_dim] false device).castDType dtype
-  let v0 : DTensor #[batch, num_kv_heads, maxLen, head_dim] dtype :=
+  let v0 : Tensor { shape := #[batch, num_kv_heads, maxLen, head_dim], dtype := dtype } :=
     (Tensor.zeros #[batch, num_kv_heads, maxLen, head_dim] false device).castDType dtype
   { kStoreDyn := ⟨_, k0⟩, vStoreDyn := ⟨_, v0⟩, seq := 0, maxLen := maxLen }
 
 /-- Recover the statically-shaped store from its existential carrier,
     validating the runtime handle against the cache metadata. -/
 private def expectStore {batch num_kv_heads head_dim : UInt64}
-    (store : Σ (s : Shape), DTensor s dtype) (maxLen : UInt64)
-    : DTensor #[batch, num_kv_heads, maxLen, head_dim] dtype :=
+    (store : Σ (s : Shape), Tensor { shape := s, dtype := dtype }) (maxLen : UInt64)
+    : Tensor { shape := #[batch, num_kv_heads, maxLen, head_dim], dtype := dtype } :=
   match Tensor.ofRaw store.2.raw with
   | .ok t => t
   | .error message => panic! s!"QwenAttention.KVCache store: {message}"
@@ -166,10 +166,10 @@ private def meanDimTo {s : Shape} {d : DType} {dev : DevicePolicy}
     Input: [batch, seq, n_heads, head_dim], norm: [head_dim]
     Broadcasts norm across all heads. -/
 private def applyHeadNorm {batch seq n_heads head_dim : UInt64}
-    (x : DTensor #[batch, seq, n_heads, head_dim] dtype)
-    (norm : DTensor #[head_dim] dtype)
+    (x : Tensor { shape := #[batch, seq, n_heads, head_dim], dtype := dtype })
+    (norm : Tensor { shape := #[head_dim], dtype := dtype })
     (eps : Float := 1e-6)
-    : DTensor #[batch, seq, n_heads, head_dim] dtype :=
+    : Tensor { shape := #[batch, seq, n_heads, head_dim], dtype := dtype } :=
   Tensor.rmsNormPreserving x norm eps
 
 /-- Forward pass for attention.
@@ -177,11 +177,11 @@ private def applyHeadNorm {batch seq n_heads head_dim : UInt64}
     Output: [batch, seq, hidden_size] -/
 def forward {batch seq hidden_size num_heads num_kv_heads head_dim : UInt64}
     (attn : QwenAttention hidden_size num_heads num_kv_heads head_dim dtype)
-    (x : DTensor #[batch, seq, hidden_size] dtype)
-    (cos : DTensor #[seq, head_dim / 2] .Float32)
-    (sin : DTensor #[seq, head_dim / 2] .Float32)
+    (x : Tensor { shape := #[batch, seq, hidden_size], dtype := dtype })
+    (cos : Tensor { shape := #[seq, head_dim / 2], dtype := .Float32 })
+    (sin : Tensor { shape := #[seq, head_dim / 2], dtype := .Float32 })
     (is_causal : Bool := true)
-    : DTensor #[batch, seq, hidden_size] dtype :=
+    : Tensor { shape := #[batch, seq, hidden_size], dtype := dtype } :=
   -- Project to Q, K, V
   let q := Tensor.linear3d x attn.q_proj  -- [batch, seq, num_heads * head_dim]
   let k := Tensor.linear3d x attn.k_proj  -- [batch, seq, num_kv_heads * head_dim]
@@ -232,12 +232,12 @@ def forward {batch seq hidden_size num_heads num_kv_heads head_dim : UInt64}
     otherwise — so this flag is safe to flip on for any shape. -/
 def forwardStep {batch hidden_size num_heads num_kv_heads head_dim : UInt64}
     (attn : QwenAttention hidden_size num_heads num_kv_heads head_dim dtype)
-    (x : DTensor #[batch, 1, hidden_size] dtype)
-    (cos : DTensor #[1, head_dim / 2] .Float32)
-    (sin : DTensor #[1, head_dim / 2] .Float32)
+    (x : Tensor { shape := #[batch, 1, hidden_size], dtype := dtype })
+    (cos : Tensor { shape := #[1, head_dim / 2], dtype := .Float32 })
+    (sin : Tensor { shape := #[1, head_dim / 2], dtype := .Float32 })
     (cache : KVCache batch num_kv_heads head_dim dtype)
     (useTyrFlashAttn : Bool := false)
-    : DTensor #[batch, 1, hidden_size] dtype × KVCache batch num_kv_heads head_dim dtype :=
+    : Tensor { shape := #[batch, 1, hidden_size], dtype := dtype } × KVCache batch num_kv_heads head_dim dtype :=
   -- Project current token to Q/K/V.
   let q0 := Tensor.linear3d x attn.q_proj
   let k0 := Tensor.linear3d x attn.k_proj
@@ -264,9 +264,9 @@ def forwardStep {batch hidden_size num_heads num_kv_heads head_dim : UInt64}
   let kNew := transposeForAttention k
   let vNew := transposeForAttention v
 
-  let kStore : DTensor #[batch, num_kv_heads, cache.maxLen, head_dim] dtype :=
+  let kStore : Tensor { shape := #[batch, num_kv_heads, cache.maxLen, head_dim], dtype := dtype } :=
     Tensor.castLike kNew (expectStore cache.kStoreDyn cache.maxLen)
-  let vStore : DTensor #[batch, num_kv_heads, cache.maxLen, head_dim] dtype :=
+  let vStore : Tensor { shape := #[batch, num_kv_heads, cache.maxLen, head_dim], dtype := dtype } :=
     Tensor.castLike vNew (expectStore cache.vStoreDyn cache.maxLen)
 
   if cache.seq < cache.maxLen then
@@ -323,12 +323,12 @@ def forwardStep {batch hidden_size num_heads num_kv_heads head_dim : UInt64}
 def forwardMasked {batch seq hidden_size num_heads num_kv_heads head_dim : UInt64}
     {maskDtype : DType}
     (attn : QwenAttention hidden_size num_heads num_kv_heads head_dim dtype)
-    (x : DTensor #[batch, seq, hidden_size] dtype)
-    (cos : DTensor #[seq, head_dim / 2] .Float32)
-    (sin : DTensor #[seq, head_dim / 2] .Float32)
+    (x : Tensor { shape := #[batch, seq, hidden_size], dtype := dtype })
+    (cos : Tensor { shape := #[seq, head_dim / 2], dtype := .Float32 })
+    (sin : Tensor { shape := #[seq, head_dim / 2], dtype := .Float32 })
     (attn_mask : Tensor ⟨#[batch, seq], maskDtype, .any⟩)
     (is_causal : Bool := true)
-    : DTensor #[batch, seq, hidden_size] dtype :=
+    : Tensor { shape := #[batch, seq, hidden_size], dtype := dtype } :=
   -- Project to Q, K, V
   let q := Tensor.linear3d x attn.q_proj  -- [batch, seq, num_heads * head_dim]
   let k := Tensor.linear3d x attn.k_proj  -- [batch, seq, num_kv_heads * head_dim]

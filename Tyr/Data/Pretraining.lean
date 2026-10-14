@@ -298,14 +298,14 @@ def createInputTarget (tokens : Array UInt64) : (Array UInt64 × Array UInt64) :
 
 /-- Build an Int64 token tensor from host data over the raw FFI boundary.
     `reshapeChecked` validates the result metadata (shape and Int64 dtype). -/
-private def int64TensorFromArray (arr : Array Int64) : DTensor #[arr.size.toUInt64] .Int64 :=
+private def int64TensorFromArray (arr : Array Int64) : Tensor { shape := #[arr.size.toUInt64], dtype := .Int64 } :=
   Tensor.fromInt64Array arr
 
 /-- Get next batch of (input, target) pairs.
     Returns Int64 tensors of shape [batchSize, seqLen]. -/
 def PretrainingLoader.nextBatch (loader : PretrainingLoader)
-    : IO (Option (DTensor #[loader.config.batchSize, loader.config.seqLen] .Int64 ×
-                  DTensor #[loader.config.batchSize, loader.config.seqLen] .Int64) ×
+    : IO (Option (Tensor { shape := #[loader.config.batchSize, loader.config.seqLen], dtype := .Int64 } ×
+                  Tensor { shape := #[loader.config.batchSize, loader.config.seqLen], dtype := .Int64 }) ×
           PretrainingLoader) := do
   let tokensNeeded := (loader.config.batchSize * loader.config.seqLen + 1).toNat
 
@@ -348,20 +348,20 @@ def PretrainingLoader.resume (loader : PretrainingLoader) (state : LoaderState)
 /-- Load validation data (typically last shard of training data) -/
 structure ValidationLoader where
   /-- All validation tokens (runtime length) -/
-  tokens : Σ n : UInt64, DTensor #[n] .Int64
+  tokens : Σ n : UInt64, Tensor { shape := #[n], dtype := .Int64 }
   /-- Current position -/
   position : Nat
   /-- Sequence length -/
   seqLen : UInt64
   deriving Repr
 
-def ValidationLoader.init (tokens : Σ n : UInt64, DTensor #[n] .Int64) (seqLen : UInt64)
+def ValidationLoader.init (tokens : Σ n : UInt64, Tensor { shape := #[n], dtype := .Int64 }) (seqLen : UInt64)
     : ValidationLoader :=
   { tokens, position := 0, seqLen }
 
 def ValidationLoader.nextBatch (loader : ValidationLoader) (batchSize : UInt64)
-    : IO (Option (DTensor #[batchSize, loader.seqLen] .Int64 ×
-                  DTensor #[batchSize, loader.seqLen] .Int64) × ValidationLoader) := do
+    : IO (Option (Tensor { shape := #[batchSize, loader.seqLen], dtype := .Int64 } ×
+                  Tensor { shape := #[batchSize, loader.seqLen], dtype := .Int64 }) × ValidationLoader) := do
   -- Implementation would slice tokens and create batches
   -- Placeholder for now
   return (none, loader)
@@ -506,8 +506,8 @@ def fillBuffer (state : StreamingLoaderState) (config : StreamingLoaderConfig) (
     - input = tokens[:-1]
     - target = tokens[1:] -/
 def StreamingLoaderState.nextBatch (state : StreamingLoaderState) (config : StreamingLoaderConfig)
-    : IO (Option (DTensor #[config.batchTokens / config.seqLen, config.seqLen] .Int64 ×
-                  DTensor #[config.batchTokens / config.seqLen, config.seqLen] .Int64) ×
+    : IO (Option (Tensor { shape := #[config.batchTokens / config.seqLen, config.seqLen], dtype := .Int64 } ×
+                  Tensor { shape := #[config.batchTokens / config.seqLen, config.seqLen], dtype := .Int64 }) ×
           StreamingLoaderState) := do
   let batchSize := config.batchTokens / config.seqLen
   let tokensNeeded := (batchSize * config.seqLen + 1).toNat

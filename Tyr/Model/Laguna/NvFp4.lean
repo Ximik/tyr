@@ -39,11 +39,11 @@ private def e2m1Value (nibble : Nat) : Float :=
   if nibble >= 8 then -mag else mag
 
 /-- F32 lookup table for the LOW nibble (element `2i`) of each byte. -/
-private def e2m1LutLo : DTensor #[256] .Float32 :=
+private def e2m1LutLo : Tensor { shape := #[256], dtype := .Float32 } :=
   (Tensor.fromFloatArray (Array.ofFn (n := 256) fun b => e2m1Value (b.val % 16))).reshapeChecked #[256]
 
 /-- F32 lookup table for the HIGH nibble (element `2i+1`) of each byte. -/
-private def e2m1LutHi : DTensor #[256] .Float32 :=
+private def e2m1LutHi : Tensor { shape := #[256], dtype := .Float32 } :=
   (Tensor.fromFloatArray (Array.ofFn (n := 256) fun b => e2m1Value (b.val / 16))).reshapeChecked #[256]
 
 /-- Shared dequant kernel.
@@ -56,10 +56,10 @@ private def e2m1LutHi : DTensor #[256] .Float32 :=
     Returns BF16 tensor of runtime shape `[lead, out, in]`. -/
 private def dequantCore
     (lead outFeatures inFeatures : UInt64)
-    (packed : STensor #[lead, outFeatures, inFeatures / 2])
-    (scales : STensor #[lead, outFeatures, inFeatures / 16])
-    (globalB : DTensor #[lead, 1, 1, 1] .Float32)
-    : IO (DTensor #[lead, outFeatures, inFeatures] .BFloat16) := do
+    (packed : Tensor { shape := #[lead, outFeatures, inFeatures / 2] })
+    (scales : Tensor { shape := #[lead, outFeatures, inFeatures / 16] })
+    (globalB : Tensor { shape := #[lead, 1, 1, 1], dtype := .Float32 })
+    : IO (Tensor { shape := #[lead, outFeatures, inFeatures], dtype := .BFloat16 }) := do
   if inFeatures % 16 != 0 then
     throw <| IO.userError
       s!"nvfp4.dequantCore: inFeatures={inFeatures} not divisible by 16"
@@ -82,7 +82,7 @@ private def dequantCore
 
 /-- Validate the caller's indexed input shape before reshaping a packed bank. -/
 private def checkShape {s : Shape} {d : DType}
-    (name : String) (_tensor : DTensor s d) (expected : Shape) : IO Unit := do
+    (name : String) (_tensor : Tensor { shape := s, dtype := d }) (expected : Shape) : IO Unit := do
   if s != expected then
     throw <| IO.userError s!"nvfp4: {name} must have shape {expected}, got {s}"
 
@@ -90,9 +90,9 @@ private def checkShape {s : Shape} {d : DType}
 Packed bytes and float8 scales retain their actual checkpoint dtype; their
 shapes are validated before any reshape. Global scale must contain one value. -/
 def dequantMatrix {ps ss gs : Shape} {pd sd gd : DType}
-    (packed : DTensor ps pd) (scales : DTensor ss sd) (globalScale : DTensor gs gd)
+    (packed : Tensor { shape := ps, dtype := pd }) (scales : Tensor { shape := ss, dtype := sd }) (globalScale : Tensor { shape := gs, dtype := gd })
     (outFeatures inFeatures : UInt64)
-    : IO (DTensor #[outFeatures, inFeatures] .BFloat16) := do
+    : IO (Tensor { shape := #[outFeatures, inFeatures], dtype := .BFloat16 }) := do
   checkShape "packed" packed #[outFeatures, inFeatures / 2]
   checkShape "scales" scales #[outFeatures, inFeatures / 16]
   if gs != #[] && gs != #[1] then
@@ -105,9 +105,9 @@ def dequantMatrix {ps ss gs : Shape} {pd sd gd : DType}
 
 /-- Dequantize an NVFP4 expert bank, preserving expert and matrix dimensions. -/
 def dequantBank {ps ss gs : Shape} {pd sd gd : DType}
-    (packed : DTensor ps pd) (scales : DTensor ss sd) (globalScale : DTensor gs gd)
+    (packed : Tensor { shape := ps, dtype := pd }) (scales : Tensor { shape := ss, dtype := sd }) (globalScale : Tensor { shape := gs, dtype := gd })
     (numExperts outFeatures inFeatures : UInt64)
-    : IO (DTensor #[numExperts, outFeatures, inFeatures] .BFloat16) := do
+    : IO (Tensor { shape := #[numExperts, outFeatures, inFeatures], dtype := .BFloat16 }) := do
   checkShape "packed" packed #[numExperts, outFeatures, inFeatures / 2]
   checkShape "scales" scales #[numExperts, outFeatures, inFeatures / 16]
   checkShape "global scale" globalScale #[numExperts]

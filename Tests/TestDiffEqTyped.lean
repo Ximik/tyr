@@ -88,15 +88,15 @@ private abbrev YSpec : StaticSpec := { shape := #[2], dtype := .Float32 }
   let steps := 500
   let dt := 1.0 / steps.toFloat
   -- tensor state, n = 64
-  let tTerm : ODETerm (DTensor #[64] .Float32) Unit :=
+  let tTerm : ODETerm (Tensor { shape := #[64], dtype := .Float32 }) Unit :=
     { vectorField := fun _t y _ => Tensor.Preserving.mulScalar y (-1.0) }
   let tSolver :=
-    Dopri5.solver (Term := ODETerm (DTensor #[64] .Float32) Unit)
-      (Y := DTensor #[64] .Float32) (VF := DTensor #[64] .Float32) (Args := Unit)
+    Dopri5.solver (Term := ODETerm (Tensor { shape := #[64], dtype := .Float32 }) Unit)
+      (Y := Tensor { shape := #[64], dtype := .Float32 }) (VF := Tensor { shape := #[64], dtype := .Float32 }) (Args := Unit)
   let t0 ← IO.monoMsNow
   let tSol :=
-    diffeqsolve (Term := ODETerm (DTensor #[64] .Float32) Unit)
-      (Y := DTensor #[64] .Float32) (VF := DTensor #[64] .Float32) (Control := Time) (Args := Unit)
+    diffeqsolve (Term := ODETerm (Tensor { shape := #[64], dtype := .Float32 }) Unit)
+      (Y := Tensor { shape := #[64], dtype := .Float32 }) (VF := Tensor { shape := #[64], dtype := .Float32 }) (Control := Time) (Args := Unit)
       (Controller := ConstantStepSize)
       tTerm tSolver 0.0 1.0 (some dt) (Tensor.ones #[64]) () (saveat := { t1 := true })
   let tFinal := Tensor.item (Tensor.sumAll ((tSol.ys.getD #[]).getD 0 (Tensor.ones #[64])))

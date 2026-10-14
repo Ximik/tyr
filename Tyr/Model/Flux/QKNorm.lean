@@ -31,9 +31,9 @@ def init (head_dim : UInt64) (eps : Float := 1e-6) : QKNorm head_dim :=
     Returns normalized (q, k) -/
 def forward {batch seq n_head head_dim : UInt64}
     (qkn : QKNorm head_dim)
-    (q : STensor #[batch, seq, n_head, head_dim])
-    (k : STensor #[batch, seq, n_head, head_dim])
-    : STensor #[batch, seq, n_head, head_dim] × STensor #[batch, seq, n_head, head_dim] :=
+    (q : Tensor { shape := #[batch, seq, n_head, head_dim] })
+    (k : Tensor { shape := #[batch, seq, n_head, head_dim] })
+    : Tensor { shape := #[batch, seq, n_head, head_dim] } × Tensor { shape := #[batch, seq, n_head, head_dim] } :=
   let q_norm := qkn.query_norm.forward4d q
   let k_norm := qkn.key_norm.forward4d k
   (q_norm, k_norm)
@@ -41,9 +41,9 @@ def forward {batch seq n_head head_dim : UInt64}
 /-- Forward for attention-transposed format: [batch, n_head, seq, head_dim] -/
 def forwardAttn {batch n_head seq head_dim : UInt64}
     (qkn : QKNorm head_dim)
-    (q : STensor #[batch, n_head, seq, head_dim])
-    (k : STensor #[batch, n_head, seq, head_dim])
-    : STensor #[batch, n_head, seq, head_dim] × STensor #[batch, n_head, seq, head_dim] :=
+    (q : Tensor { shape := #[batch, n_head, seq, head_dim] })
+    (k : Tensor { shape := #[batch, n_head, seq, head_dim] })
+    : Tensor { shape := #[batch, n_head, seq, head_dim] } × Tensor { shape := #[batch, n_head, seq, head_dim] } :=
   let q_norm := qkn.query_norm.forward5d q
   let k_norm := qkn.key_norm.forward5d k
   (q_norm, k_norm)

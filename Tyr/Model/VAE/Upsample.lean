@@ -29,8 +29,8 @@ def init (channels : UInt64) : IO (Upsample channels) := do
     Output: [batch, channels, height*2, width*2] -/
 def forward {batch channels height width : UInt64}
     (up : Upsample channels)
-    (x : STensor #[batch, channels, height, width])
-    : STensor #[batch, channels, height * 2, width * 2] :=
+    (x : Tensor { shape := #[batch, channels, height, width] })
+    : Tensor { shape := #[batch, channels, height * 2, width * 2] } :=
   -- 2× nearest-neighbor upsample
   let x_up := upsample2 x
   let x_up := Tensor.reshapeChecked x_up #[batch, channels, height * 2, width * 2]
@@ -58,8 +58,8 @@ def init (channels : UInt64) : IO (Downsample channels) := do
     Output: [batch, channels, ceil(height/2), ceil(width/2)] -/
 def forward {batch channels height width : UInt64}
     (down : Downsample channels)
-    (x : STensor #[batch, channels, height, width])
-    : STensor #[batch, channels, Tensor.convExtent height 3 2 1 1, Tensor.convExtent width 3 2 1 1] :=
+    (x : Tensor { shape := #[batch, channels, height, width] })
+    : Tensor { shape := #[batch, channels, Tensor.convExtent height 3 2 1 1, Tensor.convExtent width 3 2 1 1] } :=
   -- Pad input for proper strided conv
   -- Note: In VAE encoder, asymmetric padding may be needed
   let out := Tensor.conv2dBias x down.conv.weight (Tensor.castLike down.conv.weight (Tensor.zeros #[channels] false down.conv.weight.device)) #[2, 2] #[1, 1]

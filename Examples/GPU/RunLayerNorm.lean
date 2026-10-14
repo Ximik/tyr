@@ -23,8 +23,8 @@ def fixtureSpec : FixtureSpec := {
 def fixtureFile (name : String) : System.FilePath :=
   Examples.GPU.fixturePath fixtureSpec name
 
-abbrev LayerNormInput (dtype : DType) := DTensor #[1, 64, 1024] dtype
-abbrev LayerNormWeight (dtype : DType) := DTensor #[1024] dtype
+abbrev LayerNormInput (dtype : DType) := Tensor { shape := #[1, 64, 1024], dtype := dtype }
+abbrev LayerNormWeight (dtype : DType) := Tensor { shape := #[1024], dtype := dtype }
 
 structure LayerNormInputs (dtype : DType) where
   x : LayerNormInput dtype

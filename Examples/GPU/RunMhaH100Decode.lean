@@ -123,7 +123,7 @@ def runDecodeOnceFor (shape : DecodeShape) : IO Bool := do
 
   -- Route through the production op. select_route picks tkMhaH100Decode[64]
   -- when shape is eligible; else falls back to SDPA.
-  let actual : DTensor (shapeQ shape) .BFloat16 :=
+  let actual : Tensor { shape := (shapeQ shape), dtype := .BFloat16 } :=
     Tensor.flashAttention q k v true
   let _ ← torch.cuda_synchronize
 

@@ -9,10 +9,10 @@ open torch
 open Tyr.Modular
 open Tyr.AD
 
-private def vectorToColumn {n : UInt64} (v : DTensor #[n] .Float32) : DTensor #[n, 1] .Float32 :=
+private def vectorToColumn {n : UInt64} (v : Tensor { shape := #[n], dtype := .Float32 }) : Tensor { shape := #[n, 1], dtype := .Float32 } :=
   Tensor.reshape v #[n, 1] (by simp [TensorSpec.numelOfShape])
 
-private def columnToVector {n : UInt64} (v : DTensor #[n, 1] .Float32) : DTensor #[n] .Float32 :=
+private def columnToVector {n : UInt64} (v : Tensor { shape := #[n, 1], dtype := .Float32 }) : Tensor { shape := #[n], dtype := .Float32 } :=
   Tensor.reshape v #[n] (by simp [TensorSpec.numelOfShape])
 
 @[test]
@@ -61,7 +61,7 @@ def testEmbeddedStiefelRetractAmbientStepPreservesConstraint : IO Unit := do
   LeanTest.assertTrue (Tensor.allclose wtW I (rtol := 1e-4) (atol := 1e-5))
     "Embedded ambient-step retraction should preserve the Stiefel constraint"
 
-example (_x : DTensor #[4] .Float32) (_g : DTensor #[5] .Float32) : True := by
+example (_x : Tensor { shape := #[4], dtype := .Float32 }) (_g : Tensor { shape := #[5], dtype := .Float32 }) : True := by
   fail_if_success
     have _ := EmbeddedManifold.retractAmbientStep _x _g 0.1
   trivial

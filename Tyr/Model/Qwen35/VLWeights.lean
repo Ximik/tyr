@@ -133,7 +133,7 @@ private def loadVisionModelSharded (modelDir : String) (cfg : VisionConfig)
     (visionNameCandidates "model.visual.patch_embed.proj.bias")
     #[cfg.hidden_size]
     device
-  let patchW : STensor #[cfg.hidden_size, VisionConfig.patchDim cfg] :=
+  let patchW : Tensor { shape := #[cfg.hidden_size, VisionConfig.patchDim cfg] } :=
     Tensor.reshapeChecked convW #[cfg.hidden_size, VisionConfig.patchDim cfg]
   let patchEmbed : Qwen35VisionPatchEmbed cfg := {
     weight := reqGradFalse patchW
@@ -202,7 +202,7 @@ private def loadVisionModel (path : String) (cfg : VisionConfig)
     (visionNameCandidates "model.visual.patch_embed.proj.bias")
     #[cfg.hidden_size]
     device
-  let patchW : STensor #[cfg.hidden_size, VisionConfig.patchDim cfg] :=
+  let patchW : Tensor { shape := #[cfg.hidden_size, VisionConfig.patchDim cfg] } :=
     Tensor.reshapeChecked convW #[cfg.hidden_size, VisionConfig.patchDim cfg]
   let patchEmbed : Qwen35VisionPatchEmbed cfg := {
     weight := reqGradFalse patchW

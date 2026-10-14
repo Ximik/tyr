@@ -44,7 +44,7 @@ def testArangeLengthAndScalarWidths : IO Unit := do
 @[test]
 def testExactScalarReshape : IO Unit := do
   let x := Tensor.ones #[1]
-  let scalar : DTensor #[] .Float32 := x.reshape #[]
+  let scalar : Tensor { shape := #[], dtype := .Float32 } := x.reshape #[]
   LeanTest.assertEqual scalar.runtimeShape #[]
   LeanTest.assertEqual scalar.item 1.0
 

@@ -25,7 +25,7 @@ private def check (cond : Bool) (msg : String) : IO Unit := do
 /-- Max abs error and max rel error (denominator clamped by 1e-6) between
     two tensors, computed in FP32. -/
 private def maxErrors {s : Shape} {d e : DType}
-    (got : DTensor s d) (expected : DTensor s e) : IO (Float × Float) := do
+    (got : Tensor { shape := s, dtype := d }) (expected : Tensor { shape := s, dtype := e }) : IO (Float × Float) := do
   let a ← Tensor.toFloatArray got.toFloat32
   let b ← Tensor.toFloatArray expected.toFloat32
   let mut maxAbs := 0.0

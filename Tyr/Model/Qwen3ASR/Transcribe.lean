@@ -200,7 +200,7 @@ private def preparePromptInputIds
     (tok : tokenizer.qwen3.QwenTokenizer)
     (prompt : String)
     (audioLen : UInt64)
-    : IO (Sigma (fun seq => DTensor #[1, seq] .Int64)) := do
+    : IO (Sigma (fun seq => Tensor { shape := #[1, seq], dtype := .Int64 })) := do
   let processor : Qwen3ASRProcessor := {}
   let promptIds ←
     match processor.encodeWithExpandedAudioTokenIds
@@ -215,21 +215,21 @@ private def preparePromptInputIds
   let seq : UInt64 := idsVals.size.toUInt64
   if seq == 0 then
     throw <| IO.userError "ASR prompt/input sequence is empty"
-  let inputIds : DTensor #[1, seq] .Int64 := Tensor.reshapeChecked (Tensor.fromInt64Array idsVals) #[1, seq]
+  let inputIds : Tensor { shape := #[1, seq], dtype := .Int64 } := Tensor.reshapeChecked (Tensor.fromInt64Array idsVals) #[1, seq]
   pure ⟨seq, inputIds⟩
 
 private def decodeGeneratedText
     (tok : tokenizer.qwen3.QwenTokenizer)
     {seq : UInt64}
     (outSeq : UInt64)
-    (outIds : DTensor #[1, outSeq] .Int64)
+    (outIds : Tensor { shape := #[1, outSeq], dtype := .Int64 })
     : IO String := do
   if outSeq <= seq then
     pure ""
   else
     let newSeq := outSeq - seq
-    let newOnly : DTensor #[1, newSeq] .Int64 := Tensor.sliceChecked outIds 1 seq newSeq #[1, newSeq]
-    let flat : DTensor #[newSeq] .Int64 := Tensor.reshapeChecked newOnly #[newSeq]
+    let newOnly : Tensor { shape := #[1, newSeq], dtype := .Int64 } := Tensor.sliceChecked outIds 1 seq newSeq #[1, newSeq]
+    let flat : Tensor { shape := #[newSeq], dtype := .Int64 } := Tensor.reshapeChecked newOnly #[newSeq]
     let idsU64 ← Tensor.toUInt64Array flat
     let ids := idsU64.map (fun x => x.toUInt32)
     pure (tokenizer.qwen3.decodeText tok ids)
@@ -238,7 +238,7 @@ private def decodeGeneratedTextsBatch
     (tok : tokenizer.qwen3.QwenTokenizer)
     {batch seq : UInt64}
     (outSeq : UInt64)
-    (outIds : DTensor #[batch, outSeq] .Int64)
+    (outIds : Tensor { shape := #[batch, outSeq], dtype := .Int64 })
     : IO (Array String) := do
   if batch == 0 then
     pure #[]
@@ -246,8 +246,8 @@ private def decodeGeneratedTextsBatch
     pure (Array.replicate batch.toNat "")
   else
     let newSeq := outSeq - seq
-    let newOnly : DTensor #[batch, newSeq] .Int64 := Tensor.sliceChecked outIds 1 seq newSeq #[batch, newSeq]
-    let flat : DTensor #[batch * newSeq] .Int64 := Tensor.reshapeChecked newOnly #[batch * newSeq]
+    let newOnly : Tensor { shape := #[batch, newSeq], dtype := .Int64 } := Tensor.sliceChecked outIds 1 seq newSeq #[batch, newSeq]
+    let flat : Tensor { shape := #[batch * newSeq], dtype := .Int64 } := Tensor.reshapeChecked newOnly #[batch * newSeq]
     let idsU64 ← Tensor.toUInt64Array flat
     let rowWidth := newSeq.toNat
     let mut out : Array String := Array.mkEmpty batch.toNat
@@ -259,7 +259,7 @@ private def decodeGeneratedTextsBatch
     pure out
 
 private def extractAudioLenFromFeatureMask {cfg : Qwen3ASRConfig} {frames : UInt64}
-    (featureAttentionMask : DTensor #[1, frames] .Int64)
+    (featureAttentionMask : Tensor { shape := #[1, frames], dtype := .Int64 })
     : IO UInt64 := do
   let validFramesTensor := Tensor.sumAll featureAttentionMask
   let validFrames := validFramesTensor.itemInt.toInt.toNat.toUInt64
@@ -293,10 +293,10 @@ private def alignSingleWithModel
   else
     let dev := modelDevice alignModel
     let alignVals := alignIdsArr.map (fun id => Int64.ofNat id.toNat)
-    let inputIdsAlignCpu : DTensor #[1, seqAlign] .Int64 := Tensor.reshapeChecked (Tensor.fromInt64Array alignVals) #[1, seqAlign]
-    let inputIdsAlign : DTensor #[1, seqAlign] .Int64 := inputIdsAlignCpu.to dev
-    let inputFeaturesDev : DTensor #[1, melBins, frames] .Float32 := frontendOut.inputFeatures.to dev
-    let featureAttentionMaskDev : DTensor #[1, frames] .Int64 := frontendOut.featureAttentionMask.to dev
+    let inputIdsAlignCpu : Tensor { shape := #[1, seqAlign], dtype := .Int64 } := Tensor.reshapeChecked (Tensor.fromInt64Array alignVals) #[1, seqAlign]
+    let inputIdsAlign : Tensor { shape := #[1, seqAlign], dtype := .Int64 } := inputIdsAlignCpu.to dev
+    let inputFeaturesDev : Tensor { shape := #[1, melBins, frames], dtype := .Float32 } := frontendOut.inputFeatures.to dev
+    let featureAttentionMaskDev : Tensor { shape := #[1, frames], dtype := .Int64 } := frontendOut.featureAttentionMask.to dev
     let results ←
       autograd.no_grad do
         alignModel.alignPrepared
@@ -304,7 +304,7 @@ private def alignSingleWithModel
           #[wordList]
           (inputFeatures := some (Tensor.reshapeChecked inputFeaturesDev #[1, alignCfg.thinkerConfig.audioConfig.numMelBins, frames]).forgetDType)
           (featureAttentionMask := some featureAttentionMaskDev)
-          (attentionMask := (none : Option (DTensor #[1, seqAlign] .Int64)))
+          (attentionMask := (none : Option (Tensor { shape := #[1, seqAlign], dtype := .Int64 })))
           (timestampTokenId := alignCfg.timestampTokenId)
           (timestampSegmentTime := alignCfg.timestampSegmentTime)
     pure (results[0]?)
@@ -380,9 +380,9 @@ private def transcribeWithFrontend
   let promptPack ← preparePromptInputIds (cfg := cfg) tok prompt audioLen
   let dev := modelDevice model
   let seq := promptPack.1
-  let inputIds : DTensor #[1, seq] .Int64 := promptPack.2.to dev
-  let inputFeaturesDev : DTensor #[1, melBins, frames] .Float32 := frontendOut.inputFeatures.to dev
-  let featureAttentionMaskDev : DTensor #[1, frames] .Int64 := frontendOut.featureAttentionMask.to dev
+  let inputIds : Tensor { shape := #[1, seq], dtype := .Int64 } := promptPack.2.to dev
+  let inputFeaturesDev : Tensor { shape := #[1, melBins, frames], dtype := .Float32 } := frontendOut.inputFeatures.to dev
+  let featureAttentionMaskDev : Tensor { shape := #[1, frames], dtype := .Int64 } := frontendOut.featureAttentionMask.to dev
   let generated ←
     autograd.no_grad do
       model.generateGreedy
@@ -494,9 +494,9 @@ private structure BatchedDecodeRow where
   seq : UInt64
   frames : UInt64
   melBins : UInt64
-  inputIdsRow : DTensor #[1, seq] .Int64
-  inputFeaturesRow : DTensor #[1, melBins, frames] .Float32
-  featureAttentionMaskRow : DTensor #[1, frames] .Int64
+  inputIdsRow : Tensor { shape := #[1, seq], dtype := .Int64 }
+  inputFeaturesRow : Tensor { shape := #[1, melBins, frames], dtype := .Float32 }
+  featureAttentionMaskRow : Tensor { shape := #[1, frames], dtype := .Int64 }
   deriving Inhabited
 
 private structure BatchedDecodeBucket where
@@ -578,10 +578,10 @@ private def tryTranscribeWaveformsBatchedChunk
     let audioLen ← extractAudioLenFromFeatureMask (cfg := cfg) (frames := frames) frontendOut.featureAttentionMask
     let promptPack ← preparePromptInputIds (cfg := cfg) tok prompt audioLen
     let seq := promptPack.1
-    let inputIdsRowDyn : DTensor #[1, seq] .Int64 := Tensor.reshapeChecked promptPack.2 #[1, seq]
-    let inputFeaturesRowDyn : DTensor #[1, preprocessor.featureSize, frames] .Float32 :=
+    let inputIdsRowDyn : Tensor { shape := #[1, seq], dtype := .Int64 } := Tensor.reshapeChecked promptPack.2 #[1, seq]
+    let inputFeaturesRowDyn : Tensor { shape := #[1, preprocessor.featureSize, frames], dtype := .Float32 } :=
       Tensor.reshapeChecked frontendOut.inputFeatures #[1, preprocessor.featureSize, frames]
-    let featureAttentionMaskRowDyn : DTensor #[1, frames] .Int64 := Tensor.reshapeChecked frontendOut.featureAttentionMask #[1, frames]
+    let featureAttentionMaskRowDyn : Tensor { shape := #[1, frames], dtype := .Int64 } := Tensor.reshapeChecked frontendOut.featureAttentionMask #[1, frames]
     buckets := addRowToBuckets buckets frames seq {
       seq := seq
       frames := frames
@@ -604,10 +604,10 @@ private def tryTranscribeWaveformsBatchedChunk
       let inputRows := bucket.rows.map (fun r => r.inputIdsRow.packShape)
       let featRows := bucket.rows.map (fun r => r.inputFeaturesRow.packShape)
       let fmaskRows := bucket.rows.map (fun r => r.featureAttentionMaskRow.packShape)
-      let inputIdsCpu : DTensor #[batch, seq] .Int64 := Tensor.catManyChecked inputRows 0 #[batch, seq]
-      let inputFeaturesCpu : DTensor #[batch, preprocessor.featureSize, frames] .Float32 :=
+      let inputIdsCpu : Tensor { shape := #[batch, seq], dtype := .Int64 } := Tensor.catManyChecked inputRows 0 #[batch, seq]
+      let inputFeaturesCpu : Tensor { shape := #[batch, preprocessor.featureSize, frames], dtype := .Float32 } :=
         Tensor.catManyChecked featRows 0 #[batch, preprocessor.featureSize, frames]
-      let featureAttentionMaskCpu : DTensor #[batch, frames] .Int64 :=
+      let featureAttentionMaskCpu : Tensor { shape := #[batch, frames], dtype := .Int64 } :=
         Tensor.catManyChecked fmaskRows 0 #[batch, frames]
       let generated ←
         autograd.no_grad do

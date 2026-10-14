@@ -49,13 +49,13 @@ structure Engine where
   deriving Inhabited
 
 /-- Apply temperature scaling to logits -/
-def applyTemperature {s : Shape} (logits : DTensor s .Float32) (temp : Float) : DTensor s .Float32 :=
+def applyTemperature {s : Shape} (logits : Tensor { shape := s, dtype := .Float32 }) (temp : Float) : Tensor { shape := s, dtype := .Float32 } :=
   if temp == 1.0 then logits
   else Tensor.mulScalar logits (1.0 / temp)
 
 /-- Sample from logits using argmax (greedy).
     Returns array of token IDs, one per batch element. -/
-def sampleGreedy {batch vocabSize : UInt64} (logits : DTensor #[batch, vocabSize] .Float32)
+def sampleGreedy {batch vocabSize : UInt64} (logits : Tensor { shape := #[batch, vocabSize], dtype := .Float32 })
     : IO (Array TokenId) := do
   -- Get argmax along vocab dimension - returns [batch] tensor of indices
   let indices := Tensor.argmax logits (1 : UInt64)
@@ -64,20 +64,20 @@ def sampleGreedy {batch vocabSize : UInt64} (logits : DTensor #[batch, vocabSize
 
 /-- Apply top-k filtering to logits.
     Sets all logits outside the top k to -infinity. -/
-def applyTopK {s : Shape} (logits : DTensor s .Float32) (k : Nat) : DTensor s .Float32 :=
+def applyTopK {s : Shape} (logits : Tensor { shape := s, dtype := .Float32 }) (k : Nat) : Tensor { shape := s, dtype := .Float32 } :=
   if k == 0 then logits
   else Tensor.topKFilter logits k.toUInt64
 
 /-- Apply top-p (nucleus) filtering to logits.
     Sets logits outside the nucleus (cumulative prob > p) to -infinity. -/
-def applyTopP {s : Shape} (logits : DTensor s .Float32) (p : Float) : DTensor s .Float32 :=
+def applyTopP {s : Shape} (logits : Tensor { shape := s, dtype := .Float32 }) (p : Float) : Tensor { shape := s, dtype := .Float32 } :=
   if p >= 1.0 then logits
   else Tensor.topPFilter logits p
 
 /-- Sample from logits with temperature, top-k, and top-p.
     Returns array of token IDs, one per batch element. -/
 def sampleWithConfig {batch vocabSize : UInt64}
-    (logits : DTensor #[batch, vocabSize] .Float32) (cfg : SamplingConfig)
+    (logits : Tensor { shape := #[batch, vocabSize], dtype := .Float32 }) (cfg : SamplingConfig)
     : IO (Array TokenId) := do
   -- Apply temperature
   let scaled := applyTemperature logits cfg.temperature
@@ -203,7 +203,7 @@ def processTokenTyped (engine : Engine) (state : BoxedRowState) (token : TokenId
     integrates with the generation loop. -/
 unsafe def generateTyped (engine : Engine) (batch vocabSize : UInt64)
     (promptTokens : Array (Array TokenId))
-    (runModel : Array TokenId → IO (DTensor #[batch, vocabSize] .Float32))
+    (runModel : Array TokenId → IO (Tensor { shape := #[batch, vocabSize], dtype := .Float32 }))
     (decode : Array TokenId → String)
     (encode : String → Array TokenId)
     : IO (Array (Array TokenId)) := do
@@ -265,7 +265,7 @@ unsafe def generateTyped (engine : Engine) (batch vocabSize : UInt64)
     - encode: Encoder function for tool output injection -/
 def generate (engine : Engine) (batch vocabSize : UInt64)
     (promptTokens : Array (Array TokenId))
-    (runModel : Array TokenId → IO (DTensor #[batch, vocabSize] .Float32))
+    (runModel : Array TokenId → IO (Tensor { shape := #[batch, vocabSize], dtype := .Float32 }))
     (decode : Array TokenId → String)
     (encode : String → Array TokenId)
     : IO (Array (Array TokenId)) := do
@@ -306,7 +306,7 @@ def generate (engine : Engine) (batch vocabSize : UInt64)
 /-- Generate a single completion from a prompt -/
 def generateOne (engine : Engine) (vocabSize : UInt64)
     (promptTokens : Array TokenId)
-    (runModel : Array TokenId → IO (DTensor #[1, vocabSize] .Float32))
+    (runModel : Array TokenId → IO (Tensor { shape := #[1, vocabSize], dtype := .Float32 }))
     (decode : Array TokenId → String)
     (encode : String → Array TokenId)
     : IO (Array TokenId) := do
@@ -341,7 +341,7 @@ def generateText (engine : Engine) (vocabSize : UInt64)
     (prompt : String)
     (encode : String → Array TokenId)
     (decode : Array TokenId → String)
-    (runModel : Array TokenId → IO (DTensor #[1, vocabSize] .Float32))
+    (runModel : Array TokenId → IO (Tensor { shape := #[1, vocabSize], dtype := .Float32 }))
     : IO String := do
   let promptTokens := encode prompt
   let outputTokens ← generateOne engine vocabSize promptTokens runModel decode encode

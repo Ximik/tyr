@@ -26,11 +26,11 @@ structure SingleStreamBlock (hidden_size num_heads head_dim mlp_hidden : UInt64)
       Q: [hidden, hidden], K: [hidden, hidden], V: [hidden, hidden]
       gate: [mlp_hidden, hidden], up: [mlp_hidden, hidden]
       Total: [hidden * 3 + mlp_hidden * 2, hidden] -/
-  linear1 : STensor #[num_heads * head_dim * 3 + mlp_hidden * 2, hidden_size]
+  linear1 : Tensor { shape := #[num_heads * head_dim * 3 + mlp_hidden * 2, hidden_size] }
   /-- Fused output projection for attention + MLP down
       attn_out: [hidden, hidden], mlp_down: [hidden, mlp_hidden]
       Total: [hidden, hidden + mlp_hidden] -/
-  linear2 : STensor #[hidden_size, num_heads * head_dim + mlp_hidden]
+  linear2 : Tensor { shape := #[hidden_size, num_heads * head_dim + mlp_hidden] }
   /-- QK normalization -/
   norm : QKNorm head_dim
   deriving TensorStruct
@@ -63,10 +63,10 @@ def init (hidden_size num_heads head_dim mlp_hidden : UInt64)
     Returns: [batch, seq, hidden_size] -/
 def forward {batch seq hidden_size num_heads head_dim mlp_hidden : UInt64}
     (block : SingleStreamBlock hidden_size num_heads head_dim mlp_hidden)
-    (x : STensor #[batch, seq, hidden_size])
-    (pe : DTensor #[batch, 1, seq, head_dim / 2, 2, 2] .Float32)  -- Shape depends on RoPE implementation
-    (mod : STensor #[batch, 3, hidden_size])
-    : STensor #[batch, seq, hidden_size] :=
+    (x : Tensor { shape := #[batch, seq, hidden_size] })
+    (pe : Tensor { shape := #[batch, 1, seq, head_dim / 2, 2, 2], dtype := .Float32 })  -- Shape depends on RoPE implementation
+    (mod : Tensor { shape := #[batch, 3, hidden_size] })
+    : Tensor { shape := #[batch, seq, hidden_size] } :=
   -- Extract shift, scale, gate from modulation
   let mod_shift := Tensor.reshapeChecked (sliceTyped mod 1 0 1) #[batch, hidden_size]
   let mod_scale := Tensor.reshapeChecked (sliceTyped mod 1 1 1) #[batch, hidden_size]
@@ -116,7 +116,7 @@ def forward {batch seq hidden_size num_heads head_dim mlp_hidden : UInt64}
   let mlp_out := Tensor.Preserving.silu gate * up
 
   -- Concatenate attention and MLP outputs
-  let combined : STensor #[batch, seq, num_heads * head_dim + mlp_hidden] := qwen35.typedCat attn mlp_out 2  -- [batch, seq, hidden + mlp_hidden]
+  let combined : Tensor { shape := #[batch, seq, num_heads * head_dim + mlp_hidden] } := qwen35.typedCat attn mlp_out 2  -- [batch, seq, hidden + mlp_hidden]
 
   -- Final projection
   let out := Tensor.linear3d combined block.linear2  -- [batch, seq, hidden_size]

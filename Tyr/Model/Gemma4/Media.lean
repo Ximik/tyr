@@ -17,7 +17,7 @@ open torch.gemma4
 def loadImagePatchGrid (cfg : VLConfig) (path : String)
     : IO (Sigma (fun patchRows =>
         Sigma (fun patchCols =>
-          STensor #[patchRows, patchCols, VisionConfig.patchDim cfg.vision_config]))) := do
+          Tensor { shape := #[patchRows, patchCols, VisionConfig.patchDim cfg.vision_config] }))) := do
   let dyn ← RawTensor.gemma4LoadImage
     path
     cfg.vision_config.patch_size

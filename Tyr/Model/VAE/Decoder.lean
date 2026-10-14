@@ -125,8 +125,8 @@ def init : IO Decoder := do
     Output: [batch, 3, 8*H, 8*W] RGB image -/
 def forward {batch height width : UInt64}
     (dec : Decoder)
-    (z : STensor #[batch, 32, height, width])
-    : STensor #[batch, 3, height * 2 * 2 * 2, width * 2 * 2 * 2] :=
+    (z : Tensor { shape := #[batch, 32, height, width] })
+    : Tensor { shape := #[batch, 3, height * 2 * 2 * 2, width * 2 * 2 * 2] } :=
   -- Post-quant conv: [batch, 32, 32, 32] → [batch, 32, 32, 32]
   let z := Tensor.conv2dBias z dec.post_quant_conv.weight dec.post_quant_conv.bias #[1, 1] #[0, 0]
   let z := Tensor.reshapeChecked z #[batch, 32, height, width]
@@ -165,7 +165,7 @@ def forward {batch height width : UInt64}
 /-- Decode latents to image (batch=1 specialized version).
     Input: [1, 32, 32, 32] latent
     Output: [1, 3, 256, 256] RGB image -/
-def forward1 (dec : Decoder) (z : STensor #[1, 32, 32, 32]) : STensor #[1, 3, 256, 256] :=
+def forward1 (dec : Decoder) (z : Tensor { shape := #[1, 32, 32, 32] }) : Tensor { shape := #[1, 3, 256, 256] } :=
   dec.forward z
 
 end Decoder

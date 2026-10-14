@@ -21,7 +21,7 @@ namespace torch.qwen
     Uses type-level parameters for dimensions. -/
 structure Qwen3Model (cfg : QwenConfig) (dtype : DType := .Float32) where
   /-- Token embeddings: [vocab_size, hidden_size] -/
-  embed_tokens : DTensor #[cfg.vocab_size, cfg.hidden_size] dtype
+  embed_tokens : Tensor { shape := #[cfg.vocab_size, cfg.hidden_size], dtype := dtype }
   /-- Transformer layers -/
   layers : Array (QwenLayer cfg.hidden_size cfg.num_attention_heads cfg.num_key_value_heads cfg.head_dim cfg.intermediate_size dtype)
   /-- Final layer norm -/
@@ -58,42 +58,42 @@ def init (cfg : QwenConfig) (dtype : DType := .Float32) : IO (Qwen3Model cfg dty
     Rewritten in functional style to avoid Id.run issues with FFI shape tracking. -/
 def forwardWithHiddenStates {batch seq : UInt64} (cfg : QwenConfig)
     (model : Qwen3Model cfg dtype)
-    (input_ids : DTensor #[batch, seq] .Int64)
-    (cos : DTensor #[seq, cfg.head_dim / 2] .Float32)
-    (sin : DTensor #[seq, cfg.head_dim / 2] .Float32)
-    : Array (DTensor #[batch, seq, cfg.hidden_size] dtype) :=
+    (input_ids : Tensor { shape := #[batch, seq], dtype := .Int64 })
+    (cos : Tensor { shape := #[seq, cfg.head_dim / 2], dtype := .Float32 })
+    (sin : Tensor { shape := #[seq, cfg.head_dim / 2], dtype := .Float32 })
+    : Array (Tensor { shape := #[batch, seq, cfg.hidden_size], dtype := dtype }) :=
   -- Embed tokens
   let hidden := Tensor.embedding input_ids model.embed_tokens
   -- Process each layer, accumulating (current_hidden, collected_states)
   let (finalH, hiddenStates) := model.layers.foldl
-    (fun (acc : DTensor #[batch, seq, cfg.hidden_size] dtype × Array (DTensor #[batch, seq, cfg.hidden_size] dtype)) layer =>
+    (fun (acc : Tensor { shape := #[batch, seq, cfg.hidden_size], dtype := dtype } × Array (Tensor { shape := #[batch, seq, cfg.hidden_size], dtype := dtype })) layer =>
       let (h, states) := acc
       let h' := layer.forward h cos sin true
       (h', states.push h'))
     (hidden, #[])
   -- Add final normalized state
-  let finalHidden : DTensor #[batch, seq, cfg.hidden_size] dtype := model.norm.forward3dPreserving finalH
+  let finalHidden : Tensor { shape := #[batch, seq, cfg.hidden_size], dtype := dtype } := model.norm.forward3dPreserving finalH
   hiddenStates.push finalHidden
 
 def forwardWithHiddenStatesMasked {batch seq : UInt64} (cfg : QwenConfig)
     {maskDtype : DType}
     (model : Qwen3Model cfg dtype)
-    (input_ids : DTensor #[batch, seq] .Int64)
-    (cos : DTensor #[seq, cfg.head_dim / 2] .Float32)
-    (sin : DTensor #[seq, cfg.head_dim / 2] .Float32)
+    (input_ids : Tensor { shape := #[batch, seq], dtype := .Int64 })
+    (cos : Tensor { shape := #[seq, cfg.head_dim / 2], dtype := .Float32 })
+    (sin : Tensor { shape := #[seq, cfg.head_dim / 2], dtype := .Float32 })
     (attn_mask : Tensor ⟨#[batch, seq], maskDtype, .any⟩)
-    : Array (DTensor #[batch, seq, cfg.hidden_size] dtype) :=
+    : Array (Tensor { shape := #[batch, seq, cfg.hidden_size], dtype := dtype }) :=
   -- Embed tokens
   let hidden := Tensor.embedding input_ids model.embed_tokens
   -- Process each layer, accumulating (current_hidden, collected_states)
   let (finalH, hiddenStates) := model.layers.foldl
-    (fun (acc : DTensor #[batch, seq, cfg.hidden_size] dtype × Array (DTensor #[batch, seq, cfg.hidden_size] dtype)) layer =>
+    (fun (acc : Tensor { shape := #[batch, seq, cfg.hidden_size], dtype := dtype } × Array (Tensor { shape := #[batch, seq, cfg.hidden_size], dtype := dtype })) layer =>
       let (h, states) := acc
       let h' := layer.forwardMasked h cos sin attn_mask true
       (h', states.push h'))
     (hidden, #[])
   -- Add final normalized state
-  let finalHidden : DTensor #[batch, seq, cfg.hidden_size] dtype := model.norm.forward3dPreserving finalH
+  let finalHidden : Tensor { shape := #[batch, seq, cfg.hidden_size], dtype := dtype } := model.norm.forward3dPreserving finalH
   hiddenStates.push finalHidden
 
 /-- Forward pass returning only the final hidden state.
@@ -102,10 +102,10 @@ def forwardWithHiddenStatesMasked {batch seq : UInt64} (cfg : QwenConfig)
     Rewritten in functional style to avoid Id.run issues with FFI shape tracking. -/
 def forward {batch seq : UInt64} (cfg : QwenConfig)
     (model : Qwen3Model cfg dtype)
-    (input_ids : DTensor #[batch, seq] .Int64)
-    (cos : DTensor #[seq, cfg.head_dim / 2] .Float32)
-    (sin : DTensor #[seq, cfg.head_dim / 2] .Float32)
-    : DTensor #[batch, seq, cfg.hidden_size] dtype :=
+    (input_ids : Tensor { shape := #[batch, seq], dtype := .Int64 })
+    (cos : Tensor { shape := #[seq, cfg.head_dim / 2], dtype := .Float32 })
+    (sin : Tensor { shape := #[seq, cfg.head_dim / 2], dtype := .Float32 })
+    : Tensor { shape := #[batch, seq, cfg.hidden_size], dtype := dtype } :=
   -- Embed tokens
   let hidden := Tensor.embedding input_ids model.embed_tokens
   -- Process each layer using fold
@@ -118,11 +118,11 @@ def forward {batch seq : UInt64} (cfg : QwenConfig)
 def forwardMasked {batch seq : UInt64} (cfg : QwenConfig)
     {maskDtype : DType}
     (model : Qwen3Model cfg dtype)
-    (input_ids : DTensor #[batch, seq] .Int64)
-    (cos : DTensor #[seq, cfg.head_dim / 2] .Float32)
-    (sin : DTensor #[seq, cfg.head_dim / 2] .Float32)
+    (input_ids : Tensor { shape := #[batch, seq], dtype := .Int64 })
+    (cos : Tensor { shape := #[seq, cfg.head_dim / 2], dtype := .Float32 })
+    (sin : Tensor { shape := #[seq, cfg.head_dim / 2], dtype := .Float32 })
     (attn_mask : Tensor ⟨#[batch, seq], maskDtype, .any⟩)
-    : DTensor #[batch, seq, cfg.hidden_size] dtype :=
+    : Tensor { shape := #[batch, seq, cfg.hidden_size], dtype := dtype } :=
   -- Embed tokens
   let hidden := Tensor.embedding input_ids model.embed_tokens
   -- Process each layer using fold

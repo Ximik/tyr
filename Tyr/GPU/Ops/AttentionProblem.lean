@@ -146,10 +146,10 @@ def inferMode (qSeq kvSeq : UInt64) (windowSize : Option UInt64 := none) : Atten
     runtime dtype/device of the query handle, as before. -/
 def ofQKV
     {batch nHead nKvHead qSeq kvSeq headDim : UInt64} {d : DType}
-    (q : DTensor #[batch, nHead, qSeq, headDim] d)
-    (k : DTensor #[batch, nKvHead, kvSeq, headDim] d)
-    (v : DTensor #[batch, nKvHead, kvSeq, headDim] d)
-    (attnMask : Option (STensor #[batch, kvSeq]) := none)
+    (q : Tensor { shape := #[batch, nHead, qSeq, headDim], dtype := d })
+    (k : Tensor { shape := #[batch, nKvHead, kvSeq, headDim], dtype := d })
+    (v : Tensor { shape := #[batch, nKvHead, kvSeq, headDim], dtype := d })
+    (attnMask : Option (Tensor { shape := #[batch, kvSeq] }) := none)
     (dropoutP : Float := 0.0)
     (isCausal : Bool := false)
     (scale : Option Float := none)

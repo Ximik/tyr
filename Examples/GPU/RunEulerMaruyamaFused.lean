@@ -36,11 +36,11 @@ def runOnce : IO Bool := do
   let a := -0.5   -- drift rate
   let b := 0.3    -- diffusion rate
 
-  let drift : Float → DTensor #[n] .Float32 → DTensor #[n] .Float32 := fun _ y => Tensor.Preserving.mulScalar y a
-  let diffusion : Float → DTensor #[n] .Float32 → DTensor #[n] .Float32 := fun _ y => Tensor.Preserving.mulScalar y b
+  let drift : Float → Tensor { shape := #[n], dtype := .Float32 } → Tensor { shape := #[n], dtype := .Float32 } := fun _ y => Tensor.Preserving.mulScalar y a
+  let diffusion : Float → Tensor { shape := #[n], dtype := .Float32 } → Tensor { shape := #[n], dtype := .Float32 } := fun _ y => Tensor.Preserving.mulScalar y b
 
   -- CPU reference: same EM update, increments from the CPU tensor VBT
-  let cpuTree : VirtualBrownianTree (DTensor #[n] .Float32) := {
+  let cpuTree : VirtualBrownianTree (Tensor { shape := #[n], dtype := .Float32 }) := {
     t0 := t0, t1 := t1, tol := tol, seed := treeSeed
     shape := Tensor.zeros #[n]
   }

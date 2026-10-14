@@ -42,9 +42,9 @@ private def assertTensorEqual {σ : StaticSpec} (a b : Tensor σ) : IO Unit := d
 
 @[test]
 def testTrainingResumeRoundTrip : IO Unit := IO.FS.withTempDir fun dir => do
-  let params : DTensor #[2] .Float32 := Tensor.full #[2] 0.25
-  let grads : DTensor #[2] .Float32 := Tensor.full #[2] 0.125
-  let adam := Optim.scale_by_adam (α := DTensor #[2] .Float32)
+  let params : Tensor { shape := #[2], dtype := .Float32 } := Tensor.full #[2] 0.25
+  let grads : Tensor { shape := #[2], dtype := .Float32 } := Tensor.full #[2] 0.125
+  let adam := Optim.scale_by_adam (α := Tensor { shape := #[2], dtype := .Float32 })
   let (_, state) := adam.update params grads (adam.init params)
   let m : CheckpointMeta := { iteration := 1, bestValLoss := 1e-8, trainLoss := 0.5, optimCount := state.count }
   saveTrainingCheckpoint params state.mu state.nu m dir.toString
@@ -64,7 +64,7 @@ def testTrainingResumeRoundTrip : IO Unit := IO.FS.withTempDir fun dir => do
 
 @[test]
 def testInterruptedSavePreservesCommittedSnapshot : IO Unit := IO.FS.withTempDir fun dir => do
-  let original : DTensor #[2] .Float32 := Tensor.ones #[2]
+  let original : Tensor { shape := #[2], dtype := .Float32 } := Tensor.ones #[2]
   let m : CheckpointMeta := { iteration := 1, bestValLoss := 0.5, trainLoss := 0.75 }
   saveTrainingCheckpoint original original original m dir.toString
   let before ← IO.FS.readFile (dir / "CURRENT")
@@ -82,7 +82,7 @@ def testInterruptedSavePreservesCommittedSnapshot : IO Unit := IO.FS.withTempDir
 
 @[test]
 def testModelAndOptimizerStandaloneSnapshots : IO Unit := IO.FS.withTempDir fun dir => do
-  let template : DTensor #[2] .Float32 := Tensor.zeros #[2]
+  let template : Tensor { shape := #[2], dtype := .Float32 } := Tensor.zeros #[2]
   saveCheckpoint (Tensor.ones #[2]) 7 0.25 0.5 dir.toString
   saveOptimizerState (Tensor.full #[2] 0.1) (Tensor.full #[2] 0.2) 9 dir.toString
   assertTrue (← checkpointExists dir.toString)
@@ -107,19 +107,19 @@ def testStoredDTypeMustMatchTypedTemplate : IO Unit := IO.FS.withTempDir fun dir
 
 @[test]
 def testTensorCountMismatchRejected : IO Unit := IO.FS.withTempDir fun dir => do
-  let params : Array (DTensor #[2] .Float32) := #[Tensor.ones #[2], Tensor.zeros #[2]]
+  let params : Array (Tensor { shape := #[2], dtype := .Float32 }) := #[Tensor.ones #[2], Tensor.zeros #[2]]
   saveCheckpoint params 1 0.0 0.0 dir.toString
-  assertThrows (loadCheckpoint (#[Tensor.zeros #[2]] : Array (DTensor #[2] .Float32)) dir.toString)
+  assertThrows (loadCheckpoint (#[Tensor.zeros #[2]] : Array (Tensor { shape := #[2], dtype := .Float32 })) dir.toString)
     (some "tensor count mismatch")
-  assertThrows (loadCheckpoint (#[] : Array (DTensor #[2] .Float32)) dir.toString)
+  assertThrows (loadCheckpoint (#[] : Array (Tensor { shape := #[2], dtype := .Float32 })) dir.toString)
     (some "tensor count mismatch")
-  assertThrows (loadCheckpoint (#[Tensor.zeros #[2], Tensor.zeros #[2], Tensor.zeros #[2]] : Array (DTensor #[2] .Float32)) dir.toString)
+  assertThrows (loadCheckpoint (#[Tensor.zeros #[2], Tensor.zeros #[2], Tensor.zeros #[2]] : Array (Tensor { shape := #[2], dtype := .Float32 })) dir.toString)
     (some "tensor count mismatch")
 
 @[test]
 def testReaderPinsOneSnapshotAcrossReplacement : IO Unit := IO.FS.withTempDir fun dir => do
-  let old : DTensor #[2] .Float32 := Tensor.ones #[2]
-  let fresh : DTensor #[2] .Float32 := Tensor.full #[2] 2.0
+  let old : Tensor { shape := #[2], dtype := .Float32 } := Tensor.ones #[2]
+  let fresh : Tensor { shape := #[2], dtype := .Float32 } := Tensor.full #[2] 2.0
   let m : CheckpointMeta := { iteration := 1, bestValLoss := 0.0, trainLoss := 0.0 }
   saveTrainingCheckpoint old old old m dir.toString
   let replaced ← IO.mkRef false

@@ -11,10 +11,10 @@ open Tyr.AD
 
 /-- Ambient matrix type for manifold carriers: Float32 weights with
     unconstrained placement, matching the carrier instances' manifold types. -/
-abbrev AmbientMatrix (m n : UInt64) : Type := DTensor #[m, n] .Float32
+abbrev AmbientMatrix (m n : UInt64) : Type := Tensor { shape := #[m, n], dtype := .Float32 }
 
 /-- Ambient vector type for manifold carriers. -/
-abbrev AmbientVector (n : UInt64) : Type := DTensor #[n] .Float32
+abbrev AmbientVector (n : UInt64) : Type := Tensor { shape := #[n], dtype := .Float32 }
 
 /-- Shape-legality constraint for manifold-carrier matrices: at least as many
     rows as columns (the square case included). A reducible abbrev so `decide`

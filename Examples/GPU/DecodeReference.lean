@@ -24,20 +24,20 @@ def runDecodeCacheParity (device : Device) : IO Bool := do
   let vAll := vf.toBFloat16
 
   -- Reference: do attention over the full sequence (causal=true, q_seq=kv_seq).
-  let refAll : DTensor #[batch, qHeads, totalLen, headDim] .BFloat16 :=
+  let refAll : Tensor { shape := #[batch, qHeads, totalLen, headDim], dtype := .BFloat16 } :=
     Tensor.attentionGQAQKV qAll kAll vAll 0.0 true true
 
   -- Build a 1-layer cache, append tokens one at a time, run cached attention.
   let mut cache ← Generator.KVCache.Cache.init 1 batch maxLen kvHeads headDim (device := device)
   -- Accumulate per-step kernel outputs into a list, then stack.
-  let mut acc : Array (DTensor #[batch, qHeads, 1, headDim] .BFloat16) := #[]
+  let mut acc : Array (Tensor { shape := #[batch, qHeads, 1, headDim], dtype := .BFloat16 }) := #[]
   for i in [:totalLen.toNat] do
     let pos : UInt64 := i.toUInt64
-    let qStep : DTensor #[batch, qHeads, 1, headDim] .BFloat16 :=
+    let qStep : Tensor { shape := #[batch, qHeads, 1, headDim], dtype := .BFloat16 } :=
       Tensor.sliceChecked qAll 2 pos 1 #[batch, qHeads, 1, headDim]
-    let kStep : DTensor #[batch, kvHeads, 1, headDim] .BFloat16 :=
+    let kStep : Tensor { shape := #[batch, kvHeads, 1, headDim], dtype := .BFloat16 } :=
       Tensor.sliceChecked kAll 2 pos 1 #[batch, kvHeads, 1, headDim]
-    let vStep : DTensor #[batch, kvHeads, 1, headDim] .BFloat16 :=
+    let vStep : Tensor { shape := #[batch, kvHeads, 1, headDim], dtype := .BFloat16 } :=
       Tensor.sliceChecked vAll 2 pos 1 #[batch, kvHeads, 1, headDim]
     let (cache', out) ← cache.attendLayer (numQHeads := qHeads)
         0 qStep kStep vStep (enableGqa := true)
@@ -53,7 +53,7 @@ def runDecodeCacheParity (device : Device) : IO Bool := do
   let mut maxAbsAll : Float := 0.0
   for i in [:totalLen.toNat] do
     let pos : UInt64 := i.toUInt64
-    let refStep : DTensor #[batch, qHeads, 1, headDim] .BFloat16 :=
+    let refStep : Tensor { shape := #[batch, qHeads, 1, headDim], dtype := .BFloat16 } :=
       Tensor.sliceChecked refAll 2 pos 1 #[batch, qHeads, 1, headDim]
     let cachedStep := acc[i]!
     let diff := Tensor.abs (cachedStep - refStep)

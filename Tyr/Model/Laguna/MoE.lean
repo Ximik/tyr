@@ -54,9 +54,9 @@ open torch.qwen35
 /-- Top-k sigmoid router for Laguna MoE (aux-loss-free load balancing). -/
 structure LagunaTopKRouter (cfg : Config) where
   /-- Router projection `[num_experts, hidden_size]` (BF16 in the checkpoint). -/
-  weight : STensor #[cfg.num_experts, cfg.hidden_size]
+  weight : Tensor { shape := #[cfg.num_experts, cfg.hidden_size] }
   /-- Optional per-expert selection bias (added to selection scores only). -/
-  eScoreCorrectionBias : Option (STensor #[cfg.num_experts]) := none
+  eScoreCorrectionBias : Option (Tensor { shape := #[cfg.num_experts] }) := none
   deriving TensorStruct
 
 namespace LagunaTopKRouter
@@ -65,9 +65,9 @@ namespace LagunaTopKRouter
     Returns `(selectedExperts, routingWeights)`, both `[tokens, num_experts_per_tok]`;
     `selectedExperts` is int64, `routingWeights` has `x`'s dtype. -/
 def route {tokens : UInt64}
-    (cfg : Config) (r : LagunaTopKRouter cfg) (x : STensor #[tokens, cfg.hidden_size])
-    : IO (DTensor #[tokens, cfg.num_experts_per_tok] .Int64 × STensor #[tokens, cfg.num_experts_per_tok]) := do
-  let logits0 : STensor #[tokens, cfg.num_experts] :=
+    (cfg : Config) (r : LagunaTopKRouter cfg) (x : Tensor { shape := #[tokens, cfg.hidden_size] })
+    : IO (Tensor { shape := #[tokens, cfg.num_experts_per_tok], dtype := .Int64 } × Tensor { shape := #[tokens, cfg.num_experts_per_tok] }) := do
+  let logits0 : Tensor { shape := #[tokens, cfg.num_experts] } :=
     einsumChecked "eh,th->te" (floatDynamic r.weight) (floatDynamic x)
   let logits :=
     if cfg.moe_router_logit_softcapping > 0.0 then
@@ -95,15 +95,15 @@ end LagunaTopKRouter
       scales F8_E4M3 `[E, hidden, moe_intermediate/16]`
     - globals: F32 `[E]` -/
 structure LagunaPackedExperts (cfg : Config) where
-  gatePacked : STensor #[cfg.num_experts, cfg.moe_intermediate_size, cfg.hidden_size / 2]
-  gateScale : STensor #[cfg.num_experts, cfg.moe_intermediate_size, cfg.hidden_size / 16]
-  gateGlobal : STensor #[cfg.num_experts]
-  upPacked : STensor #[cfg.num_experts, cfg.moe_intermediate_size, cfg.hidden_size / 2]
-  upScale : STensor #[cfg.num_experts, cfg.moe_intermediate_size, cfg.hidden_size / 16]
-  upGlobal : STensor #[cfg.num_experts]
-  downPacked : STensor #[cfg.num_experts, cfg.hidden_size, cfg.moe_intermediate_size / 2]
-  downScale : STensor #[cfg.num_experts, cfg.hidden_size, cfg.moe_intermediate_size / 16]
-  downGlobal : STensor #[cfg.num_experts]
+  gatePacked : Tensor { shape := #[cfg.num_experts, cfg.moe_intermediate_size, cfg.hidden_size / 2] }
+  gateScale : Tensor { shape := #[cfg.num_experts, cfg.moe_intermediate_size, cfg.hidden_size / 16] }
+  gateGlobal : Tensor { shape := #[cfg.num_experts] }
+  upPacked : Tensor { shape := #[cfg.num_experts, cfg.moe_intermediate_size, cfg.hidden_size / 2] }
+  upScale : Tensor { shape := #[cfg.num_experts, cfg.moe_intermediate_size, cfg.hidden_size / 16] }
+  upGlobal : Tensor { shape := #[cfg.num_experts] }
+  downPacked : Tensor { shape := #[cfg.num_experts, cfg.hidden_size, cfg.moe_intermediate_size / 2] }
+  downScale : Tensor { shape := #[cfg.num_experts, cfg.hidden_size, cfg.moe_intermediate_size / 16] }
+  downGlobal : Tensor { shape := #[cfg.num_experts] }
   deriving TensorStruct
 
 /-- Dense BF16 expert weight banks for Laguna MoE (shape-indexed device
@@ -112,9 +112,9 @@ structure LagunaPackedExperts (cfg : Config) where
     - gateProj/upProj: BF16 `[E, moe_intermediate, hidden]`
     - downProj: BF16 `[E, hidden, moe_intermediate]` -/
 structure LagunaDenseExperts (cfg : Config) where
-  gateProj : STensor #[cfg.num_experts, cfg.moe_intermediate_size, cfg.hidden_size]
-  upProj : STensor #[cfg.num_experts, cfg.moe_intermediate_size, cfg.hidden_size]
-  downProj : STensor #[cfg.num_experts, cfg.hidden_size, cfg.moe_intermediate_size]
+  gateProj : Tensor { shape := #[cfg.num_experts, cfg.moe_intermediate_size, cfg.hidden_size] }
+  upProj : Tensor { shape := #[cfg.num_experts, cfg.moe_intermediate_size, cfg.hidden_size] }
+  downProj : Tensor { shape := #[cfg.num_experts, cfg.hidden_size, cfg.moe_intermediate_size] }
   deriving TensorStruct
 
 /-- Sparse MoE block: sigmoid-routed packed experts + dense shared expert. -/
@@ -125,19 +125,19 @@ structure LagunaSparseMoeBlock (cfg : Config) where
       instead of the NVFP4-packed `experts` banks (which may be unused
       placeholders); the per-expert dispatch order is unchanged. -/
   denseExperts : Option (LagunaDenseExperts cfg) := none
-  sharedGateProj : STensor #[cfg.shared_expert_intermediate_size, cfg.hidden_size]
-  sharedUpProj : STensor #[cfg.shared_expert_intermediate_size, cfg.hidden_size]
-  sharedDownProj : STensor #[cfg.hidden_size, cfg.shared_expert_intermediate_size]
+  sharedGateProj : Tensor { shape := #[cfg.shared_expert_intermediate_size, cfg.hidden_size] }
+  sharedUpProj : Tensor { shape := #[cfg.shared_expert_intermediate_size, cfg.hidden_size] }
+  sharedDownProj : Tensor { shape := #[cfg.hidden_size, cfg.shared_expert_intermediate_size] }
   deriving TensorStruct
 
 namespace LagunaSparseMoeBlock
 
 /-- Dequantize one expert row while retaining the bank's three dimensions. -/
 private def dequantExpertSlice {numExperts outFeatures inFeatures : UInt64}
-    (bankPacked : STensor #[numExperts, outFeatures, inFeatures / 2])
-    (bankScales : STensor #[numExperts, outFeatures, inFeatures / 16])
-    (bankGlobal : STensor #[numExperts]) (e : UInt64)
-    : IO (STensor #[outFeatures, inFeatures]) := do
+    (bankPacked : Tensor { shape := #[numExperts, outFeatures, inFeatures / 2] })
+    (bankScales : Tensor { shape := #[numExperts, outFeatures, inFeatures / 16] })
+    (bankGlobal : Tensor { shape := #[numExperts] }) (e : UInt64)
+    : IO (Tensor { shape := #[outFeatures, inFeatures] }) := do
   let out ← nvfp4.dequantMatrix
     ((bankPacked.sliceChecked 0 e 1 #[1, outFeatures, inFeatures / 2]).reshapeChecked #[outFeatures, inFeatures / 2])
     ((bankScales.sliceChecked 0 e 1 #[1, outFeatures, inFeatures / 16]).reshapeChecked #[outFeatures, inFeatures / 16])
@@ -151,9 +151,9 @@ private def expertWeights
     (cfg : Config)
     (m : LagunaSparseMoeBlock cfg)
     (e : UInt64)
-    : IO (STensor #[cfg.moe_intermediate_size, cfg.hidden_size]
-        × STensor #[cfg.moe_intermediate_size, cfg.hidden_size]
-        × STensor #[cfg.hidden_size, cfg.moe_intermediate_size]) := do
+    : IO (Tensor { shape := #[cfg.moe_intermediate_size, cfg.hidden_size] }
+        × Tensor { shape := #[cfg.moe_intermediate_size, cfg.hidden_size] }
+        × Tensor { shape := #[cfg.hidden_size, cfg.moe_intermediate_size] }) := do
   match m.denseExperts with
   | some de =>
     let gate3 := de.gateProj
@@ -164,13 +164,13 @@ private def expertWeights
       Tensor.reshapeChecked (sliceTyped up3 0 e 1) #[cfg.moe_intermediate_size, cfg.hidden_size],
       Tensor.reshapeChecked (sliceTyped down3 0 e 1) #[cfg.hidden_size, cfg.moe_intermediate_size])
   | none =>
-    let gateW : STensor #[cfg.moe_intermediate_size, cfg.hidden_size] :=
+    let gateW : Tensor { shape := #[cfg.moe_intermediate_size, cfg.hidden_size] } :=
       Tensor.reshapeChecked (← dequantExpertSlice (inFeatures := cfg.hidden_size) m.experts.gatePacked m.experts.gateScale m.experts.gateGlobal
         e) #[cfg.moe_intermediate_size, cfg.hidden_size]
-    let upW : STensor #[cfg.moe_intermediate_size, cfg.hidden_size] :=
+    let upW : Tensor { shape := #[cfg.moe_intermediate_size, cfg.hidden_size] } :=
       Tensor.reshapeChecked (← dequantExpertSlice (inFeatures := cfg.hidden_size) m.experts.upPacked m.experts.upScale m.experts.upGlobal
         e) #[cfg.moe_intermediate_size, cfg.hidden_size]
-    let downW : STensor #[cfg.hidden_size, cfg.moe_intermediate_size] :=
+    let downW : Tensor { shape := #[cfg.hidden_size, cfg.moe_intermediate_size] } :=
       Tensor.reshapeChecked (← dequantExpertSlice (inFeatures := cfg.moe_intermediate_size) m.experts.downPacked m.experts.downScale m.experts.downGlobal
         e) #[cfg.hidden_size, cfg.moe_intermediate_size]
     pure (gateW, upW, downW)
@@ -190,11 +190,11 @@ private def expertWeights
 private def forwardDecode1
     (cfg : Config)
     (m : LagunaSparseMoeBlock cfg)
-    (x : STensor #[1, cfg.hidden_size])
-    (flatIdx : DTensor #[cfg.num_experts_per_tok] .Int64)
-    (flatW : STensor #[cfg.num_experts_per_tok])
+    (x : Tensor { shape := #[1, cfg.hidden_size] })
+    (flatIdx : Tensor { shape := #[cfg.num_experts_per_tok], dtype := .Int64 })
+    (flatW : Tensor { shape := #[cfg.num_experts_per_tok] })
     (useFused : Bool := true)
-    : IO (STensor #[1, cfg.hidden_size]) := do
+    : IO (Tensor { shape := #[1, cfg.hidden_size] }) := do
   let k := cfg.num_experts_per_tok
   let E := cfg.num_experts
   let mi := cfg.moe_intermediate_size
@@ -208,7 +208,7 @@ private def forwardDecode1
     -- fused path, everything else keeps the eager fallback.
     m.experts.gatePacked.actualSpec.dtype == .UInt8 && m.experts.upPacked.actualSpec.dtype == .UInt8 &&
     m.experts.downPacked.actualSpec.dtype == .UInt8
-  let acc : STensor #[1, h] ←
+  let acc : Tensor { shape := #[1, h] } ←
     if useFusedKernel then do
       -- Fused NVFP4 kernel: routed[t] = Σ_p w[t,p] · expert_{idx[t,p]}(x[t]).
       let xE := x
@@ -221,13 +221,13 @@ private def forwardDecode1
         E mi h
       pure fused.forgetDType
     else do
-      let hitT : DTensor #[k] .Int64 := Tensor.reshapeChecked flatIdx #[k]
+      let hitT : Tensor { shape := #[k], dtype := .Int64 } := Tensor.reshapeChecked flatIdx #[k]
       let (gateW, upW, downW) ← do
         match m.denseExperts with
         | some de =>
-          let g : STensor #[k, mi, h] := Tensor.reshapeChecked (Tensor.embedding1d hitT (Tensor.reshapeChecked de.gateProj #[E, mi * h])) #[k, mi, h]
-          let u : STensor #[k, mi, h] := Tensor.reshapeChecked (Tensor.embedding1d hitT (Tensor.reshapeChecked de.upProj #[E, mi * h])) #[k, mi, h]
-          let d : STensor #[k, h, mi] := Tensor.reshapeChecked (Tensor.embedding1d hitT (Tensor.reshapeChecked de.downProj #[E, h * mi])) #[k, h, mi]
+          let g : Tensor { shape := #[k, mi, h] } := Tensor.reshapeChecked (Tensor.embedding1d hitT (Tensor.reshapeChecked de.gateProj #[E, mi * h])) #[k, mi, h]
+          let u : Tensor { shape := #[k, mi, h] } := Tensor.reshapeChecked (Tensor.embedding1d hitT (Tensor.reshapeChecked de.upProj #[E, mi * h])) #[k, mi, h]
+          let d : Tensor { shape := #[k, h, mi] } := Tensor.reshapeChecked (Tensor.embedding1d hitT (Tensor.reshapeChecked de.downProj #[E, h * mi])) #[k, h, mi]
           pure (g, u, d)
         | none => do
           let gp := Tensor.reshapeChecked (Tensor.embedding1d hitT (Tensor.reshapeChecked m.experts.gatePacked #[E, mi * (h / 2)])) #[k, mi, h / 2]
@@ -244,17 +244,17 @@ private def forwardDecode1
           let d ← nvfp4.dequantBank dp ds dg k h mi
           pure (g.forgetDType, u.forgetDType, d.forgetDType)
       -- Batched SwiGLU: [k,1,h] @ Wᵀ per projection.
-      let x3 : STensor #[k, 1, h] := Tensor.reshapeChecked (Tensor.expand (Tensor.reshapeChecked x #[1, 1, h]) #[k, 1, h]) #[k, 1, h]
-      let g : STensor #[k, 1, mi] := bmm x3 (transposeMatrixBatch gateW)
-      let u : STensor #[k, 1, mi] := bmm x3 (transposeMatrixBatch upW)
-      let hid : STensor #[k, 1, mi] := mulSame (Tensor.Preserving.silu g) u
-      let o : STensor #[k, 1, h] := bmm hid (transposeMatrixBatch downW)
-      let ow : STensor #[k, 1, h] := mulBroadcast (Tensor.reshapeChecked flatW #[k, 1, 1]) o
+      let x3 : Tensor { shape := #[k, 1, h] } := Tensor.reshapeChecked (Tensor.expand (Tensor.reshapeChecked x #[1, 1, h]) #[k, 1, h]) #[k, 1, h]
+      let g : Tensor { shape := #[k, 1, mi] } := bmm x3 (transposeMatrixBatch gateW)
+      let u : Tensor { shape := #[k, 1, mi] } := bmm x3 (transposeMatrixBatch upW)
+      let hid : Tensor { shape := #[k, 1, mi] } := mulSame (Tensor.Preserving.silu g) u
+      let o : Tensor { shape := #[k, 1, h] } := bmm hid (transposeMatrixBatch downW)
+      let ow : Tensor { shape := #[k, 1, h] } := mulBroadcast (Tensor.reshapeChecked flatW #[k, 1, 1]) o
       pure (Tensor.reshapeChecked (Tensor.Preserving.sumDim ow 0 false) #[1, h])
   -- Dense shared expert (SwiGLU MLP, no gating score).
-  let sharedH : STensor #[1, cfg.shared_expert_intermediate_size] :=
+  let sharedH : Tensor { shape := #[1, cfg.shared_expert_intermediate_size] } :=
     mulSame (Tensor.Preserving.silu (Tensor.linear x m.sharedGateProj)) (Tensor.linear x m.sharedUpProj)
-  let sharedOut : STensor #[1, h] := Tensor.linear sharedH m.sharedDownProj
+  let sharedOut : Tensor { shape := #[1, h] } := Tensor.linear sharedH m.sharedDownProj
   pure (Tensor.reshapeChecked (addSame (Tensor.Preserving.mulScalar acc cfg.moe_routed_scaling_factor) sharedOut) #[1, h])
 
 /-- MoE forward over a 2D `[tokens, hidden]` batch.
@@ -264,18 +264,18 @@ private def forwardDecode1
 def forward2d {tokens : UInt64}
     (cfg : Config)
     (m : LagunaSparseMoeBlock cfg)
-    (x : STensor #[tokens, cfg.hidden_size])
+    (x : Tensor { shape := #[tokens, cfg.hidden_size] })
     (useFused : Bool := true)
-    : IO (STensor #[tokens, cfg.hidden_size]) := do
+    : IO (Tensor { shape := #[tokens, cfg.hidden_size] }) := do
   let k := cfg.num_experts_per_tok
   let (topIdx, weights) ← m.router.route cfg x
   -- Flattened dispatch views: pair p = token * k + slot.
-  let flatIdx : DTensor #[tokens * k] .Int64 := Tensor.reshapeChecked topIdx #[tokens * k]
-  let flatW : STensor #[tokens * k] := Tensor.reshapeChecked weights #[tokens * k]
+  let flatIdx : Tensor { shape := #[tokens * k], dtype := .Int64 } := Tensor.reshapeChecked topIdx #[tokens * k]
+  let flatW : Tensor { shape := #[tokens * k] } := Tensor.reshapeChecked weights #[tokens * k]
   let device := x.device
   if tokens == 1 then
     -- Single-token decode: batched path (k distinct experts, no dispatch scan).
-    let x1 : STensor #[1, cfg.hidden_size] := Tensor.reshapeChecked x #[1, cfg.hidden_size]
+    let x1 : Tensor { shape := #[1, cfg.hidden_size] } := Tensor.reshapeChecked x #[1, cfg.hidden_size]
     pure (Tensor.reshapeChecked (← forwardDecode1 cfg m x1 (flatIdx.reshapeChecked #[k]) (flatW.reshapeChecked #[k]) useFused) #[tokens, cfg.hidden_size])
   else do
     let h := cfg.hidden_size
@@ -298,9 +298,9 @@ def forward2d {tokens : UInt64}
         cfg.num_experts mi h
       let routed := routedBF16.forgetDType
       -- Dense shared expert (SwiGLU MLP, no gating score).
-      let sharedH : STensor #[tokens, cfg.shared_expert_intermediate_size] :=
+      let sharedH : Tensor { shape := #[tokens, cfg.shared_expert_intermediate_size] } :=
         mulSame (Tensor.Preserving.silu (Tensor.linear x m.sharedGateProj)) (Tensor.linear x m.sharedUpProj)
-      let sharedOut : STensor #[tokens, cfg.hidden_size] := Tensor.linear sharedH m.sharedDownProj
+      let sharedOut : Tensor { shape := #[tokens, cfg.hidden_size] } := Tensor.linear sharedH m.sharedDownProj
       pure (Tensor.reshapeChecked (addSame (Tensor.Preserving.mulScalar routed cfg.moe_routed_scaling_factor) sharedOut) #[tokens, cfg.hidden_size])
     else do
       -- Per-pair token row ids: [0..tokens) repeated k times each.
@@ -309,7 +309,7 @@ def forward2d {tokens : UInt64}
       let tokIdsFlat :=
         Tensor.reshapeChecked (Tensor.expand (Tensor.reshapeChecked ((Tensor.arange tokens).to device) #[tokens, 1]) #[tokens, k]) #[tokens * k]
       -- Accumulator in the model dtype (HF: torch.zeros_like(hidden_states)).
-      let mut acc : STensor #[tokens, cfg.hidden_size] := Tensor.castLike x (zerosDynamic #[tokens, cfg.hidden_size] false device)
+      let mut acc : Tensor { shape := #[tokens, cfg.hidden_size] } := Tensor.castLike x (zerosDynamic #[tokens, cfg.hidden_size] false device)
       -- Per-unique-expert dispatch: materialize each hit expert once per forward.
       -- One CPU readback of the (small) dispatch list — <= tokens*k entries —
       -- instead of scanning all num_experts with a GPU mask + host sync per
@@ -330,21 +330,21 @@ def forward2d {tokens : UInt64}
         let tokE := tokEr.2
         let (gateW, upW, downW) ← expertWeights cfg m eU
         -- SwiGLU expert MLP in BF16.
-        let xE : STensor #[nE, cfg.hidden_size] := Tensor.embedding1d tokE x
-        let hid : STensor #[nE, cfg.moe_intermediate_size] :=
+        let xE : Tensor { shape := #[nE, cfg.hidden_size] } := Tensor.embedding1d tokE x
+        let hid : Tensor { shape := #[nE, cfg.moe_intermediate_size] } :=
           mulSame (Tensor.Preserving.silu (Tensor.linear xE gateW)) (Tensor.linear xE upW)
-        let outE : STensor #[nE, cfg.hidden_size] := Tensor.linear hid downW
+        let outE : Tensor { shape := #[nE, cfg.hidden_size] } := Tensor.linear hid downW
         -- Routing weights multiply the expert OUTPUT (moe_apply_router_weight_on_input=false).
-        let outEW : STensor #[nE, cfg.hidden_size] := mulBroadcast (Tensor.reshapeChecked wE.2 #[nE, 1]) outE
-        let idxRows : DTensor #[nE, cfg.hidden_size] .Int64 :=
+        let outEW : Tensor { shape := #[nE, cfg.hidden_size] } := mulBroadcast (Tensor.reshapeChecked wE.2 #[nE, 1]) outE
+        let idxRows : Tensor { shape := #[nE, cfg.hidden_size], dtype := .Int64 } :=
           Tensor.reshapeChecked (Tensor.expand (Tensor.reshapeChecked tokE #[nE, 1]) #[nE, cfg.hidden_size]) #[nE, cfg.hidden_size]
         acc := scatterAdd acc 0 idxRows outEW
       -- Dense shared expert (SwiGLU MLP, no gating score).
-      let sharedH : STensor #[tokens, cfg.shared_expert_intermediate_size] :=
+      let sharedH : Tensor { shape := #[tokens, cfg.shared_expert_intermediate_size] } :=
         mulSame (Tensor.Preserving.silu (Tensor.linear x m.sharedGateProj)) (Tensor.linear x m.sharedUpProj)
-      let sharedOut : STensor #[tokens, cfg.hidden_size] := Tensor.linear sharedH m.sharedDownProj
+      let sharedOut : Tensor { shape := #[tokens, cfg.hidden_size] } := Tensor.linear sharedH m.sharedDownProj
       -- HF multiplies the routed output by the scaling factor, then adds the shared expert.
-      let routed : STensor #[tokens, cfg.hidden_size] := Tensor.Preserving.mulScalar acc cfg.moe_routed_scaling_factor
+      let routed : Tensor { shape := #[tokens, cfg.hidden_size] } := Tensor.Preserving.mulScalar acc cfg.moe_routed_scaling_factor
       pure (Tensor.reshapeChecked (addSame routed sharedOut) #[tokens, cfg.hidden_size])
 
 end LagunaSparseMoeBlock

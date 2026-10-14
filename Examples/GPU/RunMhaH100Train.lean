@@ -54,7 +54,7 @@ def oneKernelTrainStep
     (targetOut : MhaTensor)
     (stream : UInt64)
     (lr : Float)
-    : IO (MasterTensor × MasterTensor × MasterTensor × DTensor #[] .Float32) := do
+    : IO (MasterTensor × MasterTensor × MasterTensor × Tensor { shape := #[], dtype := .Float32 }) := do
   let q : MhaTensor := qM.toBFloat16
   let k : MhaTensor := kM.toBFloat16
   let v : MhaTensor := vM.toBFloat16

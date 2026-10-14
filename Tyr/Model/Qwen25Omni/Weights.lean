@@ -51,7 +51,7 @@ private def tensorNameCandidates (name : String) : Array String :=
     out
 
 private def loadLinearWeightSharded (modelDir : String) (baseName : String) (outDim inDim : UInt64)
-    : IO (DTensor #[outDim, inDim] .Float32) := do
+    : IO (Tensor { shape := #[outDim, inDim], dtype := .Float32 }) := do
   let bases := baseNameCandidates baseName
   for b in bases do
     let wName := s!"{b}.weight"
@@ -64,7 +64,7 @@ private def loadLinearWeightSharded (modelDir : String) (baseName : String) (out
   throw <| IO.userError s!"Failed to load linear weight (sharded): {baseName}"
 
 private def loadLinearWeight (path : String) (baseName : String) (outDim inDim : UInt64)
-    : IO (DTensor #[outDim, inDim] .Float32) := do
+    : IO (Tensor { shape := #[outDim, inDim], dtype := .Float32 }) := do
   let bases := baseNameCandidates baseName
   for b in bases do
     let wName := s!"{b}.weight"

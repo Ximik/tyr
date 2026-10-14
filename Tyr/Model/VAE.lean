@@ -22,9 +22,9 @@ structure AutoEncoder where
   /-- The VAE decoder -/
   decoder : Decoder
   /-- BatchNorm running mean for latent normalization [128] -/
-  bn_running_mean : STensor #[128]
+  bn_running_mean : Tensor { shape := #[128] }
   /-- BatchNorm running variance for latent normalization [128] -/
-  bn_running_var : STensor #[128]
+  bn_running_var : Tensor { shape := #[128] }
   deriving TensorStruct
 
 namespace AutoEncoder
@@ -35,7 +35,7 @@ def bn_eps : Float := 1e-4
 /-- Inverse normalize packed latents using BN statistics.
     z: [batch, 128, h, w] → [batch, 128, h, w]
     Formula: z * sqrt(running_var + eps) + running_mean -/
-def invNormalize (ae : AutoEncoder) (z : STensor #[1, 128, 16, 16]) : STensor #[1, 128, 16, 16] :=
+def invNormalize (ae : AutoEncoder) (z : Tensor { shape := #[1, 128, 16, 16] }) : Tensor { shape := #[1, 128, 16, 16] } :=
   -- Compute scale: sqrt(running_var + eps)
   let var_plus_eps := Tensor.Preserving.addScalar ae.bn_running_var bn_eps
   let scale := Tensor.Preserving.sqrt var_plus_eps
@@ -51,7 +51,7 @@ def invNormalize (ae : AutoEncoder) (z : STensor #[1, 128, 16, 16]) : STensor #[
     Packed: [1, 128, 16, 16]
     Unpacked: [1, 32, 32, 32]
     The reshape and permutation preserve the indexed spatial layout. -/
-def unpackLatents16x16 (z : STensor #[1, 128, 16, 16]) : STensor #[1, 32, 32, 32] :=
+def unpackLatents16x16 (z : Tensor { shape := #[1, 128, 16, 16] }) : Tensor { shape := #[1, 32, 32, 32] } :=
   -- Reshape: [1, 128, 16, 16] → [1, 32, 2, 2, 16, 16]
   let z := Tensor.reshapeChecked z #[1, 32, 2, 2, 16, 16]
   -- Permute: [1, 32, 2, 2, 16, 16] → [1, 32, 16, 2, 16, 2]
@@ -63,7 +63,7 @@ def unpackLatents16x16 (z : STensor #[1, 128, 16, 16]) : STensor #[1, 32, 32, 32
     Input: packed latents [1, 128, 16, 16]
     Output: RGB image [1, 3, 256, 256]
     The reshape and permutation preserve the indexed spatial layout. -/
-def decode (ae : AutoEncoder) (z : STensor #[1, 128, 16, 16]) : STensor #[1, 3, 256, 256] :=
+def decode (ae : AutoEncoder) (z : Tensor { shape := #[1, 128, 16, 16] }) : Tensor { shape := #[1, 3, 256, 256] } :=
   -- Step 1: Inverse normalize using BN stats (uses broadcasting)
   let z := ae.invNormalize z
   -- Step 2: Unpack latents [1, 128, 16, 16] → [1, 32, 32, 32]

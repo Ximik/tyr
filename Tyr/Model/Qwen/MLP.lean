@@ -18,11 +18,11 @@ namespace torch.qwen
     SwiGLU is more expressive than standard GELU MLP. -/
 structure QwenMLP (hidden_size intermediate_size : UInt64) (dtype : DType := .Float32) where
   /-- Gate projection: [intermediate_size, hidden_size] -/
-  gate_proj : DTensor #[intermediate_size, hidden_size] dtype
+  gate_proj : Tensor { shape := #[intermediate_size, hidden_size], dtype := dtype }
   /-- Up projection: [intermediate_size, hidden_size] -/
-  up_proj : DTensor #[intermediate_size, hidden_size] dtype
+  up_proj : Tensor { shape := #[intermediate_size, hidden_size], dtype := dtype }
   /-- Down projection: [hidden_size, intermediate_size] -/
-  down_proj : DTensor #[hidden_size, intermediate_size] dtype
+  down_proj : Tensor { shape := #[hidden_size, intermediate_size], dtype := dtype }
   deriving TensorStruct
 
 namespace QwenMLP
@@ -53,8 +53,8 @@ def init (hidden_size intermediate_size : UInt64) (dtype : DType := .Float32) : 
     SwiGLU: down(silu(gate(x)) * up(x)) -/
 def forward {batch seq hidden_size intermediate_size : UInt64}
     (mlp : QwenMLP hidden_size intermediate_size dtype)
-    (x : DTensor #[batch, seq, hidden_size] dtype)
-    : DTensor #[batch, seq, hidden_size] dtype :=
+    (x : Tensor { shape := #[batch, seq, hidden_size], dtype := dtype })
+    : Tensor { shape := #[batch, seq, hidden_size], dtype := dtype } :=
   -- Compute gate and up projections
   let gate := Tensor.linear3d x mlp.gate_proj  -- [batch, seq, intermediate_size]
   let up := Tensor.linear3d x mlp.up_proj      -- [batch, seq, intermediate_size]

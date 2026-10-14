@@ -26,23 +26,23 @@ private def rightReflectPad : Nat := 64
 private def preparedInputSamples : Nat := combinedInputSamples + rightReflectPad
 
 private def addBias2d {n d : UInt64}
-    (x : DTensor #[n, d] .Float32) (b : DTensor #[d] .Float32)
-    : DTensor #[n, d] .Float32 :=
+    (x : Tensor { shape := #[n, d], dtype := .Float32 }) (b : Tensor { shape := #[d], dtype := .Float32 })
+    : Tensor { shape := #[n, d], dtype := .Float32 } :=
   x + (b.reshapeChecked #[1, d]).expand #[n, d]
 
 private def addBias3d {batch channels frames : UInt64}
-    (x : DTensor #[batch, channels, frames] .Float32)
-    (b : DTensor #[channels] .Float32)
-    : DTensor #[batch, channels, frames] .Float32 :=
+    (x : Tensor { shape := #[batch, channels, frames], dtype := .Float32 })
+    (b : Tensor { shape := #[channels], dtype := .Float32 })
+    : Tensor { shape := #[batch, channels, frames], dtype := .Float32 } :=
   x + (b.reshapeChecked #[1, channels, 1]).expand #[batch, channels, frames]
 
 private def linear2d {batch inDim outDim : UInt64}
-    (x : DTensor #[batch, inDim] .Float32)
-    (w : DTensor #[outDim, inDim] .Float32)
-    (b : DTensor #[outDim] .Float32) : DTensor #[batch, outDim] .Float32 :=
+    (x : Tensor { shape := #[batch, inDim], dtype := .Float32 })
+    (w : Tensor { shape := #[outDim, inDim], dtype := .Float32 })
+    (b : Tensor { shape := #[outDim], dtype := .Float32 }) : Tensor { shape := #[batch, outDim], dtype := .Float32 } :=
   addBias2d (Tensor.linear x w) b
 
-private def loadWeight (path name : String) (shape : Shape) : IO (DTensor shape .Float32) := do
+private def loadWeight (path name : String) (shape : Shape) : IO (Tensor { shape := shape, dtype := .Float32 }) := do
   let some tensor ← safetensors.tryLoadTensor path name shape
     | throw <| IO.userError s!"SileroVAD: failed to load {name}"
   pure tensor.toFloat32
@@ -79,8 +79,8 @@ def reflectPadRight (xs : Array Float) (pad : Nat) : Array Float :=
 
 /-- LSTM state for one-stream Silero-VAD inference (`batch=1`). -/
 structure VADLstmState where
-  h : DTensor #[1, 128] .Float32
-  c : DTensor #[1, 128] .Float32
+  h : Tensor { shape := #[1, 128], dtype := .Float32 }
+  c : Tensor { shape := #[1, 128], dtype := .Float32 }
   deriving TensorStruct
 
 namespace VADLstmState
@@ -94,21 +94,21 @@ end VADLstmState
 
 /-- Lean module matching `TinySileroVAD` weight layout. -/
 structure SileroVAD where
-  stftConvWeight : DTensor #[258, 1, 256] .Float32
-  conv1Weight : DTensor #[128, 129, 3] .Float32
-  conv1Bias : DTensor #[128] .Float32
-  conv2Weight : DTensor #[64, 128, 3] .Float32
-  conv2Bias : DTensor #[64] .Float32
-  conv3Weight : DTensor #[64, 64, 3] .Float32
-  conv3Bias : DTensor #[64] .Float32
-  conv4Weight : DTensor #[128, 64, 3] .Float32
-  conv4Bias : DTensor #[128] .Float32
-  lstmWeightIH : DTensor #[512, 128] .Float32
-  lstmWeightHH : DTensor #[512, 128] .Float32
-  lstmBiasIH : DTensor #[512] .Float32
-  lstmBiasHH : DTensor #[512] .Float32
-  finalConvWeight : DTensor #[1, 128, 1] .Float32
-  finalConvBias : DTensor #[1] .Float32
+  stftConvWeight : Tensor { shape := #[258, 1, 256], dtype := .Float32 }
+  conv1Weight : Tensor { shape := #[128, 129, 3], dtype := .Float32 }
+  conv1Bias : Tensor { shape := #[128], dtype := .Float32 }
+  conv2Weight : Tensor { shape := #[64, 128, 3], dtype := .Float32 }
+  conv2Bias : Tensor { shape := #[64], dtype := .Float32 }
+  conv3Weight : Tensor { shape := #[64, 64, 3], dtype := .Float32 }
+  conv3Bias : Tensor { shape := #[64], dtype := .Float32 }
+  conv4Weight : Tensor { shape := #[128, 64, 3], dtype := .Float32 }
+  conv4Bias : Tensor { shape := #[128], dtype := .Float32 }
+  lstmWeightIH : Tensor { shape := #[512, 128], dtype := .Float32 }
+  lstmWeightHH : Tensor { shape := #[512, 128], dtype := .Float32 }
+  lstmBiasIH : Tensor { shape := #[512], dtype := .Float32 }
+  lstmBiasHH : Tensor { shape := #[512], dtype := .Float32 }
+  finalConvWeight : Tensor { shape := #[1, 128, 1], dtype := .Float32 }
+  finalConvBias : Tensor { shape := #[1], dtype := .Float32 }
   deriving TensorStruct
 
 namespace SileroVAD
@@ -184,25 +184,25 @@ def load (path : String) : IO SileroVAD := do
 
 private def lstmCellStep
     (m : SileroVAD)
-    (x : DTensor #[1, 128] .Float32)
+    (x : Tensor { shape := #[1, 128], dtype := .Float32 })
     (st : VADLstmState)
     : VADLstmState := Id.run do
-  let gatesIH : DTensor #[1, 512] .Float32 := linear2d x m.lstmWeightIH m.lstmBiasIH
-  let gatesHH : DTensor #[1, 512] .Float32 := linear2d st.h m.lstmWeightHH m.lstmBiasHH
-  let gates : DTensor #[1, 512] .Float32 := gatesIH + gatesHH
+  let gatesIH : Tensor { shape := #[1, 512], dtype := .Float32 } := linear2d x m.lstmWeightIH m.lstmBiasIH
+  let gatesHH : Tensor { shape := #[1, 512], dtype := .Float32 } := linear2d st.h m.lstmWeightHH m.lstmBiasHH
+  let gates : Tensor { shape := #[1, 512], dtype := .Float32 } := gatesIH + gatesHH
 
-  let iGateRaw : DTensor #[1, 128] .Float32 := Tensor.slice gates 1 0 128
-  let fGateRaw : DTensor #[1, 128] .Float32 := Tensor.slice gates 1 128 128
-  let gGateRaw : DTensor #[1, 128] .Float32 := Tensor.slice gates 1 256 128
-  let oGateRaw : DTensor #[1, 128] .Float32 := Tensor.slice gates 1 384 128
+  let iGateRaw : Tensor { shape := #[1, 128], dtype := .Float32 } := Tensor.slice gates 1 0 128
+  let fGateRaw : Tensor { shape := #[1, 128], dtype := .Float32 } := Tensor.slice gates 1 128 128
+  let gGateRaw : Tensor { shape := #[1, 128], dtype := .Float32 } := Tensor.slice gates 1 256 128
+  let oGateRaw : Tensor { shape := #[1, 128], dtype := .Float32 } := Tensor.slice gates 1 384 128
 
-  let iGate : DTensor #[1, 128] .Float32 := Tensor.sigmoid iGateRaw
-  let fGate : DTensor #[1, 128] .Float32 := Tensor.sigmoid fGateRaw
-  let gGate : DTensor #[1, 128] .Float32 := Tensor.tanh gGateRaw
-  let oGate : DTensor #[1, 128] .Float32 := Tensor.sigmoid oGateRaw
+  let iGate : Tensor { shape := #[1, 128], dtype := .Float32 } := Tensor.sigmoid iGateRaw
+  let fGate : Tensor { shape := #[1, 128], dtype := .Float32 } := Tensor.sigmoid fGateRaw
+  let gGate : Tensor { shape := #[1, 128], dtype := .Float32 } := Tensor.tanh gGateRaw
+  let oGate : Tensor { shape := #[1, 128], dtype := .Float32 } := Tensor.sigmoid oGateRaw
 
-  let cNext : DTensor #[1, 128] .Float32 := fGate * st.c + iGate * gGate
-  let hNext : DTensor #[1, 128] .Float32 := oGate * Tensor.tanh cNext
+  let cNext : Tensor { shape := #[1, 128], dtype := .Float32 } := fGate * st.c + iGate * gGate
+  let hNext : Tensor { shape := #[1, 128], dtype := .Float32 } := oGate * Tensor.tanh cNext
   { h := hNext, c := cNext }
 
 /-- Core forward pass.
@@ -210,36 +210,36 @@ private def lstmCellStep
     (`64` context + `512` chunk) with additional right reflect padding `64`. -/
 def forwardPrepared
     (m : SileroVAD)
-    (xPrepared : DTensor #[1, preparedInputSamples.toUInt64] .Float32)
+    (xPrepared : Tensor { shape := #[1, preparedInputSamples.toUInt64], dtype := .Float32 })
     (state : VADLstmState)
-    : DTensor #[1, 1] .Float32 × VADLstmState := Id.run do
-  let x0 : DTensor #[1, 1, preparedInputSamples.toUInt64] .Float32 :=
+    : Tensor { shape := #[1, 1], dtype := .Float32 } × VADLstmState := Id.run do
+  let x0 : Tensor { shape := #[1, 1, preparedInputSamples.toUInt64], dtype := .Float32 } :=
     Tensor.reshapeChecked xPrepared #[1, 1, preparedInputSamples.toUInt64]
 
-  let stft : DTensor #[1, 258, 4] .Float32 :=
+  let stft : Tensor { shape := #[1, 258, 4], dtype := .Float32 } :=
     Tensor.reshapeChecked (Tensor.conv1d x0 m.stftConvWeight 128 0 1) #[1, 258, 4]
-  let re : DTensor #[1, 129, 4] .Float32 := Tensor.slice stft 1 0 129
-  let im : DTensor #[1, 129, 4] .Float32 := Tensor.slice stft 1 129 129
-  let mag : DTensor #[1, 129, 4] .Float32 := Tensor.sqrt (re * re + im * im)
+  let re : Tensor { shape := #[1, 129, 4], dtype := .Float32 } := Tensor.slice stft 1 0 129
+  let im : Tensor { shape := #[1, 129, 4], dtype := .Float32 } := Tensor.slice stft 1 129 129
+  let mag : Tensor { shape := #[1, 129, 4], dtype := .Float32 } := Tensor.sqrt (re * re + im * im)
 
-  let h1 : DTensor #[1, 128, 4] .Float32 :=
+  let h1 : Tensor { shape := #[1, 128, 4], dtype := .Float32 } :=
     Tensor.relu (addBias3d (Tensor.reshapeChecked (Tensor.conv1d mag m.conv1Weight 1 1 1) #[1, 128, 4]) m.conv1Bias)
-  let h2 : DTensor #[1, 64, 2] .Float32 :=
+  let h2 : Tensor { shape := #[1, 64, 2], dtype := .Float32 } :=
     Tensor.relu (addBias3d (Tensor.reshapeChecked (Tensor.conv1d h1 m.conv2Weight 2 1 1) #[1, 64, 2]) m.conv2Bias)
-  let h3 : DTensor #[1, 64, 1] .Float32 :=
+  let h3 : Tensor { shape := #[1, 64, 1], dtype := .Float32 } :=
     Tensor.relu (addBias3d (Tensor.reshapeChecked (Tensor.conv1d h2 m.conv3Weight 2 1 1) #[1, 64, 1]) m.conv3Bias)
-  let h4 : DTensor #[1, 128, 1] .Float32 :=
+  let h4 : Tensor { shape := #[1, 128, 1], dtype := .Float32 } :=
     Tensor.relu (addBias3d (Tensor.reshapeChecked (Tensor.conv1d h3 m.conv4Weight 1 1 1) #[1, 128, 1]) m.conv4Bias)
 
-  let xFlat : DTensor #[1, 128] .Float32 := Tensor.reshapeChecked h4 #[1, 128]
+  let xFlat : Tensor { shape := #[1, 128], dtype := .Float32 } := Tensor.reshapeChecked h4 #[1, 128]
   let state' := lstmCellStep m xFlat state
-  let hAct : DTensor #[1, 128, 1] .Float32 := Tensor.reshapeChecked (Tensor.relu state'.h) #[1, 128, 1]
+  let hAct : Tensor { shape := #[1, 128, 1], dtype := .Float32 } := Tensor.reshapeChecked (Tensor.relu state'.h) #[1, 128, 1]
 
-  let y0 : DTensor #[1, 1, 1] .Float32 :=
+  let y0 : Tensor { shape := #[1, 1, 1], dtype := .Float32 } :=
     Tensor.reshapeChecked (Tensor.conv1d hAct m.finalConvWeight 1 0 1) #[1, 1, 1]
-  let y1 : DTensor #[1, 1, 1] .Float32 := addBias3d y0 m.finalConvBias
-  let y2 : DTensor #[1, 1, 1] .Float32 := Tensor.sigmoid y1
-  let y : DTensor #[1, 1] .Float32 := Tensor.reshapeChecked y2 #[1, 1]
+  let y1 : Tensor { shape := #[1, 1, 1], dtype := .Float32 } := addBias3d y0 m.finalConvBias
+  let y2 : Tensor { shape := #[1, 1, 1], dtype := .Float32 } := Tensor.sigmoid y1
+  let y : Tensor { shape := #[1, 1], dtype := .Float32 } := Tensor.reshapeChecked y2 #[1, 1]
   (y, state')
 
 end SileroVAD
@@ -286,7 +286,7 @@ private def splitEvery (xs : Array Float) (n : Nat) : Array (Array Float) :=
         i := i + n
       out
 
-private def prepareChunkTensor (context chunk : Array Float) : IO (DTensor #[1, preparedInputSamples.toUInt64] .Float32 × Array Float) := do
+private def prepareChunkTensor (context chunk : Array Float) : IO (Tensor { shape := #[1, preparedInputSamples.toUInt64], dtype := .Float32 } × Array Float) := do
   if context.size != contextSizeSamples then
     throw <| IO.userError
       s!"SileroVAD context size mismatch: expected {contextSizeSamples}, got {context.size}"
@@ -303,7 +303,7 @@ private def prepareChunkTensor (context chunk : Array Float) : IO (DTensor #[1, 
     throw <| IO.userError
       s!"SileroVAD prepared input size mismatch: expected {preparedInputSamples}, got {prepared.size}"
 
-  let x : DTensor #[1, preparedInputSamples.toUInt64] .Float32 :=
+  let x : Tensor { shape := #[1, preparedInputSamples.toUInt64], dtype := .Float32 } :=
     Tensor.reshapeChecked (Tensor.fromFloatArray prepared) #[1, preparedInputSamples.toUInt64]
   let nextContext := combined.extract (combined.size - contextSizeSamples) combined.size
   pure (x, nextContext)

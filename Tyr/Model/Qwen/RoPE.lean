@@ -24,9 +24,9 @@ def applyRotaryEmb {batch seq n_head head_dim : UInt64} {d dc : DType} {dev : De
     The runtime computes them in Float32. -/
 structure RoPECache (max_seq : UInt64) (head_dim : UInt64) where
   /-- Cosine values: [max_seq, head_dim/2] -/
-  cos : DTensor #[max_seq, head_dim / 2] .Float32
+  cos : Tensor { shape := #[max_seq, head_dim / 2], dtype := .Float32 }
   /-- Sine values: [max_seq, head_dim/2] -/
-  sin : DTensor #[max_seq, head_dim / 2] .Float32
+  sin : Tensor { shape := #[max_seq, head_dim / 2], dtype := .Float32 }
 
 namespace RoPECache
 
@@ -42,10 +42,10 @@ end RoPECache
     x: [batch, seq, n_head, head_dim]
     Returns: [batch, seq, n_head, head_dim] with positions encoded -/
 def applyRoPE {batch seq n_head head_dim max_seq : UInt64}
-    (x : DTensor #[batch, seq, n_head, head_dim] .Float32)
+    (x : Tensor { shape := #[batch, seq, n_head, head_dim], dtype := .Float32 })
     (cache : RoPECache max_seq head_dim)
     (start_pos : UInt64 := 0)
-    : DTensor #[batch, seq, n_head, head_dim] .Float32 :=
+    : Tensor { shape := #[batch, seq, n_head, head_dim], dtype := .Float32 } :=
   -- Slice cos/sin to current sequence length (runtime bounds, validated)
   let cos := cache.cos.sliceChecked 0 start_pos seq #[seq, head_dim / 2]
   let sin := cache.sin.sliceChecked 0 start_pos seq #[seq, head_dim / 2]
@@ -55,7 +55,7 @@ def applyRoPE {batch seq n_head head_dim max_seq : UInt64}
 /-- Pure typed frequency table used by full and cached decoding. -/
 def computeFreqsOnDevice (seq headDim : UInt64) (theta : Float := 10000.0)
     (device : Device := .CPU) :
-    DTensor #[seq, headDim / 2] .Float32 × DTensor #[seq, headDim / 2] .Float32 :=
+    Tensor { shape := #[seq, headDim / 2], dtype := .Float32 } × Tensor { shape := #[seq, headDim / 2], dtype := .Float32 } :=
   Tensor.rotaryFreqs seq headDim theta device
 
 end torch.qwen
