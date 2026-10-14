@@ -188,12 +188,12 @@ def testNormalizeDualReducesDualNorm : IO Unit := do
     s!"Dual norm should decrease after normalization: {dAfter} vs {dBefore}"
 
 
-example (_emb : Embedding 3 2) (_tokens : torch.DTensor #[1, 2] .Float32) : True := by
+example (_emb : Embedding 3 2) (_tokens : torch.Tensor { shape := #[1, 2], dtype := .Float32 }) : True := by
   fail_if_success
     have _ := Embedding.forward _emb _tokens
   trivial
 
-example (_weight : torch.DTensor #[2, 3] .Float32) : True := by
+example (_weight : torch.Tensor { shape := #[2, 3], dtype := .Float32 }) : True := by
   fail_if_success
     have _ : Embedding 3 2 := ⟨_weight⟩
   trivial
@@ -213,7 +213,7 @@ def testIndexedEmbeddingLookupGradientAndNorms : IO Unit := do
   let loss := torch.Tensor.sumAll output
   LeanTest.assertEqual loss.item 24.0 "Embedding should return all six selected rows"
   torch.Tensor.backwardLoss loss
-  let gradient := weight.gradOf
+  let gradient ← weight.gradOf
   let selected := torch.Tensor.slice gradient 0 1 1
   LeanTest.assertEqual (torch.Tensor.item (torch.Tensor.sumAll selected)) 12.0
     "Repeated token indices should accumulate six gradients per embedding component"

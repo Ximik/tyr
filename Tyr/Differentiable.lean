@@ -2,10 +2,10 @@ import Tyr.Typed.Ops
 
 namespace torch
 
-/-- A value with an associated cotangent representation and gradient extraction. -/
+/-- A value with an associated cotangent representation and effectful gradient snapshot extraction. -/
 class differentiable (α : Type u) where
-  cotangent_space : Type u
-  grad : α → cotangent_space
+  cotangent_space : Type
+  grad : α → IO cotangent_space
 
 /-- Tensor gradients retain the complete static specification. -/
 instance {σ : StaticSpec} : differentiable (Tensor σ) where

@@ -20,12 +20,13 @@ open torch.qwen
 open torch.vae
 open torch.flux
 
-private def toFloat32 {α : Type} [TensorStruct α] (x : α) : α :=
-  TensorStruct.map (fun t => t.checkedReplacement t.toFloat32.raw) x
+private def toFloat32Tree {α : Type} [TensorStruct α] (x : α) : IO α :=
+  TensorStruct.castDType .Float32 x
 
 private def toFloat32Embedder {cfg : QwenConfig} {max_seq : UInt64}
-    (e : QwenFluxEmbedder cfg max_seq) : QwenFluxEmbedder cfg max_seq :=
-  { e with model := toFloat32 e.model }
+    (e : QwenFluxEmbedder cfg max_seq) : IO (QwenFluxEmbedder cfg max_seq) := do
+  let model ← toFloat32Tree e.model
+  pure { e with model }
 
 /-- Configuration for the demo -/
 structure DemoConfig where
@@ -115,7 +116,7 @@ private def loadMaskIds (path : String) (maxLen : UInt64) : IO (Array Int64) := 
   pure ids
 
 /-- Construct indexed token IDs and attention masks from a prompt or token files. -/
-private def promptTokens (cfg : DemoConfig) (prompt : String) : IO (DTensor #[1, maxSeqLen] .Int64 × DTensor #[1, maxSeqLen] .Int64 × UInt64) := do
+private def promptTokens (cfg : DemoConfig) (prompt : String) : IO (Tensor { shape := #[1, maxSeqLen], dtype := .Int64 } × Tensor { shape := #[1, maxSeqLen], dtype := .Int64 } × UInt64) := do
   if cfg.useTokenFiles then
     if !(← data.fileExists cfg.tokensPath) then
       throw (IO.userError s!"Token file not found: {cfg.tokensPath}")
@@ -153,18 +154,18 @@ def runDemo (cfg : DemoConfig) (prompt : String) : IO Unit := do
   -- Load Qwen text encoder (sharded, with Flux Klein config)
   let qwenCfg := QwenConfig.fluxKleinTextEncoder
   let qwen ← loadQwenFluxEmbedderSharded cfg.qwenDir qwenCfg maxSeqLen #[8, 17, 26]
-  let qwen := toFloat32Embedder qwen
+  let qwen ← toFloat32Embedder qwen
   IO.println "  ✓ Qwen text encoder loaded (Flux Klein variant)"
 
   -- Load Flux model
   let fluxCfg := FluxConfig.klein4B
   let flux ← loadFluxModel cfg.fluxPath fluxCfg
-  let flux := toFloat32 flux
+  let flux ← toFloat32Tree flux
   IO.println "  ✓ Flux model loaded"
 
   -- Load VAE AutoEncoder (includes BN stats for proper normalization)
   let vae ← loadAutoEncoder cfg.vaePath
-  let vae := toFloat32 vae
+  let vae ← toFloat32Tree vae
   IO.println "  ✓ VAE AutoEncoder loaded"
 
   IO.println ""
@@ -174,7 +175,7 @@ def runDemo (cfg : DemoConfig) (prompt : String) : IO Unit := do
   IO.println "  [1/4] Encoding text..."
   let (tokens, attnMask, tokenCount) ← promptTokens cfg prompt
   let txtEmb := qwen.encodeMasked (batch := 1) (seq := maxSeqLen) (maskDtype := .Int64) qwenCfg maxSeqLen tokens attnMask
-  let txtEmb : STensor #[1, maxSeqLen, fluxCfg.context_in_dim] :=
+  let txtEmb : Tensor { shape := #[1, maxSeqLen, fluxCfg.context_in_dim] } :=
     (txtEmb.reshapeChecked #[1, maxSeqLen, fluxCfg.context_in_dim]).forgetDType
   IO.println s!"    Text token count: {tokenCount}"
   IO.println s!"    Text embedding shape: {txtEmb.runtimeShape}"
@@ -185,7 +186,7 @@ def runDemo (cfg : DemoConfig) (prompt : String) : IO Unit := do
   let imgSeq := cfg.latentH * cfg.latentW
   let noiseSpatial ← randomWeight #[1, 128, cfg.latentH, cfg.latentW]
   let noiseSeq := Tensor.permute noiseSpatial #[0, 2, 3, 1]
-  let noise : STensor #[1, imgSeq, 128] := Tensor.reshapeChecked noiseSeq #[1, imgSeq, 128]
+  let noise : Tensor { shape := #[1, imgSeq, 128] } := Tensor.reshapeChecked noiseSeq #[1, imgSeq, 128]
 
   -- Compute position IDs for RoPE
   let imgIds ← computeImagePositionIds cfg.latentH cfg.latentW
@@ -196,9 +197,9 @@ def runDemo (cfg : DemoConfig) (prompt : String) : IO Unit := do
   let latents := denoise fluxCfg flux noise txtEmb imgIds txtIds cfg.numSteps
   IO.println s!"    Denoised with {cfg.numSteps} steps"
   -- Transform latents for VAE (inverse of flattening)
-  let latentsHW : STensor #[1, cfg.latentH, cfg.latentW, 128] :=
+  let latentsHW : Tensor { shape := #[1, cfg.latentH, cfg.latentW, 128] } :=
     Tensor.reshapeChecked latents #[1, cfg.latentH, cfg.latentW, 128]
-  let packedLatents : STensor #[1, 128, cfg.latentH, cfg.latentW] :=
+  let packedLatents : Tensor { shape := #[1, 128, cfg.latentH, cfg.latentW] } :=
     (Tensor.permute latentsHW #[0, 3, 1, 2]).reshapeChecked #[1, 128, cfg.latentH, cfg.latentW]
 
   -- Step 4: Decode with VAE and save

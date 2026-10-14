@@ -46,8 +46,8 @@ When generating a TensorStruct instance, each field is handled based on its type
 ```lean
 -- Define your structure
 structure MyLayer where
-  weight : DTensor #[n, m] .Float32
-  bias : DTensor #[n] .Float32
+  weight : Tensor { shape := #[n, m], dtype := .Float32 }
+  bias : Tensor { shape := #[n], dtype := .Float32 }
   config : Static Config
 
 -- Manually create instance (the macro would generate this)

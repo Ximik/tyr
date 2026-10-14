@@ -34,8 +34,8 @@ structure FlowConfig where
   Tyr callers can plug that mapping in here; the identity map gives the standard
   linear flow interpolation used by the core FLM equations. -/
 structure TimeMap where
-  tauToT : {batch : UInt64} → DTensor #[batch] .Float32 → DTensor #[batch] .Float32
-  tToTau : {batch : UInt64} → DTensor #[batch] .Float32 → DTensor #[batch] .Float32
+  tauToT : {batch : UInt64} → Tensor { shape := #[batch], dtype := .Float32 } → Tensor { shape := #[batch], dtype := .Float32 }
+  tToTau : {batch : UInt64} → Tensor { shape := #[batch], dtype := .Float32 } → Tensor { shape := #[batch], dtype := .Float32 }
 
 def TimeMap.identity : TimeMap :=
   { tauToT := fun {_batch} tau => tau
@@ -51,12 +51,12 @@ def TimeMap.identity : TimeMap :=
   `forwardPure` is required for ODE sampling, because DiffEq vector fields are
   pure functions. It should be the inference/no-grad equivalent of `forward`. -/
 structure FlowDenoiser (seq vocab : UInt64) (Params : Type) where
-  forward : {batch : UInt64} → Params → DTensor #[batch, seq, vocab] .Float32 → DTensor #[batch] .Float32
-    → Option (DTensor #[batch] .Float32) → IO (DTensor #[batch, seq, vocab] .Float32)
-  forwardPure : Option ({batch : UInt64} → Params → DTensor #[batch, seq, vocab] .Float32 → DTensor #[batch] .Float32
-    → Option (DTensor #[batch] .Float32) → DTensor #[batch, seq, vocab] .Float32) := none
-  lossWeight : Option ({batch : UInt64} → Params → DTensor #[batch] .Float32 → Option (DTensor #[batch] .Float32)
-    → IO (DTensor #[batch] .Float32)) := none
+  forward : {batch : UInt64} → Params → Tensor { shape := #[batch, seq, vocab], dtype := .Float32 } → Tensor { shape := #[batch], dtype := .Float32 }
+    → Option (Tensor { shape := #[batch], dtype := .Float32 }) → IO (Tensor { shape := #[batch, seq, vocab], dtype := .Float32 })
+  forwardPure : Option ({batch : UInt64} → Params → Tensor { shape := #[batch, seq, vocab], dtype := .Float32 } → Tensor { shape := #[batch], dtype := .Float32 }
+    → Option (Tensor { shape := #[batch], dtype := .Float32 }) → Tensor { shape := #[batch, seq, vocab], dtype := .Float32 }) := none
+  lossWeight : Option ({batch : UInt64} → Params → Tensor { shape := #[batch], dtype := .Float32 } → Option (Tensor { shape := #[batch], dtype := .Float32 })
+    → IO (Tensor { shape := #[batch], dtype := .Float32 })) := none
 
 structure LossReport where
   loss : Float
@@ -65,78 +65,78 @@ structure LossReport where
   deriving Repr
 
 structure SemigroupTimes (batch : UInt64) where
-  tauS : DTensor #[batch] .Float32
-  tauU : DTensor #[batch] .Float32
-  tauT : DTensor #[batch] .Float32
+  tauS : Tensor { shape := #[batch], dtype := .Float32 }
+  tauU : Tensor { shape := #[batch], dtype := .Float32 }
+  tauT : Tensor { shape := #[batch], dtype := .Float32 }
 
-private def expandBatch {batch seq : UInt64} (x : DTensor #[batch] .Float32) : DTensor #[batch, seq] .Float32 :=
+private def expandBatch {batch seq : UInt64} (x : Tensor { shape := #[batch], dtype := .Float32 }) : Tensor { shape := #[batch, seq], dtype := .Float32 } :=
   Tensor.expand (Tensor.unsqueeze x 1) #[batch, seq]
 
-private def expandTime3 {batch seq vocab : UInt64} (x : DTensor #[batch] .Float32)
-    : DTensor #[batch, seq, vocab] .Float32 :=
+private def expandTime3 {batch seq vocab : UInt64} (x : Tensor { shape := #[batch], dtype := .Float32 })
+    : Tensor { shape := #[batch, seq, vocab], dtype := .Float32 } :=
   Tensor.expand (Tensor.unsqueeze (Tensor.unsqueeze x 1) 2) #[batch, seq, vocab]
 
 /-- Token ids to one-hot vectors using `eye` as the embedding table. -/
-def oneHot {batch seq vocab : UInt64} (tokens : DTensor #[batch, seq] .Int64)
-    : DTensor #[batch, seq, vocab] .Float32 :=
+def oneHot {batch seq vocab : UInt64} (tokens : Tensor { shape := #[batch, seq], dtype := .Int64 })
+    : Tensor { shape := #[batch, seq, vocab], dtype := .Float32 } :=
   Tensor.embedding tokens (Tensor.eye vocab)
 
 /-- Sample uniformly from the configured training time interval. -/
-def sampleTau (cfg : FlowConfig) (batch : UInt64) : IO (DTensor #[batch] .Float32) := do
+def sampleTau (cfg : FlowConfig) (batch : UInt64) : IO (Tensor { shape := #[batch], dtype := .Float32 }) := do
   let eps ← Tensor.uniformLike (Tensor.zeros #[batch])
   pure (eps * (cfg.tMax - cfg.tMin) + cfg.tMin)
 
 /-- Continuous FLM corruption: `x_t = (1 - t) noise + t one_hot(x_1)`. -/
 def corruptContinuous {batch seq vocab : UInt64}
-    (tokens : DTensor #[batch, seq] .Int64)
-    (t : DTensor #[batch] .Float32)
-    : IO (DTensor #[batch, seq, vocab] .Float32 × DTensor #[batch, seq, vocab] .Float32) := do
+    (tokens : Tensor { shape := #[batch, seq], dtype := .Int64 })
+    (t : Tensor { shape := #[batch], dtype := .Float32 })
+    : IO (Tensor { shape := #[batch, seq, vocab], dtype := .Float32 } × Tensor { shape := #[batch, seq, vocab], dtype := .Float32 }) := do
   let target := oneHot (vocab := vocab) tokens
   let noise ← Tensor.randn #[batch, seq, vocab]
   let t3 := expandTime3 (seq := seq) (vocab := vocab) t
   let one := Tensor.onesLike target
   pure (((one - t3) * noise + t3 * target), target)
 
-private def softcap {s : Shape} (x : DTensor s .Float32) (cap : Float) : DTensor s .Float32 :=
+private def softcap {s : Shape} (x : Tensor { shape := s, dtype := .Float32 }) (cap : Float) : Tensor { shape := s, dtype := .Float32 } :=
   Tensor.tanh (x / cap) * cap
 
-def cappedLogSoftmax {s : Shape} (cfg : FlowConfig) (logits : DTensor s .Float32) : DTensor s .Float32 :=
+def cappedLogSoftmax {s : Shape} (cfg : FlowConfig) (logits : Tensor { shape := s, dtype := .Float32 }) : Tensor { shape := s, dtype := .Float32 } :=
   Tensor.logSoftmax (softcap logits cfg.softcap) (-1)
 
 def forwardLogProbs {seq vocab batch : UInt64} {Params : Type}
     (cfg : FlowConfig)
     (model : FlowDenoiser seq vocab Params)
     (params : Params)
-    (x : DTensor #[batch, seq, vocab] .Float32)
-    (tau : DTensor #[batch] .Float32)
-    (tauPrime : Option (DTensor #[batch] .Float32) := none)
-    : IO (DTensor #[batch, seq, vocab] .Float32) := do
+    (x : Tensor { shape := #[batch, seq, vocab], dtype := .Float32 })
+    (tau : Tensor { shape := #[batch], dtype := .Float32 })
+    (tauPrime : Option (Tensor { shape := #[batch], dtype := .Float32 }) := none)
+    : IO (Tensor { shape := #[batch, seq, vocab], dtype := .Float32 }) := do
   let logits ← model.forward params x tau tauPrime
   pure (cappedLogSoftmax cfg logits)
 
 def forwardLogProbsPure {seq vocab batch : UInt64} {Params : Type}
     (cfg : FlowConfig)
-    (forwardPure : {batch : UInt64} → Params → DTensor #[batch, seq, vocab] .Float32 → DTensor #[batch] .Float32
-      → Option (DTensor #[batch] .Float32) → DTensor #[batch, seq, vocab] .Float32)
+    (forwardPure : {batch : UInt64} → Params → Tensor { shape := #[batch, seq, vocab], dtype := .Float32 } → Tensor { shape := #[batch], dtype := .Float32 }
+      → Option (Tensor { shape := #[batch], dtype := .Float32 }) → Tensor { shape := #[batch, seq, vocab], dtype := .Float32 })
     (params : Params)
-    (x : DTensor #[batch, seq, vocab] .Float32)
-    (tau : DTensor #[batch] .Float32)
-    (tauPrime : Option (DTensor #[batch] .Float32) := none)
-    : DTensor #[batch, seq, vocab] .Float32 :=
+    (x : Tensor { shape := #[batch, seq, vocab], dtype := .Float32 })
+    (tau : Tensor { shape := #[batch], dtype := .Float32 })
+    (tauPrime : Option (Tensor { shape := #[batch], dtype := .Float32 }) := none)
+    : Tensor { shape := #[batch, seq, vocab], dtype := .Float32 } :=
   cappedLogSoftmax cfg (forwardPure params x tau tauPrime)
 
 /-- Per-token cross entropy against a dense one-hot/probability target. -/
 def denseTargetNll {batch seq vocab : UInt64}
-    (logProbs target : DTensor #[batch, seq, vocab] .Float32) : DTensor #[batch, seq] .Float32 :=
+    (logProbs target : Tensor { shape := #[batch, seq, vocab], dtype := .Float32 }) : Tensor { shape := #[batch, seq], dtype := .Float32 } :=
   (Tensor.mulScalar (Tensor.sumDim (target * logProbs) 2) (-1.0)).reshapeChecked #[batch, seq]
 
 private def maybeApplyLossWeight {batch seq : UInt64} {Params : Type}
     (model : FlowDenoiser seq vocab Params)
     (params : Params)
-    (tau : DTensor #[batch] .Float32)
-    (tauPrime : Option (DTensor #[batch] .Float32))
-    (loss : DTensor #[batch, seq] .Float32)
-    : IO (DTensor #[batch, seq] .Float32) := do
+    (tau : Tensor { shape := #[batch], dtype := .Float32 })
+    (tauPrime : Option (Tensor { shape := #[batch], dtype := .Float32 }))
+    (loss : Tensor { shape := #[batch, seq], dtype := .Float32 })
+    : IO (Tensor { shape := #[batch, seq], dtype := .Float32 }) := do
   match model.lossWeight with
   | none => pure loss
   | some weightFn =>
@@ -150,9 +150,9 @@ def flowLossGivenTau {batch seq vocab : UInt64} {Params : Type}
     (timeMap : TimeMap)
     (model : FlowDenoiser seq vocab Params)
     (params : Params)
-    (tokens : DTensor #[batch, seq] .Int64)
-    (tau : DTensor #[batch] .Float32)
-    : IO (DTensor #[batch, seq] .Float32) := do
+    (tokens : Tensor { shape := #[batch, seq], dtype := .Int64 })
+    (tau : Tensor { shape := #[batch], dtype := .Float32 })
+    : IO (Tensor { shape := #[batch, seq], dtype := .Float32 }) := do
   let t := timeMap.tauToT tau
   let (xT, target) ← corruptContinuous (vocab := vocab) tokens t
   let logProbs ← forwardLogProbs cfg model params xT tau none
@@ -165,13 +165,13 @@ def flowLoss {batch seq vocab : UInt64} {Params : Type}
     (timeMap : TimeMap)
     (model : FlowDenoiser seq vocab Params)
     (params : Params)
-    (tokens : DTensor #[batch, seq] .Int64)
-    : IO (DTensor #[batch, seq] .Float32) := do
+    (tokens : Tensor { shape := #[batch, seq], dtype := .Int64 })
+    : IO (Tensor { shape := #[batch, seq], dtype := .Float32 }) := do
   let tau ← sampleTau cfg batch
   flowLossGivenTau cfg timeMap model params tokens tau
 
-def maskedMean {batch seq : UInt64} (loss validTokens : DTensor #[batch, seq] .Float32)
-    (eps : Float := 1.0e-8) : DTensor #[] .Float32 :=
+def maskedMean {batch seq : UInt64} (loss validTokens : Tensor { shape := #[batch, seq], dtype := .Float32 })
+    (eps : Float := 1.0e-8) : Tensor { shape := #[], dtype := .Float32 } :=
   let nlls := Tensor.sumAll (loss * validTokens)
   let denom := Tensor.sumAll validTokens
   Tensor.div nlls (denom + eps)
@@ -183,18 +183,18 @@ def trainStep {seq vocab batch : UInt64} {Params : Type} [TensorStruct Params]
     (model : FlowDenoiser seq vocab Params)
     (params : Params)
     (optState : Optim.AdamWState Params)
-    (tokens : DTensor #[batch, seq] .Int64)
-    (validTokens : DTensor #[batch, seq] .Float32)
+    (tokens : Tensor { shape := #[batch, seq], dtype := .Int64 })
+    (validTokens : Tensor { shape := #[batch, seq], dtype := .Float32 })
     (lr : Float)
     (clipGrads : Params → Float → IO Unit := fun _ _ => pure ())
     : IO (Params × Optim.AdamWState Params × LossReport) := do
-  let params := TensorStruct.zeroGrads params
+  TensorStruct.zeroGrads params
   let perToken ← flowLoss cfg timeMap model params tokens
   let lossT := maskedMean perToken validTokens
   Tensor.backwardLoss lossT
   if cfg.gradClip > 0 then
     clipGrads params cfg.gradClip
-  let grads := TensorStruct.grads params
+  let grads ← TensorStruct.grads params
   let opt := Optim.adamw (lr := lr) (weight_decay := cfg.weightDecay)
   let (params', optState') := Optim.step opt params grads optState
   let nlls := Tensor.sumAll (perToken * validTokens)
@@ -207,8 +207,8 @@ def trainStep {seq vocab batch : UInt64} {Params : Type} [TensorStruct Params]
 
 private def pureForwardOrThrow {seq vocab : UInt64} {Params : Type}
     (model : FlowDenoiser seq vocab Params)
-    : IO ({batch : UInt64} → Params → DTensor #[batch, seq, vocab] .Float32 → DTensor #[batch] .Float32
-      → Option (DTensor #[batch] .Float32) → DTensor #[batch, seq, vocab] .Float32) := do
+    : IO ({batch : UInt64} → Params → Tensor { shape := #[batch, seq, vocab], dtype := .Float32 } → Tensor { shape := #[batch], dtype := .Float32 }
+      → Option (Tensor { shape := #[batch], dtype := .Float32 }) → Tensor { shape := #[batch, seq, vocab], dtype := .Float32 }) := do
   match model.forwardPure with
   | some forwardPure => pure forwardPure
   | none =>
@@ -222,12 +222,12 @@ private def scalarMappedTime {batch : UInt64} (timeMap : TimeMap) (tau : Float) 
 private def flowVelocityAtT {batch seq vocab : UInt64} {Params : Type}
     (cfg : FlowConfig)
     (timeMap : TimeMap)
-    (forwardPure : {batch : UInt64} → Params → DTensor #[batch, seq, vocab] .Float32 → DTensor #[batch] .Float32
-      → Option (DTensor #[batch] .Float32) → DTensor #[batch, seq, vocab] .Float32)
+    (forwardPure : {batch : UInt64} → Params → Tensor { shape := #[batch, seq, vocab], dtype := .Float32 } → Tensor { shape := #[batch], dtype := .Float32 }
+      → Option (Tensor { shape := #[batch], dtype := .Float32 }) → Tensor { shape := #[batch, seq, vocab], dtype := .Float32 })
     (params : Params)
     (t : DiffEq.Time)
-    (z : DTensor #[batch, seq, vocab] .Float32)
-    : DTensor #[batch, seq, vocab] .Float32 :=
+    (z : Tensor { shape := #[batch, seq, vocab], dtype := .Float32 })
+    : Tensor { shape := #[batch, seq, vocab], dtype := .Float32 } :=
   let tTensor := Tensor.full #[batch] t
   let tau := timeMap.tToTau tTensor
   let logPred := forwardLogProbsPure cfg forwardPure params z tau none
@@ -239,12 +239,12 @@ private def flowVelocityAtT {batch seq vocab : UInt64} {Params : Type}
 private def finalFlowProjection {batch seq vocab : UInt64} {Params : Type}
     (cfg : FlowConfig)
     (timeMap : TimeMap)
-    (forwardPure : {batch : UInt64} → Params → DTensor #[batch, seq, vocab] .Float32 → DTensor #[batch] .Float32
-      → Option (DTensor #[batch] .Float32) → DTensor #[batch, seq, vocab] .Float32)
+    (forwardPure : {batch : UInt64} → Params → Tensor { shape := #[batch, seq, vocab], dtype := .Float32 } → Tensor { shape := #[batch], dtype := .Float32 }
+      → Option (Tensor { shape := #[batch], dtype := .Float32 }) → Tensor { shape := #[batch, seq, vocab], dtype := .Float32 })
     (params : Params)
     (t : DiffEq.Time)
-    (z : DTensor #[batch, seq, vocab] .Float32)
-    : DTensor #[batch, seq, vocab] .Float32 :=
+    (z : Tensor { shape := #[batch, seq, vocab], dtype := .Float32 })
+    : Tensor { shape := #[batch, seq, vocab], dtype := .Float32 } :=
   let tTensor := Tensor.full #[batch] t
   let tau := timeMap.tToTau tTensor
   Tensor.exp (forwardLogProbsPure cfg forwardPure params z tau none)
@@ -257,13 +257,13 @@ def generateFLMWithSolver {seq vocab batch : UInt64} {Params : Type}
     (params : Params)
     (steps : Nat)
     (solver : DiffEq.AbstractSolver
-      (DiffEq.ODETerm (DTensor #[batch, seq, vocab] .Float32) Unit)
-      (DTensor #[batch, seq, vocab] .Float32)
-      (DTensor #[batch, seq, vocab] .Float32)
+      (DiffEq.ODETerm (Tensor { shape := #[batch, seq, vocab], dtype := .Float32 }) Unit)
+      (Tensor { shape := #[batch, seq, vocab], dtype := .Float32 })
+      (Tensor { shape := #[batch, seq, vocab], dtype := .Float32 })
       DiffEq.Time
       Unit)
     (maxSteps : Nat := 4096)
-    : IO (DTensor #[batch, seq] .Int64) := do
+    : IO (Tensor { shape := #[batch, seq], dtype := .Int64 }) := do
   if steps == 0 then
     throw (IO.userError "generateFLM requires steps > 0")
   let forwardPure ← pureForwardOrThrow model
@@ -276,13 +276,13 @@ def generateFLMWithSolver {seq vocab batch : UInt64} {Params : Type}
     if steps == 1 then
       pure z0
     else do
-      let term : DiffEq.ODETerm (DTensor #[batch, seq, vocab] .Float32) Unit :=
+      let term : DiffEq.ODETerm (Tensor { shape := #[batch, seq, vocab], dtype := .Float32 }) Unit :=
         { vectorField := fun t z _ => flowVelocityAtT cfg timeMap forwardPure params t z }
       let sol :=
         DiffEq.diffeqsolve
-          (Term := DiffEq.ODETerm (DTensor #[batch, seq, vocab] .Float32) Unit)
-          (Y := DTensor #[batch, seq, vocab] .Float32)
-          (VF := DTensor #[batch, seq, vocab] .Float32)
+          (Term := DiffEq.ODETerm (Tensor { shape := #[batch, seq, vocab], dtype := .Float32 }) Unit)
+          (Y := Tensor { shape := #[batch, seq, vocab], dtype := .Float32 })
+          (VF := Tensor { shape := #[batch, seq, vocab], dtype := .Float32 })
           (Control := DiffEq.Time)
           (Args := Unit)
           (Controller := DiffEq.ConstantStepSize)
@@ -308,21 +308,21 @@ def generateFLM {seq vocab batch : UInt64} {Params : Type}
     (model : FlowDenoiser seq vocab Params)
     (params : Params)
     (steps : Nat)
-    : IO (DTensor #[batch, seq] .Int64) := do
+    : IO (Tensor { shape := #[batch, seq], dtype := .Int64 }) := do
   let solver :=
     DiffEq.Euler.solver
-      (Term := DiffEq.ODETerm (DTensor #[batch, seq, vocab] .Float32) Unit)
-      (Y := DTensor #[batch, seq, vocab] .Float32)
-      (VF := DTensor #[batch, seq, vocab] .Float32)
+      (Term := DiffEq.ODETerm (Tensor { shape := #[batch, seq, vocab], dtype := .Float32 }) Unit)
+      (Y := Tensor { shape := #[batch, seq, vocab], dtype := .Float32 })
+      (VF := Tensor { shape := #[batch, seq, vocab], dtype := .Float32 })
       (Args := Unit)
   generateFLMWithSolver cfg timeMap model params steps solver
 
 /-- Interpolate from a source state toward a predicted data point. -/
 def flowInterpolate {batch seq vocab : UInt64}
     (cfg : FlowConfig)
-    (xS dataPred : DTensor #[batch, seq, vocab] .Float32)
-    (s t : DTensor #[batch] .Float32)
-    : DTensor #[batch, seq, vocab] .Float32 :=
+    (xS dataPred : Tensor { shape := #[batch, seq, vocab], dtype := .Float32 })
+    (s t : Tensor { shape := #[batch], dtype := .Float32 })
+    : Tensor { shape := #[batch, seq, vocab], dtype := .Float32 } :=
   let s3 := expandTime3 (seq := seq) (vocab := vocab) s
   let t3 := expandTime3 (seq := seq) (vocab := vocab) t
   let one := Tensor.onesLike xS
@@ -332,8 +332,8 @@ def flowInterpolate {batch seq vocab : UInt64}
 /-- PSD semigroup mixing coefficient from the FMLM paper/code. -/
 def psdLambda {batch seq vocab : UInt64}
     (cfg : FlowConfig)
-    (s u t : DTensor #[batch] .Float32)
-    : DTensor #[batch, seq, vocab] .Float32 :=
+    (s u t : Tensor { shape := #[batch], dtype := .Float32 })
+    : Tensor { shape := #[batch, seq, vocab], dtype := .Float32 } :=
   let s3 := expandTime3 (seq := seq) (vocab := vocab) s
   let u3 := expandTime3 (seq := seq) (vocab := vocab) u
   let t3 := expandTime3 (seq := seq) (vocab := vocab) t
@@ -348,9 +348,9 @@ def psdTarget {batch seq vocab : UInt64} {Params : Type}
     (timeMap : TimeMap)
     (model : FlowDenoiser seq vocab Params)
     (params : Params)
-    (xS : DTensor #[batch, seq, vocab] .Float32)
-    (tauS tauU tauT : DTensor #[batch] .Float32)
-    : IO (DTensor #[batch, seq, vocab] .Float32) := do
+    (xS : Tensor { shape := #[batch, seq, vocab], dtype := .Float32 })
+    (tauS tauU tauT : Tensor { shape := #[batch], dtype := .Float32 })
+    : IO (Tensor { shape := #[batch, seq, vocab], dtype := .Float32 }) := do
   let s := timeMap.tauToT tauS
   let u := timeMap.tauToT tauU
   let t := timeMap.tauToT tauT
@@ -369,9 +369,9 @@ def psdLossGivenTau {batch seq vocab : UInt64} {Params : Type}
     (timeMap : TimeMap)
     (model : FlowDenoiser seq vocab Params)
     (params : Params)
-    (tokens : DTensor #[batch, seq] .Int64)
-    (tauS tauU tauT : DTensor #[batch] .Float32)
-    : IO (DTensor #[batch, seq] .Float32) := do
+    (tokens : Tensor { shape := #[batch, seq], dtype := .Int64 })
+    (tauS tauU tauT : Tensor { shape := #[batch], dtype := .Float32 })
+    : IO (Tensor { shape := #[batch, seq], dtype := .Float32 }) := do
   let s := timeMap.tauToT tauS
   let (xS, _) ← corruptContinuous (vocab := vocab) tokens s
   let target ← psdTarget cfg timeMap model params xS tauS tauU tauT
@@ -385,10 +385,10 @@ def diagonalLossGivenTau {batch seq vocab : UInt64} {Params : Type}
     (timeMap : TimeMap)
     (model : FlowDenoiser seq vocab Params)
     (params : Params)
-    (tokens : DTensor #[batch, seq] .Int64)
-    (tau : DTensor #[batch] .Float32)
-    (teacherTarget : Option (DTensor #[batch, seq, vocab] .Float32) := none)
-    : IO (DTensor #[batch, seq] .Float32) := do
+    (tokens : Tensor { shape := #[batch, seq], dtype := .Int64 })
+    (tau : Tensor { shape := #[batch], dtype := .Float32 })
+    (teacherTarget : Option (Tensor { shape := #[batch, seq, vocab], dtype := .Float32 }) := none)
+    : IO (Tensor { shape := #[batch, seq], dtype := .Float32 }) := do
   let t := timeMap.tauToT tau
   let (xT, oneHotTarget) ← corruptContinuous (vocab := vocab) tokens t
   let target := teacherTarget.getD oneHotTarget

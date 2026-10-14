@@ -22,7 +22,7 @@ private def fixture : BranchingBridgeResult MoleculeAtom := {
   LeanTest.assertEqual packed.padmask.actualSpec.dtype .Int64
   LeanTest.assertEqual packed.coord.actualSpec.dtype .Float32
   let buffer ← BranchingMoleculeBatch.zeros 1 2 .CPU true
-  let copied ← (buffer.copyInto packed).eval
+  let copied ← buffer.copyInto packed
   LeanTest.assertEqual copied.coord.actualSpec.dtype .BFloat16
   LeanTest.assertEqual copied.t.actualSpec.dtype .BFloat16
   LeanTest.assertEqual copied.label.actualSpec.dtype .Int64
@@ -36,6 +36,26 @@ private def fixture : BranchingBridgeResult MoleculeAtom := {
     pure false
   catch _ => pure true
   LeanTest.assertTrue rejected "A fixed Float32 leaf must not silently become BF16"
+
+@[test] def testBranchingStaticCopyRejectsImplicitCastAndBroadcast : IO Unit := do
+  let dst ← data.cloneInferenceIO (Tensor.fullInt #[2] 7)
+  let fractional := Tensor.fromFloatArray #[1.75, 2.25]
+  let dtypeError ← try
+    let _ ← copyIntoChecked? dst.forgetDType fractional.forgetDType
+    pure none
+  catch error => pure (some error.toString)
+  LeanTest.assertTrue (dtypeError.any (·.containsSubstr "dtype mismatch"))
+    "Static buffer copy must reject an implicit Float32-to-Int64 cast"
+  LeanTest.assertEqual (← dst.toUInt64Array) #[7, 7]
+  let shapeError ← try
+    let _ ← copyIntoChecked? dst (Tensor.fullInt #[1] 3)
+    pure none
+  catch error => pure (some error.toString)
+  LeanTest.assertTrue (shapeError.any (·.containsSubstr "shape mismatch"))
+    "Static buffer copy must reject native copy_ broadcasting"
+  LeanTest.assertEqual (← dst.toUInt64Array) #[7, 7]
+  let copied ← copyIntoChecked? dst (Tensor.castLike dst fractional)
+  LeanTest.assertEqual (← copied.toUInt64Array) #[1, 2]
 
 @[test] def testBranchingMuonPreservesBF16Rounding : IO Unit := do
   let param := (Tensor.fromFloatArray #[1, 2, 3, 4, 5, 6]).reshapeChecked #[3, 2]
@@ -57,12 +77,12 @@ private def fixture : BranchingBridgeResult MoleculeAtom := {
 
 @[test] def testBranchingModelConfigMismatchIsRejected : IO Unit := do
   let cfg : BranchingTrainConfig := { maxLen := 2 }
-  let model : BranchingMoleculeModel 1 2 (DTensor #[] .Float32) := {
+  let model : BranchingMoleculeModel 1 2 (Tensor { shape := #[], dtype := .Float32 }) := {
     forward := fun _ _ _ _ _ => throw <| IO.userError "model should not run"
   }
   let rejected ← try
     let param := Tensor.zeros #[]
-    let _ ← trainStepMolecule cfg model param ((Optim.adamw (α := DTensor #[] .Float32)).init param) fixture 0.01
+    let _ ← trainStepMolecule cfg model param ((Optim.adamw (α := Tensor { shape := #[], dtype := .Float32 })).init param) fixture 0.01
     pure false
   catch error => pure (error.toString.containsSubstr "maxLen mismatch")
   LeanTest.assertTrue rejected "Mismatched model/config sequence lengths must fail before forward"

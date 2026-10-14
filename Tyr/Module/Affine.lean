@@ -19,7 +19,7 @@ instance {n m : UInt64} {d : DType} {dev : DevicePolicy} :
 instance {n m : UInt64} {d : DType} {dev : DevicePolicy} :
     differentiable (@Affine n m d dev) where
   cotangent_space := @Affine n m d dev
-  grad a := ⟨Tensor.gradOf a.w, Tensor.gradOf a.b⟩
+  grad a := do pure ⟨← Tensor.gradOf a.w, ← Tensor.gradOf a.b⟩
 
 /-- Apply an affine map to a batch, retaining dtype and device policy. -/
 def Affine.step {batch n m : UInt64} {d : DType} {dev : DevicePolicy}

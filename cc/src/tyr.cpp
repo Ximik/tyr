@@ -18,7 +18,7 @@
  *
  * ## Parameter Types
  *
- * - `lean_obj_arg` (owned): Caller receives ownership. MUST call `lean_dec()`
+ * - `lean_obj_arg` (owned): Callee receives ownership. MUST call `lean_dec()`
  *   after extracting data. Used for temporary parameters like shape arrays.
  *   Example:
  *     lean_object* lean_torch_randn(lean_obj_arg s, ...) {
@@ -27,7 +27,7 @@
  *       ...
  *     }
  *
- * - `b_lean_obj_arg` (borrowed): Caller does NOT own the object. Must NOT
+ * - `b_lean_obj_arg` (borrowed): Callee does NOT own the object. Must NOT
  *   call `lean_dec()`. Use `borrowTensor()` to get a C++ tensor with shared
  *   ownership that auto-decrements when it goes out of scope.
  *   Example:
@@ -91,8 +91,11 @@
 #include <torch/torch.h>
 #include <ATen/ATen.h>
 #include "tyr_attention.h"
+#include "tyr_tensor_metadata.h"
+
 #include <ATen/Generator.h>
 #include <ATen/Context.h>
+#include <c10/core/CPUAllocator.h>
 #if defined(__has_include)
 #if __has_include(<ATen/cuda/CUDAGeneratorImpl.h>)
 #include <ATen/cuda/CUDAGeneratorImpl.h>
@@ -155,6 +158,9 @@ torch::Tensor flash_attn_dispatch(
 extern "C" bool tyr_apple_mps_is_available(int debug_flag);
 #endif
 
+// Own transferred Lean arguments before parsing or calling throwable native code.
+using OwnedLeanObject = std::unique_ptr<lean_object, decltype(&lean_dec)>;
+
 // Global atomic counter for live tensors handed to Lean
 std::atomic<int64_t> g_live_lean_tensors(0);
 
@@ -199,6 +205,77 @@ torch::Tensor borrowTensor(b_lean_obj_arg o) {
     return torch::Tensor(std::move(p));
 }
 
+// Consume a Lean reference only after acquiring an owning native handle. This
+// lets the final Lean reference disappear before native uniqueness is tested.
+static torch::Tensor takeTensor(lean_obj_arg owned) {
+  OwnedLeanObject owner(owned, lean_dec);
+  auto tensor = borrowTensor(owned);
+  owner.reset();
+  return tensor;
+}
+
+// Reuse is deliberately limited to ordinary, allocator-owned CPU storage.
+// Accelerator streams and external buffers may have readers that neither
+// Lean's RC nor TensorImpl's RC can observe, so those updates always clone.
+static bool canReuseTensorValue(const torch::Tensor& tensor) {
+  if (!tensor.defined() || !tensor.device().is_cpu() ||
+      tensor.layout() != torch::kStrided || tensor.is_quantized() ||
+      tensor.is_nested() || tensor.is_conj() || tensor.is_neg() ||
+      !tensor.is_contiguous() || tensor.storage_offset() != 0) return false;
+  const auto& impl = tensor.getIntrusivePtr();
+  if (!impl.is_uniquely_owned() || impl->autograd_meta() != nullptr ||
+      impl->is_inference() || !impl->unique_version() || !impl->has_storage()) return false;
+  const auto& storage = tensor.storage();
+  if (!storage.resizable() || storage.allocator() != c10::GetCPUAllocator() ||
+      storage.nbytes() != tensor.nbytes()) return false;
+  // Observe the combined strong/weak counts atomically, without adding a ref.
+  // Separate reads can miss a weak observer that locks and drops its weak ref
+  // between them. Storage pins the lifetime of this non-owning handle; release
+  // it before destruction so observation never decrements Storage's reference.
+  struct StorageOwnershipObserver {
+    c10::intrusive_ptr<c10::StorageImpl> pointer;
+    ~StorageOwnershipObserver() { pointer.release(); }
+  } observer{c10::intrusive_ptr<c10::StorageImpl>(
+      storage.unsafeGetStorageImpl(), c10::raw::DontIncreaseRefcount{})};
+  return observer.pointer.is_uniquely_owned();
+}
+
+static torch::Tensor tensorForValueUpdate(torch::Tensor tensor) {
+  if (canReuseTensorValue(tensor)) return tensor;
+  return tensor.clone();
+}
+
+// Used under NoGradGuard for cache/optimizer value updates. Cloning must not
+// silently turn a trainable parameter into a tensor with requires_grad=false.
+static torch::Tensor tensorForNoGradValueUpdate(torch::Tensor tensor) {
+  if (canReuseTensorValue(tensor)) return tensor;
+  auto result = tensor.clone();
+  result.requires_grad_(tensor.requires_grad());
+  return result;
+}
+
+static void checkCopyMetadata(const torch::Tensor& destination, const torch::Tensor& source) {
+  TORCH_CHECK(destination.sizes() == source.sizes(), "copy: tensor shape mismatch");
+  TORCH_CHECK(destination.scalar_type() == source.scalar_type(), "copy: tensor dtype mismatch");
+  // copy_ transfers across devices while retaining destination placement.
+}
+
+static int64_t checkSliceCopy(const torch::Tensor& destination, const torch::Tensor& source,
+                              uint64_t dim, uint64_t start) {
+  TORCH_CHECK(dim < static_cast<uint64_t>(destination.dim()), "slice copy dimension out of range");
+  TORCH_CHECK(source.dim() == destination.dim(), "slice copy rank mismatch");
+  const auto axis = static_cast<int64_t>(dim);
+  TORCH_CHECK(start <= static_cast<uint64_t>(destination.size(axis)) &&
+    static_cast<uint64_t>(source.size(axis)) <= static_cast<uint64_t>(destination.size(axis)) - start,
+    "slice copy exceeds capacity");
+  for (int64_t i = 0; i < destination.dim(); ++i) {
+    TORCH_CHECK(i == axis || destination.size(i) == source.size(i), "slice copy shape mismatch");
+  }
+  TORCH_CHECK(destination.device() == source.device() && destination.scalar_type() == source.scalar_type(),
+    "slice copy device/dtype mismatch");
+  return axis;
+}
+
 // Transfer ownership of a new tensor to Lean.
 // The tensor object is moved to a heap allocation owned by Lean.
 lean_object *giveTensor(torch::Tensor t) {
@@ -224,25 +301,20 @@ std::vector<int64_t> getShape(b_lean_obj_arg s) {
 }
 
 torch::Device getDevice(b_lean_obj_arg device) {
-  auto tag = lean_obj_tag(device);
-  if (tag == 0) {  // CUDA
-    auto cuda_idx = lean_ctor_get_uint64(device, 0);
-    return torch::Device(torch::kCUDA, cuda_idx);
-  } else if (tag == 1) {  // CPU
-    return torch::Device(torch::kCPU);
-  } else {  // MPS (tag == 2)
+  const auto tag = lean_obj_tag(device);
+  TORCH_CHECK(tag != 0 || !lean_is_scalar(device), "Malformed Lean CUDA device constructor");
+  const auto cuda_index = tag == 0 ? lean_ctor_get_uint64(device, 0) : 0;
+  const auto result = tyr::metadata::deviceFromLeanTag(tag, cuda_index);
 #ifdef __APPLE__
+  if (result.is_mps()) {
     static std::once_flag g_mps_runtime_warmup_once;
     std::call_once(g_mps_runtime_warmup_once, []() {
       const int debug_flag = std::getenv("TYR_DEBUG_MPS") != nullptr ? 1 : 0;
       (void)tyr_apple_mps_is_available(debug_flag);
     });
-    return torch::Device(torch::kMPS);
-#else
-    // MPS not available on non-Apple platforms, fallback to CPU
-    return torch::Device(torch::kCPU);
-#endif
   }
+#endif
+  return result;
 }
 
 static lean_object* mkIoUserError(const std::string& msg) {
@@ -370,7 +442,8 @@ lean_object* lean_torch_manual_seed(uint64_t seed, lean_object* /*w*/) {
 // ============================================================================
 
 // Get runtime shape as Lean Array UInt64
-lean_object* lean_torch_get_shape(lean_obj_arg /*s*/, b_lean_obj_arg t) {
+lean_object* lean_torch_get_shape(lean_obj_arg s, b_lean_obj_arg t) {
+  lean_dec(s);
     auto tensor = borrowTensor(t);
     auto sizes = tensor.sizes();
 
@@ -382,7 +455,8 @@ lean_object* lean_torch_get_shape(lean_obj_arg /*s*/, b_lean_obj_arg t) {
 }
 
 // Get dtype as string
-lean_object* lean_torch_get_dtype(lean_obj_arg /*s*/, b_lean_obj_arg t) {
+lean_object* lean_torch_get_dtype(lean_obj_arg s, b_lean_obj_arg t) {
+  lean_dec(s);
     auto tensor = borrowTensor(t);
     std::string dtype_str;
 
@@ -399,13 +473,14 @@ lean_object* lean_torch_get_dtype(lean_obj_arg /*s*/, b_lean_obj_arg t) {
     else if (dtype == torch::kBool) dtype_str = "Bool";
     else if (dtype == torch::kFloat8_e4m3fn) dtype_str = "float8_e4m3fn";
     else if (dtype == torch::kFloat8_e5m2) dtype_str = "float8_e5m2";
-    else dtype_str = "Unknown";
+    else dtype_str = c10::toString(tensor.scalar_type());
 
     return lean_mk_string(dtype_str.c_str());
 }
 
 // Get device as string
-lean_object* lean_torch_get_device(lean_obj_arg /*s*/, b_lean_obj_arg t) {
+lean_object* lean_torch_get_device(lean_obj_arg s, b_lean_obj_arg t) {
+  lean_dec(s);
     auto tensor = borrowTensor(t);
     auto device = tensor.device();
 
@@ -415,26 +490,29 @@ lean_object* lean_torch_get_device(lean_obj_arg /*s*/, b_lean_obj_arg t) {
 }
 
 // Get device as Device enum (CUDA=0, CPU=1, MPS=2)
-lean_object* lean_torch_get_device_enum(lean_obj_arg /*s*/, b_lean_obj_arg t) {
+lean_object* lean_torch_get_device_enum(lean_obj_arg s, b_lean_obj_arg t) {
+  lean_dec(s);
     auto tensor = borrowTensor(t);
     auto device = tensor.device();
 
-    if (device.is_cuda()) {
+    const auto tag = tyr::metadata::leanDeviceTag(device);
+    if (tag == 0) {
         // CUDA tag=0, constructor with 1 field (device index)
         lean_object* obj = lean_alloc_ctor(0, 0, 8);
         lean_ctor_set_uint64(obj, 0, device.index());
         return obj;
-    } else if (device.is_cpu()) {
+    } else if (tag == 1) {
         // CPU tag=1, scalar constructor
         return lean_box(1);
-    } else {
+    } else { // leanDeviceTag rejects every unsupported backend.
         // MPS tag=2, scalar constructor
         return lean_box(2);
     }
 }
 
 // Get tensor values as flat Array Float (up to max_elements)
-lean_object* lean_torch_get_values(lean_obj_arg /*s*/, b_lean_obj_arg t, uint64_t max_elements) {
+lean_object* lean_torch_get_values(lean_obj_arg s, b_lean_obj_arg t, uint64_t max_elements) {
+  lean_dec(s);
     auto tensor = borrowTensor(t);
 
     // Move to CPU if needed and convert to float
@@ -457,7 +535,8 @@ lean_object* lean_torch_get_values(lean_obj_arg /*s*/, b_lean_obj_arg t, uint64_
 }
 
 // Get tensor statistics as JSON string
-lean_object* lean_torch_get_stats(lean_obj_arg /*s*/, b_lean_obj_arg t) {
+lean_object* lean_torch_get_stats(lean_obj_arg s, b_lean_obj_arg t) {
+  lean_dec(s);
     auto tensor = borrowTensor(t);
     auto cpu_tensor = tensor.cpu().to(torch::kFloat32);
 
@@ -479,13 +558,15 @@ lean_object* lean_torch_get_stats(lean_obj_arg /*s*/, b_lean_obj_arg t) {
 // --
 // tensor creation api
 lean_object* lean_torch_randn(lean_obj_arg s, uint8_t requires_grad, lean_obj_arg device) {
+  OwnedLeanObject s_owner(s, lean_dec);
+  OwnedLeanObject device_owner(device, lean_dec);
   auto device_ = getDevice(device);
-  lean_dec(device);
+  device_owner.reset();
   // CPU-then-transfer to avoid the GB10 CUDA-RNG throw path; see comment
   // on `lean_torch_rand`.
   auto cpu_t = torch::randn(getShape(s), torch::TensorOptions().requires_grad(requires_grad));
   auto t = device_.is_cpu() ? cpu_t : cpu_t.to(device_);
-  lean_dec(s);
+  s_owner.reset();
   return lean_io_result_mk_ok(fromTorchTensor(t));
 }
 // Generate on CPU then transfer to the target device. The libtorch CUDA
@@ -507,8 +588,9 @@ lean_object* lean_torch_rand(lean_obj_arg s, int requires_grad, lean_obj_arg dev
 // Unlike a Float32 sample followed by a cast, this samples in the reference dtype.
 lean_object* lean_torch_uniform_like(lean_obj_arg shape, b_lean_obj_arg reference,
                                      double lo, double hi) {
+  OwnedLeanObject shape_owner(shape, lean_dec);
   auto dims = getShape(shape);
-  lean_dec(shape);
+  shape_owner.reset();
   if (!std::isfinite(lo) || !std::isfinite(hi) || lo > hi) {
     return mkIoUserError("uniformLike requires finite bounds with lo <= hi");
   }
@@ -530,59 +612,76 @@ lean_object* lean_torch_uniform_like(lean_obj_arg shape, b_lean_obj_arg referenc
 }
 
 lean_object* lean_torch_randint(uint64_t lowBits, uint64_t highBits, lean_obj_arg s, uint8_t /*requires_grad*/, lean_obj_arg device) {
+  OwnedLeanObject s_owner(s, lean_dec);
+  OwnedLeanObject device_owner(device, lean_dec);
   const auto low = std::bit_cast<int64_t>(lowBits);
   const auto high = std::bit_cast<int64_t>(highBits);
   auto device_ = getDevice(device);
-  lean_dec(device);
+  device_owner.reset();
   // randint always returns Long (int64) dtype - integral types don't support requires_grad.
   // CPU-then-transfer for the same reason as `lean_torch_rand`.
   auto cpu_t = torch::randint(low, high, getShape(s), torch::TensorOptions().dtype(torch::kLong));
   auto t = device_.is_cpu() ? cpu_t : cpu_t.to(device_);
-  lean_dec(s);
+  s_owner.reset();
   return lean_io_result_mk_ok(fromTorchTensor(t));
 }
 
 lean_object* lean_torch_full(lean_obj_arg s, double value, uint8_t requires_grad, lean_obj_arg device) {
+  OwnedLeanObject s_owner(s, lean_dec);
+  OwnedLeanObject device_owner(device, lean_dec);
   auto device_ = getDevice(device);
-  lean_dec(device);
+  device_owner.reset();
   auto t = torch::full(getShape(s), value, torch::TensorOptions().requires_grad(requires_grad).device(device_));
-  lean_dec(s);
+  s_owner.reset();
   return fromTorchTensor(t);
 }
 
 lean_object* lean_torch_zeros(lean_obj_arg s, uint8_t requires_grad, lean_obj_arg device) {
+  OwnedLeanObject s_owner(s, lean_dec);
+  OwnedLeanObject device_owner(device, lean_dec);
   auto device_ = getDevice(device);
-  lean_dec(device);
+  device_owner.reset();
   auto t = torch::zeros(getShape(s), torch::TensorOptions().requires_grad(requires_grad).device(device_));
-  lean_dec(s);
+  s_owner.reset();
   return fromTorchTensor(t);
 }
 
 lean_object* lean_torch_ones(lean_obj_arg s, uint8_t requires_grad, lean_obj_arg device) {
+  OwnedLeanObject s_owner(s, lean_dec);
+  OwnedLeanObject device_owner(device, lean_dec);
   auto device_ = getDevice(device);
-  lean_dec(device);
+  device_owner.reset();
   auto t = torch::ones(getShape(s), torch::TensorOptions().requires_grad(requires_grad).device(device_));
-  lean_dec(s);
+  s_owner.reset();
   return fromTorchTensor(t);
 }
 
-lean_object* lean_torch_zeros_like(lean_obj_arg /*s*/, b_lean_obj_arg self) {
+lean_object* lean_torch_zeros_like(lean_obj_arg s, b_lean_obj_arg self) {
+  lean_dec(s);
   auto self_ = borrowTensor(self);
   auto t = torch::zeros_like(self_);
   return fromTorchTensor(t);
 }
 
-lean_object* lean_torch_ones_like(lean_obj_arg /*s*/, b_lean_obj_arg self) {
+lean_object* lean_torch_ones_like(lean_obj_arg s, b_lean_obj_arg self) {
+  lean_dec(s);
   auto self_ = borrowTensor(self);
   auto t = torch::ones_like(self_);
   return fromTorchTensor(t);
 }
 
-lean_object* lean_torch_copy_(lean_obj_arg /*s*/, b_lean_obj_arg dst,
+lean_object* lean_torch_copy_(lean_obj_arg s, lean_obj_arg dst,
                               b_lean_obj_arg src) {
+  lean_dec(s);
+  OwnedLeanObject destination_owner(dst, lean_dec);
   try {
-    borrowTensor(dst).copy_(borrowTensor(src));
-    return lean_io_result_mk_ok(lean_box(0));
+    // Borrow first: src may be the very same Lean object as consumed dst.
+    auto source = borrowTensor(src);
+    auto destination = takeTensor(destination_owner.release());
+    checkCopyMetadata(destination, source);
+    auto result = tensorForValueUpdate(std::move(destination));
+    result.copy_(source);
+    return lean_io_result_mk_ok(fromTorchTensor(std::move(result)));
   } catch (const c10::Error& e) {
     return mkC10IoError("copy_ failed", e);
   } catch (const std::exception& e) {
@@ -621,7 +720,8 @@ lean_object* lean_torch_logspace(double start, double stop, uint64_t steps, doub
 }
 
 
-uint8_t lean_torch_requires_grad(lean_obj_arg /* shape */, b_lean_obj_arg x) {
+uint8_t lean_torch_requires_grad(lean_obj_arg shape, b_lean_obj_arg x) {
+  lean_dec(shape);
     auto x_ = borrowTensor(x);
     auto res_ = x_.requires_grad();
     return res_;
@@ -651,7 +751,9 @@ lean_object* lean_torch_reshape_exact(lean_obj_arg s, b_lean_obj_arg self,
   return fromTorchTensor(borrowTensor(self).reshape(getShape(shape)));
 }
 
-lean_object* lean_torch_permute(lean_obj_arg /*s*/, b_lean_obj_arg self, b_lean_obj_arg permutation) {
+lean_object* lean_torch_permute(lean_obj_arg s, b_lean_obj_arg self, lean_obj_arg permutation) {
+  lean_dec(s);
+  OwnedLeanObject permutation_owner(permutation, lean_dec);
   auto permutation_ = getShape(permutation);
   auto self_ = borrowTensor(self);
   auto res = torch::permute(self_, permutation_);
@@ -659,22 +761,25 @@ lean_object* lean_torch_permute(lean_obj_arg /*s*/, b_lean_obj_arg self, b_lean_
 }
 
 lean_object* lean_torch_get(lean_obj_arg s, b_lean_obj_arg self, lean_obj_arg idx) {
+  OwnedLeanObject idx_owner(idx, lean_dec);
   lean_dec(s);
   const auto index = static_cast<int64_t>(lean_int64_of_int(idx));
   auto* roundtrip = lean_int64_to_int(index);
   const bool fits = lean_int_dec_eq(idx, roundtrip);
   lean_dec(roundtrip);
-  lean_dec(idx);
+  idx_owner.reset();
   TORCH_CHECK(fits, "getOp: index must fit in signed 64 bits");
   auto self_ = borrowTensor(self);
   auto res = self_.index({index});
   return fromTorchTensor(res);
 }
 
-lean_object* lean_torch_to(lean_obj_arg /*s*/, b_lean_obj_arg self, lean_obj_arg device) {
+lean_object* lean_torch_to(lean_obj_arg s, b_lean_obj_arg self, lean_obj_arg device) {
+  lean_dec(s);
+  OwnedLeanObject device_owner(device, lean_dec);
   auto self_ = borrowTensor(self);
   auto device_ = getDevice(device);
-  lean_dec(device);
+  device_owner.reset();
   auto res = self_.to(device_);
   return fromTorchTensor(res);
 }
@@ -694,10 +799,10 @@ lean_object* lean_torch_slice(lean_obj_arg /*s*/,
 
 #define BINOP_FUN(F) \
 lean_object* lean_torch_tensor_##F(lean_obj_arg s, b_lean_obj_arg a, b_lean_obj_arg b) { \
+  lean_dec(s); \
   auto a_ = borrowTensor(a); \
   auto b_ = borrowTensor(b); \
   auto c_ = torch::F(a_, b_); \
-  lean_dec(s); \
   return fromTorchTensor(c_); \
 }
 
@@ -711,9 +816,9 @@ extern "C" LEAN_EXPORT lean_object* lean_torch_tensor_mul_diff(lean_object* /*s1
 
 #define UNOP_FUN(F) \
 lean_object* lean_torch_tensor_##F(lean_obj_arg s, b_lean_obj_arg a) { \
+  lean_dec(s); \
   auto a_ = borrowTensor(a); \
   auto c_ = torch::F(a_); \
-  lean_dec(s); \
   return fromTorchTensor(c_); \
 }
 
@@ -739,14 +844,17 @@ UNOP_FUN(log10)
 UNOP_FUN(softplus)
 #undef UNOP_FUN
 
-lean_object* lean_torch_atan2(lean_obj_arg /*s*/, b_lean_obj_arg y, b_lean_obj_arg x) {
+lean_object* lean_torch_atan2(lean_obj_arg s, b_lean_obj_arg y, b_lean_obj_arg x) {
+  lean_dec(s);
   auto y_ = borrowTensor(y);
   auto x_ = borrowTensor(x);
   auto out_ = torch::atan2(y_, x_);
   return fromTorchTensor(out_);
 }
 
-lean_object* lean_torch_tensor_grad(lean_obj_arg /* s */, lean_obj_arg /* s' */, b_lean_obj_arg output, b_lean_obj_arg input, b_lean_obj_arg grad_output) {
+lean_object* lean_torch_tensor_grad(lean_obj_arg s, lean_obj_arg s_out, b_lean_obj_arg output, b_lean_obj_arg input, b_lean_obj_arg grad_output) {
+  lean_dec(s);
+  lean_dec(s_out);
   auto output_ = borrowTensor(output);
   auto input_ = borrowTensor(input);
   auto grad_output_ = borrowTensor(grad_output);
@@ -785,37 +893,60 @@ uint8_t lean_torch_allclose(b_lean_obj_arg a, b_lean_obj_arg b, double rtol, dou
   return torch::allclose(a_, b_, rtol, atol);
 }
 
-lean_object* lean_torch_grad_of(lean_obj_arg /* shape */, b_lean_obj_arg x) {
+lean_object* lean_torch_grad_of(lean_obj_arg shape, b_lean_obj_arg x) {
+  lean_dec(shape);
+  try {
+    torch::NoGradGuard guard;
     auto out_ = borrowTensor(x);
     auto grad_out_ = out_.grad();
-    // Parameters that are not used in the current forward pass have undefined grads.
-    // Return an explicit zero tensor so downstream optimizer code can treat this as
-    // a standard "no gradient update" case.
-    if (!grad_out_.defined()) {
-      grad_out_ = torch::zeros_like(out_);
-    }
-    return fromTorchTensor(grad_out_);
+    // Gradient state is mutable. Return an independent, detached snapshot.
+    auto snapshot = grad_out_.defined() ? grad_out_.detach().clone() : torch::zeros_like(out_);
+    return lean_io_result_mk_ok(fromTorchTensor(std::move(snapshot)));
+  } catch (const c10::Error& e) {
+    return mkC10IoError("gradOf", e);
+  } catch (const std::exception& e) {
+    return mkStdIoError("gradOf", e);
+  }
 }
 
 // Zero gradients
-lean_object* lean_torch_zero_grad(lean_obj_arg /* shape */, b_lean_obj_arg x) {
+lean_object* lean_torch_zero_grad(lean_obj_arg shape, b_lean_obj_arg x) {
+  lean_dec(shape);
+  try {
+    torch::NoGradGuard guard;
     auto x_ = borrowTensor(x);
     if (x_.grad().defined()) {
         x_.grad().zero_();
     }
-    lean_inc(x);
-    return x;
+    return lean_io_result_mk_ok(lean_box(0));
+  } catch (const c10::Error& e) {
+    return mkC10IoError("zeroGrad", e);
+  } catch (const std::exception& e) {
+    return mkStdIoError("zeroGrad", e);
+  }
 }
 
 // Set requires_grad
-lean_object* lean_torch_set_requires_grad(lean_obj_arg /* shape */, b_lean_obj_arg x, uint8_t requires_grad) {
-    auto x_ = borrowTensor(x);
-    auto result_ = x_.requires_grad_(requires_grad);
-    return fromTorchTensor(result_);
+lean_object* lean_torch_set_requires_grad(lean_obj_arg shape, lean_obj_arg x, uint8_t requires_grad) {
+  lean_dec(shape);
+  auto tensor = takeTensor(x);
+  const bool enabled = requires_grad != 0;
+  // A no-op preserves existing leaf identity and grad_fn, even if aliased.
+  if (tensor.requires_grad() == enabled) return fromTorchTensor(std::move(tensor));
+  TORCH_CHECK(tensor.is_leaf(), "you can only change requires_grad flags of leaf variables");
+  if (!canReuseTensorValue(tensor)) {
+    torch::NoGradGuard guard;
+    auto result = tensor.clone();
+    if (tensor.grad().defined()) result.mutable_grad() = tensor.grad().detach().clone();
+    tensor = std::move(result);
+  }
+  tensor.requires_grad_(enabled);
+  return fromTorchTensor(std::move(tensor));
 }
 
 // Detach tensor from computation graph
-lean_object* lean_torch_detach(lean_obj_arg /* shape */, b_lean_obj_arg x) {
+lean_object* lean_torch_detach(lean_obj_arg shape, b_lean_obj_arg x) {
+  lean_dec(shape);
     auto x_ = borrowTensor(x);
     auto result_ = x_.detach();
     return fromTorchTensor(result_);
@@ -844,7 +975,8 @@ uint8_t lean_torch_is_leaf(b_lean_obj_arg x) {
 }
 
 // Get gradient function (for debugging)
-uint8_t lean_torch_has_grad_fn(lean_obj_arg /* shape */, b_lean_obj_arg x) {
+uint8_t lean_torch_has_grad_fn(lean_obj_arg shape, b_lean_obj_arg x) {
+  lean_dec(shape);
     auto x_ = borrowTensor(x);
     auto result = x_.grad_fn() != nullptr;
     return result;
@@ -921,7 +1053,8 @@ lean_object* lean_torch_grad_grad(lean_obj_arg /* sx */, lean_obj_arg /* sy */, 
 
 
 
-lean_object* lean_torch_tensor_softmax(lean_obj_arg /**/, b_lean_obj_arg a, uint32_t dim_bits) {
+lean_object* lean_torch_tensor_softmax(lean_obj_arg shape, b_lean_obj_arg a, uint32_t dim_bits) {
+  lean_dec(shape);
   const int32_t dim = static_cast<int32_t>(dim_bits);
   auto a_ = borrowTensor(a);
   auto c_ = torch::softmax(a_, dim);
@@ -946,7 +1079,8 @@ lean_object* lean_torch_cross_entropy_none(uint64_t /*n*/, uint64_t /*c*/, b_lea
 }
 
 
-lean_object *lean_torch_to_string(lean_object /* s */, b_lean_obj_arg t) {
+lean_object *lean_torch_to_string(lean_obj_arg shape, b_lean_obj_arg t) {
+  lean_dec(shape);
   auto tensor = borrowTensor(t);
   std::ostringstream stream;
   stream << tensor;
@@ -1048,9 +1182,9 @@ lean_object* lean_torch_conv2d(
 }
 
 lean_object* lean_torch_conv2d_bias(
-  lean_obj_arg /*input_shape*/,
-  lean_obj_arg /*weight_shape*/,
-  lean_obj_arg /*bias_shape*/,
+  lean_obj_arg input_shape,
+  lean_obj_arg weight_shape,
+  lean_obj_arg bias_shape,
   b_lean_obj_arg input,
   b_lean_obj_arg weight,
   b_lean_obj_arg bias,
@@ -1058,15 +1192,21 @@ lean_object* lean_torch_conv2d_bias(
   lean_obj_arg padding,
   lean_obj_arg dilation
 ) {
+  lean_dec(input_shape);
+  lean_dec(weight_shape);
+  lean_dec(bias_shape);
+  OwnedLeanObject stride_owner(stride, lean_dec);
+  OwnedLeanObject padding_owner(padding, lean_dec);
+  OwnedLeanObject dilation_owner(dilation, lean_dec);
   auto input_ = borrowTensor(input);
   auto weight_ = borrowTensor(weight);
   auto bias_ = borrowTensor(bias);
   auto stride_ = getShape(stride);
   auto padding_ = getShape(padding);
   auto dilation_ = getShape(dilation);
-  lean_dec(stride);
-  lean_dec(padding);
-  lean_dec(dilation);
+  stride_owner.reset();
+  padding_owner.reset();
+  dilation_owner.reset();
 
   // Use at::conv2d which takes bias as a parameter
   auto output_ = at::conv2d(input_, weight_, bias_, stride_, padding_, dilation_);
@@ -1074,14 +1214,16 @@ lean_object* lean_torch_conv2d_bias(
 }
 
 lean_object* lean_torch_conv1d(
-  lean_obj_arg /*input_shape*/,
-  lean_obj_arg /*weight_shape*/,
+  lean_obj_arg input_shape,
+  lean_obj_arg weight_shape,
   b_lean_obj_arg input,
   b_lean_obj_arg weight,
   uint64_t stride,
   uint64_t padding,
   uint64_t dilation
 ) {
+  lean_dec(input_shape);
+  lean_dec(weight_shape);
   auto input_ = borrowTensor(input);
   auto weight_ = borrowTensor(weight);
   auto options = torch::nn::functional::Conv1dFuncOptions()
@@ -1093,9 +1235,9 @@ lean_object* lean_torch_conv1d(
 }
 
 lean_object* lean_torch_conv1d_group_bias(
-  lean_obj_arg /*input_shape*/,
-  lean_obj_arg /*weight_shape*/,
-  lean_obj_arg /*bias_shape*/,
+  lean_obj_arg input_shape,
+  lean_obj_arg weight_shape,
+  lean_obj_arg bias_shape,
   b_lean_obj_arg input,
   b_lean_obj_arg weight,
   b_lean_obj_arg bias,
@@ -1104,6 +1246,9 @@ lean_object* lean_torch_conv1d_group_bias(
   uint64_t dilation,
   uint64_t groups
 ) {
+  lean_dec(input_shape);
+  lean_dec(weight_shape);
+  lean_dec(bias_shape);
   auto input_ = borrowTensor(input);
   auto weight_ = borrowTensor(weight);
   auto bias_ = borrowTensor(bias);
@@ -1132,19 +1277,23 @@ lean_object* lean_torch_adaptive_avg_pool2d(
 }
 
 lean_object* lean_torch_avg_pool2d(
-  lean_obj_arg /*input_shape*/,
+  lean_obj_arg input_shape,
   b_lean_obj_arg input,
   lean_obj_arg kernel_size,
   lean_obj_arg stride,
   lean_obj_arg padding
 ) {
+  lean_dec(input_shape);
+  OwnedLeanObject kernel_size_owner(kernel_size, lean_dec);
+  OwnedLeanObject stride_owner(stride, lean_dec);
+  OwnedLeanObject padding_owner(padding, lean_dec);
   auto input_ = borrowTensor(input);
   auto kernel_size_ = getShape(kernel_size);
   auto stride_ = getShape(stride);
   auto padding_ = getShape(padding);
-  lean_dec(kernel_size);
-  lean_dec(stride);
-  lean_dec(padding);
+  kernel_size_owner.reset();
+  stride_owner.reset();
+  padding_owner.reset();
   
   auto options = torch::nn::functional::AvgPool2dFuncOptions(kernel_size_);
   if (stride_.size() > 0) {
@@ -1181,7 +1330,8 @@ lean_object* lean_torch_max_pool2d(
   return fromTorchTensor(output_);
 }
 
-lean_object* lean_torch_dropout(lean_obj_arg /*s*/, b_lean_obj_arg input, double p, uint8_t training) {
+lean_object* lean_torch_dropout(lean_obj_arg s, b_lean_obj_arg input, double p, uint8_t training) {
+  lean_dec(s);
   auto input_ = borrowTensor(input);
   auto output_ = torch::nn::functional::dropout(input_, torch::nn::functional::DropoutFuncOptions().p(p).training(training));
   return lean_io_result_mk_ok(fromTorchTensor(output_));
@@ -1210,7 +1360,8 @@ lean_object* lean_torch_log_softmax(b_lean_obj_arg input, uint32_t dim) {
   return fromTorchTensor(output_);
 }
 
-lean_object* lean_torch_leaky_relu(lean_obj_arg /*s*/, b_lean_obj_arg input, double negative_slope) {
+lean_object* lean_torch_leaky_relu(lean_obj_arg s, b_lean_obj_arg input, double negative_slope) {
+  lean_dec(s);
   auto input_ = borrowTensor(input);
   auto output_ = torch::nn::functional::leaky_relu(input_, torch::nn::functional::LeakyReLUFuncOptions().negative_slope(negative_slope));
   return fromTorchTensor(output_);
@@ -1314,13 +1465,16 @@ lean_object* lean_torch_layer_norm(
 
 // Group normalization
 lean_object* lean_torch_group_norm(
-  lean_obj_arg /*s*/,
+  lean_obj_arg s,
   b_lean_obj_arg input,
   uint64_t num_groups,
   lean_obj_arg weight,
   lean_obj_arg bias,
   double eps
 ) {
+  lean_dec(s);
+  OwnedLeanObject weight_owner(weight, lean_dec);
+  OwnedLeanObject bias_owner(bias, lean_dec);
   auto input_ = borrowTensor(input);
 
   // Initialize to empty tensors for safe conditional release
@@ -1335,8 +1489,8 @@ lean_object* lean_torch_group_norm(
     lean_object* b = lean_ctor_get(bias, 0);
     bias_ = borrowTensor(b);
   }
-  lean_dec(weight);
-  lean_dec(bias);
+  weight_owner.reset();
+  bias_owner.reset();
 
   auto output_ = torch::group_norm(
     input_,
@@ -1408,7 +1562,10 @@ lean_object* lean_torch_instance_norm(
 }
 
 // Binary cross entropy loss
-lean_object* lean_torch_binary_cross_entropy(lean_obj_arg /*s*/, b_lean_obj_arg input, b_lean_obj_arg target, lean_obj_arg weight, lean_obj_arg reduction) {
+lean_object* lean_torch_binary_cross_entropy(lean_obj_arg s, b_lean_obj_arg input, b_lean_obj_arg target, lean_obj_arg weight, lean_obj_arg reduction) {
+  lean_dec(s);
+  OwnedLeanObject weight_owner(weight, lean_dec);
+  OwnedLeanObject reduction_owner(reduction, lean_dec);
   auto input_ = borrowTensor(input);
   auto target_ = borrowTensor(target);
   
@@ -1428,8 +1585,8 @@ lean_object* lean_torch_binary_cross_entropy(lean_obj_arg /*s*/, b_lean_obj_arg 
     reduction_mode = 2;
   }
   
-  lean_dec(weight);
-  lean_dec(reduction);
+  weight_owner.reset();
+  reduction_owner.reset();
   
   auto output_ = torch::binary_cross_entropy(
     input_, 
@@ -1533,6 +1690,8 @@ lean_object* lean_torch_embedding(
   uint8_t scale_grad_by_freq,
   uint8_t sparse
 ) {
+  lean_dec(max_norm); // Currently unused by the native embedding operation.
+  OwnedLeanObject padding_idx_owner(padding_idx, lean_dec);
   auto input_ = borrowTensor(input);
   auto weight_ = borrowTensor(weight);
 
@@ -1542,8 +1701,7 @@ lean_object* lean_torch_embedding(
     padding_idx_val = static_cast<int64_t>(lean_int64_of_int(idx));
   }
 
-  lean_dec(padding_idx);
-  lean_dec(max_norm); // Unused but must dec
+  padding_idx_owner.reset();
 
   auto output_ = torch::embedding(
     weight_,
@@ -1569,6 +1727,8 @@ lean_object* lean_torch_embedding_1d(
   uint8_t scale_grad_by_freq,
   uint8_t sparse
 ) {
+  lean_dec(max_norm); // Currently unused by the native embedding operation.
+  OwnedLeanObject padding_idx_owner(padding_idx, lean_dec);
   auto input_ = borrowTensor(input);
   auto weight_ = borrowTensor(weight);
 
@@ -1578,8 +1738,7 @@ lean_object* lean_torch_embedding_1d(
     padding_idx_val = static_cast<int64_t>(lean_int64_of_int(idx));
   }
 
-  lean_dec(padding_idx);
-  lean_dec(max_norm);
+  padding_idx_owner.reset();
 
   auto output_ = torch::embedding(
     weight_,
@@ -1594,7 +1753,9 @@ lean_object* lean_torch_embedding_1d(
 
 // Matrix multiplication functions (critical for transformers)
 // Lean passes both Shape implicits of `matmul_impl {s1 s2 : Shape}`.
-lean_object* lean_torch_matmul(lean_obj_arg /*s1*/, lean_obj_arg /*s2*/, b_lean_obj_arg input, b_lean_obj_arg other) {
+lean_object* lean_torch_matmul(lean_obj_arg s1, lean_obj_arg s2, b_lean_obj_arg input, b_lean_obj_arg other) {
+  lean_dec(s1);
+  lean_dec(s2);
   auto input_ = borrowTensor(input);
   auto other_ = borrowTensor(other);
   auto result_ = torch::matmul(input_, other_);
@@ -1639,7 +1800,8 @@ lean_object* lean_torch_mm(uint64_t m, uint64_t n, uint64_t k, b_lean_obj_arg in
 }
 
 // Tensor operations (essential for attention mechanisms)
-lean_object* lean_torch_transpose(lean_obj_arg /*s*/, b_lean_obj_arg input, uint64_t dim0, uint64_t dim1) {
+lean_object* lean_torch_transpose(lean_obj_arg s, b_lean_obj_arg input, uint64_t dim0, uint64_t dim1) {
+  lean_dec(s);
   auto input_ = borrowTensor(input);
   auto result_ = torch::transpose(input_, static_cast<int64_t>(dim0), static_cast<int64_t>(dim1));
   return fromTorchTensor(result_);
@@ -1665,14 +1827,17 @@ lean_object* lean_torch_cat(lean_obj_arg /*s*/, b_lean_obj_arg tensors, lean_obj
 
 // Direct 2-tensor concatenation without intermediate reshapes
 lean_object* lean_torch_cat2(
-    lean_obj_arg /*s1*/,
-    lean_obj_arg /*s2*/,
+    lean_obj_arg s1,
+    lean_obj_arg s2,
     b_lean_obj_arg t1,
     b_lean_obj_arg t2,
     lean_obj_arg dim_obj
 ) {
+  lean_dec(s1);
+  lean_dec(s2);
+  OwnedLeanObject dim_obj_owner(dim_obj, lean_dec);
   int64_t dim = static_cast<int64_t>(lean_int64_of_int(dim_obj));
-  lean_dec(dim_obj);
+  dim_obj_owner.reset();
   auto t1_ = borrowTensor(t1);
   auto t2_ = borrowTensor(t2);
   auto result_ = torch::cat({t1_, t2_}, dim);
@@ -1685,8 +1850,9 @@ lean_object* lean_torch_erase_shape(lean_obj_arg /*s*/, b_lean_obj_arg t) {
 }
 
 lean_object* lean_torch_cat_dyn(b_lean_obj_arg tensors, lean_obj_arg dim_obj) {
+  OwnedLeanObject dim_obj_owner(dim_obj, lean_dec);
   int64_t dim = static_cast<int64_t>(lean_int64_of_int(dim_obj));
-  lean_dec(dim_obj);
+  dim_obj_owner.reset();
   if (!lean_is_array(tensors)) {
     lean_internal_panic("lean_torch_cat_dyn: expected array");
   }
@@ -1743,7 +1909,8 @@ lean_object* lean_torch_softmax_dim(lean_obj_arg /*s*/, b_lean_obj_arg input, in
 }
 
 // Cumulative sum along a dimension.
-lean_object* lean_torch_cumsum(lean_obj_arg /*s*/, b_lean_obj_arg input, uint64_t dimBits) {
+lean_object* lean_torch_cumsum(lean_obj_arg s, b_lean_obj_arg input, uint64_t dimBits) {
+  lean_dec(s);
   const auto dim = std::bit_cast<int64_t>(dimBits);
   auto input_ = borrowTensor(input);
   auto result_ = torch::cumsum(input_, dim);
@@ -1794,14 +1961,18 @@ lean_object* lean_torch_chunk(lean_obj_arg /*s*/, b_lean_obj_arg tensor, int chu
   return result_array;
 }
 
-lean_object* lean_torch_unsqueeze(lean_obj_arg /*s*/, b_lean_obj_arg input, b_lean_obj_arg dim) {
+lean_object* lean_torch_unsqueeze(lean_obj_arg s, b_lean_obj_arg input, lean_obj_arg dim) {
+  lean_dec(s);
+  OwnedLeanObject dim_owner(dim, lean_dec);
   auto input_ = borrowTensor(input);
   auto dim_ = lean_uint64_of_nat(dim);
   auto result_ = torch::unsqueeze(input_, static_cast<int64_t>(dim_));
   return fromTorchTensor(result_);
 }
 
-lean_object* lean_torch_squeeze(lean_obj_arg /*s*/, b_lean_obj_arg input, b_lean_obj_arg dim) {
+lean_object* lean_torch_squeeze(lean_obj_arg s, b_lean_obj_arg input, lean_obj_arg dim) {
+  lean_dec(s);
+  OwnedLeanObject dim_owner(dim, lean_dec);
   auto input_ = borrowTensor(input);
   auto dim_ = lean_uint64_of_nat(dim);
   auto result_ = torch::squeeze(input_, static_cast<int64_t>(dim_));
@@ -1809,33 +1980,39 @@ lean_object* lean_torch_squeeze(lean_obj_arg /*s*/, b_lean_obj_arg input, b_lean
 }
 
 // Mathematical operations
-lean_object* lean_torch_sqrt(lean_obj_arg /*s*/, b_lean_obj_arg input) {
+lean_object* lean_torch_sqrt(lean_obj_arg s, b_lean_obj_arg input) {
+  lean_dec(s);
   auto input_ = borrowTensor(input);
   auto result_ = torch::sqrt(input_);
   return fromTorchTensor(result_);
 }
 
-lean_object* lean_torch_rsqrt(lean_obj_arg /*s*/, b_lean_obj_arg input) {
+lean_object* lean_torch_rsqrt(lean_obj_arg s, b_lean_obj_arg input) {
+  lean_dec(s);
   auto input_ = borrowTensor(input);
   auto result_ = torch::rsqrt(input_);
   return fromTorchTensor(result_);
 }
 
-lean_object* lean_torch_div(lean_obj_arg /*s*/, b_lean_obj_arg input, b_lean_obj_arg other) {
+lean_object* lean_torch_div(lean_obj_arg s, b_lean_obj_arg input, b_lean_obj_arg other) {
+  lean_dec(s);
   auto input_ = borrowTensor(input);
   auto other_ = borrowTensor(other);
   auto result_ = torch::div(input_, other_);
   return fromTorchTensor(result_);
 }
 
-lean_object* lean_torch_pow(lean_obj_arg /*s*/, b_lean_obj_arg input, double exponent) {
+lean_object* lean_torch_pow(lean_obj_arg s, b_lean_obj_arg input, double exponent) {
+  lean_dec(s);
   auto input_ = borrowTensor(input);
   auto result_ = torch::pow(input_, exponent);
   return fromTorchTensor(result_);
 }
 
 // Reduction operations
-lean_object* lean_torch_sum(lean_obj_arg /*s*/, b_lean_obj_arg input, lean_obj_arg dim, uint8_t keepdim) {
+lean_object* lean_torch_sum(lean_obj_arg s, b_lean_obj_arg input, lean_obj_arg dim, uint8_t keepdim) {
+  lean_dec(s);
+  OwnedLeanObject dim_owner(dim, lean_dec);
   auto input_ = borrowTensor(input);
   torch::Tensor result_;
   
@@ -1846,14 +2023,16 @@ lean_object* lean_torch_sum(lean_obj_arg /*s*/, b_lean_obj_arg input, lean_obj_a
     // some: dim is a constructor wrapping Array UInt64
     lean_object* dims_obj = lean_ctor_get(dim, 0);
     auto dims = getShape(dims_obj);
-    lean_dec(dim);
+    dim_owner.reset();
     result_ = torch::sum(input_, c10::IntArrayRef(dims.data(), dims.size()), keepdim);
   }
   
   return fromTorchTensor(result_);
 }
 
-lean_object* lean_torch_mean(lean_obj_arg /*s*/, b_lean_obj_arg input, lean_obj_arg dim, uint8_t keepdim) {
+lean_object* lean_torch_mean(lean_obj_arg s, b_lean_obj_arg input, lean_obj_arg dim, uint8_t keepdim) {
+  lean_dec(s);
+  OwnedLeanObject dim_owner(dim, lean_dec);
   auto input_ = borrowTensor(input);
   torch::Tensor result_;
 
@@ -1864,14 +2043,15 @@ lean_object* lean_torch_mean(lean_obj_arg /*s*/, b_lean_obj_arg input, lean_obj_
     // some: dim is a constructor wrapping Array UInt64
     lean_object* dims_obj = lean_ctor_get(dim, 0);
     auto dims = getShape(dims_obj);
-    lean_dec(dim);
+    dim_owner.reset();
     result_ = torch::mean(input_, c10::IntArrayRef(dims.data(), dims.size()), keepdim);
   }
 
   return fromTorchTensor(result_);
 }
 
-lean_object* lean_torch_abs(lean_obj_arg /*s*/, b_lean_obj_arg input) {
+lean_object* lean_torch_abs(lean_obj_arg s, b_lean_obj_arg input) {
+  lean_dec(s);
   auto input_ = borrowTensor(input);
   auto result_ = torch::abs(input_);
   return fromTorchTensor(result_);
@@ -1906,14 +2086,16 @@ lean_object* lean_torch_min(lean_obj_arg /*s*/, b_lean_obj_arg input, int dim, u
 }
 
 // Masking and conditional operations
-lean_object* lean_torch_masked_fill(lean_obj_arg /*s*/, b_lean_obj_arg input, b_lean_obj_arg mask, double value) {
+lean_object* lean_torch_masked_fill(lean_obj_arg s, b_lean_obj_arg input, b_lean_obj_arg mask, double value) {
+  lean_dec(s);
   auto input_ = borrowTensor(input);
   auto mask_ = borrowTensor(mask);
   auto result_ = input_.masked_fill(mask_, value);
   return fromTorchTensor(result_);
 }
 
-lean_object* lean_torch_masked_select(lean_obj_arg /*s*/, b_lean_obj_arg input, b_lean_obj_arg mask) {
+lean_object* lean_torch_masked_select(lean_obj_arg s, b_lean_obj_arg input, b_lean_obj_arg mask) {
+  lean_dec(s);
   auto input_ = borrowTensor(input);
   auto mask_ = borrowTensor(mask);
   auto result_ = input_.masked_select(mask_);
@@ -1921,7 +2103,9 @@ lean_object* lean_torch_masked_select(lean_obj_arg /*s*/, b_lean_obj_arg input, 
 }
 
 lean_object* lean_torch_masked_scatter(
-    lean_obj_arg /*s*/, lean_obj_arg /*src*/, b_lean_obj_arg input, b_lean_obj_arg mask, b_lean_obj_arg source) {
+    lean_obj_arg s, lean_obj_arg src, b_lean_obj_arg input, b_lean_obj_arg mask, b_lean_obj_arg source) {
+  lean_dec(s);
+  lean_dec(src);
   auto input_ = borrowTensor(input);
   auto mask_ = borrowTensor(mask);
   auto source_ = borrowTensor(source);
@@ -2002,7 +2186,8 @@ lean_object* lean_torch_gemma4_text_experts_forward(
   return fromTorchTensor(result_);
 }
 
-lean_object* lean_torch_where(lean_obj_arg /*s*/, b_lean_obj_arg condition, b_lean_obj_arg x, b_lean_obj_arg y) {
+lean_object* lean_torch_where(lean_obj_arg s, b_lean_obj_arg condition, b_lean_obj_arg x, b_lean_obj_arg y) {
+  lean_dec(s);
   auto condition_ = borrowTensor(condition);
   auto x_ = borrowTensor(x);
   auto y_ = borrowTensor(y);
@@ -2011,9 +2196,11 @@ lean_object* lean_torch_where(lean_obj_arg /*s*/, b_lean_obj_arg condition, b_le
 }
 
 // Broadcasting and expanding
-lean_object* lean_torch_expand(lean_obj_arg /*s*/, b_lean_obj_arg input, lean_obj_arg size) {
+lean_object* lean_torch_expand(lean_obj_arg s, b_lean_obj_arg input, lean_obj_arg size) {
+  lean_dec(s);
+  OwnedLeanObject size_owner(size, lean_dec);
   auto input_ = borrowTensor(input);
-  auto size_ = getShape(size); lean_dec(size);
+  auto size_ = getShape(size); size_owner.reset();
   auto result_ = input_.expand(c10::IntArrayRef(size_.data(), size_.size()));
   return fromTorchTensor(result_);
 }
@@ -2026,25 +2213,29 @@ lean_object* lean_torch_repeat(lean_obj_arg /*s*/, b_lean_obj_arg input, lean_ob
 }
 
 // Scalar operations (tensor-scalar arithmetic)
-lean_object* lean_torch_mul_scalar(lean_obj_arg /*s*/, b_lean_obj_arg input, double scalar) {
+lean_object* lean_torch_mul_scalar(lean_obj_arg s, b_lean_obj_arg input, double scalar) {
+  lean_dec(s);
   auto input_ = borrowTensor(input);
   auto result_ = input_ * scalar;
   return fromTorchTensor(result_);
 }
 
-lean_object* lean_torch_div_scalar(lean_obj_arg /*s*/, b_lean_obj_arg input, double scalar) {
+lean_object* lean_torch_div_scalar(lean_obj_arg s, b_lean_obj_arg input, double scalar) {
+  lean_dec(s);
   auto input_ = borrowTensor(input);
   auto result_ = input_ / scalar;
   return fromTorchTensor(result_);
 }
 
-lean_object* lean_torch_add_scalar(lean_obj_arg /*s*/, b_lean_obj_arg input, double scalar) {
+lean_object* lean_torch_add_scalar(lean_obj_arg s, b_lean_obj_arg input, double scalar) {
+  lean_dec(s);
   auto input_ = borrowTensor(input);
   auto result_ = input_ + scalar;
   return fromTorchTensor(result_);
 }
 
-lean_object* lean_torch_sub_scalar(lean_obj_arg /*s*/, b_lean_obj_arg input, double scalar) {
+lean_object* lean_torch_sub_scalar(lean_obj_arg s, b_lean_obj_arg input, double scalar) {
+  lean_dec(s);
   auto input_ = borrowTensor(input);
   auto result_ = input_ - scalar;
   return fromTorchTensor(result_);
@@ -2072,7 +2263,8 @@ lean_object* lean_torch_topk_values(lean_obj_arg /*s*/, b_lean_obj_arg input, ui
 }
 
 // Multinomial sampling
-lean_object* lean_torch_multinomial(lean_obj_arg /*s*/, b_lean_obj_arg input, uint64_t num_samples, uint8_t replacement) {
+lean_object* lean_torch_multinomial(lean_obj_arg s, b_lean_obj_arg input, uint64_t num_samples, uint8_t replacement) {
+  lean_dec(s);
   try {
     auto input_ = borrowTensor(input);
     auto result_ = torch::multinomial(input_, num_samples, replacement);
@@ -2085,8 +2277,10 @@ lean_object* lean_torch_multinomial(lean_obj_arg /*s*/, b_lean_obj_arg input, ui
 }
 
 // Gradient clipping (in-place, returns norm)
-lean_object* lean_torch_clip_grad_norm_(lean_obj_arg /*s*/, b_lean_obj_arg param, double max_norm) {
+lean_object* lean_torch_clip_grad_norm_(lean_obj_arg s, b_lean_obj_arg param, double max_norm) {
+  lean_dec(s);
   try {
+    torch::NoGradGuard guard;
     auto param_ = borrowTensor(param);
     double total_norm = 0.0;
     if (param_.grad().defined()) {
@@ -2106,21 +2300,24 @@ lean_object* lean_torch_clip_grad_norm_(lean_obj_arg /*s*/, b_lean_obj_arg param
 }
 
 // Item extraction (get scalar value from 0-d tensor)
-double lean_torch_item(lean_obj_arg /*s*/, b_lean_obj_arg input) {
+double lean_torch_item(lean_obj_arg s, b_lean_obj_arg input) {
+  lean_dec(s);
   auto input_ = borrowTensor(input);
   double result = input_.item<double>();
   return result;
 }
 
 // Item extraction as int64
-uint64_t lean_torch_item_int(lean_obj_arg /*s*/, b_lean_obj_arg input) {
+uint64_t lean_torch_item_int(lean_obj_arg s, b_lean_obj_arg input) {
+  lean_dec(s);
   auto input_ = borrowTensor(input);
   int64_t result = input_.item<int64_t>();
   return static_cast<uint64_t>(result);
 }
 
 // Argmax
-lean_object* lean_torch_argmax(lean_obj_arg /*s*/, b_lean_obj_arg input, uint64_t dim) {
+lean_object* lean_torch_argmax(lean_obj_arg s, b_lean_obj_arg input, uint64_t dim) {
+  lean_dec(s);
   auto input_ = borrowTensor(input);
   auto dim_ = static_cast<int64_t>(dim);
   auto result_ = torch::argmax(input_, dim_);
@@ -2221,7 +2418,8 @@ lean_object* lean_torch_resample_soxr_hq(
 }
 
 // Backward pass
-lean_object* lean_torch_backward_unit(lean_obj_arg /*s*/, b_lean_obj_arg output, b_lean_obj_arg grad_output) {
+lean_object* lean_torch_backward_unit(lean_obj_arg s, b_lean_obj_arg output, b_lean_obj_arg grad_output) {
+  lean_dec(s);
   try {
     auto output_ = borrowTensor(output);
     auto grad_output_ = borrowTensor(grad_output);
@@ -2357,12 +2555,13 @@ lean_object* lean_torch_slice_1d(
 // Slice a tensor along a specified dimension: data.slice(dim, start, start+len)
 // Fully dependently typed - output shape is computed from input shape and slice params
 lean_object* lean_torch_slice_along_dim(
-  lean_obj_arg /*s*/,
+  lean_obj_arg s,
   b_lean_obj_arg input,
   uint64_t dim,
   uint64_t start,
   uint64_t len
 ) {
+  lean_dec(s);
   auto input_ = borrowTensor(input);
   auto result_ = input_.slice(static_cast<int64_t>(dim),
                                static_cast<int64_t>(start),
@@ -2372,44 +2571,22 @@ lean_object* lean_torch_slice_along_dim(
 
 // Return a copy of `input` with a slice along `dim` replaced by `src` at `start`.
 lean_object* lean_torch_slice_scatter_along_dim(
-  lean_obj_arg /*s*/,
-  lean_obj_arg /*src_shape*/,
-  b_lean_obj_arg input,
+  lean_obj_arg s,
+  lean_obj_arg src_shape,
+  lean_obj_arg input,
   uint64_t dim,
   uint64_t start,
   b_lean_obj_arg src
 ) {
-  auto input_ = borrowTensor(input);
+  lean_dec(s);
+  lean_dec(src_shape);
+  OwnedLeanObject input_owner(input, lean_dec);
   auto src_ = borrowTensor(src);
-  auto dim_i = static_cast<int64_t>(dim);
-  auto start_i = static_cast<int64_t>(start);
-  auto end_i = start_i + src_.size(dim_i);
-
-  auto result_ = input_.clone();
-  result_.slice(dim_i, start_i, end_i).copy_(src_);
-  return fromTorchTensor(result_);
-}
-
-// In-place variant of `lean_torch_slice_scatter_along_dim`: writes `src` into
-// `input` directly instead of cloning. `input` must be uniquely owned by the
-// caller — the mutation is observable through any other alias of the tensor.
-// Same borrowed-in/inc-out contract as `lean_torch_zero_grad`.
-lean_object* lean_torch_slice_scatter_along_dim_inplace(
-  lean_obj_arg /*s*/,
-  lean_obj_arg /*src_shape*/,
-  b_lean_obj_arg input,
-  uint64_t dim,
-  uint64_t start,
-  b_lean_obj_arg src
-) {
-  auto input_ = borrowTensor(input);
-  auto src_ = borrowTensor(src);
-  auto dim_i = static_cast<int64_t>(dim);
-  auto start_i = static_cast<int64_t>(start);
-
-  input_.narrow(dim_i, start_i, src_.size(dim_i)).copy_(src_);
-  lean_inc(input);
-  return input;
+  auto input_ = takeTensor(input_owner.release());
+  const auto axis = checkSliceCopy(input_, src_, dim, start);
+  auto result = tensorForValueUpdate(std::move(input_));
+  result.narrow(axis, static_cast<int64_t>(start), src_.size(axis)).copy_(src_);
+  return fromTorchTensor(std::move(result));
 }
 
 // Allocation is effectful so separate mutable buffers cannot be commoned by Lean.
@@ -2425,30 +2602,22 @@ lean_object* lean_torch_clone_inference_io(lean_obj_arg shape, b_lean_obj_arg sr
   }
 }
 
-// Effectful inference cache write: no clone and no autograd history.
+// Effectful cache value update: consume the destination, reuse only when safe.
 lean_object* lean_torch_copy_slice_io(
-  lean_obj_arg shape, lean_obj_arg src_shape, b_lean_obj_arg input,
+  lean_obj_arg shape, lean_obj_arg src_shape, lean_obj_arg input,
   uint64_t dim, uint64_t start, b_lean_obj_arg src
 ) {
   lean_dec(shape);
   lean_dec(src_shape);
+  OwnedLeanObject input_owner(input, lean_dec);
   try {
     torch::NoGradGuard guard;
-    auto dst = borrowTensor(input);
     auto source = borrowTensor(src);
-    TORCH_CHECK(dim < static_cast<uint64_t>(dst.dim()), "cache copy dimension out of range");
-    TORCH_CHECK(source.dim() == dst.dim(), "cache copy rank mismatch");
-    const auto d = static_cast<int64_t>(dim);
-    TORCH_CHECK(start <= static_cast<uint64_t>(dst.size(d)) &&
-      static_cast<uint64_t>(source.size(d)) <= static_cast<uint64_t>(dst.size(d)) - start,
-      "cache copy exceeds capacity");
-    for (int64_t i = 0; i < dst.dim(); ++i) {
-      TORCH_CHECK(i == d || dst.size(i) == source.size(i), "cache copy shape mismatch");
-    }
-    TORCH_CHECK(dst.device() == source.device() && dst.scalar_type() == source.scalar_type(),
-      "cache copy device/dtype mismatch");
-    dst.narrow(d, static_cast<int64_t>(start), source.size(d)).copy_(source);
-    return lean_io_result_mk_ok(lean_box(0));
+    auto destination = takeTensor(input_owner.release());
+    const auto axis = checkSliceCopy(destination, source, dim, start);
+    auto result = tensorForNoGradValueUpdate(std::move(destination));
+    result.narrow(axis, static_cast<int64_t>(start), source.size(axis)).copy_(source);
+    return lean_io_result_mk_ok(fromTorchTensor(std::move(result)));
   } catch (const c10::Error& e) {
     return mkC10IoError("copySliceIO", e);
   } catch (const std::exception& e) {
@@ -2478,12 +2647,13 @@ extern "C" LEAN_EXPORT lean_object* lean_torch_stack_1d(
   lean_obj_arg tensors,
   uint64_t dim
 ) {
+  OwnedLeanObject tensors_owner(tensors, lean_dec);
   std::vector<torch::Tensor> tensor_list;
   for (size_t i = 0; i < lean_array_size(tensors); i++) {
     auto tensor_obj = lean_array_get_core(tensors, i);
     tensor_list.push_back(borrowTensor(tensor_obj));
   }
-  lean_dec(tensors);
+  tensors_owner.reset();
   auto result_ = torch::stack(tensor_list, static_cast<int64_t>(dim));
   return fromTorchTensor(result_);
 }
@@ -2510,12 +2680,13 @@ lean_object* lean_torch_unbind(
   b_lean_obj_arg t,
   lean_obj_arg dim
 ) {
+  OwnedLeanObject dim_owner(dim, lean_dec);
   lean_dec(s);
   // Nat is boxed in Lean, unlike UInt64/Int64. Check the axis before
   // conversion so an arbitrary-precision Nat cannot wrap into a valid axis.
   auto t_ = borrowTensor(t);
   const bool in_range = lean_nat_dec_lt(dim, lean_box(t_.dim()));
-  const auto axis = lean_uint64_of_nat_mk(dim);
+  const auto axis = lean_uint64_of_nat(dim);
   TORCH_CHECK(in_range, "unbind: dimension out of range");
   auto unbinded = torch::unbind(t_, static_cast<int64_t>(axis));
   size_t n = unbinded.size();
@@ -2527,7 +2698,8 @@ lean_object* lean_torch_unbind(
 }
 
 // Convert tensor to Long (int64) dtype
-lean_object* lean_torch_to_long(lean_obj_arg /*s*/, b_lean_obj_arg input) {
+lean_object* lean_torch_to_long(lean_obj_arg s, b_lean_obj_arg input) {
+  lean_dec(s);
   auto input_ = borrowTensor(input);
   auto result_ = input_.to(torch::kLong);
   return fromTorchTensor(result_);
@@ -2810,28 +2982,36 @@ lean_object* lean_torch_sdpa_4d_bias(
   }
 }
 
-// In-place whole-tensor copy: `dst.copy_(src)` (converts dtype if needed).
-// Same ownership contract as the other in-place mutators (zero_grad etc.):
-// borrowed args, returns an inc'd reference to the mutated `dst`.
-// NoGradGuard: copying into requires-grad leaves (optimizer/state fold-back)
-// is only legal with autograd off.
+// Whole-tensor copy with matching shape/dtype and destination placement.
+// Explicit optimizer/state value update. The destination is consumed and the
+// updated tensor is returned; aliases observe the previous value.
 lean_object* lean_torch_copy_inplace(
-  lean_obj_arg /*s*/,
-  b_lean_obj_arg dst,
+  lean_obj_arg s,
+  lean_obj_arg dst,
   b_lean_obj_arg src
 ) {
-  auto dst_ = borrowTensor(dst);
-  auto src_ = borrowTensor(src);
-  torch::NoGradGuard guard;
-  dst_.copy_(src_);
-  lean_inc(dst);
-  return dst;
+  lean_dec(s);
+  OwnedLeanObject destination_owner(dst, lean_dec);
+  try {
+    torch::NoGradGuard guard;
+    auto source = borrowTensor(src);
+    auto destination = takeTensor(destination_owner.release());
+    checkCopyMetadata(destination, source);
+    auto result = tensorForNoGradValueUpdate(std::move(destination));
+    result.copy_(source);
+    return lean_io_result_mk_ok(fromTorchTensor(std::move(result)));
+  } catch (const c10::Error& e) {
+    return mkC10IoError("copyInplace", e);
+  } catch (const std::exception& e) {
+    return mkStdIoError("copyInplace", e);
+  }
 }
 
 // No-op that forces its tensor argument at the FFI boundary. Used to force
 // lazy Lean staging computations (static buffers, in-place copies) to run
 // eagerly *before* a CUDA graph capture/replay instead of inside it.
-lean_object* lean_torch_touch(lean_obj_arg /*s*/, b_lean_obj_arg /*t*/) {
+lean_object* lean_torch_touch(lean_obj_arg s, b_lean_obj_arg /*t*/) {
+  lean_dec(s);
   return lean_io_result_mk_ok(lean_box(0));
 }
 
@@ -2839,10 +3019,11 @@ lean_object* lean_torch_touch(lean_obj_arg /*s*/, b_lean_obj_arg /*t*/) {
 // scalar input (e.g. the learning rate) through a static buffer instead of a
 // baked-in Float.
 lean_object* lean_torch_mul_tensor_scalar(
-  lean_obj_arg /*s*/,
+  lean_obj_arg s,
   b_lean_obj_arg input,
   b_lean_obj_arg scalar
 ) {
+  lean_dec(s);
   auto input_ = borrowTensor(input);
   auto scalar_ = borrowTensor(scalar);
   return fromTorchTensor(input_ * scalar_);
@@ -2938,7 +3119,8 @@ lean_object* lean_torch_cuda_graph_reset(lean_object* w) {
 } // anonymous namespace
 
 // Save tensor to a binary file
-lean_object* lean_torch_save_tensor(lean_obj_arg /*s*/, b_lean_obj_arg tensor, b_lean_obj_arg path_obj) {
+lean_object* lean_torch_save_tensor(lean_obj_arg s, b_lean_obj_arg tensor, b_lean_obj_arg path_obj) {
+  lean_dec(s);
   auto tensor_ = borrowTensor(tensor);
   const char* path = lean_string_cstr(path_obj);
 
@@ -3123,11 +3305,12 @@ static bool patch_wav_sizes(std::fstream& file, uint64_t data_size64) {
 }
 
 lean_object* lean_torch_save_wav(
-  lean_obj_arg /*shape*/,
+  lean_obj_arg shape,
   b_lean_obj_arg tensor_obj,
   b_lean_obj_arg path_obj,
   uint64_t sample_rate
 ) {
+  lean_dec(shape);
   const char* path = lean_string_cstr(path_obj);
   try {
     auto tensor = borrowTensor(tensor_obj);
@@ -3371,6 +3554,36 @@ extern "C" LEAN_EXPORT lean_object* lean_torch_cast_dtype(
   return fromTorchTensor(borrowTensor(tensor).to(*dtype));
 }
 
+extern "C" LEAN_EXPORT lean_object* lean_torch_convert_tensor(
+    lean_obj_arg shape, b_lean_obj_arg tensor, b_lean_obj_arg device,
+    b_lean_obj_arg dtype_option) {
+  std::unique_ptr<lean_object, void (*)(lean_object*)> shape_owner(shape, lean_dec);
+  try {
+    const auto expected_shape = getShape(shape);
+    auto source = borrowTensor(tensor);
+    TORCH_CHECK(source.sizes().vec() == expected_shape,
+                "source tensor shape mismatch");
+
+    auto target_dtype = source.scalar_type();
+    if (!lean_is_scalar(dtype_option)) {
+      const auto* tag = lean_string_cstr(lean_ctor_get(dtype_option, 0));
+      const auto parsed_dtype = parseDtype(tag);
+      TORCH_CHECK(parsed_dtype.has_value(), "Unsupported target dtype tag: ", tag);
+      target_dtype = *parsed_dtype;
+    }
+    const auto target_device = getDevice(device);
+
+    // A single conversion avoids unsupported intermediate tensors, such as
+    // Float64 on MPS when moving MPS/Float32 to CPU/Float64 or the reverse.
+    auto converted = source.to(target_device, target_dtype);
+    return lean_io_result_mk_ok(fromTorchTensor(converted));
+  } catch (const c10::Error& e) {
+    return mkC10IoError("convertIO", e);
+  } catch (const std::exception& e) {
+    return mkStdIoError("convertIO", e);
+  }
+}
+
 static std::optional<size_t> findMatchingDelim(
     const std::string& s, size_t open_pos, char open_ch, char close_ch) {
   if (open_pos >= s.size() || s[open_pos] != open_ch) return std::nullopt;
@@ -3574,11 +3787,12 @@ static std::optional<std::string> writeSafeTensorsFile(
 
 // Save a single tensor to SafeTensors file under the given tensor name.
 lean_object* lean_torch_safetensors_save(
-  lean_obj_arg /*shape*/,
+  lean_obj_arg shape,
   b_lean_obj_arg path_obj,
   b_lean_obj_arg name_obj,
   b_lean_obj_arg tensor_obj
 ) {
+  lean_dec(shape);
   const char* path = lean_string_cstr(path_obj);
   const char* tensor_name = lean_string_cstr(name_obj);
 
@@ -4069,11 +4283,12 @@ extern "C" LEAN_EXPORT lean_object* lean_torch_safetensors_load_from_handle(
     b_lean_obj_arg handle,
     b_lean_obj_arg name_obj,
     lean_obj_arg shape_obj) {
+  OwnedLeanObject shape_obj_owner(shape_obj, lean_dec);
   auto* wrapper = static_cast<std::shared_ptr<SafeTensorsFile>*>(lean_get_external_data(handle));
   auto loader = *wrapper;
   std::string name(lean_string_cstr(name_obj));
   auto expected_shape = getShape(shape_obj);
-  lean_dec(shape_obj);
+  shape_obj_owner.reset();
 
   try {
     const auto* entry = loader->findEntry(name);
@@ -4091,10 +4306,11 @@ lean_object* lean_torch_safetensors_load(
   b_lean_obj_arg name_obj,
   lean_obj_arg shape_obj
 ) {
+  OwnedLeanObject shape_obj_owner(shape_obj, lean_dec);
   std::string path(lean_string_cstr(path_obj));
   std::string tensor_name(lean_string_cstr(name_obj));
   auto expected_shape = getShape(shape_obj);
-  lean_dec(shape_obj);
+  shape_obj_owner.reset();
 
   try {
     auto loader = getCachedSafeTensorsFile(path);
@@ -4113,11 +4329,12 @@ lean_object* lean_torch_safetensors_load_sharded(
   b_lean_obj_arg name_obj,
   lean_obj_arg shape
 ) {
+  OwnedLeanObject shape_owner(shape, lean_dec);
   try {
     std::string dir(lean_string_cstr(dir_obj));
     std::string tensor_name(lean_string_cstr(name_obj));
     auto expected_shape = getShape(shape);
-    lean_dec(shape);
+    shape_owner.reset();
 
     auto sharded = getCachedShardedSafeTensorsDir(dir);
     const auto* resolved = sharded->find(tensor_name);
@@ -4330,7 +4547,8 @@ lean_object* lean_torch_relu_squared(lean_obj_arg /*s*/, b_lean_obj_arg input) {
 }
 
 // Logit softcap: cap * tanh(x / cap)
-lean_object* lean_torch_softcap(lean_obj_arg /*s*/, b_lean_obj_arg input, double cap) {
+lean_object* lean_torch_softcap(lean_obj_arg s, b_lean_obj_arg input, double cap) {
+  lean_dec(s);
   auto input_ = borrowTensor(input);
   auto result_ = cap * torch::tanh(input_ / cap);
   return fromTorchTensor(result_);
@@ -4422,8 +4640,9 @@ lean_object* lean_torch_compute_rotary_freqs_on_device_pure(
   double base,
   lean_obj_arg device
 ) {
+  OwnedLeanObject device_owner(device, lean_dec);
   auto device_ = getDevice(device);
-  lean_dec(device);
+  device_owner.reset();
   return compute_rotary_freqs_impl(seq_len, head_dim, base, device_);
 }
 
@@ -4650,7 +4869,8 @@ lean_object* lean_torch_sdpa_gqa_qkv(
 // ============================================================================
 
 // Less than comparison: returns a boolean tensor
-lean_object* lean_torch_lt(lean_obj_arg /*s*/, b_lean_obj_arg a, b_lean_obj_arg b) {
+lean_object* lean_torch_lt(lean_obj_arg s, b_lean_obj_arg a, b_lean_obj_arg b) {
+  lean_dec(s);
   auto a_ = borrowTensor(a);
   auto b_ = borrowTensor(b);
   auto result_ = torch::lt(a_, b_);
@@ -4658,14 +4878,16 @@ lean_object* lean_torch_lt(lean_obj_arg /*s*/, b_lean_obj_arg a, b_lean_obj_arg 
 }
 
 // Less than scalar comparison
-lean_object* lean_torch_lt_scalar(lean_obj_arg /*s*/, b_lean_obj_arg input, double scalar) {
+lean_object* lean_torch_lt_scalar(lean_obj_arg s, b_lean_obj_arg input, double scalar) {
+  lean_dec(s);
   auto input_ = borrowTensor(input);
   auto result_ = input_ < scalar;
   return fromTorchTensor(result_);
 }
 
 // Greater than comparison
-lean_object* lean_torch_gt(lean_obj_arg /*s*/, b_lean_obj_arg a, b_lean_obj_arg b) {
+lean_object* lean_torch_gt(lean_obj_arg s, b_lean_obj_arg a, b_lean_obj_arg b) {
+  lean_dec(s);
   auto a_ = borrowTensor(a);
   auto b_ = borrowTensor(b);
   auto result_ = torch::gt(a_, b_);
@@ -4673,7 +4895,8 @@ lean_object* lean_torch_gt(lean_obj_arg /*s*/, b_lean_obj_arg a, b_lean_obj_arg 
 }
 
 // Greater than or equal comparison
-lean_object* lean_torch_ge(lean_obj_arg /*s*/, b_lean_obj_arg a, b_lean_obj_arg b) {
+lean_object* lean_torch_ge(lean_obj_arg s, b_lean_obj_arg a, b_lean_obj_arg b) {
+  lean_dec(s);
   auto a_ = borrowTensor(a);
   auto b_ = borrowTensor(b);
   auto result_ = torch::ge(a_, b_);
@@ -4689,7 +4912,8 @@ lean_object* lean_torch_eq(lean_obj_arg /*s*/, b_lean_obj_arg a, b_lean_obj_arg 
 }
 
 // Equality with scalar comparison
-lean_object* lean_torch_eq_scalar(lean_obj_arg /*s*/, b_lean_obj_arg input, uint64_t scalar) {
+lean_object* lean_torch_eq_scalar(lean_obj_arg s, b_lean_obj_arg input, uint64_t scalar) {
+  lean_dec(s);
   auto input_ = borrowTensor(input);
   auto result_ = input_ == static_cast<int64_t>(scalar);
   return fromTorchTensor(result_);
@@ -4697,9 +4921,10 @@ lean_object* lean_torch_eq_scalar(lean_obj_arg /*s*/, b_lean_obj_arg input, uint
 
 // Full tensor with given shape and scalar value (int64 version for token ids)
 lean_object* lean_torch_full_int(lean_obj_arg s, uint64_t value_bits) {
+  OwnedLeanObject s_owner(s, lean_dec);
   const int64_t value = static_cast<int64_t>(value_bits);
   auto shape = getShape(s);
-  lean_dec(s);
+  s_owner.reset();
   auto result_ = torch::full(shape, value, torch::kInt64);
   return fromTorchTensor(result_);
 }
@@ -4729,20 +4954,23 @@ lean_object* lean_torch_max_dim_3d(uint64_t /*d0*/, uint64_t /*d1*/, uint64_t /*
 }
 
 // Boolean any (returns true if any element is true)
-uint8_t lean_torch_any(lean_obj_arg /*s*/, b_lean_obj_arg input) {
+uint8_t lean_torch_any(lean_obj_arg s, b_lean_obj_arg input) {
+  lean_dec(s);
   auto input_ = borrowTensor(input);
   return input_.any().item<bool>();
 }
 
 // Logical NOT for boolean tensors
-lean_object* lean_torch_logical_not(lean_obj_arg /*s*/, b_lean_obj_arg input) {
+lean_object* lean_torch_logical_not(lean_obj_arg s, b_lean_obj_arg input) {
+  lean_dec(s);
   auto input_ = borrowTensor(input);
   auto result_ = torch::logical_not(input_);
   return fromTorchTensor(result_);
 }
 
 // Logical AND for boolean tensors
-lean_object* lean_torch_logical_and(lean_obj_arg /*s*/, b_lean_obj_arg a, b_lean_obj_arg b) {
+lean_object* lean_torch_logical_and(lean_obj_arg s, b_lean_obj_arg a, b_lean_obj_arg b) {
+  lean_dec(s);
   auto a_ = borrowTensor(a);
   auto b_ = borrowTensor(b);
   auto result_ = torch::logical_and(a_, b_);
@@ -4750,14 +4978,16 @@ lean_object* lean_torch_logical_and(lean_obj_arg /*s*/, b_lean_obj_arg a, b_lean
 }
 
 // Convert to float dtype
-lean_object* lean_torch_to_float(lean_obj_arg /*s*/, b_lean_obj_arg input) {
+lean_object* lean_torch_to_float(lean_obj_arg s, b_lean_obj_arg input) {
+  lean_dec(s);
   auto input_ = borrowTensor(input);
   auto result_ = input_.to(torch::kFloat32);
   return fromTorchTensor(result_);
 }
 
 // Convert to bfloat16 dtype
-lean_object* lean_torch_to_bfloat16(lean_obj_arg /*s*/, b_lean_obj_arg input) {
+lean_object* lean_torch_to_bfloat16(lean_obj_arg s, b_lean_obj_arg input) {
+  lean_dec(s);
   auto input_ = borrowTensor(input);
   auto result_ = input_.to(torch::kBFloat16);
   return fromTorchTensor(result_);
@@ -4779,7 +5009,8 @@ lean_object* lean_torch_clamp(lean_obj_arg /*s*/, b_lean_obj_arg input, int64_t 
 }
 
 // Clamp values to a floating-point range
-lean_object* lean_torch_clamp_float(lean_obj_arg /*s*/, b_lean_obj_arg input, double min_val, double max_val) {
+lean_object* lean_torch_clamp_float(lean_obj_arg s, b_lean_obj_arg input, double min_val, double max_val) {
+  lean_dec(s);
   auto input_ = borrowTensor(input);
   auto result_ = torch::clamp(input_, min_val, max_val);
   return fromTorchTensor(result_);
@@ -4980,9 +5211,12 @@ lean_object* lean_torch_conv_transpose2d(
 }
 
 lean_object* lean_torch_conv_transpose1d_bias(
-    lean_obj_arg /*input_shape*/, lean_obj_arg /*weight_shape*/, lean_obj_arg /*bias_shape*/,
+    lean_obj_arg input_shape, lean_obj_arg weight_shape, lean_obj_arg bias_shape,
     b_lean_obj_arg input, b_lean_obj_arg weight, b_lean_obj_arg bias,
     uint64_t stride, uint64_t padding, uint64_t output_padding, uint64_t dilation) {
+  lean_dec(input_shape);
+  lean_dec(weight_shape);
+  lean_dec(bias_shape);
   auto input_ = borrowTensor(input);
   auto weight_ = borrowTensor(weight);
   auto bias_ = borrowTensor(bias);
@@ -5066,8 +5300,10 @@ lean_object* lean_torch_nll_loss_none(
 
 // Gather along dimension
 lean_object* lean_torch_gather(
-    lean_obj_arg /*input_shape*/, lean_obj_arg /*index_shape*/,
+    lean_obj_arg input_shape, lean_obj_arg index_shape,
     b_lean_obj_arg input, uint64_t dimBits, b_lean_obj_arg indices) {
+  lean_dec(input_shape);
+  lean_dec(index_shape);
   const auto dim = std::bit_cast<int64_t>(dimBits);
   auto input_ = borrowTensor(input);
   auto indices_ = borrowTensor(indices);
@@ -5088,8 +5324,9 @@ lean_object* lean_torch_scatter(
 
 // Scatter with add reduction
 lean_object* lean_torch_scatter_add(
-    lean_obj_arg /*s*/,
+    lean_obj_arg s,
     b_lean_obj_arg input, uint64_t dim, b_lean_obj_arg indices, b_lean_obj_arg src) {
+  lean_dec(s);
   auto input_ = borrowTensor(input);
   auto indices_ = borrowTensor(indices);
   auto src_ = borrowTensor(src);
@@ -5126,10 +5363,13 @@ lean_object* lean_torch_einsum(lean_obj_arg equation, b_lean_obj_arg tensors) {
 
 // Einsum with 2 tensors (common case)
 lean_object* lean_torch_einsum2(
-    lean_obj_arg /*s1*/, lean_obj_arg /*s2*/,
+    lean_obj_arg s1, lean_obj_arg s2,
     lean_obj_arg equation, b_lean_obj_arg a, b_lean_obj_arg b) {
+  lean_dec(s1);
+  lean_dec(s2);
+  OwnedLeanObject equation_owner(equation, lean_dec);
   auto eq_str = std::string(lean_string_cstr(equation));
-  lean_dec(equation);
+  equation_owner.reset();
   auto a_ = borrowTensor(a);
   auto b_ = borrowTensor(b);
   auto result_ = torch::einsum(eq_str, {a_, b_});
@@ -5138,12 +5378,15 @@ lean_object* lean_torch_einsum2(
 
 // Interpolate to target size
 lean_object* lean_torch_interpolate(
-    lean_obj_arg /*s*/, b_lean_obj_arg input,
+    lean_obj_arg s, b_lean_obj_arg input,
     lean_obj_arg size, lean_obj_arg mode, uint8_t align_corners) {
+  lean_dec(s);
+  OwnedLeanObject size_owner(size, lean_dec);
+  OwnedLeanObject mode_owner(mode, lean_dec);
   auto input_ = borrowTensor(input);
-  auto size_ = getShape(size); lean_dec(size);
+  auto size_ = getShape(size); size_owner.reset();
   auto mode_str = std::string(lean_string_cstr(mode));
-  lean_dec(mode);
+  mode_owner.reset();
 
   torch::nn::functional::InterpolateFuncOptions options;
   options.size(size_);
@@ -5200,8 +5443,10 @@ lean_object* lean_torch_interpolate_scale(
 }
 
 // Clip gradient values element-wise
-lean_object* lean_torch_clip_grad_value_(lean_obj_arg /*s*/, b_lean_obj_arg param, double clip_value, lean_object* /*w*/) {
+lean_object* lean_torch_clip_grad_value_(lean_obj_arg s, b_lean_obj_arg param, double clip_value, lean_object* /*w*/) {
+  lean_dec(s);
   try {
+    torch::NoGradGuard guard;
     auto param_ = borrowTensor(param);
     if (param_.grad().defined()) {
       param_.grad().clamp_(-clip_value, clip_value);
@@ -5221,10 +5466,11 @@ lean_object* lean_torch_clip_grad_value_(lean_obj_arg /*s*/, b_lean_obj_arg para
 // Top-k filtering: set all logits outside top-k to -infinity
 // logits: [..., vocab_size], k: number of top logits to keep
 lean_object* lean_torch_topk_filter(
-    lean_obj_arg /*s*/,
+    lean_obj_arg s,
     b_lean_obj_arg logits,
     uint64_t k
 ) {
+  lean_dec(s);
   auto logits_ = borrowTensor(logits);
 
   if (k == 0) {
@@ -5258,10 +5504,11 @@ lean_object* lean_torch_topk_filter(
 // Top-p (nucleus) filtering: set logits outside cumulative probability p to -infinity
 // logits: [..., vocab_size], p: cumulative probability threshold
 lean_object* lean_torch_topp_filter(
-    lean_obj_arg /*s*/,
+    lean_obj_arg s,
     b_lean_obj_arg logits,
     double p
 ) {
+  lean_dec(s);
   auto logits_ = borrowTensor(logits);
 
   if (p >= 1.0) {

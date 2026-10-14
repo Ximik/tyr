@@ -3,7 +3,8 @@ import Tyr.RawTensor
 /-! Native neural-network operations. Only typed adapters consume these handles. -/
 namespace torch.RawTensor
 
-@[extern "lean_torch_copy_"] opaque copyInto (shape : Shape) (dst src : @& RawTensor) : IO Unit
+@[extern "lean_torch_copy_"] opaque copyInto (shape : Shape)
+    (dst : RawTensor) (src : @& RawTensor) : IO RawTensor
 
 @[extern "lean_torch_conv2d_bias"] opaque conv2dBias (inputShape weightShape biasShape : Shape)
     (input weight bias : @& RawTensor) (stride padding dilation : Array UInt64) : RawTensor
@@ -29,7 +30,7 @@ namespace torch.RawTensor
     (q k v : @& RawTensor) (mask : Option RawTensor) (dropout : Float)
     (causal : Bool) (scale : Option Float) (gqa : Bool) : RawTensor
 @[extern "lean_torch_slice_scatter_along_dim"] opaque sliceScatter (shape sourceShape : Shape)
-    (input : @& RawTensor) (dim start : UInt64) (source : @& RawTensor) : RawTensor
+    (input : RawTensor) (dim start : UInt64) (source : @& RawTensor) : RawTensor
 @[extern "lean_torch_apply_rotary_emb"] opaque applyRotary (batch seq heads dim : UInt64)
     (input cos sin : @& RawTensor) : RawTensor
 @[extern "lean_torch_compute_rotary_freqs_on_device_pure"] opaque rotaryFreqs

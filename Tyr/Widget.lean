@@ -56,7 +56,7 @@ open torch
 
 def demoModule : IO ModuleDisplayProps := do
   let lin ← Linear.init 16 32
-  pure (toModuleDisplayProps lin "Linear(16->32)")
+  toModuleDisplayProps lin "Linear(16->32)"
 
 #module demoModule
 ```
@@ -82,7 +82,7 @@ def tinyTree : IO ModuleDisplayProps := do
   let fc1 ← Linear.init 8 16
   let fc2 ← Linear.init 16 4
   let m : TinyMLP := { fc1, fc2, note := "demo" }
-  pure (toModuleDisplayProps m "TinyMLP")
+  toModuleDisplayProps m "TinyMLP"
 
 #module tinyTree
 ```
@@ -770,7 +770,7 @@ export default function Widget(props) {
 "
 
 /-- Convert a tensor to widget props -/
-def tensorToProps {σ : StaticSpec} (t : Tensor σ) : TensorDisplayProps :=
+def tensorToProps {σ : StaticSpec} (t : Tensor σ) : IO TensorDisplayProps := do
   let shape := t.runtimeShape
   let dtype := toString t.dtype
   let device := t.raw.deviceStr
@@ -778,22 +778,18 @@ def tensorToProps {σ : StaticSpec} (t : Tensor σ) : TensorDisplayProps :=
   let stats := t.raw.stats
   let values := t.raw.getValues 10000  -- Get up to 10k values
   let numel := shape.foldl (· * ·) 1
-  let gradValues : Option (Array Float) :=
+  let gradient ←
     if requiresGrad then
-      let g := Tensor.gradOf t
-      some (g.raw.getValues 10000).toList.toArray
-    else none
-  let gradStats : Option String :=
-    if requiresGrad then
-      let g := Tensor.gradOf t
-      some g.raw.stats
-    else none
-  { shape, dtype, device, requiresGrad, numel, stats, values := values.toList.toArray, gradValues, gradStats }
+      pure (some (← Tensor.gradOf t))
+    else pure none
+  let gradValues := gradient.map fun g => (g.raw.getValues 10000).toList.toArray
+  let gradStats := gradient.map fun g => g.raw.stats
+  pure { shape, dtype, device, requiresGrad, numel, stats, values := values.toList.toArray, gradValues, gradStats }
 
 /-- Convert a tensor with name and axis labels -/
-def tensorToPropsNamed {σ : StaticSpec} (t : Tensor σ) (name : String) (axisNames : Array String := #[]) : TensorDisplayProps :=
-  let base := tensorToProps t
-  { base with name := some name, axisNames := if axisNames.isEmpty then none else some axisNames }
+def tensorToPropsNamed {σ : StaticSpec} (t : Tensor σ) (name : String) (axisNames : Array String := #[]) : IO TensorDisplayProps := do
+  let base ← tensorToProps t
+  pure { base with name := some name, axisNames := if axisNames.isEmpty then none else some axisNames }
 
 /-! ## ToModuleDisplay Typeclass
 
@@ -804,49 +800,49 @@ Works with any type that has a TensorStruct instance.
 /-- Typeclass for converting values to ModuleNode for visualization -/
 class ToModuleDisplay (α : Type) where
   /-- Convert a value to a ModuleNode with the given name -/
-  toModuleNode : α → String → ModuleNode
+  toModuleNode : α → String → IO ModuleNode
 
 /-- Convert any ToModuleDisplay to full props -/
-def toModuleDisplayProps [ToModuleDisplay α] (value : α) (name : String := "root") : ModuleDisplayProps :=
-  { root := ToModuleDisplay.toModuleNode value name }
+def toModuleDisplayProps [ToModuleDisplay α] (value : α) (name : String := "root") : IO ModuleDisplayProps := do
+  pure { root := ← ToModuleDisplay.toModuleNode value name }
 
 /-- Instance for single tensors -/
 instance {σ : StaticSpec} : ToModuleDisplay (Tensor σ) where
-  toModuleNode t name :=
-    ModuleNode.tensor (tensorToPropsNamed t name)
+  toModuleNode t name := do
+    pure (ModuleNode.tensor (← tensorToPropsNamed t name))
 
 /-- Instance for Optional values -/
 instance [ToModuleDisplay α] : ToModuleDisplay (Option α) where
   toModuleNode opt name :=
     match opt with
     | some x => ToModuleDisplay.toModuleNode x name
-    | none => ModuleNode.group s!"{name} (none)" #[]
+    | none => pure (ModuleNode.group s!"{name} (none)" #[])
 
 /-- Instance for Arrays -/
 instance [ToModuleDisplay α] : ToModuleDisplay (Array α) where
-  toModuleNode arr name :=
-    let children := arr.mapIdx fun i x =>
-      (s!"[{i}]", ToModuleDisplay.toModuleNode x s!"{name}[{i}]")
-    ModuleNode.group s!"{name} [{arr.size}]" children
+  toModuleNode arr name := do
+    let children ← arr.mapIdxM fun i x => do
+      pure (s!"[{i}]", ← ToModuleDisplay.toModuleNode x s!"{name}[{i}]")
+    pure (ModuleNode.group s!"{name} [{arr.size}]" children)
 
 /-- Instance for Lists -/
 instance [ToModuleDisplay α] : ToModuleDisplay (List α) where
-  toModuleNode lst name :=
-    let children := lst.toArray.mapIdx fun i x =>
-      (s!"[{i}]", ToModuleDisplay.toModuleNode x s!"{name}[{i}]")
-    ModuleNode.group s!"{name} [{lst.length}]" children
+  toModuleNode lst name := do
+    let children ← lst.toArray.mapIdxM fun i x => do
+      pure (s!"[{i}]", ← ToModuleDisplay.toModuleNode x s!"{name}[{i}]")
+    pure (ModuleNode.group s!"{name} [{lst.length}]" children)
 
 /-- Instance for tuples -/
 instance [ToModuleDisplay α] [ToModuleDisplay β] : ToModuleDisplay (α × β) where
-  toModuleNode pair name :=
-    ModuleNode.group name #[
-      ("fst", ToModuleDisplay.toModuleNode pair.1 "fst"),
-      ("snd", ToModuleDisplay.toModuleNode pair.2 "snd")
-    ]
+  toModuleNode pair name := do
+    pure (ModuleNode.group name #[
+      ("fst", ← ToModuleDisplay.toModuleNode pair.1 "fst"),
+      ("snd", ← ToModuleDisplay.toModuleNode pair.2 "snd")
+    ])
 
 /-- Instance for Static (configuration/hyperparameters) - displays value as label -/
 instance [ToString α] : ToModuleDisplay (Static α) where
-  toModuleNode s name := ModuleNode.static name (toString s.val)
+  toModuleNode s name := pure (ModuleNode.static name (toString s.val))
 
 /-- Evaluate an IO expression that produces TensorDisplayProps -/
 private unsafe def evalTensorPropsIO (e : Expr) : TermElabM TensorDisplayProps := do
@@ -857,15 +853,6 @@ private unsafe def evalTensorPropsIO (e : Expr) : TermElabM TensorDisplayProps :
 /-- Safe wrapper for evalTensorPropsIO -/
 @[implemented_by evalTensorPropsIO]
 private opaque evalTensorPropsIOSafe (e : Expr) : TermElabM TensorDisplayProps
-
-/-- Evaluate a non-IO expression that produces TensorDisplayProps -/
-private unsafe def evalTensorProps (e : Expr) : TermElabM TensorDisplayProps := do
-  let type ← Meta.inferType e
-  Meta.evalExpr TensorDisplayProps type e
-
-/-- Safe wrapper for evalTensorProps -/
-@[implemented_by evalTensorProps]
-private opaque evalTensorPropsSafe (e : Expr) : TermElabM TensorDisplayProps
 
 /-- Check if a type is IO applied to something -/
 private def isIOType (type : Expr) : Bool :=
@@ -909,15 +896,15 @@ elab "#tensor " t:term : command => do
     let e ← instantiateMVars e
     let type ← Meta.inferType e
     if isIOType type then
-      -- IO case: tensorToProps <$> t, then run IO
-      let propsIO ← Term.elabTerm (← `(tensorToProps <$> $t)) none
+      -- Sequence tensor construction before reading the gradient snapshot.
+      let propsIO ← Term.elabTerm (← `(do tensorToProps (← $t))) none
       let propsIO ← instantiateMVars propsIO
       evalTensorPropsIOSafe propsIO
     else
       -- Non-IO case: just apply tensorToProps
       let propsExpr ← Term.elabTerm (← `(tensorToProps $t)) none
       let propsExpr ← instantiateMVars propsExpr
-      evalTensorPropsSafe propsExpr
+      evalTensorPropsIOSafe propsExpr
   -- Encode props for RPC and save widget info
   let propsJson := Server.RpcEncodable.rpcEncode props
   liftCoreM <| Widget.savePanelWidgetInfo (hash TensorWidget.javascript) propsJson t
@@ -931,7 +918,7 @@ Examples:
 ```lean
 def linTree : IO ModuleDisplayProps := do
   let lin ← Linear.init 8 16
-  pure (toModuleDisplayProps lin "Linear(8->16)")
+  toModuleDisplayProps lin "Linear(8->16)"
 
 #module linTree
 ```
@@ -970,7 +957,7 @@ private def mkToModuleDisplayInstanceCmd (typeName : Name) : CommandElabM Unit :
   -- Build field entries: (name, toModuleNode x.field name)
   let fieldEntries : Array (TSyntax `term) ← fieldNames.mapM fun fname => do
     let fnameStr := toString fname
-    `(term| ($(Lean.quote fnameStr), ToModuleDisplay.toModuleNode x.$(mkIdent fname) $(Lean.quote fnameStr)))
+    `(term| ($(Lean.quote fnameStr), ← ToModuleDisplay.toModuleNode x.$(mkIdent fname) $(Lean.quote fnameStr)))
 
   let fieldsArray ← `(term| #[$[$fieldEntries],*])
 
@@ -981,7 +968,7 @@ private def mkToModuleDisplayInstanceCmd (typeName : Name) : CommandElabM Unit :
     -- No parameters - simple instance
     let instCmd ← `(command|
       instance : ToModuleDisplay $(mkIdent typeName) where
-        toModuleNode x name := ModuleNode.group name $fieldsArray
+        toModuleNode x name := do pure (ModuleNode.group name $fieldsArray)
     )
     elabCommand instCmd
   else
@@ -1010,7 +997,7 @@ private def mkToModuleDisplayInstanceCmd (typeName : Name) : CommandElabM Unit :
         -- Generate instance command with binders
         `(command|
           instance $[$binderStxs]* : ToModuleDisplay $appliedType where
-            toModuleNode x name := ModuleNode.group name $fieldsArray
+            toModuleNode x name := do pure (ModuleNode.group name $fieldsArray)
         )
 
     elabCommand instCmd

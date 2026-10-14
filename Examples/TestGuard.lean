@@ -10,8 +10,8 @@ open torch
 def exampleModule : IO ModuleDisplayProps := do
   let weight ← Tensor.randn #[64, 128]
   let bias ← Tensor.randn #[64]
-  let weightNode := ModuleNode.tensor (tensorToPropsNamed weight "weight" #["out", "in"])
-  let biasNode := ModuleNode.tensor (tensorToPropsNamed bias "bias" #["out"])
+  let weightNode := ModuleNode.tensor (← tensorToPropsNamed weight "weight" #["out", "in"])
+  let biasNode := ModuleNode.tensor (← tensorToPropsNamed bias "bias" #["out"])
 
   return {
     root := ModuleNode.group "Linear" #[
@@ -27,12 +27,12 @@ def mlpModule : IO ModuleDisplayProps := do
   let w2 ← Tensor.randn #[10, 128]
   let b2 ← Tensor.randn #[10]
   let layer1 := ModuleNode.group "layer1" #[
-    ("weight", ModuleNode.tensor (tensorToPropsNamed w1 "weight" #["out", "in"])),
-    ("bias", ModuleNode.tensor (tensorToPropsNamed b1 "bias" #["out"]))
+    ("weight", ModuleNode.tensor (← tensorToPropsNamed w1 "weight" #["out", "in"])),
+    ("bias", ModuleNode.tensor (← tensorToPropsNamed b1 "bias" #["out"]))
   ]
   let layer2 := ModuleNode.group "layer2" #[
-    ("weight", ModuleNode.tensor (tensorToPropsNamed w2 "weight" #["out", "in"])),
-    ("bias", ModuleNode.tensor (tensorToPropsNamed b2 "bias" #["out"]))
+    ("weight", ModuleNode.tensor (← tensorToPropsNamed w2 "weight" #["out", "in"])),
+    ("bias", ModuleNode.tensor (← tensorToPropsNamed b2 "bias" #["out"]))
     ]
   return {
     root := ModuleNode.group "MLP" #[
@@ -62,6 +62,6 @@ def exampleMLP : IO ModuleDisplayProps := do
   let fc1 ← Linear.init 64 256
   let fc2 ← Linear.init 256 10
   let mlp : MLP 64 256 10 := { fc1, fc2 }
-  pure (toModuleDisplayProps mlp "MLP(64 → 256 → 10)")
+  toModuleDisplayProps mlp "MLP(64 → 256 → 10)"
 
 #module exampleMLP

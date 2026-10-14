@@ -28,12 +28,12 @@ import Tyr.Module.Derive
 open torch
 
 structure MyLinear (inDim outDim : UInt64) where
-  weight : DTensor #[outDim, inDim] .Float32
-  bias : Option (DTensor #[outDim] .Float32) := none
+  weight : Tensor { shape := #[outDim, inDim], dtype := .Float32 }
+  bias : Option (Tensor { shape := #[outDim], dtype := .Float32 }) := none
   deriving TensorStruct
 
 instance {inDim outDim batch : UInt64} :
-    Module (MyLinear inDim outDim) (DTensor #[batch, inDim] .Float32) (DTensor #[batch, outDim] .Float32) where
+    Module (MyLinear inDim outDim) (Tensor { shape := #[batch, inDim], dtype := .Float32 }) (Tensor { shape := #[batch, outDim], dtype := .Float32 }) where
   forward m x :=
     let y := Tensor.linear x m.weight
     match m.bias with
@@ -65,7 +65,7 @@ structure MyLinearCtx (inDim outDim : UInt64) where
 
 instance {inDim outDim batch : UInt64} :
     ModuleCtx (MyLinearCtx inDim outDim) TrainingCtx
-      (DTensor #[batch, inDim] .Float32) (DTensor #[batch, outDim] .Float32) where
+      (Tensor { shape := #[batch, inDim], dtype := .Float32 }) (Tensor { shape := #[batch, outDim], dtype := .Float32 }) where
   forward m ctx x := do
     let y := Module.forward m.lin x
     Tensor.dropout y ctx.dropout_p ctx.training

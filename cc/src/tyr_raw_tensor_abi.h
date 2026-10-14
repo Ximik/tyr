@@ -7,6 +7,15 @@
 extern "C" {
 #endif
 
+// Basic metadata calls consume their legacy shape argument and borrow the tensor.
+lean_object* lean_torch_to_string(lean_object*, lean_object*);
+lean_object* lean_torch_get_shape(lean_object*, lean_object*);
+lean_object* lean_torch_get_dtype(lean_object*, lean_object*);
+lean_object* lean_torch_get_device_enum(lean_object*, lean_object*);
+lean_object* lean_torch_get_device(lean_object*, lean_object*);
+lean_object* lean_torch_get_values(lean_object*, lean_object*, uint64_t);
+lean_object* lean_torch_get_stats(lean_object*, lean_object*);
+
 lean_object* lean_torch_slice_along_dim(lean_object*, lean_object*, uint64_t, uint64_t, uint64_t);
 lean_object* lean_torch_clamp_float(lean_object*, lean_object*, double, double);
 lean_object* lean_torch_diag(uint64_t, lean_object*);
@@ -39,11 +48,13 @@ lean_object* lean_torch_uniform_like(lean_object*, lean_object*, double, double)
 lean_object* lean_torch_abs(lean_object*, lean_object*);
 lean_object* lean_torch_to(lean_object*, lean_object*, lean_object*);
 lean_object* lean_torch_cast_dtype(lean_object*, lean_object*, lean_object*);
+lean_object* lean_torch_convert_tensor(lean_object*, lean_object*, lean_object*, lean_object*);
 uint8_t lean_torch_requires_grad(lean_object*, lean_object*);
 double lean_torch_l2_norm(uint64_t, lean_object*);
 double lean_torch_item(lean_object*, lean_object*);
 lean_object* lean_torch_gt(lean_object*, lean_object*, lean_object*);
 lean_object* lean_torch_where(lean_object*, lean_object*, lean_object*, lean_object*);
+// grad_of: borrowed tensor -> IO detached snapshot; zero_grad: borrowed tensor -> IO Unit.
 lean_object* lean_torch_grad_of(lean_object*, lean_object*);
 lean_object* lean_torch_zero_grad(lean_object*, lean_object*);
 lean_object* lean_torch_add_scalar(lean_object*, lean_object*, double);
@@ -76,6 +87,7 @@ lean_object* lean_torch_randn(lean_object*, uint8_t, lean_object*);
 lean_object* lean_torch_reshape_exact(lean_object*, lean_object*, lean_object*);
 lean_object* lean_torch_rsqrt(lean_object*, lean_object*);
 lean_object* lean_torch_sdpa_4d(uint64_t, uint64_t, uint64_t, uint64_t, lean_object*, lean_object*, lean_object*, double, uint8_t);
+// set_requires_grad consumes the tensor and returns its updated value.
 lean_object* lean_torch_set_requires_grad(lean_object*, lean_object*, uint8_t);
 lean_object* lean_torch_sqrt(lean_object*, lean_object*);
 lean_object* lean_torch_squeeze(lean_object*, lean_object*, lean_object*);

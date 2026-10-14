@@ -2,11 +2,11 @@
 # Tyr.Basic.Types
 
 The pure part of `Tyr.Basic`: `Shape`, `DType`, `Device`, the native tensor
-carrier `RawTensor`, the indexed `Tensor` over `StaticSpec`, and shape-transform
+carrier `RawTensor`, the tensor index `StaticSpec`, and shape-transform
 utilities. It declares no native functions, so the GPU code generator can use it
 without linking `libTyrC`. `Tyr.Basic` adds the tensor metadata functions
-implemented in `libTyrC`. Public tensors retain their shape, dtype, and device
-policy in the `Tensor` index.
+implemented in `libTyrC`, along with the indexed `Tensor` and its checked
+construction boundary.
 -/
 
 namespace torch
@@ -115,31 +115,6 @@ structure StaticSpec where
   dtype : DType := .Unknown "dynamic"
   device : DevicePolicy := .any
 deriving Repr, BEq
-
-/-- Typed tensor: enforced `StaticSpec` index over a native handle. -/
-structure Tensor (σ : StaticSpec) where
-  private mk ::
-  raw : RawTensor
-
-/-- Shape+dtype instantiation of the graded tensor (device unconstrained). -/
-abbrev DTensor (shape : Shape) (dtype : DType) : Type :=
-  Tensor { shape, dtype }
-
-abbrev TT (shape : Shape) (dtype : DType) : Type :=
-  DTensor shape dtype
-
-/-- Shape-only instantiation of the graded tensor: dtype and device policy
-    stay dynamic, matching runtime buffers whose dtype follows the parameter. -/
-abbrev STensor (shape : Shape) : Type :=
-  Tensor { shape }
-
-namespace Tensor
-
-/-- Wrap a raw tensor, assuming the full static spec holds. -/
-def assumeSpec {σ : StaticSpec} (raw : RawTensor) : Tensor σ :=
-  .mk raw
-
-end Tensor
 
 /-! ## Shape Manipulation Helpers -/
 

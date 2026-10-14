@@ -2,7 +2,7 @@ import Tyr.RawTensor
 
 namespace torch.RawTensor
 @[extern "lean_torch_copy_inplace"] opaque copyInplace (shape : Shape)
-    (dst src : @& RawTensor) : RawTensor
+    (dst : RawTensor) (src : @& RawTensor) : IO RawTensor
 @[extern "lean_torch_touch"] opaque touch (shape : Shape) (input : @& RawTensor) : IO Unit
 @[extern "lean_torch_mul_tensor_scalar"] opaque mulTensorScalar (shape : Shape)
     (input scalar : @& RawTensor) : RawTensor

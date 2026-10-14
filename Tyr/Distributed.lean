@@ -1,4 +1,5 @@
 import Tyr.TensorStruct
+import Tyr.Inference.OwnedKV
 
 /-!
 # Tyr.Distributed
@@ -45,6 +46,13 @@ def ReduceOp.toUInt8 : ReduceOp → UInt8
 structure WorkHandle where
   id : UInt64
   deriving Repr, BEq, Inhabited
+
+/-- Wait for an async operation to complete. -/
+@[extern "lean_torch_dist_wait"]
+private opaque waitImpl (workId : UInt64) : IO Unit
+
+def wait (handle : WorkHandle) : IO Unit :=
+  waitImpl handle.id
 
 /-! ## Process Group Management -/
 
@@ -98,16 +106,24 @@ opaque barrier : IO Unit
 @[extern "lean_torch_dist_all_reduce"]
 private opaque allReduceImpl (tensor : @& RawTensor) (op : UInt8) (asyncOp : UInt8) : IO UInt64
 
-/-- All-reduce (synchronous). The buffer is reduced in place; the static spec
-    is untouched by the collective. -/
-def allReduce {σ : StaticSpec} (tensor : Tensor σ) (op : ReduceOp := .sum) : IO Unit := do
-  let _ ← allReduceImpl tensor.raw op.toUInt8 0
-  return ()
+/-- All-reduce into an independent result, preserving the input tensor and its
+    `requiresGrad` flag. A trainable result is a new leaf. -/
+def allReduce {σ : StaticSpec} (tensor : Tensor σ) (op : ReduceOp := .sum) : IO (Tensor σ) := do
+  let requiresGrad := tensor.requiresGrad
+  let result ← data.cloneInferenceIO tensor
+  let _ ← allReduceImpl result.raw op.toUInt8 0
+  return result.setRequiresGrad requiresGrad
 
-/-- All-reduce (asynchronous) -/
-def allReduceAsync {σ : StaticSpec} (tensor : Tensor σ) (op : ReduceOp := .sum) : IO WorkHandle := do
-  let id ← allReduceImpl tensor.raw op.toUInt8 1
-  return ⟨id⟩
+/-- Launch all-reduce on an independent buffer. Execute the returned action once
+    to await completion and obtain the result; no pending tensor is exposed. -/
+def allReduceAsync {σ : StaticSpec} (tensor : Tensor σ) (op : ReduceOp := .sum) :
+    IO (IO (Tensor σ)) := do
+  let requiresGrad := tensor.requiresGrad
+  let result ← data.cloneInferenceIO tensor
+  let id ← allReduceImpl result.raw op.toUInt8 1
+  return do
+    wait ⟨id⟩
+    pure (result.setRequiresGrad requiresGrad)
 
 /-- Broadcast tensor from source rank to all processes (in-place).
 
@@ -118,9 +134,13 @@ def allReduceAsync {σ : StaticSpec} (tensor : Tensor σ) (op : ReduceOp := .sum
 @[extern "lean_torch_dist_broadcast"]
 private opaque broadcastImpl (tensor : @& RawTensor) (srcRank : UInt64) : IO Unit
 
-/-- Broadcast a tensor from `srcRank` (in-place buffer update). -/
-def broadcast {σ : StaticSpec} (tensor : Tensor σ) (srcRank : UInt64) : IO Unit :=
-  broadcastImpl tensor.raw srcRank
+/-- Return the tensor broadcast from `srcRank`, preserving the input value and
+    its `requiresGrad` flag. A trainable result is a new leaf. -/
+def broadcast {σ : StaticSpec} (tensor : Tensor σ) (srcRank : UInt64) : IO (Tensor σ) := do
+  let requiresGrad := tensor.requiresGrad
+  let result ← data.cloneInferenceIO tensor
+  broadcastImpl result.raw srcRank
+  pure (result.setRequiresGrad requiresGrad)
 
 /-- Reduce-scatter: reduce tensors and scatter results to all processes.
 
@@ -134,13 +154,23 @@ def broadcast {σ : StaticSpec} (tensor : Tensor σ) (srcRank : UInt64) : IO Uni
 private opaque reduceScatterImpl (output : @& RawTensor) (input : @& RawTensor)
     (op : UInt8) (asyncOp : UInt8) : IO UInt64
 
+/-- Allocate private collective storage with the input's actual dtype and device,
+    including when the static specification leaves either component unrestricted. -/
+private def collectiveOutput {σ : StaticSpec} (shape : Shape) (input : Tensor σ) :
+    IO (Tensor (σ.withShape shape)) := do
+  let template := Tensor.zerosFor { shape, dtype := input.raw.dtype, device := .exact input.raw.device }
+  let output ← data.cloneInferenceIO template
+  match Tensor.ofRaw output.raw with
+  | .ok result => pure result
+  | .error message => throw (IO.userError s!"Collective output allocation: {message}")
+
 /-- Reduce-scatter (synchronous), return-allocated: the input's leading axis is
     chunked across `worldSize` ranks, so the result spec is computed from the
     input spec — no independent output shape can be claimed. -/
 def reduceScatter {σ : StaticSpec} (worldSize : UInt64) (input : Tensor σ)
     (op : ReduceOp := .sum)
     : IO (Tensor (σ.withShape (σ.shape.set! 0 (σ.shape.getD 0 0 / worldSize)))) := do
-  let output := Tensor.zerosFor (σ.withShape (σ.shape.set! 0 (σ.shape.getD 0 0 / worldSize)))
+  let output ← collectiveOutput (σ.shape.set! 0 (σ.shape.getD 0 0 / worldSize)) input
   let _ ← reduceScatterImpl output.raw input.raw op.toUInt8 0
   return output
 
@@ -154,11 +184,14 @@ def reduceScatter {σ : StaticSpec} (worldSize : UInt64) (input : Tensor σ)
 private opaque reduceScatterListImpl (output : @& RawTensor) (inputs : @& Array RawTensor)
     (op : UInt8) : IO Unit
 
-/-- Reduce-scatter from an explicit list of per-rank inputs (one per rank),
-    all sharing the output's spec. -/
+/-- Reduce-scatter from per-rank inputs into an independent copy of `output`.
+    All inputs and the output template retain their original values. -/
 def reduceScatterList {σ : StaticSpec} (output : Tensor σ) (inputs : Array (Tensor σ))
-    (op : ReduceOp := .sum) : IO Unit :=
-  reduceScatterListImpl output.raw (inputs.map Tensor.toTensor) op.toUInt8
+    (op : ReduceOp := .sum) : IO (Tensor σ) := do
+  let requiresGrad := output.requiresGrad
+  let result ← data.cloneInferenceIO output
+  reduceScatterListImpl result.raw (inputs.map Tensor.toTensor) op.toUInt8
+  pure (result.setRequiresGrad requiresGrad)
 
 /-- All-gather: gather tensors from all processes to all processes.
     The output buffer (leading axis = worldSize × input's) is written in place.
@@ -174,7 +207,7 @@ private opaque allGatherImpl (output : @& RawTensor) (input : @& RawTensor)
     computed from the input spec — no independent output shape can be claimed. -/
 def allGather {σ : StaticSpec} (worldSize : UInt64) (input : Tensor σ)
     : IO (Tensor (σ.withShape (σ.shape.set! 0 (σ.shape.getD 0 0 * worldSize)))) := do
-  let output := Tensor.zerosFor (σ.withShape (σ.shape.set! 0 (σ.shape.getD 0 0 * worldSize)))
+  let output ← collectiveOutput (σ.shape.set! 0 (σ.shape.getD 0 0 * worldSize)) input
   let _ ← allGatherImpl output.raw input.raw 0
   return output
 
@@ -187,16 +220,16 @@ def allGather {σ : StaticSpec} (worldSize : UInt64) (input : Tensor σ)
 @[extern "lean_torch_dist_all_gather_list"]
 private opaque allGatherListImpl (outputs : @& Array RawTensor) (input : @& RawTensor) : IO Unit
 
-/-- All-gather into an explicit list of output tensor buffers sharing the
-    input's spec. -/
-def allGatherList {σ : StaticSpec} (outputs : Array (Tensor σ)) (input : Tensor σ) : IO Unit :=
-  allGatherListImpl (outputs.map Tensor.toTensor) input.raw
+/-- All-gather into independent copies of the output templates. Every returned
+    entry has its own storage, including when templates share an input value. -/
+def allGatherList {σ : StaticSpec} (outputs : Array (Tensor σ)) (input : Tensor σ) :
+    IO (Array (Tensor σ)) := do
+  let requiresGrad := outputs.map Tensor.requiresGrad
+  let results ← outputs.mapM data.cloneInferenceIO
+  allGatherListImpl (results.map Tensor.toTensor) input.raw
+  pure (results.mapIdx fun i result => result.setRequiresGrad (requiresGrad[i]?.getD false))
 
 /-! ## Async Operation Handling -/
-
-/-- Wait for an async operation to complete -/
-@[extern "lean_torch_dist_wait"]
-opaque wait (handle : WorkHandle) : IO Unit
 
 /-- Check if an async operation is complete (non-blocking) -/
 @[extern "lean_torch_dist_is_completed"]
@@ -205,12 +238,32 @@ private opaque isCompletedImpl (workId : UInt64) : IO Bool
 def WorkHandle.isCompleted (handle : WorkHandle) : IO Bool :=
   isCompletedImpl handle.id
 
-/-- Wait for multiple async operations -/
+/-- Wait for every async operation, then rethrow the first error if any wait
+    failed. Later work handles are drained even when an earlier operation fails. -/
 def waitAll (handles : Array WorkHandle) : IO Unit := do
+  let mut firstError : Option IO.Error := none
   for h in handles do
-    wait h
+    try
+      wait h
+    catch error =>
+      if firstError.isNone then firstError := some error
+  match firstError with
+  | some error => throw error
+  | none => pure ()
 
 /-! ## Polar Express Operations -/
+
+/-- Validate native results before exposing the indexed API. In particular,
+floating scalar arithmetic can promote an integer input's dtype. -/
+private def checkedResult {σ : StaticSpec} (operation : String) (dtype : DType)
+    (device : Device) (raw : RawTensor) : IO (Tensor σ) :=
+  let checked : Except String (Tensor σ) := do
+    TensorSpec.checkDType dtype raw.dtype
+    (DevicePolicy.exact device).check raw.device
+    Tensor.ofRaw raw
+  match checked with
+  | .ok tensor => pure tensor
+  | .error message => throw (IO.userError s!"{operation}: {message}")
 
 /-- Symmetric matrix multiplication: C = A @ A.T (raw handle boundary).
 
@@ -224,7 +277,7 @@ private opaque xxtImpl (A : @& RawTensor) : IO RawTensor
     input, not claimed independently. -/
 def xxt {m n : UInt64} {d : DType} {dev : DevicePolicy}
     (A : Tensor ⟨#[m, n], d, dev⟩) : IO (Tensor ⟨#[m, m], d, dev⟩) := do
-  pure (.assumeSpec (← xxtImpl A.raw))
+  checkedResult "xxt" A.raw.dtype A.device (← xxtImpl A.raw)
 
 /-- Fused operation: C = beta * A + alpha * (A @ A.T)
 
@@ -235,7 +288,7 @@ private opaque baPlusCaaImpl (A : @& RawTensor) (alpha beta : Float) : IO RawTen
 
 /-- `beta * A + alpha * (A @ Aᵀ)`, spec-preserving. -/
 def baPlusCaa {σ : StaticSpec} (A : Tensor σ) (alpha beta : Float) : IO (Tensor σ) := do
-  pure (.assumeSpec (← baPlusCaaImpl A.raw alpha beta))
+  checkedResult "baPlusCaa" A.raw.dtype A.device (← baPlusCaaImpl A.raw alpha beta)
 
 /-- Single Newton-Schulz iteration step (raw handle boundary).
 
@@ -246,7 +299,7 @@ private opaque newtonSchulzStepImpl (X : @& RawTensor) (a b c : Float) : IO RawT
 
 /-- Single Newton-Schulz iteration step, spec-preserving. -/
 def newtonSchulzStep {σ : StaticSpec} (X : Tensor σ) (a b c : Float) : IO (Tensor σ) := do
-  pure (.assumeSpec (← newtonSchulzStepImpl X.raw a b c))
+  checkedResult "newtonSchulzStep" X.raw.dtype X.device (← newtonSchulzStepImpl X.raw a b c)
 
 /-- Polar Express orthogonalization via Newton-Schulz iterations (raw boundary).
 
@@ -259,7 +312,7 @@ private opaque polarExpressImpl (G : @& RawTensor) (numIters : UInt64) : IO RawT
 /-- Polar Express orthogonalization via Newton-Schulz iterations,
     spec-preserving. -/
 def polarExpress {σ : StaticSpec} (G : Tensor σ) (numIters : UInt64 := 5) : IO (Tensor σ) := do
-  pure (.assumeSpec (← polarExpressImpl G.raw numIters))
+  checkedResult "polarExpress" G.raw.dtype G.device (← polarExpressImpl G.raw numIters)
 
 /-- Muon-style orthogonalized gradient (raw boundary).
 
@@ -274,9 +327,7 @@ private opaque muonOrthogonalizeImpl (G : @& RawTensor) (numIters : UInt64) : IO
     Shape and placement are preserved; the output dtype is explicit. -/
 def muonOrthogonalize {σ : StaticSpec} (G : Tensor σ) (numIters : UInt64 := 5) :
     IO (Tensor (σ.withDType .BFloat16)) := do
-  match Tensor.ofRaw (← muonOrthogonalizeImpl G.raw numIters) with
-  | .ok tensor => pure tensor
-  | .error message => throw (IO.userError s!"muonOrthogonalize: {message}")
+  checkedResult "muonOrthogonalize" .BFloat16 G.device (← muonOrthogonalizeImpl G.raw numIters)
 
 /-- Cautious weight decay update (raw boundary).
 
@@ -289,7 +340,7 @@ private opaque cautiousUpdateImpl (param update : @& RawTensor) (lr wd : Float) 
 
 /-- Cautious weight decay update, spec-preserving. -/
 def cautiousUpdate {σ : StaticSpec} (param update : Tensor σ) (lr wd : Float) : IO (Tensor σ) := do
-  pure (.assumeSpec (← cautiousUpdateImpl param.raw update.raw lr wd))
+  checkedResult "cautiousUpdate" param.raw.dtype param.device (← cautiousUpdateImpl param.raw update.raw lr wd)
 
 /-! ## Helper Functions -/
 
@@ -314,10 +365,9 @@ def isMaster : IO Bool := do
 
 /-- Broadcast model parameters from rank 0 to all processes -/
 def broadcastParams {α : Type} [TensorStruct α] (params : α) : IO α := do
-  TensorStruct.mapM (fun t => do broadcast t 0; pure t) params
+  TensorStruct.mapM (fun t => broadcast t 0) params
 
-/-- All-reduce gradients across all processes.
-    Uses the gradient field of tensors that have requires_grad=true.
+/-- All-reduce gradient values across all processes, preserving the input tree.
 
     Args:
     - grads: Gradient structure (typically from TensorStruct.grads)
@@ -326,25 +376,31 @@ def broadcastParams {α : Type} [TensorStruct α] (params : α) : IO α := do
     After this call, all ranks have the same averaged gradients.
 -/
 def allReduceGrads {α : Type} [TensorStruct α] (grads : α) (op : ReduceOp := .avg) : IO α := do
-  TensorStruct.mapM (fun t => do
-    allReduce t op
-    pure t
-  ) grads
+  TensorStruct.mapM (fun t => allReduce t op) grads
 
-/-- All-reduce gradients asynchronously, returning work handles.
-    Use `waitAll` to wait for completion before using gradients.
+/-- Launch all gradient reductions, returning an action that waits for every
+    operation before exposing the independent result tree. Execute it once.
 -/
 def allReduceGradsAsync {α : Type} [TensorStruct α] (grads : α) (op : ReduceOp := .avg)
-    : IO (α × Array WorkHandle) := do
-  -- Use a StateT pattern to collect handles
+    : IO (IO α) := do
   let handlesRef ← IO.mkRef #[]
-  let result ← TensorStruct.mapM (fun t => do
-    let h ← allReduceAsync t op
-    handlesRef.modify (·.push h)
-    pure t
-  ) grads
-  let handles ← handlesRef.get
-  return (result, handles)
+  try
+    let result ← TensorStruct.mapM (fun t => do
+      let output ← data.cloneInferenceIO t
+      let id ← allReduceImpl output.raw op.toUInt8 1
+      handlesRef.modify (·.push (WorkHandle.mk id))
+      pure output
+    ) grads
+    let handles ← handlesRef.get
+    return do
+      waitAll handles
+      pure (TensorStruct.zipWith (fun original output =>
+        output.setRequiresGrad original.requiresGrad) grads result)
+  catch error =>
+    -- Drain any operations launched before a later leaf failed.
+    for handle in (← handlesRef.get) do
+      try wait handle catch _ => pure ()
+    throw error
 
 /-! ## Distributed Sampler -/
 

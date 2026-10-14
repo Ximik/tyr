@@ -1,7 +1,7 @@
 /-
   Examples/GPU/RunCopy.lean
 
-  End-to-end GPU demo and allocation-free copy benchmark.
+  End-to-end GPU demo and copy benchmark.
 -/
 import Examples.GPU.Benchmark
 import Tyr.Torch
@@ -43,18 +43,23 @@ private def runBenchmark (args : List String) : IO UInt32 := do
   let stream ← torch.cuda_current_stream
 
   copy64x64Float4.launch input.raw tyrOut.raw 1 1 1 512 1 1 0 stream
-  Tensor.copyInto torchOut input
+  let torchOut ← Tensor.copyInto torchOut input
   torch.cuda_synchronize
   let tyrCheck ← reportTensorComparison "copy.bench.tyr" input tyrOut 1e-7 1e-7
   let torchCheck ← reportTensorComparison "copy.bench.torch" input torchOut 1e-7 1e-7
 
   let tyrSamples ← timeCudaEvents cfg stream do
     copy64x64Float4.launch input.raw tyrOut.raw 1 1 1 512 1 1 0 stream
+  let torchBuffer ← IO.mkRef (some torchOut)
   let torchSamples ← timeCudaEvents cfg stream do
-    Tensor.copyInto torchOut input
+    let some destination ← torchBuffer.swap none
+      | throw (IO.userError "Copy benchmark destination is unavailable")
+    let updated ← Tensor.copyInto destination input
+    torchBuffer.set (some updated)
 
   let tyrLine := summaryJson cfg "copy_f32_64x64" "tyr" "generated_float4_512x2" tyrSamples tyrCheck
   let torchLine := summaryJson cfg "copy_f32_64x64" "torch_eager" "libtorch_copy_" torchSamples torchCheck
+    "copy_on_write_update" false
   IO.println tyrLine
   IO.println torchLine
   match cfg.jsonlOut? with

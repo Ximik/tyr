@@ -579,70 +579,70 @@ private def benchmarkAction (warmup iters repeats : Nat) (action : IO Unit) : IO
 
 private def sdpaEqualRef
     {batch heads seq headDim : UInt64}
-    (qBase kBase vBase dOBase : DTensor #[batch, heads, seq, headDim] .BFloat16)
+    (qBase kBase vBase dOBase : Tensor { shape := #[batch, heads, seq, headDim], dtype := .BFloat16 })
     (isCausal : Bool)
-    : IO (DTensor #[batch, heads, seq, headDim] .BFloat16 × DTensor #[batch, heads, seq, headDim] .Float32 × DTensor #[batch, heads, seq, headDim] .Float32 × DTensor #[batch, heads, seq, headDim] .Float32) := do
+    : IO (Tensor { shape := #[batch, heads, seq, headDim], dtype := .BFloat16 } × Tensor { shape := #[batch, heads, seq, headDim], dtype := .Float32 } × Tensor { shape := #[batch, heads, seq, headDim], dtype := .Float32 } × Tensor { shape := #[batch, heads, seq, headDim], dtype := .Float32 }) := do
   let q ← makeLeaf qBase
   let k ← makeLeaf kBase
   let v ← makeLeaf vBase
   let out := Tensor.attentionGQA q k v 0.0 isCausal
   backwardWithCotangent out dOBase
   let _ ← torch.cuda_synchronize
-  pure (out, (Tensor.gradOf q).toFloat32, (Tensor.gradOf k).toFloat32, (Tensor.gradOf v).toFloat32)
+  pure (out, (← Tensor.gradOf q).toFloat32, (← Tensor.gradOf k).toFloat32, (← Tensor.gradOf v).toFloat32)
 
 private def sdpaGqaRef
     {batch qHeads kvHeads seq headDim : UInt64}
-    (qBase : DTensor #[batch, qHeads, seq, headDim] .BFloat16)
-    (kBase vBase : DTensor #[batch, kvHeads, seq, headDim] .BFloat16)
-    (dOBase : DTensor #[batch, qHeads, seq, headDim] .BFloat16)
+    (qBase : Tensor { shape := #[batch, qHeads, seq, headDim], dtype := .BFloat16 })
+    (kBase vBase : Tensor { shape := #[batch, kvHeads, seq, headDim], dtype := .BFloat16 })
+    (dOBase : Tensor { shape := #[batch, qHeads, seq, headDim], dtype := .BFloat16 })
     (isCausal : Bool)
-    : IO (DTensor #[batch, qHeads, seq, headDim] .BFloat16 × DTensor #[batch, qHeads, seq, headDim] .Float32 × DTensor #[batch, kvHeads, seq, headDim] .Float32 × DTensor #[batch, kvHeads, seq, headDim] .Float32) := do
+    : IO (Tensor { shape := #[batch, qHeads, seq, headDim], dtype := .BFloat16 } × Tensor { shape := #[batch, qHeads, seq, headDim], dtype := .Float32 } × Tensor { shape := #[batch, kvHeads, seq, headDim], dtype := .Float32 } × Tensor { shape := #[batch, kvHeads, seq, headDim], dtype := .Float32 }) := do
   let q ← makeLeaf qBase
   let k ← makeLeaf kBase
   let v ← makeLeaf vBase
   let out := Tensor.attentionGQAQKV q k v 0.0 isCausal true
   backwardWithCotangent out dOBase
   let _ ← torch.cuda_synchronize
-  pure (out, (Tensor.gradOf q).toFloat32, (Tensor.gradOf k).toFloat32, (Tensor.gradOf v).toFloat32)
+  pure (out, (← Tensor.gradOf q).toFloat32, (← Tensor.gradOf k).toFloat32, (← Tensor.gradOf v).toFloat32)
 
 private def tyrEqualOnce
     {batch heads seq headDim : UInt64}
-    (qBase kBase vBase dOBase : DTensor #[batch, heads, seq, headDim] .BFloat16)
+    (qBase kBase vBase dOBase : Tensor { shape := #[batch, heads, seq, headDim], dtype := .BFloat16 })
     (isCausal : Bool)
-    : IO (DispatchRoute × DTensor #[batch, heads, seq, headDim] .BFloat16 × DTensor #[batch, heads, seq, headDim] .Float32 × DTensor #[batch, heads, seq, headDim] .Float32 × DTensor #[batch, heads, seq, headDim] .Float32) := do
+    : IO (DispatchRoute × Tensor { shape := #[batch, heads, seq, headDim], dtype := .BFloat16 } × Tensor { shape := #[batch, heads, seq, headDim], dtype := .Float32 } × Tensor { shape := #[batch, heads, seq, headDim], dtype := .Float32 } × Tensor { shape := #[batch, heads, seq, headDim], dtype := .Float32 }) := do
   let q ← makeLeaf qBase
   let k ← makeLeaf kBase
   let v ← makeLeaf vBase
   let (route, out) := flashAttnWithRoute q k v none 0.0 isCausal none false
   backwardWithCotangent out dOBase
   let _ ← torch.cuda_synchronize
-  pure (route, out, (Tensor.gradOf q).toFloat32, (Tensor.gradOf k).toFloat32, (Tensor.gradOf v).toFloat32)
+  pure (route, out, (← Tensor.gradOf q).toFloat32, (← Tensor.gradOf k).toFloat32, (← Tensor.gradOf v).toFloat32)
 
 private def tyrGqaOnce
     {batch qHeads kvHeads seq headDim : UInt64}
-    (qBase : DTensor #[batch, qHeads, seq, headDim] .BFloat16)
-    (kBase vBase : DTensor #[batch, kvHeads, seq, headDim] .BFloat16)
-    (dOBase : DTensor #[batch, qHeads, seq, headDim] .BFloat16)
+    (qBase : Tensor { shape := #[batch, qHeads, seq, headDim], dtype := .BFloat16 })
+    (kBase vBase : Tensor { shape := #[batch, kvHeads, seq, headDim], dtype := .BFloat16 })
+    (dOBase : Tensor { shape := #[batch, qHeads, seq, headDim], dtype := .BFloat16 })
     (isCausal : Bool)
-    : IO (DispatchRoute × DTensor #[batch, qHeads, seq, headDim] .BFloat16 × DTensor #[batch, qHeads, seq, headDim] .Float32 × DTensor #[batch, kvHeads, seq, headDim] .Float32 × DTensor #[batch, kvHeads, seq, headDim] .Float32) := do
+    : IO (DispatchRoute × Tensor { shape := #[batch, qHeads, seq, headDim], dtype := .BFloat16 } × Tensor { shape := #[batch, qHeads, seq, headDim], dtype := .Float32 } × Tensor { shape := #[batch, kvHeads, seq, headDim], dtype := .Float32 } × Tensor { shape := #[batch, kvHeads, seq, headDim], dtype := .Float32 }) := do
   let q ← makeLeaf qBase
   let k ← makeLeaf kBase
   let v ← makeLeaf vBase
   let (route, out) := flashAttnWithRoute q k v none 0.0 isCausal none true
   backwardWithCotangent out dOBase
   let _ ← torch.cuda_synchronize
-  pure (route, out, (Tensor.gradOf q).toFloat32, (Tensor.gradOf k).toFloat32, (Tensor.gradOf v).toFloat32)
+  pure (route, out, (← Tensor.gradOf q).toFloat32, (← Tensor.gradOf k).toFloat32, (← Tensor.gradOf v).toFloat32)
 
 private def sdpaEqualForward {batch heads seq headDim : UInt64}
-    (qBase kBase vBase : DTensor #[batch, heads, seq, headDim] .BFloat16)
+    (qBase kBase vBase : Tensor { shape := #[batch, heads, seq, headDim], dtype := .BFloat16 })
     (isCausal : Bool)
-    : DTensor #[batch, heads, seq, headDim] .BFloat16 :=
+    : Tensor { shape := #[batch, heads, seq, headDim], dtype := .BFloat16 } :=
   Tensor.attentionGQA qBase kBase vBase 0.0 isCausal
 
 private def tyrEqualForward {batch heads seq headDim : UInt64}
-    (qBase kBase vBase : DTensor #[batch, heads, seq, headDim] .BFloat16)
+    (qBase kBase vBase : Tensor { shape := #[batch, heads, seq, headDim], dtype := .BFloat16 })
     (isCausal : Bool)
-    : DispatchRoute × DTensor #[batch, heads, seq, headDim] .BFloat16 :=
+    : DispatchRoute × Tensor { shape := #[batch, heads, seq, headDim], dtype := .BFloat16 } :=
   flashAttnWithRoute qBase kBase vBase none 0.0 isCausal none false
 
 private def runEqualHeadsFwdBwd

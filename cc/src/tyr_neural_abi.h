@@ -5,6 +5,7 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+// copy_ consumes destination, borrows source, and returns IO RawTensor.
 lean_object* lean_torch_copy_(lean_object*, lean_object*, lean_object*);
 lean_object* lean_torch_conv2d_bias(lean_object*, lean_object*, lean_object*, lean_object*, lean_object*, lean_object*, lean_object*, lean_object*, lean_object*);
 lean_object* lean_torch_cat_dyn(lean_object*, lean_object*);
@@ -18,6 +19,7 @@ lean_object* lean_torch_masked_select(lean_object*, lean_object*, lean_object*);
 lean_object* lean_torch_masked_scatter(lean_object*, lean_object*, lean_object*, lean_object*, lean_object*);
 lean_object* lean_torch_sdpa_gqa_qkv(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, lean_object*, lean_object*, lean_object*, double, uint8_t, uint8_t);
 lean_object* lean_torch_tyr_flash_attn_4d(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, lean_object*, lean_object*, lean_object*, lean_object*, double, uint8_t, lean_object*, uint8_t);
+// slice_scatter consumes input, borrows source, and returns a tensor value.
 lean_object* lean_torch_slice_scatter_along_dim(lean_object*, lean_object*, lean_object*, uint64_t, uint64_t, lean_object*);
 lean_object* lean_torch_apply_rotary_emb(uint64_t, uint64_t, uint64_t, uint64_t, lean_object*, lean_object*, lean_object*);
 lean_object* lean_torch_compute_rotary_freqs_on_device_pure(uint64_t, uint64_t, double, lean_object*);

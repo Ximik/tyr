@@ -111,11 +111,11 @@ structure SFTBatch where
   /-- Sequence length -/
   seqLen : UInt64
   /-- Input token IDs: [batchSize, seqLen] as Int64 tensor -/
-  inputs : DTensor #[batchSize, seqLen] .Int64
+  inputs : Tensor { shape := #[batchSize, seqLen], dtype := .Int64 }
   /-- Target token IDs: [batchSize, seqLen] as Int64 tensor -/
-  targets : DTensor #[batchSize, seqLen] .Int64
+  targets : Tensor { shape := #[batchSize, seqLen], dtype := .Int64 }
   /-- Training mask: [batchSize, seqLen] as Float32 tensor (1.0 = train, 0.0 = ignore) -/
-  mask : DTensor #[batchSize, seqLen] .Float32
+  mask : Tensor { shape := #[batchSize, seqLen], dtype := .Float32 }
   /-- Number of valid (non-masked) target tokens -/
   numValidTokens : Nat
   deriving Repr
@@ -190,7 +190,7 @@ def maskedCrossEntropy {batch seq vocab : UInt64} {d m : DType} {dev : DevicePol
 
 /-- Build an Int64 token tensor from host data over the raw FFI boundary.
     `reshapeChecked` validates the result metadata (shape and Int64 dtype). -/
-private def int64TensorFromArray (arr : Array Int64) : DTensor #[arr.size.toUInt64] .Int64 :=
+private def int64TensorFromArray (arr : Array Int64) : Tensor { shape := #[arr.size.toUInt64], dtype := .Int64 } :=
   Tensor.fromInt64Array arr
 
 /-- Prepare SFT batch from tokenized conversations.
@@ -280,8 +280,8 @@ def sftForward {batch seq vocab : UInt64} {d m : DType} {dev : DevicePolicy}
     masked mean over all evaluated tokens. -/
 def evalValidationLoss
     (dataFn : IO SFTBatch)
-    (forwardFn : {b s : UInt64} → DTensor #[b, s] .Int64 →
-      IO (Σ v : UInt64, DTensor #[b, s, v] .Float32))
+    (forwardFn : {b s : UInt64} → Tensor { shape := #[b, s], dtype := .Int64 } →
+      IO (Σ v : UInt64, Tensor { shape := #[b, s, v], dtype := .Float32 }))
     (numSteps : Nat)
     (device : Device := Device.CPU)
     : IO Float := autograd.no_grad do
@@ -384,10 +384,10 @@ def trainLoop [TensorStruct P]
     (cfg : SFTConfig)
     (params : P)
     (optState : Optim.AdamWState P)
-    (forwardFn : P → {b s : UInt64} → DTensor #[b, s] .Int64 →
-      IO (Σ v : UInt64, DTensor #[b, s, v] .Float32))  -- params → inputs → logits
-    (lossFn : {b s v : UInt64} → DTensor #[b, s, v] .Float32 → DTensor #[b, s] .Int64 →
-      DTensor #[b, s] .Float32 → DTensor #[] .Float32)  -- logits → targets → mask → loss
+    (forwardFn : P → {b s : UInt64} → Tensor { shape := #[b, s], dtype := .Int64 } →
+      IO (Σ v : UInt64, Tensor { shape := #[b, s, v], dtype := .Float32 }))  -- params → inputs → logits
+    (lossFn : {b s v : UInt64} → Tensor { shape := #[b, s, v], dtype := .Float32 } → Tensor { shape := #[b, s], dtype := .Int64 } →
+      Tensor { shape := #[b, s], dtype := .Float32 } → Tensor { shape := #[], dtype := .Float32 })  -- logits → targets → mask → loss
     (trainDataFn : IO SFTBatch)
     (valDataFn : Option (IO SFTBatch) := none)
     (numTrainExamples : Nat := 10000)
@@ -426,7 +426,8 @@ def trainLoop [TensorStruct P]
       break
 
     -- Zero gradients at start of accumulation
-    let workingParams := TensorStruct.zeroGrads (TensorStruct.makeLeafParams currentParams)
+    let workingParams := TensorStruct.makeLeafParams currentParams
+    TensorStruct.zeroGrads workingParams
 
     -- Gradient accumulation loop
     let mut accumLoss : Float := 0.0
@@ -454,13 +455,10 @@ def trainLoop [TensorStruct P]
     let lr := cfg.embeddingLr * cfg.initLrFrac * lrm
 
     -- Synchronize gradients across ranks in distributed training.
-    if isDistributed then
-      let gradsToSync := TensorStruct.grads workingParams
-      let _ ← dist.allReduceGrads gradsToSync .avg
-      pure ()
+    let grads ← TensorStruct.grads workingParams
+    let grads ← if isDistributed then dist.allReduceGrads grads .avg else pure grads
 
-    -- Extract gradients and update parameters.
-    let grads := TensorStruct.grads workingParams
+    -- Update parameters from the synchronized gradient snapshots.
     let opt := Optim.adamw (lr := lr) (b1 := 0.9) (b2 := 0.999)
     let (newParams, newOptState) := Optim.step opt workingParams grads currentOptState
 
@@ -522,10 +520,10 @@ def makeTaskDataGenerator
 def trainSFT [TensorStruct P]
     (cfg : SFTConfig)
     (params : P)
-    (forwardFn : P → {b s : UInt64} → DTensor #[b, s] .Int64 →
-      IO (Σ v : UInt64, DTensor #[b, s, v] .Float32))
-    (lossFn : {b s v : UInt64} → DTensor #[b, s, v] .Float32 → DTensor #[b, s] .Int64 →
-      DTensor #[b, s] .Float32 → DTensor #[] .Float32)
+    (forwardFn : P → {b s : UInt64} → Tensor { shape := #[b, s], dtype := .Int64 } →
+      IO (Σ v : UInt64, Tensor { shape := #[b, s, v], dtype := .Float32 }))
+    (lossFn : {b s v : UInt64} → Tensor { shape := #[b, s, v], dtype := .Float32 } → Tensor { shape := #[b, s], dtype := .Int64 } →
+      Tensor { shape := #[b, s], dtype := .Float32 } → Tensor { shape := #[], dtype := .Float32 })
     (trainDataFn : IO SFTBatch)
     (numTrainExamples : Nat)
     : IO (P × SFTState) := do

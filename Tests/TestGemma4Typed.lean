@@ -19,7 +19,7 @@ private def cfg : Config := {
   hidden_size_per_layer_input := 2, vocab_size_per_layer_input := 16
 }
 
-private def weight (s : Shape) (offset : Float := 0.0) : STensor s :=
+private def weight (s : Shape) (offset : Float := 0.0) : Tensor { shape := s } :=
   let n := s.foldl (· * ·) 1
   let vals := Array.ofFn (n := n.toNat) fun i => Float.sin (i.val.toFloat * 0.71 + offset) * 0.2
   (Tensor.fromFloatArray vals).reshapeChecked s |>.forgetDType
@@ -58,7 +58,7 @@ private def textModel (c : Config) : Gemma4ForCausalLM c := Id.run do
       layers, norm := norm c.hidden_size }
     lmHead := weight #[c.vocab_size, c.hidden_size] 1.6 }
 
-private def ids : DTensor #[1, 7] .Int64 :=
+private def ids : Tensor { shape := #[1, 7], dtype := .Int64 } :=
   (Tensor.fromInt64Array #[2, 4, 7, 3, 9, 5, 11]).reshapeChecked #[1, 7]
 
 private def close {σ τ : StaticSpec} (x : Tensor σ) (y : Tensor τ) (tol : Float := 1e-4) : IO Unit := do
@@ -90,7 +90,7 @@ private def close {σ τ : StaticSpec} (x : Tensor σ) (y : Tensor τ) (tol : Fl
 @[test] def testGemma4GenerationDTypesAndStreaming : IO Unit := do
   for bf16 in #[false, true] do
     let m := textModel cfg
-    let m := if bf16 then TensorStruct.map (fun t => t.checkedReplacement t.toBFloat16.raw) m else m
+    let m ← if bf16 then TensorStruct.castDType .BFloat16 m else pure m
     let prediction := m.forward cfg ids
     LeanTest.assertEqual prediction.actualSpec.dtype (if bf16 then .BFloat16 else .Float32)
     for v in (← prediction.toFloatArray) do LeanTest.assertTrue v.isFinite
@@ -119,7 +119,7 @@ private def roundTrip {α : Type} [TensorStruct α] (params : α) (dir : String)
     proj := weight #[3, 8] 0.3
     scale := weight #[8] 0.5
     per_expert_scale := (Tensor.ones #[3]).forgetDType }
-  let router := TensorStruct.map (fun t => t.checkedReplacement t.toBFloat16.raw) router
+  let router ← TensorStruct.castDType .BFloat16 router
   let x := (weight #[2, 8] 0.7).toBFloat16.forgetDType
   let (probs, weights, indices) := router.forward c x
   LeanTest.assertEqual probs.actualSpec.dtype .Float32
@@ -206,7 +206,7 @@ private def multimodalModel : Gemma4ForConditionalGeneration vlCfg := {
 
 @[test] def testGemma4MultimodalDTypesAndPlaceholderChecks : IO Unit := do
   for bf16 in #[false, true] do
-    let m := if bf16 then TensorStruct.map (fun t => t.checkedReplacement t.toBFloat16.raw) multimodalModel else multimodalModel
+    let m ← if bf16 then TensorStruct.castDType .BFloat16 multimodalModel else pure multimodalModel
     let features := m.getImageFeatures vlCfg (weight #[4, 4, 12] 0.1)
     LeanTest.assertEqual features.actualSpec.dtype (if bf16 then .BFloat16 else .Float32)
     let prompt := (Tensor.fromInt64Array #[2, 15, 15, 15, 15, 3, 4]).reshapeChecked #[1, 7]

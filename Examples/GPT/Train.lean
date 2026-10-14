@@ -99,7 +99,7 @@ def trainStep {modelCfg : Config} {batch seq : UInt64}
     (lr : Float)
     : IO (GPTParams modelCfg × Optim.AdamWState (GPTParams modelCfg) × Float) := do
   -- Zero gradients BEFORE forward/backward to prevent gradient accumulation
-  let params := TensorStruct.zeroGrads params
+  TensorStruct.zeroGrads params
 
   -- Forward pass: compute loss (training=true enables dropout)
   let lossT ← gpt.loss params x y true
@@ -119,7 +119,7 @@ def trainStep {modelCfg : Config} {batch seq : UInt64}
   let lossVal := Tensor.item lossT
 
   -- Extract gradients from parameters
-  let grads := TensorStruct.grads params
+  let grads ← TensorStruct.grads params
 
   -- Update parameters with AdamW using Optax-style step
   let opt := Optim.adamw (lr := lr)
@@ -141,7 +141,7 @@ def trainStepWithAccum {modelCfg : Config} {batch seq : UInt64}
   let lossScale := 1.0 / accumSteps.toFloat
 
   -- Zero gradients at the start of accumulation window
-  let params := TensorStruct.zeroGrads params
+  TensorStruct.zeroGrads params
   let mut totalLoss : Float := 0.0
 
   -- Accumulate gradients over multiple micro-batches
@@ -165,7 +165,7 @@ def trainStepWithAccum {modelCfg : Config} {batch seq : UInt64}
     pure ()
 
   -- Extract accumulated gradients
-  let grads := TensorStruct.grads params
+  let grads ← TensorStruct.grads params
 
   -- Update parameters
   let opt := Optim.adamw (lr := lr)

@@ -43,8 +43,8 @@ private def close {σ τ : StaticSpec} (x : Tensor σ) (y : Tensor τ) (tol : Fl
   let attn ← AttnBlock.init 32
   let block ← ResnetBlock.init 32 64
   for bf16 in #[false, true] do
-    let attn := if bf16 then TensorStruct.map (fun t => t.checkedReplacement t.toBFloat16.raw) attn else attn
-    let block := if bf16 then TensorStruct.map (fun t => t.checkedReplacement t.toBFloat16.raw) block else block
+    let attn ← if bf16 then TensorStruct.castDType .BFloat16 attn else pure attn
+    let block ← if bf16 then TensorStruct.castDType .BFloat16 block else pure block
     let x ← Tensor.randn #[2, 32, 2, 3]
     let x := Tensor.castLike attn.q.weight x
     let y := attn.forward x

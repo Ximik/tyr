@@ -44,7 +44,7 @@ private def config : Config :=
     throw (IO.userError "nonfinite GPT loss")
   Tensor.backwardLoss loss
   let opt := Optim.adamw (α := GPTParams config) (lr := 0.001)
-  let (updated, _) := Optim.step opt params (TensorStruct.grads params) (opt.init params)
+  let (updated, _) := Optim.step opt params (← TensorStruct.grads params) (opt.init params)
   let some block := updated.blocks[0]? | throw (IO.userError "missing GPT block")
   unless block.mlp_proj.raw.runtimeShape == #[4, 16] do
     throw (IO.userError "optimizer lost GPT projection shape")

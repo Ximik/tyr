@@ -3,9 +3,9 @@ import Tyr.Typed.Spec
 /-!
 # Runtime placement contracts
 
-LeanMLX keeps device as an explicit runtime target instead of making it part of
-the tensor type.  Tyr's typed facade follows the same direction: dtype belongs
-in `TensorSpec`, while device is checked at boundaries that care about placement.
+`StaticSpec.device` carries either an exact placement or an unrestricted policy.
+`TensorContract` adds runtime placement checks to shape/dtype metadata for
+boundaries such as file loading and external native handles.
 -/
 
 namespace torch

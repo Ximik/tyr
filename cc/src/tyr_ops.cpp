@@ -2,6 +2,7 @@
 #include <cmath>
 #include <iostream>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -777,6 +778,10 @@ extern "C" LEAN_EXPORT lean_object* lean_torch_tyr_flash_attn_4d(
     uint8_t is_causal,
     lean_obj_arg scale,
     uint8_t enable_gqa) {
+  // Both options are transferred by Lean; keep them owned even if borrowing
+  // Q/K/V or parsing the first option throws before the second is inspected.
+  std::unique_ptr<lean_object, decltype(&lean_dec)> mask_owner(attn_mask, lean_dec);
+  std::unique_ptr<lean_object, decltype(&lean_dec)> scale_owner(scale, lean_dec);
   try {
     auto q = borrowTensor(query);
     auto k = borrowTensor(key);
@@ -786,13 +791,13 @@ extern "C" LEAN_EXPORT lean_object* lean_torch_tyr_flash_attn_4d(
     if (!lean_is_scalar(attn_mask)) {
       mask_opt = borrowTensor(lean_ctor_get(attn_mask, 0));
     }
-    lean_dec(attn_mask);
+    mask_owner.reset();
 
     c10::optional<double> scale_opt = c10::nullopt;
     if (!lean_is_scalar(scale)) {
       scale_opt = static_cast<double>(lean_unbox_float(lean_ctor_get(scale, 0)));
     }
-    lean_dec(scale);
+    scale_owner.reset();
 
     auto result = tyr_ops::flash_attn_dispatch(
         q, k, v, mask_opt, dropout_p, is_causal != 0, scale_opt, enable_gqa != 0);

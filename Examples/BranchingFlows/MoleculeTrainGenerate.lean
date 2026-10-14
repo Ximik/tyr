@@ -451,8 +451,7 @@ private def runWithModel {Params : Type} [TensorStruct Params] {maxLen vocab : U
     (trainCfg : BranchingTrainConfig)
     (model : BranchingMoleculeModel maxLen vocab Params)
     (initParams : Params)
-    (makeLearnedModel : Params → Float → BranchingState MoleculeAtom → IO MoleculeModelPrediction)
-    (graphModel? : Option (BranchingMoleculeModel maxLen vocab Params) := none) :
+    (makeLearnedModel : Params → Float → BranchingState MoleculeAtom → IO MoleculeModelPrediction) :
     IO Unit := do
   -- Pin one immutable directory before reading model, metadata, and optimizer
   -- state. Legacy flat checkpoint directories resolve to themselves.
@@ -521,18 +520,10 @@ private def runWithModel {Params : Type} [TensorStruct Params] {maxLen vocab : U
         (parallelism := opts.parallelSampling)
     let mut pendingSample := Task.spawn (fun () => sampleNext rng)
 
-    -- CUDA-graph training: step 0 runs eagerly (warmup + canonical buffers);
-    -- at step 1 the step is captured once into a CUDA graph over static
-    -- buffers (packed batch, lr scalar, canonical params/momentum), later
-    -- steps replay it. Any capture failure falls back to the eager loop.
-    let isCuda := match opts.device with | .CUDA _ => true | _ => false
-    let batchU := opts.batchSize.toUInt64
-    let mut graphAttempted := false
-    let mut graphed := false
-    let mut staticBatch? : Option (BranchingMoleculeBatch batchU maxLen) := none
-    let mut lrBuf? : Option (STensor #[]) := none
-    let mut graphOut? : Option
-      (Params × MoleculeMuonState Params × (STensor #[] × STensor #[] × STensor #[] × STensor #[] × STensor #[])) := none
+    -- Value updates may replace storage; graph replay requires a separate
+    -- mutable buffer interface with stable addresses.
+    if opts.cudaGraph then
+      IO.eprintln "CUDA graph training is unavailable with value-preserving tensor updates; using eager training."
 
     for step in [:opts.steps] do
       let globalStep := startIteration + step
@@ -542,81 +533,12 @@ private def runWithModel {Params : Type} [TensorStruct Params] {maxLen vocab : U
       rng := rng'
       pendingSample := Task.spawn (fun () => sampleNext rng)
       let t1 ← IO.monoMsNow
-      if opts.cudaGraph && isCuda && !graphAttempted && step >= 1 then
-        graphAttempted := true
-        try
-          let ⟨_batch, packedCpu⟩ ← packBranchingMolecule trainCfg bridgeBatch labelDFM
-          let sb : BranchingMoleculeBatch batchU maxLen ←
-            BranchingMoleculeBatch.zeros batchU maxLen opts.device opts.bf16
-          -- Force the lazy staging (alloc + in-place copies) to run *before*
-          -- capture begins; pure lets would otherwise evaluate inside it.
-          let sb ← (sb.copyInto (packedCpu.toDevice opts.device)).eval
-          let lrT : STensor #[] ← data.cloneInferenceIO (fullDynamic #[] lr false opts.device)
-          touchTensor lrT
-          torch.cudaGraphCaptureBegin
-          let (outP, outM, losses) ←
-            trainStepMoleculeMuonCoreT (batch := batchU) (maxLen := maxLen) (vocab := vocab) trainCfg
-              (graphModel?.getD model)
-              params optState sb lrT labelDFM
-          torch.cudaGraphCaptureEnd
-          staticBatch? := some sb
-          lrBuf? := some lrT
-          graphOut? := some (outP, outM, losses)
-          graphed := true
-          -- The capture executed this step's compute; fold outputs back into
-          -- the canonical buffers (their storage must not change), forcing
-          -- the copies before the next replay reads the canonical storage.
-          -- no_grad: the canonical params are requires-grad leaves, and
-          -- in-place copy_ into them is only legal with autograd off.
-          params ← torch.autograd.no_grad do
-            TensorStruct.mapM (fun t => do touchTensor t; pure t)
-              (TensorStruct.zipWith (fun d s => copyIntoChecked d s) params outP)
-          let momentum' ← torch.autograd.no_grad do
-            TensorStruct.mapM (fun t => do touchTensor t; pure t)
-              (TensorStruct.zipWith (fun d s => copyIntoChecked d s) optState.momentum outM.momentum)
-          optState := { momentum := momentum', step := outM.step }
-          let (tl, cl, ll, sl, dl) := losses
-          lastReport := moleculeLossReport tl cl ll sl dl
-          if step == 0 || step % opts.logEvery == 0 then
-            IO.println "molecule_train cuda graph captured"
-        catch e =>
-          IO.eprintln s!"cuda graph capture failed at step {globalStep}; continuing eagerly: {e}"
-          torch.cudaGraphReset
-          staticBatch? := none
-          lrBuf? := none
-          graphOut? := none
-          let (params', optState', report) ←
-            trainStepMoleculeMuon (maxLen := maxLen) (vocab := vocab) trainCfg model
-              params optState bridgeBatch lr labelDFM (device := opts.device) (timePhases := opts.timePhases) (bf16 := opts.bf16)
-          params := params'
-          optState := optState'
-          lastReport := report
-      else if graphed then
-        let some sb := staticBatch? | panic! "graphed without static batch"
-        let some lrT := lrBuf? | panic! "graphed without lr buffer"
-        let some (outP, outM, losses) := graphOut? | panic! "graphed without outputs"
-        let ⟨_batch, packedCpu⟩ ← packBranchingMolecule trainCfg bridgeBatch labelDFM
-        -- Force input staging before the replay launches, and the fold-back
-        -- copies before the next replay reads the canonical storage.
-        let _ ← (sb.copyInto (packedCpu.toDevice opts.device)).eval
-        touchTensor (copyIntoChecked lrT (fullDynamic #[] lr))
-        torch.cudaGraphReplay
-        params ← torch.autograd.no_grad do
-          TensorStruct.mapM (fun t => do touchTensor t; pure t)
-            (TensorStruct.zipWith (fun d s => copyIntoChecked d s) params outP)
-        let momentum' ← torch.autograd.no_grad do
-          TensorStruct.mapM (fun t => do touchTensor t; pure t)
-            (TensorStruct.zipWith (fun d s => copyIntoChecked d s) optState.momentum outM.momentum)
-        optState := { momentum := momentum', step := outM.step }
-                let (tl, cl, ll, sl, dl) := losses
-        lastReport := moleculeLossReport tl cl ll sl dl
-      else
-        let (params', optState', report) ←
-          trainStepMoleculeMuon (maxLen := maxLen) (vocab := vocab) trainCfg model
-            params optState bridgeBatch lr labelDFM (device := opts.device) (timePhases := opts.timePhases) (bf16 := opts.bf16)
-        params := params'
-        optState := optState'
-        lastReport := report
+      let (params', optState', report) ←
+        trainStepMoleculeMuon (maxLen := maxLen) (vocab := vocab) trainCfg model
+          params optState bridgeBatch lr labelDFM (device := opts.device) (timePhases := opts.timePhases) (bf16 := opts.bf16)
+      params := params'
+      optState := optState'
+      lastReport := report
       let t2 ← IO.monoMsNow
       sampleMs := sampleMs + (t1 - t0)
       trainMs := trainMs + (t2 - t1)
@@ -824,22 +746,9 @@ def run (opts : RunOptions) : IO Unit := do
         (splitLogitCap? := opts.splitLogitCap?)
         (coordTargetCap? := opts.coordTargetCap?)
         (device := opts.device)
-    -- Graph-safe model: rotary frequencies precomputed on-device outside the
-    -- capture region (`forward` recomputes them per call with a host→device
-    -- copy, which is illegal during CUDA stream capture).
-    let (ropeCos, ropeSin) :=
-      Tensor.rotaryFreqs opts.maxLen opts.headDim 10000.0 opts.device
-    let graphModel : BranchingMoleculeModel opts.maxLen vocab
-        (FullMoleculeTransformerParams vocab opts.hiddenDim opts.heads opts.headDim
-          opts.mlp opts.rffDim opts.layers) :=
-      { forward := fun {batch} params coord label t padmask =>
-          FullMoleculeTransformerParams.forwardFreqs (batch := batch) params coord label t
-            padmask ropeCos.forgetDType ropeSin.forgetDType
-            (coordUpdateLayers := opts.coordUpdateLayers)
-            (coordTargetCap? := opts.coordTargetCap?) }
     runWithModel (maxLen := opts.maxLen) (vocab := vocab)
       opts records.size states.size trainStates evalStates bridgeCfg labelDFM trainCfg
-      model initParams makeLearnedModel (graphModel? := some graphModel)
+      model initParams makeLearnedModel
   else
     let model :=
       moleculeTransformerModel (maxLen := opts.maxLen) (vocab := vocab)

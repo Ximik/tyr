@@ -12,20 +12,20 @@ private def allclose {σ : StaticSpec} (lhs rhs : Tensor σ) : Bool :=
   Tensor.allclose lhs rhs
 
 structure Model where
-  weight : DTensor #[2, 4] .Float32
-  bias : DTensor #[2] .Float32
+  weight : Tensor { shape := #[2, 4], dtype := .Float32 }
+  bias : Tensor { shape := #[2], dtype := .Float32 }
   cache : Frozen { shape := #[2], dtype := .Float32 }
   name : Static String
   deriving TensorStruct, ToTensorStructSchema, TensorStructFlatten
 
 structure InputBundle where
-  x : DTensor #[4] .Float32
-  scale : Option (DTensor #[1] .Float32)
+  x : Tensor { shape := #[4], dtype := .Float32 }
+  scale : Option (Tensor { shape := #[1], dtype := .Float32 })
   flag : Bool
   deriving TensorStruct, ToTensorStructSchema, TensorStructFlatten
 
 structure OutputBundle where
-  logits : DTensor #[2] .Float32
+  logits : Tensor { shape := #[2], dtype := .Float32 }
   label : Static String
   deriving TensorStruct, ToTensorStructSchema, TensorStructFlatten
 
@@ -102,10 +102,10 @@ private def fakeStructuredFrontend : StructuredFrontendFunction Model InputBundl
           pure replacementInvarLeaves
       } }
 
-private def sampleScalarLoss : DTensor #[] .Float32 :=
+private def sampleScalarLoss : Tensor { shape := #[], dtype := .Float32 } :=
   Tensor.full #[] 13.0
 
-private def replacementScalarLoss : DTensor #[] .Float32 :=
+private def replacementScalarLoss : Tensor { shape := #[], dtype := .Float32 } :=
   Tensor.full #[] 17.0
 
 private def scalarLossSignature : FrontendADSignature :=
@@ -113,7 +113,7 @@ private def scalarLossSignature : FrontendADSignature :=
     inputs := #[FrontendBoundary.ofValue sampleInput .diffOnly]
     outputs := #[FrontendBoundary.ofValue sampleScalarLoss .diffOnly] }
 
-private def fakeScalarLossFrontend : StructuredFrontendFunction Model InputBundle (DTensor #[] .Float32) :=
+private def fakeScalarLossFrontend : StructuredFrontendFunction Model InputBundle (Tensor { shape := #[], dtype := .Float32 }) :=
   { signature := scalarLossSignature
     evalFlat := fun invarLeaves => do
       if invarLeaves.size != scalarLossSignature.paramLeafCount + scalarLossSignature.inputLeafCount then
@@ -178,12 +178,11 @@ def testFrontendBoundaryMatchesFlattenSelection : IO Unit := do
     "Frontend bindings must retain the typed and frozen leaf dtypes."
 
 @[test]
-def testFrontendBoundaryRejectsWrongDTypeAndInvalidRuntimeShape : IO Unit := do
+def testFrontendBoundaryRejectsWrongDTypeAndShape : IO Unit := do
   let boundary := FrontendBoundary.ofValue sampleModel .diffAndFrozen
   let leaves := TensorStructFlatten.flatten sampleModel
   let wrongDType := leaves.set! 0 (TensorLeafValue.ofTensor .diff (Tensor.fullInt #[2, 4] 1))
-  let invalidShape : DTensor #[2, 4] .Float32 := Tensor.assumeSpec (Tensor.zeros #[8]).raw
-  let wrongShape := leaves.set! 0 (TensorLeafValue.ofTensor .diff invalidShape)
+  let wrongShape := leaves.set! 0 (TensorLeafValue.ofTensor .diff (Tensor.zeros #[8]))
   for (badLeaves, detail) in #[(wrongDType, "dtype"), (wrongShape, "shape")] do
     match boundary.validateFlattenedLeaves badLeaves with
     | .ok _ => LeanTest.fail s!"Frontend boundary accepted invalid {detail}."

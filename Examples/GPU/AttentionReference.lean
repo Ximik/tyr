@@ -5,8 +5,8 @@ open torch
 
 /-- Noncausal head-dimension-64 attention with quantized inputs and Float32 reference arithmetic. -/
 def attentionReference {batch heads qSeq kvSeq : UInt64}
-    (q : DTensor #[batch, heads, qSeq, 64] .BFloat16)
-    (k v : DTensor #[batch, heads, kvSeq, 64] .BFloat16) := Id.run do
+    (q : Tensor { shape := #[batch, heads, qSeq, 64], dtype := .BFloat16 })
+    (k v : Tensor { shape := #[batch, heads, kvSeq, 64], dtype := .BFloat16 }) := Id.run do
   let kt := (Tensor.transpose k.toFloat32 2 3).reshapeChecked #[batch, heads, 64, kvSeq]
   let scores := Tensor.bmm4d q.toFloat32 kt
   let scaled := Tensor.Preserving.mulScalar scores 0.125
@@ -18,15 +18,15 @@ def attentionReference {batch heads qSeq kvSeq : UInt64}
 
 /-- BF16 SDPA vector-Jacobian product, returned in Float32 for kernel comparison. -/
 def attentionTrainingReference {batch heads seq : UInt64}
-    (q k v cotangent : DTensor #[batch, heads, seq, 64] .BFloat16) :
-    IO (DTensor #[batch, heads, seq, 64] .BFloat16 × DTensor #[batch, heads, seq, 64] .Float32 ×
-      DTensor #[batch, heads, seq, 64] .Float32 × DTensor #[batch, heads, seq, 64] .Float32) := do
+    (q k v cotangent : Tensor { shape := #[batch, heads, seq, 64], dtype := .BFloat16 }) :
+    IO (Tensor { shape := #[batch, heads, seq, 64], dtype := .BFloat16 } × Tensor { shape := #[batch, heads, seq, 64], dtype := .Float32 } ×
+      Tensor { shape := #[batch, heads, seq, 64], dtype := .Float32 } × Tensor { shape := #[batch, heads, seq, 64], dtype := .Float32 }) := do
   let qRef := Tensor.setRequiresGrad (Tensor.detach q) true
   let kRef := Tensor.setRequiresGrad (Tensor.detach k) true
   let vRef := Tensor.setRequiresGrad (Tensor.detach v) true
   let output := Tensor.attentionGQA qRef kRef vRef 0.0 false
   Tensor.backwardLoss (Tensor.sumAll (output.toFloat32 * cotangent.toFloat32))
-  pure (output, (Tensor.gradOf qRef).toFloat32, (Tensor.gradOf kRef).toFloat32,
-    (Tensor.gradOf vRef).toFloat32)
+  pure (output, (← Tensor.gradOf qRef).toFloat32, (← Tensor.gradOf kRef).toFloat32,
+    (← Tensor.gradOf vRef).toFloat32)
 
 end Examples.GPU

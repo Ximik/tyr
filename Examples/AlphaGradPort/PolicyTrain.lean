@@ -126,8 +126,8 @@ def init (actionDim : UInt64) : IO (AlphaGradNet actionDim) := do
 
 def forward {batch actionDim : UInt64}
     (net : AlphaGradNet actionDim)
-    (x : DTensor #[batch, OBS_DIM] .Float32) :
-    DTensor #[batch, actionDim] .Float32 × DTensor #[batch, 1] .Float32 :=
+    (x : Tensor { shape := #[batch, OBS_DIM], dtype := .Float32 }) :
+    Tensor { shape := #[batch, actionDim], dtype := .Float32 } × Tensor { shape := #[batch, 1], dtype := .Float32 } :=
   let h := Tensor.relu (Linear.forward2d net.fc1 x)
   let logits := Linear.forward2d net.policyHead h
   let value := Linear.forward2d net.valueHead h
@@ -146,7 +146,7 @@ private structure NetEval (actionDim : UInt64) where
 
 private def extractBiasOrZeros
     {n : UInt64}
-    (b? : Option (DTensor #[n] .Float32)) :
+    (b? : Option (Tensor { shape := #[n], dtype := .Float32 })) :
     IO (Array Float) := do
   match b? with
   | some b => b.toFloatArray
@@ -273,7 +273,7 @@ private def normalizeArray (xs : Array Float) : Array Float :=
 private def rowsToTensor?
     (rows : Array (Array Float))
     (cols : UInt64) :
-    Except String (Σ n : UInt64, DTensor #[n, cols] .Float32) := do
+    Except String (Σ n : UInt64, Tensor { shape := #[n, cols], dtype := .Float32 }) := do
   let colsNat := cols.toNat
   for i in [:rows.size] do
     let row := rows.getD i #[]
@@ -285,7 +285,7 @@ private def rowsToTensor?
       flat := flat.push x
   let n : UInt64 := rows.size.toUInt64
   let tDyn := Tensor.fromFloatArray flat
-  let t : DTensor #[n, cols] .Float32 := Tensor.reshapeChecked tDyn #[n, cols]
+  let t : Tensor { shape := #[n, cols], dtype := .Float32 } := Tensor.reshapeChecked tDyn #[n, cols]
   pure ⟨n, t⟩
 
 private def rolloutPPOEpisode
@@ -412,14 +412,14 @@ private def ppoUpdate
       if a >= actionNat then
         return .error s!"PPO action index out of range: action={a}, actionDim={actionNat}."
       oneHotFlat := oneHotFlat.set! (i * actionNat + a) 1.0
-    let oneHot : DTensor #[n, actionDim] .Float32 :=
+    let oneHot : Tensor { shape := #[n, actionDim], dtype := .Float32 } :=
       Tensor.reshapeChecked (Tensor.fromFloatArray oneHotFlat) #[n, actionDim]
 
-    let oldLogT : DTensor #[n, 1] .Float32 :=
+    let oldLogT : Tensor { shape := #[n, 1], dtype := .Float32 } :=
       Tensor.reshapeChecked (Tensor.fromFloatArray oldLogProbs) #[n, 1]
-    let advT : DTensor #[n, 1] .Float32 :=
+    let advT : Tensor { shape := #[n, 1], dtype := .Float32 } :=
       Tensor.reshapeChecked (Tensor.fromFloatArray advantages) #[n, 1]
-    let retT : DTensor #[n, 1] .Float32 :=
+    let retT : Tensor { shape := #[n, 1], dtype := .Float32 } :=
       Tensor.reshapeChecked (Tensor.fromFloatArray returnsRaw) #[n, 1]
 
     let mut netCur := net
@@ -429,10 +429,11 @@ private def ppoUpdate
     let mut entropyV := 0.0
 
     for _ in [:cfg.updateEpochs] do
-      let working := TensorStruct.zeroGrads (TensorStruct.makeLeafParams netCur)
+      let working := TensorStruct.makeLeafParams netCur
+      TensorStruct.zeroGrads working
       let (logits, values) := AlphaGradNet.forward working obs
       let logProbsAll := Tensor.logSoftmax logits (-1) rfl
-      let selectedLogProbs : DTensor #[n, 1] .Float32 :=
+      let selectedLogProbs : Tensor { shape := #[n, 1], dtype := .Float32 } :=
         Tensor.sumDim (oneHot * logProbsAll) 1 true
 
       let ratio := Tensor.exp (selectedLogProbs - oldLogT) rfl
@@ -459,7 +460,7 @@ private def ppoUpdate
         Tensor.Preserving.mulScalar entropy cfg.entropyCoef
 
       Tensor.backwardLoss totalLoss
-      let grads := TensorStruct.grads working
+      let grads ← TensorStruct.grads working
       let opt := Optim.adamw (lr := cfg.learningRate) (weight_decay := cfg.weightDecay)
       let (netNext, stateNext) := Optim.step opt working grads stateCur
 
@@ -712,12 +713,12 @@ private def alphaZeroUpdate
         return .error s!"AlphaZero policy row {i} width mismatch: expected {actionNat}, got {row.size}."
       for x in row do
         flatPolicy := flatPolicy.push x
-    let policyT : DTensor #[n, actionDim] .Float32 :=
+    let policyT : Tensor { shape := #[n, actionDim], dtype := .Float32 } :=
       Tensor.reshapeChecked (Tensor.fromFloatArray flatPolicy) #[n, actionDim]
 
     if valueTargets.size != n.toNat then
       return .error s!"AlphaZero value targets mismatch: expected {n.toNat}, got {valueTargets.size}."
-    let valueT : DTensor #[n, 1] .Float32 :=
+    let valueT : Tensor { shape := #[n, 1], dtype := .Float32 } :=
       Tensor.reshapeChecked (Tensor.fromFloatArray valueTargets) #[n, 1]
 
     let mut netCur := net
@@ -726,7 +727,8 @@ private def alphaZeroUpdate
     let mut valueLossV := 0.0
 
     for _ in [:cfg.updateEpochs] do
-      let working := TensorStruct.zeroGrads (TensorStruct.makeLeafParams netCur)
+      let working := TensorStruct.makeLeafParams netCur
+      TensorStruct.zeroGrads working
       let (logits, values) := AlphaGradNet.forward working obs
       let logProbs := Tensor.logSoftmax logits (-1) rfl
       let policyPer := Tensor.sumDim (policyT * logProbs) 1 false
@@ -736,7 +738,7 @@ private def alphaZeroUpdate
       let totalLoss := policyLoss + Tensor.Preserving.mulScalar valueLoss cfg.valueCoef
 
       Tensor.backwardLoss totalLoss
-      let grads := TensorStruct.grads working
+      let grads ← TensorStruct.grads working
       let opt := Optim.adamw (lr := cfg.learningRate) (weight_decay := cfg.weightDecay)
       let (netNext, stateNext) := Optim.step opt working grads stateCur
       netCur := netNext

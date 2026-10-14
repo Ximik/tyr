@@ -1,4 +1,4 @@
-import Tyr.Typed.Ops
+import Tyr.Typed.Neural
 
 /-!
 # Tyr.TensorStruct
@@ -26,7 +26,7 @@ written once and reused across many models.
   treated as non-trainable.
 - `Vector n α`: length-indexed container for compile-time-safe `zipWith`.
 - `TensorStruct` utilities: `count`, `grads`, `zeroGrads`, `detach`,
-  `requiresGrad`, `makeLeafParams`, `scale`, `add`, `sub`.
+  `requiresGrad`, `makeLeafParams`, `castDType`, `scale`, `add`, `sub`.
 
 ## Traversal Semantics
 
@@ -50,8 +50,9 @@ scalars, including indexed `Tensor σ` leaves. The `deriving TensorStruct`
 handler lives in `Tyr.Module.Derive`, so import that module when deriving
 instances.
 Traversal callbacks preserve each leaf's complete `StaticSpec` index. A map
-cannot change a leaf's shape, dtype or pinned device policy. Use an explicit
-model conversion when changing those contracts.
+cannot change a leaf's shape, concrete dtype or pinned device policy. Dynamic
+dtype leaves can be explicitly recast with `TensorStruct.castDType`; changing a
+concrete dtype contract requires a model conversion with a different result type.
 
 ## Examples
 
@@ -63,8 +64,8 @@ import Tyr.Module.Derive
 open torch
 
 structure LinearParams (inDim outDim : UInt64) where
-  weight : DTensor #[outDim, inDim] .Float32
-  bias : DTensor #[outDim] .Float32
+  weight : Tensor { shape := #[outDim, inDim], dtype := .Float32 }
+  bias : Tensor { shape := #[outDim], dtype := .Float32 }
   name : Static String
   runningMean : Frozen { shape := #[outDim], dtype := .Float32 }
   deriving TensorStruct
@@ -78,11 +79,13 @@ open torch
 def detachAll [TensorStruct α] (x : α) : α :=
   TensorStruct.map Tensor.detach x
 
-def clearGradsM [TensorStruct α] (x : α) : IO α :=
-  TensorStruct.mapM (fun t => pure (Tensor.zeroGrad t)) x
+def clearGradsM [TensorStruct α] (x : α) : IO Unit :=
+  TensorStruct.zeroGrads x
 
-def prepareForTraining [TensorStruct α] (x : α) : α :=
-  TensorStruct.zeroGrads (TensorStruct.makeLeafParams x)
+def prepareForTraining [TensorStruct α] (x : α) : IO α := do
+  let params := TensorStruct.makeLeafParams x
+  TensorStruct.zeroGrads params
+  pure params
 
 def tensorLeafCount [TensorStruct α] (x : α) : Nat :=
   TensorStruct.count x
@@ -272,7 +275,7 @@ instance {σ : StaticSpec} : TensorStruct (Tensor σ) where
   fold f init tensor := f tensor init
 
 /-- A heterogeneous shape carrier whose leaves retain an indexed dtype. -/
-abbrev ShapePackedTensor (dtype : DType) := Sigma fun shape : Shape => DTensor shape dtype
+abbrev ShapePackedTensor (dtype : DType) := Sigma fun shape : Shape => Tensor { shape := shape, dtype := dtype }
 
 instance {dtype : DType} : Inhabited (ShapePackedTensor dtype) := ⟨⟨#[], default⟩⟩
 
@@ -424,13 +427,14 @@ namespace TensorStruct
 def count [TensorStruct α] (model : α) : Nat :=
   fold (fun _ n => n + 1) 0 model
 
-/-- Get gradients for all tensors in the structure -/
-def grads [TensorStruct α] (model : α) : α :=
-  map Tensor.gradOf model
+/-- Read independent gradient snapshots for all tensors in the structure. -/
+def grads [TensorStruct α] (model : α) : IO α :=
+  mapM Tensor.gradOf model
 
-/-- Zero all gradients in the structure -/
-def zeroGrads [TensorStruct α] (model : α) : α :=
-  map Tensor.zeroGrad model
+/-- Clear all accumulated gradients in the structure in place. -/
+def zeroGrads [TensorStruct α] (model : α) : IO Unit := do
+  let _ ← mapM (fun t => do Tensor.zeroGrad t; pure t) model
+  pure ()
 
 /-- Detach all tensors from the computation graph -/
 def detach [TensorStruct α] (model : α) : α :=
@@ -447,6 +451,20 @@ private def _makeLeafParam {σ : StaticSpec} (t : Tensor σ) : Tensor σ :=
 /-- Make all tensors trainable leaf parameters -/
 def makeLeafParams [TensorStruct α] (model : α) : α :=
   map _makeLeafParam model
+
+/-- Explicitly cast tensor-tree leaves while retaining their original static
+indices. A dynamic dtype permits a native dtype change; a concrete dtype rejects
+a different result. Shape, actual device and pinned placement are preserved.
+Failure is reported through IO instead of substituting a fallback tensor. -/
+def castDType [TensorStruct α] (dtype : DType) (params : α) : IO α :=
+  mapM (fun {σ} tensor => do
+    let result : Except String (Tensor σ) := do
+      let converted ← tensor.castDType? dtype
+      Tensor.ofRaw converted.raw
+    match result with
+    | .ok converted => pure converted
+    | .error message =>
+        throw <| IO.userError s!"TensorStruct.castDType to {dtype}: {message}") params
 
 /-- Apply a scalar multiplication to all tensors -/
 def scale [TensorStruct α] (model : α) (s : Float) : α :=

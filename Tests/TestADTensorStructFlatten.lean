@@ -8,21 +8,21 @@ open torch
 open LeanTest
 
 structure Inner where
-  bias : DTensor #[4] .Float32
+  bias : Tensor { shape := #[4], dtype := .Float32 }
   tag : Static String
   cache : Frozen { shape := #[4], dtype := .Float32 }
   deriving Model
 
 structure Outer where
-  weight : DTensor #[2, 4] .Float32
+  weight : Tensor { shape := #[2, 4], dtype := .Float32 }
   inner : Inner
   gates : torch.Vector 2 (Frozen { shape := #[1], dtype := .Float32 })
-  optScale : Option (DTensor #[3] .Float32)
+  optScale : Option (Tensor { shape := #[3], dtype := .Float32 })
   flag : Bool
   deriving Model
 
 set_option linter.unusedVariables false in
-example (wrongShape : DTensor #[3] .Float32) (wrongDType : DTensor #[4] .Int64) : True := by
+example (wrongShape : Tensor { shape := #[3], dtype := .Float32 }) (wrongDType : Tensor { shape := #[4], dtype := .Int64 }) : True := by
   fail_if_success
     have _ : Frozen { shape := #[4], dtype := .Float32 } := ⟨wrongShape⟩
   fail_if_success
@@ -30,7 +30,7 @@ example (wrongShape : DTensor #[3] .Float32) (wrongDType : DTensor #[4] .Int64) 
   trivial
 
 set_option linter.unusedVariables false in
-example (params : DTensor #[4] .Float32) : True := by
+example (params : Tensor { shape := #[4], dtype := .Float32 }) : True := by
   fail_if_success
     have _ := TensorStruct.map (fun _ => Tensor.zeros #[3]) params
   fail_if_success
@@ -217,11 +217,11 @@ def testTensorStructRebuildRejectsMissingAndExtraLeaves : IO Unit := do
 
 structure MixedParams where
   weight : Tensor { shape := #[2], dtype := .Float32, device := .exact .CPU }
-  indices : DTensor #[2] .Int64
+  indices : Tensor { shape := #[2], dtype := .Int64 }
   deriving Model
 
 private def mixedParams : MixedParams := {
-  weight := Tensor.assumeSpec (Tensor.full #[2] 3.0).raw
+  weight := (Tensor.onesFor { shape := #[2], dtype := .Float32, device := .exact .CPU }).mulScalar 3.0
   indices := Tensor.fullInt #[2] 7
 }
 
@@ -263,19 +263,11 @@ def testFrozenRebuildRejectsDTypeMismatch : IO Unit := do
         s!"Frozen mismatch diagnostic should identify the field and dtype: {message}"
 
 @[test]
-def testTypedRebuildRejectsDTypeRoleAndMalformedHandles : IO Unit := do
+def testTypedRebuildRejectsShapeDTypeAndRole : IO Unit := do
   expectWeightRebuildError
     (TensorLeafValue.ofTensor .diff (Tensor.fullInt #[2] 1)) "dtype"
   expectWeightRebuildError
     (TensorLeafValue.ofTensor .frozen mixedParams.weight) "role"
-  let malformedShape : DTensor #[2] .Float32 :=
-    Tensor.assumeSpec (Tensor.zeros #[3]).raw
-  expectWeightRebuildError (TensorLeafValue.ofTensor .diff malformedShape) "shape"
-  let malformedDType : DTensor #[2] .Float32 :=
-    Tensor.assumeSpec (Tensor.fullInt #[2] 1).raw
-  expectWeightRebuildError (TensorLeafValue.ofTensor .diff malformedDType) "dtype"
-  let malformedDevice : Tensor { shape := #[2], dtype := .Float32, device := .exact .MPS } :=
-    Tensor.assumeSpec (Tensor.zeros #[2]).raw
-  expectWeightRebuildError (TensorLeafValue.ofTensor .diff malformedDevice) "device"
+  expectWeightRebuildError (TensorLeafValue.ofTensor .diff (Tensor.zeros #[3])) "shape"
 
 end Tests.ADTensorStructFlatten

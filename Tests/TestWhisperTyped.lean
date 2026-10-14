@@ -12,9 +12,9 @@ private def cfg : WhisperConfig := {
   maxSourcePositions := 4, maxTargetPositions := 8,
   padTokenId := 0, bosTokenId := 1, eosTokenId := 2, decoderStartTokenId := 1 }
 
-private def features : DTensor #[1, 4, 5] .Float32 :=
+private def features : Tensor { shape := #[1, 4, 5], dtype := .Float32 } :=
   (Tensor.fromFloatArray (Array.ofFn (n := 20) fun i => Float.sin (i.val.toFloat * 0.3))).reshapeChecked #[1, 4, 5]
-private def tokens : DTensor #[1, 4] .Int64 := (Tensor.fromInt64Array #[1, 3, 5, 7]).reshapeChecked #[1, 4]
+private def tokens : Tensor { shape := #[1, 4], dtype := .Int64 } := (Tensor.fromInt64Array #[1, 3, 5, 7]).reshapeChecked #[1, 4]
 
 private def close {σ τ : StaticSpec} (x : Tensor σ) (y : Tensor τ) (tol : Float := 1e-4) : IO Unit := do
   LeanTest.assertEqual x.runtimeShape y.runtimeShape
@@ -27,7 +27,7 @@ private def close {σ τ : StaticSpec} (x : Tensor σ) (y : Tensor τ) (tol : Fl
 @[test] def testWhisperCachedDecodeDTypesAndParity : IO Unit := Tensor.noGrad do
   let original ← WhisperForConditionalGeneration.init cfg
   for bf16 in #[false, true] do
-    let model := if bf16 then TensorStruct.map (fun t => t.checkedReplacement t.toBFloat16.raw) original else original
+    let model ← if bf16 then TensorStruct.castDType .BFloat16 original else pure original
     let encoded ← model.encode features.forgetDType
     LeanTest.assertEqual encoded.runtimeShape #[1, 3, 8]
     LeanTest.assertEqual encoded.actualSpec.dtype (if bf16 then .BFloat16 else .Float32)

@@ -24,23 +24,22 @@ inductive SamplingStrategy where
 
 /-- Callback invoked on every generated token during streaming decode.
     Tokens are Int64 vocabulary indices. -/
-abbrev StreamCallback (batch : UInt64) := UInt64 → DTensor #[batch] .Int64 → IO Unit
+abbrev StreamCallback (batch : UInt64) := UInt64 → Tensor { shape := #[batch], dtype := .Int64 } → IO Unit
 
 
 
 /-- All-false Bool mask on the same placement as `reference`. -/
 private def falseMaskLike {n : UInt64} {dev : DevicePolicy}
     (reference : Tensor ⟨#[n], .Int64, dev⟩) : Tensor ⟨#[n], .Bool, dev⟩ :=
-  let zeros := RawTensor.toDevice #[n] (RawTensor.fullInt #[n] 0) reference.raw.device
-  Tensor.assumeSpec (RawTensor.eqScalar #[n] zeros 1)
+  Tensor.eqScalar (Tensor.zerosLike reference) 1
 
 /-! ## Token Selection -/
 
 /-- Sample a batch of next tokens from logits according to a strategy. -/
 def sampleFromLogits {batch vocab : UInt64}
-    (logits : DTensor #[batch, vocab] .Float32)
+    (logits : Tensor { shape := #[batch, vocab], dtype := .Float32 })
     (strategy : SamplingStrategy)
-    : IO (DTensor #[batch] .Int64) := do
+    : IO (Tensor { shape := #[batch], dtype := .Int64 }) := do
   match strategy with
   | .greedy =>
     -- `argmax` removes dim 1 via `reduceShape`, which does not reduce at
@@ -67,25 +66,24 @@ def sampleFromLogits {batch vocab : UInt64}
 
 /-- Return a Bool mask of tokens that belong to `values`. -/
 def tokenInSet {n : UInt64}
-    (tokens : DTensor #[n] .Int64)
+    (tokens : Tensor { shape := #[n], dtype := .Int64 })
     (values : Array UInt64)
-    : DTensor #[n] .Bool :=
+    : Tensor { shape := #[n], dtype := .Bool } :=
   Id.run do
     let mut mask := falseMaskLike tokens
     for value in values do
-      let hit : DTensor #[n] .Bool := Tensor.eqScalar tokens (Int64.ofNat value.toNat)
+      let hit : Tensor { shape := #[n], dtype := .Bool } := Tensor.eqScalar tokens (Int64.ofNat value.toNat)
       mask := Tensor.logicalOr mask hit
     return mask
 
 /-- Replace tokens with `eosToken` wherever `finished` is true. -/
 def applyFinishedEos {n : UInt64}
-    (tokens : DTensor #[n] .Int64)
-    (finished : DTensor #[n] .Bool)
+    (tokens : Tensor { shape := #[n], dtype := .Int64 })
+    (finished : Tensor { shape := #[n], dtype := .Bool })
     (eosToken : UInt64)
-    : DTensor #[n] .Int64 :=
-  let eos : DTensor #[n] .Int64 :=
-    Tensor.assumeSpec (RawTensor.toDevice #[n]
-      (RawTensor.fullInt #[n] (Int64.ofNat eosToken.toNat)) tokens.raw.device)
+    : Tensor { shape := #[n], dtype := .Int64 } :=
+  let eos : Tensor { shape := #[n], dtype := .Int64 } :=
+    (Tensor.fullInt #[n] (Int64.ofNat eosToken.toNat)).to tokens.device
   Tensor.whereSelect finished eos tokens
 
 end torch.Model

@@ -6,8 +6,7 @@
   `[batch, numKvHeads, maxSeqLen, headDim]`, allocated fresh per layer in
   `Cache.init` so no two layers share storage. During generation we write the
   new token's K, V at position `cache.currentLen` via `copySliceIO`
-  (the C++ op `lean_torch_copy_slice_io` in `cc/src/tyr.cpp`
-  does narrow + copy_ on the ORIGINAL buffer — no clone) and slice the cache
+  and keep the returned buffers. Storage is reused when safe. We slice the cache
   to `[..., currentLen+1, ...]` for the attention call.
 
   Buffers are indexed tensors: shape, dtype and device policy are carried in
@@ -21,15 +20,9 @@
   `Tensor.sliceChecked`, which validates the claimed spec against the native
   handle.
 
-  Ownership contract: appends mutate the layer's buffers in place, so the
-  `Cache`/`LayerCache` value passed to `LayerCache.append`,
-  `Cache.appendLayer`, or `Cache.attendLayer` must not be reused after the
-  call — the pre-append and post-append values share the mutated tensors, and
-  the write is observable through the old value. The interface stays
-  effectful: an updated cache is returned in IO and the caller
-  threads it forward, discarding the old one. Access must be serialized by
-  the caller; this low-level cache does not provide a lock. All in-tree consumers (the
-  decode parity harness `Examples/GPU/RunMhaH100Decode.lean`) satisfy this.
+  Appends return an updated cache in IO. Retaining an earlier cache or view
+  preserves its values; callers thread the returned cache forward to observe
+  new tokens. Native copy-on-write can reuse storage when no aliases remain.
 
   The attention call goes through `Tensor.flashAttention`, which the C++
   `tyr::flash_attn` operator dispatches to the native TK decode kernel
@@ -139,31 +132,31 @@ def Cache.setLayer (cache : Cache numLayers batch maxSeqLen numKvHeads headDim d
 
     The new K and V tensors have shape `[batch, numKvHeads, 1, headDim]` (one
     token per batch row) — now static in the `Tensor` spec — and are written
-    IN PLACE into the layer's cache buffers at the `pos`-th slot along the
-    sequence dimension, via ordered `copySliceIO` calls (narrow + copy_ on the
-    original tensor, no clone). The passed-in layer cache must not be reused
-    after this call: old and new values share the mutated tensors, so the
-    write is observable through the old value. The cache's `seqLens` is not
+    into the returned layer's cache buffers at the `pos`-th slot along the
+    sequence dimension. Storage is reused when safe; retained old caches and
+    views preserve their values. The cache's `seqLens` is not
     touched here — call `Cache.incrementSeqLens` after appending to all
     layers of a step to advance position. -/
 def LayerCache.append (lc : LayerCache batch maxSeqLen numKvHeads headDim dtype device)
     (newK newV : Tensor ⟨#[batch, numKvHeads, 1, headDim], dtype, device⟩) (pos : UInt64)
     : IO (LayerCache batch maxSeqLen numKvHeads headDim dtype device) := do
+  let keys := lc.keys
+  let values := lc.values
   if pos >= maxSeqLen then throw <| IO.userError "KV cache append exceeds capacity"
-  -- Validate both sources and destinations before either in-place write.
+  -- Validate both sources and destinations before either update.
   -- Interoperability can introduce handles whose metadata violates an index.
-  for result in [lc.keys.validate, lc.values.validate, newK.validate, newV.validate] do
+  for result in [keys.validate, values.validate, newK.validate, newV.validate] do
     match result with
     | .ok () => pure ()
     | .error message => throw <| IO.userError s!"KV cache append: {message}"
   -- Dynamic dtype/device policies also require physical equality.
-  if lc.keys.raw.device != lc.values.raw.device || lc.keys.raw.dtype != lc.values.raw.dtype ||
-      newK.raw.device != lc.keys.raw.device || newV.raw.device != lc.values.raw.device ||
-      newK.raw.dtype != lc.keys.raw.dtype || newV.raw.dtype != lc.values.raw.dtype then
+  if keys.raw.device != values.raw.device || keys.raw.dtype != values.raw.dtype ||
+      newK.raw.device != keys.raw.device || newV.raw.device != values.raw.device ||
+      newK.raw.dtype != keys.raw.dtype || newV.raw.dtype != values.raw.dtype then
     throw <| IO.userError "KV cache append device/dtype mismatch"
-  copySliceIO lc.keys 2 pos newK
-  copySliceIO lc.values 2 pos newV
-  return lc
+  let keys ← copySliceIO keys 2 pos newK
+  let values ← copySliceIO values 2 pos newV
+  return { keys, values }
 
 /-- Slice the cache K and V tensors to cover positions `[0, validLen)`.
 
@@ -181,21 +174,38 @@ def LayerCache.attentionView (lc : LayerCache batch maxSeqLen numKvHeads headDim
   return (Tensor.sliceChecked lc.keys 2 0 validLen #[batch, numKvHeads, validLen, headDim],
     Tensor.sliceChecked lc.values 2 0 validLen #[batch, numKvHeads, validLen, headDim])
 
-/-- Append a single new K, V token to the layer cache at `cache.currentLen` and
-    return the updated full cache (with that layer rewritten). The write is in
-    place (see `LayerCache.append`): do not reuse the passed-in `cache` after
-    this call. Does NOT advance seqLens — call `incrementSeqLens` once per
-    generated token after appending to every layer for the step. -/
+/-- Remove a layer before updating it, using constant-time swaps and a pop. -/
+@[noinline] private def takeLayerForUpdate
+    (layers : Array (LayerCache batch maxSeqLen numKvHeads headDim dtype device))
+    (index : Nat) : Option (LayerCache batch maxSeqLen numKvHeads headDim dtype device ×
+      Array (LayerCache batch maxSeqLen numKvHeads headDim dtype device)) :=
+  if h : index < layers.size then
+    let selected := layers[index]
+    -- Returning both values across this boundary forces removal before the
+    -- caller can update selected; a pure slot-clear let can be floated later.
+    let remaining := (layers.swapIfInBounds index (layers.size - 1)).pop
+    some (selected, remaining)
+  else none
+
+/-- Append a single new K, V token at `cache.currentLen`, returning the updated
+cache and preserving retained old caches and views. This does not advance
+`seqLens`; call `incrementSeqLens` once per generated token after all layers. -/
 def Cache.appendLayer (cache : Cache numLayers batch maxSeqLen numKvHeads headDim dtype device)
     (layerIdx : Nat) (newK newV : Tensor ⟨#[batch, numKvHeads, 1, headDim], dtype, device⟩)
     : IO (Cache numLayers batch maxSeqLen numKvHeads headDim dtype device) := do
   cache.validate
-  match cache.layers[layerIdx]? with
-  | none => throw <| IO.userError "KV cache layer index out of range"
-  | some lc => do
-    let pos := cache.currentLen
-    let lc ← lc.append newK newV pos
-    return cache.setLayer layerIdx lc
+  let layers := cache.layers
+  let seqLens := cache.seqLens
+  let maxLen := cache.maxLen
+  let pos := seqLens[0]?.getD 0
+  let some (lc, layers) := takeLayerForUpdate layers layerIdx
+    | throw <| IO.userError "KV cache layer index out of range"
+  let updated ← lc.append newK newV pos
+  -- Extraction swapped the selected layer to the end before popping it.
+  -- Append its replacement and swap it back to restore the original order.
+  let layers := layers.push updated
+  let layers := layers.swapIfInBounds layerIdx (layers.size - 1)
+  return { layers, seqLens, maxLen }
 
 /-- One step of cached decode-attention for a single layer.
 
@@ -205,8 +215,7 @@ def Cache.appendLayer (cache : Cache numLayers batch maxSeqLen numKvHeads headDi
     3. Call `tyrFlashAttn4d` on `(newQ, K_view, V_view)`.
 
     Returns the updated full cache and the attention output for the new query
-    token. The K/V append is in place (see `LayerCache.append`): do not reuse
-    the passed-in `cache` after this call. The C++ `tyr::flash_attn`
+    token. Retained input caches remain unchanged. The C++ `tyr::flash_attn`
     dispatcher routes to `tkMhaH100DecodeFwd` when the shape is
     decode-eligible (head_dim ∈ {64, 128, 256}, qSeq==1, BF16, GQA-valid),
     and falls back to PyTorch SDPA otherwise.
@@ -235,9 +244,11 @@ def Cache.attendLayer
   match newQ.validate with
   | .ok () => pure ()
   | .error message => throw <| IO.userError s!"KV cache query: {message}"
-  let cache' ← cache.appendLayer layerIdx newK newV
   let validLen := cache.currentLen + 1
-  let (kView, vView) ← lc.attentionView validLen
+  let cache' ← cache.appendLayer layerIdx newK newV
+  let some updatedLayer := cache'.layers[layerIdx]?
+    | throw <| IO.userError "KV cache layer index out of range after append"
+  let (kView, vView) ← updatedLayer.attentionView validLen
   let output := Tensor.flashAttention newQ kView vView enableGqa
   return (cache', output)
 

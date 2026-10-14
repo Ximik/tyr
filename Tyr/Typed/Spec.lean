@@ -22,7 +22,10 @@ def permuteShape (s : Shape) (permutation : Array UInt64) : Shape :=
 
 /-- Shape after concatenation along `dim`; libtorch checks compatibility. -/
 def catShape (s1 s2 : Shape) (dim : Nat) : Shape :=
-  s1.set! dim (s1.getD dim 0 + s2.getD dim 0)
+  if s1.size == s2.size then s1.set! dim (s1.getD dim 0 + s2.getD dim 0)
+  else if s1 == #[0] then s2
+  else if s2 == #[0] then s1
+  else s1.set! dim (s1.getD dim 0 + s2.getD dim 0)
 
 def scalar (dtype : DType) : TensorSpec :=
   { shape := #[], dtype }
@@ -80,13 +83,23 @@ def broadcastList? : List Shape → Option Shape
 def broadcastShape (lhs rhs : Shape) : Shape :=
   (broadcastShapes? lhs rhs).getD #[]
 
+/-- Dtype promotion distinguishes zero-dimensional tensor operands from
+non-scalars, whose precision takes precedence within a dtype category. -/
+def pointwiseDType (lhs rhs : TensorSpec) : DType :=
+  if lhs.shape.isEmpty && !rhs.shape.isEmpty then
+    DType.promoteScalar rhs.dtype lhs.dtype
+  else if rhs.shape.isEmpty && !lhs.shape.isEmpty then
+    DType.promoteScalar lhs.dtype rhs.dtype
+  else
+    DType.promote lhs.dtype rhs.dtype
+
 def pointwise? (lhs rhs : TensorSpec) : Option TensorSpec := do
   let shape ← broadcastShapes? lhs.shape rhs.shape
-  pure { shape, dtype := DType.promote lhs.dtype rhs.dtype }
+  pure { shape, dtype := pointwiseDType lhs rhs }
 
 def division? (lhs rhs : TensorSpec) : Option TensorSpec := do
   let shape ← broadcastShapes? lhs.shape rhs.shape
-  pure { shape, dtype := DType.divideResult (DType.promote lhs.dtype rhs.dtype) }
+  pure { shape, dtype := DType.divideResult (pointwiseDType lhs rhs) }
 
 def matmulShape? (lhs rhs : Shape) : Option Shape :=
   match lhs.size, rhs.size with

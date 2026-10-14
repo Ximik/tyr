@@ -55,7 +55,7 @@ private def close {σ τ : StaticSpec} (x : Tensor σ) (y : Tensor τ) (tol : Fl
   let image ← randomWeight #[2, 6, 4]
   let text ← randomWeight #[2, 3, 6]
   for bf16 in #[false, true] do
-    let model := if bf16 then TensorStruct.map (fun t => t.checkedReplacement t.toBFloat16.raw) initial else initial
+    let model ← if bf16 then TensorStruct.castDType .BFloat16 initial else pure initial
     let image := Tensor.castLike model.img_in image
     let text := Tensor.castLike model.txt_in text
     let y := model.forward cfg image text (Tensor.full #[2] 0.5) imageIds textIds

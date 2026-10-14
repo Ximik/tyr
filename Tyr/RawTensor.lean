@@ -4,8 +4,6 @@ import Tyr.Basic
 Model code should use `torch.Tensor`; only typed adapters call this module. -/
 namespace torch.RawTensor
 
-@[extern "lean_torch_zeros"] opaque zeros (shape : Shape) (requiresGrad : Bool := false) (device : Device := .CPU) : RawTensor
-
 @[extern "lean_torch_ones"] opaque ones (shape : Shape) (requiresGrad : Bool := false) (device : Device := .CPU) : RawTensor
 
 @[extern "lean_torch_randn"] opaque randn (shape : Shape) (requiresGrad : Bool := false) (device : Device := .CPU) : IO RawTensor
@@ -26,7 +24,11 @@ namespace torch.RawTensor
 
 @[extern "lean_torch_to"] opaque toDevice (shape : Shape) (t : @& RawTensor) (device : Device) : RawTensor
 
-@[extern "lean_torch_cast_dtype"] opaque castDType (shape : Shape) (t : @& RawTensor) (tag : @& String) : RawTensor
+/-- Convert dtype and device together, with native failures returned through IO.
+`none` retains the source dtype; a supplied tag must name a supported dtype.
+The source shape is checked before conversion and never reshaped. -/
+@[extern "lean_torch_convert_tensor"] opaque convertIO (shape : Shape)
+    (t : @& RawTensor) (device : @& Device) (dtype : @& Option String) : IO RawTensor
 
 @[extern "lean_torch_requires_grad"] opaque requiresGrad (shape : Shape) (t : @& RawTensor) : Bool
 
@@ -60,9 +62,12 @@ namespace torch.RawTensor
 
 @[extern "lean_torch_detach"] opaque detach (shape : Shape) (t : @& RawTensor) : RawTensor
 
-@[extern "lean_torch_grad_of"] opaque gradOf (shape : Shape) (t : @& RawTensor) : RawTensor
+/-- Read an independent, detached snapshot of the accumulated gradient.
+    An undefined gradient is represented by a zero tensor. -/
+@[extern "lean_torch_grad_of"] opaque gradOf (shape : Shape) (t : @& RawTensor) : IO RawTensor
 
-@[extern "lean_torch_zero_grad"] opaque zeroGrad (shape : Shape) (t : @& RawTensor) : RawTensor
+/-- Clear the tensor's accumulated gradient in place. -/
+@[extern "lean_torch_zero_grad"] opaque zeroGrad (shape : Shape) (t : @& RawTensor) : IO Unit
 
 @[extern "lean_torch_tensor_add"] opaque add (shape : Shape) (a b : @& RawTensor) : RawTensor
 
@@ -114,7 +119,8 @@ namespace torch.RawTensor
 
 @[extern "lean_torch_mean"] opaque mean (shape : Shape) (t : @& RawTensor) (dims : Option (Array UInt64)) (keepdim : Bool) : RawTensor
 
-@[extern "lean_torch_set_requires_grad"] opaque setRequiresGrad (shape : Shape) (t : @& RawTensor) (requiresGrad : Bool) : RawTensor
+/-- Return a tensor with the requested autograd flag, preserving other aliases. -/
+@[extern "lean_torch_set_requires_grad"] opaque setRequiresGrad (shape : Shape) (t : RawTensor) (requiresGrad : Bool) : RawTensor
 
 @[extern "lean_torch_affine3d"] opaque affine3d (batch seq inDim outDim : UInt64) (x weight bias : @& RawTensor) : RawTensor
 

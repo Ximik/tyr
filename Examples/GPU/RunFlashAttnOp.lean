@@ -30,9 +30,9 @@ private def nativeDenseCase : IO Bool := do
   let (route, out) := flashAttnWithRoute q k v
   FlashBenchReference.backwardWithCotangent out dO
   let _ ← torch.cuda_synchronize
-  let dq := (Tensor.gradOf q).toFloat32
-  let dk := (Tensor.gradOf k).toFloat32
-  let dv := (Tensor.gradOf v).toFloat32
+  let dq := (← Tensor.gradOf q).toFloat32
+  let dk := (← Tensor.gradOf k).toFloat32
+  let dv := (← Tensor.gradOf v).toFloat32
 
   let qRef := Tensor.setRequiresGrad (Tensor.detach q) true
   let kRef := Tensor.setRequiresGrad (Tensor.detach k) true
@@ -40,9 +40,9 @@ private def nativeDenseCase : IO Bool := do
   let outRef := Tensor.attentionGQA qRef kRef vRef 0.0 false
   FlashBenchReference.backwardWithCotangent outRef dO
   let _ ← torch.cuda_synchronize
-  let dqRef := (Tensor.gradOf qRef).toFloat32
-  let dkRef := (Tensor.gradOf kRef).toFloat32
-  let dvRef := (Tensor.gradOf vRef).toFloat32
+  let dqRef := (← Tensor.gradOf qRef).toFloat32
+  let dkRef := (← Tensor.gradOf kRef).toFloat32
+  let dvRef := (← Tensor.gradOf vRef).toFloat32
 
   let routeOk := route == .tkKernel
   let outOk := Tensor.allclose outRef out 3e-2 3e-2
@@ -70,9 +70,9 @@ private def portableCausalCase : IO Bool := do
   let (route, out) := flashAttnWithRoute q k v none 0.0 true none false
   FlashBenchReference.backwardWithCotangent out dO
   let _ ← torch.cuda_synchronize
-  let dq := (Tensor.gradOf q).toFloat32
-  let dk := (Tensor.gradOf k).toFloat32
-  let dv := (Tensor.gradOf v).toFloat32
+  let dq := (← Tensor.gradOf q).toFloat32
+  let dk := (← Tensor.gradOf k).toFloat32
+  let dv := (← Tensor.gradOf v).toFloat32
 
   let qRef := Tensor.setRequiresGrad (Tensor.detach q) true
   let kRef := Tensor.setRequiresGrad (Tensor.detach k) true
@@ -80,9 +80,9 @@ private def portableCausalCase : IO Bool := do
   let outRef := Tensor.attentionGQA qRef kRef vRef 0.0 true
   FlashBenchReference.backwardWithCotangent outRef dO
   let _ ← torch.cuda_synchronize
-  let dqRef := (Tensor.gradOf qRef).toFloat32
-  let dkRef := (Tensor.gradOf kRef).toFloat32
-  let dvRef := (Tensor.gradOf vRef).toFloat32
+  let dqRef := (← Tensor.gradOf qRef).toFloat32
+  let dkRef := (← Tensor.gradOf kRef).toFloat32
+  let dvRef := (← Tensor.gradOf vRef).toFloat32
 
   let routeOk := route == .portable
   let outOk := Tensor.allclose outRef out 1e-5 1e-5
@@ -110,9 +110,9 @@ private def portableGqaCase : IO Bool := do
   let (route, out) := flashAttnWithRoute q k v none 0.0 false none true
   FlashBenchReference.backwardWithCotangent out dO
   let _ ← torch.cuda_synchronize
-  let dq := (Tensor.gradOf q).toFloat32
-  let dk := (Tensor.gradOf k).toFloat32
-  let dv := (Tensor.gradOf v).toFloat32
+  let dq := (← Tensor.gradOf q).toFloat32
+  let dk := (← Tensor.gradOf k).toFloat32
+  let dv := (← Tensor.gradOf v).toFloat32
 
   let qRef := Tensor.setRequiresGrad (Tensor.detach q) true
   let kRef := Tensor.setRequiresGrad (Tensor.detach k) true
@@ -120,9 +120,9 @@ private def portableGqaCase : IO Bool := do
   let outRef := Tensor.attentionGQAQKV qRef kRef vRef 0.0 false true
   FlashBenchReference.backwardWithCotangent outRef dO
   let _ ← torch.cuda_synchronize
-  let dqRef := (Tensor.gradOf qRef).toFloat32
-  let dkRef := (Tensor.gradOf kRef).toFloat32
-  let dvRef := (Tensor.gradOf vRef).toFloat32
+  let dqRef := (← Tensor.gradOf qRef).toFloat32
+  let dkRef := (← Tensor.gradOf kRef).toFloat32
+  let dvRef := (← Tensor.gradOf vRef).toFloat32
 
   let routeOk := route == .portable
   let outOk := Tensor.allclose outRef out 1e-5 1e-5

@@ -6,7 +6,7 @@
   Supports both single-file and sharded HuggingFace models.
 
   Consumes the typed `Tyr/SafeTensors/Load` API: loads arrive as
-  shape-indexed `STensor s` (dtype follows the file), and are bridged into
+  shape-indexed `Tensor { shape := s }` (dtype follows the file), and are bridged into
   the Float32-pinned structure fields with `Tensor.toFloat32`. The cast
   also covers BF16 checkpoints, which the legacy pipeline only survived
   when weights happened to be Float32 on disk.
@@ -26,13 +26,13 @@ open torch.Model (dequantizeFP8)
 open torch.safetensors (tryLoadTensor tryLoadTensorSharded)
 
 /-- Load a required tensor from a sharded checkpoint, throwing if absent. -/
-private def loadRequiredSharded (modelDir : String) (name : String) (s : Shape) : IO (STensor s) := do
+private def loadRequiredSharded (modelDir : String) (name : String) (s : Shape) : IO (Tensor { shape := s }) := do
   match (← tryLoadTensorSharded modelDir name s) with
   | some t => pure t
   | none => throw <| IO.userError s!"Failed to load tensor (sharded): {name}"
 
 /-- Load a required tensor from a single SafeTensors file, throwing if absent. -/
-private def loadRequired (path : String) (name : String) (s : Shape) : IO (STensor s) := do
+private def loadRequired (path : String) (name : String) (s : Shape) : IO (Tensor { shape := s }) := do
   match (← tryLoadTensor path name s) with
   | some t => pure t
   | none => throw <| IO.userError s!"Failed to load tensor: {name}"
@@ -41,7 +41,7 @@ private def loadRequired (path : String) (name : String) (s : Shape) : IO (STens
     If a matching weight_scale_inv exists, dequantize to float32;
     otherwise cast the loaded weights to float32. -/
 private def loadLinearWeightSharded (modelDir : String) (name : String) (outDim inDim : UInt64)
-    : IO (DTensor #[outDim, inDim] .Float32) := do
+    : IO (Tensor { shape := #[outDim, inDim], dtype := .Float32 }) := do
   let w ← loadRequiredSharded modelDir s!"{name}.weight" #[outDim, inDim]
   let scaleInvOpt ← tryLoadTensorSharded modelDir s!"{name}.weight_scale_inv" #[outDim / 128, inDim / 128]
   match scaleInvOpt with
@@ -52,7 +52,7 @@ private def loadLinearWeightSharded (modelDir : String) (name : String) (outDim 
     If a matching weight_scale_inv exists, dequantize to float32;
     otherwise cast the loaded weights to float32. -/
 private def loadLinearWeight (path : String) (name : String) (outDim inDim : UInt64)
-    : IO (DTensor #[outDim, inDim] .Float32) := do
+    : IO (Tensor { shape := #[outDim, inDim], dtype := .Float32 }) := do
   let w ← loadRequired path s!"{name}.weight" #[outDim, inDim]
   let scaleInv ← tryLoadTensor path s!"{name}.weight_scale_inv" #[outDim / 128, inDim / 128]
   match scaleInv with

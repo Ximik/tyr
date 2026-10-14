@@ -5,7 +5,7 @@
   generated RK kernels (`Tyr.GPU.Kernels.RKCombine`), following the
   kernel-op layering used by `Tyr.GPU.Ops.MhaH100`.
 
-  State layout contract: `DTensor #[1, 1, 64, cols] .Float32` with
+  State layout contract: `Tensor { shape := #[1, 1, 64, cols], dtype := .Float32 }` with
   `cols % 64 == 0` (one 64×64 tile per block, grid x = cols / 64).
 
   Per step this issues 7 vector-field evaluations, 7 `mulScalar` products
@@ -31,7 +31,7 @@ open torch
 open Tyr.GPU.Kernels
 
 /-- Tile-layout state used by the fused integrator. -/
-abbrev Tile (cols : UInt64) : Type := DTensor #[1, 1, 64, cols] .Float32
+abbrev Tile (cols : UInt64) : Type := Tensor { shape := #[1, 1, 64, cols], dtype := .Float32 }
 
 /-- Preallocated scratch buffers for one solver instance. -/
 structure Workspace (cols : UInt64) where

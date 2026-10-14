@@ -130,7 +130,9 @@ private def indentBlock (n : Nat) (source : String) : String :=
 private def renderTensorDecls (sourceIsDirectory : Bool) (tensor : TensorSchema) (declName : String) : Array String :=
   let shapeLit := renderShapeLit tensor.shape
   let dtypeExpr := renderDTypeExpr tensor.dtype
-  let typedReturnType := s!"(_root_.torch.DTensor {declName}Shape {dtypeExpr})"
+  let typedReturnType :=
+    "(_root_.torch.Tensor { shape := " ++ s!"{declName}Shape, dtype := {dtypeExpr}, " ++
+    "device := _root_.torch.DevicePolicy.any })"
   let shapeDecl :=
     s!"/-- Static shape for tensor `{tensor.name}`. -/\n" ++
     s!"abbrev {declName}Shape : _root_.torch.Shape := {shapeLit}\n"
@@ -298,7 +300,9 @@ private inductive TypeRepr where
   | struct (typeName : String) (fields : Array (String × FieldSource × TypeRepr))
 
 private partial def TypeRepr.typeExpr : TypeRepr → String
-  | .leaf declName => s!"_root_.torch.DTensor {declName}Shape {declName}Spec.dtype"
+  | .leaf declName =>
+      "_root_.torch.Tensor { shape := " ++ s!"{declName}Shape, dtype := {declName}Spec.dtype, " ++
+      "device := _root_.torch.DevicePolicy.any }"
   | .array elem _ => s!"Array ({elem.typeExpr})"
   | .struct typeName _ => typeName
 

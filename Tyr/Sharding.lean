@@ -273,7 +273,7 @@ def MaybeSharded.updateWithGrad {σ : StaticSpec} {rank worldSize : UInt64}
   match p with
   | .replicated t =>
     -- Replicated: all-reduce gradient, update locally
-    dist.allReduce fullGrad .avg
+    let fullGrad ← dist.allReduce fullGrad .avg
     let newT ← updateFn t fullGrad
     return .replicated newT
   | .sharded st =>

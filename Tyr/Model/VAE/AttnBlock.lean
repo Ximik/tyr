@@ -45,8 +45,8 @@ def init (channels : UInt64) : IO (AttnBlock channels) := do
     Applies single-head spatial self-attention. -/
 def forward {batch channels height width : UInt64}
     (attn : AttnBlock channels)
-    (x : STensor #[batch, channels, height, width])
-    : STensor #[batch, channels, height, width] :=
+    (x : Tensor { shape := #[batch, channels, height, width] })
+    : Tensor { shape := #[batch, channels, height, width] } :=
   let h := attn.norm.forward x
 
   -- Project to Q, K, V
@@ -60,9 +60,9 @@ def forward {batch channels height width : UInt64}
   let k := Tensor.reshapeChecked k #[batch, channels, spatial]
   let v := Tensor.reshapeChecked v #[batch, channels, spatial]
 
-  -- Compute attention: softmax(Q^STensor K / sqrt(channels)) V
+  -- Compute attention: softmax(Qᵀ K / sqrt(channels)) V
   -- Q: [batch, channels, spatial], K: [batch, channels, spatial]
-  -- Q^STensor K: [batch, spatial, spatial]
+  -- Qᵀ K: [batch, spatial, spatial]
   let q_t := Tensor.transpose q 1 2  -- [batch, spatial, channels]
   let scale := Float.sqrt channels.toFloat
   let attn_weights := bmm q_t k  -- [batch, spatial, spatial]
@@ -70,7 +70,7 @@ def forward {batch channels height width : UInt64}
   let attn_weights := Tensor.Preserving.softmax attn_weights (-1)
 
   -- V: [batch, channels, spatial]
-  -- attn_weights @ V^STensor = [batch, spatial, spatial] @ [batch, spatial, channels]
+  -- attn_weights @ Vᵀ = [batch, spatial, spatial] @ [batch, spatial, channels]
   let v_t := Tensor.transpose v 1 2  -- [batch, spatial, channels]
   let out := bmm attn_weights v_t  -- [batch, spatial, channels]
   let out := Tensor.transpose out 1 2  -- [batch, channels, spatial]

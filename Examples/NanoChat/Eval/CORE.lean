@@ -26,7 +26,7 @@ open torch
 /-- Evaluation models preserve the supplied batch and sequence dimensions and
 expose their actual vocabulary size in the result type. -/
 abbrev ModelRunner (vocab : UInt64) := {batch seq : UInt64} →
-  DTensor #[batch, seq] .Int64 → IO (DTensor #[batch, seq, vocab] .Float32)
+  Tensor { shape := #[batch, seq], dtype := .Int64 } → IO (Tensor { shape := #[batch, seq, vocab], dtype := .Float32 })
 
 /-! ## Task Types -/
 
@@ -177,7 +177,7 @@ def padSequences (sequences : Array (Array UInt64)) (padToken : UInt64) : Array 
 
 /-- Convert padded sequences to input tensor -/
 def sequencesToTensor {batch seq : UInt64} (sequences : Array (Array UInt64))
-    : DTensor #[batch, seq] .Int64 :=
+    : Tensor { shape := #[batch, seq], dtype := .Int64 } :=
   -- Flatten and convert to int64 array
   let flat := sequences.foldl (fun acc seq => acc ++ seq.map (·.toInt64)) #[]
   let tensor := Tensor.fromInt64Array flat
@@ -245,8 +245,8 @@ structure EvalResult where
 
 /-- Compute per-token losses from model output.
     Returns losses tensor where losses[i] is loss for predicting token i+1 from position i. -/
-def computeLosses {batch seq vocab : UInt64} (logits : DTensor #[batch, seq, vocab] .Float32)
-    (targetIds : DTensor #[batch, seq] .Int64) : DTensor #[batch, seq] .Float32 :=
+def computeLosses {batch seq vocab : UInt64} (logits : Tensor { shape := #[batch, seq, vocab], dtype := .Float32 })
+    (targetIds : Tensor { shape := #[batch, seq], dtype := .Int64 }) : Tensor { shape := #[batch, seq], dtype := .Float32 } :=
   -- Compute cross-entropy at each position
   -- logits: [batch, seq, vocab], targets: [batch, seq]
   -- Result: [batch, seq] (loss at each position)
@@ -265,8 +265,8 @@ def computeLosses {batch seq vocab : UInt64} (logits : DTensor #[batch, seq, voc
     3. Average the losses over the continuation region (startIdx to endIdx)
     4. Pick the option with lowest average loss -/
 def evaluateMC {batch seq vocab : UInt64}
-    (logits : DTensor #[batch, seq, vocab] .Float32)
-    (targetIds : DTensor #[batch, seq] .Int64)
+    (logits : Tensor { shape := #[batch, seq, vocab], dtype := .Float32 })
+    (targetIds : Tensor { shape := #[batch, seq], dtype := .Int64 })
     (batchInfo : BatchInfo)
     (goldIdx : Nat) : IO EvalResult := do
   -- Compute per-position losses: [batch, seq]
@@ -323,8 +323,8 @@ def evaluateMC {batch seq vocab : UInt64}
     2. Compare predictions[start-1:end-1] with target tokens[start:end]
     3. Return correct=true if all predictions match -/
 def evaluateLM {seq vocab : UInt64}
-    (logits : DTensor #[1, seq, vocab] .Float32)
-    (targetIds : DTensor #[1, seq] .Int64)
+    (logits : Tensor { shape := #[1, seq, vocab], dtype := .Float32 })
+    (targetIds : Tensor { shape := #[1, seq], dtype := .Int64 })
     (batchInfo : BatchInfo) : IO EvalResult := do
   let startIdx := batchInfo.startIndices[0]!
   let endIdx := batchInfo.endIndices[0]!
@@ -478,11 +478,11 @@ def evaluateTask {vocab : UInt64}
   -- Aggregate across ranks if distributed
   if useDistributed && worldSize > 1 then
     dist.barrier
-    -- All-reduce numCorrect and numTotal (allReduce modifies in-place)
+    -- Read reduced counter values while preserving the local inputs.
     let correctTensor := Tensor.fromInt64Array #[numCorrect.toInt64]
     let totalTensor := Tensor.fromInt64Array #[numTotal.toInt64]
-    dist.allReduce correctTensor .sum
-    dist.allReduce totalTensor .sum
+    let correctTensor ← dist.allReduce correctTensor .sum
+    let totalTensor ← dist.allReduce totalTensor .sum
     numCorrect := (Tensor.itemInt (correctTensor.reshapeChecked #[])).toInt.toNat
     numTotal := (Tensor.itemInt (totalTensor.reshapeChecked #[])).toInt.toNat
 

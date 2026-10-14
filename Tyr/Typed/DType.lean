@@ -95,6 +95,18 @@ def promote : DType → DType → DType
   | .Float8E5M2, _ | _, .Float8E5M2 => .Float32
   | lhs, rhs => promoteIntegral lhs rhs
 
+/-- A zero-dimensional tensor raises the dtype category of a non-scalar
+operand, but does not raise precision within that category. This is libtorch's
+tensor-scalar rule; two scalars and two non-scalars use `promote` instead. -/
+def promoteScalar (tensor scalar : DType) : DType :=
+  match tensor, scalar with
+  | .Unknown raw, _ | _, .Unknown raw => .Unknown raw
+  | _, _ =>
+    if tensor.isFloating then tensor
+    else if scalar.isFloating then scalar
+    else if tensor.isBool then promote tensor scalar
+    else tensor
+
 def absResult : DType → DType
   | dtype => dtype
 

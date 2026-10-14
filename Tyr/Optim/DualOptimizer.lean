@@ -567,7 +567,7 @@ def stepMatrixGroupDistributed {m n : UInt64} {d : DType} {dev : DevicePolicy}
           for i in [:params.size] do
             let p := params[i]!
             let g := Tensor.detach (grads[i]?.getD (Tensor.zerosLike p))
-            dist.allReduce g .avg
+            let g ← dist.allReduce g .avg
             reducedGrads := reducedGrads.push g
           stepMatrixGroupLocal params reducedGrads states cfg step lrMul wdMul
 

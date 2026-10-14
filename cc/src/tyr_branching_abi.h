@@ -5,6 +5,7 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+// Consumes destination, borrows source, returns IO RawTensor with value semantics.
 lean_object* lean_torch_copy_inplace(lean_object*, lean_object*, lean_object*);
 lean_object* lean_torch_touch(lean_object*, lean_object*);
 lean_object* lean_torch_mul_tensor_scalar(lean_object*, lean_object*, lean_object*);

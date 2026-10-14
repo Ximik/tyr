@@ -23,7 +23,7 @@ import LeanTest
 open torch Examples.GPU.IndexedParity
 
 set_option linter.unusedVariables false in
-example (a : DTensor #[2] .Float32) (b : DTensor #[3] .Float32) : True := by
+example (a : Tensor { shape := #[2], dtype := .Float32 }) (b : Tensor { shape := #[3], dtype := .Float32 }) : True := by
   fail_if_success
     have _ := compareTensors "bad shape" a b 0 0
   trivial
@@ -167,15 +167,15 @@ example (inputs : Examples.GPU.RunLayerNorm.LayerNormInputs .Float32) : True := 
     LeanTest.assertTrue (Tensor.allclose m1 ((Tensor.fromFloatArray expectedM).reshapeChecked #[3]) 0 1e-6)
     LeanTest.assertTrue (Tensor.allclose v1 ((Tensor.fromFloatArray expectedV).reshapeChecked #[3]) 0 1e-6)
   let dst ← Tensor.uniformLike master 0 0
-  Tensor.copyInto dst master
+  let dst ← Tensor.copyInto dst master
   LeanTest.assertTrue (Tensor.allclose dst master 0 0)
-  Tensor.copyInto dst (Tensor.zerosLike master)
+  let dst ← Tensor.copyInto dst (Tensor.zerosLike master)
   LeanTest.assertTrue (Tensor.allclose master (Tensor.fromFloatArray #[1.0, -2.0, 3.0]) 0 0)
   LeanTest.assertTrue (Tensor.allclose dst (Tensor.zerosLike master) 0 0)
 
 set_option linter.unusedVariables false in
-example (a : DTensor #[2] .Float32) (b : DTensor #[2] .BFloat16)
-    (c : DTensor #[3] .Float32) : True := by
+example (a : Tensor { shape := #[2], dtype := .Float32 }) (b : Tensor { shape := #[2], dtype := .BFloat16 })
+    (c : Tensor { shape := #[3], dtype := .Float32 }) : True := by
   fail_if_success
     have _ := Tensor.copyInto a b
   fail_if_success
@@ -215,7 +215,7 @@ example (a : DTensor #[2] .Float32) (b : DTensor #[2] .BFloat16)
   LeanTest.assertTrue (Tensor.allclose lse expectedLse 0 1e-6)
 
 set_option linter.unusedVariables false in
-example (a : DTensor #[2, 3] .BFloat16) (b : DTensor #[4, 5] .BFloat16) : True := by
+example (a : Tensor { shape := #[2, 3], dtype := .BFloat16 }) (b : Tensor { shape := #[4, 5], dtype := .BFloat16 }) : True := by
   fail_if_success
     have _ := Examples.GPU.gemmReference a b
   trivial
@@ -282,5 +282,5 @@ example (a : DTensor #[2, 3] .BFloat16) (b : DTensor #[4, 5] .BFloat16) : True :
     let out := leaf * leaf
     let cotangent := (Tensor.fromFloatArray #[2.0, -1.0]).toBFloat16
     Examples.GPU.FlashBenchReference.backwardWithCotangent out cotangent
-    LeanTest.assertTrue (Tensor.allclose (Tensor.gradOf leaf).toFloat32
+    LeanTest.assertTrue (Tensor.allclose (← Tensor.gradOf leaf).toFloat32
       (Tensor.fromFloatArray #[12.0, -8.0]) 0 0)

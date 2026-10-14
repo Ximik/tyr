@@ -12,12 +12,12 @@ open Tyr.GPU.Ops
 /-- Query layout for the typed FlashAttention surface: `[batch, nHead, qSeq, headDim]`
     with the dtype tracked statically. -/
 abbrev Query (batch nHead qSeq headDim : UInt64) (d : DType) : Type :=
-  DTensor #[batch, nHead, qSeq, headDim] d
+  Tensor { shape := #[batch, nHead, qSeq, headDim], dtype := d }
 /-- Key/value layout: `[batch, nKvHead, kvSeq, headDim]`, sharing the query dtype. -/
 abbrev KeyValue (batch nKvHead kvSeq headDim : UInt64) (d : DType) : Type :=
-  DTensor #[batch, nKvHead, kvSeq, headDim] d
+  Tensor { shape := #[batch, nKvHead, kvSeq, headDim], dtype := d }
 /-- Padding-mask layout: `[batch, kvSeq]`; the mask dtype stays dynamic. -/
-abbrev PaddingMask (batch kvSeq : UInt64) : Type := STensor #[batch, kvSeq]
+abbrev PaddingMask (batch kvSeq : UInt64) : Type := Tensor { shape := #[batch, kvSeq] }
 
 inductive DispatchRoute where
   | tkKernel
@@ -136,16 +136,21 @@ structure PackedQKV where
   qSeq : UInt64
   kvSeq : UInt64
   headDim : UInt64
-  q : STensor #[batch, nHead, qSeq, headDim]
-  k : STensor #[batch, nKvHead, kvSeq, headDim]
-  v : STensor #[batch, nKvHead, kvSeq, headDim]
+  q : Tensor { shape := #[batch, nHead, qSeq, headDim] }
+  k : Tensor { shape := #[batch, nKvHead, kvSeq, headDim] }
+  v : Tensor { shape := #[batch, nKvHead, kvSeq, headDim] }
 
 abbrev DynOut :=
   Sigma (fun batch =>
     Sigma (fun nHead =>
       Sigma (fun qSeq =>
         Sigma (fun headDim =>
-          STensor #[batch, nHead, qSeq, headDim]))))
+          Tensor { shape := #[batch, nHead, qSeq, headDim] }))))
+
+private def checkedRaw {σ : StaticSpec} (label : String) (raw : RawTensor) : IO (Tensor σ) :=
+  match Tensor.ofRaw raw with
+  | .ok tensor => pure tensor
+  | .error message => throw <| IO.userError s!"flashAttnDyn: {label}: {message}"
 
 private def parseQKVDyn (qDyn kDyn vDyn : RawTensor) : IO PackedQKV := do
   let qShape := qDyn.runtimeShape
@@ -180,11 +185,9 @@ private def parseQKVDyn (qDyn kDyn vDyn : RawTensor) : IO PackedQKV := do
   if !(kHeadDim == headDim && vHeadDim == headDim) then
     throw <| IO.userError s!"flashAttnDyn: head_dim mismatch q={headDim} k={kHeadDim} v={vHeadDim}"
 
-  -- The runtime shapes were just validated above, so the erased handles carry
-  -- exactly the shapes the specs claim.
-  let q : STensor #[batch, nHead, qSeq, headDim] := Tensor.assumeSpec qDyn
-  let k : STensor #[batch, nKvHead, kvSeq, headDim] := Tensor.assumeSpec kDyn
-  let v : STensor #[batch, nKvHead, kvSeq, headDim] := Tensor.assumeSpec vDyn
+  let q : Tensor { shape := #[batch, nHead, qSeq, headDim] } ← checkedRaw "query" qDyn
+  let k : Tensor { shape := #[batch, nKvHead, kvSeq, headDim] } ← checkedRaw "key" kDyn
+  let v : Tensor { shape := #[batch, nKvHead, kvSeq, headDim] } ← checkedRaw "value" vDyn
   pure {
     batch := batch
     nHead := nHead
@@ -212,7 +215,7 @@ private def parseMaskDyn
       if !(gotBatch == batch && gotKvSeq == kvSeq) then
         throw <| IO.userError
           s!"flashAttnDyn: attn_mask shape mismatch expected=[{batch},{kvSeq}] got=[{gotBatch},{gotKvSeq}]"
-      let mask : PaddingMask batch kvSeq := Tensor.assumeSpec maskDyn
+      let mask : PaddingMask batch kvSeq ← checkedRaw "attn_mask" maskDyn
       pure (some mask)
 
 /-- Fully general existential adapter:
@@ -228,7 +231,7 @@ def flashAttnDyn
     : IO DynOut := do
   let packed ← parseQKVDyn qDyn kDyn vDyn
   let typedMask ← parseMaskDyn packed.batch packed.kvSeq attnMask
-  let out : STensor #[packed.batch, packed.nHead, packed.qSeq, packed.headDim] :=
+  let out : Tensor { shape := #[packed.batch, packed.nHead, packed.qSeq, packed.headDim] } :=
     flashAttn packed.q packed.k packed.v typedMask dropoutP isCausal scale enableGqa
   pure ⟨packed.batch, ⟨packed.nHead, ⟨packed.qSeq, ⟨packed.headDim, out⟩⟩⟩⟩
 

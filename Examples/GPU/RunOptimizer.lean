@@ -36,20 +36,20 @@ private def optimizerMatrix : LeanBenchmark.Matrix OptimizerShape := {
 private def benchmarkShape (cfg : Benchmark.Config) (stream : UInt64)
     (caseLabel : String) (elements : UInt64) : IO (String × Bool) := do
   let device := Device.CUDA 0
-  let master : DTensor #[elements] .Float32 ← Tensor.randn #[elements] false device
-  let masterOriginal : DTensor #[elements] .Float32 ← Tensor.randn #[elements] false device
-  Tensor.copyInto masterOriginal master
-  let gradF : DTensor #[elements] .Float32 ← Tensor.randn #[elements] false device
-  let grad : DTensor #[elements] .BFloat16 := gradF.toBFloat16
-  let gradBackupF : DTensor #[elements] .Float32 ← Tensor.randn #[elements] false device
-  let gradBackup : DTensor #[elements] .BFloat16 := gradBackupF.toBFloat16
-  Tensor.copyInto gradBackup grad
-  let model : DTensor #[elements] .BFloat16 := master.toBFloat16
-  let moment1 : DTensor #[elements] .Float32 ← Tensor.randn #[elements] false device
-  let moment2 : DTensor #[elements] .Float32 ← Tensor.randn #[elements] false device
-  let zeroMoment : DTensor #[elements] .Float32 := Tensor.zerosLike master
-  Tensor.copyInto moment1 zeroMoment
-  Tensor.copyInto moment2 zeroMoment
+  let master : Tensor { shape := #[elements], dtype := .Float32 } ← Tensor.randn #[elements] false device
+  let masterOriginal : Tensor { shape := #[elements], dtype := .Float32 } ← Tensor.randn #[elements] false device
+  let masterOriginal ← Tensor.copyInto masterOriginal master
+  let gradF : Tensor { shape := #[elements], dtype := .Float32 } ← Tensor.randn #[elements] false device
+  let grad : Tensor { shape := #[elements], dtype := .BFloat16 } := gradF.toBFloat16
+  let gradBackupF : Tensor { shape := #[elements], dtype := .Float32 } ← Tensor.randn #[elements] false device
+  let gradBackup : Tensor { shape := #[elements], dtype := .BFloat16 } := gradBackupF.toBFloat16
+  let gradBackup ← Tensor.copyInto gradBackup grad
+  let model : Tensor { shape := #[elements], dtype := .BFloat16 } := master.toBFloat16
+  let moment1 : Tensor { shape := #[elements], dtype := .Float32 } ← Tensor.randn #[elements] false device
+  let moment2 : Tensor { shape := #[elements], dtype := .Float32 } ← Tensor.randn #[elements] false device
+  let zeroMoment : Tensor { shape := #[elements], dtype := .Float32 } := Tensor.zerosLike master
+  let moment1 ← Tensor.copyInto moment1 zeroMoment
+  let moment2 ← Tensor.copyInto moment2 zeroMoment
   let learningRate : Float := 3.0e-4
   let beta1 : Float := 0.9
   let beta2 : Float := 0.95
@@ -61,13 +61,15 @@ private def benchmarkShape (cfg : Benchmark.Config) (stream : UInt64)
     referenceUpdate masterOriginal grad moment1 moment2 learningRate beta1 beta2 epsilon
       weightDecay invBias1 invBias2
   let blocks := (elements + 255) / 256
-  let launch : IO Unit :=
+  let launch (master : Tensor { shape := #[elements], dtype := .Float32 })
+      (model grad : Tensor { shape := #[elements], dtype := .BFloat16 })
+      (moment1 moment2 : Tensor { shape := #[elements], dtype := .Float32 }) : IO Unit :=
     adamWMasterBf16.launch master.raw model.raw grad.raw moment1.raw moment2.raw elements
       learningRate.toFloat32 beta1.toFloat32 beta2.toFloat32 epsilon.toFloat32
       weightDecay.toFloat32 invBias1.toFloat32 invBias2.toFloat32
       blocks 1 1 256 1 1 0 stream
 
-  launch
+  launch master model grad moment1 moment2
   torch.cuda_synchronize
   let preMaster := IndexedParity.compareTensors s!"optimizer.{caseLabel}.master" expectedMaster master 2e-5 2e-5
   let preModel := IndexedParity.compareTensors s!"optimizer.{caseLabel}.model" expectedModel model 2e-3 2e-3
@@ -75,15 +77,15 @@ private def benchmarkShape (cfg : Benchmark.Config) (stream : UInt64)
   let preV := IndexedParity.compareTensors s!"optimizer.{caseLabel}.moment2" expectedV moment2 2e-5 2e-5
   for check in #[preMaster, preModel, preM, preV] do logTensorCheck check
 
-  let zeroMaster : DTensor #[elements] .Float32 ← Tensor.randn #[elements] false device
-  Tensor.copyInto master zeroMaster
-  Tensor.copyInto model (zeroMaster.toBFloat16)
-  Tensor.copyInto grad (Tensor.zerosLike grad)
-  Tensor.copyInto moment1 zeroMoment
-  Tensor.copyInto moment2 zeroMoment
-  launch
+  let zeroMaster : Tensor { shape := #[elements], dtype := .Float32 } ← Tensor.randn #[elements] false device
+  let master ← Tensor.copyInto master zeroMaster
+  let model ← Tensor.copyInto model (zeroMaster.toBFloat16)
+  let grad ← Tensor.copyInto grad (Tensor.zerosLike grad)
+  let moment1 ← Tensor.copyInto moment1 zeroMoment
+  let moment2 ← Tensor.copyInto moment2 zeroMoment
+  launch master model grad moment1 moment2
   torch.cuda_synchronize
-  let zeroExpectedMaster : DTensor #[elements] .Float32 :=
+  let zeroExpectedMaster : Tensor { shape := #[elements], dtype := .Float32 } :=
     zeroMaster * (1.0 - learningRate * weightDecay)
   let zeroExpectedModel := zeroExpectedMaster.toBFloat16
   let zeroMasterCheck :=
@@ -97,13 +99,13 @@ private def benchmarkShape (cfg : Benchmark.Config) (stream : UInt64)
   for check in #[zeroMasterCheck, zeroModelCheck, zeroMCheck, zeroVCheck] do
     logTensorCheck check
 
-  let resetMaster : DTensor #[elements] .Float32 ← Tensor.randn #[elements] false device
-  Tensor.copyInto master resetMaster
-  Tensor.copyInto model (resetMaster.toBFloat16)
-  Tensor.copyInto grad gradBackup
-  Tensor.copyInto moment1 zeroMoment
-  Tensor.copyInto moment2 zeroMoment
-  let samples ← Benchmark.timeCudaEvents cfg stream launch
+  let resetMaster : Tensor { shape := #[elements], dtype := .Float32 } ← Tensor.randn #[elements] false device
+  let master ← Tensor.copyInto master resetMaster
+  let model ← Tensor.copyInto model (resetMaster.toBFloat16)
+  let grad ← Tensor.copyInto grad gradBackup
+  let moment1 ← Tensor.copyInto moment1 zeroMoment
+  let moment2 ← Tensor.copyInto moment2 zeroMoment
+  let samples ← Benchmark.timeCudaEvents cfg stream (launch master model grad moment1 moment2)
   let finiteMaster := IndexedParity.compareTensors s!"optimizer.{caseLabel}.master.self" master master 0 0
   let finiteModel := IndexedParity.compareTensors s!"optimizer.{caseLabel}.model.self" model model 0 0
   let correct := preMaster.ok && preModel.ok && preM.ok && preV.ok &&

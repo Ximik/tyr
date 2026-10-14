@@ -99,7 +99,7 @@ import Tyr
 
 open torch
 
-def toyForward : DTensor #[2, 4] .Float32 :=
+def toyForward : Tensor { shape := #[2, 4], dtype := .Float32 } :=
   let x := Tensor.zeros #[2, 8]
   let w := Tensor.zeros #[4, 8]
   x.linear w

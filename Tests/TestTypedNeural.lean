@@ -4,6 +4,22 @@ import LeanTest
 
 open torch
 
+@[test] def testTypedAttentionValuesAndMetadata : IO Unit := do
+  let σ : StaticSpec := ⟨#[1, 1, 2, 2], .Float64, .exact .CPU⟩
+  let q := Tensor.zerosFor σ
+  let values := ((Tensor.fromFloatArray #[2, 4, 6, 8]).reshape #[1, 1, 2, 2]).castDType .Float64
+  let v : Tensor σ ← match Tensor.ofRaw values.raw with
+    | .ok t => pure t
+    | .error message => throw <| IO.userError message
+  let full := Tensor.attention q q v 0.0 false
+  let causal := Tensor.attention q q v 0.0 true
+  for output in #[full, causal] do
+    match output.validate with
+    | .ok () => pure ()
+    | .error message => LeanTest.fail message
+  LeanTest.assertEqual (← full.toFloatArray) #[4, 6, 4, 6]
+  LeanTest.assertEqual (← causal.toFloatArray) #[2, 4, 4, 6]
+
 @[test] def testTypedNeuralGatherAndMasks : IO Unit := do
   let x := (Tensor.fromFloatArray #[1, 2, 3, 4, 5, 6]).reshapeChecked #[2, 3]
   let indices := (Tensor.fromInt64Array #[2, 0, 1, 1]).reshapeChecked #[2, 2]
@@ -69,7 +85,7 @@ open torch
 @[test] def testTypedStreamingWav : IO Unit := IO.FS.withTempDir fun dir => do
   let path := (dir / "stream.wav").toString
   Tensor.wavBegin path 16000
-  let emit (chunk : Sigma fun n => STensor #[1, 1, n]) : IO Unit :=
+  let emit (chunk : Sigma fun n => Tensor { shape := #[1, 1, n] }) : IO Unit :=
     Tensor.wavAppend chunk.2 path
   emit ⟨3, (Tensor.fromFloatArray #[-1, 0, 1]).reshapeChecked #[1, 1, 3] |>.forgetDType⟩
   emit ⟨0, (Tensor.zeros #[1, 1, 0]).forgetDType⟩

@@ -311,8 +311,8 @@ structure StepResult where
 def trainStep {cfg : moddedGpt.Config} {batch seq : UInt64}
     (params : ModdedGPTParams cfg)
     (yarn : YarnRotary cfg.headDim cfg.maxSeqLen)
-    (input : DTensor #[batch, seq] .Int64)
-    (target : DTensor #[batch, seq] .Int64)
+    (input : Tensor { shape := #[batch, seq], dtype := .Int64 })
+    (target : Tensor { shape := #[batch, seq], dtype := .Int64 })
     (optState : OptimizerState cfg)
     (hp : Hyperparameters)
     (gradClip : Float := 0.0)
@@ -320,7 +320,8 @@ def trainStep {cfg : moddedGpt.Config} {batch seq : UInt64}
   let startTime ← IO.monoMsNow
 
   -- Ensure parameters are trainable leaves before backprop.
-  let params := TensorStruct.zeroGrads (TensorStruct.makeLeafParams params)
+  let params := TensorStruct.makeLeafParams params
+  TensorStruct.zeroGrads params
 
   -- Forward pass (window pattern is in cfg)
   let lossT ← moddedGpt.loss params yarn input target true
@@ -353,7 +354,7 @@ def trainStep {cfg : moddedGpt.Config} {batch seq : UInt64}
     let _ ← Tensor.clipGradNorm params.scalars.values gradClip
 
   -- Extract gradients from parameters
-  let grads := TensorStruct.grads params
+  let grads ← TensorStruct.grads params
 
   -- Get current learning rate from schedule
   let lr := getLearningRate optState.step hp optState.baseLr
@@ -390,7 +391,7 @@ def trainStep {cfg : moddedGpt.Config} {batch seq : UInt64}
 def accumulateGradients {cfg : moddedGpt.Config} {batch seq : UInt64}
     (params : ModdedGPTParams cfg)
     (yarn : YarnRotary cfg.headDim cfg.maxSeqLen)
-    (batches : Array (DTensor #[batch, seq] .Int64 × DTensor #[batch, seq] .Int64))
+    (batches : Array (Tensor { shape := #[batch, seq], dtype := .Int64 } × Tensor { shape := #[batch, seq], dtype := .Int64 }))
     : IO Float := do
   let mut totalLoss := 0.0
   let numBatches := batches.size
@@ -977,7 +978,7 @@ def runValidation (state : TrainState cfg) (hp : Hyperparameters)
 def trainStepDistributedAccum {cfg : moddedGpt.Config} {batch seq : UInt64}
     (params : ModdedGPTParams cfg)
     (yarn : YarnRotary cfg.headDim cfg.maxSeqLen)
-    (microBatches : Array (DTensor #[batch, seq] .Int64 × DTensor #[batch, seq] .Int64))
+    (microBatches : Array (Tensor { shape := #[batch, seq], dtype := .Int64 } × Tensor { shape := #[batch, seq], dtype := .Int64 }))
     (optState : OptimizerState cfg)
     (hp : Hyperparameters)
     (gradClip : Float := 0.0)
@@ -987,7 +988,8 @@ def trainStepDistributedAccum {cfg : moddedGpt.Config} {batch seq : UInt64}
   let startTime ← IO.monoMsNow
   let isDistributed ← dist.isInitialized
   let worldSize ← if isDistributed then dist.getWorldSize else pure 1
-  let params := TensorStruct.zeroGrads (TensorStruct.makeLeafParams params)
+  let params := TensorStruct.makeLeafParams params
+  TensorStruct.zeroGrads params
   let microCount := microBatches.size.toUInt64
   let mut totalLoss := 0.0
   for (input, target) in microBatches do
@@ -1012,7 +1014,7 @@ def trainStepDistributedAccum {cfg : moddedGpt.Config} {batch seq : UInt64}
       let _ ← Tensor.clipGradNorm block.mlp.cProj gradClip
     let _ ← Tensor.clipGradNorm params.lmHead.weight gradClip
     let _ ← Tensor.clipGradNorm params.scalars.values gradClip
-  let grads := TensorStruct.grads params
+  let grads ← TensorStruct.grads params
   let batchScale := batchLrScale hp
   let dScale := dModelLrScale cfg
   let lrEmbed := getLearningRate optState.step hp (hp.embeddingLr * batchScale * dScale)
@@ -1038,15 +1040,15 @@ def trainStepDistributedAccum {cfg : moddedGpt.Config} {batch seq : UInt64}
     worldSize := worldSize
   }
 
-  let runAdamStep : {s : Shape} → (p : DTensor s .Float32) → (g : DTensor s .Float32) → DistAdam.ParamState ⟨s, .Float32, .any⟩ → Float →
-      IO (DTensor s .Float32 × DistAdam.ParamState ⟨s, .Float32, .any⟩) :=
+  let runAdamStep : {s : Shape} → (p : Tensor { shape := s, dtype := .Float32 }) → (g : Tensor { shape := s, dtype := .Float32 }) → DistAdam.ParamState ⟨s, .Float32, .any⟩ → Float →
+      IO (Tensor { shape := s, dtype := .Float32 } × DistAdam.ParamState ⟨s, .Float32, .any⟩) :=
     fun {_} p g st lr => do
       DistAdam.stepDistributed p g st { adamCfgBase with lr := lr } 1.0 1.0
 
   let (embed', embedState') ← runAdamStep
     params.embed grads.embed optState.dualState.embed lrEmbed
 
-  let mut newValueEmbeds : Array (DTensor #[cfg.vocabSize, cfg.modelDim] .Float32) := #[]
+  let mut newValueEmbeds : Array (Tensor { shape := #[cfg.vocabSize, cfg.modelDim], dtype := .Float32 }) := #[]
   let mut newValueEmbedStates : Array (DistAdam.ParamState ⟨#[cfg.vocabSize, cfg.modelDim], .Float32, .any⟩) := #[]
   for i in [:params.valueEmbeds.size] do
     let ve := params.valueEmbeds[i]!
@@ -1070,24 +1072,24 @@ def trainStepDistributedAccum {cfg : moddedGpt.Config} {batch seq : UInt64}
   let smearGateState' := smearGateStates[0]?.getD optState.dualState.smearGate
 
   let mut blockStatesIn : Array (MuonBlockState cfg) := #[]
-  let mut cFcParams : Array (DTensor #[4 * cfg.modelDim, cfg.modelDim] .Float32) := #[]
-  let mut cFcGrads : Array (DTensor #[4 * cfg.modelDim, cfg.modelDim] .Float32) := #[]
+  let mut cFcParams : Array (Tensor { shape := #[4 * cfg.modelDim, cfg.modelDim], dtype := .Float32 }) := #[]
+  let mut cFcGrads : Array (Tensor { shape := #[4 * cfg.modelDim, cfg.modelDim], dtype := .Float32 }) := #[]
   let mut cFcStates : Array (NorMuon.ParamState ⟨#[4 * cfg.modelDim, cfg.modelDim], .Float32, .any⟩) := #[]
-  let mut cProjParams : Array (DTensor #[4 * cfg.modelDim, cfg.modelDim] .Float32) := #[]
-  let mut cProjGrads : Array (DTensor #[4 * cfg.modelDim, cfg.modelDim] .Float32) := #[]
+  let mut cProjParams : Array (Tensor { shape := #[4 * cfg.modelDim, cfg.modelDim], dtype := .Float32 }) := #[]
+  let mut cProjGrads : Array (Tensor { shape := #[4 * cfg.modelDim, cfg.modelDim], dtype := .Float32 }) := #[]
   let mut cProjStates : Array (NorMuon.ParamState ⟨#[4 * cfg.modelDim, cfg.modelDim], .Float32, .any⟩) := #[]
 
-  let mut qParams : Array (DTensor #[cfg.nHead * cfg.headDim, cfg.modelDim] .Float32) := #[]
-  let mut qGrads : Array (DTensor #[cfg.nHead * cfg.headDim, cfg.modelDim] .Float32) := #[]
+  let mut qParams : Array (Tensor { shape := #[cfg.nHead * cfg.headDim, cfg.modelDim], dtype := .Float32 }) := #[]
+  let mut qGrads : Array (Tensor { shape := #[cfg.nHead * cfg.headDim, cfg.modelDim], dtype := .Float32 }) := #[]
   let mut qStates : Array (NorMuon.ParamState ⟨#[cfg.nHead * cfg.headDim, cfg.modelDim], .Float32, .any⟩) := #[]
-  let mut kParams : Array (DTensor #[cfg.nHead * cfg.headDim, cfg.modelDim] .Float32) := #[]
-  let mut kGrads : Array (DTensor #[cfg.nHead * cfg.headDim, cfg.modelDim] .Float32) := #[]
+  let mut kParams : Array (Tensor { shape := #[cfg.nHead * cfg.headDim, cfg.modelDim], dtype := .Float32 }) := #[]
+  let mut kGrads : Array (Tensor { shape := #[cfg.nHead * cfg.headDim, cfg.modelDim], dtype := .Float32 }) := #[]
   let mut kStates : Array (NorMuon.ParamState ⟨#[cfg.nHead * cfg.headDim, cfg.modelDim], .Float32, .any⟩) := #[]
-  let mut vParams : Array (DTensor #[cfg.nHead * cfg.headDim, cfg.modelDim] .Float32) := #[]
-  let mut vGrads : Array (DTensor #[cfg.nHead * cfg.headDim, cfg.modelDim] .Float32) := #[]
+  let mut vParams : Array (Tensor { shape := #[cfg.nHead * cfg.headDim, cfg.modelDim], dtype := .Float32 }) := #[]
+  let mut vGrads : Array (Tensor { shape := #[cfg.nHead * cfg.headDim, cfg.modelDim], dtype := .Float32 }) := #[]
   let mut vStates : Array (NorMuon.ParamState ⟨#[cfg.nHead * cfg.headDim, cfg.modelDim], .Float32, .any⟩) := #[]
-  let mut oParams : Array (DTensor #[cfg.modelDim, cfg.nHead * cfg.headDim] .Float32) := #[]
-  let mut oGrads : Array (DTensor #[cfg.modelDim, cfg.nHead * cfg.headDim] .Float32) := #[]
+  let mut oParams : Array (Tensor { shape := #[cfg.modelDim, cfg.nHead * cfg.headDim], dtype := .Float32 }) := #[]
+  let mut oGrads : Array (Tensor { shape := #[cfg.modelDim, cfg.nHead * cfg.headDim], dtype := .Float32 }) := #[]
   let mut oStates : Array (NorMuon.ParamState ⟨#[cfg.modelDim, cfg.nHead * cfg.headDim], .Float32, .any⟩) := #[]
 
   for i in [:params.blocks.size] do
@@ -1267,7 +1269,7 @@ def trainLoop (cfg : moddedGpt.Config) (hp : Hyperparameters)
     let gradAccum := effectiveGradAccumSteps hp 1
     let iterator ← state.dataGen.iterator.updateParams batchSize seqLen
     let dataGen := { state.dataGen with iterator }
-    let mut microBatches : Array (DTensor #[batchSize, seqLen] .Int64 × DTensor #[batchSize, seqLen] .Int64) := #[]
+    let mut microBatches : Array (Tensor { shape := #[batchSize, seqLen], dtype := .Int64 } × Tensor { shape := #[batchSize, seqLen], dtype := .Int64 }) := #[]
     let mut newDataGen := dataGen
     let device := state.params.embed.device
     for _ in [:gradAccum.toNat] do
@@ -1331,16 +1333,22 @@ def syncParameters {cfg : moddedGpt.Config} (params : ModdedGPTParams cfg) : IO 
   else
     return TensorStruct.makeLeafParams params
 
-/-- All-reduce gradients across all ranks.
-    Call this after backward() and before optimizer.step(). -/
-def syncGradients {cfg : moddedGpt.Config} (params : ModdedGPTParams cfg) : IO Unit := do
+/-- Read gradient snapshots and average them across initialized ranks.
+    The returned tree is passed directly to clipping and the optimizer. -/
+def syncGradients {cfg : moddedGpt.Config} (params : ModdedGPTParams cfg) :
+    IO (ModdedGPTParams cfg) := do
+  let grads ← TensorStruct.grads params
   let isDistributed ← dist.isInitialized
-  if isDistributed then
-    -- Extract gradients from all parameters
-    let grads := TensorStruct.grads params
-    -- All-reduce to average gradients across ranks
-    let _ ← dist.allReduceGrads grads .avg
-    pure ()
+  if isDistributed then dist.allReduceGrads grads .avg else pure grads
+
+/-- Clip a gradient value without modifying its parameter's gradient accumulator. -/
+private def clipGradientValue {σ : StaticSpec} (gradient : Tensor σ) (maxNorm : Float) :
+    Tensor σ :=
+  let values := gradient.toFloat32
+  let norm := Float.sqrt (Tensor.sumAll (values * values)).item
+  if norm > maxNorm then
+    Tensor.Preserving.mulScalar gradient (maxNorm / norm)
+  else gradient
 
 /-- Distributed training step with gradient synchronization.
 
@@ -1355,8 +1363,8 @@ def syncGradients {cfg : moddedGpt.Config} (params : ModdedGPTParams cfg) : IO U
 def trainStepDistributed {cfg : moddedGpt.Config} {batch seq : UInt64}
     (params : ModdedGPTParams cfg)
     (yarn : YarnRotary cfg.headDim cfg.maxSeqLen)
-    (input : DTensor #[batch, seq] .Int64)
-    (target : DTensor #[batch, seq] .Int64)
+    (input : Tensor { shape := #[batch, seq], dtype := .Int64 })
+    (target : Tensor { shape := #[batch, seq], dtype := .Int64 })
     (optState : OptimizerState cfg)
     (hp : Hyperparameters)
     (gradClip : Float := 0.0)
@@ -1368,7 +1376,8 @@ def trainStepDistributed {cfg : moddedGpt.Config} {batch seq : UInt64}
   let worldSize ← if isDistributed then dist.getWorldSize else pure 1
 
   -- Ensure parameters are trainable leaves before backprop.
-  let params := TensorStruct.zeroGrads (TensorStruct.makeLeafParams params)
+  let params := TensorStruct.makeLeafParams params
+  TensorStruct.zeroGrads params
 
   -- Forward pass (window pattern is in cfg)
   let lossT ← moddedGpt.loss params yarn input target true
@@ -1379,34 +1388,11 @@ def trainStepDistributed {cfg : moddedGpt.Config} {batch seq : UInt64}
   -- Get loss value for logging (before sync to avoid extra comm)
   let lossVal := Tensor.item lossT
 
-  -- *** DISTRIBUTED GRADIENT SYNCHRONIZATION ***
-  -- All-reduce gradients across all ranks
-  if isDistributed then
-    syncGradients params
-
-  -- Gradient clipping (per-tensor norm clipping)
-  if gradClip > 0 then
-    let _ ← Tensor.clipGradNorm params.embed gradClip
-    let _ ← Tensor.clipGradNorm params.smearGate.weight gradClip
-    for ve in params.valueEmbeds do
-      let _ ← Tensor.clipGradNorm ve gradClip
-    for block in params.blocks do
-      -- Attention layer (may be None for some layers)
-      match block.attn with
-      | some attn =>
-        let _ ← Tensor.clipGradNorm attn.wQ gradClip
-        let _ ← Tensor.clipGradNorm attn.wK gradClip
-        let _ ← Tensor.clipGradNorm attn.wV gradClip
-        let _ ← Tensor.clipGradNorm attn.wO gradClip
-      | none => pure ()
-      -- MLP
-      let _ ← Tensor.clipGradNorm block.mlp.cFc gradClip
-      let _ ← Tensor.clipGradNorm block.mlp.cProj gradClip
-    let _ ← Tensor.clipGradNorm params.lmHead.weight gradClip
-    let _ ← Tensor.clipGradNorm params.scalars.values gradClip
-
-  -- Extract gradients from parameters
-  let grads := TensorStruct.grads params
+  -- Synchronize the snapshots once and clip those exact values before updating.
+  let grads ← syncGradients params
+  let grads := if gradClip > 0 then
+    TensorStruct.map (fun gradient => clipGradientValue gradient gradClip) grads
+  else grads
 
   -- Get current learning rate from schedule
   let lr := getLearningRate optState.step hp optState.baseLr
@@ -1536,7 +1522,7 @@ def trainLoopDistributed (cfg : moddedGpt.Config) (hp : Hyperparameters)
     let gradAccum := effectiveGradAccumSteps hp state.worldSize
     let iterator ← state.dataGen.iterator.updateParams batchSize seqLen
     let dataGen := { state.dataGen with iterator }
-    let mut microBatches : Array (DTensor #[batchSize, seqLen] .Int64 × DTensor #[batchSize, seqLen] .Int64) := #[]
+    let mut microBatches : Array (Tensor { shape := #[batchSize, seqLen], dtype := .Int64 } × Tensor { shape := #[batchSize, seqLen], dtype := .Int64 }) := #[]
     let mut newDataGen := dataGen
     let device := state.params.embed.device
     for _ in [:gradAccum.toNat] do
@@ -1723,8 +1709,8 @@ def trainDistributed (cfg : moddedGpt.Config) (hp : Hyperparameters)
 structure DynamicGPTBatch where
   batch : UInt64
   seq : UInt64
-  input : DTensor #[batch, seq] .Int64
-  target : DTensor #[batch, seq] .Int64
+  input : Tensor { shape := #[batch, seq], dtype := .Int64 }
+  target : Tensor { shape := #[batch, seq], dtype := .Int64 }
 
 /-- Provider callback for GPT micro-batches. -/
 abbrev DynamicGPTBatchProvider := IO (Option DynamicGPTBatch)
@@ -1781,8 +1767,8 @@ private def collectMicroBatches {batch seq : UInt64}
     (provider : DynamicGPTBatchProvider)
     (gradAccum : Nat)
     (device : Device)
-    : IO (Array (DTensor #[batch, seq] .Int64 × DTensor #[batch, seq] .Int64)) := do
-  let mut microBatches : Array (DTensor #[batch, seq] .Int64 × DTensor #[batch, seq] .Int64) := #[]
+    : IO (Array (Tensor { shape := #[batch, seq], dtype := .Int64 } × Tensor { shape := #[batch, seq], dtype := .Int64 })) := do
+  let mut microBatches : Array (Tensor { shape := #[batch, seq], dtype := .Int64 } × Tensor { shape := #[batch, seq], dtype := .Int64 }) := #[]
   for _ in [:gradAccum] do
     match ← provider with
     | none => pure ()
@@ -1827,7 +1813,7 @@ private def checkpointPhase (label : String) (worldSize : UInt64) (device : Devi
   let failure? ← try action; pure none catch e => pure (some s!"{e}")
   let failed : Bool ← if worldSize > 1 then do
       let flag := (Tensor.full #[1] (if failure?.isSome then 1.0 else 0.0)).to device
-      dist.allReduce flag .max
+      let flag ← dist.allReduce flag .max
       pure (decide (Tensor.item (flag.reshapeChecked #[]) > 0.0))
     else pure failure?.isSome
   match failed with

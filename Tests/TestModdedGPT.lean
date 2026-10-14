@@ -57,6 +57,42 @@ def testPolarExpressFFI : IO Unit := do
   let norm := Tensor.item (Tensor.meanAll (Tensor.abs orthG))
   LeanTest.assertTrue (norm > 0.0) "Orthogonalized gradient should be non-zero"
 
+/-- The native scalar arithmetic promotes Int64 to Float32. The indexed
+boundary must reject this instead of returning a tensor with a false dtype. -/
+@[test]
+def testDistributedRejectsPromotedIntegerResults : IO Unit := do
+  let input := Tensor.fullInt #[2, 2] 1
+  LeanTest.assertThrows (dist.baPlusCaa input 0.5 0.5)
+    (some "baPlusCaa: Expected dtype Int64, got Float32")
+  LeanTest.assertThrows (dist.newtonSchulzStep input 0.5 0.5 0.5)
+    (some "newtonSchulzStep: Expected dtype Int64, got Float32")
+  LeanTest.assertThrows (dist.cautiousUpdate input input 0.1 0.1)
+    (some "cautiousUpdate: Expected dtype Int64, got Float32")
+  LeanTest.assertThrows (dist.baPlusCaa input.forgetDType 0.5 0.5)
+    (some "baPlusCaa: Expected dtype Int64, got Float32")
+  LeanTest.assertThrows (dist.newtonSchulzStep input.forgetDType 0.5 0.5 0.5)
+    (some "newtonSchulzStep: Expected dtype Int64, got Float32")
+  LeanTest.assertThrows (dist.cautiousUpdate input.forgetDType input.forgetDType 0.1 0.1)
+    (some "cautiousUpdate: Expected dtype Int64, got Float32")
+
+/-- Successful native results retain the full claimed metadata, including an
+exact CPU placement and the rectangular XXT result shape. -/
+@[test]
+def testDistributedFloatingResultMetadata : IO Unit := do
+  for dtype in #[DType.Float32, DType.Float64] do
+    let input := Tensor.onesFor ⟨#[2, 2], dtype, .exact .CPU⟩
+    let rectangular := Tensor.onesFor ⟨#[2, 3], dtype, .exact .CPU⟩
+    for (operation, result) in #[
+        ("xxt", ← dist.xxt rectangular),
+        ("baPlusCaa", ← dist.baPlusCaa input 0.5 0.5),
+        ("newtonSchulzStep", ← dist.newtonSchulzStep input 0.5 0.5 0.5),
+        ("polarExpress", ← dist.polarExpress input 1),
+        ("cautiousUpdate", ← dist.cautiousUpdate input input 0.1 0.1)] do
+      LeanTest.assertEqual result.runtimeShape #[2, 2] operation
+      LeanTest.assertEqual result.actualSpec.dtype dtype operation
+      LeanTest.assertTrue (result.device == .CPU) s!"{operation}: result must stay on CPU"
+      LeanTest.assertTrue result.validate.isOk s!"{operation}: static spec must match native metadata"
+
 /-! ## 2. Pure Function Tests (Schedules) -/
 
 @[test]

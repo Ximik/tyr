@@ -133,8 +133,8 @@ private def batchedEosDeterministicModel : IO (Qwen35ForCausalLM tinyBatchedEosC
     1, 0, 0, 0,
     0, 0, 0, 0
   ]
-  let embed : STensor #[4, 4] := floatDynamic (Tensor.reshapeChecked (Tensor.fromInt64Array embedVals) #[4, 4])
-  let lmHead : STensor #[4, 4] := floatDynamic (Tensor.reshapeChecked (Tensor.fromInt64Array lmHeadVals) #[4, 4])
+  let embed : Tensor { shape := #[4, 4] } := floatDynamic (Tensor.reshapeChecked (Tensor.fromInt64Array embedVals) #[4, 4])
+  let lmHead : Tensor { shape := #[4, 4] } := floatDynamic (Tensor.reshapeChecked (Tensor.fromInt64Array lmHeadVals) #[4, 4])
   pure {
     base with
     model := { base.model with embed_tokens := embed }
@@ -142,17 +142,17 @@ private def batchedEosDeterministicModel : IO (Qwen35ForCausalLM tinyBatchedEosC
   }
 
 private def rowTokenIds {seq : UInt64}
-    (tokens : DTensor #[2, seq] .Int64)
+    (tokens : Tensor { shape := #[2, seq], dtype := .Int64 })
     (row : UInt64)
     : IO (Array UInt64) := do
-  let row2d : DTensor #[1, seq] .Int64 := typedSlice tokens 0 row 1
-  let flat : DTensor #[seq] .Int64 := Tensor.reshapeChecked (id row2d) #[seq]
+  let row2d : Tensor { shape := #[1, seq], dtype := .Int64 } := typedSlice tokens 0 row 1
+  let flat : Tensor { shape := #[seq], dtype := .Int64 } := Tensor.reshapeChecked (id row2d) #[seq]
   Tensor.toUInt64Array flat
 
 @[test]
 def testQwen35DenseInitAndForward : IO Unit := do
   let model ← Qwen35ForCausalLM.init tinyDenseCfg
-  let ids : DTensor #[1, 5] .Int64 := Tensor.reshapeChecked (Tensor.fromInt64Array #[1, 2, 3, 4, 5]) #[1, 5]
+  let ids : Tensor { shape := #[1, 5], dtype := .Int64 } := Tensor.reshapeChecked (Tensor.fromInt64Array #[1, 2, 3, 4, 5]) #[1, 5]
   let logits := model.forward tinyDenseCfg ids
   LeanTest.assertEqual logits.runtimeShape #[1, 5, tinyDenseCfg.vocab_size]
     "dense forward should return [batch, seq, vocab]"
@@ -160,7 +160,7 @@ def testQwen35DenseInitAndForward : IO Unit := do
 @[test]
 def testQwen35DenseGreedyCachedUncachedParity : IO Unit := do
   let model ← Qwen35ForCausalLM.init tinyDenseCfg
-  let ids : DTensor #[1, 4] .Int64 := Tensor.reshapeChecked (Tensor.fromInt64Array #[3, 1, 2, 4]) #[1, 4]
+  let ids : Tensor { shape := #[1, 4], dtype := .Int64 } := Tensor.reshapeChecked (Tensor.fromInt64Array #[3, 1, 2, 4]) #[1, 4]
 
   let ⟨seqCached, outCached⟩ ← model.generateGreedy tinyDenseCfg ids 4 #[]
   let ⟨seqUncached, outUncached⟩ ←
@@ -171,8 +171,8 @@ def testQwen35DenseGreedyCachedUncachedParity : IO Unit := do
   LeanTest.assertEqual seqUncached (4 + 4)
     "uncached greedy should append maxNewTokens"
 
-  let cachedFlat : DTensor #[seqCached] .Int64 := Tensor.reshapeChecked (id outCached) #[seqCached]
-  let uncachedFlat : DTensor #[seqUncached] .Int64 := Tensor.reshapeChecked (id outUncached) #[seqUncached]
+  let cachedFlat : Tensor { shape := #[seqCached], dtype := .Int64 } := Tensor.reshapeChecked (id outCached) #[seqCached]
+  let uncachedFlat : Tensor { shape := #[seqUncached], dtype := .Int64 } := Tensor.reshapeChecked (id outUncached) #[seqUncached]
   let cachedIds ← Tensor.toUInt64Array cachedFlat
   let uncachedIds ← Tensor.toUInt64Array uncachedFlat
 
@@ -182,7 +182,7 @@ def testQwen35DenseGreedyCachedUncachedParity : IO Unit := do
 @[test]
 def testQwen35AttentionUsesPerHeadQGateLayout : IO Unit := do
   let cfg := tinyAttentionCfg
-  let qProj : STensor #[cfg.num_attention_heads * cfg.head_dim * 2, cfg.hidden_size] :=
+  let qProj : Tensor { shape := #[cfg.num_attention_heads * cfg.head_dim * 2, cfg.hidden_size] } :=
     Tensor.reshapeChecked (floatArrayDynamic #[
       1.0, 0.0, 0.0, 0.0,
       0.0, 1.0, 0.0, 0.0,
@@ -193,14 +193,14 @@ def testQwen35AttentionUsesPerHeadQGateLayout : IO Unit := do
       0.0, 0.0, -10.0, 0.0,
       0.0, 0.0, 0.0, -10.0
     ]) #[cfg.num_attention_heads * cfg.head_dim * 2, cfg.hidden_size]
-  let ident : STensor #[cfg.num_attention_heads * cfg.head_dim, cfg.hidden_size] :=
+  let ident : Tensor { shape := #[cfg.num_attention_heads * cfg.head_dim, cfg.hidden_size] } :=
     Tensor.reshapeChecked (floatArrayDynamic #[
       1.0, 0.0, 0.0, 0.0,
       0.0, 1.0, 0.0, 0.0,
       0.0, 0.0, 1.0, 0.0,
       0.0, 0.0, 0.0, 1.0
     ]) #[cfg.num_attention_heads * cfg.head_dim, cfg.hidden_size]
-  let oProj : STensor #[cfg.hidden_size, cfg.num_attention_heads * cfg.head_dim] :=
+  let oProj : Tensor { shape := #[cfg.hidden_size, cfg.num_attention_heads * cfg.head_dim] } :=
     Tensor.reshapeChecked (floatArrayDynamic #[
       1.0, 0.0, 0.0, 0.0,
       0.0, 1.0, 0.0, 0.0,
@@ -215,10 +215,10 @@ def testQwen35AttentionUsesPerHeadQGateLayout : IO Unit := do
     q_norm := Qwen35RMSNorm.initZeroCentered cfg.head_dim cfg.rms_norm_eps
     k_norm := Qwen35RMSNorm.initZeroCentered cfg.head_dim cfg.rms_norm_eps
   }
-  let x : STensor #[1, 1, cfg.hidden_size] :=
+  let x : Tensor { shape := #[1, 1, cfg.hidden_size] } :=
     Tensor.reshapeChecked (floatArrayDynamic #[1.0, 2.0, 3.0, 4.0]) #[1, 1, cfg.hidden_size]
   let (cos, sin) := Tensor.rotaryFreqs 1 (Config.rotaryDim cfg) cfg.rope_theta x.device
-  let out : STensor #[1, 1, cfg.hidden_size] := attn.forward cfg x cos sin true
+  let out : Tensor { shape := #[1, 1, cfg.hidden_size] } := attn.forward cfg x cos sin true
   let vals ← Tensor.toFloatArray (id out)
   LeanTest.assertTrue (approxEq vals[0]! (1.0 / (1.0 + Float.exp (-10.0))) 1e-4)
     "head 0 dim 0 should use the head-local gate rows"
@@ -231,9 +231,9 @@ def testQwen35AttentionUsesPerHeadQGateLayout : IO Unit := do
 
 @[test]
 def testQwen35RMSNormCheckpointWeightIsZeroCentered : IO Unit := do
-  let raw : STensor #[2] := floatArrayDynamic #[0.25, -0.5]
+  let raw : Tensor { shape := #[2] } := floatArrayDynamic #[0.25, -0.5]
   let norm := Qwen35RMSNorm.fromCheckpointWeight raw
-  let x : STensor #[1, 2] := Tensor.reshapeChecked (floatArrayDynamic #[1.0, 1.0]) #[1, 2]
+  let x : Tensor { shape := #[1, 2] } := Tensor.reshapeChecked (floatArrayDynamic #[1.0, 1.0]) #[1, 2]
   let out := norm.forward2d x
   let vals ← Tensor.toFloatArray (id out)
   LeanTest.assertTrue (approxEq vals[0]! 1.25 1e-5)
@@ -244,11 +244,11 @@ def testQwen35RMSNormCheckpointWeightIsZeroCentered : IO Unit := do
 @[test]
 def testQwen35DenseGreedyStreamParity : IO Unit := do
   let model ← Qwen35ForCausalLM.init tinyDenseCfg
-  let ids : DTensor #[1, 4] .Int64 := Tensor.reshapeChecked (Tensor.fromInt64Array #[7, 2, 5, 1]) #[1, 4]
+  let ids : Tensor { shape := #[1, 4], dtype := .Int64 } := Tensor.reshapeChecked (Tensor.fromInt64Array #[7, 2, 5, 1]) #[1, 4]
 
   let streamedRef ← IO.mkRef (#[] : Array UInt64)
   let onStep : StreamCallback 1 := fun _ nextTok => do
-    let flat : DTensor #[1] .Int64 := Tensor.reshapeChecked (id nextTok) #[1]
+    let flat : Tensor { shape := #[1], dtype := .Int64 } := Tensor.reshapeChecked (id nextTok) #[1]
     let vals ← Tensor.toUInt64Array flat
     streamedRef.modify (fun xs => xs ++ vals)
 
@@ -260,8 +260,8 @@ def testQwen35DenseGreedyStreamParity : IO Unit := do
   LeanTest.assertEqual seqStream seqPlain
     "streaming and non-streaming cached generation should have equal output length"
 
-  let streamFlat : DTensor #[seqStream] .Int64 := Tensor.reshapeChecked (id outStream) #[seqStream]
-  let plainFlat : DTensor #[seqPlain] .Int64 := Tensor.reshapeChecked (id outPlain) #[seqPlain]
+  let streamFlat : Tensor { shape := #[seqStream], dtype := .Int64 } := Tensor.reshapeChecked (id outStream) #[seqStream]
+  let plainFlat : Tensor { shape := #[seqPlain], dtype := .Int64 } := Tensor.reshapeChecked (id outPlain) #[seqPlain]
   let streamIds ← Tensor.toUInt64Array streamFlat
   let plainIds ← Tensor.toUInt64Array plainFlat
   LeanTest.assertEqual streamIds plainIds
@@ -274,7 +274,7 @@ def testQwen35DenseGreedyStreamParity : IO Unit := do
 @[test]
 def testQwen35BatchedEosStopsPerRow : IO Unit := do
   let model ← batchedEosDeterministicModel
-  let ids : DTensor #[2, 1] .Int64 := Tensor.reshapeChecked (Tensor.fromInt64Array #[0, 3]) #[2, 1]
+  let ids : Tensor { shape := #[2, 1], dtype := .Int64 } := Tensor.reshapeChecked (Tensor.fromInt64Array #[0, 3]) #[2, 1]
   let eos := #[2]
 
   let ⟨seqCached, outCached⟩ ← model.generate tinyBatchedEosCfg ids 2 .greedy eos
@@ -307,7 +307,7 @@ def testQwen35BatchedEosStopsPerRow : IO Unit := do
 @[test]
 def testQwen35MoeInitAndForward : IO Unit := do
   let model ← Qwen35ForCausalLM.init tinyMoeCfg
-  let ids : DTensor #[1, 3] .Int64 := Tensor.reshapeChecked (Tensor.fromInt64Array #[5, 6, 7]) #[1, 3]
+  let ids : Tensor { shape := #[1, 3], dtype := .Int64 } := Tensor.reshapeChecked (Tensor.fromInt64Array #[5, 6, 7]) #[1, 3]
   let logits := model.forward tinyMoeCfg ids
   LeanTest.assertEqual logits.runtimeShape #[1, 3, tinyMoeCfg.vocab_size]
     "moe forward should return [batch, seq, vocab]"
@@ -376,7 +376,7 @@ def testQwen35ConfigLoadNestedTextConfig : IO Unit := do
 
 @[test] def testQwen35BFloat16HybridCache : IO Unit := do
   let initialized ← Qwen35ForCausalLM.init tinyDenseCfg false
-  let model := TensorStruct.map (fun t => t.checkedReplacement t.toBFloat16.raw) initialized
+  let model ← TensorStruct.castDType .BFloat16 initialized
   let ids := (Tensor.fromInt64Array #[1, 2, 3, 4]).reshapeChecked #[1, 4]
   let embeds := model.embedTokens ids
   let (cos, sin) := Tensor.rotaryFreqs 4 (Config.rotaryDim tinyDenseCfg) tinyDenseCfg.rope_theta

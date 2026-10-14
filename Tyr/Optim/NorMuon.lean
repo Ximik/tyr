@@ -286,7 +286,7 @@ def stepDistributedOwner {σ : StaticSpec} (param : Tensor σ) (grad : Tensor σ
 
   let rank ← dist.getRank
   let gradAvg := Tensor.detach grad
-  dist.allReduce gradAvg .avg
+  let gradAvg ← dist.allReduce gradAvg .avg
 
   let (ownerParam, ownerState) ←
     if rank == ownerRank then
@@ -295,14 +295,14 @@ def stepDistributedOwner {σ : StaticSpec} (param : Tensor σ) (grad : Tensor σ
       pure (param, state)
 
   let paramSynced := if rank == ownerRank then ownerParam else Tensor.detach param
-  dist.broadcast paramSynced ownerRank
+  let paramSynced ← dist.broadcast paramSynced ownerRank
 
   let momentumSynced :=
     if rank == ownerRank then
       ownerState.momentumBuffer.getD (Tensor.zerosLike paramSynced)
     else
       Tensor.zerosLike paramSynced
-  dist.broadcast momentumSynced ownerRank
+  let momentumSynced ← dist.broadcast momentumSynced ownerRank
 
   let newParam := Tensor.setRequiresGrad (Tensor.detach paramSynced) true
   let newState : ParamState σ := {
@@ -374,7 +374,7 @@ def stepDistributedGroup {σ : StaticSpec}
     let ownerIdx := base + rankNat
     let gradOwner := if ownerIdx < params.size then Tensor.zerosLike params[ownerIdx]!
       else Tensor.zerosLike zeroBuf
-    dist.reduceScatterList gradOwner rsInputs .avg
+    let gradOwner ← dist.reduceScatterList gradOwner rsInputs .avg
 
     let mut ownerParam := if ownerIdx < params.size then params[ownerIdx]! else zeroBuf
     let mut ownerState := states[ownerIdx]?.getD (initParamState ownerParam)
@@ -390,7 +390,7 @@ def stepDistributedGroup {σ : StaticSpec}
       let t := if idx < params.size then params[idx]! else zeroBuf
       gatherParams := gatherParams.push (Tensor.detach t)
     let agInput := if ownerIdx < params.size then ownerParam else zeroBuf
-    dist.allGatherList gatherParams agInput
+    gatherParams ← dist.allGatherList gatherParams agInput
 
     -- Gather owner momentum buffers to keep replicated checkpoint-compatible state.
     let mut gatherMomentum : Array (Tensor σ) := #[]
@@ -399,7 +399,7 @@ def stepDistributedGroup {σ : StaticSpec}
       let t := if idx < params.size then params[idx]! else zeroBuf
       gatherMomentum := gatherMomentum.push (Tensor.zerosLike t)
     let agMomentum := ownerState.momentumBuffer.getD (Tensor.zerosLike agInput)
-    dist.allGatherList gatherMomentum agMomentum
+    gatherMomentum ← dist.allGatherList gatherMomentum agMomentum
 
     for j in [:ws] do
       let idx := base + j

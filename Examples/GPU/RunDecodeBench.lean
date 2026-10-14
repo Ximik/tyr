@@ -191,17 +191,21 @@ private def runOne (runId : String) (warmup iters repeats : Nat)
   let v := vBase.toBFloat16
 
   -- SDPA reference output (BF16 in / BF16 out, same as kernel) for parity.
-  let outRef : DTensor #[c.batch, c.qHeads, 1, c.headDim] .BFloat16 :=
+  let outRef : Tensor { shape := #[c.batch, c.qHeads, 1, c.headDim], dtype := .BFloat16 } :=
     Tensor.attentionGQAQKV
       (q.toFloat32) (k.toFloat32) (v.toFloat32) 0.0 false true
       |> Tensor.toBFloat16
 
   match backend with
   | .torchSdpa =>
-      let sink : DTensor #[c.batch, c.qHeads, 1, c.headDim] .BFloat16 ← Tensor.uniformLike q 0 0
+      let sink : Tensor { shape := #[c.batch, c.qHeads, 1, c.headDim], dtype := .BFloat16 } ← Tensor.uniformLike q 0 0
+      let sinkRef ← IO.mkRef (some sink)
       let action : IO Unit := do
         let out := Tensor.attentionGQAQKV q k v 0.0 false true
-        Tensor.copyInto sink out
+        let some destination ← sinkRef.swap none
+          | throw (IO.userError "Decode benchmark destination is unavailable")
+        let updated ← Tensor.copyInto destination out
+        sinkRef.set (some updated)
       let lats ← benchmarkAction runId warmup iters repeats stream action
       pure {
         runId := runId, caseId := c.caseId, backend := "torch_sdpa",
@@ -217,17 +221,21 @@ private def runOne (runId : String) (warmup iters repeats : Nat)
   | .tyrRuntime =>
       let routeActual := expectedRouteFor c
       -- Correctness once before timing.
-      let outActual : DTensor #[c.batch, c.qHeads, 1, c.headDim] .BFloat16 :=
+      let outActual : Tensor { shape := #[c.batch, c.qHeads, 1, c.headDim], dtype := .BFloat16 } :=
         Tensor.flashAttention q k v true
       let _ ← torch.cuda_synchronize
       let outMae := Tensor.item (Tensor.meanAll (Tensor.abs (outActual - outRef)))
       let outMax := Tensor.item (Tensor.maxAll (Tensor.abs (outActual - outRef)))
       let okRoute := routeActual == c.expectedTyrRoute
       let okOut := Tensor.allclose outRef outActual 5.0e-2 5.0e-2
-      let sink : DTensor #[c.batch, c.qHeads, 1, c.headDim] .BFloat16 ← Tensor.uniformLike q 0 0
+      let sink : Tensor { shape := #[c.batch, c.qHeads, 1, c.headDim], dtype := .BFloat16 } ← Tensor.uniformLike q 0 0
+      let sinkRef ← IO.mkRef (some sink)
       let action : IO Unit := do
         let out := Tensor.flashAttention q k v true
-        Tensor.copyInto sink out
+        let some destination ← sinkRef.swap none
+          | throw (IO.userError "Decode benchmark destination is unavailable")
+        let updated ← Tensor.copyInto destination out
+        sinkRef.set (some updated)
       let lats ← benchmarkAction runId warmup iters repeats stream action
       pure {
         runId := runId, caseId := c.caseId, backend := "tyr_runtime",

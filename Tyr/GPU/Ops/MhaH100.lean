@@ -15,13 +15,13 @@ open torch
 open Tyr.GPU.Kernels
 
 /-- BF16 tensor shape used by `mha_h100` kernels: `[1, 1, seq, 64]`. -/
-abbrev BF16 (seq : UInt64) : Type := DTensor #[1, 1, seq, 64] .BFloat16
+abbrev BF16 (seq : UInt64) : Type := Tensor { shape := #[1, 1, seq, 64], dtype := .BFloat16 }
 
 /-- FP32 gradient/output tensor shape used by `mha_h100` kernels. -/
-abbrev F32 (seq : UInt64) : Type := DTensor #[1, 1, seq, 64] .Float32
+abbrev F32 (seq : UInt64) : Type := Tensor { shape := #[1, 1, seq, 64], dtype := .Float32 }
 
 /-- Per-query L/D vector tensor shape matching TK vector TMA layouts: `[1, 1, 1, seq]`. -/
-abbrev L (kvBlocks : UInt64) : Type := DTensor #[1, 1, 1, kvBlocks * 64] .Float32
+abbrev L (kvBlocks : UInt64) : Type := Tensor { shape := #[1, 1, 1, kvBlocks * 64], dtype := .Float32 }
 
 /-- Launch configuration shared across wrapper entry points. -/
 structure LaunchCfg where
@@ -134,9 +134,7 @@ def mhaBwd {seq kvBlocks : UInt64} [Variant seq kvBlocks]
 
 private def sdpaFwdPortable {seq : UInt64}
     (q k v : BF16 seq) (isCausal : Bool) : BF16 seq :=
-  -- `RawTensor.attention` is the `lean_torch_sdpa_4d` extern; the handle is
-  -- re-graded at the known spec (SDPA preserves shape and dtype).
-  Tensor.assumeSpec (RawTensor.attention 1 1 seq 64 q.raw k.raw v.raw 0.0 isCausal)
+  Tensor.attention q k v 0.0 isCausal
 
 private def sdpaBwdPortable {seq : UInt64}
     (q k v dO : BF16 seq) (isCausal : Bool) : IO (F32 seq × F32 seq × F32 seq) := do
@@ -144,11 +142,11 @@ private def sdpaBwdPortable {seq : UInt64}
   let kLeaf := Tensor.setRequiresGrad (Tensor.detach k) true
   let vLeaf := Tensor.setRequiresGrad (Tensor.detach v) true
   let outRef : BF16 seq :=
-    Tensor.assumeSpec (RawTensor.attention 1 1 seq 64 qLeaf.raw kLeaf.raw vLeaf.raw 0.0 isCausal)
+    Tensor.attention qLeaf kLeaf vLeaf 0.0 isCausal
   Tensor.backward outRef dO
-  let dQ : F32 seq := Tensor.toFloat32 (Tensor.gradOf qLeaf)
-  let dK : F32 seq := Tensor.toFloat32 (Tensor.gradOf kLeaf)
-  let dV : F32 seq := Tensor.toFloat32 (Tensor.gradOf vLeaf)
+  let dQ : F32 seq := Tensor.toFloat32 (← Tensor.gradOf qLeaf)
+  let dK : F32 seq := Tensor.toFloat32 (← Tensor.gradOf kLeaf)
+  let dV : F32 seq := Tensor.toFloat32 (← Tensor.gradOf vLeaf)
   pure (dQ, dK, dV)
 
 /-- Portable forward path (arbitrary `seq`, causal/non-causal) backed by SDPA. -/

@@ -119,7 +119,7 @@ def trainStep (cfg : torch.gpt.Config)
     (y : Tokens #[batchSize, seqLen])
     : IO (GPTParams cfg × AdamWState (GPTParams cfg) × Float) := do
   -- Zero gradients
-  let params := TensorStruct.zeroGrads params
+  TensorStruct.zeroGrads params
 
   -- Forward pass and compute loss
   let lossT ← torch.gpt.loss params x y true
@@ -131,7 +131,7 @@ def trainStep (cfg : torch.gpt.Config)
   let lossVal := Tensor.item lossT
 
   -- Extract gradients from parameters
-  let grads := TensorStruct.grads params
+  let grads ← TensorStruct.grads params
 
   -- Update parameters with optimizer step
   let (params', optState') := step opt params grads optState

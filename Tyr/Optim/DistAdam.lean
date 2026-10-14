@@ -199,7 +199,7 @@ def stepDistributed {σ : StaticSpec} (param : Tensor σ) (grad : Tensor σ) (st
   -- If not shardable, fall back to all-reduce + local step for compatibility.
   if !canShardFirstDim σ.shape worldSize then
     let gradReduced := Tensor.detach grad
-    dist.allReduce gradReduced .avg
+    let gradReduced ← dist.allReduce gradReduced .avg
     return (← stepSingle param gradReduced state cfg lrMul wdMul)
 
   let step := state.step + 1

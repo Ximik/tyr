@@ -90,7 +90,7 @@ def trainStep {modelCfg : Config} {batch seq num_timesteps : UInt64}
     (lr : Float)
     : IO (DiffusionParams modelCfg × Optim.AdamWState (DiffusionParams modelCfg) × Float) := do
   -- Zero gradients BEFORE forward/backward
-  let params := TensorStruct.zeroGrads params
+  TensorStruct.zeroGrads params
 
   -- Sample random timesteps for each sample in batch
   let t ← Tensor.randint 0 num_timesteps.toInt64 #[batch]
@@ -115,7 +115,7 @@ def trainStep {modelCfg : Config} {batch seq num_timesteps : UInt64}
   let lossVal := Tensor.item lossT
 
   -- Extract gradients from parameters
-  let grads := TensorStruct.grads params
+  let grads ← TensorStruct.grads params
 
   -- Update parameters with AdamW
   let opt := Optim.adamw (lr := lr) (weight_decay := trainCfg.weightDecay)

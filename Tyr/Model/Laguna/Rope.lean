@@ -37,11 +37,11 @@
 
     let tables ← precomputeRotaryTables cfg maxLen device
     -- sliding layers (full rotary, rotaryDim = headDim = 128):
-    let cos : DTensor #[seq, 64] .Float32 := sliceRotaryRows tables.slidingCos 0 seq
-    let q' := Tensor.applyRotary q cos sin            -- q : STensor #[b, seq, h, 128]
+    let cos : Tensor { shape := #[seq, 64], dtype := .Float32 } := sliceRotaryRows tables.slidingCos 0 seq
+    let q' := Tensor.applyRotary q cos sin            -- q : Tensor { shape := #[b, seq, h, 128] }
     -- full layers (partial rotary 0.5, rotaryDim = 64):
-    let cos : DTensor #[seq, 32] .Float32 := sliceRotaryRows tables.fullCos position 1
-    let q' := applyRotaryPartial q cos sin               -- q : STensor #[b, 1, h, 128]
+    let cos : Tensor { shape := #[seq, 32], dtype := .Float32 } := sliceRotaryRows tables.fullCos position 1
+    let q' := applyRotaryPartial q cos sin               -- q : Tensor { shape := #[b, 1, h, 128] }
 -/
 import Tyr.Basic
 import Tyr.Typed.Neural
@@ -123,8 +123,8 @@ def yarnInvFreq (cfg : Config) : Array Float :=
     the layout consumed by `Tensor.applyRotary`. -/
 def buildCosSinTables (invFreq : Array Float) (maxLen : UInt64) (scale : Float := 1.0)
     (device : Device := Device.CPU) :
-    DTensor #[maxLen, invFreq.size.toUInt64] .Float32 ×
-    DTensor #[maxLen, invFreq.size.toUInt64] .Float32 :=
+    Tensor { shape := #[maxLen, invFreq.size.toUInt64], dtype := .Float32 } ×
+    Tensor { shape := #[maxLen, invFreq.size.toUInt64], dtype := .Float32 } :=
   let half := invFreq.size
   let n := maxLen.toNat
   let (cosArr, sinArr) := Id.run do
@@ -173,13 +173,13 @@ def precomputeRotaryTables (cfg : Config) (maxLen : UInt64) (device : Device)
     Prefill: `sliceRotaryRows table 0 seq`.  Decode step at `position`:
     `sliceRotaryRows table position 1`. -/
 def sliceRotaryRows {half : UInt64} (table : ShapePackedTensor .Float32)
-    (start len : UInt64) : DTensor #[len, half] .Float32 :=
+    (start len : UInt64) : Tensor { shape := #[len, half], dtype := .Float32 } :=
   table.2.sliceChecked 0 start len #[len, half]
 
 /-- Slice rows `[start, start + len)` of a cos/sin table pair. -/
 def sliceRotaryRowsPair {half : UInt64}
     (cosTable sinTable : ShapePackedTensor .Float32) (start len : UInt64)
-    : DTensor #[len, half] .Float32 × DTensor #[len, half] .Float32 :=
+    : Tensor { shape := #[len, half], dtype := .Float32 } × Tensor { shape := #[len, half], dtype := .Float32 } :=
   (sliceRotaryRows cosTable start len, sliceRotaryRows sinTable start len)
 
 /-- Apply rotary embeddings to the first `rotary_dim` channels of `x`
@@ -193,10 +193,10 @@ def sliceRotaryRowsPair {half : UInt64}
       `Tensor.applyRotary` directly on the full head; this helper handles
       that case too (the pass-through slice is then empty). -/
 def applyRotaryPartial {batch seq n_head head_dim rotary_dim : UInt64} {d dc : DType}
-    (x : DTensor #[batch, seq, n_head, head_dim] d)
-    (cos : DTensor #[seq, rotary_dim / 2] dc)
-    (sin : DTensor #[seq, rotary_dim / 2] dc)
-    : DTensor #[batch, seq, n_head, head_dim] d :=
+    (x : Tensor { shape := #[batch, seq, n_head, head_dim], dtype := d })
+    (cos : Tensor { shape := #[seq, rotary_dim / 2], dtype := dc })
+    (sin : Tensor { shape := #[seq, rotary_dim / 2], dtype := dc })
+    : Tensor { shape := #[batch, seq, n_head, head_dim], dtype := d } :=
   let xRot := x.sliceChecked 3 0 rotary_dim #[batch, seq, n_head, rotary_dim]
   let xRot := Tensor.applyRotary xRot cos sin
   let xPassLen : UInt64 := head_dim - rotary_dim
