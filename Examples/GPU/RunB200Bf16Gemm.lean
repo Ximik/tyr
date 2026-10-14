@@ -1,7 +1,9 @@
 /- End-to-end Blackwell/B200 BF16 GEMM validation. -/
 import Tyr.Torch
+import Tyr.Typed.Neural
 import Tyr.GPU.Kernels.Bf16Gemm
-import Examples.GPU.Parity
+import Examples.GPU.IndexedParity
+import Examples.GPU.GemmReference
 import Examples.GPU.FixtureRunner
 import Examples.GPU.Benchmark
 
@@ -27,19 +29,19 @@ def generateFixtures : IO Unit := do
   IO.FS.createDirAll fixtureSpec.dir
   let device := Device.CUDA 0
 
-  let aFloat ← torch.randn #[256, 64] false device
-  let bFloat ← torch.randn #[256, 64] false device
-  let a := torch.toBFloat16' aFloat
-  let b : T #[256, 64] := torch.toBFloat16' bFloat
-  let expectedFloat : T #[256, 256] := torch.nn.matmul2d (torch.toFloat' a) (torch.nn.transpose2d (torch.toFloat' b))
-  let expected := torch.toBFloat16' expectedFloat
+  let aFloat ← Tensor.randn #[256, 64] false device
+  let bFloat ← Tensor.randn #[256, 64] false device
+  let a := aFloat.toBFloat16
+  let b : DTensor #[256, 64] .BFloat16 := bFloat.toBFloat16
+  let expectedFloat : DTensor #[256, 256] .Float32 := gemmReference a b
+  let expected := expectedFloat.toBFloat16
 
-  torch.data.saveTensor a (fixtureFile "a").toString
-  torch.data.saveTensor b (fixtureFile "b").toString
-  torch.data.saveTensor expected (fixtureFile "expected_c").toString
+  Tensor.saveTensor a (fixtureFile "a").toString
+  Tensor.saveTensor b (fixtureFile "b").toString
+  Tensor.saveTensor expected (fixtureFile "expected_c").toString
 
-  let aMean := torch.nn.item (torch.nn.meanAll aFloat)
-  let cMean := torch.nn.item (torch.nn.meanAll expectedFloat)
+  let aMean := Tensor.item (Tensor.meanAll aFloat)
+  let cMean := Tensor.item (Tensor.meanAll expectedFloat)
   IO.println s!"Generated b200 bf16 GEMM fixtures in {fixtureSpec.dir} aMean={aMean} expectedMean={cMean}"
 
 def runOnce : IO Bool := do
@@ -53,18 +55,18 @@ def runOnce : IO Bool := do
   if !(← fixturesPresent fixtureSpec) then
     generateFixtures
 
-  let a ← torch.data.loadTensor #[256, 64] (fixtureFile "a").toString
-  let b ← torch.data.loadTensor #[256, 64] (fixtureFile "b").toString
-  let expected ← torch.data.loadTensor #[256, 256] (fixtureFile "expected_c").toString
+  let a ← Tensor.loadTensorExact { shape := #[256, 64], dtype := .BFloat16 } (fixtureFile "a").toString
+  let b ← Tensor.loadTensorExact { shape := #[256, 64], dtype := .BFloat16 } (fixtureFile "b").toString
+  let expected ← Tensor.loadTensorExact { shape := #[256, 256], dtype := .BFloat16 } (fixtureFile "expected_c").toString
 
-  let output := torch.zeros_like expected
+  let output ← Tensor.uniformLike expected 0 0
   let stream ← torch.cuda_current_stream
 
   -- One CTA covers the full 256x256 tile for this focused parity case.
-  tkGB10Bf16GemmFwd.launch a b output 256 256 64 4 4 1 32 1 1 0 stream
+  tkGB10Bf16GemmFwd.launch a.raw b.raw output.raw 256 256 64 4 4 1 32 1 1 0 stream
   let _ ← torch.cuda_synchronize
 
-  let check := compareTensors "b200_bf16_gemm.output" expected output 5e-2 5e-2
+  let check := IndexedParity.compareTensors "b200_bf16_gemm.output" expected output 5e-2 5e-2
   logTensorCheck check
   pure check.ok
 
@@ -156,12 +158,12 @@ private def customShapeRequested (args : List String) : Bool :=
 
 private def benchmarkShape (cfg : Benchmark.Config) (caseLabel : String) (m n k : UInt64) : IO (String × Bool) := do
   let device := Device.CUDA 0
-  let a : T #[m, k] := torch.toBFloat16' (← torch.randn #[m, k] false device)
-  let b : T #[n, k] := torch.toBFloat16' (← torch.randn #[n, k] false device)
-  let expectedFloat : T #[m, n] :=
-    torch.nn.matmul2d (torch.toFloat' a) (torch.nn.transpose2d (torch.toFloat' b))
-  let expected : T #[m, n] := torch.toBFloat16' expectedFloat
-  let output := torch.zeros_like expected
+  let a : DTensor #[m, k] .BFloat16 := (← Tensor.randn #[m, k] false device).toBFloat16
+  let b : DTensor #[n, k] .BFloat16 := (← Tensor.randn #[n, k] false device).toBFloat16
+  let expectedFloat : DTensor #[m, n] .Float32 :=
+    gemmReference a b
+  let expected : DTensor #[m, n] .BFloat16 := expectedFloat.toBFloat16
+  let output ← Tensor.uniformLike expected 0 0
   let stream ← torch.cuda_current_stream
   let atol := if k >= 3072 then 1.0 else if k >= 1536 then 0.5 else 5e-2
   let gridX := n / 64
@@ -174,17 +176,17 @@ private def benchmarkShape (cfg : Benchmark.Config) (caseLabel : String) (m n k 
     s!"generated_gb10_warp4_rows16_64x64_runtime_k{k}_tma2"
   let launch : IO Unit :=
     if k == 64 then
-      tkGB10Bf16GemmFwd.launch a b output m n k gridX gridY 1 32 1 1 0 stream
+      tkGB10Bf16GemmFwd.launch a.raw b.raw output.raw m n k gridX gridY 1 32 1 1 0 stream
     else if k == 1024 then
-      tkGB10Bf16GemmK1024Fwd.launch a b output m n k gridX gridY 1 128 1 1 0 stream
+      tkGB10Bf16GemmK1024Fwd.launch a.raw b.raw output.raw m n k gridX gridY 1 128 1 1 0 stream
     else
-      tkGB10Bf16GemmKRuntimeFwd.launch a b output m n k gridX gridY 1 128 1 1 0 stream
+      tkGB10Bf16GemmKRuntimeFwd.launch a.raw b.raw output.raw m n k gridX gridY 1 128 1 1 0 stream
   launch
   torch.cuda_synchronize
-  let check := compareTensors s!"gb10_bf16_gemm.bench.{m}x{n}x{k}" expected output 5e-2 atol
+  let check := IndexedParity.compareTensors s!"gb10_bf16_gemm.bench.{m}x{n}x{k}" expected output 5e-2 atol
   logTensorCheck check
   let samples ← Benchmark.timeCudaEvents cfg stream launch
-  let postTimingCheck := compareTensors s!"gb10_bf16_gemm.bench.post_timing.{m}x{n}x{k}" expected output 5e-2 atol
+  let postTimingCheck := IndexedParity.compareTensors s!"gb10_bf16_gemm.bench.post_timing.{m}x{n}x{k}" expected output 5e-2 atol
   logTensorCheck postTimingCheck
   let correct := check.ok && postTimingCheck.ok
   let caseId := s!"bf16_gemm_{caseLabel}_{m}x{n}x{k}"

@@ -863,6 +863,30 @@ executable correctly fails on this CUDA-unavailable host. Test inventory
 validation still finds nine required and four optional suites. Upstream main
 CI remains green, independently of these local changes.
 
+## BF16 GEMM and FlashAttention fixture runner migration
+
+The B200/GB10 BF16 GEMM fixture and benchmark runner now uses indexed operands,
+Float32 reference accumulation, BF16 expected outputs, and exact fixture
+shape/dtype loading. Both FlashAttention fixture runners use a shared indexed
+head-dimension-64 reference with separate query and key/value sequence lengths.
+BF16 outputs and Float32 log-sum-exp values remain distinct. Mutable kernel
+outputs are allocated through IO; raw handles appear only at launch boundaries.
+FlashAttention3's executable also supplies the suite name required by the
+current fixture-runner API.
+
+CPU regressions cover nonsquare GEMM orientation, Float32 accumulation across
+cancellation, and analytic attention output/log-sum-exp with unequal sequence
+lengths and nonuniform attention weights. Compile-time coverage rejects
+incompatible GEMM reduction dimensions. The FlashAttention runner participates
+in the CUDA-unavailable check. All three executables terminate with a
+CUDA-unavailable error before generating fixtures on this host; no actual
+CUDA parity or performance is qualified by these checks.
+The main runner, both GPU test targets, and all three migrated executables
+build under `--wfail` (1,766 jobs). All 1,483 main CPU tests pass without
+failures or skips, and the test inventory validates nine required and four
+optional suites. GitHub CLI reports green upstream main CI and a failed older
+CUDA smoke run; neither provides qualification for the local migration.
+
 ## Remaining acceptance criteria
 
 Remove the `T` declaration and all model, generator, reflection, documentation,

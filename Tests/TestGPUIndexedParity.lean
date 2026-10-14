@@ -1,8 +1,11 @@
 import Examples.GPU.IndexedParity
+import Examples.GPU.GemmReference
+import Examples.GPU.AttentionReference
 import Examples.GPU.LossReference
 import Examples.GPU.OptimizerReference
 import Examples.GPU.RunRMSNorm
 import Examples.GPU.RunLayerNorm
+import Examples.GPU.RunFlashAttn
 import Examples.GPU.RunRotary
 import Examples.GPU.RunRKCombine
 import Examples.GPU.RunRKFusedSolve
@@ -37,7 +40,7 @@ example (a : DTensor #[2] .Float32) (b : DTensor #[3] .Float32) : True := by
       Examples.GPU.RunBrownianDescent.runOnce, Examples.GPU.RunEulerMaruyamaFused.runOnce,
       Examples.GPU.RunRotary.runOnce, Examples.GPU.RunLayerNorm.runOnce,
       Examples.GPU.RunLayerNorm.runBFloat16Once, Examples.GPU.RunRMSNorm.runOnce,
-      Examples.GPU.RunRMSNorm.runBFloat16Once] do
+      Examples.GPU.RunRMSNorm.runBFloat16Once, Examples.GPU.RunFlashAttn.runOnce] do
     LeanTest.assertTrue (!(← run)) "CPU hosts cannot claim a successful GPU parity run"
 
 @[test] def testGPURotaryIndexedTrainingReference : IO Unit := do
@@ -169,4 +172,42 @@ example (a : DTensor #[2] .Float32) (b : DTensor #[2] .BFloat16)
     have _ := Tensor.copyInto a b
   fail_if_success
     have _ := Tensor.copyInto a c
+  trivial
+
+@[test] def testGPUGemmIndexedReference : IO Unit := do
+  let a := (Tensor.fromFloatArray #[1, 2, -1, 0.5]).reshapeChecked #[2, 2] |>.toBFloat16
+  let b := (Tensor.fromFloatArray #[3, 4, 0, 2, -2, 1]).reshapeChecked #[3, 2] |>.toBFloat16
+  let output := Examples.GPU.gemmReference a b
+  let expected := (Tensor.fromFloatArray #[11, 4, 0, -1, 1, 2.5]).reshapeChecked #[2, 3]
+  LeanTest.assertEqual output.actualSpec.dtype DType.Float32
+  LeanTest.assertTrue (Tensor.allclose output expected 0 0)
+  let cancellation := (Tensor.fromFloatArray #[256, 1, -256]).reshapeChecked #[1, 3] |>.toBFloat16
+  let ones := (Tensor.ones #[1, 3]).toBFloat16
+  LeanTest.assertTrue (Tensor.allclose (Examples.GPU.gemmReference cancellation ones)
+    (Tensor.ones #[1, 1]) 0 0)
+
+@[test] def testGPUAttentionIndexedReference : IO Unit := do
+  let q := (Tensor.fromFloatArray (Array.replicate 64 0.0 ++ Array.replicate 64 1.0))
+    |>.reshapeChecked #[1, 1, 2, 64] |>.toBFloat16
+  let k := (Tensor.fromFloatArray
+    (Array.replicate 64 0.0 ++ Array.replicate 64 1.0 ++ Array.replicate 64 0.0))
+    |>.reshapeChecked #[1, 1, 3, 64] |>.toBFloat16
+  let v := (Tensor.fromFloatArray
+    (Array.replicate 64 1.0 ++ Array.replicate 64 2.0 ++ Array.replicate 64 6.0))
+    |>.reshapeChecked #[1, 1, 3, 64] |>.toBFloat16
+  let (output, lse) := Examples.GPU.attentionReference q k v
+  LeanTest.assertEqual output.actualSpec.dtype DType.BFloat16
+  LeanTest.assertEqual lse.actualSpec.dtype DType.Float32
+  let expected := (Tensor.fromFloatArray
+    (Array.replicate 64 3.0 ++ Array.replicate 64 ((7.0 + 2.0 * Float.exp 8.0) / (2.0 + Float.exp 8.0))))
+    |>.reshapeChecked #[1, 1, 2, 64] |>.toBFloat16
+  LeanTest.assertTrue (Tensor.allclose output.toFloat32 expected.toFloat32 0 0)
+  let expectedLse := (Tensor.fromFloatArray #[Float.log 3.0, Float.log (2.0 + Float.exp 8.0)])
+    |>.reshapeChecked #[1, 1, 2]
+  LeanTest.assertTrue (Tensor.allclose lse expectedLse 0 1e-6)
+
+set_option linter.unusedVariables false in
+example (a : DTensor #[2, 3] .BFloat16) (b : DTensor #[4, 5] .BFloat16) : True := by
+  fail_if_success
+    have _ := Examples.GPU.gemmReference a b
   trivial
