@@ -1023,6 +1023,27 @@ boundary tests pass, and the neural ABI audit passes all 43 declarations.
 The intentional crash probe was compiled but not executed. Actual GPU
 qualification remains outstanding.
 
+## Remove legacy linear algebra, rotary, and tensor autograd APIs
+
+`Tyr.Torch` no longer declares legacy linear algebra, rotary, or tensor autograd
+operations. Global gradient-mode controls remain available. Indexed
+`Tensor.backward` accepts an explicit cotangent with the output specification,
+and `Tensor.hasGradFn` inspects graph ownership without exposing a raw handle.
+MHA portable backward and inference-cache graph checks use these adapters.
+The native backward function now matches Lean's three-argument generated ABI;
+the old unused world argument has been removed. All 45 neural ABI declarations
+match generated C output.
+
+NanoChat chat sampling now retains indexed Int64 tokens and Float32 logits
+through final-position slicing, filtering, softmax, multinomial sampling, and
+scalar extraction. ChatSFT uses the existing indexed unreduced cross entropy;
+checkpoint and module smoke tests use indexed scalar extraction.
+
+The strict build passes for `test_runner`, `NanoChatChat`, `TestGPUE2E`, and
+`TestGPUGB10E2E`. The CPU explicit-cotangent test passes: differentiating
+`[2, 3]²` with cotangent `[4, 5]` produces `[16, 30]`, and detach removes the
+gradient function. GPU targets have only been compiled on this machine.
+
 ## Remaining acceptance criteria
 
 Remove the `T` declaration and all model, generator, reflection, documentation,

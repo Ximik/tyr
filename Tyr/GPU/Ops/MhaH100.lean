@@ -5,7 +5,7 @@
    3) explicit forward/backward API: `mhaFwd` / `mhaBwd`
    4) TK-style dispatch helpers: `mhaFwdDispatch` / `mhaBwdDispatch` -/
 import Tyr.Torch
-import Tyr.Typed.Ops
+import Tyr.Typed.Neural
 import Tyr.GPU.Ops.AttentionProblem
 import Tyr.GPU.Kernels.MhaH100
 
@@ -145,10 +145,7 @@ private def sdpaBwdPortable {seq : UInt64}
   let vLeaf := Tensor.setRequiresGrad (Tensor.detach v) true
   let outRef : BF16 seq :=
     Tensor.assumeSpec (RawTensor.attention 1 1 seq 64 qLeaf.raw kLeaf.raw vLeaf.raw 0.0 isCausal)
-  -- One backward over the shared graph populating all three leaf grads; there
-  -- is no typed `Tensor.backward` with an explicit cotangent, so the raw
-  -- handle crosses at this FFI edge.
-  torch.autograd.backward (s := #[1, 1, seq, 64]) outRef.raw dO.raw
+  Tensor.backward outRef dO
   let dQ : F32 seq := Tensor.toFloat32 (Tensor.gradOf qLeaf)
   let dK : F32 seq := Tensor.toFloat32 (Tensor.gradOf kLeaf)
   let dV : F32 seq := Tensor.toFloat32 (Tensor.gradOf vLeaf)

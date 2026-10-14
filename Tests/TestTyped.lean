@@ -1,5 +1,6 @@
 import LeanTest
 import Tyr.Typed
+import Tyr.Typed.Neural
 import Tyr.Torch
 
 open torch
@@ -330,5 +331,18 @@ def testTypedStackArrayOwnership : IO Unit := do
     LeanTest.assertEqual (← vectors[0]!.toFloatArray) #[i.toFloat, 2, 3]
     LeanTest.assertEqual (← (Tensor.stack1d vectors).toFloatArray)
       #[i.toFloat, 2, 3, 4, 5, 6]
+
+@[test]
+def testTypedExplicitCotangentBackward : IO Unit := do
+  let input := (Tensor.fromFloatArray #[2.0, 3.0]).setRequiresGrad true
+  let output := Tensor.mul input input
+  LeanTest.assertTrue (Tensor.hasGradFn output)
+    "Squared differentiable input should retain its graph"
+  LeanTest.assertTrue (!Tensor.hasGradFn output.detach)
+    "Detached output should not retain its graph"
+  let cotangent := Tensor.fromFloatArray #[4.0, 5.0]
+  Tensor.backward output cotangent
+  LeanTest.assertEqual (← input.gradOf.toFloatArray) #[16.0, 30.0]
+    "Backward must multiply the derivative by the explicit cotangent"
 
 end Tests.TestTyped

@@ -84,4 +84,9 @@ namespace torch.RawTensor
 @[extern "lean_torch_logspace"] opaque logspace (start stop : Float) (steps : UInt64)
     (base : Float) (requiresGrad : Bool) : RawTensor
 
+@[extern "lean_torch_backward_unit"] opaque backward (shape : Shape)
+    (output cotangent : @& RawTensor) : IO Unit
+@[extern "lean_torch_has_grad_fn"] opaque hasGradFn (shape : Shape)
+    (input : @& RawTensor) : Bool
+
 end torch.RawTensor

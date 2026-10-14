@@ -239,27 +239,23 @@ private def sampleNextToken {cfg : Config}
   if context.isEmpty then
     throw <| IO.userError "Cannot decode from an empty prompt."
 
-  let inputTensor := data.fromInt64Array (context.map (·.toInt64))
-  let inputReshaped := (reshape inputTensor #[1, context.size.toUInt64]).to device
+  let inputTensor := Tensor.fromInt64Array (context.map (·.toInt64))
+  let inputReshaped := (inputTensor.reshapeChecked #[1, context.size.toUInt64]).to device
   let logits ← moddedGpt.forward params yarn inputReshaped false
 
-  -- Extract logits for the final time step.
-  let logitsFlat := reshape logits #[context.size.toUInt64 * cfg.vocabSize]
-  let startIdx := ((context.size - 1).toUInt64 * cfg.vocabSize).toInt64
-  let endIdx := (context.size.toUInt64 * cfg.vocabSize).toInt64
-  let lastLogits := data.slice1d' logitsFlat startIdx endIdx
-  let rowLogits := reshape lastLogits #[1, cfg.vocabSize]
-
+  -- Keep the final time step, then view its logits as one sampling row.
+  let lastLogits := Tensor.sliceChecked logits 1 (context.size - 1).toUInt64 1
+    #[1, 1, cfg.vocabSize]
+  let rowLogits := lastLogits.reshapeChecked #[1, cfg.vocabSize]
   let scaled :=
     if temperature == 1.0 then rowLogits
-    else mul_scalar rowLogits (1.0 / temperature)
+    else Tensor.mulScalar rowLogits (1.0 / temperature)
   let filtered :=
     if topK == 0 then scaled
-    else nn.topKFilter scaled topK.toUInt64
-  let probs := nn.softmax filtered (-1)
-  let sampled ← nn.multinomial probs 1
-  let sampled := nn.squeezeDim sampled (-1)
-  pure (nn.itemInt sampled).toUInt64
+    else Tensor.topKFilter scaled topK.toUInt64
+  let probs := Tensor.softmax filtered (-1)
+  let sampled ← Tensor.multinomial probs 1
+  pure (Tensor.itemInt (sampled.reshapeChecked #[])).toUInt64
 
 private def promptWithMarkers (markers : ChatMarkerIds) (base : Array UInt64) (prompt : Array UInt64)
     : Array UInt64 :=

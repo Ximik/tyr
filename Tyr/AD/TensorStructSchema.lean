@@ -1,6 +1,5 @@
 import Lean
 import Tyr.TensorStruct
-import Tyr.Legacy.Tensor
 
 /-!
 # Tyr.AD.TensorStructSchema

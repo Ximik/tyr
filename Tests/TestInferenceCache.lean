@@ -1,3 +1,4 @@
+import Tyr.Typed.Neural
 import Tyr.Inference.KVCache
 import LeanTest
 
@@ -74,7 +75,7 @@ private def rejected (action : IO α) (label : String) : IO Unit := do
   let enabled ← autograd.is_grad_enabled
   let (cache, first) ← cache.attendLayer 0 q (token 3) (token 7)
   LeanTest.assertEqual (← values first) #[7, 7] "One-token attention reads the value after both writes"
-  LeanTest.assertTrue (!autograd.has_grad_fn (s := first.shape) first.raw) "Inference attention has no autograd graph"
+  LeanTest.assertTrue (!Tensor.hasGradFn first) "Inference attention has no autograd graph"
   LeanTest.assertEqual (← autograd.is_grad_enabled) enabled "Inference restores caller grad mode"
   let cache ← cache.incrementSeqLens
   let (_, second) ← cache.attendLayer 0 q (token 5) (token 11)

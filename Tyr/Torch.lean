@@ -18,7 +18,7 @@ provides the low-level operations used by higher-level model, optimizer, and tra
 - `torch.nn`: neural network functional operators and loss primitives.
 - `torch.data` and `torch.signal`: data and signal-processing helpers.
 - `torch.safetensors`: tensor checkpoint loading/saving, including sharded loading.
-- Specialized helpers in submodules such as `torch.rotary` and `torch.linalg`.
+- Indexed numerics and rotary helpers now live in `torch.Tensor`.
 
 ## Scope
 
@@ -318,26 +318,8 @@ def pool2dShape (input_shape kernel_size : Shape) (stride padding : Shape) : Sha
 --
 namespace autograd
 
-@[extern "lean_torch_tensor_grad"] opaque grad {sx sy : Shape} (y : (@& T sy)) (x : (@& T sx)) (dy : (@& T sy)) : (T sx)
-
-def pullback {sx sy : Shape} (f : T sx → T sy) (x : T sx) (dy : T sy) : T sx :=
-    grad (f x) x dy
-
-@[extern "lean_torch_grad_of"] opaque grad_of {s : Shape} (x : @& T s) : T s
-@[extern "lean_torch_zero_grad"] opaque zero_grad {s : Shape} (x : @& T s) : T s
-@[extern "lean_torch_set_requires_grad"] opaque set_requires_grad {s : Shape} (x : @& T s) (requires_grad : Bool) : T s
-@[extern "lean_torch_detach"] opaque detach {s : Shape} (x : @& T s) : T s
-@[extern "lean_torch_clone"] opaque clone {s : Shape} (x : @& T s) : T s
-@[extern "lean_torch_retain_grad"] opaque retain_grad {s : Shape} (x : @& T s) : T s
-@[extern "lean_torch_is_leaf"] opaque is_leaf (x : @& T #[]) : Bool
-@[extern "lean_torch_has_grad_fn"] opaque has_grad_fn {s : Shape} (x : @& T s) : Bool
-@[extern "lean_torch_accumulate_grad"] opaque accumulate_grad {s : Shape} (x : @& T s) (grad : @& T s) : T s
-@[extern "lean_torch_set_grad"] opaque set_grad {s : Shape} (x : @& T s) (grad : @& T s) : T s
 @[extern "lean_torch_set_grad_enabled"] opaque set_grad_enabled (enabled : Bool) : IO Unit
 @[extern "lean_torch_is_grad_enabled"] opaque is_grad_enabled : IO Bool
-@[extern "lean_torch_grad_grad"] opaque grad_grad {sx sy sz : Shape}
-    (z : @& T sz) (y : @& T sy) (x : @& T sx) (grad_z : @& T sz) (grad_y : @& T sy) : T sx
-
 /-- Run an IO action with gradient computation disabled.
     This prevents building computation graphs for validation/inference. -/
 def no_grad {α : Type} (action : IO α) : IO α := do
@@ -852,11 +834,7 @@ opaque clip_grad_value_ {s : Shape} (param : @& T s) (clip_value : Float) : IO U
 end nn
 
 -- Extended autograd operations
-namespace autograd
 
-@[extern "lean_torch_backward_unit"] opaque backward {s : Shape} (output : @& T s) (grad_output : @& T s) : IO Unit
-
-end autograd
 
 -- Data loading utilities
 namespace data
@@ -1155,13 +1133,7 @@ def loadTensorShardedOnDevice (dir : String) (name : String) (s : Shape) (device
 
 end safetensors
 
--- Autograd utilities
-namespace autograd
 
-/-- Backward pass from scalar loss (gradient = 1.0) -/
-@[extern "lean_torch_backward_loss"]
-opaque backwardLoss (loss : @& T #[]) : IO Unit
-end autograd
 
 @[extern "lean_torch_get_live_tensors"]
 opaque get_live_tensors : IO UInt64
@@ -1170,46 +1142,7 @@ opaque get_live_tensors : IO UInt64
 @[extern "lean_torch_manual_seed"]
 opaque manualSeed (seed : UInt64) : IO Unit
 
-namespace rotary
 
-/-- Precompute rotary embedding frequencies.
-    Returns (cos, sin) tensors of shape [seqLen, headDim/2]. -/
-@[extern "lean_torch_compute_rotary_freqs"]
-opaque computeFreqs (seqLen headDim : UInt64) (base : Float := 10000.0)
-    : IO (T #[seqLen, headDim / 2] × T #[seqLen, headDim / 2])
-
-/-- Pure version of precompute rotary embedding frequencies.
-    Returns (cos, sin) tensors of shape [seqLen, headDim/2].
-    Safe to use since the computation is deterministic. -/
-@[extern "lean_torch_compute_rotary_freqs_pure"]
-opaque computeFreqsPure (seqLen headDim : UInt64) (base : Float := 10000.0)
-    : T #[seqLen, headDim / 2] × T #[seqLen, headDim / 2]
-
-/-- Precompute rotary frequencies on a target device.
-    Returns (cos, sin) tensors of shape [seqLen, headDim/2]. -/
-@[extern "lean_torch_compute_rotary_freqs_on_device"]
-opaque computeFreqsOnDevice (seqLen headDim : UInt64) (base : Float := 10000.0)
-    (device : Device := Device.CPU)
-    : IO (T #[seqLen, headDim / 2] × T #[seqLen, headDim / 2])
-
-/-- Pure version of `computeFreqsOnDevice`.
-    Safe to use since the computation is deterministic. -/
-@[extern "lean_torch_compute_rotary_freqs_on_device_pure"]
-opaque computeFreqsOnDevicePure (seqLen headDim : UInt64) (base : Float := 10000.0)
-    (device : Device := Device.CPU)
-    : T #[seqLen, headDim / 2] × T #[seqLen, headDim / 2]
-
-/-- Apply rotary embeddings to queries or keys.
-    x: [batch, seq, n_head, head_dim]
-    cos, sin: [seq, head_dim/2] (broadcast to match x) -/
-@[extern "lean_torch_apply_rotary_emb"]
-opaque applyRotaryEmb {batch seq n_head head_dim : UInt64}
-    (x : @& T #[batch, seq, n_head, head_dim])
-    (cos : @& T #[seq, head_dim / 2])
-    (sin : @& T #[seq, head_dim / 2])
-    : T #[batch, seq, n_head, head_dim]
-
-end rotary
 
 namespace nn
 
@@ -1599,82 +1532,6 @@ def triplet_margin_loss {batch dim : UInt64}
 -- Linear Algebra operations for manifold optimization
 -- ============================================================================
 
-namespace linalg
 
-/-- QR decomposition: A = Q @ R where Q is orthogonal, R is upper triangular.
-    For an m×n matrix, returns Q as m×m (complete QR) and R as m×n. -/
-@[extern "lean_torch_qr"]
-opaque qr {m n : UInt64} (A : @& T #[m, n]) : T #[m, m] × T #[m, n]
-
-/-- Reduced QR decomposition: returns Q as m×min(m,n) and R as min(m,n)×n.
-    More efficient when only the first n columns of Q are needed. -/
-@[extern "lean_torch_qr_reduced"]
-opaque qr_reduced {m n : UInt64} (A : @& T #[m, n]) : T #[m, n] × T #[n, n]
-
-/-- Matrix exponential: exp(A) for square matrix A.
-    Uses Padé approximation. Useful for O(n) exponential map. -/
-@[extern "lean_torch_matrix_exp"]
-opaque matrix_exp {n : UInt64} (A : @& T #[n, n]) : T #[n, n]
-
-/-- Matrix logarithm: log(A) for square matrix A. -/
-@[extern "lean_torch_matrix_log"]
-opaque matrix_log {n : UInt64} (A : @& T #[n, n]) : T #[n, n]
-
-/-- Matrix inverse: A^{-1} for square matrix A. -/
-@[extern "lean_torch_inv"]
-opaque inv {n : UInt64} (A : @& T #[n, n]) : T #[n, n]
-
-/-- SVD decomposition: A = U @ diag(S) @ Vᵀ (reduced form).
-    For m×n matrix A with k = min(m,n):
-    - U: m×k orthonormal columns
-    - S: k singular values (1D tensor)
-    - Vh: k×n orthonormal rows (Vᵀ)
-    Returns (U, S, Vh). -/
-@[extern "lean_torch_svd"]
-opaque svd {m n : UInt64} (A : @& T #[m, n]) : T #[m, min m n] × T #[min m n] × T #[min m n, n]
-
-/-- Singular values only: returns just the singular values S from SVD.
-    More efficient than full SVD when U, V are not needed. -/
-@[extern "lean_torch_svdvals"]
-opaque svdvals {m n : UInt64} (A : @& T #[m, n]) : T #[min m n]
-
-/-- Extract diagonal of a square matrix as a 1D tensor. -/
-@[extern "lean_torch_diag"]
-opaque diag {n : UInt64} (A : @& T #[n, n]) : T #[n]
-
-/-- Create diagonal matrix from 1D tensor. -/
-@[extern "lean_torch_diagflat"]
-opaque diagflat {n : UInt64} (v : @& T #[n]) : T #[n, n]
-
--- Modular norm operations
-
-/-- Spectral norm: largest singular value σ_max(A).
-    This is the operator norm induced by the ℓ₂ vector norm. -/
-@[extern "lean_torch_spectral_norm"]
-opaque spectralNorm {m n : UInt64} (A : @& T #[m, n]) : Float
-
-/-- Nuclear norm: sum of singular values Σσᵢ(A).
-    This is the dual norm to the spectral norm. -/
-@[extern "lean_torch_nuclear_norm"]
-opaque nuclearNorm {m n : UInt64} (A : @& T #[m, n]) : Float
-
-/-- Row-wise L2 norms: returns ||a_i||₂ for each row i. -/
-@[extern "lean_torch_row_norms"]
-opaque rowNorms {n d : UInt64} (A : @& T #[n, d]) : T #[n]
-
-/-- Max row norm: max_i ||a_i||₂.
-    Used as the modular norm for embedding layers. -/
-@[extern "lean_torch_max_row_norm"]
-opaque maxRowNorm {n d : UInt64} (A : @& T #[n, d]) : Float
-
-/-- L2 norm of a 1D tensor: ||v||₂. -/
-@[extern "lean_torch_l2_norm"]
-opaque l2Norm {n : UInt64} (v : @& T #[n]) : Float
-
-/-- Frobenius norm of a matrix: ||A||_F = √(Σᵢⱼ aᵢⱼ²). -/
-@[extern "lean_torch_frobenius_norm"]
-opaque frobeniusNorm {m n : UInt64} (A : @& T #[m, n]) : Float
-
-end linalg
 
 end torch

@@ -48,6 +48,8 @@ lean_object* lean_torch_topk_2d(uint64_t, uint64_t, lean_object*, uint64_t, uint
 lean_object* lean_torch_get(lean_object*, lean_object*, lean_object*);
 lean_object* lean_torch_unbind(lean_object*, lean_object*, lean_object*);
 lean_object* lean_torch_logspace(double, double, uint64_t, double, uint8_t);
+lean_object* lean_torch_backward_unit(lean_object*, lean_object*, lean_object*);
+uint8_t lean_torch_has_grad_fn(lean_object*, lean_object*);
 #ifdef __cplusplus
 }
 #endif

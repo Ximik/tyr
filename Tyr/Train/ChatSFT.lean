@@ -152,14 +152,6 @@ def SFTBatch.ofConversationBatch (batch : ConversationBatch) : SFTBatch :=
 
 /-! ## Masked Loss Computation -/
 
-/-- Per-token cross entropy over the raw FFI boundary (the typed surface only
-    exposes the mean-reduced `Tensor.crossEntropy`). The result has one loss per
-    row and keeps the logits dtype, exactly as `Tensor.crossEntropy` claims. -/
-private def crossEntropyNone {n c : UInt64} {d : DType} {dev : DevicePolicy}
-    (logits : Tensor ⟨#[n, c], d, dev⟩) (targets : Tensor ⟨#[n], .Int64, dev⟩) :
-    Tensor ⟨#[n], d, dev⟩ :=
-  .assumeSpec (nn.cross_entropy_none (n := n) (c := c) logits.raw targets.raw)
-
 /-- Compute cross-entropy loss with mask.
     Only positions where mask > 0 contribute to the loss.
 
@@ -181,7 +173,7 @@ def maskedCrossEntropy {batch seq vocab : UInt64} {d m : DType} {dev : DevicePol
   let logitsFlat := logits.reshapeChecked #[batchSeq, vocab]
   let targetsFlat := targets.reshapeChecked #[batchSeq]
   -- Compute per-element loss
-  let lossesFlat := crossEntropyNone logitsFlat targetsFlat
+  let lossesFlat := Tensor.crossEntropyNone logitsFlat targetsFlat
   -- Apply mask and compute mean over valid positions
   let maskFlat := mask.reshapeChecked #[batchSeq]
   let maskedLosses := Tensor.mul lossesFlat maskFlat

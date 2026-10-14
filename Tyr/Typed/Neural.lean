@@ -346,4 +346,11 @@ def logspace (start stop : Float) (steps : UInt64) (base : Float := 10.0) :
   | .ok result => result
   | .error message => panic! s!"Tensor.logspace: {message}"
 
+/-- Backpropagate an explicit cotangent through the output graph. -/
+def backward {σ : StaticSpec} (output cotangent : Tensor σ) : IO Unit :=
+  RawTensor.backward σ.shape output.raw cotangent.raw
+
+def hasGradFn {σ : StaticSpec} (input : Tensor σ) : Bool :=
+  RawTensor.hasGradFn σ.shape input.raw
+
 end torch.Tensor
