@@ -36,7 +36,7 @@ parallel bookkeeping arrays (`groupings`, `del`, `ids`, `branchmask`, `flowmask`
 
 **Anchor merging.** `class AnchorMerge α where merge : α → α → Nat → Nat → α` (`:308`)
 combines two coalescing anchors weighted by descendant counts. Instances exist for
-`Float`, `T s`, products, and `flowfusion.MaskedState α`.
+`Float`, indexed tensors, products, and `flowfusion.MaskedState α cmaskSpec lmaskSpec`.
 
 **Coalescence policies.** Which pairs of adjacent same-group particles merge is decided
 by a `CoalescencePolicy α` (`:393`):
@@ -160,10 +160,10 @@ molecule case (`BranchingModel` in `BranchingFlowsTrain.lean:50` is the discrete
 analog):
 
 ```lean
-structure BranchingMoleculeModel (maxLen vocab : UInt64) (Params : Type) where  -- MoleculeTrain.lean:49
-  forward : {batch : UInt64} → Params → T #[batch, maxLen, 3] → T #[batch, maxLen] → T #[batch]
-    → T #[batch, maxLen]
-    → IO (T #[batch, maxLen, 3] × T #[batch, maxLen, vocab] × T #[batch, maxLen] × T #[batch, maxLen])
+structure BranchingMoleculeModel (maxLen vocab : UInt64) (Params : Type) where
+  forward : {batch : UInt64} → Params → STensor #[batch, maxLen, 3] → DTensor #[batch, maxLen] .Int64 → STensor #[batch]
+    → DTensor #[batch, maxLen] .Int64
+    → IO (STensor #[batch, maxLen, 3] × STensor #[batch, maxLen, vocab] × STensor #[batch, maxLen] × STensor #[batch, maxLen])
 ```
 
 `packBranchingNat` / `packBranchingTensor` (`:107`, `:188`) pack discrete-token and
@@ -189,9 +189,10 @@ RoPE, coordinate-update layers) via `fullMoleculeTransformerModel` (`:473`). Bot
 
 ### Flowfusion (`Tyr/Model/Flowfusion.lean`)
 
-Minimal wrappers, not a full Flowfusion port. `MaskedState α` (`:18`) pairs a state with
-conditioning/loss masks stored as `Static (T #[])` so `TensorStruct` traversal skips
-them; `Guide α` (`:45`) wraps an alternative prediction target with optional masks.
+Minimal wrappers, not a full Flowfusion port. `MaskedState α cmaskSpec lmaskSpec` pairs a state with
+conditioning/loss masks stored as `Static (Tensor cmaskSpec)` and
+`Static (Tensor lmaskSpec)` so `TensorStruct` traversal skips
+them; `Guide α cmaskSpec lmaskSpec` wraps an alternative prediction target with optional masks.
 `unmask` (`:67`) and `maskLike` (`:70`) convert. `Guide` has no call sites outside its
 own module; `MaskedState` is used only by the `AnchorMerge` instance in
 `BranchingFlows.lean:344`.
@@ -213,12 +214,14 @@ timestep embedding is a C++ FFI extern (`@[extern "lean_torch_timestep_embedding
 embeddings, timesteps, and both position-ID tensors, returning the velocity prediction:
 
 ```lean
-def forward {batch img_seq txt_seq : UInt64} (cfg : FluxConfig) (model : FluxModel cfg)
-    (img : T #[batch, img_seq, cfg.in_channels])
-    (txt : T #[batch, txt_seq, cfg.context_in_dim])
-    (timesteps : T #[batch])
-    (img_ids : T #[batch, img_seq, 4]) (txt_ids : T #[batch, txt_seq, 4])
-    : T #[batch, img_seq, cfg.in_channels]
+def forward {batch img_seq txt_seq : UInt64} (cfg : FluxConfig)
+    (model : FluxModel cfg)
+    (img : STensor #[batch, img_seq, cfg.in_channels])
+    (txt : STensor #[batch, txt_seq, cfg.context_in_dim])
+    (timesteps : DTensor #[batch] .Float32)
+    (img_ids : DTensor #[batch, img_seq, 4] .Int64)
+    (txt_ids : DTensor #[batch, txt_seq, 4] .Int64)
+    : STensor #[batch, img_seq, cfg.in_channels]
 ```
 
 `Sampling.lean` implements the Flux2 schedule (`computeTimesteps image_seq_len num_steps`,
@@ -248,12 +251,12 @@ packed latents, and the full decode pipeline:
 ```lean
 structure AutoEncoder where
   decoder : Decoder
-  bn_running_mean : T #[128]
-  bn_running_var : T #[128]
+  bn_running_mean : STensor #[128]
+  bn_running_var : STensor #[128]
   deriving TensorStruct
 
-def AutoEncoder.invNormalize (ae : AutoEncoder) (z : T #[1, 128, 16, 16]) : T #[1, 128, 16, 16]
-def AutoEncoder.decode (ae : AutoEncoder) (z : T #[1, 128, 16, 16]) : T #[1, 3, 256, 256]
+def AutoEncoder.invNormalize (ae : AutoEncoder) (z : STensor #[1, 128, 16, 16]) : STensor #[1, 128, 16, 16]
+def AutoEncoder.decode (ae : AutoEncoder) (z : STensor #[1, 128, 16, 16]) : STensor #[1, 3, 256, 256]
 def loadAutoEncoder (path : String) (log : Handlers := {}) : IO AutoEncoder
 ```
 
@@ -297,7 +300,7 @@ Flux + VAE:
 | `sample` | fresh noise → `denoise` | `Flux/Sampling.lean:94` |
 | `packLatents` / `unpackLatents` | VAE spatial ↔ packed sequence | `Flux/Sampling.lean:156,174` |
 | `loadAutoEncoder` | decoder + BN stats from SafeTensors | `VAE.lean:77` |
-| `AutoEncoder.decode` | `T #[1,128,16,16] → T #[1,3,256,256]` | `VAE.lean:66` |
+| `AutoEncoder.decode` | `STensor #[1,128,16,16] → STensor #[1,3,256,256]` | `VAE.lean:66` |
 
 ## Usage examples
 
@@ -371,32 +374,41 @@ Reconstructed example (from `Examples/Flux/FluxDemo.lean`) — text-to-image wit
 Klein 4B (256×256 path, 4-step distilled schedule):
 
 ```lean
+import Tyr.Model.Qwen.Weights
+import Tyr.Model.VAE
+import Tyr.Model.Flux.Weights
+import Tyr.Model.Flux
 open torch torch.qwen torch.vae torch.flux
+def fluxExample (qwenDir : String) (tokens : DTensor #[1, 512] .Int64)
+    (attnMask : DTensor #[1, 512] .Bool) : IO Unit := do
 
--- text encoder (Qwen), diffusion model, and latent decoder
-let qwen ← loadQwenFluxEmbedderSharded qwenDir QwenConfig.fluxKleinTextEncoder 512 #[8, 17, 26]
-let flux ← loadFluxModel "weights/flux.safetensors" FluxConfig.klein4B
-let vae ← loadAutoEncoder "weights/ae.safetensors"
+  -- text encoder (Qwen), diffusion model, and latent decoder
+  let qwen ← loadQwenFluxEmbedderSharded qwenDir QwenConfig.fluxKleinTextEncoder 512 #[8, 17, 26]
+  let flux ← loadFluxModel "weights/flux.safetensors" FluxConfig.klein4B
+  let vae ← loadAutoEncoder "weights/ae.safetensors"
 
--- encode prompt, prepare noise and RoPE position ids
-let txtEmb := qwen.encodeMasked QwenConfig.fluxKleinTextEncoder 512 tokens attnMask
-let noiseSeq := permute (← torch.randn #[1, 128, 16, 16]) #[0, 2, 3, 1]
-let noise : T #[1, 256, 128] := reshape noiseSeq #[1, 256, 128]
-let imgIds ← computeImagePositionIds 16 16
-let txtIds ← computeTextPositionIds 512
+  -- encode prompt, prepare noise and RoPE position ids
+  let txtEmb := qwen.encodeMasked QwenConfig.fluxKleinTextEncoder 512 tokens attnMask
+  let txtEmb : STensor #[1, 512, FluxConfig.klein4B.context_in_dim] :=
+    (txtEmb.reshapeChecked #[1, 512, FluxConfig.klein4B.context_in_dim]).forgetDType
+  let noiseSeq := Tensor.permute (← randomWeight #[1, 128, 16, 16]) #[0, 2, 3, 1]
+  let noise : STensor #[1, 256, 128] := Tensor.reshapeChecked noiseSeq #[1, 256, 128]
+  let imgIds ← computeImagePositionIds 16 16
+  let txtIds ← computeTextPositionIds 512
 
--- denoise and decode
-let latents := denoise FluxConfig.klein4B flux noise txtEmb imgIds txtIds 4
-let packed : T #[1, 128, 16, 16] := permute (reshape latents #[1, 16, 16, 128]) #[0, 3, 1, 2]
-let image := vae.decoder.forward1 (AutoEncoder.unpackLatents16x16 (vae.invNormalize packed))
-torch.data.savePPMExplicit #[1, 3, 256, 256] image "output.ppm"
+  -- denoise and decode
+  let latents := denoise FluxConfig.klein4B flux noise txtEmb imgIds txtIds 4
+  let packed : STensor #[1, 128, 16, 16] :=
+    (Tensor.permute (Tensor.reshapeChecked latents #[1, 16, 16, 128]) #[0, 3, 1, 2]).reshapeChecked #[1, 128, 16, 16]
+  let image := vae.decoder.forward1 (AutoEncoder.unpackLatents16x16 (vae.invNormalize packed))
+  saveImagePPM image "output.ppm"
 ```
 
 ## Related guides
 
-- [core/tensors.md](../core/tensors.md) — `T s`, shapes, and the `nn.*` ops behind every forward here
+- [core/tensors.md](../core/tensors.md) — `Tensor σ`, shapes, and indexed operations behind every forward here
 - [core/tensorstruct.md](../core/tensorstruct.md) — the traversal class that makes whole models device-movable and checkpointable
-- [autodiff.md](../autodiff.md) — `autograd.backwardLoss` as used by `trainStepMolecule`
+- [autodiff.md](../autodiff.md) — `Tensor.backwardLoss` as used by `trainStepMolecule`
 - [optimization.md](../optimization.md) — `Optim.adamw` and optimizer state
 - [serialization.md](../serialization.md) — SafeTensors loading and checkpoint save/resume
 - [diffeq.md](../diffeq.md) — the solvers behind `DiffEqBridgeConfig`/`ODEBridgeConfig`/`SDEBridgeConfig`

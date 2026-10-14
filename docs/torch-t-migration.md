@@ -1220,6 +1220,13 @@ Model tables distinguish token forwards from embedding forwards. Complete
 tiny-Qwen3 and FLM examples typecheck against the migrated API. Checkpoint
 inference and CUDA execution are not implied by these documentation checks.
 
+## Update the generative-model guide
+
+Molecule, Flux, VAE, and Flowfusion signatures now retain their indexed tensor
+contracts. The complete Flux example typechecks, including checked conversion
+from the runtime-selected text-encoder layers to the diffusion context shape.
+This does not execute checkpoint-backed image generation.
+
 ## Remaining acceptance criteria
 
 Remove the `T` declaration and all model, generator, reflection, documentation,
