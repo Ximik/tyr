@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Compare the audited C++ ABI header with Lean's generated C declarations.
 
-Run after `lake build Tyr.Torch:c`. The native compiler independently checks
+Run after building the relevant native adapters. The native compiler independently checks
 the other side of this contract because tyr.cpp includes tyr_ffi_abi.h.
 This intentionally checks the named, audited boundaries in that header; it
 does not claim that the remaining legacy FFI surface has been audited.
@@ -38,11 +38,20 @@ def declarations(path: Path) -> dict[str, tuple[str, tuple[str, ...]]]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--header", type=Path, default=ROOT / "cc/src/tyr_ffi_abi.h")
-    parser.add_argument("--generated", type=Path, default=ROOT / ".lake/build/ir/Tyr/Torch.c")
+    parser.add_argument("--generated", type=Path, nargs="+", default=[
+        ROOT / ".lake/build/ir/Tyr/Torch.c",
+        ROOT / ".lake/build/ir/Tyr/RawTensor.c",
+        ROOT / ".lake/build/ir/Tyr/RawTensor/Neural.c",
+    ])
     args = parser.parse_args()
     try:
         expected = declarations(args.header)
-        generated = declarations(args.generated)
+        generated = {}
+        for source in args.generated:
+            for name, signature in declarations(source).items():
+                if name in generated and generated[name] != signature:
+                    raise ValueError(f"{source}: conflicting declarations for {name}")
+                generated[name] = signature
     except (OSError, ValueError) as error:
         print(f"FFI ABI check: {error}", file=sys.stderr)
         return 1
@@ -53,7 +62,7 @@ def main() -> int:
     for name, signature in expected.items():
         actual = generated.get(name)
         if actual is None:
-            errors.append(f"{name}: missing generated declaration; rebuild Tyr.Torch:c")
+            errors.append(f"{name}: missing generated declaration; rebuild the native adapter")
         elif actual != signature:
             errors.append(f"{name}: header {signature}, Lean {actual}")
     if errors:

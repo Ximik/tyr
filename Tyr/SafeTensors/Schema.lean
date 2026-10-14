@@ -6,7 +6,7 @@
   - introspect single-file or sharded-directory layouts
   - support HuggingFace `model.safetensors.index.json` when present
 -/
-import Tyr.Torch
+import Tyr.RawTensor.SafeTensors
 import Tyr.Typed.Tensor
 import Lean.Data.Json
 import Lean.Data.Json.FromToJson
@@ -87,7 +87,7 @@ def loadFromHandleWithContract
     (contract : TensorContract)
     (device : Device := Device.CPU)
     : IO (DTensor contract.spec.shape contract.spec.dtype) := do
-  let raw ← loadFromHandleOnDevice handle name contract.spec.shape device
+  let raw ← RawTensor.safeTensorsLoadFromHandleOnDevice handle name device
   checkLoadedWithContract s!"SafeTensors tensor '{name}'" contract raw
 
 /-- Load from a SafeTensors file and check against an explicit contract. -/
@@ -97,7 +97,7 @@ def loadTensorWithContract
     (contract : TensorContract)
     (device : Device := Device.CPU)
     : IO (DTensor contract.spec.shape contract.spec.dtype) := do
-  let raw ← loadTensorOnDevice path name contract.spec.shape device
+  let raw ← RawTensor.safeTensorsLoadOnDevice path name device
   checkLoadedWithContract s!"SafeTensors tensor '{name}'" contract raw
 
 /-- Load from a sharded SafeTensors directory and check against an explicit contract. -/
@@ -107,7 +107,7 @@ def loadTensorShardedWithContract
     (contract : TensorContract)
     (device : Device := Device.CPU)
     : IO (DTensor contract.spec.shape contract.spec.dtype) := do
-  let raw ← loadTensorShardedOnDevice dir name contract.spec.shape device
+  let raw ← RawTensor.safeTensorsLoadShardedOnDevice dir name device
   checkLoadedWithContract s!"SafeTensors tensor '{name}'" contract raw
 
 /-- Load from an open SafeTensors handle and check shape, dtype, and target device. -/

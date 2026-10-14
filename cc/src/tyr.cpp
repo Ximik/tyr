@@ -1,3 +1,4 @@
+#include "tyr_safetensors_abi.h"
 #include "tyr_flux_abi.h"
 #include "tyr_vae_abi.h"
 #include "tyr_gemma4_abi.h"
@@ -4047,7 +4048,7 @@ static void safetensors_handle_finalizer(void* ptr) {
 
 static void safetensors_handle_foreach(void* /*ptr*/, b_lean_obj_arg /*f*/) {}
 
-extern "C" LEAN_EXPORT lean_object* lean_torch_safetensors_open(b_lean_obj_arg path_obj, lean_object* /*w*/) {
+extern "C" LEAN_EXPORT lean_object* lean_torch_safetensors_open(b_lean_obj_arg path_obj) {
   try {
     std::string path(lean_string_cstr(path_obj));
     if (!g_safetensors_handle_class) {
@@ -4067,8 +4068,7 @@ extern "C" LEAN_EXPORT lean_object* lean_torch_safetensors_open(b_lean_obj_arg p
 extern "C" LEAN_EXPORT lean_object* lean_torch_safetensors_load_from_handle(
     b_lean_obj_arg handle,
     b_lean_obj_arg name_obj,
-    lean_obj_arg shape_obj,
-    lean_object* /*w*/) {
+    lean_obj_arg shape_obj) {
   auto* wrapper = static_cast<std::shared_ptr<SafeTensorsFile>*>(lean_get_external_data(handle));
   auto loader = *wrapper;
   std::string name(lean_string_cstr(name_obj));
@@ -4089,8 +4089,7 @@ extern "C" LEAN_EXPORT lean_object* lean_torch_safetensors_load_from_handle(
 lean_object* lean_torch_safetensors_load(
   b_lean_obj_arg path_obj,
   b_lean_obj_arg name_obj,
-  lean_obj_arg shape_obj,
-  lean_object* w
+  lean_obj_arg shape_obj
 ) {
   std::string path(lean_string_cstr(path_obj));
   std::string tensor_name(lean_string_cstr(name_obj));
@@ -4112,8 +4111,7 @@ lean_object* lean_torch_safetensors_load(
 lean_object* lean_torch_safetensors_load_sharded(
   b_lean_obj_arg dir_obj,
   b_lean_obj_arg name_obj,
-  lean_obj_arg shape,
-  lean_object* w
+  lean_obj_arg shape
 ) {
   try {
     std::string dir(lean_string_cstr(dir_obj));

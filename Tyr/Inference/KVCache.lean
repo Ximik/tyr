@@ -31,7 +31,7 @@
   the caller; this low-level cache does not provide a lock. All in-tree consumers (the
   decode parity harness `Examples/GPU/RunMhaH100Decode.lean`) satisfy this.
 
-  The attention call goes through `nn.tyrFlashAttn4d`, which the C++
+  The attention call goes through `Tensor.flashAttention`, which the C++
   `tyr::flash_attn` operator dispatches to the native TK decode kernel
   (`tkMhaH100DecodeFwd`) when shape-eligible (BF16, qSeq=1,
   head_dim ∈ {64, 128, 256}, GQA-valid) and to PyTorch SDPA otherwise. The
@@ -43,7 +43,7 @@
   earlier copy at `Examples/NanoChat/Generator/KVCache.lean` is a thin
   re-export shim.) -/
 import Tyr.Torch
-import Tyr.Typed.Ops
+import Tyr.Typed.Neural
 import Tyr.Inference.OwnedKV
 import Tyr.TensorStruct
 import Tyr.Module.Derive
@@ -197,22 +197,6 @@ def Cache.appendLayer (cache : Cache numLayers batch maxSeqLen numKvHeads headDi
     let lc ← lc.append newK newV pos
     return cache.setLayer layerIdx lc
 
-/-- Typed adapter over the `tyr::flash_attn` runtime dispatcher
-    (`nn.tyrFlashAttn4d`, the same extern the legacy call used): the output
-    shares the query's shape, dtype and device policy. `Tyr.Typed.Ops` has no
-    typed flash-attention op yet; this unwraps the indexed tensors at the
-    extern boundary and re-asserts the output spec. -/
-private def flashAttn4d {batch nHead nKvHead qSeq kvSeq headDim : UInt64}
-    {dtype : DType} {device : DevicePolicy}
-    (query : Tensor ⟨#[batch, nHead, qSeq, headDim], dtype, device⟩)
-    (key : Tensor ⟨#[batch, nKvHead, kvSeq, headDim], dtype, device⟩)
-    (value : Tensor ⟨#[batch, nKvHead, kvSeq, headDim], dtype, device⟩)
-    (enableGqa : Bool) : Tensor ⟨#[batch, nHead, qSeq, headDim], dtype, device⟩ :=
-  Tensor.assumeSpec (nn.tyrFlashAttn4d
-    (batch := batch) (n_head := nHead) (n_kv_head := nKvHead)
-    (q_seq := qSeq) (kv_seq := kvSeq) (head_dim := headDim)
-    query.raw key.raw value.raw none 0.0 false none enableGqa)
-
 /-- One step of cached decode-attention for a single layer.
 
     1. Write `newK`, `newV` (one token per batch row) into layer `layerIdx`'s
@@ -254,7 +238,7 @@ def Cache.attendLayer
   let cache' ← cache.appendLayer layerIdx newK newV
   let validLen := cache.currentLen + 1
   let (kView, vView) ← lc.attentionView validLen
-  let output := flashAttn4d newQ kView vView enableGqa
+  let output := Tensor.flashAttention newQ kView vView enableGqa
   return (cache', output)
 
 /-- TensorStruct instance for LayerCache -/

@@ -170,17 +170,17 @@ def BOSFinder.take (finder : BOSFinder) {n : UInt64} (tokens : DTensor #[n] .Int
     if finder.orderedEnds[mid]! <= finder.currentPos then lo := mid + 1 else hi := mid
   let mut doc := lo
   let mut pos := finder.currentPos
-  let mut chunks : Array RawTensor := #[]
+  let mut chunks : Array (Sigma fun shape => DTensor shape .Int64) := #[]
   while pos < endPos do
     let docEnd := finder.orderedEnds[doc]!
     let docStart := if doc == 0 then 0 else finder.orderedEnds[doc - 1]!
     let sourceStart := finder.orderedStarts[doc]! + (pos - docStart)
     let len := min (endPos - pos) (docEnd - pos)
-    chunks := chunks.push (tokens.sliceChecked 0 sourceStart len #[len]).raw
+    chunks := chunks.push (Tensor.packShape (tokens.sliceChecked 0 sourceStart len #[len]))
     pos := pos + len
     doc := doc + 1
   -- Concatenating the document slices yields exactly `count` tokens.
-  let chunk ← match Tensor.ofRaw (σ := ⟨#[count], .Int64, .any⟩) (nn.cat_dyn chunks 0) with
+  let chunk ← match Tensor.catMany? chunks 0 #[count] with
     | .ok tensor => pure tensor
     | .error message => throw <| IO.userError s!"BOS document batch: {message}"
   return (chunk, { finder with currentPos := endPos })
@@ -454,7 +454,7 @@ def DistributedDataGenerator.nextTokens (gen : DistributedDataGenerator) (count 
   if count == 0 then throw <| IO.userError "Batch token count must be positive"
   let mut gen := gen
   let mut remaining := count
-  let mut chunks : Array RawTensor := #[]
+  let mut chunks : Array (Sigma fun shape => DTensor shape .Int64) := #[]
   let mut emptyFiles := 0
   while remaining > 0 do
     let iter := gen.iterator
@@ -462,7 +462,7 @@ def DistributedDataGenerator.nextTokens (gen : DistributedDataGenerator) (count 
     let len := min remaining available
     if len > 0 then
       let (chunk, finder) ← iter.shard.bosFinder.take iter.shard.tokens len
-      chunks := chunks.push chunk.raw
+      chunks := chunks.push (Tensor.packShape chunk)
       gen := { gen with iterator := { iter with shard := { iter.shard with bosFinder := finder } } }
       remaining := remaining - len
       emptyFiles := 0
@@ -481,7 +481,7 @@ def DistributedDataGenerator.nextTokens (gen : DistributedDataGenerator) (count 
     globalStep := gen.globalStep + 1
     iterator := { gen.iterator with batchCount := gen.iterator.batchCount + 1 } }
   -- The chunks consumed exactly `count` tokens in total.
-  let tokens ← match Tensor.ofRaw (σ := ⟨#[count], .Int64, .any⟩) (nn.cat_dyn chunks 0) with
+  let tokens ← match Tensor.catMany? chunks 0 #[count] with
     | .ok tensor => pure tensor
     | .error message => throw <| IO.userError s!"Training stream batch: {message}"
   return (tokens, gen)

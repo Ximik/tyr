@@ -225,7 +225,7 @@ def forward {batch seq hidden_size num_heads num_kv_heads head_dim : UInt64}
     Input query is one token `[batch,1,hidden]`; cache grows by one KV step.
 
     When `useTyrFlashAttn` is true (default false), routes the cached
-    attention through `nn.tyrFlashAttn4d` instead of `scaledDotProductAttentionGQAQKV`.
+    attention through `Tensor.flashAttention` instead of `scaledDotProductAttentionGQAQKV`.
     The C++ `tyr::flash_attn` dispatcher then routes shape-eligible decode
     problems (BF16 + qSeq=1 + head_dim=128 or 64 + GQA-valid) to the native
     TK kernel `tkMhaH100DecodeFwd[64]`, and falls back to PyTorch SDPA

@@ -1044,6 +1044,40 @@ The strict build passes for `test_runner`, `NanoChatChat`, `TestGPUE2E`, and
 `[2, 3]²` with cotangent `[4, 5]` produces `[16, 30]`, and detach removes the
 gradient function. GPU targets have only been compiled on this machine.
 
+## Remove the legacy neural namespace
+
+All 1,489 main CPU tests passed after the linear algebra/rotary/autograd removal.
+The remaining concatenation callers now keep existentially indexed Int64 chunks
+in the data loader, using `Tensor.catMany?` to report metadata failures through
+the existing IO error paths. The Qwen embedder uses the same typed boundary.
+
+`Tensor.flashAttention` accepts the existing padding mask, dropout, causal,
+and scale options. GPU dispatch and inference caching share that metadata-checked
+adapter. The legacy `torch.nn` declarations and their unused simplified focal
+and triplet loss helpers have been removed.
+
+The core ABI checker reads declarations across the remaining compatibility
+module and both raw adapter modules, rejecting conflicting signatures across
+modules. Its 11 audited declarations and the 45 neural declarations pass.
+
+## Isolate SafeTensors native loading
+
+The full 1,489-test main CPU suite passed after the legacy neural namespace was
+removed. SafeTensors native calls now live in `Tyr.RawTensor.SafeTensors`; the
+public schema and candidate loaders return indexed tensors. The old tensor
+load/save surface and unused signal namespace were removed from `Tyr.Torch`.
+The dtype-promotion matrix test also uses indexed loading and arithmetic.
+
+Contract loaders now request stored dimensions before checking their shape,
+dtype, and placement claims. A regression exercises equal-numel wrong-shape
+rejection through single-file, open-handle, and sharded APIs. A dedicated native
+header audits all four SafeTensors entry points, including corrected signatures
+without obsolete world arguments; CPU CI and hardware qualification run it.
+
+The strict main/GPU-target build passes. All 14 SafeTensors tests and all 15
+`Tests.TestTyped` tests pass, including shape rejection and dtype promotion.
+The core 11-declaration and SafeTensors 4-declaration ABI audits pass.
+
 ## Remaining acceptance criteria
 
 Remove the `T` declaration and all model, generator, reflection, documentation,

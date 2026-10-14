@@ -2,6 +2,7 @@ import LeanTest
 import Tyr.Typed
 import Tyr.Typed.Neural
 import Tyr.Torch
+import Tyr.SafeTensors.Schema
 
 open torch
 
@@ -137,18 +138,16 @@ def testTypedDtypePromotionMatrix : IO Unit := do
   let dtypes : Array DType := #[.Bool, .UInt8, .Int8, .Int16, .Int32, .Int64,
     .Float16, .BFloat16, .Float32, .Float64]
   for lhs in dtypes do
-    let a ← safetensors.loadTensor path lhs.canonicalName #[1]
-    let .ok a := Tensor.ofTensor (shape := #[1]) lhs a | LeanTest.fail s!"fixture dtype {lhs}"
+    let a ← safetensors.loadTensorWithSpec path lhs.canonicalName ⟨#[1], lhs⟩
     for rhs in dtypes do
-      let b ← safetensors.loadTensor path rhs.canonicalName #[1]
-      let .ok b := Tensor.ofTensor (shape := #[1]) rhs b | LeanTest.fail s!"fixture dtype {rhs}"
+      let b ← safetensors.loadTensorWithSpec path rhs.canonicalName ⟨#[1], rhs⟩
       assertValid (Tensor.add a b) s!"{lhs} + {rhs}"
-  let u8 ← safetensors.loadTensor path "UInt8" #[1]
-  let i8 ← safetensors.loadTensor path "Int8" #[1]
-  LeanTest.assertEqual ((torch.add u8 i8).getValues.toList.toArray) #[254.0]
+  let u8 ← safetensors.loadTensorWithSpec path "UInt8" ⟨#[1], .UInt8⟩
+  let i8 ← safetensors.loadTensorWithSpec path "Int8" ⟨#[1], .Int8⟩
+  LeanTest.assertEqual (← (Tensor.add u8 i8).toFloatArray) #[254.0]
   for dtype in #[DType.Float8E4M3FN, DType.Float8E5M2] do
-    let raw ← safetensors.loadTensor path dtype.canonicalName #[1]
-    LeanTest.assertEqual raw.dtype dtype
+    let raw ← safetensors.loadTensorWithSpec path dtype.canonicalName ⟨#[1], dtype⟩
+    LeanTest.assertEqual raw.actualSpec.dtype dtype
     LeanTest.assertEqual dtype.bitWidth? (some 8)
 
 /-- The typed wrappers re-index the phantom dtype according to the promotion

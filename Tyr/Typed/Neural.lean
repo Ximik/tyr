@@ -54,10 +54,15 @@ def packShape {s : Shape} {d : DType} {dev : DevicePolicy} (t : Tensor ⟨s, d, 
 
 /-- Concatenate tensors with runtime-varying shapes, checking the requested result.
 Inputs retain their individual shape indices rather than pretending to be scalars. -/
+def catMany? {d : DType} {dev : DevicePolicy}
+    (tensors : Array (Sigma (fun shape => Tensor ⟨shape, d, dev⟩)))
+    (dim : Int) (shape : Shape) : Except String (Tensor ⟨shape, d, dev⟩) :=
+  Tensor.ofRaw (RawTensor.catMany (tensors.map fun t => t.2.raw) dim)
+
 def catManyChecked {d : DType} {dev : DevicePolicy}
     (tensors : Array (Sigma (fun shape => Tensor ⟨shape, d, dev⟩)))
     (dim : Int) (shape : Shape) : Tensor ⟨shape, d, dev⟩ :=
-  match Tensor.ofRaw (RawTensor.catMany (tensors.map fun t => t.2.raw) dim) with
+  match catMany? tensors dim shape with
   | .ok result => result
   | .error message => panic! s!"Tensor.catManyChecked: {message}"
 
@@ -175,9 +180,11 @@ def attentionGQAQKV {batch heads kvHeads qSeq kvSeq dim : UInt64} {d : DType} {d
 /-- Experimental native FlashAttention dispatch, with a metadata-checked result. -/
 def flashAttention {batch heads kvHeads qSeq kvSeq dim : UInt64} {d : DType} {dev : DevicePolicy}
     (q : Tensor ⟨#[batch, heads, qSeq, dim], d, dev⟩)
-    (k v : Tensor ⟨#[batch, kvHeads, kvSeq, dim], d, dev⟩) (gqa : Bool := false) :=
+    (k v : Tensor ⟨#[batch, kvHeads, kvSeq, dim], d, dev⟩) (gqa : Bool := false)
+    (mask : Option (STensor #[batch, kvSeq]) := none) (dropout : Float := 0.0)
+    (causal : Bool := false) (scale : Option Float := none) :=
   q.checkedReplacement (RawTensor.flashAttention batch heads kvHeads qSeq kvSeq dim
-    q.raw k.raw v.raw none 0.0 false none gqa)
+    q.raw k.raw v.raw (mask.map Tensor.raw) dropout causal scale gqa)
 
 def sliceScatter {s sourceShape : Shape} {d : DType} {dev : DevicePolicy}
     (input : Tensor ⟨s, d, dev⟩) (dim start : UInt64)

@@ -11,7 +11,7 @@
   the requested shape and hand out shape-indexed tensors (`STensor`).
   The dtype follows the file and stays dynamic.
 -/
-import Tyr.Torch
+import Tyr.RawTensor.SafeTensors
 import Tyr.Typed.Tensor
 
 namespace torch.safetensors
@@ -33,7 +33,7 @@ def tryLoadTensor (path : String) (name : String) (s : Shape)
     (device : Device := Device.CPU)
     : IO (Option (STensor s)) := do
   try
-    let raw ← loadTensorOnDevice path name #[] device
+    let raw ← RawTensor.safeTensorsLoadOnDevice path name device
     pure (some (← checkLoadedShape name s raw))
   catch _ =>
     pure none
@@ -46,7 +46,7 @@ def tryLoadTensorSharded (dir : String) (name : String) (s : Shape)
     (device : Device := Device.CPU)
     : IO (Option (STensor s)) := do
   try
-    let raw ← loadTensorShardedOnDevice dir name #[] device
+    let raw ← RawTensor.safeTensorsLoadShardedOnDevice dir name device
     pure (some (← checkLoadedShape name s raw))
   catch _ =>
     pure none
@@ -63,7 +63,7 @@ def tryLoadOptionalTensor (path : String) (name : String) (s : Shape)
     (device : Device := Device.CPU)
     : IO (Option (STensor s)) := do
   try
-    let raw ← loadTensorOnDevice path name #[] device
+    let raw ← RawTensor.safeTensorsLoadOnDevice path name device
     pure (some (← checkLoadedShape name s raw))
   catch e =>
     if isMissingTensorError (toString e) name then
@@ -77,7 +77,7 @@ def tryLoadOptionalTensorSharded (dir : String) (name : String) (s : Shape)
     (device : Device := Device.CPU)
     : IO (Option (STensor s)) := do
   try
-    let raw ← loadTensorShardedOnDevice dir name #[] device
+    let raw ← RawTensor.safeTensorsLoadShardedOnDevice dir name device
     pure (some (← checkLoadedShape name s raw))
   catch e =>
     if isMissingTensorError (toString e) name then

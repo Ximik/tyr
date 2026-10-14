@@ -8,6 +8,7 @@
 -/
 import Tyr.Torch
 import Tyr.Typed
+import Tyr.Typed.Neural
 import Tyr.Model.Qwen.Config
 import Tyr.Model.Qwen.Model
 import Tyr.Model.Qwen.RoPE
@@ -52,7 +53,7 @@ def fromModel (cfg : QwenConfig) (max_seq : UInt64) (model : Qwen3Model cfg)
 private def catAlong {s : Shape} {d : DType} {dev : DevicePolicy}
     (tensors : Array (Tensor ⟨s, d, dev⟩)) (dim : Int) (out : Shape)
     : Tensor ⟨out, d, dev⟩ :=
-  match Tensor.ofRaw (nn.cat_impl (s := s) (tensors.map Tensor.toTensor) dim) with
+  match Tensor.catMany? (tensors.map Tensor.packShape) dim out with
   | .ok t => t
   | .error message => panic! s!"QwenFluxEmbedder cat: {message}"
 

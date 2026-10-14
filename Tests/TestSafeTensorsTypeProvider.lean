@@ -337,3 +337,19 @@ def testSafeTensorsDefaultLoaderRejectsDtype : IO Unit := IO.FS.withTempDir fun 
   IO.FS.writeBinFile path
     (headerPrefix header.size.toUInt64 ++ header ++ ByteArray.mk (Array.replicate 24 0))
   LeanTest.assertThrows (SingleSafe.load_linear_weight path) (some "dtype")
+
+/-- Equal element counts must not permit a different stored layout. -/
+@[test]
+def testSafeTensorsContractRejectsReshapedLayout : IO Unit := do
+  let path := "Tests/fixtures/safetensors/single.safetensors"
+  LeanTest.assertThrows
+    (safetensors.loadTensorWithSpec path "linear.weight" ⟨#[3, 2], .Float32⟩)
+    (some "shape")
+  let handle ← safetensors.openHandle path
+  LeanTest.assertThrows
+    (safetensors.loadFromHandleWithSpec handle "linear.weight" ⟨#[3, 2], .Float32⟩)
+    (some "shape")
+  LeanTest.assertThrows
+    (safetensors.loadTensorShardedWithSpec "Tests/fixtures/safetensors/sharded"
+      "embed.weight" ⟨#[1, 4], .Float32⟩)
+    (some "shape")

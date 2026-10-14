@@ -1,6 +1,6 @@
 /- High-level FlashAttention/SDPA wrappers with typed dispatch and dynamic adapters. -/
 import Tyr.Torch
-import Tyr.Typed.Ops
+import Tyr.Typed.Neural
 import Tyr.GPU.Ops.AttentionProblem
 import Tyr.GPU.Ops.MhaH100
 
@@ -85,8 +85,7 @@ def dispatchRoute
 
 /-- Main typed FlashAttention/SDPA API.
     This routes through a torch-registered op (`tyr::flash_attn`) so autograd remains native.
-    There is no typed wrapper for that registered op, so the raw handles cross at
-    this FFI edge; the result is re-graded at the statically known spec. -/
+    The indexed adapter checks that native output metadata matches the query. -/
 @[inline] def flashAttn
     {batch nHead nKvHead qSeq kvSeq headDim : UInt64} {d : DType}
     (query : Query batch nHead qSeq headDim d)
@@ -98,11 +97,7 @@ def dispatchRoute
     (scale : Option Float := none)
     (enableGqa : Bool := false)
     : Query batch nHead qSeq headDim d :=
-  Tensor.assumeSpec <|
-    torch.nn.tyrFlashAttn4d
-      (batch := batch) (n_head := nHead) (n_kv_head := nKvHead)
-      (q_seq := qSeq) (kv_seq := kvSeq) (head_dim := headDim)
-      query.raw key.raw value.raw (attnMask.map Tensor.raw) dropoutP isCausal scale enableGqa
+  Tensor.flashAttention query key value enableGqa attnMask dropoutP isCausal scale
 
 /-- Alias matching PyTorch naming. -/
 @[inline] def scaledDotProductAttention
