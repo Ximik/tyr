@@ -1,4 +1,5 @@
 import Examples.GPU.IndexedParity
+import Examples.GPU.MhaTrainingReference
 import Examples.GPU.GemmReference
 import Examples.GPU.AttentionReference
 import Examples.GPU.LossReference
@@ -226,3 +227,22 @@ example (a : DTensor #[2, 3] .BFloat16) (b : DTensor #[4, 5] .BFloat16) : True :
     LeanTest.assertTrue (Tensor.allclose dq (Tensor.full #[1, 1, 2, 64] 4.0) 0 0)
     LeanTest.assertTrue (Tensor.allclose dk (Tensor.zeros #[1, 1, 2, 64]) 0 0)
     LeanTest.assertTrue (Tensor.allclose dv (Tensor.ones #[1, 1, 2, 64]) 0 0)
+
+@[test] def testGPUMhaIndexedTrainingLossAndStep : IO Unit := do
+  let out := (Tensor.full #[1, 1, 128, 64] 3.0).toBFloat16
+  let target := (Tensor.ones #[1, 1, 128, 64]).toBFloat16
+  let (loss, cotangent) := Examples.GPU.lossAndGradOut out target
+  LeanTest.assertEqual loss.item 2.0
+  LeanTest.assertTrue (Tensor.allclose cotangent.toFloat32
+    (Tensor.full #[1, 1, 128, 64] (2.0 / 8192.0)) 0 0)
+  let q := Tensor.zeros #[1, 1, 128, 64]
+  let k := Tensor.zeros #[1, 1, 128, 64]
+  let v := Tensor.full #[1, 1, 128, 64] 3.0
+  for _ in [:2] do
+    let (qn, kn, vn, stepLoss) ← Examples.GPU.oneTorchTrainStep q k v target.toFloat32 1.0
+    LeanTest.assertTrue ((stepLoss.item - 2.0).abs < 1e-6)
+    LeanTest.assertTrue (Tensor.allclose qn q 0 0)
+    LeanTest.assertTrue (Tensor.allclose kn k 0 0)
+    LeanTest.assertTrue (Tensor.allclose vn
+      (Tensor.full #[1, 1, 128, 64] (3.0 - 2.0 / 8192.0)) 0 1e-6)
+    LeanTest.assertTrue (Tensor.allclose v (Tensor.full #[1, 1, 128, 64] 3.0) 0 0)

@@ -905,6 +905,25 @@ The main runner, both GPU test targets, and H100 executable build under
 `--wfail` (1,760 jobs). All 1,484 main CPU tests pass with zero failures/skips.
 The inventory validates nine required and four optional suites.
 
+## H100 768-token and training runner migration
+
+The 768-token fixture runner now shares indexed attention references, requires
+exact BF16 activation and Float32 gradient/normalizer fixtures, and allocates
+independent writable buffers through IO. The training demo distinguishes BF16
+kernel activations from Float32 optimizer state and scalar losses. Its loss,
+cotangent, SGD, and PyTorch baseline step are importable without an executable
+entry point. Initial parameter tensors can be shared because each SGD update
+produces new storage; a CPU regression verifies initial-value preservation and
+repeated-call independence, alongside analytic loss and update values.
+
+Both executables and the GPU test targets build locally. Each executable
+returns failure without CUDA. Hardware training convergence, multi-block
+backward parity, and timings remain unqualified.
+The combined build passes under `--wfail` (1,765 jobs). All 1,485 main CPU
+tests pass with zero failures/skips. Inventory validation still covers nine
+required and four optional suites. GitHub CLI reports green upstream main CI,
+which is separate from these local commits.
+
 ## Remaining acceptance criteria
 
 Remove the `T` declaration and all model, generator, reflection, documentation,

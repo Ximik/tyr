@@ -2,6 +2,7 @@
    It optimizes q/k/v to match a fixed target attention output and can benchmark
    kernel-based training steps against a PyTorch SDPA autograd baseline. -/
 import Tyr.Torch
+import Examples.GPU.MhaTrainingReference
 import Tyr.GPU.Kernels.MhaH100
 
 namespace Examples.GPU
@@ -9,10 +10,6 @@ namespace Examples.GPU
 open torch
 open Tyr.GPU.Kernels
 
-abbrev MhaTensor := T #[1, 1, 128, 64]   -- bf16 kernel inputs/outputs
-abbrev MasterTensor := T #[1, 1, 128, 64] -- fp32 optimizer state
-abbrev LTensor := T #[2, 64]
-def nElems : Float := 8192.0
 private def contractLabel : String := "dq_direct_kv_sweep_store_add"
 private def seqLen : Nat := 128
 private def headDim : Nat := 64
@@ -27,9 +24,9 @@ structure TrainSetup where
   vInit : MasterTensor
 
 def forwardMha (q k v : MhaTensor) (stream : UInt64) : IO (MhaTensor × LTensor) := do
-  let out := torch.zeros_like q
-  let lOut : LTensor := torch.zeros #[2, 64] false (Device.CUDA 0)
-  tkMhaH100Fwd2Block.launch q k v out lOut 128 64 1 2 1 128 1 1 0 stream
+  let out ← Tensor.uniformLike q 0 0
+  let lOut : LTensor ← Tensor.uniformLike (Tensor.zeros #[2, 64] false (Device.CUDA 0)) 0 0
+  tkMhaH100Fwd2Block.launch q.raw k.raw v.raw out.raw lOut.raw 128 64 1 2 1 128 1 1 0 stream
   pure (out, lOut)
 
 def backwardMha
@@ -38,30 +35,18 @@ def backwardMha
     (out : MhaTensor)
     (stream : UInt64)
     : IO (MasterTensor × MasterTensor × MasterTensor) := do
-  let dVec : LTensor := torch.mul_scalar lOut 0.0
-  tkMhaH100BwdPrep2Block.launch dO out dVec 128 64 1 2 1 128 1 1 0 stream
+  let dVec ← Tensor.uniformLike lOut 0 0
+  tkMhaH100BwdPrep2Block.launch dO.raw out.raw dVec.raw 128 64 1 2 1 128 1 1 0 stream
 
-  let dQ : MasterTensor := torch.zeros #[1, 1, 128, 64] false (Device.CUDA 0)
-  let dK : MasterTensor := torch.zeros #[1, 1, 128, 64] false (Device.CUDA 0)
-  let dV : MasterTensor := torch.zeros #[1, 1, 128, 64] false (Device.CUDA 0)
-  tkMhaH100Bwd2BlockDq.launch q k v dO lOut dVec dQ 128 64 1 2 1 128 1 1 0 stream
-  tkMhaH100Bwd2BlockKvSweep.launch q k v dO lOut dVec dQ dK dV 128 64 1 2 1 128 1 1 0 stream
+  let dQ : MasterTensor ← Tensor.uniformLike (Tensor.zeros #[1, 1, 128, 64] false (Device.CUDA 0)) 0 0
+  let dK : MasterTensor ← Tensor.uniformLike (Tensor.zeros #[1, 1, 128, 64] false (Device.CUDA 0)) 0 0
+  let dV : MasterTensor ← Tensor.uniformLike (Tensor.zeros #[1, 1, 128, 64] false (Device.CUDA 0)) 0 0
+  tkMhaH100Bwd2BlockDq.launch q.raw k.raw v.raw dO.raw lOut.raw dVec.raw dQ.raw 128 64 1 2 1 128 1 1 0 stream
+  tkMhaH100Bwd2BlockKvSweep.launch q.raw k.raw v.raw dO.raw lOut.raw dVec.raw dQ.raw dK.raw dV.raw 128 64 1 2 1 128 1 1 0 stream
   pure (dQ, dK, dV)
 
-def lossAndGradOut (out targetOut : MhaTensor) : T #[] × MhaTensor :=
-  let out32 : MasterTensor := torch.toFloat' out
-  let tgt32 : MasterTensor := torch.toFloat' targetOut
-  let diff : MasterTensor := out32 - tgt32
-  let lossT : T #[] := torch.mul_scalar (torch.nn.meanAll (diff * diff)) 0.5
-  let dO32 : MasterTensor := diff / nElems
-  let dO : MhaTensor := torch.toBFloat16' dO32
-  (lossT, dO)
-
-def sgdUpdate (param grad : MasterTensor) (lr : Float) : MasterTensor :=
-  param - (grad * lr)
-
 def mkNoisyInit (targetF : MasterTensor) (noiseScale : Float) (device : Device) : IO MasterTensor := do
-  let noise : MasterTensor ← torch.randn #[1, 1, 128, 64] false device
+  let noise : MasterTensor ← Tensor.randn #[1, 1, 128, 64] false device
   pure (targetF + (noise * noiseScale))
 
 def oneKernelTrainStep
@@ -69,33 +54,13 @@ def oneKernelTrainStep
     (targetOut : MhaTensor)
     (stream : UInt64)
     (lr : Float)
-    : IO (MasterTensor × MasterTensor × MasterTensor × T #[]) := do
-  let q : MhaTensor := torch.toBFloat16' qM
-  let k : MhaTensor := torch.toBFloat16' kM
-  let v : MhaTensor := torch.toBFloat16' vM
+    : IO (MasterTensor × MasterTensor × MasterTensor × DTensor #[] .Float32) := do
+  let q : MhaTensor := qM.toBFloat16
+  let k : MhaTensor := kM.toBFloat16
+  let v : MhaTensor := vM.toBFloat16
   let (out, lOut) ← forwardMha q k v stream
   let (lossT, dO) := lossAndGradOut out targetOut
   let (dQ, dK, dV) ← backwardMha q k v dO lOut out stream
-  let qM' := sgdUpdate qM dQ lr
-  let kM' := sgdUpdate kM dK lr
-  let vM' := sgdUpdate vM dV lr
-  pure (qM', kM', vM', lossT)
-
-def oneTorchTrainStep
-    (qM kM vM : MasterTensor)
-    (targetOut32 : MasterTensor)
-    (lr : Float)
-    : IO (MasterTensor × MasterTensor × MasterTensor × T #[]) := do
-  let qLeaf := torch.autograd.set_requires_grad (torch.autograd.detach qM) true
-  let kLeaf := torch.autograd.set_requires_grad (torch.autograd.detach kM) true
-  let vLeaf := torch.autograd.set_requires_grad (torch.autograd.detach vM) true
-  let out : MasterTensor := torch.nn.scaled_dot_product_attention qLeaf kLeaf vLeaf 0.0 false
-  let diff : MasterTensor := out - targetOut32
-  let lossT : T #[] := torch.mul_scalar (torch.nn.meanAll (diff * diff)) 0.5
-  torch.autograd.backwardLoss lossT
-  let dQ : MasterTensor := torch.autograd.grad_of qLeaf
-  let dK : MasterTensor := torch.autograd.grad_of kLeaf
-  let dV : MasterTensor := torch.autograd.grad_of vLeaf
   let qM' := sgdUpdate qM dQ lr
   let kM' := sgdUpdate kM dK lr
   let vM' := sgdUpdate vM dV lr
@@ -109,18 +74,18 @@ def makeSetup (noiseScale : Float) : IO (Option TrainSetup) := do
   let stream ← torch.cuda_current_stream
 
   -- Ground-truth tensors defining the training target.
-  let qTargetF : MasterTensor ← torch.randn #[1, 1, 128, 64] false device
-  let kTargetF : MasterTensor ← torch.randn #[1, 1, 128, 64] false device
-  let vTargetF : MasterTensor ← torch.randn #[1, 1, 128, 64] false device
-  let qTarget : MhaTensor := torch.toBFloat16' qTargetF
-  let kTarget : MhaTensor := torch.toBFloat16' kTargetF
-  let vTarget : MhaTensor := torch.toBFloat16' vTargetF
+  let qTargetF : MasterTensor ← Tensor.randn #[1, 1, 128, 64] false device
+  let kTargetF : MasterTensor ← Tensor.randn #[1, 1, 128, 64] false device
+  let vTargetF : MasterTensor ← Tensor.randn #[1, 1, 128, 64] false device
+  let qTarget : MhaTensor := qTargetF.toBFloat16
+  let kTarget : MhaTensor := kTargetF.toBFloat16
+  let vTarget : MhaTensor := vTargetF.toBFloat16
   let (targetOut, _) ← forwardMha qTarget kTarget vTarget stream
 
   let qInit ← mkNoisyInit qTargetF noiseScale device
   let kInit ← mkNoisyInit kTargetF noiseScale device
   let vInit ← mkNoisyInit vTargetF noiseScale device
-  let targetOut32 : MasterTensor := torch.toFloat' targetOut
+  let targetOut32 : MasterTensor := targetOut.toFloat32
   let _ ← torch.cuda_synchronize
 
   return some {
@@ -177,9 +142,9 @@ def runTrainKernel (steps : Nat) (lr : Float) (noiseScale : Float) (logEvery : N
   let some setup ← makeSetup noiseScale
     | IO.eprintln "CUDA is not available on this host."; return false
 
-  let mut qM := torch.autograd.clone setup.qInit
-  let mut kM := torch.autograd.clone setup.kInit
-  let mut vM := torch.autograd.clone setup.vInit
+  let mut qM := setup.qInit
+  let mut kM := setup.kInit
+  let mut vM := setup.vInit
 
   let mut firstLoss : Float := 0.0
   let mut lastLoss : Float := 0.0
@@ -191,7 +156,7 @@ def runTrainKernel (steps : Nat) (lr : Float) (noiseScale : Float) (logEvery : N
     let mustLog := step == 0 || step + 1 == steps || (logEvery > 0 && step % logEvery == 0)
     if mustLog then
       let _ ← torch.cuda_synchronize
-      let loss := torch.nn.item lossT
+      let loss := Tensor.item lossT
       if step == 0 then
         firstLoss := loss
       if step + 1 == steps then
@@ -205,9 +170,9 @@ def runTrainKernel (steps : Nat) (lr : Float) (noiseScale : Float) (logEvery : N
   pure ok
 
 def benchKernel (setup : TrainSetup) (warmup benchIters : Nat) (lr : Float) : IO Float := do
-  let mut qM := torch.autograd.clone setup.qInit
-  let mut kM := torch.autograd.clone setup.kInit
-  let mut vM := torch.autograd.clone setup.vInit
+  let mut qM := setup.qInit
+  let mut kM := setup.kInit
+  let mut vM := setup.vInit
 
   for _ in [:warmup] do
     let (qN, kN, vN, _) ← oneKernelTrainStep qM kM vM setup.targetOut setup.stream lr
@@ -215,9 +180,9 @@ def benchKernel (setup : TrainSetup) (warmup benchIters : Nat) (lr : Float) : IO
   let _ ← torch.cuda_synchronize
 
   -- Reinitialize to avoid timing warmup-mutated state.
-  qM := torch.autograd.clone setup.qInit
-  kM := torch.autograd.clone setup.kInit
-  vM := torch.autograd.clone setup.vInit
+  qM := setup.qInit
+  kM := setup.kInit
+  vM := setup.vInit
 
   let t0 ← IO.monoNanosNow
   for _ in [:benchIters] do
@@ -230,18 +195,18 @@ def benchKernel (setup : TrainSetup) (warmup benchIters : Nat) (lr : Float) : IO
   pure (elapsedMs / benchIters.toFloat)
 
 def benchTorch (setup : TrainSetup) (warmup benchIters : Nat) (lr : Float) : IO Float := do
-  let mut qM := torch.autograd.clone setup.qInit
-  let mut kM := torch.autograd.clone setup.kInit
-  let mut vM := torch.autograd.clone setup.vInit
+  let mut qM := setup.qInit
+  let mut kM := setup.kInit
+  let mut vM := setup.vInit
 
   for _ in [:warmup] do
     let (qN, kN, vN, _) ← oneTorchTrainStep qM kM vM setup.targetOut32 lr
     qM := qN; kM := kN; vM := vN
   let _ ← torch.cuda_synchronize
 
-  qM := torch.autograd.clone setup.qInit
-  kM := torch.autograd.clone setup.kInit
-  vM := torch.autograd.clone setup.vInit
+  qM := setup.qInit
+  kM := setup.kInit
+  vM := setup.vInit
 
   let t0 ← IO.monoNanosNow
   for _ in [:benchIters] do
