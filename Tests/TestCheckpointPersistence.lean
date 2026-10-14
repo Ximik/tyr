@@ -1,4 +1,5 @@
 import Tyr.Checkpoint
+import Tyr.Tokenizer.TokenBytes
 import Tyr.Optim
 import Tyr.Module.Derive
 import LeanTest
@@ -134,5 +135,17 @@ def testReaderPinsOneSnapshotAcrossReplacement : IO Unit := IO.FS.withTempDir fu
   let (next, _, _, nextMetadata) ← loadTrainingCheckpoint old dir.toString
   assertTensorEqual next fresh
   assertEqual nextMetadata.iteration 2
+
+@[test]
+def testTokenBytesExactPersistence : IO Unit := IO.FS.withTempDir fun dir => do
+  let path := (dir / "token-bytes.pt").toString
+  let mapping := tokenizer.TokenBytes.dummy 4
+  mapping.save path
+  let loaded ← tokenizer.TokenBytes.load path 4
+  LeanTest.assertEqual (← loaded.bytes.toUInt64Array) #[2, 2, 2, 2]
+  Tensor.saveTensor (mapping.bytes.reshapeChecked #[2, 2]) path
+  LeanTest.assertThrows (tokenizer.TokenBytes.load path 4) (some "shape")
+  Tensor.saveTensor (Tensor.ones #[4]) path
+  LeanTest.assertThrows (tokenizer.TokenBytes.load path 4) (some "dtype")
 
 end Tests.CheckpointPersistence

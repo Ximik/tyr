@@ -15,7 +15,6 @@ import Tyr.Inference.OwnedKV
 namespace torch.branching
 
 open torch
-open torch.nn
 
 structure BranchingMoleculeBatch (batch maxLen : UInt64) where
   t : STensor #[batch]

@@ -17,9 +17,7 @@ lean_object* lean_torch_logspace(double, double, uint64_t, double, uint8_t);
 lean_object* lean_torch_linear3d(uint64_t, uint64_t, uint64_t, uint64_t, lean_object*, lean_object*);
 lean_object* lean_torch_get(lean_object*, lean_object*, lean_object*);
 lean_object* lean_torch_unbind(lean_object*, lean_object*, lean_object*);
-lean_object* lean_torch_reshape(lean_object*, lean_object*, lean_object*);
 lean_object* lean_torch_reshape_exact(lean_object*, lean_object*, lean_object*);
-lean_object* lean_torch_load_tensor(lean_object*, lean_object*);
 lean_object* lean_torch_load_tensor_exact(lean_object*, lean_object*);
 
 #ifdef __cplusplus

@@ -9,6 +9,7 @@
 
   Ground truth generator: Tests/fixtures/laguna/gen_nvfp4_fixtures.py
 -/
+import Tyr.Torch
 import Tyr.SafeTensors.Load
 import Tyr.Model.Laguna.NvFp4
 

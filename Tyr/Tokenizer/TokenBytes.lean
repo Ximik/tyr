@@ -1,3 +1,4 @@
+import Tyr.Typed.Neural
 /-
   Tyr/Tokenizer/TokenBytes.lean
 
@@ -26,21 +27,13 @@ structure TokenBytes where
   bytes : DTensor #[vocabSize.toUInt64] .Int64
   deriving Repr
 
-/-- Build an Int64 tensor of exactly `n` entries from host data over the raw
-    FFI boundary, validating the runtime metadata against the claimed spec.
-    Panics if the array length or dtype disagree with `n`/Int64. -/
+/-- Construct the requested Int64 vector, checking its length. -/
 private def int64VectorFromArray (arr : Array Int64) (n : UInt64) : DTensor #[n] .Int64 :=
-  match Tensor.ofRaw (σ := ⟨#[n], .Int64, .any⟩) (data.fromInt64Array arr) with
-  | .ok tensor => tensor
-  | .error message => panic! s!"int64VectorFromArray: {message}"
+  (Tensor.fromInt64Array arr).reshapeChecked #[n]
 
-/-- Gather byte counts per token over the raw FFI boundary
-    (`index_select` preserves the Int64 dtype and yields one entry per index). -/
 private def indexSelect1d {n k : UInt64} (t : DTensor #[n] .Int64)
     (indices : DTensor #[k] .Int64) : DTensor #[k] .Int64 :=
-  match Tensor.ofRaw (σ := ⟨#[k], .Int64, .any⟩) (data.indexSelect (n := n) (k := k) t.raw 0 indices.raw) with
-  | .ok tensor => tensor
-  | .error message => panic! s!"indexSelect1d: {message}"
+  Tensor.indexSelect t indices
 
 /-- Build token bytes mapping from a BPE tokenizer.
     For each token:
@@ -116,17 +109,14 @@ def TokenBytes.totalBytesWithMask' (tb : TokenBytes)
 
 /-- Save token bytes mapping to a file -/
 def TokenBytes.save (tb : TokenBytes) (path : String) : IO Unit := do
-  data.saveTensor (s := #[tb.vocabSize.toUInt64]) tb.bytes.raw path
+  Tensor.saveTensor tb.bytes path
 
 /-- Load token bytes mapping from a file.
 
     Unlike the legacy loader, the stored tensor is validated against the
     claimed spec (`[vocabSize]`, Int64) and a mismatch is an IO error. -/
 def TokenBytes.load (path : String) (vocabSize : UInt32) : IO TokenBytes := do
-  let raw ← data.loadTensor #[vocabSize.toUInt64] path
-  let bytes ← match Tensor.ofRaw (σ := ⟨#[vocabSize.toUInt64], .Int64, .any⟩) raw with
-    | .ok tensor => pure tensor
-    | .error message => throw <| IO.userError s!"TokenBytes.load {path}: {message}"
+  let bytes ← Tensor.loadTensorExact {shape := #[vocabSize.toUInt64], dtype := .Int64} path
   return { vocabSize, bytes }
 
 /-- Create a dummy token bytes mapping for testing.

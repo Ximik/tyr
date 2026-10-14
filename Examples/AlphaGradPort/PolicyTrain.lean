@@ -149,18 +149,18 @@ private def extractBiasOrZeros
     (b? : Option (DTensor #[n] .Float32)) :
     IO (Array Float) := do
   match b? with
-  | some b => data.tensorToFloatArray' b.raw
+  | some b => b.toFloatArray
   | none => pure (Array.replicate n.toNat 0.0)
 
 private def buildEvalNet
     {actionDim : UInt64}
     (net : AlphaGradNet actionDim) :
     IO (NetEval actionDim) := do
-  let fc1Weight ← data.tensorToFloatArray' net.fc1.weight.raw
+  let fc1Weight ← net.fc1.weight.toFloatArray
   let fc1Bias ← extractBiasOrZeros net.fc1.bias
-  let policyWeight ← data.tensorToFloatArray' net.policyHead.weight.raw
+  let policyWeight ← net.policyHead.weight.toFloatArray
   let policyBias ← extractBiasOrZeros net.policyHead.bias
-  let valueWeight ← data.tensorToFloatArray' net.valueHead.weight.raw
+  let valueWeight ← net.valueHead.weight.toFloatArray
   let valueBiasArr ← extractBiasOrZeros net.valueHead.bias
   let valueBias := valueBiasArr.getD 0 0.0
   pure {

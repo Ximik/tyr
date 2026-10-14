@@ -65,7 +65,7 @@ def init (hidden_size num_heads num_kv_heads head_dim : UInt64) (dtype : DType :
     `maxLen` is a runtime value (not a type index), so the stores are
     carried existentially over their shape and re-validated against the
     cache metadata by `expectStore` at every decode step — the typed
-    equivalent of the legacy `T #[]` erase-then-reshape dance. -/
+    adapter for rank changes without erasing the tensor specification. -/
 structure KVCache (batch num_kv_heads head_dim : UInt64) (dtype : DType := .Float32) where
   kStoreDyn : Σ (s : Shape), DTensor s dtype
   vStoreDyn : Σ (s : Shape), DTensor s dtype

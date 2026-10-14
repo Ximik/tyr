@@ -132,8 +132,8 @@ structure BOSFinder where
 def BOSFinder.init {n : UInt64} (tokens : DTensor #[n] .Int64) (bosToken : UInt64)
     : IO BOSFinder := do
   let dataLen := n
-  let positionsTensor ← data.findBosPositions (n := n) tokens.raw bosToken.toInt64
-  let positions ← data.tensorToUInt64Array' positionsTensor
+  let ⟨_, positionsTensor⟩ ← Tensor.findTokenPositions tokens bosToken.toInt64
+  let positions ← positionsTensor.toUInt64Array
   -- Preserve a prefix before the first BOS as a document fragment. Rank
   -- partitions may begin inside a document; no tokens are discarded.
   let positions := if positions[0]? == some 0 then positions else #[0] ++ positions
@@ -269,7 +269,7 @@ def parseFinewebHeader? {n : UInt64} (tokens : DTensor #[n] .Int64)
     return none
 
   let hdr6 : DTensor #[6] .Int64 := tokens.sliceChecked 0 0 6 #[6]
-  let vals ← data.tensorToUInt64Array' hdr6.raw
+  let vals ← hdr6.toUInt64Array
   if vals.size < 6 then
     return none
 

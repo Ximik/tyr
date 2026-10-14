@@ -1,5 +1,6 @@
 import Tyr.TensorStruct
 import Tyr.Torch
+import Tyr.Typed.Neural
 import Tyr.Log
 import Lean.Data.Json
 import Lean.Data.Json.FromToJson
@@ -175,7 +176,7 @@ def saveParams [TensorStruct α]
     acc
     let idx ← indexRef.get
     let path := s!"{dir}/{namePrefix}_{idx}.pt"
-    data.saveTensor (s := σ.shape) t.raw path
+    Tensor.saveTensor t path
     indexRef.set (idx + 1)
   ) (pure ()) params
   let finalIdx ← indexRef.get
@@ -203,10 +204,7 @@ def loadParams [TensorStruct α]
   let result ← TensorStruct.mapM (fun {σ} (_expected : Tensor σ) => do
     let idx ← indexRef.get
     let path := s!"{dir}/{namePrefix}_{idx}.pt"
-    let raw ← data.loadTensorExact σ.shape path
-    let t ← match Tensor.ofRaw (σ := σ) raw with
-      | .ok tensor => pure tensor
-      | .error message => throw <| IO.userError s!"Invalid checkpoint tensor {path}: {message}"
+    let t ← Tensor.loadTensorExact σ path
     indexRef.set (idx + 1)
     pure t
   ) template

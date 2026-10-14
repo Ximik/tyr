@@ -330,8 +330,7 @@ def renderConversation
     The runtime shape is the array length; `reshapeChecked` validates the
     result metadata (shape and Int64 dtype) against the static spec. -/
 private def int64TensorFromArray (arr : Array Int64) : DTensor #[arr.size.toUInt64] .Int64 :=
-  Tensor.reshapeChecked (.assumeSpec (data.fromInt64Array arr) : DTensor #[] .Int64)
-    #[arr.size.toUInt64]
+  Tensor.fromInt64Array arr
 
 /-- A batch of tokenized conversations -/
 structure ConversationBatch where

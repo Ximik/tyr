@@ -360,4 +360,14 @@ def backward {σ : StaticSpec} (output cotangent : Tensor σ) : IO Unit :=
 def hasGradFn {σ : StaticSpec} (input : Tensor σ) : Bool :=
   RawTensor.hasGradFn σ.shape input.raw
 
+/-- Find matching token positions, retaining the runtime-dependent vector length. -/
+def findTokenPositions {n : UInt64} {dev : DevicePolicy}
+    (tokens : Tensor ⟨#[n], .Int64, dev⟩) (token : Int64) :
+    IO (Sigma fun count => Tensor ⟨#[count], .Int64, dev⟩) := do
+  let raw ← RawTensor.findTokenPositions n tokens.raw token
+  let count := raw.runtimeShape.getD 0 0
+  match Tensor.ofRaw (σ := ⟨#[count], .Int64, dev⟩) raw with
+  | .ok result => pure ⟨count, result⟩
+  | .error message => throw (IO.userError s!"Tensor.findTokenPositions: {message}")
+
 end torch.Tensor

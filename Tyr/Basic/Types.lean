@@ -5,8 +5,8 @@ The pure part of `Tyr.Basic`: `Shape`, `DType`, `Device`, the native tensor
 carrier `RawTensor`, the indexed `Tensor` over `StaticSpec`, and shape-transform
 utilities. It declares no native functions, so the GPU code generator can use it
 without linking `libTyrC`. `Tyr.Basic` adds the tensor metadata functions
-implemented in `libTyrC`. The legacy shape-erasing `torch.T` alias is isolated
-in `Tyr.Legacy.Tensor` and intentionally absent here.
+implemented in `libTyrC`. Public tensors retain their shape, dtype, and device
+policy in the `Tensor` index.
 -/
 
 namespace torch

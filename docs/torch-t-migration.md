@@ -1078,6 +1078,61 @@ The strict main/GPU-target build passes. All 14 SafeTensors tests and all 15
 `Tests.TestTyped` tests pass, including shape rejection and dtype promotion.
 The core 11-declaration and SafeTensors 4-declaration ABI audits pass.
 
+## Remove legacy tensor data adapters
+
+Checkpoint persistence and token-byte tables use indexed save/exact-load APIs.
+Token-byte loading now checks the stored layout as well as dtype, with regression
+coverage for equal-numel wrong-shape files and Float32 files where Int64 is
+required. Token arrays in pretraining, task collation, and ChatSFT use indexed
+constructors directly; AlphaGrad policy export uses indexed host-array conversion.
+
+`Tensor.findTokenPositions` returns an existentially indexed Int64 vector and
+validates the native result. Its native ABI now uses the correct UInt64 length
+and Int64 bit representation, without an obsolete world argument. Regression
+coverage includes negative token IDs and empty matches. The legacy tensor
+functions in `torch.data` are removed; non-tensor file and audio utilities remain.
+
+## Remove the legacy tensor declaration
+
+`Tyr.Legacy.Tensor` has been deleted. `Tyr.Torch` now retains only runtime/device
+services, non-tensor data utilities, and shape helpers; its legacy tensor
+constructors, arithmetic, transforms, and instances are removed. Generation uses
+the indexed logical-mask operations. The standalone negative typecheck still
+asserts that `torch.T` is unavailable through the typed facade.
+
+The core ABI audit now reads only native adapter modules and excludes the
+obsolete reshape and permissive-load declarations. All nine core and 46 neural
+signatures match generated C. README examples use indexed tensors and current
+TensorStruct/data-loader signatures. The remaining documentation and full
+acceptance gates still need validation after declaration removal.
+
+## Revalidate the complete CPU inventory and core guides
+
+The strict main and both GPU test targets build with the legacy declaration
+absent. Wider CPU-suite rebuilding exposed missing explicit runtime imports in
+two Laguna runners and obsolete neural namespace opens in BranchingFlows training
+modules; those dependencies have been corrected.
+
+The core tensor and typed-specification guides now describe the indexed API,
+checked native boundaries, exact scalar semantics, runtime-dependent shapes,
+autograd, and persistence. All five complete Lean examples in those two guides
+were typechecked against the current modules. Other guides still require the
+same migration review; this is not a documentation-completion claim.
+
+## CPU evidence after declaration removal
+
+All nine required CPU suites build with `--wfail` and pass after removing the
+legacy declaration and migrating the remaining data callers. The main suite
+passes 1,492 tests; the experimental and seven Laguna suites also pass.
+The core nine-declaration and neural 46-declaration ABI audits pass. GPU cases
+within CPU suites are skipped where CUDA is unavailable; this is not hardware
+qualification. Both GPU test executables compile.
+
+The TensorStruct guide now documents specification-preserving leaves and frozen
+participation accurately, and its complete example typechecks. The AD guide's
+structured frontend and tape examples use the indexed API. Documentation outside
+these reviewed guides and full example coverage remain outstanding.
+
 ## Remaining acceptance criteria
 
 Remove the `T` declaration and all model, generator, reflection, documentation,

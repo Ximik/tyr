@@ -19,8 +19,7 @@ It is the lowest-level shared layer used across runtime bindings, model code, an
 
 This module is intentionally kernel-agnostic.
 Typed numerical operations live in `Tyr.Typed.Ops`; native adapters live in
-`Tyr.RawTensor`. Legacy shape-erasing declarations are isolated in
-`Tyr.Legacy.Tensor`.
+`Tyr.RawTensor`. Public numerical APIs use indexed `Tensor` values.
 -/
 
 namespace torch

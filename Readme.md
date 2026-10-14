@@ -4,9 +4,9 @@ A deep learning framework for Lean 4 with a typed tensor facade over LibTorch.
 
 ## Overview
 
-Use `torch.Tensor` for compile-time shape and dtype checks in new model code.
-The raw `torch.T s` interface remains available for existing models and native
-interop; its shape argument is an annotation and does not enforce shape equality.
+Use `torch.Tensor` for shape, dtype, and device-policy indices in model code.
+Native adapters use `RawTensor` handles internally; checked constructors validate
+external metadata before exposing indexed tensors.
 
 ```lean
 import Tyr.Typed
@@ -217,26 +217,22 @@ Generic traversal over structures containing tensors:
 
 ```lean
 class TensorStruct (α : Type) where
-  map     : (∀ {s}, T s → T s) → α → α
-  mapM    : (∀ {s}, T s → m (T s)) → α → m α
-  zipWith : (∀ {s}, T s → T s → T s) → α → α → α
-  fold    : (∀ {s}, T s → β → β) → β → α → β
+  map : (∀ {σ}, Tensor σ → Tensor σ) → α → α
+  mapM {m : Type → Type} [Monad m] : (∀ {σ}, Tensor σ → m (Tensor σ)) → α → m α
+  zipWith : (∀ {σ}, Tensor σ → Tensor σ → Tensor σ) → α → α → α
+  fold {β : Type} : (∀ {σ}, Tensor σ → β → β) → β → α → β
 ```
 
 Use `Vector n α` instead of `Array α` for type-safe `zipWith` operations.
 
 ### Data Loading
 
-Two patterns for different use cases:
+Batch dimensions may come from runtime configuration while remaining in the tensor type:
 
 ```lean
--- Fixed dimensions (raw tensor API):
-let iter := SequentialBatchIterator.new loader 8 256
-let (batch, iter') := iter.next  -- Returns T #[8, 256]
-
--- Dynamic dimensions:
 let iter := BatchIterator.new shard 8 256
-let (batch, iter') ← iter.next   -- Returns T #[] (erased)
+let (batch, iter') ← iter.next
+-- batch : Option (DTensor #[iter.batchSize, iter.seqLen] .Int64)
 ```
 
 ### SafeTensors Type Provider

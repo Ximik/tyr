@@ -26,23 +26,7 @@ inductive SamplingStrategy where
     Tokens are Int64 vocabulary indices. -/
 abbrev StreamCallback (batch : UInt64) := UInt64 → DTensor #[batch] .Int64 → IO Unit
 
-/-! ## Mask adapters
 
-`Tyr.Typed.Ops` has no Bool combinators or `where` wrapper yet; these
-private adapters re-assert the spec over the existing externs (the same
-pattern as the flash-attention adapter in `Tyr/Inference/KVCache.lean`). -/
-
-/-- Boolean OR for Bool masks (De Morgan over the legacy externs). -/
-private def orMask {s : Shape} {dev : DevicePolicy}
-    (a b : Tensor ⟨s, .Bool, dev⟩) : Tensor ⟨s, .Bool, dev⟩ :=
-  Tensor.assumeSpec (torch.logical_not (s := s)
-    (torch.logical_and (s := s)
-      (torch.logical_not (s := s) a.raw) (torch.logical_not (s := s) b.raw)))
-
-/-- `where` with a Bool condition and both branches sharing one spec. -/
-private def whereSelect {s : Shape} {d : DType} {dev : DevicePolicy}
-    (condition : Tensor ⟨s, .Bool, dev⟩) (x y : Tensor ⟨s, d, dev⟩) : Tensor ⟨s, d, dev⟩ :=
-  Tensor.assumeSpec (RawTensor.whereSelect s condition.raw x.raw y.raw)
 
 /-- All-false Bool mask on the same placement as `reference`. -/
 private def falseMaskLike {n : UInt64} {dev : DevicePolicy}
@@ -90,7 +74,7 @@ def tokenInSet {n : UInt64}
     let mut mask := falseMaskLike tokens
     for value in values do
       let hit : DTensor #[n] .Bool := Tensor.eqScalar tokens (Int64.ofNat value.toNat)
-      mask := orMask mask hit
+      mask := Tensor.logicalOr mask hit
     return mask
 
 /-- Replace tokens with `eosToken` wherever `finished` is true. -/
@@ -102,6 +86,6 @@ def applyFinishedEos {n : UInt64}
   let eos : DTensor #[n] .Int64 :=
     Tensor.assumeSpec (RawTensor.toDevice #[n]
       (RawTensor.fullInt #[n] (Int64.ofNat eosToken.toNat)) tokens.raw.device)
-  whereSelect finished eos tokens
+  Tensor.whereSelect finished eos tokens
 
 end torch.Model

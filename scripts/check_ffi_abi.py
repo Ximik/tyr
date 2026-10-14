@@ -39,7 +39,6 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--header", type=Path, default=ROOT / "cc/src/tyr_ffi_abi.h")
     parser.add_argument("--generated", type=Path, nargs="+", default=[
-        ROOT / ".lake/build/ir/Tyr/Torch.c",
         ROOT / ".lake/build/ir/Tyr/RawTensor.c",
         ROOT / ".lake/build/ir/Tyr/RawTensor/Neural.c",
     ])

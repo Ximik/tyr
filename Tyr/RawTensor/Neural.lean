@@ -89,4 +89,7 @@ namespace torch.RawTensor
 @[extern "lean_torch_has_grad_fn"] opaque hasGradFn (shape : Shape)
     (input : @& RawTensor) : Bool
 
+@[extern "lean_torch_find_bos_positions"] opaque findTokenPositions (n : UInt64)
+    (tokens : @& RawTensor) (token : Int64) : IO RawTensor
+
 end torch.RawTensor

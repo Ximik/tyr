@@ -12,7 +12,6 @@ import Tyr.Model.BranchingFlows.MoleculeTrain
 namespace torch.branching
 
 open torch
-open torch.nn
 
 structure MoleculeTransformerParams (vocab heads headDim mlp : UInt64) where
   coordW : STensor #[heads * headDim, 3]

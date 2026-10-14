@@ -15,7 +15,6 @@ import Tyr.Model.BranchingFlows
 namespace torch.branching
 
 open torch
-open torch.nn
 
 structure BranchingTrainConfig where
   maxLen : UInt64

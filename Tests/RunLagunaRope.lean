@@ -9,12 +9,13 @@
     1. YaRN diagnostics: correction range (low, high) == (9, 18); inv_freq matches.
     2. CPU tables match the python reference (max abs diff < 1e-5).
     3. CUDA tables match the python reference (< 1e-5) and the CPU tables bitwise.
-    4. Sliding table layout equivalence with `rotary.computeFreqsOnDevicePure`.
+    4. Sliding table layout equivalence with `Tensor.rotaryFreqs`.
     5. End-to-end `applyRotaryPartial` / `Tensor.applyRotary` vs HF
        `apply_rotary_pos_emb` (partial YaRN, full-width sliding, decode-step).
 -/
 import Tyr.Model.Laguna.Config
 import Tyr.Model.Laguna.Rope
+import Tyr.Torch
 import Tyr.SafeTensors.Load
 
 open torch torch.laguna

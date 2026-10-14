@@ -191,8 +191,7 @@ def maskedCrossEntropy {batch seq vocab : UInt64} {d m : DType} {dev : DevicePol
 /-- Build an Int64 token tensor from host data over the raw FFI boundary.
     `reshapeChecked` validates the result metadata (shape and Int64 dtype). -/
 private def int64TensorFromArray (arr : Array Int64) : DTensor #[arr.size.toUInt64] .Int64 :=
-  Tensor.reshapeChecked (.assumeSpec (data.fromInt64Array arr) : DTensor #[] .Int64)
-    #[arr.size.toUInt64]
+  Tensor.fromInt64Array arr
 
 /-- Prepare SFT batch from tokenized conversations.
     Creates input/target pairs where targets are shifted and masked.

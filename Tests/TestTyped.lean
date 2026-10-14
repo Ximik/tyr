@@ -238,7 +238,7 @@ def testBroadcastOpsParity : IO Unit := do
   let bias := Tensor.full #[3] 2.0
   let y := x.addB bias
   assertValid y "addB bias pattern"
-  let vals ← data.tensorToFloatArray' y.raw
+  let vals ← y.toFloatArray
   LeanTest.assertEqual vals.size 6 "bias add yields 2x3 elements"
   for v in vals do
     LeanTest.assertTrue (v == 3.0) s!"1 + 2 broadcast value, got {v}"
@@ -259,7 +259,7 @@ def testBroadcastOpsParity : IO Unit := do
   -- broadcastability proof is discharged at the call site
   let opSum := x +ᵇ bias
   assertValid opSum "operator +ᵇ broadcasts"
-  let opVals ← data.tensorToFloatArray' opSum.raw
+  let opVals ← opSum.toFloatArray
   for v in opVals do
     LeanTest.assertTrue (v == 3.0) s!"operator broadcast value, got {v}"
   assertValid (x *ᵇ bias) "operator *ᵇ broadcasts"
@@ -284,7 +284,7 @@ def testTypedLayers : IO Unit := do
   let rn := Typed.RMSNorm.init 3
   let y := rn.forward3d x3
   assertValid y "typed RMSNorm forward3d"
-  let vals ← data.tensorToFloatArray' y.raw
+  let vals ← y.toFloatArray
   LeanTest.assertEqual vals.size 30 "rmsnorm preserves numel"
   for v in vals do
     LeanTest.assertTrue ((v - 1.0).abs < 1e-3) s!"rmsnorm(ones) ≈ 1, got {v}"
@@ -343,5 +343,15 @@ def testTypedExplicitCotangentBackward : IO Unit := do
   Tensor.backward output cotangent
   LeanTest.assertEqual (← input.gradOf.toFloatArray) #[16.0, 30.0]
     "Backward must multiply the derivative by the explicit cotangent"
+
+@[test]
+def testTypedTokenPositions : IO Unit := do
+  let tokens := Tensor.fromInt64Array #[-1, 4, -1, 7]
+  let ⟨count, positions⟩ ← Tensor.findTokenPositions tokens (-1)
+  LeanTest.assertEqual count 2
+  LeanTest.assertEqual (← positions.toUInt64Array) #[0, 2]
+  let ⟨count, positions⟩ ← Tensor.findTokenPositions tokens 99
+  LeanTest.assertEqual count 0
+  LeanTest.assertEqual (← positions.toUInt64Array) #[]
 
 end Tests.TestTyped

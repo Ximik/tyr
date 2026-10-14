@@ -4133,16 +4133,15 @@ lean_object* lean_torch_safetensors_load_sharded(
 // Find positions of BOS tokens in a 1D tensor
 // Returns a 1D int64 tensor containing indices where tokens == bos_token
 lean_object* lean_torch_find_bos_positions(
-    lean_obj_arg /*n*/,
+    uint64_t /*n*/,
     b_lean_obj_arg tokens,
-    int64_t bos_token,
-    lean_object* w
+    uint64_t bos_token
 ) {
   try {
     auto tokens_ = borrowTensor(tokens);
 
     // Create mask where tokens == bos_token
-    auto mask = tokens_ == bos_token;
+    auto mask = tokens_ == static_cast<int64_t>(bos_token);
 
     // Get indices where mask is true
     auto positions = torch::nonzero(mask);
