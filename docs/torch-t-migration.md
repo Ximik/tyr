@@ -1163,6 +1163,14 @@ solver algebra and preserving scalar operations; its complete example block,
 including scalar-tensor backsolve adjoints, typechecks. The testing guide links
 to the indexed tensor surface.
 
+## Update the module guide
+
+Layer parameter fields now show their dtype and device-policy indices. The
+manifold-carrier section uses explicit shape proofs and the current ambient
+replacement/projection methods. Policy-network and manifold-update examples
+use indexed arithmetic; both complete examples typecheck, including the explicit
+carrier argument needed for matrix extraction.
+
 ## Remaining acceptance criteria
 
 Remove the `T` declaration and all model, generator, reflection, documentation,
