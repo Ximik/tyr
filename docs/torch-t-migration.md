@@ -1181,6 +1181,14 @@ with `--wfail` as a temporary Lake example module, including native-backed
 The improvements inventory no longer describes the removed carrier or its
 obsolete broadcast/literal limitations.
 
+## Update GPU code-generation boundary documentation
+
+The DSL guide identifies the launcher carrier as `RawTensor`. Its complete
+copy example keeps indexed host tensors, allocates independent output storage
+in IO, and passes raw handles only to the generated launch function. The example
+typechecks against the current vectorized copy launcher. This is compilation
+evidence only; executing the kernel still requires CUDA hardware qualification.
+
 ## Remaining acceptance criteria
 
 Remove the `T` declaration and all model, generator, reflection, documentation,

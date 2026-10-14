@@ -97,7 +97,7 @@ structure KVal (T : Type) where id : VarId; name : String
 Also: `STArray`, `SV`, `STRowVec`/`STColVec` (TMA vector views),
 `SemaphoreArray`, `TT`/`TMEMPool` (Blackwell tensor memory), `KShared`
 (runtime-sized dynamic shared memory), complex pairs `CRT`/`CST`/`CRV`/`CSV`,
-and FFI aliases `Tensor := torch.T #[]`, `CudaStream := UInt64`
+and FFI aliases `Tensor := torch.RawTensor`, `CudaStream := UInt64`
 (`Tyr/GPU/Codegen/TileTypes.lean:209-212`).
 
 ### The builder monad (`Tyr/GPU/Codegen/Monad.lean`)
@@ -363,21 +363,28 @@ lake exe GenerateGpuKernels Tyr.GPU.Kernels.Examples
 ```
 
 Host side — launch through the generated FFI wrapper. The pattern below is
-exactly how `RunCopy` drives `copy64x64.launch`; grid/block/sharedMem/stream
+how `RunCopy` drives `copy64x64Float4.launch`; grid/block/sharedMem/stream
 are the flattened trailing arguments the attribute appends:
 
 ```lean
 import Tyr.Torch
+import Tyr.Typed.Neural
 import Tyr.GPU.Kernels.Copy
 open torch Tyr.GPU.Kernels
 
--- input : T #[1, 1, 64, 64] (CUDA); output := torch.zeros_like input
-let stream ← torch.cuda_current_stream
-copy64x64.launch input output 1 1 1  128 1 1  0 stream
---                            grid    block   smem stream
-let _ ← torch.cuda_synchronize
+def copyTile : IO (DTensor #[1, 1, 64, 64] .Float32) := do
+  let input ← Tensor.uniformLike
+    (Tensor.zeros #[1, 1, 64, 64] false (.CUDA 0))
+  let output ← Tensor.uniformLike input 0 0
+  let stream ← torch.cuda_current_stream
+  copy64x64Float4.launch input.raw output.raw 1 1 1 512 1 1 0 stream
+  --                                          grid  block   smem stream
+  torch.cuda_synchronize
+  pure output
 ```
 
+Only the launch boundary receives raw handles; host values retain their indexed
+types. This example requires compatible CUDA hardware and a compiled kernel.
 Scratch/output buffers must be allocated through `IO` (as above); kernels
 mutate the tensors you pass in, and pure-looking `let` bindings can alias
 through CSE — see the caveat in `Tyr/GPU/Ops/RKFused.lean`.
