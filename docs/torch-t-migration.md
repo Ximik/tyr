@@ -1189,6 +1189,14 @@ in IO, and passes raw handles only to the generated launch function. The example
 typechecks against the current vectorized copy launcher. This is compilation
 evidence only; executing the kernel still requires CUDA hardware qualification.
 
+## Update audio and speech model signatures
+
+The audio/speech model guide now matches the indexed speaker-encoder, ASR, and
+Whisper declarations, including the ASR text model's dynamic dtype argument.
+It explains the partial claims of `STensor`, uses the indexed WAV append adapter,
+and points to checked SafeTensors loading. These signatures were compared with
+their implementation declarations; checkpoint-backed inference was not rerun.
+
 ## Remaining acceptance criteria
 
 Remove the `T` declaration and all model, generator, reflection, documentation,

@@ -12,6 +12,10 @@ pretrained safetensors checkpoints, not training code.
 
 All five families follow the same idiom as the rest of `Tyr/Model`:
 
+The `STensor shape` fields shown below preserve their shape index while leaving
+dtype and placement dynamic. They do not assert Float32 or a particular device;
+checked loading and model adapters validate the metadata they require.
+
 - A plain **config structure** (e.g. `WhisperConfig`, `Qwen3ASRConfig`) with field
   defaults, parsed from a checkpoint's `config.json` via
   `<Config>.loadFromPretrainedDir modelDir`.
@@ -20,7 +24,7 @@ All five families follow the same idiom as the rest of `Tyr/Model`:
   device-mapped (`TensorStruct.map (fun t => t.to device)`) and frozen generically.
   See [TensorStruct](../core/tensorstruct.md).
 - Weights loaded from safetensors with shape-checked names, sharded variants for
-  multi-file checkpoints (`safetensors.loadTensorSharded`); see
+  multi-file checkpoints through the checked `Tyr.SafeTensors` loaders; see
   [Serialization](../serialization.md).
 - A **pretrained resolution** step that accepts either a local directory or a
   HuggingFace repo id and downloads/caches through `Tyr.Hub`.
@@ -80,7 +84,7 @@ structure Qwen3TTSForConditionalGeneration (cfg : Qwen3TTSConfig) where
   codebooks 1..N from codebook-0 context. Both reuse the Qwen LLM layer — `TalkerLayer
   cfg` is an abbrev for `qwen.QwenLayer` (Talker.lean:26).
 - **Speaker encoder** (`SpeakerEncoder.lean`): ECAPA-TDNN producing
-  `T #[batch, cfg.speakerEncoderConfig.encDim]` embeddings from mel features; only
+  `STensor #[batch, cfg.speakerEncoderConfig.encDim]` embeddings from mel features; only
   present for `ttsModelType == "base"`. Used for voice cloning via
   `VoiceClonePromptItem` (Model.lean:17).
 - **Speech tokenizer decoder** (`SpeechTokenizer.lean:263`): `SpeechTokenizer12HzDecoder`
@@ -106,10 +110,10 @@ alignment. Import `Tyr.Model.Qwen3ASR`.
 ```lean
 structure Qwen3ASRThinkerForConditionalGeneration (cfg : ThinkerConfig) where
   audioTower : AudioEncoder cfg.audioConfig
-  textModel : qwen.Qwen3Model (TextQwenConfig cfg)
-  audioProjectionWeight : T #[cfg.textConfig.hiddenSize, cfg.audioConfig.outputDim]
-  audioProjectionBias : T #[cfg.textConfig.hiddenSize]
-  lmHead : T #[ThinkerLmVocabSize cfg, cfg.textConfig.hiddenSize]
+  textModel : qwen.Qwen3Model (TextQwenConfig cfg) (.Unknown "dynamic")
+  audioProjectionWeight : STensor #[cfg.textConfig.hiddenSize, cfg.audioConfig.outputDim]
+  audioProjectionBias : STensor #[cfg.textConfig.hiddenSize]
+  lmHead : STensor #[ThinkerLmVocabSize cfg, cfg.textConfig.hiddenSize]
   deriving TensorStruct
 
 structure Qwen3ASRForConditionalGeneration (cfg : Qwen3ASRConfig) where
@@ -218,7 +222,7 @@ HF Whisper fields (`numMelBins`, `dModel`, `encoderLayers`, `decoderLayers`,
 ```lean
 structure WhisperForConditionalGeneration (cfg : WhisperConfig) where
   model : WhisperModel cfg      -- encoder + decoder stacks
-  projOut : T #[cfg.vocabSize, cfg.dModel]
+  projOut : STensor #[cfg.vocabSize, cfg.dModel]
   deriving TensorStruct
 ```
 
@@ -324,7 +328,7 @@ dec.decodeFrameMajorChunkedToWav codes16 "out.wav"
 
 -- or true streaming: audio chunks appended to the WAV as frames are generated
 let out ← model.streamFromTalkerInputs talkerInputs streamOpts (some dec)
-  { onAudioChunk := fun chunk => data.wavAppend chunk "out.wav" }
+  { onAudioChunk := fun chunk => Tensor.wavAppend chunk "out.wav" }
 ```
 
 Reconstructed example (from `Examples/Qwen3ASR/Transcribe.lean`):
@@ -389,7 +393,7 @@ combine these models with the `Tyr/Audio` capture layer — see
 ## Related guides
 
 - [Getting started](../getting-started.md) — build and run the examples
-- [Tensors](../core/tensors.md) — the shape-typed `T s` used throughout these models
+- [Tensors](../core/tensors.md) — the indexed `Tensor σ` used throughout these models
 - [TensorStruct](../core/tensorstruct.md) — generic device mapping of whole models
 - [Serialization](../serialization.md) — safetensors loading and the type provider
 - [LLM models](llms.md) — the Qwen layers reused by Qwen3TTS and Qwen3ASR
