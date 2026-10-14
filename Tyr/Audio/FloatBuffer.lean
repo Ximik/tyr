@@ -7,12 +7,13 @@
 -/
 
 /-- Contiguous unboxed buffer of Float64 values, backed by native `double*`.
-    All mutation is gated behind `IO` to ensure linear use. -/
+    Mutating operations are exposed through `IO`. -/
 opaque FloatBuffer : Type := Unit
 
 namespace FloatBuffer
 
-/-- Create an empty buffer with the given initial capacity (in elements). -/
+/-- Create an empty buffer with the given initial capacity (in elements).
+    Unaddressable capacities and allocation failures return an IO error. -/
 @[extern "lean_float_buffer_mk_empty"]
 opaque mkEmpty (capacity : @& Nat) : IO FloatBuffer
 
@@ -20,7 +21,8 @@ opaque mkEmpty (capacity : @& Nat) : IO FloatBuffer
 @[extern "lean_float_buffer_size"]
 opaque size (buf : @& FloatBuffer) : Nat
 
-/-- Read the element at index `i`. Unchecked — caller must ensure `i < size`. -/
+/-- Read the element at index `i`. The caller must ensure `i < size`;
+    an invalid index is a fatal bounds error. -/
 @[extern "lean_float_buffer_get"]
 opaque uget (buf : @& FloatBuffer) (i : @& Nat) : Float
 
@@ -44,7 +46,8 @@ opaque appendArray (buf : FloatBuffer) (arr : @& Array Float) : IO FloatBuffer
 @[extern "lean_float_buffer_clear"]
 opaque clear (buf : FloatBuffer) : IO FloatBuffer
 
-/-- Keep only the last `n` samples, dropping earlier ones (memmove). -/
+/-- Keep only the last `n` samples, dropping earlier ones (memmove).
+    If `n ≥ size`, including arbitrarily large `Nat` values, keep all samples. -/
 @[extern "lean_float_buffer_keep_last"]
 opaque keepLast (buf : FloatBuffer) (n : @& Nat) : IO FloatBuffer
 

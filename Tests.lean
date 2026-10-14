@@ -162,3 +162,4 @@ import Tests.TestFLM
 import Tests.TestTypedNeural
 
 import Tests.TestTTSTypedLoading
+import Tests.TestFloatBuffer

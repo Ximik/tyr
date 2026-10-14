@@ -4,7 +4,9 @@
 Run after building the relevant native adapters. The native compiler independently checks
 the other side of this contract because tyr.cpp includes tyr_ffi_abi.h.
 This intentionally checks the named, audited boundaries in that header; it
-does not claim that the remaining legacy FFI surface has been audited.
+does not claim that the remaining legacy FFI surface has been audited. Use
+--require-complete for an adapter whose recognized declarations must all appear
+in the audited header.
 """
 
 import argparse
@@ -16,7 +18,7 @@ import sys
 ROOT = Path(__file__).resolve().parent.parent
 DECLARATION = re.compile(
     r"\b(lean_object\s*\*|uint(?:8|16|32|64)_t|size_t|double|float|void)"
-    r"\s+(lean_torch_\w+)\s*\(([^()]*)\)\s*;"
+    r"\s+(lean_(?:torch|float_buffer)_\w+)\s*\(([^()]*)\)\s*;"
 )
 
 
@@ -39,9 +41,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--header", type=Path, default=ROOT / "cc/src/tyr_ffi_abi.h")
     parser.add_argument("--generated", type=Path, nargs="+", default=[
+        ROOT / ".lake/build/ir/Tyr/Basic.c",
         ROOT / ".lake/build/ir/Tyr/RawTensor.c",
         ROOT / ".lake/build/ir/Tyr/RawTensor/Neural.c",
     ])
+    parser.add_argument("--require-complete", action="store_true",
+                        help="reject generated declarations missing from the audited header")
     args = parser.parse_args()
     try:
         expected = declarations(args.header)
@@ -64,6 +69,9 @@ def main() -> int:
             errors.append(f"{name}: missing generated declaration; rebuild the native adapter")
         elif actual != signature:
             errors.append(f"{name}: header {signature}, Lean {actual}")
+    if args.require_complete:
+        for name in sorted(generated.keys() - expected.keys()):
+            errors.append(f"{name}: generated declaration is not covered by the audited header")
     if errors:
         print("FFI ABI check failed:\n" + "\n".join(errors), file=sys.stderr)
         return 1
