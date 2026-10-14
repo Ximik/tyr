@@ -67,6 +67,7 @@ jobs:
       - name: Build required test runners
         run: |
           python3 scripts/test_inventory.py --build --wfail
+          lake build --wfail RunDistributedValues
 
       - name: Verify audited FFI ABI declarations
         run: |
@@ -103,6 +104,7 @@ jobs:
       - name: Check recoverable native tensor errors
         run: |
           bash scripts/test_native_tensor_errors.sh
+          bash scripts/test_functional_grad_callback.sh
 
       - name: Build examples and FFI probe
         run: |
@@ -139,6 +141,9 @@ jobs:
           lake env python3 scripts/test_branching_checkpoint_resume.py
           lake env ./.lake/build/bin/mctx_bench
 
+      - name: Test two-rank Gloo collective values
+        run: lake env python3 scripts/test_distributed_values.py --log-dir output/ci/distributed
+
       - name: Upload CPU test diagnostics
         if: always()
         uses: actions/upload-artifact@v4
@@ -168,6 +173,7 @@ jobs:
         run: |
           python3 scripts/test_inventory.py
           python3 scripts/test_test_inventory.py
+          python3 scripts/test_distributed_values_runner.py
           python3 .github/scripts/test_cache_key.py
           python3 .github/scripts/test_readiness.py
           python3 scripts/qualification/test_qualification.py
