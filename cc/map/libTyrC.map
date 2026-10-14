@@ -1,13 +1,17 @@
-/* Symbols libTyrC.so exports (Linux linker version script; macOS uses
-   libTyrC.exports). Everything else stays private, so libTyrC's copies of
-   C++ template code (std::, torch::, arrow::) and of soxr never stand in for
-   another library's.
+/* Symbols libTyrC.so exports. Everything else stays private, so libTyrC's
+   copies of C++ template code (std::, torch::, arrow::) and of soxr never
+   stand in for another library's.
 
-   lean_*      the functions Lean calls, including the GPU kernel launchers
-   tyr_ops::*  the C++ dispatch API used by cc/tools/bench_flash_attn.cpp */
+   lean_<prefix>_*  the functions Lean calls, including the GPU kernel launchers
+   tyr_ops::*       the C++ dispatch API used by cc/tools/bench_flash_attn.cpp */
 {
   global:
-    lean_*;
+    lean_torch_*;
+    lean_launch_*;
+    lean_tyr_*;
+    lean_float_buffer_*;
+    lean_parquet_*;
+    lean_exec_*;
     extern "C++" { tyr_ops::*; };
   local: *;
 };

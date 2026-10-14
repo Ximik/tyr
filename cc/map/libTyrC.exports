@@ -1,3 +1,10 @@
-# Symbols libTyrC.dylib exports on macOS; see libTyrC.map for why.
-_lean_*
+# Symbols libTyrC.dylib exports. Only Tyr's own prefixes: with
+# `-undefined dynamic_lookup` a bare _lean_* would also match the Lean runtime
+# functions libTyrC calls, which ld turns into re-exports that dyld rejects.
+_lean_torch_*
+_lean_launch_*
+_lean_tyr_*
+_lean_float_buffer_*
+_lean_parquet_*
+_lean_exec_*
 __ZN7tyr_ops*

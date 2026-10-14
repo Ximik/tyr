@@ -40,7 +40,7 @@ class NativeBuildTests(unittest.TestCase):
         self.header = self.cc / "include/nested/config.h"
         self.header.write_text("#define VALUE 3\n")
         (self.cc / "src/probe.cpp").write_text(
-            '#include "nested/config.h"\nextern "C" int lean_probe() { return VALUE; }\n')
+            '#include "nested/config.h"\nextern "C" int lean_tyr_probe() { return VALUE; }\n')
         self.obj = self.cc / "build/probe.o"
         extension = "dylib" if sys.platform == "darwin" else "so"
         self.library = self.cc / f"build/libTyrC.{extension}"
@@ -62,7 +62,7 @@ class NativeBuildTests(unittest.TestCase):
 
     def probe(self, library=None):
         (self.root / "main.cpp").write_text(
-            '#include <cstdio>\nextern "C" int lean_probe();\nint main() { std::printf("%d", lean_probe()); }\n')
+            '#include <cstdio>\nextern "C" int lean_tyr_probe();\nint main() { std::printf("%d", lean_tyr_probe()); }\n')
         subprocess.run(["c++", str(self.root / "main.cpp"), str(library or self.library),
                         "-o", str(self.root / "probe")], check=True, capture_output=True)
         return subprocess.check_output([str(self.root / "probe")], cwd=self.cc, text=True)
@@ -70,7 +70,7 @@ class NativeBuildTests(unittest.TestCase):
     def test_shared_library_tracks_its_dependency_archive(self):
         (self.cc / "src/probe.cpp").write_text(
             'extern "C" int fixture_dependency();\n'
-            'extern "C" int lean_probe() { return fixture_dependency(); }\n')
+            'extern "C" int lean_tyr_probe() { return fixture_dependency(); }\n')
         dependency_source = self.cc / "src/dependency.cpp"
         dependency_source.write_text('extern "C" int fixture_dependency() { return 3; }\n')
         dependency_archive = self.cc / "build/dependency/libfixture.a"
@@ -133,7 +133,7 @@ class NativeBuildTests(unittest.TestCase):
         time.sleep(1.05)
         self.header.rename(self.header.with_name("renamed.h"))
         (self.cc / "src/probe.cpp").write_text(
-            '#include "nested/renamed.h"\nextern "C" int lean_probe() { return VALUE; }\n')
+            '#include "nested/renamed.h"\nextern "C" int lean_tyr_probe() { return VALUE; }\n')
         self.make(GPU="GB10")
         incremental = self.probe()
         shutil.rmtree(self.cc / "build")
