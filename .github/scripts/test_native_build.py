@@ -13,7 +13,7 @@ import time
 import unittest
 
 
-REPO = Path(__file__).resolve().parents[1]
+REPO = Path(__file__).resolve().parents[2]
 
 
 class NativeBuildTests(unittest.TestCase):

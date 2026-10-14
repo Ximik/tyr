@@ -83,7 +83,6 @@ jobs:
           lake env lean Examples/BranchingFlows/BranchingFlowsDemo.lean
 
       - name: Check FFI crash reporting
-        if: runner.os == 'Linux'
         run: .github/scripts/check_ffi_crash_probe.sh
 
       - name: Check no library replaces another library's code
@@ -147,6 +146,6 @@ jobs:
           python3 scripts/qualification/test_qualification.py
           python3 scripts/test_qwen3tts_asr_wrapper.py
           "$RUNNER_TEMP/qualification-tests/bin/python" scripts/test_qwen3tts_parity_wrapper.py
-          python3 scripts/test_native_build.py
+          python3 .github/scripts/test_native_build.py
           python3 scripts/test_branching_checkpoint_snapshot.py
           bash scripts/nanochat/test_checkpoint_paths.sh
