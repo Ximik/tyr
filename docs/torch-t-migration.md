@@ -1133,6 +1133,19 @@ participation accurately, and its complete example typechecks. The AD guide's
 structured frontend and tape examples use the indexed API. Documentation outside
 these reviewed guides and full example coverage remain outstanding.
 
+## Complete example-module typechecking
+
+All 108 Lean modules under `Examples/` build with `--wfail` after carrier removal.
+The strict run found an unused pair of local sample-count calculations in
+`Qwen3ASR.LiveMic`; removing them leaves runtime behavior unchanged. This covers
+example modules outside the test import graphs, including checkpoint-backed and
+GPU runners. It does not execute those runners or qualify GPU hardware.
+
+The serialization guide now documents indexed default generated loaders,
+checked raw SafeTensors boundaries, and single-tensor export. The FFI guide uses
+`RawTensor` only for the native carrier and indexed tensors for its public
+example. Their complete updated examples both typecheck.
+
 ## Remaining acceptance criteria
 
 Remove the `T` declaration and all model, generator, reflection, documentation,

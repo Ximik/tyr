@@ -15,8 +15,8 @@ boundary itself.
 
 ### The tensor contract
 
-On the Lean side a tensor is opaque and shape-indexed (`Tyr/Basic.lean:23`,
-`Tyr/Basic.lean:101-108`):
+The native carrier is opaque. Public tensors wrap it with a specification
+(`Tyr.Basic.Types`):
 
 ```lean
 abbrev Shape := Array UInt64
@@ -27,10 +27,10 @@ inductive Device where
   | MPS
 
 opaque TSpec : NonemptyType
-def T (_ : Shape) : Type := TSpec.type
+def RawTensor : Type := TSpec.type
 ```
 
-At runtime, `T s` is a Lean external object whose payload is a raw
+At runtime, `RawTensor` is a Lean external object whose payload is a raw
 `c10::TensorImpl*`. The external class is registered with a finalizer that
 decrements the intrusive pointer (`cc/src/tyr.cpp:149-161`). Three functions
 govern ownership across the boundary — declared in the 15-line header
@@ -95,8 +95,8 @@ this failure mode (own `ffi_crash_probe` exe, not part of the test suite).
 
 | File | Exports | Bound from |
 |---|---|---|
-| `tyr.cpp` (5236 lines) | ~235 `lean_torch_*` entry points: creation, elementwise, reductions, shape ops, linalg, norms, autograd, safetensors, sampling, soxr resampling | mostly `Tyr/Torch.lean` (245 `@[extern]`) |
-| `tyr_ops.cpp` | flash-attention router `tyr_ops::flash_attn_dispatch` + `lean_torch_tyr_flash_attn_4d` | `Tyr/Torch.lean:1197` |
+| `tyr.cpp` (5236 lines) | ~235 `lean_torch_*` entry points: creation, elementwise, reductions, shape ops, linalg, norms, autograd, safetensors, sampling, soxr resampling | `Tyr.RawTensor` and its adapter submodules |
+| `tyr_ops.cpp` | flash-attention router `tyr_ops::flash_attn_dispatch` + `lean_torch_tyr_flash_attn_4d` | `Tyr.RawTensor.Neural` |
 | `tyr_distributed.cpp` | 15 `lean_torch_dist_*` c10d wrappers (TCPStore, NCCL/Gloo, async work handles) | `Tyr/Distributed.lean` |
 | `tyr_polar.cpp` | `lean_torch_xxt`, `ba_plus_cAA`, `newton_schulz_step`, `polar_express`, `muon_orthogonalize`, `cautious_update` | manifold/optimizer modules |
 | `tyr_parquet.cpp` | 6 `lean_parquet_*` Arrow/Parquet readers, `__has_include`-gated | `Tyr/Data/Pretraining.lean:48-73` |
@@ -282,14 +282,14 @@ C++ side, what you touch when adding a binding (`cc/src/tyr.cpp`):
 | `mkIoUserError` / `mkC10IoError` :234-244 | wrap errors as `IO.Error` results |
 | `lean_torch_get_live_tensors` :307 | leak gauge, bound as `torch.get_live_tensors` |
 
-Lean side (`Tyr/Torch.lean:1060-1065`):
+Lean side (`Tyr.Torch`):
 
 ```lean
 @[extern "lean_torch_get_live_tensors"]
 opaque get_live_tensors : IO UInt64
 
 @[extern "lean_torch_manual_seed"]
-opaque manual_seed (seed : UInt64) : IO Unit
+opaque manualSeed (seed : UInt64) : IO Unit
 ```
 
 Makefile targets: `all` (default) and `dylib` (both build `libTyrC`),
@@ -301,37 +301,30 @@ missing.
 
 ## Usage example
 
-Reconstructed example (from `Tests/FfiCrashProbe.lean`, `Tyr/Torch.lean:44-51,
-984-989`, `Tyr/Distributed.lean:61-119`):
+This example uses indexed operations; native handles remain inside the adapters.
+The checkpoint function checks stored shape and dtype before returning.
 
 ```lean
 import Tyr.Torch
-import Tyr.Distributed
-
+import Tyr.Typed.Neural
+import Tyr.SafeTensors.Schema
 open torch
 
-def main : IO Unit := do
-  -- Pure ops on the Lean side; shapes are compile-time checked.
-  let x : T #[2, 2] := torch.ones #[2, 2]
-  let y := torch.add x x                -- → lean_torch_tensor_add
-  let z ← torch.randn #[2, 2]           -- IO: randomness
-
-  -- Device transfer; on a CUDA-less machine this aborts via the
-  -- terminate handler with a trimmed c10::Error message.
-  let zg := z.to (.CUDA 0)
-
-  -- Leak gauge: count of tensors currently handed to Lean.
+def nativeExample : IO Unit := do
+  let x : DTensor #[2, 2] .Float32 := Tensor.ones #[2, 2]
+  let y := Tensor.add x x
+  let z ← Tensor.randn #[2, 2]
+  IO.println s!"values: {← y.toFloatArray}, random shape: {z.runtimeShape}"
   IO.println s!"live tensors: {← torch.get_live_tensors}"
 
-  -- Safetensors handle (external-class object with a per-file cache).
-  let h ← safetensors.openHandle "model.safetensors"
-  let w ← safetensors.loadFromHandle h "layer.weight" #[768, 768]
-
-  -- Distributed, launched via torchrun (see scripts/nanochat/).
-  torch.dist.initProcessGroup "nccl" "127.0.0.1" 29500 rank worldSize
-  torch.dist.allReduce y .sum
-  torch.dist.destroyProcessGroup
+def loadCheckedWeight (path : String) : IO (DTensor #[768, 768] .Float32) := do
+  let handle ← safetensors.openHandle path
+  safetensors.loadFromHandleWithSpec handle "layer.weight" ⟨#[768, 768], .Float32⟩
 ```
+
+`Tests.FfiCrashProbe` is a separate intentional device-error probe. It is not a
+normal unit test. Distributed examples require their own process-group setup;
+see [distributed training](distributed.md).
 
 Build and run through Lake:
 
@@ -347,7 +340,7 @@ lake exe ffi_crash_probe
 ## Related guides
 
 - [Getting started](getting-started.md) — the day-one build path this chapter explains
-- [Core tensors](core/tensors.md) — the `T s` API surface the FFI implements
+- [Core tensors](core/tensors.md) — the indexed tensor API and native adapter boundary
 - [Autodiff](autodiff.md) — gradient bindings (`lean_torch_backward` and friends)
 - [Serialization](serialization.md) — safetensors handles and sharded loading
 - [Distributed training](distributed.md) — the `torch.dist` collectives over c10d

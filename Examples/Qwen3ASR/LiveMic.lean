@@ -289,9 +289,7 @@ def runMain (argv : List String) : IO UInt32 := do
   let pre ← PreprocessorConfig.loadFromPretrainedDir modelDir
   let model ← Qwen3ASRForConditionalGeneration.loadSharded modelDir cfg
 
-  let chunkSamples := toSamples args.chunkSec
   let hopSamples := toSamples args.hopSec
-  let ringCapSamples := chunkSamples + hopSamples
   let silenceSamples := toSamples args.silenceSec
   let minSpeechSamples := toSamples args.minSpeechSec
   let ratioSteps := Nat.max 1 (((args.chunkSec / args.hopSec) + 0.5).toUInt64.toNat)
