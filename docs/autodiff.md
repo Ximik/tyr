@@ -348,8 +348,10 @@ Day-to-day training uses libtorch's tape through the FFI. The idiom is
 (usually `let gradients ← TensorStruct.grads params`). Gradient reads return
 independent snapshots; `TensorStruct.zeroGrads params` clears accumulated
 gradients in IO without changing those snapshots. Leaf parameters are prepared
-with `Tensor.setRequiresGrad (Tensor.detach t) true`; distinct native allocations
-require an effectful allocation boundary. Evaluation uses `autograd.no_grad`.
+with `let parameter ← Tensor.parameter t` or `let params ← TensorStruct.makeLeafParams tree`.
+These effectful calls create independent gradient identities. Backward retains the graph
+so surviving pure forward values can be reused. Evaluation explicitly detaches models
+and floating inputs; ambient `no_grad` scopes are no longer exposed.
 See [core/tensors.md](core/tensors.md), [core/tensorstruct.md](core/tensorstruct.md),
 and [optimization.md](optimization.md).
 

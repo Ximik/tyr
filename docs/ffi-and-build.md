@@ -15,8 +15,8 @@ boundary itself.
 
 ### The tensor contract
 
-The native carrier is opaque. Public tensors wrap it with a specification
-(`Tyr.Basic.Types`):
+The native carrier is opaque. Public tensors index it with a specification
+(`Tyr.Basic.Types` and `Tyr.Basic`):
 
 ```lean
 abbrev Shape := Array UInt64
@@ -29,6 +29,23 @@ inductive Device where
 opaque TSpec : NonemptyType
 def RawTensor : Type := TSpec.type
 ```
+
+`Tensor σ` uses a private opaque carrier indexed by `StaticSpec`. It has no
+public constructor or structural recursor, and different indices are not
+definitionally interchangeable. `Tensor.raw` exposes the unindexed handle;
+`Tensor.ofRaw` admits it only after checking native shape, dtype, and device
+policy. The reserved dtype `Unknown "dynamic"` and device policy `.any` weaken
+their respective claims; an arbitrary unknown dtype token does not bypass the
+check. `zerosFor` accepts only a specification and supplies the native zero
+factory used by `Inhabited`.
+
+Runtime representation casts are private **unsafe** implementations behind
+opaque public declarations. Their safety does not depend on name privacy:
+safe Lean code cannot use them even if it discovers their private names.
+`Tests/TestTensorConstruction.lean` checks attempted construction, record
+updates, index conversion, tactic-based construction, and private implementation
+access, alongside checked native admission. These are runtime metadata checks,
+not kernel proofs about LibTorch's implementation.
 
 At runtime, `RawTensor` is a Lean external object whose payload is a raw
 `c10::TensorImpl*`. The external class is registered with a finalizer that
@@ -111,9 +128,36 @@ keeping the original tensor as a fallback.
 
 Gradient accumulation remains explicit mutable state: backward, clipping, and
 `zeroGrad` are IO operations, and `gradOf` returns an independent snapshot in IO.
-These changes do not make a pure parameter factory a source of fresh autograd
-identity. Callers requiring distinct allocations must use an effectful allocation
-boundary.
+`setRequiresGrad` is also effectful. Pure constant factories create tensors
+without gradient identity; use `Tensor.parameter` or
+`TensorStruct.makeLeafParams` to create independent trainable leaves. Repeating
+an equal pure allocation may share its result, so pure factories do not promise
+fresh storage. `data.cloneInferenceIO` supplies an independent detached copy
+when storage freshness is required.
+
+Pure forward computations may also be shared. The public backward operations
+retain their graph so evaluating backward does not invalidate a surviving
+forward value. Graph storage remains alive while that value is reachable;
+release unused outputs and use detached inputs for inference to avoid retaining
+unneeded graphs. `Tests/TestAutogradIdentity.lean` covers independent parameter
+initialization and repeated backward on the same forward value.
+
+Inference uses explicit values, without a thread-local gradient-mode scope:
+
+```lean
+let inferenceModel := TensorStruct.detach model
+let inferenceInput := Tensor.detach input
+let output := forward inferenceModel inferenceInput
+```
+
+Detach every floating input that can carry gradients, including cached
+activations and auxiliary embeddings. Detaching only the output still constructs
+the forward graph. Generic callbacks must receive detached model parameters
+explicitly; a wrapper cannot detach parameters hidden in a closure. The former
+public `no_grad` / `noGrad` scopes and ambient mode setters are removed because
+Lean may move or share pure expressions across IO actions. Native guards remain
+local to specific operations such as gradient snapshots and cache copies, where
+the operation's semantics explicitly require detached results.
 
 `scripts/test_native_tensor_values.sh` checks actual exported operations against
 Lean aliases, native aliases, storage views, weak observers, and saved autograd
@@ -126,20 +170,19 @@ which returned-value updates do not promise. A future graph implementation needs
 an explicit mutable-buffer API. GPU benchmark kernels still require separate
 hardware qualification.
 
-### Open boundary work
-
-This WIP does not close every finding from the RawTensor audit. `Tensor` is still
-a structure with a private constructor; Lean's constructor tactics can bypass
-that visibility and manufacture an unchecked index. An opaque representation is
-still needed for a hard construction boundary. The checked entry points validate
-native metadata, but constructor privacy alone does not enforce their use.
-
-The FlashAttention raw entry point also still returns an IO error object on
-failure despite declaring a raw tensor result. Its error carrier needs a separate
-API migration. Together with the uncaught native failures below and pure
-autograd-identity limitations above, these remain open review items.
-
 ### Error strategy
+
+Native result carriers must match the Lean declaration on every path.
+`RawTensor.flashAttention` and `RawTensor.transpose` return
+`Except String RawTensor`; their typed `Tensor.flashAttention?` and
+`Tensor.transpose?` adapters preserve recoverable failures and check successful
+results. The convenience variants use Lean's panic fallback on errors.
+`Tensor.randint` reports invalid bounds and device failures through `IO.Error`.
+The native `randn`/`rand` factories and dropout also catch failures at their IO boundary;
+those random factories enable requested gradients after device transfer so their
+results remain leaf parameters.
+`scripts/test_native_tensor_errors.sh` exercises success and failure carriers,
+including borrowed-reference preservation and cleanup on invalid input.
 
 Many pure ops are unguarded. Type indices do not validate native execution;
 typed adapters check metadata at selected boundaries. A global
@@ -147,13 +190,25 @@ typed adapters check metadata at selected boundaries. A global
 prints the pending `c10::Error`'s user-facing text and aborts, instead of
 dumping libtorch's backtrace. Set `TYR_VERBOSE_ERRORS=1` for the full report.
 IO entry points such as safetensors, parquet, and process groups catch and
-return `lean_io_result_mk_error` values instead. This is not yet uniform:
-random factories and dropout still have uncaught native failure paths. Two sites carry workarounds
+return `lean_io_result_mk_error` values instead. A native exception must be
+caught before crossing a generated Lean call frame: Lean's reference-count
+cleanup does not run during C++ stack unwinding. Two sites carry workarounds
 for a libc++abi/libstdc++ exception-ABI mismatch (Lean's toolchain vs.
 libtorch's): `lean_torch_manual_seed` seeds only the CPU generator, and CUDA
 synchronization calls `cudaDeviceSynchronize` via cudart directly
 (`cc/src/tyr.cpp:311-352`). `Tests/FfiCrashProbe.lean` is a manual probe for
 this failure mode (own `ffi_crash_probe` exe, not part of the test suite).
+
+`TensorStruct.functionalGrad` invokes a pure Lean callback with temporary
+autograd leaves and returns detached derivatives. Setup and gradient-engine
+failures return the raw API's `Except.error`; the typed convenience API uses a
+panic fallback. The callback must return normally. A native exception from an
+unguarded pure operation inside a compiled callback terminates with an explicit
+diagnostic, because returning after unwinding generated Lean frames would leave
+their owned references unreleased. Interpreter callback exceptions are also
+unrecoverable. This API does not make arbitrary pure native failures recoverable.
+`scripts/test_functional_grad_callback.sh` checks normal derivatives, recoverable
+setup/result errors without leaks, and fatal callback errors in separate processes.
 
 ### Translation units in `cc/src`
 
@@ -231,7 +286,8 @@ not compile LibTorch or CUDA and does not modify workspace build artifacts.
 
 The Makefile takes every native dependency from `external/` — libtorch
 (`external/wheels/torch`), soxr (built from the `external/git/soxr` checkout without
-cmake), Arrow/Parquet (`external/wheels/pyarrow`, linked by the file names the
+cmake), Gloo headers (`external/git/gloo`, pinned to the wheel's matching
+PyTorch submodule revision), Arrow/Parquet (`external/wheels/pyarrow`, linked by the file names the
 wheel provides, e.g. `libarrow.so.2500`), and the CUDA runtime and NCCL (`external/wheels/nvidia`, CUDA
 variant only); `deps/fetch.sh` populates them. It probes only Lean
 (`lean --print-prefix`) and the CUDA toolkit (`nvcc`). GPU targets are a table

@@ -98,8 +98,8 @@ value against its current native metadata.
 `TensorRole`. The role does not itself enforce a runtime invariant.
 
 There is no public unchecked raw constructor or implicit coercion to
-`RawTensor`. The private constructor also prevents anonymous construction and
-record updates from replacing a checked handle. Native adapters use explicit
+`RawTensor`. The opaque carrier prevents anonymous construction, structural
+elimination, and record updates from replacing a checked handle. Native adapters use explicit
 `.raw` access and validate returned handles. `checkedReplacement?` additionally
 checks that actual dtype and device are unchanged, including for partial specs.
 The native `zerosFor` factory bootstraps pure defaults from a requested spec;
@@ -194,9 +194,12 @@ the same declared structure type. It validates each converted leaf against its
 original specification, allowing dynamic dtype leaves to change and reporting
 an error for a conflicting concrete dtype.
 
-The indexed autograd API includes `setRequiresGrad`, `detach`, `grad`, `gradOf`,
+The indexed autograd API includes effectful `parameter` and `setRequiresGrad`,
+pure `detach` and `grad`, plus `gradOf`,
 `backwardLoss`, and explicit-cotangent `backward`. `gradOf` reads an independent
-gradient snapshot in IO; `zeroGrad` clears accumulated gradients in IO. Value
+gradient snapshot in IO; `zeroGrad` clears accumulated gradients in IO. Backward
+retains the graph for surviving forward values. Inference explicitly detaches model
+parameters and floating inputs. Value
 updates consume a tensor and return its replacement, preserving retained aliases.
 Typed adapters capture actual dtype/device before the native call and validate
 the replacement without retaining the consumed tensor. Indexing a tensor does

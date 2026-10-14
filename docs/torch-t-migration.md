@@ -33,9 +33,9 @@ describe the earlier review checkpoint.
 
 `Tensor.assumeSpec` and the implicit coercion to `RawTensor` are removed.
 The indexed carrier now lives in `Tyr.Basic` beside native metadata inspection;
-its private constructor is available only there. `Tyr.Basic.Types` remains
-native-free for GPU code generation. Anonymous construction and record updates
-cannot replace a checked handle. Existing handles enter through `ofRaw`, which
+it is opaque and has no public constructor or structural recursor.
+`Tyr.Basic.Types` remains native-free for GPU code generation. Anonymous
+construction and record updates cannot replace a checked handle. Existing handles enter through `ofRaw`, which
 checks shape, dtype, and device before construction. Core operation adapters
 now validate native outputs as well, including tuples and IO results.
 

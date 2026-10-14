@@ -75,12 +75,14 @@ for operations where preserving an input's generic dtype requires validation.
 ## Autograd and mutation
 
 `setRequiresGrad`, `detach`, and `gradOf` retain the tensor specification.
-`setRequiresGrad` returns a value with the requested flag and preserves retained
-aliases. `gradOf : IO (Tensor σ)` returns a detached, independent snapshot of
+`setRequiresGrad : Tensor σ → Bool → IO (Tensor σ)` returns the requested flag
+without changing retained aliases. `parameter : Tensor σ → IO (Tensor σ)` always
+creates an independent detached trainable leaf. `gradOf : IO (Tensor σ)` returns a detached, independent snapshot of
 accumulated gradients. Later backward passes, clipping, and `zeroGrad : IO Unit`
 do not change a previously returned gradient snapshot.
 `backwardLoss` takes a scalar loss; `backward` takes an output and an explicit
-cotangent with the same specification. `hasGradFn` inspects graph ownership.
+cotangent with the same specification. Both retain the graph for reuse; its saved
+storage remains live while outputs are reachable. `hasGradFn` inspects graph ownership.
 `copyInto : Tensor σ → Tensor σ → IO (Tensor σ)` returns the updated destination.
 Always use its result: retained aliases keep their original values. Native code
 consumes the destination reference and reuses storage only after proving native

@@ -51,7 +51,7 @@ structure RMSNorm (dim : UInt64) (dtype : DType := .Float32)
   deriving TensorStruct, ToModuleDisplay
 ```
 
-`Linear.init` uses Kaiming/He initialization (`std = sqrt(2 / in_dim)`) and marks every parameter as a trainable autograd leaf (`Linear.lean:23-35`); `LayerNorm.init` / `RMSNorm.init` do the same with ones/zeros. Each layer exposes explicit `forwardNd` functions plus `Module` instances for the common arities (see the API table below).
+`Linear.init` uses Kaiming/He initialization (`std = sqrt(2 / in_dim)`) and marks every parameter as a trainable autograd leaf (`Linear.lean:23-35`); `LayerNorm.init` / `RMSNorm.init` do the same with ones/zeros. All three trainable initializers return `IO` so repeated equal initializations receive independent gradient identities. Each layer exposes explicit `forwardNd` functions plus `Module` instances for the common arities (see the API table below).
 
 `Affine.lean` provides an indexed affine map with `[input, output]` weights, `TensorStruct` and `Module` instances, and typed gradient extraction. Its forward operation is `input @ weight + bias`; `Linear` uses the transposed weight convention instead. `Conv2d.lean` has runtime hyperparameters with indexed weight and bias fields; initialization validates grouped-channel dimensions and retains dtype and device. It currently has no model call sites.
 
@@ -146,7 +146,7 @@ structure ManifoldVectorParam (V : UInt64 → Type) [VectorManifoldCarrier V] (n
 
 `ManifoldLinear.init` projects random weights onto the manifold and re-wraps them as trainable leaves; `forward2d` runs through `toMatrix`; `applyDualMapUpdate` takes a geometry-aware `dualMapStep` on the weight and a plain Euclidean step on the bias (`Manifold.lean:131-169`). Aliases: `StiefelLinear`, `GrassmannLinear`, `OrthogonalLinear dim` (square), `HyperbolicVector n` (`Manifold.lean:303-312`). Both types have `TensorStruct` and `NormedModule` instances (spectral-norm based, like `Linear`).
 
-`ManifoldUpdatable` (`Manifold.lean:324`) is a composable update interface — `Cotangent : P → Type` plus `applyUpdate : (p : P) → Cotangent p → Float → P` — with instances for both manifold types, pairs, and `Sequential`, so tree-shaped parameter structures get geometry-aware steps via `ManifoldUpdatable.step`. `applyMatrixBudgetFromModules` (`Manifold.lean:367`) compiles modular sensitivities of a module array into the `matrix` budget multiplier of a `torch.Optim.DualOptimizer.Config` and sets `useModularBudget := true`.
+`ManifoldUpdatable` (`Manifold.lean:324`) is a composable update interface — `Cotangent : P → Type` plus `applyUpdate : (p : P) → Cotangent p → Float → IO P` — with instances for both manifold types, pairs, and `Sequential`, so tree-shaped parameter structures get geometry-aware steps via `ManifoldUpdatable.step`. `applyMatrixBudgetFromModules` (`Manifold.lean:367`) compiles modular sensitivities of a module array into the `matrix` budget multiplier of a `torch.Optim.DualOptimizer.Config` and sets `useModularBudget := true`.
 
 ### Metric factors and the Riemannian recursion
 
@@ -211,9 +211,9 @@ def ManifoldLinear.init [MatrixManifoldCarrier M] (in_dim out_dim : UInt64)
 def ManifoldLinear.applyDualMapUpdate [MatrixManifoldCarrier M] {in_dim out_dim : UInt64}
     (lin : ManifoldLinear M in_dim out_dim)
     (weightGrad : Tensor { shape := #[out_dim, in_dim], dtype := .Float32 }) (biasGrad? : Option (Tensor { shape := #[out_dim], dtype := .Float32 }))
-    (lr : Float) : ManifoldLinear M in_dim out_dim
+    (lr : Float) : IO (ManifoldLinear M in_dim out_dim)
 def ManifoldUpdatable.step [ManifoldUpdatable P]
-    (params : P) (grad : ManifoldUpdatable.Cotangent params) (lr : Float) : P
+    (params : P) (grad : ManifoldUpdatable.Cotangent params) (lr : Float) : IO P
 def applyMatrixBudgetFromModules [NormedModule M]
     (optCfg : torch.Optim.DualOptimizer.Config)
     (budgetCfg : BudgetConfig := {}) (modules : Array M)

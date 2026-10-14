@@ -261,7 +261,10 @@ structure AdjointResult (Y Args : Type) where
 ```
 
 `Adjoint/Torch.lean` implements this for any `[TensorStruct Y] [TensorStruct Args]`
-via `TensorStruct.makeLeafParams` and `autograd.grad`. Entry points:
+via `TensorStruct.functionalGrad`: temporary differentiation leaves stay inside a
+pure callback boundary and only detached derivatives escape. The primal is evaluated
+separately on detached inputs, preserving static metadata without exporting temporary
+leaf identities. Entry points:
 
 | Function | Mode |
 |---|---|

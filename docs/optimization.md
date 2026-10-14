@@ -46,7 +46,7 @@ Built-in pieces (`Tyr/Optim.lean:114-297`):
 - Composed optimizers: `adamw` = `scale_by_adam → add_decayed_weights → scale(-lr)`
   (`:190`), `sgd`, `sgd_momentum`.
 - Application: `apply_updates` (detach, add, re-enable `requires_grad`, `:213`) and
-  `step opt params grads state : (α × S)` (`:223`).
+  `step opt params grads state : IO (α × S)` (`:223`).
 - Schedule integration: `Schedule := Nat → Float` (`:235`), `scale_by_schedule`, and
   schedule-aware variants `adamw_schedule`, `sgd_schedule`, `sgd_momentum_schedule`.
 
@@ -267,8 +267,8 @@ Optim core (`torch.Optim`, `Tyr/Optim.lean`):
 | `sgd` / `sgd_momentum` | `(lr : Float)` / `(lr) (momentum := 0.9)` |
 | `chain` | `GradientTransformation α S1 → GradientTransformation α S2 → GradientTransformation α (ChainState S1 S2)` |
 | `scale_by_schedule` | `(schedule : Schedule) : GradientTransformation α ScaleByScheduleState` |
-| `step` | `opt → params → grads → state → (α × S)` |
-| `apply_updates` | `params → updates → params` (detach/add/re-enable grad) |
+| `step` | `opt → params → grads → state → IO (α × S)` |
+| `apply_updates` | `params → updates → IO params` (add, then create independent trainable leaves) |
 
 Schedules (`torch.Optim.Scheduler`): constructors and combinators as listed above; the legacy `ScheduleConfig` + `getLr` API mirrors them.
 
@@ -325,7 +325,7 @@ Tensor.backwardLoss lossT
 let lossVal := Tensor.item lossT
 let grads ← TensorStruct.grads params
 let opt := Optim.adamw (lr := lr)
-let (params', optState') := Optim.step opt params grads optState
+let (params', optState') ← Optim.step opt params grads optState
 ```
 
 `lr` is computed by the caller (that example keeps its own inline cosine warmup). The

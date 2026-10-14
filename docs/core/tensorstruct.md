@@ -80,8 +80,11 @@ All utilities below require `[TensorStruct α]`:
 - `count` counts tensor leaves.
 - `grads : α → IO α` obtains an independent gradient snapshot tree;
   `zeroGrads : α → IO Unit` clears the parameters' accumulated gradients.
-- `detach` and `requiresGrad` transform graph participation.
-- `makeLeafParams` detaches and enables gradient tracking.
+- `detach : α → α` removes graph participation explicitly.
+- `requiresGrad : α → Bool → IO α` changes autograd flags.
+- `makeLeafParams : α → IO α` creates independent trainable leaves.
+- `functionalGrad` differentiates a scalar function using private temporary leaves
+  and returns detached gradients without accumulating parameter gradients.
 - `scale`, `add`, and `sub` transform matching parameter trees.
 - `all` and `any` evaluate specification-polymorphic leaf predicates.
 

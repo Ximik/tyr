@@ -190,7 +190,7 @@ structure FlowDenoiser (seq vocab : UInt64) (Params : Type) where
 | Symbol | Signature |
 |---|---|
 | `initWeight` | `(shape : Shape) → (fanIn : UInt64) → (dtype : DType := .Float32) → IO (Tensor { shape := shape, dtype := dtype })` |
-| `initBias` | `(shape : Shape) → (dtype : DType := .Float32) → Tensor { shape := shape, dtype := dtype }` |
+| `initBias` | `(shape : Shape) → (dtype : DType := .Float32) → IO (Tensor { shape := shape, dtype := dtype })` |
 | `reqGradFalse` | `Tensor σ → Tensor σ` |
 | `dequantizeFP8` | `Tensor { shape := #[out, in] } → Tensor { shape := #[out/128, in/128] } → Tensor { shape := #[out, in], dtype := .Float32 }` |
 | `dequantizeFP8Experts` | `Tensor { shape := #[e, out, in] } → Tensor { shape := #[e, out/128, in/128] } → Tensor { shape := #[e, out, in], dtype := .Float32 }` |
