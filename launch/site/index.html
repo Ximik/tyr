@@ -52,7 +52,7 @@
     (x      : Tensor ⟨#[b, m], d, dev⟩)
     (weight : Tensor ⟨#[n, m], d, dev⟩) :
     Tensor ⟨#[b, n], d, dev⟩ :=
-  .assumeSpec (torch.linear x.raw weight.raw)</code></pre>
+  Tensor.linear x weight</code></pre>
         <p>A use site can specialize this contract to ordinary model dimensions. The valid program below elaborates. Changing the weight from <code>#[512, 768]</code> to <code>#[768, 512]</code> makes the shared input dimension inconsistent, so Lean rejects the program before a numerical kernel is called.</p>
       </section>
 
@@ -129,7 +129,7 @@
       <figure class="wide figure schema-figure">
         <div class="schema-input"><span>input</span><code>safetensors_type_provider<br>  "indexed_dir" as Weights</code></div>
         <div class="schema-arrow">→</div>
-        <div class="schema-output"><span>generated declarations</span><code>Weights.load_embed_weightTyped<br>  : IO (DTensor #[2,2] Float32)<br><br>Weights.loadAll : IO Weights</code></div>
+        <div class="schema-output"><span>generated declarations</span><code>Weights.load_embed_weightTyped<br>  : IO (Tensor { shape := #[2,2], dtype := .Float32 })<br><br>Weights.loadAll : IO Weights</code></div>
         <figcaption><strong>Schema-generated APIs.</strong> No model schema is handwritten in this example. A change to the checkpoint header changes the declarations generated during elaboration. Verified with <code>./scripts/launch/run_safetensors_schema.sh</code>.</figcaption>
       </figure>
 

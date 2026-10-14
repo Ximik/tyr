@@ -52,22 +52,24 @@ intrusive ref; Lean passes it back → `borrowTensor` increfs and reclaims a
 `torch::Tensor` that decrefs on scope exit; Lean's GC finalizes the external
 object → `deleteTorchTensorFinalize` releases Lean's ref. A global
 `std::atomic<int64_t> g_live_lean_tensors` (`cc/src/tyr.cpp:145`) counts
-tensors currently handed to Lean and is the first thing to check when memory
-grows unboundedly.
+tensors currently handed to Lean. This counter does not include leaked Lean
+shape arrays, options, or other arguments; their ownership needs separate checks.
 
 Lean-side ownership conventions, documented in the `cc/src/tyr.cpp:1-54` header
 comment: `lean_obj_arg` parameters are owned — the callee must `lean_dec` them
 (typical for shape arrays); `b_lean_obj_arg` parameters are borrowed — never
-`lean_dec`, use `borrowTensor`. The bulk elementwise ops are generated from
-macros that show the pattern (`cc/src/tyr.cpp:615-660`):
+`lean_dec`, use `borrowTensor`. Release unused owned arguments before any
+throwable work. For arguments that must be parsed, use scoped ownership so
+exceptions and early returns release them too. The bulk elementwise macros
+release their unused shape before invoking libtorch:
 
 ```cpp
 #define BINOP_FUN(F) \
 lean_object* lean_torch_tensor_##F(lean_obj_arg s, b_lean_obj_arg a, b_lean_obj_arg b) { \
+  lean_dec(s); \
   auto a_ = borrowTensor(a); \
   auto b_ = borrowTensor(b); \
   auto c_ = torch::F(a_, b_); \
-  lean_dec(s); \
   return fromTorchTensor(c_); \
 }
 BINOP_FUN(add) BINOP_FUN(sub) BINOP_FUN(mul)
@@ -75,16 +77,78 @@ BINOP_FUN(add) BINOP_FUN(sub) BINOP_FUN(mul)
 
 `getDevice` (`cc/src/tyr.cpp:212`) maps the `Device` constructors by tag —
 0 = `CUDA idx`, 1 = `CPU`, 2 = `MPS` (with a `std::call_once` MPS warmup on
-Apple; falls back to CPU off Apple).
+Apple). Unsupported MPS requests and CUDA indices outside the native range
+are rejected.
+
+`scripts/test_native_tensor_ownership.sh` checks reference counts across
+successful calls and native exception paths. It also checks that borrowed
+tensor handles remain valid. The ABI checker cannot distinguish owned and
+borrowed arguments: both appear as `lean_object*` in generated C.
+
+FloatBuffer has its own audited header, `cc/src/tyr_float_buffer_abi.h`.
+Its `Nat` inputs are boxed Lean objects, its pure `Float` result is a native
+`double`, and its IO results use Lean's result wrapper. CI compares every
+recognized declaration in the generated FloatBuffer adapter with the header
+using `scripts/check_ffi_abi.py --require-complete`.
+
+### Consuming tensor updates
+
+Value updates receive their destination as an owned `lean_obj_arg`, acquire a
+native owning handle, and release the consumed Lean reference before inspecting
+native ownership. A surviving Lean alias keeps its external wrapper and that
+wrapper's native reference alive. Native uniqueness can therefore rule out
+surviving Lean aliases after this handoff without synchronizing the two counters.
+Borrowed sources continue to use `borrowTensor` and must not be decremented.
+
+TensorImpl uniqueness alone does not establish exclusive storage ownership.
+The reuse path also checks storage and version ownership and excludes views,
+autograd metadata, weak observers, foreign storage, and accelerator storage.
+Only ordinary CPU allocations satisfying these checks are reused. Other inputs
+are copied before writing. Every value update returns its resulting tensor;
+callers must retain that result. The typed adapter captures dtype and device
+before the call and validates the result with `Tensor.checkedUpdate?`, without
+keeping the original tensor as a fallback.
+
+Gradient accumulation remains explicit mutable state: backward, clipping, and
+`zeroGrad` are IO operations, and `gradOf` returns an independent snapshot in IO.
+These changes do not make a pure parameter factory a source of fresh autograd
+identity. Callers requiring distinct allocations must use an effectful allocation
+boundary.
+
+`scripts/test_native_tensor_values.sh` checks actual exported operations against
+Lean aliases, native aliases, storage views, weak observers, and saved autograd
+inputs. It also verifies unique CPU reuse and gradient snapshot stability.
+The Lean regressions cover returned-value use, metadata checks, and effect order.
+
+The BranchingFlows molecule training CUDA-graph option currently uses its eager
+training path with a notice: replay requires stable mutable buffer addresses,
+which returned-value updates do not promise. A future graph implementation needs
+an explicit mutable-buffer API. GPU benchmark kernels still require separate
+hardware qualification.
+
+### Open boundary work
+
+This WIP does not close every finding from the RawTensor audit. `Tensor` is still
+a structure with a private constructor; Lean's constructor tactics can bypass
+that visibility and manufacture an unchecked index. An opaque representation is
+still needed for a hard construction boundary. The checked entry points validate
+native metadata, but constructor privacy alone does not enforce their use.
+
+The FlashAttention raw entry point also still returns an IO error object on
+failure despite declaring a raw tensor result. Its error carrier needs a separate
+API migration. Together with the uncaught native failures below and pure
+autograd-identity limitations above, these remain open review items.
 
 ### Error strategy
 
-Pure ops are unguarded: shapes are checked by Lean's type system before
-crossing the FFI, so a global `std::terminate` handler (`cc/src/tyr.cpp:267-301`)
+Many pure ops are unguarded. Type indices do not validate native execution;
+typed adapters check metadata at selected boundaries. A global
+`std::terminate` handler (`cc/src/tyr.cpp:267-301`)
 prints the pending `c10::Error`'s user-facing text and aborts, instead of
 dumping libtorch's backtrace. Set `TYR_VERBOSE_ERRORS=1` for the full report.
-IO-flavored entry points (safetensors, parquet, process groups) catch and
-return `lean_io_result_mk_error` values instead. Two sites carry workarounds
+IO entry points such as safetensors, parquet, and process groups catch and
+return `lean_io_result_mk_error` values instead. This is not yet uniform:
+random factories and dropout still have uncaught native failure paths. Two sites carry workarounds
 for a libc++abi/libstdc++ exception-ABI mismatch (Lean's toolchain vs.
 libtorch's): `lean_torch_manual_seed` seeds only the CPU generator, and CUDA
 synchronization calls `cudaDeviceSynchronize` via cudart directly
@@ -311,13 +375,13 @@ import Tyr.SafeTensors.Schema
 open torch
 
 def nativeExample : IO Unit := do
-  let x : DTensor #[2, 2] .Float32 := Tensor.ones #[2, 2]
+  let x : Tensor { shape := #[2, 2], dtype := .Float32 } := Tensor.ones #[2, 2]
   let y := Tensor.add x x
   let z ← Tensor.randn #[2, 2]
   IO.println s!"values: {← y.toFloatArray}, random shape: {z.runtimeShape}"
   IO.println s!"live tensors: {← torch.get_live_tensors}"
 
-def loadCheckedWeight (path : String) : IO (DTensor #[768, 768] .Float32) := do
+def loadCheckedWeight (path : String) : IO (Tensor { shape := #[768, 768], dtype := .Float32 }) := do
   let handle ← safetensors.openHandle path
   safetensors.loadFromHandleWithSpec handle "layer.weight" ⟨#[768, 768], .Float32⟩
 ```

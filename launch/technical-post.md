@@ -29,7 +29,7 @@ such as dimensions occur in the type itself.
 
 This moves a class of consistency checks from execution to program
 elaboration. The relationships are compositional: if one function returns
-`Tensor #[batch, hidden]` and the next requires that shape, Lean checks their
+`Tensor { shape := #[batch, hidden] }` and the next requires that shape, Lean checks their
 connection even when `batch` and `hidden` are symbolic. The point is not to
 encode every property of a learned system in a type. Data-dependent dimensions,
 imported checkpoints, device availability, allocation, and floating-point
@@ -45,7 +45,7 @@ def linear {m n b : UInt64} {d : DType} {dev : DevicePolicy}
     (x      : Tensor ⟨#[b, m], d, dev⟩)
     (weight : Tensor ⟨#[n, m], d, dev⟩) :
     Tensor ⟨#[b, n], d, dev⟩ :=
-  .assumeSpec (torch.linear x.raw weight.raw)
+  Tensor.linear x weight
 ```
 
 The same `m` occurs in both inputs, `b` is preserved, and `n` becomes the
@@ -132,7 +132,7 @@ includes a declaration of the form
 
 ```lean
 Weights.load_embed_weightTyped :
-  IO (DTensor #[2, 2] DType.Float32)
+  IO (Tensor { shape := #[2, 2], dtype := DType.Float32 })
 ```
 
 The focused example is:

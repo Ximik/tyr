@@ -105,18 +105,18 @@ Concrete families (all in `Tyr.AD`, one file each under `Tyr/Manifolds/`):
 
 | Type | Constraint | Retraction / exp |
 |---|---|---|
-| `Stiefel n p` | `XᵀX = Iₚ`, `matrix : DTensor #[n, p] .Float32` | QR of `X + Z` |
+| `Stiefel n p` | `XᵀX = Iₚ`, `matrix : Tensor { shape := #[n, p], dtype := .Float32 }` | QR of `X + Z` |
 | `Orthogonal n` | `QᵀQ = I`, tangent stored as `SkewSymmetric n` | `Q · exp(S)` via `linalg.matrix_exp`, then QR |
 | `Grassmann n p` | `XᵀX = Iₚ` modulo `O(p)`, tangent `XᵀZ = 0` | QR of `X + Z` |
-| `Sphere n` | unit-norm `coords : DTensor #[n] .Float32` | geodesic `exp`; normalize for `retract` |
+| `Sphere n` | unit-norm `coords : Tensor { shape := #[n], dtype := .Float32 }` | geodesic `exp`; normalize for `retract` |
 | `Oblique m n` | unit-norm columns | column normalization |
 | `Positive m n` | elementwise-positive | second-order step `x + v + v²/(2x)`, then clamp; `sharp` scales by `x²` |
 | `SymmetricPositiveDefinite n` | SPD | log-Euclidean: `project(matrix_log X + v)` |
-| `PSDFixedRank n k` | `Y Yᵀ` factor, `Y : DTensor #[n, k] .Float32` | addition in factor space |
+| `PSDFixedRank n k` | `Y Yᵀ` factor, `Y : Tensor { shape := #[n, k], dtype := .Float32 }` | addition in factor space |
 | `Elliptope n k` | row-wise unit norms | row normalization |
 | `FixedRankEmbedded m n k` | rank ≤ `k` | slice-based low-rank projection |
 | `PoincareBall n` | `‖x‖ < 1` | Euclidean add + ball projection (`sharp`/`flat` are `id` — not the Poincaré metric) |
-| `Hyperbolic n` | hyperboloid `⟨x,x⟩_L = -1`, `coords : DTensor #[n+1] .Float32` | Minkowski normalize; `sharp`/`flat` apply the Minkowski metric |
+| `Hyperbolic n` | hyperboloid `⟨x,x⟩_L = -1`, `coords : Tensor { shape := #[n+1], dtype := .Float32 }` | Minkowski normalize; `sharp`/`flat` apply the Minkowski metric |
 
 Grassmann also ships geometry extras: `principalAngles`, `distance` (chordal, despite the
 geodesic docstring), and a `log` map (`Grassmann.lean:62-136`).
@@ -240,13 +240,13 @@ Entry points:
 
 ```lean
 def stepCrossEntropy [TensorStruct Params]
-    (params : Params) (forward : Params → IO (DTensor #[batch, seq, vocab] .Float32))
-    (targets : DTensor #[batch, seq] .Int64) (lr : Float) (gradClip : Float := 0.0)
+    (params : Params) (forward : Params → IO (Tensor { shape := #[batch, seq, vocab], dtype := .Float32 }))
+    (targets : Tensor { shape := #[batch, seq], dtype := .Int64 }) (lr : Float) (gradClip : Float := 0.0)
     : IO (StepResult Params #[batch, seq, vocab])                -- RiemannianTreeSGD.lean:290
 
 def stepCrossEntropySampledFisher [TensorStruct Params]
-    (params : Params) (forward : Params → IO (DTensor #[batch, seq, vocab] .Float32))
-    (targets : DTensor #[batch, seq] .Int64) (probeCount : UInt64) (lr : Float) (gradClip : Float := 0.0)
+    (params : Params) (forward : Params → IO (Tensor { shape := #[batch, seq, vocab], dtype := .Float32 }))
+    (targets : Tensor { shape := #[batch, seq], dtype := .Int64 }) (probeCount : UInt64) (lr : Float) (gradClip : Float := 0.0)
     : IO (StepResult Params #[batch, seq, vocab])                -- :332
 ```
 
@@ -323,7 +323,7 @@ Reconstructed example (from `Examples/GPT/Train.lean:138-145`):
 let lossT ← gpt.loss params x y true
 Tensor.backwardLoss lossT
 let lossVal := Tensor.item lossT
-let grads := TensorStruct.grads params
+let grads ← TensorStruct.grads params
 let opt := Optim.adamw (lr := lr)
 let (params', optState') := Optim.step opt params grads optState
 ```

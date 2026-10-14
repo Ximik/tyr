@@ -12,8 +12,8 @@ pretrained safetensors checkpoints, not training code.
 
 All five families follow the same idiom as the rest of `Tyr/Model`:
 
-The `STensor shape` fields shown below preserve their shape index while leaving
-dtype and placement dynamic. They do not assert Float32 or a particular device;
+The `Tensor { shape := shape }` fields shown below preserve their shape index
+while leaving dtype and placement dynamic. They do not assert Float32 or a particular device;
 checked loading and model adapters validate the metadata they require.
 
 - A plain **config structure** (e.g. `WhisperConfig`, `Qwen3ASRConfig`) with field
@@ -84,7 +84,7 @@ structure Qwen3TTSForConditionalGeneration (cfg : Qwen3TTSConfig) where
   codebooks 1..N from codebook-0 context. Both reuse the Qwen LLM layer — `TalkerLayer
   cfg` is an abbrev for `qwen.QwenLayer` (Talker.lean:26).
 - **Speaker encoder** (`SpeakerEncoder.lean`): ECAPA-TDNN producing
-  `STensor #[batch, cfg.speakerEncoderConfig.encDim]` embeddings from mel features; only
+  `Tensor { shape := #[batch, cfg.speakerEncoderConfig.encDim] }` embeddings from mel features; only
   present for `ttsModelType == "base"`. Used for voice cloning via
   `VoiceClonePromptItem` (Model.lean:17).
 - **Speech tokenizer decoder** (`SpeechTokenizer.lean:263`): `SpeechTokenizer12HzDecoder`
@@ -111,9 +111,9 @@ alignment. Import `Tyr.Model.Qwen3ASR`.
 structure Qwen3ASRThinkerForConditionalGeneration (cfg : ThinkerConfig) where
   audioTower : AudioEncoder cfg.audioConfig
   textModel : qwen.Qwen3Model (TextQwenConfig cfg) (.Unknown "dynamic")
-  audioProjectionWeight : STensor #[cfg.textConfig.hiddenSize, cfg.audioConfig.outputDim]
-  audioProjectionBias : STensor #[cfg.textConfig.hiddenSize]
-  lmHead : STensor #[ThinkerLmVocabSize cfg, cfg.textConfig.hiddenSize]
+  audioProjectionWeight : Tensor { shape := #[cfg.textConfig.hiddenSize, cfg.audioConfig.outputDim] }
+  audioProjectionBias : Tensor { shape := #[cfg.textConfig.hiddenSize] }
+  lmHead : Tensor { shape := #[ThinkerLmVocabSize cfg, cfg.textConfig.hiddenSize] }
   deriving TensorStruct
 
 structure Qwen3ASRForConditionalGeneration (cfg : Qwen3ASRConfig) where
@@ -222,7 +222,7 @@ HF Whisper fields (`numMelBins`, `dModel`, `encoderLayers`, `decoderLayers`,
 ```lean
 structure WhisperForConditionalGeneration (cfg : WhisperConfig) where
   model : WhisperModel cfg      -- encoder + decoder stacks
-  projOut : STensor #[cfg.vocabSize, cfg.dModel]
+  projOut : Tensor { shape := #[cfg.vocabSize, cfg.dModel] }
   deriving TensorStruct
 ```
 

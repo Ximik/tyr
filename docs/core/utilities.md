@@ -26,7 +26,7 @@ The threading model is JAX-style: you never mutate a key, you derive new ones. `
 
 The main consumer is the DiffEq Brownian-path code, which folds hashed interval bounds into keys so an entire Brownian path is a pure function of `(seed, t0, t1)` (`Tyr/DiffEq/Brownian.lean:161-176`). The same arithmetic is replicated element-wise on the GPU by the `BrownianSample` kernel (`Tyr/GPU/Kernels/BrownianSample.lean`) so device draws agree with the CPU per element; `Examples/GPU/RunBrownianSample.lean` is the parity harness.
 
-Contrast with tensor RNG: `Tensor.randn (s : Shape) ... : IO (DTensor s .Float32)` lives behind the libtorch FFI, runs in `IO`, and is seeded globally via `manualSeed` (`Tyr/Torch.lean:1065`). `PRNGKey` is for value-level randomness in pure Lean code.
+Contrast with tensor RNG: `Tensor.randn (s : Shape) ... : IO (Tensor { shape := s, dtype := .Float32 })` lives behind the libtorch FFI, runs in `IO`, and is seeded globally via `manualSeed` (`Tyr/Torch.lean:1065`). `PRNGKey` is for value-level randomness in pure Lean code.
 
 `Tyr.PRNG` is not re-exported by the root `Tyr.lean`; import it directly.
 
@@ -90,9 +90,9 @@ For module trees there is a typeclass plus a deriving handler:
 
 ```lean
 class ToModuleDisplay (α : Type) where
-  toModuleNode : α → String → ModuleNode
+  toModuleNode : α → String → IO ModuleNode
 
-def toModuleDisplayProps [ToModuleDisplay α] (value : α) (name : String := "root") : ModuleDisplayProps
+def toModuleDisplayProps [ToModuleDisplay α] (value : α) (name : String := "root") : IO ModuleDisplayProps
 ```
 
 Instances exist for `Tensor σ`, `Option α`, `Array α`, `List α`, `α × β`, and `Static α` (rendered as a plain `name: value` label). The deriving handler (`Tyr/Widget.lean:1021-1032`) generates an instance for any structure, producing one `group` node whose children are the fields. The built-in modules already use it — e.g. `Linear` derives `TensorStruct, ToModuleDisplay` (`Tyr/Module/Linear.lean:18`), as do `RMSNorm` and `LayerNorm`.
@@ -130,9 +130,9 @@ Both elaborate the term, evaluate it inside the Lean server via `Meta.evalExpr` 
 
 | Signature | Purpose |
 | --- | --- |
-| `tensorToProps (t : Tensor σ) : TensorDisplayProps` | Snapshot a tensor for display. |
-| `tensorToPropsNamed (t : Tensor σ) (name : String) (axisNames : Array String := #[]) : TensorDisplayProps` | Same, with name and axis labels. |
-| `toModuleDisplayProps [ToModuleDisplay α] (value : α) (name : String := "root") : ModuleDisplayProps` | Build a display tree from any derivable structure. |
+| `tensorToProps (t : Tensor σ) : IO TensorDisplayProps` | Snapshot a tensor and its current gradient for display. |
+| `tensorToPropsNamed (t : Tensor σ) (name : String) (axisNames : Array String := #[]) : IO TensorDisplayProps` | Same, with name and axis labels. |
+| `toModuleDisplayProps [ToModuleDisplay α] (value : α) (name : String := "root") : IO ModuleDisplayProps` | Build a display tree from any derivable structure. |
 | `deriving ToModuleDisplay` | Generate a tree instance from a structure's fields. |
 | `#tensor <term>` | Infoview heatmap for `Tensor σ` or `IO (Tensor σ)`. |
 | `#module <term>` | Infoview tree for `ModuleDisplayProps` or `IO ModuleDisplayProps`. |
@@ -210,7 +210,7 @@ def exampleMLP : IO ModuleDisplayProps := do
   let fc1 ← Linear.init 64 256
   let fc2 ← Linear.init 256 10
   let mlp : MLP 64 256 10 := { fc1, fc2 }
-  pure (toModuleDisplayProps mlp "MLP(64 → 256 → 10)")
+  toModuleDisplayProps mlp "MLP(64 → 256 → 10)"
 
 #module exampleMLP
 ```

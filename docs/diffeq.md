@@ -380,14 +380,14 @@ def eventExample : IO Unit := do
 -- 4. Neural-ODE-style gradient: backsolve adjoint through an RK4 solve
 --    of dy/dt = a * y on scalar tensors.
 def adjointExample : IO Unit := do
-  let term : ODETerm (DTensor #[] .Float32) (DTensor #[] .Float32) := { vectorField := fun _t y a => Tensor.mul a y }
+  let term : ODETerm (Tensor { shape := #[], dtype := .Float32 }) (Tensor { shape := #[], dtype := .Float32 }) := { vectorField := fun _t y a => Tensor.mul a y }
   let solver :=
-    RK4.solver (Term := ODETerm (DTensor #[] .Float32) (DTensor #[] .Float32)) (Y := DTensor #[] .Float32) (VF := DTensor #[] .Float32) (Args := DTensor #[] .Float32)
+    RK4.solver (Term := ODETerm (Tensor { shape := #[], dtype := .Float32 }) (Tensor { shape := #[], dtype := .Float32 })) (Y := Tensor { shape := #[], dtype := .Float32 }) (VF := Tensor { shape := #[], dtype := .Float32 }) (Args := Tensor { shape := #[], dtype := .Float32 })
   let adjSolver :=
     RK4.solver
-      (Term := ODETerm (AdjointState (DTensor #[] .Float32) (DTensor #[] .Float32)) (DTensor #[] .Float32))
-      (Y := AdjointState (DTensor #[] .Float32) (DTensor #[] .Float32)) (VF := AdjointState (DTensor #[] .Float32) (DTensor #[] .Float32))
-      (Args := DTensor #[] .Float32)
+      (Term := ODETerm (AdjointState (Tensor { shape := #[], dtype := .Float32 }) (Tensor { shape := #[], dtype := .Float32 })) (Tensor { shape := #[], dtype := .Float32 }))
+      (Y := AdjointState (Tensor { shape := #[], dtype := .Float32 }) (Tensor { shape := #[], dtype := .Float32 })) (VF := AdjointState (Tensor { shape := #[], dtype := .Float32 }) (Tensor { shape := #[], dtype := .Float32 }))
+      (Args := Tensor { shape := #[], dtype := .Float32 })
   let a := Tensor.full #[] 0.3
   let sol := diffeqsolve term solver 0.0 1.0 (some 0.01) (Tensor.full #[] 2.0) a
     (saveat := { steps := true }) (controller := ({} : ConstantStepSize))

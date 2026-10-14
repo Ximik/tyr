@@ -32,11 +32,11 @@ A first program uses indexed tensors:
 import Tyr.Typed
 open torch
 
-def exampleTensor : DTensor #[2, 3] .Float32 :=
+def exampleTensor : Tensor { shape := #[2, 3], dtype := .Float32 } :=
   Tensor.ones #[2, 3]
 ```
 
-`Tensor σ` records shape, dtype, and device policy. `DTensor` fixes shape and
+`Tensor σ` records shape, dtype, and device policy. The example fixes shape and
 dtype while leaving placement unrestricted. `Device` supports CPU, CUDA, and
 MPS; `getBestDevice` from `Tyr.Torch` selects MPS, then CUDA, then CPU based on
 availability. Native handles are confined to adapters behind the indexed API.
@@ -268,7 +268,7 @@ def main : IO Unit := do
 
   -- data/shakespeare_char/train.bin ships in the repo (nanoGPT u16 format)
   let nTrain ← data.binFileTokenCount "data/shakespeare_char/train.bin"
-  let trainData ← data.loadU16Bin nTrain "data/shakespeare_char/train.bin"
+  let trainData ← Tensor.loadU16Bin nTrain "data/shakespeare_char/train.bin"
 
   let params ← GPTParams.init modelCfg trainCfg.device
   let opt := Optim.adamw (lr := trainCfg.learningRate) -- Optim.lean:190

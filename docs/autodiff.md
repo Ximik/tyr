@@ -301,17 +301,17 @@ import Tyr
 open torch Tyr.AD.Frontend Tyr.AD.JaxprLike
 
 structure Params where
-  padv : DTensor #[1] .Float32
+  padv : Tensor { shape := #[1], dtype := .Float32 }
   label : Static String
   deriving TensorStruct, ToTensorStructSchema, TensorStructFlatten
 
 structure Inputs where
-  base : DTensor #[2] .Float32
+  base : Tensor { shape := #[2], dtype := .Float32 }
   tag : Static String
   deriving TensorStruct, ToTensorStructSchema, TensorStructFlatten
 
 structure Outputs where
-  loss : DTensor #[] .Float32
+  loss : Tensor { shape := #[], dtype := .Float32 }
   label : Static String
   deriving TensorStruct, ToTensorStructSchema, TensorStructFlatten
 
@@ -343,7 +343,15 @@ The executable fixture supplies matching Float32 dtype metadata for the indexed 
 
 ## The indexed LibTorch autograd path
 
-Day-to-day training does not use either system above: it uses libtorch's tape through the FFI. The idiom is `Tensor.backwardLoss loss` followed by `Tensor.gradOf param` (usually via `TensorStruct.grads`), with leaf parameters created by `Tensor.setRequiresGrad (Tensor.detach t) true` and evaluation wrapped in `autograd.no_grad`. All of that is documented in [core/tensors.md](core/tensors.md); gradient-as-tree operations are in [core/tensorstruct.md](core/tensorstruct.md); training loops in [optimization.md](optimization.md).
+Day-to-day training uses libtorch's tape through the FFI. The idiom is
+`Tensor.backwardLoss loss` followed by `let gradient ← Tensor.gradOf param`
+(usually `let gradients ← TensorStruct.grads params`). Gradient reads return
+independent snapshots; `TensorStruct.zeroGrads params` clears accumulated
+gradients in IO without changing those snapshots. Leaf parameters are prepared
+with `Tensor.setRequiresGrad (Tensor.detach t) true`; distinct native allocations
+require an effectful allocation boundary. Evaluation uses `autograd.no_grad`.
+See [core/tensors.md](core/tensors.md), [core/tensorstruct.md](core/tensorstruct.md),
+and [optimization.md](optimization.md).
 
 ## Current limitations
 

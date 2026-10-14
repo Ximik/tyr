@@ -12,14 +12,14 @@ external metadata before exposing indexed tensors.
 import Tyr.Typed
 open torch
 
-def forward : DTensor #[32, 512] .Float32 :=
+def forward : Tensor { shape := #[32, 512], dtype := .Float32 } :=
   let x := Tensor.ones #[32, 768]
   let w := Tensor.ones #[512, 768]
   x.linear w
 
 -- Replacing w with Tensor.ones #[768, 512] is a type error.
 -- Raw handles cross into this facade through Tensor.ofTensor, which checks
--- their actual shape and dtype. Tensor.assumeSpec explicitly bypasses checks.
+-- their actual shape and dtype. Raw handles enter through Tensor.ofRaw.
 ```
 
 ## Dependencies
@@ -199,8 +199,8 @@ Notes:
 
 ```lean
 def project {m k n : UInt64}
-    (x : DTensor #[m, k] .Float32) (w : DTensor #[k, n] .Float32) :
-    DTensor #[m, n] .Float32 :=
+    (x : Tensor { shape := #[m, k], dtype := .Float32 }) (w : Tensor { shape := #[k, n], dtype := .Float32 }) :
+    Tensor { shape := #[m, n], dtype := .Float32 } :=
   x.mm w
 ```
 
@@ -231,7 +231,7 @@ Batch dimensions may come from runtime configuration while remaining in the tens
 ```lean
 let iter := BatchIterator.new shard 8 256
 let (batch, iter') ← iter.next
--- batch : Option (DTensor #[iter.batchSize, iter.seqLen] .Int64)
+-- batch : Option (Tensor { shape := #[iter.batchSize, iter.seqLen], dtype := .Int64 })
 ```
 
 ### SafeTensors Type Provider

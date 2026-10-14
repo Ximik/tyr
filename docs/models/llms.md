@@ -40,12 +40,12 @@ The model itself is a structure over a config value (Qwen3 shown, `Tyr/Model/Qwe
 ```lean
 structure Qwen3ForCausalLM (cfg : Config) where
   model : qwen.Qwen3Model cfg
-  lmHead : DTensor #[cfg.vocab_size, cfg.hidden_size] .Float32
+  lmHead : Tensor { shape := #[cfg.vocab_size, cfg.hidden_size], dtype := .Float32 }
   tieWordEmbeddings : Bool := true
   deriving TensorStruct
 ```
 
-Because `cfg` is a value parameter, one implementation serves every checkpoint size — the preset just picks the shapes. `deriving TensorStruct` makes the whole model traversable for device moves, checkpointing, and optimizers (see [TensorStruct](../core/tensorstruct.md)). Every family also follows the same decode convention: generation returns `IO (Sigma (fun outSeq => DTensor #[batch, outSeq] .Int64))` because the output length is runtime-determined (EOS early stop), and batched per-row EOS masking happens on-device via `tokenInSet` / `applyFinishedEos`.
+Because `cfg` is a value parameter, one implementation serves every checkpoint size — the preset just picks the shapes. `deriving TensorStruct` makes the whole model traversable for device moves, checkpointing, and optimizers (see [TensorStruct](../core/tensorstruct.md)). Every family also follows the same decode convention: generation returns `IO (Sigma (fun outSeq => Tensor { shape := #[batch, outSeq], dtype := .Int64 }))` because the output length is runtime-determined (EOS early stop), and batched per-row EOS masking happens on-device via `tokenInSet` / `applyFinishedEos`.
 
 ### Shared generation infrastructure
 
@@ -57,14 +57,14 @@ inductive SamplingStrategy where
   | multinomial (temperature : Float := 1.0) (topK : UInt64 := 0) (topP : Float := 1.0)
 
 /-- Callback invoked on every generated token during streaming decode. -/
-abbrev StreamCallback (batch : UInt64) := UInt64 → DTensor #[batch] .Int64 → IO Unit
+abbrev StreamCallback (batch : UInt64) := UInt64 → Tensor { shape := #[batch], dtype := .Int64 } → IO Unit
 
-def sampleFromLogits (logits : DTensor #[batch, vocab] .Float32)
-    (strategy : SamplingStrategy) : IO (DTensor #[batch] .Int64)
-def tokenInSet (tokens : DTensor #[n] .Int64)
-    (values : Array UInt64) : DTensor #[n] .Bool
-def applyFinishedEos (tokens : DTensor #[n] .Int64) (finished : DTensor #[n] .Bool)
-    (eosToken : UInt64) : DTensor #[n] .Int64
+def sampleFromLogits (logits : Tensor { shape := #[batch, vocab], dtype := .Float32 })
+    (strategy : SamplingStrategy) : IO (Tensor { shape := #[batch], dtype := .Int64 })
+def tokenInSet (tokens : Tensor { shape := #[n], dtype := .Int64 })
+    (values : Array UInt64) : Tensor { shape := #[n], dtype := .Bool }
+def applyFinishedEos (tokens : Tensor { shape := #[n], dtype := .Int64 }) (finished : Tensor { shape := #[n], dtype := .Bool })
+    (eosToken : UInt64) : Tensor { shape := #[n], dtype := .Int64 }
 ```
 
 `sampleFromLogits` semantics (`Generation.lean:26-47`): greedy is `Tensor.argmax`; multinomial throws unless `temperature > 0`, scales logits by `1/temperature` (skipped at exactly 1.0), applies a top-K filter unless `topK == 0`, then a top-P filter unless `topP >= 1.0`, then softmax + `Tensor.multinomial`. Qwen3.5 and Gemma 4 decode through this; Qwen3 (and therefore Qwen2.5-Omni) has its own private greedy loops and supports **greedy decoding only** — no temperature/top-k/top-p.
@@ -75,8 +75,8 @@ The shared incremental cache is `qwen.QwenAttention.KVCache` (`Tyr/Model/Qwen/At
 
 ```lean
 structure KVCache (batch num_kv_heads head_dim : UInt64) (dtype : DType := .Float32) where
-  kStoreDyn : Σ (s : Shape), DTensor s dtype
-  vStoreDyn : Σ (s : Shape), DTensor s dtype
+  kStoreDyn : Σ (s : Shape), Tensor { shape := s, dtype := dtype }
+  vStoreDyn : Σ (s : Shape), Tensor { shape := s, dtype := dtype }
   seq : UInt64 := 0
   maxLen : UInt64 := 0
 ```
@@ -163,12 +163,12 @@ Three `@[extern]` opaque kernels sit inside this component (declared `private`, 
 
 ```lean
 structure FlowDenoiser (seq vocab : UInt64) (Params : Type) where
-  forward : {batch : UInt64} → Params → DTensor #[batch, seq, vocab] .Float32 → DTensor #[batch] .Float32
-    → Option (DTensor #[batch] .Float32) → IO (DTensor #[batch, seq, vocab] .Float32)
-  forwardPure : Option ({batch : UInt64} → Params → DTensor #[batch, seq, vocab] .Float32 → DTensor #[batch] .Float32
-    → Option (DTensor #[batch] .Float32) → DTensor #[batch, seq, vocab] .Float32) := none
-  lossWeight : Option ({batch : UInt64} → Params → DTensor #[batch] .Float32 → Option (DTensor #[batch] .Float32)
-    → IO (DTensor #[batch] .Float32)) := none
+  forward : {batch : UInt64} → Params → Tensor { shape := #[batch, seq, vocab], dtype := .Float32 } → Tensor { shape := #[batch], dtype := .Float32 }
+    → Option (Tensor { shape := #[batch], dtype := .Float32 }) → IO (Tensor { shape := #[batch, seq, vocab], dtype := .Float32 })
+  forwardPure : Option ({batch : UInt64} → Params → Tensor { shape := #[batch, seq, vocab], dtype := .Float32 } → Tensor { shape := #[batch], dtype := .Float32 }
+    → Option (Tensor { shape := #[batch], dtype := .Float32 }) → Tensor { shape := #[batch, seq, vocab], dtype := .Float32 }) := none
+  lossWeight : Option ({batch : UInt64} → Params → Tensor { shape := #[batch], dtype := .Float32 } → Option (Tensor { shape := #[batch], dtype := .Float32 })
+    → IO (Tensor { shape := #[batch], dtype := .Float32 })) := none
 ```
 
 `forwardPure` is required for generation because `Tyr.DiffEq` vector fields are pure functions; `generateFLM` throws if it is absent. Sampling treats the flow as an ODE from Gaussian noise to one-hot data and integrates it with `DiffEq.Euler` (`generateFLM`) or any `DiffEq.AbstractSolver` you supply (`generateFLMWithSolver`). FLM is currently library-only: its sole consumer in the repo is `Tests/TestFLM.lean`.
@@ -180,20 +180,20 @@ structure FlowDenoiser (seq vocab : UInt64) (Params : Type) where
 | Symbol | Signature / meaning |
 |---|---|
 | `SamplingStrategy` | `.greedy` or `.multinomial (temperature := 1.0) (topK := 0) (topP := 1.0)`; `topK = 0` / `topP >= 1` disable those filters |
-| `StreamCallback batch` | `UInt64 → DTensor #[batch] .Int64 → IO Unit`, invoked per decode step |
-| `sampleFromLogits` | `DTensor #[batch, vocab] .Float32 → SamplingStrategy → IO (DTensor #[batch] .Int64)` |
-| `tokenInSet` | `DTensor #[n] .Int64 → Array UInt64 → DTensor #[n] .Bool` boolean membership mask |
-| `applyFinishedEos` | `DTensor #[n] .Int64 → DTensor #[n] .Bool → UInt64 → DTensor #[n] .Int64` overwrite finished rows with EOS |
+| `StreamCallback batch` | `UInt64 → Tensor { shape := #[batch], dtype := .Int64 } → IO Unit`, invoked per decode step |
+| `sampleFromLogits` | `Tensor { shape := #[batch, vocab], dtype := .Float32 } → SamplingStrategy → IO (Tensor { shape := #[batch], dtype := .Int64 })` |
+| `tokenInSet` | `Tensor { shape := #[n], dtype := .Int64 } → Array UInt64 → Tensor { shape := #[n], dtype := .Bool }` boolean membership mask |
+| `applyFinishedEos` | `Tensor { shape := #[n], dtype := .Int64 } → Tensor { shape := #[n], dtype := .Bool } → UInt64 → Tensor { shape := #[n], dtype := .Int64 }` overwrite finished rows with EOS |
 
 ### Model utils (`Tyr/Model/Utils.lean`, `torch.Model`)
 
 | Symbol | Signature |
 |---|---|
-| `initWeight` | `(shape : Shape) → (fanIn : UInt64) → (dtype : DType := .Float32) → IO (DTensor shape dtype)` |
-| `initBias` | `(shape : Shape) → (dtype : DType := .Float32) → DTensor shape dtype` |
+| `initWeight` | `(shape : Shape) → (fanIn : UInt64) → (dtype : DType := .Float32) → IO (Tensor { shape := shape, dtype := dtype })` |
+| `initBias` | `(shape : Shape) → (dtype : DType := .Float32) → Tensor { shape := shape, dtype := dtype }` |
 | `reqGradFalse` | `Tensor σ → Tensor σ` |
-| `dequantizeFP8` | `STensor #[out, in] → STensor #[out/128, in/128] → DTensor #[out, in] .Float32` |
-| `dequantizeFP8Experts` | `STensor #[e, out, in] → STensor #[e, out/128, in/128] → DTensor #[e, out, in] .Float32` |
+| `dequantizeFP8` | `Tensor { shape := #[out, in] } → Tensor { shape := #[out/128, in/128] } → Tensor { shape := #[out, in], dtype := .Float32 }` |
+| `dequantizeFP8Experts` | `Tensor { shape := #[e, out, in] } → Tensor { shape := #[e, out/128, in/128] } → Tensor { shape := #[e, out, in], dtype := .Float32 }` |
 
 ### Qwen3 (`torch.qwen3`)
 
@@ -202,8 +202,8 @@ structure FlowDenoiser (seq vocab : UInt64) (Params : Type) where
 | `Config` | `abbrev Config := qwen.QwenConfig`; preset `Config.qwen3_4B` |
 | `Config.loadFromFile` / `Config.loadFromPretrainedDir` | `(pathOrDir : String) (defaults := Config.qwen3_4B) : IO Config`, with invariant validation |
 | `Qwen3ForCausalLM.init` | `(cfg : Config) (tieWordEmbeddings := true) : IO (Qwen3ForCausalLM cfg)` |
-| `forward` | `(m) (inputIds : DTensor #[batch, seq] .Int64) (attnMask := none) : DTensor #[batch, seq, cfg.vocab_size] .Float32` |
-| `generateGreedy` | `(m) (inputIds) (maxNewTokens := 512) (eosTokenIds := #[]) : IO (Sigma (fun outSeq => DTensor #[batch, outSeq] .Int64))`, KV-cached |
+| `forward` | `(m) (inputIds : Tensor { shape := #[batch, seq], dtype := .Int64 }) (attnMask := none) : Tensor { shape := #[batch, seq, cfg.vocab_size], dtype := .Float32 }` |
+| `generateGreedy` | `(m) (inputIds) (maxNewTokens := 512) (eosTokenIds := #[]) : IO (Sigma (fun outSeq => Tensor { shape := #[batch, outSeq], dtype := .Int64 }))`, KV-cached |
 | `generateGreedyUncached` | same signature; full re-forward per step, used as the parity reference |
 | `Qwen3ForCausalLM.loadSharded` / `load` | `(dirOrPath : String) (cfg := Config.qwen3_4B) (log := {}) : IO (Qwen3ForCausalLM cfg)`; ties embeddings when `lm_head.weight` is absent |
 
@@ -214,9 +214,9 @@ structure FlowDenoiser (seq vocab : UInt64) (Params : Type) where
 
 ```lean
 -- all in namespace Qwen35ForCausalLM; called as `model.generate cfg …`
-def generate (cfg : Config) (m : Qwen35ForCausalLM cfg) (inputIds : DTensor #[batch, seq] .Int64)
+def generate (cfg : Config) (m : Qwen35ForCausalLM cfg) (inputIds : Tensor { shape := #[batch, seq], dtype := .Int64 })
     (maxNewTokens : UInt64 := 256) (strategy : SamplingStrategy := .greedy)
-    (eosTokenIds : Array UInt64 := #[]) : IO (Sigma (fun outSeq => DTensor #[batch, outSeq] .Int64))
+    (eosTokenIds : Array UInt64 := #[]) : IO (Sigma (fun outSeq => Tensor { shape := #[batch, outSeq], dtype := .Int64 }))
 def generateStream      -- same, plus `(onStep : StreamCallback batch)` after `inputIds`
 def generateFromEmbeds  -- same as `generate`, plus precomputed `inputsEmbeds`
 def generateUncached    -- same as `generate`; full re-forward reference
@@ -243,9 +243,9 @@ Same pattern: `Gemma4ForCausalLM.generate` / `generateStream` / `generateFromEmb
 | `FlowConfig` | `tMin`/`tMax`/`softcap`/`eps`/`weightDecay`/`gradClip` knobs |
 | `TimeMap.identity` | linear tau↔t map (plug LUT-based conversions in here) |
 | `corruptContinuous` | `x_t = (1 - t)·noise + t·oneHot(x)` corruption, returns `(x_t, target)` |
-| `flowLoss` / `flowLossGivenTau` | per-token flow-matching loss, `IO (DTensor #[batch, seq] .Float32)` |
+| `flowLoss` / `flowLossGivenTau` | per-token flow-matching loss, `IO (Tensor { shape := #[batch, seq], dtype := .Float32 })` |
 | `trainStep` | full AdamW step; returns `(Params × Optim.AdamWState Params × LossReport)` |
-| `generateFLM` | ODE sampling with DiffEq Euler, `(steps : Nat) → IO (DTensor #[batch, seq] .Int64)` |
+| `generateFLM` | ODE sampling with DiffEq Euler, `(steps : Nat) → IO (Tensor { shape := #[batch, seq], dtype := .Int64 })` |
 | `generateFLMWithSolver` | same with a caller-supplied `DiffEq.AbstractSolver` |
 | `psdLossGivenTau` / `diagonalLossGivenTau` / `samplePsdTimes` | FMLM semigroup losses and time sampling |
 
@@ -307,7 +307,7 @@ private def tinyCfg : Config := {
 def main : IO Unit := do
   let model ← Qwen3ForCausalLM.init tinyCfg
   let ids := Tensor.reshape (Tensor.fromInt64Array #[3, 2, 1]) #[1, 3]
-  let logits := model.forward ids                 -- DTensor #[1, 3, 64] .Float32
+  let logits := model.forward ids                 -- Tensor { shape := #[1, 3, 64], dtype := .Float32 }
   let ⟨outSeq, _out⟩ ← model.generateGreedy ids 4 #[]
   IO.println s!"logits: {logits.runtimeShape}, generated {outSeq} tokens total"
 ```
@@ -321,9 +321,9 @@ Reconstructed example (from `Examples/Flux/FluxDemo.lean:128-174`):
 ```lean
 let qwenCfg := QwenConfig.fluxKleinTextEncoder
 let qwen ← loadQwenFluxEmbedderSharded qwenDir qwenCfg maxSeqLen #[8, 17, 26]
--- tokens : DTensor #[1, maxSeqLen] .Int64; attnMask has the same shape
+-- tokens : Tensor { shape := #[1, maxSeqLen], dtype := .Int64 }; attnMask has the same shape
 let txtEmb := qwen.encodeMasked qwenCfg maxSeqLen tokens attnMask
--- txtEmb : DTensor #[1, maxSeqLen, qwen.outputLayers.size.toUInt64 * qwenCfg.hidden_size] .Float32
+-- txtEmb : Tensor { shape := #[1, maxSeqLen, qwen.outputLayers.size.toUInt64 * qwenCfg.hidden_size], dtype := .Float32 }
 ```
 
 ### FLM training loss and ODE sampling
@@ -344,7 +344,7 @@ def main : IO Unit := do
   let loss ← flowLoss (cfg := {}) TimeMap.identity identityDenoiser () tokens
   IO.println s!"mean loss: {(Tensor.meanAll loss).item}"
   let out ← generateFLM (batch := 2) (cfg := {}) TimeMap.identity identityDenoiser () 8
-  IO.println s!"sampled tokens: {out.runtimeShape}"  -- DTensor #[2, 3] .Int64 after argmax
+  IO.println s!"sampled tokens: {out.runtimeShape}"  -- Tensor { shape := #[2, 3], dtype := .Int64 } after argmax
 ```
 
 ## Caveats

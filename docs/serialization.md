@@ -30,7 +30,7 @@ placement before returning an indexed tensor.
 `torch.safetensors.openHandle` returns a `SafeTensorsHandle` for repeated reads.
 Use `loadFromHandleWithSpec`, `loadTensorWithSpec`, or
 `loadTensorShardedWithSpec` with a `TensorSpec`; each returns
-`IO (DTensor spec.shape spec.dtype)`. Contract variants also carry role and device
+`IO (Tensor { shape := spec.shape, dtype := spec.dtype })`. Contract variants also carry role and device
 policy metadata. The device argument defaults to CPU.
 
 The native header `cc/src/tyr_safetensors_abi.h` and generated-C audit cover all
@@ -76,12 +76,12 @@ Results are sorted by name and duplicate tensor names are rejected.
 time without a multi-GB checkpoint on disk.
 
 The schema layer also provides contract-checked typed loaders that return a
-dtype-indexed `DTensor` (see [Typed tensors](core/typed.md)):
+dtype-indexed `Tensor` (see [Typed tensors](core/typed.md)):
 
 ```lean
 def loadTensorWithContract (path : String) (name : String)
     (contract : TensorContract) (device : Device := Device.CPU)
-    : IO (DTensor contract.spec.shape contract.spec.dtype)
+    : IO (Tensor { shape := contract.spec.shape, dtype := contract.spec.dtype })
 ```
 
 plus `loadFromHandleWithContract`, `loadTensorShardedWithContract`, `...WithSpec`
@@ -124,9 +124,9 @@ shown; the declaration base name is sanitized and lowercased to `linear_weight`)
 
 - `abbrev linear_weightShape : Shape` — the static shape;
 - `def linear_weightSpec : TensorSchema` and `def linear_weightTensorSpec : TensorSpec`;
-- `def load_linear_weight (source : String := defaultSource) : IO (DTensor linear_weightShape linear_weightTensorSpec.dtype)`;
+- `def load_linear_weight (source : String := defaultSource) : IO (Tensor { shape := linear_weightShape, dtype := linear_weightTensorSpec.dtype })`;
 - explicitly named checked variants `load_linear_weightTyped` / `...TypedOnDevice` returning
-  `IO (DTensor linear_weightShape ...)`;
+  `IO (Tensor { shape := linear_weightShape, dtype := linear_weightTensorSpec.dtype })`;
 - for single-file sources additionally `load_linear_weightFromHandle` and
   `load_linear_weightTypedFromHandle[OnDevice]` taking a `SafeTensorsHandle`.
 
@@ -275,8 +275,8 @@ SafeTensors export.
 | `saveSnapshot` / `loadSnapshot` | `String → Schema → IO Unit` / `String → IO Schema` | persist/restore a schema |
 | `TensorSchema.toSpec` | `TensorSchema → TensorSpec` | shape + dtype |
 | `TensorSchema.contract` | `(role := .parameter) → (devicePolicy := .any) → TensorContract` | boundary contract |
-| `loadTensor[Sharded]WithContract` | `... → IO (DTensor contract.spec.shape contract.spec.dtype)` | checked load from file/dir |
-| `loadFromHandleWithContract` | `SafeTensorsHandle → ... → IO (DTensor ...)` | checked load from open handle |
+| `loadTensor[Sharded]WithContract` | `... → IO (Tensor { shape := contract.spec.shape, dtype := contract.spec.dtype })` | checked load from file/dir |
+| `loadFromHandleWithContract` | `SafeTensorsHandle → ... → IO (Tensor { shape := contract.spec.shape, dtype := contract.spec.dtype })` | checked load from open handle |
 | `...WithSpec`, `...WithSchema` | same shapes | spec/schema conveniences |
 
 ### Try-load helpers (`Tyr/SafeTensors/Load.lean`)
@@ -289,7 +289,7 @@ SafeTensors export.
 | `loadTensorCandidates` / `loadTensorShardedCandidates` | throwing variants of the above |
 
 All take `(path|dir) (name[s]) (s : Shape) (device : Device := Device.CPU)` and
-return `IO (Option (STensor s))` resp. `IO (STensor s)`; dtype follows the file.
+return `IO (Option (Tensor { shape := s }))` resp. `IO (Tensor { shape := s })`; dtype follows the file.
 
 ### Hub (`torch.Hub`, `Tyr/Hub.lean`)
 
@@ -334,10 +334,10 @@ safetensors_type_provider "Tests/fixtures/safetensors/sharded" as ShardedSafe
 
 def demo : IO Unit := do
   -- Per-tensor loaders; shape is checked against the generated Shape abbrev.
-  let w ← SingleSafe.load_linear_weight            -- DTensor #[2, 3] .Float32
+  let w ← SingleSafe.load_linear_weight            -- Tensor { shape := #[2, 3], dtype := .Float32 }
   IO.println s!"weight shape: {w.runtimeShape}"
   -- Explicitly named dtype-indexed checked loader.
-  let wTyped ← SingleSafe.load_linear_weightTyped  -- DTensor #[2, 3] .Float32
+  let wTyped ← SingleSafe.load_linear_weightTyped  -- Tensor { shape := #[2, 3], dtype := .Float32 }
   IO.println s!"weight dtype: {wTyped.actualSpec.dtype}"
   -- Full hierarchical record: fields follow tensor names split on '.'.
   let weights ← ShardedSafe.loadAll
@@ -421,7 +421,7 @@ invalid state; legacy flat directories retain their compatibility loader.
 ## Related guides
 
 - [Core tensors](core/tensors.md) — `Tensor σ`, `Shape`, `DType`, `Device`
-- [Typed tensors](core/typed.md) — `TensorSpec`, `TensorContract`, `DTensor`
+- [Typed tensors](core/typed.md) — `TensorSpec`, `TensorContract`, `Tensor`
 - [TensorStruct](core/tensorstruct.md) — the traversal class behind checkpointing
 - [Optimization](optimization.md) — the Adam state trees being persisted
 - [LLM models](models/llms.md), [Audio and speech models](models/audio-speech.md) —

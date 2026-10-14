@@ -138,7 +138,7 @@ The layer types:
 structure ManifoldLinear (M : UInt64 → UInt64 → Type) [MatrixManifoldCarrier M]
     (in_dim out_dim : UInt64) where
   weight : M out_dim in_dim
-  bias : Option (DTensor #[out_dim] .Float32) := none
+  bias : Option (Tensor { shape := #[out_dim], dtype := .Float32 }) := none
 
 structure ManifoldVectorParam (V : UInt64 → Type) [VectorManifoldCarrier V] (n : UInt64) where
   value : V n
@@ -152,8 +152,8 @@ structure ManifoldVectorParam (V : UInt64 → Type) [VectorManifoldCarrier V] (n
 
 `Tyr/Modular/MetricFactor.lean` provides the linear algebra for low-rank pullback metrics:
 
-- `MetricFactor rank dim` (default Float32 and unrestricted device policy) wraps `matrix : DTensor #[rank, dim] .Float32`, a factor `K` of the PSD metric `KᵀK`.
-- `DiagonalMass dim` with the same defaults wraps `diag : DTensor #[dim] .Float32` (`ones`, `ofScalar`, `toMatrix`, `invDiag`, `apply`, `applyInv`).
+- `MetricFactor rank dim` (default Float32 and unrestricted device policy) wraps `matrix : Tensor { shape := #[rank, dim], dtype := .Float32 }`, a factor `K` of the PSD metric `KᵀK`.
+- `DiagonalMass dim` with the same defaults wraps `diag : Tensor { shape := #[dim], dtype := .Float32 }` (`ones`, `ofScalar`, `toMatrix`, `invDiag`, `apply`, `applyInv`).
 - Operations: `pullback` along a Jacobian, `gram` (`KᵀK`), `denseMetric D K = D + KᵀK`, `apply` / `applyTranspose` / `applyRegularized`, and `solveWoodbury D K g` solving `(D + KᵀK)x = g` via the Woodbury identity with inner matrix `I + K D⁻¹ Kᵀ` (`MetricFactor.lean:109-119`).
 
 `Tyr/Modular/RiemannianModule.lean:32` turns a leaf module into a tape-based, locally-linearizable unit for recursive metric-factor propagation:
@@ -162,10 +162,10 @@ structure ManifoldVectorParam (V : UInt64 → Type) [VectorManifoldCarrier V] (n
 class RiemannianModule (M : Type) (inDim outDim : UInt64) where
   paramDim : UInt64
   Tape : Type
-  forwardWithTape : M → DTensor #[inDim] .Float32 → DTensor #[outDim] .Float32 × Tape
+  forwardWithTape : M → Tensor { shape := #[inDim], dtype := .Float32 } → Tensor { shape := #[outDim], dtype := .Float32 } × Tape
   localLinearization : M → Tape → LocalLinearization inDim paramDim outDim
   paramMass : M → DiagonalMass paramDim
-  applyAmbientUpdate : M → DTensor #[paramDim] .Float32 → Float → M
+  applyAmbientUpdate : M → Tensor { shape := #[paramDim], dtype := .Float32 } → Float → M
 ```
 
 `LocalLinearization` (`RiemannianModule.lean:13`) bundles operator-form Jacobians (`applyA`, `applyAT`, `applyB`, `applyBT`) plus dense `materializeA` / `materializeB` for tests and factor pullbacks via row-wise adjoints. Instances exist for `torch.Linear` (parameter dim `out·in + out`, tape = input vector) and `ManifoldLinear` (ambient update re-projects onto the manifold). `backwardLeafStep` performs one layer's metric solve + update + factor/cotangent propagation and returns `LayerStepDiagnostics` (gradient/update/residual norms, inner condition estimate); `sequentialForwardWithTape` / `sequentialBackwardMetricStep` handle two-layer `Sequential` compositions. These are the building blocks consumed by `Tyr.Optim.RiemannianSGD`.
@@ -176,8 +176,8 @@ Built-in layers (all in namespace `torch`):
 
 | Layer | Init | Forward functions | `Module` instances |
 |---|---|---|---|
-| `Linear in_dim out_dim` | `Linear.init (in_dim out_dim) (withBias := true) : IO (Linear in_dim out_dim)` | `forward2d : DTensor #[b,i] .Float32 → DTensor #[b,o] .Float32`, `forward3d : DTensor #[b,s,i] .Float32 → DTensor #[b,s,o] .Float32` | 2D and 3D |
-| `LayerNorm dim` | `LayerNorm.init (dim) (eps := 1e-5)`, `LayerNorm.initNoAffine` | `forward3d : DTensor #[b,s,d] .Float32 → DTensor #[b,s,d] .Float32` | 3D only |
+| `Linear in_dim out_dim` | `Linear.init (in_dim out_dim) (withBias := true) : IO (Linear in_dim out_dim)` | `forward2d : Tensor { shape := #[b,i], dtype := .Float32 } → Tensor { shape := #[b,o], dtype := .Float32 }`, `forward3d : Tensor { shape := #[b,s,i], dtype := .Float32 } → Tensor { shape := #[b,s,o], dtype := .Float32 }` | 2D and 3D |
+| `LayerNorm dim` | `LayerNorm.init (dim) (eps := 1e-5)`, `LayerNorm.initNoAffine` | `forward3d : Tensor { shape := #[b,s,d], dtype := .Float32 } → Tensor { shape := #[b,s,d], dtype := .Float32 }` | 3D only |
 | `RMSNorm dim` | `RMSNorm.init (dim) (eps := 1e-6)` | `forward2d`, `forward3d`, `forward4d`, `forward5d` | 2D and 3D |
 
 Note: `RMSNorm.forward5d` (`RMSNorm.lean:48`) is misnamed — it is a 4D forward on the attention layout `[batch, n_head, seq, head_dim]`; `forward4d` uses `[batch, seq, n_head, head_dim]`. Neither 4D variant has a `Module` instance.
@@ -210,7 +210,7 @@ def ManifoldLinear.init [MatrixManifoldCarrier M] (in_dim out_dim : UInt64)
     : IO (ManifoldLinear M in_dim out_dim)
 def ManifoldLinear.applyDualMapUpdate [MatrixManifoldCarrier M] {in_dim out_dim : UInt64}
     (lin : ManifoldLinear M in_dim out_dim)
-    (weightGrad : DTensor #[out_dim, in_dim] .Float32) (biasGrad? : Option (DTensor #[out_dim] .Float32))
+    (weightGrad : Tensor { shape := #[out_dim, in_dim], dtype := .Float32 }) (biasGrad? : Option (Tensor { shape := #[out_dim], dtype := .Float32 }))
     (lr : Float) : ManifoldLinear M in_dim out_dim
 def ManifoldUpdatable.step [ManifoldUpdatable P]
     (params : P) (grad : ManifoldUpdatable.Cotangent params) (lr : Float) : P
@@ -245,8 +245,8 @@ def PolicyNet.init (obsDim hidden actionDim : UInt64)
   pure { fc1, policyHead, valueHead }
 
 def PolicyNet.forward {batch obsDim hidden actionDim : UInt64}
-    (net : PolicyNet obsDim hidden actionDim) (x : DTensor #[batch, obsDim] .Float32)
-    : DTensor #[batch, actionDim] .Float32 × DTensor #[batch, 1] .Float32 :=
+    (net : PolicyNet obsDim hidden actionDim) (x : Tensor { shape := #[batch, obsDim], dtype := .Float32 })
+    : Tensor { shape := #[batch, actionDim], dtype := .Float32 } × Tensor { shape := #[batch, 1], dtype := .Float32 } :=
   let h := Tensor.relu (Linear.forward2d net.fc1 x)
   (Linear.forward2d net.policyHead h, Linear.forward2d net.valueHead h)
 ```

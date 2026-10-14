@@ -1,9 +1,222 @@
 # Removing the legacy tensor alias
 
-The intended public tensor type is `torch.Tensor σ`. The legacy
-`torch.T shape` is a transparent alias for a single native handle type: different
-shapes are definitionally equal. It must not be used to claim shape safety.
-This migration is in progress; the alias has not yet been eliminated.
+The public tensor type is `torch.Tensor σ`. The former `torch.T shape` was a
+transparent alias for a single native handle type: different shapes were
+definitionally equal. Its declaration and production callers have been removed.
+The shape/dtype convenience aliases `DTensor` and `STensor` have also been
+removed; public signatures now use `Tensor` with a complete or partial
+`StaticSpec` directly. The sections below retain the migration history and its
+validation checkpoints; older inventories and uses of the removed names describe
+those checkpoints. GPU hardware qualification remains separate from removal of
+the declarations.
+
+## 2026-10-14 follow-up: remove the convenience aliases
+
+`DTensor s d` becomes `Tensor { shape := s, dtype := d }`; `STensor s` becomes
+`Tensor { shape := s }`. This preserves the existing shape, dtype, and device
+claims without changing native representation. Source signatures, generated
+loaders, examples, tests, and current API guides now use the canonical spelling.
+An existential shape remains explicit as `Sigma (fun s => Tensor { shape := s })`.
+
+The unused `torch.TT`, `SomeDTensor`, and `Tensor.assumeDType` names are removed
+as well. `Tensor.toSome` now accepts any `Tensor σ` and returns `Sigma Tensor`,
+preserving its entire specification, including device policy. Raw handles still
+enter checked code through `Tensor.ofRaw`; removing aliases adds no unchecked
+conversions.
+
+Alias removal passed the strict 1,868-job build, all nine CPU suites (1,500
+main tests), all twelve ABI checks, seven complete guide examples, and the
+standalone specification prototype. The validation results in the review below
+describe the earlier review checkpoint.
+
+## 2026-10-14 follow-up: close unchecked raw admission
+
+`Tensor.assumeSpec` and the implicit coercion to `RawTensor` are removed.
+The indexed carrier now lives in `Tyr.Basic` beside native metadata inspection;
+its private constructor is available only there. `Tyr.Basic.Types` remains
+native-free for GPU code generation. Anonymous construction and record updates
+cannot replace a checked handle. Existing handles enter through `ofRaw`, which
+checks shape, dtype, and device before construction. Core operation adapters
+now validate native outputs as well, including tuples and IO results.
+
+`checkedReplacement?` compares actual dtype and placement against the original
+handle, so a dynamic specification cannot hide metadata changes in preserving
+operations. Copy adapters check actual shape and dtype before mutation. The
+BranchingFlows batch-staging path now explicitly casts floating fields when
+copying Float32 batches into BF16 storage.
+Intentional model-tree conversion uses `TensorStruct.castTo TargetType source`:
+the destination type specifies dtype and placement separately for each leaf.
+`TensorStruct.castDType` remains a uniform convenience operation within the same
+declared structure type, checking every converted leaf against its original
+specification. A conflicting concrete dtype produces an error.
+
+Only the reserved `.Unknown "dynamic"` token weakens a dtype claim; arbitrary
+unknown or misspelled tokens are no longer wildcards. `castDType?`, `castLike?`,
+and `reshapeChecked?` return metadata validation errors through `Except`. Reshape checks native
+element counts and rejects unsigned extents that would become negative native
+dimensions. `reifyDType` recovers an existential native dtype while retaining
+shape and device policy. Explicit weakening remains available; a shared dynamic
+index does not establish equality of two actual dtypes.
+
+The remaining native construction trust is `zerosFor`: it allocates fresh
+storage from the requested spec to bootstrap pure defaults, accepts no foreign
+handle, and relies on libtorch allocation/casting. Metadata introspection and
+the C ABI are also trusted. Native device conversion now rejects oversized CUDA
+indices, unsupported MPS requests, and unrepresentable native backends instead
+of wrapping or mislabeling them. Unsupported dtype metadata retains its native
+scalar-type name, so distinct types such as complex64 and complex128 cannot
+collapse to the same `Unknown` value. Pure convenience APIs retain Lean's panic/fallback
+behavior; callers requiring recoverable rejection should use `Except` or IO
+APIs. Native allocation and execution retain their existing LibTorch error
+behavior. This change is not a proof of native code or GPU execution.
+
+## 2026-10-14 follow-up: choose tensor-tree destination types
+
+`TensorStruct.castTo TargetType source` converts a tree using the complete
+specifications in `TargetType`. Heterogeneous targets can request BF16 model
+weights, Float32 normalization weights, and Int64 indices in one conversion.
+The result carries those destination types through subsequent Lean code.
+
+```lean
+import Tyr.TensorStruct.Cast
+open torch
+
+abbrev StoredPair :=
+  Tensor { shape := #[2, 3], dtype := .Float32 } ×
+  Frozen { shape := #[2], dtype := .Int64 }
+
+abbrev RuntimePair :=
+  Tensor { shape := #[2, 3], dtype := .BFloat16, device := .exact .CPU } ×
+  Frozen { shape := #[2], dtype := .Int64 }
+
+def preparePair (source : StoredPair) : IO RuntimePair :=
+  TensorStruct.castTo RuntimePair source
+```
+
+Each tensor retains its shape. A concrete target dtype requests a native cast;
+an exact target device requests an explicit move. `castTo` submits dtype and
+placement together in a single native conversion, allowing an MPS Float32
+source to request CPU Float64 directly. Dynamic target dtype and unrestricted
+target placement retain the corresponding source metadata.
+Container lengths, option branches, frozen roles, and static values are
+preserved. Within `castTo`, metadata validation failures and caught native
+conversion exceptions produce IO errors with the leaf's structural path.
+
+`TensorTreeCast SourceType TargetType` describes the traversal. For records,
+`import Tyr.TensorStruct.DeriveCast` enables
+`derive_tensor_tree_cast SourceType => TargetType`, matching field names and
+declaration order. The [typed tensor guide](core/typed.md#models-differentiation-and-persistence)
+contains a complete record example. `TensorStruct.castDType dtype params`
+remains useful for uniform conversion of dynamic leaves within one declared
+structure type; its original concrete leaf specifications still apply.
+
+The raw-admission and type-tree changes pass the strict 1,876-job build across
+all nine required CPU runners, `Examples`, `TestGPUE2E`, and `TestGPUGB10E2E`.
+All nine CPU suites pass: 1,509 main tests, 50 experimental tests, and seven
+Laguna suites, with no panic or fatal messages. All twelve ABI checks pass,
+including 112 raw declarations, and both new casting guide examples typecheck.
+The native regression checks actual CPU conversion, complex dtype/value
+preservation, device bounds, and conversion IO errors. MPS was unavailable, so
+the two MPS/CPU conversion-direction checks were explicitly skipped. CUDA
+execution and hosted CI qualification of these local changes remain unverified.
+
+## 2026-10-14 review: one carrier and a smaller unchecked boundary
+
+The transition fixes the original defect: different `Tensor` shape indices are
+not definitionally interchangeable, and the standalone compilation test rejects
+the removed `torch.T` name. At this review checkpoint, `DTensor` and `STensor`
+were abbreviations of this same indexed carrier, not additional runtime
+representations. The follow-up above removes both spellings.
+
+The review reproduced four classes of false metadata claims through native
+CPU execution:
+
+- `baPlusCaa`, `newtonSchulzStep`, and `cautiousUpdate` returned Float32 for
+  Int64 inputs while claiming to preserve Int64. Distributed native results
+  now pass through `Tensor.ofRaw` and report contextual IO errors on mismatch.
+- Broadcasting a Float64 scalar with a Float32 vector returned Float32 while
+  the result specification claimed Float64. The dtype algebra now accounts
+  for zero-dimensional tensor promotion; scalar placement policies also avoid
+  claiming the CPU scalar's device for a result on another device.
+- Wrapped negative dimensions could succeed natively while disagreeing with
+  the nonnegative shape algebra. Runtime-dimension adapters now check result
+  metadata. Concatenation's special empty one-dimensional input also needed
+  its own result-shape rule.
+- Weighted RMS normalization could claim Float64 despite Float32 output for a
+  scalar weight, or claim the input shape after an expanding weight broadcast.
+  Its result dtype now follows scalar promotion and its output shape is checked.
+
+All 22 `assumeSpec` call sites outside `Tyr.Basic.Types` and `Tyr.Typed.*` in
+`Tyr/` and `Examples/` were removed. GPT/model helpers reuse typed operations;
+dynamic FlashAttention and inference-clone boundaries validate metadata. A
+shared checked attention adapter replaces three independent raw wrappers.
+Ten unchecked core wrappers now validate their result specifications as well.
+Unchecked native construction remains inside the core implementation, along
+with intentional malformed-handle test fixtures. This is a reduced trust
+surface, not a proof that every native operation obeys its specification.
+
+### Eliminating the remaining type names
+
+| Existing spelling | Canonical spelling | Effect |
+| --- | --- | --- |
+| `DTensor s d` | `Tensor { shape := s, dtype := d }` | Same shape/dtype contract and unrestricted device |
+| `STensor s` | `Tensor { shape := s }` | Same shape contract and dynamic dtype/device |
+| `Sigma STensor` | `Sigma (fun s => Tensor { shape := s })` | Retains the existential shape witness |
+
+SafeTensors generation now emits canonical `Tensor` types for both loader
+results and nested record leaves. The aliases remained available at this review
+checkpoint; the follow-up above completes the coordinated source/API migration.
+This cleanup does not change the representation.
+New generic helpers should preserve `σ : StaticSpec` or explicit dtype/device
+parameters. Replacing `STensor` text alone does not recover dtype relationships:
+two `.Unknown "dynamic"` claims can describe different native dtypes. Where a
+model requires one shared dtype, carry it as a parameter or package it once
+existentially at the loading boundary, while retaining deliberate mixed-dtype
+weights and checkpoint storage.
+
+The review found no repository consumers of `SomeDTensor` and `Tensor.toSome`.
+The follow-up replaces their packaging with `Sigma Tensor`, already used by AD
+leaves, to preserve full device policies, and removes the unused `torch.TT` and
+`Tensor.assumeDType` compatibility names. `ShapePackedTensor` and dependent
+arrays remain: their witnesses represent genuine runtime-varying shapes.
+
+Pure checked operations follow the existing `panic!` convention and can return
+an inhabited fallback after reporting a mismatch. `Tensor.ofRaw`, `transpose?`,
+`expand?`, and `rmsNormWeighted?` expose recoverable metadata errors; IO adapters
+should propagate errors.
+The new checks read native metadata and add overhead; no performance comparison
+or GPU hardware qualification is implied by this review.
+
+### Review validation
+
+The final build passes with `--wfail` across all nine required CPU runners,
+`Examples`, `TestGPUE2E`, and `TestGPUGB10E2E` (1,868 build jobs). All nine CPU
+suites pass, including 1,499 main tests and the experimental and seven Laguna
+suites. The new regressions execute scalar promotion across 500 dtype/operand
+combinations, runtime shape checks, RMSNorm contracts, distributed result
+metadata/rejection, inference-clone ownership/rejection, and attention values.
+The main suite also exercises generated checkpoint loaders and AD metadata.
+
+All twelve ABI commands from `.github/workflows/cpu.yml` pass. The five complete
+Lean examples in the core tensor/specification guides and the migrated
+`dev/static_spec_tensor_proto.lean` typecheck. The latter now uses the public
+carrier and guards its four intentional compilation failures instead of
+depending on the removed alias.
+
+Reproduce the broad local checks with:
+
+```sh
+python3 scripts/test_inventory.py --build --wfail
+lake build --wfail Examples TestGPUE2E TestGPUGB10E2E
+lake env python3 scripts/test_inventory.py --run --report /tmp/tyr-review/suites.json
+lake env lean dev/static_spec_tensor_proto.lean
+```
+
+GitHub CLI checks found no hosted run for this working-tree candidate: the
+latest successful origin CI reports `05304ff`, and the upstream branch's
+successful runs report the older `a4d9105`. Local CPU success and GPU-runner
+compilation do not establish CUDA execution; CPU-suite CUDA cases skip on this
+machine. All changes remain local.
 
 ## What actually needs a raw handle
 
@@ -261,7 +474,7 @@ Reproducible focused acceptance:
 ```sh
 lake build test_typed_models
 lake env .lake/build/bin/test_typed_models
-python3 scripts/check_ffi_abi.py --header cc/src/tyr_raw_tensor_abi.h --generated .lake/build/ir/Tyr/RawTensor.c
+python3 scripts/check_ffi_abi.py --header cc/src/tyr_raw_tensor_abi.h --generated .lake/build/ir/Tyr/Basic.c .lake/build/ir/Tyr/RawTensor.c
 python3 scripts/check_ffi_abi.py
 ```
 
@@ -318,7 +531,7 @@ outstanding. GitHub CLI reports successful CI for older commit
 lake build test_typed_models
 lake env .lake/build/bin/test_typed_models
 python3 scripts/check_ffi_abi.py --header cc/src/tyr_neural_abi.h --generated .lake/build/ir/Tyr/RawTensor/Neural.c
-python3 scripts/check_ffi_abi.py --header cc/src/tyr_raw_tensor_abi.h --generated .lake/build/ir/Tyr/RawTensor.c
+python3 scripts/check_ffi_abi.py --header cc/src/tyr_raw_tensor_abi.h --generated .lake/build/ir/Tyr/Basic.c .lake/build/ir/Tyr/RawTensor.c
 python3 scripts/check_ffi_abi.py
 ```
 
@@ -1245,7 +1458,11 @@ Shell syntax validation and all eleven qualification harness tests pass.
 The final reference scan finds only the deliberate standalone negative test
 outside this historical migration log. Actual GPU execution remains open.
 
-## Remaining acceptance criteria
+## Original migration acceptance criteria
+
+These criteria guided the migration recorded above. The declaration removals
+and local CPU validation are recorded at their respective checkpoints; actual
+GPU hardware qualification remains outstanding.
 
 Remove the `T` declaration and all model, generator, reflection, documentation,
 and test dependencies on it. A rename of `T` to another unchecked public tensor

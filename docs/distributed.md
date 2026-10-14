@@ -24,7 +24,8 @@ The layers compose bottom-up; each one is usable independently. All Lean
 modules are re-exported from the umbrella `Tyr.lean` (`Tyr.lean:30-54`) and
 live in `torch.*` namespaces. The C++ side is a single global
 `c10d::ProcessGroup` plus a `TCPStore` in `cc/src/tyr_distributed.cpp`; NCCL
-is compile-time gated (`USE_C10D_NCCL`), Gloo always available for CPU. Async
+and Gloo are compile-time gated (`USE_C10D_NCCL` and `USE_C10D_GLOO`). A CPU
+build does not necessarily include a distributed backend. Async
 work items live in a global map keyed by `UInt64` work ids.
 
 ### Collectives: `torch.dist` (`Tyr/Distributed.lean`)
@@ -41,14 +42,16 @@ opaque destroyProcessGroup : IO Unit
 opaque barrier : IO Unit
 ```
 
-Collectives consume indexed tensors. All-reduce and broadcast mutate their
-inputs; reduce-scatter and all-gather allocate and return their outputs. `ReduceOp` is
-`sum | avg | product | min | max` (`Tyr/Distributed.lean:29`). The asynchronous all-reduce wrapper returns a `WorkHandle`:
+Collectives preserve input values and return independent results. Private native
+collectives write only into fresh effectfully allocated buffers. `ReduceOp` is
+`sum | avg | product | min | max`. An asynchronous reduction returns an awaiting
+action; execute that action once to wait and obtain the completed tensor. A tensor
+whose storage is still being written is never exposed to the caller.
 
 ```lean
-def allReduce {σ : StaticSpec} (tensor : Tensor σ) (op : ReduceOp := .sum) : IO Unit
-def allReduceAsync {σ : StaticSpec} (tensor : Tensor σ) (op : ReduceOp := .sum) : IO WorkHandle
-def broadcast {σ : StaticSpec} (tensor : Tensor σ) (srcRank : UInt64) : IO Unit
+def allReduce {σ : StaticSpec} (tensor : Tensor σ) (op : ReduceOp := .sum) : IO (Tensor σ)
+def allReduceAsync {σ : StaticSpec} (tensor : Tensor σ) (op : ReduceOp := .sum) : IO (IO (Tensor σ))
+def broadcast {σ : StaticSpec} (tensor : Tensor σ) (srcRank : UInt64) : IO (Tensor σ)
 def reduceScatter {σ : StaticSpec} (worldSize : UInt64) (input : Tensor σ)
     (op : ReduceOp := .sum)
     : IO (Tensor (σ.withShape (σ.shape.set! 0 (σ.shape.getD 0 0 / worldSize))))
@@ -56,7 +59,7 @@ def allGather {σ : StaticSpec} (worldSize : UInt64) (input : Tensor σ)
     : IO (Tensor (σ.withShape (σ.shape.set! 0 (σ.shape.getD 0 0 * worldSize))))
 
 structure WorkHandle where id : UInt64
-opaque wait (handle : WorkHandle) : IO Unit
+def wait (handle : WorkHandle) : IO Unit
 def WorkHandle.isCompleted (handle : WorkHandle) : IO Bool
 def waitAll (handles : Array WorkHandle) : IO Unit
 ```
@@ -67,13 +70,20 @@ leaf (`Tyr/Distributed.lean:280-311`) — the functions most loops call:
 ```lean
 def broadcastParams [TensorStruct α] (params : α) : IO α          -- from rank 0
 def allReduceGrads [TensorStruct α] (grads : α) (op := .avg) : IO α
-def allReduceGradsAsync [TensorStruct α] (grads : α) (op := .avg) : IO (α × Array WorkHandle)
+def allReduceGradsAsync [TensorStruct α] (grads : α) (op := .avg) : IO (IO α)
 ```
 
 The standard data-parallel recipe: `broadcastParams` once after init, local
 forward/backward per rank, `allReduceGrads .avg` after backward, one
-identical optimizer step on every rank (see
+identical optimizer step on every rank using the returned gradient tree (see
 `Examples/NanoChat/ModdedTrain.lean:1167-1196`).
+
+`Tests/RunDistributedValues.lean` checks retained inputs and earlier outputs,
+repeated list collectives, and async completion on two ranks. Build
+`Tests.RunDistributedValues`, then run it twice with ranks `0` and `1` and the
+same port, using its generated Lean setup file. This numerical check requires a
+Gloo-enabled native build; builds without a distributed backend still run the
+ordinary error-path and async-interface tests in `Tests.TestDistributedValues`.
 
 `dist.withDistributed` (`Tyr/Distributed.lean:261`) brackets init/action/teardown
 for a single process group (no teardown if the action throws). A
@@ -234,8 +244,8 @@ its tensor types depend on those fields:
 ```lean
 structure SFTBatch where
   batchSize seqLen : UInt64
-  inputs targets : DTensor #[batchSize, seqLen] .Int64
-  mask : DTensor #[batchSize, seqLen] .Float32
+  inputs targets : Tensor { shape := #[batchSize, seqLen], dtype := .Int64 }
+  mask : Tensor { shape := #[batchSize, seqLen], dtype := .Float32 }
   numValidTokens : Nat
 
 def maskedCrossEntropy {batch seq vocab : UInt64} {d m : DType} {dev : DevicePolicy}
@@ -250,10 +260,10 @@ The main entry is generic over the parameter tree:
 ```lean
 def trainLoop [TensorStruct P]
     (cfg : SFTConfig) (params : P) (optState : Optim.AdamWState P)
-    (forwardFn : P → {b s : UInt64} → DTensor #[b, s] .Int64 →
-      IO (Σ v : UInt64, DTensor #[b, s, v] .Float32))
-    (lossFn : {b s v : UInt64} → DTensor #[b, s, v] .Float32 →
-      DTensor #[b, s] .Int64 → DTensor #[b, s] .Float32 → DTensor #[] .Float32)
+    (forwardFn : P → {b s : UInt64} → Tensor { shape := #[b, s], dtype := .Int64 } →
+      IO (Σ v : UInt64, Tensor { shape := #[b, s, v], dtype := .Float32 }))
+    (lossFn : {b s v : UInt64} → Tensor { shape := #[b, s, v], dtype := .Float32 } →
+      Tensor { shape := #[b, s], dtype := .Int64 } → Tensor { shape := #[b, s], dtype := .Float32 } → Tensor { shape := #[], dtype := .Float32 })
     (trainDataFn : IO SFTBatch) (valDataFn : Option (IO SFTBatch) := none)
     (numTrainExamples : Nat := 10000) (callbacks : Callbacks := {})
     : IO (P × Optim.AdamWState P × SFTState)
@@ -285,9 +295,9 @@ trust region, no importance weights, no clipping, advantage
 
 ```lean
 def computeAdvantages (rewards : Array Float) : Array Float
-def computePGLoss (logProbs : DTensor #[b, t] .Float32)
-    (advantages : DTensor #[b] .Float32) (mask : DTensor #[b, t] .Float32)
-    (numPasses : UInt64 := 1) (examplesPerRank : UInt64 := 1) : DTensor #[] .Float32
+def computePGLoss (logProbs : Tensor { shape := #[b, t], dtype := .Float32 })
+    (advantages : Tensor { shape := #[b], dtype := .Float32 }) (mask : Tensor { shape := #[b, t], dtype := .Float32 })
+    (numPasses : UInt64 := 1) (examplesPerRank : UInt64 := 1) : Tensor { shape := #[], dtype := .Float32 }
 ```
 
 Rewards are pluggable; `mathReward` parses the GSM8K `#### <answer>` marker,
@@ -303,7 +313,7 @@ The update-capable training loop:
 def trainOnPromptsWithUpdates (b t : UInt64) [TensorStruct P]
     (prompts : Array (Array UInt64 × String × String))   -- (tokens, text, answer)
     (generateOneFn : P → Array UInt64 → IO UInt64)
-    (forwardFn : P → DTensor #[b, t] .Int64 → DTensor #[b, t] .Int64 → IO (DTensor #[b, t] .Float32))  -- (params, input, target) → per-token NLL
+    (forwardFn : P → Tensor { shape := #[b, t], dtype := .Int64 } → Tensor { shape := #[b, t], dtype := .Int64 } → IO (Tensor { shape := #[b, t], dtype := .Float32 }))  -- (params, input, target) → per-token NLL
     (params : P) (optState : Optim.AdamWState P)
     (decodeFn : Array UInt64 → String) (rewardFn : String → String → Float)
     (config : GRPOConfig) (numEpochs : Nat := 1) (callbacks : Callbacks := {})
@@ -373,8 +383,8 @@ if worldSize > 1 then
   dist.initProcessGroup "nccl" masterAddr masterPort rank worldSize
 let params ← dist.broadcastParams params        -- identical starting point
 -- per step: local forward/backward, then
-let grads := TensorStruct.grads params
-let _ ← dist.allReduceGrads grads .avg          -- identical gradients everywhere
+let grads ← TensorStruct.grads params
+let grads ← dist.allReduceGrads grads .avg      -- use the returned reduced values
 -- ... identical optimizer step on every rank; teardown at the end:
 if isDistributed then dist.barrier; dist.destroyProcessGroup
 ```

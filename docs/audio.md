@@ -173,9 +173,10 @@ The default dtype is BFloat16 and the default placement policy is unrestricted.
 
 The cache's runtime device must match Q/K/V. Although the structure can represent
 other dtype policies, the convenience initializer creates BF16 buffers. Appends
-mutate existing storage through `copySliceIO`; old and returned cache values can
-share the modified buffers. Do not reuse a consumed cache as an independent
-snapshot. `Cache.init` allocates independent K/V storage for every layer.
+use the returned tensors from `copySliceIO`; an earlier cache or attention view
+keeps its original values. Thread the returned cache into the next decode step.
+Uniquely owned eligible CPU buffers can be reused; accelerator updates currently
+copy. `Cache.init` allocates independent K/V storage for every layer.
 Invalid capacity, position, and layer accesses produce IO errors.
 
 The CPU/GPU parity harness compares cached decoding with full-sequence attention.
@@ -240,10 +241,10 @@ open torch torch.Generator
 
 def decodeStep {batch maxLen kvHeads : UInt64}
     (cache : KVCache.Cache 1 batch maxLen kvHeads 128)
-    (q : DTensor #[batch, 32, 1, 128] .BFloat16)
-    (k v : DTensor #[batch, kvHeads, 1, 128] .BFloat16) :
+    (q : Tensor { shape := #[batch, 32, 1, 128], dtype := .BFloat16 })
+    (k v : Tensor { shape := #[batch, kvHeads, 1, 128], dtype := .BFloat16 }) :
     IO (KVCache.Cache 1 batch maxLen kvHeads 128 ×
-      DTensor #[batch, 32, 1, 128] .BFloat16) := do
+      Tensor { shape := #[batch, 32, 1, 128], dtype := .BFloat16 }) := do
   let (cache', out) ← cache.attendLayer (numQHeads := 32) 0 q k v (enableGqa := true)
   let cache' ← cache'.incrementSeqLens
   pure (cache', out)

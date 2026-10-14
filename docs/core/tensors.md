@@ -13,7 +13,7 @@ import Tyr.Typed
 import Tyr.Typed.Neural
 open torch
 
-abbrev Activations := DTensor #[32, 128] .Float32
+abbrev Activations := Tensor { shape := #[32, 128], dtype := .Float32 }
 abbrev PinnedActivations := Tensor {
   shape := #[32, 128]
   dtype := .BFloat16
@@ -21,8 +21,8 @@ abbrev PinnedActivations := Tensor {
 }
 ```
 
-`DTensor shape dtype` leaves placement unrestricted. `STensor shape` also leaves
-dtype dynamic. A dynamic dtype or `.any` placement makes no claim about that
+`Tensor { shape := shape, dtype := dtype }` leaves placement unrestricted.
+`Tensor { shape := shape }` also leaves dtype dynamic. A dynamic dtype or `.any` placement makes no claim about that
 component; `actualSpec` and `device` report native metadata. `shape`, `dtype`, and
 `staticSpec` describe the declared index. Different shape/dtype indices are not
 interchangeable.
@@ -30,8 +30,10 @@ interchangeable.
 `RawTensor` is the native handle used by adapters in `Tyr.RawTensor` and its
 submodules. It is not the model-facing tensor type. `Tensor.ofRaw` validates
 shape, dtype, and placement and returns `Except String (Tensor σ)`.
-`Tensor.assumeSpec` bypasses those checks and belongs only at a justified trust
-boundary. Static indices alone do not prove a native implementation correct.
+There is no public unchecked raw constructor or implicit raw coercion. Native
+adapters use explicit `.raw` access and validate returned handles. Static
+indices alone do not prove a native implementation correct: metadata extraction
+and the native zero factory remain trusted native boundaries.
 
 ## Creation and conversion
 
@@ -73,9 +75,19 @@ for operations where preserving an input's generic dtype requires validation.
 ## Autograd and mutation
 
 `setRequiresGrad`, `detach`, and `gradOf` retain the tensor specification.
+`setRequiresGrad` returns a value with the requested flag and preserves retained
+aliases. `gradOf : IO (Tensor σ)` returns a detached, independent snapshot of
+accumulated gradients. Later backward passes, clipping, and `zeroGrad : IO Unit`
+do not change a previously returned gradient snapshot.
 `backwardLoss` takes a scalar loss; `backward` takes an output and an explicit
 cotangent with the same specification. `hasGradFn` inspects graph ownership.
-`copyInto` is an `IO` operation that copies into existing storage.
+`copyInto : Tensor σ → Tensor σ → IO (Tensor σ)` returns the updated destination.
+Always use its result: retained aliases keep their original values. Native code
+consumes the destination reference and reuses storage only after proving native
+ownership permits it; otherwise it copies. Inference `data.copySliceIO` follows
+the same returned-value contract. Reuse currently covers ordinary uniquely owned
+CPU storage; accelerator, view, autograd, and externally backed storage take the
+copying path.
 
 ```lean
 import Tyr.Typed
@@ -83,9 +95,9 @@ import Tyr.Typed.Neural
 open torch
 
 def classifierStep {batch inDim classes : UInt64}
-    (weight : DTensor #[classes, inDim] .Float32)
-    (input : DTensor #[batch, inDim] .Float32)
-    (targets : DTensor #[batch] .Int64) : IO Float := do
+    (weight : Tensor { shape := #[classes, inDim], dtype := .Float32 })
+    (input : Tensor { shape := #[batch, inDim], dtype := .Float32 })
+    (targets : Tensor { shape := #[batch], dtype := .Int64 }) : IO Float := do
   let logits := Tensor.linear input weight
   let loss := Tensor.crossEntropy logits targets
   Tensor.backwardLoss loss

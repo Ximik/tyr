@@ -32,8 +32,8 @@ import Tyr.Module.Derive
 open torch
 
 structure LinearParameters (inDim outDim : UInt64) where
-  weight : DTensor #[outDim, inDim] .Float32
-  bias : DTensor #[outDim] .Float32
+  weight : Tensor { shape := #[outDim, inDim], dtype := .Float32 }
+  bias : Tensor { shape := #[outDim], dtype := .Float32 }
   name : Static String
   deriving TensorStruct
 
@@ -78,7 +78,8 @@ nested runtime-dependent structures can still need their own checks.
 All utilities below require `[TensorStruct α]`:
 
 - `count` counts tensor leaves.
-- `grads` and `zeroGrads` obtain or clear accumulated gradients.
+- `grads : α → IO α` obtains an independent gradient snapshot tree;
+  `zeroGrads : α → IO Unit` clears the parameters' accumulated gradients.
 - `detach` and `requiresGrad` transform graph participation.
 - `makeLeafParams` detaches and enables gradient tracking.
 - `scale`, `add`, and `sub` transform matching parameter trees.
@@ -88,6 +89,24 @@ Generic scalar scaling uses a preserving adapter. Its runtime metadata check
 matters for dtypes where native scalar arithmetic could change the result dtype.
 A traversal preserves indices, not unique storage ownership; use explicit
 allocation/copy APIs when independent mutable storage is required.
+
+## Casting to a destination type tree
+
+`TensorStruct.castTo TargetType source` uses each tensor specification in the
+destination Lean type to choose its dtype and device. The result has `TargetType`;
+each leaf keeps its shape, and container lengths and `Static`/`Frozen` roles are
+preserved. Dtype and device changes happen together in one native conversion.
+Validation and native conversion errors report the affected field or index.
+
+Import `Tyr.TensorStruct.Cast` for supported leaf and container conversions. For
+records, import `Tyr.TensorStruct.DeriveCast` and declare
+`derive_tensor_tree_cast SourceType => TargetType`. This matches fields by name
+and order without allocating a destination template. See the
+[complete record example](typed.md#models-differentiation-and-persistence).
+
+`TensorStruct.castDType dtype source` is the uniform convenience for dynamic
+dtype leaves within the same declared type; concrete leaf specifications still
+apply. Ordinary `map` and `mapM` retain each leaf's complete specification.
 
 ## Persistence and AD
 

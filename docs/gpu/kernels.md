@@ -185,8 +185,8 @@ SDPA otherwise. Companions in the same module:
 ### Ops: H100 MHA (`Tyr.GPU.Ops.MhaH100`)
 
 Explicit two-call forward/backward over the `MhaH100` kernels. Shapes are
-fixed: `BF16 seq := DTensor #[1, 1, seq, 64] .BFloat16`, per-tile vector
-`L kvBlocks := DTensor #[1, 1, 1, kvBlocks * 64] .Float32`. Variant selection is a typeclass:
+fixed: `BF16 seq := Tensor { shape := #[1, 1, seq, 64], dtype := .BFloat16 }`, per-tile vector
+`L kvBlocks := Tensor { shape := #[1, 1, 1, kvBlocks * 64], dtype := .Float32 }`. Variant selection is a typeclass:
 
 ```lean
 class Variant (seq kvBlocks : UInt64) where
@@ -235,13 +235,13 @@ Eligibility details live in `currentTkBaseEligible` / `currentTkDecodeEligible`
 ### Ops: fused simulation kernels
 
 - `Tyr.GPU.Ops.RKFused` — fused fixed-step Dopri5 on tile states
-  `Tile cols := DTensor #[1, 1, 64, cols] .Float32` (`cols % 64 == 0`):
+  `Tile cols := Tensor { shape := #[1, 1, 64, cols], dtype := .Float32 }` (`cols % 64 == 0`):
   `Workspace.make cols device : IO (Workspace cols)` (scratch allocated through
   `IO`, see the aliasing caveat below),
   `dopri5StepFused`, and
   `dopri5SolveFused (vf : Float → Tile cols → Tile cols) (t0 t1 : Float) (steps : Nat) (y0) (ws) (blackwell) (stream) : IO (Tile cols)`.
 - `Tyr.GPU.Ops.SDEFused` — fused fixed-step Euler–Maruyama on flat states
-  `DTensor #[n] .Float32`: `emStepFused` (one launch per step; noise drawn inline by the VBT
+  `Tensor { shape := #[n], dtype := .Float32 }`: `emStepFused` (one launch per step; noise drawn inline by the VBT
   descent kernel) and `emSolveFused`, with `DeviceSchedule.make` precomputing
   the Brownian value-query schedules.
 - `Tyr.GPU.Ops.BrownianFused` — host side of the device virtual Brownian
@@ -263,7 +263,7 @@ import Tyr.GPU.Kernels.MhaH100
 open torch Tyr.GPU.Kernels
 
 -- Inputs must be contiguous BF16 tensors on compatible CUDA hardware.
-def mhaForward (q k v : DTensor #[1, 1, 128, 64] .BFloat16) := do
+def mhaForward (q k v : Tensor { shape := #[1, 1, 128, 64], dtype := .BFloat16 }) := do
   let stream ← torch.cuda_current_stream
   let out ← Tensor.uniformLike q 0 0
   let lOut ← Tensor.uniformLike
@@ -291,11 +291,11 @@ import Tyr.GPU.Ops.FlashAttn
 open torch Tyr.GPU.Ops.FlashAttn
 
 -- q, k, and v must be trainable leaves for gradient extraction.
-def attentionGradient (q k v dO : DTensor #[1, 1, 128, 64] .BFloat16)
-    : IO (DispatchRoute × DTensor #[1, 1, 128, 64] .Float32) := do
+def attentionGradient (q k v dO : Tensor { shape := #[1, 1, 128, 64], dtype := .BFloat16 })
+    : IO (DispatchRoute × Tensor { shape := #[1, 1, 128, 64], dtype := .Float32 }) := do
   let (route, out) := flashAttnWithRoute q k v
   Tensor.backward out dO
-  pure (route, (Tensor.gradOf q).toFloat32)
+  pure (route, (← Tensor.gradOf q).toFloat32)
 ```
 
 Fused ODE solve — reconstructed example (from
