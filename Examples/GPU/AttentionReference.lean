@@ -16,4 +16,17 @@ def attentionReference {qSeq kvSeq : UInt64}
   let lse := Tensor.log sumExp
   return (output, lse)
 
+/-- BF16 SDPA vector-Jacobian product, returned in Float32 for kernel comparison. -/
+def attentionTrainingReference {seq : UInt64}
+    (q k v cotangent : DTensor #[1, 1, seq, 64] .BFloat16) :
+    IO (DTensor #[1, 1, seq, 64] .BFloat16 × DTensor #[1, 1, seq, 64] .Float32 ×
+      DTensor #[1, 1, seq, 64] .Float32 × DTensor #[1, 1, seq, 64] .Float32) := do
+  let qRef := Tensor.setRequiresGrad (Tensor.detach q) true
+  let kRef := Tensor.setRequiresGrad (Tensor.detach k) true
+  let vRef := Tensor.setRequiresGrad (Tensor.detach v) true
+  let output := Tensor.attentionGQA qRef kRef vRef 0.0 false
+  Tensor.backwardLoss (Tensor.sumAll (output.toFloat32 * cotangent.toFloat32))
+  pure (output, (Tensor.gradOf qRef).toFloat32, (Tensor.gradOf kRef).toFloat32,
+    (Tensor.gradOf vRef).toFloat32)
+
 end Examples.GPU

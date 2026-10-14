@@ -887,6 +887,24 @@ failures or skips, and the test inventory validates nine required and four
 optional suites. GitHub CLI reports green upstream main CI and a failed older
 CUDA smoke run; neither provides qualification for the local migration.
 
+## H100 attention forward/backward fixture migration
+
+The reduced 128-token H100 runner now uses BF16 forward activations and
+Float32 log-normalizer and gradient buffers. Fixture loading checks exact
+shape and dtype, diagnostic gradient dumps remain indexed, and all writable
+kernel outputs receive independent IO allocations. Raw handles are confined
+to kernel launches.
+
+The shared training reference computes a scalar cotangent contraction through
+BF16 SDPA and returns Float32 gradients. Detached reference leaves prevent
+accumulation across calls. An analytic two-token regression checks output,
+query/key/value derivatives, and repeated-call independence. The runner also
+participates in the CUDA-unavailable check. Actual H100 kernel parity and
+gradient accumulation on hardware remain unqualified.
+The main runner, both GPU test targets, and H100 executable build under
+`--wfail` (1,760 jobs). All 1,484 main CPU tests pass with zero failures/skips.
+The inventory validates nine required and four optional suites.
+
 ## Remaining acceptance criteria
 
 Remove the `T` declaration and all model, generator, reflection, documentation,
