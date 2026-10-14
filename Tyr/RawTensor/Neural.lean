@@ -79,4 +79,9 @@ namespace torch.RawTensor
 @[extern "lean_torch_topk_2d"] opaque topKLast2d (rows cols : UInt64)
     (input : @& RawTensor) (k dim : UInt64) : RawTensor × RawTensor
 
+@[extern "lean_torch_get"] opaque getOp (shape : Shape) (input : @& RawTensor) (idx : Int) : RawTensor
+@[extern "lean_torch_unbind"] opaque unbind (shape : Shape) (input : @& RawTensor) (dim : Nat) : Array RawTensor
+@[extern "lean_torch_logspace"] opaque logspace (start stop : Float) (steps : UInt64)
+    (base : Float) (requiresGrad : Bool) : RawTensor
+
 end torch.RawTensor

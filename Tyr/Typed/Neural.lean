@@ -316,4 +316,34 @@ def topKLast2d {rows cols : UInt64} {d : DType} {dev : DevicePolicy}
   | .ok values, .ok indices => (values, indices)
   | .error message, _ | _, .error message => panic! s!"Tensor.topKLast2d: {message}"
 
+/-- End-exclusive integer range, with overflow-safe length computation. -/
+def rangeLength (start stop step : UInt64) : UInt64 :=
+  if step == 0 || stop <= start then 0
+  else ((stop.toNat - start.toNat + step.toNat - 1) / step.toNat).toUInt64
+
+def arangeFrom (start stop : UInt64) (step : UInt64 := 1) :
+    DTensor #[rangeLength start stop step] .Int64 :=
+  match Tensor.ofRaw (RawTensor.arange start stop step) with
+  | .ok result => result
+  | .error message => panic! s!"Tensor.arangeFrom: {message}"
+
+def getOp {σ : StaticSpec} (input : Tensor σ) (idx : Int) :
+    Tensor (σ.withShape σ.shape[1:].toArray) :=
+  match Tensor.ofRaw (RawTensor.getOp σ.shape input.raw idx) with
+  | .ok result => result
+  | .error message => panic! s!"Tensor.getOp: {message}"
+
+def unbind {σ : StaticSpec} (input : Tensor σ) (dim : Nat := 0) :
+    Array (Tensor (σ.withShape (unbindShape σ.shape dim))) :=
+  (RawTensor.unbind σ.shape input.raw dim).map fun raw =>
+    match Tensor.ofRaw raw with
+    | .ok result => result
+    | .error message => panic! s!"Tensor.unbind: {message}"
+
+def logspace (start stop : Float) (steps : UInt64) (base : Float := 10.0) :
+    DTensor #[steps] .Float32 :=
+  match Tensor.ofRaw (RawTensor.logspace start stop steps base false) with
+  | .ok result => result
+  | .error message => panic! s!"Tensor.logspace: {message}"
+
 end torch.Tensor

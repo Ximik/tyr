@@ -1006,6 +1006,23 @@ All nine required CPU suites build with `--wfail` and pass through
 `T` declaration and operations in `Tyr.Torch` still exist and require separate
 removal after their remaining consumers are migrated.
 
+## Migrate remaining constructor and FFI boundary tests
+
+AD frontend placeholders and modular norm tests now construct indexed tensors.
+Typed constructor rejection tests use native handles directly at the tested
+raw-to-indexed boundary. All 1,488 main tests passed after these changes.
+
+FFI boundary tests and the manual crash probe now use indexed tensors. Checked
+adapters cover start/stop/step ranges, boxed integer indexing, unbind, and
+logspace. Scalar reshape is tested as an actual scalar; exact loading still
+rejects equal-element-count tensors with the wrong shape. Legacy shape erasure
+and permissive loading are no longer asserted as supported public behavior.
+
+`lake build test_runner ffi_crash_probe --wfail` passes, all four migrated FFI
+boundary tests pass, and the neural ABI audit passes all 43 declarations.
+The intentional crash probe was compiled but not executed. Actual GPU
+qualification remains outstanding.
+
 ## Remaining acceptance criteria
 
 Remove the `T` declaration and all model, generator, reflection, documentation,

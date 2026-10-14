@@ -9,14 +9,14 @@
   SIGABRT/SIGSEGV. On a machine where CUDA is available the transfer
   succeeds and the probe reports that nothing crashed.
 -/
-import Tyr.Torch
+import Tyr.Typed
 
 open torch
 
 def main : IO Unit := do
-  let m : T #[2, 2] := torch.ones #[2, 2]
+  let m : DTensor #[2, 2] .Float32 := Tensor.ones #[2, 2]
   IO.println "triggering libtorch device error via .to (CUDA 0)..."
   (← IO.getStdout).flush
   let c := m.to (.CUDA 0)
-  let arr ← data.tensorToFloatArray' c
+  let arr ← c.toFloatArray
   IO.println s!"no crash (CUDA available?): {arr}"

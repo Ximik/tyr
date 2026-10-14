@@ -113,9 +113,9 @@ private def assertValid {σ : StaticSpec}
 
 @[test]
 def testTypedCheckedShapeBoundary : IO Unit := do
-  let raw := torch.ones #[2]
+  let raw := torch.RawTensor.ones #[2]
   LeanTest.assertTrue (Tensor.ofTensor? (shape := #[99]) .Float32 raw).isNone
-    "the raw T shape annotation cannot establish the typed shape invariant"
+    "a native handle cannot establish the typed shape invariant"
   match Tensor.ofTensor (shape := #[99]) .Float32 raw with
   | .ok _ => LeanTest.fail "a mismatched runtime shape must be rejected"
   | .error error => LeanTest.assertTrue (error.containsSubstr "Expected shape")
@@ -264,7 +264,7 @@ def testBroadcastOpsParity : IO Unit := do
     LeanTest.assertTrue (v == 3.0) s!"operator broadcast value, got {v}"
   assertValid (x *ᵇ bias) "operator *ᵇ broadcasts"
   -- a shape-only (dynamic dtype) claim validates against any runtime dtype
-  let dyn : Tensor { shape := #[2, 3] } := Tensor.assumeSpec (torch.ones #[2, 3])
+  let dyn : Tensor { shape := #[2, 3] } := Tensor.assumeSpec (torch.RawTensor.ones #[2, 3])
   assertValid dyn "shape-only claim is dtype-agnostic"
 
 /-- Fully typed model layers: shape and dtype agree end to end, runtime
@@ -304,13 +304,13 @@ def testTypedLayers : IO Unit := do
 @[test]
 def testDevicePinnedSpec : IO Unit := do
   let pinned : Tensor { shape := #[2, 2], dtype := .Float32, device := .exact .CPU } :=
-    Tensor.assumeSpec (torch.ones #[2, 2])
+    Tensor.assumeSpec (torch.RawTensor.ones #[2, 2])
   assertValid pinned "CPU-pinned tensor on CPU"
   assertValid pinned.relu "spec-preserving op keeps the pin"
   assertValid (Add.add pinned pinned) "homogeneous add keeps the pin"
   -- a wrong pin is a *runtime* validate failure (the claim is checked, not trusted)
   let misPinned : Tensor { shape := #[2, 2], dtype := .Float32, device := .exact (.CUDA 0) } :=
-    Tensor.assumeSpec (torch.ones #[2, 2])
+    Tensor.assumeSpec (torch.RawTensor.ones #[2, 2])
   match misPinned.validate with
   | .ok () => LeanTest.fail "CUDA pin on a CPU tensor should fail validation"
   | .error err => LeanTest.assertTrue (err.containsSubstr "device") s!"got: {err}"

@@ -14,45 +14,45 @@ open Tyr.Modular
 @[test]
 def testSpectralNormPositive : IO Unit := do
   -- Spectral norm should be non-negative
-  let mat ← torch.randn #[4, 3]
-  let σ := torch.linalg.spectralNorm mat
+  let mat ← torch.Tensor.randn #[4, 3]
+  let σ := torch.Tensor.spectralNorm mat
   LeanTest.assertTrue (σ ≥ 0.0) s!"Spectral norm should be non-negative, got {σ}"
 
 @[test]
 def testSpectralNormOfZero : IO Unit := do
   -- Spectral norm of zero matrix should be 0
-  let mat := torch.zeros #[3, 3]
-  let σ := torch.linalg.spectralNorm mat
+  let mat := torch.Tensor.zeros #[3, 3]
+  let σ := torch.Tensor.spectralNorm mat
   LeanTest.assertTrue (σ < 1e-6) s!"Spectral norm of zero should be ~0, got {σ}"
 
 @[test]
 def testNuclearNormPositive : IO Unit := do
   -- Nuclear norm should be non-negative
-  let mat ← torch.randn #[4, 3]
-  let n := torch.linalg.nuclearNorm mat
+  let mat ← torch.Tensor.randn #[4, 3]
+  let n := torch.Tensor.nuclearNorm mat
   LeanTest.assertTrue (n ≥ 0.0) s!"Nuclear norm should be non-negative, got {n}"
 
 @[test]
 def testSpectralLessThanNuclear : IO Unit := do
   -- Spectral norm ≤ nuclear norm (equality only for rank-1 matrices)
-  let mat ← torch.randn #[4, 3]
-  let σ := torch.linalg.spectralNorm mat
-  let n := torch.linalg.nuclearNorm mat
+  let mat ← torch.Tensor.randn #[4, 3]
+  let σ := torch.Tensor.spectralNorm mat
+  let n := torch.Tensor.nuclearNorm mat
   LeanTest.assertTrue (σ ≤ n + 1e-5)
     s!"Spectral {σ} should be ≤ nuclear {n}"
 
 @[test]
 def testL2NormPositive : IO Unit := do
   -- L2 norm should be non-negative
-  let vec ← torch.randn #[10]
-  let n := torch.linalg.l2Norm vec
+  let vec ← torch.Tensor.randn #[10]
+  let n := torch.Tensor.l2Norm vec
   LeanTest.assertTrue (n ≥ 0.0) s!"L2 norm should be non-negative, got {n}"
 
 @[test]
 def testMaxRowNormPositive : IO Unit := do
   -- Max row norm should be non-negative
-  let mat ← torch.randn #[5, 3]
-  let n := torch.linalg.maxRowNorm mat
+  let mat ← torch.Tensor.randn #[5, 3]
+  let n := torch.Tensor.maxRowNorm mat
   LeanTest.assertTrue (n ≥ 0.0) s!"Max row norm should be non-negative, got {n}"
 
 /-! ## Linear Layer NormedModule Tests -/

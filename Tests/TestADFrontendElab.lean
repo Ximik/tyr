@@ -24,7 +24,7 @@ def runCoreM (x : CoreM α) : IO α := do
       throw (IO.userError (← msg.toMessageData.toString))
 
 opaque frontendPadPrimitive (_base : torch.DTensor #[2] .Float32) (_padv : torch.DTensor #[1] .Float32) : torch.DTensor #[6] .Float32 :=
-  torch.Tensor.assumeSpec (torch.zeros #[6])
+  torch.Tensor.zeros #[6]
 
 def ordinaryPadWrapper (base : torch.DTensor #[2] .Float32) (padv : torch.DTensor #[1] .Float32) : torch.DTensor #[6] .Float32 :=
   frontendPadPrimitive base padv
@@ -36,7 +36,7 @@ def unsupportedCompositeWrapper (base : torch.DTensor #[2] .Float32) (padv : tor
 
 opaque frontendFrozenPadPrimitive (_base : torch.DTensor #[2] .Float32)
     (_padv : torch.Frozen { shape := #[1], dtype := .Float32 }) : torch.DTensor #[6] .Float32 :=
-  torch.Tensor.assumeSpec (torch.zeros #[6])
+  torch.Tensor.zeros #[6]
 
 def frozenPadWrapper (base : torch.DTensor #[2] .Float32)
     (padv : torch.Frozen { shape := #[1], dtype := .Float32 }) : torch.DTensor #[6] .Float32 :=
