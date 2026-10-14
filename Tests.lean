@@ -15,6 +15,7 @@ import Tests.TestNanoChatCheckpoint
 import Tests.TestFFIBoundary
 import Tests.TestWidgetTyped
 import Tests.TestTypedStandalone
+import Tests.TestTensorTreeCast
 import Tests.TestTensorValueUpdates
 import Tests.TestTensorAutogradEffects
 import Tests.TestDistributedValues

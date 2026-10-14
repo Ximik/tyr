@@ -5,6 +5,8 @@ import Tyr.Torch
 import Tyr.Typed
 import Tyr.SafeTensors
 import Tyr.TensorStruct
+import Tyr.TensorStruct.Cast
+import Tyr.TensorStruct.DeriveCast
 import Tyr.Mctx
 import Tyr.MctxDag
 
@@ -79,6 +81,8 @@ This root module re-exports the core, general-purpose surface area:
 - `Tyr.Typed`: tensor wrappers with static shape/dtype checks and checked raw boundaries.
 - `Tyr.SafeTensors`: typed SafeTensors schema and loading support.
 - `Tyr.TensorStruct`: generic traversal/mapping over tensor-containing structures.
+- `Tyr.TensorStruct.Cast`: conversion to a destination tree of tensor types,
+  with per-leaf dtype/device specifications and no allocated destination template.
 - `Tyr.Mctx`: Monte Carlo tree search infrastructure.
 - `Tyr.MctxDag`: DAG-oriented counterpart to `Tyr.Mctx` with sharing semantics.
 - `Tyr.AutoGrad`: JAX-style automatic differentiation over Tyr IR.
