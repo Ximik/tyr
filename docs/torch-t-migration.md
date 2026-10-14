@@ -944,6 +944,26 @@ executables correctly return failure without CUDA. The inventory validates
 nine required and four optional suites. Upstream main CI remains green and
 is separate from this local migration.
 
+## GB10 attention runner migration
+
+The GB10 fixture and benchmark paths now carry indexed BF16 activations,
+Float32 saved normalization state, and the kernel-specific gradient dtype:
+Float32 for the reduced direct backward kernels and BF16 for the specialized
+768-token backward kernels. Fixture loading requires exact shape/dtype.
+Writable outputs use independent IO allocations, replacing syntactically
+different pure expressions previously used to avoid allocation aliasing.
+
+Shared attention references now support indexed batch and head counts. A
+CPU regression checks two batches and three heads against analytic forward,
+log-sum-exp, and Q/K/V derivatives. The GB10 runner also participates in the
+CUDA-unavailable regression. Actual GB10 numerical parity and performance
+remain unqualified without hardware execution.
+The main runner, both GPU test targets, and GB10 executable build under
+`--wfail` (1,764 jobs). All 1,487 main CPU tests pass with zero failures/skips.
+The benchmark correctly fails on this CUDA-unavailable host. Test inventory
+validation still covers nine required and four optional suites. GitHub CLI
+reports green upstream main CI, independently of the local changes.
+
 ## Remaining acceptance criteria
 
 Remove the `T` declaration and all model, generator, reflection, documentation,

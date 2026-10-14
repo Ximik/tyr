@@ -7,6 +7,7 @@ import Examples.GPU.LossReference
 import Examples.GPU.OptimizerReference
 import Examples.GPU.RunRMSNorm
 import Examples.GPU.RunLayerNorm
+import Examples.GPU.RunMhaGB10
 import Examples.GPU.RunMhaH100
 import Examples.GPU.RunFlashAttn
 import Examples.GPU.RunRotary
@@ -43,7 +44,7 @@ example (a : DTensor #[2] .Float32) (b : DTensor #[3] .Float32) : True := by
       Examples.GPU.RunBrownianDescent.runOnce, Examples.GPU.RunEulerMaruyamaFused.runOnce,
       Examples.GPU.RunRotary.runOnce, Examples.GPU.RunLayerNorm.runOnce,
       Examples.GPU.RunLayerNorm.runBFloat16Once, Examples.GPU.RunRMSNorm.runOnce,
-      Examples.GPU.RunRMSNorm.runBFloat16Once, Examples.GPU.RunFlashAttn.runOnce, Examples.GPU.RunMhaH100.runOnce false] do
+      Examples.GPU.RunRMSNorm.runBFloat16Once, Examples.GPU.RunFlashAttn.runOnce, Examples.GPU.RunMhaH100.runOnce false, Examples.GPU.RunMhaGB10.runOnce] do
     LeanTest.assertTrue (!(← run)) "CPU hosts cannot claim a successful GPU parity run"
 
 @[test] def testGPURotaryIndexedTrainingReference : IO Unit := do
@@ -251,3 +252,18 @@ example (a : DTensor #[2, 3] .BFloat16) (b : DTensor #[4, 5] .BFloat16) : True :
 @[test] def testGPUDecodeIndexedCacheReference : IO Unit := do
   torch.manualSeed 42
   LeanTest.assertTrue (← Examples.GPU.runDecodeCacheParity .CPU)
+
+@[test] def testGPUAttentionIndexedBatchedHeads : IO Unit := do
+  let q := (Tensor.zeros #[2, 3, 2, 64]).toBFloat16
+  let k := (Tensor.fromFloatArray (Array.replicate 64 0.0 ++ Array.replicate 64 1.0))
+    |>.reshapeChecked #[1, 1, 2, 64] |>.expand #[2, 3, 2, 64] |>.toBFloat16
+  let v := (Tensor.fromFloatArray (Array.replicate 64 1.0 ++ Array.replicate 64 3.0))
+    |>.reshapeChecked #[1, 1, 2, 64] |>.expand #[2, 3, 2, 64] |>.toBFloat16
+  let cotangent := (Tensor.ones #[2, 3, 2, 64]).toBFloat16
+  let (out, lse) := Examples.GPU.attentionReference q k v
+  LeanTest.assertTrue (Tensor.allclose out.toFloat32 (Tensor.full #[2, 3, 2, 64] 2.0) 0 0)
+  LeanTest.assertTrue (Tensor.allclose lse (Tensor.full #[2, 3, 2] (Float.log 2.0)) 0 1e-6)
+  let (_, dq, dk, dv) ← Examples.GPU.attentionTrainingReference q k v cotangent
+  LeanTest.assertTrue (Tensor.allclose dq (Tensor.full #[2, 3, 2, 64] 4.0) 0 0)
+  LeanTest.assertTrue (Tensor.allclose dk (Tensor.zeros #[2, 3, 2, 64]) 0 0)
+  LeanTest.assertTrue (Tensor.allclose dv (Tensor.ones #[2, 3, 2, 64]) 0 0)

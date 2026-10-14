@@ -4,23 +4,23 @@ namespace Examples.GPU
 open torch
 
 /-- Noncausal head-dimension-64 attention with quantized inputs and Float32 reference arithmetic. -/
-def attentionReference {qSeq kvSeq : UInt64}
-    (q : DTensor #[1, 1, qSeq, 64] .BFloat16)
-    (k v : DTensor #[1, 1, kvSeq, 64] .BFloat16) := Id.run do
-  let kt := (Tensor.transpose k.toFloat32 2 3).reshapeChecked #[1, 1, 64, kvSeq]
+def attentionReference {batch heads qSeq kvSeq : UInt64}
+    (q : DTensor #[batch, heads, qSeq, 64] .BFloat16)
+    (k v : DTensor #[batch, heads, kvSeq, 64] .BFloat16) := Id.run do
+  let kt := (Tensor.transpose k.toFloat32 2 3).reshapeChecked #[batch, heads, 64, kvSeq]
   let scores := Tensor.bmm4d q.toFloat32 kt
   let scaled := Tensor.Preserving.mulScalar scores 0.125
   let probs := Tensor.softmax scaled (-1)
   let output := (Tensor.bmm4d probs v.toFloat32).toBFloat16
-  let sumExp := (Tensor.sumDim (Tensor.exp scaled) 3 false).reshapeChecked #[1, 1, qSeq]
+  let sumExp := (Tensor.sumDim (Tensor.exp scaled) 3 false).reshapeChecked #[batch, heads, qSeq]
   let lse := Tensor.log sumExp
   return (output, lse)
 
 /-- BF16 SDPA vector-Jacobian product, returned in Float32 for kernel comparison. -/
-def attentionTrainingReference {seq : UInt64}
-    (q k v cotangent : DTensor #[1, 1, seq, 64] .BFloat16) :
-    IO (DTensor #[1, 1, seq, 64] .BFloat16 × DTensor #[1, 1, seq, 64] .Float32 ×
-      DTensor #[1, 1, seq, 64] .Float32 × DTensor #[1, 1, seq, 64] .Float32) := do
+def attentionTrainingReference {batch heads seq : UInt64}
+    (q k v cotangent : DTensor #[batch, heads, seq, 64] .BFloat16) :
+    IO (DTensor #[batch, heads, seq, 64] .BFloat16 × DTensor #[batch, heads, seq, 64] .Float32 ×
+      DTensor #[batch, heads, seq, 64] .Float32 × DTensor #[batch, heads, seq, 64] .Float32) := do
   let qRef := Tensor.setRequiresGrad (Tensor.detach q) true
   let kRef := Tensor.setRequiresGrad (Tensor.detach k) true
   let vRef := Tensor.setRequiresGrad (Tensor.detach v) true

@@ -1,7 +1,8 @@
 /- End-to-end GB10/Blackwell MHA validation using the reduced 2-block path. -/
 import Tyr.Torch
 import Tyr.GPU.Kernels.MhaGB10
-import Examples.GPU.Parity
+import Examples.GPU.IndexedParity
+import Examples.GPU.AttentionReference
 import Examples.GPU.FixtureRunner
 import Examples.GPU.Benchmark
 
@@ -31,51 +32,35 @@ def generateFixtures : IO Unit := do
   IO.FS.createDirAll fixtureSpec.dir
   let device := Device.CUDA 0
 
-  let qf ← torch.randn #[1, 1, 128, 64] false device
-  let kf ← torch.randn #[1, 1, 128, 64] false device
-  let vf ← torch.randn #[1, 1, 128, 64] false device
-  let dOf ← torch.randn #[1, 1, 128, 64] false device
+  let qf ← Tensor.randn #[1, 1, 128, 64] false device
+  let kf ← Tensor.randn #[1, 1, 128, 64] false device
+  let vf ← Tensor.randn #[1, 1, 128, 64] false device
+  let dOf ← Tensor.randn #[1, 1, 128, 64] false device
 
-  let q := torch.toBFloat16' qf
-  let k := torch.toBFloat16' kf
-  let v := torch.toBFloat16' vf
-  let dO := torch.toBFloat16' dOf
+  let q := qf.toBFloat16
+  let k := kf.toBFloat16
+  let v := vf.toBFloat16
+  let dO := dOf.toBFloat16
 
-  let expectedOut := torch.nn.scaled_dot_product_attention q k v 0.0 false
+  let expectedOut := Tensor.attentionGQA q k v 0.0 false
 
-  let q32 := torch.toFloat' q
-  let k32 := torch.toFloat' k
-  let kT : T #[1, 1, 64, 128] := torch.nn.transpose k32 2 3
-  let scores : T #[1, 1, 128, 128] := torch.nn.bmm4d q32 kT
-  let scaled : T #[1, 1, 128, 128] := scores / 8.0
-  let expScores : T #[1, 1, 128, 128] := torch.nn.exp scaled
-  let sumExp : T #[1, 1, 128] := torch.nn.sumDim expScores 3 false
-  let lse3 : T #[1, 1, 128] := torch.nn.log sumExp
-  let expectedL3 : T #[1, 1, 128] := torch.mul_scalar lse3 (-8.0)
-  let expectedL : T #[2, 64] := torch.reshape expectedL3 #[2, 64]
+  let (_, lse) := attentionReference q k v
+  let expectedL := (Tensor.Preserving.mulScalar lse (-8.0)).reshapeChecked #[2, 64]
+  let (_, expectedDQ, expectedDK, expectedDV) ← attentionTrainingReference q k v dO
 
-  let qRef := torch.autograd.set_requires_grad q true
-  let kRef := torch.autograd.set_requires_grad k true
-  let vRef := torch.autograd.set_requires_grad v true
-  let outRef := torch.nn.scaled_dot_product_attention qRef kRef vRef 0.0 false
-  torch.autograd.backward outRef dO
-  let expectedDQ := torch.toFloat' (torch.autograd.grad_of qRef)
-  let expectedDK := torch.toFloat' (torch.autograd.grad_of kRef)
-  let expectedDV := torch.toFloat' (torch.autograd.grad_of vRef)
+  Tensor.saveTensor q (fixtureFile "q").toString
+  Tensor.saveTensor k (fixtureFile "k").toString
+  Tensor.saveTensor v (fixtureFile "v").toString
+  Tensor.saveTensor dO (fixtureFile "dO").toString
+  Tensor.saveTensor expectedOut (fixtureFile "expected_o").toString
+  Tensor.saveTensor expectedL (fixtureFile "expected_l").toString
+  Tensor.saveTensor expectedDQ (fixtureFile "expected_dq").toString
+  Tensor.saveTensor expectedDK (fixtureFile "expected_dk").toString
+  Tensor.saveTensor expectedDV (fixtureFile "expected_dv").toString
 
-  torch.data.saveTensor q (fixtureFile "q").toString
-  torch.data.saveTensor k (fixtureFile "k").toString
-  torch.data.saveTensor v (fixtureFile "v").toString
-  torch.data.saveTensor dO (fixtureFile "dO").toString
-  torch.data.saveTensor expectedOut (fixtureFile "expected_o").toString
-  torch.data.saveTensor expectedL (fixtureFile "expected_l").toString
-  torch.data.saveTensor expectedDQ (fixtureFile "expected_dq").toString
-  torch.data.saveTensor expectedDK (fixtureFile "expected_dk").toString
-  torch.data.saveTensor expectedDV (fixtureFile "expected_dv").toString
-
-  let outMean := torch.nn.item (torch.nn.meanAll expectedOut)
-  let lMean := torch.nn.item (torch.nn.meanAll expectedL)
-  let dqMean := torch.nn.item (torch.nn.meanAll expectedDQ)
+  let outMean := Tensor.item (Tensor.meanAll expectedOut)
+  let lMean := Tensor.item (Tensor.meanAll expectedL)
+  let dqMean := Tensor.item (Tensor.meanAll expectedDQ)
   IO.println s!"Generated mha_gb10 fixtures in {fixtureSpec.dir} outMean={outMean} lMean={lMean} dqMean={dqMean}"
 
 def runOnce : IO Bool := do
@@ -91,46 +76,45 @@ def runOnce : IO Bool := do
 
   let stream ← torch.cuda_current_stream
 
-  let q ← torch.data.loadTensor #[1, 1, 128, 64] (fixtureFile "q").toString
-  let k ← torch.data.loadTensor #[1, 1, 128, 64] (fixtureFile "k").toString
-  let v ← torch.data.loadTensor #[1, 1, 128, 64] (fixtureFile "v").toString
-  let dO ← torch.data.loadTensor #[1, 1, 128, 64] (fixtureFile "dO").toString
-  let expectedOut ← torch.data.loadTensor #[1, 1, 128, 64] (fixtureFile "expected_o").toString
-  let expectedL ← torch.data.loadTensor #[2, 64] (fixtureFile "expected_l").toString
-  let expectedDQ ← torch.data.loadTensor #[1, 1, 128, 64] (fixtureFile "expected_dq").toString
-  let expectedDK ← torch.data.loadTensor #[1, 1, 128, 64] (fixtureFile "expected_dk").toString
-  let expectedDV ← torch.data.loadTensor #[1, 1, 128, 64] (fixtureFile "expected_dv").toString
+  let q ← Tensor.loadTensorExact { shape := #[1, 1, 128, 64], dtype := .BFloat16 } (fixtureFile "q").toString
+  let k ← Tensor.loadTensorExact { shape := #[1, 1, 128, 64], dtype := .BFloat16 } (fixtureFile "k").toString
+  let v ← Tensor.loadTensorExact { shape := #[1, 1, 128, 64], dtype := .BFloat16 } (fixtureFile "v").toString
+  let dO ← Tensor.loadTensorExact { shape := #[1, 1, 128, 64], dtype := .BFloat16 } (fixtureFile "dO").toString
+  let expectedOut ← Tensor.loadTensorExact { shape := #[1, 1, 128, 64], dtype := .BFloat16 } (fixtureFile "expected_o").toString
+  let expectedL ← Tensor.loadTensorExact { shape := #[2, 64], dtype := .Float32 } (fixtureFile "expected_l").toString
+  let expectedDQ ← Tensor.loadTensorExact { shape := #[1, 1, 128, 64], dtype := .Float32 } (fixtureFile "expected_dq").toString
+  let expectedDK ← Tensor.loadTensorExact { shape := #[1, 1, 128, 64], dtype := .Float32 } (fixtureFile "expected_dk").toString
+  let expectedDV ← Tensor.loadTensorExact { shape := #[1, 1, 128, 64], dtype := .Float32 } (fixtureFile "expected_dv").toString
 
-  let outLse := torch.zeros_like q
-  let lseOut := torch.zeros #[2, 64] false (Device.CUDA 0)
-  tkFlashAttnGb10Fwd2BlockLse.launch q k v outLse lseOut 128 64 1 2 1 128 1 1 0 stream
+  let outLse ← Tensor.uniformLike q 0 0
+  let lseOut ← Tensor.uniformLike (Tensor.zeros #[2, 64] false (Device.CUDA 0)) 0 0
+  tkFlashAttnGb10Fwd2BlockLse.launch q.raw k.raw v.raw outLse.raw lseOut.raw 128 64 1 2 1 128 1 1 0 stream
   let _ ← torch.cuda_synchronize
-  let lFromLse : T #[2, 64] := torch.mul_scalar lseOut (-8.0)
+  let lFromLse : DTensor #[2, 64] .Float32 := Tensor.Preserving.mulScalar lseOut (-8.0)
 
-  let out := torch.zeros_like q
-  let lOut : T #[2, 64] := torch.zeros_like lseOut
-  tkMhaGb10Fwd2Block.launch q k v out lOut 128 64 1 8 1 128 1 1 0 stream
-  let _ ← torch.cuda_synchronize
-
-  let dVec : T #[2, 64] := torch.mul_scalar lOut 0.0
-  tkMhaGb10BwdPrep2Block.launch dO out dVec 128 64 1 8 1 32 1 1 0 stream
+  let out ← Tensor.uniformLike q 0 0
+  let lOut : DTensor #[2, 64] .Float32 ← Tensor.uniformLike lseOut 0 0
+  tkMhaGb10Fwd2Block.launch q.raw k.raw v.raw out.raw lOut.raw 128 64 1 8 1 128 1 1 0 stream
   let _ ← torch.cuda_synchronize
 
-  let dQ := torch.zeros #[1, 1, 128, 64] false (Device.CUDA 0)
-  let dKSeed := torch.ones #[1, 1, 128, 64] false (Device.CUDA 0)
-  let dK : T #[1, 1, 128, 64] := torch.mul_scalar dKSeed 0.0
-  let dV : T #[1, 1, 128, 64] := torch.add_scalar dK 0.0
-  tkMhaGb10BwdDQDirect.launch q k v dO lOut dVec dQ 128 64 1 8 1 32 1 1 0 stream
-  tkMhaGb10BwdDKDVDirect.launch q k v dO lOut dVec dK dV 128 64 1 8 1 32 1 1 0 stream
+  let dVec ← Tensor.uniformLike lOut 0 0
+  tkMhaGb10BwdPrep2Block.launch dO.raw out.raw dVec.raw 128 64 1 8 1 32 1 1 0 stream
   let _ ← torch.cuda_synchronize
 
-  let outCheck := compareTensors "mha_gb10.forward" expectedOut out 3e-2 3e-2
-  let lCheck := compareTensors "mha_gb10.l" expectedL lOut 3e-2 3e-2
-  let lKernelCheck := compareTensors "mha_gb10.l_vs_lse_kernel" lFromLse lOut 3e-2 3e-2
-  let lFixtureCheck := compareTensors "mha_gb10.lse_kernel_vs_fixture" expectedL lFromLse 3e-2 3e-2
-  let dqCheck := compareTensors "mha_gb10.dq" expectedDQ dQ 3e-2 3e-2
-  let dkCheck := compareTensors "mha_gb10.dk" expectedDK dK 3e-2 3e-2
-  let dvCheck := compareTensors "mha_gb10.dv" expectedDV dV 3e-2 3e-2
+  let dQ ← Tensor.uniformLike (Tensor.zeros #[1, 1, 128, 64] false (Device.CUDA 0)) 0 0
+  let dK ← Tensor.uniformLike dQ 0 0
+  let dV ← Tensor.uniformLike dQ 0 0
+  tkMhaGb10BwdDQDirect.launch q.raw k.raw v.raw dO.raw lOut.raw dVec.raw dQ.raw 128 64 1 8 1 32 1 1 0 stream
+  tkMhaGb10BwdDKDVDirect.launch q.raw k.raw v.raw dO.raw lOut.raw dVec.raw dK.raw dV.raw 128 64 1 8 1 32 1 1 0 stream
+  let _ ← torch.cuda_synchronize
+
+  let outCheck := IndexedParity.compareTensors "mha_gb10.forward" expectedOut out 3e-2 3e-2
+  let lCheck := IndexedParity.compareTensors "mha_gb10.l" expectedL lOut 3e-2 3e-2
+  let lKernelCheck := IndexedParity.compareTensors "mha_gb10.l_vs_lse_kernel" lFromLse lOut 3e-2 3e-2
+  let lFixtureCheck := IndexedParity.compareTensors "mha_gb10.lse_kernel_vs_fixture" expectedL lFromLse 3e-2 3e-2
+  let dqCheck := IndexedParity.compareTensors "mha_gb10.dq" expectedDQ dQ 3e-2 3e-2
+  let dkCheck := IndexedParity.compareTensors "mha_gb10.dk" expectedDK dK 3e-2 3e-2
+  let dvCheck := IndexedParity.compareTensors "mha_gb10.dv" expectedDV dV 3e-2 3e-2
   for check in #[outCheck, lCheck, lKernelCheck, lFixtureCheck, dqCheck, dkCheck, dvCheck] do
     logTensorCheck check
 
@@ -162,42 +146,35 @@ private def benchmarkForwardSeq (cfg : Benchmark.Config) (stream : UInt64)
     (shape : ForwardShape) : IO (String × Bool) := do
   let { batch, qHeads, seqLen } := shape
   let device := Device.CUDA 0
-  let qf ← torch.randn #[batch, qHeads, seqLen, 64] false device
-  let kf ← torch.randn #[batch, qHeads, seqLen, 64] false device
-  let vf ← torch.randn #[batch, qHeads, seqLen, 64] false device
-  let q := torch.toBFloat16' qf
-  let k := torch.toBFloat16' kf
-  let v := torch.toBFloat16' vf
-  let expected := torch.nn.scaled_dot_product_attention q k v 0.0 false
-  let q32 := torch.toFloat' q
-  let k32 := torch.toFloat' k
-  let kT : T #[batch, qHeads, 64, seqLen] := torch.nn.transpose k32 2 3
-  let scores : T #[batch, qHeads, seqLen, seqLen] := torch.nn.bmm4d q32 kT
-  let scaled : T #[batch, qHeads, seqLen, seqLen] := scores / 8.0
-  let expScores : T #[batch, qHeads, seqLen, seqLen] := torch.nn.exp scaled
-  let sumExp : T #[batch, qHeads, seqLen] := torch.nn.sumDim expScores 3 false
-  let expectedL3 : T #[batch, qHeads, seqLen] :=
-    torch.mul_scalar (torch.nn.log sumExp) (-8.0)
-  let out := torch.zeros_like q
+  let qf ← Tensor.randn #[batch, qHeads, seqLen, 64] false device
+  let kf ← Tensor.randn #[batch, qHeads, seqLen, 64] false device
+  let vf ← Tensor.randn #[batch, qHeads, seqLen, 64] false device
+  let q := qf.toBFloat16
+  let k := kf.toBFloat16
+  let v := vf.toBFloat16
+  let expected := Tensor.attentionGQA q k v 0.0 false
+  let (_, lse) := attentionReference q k v
+  let expectedL3 := Tensor.Preserving.mulScalar lse (-8.0)
+  let out ← Tensor.uniformLike q 0 0
   let useS768Specialization := seqLen == 768
   let useLongSchedule := seqLen >= 2048
   let rowTileSize : UInt64 := if useS768Specialization then 32 else if useLongSchedule then 32 else 16
   let queryBlocks := (seqLen + rowTileSize - 1) / rowTileSize
   let launchQueryBlocks := if useS768Specialization then seqLen / (4 * rowTileSize) else queryBlocks
   let lBlocks := if useS768Specialization then batch * qHeads * queryBlocks else queryBlocks
-  let lOut : T #[lBlocks, rowTileSize] := torch.zeros #[lBlocks, rowTileSize] false device
-  let expectedL : T #[lBlocks, rowTileSize] := torch.reshape expectedL3 #[lBlocks, rowTileSize]
+  let lOut : DTensor #[lBlocks, rowTileSize] .Float32 ← Tensor.uniformLike (Tensor.zeros #[lBlocks, rowTileSize] false device) 0 0
+  let expectedL : DTensor #[lBlocks, rowTileSize] .Float32 := Tensor.reshapeChecked expectedL3 #[lBlocks, rowTileSize]
   let launch : IO Unit := if useS768Specialization then
-    tkMhaGb10FwdS768D64Warp4.launch q k v out lOut seqLen 64 qHeads
+    tkMhaGb10FwdS768D64Warp4.launch q.raw k.raw v.raw out.raw lOut.raw seqLen 64 qHeads
       launchQueryBlocks qHeads batch 128 1 1 0 stream
   else if useLongSchedule then
-    tkMhaGb10FwdLong.launch q k v out lOut seqLen 64 1 queryBlocks 1 128 1 1 0 stream
+    tkMhaGb10FwdLong.launch q.raw k.raw v.raw out.raw lOut.raw seqLen 64 1 queryBlocks 1 128 1 1 0 stream
   else
-    tkMhaGb10Fwd2Block.launch q k v out lOut seqLen 64 1 queryBlocks 1 128 1 1 0 stream
+    tkMhaGb10Fwd2Block.launch q.raw k.raw v.raw out.raw lOut.raw seqLen 64 1 queryBlocks 1 128 1 1 0 stream
   launch
   torch.cuda_synchronize
-  let check := compareTensors s!"mha_gb10.bench.forward.s{seqLen}" expected out 3e-2 3e-2
-  let lCheck := compareTensors s!"mha_gb10.bench.l.s{seqLen}" expectedL lOut 3e-2 3e-2
+  let check := IndexedParity.compareTensors s!"mha_gb10.bench.forward.s{seqLen}" expected out 3e-2 3e-2
+  let lCheck := IndexedParity.compareTensors s!"mha_gb10.bench.l.s{seqLen}" expectedL lOut 3e-2 3e-2
   logTensorCheck check
   logTensorCheck lCheck
   let samples ← Benchmark.timeCudaEvents cfg stream launch
@@ -212,40 +189,33 @@ private def benchmarkBackwardS768 (cfg : Benchmark.Config) (stream : UInt64) (ba
     : IO (Array String × Bool) := do
   let device := Device.CUDA 0
   let shape := #[batch, 16, 768, 64]
-  let qf ← torch.randn shape false device
-  let kf ← torch.randn shape false device
-  let vf ← torch.randn shape false device
-  let dOf ← torch.randn shape false device
-  let q := torch.toBFloat16' qf
-  let k := torch.toBFloat16' kf
-  let v := torch.toBFloat16' vf
-  let dO := torch.toBFloat16' dOf
-  let qRef := torch.autograd.set_requires_grad q true
-  let kRef := torch.autograd.set_requires_grad k true
-  let vRef := torch.autograd.set_requires_grad v true
-  let outRef := torch.nn.scaled_dot_product_attention qRef kRef vRef 0.0 false
-  torch.autograd.backward outRef dO
-  let expectedDQ := torch.toFloat' (torch.autograd.grad_of qRef)
-  let expectedDK := torch.toFloat' (torch.autograd.grad_of kRef)
-  let expectedDV := torch.toFloat' (torch.autograd.grad_of vRef)
-  let out := torch.zeros_like q
-  let lOut32 : T #[batch * 384, 32] := torch.zeros #[batch * 384, 32] false device
-  let launchForward := tkMhaGb10FwdS768D64Warp4.launch q k v out lOut32 768 64 16
+  let qf ← Tensor.randn shape false device
+  let kf ← Tensor.randn shape false device
+  let vf ← Tensor.randn shape false device
+  let dOf ← Tensor.randn shape false device
+  let q := qf.toBFloat16
+  let k := kf.toBFloat16
+  let v := vf.toBFloat16
+  let dO := dOf.toBFloat16
+  let (_, expectedDQ, expectedDK, expectedDV) ← attentionTrainingReference q k v dO
+  let out ← Tensor.uniformLike q 0 0
+  let lOut32 : DTensor #[batch * 384, 32] .Float32 ← Tensor.uniformLike (Tensor.zeros #[batch * 384, 32] false device) 0 0
+  let launchForward := tkMhaGb10FwdS768D64Warp4.launch q.raw k.raw v.raw out.raw lOut32.raw 768 64 16
     6 16 batch 128 1 1 0 stream
   launchForward
-  let lOut : T #[batch * 768, 16] := torch.reshape lOut32 #[batch * 768, 16]
+  let lOut : DTensor #[batch * 768, 16] .Float32 := Tensor.reshapeChecked lOut32 #[batch * 768, 16]
   torch.cuda_synchronize
-  let dVec : T #[batch * 768, 16] := torch.mul_scalar lOut 0.0
-  let dO32 := torch.toFloat' dO
-  let out32 := torch.toFloat' out
-  let expectedD3 : T #[batch, 16, 768] := torch.nn.sumDim (dO32 * out32) 3 false
-  let expectedD : T #[batch * 768, 16] := torch.reshape expectedD3 #[batch * 768, 16]
-  let dQ : T #[batch, 16, 768, 64] := torch.mul_scalar q 0.0
-  let dK : T #[batch, 16, 768, 64] := torch.mul_scalar k 0.0
-  let dV : T #[batch, 16, 768, 64] := torch.mul_scalar v 0.0
-  let launchDQ := tkMhaGb10BwdDQS768D64.launch q k v dO out lOut dVec dQ 768 64 16
+  let dVec ← Tensor.uniformLike lOut 0 0
+  let dO32 := dO.toFloat32
+  let out32 := out.toFloat32
+  let expectedD3 : DTensor #[batch, 16, 768] .Float32 := (Tensor.sumDim (dO32 * out32) 3 false).reshapeChecked #[batch, 16, 768]
+  let expectedD : DTensor #[batch * 768, 16] .Float32 := Tensor.reshapeChecked expectedD3 #[batch * 768, 16]
+  let dQ ← Tensor.uniformLike q 0 0
+  let dK ← Tensor.uniformLike k 0 0
+  let dV ← Tensor.uniformLike v 0 0
+  let launchDQ := tkMhaGb10BwdDQS768D64.launch q.raw k.raw v.raw dO.raw out.raw lOut.raw dVec.raw dQ.raw 768 64 16
     12 16 batch 128 1 1 0 stream
-  let launchDKDV := tkMhaGb10BwdDKDVS768D64.launch q k v dO lOut dVec dK dV 768 64 16
+  let launchDKDV := tkMhaGb10BwdDKDVS768D64.launch q.raw k.raw v.raw dO.raw lOut.raw dVec.raw dK.raw dV.raw 768 64 16
     12 16 batch 128 1 1 0 stream
   let launch := do
     launchDQ
@@ -255,10 +225,10 @@ private def benchmarkBackwardS768 (cfg : Benchmark.Config) (stream : UInt64) (ba
     launch
   launch
   torch.cuda_synchronize
-  let dCheck := compareTensors "mha_gb10.bench.s768.d" expectedD dVec 3e-2 3e-2
-  let dqCheck := compareTensors "mha_gb10.bench.s768.dq" expectedDQ (torch.toFloat' dQ) 3e-2 3e-2
-  let dkCheck := compareTensors "mha_gb10.bench.s768.dk" expectedDK (torch.toFloat' dK) 3e-2 3e-2
-  let dvCheck := compareTensors "mha_gb10.bench.s768.dv" expectedDV (torch.toFloat' dV) 3e-2 3e-2
+  let dCheck := IndexedParity.compareTensors "mha_gb10.bench.s768.d" expectedD dVec 3e-2 3e-2
+  let dqCheck := IndexedParity.compareTensors "mha_gb10.bench.s768.dq" expectedDQ (dQ.toFloat32) 3e-2 3e-2
+  let dkCheck := IndexedParity.compareTensors "mha_gb10.bench.s768.dk" expectedDK (dK.toFloat32) 3e-2 3e-2
+  let dvCheck := IndexedParity.compareTensors "mha_gb10.bench.s768.dv" expectedDV (dV.toFloat32) 3e-2 3e-2
   for check in #[dCheck, dqCheck, dkCheck, dvCheck] do logTensorCheck check
   let ok := dCheck.ok && dqCheck.ok && dkCheck.ok && dvCheck.ok
   let fullSamples ← Benchmark.timeCudaEvents cfg stream launch
@@ -307,45 +277,43 @@ private def runBenchmark (args : List String) : IO UInt32 := do
       let (lines, ok) ← benchmarkBackwardS768 cfg stream matrixCase.payload.batch
       s768BackwardLines := s768BackwardLines ++ lines
       s768BackwardOk := s768BackwardOk && ok
-  let q ← torch.data.loadTensor #[1, 1, 128, 64] (fixtureFile "q").toString
-  let k ← torch.data.loadTensor #[1, 1, 128, 64] (fixtureFile "k").toString
-  let v ← torch.data.loadTensor #[1, 1, 128, 64] (fixtureFile "v").toString
-  let expectedOut ← torch.data.loadTensor #[1, 1, 128, 64] (fixtureFile "expected_o").toString
-  let dO ← torch.data.loadTensor #[1, 1, 128, 64] (fixtureFile "dO").toString
-  let expectedDQ ← torch.data.loadTensor #[1, 1, 128, 64] (fixtureFile "expected_dq").toString
-  let expectedDK ← torch.data.loadTensor #[1, 1, 128, 64] (fixtureFile "expected_dk").toString
-  let expectedDV ← torch.data.loadTensor #[1, 1, 128, 64] (fixtureFile "expected_dv").toString
-  let out := torch.zeros_like q
-  let lOut : T #[2, 64] := torch.zeros #[2, 64] false (Device.CUDA 0)
-  let launch := tkMhaGb10Fwd2Block.launch q k v out lOut
+  let q ← Tensor.loadTensorExact { shape := #[1, 1, 128, 64], dtype := .BFloat16 } (fixtureFile "q").toString
+  let k ← Tensor.loadTensorExact { shape := #[1, 1, 128, 64], dtype := .BFloat16 } (fixtureFile "k").toString
+  let v ← Tensor.loadTensorExact { shape := #[1, 1, 128, 64], dtype := .BFloat16 } (fixtureFile "v").toString
+  let expectedOut ← Tensor.loadTensorExact { shape := #[1, 1, 128, 64], dtype := .BFloat16 } (fixtureFile "expected_o").toString
+  let dO ← Tensor.loadTensorExact { shape := #[1, 1, 128, 64], dtype := .BFloat16 } (fixtureFile "dO").toString
+  let expectedDQ ← Tensor.loadTensorExact { shape := #[1, 1, 128, 64], dtype := .Float32 } (fixtureFile "expected_dq").toString
+  let expectedDK ← Tensor.loadTensorExact { shape := #[1, 1, 128, 64], dtype := .Float32 } (fixtureFile "expected_dk").toString
+  let expectedDV ← Tensor.loadTensorExact { shape := #[1, 1, 128, 64], dtype := .Float32 } (fixtureFile "expected_dv").toString
+  let out ← Tensor.uniformLike q 0 0
+  let lOut : DTensor #[2, 64] .Float32 ← Tensor.uniformLike (Tensor.zeros #[2, 64] false (Device.CUDA 0)) 0 0
+  let launch := tkMhaGb10Fwd2Block.launch q.raw k.raw v.raw out.raw lOut.raw
     128 64 1 8 1 128 1 1 0 stream
   launch
   torch.cuda_synchronize
-  let check := compareTensors "mha_gb10.bench.forward" expectedOut out 3e-2 3e-2
+  let check := IndexedParity.compareTensors "mha_gb10.bench.forward" expectedOut out 3e-2 3e-2
   logTensorCheck check
-  let dVec : T #[2, 64] := torch.mul_scalar lOut 0.0
-  let dO32 := torch.toFloat' dO
-  let out32 := torch.toFloat' out
-  let expectedD3 : T #[1, 1, 128] := torch.nn.sumDim (dO32 * out32) 3 false
-  let expectedD : T #[2, 64] := torch.reshape expectedD3 #[2, 64]
-  let dQ := torch.zeros #[1, 1, 128, 64] false (Device.CUDA 0)
-  -- Keep the mutable kernel outputs syntactically distinct: identical pure
-  -- allocation expressions can be commoned by Lean and alias each other.
-  let dKSeed := torch.ones #[1, 1, 128, 64] false (Device.CUDA 0)
-  let dK : T #[1, 1, 128, 64] := torch.mul_scalar dKSeed 0.0
-  let dV : T #[1, 1, 128, 64] := torch.add_scalar dK 0.0
+  let dVec ← Tensor.uniformLike lOut 0 0
+  let dO32 := dO.toFloat32
+  let out32 := out.toFloat32
+  let expectedD3 : DTensor #[1, 1, 128] .Float32 := (Tensor.sumDim (dO32 * out32) 3 false).reshapeChecked #[1, 1, 128]
+  let expectedD : DTensor #[2, 64] .Float32 := Tensor.reshapeChecked expectedD3 #[2, 64]
+  let dQ ← Tensor.uniformLike (Tensor.zeros #[1, 1, 128, 64] false (Device.CUDA 0)) 0 0
+  -- Each mutable gradient buffer is independently allocated through IO.
+  let dK ← Tensor.uniformLike dQ 0 0
+  let dV ← Tensor.uniformLike dQ 0 0
   let launchBackward := do
-    tkMhaGb10BwdPrep2Block.launch dO out dVec 128 64 1 8 1 32 1 1 0 stream
-    tkMhaGb10BwdDQDirect.launch q k v dO lOut dVec dQ
+    tkMhaGb10BwdPrep2Block.launch dO.raw out.raw dVec.raw 128 64 1 8 1 32 1 1 0 stream
+    tkMhaGb10BwdDQDirect.launch q.raw k.raw v.raw dO.raw lOut.raw dVec.raw dQ.raw
       128 64 1 8 1 32 1 1 0 stream
-    tkMhaGb10BwdDKDVDirect.launch q k v dO lOut dVec dK dV
+    tkMhaGb10BwdDKDVDirect.launch q.raw k.raw v.raw dO.raw lOut.raw dVec.raw dK.raw dV.raw
       128 64 1 8 1 32 1 1 0 stream
   launchBackward
   torch.cuda_synchronize
-  let dCheck := compareTensors "mha_gb10.bench.d" expectedD dVec 3e-2 3e-2
-  let dqCheck := compareTensors "mha_gb10.bench.dq" expectedDQ dQ 3e-2 3e-2
-  let dkCheck := compareTensors "mha_gb10.bench.dk" expectedDK dK 3e-2 3e-2
-  let dvCheck := compareTensors "mha_gb10.bench.dv" expectedDV dV 3e-2 3e-2
+  let dCheck := IndexedParity.compareTensors "mha_gb10.bench.d" expectedD dVec 3e-2 3e-2
+  let dqCheck := IndexedParity.compareTensors "mha_gb10.bench.dq" expectedDQ dQ 3e-2 3e-2
+  let dkCheck := IndexedParity.compareTensors "mha_gb10.bench.dk" expectedDK dK 3e-2 3e-2
+  let dvCheck := IndexedParity.compareTensors "mha_gb10.bench.dv" expectedDV dV 3e-2 3e-2
   for gradCheck in #[dCheck, dqCheck, dkCheck, dvCheck] do logTensorCheck gradCheck
   let backwardOk := dCheck.ok && dqCheck.ok && dkCheck.ok && dvCheck.ok
   let backwardSamples ← Benchmark.timeCudaEvents cfg stream launchBackward
