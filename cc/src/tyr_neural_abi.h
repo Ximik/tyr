@@ -18,6 +18,7 @@ lean_object* lean_torch_gather(lean_object*, lean_object*, lean_object*, uint64_
 lean_object* lean_torch_masked_select(lean_object*, lean_object*, lean_object*);
 lean_object* lean_torch_masked_scatter(lean_object*, lean_object*, lean_object*, lean_object*, lean_object*);
 lean_object* lean_torch_sdpa_gqa_qkv(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, lean_object*, lean_object*, lean_object*, double, uint8_t, uint8_t);
+// Except String RawTensor; borrows Q/K/V and consumes both Option arguments.
 lean_object* lean_torch_tyr_flash_attn_4d(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, lean_object*, lean_object*, lean_object*, lean_object*, double, uint8_t, lean_object*, uint8_t);
 // slice_scatter consumes input, borrows source, and returns a tensor value.
 lean_object* lean_torch_slice_scatter_along_dim(lean_object*, lean_object*, lean_object*, uint64_t, uint64_t, lean_object*);

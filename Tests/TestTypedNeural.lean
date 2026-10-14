@@ -52,6 +52,42 @@ open torch
   LeanTest.assertEqual (← sampled.toFloatArray) (Array.replicate 16 (-7.0))
     "Lean Int64 bounds cross the C ABI with their signed bit pattern intact"
 
+@[test] def testTypedFlashAttentionCheckedErrors : IO Unit := do
+  let q := Tensor.zeros #[1, 1, 2, 2]
+  let v := (Tensor.fromFloatArray #[2, 4, 6, 8]).reshape #[1, 1, 2, 2]
+  let result ← match Tensor.flashAttention? q q v with
+    | .ok result => pure result
+    | .error message => LeanTest.fail message
+  LeanTest.assertEqual (← result.toFloatArray) #[4, 6, 4, 6]
+  LeanTest.assertTrue (result.actualSpec == q.actualSpec)
+  for dropout in #[-0.5, 1.5] do
+    match Tensor.flashAttention? q q v (dropout := dropout) with
+    | .ok _ => LeanTest.fail "Invalid FlashAttention dropout must return an error"
+    | .error message => LeanTest.assertTrue (!message.isEmpty)
+  let ints := q.castDType .Int64
+  match Tensor.flashAttention? ints ints ints with
+  | .ok _ => LeanTest.fail "Integer FlashAttention must return an error"
+  | .error message => LeanTest.assertTrue (!message.isEmpty)
+
+@[test] def testTypedRandintRecoverableErrors : IO Unit := do
+  for (low, high, device) in #[(3, 3, Device.CPU), (4, 3, Device.CPU),
+      (0, 2, Device.CUDA 18446744073709551615)] do
+    let rejected ← try
+        let _ ← Tensor.randint low high #[2] device
+        pure false
+      catch _ => pure true
+    LeanTest.assertTrue rejected "Invalid randint arguments must return IO.error"
+
+@[test] def testTypedTransposeRecoverableErrors : IO Unit := do
+  let matrix := Tensor.ones #[2, 3]
+  for (dim0, dim1) in #[(0, 9), (9, 0), (0, 18446744073709551615)] do
+    match matrix.transpose? dim0 dim1 with
+    | .ok _ => LeanTest.fail "Invalid transpose axes must return Except.error"
+    | .error message => LeanTest.assertTrue (!message.isEmpty)
+  match (Tensor.full #[] 5).transpose? 0 0 with
+  | .ok scalar => LeanTest.assertEqual (← scalar.toFloatArray) #[5]
+  | .error message => LeanTest.fail message
+
 @[test] def testTypedRMSNormBFloat16Rounding : IO Unit := do
   let values := (Tensor.fromFloatArray
     #[0.17, -0.41, 0.83, 1.27, 0.9, 0.5, -0.7, 1.1]).reshapeChecked #[1, 2, 4]

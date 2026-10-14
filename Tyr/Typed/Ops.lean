@@ -550,10 +550,11 @@ def permute {σ : StaticSpec} (t : Tensor σ) (permutation : Array UInt64) :
     Tensor (σ.withShape (TensorSpec.permuteShape σ.shape permutation)) :=
   checkedResult "permute" (Tensor.ofRaw (RawTensor.permute t.shape t.raw permutation))
 
-/-- Transpose along nonnegative axes, checking the native result metadata. -/
+/-- Transpose along nonnegative axes, returning native validation errors and
+checking the result metadata. -/
 def transpose? {σ : StaticSpec} (t : Tensor σ) (dim0 dim1 : UInt64) :
-    Except String (Tensor (σ.withShape (transposeShape σ.shape dim0.toNat dim1.toNat))) :=
-  Tensor.ofRaw (RawTensor.transpose t.shape t.raw dim0 dim1)
+    Except String (Tensor (σ.withShape (transposeShape σ.shape dim0.toNat dim1.toNat))) := do
+  Tensor.ofRaw (← RawTensor.transpose t.shape t.raw dim0 dim1)
 
 def transpose {σ : StaticSpec} (t : Tensor σ) (dim0 dim1 : UInt64) :
     Tensor (σ.withShape (transposeShape σ.shape dim0.toNat dim1.toNat)) :=

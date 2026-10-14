@@ -106,6 +106,7 @@ lean_object* lean_torch_tensor_tanh(lean_object*, lean_object*);
 lean_object* lean_torch_to_bfloat16(lean_object*, lean_object*);
 lean_object* lean_torch_to_float(lean_object*, lean_object*);
 lean_object* lean_torch_to_long(lean_object*, lean_object*);
+// Except String RawTensor; consumes shape and borrows the tensor.
 lean_object* lean_torch_transpose(lean_object*, lean_object*, uint64_t, uint64_t);
 lean_object* lean_torch_transpose_2d(uint64_t, uint64_t, lean_object*);
 lean_object* lean_torch_transpose_for_attention(uint64_t, uint64_t, uint64_t, uint64_t, lean_object*);

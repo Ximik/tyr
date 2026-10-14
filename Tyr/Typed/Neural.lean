@@ -226,14 +226,30 @@ def attentionGQAQKV {batch heads kvHeads qSeq kvSeq dim : UInt64} {d : DType} {d
   q.checkedReplacement (RawTensor.attentionGQAQKV batch heads kvHeads qSeq kvSeq dim
     q.raw k.raw v.raw dropout causal gqa)
 
-/-- Experimental native FlashAttention dispatch, with a metadata-checked result. -/
+/-- Native FlashAttention dispatch with recoverable native errors and a
+metadata-checked result. -/
+def flashAttention? {batch heads kvHeads qSeq kvSeq dim : UInt64} {d : DType} {dev : DevicePolicy}
+    (q : Tensor ⟨#[batch, heads, qSeq, dim], d, dev⟩)
+    (k v : Tensor ⟨#[batch, kvHeads, kvSeq, dim], d, dev⟩) (gqa : Bool := false)
+    (mask : Option (Tensor { shape := #[batch, kvSeq] }) := none) (dropout : Float := 0.0)
+    (causal : Bool := false) (scale : Option Float := none) :
+    Except String (Tensor ⟨#[batch, heads, qSeq, dim], d, dev⟩) := do
+  let raw ← RawTensor.flashAttention batch heads kvHeads qSeq kvSeq dim
+    q.raw k.raw v.raw (mask.map Tensor.raw) dropout causal scale gqa
+  q.checkedReplacement? raw
+
+/-- FlashAttention convenience wrapper. Use `flashAttention?` to handle native
+validation or execution failures explicitly. -/
 def flashAttention {batch heads kvHeads qSeq kvSeq dim : UInt64} {d : DType} {dev : DevicePolicy}
     (q : Tensor ⟨#[batch, heads, qSeq, dim], d, dev⟩)
     (k v : Tensor ⟨#[batch, kvHeads, kvSeq, dim], d, dev⟩) (gqa : Bool := false)
     (mask : Option (Tensor { shape := #[batch, kvSeq] }) := none) (dropout : Float := 0.0)
-    (causal : Bool := false) (scale : Option Float := none) :=
-  q.checkedReplacement (RawTensor.flashAttention batch heads kvHeads qSeq kvSeq dim
-    q.raw k.raw v.raw (mask.map Tensor.raw) dropout causal scale gqa)
+    (causal : Bool := false) (scale : Option Float := none) :
+    Tensor ⟨#[batch, heads, qSeq, dim], d, dev⟩ :=
+  letI : Inhabited (Tensor ⟨#[batch, heads, qSeq, dim], d, dev⟩) := ⟨q⟩
+  match flashAttention? q k v gqa mask dropout causal scale with
+  | .ok result => result
+  | .error message => panic! s!"Tensor.flashAttention: {message}"
 
 def sliceScatter {s sourceShape : Shape} {d : DType} {dev : DevicePolicy}
     (input : Tensor ⟨s, d, dev⟩) (dim start : UInt64)

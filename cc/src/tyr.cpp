@@ -560,14 +560,20 @@ lean_object* lean_torch_get_stats(lean_obj_arg s, b_lean_obj_arg t) {
 lean_object* lean_torch_randn(lean_obj_arg s, uint8_t requires_grad, lean_obj_arg device) {
   OwnedLeanObject s_owner(s, lean_dec);
   OwnedLeanObject device_owner(device, lean_dec);
-  auto device_ = getDevice(device);
-  device_owner.reset();
-  // CPU-then-transfer to avoid the GB10 CUDA-RNG throw path; see comment
-  // on `lean_torch_rand`.
-  auto cpu_t = torch::randn(getShape(s), torch::TensorOptions().requires_grad(requires_grad));
-  auto t = device_.is_cpu() ? cpu_t : cpu_t.to(device_);
-  s_owner.reset();
-  return lean_io_result_mk_ok(fromTorchTensor(t));
+  try {
+    auto device_ = getDevice(device);
+    device_owner.reset();
+    // CPU-then-transfer to avoid the GB10 CUDA-RNG throw path; see comment
+    // on `lean_torch_rand`.
+    auto cpu_t = torch::randn(getShape(s), torch::TensorOptions().requires_grad(requires_grad));
+    auto t = device_.is_cpu() ? cpu_t : cpu_t.to(device_);
+    s_owner.reset();
+    return lean_io_result_mk_ok(fromTorchTensor(t));
+  } catch (const c10::Error& e) {
+    return mkC10IoError("randn", e);
+  } catch (const std::exception& e) {
+    return mkIoUserError(std::string("randn: ") + e.what());
+  }
 }
 // Generate on CPU then transfer to the target device. The libtorch CUDA
 // `Philox` generator hits `c10_cuda_check_implementation` on GB10/sm_120
@@ -576,12 +582,20 @@ lean_object* lean_torch_randn(lean_obj_arg s, uint8_t requires_grad, lean_obj_ar
 // `.to`-transferring avoids the throw entirely and is numerically
 // equivalent for fixture-regeneration use cases.
 lean_object* lean_torch_rand(lean_obj_arg s, int requires_grad, lean_obj_arg device) {
-  auto device_ = getDevice(device);
-  lean_dec(device);
-  auto cpu_t = torch::rand(getShape(s), torch::TensorOptions().requires_grad(requires_grad));
-  auto t = device_.is_cpu() ? cpu_t : cpu_t.to(device_);
-  lean_dec(s);
-  return lean_io_result_mk_ok(fromTorchTensor(t));
+  OwnedLeanObject s_owner(s, lean_dec);
+  OwnedLeanObject device_owner(device, lean_dec);
+  try {
+    auto device_ = getDevice(device);
+    device_owner.reset();
+    auto cpu_t = torch::rand(getShape(s), torch::TensorOptions().requires_grad(requires_grad));
+    auto t = device_.is_cpu() ? cpu_t : cpu_t.to(device_);
+    s_owner.reset();
+    return lean_io_result_mk_ok(fromTorchTensor(t));
+  } catch (const c10::Error& e) {
+    return mkC10IoError("rand", e);
+  } catch (const std::exception& e) {
+    return mkIoUserError(std::string("rand: ") + e.what());
+  }
 }
 
 // Initialize on CPU, then transfer, matching the GB10-safe random factory path.
@@ -614,16 +628,22 @@ lean_object* lean_torch_uniform_like(lean_obj_arg shape, b_lean_obj_arg referenc
 lean_object* lean_torch_randint(uint64_t lowBits, uint64_t highBits, lean_obj_arg s, uint8_t /*requires_grad*/, lean_obj_arg device) {
   OwnedLeanObject s_owner(s, lean_dec);
   OwnedLeanObject device_owner(device, lean_dec);
-  const auto low = std::bit_cast<int64_t>(lowBits);
-  const auto high = std::bit_cast<int64_t>(highBits);
-  auto device_ = getDevice(device);
-  device_owner.reset();
-  // randint always returns Long (int64) dtype - integral types don't support requires_grad.
-  // CPU-then-transfer for the same reason as `lean_torch_rand`.
-  auto cpu_t = torch::randint(low, high, getShape(s), torch::TensorOptions().dtype(torch::kLong));
-  auto t = device_.is_cpu() ? cpu_t : cpu_t.to(device_);
-  s_owner.reset();
-  return lean_io_result_mk_ok(fromTorchTensor(t));
+  try {
+    const auto low = std::bit_cast<int64_t>(lowBits);
+    const auto high = std::bit_cast<int64_t>(highBits);
+    auto device_ = getDevice(device);
+    device_owner.reset();
+    // randint always returns Long (int64) dtype - integral types don't support requires_grad.
+    // CPU-then-transfer for the same reason as `lean_torch_rand`.
+    auto cpu_t = torch::randint(low, high, getShape(s), torch::TensorOptions().dtype(torch::kLong));
+    auto t = device_.is_cpu() ? cpu_t : cpu_t.to(device_);
+    s_owner.reset();
+    return lean_io_result_mk_ok(fromTorchTensor(t));
+  } catch (const c10::Error& e) {
+    return mkC10IoError("randint", e);
+  } catch (const std::exception& e) {
+    return mkIoUserError(std::string("randint: ") + e.what());
+  }
 }
 
 lean_object* lean_torch_full(lean_obj_arg s, double value, uint8_t requires_grad, lean_obj_arg device) {
@@ -1332,9 +1352,15 @@ lean_object* lean_torch_max_pool2d(
 
 lean_object* lean_torch_dropout(lean_obj_arg s, b_lean_obj_arg input, double p, uint8_t training) {
   lean_dec(s);
-  auto input_ = borrowTensor(input);
-  auto output_ = torch::nn::functional::dropout(input_, torch::nn::functional::DropoutFuncOptions().p(p).training(training));
-  return lean_io_result_mk_ok(fromTorchTensor(output_));
+  try {
+    auto input_ = borrowTensor(input);
+    auto output_ = torch::nn::functional::dropout(input_, torch::nn::functional::DropoutFuncOptions().p(p).training(training));
+    return lean_io_result_mk_ok(fromTorchTensor(output_));
+  } catch (const c10::Error& e) {
+    return mkC10IoError("dropout", e);
+  } catch (const std::exception& e) {
+    return mkIoUserError(std::string("dropout: ") + e.what());
+  }
 }
 
 lean_object* lean_torch_mse_loss(lean_obj_arg /*s*/, b_lean_obj_arg input, b_lean_obj_arg target, lean_obj_arg reduction) {
@@ -1802,9 +1828,26 @@ lean_object* lean_torch_mm(uint64_t m, uint64_t n, uint64_t k, b_lean_obj_arg in
 // Tensor operations (essential for attention mechanisms)
 lean_object* lean_torch_transpose(lean_obj_arg s, b_lean_obj_arg input, uint64_t dim0, uint64_t dim1) {
   lean_dec(s);
-  auto input_ = borrowTensor(input);
-  auto result_ = torch::transpose(input_, static_cast<int64_t>(dim0), static_cast<int64_t>(dim1));
-  return fromTorchTensor(result_);
+  auto error = [](const std::string& message) {
+    auto* result = lean_alloc_ctor(0, 1, 0);
+    lean_ctor_set(result, 0, lean_mk_string(("transpose: " + message).c_str()));
+    return result;
+  };
+  try {
+    auto input_ = borrowTensor(input);
+    // libtorch accepts axis zero on a scalar, but UInt64 axes must never wrap
+    // into its negative-axis convention before validation.
+    const auto axes = static_cast<uint64_t>(std::max<int64_t>(1, input_.dim()));
+    TORCH_CHECK(dim0 < axes && dim1 < axes, "dimension out of range");
+    auto result_ = torch::transpose(input_, static_cast<int64_t>(dim0), static_cast<int64_t>(dim1));
+    auto* result = lean_alloc_ctor(1, 1, 0);
+    lean_ctor_set(result, 0, fromTorchTensor(result_));
+    return result;
+  } catch (const c10::Error& e) {
+    return error(e.what_without_backtrace());
+  } catch (const std::exception& e) {
+    return error(e.what());
+  }
 }
 
 lean_object* lean_torch_cat(lean_obj_arg /*s*/, b_lean_obj_arg tensors, lean_obj_arg dim_obj) {

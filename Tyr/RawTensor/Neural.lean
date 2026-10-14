@@ -28,7 +28,7 @@ namespace torch.RawTensor
     (q k v : @& RawTensor) (dropout : Float) (causal gqa : Bool) : RawTensor
 @[extern "lean_torch_tyr_flash_attn_4d"] opaque flashAttention (batch heads kvHeads qSeq kvSeq dim : UInt64)
     (q k v : @& RawTensor) (mask : Option RawTensor) (dropout : Float)
-    (causal : Bool) (scale : Option Float) (gqa : Bool) : RawTensor
+    (causal : Bool) (scale : Option Float) (gqa : Bool) : Except String RawTensor
 @[extern "lean_torch_slice_scatter_along_dim"] opaque sliceScatter (shape sourceShape : Shape)
     (input : RawTensor) (dim start : UInt64) (source : @& RawTensor) : RawTensor
 @[extern "lean_torch_apply_rotary_emb"] opaque applyRotary (batch seq heads dim : UInt64)

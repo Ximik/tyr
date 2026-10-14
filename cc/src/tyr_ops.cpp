@@ -749,8 +749,10 @@ torch::Tensor flash_attn_dispatch_vendored_tk(
       query, key, value, attn_mask, dropout_p, is_causal, scale, enable_gqa);
 }
 
-static lean_object* mk_io_error(const std::string& msg) {
-  return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string(msg.c_str())));
+static lean_object* mk_except_error(const std::string& msg) {
+  auto* result = lean_alloc_ctor(0, 1, 0);
+  lean_ctor_set(result, 0, lean_mk_string(msg.c_str()));
+  return result;
 }
 
 } // namespace tyr_ops
@@ -801,10 +803,12 @@ extern "C" LEAN_EXPORT lean_object* lean_torch_tyr_flash_attn_4d(
 
     auto result = tyr_ops::flash_attn_dispatch(
         q, k, v, mask_opt, dropout_p, is_causal != 0, scale_opt, enable_gqa != 0);
-    return fromTorchTensor(result);
+    auto* success = lean_alloc_ctor(1, 1, 0);
+    lean_ctor_set(success, 0, fromTorchTensor(result));
+    return success;
   } catch (const c10::Error& e) {
-    return tyr_ops::mk_io_error(std::string("lean_torch_tyr_flash_attn_4d: ") + e.what());
+    return tyr_ops::mk_except_error(std::string("flashAttention: ") + e.what_without_backtrace());
   } catch (const std::exception& e) {
-    return tyr_ops::mk_io_error(std::string("lean_torch_tyr_flash_attn_4d: ") + e.what());
+    return tyr_ops::mk_except_error(std::string("flashAttention: ") + e.what());
   }
 }
