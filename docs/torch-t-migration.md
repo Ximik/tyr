@@ -1205,6 +1205,13 @@ Int64 token versus Float32 loss inputs for GRPO. Signatures were checked against
 the collective, sharding, SFT, and GRPO implementation declarations. This review
 does not establish multi-rank runtime qualification.
 
+## Update the GPU kernel guide
+
+The kernel guide uses raw handles at generated launch boundaries and indexed
+FlashAttention and simulation types. Complete MHA forward-launch and attention
+gradient examples typecheck. Backward launch details point to the full maintained
+runner. These checks do not execute CUDA kernels or establish GPU qualification.
+
 ## Remaining acceptance criteria
 
 Remove the `T` declaration and all model, generator, reflection, documentation,
