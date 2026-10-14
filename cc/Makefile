@@ -276,12 +276,7 @@ LEAN_LIB := $(LEAN_HOME)/lib/lean
 ifeq ($(UNAME_S),Darwin)
 DYLIB_LEAN_FLAGS := -undefined dynamic_lookup -install_name @rpath/$(DYLIB)
 RPATH_ORIGIN := @loader_path
-# Generated from the symbols libTyrC defines (see the rule below), not the
-# patterns in map/libTyrC.exports directly: with `-undefined dynamic_lookup`
-# those patterns also match undefined `lean_*` references, which ld turns into
-# flat-lookup re-exports that dyld rejects ("re-export ordinal -2 ... out of
-# range for _lean_notify_assert").
-DYLIB_EXPORTS := $(OUT_DIR)/libTyrC.exports
+DYLIB_EXPORTS := map/libTyrC.exports
 DYLIB_EXPORT_FLAGS := -Wl,-exported_symbols_list,$(DYLIB_EXPORTS)
 else
 DYLIB_LEAN_FLAGS :=
@@ -396,12 +391,6 @@ $(SOXR_OBJ_DIR)/%.o: $(SOXR_DIR)/src/%.c $(SOXR_CONFIG) $(BUILD_FLAGS) $(TYR_MAK
 
 $(OUT_DIR):
 	$(MKPATH) $@
-
-ifeq ($(UNAME_S),Darwin)
-# Defined `_lean_*` and `tyr_ops::` symbols, matching map/libTyrC.exports.
-$(OUT_DIR)/libTyrC.exports: $(OBJ_FILES) map/libTyrC.exports | $(OUT_DIR)
-	nm -gUj $(OBJ_FILES) | grep -E '^(_lean_|__ZN7tyr_ops)' | sort -u > $@
-endif
 
 $(OUT_DIR)/$(DYLIB) : $(OBJ_FILES) $(SOXR_LIB) $(DYLIB_EXPORTS) $(BUILD_FLAGS) $(TYR_MAKEFILE) | check-deps $(OUT_DIR)
 	$(CXX) $(SHARED_FLAG) -o $@ $(OBJ_FILES) $(DYLIB_LINK_FLAGS) $(DYLIB_EXPORT_FLAGS)

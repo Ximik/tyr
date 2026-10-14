@@ -160,7 +160,7 @@ header changes rebuild their consumers. `cc/build/build-flags.txt` lists every
 value that affects compiled output (compilers, flags, GPU, kernel set, selected
 objects); objects depend on it, and it is rewritten only when its content
 changes, so a changed flag rebuilds and an unchanged one does not. The inexpensive regression command
-`python3 scripts/test_native_build.py` exercises these rules with tiny sources
+`python3 .github/scripts/test_native_build.py` exercises these rules with tiny sources
 in a temporary checkout: header edits, architecture switches, renamed headers,
 clean/incremental output agreement, and launcher additions/removals. It does
 not compile LibTorch or CUDA and does not modify workspace build artifacts.
@@ -193,8 +193,10 @@ run paths relative to `cc/build`. It does not link the Lean runtime; its
 `lean_*` references resolve from the executable or the `lean` process that
 loads it (`-undefined dynamic_lookup` on macOS). Because the system glibc and
 libstdc++ stay behind `libTyrC`, the Lean toolchain's older glibc never has to
-resolve them. It exports only the functions Lean calls (`lean_*`, including the
-GPU kernel launchers) and the `tyr_ops::` dispatch API used by
+resolve them. It exports only the functions Lean calls (`lean_torch_*`,
+`lean_launch_*` for the GPU kernel launchers, and a few other `lean_<prefix>_*`
+groups; a new FFI prefix must be added to both lists) and the `tyr_ops::`
+dispatch API used by
 `cc/tools/bench_flash_attn.cpp` (`cc/map/libTyrC.map`, `cc/map/libTyrC.exports` on
 macOS). Its copies of C++ template code and of soxr stay private, so they never
 stand in for libtorch's own.

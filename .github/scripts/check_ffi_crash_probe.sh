@@ -6,7 +6,7 @@
 #   - abort with SIGABRT (exit code 134), and
 #   - print the libtorch error through Tyr's terminate handler (cc/src/tyr.cpp).
 #
-# Usage: .github/scripts/check_ffi_crash_probe.sh   (Linux only, from the repo root)
+# Usage: .github/scripts/check_ffi_crash_probe.sh   (from the repo root)
 set -uo pipefail
 
 log=output/ci/ffi-crash-probe.log
