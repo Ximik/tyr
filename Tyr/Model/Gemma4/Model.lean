@@ -22,7 +22,7 @@ open torch
 open torch.Model torch.qwen35
 
 private def reqGradFalse {s : Shape} (t : Tensor { shape := s }) : Tensor { shape := s } :=
-  Tensor.setRequiresGrad t false
+  Tensor.detach t
 
 /-- Gemma 4 RMSNorm with standard learned scale. -/
 structure Gemma4RMSNorm (dim : UInt64) where

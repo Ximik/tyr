@@ -1624,7 +1624,7 @@ def supervisedFineTune (cfg : NanoChatConfig) : PipelineM Unit := do
   | some midCkpt =>
     log s!"Loaded checkpoint at step {midCkpt.step}"
     let paramsOnDeviceRaw ← TensorStruct.mapM (fun t => pure (t.to trainDevice)) midCkpt.params
-    let paramsOnDevice := TensorStruct.makeLeafParams paramsOnDeviceRaw
+    let paramsOnDevice ← TensorStruct.makeLeafParams paramsOnDeviceRaw
 
     -- Initialize YaRN rotary embeddings
     let yarn ← YarnRotary.init modelCfg.headDim modelCfg.maxSeqLen modelCfg.ropeBase
@@ -1785,7 +1785,7 @@ def reinforcementLearning (cfg : NanoChatConfig) : PipelineM Unit := do
   | some sftCkpt =>
     log s!"Loaded checkpoint at step {sftCkpt.step}"
     let paramsOnDeviceRaw ← TensorStruct.mapM (fun t => pure (t.to trainDevice)) sftCkpt.params
-    let paramsOnDevice := TensorStruct.makeLeafParams paramsOnDeviceRaw
+    let paramsOnDevice ← TensorStruct.makeLeafParams paramsOnDeviceRaw
     let adamStateOnDevice ← TensorStruct.mapM (fun t => pure (t.to trainDevice)) sftCkpt.optState.adamState
 
     -- Initialize model components

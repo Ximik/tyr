@@ -20,7 +20,7 @@ open torch.Model
 
 private def initUniform (shape : Shape) (scale : Float) : IO (Tensor { shape := shape, dtype := .Float32 }) := do
   let w ← uniformTensor shape (-scale) scale
-  pure (Tensor.setRequiresGrad w true)
+  Tensor.parameter w
 
 private def xavierScale (dim : Nat) : Float :=
   1.0 / Float.sqrt (max 1 dim).toFloat
@@ -140,7 +140,7 @@ namespace LinearNorm
 def init (inDim outDim : UInt64) : IO (LinearNorm inDim outDim) := do
   let scale := xavierScale outDim.toNat
   let weight ← initUniform #[outDim, inDim] scale
-  let bias := initBias #[outDim]
+  let bias ← initBias #[outDim]
   pure { weight, bias }
 
 def forward2d {batch inDim outDim : UInt64}
@@ -174,7 +174,7 @@ def init (inC outC kernel : UInt64)
     (dilation : UInt64 := 1)
     : IO (Conv1dParams inC outC kernel stride padding dilation) := do
   let weight ← initWeight #[outC, inC, kernel] (inC * kernel)
-  let bias := initBias #[outC]
+  let bias ← initBias #[outC]
   pure { weight, bias }
 
 def forward {batch frames inC outC kernel stride padding dilation : UInt64}
@@ -204,7 +204,7 @@ def init (channels kernel : UInt64)
     (dilation : UInt64 := 1)
     : IO (DepthwiseConv1dParams channels kernel stride padding dilation) := do
   let weight ← initWeight #[channels, 1, kernel] kernel
-  let bias := initBias #[channels]
+  let bias ← initBias #[channels]
   pure { weight, bias }
 
 def forward {batch frames channels kernel stride padding dilation : UInt64}
@@ -236,7 +236,7 @@ def init (channels kernel : UInt64)
     (dilation : UInt64 := 1)
     : IO (DepthwiseTransConv1dParams channels kernel stride padding outputPadding dilation) := do
   let weight ← initWeight #[channels, 1, kernel] kernel
-  let bias := initBias #[channels]
+  let bias ← initBias #[channels]
   pure { weight, bias }
 
 def forward {batch frames channels kernel stride padding outputPadding dilation : UInt64}
@@ -302,8 +302,8 @@ def init (inC outC kernel : UInt64)
     (dilation : UInt64 := 1)
     : IO (WNConv1dParams inC outC kernel stride padding dilation) := do
   let weightV ← initWeight #[outC, inC, kernel] (inC * kernel)
-  let weightG : Tensor { shape := #[outC], dtype := .Float32 } := Tensor.setRequiresGrad (normDim0_3d weightV) true
-  let bias := initBias #[outC]
+  let weightG : Tensor { shape := #[outC], dtype := .Float32 } ← Tensor.parameter (normDim0_3d weightV)
+  let bias ← initBias #[outC]
   pure { weightV, weightG, bias }
 
 def forward {batch frames inC outC kernel stride padding dilation : UInt64}
@@ -337,8 +337,8 @@ def init (inC outC kernel : UInt64)
     (dilation : UInt64 := 1)
     : IO (WNConvTranspose1dParams inC outC kernel stride padding outputPadding dilation) := do
   let weightV ← initWeight #[inC, outC, kernel] (max 1 (outC * kernel).toNat |>.toUInt64)
-  let weightG : Tensor { shape := #[inC], dtype := .Float32 } := Tensor.setRequiresGrad (normDim0_3d weightV) true
-  let bias := initBias #[outC]
+  let weightG : Tensor { shape := #[inC], dtype := .Float32 } ← Tensor.parameter (normDim0_3d weightV)
+  let bias ← initBias #[outC]
   pure { weightV, weightG, bias }
 
 def forward {batch frames inC outC kernel stride padding outputPadding dilation : UInt64}
@@ -372,8 +372,8 @@ def init (channels kernel : UInt64)
     (dilation : UInt64 := 1)
     : IO (WNDepthwiseTransConv1dParams channels kernel stride padding outputPadding dilation) := do
   let weightV ← initWeight #[channels, 1, kernel] kernel
-  let weightG : Tensor { shape := #[channels], dtype := .Float32 } := Tensor.setRequiresGrad (normDim0_3d weightV) true
-  let bias := initBias #[channels]
+  let weightG : Tensor { shape := #[channels], dtype := .Float32 } ← Tensor.parameter (normDim0_3d weightV)
+  let bias ← initBias #[channels]
   pure { weightV, weightG, bias }
 
 def forward {batch frames channels kernel stride padding outputPadding dilation : UInt64}
@@ -500,7 +500,7 @@ def init (nToken : UInt64) (cfg : AlbertConfig) : IO (AlbertEmbeddings nToken cf
   let positionEmbeddings ← initUniform #[cfg.maxPositionEmbeddings, cfg.embeddingSize] scale
   let tokenTypeEmbeddings ← initUniform #[cfg.typeVocabSize, cfg.embeddingSize] scale
   let layerNormWeight ← initUniform #[cfg.embeddingSize] 0.02
-  let layerNormBias := initBias #[cfg.embeddingSize]
+  let layerNormBias ← initBias #[cfg.embeddingSize]
   pure { wordEmbeddings, positionEmbeddings, tokenTypeEmbeddings, layerNormWeight, layerNormBias }
 
 def forward {seq nToken : UInt64}
@@ -534,7 +534,7 @@ def init (cfg : AlbertConfig) : IO (KittenAlbertSelfAttention cfg) := do
   let value ← LinearNorm.init cfg.hiddenSize (AlbertConfig.allHeadSize cfg)
   let dense ← LinearNorm.init (AlbertConfig.allHeadSize cfg) cfg.hiddenSize
   let layerNormWeight ← initUniform #[cfg.hiddenSize] 0.02
-  let layerNormBias := initBias #[cfg.hiddenSize]
+  let layerNormBias ← initBias #[cfg.hiddenSize]
   pure { query, key, value, dense, layerNormWeight, layerNormBias }
 
 def forward {seq : UInt64}
@@ -578,7 +578,7 @@ namespace KittenAlbertLayer
 def init (cfg : AlbertConfig) : IO (KittenAlbertLayer cfg) := do
   let attention ← KittenAlbertSelfAttention.init cfg
   let fullLayerNormWeight ← initUniform #[cfg.hiddenSize] 0.02
-  let fullLayerNormBias := initBias #[cfg.hiddenSize]
+  let fullLayerNormBias ← initBias #[cfg.hiddenSize]
   let ffn ← LinearNorm.init cfg.hiddenSize cfg.intermediateSize
   let ffnOutput ← LinearNorm.init cfg.intermediateSize cfg.hiddenSize
   pure { attention, fullLayerNormWeight, fullLayerNormBias, ffn, ffnOutput }
@@ -683,7 +683,7 @@ namespace TextConvLayer
 def init (cfg : KittenTTSConfig) : IO (TextConvLayer cfg) := do
   let conv ← Conv1dParams.init cfg.hiddenDim cfg.hiddenDim cfg.textEncoderKernelSize 1 ((cfg.textEncoderKernelSize - 1) / 2) 1
   let lnWeight ← initUniform #[cfg.hiddenDim] 0.02
-  let lnBias := initBias #[cfg.hiddenDim]
+  let lnBias ← initBias #[cfg.hiddenDim]
   pure { conv, lnWeight, lnBias }
 
 def forward {seq : UInt64}
@@ -763,8 +763,8 @@ namespace AdaIN1d
 
 def init (styleDim channels : UInt64) : IO (AdaIN1d styleDim channels) := do
   let fc ← LinearNorm.init styleDim (2 * channels)
-  let normWeight := Tensor.setRequiresGrad (Tensor.ones #[channels] false Device.CPU) true
-  let normBias := initBias #[channels]
+  let normWeight ← Tensor.parameter (Tensor.ones #[channels] false Device.CPU)
+  let normBias ← initBias #[channels]
   pure { fc, normWeight, normBias }
 
 def forward {frames styleDim channels : UInt64}
@@ -1049,8 +1049,8 @@ namespace AdaIN1dDyn
 
 def init (styleDim channels : UInt64) : IO (AdaIN1dDyn styleDim) := do
   let fc ← LinearNorm.init styleDim (2 * channels)
-  let normWeight : Tensor { shape := #[channels], dtype := .Float32 } := Tensor.setRequiresGrad (Tensor.ones #[channels] false Device.CPU) true
-  let normBias := initBias #[channels]
+  let normWeight : Tensor { shape := #[channels], dtype := .Float32 } ← Tensor.parameter (Tensor.ones #[channels] false Device.CPU)
+  let normBias ← initBias #[channels]
   pure {
     fcWeight := Tensor.packShape fc.weight
     fcBias := Tensor.packShape fc.bias
@@ -1098,8 +1098,8 @@ def init (inC outC kernel : UInt64)
     (dilation : UInt64 := 1)
     : IO WNConv1dDyn := do
   let weightV ← initWeight #[outC, inC, kernel] (inC * kernel)
-  let weightG : Tensor { shape := #[outC], dtype := .Float32 } := Tensor.setRequiresGrad (normDim0_3d weightV) true
-  let bias := initBias #[outC]
+  let weightG : Tensor { shape := #[outC], dtype := .Float32 } ← Tensor.parameter (normDim0_3d weightV)
+  let bias ← initBias #[outC]
   pure {
     weightV := Tensor.packShape weightV
     weightG := Tensor.packShape weightG
@@ -1142,8 +1142,8 @@ def init (inC outC kernel : UInt64)
     : IO WNConvTranspose1dDyn := do
   let fanIn := if outC * kernel == 0 then 1 else outC * kernel
   let weightV ← initWeight #[inC, outC, kernel] fanIn
-  let weightG : Tensor { shape := #[inC], dtype := .Float32 } := Tensor.setRequiresGrad (normDim0_3d weightV) true
-  let bias := initBias #[outC]
+  let weightG : Tensor { shape := #[inC], dtype := .Float32 } ← Tensor.parameter (normDim0_3d weightV)
+  let bias ← initBias #[outC]
   pure {
     weightV := Tensor.packShape weightV
     weightG := Tensor.packShape weightG

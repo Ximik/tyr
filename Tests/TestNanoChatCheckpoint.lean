@@ -31,7 +31,7 @@ private def trainedCheckpoint : IO (Checkpoint tinyConfig) := do
   let initialOpt := OptimizerState.init tinyConfig params 0.023 0.017
   let grads := TensorStruct.map (fun t => Tensor.Preserving.addScalar (Tensor.zerosLike t) 0.125) params
   let opt := Optim.adamw (α := moddedGpt.ModdedGPTParams tinyConfig) (lr := 0.023) (weight_decay := 0.017)
-  let (params, adamState) := Optim.step opt params grads initialOpt.adamState
+  let (params, adamState) ← Optim.step opt params grads initialOpt.adamState
   let (_, embedState) ← Optim.DistAdam.stepSingle params.embed grads.embed
     initialOpt.dualState.embed { lr := 0.023 }
   let dualState := { initialOpt.dualState with
@@ -106,8 +106,8 @@ private def metadata (tokens : UInt64) : CheckpointMetadata := {
   let grads := TensorStruct.map (fun t => Tensor.Preserving.addScalar (Tensor.zerosLike t) 0.125) original.params
   let opt := Optim.adamw (α := moddedGpt.ModdedGPTParams tinyConfig)
     (lr := original.optState.baseLr) (weight_decay := original.optState.weightDecay)
-  let (expectedParams, expectedAdam) := Optim.step opt original.params grads original.optState.adamState
-  let (actualParams, actualAdam) := Optim.step opt loaded.params grads loaded.optState.adamState
+  let (expectedParams, expectedAdam) ← Optim.step opt original.params grads original.optState.adamState
+  let (actualParams, actualAdam) ← Optim.step opt loaded.params grads loaded.optState.adamState
   assertTreeEqual actualParams expectedParams
   assertTreeEqual actualAdam expectedAdam
   assertEqual actualAdam.fst.count expectedAdam.fst.count

@@ -16,7 +16,7 @@ def relL2
 /-- Fresh storage makes repeated backward calls independent even under Lean commoning. -/
 def makeLeaf {s : Shape} {dtype : DType} (base : Tensor { shape := s, dtype := dtype }) : IO (Tensor { shape := s, dtype := dtype }) := do
   let leaf ← torch.data.cloneInferenceIO base
-  pure (Tensor.setRequiresGrad leaf true)
+  Tensor.parameter leaf
 
 def backwardWithCotangent {s : Shape} {dtype : DType} (out dOut : Tensor { shape := s, dtype := dtype }) : IO Unit :=
   Tensor.backwardLoss (Tensor.sumAll (out.toFloat32 * dOut.toFloat32))

@@ -38,7 +38,7 @@ def init (cfg : QwenConfig) (dtype : DType := .Float32) : IO (Qwen3Model cfg dty
   let emb ← Tensor.randn #[cfg.vocab_size, cfg.hidden_size]
   let emb := emb.castDType dtype
   let std := 0.02  -- Standard embedding init
-  let embed_tokens := Tensor.setRequiresGrad (Tensor.Preserving.mulScalar emb std) true
+  let embed_tokens ← Tensor.parameter (Tensor.Preserving.mulScalar emb std)
 
   -- Initialize layers
   let mut layers := #[]
@@ -48,7 +48,7 @@ def init (cfg : QwenConfig) (dtype : DType := .Float32) : IO (Qwen3Model cfg dty
     layers := layers.push layer
 
   -- Final norm
-  let norm := RMSNorm.init cfg.hidden_size cfg.rms_norm_eps dtype
+  let norm ← RMSNorm.init cfg.hidden_size cfg.rms_norm_eps dtype
 
   pure { embed_tokens, layers, norm }
 

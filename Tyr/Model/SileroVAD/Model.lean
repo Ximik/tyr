@@ -116,19 +116,19 @@ namespace SileroVAD
 def init : IO SileroVAD := do
   let stftConvWeight ← initWeight #[258, 1, 256] 256
   let conv1Weight ← initWeight #[128, 129, 3] (129 * 3)
-  let conv1Bias := initBias #[128]
+  let conv1Bias ← initBias #[128]
   let conv2Weight ← initWeight #[64, 128, 3] (128 * 3)
-  let conv2Bias := initBias #[64]
+  let conv2Bias ← initBias #[64]
   let conv3Weight ← initWeight #[64, 64, 3] (64 * 3)
-  let conv3Bias := initBias #[64]
+  let conv3Bias ← initBias #[64]
   let conv4Weight ← initWeight #[128, 64, 3] (64 * 3)
-  let conv4Bias := initBias #[128]
+  let conv4Bias ← initBias #[128]
   let lstmWeightIH ← initWeight #[512, 128] 128
   let lstmWeightHH ← initWeight #[512, 128] 128
-  let lstmBiasIH := initBias #[512]
-  let lstmBiasHH := initBias #[512]
+  let lstmBiasIH ← initBias #[512]
+  let lstmBiasHH ← initBias #[512]
   let finalConvWeight ← initWeight #[1, 128, 1] 128
-  let finalConvBias := initBias #[1]
+  let finalConvBias ← initBias #[1]
   pure {
     stftConvWeight
     conv1Weight

@@ -85,12 +85,12 @@ def loadAttentionSharded (modelDir : String) (layerIdx : UInt64)
     pure none
 
   pure {
-    q_proj := Tensor.setRequiresGrad q_proj false
-    k_proj := Tensor.setRequiresGrad k_proj false
-    v_proj := Tensor.setRequiresGrad v_proj false
-    o_proj := Tensor.setRequiresGrad o_proj false
-    q_norm := q_norm.map (fun t => Tensor.setRequiresGrad t.toFloat32 false)
-    k_norm := k_norm.map (fun t => Tensor.setRequiresGrad t.toFloat32 false)
+    q_proj := Tensor.detach q_proj
+    k_proj := Tensor.detach k_proj
+    v_proj := Tensor.detach v_proj
+    o_proj := Tensor.detach o_proj
+    q_norm := q_norm.map (fun t => Tensor.detach t.toFloat32)
+    k_norm := k_norm.map (fun t => Tensor.detach t.toFloat32)
   }
 
 /-- Load a single MLP layer from sharded SafeTensors -/
@@ -104,16 +104,16 @@ def loadMLPSharded (modelDir : String) (layerIdx : UInt64)
   let down_proj ← loadLinearWeightSharded modelDir s!"{layerPrefix}.down_proj" hidden_size intermediate_size
 
   pure {
-    gate_proj := Tensor.setRequiresGrad gate_proj false
-    up_proj := Tensor.setRequiresGrad up_proj false
-    down_proj := Tensor.setRequiresGrad down_proj false
+    gate_proj := Tensor.detach gate_proj
+    up_proj := Tensor.detach up_proj
+    down_proj := Tensor.detach down_proj
   }
 
 /-- Load RMSNorm weights from sharded SafeTensors -/
 def loadRMSNormSharded (modelDir : String) (name : String) (dim : UInt64)
     : IO (RMSNorm dim) := do
   let scale ← loadRequiredSharded modelDir s!"{name}.weight" #[dim]
-  pure { weight := Tensor.setRequiresGrad scale.toFloat32 false, eps := ⟨1e-6⟩ }
+  pure { weight := Tensor.detach scale.toFloat32, eps := ⟨1e-6⟩ }
 
 /-- Load a single transformer layer from sharded SafeTensors -/
 def loadLayerSharded (modelDir : String) (layerIdx : UInt64) (cfg : QwenConfig)
@@ -139,7 +139,7 @@ def loadQwen3ModelSharded (modelDir : String) (cfg : QwenConfig := QwenConfig.qw
 
   -- Token embeddings
   let embed_tokens ← loadRequiredSharded modelDir "model.embed_tokens.weight" #[cfg.vocab_size, cfg.hidden_size]
-  let embed_tokens := Tensor.setRequiresGrad embed_tokens.toFloat32 false
+  let embed_tokens := Tensor.detach embed_tokens.toFloat32
   log.onInfo "  Loaded embed_tokens"
 
   -- Layers
@@ -173,10 +173,10 @@ def loadAttention (path : String) (layerIdx : UInt64)
   let o_proj ← loadLinearWeight path s!"{layerPrefix}.o_proj" hidden_size (num_heads * head_dim)
 
   pure {
-    q_proj := Tensor.setRequiresGrad q_proj false
-    k_proj := Tensor.setRequiresGrad k_proj false
-    v_proj := Tensor.setRequiresGrad v_proj false
-    o_proj := Tensor.setRequiresGrad o_proj false
+    q_proj := Tensor.detach q_proj
+    k_proj := Tensor.detach k_proj
+    v_proj := Tensor.detach v_proj
+    o_proj := Tensor.detach o_proj
   }
 
 /-- Load a single MLP layer from SafeTensors (single file) -/
@@ -190,16 +190,16 @@ def loadMLP (path : String) (layerIdx : UInt64)
   let down_proj ← loadLinearWeight path s!"{layerPrefix}.down_proj" hidden_size intermediate_size
 
   pure {
-    gate_proj := Tensor.setRequiresGrad gate_proj false
-    up_proj := Tensor.setRequiresGrad up_proj false
-    down_proj := Tensor.setRequiresGrad down_proj false
+    gate_proj := Tensor.detach gate_proj
+    up_proj := Tensor.detach up_proj
+    down_proj := Tensor.detach down_proj
   }
 
 /-- Load RMSNorm weights from SafeTensors (single file) -/
 def loadRMSNorm (path : String) (name : String) (dim : UInt64)
     : IO (RMSNorm dim) := do
   let scale ← loadRequired path s!"{name}.weight" #[dim]
-  pure { weight := Tensor.setRequiresGrad scale.toFloat32 false, eps := ⟨1e-6⟩ }
+  pure { weight := Tensor.detach scale.toFloat32, eps := ⟨1e-6⟩ }
 
 /-- Load a single transformer layer from SafeTensors (single file) -/
 def loadLayer (path : String) (layerIdx : UInt64) (cfg : QwenConfig)
@@ -221,7 +221,7 @@ def loadQwen3Model (path : String) (cfg : QwenConfig := QwenConfig.qwen3_4B)
 
   -- Token embeddings
   let embed_tokens ← loadRequired path "model.embed_tokens.weight" #[cfg.vocab_size, cfg.hidden_size]
-  let embed_tokens := Tensor.setRequiresGrad embed_tokens.toFloat32 false
+  let embed_tokens := Tensor.detach embed_tokens.toFloat32
   log.onInfo "  Loaded embed_tokens"
 
   -- Layers

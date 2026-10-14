@@ -565,8 +565,10 @@ lean_object* lean_torch_randn(lean_obj_arg s, uint8_t requires_grad, lean_obj_ar
     device_owner.reset();
     // CPU-then-transfer to avoid the GB10 CUDA-RNG throw path; see comment
     // on `lean_torch_rand`.
-    auto cpu_t = torch::randn(getShape(s), torch::TensorOptions().requires_grad(requires_grad));
+    // Enable gradients only after transfer so the result is a leaf on every device.
+    auto cpu_t = torch::randn(getShape(s), torch::TensorOptions().requires_grad(false));
     auto t = device_.is_cpu() ? cpu_t : cpu_t.to(device_);
+    t.requires_grad_(requires_grad != 0);
     s_owner.reset();
     return lean_io_result_mk_ok(fromTorchTensor(t));
   } catch (const c10::Error& e) {
@@ -587,8 +589,9 @@ lean_object* lean_torch_rand(lean_obj_arg s, int requires_grad, lean_obj_arg dev
   try {
     auto device_ = getDevice(device);
     device_owner.reset();
-    auto cpu_t = torch::rand(getShape(s), torch::TensorOptions().requires_grad(requires_grad));
+    auto cpu_t = torch::rand(getShape(s), torch::TensorOptions().requires_grad(false));
     auto t = device_.is_cpu() ? cpu_t : cpu_t.to(device_);
+    t.requires_grad_(requires_grad != 0);
     s_owner.reset();
     return lean_io_result_mk_ok(fromTorchTensor(t));
   } catch (const c10::Error& e) {
@@ -946,22 +949,90 @@ lean_object* lean_torch_zero_grad(lean_obj_arg shape, b_lean_obj_arg x) {
   }
 }
 
-// Set requires_grad
+// Generated Lean frames release owned references only on normal return. Native
+// exceptions from pure callback operations cannot safely become a recoverable
+// functionalGrad error after unwinding those frames.
+static lean_object* applyPureAutogradCallback(lean_obj_arg callback,
+                                             lean_obj_arg arguments) noexcept {
+  try {
+    return lean_apply_1(callback, arguments);
+  } catch (const c10::Error& error) {
+    std::fprintf(stderr, "functionalGrad: unrecoverable native exception in pure Lean callback; "
+                         "Lean reference cleanup cannot unwind: %s\n", error.what_without_backtrace());
+  } catch (const std::exception& error) {
+    std::fprintf(stderr, "functionalGrad: unrecoverable native exception in pure Lean callback; "
+                         "Lean reference cleanup cannot unwind: %s\n", error.what());
+  } catch (...) {
+    std::fprintf(stderr, "functionalGrad: unrecoverable unknown exception in pure Lean callback; "
+                         "Lean reference cleanup cannot unwind\n");
+  }
+  std::fflush(stderr);
+  std::abort();
+}
+
+// A pure differentiation boundary. Temporary leaf identities cannot escape:
+// the callback returns only a scalar loss, and results are detached gradients.
+lean_object* lean_torch_functional_grad(b_lean_obj_arg inputs, lean_obj_arg f) {
+  OwnedLeanObject callback(f, lean_dec);
+  try {
+    torch::AutoGradMode enable_grad(true);
+    std::vector<torch::Tensor> leaves;
+    const size_t size = lean_array_size(inputs);
+    leaves.reserve(size);
+    OwnedLeanObject arguments(lean_mk_empty_array(), lean_dec);
+    for (size_t i = 0; i < size; ++i) {
+      auto leaf = borrowTensor(lean_array_get_core(inputs, i)).detach().clone();
+      leaf.requires_grad_(true);
+      leaves.push_back(leaf);
+      arguments.reset(lean_array_push(arguments.release(), fromTorchTensor(leaf)));
+    }
+    OwnedLeanObject loss_object(applyPureAutogradCallback(callback.release(), arguments.release()), lean_dec);
+    auto loss = borrowTensor(loss_object.get());
+    TORCH_CHECK(loss.numel() == 1, "functionalGrad: expected scalar output");
+    std::vector<torch::Tensor> gradients(size);
+    if (size != 0 && loss.requires_grad()) {
+      gradients = torch::autograd::grad({loss}, leaves, {}, /*retain_graph=*/true,
+                                        /*create_graph=*/false, /*allow_unused=*/true);
+    }
+    OwnedLeanObject result(lean_mk_empty_array(), lean_dec);
+    for (size_t i = 0; i < size; ++i) {
+      auto gradient = gradients[i].defined() ? gradients[i].detach().clone()
+                                            : torch::zeros_like(leaves[i]);
+      result.reset(lean_array_push(result.release(), fromTorchTensor(std::move(gradient))));
+    }
+    auto* ok = lean_alloc_ctor(1, 1, 0);
+    lean_ctor_set(ok, 0, result.release());
+    return ok;
+  } catch (const std::exception& e) {
+    auto* error = lean_alloc_ctor(0, 1, 0);
+    lean_ctor_set(error, 0, lean_mk_string((std::string("functionalGrad: ") + e.what()).c_str()));
+    return error;
+  }
+}
+
+// Parameter identity is effectful. Consume the Lean reference before the native
+// uniqueness check, and carry all failures through IO.
 lean_object* lean_torch_set_requires_grad(lean_obj_arg shape, lean_obj_arg x, uint8_t requires_grad) {
   lean_dec(shape);
   auto tensor = takeTensor(x);
-  const bool enabled = requires_grad != 0;
-  // A no-op preserves existing leaf identity and grad_fn, even if aliased.
-  if (tensor.requires_grad() == enabled) return fromTorchTensor(std::move(tensor));
-  TORCH_CHECK(tensor.is_leaf(), "you can only change requires_grad flags of leaf variables");
-  if (!canReuseTensorValue(tensor)) {
-    torch::NoGradGuard guard;
-    auto result = tensor.clone();
-    if (tensor.grad().defined()) result.mutable_grad() = tensor.grad().detach().clone();
-    tensor = std::move(result);
+  try {
+    const bool enabled = requires_grad != 0;
+    if (tensor.requires_grad() == enabled)
+      return lean_io_result_mk_ok(fromTorchTensor(std::move(tensor)));
+    TORCH_CHECK(tensor.is_leaf(), "you can only change requires_grad flags of leaf variables");
+    if (!canReuseTensorValue(tensor)) {
+      torch::NoGradGuard guard;
+      auto result = tensor.clone();
+      if (tensor.grad().defined()) result.mutable_grad() = tensor.grad().detach().clone();
+      tensor = std::move(result);
+    }
+    tensor.requires_grad_(enabled);
+    return lean_io_result_mk_ok(fromTorchTensor(std::move(tensor)));
+  } catch (const c10::Error& e) {
+    return mkC10IoError("setRequiresGrad", e);
+  } catch (const std::exception& e) {
+    return mkStdIoError("setRequiresGrad", e);
   }
-  tensor.requires_grad_(enabled);
-  return fromTorchTensor(std::move(tensor));
 }
 
 // Detach tensor from computation graph
@@ -2466,7 +2537,7 @@ lean_object* lean_torch_backward_unit(lean_obj_arg s, b_lean_obj_arg output, b_l
   try {
     auto output_ = borrowTensor(output);
     auto grad_output_ = borrowTensor(grad_output);
-    output_.backward(grad_output_);
+    output_.backward(grad_output_, /*retain_graph=*/true);
     return lean_io_result_mk_ok(lean_box(0));
   } catch (const c10::Error& e) {
     return mkC10IoError("Backward failed", e);
@@ -2752,7 +2823,7 @@ lean_object* lean_torch_to_long(lean_obj_arg s, b_lean_obj_arg input) {
 lean_object* lean_torch_backward_loss(b_lean_obj_arg loss) {
   try {
     auto loss_ = borrowTensor(loss);
-    loss_.backward();
+    loss_.backward({}, /*retain_graph=*/true);
     return lean_io_result_mk_ok(lean_box(0));
   } catch (const c10::Error& e) {
     return mkC10IoError("Backward loss failed", e);

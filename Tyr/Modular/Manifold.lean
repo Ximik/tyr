@@ -112,9 +112,9 @@ structure ManifoldLinear (M : UInt64 → UInt64 → Type) [MatrixManifoldCarrier
 namespace ManifoldLinear
 
 private def makeLeafWeight [MatrixManifoldCarrier M] {in_dim out_dim : UInt64}
-    (w : M out_dim in_dim) : M out_dim in_dim :=
-  MatrixManifoldCarrier.reAmbient w
-    (Tensor.setRequiresGrad (Tensor.detach (MatrixManifoldCarrier.toMatrix w)) true)
+    (w : M out_dim in_dim) : IO (M out_dim in_dim) := do
+  let leaf ← Tensor.parameter (MatrixManifoldCarrier.toMatrix w)
+  pure (MatrixManifoldCarrier.reAmbient w leaf)
 
 /-- Initialize manifold-linear weights by projecting a random matrix. -/
 def init [MatrixManifoldCarrier M] (in_dim out_dim : UInt64)
@@ -122,9 +122,9 @@ def init [MatrixManifoldCarrier M] (in_dim out_dim : UInt64)
     (h : MatrixShapeOK out_dim in_dim := by decide)
     : IO (ManifoldLinear M in_dim out_dim) := do
   let w0 ← Tensor.randn #[out_dim, in_dim]
-  let weight := makeLeafWeight (MatrixManifoldCarrier.project h w0)
-  let bias ← if withBias then
-      pure (some (Tensor.zeros #[out_dim] true))
+  let weight ← makeLeafWeight (MatrixManifoldCarrier.project h w0)
+  let bias ← if withBias then do
+      pure (some (← Tensor.parameter (Tensor.zeros #[out_dim])))
     else
       pure none
   pure { weight, bias }
@@ -143,15 +143,15 @@ def applyDualMapUpdate [MatrixManifoldCarrier M] {in_dim out_dim : UInt64}
     (lin : ManifoldLinear M in_dim out_dim)
     (weightGrad : AmbientMatrix out_dim in_dim)
     (biasGrad? : Option (AmbientVector out_dim))
-    (lr : Float) : ManifoldLinear M in_dim out_dim :=
-  let weight' := makeLeafWeight (MatrixManifoldCarrier.dualMapStep lin.weight weightGrad lr)
-  let bias' :=
+    (lr : Float) : IO (ManifoldLinear M in_dim out_dim) := do
+  let weight' ← makeLeafWeight (MatrixManifoldCarrier.dualMapStep lin.weight weightGrad lr)
+  let bias' ←
     match lin.bias, biasGrad? with
-    | some b, some g =>
-      some (Tensor.setRequiresGrad (Tensor.detach (Sub.sub b (Tensor.Preserving.mulScalar g lr))) true)
-    | some b, none => some b
-    | none, _ => none
-  { lin with weight := weight', bias := bias' }
+    | some b, some g => do
+      pure (some (← Tensor.parameter (Sub.sub b (Tensor.Preserving.mulScalar g lr))))
+    | some b, none => pure (some b)
+    | none, _ => pure none
+  pure { lin with weight := weight', bias := bias' }
 
 end ManifoldLinear
 
@@ -163,24 +163,24 @@ namespace ManifoldVectorParam
 
 /-- Ensure manifold-vector value is represented by a trainable leaf tensor. -/
 private def makeLeafValue [VectorManifoldCarrier V] {n : UInt64}
-    (v : V n) : V n :=
-  VectorManifoldCarrier.fromAmbientUnchecked
-    (Tensor.setRequiresGrad (Tensor.detach (VectorManifoldCarrier.toVector v)) true)
+    (v : V n) : IO (V n) := do
+  let leaf ← Tensor.parameter (VectorManifoldCarrier.toVector v)
+  pure (VectorManifoldCarrier.fromAmbientUnchecked leaf)
 
 /-- Initialize from random ambient coordinates projected to manifold. -/
 def init [VectorManifoldCarrier V] (n : UInt64) : IO (ManifoldVectorParam V n) := do
   let d := (VectorManifoldCarrier.ambientDim (V := V) n)
   let vRaw ← Tensor.randn #[d]
-  let v := makeLeafValue (VectorManifoldCarrier.project n vRaw)
+  let v ← makeLeafValue (VectorManifoldCarrier.project n vRaw)
   pure { value := v }
 
 /-- Apply one dual-map manifold update for this vector parameter. -/
 def applyDualMapUpdate [VectorManifoldCarrier V] {n : UInt64}
     (p : ManifoldVectorParam V n)
     (grad : AmbientVector (VectorManifoldCarrier.ambientDim (V := V) n))
-    (lr : Float) : ManifoldVectorParam V n :=
+    (lr : Float) : IO (ManifoldVectorParam V n) := do
   let v' := VectorManifoldCarrier.dualMapStep p.value grad lr
-  { value := makeLeafValue v' }
+  pure { value := ← makeLeafValue v' }
 
 end ManifoldVectorParam
 
@@ -302,12 +302,12 @@ so product/sequential structures can be updated without dedicated manifold types
 -/
 class ManifoldUpdatable (P : Type) where
   Cotangent : P → Type
-  applyUpdate : (params : P) → Cotangent params → Float → P
+  applyUpdate : (params : P) → Cotangent params → Float → IO P
 
 namespace ManifoldUpdatable
 
 /-- Apply one manifold-native update step. -/
-def step [ManifoldUpdatable P] (params : P) (grad : ManifoldUpdatable.Cotangent params) (lr : Float) : P :=
+def step [ManifoldUpdatable P] (params : P) (grad : ManifoldUpdatable.Cotangent params) (lr : Float) : IO P :=
   ManifoldUpdatable.applyUpdate params grad lr
 
 instance [MatrixManifoldCarrier M] (in_dim out_dim : UInt64) :
@@ -322,16 +322,18 @@ instance [VectorManifoldCarrier V] (n : UInt64) :
 
 instance [ManifoldUpdatable A] [ManifoldUpdatable B] : ManifoldUpdatable (A × B) where
   Cotangent p := ManifoldUpdatable.Cotangent p.1 × ManifoldUpdatable.Cotangent p.2
-  applyUpdate p g lr :=
-    (ManifoldUpdatable.applyUpdate p.1 g.1 lr, ManifoldUpdatable.applyUpdate p.2 g.2 lr)
+  applyUpdate p g lr := do
+    let first ← ManifoldUpdatable.applyUpdate p.1 g.1 lr
+    let second ← ManifoldUpdatable.applyUpdate p.2 g.2 lr
+    pure (first, second)
 
 instance [ManifoldUpdatable M₁] [ManifoldUpdatable M₂] :
     ManifoldUpdatable (Sequential M₁ M₂) where
   Cotangent net := ManifoldUpdatable.Cotangent net.first × ManifoldUpdatable.Cotangent net.second
-  applyUpdate net g lr := {
-    first := ManifoldUpdatable.applyUpdate net.first g.1 lr
-    second := ManifoldUpdatable.applyUpdate net.second g.2 lr
-  }
+  applyUpdate net g lr := do
+    let first ← ManifoldUpdatable.applyUpdate net.first g.1 lr
+    let second ← ManifoldUpdatable.applyUpdate net.second g.2 lr
+    pure { first, second }
 
 end ManifoldUpdatable
 

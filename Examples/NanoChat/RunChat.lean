@@ -311,7 +311,7 @@ unsafe def main (rawArgs : List String) : IO UInt32 := do
     | none => throw <| IO.userError s!"Checkpoint not found or incompatible with current config: {checkpointPath}"
 
   let paramsOnDeviceRaw ← TensorStruct.mapM (fun t => pure (t.to device)) ckpt.params
-  let paramsOnDevice := TensorStruct.makeLeafParams paramsOnDeviceRaw
+  let paramsOnDevice ← TensorStruct.makeLeafParams paramsOnDeviceRaw
 
   let yarn0 ← YarnRotary.init cfg.headDim cfg.maxSeqLen cfg.ropeBase
   let yarn := moveYarnToDevice yarn0 device

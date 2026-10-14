@@ -83,7 +83,7 @@ def clearGradsM [TensorStruct α] (x : α) : IO Unit :=
   TensorStruct.zeroGrads x
 
 def prepareForTraining [TensorStruct α] (x : α) : IO α := do
-  let params := TensorStruct.makeLeafParams x
+  let params ← TensorStruct.makeLeafParams x
   TensorStruct.zeroGrads params
   pure params
 
@@ -308,6 +308,16 @@ Example migration:
 This trades some flexibility for compile-time guarantees.
 -/
 
+/-- Product trees preserve independent leaf positions, including equal values. -/
+instance [TensorStruct α] [TensorStruct β] : TensorStruct (α × β) where
+  map f value := (TensorStruct.map f value.1, TensorStruct.map f value.2)
+  mapM f value := do
+    pure (← TensorStruct.mapM f value.1, ← TensorStruct.mapM f value.2)
+  zipWith f lhs rhs :=
+    (TensorStruct.zipWith f lhs.1 rhs.1, TensorStruct.zipWith f lhs.2 rhs.2)
+  fold f initial value :=
+    TensorStruct.fold f (TensorStruct.fold f initial value.1) value.2
+
 /-- TensorStruct instance for Array.
     **Warning**: `zipWith` panics if arrays have different sizes.
     For type-safe zipWith, use `Vector n α` instead. -/
@@ -440,17 +450,43 @@ def zeroGrads [TensorStruct α] (model : α) : IO Unit := do
 def detach [TensorStruct α] (model : α) : α :=
   map Tensor.detach model
 
-/-- Set requires_grad on all tensors -/
-def requiresGrad [TensorStruct α] (model : α) (b : Bool) : α :=
-  map (fun t => Tensor.setRequiresGrad t b) model
+/-- Set autograd flags through the effectful parameter boundary. -/
+def requiresGrad [TensorStruct α] (model : α) (b : Bool) : IO α :=
+  mapM (fun t => Tensor.setRequiresGrad t b) model
 
-/-- Make a tensor a trainable leaf parameter (detach and set requires_grad) -/
-private def _makeLeafParam {σ : StaticSpec} (t : Tensor σ) : Tensor σ :=
-  Tensor.setRequiresGrad (Tensor.detach t) true
+/-- Create independent trainable leaf parameters throughout a tensor tree. -/
+def makeLeafParams [TensorStruct α] (model : α) : IO α :=
+  mapM Tensor.parameter model
 
-/-- Make all tensors trainable leaf parameters -/
-def makeLeafParams [TensorStruct α] (model : α) : α :=
-  map _makeLeafParam model
+/-- Rebuild a tree with checked native leaves in traversal order. The stateful
+    traversal avoids relying on `fold` and `mapM` having matching instances. -/
+private def rawLeaves [TensorStruct α] (value : α) : Array RawTensor :=
+  ((mapM (m := StateM (Array RawTensor)) (fun tensor => do
+    modify (·.push tensor.raw)
+    pure tensor) value).run #[]).2
+
+private def withRawLeaves [TensorStruct α] (template : α) (leaves : Array RawTensor) : α :=
+  ((mapM (m := StateM Nat) (fun {σ} _ => do
+    let index ← get
+    set (index + 1)
+    pure (match leaves[index]? with
+      | none => panic! "functionalGrad: missing leaf"
+      | some raw => match Tensor.ofRaw (σ := σ) raw with
+        | .ok tensor => tensor
+        | .error message => panic! s!"functionalGrad: {message}"))
+    template).run 0).1
+
+/-- Pure first derivatives of a scalar-valued function over a tensor tree.
+    Fresh differentiation variables live entirely inside the native callback;
+    only detached gradients escape. Identical input values in different leaves
+    remain independent variables. No parameter gradient buffers are mutated. -/
+def functionalGrad [TensorStruct α] (f : α → Tensor { shape := #[], dtype := .Float32 })
+    (inputs : α) : α :=
+  let gradients := match RawTensor.functionalGrad (rawLeaves inputs)
+      (fun leaves => (f (withRawLeaves inputs leaves)).raw) with
+    | .ok gradients => gradients
+    | .error message => panic! message
+  withRawLeaves inputs gradients
 
 /-- Explicitly cast tensor-tree leaves while retaining their original static
 indices. A dynamic dtype permits a native dtype change; a concrete dtype rejects

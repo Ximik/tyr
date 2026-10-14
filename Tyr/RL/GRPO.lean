@@ -802,7 +802,7 @@ def grpoStepWithModelUpdate (b t : UInt64) [TensorStruct P]
   let mut totalLoss? : Option (Tensor { shape := #[], dtype := .Float32 }) := none
 
   -- Accumulate gradients across all rollout samples.
-  let workingParams := TensorStruct.makeLeafParams params
+  let workingParams ← TensorStruct.makeLeafParams params
   TensorStruct.zeroGrads workingParams
 
   for batch in rollouts do
@@ -858,7 +858,7 @@ def grpoStepWithModelUpdate (b t : UInt64) [TensorStruct P]
   let grads ← if isDistributed then dist.allReduceGrads grads .avg else pure grads
   let lr := state.getLr config.matrixLr config.initLrFrac
   let opt := Optim.adamw (lr := lr) (b1 := 0.9) (b2 := 0.999) (weight_decay := config.weightDecay)
-  let (newParams, newOptState) := Optim.step opt workingParams grads optState
+  let (newParams, newOptState) ← Optim.step opt workingParams grads optState
 
   let meanReward := rewards.foldl (· + ·) 0.0 / rewards.size.toFloat
   let meanGenLen := totalGenLen.toFloat / rewards.size.toFloat

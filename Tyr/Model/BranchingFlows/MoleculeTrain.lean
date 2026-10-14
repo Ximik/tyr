@@ -351,7 +351,7 @@ def trainStepMolecule {maxLen vocab : UInt64} {Params : Type} [TensorStruct Para
       pure ())
     (device : Device := Device.CPU)
     : IO (Params × Optim.AdamWState Params × BranchingMoleculeLossReport) := do
-  let params := TensorStruct.makeLeafParams params
+  let params ← TensorStruct.makeLeafParams params
   TensorStruct.zeroGrads params
   if cfg.maxLen != maxLen then throw <| IO.userError "BranchingFlows model/config maxLen mismatch"
   let ⟨batch, packedCpu⟩ ← packBranchingMolecule { cfg with maxLen := maxLen } result labelDFM
@@ -367,7 +367,7 @@ def trainStepMolecule {maxLen vocab : UInt64} {Params : Type} [TensorStruct Para
 
   let grads ← TensorStruct.grads params
   let opt := Optim.adamw (lr := lr) (weight_decay := cfg.weightDecay)
-  let (params', optState') := Optim.step opt params grads optState
+  let (params', optState') ← Optim.step opt params grads optState
 
   return (params', optState', report)
 
@@ -438,7 +438,8 @@ def moleculeMuonStep [TensorStruct Params]
     let update :=
       direction +
       Tensor.Preserving.mulScalar p (lr * weightDecay)
-    Tensor.setRequiresGrad (p - update) true) params orth
+    p - update) params orth
+  let params' ← TensorStruct.makeLeafParams params'
   return (params', { momentum, step := state.step + 1 })
 
 /-- `moleculeMuonStep` with the learning rate supplied as a 0-dim tensor, so a
@@ -470,7 +471,8 @@ def moleculeMuonStepT [TensorStruct Params]
     let update :=
       direction +
       Tensor.Preserving.mulScalar (mulTensorScalar p lrT) weightDecay
-    Tensor.setRequiresGrad (p - update) true) params orth
+    p - update) params orth
+  let params' ← TensorStruct.makeLeafParams params'
   return (params', { momentum, step := state.step + 1 })
 
 /-- Graph-safe core of `trainStepMoleculeMuon`: takes a pre-packed batch (the
@@ -493,7 +495,7 @@ def trainStepMoleculeMuonCoreT {batch maxLen vocab : UInt64} {Params : Type} [Te
         pure tensor) params
       pure ())
     : IO (Params × MoleculeMuonState Params × (Tensor { shape := #[] } × Tensor { shape := #[] } × Tensor { shape := #[] } × Tensor { shape := #[] } × Tensor { shape := #[] })) := do
-  let params := TensorStruct.makeLeafParams params
+  let params ← TensorStruct.makeLeafParams params
   TensorStruct.zeroGrads params
   let (coordPred, labelLogits, splitLogits, delLogits) ←
     model.forward (batch := batch) params packed.coord packed.label packed.t packed.padmask
@@ -527,7 +529,7 @@ def trainStepMoleculeMuon {maxLen vocab : UInt64} {Params : Type} [TensorStruct 
     (bf16 : Bool := false)
     : IO (Params × MoleculeMuonState Params × BranchingMoleculeLossReport) := do
   let t0 ← IO.monoMsNow
-  let params := TensorStruct.makeLeafParams params
+  let params ← TensorStruct.makeLeafParams params
   TensorStruct.zeroGrads params
   if cfg.maxLen != maxLen then throw <| IO.userError "BranchingFlows model/config maxLen mismatch"
   let ⟨batch, packedCpu⟩ ← packBranchingMolecule { cfg with maxLen := maxLen } result labelDFM
@@ -557,7 +559,7 @@ def trainStepMoleculeMuon {maxLen vocab : UInt64} {Params : Type} [TensorStruct 
     IO.println s!"molecule_train_phases step={optState.step} pack_ms={t1 - t0} fwd_ms={t2 - t1} bwd_ms={t3 - t2} muon_ms={t4 - t3}"
   return (params', optState', report)
 
-def evalMoleculeLoss {maxLen vocab : UInt64} {Params : Type}
+def evalMoleculeLoss {maxLen vocab : UInt64} {Params : Type} [TensorStruct Params]
     (cfg : BranchingTrainConfig)
     (model : BranchingMoleculeModel maxLen vocab Params)
     (params : Params)
@@ -566,16 +568,16 @@ def evalMoleculeLoss {maxLen vocab : UInt64} {Params : Type}
     (device : Device := Device.CPU)
     (bf16 : Bool := false)
     : IO BranchingMoleculeLossReport := do
-  torch.autograd.no_grad do
-    if cfg.maxLen != maxLen then throw <| IO.userError "BranchingFlows model/config maxLen mismatch"
-    let ⟨batch, packedCpu⟩ ← packBranchingMolecule { cfg with maxLen := maxLen } result labelDFM
-    let packedDev := packedCpu.toDevice device
-    let packed := if bf16 then packedDev.castBFloat16 else packedDev
-    let (coordPred, labelLogits, splitLogits, delLogits) ←
-      model.forward (batch := batch) params packed.coord packed.label packed.t packed.padmask
-    let (_, report) :=
-      moleculeLosses (vocab := vocab) cfg packed coordPred labelLogits splitLogits delLogits
-    pure report
+  let params := TensorStruct.detach params
+  if cfg.maxLen != maxLen then throw <| IO.userError "BranchingFlows model/config maxLen mismatch"
+  let ⟨batch, packedCpu⟩ ← packBranchingMolecule { cfg with maxLen := maxLen } result labelDFM
+  let packedDev := packedCpu.toDevice device
+  let packed := if bf16 then packedDev.castBFloat16 else packedDev
+  let (coordPred, labelLogits, splitLogits, delLogits) ←
+    model.forward (batch := batch) params packed.coord packed.label packed.t packed.padmask
+  let (_, report) :=
+    moleculeLosses (vocab := vocab) cfg packed coordPred labelLogits splitLogits delLogits
+  pure report
 
 /-- Run the molecule `branchingBridge` over a (sub-)batch of targets. Pure. -/
 private def runMoleculeBridgeBatch

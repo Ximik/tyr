@@ -36,13 +36,13 @@ def init (dModel nHeads : UInt64) : IO (WhisperAttention dModel nHeads) := do
   if nHeads == 0 || dModel % nHeads != 0 then
     throw <| IO.userError s!"WhisperAttention requires d_model divisible by n_heads, got {dModel} and {nHeads}"
   let qProjWeight ← initWeightDynamic #[dModel, dModel] dModel
-  let qProjBias := initBiasDynamic #[dModel]
+  let qProjBias ← initBiasDynamic #[dModel]
   let kProjWeight ← initWeightDynamic #[dModel, dModel] dModel
-  let kProjBias := initBiasDynamic #[dModel]
+  let kProjBias ← initBiasDynamic #[dModel]
   let vProjWeight ← initWeightDynamic #[dModel, dModel] dModel
-  let vProjBias := initBiasDynamic #[dModel]
+  let vProjBias ← initBiasDynamic #[dModel]
   let outProjWeight ← initWeightDynamic #[dModel, dModel] dModel
-  let outProjBias := initBiasDynamic #[dModel]
+  let outProjBias ← initBiasDynamic #[dModel]
   pure { qProjWeight, qProjBias, kProjWeight, kProjBias, vProjWeight, vProjBias, outProjWeight, outProjBias }
 
 /-- Incremental self-attention KV cache for one decoder layer. -/
@@ -213,12 +213,12 @@ namespace WhisperEncoderLayer
 
 def init (cfg : WhisperConfig) : IO (WhisperEncoderLayer cfg) := do
   let selfAttn ← WhisperAttention.init cfg.dModel cfg.encoderAttentionHeads
-  let selfAttnLayerNorm := initLayerNorm cfg.dModel cfg.layerNormEps
+  let selfAttnLayerNorm ← initLayerNorm cfg.dModel cfg.layerNormEps
   let fc1Weight ← initWeightDynamic #[cfg.encoderFfnDim, cfg.dModel] cfg.dModel
-  let fc1Bias := initBiasDynamic #[cfg.encoderFfnDim]
+  let fc1Bias ← initBiasDynamic #[cfg.encoderFfnDim]
   let fc2Weight ← initWeightDynamic #[cfg.dModel, cfg.encoderFfnDim] cfg.encoderFfnDim
-  let fc2Bias := initBiasDynamic #[cfg.dModel]
-  let finalLayerNorm := initLayerNorm cfg.dModel cfg.layerNormEps
+  let fc2Bias ← initBiasDynamic #[cfg.dModel]
+  let finalLayerNorm ← initLayerNorm cfg.dModel cfg.layerNormEps
   pure { selfAttn, selfAttnLayerNorm, fc1Weight, fc1Bias, fc2Weight, fc2Bias, finalLayerNorm }
 
 def forward {batch seq : UInt64}
@@ -252,14 +252,14 @@ namespace WhisperDecoderLayer
 
 def init (cfg : WhisperConfig) : IO (WhisperDecoderLayer cfg) := do
   let selfAttn ← WhisperAttention.init cfg.dModel cfg.decoderAttentionHeads
-  let selfAttnLayerNorm := initLayerNorm cfg.dModel cfg.layerNormEps
+  let selfAttnLayerNorm ← initLayerNorm cfg.dModel cfg.layerNormEps
   let encoderAttn ← WhisperAttention.init cfg.dModel cfg.decoderAttentionHeads
-  let encoderAttnLayerNorm := initLayerNorm cfg.dModel cfg.layerNormEps
+  let encoderAttnLayerNorm ← initLayerNorm cfg.dModel cfg.layerNormEps
   let fc1Weight ← initWeightDynamic #[cfg.decoderFfnDim, cfg.dModel] cfg.dModel
-  let fc1Bias := initBiasDynamic #[cfg.decoderFfnDim]
+  let fc1Bias ← initBiasDynamic #[cfg.decoderFfnDim]
   let fc2Weight ← initWeightDynamic #[cfg.dModel, cfg.decoderFfnDim] cfg.decoderFfnDim
-  let fc2Bias := initBiasDynamic #[cfg.dModel]
-  let finalLayerNorm := initLayerNorm cfg.dModel cfg.layerNormEps
+  let fc2Bias ← initBiasDynamic #[cfg.dModel]
+  let finalLayerNorm ← initLayerNorm cfg.dModel cfg.layerNormEps
   pure {
     selfAttn
     selfAttnLayerNorm
@@ -333,22 +333,22 @@ def init (cfg : WhisperConfig) : IO (WhisperModel cfg) := do
     throw <| IO.userError
       s!"Invalid Whisper config: d_model={cfg.dModel}, encoder_heads={cfg.encoderAttentionHeads}, decoder_heads={cfg.decoderAttentionHeads}"
   let encoderConv1Weight ← initWeightDynamic #[cfg.dModel, cfg.numMelBins, 3] cfg.numMelBins
-  let encoderConv1Bias := initBiasDynamic #[cfg.dModel]
+  let encoderConv1Bias ← initBiasDynamic #[cfg.dModel]
   let encoderConv2Weight ← initWeightDynamic #[cfg.dModel, cfg.dModel, 3] cfg.dModel
-  let encoderConv2Bias := initBiasDynamic #[cfg.dModel]
+  let encoderConv2Bias ← initBiasDynamic #[cfg.dModel]
   let encoderPositionalEmbedding ← initWeightDynamic #[cfg.maxSourcePositions, cfg.dModel] cfg.dModel
 
   let mut encoderLayers : Array (WhisperEncoderLayer cfg) := #[]
   for _ in [:cfg.encoderLayers.toNat] do
     encoderLayers := encoderLayers.push (← WhisperEncoderLayer.init cfg)
-  let encoderLayerNorm := initLayerNorm cfg.dModel cfg.layerNormEps
+  let encoderLayerNorm ← initLayerNorm cfg.dModel cfg.layerNormEps
 
   let decoderTokenEmbedding ← initWeightDynamic #[cfg.vocabSize, cfg.dModel] cfg.dModel
   let decoderPositionalEmbedding ← initWeightDynamic #[cfg.maxTargetPositions, cfg.dModel] cfg.dModel
   let mut decoderLayers : Array (WhisperDecoderLayer cfg) := #[]
   for _ in [:cfg.decoderLayers.toNat] do
     decoderLayers := decoderLayers.push (← WhisperDecoderLayer.init cfg)
-  let decoderLayerNorm := initLayerNorm cfg.dModel cfg.layerNormEps
+  let decoderLayerNorm ← initLayerNorm cfg.dModel cfg.layerNormEps
 
   pure {
     encoderConv1Weight

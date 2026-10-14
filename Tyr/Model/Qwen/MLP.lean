@@ -41,9 +41,9 @@ def init (hidden_size intermediate_size : UInt64) (dtype : DType := .Float32) : 
   let down := down.castDType dtype
 
   pure {
-    gate_proj := Tensor.setRequiresGrad (Tensor.Preserving.mulScalar gate std) true
-    up_proj := Tensor.setRequiresGrad (Tensor.Preserving.mulScalar up std) true
-    down_proj := Tensor.setRequiresGrad (Tensor.Preserving.mulScalar down std) true
+    gate_proj := (← Tensor.parameter (Tensor.Preserving.mulScalar gate std))
+    up_proj := (← Tensor.parameter (Tensor.Preserving.mulScalar up std))
+    down_proj := (← Tensor.parameter (Tensor.Preserving.mulScalar down std))
   }
 
 /-- Forward pass for MLP.

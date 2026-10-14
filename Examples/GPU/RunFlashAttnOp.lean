@@ -22,9 +22,9 @@ private def reportCase
 
 private def nativeDenseCase : IO Bool := do
   let device := Device.CUDA 0
-  let q := Tensor.setRequiresGrad ((← Tensor.randn #[1, 1, 128, 64] false device).toBFloat16) true
-  let k := Tensor.setRequiresGrad ((← Tensor.randn #[1, 1, 128, 64] false device).toBFloat16) true
-  let v := Tensor.setRequiresGrad ((← Tensor.randn #[1, 1, 128, 64] false device).toBFloat16) true
+  let q ← Tensor.setRequiresGrad ((← Tensor.randn #[1, 1, 128, 64] false device).toBFloat16) true
+  let k ← Tensor.setRequiresGrad ((← Tensor.randn #[1, 1, 128, 64] false device).toBFloat16) true
+  let v ← Tensor.setRequiresGrad ((← Tensor.randn #[1, 1, 128, 64] false device).toBFloat16) true
   let dO := (← Tensor.randn #[1, 1, 128, 64] false device).toBFloat16
 
   let (route, out) := flashAttnWithRoute q k v
@@ -34,9 +34,9 @@ private def nativeDenseCase : IO Bool := do
   let dk := (← Tensor.gradOf k).toFloat32
   let dv := (← Tensor.gradOf v).toFloat32
 
-  let qRef := Tensor.setRequiresGrad (Tensor.detach q) true
-  let kRef := Tensor.setRequiresGrad (Tensor.detach k) true
-  let vRef := Tensor.setRequiresGrad (Tensor.detach v) true
+  let qRef ← Tensor.setRequiresGrad (Tensor.detach q) true
+  let kRef ← Tensor.setRequiresGrad (Tensor.detach k) true
+  let vRef ← Tensor.setRequiresGrad (Tensor.detach v) true
   let outRef := Tensor.attentionGQA qRef kRef vRef 0.0 false
   FlashBenchReference.backwardWithCotangent outRef dO
   let _ ← torch.cuda_synchronize
@@ -62,9 +62,9 @@ private def nativeDenseCase : IO Bool := do
 
 private def portableCausalCase : IO Bool := do
   let device := Device.CUDA 0
-  let q := Tensor.setRequiresGrad ((← Tensor.randn #[1, 1, 96, 64] false device).toBFloat16) true
-  let k := Tensor.setRequiresGrad ((← Tensor.randn #[1, 1, 96, 64] false device).toBFloat16) true
-  let v := Tensor.setRequiresGrad ((← Tensor.randn #[1, 1, 96, 64] false device).toBFloat16) true
+  let q ← Tensor.setRequiresGrad ((← Tensor.randn #[1, 1, 96, 64] false device).toBFloat16) true
+  let k ← Tensor.setRequiresGrad ((← Tensor.randn #[1, 1, 96, 64] false device).toBFloat16) true
+  let v ← Tensor.setRequiresGrad ((← Tensor.randn #[1, 1, 96, 64] false device).toBFloat16) true
   let dO := (← Tensor.randn #[1, 1, 96, 64] false device).toBFloat16
 
   let (route, out) := flashAttnWithRoute q k v none 0.0 true none false
@@ -74,9 +74,9 @@ private def portableCausalCase : IO Bool := do
   let dk := (← Tensor.gradOf k).toFloat32
   let dv := (← Tensor.gradOf v).toFloat32
 
-  let qRef := Tensor.setRequiresGrad (Tensor.detach q) true
-  let kRef := Tensor.setRequiresGrad (Tensor.detach k) true
-  let vRef := Tensor.setRequiresGrad (Tensor.detach v) true
+  let qRef ← Tensor.setRequiresGrad (Tensor.detach q) true
+  let kRef ← Tensor.setRequiresGrad (Tensor.detach k) true
+  let vRef ← Tensor.setRequiresGrad (Tensor.detach v) true
   let outRef := Tensor.attentionGQA qRef kRef vRef 0.0 true
   FlashBenchReference.backwardWithCotangent outRef dO
   let _ ← torch.cuda_synchronize
@@ -102,9 +102,9 @@ private def portableCausalCase : IO Bool := do
 
 private def portableGqaCase : IO Bool := do
   let device := Device.CUDA 0
-  let q := Tensor.setRequiresGrad ((← Tensor.randn #[1, 4, 96, 64] false device).toBFloat16) true
-  let k := Tensor.setRequiresGrad ((← Tensor.randn #[1, 2, 96, 64] false device).toBFloat16) true
-  let v := Tensor.setRequiresGrad ((← Tensor.randn #[1, 2, 96, 64] false device).toBFloat16) true
+  let q ← Tensor.setRequiresGrad ((← Tensor.randn #[1, 4, 96, 64] false device).toBFloat16) true
+  let k ← Tensor.setRequiresGrad ((← Tensor.randn #[1, 2, 96, 64] false device).toBFloat16) true
+  let v ← Tensor.setRequiresGrad ((← Tensor.randn #[1, 2, 96, 64] false device).toBFloat16) true
   let dO := (← Tensor.randn #[1, 4, 96, 64] false device).toBFloat16
 
   let (route, out) := flashAttnWithRoute q k v none 0.0 false none true
@@ -114,9 +114,9 @@ private def portableGqaCase : IO Bool := do
   let dk := (← Tensor.gradOf k).toFloat32
   let dv := (← Tensor.gradOf v).toFloat32
 
-  let qRef := Tensor.setRequiresGrad (Tensor.detach q) true
-  let kRef := Tensor.setRequiresGrad (Tensor.detach k) true
-  let vRef := Tensor.setRequiresGrad (Tensor.detach v) true
+  let qRef ← Tensor.setRequiresGrad (Tensor.detach q) true
+  let kRef ← Tensor.setRequiresGrad (Tensor.detach k) true
+  let vRef ← Tensor.setRequiresGrad (Tensor.detach v) true
   let outRef := Tensor.attentionGQAQKV qRef kRef vRef 0.0 false true
   FlashBenchReference.backwardWithCotangent outRef dO
   let _ ← torch.cuda_synchronize

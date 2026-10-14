@@ -210,7 +210,7 @@ def loadParams [TensorStruct α]
   ) template
   let finalIdx ← indexRef.get
   log.onInfo s!"Loaded {finalIdx} tensors from {dir}"
-  return if asParameters then TensorStruct.makeLeafParams result else TensorStruct.detach result
+  if asParameters then TensorStruct.makeLeafParams result else pure (TensorStruct.detach result)
 
 /-- Save full checkpoint (params + metadata) -/
 def saveCheckpoint [TensorStruct α]

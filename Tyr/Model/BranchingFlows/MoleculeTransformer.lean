@@ -577,24 +577,24 @@ def moleculeTransformerPrediction {maxLen vocab heads headDim mlp : UInt64}
     (coordTargetCap? : Option Float := none)
     (device : Device := Device.CPU) :
     IO MoleculeModelPrediction := do
-  torch.autograd.no_grad do
-    let (coord, label, time, padmask) ←
-      packMoleculeStateForTransformer (maxLen := maxLen) (vocab := vocab) padToken t state device
-    let (coordPred, labelLogits, splitLogits, delLogits) ←
-      MoleculeTransformerParams.forward (batch := 1) params coord label time padmask coordTargetCap?
-    let n := state.state.size
-    let canSplit := n < maxLen.toNat
-    let coordTargets := (Array.range n).map (fun j => tensorVec3 coordPred j)
-    let labelTargets := (Array.range n).map (fun j => tensorLabelLogits labelLogits j)
-    let splitTargets := (Array.range n).map (fun j =>
-      if canSplit then clampUpper? splitLogitCap? (scalar2d splitLogits j) else -100.0)
-    let delTargets := (Array.range n).map (fun j => scalar2d delLogits j)
-    pure {
-      coordTargets
-      labelLogits := labelTargets
-      splitLogits := splitTargets
-      delLogits := delTargets
-    }
+  let params := TensorStruct.detach params
+  let (coord, label, time, padmask) ←
+    packMoleculeStateForTransformer (maxLen := maxLen) (vocab := vocab) padToken t state device
+  let (coordPred, labelLogits, splitLogits, delLogits) ←
+    MoleculeTransformerParams.forward (batch := 1) params coord label time padmask coordTargetCap?
+  let n := state.state.size
+  let canSplit := n < maxLen.toNat
+  let coordTargets := (Array.range n).map (fun j => tensorVec3 coordPred j)
+  let labelTargets := (Array.range n).map (fun j => tensorLabelLogits labelLogits j)
+  let splitTargets := (Array.range n).map (fun j =>
+    if canSplit then clampUpper? splitLogitCap? (scalar2d splitLogits j) else -100.0)
+  let delTargets := (Array.range n).map (fun j => scalar2d delLogits j)
+  pure {
+    coordTargets
+    labelLogits := labelTargets
+    splitLogits := splitTargets
+    delLogits := delTargets
+  }
 
 def moleculeTransformerIOModel {maxLen vocab heads headDim mlp : UInt64}
     (padToken : Int64)
@@ -620,25 +620,25 @@ def fullMoleculeTransformerPrediction
     (coordTargetCap? : Option Float := none)
     (device : Device := Device.CPU) :
     IO MoleculeModelPrediction := do
-  torch.autograd.no_grad do
-    let (coord, label, time, padmask) ←
-      packMoleculeStateForTransformer (maxLen := maxLen) (vocab := vocab) padToken t state device
-    let (coordPred, labelLogits, splitLogits, delLogits) ←
-      FullMoleculeTransformerParams.forward (batch := 1) params coord label time padmask
-        (coordUpdateLayers := coordUpdateLayers) (coordTargetCap? := coordTargetCap?)
-    let n := state.state.size
-    let canSplit := n < maxLen.toNat
-    let coordTargets := (Array.range n).map (fun j => tensorVec3 coordPred j)
-    let labelTargets := (Array.range n).map (fun j => tensorLabelLogits labelLogits j)
-    let splitTargets := (Array.range n).map (fun j =>
-      if canSplit then clampUpper? splitLogitCap? (scalar2d splitLogits j) else -100.0)
-    let delTargets := (Array.range n).map (fun j => scalar2d delLogits j)
-    pure {
-      coordTargets
-      labelLogits := labelTargets
-      splitLogits := splitTargets
-      delLogits := delTargets
-    }
+  let params := TensorStruct.detach params
+  let (coord, label, time, padmask) ←
+    packMoleculeStateForTransformer (maxLen := maxLen) (vocab := vocab) padToken t state device
+  let (coordPred, labelLogits, splitLogits, delLogits) ←
+    FullMoleculeTransformerParams.forward (batch := 1) params coord label time padmask
+      (coordUpdateLayers := coordUpdateLayers) (coordTargetCap? := coordTargetCap?)
+  let n := state.state.size
+  let canSplit := n < maxLen.toNat
+  let coordTargets := (Array.range n).map (fun j => tensorVec3 coordPred j)
+  let labelTargets := (Array.range n).map (fun j => tensorLabelLogits labelLogits j)
+  let splitTargets := (Array.range n).map (fun j =>
+    if canSplit then clampUpper? splitLogitCap? (scalar2d splitLogits j) else -100.0)
+  let delTargets := (Array.range n).map (fun j => scalar2d delLogits j)
+  pure {
+    coordTargets
+    labelLogits := labelTargets
+    splitLogits := splitTargets
+    delLogits := delTargets
+  }
 
 def fullMoleculeTransformerIOModel
     {maxLen vocab hidden heads headDim mlp rff layers : UInt64}

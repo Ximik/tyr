@@ -9,9 +9,14 @@ def randomWeight (s : Shape) : IO (Tensor { shape := s }) := do
 
 def zerosWeight (s : Shape) : Tensor { shape := s } := (Tensor.zeros s).forgetDType
 
-def initLayerNorm (dim : UInt64) (eps : Float := 1e-5) (train : Bool := true) : LayerNorm dim (.Unknown "dynamic") :=
-  { weight := (Tensor.ones #[dim] train).forgetDType,
-    bias := (Tensor.zeros #[dim] train).forgetDType, eps := ⟨eps⟩ }
+def initLayerNorm (dim : UInt64) (eps : Float := 1e-5) (train : Bool := true) :
+    IO (LayerNorm dim (.Unknown "dynamic")) := do
+  let weight := (Tensor.ones #[dim]).forgetDType
+  let bias := (Tensor.zeros #[dim]).forgetDType
+  if train then
+    pure { weight := (← weight.parameter), bias := (← bias.parameter), eps := ⟨eps⟩ }
+  else
+    pure { weight, bias, eps := ⟨eps⟩ }
 
 def sliceTyped {s : Shape} {d : DType} (x : Tensor { shape := s, dtype := d }) (dim : Nat) (start len : UInt64) : Tensor { shape := (s.set! dim len), dtype := d } :=
   x.sliceChecked dim start len (s.set! dim len)

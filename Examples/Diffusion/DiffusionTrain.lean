@@ -119,12 +119,12 @@ def trainStep {modelCfg : Config} {batch seq num_timesteps : UInt64}
 
   -- Update parameters with AdamW
   let opt := Optim.adamw (lr := lr) (weight_decay := trainCfg.weightDecay)
-  let (params', optState') := Optim.step opt params grads optState
+  let (params', optState') ← Optim.step opt params grads optState
 
   return (params', optState', lossVal)
 
 /-- Evaluate model on validation data.
-    Uses no_grad context to avoid building computation graphs. -/
+    Uses detached parameters to avoid building computation graphs. -/
 def evalLoss {modelCfg : Config} {num_timesteps : UInt64}
     (params : DiffusionParams modelCfg)
     (schedule : MaskedDiffusionSchedule num_timesteps)
@@ -132,7 +132,9 @@ def evalLoss {modelCfg : Config} {num_timesteps : UInt64}
     (batchSize seqLen : UInt64)
     (rotaryCache : RotaryCache rotaryLen modelCfg.headDim)
     (numBatches : Nat)
-    : IO Float := Tensor.noGrad do
+    : IO Float := do
+  let params := TensorStruct.detach params
+  let rotaryCache := { rotaryCache with cos := rotaryCache.cos.detach, sin := rotaryCache.sin.detach }
   let mut totalLoss : Float := 0.0
   for _ in [:numBatches] do
     let x_0 ← getBatch valData batchSize seqLen

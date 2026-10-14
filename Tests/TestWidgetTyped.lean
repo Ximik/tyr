@@ -12,7 +12,7 @@ private structure DisplayModel where
 
 @[test]
 def testIndexedTensorWidgetMetadataAndGradients : IO Unit := do
-  let weight : Tensor ⟨#[2, 3], .Float64, .exact .CPU⟩ :=
+  let weight : Tensor ⟨#[2, 3], .Float64, .exact .CPU⟩ ←
     (Tensor.onesLike (Tensor.zerosFor _)).setRequiresGrad true
   let loss := Tensor.sumAll (Tensor.Preserving.mulScalar weight 3.0)
   Tensor.backwardLoss loss

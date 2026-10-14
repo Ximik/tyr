@@ -95,12 +95,11 @@ private def rejected (action : IO α) (label : String) : IO Unit := do
 
 @[test] def testInferenceCacheOrderedAttentionHasNoGraph : IO Unit := do
   let cache ← Cache.init 1 1 2 1 2
-  let q := Tensor.setRequiresGrad (token 0) true
-  let enabled ← autograd.is_grad_enabled
+  let q ← Tensor.setRequiresGrad (token 0) true
   let (cache, first) ← cache.attendLayer 0 q (token 3) (token 7)
   LeanTest.assertEqual (← values first) #[7, 7] "One-token attention reads the value after both writes"
   LeanTest.assertTrue (!Tensor.hasGradFn first) "Inference attention has no autograd graph"
-  LeanTest.assertEqual (← autograd.is_grad_enabled) enabled "Inference restores caller grad mode"
+  LeanTest.assertTrue q.requiresGrad "Inference leaves the caller query trainable"
   let cache ← cache.incrementSeqLens
   let (_, second) ← cache.attendLayer 0 q (token 5) (token 11)
   LeanTest.assertEqual (← values second) #[9, 9] "Zero query averages the two separately stored values"

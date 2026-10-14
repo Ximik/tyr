@@ -255,7 +255,7 @@ def stepSingle {σ : StaticSpec} (param : Tensor σ) (grad : Tensor σ) (state :
       -- for subtraction. Never claim the BF16 kernel result has the input dtype.
       pure (Tensor.castLike param (Tensor.mulScalar (Tensor.detach orthGrad) effectiveLr))
   let newParam := Sub.sub paramDecayed update
-  let newParam := Tensor.setRequiresGrad (Tensor.detach newParam) true
+  let newParam ← Tensor.parameter (Tensor.detach newParam)
 
   let newState : ParamState σ := {
     momentumBuffer := some newMomentum
@@ -304,7 +304,7 @@ def stepDistributedOwner {σ : StaticSpec} (param : Tensor σ) (grad : Tensor σ
       Tensor.zerosLike paramSynced
   let momentumSynced ← dist.broadcast momentumSynced ownerRank
 
-  let newParam := Tensor.setRequiresGrad (Tensor.detach paramSynced) true
+  let newParam ← Tensor.parameter (Tensor.detach paramSynced)
   let newState : ParamState σ := {
     momentumBuffer := some momentumSynced
     secondMoment := ownerState.secondMoment
@@ -404,7 +404,7 @@ def stepDistributedGroup {σ : StaticSpec}
     for j in [:ws] do
       let idx := base + j
       if idx < params.size then
-        let pSynced := Tensor.setRequiresGrad (Tensor.detach gatherParams[j]!) true
+        let pSynced ← Tensor.parameter (Tensor.detach gatherParams[j]!)
         outParams := outParams.set! idx pSynced
         let prevState := outStates[idx]?.getD (initParamState pSynced)
         let stSynced : ParamState σ := {
@@ -446,7 +446,7 @@ def stepAdamLike {σ : StaticSpec} (param : Tensor σ) (grad : Tensor σ) (state
   let effectiveLr := cfg.lr * lrMul
   let update := Tensor.Preserving.mulScalar newMomentum effectiveLr
   let newParam := Sub.sub param update
-  let newParam := Tensor.setRequiresGrad (Tensor.detach newParam) true
+  let newParam ← Tensor.parameter (Tensor.detach newParam)
 
   let newState : ParamState σ := {
     momentumBuffer := some newMomentum

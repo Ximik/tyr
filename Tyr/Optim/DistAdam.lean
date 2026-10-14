@@ -144,7 +144,7 @@ def stepSingle {σ : StaticSpec} (param : Tensor σ) (grad : Tensor σ) (state :
 
   -- Apply update
   let newParam := Sub.sub paramDecayed scaledUpdate
-  let newParam := Tensor.setRequiresGrad newParam true
+  let newParam ← Tensor.parameter newParam
 
   let newState : ParamState σ := {
     expAvg := expAvg
@@ -263,7 +263,7 @@ def stepDistributed {σ : StaticSpec} (param : Tensor σ) (grad : Tensor σ) (st
   let gatheredExpAvg ← gatherAs "first moment" newExpAvg
   let gatheredExpAvgSq ← gatherAs "second moment" newExpAvgSq
 
-  let newParam := Tensor.setRequiresGrad (Tensor.detach gatheredParam) true
+  let newParam ← Tensor.parameter (Tensor.detach gatheredParam)
   let newState : ParamState σ := {
     expAvg := gatheredExpAvg
     expAvgSq := gatheredExpAvgSq
@@ -379,7 +379,7 @@ def stepSharded {σ : StaticSpec} {rank worldSize : UInt64}
 
   -- 7. Apply update to local shard
   let newLocal := Sub.sub paramDecayed scaledUpdate
-  let newLocal := Tensor.setRequiresGrad newLocal true
+  let newLocal ← Tensor.parameter newLocal
 
   -- 8. Update sharded parameter (mark cache as stale)
   let newParam := param.updateShard newLocal

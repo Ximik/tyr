@@ -65,11 +65,11 @@ def initSelfAttention (hidden_size num_heads head_dim : UInt64)
   let std := Float.sqrt (2.0 / hidden_size.toFloat)
   let qkv ← randomWeight #[num_heads * head_dim * 3, hidden_size]
   let proj ← randomWeight #[hidden_size, num_heads * head_dim]
-  let norm := QKNorm.init head_dim
+  let norm ← QKNorm.init head_dim
   pure {
-    qkv := Tensor.setRequiresGrad (Tensor.Preserving.mulScalar qkv std) true
+    qkv := (← Tensor.parameter (Tensor.Preserving.mulScalar qkv std))
     norm
-    proj := Tensor.setRequiresGrad (Tensor.Preserving.mulScalar proj std) true
+    proj := (← Tensor.parameter (Tensor.Preserving.mulScalar proj std))
   }
 
 /-- Initialize SwiGLU MLP -/
@@ -79,21 +79,21 @@ def initMLP (hidden_size mlp_hidden : UInt64)
   let w1 ← randomWeight #[mlp_hidden * 2, hidden_size]
   let w2 ← randomWeight #[hidden_size, mlp_hidden]
   pure {
-    w1 := Tensor.setRequiresGrad (Tensor.Preserving.mulScalar w1 std) true
-    w2 := Tensor.setRequiresGrad (Tensor.Preserving.mulScalar w2 std) true
+    w1 := (← Tensor.parameter (Tensor.Preserving.mulScalar w1 std))
+    w2 := (← Tensor.parameter (Tensor.Preserving.mulScalar w2 std))
   }
 
 /-- Initialize double-stream block -/
 def init (hidden_size num_heads head_dim mlp_hidden : UInt64)
     : IO (DoubleStreamBlock hidden_size num_heads head_dim mlp_hidden) := do
-  let img_norm1 := initLayerNorm hidden_size
+  let img_norm1 ← initLayerNorm hidden_size
   let img_attn ← initSelfAttention hidden_size num_heads head_dim
-  let img_norm2 := initLayerNorm hidden_size
+  let img_norm2 ← initLayerNorm hidden_size
   let img_mlp ← initMLP hidden_size mlp_hidden
 
-  let txt_norm1 := initLayerNorm hidden_size
+  let txt_norm1 ← initLayerNorm hidden_size
   let txt_attn ← initSelfAttention hidden_size num_heads head_dim
-  let txt_norm2 := initLayerNorm hidden_size
+  let txt_norm2 ← initLayerNorm hidden_size
   let txt_mlp ← initMLP hidden_size mlp_hidden
 
   pure {

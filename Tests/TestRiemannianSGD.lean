@@ -14,7 +14,7 @@ def testLinearRiemannianMSEStepProducesFiniteDiagnostics : IO Unit := do
   let layer ← torch.Linear.init 4 3 true
   let x ← Tensor.randn #[4]
   let target ← Tensor.randn #[3]
-  let result := torch.Optim.RiemannianSGD.stepMSE layer x target 0.02
+  let result ← torch.Optim.RiemannianSGD.stepMSE layer x target 0.02
   LeanTest.assertEqual result.diagnostics.size 1
   let stats := result.diagnostics[0]!
   LeanTest.assertTrue (Float.isFinite result.loss && result.loss >= 0.0)
@@ -27,7 +27,7 @@ def testManifoldLinearRiemannianStepPreservesStiefelConstraint : IO Unit := do
   let layer ← ManifoldLinear.init (M := Tyr.AD.Stiefel) 4 6 false
   let x ← Tensor.randn #[4]
   let target ← Tensor.randn #[6]
-  let result := torch.Optim.RiemannianSGD.stepMSE layer x target 0.02
+  let result ← torch.Optim.RiemannianSGD.stepMSE layer x target 0.02
   let w := result.params.weight.matrix
   let wtW := Tensor.mm (Tensor.transpose2d w) w
   let I := Tensor.eye 4
@@ -66,7 +66,7 @@ def testSequentialRiemannianMSEStepReturnsLayerDiagnostics : IO Unit := do
   let net : Sequential (torch.Linear 4 3) (torch.Linear 3 2) := Sequential.mk' l1 l2
   let x ← Tensor.randn #[4]
   let target ← Tensor.randn #[2]
-  let result :=
+  let result ←
     torch.Optim.RiemannianSGD.stepSequentialMSE
       (M₁ := torch.Linear 4 3) (M₂ := torch.Linear 3 2)
       (inDim := 4) (midDim := 3) (outDim := 2)

@@ -22,12 +22,12 @@ def stepWithFactor {M : Type} {rank inDim outDim : UInt64}
     (outputFactor : MetricFactor rank outDim)
     (outputCotangent : AmbientVector outDim)
     (lr : Float)
-    : StepResult M rank inDim outDim :=
+    : IO (StepResult M rank inDim outDim) := do
   let (prediction, tape) :=
     RiemannianModule.forwardWithTape (M := M) (inDim := inDim) (outDim := outDim) params x
-  let (params', inputFactor, inputCotangent, diagnostics) :=
+  let (params', inputFactor, inputCotangent, diagnostics) ←
     RiemannianModule.backwardLeafStep params tape outputFactor outputCotangent lr
-  {
+  pure {
     params := params'
     prediction := prediction
     inputFactor := inputFactor
@@ -42,15 +42,15 @@ def stepMSE {M : Type} {inDim outDim : UInt64}
     (x : AmbientVector inDim)
     (target : AmbientVector outDim)
     (lr : Float)
-    : StepResult M outDim inDim outDim :=
+    : IO (StepResult M outDim inDim outDim) := do
   let (prediction, tape) :=
     RiemannianModule.forwardWithTape (M := M) (inDim := inDim) (outDim := outDim) params x
   let residual := Sub.sub prediction target
   let loss := 0.5 * Tensor.item (Tensor.sumAll (Mul.mul residual residual))
   let outputFactor := MetricFactor.identity outDim
-  let (params', inputFactor, inputCotangent, diagnostics) :=
+  let (params', inputFactor, inputCotangent, diagnostics) ←
     RiemannianModule.backwardLeafStep params tape outputFactor residual lr
-  {
+  pure {
     params := params'
     prediction := prediction
     inputFactor := inputFactor
@@ -70,17 +70,17 @@ def stepSequentialWithFactor
     (outputFactor : MetricFactor rank outDim)
     (outputCotangent : AmbientVector outDim)
     (lr : Float)
-    : StepResult (Sequential M₁ M₂) rank inDim outDim :=
+    : IO (StepResult (Sequential M₁ M₂) rank inDim outDim) := do
   let (prediction, tape) :
       AmbientVector outDim × SequentialTape M₁ inDim midDim M₂ outDim :=
     sequentialForwardWithTape
       (M₁ := M₁) (M₂ := M₂) (inDim := inDim) (midDim := midDim) (outDim := outDim)
       params x
-  let (params', inputFactor, inputCotangent, diagnostics) :=
+  let (params', inputFactor, inputCotangent, diagnostics) ←
     sequentialBackwardMetricStep
       (M₁ := M₁) (M₂ := M₂) (rank := rank) (inDim := inDim) (midDim := midDim) (outDim := outDim)
       params tape outputFactor outputCotangent lr
-  {
+  pure {
     params := params'
     prediction := prediction
     inputFactor := inputFactor
@@ -98,7 +98,7 @@ def stepSequentialMSE
     (x : AmbientVector inDim)
     (target : AmbientVector outDim)
     (lr : Float)
-    : StepResult (Sequential M₁ M₂) outDim inDim outDim :=
+    : IO (StepResult (Sequential M₁ M₂) outDim inDim outDim) := do
   let (prediction, tape) :
       AmbientVector outDim × SequentialTape M₁ inDim midDim M₂ outDim :=
     sequentialForwardWithTape
@@ -107,11 +107,11 @@ def stepSequentialMSE
   let residual := Sub.sub prediction target
   let loss := 0.5 * Tensor.item (Tensor.sumAll (Mul.mul residual residual))
   let outputFactor := MetricFactor.identity outDim
-  let (params', inputFactor, inputCotangent, diagnostics) :=
+  let (params', inputFactor, inputCotangent, diagnostics) ←
     sequentialBackwardMetricStep
       (M₁ := M₁) (M₂ := M₂) (rank := outDim) (inDim := inDim) (midDim := midDim) (outDim := outDim)
       params tape outputFactor residual lr
-  {
+  pure {
     params := params'
     prediction := prediction
     inputFactor := inputFactor

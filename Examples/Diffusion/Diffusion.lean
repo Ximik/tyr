@@ -86,10 +86,10 @@ def DiffusionParams.init (cfg : Config) : IO (DiffusionParams cfg) := do
   let output_head := Tensor.zeros #[cfg.vocab_size, cfg.n_embd]
 
   return {
-    token_emb := makeLeafParam ((token_emb * scale))
-    time_emb := makeLeafParam time_emb  -- standard normal init for embeddings
+    token_emb := ← makeLeafParam ((token_emb * scale))
+    time_emb := ← makeLeafParam time_emb  -- standard normal init for embeddings
     blocks := blocks
-    output_head := makeLeafParam output_head
+    output_head := ← makeLeafParam output_head
   }
 
 /-- Bidirectional attention forward pass (is_causal=false) -/

@@ -169,8 +169,8 @@ def init (cfg : Config) (numHeads : UInt64) : IO (LagunaAttention cfg numHeads) 
   let v ← initDynamicWeight #[cfg.num_key_value_heads * cfg.head_dim, cfg.hidden_size] cfg.hidden_size
   let o ← initDynamicWeight #[cfg.hidden_size, numHeads * cfg.head_dim] (numHeads * cfg.head_dim)
   let g ← initDynamicWeight #[numHeads, cfg.hidden_size] cfg.hidden_size
-  let qn := Tensor.setRequiresGrad (onesDynamic #[cfg.head_dim]) true
-  let kn := Tensor.setRequiresGrad (onesDynamic #[cfg.head_dim]) true
+  let qn ← Tensor.parameter (onesDynamic #[cfg.head_dim])
+  let kn ← Tensor.parameter (onesDynamic #[cfg.head_dim])
   pure {
     q_proj := q
     k_proj := k
@@ -487,8 +487,8 @@ def initSparseMoeBlock (cfg : Config) : IO (LagunaSparseMoeBlock cfg) := do
   }
 
 def init (cfg : Config) (layerIdx : UInt64) : IO (LagunaLayer cfg) := do
-  let inputNorm := Tensor.setRequiresGrad (onesDynamic #[cfg.hidden_size]) true
-  let postNorm := Tensor.setRequiresGrad (onesDynamic #[cfg.hidden_size]) true
+  let inputNorm ← Tensor.parameter (onesDynamic #[cfg.hidden_size])
+  let postNorm ← Tensor.parameter (onesDynamic #[cfg.hidden_size])
   let attnFull ←
     match cfg.layerType layerIdx with
     | .fullAttention =>
@@ -655,11 +655,11 @@ namespace LagunaModel
 
 def init (cfg : Config) : IO (LagunaModel cfg) := do
   let embRaw ← randnDynamic #[cfg.vocab_size, cfg.hidden_size]
-  let embedTokens := Tensor.setRequiresGrad (Tensor.Preserving.mulScalar embRaw 0.02) true
+  let embedTokens ← Tensor.parameter (Tensor.Preserving.mulScalar embRaw 0.02)
   let mut layers : Array (LagunaLayer cfg) := Array.mkEmpty cfg.num_hidden_layers.toNat
   for i in [:cfg.num_hidden_layers.toNat] do
     layers := layers.push (← LagunaLayer.init cfg i.toUInt64)
-  let norm := Tensor.setRequiresGrad (onesDynamic #[cfg.hidden_size]) true
+  let norm ← Tensor.parameter (onesDynamic #[cfg.hidden_size])
   pure { embed_tokens := embedTokens, layers := layers, norm := norm }
 
 /-- Allocate a fresh per-layer KV cache with capacity `maxLen` on `device`. -/
@@ -784,8 +784,10 @@ private def forwardSession {batch seq : UInt64} (cfg : Config) (m : LagunaModel 
   -- Validation failures above leave the session usable. Any failure below may
   -- have mutated a subset of layers, so no partially updated state is reusable.
   set (none : Option (LagunaCache cfg batch))
-  let (hidden, updated) ← autograd.no_grad do
-    let mut h := x
+  let (hidden, updated) ← do
+    let m := TensorStruct.detach m
+    let tables := tables.detach
+    let mut h := x.detach
     let mut caches := cache.kvCaches
     for i in [:m.layers.size] do
       let some layer := m.layers[i]? | throw <| IO.userError "missing Laguna layer"
@@ -793,7 +795,7 @@ private def forwardSession {batch seq : UInt64} (cfg : Config) (m : LagunaModel 
       let (next, kv) ← layer.forwardOwned cfg h tables position prefill cached
       h := next
       caches := caches.set! i kv
-    return (rmsNormWeighted3d m.norm h cfg.rms_norm_eps, { kvCaches := caches : LagunaCache cfg batch })
+    pure (rmsNormWeighted3d m.norm h cfg.rms_norm_eps, { kvCaches := caches : LagunaCache cfg batch })
   set (some updated)
   return hidden
 
@@ -863,18 +865,18 @@ def decodeStep {batch : UInt64}
 /-- Inference-only prefill into an owned cache session. The session must be fresh. -/
 def prefillSession {batch seq : UInt64} (cfg : Config) (m : LagunaForCausalLM cfg)
     (tables : LagunaRotaryTables) (inputsEmbeds : Tensor { shape := #[batch, seq, cfg.hidden_size] })
-    (session : LagunaCacheSession cfg batch) : IO (Tensor { shape := #[batch, cfg.vocab_size] }) := autograd.no_grad do
+    (session : LagunaCacheSession cfg batch) : IO (Tensor { shape := #[batch, cfg.vocab_size] }) := do
   let hidden ← m.model.forwardSession cfg inputsEmbeds tables 0 true session
   let lastHidden : Tensor { shape := #[batch, 1, cfg.hidden_size] } := sliceTyped hidden 1 (seq - 1) 1
-  return Tensor.reshapeChecked (Tensor.linear3d lastHidden m.lmHead) #[batch, cfg.vocab_size]
+  return Tensor.reshapeChecked (Tensor.linear3d lastHidden m.lmHead.detach) #[batch, cfg.vocab_size]
 
 /-- Append one token at the next absolute position without copying cache buffers. -/
 def decodeSession {batch : UInt64} (cfg : Config) (m : LagunaForCausalLM cfg)
     (tables : LagunaRotaryTables) (tokenEmbed : Tensor { shape := #[batch, 1, cfg.hidden_size] })
     (position : UInt64) (session : LagunaCacheSession cfg batch)
-    : IO (Tensor { shape := #[batch, cfg.vocab_size] }) := autograd.no_grad do
+    : IO (Tensor { shape := #[batch, cfg.vocab_size] }) := do
   let hidden ← m.model.forwardSession cfg tokenEmbed tables position false session
-  return Tensor.reshapeChecked (Tensor.linear3d hidden m.lmHead) #[batch, cfg.vocab_size]
+  return Tensor.reshapeChecked (Tensor.linear3d hidden m.lmHead.detach) #[batch, cfg.vocab_size]
 
 private partial def decodeLoopCached {batch : UInt64}
     (cfg : Config)
@@ -935,7 +937,8 @@ private def generateCore {batch seq : UInt64}
     (strategy : SamplingStrategy)
     (eosTokenIds : Array UInt64)
     (onStep : Option (StreamCallback batch))
-    : IO (Sigma (fun outSeq => Tensor { shape := #[batch, outSeq], dtype := .Int64 })) := autograd.no_grad do
+    : IO (Sigma (fun outSeq => Tensor { shape := #[batch, outSeq], dtype := .Int64 })) := do
+  let m := TensorStruct.detach m
   if seq == 0 then
     throw <| IO.userError "generate requires non-empty prompt sequence"
   if maxNewTokens == 0 then

@@ -277,6 +277,7 @@ private def alignSingleWithModel
     (frontendOut : WhisperFrontendOutput melBins frames)
     (audioLen : UInt64)
     : IO (Option ForcedAlignResult) := do
+  let alignModel := TensorStruct.detach alignModel
   let (wordList, alignRaw) := Qwen3ForceAlignProcessor.encodeTimestampText text language
   let processor : Qwen3ASRProcessor := {}
   let alignIdsArr ←
@@ -295,10 +296,10 @@ private def alignSingleWithModel
     let alignVals := alignIdsArr.map (fun id => Int64.ofNat id.toNat)
     let inputIdsAlignCpu : Tensor { shape := #[1, seqAlign], dtype := .Int64 } := Tensor.reshapeChecked (Tensor.fromInt64Array alignVals) #[1, seqAlign]
     let inputIdsAlign : Tensor { shape := #[1, seqAlign], dtype := .Int64 } := inputIdsAlignCpu.to dev
-    let inputFeaturesDev : Tensor { shape := #[1, melBins, frames], dtype := .Float32 } := frontendOut.inputFeatures.to dev
+    let inputFeaturesDev : Tensor { shape := #[1, melBins, frames], dtype := .Float32 } := frontendOut.inputFeatures.detach.to dev
     let featureAttentionMaskDev : Tensor { shape := #[1, frames], dtype := .Int64 } := frontendOut.featureAttentionMask.to dev
     let results ←
-      autograd.no_grad do
+      do
         alignModel.alignPrepared
           inputIdsAlign
           #[wordList]
@@ -373,6 +374,7 @@ private def transcribeWithFrontend
     (maxNewTokens : UInt64 := 512)
     (eosTokenIds : Array UInt64 := defaultEosTokenIds)
     : IO ASRTranscription := do
+  let model := TensorStruct.detach model
   let forceLanguage ← validateForcedLanguage model.supportLanguages language
   let prompt := buildTextPrompt context forceLanguage
   let audioLen ← extractAudioLenFromFeatureMask (cfg := cfg) frontendOut.featureAttentionMask
@@ -381,10 +383,10 @@ private def transcribeWithFrontend
   let dev := modelDevice model
   let seq := promptPack.1
   let inputIds : Tensor { shape := #[1, seq], dtype := .Int64 } := promptPack.2.to dev
-  let inputFeaturesDev : Tensor { shape := #[1, melBins, frames], dtype := .Float32 } := frontendOut.inputFeatures.to dev
+  let inputFeaturesDev : Tensor { shape := #[1, melBins, frames], dtype := .Float32 } := frontendOut.inputFeatures.detach.to dev
   let featureAttentionMaskDev : Tensor { shape := #[1, frames], dtype := .Int64 } := frontendOut.featureAttentionMask.to dev
   let generated ←
-    autograd.no_grad do
+    do
       model.generateGreedy
         inputIds
         (inputFeatures := some (Tensor.reshapeChecked inputFeaturesDev #[1, cfg.thinkerConfig.audioConfig.numMelBins, frames]).forgetDType)
@@ -543,6 +545,7 @@ private def tryTranscribeWaveformsBatchedChunk
     (maxNewTokens : UInt64)
     (eosTokenIds : Array UInt64)
     : IO (Option (Array ASRTranscription)) := do
+  let model := TensorStruct.detach model
   let dev := modelDevice model
   let n := audios16k.size
   if n == 0 then
@@ -610,7 +613,7 @@ private def tryTranscribeWaveformsBatchedChunk
       let featureAttentionMaskCpu : Tensor { shape := #[batch, frames], dtype := .Int64 } :=
         Tensor.catManyChecked fmaskRows 0 #[batch, frames]
       let generated ←
-        autograd.no_grad do
+        do
           model.generateGreedy
             (inputIdsCpu.to dev)
             (inputFeatures := some (Tensor.reshapeChecked (inputFeaturesCpu.to dev) #[batch, cfg.thinkerConfig.audioConfig.numMelBins, frames]).forgetDType)

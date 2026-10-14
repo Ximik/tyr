@@ -990,10 +990,11 @@ def testQwen3ASRForwardVariableFeatureMask : IO Unit := do
   LeanTest.assertTrue (Float.isFinite s) "variable feature mask forward should be finite"
 
 @[test]
-def testQwen3ASRAudioEncoderFeatureDType : IO Unit := autograd.no_grad do
+def testQwen3ASRAudioEncoderFeatureDType : IO Unit := do
   let cfg : AudioEncoderConfig :=
     { tinyChunkedCfg.thinkerConfig.audioConfig with nWindow := 8, nWindowInfer := 32 }
   let original ← AudioEncoder.init cfg
+  let original := TensorStruct.detach original
   let features : Tensor { shape := #[3, cfg.numMelBins, 32], dtype := .Float32 } := Tensor.reshapeChecked
     (Tensor.sin (Tensor.toFloat32 (Tensor.arange (3 * cfg.numMelBins * 32)))) #[3, cfg.numMelBins, 32]
   for bf16Weights in #[false, true] do
@@ -1027,11 +1028,12 @@ def testQwen3ASRAudioEncoderFeatureDType : IO Unit := autograd.no_grad do
     LeanTest.assertEqual empty.actualSpec.dtype encoder.conv2d1Weight.actualSpec.dtype "Empty batch keeps model dtype"
 
 @[test]
-def testQwen3ASRBFloat16VariableLengthGeneration : IO Unit := autograd.no_grad do
+def testQwen3ASRBFloat16VariableLengthGeneration : IO Unit := do
   let cfg : Qwen3ASRConfig := { tinyChunkedCfg with thinkerConfig := {
     tinyChunkedCfg.thinkerConfig with audioConfig := {
       tinyChunkedCfg.thinkerConfig.audioConfig with nWindow := 8, nWindowInfer := 32 } } }
   let original ← Qwen3ASRForConditionalGeneration.init cfg
+  let original := TensorStruct.detach original
   let model ← TensorStruct.castDType .BFloat16 original
   let aTok := Int64.ofNat cfg.thinkerConfig.audioTokenId.toNat
   let ids : Tensor { shape := #[2, 6], dtype := .Int64 } := Tensor.reshapeChecked (Tensor.fromInt64Array

@@ -21,9 +21,9 @@ def attentionTrainingReference {batch heads seq : UInt64}
     (q k v cotangent : Tensor { shape := #[batch, heads, seq, 64], dtype := .BFloat16 }) :
     IO (Tensor { shape := #[batch, heads, seq, 64], dtype := .BFloat16 } × Tensor { shape := #[batch, heads, seq, 64], dtype := .Float32 } ×
       Tensor { shape := #[batch, heads, seq, 64], dtype := .Float32 } × Tensor { shape := #[batch, heads, seq, 64], dtype := .Float32 }) := do
-  let qRef := Tensor.setRequiresGrad (Tensor.detach q) true
-  let kRef := Tensor.setRequiresGrad (Tensor.detach k) true
-  let vRef := Tensor.setRequiresGrad (Tensor.detach v) true
+  let qRef ← Tensor.setRequiresGrad (Tensor.detach q) true
+  let kRef ← Tensor.setRequiresGrad (Tensor.detach k) true
+  let vRef ← Tensor.setRequiresGrad (Tensor.detach v) true
   let output := Tensor.attentionGQA qRef kRef vRef 0.0 false
   Tensor.backwardLoss (Tensor.sumAll (output.toFloat32 * cotangent.toFloat32))
   pure (output, (← Tensor.gradOf qRef).toFloat32, (← Tensor.gradOf kRef).toFloat32,

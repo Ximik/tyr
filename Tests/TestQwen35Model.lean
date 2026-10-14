@@ -212,8 +212,8 @@ def testQwen35AttentionUsesPerHeadQGateLayout : IO Unit := do
     k_proj := ident
     v_proj := ident
     o_proj := oProj
-    q_norm := Qwen35RMSNorm.initZeroCentered cfg.head_dim cfg.rms_norm_eps
-    k_norm := Qwen35RMSNorm.initZeroCentered cfg.head_dim cfg.rms_norm_eps
+    q_norm := ← Qwen35RMSNorm.initZeroCentered cfg.head_dim cfg.rms_norm_eps
+    k_norm := ← Qwen35RMSNorm.initZeroCentered cfg.head_dim cfg.rms_norm_eps
   }
   let x : Tensor { shape := #[1, 1, cfg.hidden_size] } :=
     Tensor.reshapeChecked (floatArrayDynamic #[1.0, 2.0, 3.0, 4.0]) #[1, 1, cfg.hidden_size]
@@ -462,7 +462,7 @@ private def writeQwen35Fixture (dir : System.FilePath) (cfg : Config)
     IO.FS.writeFile (dir / "model.safetensors.index.json")
       (Lean.Json.mkObj [("weight_map", Lean.Json.mkObj index)]).compress
 
-@[test] def testQwen35TypedCheckpointLoading : IO Unit := Tensor.noGrad do
+@[test] def testQwen35TypedCheckpointLoading : IO Unit := do
   for cfg in #[tinyDenseCfg, tinyMoeCfg] do
     for bf16 in #[false, true] do
       for sharded in #[false, true] do
@@ -471,6 +471,7 @@ private def writeQwen35Fixture (dir : System.FilePath) (cfg : Config)
             writeQwen35Fixture dir cfg bf16 sharded optionalWeights
             let model ← if sharded then Qwen35ForCausalLM.loadSharded dir.toString cfg
               else Qwen35ForCausalLM.load (dir / "model.safetensors").toString cfg
+            let model := TensorStruct.detach model
             let dtype := if bf16 then DType.BFloat16 else .Float32
             LeanTest.assertEqual model.model.embed_tokens.actualSpec.dtype dtype
             LeanTest.assertEqual model.lmHead.actualSpec.dtype dtype

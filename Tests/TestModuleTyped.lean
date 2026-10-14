@@ -55,8 +55,8 @@ def testAffineNonSquareForwardAndGradient : IO Unit := do
   let weight : Tensor ⟨#[3, 2], .Float64, .exact .CPU⟩ := Tensor.onesLike (Tensor.zerosFor _)
   let bias : Tensor ⟨#[2], .Float64, .exact .CPU⟩ := Tensor.onesLike (Tensor.zerosFor _)
   let a : @Affine 2 3 .Float64 (.exact .CPU) := {
-    w := (Tensor.Preserving.mulScalar weight 3.0).setRequiresGrad true
-    b := (Tensor.Preserving.mulScalar bias 5.0).setRequiresGrad true }
+    w := ← Tensor.parameter (Tensor.Preserving.mulScalar weight 3.0)
+    b := ← Tensor.parameter (Tensor.Preserving.mulScalar bias 5.0) }
   let input : Tensor ⟨#[4, 3], .Float64, .exact .CPU⟩ :=
     Tensor.Preserving.mulScalar (Tensor.onesLike (Tensor.zerosFor _)) 2.0
   let output : Tensor ⟨#[4, 2], .Float64, .exact .CPU⟩ := Module.forward a input

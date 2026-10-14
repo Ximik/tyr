@@ -22,9 +22,10 @@ structure QKNorm (head_dim : UInt64) where
 namespace QKNorm
 
 /-- Initialize QK normalization -/
-def init (head_dim : UInt64) (eps : Float := 1e-6) : QKNorm head_dim :=
-  { query_norm := RMSNorm.init head_dim eps (.Unknown "dynamic")
-  , key_norm := RMSNorm.init head_dim eps (.Unknown "dynamic") }
+def init (head_dim : UInt64) (eps : Float := 1e-6) : IO (QKNorm head_dim) := do
+  pure {
+    query_norm := (← RMSNorm.init head_dim eps (.Unknown "dynamic"))
+    key_norm := (← RMSNorm.init head_dim eps (.Unknown "dynamic")) }
 
 /-- Forward pass: normalize Q and K.
     q, k: [batch, seq, n_head, head_dim] or [batch, n_head, seq, head_dim]

@@ -105,7 +105,7 @@ def init : IO Decoder := do
   let up_0_block_2 ← ResnetBlock.init 128 128
 
   -- Final layers
-  let norm_out := GroupNormParams.init 32 128
+  let norm_out ← GroupNormParams.init 32 128
   let conv_out ← Conv2dParams.init 128 3 3 1
 
   pure {

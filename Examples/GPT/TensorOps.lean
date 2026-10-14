@@ -15,8 +15,8 @@ def checked {s : Shape} (d : DType) (raw : RawTensor) : IO (Tensor { shape := s,
   | .ok t => pure t
   | .error message => throw (IO.userError message)
 
-def leaf {s : Shape} (t : Activation s) : Activation s :=
-  t.detach.setRequiresGrad true
+def leaf {s : Shape} (t : Activation s) : IO (Activation s) :=
+  Tensor.parameter t
 
 def reshape {s : Shape} {d : DType} (t : Tensor { shape := s, dtype := d }) (target : Shape) : IO (Tensor { shape := target, dtype := d }) := do
   unless TensorSpec.numelOfShape s == TensorSpec.numelOfShape target do

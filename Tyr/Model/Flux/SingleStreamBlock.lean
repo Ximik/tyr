@@ -40,7 +40,7 @@ namespace SingleStreamBlock
 /-- Initialize single-stream block -/
 def init (hidden_size num_heads head_dim mlp_hidden : UInt64)
     : IO (SingleStreamBlock hidden_size num_heads head_dim mlp_hidden) := do
-  let pre_norm := initLayerNorm hidden_size
+  let pre_norm ← initLayerNorm hidden_size
   let qkv_dim := num_heads * head_dim * 3
   let mlp_in := mlp_hidden * 2
   let std := Float.sqrt (2.0 / hidden_size.toFloat)
@@ -48,11 +48,11 @@ def init (hidden_size num_heads head_dim mlp_hidden : UInt64)
   let l1 ← randomWeight #[qkv_dim + mlp_in, hidden_size]
   let l2 ← randomWeight #[hidden_size, num_heads * head_dim + mlp_hidden]
 
-  let norm := QKNorm.init head_dim
+  let norm ← QKNorm.init head_dim
   pure {
     pre_norm
-    linear1 := Tensor.setRequiresGrad (Tensor.Preserving.mulScalar l1 std) true
-    linear2 := Tensor.setRequiresGrad (Tensor.Preserving.mulScalar l2 std) true
+    linear1 := (← Tensor.parameter (Tensor.Preserving.mulScalar l1 std))
+    linear2 := (← Tensor.parameter (Tensor.Preserving.mulScalar l2 std))
     norm
   }
 

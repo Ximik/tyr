@@ -22,12 +22,12 @@ open torch.Model
 private def initWeight (shape : Shape) (fanIn : UInt64) : IO (Tensor { shape := shape }) :=
   Model.initWeight shape fanIn (.Unknown "dynamic")
 
-private def initBias (shape : Shape) : Tensor { shape := shape } :=
+private def initBias (shape : Shape) : IO (Tensor { shape := shape }) :=
   Model.initBias shape (.Unknown "dynamic")
 
-private def initLayerNorm (dim : UInt64) (eps : Float := 1e-5) : LayerNorm dim (.Unknown "dynamic") :=
-  let norm := LayerNorm.init dim eps
-  { weight := norm.weight.forgetDType, bias := norm.bias.forgetDType, eps := norm.eps }
+private def initLayerNorm (dim : UInt64) (eps : Float := 1e-5) : IO (LayerNorm dim (.Unknown "dynamic")) := do
+  let norm ← LayerNorm.init dim eps
+  pure { weight := norm.weight.forgetDType, bias := norm.bias.forgetDType, eps := norm.eps }
 
 
 private def activate {s : Shape} (name : String) (x : Tensor { shape := s }) : Tensor { shape := s } :=
@@ -72,17 +72,17 @@ namespace AudioAttention
 def init (cfg : AudioEncoderConfig) : IO (AudioAttention cfg) := do
   let qProjWeight ← initWeight
     #[cfg.encoderAttentionHeads * AudioEncoderConfig.headDim cfg, cfg.dModel] cfg.dModel
-  let qProjBias := initBias #[cfg.encoderAttentionHeads * AudioEncoderConfig.headDim cfg]
+  let qProjBias ← initBias #[cfg.encoderAttentionHeads * AudioEncoderConfig.headDim cfg]
   let kProjWeight ← initWeight
     #[cfg.encoderAttentionHeads * AudioEncoderConfig.headDim cfg, cfg.dModel] cfg.dModel
-  let kProjBias := initBias #[cfg.encoderAttentionHeads * AudioEncoderConfig.headDim cfg]
+  let kProjBias ← initBias #[cfg.encoderAttentionHeads * AudioEncoderConfig.headDim cfg]
   let vProjWeight ← initWeight
     #[cfg.encoderAttentionHeads * AudioEncoderConfig.headDim cfg, cfg.dModel] cfg.dModel
-  let vProjBias := initBias #[cfg.encoderAttentionHeads * AudioEncoderConfig.headDim cfg]
+  let vProjBias ← initBias #[cfg.encoderAttentionHeads * AudioEncoderConfig.headDim cfg]
   let outProjWeight ← initWeight
     #[cfg.dModel, cfg.encoderAttentionHeads * AudioEncoderConfig.headDim cfg]
     (cfg.encoderAttentionHeads * AudioEncoderConfig.headDim cfg)
-  let outProjBias := initBias #[cfg.dModel]
+  let outProjBias ← initBias #[cfg.dModel]
   pure {
     qProjWeight, qProjBias, kProjWeight, kProjBias, vProjWeight, vProjBias, outProjWeight, outProjBias
   }
@@ -141,12 +141,12 @@ namespace AudioEncoderLayer
 
 def init (cfg : AudioEncoderConfig) : IO (AudioEncoderLayer cfg) := do
   let selfAttn ← AudioAttention.init cfg
-  let selfAttnLayerNorm := initLayerNorm cfg.dModel 1e-5
+  let selfAttnLayerNorm ← initLayerNorm cfg.dModel 1e-5
   let fc1Weight ← initWeight #[cfg.encoderFfnDim, cfg.dModel] cfg.dModel
-  let fc1Bias := initBias #[cfg.encoderFfnDim]
+  let fc1Bias ← initBias #[cfg.encoderFfnDim]
   let fc2Weight ← initWeight #[cfg.dModel, cfg.encoderFfnDim] cfg.encoderFfnDim
-  let fc2Bias := initBias #[cfg.dModel]
-  let finalLayerNorm := initLayerNorm cfg.dModel 1e-5
+  let fc2Bias ← initBias #[cfg.dModel]
+  let finalLayerNorm ← initLayerNorm cfg.dModel 1e-5
   pure { selfAttn, selfAttnLayerNorm, fc1Weight, fc1Bias, fc2Weight, fc2Bias, finalLayerNorm }
 
 def forward {batch seq : UInt64}
@@ -201,11 +201,11 @@ def init (cfg : AudioEncoderConfig) : IO (AudioEncoder cfg) := do
       s!"Audio encoder requires dModel divisible by encoderAttentionHeads, got {cfg.dModel} and {cfg.encoderAttentionHeads}"
 
   let conv2d1Weight ← initWeight #[cfg.downsampleHiddenSize, 1, 3, 3] 1
-  let conv2d1Bias := initBias #[cfg.downsampleHiddenSize]
+  let conv2d1Bias ← initBias #[cfg.downsampleHiddenSize]
   let conv2d2Weight ← initWeight #[cfg.downsampleHiddenSize, cfg.downsampleHiddenSize, 3, 3] cfg.downsampleHiddenSize
-  let conv2d2Bias := initBias #[cfg.downsampleHiddenSize]
+  let conv2d2Bias ← initBias #[cfg.downsampleHiddenSize]
   let conv2d3Weight ← initWeight #[cfg.downsampleHiddenSize, cfg.downsampleHiddenSize, 3, 3] cfg.downsampleHiddenSize
-  let conv2d3Bias := initBias #[cfg.downsampleHiddenSize]
+  let conv2d3Bias ← initBias #[cfg.downsampleHiddenSize]
 
   let convOutWeight ← initWeight #[cfg.dModel, AudioEncoderConfig.convOutInDim cfg] (AudioEncoderConfig.convOutInDim cfg)
 
@@ -214,11 +214,11 @@ def init (cfg : AudioEncoderConfig) : IO (AudioEncoder cfg) := do
     let layer ← AudioEncoderLayer.init cfg
     layers := layers.push layer
 
-  let lnPost := initLayerNorm cfg.dModel 1e-5
+  let lnPost ← initLayerNorm cfg.dModel 1e-5
   let proj1Weight ← initWeight #[cfg.dModel, cfg.dModel] cfg.dModel
-  let proj1Bias := initBias #[cfg.dModel]
+  let proj1Bias ← initBias #[cfg.dModel]
   let proj2Weight ← initWeight #[cfg.outputDim, cfg.dModel] cfg.dModel
-  let proj2Bias := initBias #[cfg.outputDim]
+  let proj2Bias ← initBias #[cfg.outputDim]
 
   pure {
     conv2d1Weight, conv2d1Bias, conv2d2Weight, conv2d2Bias, conv2d3Weight, conv2d3Bias,

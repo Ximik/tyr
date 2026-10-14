@@ -53,10 +53,10 @@ def init (hidden_size num_heads num_kv_heads head_dim : UInt64) (dtype : DType :
   let o := o.castDType dtype
 
   pure {
-    q_proj := Tensor.setRequiresGrad (Tensor.Preserving.mulScalar q std) true
-    k_proj := Tensor.setRequiresGrad (Tensor.Preserving.mulScalar k std) true
-    v_proj := Tensor.setRequiresGrad (Tensor.Preserving.mulScalar v std) true
-    o_proj := Tensor.setRequiresGrad (Tensor.Preserving.mulScalar o std) true
+    q_proj := (← Tensor.parameter (Tensor.Preserving.mulScalar q std))
+    k_proj := (← Tensor.parameter (Tensor.Preserving.mulScalar k std))
+    v_proj := (← Tensor.parameter (Tensor.Preserving.mulScalar v std))
+    o_proj := (← Tensor.parameter (Tensor.Preserving.mulScalar o std))
   }
 
 /-- Incremental KV cache for one attention layer.

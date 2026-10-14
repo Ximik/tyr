@@ -30,7 +30,7 @@ namespace torch
 namespace RawTensor
 
 @[extern "lean_torch_zeros"] opaque zeros (shape : Shape) (requiresGrad : Bool := false)
-    (device : Device := .CPU) : RawTensor
+    (device : Device := .CPU) (noGrad : requiresGrad = false := by decide) : RawTensor
 
 @[extern "lean_torch_cast_dtype"] opaque castDType (shape : Shape) (t : @& RawTensor)
     (tag : @& String) : RawTensor

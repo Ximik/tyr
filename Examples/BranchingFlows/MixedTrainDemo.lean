@@ -194,7 +194,7 @@ def runDemo : IO Unit := do
   }
 
   let params ← MixParams.init vocab hidden
-  let params := TensorStruct.makeLeafParams params
+  let params ← TensorStruct.makeLeafParams params
   let opt := Optim.adamw (lr := 1.0e-3)
   let mut optState := opt.init params
   let mut params := params
@@ -234,7 +234,7 @@ def runDemo : IO Unit := do
       if h : batchD = batchU then pure (h ▸ packedDisc0)
       else throw <| IO.userError "Mixed bridge batch sizes differ"
 
-    let paramsTrain := TensorStruct.makeLeafParams params
+    let paramsTrain ← TensorStruct.makeLeafParams params
 
     TensorStruct.zeroGrads paramsTrain
     let t := packedDisc.t
@@ -265,7 +265,7 @@ def runDemo : IO Unit := do
       pure ()
 
     let grads ← TensorStruct.grads paramsTrain
-    let (params', optState') := Optim.step opt paramsTrain grads optState
+    let (params', optState') ← Optim.step opt paramsTrain grads optState
     params := params'
     optState := optState'
 

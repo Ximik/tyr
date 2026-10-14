@@ -230,43 +230,36 @@ def testParseStaticIndices : IO Unit := do
   LeanTest.assertTrue (kinds[0]! == .diff) "Expected parameter 0 to be differentiable"
 
 @[test]
-def testNoGradRestoresOnException : IO Unit := do
-  let before ← torch.autograd.is_grad_enabled
-  let _ ← torch.autograd.set_grad_enabled true
-  let threw ←
-    try
-      let (_ : Unit) ← torch.autograd.no_grad (α := Unit) do
-        let enabled ← torch.autograd.is_grad_enabled
-        LeanTest.assertTrue (!enabled) "grad should be disabled inside no_grad"
-        throw (IO.userError "intentional failure")
-      pure false
-    catch _ =>
-      pure true
-
-  LeanTest.assertTrue threw "no_grad test should throw from inner action"
-  let after ← torch.autograd.is_grad_enabled
-  LeanTest.assertTrue after "grad mode should be restored after exception"
-  let _ ← torch.autograd.set_grad_enabled before
+def testDetachedInferencePreservesTrainableInputOnException : IO Unit := do
+  let parameter ← Tensor.parameter (Tensor.full #[] 3)
+  let inference := Tensor.Preserving.mulScalar parameter.detach 2
+  LeanTest.assertTrue (!inference.requiresGrad && !inference.hasGradFn)
+    "Explicit detached inference has no autograd graph"
+  LeanTest.assertEqual inference.item 6.0
+  let failure : IO Unit := throw (IO.userError "intentional failure")
+  let threw ← try
+    failure
+    pure false
+  catch _ => pure true
+  LeanTest.assertTrue threw
+  LeanTest.assertTrue parameter.requiresGrad "Inference failure preserves the original parameter"
+  Tensor.backwardLoss (Tensor.mul parameter parameter)
+  let gradient ← parameter.gradOf
+  LeanTest.assertEqual gradient.item 6.0
 
 @[test]
-def testNoGradNestedRestore : IO Unit := do
-  let before ← torch.autograd.is_grad_enabled
-  let _ ← torch.autograd.set_grad_enabled true
-
-  let _ ← torch.autograd.no_grad do
-    let outerEnabled ← torch.autograd.is_grad_enabled
-    LeanTest.assertTrue (!outerEnabled) "outer no_grad should disable grad"
-    let _ ← torch.autograd.no_grad do
-      let innerEnabled ← torch.autograd.is_grad_enabled
-      LeanTest.assertTrue (!innerEnabled) "inner no_grad should keep grad disabled"
-      pure ()
-    let outerAfterInner ← torch.autograd.is_grad_enabled
-    LeanTest.assertTrue (!outerAfterInner) "outer no_grad should remain disabled after inner"
-    pure ()
-
-  let after ← torch.autograd.is_grad_enabled
-  LeanTest.assertTrue after "grad mode should be restored after nested no_grad"
-  let _ ← torch.autograd.set_grad_enabled before
+def testDetachedInferenceAndTrainingRemainIndependent : IO Unit := do
+  let parameter ← Tensor.parameter (Tensor.full #[] 4)
+  let inference := Tensor.mul parameter.detach parameter.detach
+  let training := Tensor.mul parameter parameter
+  LeanTest.assertTrue (!inference.requiresGrad && !inference.hasGradFn)
+    "Detached operands keep inference outside the graph"
+  LeanTest.assertTrue (training.requiresGrad && training.hasGradFn)
+    "The original operands still build a training graph"
+  LeanTest.assertEqual inference.item training.item
+  Tensor.backwardLoss training
+  let gradient ← parameter.gradOf
+  LeanTest.assertEqual gradient.item 8.0
 
 /-! ## JVP Execution Tests -/
 

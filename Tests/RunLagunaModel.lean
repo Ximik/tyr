@@ -553,31 +553,26 @@ private def runOwnedCacheCheck (device : Device) (bf16 : Bool := false) : IO Uni
 
   -- The first layer successfully writes K/V before this second-layer IO error.
   -- A failure after mutation must invalidate the session rather than expose
-  -- partially advanced buffers, and no-grad must restore the caller's mode.
+  -- partially advanced buffers or change the caller's input trainability.
   let some second := model.model.layers[1]? | throw <| IO.userError "missing second test layer"
   let broken := { model with model := { model.model with
     layers := model.model.layers.set! 1 { second with attnFull := none, attnSliding := none } } }
   let prompt : Tensor { shape := #[1, 5], dtype := .Int64 } := sliceTyped ids 1 0 5
-  let wasEnabled ← autograd.is_grad_enabled
-  try
-    for enabled in #[true, false] do
-      autograd.set_grad_enabled enabled
-      let session ← broken.model.initCacheSession (batch := 1) cfg 20 device
-      expectRejected (broken.prefillSession cfg tables (broken.embedTokens prompt) session)
-        s!"(d) [{lbl}] malformed second layer fails after an earlier cache write"
-      check ((← autograd.is_grad_enabled) == enabled)
-        s!"(d) [{lbl}] failed inference restores caller gradient mode {enabled}"
-      expectRejected session.capacities "partially updated session cannot expose capacities"
-      expectRejected session.fork "partially updated session cannot be forked"
-  finally
-    autograd.set_grad_enabled wasEnabled
+  let input ← Tensor.parameter (broken.embedTokens prompt)
+  let session ← broken.model.initCacheSession (batch := 1) cfg 20 device
+  expectRejected (broken.prefillSession cfg tables input session)
+    s!"(d) [{lbl}] malformed second layer fails after an earlier cache write"
+  check input.requiresGrad s!"(d) [{lbl}] failed inference preserves caller input trainability"
+  expectRejected session.capacities "partially updated session cannot expose capacities"
+  expectRejected session.fork "partially updated session cannot be forked"
 
 /-- Opt-in timing of identical eight-token decode workloads. Allocation and
 prefill are outside the timer; CUDA is synchronized at both boundaries. -/
-private def runCacheBenchmark (device : Device) : IO Unit := autograd.no_grad do
+private def runCacheBenchmark (device : Device) : IO Unit := do
   let cfg := denseTiny
   torch.manualSeed 987
   let model ← moveModel (← LagunaForCausalLM.init cfg) device false
+  let model := TensorStruct.detach model
   let ids : Tensor { shape := #[1, 20], dtype := .Int64 } := mkIds baseIds device
   let prompt : Tensor { shape := #[1, 12], dtype := .Int64 } := sliceTyped ids 1 0 12
   let synchronize : IO Unit := if device == .CPU then pure () else torch.cuda_synchronize

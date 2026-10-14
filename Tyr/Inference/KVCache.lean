@@ -234,7 +234,7 @@ def Cache.attendLayer
     (newK newV : Tensor ⟨#[batch, numKvHeads, 1, headDim], dtype, device⟩)
     (enableGqa : Bool := false)
     : IO (Cache numLayers batch maxSeqLen numKvHeads headDim dtype device
-      × Tensor ⟨#[batch, numQHeads, 1, headDim], dtype, device⟩) := autograd.no_grad do
+      × Tensor ⟨#[batch, numQHeads, 1, headDim], dtype, device⟩) := do
   let some lc := cache.layers[layerIdx]?
     | throw <| IO.userError "KV cache layer index out of range"
   if numQHeads == 0 || numKvHeads == 0 ||
@@ -249,7 +249,7 @@ def Cache.attendLayer
   let some updatedLayer := cache'.layers[layerIdx]?
     | throw <| IO.userError "KV cache layer index out of range after append"
   let (kView, vView) ← updatedLayer.attentionView validLen
-  let output := Tensor.flashAttention newQ kView vView enableGqa
+  let output := Tensor.flashAttention (Tensor.detach newQ) kView vView enableGqa
   return (cache', output)
 
 /-- TensorStruct instance for LayerCache -/

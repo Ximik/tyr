@@ -24,8 +24,9 @@ private def close {σ τ : StaticSpec} (x : Tensor σ) (y : Tensor τ) (tol : Fl
     LeanTest.assertTrue (xs[i]!.isFinite && (xs[i]! - ys[i]!).abs <= tol)
       s!"Whisper mismatch at {i}: {xs[i]!} vs {ys[i]!}, tolerance {tol}"
 
-@[test] def testWhisperCachedDecodeDTypesAndParity : IO Unit := Tensor.noGrad do
+@[test] def testWhisperCachedDecodeDTypesAndParity : IO Unit := do
   let original ← WhisperForConditionalGeneration.init cfg
+  let original := TensorStruct.detach original
   for bf16 in #[false, true] do
     let model ← if bf16 then TensorStruct.castDType .BFloat16 original else pure original
     let encoded ← model.encode features.forgetDType
@@ -110,9 +111,10 @@ private def roundTrip {α : Type} [TensorStruct α] (value : α) (dir : String) 
   close encoded other 0
   close (← model.decode tokens encoded) (← restored.decode tokens other) 0
 
-@[test] def testWhisperWaveformGreedyBeamAndSampling : IO Unit := Tensor.noGrad do
+@[test] def testWhisperWaveformGreedyBeamAndSampling : IO Unit := do
   let audioCfg := { cfg with maxSourcePositions := 16, maxTargetPositions := 16, eosTokenId := 15 }
   let model ← WhisperForConditionalGeneration.init audioCfg
+  let model := TensorStruct.detach model
   let norm : LayerNorm 8 (.Unknown "dynamic") := {
     weight := zerosDynamic #[8], bias := (Tensor.ones #[8]).forgetDType }
   let projection := Tensor.sliceScatter (zerosDynamic #[16, 8]) 0 0 ((Tensor.ones #[1, 8]).forgetDType)

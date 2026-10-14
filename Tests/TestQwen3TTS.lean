@@ -90,9 +90,10 @@ def testQwen3TTSRMSNormModelDType : IO Unit := do
       "Functional RMSNorm keeps its documented Float32 contract"
 
 @[test]
-def testQwen3TTSBFloat16IncrementalCache : IO Unit := autograd.no_grad do
+def testQwen3TTSBFloat16IncrementalCache : IO Unit := do
   torch.manualSeed 7341
   let raw ← qwen.QwenLayer.init 8 2 1 4 16 (dtype := .Unknown "dynamic")
+  let raw := TensorStruct.detach raw
   let base := { raw with
     self_attn := TensorStruct.scale raw.self_attn 0.25
     mlp := TensorStruct.scale raw.mlp 0.25 }

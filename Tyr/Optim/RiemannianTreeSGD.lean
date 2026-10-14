@@ -163,13 +163,13 @@ private def finalizePreparedStepWithTreeFactor
     (factor : TreeMetricFactor Params rank)
     (gradient : Params)
     (lr : Float)
-    : StepResult Params s :=
+    : IO (StepResult Params s) := do
   let update := TreeMetricFactor.solveWoodbury mass factor gradient
   let inner := TreeMetricFactor.woodburyInner mass factor
   let innerInv := Tensor.inv inner
   let residual := TreeMetricFactor.applyRegularized mass factor update |> fun x => TensorStruct.sub x gradient
-  let params' := torch.Optim.apply_updates params (TensorStruct.scale update (-lr))
-  {
+  let params' ← torch.Optim.apply_updates params (TensorStruct.scale update (-lr))
+  pure {
     params := params'
     prediction := Tensor.detach predictionReq
     diagnostics := {
@@ -191,7 +191,7 @@ private def stepPreparedWithFactorAndMass
     (outputFactor : MetricFactor rank (shapeNumel s))
     (outputCotangent : Tensor { shape := s, dtype := .Float32 })
     (lr : Float)
-    : StepResult Params s :=
+    : IO (StepResult Params s) := do
   let gradient := paramVjpFromPrepared predictionReq paramsReq outputCotangent
   let factor := buildTreeFactorFromOutputFactor predictionReq paramsReq outputFactor
   finalizePreparedStepWithTreeFactor params predictionReq mass factor gradient lr
@@ -207,9 +207,9 @@ def stepWithFactorAndMass
     (outputCotangent : Tensor { shape := s, dtype := .Float32 })
     (lr : Float)
     : IO (StepResult Params s) := do
-  let paramsReq := TensorStruct.makeLeafParams params
+  let paramsReq ← TensorStruct.makeLeafParams params
   let predictionReq ← forward paramsReq
-  pure <| stepPreparedWithFactorAndMass
+  stepPreparedWithFactorAndMass
     params paramsReq predictionReq mass outputFactor outputCotangent lr
 
 /-- Whole-model tree step with unit diagonal mass. -/
@@ -233,7 +233,7 @@ private def prepareCrossEntropyStep
     (targets : Tensor { shape := #[batch, seq], dtype := .Int64 })
     : IO (Params × Tensor { shape := #[batch, seq, vocab], dtype := .Float32 } × Tensor { shape := #[], dtype := .Float32 } ×
         Tensor { shape := #[batch, seq, vocab], dtype := .Float32 }) := do
-  let paramsReq := TensorStruct.makeLeafParams params
+  let paramsReq ← TensorStruct.makeLeafParams params
   let predictionReq ← forward paramsReq
   let logitsFlat : Tensor { shape := #[batch * seq, vocab], dtype := .Float32 } :=
     Tensor.reshapeChecked predictionReq #[batch * seq, vocab]
@@ -306,7 +306,7 @@ def stepCrossEntropy
     let inner := TreeMetricFactor.woodburyInner mass factor
     let innerInv := Tensor.inv inner
     let residual := TreeMetricFactor.applyRegularized mass factor update |> fun x => TensorStruct.sub x paramGrad
-    let params' := torch.Optim.apply_updates params (TensorStruct.scale update (-lr))
+    let params' ← torch.Optim.apply_updates params (TensorStruct.scale update (-lr))
     pure {
       params := params'
       prediction := Tensor.detach predictionReq
@@ -320,7 +320,7 @@ def stepCrossEntropy
       loss := Tensor.item lossT
     }
   else
-    let result := stepPreparedWithFactorAndMass
+    let result ← stepPreparedWithFactorAndMass
       (rank := outDim)
       params paramsReq predictionReq mass outputFactor outputCotangent lr
     pure { result with loss := Tensor.item lossT }
@@ -347,7 +347,7 @@ def stepCrossEntropySampledFisher
     sampledFisherTreeFactor
       (rank := probeCount)
       predictionReq paramsReq rows hRows
-  let result :=
+  let result ←
     finalizePreparedStepWithTreeFactor
       (rank := probeCount)
       params predictionReq mass factor gradient lr

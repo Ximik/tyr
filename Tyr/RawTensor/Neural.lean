@@ -74,7 +74,7 @@ namespace torch.RawTensor
 
 @[extern "lean_torch_load_u16_bin"] opaque loadU16Bin (count : UInt64) (path : @& String) : IO RawTensor
 
-@[extern "lean_torch_linspace"] opaque linspace (start stop : Float) (count : UInt64) (requiresGrad : Bool) : RawTensor
+@[extern "lean_torch_linspace"] opaque linspace (start stop : Float) (count : UInt64) (requiresGrad : Bool) (noGrad : requiresGrad = false := by decide) : RawTensor
 @[extern "lean_torch_max_dim_3d"] opaque maxLast3d (batch seq vocab : UInt64)
     (input : @& RawTensor) (dim : UInt64) : RawTensor × RawTensor
 @[extern "lean_torch_topk_2d"] opaque topKLast2d (rows cols : UInt64)
@@ -83,7 +83,7 @@ namespace torch.RawTensor
 @[extern "lean_torch_get"] opaque getOp (shape : Shape) (input : @& RawTensor) (idx : Int) : RawTensor
 @[extern "lean_torch_unbind"] opaque unbind (shape : Shape) (input : @& RawTensor) (dim : Nat) : Array RawTensor
 @[extern "lean_torch_logspace"] opaque logspace (start stop : Float) (steps : UInt64)
-    (base : Float) (requiresGrad : Bool) : RawTensor
+    (base : Float) (requiresGrad : Bool) (noGrad : requiresGrad = false := by decide) : RawTensor
 
 @[extern "lean_torch_backward_unit"] opaque backward (shape : Shape)
     (output cotangent : @& RawTensor) : IO Unit

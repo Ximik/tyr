@@ -423,7 +423,7 @@ def stepGenericManifoldSingle {m n : UInt64} {d : DType} {dev : DevicePolicy}
   let aspectScale := NorMuon.aspectRatioScale #[m, n]
   let effectiveLr := cfg.matrixLr * lrMul * aspectScale
   let updated ← stepOnManifoldFamily cfg.matrixManifold param nesterovGrad effectiveLr
-  let newParam := Tensor.setRequiresGrad (Tensor.detach updated) true
+  let newParam ← Tensor.parameter (Tensor.detach updated)
   let newState : GenericManifoldState m n d dev := {
     momentumBuffer := some newMomentum
     step := state.step + 1

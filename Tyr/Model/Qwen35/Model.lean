@@ -55,11 +55,11 @@ structure Qwen35RMSNorm (dim : UInt64) where
 
 namespace Qwen35RMSNorm
 
-def initZeroCentered (dim : UInt64) (eps : Float := 1e-6) : Qwen35RMSNorm dim :=
-  { weight := Tensor.setRequiresGrad (zerosDynamic #[dim]) true, eps }
+def initZeroCentered (dim : UInt64) (eps : Float := 1e-6) : IO (Qwen35RMSNorm dim) := do
+  pure { weight := (← Tensor.parameter (zerosDynamic #[dim])), eps }
 
-def initOneCentered (dim : UInt64) (eps : Float := 1e-6) : Qwen35RMSNorm dim :=
-  { weight := Tensor.setRequiresGrad (onesDynamic #[dim]) true, eps }
+def initOneCentered (dim : UInt64) (eps : Float := 1e-6) : IO (Qwen35RMSNorm dim) := do
+  pure { weight := (← Tensor.parameter (onesDynamic #[dim])), eps }
 
 /-- HuggingFace Qwen3.5 checkpoints already store the zero-centered RMSNorm
     parameter used by the `(1 + weight)` formulation, so the raw tensor should
@@ -100,8 +100,8 @@ structure Qwen35RMSNormGated (dim : UInt64) where
 
 namespace Qwen35RMSNormGated
 
-def init (dim : UInt64) (eps : Float := 1e-6) : Qwen35RMSNormGated dim :=
-  { weight := Tensor.setRequiresGrad (onesDynamic #[dim]) true, eps }
+def init (dim : UInt64) (eps : Float := 1e-6) : IO (Qwen35RMSNormGated dim) := do
+  pure { weight := (← Tensor.parameter (onesDynamic #[dim])), eps }
 
 def forward2d {n dim : UInt64}
     (m : Qwen35RMSNormGated dim)
@@ -316,8 +316,8 @@ def init (cfg : Config) : IO (Qwen35Attention cfg) := do
     k_proj := k
     v_proj := v
     o_proj := o
-    q_norm := Qwen35RMSNorm.initZeroCentered cfg.head_dim cfg.rms_norm_eps
-    k_norm := Qwen35RMSNorm.initZeroCentered cfg.head_dim cfg.rms_norm_eps
+    q_norm := (← Qwen35RMSNorm.initZeroCentered cfg.head_dim cfg.rms_norm_eps)
+    k_norm := (← Qwen35RMSNorm.initZeroCentered cfg.head_dim cfg.rms_norm_eps)
   }
 
 private def applyHeadNorm {batch seq n_heads head_dim : UInt64}
@@ -592,13 +592,13 @@ def init (cfg : Config) : IO (Qwen35GatedDeltaNet cfg) := do
   let inA ← initDynamicWeight #[cfg.linear_num_value_heads, cfg.hidden_size] cfg.hidden_size
 
   let convW ← initDynamicWeight #[Config.linearConvDim cfg, 1, cfg.linear_conv_kernel_dim] cfg.linear_conv_kernel_dim
-  let convB := initDynamicBias #[Config.linearConvDim cfg]
+  let convB ← initDynamicBias #[Config.linearConvDim cfg]
 
-  let dtBias := Tensor.setRequiresGrad (onesDynamic #[cfg.linear_num_value_heads]) true
+  let dtBias ← Tensor.parameter (onesDynamic #[cfg.linear_num_value_heads])
 
   let aRand ← randDynamic #[cfg.linear_num_value_heads]
   let aScaled : Tensor { shape := #[cfg.linear_num_value_heads] } := Tensor.Preserving.addScalar (Tensor.Preserving.mulScalar aRand 16.0) 1e-6
-  let aLog := Tensor.setRequiresGrad (logDynamic aScaled) true
+  let aLog ← Tensor.parameter (logDynamic aScaled)
 
   let outProj ← initDynamicWeight #[cfg.hidden_size, Config.linearValueDim cfg] (Config.linearValueDim cfg)
   pure {
@@ -610,7 +610,7 @@ def init (cfg : Config) : IO (Qwen35GatedDeltaNet cfg) := do
     conv1d_bias := convB
     dt_bias := dtBias
     a_log := aLog
-    norm := Qwen35RMSNormGated.init cfg.linear_value_head_dim cfg.rms_norm_eps
+    norm := (← Qwen35RMSNormGated.init cfg.linear_value_head_dim cfg.rms_norm_eps)
     out_proj := outProj
   }
 
@@ -780,8 +780,8 @@ structure Qwen35Layer (cfg : Config) where
 namespace Qwen35Layer
 
 def init (cfg : Config) (layerType : LayerType) : IO (Qwen35Layer cfg) := do
-  let inputNorm := Qwen35RMSNorm.initZeroCentered cfg.hidden_size cfg.rms_norm_eps
-  let postNorm := Qwen35RMSNorm.initZeroCentered cfg.hidden_size cfg.rms_norm_eps
+  let inputNorm ← Qwen35RMSNorm.initZeroCentered cfg.hidden_size cfg.rms_norm_eps
+  let postNorm ← Qwen35RMSNorm.initZeroCentered cfg.hidden_size cfg.rms_norm_eps
 
   let fullAttn ←
     match layerType with
@@ -956,7 +956,7 @@ namespace Qwen35Model
 
 def init (cfg : Config) : IO (Qwen35Model cfg) := do
   let embRaw := (← Tensor.randn #[cfg.vocab_size, cfg.hidden_size]).forgetDType
-  let embedTokens := Tensor.setRequiresGrad (Tensor.Preserving.mulScalar embRaw 0.02) true
+  let embedTokens ← Tensor.parameter (Tensor.Preserving.mulScalar embRaw 0.02)
 
   let layerTypes := Config.normalizedLayerTypes cfg
   let mut layers : Array (Qwen35Layer cfg) := #[]
@@ -965,7 +965,7 @@ def init (cfg : Config) : IO (Qwen35Model cfg) := do
     let l ← Qwen35Layer.init cfg lt
     layers := layers.push l
 
-  let norm := Qwen35RMSNorm.initZeroCentered cfg.hidden_size cfg.rms_norm_eps
+  let norm ← Qwen35RMSNorm.initZeroCentered cfg.hidden_size cfg.rms_norm_eps
   pure { embed_tokens := embedTokens, layers := layers, norm := norm }
 
 def initCache {batch : UInt64}

@@ -91,7 +91,11 @@ Object requiresGrad(lean_object* input, bool enabled) {
 #ifdef TYR_LEGACY_VALUE_UPDATES
   lean_dec(input);
 #endif
+#ifdef TYR_LEGACY_VALUE_UPDATES
   return Object(result, lean_dec);
+#else
+  return ioTensor(result);
+#endif
 }
 Object gradient(lean_object* input) {
 #ifdef TYR_LEGACY_VALUE_UPDATES

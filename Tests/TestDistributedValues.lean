@@ -39,7 +39,7 @@ def testUninitializedCollectivesReturnErrors : IO Unit := do
     Retained inputs and earlier results detect writes into shared storage. -/
 def checkTwoRankValues (rank : UInt64) : IO Unit := do
   let rankValue := rank.toNat.toFloat + 1.0
-  let input := (Tensor.fromFloatArray #[rankValue]).setRequiresGrad true
+  let input ← (Tensor.fromFloatArray #[rankValue]).setRequiresGrad true
   let reduced ← dist.allReduce input .sum
   LeanTest.assertEqual (← input.toFloatArray) #[rankValue]
   LeanTest.assertEqual (← reduced.toFloatArray) #[3.0]
@@ -51,7 +51,7 @@ def checkTwoRankValues (rank : UInt64) : IO Unit := do
   LeanTest.assertTrue (broadcast.requiresGrad && broadcast.isLeaf)
     "Broadcast results retain the input's trainability"
 
-  let template := (Tensor.zeros #[1]).setRequiresGrad true
+  let template ← (Tensor.zeros #[1]).setRequiresGrad true
   let gathered ← dist.allGatherList #[template, template] input
   LeanTest.assertEqual (← template.toFloatArray) #[0.0]
   LeanTest.assertEqual (← gathered[0]!.toFloatArray) #[1.0]

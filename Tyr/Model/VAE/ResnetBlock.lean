@@ -21,10 +21,10 @@ structure GroupNormParams (num_groups channels : UInt64) where
 namespace GroupNormParams
 
 /-- Initialize GroupNorm parameters (weight=1, bias=0) -/
-def init (num_groups channels : UInt64) : GroupNormParams num_groups channels :=
-  let weight := Tensor.setRequiresGrad ((Tensor.ones #[channels]).forgetDType) true
-  let bias := Tensor.setRequiresGrad ((Tensor.zeros #[channels]).forgetDType) true
-  { weight, bias }
+def init (num_groups channels : UInt64) : IO (GroupNormParams num_groups channels) := do
+  let weight ← Tensor.parameter ((Tensor.ones #[channels]).forgetDType)
+  let bias ← Tensor.parameter ((Tensor.zeros #[channels]).forgetDType)
+  pure { weight, bias }
 
 /-- Apply GroupNorm to input tensor [batch, channels, height, width] -/
 def forward {batch channels height width num_groups : UInt64}
@@ -52,8 +52,8 @@ def init (in_ch out_ch kernel_size : UInt64) (padding : UInt64 := 0) : IO (Conv2
   let w := w.forgetDType
   let b := (Tensor.zeros #[out_ch]).forgetDType
   pure {
-    weight := Tensor.setRequiresGrad (Tensor.Preserving.mulScalar w std) true
-    bias := Tensor.setRequiresGrad b true
+    weight := (← Tensor.parameter (Tensor.Preserving.mulScalar w std))
+    bias := (← Tensor.parameter b)
   }
 
 /-- Apply convolution -/
@@ -89,9 +89,9 @@ namespace ResnetBlock
 
 /-- Initialize ResnetBlock -/
 def init (in_ch out_ch : UInt64) : IO (ResnetBlock in_ch out_ch) := do
-  let norm1 := GroupNormParams.init 32 in_ch
+  let norm1 ← GroupNormParams.init 32 in_ch
   let conv1 ← Conv2dParams.init in_ch out_ch 3 1
-  let norm2 := GroupNormParams.init 32 out_ch
+  let norm2 ← GroupNormParams.init 32 out_ch
   let conv2 ← Conv2dParams.init out_ch out_ch 3 1
   let nin_shortcut ← if in_ch != out_ch then do
     let c ← Conv2dParams.init in_ch out_ch 1 0

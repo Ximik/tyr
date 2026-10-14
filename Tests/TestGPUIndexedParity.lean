@@ -134,7 +134,7 @@ example (inputs : Examples.GPU.RunLayerNorm.LayerNormInputs .Float32) : True := 
 @[test] def testGPULossIndexedTrainingReference : IO Unit := do
   let logits := (Tensor.zeros #[2, 3072]).toBFloat16
   let targets := (Tensor.fromInt64Array #[0, 3071]).reshapeChecked #[2]
-  let (losses, mean, gradient) := Examples.GPU.RunLoss.referenceTraining logits targets
+  let (losses, mean, gradient) ← Examples.GPU.RunLoss.referenceTraining logits targets
   LeanTest.assertEqual losses.actualSpec.dtype DType.Float32
   LeanTest.assertEqual mean.actualSpec.dtype DType.Float32
   LeanTest.assertEqual gradient.actualSpec.dtype DType.BFloat16

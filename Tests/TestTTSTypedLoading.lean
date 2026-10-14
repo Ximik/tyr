@@ -62,13 +62,16 @@ private def writeCheckpoint (dir : System.FilePath) (bf16 projection sharded : B
     IO.FS.writeFile (dir / "model.safetensors.index.json")
       (Json.mkObj [("weight_map", Json.mkObj index)]).compress
 
-@[test] def testTTSTypedCheckpointDTypesAndOptionalProjection : IO Unit := Tensor.noGrad do
+@[test] def testTTSTypedCheckpointDTypesAndOptionalProjection : IO Unit := do
   for bf16 in [false, true] do
     for projection in [false, true] do
       for sharded in [false, true] do
         IO.FS.withTempDir fun dir => do
           writeCheckpoint dir bf16 projection sharded
           let model ← Qwen3TTSForConditionalGeneration.loadSharded dir.toString cfg
+          let model := { model with
+            talker := TensorStruct.detach model.talker
+            speakerEncoder := model.speakerEncoder.map TensorStruct.detach }
           let dtype := if bf16 then DType.BFloat16 else .Float32
           LeanTest.assertEqual model.talker.model.codecEmbedding.actualSpec.dtype dtype
           LeanTest.assertEqual model.talker.codePredictor.inputProjection.actualSpec.dtype dtype
@@ -84,7 +87,7 @@ private def writeCheckpoint (dir : System.FilePath) (bf16 projection sharded : B
             LeanTest.assertEqual (← model.talker.codePredictor.inputProjection.toFloatArray) (← identity)
           let generated ← model.generateCodesWithLengths prompt 2 2 1.0 1 1.0
           LeanTest.assertEqual generated.codes.actualSpec.dtype DType.Int64
-          LeanTest.assertEqual generated.codes.runtimeShape #[1, 2, 2]
-          LeanTest.assertEqual generated.lengths #[2]
+          LeanTest.assertEqual generated.codes.runtimeShape (#[1, 2, 2] : Shape)
+          LeanTest.assertEqual generated.lengths (#[2] : Array UInt64)
 
 end Tests.TTSTypedLoading

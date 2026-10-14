@@ -148,7 +148,7 @@ def init (vocabSize dim : UInt64) : IO (Embedding vocabSize dim) := do
   let std := 1.0 / Float.sqrt dim.toFloat
   let w ← torch.Tensor.randn #[vocabSize, dim]
   let weight := torch.Tensor.Preserving.mulScalar w std
-  let weight := torch.Tensor.setRequiresGrad weight true
+  let weight ← torch.Tensor.parameter weight
   pure { weight }
 
 /-- Lookup embeddings for a batch of token indices -/

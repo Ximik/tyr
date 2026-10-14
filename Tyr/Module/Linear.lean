@@ -26,9 +26,9 @@ def init (in_dim out_dim : UInt64) (withBias : Bool := true) : IO (Linear in_dim
   let std := Float.sqrt (2.0 / in_dim.toFloat)
   let w ← Tensor.randn #[out_dim, in_dim]
   let weight := Tensor.Preserving.mulScalar w std
-  let weight := Tensor.setRequiresGrad weight true
+  let weight ← Tensor.parameter weight
   let bias ← if withBias then do
-    let b := Tensor.zeros #[out_dim] true
+    let b ← Tensor.parameter (Tensor.zeros #[out_dim])
     pure (some b)
   else
     pure none

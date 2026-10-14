@@ -90,7 +90,7 @@ def testTangentProjectionConstraint : IO Unit := do
 @[test]
 def testStiefelConstraintAfterStep : IO Unit := do
   let W0raw ← Tensor.randn #[8, 4]
-  let W0 := Tensor.setRequiresGrad (Tensor.detach (retractStiefel W0raw)) true
+  let W0 ← Tensor.setRequiresGrad (Tensor.detach (retractStiefel W0raw)) true
   let G ← Tensor.randn #[8, 4]
 
   let st := initParamState W0
@@ -113,7 +113,7 @@ def testStiefelConstraintAfterStep : IO Unit := do
 @[test]
 def testDualAscentDiagnosticsEarlyStop : IO Unit := do
   let W0raw ← Tensor.randn #[8, 4]
-  let W0 := Tensor.setRequiresGrad (Tensor.detach (retractStiefel W0raw)) true
+  let W0 ← Tensor.setRequiresGrad (Tensor.detach (retractStiefel W0raw)) true
   let G ← Tensor.randn #[8, 4]
   let st := initParamState W0
   let cfg : Config := {
@@ -137,7 +137,7 @@ def testDualAscentDiagnosticsEarlyStop : IO Unit := do
 @[test]
 def testFixedPointDiagnosticsPath : IO Unit := do
   let W0raw ← Tensor.randn #[8, 4]
-  let W0 := Tensor.setRequiresGrad (Tensor.detach (retractStiefel W0raw)) true
+  let W0 ← Tensor.setRequiresGrad (Tensor.detach (retractStiefel W0raw)) true
   let G ← Tensor.randn #[8, 4]
   let st := initParamState W0
   let cfg : Config := {
@@ -163,7 +163,7 @@ def testFixedPointDiagnosticsPath : IO Unit := do
 @[test]
 def testStrictToleranceRunsFullIterations : IO Unit := do
   let W0raw ← Tensor.randn #[8, 4]
-  let W0 := Tensor.setRequiresGrad (Tensor.detach (retractStiefel W0raw)) true
+  let W0 ← Tensor.setRequiresGrad (Tensor.detach (retractStiefel W0raw)) true
   let G ← Tensor.randn #[8, 4]
   let st := initParamState W0
   let cfg : Config := {

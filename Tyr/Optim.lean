@@ -210,20 +210,21 @@ def sgd [TensorStruct α] (lr : Float) : GradientTransformation α EmptyState :=
 /-- Apply gradient updates to parameters: p' = p + updates
 
     Handles detaching and re-enabling requires_grad for training. -/
-def apply_updates [TensorStruct α] (params : α) (updates : α) : α :=
-  TensorStruct.zipWith (fun p u =>
+def apply_updates [TensorStruct α] (params : α) (updates : α) : IO α :=
+  let updated := TensorStruct.zipWith (fun p u =>
     let p_d := Tensor.detach p
-    let p_new := Add.add p_d u
-    Tensor.setRequiresGrad p_new true
+    Add.add p_d u
   ) params updates
+  TensorStruct.mapM Tensor.parameter updated
 
 /-- Full optimizer step: transform gradients and apply to parameters
 
     Returns (new_params, new_state) -/
 def step [TensorStruct α] (opt : GradientTransformation α S) (params grads : α) (state : S)
-    : (α × S) :=
+    : IO (α × S) := do
   let (updates, newState) := opt.update params grads state
-  (apply_updates params updates, newState)
+  let params ← apply_updates params updates
+  pure (params, newState)
 
 /-! ## Schedule-Based Scaling
 

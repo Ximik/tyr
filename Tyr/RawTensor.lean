@@ -4,11 +4,11 @@ import Tyr.Basic
 Model code should use `torch.Tensor`; only typed adapters call this module. -/
 namespace torch.RawTensor
 
-@[extern "lean_torch_ones"] opaque ones (shape : Shape) (requiresGrad : Bool := false) (device : Device := .CPU) : RawTensor
+@[extern "lean_torch_ones"] opaque ones (shape : Shape) (requiresGrad : Bool := false) (device : Device := .CPU) (noGrad : requiresGrad = false := by decide) : RawTensor
 
 @[extern "lean_torch_randn"] opaque randn (shape : Shape) (requiresGrad : Bool := false) (device : Device := .CPU) : IO RawTensor
 
-@[extern "lean_torch_full"] opaque full (shape : Shape) (value : Float) (requiresGrad : Bool := false) (device : Device := .CPU) : RawTensor
+@[extern "lean_torch_full"] opaque full (shape : Shape) (value : Float) (requiresGrad : Bool := false) (device : Device := .CPU) (noGrad : requiresGrad = false := by decide) : RawTensor
 
 @[extern "lean_torch_full_int"] opaque fullInt (shape : Shape) (value : Int64) : RawTensor
 
@@ -121,7 +121,7 @@ The source shape is checked before conversion and never reshaped. -/
 @[extern "lean_torch_mean"] opaque mean (shape : Shape) (t : @& RawTensor) (dims : Option (Array UInt64)) (keepdim : Bool) : RawTensor
 
 /-- Return a tensor with the requested autograd flag, preserving other aliases. -/
-@[extern "lean_torch_set_requires_grad"] opaque setRequiresGrad (shape : Shape) (t : RawTensor) (requiresGrad : Bool) : RawTensor
+@[extern "lean_torch_set_requires_grad"] opaque setRequiresGrad (shape : Shape) (t : RawTensor) (requiresGrad : Bool) : IO RawTensor
 
 @[extern "lean_torch_affine3d"] opaque affine3d (batch seq inDim outDim : UInt64) (x weight bias : @& RawTensor) : RawTensor
 
@@ -177,7 +177,7 @@ namespace torch.RawTensor
 @[extern "lean_torch_uniform_like"] opaque uniformLike (shape : Shape) (reference : @& RawTensor)
     (lo hi : Float) : IO RawTensor
 
-@[extern "lean_torch_eye"] opaque eye (n : UInt64) (requiresGrad : Bool := false) : RawTensor
+@[extern "lean_torch_eye"] opaque eye (n : UInt64) (requiresGrad : Bool := false) (noGrad : requiresGrad = false := by decide) : RawTensor
 
 /-- Complete QR: returns (Q, R) with Q m×m and R m×n. -/
 @[extern "lean_torch_qr"] opaque qr (m n : UInt64) (t : @& RawTensor) : RawTensor × RawTensor
@@ -268,12 +268,6 @@ namespace torch.RawTensor
 /-- Extract an Int64 scalar. The shape argument is unread natively. -/
 @[extern "lean_torch_item_int"] opaque itemInt (shape : Shape) (t : @& RawTensor) : Int64
 
-/-- Enable/disable autograd graph construction globally. -/
-@[extern "lean_torch_set_grad_enabled"] opaque setGradEnabled (enabled : Bool) : IO Unit
-
-/-- Whether autograd graph construction is enabled. -/
-@[extern "lean_torch_is_grad_enabled"] opaque isGradEnabled : IO Bool
-
 /-- Elementwise logical negation of a Bool tensor. The shape argument is unread natively. -/
 @[extern "lean_torch_logical_not"] opaque logicalNot (shape : Shape) (t : @& RawTensor) : RawTensor
 
@@ -290,4 +284,12 @@ namespace torch.RawTensor
 @[extern "lean_torch_randint"] opaque randint (low high : Int64) (shape : Shape)
     (requiresGrad : Bool) (device : Device) : IO RawTensor
 
+end torch.RawTensor
+
+namespace torch.RawTensor
+/-- Differentiate a pure scalar function with private fresh leaves. The callback
+cannot export the temporary leaves; only detached derivatives are returned. -/
+@[extern "lean_torch_functional_grad"] opaque functionalGrad
+    (inputs : @& Array RawTensor) (f : Array RawTensor → RawTensor) :
+    Except String (Array RawTensor)
 end torch.RawTensor

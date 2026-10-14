@@ -109,7 +109,7 @@ def loadDiffusionParams (cfg : Config) (dir : String) : IO (DiffusionParams cfg)
     blocks := blocks
     output_head := output_head
   }
-  return TensorStruct.makeLeafParams model
+  TensorStruct.makeLeafParams model
 
 /-- Save checkpoint metadata -/
 def saveCheckpointMeta (m : DiffusionCheckpointMeta) (path : String) : IO Unit := do

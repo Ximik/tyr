@@ -31,10 +31,10 @@ def init (inDim outDim : UInt64) (withBias : Bool := true) :
     IO (Linear inDim outDim .Float32) := do
   let std := Float.sqrt (2.0 / inDim.toFloat)
   let w ← Tensor.randn #[outDim, inDim]
-  let weight := (w.mulScalar std).setRequiresGrad true
+  let weight ← (w.mulScalar std).parameter
   let bias ←
     if withBias then
-      pure (some ((Tensor.zeros #[outDim]).setRequiresGrad true))
+      pure (some (← (Tensor.zeros #[outDim]).parameter))
     else
       pure none
   pure { weight, bias }
@@ -68,8 +68,8 @@ structure RMSNorm (dim : UInt64) (d : DType)
 namespace RMSNorm
 
 /-- Initialize with unit weights (Float32). -/
-def init (dim : UInt64) (eps : Float := 1e-6) : RMSNorm dim .Float32 :=
-  { weight := (Tensor.ones #[dim]).setRequiresGrad true, eps }
+def init (dim : UInt64) (eps : Float := 1e-6) : IO (RMSNorm dim .Float32) := do
+  pure { weight := (← (Tensor.ones #[dim]).parameter), eps }
 
 /-! The runtime normalizes in Float32 for stability, so forward results are
 `promote Float32 d` (Float32 for f16/bf16 layers) — the dtype change is

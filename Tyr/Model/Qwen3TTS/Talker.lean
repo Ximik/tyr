@@ -73,7 +73,7 @@ def init (cfg : TalkerConfig) : IO (TalkerModel cfg) := do
       cfg.headDim cfg.intermediateSize cfg.rmsNormEps (.Unknown "dynamic")
     layers := layers.push layer
 
-  let norm := RMSNorm.init cfg.hiddenSize cfg.rmsNormEps (.Unknown "dynamic")
+  let norm ← RMSNorm.init cfg.hiddenSize cfg.rmsNormEps (.Unknown "dynamic")
   pure {
     codecEmbedding
     textEmbedding
@@ -193,7 +193,7 @@ def init (cfg : TalkerConfig) : IO (TalkerCodePredictor cfg) := do
       cfg.codePredictorConfig.rmsNormEps (.Unknown "dynamic")
     layers := layers.push layer
 
-  let norm := RMSNorm.init cfg.codePredictorConfig.hiddenSize cfg.codePredictorConfig.rmsNormEps (.Unknown "dynamic")
+  let norm ← RMSNorm.init cfg.codePredictorConfig.hiddenSize cfg.codePredictorConfig.rmsNormEps (.Unknown "dynamic")
 
   let mut lmHeads : Array (Tensor { shape := #[cfg.codePredictorConfig.vocabSize, cfg.codePredictorConfig.hiddenSize] }) := #[]
   for _ in [:numCodebooks] do
@@ -605,7 +605,12 @@ def streamCodes {batch seq : UInt64} (cfg : TalkerConfig)
     (subtalkerTopKsByGroup : Option (Array UInt64) := none)
     (subtalkerTopPsByGroup : Option (Array Float) := none)
     : IO (Array UInt64) :=
-  autograd.no_grad do
+  do
+    let m := TensorStruct.detach m
+    let talkerInputs := talkerInputs.detach
+    let trailingTextHidden : Option (Sigma fun trailingSeq => Tensor { shape := #[batch, trailingSeq, cfg.hiddenSize] }) :=
+      trailingTextHidden.map fun packed => ⟨packed.1, packed.2.detach⟩
+    let ttsPadEmbed := ttsPadEmbed.map Tensor.detach
     if maxFrames == 0 then
       return Array.replicate batch.toNat 0
 

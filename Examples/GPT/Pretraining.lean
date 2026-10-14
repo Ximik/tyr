@@ -134,7 +134,7 @@ def trainStep (cfg : torch.gpt.Config)
   let grads ← TensorStruct.grads params
 
   -- Update parameters with optimizer step
-  let (params', optState') := step opt params grads optState
+  let (params', optState') ← step opt params grads optState
 
   return (params', optState', lossVal)
 

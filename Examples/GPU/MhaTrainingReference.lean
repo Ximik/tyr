@@ -25,9 +25,9 @@ def oneTorchTrainStep
     (targetOut32 : MasterTensor)
     (lr : Float)
     : IO (MasterTensor × MasterTensor × MasterTensor × Tensor { shape := #[], dtype := .Float32 }) := do
-  let qLeaf := Tensor.setRequiresGrad (Tensor.detach qM) true
-  let kLeaf := Tensor.setRequiresGrad (Tensor.detach kM) true
-  let vLeaf := Tensor.setRequiresGrad (Tensor.detach vM) true
+  let qLeaf ← Tensor.setRequiresGrad (Tensor.detach qM) true
+  let kLeaf ← Tensor.setRequiresGrad (Tensor.detach kM) true
+  let vLeaf ← Tensor.setRequiresGrad (Tensor.detach vM) true
   let out : MasterTensor := Tensor.attentionGQA qLeaf kLeaf vLeaf 0.0 false
   let diff : MasterTensor := out - targetOut32
   let lossT : Tensor { shape := #[], dtype := .Float32 } := Tensor.Preserving.mulScalar (Tensor.meanAll (diff * diff)) 0.5

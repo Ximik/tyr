@@ -14,8 +14,8 @@ private def close {σ τ : StaticSpec} (x : Tensor σ) (y : Tensor τ) (tol : Fl
       s!"VAE mismatch at {i}: {xs[i]!} vs {ys[i]!}"
 
 @[test] def testVAEGroupNormAndGradient : IO Unit := do
-  let x := Tensor.setRequiresGrad ((Tensor.fromFloatArray #[1, 2, 3, 4, 5, 6, 7, 8]).reshapeChecked #[1, 2, 2, 2]).forgetDType true
-  let gn := GroupNormParams.init 2 2
+  let x ← Tensor.setRequiresGrad ((Tensor.fromFloatArray #[1, 2, 3, 4, 5, 6, 7, 8]).reshapeChecked #[1, 2, 2, 2]).forgetDType true
+  let gn ← GroupNormParams.init 2 2
   let y := gn.forward x
   let expected := (Tensor.fromFloatArray #[-1.34164025, -0.44721342, 0.44721342, 1.34164025,
     -1.34164025, -0.44721342, 0.44721342, 1.34164025]).reshapeChecked #[1, 2, 2, 2]

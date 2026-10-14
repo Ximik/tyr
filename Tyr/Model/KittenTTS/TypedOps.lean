@@ -26,8 +26,9 @@ def uniformTensor (shape : Shape) (lo hi : Float) : IO (Tensor { shape := shape,
   Tensor.uniformLike (Tensor.zeros shape) lo hi
 
 def randTensor (shape : Shape) (requiresGrad : Bool := false) (device : Device := .CPU) :
-    IO (Tensor { shape := shape, dtype := .Float32 }) :=
-  Tensor.uniformLike (Tensor.zeros shape requiresGrad device)
+    IO (Tensor { shape := shape, dtype := .Float32 }) := do
+  let sample ← Tensor.uniformLike (Tensor.zeros shape false device)
+  if requiresGrad then sample.parameter else pure sample
 
 def leakyRelu {s : Shape} (x : Tensor { shape := s, dtype := .Float32 }) (slope : Float := 0.01) : Tensor { shape := s, dtype := .Float32 } :=
   checked (RawTensor.leakyRelu s x.raw slope)

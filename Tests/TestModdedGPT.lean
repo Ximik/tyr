@@ -136,7 +136,7 @@ def testSchedules : IO Unit := do
 def testNorMuon : IO Unit := do
   -- Create a parameter and gradient
   let param ← Tensor.randn #[64, 64] false
-  let param := Tensor.setRequiresGrad param true
+  let param ← Tensor.setRequiresGrad param true
   let grad ← Tensor.randn #[64, 64] false
 
   -- Initialize state
@@ -157,7 +157,7 @@ def testNorMuon : IO Unit := do
 def testDistAdam : IO Unit := do
   -- Create a parameter and gradient
   let param ← Tensor.randn #[128, 64] false
-  let param := Tensor.setRequiresGrad param true
+  let param ← Tensor.setRequiresGrad param true
   let grad ← Tensor.randn #[128, 64] false
 
   -- Initialize state

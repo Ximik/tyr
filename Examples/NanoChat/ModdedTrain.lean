@@ -33,7 +33,7 @@ open torch.Optim
 
 private def moveToDevice [TensorStruct α] (x : α) (device : Device) : IO α := do
   let moved ← TensorStruct.mapM (fun t => pure (t.to device)) x
-  pure (TensorStruct.makeLeafParams moved)
+  TensorStruct.makeLeafParams moved
 
 private def moveYarnToDevice {headDim maxSeqLen : UInt64}
     (yarn : YarnRotary headDim maxSeqLen) (device : Device) : YarnRotary headDim maxSeqLen :=
@@ -320,7 +320,7 @@ def trainStep {cfg : moddedGpt.Config} {batch seq : UInt64}
   let startTime ← IO.monoMsNow
 
   -- Ensure parameters are trainable leaves before backprop.
-  let params := TensorStruct.makeLeafParams params
+  let params ← TensorStruct.makeLeafParams params
   TensorStruct.zeroGrads params
 
   -- Forward pass (window pattern is in cfg)
@@ -363,7 +363,7 @@ def trainStep {cfg : moddedGpt.Config} {batch seq : UInt64}
   let opt := Optim.adamw (lr := lr) (weight_decay := optState.weightDecay)
 
   -- Apply optimizer step
-  let (newParams, newAdamState) := Optim.step opt params grads optState.adamState
+  let (newParams, newAdamState) ← Optim.step opt params grads optState.adamState
 
   let endTime ← IO.monoMsNow
   let timeMs := (endTime - startTime).toFloat
@@ -988,7 +988,7 @@ def trainStepDistributedAccum {cfg : moddedGpt.Config} {batch seq : UInt64}
   let startTime ← IO.monoMsNow
   let isDistributed ← dist.isInitialized
   let worldSize ← if isDistributed then dist.getWorldSize else pure 1
-  let params := TensorStruct.makeLeafParams params
+  let params ← TensorStruct.makeLeafParams params
   TensorStruct.zeroGrads params
   let microCount := microBatches.size.toUInt64
   let mut totalLoss := 0.0
@@ -1230,7 +1230,7 @@ def trainStepDistributedAccum {cfg : moddedGpt.Config} {batch seq : UInt64}
     smearGate := smearGateState'
     blocks := newBlockStates
   }
-  let newParams := TensorStruct.makeLeafParams newParams
+  let newParams ← TensorStruct.makeLeafParams newParams
   let endTime ← IO.monoMsNow
   let timeMs := (endTime - startTime).toFloat
   let result : StepResult := {
@@ -1329,9 +1329,9 @@ def syncParameters {cfg : moddedGpt.Config} (params : ModdedGPTParams cfg) : IO 
   if isDistributed then
     let syncedParams ← dist.broadcastParams params
     dist.barrier
-    return TensorStruct.makeLeafParams syncedParams
+    TensorStruct.makeLeafParams syncedParams
   else
-    return TensorStruct.makeLeafParams params
+    TensorStruct.makeLeafParams params
 
 /-- Read gradient snapshots and average them across initialized ranks.
     The returned tree is passed directly to clipping and the optimizer. -/
@@ -1376,7 +1376,7 @@ def trainStepDistributed {cfg : moddedGpt.Config} {batch seq : UInt64}
   let worldSize ← if isDistributed then dist.getWorldSize else pure 1
 
   -- Ensure parameters are trainable leaves before backprop.
-  let params := TensorStruct.makeLeafParams params
+  let params ← TensorStruct.makeLeafParams params
   TensorStruct.zeroGrads params
 
   -- Forward pass (window pattern is in cfg)
@@ -1401,7 +1401,7 @@ def trainStepDistributed {cfg : moddedGpt.Config} {batch seq : UInt64}
   let opt := Optim.adamw (lr := lr) (weight_decay := optState.weightDecay)
 
   -- Apply optimizer step
-  let (newParams, newAdamState) := Optim.step opt params grads optState.adamState
+  let (newParams, newAdamState) ← Optim.step opt params grads optState.adamState
 
   let endTime ← IO.monoMsNow
   let timeMs := (endTime - startTime).toFloat

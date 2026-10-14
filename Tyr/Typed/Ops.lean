@@ -51,16 +51,16 @@ the runtime `device` argument places the tensor, the policy only constrains
 which placements the type admits. -/
 
 def zeros (shape : Shape) (requiresGrad : Bool := false)
-    (device : Device := Device.CPU) : Tensor { shape, dtype := .Float32 } :=
-  checkedResult "zeros" (Tensor.ofRaw (RawTensor.zeros shape requiresGrad device))
+    (device : Device := Device.CPU) (noGrad : requiresGrad = false := by decide) : Tensor { shape, dtype := .Float32 } :=
+  checkedResult "zeros" (Tensor.ofRaw (RawTensor.zeros shape requiresGrad device noGrad))
 
 def ones (shape : Shape) (requiresGrad : Bool := false)
-    (device : Device := Device.CPU) : Tensor { shape, dtype := .Float32 } :=
-  checkedResult "ones" (Tensor.ofRaw (RawTensor.ones shape requiresGrad device))
+    (device : Device := Device.CPU) (noGrad : requiresGrad = false := by decide) : Tensor { shape, dtype := .Float32 } :=
+  checkedResult "ones" (Tensor.ofRaw (RawTensor.ones shape requiresGrad device noGrad))
 
 def full (shape : Shape) (value : Float) (requiresGrad : Bool := false)
-    (device : Device := Device.CPU) : Tensor { shape, dtype := .Float32 } :=
-  checkedResult "full" (Tensor.ofRaw (RawTensor.full shape value requiresGrad device))
+    (device : Device := Device.CPU) (noGrad : requiresGrad = false := by decide) : Tensor { shape, dtype := .Float32 } :=
+  checkedResult "full" (Tensor.ofRaw (RawTensor.full shape value requiresGrad device noGrad))
 
 def fullInt (shape : Shape) (value : Int64) : Tensor { shape, dtype := .Int64 } :=
   checkedResult "fullInt" (Tensor.ofRaw (RawTensor.fullInt shape value))
@@ -648,15 +648,6 @@ def crossEntropyNone {n c : UInt64} {d : DType} {dev : DevicePolicy}
 def itemInt {d : DType} {dev : DevicePolicy} (t : Tensor ⟨#[], d, dev⟩) : Int64 :=
   RawTensor.itemInt #[] t.raw
 
-/-- Run an IO action with autograd graph construction disabled. -/
-def noGrad {α : Type} (action : IO α) : IO α := do
-  let wasEnabled ← RawTensor.isGradEnabled
-  RawTensor.setGradEnabled false
-  try
-    action
-  finally
-    RawTensor.setGradEnabled wasEnabled
-
 /-- Select between two same-spec tensors elementwise by a Bool condition. -/
 def whereSelect {s : Shape} {d : DType} {dev : DevicePolicy}
     (condition : Tensor ⟨s, .Bool, dev⟩) (x y : Tensor ⟨s, d, dev⟩) :
@@ -782,12 +773,19 @@ def div {σ : StaticSpec} (lhs rhs : Tensor σ) : Tensor σ :=
 
 end Preserving
 
-/-- Return a tensor with the requested autograd flag, preserving other aliases. -/
+/-- Change the autograd flag without changing other aliases. Creating mutable
+    gradient identity is effectful, even when the tensor values are equal. -/
 def setRequiresGrad {σ : StaticSpec} (t : Tensor σ) (requiresGrad : Bool) :
-    Tensor σ :=
+    IO (Tensor σ) := do
   let dtype := t.raw.dtype
   let device := t.raw.device
-  checkedUpdate dtype device (RawTensor.setRequiresGrad σ.shape t.raw requiresGrad)
+  let raw ← RawTensor.setRequiresGrad σ.shape t.raw requiresGrad
+  pure (checkedUpdate dtype device raw)
+
+/-- Create an independent trainable leaf. Detaching first ensures fresh gradient
+    identity even when the source is already a parameter. -/
+def parameter {σ : StaticSpec} (t : Tensor σ) : IO (Tensor σ) :=
+  setRequiresGrad (detach t) true
 
 /-- Fused affine for 3D input: `x @ Wᵀ + b`. -/
 def affine3d {batch seq inDim outDim : UInt64} {d : DType} {dev : DevicePolicy}

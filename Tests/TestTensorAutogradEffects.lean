@@ -10,7 +10,7 @@ open torch
 @[test]
 def testGradientSnapshotsSurviveAccumulationAndZeroing : IO Unit := do
   let fresh ← data.cloneInferenceIO (Tensor.fromFloatArray #[2.0, 3.0])
-  let parameter := fresh.setRequiresGrad true
+  let parameter ← fresh.setRequiresGrad true
   let missing ← parameter.gradOf
   LeanTest.assertEqual (← missing.toFloatArray) #[0.0, 0.0]
   Tensor.backwardLoss (Tensor.sumAll (parameter * parameter))
@@ -35,7 +35,7 @@ def testGradientSnapshotsSurviveAccumulationAndZeroing : IO Unit := do
 @[test]
 def testGradientSnapshotsSurviveClipping : IO Unit := do
   let fresh ← data.cloneInferenceIO (Tensor.fromFloatArray #[3.0, 4.0])
-  let parameter := fresh.setRequiresGrad true
+  let parameter ← fresh.setRequiresGrad true
   Tensor.backwardLoss (Tensor.sumAll (parameter * parameter))
   let before ← parameter.gradOf
   let norm ← parameter.clipGradNorm 1.0
@@ -47,11 +47,11 @@ def testGradientSnapshotsSurviveClipping : IO Unit := do
 @[test]
 def testGradientTreeSnapshotsAndAliasedFlagUpdates : IO Unit := do
   let source ← data.cloneInferenceIO (Tensor.fromFloatArray #[2.0, 3.0])
-  let parameter := source.setRequiresGrad true
+  let parameter ← source.setRequiresGrad true
   LeanTest.assertTrue (!source.requiresGrad) "Flag updates must preserve the input alias"
   LeanTest.assertTrue (parameter.requiresGrad && parameter.isLeaf)
   let otherFresh ← data.cloneInferenceIO (Tensor.fromFloatArray #[5.0, 7.0])
-  let other := otherFresh.setRequiresGrad true
+  let other ← otherFresh.setRequiresGrad true
   let model := (parameter, other)
   Tensor.backwardLoss (Tensor.sumAll (parameter * parameter) + Tensor.sumAll other)
   let gradients ← TensorStruct.grads model

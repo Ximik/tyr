@@ -46,14 +46,17 @@ private def close {σ τ : StaticSpec} (x : Tensor σ) (y : Tensor τ) (tol : Fl
     Float.cos 1, Float.cos 0.01, Float.sin 1, Float.sin 0.01, 0]
   close y (expected.reshapeChecked #[2, 5])
 
-@[test] def testFluxForwardAndDenoiseDTypes : IO Unit := Tensor.noGrad do
+@[test] def testFluxForwardAndDenoiseDTypes : IO Unit := do
   let initial ← FluxModel.init cfg
+  let initial := TensorStruct.detach initial
   let imageIds ← computeImagePositionIds 2 3
   let textIds ← computeTextPositionIds 3
   let imageIds := Tensor.expand imageIds #[2, 6, 4]
   let textIds := Tensor.expand textIds #[2, 3, 4]
   let image ← randomWeight #[2, 6, 4]
+  let image := image.detach
   let text ← randomWeight #[2, 3, 6]
+  let text := text.detach
   for bf16 in #[false, true] do
     let model ← if bf16 then TensorStruct.castDType .BFloat16 initial else pure initial
     let image := Tensor.castLike model.img_in image

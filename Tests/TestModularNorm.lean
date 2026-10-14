@@ -85,14 +85,14 @@ def testLinearNormalizationReducesNorm : IO Unit := do
 @[test]
 def testLayerNormNormPositive : IO Unit := do
   -- LayerNorm norm should be positive (initialized with ones/zeros)
-  let ln := torch.LayerNorm.init 64
+  let ln ← torch.LayerNorm.init 64
   let n := NormedModule.norm ln
   LeanTest.assertTrue (n > 0.0) s!"LayerNorm norm should be positive, got {n}"
 
 @[test]
 def testLayerNormNuIsOne : IO Unit := do
   -- LayerNorm should have nu = 1 (approximately preserves scale)
-  let ln := torch.LayerNorm.init 64
+  let ln ← torch.LayerNorm.init 64
   let ν := NormedModule.nu ln
   LeanTest.assertTrue (ν == 1.0) s!"LayerNorm nu should be 1.0, got {ν}"
 
@@ -202,7 +202,7 @@ example (_weight : torch.Tensor { shape := #[2, 3], dtype := .Float32 }) : True 
 def testIndexedEmbeddingLookupGradientAndNorms : IO Unit := do
   let weight : torch.Tensor ⟨#[3, 2], .Float64, .exact .CPU⟩ :=
     torch.Tensor.onesLike (torch.Tensor.zerosFor _)
-  let weight := (torch.Tensor.Preserving.mulScalar weight 2.0).setRequiresGrad true
+  let weight ← (torch.Tensor.Preserving.mulScalar weight 2.0).setRequiresGrad true
   let emb : Embedding 3 2 .Float64 (.exact .CPU) := ⟨weight⟩
   let tokens : torch.Tensor ⟨#[2, 3], .Int64, .exact .CPU⟩ :=
     torch.Tensor.onesLike (torch.Tensor.zerosFor _)

@@ -112,7 +112,7 @@ def allReduce {σ : StaticSpec} (tensor : Tensor σ) (op : ReduceOp := .sum) : I
   let requiresGrad := tensor.requiresGrad
   let result ← data.cloneInferenceIO tensor
   let _ ← allReduceImpl result.raw op.toUInt8 0
-  return result.setRequiresGrad requiresGrad
+  result.setRequiresGrad requiresGrad
 
 /-- Launch all-reduce on an independent buffer. Execute the returned action once
     to await completion and obtain the result; no pending tensor is exposed. -/
@@ -123,7 +123,7 @@ def allReduceAsync {σ : StaticSpec} (tensor : Tensor σ) (op : ReduceOp := .sum
   let id ← allReduceImpl result.raw op.toUInt8 1
   return do
     wait ⟨id⟩
-    pure (result.setRequiresGrad requiresGrad)
+    result.setRequiresGrad requiresGrad
 
 /-- Broadcast tensor from source rank to all processes (in-place).
 
@@ -140,7 +140,7 @@ def broadcast {σ : StaticSpec} (tensor : Tensor σ) (srcRank : UInt64) : IO (Te
   let requiresGrad := tensor.requiresGrad
   let result ← data.cloneInferenceIO tensor
   broadcastImpl result.raw srcRank
-  pure (result.setRequiresGrad requiresGrad)
+  result.setRequiresGrad requiresGrad
 
 /-- Reduce-scatter: reduce tensors and scatter results to all processes.
 
@@ -191,7 +191,7 @@ def reduceScatterList {σ : StaticSpec} (output : Tensor σ) (inputs : Array (Te
   let requiresGrad := output.requiresGrad
   let result ← data.cloneInferenceIO output
   reduceScatterListImpl result.raw (inputs.map Tensor.toTensor) op.toUInt8
-  pure (result.setRequiresGrad requiresGrad)
+  result.setRequiresGrad requiresGrad
 
 /-- All-gather: gather tensors from all processes to all processes.
     The output buffer (leading axis = worldSize × input's) is written in place.
@@ -227,7 +227,7 @@ def allGatherList {σ : StaticSpec} (outputs : Array (Tensor σ)) (input : Tenso
   let requiresGrad := outputs.map Tensor.requiresGrad
   let results ← outputs.mapM data.cloneInferenceIO
   allGatherListImpl (results.map Tensor.toTensor) input.raw
-  pure (results.mapIdx fun i result => result.setRequiresGrad (requiresGrad[i]?.getD false))
+  results.mapIdxM fun i result => result.setRequiresGrad (requiresGrad[i]?.getD false)
 
 /-! ## Async Operation Handling -/
 
@@ -384,8 +384,10 @@ def allReduceGrads {α : Type} [TensorStruct α] (grads : α) (op : ReduceOp := 
 def allReduceGradsAsync {α : Type} [TensorStruct α] (grads : α) (op : ReduceOp := .avg)
     : IO (IO α) := do
   let handlesRef ← IO.mkRef #[]
+  let flagsRef ← IO.mkRef #[]
   try
     let result ← TensorStruct.mapM (fun t => do
+      flagsRef.modify (·.push t.requiresGrad)
       let output ← data.cloneInferenceIO t
       let id ← allReduceImpl output.raw op.toUInt8 1
       handlesRef.modify (·.push (WorkHandle.mk id))
@@ -394,8 +396,12 @@ def allReduceGradsAsync {α : Type} [TensorStruct α] (grads : α) (op : ReduceO
     let handles ← handlesRef.get
     return do
       waitAll handles
-      pure (TensorStruct.zipWith (fun original output =>
-        output.setRequiresGrad original.requiresGrad) grads result)
+      let flags ← flagsRef.get
+      let restore : StateT Nat IO α := TensorStruct.mapM (fun output => do
+        let index ← get
+        set (index + 1)
+        output.setRequiresGrad (flags[index]?.getD false)) result
+      return (← restore.run 0).1
   catch error =>
     -- Drain any operations launched before a later leaf failed.
     for handle in (← handlesRef.get) do

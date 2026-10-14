@@ -22,7 +22,7 @@ def testTypedDefaultsAndPlacement : IO Unit := do
     | .ok () => pure ()
     | .error message => LeanTest.fail s!"CPU move lost {dtype} contract: {message}"
     LeanTest.assertTrue (!moved.requiresGrad) "Defaults should not track gradients."
-  let scalar := (Tensor.full #[] 2.5).setRequiresGrad true
+  let scalar ← (Tensor.full #[] 2.5).setRequiresGrad true
   LeanTest.assertTrue scalar.requiresGrad "Typed autograd metadata should reflect requires_grad."
   LeanTest.assertEqual scalar.item 2.5 "Typed scalar extraction should preserve the value."
 
@@ -348,7 +348,7 @@ def testTypedLayers : IO Unit := do
   let linNb ← Typed.Linear.init 3 4 (withBias := false)
   assertValid (linNb.forward3d x3) "typed Linear forward3d (no bias)"
   -- RMSNorm: normalizing all-ones with unit weights gives ~1.0 everywhere
-  let rn := Typed.RMSNorm.init 3
+  let rn ← Typed.RMSNorm.init 3
   let y := rn.forward3d x3
   assertValid y "typed RMSNorm forward3d"
   let vals ← y.toFloatArray
@@ -399,7 +399,7 @@ def testTypedStackArrayOwnership : IO Unit := do
 
 @[test]
 def testTypedExplicitCotangentBackward : IO Unit := do
-  let input := (Tensor.fromFloatArray #[2.0, 3.0]).setRequiresGrad true
+  let input ← (Tensor.fromFloatArray #[2.0, 3.0]).setRequiresGrad true
   let output := Tensor.mul input input
   LeanTest.assertTrue (Tensor.hasGradFn output)
     "Squared differentiable input should retain its graph"

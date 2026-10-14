@@ -138,9 +138,9 @@ private def sdpaFwdPortable {seq : UInt64}
 
 private def sdpaBwdPortable {seq : UInt64}
     (q k v dO : BF16 seq) (isCausal : Bool) : IO (F32 seq × F32 seq × F32 seq) := do
-  let qLeaf := Tensor.setRequiresGrad (Tensor.detach q) true
-  let kLeaf := Tensor.setRequiresGrad (Tensor.detach k) true
-  let vLeaf := Tensor.setRequiresGrad (Tensor.detach v) true
+  let qLeaf ← Tensor.parameter q
+  let kLeaf ← Tensor.parameter k
+  let vLeaf ← Tensor.parameter v
   let outRef : BF16 seq :=
     Tensor.attention qLeaf kLeaf vLeaf 0.0 isCausal
   Tensor.backward outRef dO

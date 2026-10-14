@@ -179,7 +179,7 @@ def CastedLinear.init (inDim outDim : UInt64) (scale : Float := 0.02)
   let weight ← Tensor.randn #[outDim, inDim] false
   let scaledWeight := Tensor.mulScalar weight scale
   return {
-    weight := Tensor.setRequiresGrad (Tensor.detach scaledWeight) true
+    weight := ← Tensor.parameter (Tensor.detach scaledWeight)
     useFp8 := false
     lrMul := lrMul
     wdMul := wdMul
@@ -229,10 +229,10 @@ def CausalSelfAttention.init (dim headDim numHeads : UInt64)
   -- Output projection initialized to zero (modded-nanogpt style)
   let wO := Tensor.zeros #[dim, numHeads * headDim]
   return {
-    wQ := Tensor.setRequiresGrad (Tensor.detach wQ) true
-    wK := Tensor.setRequiresGrad (Tensor.detach wK) true
-    wV := Tensor.setRequiresGrad (Tensor.detach wV) true
-    wO := Tensor.setRequiresGrad (Tensor.detach wO) true
+    wQ := ← Tensor.parameter (Tensor.detach wQ)
+    wK := ← Tensor.parameter (Tensor.detach wK)
+    wV := ← Tensor.parameter (Tensor.detach wV)
+    wO := ← Tensor.parameter (Tensor.detach wO)
   }
 
 /-- Functional RMSNorm (no learnable parameters) -/
@@ -329,8 +329,8 @@ def MLP.init (dim : UInt64) : IO (MLP dim) := do
   -- c_proj initialized to zero (modded-nanogpt style)
   let cProj := Tensor.zeros #[4 * dim, dim]
   return {
-    cFc := Tensor.setRequiresGrad (Tensor.detach (Tensor.mulScalar cFc 0.02)) true
-    cProj := Tensor.setRequiresGrad (Tensor.detach cProj) true
+    cFc := ← Tensor.parameter (Tensor.detach (Tensor.mulScalar cFc 0.02))
+    cProj := ← Tensor.parameter (Tensor.detach cProj)
   }
 
 /-- Forward pass for MLP with ReLU^2 activation -/
@@ -397,9 +397,10 @@ structure Scalars (nLayer : UInt64) where
   deriving Repr, TensorStruct
 
 /-- Initialize scalars with modded-nanogpt defaults -/
-def Scalars.init (nLayer : UInt64) : Scalars nLayer := {
-  values := Tensor.setRequiresGrad (Tensor.mulScalar (Tensor.ones #[nLayer * 4 + 8]) 1.1) true
-}
+def Scalars.init (nLayer : UInt64) : IO (Scalars nLayer) := do
+  pure {
+    values := ← Tensor.parameter (Tensor.mulScalar (Tensor.ones #[nLayer * 4 + 8]) 1.1)
+  }
 
 /-! ## Scalar/Value Helper Utilities -/
 
@@ -459,7 +460,7 @@ structure ModdedGPTParams (cfg : Config) where
 def ModdedGPTParams.init (cfg : Config) : IO (ModdedGPTParams cfg) := do
   -- Token embeddings
   let embed ← Tensor.randn #[cfg.vocabSize, cfg.modelDim] false
-  let embed := Tensor.setRequiresGrad (Tensor.detach (Tensor.mulScalar embed 0.02)) true
+  let embed ← Tensor.setRequiresGrad (Tensor.detach (Tensor.mulScalar embed 0.02)) true
 
   -- Smear gate
   let smearGate ← CastedLinear.init 12 1 0.02
@@ -468,7 +469,8 @@ def ModdedGPTParams.init (cfg : Config) : IO (ModdedGPTParams cfg) := do
   let mut valueEmbeds := #[]
   for _ in [:cfg.numValueEmbeds] do
     let ve ← Tensor.randn #[cfg.vocabSize, cfg.modelDim] false
-    valueEmbeds := valueEmbeds.push (Tensor.setRequiresGrad (Tensor.detach (Tensor.mulScalar ve 0.02)) true)
+    let ve ← Tensor.parameter (Tensor.mulScalar ve 0.02)
+    valueEmbeds := valueEmbeds.push ve
 
   -- Transformer blocks
   let mut blocks := #[]
@@ -482,7 +484,7 @@ def ModdedGPTParams.init (cfg : Config) : IO (ModdedGPTParams cfg) := do
   let lmHead ← CastedLinear.init cfg.modelDim cfg.vocabSize 0.02
 
   -- Scalars
-  let scalars := Scalars.init cfg.nLayer
+  let scalars ← Scalars.init cfg.nLayer
 
   return {
     embed := embed

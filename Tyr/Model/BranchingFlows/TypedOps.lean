@@ -4,8 +4,8 @@ import Tyr.TensorStruct
 
 namespace torch.branching
 
-def zerosDynamic (shape : Shape) (requiresGrad : Bool := false) (device : Device := .CPU) : Tensor { shape := shape } :=
-  (Tensor.zeros shape requiresGrad device).forgetDType
+def zerosDynamic (shape : Shape) (requiresGrad : Bool := false) (device : Device := .CPU) (noGrad : requiresGrad = false := by decide) : Tensor { shape := shape } :=
+  (Tensor.zeros shape requiresGrad device noGrad).forgetDType
 def onesDynamic (shape : Shape) : Tensor { shape := shape } := (Tensor.ones shape).forgetDType
 def randnDynamic (shape : Shape) : IO (Tensor { shape := shape }) := do
   return (← Tensor.randn shape).forgetDType
@@ -64,8 +64,8 @@ def attentionBias {b h s d : UInt64} (q k v : Tensor { shape := #[b, h, s, d] })
     (bias : Tensor { shape := #[b, h, s, s] }) : Tensor { shape := #[b, h, s, d] } :=
   q.checkedReplacement (RawTensor.branchingAttentionBias b h s d q.raw k.raw v.raw bias.raw 0.0 false)
 
-def fullDynamic (shape : Shape) (value : Float) (requiresGrad : Bool := false) (device : Device := .CPU) : Tensor { shape := shape } :=
-  zerosDynamic shape requiresGrad device + value
+def fullDynamic (shape : Shape) (value : Float) (requiresGrad : Bool := false) (device : Device := .CPU) (noGrad : requiresGrad = false := by decide) : Tensor { shape := shape } :=
+  zerosDynamic shape requiresGrad device noGrad + value
 
 /-- Recast a tree only when each leaf's static dtype permits BF16. -/
 def castTreeBFloat16 {α : Type} [TensorStruct α] (params : α) : IO α :=

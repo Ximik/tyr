@@ -142,15 +142,15 @@ def init (cfg : ThinkerConfig) : IO (Qwen3ASRThinkerForConditionalGeneration cfg
   let textModel ← qwen.Qwen3Model.init (TextQwenConfig cfg) (.Unknown "dynamic")
   let audioProjectionWeight ←
     if h : cfg.audioConfig.outputDim = cfg.textConfig.hiddenSize then
-      let eye : Tensor { shape := #[cfg.textConfig.hiddenSize, cfg.textConfig.hiddenSize] } :=
-        Tensor.setRequiresGrad ((Tensor.eye cfg.textConfig.hiddenSize).forgetDType) true
+      let eye : Tensor { shape := #[cfg.textConfig.hiddenSize, cfg.textConfig.hiddenSize] } ←
+        Tensor.parameter ((Tensor.eye cfg.textConfig.hiddenSize).forgetDType)
       let eye' : Tensor { shape := #[cfg.textConfig.hiddenSize, cfg.audioConfig.outputDim] } := by
         simpa [h] using eye
       pure eye'
     else
       throw <| IO.userError
         s!"Qwen3-ASR expects audio output dim == text hidden dim, got {cfg.audioConfig.outputDim} and {cfg.textConfig.hiddenSize}"
-  let audioProjectionBias := initBias #[cfg.textConfig.hiddenSize] (.Unknown "dynamic")
+  let audioProjectionBias ← initBias #[cfg.textConfig.hiddenSize] (.Unknown "dynamic")
   let lmHead ← initWeight #[ThinkerLmVocabSize cfg, cfg.textConfig.hiddenSize] cfg.textConfig.hiddenSize (.Unknown "dynamic")
   pure { audioTower, textModel, audioProjectionWeight, audioProjectionBias, lmHead }
 

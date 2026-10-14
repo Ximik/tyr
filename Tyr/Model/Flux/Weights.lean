@@ -18,7 +18,7 @@ open torch.Log
 def loadRMSNormFlux2 (path : String) (name : String) (dim : UInt64)
     : IO (RMSNorm dim (.Unknown "dynamic")) := do
   let weight ← safetensors.loadTensorCandidates path #[s!"{name}.scale"] #[dim]
-  pure { weight := Tensor.setRequiresGrad weight false, eps := ⟨1e-6⟩ }
+  pure { weight := Tensor.detach weight, eps := ⟨1e-6⟩ }
 
 /-- Load QKNorm weights from Flux2 format -/
 def loadQKNormFlux2 (path : String) (name : String) (head_dim : UInt64)
@@ -32,7 +32,7 @@ def loadModulationFlux2 (path : String) (name : String) (hidden_size : UInt64) (
     : IO (Modulation hidden_size isDouble) := do
   let outDim := if isDouble then 6 * hidden_size else 3 * hidden_size
   let lin ← safetensors.loadTensorCandidates path #[s!"{name}.lin.weight"] #[outDim, hidden_size]
-  pure { lin := Tensor.setRequiresGrad lin false }
+  pure { lin := Tensor.detach lin }
 
 /-- Load SelfAttention weights from Flux2 format -/
 def loadSelfAttentionFlux2 (path : String) (name : String)
@@ -42,9 +42,9 @@ def loadSelfAttentionFlux2 (path : String) (name : String)
   let norm ← loadQKNormFlux2 path s!"{name}.norm" head_dim
   let proj ← safetensors.loadTensorCandidates path #[s!"{name}.proj.weight"] #[hidden_size, num_heads * head_dim]
   pure {
-    qkv := Tensor.setRequiresGrad qkv false
+    qkv := Tensor.detach qkv
     norm
-    proj := Tensor.setRequiresGrad proj false
+    proj := Tensor.detach proj
   }
 
 /-- Load SwiGLU MLP weights from Flux2 format (indexed layers: .0, .2) -/
@@ -55,8 +55,8 @@ def loadSwiGLUMLPFlux2 (path : String) (name : String)
   let w1 ← safetensors.loadTensorCandidates path #[s!"{name}.0.weight"] #[mlp_hidden * 2, hidden_size]
   let w2 ← safetensors.loadTensorCandidates path #[s!"{name}.2.weight"] #[hidden_size, mlp_hidden]
   pure {
-    w1 := Tensor.setRequiresGrad w1 false
-    w2 := Tensor.setRequiresGrad w2 false
+    w1 := Tensor.detach w1
+    w2 := Tensor.detach w2
   }
 
 /-- Load DoubleStreamBlock weights from Flux2 format.
@@ -75,10 +75,10 @@ def loadDoubleStreamBlockFlux2 (path : String) (name : String) (cfg : FluxConfig
   let txt_mlp ← loadSwiGLUMLPFlux2 path s!"{name}.txt_mlp" cfg.hidden_size mlp_hidden
 
   -- Flux2 uses elementwise_affine=False LayerNorms, create with ones
-  let img_norm1 := initLayerNorm cfg.hidden_size 1e-6 false
-  let img_norm2 := initLayerNorm cfg.hidden_size 1e-6 false
-  let txt_norm1 := initLayerNorm cfg.hidden_size 1e-6 false
-  let txt_norm2 := initLayerNorm cfg.hidden_size 1e-6 false
+  let img_norm1 ← initLayerNorm cfg.hidden_size 1e-6 false
+  let img_norm2 ← initLayerNorm cfg.hidden_size 1e-6 false
+  let txt_norm1 ← initLayerNorm cfg.hidden_size 1e-6 false
+  let txt_norm2 ← initLayerNorm cfg.hidden_size 1e-6 false
 
   pure {
     img_norm1, img_attn, img_norm2, img_mlp
@@ -97,12 +97,12 @@ def loadSingleStreamBlockFlux2 (path : String) (name : String) (cfg : FluxConfig
   let norm ← loadQKNormFlux2 path s!"{name}.norm" cfg.head_dim
 
   -- Flux2 uses elementwise_affine=False pre_norm
-  let pre_norm := initLayerNorm cfg.hidden_size 1e-6 false
+  let pre_norm ← initLayerNorm cfg.hidden_size 1e-6 false
 
   pure {
     pre_norm
-    linear1 := Tensor.setRequiresGrad linear1 false
-    linear2 := Tensor.setRequiresGrad linear2 false
+    linear1 := Tensor.detach linear1
+    linear2 := Tensor.detach linear2
     norm
   }
 
@@ -112,8 +112,8 @@ def loadMLPEmbedder (path : String) (name : String) (in_dim hidden_dim : UInt64)
   let in_layer ← safetensors.loadTensorCandidates path #[s!"{name}.in_layer.weight"] #[hidden_dim, in_dim]
   let out_layer ← safetensors.loadTensorCandidates path #[s!"{name}.out_layer.weight"] #[hidden_dim, hidden_dim]
   pure {
-    in_layer := Tensor.setRequiresGrad in_layer false
-    out_layer := Tensor.setRequiresGrad out_layer false
+    in_layer := Tensor.detach in_layer
+    out_layer := Tensor.detach out_layer
   }
 
 /-- Load full Flux model from SafeTensors -/
@@ -151,15 +151,15 @@ def loadFluxModel (path : String) (cfg : FluxConfig := FluxConfig.klein4B)
   log.onInfo s!"  Loaded {cfg.num_single_layers} single blocks"
 
   -- Final layer (Flux2 uses elementwise_affine=False for norm)
-  let final_norm := initLayerNorm cfg.hidden_size 1e-6 false
+  let final_norm ← initLayerNorm cfg.hidden_size 1e-6 false
   let final_linear ← safetensors.loadTensorCandidates path #["final_layer.linear.weight"] #[cfg.in_channels, cfg.hidden_size]
   let final_mod ← safetensors.loadTensorCandidates path #["final_layer.adaLN_modulation.1.weight"] #[cfg.hidden_size * 2, cfg.hidden_size]
   log.onInfo "  Loaded final layer"
 
   log.onInfo "Flux model loaded successfully!"
   pure {
-    img_in := Tensor.setRequiresGrad img_in false
-    txt_in := Tensor.setRequiresGrad txt_in false
+    img_in := Tensor.detach img_in
+    txt_in := Tensor.detach txt_in
     time_in
     double_blocks
     single_blocks
@@ -168,8 +168,8 @@ def loadFluxModel (path : String) (cfg : FluxConfig := FluxConfig.klein4B)
     single_stream_modulation
     final_layer := {
       norm := final_norm
-      linear := Tensor.setRequiresGrad final_linear false
-      modulation := Tensor.setRequiresGrad final_mod false
+      linear := Tensor.detach final_linear
+      modulation := Tensor.detach final_mod
     }
   }
 

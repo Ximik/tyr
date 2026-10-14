@@ -21,15 +21,15 @@ def initWeight (shape : Shape) (fanIn : UInt64) (dtype : DType := .Float32) : IO
   let std := Float.sqrt (2.0 / fanIn.toFloat)
   let w ← Tensor.randn shape
   let w := Tensor.Preserving.mulScalar w std
-  pure (Tensor.setRequiresGrad (w.castDType dtype) true)
+  Tensor.parameter (w.castDType dtype)
 
 /-- Zero bias tensor with requires_grad=true. -/
-def initBias (shape : Shape) (dtype : DType := .Float32) : Tensor { shape := shape, dtype := dtype } :=
-  Tensor.setRequiresGrad ((Tensor.zeros shape).castDType dtype) true
+def initBias (shape : Shape) (dtype : DType := .Float32) : IO (Tensor { shape := shape, dtype := dtype }) :=
+  Tensor.parameter ((Tensor.zeros shape).castDType dtype)
 
 /-- Mark a loaded pretrained tensor as frozen (requires_grad=false). -/
 def reqGradFalse {σ : StaticSpec} (t : Tensor σ) : Tensor σ :=
-  Tensor.setRequiresGrad t false
+  Tensor.detach t
 
 /-- Dequantize FP8 weights with blockwise inverse scales (128x128 blocks).
     weight: [out, in], scale_inv: [out/128, in/128]. Returns float32 weights.

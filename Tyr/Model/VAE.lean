@@ -88,8 +88,8 @@ def loadAutoEncoder (path : String) (log : Handlers := {}) : IO AutoEncoder := d
   log.onInfo "AutoEncoder loaded successfully!"
   pure {
     decoder
-    bn_running_mean := Tensor.setRequiresGrad bn_running_mean false
-    bn_running_var := Tensor.setRequiresGrad bn_running_var false
+    bn_running_mean := Tensor.detach bn_running_mean
+    bn_running_var := Tensor.detach bn_running_var
   }
 
 end torch.vae

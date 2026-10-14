@@ -27,9 +27,9 @@ structure RMSNorm (dim : UInt64) (dtype : DType := .Float32)
 namespace RMSNorm
 
 /-- Initialize RMSNorm with ones for weight -/
-def init (dim : UInt64) (eps : Float := 1e-6) (dtype : DType := .Float32) : RMSNorm dim dtype :=
-  let weight := (Tensor.ones #[dim] true).castDType dtype
-  { weight, eps := ⟨eps⟩ }
+def init (dim : UInt64) (eps : Float := 1e-6) (dtype : DType := .Float32) : IO (RMSNorm dim dtype) := do
+  let weight ← Tensor.parameter ((Tensor.ones #[dim]).castDType dtype)
+  pure { weight, eps := ⟨eps⟩ }
 
 /-- Forward pass for 2D input [seq, dim] -/
 def forward2d {dim seq : UInt64} {d : DType} {dev : DevicePolicy} (rn : RMSNorm dim d dev)

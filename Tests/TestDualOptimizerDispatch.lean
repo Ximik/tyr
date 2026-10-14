@@ -98,7 +98,7 @@ def testManifoldMuonConfigForwardsSolverKnobs : IO Unit := do
 @[test]
 def testStepMatrixSingleStiefelConstraint : IO Unit := do
   let pRaw ← Tensor.randn #[8, 4]
-  let p := Tensor.setRequiresGrad
+  let p ← Tensor.setRequiresGrad
     (Tensor.detach (torch.Optim.ManifoldMuon.retractStiefel pRaw)) true
   let g ← Tensor.randn #[8, 4]
 
@@ -122,7 +122,7 @@ def testStepMatrixSingleStiefelConstraint : IO Unit := do
 @[test]
 def testStepMatrixSingleGrassmannConstraint : IO Unit := do
   let pRaw ← Tensor.randn #[9, 3]
-  let p := Tensor.setRequiresGrad
+  let p ← Tensor.setRequiresGrad
     (Tensor.detach (Tyr.AD.Grassmann.project 9 3 pRaw).matrix) true
   let g ← Tensor.randn #[9, 3]
 
@@ -145,7 +145,7 @@ def testStepMatrixSingleGrassmannConstraint : IO Unit := do
 @[test]
 def testStepMatrixSingleOrthogonalSquareConstraint : IO Unit := do
   let pRaw ← Tensor.randn #[6, 6]
-  let p := Tensor.setRequiresGrad
+  let p ← Tensor.setRequiresGrad
     (Tensor.detach (Tyr.AD.Orthogonal.project 6 pRaw).matrix) true
   let g ← Tensor.randn #[6, 6]
 
@@ -168,7 +168,7 @@ def testStepMatrixSingleOrthogonalSquareConstraint : IO Unit := do
 @[test]
 def testStepMatrixSingleOrthogonalNonSquareFails : IO Unit := do
   let pRaw ← Tensor.randn #[8, 4]
-  let p := Tensor.setRequiresGrad
+  let p ← Tensor.setRequiresGrad
     (Tensor.detach (Tyr.AD.Stiefel.project 8 4 pRaw).matrix) true
   let g ← Tensor.randn #[8, 4]
 
@@ -197,9 +197,9 @@ def testMatrixBackendOpsComposable : IO Unit := do
 
   let p0Raw ← Tensor.randn #[12, 4]
   let p1Raw ← Tensor.randn #[12, 4]
-  let p0 := Tensor.setRequiresGrad
+  let p0 ← Tensor.setRequiresGrad
     (Tensor.detach (Tyr.AD.Grassmann.project 12 4 p0Raw).matrix) true
-  let p1 := Tensor.setRequiresGrad
+  let p1 ← Tensor.setRequiresGrad
     (Tensor.detach (Tyr.AD.Grassmann.project 12 4 p1Raw).matrix) true
   let g0 ← Tensor.randn #[12, 4]
   let g1 ← Tensor.randn #[12, 4]
@@ -219,7 +219,7 @@ def testMatrixBackendOpsBenchmarkPositive : IO Unit := do
     matrixLr := 0.01
   }
   let mut p := (Tyr.AD.Grassmann.project 20 6 (← Tensor.randn #[20, 6])).matrix
-  p := Tensor.setRequiresGrad (Tensor.detach p) true
+  p ← Tensor.parameter p
   let mut st := initMatrixParamState cfg p
 
   let t0 ← IO.monoNanosNow

@@ -34,8 +34,9 @@ def softplusDynamic {s : Shape} (x : Tensor { shape := s }) : Tensor { shape := 
   checked (RawTensor.softplus s x.raw)
 def floatDynamic {s : Shape} {d : DType} (x : Tensor { shape := s, dtype := d }) : Tensor { shape := s } := x.toFloat32.forgetDType
 
-def zerosDynamic (shape : Shape) (requiresGrad : Bool := false) (device : Device := .CPU) : Tensor { shape := shape } :=
-  (Tensor.zeros shape requiresGrad device).forgetDType
+def zerosDynamic (shape : Shape) (requiresGrad : Bool := false) (device : Device := .CPU)
+    (_noGrad : requiresGrad = false := by decide) : Tensor { shape := shape } :=
+  (Tensor.zeros shape false device).forgetDType
 def onesDynamic (shape : Shape) : Tensor { shape := shape } := (Tensor.ones shape).forgetDType
 def zerosDynamicOn {shape : Shape} (device : Device) : Tensor { shape := shape } := zerosDynamic shape false device
 
@@ -44,7 +45,7 @@ def randDynamic (shape : Shape) : IO (Tensor { shape := shape }) := do
 
 def initDynamicWeight (shape : Shape) (fanIn : UInt64) : IO (Tensor { shape := shape }) :=
   Model.initWeight shape fanIn (.Unknown "dynamic")
-def initDynamicBias (shape : Shape) : Tensor { shape := shape } := Model.initBias shape (.Unknown "dynamic")
+def initDynamicBias (shape : Shape) : IO (Tensor { shape := shape }) := Model.initBias shape (.Unknown "dynamic")
 
 def convGroups {batch cin cout cinGroup length kernel : UInt64} {out : Shape}
     (input : Tensor { shape := #[batch, cin, length] }) (weight : Tensor { shape := #[cout, cinGroup, kernel] })

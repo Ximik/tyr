@@ -19,7 +19,7 @@ namespace torch.qwen3tts
 
 private def initWeight (shape : Shape) (fanIn : UInt64) : IO (Tensor { shape := shape }) :=
   Model.initWeight shape fanIn (.Unknown "dynamic")
-private def initBias (shape : Shape) : Tensor { shape := shape } :=
+private def initBias (shape : Shape) : IO (Tensor { shape := shape }) :=
   Model.initBias shape (.Unknown "dynamic")
 
 private def c0 (cfg : SpeakerEncoderConfig) : UInt64 := cfg.encChannels.getD 0 512
@@ -71,7 +71,7 @@ namespace TimeDelayNetBlock
 def init (inChannels outChannels kernelSize dilation : UInt64)
     : IO (TimeDelayNetBlock inChannels outChannels kernelSize dilation) := do
   let weight ← initWeight #[outChannels, inChannels, kernelSize] inChannels
-  let bias := initBias #[outChannels]
+  let bias ← initBias #[outChannels]
   pure { weight, bias }
 
 def forward {batch frames inChannels outChannels kernelSize dilation : UInt64}
@@ -97,8 +97,8 @@ namespace SqueezeExcitationBlock
 def init (channels seChannels : UInt64) : IO (SqueezeExcitationBlock channels seChannels) := do
   let conv1Weight ← initWeight #[seChannels, channels, 1] channels
   let conv2Weight ← initWeight #[channels, seChannels, 1] seChannels
-  let conv1Bias := initBias #[seChannels]
-  let conv2Bias := initBias #[channels]
+  let conv1Bias ← initBias #[seChannels]
+  let conv2Bias ← initBias #[channels]
   pure { conv1Weight, conv1Bias, conv2Weight, conv2Bias }
 
 def forward {batch frames channels seChannels : UInt64}
@@ -209,7 +209,7 @@ def init (channels attentionChannels : UInt64)
     : IO (AttentiveStatisticsPooling channels attentionChannels) := do
   let tdnn ← TimeDelayNetBlock.init (channels * 3) attentionChannels 1 1
   let convWeight ← initWeight #[channels, attentionChannels, 1] attentionChannels
-  let convBias := initBias #[channels]
+  let convBias ← initBias #[channels]
   pure { tdnn, convWeight, convBias }
 
 def forward {batch frames channels attentionChannels : UInt64}
@@ -288,7 +288,7 @@ def init (cfg : SpeakerEncoderConfig) : IO (SpeakerEncoder cfg) := do
   let mfa ← TimeDelayNetBlock.init (mfaInChannels cfg) (c4 cfg) (k4 cfg) (d4 cfg)
   let asp ← AttentiveStatisticsPooling.init (c4 cfg) cfg.encAttentionChannels
   let fcWeight ← initWeight #[cfg.encDim, (c4 cfg) * 2, 1] ((c4 cfg) * 2)
-  let fcBias := initBias #[cfg.encDim]
+  let fcBias ← initBias #[cfg.encDim]
 
   pure { tdnn0, block1, block2, block3, mfa, asp, fcWeight, fcBias }
 

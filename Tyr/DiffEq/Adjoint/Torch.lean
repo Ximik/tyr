@@ -14,21 +14,16 @@ private def dotStruct [TensorStruct Y] (x y : Y) : Tensor { shape := #[], dtype 
   TensorStruct.fold (fun t acc => Add.add acc (Tensor.toFloat32 (Tensor.sumAll t)).forgetDevice)
     (Tensor.zeros #[]) prod
 
-private def gradStruct [TensorStruct α] (loss : Tensor { shape := #[], dtype := .Float32 }) (x : α) : α :=
-  TensorStruct.map (fun t => Tensor.grad loss t (Tensor.onesLike loss)) x
-
 private def vjp
     [TensorStruct Y] [TensorStruct Args]
     (vf : Time → Y → Args → Y)
     (t : Time) (y : Y) (args : Args) (adjY : Y) : (Y × Y × Args) :=
-  let yReq := TensorStruct.makeLeafParams y
-  let argsReq := TensorStruct.makeLeafParams args
-  let fReq := vf t yReq argsReq
   let adjDet := TensorStruct.detach adjY
-  let loss := dotStruct fReq adjDet
-  let gradY := gradStruct loss yReq
-  let gradArgs := gradStruct loss argsReq
-  let fDet := TensorStruct.detach fReq
+  let (gradY, gradArgs) := TensorStruct.functionalGrad
+    (fun (y, args) => dotStruct (vf t y args) adjDet) (y, args)
+  -- The primal is evaluated with detached inputs, so no private differentiation
+  -- variables can escape through static fields or custom TensorStruct instances.
+  let fDet := TensorStruct.detach (vf t (TensorStruct.detach y) (TensorStruct.detach args))
   (fDet, gradY, gradArgs)
 
 instance [TensorStruct Y] [TensorStruct Args] : AdjointBackend Y Args where
@@ -38,14 +33,8 @@ private def vjpFn
     [TensorStruct Y] [TensorStruct Args]
     (f : Y → Args → Y)
     (y : Y) (args : Args) (adjY : Y) : (Y × Args) :=
-  let yReq := TensorStruct.makeLeafParams y
-  let argsReq := TensorStruct.makeLeafParams args
-  let out := f yReq argsReq
   let adjDet := TensorStruct.detach adjY
-  let loss := dotStruct out adjDet
-  let gradY := gradStruct loss yReq
-  let gradArgs := gradStruct loss argsReq
-  (gradY, gradArgs)
+  TensorStruct.functionalGrad (fun (y, args) => dotStruct (f y args) adjDet) (y, args)
 
 instance [TensorStruct Y] [TensorStruct Args] : AdjointFnBackend Y Args where
   vjpFn := vjpFn

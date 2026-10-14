@@ -29,7 +29,7 @@ private def requireTrue (ok : Bool) (msg : String) : IO Unit := do
     throw (IO.userError msg)
 
 private def freeze {s : Shape} (t : Tensor { shape := s }) : Tensor { shape := s } :=
-  Tensor.setRequiresGrad t false
+  Tensor.detach t
 
 private def loadFrozen (path : String) (name : String) (s : Shape) : IO (Tensor { shape := s }) := do
   let t ← safetensors.loadTensorCandidates path #[name] s

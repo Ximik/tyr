@@ -33,7 +33,7 @@ abbrev PerLayerInputs (cfg : VLConfig) (batch seq : UInt64) :=
   Option (Tensor { shape := #[batch, seq, cfg.text_config.num_hidden_layers, cfg.text_config.hidden_size_per_layer_input] })
 
 private def reqGradFalse {s : Shape} (t : Tensor { shape := s }) : Tensor { shape := s } :=
-  Tensor.setRequiresGrad t false
+  Tensor.detach t
 
 private def clampMin {s : Shape} (x : Tensor { shape := s }) (lo : Float) : Tensor { shape := s } :=
   Tensor.Preserving.clampFloat x lo (Float.ofBits 0x7ff0000000000000)

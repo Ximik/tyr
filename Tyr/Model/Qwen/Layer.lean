@@ -39,9 +39,9 @@ variable {dtype : DType}
 def init (hidden_size num_heads num_kv_heads head_dim intermediate_size : UInt64)
     (eps : Float := 1e-6) (dtype : DType := .Float32)
     : IO (QwenLayer hidden_size num_heads num_kv_heads head_dim intermediate_size dtype) := do
-  let input_layernorm := RMSNorm.init hidden_size eps dtype
+  let input_layernorm ← RMSNorm.init hidden_size eps dtype
   let self_attn ← QwenAttention.init hidden_size num_heads num_kv_heads head_dim dtype
-  let post_attention_layernorm := RMSNorm.init hidden_size eps dtype
+  let post_attention_layernorm ← RMSNorm.init hidden_size eps dtype
   let mlp ← QwenMLP.init hidden_size intermediate_size dtype
   pure { input_layernorm, self_attn, post_attention_layernorm, mlp }
 

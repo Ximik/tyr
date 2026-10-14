@@ -49,13 +49,13 @@ def init (hidden_size : UInt64) (isDouble : Bool := false) : IO (Modulation hidd
   let outDim := if isDouble then 6 * hidden_size else 3 * hidden_size
   let std := Float.sqrt (2.0 / hidden_size.toFloat)
   let w ← randomWeight #[outDim, hidden_size]
-  pure { lin := Tensor.setRequiresGrad (Tensor.Preserving.mulScalar w std) true }
+  pure { lin := (← Tensor.parameter (Tensor.Preserving.mulScalar w std)) }
 
 /-- Initialize modulation with zero weights (for dummy/placeholder modulation).
     Used when modulation is at model level instead of per-block. -/
 def initZero (hidden_size : UInt64) (isDouble : Bool := false) : Modulation hidden_size isDouble :=
   let outDim := if isDouble then 6 * hidden_size else 3 * hidden_size
-  { lin := Tensor.setRequiresGrad (zerosWeight #[outDim, hidden_size]) false }
+  { lin := Tensor.detach (zerosWeight #[outDim, hidden_size]) }
 
 /-- Forward pass: compute modulation from timestep embedding.
     Input vec: [batch, hidden_size] (timestep embedding)

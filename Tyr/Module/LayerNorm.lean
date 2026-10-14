@@ -22,10 +22,10 @@ structure LayerNorm (dim : UInt64) (dtype : DType := .Float32)
 namespace LayerNorm
 
 /-- Initialize layer norm with ones for weight and zeros for bias -/
-def init (dim : UInt64) (eps : Float := 1e-5) : LayerNorm dim :=
-  let weight := Tensor.ones #[dim] true
-  let bias := Tensor.zeros #[dim] true
-  { weight, bias, eps := ⟨eps⟩ }
+def init (dim : UInt64) (eps : Float := 1e-5) : IO (LayerNorm dim) := do
+  let weight ← Tensor.parameter (Tensor.ones #[dim])
+  let bias ← Tensor.parameter (Tensor.zeros #[dim])
+  pure { weight, bias, eps := ⟨eps⟩ }
 
 /-- Initialize layer norm without learnable affine parameters.
     Used when elementwise_affine=False in PyTorch.

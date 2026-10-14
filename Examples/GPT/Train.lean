@@ -123,7 +123,7 @@ def trainStep {modelCfg : Config} {batch seq : UInt64}
 
   -- Update parameters with AdamW using Optax-style step
   let opt := Optim.adamw (lr := lr)
-  let (params', optState') := Optim.step opt params grads optState
+  let (params', optState') ← Optim.step opt params grads optState
 
   return (params', optState', lossVal)
 
@@ -169,7 +169,7 @@ def trainStepWithAccum {modelCfg : Config} {batch seq : UInt64}
 
   -- Update parameters
   let opt := Optim.adamw (lr := lr)
-  let (params', optState') := Optim.step opt params grads optState
+  let (params', optState') ← Optim.step opt params grads optState
 
   -- Return average loss over accumulation steps
   return (params', optState', totalLoss / accumSteps.toFloat)
@@ -179,14 +179,15 @@ def perplexity (loss : Float) : Float := Float.exp loss
 
 /-- Evaluate model on validation data
     Returns average loss over numBatches batches.
-    Uses no_grad context to avoid building computation graphs. -/
+    Uses detached parameters to avoid building computation graphs. -/
 def evalLoss {modelCfg : Config}
     (params : GPTParams modelCfg)
     (valData : Tokens #[n])
     (batchSize blockSize : UInt64)
     (numBatches : Nat)
     (device : Device := Device.CPU)
-    : IO Float := Tensor.noGrad do
+    : IO Float := do
+  let params := TensorStruct.detach params
   let mut totalLoss : Float := 0.0
   for _ in [:numBatches] do
     let (x, y) ← getBatch valData batchSize blockSize device

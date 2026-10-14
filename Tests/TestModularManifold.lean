@@ -13,7 +13,7 @@ def testStiefelLinearConstraintAfterUpdate : IO Unit := do
   let layer ← ManifoldLinear.init (M := Tyr.AD.Stiefel) 8 16 true
   let gW ← Tensor.randn #[16, 8] false
   let gB ← Tensor.randn #[16] false
-  let layer' := ManifoldLinear.applyDualMapUpdate layer gW (some gB) 0.02
+  let layer' ← ManifoldLinear.applyDualMapUpdate layer gW (some gB) 0.02
 
   let w := layer'.weight.matrix
   let wtW := Tensor.mm (Tensor.transpose2d w) w
@@ -32,7 +32,7 @@ def testStiefelLinearWeightIsTrainableLeaf : IO Unit := do
 
   let gW ← Tensor.randn #[16, 8] false
   let gB ← Tensor.randn #[16] false
-  let layer' := ManifoldLinear.applyDualMapUpdate layer gW (some gB) 0.02
+  let layer' ← ManifoldLinear.applyDualMapUpdate layer gW (some gB) 0.02
   let w1 := layer'.weight.matrix
   LeanTest.assertTrue (Tensor.requiresGrad w1)
     "Expected manifold-linear weight to require gradients after update"
@@ -44,7 +44,7 @@ def testGrassmannLinearConstraintAfterUpdate : IO Unit := do
   let layer ← ManifoldLinear.init (M := Tyr.AD.Grassmann) 6 12 true
   let gW ← Tensor.randn #[12, 6] false
   let gB ← Tensor.randn #[12] false
-  let layer' := ManifoldLinear.applyDualMapUpdate layer gW (some gB) 0.02
+  let layer' ← ManifoldLinear.applyDualMapUpdate layer gW (some gB) 0.02
 
   let w := layer'.weight.matrix
   let wtW := Tensor.mm (Tensor.transpose2d w) w
@@ -57,7 +57,7 @@ def testOrthogonalLinearConstraintAfterUpdate : IO Unit := do
   let layer : OrthogonalLinear 8 ← ManifoldLinear.init (M := OrthogonalMatrix) 8 8 true
   let gW ← Tensor.randn #[8, 8] false
   let gB ← Tensor.randn #[8] false
-  let layer' := ManifoldLinear.applyDualMapUpdate layer gW (some gB) 0.02
+  let layer' ← ManifoldLinear.applyDualMapUpdate layer gW (some gB) 0.02
 
   let w := layer'.weight.matrix
   let wtW := Tensor.mm (Tensor.transpose2d w) w
@@ -95,7 +95,7 @@ def testManifoldLinearBenchmarkPositive : IO Unit := do
   let t0 ← IO.monoNanosNow
   for _ in [:3] do
     let gW ← Tensor.randn #[64, 32] false
-    layer := ManifoldLinear.applyDualMapUpdate layer gW none 0.01
+    layer ← ManifoldLinear.applyDualMapUpdate layer gW none 0.01
   let t1 ← IO.monoNanosNow
   let elapsedMs := (t1.toFloat - t0.toFloat) / 1000000.0
   LeanTest.assertTrue (elapsedMs > 0.0)
@@ -111,7 +111,7 @@ def testHyperbolicVectorConstraintAfterUpdate : IO Unit := do
     "Expected hyperbolic manifold vector to be a leaf tensor after init"
 
   let g ← Tensor.randn #[7] false
-  let p1 := ManifoldVectorParam.applyDualMapUpdate p0 g 0.02
+  let p1 ← ManifoldVectorParam.applyDualMapUpdate p0 g 0.02
   let coords := p1.value.coords
   LeanTest.assertTrue (Tensor.requiresGrad coords)
     "Expected hyperbolic manifold vector to require gradients after update"
@@ -127,7 +127,7 @@ def testHyperbolicVectorBenchmarkPositive : IO Unit := do
   let t0 ← IO.monoNanosNow
   for _ in [:3] do
     let g ← Tensor.randn #[9] false
-    p := ManifoldVectorParam.applyDualMapUpdate p g 0.01
+    p ← ManifoldVectorParam.applyDualMapUpdate p g 0.01
   let t1 ← IO.monoNanosNow
   let elapsedMs := (t1.toFloat - t0.toFloat) / 1000000.0
   LeanTest.assertTrue (elapsedMs > 0.0)
@@ -145,7 +145,7 @@ def testManifoldUpdatableSequentialComposes : IO Unit := do
   let g2b ← Tensor.randn #[16] false
   let grad := ((g1w, some g1b), (g2w, some g2b))
 
-  let net' := ManifoldUpdatable.step net grad 0.02
+  let net' ← ManifoldUpdatable.step net grad 0.02
 
   let w1 := net'.first.weight.matrix
   let w1tW1 := Tensor.mm (Tensor.transpose2d w1) w1
@@ -167,7 +167,7 @@ def testManifoldUpdatablePairComposes : IO Unit := do
   let gv ← Tensor.randn #[6] false
   let grad := ((gw, none), gv)
 
-  let params' := ManifoldUpdatable.step params grad 0.01
+  let params' ← ManifoldUpdatable.step params grad 0.01
 
   let w := params'.1.weight.matrix
   let wtW := Tensor.mm (Tensor.transpose2d w) w

@@ -68,7 +68,7 @@ open torch
 
 @[test] def testDynamicRequiresGradPreservesNativeMetadata : IO Unit := do
   let original := ((Tensor.full #[2] 3).castDType .Float64).forgetDType
-  let trainable := original.setRequiresGrad true
+  let trainable ← original.setRequiresGrad true
   LeanTest.assertEqual trainable.raw.dtype DType.Float64
   LeanTest.assertTrue (trainable.raw.device == original.raw.device)
   LeanTest.assertEqual (← trainable.toFloatArray) #[3, 3]

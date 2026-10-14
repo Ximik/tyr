@@ -29,7 +29,7 @@ private def checkedWeight {source target : Shape} (tensor : Tensor { shape := so
   | .error message => throw <| IO.userError s!"KittenTTS checkpoint shape: {message}"
 
 private def reqGradFalse {s : Shape} (t : Tensor { shape := s, dtype := .Float32 }) : Tensor { shape := s, dtype := .Float32 } :=
-  Tensor.setRequiresGrad t false
+  Tensor.detach t
 
 private def getOrThrow {α} (xs : Array α) (idx : Nat) (msg : String) : IO α :=
   match xs[idx]? with

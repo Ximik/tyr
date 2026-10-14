@@ -51,10 +51,10 @@ structure Qwen35VisionLayerNorm (dim : UInt64) where
 
 namespace Qwen35VisionLayerNorm
 
-def init (dim : UInt64) (eps : Float := 1e-6) : Qwen35VisionLayerNorm dim :=
-  {
-    weight := Tensor.setRequiresGrad (onesDynamic #[dim]) true
-    bias := Tensor.setRequiresGrad (zerosDynamic #[dim]) true
+def init (dim : UInt64) (eps : Float := 1e-6) : IO (Qwen35VisionLayerNorm dim) := do
+  pure {
+    weight := (← Tensor.parameter (onesDynamic #[dim]))
+    bias := (← Tensor.parameter (zerosDynamic #[dim]))
     eps := eps
   }
 
@@ -80,9 +80,9 @@ namespace Qwen35VisionMLP
 
 def init (cfg : VisionConfig) : IO (Qwen35VisionMLP cfg) := do
   let w1 ← initDynamicWeight #[cfg.intermediate_size, cfg.hidden_size] cfg.hidden_size
-  let b1 := initDynamicBias #[cfg.intermediate_size]
+  let b1 ← initDynamicBias #[cfg.intermediate_size]
   let w2 ← initDynamicWeight #[cfg.hidden_size, cfg.intermediate_size] cfg.intermediate_size
-  let b2 := initDynamicBias #[cfg.hidden_size]
+  let b2 ← initDynamicBias #[cfg.hidden_size]
   pure {
     linear_fc1_weight := w1
     linear_fc1_bias := b1
@@ -113,7 +113,7 @@ namespace Qwen35VisionPatchEmbed
 
 def init (cfg : VisionConfig) : IO (Qwen35VisionPatchEmbed cfg) := do
   let w ← initDynamicWeight #[cfg.hidden_size, VisionConfig.patchDim cfg] (VisionConfig.patchDim cfg)
-  let b := initDynamicBias #[cfg.hidden_size]
+  let b ← initDynamicBias #[cfg.hidden_size]
   pure { weight := w, bias := b }
 
 def forward {nPatches : UInt64}
@@ -137,9 +137,9 @@ namespace Qwen35VisionAttention
 
 def init (cfg : VisionConfig) : IO (Qwen35VisionAttention cfg) := do
   let qkvW ← initDynamicWeight #[cfg.hidden_size * 3, cfg.hidden_size] cfg.hidden_size
-  let qkvB := initDynamicBias #[cfg.hidden_size * 3]
+  let qkvB ← initDynamicBias #[cfg.hidden_size * 3]
   let projW ← initDynamicWeight #[cfg.hidden_size, cfg.hidden_size] cfg.hidden_size
-  let projB := initDynamicBias #[cfg.hidden_size]
+  let projB ← initDynamicBias #[cfg.hidden_size]
   pure {
     qkv_weight := qkvW
     qkv_bias := qkvB
@@ -195,8 +195,8 @@ def init (cfg : VisionConfig) : IO (Qwen35VisionBlock cfg) := do
   let attn ← Qwen35VisionAttention.init cfg
   let mlp ← Qwen35VisionMLP.init cfg
   pure {
-    norm1 := Qwen35VisionLayerNorm.init cfg.hidden_size 1e-6
-    norm2 := Qwen35VisionLayerNorm.init cfg.hidden_size 1e-6
+    norm1 := (← Qwen35VisionLayerNorm.init cfg.hidden_size 1e-6)
+    norm2 := (← Qwen35VisionLayerNorm.init cfg.hidden_size 1e-6)
     attn := attn
     mlp := mlp
   }
@@ -225,11 +225,11 @@ namespace Qwen35VisionPatchMerger
 def init (cfg : VisionConfig) : IO (Qwen35VisionPatchMerger cfg) := do
   let mergedHidden := cfg.hidden_size * VisionConfig.mergeUnit cfg
   let fc1W ← initDynamicWeight #[mergedHidden, mergedHidden] mergedHidden
-  let fc1B := initDynamicBias #[mergedHidden]
+  let fc1B ← initDynamicBias #[mergedHidden]
   let fc2W ← initDynamicWeight #[cfg.out_hidden_size, mergedHidden] mergedHidden
-  let fc2B := initDynamicBias #[cfg.out_hidden_size]
+  let fc2B ← initDynamicBias #[cfg.out_hidden_size]
   pure {
-    norm := Qwen35VisionLayerNorm.init cfg.hidden_size 1e-6
+    norm := (← Qwen35VisionLayerNorm.init cfg.hidden_size 1e-6)
     linear_fc1_weight := fc1W
     linear_fc1_bias := fc1B
     linear_fc2_weight := fc2W
@@ -272,7 +272,7 @@ namespace Qwen35VisionModel
 def init (cfg : VisionConfig) : IO (Qwen35VisionModel cfg) := do
   let patchEmbed ← Qwen35VisionPatchEmbed.init cfg
   let posRaw := (← Tensor.randn #[cfg.num_position_embeddings, cfg.hidden_size]).forgetDType
-  let posEmbed := Tensor.setRequiresGrad (Tensor.Preserving.mulScalar posRaw 0.02) true
+  let posEmbed ← Tensor.parameter (Tensor.Preserving.mulScalar posRaw 0.02)
 
   let mut blocks : Array (Qwen35VisionBlock cfg) := #[]
   for _ in [:cfg.depth.toNat] do

@@ -107,6 +107,24 @@ structure StreamingDecodeCache (cfg : Qwen3ASRConfig) where
   audioEncoderCache : Option (StreamingAudioEncoderCache cfg) := none
   frontendCache : Option (StreamingFrontendCache cfg) := none
 
+/-- Cached activations supplied by callers enter inference as detached views. -/
+private def detachDecodeCache (cache : StreamingDecodeCache cfg) : StreamingDecodeCache cfg :=
+  { cache with
+    promptCache := cache.promptCache.map fun prompt =>
+      { prompt with
+        promptEmbeds := prompt.promptEmbeds.detach
+        cosAll := prompt.cosAll.detach
+        sinAll := prompt.sinAll.detach
+        kvCaches := prompt.kvCaches.map fun kv =>
+          { kv with kStoreDyn := kv.kStoreDyn.2.detach.packShape
+                    vStoreDyn := kv.vStoreDyn.2.detach.packShape }
+        lastLogits := prompt.lastLogits.detach }
+    audioEncoderCache := cache.audioEncoderCache.map fun audio =>
+      { audio with audioEmbedsValidDyn := audio.audioEmbedsValidDyn.detach }
+    frontendCache := cache.frontendCache.map fun frontend =>
+      { frontend with inputFeaturesDyn := frontend.inputFeaturesDyn.detach
+                      inputFeaturesDevDyn := frontend.inputFeaturesDevDyn.map Tensor.detach } }
+
 private def toLower (s : String) : String :=
   String.ofList (s.toList.map Char.toLower)
 
@@ -833,8 +851,9 @@ def decodeStreamingChunkWithModelStateCached
   if audio16k.isEmpty then
     pure ("", cache)
   else
-    autograd.no_grad do
-      let cache0 : StreamingDecodeCache cfg := cache.getD {}
+    do
+      let model := TensorStruct.detach model
+      let cache0 : StreamingDecodeCache cfg := detachDecodeCache (cache.getD {})
       let dev := model.thinker.textModel.embed_tokens.device
       let (frontendPack, frontendCacheCpu', reusedPrefixFrames) ←
         buildStreamingFrontendPackWithCache

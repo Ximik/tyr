@@ -30,8 +30,8 @@ def loadGroupNorm (path : String) (name : String) (num_groups channels : UInt64)
   let weight ← safetensors.loadTensorCandidates path #[s!"{name}.weight"] #[channels]
   let bias ← safetensors.loadTensorCandidates path #[s!"{name}.bias"] #[channels]
   pure {
-    weight := Tensor.setRequiresGrad weight false
-    bias := Tensor.setRequiresGrad bias false
+    weight := Tensor.detach weight
+    bias := Tensor.detach bias
   }
 
 /-- Load Conv2d parameters -/
@@ -41,8 +41,8 @@ def loadConv2d (path : String) (name : String)
   let weight ← safetensors.loadTensorCandidates path #[s!"{name}.weight"] #[out_ch, in_ch, kernel_size, kernel_size]
   let bias ← safetensors.loadTensorCandidates path #[s!"{name}.bias"] #[out_ch]
   pure {
-    weight := Tensor.setRequiresGrad weight false
-    bias := Tensor.setRequiresGrad bias false
+    weight := Tensor.detach weight
+    bias := Tensor.detach bias
   }
 
 /-- Load ResnetBlock (same in/out channels) from Diffusers format -/

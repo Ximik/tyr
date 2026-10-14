@@ -31,7 +31,7 @@ namespace AttnBlock
 
 /-- Initialize attention block -/
 def init (channels : UInt64) : IO (AttnBlock channels) := do
-  let norm := GroupNormParams.init 32 channels
+  let norm ← GroupNormParams.init 32 channels
   let q ← Conv2dParams.init channels channels 1 0
   let k ← Conv2dParams.init channels channels 1 0
   let v ← Conv2dParams.init channels channels 1 0

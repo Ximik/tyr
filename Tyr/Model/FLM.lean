@@ -196,7 +196,7 @@ def trainStep {seq vocab batch : UInt64} {Params : Type} [TensorStruct Params]
     clipGrads params cfg.gradClip
   let grads ← TensorStruct.grads params
   let opt := Optim.adamw (lr := lr) (weight_decay := cfg.weightDecay)
-  let (params', optState') := Optim.step opt params grads optState
+  let (params', optState') ← Optim.step opt params grads optState
   let nlls := Tensor.sumAll (perToken * validTokens)
   let ntok := Tensor.sumAll validTokens
   let report : LossReport :=

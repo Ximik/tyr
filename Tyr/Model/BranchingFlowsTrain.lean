@@ -277,7 +277,7 @@ def trainStep {maxLen vocab : UInt64} {Params : Type} [TensorStruct Params]
     (lr : Float)
     (clipGrads : Params → Float → IO Unit := fun _ _ => pure ())
     : IO (Params × Optim.AdamWState Params × BranchingLossReport) := do
-  let params := TensorStruct.makeLeafParams params
+  let params ← TensorStruct.makeLeafParams params
   TensorStruct.zeroGrads params
   if cfg.maxLen != maxLen then throw <| IO.userError "BranchingFlows model/config maxLen mismatch"
   let ⟨batch, packed⟩ ← packBranchingNat { cfg with maxLen := maxLen } result
@@ -295,7 +295,7 @@ def trainStep {maxLen vocab : UInt64} {Params : Type} [TensorStruct Params]
 
   let grads ← TensorStruct.grads params
   let opt := Optim.adamw (lr := lr) (weight_decay := cfg.weightDecay)
-  let (params', optState') := Optim.step opt params grads optState
+  let (params', optState') ← Optim.step opt params grads optState
 
   let report : BranchingLossReport := {
     total := Tensor.item totalLoss
@@ -314,7 +314,7 @@ def trainStepContinuous {maxLen dim : UInt64} {Params : Type} [TensorStruct Para
     (lr : Float)
     (clipGrads : Params → Float → IO Unit := fun _ _ => pure ())
     : IO (Params × Optim.AdamWState Params × BranchingLossReport) := do
-  let params := TensorStruct.makeLeafParams params
+  let params ← TensorStruct.makeLeafParams params
   TensorStruct.zeroGrads params
   if cfg.maxLen != maxLen then throw <| IO.userError "BranchingFlows model/config maxLen mismatch"
   let ⟨batch, packed⟩ ← packBranchingTensor (dim := dim) { cfg with maxLen := maxLen } result
@@ -332,7 +332,7 @@ def trainStepContinuous {maxLen dim : UInt64} {Params : Type} [TensorStruct Para
 
   let grads ← TensorStruct.grads params
   let opt := Optim.adamw (lr := lr) (weight_decay := cfg.weightDecay)
-  let (params', optState') := Optim.step opt params grads optState
+  let (params', optState') ← Optim.step opt params grads optState
 
   let report : BranchingLossReport := {
     total := Tensor.item totalLoss

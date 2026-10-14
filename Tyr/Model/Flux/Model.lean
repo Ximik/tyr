@@ -33,8 +33,8 @@ def init (in_dim hidden_dim : UInt64) : IO (MLPEmbedder in_dim hidden_dim) := do
   let in_l ← randomWeight #[hidden_dim, in_dim]
   let out_l ← randomWeight #[hidden_dim, hidden_dim]
   pure {
-    in_layer := Tensor.setRequiresGrad (Tensor.Preserving.mulScalar in_l std) true
-    out_layer := Tensor.setRequiresGrad (Tensor.Preserving.mulScalar out_l std) true
+    in_layer := (← Tensor.parameter (Tensor.Preserving.mulScalar in_l std))
+    out_layer := (← Tensor.parameter (Tensor.Preserving.mulScalar out_l std))
   }
 
 /-- Forward pass: linear → SiLU → linear -/
@@ -113,13 +113,13 @@ def init (cfg : FluxConfig) : IO (FluxModel cfg) := do
   let single_stream_modulation ← Modulation.init cfg.hidden_size false
 
   -- Final layer
-  let norm := initLayerNorm cfg.hidden_size
+  let norm ← initLayerNorm cfg.hidden_size
   let final_linear ← randomWeight #[cfg.in_channels, cfg.hidden_size]
   let final_mod ← randomWeight #[cfg.hidden_size * 2, cfg.hidden_size]
 
   pure {
-    img_in := Tensor.setRequiresGrad (Tensor.Preserving.mulScalar img_in std) true
-    txt_in := Tensor.setRequiresGrad (Tensor.Preserving.mulScalar txt_in std) true
+    img_in := (← Tensor.parameter (Tensor.Preserving.mulScalar img_in std))
+    txt_in := (← Tensor.parameter (Tensor.Preserving.mulScalar txt_in std))
     time_in
     double_blocks
     single_blocks
@@ -128,8 +128,8 @@ def init (cfg : FluxConfig) : IO (FluxModel cfg) := do
     single_stream_modulation
     final_layer := {
       norm
-      linear := Tensor.setRequiresGrad (Tensor.Preserving.mulScalar final_linear std) true
-      modulation := Tensor.setRequiresGrad (Tensor.Preserving.mulScalar final_mod std) true
+      linear := (← Tensor.parameter (Tensor.Preserving.mulScalar final_linear std))
+      modulation := (← Tensor.parameter (Tensor.Preserving.mulScalar final_mod std))
     }
   }
 

@@ -40,7 +40,7 @@ private def benchmarkShape (cfg : Benchmark.Config) (stream : UInt64)
   let logitsBase : Tensor { shape := #[rows, vocab], dtype := .BFloat16 } :=
     (← Tensor.randn #[rows, vocab] false device).toBFloat16
   let targets ← Tensor.randint 0 vocab.toInt64 #[rows] device
-  let (expectedLosses, expectedMean, expectedGrad) := referenceTraining logitsBase targets
+  let (expectedLosses, expectedMean, expectedGrad) ← referenceTraining logitsBase targets
 
   let losses ← Tensor.uniformLike (Tensor.zeros #[rows] false device) 0 0
   let meanLoss ← Tensor.uniformLike (Tensor.zeros #[] false device) 0 0

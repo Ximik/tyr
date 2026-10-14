@@ -14,12 +14,12 @@ example (n : UInt64) (params : BlockParams n) (scale : Float) : True := by
   fail_if_success
     have _bad : IO (BlockParams n) := do
       let projection ← Tensor.randn #[n, 4*n + 1]
-      return { params with mlp_proj := makeLeafParam (projection * scale) }
+      return { params with mlp_proj := ← makeLeafParam (projection * scale) }
   trivial
 
 example (n : UInt64) (params : BlockParams n) (scale : Float) : IO (BlockParams n) := do
   let projection ← Tensor.randn #[n, 4*n]
-  return { params with mlp_proj := makeLeafParam (projection * scale) }
+  return { params with mlp_proj := ← makeLeafParam (projection * scale) }
 
 example (params : GPTParams Config.tiny_shakespeare)
     (wrongTokens : Tokens #[1, 3]) (wrongDtype : Activation #[1, 2]) : True := by
@@ -44,7 +44,7 @@ private def config : Config :=
     throw (IO.userError "nonfinite GPT loss")
   Tensor.backwardLoss loss
   let opt := Optim.adamw (α := GPTParams config) (lr := 0.001)
-  let (updated, _) := Optim.step opt params (← TensorStruct.grads params) (opt.init params)
+  let (updated, _) ← Optim.step opt params (← TensorStruct.grads params) (opt.init params)
   let some block := updated.blocks[0]? | throw (IO.userError "missing GPT block")
   unless block.mlp_proj.raw.runtimeShape == #[4, 16] do
     throw (IO.userError "optimizer lost GPT projection shape")

@@ -65,6 +65,13 @@ structure LagunaRotaryTables where
   /-- sin table for full-attention layers (YaRN, scaled by `yarn_attention_factor`). -/
   fullSin : ShapePackedTensor .Float32
 
+/-- Inference view of all rotary tables, without changing their values. -/
+def LagunaRotaryTables.detach (tables : LagunaRotaryTables) : LagunaRotaryTables :=
+  { slidingCos := tables.slidingCos.2.detach.packShape
+    slidingSin := tables.slidingSin.2.detach.packShape
+    fullCos := tables.fullCos.2.detach.packShape
+    fullSin := tables.fullSin.2.detach.packShape }
+
 /-- `2π` as a literal (Lean core has no `Float.pi`). -/
 private def twoPi : Float := 6.283185307179586
 

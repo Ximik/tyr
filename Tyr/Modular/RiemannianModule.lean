@@ -35,7 +35,7 @@ class RiemannianModule (M : Type) (inDim outDim : UInt64) where
   forwardWithTape : M → AmbientVector inDim → AmbientVector outDim × Tape
   localLinearization : M → Tape → LocalLinearization inDim paramDim outDim
   paramMass : M → DiagonalMass paramDim
-  applyAmbientUpdate : M → AmbientVector paramDim → Float → M
+  applyAmbientUpdate : M → AmbientVector paramDim → Float → IO M
 
 namespace RiemannianModule
 
@@ -132,9 +132,9 @@ private def linearApplyParamAdjoint {inDim outDim : UInt64} {d : DType} {dev : D
   Tensor.reshapeChecked joined #[outDim * inDim + outDim]
 
 private def makeManifoldLeaf [MatrixManifoldCarrier M] {m n : UInt64}
-    (w : M m n) : M m n :=
-  MatrixManifoldCarrier.reAmbient w
-    (Tensor.setRequiresGrad (Tensor.detach (MatrixManifoldCarrier.toMatrix w)) true)
+    (w : M m n) : IO (M m n) := do
+  let leaf ← Tensor.parameter (MatrixManifoldCarrier.toMatrix w)
+  pure (MatrixManifoldCarrier.reAmbient w leaf)
 
 /-- Single leaf backward step: metric solve, parameter update, and propagation. -/
 def backwardLeafStep {M : Type} {inDim outDim : UInt64} [RiemannianModule M inDim outDim]
@@ -144,13 +144,13 @@ def backwardLeafStep {M : Type} {inDim outDim : UInt64} [RiemannianModule M inDi
     (L : MetricFactor rank outDim)
     (lambda : AmbientVector outDim)
     (lr : Float)
-    : M × MetricFactor rank inDim × AmbientVector inDim × LayerStepDiagnostics := by
+    : IO (M × MetricFactor rank inDim × AmbientVector inDim × LayerStepDiagnostics) := do
   let lin := RiemannianModule.localLinearization (M := M) (inDim := inDim) (outDim := outDim) m tape
   let g := lin.applyBT lambda
   let K := LocalLinearization.pullbackParamFactor lin L
   let mass := RiemannianModule.paramMass (M := M) (inDim := inDim) (outDim := outDim) m
   let update := MetricFactor.solveWoodbury mass K g
-  let m' := RiemannianModule.applyAmbientUpdate (M := M) (inDim := inDim) (outDim := outDim) m update lr
+  let m' ← RiemannianModule.applyAmbientUpdate (M := M) (inDim := inDim) (outDim := outDim) m update lr
   let LPrev := LocalLinearization.pullbackInputFactor lin L
   let lambdaPrev := lin.applyAT lambda
   let inner := MetricFactor.woodburyInner mass K
@@ -163,7 +163,7 @@ def backwardLeafStep {M : Type} {inDim outDim : UInt64} [RiemannianModule M inDi
     residualNorm := Tensor.l2Norm residual
     updateNorm := Tensor.l2Norm update
   }
-  exact (m', LPrev, lambdaPrev, stats)
+  pure (m', LPrev, lambdaPrev, stats)
 
 instance linearRiemannianModule (inDim outDim : UInt64) :
     RiemannianModule (torch.Linear inDim outDim) inDim outDim where
@@ -184,17 +184,15 @@ instance linearRiemannianModule (inDim outDim : UInt64) :
     applyBT := linearApplyParamAdjoint x lin.bias.isSome
   }
   paramMass _ := DiagonalMass.ones (outDim * inDim + outDim)
-  applyAmbientUpdate lin update lr :=
+  applyAmbientUpdate lin update lr := do
     let (dW, dB) := splitLinearUpdate (inDim := inDim) (outDim := outDim) update
-    let weight' := Tensor.setRequiresGrad
-      (Tensor.detach (Sub.sub lin.weight (Tensor.Preserving.mulScalar dW lr))) true
-    let bias' :=
+    let weight' ← Tensor.parameter (Sub.sub lin.weight (Tensor.Preserving.mulScalar dW lr))
+    let bias' ←
       match lin.bias with
-      | some b =>
-        some (Tensor.setRequiresGrad
-          (Tensor.detach (Sub.sub b (Tensor.Preserving.mulScalar dB lr))) true)
-      | none => none
-    { lin with weight := weight', bias := bias' }
+      | some b => do
+        pure (some (← Tensor.parameter (Sub.sub b (Tensor.Preserving.mulScalar dB lr))))
+      | none => pure none
+    pure { lin with weight := weight', bias := bias' }
 
 instance manifoldLinearRiemannianModule
     (M : UInt64 → UInt64 → Type)
@@ -220,19 +218,18 @@ instance manifoldLinearRiemannianModule
     applyBT := linearApplyParamAdjoint x lin.bias.isSome
   }
   paramMass _ := DiagonalMass.ones (outDim * inDim + outDim)
-  applyAmbientUpdate lin update lr :=
+  applyAmbientUpdate lin update lr := do
     let (dW, dB) := splitLinearUpdate (inDim := inDim) (outDim := outDim) update
     let updatedMatrix := Sub.sub (MatrixManifoldCarrier.toMatrix lin.weight)
       (Tensor.Preserving.mulScalar dW lr)
     let weight' := MatrixManifoldCarrier.projectLike lin.weight updatedMatrix
-    let weight' := makeManifoldLeaf weight'
-    let bias' :=
+    let weight' ← makeManifoldLeaf weight'
+    let bias' ←
       match lin.bias with
-      | some b =>
-        some (Tensor.setRequiresGrad
-          (Tensor.detach (Sub.sub b (Tensor.Preserving.mulScalar dB lr))) true)
-      | none => none
-    { lin with weight := weight', bias := bias' }
+      | some b => do
+        pure (some (← Tensor.parameter (Sub.sub b (Tensor.Preserving.mulScalar dB lr))))
+      | none => pure none
+    pure { lin with weight := weight', bias := bias' }
 
 end RiemannianModule
 
@@ -298,12 +295,12 @@ def sequentialBackwardMetricStep
     (L : MetricFactor rank outDim)
     (lambda : AmbientVector outDim)
     (lr : Float)
-    : Sequential M₁ M₂ × MetricFactor rank inDim × AmbientVector inDim × Array LayerStepDiagnostics := by
+    : IO (Sequential M₁ M₂ × MetricFactor rank inDim × AmbientVector inDim × Array LayerStepDiagnostics) := do
   let (tape₁, tape₂) := tape
-  let (second', midFactor, midCotangent, stats₂) :=
+  let (second', midFactor, midCotangent, stats₂) ←
     RiemannianModule.backwardLeafStep net.second tape₂ L lambda lr
-  let (first', inFactor, inCotangent, stats₁) :=
+  let (first', inFactor, inCotangent, stats₁) ←
     RiemannianModule.backwardLeafStep net.first tape₁ midFactor midCotangent lr
-  exact ({ first := first', second := second' }, inFactor, inCotangent, #[stats₁, stats₂])
+  pure ({ first := first', second := second' }, inFactor, inCotangent, #[stats₁, stats₂])
 
 end Tyr.Modular

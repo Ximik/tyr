@@ -86,7 +86,7 @@ structure GPTParams (cfg : Config) where
   deriving TensorStruct
 
 /-- Helper to create a leaf parameter tensor: detach then set requires_grad -/
-def makeLeafParam {s : Shape} (t : Activation s) : Activation s :=
+def makeLeafParam {s : Shape} (t : Activation s) : IO (Activation s) :=
   TensorOps.leaf t
 
 /-- Initialize block parameters with scaled random weights -/
@@ -100,19 +100,19 @@ def BlockParams.init (n_embd : UInt64) (scale : Float := 0.02) (device : Device 
   let mlp_fc ← Tensor.randn #[4*n_embd, n_embd] false device
   let mlp_proj ← Tensor.randn #[n_embd, 4*n_embd] false device
   return {
-    ln1_weight := makeLeafParam (Tensor.ones #[n_embd] false device)
-    ln1_bias := makeLeafParam (Tensor.zeros #[n_embd] false device)
-    q_proj := makeLeafParam (q_proj * scale)
-    k_proj := makeLeafParam (k_proj * scale)
-    v_proj := makeLeafParam (v_proj * scale)
-    c_proj := makeLeafParam (c_proj * scale)
-    c_proj_bias := makeLeafParam (Tensor.zeros #[n_embd] false device)
-    ln2_weight := makeLeafParam (Tensor.ones #[n_embd] false device)
-    ln2_bias := makeLeafParam (Tensor.zeros #[n_embd] false device)
-    mlp_fc := makeLeafParam (mlp_fc * scale)
-    mlp_fc_bias := makeLeafParam (Tensor.zeros #[4*n_embd] false device)
-    mlp_proj := makeLeafParam (mlp_proj * scale)
-    mlp_proj_bias := makeLeafParam (Tensor.zeros #[n_embd] false device)
+    ln1_weight := ← makeLeafParam (Tensor.ones #[n_embd] false device)
+    ln1_bias := ← makeLeafParam (Tensor.zeros #[n_embd] false device)
+    q_proj := ← makeLeafParam (q_proj * scale)
+    k_proj := ← makeLeafParam (k_proj * scale)
+    v_proj := ← makeLeafParam (v_proj * scale)
+    c_proj := ← makeLeafParam (c_proj * scale)
+    c_proj_bias := ← makeLeafParam (Tensor.zeros #[n_embd] false device)
+    ln2_weight := ← makeLeafParam (Tensor.ones #[n_embd] false device)
+    ln2_bias := ← makeLeafParam (Tensor.zeros #[n_embd] false device)
+    mlp_fc := ← makeLeafParam (mlp_fc * scale)
+    mlp_fc_bias := ← makeLeafParam (Tensor.zeros #[4*n_embd] false device)
+    mlp_proj := ← makeLeafParam (mlp_proj * scale)
+    mlp_proj_bias := ← makeLeafParam (Tensor.zeros #[n_embd] false device)
   }
 
 /-- Initialize full GPT model -/
@@ -124,11 +124,11 @@ def GPTParams.init (cfg : Config) (device : Device := Device.CPU) : IO (GPTParam
     let block ← BlockParams.init cfg.n_embd 0.02 device
     blocks := blocks.push block
   return {
-    wte := makeLeafParam (Tensor.mulScalar wte 0.02)
-    wpe := makeLeafParam (Tensor.mulScalar wpe 0.02)
+    wte := ← makeLeafParam (Tensor.mulScalar wte 0.02)
+    wpe := ← makeLeafParam (Tensor.mulScalar wpe 0.02)
     blocks := blocks
-    ln_f_weight := makeLeafParam (Tensor.ones #[cfg.n_embd] false device)
-    ln_f_bias := makeLeafParam (Tensor.zeros #[cfg.n_embd] false device)
+    ln_f_weight := ← makeLeafParam (Tensor.ones #[cfg.n_embd] false device)
+    ln_f_bias := ← makeLeafParam (Tensor.zeros #[cfg.n_embd] false device)
   }
 
 /-- Forward pass through a single transformer block with multi-head attention and dropout -/

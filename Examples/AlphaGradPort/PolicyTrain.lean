@@ -429,7 +429,7 @@ private def ppoUpdate
     let mut entropyV := 0.0
 
     for _ in [:cfg.updateEpochs] do
-      let working := TensorStruct.makeLeafParams netCur
+      let working ← TensorStruct.makeLeafParams netCur
       TensorStruct.zeroGrads working
       let (logits, values) := AlphaGradNet.forward working obs
       let logProbsAll := Tensor.logSoftmax logits (-1) rfl
@@ -462,7 +462,7 @@ private def ppoUpdate
       Tensor.backwardLoss totalLoss
       let grads ← TensorStruct.grads working
       let opt := Optim.adamw (lr := cfg.learningRate) (weight_decay := cfg.weightDecay)
-      let (netNext, stateNext) := Optim.step opt working grads stateCur
+      let (netNext, stateNext) ← Optim.step opt working grads stateCur
 
       netCur := netNext
       stateCur := stateNext
@@ -478,7 +478,7 @@ def trainPPO
     IO (Except String PPOSummary) := do
   let actionDim : UInt64 := task.numVertices.toUInt64
   let net0 ← AlphaGradNet.init actionDim
-  let net0 := TensorStruct.makeLeafParams net0
+  let net0 ← TensorStruct.makeLeafParams net0
   let opt := Optim.adamw (lr := cfg.learningRate) (weight_decay := cfg.weightDecay)
   let optState0 := opt.init net0
   let behavior0Eval ← buildEvalNet (TensorStruct.detach net0)
@@ -727,7 +727,7 @@ private def alphaZeroUpdate
     let mut valueLossV := 0.0
 
     for _ in [:cfg.updateEpochs] do
-      let working := TensorStruct.makeLeafParams netCur
+      let working ← TensorStruct.makeLeafParams netCur
       TensorStruct.zeroGrads working
       let (logits, values) := AlphaGradNet.forward working obs
       let logProbs := Tensor.logSoftmax logits (-1) rfl
@@ -740,7 +740,7 @@ private def alphaZeroUpdate
       Tensor.backwardLoss totalLoss
       let grads ← TensorStruct.grads working
       let opt := Optim.adamw (lr := cfg.learningRate) (weight_decay := cfg.weightDecay)
-      let (netNext, stateNext) := Optim.step opt working grads stateCur
+      let (netNext, stateNext) ← Optim.step opt working grads stateCur
       netCur := netNext
       stateCur := stateNext
       policyLossV := Tensor.item policyLoss
@@ -754,7 +754,7 @@ def trainAlphaZero
     IO (Except String AlphaZeroSummary) := do
   let actionDim : UInt64 := task.numVertices.toUInt64
   let net0 ← AlphaGradNet.init actionDim
-  let net0 := TensorStruct.makeLeafParams net0
+  let net0 ← TensorStruct.makeLeafParams net0
   let opt := Optim.adamw (lr := cfg.learningRate) (weight_decay := cfg.weightDecay)
   let optState0 := opt.init net0
 

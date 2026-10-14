@@ -33,6 +33,7 @@ double lean_torch_nuclear_norm(uint64_t, uint64_t, lean_object*);
 lean_object* lean_torch_tensor_atan(lean_object*, lean_object*);
 lean_object* lean_torch_max_all(lean_object*);
 lean_object* lean_torch_stack_1d(uint64_t, uint64_t, lean_object*, uint64_t);
+lean_object* lean_torch_functional_grad(lean_object*, lean_object*);
 lean_object* lean_torch_tensor_grad(lean_object*, lean_object*, lean_object*, lean_object*, lean_object*);
 lean_object* lean_torch_from_float_array(lean_object*);
 lean_object* lean_torch_multinomial(lean_object*, lean_object*, uint64_t, uint8_t);
@@ -87,7 +88,7 @@ lean_object* lean_torch_randn(lean_object*, uint8_t, lean_object*);
 lean_object* lean_torch_reshape_exact(lean_object*, lean_object*, lean_object*);
 lean_object* lean_torch_rsqrt(lean_object*, lean_object*);
 lean_object* lean_torch_sdpa_4d(uint64_t, uint64_t, uint64_t, uint64_t, lean_object*, lean_object*, lean_object*, double, uint8_t);
-// set_requires_grad consumes the tensor and returns its updated value.
+// set_requires_grad consumes the tensor and returns IO with its updated value.
 lean_object* lean_torch_set_requires_grad(lean_object*, lean_object*, uint8_t);
 lean_object* lean_torch_sqrt(lean_object*, lean_object*);
 lean_object* lean_torch_squeeze(lean_object*, lean_object*, lean_object*);
@@ -122,8 +123,6 @@ lean_object* lean_torch_from_int64_array(lean_object*);
 lean_object* lean_torch_index_select(uint64_t, uint64_t, lean_object*, uint64_t, lean_object*);
 lean_object* lean_torch_cross_entropy_none(uint64_t, uint64_t, lean_object*, lean_object*);
 uint64_t lean_torch_item_int(lean_object*, lean_object*);
-lean_object* lean_torch_set_grad_enabled(uint8_t);
-lean_object* lean_torch_is_grad_enabled();
 lean_object* lean_torch_logical_not(lean_object*, lean_object*);
 lean_object* lean_torch_logical_and(lean_object*, lean_object*, lean_object*);
 

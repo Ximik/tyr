@@ -165,21 +165,6 @@ def pool2dShape (input_shape kernel_size : Shape) (stride padding : Shape) : Sha
   #[batch, channels, output_height, output_width]
 
 
-namespace autograd
-
-@[extern "lean_torch_set_grad_enabled"] opaque set_grad_enabled (enabled : Bool) : IO Unit
-@[extern "lean_torch_is_grad_enabled"] opaque is_grad_enabled : IO Bool
-/-- Run an IO action with gradient computation disabled.
-    This prevents building computation graphs for validation/inference. -/
-def no_grad {α : Type} (action : IO α) : IO α := do
-  let wasEnabled ← is_grad_enabled
-  let _ ← set_grad_enabled false
-  try
-    action
-  finally
-    let _ ← set_grad_enabled wasEnabled
-
-end autograd
 
 namespace data
 

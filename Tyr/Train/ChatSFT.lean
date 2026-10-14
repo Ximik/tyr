@@ -278,13 +278,15 @@ def sftForward {batch seq vocab : UInt64} {d m : DType} {dev : DevicePolicy}
     The loss of each batch is the masked mean per-token cross entropy; batches
     are weighted by their valid-token counts so the result is the global
     masked mean over all evaluated tokens. -/
-def evalValidationLoss
+def evalValidationLoss [TensorStruct Params]
+    (params : Params)
     (dataFn : IO SFTBatch)
-    (forwardFn : {b s : UInt64} → Tensor { shape := #[b, s], dtype := .Int64 } →
+    (forwardFn : Params → {b s : UInt64} → Tensor { shape := #[b, s], dtype := .Int64 } →
       IO (Σ v : UInt64, Tensor { shape := #[b, s, v], dtype := .Float32 }))
     (numSteps : Nat)
     (device : Device := Device.CPU)
-    : IO Float := autograd.no_grad do
+    : IO Float := do
+  let params := TensorStruct.detach params
   let mut totalLoss : Float := 0.0
   let mut totalValid : Nat := 0
 
@@ -292,7 +294,7 @@ def evalValidationLoss
     let batch ← dataFn
     let batch := moveBatchToDevice batch device
     if batch.numValidTokens > 0 then
-      let ⟨_, logits⟩ ← forwardFn batch.inputs
+      let ⟨_, logits⟩ ← forwardFn params batch.inputs
       let loss := maskedCrossEntropy logits batch.targets batch.mask
       totalLoss := totalLoss + Tensor.item loss * batch.numValidTokens.toFloat
       totalValid := totalValid + batch.numValidTokens
@@ -406,7 +408,7 @@ def trainLoop [TensorStruct P]
 
   let gradAccumSteps := max 1 (cfg.gradAccumSteps worldSize)
 
-  let mut currentParams := TensorStruct.makeLeafParams params
+  let mut currentParams ← TensorStruct.makeLeafParams params
   let mut currentOptState := optState
   let mut state : SFTState := {}
 
@@ -417,7 +419,7 @@ def trainLoop [TensorStruct P]
     -- Validation evaluation
     if let some valFn := valDataFn then
       if isLastStep || (step > 0 && step % cfg.evalEvery == 0) then
-        let valLoss ← evalValidationLoss valFn (forwardFn currentParams) cfg.evalSteps cfg.device
+        let valLoss ← evalValidationLoss currentParams valFn forwardFn cfg.evalSteps cfg.device
         callbacks.onValidation step valLoss
         if valLoss < state.bestValLoss then
           state := { state with bestValLoss := valLoss }
@@ -426,7 +428,7 @@ def trainLoop [TensorStruct P]
       break
 
     -- Zero gradients at start of accumulation
-    let workingParams := TensorStruct.makeLeafParams currentParams
+    let workingParams ← TensorStruct.makeLeafParams currentParams
     TensorStruct.zeroGrads workingParams
 
     -- Gradient accumulation loop
@@ -460,7 +462,7 @@ def trainLoop [TensorStruct P]
 
     -- Update parameters from the synchronized gradient snapshots.
     let opt := Optim.adamw (lr := lr) (b1 := 0.9) (b2 := 0.999)
-    let (newParams, newOptState) := Optim.step opt workingParams grads currentOptState
+    let (newParams, newOptState) ← Optim.step opt workingParams grads currentOptState
 
     currentParams := newParams
     currentOptState := newOptState

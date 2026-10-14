@@ -292,7 +292,7 @@ def stepSingleWithDiagnostics {m n : UInt64}
   -- Ambient update + Stiefel retraction.
   let updated := Sub.sub param (Tensor.Preserving.mulScalar tangentUnit effectiveLr)
   let retracted := retractStiefel updated
-  let newParam := Tensor.setRequiresGrad (Tensor.detach retracted) true
+  let newParam ← Tensor.parameter (Tensor.detach retracted)
 
   let newState : ParamState m n d dev := {
     momentumBuffer := some newMomentum
@@ -367,7 +367,7 @@ def benchmarkLocalStep {m n : UInt64}
     (cfg : Config := {})
     : IO Float := do
   let p0 ← Tensor.randn #[m, n]
-  let p0 := Tensor.setRequiresGrad p0 true
+  let p0 ← Tensor.parameter p0
   let mut p := retractStiefel p0
   let mut st := initParamState p
 
