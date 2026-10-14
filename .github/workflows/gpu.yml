@@ -9,6 +9,12 @@ on:
     paths:
       - 'Tyr/GPU/**'
       - 'Tyr/Torch.lean'
+      - 'Tyr/Basic.lean'
+      - 'Tyr/Basic/**'
+      - 'Tyr/Typed.lean'
+      - 'Tyr/Typed/**'
+      - 'Tyr/RawTensor.lean'
+      - 'Tyr/RawTensor/**'
       - 'Tests/*GPU*.lean'
       - 'Examples/GPU/**'
       - 'Examples/NanoChat/Generator/KVCache.lean'

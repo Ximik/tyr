@@ -1236,6 +1236,15 @@ absent. All twelve ABI commands from the CPU workflow pass against generated
 Lean C output, covering core, raw tensor, owned KV, neural, SafeTensors, Qwen35,
 KittenTTS, branching, Laguna, Gemma4, VAE, and Flux declarations.
 
+## Qualification workflow coverage
+
+The GPU qualification job explicitly builds raw and SafeTensors adapter C
+outputs and runs the raw-tensor ABI audit in addition to the existing audits.
+GPU CI path filters now include the basic, typed, and raw adapter modules.
+Shell syntax validation and all eleven qualification harness tests pass.
+The final reference scan finds only the deliberate standalone negative test
+outside this historical migration log. Actual GPU execution remains open.
+
 ## Remaining acceptance criteria
 
 Remove the `T` declaration and all model, generator, reflection, documentation,
