@@ -168,7 +168,8 @@ lean_object* lean_torch_dist_init_process_group(
         } else if (backend == "gloo") {
 #if TYR_HAS_GLOO
             auto options = c10d::ProcessGroupGloo::Options::create();
-            g_process_group = c10d::ProcessGroupGloo::createProcessGroupGloo(
+            options->devices.push_back(c10d::ProcessGroupGloo::createDefaultDevice());
+            g_process_group = c10::make_intrusive<c10d::ProcessGroupGloo>(
                 g_store, g_rank, g_world_size, options);
 #else
             return lean_io_result_mk_error(lean_mk_io_user_error(

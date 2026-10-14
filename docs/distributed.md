@@ -24,8 +24,11 @@ The layers compose bottom-up; each one is usable independently. All Lean
 modules are re-exported from the umbrella `Tyr.lean` (`Tyr.lean:30-54`) and
 live in `torch.*` namespaces. The C++ side is a single global
 `c10d::ProcessGroup` plus a `TCPStore` in `cc/src/tyr_distributed.cpp`; NCCL
-and Gloo are compile-time gated (`USE_C10D_NCCL` and `USE_C10D_GLOO`). A CPU
-build does not necessarily include a distributed backend. Async
+and Gloo are compile-time gated (`USE_C10D_NCCL` and `USE_C10D_GLOO`). The pinned
+CPU and CUDA dependencies include Gloo: `deps/fetch.sh` fetches the headers at
+the exact submodule revision used by the pinned PyTorch wheel, and the native
+build enables Gloo when those headers are present. Custom LibTorch builds must
+also provide a compatible Gloo implementation. Async
 work items live in a global map keyed by `UInt64` work ids.
 
 ### Collectives: `torch.dist` (`Tyr/Distributed.lean`)
@@ -79,11 +82,23 @@ identical optimizer step on every rank using the returned gradient tree (see
 `Examples/NanoChat/ModdedTrain.lean:1167-1196`).
 
 `Tests/RunDistributedValues.lean` checks retained inputs and earlier outputs,
-repeated list collectives, and async completion on two ranks. Build
-`Tests.RunDistributedValues`, then run it twice with ranks `0` and `1` and the
-same port, using its generated Lean setup file. This numerical check requires a
-Gloo-enabled native build; builds without a distributed backend still run the
-ordinary error-path and async-interface tests in `Tests.TestDistributedValues`.
+repeated list collectives, actual integer dtypes behind dynamic specifications,
+trainability flags, and async completion on two CPU ranks:
+
+```sh
+deps/fetch.sh cpu
+lake build --wfail RunDistributedValues
+lake env python3 scripts/test_distributed_values.py
+```
+
+Use `deps/fetch.sh cuda` instead when the checkout has a CUDA configuration.
+The runner selects a localhost rendezvous port, starts both ranks, and terminates
+and reaps its remaining processes if either rank fails or the 60-second deadline
+expires. Per-rank logs and `report.json` go to `output/ci/distributed`; `--log-dir`,
+`--timeout`, and `--port` can override these defaults. CPU CI runs this numerical
+check on Linux and macOS. It qualifies Gloo CPU collectives, not multi-GPU NCCL
+behavior. Builds without Gloo still run the ordinary error-path and
+async-interface tests in `Tests.TestDistributedValues`.
 
 `dist.withDistributed` (`Tyr/Distributed.lean:261`) brackets init/action/teardown
 for a single process group (no teardown if the action throws). A

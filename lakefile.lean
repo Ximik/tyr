@@ -224,6 +224,11 @@ lean_exe test_runner where
   root := `Tests.RunTests
   supportInterpreter := true
 
+/-- Two-rank CPU collective value regressions; launched by scripts/test_distributed_values.py. -/
+lean_exe RunDistributedValues where
+  root := `Tests.RunDistributedValues
+  supportInterpreter := true
+
 /-- Native tensor-free MCTS search and allocation microbenchmarks. -/
 lean_exe mctx_bench where
   root := `benchmarks.Mctx

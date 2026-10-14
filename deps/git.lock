@@ -2,3 +2,5 @@
 # <name> <commit> <url>
 soxr 8db9067a3d5f2a6777ac54eea08ecca78835419f https://github.com/steinbergmedia/soxr.git
 ThunderKittens 9df1476fe54d56fcb255aa7cf3128cc9222827f3 https://github.com/HazyResearch/ThunderKittens.git
+# Headers matching the Gloo submodule of the pinned PyTorch 2.10.0 wheel.
+gloo 54cbae0d3a67fa890b4c3d9ee162b7860315e341 https://github.com/pytorch/gloo.git
