@@ -1197,6 +1197,14 @@ It explains the partial claims of `STensor`, uses the indexed WAV append adapter
 and points to checked SafeTensors loading. These signatures were compared with
 their implementation declarations; checkpoint-backed inference was not rerun.
 
+## Update distributed-training documentation
+
+The distributed guide now describes return-allocated gather/scatter outputs,
+full-specification sharding, dependent SFT batch fields and callbacks, and
+Int64 token versus Float32 loss inputs for GRPO. Signatures were checked against
+the collective, sharding, SFT, and GRPO implementation declarations. This review
+does not establish multi-rank runtime qualification.
+
 ## Remaining acceptance criteria
 
 Remove the `T` declaration and all model, generator, reflection, documentation,

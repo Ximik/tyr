@@ -41,16 +41,19 @@ opaque destroyProcessGroup : IO Unit
 opaque barrier : IO Unit
 ```
 
-Collectives operate in place on shape-typed tensors. `ReduceOp` is
-`sum | avg | product | min | max` (`Tyr/Distributed.lean:29`). Sync wrappers
-return `IO Unit`; `*Async` variants return a `WorkHandle`:
+Collectives consume indexed tensors. All-reduce and broadcast mutate their
+inputs; reduce-scatter and all-gather allocate and return their outputs. `ReduceOp` is
+`sum | avg | product | min | max` (`Tyr/Distributed.lean:29`). The asynchronous all-reduce wrapper returns a `WorkHandle`:
 
 ```lean
-def allReduce  (tensor : T s) (op : ReduceOp := .sum) : IO Unit
-def allReduceAsync (tensor : T s) (op : ReduceOp := .sum) : IO WorkHandle
-opaque broadcast (tensor : @& T s) (srcRank : UInt64) : IO Unit
-def reduceScatter (output : T sOut) (input : T sIn) (op : ReduceOp := .sum) : IO Unit
-def allGather (output : T sOut) (input : T sIn) : IO Unit
+def allReduce {σ : StaticSpec} (tensor : Tensor σ) (op : ReduceOp := .sum) : IO Unit
+def allReduceAsync {σ : StaticSpec} (tensor : Tensor σ) (op : ReduceOp := .sum) : IO WorkHandle
+def broadcast {σ : StaticSpec} (tensor : Tensor σ) (srcRank : UInt64) : IO Unit
+def reduceScatter {σ : StaticSpec} (worldSize : UInt64) (input : Tensor σ)
+    (op : ReduceOp := .sum)
+    : IO (Tensor (σ.withShape (σ.shape.set! 0 (σ.shape.getD 0 0 / worldSize))))
+def allGather {σ : StaticSpec} (worldSize : UInt64) (input : Tensor σ)
+    : IO (Tensor (σ.withShape (σ.shape.set! 0 (σ.shape.getD 0 0 * worldSize))))
 
 structure WorkHandle where id : UInt64
 opaque wait (handle : WorkHandle) : IO Unit
@@ -99,21 +102,23 @@ def shardedShape (s : Shape) (spec : ShardSpec) : Shape
 
 abbrev ValidShard (rank worldSize : UInt64) := rank < worldSize
 
-structure ShardedTensor (fullShape : Shape) (rank worldSize : UInt64) (shardDim := .first) where
-  shard : T (shardedShape fullShape ⟨shardDim, worldSize, rank⟩)
-  cachedFull : Option (T fullShape) := none
+structure ShardedTensor (σ : StaticSpec) (rank worldSize : UInt64)
+    (shardDim : ShardDim := .first) where
+  shard : Tensor (σ.withShape (shardedShape σ.shape ⟨shardDim, worldSize, rank⟩))
+  cachedFull : Option (Tensor σ) := none
   cacheIsStale : Bool := true
 ```
 
-Operations (`Tyr/Sharding.lean:115-183`):
+Operations retain the full tensor's dtype and device policy:
 
-```lean
-def ShardedTensor.fromFull (full : T s) (_h : ValidShard rank worldSize) (shardDim := .first)
-    : ShardedTensor s rank worldSize shardDim
-def ShardedTensor.gather : IO (T s × ShardedTensor s rank worldSize sd)        -- allGather + cache
-def ShardedTensor.scatterGrad (fullGrad : T s) : IO (T (shardedShape ...))     -- reduceScatter .sum
-def ShardedTensor.updateShard (newShard : ...) : ShardedTensor ...             -- marks cache stale
-```
+- `ShardedTensor.fromFull full proof shardDim` slices a `Tensor σ` and checks
+  the local shard metadata. The proof establishes `rank < worldSize`.
+- `sharded.gather` returns `IO (Tensor σ × ShardedTensor σ rank worldSize sd)`
+  and caches the gathered value. A fresh collective requires equal-sized shards.
+- `sharded.scatterGrad fullGrad` reduces/scatters a `Tensor σ` and checks the
+  result against `σ.withShape (shardedShape σ.shape ⟨sd, worldSize, rank⟩)`.
+- `sharded.updateShard newShard` accepts that same indexed local specification
+  and marks the cache stale.
 
 This is the ZeRO pattern: keep one shard of each parameter (and optimizer
 state) per rank, `gather` lazily for the forward pass, `scatterGrad` the
@@ -223,16 +228,21 @@ def runDueEvaluators (evaluators : Array (Evaluator α)) (ctx : α) (step : Nat)
 
 A nanochat-style supervised fine-tuning loop: masked cross-entropy over
 assistant tokens only, gradient accumulation, linear LR decay, one AdamW
-step per iteration. Batches are shape-erased (`T #[]`) since conversation
-batches vary in length:
+step per iteration. Each batch carries its runtime dimensions as fields, and
+its tensor types depend on those fields:
 
 ```lean
 structure SFTBatch where
-  inputs targets mask : T #[]      -- [batch, seq]; mask 1.0 = train, 0.0 = ignore
   batchSize seqLen : UInt64
+  inputs targets : DTensor #[batchSize, seqLen] .Int64
+  mask : DTensor #[batchSize, seqLen] .Float32
   numValidTokens : Nat
 
-def maskedCrossEntropy (logits : T #[batch, seq, vocab]) (targets mask : T #[batch, seq]) : T #[]
+def maskedCrossEntropy {batch seq vocab : UInt64} {d m : DType} {dev : DevicePolicy}
+    (logits : Tensor ⟨#[batch, seq, vocab], d, dev⟩)
+    (targets : Tensor ⟨#[batch, seq], .Int64, dev⟩)
+    (mask : Tensor ⟨#[batch, seq], m, dev⟩)
+    : Tensor ⟨#[], (DType.promote d m).sumResult, dev⟩
 ```
 
 The main entry is generic over the parameter tree:
@@ -240,8 +250,10 @@ The main entry is generic over the parameter tree:
 ```lean
 def trainLoop [TensorStruct P]
     (cfg : SFTConfig) (params : P) (optState : Optim.AdamWState P)
-    (forwardFn : P → T #[] → IO (T #[]))          -- params → inputs → logits
-    (lossFn : T #[] → T #[] → T #[] → T #[])      -- logits → targets → mask → loss
+    (forwardFn : P → {b s : UInt64} → DTensor #[b, s] .Int64 →
+      IO (Σ v : UInt64, DTensor #[b, s, v] .Float32))
+    (lossFn : {b s v : UInt64} → DTensor #[b, s, v] .Float32 →
+      DTensor #[b, s] .Int64 → DTensor #[b, s] .Float32 → DTensor #[] .Float32)
     (trainDataFn : IO SFTBatch) (valDataFn : Option (IO SFTBatch) := none)
     (numTrainExamples : Nat := 10000) (callbacks : Callbacks := {})
     : IO (P × Optim.AdamWState P × SFTState)
@@ -273,8 +285,9 @@ trust region, no importance weights, no clipping, advantage
 
 ```lean
 def computeAdvantages (rewards : Array Float) : Array Float
-def computePGLoss (logProbs : T #[b, t]) (advantages : T #[b]) (mask : T #[b, t])
-    (numPasses : UInt64 := 1) (examplesPerRank : UInt64 := 1) : T #[]
+def computePGLoss (logProbs : DTensor #[b, t] .Float32)
+    (advantages : DTensor #[b] .Float32) (mask : DTensor #[b, t] .Float32)
+    (numPasses : UInt64 := 1) (examplesPerRank : UInt64 := 1) : DTensor #[] .Float32
 ```
 
 Rewards are pluggable; `mathReward` parses the GSM8K `#### <answer>` marker,
@@ -290,7 +303,7 @@ The update-capable training loop:
 def trainOnPromptsWithUpdates (b t : UInt64) [TensorStruct P]
     (prompts : Array (Array UInt64 × String × String))   -- (tokens, text, answer)
     (generateOneFn : P → Array UInt64 → IO UInt64)
-    (forwardFn : P → T #[b, t] → T #[b, t] → IO (T #[b, t]))  -- (params, input, target) → per-token NLL
+    (forwardFn : P → DTensor #[b, t] .Int64 → DTensor #[b, t] .Int64 → IO (DTensor #[b, t] .Float32))  -- (params, input, target) → per-token NLL
     (params : P) (optState : Optim.AdamWState P)
     (decodeFn : Array UInt64 → String) (rewardFn : String → String → Float)
     (config : GRPOConfig) (numEpochs : Nat := 1) (callbacks : Callbacks := {})
@@ -336,7 +349,7 @@ def main : IO Unit :=
       let trainDataFn ← ChatSFT.makeTaskDataGenerator taskIterator sftCfg.maxSeqLen chatTokens.assistantEnd
       let callbacks := consoleSFTCallbacks.combine (ChatSFT.artifactCallbacks runArtifacts "sft")
       let optState := (Optim.adamw (lr := sftCfg.embeddingLr)).init params
-      -- forwardFn/lossFn are shape-erased; grads all-reduced inside when distributed
+      -- forwardFn/lossFn preserve batch dimensions; grads all-reduced inside when distributed
       let (params', optState', sftState) ← ChatSFT.trainLoop sftCfg
         params optState forwardFn lossFn trainDataFn none numTrainExamples callbacks
       if (← get).isMaster then
@@ -390,7 +403,7 @@ Script knobs (`TORCHRUN_BIN`, `NPROC_PER_NODE`, `SKIP_BUILD`, `TYR_DEVICE`,
 ## Related guides
 
 - [Getting started](getting-started.md) — torchrun wrappers, `TYR_DEVICE`, build prerequisites.
-- [Tensors](core/tensors.md) — `T s`, `Shape`, `Device`, the ops used by the collectives.
+- [Tensors](core/tensors.md) — `Tensor σ`, `Shape`, `Device`, the ops used by the collectives.
 - [TensorStruct](core/tensorstruct.md) — the traversal that powers `broadcastParams` / `allReduceGrads`.
 - [Optimization](optimization.md) — `Optim.adamw` / `AdamWState` used by both recipe loops, and the Polar Express kernels hosted in `Tyr/Distributed.lean`.
 - [Data](data.md) — `TaskIterator` and conversation batches behind `makeTaskDataGenerator`.
