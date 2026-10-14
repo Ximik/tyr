@@ -964,6 +964,33 @@ The benchmark correctly fails on this CUDA-unavailable host. Test inventory
 validation still covers nine required and four optional suites. GitHub CLI
 reports green upstream main CI, independently of the local changes.
 
+## Remaining GPU example migration and parity consolidation
+
+The FlashAttention benchmark now distinguishes BF16 outputs from Float32
+backward references and uses indexed dispatch APIs throughout. Its numerical
+helpers have CPU coverage for relative L2 metrics and repeated cotangent
+backward calls. That regression exposed reuse of a freed autograd graph when
+leaf creation was pure. Benchmark leaves now allocate independent storage
+through the audited IO clone operation before enabling gradients. Timing
+includes this fresh leaf allocation and must be remeasured on hardware.
+
+A scan of legacy operation calls found inferred tensor dependencies missed by
+searches for explicit `T` annotations. The copy runner, FlashAttention smoke
+runner, and Brownian sampling runner are now indexed too. Copy/output buffers
+are allocated through IO, and Brownian readback uses the indexed host adapter.
+The shared parity helper now requires indexed shapes and computes metrics in
+Float32; `IndexedParity` reexports it instead of maintaining a second version.
+
+No direct legacy tensor constructors, operations, or `T` annotations remain
+in `Examples/GPU` in the source scan. This is a source-migration milestone,
+not CUDA qualification or removal of the repository's legacy API. Actual GPU
+parity, routes, convergence, and benchmark timings still require hardware.
+The main runner, both GPU targets, FlashAttention benchmark/smoke executables,
+and copy executable build under `--wfail` (1,778 jobs). All 1,488 main CPU
+tests pass with zero failures/skips after the fresh-leaf fix. The three
+executables correctly fail without CUDA. The test inventory validates nine
+required and four optional suites; upstream main CI is green independently.
+
 ## Remaining acceptance criteria
 
 Remove the `T` declaration and all model, generator, reflection, documentation,

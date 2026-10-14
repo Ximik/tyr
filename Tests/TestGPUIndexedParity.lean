@@ -1,4 +1,7 @@
 import Examples.GPU.IndexedParity
+import Examples.GPU.RunCopy
+import Examples.GPU.RunBrownianSample
+import Examples.GPU.FlashBenchReference
 import Examples.GPU.DecodeReference
 import Examples.GPU.MhaTrainingReference
 import Examples.GPU.GemmReference
@@ -44,7 +47,8 @@ example (a : DTensor #[2] .Float32) (b : DTensor #[3] .Float32) : True := by
       Examples.GPU.RunBrownianDescent.runOnce, Examples.GPU.RunEulerMaruyamaFused.runOnce,
       Examples.GPU.RunRotary.runOnce, Examples.GPU.RunLayerNorm.runOnce,
       Examples.GPU.RunLayerNorm.runBFloat16Once, Examples.GPU.RunRMSNorm.runOnce,
-      Examples.GPU.RunRMSNorm.runBFloat16Once, Examples.GPU.RunFlashAttn.runOnce, Examples.GPU.RunMhaH100.runOnce false, Examples.GPU.RunMhaGB10.runOnce] do
+      Examples.GPU.RunRMSNorm.runBFloat16Once, Examples.GPU.RunFlashAttn.runOnce, Examples.GPU.RunMhaH100.runOnce false, Examples.GPU.RunMhaGB10.runOnce, Examples.GPU.RunCopy.runOnce,
+      Examples.GPU.RunBrownianSample.runOnce] do
     LeanTest.assertTrue (!(← run)) "CPU hosts cannot claim a successful GPU parity run"
 
 @[test] def testGPURotaryIndexedTrainingReference : IO Unit := do
@@ -267,3 +271,16 @@ example (a : DTensor #[2, 3] .BFloat16) (b : DTensor #[4, 5] .BFloat16) : True :
   LeanTest.assertTrue (Tensor.allclose dq (Tensor.full #[2, 3, 2, 64] 4.0) 0 0)
   LeanTest.assertTrue (Tensor.allclose dk (Tensor.zeros #[2, 3, 2, 64]) 0 0)
   LeanTest.assertTrue (Tensor.allclose dv (Tensor.ones #[2, 3, 2, 64]) 0 0)
+
+@[test] def testGPUFlashBenchIndexedMetricsAndCotangent : IO Unit := do
+  let ref := Tensor.fromFloatArray #[3.0, 4.0]
+  let actual := Tensor.fromFloatArray #[6.0, 8.0]
+  LeanTest.assertEqual (Examples.GPU.FlashBenchReference.relL2 actual ref) 1.0
+  LeanTest.assertEqual (Examples.GPU.FlashBenchReference.relL2 ref (Tensor.zeros #[2])) 5.0
+  for _ in [:2] do
+    let leaf ← Examples.GPU.FlashBenchReference.makeLeaf ref.toBFloat16
+    let out := leaf * leaf
+    let cotangent := (Tensor.fromFloatArray #[2.0, -1.0]).toBFloat16
+    Examples.GPU.FlashBenchReference.backwardWithCotangent out cotangent
+    LeanTest.assertTrue (Tensor.allclose (Tensor.gradOf leaf).toFloat32
+      (Tensor.fromFloatArray #[12.0, -8.0]) 0 0)
