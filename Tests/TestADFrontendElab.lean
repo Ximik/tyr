@@ -14,7 +14,9 @@ def runCoreM (x : CoreM α) : IO α := do
     #[{ module := `Tests.TestADFrontendElab }]
     {}
     (loadExts := true)
-  let ctx : Core.Context := { fileName := "<test>", fileMap := default }
+  -- CoreM.run uses this baseline; the default zero charges earlier tests too.
+  let initHeartbeats ← IO.getNumHeartbeats
+  let ctx : Core.Context := { fileName := "<test>", fileMap := default, initHeartbeats }
   let state : Core.State := { env := env }
   let eio := x.run ctx state
   let res ← EIO.toBaseIO eio
@@ -41,6 +43,24 @@ opaque frontendFrozenPadPrimitive (_base : torch.Tensor { shape := #[2], dtype :
 def frozenPadWrapper (base : torch.Tensor { shape := #[2], dtype := .Float32 })
     (padv : torch.Frozen { shape := #[1], dtype := .Float32 }) : torch.Tensor { shape := #[6], dtype := .Float32 } :=
   frontendFrozenPadPrimitive base padv
+
+def TensorTypeAlias (spec : torch.StaticSpec) : Type := torch.Tensor spec
+abbrev AliasedParameter := TensorTypeAlias { shape := #[2], dtype := .Float64 }
+def FrozenTypeAlias : Type := torch.Frozen { shape := #[1], dtype := .Int64 }
+
+opaque frontendAliasedPrimitive (_base : AliasedParameter)
+    (_padv : (let type := FrozenTypeAlias; type)) :
+    TensorTypeAlias { shape := #[6], dtype := .Float64 } :=
+  torch.Tensor.zerosFor { shape := #[6], dtype := .Float64 }
+
+def aliasedWrapper (base : AliasedParameter) (padv : FrozenTypeAlias) :
+    TensorTypeAlias { shape := #[6], dtype := .Float64 } :=
+  frontendAliasedPrimitive base padv
+
+opaque frontendRawPrimitive (tensor : torch.RawTensor) : torch.RawTensor := tensor
+
+def rawWrapper (tensor : torch.RawTensor) : torch.RawTensor :=
+  frontendRawPrimitive tensor
 
 private def padPrimitiveSpecs : Array PrimitiveFrontendSpec := #[
   {
@@ -106,6 +126,43 @@ unsafe def testDeriveFrontendFrozenTensorSpec : IO Unit := do
     "Frozen typed parameters must keep their AD participation role."
   LeanTest.assertTrue ((registration.jaxpr.invars.map (·.metaInfo.dtype)) == #[some "Float32", some "Float32"])
     "Typed and frozen parameters must retain their dtype in frontend metadata."
+
+@[test]
+unsafe def testDeriveFrontendAliasedTensorSpecs : IO Unit := do
+  let registration ← runCoreM <|
+    deriveSinglePrimitiveFrontendRegistration ``Tests.ADFrontendElab.aliasedWrapper
+      #[{ leanConst := ``Tests.ADFrontendElab.frontendAliasedPrimitive, op := padAliasOpName }]
+  let jaxpr := registration.jaxpr
+  LeanTest.assertTrue ((jaxpr.invars.map (·.metaInfo.shape)) == #[some #[2], some #[1]])
+    "Alias normalization must stop at the public Tensor/Frozen type heads."
+  LeanTest.assertTrue ((jaxpr.invars.map (·.metaInfo.participation)) == #[.diff, .frozen])
+    "Tensor and Frozen aliases must retain distinct AD participation roles."
+  LeanTest.assertTrue ((jaxpr.invars.map (·.metaInfo.dtype)) == #[some "Float64", some "Int64"])
+    "Alias normalization must preserve each parameter's own static specification."
+  LeanTest.assertTrue ((jaxpr.outvars.map (·.metaInfo.shape)) == #[some #[6]])
+  LeanTest.assertTrue ((jaxpr.outvars.map (·.metaInfo.dtype)) == #[some "Float64"])
+
+@[test]
+unsafe def testDeriveFrontendStartsFreshHeartbeatBudget : IO Unit := do
+  let previous ← IO.getNumHeartbeats
+  try
+    IO.addHeartbeats (Core.getMaxHeartbeats {} + 1)
+    testDeriveFrontendAliasedTensorSpecs
+  finally
+    IO.setNumHeartbeats previous
+
+@[test]
+unsafe def testDeriveFrontendRejectsRawHandles : IO Unit := do
+  let result ← try
+    let _ ← runCoreM <|
+      deriveSinglePrimitiveFrontendRegistration ``Tests.ADFrontendElab.rawWrapper
+        #[{ leanConst := ``Tests.ADFrontendElab.frontendRawPrimitive, op := padAliasOpName }]
+    pure (none : Option String)
+  catch error =>
+    pure (some error.toString)
+  match result with
+  | none => LeanTest.fail "A raw handle has no indexed tensor metadata."
+  | some message => LeanTest.assertTrue (message.containsSubstr "only supports tensor-like parameters")
 
 /--
 Registration itself currently trips a Lean IR interpreter assertion under

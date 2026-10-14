@@ -167,3 +167,5 @@ import Tests.TestTypedNeural
 
 import Tests.TestTTSTypedLoading
 import Tests.TestFloatBuffer
+
+import Tests.TestTensorConstruction

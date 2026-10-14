@@ -15,8 +15,8 @@ It is the lowest-level shared layer used across runtime bindings, model code, an
 - Tensor metadata extraction hooks (`runtimeShape`, dtype/device introspection,
   stats/values), implemented in `libTyrC` (this module).
 - The indexed `Tensor`, checked raw construction, and a trusted fresh zero
-  factory. Keeping its private constructor here prevents unchecked raw wrapping
-  elsewhere, while GPU code generation continues to import only `Basic.Types`.
+  factory. An opaque carrier prevents structural construction and reindexing,
+  while GPU code generation continues to import only `Basic.Types`.
 
 ## Scope
 
@@ -71,14 +71,32 @@ def stats (t : RawTensor) : String := statsImpl #[] t
 
 end RawTensor
 
-/-- Tensor indexed by a static specification. Normal construction uses the
-checked native boundary in this module. Constructor privacy is an API convention,
-not a proof of the native invariant: constructor tactics can still bypass it. -/
-structure Tensor (σ : StaticSpec) where
-  private mk ::
-  raw : RawTensor
+-- Keep the representation opaque even to constructor/cases/unfold tactics.
+-- The body establishes nonemptiness without adding an axiom; it does not make
+-- different specification indices definitionally equal in the kernel.
+private opaque TensorCarrier (_σ : StaticSpec) : NonemptyType :=
+  ⟨RawTensor, inferInstance⟩
+
+/-- Tensor indexed by a static specification. Safe code admits native handles
+through `Tensor.ofRaw`; the carrier has no constructor or structural recursor.
+At runtime it is the native handle itself, with no additional allocation. -/
+def Tensor (σ : StaticSpec) : Type := (TensorCarrier σ).type
+
+instance {σ : StaticSpec} : Nonempty (Tensor σ) := (TensorCarrier σ).property
 
 namespace Tensor
+
+-- These casts implement the native representation, not kernel proofs. They are
+-- unsafe so even discovering their private names cannot provide an unchecked
+-- constructor to safe Lean code. Public opaque declarations have safe logical
+-- bodies and use these implementations only during execution.
+private unsafe def rawImpl {σ : StaticSpec} (tensor : Tensor σ) : RawTensor :=
+  unsafeCast tensor
+
+/-- Explicitly expose the native handle, which carries no static claims. -/
+@[implemented_by rawImpl]
+opaque raw {σ : StaticSpec} (tensor : Tensor σ) : RawTensor :=
+  Classical.choice inferInstance
 
 private def renderDevice : Device → String
   | .CPU => "CPU"
@@ -102,11 +120,28 @@ token must match exactly. The `.any` device policy makes no placement claim. -/
 def validate {σ : StaticSpec} (tensor : Tensor σ) : Except String Unit :=
   checkSpec σ tensor.raw
 
+private unsafe def ofRawImpl {σ : StaticSpec} (raw : RawTensor) :
+    Except String (Tensor σ) := do
+  checkSpec σ raw
+  pure (unsafeCast raw)
+
 /-- The raw-to-indexed boundary. Construct a tensor only after validating every
 claim in the destination specification against native metadata. -/
-def ofRaw {σ : StaticSpec} (raw : RawTensor) : Except String (Tensor σ) := do
-  checkSpec σ raw
-  pure (.mk raw)
+@[implemented_by ofRawImpl]
+opaque ofRaw {σ : StaticSpec} (raw : RawTensor) : Except String (Tensor σ) :=
+  .error "Tensor.ofRaw requires its checked runtime implementation"
+
+private unsafe def zerosForImpl (σ : StaticSpec) : Tensor σ :=
+  let device := match σ.device with
+    | .any => Device.CPU
+    | .exact device => device
+  let raw := RawTensor.zeros σ.shape false device
+  let raw := match σ.dtype.safeTensorTag? with
+    | some tag => RawTensor.castDType σ.shape raw tag
+    | none =>
+        if σ.dtype == DType.Unknown "dynamic" then raw
+        else RawTensor.castDType σ.shape raw σ.dtype.canonicalName
+  unsafeCast raw
 
 /-- Trusted native allocation boundary used to bootstrap pure typed factories.
 It accepts a specification, never a foreign handle: libtorch creates fresh zeros
@@ -116,24 +151,20 @@ allocation/cast failures throw; `Unknown "dynamic"` uses the native default and
 parsing and fail instead of silently defaulting. This is the sole unchecked
 native construction boundary.
 -/
-def zerosFor (σ : StaticSpec) : Tensor σ :=
-  let device := match σ.device with
-    | .any => Device.CPU
-    | .exact device => device
-  let raw := RawTensor.zeros σ.shape false device
-  let raw := match σ.dtype.safeTensorTag? with
-    | some tag => RawTensor.castDType σ.shape raw tag
-    | none =>
-        if σ.dtype == .Unknown "dynamic" then raw
-        else RawTensor.castDType σ.shape raw σ.dtype.canonicalName
-  .mk raw
+@[implemented_by zerosForImpl]
+opaque zerosFor (σ : StaticSpec) : Tensor σ := Classical.choice inferInstance
 
 instance {σ : StaticSpec} : Inhabited (Tensor σ) := ⟨zerosFor σ⟩
 
-/-- Weaken placement without changing the native handle, shape or dtype. -/
-def forgetDevice {σ : StaticSpec} (tensor : Tensor σ) :
+private unsafe def forgetDeviceImpl {σ : StaticSpec} (tensor : Tensor σ) :
     Tensor { σ with device := .any } :=
-  .mk tensor.raw
+  unsafeCast tensor
+
+/-- Weaken placement without changing the native handle, shape or dtype. -/
+@[implemented_by forgetDeviceImpl]
+opaque forgetDevice {σ : StaticSpec} (tensor : Tensor σ) :
+    Tensor { σ with device := .any } :=
+  Classical.choice inferInstance
 
 instance {σ : StaticSpec} : ToString (Tensor σ) where
   toString t := RawTensor.toString t.raw

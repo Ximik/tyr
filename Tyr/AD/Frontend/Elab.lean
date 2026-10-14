@@ -61,17 +61,16 @@ private unsafe def indexedVarMeta (spec : Expr) (participation : DiffParticipati
   return { participation, shape := shape?, dtype := dtype? }
 
 private unsafe def tensorLikeVarMeta? (type : Expr) : MetaM (Option VarMeta) := do
-  let rawType := type.consumeMData
-  if rawType.isAppOfArity ``torch.Frozen 1 then
-    return some (← indexedVarMeta (rawType.getArg! 0) .frozen)
+  -- Normalize aliases without unfolding Tensor into its opaque carrier. Its
+  -- public application retains the specification needed for frontend metadata.
+  let type ← whnfHeadPred (← instantiateMVars type) fun type =>
+    pure (!(type.isAppOfArity ``torch.Tensor 1 || type.isAppOfArity ``torch.Frozen 1))
+  if type.isAppOfArity ``torch.Tensor 1 then
+    return some (← indexedVarMeta (type.getArg! 0) .diff)
+  else if type.isAppOfArity ``torch.Frozen 1 then
+    return some (← indexedVarMeta (type.getArg! 0) .frozen)
   else
-    let type ← whnf type
-    if type.isAppOfArity ``torch.Tensor 1 then
-      return some (← indexedVarMeta (type.getArg! 0) .diff)
-    else if type.isAppOfArity ``torch.Frozen 1 then
-      return some (← indexedVarMeta (type.getArg! 0) .frozen)
-    else
-      return none
+    return none
 
 private def unsupportedParamMessage (param : Expr) (type : Expr) : MetaM String := do
   let paramDecl ← param.fvarId!.getDecl
