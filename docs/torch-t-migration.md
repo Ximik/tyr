@@ -1146,6 +1146,14 @@ checked raw SafeTensors boundaries, and single-tensor export. The FFI guide uses
 `RawTensor` only for the native carrier and indexed tensors for its public
 example. Their complete updated examples both typecheck.
 
+## Update data and audio cache guides
+
+The data guide describes dependent Int64 batch shapes and Float32 conversation
+masks rather than erased tensors. Its complete generator example typechecks.
+The audio guide documents indexed KV buffers, effectful initialization/appends/
+position advances, explicit mutation ownership, and IO validation errors. Its
+BF16 cached-decode example typechecks against the current API.
+
 ## Remaining acceptance criteria
 
 Remove the `T` declaration and all model, generator, reflection, documentation,

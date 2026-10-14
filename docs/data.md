@@ -28,7 +28,7 @@ unrelated roots:
 - `Tyr.Text` (`Tyr/Text/`) — streaming-ASR utilities; no umbrella module and
   not re-exported by `import Tyr`.
 
-Tensor types below use Tyr's shape-tracked `T #[...]` notation (see [core/tensors.md](core/tensors.md)).
+Token tensors use `DTensor shape .Int64`; training masks use `DTensor shape .Float32` (see [core/tensors.md](core/tensors.md)).
 
 ### BPE tokenizer stack
 
@@ -130,20 +130,16 @@ rejected for exact data resume because their offsets addressed the old truncated
 unshuffled stream. ModdedTrain also rejects multi-rank exact data resume until
 its checkpoints collect every rank's cursor instead of only rank 0's.
 
-Two batch-shape patterns coexist, and the assignment of names to files is
-worth getting right:
+Batch shapes remain indexed even when their dimensions come from runtime state.
+`BatchIterator.next` returns an optional Int64 tensor with shape
+`#[iter.batchSize, iter.seqLen]`. Updating the iterator's configuration changes
+the dependent result type on the next call; no shape erasure is needed.
 
-- **Shape-erased**: `BatchIterator.next` returns `T #[]` — the statically
-  known `[batchSize, seqLen]` from `getBatch` is reshaped to `T #[]` at
-  handoff (`DataLoader.lean:302`) so callers can vary batch parameters per
-  step.
-- **Fixed-dim**: `SequentialBatchIterator (n b s : UInt64)` keeps shapes in
-  the type, returning `Option (T #[b, s] × T #[b, s])` with input/target
-  shifted by one. It lives in `Examples/GPT/GPTDataLoader.lean:153` (same
-  `torch.DataLoader` namespace), alongside `SequentialLoader`,
-  `BatchIterator.nextGPT` (shape-erased input/target split), and
-  `DistributedDataGenerator.nextBatchGPT` / `updateForStepGPT`
-  (modded-nanogpt schedules).
+`SequentialBatchIterator (n b s : UInt64)` also carries dimensions in its type
+and returns optional pairs of `DTensor #[b, s] .Int64`, shifted by one token.
+It lives in `Examples.GPT.GPTDataLoader`, alongside `BatchIterator.nextGPT`
+and the distributed GPT batching and scheduling helpers. These GPT helpers
+retain both the input and target dimensions and their Int64 dtype.
 
 ### Parquet pretraining loaders
 
@@ -181,8 +177,8 @@ def renderConversation
 It emits BOS plus role-delimited tokens; the mask is 1 on assistant content
 and end markers, 0 elsewhere (tool outputs are masked out), and a leading
 system message is merged into the first user message. `collate`
-(`Task.lean:352`) pads a batch of `TokenizedConversation`s into `T #[]`
-token/mask tensors.
+pads tokenized conversations into a `ConversationBatch`: its `batchSize` and
+`seqLen` fields index Int64 tokens and Float32 masks.
 
 Mixtures come in three forms, all projecting to the function-closure
 `ConversationMixture { size, seed, getAtSeed }` (`Task.lean:179`):
@@ -271,12 +267,12 @@ assembles a pretraining → midtraining → SFT sequence.
 | `DataShard.loadFromFile` | `(path) (shardIdx numShards bosToken : UInt64) : IO (Σ n, DataShard n)` | `Tyr/DataLoader.lean:239` |
 | `DataShard.load` / `loadValidationData` | Return `IO (Σ n, DataShard n)` with the real partition length | `Tyr/DataLoader.lean` |
 | `DistributedDataGenerator.cursor` / `.restoreCursor` | Versioned `StreamCursor` capture and validated restore | `Tyr/DataLoader.lean` |
-| `BatchIterator.new` / `.next` | `(shard) (batchSize seqLen : UInt64) : BatchIterator` / `IO (Option (T #[]) × BatchIterator)` | `Tyr/DataLoader.lean:288,291` |
+| `BatchIterator.new` / `.next` | `(shard) (batchSize seqLen : UInt64) : BatchIterator` / `IO (Option (DTensor #[iter.batchSize, iter.seqLen] .Int64) × BatchIterator)` | `Tyr/DataLoader.lean:288,291` |
 | `DistributedDataGenerator.init` | `(config : Config) (batchSize seqLen : UInt64) : IO DistributedDataGenerator` | `Tyr/DataLoader.lean:323` |
-| `DistributedDataGenerator.nextBatch` | `IO (Option (T #[]) × DistributedDataGenerator)` | `Tyr/DataLoader.lean:333` |
-| `BatchIterator.nextGPT` | `IO (Option (T #[] × T #[]) × BatchIterator)` (input/target shift) | `Examples/GPT/GPTDataLoader.lean:23` |
+| `DistributedDataGenerator.nextBatch` | `IO (Option (DTensor #[gen.iterator.batchSize, gen.iterator.seqLen] .Int64) × DistributedDataGenerator)` | `Tyr/DataLoader.lean:333` |
+| `BatchIterator.nextGPT` | `IO (Option (DTensor #[iter.batchSize, iter.seqLen] .Int64 × DTensor #[iter.batchSize, iter.seqLen] .Int64) × BatchIterator)` (input/target shift) | `Examples/GPT/GPTDataLoader.lean:23` |
 | `DistributedDataGenerator.nextBatchGPT` / `updateForStepGPT` | GPT batch + modded-nanogpt schedule | `Examples/GPT/GPTDataLoader.lean:60,84` |
-| `SequentialLoader.fromFile` / `SequentialBatchIterator.new` / `.next` | fixed-dim Shakespeare-style loading, `T #[b, s]` batches | `Examples/GPT/GPTDataLoader.lean:118,159,166` |
+| `SequentialLoader.fromFile` / `SequentialBatchIterator.new` / `.next` | fixed-dim Shakespeare-style loading, `DTensor #[b, s] .Int64` batches | `Examples/GPT/GPTDataLoader.lean:118,159,166` |
 | `loadShakespeareData` | `(trainPath valPath) (batchSize seqLen) : IO (Σ n, SequentialBatchIterator n .. × Option (Σ m, SequentialLoader m))` — one-shot Shakespeare setup | `Examples/GPT/GPTDataLoader.lean:188` |
 
 ### Parquet / downloads — `torch.Data.Pretraining`, `torch.Data.Download`, `torch.Data.HuggingFace`
@@ -301,7 +297,7 @@ assembles a pretraining → midtraining → SFT sequence.
 | `renderConversation` | `(conv) (tokens : ChatTokens) (encode : String → Array UInt64) : TokenizedConversation` | `Task.lean:236` |
 | `collate` | `(convs) (maxLen : Nat) (padToken := 0) : IO ConversationBatch` | `Task.lean:352` |
 | `TaskIterator.new` / `.nextBatch` | padded masked batches from a `ConversationMixture` | `Task.lean:400,409` |
-| `TaskTokenStream.new` / `.nextGPTBatch` | rank-strided token windows, `IO (Option (T #[] × T #[]) × _)` | `Task.lean:470,521` |
+| `TaskTokenStream.new` / `.nextGPTBatch` | rank-strided token windows; indexed Int64 input/target pairs with the stream dimensions | `Task.lean:470,521` |
 | `TaskMixture.create` / `.toConversationMixture` | `(entries : Array MixtureEntry) (seed := 42)` | `Task.lean:153,193` |
 | `EvalTask` class / `boxTask` / `entry` / `GenericTaskMixture.create` | open task typeclass + existential mixture | `Tyr/Data/TaskClass.lean:57,119,237,172` |
 | `createMidtrainingMixture` / `createSFTMixture` | `(modelName : String) : TaskMixture` | `Tyr/Data/Tasks.lean:188,197` |
@@ -344,14 +340,21 @@ Pretraining batches from fineweb shards — reconstructed example (from
 
 ```lean
 import Tyr.DataLoader
-open torch.DataLoader
+open torch torch.DataLoader
 
-let cfg : Config := { dataPath := "data/nanochat", seqLen := 128, bosToken := 50256 }
-let gen ← DistributedDataGenerator.init cfg 8 128   -- rank/worldSize auto-detected
-let (batch?, gen') ← gen.nextBatch                  -- batch? : Option (T #[])
--- With `import Examples.GPT.GPTDataLoader`, use gen.nextBatchGPT to get
--- (inputs, targets) split by the one-token shift.
+def nextTokenCount (gen : DistributedDataGenerator) : IO Nat := do
+  let (batch?, _) ← gen.nextBatch
+  match batch? with
+  | none => pure 0
+  | some batch =>
+    let indexed : DTensor #[gen.iterator.batchSize, gen.iterator.seqLen] .Int64 := batch
+    pure (← indexed.toUInt64Array).size
 ```
+
+Create a generator with `DistributedDataGenerator.init cfg batchSize seqLen`.
+With `import Examples.GPT.GPTDataLoader`, `gen.nextBatchGPT` returns indexed
+input/target pairs separated by one token.
+
 
 Fixed-dim Shakespeare batches — reconstructed example (from
 `Tests/TestDataLoader.lean:92-126`, definitions in
@@ -363,7 +366,7 @@ open torch.DataLoader
 
 let ⟨n, loader⟩ ← SequentialLoader.fromFile "data/shakespeare_char/train.bin"
 let iter : SequentialBatchIterator n 4 32 := SequentialBatchIterator.new loader 4 32
-let (pair?, iter') := iter.next    -- pair? : Option (T #[4, 32] × T #[4, 32])
+let (pair?, iter') := iter.next    -- pair? : Option (DTensor #[4, 32] .Int64 × DTensor #[4, 32] .Int64)
 ```
 
 Midtraining/SFT token stream over a task mixture — reconstructed example
@@ -379,7 +382,7 @@ let chatTokens ← buildChatTokensFromTokenizer tok   -- helper: look up special
 let encode := fun (text : String) => (tokenizer.encodeWithSpecials tok text).map (·.toUInt64)
 let mixture := (← createMidtrainTaskMixture cfg).toConversationMixture
 let stream := TaskTokenStream.new mixture batchSize seqLen chatTokens encode rank worldSize
-let (pair?, stream') ← stream.nextGPTBatch          -- Option (T #[] × T #[])
+let (pair?, stream') ← stream.nextGPTBatch          -- optional indexed Int64 input/target pair
 ```
 
 HF tokenizer for inference — reconstructed example (from
@@ -413,7 +416,7 @@ Behavior verified against source that the module docs do not advertise:
 ## Related guides
 
 - [getting-started.md](getting-started.md) — install and first model
-- [core/tensors.md](core/tensors.md) — `T #[...]` shape-tracked tensors used throughout
+- [core/tensors.md](core/tensors.md) — indexed `Tensor` specifications used throughout
 - [core/typed.md](core/typed.md) — dependent typing patterns behind fixed-dim batches
 - [serialization.md](serialization.md) — checkpoints and weights (tokenizer save/load is separate, above)
 - [distributed.md](distributed.md) — rank/world-size detection used by the loaders
