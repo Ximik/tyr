@@ -991,6 +991,21 @@ tests pass with zero failures/skips after the fresh-leaf fix. The three
 executables correctly fail without CUDA. The test inventory validates nine
 required and four optional suites; upstream main CI is green independently.
 
+## Remove legacy structural tensor support
+
+Module derivation, AD schema/flattening, and widget display no longer provide
+instances for the shape-erasing `T` carrier. The AD frontend no longer treats
+`torch.T` as a tensor parameter; indexed `Tensor` and `Frozen` remain supported.
+The remaining structured AD fixture now uses explicit Float32 tensor fields,
+indexed constructors/comparisons, and matching dtype metadata in its frontend
+graph. Missing dtype metadata is rejected against those indexed boundaries.
+
+All nine required CPU suites build with `--wfail` and pass through
+`lake env python3 scripts/test_inventory.py --run`; the main suite passes all
+1,488 tests. CUDA-only checks remain skipped on this machine. The legacy
+`T` declaration and operations in `Tyr.Torch` still exist and require separate
+removal after their remaining consumers are migrated.
+
 ## Remaining acceptance criteria
 
 Remove the `T` declaration and all model, generator, reflection, documentation,

@@ -815,14 +815,6 @@ instance {σ : StaticSpec} : ToModuleDisplay (Tensor σ) where
   toModuleNode t name :=
     ModuleNode.tensor (tensorToPropsNamed t name)
 
--- Compatibility for remaining legacy model fields. The display specification
--- comes from native metadata, never from the unchecked legacy shape annotation.
-instance {s : Shape} : ToModuleDisplay (T s) where
-  toModuleNode t name :=
-    let tensor := Tensor.assumeSpec
-      (σ := { shape := t.runtimeShape, dtype := t.dtype }) t
-    ModuleNode.tensor (tensorToPropsNamed tensor name)
-
 /-- Instance for Optional values -/
 instance [ToModuleDisplay α] : ToModuleDisplay (Option α) where
   toModuleNode opt name :=

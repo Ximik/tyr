@@ -78,25 +78,6 @@ instance : TensorStruct MyLayer where
 A single tensor is trivially a TensorStruct.
 -/
 
--- Transitional adapter for models that still have legacy tensor fields.
--- Remove this instance once all fields are indexed Tensor values.
--- Legacy annotations may use #[] for arbitrarily shaped buffers. Read the
--- actual shape and leave dtype dynamic; only migrated Tensor fields impose
--- a static dtype contract.
-private def legacyChecked {s : Shape} (raw : T s) : Tensor { shape := raw.runtimeShape } :=
-  letI : Inhabited (Tensor { shape := raw.runtimeShape }) := ⟨Tensor.assumeSpec raw⟩
-  match Tensor.ofRaw raw with
-  | .ok tensor => tensor
-  | .error message => panic! s!"Legacy tensor field: {message}"
-
-instance {s : Shape} : TensorStruct (T s) where
-  map f t := (f (legacyChecked t)).raw
-  mapM f t := do pure (← f (legacyChecked t)).raw
-  zipWith f lhs rhs :=
-    let left := legacyChecked lhs
-    (f left (left.checkedReplacement rhs)).raw
-  fold f init t := f (legacyChecked t) init
-
 /-! ## Tuple Instances
 
 Allow pairs of TensorStructs to be TensorStructs.
@@ -112,7 +93,7 @@ instance [TensorStruct α] [TensorStruct β] : TensorStruct (α × β) where
 
 open Lean Elab Command Term Meta in
 /-- Generate TensorStruct instance for a structure.
-    All fields are assumed to have TensorStruct instances (T s, Option, Array, Static, etc.) -/
+    All fields are assumed to have TensorStruct instances (Tensor σ, Option, Array, Static, etc.) -/
 private def mkTensorStructInstanceCmd (typeName : Name) : CommandElabM Unit := do
   let env ← getEnv
 

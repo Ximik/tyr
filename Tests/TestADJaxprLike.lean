@@ -719,7 +719,7 @@ def testAdFrontendSynthesizesStructuredRuntimeCompanions : IO Unit := do
     | .error err => LeanTest.fail s!"Generated frontend bundle should execute call, got: {err}"
   LeanTest.assertTrue (output.label == Tests.ADJaxprLikeElabFixture.sampleRuntimePadOutput.label)
     "Generated frontend bundle should preserve static output fields from the runtime template."
-  LeanTest.assertTrue (torch.allclose output.loss Tests.ADJaxprLikeElabFixture.replacementRuntimePadOutput.loss)
+  LeanTest.assertTrue (torch.Tensor.allclose output.loss Tests.ADJaxprLikeElabFixture.replacementRuntimePadOutput.loss)
     "Generated frontend bundle should rebuild the flat runtime output."
 
   let structured ←
@@ -730,7 +730,7 @@ def testAdFrontendSynthesizesStructuredRuntimeCompanions : IO Unit := do
     | .error err => LeanTest.fail s!"Generated linearize companion should succeed, got: {err}"
   LeanTest.assertTrue (structured.output.label == Tests.ADJaxprLikeElabFixture.sampleRuntimePadOutput.label)
     "Generated linearize companion should preserve static output fields from the runtime template."
-  LeanTest.assertTrue (torch.allclose structured.output.loss Tests.ADJaxprLikeElabFixture.replacementRuntimePadOutput.loss)
+  LeanTest.assertTrue (torch.Tensor.allclose structured.output.loss Tests.ADJaxprLikeElabFixture.replacementRuntimePadOutput.loss)
     "Generated linearize companion should rebuild the primal output."
   let pullbackCotangents ←
     match structured.pullback Tests.ADJaxprLikeElabFixture.replacementRuntimePadOutput with
@@ -738,11 +738,11 @@ def testAdFrontendSynthesizesStructuredRuntimeCompanions : IO Unit := do
     | .error err => LeanTest.fail s!"Generated pullback should succeed, got: {err}"
   LeanTest.assertTrue (pullbackCotangents.params.label == Tests.ADJaxprLikeElabFixture.sampleRuntimePadParams.label)
     "Generated pullback should preserve static parameter fields from the runtime template."
-  LeanTest.assertTrue (torch.allclose pullbackCotangents.params.padv Tests.ADJaxprLikeElabFixture.replacementRuntimePadParams.padv)
+  LeanTest.assertTrue (torch.Tensor.allclose pullbackCotangents.params.padv Tests.ADJaxprLikeElabFixture.replacementRuntimePadParams.padv)
     "Generated pullback should rebuild parameter cotangents."
   LeanTest.assertTrue (pullbackCotangents.inputs.tag == Tests.ADJaxprLikeElabFixture.sampleRuntimePadInput.tag)
     "Generated pullback should preserve static input fields from the runtime template."
-  LeanTest.assertTrue (torch.allclose pullbackCotangents.inputs.base Tests.ADJaxprLikeElabFixture.replacementRuntimePadInput.base)
+  LeanTest.assertTrue (torch.Tensor.allclose pullbackCotangents.inputs.base Tests.ADJaxprLikeElabFixture.replacementRuntimePadInput.base)
     "Generated pullback should rebuild input cotangents."
 
   let directVJP ←
@@ -752,9 +752,9 @@ def testAdFrontendSynthesizesStructuredRuntimeCompanions : IO Unit := do
         Tests.ADJaxprLikeElabFixture.replacementRuntimePadOutput with
     | .ok value => pure value
     | .error err => LeanTest.fail s!"Generated vjp companion should succeed, got: {err}"
-  LeanTest.assertTrue (torch.allclose directVJP.params.padv Tests.ADJaxprLikeElabFixture.replacementRuntimePadParams.padv)
+  LeanTest.assertTrue (torch.Tensor.allclose directVJP.params.padv Tests.ADJaxprLikeElabFixture.replacementRuntimePadParams.padv)
     "Generated vjp companion should rebuild parameter cotangents."
-  LeanTest.assertTrue (torch.allclose directVJP.inputs.base Tests.ADJaxprLikeElabFixture.replacementRuntimePadInput.base)
+  LeanTest.assertTrue (torch.Tensor.allclose directVJP.inputs.base Tests.ADJaxprLikeElabFixture.replacementRuntimePadInput.base)
     "Generated vjp companion should rebuild input cotangents."
 
   let (loss, valueGrad) ←
@@ -765,9 +765,9 @@ def testAdFrontendSynthesizesStructuredRuntimeCompanions : IO Unit := do
     | .error err => LeanTest.fail s!"Generated valueAndGrad companion should succeed, got: {err}"
   LeanTest.assertTrue (loss.label == Tests.ADJaxprLikeElabFixture.sampleRuntimePadOutput.label)
     "Generated valueAndGrad companion should preserve static output fields from the runtime template."
-  LeanTest.assertTrue (torch.allclose loss.loss Tests.ADJaxprLikeElabFixture.replacementRuntimePadOutput.loss)
+  LeanTest.assertTrue (torch.Tensor.allclose loss.loss Tests.ADJaxprLikeElabFixture.replacementRuntimePadOutput.loss)
     "Generated valueAndGrad companion should rebuild the scalar primal output."
-  LeanTest.assertTrue (torch.allclose valueGrad.params.padv Tests.ADJaxprLikeElabFixture.replacementRuntimePadParams.padv)
+  LeanTest.assertTrue (torch.Tensor.allclose valueGrad.params.padv Tests.ADJaxprLikeElabFixture.replacementRuntimePadParams.padv)
     "Generated valueAndGrad companion should rebuild scalar-loss parameter gradients."
 
   let gradOnly ←
@@ -776,7 +776,7 @@ def testAdFrontendSynthesizesStructuredRuntimeCompanions : IO Unit := do
         Tests.ADJaxprLikeElabFixture.sampleRuntimePadInput with
     | .ok value => pure value
     | .error err => LeanTest.fail s!"Generated grad companion should succeed, got: {err}"
-  LeanTest.assertTrue (torch.allclose gradOnly.params.padv Tests.ADJaxprLikeElabFixture.replacementRuntimePadParams.padv)
+  LeanTest.assertTrue (torch.Tensor.allclose gradOnly.params.padv Tests.ADJaxprLikeElabFixture.replacementRuntimePadParams.padv)
     "Generated grad companion should rebuild scalar-loss parameter gradients."
 
 @[test]

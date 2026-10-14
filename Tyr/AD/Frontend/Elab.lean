@@ -62,10 +62,7 @@ private unsafe def indexedVarMeta (spec : Expr) (participation : DiffParticipati
 
 private unsafe def tensorLikeVarMeta? (type : Expr) : MetaM (Option VarMeta) := do
   let rawType := type.consumeMData
-  if rawType.isAppOfArity ``torch.T 1 then
-    let shape? ← evalClosedShapeExpr? (rawType.getArg! 0)
-    return some { participation := .diff, shape := shape? }
-  else if rawType.isAppOfArity ``torch.Frozen 1 then
+  if rawType.isAppOfArity ``torch.Frozen 1 then
     return some (← indexedVarMeta (rawType.getArg! 0) .frozen)
   else
     let type ← whnf type
@@ -142,7 +139,7 @@ private def argsToJVars
 Derive a direct `FrontendRegistration` from an ordinary Lean definition in the
 initial supported subset:
 
-- tensor-like parameters only (`torch.Tensor` / `torch.Frozen`; legacy `torch.T` during migration)
+- tensor-like parameters only (`torch.Tensor` / `torch.Frozen`)
 - body is a single registered primitive call
 - result type is tensor-like
 -/
