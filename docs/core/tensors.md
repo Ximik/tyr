@@ -3,8 +3,8 @@
 Use `Tyr.Typed` for tensor operations and `Tyr.Typed.Neural` for additional
 neural, storage, and data adapters. The public type is `torch.Tensor σ`, where
 `σ : StaticSpec` records shape, dtype, and device policy. `Tyr.Torch` supplies
-runtime services such as device discovery, CUDA streams/events, RNG seeding,
-and global gradient-mode control.
+runtime services such as device discovery, CUDA streams/events, and RNG seeding.
+Inference uses explicitly detached tensors rather than ambient gradient-mode scopes.
 
 ## Tensor specifications
 
@@ -52,9 +52,12 @@ repeating a pure expression does not establish independent storage.
 
 ## Arithmetic, transforms, and reductions
 
-`Tensor.add`, `sub`, `mul`, and `div` compute result specifications using shape
-broadcasting and dtype promotion. Floating-only operations require a floating
-dtype. Matrix multiplication requires compatible dimensions and matching dtype
+`Tensor.add`, `sub`, `mul`, and `div` take equal shapes and require a
+`DType.Promotes` witness for the result dtype. Their `addB`, `subB`, `mulB`, and
+`divB` variants additionally support broadcasting through `TensorSpec.Promotes`.
+These erased proofs establish the promotion rule; they do not establish that
+the operator has a kernel for that dtype and device. Floating-only operations
+require a floating dtype. Matrix multiplication requires compatible dimensions and matching dtype
 and device policy. `linear` consumes an `[outDim, inDim]` weight matrix;
 `linear3d` handles batched sequences.
 
@@ -69,8 +72,16 @@ specification; `catManyChecked` reports a mismatch through Lean's panic mechanis
 A dynamic shape does not require pretending that a tensor is a scalar.
 
 Reduction indices follow native accumulation rules. For example, integer sums
-may accumulate in Int64. `Tensor.Preserving` contains metadata-checked adapters
-for operations where preserving an input's generic dtype requires validation.
+may accumulate in Int64. `Tensor.Preserving` provides explicit runtime-checked
+adapters for generic or shape-only tensors. Its binary arithmetic checks actual
+operand promotion and rejects a change to the left operand's dtype, then checks
+result metadata. Use the `?` variants to handle these rejections; convenience
+wrappers use Lean's panic fallback. Deliberate mixed-precision computation needs
+explicit input conversions or a witnessed promoting operation.
+`Tensor.Promoting` provides the latter when dtypes are known only at runtime:
+its checked variants return the computed dtype with a promotion witness, and
+its convenience wrappers retain that native result under a dynamic dtype index.
+They do not coerce operands to the left operand's dtype.
 
 ## Autograd and mutation
 

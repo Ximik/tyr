@@ -14,7 +14,8 @@ data, and persistence operations. `import Tyr` aggregates the library.
 | --- | --- |
 | `Tyr.Basic.Types` | Raw carrier, specifications, dtype/device types, pure shape helpers |
 | `Tyr.Basic` | Indexed carrier, checked raw admission, native metadata, native zero factory |
-| `Tyr.Typed.DType` | Dtype promotion and accumulation rules |
+| `Tyr.Typed.DType` | Partial dtype promotion and accumulation rules |
+| `Tyr.Typed.Promotion` | Erased proof classes for successful dtype promotion |
 | `Tyr.Typed.Spec` | Shape and result-spec algebra |
 | `Tyr.Typed.Device` | Placement policies and tensor contracts |
 | `Tyr.Typed.Tensor` | Checked constructors, validation, existential packaging |
@@ -63,21 +64,94 @@ concrete valid dimensions are usually discharged automatically. Specialized
 operations such as `linear`, `linear3d`, and `bmm4d` encode their dimension
 relationships directly in their argument types.
 
-Dtype promotion is explicit in result specifications. For example, UInt8 with
-Int8 promotes to Int16, Float16 with BFloat16 promotes to Float32, and integer
-sums use their specified accumulation dtype. Floating-only math requires a
-floating dtype; a caller with a dynamic dtype may need an explicit cast or a
-metadata-checked preserving adapter.
+`DType.all` contains all 46 concrete scalar types in the pinned PyTorch 2.10
+runtime: ordinary numeric types, Complex32/64/128, quantized types, packed bits,
+low-bit integers, and Float8/Float4 formats. Complex widths count both real and
+imaginary components. `DType.ofString?` accepts canonical, native, and Python
+names such as `Complex64`, `ComplexFloat`, and `torch.complex64`. Recognition
+does not promise allocation, conversion, or arithmetic kernels on every backend.
+SafeTensors support remains limited to the formats returned by `safeTensorTag?`.
+
+Dtype promotion is partial. `DType.promote? l r` returns `some result` only when
+PyTorch defines the pair. Typed arithmetic carries this result as an erased
+`Prop` witness, `DType.Promotes l r result`, whose `valid` field proves
+`DType.promote? l r = some result`. The result parameter is inferred for concrete
+dtypes. Generic forward functions carry the constraint explicitly:
+
+```lean
+import Tyr.Typed
+open torch
+
+-- Tensor.add has this same shape/dtype/device signature.
+def combine {s : Shape} {l r result : DType} {dev : DevicePolicy}
+    [DType.Promotes l r result]
+    (left : Tensor ⟨s, l, dev⟩) (right : Tensor ⟨s, r, dev⟩) :
+    Tensor ⟨s, result, dev⟩ :=
+  Tensor.add left right
+
+example : DType.Promotes .Float16 .BFloat16 .Float32 := inferInstance
+example : DType.Promotes .Complex32 .BFloat16 .Complex64 := inferInstance
+example {l r result : DType} [h : DType.Promotes l r result] :
+    DType.promote? l r = some result := h.valid
+
+example : DType.ScalarPromotes .Float32 .Float64 .Float32 := inferInstance
+example : DType.NonBool .Float32 := inferInstance
+```
+
+Unknown dtypes, including `.Unknown "dynamic"`, have no static promotion
+witness. Unsupported mixed shell-type pairs, such as Float8E4M3FN with Float32,
+also have no witness; callers must choose an explicit conversion. A promotion
+witness proves that Tyr's promotion function returns that dtype; it is not a
+proof of the native implementation or kernel availability. Operator conditions
+are separate: `Tensor.sub` additionally requires `DType.NonBool` for each operand.
+Integer sums use their specified accumulation dtype, and floating-only math
+requires a floating dtype.
 
 Broadcasting distinguishes zero-dimensional scalar tensors from nonscalars:
 within the same dtype category, the nonscalar's precision wins. A Float64 scalar
 plus a Float32 vector therefore returns Float32. This is different from adding
 two nonscalar Float64/Float32 tensors.
+`DType.ScalarPromotes` expresses this rule; host `Float` arithmetic uses the
+Float32 default scalar category. Broadcasting uses `TensorSpec.Promotes`, which
+selects the appropriate rule from the operand ranks.
+
+Runtime-typed parameter trees can use the explicit `Tensor.Preserving.add?`,
+`sub?`, and `mul?` adapters. They inspect actual dtypes before arithmetic and
+reject undefined promotion or a result that would change the left operand's
+dtype. They then validate the result's shape, dtype, and device. The host-scalar
+adapters `addScalar?`, `mulScalar?`, and `divScalar?` likewise check the actual
+dtype against weak scalar promotion. These adapters do not
+introduce a static promotion instance or conceal a change behind a dynamic
+index; the corresponding convenience wrappers use Lean's panic fallback.
+For example, a dynamic BF16 left operand and Float32 right operand are rejected
+because their result would be Float32. Mixed-precision algorithms must make an
+intended conversion explicit before using a preserving adapter, or expose the
+promoted result through a witness. These checks do not convert arbitrary native
+kernel failures into `Except.error`.
+
+Use `Tensor.Promoting.add?`, `sub?`, `mul?`, and `div?` when input dtype indices
+are dynamic and the operation should follow native promotion. They inspect the
+actual operand dtypes, construct a promotion witness, and validate the result
+at its computed dtype. The returned `Promoted` package exposes `dtype`,
+`witness`, and `tensor`; division additionally applies its integer-to-floating
+result rule. Host-scalar variants such as `mulScalar?` return `ScalarPromoted`
+with a `ScalarPromotes` witness. No input
+cast is needed. Their convenience wrappers, such as `Tensor.Promoting.mul`,
+return a shape-indexed tensor with dynamic dtype, retaining the promoted native
+value. For example, BF16 activations multiplied by Float32 routing weights
+produce Float32, while BF16 activations multiplied by an Int64 mask remain BF16.
+The `?` variants report unsupported promotion and metadata mismatches; native
+kernel availability remains a separate requirement.
 
 Matrix multiplication requires operands with matching dtype and device policy.
 Matching `.any` policies do not prove matching actual devices: native device
 compatibility still matters. Static shape and dtype rules complement runtime
 checks; they do not verify the implementation of an extern.
+
+After building the dtype modules, run `bash scripts/test_dtype_promotion.sh`
+to compare all 46² promotion pairs and all four scalar/vector rank combinations
+against an independently enumerated native runtime inventory. The harness also
+checks arithmetic result dtypes separately from unavailable kernels.
 
 ## Boundary validation
 
@@ -136,8 +210,9 @@ A scalar is `#[]`; it is never a substitute for an unknown shape.
 `reshape` requires equal element counts. `reshapeChecked?` checks runtime
 element counts and rejects wrapped negative extents before invoking the native
 reshape. `castDType?` and `castLike?` perform real dtype conversions and validate
-the result. Their pure convenience wrappers, along with `sliceChecked`, use
-Lean's panic fallback on metadata failure; use the `Except` variants when an
+the result, returning native conversion failures through `Except`. Their pure
+convenience wrappers, along with `sliceChecked`, use Lean's panic fallback on
+failure; use the `Except` variants when an
 error must be handled. Exact file loading checks the stored layout
 before returning a tensor; it does not repair a mismatch by reshaping.
 
@@ -175,8 +250,11 @@ def prepareWeights (source : StoredWeights) : IO RuntimeWeights :=
 
 The destination type supplies every leaf specification. A concrete dtype
 requests a native cast, and `.exact device` requests placement on that device.
-`castTo` requests dtype and placement together in one native conversion, so an
-MPS Float32 tensor can request CPU Float64 directly.
+`castTo` requests dtype and placement through one checked native entry point.
+That entry point chooses the conversion order for the backend: MPS-to-CPU
+transfers retain the source dtype until they reach CPU, then apply the requested
+cast. This lets an MPS Float32 tensor request CPU Float64 without an unsupported
+MPS Float64 intermediate.
 A dynamic target dtype retains the source's actual dtype; `.any` retains its
 actual placement. Every leaf keeps its shape, so callers perform any reshape
 explicitly beforehand.

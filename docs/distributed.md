@@ -263,7 +263,8 @@ structure SFTBatch where
   mask : Tensor { shape := #[batchSize, seqLen], dtype := .Float32 }
   numValidTokens : Nat
 
-def maskedCrossEntropy {batch seq vocab : UInt64} {d m : DType} {dev : DevicePolicy}
+def maskedCrossEntropy {batch seq vocab : UInt64} {d m result : DType} {dev : DevicePolicy}
+    [DType.Promotes d m result]
     (logits : Tensor ⟨#[batch, seq, vocab], d, dev⟩)
     (targets : Tensor ⟨#[batch, seq], .Int64, dev⟩)
     (mask : Tensor ⟨#[batch, seq], m, dev⟩)
