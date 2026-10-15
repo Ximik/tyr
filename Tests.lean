@@ -186,6 +186,7 @@ import Tests.TestFLM
 import Tests.TestTypedNeural
 
 import Tests.TestTTSTypedLoading
+import Tests.TestTTSDTypeRelations
 import Tests.TestFloatBuffer
 
 import Tests.TestAutogradIdentity

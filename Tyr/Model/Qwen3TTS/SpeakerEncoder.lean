@@ -9,6 +9,7 @@
   - Final 1x1 projection to speaker embedding
 -/
 import Tyr.Typed.Neural
+import Tyr.Model.Qwen3TTS.DTypes
 import Tyr.TensorStruct
 import Tyr.Module.Core
 import Tyr.Module.Derive
@@ -17,12 +18,12 @@ import Tyr.Model.Utils
 
 namespace torch.qwen3tts
 
-variable {device : Device}
+variable {device : Device} {dtype : ExactDType}
 
-private def initWeight (shape : Shape) (fanIn : UInt64) : IO (Tensor { shape := shape, device := device }) :=
-  Model.initWeight (device := device) shape fanIn (.Unknown "dynamic")
-private def initBias (shape : Shape) : IO (Tensor { shape := shape, device := device }) :=
-  Model.initBias (device := device) shape (.Unknown "dynamic")
+private def initWeight (shape : Shape) (fanIn : UInt64) : IO (Tensor { shape := shape, dtype := dtype.val, device := device }) :=
+  Model.initWeight (device := device) shape fanIn dtype.val
+private def initBias (shape : Shape) : IO (Tensor { shape := shape, dtype := dtype.val, device := device }) :=
+  Model.initBias (device := device) shape dtype.val
 
 private def c0 (cfg : SpeakerEncoderConfig) : UInt64 := cfg.encChannels.getD 0 512
 private def c1 (cfg : SpeakerEncoderConfig) : UInt64 := cfg.encChannels.getD 1 512
@@ -48,11 +49,11 @@ private def samePadding (kernelSize dilation : UInt64) : UInt64 :=
   (dilation * (kernelSize - 1)) / 2
 
 private def addBias3d {batch channels frames : UInt64}
-    (x : Tensor { shape := #[batch, channels, frames], device := device })
-    (bias : Tensor { shape := #[channels], device := device }) : Tensor { shape := #[batch, channels, frames], device := device } :=
-  let b : Tensor { shape := #[1, channels, 1], device := device } := Tensor.reshapeChecked bias #[1, channels, 1]
-  let be : Tensor { shape := #[batch, channels, frames], device := device } := Tensor.expand b #[batch, channels, frames]
-  Tensor.Promoting.add x be
+    (x : Tensor { shape := #[batch, channels, frames], dtype := dtype.val, device := device })
+    (bias : Tensor { shape := #[channels], dtype := dtype.val, device := device }) : Tensor { shape := #[batch, channels, frames], dtype := dtype.val, device := device } :=
+  let b : Tensor { shape := #[1, channels, 1], dtype := dtype.val, device := device } := Tensor.reshapeChecked bias #[1, channels, 1]
+  let be : Tensor { shape := #[batch, channels, frames], dtype := dtype.val, device := device } := Tensor.expand b #[batch, channels, frames]
+  Tensor.Preserving.add x be
 
 private def getOrFirst! [Inhabited α] (xs : Array α) (i : Nat) : α :=
   match xs[i]? with
@@ -63,23 +64,23 @@ private def getOrFirst! [Inhabited α] (xs : Array α) (i : Nat) : α :=
     | none => panic! "empty array"
 
 /-- TDNN block used throughout ECAPA speaker encoder: Conv1d + ReLU. -/
-structure TimeDelayNetBlock (inChannels outChannels kernelSize dilation : UInt64) where
-  weight : Tensor { shape := #[outChannels, inChannels, kernelSize], device := device }
-  bias : Tensor { shape := #[outChannels], device := device }
+structure TimeDelayNetBlock (inChannels outChannels kernelSize dilation : UInt64) (dtype : ExactDType := float32DType) where
+  weight : Tensor { shape := #[outChannels, inChannels, kernelSize], dtype := dtype.val, device := device }
+  bias : Tensor { shape := #[outChannels], dtype := dtype.val, device := device }
   deriving TensorStruct, Inhabited
 
 namespace TimeDelayNetBlock
 
-def init (inChannels outChannels kernelSize dilation : UInt64) (device : Device := .CPU)
-    : IO (TimeDelayNetBlock (device := device) inChannels outChannels kernelSize dilation) := do
+def init (inChannels outChannels kernelSize dilation : UInt64) (device : Device := .CPU) (dtype : ExactDType := float32DType)
+    : IO (TimeDelayNetBlock (dtype := dtype) (device := device) inChannels outChannels kernelSize dilation) := do
   let weight ← initWeight (device := device) #[outChannels, inChannels, kernelSize] inChannels
   let bias ← initBias (device := device) #[outChannels]
   pure { weight, bias }
 
 def forward {batch frames inChannels outChannels kernelSize dilation : UInt64}
-    (m : TimeDelayNetBlock (device := device) inChannels outChannels kernelSize dilation)
-    (x : Tensor { shape := #[batch, inChannels, frames], device := device }) : Tensor { shape := #[batch, outChannels, frames], device := device } :=
-  let y : Tensor { shape := #[batch, outChannels, frames], device := device } :=
+    (m : TimeDelayNetBlock (dtype := dtype) (device := device) inChannels outChannels kernelSize dilation)
+    (x : Tensor { shape := #[batch, inChannels, frames], dtype := dtype.val, device := device }) : Tensor { shape := #[batch, outChannels, frames], dtype := dtype.val, device := device } :=
+  let y : Tensor { shape := #[batch, outChannels, frames], dtype := dtype.val, device := device } :=
     Tensor.reshapeChecked (Tensor.conv1d x m.weight 1 (samePadding kernelSize dilation) dilation)
       #[batch, outChannels, frames]
   Tensor.Preserving.relu (addBias3d y m.bias)
@@ -87,16 +88,16 @@ def forward {batch frames inChannels outChannels kernelSize dilation : UInt64}
 end TimeDelayNetBlock
 
 /-- SE block: channel-wise gating from global temporal summary. -/
-structure SqueezeExcitationBlock (channels seChannels : UInt64) where
-  conv1Weight : Tensor { shape := #[seChannels, channels, 1], device := device }
-  conv1Bias : Tensor { shape := #[seChannels], device := device }
-  conv2Weight : Tensor { shape := #[channels, seChannels, 1], device := device }
-  conv2Bias : Tensor { shape := #[channels], device := device }
+structure SqueezeExcitationBlock (channels seChannels : UInt64) (dtype : ExactDType := float32DType) where
+  conv1Weight : Tensor { shape := #[seChannels, channels, 1], dtype := dtype.val, device := device }
+  conv1Bias : Tensor { shape := #[seChannels], dtype := dtype.val, device := device }
+  conv2Weight : Tensor { shape := #[channels, seChannels, 1], dtype := dtype.val, device := device }
+  conv2Bias : Tensor { shape := #[channels], dtype := dtype.val, device := device }
   deriving TensorStruct
 
 namespace SqueezeExcitationBlock
 
-def init (channels seChannels : UInt64) (device : Device := .CPU) : IO (SqueezeExcitationBlock (device := device) channels seChannels) := do
+def init (channels seChannels : UInt64) (device : Device := .CPU) (dtype : ExactDType := float32DType) : IO (SqueezeExcitationBlock (dtype := dtype) (device := device) channels seChannels) := do
   let conv1Weight ← initWeight (device := device) #[seChannels, channels, 1] channels
   let conv2Weight ← initWeight (device := device) #[channels, seChannels, 1] seChannels
   let conv1Bias ← initBias (device := device) #[seChannels]
@@ -104,51 +105,51 @@ def init (channels seChannels : UInt64) (device : Device := .CPU) : IO (SqueezeE
   pure { conv1Weight, conv1Bias, conv2Weight, conv2Bias }
 
 def forward {batch frames channels seChannels : UInt64}
-    (m : SqueezeExcitationBlock (device := device) channels seChannels)
-    (x : Tensor { shape := #[batch, channels, frames], device := device }) : Tensor { shape := #[batch, channels, frames], device := device } :=
-  let mean : Tensor { shape := #[batch, channels, 1], device := device } := Tensor.reshapeChecked (Tensor.Preserving.meanDim x 2 true) #[batch, channels, 1]
-  let h1 : Tensor { shape := #[batch, seChannels, 1], device := device } :=
+    (m : SqueezeExcitationBlock (dtype := dtype) (device := device) channels seChannels)
+    (x : Tensor { shape := #[batch, channels, frames], dtype := dtype.val, device := device }) : Tensor { shape := #[batch, channels, frames], dtype := dtype.val, device := device } :=
+  let mean : Tensor { shape := #[batch, channels, 1], dtype := dtype.val, device := device } := Tensor.reshapeChecked (Tensor.Preserving.meanDim x 2 true) #[batch, channels, 1]
+  let h1 : Tensor { shape := #[batch, seChannels, 1], dtype := dtype.val, device := device } :=
     Tensor.reshapeChecked (Tensor.conv1d mean m.conv1Weight 1 0 1) #[batch, seChannels, 1]
   let h1 := Tensor.Preserving.relu (addBias3d h1 m.conv1Bias)
-  let h2 : Tensor { shape := #[batch, channels, 1], device := device } :=
+  let h2 : Tensor { shape := #[batch, channels, 1], dtype := dtype.val, device := device } :=
     Tensor.reshapeChecked (Tensor.conv1d h1 m.conv2Weight 1 0 1) #[batch, channels, 1]
   let gate1 := Tensor.Preserving.sigmoid (addBias3d h2 m.conv2Bias)
-  let gate : Tensor { shape := #[batch, channels, frames], device := device } := Tensor.expand gate1 #[batch, channels, frames]
-  Tensor.Promoting.mul x gate
+  let gate : Tensor { shape := #[batch, channels, frames], dtype := dtype.val, device := device } := Tensor.expand gate1 #[batch, channels, frames]
+  Tensor.Preserving.mul x gate
 
 end SqueezeExcitationBlock
 
 /-- Res2Net block split over channel groups. -/
-structure Res2NetBlock (channels scale kernelSize dilation : UInt64) where
-  blocks : Array (TimeDelayNetBlock (device := device) (channels / scale) (channels / scale) kernelSize dilation)
+structure Res2NetBlock (channels scale kernelSize dilation : UInt64) (dtype : ExactDType := float32DType) where
+  blocks : Array (TimeDelayNetBlock (dtype := dtype) (device := device) (channels / scale) (channels / scale) kernelSize dilation)
   deriving TensorStruct
 
 namespace Res2NetBlock
 
-def init (channels scale kernelSize dilation : UInt64) (device : Device := .CPU)
-    : IO (Res2NetBlock (device := device) channels scale kernelSize dilation) := do
+def init (channels scale kernelSize dilation : UInt64) (device : Device := .CPU) (dtype : ExactDType := float32DType)
+    : IO (Res2NetBlock (dtype := dtype) (device := device) channels scale kernelSize dilation) := do
   let nBlocks := if scale.toNat <= 1 then 0 else scale.toNat - 1
-  let mut blocks : Array (TimeDelayNetBlock (device := device) (channels / scale) (channels / scale) kernelSize dilation) := #[]
+  let mut blocks : Array (TimeDelayNetBlock (dtype := dtype) (device := device) (channels / scale) (channels / scale) kernelSize dilation) := #[]
   for _ in [:nBlocks] do
-    let b ← TimeDelayNetBlock.init (device := device) (channels / scale) (channels / scale) kernelSize dilation
+    let b ← TimeDelayNetBlock.init (dtype := dtype) (device := device) (channels / scale) (channels / scale) kernelSize dilation
     blocks := blocks.push b
   pure { blocks }
 
 def forward {batch frames channels scale kernelSize dilation : UInt64}
-    (m : Res2NetBlock (device := device) channels scale kernelSize dilation)
-    (x : Tensor { shape := #[batch, channels, frames], device := device }) : Tensor { shape := #[batch, channels, frames], device := device } :=
+    (m : Res2NetBlock (dtype := dtype) (device := device) channels scale kernelSize dilation)
+    (x : Tensor { shape := #[batch, channels, frames], dtype := dtype.val, device := device }) : Tensor { shape := #[batch, channels, frames], dtype := dtype.val, device := device } :=
   if scale.toNat <= 1 then
     x
   else
     Id.run do
       let partChannels := channels / scale
-      let mut parts : Array (Tensor { shape := #[batch, partChannels, frames], device := device }) := #[]
+      let mut parts : Array (Tensor { shape := #[batch, partChannels, frames], dtype := dtype.val, device := device }) := #[]
       for i in [:scale.toNat] do
         let start := i.toUInt64 * partChannels
-        let part : Tensor { shape := #[batch, partChannels, frames], device := device } := Tensor.sliceChecked x 1 start partChannels #[batch, partChannels, frames]
+        let part : Tensor { shape := #[batch, partChannels, frames], dtype := dtype.val, device := device } := Tensor.sliceChecked x 1 start partChannels #[batch, partChannels, frames]
         parts := parts.push part
 
-      let mut outputs : Array (Tensor { shape := #[batch, partChannels, frames], device := device }) := #[]
+      let mut outputs : Array (Tensor { shape := #[batch, partChannels, frames], dtype := dtype.val, device := device }) := #[]
       let first := getOrFirst! parts 0
       outputs := outputs.push first
       let mut prev := first
@@ -156,117 +157,117 @@ def forward {batch frames channels scale kernelSize dilation : UInt64}
       for i in [1:scale.toNat] do
         let part := getOrFirst! parts i
         let block := getOrFirst! m.blocks (i - 1)
-        let input := if i == 1 then part else Tensor.Promoting.add part prev
+        let input := if i == 1 then part else Tensor.Preserving.add part prev
         let out := TimeDelayNetBlock.forward block input
         outputs := outputs.push out
         prev := out
 
-      let merged : Tensor { shape := #[batch, channels, frames], device := device } := Tensor.catManyChecked (outputs.map Tensor.packShape) 1 #[batch, channels, frames]
+      let merged : Tensor { shape := #[batch, channels, frames], dtype := dtype.val, device := device } := Tensor.catManyChecked (outputs.map Tensor.packShape) 1 #[batch, channels, frames]
       merged
 
 end Res2NetBlock
 
 /-- ECAPA building block: TDNN -> Res2Net -> TDNN -> SE (+ residual). -/
 structure SqueezeExcitationRes2NetBlock
-    (inChannels outChannels res2netScale seChannels kernelSize dilation : UInt64) where
-  tdnn1 : TimeDelayNetBlock (device := device) inChannels outChannels 1 1
-  res2net : Res2NetBlock (device := device) outChannels res2netScale kernelSize dilation
-  tdnn2 : TimeDelayNetBlock (device := device) outChannels outChannels 1 1
-  seBlock : SqueezeExcitationBlock (device := device) outChannels seChannels
+    (inChannels outChannels res2netScale seChannels kernelSize dilation : UInt64) (dtype : ExactDType := float32DType) where
+  tdnn1 : TimeDelayNetBlock (dtype := dtype) (device := device) inChannels outChannels 1 1
+  res2net : Res2NetBlock (dtype := dtype) (device := device) outChannels res2netScale kernelSize dilation
+  tdnn2 : TimeDelayNetBlock (dtype := dtype) (device := device) outChannels outChannels 1 1
+  seBlock : SqueezeExcitationBlock (dtype := dtype) (device := device) outChannels seChannels
   deriving TensorStruct
 
 namespace SqueezeExcitationRes2NetBlock
 
-def init (inChannels outChannels res2netScale seChannels kernelSize dilation : UInt64) (device : Device := .CPU)
-    : IO (SqueezeExcitationRes2NetBlock (device := device) inChannels outChannels res2netScale seChannels kernelSize dilation) := do
-  let tdnn1 ← TimeDelayNetBlock.init (device := device) inChannels outChannels 1 1
-  let res2net ← Res2NetBlock.init (device := device) outChannels res2netScale kernelSize dilation
-  let tdnn2 ← TimeDelayNetBlock.init (device := device) outChannels outChannels 1 1
-  let seBlock ← SqueezeExcitationBlock.init (device := device) outChannels seChannels
+def init (inChannels outChannels res2netScale seChannels kernelSize dilation : UInt64) (device : Device := .CPU) (dtype : ExactDType := float32DType)
+    : IO (SqueezeExcitationRes2NetBlock (dtype := dtype) (device := device) inChannels outChannels res2netScale seChannels kernelSize dilation) := do
+  let tdnn1 ← TimeDelayNetBlock.init (dtype := dtype) (device := device) inChannels outChannels 1 1
+  let res2net ← Res2NetBlock.init (dtype := dtype) (device := device) outChannels res2netScale kernelSize dilation
+  let tdnn2 ← TimeDelayNetBlock.init (dtype := dtype) (device := device) outChannels outChannels 1 1
+  let seBlock ← SqueezeExcitationBlock.init (dtype := dtype) (device := device) outChannels seChannels
   pure { tdnn1, res2net, tdnn2, seBlock }
 
 def forward {batch frames inChannels outChannels res2netScale seChannels kernelSize dilation : UInt64}
-    (m : SqueezeExcitationRes2NetBlock (device := device) inChannels outChannels res2netScale seChannels kernelSize dilation)
-    (x : Tensor { shape := #[batch, inChannels, frames], device := device }) : Tensor { shape := #[batch, outChannels, frames], device := device } :=
-  let residual : Tensor { shape := #[batch, outChannels, frames], device := device } := Tensor.reshapeChecked x #[batch, outChannels, frames]
+    (m : SqueezeExcitationRes2NetBlock (dtype := dtype) (device := device) inChannels outChannels res2netScale seChannels kernelSize dilation)
+    (x : Tensor { shape := #[batch, inChannels, frames], dtype := dtype.val, device := device }) : Tensor { shape := #[batch, outChannels, frames], dtype := dtype.val, device := device } :=
+  let residual : Tensor { shape := #[batch, outChannels, frames], dtype := dtype.val, device := device } := Tensor.reshapeChecked x #[batch, outChannels, frames]
   let h1 := TimeDelayNetBlock.forward m.tdnn1 x
   let h2 := Res2NetBlock.forward m.res2net h1
   let h3 := TimeDelayNetBlock.forward m.tdnn2 h2
   let h4 := SqueezeExcitationBlock.forward m.seBlock h3
-  Tensor.Promoting.add h4 residual
+  Tensor.Preserving.add h4 residual
 
 end SqueezeExcitationRes2NetBlock
 
 /-- Attentive statistics pooling (mean+std with learned temporal attention). -/
-structure AttentiveStatisticsPooling (channels attentionChannels : UInt64) where
-  tdnn : TimeDelayNetBlock (device := device) (channels * 3) attentionChannels 1 1
-  convWeight : Tensor { shape := #[channels, attentionChannels, 1], device := device }
-  convBias : Tensor { shape := #[channels], device := device }
+structure AttentiveStatisticsPooling (channels attentionChannels : UInt64) (dtype : ExactDType := float32DType) where
+  tdnn : TimeDelayNetBlock (dtype := dtype) (device := device) (channels * 3) attentionChannels 1 1
+  convWeight : Tensor { shape := #[channels, attentionChannels, 1], dtype := dtype.val, device := device }
+  convBias : Tensor { shape := #[channels], dtype := dtype.val, device := device }
   eps : Float := 1e-12
   deriving TensorStruct
 
 namespace AttentiveStatisticsPooling
 
-def init (channels attentionChannels : UInt64) (device : Device := .CPU)
-    : IO (AttentiveStatisticsPooling (device := device) channels attentionChannels) := do
-  let tdnn ← TimeDelayNetBlock.init (device := device) (channels * 3) attentionChannels 1 1
+def init (channels attentionChannels : UInt64) (device : Device := .CPU) (dtype : ExactDType := float32DType)
+    : IO (AttentiveStatisticsPooling (dtype := dtype) (device := device) channels attentionChannels) := do
+  let tdnn ← TimeDelayNetBlock.init (dtype := dtype) (device := device) (channels * 3) attentionChannels 1 1
   let convWeight ← initWeight (device := device) #[channels, attentionChannels, 1] attentionChannels
   let convBias ← initBias (device := device) #[channels]
   pure { tdnn, convWeight, convBias }
 
 def forward {batch frames channels attentionChannels : UInt64}
-    (m : AttentiveStatisticsPooling (device := device) channels attentionChannels)
-    (x : Tensor { shape := #[batch, channels, frames], device := device }) : Tensor { shape := #[batch, channels * 2, 1], device := device } :=
-  let mean : Tensor { shape := #[batch, channels], device := device } := Tensor.reshapeChecked (Tensor.Preserving.meanDim x 2 false) #[batch, channels]
-  let mean1 : Tensor { shape := #[batch, channels, 1], device := device } := Tensor.reshapeChecked mean #[batch, channels, 1]
-  let meanRep : Tensor { shape := #[batch, channels, frames], device := device } := Tensor.expand mean1 #[batch, channels, frames]
+    (m : AttentiveStatisticsPooling (dtype := dtype) (device := device) channels attentionChannels)
+    (x : Tensor { shape := #[batch, channels, frames], dtype := dtype.val, device := device }) : Tensor { shape := #[batch, channels * 2, 1], dtype := dtype.val, device := device } :=
+  let mean : Tensor { shape := #[batch, channels], dtype := dtype.val, device := device } := Tensor.reshapeChecked (Tensor.Preserving.meanDim x 2 false) #[batch, channels]
+  let mean1 : Tensor { shape := #[batch, channels, 1], dtype := dtype.val, device := device } := Tensor.reshapeChecked mean #[batch, channels, 1]
+  let meanRep : Tensor { shape := #[batch, channels, frames], dtype := dtype.val, device := device } := Tensor.expand mean1 #[batch, channels, frames]
 
-  let diff := Tensor.Promoting.sub x meanRep
-  let var : Tensor { shape := #[batch, channels], device := device } := Tensor.reshapeChecked (Tensor.Preserving.meanDim (Tensor.Promoting.mul diff diff) 2 false) #[batch, channels]
-  let std : Tensor { shape := #[batch, channels], device := device } := Tensor.Preserving.sqrt (Tensor.Preserving.addScalar var m.eps)
-  let std1 : Tensor { shape := #[batch, channels, 1], device := device } := Tensor.reshapeChecked std #[batch, channels, 1]
-  let stdRep : Tensor { shape := #[batch, channels, frames], device := device } := Tensor.expand std1 #[batch, channels, frames]
+  let diff := Tensor.Preserving.sub x meanRep
+  let var : Tensor { shape := #[batch, channels], dtype := dtype.val, device := device } := Tensor.reshapeChecked (Tensor.Preserving.meanDim (Tensor.Preserving.mul diff diff) 2 false) #[batch, channels]
+  let std : Tensor { shape := #[batch, channels], dtype := dtype.val, device := device } := Tensor.Preserving.sqrt (Tensor.Preserving.addScalar var m.eps)
+  let std1 : Tensor { shape := #[batch, channels, 1], dtype := dtype.val, device := device } := Tensor.reshapeChecked std #[batch, channels, 1]
+  let stdRep : Tensor { shape := #[batch, channels, frames], dtype := dtype.val, device := device } := Tensor.expand std1 #[batch, channels, frames]
 
-  let attIn12 : Tensor { shape := #[batch, channels + channels, frames], device := device } := Tensor.reshapeChecked (Tensor.cat x meanRep 1) #[batch, channels + channels, frames]
-  let attIn : Tensor { shape := #[batch, channels * 3, frames], device := device } := Tensor.reshapeChecked (Tensor.cat attIn12 stdRep 1) #[batch, channels * 3, frames]
+  let attIn12 : Tensor { shape := #[batch, channels + channels, frames], dtype := dtype.val, device := device } := Tensor.reshapeChecked (Tensor.cat x meanRep 1) #[batch, channels + channels, frames]
+  let attIn : Tensor { shape := #[batch, channels * 3, frames], dtype := dtype.val, device := device } := Tensor.reshapeChecked (Tensor.cat attIn12 stdRep 1) #[batch, channels * 3, frames]
   let att0 := TimeDelayNetBlock.forward m.tdnn attIn
   let att1 := Tensor.Preserving.tanh att0
-  let att2 : Tensor { shape := #[batch, channels, frames], device := device } :=
+  let att2 : Tensor { shape := #[batch, channels, frames], dtype := dtype.val, device := device } :=
     Tensor.reshapeChecked (Tensor.conv1d att1 m.convWeight 1 0 1) #[batch, channels, frames]
   let att3 := addBias3d att2 m.convBias
-  let attention : Tensor { shape := #[batch, channels, frames], device := device } := Tensor.Preserving.softmax att3 2
+  let attention : Tensor { shape := #[batch, channels, frames], dtype := dtype.val, device := device } := Tensor.Preserving.softmax att3 2
 
-  let weightedMean : Tensor { shape := #[batch, channels], device := device } := Tensor.reshapeChecked (Tensor.Preserving.sumDim (Tensor.Promoting.mul attention x) 2 false) #[batch, channels]
-  let weightedMean1 : Tensor { shape := #[batch, channels, 1], device := device } := Tensor.reshapeChecked weightedMean #[batch, channels, 1]
-  let weightedMeanRep : Tensor { shape := #[batch, channels, frames], device := device } := Tensor.expand weightedMean1 #[batch, channels, frames]
+  let weightedMean : Tensor { shape := #[batch, channels], dtype := dtype.val, device := device } := Tensor.reshapeChecked (Tensor.Preserving.sumDim (Tensor.Preserving.mul attention x) 2 false) #[batch, channels]
+  let weightedMean1 : Tensor { shape := #[batch, channels, 1], dtype := dtype.val, device := device } := Tensor.reshapeChecked weightedMean #[batch, channels, 1]
+  let weightedMeanRep : Tensor { shape := #[batch, channels, frames], dtype := dtype.val, device := device } := Tensor.expand weightedMean1 #[batch, channels, frames]
 
-  let centered := Tensor.Promoting.sub x weightedMeanRep
-  let weightedVar : Tensor { shape := #[batch, channels], device := device } := Tensor.reshapeChecked (Tensor.Preserving.sumDim (Tensor.Promoting.mul attention (Tensor.Promoting.mul centered centered)) 2 false) #[batch, channels]
-  let weightedStd : Tensor { shape := #[batch, channels], device := device } := Tensor.Preserving.sqrt (Tensor.Preserving.addScalar weightedVar m.eps)
+  let centered := Tensor.Preserving.sub x weightedMeanRep
+  let weightedVar : Tensor { shape := #[batch, channels], dtype := dtype.val, device := device } := Tensor.reshapeChecked (Tensor.Preserving.sumDim (Tensor.Preserving.mul attention (Tensor.Preserving.mul centered centered)) 2 false) #[batch, channels]
+  let weightedStd : Tensor { shape := #[batch, channels], dtype := dtype.val, device := device } := Tensor.Preserving.sqrt (Tensor.Preserving.addScalar weightedVar m.eps)
 
-  let pooled : Tensor { shape := #[batch, channels * 2], device := device } := Tensor.reshapeChecked (Tensor.cat weightedMean weightedStd 1) #[batch, channels * 2]
+  let pooled : Tensor { shape := #[batch, channels * 2], dtype := dtype.val, device := device } := Tensor.reshapeChecked (Tensor.cat weightedMean weightedStd 1) #[batch, channels * 2]
   Tensor.reshapeChecked pooled #[batch, channels * 2, 1]
 
 end AttentiveStatisticsPooling
 
 /-- Qwen3-TTS speaker encoder module. -/
-structure SpeakerEncoder (cfg : SpeakerEncoderConfig) where
-  tdnn0 : TimeDelayNetBlock (device := device) cfg.melDim (c0 cfg) (k0 cfg) (d0 cfg)
-  block1 : SqueezeExcitationRes2NetBlock (device := device)
+structure SpeakerEncoder (cfg : SpeakerEncoderConfig) (dtype : ExactDType := float32DType) where
+  tdnn0 : TimeDelayNetBlock (dtype := dtype) (device := device) cfg.melDim (c0 cfg) (k0 cfg) (d0 cfg)
+  block1 : SqueezeExcitationRes2NetBlock (dtype := dtype) (device := device)
     (c0 cfg) (c1 cfg) cfg.encRes2NetScale cfg.encSeChannels (k1 cfg) (d1 cfg)
-  block2 : SqueezeExcitationRes2NetBlock (device := device)
+  block2 : SqueezeExcitationRes2NetBlock (dtype := dtype) (device := device)
     (c1 cfg) (c2 cfg) cfg.encRes2NetScale cfg.encSeChannels (k2 cfg) (d2 cfg)
-  block3 : SqueezeExcitationRes2NetBlock (device := device)
+  block3 : SqueezeExcitationRes2NetBlock (dtype := dtype) (device := device)
     (c2 cfg) (c3 cfg) cfg.encRes2NetScale cfg.encSeChannels (k3 cfg) (d3 cfg)
-  mfa : TimeDelayNetBlock (device := device) (mfaInChannels cfg) (c4 cfg) (k4 cfg) (d4 cfg)
-  asp : AttentiveStatisticsPooling (device := device) (c4 cfg) cfg.encAttentionChannels
-  fcWeight : Tensor { shape := #[cfg.encDim, (c4 cfg) * 2, 1], device := device }
-  fcBias : Tensor { shape := #[cfg.encDim], device := device }
+  mfa : TimeDelayNetBlock (dtype := dtype) (device := device) (mfaInChannels cfg) (c4 cfg) (k4 cfg) (d4 cfg)
+  asp : AttentiveStatisticsPooling (dtype := dtype) (device := device) (c4 cfg) cfg.encAttentionChannels
+  fcWeight : Tensor { shape := #[cfg.encDim, (c4 cfg) * 2, 1], dtype := dtype.val, device := device }
+  fcBias : Tensor { shape := #[cfg.encDim], dtype := dtype.val, device := device }
   deriving TensorStruct
 
 namespace SpeakerEncoder
 
-def init (cfg : SpeakerEncoderConfig) (device : Device := .CPU) : IO (SpeakerEncoder (device := device) cfg) := do
+def init (cfg : SpeakerEncoderConfig) (device : Device := .CPU) (dtype : ExactDType := float32DType) : IO (SpeakerEncoder (dtype := dtype) (device := device) cfg) := do
   if cfg.encChannels.size < 5 then
     throw <| IO.userError "speaker encoder requires at least 5 enc_channels entries"
   if cfg.encKernelSizes.size < 5 then
@@ -280,35 +281,35 @@ def init (cfg : SpeakerEncoderConfig) (device : Device := .CPU) : IO (SpeakerEnc
   if c4 cfg != mfaInChannels cfg then
     throw <| IO.userError "speaker encoder expects enc_channels[4] = enc_channels[1] + enc_channels[2] + enc_channels[3]"
 
-  let tdnn0 ← TimeDelayNetBlock.init (device := device) cfg.melDim (c0 cfg) (k0 cfg) (d0 cfg)
-  let block1 ← SqueezeExcitationRes2NetBlock.init (device := device)
+  let tdnn0 ← TimeDelayNetBlock.init (dtype := dtype) (device := device) cfg.melDim (c0 cfg) (k0 cfg) (d0 cfg)
+  let block1 ← SqueezeExcitationRes2NetBlock.init (dtype := dtype) (device := device)
     (c0 cfg) (c1 cfg) cfg.encRes2NetScale cfg.encSeChannels (k1 cfg) (d1 cfg)
-  let block2 ← SqueezeExcitationRes2NetBlock.init (device := device)
+  let block2 ← SqueezeExcitationRes2NetBlock.init (dtype := dtype) (device := device)
     (c1 cfg) (c2 cfg) cfg.encRes2NetScale cfg.encSeChannels (k2 cfg) (d2 cfg)
-  let block3 ← SqueezeExcitationRes2NetBlock.init (device := device)
+  let block3 ← SqueezeExcitationRes2NetBlock.init (dtype := dtype) (device := device)
     (c2 cfg) (c3 cfg) cfg.encRes2NetScale cfg.encSeChannels (k3 cfg) (d3 cfg)
-  let mfa ← TimeDelayNetBlock.init (device := device) (mfaInChannels cfg) (c4 cfg) (k4 cfg) (d4 cfg)
-  let asp ← AttentiveStatisticsPooling.init (device := device) (c4 cfg) cfg.encAttentionChannels
+  let mfa ← TimeDelayNetBlock.init (dtype := dtype) (device := device) (mfaInChannels cfg) (c4 cfg) (k4 cfg) (d4 cfg)
+  let asp ← AttentiveStatisticsPooling.init (dtype := dtype) (device := device) (c4 cfg) cfg.encAttentionChannels
   let fcWeight ← initWeight (device := device) #[cfg.encDim, (c4 cfg) * 2, 1] ((c4 cfg) * 2)
   let fcBias ← initBias (device := device) #[cfg.encDim]
 
   pure { tdnn0, block1, block2, block3, mfa, asp, fcWeight, fcBias }
 
 def forward {batch frames : UInt64}
-    (m : SpeakerEncoder (device := device) cfg)
-    (mel : Tensor { shape := #[batch, frames, cfg.melDim], device := device }) : Tensor { shape := #[batch, cfg.encDim], device := device } :=
-  let x0 : Tensor { shape := #[batch, cfg.melDim, frames], device := device } := Tensor.reshapeChecked (Tensor.transpose mel 1 2) #[batch, cfg.melDim, frames]
+    (m : SpeakerEncoder (dtype := dtype) (device := device) cfg)
+    (mel : Tensor { shape := #[batch, frames, cfg.melDim], dtype := dtype.val, device := device }) : Tensor { shape := #[batch, cfg.encDim], dtype := dtype.val, device := device } :=
+  let x0 : Tensor { shape := #[batch, cfg.melDim, frames], dtype := dtype.val, device := device } := Tensor.reshapeChecked (Tensor.transpose mel 1 2) #[batch, cfg.melDim, frames]
   let x1 := TimeDelayNetBlock.forward m.tdnn0 x0
   let x2 := SqueezeExcitationRes2NetBlock.forward m.block1 x1
   let x3 := SqueezeExcitationRes2NetBlock.forward m.block2 x2
   let x4 := SqueezeExcitationRes2NetBlock.forward m.block3 x3
 
-  let agg12 : Tensor { shape := #[batch, c1 cfg + c2 cfg, frames], device := device } := Tensor.reshapeChecked (Tensor.cat x2 x3 1) #[batch, c1 cfg + c2 cfg, frames]
-  let agg123 : Tensor { shape := #[batch, mfaInChannels cfg, frames], device := device } := Tensor.reshapeChecked (Tensor.cat agg12 x4 1) #[batch, mfaInChannels cfg, frames]
+  let agg12 : Tensor { shape := #[batch, c1 cfg + c2 cfg, frames], dtype := dtype.val, device := device } := Tensor.reshapeChecked (Tensor.cat x2 x3 1) #[batch, c1 cfg + c2 cfg, frames]
+  let agg123 : Tensor { shape := #[batch, mfaInChannels cfg, frames], dtype := dtype.val, device := device } := Tensor.reshapeChecked (Tensor.cat agg12 x4 1) #[batch, mfaInChannels cfg, frames]
   let mfaOut := TimeDelayNetBlock.forward m.mfa agg123
   let pooled := AttentiveStatisticsPooling.forward m.asp mfaOut
 
-  let y0 : Tensor { shape := #[batch, cfg.encDim, 1], device := device } :=
+  let y0 : Tensor { shape := #[batch, cfg.encDim, 1], dtype := dtype.val, device := device } :=
     Tensor.reshapeChecked (Tensor.conv1d pooled m.fcWeight 1 0 1) #[batch, cfg.encDim, 1]
   let y1 := addBias3d y0 m.fcBias
   Tensor.reshapeChecked y1 #[batch, cfg.encDim]
@@ -316,7 +317,7 @@ def forward {batch frames : UInt64}
 end SpeakerEncoder
 
 instance {cfg : SpeakerEncoderConfig} {batch frames : UInt64} :
-    Module (SpeakerEncoder (device := device) cfg) (Tensor { shape := #[batch, frames, cfg.melDim], device := device }) (Tensor { shape := #[batch, cfg.encDim], device := device }) where
+    Module (SpeakerEncoder (dtype := dtype) (device := device) cfg) (Tensor { shape := #[batch, frames, cfg.melDim], dtype := dtype.val, device := device }) (Tensor { shape := #[batch, cfg.encDim], dtype := dtype.val, device := device }) where
   forward := SpeakerEncoder.forward
 
 end torch.qwen3tts

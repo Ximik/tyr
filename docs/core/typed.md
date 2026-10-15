@@ -83,6 +83,15 @@ dtype parameters for their distinct tensor roles. The wildcard default,
 `forgetDType`, and legacy promoting conveniences remain migration work; the
 exact package has no implicit coercion back to those wildcard tensors.
 
+Qwen3-TTS now loads the whole model under a `DTypeLayout` witness:
+`loadSharded` returns `Σ dtypes, Qwen3TTSForConditionalGeneration cfg dtypes`.
+The talker, code predictor, embeddings, heads, and caches share one checked dtype;
+the speaker encoder retains a separate dtype. Present checkpoint entries must
+match their group's shape and dtype. Only absent optional keys are suppressed,
+and the predictor's identity projection fallback requires both projection keys
+to be absent and equal hidden sizes. The example explicitly converts speaker
+conditioning embeddings to the talker dtype without converting stored weights.
+
 `tensor.staticSpec`, `shape`, `dtype`, and `device` describe the declared index.
 `tensor.actualSpec` and `runtimeDevice` inspect native metadata. `tensor.to target`
 performs a device conversion and returns a tensor indexed by `target`.

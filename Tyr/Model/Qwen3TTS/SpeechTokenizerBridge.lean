@@ -364,12 +364,12 @@ def prepareSpeakerMel
 
 /-- End-to-end speaker embedding from reference audio:
     audio -> mel (bridge) -> Lean speaker encoder forward. -/
-def extractSpeakerEmbeddingFromAudio
+def extractSpeakerEmbeddingFromAudio {dtypes : DTypeLayout}
     (cfg : Qwen3TTSConfig)
-    (model : Qwen3TTSForConditionalGeneration (device := device) cfg)
+    (model : Qwen3TTSForConditionalGeneration (device := device) cfg dtypes)
     (_bridge : SpeechTokenizerBridgeConfig)
     (audioPath melOutPath melFramesPath : String)
-    : IO (Tensor { shape := #[1, 1, cfg.talkerConfig.hiddenSize], device := device }) := do
+    : IO (Tensor { shape := #[1, 1, cfg.talkerConfig.hiddenSize], dtype := dtypes.speaker.val, device := device }) := do
   if cfg.speakerEncoderConfig.encDim != cfg.talkerConfig.hiddenSize then
     throw <| IO.userError
       s!"speaker embedding dim mismatch: speaker enc_dim={cfg.speakerEncoderConfig.encDim}, talker hidden={cfg.talkerConfig.hiddenSize}"
@@ -392,7 +392,7 @@ def extractSpeakerEmbeddingFromAudio
     ensureParentDir melFramesPath
     IO.FS.writeFile melFramesPath s!"{frames}\n"
 
-  let spk : Tensor { shape := #[1, cfg.speakerEncoderConfig.encDim], device := device } ← model.extractSpeakerEmbedding (mel.to device).forgetDType
+  let spk : Tensor { shape := #[1, cfg.speakerEncoderConfig.encDim], dtype := dtypes.speaker.val, device := device } ← model.extractSpeakerEmbedding (mel.to device)
   pure (Tensor.reshapeChecked spk #[1, 1, cfg.talkerConfig.hiddenSize])
 
 end torch.qwen3tts

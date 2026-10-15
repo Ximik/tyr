@@ -69,24 +69,25 @@ def testQwen3TTSRMSNormModelDType : IO Unit := do
       0.3, -1.1, 0.7, 0.2, -0.5, 0.8, 1.4, -0.2]) #[2, 3, 4]
   let weight : Tensor { shape := #[4], dtype := .Float32, device := .CPU } := Tensor.reshapeChecked (Tensor.fromFloatArray #[0.73, 1.19, -0.67, 1.53]) #[4]
   for bf16 in #[false, true] do
-    let x := if bf16 then input.toBFloat16.forgetDType else input.forgetDType
-    let w := if bf16 then weight.toBFloat16.forgetDType else weight.forgetDType
-    let norm : RMSNorm 4 (.Unknown "dynamic") := { weight := w, eps := ⟨0.01⟩ }
+    let dtype := if bf16 then DType.BFloat16 else .Float32
+    let x := input.castDType dtype
+    let w := weight.castDType dtype
+    let norm : RMSNorm 4 dtype := { weight := w, eps := ⟨0.01⟩ }
     let normalized := Tensor.rmsNormWeighted x.toFloat32 (Tensor.ones #[4]) 0.01
-    let expected : Tensor { shape := #[2, 3, 4], device := .CPU } :=
-      Tensor.Promoting.mul
-        (if bf16 then normalized.toBFloat16.forgetDType else normalized.forgetDType)
+    let expected : Tensor { shape := #[2, 3, 4], dtype, device := .CPU } :=
+      Tensor.Preserving.mul
+        (normalized.castDType dtype)
         (w.expand #[2, 3, 4])
     let actual := norm.forward3d x
     LeanTest.assertEqual actual.actualSpec.dtype x.actualSpec.dtype "RMSNorm preserves matching FP32/BF16 model dtype"
-    LeanTest.assertEqual (Tensor.item (Tensor.maxAllChecked (Tensor.abs (Tensor.Promoting.sub actual expected)))) 0.0
+    LeanTest.assertEqual (Tensor.item (Tensor.maxAllChecked (Tensor.abs (Tensor.sub actual.toFloat32 expected.toFloat32)))) 0.0
       "RMSNorm restores activation dtype before applying non-unit weights"
     for output in #[(norm.forward2d (Tensor.reshapeChecked x #[6, 4])).reshapeChecked #[2, 3, 4],
         (norm.forward4d (Tensor.reshapeChecked x #[1, 2, 3, 4])).reshapeChecked #[2, 3, 4],
         (norm.forward5d (Tensor.reshapeChecked x #[1, 2, 3, 4])).reshapeChecked #[2, 3, 4]] do
       LeanTest.assertEqual output.actualSpec.dtype x.actualSpec.dtype "All RMSNorm module layouts preserve model dtype"
       LeanTest.assertEqual (Tensor.item (Tensor.maxAllChecked (Tensor.abs
-        (Tensor.Promoting.sub (Tensor.reshapeChecked output #[2, 3, 4]) expected)))) 0.0
+        (Tensor.sub (Tensor.reshapeChecked output #[2, 3, 4]).toFloat32 expected.toFloat32)))) 0.0
         "RMSNorm layout wrappers agree"
     LeanTest.assertEqual (if bf16 then (Tensor.rmsNormWeighted x.toBFloat16 w.toBFloat16 0.01).actualSpec.dtype
       else (Tensor.rmsNormWeighted x.toFloat32 w.toFloat32 0.01).actualSpec.dtype) DType.Float32
@@ -95,23 +96,23 @@ def testQwen3TTSRMSNormModelDType : IO Unit := do
 @[test]
 def testQwen3TTSBFloat16IncrementalCache : IO Unit := do
   torch.manualSeed 7341
-  let raw ← qwen.QwenLayer.init 8 2 1 4 16 (dtype := .Unknown "dynamic")
-  let raw := TensorStruct.detach raw
-  let base := { raw with
-    self_attn := TensorStruct.scale raw.self_attn 0.25
-    mlp := TensorStruct.scale raw.mlp 0.25 }
   let inputs : Tensor { shape := #[1, 5, 8], dtype := .Float32, device := .CPU } := Tensor.reshapeChecked
     (Tensor.Preserving.mulScalar (Tensor.sin (Tensor.toFloat32 (Tensor.arange 40))) 0.5) #[1, 5, 8]
   let (cos, sin) := Tensor.rotaryFreqs 5 4 10000
   for bf16 in #[false, true] do
-    let layer ← if bf16 then TensorStruct.castDType .BFloat16 base else pure base
-    let x := if bf16 then inputs.toBFloat16.forgetDType else inputs.forgetDType
+    let dtype := if bf16 then DType.BFloat16 else .Float32
+    let raw ← qwen.QwenLayer.init 8 2 1 4 16 (dtype := dtype)
+    let raw := TensorStruct.detach raw
+    let layer := { raw with
+      self_attn := TensorStruct.scale raw.self_attn 0.25
+      mlp := TensorStruct.scale raw.mlp 0.25 }
+    let x := inputs.castDType dtype
     let full := layer.forward x cos sin
     LeanTest.assertEqual full.actualSpec.dtype x.actualSpec.dtype "Full Qwen layer retains model dtype"
-    let fresh : qwen.QwenAttention.KVCache 1 1 4 (.Unknown "dynamic") := qwen.QwenAttention.initKVCache 5 (dtype := .Unknown "dynamic")
+    let fresh : qwen.QwenAttention.KVCache 1 1 4 dtype := qwen.QwenAttention.initKVCache 5 (dtype := dtype)
     let mut cache := fresh
     -- Three prompt tokens followed by two decode tokens exercise the Talker cache path.
-    let mut outputs : Array (Sigma (fun shape => Tensor { shape := shape, device := .CPU })) := #[]
+    let mut outputs : Array (Sigma (fun shape => Tensor { shape := shape, dtype, device := .CPU })) := #[]
     for pos in [:3] do
       let (out, next) := layer.forwardStep (Tensor.sliceChecked x 1 pos.toUInt64 1 #[1, 1, 8])
         (Tensor.sliceChecked cos 0 pos.toUInt64 1 #[1, 2]) (Tensor.sliceChecked sin 0 pos.toUInt64 1 #[1, 2]) cache
@@ -136,7 +137,7 @@ def testQwen3TTSBFloat16IncrementalCache : IO Unit := do
       "Later decode leaves the functional V snapshot unchanged"
     LeanTest.assertEqual (Tensor.item (Tensor.sumAll fresh.kStoreDyn.2)) 0.0 "Fresh K snapshot remains empty"
     LeanTest.assertEqual (Tensor.item (Tensor.sumAll fresh.vStoreDyn.2)) 0.0 "Fresh V snapshot remains empty"
-    let stepped : Tensor { shape := #[1, 5, 8], device := .CPU } := Tensor.catManyChecked outputs 1 #[1, 5, 8]
+    let stepped : Tensor { shape := #[1, 5, 8], dtype, device := .CPU } := Tensor.catManyChecked outputs 1 #[1, 5, 8]
     let error := Tensor.item (Tensor.maxAll (Tensor.abs (Tensor.sub (Tensor.toFloat32 stepped) (Tensor.toFloat32 full))))
     let tolerance := if bf16 then 0.0078125 else 0.00001
     LeanTest.assertTrue (Float.isFinite error && error <= tolerance)
@@ -145,8 +146,7 @@ def testQwen3TTSBFloat16IncrementalCache : IO Unit := do
 @[test]
 def testQwen3TTSBFloat16Generation : IO Unit := do
   let cfg := tinyCfg.talkerConfig
-  let original ← TalkerForConditionalGeneration.init cfg
-  let talker ← TensorStruct.castDType .BFloat16 original
+  let talker ← TalkerForConditionalGeneration.init cfg (dtype := ⟨.BFloat16, by decide⟩)
   let ids : Tensor { shape := #[1, 3], dtype := .Int64, device := .CPU } := Tensor.fullInt #[1, 3] 1
   let prompt := TalkerModel.buildInputsFromText cfg talker.model ids
   LeanTest.assertEqual prompt.actualSpec.dtype DType.BFloat16 "Text conditioning follows BF16 weights"
@@ -248,7 +248,7 @@ def testQwen3TTSSpeakerEmbedding : IO Unit := do
   let batch : UInt64 := 2
   let frames : UInt64 := 12
   let mel ← Tensor.randn #[batch, frames, cfg.speakerEncoderConfig.melDim]
-  let emb ← model.extractSpeakerEmbedding mel.forgetDType
+  let emb ← model.extractSpeakerEmbedding mel
   let s := Tensor.item (Tensor.sumAll emb)
   LeanTest.assertTrue (Float.isFinite s) "speaker embedding sum should be finite"
 
@@ -261,20 +261,19 @@ def testQwen3TTSSpeakerEmbeddingAlignsFeatureDType : IO Unit := do
     encAttentionChannels := 4
     encRes2NetScale := 2
     encSeChannels := 4 } }
-  let original ← Qwen3TTSForConditionalGeneration.init cfg
-  let some baseEncoder := original.speakerEncoder
-    | throw <| IO.userError "Missing test speaker encoder"
   let features : Tensor { shape := #[2, 12, cfg.speakerEncoderConfig.melDim], dtype := .Float32, device := .CPU } ←
     Tensor.randn #[2, 12, cfg.speakerEncoderConfig.melDim]
   for bf16Weights in #[false, true] do
-    let enc ← if bf16Weights then TensorStruct.castDType .BFloat16 baseEncoder else pure baseEncoder
-    let model := { original with speakerEncoder := some enc }
+    let speaker : ExactDType := if bf16Weights then ⟨.BFloat16, by decide⟩ else float32DType
+    let model ← Qwen3TTSForConditionalGeneration.init cfg (dtypes := { speaker })
+    let some enc := model.speakerEncoder
+      | throw <| IO.userError "Missing test speaker encoder"
     for bf16Features in #[false, true] do
-      let mel := if bf16Features then features.toBFloat16.forgetDType else features.forgetDType
+      let mel := features.castDType (if bf16Features then .BFloat16 else .Float32)
       let originalDType := mel.actualSpec.dtype
-      let explicit := if bf16Weights then mel.toBFloat16.forgetDType else mel.toFloat32.forgetDType
+      let explicit := mel.castDType speaker.val
       let expected := enc.forward explicit
-      let actual ← model.extractSpeakerEmbedding mel.forgetDType
+      let actual ← model.extractSpeakerEmbedding mel
       LeanTest.assertEqual actual.runtimeShape #[2, cfg.speakerEncoderConfig.encDim]
         "Speaker output shape follows the model configuration"
       LeanTest.assertEqual actual.actualSpec.dtype enc.tdnn0.weight.actualSpec.dtype
@@ -297,7 +296,7 @@ def testQwen3TTSSpeakerEmbeddingUnavailableForNonBaseModel : IO Unit := do
 
   Tests.assertThrows
     (do
-      let _ ← model.extractSpeakerEmbedding mel.forgetDType
+      let _ ← model.extractSpeakerEmbedding mel
       pure ())
     (some "Speaker encoder is unavailable")
 
@@ -306,7 +305,7 @@ def testQwen3TTSStreamingApi : IO Unit := do
   let cfg := tinyCfg
   let model ← Qwen3TTSForConditionalGeneration.init cfg
   let textIds : Tensor { shape := #[1, 5], dtype := .Int64, device := .CPU } ← Tensor.randint 0 cfg.talkerConfig.textVocabSize.toInt64 #[1, 5]
-  let talkerInputs : Tensor { shape := #[1, 6, cfg.talkerConfig.hiddenSize], device := .CPU } := model.buildTalkerInputsFromText textIds
+  let talkerInputs : Tensor { shape := #[1, 6, cfg.talkerConfig.hiddenSize], dtype := .Float32, device := .CPU } := model.buildTalkerInputsFromText textIds
 
   let callbacksSeenRef ← IO.mkRef (0 : Nat)
   let callbacks : Qwen3TTSForConditionalGeneration.StreamingCallbacks := {

@@ -10,6 +10,7 @@
   and interfaces, while using Tyr's existing transformer primitives.
 -/
 import Tyr.Typed.Neural
+import Tyr.Model.Qwen3TTS.DTypes
 import Tyr.TensorStruct
 import Tyr.Module.Core
 import Tyr.Module.Derive
@@ -21,16 +22,16 @@ import Tyr.Model.Utils
 
 namespace torch.qwen3tts
 
-variable {device : Device}
+variable {device : Device} {dtype : ExactDType}
 
-private def initWeight (shape : Shape) (fanIn : UInt64) : IO (Tensor { shape := shape, device := device }) :=
-  Model.initWeight (device := device) shape fanIn (.Unknown "dynamic")
+private def initWeight (shape : Shape) (fanIn : UInt64) : IO (Tensor { shape := shape, dtype := dtype.val, device := device }) :=
+  Model.initWeight (device := device) shape fanIn dtype.val
 
-abbrev TalkerLayer (cfg : TalkerConfig) :=
-  qwen.QwenLayer (device := device) cfg.hiddenSize cfg.numAttentionHeads cfg.numKeyValueHeads cfg.headDim cfg.intermediateSize (.Unknown "dynamic")
+abbrev TalkerLayer (cfg : TalkerConfig) (dtype : ExactDType := float32DType) :=
+  qwen.QwenLayer (device := device) cfg.hiddenSize cfg.numAttentionHeads cfg.numKeyValueHeads cfg.headDim cfg.intermediateSize dtype.val
 
-abbrev CodePredictorLayer (cfg : TalkerCodePredictorConfig) :=
-  qwen.QwenLayer (device := device) cfg.hiddenSize cfg.numAttentionHeads cfg.numKeyValueHeads cfg.headDim cfg.intermediateSize (.Unknown "dynamic")
+abbrev CodePredictorLayer (cfg : TalkerCodePredictorConfig) (dtype : ExactDType := float32DType) :=
+  qwen.QwenLayer (device := device) cfg.hiddenSize cfg.numAttentionHeads cfg.numKeyValueHeads cfg.headDim cfg.intermediateSize dtype.val
 
 private def getOrFirst! [Inhabited α] (xs : Array α) (i : Nat) : α :=
   match xs[i]? with
@@ -47,20 +48,20 @@ private def optAtOr (vals : Option (Array α)) (idx : Nat) (fallback : α) : α 
   (vals >>= fun xs => xs[idx]?).getD fallback
 
 /-- Main talker decoder (text + codec embeddings -> hidden states). -/
-structure TalkerModel (cfg : TalkerConfig) where
-  codecEmbedding : Tensor { shape := #[cfg.vocabSize, cfg.hiddenSize], device := device }
-  textEmbedding : Tensor { shape := #[cfg.textVocabSize, cfg.textHiddenSize], device := device }
-  textProjectionFc1 : Tensor { shape := #[cfg.textHiddenSize, cfg.textHiddenSize], device := device }
-  textProjectionFc1Bias : Tensor { shape := #[cfg.textHiddenSize], device := device }
-  textProjectionFc2 : Tensor { shape := #[cfg.hiddenSize, cfg.textHiddenSize], device := device }
-  textProjectionFc2Bias : Tensor { shape := #[cfg.hiddenSize], device := device }
-  layers : Array (TalkerLayer (device := device) cfg)
-  norm : RMSNorm (device := device) cfg.hiddenSize (.Unknown "dynamic")
+structure TalkerModel (cfg : TalkerConfig) (dtype : ExactDType := float32DType) where
+  codecEmbedding : Tensor { shape := #[cfg.vocabSize, cfg.hiddenSize], dtype := dtype.val, device := device }
+  textEmbedding : Tensor { shape := #[cfg.textVocabSize, cfg.textHiddenSize], dtype := dtype.val, device := device }
+  textProjectionFc1 : Tensor { shape := #[cfg.textHiddenSize, cfg.textHiddenSize], dtype := dtype.val, device := device }
+  textProjectionFc1Bias : Tensor { shape := #[cfg.textHiddenSize], dtype := dtype.val, device := device }
+  textProjectionFc2 : Tensor { shape := #[cfg.hiddenSize, cfg.textHiddenSize], dtype := dtype.val, device := device }
+  textProjectionFc2Bias : Tensor { shape := #[cfg.hiddenSize], dtype := dtype.val, device := device }
+  layers : Array (TalkerLayer (dtype := dtype) (device := device) cfg)
+  norm : RMSNorm (device := device) cfg.hiddenSize dtype.val
   deriving TensorStruct
 
 namespace TalkerModel
 
-def init (cfg : TalkerConfig) (device : Device := .CPU) : IO (TalkerModel (device := device) cfg) := do
+def init (cfg : TalkerConfig) (device : Device := .CPU) (dtype : ExactDType := float32DType) : IO (TalkerModel (dtype := dtype) (device := device) cfg) := do
   let codecEmbedding ← initWeight (device := device) #[cfg.vocabSize, cfg.hiddenSize] cfg.hiddenSize
   let textEmbedding ← initWeight (device := device) #[cfg.textVocabSize, cfg.textHiddenSize] cfg.textHiddenSize
   let textProjectionFc1 ← initWeight (device := device) #[cfg.textHiddenSize, cfg.textHiddenSize] cfg.textHiddenSize
@@ -72,10 +73,10 @@ def init (cfg : TalkerConfig) (device : Device := .CPU) : IO (TalkerModel (devic
   for _ in [:cfg.numHiddenLayers.toNat] do
     let layer ← qwen.QwenLayer.init (device := device)
       cfg.hiddenSize cfg.numAttentionHeads cfg.numKeyValueHeads
-      cfg.headDim cfg.intermediateSize cfg.rmsNormEps (.Unknown "dynamic")
+      cfg.headDim cfg.intermediateSize cfg.rmsNormEps dtype.val
     layers := layers.push layer
 
-  let norm ← RMSNorm.init (device := device) cfg.hiddenSize cfg.rmsNormEps (.Unknown "dynamic")
+  let norm ← RMSNorm.init (device := device) cfg.hiddenSize cfg.rmsNormEps dtype.val
   pure {
     codecEmbedding
     textEmbedding
@@ -88,15 +89,15 @@ def init (cfg : TalkerConfig) (device : Device := .CPU) : IO (TalkerModel (devic
   }
 
 /-- Embed codec token ids with talker codec embedding table. -/
-def embedCodec {batch seq : UInt64} (m : TalkerModel (device := device) cfg)
-    (codecIds : Tensor { shape := #[batch, seq], dtype := .Int64, device := device }) : Tensor { shape := #[batch, seq, cfg.hiddenSize], device := device } :=
+def embedCodec {batch seq : UInt64} (m : TalkerModel (dtype := dtype) (device := device) cfg)
+    (codecIds : Tensor { shape := #[batch, seq], dtype := .Int64, device := device }) : Tensor { shape := #[batch, seq, cfg.hiddenSize], dtype := dtype.val, device := device } :=
   let ids : Tensor { shape := #[batch, seq], dtype := .Int64, device := device } :=
     codecIds.to m.codecEmbedding.device
   Tensor.embedding ids m.codecEmbedding
 
 /-- Embed text token ids and project to talker hidden size. -/
-def embedText {batch seq : UInt64} (m : TalkerModel (device := device) cfg)
-    (textIds : Tensor { shape := #[batch, seq], dtype := .Int64, device := device }) : Tensor { shape := #[batch, seq, cfg.hiddenSize], device := device } :=
+def embedText {batch seq : UInt64} (m : TalkerModel (dtype := dtype) (device := device) cfg)
+    (textIds : Tensor { shape := #[batch, seq], dtype := .Int64, device := device }) : Tensor { shape := #[batch, seq, cfg.hiddenSize], dtype := dtype.val, device := device } :=
   let ids : Tensor { shape := #[batch, seq], dtype := .Int64, device := device } :=
     textIds.to m.textEmbedding.device
   let t := Tensor.embedding ids m.textEmbedding
@@ -105,34 +106,34 @@ def embedText {batch seq : UInt64} (m : TalkerModel (device := device) cfg)
   Tensor.affine3d h m.textProjectionFc2 m.textProjectionFc2Bias
 
 /-- Prepend codec BOS embedding to a text-conditioning embedding sequence. -/
-def prependCodecBos {batch seq : UInt64} (cfg : TalkerConfig) (m : TalkerModel (device := device) cfg)
-    (textEmbeds : Tensor { shape := #[batch, seq, cfg.hiddenSize], device := device }) : Tensor { shape := #[batch, 1 + seq, cfg.hiddenSize], device := device } :=
+def prependCodecBos {batch seq : UInt64} (cfg : TalkerConfig) (m : TalkerModel (dtype := dtype) (device := device) cfg)
+    (textEmbeds : Tensor { shape := #[batch, seq, cfg.hiddenSize], dtype := dtype.val, device := device }) : Tensor { shape := #[batch, 1 + seq, cfg.hiddenSize], dtype := dtype.val, device := device } :=
   let bosIds0 : Tensor { shape := #[batch, 1], dtype := .Int64, device := .CPU } := Tensor.fullInt #[batch, 1] (Int64.ofNat cfg.codecBosId.toNat)
   let bosIds : Tensor { shape := #[batch, 1], dtype := .Int64, device := device } := bosIds0.to textEmbeds.device
-  let bosEmb : Tensor { shape := #[batch, 1, cfg.hiddenSize], device := device } := embedCodec m bosIds
+  let bosEmb : Tensor { shape := #[batch, 1, cfg.hiddenSize], dtype := dtype.val, device := device } := embedCodec m bosIds
   Tensor.cat bosEmb textEmbeds 1
 
 /-- Build talker input embeddings from text token IDs. -/
-def buildInputsFromText {batch textSeq : UInt64} (cfg : TalkerConfig) (m : TalkerModel (device := device) cfg)
-    (textIds : Tensor { shape := #[batch, textSeq], dtype := .Int64, device := device }) : Tensor { shape := #[batch, 1 + textSeq, cfg.hiddenSize], device := device } :=
+def buildInputsFromText {batch textSeq : UInt64} (cfg : TalkerConfig) (m : TalkerModel (dtype := dtype) (device := device) cfg)
+    (textIds : Tensor { shape := #[batch, textSeq], dtype := .Int64, device := device }) : Tensor { shape := #[batch, 1 + textSeq, cfg.hiddenSize], dtype := dtype.val, device := device } :=
   prependCodecBos cfg m (embedText m textIds)
 
 /-- Build talker input embeddings from instruct + text token IDs. -/
-def buildInputsFromInstructText {batch instructSeq textSeq : UInt64} (cfg : TalkerConfig) (m : TalkerModel (device := device) cfg)
+def buildInputsFromInstructText {batch instructSeq textSeq : UInt64} (cfg : TalkerConfig) (m : TalkerModel (dtype := dtype) (device := device) cfg)
     (instructIds : Tensor { shape := #[batch, instructSeq], dtype := .Int64, device := device })
     (textIds : Tensor { shape := #[batch, textSeq], dtype := .Int64, device := device })
-    : Tensor { shape := #[batch, 1 + (instructSeq + textSeq), cfg.hiddenSize], device := device } :=
+    : Tensor { shape := #[batch, 1 + (instructSeq + textSeq), cfg.hiddenSize], dtype := dtype.val, device := device } :=
   let instructEmb := embedText m instructIds
   let textEmb := embedText m textIds
-  let merged : Tensor { shape := #[batch, instructSeq + textSeq, cfg.hiddenSize], device := device } := Tensor.cat instructEmb textEmb 1
+  let merged : Tensor { shape := #[batch, instructSeq + textSeq, cfg.hiddenSize], dtype := dtype.val, device := device } := Tensor.cat instructEmb textEmb 1
   prependCodecBos cfg m merged
 
 /-- Forward over already-built talker input embeddings. -/
 def forwardEmbeds {batch seq : UInt64} (cfg : TalkerConfig)
-    (m : TalkerModel (device := device) cfg)
-    (inputsEmbeds : Tensor { shape := #[batch, seq, cfg.hiddenSize], device := device })
+    (m : TalkerModel (dtype := dtype) (device := device) cfg)
+    (inputsEmbeds : Tensor { shape := #[batch, seq, cfg.hiddenSize], dtype := dtype.val, device := device })
     (attnMask : Option (Tensor { shape := #[batch, seq], dtype := .Int64, device := device }) := none)
-    : Tensor { shape := #[batch, seq, cfg.hiddenSize], device := device } :=
+    : Tensor { shape := #[batch, seq, cfg.hiddenSize], dtype := dtype.val, device := device } :=
   let (cos0, sin0) := Tensor.rotaryFreqs seq cfg.headDim cfg.ropeTheta
   let cos : Tensor { shape := #[seq, cfg.headDim / 2], dtype := .Float32, device := device } :=
     cos0.to inputsEmbeds.device
@@ -151,30 +152,30 @@ def forwardEmbeds {batch seq : UInt64} (cfg : TalkerConfig)
 
 /-- Convenience forward from codec token ids. -/
 def forwardCodecIds {batch seq : UInt64} (cfg : TalkerConfig)
-    (m : TalkerModel (device := device) cfg)
+    (m : TalkerModel (dtype := dtype) (device := device) cfg)
     (codecIds : Tensor { shape := #[batch, seq], dtype := .Int64, device := device })
     (attnMask : Option (Tensor { shape := #[batch, seq], dtype := .Int64, device := device }) := none)
-    : Tensor { shape := #[batch, seq, cfg.hiddenSize], device := device } :=
+    : Tensor { shape := #[batch, seq, cfg.hiddenSize], dtype := dtype.val, device := device } :=
   forwardEmbeds cfg m (embedCodec m codecIds) attnMask
 
 end TalkerModel
 
 /-- Sub-talker model that predicts residual codec groups. -/
-structure TalkerCodePredictor (cfg : TalkerConfig) where
-  inputEmbeddings : Array (Tensor { shape := #[cfg.codePredictorConfig.vocabSize, cfg.hiddenSize], device := device })
-  inputProjection : Tensor { shape := #[cfg.codePredictorConfig.hiddenSize, cfg.hiddenSize], device := device }
-  inputProjectionBias : Tensor { shape := #[cfg.codePredictorConfig.hiddenSize], device := device }
-  layers : Array (CodePredictorLayer (device := device) cfg.codePredictorConfig)
-  norm : RMSNorm (device := device) cfg.codePredictorConfig.hiddenSize (.Unknown "dynamic")
-  lmHeads : Array (Tensor { shape := #[cfg.codePredictorConfig.vocabSize, cfg.codePredictorConfig.hiddenSize], device := device })
+structure TalkerCodePredictor (cfg : TalkerConfig) (dtype : ExactDType := float32DType) where
+  inputEmbeddings : Array (Tensor { shape := #[cfg.codePredictorConfig.vocabSize, cfg.hiddenSize], dtype := dtype.val, device := device })
+  inputProjection : Tensor { shape := #[cfg.codePredictorConfig.hiddenSize, cfg.hiddenSize], dtype := dtype.val, device := device }
+  inputProjectionBias : Tensor { shape := #[cfg.codePredictorConfig.hiddenSize], dtype := dtype.val, device := device }
+  layers : Array (CodePredictorLayer (dtype := dtype) (device := device) cfg.codePredictorConfig)
+  norm : RMSNorm (device := device) cfg.codePredictorConfig.hiddenSize dtype.val
+  lmHeads : Array (Tensor { shape := #[cfg.codePredictorConfig.vocabSize, cfg.codePredictorConfig.hiddenSize], dtype := dtype.val, device := device })
   deriving TensorStruct
 
 namespace TalkerCodePredictor
 
-def init (cfg : TalkerConfig) (device : Device := .CPU) : IO (TalkerCodePredictor (device := device) cfg) := do
+def init (cfg : TalkerConfig) (device : Device := .CPU) (dtype : ExactDType := float32DType) : IO (TalkerCodePredictor (dtype := dtype) (device := device) cfg) := do
   let numCodebooks := ensureAtLeastOne (cfg.numCodeGroups.toNat - 1)
 
-  let mut inputEmbeddings : Array (Tensor { shape := #[cfg.codePredictorConfig.vocabSize, cfg.hiddenSize], device := device }) := #[]
+  let mut inputEmbeddings : Array (Tensor { shape := #[cfg.codePredictorConfig.vocabSize, cfg.hiddenSize], dtype := dtype.val, device := device }) := #[]
   for _ in [:numCodebooks] do
     let emb ← initWeight (device := device) #[cfg.codePredictorConfig.vocabSize, cfg.hiddenSize] cfg.hiddenSize
     inputEmbeddings := inputEmbeddings.push emb
@@ -192,12 +193,12 @@ def init (cfg : TalkerConfig) (device : Device := .CPU) : IO (TalkerCodePredicto
       cfg.codePredictorConfig.numKeyValueHeads
       cfg.codePredictorConfig.headDim
       cfg.codePredictorConfig.intermediateSize
-      cfg.codePredictorConfig.rmsNormEps (.Unknown "dynamic")
+      cfg.codePredictorConfig.rmsNormEps dtype.val
     layers := layers.push layer
 
-  let norm ← RMSNorm.init (device := device) cfg.codePredictorConfig.hiddenSize cfg.codePredictorConfig.rmsNormEps (.Unknown "dynamic")
+  let norm ← RMSNorm.init (device := device) cfg.codePredictorConfig.hiddenSize cfg.codePredictorConfig.rmsNormEps dtype.val
 
-  let mut lmHeads : Array (Tensor { shape := #[cfg.codePredictorConfig.vocabSize, cfg.codePredictorConfig.hiddenSize], device := device }) := #[]
+  let mut lmHeads : Array (Tensor { shape := #[cfg.codePredictorConfig.vocabSize, cfg.codePredictorConfig.hiddenSize], dtype := dtype.val, device := device }) := #[]
   for _ in [:numCodebooks] do
     let head ← initWeight (device := device)
       #[cfg.codePredictorConfig.vocabSize, cfg.codePredictorConfig.hiddenSize]
@@ -214,23 +215,23 @@ def init (cfg : TalkerConfig) (device : Device := .CPU) : IO (TalkerCodePredicto
   }
 
 /-- Embed tokens for a specific residual codebook group. -/
-def embedGroupTokens {batch seq : UInt64} (m : TalkerCodePredictor (device := device) cfg)
-    (groupIdx : Nat) (tokenIds : Tensor { shape := #[batch, seq], dtype := .Int64, device := device }) : Tensor { shape := #[batch, seq, cfg.hiddenSize], device := device } :=
+def embedGroupTokens {batch seq : UInt64} (m : TalkerCodePredictor (dtype := dtype) (device := device) cfg)
+    (groupIdx : Nat) (tokenIds : Tensor { shape := #[batch, seq], dtype := .Int64, device := device }) : Tensor { shape := #[batch, seq, cfg.hiddenSize], dtype := dtype.val, device := device } :=
   let emb := getOrFirst! m.inputEmbeddings groupIdx
   Tensor.embedding tokenIds emb
 
 /-- Project talker hidden state to sub-talker hidden size. -/
-def projectInputs {batch seq : UInt64} (m : TalkerCodePredictor (device := device) cfg)
-    (x : Tensor { shape := #[batch, seq, cfg.hiddenSize], device := device })
-    : Tensor { shape := #[batch, seq, cfg.codePredictorConfig.hiddenSize], device := device } :=
+def projectInputs {batch seq : UInt64} (m : TalkerCodePredictor (dtype := dtype) (device := device) cfg)
+    (x : Tensor { shape := #[batch, seq, cfg.hiddenSize], dtype := dtype.val, device := device })
+    : Tensor { shape := #[batch, seq, cfg.codePredictorConfig.hiddenSize], dtype := dtype.val, device := device } :=
   Tensor.affine3d x m.inputProjection m.inputProjectionBias
 
 /-- Forward hidden states for the sub-talker decoder stack. -/
 def forwardHidden {batch seq : UInt64} (cfg : TalkerConfig)
-    (m : TalkerCodePredictor (device := device) cfg)
-    (inputsEmbeds : Tensor { shape := #[batch, seq, cfg.hiddenSize], device := device })
+    (m : TalkerCodePredictor (dtype := dtype) (device := device) cfg)
+    (inputsEmbeds : Tensor { shape := #[batch, seq, cfg.hiddenSize], dtype := dtype.val, device := device })
     (attnMask : Option (Tensor { shape := #[batch, seq], dtype := .Int64, device := device }) := none)
-    : Tensor { shape := #[batch, seq, cfg.codePredictorConfig.hiddenSize], device := device } :=
+    : Tensor { shape := #[batch, seq, cfg.codePredictorConfig.hiddenSize], dtype := dtype.val, device := device } :=
   let hidden0 := projectInputs m inputsEmbeds
   let cpCfg := cfg.codePredictorConfig
   let (cos0, sin0) := Tensor.rotaryFreqs seq cpCfg.headDim cpCfg.ropeTheta
@@ -250,20 +251,20 @@ def forwardHidden {batch seq : UInt64} (cfg : TalkerConfig)
   m.norm.forward3d hidden
 
 /-- Compute logits for one residual codebook group. -/
-def logitsForGroup {batch seq : UInt64} (m : TalkerCodePredictor (device := device) cfg)
+def logitsForGroup {batch seq : UInt64} (m : TalkerCodePredictor (dtype := dtype) (device := device) cfg)
     (groupIdx : Nat)
-    (hidden : Tensor { shape := #[batch, seq, cfg.codePredictorConfig.hiddenSize], device := device })
-    : Tensor { shape := #[batch, seq, cfg.codePredictorConfig.vocabSize], device := device } :=
+    (hidden : Tensor { shape := #[batch, seq, cfg.codePredictorConfig.hiddenSize], dtype := dtype.val, device := device })
+    : Tensor { shape := #[batch, seq, cfg.codePredictorConfig.vocabSize], dtype := dtype.val, device := device } :=
   let head := getOrFirst! m.lmHeads groupIdx
   Tensor.linear3d hidden head
 
 end TalkerCodePredictor
 
 /-- Talker + sub-talker generation heads. -/
-structure TalkerForConditionalGeneration (cfg : TalkerConfig) where
-  model : TalkerModel (device := device) cfg
-  codePredictor : TalkerCodePredictor (device := device) cfg
-  codecHead : Tensor { shape := #[cfg.vocabSize, cfg.hiddenSize], device := device }
+structure TalkerForConditionalGeneration (cfg : TalkerConfig) (dtype : ExactDType := float32DType) where
+  model : TalkerModel (dtype := dtype) (device := device) cfg
+  codePredictor : TalkerCodePredictor (dtype := dtype) (device := device) cfg
+  codecHead : Tensor { shape := #[cfg.vocabSize, cfg.hiddenSize], dtype := dtype.val, device := device }
   deriving TensorStruct
 
 namespace TalkerForConditionalGeneration
@@ -272,31 +273,31 @@ structure CodeGenerationOutput (batch maxFrames numCodeGroups : UInt64) where
   codes : Tensor { shape := #[batch, maxFrames, numCodeGroups], dtype := .Int64, device := device }
   lengths : Array UInt64
 
-structure FrameGenerationOutput (batch numCodeGroups hiddenSize : UInt64) where
+structure FrameGenerationOutput (batch numCodeGroups hiddenSize : UInt64) (dtype : ExactDType := float32DType) where
   codes : Tensor { shape := #[batch, numCodeGroups], dtype := .Int64, device := device }
-  summedEmbedding : Tensor { shape := #[batch, 1, hiddenSize], device := device }
+  summedEmbedding : Tensor { shape := #[batch, 1, hiddenSize], dtype := dtype.val, device := device }
 
 structure CodePredictorRoPECache (cfg : TalkerConfig) where
   cos : Tensor { shape := #[cfg.numCodeGroups + 1, cfg.codePredictorConfig.headDim / 2], dtype := .Float32, device := device }
   sin : Tensor { shape := #[cfg.numCodeGroups + 1, cfg.codePredictorConfig.headDim / 2], dtype := .Float32, device := device }
 
-def init (cfg : TalkerConfig) (device : Device := .CPU) : IO (TalkerForConditionalGeneration (device := device) cfg) := do
-  let model ← TalkerModel.init (device := device) cfg
-  let codePredictor ← TalkerCodePredictor.init (device := device) cfg
+def init (cfg : TalkerConfig) (device : Device := .CPU) (dtype : ExactDType := float32DType) : IO (TalkerForConditionalGeneration (dtype := dtype) (device := device) cfg) := do
+  let model ← TalkerModel.init (dtype := dtype) (device := device) cfg
+  let codePredictor ← TalkerCodePredictor.init (dtype := dtype) (device := device) cfg
   let codecHead ← initWeight (device := device) #[cfg.vocabSize, cfg.hiddenSize] cfg.hiddenSize
   pure { model, codePredictor, codecHead }
 
 /-- Forward talker decoder and return first-codebook logits. -/
 def forward {batch seq : UInt64} (cfg : TalkerConfig)
-    (m : TalkerForConditionalGeneration (device := device) cfg)
-    (talkerInputs : Tensor { shape := #[batch, seq, cfg.hiddenSize], device := device })
+    (m : TalkerForConditionalGeneration (dtype := dtype) (device := device) cfg)
+    (talkerInputs : Tensor { shape := #[batch, seq, cfg.hiddenSize], dtype := dtype.val, device := device })
     (attnMask : Option (Tensor { shape := #[batch, seq], dtype := .Int64, device := device }) := none)
-    : Tensor { shape := #[batch, seq, cfg.vocabSize], device := device } :=
+    : Tensor { shape := #[batch, seq, cfg.vocabSize], dtype := dtype.val, device := device } :=
   let hidden := TalkerModel.forwardEmbeds cfg m.model talkerInputs attnMask
   Tensor.linear3d hidden m.codecHead
 
 private def applySampling {batch vocab : UInt64}
-    (logits : Tensor { shape := #[batch, vocab], device := device })
+    (logits : Tensor { shape := #[batch, vocab], dtype := dtype.val, device := device })
     (temperature : Float)
     (topK : UInt64)
     (topP : Float)
@@ -317,10 +318,10 @@ private def applySampling {batch vocab : UInt64}
   pure (Tensor.reshapeChecked sampled #[batch])
 
 private def applySuppressTail {batch vocab : UInt64}
-    (logits : Tensor { shape := #[batch, vocab], device := device })
+    (logits : Tensor { shape := #[batch, vocab], dtype := dtype.val, device := device })
     (suppressTail : UInt64)
     (eosTokenId : UInt64)
-    : Tensor { shape := #[batch, vocab], device := device } :=
+    : Tensor { shape := #[batch, vocab], dtype := dtype.val, device := device } :=
   if suppressTail == 0 then
     logits
   else
@@ -340,9 +341,9 @@ private def applySuppressTail {batch vocab : UInt64}
     Tensor.maskedFill logits suppress2d (-1e9)
 
 private def applySuppressEos {batch vocab : UInt64}
-    (logits : Tensor { shape := #[batch, vocab], device := device })
+    (logits : Tensor { shape := #[batch, vocab], dtype := dtype.val, device := device })
     (eosTokenId : UInt64)
-    : Tensor { shape := #[batch, vocab], device := device } :=
+    : Tensor { shape := #[batch, vocab], dtype := dtype.val, device := device } :=
   let idx0 : Tensor { shape := #[vocab], dtype := .Int64, device := .CPU } := Tensor.arange vocab
   let idx : Tensor { shape := #[vocab], dtype := .Int64, device := device } := idx0.to logits.device
   let eosMask1d : Tensor { shape := #[vocab], dtype := .Bool, device := device } := Tensor.eqScalar idx (Int64.ofNat eosTokenId.toNat)
@@ -354,24 +355,30 @@ private def applySuppressEos {batch vocab : UInt64}
   Tensor.maskedFill logits eosMask2d (-1e30)
 
 private def applyRepetitionPenalty {batch vocab histLen : UInt64}
-    (logits : Tensor { shape := #[batch, vocab], device := device })
+    (logits : Tensor { shape := #[batch, vocab], dtype := dtype.val, device := device })
     (history : Tensor { shape := #[batch, histLen], dtype := .Int64, device := device })
     (penalty : Float)
-    : Tensor { shape := #[batch, vocab], device := device } :=
+    : Tensor { shape := #[batch, vocab], dtype := dtype.val, device := device } :=
   if histLen == 0 || penalty == 1.0 || penalty <= 0.0 then
     logits
   else
-    let gathered : Tensor { shape := #[batch, histLen], device := device } := Tensor.gather logits (-1) history
+    let gathered : Tensor { shape := #[batch, histLen], dtype := dtype.val, device := device } := Tensor.gather logits (-1) history
     let negMask : Tensor { shape := #[batch, histLen], dtype := .Bool, device := device } := Tensor.ltScalar gathered 0.0
     let penalizedNeg := Tensor.Preserving.mulScalar gathered penalty
     let penalizedPos := Tensor.Preserving.divScalar gathered penalty
-    let penalized : Tensor { shape := #[batch, histLen], device := device } := Tensor.Promoting.whereSelect negMask penalizedNeg penalizedPos
+    let penalized : Tensor { shape := #[batch, histLen], dtype := dtype.val, device := device } :=
+      match Tensor.Promoting.whereSelect? negMask penalizedNeg penalizedPos with
+      | .error message => panic! s!"Qwen3TTS repetition penalty: {message}"
+      | .ok promoted =>
+        match Tensor.ofRaw promoted.tensor.raw with
+        | .ok result => result
+        | .error message => panic! s!"Qwen3TTS repetition penalty: {message}"
     Tensor.scatter2d logits (-1) history penalized
 
 /-- Sample a full codec frame from the current talker hidden state `[batch,1,hidden]`. -/
 private def generateFrameFromLastHidden {batch : UInt64} (cfg : TalkerConfig)
-    (m : TalkerForConditionalGeneration (device := device) cfg)
-    (lastHidden : Tensor { shape := #[batch, 1, cfg.hiddenSize], device := device })
+    (m : TalkerForConditionalGeneration (dtype := dtype) (device := device) cfg)
+    (lastHidden : Tensor { shape := #[batch, 1, cfg.hiddenSize], dtype := dtype.val, device := device })
     (historyFirstCodes : Option (Sigma fun histLen => Tensor { shape := #[batch, histLen], dtype := .Int64, device := device }) := none)
     (allowEos : Bool := true)
     (temperature : Float := 0.9)
@@ -386,9 +393,9 @@ private def generateFrameFromLastHidden {batch : UInt64} (cfg : TalkerConfig)
     (subtalkerTopKsByGroup : Option (Array UInt64) := none)
     (subtalkerTopPsByGroup : Option (Array Float) := none)
     (cpRoPECache : Option (CodePredictorRoPECache (device := device) cfg) := none)
-    : IO (FrameGenerationOutput (device := device) batch cfg.numCodeGroups cfg.hiddenSize) := do
+    : IO (FrameGenerationOutput (dtype := dtype) (device := device) batch cfg.numCodeGroups cfg.hiddenSize) := do
   let firstLogits3 := Tensor.linear3d lastHidden m.codecHead
-  let firstLogits0 : Tensor { shape := #[batch, cfg.vocabSize], device := device } := Tensor.reshapeChecked firstLogits3 #[batch, cfg.vocabSize]
+  let firstLogits0 : Tensor { shape := #[batch, cfg.vocabSize], dtype := dtype.val, device := device } := Tensor.reshapeChecked firstLogits3 #[batch, cfg.vocabSize]
   let firstLogits1 := applySuppressTail firstLogits0 suppressTail cfg.codecEosTokenId
   let firstLogits2 :=
     if allowEos then firstLogits1 else applySuppressEos firstLogits1 cfg.codecEosTokenId
@@ -405,8 +412,8 @@ private def generateFrameFromLastHidden {batch : UInt64} (cfg : TalkerConfig)
   -- Build autoregressive sub-talker context from (past hidden + codec embeddings).
   -- Use static preallocated KV cache and step decoding instead of re-running
   -- full-prefix forward for each residual group.
-  let firstEmb : Tensor { shape := #[batch, 1, cfg.hiddenSize], device := device } := Tensor.embedding firstCode2d m.model.codecEmbedding
-  let mut summedEmb : Tensor { shape := #[batch, 1, cfg.hiddenSize], device := device } := firstEmb
+  let firstEmb : Tensor { shape := #[batch, 1, cfg.hiddenSize], dtype := dtype.val, device := device } := Tensor.embedding firstCode2d m.model.codecEmbedding
+  let mut summedEmb : Tensor { shape := #[batch, 1, cfg.hiddenSize], dtype := dtype.val, device := device } := firstEmb
   let residualGroups := cfg.numCodeGroups.toNat - 1
   if residualGroups > 0 then
     let cpCfg := cfg.codePredictorConfig
@@ -432,32 +439,32 @@ private def generateFrameFromLastHidden {batch : UInt64} (cfg : TalkerConfig)
             cpSinRaw.to cpDevice
           (cpCosAll, cpSinAll)
 
-    let mut cpCachesInit : Array (qwen.QwenAttention.KVCache batch cpCfg.numKeyValueHeads cpCfg.headDim (.Unknown "dynamic")) := #[]
+    let mut cpCachesInit : Array (qwen.QwenAttention.KVCache batch cpCfg.numKeyValueHeads cpCfg.headDim dtype.val) := #[]
     for _ in [:cpCfg.numHiddenLayers.toNat] do
       cpCachesInit := cpCachesInit.push
         (qwen.QwenAttention.initKVCache
           cpMaxSeq
           (batch := batch) (num_kv_heads := cpCfg.numKeyValueHeads) (head_dim := cpCfg.headDim)
-          cpDevice (.Unknown "dynamic"))
+          cpDevice dtype.val)
 
     let cpStep :
-        Tensor { shape := #[batch, 1, cfg.hiddenSize], device := device } →
+        Tensor { shape := #[batch, 1, cfg.hiddenSize], dtype := dtype.val, device := device } →
         UInt64 →
-        Array (qwen.QwenAttention.KVCache batch cpCfg.numKeyValueHeads cpCfg.headDim (.Unknown "dynamic")) →
-        IO (Tensor { shape := #[batch, 1, cpCfg.hiddenSize], device := device } ×
-          Array (qwen.QwenAttention.KVCache batch cpCfg.numKeyValueHeads cpCfg.headDim (.Unknown "dynamic"))) :=
+        Array (qwen.QwenAttention.KVCache batch cpCfg.numKeyValueHeads cpCfg.headDim dtype.val) →
+        IO (Tensor { shape := #[batch, 1, cpCfg.hiddenSize], dtype := dtype.val, device := device } ×
+          Array (qwen.QwenAttention.KVCache batch cpCfg.numKeyValueHeads cpCfg.headDim dtype.val)) :=
       fun tokenEmbed pos caches => do
-        let xProj : Tensor { shape := #[batch, 1, cpCfg.hiddenSize], device := device } := TalkerCodePredictor.projectInputs m.codePredictor tokenEmbed
+        let xProj : Tensor { shape := #[batch, 1, cpCfg.hiddenSize], dtype := dtype.val, device := device } := TalkerCodePredictor.projectInputs m.codePredictor tokenEmbed
         let cos : Tensor { shape := #[1, cpCfg.headDim / 2], dtype := .Float32, device := device } := Tensor.sliceChecked cpCosAll 0 pos 1 #[1, cpCfg.headDim / 2]
         let sin : Tensor { shape := #[1, cpCfg.headDim / 2], dtype := .Float32, device := device } := Tensor.sliceChecked cpSinAll 0 pos 1 #[1, cpCfg.headDim / 2]
-        let mut h : Tensor { shape := #[batch, 1, cpCfg.hiddenSize], device := device } := xProj
+        let mut h : Tensor { shape := #[batch, 1, cpCfg.hiddenSize], dtype := dtype.val, device := device } := xProj
         let mut caches := caches
         for i in [:m.codePredictor.layers.size] do
-          let layer : CodePredictorLayer (device := device) cpCfg ←
+          let layer : CodePredictorLayer (dtype := dtype) (device := device) cpCfg ←
             match m.codePredictor.layers[i]? with
             | some layer => pure layer
             | none => throw <| IO.userError s!"missing code predictor layer at index {i}"
-          let cache : qwen.QwenAttention.KVCache batch cpCfg.numKeyValueHeads cpCfg.headDim (.Unknown "dynamic") ←
+          let cache : qwen.QwenAttention.KVCache batch cpCfg.numKeyValueHeads cpCfg.headDim dtype.val ←
             match caches[i]? with
             | some cache => pure cache
             | none => throw <| IO.userError s!"missing code predictor cache at index {i}"
@@ -474,7 +481,7 @@ private def generateFrameFromLastHidden {batch : UInt64} (cfg : TalkerConfig)
 
     for g in [:residualGroups] do
       let cpLogits3 := TalkerCodePredictor.logitsForGroup m.codePredictor g cpHiddenCur
-      let cpLogits : Tensor { shape := #[batch, cpCfg.vocabSize], device := device } := Tensor.reshapeChecked cpLogits3 #[batch, cpCfg.vocabSize]
+      let cpLogits : Tensor { shape := #[batch, cpCfg.vocabSize], dtype := dtype.val, device := device } := Tensor.reshapeChecked cpLogits3 #[batch, cpCfg.vocabSize]
 
       let gTemp : Float := optAtOr subtalkerTemperaturesByGroup g subtalkerTemperature
       let gTopK : UInt64 := optAtOr subtalkerTopKsByGroup g subtalkerTopK
@@ -484,7 +491,7 @@ private def generateFrameFromLastHidden {batch : UInt64} (cfg : TalkerConfig)
       tokenCols := tokenCols.push nextCode2d
 
       let nextEmb := TalkerCodePredictor.embedGroupTokens m.codePredictor g nextCode2d
-      summedEmb := Tensor.Promoting.add summedEmb nextEmb
+      summedEmb := Tensor.Preserving.add summedEmb nextEmb
 
       if g + 1 < residualGroups then
         let (cpHiddenNext, cpCachesNext) ← cpStep nextEmb cpPos cpCaches
@@ -501,8 +508,8 @@ private def generateFrameFromLastHidden {batch : UInt64} (cfg : TalkerConfig)
 /-- Generate one frame of codec tokens `[batch, numCodeGroups]` from talker context.
     This mirrors the two-stage talker/sub-talker generation in Qwen3-TTS. -/
 def generateFrame {batch seq : UInt64} (cfg : TalkerConfig)
-    (m : TalkerForConditionalGeneration (device := device) cfg)
-    (talkerInputs : Tensor { shape := #[batch, seq, cfg.hiddenSize], device := device })
+    (m : TalkerForConditionalGeneration (dtype := dtype) (device := device) cfg)
+    (talkerInputs : Tensor { shape := #[batch, seq, cfg.hiddenSize], dtype := dtype.val, device := device })
     (attnMask : Option (Tensor { shape := #[batch, seq], dtype := .Int64, device := device }) := none)
     (historyFirstCodes : Option (Sigma fun histLen => Tensor { shape := #[batch, histLen], dtype := .Int64, device := device }) := none)
     (allowEos : Bool := true)
@@ -517,11 +524,11 @@ def generateFrame {batch seq : UInt64} (cfg : TalkerConfig)
     (subtalkerTemperaturesByGroup : Option (Array Float) := none)
     (subtalkerTopKsByGroup : Option (Array UInt64) := none)
     (subtalkerTopPsByGroup : Option (Array Float) := none)
-    : IO (FrameGenerationOutput (device := device) batch cfg.numCodeGroups cfg.hiddenSize) := do
+    : IO (FrameGenerationOutput (dtype := dtype) (device := device) batch cfg.numCodeGroups cfg.hiddenSize) := do
   if cfg.numCodeGroups == 0 then
     return {
       codes := (Tensor.fullInt #[batch, cfg.numCodeGroups] 0).to talkerInputs.device
-      summedEmbedding := Tensor.castLike talkerInputs (Tensor.zeros #[batch, 1, cfg.hiddenSize] false talkerInputs.device)
+      summedEmbedding := (← Tensor.zerosForIO { shape := #[batch, 1, cfg.hiddenSize], dtype := dtype.val, device := talkerInputs.device })
     }
 
   let hidden := TalkerModel.forwardEmbeds cfg m.model talkerInputs attnMask
@@ -536,8 +543,8 @@ mutual
 /-- Autoregressively generate a fixed number of codec frames.
     Returns `[batch, maxFrames, numCodeGroups]`. -/
 def generateCodesWithLengths {batch seq : UInt64} (cfg : TalkerConfig)
-    (m : TalkerForConditionalGeneration (device := device) cfg)
-    (talkerInputs : Tensor { shape := #[batch, seq, cfg.hiddenSize], device := device })
+    (m : TalkerForConditionalGeneration (dtype := dtype) (device := device) cfg)
+    (talkerInputs : Tensor { shape := #[batch, seq, cfg.hiddenSize], dtype := dtype.val, device := device })
     (maxFrames : UInt64 := 256)
     (minNewTokens : UInt64 := 2)
     (temperature : Float := 0.9)
@@ -548,8 +555,8 @@ def generateCodesWithLengths {batch seq : UInt64} (cfg : TalkerConfig)
     (subtalkerTopP : Float := 1.0)
     (repetitionPenalty : Float := 1.05)
     (suppressTail : UInt64 := 1024)
-    (trailingTextHidden : Option (Sigma fun trailingSeq => Tensor { shape := #[batch, trailingSeq, cfg.hiddenSize], device := device }) := none)
-    (ttsPadEmbed : Option (Tensor { shape := #[batch, 1, cfg.hiddenSize], device := device }) := none)
+    (trailingTextHidden : Option (Sigma fun trailingSeq => Tensor { shape := #[batch, trailingSeq, cfg.hiddenSize], dtype := dtype.val, device := device }) := none)
+    (ttsPadEmbed : Option (Tensor { shape := #[batch, 1, cfg.hiddenSize], dtype := dtype.val, device := device }) := none)
     (subtalkerTemperaturesByGroup : Option (Array Float) := none)
     (subtalkerTopKsByGroup : Option (Array UInt64) := none)
     (subtalkerTopPsByGroup : Option (Array Float) := none)
@@ -588,8 +595,8 @@ def generateCodesWithLengths {batch seq : UInt64} (cfg : TalkerConfig)
     `onFrame` is called for each generated frame in generation order.
     Returns per-sample EOS lengths (same convention as `generateCodesWithLengths`). -/
 def streamCodes {batch seq : UInt64} (cfg : TalkerConfig)
-    (m : TalkerForConditionalGeneration (device := device) cfg)
-    (talkerInputs : Tensor { shape := #[batch, seq, cfg.hiddenSize], device := device })
+    (m : TalkerForConditionalGeneration (dtype := dtype) (device := device) cfg)
+    (talkerInputs : Tensor { shape := #[batch, seq, cfg.hiddenSize], dtype := dtype.val, device := device })
     (onFrame : UInt64 → Tensor { shape := #[batch, cfg.numCodeGroups], dtype := .Int64, device := device } → IO Unit)
     (maxFrames : UInt64 := 256)
     (minNewTokens : UInt64 := 2)
@@ -601,8 +608,8 @@ def streamCodes {batch seq : UInt64} (cfg : TalkerConfig)
     (subtalkerTopP : Float := 1.0)
     (repetitionPenalty : Float := 1.05)
     (suppressTail : UInt64 := 1024)
-    (trailingTextHidden : Option (Sigma fun trailingSeq => Tensor { shape := #[batch, trailingSeq, cfg.hiddenSize], device := device }) := none)
-    (ttsPadEmbed : Option (Tensor { shape := #[batch, 1, cfg.hiddenSize], device := device }) := none)
+    (trailingTextHidden : Option (Sigma fun trailingSeq => Tensor { shape := #[batch, trailingSeq, cfg.hiddenSize], dtype := dtype.val, device := device }) := none)
+    (ttsPadEmbed : Option (Tensor { shape := #[batch, 1, cfg.hiddenSize], dtype := dtype.val, device := device }) := none)
     (subtalkerTemperaturesByGroup : Option (Array Float) := none)
     (subtalkerTopKsByGroup : Option (Array UInt64) := none)
     (subtalkerTopPsByGroup : Option (Array Float) := none)
@@ -610,7 +617,7 @@ def streamCodes {batch seq : UInt64} (cfg : TalkerConfig)
   do
     let m := TensorStruct.detach m
     let talkerInputs := talkerInputs.detach
-    let trailingTextHidden : Option (Sigma fun trailingSeq => Tensor { shape := #[batch, trailingSeq, cfg.hiddenSize], device := device }) :=
+    let trailingTextHidden : Option (Sigma fun trailingSeq => Tensor { shape := #[batch, trailingSeq, cfg.hiddenSize], dtype := dtype.val, device := device }) :=
       trailingTextHidden.map fun packed => ⟨packed.1, packed.2.detach⟩
     let ttsPadEmbed := ttsPadEmbed.map Tensor.detach
     if maxFrames == 0 then
@@ -622,13 +629,13 @@ def streamCodes {batch seq : UInt64} (cfg : TalkerConfig)
 
     let cacheDevice := talkerInputs.device
     let cacheMaxLen : UInt64 := seq + maxFrames + 1
-    let mut caches : Array (qwen.QwenAttention.KVCache batch cfg.numKeyValueHeads cfg.headDim (.Unknown "dynamic")) := #[]
+    let mut caches : Array (qwen.QwenAttention.KVCache batch cfg.numKeyValueHeads cfg.headDim dtype.val) := #[]
     for _ in [:cfg.numHiddenLayers.toNat] do
       caches := caches.push
         (qwen.QwenAttention.initKVCache
           cacheMaxLen
           (batch := batch) (num_kv_heads := cfg.numKeyValueHeads) (head_dim := cfg.headDim)
-          cacheDevice (.Unknown "dynamic"))
+          cacheDevice dtype.val)
 
     -- Prefill KV cache from prompt/context so per-frame generation only runs one token step.
     let (cosRaw, sinRaw) := Tensor.rotaryFreqs (seq + maxFrames + 1) cfg.headDim cfg.ropeTheta
@@ -636,20 +643,20 @@ def streamCodes {batch seq : UInt64} (cfg : TalkerConfig)
       cosRaw.to cacheDevice
     let sinAll : Tensor { shape := #[seq + maxFrames + 1, cfg.headDim / 2], dtype := .Float32, device := device } :=
       sinRaw.to cacheDevice
-    let mut lastHidden : Tensor { shape := #[batch, 1, cfg.hiddenSize], device := device } :=
-      Tensor.castLike talkerInputs (Tensor.zeros #[batch, 1, cfg.hiddenSize] false cacheDevice)
+    let mut lastHidden : Tensor { shape := #[batch, 1, cfg.hiddenSize], dtype := dtype.val, device := device } :=
+      (← Tensor.zerosForIO { shape := #[batch, 1, cfg.hiddenSize], dtype := dtype.val, device := cacheDevice })
     let mut pos : UInt64 := 0
     while pos < seq do
-      let xIn : Tensor { shape := #[batch, 1, cfg.hiddenSize], device := device } := Tensor.sliceChecked talkerInputs 1 pos 1 #[batch, 1, cfg.hiddenSize]
+      let xIn : Tensor { shape := #[batch, 1, cfg.hiddenSize], dtype := dtype.val, device := device } := Tensor.sliceChecked talkerInputs 1 pos 1 #[batch, 1, cfg.hiddenSize]
       let cos : Tensor { shape := #[1, cfg.headDim / 2], dtype := .Float32, device := device } := Tensor.sliceChecked cosAll 0 pos 1 #[1, cfg.headDim / 2]
       let sin : Tensor { shape := #[1, cfg.headDim / 2], dtype := .Float32, device := device } := Tensor.sliceChecked sinAll 0 pos 1 #[1, cfg.headDim / 2]
-      let mut h : Tensor { shape := #[batch, 1, cfg.hiddenSize], device := device } := xIn
+      let mut h : Tensor { shape := #[batch, 1, cfg.hiddenSize], dtype := dtype.val, device := device } := xIn
       for i in [:m.model.layers.size] do
-        let layer : TalkerLayer (device := device) cfg ←
+        let layer : TalkerLayer (dtype := dtype) (device := device) cfg ←
           match m.model.layers[i]? with
           | some layer => pure layer
           | none => throw <| IO.userError s!"missing talker layer at index {i}"
-        let cache : qwen.QwenAttention.KVCache batch cfg.numKeyValueHeads cfg.headDim (.Unknown "dynamic") ←
+        let cache : qwen.QwenAttention.KVCache batch cfg.numKeyValueHeads cfg.headDim dtype.val ←
           match caches[i]? with
           | some cache => pure cache
           | none => throw <| IO.userError s!"missing talker cache at index {i}"
@@ -662,9 +669,9 @@ def streamCodes {batch seq : UInt64} (cfg : TalkerConfig)
     let mut done : Array Bool := Array.replicate batch.toNat false
     let mut lengths : Array UInt64 := Array.replicate batch.toNat maxFrames
     let mut historyCols : Array (Tensor { shape := #[batch, 1], dtype := .Int64, device := device }) := #[]
-    let defaultPadEmbed : Tensor { shape := #[batch, 1, cfg.hiddenSize], device := device } :=
-      Tensor.castLike talkerInputs (Tensor.zeros #[batch, 1, cfg.hiddenSize] false cacheDevice)
-    let padEmbed : Tensor { shape := #[batch, 1, cfg.hiddenSize], device := device } := ttsPadEmbed.getD defaultPadEmbed
+    let defaultPadEmbed : Tensor { shape := #[batch, 1, cfg.hiddenSize], dtype := dtype.val, device := device } :=
+      (← Tensor.zerosForIO { shape := #[batch, 1, cfg.hiddenSize], dtype := dtype.val, device := cacheDevice })
+    let padEmbed : Tensor { shape := #[batch, 1, cfg.hiddenSize], dtype := dtype.val, device := device } := ttsPadEmbed.getD defaultPadEmbed
     let cpMaxSeq : UInt64 := cfg.numCodeGroups + 1
     let (cpCosRaw, cpSinRaw) := Tensor.rotaryFreqs cpMaxSeq cfg.codePredictorConfig.headDim cfg.codePredictorConfig.ropeTheta
     let cpRoPE : CodePredictorRoPECache (device := device) cfg := {
@@ -705,7 +712,7 @@ def streamCodes {batch seq : UInt64} (cfg : TalkerConfig)
           done := done.set! i true
           lengths := lengths.set! i step.toUInt64
 
-      let trailingAdd : Tensor { shape := #[batch, 1, cfg.hiddenSize], device := device } :=
+      let trailingAdd : Tensor { shape := #[batch, 1, cfg.hiddenSize], dtype := dtype.val, device := device } :=
         match trailingTextHidden with
         | some ⟨trailingSeq, trailing⟩ =>
             if step.toUInt64 < trailingSeq then
@@ -713,17 +720,17 @@ def streamCodes {batch seq : UInt64} (cfg : TalkerConfig)
             else
               padEmbed
         | none => padEmbed
-      let nextEmb : Tensor { shape := #[batch, 1, cfg.hiddenSize], device := device } := Tensor.Promoting.add frameOut.summedEmbedding trailingAdd
+      let nextEmb : Tensor { shape := #[batch, 1, cfg.hiddenSize], dtype := dtype.val, device := device } := Tensor.Preserving.add frameOut.summedEmbedding trailingAdd
       let nextPos : UInt64 := seq + step.toUInt64
       let cos : Tensor { shape := #[1, cfg.headDim / 2], dtype := .Float32, device := device } := Tensor.sliceChecked cosAll 0 nextPos 1 #[1, cfg.headDim / 2]
       let sin : Tensor { shape := #[1, cfg.headDim / 2], dtype := .Float32, device := device } := Tensor.sliceChecked sinAll 0 nextPos 1 #[1, cfg.headDim / 2]
-      let mut h : Tensor { shape := #[batch, 1, cfg.hiddenSize], device := device } := nextEmb
+      let mut h : Tensor { shape := #[batch, 1, cfg.hiddenSize], dtype := dtype.val, device := device } := nextEmb
       for i in [:m.model.layers.size] do
-        let layer : TalkerLayer (device := device) cfg ←
+        let layer : TalkerLayer (dtype := dtype) (device := device) cfg ←
           match m.model.layers[i]? with
           | some layer => pure layer
           | none => throw <| IO.userError s!"missing talker layer at index {i}"
-        let cache : qwen.QwenAttention.KVCache batch cfg.numKeyValueHeads cfg.headDim (.Unknown "dynamic") ←
+        let cache : qwen.QwenAttention.KVCache batch cfg.numKeyValueHeads cfg.headDim dtype.val ←
           match caches[i]? with
           | some cache => pure cache
           | none => throw <| IO.userError s!"missing talker cache at index {i}"
@@ -739,8 +746,8 @@ end
 /-- Autoregressively generate a fixed number of codec frames.
     Returns `[batch, maxFrames, numCodeGroups]`. -/
 def generateCodes {batch seq : UInt64} (cfg : TalkerConfig)
-    (m : TalkerForConditionalGeneration (device := device) cfg)
-    (talkerInputs : Tensor { shape := #[batch, seq, cfg.hiddenSize], device := device })
+    (m : TalkerForConditionalGeneration (dtype := dtype) (device := device) cfg)
+    (talkerInputs : Tensor { shape := #[batch, seq, cfg.hiddenSize], dtype := dtype.val, device := device })
     (maxFrames : UInt64 := 256)
     (minNewTokens : UInt64 := 2)
     (temperature : Float := 0.9)
@@ -751,8 +758,8 @@ def generateCodes {batch seq : UInt64} (cfg : TalkerConfig)
     (subtalkerTopP : Float := 1.0)
     (repetitionPenalty : Float := 1.05)
     (suppressTail : UInt64 := 1024)
-    (trailingTextHidden : Option (Sigma fun trailingSeq => Tensor { shape := #[batch, trailingSeq, cfg.hiddenSize], device := device }) := none)
-    (ttsPadEmbed : Option (Tensor { shape := #[batch, 1, cfg.hiddenSize], device := device }) := none)
+    (trailingTextHidden : Option (Sigma fun trailingSeq => Tensor { shape := #[batch, trailingSeq, cfg.hiddenSize], dtype := dtype.val, device := device }) := none)
+    (ttsPadEmbed : Option (Tensor { shape := #[batch, 1, cfg.hiddenSize], dtype := dtype.val, device := device }) := none)
     (subtalkerTemperaturesByGroup : Option (Array Float) := none)
     (subtalkerTopKsByGroup : Option (Array UInt64) := none)
     (subtalkerTopPsByGroup : Option (Array Float) := none)
