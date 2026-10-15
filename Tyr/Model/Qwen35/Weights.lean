@@ -204,7 +204,9 @@ private def loadLinearMixerSharded (modelDir : String) (cfg : Config) (layerIdx 
   let convB ←
     match convBOpt with
     | some b => pure b
-    | none => pure (Tensor.castLike convW (Tensor.zeros #[Config.linearConvDim cfg] false device))
+    | none => do
+      let bias ← Tensor.zerosForIO { shape := #[Config.linearConvDim cfg], dtype := convW.raw.dtype, device }
+      pure bias.forgetDType
 
   let dtBias ← loadTensorShardedCandidates modelDir (nameCandidates s!"{p}.dt_bias") #[cfg.linear_num_value_heads] device
   let aLog ← loadTensorShardedCandidates modelDir (nameCandidates s!"{p}.A_log") #[cfg.linear_num_value_heads] device
@@ -240,7 +242,9 @@ private def loadLinearMixer (path : String) (cfg : Config) (layerIdx : UInt64)
   let convB ←
     match convBOpt with
     | some b => pure b
-    | none => pure (Tensor.castLike convW (Tensor.zeros #[Config.linearConvDim cfg] false device))
+    | none => do
+      let bias ← Tensor.zerosForIO { shape := #[Config.linearConvDim cfg], dtype := convW.raw.dtype, device }
+      pure bias.forgetDType
 
   let dtBias ← loadTensorCandidates path (nameCandidates s!"{p}.dt_bias") #[cfg.linear_num_value_heads] device
   let aLog ← loadTensorCandidates path (nameCandidates s!"{p}.A_log") #[cfg.linear_num_value_heads] device

@@ -158,7 +158,7 @@ private opaque reduceScatterImpl (output : @& RawTensor) (input : @& RawTensor)
     including when the static specification leaves either component unrestricted. -/
 private def collectiveOutput {σ : StaticSpec} (shape : Shape) (input : Tensor σ) :
     IO (Tensor (σ.withShape shape)) := do
-  let template := Tensor.zerosFor { shape, dtype := input.raw.dtype, device := input.device }
+  let template ← Tensor.zerosForIO { shape, dtype := input.raw.dtype, device := input.device }
   let output ← data.cloneInferenceIO template
   match Tensor.ofRaw output.raw with
   | .ok result => pure result

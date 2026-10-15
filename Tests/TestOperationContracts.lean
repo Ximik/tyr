@@ -87,6 +87,48 @@ example (x : Tensor ⟨#[2], .Int64, .CPU⟩) (scalar : Tensor ⟨#[], .Float32,
   LeanTest.assertEqual product.raw.dtype .BFloat16
   LeanTest.assertEqual (← product.toFloatArray) #[2, 2, 2, 2]
 
+@[test] def testAffineActualDTypeEquality : IO Unit := do
+  let input := (Tensor.full #[1, 2, 2] 3).forgetDType
+  let weight := (Tensor.full #[2, 2] 2).forgetDType
+  let bias := (Tensor.ones #[2]).forgetDType
+  let otherWeight := (weight.castDType .Float64).forgetDType
+  let otherBias := (bias.castDType .Float64).forgetDType
+  expectError (Tensor.affine3d? input otherWeight bias) "Expected dtype Float32, got Float64"
+  expectError (Tensor.affine3d? input weight otherBias) "Expected dtype Float32, got Float64"
+  let result ← checked (Tensor.affine3d? input weight bias)
+  LeanTest.assertEqual result.raw.dtype .Float32
+  LeanTest.assertEqual (← result.toFloatArray) #[13, 13, 13, 13]
+
+@[test] def testAffineMissingKernelIsRecoverable : IO Unit := do
+  let input := (Tensor.ones #[1, 2, 2]).castDType .Bool
+  let weight := (Tensor.ones #[2, 2]).castDType .Bool
+  let bias := (Tensor.ones #[2]).castDType .Bool
+  expectError (Tensor.affine3d? input weight bias) "affine3d"
+
+example (_input : Tensor ⟨#[2, 2], .Int64, .CPU⟩) : True := by
+  fail_if_success have _ := Tensor.spectralNorm _input
+  fail_if_success have _ := Tensor.nuclearNorm _input
+  trivial
+
+example {d : DType} [DType.FloatingOrComplex d]
+    (input : Tensor ⟨#[2, 2], d, .CPU⟩) : Float :=
+  Tensor.spectralNorm input + Tensor.nuclearNorm input
+
+@[test] def testSingularValueNormDomains : IO Unit := do
+  let real := (Tensor.fromFloatArray #[3, 0, 0, 4]).reshapeChecked #[2, 2]
+  for dtype in #[DType.Float32, .Float64, .Complex64, .Complex128] do
+    let input := real.castDType dtype
+    LeanTest.assertEqual (← checked (Tensor.spectralNorm? input)) 4
+    LeanTest.assertEqual (← checked (Tensor.nuclearNorm? input)) 7
+  let integers := (real.castDType .Int64).forgetDType
+  expectError (Tensor.spectralNorm? integers) "floating or complex"
+  expectError (Tensor.nuclearNorm? integers) "floating or complex"
+  let halfComplex := real.castDType .Complex32
+  expectError (Tensor.spectralNorm? halfComplex) "spectralNorm"
+  expectError (Tensor.nuclearNorm? halfComplex) "nuclearNorm"
+  expectError (Tensor.spectralNorm? (Tensor.zeros #[0, 2])) "nonempty"
+  LeanTest.assertEqual (← checked (Tensor.nuclearNorm? (Tensor.zeros #[0, 2]))) 0
+
 @[test] def testMissingKernelIsRecoverable : IO Unit := do
   let x := (Tensor.ones #[2]).castDType .Complex32
   -- Promotion exists, but the pinned CPU backend lacks ComplexHalf division.

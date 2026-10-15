@@ -114,7 +114,8 @@ Stiefel geometry adapter with spectral/nuclear norms and projected dual map.
 The dual map is implemented as tangent projection followed by unit Frobenius
 normalization as a practical approximation.
 -/
-instance stiefelDualMapGeometry (m n : UInt64) : DualMapGeometry (Stiefel m n d dev) where
+instance stiefelDualMapGeometry (m n : UInt64) [DType.FloatingOrComplex d] :
+    DualMapGeometry (Stiefel m n d dev) where
   tangentNorm := fun {x} (v : StiefelTangent m n d dev) =>
     let _ := x
     Tensor.spectralNorm v.vec
@@ -130,7 +131,8 @@ Orthogonal-group adapter for dual-map optimization.
 
 Uses ambient spectral/nuclear norms and normalizes the skew parameterization.
 -/
-instance orthogonalDualMapGeometry (n : UInt64) : DualMapGeometry (Orthogonal n d dev) where
+instance orthogonalDualMapGeometry (n : UInt64) [DType.FloatingOrComplex d] :
+    DualMapGeometry (Orthogonal n d dev) where
   tangentNorm := fun {x} (v : OrthogonalTangent n d dev) =>
     Tensor.spectralNorm (OrthogonalTangent.toAmbient x v)
   cotangentNorm := fun {x} (g : OrthogonalTangent n d dev) =>
@@ -145,7 +147,8 @@ Grassmann adapter for dual-map optimization.
 
 Projects gradients to the horizontal tangent space and normalizes step size.
 -/
-instance grassmannDualMapGeometry (n p : UInt64) : DualMapGeometry (Grassmann n p d dev) where
+instance grassmannDualMapGeometry (n p : UInt64) [DType.FloatingOrComplex d] :
+    DualMapGeometry (Grassmann n p d dev) where
   tangentNorm := fun {x} (v : GrassmannTangent n p d dev) =>
     let _ := x
     Tensor.spectralNorm v.vec

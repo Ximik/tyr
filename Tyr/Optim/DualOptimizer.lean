@@ -357,7 +357,8 @@ def MatrixParamState.backendName {m n : UInt64} {d : DType} {dev : Device}
   | .manifoldMuon _ => "manifoldMuon"
   | .genericManifold _ => "genericManifold"
 
-private def stepOnManifoldFamily {m n : UInt64} {d : DType} {dev : Device}
+private def stepOnManifoldFamilyKnown {m n : UInt64} {d : DType} {dev : Device}
+    [DType.FloatingOrComplex d]
     (family : MatrixManifoldFamily)
     (param : Tensor ⟨#[m, n], d, dev⟩)
     (ambientGrad : Tensor ⟨#[m, n], d, dev⟩)
@@ -398,6 +399,22 @@ private def stepOnManifoldFamily {m n : UInt64} {d : DType} {dev : Device}
       let x : Tyr.AD.Grassmann n m d dev := ⟨Tensor.transpose2d param, h'⟩
       let g := Tyr.AD.GrassmannTangent.project x (Tensor.transpose2d ambientGrad)
       pure (Tensor.transpose2d (Tyr.AD.DualMapGeometry.dualMapStep x g lr).matrix)
+
+/-- Reify the actual dtype before entering geometry requiring floating evidence.
+This checks metadata equality without casting either input. -/
+private def stepOnManifoldFamily {m n : UInt64} {d : DType} {dev : Device}
+    (family : MatrixManifoldFamily)
+    (param ambientGrad : Tensor ⟨#[m, n], d, dev⟩) (lr : Float) :
+    IO (Tensor ⟨#[m, n], d, dev⟩) := do
+  let actual := param.raw.dtype
+  if h : (actual.isRealFloating || actual.isComplex) = true then
+    let _ : DType.FloatingOrComplex actual := ⟨h⟩
+    let param ← IO.ofExcept (Tensor.ofRaw (σ := ⟨#[m, n], actual, dev⟩) param.raw)
+    let grad ← IO.ofExcept (Tensor.ofRaw (σ := ⟨#[m, n], actual, dev⟩) ambientGrad.raw)
+    let result ← stepOnManifoldFamilyKnown family param grad lr
+    IO.ofExcept (Tensor.ofRaw result.raw)
+  else
+    throw (IO.userError s!"Manifold optimization requires a floating or complex dtype, got {actual}")
 
 /--
 Single matrix step for the generic manifold path using `DualMapGeometry`.

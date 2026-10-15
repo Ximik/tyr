@@ -62,6 +62,17 @@ instance : RealFloating .Float64 := ⟨rfl⟩
   | .Complex32 | .Complex64 | .Complex128 => true
   | _ => false
 
+/-- Standard real or complex floating domain. Kernel availability remains
+backend-specific and checked native APIs report unsupported implementations. -/
+class FloatingOrComplex (dtype : DType) : Prop where
+  valid : (dtype.isRealFloating || dtype.isComplex) = true
+
+instance {dtype : DType} [h : RealFloating dtype] : FloatingOrComplex dtype :=
+  ⟨by rw [h.valid]; rfl⟩
+instance : FloatingOrComplex .Complex32 := ⟨rfl⟩
+instance : FloatingOrComplex .Complex64 := ⟨rfl⟩
+instance : FloatingOrComplex .Complex128 := ⟨rfl⟩
+
 @[reducible] def isQuantized : DType → _root_.Bool
   | .QInt8 | .QUInt8 | .QInt32 | .QUInt4x2 | .QUInt2x4 => true
   | _ => false

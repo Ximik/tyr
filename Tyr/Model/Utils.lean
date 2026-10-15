@@ -21,12 +21,13 @@ open torch
 def initWeight (shape : Shape) (fanIn : UInt64) (dtype : DType := .Float32) (device : Device := .CPU) : IO (Tensor { device := device, shape := shape, dtype := dtype }) := do
   let std := Float.sqrt (2.0 / fanIn.toFloat)
   let w ← Tensor.randn shape (device := device)
-  let w := Tensor.Preserving.mulScalar w std
-  Tensor.parameter (w.castDType dtype)
+  let w ← IO.ofExcept (Tensor.Preserving.mulScalar? w std)
+  let w ← IO.ofExcept (w.castDType? dtype)
+  Tensor.parameter w
 
 /-- Zero bias tensor with requires_grad=true. -/
-def initBias (shape : Shape) (dtype : DType := .Float32) (device : Device := .CPU) : IO (Tensor { device := device, shape := shape, dtype := dtype }) :=
-  Tensor.parameter ((Tensor.zeros shape (device := device)).castDType dtype)
+def initBias (shape : Shape) (dtype : DType := .Float32) (device : Device := .CPU) : IO (Tensor { device := device, shape := shape, dtype := dtype }) := do
+  Tensor.parameter (← Tensor.zerosForIO { shape, dtype, device })
 
 /-- Mark a loaded pretrained tensor as frozen (requires_grad=false). -/
 def reqGradFalse {σ : StaticSpec} (t : Tensor σ) : Tensor σ :=

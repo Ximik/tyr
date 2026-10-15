@@ -75,6 +75,7 @@ extern "C" lean_object* lean_torch_laguna_moe_fp4_forward(
 
 /* ------------------------------ CUDA build ------------------------------ */
 #include <ATen/ATen.h>
+#include "tyr_checked_result.h"
 #include <c10/cuda/CUDAStream.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <cuda_runtime.h>
@@ -1234,6 +1235,7 @@ extern "C" lean_object* lean_torch_laguna_moe_fp4_forward(
     b_lean_obj_arg upPacked, b_lean_obj_arg upScale, b_lean_obj_arg upGlobal,
     b_lean_obj_arg downPacked, b_lean_obj_arg downScale, b_lean_obj_arg downGlobal,
     uint64_t numExperts, uint64_t moeInt, uint64_t hidden) {
+  return tyr::checkedIoCall("lagunaMoeFp4Forward", [&] {
   try {
     auto x_ = borrowTensor(x);
     auto topIdx_ = borrowTensor(topIdx);
@@ -1478,6 +1480,7 @@ extern "C" lean_object* lean_torch_laguna_moe_fp4_forward(
     return lagunaMoeIoError(std::string(
         "laguna_moe_fp4_forward: exception: ") + e.what());
   }
+  });
 }
 
 #endif  // __CUDACC__

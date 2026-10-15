@@ -144,7 +144,7 @@ def init (cfg : ThinkerConfig) (device : Device := .CPU) : IO (Qwen3ASRThinkerFo
   let audioProjectionWeight ←
     if h : cfg.audioConfig.outputDim = cfg.textConfig.hiddenSize then
       let eye : Tensor { device := device, shape := #[cfg.textConfig.hiddenSize, cfg.textConfig.hiddenSize] } ←
-        Tensor.parameter ((Tensor.eyeFor (n := cfg.textConfig.hiddenSize) .Float32 device).forgetDType)
+        Tensor.parameter ((← Tensor.eyeForIO (n := cfg.textConfig.hiddenSize) .Float32 device).forgetDType)
       let eye' : Tensor { device := device, shape := #[cfg.textConfig.hiddenSize, cfg.audioConfig.outputDim] } := by
         simpa [h] using eye
       pure eye'

@@ -360,7 +360,9 @@ def hannWindow (n : UInt64) : Tensor { shape := #[n], dtype := .Float32, device 
 def stft {n winLength : UInt64} {dev : Device} (input : Tensor { shape := #[n], dtype := .Float32, device := dev }) (nFft hopLength : UInt64)
     (window : Tensor { shape := #[winLength], dtype := .Float32, device := dev }) (center : Bool := true) (normalized : Bool := false) :
     IO (Sigma fun shape : Shape => Tensor { shape := shape, dtype := .Float32, device := dev }) := do
-  let raw := RawTensor.stft n input.raw nFft hopLength winLength window.raw center normalized
+  let raw ← match RawTensor.stftChecked n input.raw nFft hopLength winLength window.raw center normalized with
+    | .ok raw => pure raw
+    | .error message => throw <| IO.userError s!"Tensor.stft: {message}"
   let shape := raw.runtimeShape
   match Tensor.ofRaw (σ := ⟨shape, .Float32, dev⟩) raw with
   | .ok t => pure ⟨shape, t⟩

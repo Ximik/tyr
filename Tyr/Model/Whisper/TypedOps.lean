@@ -14,8 +14,8 @@ def zerosDynamic (s : Shape) (grad : Bool := false) (device : Device := .CPU)
 
 def initLayerNorm (dim : UInt64) (eps : Float := 1e-5) (device : Device := .CPU) : IO (LayerNorm (device := device) dim (.Unknown "dynamic")) := do
   pure {
-    weight := (← (Tensor.ones (device := device) #[dim]).forgetDType.parameter)
-    bias := (← (Tensor.zeros (device := device) #[dim]).forgetDType.parameter)
+    weight := (← (← Tensor.onesIO #[dim] device).forgetDType.parameter)
+    bias := (← (← Tensor.zerosIO #[dim] device).forgetDType.parameter)
     eps := ⟨eps⟩ }
 
 def sliceTyped {s : Shape} {d : DType} (x : Tensor { device := device, shape := s, dtype := d }) (dim : Nat) (start len : UInt64) : Tensor { device := device, shape := (s.set! dim len), dtype := d } :=

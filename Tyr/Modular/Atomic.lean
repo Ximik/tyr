@@ -29,7 +29,7 @@ The dual norm (for gradients) is the nuclear norm:
 Input sensitivity ν = ||W||_σ since ||Wx||₂ ≤ ||W||_σ ||x||₂.
 -/
 
-instance (in_dim out_dim : UInt64) {d : DType} {dev : Device} :
+instance (in_dim out_dim : UInt64) {d : DType} {dev : Device} [DType.FloatingOrComplex d] :
     NormedModule (torch.Linear in_dim out_dim d dev) where
   norm m :=
     let weightNorm := Tensor.spectralNorm m.weight

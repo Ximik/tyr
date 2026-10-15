@@ -192,7 +192,7 @@ private def loadThinkerSharded (modelDir : String) (cfg : ThinkerConfig)
   let audioProjectionWeight ←
     if h : cfg.audioConfig.outputDim = cfg.textConfig.hiddenSize then
       let eye : Tensor { device := device, shape := #[cfg.textConfig.hiddenSize, cfg.textConfig.hiddenSize] } :=
-        Tensor.castLike audioTower.proj2Weight (reqGradFalse (Tensor.eyeFor (n := cfg.textConfig.hiddenSize) .Float32 device))
+        (← Tensor.eyeForIO (n := cfg.textConfig.hiddenSize) audioTower.proj2Weight.raw.dtype device).forgetDType
       let eye' : Tensor { device := device, shape := #[cfg.textConfig.hiddenSize, cfg.audioConfig.outputDim] } := by
         simpa [h] using eye
       pure eye'
@@ -200,7 +200,7 @@ private def loadThinkerSharded (modelDir : String) (cfg : ThinkerConfig)
       throw <| IO.userError
         s!"Qwen3-ASR checkpoint expects audio output dim == text hidden dim, got {cfg.audioConfig.outputDim} and {cfg.textConfig.hiddenSize}"
   let audioProjectionBias :=
-    Tensor.castLike audioTower.proj2Weight (reqGradFalse (Tensor.zeros (device := device) #[cfg.textConfig.hiddenSize]))
+    (← Tensor.zerosForIO { shape := #[cfg.textConfig.hiddenSize], dtype := audioTower.proj2Weight.raw.dtype, device }).forgetDType
 
   let lmHead ← loadWeight (device := device) modelDir "thinker.lm_head.weight"
     #[ThinkerConfig.lmHeadOutDim cfg, cfg.textConfig.hiddenSize]

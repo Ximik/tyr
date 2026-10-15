@@ -29,7 +29,7 @@ namespace RMSNorm
 /-- Initialize RMSNorm with ones for weight -/
 def init (dim : UInt64) (eps : Float := 1e-6) (dtype : DType := .Float32)
     (device : Device := .CPU) : IO (RMSNorm dim dtype device) := do
-  let weight ← Tensor.parameter ((Tensor.ones #[dim] (device := device)).castDType dtype)
+  let weight ← Tensor.parameter (← Tensor.onesForIO { shape := #[dim], dtype, device })
   pure { weight, eps := ⟨eps⟩ }
 
 /-- Forward pass for 2D input [seq, dim] -/

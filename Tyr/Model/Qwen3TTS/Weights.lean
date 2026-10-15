@@ -132,8 +132,8 @@ private def loadCodePredictorProjectionSharded (modelDir : String) (cfg : Talker
     if cp.hiddenSize == cfg.hiddenSize then
       let reference ← loadTensorShardedTarget (device := device) modelDir "talker.model.codec_embedding.weight"
         #[cfg.vocabSize, cfg.hiddenSize]
-      let w := Tensor.castLike reference (reqGradFalse ((Tensor.eye cp.hiddenSize).to device))
-      let b := Tensor.castLike reference (reqGradFalse (Tensor.zeros #[cp.hiddenSize] (device := device)))
+      let w := (← Tensor.eyeForIO (n := cp.hiddenSize) reference.raw.dtype device).forgetDType
+      let b := (← Tensor.zerosForIO { shape := #[cp.hiddenSize], dtype := reference.raw.dtype, device }).forgetDType
       pure (w.reshapeChecked #[cfg.codePredictorConfig.hiddenSize, cfg.hiddenSize], b)
     else
       throw <| IO.userError

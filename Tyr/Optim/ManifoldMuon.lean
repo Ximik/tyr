@@ -144,10 +144,12 @@ private def solveConverged (cfg : Config) (iter residual dualDelta : Float) : Bo
 
 /-- Dual objective estimate used for diagnostics. -/
 private def dualObjectiveEstimate {m n : UInt64} (W G : Tensor ⟨#[m, n], d, dev⟩)
-    (lambda : Tensor ⟨#[n, n], d, dev⟩) : Float :=
+    (lambda : Tensor ⟨#[n, n], d, dev⟩) : IO Float := do
   let lambdaPlus := Tensor.Preserving.add lambda (Tensor.transpose2d lambda)
   let adjusted := Tensor.Preserving.add G (Tensor.Preserving.mulScalar (Tensor.mm W lambdaPlus) 2.0)
-  0.0 - Tensor.nuclearNorm adjusted
+  match Tensor.nuclearNorm? adjusted with
+  | .ok norm => pure (0.0 - norm)
+  | .error message => throw (IO.userError s!"ManifoldMuon dual objective: {message}")
 
 /--
 Run lightweight dual ascent and return matrix-sign direction plus updated dual var.
@@ -178,7 +180,7 @@ def solveDirectionDualAscent {m n : UInt64}
     iterations := iterations
     residual := residual
     dualDelta := dualDelta
-    dualObjective := dualObjectiveEstimate W G lambda
+    dualObjective := ← dualObjectiveEstimate W G lambda
     converged := converged
     solver := .dualAscent
   }
@@ -217,7 +219,7 @@ def solveDirectionFixedPoint {m n : UInt64}
     iterations := iterations
     residual := residual
     dualDelta := dualDelta
-    dualObjective := dualObjectiveEstimate W G lambda
+    dualObjective := ← dualObjectiveEstimate W G lambda
     converged := converged
     solver := .fixedPoint
   }
@@ -266,7 +268,7 @@ def stepSingleWithDiagnostics {m n : UInt64}
         iterations := 0
         residual := Tensor.frobeniusNorm (tangentResidual param signed)
         dualDelta := 0.0
-        dualObjective := dualObjectiveEstimate param nesterovGrad dual0
+        dualObjective := ← dualObjectiveEstimate param nesterovGrad dual0
         converged := true
         solver := cfg.solver
       }

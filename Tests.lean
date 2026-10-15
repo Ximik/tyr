@@ -180,3 +180,4 @@ import Tests.TestTensorConstruction
 import Tests.TestTensorDeviceDeriving
 
 import Tests.TestDeviceIdentity
+import Tests.TestFactoryRecovery

@@ -4,6 +4,14 @@ import LeanTest
 open torch
 open torch.flm
 
+@[test]
+def testFLMSamplingAllocationFailuresAreRecoverable : IO Unit := do
+  let invalid : UInt64 := 18446744073709551615
+  LeanTest.assertThrows (sampleTau (device := .CPU) {} invalid)
+  LeanTest.assertThrows (samplePsdTimes (device := .CPU) invalid)
+  LeanTest.assertThrows (sampleTau (device := .CUDA 128) {} 2)
+  LeanTest.assertThrows (samplePsdTimes (device := .CUDA 128) 2)
+
 private def tinyTokens : Tensor { shape := #[(2 : UInt64), 3], dtype := .Int64, device := .CPU } :=
   Tensor.reshapeChecked (Tensor.fromInt64Array #[0, 1, 2, 3, 4, 0]) #[(2 : UInt64), 3]
 

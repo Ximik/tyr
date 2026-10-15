@@ -38,6 +38,10 @@ namespace torch.RawTensor
 @[extern "lean_torch_hann_window"] opaque hannWindow (n : UInt64) : RawTensor
 @[extern "lean_torch_stft_1d"] opaque stft (n : UInt64) (input : @& RawTensor)
     (nFft hopLength winLength : UInt64) (window : @& RawTensor) (center normalized : Bool) : RawTensor
+/-- STFT with all native validation and kernel failures contained in `Except`. -/
+@[extern "lean_torch_stft_1d_checked"] opaque stftChecked (n : UInt64) (input : @& RawTensor)
+    (nFft hopLength winLength : UInt64) (window : @& RawTensor) (center normalized : Bool) :
+    Except String RawTensor
 @[extern "lean_torch_tensor_log10"] opaque log10 (shape : Shape) (input : @& RawTensor) : RawTensor
 @[extern "lean_torch_save_wav"] opaque saveWav (shape : Shape) (input : @& RawTensor)
     (path : @& String) (sampleRate : UInt64) : IO Unit

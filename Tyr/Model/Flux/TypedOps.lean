@@ -12,8 +12,8 @@ def zerosWeight (s : Shape) (device : Device := .CPU) : Tensor { device := devic
 
 def initLayerNorm (dim : UInt64) (eps : Float := 1e-5) (train : Bool := true) (device : Device := .CPU) :
     IO (LayerNorm (device := device) dim (.Unknown "dynamic")) := do
-  let weight := (Tensor.ones (device := device) #[dim]).forgetDType
-  let bias := (Tensor.zeros (device := device) #[dim]).forgetDType
+  let weight := (← Tensor.onesIO #[dim] device).forgetDType
+  let bias := (← Tensor.zerosIO #[dim] device).forgetDType
   if train then
     pure { weight := (← weight.parameter), bias := (← bias.parameter), eps := ⟨eps⟩ }
   else

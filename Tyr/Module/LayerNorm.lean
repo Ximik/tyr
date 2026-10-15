@@ -24,8 +24,8 @@ namespace LayerNorm
 /-- Initialize layer norm with ones for weight and zeros for bias -/
 def init (dim : UInt64) (eps : Float := 1e-5) (device : Device := .CPU) :
     IO (LayerNorm dim .Float32 device) := do
-  let weight ← Tensor.parameter (Tensor.ones #[dim] (device := device))
-  let bias ← Tensor.parameter (Tensor.zeros #[dim] (device := device))
+  let weight ← Tensor.parameter (← Tensor.onesIO #[dim] device)
+  let bias ← Tensor.parameter (← Tensor.zerosIO #[dim] device)
   pure { weight, bias, eps := ⟨eps⟩ }
 
 /-- Initialize layer norm without learnable affine parameters.

@@ -201,6 +201,14 @@ The checked `matmul?`, `mm?`, `linear?`, `linear3d?`, `matmul3d?`, and `bmm4d?`
 adapters verify actual dtype and device equality before calling native code.
 Elementwise promotion never supplies an implicit matrix cast.
 
+`Tensor.matrixLog?` accepts standard real floating matrices, including supported
+nonsymmetric matrices and real rotations. Its eigendecomposition-based solver
+rejects non-real or nonfinite outputs and checks that exponentiating the result
+reconstructs the input with a dtype-scaled relative tolerance. Defective or
+numerically unstable inputs can return an error even when a real logarithm
+exists; this is a solver limitation, not a restriction to positive definite
+matrices. Use the checked variant when those numerical failures must be handled.
+
 ## Device compatibility
 
 A tensor's concrete device is part of its type. Equal device indices tie inputs

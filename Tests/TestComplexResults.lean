@@ -82,6 +82,40 @@ example (_x : Tensor ⟨#[2, 2], .Unknown "dynamic", .CPU⟩) : True := by
   LeanTest.assertEqual logarithm.raw.dtype .Float64
   LeanTest.assertTrue ((Tensor.frobeniusNorm (restored - input)) < 1e-10)
 
+@[test] def testMatrixLogDefectiveInputCannotReturnIncorrectResult : IO Unit := do
+  -- I + N has the exact real principal log N because N² = 0. Eigenvector
+  -- reconstruction is unreliable for this defective (nondiagonalizable) input.
+  -- A checked solver may reject it, but must never report an inaccurate success.
+  let jordan := ((Tensor.fromFloatArray #[1, 1, 0, 1]).reshapeChecked #[2, 2]).castDType .Float64
+  let identity := ((Tensor.fromFloatArray #[1, 0, 0, 1]).reshapeChecked #[2, 2]).castDType .Float64
+  let nilpotent := ((Tensor.fromFloatArray #[0, 1, 0, 0]).reshapeChecked #[2, 2]).castDType .Float64
+  for scale in (#[1.0, 1e-20, 1e20] : Array Float) do
+    let input := jordan * scale
+    match Tensor.matrixLog? input with
+    | .error _ => pure ()
+    | .ok logarithm =>
+      let logScale := Float.log scale
+      let expected := identity * logScale + nilpotent
+      LeanTest.assertTrue (Tensor.frobeniusNorm (logarithm - expected) < 1e-10)
+        "matrixLog? returned an inaccurate logarithm for a real Jordan block"
+      LeanTest.assertTrue (Tensor.frobeniusNorm ((Tensor.matrixExp logarithm - input) / scale) < 1e-10)
+
+@[test] def testMatrixLogGeneralRealRoundtrips : IO Unit := do
+  -- Preserve general real inputs: nonsymmetric diagonalizable matrices, real
+  -- rotations, and the nonsymmetric inv(A) B intermediate used by SPD.distance.
+  for dtype in #[DType.Float32, DType.Float64] do
+    for data in #[#[2.0, 1.0, 0.0, 3.0], #[0.0, -1.0, 1.0, 0.0],
+        #[1.0, 0.5, 1.0, 2.0]] do
+      let input := ((Tensor.fromFloatArray data).reshapeChecked #[2, 2]).castDType dtype
+      match Tensor.matrixLog? input with
+      | .error message => LeanTest.fail s!"Supported real matrix logarithm failed: {message}"
+      | .ok logarithm =>
+        LeanTest.assertEqual logarithm.raw.dtype dtype
+        LeanTest.assertTrue (logarithm.raw.device == input.raw.device)
+        let error := Tensor.frobeniusNorm (Tensor.Preserving.sub (Tensor.matrixExp logarithm) input)
+        LeanTest.assertTrue (error < if dtype == .Float64 then 1e-10 else 1e-5)
+          "General real matrix logarithm did not reconstruct its input"
+
 @[test] def testDynamicComplexResultsRetainActualRealDtype : IO Unit := do
   let input := (diagonal .Complex128).forgetDType
   match Tensor.rowNorms? input, Tensor.svdvals? input, Tensor.svdReduced? input with

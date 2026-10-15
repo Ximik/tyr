@@ -4,6 +4,12 @@ import Tyr.Basic
 Model code should use `torch.Tensor`; only typed adapters call this module. -/
 namespace torch.RawTensor
 
+/-- Nontrainable constant factories with recoverable native failures. -/
+@[extern "lean_torch_zeros_checked"] opaque zerosChecked (shape : Shape)
+    (device : Device := .CPU) : Except String RawTensor
+@[extern "lean_torch_ones_checked"] opaque onesChecked (shape : Shape)
+    (device : Device := .CPU) : Except String RawTensor
+
 @[extern "lean_torch_ones"] opaque ones (shape : Shape) (requiresGrad : Bool := false) (device : Device := .CPU) (noGrad : requiresGrad = false := by decide) : RawTensor
 
 @[extern "lean_torch_randn"] opaque randn (shape : Shape) (requiresGrad : Bool := false) (device : Device := .CPU) : IO RawTensor
@@ -124,6 +130,8 @@ The source shape is checked before conversion and never reshaped. -/
 @[extern "lean_torch_set_requires_grad"] opaque setRequiresGrad (shape : Shape) (t : RawTensor) (requiresGrad : Bool) : IO RawTensor
 
 @[extern "lean_torch_affine3d"] opaque affine3d (batch seq inDim outDim : UInt64) (x weight bias : @& RawTensor) : RawTensor
+@[extern "lean_torch_affine3d_checked"] opaque affine3dChecked (batch seq inDim outDim : UInt64)
+    (x weight bias : @& RawTensor) : Except String RawTensor
 
 
 def sumAll (shape : Shape) (t : RawTensor) : RawTensor := sum shape t none false
@@ -178,6 +186,7 @@ namespace torch.RawTensor
     (lo hi : Float) : IO RawTensor
 
 @[extern "lean_torch_eye"] opaque eye (n : UInt64) (requiresGrad : Bool := false) (noGrad : requiresGrad = false := by decide) : RawTensor
+@[extern "lean_torch_eye_checked"] opaque eyeChecked (n : UInt64) : Except String RawTensor
 
 /-- Complete QR: returns (Q, R) with Q m×m and R m×n. -/
 @[extern "lean_torch_qr"] opaque qr (m n : UInt64) (t : @& RawTensor) : RawTensor × RawTensor
@@ -197,9 +206,13 @@ namespace torch.RawTensor
 
 /-- Largest singular value. -/
 @[extern "lean_torch_spectral_norm"] opaque spectralNorm (m n : UInt64) (t : @& RawTensor) : Float
+@[extern "lean_torch_spectral_norm_checked"] opaque spectralNormChecked (m n : UInt64)
+    (t : @& RawTensor) : Except String Float
 
 /-- Sum of the singular values. -/
 @[extern "lean_torch_nuclear_norm"] opaque nuclearNorm (m n : UInt64) (t : @& RawTensor) : Float
+@[extern "lean_torch_nuclear_norm_checked"] opaque nuclearNormChecked (m n : UInt64)
+    (t : @& RawTensor) : Except String Float
 
 @[extern "lean_torch_tensor_atan"] opaque atan (shape : Shape) (t : @& RawTensor) : RawTensor
 

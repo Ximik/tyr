@@ -23,8 +23,8 @@ namespace GroupNormParams
 
 /-- Initialize GroupNorm parameters (weight=1, bias=0) -/
 def init (num_groups channels : UInt64) (device : Device := .CPU) : IO (GroupNormParams (device := device) num_groups channels) := do
-  let weight ← Tensor.parameter ((Tensor.ones (device := device) #[channels]).forgetDType)
-  let bias ← Tensor.parameter ((Tensor.zeros (device := device) #[channels]).forgetDType)
+  let weight ← Tensor.parameter ((← Tensor.onesIO #[channels] device).forgetDType)
+  let bias ← Tensor.parameter ((← Tensor.zerosIO #[channels] device).forgetDType)
   pure { weight, bias }
 
 /-- Apply GroupNorm to input tensor [batch, channels, height, width] -/
@@ -51,7 +51,7 @@ def init (in_ch out_ch kernel_size : UInt64) (padding : UInt64 := 0) (device : D
   let std := Float.sqrt (2.0 / (in_ch * kernel_size * kernel_size).toFloat)
   let w ← Tensor.randn (device := device) #[out_ch, in_ch, kernel_size, kernel_size]
   let w := w.forgetDType
-  let b := (Tensor.zeros (device := device) #[out_ch]).forgetDType
+  let b := (← Tensor.zerosIO #[out_ch] device).forgetDType
   pure {
     weight := (← Tensor.parameter (Tensor.Preserving.mulScalar w std))
     bias := (← Tensor.parameter b)

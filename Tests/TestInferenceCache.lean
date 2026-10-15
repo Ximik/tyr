@@ -129,4 +129,10 @@ private def rejected (action : IO α) (label : String) : IO Unit := do
   LeanTest.assertEqual (← values (← layer before 1).values) #[0, 0, 0, 0]
     "The retained earlier cache must preserve its middle layer"
 
+@[test] def testInferenceCacheAllocationFailuresAreRecoverable : IO Unit := do
+  rejected (Cache.init 1 1 18446744073709551615 1 1)
+    "Cache initialization must report an unrepresentable extent through IO"
+  rejected (Cache.init 1 1 1 1 1 (device := .CUDA 128))
+    "Cache initialization must report an invalid device through IO"
+
 end Tests.InferenceCache

@@ -31,10 +31,11 @@ def init (inDim outDim : UInt64) (withBias : Bool := true) (device : Device := .
     IO (Linear inDim outDim .Float32 device) := do
   let std := Float.sqrt (2.0 / inDim.toFloat)
   let w ← Tensor.randn #[outDim, inDim] (device := device)
-  let weight ← (w.mulScalar std).parameter
+  let scaled ← IO.ofExcept (Tensor.Preserving.mulScalar? w std)
+  let weight ← scaled.parameter
   let bias ←
     if withBias then
-      pure (some (← (Tensor.zeros #[outDim] (device := device)).parameter))
+      pure (some (← (← Tensor.zerosIO #[outDim] device).parameter))
     else
       pure none
   pure { weight, bias }
@@ -70,7 +71,7 @@ namespace RMSNorm
 /-- Initialize with unit weights (Float32). -/
 def init (dim : UInt64) (eps : Float := 1e-6) (device : Device := .CPU) :
     IO (RMSNorm dim .Float32 device) := do
-  pure { weight := (← (Tensor.ones #[dim] (device := device)).parameter), eps }
+  pure { weight := (← (← Tensor.onesIO #[dim] device).parameter), eps }
 
 /-! The runtime normalizes in Float32 for stability, so forward results are
 `promote Float32 d` (Float32 for f16/bf16 layers) — the dtype change is

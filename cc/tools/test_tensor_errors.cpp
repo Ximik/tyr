@@ -337,6 +337,29 @@ void checkedExceptionKinds() {
   for (int kind : {0, 1, 2}) check(kind);
 }
 
+void checkedIoExceptionKinds() {
+  static_assert(noexcept(tyr::checkedIoCall("test", []() -> lean_object* {
+    return lean_io_result_mk_ok(lean_box(0));
+  })));
+  Object owned(shape({2}), lean_dec);
+  for (int kind : {0, 1, 2}) {
+    Object result(tyr::checkedIoCall("IO firewall", [&]() -> lean_object* {
+      Object transferred(retain(owned.get()), lean_dec);
+      if (kind == 0) TORCH_CHECK(false, "libtorch test error");
+      if (kind == 1) throw std::runtime_error("standard test error");
+      throw 7;
+    }), lean_dec);
+    require(lean_io_result_is_error(result.get()), "IO firewall did not return IO.error");
+    require(owned->m_rc == 1, "IO firewall failed to unwind native ownership guards");
+  }
+  Object success(tyr::checkedIoCall("IO firewall", [] {
+    return lean_io_result_mk_ok(lean_box(23));
+  }), lean_dec);
+  require(lean_io_result_is_ok(success.get()) &&
+    lean_unbox(lean_io_result_get_value(success.get())) == 23,
+    "IO firewall changed the successful result carrier");
+}
+
 void checkedComplexDivision() {
   auto real = full({2}, 3);
   auto complex = cast(real.get(), "Complex32");
@@ -349,6 +372,39 @@ void checkedMixedMatrix() {
   auto other = cast(real.get(), "Float64");
   Object result(CHECKED(lean_torch_mm)(2, 2, 2, real.get(), other.get()), lean_dec);
   exceptError(result.get(), "dtype");
+}
+
+void checkedAffine(int mismatch) {
+  auto input = full({1, 2, 2}, 3), originalWeight = full({2, 2}, 2), originalBias = full({2}, 1);
+  auto weight = mismatch == 1 ? cast(originalWeight.get(), "Float64") :
+    Object(retain(originalWeight.get()), lean_dec);
+  auto bias = mismatch == 2 ? cast(originalBias.get(), "Float64") :
+    Object(retain(originalBias.get()), lean_dec);
+  const auto weightRefs = weight->m_rc, biasRefs = bias->m_rc;
+  Object result(CHECKED(lean_torch_affine3d)(1, 2, 2, 2,
+    input.get(), weight.get(), bias.get()), lean_dec);
+  if (mismatch) exceptError(result.get(), "affine3d");
+  else values(exceptValue(result.get()), 4, 13);
+  require(input->m_rc == 1 && weight->m_rc == weightRefs && bias->m_rc == biasRefs,
+    "checked affine changed borrowed tensor ownership");
+}
+
+void checkedSingularValueNorm(bool nuclear, bool invalid) {
+  auto input = invalid ? Object(lean_torch_full_int(shape({2, 2}), 3), lean_dec) : full({2, 2}, 3);
+#ifdef TYR_CHECKED_BASELINE
+  Object result(lean_box_float(nuclear ? lean_torch_nuclear_norm(2, 2, input.get()) :
+    lean_torch_spectral_norm(2, 2, input.get())), lean_dec);
+#else
+  Object result(nuclear ? lean_torch_nuclear_norm_checked(2, 2, input.get()) :
+    lean_torch_spectral_norm_checked(2, 2, input.get()), lean_dec);
+#endif
+  if (invalid) exceptError(result.get(), nuclear ? "nuclearNorm" : "spectralNorm");
+  else {
+    require(lean_obj_tag(result.get()) == 1, "Norm did not return Except.ok");
+    require(std::abs(lean_unbox_float(lean_ctor_get(result.get(), 0)) - 6) < 1e-5,
+      "Norm returned an incorrect value");
+  }
+  require(input->m_rc == 1, "checked norm changed borrowed tensor ownership");
 }
 
 using Unary = lean_object* (*)(lean_object*, lean_object*);
@@ -518,8 +574,16 @@ int main() {
   }
   run("checked/owned-arguments-early-error", checkedEarlyFailure);
   run("checked/exception-kinds", checkedExceptionKinds);
+  run("checked/IO-exception-kinds", checkedIoExceptionKinds);
   run("checked/Complex32-division-kernel-error", checkedComplexDivision);
   run("checked/mm-mixed-dtype-error", checkedMixedMatrix);
+  run("checked/affine-success", [] { checkedAffine(0); });
+  run("checked/affine-weight-dtype-error", [] { checkedAffine(1); });
+  run("checked/affine-bias-dtype-error", [] { checkedAffine(2); });
+  run("checked/spectral-success", [] { checkedSingularValueNorm(false, false); });
+  run("checked/spectral-domain-error", [] { checkedSingularValueNorm(false, true); });
+  run("checked/nuclear-success", [] { checkedSingularValueNorm(true, false); });
+  run("checked/nuclear-domain-error", [] { checkedSingularValueNorm(true, true); });
   for (bool invalid : {false, true}) {
     run(invalid ? "checked/exp-error" : "checked/exp-success", [&] { checkedUnary(CHECKED(lean_torch_tensor_exp), "exp", invalid); });
     run(invalid ? "checked/sqrt-error" : "checked/sqrt-success", [&] { checkedUnary(CHECKED(lean_torch_sqrt), "sqrt", invalid); });

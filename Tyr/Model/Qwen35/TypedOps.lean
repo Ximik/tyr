@@ -44,7 +44,7 @@ def onesDynamic (shape : Shape) (device : Device := .CPU) : Tensor { device, sha
 def zerosDynamicOn {shape : Shape} (device : Device) : Tensor { device := device, shape := shape } := zerosDynamic shape false device
 
 def randDynamic (shape : Shape) (device : Device := .CPU) : IO (Tensor { device, shape }) := do
-  return (← Tensor.uniformLike (Tensor.zeros shape (device := device))).forgetDType
+  return (← Tensor.uniformLike (← Tensor.zerosIO shape device)).forgetDType
 
 def initDynamicWeight (shape : Shape) (fanIn : UInt64) (device : Device := .CPU) :
     IO (Tensor { device, shape }) :=

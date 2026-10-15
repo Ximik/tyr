@@ -48,6 +48,45 @@ The runtime defaults are Float32 for float factories and Int64 for
 `fullInt`; the indices state exactly that. Factories with a device argument
 index their result by that device, and host factories return CPU tensors. -/
 
+/-- Constant allocation with shape, placement, and native failures returned explicitly. -/
+def zeros? (shape : Shape) (device : Device := .CPU) :
+    Except String (Tensor { shape, dtype := .Float32, device }) := do
+  Tensor.ofRaw (← RawTensor.zerosChecked shape device)
+
+def ones? (shape : Shape) (device : Device := .CPU) :
+    Except String (Tensor { shape, dtype := .Float32, device }) := do
+  Tensor.ofRaw (← RawTensor.onesChecked shape device)
+
+private def factoryIO {α : Type} (result : Except String α) : IO α :=
+  match result with
+  | .ok value => pure value
+  | .error message => throw (IO.userError message)
+
+def zerosIO (shape : Shape) (device : Device := .CPU) :
+    IO (Tensor { shape, dtype := .Float32, device }) := factoryIO (zeros? shape device)
+
+def onesIO (shape : Shape) (device : Device := .CPU) :
+    IO (Tensor { shape, dtype := .Float32, device }) := factoryIO (ones? shape device)
+
+private def constantFor? (σ : StaticSpec) (native : Shape → Device → Except String RawTensor) :
+    Except String (Tensor σ) := do
+  let raw ← native σ.shape σ.device
+  let raw ← if σ.dtype.isKnown then
+      RawTensor.castDTypeChecked σ.shape raw σ.dtype.canonicalName
+    else pure raw
+  Tensor.ofRaw raw
+
+/-- Checked constant creation at a complete specification; dynamic dtype defaults to Float32. -/
+def zerosFor? (σ : StaticSpec) : Except String (Tensor σ) :=
+  constantFor? σ (fun shape device => RawTensor.zerosChecked shape device)
+
+def onesFor? (σ : StaticSpec) : Except String (Tensor σ) :=
+  constantFor? σ (fun shape device => RawTensor.onesChecked shape device)
+
+def zerosForIO (σ : StaticSpec) : IO (Tensor σ) := factoryIO (zerosFor? σ)
+
+def onesForIO (σ : StaticSpec) : IO (Tensor σ) := factoryIO (onesFor? σ)
+
 def zeros (shape : Shape) (requiresGrad : Bool := false)
     (device : Device := Device.CPU) (noGrad : requiresGrad = false := by exact of_decide_eq_true rfl) : Tensor { shape, dtype := .Float32, device } :=
   checkedResult "zeros" (Tensor.ofRaw (RawTensor.zeros shape requiresGrad device noGrad))
@@ -194,7 +233,9 @@ def matrixExp {n : UInt64} {d : DType} {dev : Device}
 
 /-- Checked real matrix logarithm. Dynamic dtypes are admitted only when their
 actual metadata is a standard real floating dtype. Native failures, non-real
-logarithms, and nonfinite results are reported as errors. -/
+logarithms, and nonfinite results are reported as errors. The eigendecomposition
+solver also rejects results that fail exponential reconstruction, including
+unsupported defective or numerically unstable cases. -/
 def matrixLog? {n : UInt64} {d : DType} {dev : Device}
     (t : Tensor ⟨#[n, n], d, dev⟩) : Except String (Tensor ⟨#[n, n], d, dev⟩) := do
   if !t.raw.dtype.isRealFloating then
@@ -216,6 +257,19 @@ def matrixLog {n : UInt64} {d : DType} {dev : Device}
 def inv {n : UInt64} {d : DType} {dev : Device}
     (t : Tensor ⟨#[n, n], d, dev⟩) : Tensor ⟨#[n, n], d, dev⟩ :=
   t.checkedReplacement (RawTensor.inv n t.raw)
+
+/-- Float32 identity matrix on CPU. -/
+def eye? (n : UInt64) : Except String (Tensor ⟨#[n, n], .Float32, .CPU⟩) := do
+  Tensor.ofRaw (← RawTensor.eyeChecked n)
+
+def eyeIO (n : UInt64) : IO (Tensor ⟨#[n, n], .Float32, .CPU⟩) := factoryIO (eye? n)
+
+/-- Allocate and convert an identity matrix without leaving the recoverable boundary. -/
+def eyeForIO {n : UInt64} (d : DType) (dev : Device := .CPU) : IO (Tensor ⟨#[n, n], d, dev⟩) := do
+  let raw ← IO.ofExcept (RawTensor.eyeChecked n)
+  let target := if d == .Unknown "dynamic" then none else some d.canonicalName
+  let raw ← RawTensor.convertIO #[n, n] raw dev target
+  IO.ofExcept (Tensor.ofRaw raw)
 
 /-- Float32 identity matrix on CPU. -/
 def eye (n : UInt64) : Tensor ⟨#[n, n], .Float32, .CPU⟩ :=
@@ -284,15 +338,34 @@ def diagflat {n : UInt64} {d : DType} {dev : Device}
     (t : Tensor ⟨#[n], d, dev⟩) : Tensor ⟨#[n, n], d, dev⟩ :=
   checkedResult "diagflat" (Tensor.ofRaw (RawTensor.diagflat n t.raw))
 
-/-- Largest singular value of a matrix. -/
-def spectralNorm {m n : UInt64} {d : DType} {dev : Device}
-    (t : Tensor ⟨#[m, n], d, dev⟩) : Float :=
-  RawTensor.spectralNorm m n t.raw
+/-- Largest singular value of a nonempty floating or complex matrix, with
+recoverable dtype, backend, and factorization failures. -/
+def spectralNorm? {m n : UInt64} {d : DType} {dev : Device}
+    (t : Tensor ⟨#[m, n], d, dev⟩) : Except String Float := do
+  if !(t.raw.dtype.isRealFloating || t.raw.dtype.isComplex) then
+    throw "spectralNorm requires a floating or complex dtype"
+  if m == 0 || n == 0 then
+    throw "spectralNorm requires a nonempty matrix"
+  RawTensor.spectralNormChecked m n t.raw
 
-/-- Sum of the singular values of a matrix. -/
+def spectralNorm {m n : UInt64} {d : DType} {dev : Device}
+    [DType.FloatingOrComplex d] (t : Tensor ⟨#[m, n], d, dev⟩) : Float :=
+  match spectralNorm? t with
+  | .ok result => result
+  | .error message => panic! s!"Tensor.spectralNorm: {message}"
+
+/-- Sum of the singular values of a floating or complex matrix. -/
+def nuclearNorm? {m n : UInt64} {d : DType} {dev : Device}
+    (t : Tensor ⟨#[m, n], d, dev⟩) : Except String Float := do
+  if !(t.raw.dtype.isRealFloating || t.raw.dtype.isComplex) then
+    throw "nuclearNorm requires a floating or complex dtype"
+  RawTensor.nuclearNormChecked m n t.raw
+
 def nuclearNorm {m n : UInt64} {d : DType} {dev : Device}
-    (t : Tensor ⟨#[m, n], d, dev⟩) : Float :=
-  RawTensor.nuclearNorm m n t.raw
+    [DType.FloatingOrComplex d] (t : Tensor ⟨#[m, n], d, dev⟩) : Float :=
+  match nuclearNorm? t with
+  | .ok result => result
+  | .error message => panic! s!"Tensor.nuclearNorm: {message}"
 
 /-! ## Casts -/
 
@@ -1143,13 +1216,23 @@ def setRequiresGrad {σ : StaticSpec} (t : Tensor σ) (requiresGrad : Bool) :
 def parameter {σ : StaticSpec} (t : Tensor σ) : IO (Tensor σ) :=
   setRequiresGrad (detach t) true
 
-/-- Fused affine for 3D input: `x @ Wᵀ + b`. -/
+/-- Fused affine for 3D input: `x @ Wᵀ + b`. Check actual dtype and placement
+for all three operands, including when their static dtype is erased. -/
+def affine3d? {batch seq inDim outDim : UInt64} {d : DType} {dev : Device}
+    (x : Tensor ⟨#[batch, seq, inDim], d, dev⟩)
+    (weight : Tensor ⟨#[outDim, inDim], d, dev⟩)
+    (bias : Tensor ⟨#[outDim], d, dev⟩) :
+    Except String (Tensor ⟨#[batch, seq, outDim], d, dev⟩) := do
+  checkMatrixOperands x weight
+  checkMatrixOperands x bias
+  Tensor.ofRaw (← RawTensor.affine3dChecked batch seq inDim outDim x.raw weight.raw bias.raw)
+
 def affine3d {batch seq inDim outDim : UInt64} {d : DType} {dev : Device}
     (x : Tensor ⟨#[batch, seq, inDim], d, dev⟩)
     (weight : Tensor ⟨#[outDim, inDim], d, dev⟩)
     (bias : Tensor ⟨#[outDim], d, dev⟩) :
     Tensor ⟨#[batch, seq, outDim], d, dev⟩ :=
-  checkedResult "affine3d" (Tensor.ofRaw (RawTensor.affine3d batch seq inDim outDim x.raw weight.raw bias.raw))
+  checkedResult "affine3d" (affine3d? x weight bias)
 
 /-- Fused layer normalization over the last dimension, preserving the spec. -/
 def layerNorm {batch seq n : UInt64} {d : DType} {dev : Device}

@@ -73,11 +73,10 @@ def Cache.init (numLayers batch maxSeqLen numKvHeads headDim : UInt64)
     : IO (Cache numLayers batch maxSeqLen numKvHeads headDim .BFloat16 device) := do
   if numLayers == 0 || batch == 0 || maxSeqLen == 0 || numKvHeads == 0 || headDim == 0 then
     throw <| IO.userError "KV cache dimensions must be positive"
-  -- Pure allocations may be commoned by Lean, even within a single layer.
-  -- Each IO clone must execute independently, both for K/V and across layers.
-  let template : Tensor ⟨#[batch, numKvHeads, maxSeqLen, headDim], .BFloat16, device⟩ :=
-    Tensor.toBFloat16 (Tensor.zeros #[batch, numKvHeads, maxSeqLen, headDim]
-      (requiresGrad := false) (device := device))
+  -- Checked allocation/conversion failures propagate through IO. Each clone
+  -- owns independent cache storage, both for K/V and across layers.
+  let template ← Tensor.zerosForIO
+    ⟨#[batch, numKvHeads, maxSeqLen, headDim], .BFloat16, device⟩
   let mut layers : Array (LayerCache batch maxSeqLen numKvHeads headDim .BFloat16 device) := #[]
   for _ in [:numLayers.toNat] do
     let keys ← cloneInferenceIO template

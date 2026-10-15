@@ -24,12 +24,12 @@ def bmm {batch rows inner cols : UInt64} (a : Tensor { shape := #[batch, rows, i
   (Tensor.bmm4d (a.reshapeChecked #[batch, 1, rows, inner])
     (b.reshapeChecked #[batch, 1, inner, cols])).reshapeChecked #[batch, rows, cols]
 
-def uniformTensor (shape : Shape) (lo hi : Float) : IO (Tensor { shape := shape, dtype := .Float32, device := device }) :=
-  Tensor.uniformLike (Tensor.zeros shape (device := device)) lo hi
+def uniformTensor (shape : Shape) (lo hi : Float) : IO (Tensor { shape := shape, dtype := .Float32, device := device }) := do
+  Tensor.uniformLike (← Tensor.zerosIO shape device) lo hi
 
 def randTensor (shape : Shape) (requiresGrad : Bool := false) (device : Device := .CPU) :
     IO (Tensor { shape := shape, dtype := .Float32, device := device }) := do
-  let sample ← Tensor.uniformLike (Tensor.zeros shape false device)
+  let sample ← Tensor.uniformLike (← Tensor.zerosIO shape device)
   if requiresGrad then sample.parameter else pure sample
 
 def leakyRelu {s : Shape} (x : Tensor { shape := s, dtype := .Float32, device := device }) (slope : Float := 0.01) : Tensor { shape := s, dtype := .Float32, device := device } :=

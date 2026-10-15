@@ -147,7 +147,7 @@ private def loadFrozenOrZeros (path : String) (name : String) (s : Shape) : IO (
   try
     loadFrozen path name s
   catch _ =>
-    pure (freeze (Tensor.zeros s (device := device)).forgetDType)
+    pure (freeze (← Tensor.zerosIO s device).forgetDType)
 
 private def addBias2d {n d : UInt64}
     (x : Tensor { shape := #[n, d], device := device })

@@ -107,4 +107,9 @@ private def writeConvCheckpoint (path : System.FilePath) (bf16 wrongShape : Bool
   let sharded ← safetensors.tryLoadTensorSharded dir.toString "conv.weight" #[1, 1, 3, 3]
   LeanTest.assertTrue sharded.isNone "sharded loading must reject the same wrong layout"
 
+@[test] def testVAEGroupNormInitializationFailuresAreRecoverable : IO Unit := do
+  -- Both failures are rejected before allocation and do not depend on hardware.
+  LeanTest.assertThrows (GroupNormParams.init 1 18446744073709551615)
+  LeanTest.assertThrows (GroupNormParams.init 1 2 (device := .CUDA 128))
+
 end Tests.VAETyped
