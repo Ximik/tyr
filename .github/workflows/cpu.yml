@@ -85,6 +85,7 @@ jobs:
           python3 scripts/check_ffi_abi.py --header cc/src/tyr_flux_abi.h --generated .lake/build/ir/Tyr/RawTensor/Flux.c
           python3 scripts/check_ffi_abi.py --header cc/src/tyr_float_buffer_abi.h --generated .lake/build/ir/Tyr/Audio/FloatBuffer.c --require-complete
           python3 scripts/check_ffi_abi.py --header cc/src/tyr_parquet_abi.h --generated .lake/build/ir/Tyr/Data/Pretraining.c --require-complete --symbol-prefix lean_parquet_
+          python3 scripts/check_ffi_abi.py --header cc/src/tyr_torch_abi.h --generated .lake/build/ir/Tyr/Torch.c --require-complete
 
       - name: Test native attention CPU semantics
         run: |
@@ -110,6 +111,7 @@ jobs:
       - name: Check recoverable native tensor errors
         run: |
           bash scripts/test_native_tensor_errors.sh
+          bash scripts/test_native_torch_recovery.sh
           bash scripts/test_functional_grad_callback.sh
 
       - name: Build examples and FFI probe

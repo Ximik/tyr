@@ -171,6 +171,8 @@ namespace data
 @[extern "lean_torch_bin_file_token_count"]
 opaque binFileTokenCount (path : @& String) : IO UInt64
 
+/-- High-quality mono resampling. Zero rates, unrepresentable output sizes, and
+native failures return IO errors. Equal-rate and empty inputs retain the input array. -/
 @[extern "lean_torch_resample_soxr_hq"]
 opaque resampleSoxrHQ (samples : @& Array Float) (origSr targetSr : UInt64) : IO (Array Float)
 
@@ -188,7 +190,7 @@ end data
 @[extern "lean_torch_get_live_tensors"]
 opaque get_live_tensors : IO UInt64
 
-/-- Set global RNG seed for deterministic runs (CPU + CUDA generators). -/
+/-- Seed the default CPU generator. CUDA generators are currently unchanged. -/
 @[extern "lean_torch_manual_seed"]
 opaque manualSeed (seed : UInt64) : IO Unit
 

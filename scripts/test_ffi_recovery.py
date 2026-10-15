@@ -17,6 +17,7 @@ class RecoveryTests(unittest.TestCase):
         (self.root / "Tyr/Data").mkdir(parents=True)
         (self.root / "cc/src").mkdir(parents=True)
         self.write("Tyr/Basic.lean", "")
+        self.write("Tyr/Torch.lean", "")
         self.write("Tyr/Data/Pretraining.lean", "")
         self.declare()
         self.native('return tyr::checkedIoCall("example", [&] { return run(); });')
@@ -59,6 +60,18 @@ class RecoveryTests(unittest.TestCase):
         self.assertTrue(any("lean_parquet_get_metadata from Tyr/Data/Pretraining.lean:2" in error
                             and "must contain only" in error for error in errors))
         self.assertTrue(any("no recognized native definition for lean_parquet_future_operation" in error
+                            for error in errors))
+
+    def test_torch_runtime_io_declarations_are_in_scope_without_symbol_list(self):
+        self.write("Tyr/Torch.lean", '''
+@[extern "lean_torch_resample_soxr_hq"] opaque resample : IO (Array Float)
+@[extern "lean_torch_future_runtime_operation"] opaque future : IO Unit
+''')
+        self.native('return resample();', "cc/src/tyr.cpp", "lean_torch_resample_soxr_hq")
+        errors = self.errors()
+        self.assertTrue(any("lean_torch_resample_soxr_hq from Tyr/Torch.lean:2" in error
+                            and "must contain only" in error for error in errors))
+        self.assertTrue(any("no recognized native definition for lean_torch_future_runtime_operation" in error
                             for error in errors))
 
     def test_parquet_arrow_and_disabled_variants_are_both_checked(self):

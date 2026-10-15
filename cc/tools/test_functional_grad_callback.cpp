@@ -1,4 +1,5 @@
 #include "tyr_raw_tensor_abi.h"
+#include "tyr_torch_abi.h"
 #include <iostream>
 #include <memory>
 #include <stdexcept>
@@ -10,7 +11,6 @@ lean_object* initialize_FunctionalGradCallback(uint8_t);
 lean_object* tyr_test_callback_sum(lean_object*, lean_object*);
 lean_object* tyr_test_callback_identity(lean_object*, lean_object*);
 lean_object* tyr_test_callback_throw(lean_object*, lean_object*);
-lean_object* lean_torch_get_live_tensors(lean_object*);
 }
 
 using Object = std::unique_ptr<lean_object, decltype(&lean_dec)>;
@@ -21,7 +21,7 @@ static void require(bool condition, const char* message) {
 }
 
 static uint64_t liveTensors() {
-  Object result(lean_torch_get_live_tensors(lean_io_mk_world()), lean_dec);
+  Object result(lean_torch_get_live_tensors(), lean_dec);
   require(lean_io_result_is_ok(result.get()), "live tensor query failed");
   return lean_unbox_uint64(lean_io_result_get_value(result.get()));
 }

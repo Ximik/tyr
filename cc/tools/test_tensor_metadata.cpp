@@ -1,5 +1,6 @@
 #include "tyr_tensor_metadata.h"
 #include "tyr_neural_abi.h"
+#include "tyr_torch_abi.h"
 #include <ATen/Context.h>
 #include <lean/lean.h>
 #include <torch/torch.h>
@@ -18,7 +19,6 @@ lean_object* lean_torch_get_dtype(lean_object*, lean_object*);
 lean_object* lean_torch_get_device_enum(lean_object*, lean_object*);
 lean_object* lean_torch_convert_tensor(lean_object*, lean_object*, lean_object*, lean_object*);
 lean_object* lean_torch_cast_dtype_checked(lean_object*, lean_object*, lean_object*);
-lean_object* lean_torch_mps_is_available(lean_object*);
 }
 
 namespace {
@@ -275,7 +275,7 @@ void testCombinedConversion(const std::filesystem::path& directory) {
             "Invalid CUDA index must return IO.error before attempting allocation");
   }
 
-  LeanObject availability(lean_torch_mps_is_available(lean_box(0)), lean_dec);
+  LeanObject availability(lean_torch_mps_is_available(), lean_dec);
   requireIoSuccess(availability.get(), "MPS availability query");
   if (!lean_unbox(lean_io_result_get_value(availability.get()))) {
     std::cout << "SKIP combined MPS conversion checks: MPS is unavailable.\n";

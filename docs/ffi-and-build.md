@@ -191,7 +191,7 @@ hardware qualification.
 
 Native result carriers must match the Lean declaration on every path.
 `scripts/check_ffi_recovery.py` inventories recoverable declarations in
-`Tyr/RawTensor.lean`, its submodules, `Tyr/Basic.lean`, and the Parquet FFI in
+`Tyr/RawTensor.lean`, its submodules, `Tyr/Basic.lean`, `Tyr/Torch.lean`, and the Parquet FFI in
 `Tyr/Data/Pretraining.lean`. It requires every native implementation, including
 inactive platform branches, to enter the common exception guard before doing
 C++ work. The CPU tooling job runs this check alongside ABI and runtime
@@ -238,6 +238,14 @@ so invalid token IDs do not reach a device-side indexing assertion. Token-byte
 totals use this boundary together with checked transfer, arithmetic, reduction,
 and scalar extraction. Equal-rate audio resampling retains the borrowed input
 array before returning it, preserving ownership of its boxed Float values.
+The resampler computes its output length with checked integer arithmetic before
+narrowing it or allocating output storage, and its native body returns C++ failures through
+`IO.Error`. The runtime-service exports in `Tyr.Torch` use the same exception
+guard and have a complete ABI header, `cc/src/tyr_torch_abi.h`, checked against
+generated `Tyr/Torch.c`. `scripts/test_native_torch_recovery.sh` exercises the
+resampler size failures, borrowed arrays, and runtime error carriers. This
+exception guard does not establish CUDA graph lifecycle or stream correctness;
+those GPU-specific contracts still require repair and qualification.
 
 STFT preserves its IO error contract even for invalid native FFT parameters.
 Apple image and video preprocessing catches C++ failures at each IO entry point;

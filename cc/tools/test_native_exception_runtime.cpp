@@ -4,6 +4,7 @@
 #include <ATen/Functions.h>
 #include <c10/util/Exception.h>
 #include <lean/lean.h>
+#include "../src/tyr_torch_abi.h"
 #include <cstdio>
 #include <cstring>
 #include <stdexcept>
@@ -12,7 +13,6 @@
 #endif
 
 extern "C" void lean_initialize_runtime_module();
-extern "C" lean_object* lean_torch_get_live_tensors(lean_object*);
 
 static bool symbolProviders() {
 #ifdef __linux__
@@ -77,7 +77,7 @@ int main() {
   lean_initialize_runtime_module();
   // Keep libTyrC in DT_NEEDED even with --as-needed. Its static constructors
   // and runtime dependencies must be present just as in the real harness.
-  lean_object* live = lean_torch_get_live_tensors(lean_io_mk_world());
+  lean_object* live = lean_torch_get_live_tensors();
   const bool live_ok = lean_io_result_is_ok(live);
   lean_dec(live);
   if (!live_ok) return 1;

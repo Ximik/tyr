@@ -88,6 +88,7 @@
 #include "tyr_raw_tensor_abi.h"
 #include "tyr_owned_kv_abi.h"
 #include "tyr_neural_abi.h"
+#include "tyr_torch_abi.h"
 #include <torch/torch.h>
 #include <ATen/ATen.h>
 #include "tyr_attention.h"
@@ -391,8 +392,10 @@ const bool g_tyr_terminate_handler_installed = [] {
 
 extern "C" {
 
-lean_object* lean_torch_get_live_tensors(lean_object* /* w */) {
+lean_object* lean_torch_get_live_tensors() {
+  return tyr::checkedIoCall("get_live_tensors", [&] {
     return lean_io_result_mk_ok(lean_box_uint64(static_cast<uint64_t>(g_live_lean_tensors.load())));
+  });
 }
 
 // Background on the workarounds below:
@@ -417,7 +420,8 @@ lean_object* lean_torch_get_live_tensors(lean_object* /* w */) {
 //     with a direct `cudaDeviceSynchronize` call that returns
 //     `cudaError_t` and never throws.
 
-lean_object* lean_torch_manual_seed(uint64_t seed, lean_object* /*w*/) {
+lean_object* lean_torch_manual_seed(uint64_t seed) {
+  return tyr::checkedIoCall("manual_seed", [&] {
   try {
     auto cpu_gen = at::detail::getDefaultCPUGenerator();
     {
@@ -436,6 +440,7 @@ lean_object* lean_torch_manual_seed(uint64_t seed, lean_object* /*w*/) {
     return lean_io_result_mk_error(lean_mk_io_user_error(
       lean_mk_string("Failed to set manual seed: unknown exception")));
   }
+  });
 }
 
 // ============================================================================
@@ -2539,12 +2544,10 @@ lean_object* lean_torch_from_float_array(b_lean_obj_arg arr) {
 }
 
 // High-quality mono waveform resample using libsoxr (`soxr_hq`).
-lean_object* lean_torch_resample_soxr_hq(
-    b_lean_obj_arg samples,
+lean_object* lean_torch_resample_soxr_hq(b_lean_obj_arg samples,
     uint64_t orig_sr,
-    uint64_t target_sr,
-    lean_object* /*w*/
-) {
+    uint64_t target_sr) {
+  return tyr::checkedIoCall("resample_soxr_hq", [&] {
   if (orig_sr == 0 || target_sr == 0) {
     return lean_io_result_mk_error(lean_mk_io_user_error(
       lean_mk_string("resampleSoxrHQ: sample rates must be non-zero")));
@@ -2563,8 +2566,19 @@ lean_object* lean_torch_resample_soxr_hq(
     in_data[i] = static_cast<float>(lean_unbox_float(lean_array_get_core(samples, i)));
   }
 
-  double ratio = static_cast<double>(target_sr) / static_cast<double>(orig_sr);
-  size_t out_len = static_cast<size_t>(std::ceil(static_cast<double>(in_len) * ratio));
+  // Compute ceil(in_len * target_sr / orig_sr) exactly before narrowing.
+  // Two 64-bit factors fit in 128 bits; quotient plus a nonzero-remainder
+  // adjustment cannot overflow. Clang/GCC support this on our native targets.
+  const auto numerator = static_cast<unsigned __int128>(in_len) * target_sr;
+  const auto output_length = numerator / orig_sr + (numerator % orig_sr != 0);
+  const auto max_lean_length = (std::numeric_limits<size_t>::max() -
+      sizeof(lean_array_object)) / sizeof(void*);
+  const auto max_output_length = std::min(std::vector<float>().max_size(), max_lean_length);
+  if (output_length > max_output_length) {
+    return lean_io_result_mk_error(lean_mk_io_user_error(
+      lean_mk_string("resampleSoxrHQ: output length exceeds the native array limit")));
+  }
+  const size_t out_len = static_cast<size_t>(output_length);
   std::vector<float> out_data(out_len, 0.0f);
 
 #if TYR_HAS_SOXR
@@ -2593,11 +2607,13 @@ lean_object* lean_torch_resample_soxr_hq(
     lean_mk_string("resampleSoxrHQ requires libsoxr (soxr.h not found at build time)")));
 #endif
 
-  lean_object* out = lean_mk_empty_array();
+  // Allocate the checked capacity directly, avoiding growth beyond that bound.
+  lean_object* out = lean_alloc_array(out_len, out_len);
   for (size_t i = 0; i < out_len; i++) {
-    out = lean_array_push(out, lean_box_float(static_cast<double>(out_data[i])));
+    lean_array_set_core(out, i, lean_box_float(static_cast<double>(out_data[i])));
   }
   return lean_io_result_mk_ok(out);
+  });
 }
 
 // Backward pass
@@ -2618,7 +2634,8 @@ lean_object* lean_torch_backward_unit(lean_obj_arg s, b_lean_obj_arg output, b_l
 }
 
 // Get number of uint16 tokens in a binary file
-lean_object* lean_torch_bin_file_token_count(b_lean_obj_arg path_obj, lean_object* w) {
+lean_object* lean_torch_bin_file_token_count(b_lean_obj_arg path_obj) {
+  return tyr::checkedIoCall("bin_file_token_count", [&] {
   const char* path = lean_string_cstr(path_obj);
 
   std::ifstream file(path, std::ios::binary | std::ios::ate);
@@ -2631,6 +2648,7 @@ lean_object* lean_torch_bin_file_token_count(b_lean_obj_arg path_obj, lean_objec
   uint64_t num_tokens = size / sizeof(uint16_t);
 
   return lean_io_result_mk_ok(lean_box_uint64(num_tokens));
+  });
 }
 
 // Load binary file of uint16 tokens into a 1D tensor with known size
@@ -3333,7 +3351,8 @@ lean_object* tyrNoCudaGraph() {
     lean_mk_string("CUDA graphs not available in this libtorch build")));
 }
 
-lean_object* lean_torch_cuda_graph_capture_begin(lean_object* w) {
+lean_object* lean_torch_cuda_graph_capture_begin() {
+  return tyr::checkedIoCall("cuda_graph_capture_begin", [&] {
 #if TYR_WITH_CUDA_GRAPH
   try {
     // Capture is illegal on the legacy default stream; mirror
@@ -3353,9 +3372,11 @@ lean_object* lean_torch_cuda_graph_capture_begin(lean_object* w) {
 #else
   return tyrNoCudaGraph();
 #endif
+  });
 }
 
-lean_object* lean_torch_cuda_graph_capture_end(lean_object* w) {
+lean_object* lean_torch_cuda_graph_capture_end() {
+  return tyr::checkedIoCall("cuda_graph_capture_end", [&] {
 #if TYR_WITH_CUDA_GRAPH
   try {
     g_cuda_graph->capture_end();
@@ -3370,9 +3391,11 @@ lean_object* lean_torch_cuda_graph_capture_end(lean_object* w) {
 #else
   return tyrNoCudaGraph();
 #endif
+  });
 }
 
-lean_object* lean_torch_cuda_graph_replay(lean_object* w) {
+lean_object* lean_torch_cuda_graph_replay() {
+  return tyr::checkedIoCall("cuda_graph_replay", [&] {
 #if TYR_WITH_CUDA_GRAPH
   try {
     g_cuda_graph->replay();
@@ -3384,13 +3407,16 @@ lean_object* lean_torch_cuda_graph_replay(lean_object* w) {
 #else
   return tyrNoCudaGraph();
 #endif
+  });
 }
 
-lean_object* lean_torch_cuda_graph_reset(lean_object* w) {
+lean_object* lean_torch_cuda_graph_reset() {
+  return tyr::checkedIoCall("cuda_graph_reset", [&] {
 #if TYR_WITH_CUDA_GRAPH
   g_cuda_graph.reset();
 #endif
   return lean_io_result_mk_ok(lean_box(0));
+  });
 }
 
 } // anonymous namespace
@@ -3472,10 +3498,12 @@ lean_object* lean_torch_load_tensor_exact(lean_obj_arg shape, b_lean_obj_arg pat
 }
 
 // Check if a file exists
-lean_object* lean_torch_file_exists(b_lean_obj_arg path_obj, lean_object* w) {
+lean_object* lean_torch_file_exists(b_lean_obj_arg path_obj) {
+  return tyr::checkedIoCall("file_exists", [&] {
   const char* path = lean_string_cstr(path_obj);
   std::ifstream file(path);
   return lean_io_result_mk_ok(lean_box(file.good() ? 1 : 0));
+  });
 }
 
 // Save image tensor as PPM file
@@ -3640,10 +3668,8 @@ lean_object* lean_torch_save_wav(
 }
 
 // Start a streaming mono WAV file with a placeholder header.
-lean_object* lean_torch_wav_begin(
-  b_lean_obj_arg path_obj,
-  uint64_t sample_rate
-) {
+lean_object* lean_torch_wav_begin(b_lean_obj_arg path_obj,
+  uint64_t sample_rate) {
   return tyr::checkedIoCall("wavBegin", [&] {
   const char* path = lean_string_cstr(path_obj);
   try {
@@ -3736,9 +3762,7 @@ lean_object* lean_torch_wav_append(
 }
 
 // Finalize a streaming WAV file by recomputing and patching header sizes.
-lean_object* lean_torch_wav_finalize(
-  b_lean_obj_arg path_obj
-) {
+lean_object* lean_torch_wav_finalize(b_lean_obj_arg path_obj) {
   return tyr::checkedIoCall("wavFinalize", [&] {
   const char* path = lean_string_cstr(path_obj);
   try {
@@ -5484,7 +5508,8 @@ lean_object* lean_torch_topk_2d_checked(uint64_t /*d1*/, uint64_t /*d2*/,
 // ============================================================================
 
 // Check if CUDA is available
-lean_object* lean_torch_cuda_is_available(lean_object* /*w*/) {
+lean_object* lean_torch_cuda_is_available() {
+  return tyr::checkedIoCall("cuda_is_available", [&] {
   try {
     return lean_io_result_mk_ok(lean_box(torch::cuda::is_available()));
   } catch (const c10::Error& e) {
@@ -5492,10 +5517,12 @@ lean_object* lean_torch_cuda_is_available(lean_object* /*w*/) {
   } catch (const std::exception& e) {
     return mkStdIoError("cuda_is_available failed", e);
   }
+  });
 }
 
 // Get the current CUDA stream as an opaque UInt64 handle.
-lean_object* lean_torch_cuda_current_stream(lean_object* /*w*/) {
+lean_object* lean_torch_cuda_current_stream() {
+  return tyr::checkedIoCall("cuda_current_stream", [&] {
   try {
     if (!torch::cuda::is_available()) {
       return lean_io_result_mk_ok(lean_box_uint64(0));
@@ -5512,6 +5539,7 @@ lean_object* lean_torch_cuda_current_stream(lean_object* /*w*/) {
   } catch (const std::exception& e) {
     return mkStdIoError("cuda_current_stream failed", e);
   }
+  });
 }
 
 // Synchronize CUDA device for deterministic validation around external
@@ -5520,7 +5548,8 @@ lean_object* lean_torch_cuda_current_stream(lean_object* /*w*/) {
 // caught across the libc++abi/libstdc++ ABI boundary in Tyr binaries
 // (see the comment block above `lean_torch_manual_seed`). `cudaDeviceSynchronize`
 // returns a `cudaError_t` and never throws.
-lean_object* lean_torch_cuda_synchronize(lean_object* /*w*/) {
+lean_object* lean_torch_cuda_synchronize() {
+  return tyr::checkedIoCall("cuda_synchronize", [&] {
   if (!torch::cuda::is_available()) {
     return lean_io_result_mk_ok(lean_box(0));
   }
@@ -5533,6 +5562,7 @@ lean_object* lean_torch_cuda_synchronize(lean_object* /*w*/) {
   }
 #endif
   return lean_io_result_mk_ok(lean_box(0));
+  });
 }
 
 #if TYR_HAS_CUDA_API
@@ -5546,7 +5576,8 @@ static lean_object* tyr_cuda_error(const char* operation, cudaError_t err) {
 }
 #endif
 
-lean_object* lean_torch_cuda_event_create(lean_object* /*w*/) {
+lean_object* lean_torch_cuda_event_create() {
+  return tyr::checkedIoCall("cuda_event_create", [&] {
 #if TYR_HAS_CUDA_API
   cudaEvent_t event{};
   const cudaError_t err = cudaEventCreate(&event);
@@ -5556,10 +5587,11 @@ lean_object* lean_torch_cuda_event_create(lean_object* /*w*/) {
   return lean_io_result_mk_error(lean_mk_io_user_error(
     lean_mk_string("CUDA event timing requires the CUDA runtime API")));
 #endif
+  });
 }
 
-lean_object* lean_torch_cuda_event_record(uint64_t raw_event, uint64_t raw_stream,
-                                           lean_object* /*w*/) {
+lean_object* lean_torch_cuda_event_record(uint64_t raw_event, uint64_t raw_stream) {
+  return tyr::checkedIoCall("cuda_event_record", [&] {
 #if TYR_HAS_CUDA_API
   const cudaError_t err = cudaEventRecord(
     tyr_cuda_event_from_raw(raw_event), reinterpret_cast<cudaStream_t>(raw_stream));
@@ -5569,9 +5601,11 @@ lean_object* lean_torch_cuda_event_record(uint64_t raw_event, uint64_t raw_strea
   return lean_io_result_mk_error(lean_mk_io_user_error(
     lean_mk_string("CUDA event timing requires the CUDA runtime API")));
 #endif
+  });
 }
 
-lean_object* lean_torch_cuda_event_synchronize(uint64_t raw_event, lean_object* /*w*/) {
+lean_object* lean_torch_cuda_event_synchronize(uint64_t raw_event) {
+  return tyr::checkedIoCall("cuda_event_synchronize", [&] {
 #if TYR_HAS_CUDA_API
   const cudaError_t err = cudaEventSynchronize(tyr_cuda_event_from_raw(raw_event));
   if (err != cudaSuccess) return tyr_cuda_error("cudaEventSynchronize", err);
@@ -5580,10 +5614,11 @@ lean_object* lean_torch_cuda_event_synchronize(uint64_t raw_event, lean_object* 
   return lean_io_result_mk_error(lean_mk_io_user_error(
     lean_mk_string("CUDA event timing requires the CUDA runtime API")));
 #endif
+  });
 }
 
-lean_object* lean_torch_cuda_event_elapsed_ms(uint64_t raw_start, uint64_t raw_stop,
-                                               lean_object* /*w*/) {
+lean_object* lean_torch_cuda_event_elapsed_ms(uint64_t raw_start, uint64_t raw_stop) {
+  return tyr::checkedIoCall("cuda_event_elapsed_ms", [&] {
 #if TYR_HAS_CUDA_API
   float elapsed_ms = 0.0f;
   const cudaError_t err = cudaEventElapsedTime(
@@ -5594,18 +5629,22 @@ lean_object* lean_torch_cuda_event_elapsed_ms(uint64_t raw_start, uint64_t raw_s
   return lean_io_result_mk_error(lean_mk_io_user_error(
     lean_mk_string("CUDA event timing requires the CUDA runtime API")));
 #endif
+  });
 }
 
-lean_object* lean_torch_cuda_event_destroy(uint64_t raw_event, lean_object* /*w*/) {
+lean_object* lean_torch_cuda_event_destroy(uint64_t raw_event) {
+  return tyr::checkedIoCall("cuda_event_destroy", [&] {
 #if TYR_HAS_CUDA_API
   const cudaError_t err = cudaEventDestroy(tyr_cuda_event_from_raw(raw_event));
   if (err != cudaSuccess) return tyr_cuda_error("cudaEventDestroy", err);
 #endif
   return lean_io_result_mk_ok(lean_box(0));
+  });
 }
 
 // Check if MPS is available
-lean_object* lean_torch_mps_is_available(lean_object* /*w*/) {
+lean_object* lean_torch_mps_is_available() {
+  return tyr::checkedIoCall("mps_is_available", [&] {
 #ifdef __APPLE__
   try {
     const int debug_flag = std::getenv("TYR_DEBUG_MPS") != nullptr ? 1 : 0;
@@ -5625,6 +5664,7 @@ lean_object* lean_torch_mps_is_available(lean_object* /*w*/) {
 #else
   return lean_io_result_mk_ok(lean_box(false));
 #endif
+  });
 }
 
 // Transposed 2D convolution
