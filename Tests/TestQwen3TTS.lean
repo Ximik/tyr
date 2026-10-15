@@ -1,3 +1,4 @@
+import Tests.Assertions
 import Tyr
 import Tyr.Model.Qwen3TTS
 import LeanTest
@@ -234,7 +235,7 @@ def testQwen3TTSRejectsNonPositiveTemperature : IO Unit := do
   let model ← Qwen3TTSForConditionalGeneration.init cfg
   let textIds : Tensor { shape := #[1, 4], dtype := .Int64, device := .CPU } ← Tensor.randint 0 cfg.talkerConfig.textVocabSize.toInt64 #[1, 4]
 
-  LeanTest.assertThrows
+  Tests.assertThrows
     (do
       let _ ← model.generateFromText textIds 2 1 0.0
       pure ())
@@ -294,7 +295,7 @@ def testQwen3TTSSpeakerEmbeddingUnavailableForNonBaseModel : IO Unit := do
   let model ← Qwen3TTSForConditionalGeneration.init cfg
   let mel : Tensor { shape := #[1, 8, cfg.speakerEncoderConfig.melDim], dtype := .Float32, device := .CPU } ← Tensor.randn #[1, 8, cfg.speakerEncoderConfig.melDim]
 
-  LeanTest.assertThrows
+  Tests.assertThrows
     (do
       let _ ← model.extractSpeakerEmbedding mel.forgetDType
       pure ())

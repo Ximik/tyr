@@ -24,6 +24,7 @@ import Tests.TestTypedStandalone
 import Tests.TestTensorTreeCast
 import Tests.TestTensorValueUpdates
 import Tests.TestTensorAutogradEffects
+import Tests.TestAssertions
 import Tests.TestDistributedValues
 import Tests.TestModuleTyped
 import Tests.TestCoreSmoke

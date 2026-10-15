@@ -3,6 +3,7 @@
 
   Tests for Model Parameter serialization and structure traversal using TensorStruct.
 -/
+import Tests.Assertions
 import Tyr.Typed.Neural
 import Tyr.Checkpoint
 import Examples.NanoChat.ModdedGPT
@@ -124,7 +125,7 @@ def testStateDictSimulation : IO Unit := do
 
   let loadedParams ← loadFromList stateList params
   let malformed : Sigma Tensor := ⟨_, Tensor.zeros #[1]⟩
-  LeanTest.assertThrows (loadFromList (malformed :: stateList.drop 1) params) (some "shape")
+  Tests.assertThrows (loadFromList (malformed :: stateList.drop 1) params) (some "shape")
   
   -- Verify loaded matches original
   let diff := TensorStruct.zipWith Tensor.Preserving.sub params loadedParams

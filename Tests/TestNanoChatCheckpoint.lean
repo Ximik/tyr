@@ -1,3 +1,4 @@
+import Tests.Assertions
 import Examples.NanoChat.ModdedTrain
 import LeanTest
 
@@ -148,7 +149,7 @@ private def metadata (tokens : UInt64) : CheckpointMetadata := {
   let current ← torch.checkpoint.resolveSnapshot dir.toString
   assertEqual (← IO.FS.readFile (s!"{pinned}/stream_cursor_rank0.json" : System.FilePath)) "old cursor"
   assertEqual (← IO.FS.readFile (s!"{current}/stream_cursor_rank0.json" : System.FilePath)) "new cursor"
-  assertThrows (torch.ModdedTrain.saveCheckpoint { original with step := 100 }
+  Tests.assertThrows (torch.ModdedTrain.saveCheckpoint { original with step := 100 }
     dir.toString (some (metadata 10000))
     (writeExtra? := some fun _ => throw <| IO.userError "injected cursor save failure"))
     (some "injected cursor save failure")

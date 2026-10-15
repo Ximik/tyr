@@ -1,3 +1,4 @@
+import Tests.Assertions
 import Tyr.Model.Qwen35.Media
 import Tyr.Model.Qwen35.Multimodal
 import Tyr.Model.Qwen35.VLConfigIO
@@ -221,5 +222,5 @@ def testQwen35MultimodalGenerateStreamWithImageAndVideoFeatures : IO Unit := do
     LeanTest.assertEqual patches.actualSpec.dtype DType.Float32
     LeanTest.assertTrue ((← patches.toFloatArray).all Float.isFinite)
   else
-    LeanTest.assertThrows (media.loadImagePatches tinyVLCfg path.toString) (some "requires macOS")
-  LeanTest.assertThrows (media.loadVideoPatches tinyVLCfg (dir / "missing.mov").toString)
+    Tests.assertThrows (media.loadImagePatches tinyVLCfg path.toString) (some "requires macOS")
+  Tests.assertThrows (media.loadVideoPatches tinyVLCfg (dir / "missing.mov").toString)

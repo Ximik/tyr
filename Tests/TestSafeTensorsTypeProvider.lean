@@ -5,6 +5,7 @@
   - runtime safetensors schema introspection
   - elaboration-time `safetensors_type_provider`
 -/
+import Tests.Assertions
 import Tyr.SafeTensors
 import LeanTest
 
@@ -48,11 +49,11 @@ private def headerPrefix (size : UInt64) : ByteArray := Id.run do
 def testSafeTensorsHeaderReadBounds : IO Unit := IO.FS.withTempDir fun dir => do
   let path := (dir / "bounded.safetensors").toString
   IO.FS.writeBinFile path (ByteArray.mk #[1, 2, 3])
-  LeanTest.assertThrows (safetensors.introspect path) (some "missing 8-byte header size")
+  Tests.assertThrows (safetensors.introspect path) (some "missing 8-byte header size")
   IO.FS.writeBinFile path (headerPrefix 4096)
-  LeanTest.assertThrows (safetensors.introspect path) (some "header exceeds file size")
+  Tests.assertThrows (safetensors.introspect path) (some "header exceeds file size")
   IO.FS.writeBinFile path (headerPrefix (safetensors.maxHeaderBytes + 1).toUInt64)
-  LeanTest.assertThrows (safetensors.introspect path) (some "byte limit")
+  Tests.assertThrows (safetensors.introspect path) (some "byte limit")
   let header := "{\"x\":{\"dtype\":\"F32\",\"shape\":[1],\"data_offsets\":[0,4]}}".toUTF8
   -- Payload bytes are deliberately not UTF-8 and must not enter JSON parsing.
   IO.FS.writeBinFile path (headerPrefix header.size.toUInt64 ++ header ++ ByteArray.mk #[255, 254, 253, 252])
@@ -110,28 +111,28 @@ def testSafeTensorsIntrospectionIndexValidationErrors : IO Unit := do
   let missingWeightMapDir ← writeIndexDir
     "index_missing_weight_map"
     "{\"metadata\":{}}"
-  LeanTest.assertThrows
+  Tests.assertThrows
     (safetensors.introspect missingWeightMapDir)
     (some "missing 'weight_map'")
 
   let nonObjectWeightMapDir ← writeIndexDir
     "index_non_object_weight_map"
     "{\"weight_map\":[]}"
-  LeanTest.assertThrows
+  Tests.assertThrows
     (safetensors.introspect nonObjectWeightMapDir)
     (some "'weight_map' must be a JSON object")
 
   let nonStringWeightMapDir ← writeIndexDir
     "index_non_string_weight_map"
     "{\"weight_map\":{\"embed.weight\":123}}"
-  LeanTest.assertThrows
+  Tests.assertThrows
     (safetensors.introspect nonStringWeightMapDir)
     (some "has non-string shard filename")
 
   let missingShardDir ← writeIndexDir
     "index_missing_shard"
     "{\"weight_map\":{\"embed.weight\":\"missing-shard-does-not-exist.safetensors\"}}"
-  LeanTest.assertThrows
+  Tests.assertThrows
     (safetensors.introspect missingShardDir)
     (some "referenced shard does not exist")
 
@@ -141,7 +142,7 @@ def testSafeTensorsIntrospectionIndexValidationErrors : IO Unit := do
   writeBinCopy
     "Tests/fixtures/safetensors/sharded/part1.safetensors"
     s!"{missingTensorDir}/part1.safetensors"
-  LeanTest.assertThrows
+  Tests.assertThrows
     (safetensors.introspect missingTensorDir)
     (some "tensor 'proj.bias' not found in shard 'part1.safetensors'")
 
@@ -150,14 +151,14 @@ def testSafeTensorsIntrospectionIndexPathSafety : IO Unit := do
   let traversalDir ← writeIndexDir
     "index_unsafe_traversal"
     "{\"weight_map\":{\"embed.weight\":\"../part1.safetensors\"}}"
-  LeanTest.assertThrows
+  Tests.assertThrows
     (safetensors.introspect traversalDir)
     (some "unsafe shard path")
 
   let absoluteDir ← writeIndexDir
     "index_unsafe_absolute"
     "{\"weight_map\":{\"embed.weight\":\"/tmp/evil.safetensors\"}}"
-  LeanTest.assertThrows
+  Tests.assertThrows
     (safetensors.introspect absoluteDir)
     (some "unsafe shard path")
 
@@ -190,7 +191,7 @@ def testSafeTensorsTypeProviderSingle : IO Unit := do
     "single-file provider should expose a checked per-tensor from-handle loader"
 
   let wrongDTypeSpec : TensorSpec := { SingleSafe.linear_weightTensorSpec with dtype := DType.BFloat16 }
-  LeanTest.assertThrows
+  Tests.assertThrows
     (safetensors.loadTensorWithSpec
       "Tests/fixtures/safetensors/single.safetensors"
       "linear.weight"
@@ -201,7 +202,7 @@ def testSafeTensorsTypeProviderSingle : IO Unit := do
     role := .parameter
     expectedDevice := some Device.MPS
   }
-  LeanTest.assertThrows
+  Tests.assertThrows
     (safetensors.loadTensorWithContract
       "Tests/fixtures/safetensors/single.safetensors"
       "linear.weight"
@@ -336,20 +337,20 @@ def testSafeTensorsDefaultLoaderRejectsDtype : IO Unit := IO.FS.withTempDir fun 
   let header := "{\"linear.weight\":{\"dtype\":\"I32\",\"shape\":[2,3],\"data_offsets\":[0,24]}}".toUTF8
   IO.FS.writeBinFile path
     (headerPrefix header.size.toUInt64 ++ header ++ ByteArray.mk (Array.replicate 24 0))
-  LeanTest.assertThrows (SingleSafe.load_linear_weight path) (some "dtype")
+  Tests.assertThrows (SingleSafe.load_linear_weight path) (some "dtype")
 
 /-- Equal element counts must not permit a different stored layout. -/
 @[test]
 def testSafeTensorsContractRejectsReshapedLayout : IO Unit := do
   let path := "Tests/fixtures/safetensors/single.safetensors"
-  LeanTest.assertThrows
+  Tests.assertThrows
     (safetensors.loadTensorWithSpec path "linear.weight" ⟨#[3, 2], .Float32⟩)
     (some "shape")
   let handle ← safetensors.openHandle path
-  LeanTest.assertThrows
+  Tests.assertThrows
     (safetensors.loadFromHandleWithSpec handle "linear.weight" ⟨#[3, 2], .Float32⟩)
     (some "shape")
-  LeanTest.assertThrows
+  Tests.assertThrows
     (safetensors.loadTensorShardedWithSpec "Tests/fixtures/safetensors/sharded"
       "embed.weight" ⟨#[1, 4], .Float32⟩)
     (some "shape")

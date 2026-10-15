@@ -1,3 +1,4 @@
+import Tests.Assertions
 import Tyr.Checkpoint
 import Tyr.Tokenizer.TokenBytes
 import Tyr.Optim
@@ -27,7 +28,7 @@ def testMetadataRejectsIncompleteAndUnknownVersions : IO Unit := IO.FS.withTempD
       "{\"version\":3,\"iteration\":0,\"optimCount\":0,\"bestValLossBits\":0,\"trainLossBits\":0}",
       "{\"version\":2}"] do
     IO.FS.writeFile path content
-    assertThrows (loadCheckpointMeta path)
+    Tests.assertThrows (loadCheckpointMeta path)
   IO.FS.writeFile path "iteration=7\nbestValLoss=1e-8\ntrainLoss=1.75"
   let legacy ← loadCheckpointMeta path
   assertEqual legacy.iteration 7
@@ -48,8 +49,8 @@ def testPlacementLoaderRetainsStoredShapeAndDType : IO Unit := IO.FS.withTempDir
   let loaded ← Tensor.loadTensorOn ⟨#[2], .Float32, .CPU⟩ path
   assertTensorEqual stored loaded
   assertTrue (loaded.runtimeDevice == .CPU) "placement loader returns the requested device"
-  assertThrows (Tensor.loadTensorOn ⟨#[1, 2], .Float32, .CPU⟩ path) (some "shape")
-  assertThrows (Tensor.loadTensorOn ⟨#[2], .Float64, .CPU⟩ path) (some "dtype")
+  Tests.assertThrows (Tensor.loadTensorOn ⟨#[1, 2], .Float32, .CPU⟩ path) (some "shape")
+  Tests.assertThrows (Tensor.loadTensorOn ⟨#[2], .Float64, .CPU⟩ path) (some "dtype")
 
 @[test]
 def testTrainingResumeRoundTrip : IO Unit := IO.FS.withTempDir fun dir => do
@@ -83,7 +84,7 @@ def testInterruptedSavePreservesCommittedSnapshot : IO Unit := IO.FS.withTempDir
   let log : Log.Handlers := { onInfo := fun _ => do
     calls.modify (· + 1)
     if (← calls.get) == 2 then throw <| IO.userError "injected interrupted write" }
-  assertThrows (saveTrainingCheckpoint (Tensor.zeros #[2]) original original
+  Tests.assertThrows (saveTrainingCheckpoint (Tensor.zeros #[2]) original original
     { m with iteration := 2 } dir.toString log) (some "injected interrupted write")
   assertEqual (← IO.FS.readFile (dir / "CURRENT")) before
   let (loaded, _, _, metadata) ← loadTrainingCheckpoint original dir.toString
@@ -105,13 +106,13 @@ def testModelAndOptimizerStandaloneSnapshots : IO Unit := IO.FS.withTempDir fun 
   assertTensorEqual mu (Tensor.full #[2] 0.1)
   assertTensorEqual nu (Tensor.full #[2] 0.2)
   assertEqual count 9
-  assertThrows (loadCheckpoint (Tensor.zeros #[3]) dir.toString) (some "shape mismatch")
+  Tests.assertThrows (loadCheckpoint (Tensor.zeros #[3]) dir.toString) (some "shape mismatch")
 
 @[test]
 def testStoredDTypeMustMatchTypedTemplate : IO Unit := IO.FS.withTempDir fun dir => do
   let stored := Tensor.toBFloat16 (Tensor.ones #[2])
   saveCheckpoint stored 1 0.0 0.0 dir.toString
-  assertThrows (loadCheckpoint (Tensor.zeros #[2]) dir.toString) (some "dtype")
+  Tests.assertThrows (loadCheckpoint (Tensor.zeros #[2]) dir.toString) (some "dtype")
   let (loaded, _) ← loadCheckpoint (Tensor.toBFloat16 (Tensor.zeros #[2])) dir.toString
   assertTrue (loaded.dtype == .BFloat16) "matching typed templates preserve stored dtype"
   assertTensorEqual loaded stored
@@ -120,11 +121,11 @@ def testStoredDTypeMustMatchTypedTemplate : IO Unit := IO.FS.withTempDir fun dir
 def testTensorCountMismatchRejected : IO Unit := IO.FS.withTempDir fun dir => do
   let params : Array (Tensor { shape := #[2], dtype := .Float32, device := .CPU }) := #[Tensor.ones #[2], Tensor.zeros #[2]]
   saveCheckpoint params 1 0.0 0.0 dir.toString
-  assertThrows (loadCheckpoint (#[Tensor.zeros #[2]] : Array (Tensor { shape := #[2], dtype := .Float32, device := .CPU })) dir.toString)
+  Tests.assertThrows (loadCheckpoint (#[Tensor.zeros #[2]] : Array (Tensor { shape := #[2], dtype := .Float32, device := .CPU })) dir.toString)
     (some "tensor count mismatch")
-  assertThrows (loadCheckpoint (#[] : Array (Tensor { shape := #[2], dtype := .Float32, device := .CPU })) dir.toString)
+  Tests.assertThrows (loadCheckpoint (#[] : Array (Tensor { shape := #[2], dtype := .Float32, device := .CPU })) dir.toString)
     (some "tensor count mismatch")
-  assertThrows (loadCheckpoint (#[Tensor.zeros #[2], Tensor.zeros #[2], Tensor.zeros #[2]] : Array (Tensor { shape := #[2], dtype := .Float32, device := .CPU })) dir.toString)
+  Tests.assertThrows (loadCheckpoint (#[Tensor.zeros #[2], Tensor.zeros #[2], Tensor.zeros #[2]] : Array (Tensor { shape := #[2], dtype := .Float32, device := .CPU })) dir.toString)
     (some "tensor count mismatch")
 
 @[test]
@@ -155,8 +156,8 @@ def testTokenBytesExactPersistence : IO Unit := IO.FS.withTempDir fun dir => do
   let loaded ← tokenizer.TokenBytes.load path 4
   LeanTest.assertEqual (← loaded.bytes.toUInt64Array) #[2, 2, 2, 2]
   Tensor.saveTensor (mapping.bytes.reshapeChecked #[2, 2]) path
-  LeanTest.assertThrows (tokenizer.TokenBytes.load path 4) (some "shape")
+  Tests.assertThrows (tokenizer.TokenBytes.load path 4) (some "shape")
   Tensor.saveTensor (Tensor.ones #[4]) path
-  LeanTest.assertThrows (tokenizer.TokenBytes.load path 4) (some "dtype")
+  Tests.assertThrows (tokenizer.TokenBytes.load path 4) (some "dtype")
 
 end Tests.CheckpointPersistence

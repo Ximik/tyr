@@ -1,3 +1,4 @@
+import Tests.Assertions
 import Tyr.Model.VAE
 import LeanTest
 
@@ -109,7 +110,7 @@ private def writeConvCheckpoint (path : System.FilePath) (bf16 wrongShape : Bool
 
 @[test] def testVAEGroupNormInitializationFailuresAreRecoverable : IO Unit := do
   -- Both failures are rejected before allocation and do not depend on hardware.
-  LeanTest.assertThrows (GroupNormParams.init 1 18446744073709551615)
-  LeanTest.assertThrows (GroupNormParams.init 1 2 (device := .CUDA 128))
+  Tests.assertThrows (GroupNormParams.init 1 18446744073709551615)
+  Tests.assertThrows (GroupNormParams.init 1 2 (device := .CUDA 128))
 
 end Tests.VAETyped

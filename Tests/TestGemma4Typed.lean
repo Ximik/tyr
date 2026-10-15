@@ -1,3 +1,4 @@
+import Tests.Assertions
 import Tyr.Model.Gemma4.Multimodal
 import Tyr.Model.Gemma4.Media
 import Tyr.Model.Gemma4.Weights
@@ -216,7 +217,7 @@ private def multimodalModel : Gemma4ForConditionalGeneration (device := .CPU) vl
     LeanTest.assertEqual out.runtimeShape #[1, 7, 16]
     for value in (← out.toFloatArray) do LeanTest.assertTrue value.isFinite
     let wrong := features.sliceChecked 0 0 3 #[3, 8]
-    LeanTest.assertThrows (m.forwardWithImageFeatures vlCfg prompt wrong) (some "placeholder token count mismatch")
+    Tests.assertThrows (m.forwardWithImageFeatures vlCfg prompt wrong) (some "placeholder token count mismatch")
     let generated ← m.generate vlCfg prompt 2 .greedy #[] (some ⟨4, features⟩)
     LeanTest.assertEqual generated.1 9
     LeanTest.assertEqual generated.2.actualSpec.dtype .Int64
@@ -232,6 +233,6 @@ private def multimodalModel : Gemma4ForConditionalGeneration (device := .CPU) vl
     LeanTest.assertEqual grid.actualSpec.dtype .Float32
     LeanTest.assertTrue ((← grid.toFloatArray).all Float.isFinite)
   else
-    LeanTest.assertThrows (media.loadImagePatchGrid vlCfg path.toString) (some "requires macOS")
+    Tests.assertThrows (media.loadImagePatchGrid vlCfg path.toString) (some "requires macOS")
 
 end Tests.Gemma4Typed

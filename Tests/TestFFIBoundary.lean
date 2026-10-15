@@ -1,3 +1,4 @@
+import Tests.Assertions
 import LeanTest
 import Tyr.Typed.Neural
 import Tyr.RawTensor.Qwen35
@@ -95,13 +96,13 @@ def testMediaNativeFailuresAreRecoverable : IO Unit := IO.FS.withTempDir fun dir
     0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130]
   IO.FS.writeBinFile path bytes
   -- More than vector<float>::max_size(): throws before attempting allocation.
-  LeanTest.assertThrows
+  Tests.assertThrows
     (RawTensor.loadImagePatchified path.toString 3 1 2305843009213693952)
     (some "loadImagePatchified")
-  LeanTest.assertThrows
+  Tests.assertThrows
     (RawTensor.loadVideoPatchified (dir / "missing.mov").toString 3 1 1 1 1)
     (some "loadVideoPatchified")
-  LeanTest.assertThrows (RawTensor.gemma4LoadImage path.toString 0 1 1 (1 / 255))
+  Tests.assertThrows (RawTensor.gemma4LoadImage path.toString 0 1 1 (1 / 255))
     (some "loadGemma4ImagePatchGrid")
   let image ← RawTensor.loadImagePatchified path.toString 3 1 1
   LeanTest.assertEqual image.runtimeShape #[1, 3]

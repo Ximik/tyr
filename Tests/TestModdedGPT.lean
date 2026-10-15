@@ -11,6 +11,7 @@
   5. Model forward tests
   6. Training step tests
 -/
+import Tests.Assertions
 import Tyr.Typed.Neural
 import Tyr.Distributed
 import Tyr.Sharding
@@ -62,17 +63,17 @@ boundary must reject this instead of returning a tensor with a false dtype. -/
 @[test]
 def testDistributedRejectsPromotedIntegerResults : IO Unit := do
   let input := Tensor.fullInt #[2, 2] 1
-  LeanTest.assertThrows (dist.baPlusCaa input 0.5 0.5)
+  Tests.assertThrows (dist.baPlusCaa input 0.5 0.5)
     (some "baPlusCaa: Expected dtype Int64, got Float32")
-  LeanTest.assertThrows (dist.newtonSchulzStep input 0.5 0.5 0.5)
+  Tests.assertThrows (dist.newtonSchulzStep input 0.5 0.5 0.5)
     (some "newtonSchulzStep: Expected dtype Int64, got Float32")
-  LeanTest.assertThrows (dist.cautiousUpdate input input 0.1 0.1)
+  Tests.assertThrows (dist.cautiousUpdate input input 0.1 0.1)
     (some "cautiousUpdate: Expected dtype Int64, got Float32")
-  LeanTest.assertThrows (dist.baPlusCaa input.forgetDType 0.5 0.5)
+  Tests.assertThrows (dist.baPlusCaa input.forgetDType 0.5 0.5)
     (some "baPlusCaa: Expected dtype Int64, got Float32")
-  LeanTest.assertThrows (dist.newtonSchulzStep input.forgetDType 0.5 0.5 0.5)
+  Tests.assertThrows (dist.newtonSchulzStep input.forgetDType 0.5 0.5 0.5)
     (some "newtonSchulzStep: Expected dtype Int64, got Float32")
-  LeanTest.assertThrows (dist.cautiousUpdate input.forgetDType input.forgetDType 0.1 0.1)
+  Tests.assertThrows (dist.cautiousUpdate input.forgetDType input.forgetDType 0.1 0.1)
     (some "cautiousUpdate: Expected dtype Int64, got Float32")
 
 /-- Successful native results retain the full claimed metadata, including an
