@@ -15,6 +15,8 @@ import Tyr.Model.Qwen3TTS.Model
 
 namespace torch.qwen3tts
 
+variable {device : Device}
+
 open torch.Log
 
 open torch.Model (reqGradFalse)
@@ -22,16 +24,16 @@ open torch.safetensors (tryLoadTensorSharded)
 
 /-- Local alias for sharded tensor loading.
     Device placement is performed once in `loadSharded`. -/
-private def loadTensorShardedTarget (modelDir : String) (name : String) (s : Shape) : IO (Tensor { shape := s }) := do
-  safetensors.loadTensorShardedCandidates modelDir #[name] s
+private def loadTensorShardedTarget (modelDir : String) (name : String) (s : Shape) : IO (Tensor { shape := s, device := device }) := do
+  safetensors.loadTensorShardedCandidates modelDir #[name] s device
 
 private def loadRMSNormSharded (modelDir : String) (name : String) (dim : UInt64) (eps : Float)
-    : IO (RMSNorm dim (.Unknown "dynamic")) := do
+    : IO (RMSNorm (device := device) dim (.Unknown "dynamic")) := do
   let w ← loadTensorShardedTarget modelDir s!"{name}.weight" #[dim]
   pure { weight := reqGradFalse w, eps := ⟨eps⟩ }
 
 private def loadTalkerLayerSharded (modelDir : String) (layerIdx : UInt64) (cfg : TalkerConfig)
-    : IO (TalkerLayer cfg) := do
+    : IO (TalkerLayer (device := device) cfg) := do
   let p := s!"talker.model.layers.{layerIdx}"
   let sp := s!"{p}.self_attn"
   let mp := s!"{p}.mlp"
@@ -45,8 +47,8 @@ private def loadTalkerLayerSharded (modelDir : String) (layerIdx : UInt64) (cfg 
   let o_proj ← loadTensorShardedTarget modelDir s!"{sp}.o_proj.weight"
     #[cfg.hiddenSize, cfg.numAttentionHeads * cfg.headDim]
 
-  let q_norm ← tryLoadTensorSharded modelDir s!"{sp}.q_norm.weight" #[cfg.headDim]
-  let k_norm ← tryLoadTensorSharded modelDir s!"{sp}.k_norm.weight" #[cfg.headDim]
+  let q_norm ← tryLoadTensorSharded modelDir s!"{sp}.q_norm.weight" #[cfg.headDim] device
+  let k_norm ← tryLoadTensorSharded modelDir s!"{sp}.k_norm.weight" #[cfg.headDim] device
 
   let gate_proj ← loadTensorShardedTarget modelDir s!"{mp}.gate_proj.weight"
     #[cfg.intermediateSize, cfg.hiddenSize]
@@ -58,7 +60,7 @@ private def loadTalkerLayerSharded (modelDir : String) (layerIdx : UInt64) (cfg 
   let input_layernorm ← loadRMSNormSharded modelDir s!"{p}.input_layernorm" cfg.hiddenSize cfg.rmsNormEps
   let post_attention_layernorm ← loadRMSNormSharded modelDir s!"{p}.post_attention_layernorm" cfg.hiddenSize cfg.rmsNormEps
 
-  let self_attn : qwen.QwenAttention cfg.hiddenSize cfg.numAttentionHeads cfg.numKeyValueHeads cfg.headDim (.Unknown "dynamic") := {
+  let self_attn : qwen.QwenAttention (device := device) cfg.hiddenSize cfg.numAttentionHeads cfg.numKeyValueHeads cfg.headDim (.Unknown "dynamic") := {
     q_proj := reqGradFalse q_proj
     k_proj := reqGradFalse k_proj
     v_proj := reqGradFalse v_proj
@@ -66,7 +68,7 @@ private def loadTalkerLayerSharded (modelDir : String) (layerIdx : UInt64) (cfg 
     q_norm := q_norm.map reqGradFalse
     k_norm := k_norm.map reqGradFalse
   }
-  let mlp : qwen.QwenMLP cfg.hiddenSize cfg.intermediateSize (.Unknown "dynamic") := {
+  let mlp : qwen.QwenMLP (device := device) cfg.hiddenSize cfg.intermediateSize (.Unknown "dynamic") := {
     gate_proj := reqGradFalse gate_proj
     up_proj := reqGradFalse up_proj
     down_proj := reqGradFalse down_proj
@@ -74,7 +76,7 @@ private def loadTalkerLayerSharded (modelDir : String) (layerIdx : UInt64) (cfg 
   pure { input_layernorm, self_attn, post_attention_layernorm, mlp }
 
 private def loadCodePredictorLayerSharded (modelDir : String) (layerIdx : UInt64) (cfg : TalkerConfig)
-    : IO (CodePredictorLayer cfg.codePredictorConfig) := do
+    : IO (CodePredictorLayer (device := device) cfg.codePredictorConfig) := do
   let cp := cfg.codePredictorConfig
   let p := s!"talker.code_predictor.model.layers.{layerIdx}"
   let sp := s!"{p}.self_attn"
@@ -89,8 +91,8 @@ private def loadCodePredictorLayerSharded (modelDir : String) (layerIdx : UInt64
   let o_proj ← loadTensorShardedTarget modelDir s!"{sp}.o_proj.weight"
     #[cp.hiddenSize, cp.numAttentionHeads * cp.headDim]
 
-  let q_norm ← tryLoadTensorSharded modelDir s!"{sp}.q_norm.weight" #[cp.headDim]
-  let k_norm ← tryLoadTensorSharded modelDir s!"{sp}.k_norm.weight" #[cp.headDim]
+  let q_norm ← tryLoadTensorSharded modelDir s!"{sp}.q_norm.weight" #[cp.headDim] device
+  let k_norm ← tryLoadTensorSharded modelDir s!"{sp}.k_norm.weight" #[cp.headDim] device
 
   let gate_proj ← loadTensorShardedTarget modelDir s!"{mp}.gate_proj.weight"
     #[cp.intermediateSize, cp.hiddenSize]
@@ -102,7 +104,7 @@ private def loadCodePredictorLayerSharded (modelDir : String) (layerIdx : UInt64
   let input_layernorm ← loadRMSNormSharded modelDir s!"{p}.input_layernorm" cp.hiddenSize cp.rmsNormEps
   let post_attention_layernorm ← loadRMSNormSharded modelDir s!"{p}.post_attention_layernorm" cp.hiddenSize cp.rmsNormEps
 
-  let self_attn : qwen.QwenAttention cp.hiddenSize cp.numAttentionHeads cp.numKeyValueHeads cp.headDim (.Unknown "dynamic") := {
+  let self_attn : qwen.QwenAttention (device := device) cp.hiddenSize cp.numAttentionHeads cp.numKeyValueHeads cp.headDim (.Unknown "dynamic") := {
     q_proj := reqGradFalse q_proj
     k_proj := reqGradFalse k_proj
     v_proj := reqGradFalse v_proj
@@ -110,7 +112,7 @@ private def loadCodePredictorLayerSharded (modelDir : String) (layerIdx : UInt64
     q_norm := q_norm.map reqGradFalse
     k_norm := k_norm.map reqGradFalse
   }
-  let mlp : qwen.QwenMLP cp.hiddenSize cp.intermediateSize (.Unknown "dynamic") := {
+  let mlp : qwen.QwenMLP (device := device) cp.hiddenSize cp.intermediateSize (.Unknown "dynamic") := {
     gate_proj := reqGradFalse gate_proj
     up_proj := reqGradFalse up_proj
     down_proj := reqGradFalse down_proj
@@ -118,7 +120,7 @@ private def loadCodePredictorLayerSharded (modelDir : String) (layerIdx : UInt64
   pure { input_layernorm, self_attn, post_attention_layernorm, mlp }
 
 private def loadCodePredictorProjectionSharded (modelDir : String) (cfg : TalkerConfig)
-    : IO (Tensor { shape := #[cfg.codePredictorConfig.hiddenSize, cfg.hiddenSize] } × Tensor { shape := #[cfg.codePredictorConfig.hiddenSize] }) := do
+    : IO (Tensor { shape := #[cfg.codePredictorConfig.hiddenSize, cfg.hiddenSize], device := device } × Tensor { shape := #[cfg.codePredictorConfig.hiddenSize], device := device }) := do
   let cp := cfg.codePredictorConfig
   try
     let w ← loadTensorShardedTarget modelDir "talker.code_predictor.small_to_mtp_projection.weight"
@@ -128,17 +130,17 @@ private def loadCodePredictorProjectionSharded (modelDir : String) (cfg : Talker
     pure (reqGradFalse w, reqGradFalse b)
   catch _ =>
     if cp.hiddenSize == cfg.hiddenSize then
-      let reference ← loadTensorShardedTarget modelDir "talker.model.codec_embedding.weight"
+      let reference ← loadTensorShardedTarget (device := device) modelDir "talker.model.codec_embedding.weight"
         #[cfg.vocabSize, cfg.hiddenSize]
-      let w := Tensor.castLike reference (reqGradFalse (Tensor.eye cp.hiddenSize))
-      let b := Tensor.castLike reference (reqGradFalse (Tensor.zeros #[cp.hiddenSize]))
+      let w := Tensor.castLike reference (reqGradFalse ((Tensor.eye cp.hiddenSize).to device))
+      let b := Tensor.castLike reference (reqGradFalse (Tensor.zeros #[cp.hiddenSize] (device := device)))
       pure (w.reshapeChecked #[cfg.codePredictorConfig.hiddenSize, cfg.hiddenSize], b)
     else
       throw <| IO.userError
         "Missing talker.code_predictor.small_to_mtp_projection.* and hidden sizes differ; cannot build projection."
 
 private def loadTalkerModelSharded (modelDir : String) (cfg : TalkerConfig)
-    : IO (TalkerModel cfg) := do
+    : IO (TalkerModel (device := device) cfg) := do
   let codecEmbedding ← loadTensorShardedTarget modelDir "talker.model.codec_embedding.weight"
     #[cfg.vocabSize, cfg.hiddenSize]
   let textEmbedding ← loadTensorShardedTarget modelDir "talker.model.text_embedding.weight"
@@ -153,7 +155,7 @@ private def loadTalkerModelSharded (modelDir : String) (cfg : TalkerConfig)
   let textProjectionFc2Bias ← loadTensorShardedTarget modelDir "talker.text_projection.linear_fc2.bias"
     #[cfg.hiddenSize]
 
-  let mut layers : Array (TalkerLayer cfg) := #[]
+  let mut layers : Array (TalkerLayer (device := device) cfg) := #[]
   for i in [:cfg.numHiddenLayers.toNat] do
     let layer ← loadTalkerLayerSharded modelDir i.toUInt64 cfg
     layers := layers.push layer
@@ -171,11 +173,11 @@ private def loadTalkerModelSharded (modelDir : String) (cfg : TalkerConfig)
   }
 
 private def loadCodePredictorSharded (modelDir : String) (cfg : TalkerConfig)
-    : IO (TalkerCodePredictor cfg) := do
+    : IO (TalkerCodePredictor (device := device) cfg) := do
   let cp := cfg.codePredictorConfig
   let nCodebooks := if cfg.numCodeGroups.toNat == 0 then 0 else cfg.numCodeGroups.toNat - 1
 
-  let mut inputEmbeddings : Array (Tensor { shape := #[cp.vocabSize, cfg.hiddenSize] }) := #[]
+  let mut inputEmbeddings : Array (Tensor { shape := #[cp.vocabSize, cfg.hiddenSize], device := device }) := #[]
   for i in [:nCodebooks] do
     let emb ← loadTensorShardedTarget modelDir
       s!"talker.code_predictor.model.codec_embedding.{i}.weight"
@@ -184,14 +186,14 @@ private def loadCodePredictorSharded (modelDir : String) (cfg : TalkerConfig)
 
   let (inputProjection, inputProjectionBias) ← loadCodePredictorProjectionSharded modelDir cfg
 
-  let mut layers : Array (CodePredictorLayer cp) := #[]
+  let mut layers : Array (CodePredictorLayer (device := device) cp) := #[]
   for i in [:cp.numHiddenLayers.toNat] do
     let layer ← loadCodePredictorLayerSharded modelDir i.toUInt64 cfg
     layers := layers.push layer
 
   let norm ← loadRMSNormSharded modelDir "talker.code_predictor.model.norm" cp.hiddenSize cp.rmsNormEps
 
-  let mut lmHeads : Array (Tensor { shape := #[cp.vocabSize, cp.hiddenSize] }) := #[]
+  let mut lmHeads : Array (Tensor { shape := #[cp.vocabSize, cp.hiddenSize], device := device }) := #[]
   for i in [:nCodebooks] do
     let head ← loadTensorShardedTarget modelDir
       s!"talker.code_predictor.lm_head.{i}.weight"
@@ -201,7 +203,7 @@ private def loadCodePredictorSharded (modelDir : String) (cfg : TalkerConfig)
   pure { inputEmbeddings, inputProjection, inputProjectionBias, layers, norm, lmHeads }
 
 private def loadTalkerForConditionalGenerationSharded (modelDir : String) (cfg : TalkerConfig)
-    : IO (TalkerForConditionalGeneration cfg) := do
+    : IO (TalkerForConditionalGeneration (device := device) cfg) := do
   let model ← loadTalkerModelSharded modelDir cfg
   let codePredictor ← loadCodePredictorSharded modelDir cfg
   let codecHead ← loadTensorShardedTarget modelDir "talker.codec_head.weight"
@@ -210,7 +212,7 @@ private def loadTalkerForConditionalGenerationSharded (modelDir : String) (cfg :
 
 private def loadTimeDelayNetBlockSharded (modelDir : String) (namePrefix : String)
     (inChannels outChannels kernelSize dilation : UInt64)
-    : IO (TimeDelayNetBlock inChannels outChannels kernelSize dilation) := do
+    : IO (TimeDelayNetBlock (device := device) inChannels outChannels kernelSize dilation) := do
   let weight ← loadTensorShardedTarget modelDir s!"{namePrefix}.conv.weight"
     #[outChannels, inChannels, kernelSize]
   let bias ← loadTensorShardedTarget modelDir s!"{namePrefix}.conv.bias"
@@ -222,7 +224,7 @@ private def loadTimeDelayNetBlockSharded (modelDir : String) (namePrefix : Strin
 
 private def loadSqueezeExcitationBlockSharded (modelDir : String) (namePrefix : String)
     (channels seChannels : UInt64)
-    : IO (SqueezeExcitationBlock channels seChannels) := do
+    : IO (SqueezeExcitationBlock (device := device) channels seChannels) := do
   let conv1Weight ← loadTensorShardedTarget modelDir s!"{namePrefix}.conv1.weight"
     #[seChannels, channels, 1]
   let conv1Bias ← loadTensorShardedTarget modelDir s!"{namePrefix}.conv1.bias"
@@ -240,9 +242,9 @@ private def loadSqueezeExcitationBlockSharded (modelDir : String) (namePrefix : 
 
 private def loadRes2NetBlockSharded (modelDir : String) (namePrefix : String)
     (channels scale kernelSize dilation : UInt64)
-    : IO (Res2NetBlock channels scale kernelSize dilation) := do
+    : IO (Res2NetBlock (device := device) channels scale kernelSize dilation) := do
   let nBlocks := if scale.toNat <= 1 then 0 else scale.toNat - 1
-  let mut blocks : Array (TimeDelayNetBlock (channels / scale) (channels / scale) kernelSize dilation) := #[]
+  let mut blocks : Array (TimeDelayNetBlock (device := device) (channels / scale) (channels / scale) kernelSize dilation) := #[]
   for i in [:nBlocks] do
     let block ← loadTimeDelayNetBlockSharded modelDir
       s!"{namePrefix}.blocks.{i}"
@@ -252,7 +254,7 @@ private def loadRes2NetBlockSharded (modelDir : String) (namePrefix : String)
 
 private def loadSqueezeExcitationRes2NetBlockSharded (modelDir : String) (namePrefix : String)
     (inChannels outChannels res2netScale seChannels kernelSize dilation : UInt64)
-    : IO (SqueezeExcitationRes2NetBlock inChannels outChannels res2netScale seChannels kernelSize dilation) := do
+    : IO (SqueezeExcitationRes2NetBlock (device := device) inChannels outChannels res2netScale seChannels kernelSize dilation) := do
   let tdnn1 ← loadTimeDelayNetBlockSharded modelDir
     s!"{namePrefix}.tdnn1" inChannels outChannels 1 1
   let res2net ← loadRes2NetBlockSharded modelDir
@@ -265,7 +267,7 @@ private def loadSqueezeExcitationRes2NetBlockSharded (modelDir : String) (namePr
 
 private def loadAttentiveStatisticsPoolingSharded (modelDir : String) (namePrefix : String)
     (channels attentionChannels : UInt64)
-    : IO (AttentiveStatisticsPooling channels attentionChannels) := do
+    : IO (AttentiveStatisticsPooling (device := device) channels attentionChannels) := do
   let tdnn ← loadTimeDelayNetBlockSharded modelDir
     s!"{namePrefix}.tdnn" (channels * 3) attentionChannels 1 1
   let convWeight ← loadTensorShardedTarget modelDir s!"{namePrefix}.conv.weight"
@@ -280,7 +282,7 @@ private def loadAttentiveStatisticsPoolingSharded (modelDir : String) (namePrefi
   }
 
 private def loadSpeakerEncoderSharded (modelDir : String) (cfg : SpeakerEncoderConfig)
-    : IO (SpeakerEncoder cfg) := do
+    : IO (SpeakerEncoder (device := device) cfg) := do
   if cfg.encChannels.size < 5 then
     throw <| IO.userError "speaker encoder requires at least 5 enc_channels entries"
   if cfg.encKernelSizes.size < 5 then
@@ -350,20 +352,18 @@ def loadSharded
     (cfg : Qwen3TTSConfig := {})
     (targetDevice : Device := Device.CPU)
     (log : Handlers := {})
-    : IO (Qwen3TTSForConditionalGeneration cfg) := do
+    : IO (Qwen3TTSForConditionalGeneration (device := targetDevice) cfg) := do
   log.onInfo s!"Loading Qwen3TTS weights from {modelDir}..."
   log.onInfo s!"Qwen3-TTS target device: {repr targetDevice}"
-  let talker ← loadTalkerForConditionalGenerationSharded modelDir cfg.talkerConfig
+  let talker ← loadTalkerForConditionalGenerationSharded (device := targetDevice) modelDir cfg.talkerConfig
 
   let speakerEncoder ←
     if cfg.ttsModelType == "base" then
-      let enc ← loadSpeakerEncoderSharded modelDir cfg.speakerEncoderConfig
+      let enc ← loadSpeakerEncoderSharded (device := targetDevice) modelDir cfg.speakerEncoderConfig
       pure (some enc)
     else
       pure none
 
-  let talker := TensorStruct.map (fun t => t.to targetDevice) talker
-  let speakerEncoder := speakerEncoder.map (TensorStruct.map (fun t => t.to targetDevice))
   log.onInfo "Loaded Qwen3TTS weights (real checkpoint tensors)."
   pure { talker, speakerEncoder }
 

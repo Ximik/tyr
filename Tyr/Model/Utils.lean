@@ -13,19 +13,20 @@ import Tyr.Typed.Neural
 
 namespace torch.Model
 
+variable {device : Device}
 open torch
 
 /-- Kaiming-like weight init: randn scaled by sqrt(2 / fanIn).
     The runtime factory produces Float32; the result is cast to `dtype`. -/
-def initWeight (shape : Shape) (fanIn : UInt64) (dtype : DType := .Float32) : IO (Tensor { shape := shape, dtype := dtype }) := do
+def initWeight (shape : Shape) (fanIn : UInt64) (dtype : DType := .Float32) (device : Device := .CPU) : IO (Tensor { device := device, shape := shape, dtype := dtype }) := do
   let std := Float.sqrt (2.0 / fanIn.toFloat)
-  let w ← Tensor.randn shape
+  let w ← Tensor.randn shape (device := device)
   let w := Tensor.Preserving.mulScalar w std
   Tensor.parameter (w.castDType dtype)
 
 /-- Zero bias tensor with requires_grad=true. -/
-def initBias (shape : Shape) (dtype : DType := .Float32) : IO (Tensor { shape := shape, dtype := dtype }) :=
-  Tensor.parameter ((Tensor.zeros shape).castDType dtype)
+def initBias (shape : Shape) (dtype : DType := .Float32) (device : Device := .CPU) : IO (Tensor { device := device, shape := shape, dtype := dtype }) :=
+  Tensor.parameter ((Tensor.zeros shape (device := device)).castDType dtype)
 
 /-- Mark a loaded pretrained tensor as frozen (requires_grad=false). -/
 def reqGradFalse {σ : StaticSpec} (t : Tensor σ) : Tensor σ :=
@@ -36,9 +37,9 @@ def reqGradFalse {σ : StaticSpec} (t : Tensor σ) : Tensor σ :=
     The block reshapes are runtime-validated (`reshapeChecked`): the block
     factors are symbolic UInt64 division, so no static numel proof exists. -/
 def dequantizeFP8 {outDim inDim : UInt64}
-    (weight : Tensor { shape := #[outDim, inDim] })
-    (scaleInv : Tensor { shape := #[outDim / 128, inDim / 128] })
-    : Tensor { shape := #[outDim, inDim], dtype := .Float32 } :=
+    (weight : Tensor { device := device, shape := #[outDim, inDim] })
+    (scaleInv : Tensor { device := device, shape := #[outDim / 128, inDim / 128] })
+    : Tensor { device := device, shape := #[outDim, inDim], dtype := .Float32 } :=
   let outBlocks := outDim / 128
   let inBlocks := inDim / 128
   let w := weight.toFloat32
@@ -52,9 +53,9 @@ def dequantizeFP8 {outDim inDim : UInt64}
 /-- Dequantize FP8 expert weights with blockwise inverse scales per expert.
     weight: [experts, out, in], scale_inv: [experts, out/128, in/128]. -/
 def dequantizeFP8Experts {experts outDim inDim : UInt64}
-    (weight : Tensor { shape := #[experts, outDim, inDim] })
-    (scaleInv : Tensor { shape := #[experts, outDim / 128, inDim / 128] })
-    : Tensor { shape := #[experts, outDim, inDim], dtype := .Float32 } :=
+    (weight : Tensor { device := device, shape := #[experts, outDim, inDim] })
+    (scaleInv : Tensor { device := device, shape := #[experts, outDim / 128, inDim / 128] })
+    : Tensor { device := device, shape := #[experts, outDim, inDim], dtype := .Float32 } :=
   let outBlocks := outDim / 128
   let inBlocks := inDim / 128
   let w := weight.toFloat32

@@ -25,13 +25,13 @@ private def uniformTimeDist : TimeDist :=
     quantile := fun p => clamp01 p }
 
 private def linBridge {dim : UInt64} (_ : Unit)
-    (x0 x1 : Tensor { shape := #[dim] }) (t0 t1 : Float) : Tensor { shape := #[dim] } :=
+    (x0 x1 : Tensor { shape := #[dim], device := .CPU }) (t0 t1 : Float) : Tensor { shape := #[dim], device := .CPU } :=
   let dt := t1 - t0
-  x0 + (x1 - x0) * dt
+  Tensor.Promoting.add x0 (Tensor.Promoting.mulScalar (Tensor.Promoting.sub x1 x0) dt)
 
 structure ToyParams (dim : UInt64) where
-  W : Tensor { shape := #[dim, dim] }
-  b : Tensor { shape := #[dim] }
+  W : Tensor { shape := #[dim, dim], device := .CPU }
+  b : Tensor { shape := #[dim], device := .CPU }
   deriving TensorStruct
 
 namespace ToyParams
@@ -43,17 +43,17 @@ def init (dim : UInt64) : IO (ToyParams dim) := do
 
 end ToyParams
 
-def toyModel {maxLen dim : UInt64} : BranchingModelContinuous maxLen dim (ToyParams dim) :=
+def toyModel {maxLen dim : UInt64} : BranchingModelContinuous (device := .CPU) maxLen dim (ToyParams dim) :=
   { forward := fun {batch} params state _t => do
       let anchorPred := Tensor.affine3d state params.W params.b
       let splitLogits := zerosDynamic #[batch, maxLen]
       let delLogits := zerosDynamic #[batch, maxLen]
       pure (anchorPred, splitLogits, delLogits) }
 
-private def mkVec2 (x y : Float) : Tensor { shape := #[2] } :=
+private def mkVec2 (x y : Float) : Tensor { shape := #[2], device := .CPU } :=
   Tensor.reshapeChecked (floatsDynamic #[x, y]) #[2]
 
-private def fixedState : BranchingState (Tensor { shape := #[2] }) :=
+private def fixedState : BranchingState (Tensor { shape := #[2], device := .CPU }) :=
   BranchingState.mkDefault
     #[mkVec2 1.0 2.0, mkVec2 (-1.0) 0.5, mkVec2 0.25 (-0.75), mkVec2 2.0 (-1.0)]
     #[0, 0, 0, 0]
@@ -66,11 +66,11 @@ def runDemo : IO Unit := do
   let x1 := fixedState
   let x1s := #[x1]
   let times := #[0.5]
-  let x0Sampler : FlowNode (Tensor { shape := #[dim] }) → Tensor { shape := #[dim] } := fun _node => zerosDynamic #[dim]
+  let x0Sampler : FlowNode (Tensor { shape := #[dim], device := .CPU }) → Tensor { shape := #[dim], device := .CPU } := fun _node => zerosDynamic #[dim]
 
   let (bridgeResult, _rng) :=
     branchingBridge (linBridge (dim := dim)) () x0Sampler x1s times
-      uniformTimeDist uniformTimeDist (sequentialUniformPolicy (Tensor { shape := #[dim] }))
+      uniformTimeDist uniformTimeDist (sequentialUniformPolicy (Tensor { shape := #[dim], device := .CPU }))
       canonicalAnchorMerge
       (coalescenceFactor := 0.0)
       (maxLen := some maxLen.toNat)

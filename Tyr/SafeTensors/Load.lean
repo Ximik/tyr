@@ -8,7 +8,7 @@
 
   Shapes and dtypes come from file metadata at runtime, so the FFI edge
   keeps raw handles; the public helpers validate each loaded handle against
-  the requested shape and hand out shape-indexed tensors (`Tensor { shape := shape }`).
+  the requested shape and hand out shape-indexed tensors (`Tensor { shape := shape, device := device }`).
   The dtype follows the file and stays dynamic.
 -/
 import Tyr.RawTensor.SafeTensors
@@ -19,8 +19,8 @@ namespace torch.safetensors
 /-- Validate a freshly loaded raw handle against the requested shape. Loaders below
 request the stored layout: passing the expected shape to the legacy native loader
 would reshape equal-numel tensors before this check, hiding layout mismatches. -/
-private def checkLoadedShape (name : String) (s : Shape) (raw : RawTensor) : IO (Tensor { shape := s }) :=
-  match Tensor.ofRaw (σ := { shape := s }) raw with
+private def checkLoadedShape (name : String) (s : Shape) (device : Device) (raw : RawTensor) : IO (Tensor { shape := s, device }) :=
+  match Tensor.ofRaw (σ := { shape := s, device }) raw with
   | .ok tensor => pure tensor
   | .error message =>
       throw <| IO.userError s!"SafeTensors tensor '{name}': {message}"
@@ -31,10 +31,10 @@ private def checkLoadedShape (name : String) (s : Shape) (raw : RawTensor) : IO 
     missing-tensor errors. -/
 def tryLoadTensor (path : String) (name : String) (s : Shape)
     (device : Device := Device.CPU)
-    : IO (Option (Tensor { shape := s })) := do
+    : IO (Option (Tensor { shape := s, device })) := do
   try
     let raw ← RawTensor.safeTensorsLoadOnDevice path name device
-    pure (some (← checkLoadedShape name s raw))
+    pure (some (← checkLoadedShape name s device raw))
   catch _ =>
     pure none
 
@@ -44,10 +44,10 @@ def tryLoadTensor (path : String) (name : String) (s : Shape)
     missing-tensor errors. -/
 def tryLoadTensorSharded (dir : String) (name : String) (s : Shape)
     (device : Device := Device.CPU)
-    : IO (Option (Tensor { shape := s })) := do
+    : IO (Option (Tensor { shape := s, device })) := do
   try
     let raw ← RawTensor.safeTensorsLoadShardedOnDevice dir name device
-    pure (some (← checkLoadedShape name s raw))
+    pure (some (← checkLoadedShape name s device raw))
   catch _ =>
     pure none
 
@@ -61,10 +61,10 @@ def isMissingTensorError (msg : String) (name : String) : Bool :=
     other errors (shape mismatch, I/O) are rethrown. -/
 def tryLoadOptionalTensor (path : String) (name : String) (s : Shape)
     (device : Device := Device.CPU)
-    : IO (Option (Tensor { shape := s })) := do
+    : IO (Option (Tensor { shape := s, device })) := do
   try
     let raw ← RawTensor.safeTensorsLoadOnDevice path name device
-    pure (some (← checkLoadedShape name s raw))
+    pure (some (← checkLoadedShape name s device raw))
   catch e =>
     if isMissingTensorError (toString e) name then
       pure none
@@ -75,10 +75,10 @@ def tryLoadOptionalTensor (path : String) (name : String) (s : Shape)
     other errors (shape mismatch, I/O) are rethrown. -/
 def tryLoadOptionalTensorSharded (dir : String) (name : String) (s : Shape)
     (device : Device := Device.CPU)
-    : IO (Option (Tensor { shape := s })) := do
+    : IO (Option (Tensor { shape := s, device })) := do
   try
     let raw ← RawTensor.safeTensorsLoadShardedOnDevice dir name device
-    pure (some (← checkLoadedShape name s raw))
+    pure (some (← checkLoadedShape name s device raw))
   catch e =>
     if isMissingTensorError (toString e) name then
       pure none
@@ -89,7 +89,7 @@ def tryLoadOptionalTensorSharded (dir : String) (name : String) (s : Shape)
     `none` if no candidate loads. -/
 def tryLoadTensorCandidates (path : String) (names : Array String) (s : Shape)
     (device : Device := Device.CPU)
-    : IO (Option (Tensor { shape := s })) := do
+    : IO (Option (Tensor { shape := s, device })) := do
   for n in names do
     if let some t ← tryLoadTensor path n s device then
       return some t
@@ -99,7 +99,7 @@ def tryLoadTensorCandidates (path : String) (names : Array String) (s : Shape)
     `none` if no candidate loads. -/
 def tryLoadTensorShardedCandidates (dir : String) (names : Array String) (s : Shape)
     (device : Device := Device.CPU)
-    : IO (Option (Tensor { shape := s })) := do
+    : IO (Option (Tensor { shape := s, device })) := do
   for n in names do
     if let some t ← tryLoadTensorSharded dir n s device then
       return some t
@@ -109,7 +109,7 @@ def tryLoadTensorShardedCandidates (dir : String) (names : Array String) (s : Sh
     throws listing all candidates if none loads. -/
 def loadTensorCandidates (path : String) (names : Array String) (s : Shape)
     (device : Device := Device.CPU)
-    : IO (Tensor { shape := s }) := do
+    : IO (Tensor { shape := s, device }) := do
   match (← tryLoadTensorCandidates path names s device) with
   | some t => pure t
   | none => throw <| IO.userError s!"Failed to load tensor: {names}"
@@ -118,7 +118,7 @@ def loadTensorCandidates (path : String) (names : Array String) (s : Shape)
     throws listing all candidates if none loads. -/
 def loadTensorShardedCandidates (dir : String) (names : Array String) (s : Shape)
     (device : Device := Device.CPU)
-    : IO (Tensor { shape := s }) := do
+    : IO (Tensor { shape := s, device }) := do
   match (← tryLoadTensorShardedCandidates dir names s device) with
   | some t => pure t
   | none => throw <| IO.userError s!"Failed to load tensor (sharded): {names}"

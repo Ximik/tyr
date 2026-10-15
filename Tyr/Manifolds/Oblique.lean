@@ -5,11 +5,11 @@ namespace Tyr.AD
 open torch
 open DifferentiableManifold
 
-variable {d : DType} {dev : DevicePolicy}
+variable {d : DType} {dev : Device}
 
 /-- Oblique manifold OB(m,n): matrices with unit-norm columns. -/
 structure Oblique (m n : UInt64) (dtype : DType := .Float32)
-    (device : DevicePolicy := .any) where
+    (device : Device := .CPU) where
   matrix : Tensor ⟨#[m, n], dtype, device⟩
 
 namespace Oblique
@@ -35,7 +35,7 @@ end Oblique
 
 /-- Tangent vector on OB(m,n). -/
 structure ObliqueTangent (m n : UInt64) (dtype : DType := .Float32)
-    (device : DevicePolicy := .any) where
+    (device : Device := .CPU) where
   vec : Tensor ⟨#[m, n], dtype, device⟩
 
 namespace ObliqueTangent

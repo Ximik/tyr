@@ -5,11 +5,11 @@ namespace Tyr.AD
 open torch
 open DifferentiableManifold
 
-variable {d : DType} {dev : DevicePolicy}
+variable {d : DType} {dev : Device}
 
 /-- Positive manifold of elementwise-positive `m x n` matrices. -/
 structure Positive (m n : UInt64) (dtype : DType := .Float32)
-    (device : DevicePolicy := .any) where
+    (device : Device := .CPU) where
   matrix : Tensor ⟨#[m, n], dtype, device⟩
 
 namespace Positive
@@ -29,7 +29,7 @@ end Positive
 
 /-- Tangent vectors on positive matrices are unconstrained ambient matrices. -/
 structure PositiveTangent (m n : UInt64) (dtype : DType := .Float32)
-    (device : DevicePolicy := .any) where
+    (device : Device := .CPU) where
   vec : Tensor ⟨#[m, n], dtype, device⟩
 
 namespace PositiveTangent

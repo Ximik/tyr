@@ -13,7 +13,7 @@
   loop (see `Tyr.GPU.Ops.BrownianFused.buildValueSchedule` for the record
   encoding and the f32-exactness constraint on time tags).
 
-  State layout: flat `Tensor { shape := #[n], dtype := .Float32 }`; the state is double-buffered, so
+  State layout: flat `Tensor { shape := #[n], dtype := .Float32, device := device }`; the state is double-buffered, so
   the kernel writing `y1` never aliases the `y0` it reads.
 -/
 import Tyr.Torch
@@ -24,6 +24,8 @@ import Tyr.GPU.Ops.BrownianFused
 namespace Tyr.GPU.Ops.SDEFused
 
 open torch
+
+variable {device : Device}
 open Tyr.GPU.Kernels
 open Tyr.GPU.Ops.BrownianFused
 
@@ -31,18 +33,18 @@ open Tyr.GPU.Ops.BrownianFused
     length (`records` holds six Float32 per node) plus the record count the
     kernel strides over. -/
 structure DeviceSchedule where
-  records : Sigma fun n : UInt64 => Tensor { shape := #[n], dtype := .Float32 }
+  records : Sigma fun n : UInt64 => Tensor { shape := #[n], dtype := .Float32, device := device }
 
 /-- Number of six-Float32 records in an uploaded schedule. -/
-def DeviceSchedule.len (sched : DeviceSchedule) : UInt64 :=
+def DeviceSchedule.len (sched : DeviceSchedule (device := device)) : UInt64 :=
   sched.records.1 / 6
 
-instance : Inhabited DeviceSchedule :=
-  ⟨{ records := ⟨0, Tensor.zeros #[0]⟩ }⟩
+instance : Inhabited (DeviceSchedule (device := device)) :=
+  ⟨{ records := ⟨0, Tensor.zeros #[0] false device⟩ }⟩
 
 /-- Build and upload the `w(t)` schedule for one query time. -/
 def DeviceSchedule.make (T0 T1 tol : Float) (maxDepth : Nat) (t : Float)
-    (device : Device) : DeviceSchedule :=
+    (device : Device) : DeviceSchedule (device := device) :=
   let sched := buildValueSchedule T0 T1 tol maxDepth t
   { records := ⟨sched.size.toUInt64, uploadSchedule sched device⟩ }
 
@@ -50,10 +52,10 @@ def DeviceSchedule.make (T0 T1 tol : Float) (maxDepth : Nat) (t : Float)
     new state into `y1Out`. `drift`/`diffusion` are the vector fields
     `f(t, y)` and `g(t, y)`; noise is diagonal, `g ∘ ΔW`. -/
 def emStepFused {n : UInt64}
-    (drift diffusion : Float → Tensor { shape := #[n], dtype := .Float32 } → Tensor { shape := #[n], dtype := .Float32 })
+    (drift diffusion : Float → Tensor { shape := #[n], dtype := .Float32, device := device } → Tensor { shape := #[n], dtype := .Float32, device := device })
     (treeSeed : UInt64) (t h : Float)
-    (schedA schedB : DeviceSchedule)
-    (y0 : Tensor { shape := #[n], dtype := .Float32 }) (y1Out : Tensor { shape := #[n], dtype := .Float32 })
+    (schedA schedB : DeviceSchedule (device := device))
+    (y0 : Tensor { shape := #[n], dtype := .Float32, device := device }) (y1Out : Tensor { shape := #[n], dtype := .Float32, device := device })
     (blackwell : Bool) (stream : UInt64) : IO Unit := do
   let fh := Tensor.Preserving.mulScalar (drift t y0) h
   let g := diffusion t y0
@@ -72,21 +74,21 @@ def emStepFused {n : UInt64}
     `treeSeed` (matching the CPU `VirtualBrownianTree` tensor instance).
     Returns a fresh tensor holding the final state. -/
 def emSolveFused {n : UInt64}
-    (drift diffusion : Float → Tensor { shape := #[n], dtype := .Float32 } → Tensor { shape := #[n], dtype := .Float32 })
+    (drift diffusion : Float → Tensor { shape := #[n], dtype := .Float32, device := device } → Tensor { shape := #[n], dtype := .Float32, device := device })
     (treeSeed : UInt64) (T0 T1 tol : Float) (maxDepth : Nat)
     (t0 t1 : Float) (steps : Nat)
-    (y0 : Tensor { shape := #[n], dtype := .Float32 })
+    (y0 : Tensor { shape := #[n], dtype := .Float32, device := device })
     (blackwell : Bool) (stream : UInt64)
-    (device : Device := Device.CUDA 0) : IO (Tensor { shape := #[n], dtype := .Float32 }) := do
+    : IO (Tensor { shape := #[n], dtype := .Float32, device := device }) := do
   let m := Nat.max steps 1
   let h := (t1 - t0) / Float.ofNat m
   -- schedules for the whole step grid, uploaded once
-  let mut scheds : Array DeviceSchedule := #[]
+  let mut scheds : Array (DeviceSchedule (device := device)) := #[]
   for k in [:m + 1] do
     let t := t0 + Float.ofNat k * h
     scheds := scheds.push (DeviceSchedule.make T0 T1 tol maxDepth t device)
   -- fresh copy of the initial state; ping-pong with one scratch buffer
-  let mut cur : Tensor { shape := #[n], dtype := .Float32 } := y0 + Tensor.Preserving.mulScalar y0 0.0
+  let mut cur : Tensor { shape := #[n], dtype := .Float32, device := device } := y0 + Tensor.Preserving.mulScalar y0 0.0
   let mut nxt ← Tensor.randn #[n] false device
   for k in [:m] do
     let t := t0 + Float.ofNat k * h

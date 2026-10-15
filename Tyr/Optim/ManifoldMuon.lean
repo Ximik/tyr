@@ -19,7 +19,7 @@ namespace torch.Optim.ManifoldMuon
 
 open torch
 
-variable {d : DType} {dev : DevicePolicy}
+variable {d : DType} {dev : Device}
 
 /-- Dual solve backend used inside manifold-Muon. -/
 inductive SolverKind where
@@ -65,7 +65,7 @@ structure SolveDiagnostics where
 
 /-- Result of solving for a constrained manifold update direction. -/
 structure SolveResult (m n : UInt64) (dtype : DType := .Float32)
-    (device : DevicePolicy := .any) where
+    (device : Device := .CPU) where
   direction : Tensor ⟨#[m, n], dtype, device⟩
   dualVar : Tensor ⟨#[n, n], dtype, device⟩
   diagnostics : SolveDiagnostics
@@ -73,7 +73,7 @@ structure SolveResult (m n : UInt64) (dtype : DType := .Float32)
 
 /-- Per-parameter state for Stiefel Manifold-Muon. -/
 structure ParamState (m n : UInt64) (dtype : DType := .Float32)
-    (device : DevicePolicy := .any) where
+    (device : Device := .CPU) where
   /-- Momentum buffer in ambient space. -/
   momentumBuffer : Option (Tensor ⟨#[m, n], dtype, device⟩) := none
   /-- Dual variable for tangent-constrained solve. -/
@@ -89,7 +89,7 @@ def initParamState {m n : UInt64} (_param : Tensor ⟨#[m, n], d, dev⟩) : Para
   step := 0
 }
 
-instance {m n : UInt64} {d : DType} {dev : DevicePolicy} :
+instance {m n : UInt64} {d : DType} {dev : Device} :
     TensorStruct (ParamState m n d dev) where
   map f s := {
     momentumBuffer := s.momentumBuffer.map (TensorStruct.map f)

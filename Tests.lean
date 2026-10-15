@@ -178,3 +178,5 @@ import Tests.TestFloatBuffer
 import Tests.TestAutogradIdentity
 import Tests.TestTensorConstruction
 import Tests.TestTensorDeviceDeriving
+
+import Tests.TestDeviceIdentity

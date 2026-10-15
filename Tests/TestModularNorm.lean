@@ -188,25 +188,25 @@ def testNormalizeDualReducesDualNorm : IO Unit := do
     s!"Dual norm should decrease after normalization: {dAfter} vs {dBefore}"
 
 
-example (_emb : Embedding 3 2) (_tokens : torch.Tensor { shape := #[1, 2], dtype := .Float32 }) : True := by
+example (_emb : Embedding 3 2) (_tokens : torch.Tensor { shape := #[1, 2], dtype := .Float32, device := .CPU }) : True := by
   fail_if_success
     have _ := Embedding.forward _emb _tokens
   trivial
 
-example (_weight : torch.Tensor { shape := #[2, 3], dtype := .Float32 }) : True := by
+example (_weight : torch.Tensor { shape := #[2, 3], dtype := .Float32, device := .CPU }) : True := by
   fail_if_success
     have _ : Embedding 3 2 := ⟨_weight⟩
   trivial
 
 @[test]
 def testIndexedEmbeddingLookupGradientAndNorms : IO Unit := do
-  let weight : torch.Tensor ⟨#[3, 2], .Float64, .exact .CPU⟩ :=
+  let weight : torch.Tensor ⟨#[3, 2], .Float64, .CPU⟩ :=
     torch.Tensor.onesLike (torch.Tensor.zerosFor _)
   let weight ← (torch.Tensor.Preserving.mulScalar weight 2.0).setRequiresGrad true
-  let emb : Embedding 3 2 .Float64 (.exact .CPU) := ⟨weight⟩
-  let tokens : torch.Tensor ⟨#[2, 3], .Int64, .exact .CPU⟩ :=
+  let emb : Embedding 3 2 .Float64 (.CPU) := ⟨weight⟩
+  let tokens : torch.Tensor ⟨#[2, 3], .Int64, .CPU⟩ :=
     torch.Tensor.onesLike (torch.Tensor.zerosFor _)
-  let output : torch.Tensor ⟨#[2, 3, 2], .Float64, .exact .CPU⟩ := emb.forward tokens
+  let output : torch.Tensor ⟨#[2, 3, 2], .Float64, .CPU⟩ := emb.forward tokens
   match output.validate with
   | .ok () => pure ()
   | .error message => LeanTest.fail message
@@ -220,8 +220,8 @@ def testIndexedEmbeddingLookupGradientAndNorms : IO Unit := do
   let unselected := torch.Tensor.slice gradient 0 0 1
   LeanTest.assertEqual (torch.Tensor.frobeniusNorm unselected) 0.0
     "Unselected embedding rows should have zero gradient"
-  let normalized : Embedding 3 2 .Float64 (.exact .CPU) := NormedModule.normalize emb
-  let dualNormalized : Embedding 3 2 .Float64 (.exact .CPU) := NormedModule.normalizeDual emb
+  let normalized : Embedding 3 2 .Float64 (.CPU) := NormedModule.normalize emb
+  let dualNormalized : Embedding 3 2 .Float64 (.CPU) := NormedModule.normalizeDual emb
   match normalized.weight.validate, dualNormalized.weight.validate with
   | .ok (), .ok () => pure ()
   | .error message, _ | _, .error message => LeanTest.fail message
@@ -229,8 +229,8 @@ def testIndexedEmbeddingLookupGradientAndNorms : IO Unit := do
     "Embedding normalization should produce unit max-row norm"
   LeanTest.assertTrue (Float.abs (NormedModule.dualNorm dualNormalized - 1.0) < 1e-10)
     "Embedding dual normalization should produce unit sum of row norms"
-  let vectorTokens : torch.Tensor ⟨#[3], .Int64, .exact .CPU⟩ := torch.Tensor.zerosFor _
-  let vectorOutput : torch.Tensor ⟨#[3, 2], .Float64, .exact .CPU⟩ :=
+  let vectorTokens : torch.Tensor ⟨#[3], .Int64, .CPU⟩ := torch.Tensor.zerosFor _
+  let vectorOutput : torch.Tensor ⟨#[3, 2], .Float64, .CPU⟩ :=
     torch.Tensor.embedding1d vectorTokens weight
   match vectorOutput.validate with
   | .ok () => pure ()

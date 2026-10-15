@@ -11,6 +11,7 @@ import Tyr.Model.Laguna.Weights
 
 namespace torch.laguna.hub
 
+variable {device : Device}
 open torch.Hub
 
 /-- Public poolside Laguna repo ids explicitly covered by Tyr as of 2026-07-22. -/
@@ -45,7 +46,7 @@ def loadFromPretrained
     (revision : String := "main")
     (cacheDir : String := Hub.defaultCacheDir)
     (device : Device := Device.CPU)
-    : IO (Sigma (fun cfg => LagunaForCausalLM cfg)) := do
+    : IO (Sigma (fun cfg => LagunaForCausalLM (device := device) cfg)) := do
   Hub.loadModelFromPretrained
     source
     revision

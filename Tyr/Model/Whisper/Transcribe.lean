@@ -17,6 +17,7 @@ import Tyr.Tokenizer.Qwen3
 
 namespace torch.whisper
 
+variable {device : Device}
 open torch.qwen3asr
 
 structure WhisperTranscription where
@@ -27,7 +28,8 @@ structure WhisperTranscription where
 
 structure WhisperBundle where
   cfg : WhisperConfig
-  model : WhisperForConditionalGeneration cfg
+  device : Device
+  model : WhisperForConditionalGeneration (device := device) cfg
   tok : tokenizer.qwen3.QwenTokenizer
   preprocessor : PreprocessorConfig
 
@@ -68,8 +70,8 @@ private structure BeamState (cfg : WhisperConfig) where
   noSpeechProb : Float := 0.0
   measuredNoSpeech : Bool := false
   finished : Bool := false
-  caches : Array (WhisperForConditionalGeneration.LayerKVCache cfg 1) := #[]
-  lastLogits? : Option (Tensor { shape := #[1, cfg.vocabSize] }) := none
+  caches : Array (WhisperForConditionalGeneration.LayerKVCache (device := device) cfg 1) := #[]
+  lastLogits? : Option (Tensor { device := device, shape := #[1, cfg.vocabSize] }) := none
   nextPos : UInt64 := 0
   deriving Inhabited
 
@@ -460,13 +462,10 @@ private def isNoSpeechChunk (opts : WhisperDecodeOptions) (cand : WhisperDecodeC
 private def buildSingleTokenOnDevice
     (id : UInt32)
     (device : Device)
-    : Tensor { shape := #[1, 1], dtype := .Int64 } :=
+    : Tensor { device := device, shape := #[1, 1], dtype := .Int64 } :=
   let idsVals : Array Int64 := #[Int64.ofNat id.toNat]
-  let inputIdsCpu : Tensor { shape := #[1, 1], dtype := .Int64 } := Tensor.reshapeChecked (Tensor.fromInt64Array idsVals) #[1, 1]
-  if inputIdsCpu.device == device then
-    inputIdsCpu
-  else
-    inputIdsCpu.to device
+  let inputIdsCpu : Tensor { device := .CPU, shape := #[1, 1], dtype := .Int64 } := Tensor.reshapeChecked (Tensor.fromInt64Array idsVals) #[1, 1]
+  inputIdsCpu.to device
 
 private def isForbiddenToken (rules : DecodeTokenRules) (id : UInt32) : Bool :=
   rules.forbidden.contains id
@@ -551,7 +550,7 @@ private def topKLogProbPairs (logProbs : Array Float) (k : Nat) : Array (Nat × 
       sorted.extract 0 (Nat.min k sorted.size)
 
 private def tokenLogProbFromLogits {vocab : UInt64}
-    (logits : Tensor { shape := #[1, vocab] })
+    (logits : Tensor { device := device, shape := #[1, vocab] })
     (tokenId : UInt32)
     : IO Float := do
   let vals ← Tensor.toFloatArray logits
@@ -559,7 +558,7 @@ private def tokenLogProbFromLogits {vocab : UInt64}
   pure (logProbs.getD tokenId.toNat (-100.0))
 
 private def tokenProbFromLogits {vocab : UInt64}
-    (logits : Tensor { shape := #[1, vocab] })
+    (logits : Tensor { device := device, shape := #[1, vocab] })
     (tokenId : UInt32)
     : IO Float := do
   let vals ← Tensor.toFloatArray logits
@@ -575,11 +574,11 @@ private def clampTopK (topK vocab : UInt64) : UInt64 :=
     topK
 
 private def filteredSamplingLogits {vocab : UInt64}
-    (logits : Tensor { shape := #[1, vocab] })
+    (logits : Tensor { device := device, shape := #[1, vocab] })
     (temperature : Float)
     (topK : UInt64)
     (topP : Float)
-    : Tensor { shape := #[1, vocab] } :=
+    : Tensor { device := device, shape := #[1, vocab] } :=
   let scaled :=
     if temperature == 1.0 then
       logits
@@ -604,7 +603,7 @@ private def filteredSamplingLogits {vocab : UInt64}
     Tensor.topPFilter filtered topP'
 
 private def argmaxTokenFromLogits {vocab : UInt64}
-    (logits : Tensor { shape := #[1, vocab] })
+    (logits : Tensor { device := device, shape := #[1, vocab] })
     (fallback : UInt64)
     (rules : DecodeTokenRules := {})
     : IO UInt32 := do
@@ -615,22 +614,22 @@ private def argmaxTokenFromLogits {vocab : UInt64}
     let id := p.1.toUInt32
     if !(isForbiddenToken rules id) then
       return id
-  let nextTokRaw : Tensor { shape := #[1], dtype := .Int64 } := (Tensor.argmax logits 1).reshapeChecked #[1]
+  let nextTokRaw : Tensor { device := device, shape := #[1], dtype := .Int64 } := (Tensor.argmax logits 1).reshapeChecked #[1]
   let nextVals ← Tensor.toUInt64Array nextTokRaw
   pure (nextVals.getD 0 fallback).toUInt32
 
 private def sampleTokenFromLogits {vocab : UInt64}
-    (logits : Tensor { shape := #[1, vocab] })
+    (logits : Tensor { device := device, shape := #[1, vocab] })
     (rules : DecodeTokenRules := {})
     (fallback : UInt64 := 0)
     : IO UInt32 := do
   let vals ← Tensor.toFloatArray logits
   let probsVals := (logProbsFromLogitsArray vals).map Float.exp
-  let probs : Tensor { shape := #[1, vocab], dtype := .Float32 } := Tensor.reshapeChecked (Tensor.fromFloatArray probsVals) #[1, vocab]
+  let probs : Tensor { device := device, shape := #[1, vocab], dtype := .Float32 } := Tensor.reshapeChecked ((Tensor.fromFloatArray probsVals).to device) #[1, vocab]
   let mut tries : Nat := 0
   while tries < 8 do
     let sampled ← Tensor.multinomial probs 1 false
-    let sampledFlat : Tensor { shape := #[1], dtype := .Int64 } := Tensor.reshapeChecked sampled #[1]
+    let sampledFlat : Tensor { device := device, shape := #[1], dtype := .Int64 } := Tensor.reshapeChecked sampled #[1]
     let sampledVals ← Tensor.toUInt64Array sampledFlat
     let id := (sampledVals.getD 0 0).toUInt32
     if !isForbiddenToken rules id then
@@ -641,16 +640,15 @@ private def sampleTokenFromLogits {vocab : UInt64}
 private def prefillPromptCaches
     {cfg : WhisperConfig}
     {encSeq : UInt64}
-    (model : WhisperForConditionalGeneration cfg)
-    (device : Device)
-    (crossCaches : Array (WhisperForConditionalGeneration.LayerCrossCache cfg))
+    (model : WhisperForConditionalGeneration (device := device) cfg)
+    (crossCaches : Array (WhisperForConditionalGeneration.LayerCrossCache (device := device) cfg))
     (promptIds : Array UInt32)
-    : IO (Tensor { shape := #[1, cfg.vocabSize] } × Array (WhisperForConditionalGeneration.LayerKVCache cfg 1) × UInt64) := do
+    : IO (Tensor { device := device, shape := #[1, cfg.vocabSize] } × Array (WhisperForConditionalGeneration.LayerKVCache (device := device) cfg 1) × UInt64) := do
   if promptIds.isEmpty then
     throw <| IO.userError "Whisper cached decode prompt is empty"
-  let mut caches : Array (WhisperForConditionalGeneration.LayerKVCache cfg 1) :=
+  let mut caches : Array (WhisperForConditionalGeneration.LayerKVCache (device := device) cfg 1) :=
     model.initLayerKVCaches cfg.maxTargetPositions device
-  let mut last? : Option (Tensor { shape := #[1, cfg.vocabSize] }) := none
+  let mut last? : Option (Tensor { device := device, shape := #[1, cfg.vocabSize] }) := none
   let mut pos : UInt64 := 0
   for i in [:promptIds.size] do
     let tok := buildSingleTokenOnDevice promptIds[i]! device
@@ -666,8 +664,8 @@ private def prefillPromptCaches
 private partial def decodeLoopCached
     {cfg : WhisperConfig}
     {encSeq : UInt64}
-    (model : WhisperForConditionalGeneration cfg)
-    (crossCaches : Array (WhisperForConditionalGeneration.LayerCrossCache cfg))
+    (model : WhisperForConditionalGeneration (device := device) cfg)
+    (crossCaches : Array (WhisperForConditionalGeneration.LayerCrossCache (device := device) cfg))
     (noSpeechTokenId : Option UInt32)
     (rules : DecodeTokenRules)
     (eosTokenId : UInt64)
@@ -677,8 +675,8 @@ private partial def decodeLoopCached
     (sample : Bool)
     (remaining : Nat)
     (state : DecodeState)
-    (caches : Array (WhisperForConditionalGeneration.LayerKVCache cfg 1))
-    (lastLogits : Tensor { shape := #[1, cfg.vocabSize] })
+    (caches : Array (WhisperForConditionalGeneration.LayerKVCache (device := device) cfg 1))
+    (lastLogits : Tensor { device := device, shape := #[1, cfg.vocabSize] })
     (nextPos : UInt64)
     : IO DecodeState := do
   if remaining == 0 then
@@ -747,26 +745,26 @@ private partial def decodeLoopCached
         nextLogits
         (nextPos + 1)
 
-private def beamRankScore {cfg : WhisperConfig} (beam : BeamState cfg) : Float :=
+private def beamRankScore {cfg : WhisperConfig} (beam : BeamState (device := device) cfg) : Float :=
   if beam.tokenCount == 0 then
     -100.0
   else
     beam.sumLogprob / beam.tokenCount.toFloat
 
-private def chooseBetterBeam {cfg : WhisperConfig} (a b : BeamState cfg) : BeamState cfg :=
+private def chooseBetterBeam {cfg : WhisperConfig} (a b : BeamState (device := device) cfg) : BeamState (device := device) cfg :=
   if beamRankScore b > beamRankScore a then b else a
 
 private def expandBeamCached
     {cfg : WhisperConfig}
     {encSeq : UInt64}
-    (model : WhisperForConditionalGeneration cfg)
-    (crossCaches : Array (WhisperForConditionalGeneration.LayerCrossCache cfg))
+    (model : WhisperForConditionalGeneration (device := device) cfg)
+    (crossCaches : Array (WhisperForConditionalGeneration.LayerCrossCache (device := device) cfg))
     (noSpeechTokenId : Option UInt32)
     (rules : DecodeTokenRules)
     (eosTokenId : UInt64)
     (beamWidth : UInt64)
-    (beam : BeamState cfg)
-    : IO (Array (BeamState cfg)) := do
+    (beam : BeamState (device := device) cfg)
+    : IO (Array (BeamState (device := device) cfg)) := do
   if beam.finished then
     pure #[beam]
   else
@@ -791,7 +789,7 @@ private def expandBeamCached
         else
           rules
       let stepRules := applyTimestampPairMask (cfg := cfg) stepRules beam.generated eosTokenId
-      let mut out : Array (BeamState cfg) := #[]
+      let mut out : Array (BeamState (device := device) cfg) := #[]
       for p in topPairs do
         let nextIdU64 := p.1.toUInt64
         let nextId := nextIdU64.toUInt32
@@ -838,15 +836,15 @@ private def expandBeamCached
 private partial def beamDecodeLoopCached
     {cfg : WhisperConfig}
     {encSeq : UInt64}
-    (model : WhisperForConditionalGeneration cfg)
-    (crossCaches : Array (WhisperForConditionalGeneration.LayerCrossCache cfg))
+    (model : WhisperForConditionalGeneration (device := device) cfg)
+    (crossCaches : Array (WhisperForConditionalGeneration.LayerCrossCache (device := device) cfg))
     (noSpeechTokenId : Option UInt32)
     (rules : DecodeTokenRules)
     (eosTokenId : UInt64)
     (beamWidth : UInt64)
     (remaining : Nat)
-    (beams : Array (BeamState cfg))
-    : IO (Array (BeamState cfg)) := do
+    (beams : Array (BeamState (device := device) cfg))
+    : IO (Array (BeamState (device := device) cfg)) := do
   if remaining == 0 then
     pure beams
   else
@@ -857,7 +855,7 @@ private partial def beamDecodeLoopCached
     if allFinished then
       pure beams
     else
-      let mut expanded : Array (BeamState cfg) := #[]
+      let mut expanded : Array (BeamState (device := device) cfg) := #[]
       for beam in beams do
         if beam.finished then
           expanded := expanded.push beam
@@ -891,9 +889,9 @@ private partial def beamDecodeLoopCached
 private def decodeBeamCached
     {cfg : WhisperConfig}
     {encSeq : UInt64}
-    (model : WhisperForConditionalGeneration cfg)
-    (encoderHidden : Tensor { shape := #[1, encSeq, cfg.dModel] })
-    (crossCaches : Array (WhisperForConditionalGeneration.LayerCrossCache cfg))
+    (model : WhisperForConditionalGeneration (device := device) cfg)
+    (_encoderHidden : Tensor { device := device, shape := #[1, encSeq, cfg.dModel] })
+    (crossCaches : Array (WhisperForConditionalGeneration.LayerCrossCache (device := device) cfg))
     (promptIds : Array UInt32)
     (noSpeechTokenId : Option UInt32)
     (rules : DecodeTokenRules)
@@ -902,8 +900,8 @@ private def decodeBeamCached
     (remaining : Nat)
     : IO DecodeState := do
   let (firstLogits, caches0, nextPos0) ←
-    prefillPromptCaches (encSeq := encSeq) model encoderHidden.device crossCaches promptIds
-  let initBeam : BeamState cfg := {
+    prefillPromptCaches (encSeq := encSeq) model crossCaches promptIds
+  let initBeam : BeamState (device := device) cfg := {
     allIds := promptIds
     caches := caches0
     lastLogits? := some firstLogits
@@ -964,10 +962,10 @@ private def chooseBetterCandidate (a b : WhisperDecodeCandidate) : WhisperDecode
 private def decodeAtTemperature
     {cfg : WhisperConfig}
     {encSeq : UInt64}
-    (model : WhisperForConditionalGeneration cfg)
+    (model : WhisperForConditionalGeneration (device := device) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
-    (encoderHidden : Tensor { shape := #[1, encSeq, cfg.dModel] })
-    (crossCaches : Array (WhisperForConditionalGeneration.LayerCrossCache cfg))
+    (encoderHidden : Tensor { device := device, shape := #[1, encSeq, cfg.dModel] })
+    (crossCaches : Array (WhisperForConditionalGeneration.LayerCrossCache (device := device) cfg))
     (promptIds : Array UInt32)
     (noSpeechTokenId : Option UInt32)
     (rules : DecodeTokenRules)
@@ -977,7 +975,7 @@ private def decodeAtTemperature
     (temperature : Float)
     : IO WhisperDecodeCandidate := do
   let (firstLogits, caches0, nextPos0) ←
-    prefillPromptCaches (encSeq := encSeq) model encoderHidden.device crossCaches promptIds
+    prefillPromptCaches (encSeq := encSeq) model crossCaches promptIds
   if temperature <= 0.0 then
     let st ←
       if opts.beamSize > 1 then
@@ -1040,10 +1038,10 @@ private def decodeAtTemperature
 private partial def decodeWithFallbackLoop
     {cfg : WhisperConfig}
     {encSeq : UInt64}
-    (model : WhisperForConditionalGeneration cfg)
+    (model : WhisperForConditionalGeneration (device := device) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
-    (encoderHidden : Tensor { shape := #[1, encSeq, cfg.dModel] })
-    (crossCaches : Array (WhisperForConditionalGeneration.LayerCrossCache cfg))
+    (encoderHidden : Tensor { device := device, shape := #[1, encSeq, cfg.dModel] })
+    (crossCaches : Array (WhisperForConditionalGeneration.LayerCrossCache (device := device) cfg))
     (promptIds : Array UInt32)
     (promptIdsFallback : Array UInt32)
     (noSpeechTokenId : Option UInt32)
@@ -1094,9 +1092,9 @@ private partial def decodeWithFallbackLoop
 private def decodeWithFallback
     {cfg : WhisperConfig}
     {encSeq : UInt64}
-    (model : WhisperForConditionalGeneration cfg)
+    (model : WhisperForConditionalGeneration (device := device) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
-    (encoderHidden : Tensor { shape := #[1, encSeq, cfg.dModel] })
+    (encoderHidden : Tensor { device := device, shape := #[1, encSeq, cfg.dModel] })
     (promptIds : Array UInt32)
     (promptIdsFallback : Array UInt32)
     (noSpeechTokenId : Option UInt32)
@@ -1125,7 +1123,7 @@ private def decodeWithFallback
 
 private def maybeAppendTailRescue
     {cfg : WhisperConfig}
-    (model : WhisperForConditionalGeneration cfg)
+    (model : WhisperForConditionalGeneration (device := device) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (pre : PreprocessorConfig)
     (wav16k : Array Float)
@@ -1153,9 +1151,9 @@ private def maybeAppendTailRescue
         (device := model.model.decoderTokenEmbedding.device)
     match pack with
     | ⟨frames, out⟩ =>
-      let inputFeatures : Tensor { shape := #[1, cfg.numMelBins, frames] } :=
+      let inputFeatures : Tensor { device := device, shape := #[1, cfg.numMelBins, frames] } :=
         (Tensor.reshapeChecked out.inputFeatures #[1, cfg.numMelBins, frames]).forgetDType
-      let encoderHidden : Tensor { shape := #[1, WhisperConfig.conv2OutputSeq frames, cfg.dModel] } ←
+      let encoderHidden : Tensor { device := device, shape := #[1, WhisperConfig.conv2OutputSeq frames, cfg.dModel] } ←
         model.encode (frames := frames) inputFeatures
       let maxNewCapPrompt :=
         if maxTarget <= basePrompt.size + 1 then
@@ -1211,12 +1209,12 @@ def loadFromPretrainedDir (modelDir : String) : IO WhisperBundle := do
       doNormalize := false
       dither := 0.0
     }
-  let model ← WhisperForConditionalGeneration.loadSharded modelDir cfg
-  pure { cfg, model, tok, preprocessor }
+  let ⟨device, model⟩ ← WhisperForConditionalGeneration.loadSharded modelDir cfg
+  pure { cfg, device, model, tok, preprocessor }
 
 private def transcribeWavCore
     {cfg : WhisperConfig}
-    (model : WhisperForConditionalGeneration cfg)
+    (model : WhisperForConditionalGeneration (device := device) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (pre : PreprocessorConfig)
     (wav16k : Array Float)
@@ -1315,9 +1313,9 @@ private def transcribeWavCore
           (device := frontendDevice)
       match pack with
       | ⟨frames, out⟩ =>
-        let inputFeatures : Tensor { shape := #[1, cfg.numMelBins, frames] } :=
+        let inputFeatures : Tensor { device := device, shape := #[1, cfg.numMelBins, frames] } :=
           (Tensor.reshapeChecked out.inputFeatures #[1, cfg.numMelBins, frames]).forgetDType
-        let encoderHidden : Tensor { shape := #[1, WhisperConfig.conv2OutputSeq frames, cfg.dModel] } ←
+        let encoderHidden : Tensor { device := device, shape := #[1, WhisperConfig.conv2OutputSeq frames, cfg.dModel] } ←
           model.encode (frames := frames) inputFeatures
         let promptIds :=
           composePromptIds
@@ -1413,7 +1411,7 @@ private def transcribeWavCore
 
 def transcribeWaveform16k
     {cfg : WhisperConfig}
-    (model : WhisperForConditionalGeneration cfg)
+    (model : WhisperForConditionalGeneration (device := device) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (pre : PreprocessorConfig)
     (wav16k : Array Float)
@@ -1426,7 +1424,7 @@ def transcribeWaveform16k
 
 def transcribeWav
     {cfg : WhisperConfig}
-    (model : WhisperForConditionalGeneration cfg)
+    (model : WhisperForConditionalGeneration (device := device) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (pre : PreprocessorConfig)
     (wavPath : String)

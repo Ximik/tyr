@@ -21,12 +21,14 @@ import Tyr.Distributed
 
 namespace torch.Eval.CORE
 
+variable {device : Device}
+
 open torch
 
 /-- Evaluation models preserve the supplied batch and sequence dimensions and
 expose their actual vocabulary size in the result type. -/
 abbrev ModelRunner (vocab : UInt64) := {batch seq : UInt64} →
-  Tensor { shape := #[batch, seq], dtype := .Int64 } → IO (Tensor { shape := #[batch, seq, vocab], dtype := .Float32 })
+  Tensor { shape := #[batch, seq], dtype := .Int64, device := device } → IO (Tensor { shape := #[batch, seq, vocab], dtype := .Float32, device := device })
 
 /-! ## Task Types -/
 
@@ -177,7 +179,7 @@ def padSequences (sequences : Array (Array UInt64)) (padToken : UInt64) : Array 
 
 /-- Convert padded sequences to input tensor -/
 def sequencesToTensor {batch seq : UInt64} (sequences : Array (Array UInt64))
-    : Tensor { shape := #[batch, seq], dtype := .Int64 } :=
+    : Tensor { shape := #[batch, seq], dtype := .Int64, device := .CPU } :=
   -- Flatten and convert to int64 array
   let flat := sequences.foldl (fun acc seq => acc ++ seq.map (·.toInt64)) #[]
   let tensor := Tensor.fromInt64Array flat
@@ -245,8 +247,8 @@ structure EvalResult where
 
 /-- Compute per-token losses from model output.
     Returns losses tensor where losses[i] is loss for predicting token i+1 from position i. -/
-def computeLosses {batch seq vocab : UInt64} (logits : Tensor { shape := #[batch, seq, vocab], dtype := .Float32 })
-    (targetIds : Tensor { shape := #[batch, seq], dtype := .Int64 }) : Tensor { shape := #[batch, seq], dtype := .Float32 } :=
+def computeLosses {batch seq vocab : UInt64} (logits : Tensor { shape := #[batch, seq, vocab], dtype := .Float32, device := device })
+    (targetIds : Tensor { shape := #[batch, seq], dtype := .Int64, device := device }) : Tensor { shape := #[batch, seq], dtype := .Float32, device := device } :=
   -- Compute cross-entropy at each position
   -- logits: [batch, seq, vocab], targets: [batch, seq]
   -- Result: [batch, seq] (loss at each position)
@@ -265,8 +267,8 @@ def computeLosses {batch seq vocab : UInt64} (logits : Tensor { shape := #[batch
     3. Average the losses over the continuation region (startIdx to endIdx)
     4. Pick the option with lowest average loss -/
 def evaluateMC {batch seq vocab : UInt64}
-    (logits : Tensor { shape := #[batch, seq, vocab], dtype := .Float32 })
-    (targetIds : Tensor { shape := #[batch, seq], dtype := .Int64 })
+    (logits : Tensor { shape := #[batch, seq, vocab], dtype := .Float32, device := device })
+    (targetIds : Tensor { shape := #[batch, seq], dtype := .Int64, device := device })
     (batchInfo : BatchInfo)
     (goldIdx : Nat) : IO EvalResult := do
   -- Compute per-position losses: [batch, seq]
@@ -323,8 +325,8 @@ def evaluateMC {batch seq vocab : UInt64}
     2. Compare predictions[start-1:end-1] with target tokens[start:end]
     3. Return correct=true if all predictions match -/
 def evaluateLM {seq vocab : UInt64}
-    (logits : Tensor { shape := #[1, seq, vocab], dtype := .Float32 })
-    (targetIds : Tensor { shape := #[1, seq], dtype := .Int64 })
+    (logits : Tensor { shape := #[1, seq, vocab], dtype := .Float32, device := device })
+    (targetIds : Tensor { shape := #[1, seq], dtype := .Int64, device := device })
     (batchInfo : BatchInfo) : IO EvalResult := do
   let startIdx := batchInfo.startIndices[0]!
   let endIdx := batchInfo.endIndices[0]!
@@ -386,9 +388,11 @@ def evaluateSingleExample {vocab : UInt64}
     (item : EvalItem)
     (taskMeta : TaskMeta)
     (tokenize : String → Array UInt64)
-    (runModel : ModelRunner vocab)
+    (runModel : ModelRunner (device := device) vocab)
     (config : EvalConfig)
     : IO (Option Bool) := do
+  unless config.device == device do
+    throw <| IO.userError "CORE evaluation device does not match the model callback"
   let bosToken := config.bosToken
   -- Render prompts and get batch info based on task type
   let maybeBatchAndGold := match taskMeta.taskType, item with
@@ -419,7 +423,7 @@ def evaluateSingleExample {vocab : UInt64}
     let inputReshaped := Tensor.reshapeChecked inputTensor #[batchSize, seqLen]
 
     -- Run model forward
-    let logits ← runModel (inputReshaped.to config.device)
+    let logits ← runModel (inputReshaped.to device)
 
     -- Create target IDs tensor (same as input for loss computation)
     let targetTensor := Tensor.fromInt64Array (paddedTokens.map (·.toInt64))
@@ -447,7 +451,7 @@ def evaluateTask {vocab : UInt64}
     (examples : Array EvalItem)
     (taskMeta : TaskMeta)
     (tokenize : String → Array UInt64)
-    (runModel : ModelRunner vocab)
+    (runModel : ModelRunner (device := device) vocab)
     (config : EvalConfig)
     : IO Float := do
   if examples.isEmpty then return 0.0

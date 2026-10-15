@@ -3,7 +3,7 @@
 
   CPU↔GPU parity for the device virtual-Brownian-tree increment: the
   kernel's per-element descent must reproduce the CPU tensor instance
-  (`VirtualBrownianTreeOps (Tensor { shape := s, dtype := .Float32 })`) — identical key derivation, identical
+  (`VirtualBrownianTreeOps (Tensor { shape := s, dtype := .Float32, device := .CPU })`) — identical key derivation, identical
   bridge arithmetic — within Float32 descent tolerance. Also reports the
   device-vs-CPU sampling wall-clock (the CPU path measured ~4.6µs per
   element-increment).
@@ -33,7 +33,7 @@ def runOnce : IO Bool := do
   let queries : List (Float × Float) := [(0.0, 1.0), (0.13, 0.61), (0.25, 0.5)]
 
   -- CPU reference: the tensor VBT instance (same keying)
-  let cpuTree : VirtualBrownianTree (Tensor { shape := #[n], dtype := .Float32 }) := {
+  let cpuTree : VirtualBrownianTree (Tensor { shape := #[n], dtype := .Float32, device := .CPU }) := {
     t0 := 0.0, t1 := 1.0, tol := tol, seed := treeSeed
     shape := Tensor.zeros #[n]
   }

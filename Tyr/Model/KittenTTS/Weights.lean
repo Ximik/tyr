@@ -13,6 +13,8 @@ import Tyr.Model.KittenTTS.Model
 
 namespace torch.kittentts
 
+variable {device : Device}
+
 open torch.Log
 
 private structure LoadedCheckpointWeights where
@@ -23,12 +25,15 @@ private structure LoadedCheckpointWeights where
   decoder : KokoroCheckpoint.WeightsDecoder
 
 /-- Check fixed-schema weights against the runtime model dimensions without reshaping them. -/
-private def checkedWeight {source target : Shape} (tensor : Tensor { shape := source, dtype := .Float32 }) : IO (Tensor { shape := target, dtype := .Float32 }) :=
-  match Tensor.ofRaw tensor.raw with
+private def checkedWeight {source target : Shape} {sourceDevice : Device}
+    (tensor : Tensor { shape := source, dtype := .Float32, device := sourceDevice }) :
+    IO (Tensor { shape := target, dtype := .Float32, device := device }) := do
+  let raw ← RawTensor.convertIO source tensor.raw device none
+  match Tensor.ofRaw raw with
   | .ok tensor => pure tensor
   | .error message => throw <| IO.userError s!"KittenTTS checkpoint shape: {message}"
 
-private def reqGradFalse {s : Shape} (t : Tensor { shape := s, dtype := .Float32 }) : Tensor { shape := s, dtype := .Float32 } :=
+private def reqGradFalse {s : Shape} (t : Tensor { shape := s, dtype := .Float32, device := device }) : Tensor { shape := s, dtype := .Float32, device := device } :=
   Tensor.detach t
 
 private def getOrThrow {α} (xs : Array α) (idx : Nat) (msg : String) : IO α :=
@@ -45,41 +50,41 @@ private def warnShapeOverride (log : Handlers) (field : String) (cfgValue actual
   pure ()
 
 private def normDim0_3d {d0 d1 d2 : UInt64}
-    (x : Tensor { shape := #[d0, d1, d2], dtype := .Float32 })
-    : Tensor { shape := #[d0], dtype := .Float32 } :=
-  let sq : Tensor { shape := #[d0, d1, d2], dtype := .Float32 } := x * x
-  let s2 : Tensor { shape := #[d0, d1, 1], dtype := .Float32 } := Tensor.sumDim sq 2 true
-  let s1 : Tensor { shape := #[d0, 1, 1], dtype := .Float32 } := Tensor.sumDim s2 1 true
+    (x : Tensor { shape := #[d0, d1, d2], dtype := .Float32, device := device })
+    : Tensor { shape := #[d0], dtype := .Float32, device := device } :=
+  let sq : Tensor { shape := #[d0, d1, d2], dtype := .Float32, device := device } := x * x
+  let s2 : Tensor { shape := #[d0, d1, 1], dtype := .Float32, device := device } := Tensor.sumDim sq 2 true
+  let s1 : Tensor { shape := #[d0, 1, 1], dtype := .Float32, device := device } := Tensor.sumDim s2 1 true
   Tensor.reshapeChecked (Tensor.sqrt (s1 + (1e-12 : Float))) #[d0]
 
 private def materializeWeightNormConv1d {outC inC kernel : UInt64}
-    (weightV : Tensor { shape := #[outC, inC, kernel], dtype := .Float32 })
-    (weightG : Tensor { shape := #[outC], dtype := .Float32 })
-    : Tensor { shape := #[outC, inC, kernel], dtype := .Float32 } :=
-  let denom : Tensor { shape := #[outC, 1, 1], dtype := .Float32 } := Tensor.reshapeChecked (normDim0_3d weightV) #[outC, 1, 1]
-  let denomE : Tensor { shape := #[outC, inC, kernel], dtype := .Float32 } := Tensor.expand denom #[outC, inC, kernel]
-  let gain : Tensor { shape := #[outC, 1, 1], dtype := .Float32 } := Tensor.reshapeChecked weightG #[outC, 1, 1]
-  let gainE : Tensor { shape := #[outC, inC, kernel], dtype := .Float32 } := Tensor.expand gain #[outC, inC, kernel]
+    (weightV : Tensor { shape := #[outC, inC, kernel], dtype := .Float32, device := device })
+    (weightG : Tensor { shape := #[outC], dtype := .Float32, device := device })
+    : Tensor { shape := #[outC, inC, kernel], dtype := .Float32, device := device } :=
+  let denom : Tensor { shape := #[outC, 1, 1], dtype := .Float32, device := device } := Tensor.reshapeChecked (normDim0_3d weightV) #[outC, 1, 1]
+  let denomE : Tensor { shape := #[outC, inC, kernel], dtype := .Float32, device := device } := Tensor.expand denom #[outC, inC, kernel]
+  let gain : Tensor { shape := #[outC, 1, 1], dtype := .Float32, device := device } := Tensor.reshapeChecked weightG #[outC, 1, 1]
+  let gainE : Tensor { shape := #[outC, inC, kernel], dtype := .Float32, device := device } := Tensor.expand gain #[outC, inC, kernel]
   Tensor.div (weightV * gainE) denomE
 
 private def linearFromTensors {inDim outDim : UInt64}
-    (weight : Tensor { shape := #[outDim, inDim], dtype := .Float32 })
-    (bias : Tensor { shape := #[outDim], dtype := .Float32 })
-    : LinearNorm inDim outDim := {
+    (weight : Tensor { shape := #[outDim, inDim], dtype := .Float32, device := device })
+    (bias : Tensor { shape := #[outDim], dtype := .Float32, device := device })
+    : LinearNorm (device := device) inDim outDim := {
       weight := reqGradFalse weight
       bias := reqGradFalse bias
     }
 
 private def biLSTMFromTensors {inputSize hiddenSize : UInt64}
-    (wxForward : Tensor { shape := #[4 * hiddenSize, inputSize], dtype := .Float32 })
-    (whForward : Tensor { shape := #[4 * hiddenSize, hiddenSize], dtype := .Float32 })
-    (biasIHForward : Tensor { shape := #[4 * hiddenSize], dtype := .Float32 })
-    (biasHHForward : Tensor { shape := #[4 * hiddenSize], dtype := .Float32 })
-    (wxBackward : Tensor { shape := #[4 * hiddenSize, inputSize], dtype := .Float32 })
-    (whBackward : Tensor { shape := #[4 * hiddenSize, hiddenSize], dtype := .Float32 })
-    (biasIHBackward : Tensor { shape := #[4 * hiddenSize], dtype := .Float32 })
-    (biasHHBackward : Tensor { shape := #[4 * hiddenSize], dtype := .Float32 })
-    : BiLSTM inputSize hiddenSize := {
+    (wxForward : Tensor { shape := #[4 * hiddenSize, inputSize], dtype := .Float32, device := device })
+    (whForward : Tensor { shape := #[4 * hiddenSize, hiddenSize], dtype := .Float32, device := device })
+    (biasIHForward : Tensor { shape := #[4 * hiddenSize], dtype := .Float32, device := device })
+    (biasHHForward : Tensor { shape := #[4 * hiddenSize], dtype := .Float32, device := device })
+    (wxBackward : Tensor { shape := #[4 * hiddenSize, inputSize], dtype := .Float32, device := device })
+    (whBackward : Tensor { shape := #[4 * hiddenSize, hiddenSize], dtype := .Float32, device := device })
+    (biasIHBackward : Tensor { shape := #[4 * hiddenSize], dtype := .Float32, device := device })
+    (biasHHBackward : Tensor { shape := #[4 * hiddenSize], dtype := .Float32, device := device })
+    : BiLSTM (device := device) inputSize hiddenSize := {
       wxForward := reqGradFalse wxForward
       whForward := reqGradFalse whForward
       biasIHForward := reqGradFalse biasIHForward
@@ -91,19 +96,19 @@ private def biLSTMFromTensors {inputSize hiddenSize : UInt64}
     }
 
 private def conv1dFromWeightNorm {inC outC kernel stride padding dilation : UInt64}
-    (weightV : Tensor { shape := #[outC, inC, kernel], dtype := .Float32 })
-    (weightG3 : Tensor { shape := #[outC, 1, 1], dtype := .Float32 })
-    (bias : Tensor { shape := #[outC], dtype := .Float32 })
-    : Conv1dParams inC outC kernel stride padding dilation := {
+    (weightV : Tensor { shape := #[outC, inC, kernel], dtype := .Float32, device := device })
+    (weightG3 : Tensor { shape := #[outC, 1, 1], dtype := .Float32, device := device })
+    (bias : Tensor { shape := #[outC], dtype := .Float32, device := device })
+    : Conv1dParams (device := device) inC outC kernel stride padding dilation := {
       weight := reqGradFalse <| materializeWeightNormConv1d weightV (Tensor.reshapeChecked weightG3 #[outC])
       bias := reqGradFalse bias
     }
 
 private def wnConv1dFromWeightNorm {inC outC kernel stride padding dilation : UInt64}
-    (weightV : Tensor { shape := #[outC, inC, kernel], dtype := .Float32 })
-    (weightG3 : Tensor { shape := #[outC, 1, 1], dtype := .Float32 })
-    (bias : Tensor { shape := #[outC], dtype := .Float32 })
-    : WNConv1dParams inC outC kernel stride padding dilation := {
+    (weightV : Tensor { shape := #[outC, inC, kernel], dtype := .Float32, device := device })
+    (weightG3 : Tensor { shape := #[outC, 1, 1], dtype := .Float32, device := device })
+    (bias : Tensor { shape := #[outC], dtype := .Float32, device := device })
+    : WNConv1dParams (device := device) inC outC kernel stride padding dilation := {
       weightV := reqGradFalse weightV
       weightG := reqGradFalse (Tensor.reshapeChecked weightG3 #[outC])
       bias := reqGradFalse bias
@@ -111,10 +116,10 @@ private def wnConv1dFromWeightNorm {inC outC kernel stride padding dilation : UI
 
 private def wnDepthwiseTransConv1dFromWeightNorm
     {channels kernel stride padding outputPadding dilation : UInt64}
-    (weightV : Tensor { shape := #[channels, 1, kernel], dtype := .Float32 })
-    (weightG3 : Tensor { shape := #[channels, 1, 1], dtype := .Float32 })
-    (bias : Tensor { shape := #[channels], dtype := .Float32 })
-    : WNDepthwiseTransConv1dParams channels kernel stride padding outputPadding dilation := {
+    (weightV : Tensor { shape := #[channels, 1, kernel], dtype := .Float32, device := device })
+    (weightG3 : Tensor { shape := #[channels, 1, 1], dtype := .Float32, device := device })
+    (bias : Tensor { shape := #[channels], dtype := .Float32, device := device })
+    : WNDepthwiseTransConv1dParams (device := device) channels kernel stride padding outputPadding dilation := {
       weightV := reqGradFalse weightV
       weightG := reqGradFalse (Tensor.reshapeChecked weightG3 #[channels])
       bias := reqGradFalse bias
@@ -122,47 +127,47 @@ private def wnDepthwiseTransConv1dFromWeightNorm
 
 private def wnConvTranspose1dFromWeightNorm
     {inC outC kernel stride padding outputPadding dilation : UInt64}
-    (weightV : Tensor { shape := #[inC, outC, kernel], dtype := .Float32 })
-    (weightG3 : Tensor { shape := #[inC, 1, 1], dtype := .Float32 })
-    (bias : Tensor { shape := #[outC], dtype := .Float32 })
-    : WNConvTranspose1dParams inC outC kernel stride padding outputPadding dilation := {
+    (weightV : Tensor { shape := #[inC, outC, kernel], dtype := .Float32, device := device })
+    (weightG3 : Tensor { shape := #[inC, 1, 1], dtype := .Float32, device := device })
+    (bias : Tensor { shape := #[outC], dtype := .Float32, device := device })
+    : WNConvTranspose1dParams (device := device) inC outC kernel stride padding outputPadding dilation := {
       weightV := reqGradFalse weightV
       weightG := reqGradFalse (Tensor.reshapeChecked weightG3 #[inC])
       bias := reqGradFalse bias
     }
 
 private def adaLayerNormFromLinear {styleDim channels : UInt64}
-    (weight : Tensor { shape := #[2 * channels, styleDim], dtype := .Float32 })
-    (bias : Tensor { shape := #[2 * channels], dtype := .Float32 })
-    : AdaLayerNorm styleDim channels := {
+    (weight : Tensor { shape := #[2 * channels, styleDim], dtype := .Float32, device := device })
+    (bias : Tensor { shape := #[2 * channels], dtype := .Float32, device := device })
+    : AdaLayerNorm (device := device) styleDim channels := {
       fc := linearFromTensors weight bias
     }
 
 private def adaIN1dFromLinear {styleDim channels : UInt64}
-    (weight : Tensor { shape := #[2 * channels, styleDim], dtype := .Float32 })
-    (bias : Tensor { shape := #[2 * channels], dtype := .Float32 })
-    : AdaIN1d styleDim channels := {
+    (weight : Tensor { shape := #[2 * channels, styleDim], dtype := .Float32, device := device })
+    (bias : Tensor { shape := #[2 * channels], dtype := .Float32, device := device })
+    : AdaIN1d (device := device) styleDim channels := {
       fc := linearFromTensors weight bias
-      normWeight := Tensor.castLike weight (reqGradFalse (Tensor.ones #[channels] false Device.CPU))
-      normBias := Tensor.castLike weight (reqGradFalse (Tensor.zeros #[channels] false Device.CPU))
+      normWeight := Tensor.castLike weight (reqGradFalse (Tensor.ones #[channels] false device))
+      normBias := Tensor.castLike weight (reqGradFalse (Tensor.zeros #[channels] false device))
     }
 
 private def adaIN1dDynFromLinear {styleDim channels : UInt64}
-    (weight : Tensor { shape := #[2 * channels, styleDim], dtype := .Float32 })
-    (bias : Tensor { shape := #[2 * channels], dtype := .Float32 })
-    : AdaIN1dDyn styleDim := {
+    (weight : Tensor { shape := #[2 * channels, styleDim], dtype := .Float32, device := device })
+    (bias : Tensor { shape := #[2 * channels], dtype := .Float32, device := device })
+    : AdaIN1dDyn (device := device) styleDim := {
       fcWeight := Tensor.packShape (reqGradFalse weight)
       fcBias := Tensor.packShape (reqGradFalse bias)
-      normWeight := Tensor.packShape (Tensor.castLike weight (Tensor.ones #[channels] false Device.CPU))
-      normBias := Tensor.packShape (Tensor.castLike weight (Tensor.zeros #[channels] false Device.CPU))
+      normWeight := Tensor.packShape (Tensor.castLike weight (Tensor.ones #[channels] false device))
+      normBias := Tensor.packShape (Tensor.castLike weight (Tensor.zeros #[channels] false device))
     }
 
 private def wnConv1dDynFromWeightNorm {inC outC kernel : UInt64}
-    (weightV : Tensor { shape := #[outC, inC, kernel], dtype := .Float32 })
-    (weightG3 : Tensor { shape := #[outC, 1, 1], dtype := .Float32 })
-    (bias : Tensor { shape := #[outC], dtype := .Float32 })
+    (weightV : Tensor { shape := #[outC, inC, kernel], dtype := .Float32, device := device })
+    (weightG3 : Tensor { shape := #[outC, 1, 1], dtype := .Float32, device := device })
+    (bias : Tensor { shape := #[outC], dtype := .Float32, device := device })
     (stride padding dilation : UInt64)
-    : WNConv1dDyn := {
+    : (WNConv1dDyn (device := device)) := {
       weightV := Tensor.packShape (reqGradFalse weightV)
       weightG := Tensor.packShape (reqGradFalse (Tensor.reshapeChecked weightG3 #[outC]))
       bias := Tensor.packShape (reqGradFalse bias)
@@ -173,10 +178,10 @@ private def wnConv1dDynFromWeightNorm {inC outC kernel : UInt64}
     }
 
 private def wnConv1dDynFromPlain {inC outC kernel : UInt64}
-    (weight : Tensor { shape := #[outC, inC, kernel], dtype := .Float32 })
-    (bias : Tensor { shape := #[outC], dtype := .Float32 })
+    (weight : Tensor { shape := #[outC, inC, kernel], dtype := .Float32, device := device })
+    (bias : Tensor { shape := #[outC], dtype := .Float32, device := device })
     (stride padding dilation : UInt64)
-    : WNConv1dDyn := {
+    : (WNConv1dDyn (device := device)) := {
       weightV := Tensor.packShape (reqGradFalse weight)
       weightG := Tensor.packShape (reqGradFalse (normDim0_3d weight))
       bias := Tensor.packShape (reqGradFalse bias)
@@ -187,11 +192,11 @@ private def wnConv1dDynFromPlain {inC outC kernel : UInt64}
     }
 
 private def wnConvTranspose1dDynFromWeightNorm {inC outC kernel : UInt64}
-    (weightV : Tensor { shape := #[inC, outC, kernel], dtype := .Float32 })
-    (weightG3 : Tensor { shape := #[inC, 1, 1], dtype := .Float32 })
-    (bias : Tensor { shape := #[outC], dtype := .Float32 })
+    (weightV : Tensor { shape := #[inC, outC, kernel], dtype := .Float32, device := device })
+    (weightG3 : Tensor { shape := #[inC, 1, 1], dtype := .Float32, device := device })
+    (bias : Tensor { shape := #[outC], dtype := .Float32, device := device })
     (stride padding outputPadding dilation : UInt64)
-    : WNConvTranspose1dDyn := {
+    : (WNConvTranspose1dDyn (device := device)) := {
       weightV := Tensor.packShape (reqGradFalse weightV)
       weightG := Tensor.packShape (reqGradFalse (Tensor.reshapeChecked weightG3 #[inC]))
       bias := Tensor.packShape (reqGradFalse bias)
@@ -202,17 +207,20 @@ private def wnConvTranspose1dDynFromWeightNorm {inC outC kernel : UInt64}
       dilation := dilation
     }
 
-private def alphaDyn {shape : Shape} (x : Tensor { shape := shape, dtype := .Float32 }) : ShapePackedTensor .Float32 :=
-  Tensor.packShape (reqGradFalse x)
+private def alphaDyn {shape : Shape} {sourceDevice : Device}
+    (x : Tensor { shape := shape, dtype := .Float32, device := sourceDevice }) :
+    IO (ShapePackedTensor .Float32 device) := do
+  let tensor : Tensor { shape, dtype := .Float32, device } ← checkedWeight x
+  pure (Tensor.packShape (reqGradFalse tensor))
 
 private def generatorAdaINResBlockFromParts {styleDim : UInt64}
-    (convs1 : Array WNConv1dDyn)
-    (convs2 : Array WNConv1dDyn)
-    (norms1 : Array (AdaIN1dDyn styleDim))
-    (norms2 : Array (AdaIN1dDyn styleDim))
-    (alpha1 : Array (ShapePackedTensor .Float32))
-    (alpha2 : Array (ShapePackedTensor .Float32))
-    : GeneratorAdaINResBlock styleDim := {
+    (convs1 : Array (WNConv1dDyn (device := device)))
+    (convs2 : Array (WNConv1dDyn (device := device)))
+    (norms1 : Array (AdaIN1dDyn (device := device) styleDim))
+    (norms2 : Array (AdaIN1dDyn (device := device) styleDim))
+    (alpha1 : Array (ShapePackedTensor .Float32 device))
+    (alpha2 : Array (ShapePackedTensor .Float32 device))
+    : GeneratorAdaINResBlock (device := device) styleDim := {
       convs1, convs2, norms1, norms2, alpha1, alpha2
     }
 
@@ -239,13 +247,13 @@ private def loadGeneratorAdaINResBlockFromCheckpointArrays
     (alpha2 : Array ζ)
     (kernel : UInt64)
     (dilations : Array UInt64)
-    (mkConv1 : α → UInt64 → UInt64 → IO WNConv1dDyn)
-    (mkConv2 : β → IO WNConv1dDyn)
-    (mkAdaIN1 : γ → IO (AdaIN1dDyn styleDim))
-    (mkAdaIN2 : δ → IO (AdaIN1dDyn styleDim))
-    (mkAlpha1 : ε → ShapePackedTensor .Float32)
-    (mkAlpha2 : ζ → ShapePackedTensor .Float32)
-    : IO (GeneratorAdaINResBlock styleDim) := do
+    (mkConv1 : α → UInt64 → UInt64 → IO (WNConv1dDyn (device := device)))
+    (mkConv2 : β → IO (WNConv1dDyn (device := device)))
+    (mkAdaIN1 : γ → IO (AdaIN1dDyn (device := device) styleDim))
+    (mkAdaIN2 : δ → IO (AdaIN1dDyn (device := device) styleDim))
+    (mkAlpha1 : ε → IO (ShapePackedTensor .Float32 device))
+    (mkAlpha2 : ζ → IO (ShapePackedTensor .Float32 device))
+    : IO (GeneratorAdaINResBlock (device := device) styleDim) := do
   let convs1 ←
     mapArrayIdxM convs1 fun i node => do
       let dilation := dilations.getD i 1
@@ -260,21 +268,21 @@ private def loadGeneratorAdaINResBlockFromCheckpointArrays
       convs2
       norms1
       norms2
-      (alpha1.map mkAlpha1)
-      (alpha2.map mkAlpha2)
+      (← mapArrayM alpha1 mkAlpha1)
+      (← mapArrayM alpha2 mkAlpha2)
 
 private def loadKittenAlbertFromCheckpoint
     (weights : KokoroCheckpoint.WeightsBert)
     (cfg : KittenTTSConfig)
-    : IO (KittenAlbert cfg.nToken cfg.plbert) := do
-  let embeddings : AlbertEmbeddings cfg.nToken cfg.plbert := {
+    : IO (KittenAlbert (device := device) cfg.nToken cfg.plbert) := do
+  let embeddings : AlbertEmbeddings (device := device) cfg.nToken cfg.plbert := {
     wordEmbeddings := reqGradFalse (← checkedWeight weights.embeddings.word_embeddings.weight)
     positionEmbeddings := reqGradFalse (← checkedWeight weights.embeddings.position_embeddings.weight)
     tokenTypeEmbeddings := reqGradFalse (← checkedWeight weights.embeddings.token_type_embeddings.weight)
     layerNormWeight := reqGradFalse (← checkedWeight weights.embeddings.layernorm.weight)
     layerNormBias := reqGradFalse (← checkedWeight weights.embeddings.layernorm.bias)
   }
-  let groups : Array (KittenAlbertLayerGroup cfg.plbert) ←
+  let groups : Array (KittenAlbertLayerGroup (device := device) cfg.plbert) ←
     weights.encoder.albert_layer_groups.mapM fun group => do
       let layers ← group.albert_layers.mapM fun layer => do pure {
         attention := {
@@ -291,22 +299,22 @@ private def loadKittenAlbertFromCheckpoint
         ffnOutput := linearFromTensors (← checkedWeight layer.ffn_output.weight) (← checkedWeight layer.ffn_output.bias)
       }
       pure { layers }
-  let encoder : KittenAlbertEncoder cfg.plbert := {
+  let encoder : KittenAlbertEncoder (device := device) cfg.plbert := {
     embeddingHiddenMappingIn :=
       linearFromTensors
         (← checkedWeight weights.encoder.embedding_hidden_mapping_in.weight)
         (← checkedWeight weights.encoder.embedding_hidden_mapping_in.bias)
     groups := groups
   }
-  let pooler : LinearNorm cfg.plbert.hiddenSize cfg.plbert.hiddenSize :=
+  let pooler : LinearNorm (device := device) cfg.plbert.hiddenSize cfg.plbert.hiddenSize :=
     linearFromTensors (← checkedWeight weights.pooler.weight) (← checkedWeight weights.pooler.bias)
   pure { embeddings, encoder, pooler }
 
 private def loadTextEncoderFromCheckpoint
     (weights : KokoroCheckpoint.WeightsTextencoder)
     (cfg : KittenTTSConfig)
-    : IO (TextEncoder cfg) := do
-  let convs : Array (TextConvLayer cfg) ←
+    : IO (TextEncoder (device := device) cfg) := do
+  let convs : Array (TextConvLayer (device := device) cfg) ←
     weights.cnn.mapM fun layer => do pure {
       conv := conv1dFromWeightNorm (← checkedWeight layer.i0.weight_v) (← checkedWeight layer.i0.weight_g) (← checkedWeight layer.i0.bias)
       lnWeight := reqGradFalse (← checkedWeight layer.i1.gamma)
@@ -331,7 +339,7 @@ private def loadTextEncoderFromCheckpoint
 private def loadDurationEncoderFromCheckpoint
     (weights : KokoroCheckpoint.WeightsPredictorTextencoder)
     (cfg : KittenTTSConfig)
-    : IO (DurationEncoder cfg) := do pure {
+    : IO (DurationEncoder (device := device) cfg) := do pure {
       lstms := #[
         biLSTMFromTensors
           (← checkedWeight weights.lstms.i0.weight_ih_l0)
@@ -372,7 +380,7 @@ private def loadProsodyPredictorFromCheckpoint
     (weights : KokoroCheckpoint.WeightsPredictor)
     (cfg : KittenTTSConfig)
     (log : Handlers := {})
-    : IO (ProsodyPredictor cfg) := do
+    : IO (ProsodyPredictor (device := device) cfg) := do
   log.onInfo "  predictor.text_encoder..."
   let durationEncoder ← loadDurationEncoderFromCheckpoint weights.text_encoder cfg
   log.onInfo "  predictor.lstm..."
@@ -387,7 +395,7 @@ private def loadProsodyPredictorFromCheckpoint
       (← checkedWeight weights.lstm.bias_ih_l0_reverse)
       (← checkedWeight weights.lstm.bias_hh_l0_reverse)
   log.onInfo "  predictor.duration_proj..."
-  let durationProj : LinearNorm cfg.hiddenDim cfg.maxDur :=
+  let durationProj : LinearNorm (device := device) cfg.hiddenDim cfg.maxDur :=
     linearFromTensors
       (← checkedWeight weights.duration_proj.linear_layer.weight)
       (← checkedWeight weights.duration_proj.linear_layer.bias)
@@ -403,22 +411,22 @@ private def loadProsodyPredictorFromCheckpoint
       (← checkedWeight weights.shared.bias_ih_l0_reverse)
       (← checkedWeight weights.shared.bias_hh_l0_reverse)
   log.onInfo "  predictor.F0 blocks..."
-  let f0Blk0 : AdainResBlk1dSame cfg.hiddenDim cfg.hiddenDim cfg.styleDim := {
+  let f0Blk0 : AdainResBlk1dSame (device := device) cfg.hiddenDim cfg.hiddenDim cfg.styleDim := {
     conv1 := wnConv1dFromWeightNorm (← checkedWeight weights.f0.i0.conv1.weight_v) (← checkedWeight weights.f0.i0.conv1.weight_g) (← checkedWeight weights.f0.i0.conv1.bias)
     conv2 := wnConv1dFromWeightNorm (← checkedWeight weights.f0.i0.conv2.weight_v) (← checkedWeight weights.f0.i0.conv2.weight_g) (← checkedWeight weights.f0.i0.conv2.bias)
     norm1 := adaIN1dFromLinear (← checkedWeight weights.f0.i0.norm1.fc.weight) (← checkedWeight weights.f0.i0.norm1.fc.bias)
     norm2 := adaIN1dFromLinear (← checkedWeight weights.f0.i0.norm2.fc.weight) (← checkedWeight weights.f0.i0.norm2.fc.bias)
     shortcut := none
   }
-  let f0Blk1 : AdainResBlk1dUp cfg.hiddenDim (cfg.hiddenDim / 2) cfg.styleDim := {
+  let f0Blk1 : AdainResBlk1dUp (device := device) cfg.hiddenDim (cfg.hiddenDim / 2) cfg.styleDim := {
     pool := wnDepthwiseTransConv1dFromWeightNorm (← checkedWeight weights.f0.i1.pool.weight_v) (← checkedWeight weights.f0.i1.pool.weight_g) (← checkedWeight weights.f0.i1.pool.bias)
     conv1 := wnConv1dFromWeightNorm (← checkedWeight weights.f0.i1.conv1.weight_v) (← checkedWeight weights.f0.i1.conv1.weight_g) (← checkedWeight weights.f0.i1.conv1.bias)
     conv2 := wnConv1dFromWeightNorm (← checkedWeight weights.f0.i1.conv2.weight_v) (← checkedWeight weights.f0.i1.conv2.weight_g) (← checkedWeight weights.f0.i1.conv2.bias)
     norm1 := adaIN1dFromLinear (← checkedWeight weights.f0.i1.norm1.fc.weight) (← checkedWeight weights.f0.i1.norm1.fc.bias)
     norm2 := adaIN1dFromLinear (← checkedWeight weights.f0.i1.norm2.fc.weight) (← checkedWeight weights.f0.i1.norm2.fc.bias)
-    shortcut := some <| wnConv1dFromWeightNorm (← checkedWeight weights.f0.i1.conv1x1.weight_v) (← checkedWeight weights.f0.i1.conv1x1.weight_g) (Tensor.castLike weights.f0.i1.conv1x1.weight_v (Tensor.zeros #[cfg.hiddenDim / 2] false Device.CPU))
+    shortcut := some <| wnConv1dFromWeightNorm (← checkedWeight weights.f0.i1.conv1x1.weight_v) (← checkedWeight weights.f0.i1.conv1x1.weight_g) (Tensor.castLike weights.f0.i1.conv1x1.weight_v (Tensor.zeros #[cfg.hiddenDim / 2] false device))
   }
-  let f0Blk2 : AdainResBlk1dSame (cfg.hiddenDim / 2) (cfg.hiddenDim / 2) cfg.styleDim := {
+  let f0Blk2 : AdainResBlk1dSame (device := device) (cfg.hiddenDim / 2) (cfg.hiddenDim / 2) cfg.styleDim := {
     conv1 := wnConv1dFromWeightNorm (← checkedWeight weights.f0.i2.conv1.weight_v) (← checkedWeight weights.f0.i2.conv1.weight_g) (← checkedWeight weights.f0.i2.conv1.bias)
     conv2 := wnConv1dFromWeightNorm (← checkedWeight weights.f0.i2.conv2.weight_v) (← checkedWeight weights.f0.i2.conv2.weight_g) (← checkedWeight weights.f0.i2.conv2.bias)
     norm1 := adaIN1dFromLinear (← checkedWeight weights.f0.i2.norm1.fc.weight) (← checkedWeight weights.f0.i2.norm1.fc.bias)
@@ -426,22 +434,22 @@ private def loadProsodyPredictorFromCheckpoint
     shortcut := none
   }
   log.onInfo "  predictor.N blocks..."
-  let nBlk0 : AdainResBlk1dSame cfg.hiddenDim cfg.hiddenDim cfg.styleDim := {
+  let nBlk0 : AdainResBlk1dSame (device := device) cfg.hiddenDim cfg.hiddenDim cfg.styleDim := {
     conv1 := wnConv1dFromWeightNorm (← checkedWeight weights.n.i0.conv1.weight_v) (← checkedWeight weights.n.i0.conv1.weight_g) (← checkedWeight weights.n.i0.conv1.bias)
     conv2 := wnConv1dFromWeightNorm (← checkedWeight weights.n.i0.conv2.weight_v) (← checkedWeight weights.n.i0.conv2.weight_g) (← checkedWeight weights.n.i0.conv2.bias)
     norm1 := adaIN1dFromLinear (← checkedWeight weights.n.i0.norm1.fc.weight) (← checkedWeight weights.n.i0.norm1.fc.bias)
     norm2 := adaIN1dFromLinear (← checkedWeight weights.n.i0.norm2.fc.weight) (← checkedWeight weights.n.i0.norm2.fc.bias)
     shortcut := none
   }
-  let nBlk1 : AdainResBlk1dUp cfg.hiddenDim (cfg.hiddenDim / 2) cfg.styleDim := {
+  let nBlk1 : AdainResBlk1dUp (device := device) cfg.hiddenDim (cfg.hiddenDim / 2) cfg.styleDim := {
     pool := wnDepthwiseTransConv1dFromWeightNorm (← checkedWeight weights.n.i1.pool.weight_v) (← checkedWeight weights.n.i1.pool.weight_g) (← checkedWeight weights.n.i1.pool.bias)
     conv1 := wnConv1dFromWeightNorm (← checkedWeight weights.n.i1.conv1.weight_v) (← checkedWeight weights.n.i1.conv1.weight_g) (← checkedWeight weights.n.i1.conv1.bias)
     conv2 := wnConv1dFromWeightNorm (← checkedWeight weights.n.i1.conv2.weight_v) (← checkedWeight weights.n.i1.conv2.weight_g) (← checkedWeight weights.n.i1.conv2.bias)
     norm1 := adaIN1dFromLinear (← checkedWeight weights.n.i1.norm1.fc.weight) (← checkedWeight weights.n.i1.norm1.fc.bias)
     norm2 := adaIN1dFromLinear (← checkedWeight weights.n.i1.norm2.fc.weight) (← checkedWeight weights.n.i1.norm2.fc.bias)
-    shortcut := some <| wnConv1dFromWeightNorm (← checkedWeight weights.n.i1.conv1x1.weight_v) (← checkedWeight weights.n.i1.conv1x1.weight_g) (Tensor.castLike weights.n.i1.conv1x1.weight_v (Tensor.zeros #[cfg.hiddenDim / 2] false Device.CPU))
+    shortcut := some <| wnConv1dFromWeightNorm (← checkedWeight weights.n.i1.conv1x1.weight_v) (← checkedWeight weights.n.i1.conv1x1.weight_g) (Tensor.castLike weights.n.i1.conv1x1.weight_v (Tensor.zeros #[cfg.hiddenDim / 2] false device))
   }
-  let nBlk2 : AdainResBlk1dSame (cfg.hiddenDim / 2) (cfg.hiddenDim / 2) cfg.styleDim := {
+  let nBlk2 : AdainResBlk1dSame (device := device) (cfg.hiddenDim / 2) (cfg.hiddenDim / 2) cfg.styleDim := {
     conv1 := wnConv1dFromWeightNorm (← checkedWeight weights.n.i2.conv1.weight_v) (← checkedWeight weights.n.i2.conv1.weight_g) (← checkedWeight weights.n.i2.conv1.bias)
     conv2 := wnConv1dFromWeightNorm (← checkedWeight weights.n.i2.conv2.weight_v) (← checkedWeight weights.n.i2.conv2.weight_g) (← checkedWeight weights.n.i2.conv2.bias)
     norm1 := adaIN1dFromLinear (← checkedWeight weights.n.i2.norm1.fc.weight) (← checkedWeight weights.n.i2.norm1.fc.bias)
@@ -473,8 +481,8 @@ private def loadProsodyPredictorFromCheckpoint
 private def loadGeneratorFromCheckpoint
     (weights : KokoroCheckpoint.WeightsDecoderGenerator)
     (cfg : KittenTTSConfig)
-    : IO (Generator cfg) := do
-  let source : SourceModuleHnNSF cfg := {
+    : IO (Generator (device := device) cfg) := do
+  let source : SourceModuleHnNSF (device := device) cfg := {
     linear := linearFromTensors (← checkedWeight weights.m_source.l_linear.weight) (← checkedWeight weights.m_source.l_linear.bias)
   }
   let noiseRes0Dilations : Array UInt64 := #[1, 3, 5]
@@ -663,7 +671,7 @@ private def loadGeneratorFromCheckpoint
         pure <| adaIN1dDynFromLinear (channels := stage1Out) (← checkedWeight node.fc.weight) (← checkedWeight node.fc.bias))
       alphaDyn
       alphaDyn
-  let stage0 : GeneratorStage cfg.styleDim := {
+  let stage0 : GeneratorStage (device := device) cfg.styleDim := {
     up :=
       wnConvTranspose1dDynFromWeightNorm (inC := weights.ups.i0.weight_v.shape[0]!) (outC := weights.ups.i0.weight_v.shape[1]!) (kernel := weights.ups.i0.weight_v.shape[2]!)
         (← checkedWeight weights.ups.i0.weight_v)
@@ -683,7 +691,7 @@ private def loadGeneratorFromCheckpoint
     noiseRes := noiseRes0
     resBlocks := #[res0, res1, res2]
   }
-  let stage1 : GeneratorStage cfg.styleDim := {
+  let stage1 : GeneratorStage (device := device) cfg.styleDim := {
     up :=
       wnConvTranspose1dDynFromWeightNorm (inC := weights.ups.i1.weight_v.shape[0]!) (outC := weights.ups.i1.weight_v.shape[1]!) (kernel := weights.ups.i1.weight_v.shape[2]!)
         (← checkedWeight weights.ups.i1.weight_v)
@@ -708,50 +716,50 @@ private def loadGeneratorFromCheckpoint
     source
     stages := #[stage0, stage1]
     convPost
-    window := Tensor.hannWindow cfg.generator.genIstftNFft
+    window := ← checkedWeight (Tensor.hannWindow cfg.generator.genIstftNFft)
   }
 
 private def loadDecoderFromCheckpoint
     (weights : KokoroCheckpoint.WeightsDecoder)
     (cfg : KittenTTSConfig)
-    : IO (Decoder cfg) := do
+    : IO (Decoder (device := device) cfg) := do
   let asrResNode ← getOrThrow weights.asr_res 0 "Missing decoder.asr_res.0"
   let generator ← loadGeneratorFromCheckpoint weights.generator cfg
-  let encode : AdainResBlk1dSame (cfg.hiddenDim + 2) cfg.maxConvDim cfg.styleDim := {
+  let encode : AdainResBlk1dSame (device := device) (cfg.hiddenDim + 2) cfg.maxConvDim cfg.styleDim := {
     conv1 := wnConv1dFromWeightNorm (← checkedWeight weights.encode.conv1.weight_v) (← checkedWeight weights.encode.conv1.weight_g) (← checkedWeight weights.encode.conv1.bias)
     conv2 := wnConv1dFromWeightNorm (← checkedWeight weights.encode.conv2.weight_v) (← checkedWeight weights.encode.conv2.weight_g) (← checkedWeight weights.encode.conv2.bias)
     norm1 := adaIN1dFromLinear (← checkedWeight weights.encode.norm1.fc.weight) (← checkedWeight weights.encode.norm1.fc.bias)
     norm2 := adaIN1dFromLinear (← checkedWeight weights.encode.norm2.fc.weight) (← checkedWeight weights.encode.norm2.fc.bias)
-    shortcut := some <| wnConv1dFromWeightNorm (← checkedWeight weights.encode.conv1x1.weight_v) (← checkedWeight weights.encode.conv1x1.weight_g) (Tensor.castLike weights.encode.conv1x1.weight_v (Tensor.zeros #[cfg.maxConvDim] false Device.CPU))
+    shortcut := some <| wnConv1dFromWeightNorm (← checkedWeight weights.encode.conv1x1.weight_v) (← checkedWeight weights.encode.conv1x1.weight_g) (Tensor.castLike weights.encode.conv1x1.weight_v (Tensor.zeros #[cfg.maxConvDim] false device))
   }
-  let decode0 : AdainResBlk1dSame (cfg.maxConvDim + cfg.asrResDim + 2) cfg.maxConvDim cfg.styleDim := {
+  let decode0 : AdainResBlk1dSame (device := device) (cfg.maxConvDim + cfg.asrResDim + 2) cfg.maxConvDim cfg.styleDim := {
     conv1 := wnConv1dFromWeightNorm (← checkedWeight weights.decode.i0.conv1.weight_v) (← checkedWeight weights.decode.i0.conv1.weight_g) (← checkedWeight weights.decode.i0.conv1.bias)
     conv2 := wnConv1dFromWeightNorm (← checkedWeight weights.decode.i0.conv2.weight_v) (← checkedWeight weights.decode.i0.conv2.weight_g) (← checkedWeight weights.decode.i0.conv2.bias)
     norm1 := adaIN1dFromLinear (← checkedWeight weights.decode.i0.norm1.fc.weight) (← checkedWeight weights.decode.i0.norm1.fc.bias)
     norm2 := adaIN1dFromLinear (← checkedWeight weights.decode.i0.norm2.fc.weight) (← checkedWeight weights.decode.i0.norm2.fc.bias)
-    shortcut := some <| wnConv1dFromWeightNorm (← checkedWeight weights.decode.i0.conv1x1.weight_v) (← checkedWeight weights.decode.i0.conv1x1.weight_g) (Tensor.castLike weights.decode.i0.conv1x1.weight_v (Tensor.zeros #[cfg.maxConvDim] false Device.CPU))
+    shortcut := some <| wnConv1dFromWeightNorm (← checkedWeight weights.decode.i0.conv1x1.weight_v) (← checkedWeight weights.decode.i0.conv1x1.weight_g) (Tensor.castLike weights.decode.i0.conv1x1.weight_v (Tensor.zeros #[cfg.maxConvDim] false device))
   }
-  let decode1 : AdainResBlk1dSame (cfg.maxConvDim + cfg.asrResDim + 2) cfg.maxConvDim cfg.styleDim := {
+  let decode1 : AdainResBlk1dSame (device := device) (cfg.maxConvDim + cfg.asrResDim + 2) cfg.maxConvDim cfg.styleDim := {
     conv1 := wnConv1dFromWeightNorm (← checkedWeight weights.decode.i1.conv1.weight_v) (← checkedWeight weights.decode.i1.conv1.weight_g) (← checkedWeight weights.decode.i1.conv1.bias)
     conv2 := wnConv1dFromWeightNorm (← checkedWeight weights.decode.i1.conv2.weight_v) (← checkedWeight weights.decode.i1.conv2.weight_g) (← checkedWeight weights.decode.i1.conv2.bias)
     norm1 := adaIN1dFromLinear (← checkedWeight weights.decode.i1.norm1.fc.weight) (← checkedWeight weights.decode.i1.norm1.fc.bias)
     norm2 := adaIN1dFromLinear (← checkedWeight weights.decode.i1.norm2.fc.weight) (← checkedWeight weights.decode.i1.norm2.fc.bias)
-    shortcut := some <| wnConv1dFromWeightNorm (← checkedWeight weights.decode.i1.conv1x1.weight_v) (← checkedWeight weights.decode.i1.conv1x1.weight_g) (Tensor.castLike weights.decode.i1.conv1x1.weight_v (Tensor.zeros #[cfg.maxConvDim] false Device.CPU))
+    shortcut := some <| wnConv1dFromWeightNorm (← checkedWeight weights.decode.i1.conv1x1.weight_v) (← checkedWeight weights.decode.i1.conv1x1.weight_g) (Tensor.castLike weights.decode.i1.conv1x1.weight_v (Tensor.zeros #[cfg.maxConvDim] false device))
   }
-  let decode2 : AdainResBlk1dSame (cfg.maxConvDim + cfg.asrResDim + 2) cfg.maxConvDim cfg.styleDim := {
+  let decode2 : AdainResBlk1dSame (device := device) (cfg.maxConvDim + cfg.asrResDim + 2) cfg.maxConvDim cfg.styleDim := {
     conv1 := wnConv1dFromWeightNorm (← checkedWeight weights.decode.i2.conv1.weight_v) (← checkedWeight weights.decode.i2.conv1.weight_g) (← checkedWeight weights.decode.i2.conv1.bias)
     conv2 := wnConv1dFromWeightNorm (← checkedWeight weights.decode.i2.conv2.weight_v) (← checkedWeight weights.decode.i2.conv2.weight_g) (← checkedWeight weights.decode.i2.conv2.bias)
     norm1 := adaIN1dFromLinear (← checkedWeight weights.decode.i2.norm1.fc.weight) (← checkedWeight weights.decode.i2.norm1.fc.bias)
     norm2 := adaIN1dFromLinear (← checkedWeight weights.decode.i2.norm2.fc.weight) (← checkedWeight weights.decode.i2.norm2.fc.bias)
-    shortcut := some <| wnConv1dFromWeightNorm (← checkedWeight weights.decode.i2.conv1x1.weight_v) (← checkedWeight weights.decode.i2.conv1x1.weight_g) (Tensor.castLike weights.decode.i2.conv1x1.weight_v (Tensor.zeros #[cfg.maxConvDim] false Device.CPU))
+    shortcut := some <| wnConv1dFromWeightNorm (← checkedWeight weights.decode.i2.conv1x1.weight_v) (← checkedWeight weights.decode.i2.conv1x1.weight_g) (Tensor.castLike weights.decode.i2.conv1x1.weight_v (Tensor.zeros #[cfg.maxConvDim] false device))
   }
-  let decode3 : AdainResBlk1dUp (cfg.maxConvDim + cfg.asrResDim + 2) (KittenTTSConfig.decoderChannels cfg) cfg.styleDim := {
+  let decode3 : AdainResBlk1dUp (device := device) (cfg.maxConvDim + cfg.asrResDim + 2) (KittenTTSConfig.decoderChannels cfg) cfg.styleDim := {
     pool := wnDepthwiseTransConv1dFromWeightNorm (← checkedWeight weights.decode.i3.pool.weight_v) (← checkedWeight weights.decode.i3.pool.weight_g) (← checkedWeight weights.decode.i3.pool.bias)
     conv1 := wnConv1dFromWeightNorm (← checkedWeight weights.decode.i3.conv1.weight_v) (← checkedWeight weights.decode.i3.conv1.weight_g) (← checkedWeight weights.decode.i3.conv1.bias)
     conv2 := wnConv1dFromWeightNorm (← checkedWeight weights.decode.i3.conv2.weight_v) (← checkedWeight weights.decode.i3.conv2.weight_g) (← checkedWeight weights.decode.i3.conv2.bias)
     norm1 := adaIN1dFromLinear (← checkedWeight weights.decode.i3.norm1.fc.weight) (← checkedWeight weights.decode.i3.norm1.fc.bias)
     norm2 := adaIN1dFromLinear (← checkedWeight weights.decode.i3.norm2.fc.weight) (← checkedWeight weights.decode.i3.norm2.fc.bias)
-    shortcut := some <| wnConv1dFromWeightNorm (← checkedWeight weights.decode.i3.conv1x1.weight_v) (← checkedWeight weights.decode.i3.conv1x1.weight_g) (Tensor.castLike weights.decode.i3.conv1x1.weight_v (Tensor.zeros #[KittenTTSConfig.decoderChannels cfg] false Device.CPU))
+    shortcut := some <| wnConv1dFromWeightNorm (← checkedWeight weights.decode.i3.conv1x1.weight_v) (← checkedWeight weights.decode.i3.conv1x1.weight_g) (Tensor.castLike weights.decode.i3.conv1x1.weight_v (Tensor.zeros #[KittenTTSConfig.decoderChannels cfg] false device))
   }
   pure {
     f0Conv := wnConv1dFromWeightNorm (← checkedWeight weights.f0_conv.weight_v) (← checkedWeight weights.f0_conv.weight_g) (← checkedWeight weights.f0_conv.bias)
@@ -862,42 +870,45 @@ private def buildModelFromCheckpointWeights
     (weights : LoadedCheckpointWeights)
     (cfg : KittenTTSConfig)
     (log : Handlers := {})
-    : IO (Model cfg) := do
+    (device : Device := .CPU)
+    : IO (Model (device := device) cfg) := do
   let bert ← loadKittenAlbertFromCheckpoint weights.bert cfg
-  let bertEncoder : LinearNorm cfg.plbert.hiddenSize cfg.hiddenDim :=
+  let bertEncoder : LinearNorm (device := device) cfg.plbert.hiddenSize cfg.hiddenDim :=
     linearFromTensors (← checkedWeight weights.bertEncoder.weight) (← checkedWeight weights.bertEncoder.bias)
   let predictor ← loadProsodyPredictorFromCheckpoint weights.predictor cfg log
   let textEncoder ← loadTextEncoderFromCheckpoint weights.textEncoder cfg
   let decoder ← loadDecoderFromCheckpoint weights.decoder cfg
-  log.onInfo "Resolving target device..."
-  let targetDevice ← resolveKittenDevice log
-  let baseModel : Model cfg := { bert, bertEncoder, predictor, textEncoder, decoder }
-  let model : Model cfg :=
-    match targetDevice with
-    | Device.CPU => baseModel
-    | _ => TensorStruct.map (fun t => t.to targetDevice) baseModel
-  log.onInfo s!"KittenTTS target device: {repr targetDevice}"
-  pure model
+  log.onInfo s!"KittenTTS target device: {repr device}"
+  pure { bert, bertEncoder, predictor, textEncoder, decoder }
 
 namespace Model
 
 structure Loaded where
   cfg : KittenTTSConfig
-  model : Model cfg
+  device : Device
+  model : Model (device := device) cfg
 
-def load (path : String) (cfg : KittenTTSConfig := {}) (log : Handlers := {})
-    : IO (Model cfg) := do
+/-- Load on an explicitly selected device, retained in the result type. -/
+def loadAt (path : String) (device : Device) (cfg : KittenTTSConfig := {})
+    (log : Handlers := {}) : IO (Model (device := device) cfg) := do
   log.onInfo s!"Loading KittenTTS weights from {path}..."
   let weights ← loadCheckpointWeights path log
-  buildModelFromCheckpointWeights weights cfg log
+  buildModelFromCheckpointWeights weights cfg log device
+
+/-- Resolve the configured placement once and return it with the indexed model. -/
+def load (path : String) (cfg : KittenTTSConfig := {}) (log : Handlers := {})
+    : IO (Sigma fun device => Model (device := device) cfg) := do
+  let device ← resolveKittenDevice log
+  return ⟨device, ← loadAt path device cfg log⟩
 
 def loadAutoConfig (path : String) (cfg : KittenTTSConfig := {}) (log : Handlers := {})
     : IO Loaded := do
   log.onInfo s!"Loading KittenTTS weights from {path}..."
   let weights ← loadCheckpointWeights path log
   let cfg' ← reconcileConfigWithCheckpoint cfg weights log
-  let model ← buildModelFromCheckpointWeights weights cfg' log
-  pure { cfg := cfg', model := model }
+  let device ← resolveKittenDevice log
+  let model ← buildModelFromCheckpointWeights weights cfg' log device
+  pure { cfg := cfg', device, model }
 
 end Model
 

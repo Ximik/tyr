@@ -17,9 +17,9 @@ open torch
 open torch.branching
 
 structure MoleculeToyParams (vocab : UInt64) where
-  coordW : Tensor { shape := #[3, 3] }
-  coordB : Tensor { shape := #[3] }
-  labelTable : Tensor { shape := #[vocab, vocab] }
+  coordW : Tensor { shape := #[3, 3], device := .CPU }
+  coordB : Tensor { shape := #[3], device := .CPU }
+  labelTable : Tensor { shape := #[vocab, vocab], device := .CPU }
   deriving TensorStruct
 
 namespace MoleculeToyParams
@@ -33,7 +33,7 @@ def init (vocab : UInt64) : IO (MoleculeToyParams vocab) := do
 end MoleculeToyParams
 
 def moleculeToyModel {maxLen vocab : UInt64} :
-    BranchingMoleculeModel maxLen vocab (MoleculeToyParams vocab) :=
+    BranchingMoleculeModel (device := .CPU) maxLen vocab (MoleculeToyParams vocab) :=
   { forward := fun {batch} params coord label _t _padmask => do
       let coordPred := Tensor.affine3d coord params.coordW params.coordB
       let labelLogits :=

@@ -11,6 +11,8 @@ import Tyr.Model.Gemma4.Multimodal
 
 namespace torch.gemma4
 
+variable {device : Device}
+
 open torch.Log
 open torch.Model (reqGradFalse)
 open torch.safetensors (pushUnique
@@ -39,14 +41,14 @@ private def visionParameterNameCandidates (name : String) : Array String :=
 private def loadVisionParameterSharded {s : Shape}
     (modelDir : String)
     (name : String)
-    : IO (Tensor { shape := s }) :=
-  loadTensorShardedCandidates modelDir (visionParameterNameCandidates name) s
+    : IO (Tensor { device := device, shape := s }) :=
+  loadTensorShardedCandidates (device := device) modelDir (visionParameterNameCandidates name) s
 
 private def loadVisionParameter {s : Shape}
     (path : String)
     (name : String)
-    : IO (Tensor { shape := s }) :=
-  loadTensorCandidates path (visionParameterNameCandidates name) s
+    : IO (Tensor { device := device, shape := s }) :=
+  loadTensorCandidates (device := device) path (visionParameterNameCandidates name) s
 
 private def tryLoadVisionScalarSharded (modelDir : String) (name : String) : IO (Option Float) := do
   let t? ← tryLoadTensorShardedCandidates modelDir (visionTensorNameCandidates name) #[]
@@ -69,17 +71,17 @@ private def tryLoadVisionScalar (path : String) (name : String) : IO (Option Flo
 private def tryLoadVisionParameterSharded {s : Shape}
     (modelDir : String)
     (name : String)
-    : IO (Option (Tensor { shape := s })) :=
-  tryLoadTensorShardedCandidates modelDir (visionParameterNameCandidates name) s
+    : IO (Option (Tensor { device := device, shape := s })) :=
+  tryLoadTensorShardedCandidates (device := device) modelDir (visionParameterNameCandidates name) s
 
 private def tryLoadVisionParameter {s : Shape}
     (path : String)
     (name : String)
-    : IO (Option (Tensor { shape := s })) :=
-  tryLoadTensorCandidates path (visionParameterNameCandidates name) s
+    : IO (Option (Tensor { device := device, shape := s })) :=
+  tryLoadTensorCandidates (device := device) path (visionParameterNameCandidates name) s
 
 private def loadVisionLinearSharded (modelDir : String) (name : String) (outDim inDim : UInt64)
-    : IO (Gemma4VisionLinear outDim inDim) := do
+    : IO (Gemma4VisionLinear (device := device) outDim inDim) := do
   let w ← loadVisionParameterSharded (s := #[outDim, inDim]) modelDir name
   let inputMin ← tryLoadVisionScalarSharded modelDir s!"{name}.input_min"
   let inputMax ← tryLoadVisionScalarSharded modelDir s!"{name}.input_max"
@@ -94,7 +96,7 @@ private def loadVisionLinearSharded (modelDir : String) (name : String) (outDim 
   }
 
 private def loadVisionLinear (path : String) (name : String) (outDim inDim : UInt64)
-    : IO (Gemma4VisionLinear outDim inDim) := do
+    : IO (Gemma4VisionLinear (device := device) outDim inDim) := do
   let w ← loadVisionParameter (s := #[outDim, inDim]) path name
   let inputMin ← tryLoadVisionScalar path s!"{name}.input_min"
   let inputMax ← tryLoadVisionScalar path s!"{name}.input_max"
@@ -109,17 +111,17 @@ private def loadVisionLinear (path : String) (name : String) (outDim inDim : UIn
   }
 
 private def loadVisionRMSNormSharded (modelDir : String) (name : String) (dim : UInt64) (eps : Float)
-    : IO (Gemma4RMSNorm dim) := do
+    : IO (Gemma4RMSNorm (device := device) dim) := do
   let w ← loadVisionParameterSharded (s := #[dim]) modelDir name
   pure (Gemma4RMSNorm.fromCheckpointWeight (reqGradFalse w) eps)
 
 private def loadVisionRMSNorm (path : String) (name : String) (dim : UInt64) (eps : Float)
-    : IO (Gemma4RMSNorm dim) := do
+    : IO (Gemma4RMSNorm (device := device) dim) := do
   let w ← loadVisionParameter (s := #[dim]) path name
   pure (Gemma4RMSNorm.fromCheckpointWeight (reqGradFalse w) eps)
 
 private def loadVisionAttentionSharded (modelDir : String) (cfg : VisionConfig) (layerIdx : UInt64)
-    : IO (Gemma4VisionAttention cfg) := do
+    : IO (Gemma4VisionAttention (device := device) cfg) := do
   let p := s!"model.vision_tower.encoder.layers.{layerIdx}.self_attn"
   pure {
     q_proj := (← loadVisionLinearSharded modelDir s!"{p}.q_proj" cfg.hidden_size cfg.hidden_size)
@@ -131,7 +133,7 @@ private def loadVisionAttentionSharded (modelDir : String) (cfg : VisionConfig) 
   }
 
 private def loadVisionAttention (path : String) (cfg : VisionConfig) (layerIdx : UInt64)
-    : IO (Gemma4VisionAttention cfg) := do
+    : IO (Gemma4VisionAttention (device := device) cfg) := do
   let p := s!"model.vision_tower.encoder.layers.{layerIdx}.self_attn"
   pure {
     q_proj := (← loadVisionLinear path s!"{p}.q_proj" cfg.hidden_size cfg.hidden_size)
@@ -143,7 +145,7 @@ private def loadVisionAttention (path : String) (cfg : VisionConfig) (layerIdx :
   }
 
 private def loadVisionMLPSharded (modelDir : String) (cfg : VisionConfig) (layerIdx : UInt64)
-    : IO (Gemma4VisionMLP cfg) := do
+    : IO (Gemma4VisionMLP (device := device) cfg) := do
   let p := s!"model.vision_tower.encoder.layers.{layerIdx}.mlp"
   pure {
     gate_proj := (← loadVisionLinearSharded modelDir s!"{p}.gate_proj" cfg.intermediate_size cfg.hidden_size)
@@ -152,7 +154,7 @@ private def loadVisionMLPSharded (modelDir : String) (cfg : VisionConfig) (layer
   }
 
 private def loadVisionMLP (path : String) (cfg : VisionConfig) (layerIdx : UInt64)
-    : IO (Gemma4VisionMLP cfg) := do
+    : IO (Gemma4VisionMLP (device := device) cfg) := do
   let p := s!"model.vision_tower.encoder.layers.{layerIdx}.mlp"
   pure {
     gate_proj := (← loadVisionLinear path s!"{p}.gate_proj" cfg.intermediate_size cfg.hidden_size)
@@ -161,7 +163,7 @@ private def loadVisionMLP (path : String) (cfg : VisionConfig) (layerIdx : UInt6
   }
 
 private def loadVisionBlockSharded (modelDir : String) (cfg : VisionConfig) (layerIdx : UInt64)
-    : IO (Gemma4VisionBlock cfg) := do
+    : IO (Gemma4VisionBlock (device := device) cfg) := do
   let p := s!"model.vision_tower.encoder.layers.{layerIdx}"
   pure {
     input_layernorm := (← loadVisionRMSNormSharded modelDir s!"{p}.input_layernorm" cfg.hidden_size cfg.rms_norm_eps)
@@ -173,7 +175,7 @@ private def loadVisionBlockSharded (modelDir : String) (cfg : VisionConfig) (lay
   }
 
 private def loadVisionBlock (path : String) (cfg : VisionConfig) (layerIdx : UInt64)
-    : IO (Gemma4VisionBlock cfg) := do
+    : IO (Gemma4VisionBlock (device := device) cfg) := do
   let p := s!"model.vision_tower.encoder.layers.{layerIdx}"
   pure {
     input_layernorm := (← loadVisionRMSNorm path s!"{p}.input_layernorm" cfg.hidden_size cfg.rms_norm_eps)
@@ -185,7 +187,7 @@ private def loadVisionBlock (path : String) (cfg : VisionConfig) (layerIdx : UIn
   }
 
 private def loadVisionPatchEmbedderSharded (modelDir : String) (cfg : VLConfig)
-    : IO (Gemma4VisionPatchEmbedder cfg) := do
+    : IO (Gemma4VisionPatchEmbedder (device := device) cfg) := do
   let inputProj ←
     loadVisionLinearSharded
       modelDir
@@ -193,7 +195,7 @@ private def loadVisionPatchEmbedderSharded (modelDir : String) (cfg : VLConfig)
       cfg.vision_config.hidden_size
       (VisionConfig.patchDim cfg.vision_config)
   let posEmbed ←
-    loadTensorShardedCandidates modelDir
+    loadTensorShardedCandidates (device := device) modelDir
       (visionTensorNameCandidates "model.vision_tower.patch_embedder.position_embedding_table")
       #[2, cfg.vision_config.position_embedding_size, cfg.vision_config.hidden_size]
   pure {
@@ -202,7 +204,7 @@ private def loadVisionPatchEmbedderSharded (modelDir : String) (cfg : VLConfig)
   }
 
 private def loadVisionPatchEmbedder (path : String) (cfg : VLConfig)
-    : IO (Gemma4VisionPatchEmbedder cfg) := do
+    : IO (Gemma4VisionPatchEmbedder (device := device) cfg) := do
   let inputProj ←
     loadVisionLinear
       path
@@ -210,7 +212,7 @@ private def loadVisionPatchEmbedder (path : String) (cfg : VLConfig)
       cfg.vision_config.hidden_size
       (VisionConfig.patchDim cfg.vision_config)
   let posEmbed ←
-    loadTensorCandidates path
+    loadTensorCandidates (device := device) path
       (visionTensorNameCandidates "model.vision_tower.patch_embedder.position_embedding_table")
       #[2, cfg.vision_config.position_embedding_size, cfg.vision_config.hidden_size]
   pure {
@@ -218,9 +220,9 @@ private def loadVisionPatchEmbedder (path : String) (cfg : VLConfig)
     position_embedding_table := reqGradFalse posEmbed
   }
 
-private def loadVisionModelSharded (modelDir : String) (cfg : VLConfig) : IO (Gemma4VisionModel cfg) := do
+private def loadVisionModelSharded (modelDir : String) (cfg : VLConfig) : IO (Gemma4VisionModel (device := device) cfg) := do
   let patchEmbedder ← loadVisionPatchEmbedderSharded modelDir cfg
-  let mut blocks : Array (Gemma4VisionBlock cfg.vision_config) := #[]
+  let mut blocks : Array (Gemma4VisionBlock (device := device) cfg.vision_config) := #[]
   for i in [:cfg.vision_config.num_hidden_layers.toNat] do
     blocks := blocks.push (← loadVisionBlockSharded modelDir cfg.vision_config i.toUInt64)
   let stdBias ← tryLoadVisionParameterSharded (s := #[cfg.vision_config.hidden_size]) modelDir "model.vision_tower.std_bias"
@@ -232,9 +234,9 @@ private def loadVisionModelSharded (modelDir : String) (cfg : VLConfig) : IO (Ge
     std_scale := stdScale.map reqGradFalse
   }
 
-private def loadVisionModel (path : String) (cfg : VLConfig) : IO (Gemma4VisionModel cfg) := do
+private def loadVisionModel (path : String) (cfg : VLConfig) : IO (Gemma4VisionModel (device := device) cfg) := do
   let patchEmbedder ← loadVisionPatchEmbedder path cfg
-  let mut blocks : Array (Gemma4VisionBlock cfg.vision_config) := #[]
+  let mut blocks : Array (Gemma4VisionBlock (device := device) cfg.vision_config) := #[]
   for i in [:cfg.vision_config.num_hidden_layers.toNat] do
     blocks := blocks.push (← loadVisionBlock path cfg.vision_config i.toUInt64)
   let stdBias ← tryLoadVisionParameter (s := #[cfg.vision_config.hidden_size]) path "model.vision_tower.std_bias"
@@ -247,7 +249,7 @@ private def loadVisionModel (path : String) (cfg : VLConfig) : IO (Gemma4VisionM
   }
 
 private def loadVisionProjectorSharded (modelDir : String) (cfg : VLConfig)
-    : IO (Gemma4MultimodalEmbedder cfg) := do
+    : IO (Gemma4MultimodalEmbedder (device := device) cfg) := do
   let embedProj ←
     loadVisionParameterSharded
       (s := #[cfg.text_config.hidden_size, cfg.vision_config.hidden_size])
@@ -256,7 +258,7 @@ private def loadVisionProjectorSharded (modelDir : String) (cfg : VLConfig)
   pure { embedding_projection := reqGradFalse embedProj }
 
 private def loadVisionProjector (path : String) (cfg : VLConfig)
-    : IO (Gemma4MultimodalEmbedder cfg) := do
+    : IO (Gemma4MultimodalEmbedder (device := device) cfg) := do
   let embedProj ←
     loadVisionParameter
       (s := #[cfg.text_config.hidden_size, cfg.vision_config.hidden_size])
@@ -268,13 +270,13 @@ namespace Gemma4ForConditionalGeneration
 
 /-- Load Gemma 4 multimodal model from a sharded HF SafeTensors directory. -/
 def loadSharded (modelDir : String) (cfg : VLConfig := {})
-    (log : Handlers := {})
-    : IO (Gemma4ForConditionalGeneration cfg) := do
-  log.onInfo s!"Loading Gemma4ForConditionalGeneration from {modelDir}..."
+    (log : Handlers := {}) (device : Device := .CPU)
+    : IO (Gemma4ForConditionalGeneration (device := device) cfg) := do
+  log.onInfo s!"Loading Gemma4ForConditionalGeneration (device := device) from {modelDir}..."
   let visionTower ← loadVisionModelSharded modelDir cfg
   let visionProjector ← loadVisionProjectorSharded modelDir cfg
-  let languageModel ← Gemma4ForCausalLM.loadSharded modelDir cfg.text_config log
-  log.onInfo "Loaded Gemma4ForConditionalGeneration weights."
+  let languageModel ← Gemma4ForCausalLM.loadSharded (device := device) modelDir cfg.text_config log
+  log.onInfo "Loaded Gemma4ForConditionalGeneration (device := device) weights."
   pure {
     vision_tower := visionTower
     embed_vision := visionProjector
@@ -283,13 +285,13 @@ def loadSharded (modelDir : String) (cfg : VLConfig := {})
 
 /-- Load Gemma 4 multimodal model from a single HF SafeTensors file. -/
 def load (path : String) (cfg : VLConfig := {})
-    (log : Handlers := {})
-    : IO (Gemma4ForConditionalGeneration cfg) := do
-  log.onInfo s!"Loading Gemma4ForConditionalGeneration from {path}..."
+    (log : Handlers := {}) (device : Device := .CPU)
+    : IO (Gemma4ForConditionalGeneration (device := device) cfg) := do
+  log.onInfo s!"Loading Gemma4ForConditionalGeneration (device := device) from {path}..."
   let visionTower ← loadVisionModel path cfg
   let visionProjector ← loadVisionProjector path cfg
-  let languageModel ← Gemma4ForCausalLM.load path cfg.text_config log
-  log.onInfo "Loaded Gemma4ForConditionalGeneration weights."
+  let languageModel ← Gemma4ForCausalLM.load (device := device) path cfg.text_config log
+  log.onInfo "Loaded Gemma4ForConditionalGeneration (device := device) weights."
   pure {
     vision_tower := visionTower
     embed_vision := visionProjector

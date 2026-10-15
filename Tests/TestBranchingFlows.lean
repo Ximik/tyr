@@ -207,13 +207,13 @@ def testBranchingLossHelpers : IO Unit := do
 
 @[test]
 def testBranchingTensorTrainingLosses : IO Unit := do
-  let logits : Tensor { shape := #[1, 2] } := Tensor.reshapeChecked (floatsDynamic #[0.0, 0.0]) #[1, 2]
-  let splitTarget : Tensor { shape := #[1, 2] } := Tensor.reshapeChecked (floatsDynamic #[1.0, 0.0]) #[1, 2]
-  let firstOnly : Tensor { shape := #[1, 2] } := Tensor.reshapeChecked (floatsDynamic #[1.0, 0.0]) #[1, 2]
+  let logits : Tensor { shape := #[1, 2], device := .CPU } := Tensor.reshapeChecked (floatsDynamic #[0.0, 0.0]) #[1, 2]
+  let splitTarget : Tensor { shape := #[1, 2], device := .CPU } := Tensor.reshapeChecked (floatsDynamic #[1.0, 0.0]) #[1, 2]
+  let firstOnly : Tensor { shape := #[1, 2], device := .CPU } := Tensor.reshapeChecked (floatsDynamic #[1.0, 0.0]) #[1, 2]
   let splitLoss := Tensor.item (maskedSplitPoissonLoss logits splitTarget firstOnly)
   LeanTest.assertTrue (Float.abs splitLoss < 1.0e-6)
     s!"Unit split intensity should have zero tensor Poisson loss for count one, got {splitLoss}"
-  let delTarget : Tensor { shape := #[1, 2] } := Tensor.reshapeChecked (floatsDynamic #[1.0, 0.0]) #[1, 2]
+  let delTarget : Tensor { shape := #[1, 2], device := .CPU } := Tensor.reshapeChecked (floatsDynamic #[1.0, 0.0]) #[1, 2]
   let delLoss := Tensor.item (maskedBCEWithLogits logits delTarget firstOnly)
   LeanTest.assertTrue (Float.abs (delLoss - Float.log 2.0) < 1.0e-6)
     s!"Zero-logit tensor deletion BCE should equal log(2), got {delLoss}"
@@ -860,12 +860,12 @@ def testBranchingMoleculePackingAndLosses : IO Unit := do
     "Packed molecule deletion targets should preserve BranchingBridgeResult targets"
 
   let totalLogits := batch.toNat * cfg.maxLen.toNat * 10
-  let labelLogits : Tensor { shape := #[batch, cfg.maxLen, 10] } :=
+  let labelLogits : Tensor { shape := #[batch, cfg.maxLen, 10], device := .CPU } :=
     Tensor.reshapeChecked (floatsDynamic (Array.replicate totalLogits 0.0)) #[batch, cfg.maxLen, 10]
   let flat := batch.toNat * cfg.maxLen.toNat
-  let splitLogits : Tensor { shape := #[batch, cfg.maxLen] } :=
+  let splitLogits : Tensor { shape := #[batch, cfg.maxLen], device := .CPU } :=
     Tensor.reshapeChecked (floatsDynamic (Array.replicate flat 0.0)) #[batch, cfg.maxLen]
-  let delLogits : Tensor { shape := #[batch, cfg.maxLen] } :=
+  let delLogits : Tensor { shape := #[batch, cfg.maxLen], device := .CPU } :=
     Tensor.reshapeChecked (floatsDynamic (Array.replicate flat 0.0)) #[batch, cfg.maxLen]
   let (_loss, report) := moleculeLosses cfg packed packed.coordAnchor labelLogits splitLogits delLogits
   LeanTest.assertTrue (Float.abs report.coord < 1.0e-6)
@@ -882,12 +882,12 @@ def testBranchingMoleculePackingAndLosses : IO Unit := do
   LeanTest.assertTrue (Float.abs (scaleSum - (1.0 / 0.95)) < 1.0e-5)
     s!"DFM-packed molecule batch should carry Flowfusion label scale at t=0.25, got {scaleSum}"
   let totalDfmLogits := batchDfm.toNat * cfg.maxLen.toNat * 10
-  let labelLogitsDfm : Tensor { shape := #[batchDfm, cfg.maxLen, 10] } :=
+  let labelLogitsDfm : Tensor { shape := #[batchDfm, cfg.maxLen, 10], device := .CPU } :=
     Tensor.reshapeChecked (floatsDynamic (Array.replicate totalDfmLogits 0.0)) #[batchDfm, cfg.maxLen, 10]
   let flatDfm := batchDfm.toNat * cfg.maxLen.toNat
-  let splitLogitsDfm : Tensor { shape := #[batchDfm, cfg.maxLen] } :=
+  let splitLogitsDfm : Tensor { shape := #[batchDfm, cfg.maxLen], device := .CPU } :=
     Tensor.reshapeChecked (floatsDynamic (Array.replicate flatDfm 0.0)) #[batchDfm, cfg.maxLen]
-  let delLogitsDfm : Tensor { shape := #[batchDfm, cfg.maxLen] } :=
+  let delLogitsDfm : Tensor { shape := #[batchDfm, cfg.maxLen], device := .CPU } :=
     Tensor.reshapeChecked (floatsDynamic (Array.replicate flatDfm 0.0)) #[batchDfm, cfg.maxLen]
   let (_dfmLoss, dfmReport) :=
     moleculeLosses cfg packedDfm packedDfm.coordAnchor labelLogitsDfm splitLogitsDfm delLogitsDfm
@@ -925,14 +925,14 @@ def testMoleculeLossUsesJuliaTimeScalingAndIndependentWeights : IO Unit := do
   }
   let ⟨batchEarly, early⟩ ← packBranchingMolecule cfg (singleAtomMoleculeLossFixture 0.0)
   let ⟨batchLate, late⟩ ← packBranchingMolecule cfg (singleAtomMoleculeLossFixture 0.9)
-  let labelEarly : Tensor { shape := #[batchEarly, cfg.maxLen, 1] } := zerosDynamic #[batchEarly, cfg.maxLen, 1]
-  let splitEarly : Tensor { shape := #[batchEarly, cfg.maxLen] } := zerosDynamic #[batchEarly, cfg.maxLen]
-  let delEarly : Tensor { shape := #[batchEarly, cfg.maxLen] } := zerosDynamic #[batchEarly, cfg.maxLen]
+  let labelEarly : Tensor { shape := #[batchEarly, cfg.maxLen, 1], device := .CPU } := zerosDynamic #[batchEarly, cfg.maxLen, 1]
+  let splitEarly : Tensor { shape := #[batchEarly, cfg.maxLen], device := .CPU } := zerosDynamic #[batchEarly, cfg.maxLen]
+  let delEarly : Tensor { shape := #[batchEarly, cfg.maxLen], device := .CPU } := zerosDynamic #[batchEarly, cfg.maxLen]
   let (totalEarly, reportEarly) :=
     moleculeLosses cfg early early.coord labelEarly splitEarly delEarly
-  let labelLate : Tensor { shape := #[batchLate, cfg.maxLen, 1] } := zerosDynamic #[batchLate, cfg.maxLen, 1]
-  let splitLate : Tensor { shape := #[batchLate, cfg.maxLen] } := zerosDynamic #[batchLate, cfg.maxLen]
-  let delLate : Tensor { shape := #[batchLate, cfg.maxLen] } := zerosDynamic #[batchLate, cfg.maxLen]
+  let labelLate : Tensor { shape := #[batchLate, cfg.maxLen, 1], device := .CPU } := zerosDynamic #[batchLate, cfg.maxLen, 1]
+  let splitLate : Tensor { shape := #[batchLate, cfg.maxLen], device := .CPU } := zerosDynamic #[batchLate, cfg.maxLen]
+  let delLate : Tensor { shape := #[batchLate, cfg.maxLen], device := .CPU } := zerosDynamic #[batchLate, cfg.maxLen]
   let (_, reportLate) :=
     moleculeLosses cfg late late.coord labelLate splitLate delLate
   LeanTest.assertTrue (Float.abs (reportLate.coord / reportEarly.coord - 4.0) < 1.0e-4)
@@ -947,10 +947,10 @@ def testMoleculeLossUsesJuliaTimeScalingAndIndependentWeights : IO Unit := do
 
 @[test]
 def testMoleculeMuonUpdatesMatrixAndVectorLeaves : IO Unit := do
-  let matrix : Tensor { shape := #[2, 2] } := Tensor.reshapeChecked (floatsDynamic #[1.0, 2.0, 3.0, 4.0]) #[2, 2]
-  let vector : Tensor { shape := #[2] } := floatsDynamic #[1.0, -1.0]
-  let grads : Tensor { shape := #[2, 2] } × Tensor { shape := #[2] } := (onesDynamic #[2, 2], onesDynamic #[2])
-  let params : Tensor { shape := #[2, 2] } × Tensor { shape := #[2] } := (matrix, vector)
+  let matrix : Tensor { shape := #[2, 2], device := .CPU } := Tensor.reshapeChecked (floatsDynamic #[1.0, 2.0, 3.0, 4.0]) #[2, 2]
+  let vector : Tensor { shape := #[2], device := .CPU } := floatsDynamic #[1.0, -1.0]
+  let grads : Tensor { shape := #[2, 2], device := .CPU } × Tensor { shape := #[2], device := .CPU } := (onesDynamic #[2, 2], onesDynamic #[2])
+  let params : Tensor { shape := #[2, 2], device := .CPU } × Tensor { shape := #[2], device := .CPU } := (matrix, vector)
   let state := initMoleculeMuonState params
   let (updated, state') ← moleculeMuonStep params grads state 0.01 0.0 0.95 5
   let matrixDelta := Tensor.item (Tensor.sumAll (Tensor.abs (Tensor.Promoting.sub updated.1 params.1)))
@@ -962,9 +962,9 @@ def testMoleculeMuonUpdatesMatrixAndVectorLeaves : IO Unit := do
   LeanTest.assertEqual state'.step 1 "Muon optimizer state should advance one step"
 
 private def moleculeCoordCell {maxLen : UInt64}
-    (coord : Tensor { shape := #[1, maxLen, 3] }) (j k : Nat) : Float :=
-  let row : Tensor { shape := #[1, 1, 3] } := sliceTyped coord 1 j.toUInt64 1
-  let cell : Tensor { shape := #[1, 1, 1] } := sliceTyped row 2 k.toUInt64 1
+    (coord : Tensor { shape := #[1, maxLen, 3], device := .CPU }) (j k : Nat) : Float :=
+  let row : Tensor { shape := #[1, 1, 3], device := .CPU } := sliceTyped coord 1 j.toUInt64 1
+  let cell : Tensor { shape := #[1, 1, 1], device := .CPU } := sliceTyped row 2 k.toUInt64 1
   Tensor.item (cell.reshapeChecked #[])
 
 @[test]
@@ -982,10 +982,10 @@ def testMoleculeTransformerCoordTargetCapAppliesInTrainingAndInference : IO Unit
     coordHeadB := floatsDynamic #[100.0, -100.0, 4.0]
   }
 
-  let coord : Tensor { shape := #[1, maxLen, 3] } := zerosDynamic #[1, maxLen, 3]
-  let label : Tensor { shape := #[1, maxLen], dtype := .Int64 } := Tensor.reshapeChecked (Tensor.fromInt64Array #[0]) #[1, maxLen]
-  let time : Tensor { shape := #[1] } := zerosDynamic #[1]
-  let padmask : Tensor { shape := #[1, maxLen], dtype := .Int64 } := Tensor.fullInt #[1, maxLen] 1
+  let coord : Tensor { shape := #[1, maxLen, 3], device := .CPU } := zerosDynamic #[1, maxLen, 3]
+  let label : Tensor { shape := #[1, maxLen], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked (Tensor.fromInt64Array #[0]) #[1, maxLen]
+  let time : Tensor { shape := #[1], device := .CPU } := zerosDynamic #[1]
+  let padmask : Tensor { shape := #[1, maxLen], dtype := .Int64, device := .CPU } := Tensor.fullInt #[1, maxLen] 1
   let trainingModel :=
     moleculeTransformerModel (maxLen := maxLen) (vocab := vocab)
       (heads := heads) (headDim := headDim) (mlp := mlp)

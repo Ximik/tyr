@@ -15,6 +15,8 @@ import Tyr.Model.Laguna.Config
 import Tyr.Model.Laguna.MoE
 
 open torch
+
+variable {device : Device}
 open torch.laguna
 
 private def check (cond : Bool) (msg : String) : IO Unit := do
@@ -45,10 +47,10 @@ private def findFixture : IO String := do
   throw (IO.userError "moe.safetensors fixture not found (run from repo root)")
 
 /-- Build the MoE block from the fixture, moving all tensors to `device`. -/
-private def loadBlock (path : String) (device : Device) : IO (LagunaSparseMoeBlock testCfg) := do
+private def loadBlock (path : String) (device : Device) : IO (LagunaSparseMoeBlock (device := device) testCfg) := do
   let routerW ← torch.safetensors.loadTensorCandidates path #["router_weight"] #[8, 64]
   let routerB ← torch.safetensors.loadTensorCandidates path #["router_bias"] #[8]
-  let router : LagunaTopKRouter testCfg := {
+  let router : LagunaTopKRouter (device := device) testCfg := {
     weight := routerW.to device
     eScoreCorrectionBias := some (routerB.to device) }
   let gatePacked ← torch.safetensors.loadTensorCandidates path #["gate_packed"] #[8, 32, 32]
@@ -60,7 +62,7 @@ private def loadBlock (path : String) (device : Device) : IO (LagunaSparseMoeBlo
   let downPacked ← torch.safetensors.loadTensorCandidates path #["down_packed"] #[8, 64, 16]
   let downScale ← torch.safetensors.loadTensorCandidates path #["down_scales"] #[8, 64, 2]
   let downGlobal ← torch.safetensors.loadTensorCandidates path #["down_global"] #[8]
-  let experts : LagunaPackedExperts testCfg := {
+  let experts : LagunaPackedExperts (device := device) testCfg := {
     gatePacked := gatePacked.to device
     gateScale := gateScale.to device
     gateGlobal := gateGlobal.to device
@@ -82,7 +84,7 @@ private def loadBlock (path : String) (device : Device) : IO (LagunaSparseMoeBlo
 
 /-- Max abs / max rel (denominator clamped by 1e-3) error in FP32. -/
 private def maxErrors {s : Shape} {d e : DType}
-    (got : Tensor { shape := s, dtype := d }) (expected : Tensor { shape := s, dtype := e }) : IO (Float × Float) := do
+    (got : Tensor { shape := s, dtype := d, device := device }) (expected : Tensor { shape := s, dtype := e, device := device }) : IO (Float × Float) := do
   let a ← Tensor.toFloatArray got.toFloat32
   let b ← Tensor.toFloatArray expected.toFloat32
   let mut maxAbs := 0.0
@@ -96,7 +98,7 @@ private def maxErrors {s : Shape} {d e : DType}
   pure (maxAbs, maxRel)
 
 private def countViolations {s : Shape} {d e : DType}
-    (got : Tensor { shape := s, dtype := d }) (expected : Tensor { shape := s, dtype := e }) (rtol atol : Float) : IO Float := do
+    (got : Tensor { shape := s, dtype := d, device := device }) (expected : Tensor { shape := s, dtype := e, device := device }) (rtol atol : Float) : IO Float := do
   let a ← Tensor.toFloatArray got.toFloat32
   let b ← Tensor.toFloatArray expected.toFloat32
   let mut violations := 0.0
@@ -114,7 +116,7 @@ private def runCase (path : String) (device : Device) : IO Unit := do
   let lbl := deviceLabel device
   let block ← loadBlock path device
   let x ← torch.safetensors.loadTensorCandidates path #["x"] #[5, 64]
-  let xD : Tensor { shape := #[5, 64] } := x.to device
+  let xD : Tensor { shape := #[5, 64], device := device } := x.to device
   let yExp ← torch.safetensors.loadTensorCandidates path #["y_expected"] #[5, 64]
   let idxExp ← torch.safetensors.loadTensorCandidates path #["top_idx_expected"] #[5, 2]
   let wExp ← torch.safetensors.loadTensorCandidates path #["weights_expected"] #[5, 2]

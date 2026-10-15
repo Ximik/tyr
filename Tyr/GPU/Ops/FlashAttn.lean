@@ -7,17 +7,19 @@ import Tyr.GPU.Ops.MhaH100
 namespace Tyr.GPU.Ops.FlashAttn
 
 open torch
+
+variable {device : Device}
 open Tyr.GPU.Ops
 
-/-- Query layout for the typed FlashAttention surface: `[batch, nHead, qSeq, headDim]`
+/-- Query (device := device) layout for the typed FlashAttention surface: `[batch, nHead, qSeq, headDim]`
     with the dtype tracked statically. -/
 abbrev Query (batch nHead qSeq headDim : UInt64) (d : DType) : Type :=
-  Tensor { shape := #[batch, nHead, qSeq, headDim], dtype := d }
+  Tensor { shape := #[batch, nHead, qSeq, headDim], dtype := d, device := device }
 /-- Key/value layout: `[batch, nKvHead, kvSeq, headDim]`, sharing the query dtype. -/
 abbrev KeyValue (batch nKvHead kvSeq headDim : UInt64) (d : DType) : Type :=
-  Tensor { shape := #[batch, nKvHead, kvSeq, headDim], dtype := d }
+  Tensor { shape := #[batch, nKvHead, kvSeq, headDim], dtype := d, device := device }
 /-- Padding-mask layout: `[batch, kvSeq]`; the mask dtype stays dynamic. -/
-abbrev PaddingMask (batch kvSeq : UInt64) : Type := Tensor { shape := #[batch, kvSeq] }
+abbrev PaddingMask (batch kvSeq : UInt64) : Type := Tensor { shape := #[batch, kvSeq], device := device }
 
 inductive DispatchRoute where
   | tkKernel
@@ -27,10 +29,10 @@ inductive DispatchRoute where
 /-- Reusable runtime problem descriptor for the typed FlashAttention surface. -/
 def attentionProblem
     {batch nHead nKvHead qSeq kvSeq headDim : UInt64} {d : DType}
-    (q : Query batch nHead qSeq headDim d)
-    (k : KeyValue batch nKvHead kvSeq headDim d)
-    (v : KeyValue batch nKvHead kvSeq headDim d)
-    (attnMask : Option (PaddingMask batch kvSeq) := none)
+    (q : Query (device := device) batch nHead qSeq headDim d)
+    (k : KeyValue (device := device) batch nKvHead kvSeq headDim d)
+    (v : KeyValue (device := device) batch nKvHead kvSeq headDim d)
+    (attnMask : Option (PaddingMask (device := device) batch kvSeq) := none)
     (dropoutP : Float := 0.0)
     (isCausal : Bool := false)
     (scale : Option Float := none)
@@ -41,10 +43,10 @@ def attentionProblem
 /-- Current native specialization eligibility for the typed FlashAttention surface. -/
 def currentSpecialization
     {batch nHead nKvHead qSeq kvSeq headDim : UInt64} {d : DType}
-    (q : Query batch nHead qSeq headDim d)
-    (k : KeyValue batch nKvHead kvSeq headDim d)
-    (v : KeyValue batch nKvHead kvSeq headDim d)
-    (attnMask : Option (PaddingMask batch kvSeq) := none)
+    (q : Query (device := device) batch nHead qSeq headDim d)
+    (k : KeyValue (device := device) batch nKvHead kvSeq headDim d)
+    (v : KeyValue (device := device) batch nKvHead kvSeq headDim d)
+    (attnMask : Option (PaddingMask (device := device) batch kvSeq) := none)
     (dropoutP : Float := 0.0)
     (isCausal : Bool := false)
     (scale : Option Float := none)
@@ -56,10 +58,10 @@ def currentSpecialization
 /-- Typed route classifier for current TK-backed coverage. -/
 def supportsTkMhaKernel
     {batch nHead nKvHead qSeq kvSeq headDim : UInt64} {d : DType}
-    (q : Query batch nHead qSeq headDim d)
-    (k : KeyValue batch nKvHead kvSeq headDim d)
-    (v : KeyValue batch nKvHead kvSeq headDim d)
-    (attnMask : Option (PaddingMask batch kvSeq) := none)
+    (q : Query (device := device) batch nHead qSeq headDim d)
+    (k : KeyValue (device := device) batch nKvHead kvSeq headDim d)
+    (v : KeyValue (device := device) batch nKvHead kvSeq headDim d)
+    (attnMask : Option (PaddingMask (device := device) batch kvSeq) := none)
     (dropoutP : Float := 0.0)
     (isCausal : Bool := false)
     (scale : Option Float := none)
@@ -70,10 +72,10 @@ def supportsTkMhaKernel
 /-- Typed dispatch route (kernel vs portable) for observability/debugging. -/
 def dispatchRoute
     {batch nHead nKvHead qSeq kvSeq headDim : UInt64} {d : DType}
-    (q : Query batch nHead qSeq headDim d)
-    (k : KeyValue batch nKvHead kvSeq headDim d)
-    (v : KeyValue batch nKvHead kvSeq headDim d)
-    (attnMask : Option (PaddingMask batch kvSeq) := none)
+    (q : Query (device := device) batch nHead qSeq headDim d)
+    (k : KeyValue (device := device) batch nKvHead kvSeq headDim d)
+    (v : KeyValue (device := device) batch nKvHead kvSeq headDim d)
+    (attnMask : Option (PaddingMask (device := device) batch kvSeq) := none)
     (dropoutP : Float := 0.0)
     (isCausal : Bool := false)
     (scale : Option Float := none)
@@ -88,43 +90,43 @@ def dispatchRoute
     The indexed adapter checks that native output metadata matches the query. -/
 @[inline] def flashAttn
     {batch nHead nKvHead qSeq kvSeq headDim : UInt64} {d : DType}
-    (query : Query batch nHead qSeq headDim d)
-    (key : KeyValue batch nKvHead kvSeq headDim d)
-    (value : KeyValue batch nKvHead kvSeq headDim d)
-    (attnMask : Option (PaddingMask batch kvSeq) := none)
+    (query : Query (device := device) batch nHead qSeq headDim d)
+    (key : KeyValue (device := device) batch nKvHead kvSeq headDim d)
+    (value : KeyValue (device := device) batch nKvHead kvSeq headDim d)
+    (attnMask : Option (PaddingMask (device := device) batch kvSeq) := none)
     (dropoutP : Float := 0.0)
     (isCausal : Bool := false)
     (scale : Option Float := none)
     (enableGqa : Bool := false)
-    : Query batch nHead qSeq headDim d :=
+    : Query (device := device) batch nHead qSeq headDim d :=
   Tensor.flashAttention query key value enableGqa attnMask dropoutP isCausal scale
 
 /-- Alias matching PyTorch naming. -/
 @[inline] def scaledDotProductAttention
     {batch nHead nKvHead qSeq kvSeq headDim : UInt64} {d : DType}
-    (query : Query batch nHead qSeq headDim d)
-    (key : KeyValue batch nKvHead kvSeq headDim d)
-    (value : KeyValue batch nKvHead kvSeq headDim d)
-    (attnMask : Option (PaddingMask batch kvSeq) := none)
+    (query : Query (device := device) batch nHead qSeq headDim d)
+    (key : KeyValue (device := device) batch nKvHead kvSeq headDim d)
+    (value : KeyValue (device := device) batch nKvHead kvSeq headDim d)
+    (attnMask : Option (PaddingMask (device := device) batch kvSeq) := none)
     (dropoutP : Float := 0.0)
     (isCausal : Bool := false)
     (scale : Option Float := none)
     (enableGqa : Bool := false)
-    : Query batch nHead qSeq headDim d :=
+    : Query (device := device) batch nHead qSeq headDim d :=
   flashAttn query key value attnMask dropoutP isCausal scale enableGqa
 
 /-- Typed API returning both the dispatch route and the output. -/
 def flashAttnWithRoute
     {batch nHead nKvHead qSeq kvSeq headDim : UInt64} {d : DType}
-    (query : Query batch nHead qSeq headDim d)
-    (key : KeyValue batch nKvHead kvSeq headDim d)
-    (value : KeyValue batch nKvHead kvSeq headDim d)
-    (attnMask : Option (PaddingMask batch kvSeq) := none)
+    (query : Query (device := device) batch nHead qSeq headDim d)
+    (key : KeyValue (device := device) batch nKvHead kvSeq headDim d)
+    (value : KeyValue (device := device) batch nKvHead kvSeq headDim d)
+    (attnMask : Option (PaddingMask (device := device) batch kvSeq) := none)
     (dropoutP : Float := 0.0)
     (isCausal : Bool := false)
     (scale : Option Float := none)
     (enableGqa : Bool := false)
-    : DispatchRoute × Query batch nHead qSeq headDim d :=
+    : DispatchRoute × Query (device := device) batch nHead qSeq headDim d :=
   let route := dispatchRoute query key value attnMask dropoutP isCausal scale enableGqa
   let out := flashAttn query key value attnMask dropoutP isCausal scale enableGqa
   (route, out)
@@ -136,23 +138,24 @@ structure PackedQKV where
   qSeq : UInt64
   kvSeq : UInt64
   headDim : UInt64
-  q : Tensor { shape := #[batch, nHead, qSeq, headDim] }
-  k : Tensor { shape := #[batch, nKvHead, kvSeq, headDim] }
-  v : Tensor { shape := #[batch, nKvHead, kvSeq, headDim] }
+  q : Tensor { shape := #[batch, nHead, qSeq, headDim], device := device }
+  k : Tensor { shape := #[batch, nKvHead, kvSeq, headDim], device := device }
+  v : Tensor { shape := #[batch, nKvHead, kvSeq, headDim], device := device }
 
 abbrev DynOut :=
   Sigma (fun batch =>
     Sigma (fun nHead =>
       Sigma (fun qSeq =>
         Sigma (fun headDim =>
-          Tensor { shape := #[batch, nHead, qSeq, headDim] }))))
+          Tensor { shape := #[batch, nHead, qSeq, headDim], device := device }))))
 
 private def checkedRaw {σ : StaticSpec} (label : String) (raw : RawTensor) : IO (Tensor σ) :=
   match Tensor.ofRaw raw with
   | .ok tensor => pure tensor
   | .error message => throw <| IO.userError s!"flashAttnDyn: {label}: {message}"
 
-private def parseQKVDyn (qDyn kDyn vDyn : RawTensor) : IO PackedQKV := do
+private def parseQKVDyn (qDyn kDyn vDyn : RawTensor) : IO (PackedQKV (device := qDyn.device)) := do
+  let device := qDyn.device
   let qShape := qDyn.runtimeShape
   if qShape.size != 4 then
     throw <| IO.userError s!"flashAttnDyn: query must be rank-4, got shape={qShape}"
@@ -185,9 +188,9 @@ private def parseQKVDyn (qDyn kDyn vDyn : RawTensor) : IO PackedQKV := do
   if !(kHeadDim == headDim && vHeadDim == headDim) then
     throw <| IO.userError s!"flashAttnDyn: head_dim mismatch q={headDim} k={kHeadDim} v={vHeadDim}"
 
-  let q : Tensor { shape := #[batch, nHead, qSeq, headDim] } ← checkedRaw "query" qDyn
-  let k : Tensor { shape := #[batch, nKvHead, kvSeq, headDim] } ← checkedRaw "key" kDyn
-  let v : Tensor { shape := #[batch, nKvHead, kvSeq, headDim] } ← checkedRaw "value" vDyn
+  let q : Tensor { shape := #[batch, nHead, qSeq, headDim], device := device } ← checkedRaw "query" qDyn
+  let k : Tensor { shape := #[batch, nKvHead, kvSeq, headDim], device := device } ← checkedRaw "key" kDyn
+  let v : Tensor { shape := #[batch, nKvHead, kvSeq, headDim], device := device } ← checkedRaw "value" vDyn
   pure {
     batch := batch
     nHead := nHead
@@ -203,7 +206,7 @@ private def parseQKVDyn (qDyn kDyn vDyn : RawTensor) : IO PackedQKV := do
 private def parseMaskDyn
     (batch kvSeq : UInt64)
     (attnMask : Option RawTensor)
-    : IO (Option (PaddingMask batch kvSeq)) := do
+    : IO (Option (PaddingMask (device := device) batch kvSeq)) := do
   match attnMask with
   | none => pure none
   | some maskDyn =>
@@ -215,7 +218,7 @@ private def parseMaskDyn
       if !(gotBatch == batch && gotKvSeq == kvSeq) then
         throw <| IO.userError
           s!"flashAttnDyn: attn_mask shape mismatch expected=[{batch},{kvSeq}] got=[{gotBatch},{gotKvSeq}]"
-      let mask : PaddingMask batch kvSeq ← checkedRaw "attn_mask" maskDyn
+      let mask : PaddingMask (device := device) batch kvSeq ← checkedRaw "attn_mask" maskDyn
       pure (some mask)
 
 /-- Fully general existential adapter:
@@ -228,10 +231,11 @@ def flashAttnDyn
     (isCausal : Bool := false)
     (scale : Option Float := none)
     (enableGqa : Bool := false)
-    : IO DynOut := do
+    : IO (DynOut (device := qDyn.device)) := do
+  let device := qDyn.device
   let packed ← parseQKVDyn qDyn kDyn vDyn
-  let typedMask ← parseMaskDyn packed.batch packed.kvSeq attnMask
-  let out : Tensor { shape := #[packed.batch, packed.nHead, packed.qSeq, packed.headDim] } :=
+  let typedMask ← parseMaskDyn (device := device) packed.batch packed.kvSeq attnMask
+  let out : Tensor { shape := #[packed.batch, packed.nHead, packed.qSeq, packed.headDim], device := device } :=
     flashAttn packed.q packed.k packed.v typedMask dropoutP isCausal scale enableGqa
   pure ⟨packed.batch, ⟨packed.nHead, ⟨packed.qSeq, ⟨packed.headDim, out⟩⟩⟩⟩
 

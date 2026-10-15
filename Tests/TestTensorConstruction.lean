@@ -63,7 +63,7 @@ def privateImplementationBypass (σ : StaticSpec) : Tensor σ :=
 @[test]
 def testCheckedAdmissionAndOpaqueAccessors : IO Unit := do
   let raw := RawTensor.zeros #[2] false .CPU
-  let spec : StaticSpec := { shape := #[2], dtype := .Float32, device := .exact .CPU }
+  let spec : StaticSpec := { shape := #[2], dtype := .Float32, device := .CPU }
   let tensor ← match Tensor.ofRaw (σ := spec) raw with
     | .error message => throw (IO.userError message)
     | .ok tensor => pure tensor
@@ -72,13 +72,14 @@ def testCheckedAdmissionAndOpaqueAccessors : IO Unit := do
   LeanTest.assertTrue (tensor.raw.device == .CPU)
   LeanTest.assertEqual tensor.raw.getValues.toList [0, 0]
   LeanTest.assertTrue tensor.validate.toOption.isSome
-  let weakened : Tensor { spec with device := .any } := tensor.forgetDevice
-  LeanTest.assertTrue weakened.validate.toOption.isSome
-  LeanTest.assertEqual weakened.raw.getValues.toList [0, 0]
+  let packaged := tensor.packDevice
+  LeanTest.assertTrue (packaged.1 == Device.CPU)
+  LeanTest.assertTrue packaged.2.validate.toOption.isSome
+  LeanTest.assertEqual packaged.2.raw.getValues.toList [0, 0]
   let rejected : Array StaticSpec := #[
     { spec with shape := #[99] },
     { spec with dtype := .Int64 },
-    { spec with device := .exact (.CUDA 7) },
+    { spec with device := (.CUDA 7) },
     { spec with dtype := .Unknown "Float32_typo" }]
   for wrong in rejected do
     LeanTest.assertTrue (Tensor.ofRaw (σ := wrong) raw).toOption.isNone
@@ -86,7 +87,7 @@ def testCheckedAdmissionAndOpaqueAccessors : IO Unit := do
 
 @[test]
 def testOpaqueDefaultAllocation : IO Unit := do
-  let tensor : Tensor { shape := #[3], dtype := .Float64, device := .exact .CPU } := default
+  let tensor : Tensor { shape := #[3], dtype := .Float64, device := .CPU } := default
   LeanTest.assertTrue tensor.validate.toOption.isSome
   LeanTest.assertEqual tensor.raw.runtimeShape #[3]
   LeanTest.assertEqual tensor.raw.dtype .Float64

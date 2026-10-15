@@ -14,17 +14,18 @@ import Tyr.Log
 
 namespace torch.vae
 
+variable {device : Device}
 open torch.Log
 
 /-- Full AutoEncoder with BatchNorm statistics for proper normalization.
     The encode/decode pipeline uses BN normalization on packed latents. -/
 structure AutoEncoder where
   /-- The VAE decoder -/
-  decoder : Decoder
+  decoder : (Decoder (device := device))
   /-- BatchNorm running mean for latent normalization [128] -/
-  bn_running_mean : Tensor { shape := #[128] }
+  bn_running_mean : Tensor { device := device, shape := #[128] }
   /-- BatchNorm running variance for latent normalization [128] -/
-  bn_running_var : Tensor { shape := #[128] }
+  bn_running_var : Tensor { device := device, shape := #[128] }
   deriving TensorStruct
 
 namespace AutoEncoder
@@ -35,7 +36,7 @@ def bn_eps : Float := 1e-4
 /-- Inverse normalize packed latents using BN statistics.
     z: [batch, 128, h, w] → [batch, 128, h, w]
     Formula: z * sqrt(running_var + eps) + running_mean -/
-def invNormalize (ae : AutoEncoder) (z : Tensor { shape := #[1, 128, 16, 16] }) : Tensor { shape := #[1, 128, 16, 16] } :=
+def invNormalize (ae : (AutoEncoder (device := device))) (z : Tensor { device := device, shape := #[1, 128, 16, 16] }) : Tensor { device := device, shape := #[1, 128, 16, 16] } :=
   -- Compute scale: sqrt(running_var + eps)
   let var_plus_eps := Tensor.Preserving.addScalar ae.bn_running_var bn_eps
   let scale := Tensor.Preserving.sqrt var_plus_eps
@@ -51,7 +52,7 @@ def invNormalize (ae : AutoEncoder) (z : Tensor { shape := #[1, 128, 16, 16] }) 
     Packed: [1, 128, 16, 16]
     Unpacked: [1, 32, 32, 32]
     The reshape and permutation preserve the indexed spatial layout. -/
-def unpackLatents16x16 (z : Tensor { shape := #[1, 128, 16, 16] }) : Tensor { shape := #[1, 32, 32, 32] } :=
+def unpackLatents16x16 (z : Tensor { device := device, shape := #[1, 128, 16, 16] }) : Tensor { device := device, shape := #[1, 32, 32, 32] } :=
   -- Reshape: [1, 128, 16, 16] → [1, 32, 2, 2, 16, 16]
   let z := Tensor.reshapeChecked z #[1, 32, 2, 2, 16, 16]
   -- Permute: [1, 32, 2, 2, 16, 16] → [1, 32, 16, 2, 16, 2]
@@ -63,7 +64,7 @@ def unpackLatents16x16 (z : Tensor { shape := #[1, 128, 16, 16] }) : Tensor { sh
     Input: packed latents [1, 128, 16, 16]
     Output: RGB image [1, 3, 256, 256]
     The reshape and permutation preserve the indexed spatial layout. -/
-def decode (ae : AutoEncoder) (z : Tensor { shape := #[1, 128, 16, 16] }) : Tensor { shape := #[1, 3, 256, 256] } :=
+def decode (ae : (AutoEncoder (device := device))) (z : Tensor { device := device, shape := #[1, 128, 16, 16] }) : Tensor { device := device, shape := #[1, 3, 256, 256] } :=
   -- Step 1: Inverse normalize using BN stats (uses broadcasting)
   let z := ae.invNormalize z
   -- Step 2: Unpack latents [1, 128, 16, 16] → [1, 32, 32, 32]
@@ -74,15 +75,15 @@ def decode (ae : AutoEncoder) (z : Tensor { shape := #[1, 128, 16, 16] }) : Tens
 end AutoEncoder
 
 /-- Load full AutoEncoder from SafeTensors including BN stats. -/
-def loadAutoEncoder (path : String) (log : Handlers := {}) : IO AutoEncoder := do
+def loadAutoEncoder (path : String) (log : Handlers := {}) (device : Device := .CPU) : IO (AutoEncoder (device := device)) := do
   log.onInfo "Loading AutoEncoder..."
 
   -- Load decoder
-  let decoder ← loadDecoder path log
+  let decoder ← loadDecoder (device := device) path log
 
   -- Load BN running stats
-  let bn_running_mean ← safetensors.loadTensorCandidates path #["bn.running_mean"] #[128]
-  let bn_running_var ← safetensors.loadTensorCandidates path #["bn.running_var"] #[128]
+  let bn_running_mean ← safetensors.loadTensorCandidates (device := device) path #["bn.running_mean"] #[128]
+  let bn_running_var ← safetensors.loadTensorCandidates (device := device) path #["bn.running_var"] #[128]
   log.onInfo "  Loaded BN running stats"
 
   log.onInfo "AutoEncoder loaded successfully!"

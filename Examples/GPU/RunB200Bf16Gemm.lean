@@ -32,8 +32,8 @@ def generateFixtures : IO Unit := do
   let aFloat ← Tensor.randn #[256, 64] false device
   let bFloat ← Tensor.randn #[256, 64] false device
   let a := aFloat.toBFloat16
-  let b : Tensor { shape := #[256, 64], dtype := .BFloat16 } := bFloat.toBFloat16
-  let expectedFloat : Tensor { shape := #[256, 256], dtype := .Float32 } := gemmReference a b
+  let b : Tensor { shape := #[256, 64], dtype := .BFloat16, device := (.CUDA 0) } := bFloat.toBFloat16
+  let expectedFloat : Tensor { shape := #[256, 256], dtype := .Float32, device := (.CUDA 0) } := gemmReference a b
   let expected := expectedFloat.toBFloat16
 
   Tensor.saveTensor a (fixtureFile "a").toString
@@ -55,9 +55,9 @@ def runOnce : IO Bool := do
   if !(← fixturesPresent fixtureSpec) then
     generateFixtures
 
-  let a ← Tensor.loadTensorExact { shape := #[256, 64], dtype := .BFloat16 } (fixtureFile "a").toString
-  let b ← Tensor.loadTensorExact { shape := #[256, 64], dtype := .BFloat16 } (fixtureFile "b").toString
-  let expected ← Tensor.loadTensorExact { shape := #[256, 256], dtype := .BFloat16 } (fixtureFile "expected_c").toString
+  let a ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[256, 64], dtype := .BFloat16 } (fixtureFile "a").toString
+  let b ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[256, 64], dtype := .BFloat16 } (fixtureFile "b").toString
+  let expected ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[256, 256], dtype := .BFloat16 } (fixtureFile "expected_c").toString
 
   let output ← Tensor.uniformLike expected 0 0
   let stream ← torch.cuda_current_stream
@@ -158,11 +158,11 @@ private def customShapeRequested (args : List String) : Bool :=
 
 private def benchmarkShape (cfg : Benchmark.Config) (caseLabel : String) (m n k : UInt64) : IO (String × Bool) := do
   let device := Device.CUDA 0
-  let a : Tensor { shape := #[m, k], dtype := .BFloat16 } := (← Tensor.randn #[m, k] false device).toBFloat16
-  let b : Tensor { shape := #[n, k], dtype := .BFloat16 } := (← Tensor.randn #[n, k] false device).toBFloat16
-  let expectedFloat : Tensor { shape := #[m, n], dtype := .Float32 } :=
+  let a : Tensor { shape := #[m, k], dtype := .BFloat16, device := (.CUDA 0) } := (← Tensor.randn #[m, k] false device).toBFloat16
+  let b : Tensor { shape := #[n, k], dtype := .BFloat16, device := (.CUDA 0) } := (← Tensor.randn #[n, k] false device).toBFloat16
+  let expectedFloat : Tensor { shape := #[m, n], dtype := .Float32, device := (.CUDA 0) } :=
     gemmReference a b
-  let expected : Tensor { shape := #[m, n], dtype := .BFloat16 } := expectedFloat.toBFloat16
+  let expected : Tensor { shape := #[m, n], dtype := .BFloat16, device := (.CUDA 0) } := expectedFloat.toBFloat16
   let output ← Tensor.uniformLike expected 0 0
   let stream ← torch.cuda_current_stream
   let atol := if k >= 3072 then 1.0 else if k >= 1536 then 0.5 else 5e-2

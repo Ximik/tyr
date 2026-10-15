@@ -3,7 +3,7 @@ import Tyr.Typed.Spec
 /-!
 # Runtime placement contracts
 
-`StaticSpec.device` carries either an exact placement or an unrestricted policy.
+`StaticSpec.device` is an actual placement, possibly selected at runtime.
 `TensorContract` adds runtime placement checks to shape/dtype metadata for
 boundaries such as file loading and external native handles.
 -/
@@ -17,9 +17,8 @@ def render : Device → String
   | .MPS => "MPS"
   | .CUDA idx => s!"CUDA:{idx}"
 
-/-- Validate actual placement for operations that require one device. Static
-`.any` policies are deliberately absent: equality of policies is not equality
-of the devices carried by native handles. -/
+/-- Validate actual placement for operations that require one device.
+The check is independent of the typed indices and also guards raw boundaries. -/
 def sameResult? (left right : Device) : Except String Device :=
   if left == right then
     .ok left
@@ -56,64 +55,42 @@ def selectionResult? (conditionShape : Shape) (condition : Device)
       throw s!"Incompatible selection device: {label} is {device.render} at shape {shape}, expected {result.render}; only rank-zero operands may move to the selected device"
   pure result
 
-end Device
+/-- Equality evidence for a same-device operation. Runtime-selected devices can
+be related by checking equality before entering a shared-device operation. -/
+class SameDeviceCompatible (left right : Device) : Prop where
+  valid : left = right
 
-namespace DevicePolicy
+instance sameDevice (device : Device) : SameDeviceCompatible device device := ⟨rfl⟩
 
-/-- The policies contain no known conflict for a same-device operation. An
-unrestricted policy still requires validation of the native device. -/
-def sameAllowed (left right : DevicePolicy) : Prop :=
-  left = .any ∨ right = .any ∨ left = right
-
-/-- Static eligibility for a same-device operation, not a proof of actual
-placement equality. Callers must also validate native metadata. -/
-class SameDeviceCompatible (left right : DevicePolicy) : Prop where
-  valid : sameAllowed left right
-
-instance sameDevice (device : DevicePolicy) : SameDeviceCompatible device device :=
-  ⟨Or.inr (Or.inr rfl)⟩
-
-instance anyDeviceLeft (right : DevicePolicy) : SameDeviceCompatible .any right :=
-  ⟨Or.inl rfl⟩
-
-instance anyDeviceRight (left : DevicePolicy) : SameDeviceCompatible left .any :=
-  ⟨Or.inr (Or.inl rfl)⟩
-
-/-- Pointwise placement permits matching/unknown policies or a CPU scalar.
-The latter is about rank, not the number of elements. -/
+/-- Binary pointwise placement is shared placement or a rank-zero CPU operand. -/
 def pointwiseAllowed (left right : StaticSpec) : Prop :=
-  sameAllowed left.device right.device ∨
-    (left.shape = #[] ∧ left.device = .exact .CPU) ∨
-    (right.shape = #[] ∧ right.device = .exact .CPU)
+  left.device = right.device ∨
+    (left.shape = #[] ∧ left.device = .CPU) ∨
+    (right.shape = #[] ∧ right.device = .CPU)
 
-/-- Reject statically known pointwise placement conflicts. In particular,
-`.any` does not bypass the runtime `Device.pointwiseResult?` check. -/
+/-- Erased evidence of valid binary pointwise placement. There is no wildcard
+instance: distinct runtime devices need equality evidence or a CPU scalar. -/
 class PointwiseCompatible (left right : StaticSpec) : Prop where
   valid : pointwiseAllowed left right
 
 instance compatiblePointwiseDevices (left right : StaticSpec)
     [h : SameDeviceCompatible left.device right.device] :
-    PointwiseCompatible left right :=
-  ⟨Or.inl h.valid⟩
+    PointwiseCompatible left right := ⟨Or.inl h.valid⟩
 
 instance cpuScalarLeft (dtype : DType) (right : StaticSpec) :
-    PointwiseCompatible ⟨#[], dtype, .exact .CPU⟩ right :=
+    PointwiseCompatible ⟨#[], dtype, .CPU⟩ right :=
   ⟨Or.inr (Or.inl ⟨rfl, rfl⟩)⟩
 
 instance cpuScalarRight (left : StaticSpec) (dtype : DType) :
-    PointwiseCompatible left ⟨#[], dtype, .exact .CPU⟩ :=
+    PointwiseCompatible left ⟨#[], dtype, .CPU⟩ :=
   ⟨Or.inr (Or.inr ⟨rfl, rfl⟩)⟩
 
-def check (policy : DevicePolicy) (actual : Device) : Except String Unit :=
-  match policy with
-  | .any => .ok ()
-  | .exact expected =>
-      if actual == expected then
-        .ok ()
-      else
-        .error s!"Expected device {expected.render}, got {actual.render}"
+/-- Check placement at a native admission or conversion boundary. -/
+def check (expected actual : Device) : Except String Unit :=
+  if actual == expected then .ok ()
+  else .error s!"Expected device {expected.render}, got {actual.render}"
 
-end DevicePolicy
+end Device
 
 inductive TensorRole where
   | activation
@@ -129,7 +106,7 @@ deriving Repr, BEq, DecidableEq
 structure TensorContract where
   spec : TensorSpec
   role : TensorRole := .activation
-  devicePolicy : DevicePolicy := .any
+  expectedDevice : Option Device := none
 deriving Repr, BEq
 
 namespace TensorContract
@@ -137,7 +114,8 @@ namespace TensorContract
 def check (contract : TensorContract) (actualSpec : TensorSpec) (actualDevice : Device) :
     Except String Unit := do
   TensorSpec.checkCompatible contract.spec actualSpec
-  contract.devicePolicy.check actualDevice
+  if let some expected := contract.expectedDevice then
+    expected.check actualDevice
 
 end TensorContract
 

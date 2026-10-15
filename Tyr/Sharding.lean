@@ -290,7 +290,7 @@ def MaybeSharded.updateWithGrad {σ : StaticSpec} {rank worldSize : UInt64}
     Each rank owns vocab_size/world_size tokens.
 -/
 structure ShardedEmbedding (vocabSize dim : UInt64) (rank worldSize : UInt64)
-    (dtype : DType := .Float32) (device : DevicePolicy := .any) where
+    (dtype : DType := .Float32) (device : Device := .CPU) where
   /-- Local portion of embedding table -/
   weight : ShardedTensor ⟨#[vocabSize, dim], dtype, device⟩ rank worldSize .first
   /-- Learning rate multiplier -/
@@ -305,7 +305,7 @@ structure ShardedEmbedding (vocabSize dim : UInt64) (rank worldSize : UInt64)
     2. Apply embedding lookup
 -/
 def ShardedEmbedding.forward {vocabSize dim rank worldSize batch seq : UInt64}
-    {d : DType} {dev : DevicePolicy}
+    {d : DType} {dev : Device}
     (emb : ShardedEmbedding vocabSize dim rank worldSize d dev)
     (tokens : Tensor ⟨#[batch, seq], .Int64, dev⟩)
     : IO (Tensor ⟨#[batch, seq, dim], d, dev⟩ × ShardedEmbedding vocabSize dim rank worldSize d dev) := do

@@ -184,7 +184,7 @@ def saveParams [TensorStruct α]
   log.onInfo s!"Saved {finalIdx} tensors to {dir}"
 
 /-- Load all tensors in a TensorStruct from a directory with a namePrefix.
-    Requires a template structure to know the shapes. -/
+    The template fixes every shape and dtype and selects the destination devices. -/
 def loadParams [TensorStruct α]
     (template : α)
     (dir : String)
@@ -204,7 +204,7 @@ def loadParams [TensorStruct α]
   let result ← TensorStruct.mapM (fun {σ} (_expected : Tensor σ) => do
     let idx ← indexRef.get
     let path := s!"{dir}/{namePrefix}_{idx}.pt"
-    let t ← Tensor.loadTensorExact σ path
+    let t ← Tensor.loadTensorOn σ path
     indexRef.set (idx + 1)
     pure t
   ) template

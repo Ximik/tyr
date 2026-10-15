@@ -5,7 +5,7 @@ import LeanTest
 
 open torch
 
-private def randnDynamic (shape : Shape) : IO (Tensor { shape := shape }) := do
+private def randnDynamic (shape : Shape) : IO (Tensor { shape := shape, device := .CPU }) := do
   return (← Tensor.randn shape).forgetDType
 open torch.Model
 open torch.qwen35
@@ -99,7 +99,7 @@ def testQwen35MultimodalConfigLoad : IO Unit := do
 def testQwen35MultimodalForwardWithImagePatches : IO Unit := do
   let model ← Qwen35ForConditionalGeneration.init tinyVLCfg
 
-  let ids : Tensor { shape := #[1, 6], dtype := .Int64 } := Tensor.reshapeChecked (Tensor.fromInt64Array #[2, 50, 50, 50, 50, 3]) #[1, 6]
+  let ids : Tensor { shape := #[1, 6], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked (Tensor.fromInt64Array #[2, 50, 50, 50, 50, 3]) #[1, 6]
   let patches ← randnDynamic #[4, VisionConfig.patchDim tinyVLCfg.vision_config]
   let logits ← model.forwardWithImagePatches tinyVLCfg ids patches none
 
@@ -111,7 +111,7 @@ def testQwen35MultimodalPlaceholderCountMismatch : IO Unit := do
   let model ← Qwen35ForConditionalGeneration.init tinyVLCfg
 
   -- only 3 image placeholders in ids but 4 visual tokens from patches
-  let ids : Tensor { shape := #[1, 6], dtype := .Int64 } := Tensor.reshapeChecked (Tensor.fromInt64Array #[2, 50, 50, 50, 4, 3]) #[1, 6]
+  let ids : Tensor { shape := #[1, 6], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked (Tensor.fromInt64Array #[2, 50, 50, 50, 4, 3]) #[1, 6]
   let patches ← randnDynamic #[4, VisionConfig.patchDim tinyVLCfg.vision_config]
 
   let didThrow ←
@@ -127,12 +127,12 @@ def testQwen35MultimodalPlaceholderCountMismatch : IO Unit := do
 @[test]
 def testQwen35MultimodalGenerateStreamBatched : IO Unit := do
   let model ← Qwen35ForConditionalGeneration.init tinyVLCfg
-  let ids : Tensor { shape := #[2, 4], dtype := .Int64 } :=
+  let ids : Tensor { shape := #[2, 4], dtype := .Int64, device := .CPU } :=
     Tensor.reshapeChecked (Tensor.fromInt64Array #[2, 5, 6, 7, 2, 8, 9, 10]) #[2, 4]
 
   let callbacksRef ← IO.mkRef (0 : Nat)
   let onStep : StreamCallback 2 := fun _ nextTok => do
-    let flat : Tensor { shape := #[2], dtype := .Int64 } := Tensor.reshapeChecked (id nextTok) #[2]
+    let flat : Tensor { shape := #[2], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked (id nextTok) #[2]
     let vals ← Tensor.toUInt64Array flat
     if vals.size == 2 then
       callbacksRef.modify (fun n => n + 1)
@@ -160,17 +160,17 @@ def testQwen35MultimodalGenerateStreamBatched : IO Unit := do
 @[test]
 def testQwen35MultimodalGenerateStreamWithImageAndVideoFeatures : IO Unit := do
   let model ← Qwen35ForConditionalGeneration.init tinyVLCfg
-  let ids : Tensor { shape := #[1, 8], dtype := .Int64 } :=
+  let ids : Tensor { shape := #[1, 8], dtype := .Int64, device := .CPU } :=
     Tensor.reshapeChecked (Tensor.fromInt64Array #[2, 50, 50, 51, 51, 51, 9, 10]) #[1, 8]
 
-  let imageFeat : Tensor { shape := #[2, tinyVLCfg.vision_config.out_hidden_size] } ←
+  let imageFeat : Tensor { shape := #[2, tinyVLCfg.vision_config.out_hidden_size], device := .CPU } ←
     randnDynamic #[2, tinyVLCfg.vision_config.out_hidden_size]
-  let videoFeat : Tensor { shape := #[3, tinyVLCfg.vision_config.out_hidden_size] } ←
+  let videoFeat : Tensor { shape := #[3, tinyVLCfg.vision_config.out_hidden_size], device := .CPU } ←
     randnDynamic #[3, tinyVLCfg.vision_config.out_hidden_size]
 
   let callbacksRef ← IO.mkRef (0 : Nat)
   let onStep : StreamCallback 1 := fun _ nextTok => do
-    let flat : Tensor { shape := #[1], dtype := .Int64 } := Tensor.reshapeChecked (id nextTok) #[1]
+    let flat : Tensor { shape := #[1], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked (id nextTok) #[1]
     let vals ← Tensor.toUInt64Array flat
     if vals.size == 1 then
       callbacksRef.modify (fun n => n + 1)
@@ -199,8 +199,8 @@ def testQwen35MultimodalGenerateStreamWithImageAndVideoFeatures : IO Unit := do
   LeanTest.assertEqual seqStream seqPlain
     "multimodal streaming and non-streaming generation should have equal output length"
 
-  let streamFlat : Tensor { shape := #[seqStream], dtype := .Int64 } := Tensor.reshapeChecked (id outStream) #[seqStream]
-  let plainFlat : Tensor { shape := #[seqPlain], dtype := .Int64 } := Tensor.reshapeChecked (id outPlain) #[seqPlain]
+  let streamFlat : Tensor { shape := #[seqStream], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked (id outStream) #[seqStream]
+  let plainFlat : Tensor { shape := #[seqPlain], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked (id outPlain) #[seqPlain]
   let streamIds ← Tensor.toUInt64Array streamFlat
   let plainIds ← Tensor.toUInt64Array plainFlat
   LeanTest.assertEqual streamIds plainIds

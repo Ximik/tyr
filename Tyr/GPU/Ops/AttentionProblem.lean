@@ -21,6 +21,8 @@ import Tyr.GPU.Types
 namespace Tyr.GPU.Ops
 
 open torch
+
+variable {device : Device}
 open Tyr.GPU
 
 /-- High-level attention execution mode. -/
@@ -146,10 +148,10 @@ def inferMode (qSeq kvSeq : UInt64) (windowSize : Option UInt64 := none) : Atten
     runtime dtype/device of the query handle, as before. -/
 def ofQKV
     {batch nHead nKvHead qSeq kvSeq headDim : UInt64} {d : DType}
-    (q : Tensor { shape := #[batch, nHead, qSeq, headDim], dtype := d })
-    (k : Tensor { shape := #[batch, nKvHead, kvSeq, headDim], dtype := d })
-    (v : Tensor { shape := #[batch, nKvHead, kvSeq, headDim], dtype := d })
-    (attnMask : Option (Tensor { shape := #[batch, kvSeq] }) := none)
+    (q : Tensor { shape := #[batch, nHead, qSeq, headDim], dtype := d, device := device })
+    (k : Tensor { shape := #[batch, nKvHead, kvSeq, headDim], dtype := d, device := device })
+    (v : Tensor { shape := #[batch, nKvHead, kvSeq, headDim], dtype := d, device := device })
+    (attnMask : Option (Tensor { shape := #[batch, kvSeq], device := device }) := none)
     (dropoutP : Float := 0.0)
     (isCausal : Bool := false)
     (scale : Option Float := none)

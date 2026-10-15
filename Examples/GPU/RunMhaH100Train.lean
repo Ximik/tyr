@@ -45,8 +45,8 @@ def backwardMha
   tkMhaH100Bwd2BlockKvSweep.launch q.raw k.raw v.raw dO.raw lOut.raw dVec.raw dQ.raw dK.raw dV.raw 128 64 1 2 1 128 1 1 0 stream
   pure (dQ, dK, dV)
 
-def mkNoisyInit (targetF : MasterTensor) (noiseScale : Float) (device : Device) : IO MasterTensor := do
-  let noise : MasterTensor ← Tensor.randn #[1, 1, 128, 64] false device
+def mkNoisyInit (targetF : MasterTensor) (noiseScale : Float) : IO MasterTensor := do
+  let noise : MasterTensor ← Tensor.randn #[1, 1, 128, 64] false (.CUDA 0)
   pure (targetF + (noise * noiseScale))
 
 def oneKernelTrainStep
@@ -54,7 +54,7 @@ def oneKernelTrainStep
     (targetOut : MhaTensor)
     (stream : UInt64)
     (lr : Float)
-    : IO (MasterTensor × MasterTensor × MasterTensor × Tensor { shape := #[], dtype := .Float32 }) := do
+    : IO (MasterTensor × MasterTensor × MasterTensor × Tensor { shape := #[], dtype := .Float32, device := (.CUDA 0) }) := do
   let q : MhaTensor := qM.toBFloat16
   let k : MhaTensor := kM.toBFloat16
   let v : MhaTensor := vM.toBFloat16
@@ -82,9 +82,9 @@ def makeSetup (noiseScale : Float) : IO (Option TrainSetup) := do
   let vTarget : MhaTensor := vTargetF.toBFloat16
   let (targetOut, _) ← forwardMha qTarget kTarget vTarget stream
 
-  let qInit ← mkNoisyInit qTargetF noiseScale device
-  let kInit ← mkNoisyInit kTargetF noiseScale device
-  let vInit ← mkNoisyInit vTargetF noiseScale device
+  let qInit ← mkNoisyInit qTargetF noiseScale
+  let kInit ← mkNoisyInit kTargetF noiseScale
+  let vInit ← mkNoisyInit vTargetF noiseScale
   let targetOut32 : MasterTensor := targetOut.toFloat32
   let _ ← torch.cuda_synchronize
 

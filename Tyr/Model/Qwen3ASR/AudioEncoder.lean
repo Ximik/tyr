@@ -17,20 +17,20 @@ import Tyr.Model.Utils
 
 namespace torch.qwen3asr
 
+variable {device : Device}
 open torch.Model
 
-private def initWeight (shape : Shape) (fanIn : UInt64) : IO (Tensor { shape := shape }) :=
-  Model.initWeight shape fanIn (.Unknown "dynamic")
+private def initWeight (shape : Shape) (fanIn : UInt64) (device : Device := .CPU) : IO (Tensor { device := device, shape := shape }) :=
+  Model.initWeight (device := device) shape fanIn (.Unknown "dynamic")
 
-private def initBias (shape : Shape) : IO (Tensor { shape := shape }) :=
-  Model.initBias shape (.Unknown "dynamic")
+private def initBias (shape : Shape) (device : Device := .CPU) : IO (Tensor { device := device, shape := shape }) :=
+  Model.initBias (device := device) shape (.Unknown "dynamic")
 
-private def initLayerNorm (dim : UInt64) (eps : Float := 1e-5) : IO (LayerNorm dim (.Unknown "dynamic")) := do
-  let norm ← LayerNorm.init dim eps
+private def initLayerNorm (dim : UInt64) (eps : Float := 1e-5) (device : Device := .CPU) : IO (LayerNorm (device := device) dim (.Unknown "dynamic")) := do
+  let norm ← LayerNorm.init (device := device) dim eps
   pure { weight := norm.weight.forgetDType, bias := norm.bias.forgetDType, eps := norm.eps }
 
-
-private def activate {s : Shape} (name : String) (x : Tensor { shape := s }) : Tensor { shape := s } :=
+private def activate {s : Shape} (name : String) (x : Tensor { device := device, shape := s }) : Tensor { device := device, shape := s } :=
   if name == "relu" then
     Tensor.Preserving.relu x
   else if name == "silu" then
@@ -41,7 +41,7 @@ private def activate {s : Shape} (name : String) (x : Tensor { shape := s }) : T
 private def sinusoidPosition {seq dim : UInt64}
     (maxTimescale : Float := 10000.0)
     (device : Device := Device.CPU)
-    : Tensor { shape := #[seq, dim] } :=
+    : Tensor { device := device, shape := #[seq, dim] } :=
   if dim % 2 == 0 then
     let half := dim / 2
     let pos := (Tensor.arange seq).toFloat32
@@ -57,53 +57,53 @@ private def sinusoidPosition {seq dim : UInt64}
 
 /-- Multi-head self-attention used by the audio encoder. -/
 structure AudioAttention (cfg : AudioEncoderConfig) where
-  qProjWeight : Tensor { shape := #[cfg.encoderAttentionHeads * AudioEncoderConfig.headDim cfg, cfg.dModel] }
-  qProjBias : Tensor { shape := #[cfg.encoderAttentionHeads * AudioEncoderConfig.headDim cfg] }
-  kProjWeight : Tensor { shape := #[cfg.encoderAttentionHeads * AudioEncoderConfig.headDim cfg, cfg.dModel] }
-  kProjBias : Tensor { shape := #[cfg.encoderAttentionHeads * AudioEncoderConfig.headDim cfg] }
-  vProjWeight : Tensor { shape := #[cfg.encoderAttentionHeads * AudioEncoderConfig.headDim cfg, cfg.dModel] }
-  vProjBias : Tensor { shape := #[cfg.encoderAttentionHeads * AudioEncoderConfig.headDim cfg] }
-  outProjWeight : Tensor { shape := #[cfg.dModel, cfg.encoderAttentionHeads * AudioEncoderConfig.headDim cfg] }
-  outProjBias : Tensor { shape := #[cfg.dModel] }
+  qProjWeight : Tensor { device := device, shape := #[cfg.encoderAttentionHeads * AudioEncoderConfig.headDim cfg, cfg.dModel] }
+  qProjBias : Tensor { device := device, shape := #[cfg.encoderAttentionHeads * AudioEncoderConfig.headDim cfg] }
+  kProjWeight : Tensor { device := device, shape := #[cfg.encoderAttentionHeads * AudioEncoderConfig.headDim cfg, cfg.dModel] }
+  kProjBias : Tensor { device := device, shape := #[cfg.encoderAttentionHeads * AudioEncoderConfig.headDim cfg] }
+  vProjWeight : Tensor { device := device, shape := #[cfg.encoderAttentionHeads * AudioEncoderConfig.headDim cfg, cfg.dModel] }
+  vProjBias : Tensor { device := device, shape := #[cfg.encoderAttentionHeads * AudioEncoderConfig.headDim cfg] }
+  outProjWeight : Tensor { device := device, shape := #[cfg.dModel, cfg.encoderAttentionHeads * AudioEncoderConfig.headDim cfg] }
+  outProjBias : Tensor { device := device, shape := #[cfg.dModel] }
   deriving TensorStruct
 
 namespace AudioAttention
 
-def init (cfg : AudioEncoderConfig) : IO (AudioAttention cfg) := do
-  let qProjWeight ← initWeight
+def init (cfg : AudioEncoderConfig) (device : Device := .CPU) : IO (AudioAttention (device := device) cfg) := do
+  let qProjWeight ← initWeight (device := device)
     #[cfg.encoderAttentionHeads * AudioEncoderConfig.headDim cfg, cfg.dModel] cfg.dModel
-  let qProjBias ← initBias #[cfg.encoderAttentionHeads * AudioEncoderConfig.headDim cfg]
-  let kProjWeight ← initWeight
+  let qProjBias ← initBias (device := device) #[cfg.encoderAttentionHeads * AudioEncoderConfig.headDim cfg]
+  let kProjWeight ← initWeight (device := device)
     #[cfg.encoderAttentionHeads * AudioEncoderConfig.headDim cfg, cfg.dModel] cfg.dModel
-  let kProjBias ← initBias #[cfg.encoderAttentionHeads * AudioEncoderConfig.headDim cfg]
-  let vProjWeight ← initWeight
+  let kProjBias ← initBias (device := device) #[cfg.encoderAttentionHeads * AudioEncoderConfig.headDim cfg]
+  let vProjWeight ← initWeight (device := device)
     #[cfg.encoderAttentionHeads * AudioEncoderConfig.headDim cfg, cfg.dModel] cfg.dModel
-  let vProjBias ← initBias #[cfg.encoderAttentionHeads * AudioEncoderConfig.headDim cfg]
-  let outProjWeight ← initWeight
+  let vProjBias ← initBias (device := device) #[cfg.encoderAttentionHeads * AudioEncoderConfig.headDim cfg]
+  let outProjWeight ← initWeight (device := device)
     #[cfg.dModel, cfg.encoderAttentionHeads * AudioEncoderConfig.headDim cfg]
     (cfg.encoderAttentionHeads * AudioEncoderConfig.headDim cfg)
-  let outProjBias ← initBias #[cfg.dModel]
+  let outProjBias ← initBias (device := device) #[cfg.dModel]
   pure {
     qProjWeight, qProjBias, kProjWeight, kProjBias, vProjWeight, vProjBias, outProjWeight, outProjBias
   }
 
 def forward {batch seq : UInt64}
-    (m : AudioAttention cfg)
-    (x : Tensor { shape := #[batch, seq, cfg.dModel] })
-    (attnMask : Option (Tensor { shape := #[batch, seq] }) := none)
-    : Tensor { shape := #[batch, seq, cfg.dModel] } :=
-  let q : Tensor { shape := #[batch, seq, cfg.encoderAttentionHeads * AudioEncoderConfig.headDim cfg] } :=
+    (m : AudioAttention (device := device) cfg)
+    (x : Tensor { device := device, shape := #[batch, seq, cfg.dModel] })
+    (attnMask : Option (Tensor { device := device, shape := #[batch, seq] }) := none)
+    : Tensor { device := device, shape := #[batch, seq, cfg.dModel] } :=
+  let q : Tensor { device := device, shape := #[batch, seq, cfg.encoderAttentionHeads * AudioEncoderConfig.headDim cfg] } :=
     Tensor.affine3d x m.qProjWeight m.qProjBias
-  let k : Tensor { shape := #[batch, seq, cfg.encoderAttentionHeads * AudioEncoderConfig.headDim cfg] } :=
+  let k : Tensor { device := device, shape := #[batch, seq, cfg.encoderAttentionHeads * AudioEncoderConfig.headDim cfg] } :=
     Tensor.affine3d x m.kProjWeight m.kProjBias
-  let v : Tensor { shape := #[batch, seq, cfg.encoderAttentionHeads * AudioEncoderConfig.headDim cfg] } :=
+  let v : Tensor { device := device, shape := #[batch, seq, cfg.encoderAttentionHeads * AudioEncoderConfig.headDim cfg] } :=
     Tensor.affine3d x m.vProjWeight m.vProjBias
 
-  let q : Tensor { shape := #[batch, seq, cfg.encoderAttentionHeads, AudioEncoderConfig.headDim cfg] } :=
+  let q : Tensor { device := device, shape := #[batch, seq, cfg.encoderAttentionHeads, AudioEncoderConfig.headDim cfg] } :=
     Tensor.reshapeChecked q #[batch, seq, cfg.encoderAttentionHeads, AudioEncoderConfig.headDim cfg]
-  let k : Tensor { shape := #[batch, seq, cfg.encoderAttentionHeads, AudioEncoderConfig.headDim cfg] } :=
+  let k : Tensor { device := device, shape := #[batch, seq, cfg.encoderAttentionHeads, AudioEncoderConfig.headDim cfg] } :=
     Tensor.reshapeChecked k #[batch, seq, cfg.encoderAttentionHeads, AudioEncoderConfig.headDim cfg]
-  let v : Tensor { shape := #[batch, seq, cfg.encoderAttentionHeads, AudioEncoderConfig.headDim cfg] } :=
+  let v : Tensor { device := device, shape := #[batch, seq, cfg.encoderAttentionHeads, AudioEncoderConfig.headDim cfg] } :=
     Tensor.reshapeChecked v #[batch, seq, cfg.encoderAttentionHeads, AudioEncoderConfig.headDim cfg]
 
   let q := Tensor.splitHeads q
@@ -120,7 +120,7 @@ def forward {batch seq : UInt64}
         q k v cfg.attentionDropout false true
 
   let out := Tensor.joinHeads out
-  let out : Tensor { shape := #[batch, seq, cfg.encoderAttentionHeads * AudioEncoderConfig.headDim cfg] } :=
+  let out : Tensor { device := device, shape := #[batch, seq, cfg.encoderAttentionHeads * AudioEncoderConfig.headDim cfg] } :=
     Tensor.reshapeChecked out #[batch, seq, cfg.encoderAttentionHeads * AudioEncoderConfig.headDim cfg]
   Tensor.affine3d out m.outProjWeight m.outProjBias
 
@@ -128,32 +128,32 @@ end AudioAttention
 
 /-- One transformer block in the audio encoder. -/
 structure AudioEncoderLayer (cfg : AudioEncoderConfig) where
-  selfAttn : AudioAttention cfg
-  selfAttnLayerNorm : LayerNorm cfg.dModel (.Unknown "dynamic")
-  fc1Weight : Tensor { shape := #[cfg.encoderFfnDim, cfg.dModel] }
-  fc1Bias : Tensor { shape := #[cfg.encoderFfnDim] }
-  fc2Weight : Tensor { shape := #[cfg.dModel, cfg.encoderFfnDim] }
-  fc2Bias : Tensor { shape := #[cfg.dModel] }
-  finalLayerNorm : LayerNorm cfg.dModel (.Unknown "dynamic")
+  selfAttn : AudioAttention (device := device) cfg
+  selfAttnLayerNorm : LayerNorm (device := device) cfg.dModel (.Unknown "dynamic")
+  fc1Weight : Tensor { device := device, shape := #[cfg.encoderFfnDim, cfg.dModel] }
+  fc1Bias : Tensor { device := device, shape := #[cfg.encoderFfnDim] }
+  fc2Weight : Tensor { device := device, shape := #[cfg.dModel, cfg.encoderFfnDim] }
+  fc2Bias : Tensor { device := device, shape := #[cfg.dModel] }
+  finalLayerNorm : LayerNorm (device := device) cfg.dModel (.Unknown "dynamic")
   deriving TensorStruct
 
 namespace AudioEncoderLayer
 
-def init (cfg : AudioEncoderConfig) : IO (AudioEncoderLayer cfg) := do
-  let selfAttn ← AudioAttention.init cfg
-  let selfAttnLayerNorm ← initLayerNorm cfg.dModel 1e-5
-  let fc1Weight ← initWeight #[cfg.encoderFfnDim, cfg.dModel] cfg.dModel
-  let fc1Bias ← initBias #[cfg.encoderFfnDim]
-  let fc2Weight ← initWeight #[cfg.dModel, cfg.encoderFfnDim] cfg.encoderFfnDim
-  let fc2Bias ← initBias #[cfg.dModel]
-  let finalLayerNorm ← initLayerNorm cfg.dModel 1e-5
+def init (cfg : AudioEncoderConfig) (device : Device := .CPU) : IO (AudioEncoderLayer (device := device) cfg) := do
+  let selfAttn ← AudioAttention.init (device := device) cfg
+  let selfAttnLayerNorm ← initLayerNorm (device := device) cfg.dModel 1e-5
+  let fc1Weight ← initWeight (device := device) #[cfg.encoderFfnDim, cfg.dModel] cfg.dModel
+  let fc1Bias ← initBias (device := device) #[cfg.encoderFfnDim]
+  let fc2Weight ← initWeight (device := device) #[cfg.dModel, cfg.encoderFfnDim] cfg.encoderFfnDim
+  let fc2Bias ← initBias (device := device) #[cfg.dModel]
+  let finalLayerNorm ← initLayerNorm (device := device) cfg.dModel 1e-5
   pure { selfAttn, selfAttnLayerNorm, fc1Weight, fc1Bias, fc2Weight, fc2Bias, finalLayerNorm }
 
 def forward {batch seq : UInt64}
-    (m : AudioEncoderLayer cfg)
-    (x : Tensor { shape := #[batch, seq, cfg.dModel] })
-    (attnMask : Option (Tensor { shape := #[batch, seq] }) := none)
-    : Tensor { shape := #[batch, seq, cfg.dModel] } :=
+    (m : AudioEncoderLayer (device := device) cfg)
+    (x : Tensor { device := device, shape := #[batch, seq, cfg.dModel] })
+    (attnMask : Option (Tensor { device := device, shape := #[batch, seq] }) := none)
+    : Tensor { device := device, shape := #[batch, seq, cfg.dModel] } :=
   let residual0 := x
   let h0 := m.selfAttnLayerNorm.forward3d x
   let h1 := m.selfAttn.forward h0 attnMask
@@ -161,28 +161,28 @@ def forward {batch seq : UInt64}
 
   let residual1 := h2
   let h3 := m.finalLayerNorm.forward3d h2
-  let h4 : Tensor { shape := #[batch, seq, cfg.encoderFfnDim] } := Tensor.affine3d h3 m.fc1Weight m.fc1Bias
+  let h4 : Tensor { device := device, shape := #[batch, seq, cfg.encoderFfnDim] } := Tensor.affine3d h3 m.fc1Weight m.fc1Bias
   let h5 := activate cfg.activationFunction h4
-  let h6 : Tensor { shape := #[batch, seq, cfg.dModel] } := Tensor.affine3d h5 m.fc2Weight m.fc2Bias
+  let h6 : Tensor { device := device, shape := #[batch, seq, cfg.dModel] } := Tensor.affine3d h5 m.fc2Weight m.fc2Bias
   Tensor.Promoting.add residual1 h6
 
 end AudioEncoderLayer
 
 /-- Full Qwen3-ASR audio encoder. -/
 structure AudioEncoder (cfg : AudioEncoderConfig) where
-  conv2d1Weight : Tensor { shape := #[cfg.downsampleHiddenSize, 1, 3, 3] }
-  conv2d1Bias : Tensor { shape := #[cfg.downsampleHiddenSize] }
-  conv2d2Weight : Tensor { shape := #[cfg.downsampleHiddenSize, cfg.downsampleHiddenSize, 3, 3] }
-  conv2d2Bias : Tensor { shape := #[cfg.downsampleHiddenSize] }
-  conv2d3Weight : Tensor { shape := #[cfg.downsampleHiddenSize, cfg.downsampleHiddenSize, 3, 3] }
-  conv2d3Bias : Tensor { shape := #[cfg.downsampleHiddenSize] }
-  convOutWeight : Tensor { shape := #[cfg.dModel, AudioEncoderConfig.convOutInDim cfg] }
-  layers : Array (AudioEncoderLayer cfg)
-  lnPost : LayerNorm cfg.dModel (.Unknown "dynamic")
-  proj1Weight : Tensor { shape := #[cfg.dModel, cfg.dModel] }
-  proj1Bias : Tensor { shape := #[cfg.dModel] }
-  proj2Weight : Tensor { shape := #[cfg.outputDim, cfg.dModel] }
-  proj2Bias : Tensor { shape := #[cfg.outputDim] }
+  conv2d1Weight : Tensor { device := device, shape := #[cfg.downsampleHiddenSize, 1, 3, 3] }
+  conv2d1Bias : Tensor { device := device, shape := #[cfg.downsampleHiddenSize] }
+  conv2d2Weight : Tensor { device := device, shape := #[cfg.downsampleHiddenSize, cfg.downsampleHiddenSize, 3, 3] }
+  conv2d2Bias : Tensor { device := device, shape := #[cfg.downsampleHiddenSize] }
+  conv2d3Weight : Tensor { device := device, shape := #[cfg.downsampleHiddenSize, cfg.downsampleHiddenSize, 3, 3] }
+  conv2d3Bias : Tensor { device := device, shape := #[cfg.downsampleHiddenSize] }
+  convOutWeight : Tensor { device := device, shape := #[cfg.dModel, AudioEncoderConfig.convOutInDim cfg] }
+  layers : Array (AudioEncoderLayer (device := device) cfg)
+  lnPost : LayerNorm (device := device) cfg.dModel (.Unknown "dynamic")
+  proj1Weight : Tensor { device := device, shape := #[cfg.dModel, cfg.dModel] }
+  proj1Bias : Tensor { device := device, shape := #[cfg.dModel] }
+  proj2Weight : Tensor { device := device, shape := #[cfg.outputDim, cfg.dModel] }
+  proj2Bias : Tensor { device := device, shape := #[cfg.outputDim] }
   deriving TensorStruct
 
 namespace AudioEncoder
@@ -190,35 +190,35 @@ namespace AudioEncoder
 /-- The frontend computes mel features in Float32. Match the first convolution's
     FP32/BF16 dtype and device before padding or convolution; matching dtypes are
     left unchanged. Positional frequencies are still computed in Float32. -/
-private def alignFeatures {batch frames : UInt64} (m : AudioEncoder cfg)
-    (features : Tensor { shape := #[batch, cfg.numMelBins, frames] }) : Tensor { shape := #[batch, cfg.numMelBins, frames] } :=
+private def alignFeatures {batch frames : UInt64} (m : AudioEncoder (device := device) cfg)
+    (features : Tensor { device := device, shape := #[batch, cfg.numMelBins, frames] }) : Tensor { device := device, shape := #[batch, cfg.numMelBins, frames] } :=
   let features := Tensor.castLike m.conv2d1Weight features
   features.to m.conv2d1Weight.device
 
-def init (cfg : AudioEncoderConfig) : IO (AudioEncoder cfg) := do
+def init (cfg : AudioEncoderConfig) (device : Device := .CPU) : IO (AudioEncoder (device := device) cfg) := do
   if cfg.dModel % cfg.encoderAttentionHeads != 0 then
     throw <| IO.userError
       s!"Audio encoder requires dModel divisible by encoderAttentionHeads, got {cfg.dModel} and {cfg.encoderAttentionHeads}"
 
-  let conv2d1Weight ← initWeight #[cfg.downsampleHiddenSize, 1, 3, 3] 1
-  let conv2d1Bias ← initBias #[cfg.downsampleHiddenSize]
-  let conv2d2Weight ← initWeight #[cfg.downsampleHiddenSize, cfg.downsampleHiddenSize, 3, 3] cfg.downsampleHiddenSize
-  let conv2d2Bias ← initBias #[cfg.downsampleHiddenSize]
-  let conv2d3Weight ← initWeight #[cfg.downsampleHiddenSize, cfg.downsampleHiddenSize, 3, 3] cfg.downsampleHiddenSize
-  let conv2d3Bias ← initBias #[cfg.downsampleHiddenSize]
+  let conv2d1Weight ← initWeight (device := device) #[cfg.downsampleHiddenSize, 1, 3, 3] 1
+  let conv2d1Bias ← initBias (device := device) #[cfg.downsampleHiddenSize]
+  let conv2d2Weight ← initWeight (device := device) #[cfg.downsampleHiddenSize, cfg.downsampleHiddenSize, 3, 3] cfg.downsampleHiddenSize
+  let conv2d2Bias ← initBias (device := device) #[cfg.downsampleHiddenSize]
+  let conv2d3Weight ← initWeight (device := device) #[cfg.downsampleHiddenSize, cfg.downsampleHiddenSize, 3, 3] cfg.downsampleHiddenSize
+  let conv2d3Bias ← initBias (device := device) #[cfg.downsampleHiddenSize]
 
-  let convOutWeight ← initWeight #[cfg.dModel, AudioEncoderConfig.convOutInDim cfg] (AudioEncoderConfig.convOutInDim cfg)
+  let convOutWeight ← initWeight (device := device) #[cfg.dModel, AudioEncoderConfig.convOutInDim cfg] (AudioEncoderConfig.convOutInDim cfg)
 
-  let mut layers : Array (AudioEncoderLayer cfg) := #[]
+  let mut layers : Array (AudioEncoderLayer (device := device) cfg) := #[]
   for _ in [:cfg.encoderLayers.toNat] do
-    let layer ← AudioEncoderLayer.init cfg
+    let layer ← AudioEncoderLayer.init (device := device) cfg
     layers := layers.push layer
 
-  let lnPost ← initLayerNorm cfg.dModel 1e-5
-  let proj1Weight ← initWeight #[cfg.dModel, cfg.dModel] cfg.dModel
-  let proj1Bias ← initBias #[cfg.dModel]
-  let proj2Weight ← initWeight #[cfg.outputDim, cfg.dModel] cfg.dModel
-  let proj2Bias ← initBias #[cfg.outputDim]
+  let lnPost ← initLayerNorm (device := device) cfg.dModel 1e-5
+  let proj1Weight ← initWeight (device := device) #[cfg.dModel, cfg.dModel] cfg.dModel
+  let proj1Bias ← initBias (device := device) #[cfg.dModel]
+  let proj2Weight ← initWeight (device := device) #[cfg.outputDim, cfg.dModel] cfg.dModel
+  let proj2Bias ← initBias (device := device) #[cfg.outputDim]
 
   pure {
     conv2d1Weight, conv2d1Bias, conv2d2Weight, conv2d2Bias, conv2d3Weight, conv2d3Bias,
@@ -298,51 +298,51 @@ private def chunkLensFromCumsum (cs : Array UInt64) : Array UInt64 :=
     out
 
 private def padRightFrames {cfg : AudioEncoderConfig} {frames maxFrames : UInt64}
-    (x : Tensor { shape := #[1, cfg.numMelBins, frames] })
-    : Tensor { shape := #[1, cfg.numMelBins, maxFrames] } :=
+    (x : Tensor { device := device, shape := #[1, cfg.numMelBins, frames] })
+    : Tensor { device := device, shape := #[1, cfg.numMelBins, maxFrames] } :=
   let padFrames := if maxFrames >= frames then maxFrames - frames else 0
-  let pad : Tensor { shape := #[1, cfg.numMelBins, padFrames] } :=
+  let pad : Tensor { device := device, shape := #[1, cfg.numMelBins, padFrames] } :=
     Tensor.castLike x ((Tensor.zeros #[1, cfg.numMelBins, padFrames] false x.device).forgetDType)
   let cat := Tensor.cat x pad 2
   Tensor.reshapeChecked cat #[1, cfg.numMelBins, maxFrames]
 
 private def encodePaddedChunk {maxFrames : UInt64}
-    (m : AudioEncoder cfg)
-    (chunk : Tensor { shape := #[1, cfg.numMelBins, maxFrames] })
-    : Tensor { shape := #[1, AudioEncoderConfig.framesAfterConv3 cfg maxFrames, cfg.dModel] } :=
+    (m : AudioEncoder (device := device) cfg)
+    (chunk : Tensor { device := device, shape := #[1, cfg.numMelBins, maxFrames] })
+    : Tensor { device := device, shape := #[1, AudioEncoderConfig.framesAfterConv3 cfg maxFrames, cfg.dModel] } :=
   let t1 := AudioEncoderConfig.downsampleOnce maxFrames
   let t2 := AudioEncoderConfig.downsampleTwice maxFrames
   let t3 := AudioEncoderConfig.framesAfterConv3 cfg maxFrames
-  let x0 : Tensor { shape := #[1, 1, cfg.numMelBins, maxFrames] } := Tensor.reshapeChecked chunk #[1, 1, cfg.numMelBins, maxFrames]
-  let x1 : Tensor { shape := #[1, cfg.downsampleHiddenSize, AudioEncoderConfig.melAfterConv1 cfg, t1] } :=
+  let x0 : Tensor { device := device, shape := #[1, 1, cfg.numMelBins, maxFrames] } := Tensor.reshapeChecked chunk #[1, 1, cfg.numMelBins, maxFrames]
+  let x1 : Tensor { device := device, shape := #[1, cfg.downsampleHiddenSize, AudioEncoderConfig.melAfterConv1 cfg, t1] } :=
     Tensor.reshapeChecked (Tensor.Preserving.gelu (Tensor.conv2dBias x0 m.conv2d1Weight m.conv2d1Bias #[2, 2] #[1, 1]))
       #[1, cfg.downsampleHiddenSize, AudioEncoderConfig.melAfterConv1 cfg, t1]
-  let x2 : Tensor { shape := #[1, cfg.downsampleHiddenSize, AudioEncoderConfig.melAfterConv2 cfg, t2] } :=
+  let x2 : Tensor { device := device, shape := #[1, cfg.downsampleHiddenSize, AudioEncoderConfig.melAfterConv2 cfg, t2] } :=
     Tensor.reshapeChecked (Tensor.Preserving.gelu (Tensor.conv2dBias x1 m.conv2d2Weight m.conv2d2Bias #[2, 2] #[1, 1]))
       #[1, cfg.downsampleHiddenSize, AudioEncoderConfig.melAfterConv2 cfg, t2]
-  let x3 : Tensor { shape := #[1, cfg.downsampleHiddenSize, AudioEncoderConfig.melAfterConv3 cfg, t3] } :=
+  let x3 : Tensor { device := device, shape := #[1, cfg.downsampleHiddenSize, AudioEncoderConfig.melAfterConv3 cfg, t3] } :=
     Tensor.reshapeChecked (Tensor.Preserving.gelu (Tensor.conv2dBias x2 m.conv2d3Weight m.conv2d3Bias #[2, 2] #[1, 1]))
       #[1, cfg.downsampleHiddenSize, AudioEncoderConfig.melAfterConv3 cfg, t3]
-  let x3t : Tensor { shape := #[1, t3, cfg.downsampleHiddenSize, AudioEncoderConfig.melAfterConv3 cfg] } :=
+  let x3t : Tensor { device := device, shape := #[1, t3, cfg.downsampleHiddenSize, AudioEncoderConfig.melAfterConv3 cfg] } :=
     Tensor.reshapeChecked (Tensor.permute x3 #[0, 3, 1, 2]) #[1, t3, cfg.downsampleHiddenSize, AudioEncoderConfig.melAfterConv3 cfg]
-  let xFlat : Tensor { shape := #[1, t3, AudioEncoderConfig.convOutInDim cfg] } :=
+  let xFlat : Tensor { device := device, shape := #[1, t3, AudioEncoderConfig.convOutInDim cfg] } :=
     Tensor.reshapeChecked x3t #[1, t3, AudioEncoderConfig.convOutInDim cfg]
   Tensor.linear3d xFlat m.convOutWeight
 
 private def runLayersChunkLocal {seq : UInt64}
-    (m : AudioEncoder cfg)
-    (hidden : Tensor { shape := #[1, seq, cfg.dModel] })
+    (m : AudioEncoder (device := device) cfg)
+    (hidden : Tensor { device := device, shape := #[1, seq, cfg.dModel] })
     (chunkLens : Array UInt64)
-    : Tensor { shape := #[1, seq, cfg.dModel] } :=
+    : Tensor { device := device, shape := #[1, seq, cfg.dModel] } :=
   if seq == 0 then
     hidden
   else
-    let parts : Array (Sigma (fun shape => Tensor { shape := shape })) := Id.run do
-      let mut out : Array (Sigma (fun shape => Tensor { shape := shape })) := #[]
+    let parts : Array (Sigma (fun shape => Tensor { device := device, shape := shape })) := Id.run do
+      let mut out : Array (Sigma (fun shape => Tensor { device := device, shape := shape })) := #[]
       let mut start : UInt64 := 0
       for len in chunkLens do
         if len != 0 then
-          let seg : Tensor { shape := #[1, len, cfg.dModel] } := Tensor.sliceChecked hidden 1 start len #[1, len, cfg.dModel]
+          let seg : Tensor { device := device, shape := #[1, len, cfg.dModel] } := Tensor.sliceChecked hidden 1 start len #[1, len, cfg.dModel]
           let segOut := m.layers.foldl (fun h layer => layer.forward h none) seg
           out := out.push (Tensor.packShape segOut)
           start := start + len
@@ -353,10 +353,10 @@ private def runLayersChunkLocal {seq : UInt64}
       Tensor.catManyChecked parts 1 #[1, seq, cfg.dModel]
 
 private def encodeOneSampleVarLen {frames : UInt64}
-    (m : AudioEncoder cfg)
-    (sample : Tensor { shape := #[1, cfg.numMelBins, frames] })
+    (m : AudioEncoder (device := device) cfg)
+    (sample : Tensor { device := device, shape := #[1, cfg.numMelBins, frames] })
     (featureLen : UInt64)
-    : Tensor { shape := #[1, AudioEncoderConfig.framesAfterConv3 cfg frames, cfg.outputDim] } :=
+    : Tensor { device := device, shape := #[1, AudioEncoderConfig.framesAfterConv3 cfg frames, cfg.outputDim] } :=
   let outSeq := AudioEncoderConfig.framesAfterConv3 cfg frames
   let featureLen := if featureLen <= frames then featureLen else frames
   if featureLen == 0 then
@@ -367,30 +367,30 @@ private def encodeOneSampleVarLen {frames : UInt64}
     let tChunk := AudioEncoderConfig.framesAfterConv3 cfg maxChunkLen
     let chunkLensAfterCnn := chunkLengthsAfterCnn cfg chunkLens
     let maxChunkAfterCnn := maxOr chunkLensAfterCnn tChunk
-    let pos : Tensor { shape := #[tChunk, cfg.dModel] } :=
+    let pos : Tensor { device := device, shape := #[tChunk, cfg.dModel] } :=
       sinusoidPosition (seq := tChunk) (dim := cfg.dModel) (device := sample.device)
-    let posBatch : Tensor { shape := #[1, tChunk, cfg.dModel] } := Tensor.reshapeChecked pos #[1, tChunk, cfg.dModel]
+    let posBatch : Tensor { device := device, shape := #[1, tChunk, cfg.dModel] } := Tensor.reshapeChecked pos #[1, tChunk, cfg.dModel]
 
-    let hiddenParts : Array (Sigma (fun shape => Tensor { shape := shape })) := Id.run do
-      let mut out : Array (Sigma (fun shape => Tensor { shape := shape })) := #[]
+    let hiddenParts : Array (Sigma (fun shape => Tensor { device := device, shape := shape })) := Id.run do
+      let mut out : Array (Sigma (fun shape => Tensor { device := device, shape := shape })) := #[]
       let mut start : UInt64 := 0
       for i in [:chunkLens.size] do
         let len := chunkLens.getD i 0
         if len != 0 then
           let desiredLen := chunkLensAfterCnn.getD i 0
-          let chunk : Tensor { shape := #[1, cfg.numMelBins, len] } := Tensor.sliceChecked sample 2 start len #[1, cfg.numMelBins, len]
-          let padded : Tensor { shape := #[1, cfg.numMelBins, maxChunkLen] } :=
+          let chunk : Tensor { device := device, shape := #[1, cfg.numMelBins, len] } := Tensor.sliceChecked sample 2 start len #[1, cfg.numMelBins, len]
+          let padded : Tensor { device := device, shape := #[1, cfg.numMelBins, maxChunkLen] } :=
             padRightFrames (cfg := cfg) (frames := len) (maxFrames := maxChunkLen) chunk
-          let emb : Tensor { shape := #[1, tChunk, cfg.dModel] } := encodePaddedChunk m padded
+          let emb : Tensor { device := device, shape := #[1, tChunk, cfg.dModel] } := encodePaddedChunk m padded
           let embPos := Tensor.Promoting.add emb (Tensor.castLike emb posBatch)
           let availLen := if desiredLen <= tChunk then desiredLen else tChunk
-          let seg0 : Tensor { shape := #[1, availLen, cfg.dModel] } := Tensor.sliceChecked embPos 1 0 availLen #[1, availLen, cfg.dModel]
-          let segDyn : Sigma (fun shape => Tensor { shape := shape }) :=
+          let seg0 : Tensor { device := device, shape := #[1, availLen, cfg.dModel] } := Tensor.sliceChecked embPos 1 0 availLen #[1, availLen, cfg.dModel]
+          let segDyn : Sigma (fun shape => Tensor { device := device, shape := shape }) :=
             if desiredLen <= availLen then
               Tensor.packShape seg0
             else
               let extraLen := desiredLen - availLen
-              let extra : Tensor { shape := #[1, extraLen, cfg.dModel] } :=
+              let extra : Tensor { device := device, shape := #[1, extraLen, cfg.dModel] } :=
                 Tensor.castLike seg0 ((Tensor.zeros #[1, extraLen, cfg.dModel] false seg0.device).forgetDType)
               Tensor.packShape (Tensor.reshapeChecked (Tensor.cat seg0 extra 1) #[1, desiredLen, cfg.dModel])
           out := out.push segDyn
@@ -398,7 +398,7 @@ private def encodeOneSampleVarLen {frames : UInt64}
       out
 
     let totalValid := sumU64 chunkLensAfterCnn
-    let hiddenValid : Tensor { shape := #[1, totalValid, cfg.dModel] } :=
+    let hiddenValid : Tensor { device := device, shape := #[1, totalValid, cfg.dModel] } :=
       if hiddenParts.isEmpty then
         Tensor.castLike sample ((Tensor.zeros #[1, totalValid, cfg.dModel] false sample.device).forgetDType)
       else
@@ -409,15 +409,15 @@ private def encodeOneSampleVarLen {frames : UInt64}
     let hiddenChunked := runLayersChunkLocal m hiddenValid attnChunkLens
 
     let hidden := m.lnPost.forward3d hiddenChunked
-    let hidden : Tensor { shape := #[1, totalValid, cfg.dModel] } := Tensor.affine3d hidden m.proj1Weight m.proj1Bias
+    let hidden : Tensor { device := device, shape := #[1, totalValid, cfg.dModel] } := Tensor.affine3d hidden m.proj1Weight m.proj1Bias
     let hidden := activate cfg.activationFunction hidden
-    let hidden : Tensor { shape := #[1, totalValid, cfg.outputDim] } := Tensor.affine3d hidden m.proj2Weight m.proj2Bias
+    let hidden : Tensor { device := device, shape := #[1, totalValid, cfg.outputDim] } := Tensor.affine3d hidden m.proj2Weight m.proj2Bias
 
     if totalValid >= outSeq then
       hidden.sliceChecked 1 0 outSeq #[1, outSeq, cfg.outputDim]
     else
       let padLen := outSeq - totalValid
-      let pad : Tensor { shape := #[1, padLen, cfg.outputDim] } :=
+      let pad : Tensor { device := device, shape := #[1, padLen, cfg.outputDim] } :=
         Tensor.castLike hidden ((Tensor.zeros #[1, padLen, cfg.outputDim] false hidden.device).forgetDType)
       Tensor.reshapeChecked (Tensor.cat hidden pad 1) #[1, outSeq, cfg.outputDim]
 
@@ -425,56 +425,56 @@ private def encodeOneSampleVarLen {frames : UInt64}
     each sample is chunked from `featureLens`, convolved chunk-wise, then transformed
     with chunk-local self-attention blocks and finally re-padded to fixed output width. -/
 def forwardVarLen {batch frames : UInt64}
-    (m : AudioEncoder cfg)
-    (inputFeatures : Tensor { shape := #[batch, cfg.numMelBins, frames] })
+    (m : AudioEncoder (device := device) cfg)
+    (inputFeatures : Tensor { device := device, shape := #[batch, cfg.numMelBins, frames] })
     (featureLens : Array UInt64)
-    : Tensor { shape := #[batch, AudioEncoderConfig.framesAfterConv3 cfg frames, cfg.outputDim] } :=
+    : Tensor { device := device, shape := #[batch, AudioEncoderConfig.framesAfterConv3 cfg frames, cfg.outputDim] } :=
   let inputFeatures := alignFeatures m inputFeatures
   let outSeq := AudioEncoderConfig.framesAfterConv3 cfg frames
   if batch == 0 then
     Tensor.castLike inputFeatures ((Tensor.zeros #[batch, outSeq, cfg.outputDim] false inputFeatures.device).forgetDType)
   else
-    let rows : Array (Sigma (fun shape => Tensor { shape := shape })) := Id.run do
-      let mut out : Array (Sigma (fun shape => Tensor { shape := shape })) := #[]
+    let rows : Array (Sigma (fun shape => Tensor { device := device, shape := shape })) := Id.run do
+      let mut out : Array (Sigma (fun shape => Tensor { device := device, shape := shape })) := #[]
       for b in [:batch.toNat] do
-        let sample : Tensor { shape := #[1, cfg.numMelBins, frames] } := Tensor.sliceChecked inputFeatures 0 b.toUInt64 1 #[1, cfg.numMelBins, frames]
+        let sample : Tensor { device := device, shape := #[1, cfg.numMelBins, frames] } := Tensor.sliceChecked inputFeatures 0 b.toUInt64 1 #[1, cfg.numMelBins, frames]
         let len := featureLens.getD b frames
-        let row : Tensor { shape := #[1, outSeq, cfg.outputDim] } := encodeOneSampleVarLen m sample len
+        let row : Tensor { device := device, shape := #[1, outSeq, cfg.outputDim] } := encodeOneSampleVarLen m sample len
         out := out.push (Tensor.packShape row)
       out
     Tensor.catManyChecked rows 0 #[batch, outSeq, cfg.outputDim]
 
 def forward {batch frames : UInt64}
-    (m : AudioEncoder cfg)
-    (inputFeatures : Tensor { shape := #[batch, cfg.numMelBins, frames] })
-    (attnMask : Option (Tensor { shape := #[batch, AudioEncoderConfig.framesAfterConv3 cfg frames] }) := none)
-    : Tensor { shape := #[batch, AudioEncoderConfig.framesAfterConv3 cfg frames, cfg.outputDim] } :=
+    (m : AudioEncoder (device := device) cfg)
+    (inputFeatures : Tensor { device := device, shape := #[batch, cfg.numMelBins, frames] })
+    (attnMask : Option (Tensor { device := device, shape := #[batch, AudioEncoderConfig.framesAfterConv3 cfg frames] }) := none)
+    : Tensor { device := device, shape := #[batch, AudioEncoderConfig.framesAfterConv3 cfg frames, cfg.outputDim] } :=
   let inputFeatures := alignFeatures m inputFeatures
   let t1 := AudioEncoderConfig.downsampleOnce frames
   let t2 := AudioEncoderConfig.downsampleTwice frames
   let t3 := AudioEncoderConfig.framesAfterConv3 cfg frames
 
-  let x0 : Tensor { shape := #[batch, 1, cfg.numMelBins, frames] } := Tensor.reshapeChecked inputFeatures #[batch, 1, cfg.numMelBins, frames]
+  let x0 : Tensor { device := device, shape := #[batch, 1, cfg.numMelBins, frames] } := Tensor.reshapeChecked inputFeatures #[batch, 1, cfg.numMelBins, frames]
 
-  let x1 : Tensor { shape := #[batch, cfg.downsampleHiddenSize, AudioEncoderConfig.melAfterConv1 cfg, t1] } :=
+  let x1 : Tensor { device := device, shape := #[batch, cfg.downsampleHiddenSize, AudioEncoderConfig.melAfterConv1 cfg, t1] } :=
     Tensor.reshapeChecked (Tensor.Preserving.gelu (Tensor.conv2dBias x0 m.conv2d1Weight m.conv2d1Bias #[2, 2] #[1, 1]))
       #[batch, cfg.downsampleHiddenSize, AudioEncoderConfig.melAfterConv1 cfg, t1]
-  let x2 : Tensor { shape := #[batch, cfg.downsampleHiddenSize, AudioEncoderConfig.melAfterConv2 cfg, t2] } :=
+  let x2 : Tensor { device := device, shape := #[batch, cfg.downsampleHiddenSize, AudioEncoderConfig.melAfterConv2 cfg, t2] } :=
     Tensor.reshapeChecked (Tensor.Preserving.gelu (Tensor.conv2dBias x1 m.conv2d2Weight m.conv2d2Bias #[2, 2] #[1, 1]))
       #[batch, cfg.downsampleHiddenSize, AudioEncoderConfig.melAfterConv2 cfg, t2]
-  let x3 : Tensor { shape := #[batch, cfg.downsampleHiddenSize, AudioEncoderConfig.melAfterConv3 cfg, t3] } :=
+  let x3 : Tensor { device := device, shape := #[batch, cfg.downsampleHiddenSize, AudioEncoderConfig.melAfterConv3 cfg, t3] } :=
     Tensor.reshapeChecked (Tensor.Preserving.gelu (Tensor.conv2dBias x2 m.conv2d3Weight m.conv2d3Bias #[2, 2] #[1, 1]))
       #[batch, cfg.downsampleHiddenSize, AudioEncoderConfig.melAfterConv3 cfg, t3]
 
-  let x3t : Tensor { shape := #[batch, t3, cfg.downsampleHiddenSize, AudioEncoderConfig.melAfterConv3 cfg] } :=
+  let x3t : Tensor { device := device, shape := #[batch, t3, cfg.downsampleHiddenSize, AudioEncoderConfig.melAfterConv3 cfg] } :=
     Tensor.reshapeChecked (Tensor.permute x3 #[0, 3, 1, 2]) #[batch, t3, cfg.downsampleHiddenSize, AudioEncoderConfig.melAfterConv3 cfg]
 
-  let xFlat : Tensor { shape := #[batch, t3, AudioEncoderConfig.convOutInDim cfg] } :=
+  let xFlat : Tensor { device := device, shape := #[batch, t3, AudioEncoderConfig.convOutInDim cfg] } :=
     Tensor.reshapeChecked x3t #[batch, t3, AudioEncoderConfig.convOutInDim cfg]
-  let xEmb : Tensor { shape := #[batch, t3, cfg.dModel] } := Tensor.linear3d xFlat m.convOutWeight
+  let xEmb : Tensor { device := device, shape := #[batch, t3, cfg.dModel] } := Tensor.linear3d xFlat m.convOutWeight
 
-  let pos : Tensor { shape := #[t3, cfg.dModel] } := sinusoidPosition (seq := t3) (dim := cfg.dModel) (device := xEmb.device)
-  let posBatch : Tensor { shape := #[batch, t3, cfg.dModel] } := Tensor.expand (Tensor.reshapeChecked pos #[1, t3, cfg.dModel]) #[batch, t3, cfg.dModel]
+  let pos : Tensor { device := device, shape := #[t3, cfg.dModel] } := sinusoidPosition (seq := t3) (dim := cfg.dModel) (device := xEmb.device)
+  let posBatch : Tensor { device := device, shape := #[batch, t3, cfg.dModel] } := Tensor.expand (Tensor.reshapeChecked pos #[1, t3, cfg.dModel]) #[batch, t3, cfg.dModel]
   let hidden0 := Tensor.Promoting.add xEmb (Tensor.castLike xEmb posBatch)
 
   let hidden := match attnMask with
@@ -482,16 +482,16 @@ def forward {batch frames : UInt64}
     | none => m.layers.foldl (fun h layer => layer.forward h none) hidden0
 
   let hidden := m.lnPost.forward3d hidden
-  let hidden : Tensor { shape := #[batch, t3, cfg.dModel] } := Tensor.affine3d hidden m.proj1Weight m.proj1Bias
+  let hidden : Tensor { device := device, shape := #[batch, t3, cfg.dModel] } := Tensor.affine3d hidden m.proj1Weight m.proj1Bias
   let hidden := activate cfg.activationFunction hidden
   Tensor.affine3d hidden m.proj2Weight m.proj2Bias
 
 end AudioEncoder
 
 instance {cfg : AudioEncoderConfig} {batch frames : UInt64} :
-    Module (AudioEncoder cfg)
-      (Tensor { shape := #[batch, cfg.numMelBins, frames] })
-      (Tensor { shape := #[batch, AudioEncoderConfig.framesAfterConv3 cfg frames, cfg.outputDim] }) where
+    Module (AudioEncoder (device := device) cfg)
+      (Tensor { device := device, shape := #[batch, cfg.numMelBins, frames] })
+      (Tensor { device := device, shape := #[batch, AudioEncoderConfig.framesAfterConv3 cfg frames, cfg.outputDim] }) where
   forward := fun m x => m.forward x none
 
 end torch.qwen3asr

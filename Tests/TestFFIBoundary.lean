@@ -44,7 +44,7 @@ def testArangeLengthAndScalarWidths : IO Unit := do
 @[test]
 def testExactScalarReshape : IO Unit := do
   let x := Tensor.ones #[1]
-  let scalar : Tensor { shape := #[], dtype := .Float32 } := x.reshape #[]
+  let scalar : Tensor { shape := #[], dtype := .Float32, device := .CPU } := x.reshape #[]
   LeanTest.assertEqual scalar.runtimeShape #[]
   LeanTest.assertEqual scalar.item 1.0
 
@@ -53,10 +53,10 @@ def testExactLoadRejectsSameNumelWrongShape : IO Unit :=
   IO.FS.withTempDir fun dir => do
     let path := (dir / "tensor.pt").toString
     Tensor.saveTensor (Tensor.ones #[2, 3]) path
-    let exact ← Tensor.loadTensorExact {shape := #[2, 3], dtype := .Float32} path
+    let exact ← Tensor.loadTensorExact {shape := #[2, 3], dtype := .Float32, device := .CPU} path
     LeanTest.assertEqual exact.runtimeShape #[2, 3]
     try
-      let _ ← Tensor.loadTensorExact {shape := #[3, 2], dtype := .Float32} path
+      let _ ← Tensor.loadTensorExact {shape := #[3, 2], dtype := .Float32, device := .CPU} path
       LeanTest.fail "exact loading must reject a shape mismatch"
     catch error =>
       LeanTest.assertTrue (error.toString.containsSubstr "Tensor shape mismatch")

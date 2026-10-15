@@ -436,15 +436,6 @@ private def runOnMasterIO (action : IO Unit) : IO Unit := do
 
 /-! ## Device & Data Adapters -/
 
-/-- Move YaRN rotary cache tensors to the target device. -/
-private def moveYarnToDevice {headDim maxSeqLen : UInt64}
-    (yarn : YarnRotary headDim maxSeqLen) (device : Device) : YarnRotary headDim maxSeqLen :=
-  { yarn with
-    cos := yarn.cos.to device
-    sin := yarn.sin.to device
-    angularFreq := yarn.angularFreq.to device
-  }
-
 private def findSpecialId? (tok : BPETokenizer) (names : Array String) : Option UInt64 := Id.run do
   for name in names do
     match tok.specialTokens.get? name with
@@ -1137,7 +1128,8 @@ def evalBaseModel (cfg : NanoChatConfig) : PipelineM Unit := runOnMaster do
 
   -- Load model checkpoint
   let ckptPath := s!"{checkpointDir}/latest.ckpt"
-  let maybeCkpt ← loadCheckpoint modelCfg ckptPath
+  let evalDevice ← resolveTrainingDevice 0 (← getLocalRankFromEnv) (← dist.isInitialized)
+  let maybeCkpt ← loadCheckpoint modelCfg ckptPath (device := evalDevice)
 
   match maybeCkpt with
   | none =>
@@ -1145,18 +1137,16 @@ def evalBaseModel (cfg : NanoChatConfig) : PipelineM Unit := runOnMaster do
     recordMetrics [("CORE", "N/A"), ("checkpoint", "not found")]
   | some ckpt =>
     log s!"Loaded checkpoint from {ckptPath} at step {ckpt.step}"
-    let evalDevice := ckpt.params.embed.device
 
     -- Create tokenization function
     let tokenizeFn := fun (text : String) =>
       (tokenizer.encodeWithSpecials tok text).map (·.toUInt64)
 
     -- Initialize YaRN rotary embeddings for evaluation
-    let yarn ← YarnRotary.init modelCfg.headDim modelCfg.maxSeqLen modelCfg.ropeBase
-    let yarn := moveYarnToDevice yarn evalDevice
+    let yarn ← YarnRotary.init modelCfg.headDim modelCfg.maxSeqLen modelCfg.ropeBase (device := evalDevice)
 
     -- Create model forward function for evaluation
-    let runModel : ModelRunner modelCfg.vocabSize := fun {batch seq} input => do
+    let runModel : ModelRunner (device := evalDevice) modelCfg.vocabSize := fun {batch seq} input => do
       let inputTyped := input.to evalDevice
       let logits ← moddedGpt.forward (batch := batch) (seq := seq) ckpt.params yarn inputTyped
       pure logits
@@ -1477,7 +1467,7 @@ def midtrain (cfg : NanoChatConfig) : PipelineM Unit := do
 
   -- If no new step was run (e.g. resume already at horizon), ensure mid/latest exists.
   if isMaster && !(← checkpointExists midCkptPath) then
-    let fallbackCkpt : Checkpoint modelCfg := {
+    let fallbackCkpt : Checkpoint (device := trainDevice) modelCfg := {
       params := finalState.params
       optState := finalState.optState
       step := finalState.step
@@ -1507,7 +1497,8 @@ def evalChat (cfg : NanoChatConfig) (checkpoint : String) : PipelineM Unit := ru
 
   -- Load checkpoint
   let ckptPath := s!"{checkpointDir}/latest.ckpt"
-  let maybeCkpt ← loadCheckpoint modelCfg ckptPath
+  let evalDevice ← resolveTrainingDevice 0 (← getLocalRankFromEnv) (← dist.isInitialized)
+  let maybeCkpt ← loadCheckpoint modelCfg ckptPath (device := evalDevice)
 
   match maybeCkpt with
   | none =>
@@ -1515,18 +1506,16 @@ def evalChat (cfg : NanoChatConfig) (checkpoint : String) : PipelineM Unit := ru
     recordMetrics [("status", "checkpoint not found")]
   | some ckpt =>
     log s!"Loaded checkpoint at step {ckpt.step}"
-    let evalDevice := ckpt.params.embed.device
 
     -- Create tokenization function
     let tokenizeFn := fun (text : String) =>
       (tokenizer.encodeWithSpecials tok text).map (·.toUInt64)
 
     -- Initialize model inference components
-    let yarn ← YarnRotary.init modelCfg.headDim modelCfg.maxSeqLen modelCfg.ropeBase
-    let yarn := moveYarnToDevice yarn evalDevice
+    let yarn ← YarnRotary.init modelCfg.headDim modelCfg.maxSeqLen modelCfg.ropeBase (device := evalDevice)
 
     -- Create model forward function for evaluation
-    let runModel : ModelRunner modelCfg.vocabSize := fun {batch seq} input => do
+    let runModel : ModelRunner (device := evalDevice) modelCfg.vocabSize := fun {batch seq} input => do
       let inputTyped := input.to evalDevice
       let logits ← moddedGpt.forward (batch := batch) (seq := seq) ckpt.params yarn inputTyped
       pure logits
@@ -1616,29 +1605,27 @@ def supervisedFineTune (cfg : NanoChatConfig) : PipelineM Unit := do
   -- Load mid checkpoint
   let ckptPath := s!"{midCheckpointDir}/latest.ckpt"
   log s!"Loading midtraining checkpoint from {ckptPath}"
-  let maybeCkpt ← loadCheckpoint modelCfg ckptPath
+  let maybeCkpt ← loadCheckpoint modelCfg ckptPath (device := trainDevice)
 
   match maybeCkpt with
   | none =>
     throw $ IO.userError s!"Midtraining checkpoint not found at {ckptPath}"
   | some midCkpt =>
     log s!"Loaded checkpoint at step {midCkpt.step}"
-    let paramsOnDeviceRaw ← TensorStruct.mapM (fun t => pure (t.to trainDevice)) midCkpt.params
-    let paramsOnDevice ← TensorStruct.makeLeafParams paramsOnDeviceRaw
+    let paramsOnDevice ← TensorStruct.makeLeafParams midCkpt.params
 
     -- Initialize YaRN rotary embeddings
-    let yarn ← YarnRotary.init modelCfg.headDim modelCfg.maxSeqLen modelCfg.ropeBase
-    let yarn := moveYarnToDevice yarn trainDevice
+    let yarn ← YarnRotary.init modelCfg.headDim modelCfg.maxSeqLen modelCfg.ropeBase (device := trainDevice)
 
     -- Keep batch and sequence indices across the SFT callback boundary.
-    let forwardFn : ModdedGPTParams modelCfg → {batch seq : UInt64} →
-        Tensor { shape := #[batch, seq], dtype := .Int64 } → IO (Σ vocab : UInt64, Tensor { shape := #[batch, seq, vocab], dtype := .Float32 }) :=
+    let forwardFn : ModdedGPTParams (device := trainDevice) modelCfg → {batch seq : UInt64} →
+        Tensor { shape := #[batch, seq], dtype := .Int64, device := trainDevice } → IO (Σ vocab : UInt64, Tensor { shape := #[batch, seq, vocab], dtype := .Float32, device := trainDevice }) :=
       fun params {batch seq} input => do
         let logits ← moddedGpt.forward (batch := batch) (seq := seq) params yarn (input.to trainDevice)
         pure ⟨modelCfg.vocabSize, logits⟩
 
-    let lossFn : {batch seq vocab : UInt64} → Tensor { shape := #[batch, seq, vocab], dtype := .Float32 } →
-        Tensor { shape := #[batch, seq], dtype := .Int64 } → Tensor { shape := #[batch, seq], dtype := .Float32 } → Tensor { shape := #[], dtype := .Float32 } :=
+    let lossFn : {batch seq vocab : UInt64} → Tensor { shape := #[batch, seq, vocab], dtype := .Float32, device := trainDevice } →
+        Tensor { shape := #[batch, seq], dtype := .Int64, device := trainDevice } → Tensor { shape := #[batch, seq], dtype := .Float32, device := trainDevice } → Tensor { shape := #[], dtype := .Float32, device := trainDevice } :=
       fun logits targets mask => maskedCrossEntropy logits targets mask
 
     -- Initialize AdamW optimizer
@@ -1683,12 +1670,12 @@ def supervisedFineTune (cfg : NanoChatConfig) : PipelineM Unit := do
 
     -- Save SFT checkpoint
     if rank == 0 then
-      let sftOptState : OptimizerState modelCfg := {
+      let sftOptState : OptimizerState (device := trainDevice) modelCfg := {
         midCkpt.optState with
         adamState := finalOptState
         step := finalState.step.toUInt64
       }
-      let sftCkpt : Checkpoint modelCfg := {
+      let sftCkpt : Checkpoint (device := trainDevice) modelCfg := {
         params := finalParams
         optState := sftOptState
         step := finalState.step.toUInt64
@@ -1777,27 +1764,25 @@ def reinforcementLearning (cfg : NanoChatConfig) : PipelineM Unit := do
   -- Load SFT checkpoint
   let ckptPath := s!"{sftCheckpointDir}/latest.ckpt"
   log s!"Loading SFT checkpoint from {ckptPath}"
-  let maybeCkpt ← loadCheckpoint modelCfg ckptPath
+  let maybeCkpt ← loadCheckpoint modelCfg ckptPath (device := trainDevice)
 
   match maybeCkpt with
   | none =>
     throw $ IO.userError s!"SFT checkpoint not found at {ckptPath}"
   | some sftCkpt =>
     log s!"Loaded checkpoint at step {sftCkpt.step}"
-    let paramsOnDeviceRaw ← TensorStruct.mapM (fun t => pure (t.to trainDevice)) sftCkpt.params
-    let paramsOnDevice ← TensorStruct.makeLeafParams paramsOnDeviceRaw
-    let adamStateOnDevice ← TensorStruct.mapM (fun t => pure (t.to trainDevice)) sftCkpt.optState.adamState
+    let paramsOnDevice ← TensorStruct.makeLeafParams sftCkpt.params
+    let adamStateOnDevice := sftCkpt.optState.adamState
 
     -- Initialize model components
-    let yarn ← YarnRotary.init modelCfg.headDim modelCfg.maxSeqLen modelCfg.ropeBase
-    let yarn := moveYarnToDevice yarn trainDevice
+    let yarn ← YarnRotary.init modelCfg.headDim modelCfg.maxSeqLen modelCfg.ropeBase (device := trainDevice)
 
     -- Create decode function
     let decodeFn := fun (tokens : Array UInt64) =>
       tokenizer.decode tok (tokens.map (·.toUInt32))
 
     -- Create generation function (single token sampling)
-    let generateOneFn := fun (params : ModdedGPTParams modelCfg) (context : Array UInt64) => do
+    let generateOneFn := fun (params : ModdedGPTParams (device := trainDevice) modelCfg) (context : Array UInt64) => do
       let inputTensor := Tensor.fromInt64Array (context.map (·.toInt64))
       let inputReshaped := (inputTensor.reshapeChecked #[1, context.size.toUInt64]).to trainDevice
       let logits ← moddedGpt.forward params yarn inputReshaped
@@ -1817,7 +1802,7 @@ def reinforcementLearning (cfg : NanoChatConfig) : PipelineM Unit := do
 
     -- Create forward function for policy gradient
     -- Returns per-token NLL: (input, target) → nll_per_token
-    let forwardFn := fun (params : ModdedGPTParams modelCfg) (input : Tensor { shape := #[1, 256], dtype := .Int64 }) (target : Tensor { shape := #[1, 256], dtype := .Int64 }) => do
+    let forwardFn := fun (params : ModdedGPTParams (device := trainDevice) modelCfg) (input : Tensor { shape := #[1, 256], dtype := .Int64, device := trainDevice }) (target : Tensor { shape := #[1, 256], dtype := .Int64, device := trainDevice }) => do
       let logits ← moddedGpt.forward params yarn (input.to trainDevice)
       -- Compute per-token cross-entropy (NLL)
       let logitsFlat := logits.reshapeChecked #[256, modelCfg.vocabSize]
@@ -1886,12 +1871,12 @@ def reinforcementLearning (cfg : NanoChatConfig) : PipelineM Unit := do
 
     -- Save RL checkpoint
     if rank == 0 then
-      let rlOptState : OptimizerState modelCfg := {
+      let rlOptState : OptimizerState (device := trainDevice) modelCfg := {
         sftCkpt.optState with
         adamState := finalAdamState
         step := result.totalSteps.toUInt64
       }
-      let rlCkpt : Checkpoint modelCfg := {
+      let rlCkpt : Checkpoint (device := trainDevice) modelCfg := {
         params := finalParams
         optState := rlOptState
         step := result.totalSteps.toUInt64

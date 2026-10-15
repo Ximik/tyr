@@ -42,13 +42,13 @@ def directPadStub (_x _padv : Nat) : Nat := 0
 attribute [ad_frontend Tests.ADJaxprLikeElabFixture.directPadFrontend] directPadStub
 
 structure StructuredPadInput where
-  base : Tensor { shape := #[2], dtype := .Float32 }
-  padv : Tensor { shape := #[1], dtype := .Float32 }
+  base : Tensor { shape := #[2], dtype := .Float32, device := .CPU }
+  padv : Tensor { shape := #[1], dtype := .Float32, device := .CPU }
   tag : Static String
   deriving TensorStruct, ToTensorStructSchema, TensorStructFlatten
 
 structure StructuredPadOutput where
-  y : Tensor { shape := #[6], dtype := .Float32 }
+  y : Tensor { shape := #[6], dtype := .Float32, device := .CPU }
   label : Static String
   deriving TensorStruct, ToTensorStructSchema, TensorStructFlatten
 
@@ -110,17 +110,17 @@ def directStructuredPadStub (_inp : StructuredPadInput) : StructuredPadOutput :=
 attribute [ad_frontend Tests.ADJaxprLikeElabFixture.structuredPadFrontend] directStructuredPadStub
 
 structure RuntimePadParams where
-  padv : Tensor { shape := #[1], dtype := .Float32 }
+  padv : Tensor { shape := #[1], dtype := .Float32, device := .CPU }
   label : Static String
   deriving TensorStruct, ToTensorStructSchema, TensorStructFlatten
 
 structure RuntimePadInput where
-  base : Tensor { shape := #[2], dtype := .Float32 }
+  base : Tensor { shape := #[2], dtype := .Float32, device := .CPU }
   tag : Static String
   deriving TensorStruct, ToTensorStructSchema, TensorStructFlatten
 
 structure RuntimePadOutput where
-  loss : Tensor { shape := #[], dtype := .Float32 }
+  loss : Tensor { shape := #[], dtype := .Float32, device := .CPU }
   label : Static String
   deriving TensorStruct, ToTensorStructSchema, TensorStructFlatten
 

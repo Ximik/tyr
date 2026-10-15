@@ -24,7 +24,7 @@ private def toFloat32Tree {α : Type} [TensorStruct α] (x : α) : IO α :=
   TensorStruct.castDType .Float32 x
 
 private def toFloat32Embedder {cfg : QwenConfig} {max_seq : UInt64}
-    (e : QwenFluxEmbedder cfg max_seq) : IO (QwenFluxEmbedder cfg max_seq) := do
+    (e : QwenFluxEmbedder (device := .CPU) cfg max_seq) : IO (QwenFluxEmbedder (device := .CPU) cfg max_seq) := do
   let model ← toFloat32Tree e.model
   pure { e with model }
 
@@ -116,7 +116,7 @@ private def loadMaskIds (path : String) (maxLen : UInt64) : IO (Array Int64) := 
   pure ids
 
 /-- Construct indexed token IDs and attention masks from a prompt or token files. -/
-private def promptTokens (cfg : DemoConfig) (prompt : String) : IO (Tensor { shape := #[1, maxSeqLen], dtype := .Int64 } × Tensor { shape := #[1, maxSeqLen], dtype := .Int64 } × UInt64) := do
+private def promptTokens (cfg : DemoConfig) (prompt : String) : IO (Tensor { shape := #[1, maxSeqLen], dtype := .Int64, device := .CPU } × Tensor { shape := #[1, maxSeqLen], dtype := .Int64, device := .CPU } × UInt64) := do
   if cfg.useTokenFiles then
     if !(← data.fileExists cfg.tokensPath) then
       throw (IO.userError s!"Token file not found: {cfg.tokensPath}")
@@ -175,7 +175,7 @@ def runDemo (cfg : DemoConfig) (prompt : String) : IO Unit := do
   IO.println "  [1/4] Encoding text..."
   let (tokens, attnMask, tokenCount) ← promptTokens cfg prompt
   let txtEmb := qwen.encodeMasked (batch := 1) (seq := maxSeqLen) (maskDtype := .Int64) qwenCfg maxSeqLen tokens attnMask
-  let txtEmb : Tensor { shape := #[1, maxSeqLen, fluxCfg.context_in_dim] } :=
+  let txtEmb : Tensor { shape := #[1, maxSeqLen, fluxCfg.context_in_dim], device := .CPU } :=
     (txtEmb.reshapeChecked #[1, maxSeqLen, fluxCfg.context_in_dim]).forgetDType
   IO.println s!"    Text token count: {tokenCount}"
   IO.println s!"    Text embedding shape: {txtEmb.runtimeShape}"
@@ -186,7 +186,7 @@ def runDemo (cfg : DemoConfig) (prompt : String) : IO Unit := do
   let imgSeq := cfg.latentH * cfg.latentW
   let noiseSpatial ← randomWeight #[1, 128, cfg.latentH, cfg.latentW]
   let noiseSeq := Tensor.permute noiseSpatial #[0, 2, 3, 1]
-  let noise : Tensor { shape := #[1, imgSeq, 128] } := Tensor.reshapeChecked noiseSeq #[1, imgSeq, 128]
+  let noise : Tensor { shape := #[1, imgSeq, 128], device := .CPU } := Tensor.reshapeChecked noiseSeq #[1, imgSeq, 128]
 
   -- Compute position IDs for RoPE
   let imgIds ← computeImagePositionIds cfg.latentH cfg.latentW
@@ -197,9 +197,9 @@ def runDemo (cfg : DemoConfig) (prompt : String) : IO Unit := do
   let latents := denoise fluxCfg flux noise txtEmb imgIds txtIds cfg.numSteps
   IO.println s!"    Denoised with {cfg.numSteps} steps"
   -- Transform latents for VAE (inverse of flattening)
-  let latentsHW : Tensor { shape := #[1, cfg.latentH, cfg.latentW, 128] } :=
+  let latentsHW : Tensor { shape := #[1, cfg.latentH, cfg.latentW, 128], device := .CPU } :=
     Tensor.reshapeChecked latents #[1, cfg.latentH, cfg.latentW, 128]
-  let packedLatents : Tensor { shape := #[1, 128, cfg.latentH, cfg.latentW] } :=
+  let packedLatents : Tensor { shape := #[1, 128, cfg.latentH, cfg.latentW], device := .CPU } :=
     (Tensor.permute latentsHW #[0, 3, 1, 2]).reshapeChecked #[1, 128, cfg.latentH, cfg.latentW]
 
   -- Step 4: Decode with VAE and save

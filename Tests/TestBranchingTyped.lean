@@ -77,12 +77,12 @@ private def fixture : BranchingBridgeResult MoleculeAtom := {
 
 @[test] def testBranchingModelConfigMismatchIsRejected : IO Unit := do
   let cfg : BranchingTrainConfig := { maxLen := 2 }
-  let model : BranchingMoleculeModel 1 2 (Tensor { shape := #[], dtype := .Float32 }) := {
+  let model : BranchingMoleculeModel (device := .CPU) 1 2 (Tensor { shape := #[], dtype := .Float32, device := .CPU }) := {
     forward := fun _ _ _ _ _ => throw <| IO.userError "model should not run"
   }
   let rejected ← try
     let param := Tensor.zeros #[]
-    let _ ← trainStepMolecule cfg model param ((Optim.adamw (α := Tensor { shape := #[], dtype := .Float32 })).init param) fixture 0.01
+    let _ ← trainStepMolecule cfg model param ((Optim.adamw (α := Tensor { shape := #[], dtype := .Float32, device := .CPU })).init param) fixture 0.01
     pure false
   catch error => pure (error.toString.containsSubstr "maxLen mismatch")
   LeanTest.assertTrue rejected "Mismatched model/config sequence lengths must fail before forward"

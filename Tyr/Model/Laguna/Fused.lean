@@ -43,6 +43,7 @@ import Tyr.RawTensor.Laguna
 
 namespace torch.laguna
 
+variable {device : Device}
 private def lagunaMoeFp4Fail {α : Type} (msg : String) : IO α :=
   throw (IO.userError s!"lagunaMoeFp4Forward: {msg}")
 
@@ -59,11 +60,11 @@ private def lagunaMoeFp4CheckShape
     Returns BF16 `[tokens, hidden]` with `Σ_p w[t,p] · expert_{idx[t,p]}(x[t])`. -/
 def lagunaMoeFp4Forward
     {xs ids ws gp gs gg up us ug dp ds dg : Shape}
-    (x : Tensor { shape := xs }) (topIdx : Tensor { shape := ids, dtype := .Int64 }) (topW : Tensor { shape := ws })
-    (gatePacked : Tensor { shape := gp }) (gateScale : Tensor { shape := gs }) (gateGlobal : Tensor { shape := gg })
-    (upPacked : Tensor { shape := up }) (upScale : Tensor { shape := us }) (upGlobal : Tensor { shape := ug })
-    (downPacked : Tensor { shape := dp }) (downScale : Tensor { shape := ds }) (downGlobal : Tensor { shape := dg })
-    (numExperts moeInt hidden : UInt64) : IO (Tensor { shape := xs, dtype := .BFloat16 }) := do
+    (x : Tensor { device := device, shape := xs }) (topIdx : Tensor { device := device, shape := ids, dtype := .Int64 }) (topW : Tensor { device := device, shape := ws })
+    (gatePacked : Tensor { device := device, shape := gp }) (gateScale : Tensor { device := device, shape := gs }) (gateGlobal : Tensor { device := device, shape := gg })
+    (upPacked : Tensor { device := device, shape := up }) (upScale : Tensor { device := device, shape := us }) (upGlobal : Tensor { device := device, shape := ug })
+    (downPacked : Tensor { device := device, shape := dp }) (downScale : Tensor { device := device, shape := ds }) (downGlobal : Tensor { device := device, shape := dg })
+    (numExperts moeInt hidden : UInt64) : IO (Tensor { device := device, shape := xs, dtype := .BFloat16 }) := do
   if hidden == 0 || hidden % 32 != 0 then
     lagunaMoeFp4Fail s!"hidden={hidden} must be a positive multiple of 32"
   if moeInt == 0 || moeInt % 32 != 0 then

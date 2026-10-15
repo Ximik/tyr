@@ -38,7 +38,7 @@ def decode (tokens : Array Int64) : String :=
 
 /-- Train with data of known size (legacy, no validation) -/
 def runTraining {n : UInt64} (modelCfg : Config) (trainCfg : TrainConfig)
-    (trainData : Tokens #[n]) : IO (GPTParams modelCfg) := do
+    (trainData : Tokens (device := .CPU) #[n]) : IO (GPTParams (device := trainCfg.device) modelCfg) := do
   IO.println ""
   IO.println "Initializing model..."
   -- Create model directly on target device
@@ -58,8 +58,8 @@ def runTraining {n : UInt64} (modelCfg : Config) (trainCfg : TrainConfig)
 
 /-- Train with validation data and checkpointing -/
 def runTrainingWithVal {nTrain nVal : UInt64} (modelCfg : Config) (trainCfg : TrainConfig)
-    (trainData : Tokens #[nTrain]) (valData : Tokens #[nVal])
-    (checkpointDir : Option String := none) : IO (GPTParams modelCfg) := do
+    (trainData : Tokens (device := .CPU) #[nTrain]) (valData : Tokens (device := .CPU) #[nVal])
+    (checkpointDir : Option String := none) : IO (GPTParams (device := trainCfg.device) modelCfg) := do
   IO.println ""
   IO.println "Initializing model..."
   -- Create model directly on target device

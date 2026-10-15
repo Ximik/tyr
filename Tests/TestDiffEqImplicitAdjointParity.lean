@@ -21,16 +21,16 @@ private def approx (a b tol : Float) : Bool :=
 
 /-- Nonlinear scalar problem dy/dt = a·y − y³ (state-dependent Jacobian, so
     the transposed fixed-point solve is genuinely exercised). -/
-private def nonlinearTerm : ODETerm (Tensor { shape := #[], dtype := .Float32 }) (Tensor { shape := #[], dtype := .Float32 }) :=
+private def nonlinearTerm : ODETerm (Tensor { shape := #[], dtype := .Float32, device := .CPU }) (Tensor { shape := #[], dtype := .Float32, device := .CPU }) :=
   { vectorField := fun _t y a => Tensor.sub (Tensor.mul a y) (Tensor.mul (Tensor.mul y y) y) }
 
 private def solveFinal
-    (solver : AbstractSolver (ODETerm (Tensor { shape := #[], dtype := .Float32 }) (Tensor { shape := #[], dtype := .Float32 })) (Tensor { shape := #[], dtype := .Float32 }) (Tensor { shape := #[], dtype := .Float32 }) Time (Tensor { shape := #[], dtype := .Float32 }))
-    (y0 a : Tensor { shape := #[], dtype := .Float32 }) (dt0 : Float) : Float :=
+    (solver : AbstractSolver (ODETerm (Tensor { shape := #[], dtype := .Float32, device := .CPU }) (Tensor { shape := #[], dtype := .Float32, device := .CPU })) (Tensor { shape := #[], dtype := .Float32, device := .CPU }) (Tensor { shape := #[], dtype := .Float32, device := .CPU }) Time (Tensor { shape := #[], dtype := .Float32, device := .CPU }))
+    (y0 a : Tensor { shape := #[], dtype := .Float32, device := .CPU }) (dt0 : Float) : Float :=
   let sol :=
     diffeqsolve
-      (Term := ODETerm (Tensor { shape := #[], dtype := .Float32 }) (Tensor { shape := #[], dtype := .Float32 }))
-      (Y := Tensor { shape := #[], dtype := .Float32 }) (VF := Tensor { shape := #[], dtype := .Float32 }) (Control := Time) (Args := Tensor { shape := #[], dtype := .Float32 })
+      (Term := ODETerm (Tensor { shape := #[], dtype := .Float32, device := .CPU }) (Tensor { shape := #[], dtype := .Float32, device := .CPU }))
+      (Y := Tensor { shape := #[], dtype := .Float32, device := .CPU }) (VF := Tensor { shape := #[], dtype := .Float32, device := .CPU }) (Control := Time) (Args := Tensor { shape := #[], dtype := .Float32, device := .CPU })
       (Controller := ConstantStepSize)
       nonlinearTerm solver 0.0 1.0 (some dt0) y0 a (saveat := { t1 := true })
   match sol.ys with
@@ -39,7 +39,7 @@ private def solveFinal
 
 private def checkAgainstFiniteDifferences
     (label : String)
-    (solver : AbstractSolver (ODETerm (Tensor { shape := #[], dtype := .Float32 }) (Tensor { shape := #[], dtype := .Float32 })) (Tensor { shape := #[], dtype := .Float32 }) (Tensor { shape := #[], dtype := .Float32 }) Time (Tensor { shape := #[], dtype := .Float32 }))
+    (solver : AbstractSolver (ODETerm (Tensor { shape := #[], dtype := .Float32, device := .CPU }) (Tensor { shape := #[], dtype := .Float32, device := .CPU })) (Tensor { shape := #[], dtype := .Float32, device := .CPU }) (Tensor { shape := #[], dtype := .Float32, device := .CPU }) Time (Tensor { shape := #[], dtype := .Float32, device := .CPU }))
     (dt0 : Float) (tol : Float) : IO Unit := do
   let y0 := Tensor.full #[] 0.8
   let a := Tensor.full #[] 0.5
@@ -67,15 +67,15 @@ private def checkAgainstFiniteDifferences
 @[test] def testImplicitEulerDirectAdjointFiniteDiff : IO Unit := do
   checkAgainstFiniteDifferences "implicitEuler"
     (ImplicitEuler.solver
-      (Term := ODETerm (Tensor { shape := #[], dtype := .Float32 }) (Tensor { shape := #[], dtype := .Float32 }))
-      (Y := Tensor { shape := #[], dtype := .Float32 }) (VF := Tensor { shape := #[], dtype := .Float32 }) (Args := Tensor { shape := #[], dtype := .Float32 }))
+      (Term := ODETerm (Tensor { shape := #[], dtype := .Float32, device := .CPU }) (Tensor { shape := #[], dtype := .Float32, device := .CPU }))
+      (Y := Tensor { shape := #[], dtype := .Float32, device := .CPU }) (VF := Tensor { shape := #[], dtype := .Float32, device := .CPU }) (Args := Tensor { shape := #[], dtype := .Float32, device := .CPU }))
     0.01 1.0e-2
 
 @[test] def testKvaerno3DirectAdjointFiniteDiff : IO Unit := do
   checkAgainstFiniteDifferences "kvaerno3"
     (Kvaerno3.solver
-      (Term := ODETerm (Tensor { shape := #[], dtype := .Float32 }) (Tensor { shape := #[], dtype := .Float32 }))
-      (Y := Tensor { shape := #[], dtype := .Float32 }) (VF := Tensor { shape := #[], dtype := .Float32 }) (Args := Tensor { shape := #[], dtype := .Float32 }))
+      (Term := ODETerm (Tensor { shape := #[], dtype := .Float32, device := .CPU }) (Tensor { shape := #[], dtype := .Float32, device := .CPU }))
+      (Y := Tensor { shape := #[], dtype := .Float32, device := .CPU }) (VF := Tensor { shape := #[], dtype := .Float32, device := .CPU }) (Args := Tensor { shape := #[], dtype := .Float32, device := .CPU }))
     0.05 1.0e-2
 
 @[test] def testKvaerno5MatchesDopri5Adjoint : IO Unit := do
@@ -87,12 +87,12 @@ private def checkAgainstFiniteDifferences
   let dt0 := some 0.05
   let implicitSolver :=
     Kvaerno5.solver
-      (Term := ODETerm (Tensor { shape := #[], dtype := .Float32 }) (Tensor { shape := #[], dtype := .Float32 }))
-      (Y := Tensor { shape := #[], dtype := .Float32 }) (VF := Tensor { shape := #[], dtype := .Float32 }) (Args := Tensor { shape := #[], dtype := .Float32 })
+      (Term := ODETerm (Tensor { shape := #[], dtype := .Float32, device := .CPU }) (Tensor { shape := #[], dtype := .Float32, device := .CPU }))
+      (Y := Tensor { shape := #[], dtype := .Float32, device := .CPU }) (VF := Tensor { shape := #[], dtype := .Float32, device := .CPU }) (Args := Tensor { shape := #[], dtype := .Float32, device := .CPU })
   let explicitSolver :=
     Dopri5.solver
-      (Term := ODETerm (Tensor { shape := #[], dtype := .Float32 }) (Tensor { shape := #[], dtype := .Float32 }))
-      (Y := Tensor { shape := #[], dtype := .Float32 }) (VF := Tensor { shape := #[], dtype := .Float32 }) (Args := Tensor { shape := #[], dtype := .Float32 })
+      (Term := ODETerm (Tensor { shape := #[], dtype := .Float32, device := .CPU }) (Tensor { shape := #[], dtype := .Float32, device := .CPU }))
+      (Y := Tensor { shape := #[], dtype := .Float32, device := .CPU }) (VF := Tensor { shape := #[], dtype := .Float32, device := .CPU }) (Args := Tensor { shape := #[], dtype := .Float32, device := .CPU })
   let (_, adjI) :=
     diffeqsolveDirectAdjoint nonlinearTerm implicitSolver 0.0 1.0 dt0 y0 a adjY1
       (saveat := { t1 := true })
@@ -109,23 +109,23 @@ private def checkAgainstFiniteDifferences
 
 /-! ## IMEX (KenCarp) adjoints -/
 
-private def imexExplicitTerm : ODETerm (Tensor { shape := #[], dtype := .Float32 }) (Tensor { shape := #[], dtype := .Float32 }) :=
+private def imexExplicitTerm : ODETerm (Tensor { shape := #[], dtype := .Float32, device := .CPU }) (Tensor { shape := #[], dtype := .Float32, device := .CPU }) :=
   { vectorField := fun _t y a => Tensor.mul a y }
 
-private def imexImplicitTerm : ODETerm (Tensor { shape := #[], dtype := .Float32 }) (Tensor { shape := #[], dtype := .Float32 }) :=
+private def imexImplicitTerm : ODETerm (Tensor { shape := #[], dtype := .Float32, device := .CPU }) (Tensor { shape := #[], dtype := .Float32, device := .CPU }) :=
   { vectorField := fun _t y _ => Tensor.mulScalar (Tensor.mul (Tensor.mul y y) y) (-1.0) }
 
-private def imexTerms : MultiTerm (ODETerm (Tensor { shape := #[], dtype := .Float32 }) (Tensor { shape := #[], dtype := .Float32 })) (ODETerm (Tensor { shape := #[], dtype := .Float32 }) (Tensor { shape := #[], dtype := .Float32 })) :=
+private def imexTerms : MultiTerm (ODETerm (Tensor { shape := #[], dtype := .Float32, device := .CPU }) (Tensor { shape := #[], dtype := .Float32, device := .CPU })) (ODETerm (Tensor { shape := #[], dtype := .Float32, device := .CPU }) (Tensor { shape := #[], dtype := .Float32, device := .CPU })) :=
   { term1 := imexExplicitTerm, term2 := imexImplicitTerm }
 
 private def imexSolveFinal
-    (solver : AbstractSolver (MultiTerm (ODETerm (Tensor { shape := #[], dtype := .Float32 }) (Tensor { shape := #[], dtype := .Float32 })) (ODETerm (Tensor { shape := #[], dtype := .Float32 }) (Tensor { shape := #[], dtype := .Float32 })))
-      (Tensor { shape := #[], dtype := .Float32 }) (Tensor { shape := #[], dtype := .Float32 } × Tensor { shape := #[], dtype := .Float32 }) (Time × Time) (Tensor { shape := #[], dtype := .Float32 }))
-    (y0 a : Tensor { shape := #[], dtype := .Float32 }) (dt0 : Float) : Float :=
+    (solver : AbstractSolver (MultiTerm (ODETerm (Tensor { shape := #[], dtype := .Float32, device := .CPU }) (Tensor { shape := #[], dtype := .Float32, device := .CPU })) (ODETerm (Tensor { shape := #[], dtype := .Float32, device := .CPU }) (Tensor { shape := #[], dtype := .Float32, device := .CPU })))
+      (Tensor { shape := #[], dtype := .Float32, device := .CPU }) (Tensor { shape := #[], dtype := .Float32, device := .CPU } × Tensor { shape := #[], dtype := .Float32, device := .CPU }) (Time × Time) (Tensor { shape := #[], dtype := .Float32, device := .CPU }))
+    (y0 a : Tensor { shape := #[], dtype := .Float32, device := .CPU }) (dt0 : Float) : Float :=
   let sol :=
     diffeqsolve
-      (Term := MultiTerm (ODETerm (Tensor { shape := #[], dtype := .Float32 }) (Tensor { shape := #[], dtype := .Float32 })) (ODETerm (Tensor { shape := #[], dtype := .Float32 }) (Tensor { shape := #[], dtype := .Float32 })))
-      (Y := Tensor { shape := #[], dtype := .Float32 }) (VF := (Tensor { shape := #[], dtype := .Float32 } × Tensor { shape := #[], dtype := .Float32 })) (Control := (Time × Time)) (Args := Tensor { shape := #[], dtype := .Float32 })
+      (Term := MultiTerm (ODETerm (Tensor { shape := #[], dtype := .Float32, device := .CPU }) (Tensor { shape := #[], dtype := .Float32, device := .CPU })) (ODETerm (Tensor { shape := #[], dtype := .Float32, device := .CPU }) (Tensor { shape := #[], dtype := .Float32, device := .CPU })))
+      (Y := Tensor { shape := #[], dtype := .Float32, device := .CPU }) (VF := (Tensor { shape := #[], dtype := .Float32, device := .CPU } × Tensor { shape := #[], dtype := .Float32, device := .CPU })) (Control := (Time × Time)) (Args := Tensor { shape := #[], dtype := .Float32, device := .CPU })
       (Controller := ConstantStepSize)
       imexTerms solver 0.0 1.0 (some dt0) y0 a (saveat := { t1 := true })
   match sol.ys with
@@ -137,9 +137,9 @@ private def imexSolveFinal
 @[test] def testKencarp4ImexAdjointFiniteDiff : IO Unit := do
   let solver :=
     Kencarp4.solver
-      (ExplicitTerm := ODETerm (Tensor { shape := #[], dtype := .Float32 }) (Tensor { shape := #[], dtype := .Float32 }))
-      (ImplicitTerm := ODETerm (Tensor { shape := #[], dtype := .Float32 }) (Tensor { shape := #[], dtype := .Float32 }))
-      (Y := Tensor { shape := #[], dtype := .Float32 }) (VFe := Tensor { shape := #[], dtype := .Float32 }) (VFi := Tensor { shape := #[], dtype := .Float32 }) (Args := Tensor { shape := #[], dtype := .Float32 })
+      (ExplicitTerm := ODETerm (Tensor { shape := #[], dtype := .Float32, device := .CPU }) (Tensor { shape := #[], dtype := .Float32, device := .CPU }))
+      (ImplicitTerm := ODETerm (Tensor { shape := #[], dtype := .Float32, device := .CPU }) (Tensor { shape := #[], dtype := .Float32, device := .CPU }))
+      (Y := Tensor { shape := #[], dtype := .Float32, device := .CPU }) (VFe := Tensor { shape := #[], dtype := .Float32, device := .CPU }) (VFi := Tensor { shape := #[], dtype := .Float32, device := .CPU }) (Args := Tensor { shape := #[], dtype := .Float32, device := .CPU })
   let y0 := Tensor.full #[] 0.8
   let a := Tensor.full #[] 0.5
   let adjY1 := Tensor.ones #[]

@@ -897,12 +897,16 @@ elab "#tensor " t:term : command => do
     let type ← Meta.inferType e
     if isIOType type then
       -- Sequence tensor construction before reading the gradient snapshot.
-      let propsIO ← Term.elabTerm (← `(do tensorToProps (← $t))) none
+      let propsIO ← Term.elabTerm (← `(do tensorToProps (← $t)))
+        (some (mkApp (mkConst ``IO) (mkConst ``TensorDisplayProps)))
+      Term.synthesizeSyntheticMVarsNoPostponing
       let propsIO ← instantiateMVars propsIO
       evalTensorPropsIOSafe propsIO
     else
       -- Non-IO case: just apply tensorToProps
-      let propsExpr ← Term.elabTerm (← `(tensorToProps $t)) none
+      let propsExpr ← Term.elabTerm (← `(tensorToProps $t))
+        (some (mkApp (mkConst ``IO) (mkConst ``TensorDisplayProps)))
+      Term.synthesizeSyntheticMVarsNoPostponing
       let propsExpr ← instantiateMVars propsExpr
       evalTensorPropsIOSafe propsExpr
   -- Encode props for RPC and save widget info

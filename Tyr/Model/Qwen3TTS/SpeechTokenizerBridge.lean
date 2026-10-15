@@ -17,6 +17,8 @@ import Tyr.Log
 
 namespace torch.qwen3tts
 
+variable {device : Device}
+
 open torch.Log
 
 structure SpeechTokenizerBridgeConfig where
@@ -180,7 +182,7 @@ private def computeSpeakerMelFromWave
     (winSize : UInt64 := 1024)
     (fminHz : Float := 0.0)
     (fmaxHz : Option Float := none)
-    : IO (Sigma fun frames => Tensor { shape := #[1, frames, melDim], dtype := .Float32 }) := do
+    : IO (Sigma fun frames => Tensor { shape := #[1, frames, melDim], dtype := .Float32, device := .CPU }) := do
   if wave.isEmpty then
     throw <| IO.userError "Reference audio is empty after loading/resampling."
   if nFft == 0 || hopSize == 0 || winSize == 0 then
@@ -189,9 +191,9 @@ private def computeSpeakerMelFromWave
   let pad : UInt64 := if nFft > hopSize then (nFft - hopSize) / 2 else 0
   let padded := reflectPad1d wave pad.toNat
   let paddedLen : UInt64 := padded.size.toUInt64
-  let wav : Tensor { shape := #[paddedLen], dtype := .Float32 } := Tensor.reshapeChecked (Tensor.fromFloatArray padded) #[paddedLen]
+  let wav : Tensor { shape := #[paddedLen], dtype := .Float32, device := .CPU } := Tensor.reshapeChecked (Tensor.fromFloatArray padded) #[paddedLen]
 
-  let window : Tensor { shape := #[winSize], dtype := .Float32 } := Tensor.hannWindow winSize
+  let window : Tensor { shape := #[winSize], dtype := .Float32, device := .CPU } := Tensor.hannWindow winSize
   let ⟨_, stftDyn⟩ ← Tensor.stft wav nFft hopSize window false false
   let stftShape := stftDyn.runtimeShape
   if stftShape.size < 3 then
@@ -205,21 +207,21 @@ private def computeSpeakerMelFromWave
   if frames == 0 then
     throw <| IO.userError "Speaker mel extraction produced zero frames."
 
-  let spec : Tensor { shape := #[freqBins, frames, 2], dtype := .Float32 } := Tensor.reshapeChecked stftDyn #[freqBins, frames, 2]
-  let re3 : Tensor { shape := #[freqBins, frames, 1], dtype := .Float32 } := Tensor.sliceChecked spec 2 0 1 #[freqBins, frames, 1]
-  let im3 : Tensor { shape := #[freqBins, frames, 1], dtype := .Float32 } := Tensor.sliceChecked spec 2 1 1 #[freqBins, frames, 1]
-  let re : Tensor { shape := #[freqBins, frames], dtype := .Float32 } := Tensor.reshapeChecked re3 #[freqBins, frames]
-  let im : Tensor { shape := #[freqBins, frames], dtype := .Float32 } := Tensor.reshapeChecked im3 #[freqBins, frames]
-  let mag : Tensor { shape := #[freqBins, frames], dtype := .Float32 } := Tensor.sqrt ((re * re) + (im * im) + (1e-9 : Float))
+  let spec : Tensor { shape := #[freqBins, frames, 2], dtype := .Float32, device := .CPU } := Tensor.reshapeChecked stftDyn #[freqBins, frames, 2]
+  let re3 : Tensor { shape := #[freqBins, frames, 1], dtype := .Float32, device := .CPU } := Tensor.sliceChecked spec 2 0 1 #[freqBins, frames, 1]
+  let im3 : Tensor { shape := #[freqBins, frames, 1], dtype := .Float32, device := .CPU } := Tensor.sliceChecked spec 2 1 1 #[freqBins, frames, 1]
+  let re : Tensor { shape := #[freqBins, frames], dtype := .Float32, device := .CPU } := Tensor.reshapeChecked re3 #[freqBins, frames]
+  let im : Tensor { shape := #[freqBins, frames], dtype := .Float32, device := .CPU } := Tensor.reshapeChecked im3 #[freqBins, frames]
+  let mag : Tensor { shape := #[freqBins, frames], dtype := .Float32, device := .CPU } := Tensor.sqrt ((re * re) + (im * im) + (1e-9 : Float))
 
   let melMaxHz : Float := fmaxHz.getD (sampleRate.toFloat / 2.0)
   let melFlat := buildSlaneyMelFilterBankFlat
     freqBins.toNat melDim.toNat sampleRate.toNat fminHz melMaxHz
-  let melFilter : Tensor { shape := #[freqBins, melDim], dtype := .Float32 } := Tensor.reshapeChecked (Tensor.fromFloatArray melFlat) #[freqBins, melDim]
-  let melPow : Tensor { shape := #[melDim, frames], dtype := .Float32 } := Tensor.mm (Tensor.transpose2d melFilter) mag
-  let melLog : Tensor { shape := #[melDim, frames], dtype := .Float32 } := Tensor.log (Tensor.Preserving.clampFloat melPow (1e-5 : Float) (1e10 : Float))
-  let melFrameMajor : Tensor { shape := #[frames, melDim], dtype := .Float32 } := Tensor.transpose2d melLog
-  let mel3 : Tensor { shape := #[1, frames, melDim], dtype := .Float32 } := Tensor.reshapeChecked melFrameMajor #[1, frames, melDim]
+  let melFilter : Tensor { shape := #[freqBins, melDim], dtype := .Float32, device := .CPU } := Tensor.reshapeChecked (Tensor.fromFloatArray melFlat) #[freqBins, melDim]
+  let melPow : Tensor { shape := #[melDim, frames], dtype := .Float32, device := .CPU } := Tensor.mm (Tensor.transpose2d melFilter) mag
+  let melLog : Tensor { shape := #[melDim, frames], dtype := .Float32, device := .CPU } := Tensor.log (Tensor.Preserving.clampFloat melPow (1e-5 : Float) (1e10 : Float))
+  let melFrameMajor : Tensor { shape := #[frames, melDim], dtype := .Float32, device := .CPU } := Tensor.transpose2d melLog
+  let mel3 : Tensor { shape := #[1, frames, melDim], dtype := .Float32, device := .CPU } := Tensor.reshapeChecked melFrameMajor #[1, frames, melDim]
   pure ⟨frames, mel3⟩
 
 private def loadResampledMonoWav (path : String) (targetSr : UInt64) : IO (Array Float) := do
@@ -304,12 +306,12 @@ def encodeAudioToCodes
     let chunkSamples : Nat := (encoder.inputSampleRate * 10).toNat
     let leftContextSamples : Nat := (encoder.inputSampleRate * 12).toNat
     if wave.size <= chunkSamples then
-      let audio0 : Tensor { shape := #[samples], dtype := .Float32 } := Tensor.reshapeChecked (Tensor.fromFloatArray wave) #[samples]
-      let audio : Tensor { shape := #[samples], dtype := .Float32 } :=
-        if audio0.device == encoder.conv0Weight.device then audio0 else audio0.to encoder.conv0Weight.device
+      let audio0 : Tensor { shape := #[samples], dtype := .Float32, device := .CPU } := Tensor.reshapeChecked (Tensor.fromFloatArray wave) #[samples]
+      let audio : Tensor { shape := #[samples], dtype := .Float32, device := device } :=
+        audio0.to encoder.conv0Weight.device
       let frames : UInt64 := encodedFrames samples
       let ⟨groups, codes⟩ := encoder.encodeMonoFrameMajorWithRoPEOffsetDynamic (Tensor.castLike encoder.conv0Weight audio)
-      let flat : Tensor { shape := #[frames * groups], dtype := .Int64 } := Tensor.reshapeChecked codes #[frames * groups]
+      let flat : Tensor { shape := #[frames * groups], dtype := .Int64, device := device } := Tensor.reshapeChecked codes #[frames * groups]
       let vals ← Tensor.toUInt64Array flat
       IO.FS.writeFile codesPath (formatCodesRows vals groups)
     else
@@ -364,10 +366,10 @@ def prepareSpeakerMel
     audio -> mel (bridge) -> Lean speaker encoder forward. -/
 def extractSpeakerEmbeddingFromAudio
     (cfg : Qwen3TTSConfig)
-    (model : Qwen3TTSForConditionalGeneration cfg)
+    (model : Qwen3TTSForConditionalGeneration (device := device) cfg)
     (_bridge : SpeechTokenizerBridgeConfig)
     (audioPath melOutPath melFramesPath : String)
-    : IO (Tensor { shape := #[1, 1, cfg.talkerConfig.hiddenSize] }) := do
+    : IO (Tensor { shape := #[1, 1, cfg.talkerConfig.hiddenSize], device := device }) := do
   if cfg.speakerEncoderConfig.encDim != cfg.talkerConfig.hiddenSize then
     throw <| IO.userError
       s!"speaker embedding dim mismatch: speaker enc_dim={cfg.speakerEncoderConfig.encDim}, talker hidden={cfg.talkerConfig.hiddenSize}"
@@ -390,7 +392,7 @@ def extractSpeakerEmbeddingFromAudio
     ensureParentDir melFramesPath
     IO.FS.writeFile melFramesPath s!"{frames}\n"
 
-  let spk : Tensor { shape := #[1, cfg.speakerEncoderConfig.encDim] } ← model.extractSpeakerEmbedding mel.forgetDType
+  let spk : Tensor { shape := #[1, cfg.speakerEncoderConfig.encDim], device := device } ← model.extractSpeakerEmbedding (mel.to device).forgetDType
   pure (Tensor.reshapeChecked spk #[1, 1, cfg.talkerConfig.hiddenSize])
 
 end torch.qwen3tts

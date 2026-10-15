@@ -8,23 +8,23 @@ open torch
 open LeanTest
 
 structure Inner where
-  bias : Tensor { shape := #[4], dtype := .Float32 }
+  bias : Tensor { shape := #[4], dtype := .Float32, device := .CPU }
   tag : Static String
-  cache : Frozen { shape := #[4], dtype := .Float32 }
+  cache : Frozen { shape := #[4], dtype := .Float32, device := .CPU }
   deriving TensorStruct, ToTensorStructSchema
 
 structure Outer where
-  weight : Tensor { shape := #[2, 4], dtype := .Float32 }
+  weight : Tensor { shape := #[2, 4], dtype := .Float32, device := .CPU }
   inner : Inner
-  gates : torch.Vector 2 (Frozen { shape := #[1], dtype := .Float32 })
-  optScale : Option (Tensor { shape := #[3], dtype := .Float32 })
+  gates : torch.Vector 2 (Frozen { shape := #[1], dtype := .Float32, device := .CPU })
+  optScale : Option (Tensor { shape := #[3], dtype := .Float32, device := .CPU })
   flag : Bool
   deriving TensorStruct, ToTensorStructSchema
 
 structure IndexedContainer where
-  blocks : Array (Tensor { shape := #[2], dtype := .Float32 })
+  blocks : Array (Tensor { shape := #[2], dtype := .Float32, device := .CPU })
   labels : List (Static String)
-  maybeFrozen : Option (Frozen { shape := #[2], dtype := .Float32 })
+  maybeFrozen : Option (Frozen { shape := #[2], dtype := .Float32, device := .CPU })
   deriving TensorStruct, ToTensorStructSchema
 
 private def sampleOuter : Outer :=
@@ -32,9 +32,9 @@ private def sampleOuter : Outer :=
     inner := {
       bias := Tensor.zeros #[4]
       tag := "inner-tag"
-      cache := (Tensor.zeros #[4] : Frozen { shape := #[4], dtype := .Float32 })
+      cache := (Tensor.zeros #[4] : Frozen { shape := #[4], dtype := .Float32, device := .CPU })
     }
-    gates := torch.Vector.replicate 2 ((Tensor.zeros #[1]) : Frozen { shape := #[1], dtype := .Float32 })
+    gates := torch.Vector.replicate 2 ((Tensor.zeros #[1]) : Frozen { shape := #[1], dtype := .Float32, device := .CPU })
     optScale := some (Tensor.zeros #[3])
     flag := true }
 

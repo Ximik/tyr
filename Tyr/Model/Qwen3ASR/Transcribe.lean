@@ -17,6 +17,7 @@ import Tyr.Tokenizer.Qwen3
 
 namespace torch.qwen3asr
 
+variable {device : Device}
 /-- One offline ASR transcription result. -/
 structure ASRTranscription where
   language : String
@@ -28,7 +29,8 @@ structure ASRTranscription where
     independent model/tokenizer checkpoint that can be attached to ASR transcription. -/
 structure Qwen3ForcedAligner where
   cfg : Qwen3ASRConfig
-  model : Qwen3ASRForConditionalGeneration cfg
+  device : Device
+  model : Qwen3ASRForConditionalGeneration (device := device) cfg
   tok : tokenizer.qwen3.QwenTokenizer
   preprocessor : PreprocessorConfig
 
@@ -174,7 +176,7 @@ private def isFrontendReuseCompatible
   base.dither == align.dither
 
 private def modelDevice {cfg : Qwen3ASRConfig}
-    (model : Qwen3ASRForConditionalGeneration cfg) : Device :=
+    (model : Qwen3ASRForConditionalGeneration (device := device) cfg) : Device :=
   model.thinker.textModel.embed_tokens.device
 
 private def validateForcedLanguage
@@ -200,7 +202,7 @@ private def preparePromptInputIds
     (tok : tokenizer.qwen3.QwenTokenizer)
     (prompt : String)
     (audioLen : UInt64)
-    : IO (Sigma (fun seq => Tensor { shape := #[1, seq], dtype := .Int64 })) := do
+    : IO (Sigma (fun seq => Tensor { device := .CPU, shape := #[1, seq], dtype := .Int64 })) := do
   let processor : Qwen3ASRProcessor := {}
   let promptIds ←
     match processor.encodeWithExpandedAudioTokenIds
@@ -215,21 +217,21 @@ private def preparePromptInputIds
   let seq : UInt64 := idsVals.size.toUInt64
   if seq == 0 then
     throw <| IO.userError "ASR prompt/input sequence is empty"
-  let inputIds : Tensor { shape := #[1, seq], dtype := .Int64 } := Tensor.reshapeChecked (Tensor.fromInt64Array idsVals) #[1, seq]
+  let inputIds : Tensor { device := .CPU, shape := #[1, seq], dtype := .Int64 } := Tensor.reshapeChecked (Tensor.fromInt64Array idsVals) #[1, seq]
   pure ⟨seq, inputIds⟩
 
 private def decodeGeneratedText
     (tok : tokenizer.qwen3.QwenTokenizer)
     {seq : UInt64}
     (outSeq : UInt64)
-    (outIds : Tensor { shape := #[1, outSeq], dtype := .Int64 })
+    (outIds : Tensor { device := device, shape := #[1, outSeq], dtype := .Int64 })
     : IO String := do
   if outSeq <= seq then
     pure ""
   else
     let newSeq := outSeq - seq
-    let newOnly : Tensor { shape := #[1, newSeq], dtype := .Int64 } := Tensor.sliceChecked outIds 1 seq newSeq #[1, newSeq]
-    let flat : Tensor { shape := #[newSeq], dtype := .Int64 } := Tensor.reshapeChecked newOnly #[newSeq]
+    let newOnly : Tensor { device := device, shape := #[1, newSeq], dtype := .Int64 } := Tensor.sliceChecked outIds 1 seq newSeq #[1, newSeq]
+    let flat : Tensor { device := device, shape := #[newSeq], dtype := .Int64 } := Tensor.reshapeChecked newOnly #[newSeq]
     let idsU64 ← Tensor.toUInt64Array flat
     let ids := idsU64.map (fun x => x.toUInt32)
     pure (tokenizer.qwen3.decodeText tok ids)
@@ -238,7 +240,7 @@ private def decodeGeneratedTextsBatch
     (tok : tokenizer.qwen3.QwenTokenizer)
     {batch seq : UInt64}
     (outSeq : UInt64)
-    (outIds : Tensor { shape := #[batch, outSeq], dtype := .Int64 })
+    (outIds : Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })
     : IO (Array String) := do
   if batch == 0 then
     pure #[]
@@ -246,8 +248,8 @@ private def decodeGeneratedTextsBatch
     pure (Array.replicate batch.toNat "")
   else
     let newSeq := outSeq - seq
-    let newOnly : Tensor { shape := #[batch, newSeq], dtype := .Int64 } := Tensor.sliceChecked outIds 1 seq newSeq #[batch, newSeq]
-    let flat : Tensor { shape := #[batch * newSeq], dtype := .Int64 } := Tensor.reshapeChecked newOnly #[batch * newSeq]
+    let newOnly : Tensor { device := device, shape := #[batch, newSeq], dtype := .Int64 } := Tensor.sliceChecked outIds 1 seq newSeq #[batch, newSeq]
+    let flat : Tensor { device := device, shape := #[batch * newSeq], dtype := .Int64 } := Tensor.reshapeChecked newOnly #[batch * newSeq]
     let idsU64 ← Tensor.toUInt64Array flat
     let rowWidth := newSeq.toNat
     let mut out : Array String := Array.mkEmpty batch.toNat
@@ -259,7 +261,7 @@ private def decodeGeneratedTextsBatch
     pure out
 
 private def extractAudioLenFromFeatureMask {cfg : Qwen3ASRConfig} {frames : UInt64}
-    (featureAttentionMask : Tensor { shape := #[1, frames], dtype := .Int64 })
+    (featureAttentionMask : Tensor { device := device, shape := #[1, frames], dtype := .Int64 })
     : IO UInt64 := do
   let validFramesTensor := Tensor.sumAll featureAttentionMask
   let validFrames := validFramesTensor.itemInt.toInt.toNat.toUInt64
@@ -269,12 +271,12 @@ private def extractAudioLenFromFeatureMask {cfg : Qwen3ASRConfig} {frames : UInt
 
 private def alignSingleWithModel
     {alignCfg : Qwen3ASRConfig}
-    (alignModel : Qwen3ASRForConditionalGeneration alignCfg)
+    (alignModel : Qwen3ASRForConditionalGeneration (device := device) alignCfg)
     (alignTok : tokenizer.qwen3.QwenTokenizer)
     (text : String)
     (language : String)
-    {melBins frames : UInt64}
-    (frontendOut : WhisperFrontendOutput melBins frames)
+    {melBins frames : UInt64} {frontendDevice : Device}
+    (frontendOut : WhisperFrontendOutput (device := frontendDevice) melBins frames)
     (audioLen : UInt64)
     : IO (Option ForcedAlignResult) := do
   let alignModel := TensorStruct.detach alignModel
@@ -294,10 +296,10 @@ private def alignSingleWithModel
   else
     let dev := modelDevice alignModel
     let alignVals := alignIdsArr.map (fun id => Int64.ofNat id.toNat)
-    let inputIdsAlignCpu : Tensor { shape := #[1, seqAlign], dtype := .Int64 } := Tensor.reshapeChecked (Tensor.fromInt64Array alignVals) #[1, seqAlign]
-    let inputIdsAlign : Tensor { shape := #[1, seqAlign], dtype := .Int64 } := inputIdsAlignCpu.to dev
-    let inputFeaturesDev : Tensor { shape := #[1, melBins, frames], dtype := .Float32 } := frontendOut.inputFeatures.detach.to dev
-    let featureAttentionMaskDev : Tensor { shape := #[1, frames], dtype := .Int64 } := frontendOut.featureAttentionMask.to dev
+    let inputIdsAlignCpu : Tensor { device := .CPU, shape := #[1, seqAlign], dtype := .Int64 } := Tensor.reshapeChecked (Tensor.fromInt64Array alignVals) #[1, seqAlign]
+    let inputIdsAlign : Tensor { device := device, shape := #[1, seqAlign], dtype := .Int64 } := inputIdsAlignCpu.to dev
+    let inputFeaturesDev : Tensor { device := device, shape := #[1, melBins, frames], dtype := .Float32 } := frontendOut.inputFeatures.detach.to dev
+    let featureAttentionMaskDev : Tensor { device := device, shape := #[1, frames], dtype := .Int64 } := frontendOut.featureAttentionMask.to dev
     let results ←
       do
         alignModel.alignPrepared
@@ -305,7 +307,7 @@ private def alignSingleWithModel
           #[wordList]
           (inputFeatures := some (Tensor.reshapeChecked inputFeaturesDev #[1, alignCfg.thinkerConfig.audioConfig.numMelBins, frames]).forgetDType)
           (featureAttentionMask := some featureAttentionMaskDev)
-          (attentionMask := (none : Option (Tensor { shape := #[1, seqAlign], dtype := .Int64 })))
+          (attentionMask := (none : Option (Tensor { device := device, shape := #[1, seqAlign], dtype := .Int64 })))
           (timestampTokenId := alignCfg.timestampTokenId)
           (timestampSegmentTime := alignCfg.timestampSegmentTime)
     pure (results[0]?)
@@ -329,7 +331,7 @@ private def alignSingleWithForcedAligner
 
 private def maybeAlignTimestamps
     {cfg : Qwen3ASRConfig}
-    (model : Qwen3ASRForConditionalGeneration cfg)
+    (model : Qwen3ASRForConditionalGeneration (device := device) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (preprocessor : PreprocessorConfig)
     (forcedAligner : Option Qwen3ForcedAligner := none)
@@ -337,7 +339,7 @@ private def maybeAlignTimestamps
     (language : String)
     (audio16k : Array Float)
     {melBins frames : UInt64}
-    (frontendOut : WhisperFrontendOutput melBins frames)
+    (frontendOut : WhisperFrontendOutput (device := device) melBins frames)
     (audioLen : UInt64)
     (returnTimeStamps : Bool)
     : IO (Option ForcedAlignResult) := do
@@ -361,13 +363,13 @@ private def maybeAlignTimestamps
 
 private def transcribeWithFrontend
     {cfg : Qwen3ASRConfig}
-    (model : Qwen3ASRForConditionalGeneration cfg)
+    (model : Qwen3ASRForConditionalGeneration (device := device) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (preprocessor : PreprocessorConfig)
     (forcedAligner : Option Qwen3ForcedAligner := none)
     (audio16k : Array Float)
     {melBins frames : UInt64}
-    (frontendOut : WhisperFrontendOutput melBins frames)
+    (frontendOut : WhisperFrontendOutput (device := device) melBins frames)
     (context : String := "")
     (language : Option String := none)
     (returnTimeStamps : Bool := false)
@@ -382,9 +384,9 @@ private def transcribeWithFrontend
   let promptPack ← preparePromptInputIds (cfg := cfg) tok prompt audioLen
   let dev := modelDevice model
   let seq := promptPack.1
-  let inputIds : Tensor { shape := #[1, seq], dtype := .Int64 } := promptPack.2.to dev
-  let inputFeaturesDev : Tensor { shape := #[1, melBins, frames], dtype := .Float32 } := frontendOut.inputFeatures.detach.to dev
-  let featureAttentionMaskDev : Tensor { shape := #[1, frames], dtype := .Int64 } := frontendOut.featureAttentionMask.to dev
+  let inputIds : Tensor { device := device, shape := #[1, seq], dtype := .Int64 } := promptPack.2.to dev
+  let inputFeaturesDev : Tensor { device := device, shape := #[1, melBins, frames], dtype := .Float32 } := frontendOut.inputFeatures.detach.to dev
+  let featureAttentionMaskDev : Tensor { device := device, shape := #[1, frames], dtype := .Int64 } := frontendOut.featureAttentionMask.to dev
   let generated ←
     do
       model.generateGreedy
@@ -405,7 +407,7 @@ private def transcribeWithFrontend
 /-- Offline ASR for one in-memory 16k mono waveform. -/
 def transcribeWaveform
     {cfg : Qwen3ASRConfig}
-    (model : Qwen3ASRForConditionalGeneration cfg)
+    (model : Qwen3ASRForConditionalGeneration (device := device) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (preprocessor : PreprocessorConfig)
     (audio16k : Array Float)
@@ -496,19 +498,19 @@ private structure BatchedDecodeRow where
   seq : UInt64
   frames : UInt64
   melBins : UInt64
-  inputIdsRow : Tensor { shape := #[1, seq], dtype := .Int64 }
-  inputFeaturesRow : Tensor { shape := #[1, melBins, frames], dtype := .Float32 }
-  featureAttentionMaskRow : Tensor { shape := #[1, frames], dtype := .Int64 }
+  inputIdsRow : Tensor { device := device, shape := #[1, seq], dtype := .Int64 }
+  inputFeaturesRow : Tensor { device := device, shape := #[1, melBins, frames], dtype := .Float32 }
+  featureAttentionMaskRow : Tensor { device := device, shape := #[1, frames], dtype := .Int64 }
   deriving Inhabited
 
 private structure BatchedDecodeBucket where
   frames : UInt64
   seq : UInt64
-  rows : Array BatchedDecodeRow := #[]
+  rows : Array (BatchedDecodeRow (device := device)) := #[]
   deriving Inhabited
 
 private def findBucketIdx
-    (buckets : Array BatchedDecodeBucket)
+    (buckets : Array (BatchedDecodeBucket (device := device)))
     (frames seq : UInt64)
     : Option Nat :=
   Id.run do
@@ -521,10 +523,10 @@ private def findBucketIdx
     found
 
 private def addRowToBuckets
-    (buckets : Array BatchedDecodeBucket)
+    (buckets : Array (BatchedDecodeBucket (device := device)))
     (frames seq : UInt64)
-    (row : BatchedDecodeRow)
-    : Array BatchedDecodeBucket :=
+    (row : BatchedDecodeRow (device := device))
+    : Array (BatchedDecodeBucket (device := device)) :=
   match findBucketIdx buckets frames seq with
   | some i =>
       let b := buckets[i]!
@@ -536,7 +538,7 @@ private def addRowToBuckets
     Returns `none` when inputs are not batch-collatable (e.g. multi-chunk split). -/
 private def tryTranscribeWaveformsBatchedChunk
     {cfg : Qwen3ASRConfig}
-    (model : Qwen3ASRForConditionalGeneration cfg)
+    (model : Qwen3ASRForConditionalGeneration (device := device) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (preprocessor : PreprocessorConfig)
     (audios16k : Array (Array Float))
@@ -555,7 +557,7 @@ private def tryTranscribeWaveformsBatchedChunk
       s!"Internal batch collation mismatch: audio={n}, context={contexts.size}, language={languages.size}"
 
   let maxChunkSec := maxAsrInputSeconds
-  let mut buckets : Array BatchedDecodeBucket := #[]
+  let mut buckets : Array (BatchedDecodeBucket (device := device)) := #[]
   for i in [:n] do
     let searchExpandSec : Float := 1.0
     let chunks :=
@@ -581,10 +583,10 @@ private def tryTranscribeWaveformsBatchedChunk
     let audioLen ← extractAudioLenFromFeatureMask (cfg := cfg) (frames := frames) frontendOut.featureAttentionMask
     let promptPack ← preparePromptInputIds (cfg := cfg) tok prompt audioLen
     let seq := promptPack.1
-    let inputIdsRowDyn : Tensor { shape := #[1, seq], dtype := .Int64 } := Tensor.reshapeChecked promptPack.2 #[1, seq]
-    let inputFeaturesRowDyn : Tensor { shape := #[1, preprocessor.featureSize, frames], dtype := .Float32 } :=
+    let inputIdsRowDyn : Tensor { device := device, shape := #[1, seq], dtype := .Int64 } := Tensor.reshapeChecked (promptPack.2.to device) #[1, seq]
+    let inputFeaturesRowDyn : Tensor { device := device, shape := #[1, preprocessor.featureSize, frames], dtype := .Float32 } :=
       Tensor.reshapeChecked frontendOut.inputFeatures #[1, preprocessor.featureSize, frames]
-    let featureAttentionMaskRowDyn : Tensor { shape := #[1, frames], dtype := .Int64 } := Tensor.reshapeChecked frontendOut.featureAttentionMask #[1, frames]
+    let featureAttentionMaskRowDyn : Tensor { device := device, shape := #[1, frames], dtype := .Int64 } := Tensor.reshapeChecked frontendOut.featureAttentionMask #[1, frames]
     buckets := addRowToBuckets buckets frames seq {
       seq := seq
       frames := frames
@@ -607,10 +609,10 @@ private def tryTranscribeWaveformsBatchedChunk
       let inputRows := bucket.rows.map (fun r => r.inputIdsRow.packShape)
       let featRows := bucket.rows.map (fun r => r.inputFeaturesRow.packShape)
       let fmaskRows := bucket.rows.map (fun r => r.featureAttentionMaskRow.packShape)
-      let inputIdsCpu : Tensor { shape := #[batch, seq], dtype := .Int64 } := Tensor.catManyChecked inputRows 0 #[batch, seq]
-      let inputFeaturesCpu : Tensor { shape := #[batch, preprocessor.featureSize, frames], dtype := .Float32 } :=
+      let inputIdsCpu : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 } := Tensor.catManyChecked inputRows 0 #[batch, seq]
+      let inputFeaturesCpu : Tensor { device := device, shape := #[batch, preprocessor.featureSize, frames], dtype := .Float32 } :=
         Tensor.catManyChecked featRows 0 #[batch, preprocessor.featureSize, frames]
-      let featureAttentionMaskCpu : Tensor { shape := #[batch, frames], dtype := .Int64 } :=
+      let featureAttentionMaskCpu : Tensor { device := device, shape := #[batch, frames], dtype := .Int64 } :=
         Tensor.catManyChecked fmaskRows 0 #[batch, frames]
       let generated ←
         do
@@ -647,7 +649,7 @@ private def tryTranscribeWaveformsBatchedChunk
 /-- Offline ASR for a batch of in-memory 16k mono waveforms. -/
 def transcribeWaveforms
     {cfg : Qwen3ASRConfig}
-    (model : Qwen3ASRForConditionalGeneration cfg)
+    (model : Qwen3ASRForConditionalGeneration (device := device) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (preprocessor : PreprocessorConfig)
     (audios16k : Array (Array Float))
@@ -705,7 +707,7 @@ def transcribeWaveforms
 /-- Offline ASR from one WAV path. WAV is normalized/resampled to 16k first. -/
 def transcribeWav
     {cfg : Qwen3ASRConfig}
-    (model : Qwen3ASRForConditionalGeneration cfg)
+    (model : Qwen3ASRForConditionalGeneration (device := device) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (preprocessor : PreprocessorConfig)
     (wavPath : String)
@@ -724,7 +726,7 @@ def transcribeWav
     Supports path/URL/base64/in-memory waveform+sample-rate forms. -/
 def transcribeAudioInput
     {cfg : Qwen3ASRConfig}
-    (model : Qwen3ASRForConditionalGeneration cfg)
+    (model : Qwen3ASRForConditionalGeneration (device := device) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (preprocessor : PreprocessorConfig)
     (audio : ASRAudioInput)
@@ -743,7 +745,7 @@ def transcribeAudioInput
     local path / URL / base64 payload. -/
 def transcribeAudioSource
     {cfg : Qwen3ASRConfig}
-    (model : Qwen3ASRForConditionalGeneration cfg)
+    (model : Qwen3ASRForConditionalGeneration (device := device) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (preprocessor : PreprocessorConfig)
     (source : String)
@@ -769,7 +771,7 @@ def transcribeAudioSource
 /-- Offline ASR from WAV paths. WAVs are normalized/resampled to 16k first. -/
 def transcribeWavs
     {cfg : Qwen3ASRConfig}
-    (model : Qwen3ASRForConditionalGeneration cfg)
+    (model : Qwen3ASRForConditionalGeneration (device := device) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (preprocessor : PreprocessorConfig)
     (wavPaths : Array String)
@@ -801,7 +803,7 @@ def transcribeWavs
     Inputs can mix path/URL/base64/in-memory waveform forms. -/
 def transcribeAudioInputs
     {cfg : Qwen3ASRConfig}
-    (model : Qwen3ASRForConditionalGeneration cfg)
+    (model : Qwen3ASRForConditionalGeneration (device := device) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (preprocessor : PreprocessorConfig)
     (audios : Array ASRAudioInput)
@@ -832,7 +834,7 @@ def transcribeAudioInputs
 /-- Offline ASR from string sources with auto-detection per source string. -/
 def transcribeAudioSources
     {cfg : Qwen3ASRConfig}
-    (model : Qwen3ASRForConditionalGeneration cfg)
+    (model : Qwen3ASRForConditionalGeneration (device := device) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (preprocessor : PreprocessorConfig)
     (sources : Array String)
@@ -862,8 +864,7 @@ namespace Qwen3ForcedAligner
 def loadFromPretrained
     (source : String)
     (revision : String := "main")
-    (cacheDir : String := Hub.defaultCacheDir)
-    : IO Qwen3ForcedAligner := do
+    (cacheDir : String := Hub.defaultCacheDir) : IO Qwen3ForcedAligner := do
   let modelDir ← hub.resolvePretrainedDir source {
     revision := revision
     cacheDir := cacheDir
@@ -876,8 +877,8 @@ def loadFromPretrained
       s!"Requested aligner source is not a forced-aligner checkpoint (model_type={cfg.thinkerConfig.modelType})"
   let tok ← tokenizer.qwen3.loadTokenizer modelDir
   let preprocessor ← PreprocessorConfig.loadFromPretrainedDir modelDir
-  let model ← Qwen3ASRForConditionalGeneration.loadSharded modelDir cfg
-  pure { cfg, model, tok, preprocessor }
+  let ⟨device, model⟩ ← Qwen3ASRForConditionalGeneration.loadSharded modelDir cfg
+  pure { cfg, device, model, tok, preprocessor }
 
 private def validateAlignLanguage (aligner : Qwen3ForcedAligner) (language : String) : IO String := do
   let ln ←
@@ -1014,7 +1015,7 @@ namespace Qwen3ASRForConditionalGeneration
 
 /-- Method-style offline ASR for one waveform. -/
 def transcribeWaveform
-    (m : Qwen3ASRForConditionalGeneration cfg)
+    (m : Qwen3ASRForConditionalGeneration (device := device) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (preprocessor : PreprocessorConfig)
     (audio16k : Array Float)
@@ -1030,7 +1031,7 @@ def transcribeWaveform
 
 /-- Method-style offline ASR for multiple waveforms. -/
 def transcribeWaveforms
-    (m : Qwen3ASRForConditionalGeneration cfg)
+    (m : Qwen3ASRForConditionalGeneration (device := device) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (preprocessor : PreprocessorConfig)
     (audios16k : Array (Array Float))
@@ -1047,7 +1048,7 @@ def transcribeWaveforms
 
 /-- Method-style offline ASR from one WAV path. -/
 def transcribeWav
-    (m : Qwen3ASRForConditionalGeneration cfg)
+    (m : Qwen3ASRForConditionalGeneration (device := device) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (preprocessor : PreprocessorConfig)
     (wavPath : String)
@@ -1063,7 +1064,7 @@ def transcribeWav
 
 /-- Method-style offline ASR from one unified audio input. -/
 def transcribeAudioInput
-    (m : Qwen3ASRForConditionalGeneration cfg)
+    (m : Qwen3ASRForConditionalGeneration (device := device) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (preprocessor : PreprocessorConfig)
     (audio : ASRAudioInput)
@@ -1079,7 +1080,7 @@ def transcribeAudioInput
 
 /-- Method-style offline ASR from string source with auto-detection. -/
 def transcribeAudioSource
-    (m : Qwen3ASRForConditionalGeneration cfg)
+    (m : Qwen3ASRForConditionalGeneration (device := device) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (preprocessor : PreprocessorConfig)
     (source : String)
@@ -1095,7 +1096,7 @@ def transcribeAudioSource
 
 /-- Method-style offline ASR from WAV paths. -/
 def transcribeWavs
-    (m : Qwen3ASRForConditionalGeneration cfg)
+    (m : Qwen3ASRForConditionalGeneration (device := device) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (preprocessor : PreprocessorConfig)
     (wavPaths : Array String)
@@ -1112,7 +1113,7 @@ def transcribeWavs
 
 /-- Method-style offline ASR from unified audio inputs. -/
 def transcribeAudioInputs
-    (m : Qwen3ASRForConditionalGeneration cfg)
+    (m : Qwen3ASRForConditionalGeneration (device := device) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (preprocessor : PreprocessorConfig)
     (audios : Array ASRAudioInput)
@@ -1129,7 +1130,7 @@ def transcribeAudioInputs
 
 /-- Method-style offline ASR from string sources with auto-detection. -/
 def transcribeAudioSources
-    (m : Qwen3ASRForConditionalGeneration cfg)
+    (m : Qwen3ASRForConditionalGeneration (device := device) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (preprocessor : PreprocessorConfig)
     (sources : Array String)

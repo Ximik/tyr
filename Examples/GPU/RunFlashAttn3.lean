@@ -50,10 +50,10 @@ def runFa3Once : IO Bool := do
   if !(← fixturesPresent fa3FixtureSpec) then
     generateFa3Fixtures
 
-  let q ← Tensor.loadTensorExact { shape := #[1, 1, 256, 64], dtype := .BFloat16 } (fa3FixtureFile "q").toString
-  let k ← Tensor.loadTensorExact { shape := #[1, 1, 256, 64], dtype := .BFloat16 } (fa3FixtureFile "k").toString
-  let v ← Tensor.loadTensorExact { shape := #[1, 1, 256, 64], dtype := .BFloat16 } (fa3FixtureFile "v").toString
-  let expectedOut ← Tensor.loadTensorExact { shape := #[1, 1, 256, 64], dtype := .BFloat16 } (fa3FixtureFile "expected_o").toString
+  let q ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[1, 1, 256, 64], dtype := .BFloat16 } (fa3FixtureFile "q").toString
+  let k ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[1, 1, 256, 64], dtype := .BFloat16 } (fa3FixtureFile "k").toString
+  let v ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[1, 1, 256, 64], dtype := .BFloat16 } (fa3FixtureFile "v").toString
+  let expectedOut ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[1, 1, 256, 64], dtype := .BFloat16 } (fa3FixtureFile "expected_o").toString
 
   let outFwd ← Tensor.uniformLike q 0 0
   let lseOut ← Tensor.uniformLike (Tensor.zeros #[1, 1, 256] false (Device.CUDA 0)) 0 0

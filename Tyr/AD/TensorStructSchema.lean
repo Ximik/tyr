@@ -257,10 +257,10 @@ instance {σ : StaticSpec} : TensorStructFlatten (Tensor σ) where
     else
       throw s!"Internal error: selection {reprStr selection} excluded diff leaf at {renderPath path}."
 
-instance {dtype : DType} : ToTensorStructSchema (ShapePackedTensor dtype) where
+instance {dtype : DType} {device : Device} : ToTensorStructSchema (ShapePackedTensor dtype device) where
   describeLeaves tensor path := ToTensorStructSchema.describeLeaves tensor.2 path
 
-instance {dtype : DType} : TensorStructFlatten (ShapePackedTensor dtype) where
+instance {dtype : DType} {device : Device} : TensorStructFlatten (ShapePackedTensor dtype device) where
   flattenAt tensor path selection := TensorStructFlatten.flattenAt tensor.2 path selection
   rebuildAt template path selection leaves := do
     let value ← TensorStructFlatten.rebuildAt template.2 path selection leaves

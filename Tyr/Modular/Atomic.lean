@@ -29,7 +29,7 @@ The dual norm (for gradients) is the nuclear norm:
 Input sensitivity ν = ||W||_σ since ||Wx||₂ ≤ ||W||_σ ||x||₂.
 -/
 
-instance (in_dim out_dim : UInt64) {d : DType} {dev : DevicePolicy} :
+instance (in_dim out_dim : UInt64) {d : DType} {dev : Device} :
     NormedModule (torch.Linear in_dim out_dim d dev) where
   norm m :=
     let weightNorm := Tensor.spectralNorm m.weight
@@ -80,7 +80,7 @@ The modular norm combines them via ℓ₂:
 Input sensitivity ν depends on the activation range, typically O(1).
 -/
 
-instance (dim : UInt64) {d : DType} {dev : DevicePolicy} :
+instance (dim : UInt64) {d : DType} {dev : Device} :
     NormedModule (torch.LayerNorm dim d dev) where
   norm m :=
     let wNorm := Tensor.l2Norm m.weight
@@ -128,10 +128,10 @@ The dual norm is the sum of row norms (ℓ₁ of row ℓ₂ norms).
 
 /-- Embedding table: maps discrete tokens to continuous vectors -/
 structure Embedding (vocabSize dim : UInt64) (dtype : torch.DType := .Float32)
-    (device : torch.DevicePolicy := .any) where
+    (device : torch.Device := .CPU) where
   weight : torch.Tensor ⟨#[vocabSize, dim], dtype, device⟩
 
-variable {dtype : torch.DType} {device : torch.DevicePolicy}
+variable {dtype : torch.DType} {device : torch.Device}
 
 namespace Embedding
 

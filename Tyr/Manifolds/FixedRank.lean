@@ -5,11 +5,11 @@ namespace Tyr.AD
 open torch
 open DifferentiableManifold
 
-variable {d : DType} {dev : DevicePolicy}
+variable {d : DType} {dev : Device}
 
 /-- Embedded manifold of `m x n` matrices with rank constrained to `k`. -/
 structure FixedRankEmbedded (m n k : UInt64) (dtype : DType := .Float32)
-    (device : DevicePolicy := .any) where
+    (device : Device := .CPU) where
   matrix : Tensor ⟨#[m, n], dtype, device⟩
   rankBound : k.toNat ≤ m.toNat ∧ k.toNat ≤ n.toNat
 
@@ -34,7 +34,7 @@ def random (m n k : UInt64)
 end FixedRankEmbedded
 
 structure FixedRankTangent (m n k : UInt64) (dtype : DType := .Float32)
-    (device : DevicePolicy := .any) where
+    (device : Device := .CPU) where
   vec : Tensor ⟨#[m, n], dtype, device⟩
 
 namespace FixedRankTangent

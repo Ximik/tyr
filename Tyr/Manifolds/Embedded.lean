@@ -9,7 +9,7 @@ namespace Tyr.AD
 open torch
 open DifferentiableManifold
 
-variable {d : DType} {dev : DevicePolicy}
+variable {d : DType} {dev : Device}
 
 /--
 Manifolds that admit a distinguished ambient representation together with

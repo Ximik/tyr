@@ -116,29 +116,29 @@ def runDecodeOnceFor (shape : DecodeShape) : IO Bool := do
   if !(← fixturesPresent (decodeFixtureSpec shape)) then
     generateDecodeFixturesFor shape
 
-  let q ← Tensor.loadTensorExact { shape := shapeQ shape, dtype := .BFloat16 } (decodeFixtureFile shape "q").toString
-  let k ← Tensor.loadTensorExact { shape := shapeKV shape, dtype := .BFloat16 } (decodeFixtureFile shape "k").toString
-  let v ← Tensor.loadTensorExact { shape := shapeKV shape, dtype := .BFloat16 } (decodeFixtureFile shape "v").toString
-  let expected ← Tensor.loadTensorExact { shape := shapeQ shape, dtype := .BFloat16 } (decodeFixtureFile shape "expected_o").toString
+  let q ← Tensor.loadTensorExact { device := .CUDA 0, shape := shapeQ shape, dtype := .BFloat16 } (decodeFixtureFile shape "q").toString
+  let k ← Tensor.loadTensorExact { device := .CUDA 0, shape := shapeKV shape, dtype := .BFloat16 } (decodeFixtureFile shape "k").toString
+  let v ← Tensor.loadTensorExact { device := .CUDA 0, shape := shapeKV shape, dtype := .BFloat16 } (decodeFixtureFile shape "v").toString
+  let expected ← Tensor.loadTensorExact { device := .CUDA 0, shape := shapeQ shape, dtype := .BFloat16 } (decodeFixtureFile shape "expected_o").toString
 
   -- Route through the production op. select_route picks tkMhaH100Decode[64]
   -- when shape is eligible; else falls back to SDPA.
-  let actual : Tensor { shape := (shapeQ shape), dtype := .BFloat16 } :=
+  let actual : Tensor { shape := (shapeQ shape), dtype := .BFloat16, device := (.CUDA 0) } :=
     Tensor.flashAttention q k v true
   let _ ← torch.cuda_synchronize
 
   let ok := Tensor.allclose expected actual shape.atol shape.rtol
   let diff := Tensor.abs (actual - expected)
   let mae := Tensor.item (Tensor.meanAll diff)
-  let maxAbs := Tensor.item (Tensor.maxAll diff)
-  let actMaxAbs := Tensor.item (Tensor.maxAll (Tensor.abs actual))
+  let maxAbs := Tensor.item (Tensor.maxAllChecked diff)
+  let actMaxAbs := Tensor.item (Tensor.maxAllChecked (Tensor.abs actual))
   let actMeanAbs := Tensor.item (Tensor.meanAll (Tensor.abs actual))
   IO.println s!"  decode {shape.name}: ok={ok} mae={mae} max_abs={maxAbs} act_mean_abs={actMeanAbs} act_max_abs={actMaxAbs}"
   -- Per-(batch, q_head) row diagnostics: which heads have correct vs zero output?
   -- mae over the head_dim axis for each (b, h). Expected is non-trivial; if our
   -- kernel only fills some heads correctly, we'll see a binary distribution.
-  let perHeadAct := Tensor.maxAll (Tensor.abs actual)
-  let perHeadExp := Tensor.maxAll (Tensor.abs expected)
+  let perHeadAct := Tensor.maxAllChecked (Tensor.abs actual)
+  let perHeadExp := Tensor.maxAllChecked (Tensor.abs expected)
   IO.println s!"    per-shape actMax={Tensor.item perHeadAct} expMax={Tensor.item perHeadExp}"
   pure ok
 

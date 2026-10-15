@@ -35,6 +35,8 @@ import Tyr.Model.Laguna.MoE
 import Tyr.Model.Laguna.Fused
 
 open torch
+
+variable {device : Device}
 open torch.laguna
 
 private def check (cond : Bool) (msg : String) : IO Unit := do
@@ -79,10 +81,10 @@ private def findFixture : IO String := do
   throw (IO.userError "moe.safetensors fixture not found (run from repo root)")
 
 /-- Build the small fixture MoE block on `device` (same as RunLagunaMoe). -/
-private def loadBlock (path : String) (device : Device) : IO (LagunaSparseMoeBlock testCfg) := do
+private def loadBlock (path : String) (device : Device) : IO (LagunaSparseMoeBlock (device := device) testCfg) := do
   let routerW ← torch.safetensors.loadTensorCandidates path #["router_weight"] #[8, 64]
   let routerB ← torch.safetensors.loadTensorCandidates path #["router_bias"] #[8]
-  let router : LagunaTopKRouter testCfg := {
+  let router : LagunaTopKRouter (device := device) testCfg := {
     weight := routerW.to device
     eScoreCorrectionBias := some (routerB.to device) }
   let gatePacked ← torch.safetensors.loadTensorCandidates path #["gate_packed"] #[8, 32, 32]
@@ -94,7 +96,7 @@ private def loadBlock (path : String) (device : Device) : IO (LagunaSparseMoeBlo
   let downPacked ← torch.safetensors.loadTensorCandidates path #["down_packed"] #[8, 64, 16]
   let downScale ← torch.safetensors.loadTensorCandidates path #["down_scales"] #[8, 64, 2]
   let downGlobal ← torch.safetensors.loadTensorCandidates path #["down_global"] #[8]
-  let experts : LagunaPackedExperts testCfg := {
+  let experts : LagunaPackedExperts (device := device) testCfg := {
     gatePacked := gatePacked.to device
     gateScale := gateScale.to device
     gateGlobal := gateGlobal.to device
@@ -116,7 +118,7 @@ private def loadBlock (path : String) (device : Device) : IO (LagunaSparseMoeBlo
 
 /-- Max abs / max rel (denominator clamped by 1e-3) error in FP32. -/
 private def maxErrors {s : Shape} {d e : DType}
-    (got : Tensor { shape := s, dtype := d }) (expected : Tensor { shape := s, dtype := e }) : IO (Float × Float) := do
+    (got : Tensor { shape := s, dtype := d, device := device }) (expected : Tensor { shape := s, dtype := e, device := device }) : IO (Float × Float) := do
   let ad := Tensor.abs (got.toFloat32 - expected.toFloat32)
   let maxAbs := (Tensor.maxAllChecked ad).item
   let denom := Tensor.Preserving.addScalar (Tensor.abs expected.toFloat32) 1e-3
@@ -127,12 +129,12 @@ private def maxErrors {s : Shape} {d e : DType}
     element count by repeated doubling + a final slice, and reshape.
     Used to synthesize benchmark-sized banks from the fixture bank bytes;
     the values don't need to be meaningful, only the shapes/dtypes do. -/
-private def tileToShape {s : Shape} (src : Tensor { shape := s }) (shape : Shape) (device : Device) : IO (Tensor { shape := shape }) := do
+private def tileToShape {s : Shape} {source : Device} (src : Tensor { shape := s, device := source }) (shape : Shape) (device : Device) : IO (Tensor { shape := shape, device := device }) := do
   let numel := shape.foldl (· * ·) 1
   let srcD := src.to device
   let n0 := srcD.shape.foldl (· * ·) 1
   if n0 == 0 then throw <| IO.userError "tileToShape: empty source tensor"
-  let mut cur : ShapePackedTensor (.Unknown "dynamic") := (srcD.reshapeChecked #[n0]).packShape
+  let mut cur : ShapePackedTensor (.Unknown "dynamic") device := (srcD.reshapeChecked #[n0]).packShape
   let mut n := n0
   while n < numel do
     cur := (Tensor.catManyChecked #[cur, cur] 0 #[n * 2]).packShape
@@ -147,12 +149,12 @@ private def bfloatDynamic {σ : StaticSpec} (t : Tensor σ) : Tensor {σ with dt
     W4A4 path. Shared-expert weights are zero so the block output isolates the
     routed experts when compared with the eager W4A16 reference. -/
 private def synthNativeBlock
-    (path : String) (device : Device) : IO (LagunaSparseMoeBlock nativeCfg) := do
+    (path : String) (device : Device) : IO (LagunaSparseMoeBlock (device := device) nativeCfg) := do
   let E := nativeCfg.num_experts
   let h := nativeCfg.hidden_size
   let mi := nativeCfg.moe_intermediate_size
   let routerW ← Tensor.randn #[E, h] false device
-  let router : LagunaTopKRouter nativeCfg := {
+  let router : LagunaTopKRouter (device := device) nativeCfg := {
     weight := bfloatDynamic routerW
     eScoreCorrectionBias := none }
   let gatePacked ← torch.safetensors.loadTensorCandidates path #["gate_packed"] #[8, 32, 32]
@@ -164,7 +166,7 @@ private def synthNativeBlock
   let downPacked ← torch.safetensors.loadTensorCandidates path #["down_packed"] #[8, 64, 16]
   let downScale ← torch.safetensors.loadTensorCandidates path #["down_scales"] #[8, 64, 2]
   let downGlobal ← torch.safetensors.loadTensorCandidates path #["down_global"] #[8]
-  let experts : LagunaPackedExperts nativeCfg := {
+  let experts : LagunaPackedExperts (device := device) nativeCfg := {
     gatePacked := (← tileToShape gatePacked #[E, mi, h / 2] device)
     gateScale := (← tileToShape gateScale #[E, mi, h / 16] device)
     gateGlobal := (← tileToShape gateGlobal #[E] device)
@@ -174,11 +176,11 @@ private def synthNativeBlock
     downPacked := (← tileToShape downPacked #[E, h, mi / 2] device)
     downScale := (← tileToShape downScale #[E, h, mi / 16] device)
     downGlobal := (← tileToShape downGlobal #[E] device) }
-  let sharedGate : Tensor { shape := #[128, 128] } :=
+  let sharedGate : Tensor { shape := #[128, 128], device := device } :=
     bfloatDynamic (Tensor.zeros #[128, 128] false device)
-  let sharedUp : Tensor { shape := #[128, 128] } :=
+  let sharedUp : Tensor { shape := #[128, 128], device := device } :=
     bfloatDynamic (Tensor.zeros #[128, 128] false device)
-  let sharedDown : Tensor { shape := #[128, 128] } :=
+  let sharedDown : Tensor { shape := #[128, 128], device := device } :=
     bfloatDynamic (Tensor.zeros #[128, 128] false device)
   pure {
     router := router
@@ -190,12 +192,12 @@ private def synthNativeBlock
 /-- Build a production-sized MoE block with synthesized packed banks.
     Bank bytes are tiled from the fixture (content is random-looking, which
     is all the benchmark needs); router/shared weights are random BF16. -/
-private def synthBigBlock (path : String) (device : Device) : IO (LagunaSparseMoeBlock bigCfg) := do
+private def synthBigBlock (path : String) (device : Device) : IO (LagunaSparseMoeBlock (device := device) bigCfg) := do
   let E := bigCfg.num_experts
   let h := bigCfg.hidden_size
   let mi := bigCfg.moe_intermediate_size
   let routerW ← Tensor.randn #[E, h] false device
-  let router : LagunaTopKRouter bigCfg := {
+  let router : LagunaTopKRouter (device := device) bigCfg := {
     weight := bfloatDynamic routerW
     eScoreCorrectionBias := none }
   let gatePacked ← torch.safetensors.loadTensorCandidates path #["gate_packed"] #[8, 32, 32]
@@ -208,7 +210,7 @@ private def synthBigBlock (path : String) (device : Device) : IO (LagunaSparseMo
   let downScale ← torch.safetensors.loadTensorCandidates path #["down_scales"] #[8, 64, 2]
   let downGlobal ← torch.safetensors.loadTensorCandidates path #["down_global"] #[8]
   IO.println "  tiling packed banks to production size..."
-  let experts : LagunaPackedExperts bigCfg := {
+  let experts : LagunaPackedExperts (device := device) bigCfg := {
     gatePacked := (← tileToShape gatePacked #[E, mi, h / 2] device)
     gateScale := (← tileToShape gateScale #[E, mi, h / 16] device)
     gateGlobal := (← tileToShape gateGlobal #[E] device)
@@ -253,7 +255,7 @@ private def timeCuda (warmup iters : Nat) (f : IO Unit) : IO (Float × Float) :=
 
 /-- Count elements violating `|got - exp| > atol + rtol * |exp|` (FP32). -/
 private def countViolations {s : Shape} {d e : DType}
-    (got : Tensor { shape := s, dtype := d }) (expected : Tensor { shape := s, dtype := e }) (rtol atol : Float) : IO Float := do
+    (got : Tensor { shape := s, dtype := d, device := device }) (expected : Tensor { shape := s, dtype := e, device := device }) (rtol atol : Float) : IO Float := do
   let a ← Tensor.toFloatArray got.toFloat32
   let b ← Tensor.toFloatArray expected.toFloat32
   let mut count := 0.0
@@ -264,7 +266,7 @@ private def countViolations {s : Shape} {d e : DType}
 
 /-- Preserve the F32 reduction used by the native-prefill reference gate. -/
 private def normalizedRmse {s : Shape} {d e : DType}
-    (got : Tensor { shape := s, dtype := d }) (expected : Tensor { shape := s, dtype := e }) : IO (Float × Float × Float) := do
+    (got : Tensor { shape := s, dtype := d, device := device }) (expected : Tensor { shape := s, dtype := e, device := device }) : IO (Float × Float × Float) := do
   let delta := got.toFloat32 - expected.toFloat32
   let ref := expected.toFloat32
   let rmse := Float.sqrt (Tensor.meanAll (delta * delta)).item
@@ -276,16 +278,16 @@ private def runCorrectness (path : String) (device : Device) : IO Unit := do
   IO.println "-- correctness: fused vs eager decode (fixture block, CUDA)"
   let block ← loadBlock path device
   let x ← torch.safetensors.loadTensorCandidates path #["x"] #[5, 64]
-  let xD : Tensor { shape := #[5, 64] } := x.to device
+  let xD : Tensor { shape := #[5, 64], device := device } := x.to device
   let yExp ← torch.safetensors.loadTensorCandidates path #["y_expected"] #[5, 64]
-  let yExpD : Tensor { shape := #[5, 64] } := yExp.to device
+  let yExpD : Tensor { shape := #[5, 64], device := device } := yExp.to device
   let mut worst := 0.0
   for i in [:5] do
-    let x1 : Tensor { shape := #[1, 64] } := Tensor.reshapeChecked (sliceTyped xD 0 i.toUInt64 1) #[1, 64]
+    let x1 : Tensor { shape := #[1, 64], device := device } := Tensor.reshapeChecked (sliceTyped xD 0 i.toUInt64 1) #[1, 64]
     let yFused ← block.forward2d testCfg x1
     let yEager ← block.forward2d testCfg x1 false
     let (maxAbs, maxRel) ← maxErrors yFused yEager
-    let yExpRow : Tensor { shape := #[1, 64] } := Tensor.reshapeChecked (sliceTyped yExpD 0 i.toUInt64 1) #[1, 64]
+    let yExpRow : Tensor { shape := #[1, 64], device := device } := Tensor.reshapeChecked (sliceTyped yExpD 0 i.toUInt64 1) #[1, 64]
     let (refAbs, _) ← maxErrors yFused yExpRow
     -- The fused kernel evaluates the exact FP4 math in FP32, while the eager
     -- path rounds dequantized weights to BF16 and accumulates in BF16, so
@@ -315,7 +317,7 @@ private def runCorrectness (path : String) (device : Device) : IO Unit := do
 private def runNativeCorrectness (path : String) (device : Device) : IO Unit := do
   IO.println "-- correctness: native SM12x W4A4 prefill vs eager W4A16"
   let block ← synthNativeBlock path device
-  let x : Tensor { shape := #[16, 128] } := bfloatDynamic (← Tensor.randn #[16, 128] false device)
+  let x : Tensor { shape := #[16, 128], device := device } := bfloatDynamic (← Tensor.randn #[16, 128] false device)
   let yNative ← block.forward2d nativeCfg x
   let yEager ← block.forward2d nativeCfg x false
   let (maxAbs, maxRel) ← maxErrors yNative yEager
@@ -326,13 +328,13 @@ private def runNativeCorrectness (path : String) (device : Device) : IO Unit := 
   -- A tied router sends every token to the same two experts. Seventeen tokens
   -- force maxExpertRows=17 and a padded GEMM stride of 20, covering both the
   -- maximally skewed routing bound and a non-multiple-of-four occupancy.
-  let zeroRouterW : Tensor { shape := #[8, 128] } :=
+  let zeroRouterW : Tensor { shape := #[8, 128], device := device } :=
     bfloatDynamic (Tensor.zeros #[8, 128] false device)
-  let skewed : LagunaSparseMoeBlock nativeCfg := {
+  let skewed : LagunaSparseMoeBlock (device := device) nativeCfg := {
     block with router := {
       weight := zeroRouterW
       eScoreCorrectionBias := none } }
-  let xSkew : Tensor { shape := #[17, 128] } :=
+  let xSkew : Tensor { shape := #[17, 128], device := device } :=
     bfloatDynamic (← Tensor.randn #[17, 128] false device)
   let ySkewNative ← skewed.forward2d nativeCfg xSkew
   let ySkewEager ← skewed.forward2d nativeCfg xSkew false
@@ -346,7 +348,7 @@ private def runNativeCorrectness (path : String) (device : Device) : IO Unit := 
 private def runBenchmark (path : String) (device : Device) : IO Unit := do
   IO.println "-- micro-benchmark: production-sized banks (hidden=3072, E=256, k=10, moeInt=1024)"
   let block ← synthBigBlock path device
-  let x1 : Tensor { shape := #[1, 3072] } := bfloatDynamic (← Tensor.randn #[1, 3072] false device)
+  let x1 : Tensor { shape := #[1, 3072], device := device } := bfloatDynamic (← Tensor.randn #[1, 3072] false device)
   let (topIdx, topW) ← block.router.route bigCfg x1
   let k := bigCfg.num_experts_per_tok
   let h := bigCfg.hidden_size
@@ -372,7 +374,7 @@ private def runBenchmark (path : String) (device : Device) : IO Unit := do
   -- checkpoint benchmark. This exercises the expert-grouped prefill path
   -- without paying the full model's checkpoint-load cost on every kernel
   -- tuning iteration.
-  let x56 : Tensor { shape := #[56, 3072] } := bfloatDynamic (← Tensor.randn #[56, 3072] false device)
+  let x56 : Tensor { shape := #[56, 3072], device := device } := bfloatDynamic (← Tensor.randn #[56, 3072] false device)
   let (topIdx56, topW56) ← block.router.route bigCfg x56
   let (evP, wallP) ← timeCuda 3 20 (do
     _ ← lagunaMoeFp4Forward x56 topIdx56 topW56

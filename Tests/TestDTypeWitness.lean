@@ -81,94 +81,94 @@ example : TensorSpec.matmul? ⟨#[2, 3], .Float32⟩ ⟨#[3, 4], .Float32⟩ =
     some ⟨#[2, 4], .Float32⟩ := by decide
 
 -- These functions are elaborated without allocating tensors or invoking kernels.
-example (a : Tensor ⟨#[2], .UInt8, .any⟩) (b : Tensor ⟨#[2], .Int8, .any⟩) :
-    Tensor ⟨#[2], .Int16, .any⟩ := a + b
+example (a : Tensor ⟨#[2], .UInt8, .CPU⟩) (b : Tensor ⟨#[2], .Int8, .CPU⟩) :
+    Tensor ⟨#[2], .Int16, .CPU⟩ := a + b
 
-example (a : Tensor ⟨#[2], .Complex64, .any⟩) (b : Tensor ⟨#[2], .Float64, .any⟩) :
-    Tensor ⟨#[2], .Complex128, .any⟩ := Tensor.add a b
+example (a : Tensor ⟨#[2], .Complex64, .CPU⟩) (b : Tensor ⟨#[2], .Float64, .CPU⟩) :
+    Tensor ⟨#[2], .Complex128, .CPU⟩ := Tensor.add a b
 
-example (a : Tensor ⟨#[2, 1], .Float16, .any⟩) (b : Tensor ⟨#[3], .BFloat16, .any⟩) :
-    Tensor ⟨#[2, 3], .Float32, .any⟩ := a.addB b
+example (a : Tensor ⟨#[2, 1], .Float16, .CPU⟩) (b : Tensor ⟨#[3], .BFloat16, .CPU⟩) :
+    Tensor ⟨#[2, 3], .Float32, .CPU⟩ := a.addB b
 
-example (a : Tensor ⟨#[], .Float64, .any⟩) (b : Tensor ⟨#[2], .Float32, .any⟩) :
-    Tensor ⟨#[2], .Float32, .any⟩ := a.addB b
+example (a : Tensor ⟨#[], .Float64, .CPU⟩) (b : Tensor ⟨#[2], .Float32, .CPU⟩) :
+    Tensor ⟨#[2], .Float32, .CPU⟩ := a.addB b
 
 -- Computed dtype indices must remain transparent to promotion inference. These
 -- definitions deliberately omit an expected result type, as normal composed
 -- model expressions do. The following examples separately check their indices.
-private def addFloatSums (x : Tensor ⟨#[2], .Float32, .any⟩) :=
+private def addFloatSums (x : Tensor ⟨#[2], .Float32, .CPU⟩) :=
   x.sumAll + x.sumAll
 
-private def addIntegerSums (x : Tensor ⟨#[2], .Int32, .any⟩) :=
+private def addIntegerSums (x : Tensor ⟨#[2], .Int32, .CPU⟩) :=
   x.sumAll + x.sumAll
 
-private def addComplexSums (x : Tensor ⟨#[2], .Complex64, .any⟩) :=
+private def addComplexSums (x : Tensor ⟨#[2], .Complex64, .CPU⟩) :=
   x.sumAll + x.sumAll
 
-private def addMixedSums (x : Tensor ⟨#[2], .Float16, .any⟩)
-    (y : Tensor ⟨#[2], .BFloat16, .any⟩) :=
+private def addMixedSums (x : Tensor ⟨#[2], .Float16, .CPU⟩)
+    (y : Tensor ⟨#[2], .BFloat16, .CPU⟩) :=
   x.sumAll + y.sumAll
 
-private def subtractFloatSums (x : Tensor ⟨#[2], .Float32, .any⟩) :=
+private def subtractFloatSums (x : Tensor ⟨#[2], .Float32, .CPU⟩) :=
   x.sumAll - x.sumAll
 
-private def addIntegerQuotient (x : Tensor ⟨#[2], .Int32, .any⟩)
-    (y : Tensor ⟨#[2], .Float32, .any⟩) :=
+private def addIntegerQuotient (x : Tensor ⟨#[2], .Int32, .CPU⟩)
+    (y : Tensor ⟨#[2], .Float32, .CPU⟩) :=
   Tensor.div x x + y
 
-private def addFloatQuotient (x : Tensor ⟨#[2], .Float32, .any⟩) :=
+private def addFloatQuotient (x : Tensor ⟨#[2], .Float32, .CPU⟩) :=
   Tensor.div x x + x
 
-private def addScalarToIntegerQuotient (x : Tensor ⟨#[2], .Int32, .any⟩) :=
+private def addScalarToIntegerQuotient (x : Tensor ⟨#[2], .Int32, .CPU⟩) :=
   Tensor.div x x + (1.0 : Float)
 
-private def addComplexMagnitudes (x : Tensor ⟨#[2], .Complex64, .any⟩) :=
+private def addComplexMagnitudes (x : Tensor ⟨#[2], .Complex64, .CPU⟩) :=
   x.abs + x.abs
 
 -- Scalar broadcasting keeps the vector's symbolic shape visible to the next
 -- operation; both operand orders must compose without an intermediate cast.
 private def addWeakScalarThenVector {n : UInt64}
-    (vector : Tensor ⟨#[n], .Float32, .any⟩) (scalar : Tensor ⟨#[], .Float64, .any⟩) :=
+    (vector : Tensor ⟨#[n], .Float32, .CPU⟩) (scalar : Tensor ⟨#[], .Float64, .CPU⟩) :=
   vector.addB scalar + vector
 
 private def addReversedWeakScalarThenVector {n : UInt64}
-    (vector : Tensor ⟨#[n], .Float32, .any⟩) (scalar : Tensor ⟨#[], .Float64, .any⟩) :=
+    (vector : Tensor ⟨#[n], .Float32, .CPU⟩) (scalar : Tensor ⟨#[], .Float64, .CPU⟩) :=
   scalar.addB vector + vector
 
 private def addCPUSignalAfterScalar {n : UInt64}
-    (vector : Tensor ⟨#[n], .Float32, .exact .CPU⟩)
-    (scalar : Tensor ⟨#[], .Float64, .exact .CPU⟩) :=
+    (vector : Tensor ⟨#[n], .Float32, .CPU⟩)
+    (scalar : Tensor ⟨#[], .Float64, .CPU⟩) :=
   scalar.addB vector + vector
 
-example (x : Tensor ⟨#[2], .Float32, .any⟩) : Tensor ⟨#[], .Float32, .any⟩ :=
+example (x : Tensor ⟨#[2], .Float32, .CPU⟩) : Tensor ⟨#[], .Float32, .CPU⟩ :=
   addFloatSums x
-example (x : Tensor ⟨#[2], .Int32, .any⟩) : Tensor ⟨#[], .Int64, .any⟩ :=
+example (x : Tensor ⟨#[2], .Int32, .CPU⟩) : Tensor ⟨#[], .Int64, .CPU⟩ :=
   addIntegerSums x
-example (x : Tensor ⟨#[2], .Complex64, .any⟩) : Tensor ⟨#[], .Complex64, .any⟩ :=
+example (x : Tensor ⟨#[2], .Complex64, .CPU⟩) : Tensor ⟨#[], .Complex64, .CPU⟩ :=
   addComplexSums x
-example (x : Tensor ⟨#[2], .Float16, .any⟩) (y : Tensor ⟨#[2], .BFloat16, .any⟩) :
-    Tensor ⟨#[], .Float32, .any⟩ := addMixedSums x y
-example (x : Tensor ⟨#[2], .Float32, .any⟩) : Tensor ⟨#[], .Float32, .any⟩ :=
+example (x : Tensor ⟨#[2], .Float16, .CPU⟩) (y : Tensor ⟨#[2], .BFloat16, .CPU⟩) :
+    Tensor ⟨#[], .Float32, .CPU⟩ := addMixedSums x y
+example (x : Tensor ⟨#[2], .Float32, .CPU⟩) : Tensor ⟨#[], .Float32, .CPU⟩ :=
   subtractFloatSums x
-example (x : Tensor ⟨#[2], .Int32, .any⟩) (y : Tensor ⟨#[2], .Float32, .any⟩) :
-    Tensor ⟨#[2], .Float32, .any⟩ := addIntegerQuotient x y
-example (x : Tensor ⟨#[2], .Float32, .any⟩) : Tensor ⟨#[2], .Float32, .any⟩ :=
+example (x : Tensor ⟨#[2], .Int32, .CPU⟩) (y : Tensor ⟨#[2], .Float32, .CPU⟩) :
+    Tensor ⟨#[2], .Float32, .CPU⟩ := addIntegerQuotient x y
+example (x : Tensor ⟨#[2], .Float32, .CPU⟩) : Tensor ⟨#[2], .Float32, .CPU⟩ :=
   addFloatQuotient x
-example (x : Tensor ⟨#[2], .Int32, .any⟩) : Tensor ⟨#[2], .Float32, .any⟩ :=
+example (x : Tensor ⟨#[2], .Int32, .CPU⟩) : Tensor ⟨#[2], .Float32, .CPU⟩ :=
   addScalarToIntegerQuotient x
-example (x : Tensor ⟨#[2], .Complex64, .any⟩) : Tensor ⟨#[2], .Float32, .any⟩ :=
+example (x : Tensor ⟨#[2], .Complex64, .CPU⟩) : Tensor ⟨#[2], .Float32, .CPU⟩ :=
   addComplexMagnitudes x
-example {n : UInt64} (vector : Tensor ⟨#[n], .Float32, .any⟩)
-    (scalar : Tensor ⟨#[], .Float64, .any⟩) : Tensor ⟨#[n], .Float32, .any⟩ :=
+example {n : UInt64} (vector : Tensor ⟨#[n], .Float32, .CPU⟩)
+    (scalar : Tensor ⟨#[], .Float64, .CPU⟩) : Tensor ⟨#[n], .Float32, .CPU⟩ :=
   addWeakScalarThenVector vector scalar
-example {n : UInt64} (vector : Tensor ⟨#[n], .Float32, .any⟩)
-    (scalar : Tensor ⟨#[], .Float64, .any⟩) : Tensor ⟨#[n], .Float32, .any⟩ :=
+example {n : UInt64} (vector : Tensor ⟨#[n], .Float32, .CPU⟩)
+    (scalar : Tensor ⟨#[], .Float64, .CPU⟩) : Tensor ⟨#[n], .Float32, .CPU⟩ :=
   addReversedWeakScalarThenVector vector scalar
-example {n : UInt64} (vector : Tensor ⟨#[n], .Float32, .exact .CPU⟩)
-    (scalar : Tensor ⟨#[], .Float64, .exact .CPU⟩) : Tensor ⟨#[n], .Float32, .exact .CPU⟩ :=
+example {n : UInt64} (vector : Tensor ⟨#[n], .Float32, .CPU⟩)
+    (scalar : Tensor ⟨#[], .Float64, .CPU⟩) : Tensor ⟨#[n], .Float32, .CPU⟩ :=
   addCPUSignalAfterScalar vector scalar
 
-example {shape : Shape} {lhs rhs result : DType} {device : DevicePolicy}
+example {shape : Shape} {lhs rhs result : DType} {device : Device}
     [DType.Promotes lhs rhs result]
     (a : Tensor ⟨shape, lhs, device⟩) (b : Tensor ⟨shape, rhs, device⟩) :
     Tensor ⟨shape, result, device⟩ := a + b
@@ -177,7 +177,7 @@ example {spec : StaticSpec} [DType.Promotes spec.dtype spec.dtype spec.dtype]
     (a b : Tensor spec) : Tensor spec := Add.add a b
 
 -- A runtime-checked promotion can supply the same proof expected by static APIs.
-example {shape : Shape} {lhs rhs : DType} {device : DevicePolicy}
+example {shape : Shape} {lhs rhs : DType} {device : Device}
     (a : Tensor ⟨shape, lhs, device⟩) (b : Tensor ⟨shape, rhs, device⟩) :
     Option (Sigma fun result : DType => Tensor ⟨shape, result, device⟩) :=
   match h : DType.promote? lhs rhs with
@@ -186,29 +186,29 @@ example {shape : Shape} {lhs rhs : DType} {device : DevicePolicy}
       letI : DType.Promotes lhs rhs result := ⟨h⟩
       some ⟨result, Tensor.add a b⟩
 
-example (_a : Tensor ⟨#[2], .Float8E4M3FN, .any⟩)
-    (_b : Tensor ⟨#[2], .Float32, .any⟩) : True := by
+example (_a : Tensor ⟨#[2], .Float8E4M3FN, .CPU⟩)
+    (_b : Tensor ⟨#[2], .Float32, .CPU⟩) : True := by
   fail_if_success have _ := Tensor.add _a _b
   fail_if_success have _ := _a + _b
   fail_if_success have _ := _a.addB _b
   trivial
 
-example (_a : Tensor ⟨#[2], .QInt8, .any⟩)
-    (_b : Tensor ⟨#[2], .QUInt8, .any⟩) : True := by
+example (_a : Tensor ⟨#[2], .QInt8, .CPU⟩)
+    (_b : Tensor ⟨#[2], .QUInt8, .CPU⟩) : True := by
   fail_if_success have _ := Tensor.add _a _b
   fail_if_success have _ := _a + _b
   fail_if_success have _ := _a.addB _b
   trivial
 
-example (_a : Tensor ⟨#[2], .UInt16, .any⟩)
-    (_b : Tensor ⟨#[2], .Int64, .any⟩) : True := by
+example (_a : Tensor ⟨#[2], .UInt16, .CPU⟩)
+    (_b : Tensor ⟨#[2], .Int64, .CPU⟩) : True := by
   fail_if_success have _ := Tensor.add _a _b
   fail_if_success have _ := _a + _b
   fail_if_success have _ := _a.addB _b
   trivial
 
 -- The homogeneous instances must not bypass missing promotion evidence.
-example (_a _b : Tensor { shape := #[2] }) : True := by
+example (_a _b : Tensor { shape := #[2], device := .CPU }) : True := by
   fail_if_success have _ := Tensor.add _a _b
   fail_if_success have _ := _a + _b
   fail_if_success have _ := _a.addB _b
@@ -223,8 +223,8 @@ example {_spec : StaticSpec} (_a _b : Tensor _spec) : True := by
   trivial
 
 -- Bool promotion is defined, but subtraction has a separate precondition.
-example (_a _b : Tensor ⟨#[2], .Bool, .any⟩)
-    (_float : Tensor ⟨#[2], .Float32, .any⟩) : True := by
+example (_a _b : Tensor ⟨#[2], .Bool, .CPU⟩)
+    (_float : Tensor ⟨#[2], .Float32, .CPU⟩) : True := by
   fail_if_success have _ := Tensor.sub _a _b
   fail_if_success have _ := _a - _b
   fail_if_success have _ := _a.subB _b

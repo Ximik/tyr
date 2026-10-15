@@ -5,7 +5,7 @@ namespace Tests.ComplexResults
 
 open torch
 
-private def diagonal (dtype : DType) : Tensor ⟨#[2, 2], dtype, .any⟩ :=
+private def diagonal (dtype : DType) : Tensor ⟨#[2, 2], dtype, .CPU⟩ :=
   ((Tensor.fromFloatArray #[3, 0, 0, 4]).reshapeChecked #[2, 2]).castDType dtype
 
 private def expectError {α : Type} (result : Except String α) : IO Unit :=
@@ -13,31 +13,31 @@ private def expectError {α : Type} (result : Except String α) : IO Unit :=
   | .ok _ => LeanTest.fail "Expected a recoverable domain or native error"
   | .error _ => pure ()
 
-example (x : Tensor ⟨#[2, 2], .Complex64, .any⟩) :
-    Tensor ⟨#[2], .Float32, .any⟩ := Tensor.rowNorms x
+example (x : Tensor ⟨#[2, 2], .Complex64, .CPU⟩) :
+    Tensor ⟨#[2], .Float32, .CPU⟩ := Tensor.rowNorms x
 
-example (x : Tensor ⟨#[2, 2], .Complex32, .any⟩) :
-    Tensor ⟨#[2], .Float16, .any⟩ := Tensor.rowNorms x
+example (x : Tensor ⟨#[2, 2], .Complex32, .CPU⟩) :
+    Tensor ⟨#[2], .Float16, .CPU⟩ := Tensor.rowNorms x
 
-example (x : Tensor ⟨#[2, 2], .Complex128, .any⟩) :
-    Tensor ⟨#[2], .Float64, .any⟩ := Tensor.svdvals x
+example (x : Tensor ⟨#[2, 2], .Complex128, .CPU⟩) :
+    Tensor ⟨#[2], .Float64, .CPU⟩ := Tensor.svdvals x
 
-example (x : Tensor ⟨#[2, 2], .Complex64, .any⟩) :
-    Tensor ⟨#[2, 2], .Complex64, .any⟩ × Tensor ⟨#[2], .Float32, .any⟩ ×
-      Tensor ⟨#[2, 2], .Complex64, .any⟩ := Tensor.svdReduced x
+example (x : Tensor ⟨#[2, 2], .Complex64, .CPU⟩) :
+    Tensor ⟨#[2, 2], .Complex64, .CPU⟩ × Tensor ⟨#[2], .Float32, .CPU⟩ ×
+      Tensor ⟨#[2, 2], .Complex64, .CPU⟩ := Tensor.svdReduced x
 
-example {d : DType} [DType.RealFloating d] (x : Tensor ⟨#[2, 2], d, .any⟩) :
-    Tensor ⟨#[2, 2], d, .any⟩ := Tensor.matrixLog x
+example {d : DType} [DType.RealFloating d] (x : Tensor ⟨#[2, 2], d, .CPU⟩) :
+    Tensor ⟨#[2, 2], d, .CPU⟩ := Tensor.matrixLog x
 
-example (_x : Tensor ⟨#[2, 2], .Complex64, .any⟩) : True := by
+example (_x : Tensor ⟨#[2, 2], .Complex64, .CPU⟩) : True := by
   fail_if_success have _ := Tensor.matrixLog _x
   trivial
 
-example (_x : Tensor ⟨#[2, 2], .Float8E4M3FN, .any⟩) : True := by
+example (_x : Tensor ⟨#[2, 2], .Float8E4M3FN, .CPU⟩) : True := by
   fail_if_success have _ := Tensor.matrixLog _x
   trivial
 
-example (_x : Tensor ⟨#[2, 2], .Unknown "dynamic", .any⟩) : True := by
+example (_x : Tensor ⟨#[2, 2], .Unknown "dynamic", .CPU⟩) : True := by
   fail_if_success have _ := Tensor.matrixLog _x
   trivial
 

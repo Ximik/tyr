@@ -55,10 +55,10 @@ private def loadAttentionParams (n_embd n_head n_kv_head : UInt64)
   let q_dim := n_head * head_dim
   let kv_dim := n_kv_head * head_dim
   return {
-    c_q := ← Tensor.loadTensorExact { shape := #[q_dim, n_embd], dtype := .Float32 } (pfx ++ "c_q.pt")
-    c_k := ← Tensor.loadTensorExact { shape := #[kv_dim, n_embd], dtype := .Float32 } (pfx ++ "c_k.pt")
-    c_v := ← Tensor.loadTensorExact { shape := #[kv_dim, n_embd], dtype := .Float32 } (pfx ++ "c_v.pt")
-    c_proj := ← Tensor.loadTensorExact { shape := #[n_embd, n_embd], dtype := .Float32 } (pfx ++ "c_proj.pt")
+    c_q := ← Tensor.loadTensorExact { device := .CPU, shape := #[q_dim, n_embd], dtype := .Float32 } (pfx ++ "c_q.pt")
+    c_k := ← Tensor.loadTensorExact { device := .CPU, shape := #[kv_dim, n_embd], dtype := .Float32 } (pfx ++ "c_k.pt")
+    c_v := ← Tensor.loadTensorExact { device := .CPU, shape := #[kv_dim, n_embd], dtype := .Float32 } (pfx ++ "c_v.pt")
+    c_proj := ← Tensor.loadTensorExact { device := .CPU, shape := #[n_embd, n_embd], dtype := .Float32 } (pfx ++ "c_proj.pt")
   }
 
 /-- Load MLPParams from directory -/
@@ -66,8 +66,8 @@ private def loadMLPParams (n_embd : UInt64)
     (dir : String) (blockIdx : Nat) : IO (MLPParams n_embd) := do
   let pfx := s!"{dir}/block_{blockIdx}_mlp_"
   return {
-    c_fc := ← Tensor.loadTensorExact { shape := #[4 * n_embd, n_embd], dtype := .Float32 } (pfx ++ "c_fc.pt")
-    c_proj := ← Tensor.loadTensorExact { shape := #[n_embd, 4 * n_embd], dtype := .Float32 } (pfx ++ "c_proj.pt")
+    c_fc := ← Tensor.loadTensorExact { device := .CPU, shape := #[4 * n_embd, n_embd], dtype := .Float32 } (pfx ++ "c_fc.pt")
+    c_proj := ← Tensor.loadTensorExact { device := .CPU, shape := #[n_embd, 4 * n_embd], dtype := .Float32 } (pfx ++ "c_proj.pt")
   }
 
 /-- Load BlockParams from directory -/
@@ -93,9 +93,9 @@ def saveDiffusionParams {cfg : Config} (params : DiffusionParams cfg) (dir : Str
 /-- Load DiffusionParams from a directory -/
 def loadDiffusionParams (cfg : Config) (dir : String) : IO (DiffusionParams cfg) := do
   -- Load embeddings
-  let token_emb ← Tensor.loadTensorExact { shape := #[cfg.vocab_size, cfg.n_embd], dtype := .Float32 } (dir ++ "/token_emb.pt")
-  let time_emb ← Tensor.loadTensorExact { shape := #[cfg.diffusion_steps, cfg.n_embd], dtype := .Float32 } (dir ++ "/time_emb.pt")
-  let output_head ← Tensor.loadTensorExact { shape := #[cfg.vocab_size, cfg.n_embd], dtype := .Float32 } (dir ++ "/output_head.pt")
+  let token_emb ← Tensor.loadTensorExact { device := .CPU, shape := #[cfg.vocab_size, cfg.n_embd], dtype := .Float32 } (dir ++ "/token_emb.pt")
+  let time_emb ← Tensor.loadTensorExact { device := .CPU, shape := #[cfg.diffusion_steps, cfg.n_embd], dtype := .Float32 } (dir ++ "/time_emb.pt")
+  let output_head ← Tensor.loadTensorExact { device := .CPU, shape := #[cfg.vocab_size, cfg.n_embd], dtype := .Float32 } (dir ++ "/output_head.pt")
   -- Load blocks
   let mut blocks : Array (BlockParams cfg.n_embd cfg.n_head cfg.n_head) := #[]
   for i in [:cfg.n_layer.toNat] do
@@ -208,16 +208,16 @@ private def loadAttentionAdamState (n_embd n_head n_kv_head : UInt64)
   let q_dim := n_head * head_dim
   let kv_dim := n_kv_head * head_dim
   let mu : AttentionParams n_embd n_head n_kv_head := {
-    c_q := ← Tensor.loadTensorExact { shape := #[q_dim, n_embd], dtype := .Float32 } (pfx ++ "mu_c_q.pt")
-    c_k := ← Tensor.loadTensorExact { shape := #[kv_dim, n_embd], dtype := .Float32 } (pfx ++ "mu_c_k.pt")
-    c_v := ← Tensor.loadTensorExact { shape := #[kv_dim, n_embd], dtype := .Float32 } (pfx ++ "mu_c_v.pt")
-    c_proj := ← Tensor.loadTensorExact { shape := #[n_embd, n_embd], dtype := .Float32 } (pfx ++ "mu_c_proj.pt")
+    c_q := ← Tensor.loadTensorExact { device := .CPU, shape := #[q_dim, n_embd], dtype := .Float32 } (pfx ++ "mu_c_q.pt")
+    c_k := ← Tensor.loadTensorExact { device := .CPU, shape := #[kv_dim, n_embd], dtype := .Float32 } (pfx ++ "mu_c_k.pt")
+    c_v := ← Tensor.loadTensorExact { device := .CPU, shape := #[kv_dim, n_embd], dtype := .Float32 } (pfx ++ "mu_c_v.pt")
+    c_proj := ← Tensor.loadTensorExact { device := .CPU, shape := #[n_embd, n_embd], dtype := .Float32 } (pfx ++ "mu_c_proj.pt")
   }
   let nu : AttentionParams n_embd n_head n_kv_head := {
-    c_q := ← Tensor.loadTensorExact { shape := #[q_dim, n_embd], dtype := .Float32 } (pfx ++ "nu_c_q.pt")
-    c_k := ← Tensor.loadTensorExact { shape := #[kv_dim, n_embd], dtype := .Float32 } (pfx ++ "nu_c_k.pt")
-    c_v := ← Tensor.loadTensorExact { shape := #[kv_dim, n_embd], dtype := .Float32 } (pfx ++ "nu_c_v.pt")
-    c_proj := ← Tensor.loadTensorExact { shape := #[n_embd, n_embd], dtype := .Float32 } (pfx ++ "nu_c_proj.pt")
+    c_q := ← Tensor.loadTensorExact { device := .CPU, shape := #[q_dim, n_embd], dtype := .Float32 } (pfx ++ "nu_c_q.pt")
+    c_k := ← Tensor.loadTensorExact { device := .CPU, shape := #[kv_dim, n_embd], dtype := .Float32 } (pfx ++ "nu_c_k.pt")
+    c_v := ← Tensor.loadTensorExact { device := .CPU, shape := #[kv_dim, n_embd], dtype := .Float32 } (pfx ++ "nu_c_v.pt")
+    c_proj := ← Tensor.loadTensorExact { device := .CPU, shape := #[n_embd, n_embd], dtype := .Float32 } (pfx ++ "nu_c_proj.pt")
   }
   return (mu, nu)
 
@@ -226,12 +226,12 @@ private def loadMLPAdamState (n_embd : UInt64) (dir : String) (blockIdx : Nat)
     : IO (MLPParams n_embd × MLPParams n_embd) := do
   let pfx := s!"{dir}/optim_block_{blockIdx}_mlp_"
   let mu : MLPParams n_embd := {
-    c_fc := ← Tensor.loadTensorExact { shape := #[4 * n_embd, n_embd], dtype := .Float32 } (pfx ++ "mu_c_fc.pt")
-    c_proj := ← Tensor.loadTensorExact { shape := #[n_embd, 4 * n_embd], dtype := .Float32 } (pfx ++ "mu_c_proj.pt")
+    c_fc := ← Tensor.loadTensorExact { device := .CPU, shape := #[4 * n_embd, n_embd], dtype := .Float32 } (pfx ++ "mu_c_fc.pt")
+    c_proj := ← Tensor.loadTensorExact { device := .CPU, shape := #[n_embd, 4 * n_embd], dtype := .Float32 } (pfx ++ "mu_c_proj.pt")
   }
   let nu : MLPParams n_embd := {
-    c_fc := ← Tensor.loadTensorExact { shape := #[4 * n_embd, n_embd], dtype := .Float32 } (pfx ++ "nu_c_fc.pt")
-    c_proj := ← Tensor.loadTensorExact { shape := #[n_embd, 4 * n_embd], dtype := .Float32 } (pfx ++ "nu_c_proj.pt")
+    c_fc := ← Tensor.loadTensorExact { device := .CPU, shape := #[4 * n_embd, n_embd], dtype := .Float32 } (pfx ++ "nu_c_fc.pt")
+    c_proj := ← Tensor.loadTensorExact { device := .CPU, shape := #[n_embd, 4 * n_embd], dtype := .Float32 } (pfx ++ "nu_c_proj.pt")
   }
   return (mu, nu)
 
@@ -275,12 +275,12 @@ def loadDiffusionAdamWState (cfg : Config) (dir : String)
     | some n => n
     | none => 0
   -- Load embedding mu/nu
-  let mu_token_emb ← Tensor.loadTensorExact { shape := #[cfg.vocab_size, cfg.n_embd], dtype := .Float32 } (pfx ++ "mu_token_emb.pt")
-  let mu_time_emb ← Tensor.loadTensorExact { shape := #[cfg.diffusion_steps, cfg.n_embd], dtype := .Float32 } (pfx ++ "mu_time_emb.pt")
-  let mu_output_head ← Tensor.loadTensorExact { shape := #[cfg.vocab_size, cfg.n_embd], dtype := .Float32 } (pfx ++ "mu_output_head.pt")
-  let nu_token_emb ← Tensor.loadTensorExact { shape := #[cfg.vocab_size, cfg.n_embd], dtype := .Float32 } (pfx ++ "nu_token_emb.pt")
-  let nu_time_emb ← Tensor.loadTensorExact { shape := #[cfg.diffusion_steps, cfg.n_embd], dtype := .Float32 } (pfx ++ "nu_time_emb.pt")
-  let nu_output_head ← Tensor.loadTensorExact { shape := #[cfg.vocab_size, cfg.n_embd], dtype := .Float32 } (pfx ++ "nu_output_head.pt")
+  let mu_token_emb ← Tensor.loadTensorExact { device := .CPU, shape := #[cfg.vocab_size, cfg.n_embd], dtype := .Float32 } (pfx ++ "mu_token_emb.pt")
+  let mu_time_emb ← Tensor.loadTensorExact { device := .CPU, shape := #[cfg.diffusion_steps, cfg.n_embd], dtype := .Float32 } (pfx ++ "mu_time_emb.pt")
+  let mu_output_head ← Tensor.loadTensorExact { device := .CPU, shape := #[cfg.vocab_size, cfg.n_embd], dtype := .Float32 } (pfx ++ "mu_output_head.pt")
+  let nu_token_emb ← Tensor.loadTensorExact { device := .CPU, shape := #[cfg.vocab_size, cfg.n_embd], dtype := .Float32 } (pfx ++ "nu_token_emb.pt")
+  let nu_time_emb ← Tensor.loadTensorExact { device := .CPU, shape := #[cfg.diffusion_steps, cfg.n_embd], dtype := .Float32 } (pfx ++ "nu_time_emb.pt")
+  let nu_output_head ← Tensor.loadTensorExact { device := .CPU, shape := #[cfg.vocab_size, cfg.n_embd], dtype := .Float32 } (pfx ++ "nu_output_head.pt")
   -- Load block states
   let mut muBlocks : Array (BlockParams cfg.n_embd cfg.n_head cfg.n_head) := #[]
   let mut nuBlocks : Array (BlockParams cfg.n_embd cfg.n_head cfg.n_head) := #[]

@@ -18,19 +18,19 @@ private def assertTreeEqual [TensorStruct α] (actual expected : α) : IO Unit :
   let error := TensorStruct.fold (fun {_s} t acc => acc + Tensor.item (Tensor.sumAll t)) 0.0 errors
   assertTrue (error.isFinite && error < 1e-6) s!"checkpoint tensor difference {error}"
 
-private def markedMuon {s : Shape} (step : Nat) : Optim.NorMuon.ParamState ⟨s, .Float32, .any⟩ := {
+private def markedMuon {s : Shape} (step : Nat) : Optim.NorMuon.ParamState ⟨s, .Float32, .CPU⟩ := {
   momentumBuffer := some (Tensor.full s (step.toFloat / 128.0))
   -- The second moment is a genuine rank-zero tensor.
   secondMoment := some (Tensor.full #[] (step.toFloat / 64.0))
   step
 }
 
-private def trainedCheckpoint : IO (Checkpoint tinyConfig) := do
+private def trainedCheckpoint : IO (Checkpoint (device := .CPU) tinyConfig) := do
   let initialParams ← moddedGpt.ModdedGPTParams.init tinyConfig
   let params := TensorStruct.map (fun t => Tensor.Preserving.addScalar (Tensor.zerosLike t) 0.25) initialParams
   let initialOpt := OptimizerState.init tinyConfig params 0.023 0.017
   let grads := TensorStruct.map (fun t => Tensor.Preserving.addScalar (Tensor.zerosLike t) 0.125) params
-  let opt := Optim.adamw (α := moddedGpt.ModdedGPTParams tinyConfig) (lr := 0.023) (weight_decay := 0.017)
+  let opt := Optim.adamw (α := moddedGpt.ModdedGPTParams (device := .CPU) tinyConfig) (lr := 0.023) (weight_decay := 0.017)
   let (params, adamState) ← Optim.step opt params grads initialOpt.adamState
   let (_, embedState) ← Optim.DistAdam.stepSingle params.embed grads.embed
     initialOpt.dualState.embed { lr := 0.023 }
@@ -104,7 +104,7 @@ private def metadata (tokens : UInt64) : CheckpointMetadata := {
 
   -- Compare the next update, including bias correction and Muon momentum.
   let grads := TensorStruct.map (fun t => Tensor.Preserving.addScalar (Tensor.zerosLike t) 0.125) original.params
-  let opt := Optim.adamw (α := moddedGpt.ModdedGPTParams tinyConfig)
+  let opt := Optim.adamw (α := moddedGpt.ModdedGPTParams (device := .CPU) tinyConfig)
     (lr := original.optState.baseLr) (weight_decay := original.optState.weightDecay)
   let (expectedParams, expectedAdam) ← Optim.step opt original.params grads original.optState.adamState
   let (actualParams, actualAdam) ← Optim.step opt loaded.params grads loaded.optState.adamState
@@ -160,7 +160,7 @@ private def metadata (tokens : UInt64) : CheckpointMetadata := {
     "missing promised training metadata must not reset hyperparameters or data position"
   IO.FS.writeFile metaPath metaContents
   IO.FS.removeFile (s!"{current}/optim_dual_0.pt" : System.FilePath)
-  assertTrue (← torch.ModdedTrain.loadCheckpoint tinyConfig dir.toString true).isNone
+  assertTrue (← torch.ModdedTrain.loadCheckpoint (device := .CPU) tinyConfig dir.toString true).isNone
     "a corrupt new dual-state snapshot must not silently reset optimizer state"
   IO.FS.removeFile (s!"{current}/state_meta.json" : System.FilePath)
   assertTrue (← loadCheckpointForResume tinyConfig dir.toString true).isNone
@@ -171,7 +171,7 @@ private def metadata (tokens : UInt64) : CheckpointMetadata := {
 
 @[test] def testNanoChatLegacyFlatCheckpoint : IO Unit := IO.FS.withTempDir fun dir => do
   let params ← moddedGpt.ModdedGPTParams.init tinyConfig
-  let original : Checkpoint tinyConfig := {
+  let original : Checkpoint (device := .CPU) tinyConfig := {
     params, optState := OptimizerState.init tinyConfig params 0.25 0.125,
     step := 7, bestValLoss := 0.5
   }

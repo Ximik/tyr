@@ -10,9 +10,9 @@ namespace Examples.GPU
 open torch
 open Tyr.GPU.Kernels
 
-private abbrev MhaTensor := Tensor { shape := #[1, 1, 768, 64], dtype := .Float32 }
-private abbrev LTensor := Tensor { shape := #[12, 64], dtype := .Float32 }
-private abbrev GradTiles := Tensor { shape := #[12, 64, 64], dtype := .Float32 }
+private abbrev MhaTensor := Tensor { shape := #[1, 1, 768, 64], dtype := .Float32, device := (.CUDA 0) }
+private abbrev LTensor := Tensor { shape := #[12, 64], dtype := .Float32, device := (.CUDA 0) }
+private abbrev GradTiles := Tensor { shape := #[12, 64, 64], dtype := .Float32, device := (.CUDA 0) }
 
 private def contractLabel : String := "dq_direct_kv_sweep_store_add"
 private def seqLen : Nat := 768
@@ -92,15 +92,15 @@ def runOnce (dumpPartials : Bool := false) : IO Bool := do
 
   let stream ← torch.cuda_current_stream
 
-  let q ← Tensor.loadTensorExact { shape := #[1, 1, 768, 64], dtype := .BFloat16 } (fixtureFile "q").toString
-  let k ← Tensor.loadTensorExact { shape := #[1, 1, 768, 64], dtype := .BFloat16 } (fixtureFile "k").toString
-  let v ← Tensor.loadTensorExact { shape := #[1, 1, 768, 64], dtype := .BFloat16 } (fixtureFile "v").toString
-  let dO ← Tensor.loadTensorExact { shape := #[1, 1, 768, 64], dtype := .BFloat16 } (fixtureFile "dO").toString
-  let expectedOut ← Tensor.loadTensorExact { shape := #[1, 1, 768, 64], dtype := .BFloat16 } (fixtureFile "expected_o").toString
-  let expectedL ← Tensor.loadTensorExact { shape := #[12, 64], dtype := .Float32 } (fixtureFile "expected_l").toString
-  let expectedDQ ← Tensor.loadTensorExact { shape := #[1, 1, 768, 64], dtype := .Float32 } (fixtureFile "expected_dq").toString
-  let expectedDK ← Tensor.loadTensorExact { shape := #[1, 1, 768, 64], dtype := .Float32 } (fixtureFile "expected_dk").toString
-  let expectedDV ← Tensor.loadTensorExact { shape := #[1, 1, 768, 64], dtype := .Float32 } (fixtureFile "expected_dv").toString
+  let q ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[1, 1, 768, 64], dtype := .BFloat16 } (fixtureFile "q").toString
+  let k ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[1, 1, 768, 64], dtype := .BFloat16 } (fixtureFile "k").toString
+  let v ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[1, 1, 768, 64], dtype := .BFloat16 } (fixtureFile "v").toString
+  let dO ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[1, 1, 768, 64], dtype := .BFloat16 } (fixtureFile "dO").toString
+  let expectedOut ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[1, 1, 768, 64], dtype := .BFloat16 } (fixtureFile "expected_o").toString
+  let expectedL ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[12, 64], dtype := .Float32 } (fixtureFile "expected_l").toString
+  let expectedDQ ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[1, 1, 768, 64], dtype := .Float32 } (fixtureFile "expected_dq").toString
+  let expectedDK ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[1, 1, 768, 64], dtype := .Float32 } (fixtureFile "expected_dk").toString
+  let expectedDV ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[1, 1, 768, 64], dtype := .Float32 } (fixtureFile "expected_dv").toString
 
   let outLse ← Tensor.uniformLike q 0 0
   let lseOut ← Tensor.uniformLike (Tensor.zeros #[12, 64] false (Device.CUDA 0)) 0 0

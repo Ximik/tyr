@@ -10,7 +10,7 @@ namespace Tyr.AD
 open torch
 open DifferentiableManifold
 
-variable {d : DType} {dev : DevicePolicy}
+variable {d : DType} {dev : Device}
 
 /-! ## Grassmann Manifold Gr(n, p)
 
@@ -33,7 +33,7 @@ This differs from Stiefel where XᵀZ is skew-symmetric. For Grassmann, XᵀZ = 
     Constraint: XᵀX = Iₚ, and tangent vectors satisfy XᵀZ = 0.
     The `tall` witness records that orthonormal p-column frames need n ≥ p. -/
 structure Grassmann (n p : UInt64) (dtype : DType := .Float32)
-    (device : DevicePolicy := .any) where
+    (device : Device := .CPU) where
   /-- Representative matrix with orthonormal columns -/
   matrix : Tensor ⟨#[n, p], dtype, device⟩
   /-- Orthonormal p-column frames in ℝⁿ require p ≤ n. -/
@@ -87,7 +87,7 @@ end Grassmann
 /-- Tangent vector on the Grassmann manifold.
     Z ∈ T_X Gr(n,p) satisfies: XᵀZ = 0 (Z is orthogonal to columns of X) -/
 structure GrassmannTangent (n p : UInt64) (dtype : DType := .Float32)
-    (device : DevicePolicy := .any) where
+    (device : Device := .CPU) where
   /-- The tangent vector as an n×p matrix orthogonal to base point -/
   vec : Tensor ⟨#[n, p], dtype, device⟩
 

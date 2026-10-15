@@ -32,12 +32,12 @@ def generateFixtures : IO Unit := do
   let x ← Tensor.uniformLike (Tensor.zeros #[64, 64] false device)
 
   let (cosCpu, sinCpu) := Tensor.rotaryFreqs (64 : UInt64) (64 : UInt64) 10000.0
-  let cos : Tensor { shape := #[64, 32], dtype := .Float32 } := cosCpu.to device
-  let sin : Tensor { shape := #[64, 32], dtype := .Float32 } := sinCpu.to device
+  let cos : Tensor { shape := #[64, 32], dtype := .Float32, device := (.CUDA 0) } := cosCpu.to device
+  let sin : Tensor { shape := #[64, 32], dtype := .Float32, device := (.CUDA 0) } := sinCpu.to device
 
-  let x4 : Tensor { shape := #[1, 64, 1, 64], dtype := .Float32 } := Tensor.reshapeChecked x #[1, 64, 1, 64]
+  let x4 : Tensor { shape := #[1, 64, 1, 64], dtype := .Float32, device := (.CUDA 0) } := Tensor.reshapeChecked x #[1, 64, 1, 64]
   let expected4 := Tensor.applyRotary x4 cos sin
-  let expected : Tensor { shape := #[64, 64], dtype := .Float32 } := Tensor.reshapeChecked expected4 #[64, 64]
+  let expected : Tensor { shape := #[64, 64], dtype := .Float32, device := (.CUDA 0) } := Tensor.reshapeChecked expected4 #[64, 64]
 
   Tensor.saveTensor x (fixtureFile "x").toString
   Tensor.saveTensor sin (fixtureFile "sin").toString
@@ -55,10 +55,10 @@ def runOnce : IO Bool := do
   if !(← fixturesPresent fixtureSpec) then
     generateFixtures
 
-  let x ← Tensor.loadTensorExact { shape := #[64, 64], dtype := .Float32 } (fixtureFile "x").toString
-  let sin ← Tensor.loadTensorExact { shape := #[64, 32], dtype := .Float32 } (fixtureFile "sin").toString
-  let cos ← Tensor.loadTensorExact { shape := #[64, 32], dtype := .Float32 } (fixtureFile "cos").toString
-  let expected ← Tensor.loadTensorExact { shape := #[64, 64], dtype := .Float32 } (fixtureFile "expected").toString
+  let x ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[64, 64], dtype := .Float32 } (fixtureFile "x").toString
+  let sin ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[64, 32], dtype := .Float32 } (fixtureFile "sin").toString
+  let cos ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[64, 32], dtype := .Float32 } (fixtureFile "cos").toString
+  let expected ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[64, 64], dtype := .Float32 } (fixtureFile "expected").toString
 
   let output := Tensor.zerosLike x
   let stream ← torch.cuda_current_stream
@@ -108,12 +108,12 @@ private def trainingMatrix : LeanBenchmark.Matrix TrainingShape := {
 }
 
 /-- Reference forward and adjoint rotations for separate query and key head counts. -/
-def referenceTraining {batch seqLen qHeads kvHeads : UInt64} {dtype : DType}
-    (q : Tensor { shape := #[batch, seqLen, qHeads, 64], dtype := dtype })
-    (k : Tensor { shape := #[batch, seqLen, kvHeads, 64], dtype := dtype })
-    (gradQ : Tensor { shape := #[batch, seqLen, qHeads, 64], dtype := dtype })
-    (gradK : Tensor { shape := #[batch, seqLen, kvHeads, 64], dtype := dtype })
-    (cos sin : Tensor { shape := #[seqLen, 32], dtype := .Float32 }) :=
+def referenceTraining {device : Device} {batch seqLen qHeads kvHeads : UInt64} {dtype : DType}
+    (q : Tensor { shape := #[batch, seqLen, qHeads, 64], dtype := dtype, device := device })
+    (k : Tensor { shape := #[batch, seqLen, kvHeads, 64], dtype := dtype, device := device })
+    (gradQ : Tensor { shape := #[batch, seqLen, qHeads, 64], dtype := dtype, device := device })
+    (gradK : Tensor { shape := #[batch, seqLen, kvHeads, 64], dtype := dtype, device := device })
+    (cos sin : Tensor { shape := #[seqLen, 32], dtype := .Float32, device := device }) :=
   let negSin := Tensor.Preserving.mulScalar sin (-1.0)
   (Tensor.applyRotary q cos sin, Tensor.applyRotary k cos sin,
     Tensor.applyRotary gradQ cos negSin, Tensor.applyRotary gradK cos negSin)
@@ -126,10 +126,10 @@ private def benchmarkTrainingShape (cfg : Benchmark.Config) (caseLabel : String)
   let kf ← Tensor.randn #[batch, seqLen, kvHeads, 64] false device
   let gradQf ← Tensor.randn #[batch, seqLen, qHeads, 64] false device
   let gradKf ← Tensor.randn #[batch, seqLen, kvHeads, 64] false device
-  let q : Tensor { shape := #[batch, seqLen, qHeads, 64], dtype := .BFloat16 } := qf.toBFloat16
-  let k : Tensor { shape := #[batch, seqLen, kvHeads, 64], dtype := .BFloat16 } := kf.toBFloat16
-  let gradQ : Tensor { shape := #[batch, seqLen, qHeads, 64], dtype := .BFloat16 } := gradQf.toBFloat16
-  let gradK : Tensor { shape := #[batch, seqLen, kvHeads, 64], dtype := .BFloat16 } := gradKf.toBFloat16
+  let q : Tensor { shape := #[batch, seqLen, qHeads, 64], dtype := .BFloat16, device := (.CUDA 0) } := qf.toBFloat16
+  let k : Tensor { shape := #[batch, seqLen, kvHeads, 64], dtype := .BFloat16, device := (.CUDA 0) } := kf.toBFloat16
+  let gradQ : Tensor { shape := #[batch, seqLen, qHeads, 64], dtype := .BFloat16, device := (.CUDA 0) } := gradQf.toBFloat16
+  let gradK : Tensor { shape := #[batch, seqLen, kvHeads, 64], dtype := .BFloat16, device := (.CUDA 0) } := gradKf.toBFloat16
   let (cos, sin) := Tensor.rotaryFreqs seqLen 64 10000.0 device
   let (expectedQ, expectedK, expectedGradQ, expectedGradK) :=
     referenceTraining q k gradQ gradK cos sin

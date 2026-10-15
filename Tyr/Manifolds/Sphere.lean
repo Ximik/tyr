@@ -5,11 +5,11 @@ namespace Tyr.AD
 open torch
 open DifferentiableManifold
 
-variable {d : DType} {dev : DevicePolicy}
+variable {d : DType} {dev : Device}
 
 /-- Real sphere S^{n-1} represented as unit-norm vectors in `R^n`. -/
 structure Sphere (n : UInt64) (dtype : DType := .Float32)
-    (device : DevicePolicy := .any) where
+    (device : Device := .CPU) where
   coords : Tensor ⟨#[n], dtype, device⟩
 
 namespace Sphere
@@ -35,7 +35,7 @@ end Sphere
 
 /-- Tangent vector at a sphere point. -/
 structure SphereTangent (n : UInt64) (dtype : DType := .Float32)
-    (device : DevicePolicy := .any) where
+    (device : Device := .CPU) where
   vec : Tensor ⟨#[n], dtype, device⟩
 
 namespace SphereTangent

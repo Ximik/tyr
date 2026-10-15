@@ -55,11 +55,11 @@ def runOnce : IO Bool := do
   if !(← fixturesPresent fixtureSpec) then
     generateFixtures
 
-  let q ← Tensor.loadTensorExact { shape := #[1, 1, 128, 64], dtype := .BFloat16 } (fixtureFile "q").toString
-  let k ← Tensor.loadTensorExact { shape := #[1, 1, 128, 64], dtype := .BFloat16 } (fixtureFile "k").toString
-  let v ← Tensor.loadTensorExact { shape := #[1, 1, 128, 64], dtype := .BFloat16 } (fixtureFile "v").toString
-  let expectedOut ← Tensor.loadTensorExact { shape := #[1, 1, 128, 64], dtype := .BFloat16 } (fixtureFile "expected_o").toString
-  let expectedLse ← Tensor.loadTensorExact { shape := #[2, 64], dtype := .Float32 } (fixtureFile "expected_lse").toString
+  let q ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[1, 1, 128, 64], dtype := .BFloat16 } (fixtureFile "q").toString
+  let k ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[1, 1, 128, 64], dtype := .BFloat16 } (fixtureFile "k").toString
+  let v ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[1, 1, 128, 64], dtype := .BFloat16 } (fixtureFile "v").toString
+  let expectedOut ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[1, 1, 128, 64], dtype := .BFloat16 } (fixtureFile "expected_o").toString
+  let expectedLse ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[2, 64], dtype := .Float32 } (fixtureFile "expected_lse").toString
 
   let outFwd ← Tensor.uniformLike q 0 0
   let outFwdLse ← Tensor.uniformLike q 0 0

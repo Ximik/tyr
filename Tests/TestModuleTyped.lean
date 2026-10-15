@@ -8,24 +8,24 @@ namespace Tests.ModuleTyped
 
 open torch
 
-example (_a : Affine (n := 2) (m := 3)) (_x : Tensor { shape := #[4, 2], dtype := .Float32 }) : True := by
+example (_a : Affine (n := 2) (m := 3)) (_x : Tensor { shape := #[4, 2], dtype := .Float32, device := .CPU }) : True := by
   fail_if_success
     have _ := _a.step _x
   trivial
 
-example (_w : Tensor { shape := #[2, 3], dtype := .Float32 }) (_b : Tensor { shape := #[2], dtype := .Float32 }) : True := by
+example (_w : Tensor { shape := #[2, 3], dtype := .Float32, device := .CPU }) (_b : Tensor { shape := #[2], dtype := .Float32, device := .CPU }) : True := by
   fail_if_success
     have _ : Affine (n := 2) (m := 3) := ⟨_w, _b⟩
   trivial
 
 private structure MyLinear (inDim outDim : UInt64) where
-  weight : Tensor { shape := #[outDim, inDim], dtype := .Float32 }
-  bias : Option (Tensor { shape := #[outDim], dtype := .Float32 }) := none
+  weight : Tensor { shape := #[outDim, inDim], dtype := .Float32, device := .CPU }
+  bias : Option (Tensor { shape := #[outDim], dtype := .Float32, device := .CPU }) := none
   deriving TensorStruct
 
 private instance {inDim outDim batch : UInt64} :
-    Module (MyLinear inDim outDim) (Tensor { shape := #[batch, inDim], dtype := .Float32 })
-      (Tensor { shape := #[batch, outDim], dtype := .Float32 }) where
+    Module (MyLinear inDim outDim) (Tensor { shape := #[batch, inDim], dtype := .Float32, device := .CPU })
+      (Tensor { shape := #[batch, outDim], dtype := .Float32, device := .CPU }) where
   forward m x :=
     let y := Tensor.linear x m.weight
     match m.bias with
@@ -45,21 +45,21 @@ private structure MyLinearCtx (inDim outDim : UInt64) where
 
 private instance {inDim outDim batch : UInt64} :
     ModuleCtx (MyLinearCtx inDim outDim) TrainingCtx
-      (Tensor { shape := #[batch, inDim], dtype := .Float32 }) (Tensor { shape := #[batch, outDim], dtype := .Float32 }) where
+      (Tensor { shape := #[batch, inDim], dtype := .Float32, device := .CPU }) (Tensor { shape := #[batch, outDim], dtype := .Float32, device := .CPU }) where
   forward m ctx x := do
     let y := Module.forward m.lin x
     Tensor.dropout y ctx.dropout_p ctx.training
 
 @[test]
 def testAffineNonSquareForwardAndGradient : IO Unit := do
-  let weight : Tensor ⟨#[3, 2], .Float64, .exact .CPU⟩ := Tensor.onesLike (Tensor.zerosFor _)
-  let bias : Tensor ⟨#[2], .Float64, .exact .CPU⟩ := Tensor.onesLike (Tensor.zerosFor _)
-  let a : @Affine 2 3 .Float64 (.exact .CPU) := {
+  let weight : Tensor ⟨#[3, 2], .Float64, .CPU⟩ := Tensor.onesLike (Tensor.zerosFor _)
+  let bias : Tensor ⟨#[2], .Float64, .CPU⟩ := Tensor.onesLike (Tensor.zerosFor _)
+  let a : @Affine 2 3 .Float64 (.CPU) := {
     w := ← Tensor.parameter (Tensor.Preserving.mulScalar weight 3.0)
     b := ← Tensor.parameter (Tensor.Preserving.mulScalar bias 5.0) }
-  let input : Tensor ⟨#[4, 3], .Float64, .exact .CPU⟩ :=
+  let input : Tensor ⟨#[4, 3], .Float64, .CPU⟩ :=
     Tensor.Preserving.mulScalar (Tensor.onesLike (Tensor.zerosFor _)) 2.0
-  let output : Tensor ⟨#[4, 2], .Float64, .exact .CPU⟩ := Module.forward a input
+  let output : Tensor ⟨#[4, 2], .Float64, .CPU⟩ := Module.forward a input
   match output.validate with
   | .ok () => pure ()
   | .error message => LeanTest.fail message
@@ -68,17 +68,17 @@ def testAffineNonSquareForwardAndGradient : IO Unit := do
     "Affine must compute input @ weight + bias with distinct input/output dimensions"
   let loss := Tensor.sumAll output
   Tensor.backwardLoss loss
-  let gradient : @Affine 2 3 .Float64 (.exact .CPU) ← differentiable.grad a
+  let gradient : @Affine 2 3 .Float64 (.CPU) ← differentiable.grad a
   LeanTest.assertTrue
     (Tensor.frobeniusNorm (Sub.sub gradient.w (Tensor.Preserving.mulScalar weight 8.0)) < 1e-10)
     "Affine weight gradient must sum all four input rows"
   LeanTest.assertTrue
     (Tensor.l2Norm (Sub.sub gradient.b (Tensor.Preserving.mulScalar bias 4.0)) < 1e-10)
     "Affine bias gradient must count batch rows"
-  let tensorGradient : Tensor ⟨#[3, 2], .Float64, .exact .CPU⟩ ← differentiable.grad a.w
+  let tensorGradient : Tensor ⟨#[3, 2], .Float64, .CPU⟩ ← differentiable.grad a.w
   LeanTest.assertEqual (Tensor.frobeniusNorm (Sub.sub tensorGradient gradient.w)) 0.0
     "Tensor and module gradient interfaces must agree"
-  let traversed : @Affine 2 3 .Float64 (.exact .CPU) ← TensorStruct.grads a
+  let traversed : @Affine 2 3 .Float64 (.CPU) ← TensorStruct.grads a
   LeanTest.assertEqual (Tensor.frobeniusNorm (Sub.sub traversed.w gradient.w)) 0.0
     "Structural gradient traversal must retain indexed affine fields"
 
@@ -86,15 +86,15 @@ def testAffineNonSquareForwardAndGradient : IO Unit := do
 def testDocumentedModuleInterfaces : IO Unit := do
   let lin : MyLinear 3 2 := ⟨Tensor.ones #[2, 3], some (Tensor.ones #[2])⟩
   let input := Tensor.ones #[4, 3]
-  let pureOutput : Tensor { shape := #[4, 2], dtype := .Float32 } := Module.forward lin input
-  let ioOutput : Tensor { shape := #[4, 2], dtype := .Float32 } ← ModuleIO.forward lin input
+  let pureOutput : Tensor { shape := #[4, 2], dtype := .Float32, device := .CPU } := Module.forward lin input
+  let ioOutput : Tensor { shape := #[4, 2], dtype := .Float32, device := .CPU } ← ModuleIO.forward lin input
   LeanTest.assertEqual (Tensor.frobeniusNorm (pureOutput - ioOutput)) 0.0
     "Pure modules should lift to IO without changing their tensor contract"
-  let contextual : Tensor { shape := #[4, 2], dtype := .Float32 } ←
+  let contextual : Tensor { shape := #[4, 2], dtype := .Float32, device := .CPU } ←
     ModuleCtx.forward (MyLinearCtx.mk lin) TrainingCtx.eval input
   LeanTest.assertEqual (Tensor.frobeniusNorm (pureOutput - contextual)) 0.0
     "Evaluation context should retain the pure forward result"
-  let dropped : Tensor { shape := #[4, 3], dtype := .Float32 } ← ModuleIO.forward (MyDropout.mk ⟨1.0⟩) input
+  let dropped : Tensor { shape := #[4, 3], dtype := .Float32, device := .CPU } ← ModuleIO.forward (MyDropout.mk ⟨1.0⟩) input
   LeanTest.assertEqual (Tensor.frobeniusNorm dropped) 0.0
     "Training dropout with p=1 should zero every activation"
   match dropped.validate with
@@ -110,7 +110,7 @@ example : True := by
 
 @[test]
 def testConv2dIndexedInitialization : IO Unit := do
-  let config : Conv2d .Float64 (.exact .CPU) := {
+  let config : Conv2d .Float64 (.CPU) := {
     in_channels := 4, out_channels := 6, kernel_size := (2, 3), groups := 2
     outputBias := Tensor.onesLike (Tensor.zerosFor _) }
   let initialized ← config.init
@@ -138,7 +138,7 @@ def testConv2dIndexedInitialization : IO Unit := do
 @[test]
 def testUniformLikeDTypeAndErrors : IO Unit := do
   for dtype in #[DType.Float16, .BFloat16, .Float32, .Float64] do
-    let reference : Tensor ⟨#[2, 3], dtype, .exact .CPU⟩ := Tensor.zerosFor _
+    let reference : Tensor ⟨#[2, 3], dtype, .CPU⟩ := Tensor.zerosFor _
     let sample ← Tensor.uniformLike reference (-0.25) 0.5
     match sample.validate with
     | .ok () => pure ()

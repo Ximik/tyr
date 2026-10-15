@@ -4,31 +4,18 @@ import Tyr.Typed.Device
 /-!
 # Typed tensor facade
 
-`Tensor (σ : StaticSpec)` is a lightweight typed view over Tyr's existing
-`RawTensor`, indexed by shape, dtype, and device policy. The index is
-preserved during typechecking: a `Tensor σ` contains one native handle,
-so the carrier adds no allocation. Checked construction reads native metadata;
-the FFI representation is unchanged.
-
-Grading: `dtype` and `device` have "dynamic" defaults, so
-`Tensor {shape := s}` claims only the shape, while
-`Tensor {shape := s, dtype := .Float32, device := .exact (.CUDA 0)}` pins
-everything. `Tensor {shape := s, dtype := d}` pins shape and dtype while
-leaving the device unconstrained.
-
-Checked constructors validate runtime metadata when crossing from raw
-tensors into the typed facade. There is no public unchecked conversion or
-implicit coercion back to `RawTensor`; native adapters use the explicit `.raw`
-projection. Only the reserved default dtype `Unknown "dynamic"` makes no dtype
-claim; other unknown tokens must match exactly. The `.any` device policy makes
-no device claim.
+`Tensor σ` retains shape, dtype and actual placement. A runtime `Device` value
+can be an index; unknown placement is packaged existentially, never erased.
+Only `Unknown "dynamic"` relaxes the dtype claim. Checked admission validates
+all indices against native metadata. The indexed carrier has no allocation or
+public unchecked constructor; FFI adapters use the explicit `.raw` projection.
 -/
 
 namespace torch
 
 namespace StaticSpec
 
-/-- Forget the device policy (runtime-metadata view). -/
+/-- Shape and dtype metadata without a placement field. -/
 @[reducible] def toTensorSpec (σ : StaticSpec) : TensorSpec :=
   { shape := σ.shape, dtype := σ.dtype }
 
@@ -39,14 +26,14 @@ namespace StaticSpec
   { σ with dtype }
 
 /-- A CPU scalar follows the other operand's placement; all other left
-operands keep their placement policy. This selects an output policy, assuming
+operands keep their placement. This selects an output device, assuming
 callers separately check static and actual device compatibility. -/
-@[reducible] def pointwiseDevice (l r : StaticSpec) : DevicePolicy :=
+@[reducible] def pointwiseDevice (l r : StaticSpec) : Device :=
   match l.shape.toList with
   | _ :: _ => l.device
   | [] =>
       match l.device with
-      | .exact .CPU => r.device
+      | .CPU => r.device
       | device => device
 
 /-- Result spec of a broadcasting pointwise op, including the weaker dtype
@@ -78,7 +65,7 @@ def toTensor {σ : StaticSpec} (t : Tensor σ) : RawTensor :=
 def spec {σ : StaticSpec} (_t : Tensor σ) : TensorSpec :=
   σ.toTensorSpec
 
-/-- The full static spec, including the device policy. -/
+/-- The full index, including actual placement. -/
 def staticSpec {σ : StaticSpec} (_t : Tensor σ) : StaticSpec :=
   σ
 
@@ -88,36 +75,52 @@ def dtype {σ : StaticSpec} (_t : Tensor σ) : DType :=
 def shape {σ : StaticSpec} (_t : Tensor σ) : Shape :=
   σ.shape
 
-/-- Actual native device, including for an unrestricted placement policy. -/
-def device {σ : StaticSpec} (t : Tensor σ) : Device :=
+/-- Placement retained by the tensor index. Raw admission checks it exactly. -/
+@[reducible] def device {σ : StaticSpec} (_t : Tensor σ) : Device :=
+  σ.device
+
+/-- Native placement, useful for independent boundary validation. -/
+def runtimeDevice {σ : StaticSpec} (t : Tensor σ) : Device :=
   t.raw.device
 
 /-- Actual native shape, as distinct from the static `shape` index. -/
 def runtimeShape {σ : StaticSpec} (t : Tensor σ) : Shape :=
   t.raw.runtimeShape
 
-/-- Check actual native placement before binary pointwise execution, including
-for two tensors whose static policies are both `.any`. -/
+/-- Independently validate native placement before binary pointwise execution. -/
 def checkPointwise {σ τ : StaticSpec} (left : Tensor σ) (right : Tensor τ) :
     Except String Unit := do
-  let _ ← Device.pointwiseResult? left.runtimeShape left.device
-    right.runtimeShape right.device
+  let _ ← Device.pointwiseResult? left.runtimeShape left.runtimeDevice
+    right.runtimeShape right.runtimeDevice
   pure ()
 
 /-- Check actual native placement for operations without the CPU scalar
 exception, such as matrix multiplication and concatenation. -/
 def checkSameDevice {σ τ : StaticSpec} (left : Tensor σ) (right : Tensor τ) :
     Except String Unit := do
-  let _ ← Device.sameResult? left.device right.device
+  let _ ← Device.sameResult? left.runtimeDevice right.runtimeDevice
   pure ()
 
 /-- Validate the selection-specific scalar relocation rule before native
 `where` execution. Placement is selected in condition, left, right order. -/
 def checkSelection {σ τ υ : StaticSpec} (condition : Tensor σ)
     (left : Tensor τ) (right : Tensor υ) : Except String Unit := do
-  let _ ← Device.selectionResult? condition.runtimeShape condition.device
-    left.runtimeShape left.device right.runtimeShape right.device
+  let _ ← Device.selectionResult? condition.runtimeShape condition.runtimeDevice
+    left.runtimeShape left.runtimeDevice right.runtimeShape right.runtimeDevice
   pure ()
+
+/-- Compare runtime-selected indices and return equality evidence, so unpacked
+tensors can enter operations that require one shared placement. -/
+def sameDevice? {σ τ : StaticSpec} (_left : Tensor σ) (_right : Tensor τ) :
+    Except String (PLift (σ.device = τ.device)) :=
+  if h : σ.device = τ.device then .ok ⟨h⟩
+  else .error s!"Expected the same device, got {σ.device.render} and {τ.device.render}"
+
+/-- Recover a requested placement index by checking equality, with no transfer. -/
+def atDevice? {σ : StaticSpec} (tensor : Tensor σ) (device : Device) :
+    Except String (Tensor { σ with device }) :=
+  if h : σ.device = device then .ok (h ▸ tensor)
+  else .error s!"Expected device {device.render}, got {σ.device.render}"
 
 /-- Runtime metadata actually carried by the handle. -/
 def actualSpec {σ : StaticSpec} (t : Tensor σ) : TensorSpec :=
@@ -130,7 +133,7 @@ Dynamic specifications still preserve the actual dtype and placement. -/
 def checkedUpdate? {σ : StaticSpec} (expectedDType : DType) (expectedDevice : Device)
     (raw : RawTensor) : Except String (Tensor σ) := do
   TensorSpec.checkDType expectedDType raw.dtype
-  (DevicePolicy.exact expectedDevice).check raw.device
+  expectedDevice.check raw.device
   ofRaw raw
 
 /-- Pure value-update adapter. Its panic fallback is the valid default for the
@@ -147,7 +150,7 @@ operation that promises to preserve the tensor's specification. -/
 def checkedReplacement? {σ : StaticSpec} (original : Tensor σ) (raw : RawTensor) :
     Except String (Tensor σ) := do
   TensorSpec.checkDType original.raw.dtype raw.dtype
-  (DevicePolicy.exact original.raw.device).check raw.device
+  original.raw.device.check raw.device
   ofRaw raw
 
 /-- Native adapter for operations whose output must preserve an existing
@@ -160,20 +163,20 @@ def checkedReplacement {σ : StaticSpec} (original : Tensor σ) (raw : RawTensor
   | .error message => panic! s!"Tensor replacement: {message}"
 
 def ofTensor? {shape : Shape} (dtype : DType) (raw : RawTensor) :
-    Option (Tensor { shape, dtype }) :=
+    Option (Tensor { shape, dtype, device := raw.device }) :=
   if raw.runtimeShape == shape && raw.dtype == dtype then
     (ofRaw raw).toOption
   else
     none
 
 def ofTensor {shape : Shape} (dtype : DType) (raw : RawTensor) :
-    Except String (Tensor { shape, dtype }) := do
+    Except String (Tensor { shape, dtype, device := raw.device }) := do
   TensorSpec.checkShape shape raw.runtimeShape
   TensorSpec.checkDType dtype raw.dtype
   ofRaw raw
 
 def ofTensorWithContract {shape : Shape} (contract : TensorContract) (raw : RawTensor) :
-    Except String (Tensor { shape, dtype := contract.spec.dtype }) := do
+    Except String (Tensor { shape, dtype := contract.spec.dtype, device := raw.device }) := do
   let actual : TensorSpec := { shape := raw.runtimeShape, dtype := raw.dtype }
   contract.check actual raw.device
   if contract.spec.shape = shape then
@@ -181,12 +184,12 @@ def ofTensorWithContract {shape : Shape} (contract : TensorContract) (raw : RawT
   else
     .error s!"Expected static shape {reprStr contract.spec.shape}, got {reprStr shape}"
 
-/-- Package a tensor with its full static specification, preserving the device policy. -/
+/-- Package a tensor with its full static specification, preserving actual placement. -/
 def toSome {σ : StaticSpec} (tensor : Tensor σ) : Sigma Tensor :=
   ⟨σ, tensor⟩
 
 /-- Recover the native dtype as an existential index without casting values or
-forgetting shape/device policy. The resulting tensor passes the checked raw
+forgetting shape or placement. The resulting tensor passes the checked raw
 boundary, including when the input carries the dynamic dtype marker. -/
 def reifyDType {σ : StaticSpec} (tensor : Tensor σ) :
     Except String (Sigma fun dtype : DType => Tensor { σ with dtype }) := do

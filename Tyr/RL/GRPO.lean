@@ -37,6 +37,8 @@ import Tyr.Train.RunLedger
 namespace torch.RL.GRPO
 
 open torch
+
+variable {device : Device}
 open torch.dist
 open torch.Train.RunLedger
 
@@ -97,7 +99,7 @@ def computeAdvantages (rewards : Array Float) : Array Float :=
     rewards.map (· - mu)
 
 /-- Compute advantages from a tensor of rewards -/
-def computeAdvantagesTensor (rewards : Tensor { shape := #[b], dtype := .Float32 }) : Tensor { shape := #[b], dtype := .Float32 } :=
+def computeAdvantagesTensor (rewards : Tensor { shape := #[b], dtype := .Float32, device := device }) : Tensor { shape := #[b], dtype := .Float32, device := device } :=
   let mu := Tensor.meanAll rewards
   let muExpanded := Tensor.expand mu #[b]
   rewards - muExpanded
@@ -180,15 +182,12 @@ structure RolloutBatch where
 
     Returns the loss (negated pg_objective). -/
 def computePGLoss
-    (logProbs : Tensor { shape := #[b, t], dtype := .Float32 })
-    (advantages : Tensor { shape := #[b], dtype := .Float32 })
-    (mask : Tensor { shape := #[b, t], dtype := .Float32 })
+    (logProbs : Tensor { shape := #[b, t], dtype := .Float32, device := device })
+    (advantages : Tensor { shape := #[b], dtype := .Float32, device := device })
+    (mask : Tensor { shape := #[b, t], dtype := .Float32, device := device })
     (numPasses : UInt64 := 1)
     (examplesPerRank : UInt64 := 1)
-    : Tensor { shape := #[], dtype := .Float32 } :=
-  let device := logProbs.raw.device
-  let advantages := advantages.to device
-  let mask := mask.to device
+    : Tensor { shape := #[], dtype := .Float32, device := device } :=
 
   -- Expand advantages to [B, T] for broadcasting
   let advExpanded := Tensor.unsqueeze advantages 1  -- [B, 1]
@@ -396,7 +395,7 @@ def grpoStep
     - padToken: Padding token ID (default 0) -/
 def grpoStepWithModel (b t : UInt64)
     (rollouts : Array RolloutBatch)
-    (forwardFn : Tensor { shape := #[b, t], dtype := .Int64 } → Tensor { shape := #[b, t], dtype := .Int64 } → IO (Tensor { shape := #[b, t], dtype := .Float32 }))  -- (input, target) → nll_per_token
+    (forwardFn : Tensor { shape := #[b, t], dtype := .Int64, device := device } → Tensor { shape := #[b, t], dtype := .Int64, device := device } → IO (Tensor { shape := #[b, t], dtype := .Float32, device := device }))  -- (input, target) → nll_per_token
     (config : GRPOConfig)
     (state : GRPOState)
     (padToken : UInt64 := 0)
@@ -441,16 +440,16 @@ def grpoStepWithModel (b t : UInt64)
   let maskFlat : Array Float := shiftedMasks.foldl (fun acc m => acc ++ m) #[]
 
   -- Create tensors, validating the runtime shape against the claimed [B, T]
-  let inputTensor : Tensor { shape := #[b, t], dtype := .Int64 } :=
-    Tensor.reshapeChecked (Tensor.toInt64 (Tensor.fromFloatArray inputFlat)) #[b, t]
-  let targetTensor : Tensor { shape := #[b, t], dtype := .Int64 } :=
-    Tensor.reshapeChecked (Tensor.toInt64 (Tensor.fromFloatArray targetFlat)) #[b, t]
+  let inputTensor : Tensor { shape := #[b, t], dtype := .Int64, device := device } :=
+    (Tensor.reshapeChecked (Tensor.toInt64 (Tensor.fromFloatArray inputFlat)) #[b, t]).to device
+  let targetTensor : Tensor { shape := #[b, t], dtype := .Int64, device := device } :=
+    (Tensor.reshapeChecked (Tensor.toInt64 (Tensor.fromFloatArray targetFlat)) #[b, t]).to device
 
-  let maskTensor : Tensor { shape := #[b, t], dtype := .Float32 } :=
-    Tensor.reshapeChecked (Tensor.fromFloatArray maskFlat) #[b, t]
+  let maskTensor : Tensor { shape := #[b, t], dtype := .Float32, device := device } :=
+    (Tensor.reshapeChecked (Tensor.fromFloatArray maskFlat) #[b, t]).to device
 
-  let advTensor : Tensor { shape := #[b], dtype := .Float32 } :=
-    Tensor.reshapeChecked (Tensor.fromFloatArray advantages) #[b]
+  let advTensor : Tensor { shape := #[b], dtype := .Float32, device := device } :=
+    (Tensor.reshapeChecked (Tensor.fromFloatArray advantages) #[b]).to device
 
   -- Forward pass: get per-token NLL
   let nllPerToken ← forwardFn inputTensor targetTensor  -- [B, T-1]
@@ -704,7 +703,7 @@ structure TrainResult where
 def trainLoop (b t : UInt64)
     (getPromptFn : Nat → IO (Array UInt64 × String × String))  -- step → (tokens, text, answer)
     (generateOneFn : Array UInt64 → IO UInt64)
-    (forwardFn : Tensor { shape := #[b, t], dtype := .Int64 } → Tensor { shape := #[b, t], dtype := .Int64 } → IO (Tensor { shape := #[b, t], dtype := .Float32 }))
+    (forwardFn : Tensor { shape := #[b, t], dtype := .Int64, device := device } → Tensor { shape := #[b, t], dtype := .Int64, device := device } → IO (Tensor { shape := #[b, t], dtype := .Float32, device := device }))
     (decodeFn : Array UInt64 → String)
     (rewardFn : String → String → Float)
     (config : GRPOConfig)
@@ -771,7 +770,7 @@ def grpoStepWithModelUpdate (b t : UInt64) [TensorStruct P]
     (params : P)
     (optState : Optim.AdamWState P)
     (rollouts : Array RolloutBatch)
-    (forwardFn : P → Tensor { shape := #[b, t], dtype := .Int64 } → Tensor { shape := #[b, t], dtype := .Int64 } → IO (Tensor { shape := #[b, t], dtype := .Float32 }))  -- (params, input, target) → nll_per_token
+    (forwardFn : P → Tensor { shape := #[b, t], dtype := .Int64, device := device } → Tensor { shape := #[b, t], dtype := .Int64, device := device } → IO (Tensor { shape := #[b, t], dtype := .Float32, device := device }))  -- (params, input, target) → nll_per_token
     (config : GRPOConfig)
     (state : GRPOState)
     (padToken : UInt64 := 0)
@@ -799,7 +798,7 @@ def grpoStepWithModelUpdate (b t : UInt64) [TensorStruct P]
   let advantages := computeAdvantages rewards
   let tNat := t.toNat
   let mut sampleIdx := 0
-  let mut totalLoss? : Option (Tensor { shape := #[], dtype := .Float32 }) := none
+  let mut totalLoss? : Option (Tensor { shape := #[], dtype := .Float32, device := device }) := none
 
   -- Accumulate gradients across all rollout samples.
   let workingParams ← TensorStruct.makeLeafParams params
@@ -826,16 +825,16 @@ def grpoStepWithModelUpdate (b t : UInt64) [TensorStruct P]
 
       -- Token IDs are staged through Float (see grpoStepWithModel); values
       -- below 2^24 round-trip exactly, which covers every vocab in use.
-      let inputTensor : Tensor { shape := #[b, t], dtype := .Int64 } :=
-        Tensor.reshapeChecked (Tensor.toInt64 (Tensor.fromFloatArray (inputSeq.map (·.toFloat)))) #[b, t]
-      let targetTensor : Tensor { shape := #[b, t], dtype := .Int64 } :=
-        Tensor.reshapeChecked (Tensor.toInt64 (Tensor.fromFloatArray (targetSeq.map (·.toFloat)))) #[b, t]
-      let maskTensor : Tensor { shape := #[b, t], dtype := .Float32 } :=
-        Tensor.reshapeChecked (Tensor.fromFloatArray maskSeq) #[b, t]
+      let inputTensor : Tensor { shape := #[b, t], dtype := .Int64, device := device } :=
+        (Tensor.reshapeChecked (Tensor.toInt64 (Tensor.fromFloatArray (inputSeq.map (·.toFloat)))) #[b, t]).to device
+      let targetTensor : Tensor { shape := #[b, t], dtype := .Int64, device := device } :=
+        (Tensor.reshapeChecked (Tensor.toInt64 (Tensor.fromFloatArray (targetSeq.map (·.toFloat)))) #[b, t]).to device
+      let maskTensor : Tensor { shape := #[b, t], dtype := .Float32, device := device } :=
+        (Tensor.reshapeChecked (Tensor.fromFloatArray maskSeq) #[b, t]).to device
 
       let adv := advantages[sampleIdx]!
-      let advTensor : Tensor { shape := #[b], dtype := .Float32 } :=
-        Tensor.reshapeChecked (Tensor.fromFloatArray #[adv]) #[b]
+      let advTensor : Tensor { shape := #[b], dtype := .Float32, device := device } :=
+        (Tensor.reshapeChecked (Tensor.fromFloatArray #[adv]) #[b]).to device
 
       let nllPerToken ← forwardFn workingParams inputTensor targetTensor
       let logProbs := negateToLogProb nllPerToken
@@ -883,7 +882,7 @@ def grpoStepWithModelUpdate (b t : UInt64) [TensorStruct P]
 def trainLoopWithUpdates (b t : UInt64) [TensorStruct P]
     (getPromptFn : Nat → IO (Array UInt64 × String × String))  -- step → (tokens, text, answer)
     (generateOneFn : P → Array UInt64 → IO UInt64)
-    (forwardFn : P → Tensor { shape := #[b, t], dtype := .Int64 } → Tensor { shape := #[b, t], dtype := .Int64 } → IO (Tensor { shape := #[b, t], dtype := .Float32 }))
+    (forwardFn : P → Tensor { shape := #[b, t], dtype := .Int64, device := device } → Tensor { shape := #[b, t], dtype := .Int64, device := device } → IO (Tensor { shape := #[b, t], dtype := .Float32, device := device }))
     (params : P)
     (optState : Optim.AdamWState P)
     (decodeFn : Array UInt64 → String)
@@ -952,7 +951,7 @@ def trainLoopWithUpdates (b t : UInt64) [TensorStruct P]
 def trainOnPrompts (b t : UInt64)
     (prompts : Array (Array UInt64 × String × String))  -- (tokens, text, answer)
     (generateOneFn : Array UInt64 → IO UInt64)
-    (forwardFn : Tensor { shape := #[b, t], dtype := .Int64 } → Tensor { shape := #[b, t], dtype := .Int64 } → IO (Tensor { shape := #[b, t], dtype := .Float32 }))
+    (forwardFn : Tensor { shape := #[b, t], dtype := .Int64, device := device } → Tensor { shape := #[b, t], dtype := .Int64, device := device } → IO (Tensor { shape := #[b, t], dtype := .Float32, device := device }))
     (decodeFn : Array UInt64 → String)
     (rewardFn : String → String → Float)
     (config : GRPOConfig)
@@ -973,7 +972,7 @@ def trainOnPrompts (b t : UInt64)
 def trainOnPromptsWithUpdates (b t : UInt64) [TensorStruct P]
     (prompts : Array (Array UInt64 × String × String))  -- (tokens, text, answer)
     (generateOneFn : P → Array UInt64 → IO UInt64)
-    (forwardFn : P → Tensor { shape := #[b, t], dtype := .Int64 } → Tensor { shape := #[b, t], dtype := .Int64 } → IO (Tensor { shape := #[b, t], dtype := .Float32 }))
+    (forwardFn : P → Tensor { shape := #[b, t], dtype := .Int64, device := device } → Tensor { shape := #[b, t], dtype := .Int64, device := device } → IO (Tensor { shape := #[b, t], dtype := .Float32, device := device }))
     (params : P)
     (optState : Optim.AdamWState P)
     (decodeFn : Array UInt64 → String)

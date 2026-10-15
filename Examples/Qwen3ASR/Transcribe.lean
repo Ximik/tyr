@@ -124,9 +124,10 @@ private def uiPrintInline (s : String) : IO Unit := do
   (← IO.getStdout).flush
 
 private def transcribeWavStreamed
+    {device : torch.Device}
     (modelDir : String)
     {cfg : Qwen3ASRConfig}
-    (model : Qwen3ASRForConditionalGeneration cfg)
+    (model : Qwen3ASRForConditionalGeneration (device := device) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (pre : PreprocessorConfig)
     (wavPath : String)
@@ -149,6 +150,7 @@ private def transcribeWavStreamed
     else
       pure decodeMode
   let sm : StreamModel := {
+    device := device
     cfg := cfg
     model := model
     tok := tok
@@ -214,7 +216,7 @@ def runMain (argv : List String) : IO UInt32 := do
   let cfg ← Qwen3ASRConfig.loadFromPretrainedDir modelDir
   let tok ← tokenizer.qwen3.loadTokenizer modelDir
   let pre ← PreprocessorConfig.loadFromPretrainedDir modelDir
-  let model ← Qwen3ASRForConditionalGeneration.loadSharded modelDir cfg
+  let ⟨_device, model⟩ ← Qwen3ASRForConditionalGeneration.loadSharded modelDir cfg
   IO.println s!"Qwen3-ASR target device: {repr model.thinker.lmHead.device}"
   let forcedAligner ←
     match args.alignerSource with

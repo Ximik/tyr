@@ -19,14 +19,14 @@ private def cfg : Config := {
   hidden_size_per_layer_input := 2, vocab_size_per_layer_input := 16
 }
 
-private def weight (s : Shape) (offset : Float := 0.0) : Tensor { shape := s } :=
+private def weight (s : Shape) (offset : Float := 0.0) : Tensor { shape := s, device := .CPU } :=
   let n := s.foldl (· * ·) 1
   let vals := Array.ofFn (n := n.toNat) fun i => Float.sin (i.val.toFloat * 0.71 + offset) * 0.2
   (Tensor.fromFloatArray vals).reshapeChecked s |>.forgetDType
 
-private def norm (n : UInt64) : Gemma4RMSNorm n := { weight := (Tensor.ones #[n]).forgetDType }
+private def norm (n : UInt64) : Gemma4RMSNorm (device := .CPU) n := { weight := (Tensor.ones #[n]).forgetDType }
 
-private def textModel (c : Config) : Gemma4ForCausalLM c := Id.run do
+private def textModel (c : Config) : Gemma4ForCausalLM (device := .CPU) c := Id.run do
   let mut layers := #[]
   for i in [:c.num_hidden_layers.toNat] do
     let layer : Gemma4Layer c := {
@@ -58,7 +58,7 @@ private def textModel (c : Config) : Gemma4ForCausalLM c := Id.run do
       layers, norm := norm c.hidden_size }
     lmHead := weight #[c.vocab_size, c.hidden_size] 1.6 }
 
-private def ids : Tensor { shape := #[1, 7], dtype := .Int64 } :=
+private def ids : Tensor { shape := #[1, 7], dtype := .Int64, device := .CPU } :=
   (Tensor.fromInt64Array #[2, 4, 7, 3, 9, 5, 11]).reshapeChecked #[1, 7]
 
 private def close {σ τ : StaticSpec} (x : Tensor σ) (y : Tensor τ) (tol : Float := 1e-4) : IO Unit := do
@@ -164,10 +164,10 @@ private def vlCfg : VLConfig := {
   image_processor := { patch_size := 2, pooling_kernel_size := 2, max_soft_tokens := 4 }
   image_token_id := 15 }
 
-private def visionLinear (outDim inDim : UInt64) (phase : Float) : Gemma4VisionLinear outDim inDim :=
+private def visionLinear (outDim inDim : UInt64) (phase : Float) : Gemma4VisionLinear (device := .CPU) outDim inDim :=
   { weight := weight #[outDim, inDim] phase }
 
-private def multimodalModel : Gemma4ForConditionalGeneration vlCfg := {
+private def multimodalModel : Gemma4ForConditionalGeneration (device := .CPU) vlCfg := {
   language_model := textModel vlCfg.text_config
   embed_vision := { embedding_projection := weight #[8, 8] 0.4 }
   vision_tower := {

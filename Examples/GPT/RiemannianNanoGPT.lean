@@ -13,6 +13,8 @@ import Tyr.Optim.RiemannianTreeSGD
 namespace Examples.GPT.RiemannianNanoGPT
 
 open torch
+
+variable {device : Device}
 open torch.gpt
 open torch.train
 open torch.checkpoint
@@ -94,7 +96,7 @@ def isFiniteFloat (x : Float) : Bool :=
   !x.isNaN && !x.isInf
 
 /-- Synthetic Shakespeare-sized token stream. -/
-def mkShakespeareLikeStream (cfg : PrototypeConfig) : IO (Tokens #[cfg.streamTokens]) := do
+def mkShakespeareLikeStream (cfg : PrototypeConfig) : IO (Tokens (device := .CPU) #[cfg.streamTokens]) := do
   Tensor.randint 0 cfg.modelConfig.vocab_size.toInt64 #[cfg.streamTokens]
 
 private def validateConfig (cfg : PrototypeConfig) : IO Unit := do
@@ -114,10 +116,10 @@ private def pullbackMetricLabel (cfg : PullbackMetricConfig) : String :=
   | .sampledFisher => s!"sampled_fisher({cfg.fisherProbeCount})"
 
 private def prototypeTrainBatch (cfg : PrototypeConfig)
-    (params : GPTParams cfg.modelConfig)
-    (stream : Tokens #[cfg.streamTokens])
+    (params : GPTParams (device := cfg.trainConfig.device) cfg.modelConfig)
+    (stream : Tokens (device := .CPU) #[cfg.streamTokens])
     (lr : Float)
-    : IO (GPTParams cfg.modelConfig × Float × torch.Optim.RiemannianTreeSGD.StepDiagnostics) := do
+    : IO (GPTParams (device := cfg.trainConfig.device) cfg.modelConfig × Float × torch.Optim.RiemannianTreeSGD.StepDiagnostics) := do
   let (x, y) ←
     torch.train.getBatch
       stream cfg.trainConfig.batchSize cfg.trainConfig.blockSize cfg.trainConfig.device
@@ -297,11 +299,11 @@ private def outputFactorRank (cfg : Config) (trainCfg : TrainConfig) (pullbackMe
 private def riemannianTrainStep {modelCfg : Config} {batch seq : UInt64}
     (trainCfg : TrainConfig)
     (pullbackMetric : PullbackMetricConfig)
-    (params : GPTParams modelCfg)
-    (x : Tokens #[batch, seq])
-    (y : Tokens #[batch, seq])
+    (params : GPTParams (device := device) modelCfg)
+    (x : Tokens (device := device) #[batch, seq])
+    (y : Tokens (device := device) #[batch, seq])
     (lr : Float)
-    : IO (GPTParams modelCfg × torch.Optim.RiemannianTreeSGD.StepDiagnostics × Float) := do
+    : IO (GPTParams (device := device) modelCfg × torch.Optim.RiemannianTreeSGD.StepDiagnostics × Float) := do
   let step ←
     match pullbackMetric.mode with
     | .exact =>
@@ -324,7 +326,7 @@ private def riemannianTrainStep {modelCfg : Config} {batch seq : UInt64}
 /-- Train with data of known size (legacy, no validation). -/
 def runTraining {n : UInt64} (modelCfg : Config) (trainCfg : TrainConfig)
     (pullbackMetric : PullbackMetricConfig := { mode := .sampledFisher, fisherProbeCount := 32 })
-    (trainData : Tokens #[n]) : IO (GPTParams modelCfg) := do
+    (trainData : Tokens (device := .CPU) #[n]) : IO (GPTParams (device := trainCfg.device) modelCfg) := do
   IO.println ""
   IO.println "Initializing model..."
   let mut params ← GPTParams.init modelCfg trainCfg.device
@@ -364,8 +366,8 @@ def runTraining {n : UInt64} (modelCfg : Config) (trainCfg : TrainConfig)
 /-- Train with validation data and checkpointing. -/
 def runTrainingWithVal {nTrain nVal : UInt64} (modelCfg : Config) (trainCfg : TrainConfig)
     (pullbackMetric : PullbackMetricConfig := { mode := .sampledFisher, fisherProbeCount := 32 })
-    (trainData : Tokens #[nTrain]) (valData : Tokens #[nVal])
-    (checkpointDir : Option String := none) : IO (GPTParams modelCfg) := do
+    (trainData : Tokens (device := .CPU) #[nTrain]) (valData : Tokens (device := .CPU) #[nVal])
+    (checkpointDir : Option String := none) : IO (GPTParams (device := trainCfg.device) modelCfg) := do
   IO.println ""
   IO.println "Initializing model..."
   let mut params ← GPTParams.init modelCfg trainCfg.device
@@ -401,7 +403,7 @@ def runTrainingWithVal {nTrain nVal : UInt64} (modelCfg : Config) (trainCfg : Tr
       totalLoss := 0.0
 
     if iterNum % trainCfg.evalInterval == 0 && iterNum > 0 then
-      let valLoss ← evalLoss params valData trainCfg.batchSize trainCfg.blockSize 10 trainCfg.device
+      let valLoss ← evalLoss params valData trainCfg.batchSize trainCfg.blockSize 10
       let valPpl := perplexity valLoss
       IO.println s!"  val_loss={valLoss}, val_ppl={valPpl}"
       if valLoss < bestValLoss then
@@ -409,7 +411,7 @@ def runTrainingWithVal {nTrain nVal : UInt64} (modelCfg : Config) (trainCfg : Tr
         IO.println "  [new best val_loss!]"
       (← IO.getStdout).flush
 
-  let finalValLoss ← evalLoss params valData trainCfg.batchSize trainCfg.blockSize 10 trainCfg.device
+  let finalValLoss ← evalLoss params valData trainCfg.batchSize trainCfg.blockSize 10
   let finalValPpl := perplexity finalValLoss
   if finalValLoss < bestValLoss then
     bestValLoss := finalValLoss

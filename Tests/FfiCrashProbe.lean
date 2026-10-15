@@ -14,7 +14,7 @@ import Tyr.Typed
 open torch
 
 def main : IO Unit := do
-  let m : Tensor { shape := #[2, 2], dtype := .Float32 } := Tensor.ones #[2, 2]
+  let m : Tensor { shape := #[2, 2], dtype := .Float32, device := .CPU } := Tensor.ones #[2, 2]
   IO.println "triggering libtorch device error via .to (CUDA 0)..."
   (← IO.getStdout).flush
   let c := m.to (.CUDA 0)

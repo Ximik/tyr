@@ -12,27 +12,27 @@ private def allclose {σ : StaticSpec} (lhs rhs : Tensor σ) : Bool :=
   Tensor.allclose lhs rhs
 
 structure Model where
-  weight : Tensor { shape := #[2, 4], dtype := .Float32 }
-  bias : Tensor { shape := #[2], dtype := .Float32 }
-  cache : Frozen { shape := #[2], dtype := .Float32 }
+  weight : Tensor { shape := #[2, 4], dtype := .Float32, device := .CPU }
+  bias : Tensor { shape := #[2], dtype := .Float32, device := .CPU }
+  cache : Frozen { shape := #[2], dtype := .Float32, device := .CPU }
   name : Static String
   deriving TensorStruct, ToTensorStructSchema, TensorStructFlatten
 
 structure InputBundle where
-  x : Tensor { shape := #[4], dtype := .Float32 }
-  scale : Option (Tensor { shape := #[1], dtype := .Float32 })
+  x : Tensor { shape := #[4], dtype := .Float32, device := .CPU }
+  scale : Option (Tensor { shape := #[1], dtype := .Float32, device := .CPU })
   flag : Bool
   deriving TensorStruct, ToTensorStructSchema, TensorStructFlatten
 
 structure OutputBundle where
-  logits : Tensor { shape := #[2], dtype := .Float32 }
+  logits : Tensor { shape := #[2], dtype := .Float32, device := .CPU }
   label : Static String
   deriving TensorStruct, ToTensorStructSchema, TensorStructFlatten
 
 private def sampleModel : Model :=
   { weight := Tensor.full #[2, 4] 2.0
     bias := Tensor.full #[2] 3.0
-    cache := (Tensor.full #[2] 4.0 : Frozen { shape := #[2], dtype := .Float32 })
+    cache := (Tensor.full #[2] 4.0 : Frozen { shape := #[2], dtype := .Float32, device := .CPU })
     name := "model" }
 
 private def sampleInput : InputBundle :=
@@ -56,7 +56,7 @@ private def replacementOutput : OutputBundle :=
 private def replacementModel : Model :=
   { weight := Tensor.full #[2, 4] 8.0
     bias := Tensor.full #[2] 9.0
-    cache := (Tensor.full #[2] 10.0 : Frozen { shape := #[2], dtype := .Float32 })
+    cache := (Tensor.full #[2] 10.0 : Frozen { shape := #[2], dtype := .Float32, device := .CPU })
     name := "replacement-model" }
 
 private def replacementInput : InputBundle :=
@@ -102,10 +102,10 @@ private def fakeStructuredFrontend : StructuredFrontendFunction Model InputBundl
           pure replacementInvarLeaves
       } }
 
-private def sampleScalarLoss : Tensor { shape := #[], dtype := .Float32 } :=
+private def sampleScalarLoss : Tensor { shape := #[], dtype := .Float32, device := .CPU } :=
   Tensor.full #[] 13.0
 
-private def replacementScalarLoss : Tensor { shape := #[], dtype := .Float32 } :=
+private def replacementScalarLoss : Tensor { shape := #[], dtype := .Float32, device := .CPU } :=
   Tensor.full #[] 17.0
 
 private def scalarLossSignature : FrontendADSignature :=
@@ -113,7 +113,7 @@ private def scalarLossSignature : FrontendADSignature :=
     inputs := #[FrontendBoundary.ofValue sampleInput .diffOnly]
     outputs := #[FrontendBoundary.ofValue sampleScalarLoss .diffOnly] }
 
-private def fakeScalarLossFrontend : StructuredFrontendFunction Model InputBundle (Tensor { shape := #[], dtype := .Float32 }) :=
+private def fakeScalarLossFrontend : StructuredFrontendFunction Model InputBundle (Tensor { shape := #[], dtype := .Float32, device := .CPU }) :=
   { signature := scalarLossSignature
     evalFlat := fun invarLeaves => do
       if invarLeaves.size != scalarLossSignature.paramLeafCount + scalarLossSignature.inputLeafCount then

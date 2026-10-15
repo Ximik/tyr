@@ -51,9 +51,7 @@ private def castTensorAt {σ τ : StaticSpec} (path : String)
       match targetDType with
       | .Unknown _ => throw (IO.userError s!"Unsupported target dtype {targetDType}")
       | _ => pure (some targetDType.canonicalName)
-    let targetDevice := match τ.device with
-      | .any => tensor.raw.device
-      | .exact device => device
+    let targetDevice := τ.device
     -- Request dtype and placement together: an intermediate dtype may be
     -- unsupported on the source device (e.g. MPS Float32 -> CPU Float64).
     let raw ← if dtypeTag.isNone && targetDevice == tensor.raw.device then
@@ -61,7 +59,7 @@ private def castTensorAt {σ τ : StaticSpec} (path : String)
       else RawTensor.convertIO σ.shape tensor.raw targetDevice dtypeTag
     -- Check retained metadata too, even when the destination index is dynamic.
     checked (TensorSpec.checkDType targetDType raw.dtype)
-    checked (DevicePolicy.check (.exact targetDevice) raw.device)
+    checked (Device.check targetDevice raw.device)
     checked (Tensor.ofRaw raw)
   catch error =>
     throw <| IO.userError s!"TensorStruct.castTo at {renderPath path}: {error}"
@@ -76,10 +74,11 @@ instance {σ τ : StaticSpec} : TensorTreeCast (Frozen σ) (Frozen τ) where
 instance {α : Type} : TensorTreeCast (Static α) (Static α) where
   castAt _ source := pure source
 
-instance {sourceDType targetDType : DType} :
-    TensorTreeCast (ShapePackedTensor sourceDType) (ShapePackedTensor targetDType) where
+instance {sourceDType targetDType : DType} {sourceDevice targetDevice : Device} :
+    TensorTreeCast (ShapePackedTensor sourceDType sourceDevice)
+      (ShapePackedTensor targetDType targetDevice) where
   castAt path source := do
-    let tensor : Tensor { shape := source.1, dtype := targetDType } ←
+    let tensor : Tensor { shape := source.1, dtype := targetDType, device := targetDevice } ←
       castAt path source.2
     pure ⟨source.1, tensor⟩
 
@@ -146,7 +145,6 @@ instance : TensorTreeCast ISize ISize where castAt _ source := pure source
 instance {n : Nat} : TensorTreeCast (Fin n) (Fin n) where castAt _ source := pure source
 instance : TensorTreeCast DType DType where castAt _ source := pure source
 instance : TensorTreeCast Device Device where castAt _ source := pure source
-instance : TensorTreeCast DevicePolicy DevicePolicy where castAt _ source := pure source
 instance : TensorTreeCast StaticSpec StaticSpec where castAt _ source := pure source
 
 end TensorTreeCast
@@ -154,8 +152,8 @@ end TensorTreeCast
 namespace TensorStruct
 
 /-- Convert to the destination tree of tensor types, with no allocated target
-template. Dynamic target dtype and unrestricted target placement preserve the
-source's actual dtype/device; concrete targets request real native conversions.
+template. A dynamic target dtype preserves the source dtype; each target has a
+concrete device, and differing target dtypes/devices request real native conversions.
 Shape mismatches and unsupported dtype targets report their structural path. -/
 def castTo (β : Type) {α : Type} [TensorTreeCast α β] (source : α) : IO β :=
   TensorTreeCast.castAt "" source

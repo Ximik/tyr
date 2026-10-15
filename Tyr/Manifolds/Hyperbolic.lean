@@ -10,7 +10,7 @@ namespace Tyr.AD
 open torch
 open DifferentiableManifold
 
-variable {d : DType} {dev : DevicePolicy}
+variable {d : DType} {dev : Device}
 
 /-! ## Hyperbolic Manifold H^n (hyperboloid model)
 
@@ -23,7 +23,7 @@ where <x,y>_L = sum_{i=1..n} x_i y_i - x_{n+1} y_{n+1}.
 
 /-- Hyperbolic space H^n represented as an (n+1)-vector on the hyperboloid. -/
 structure Hyperbolic (n : UInt64) (dtype : DType := .Float32)
-    (device : DevicePolicy := .any) where
+    (device : Device := .CPU) where
   /-- Ambient coordinates in R^{n+1} -/
   coords : Tensor ⟨#[n + 1], dtype, device⟩
 
@@ -63,7 +63,7 @@ def random (n : UInt64) : IO (Hyperbolic n) := do
   let spatial ← Tensor.randn #[n]
   let spatialSq := Tensor.item (Tensor.sumAll (Mul.mul spatial spatial))
   let t := Float.sqrt (spatialSq + 1.0)
-  let tVec := Tensor.Preserving.mulScalar (Tensor.onesFor ⟨#[1], .Float32, .any⟩) t
+  let tVec := Tensor.Preserving.mulScalar (Tensor.onesFor ⟨#[1], .Float32, .CPU⟩) t
   return ⟨Tensor.cat spatial tVec 0⟩
 
 /-- Origin point (0, ..., 0, 1). -/
@@ -74,7 +74,7 @@ end Hyperbolic
 
 /-- Tangent vector on H^n, represented in ambient coordinates. -/
 structure HyperbolicTangent (n : UInt64) (dtype : DType := .Float32)
-    (device : DevicePolicy := .any) where
+    (device : Device := .CPU) where
   /-- Tangent vector in R^{n+1} -/
   vec : Tensor ⟨#[n + 1], dtype, device⟩
 

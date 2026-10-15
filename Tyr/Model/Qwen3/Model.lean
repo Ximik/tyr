@@ -18,69 +18,70 @@ import Tyr.Model.Utils
 
 namespace torch.qwen3
 
+variable {device : Device}
 open torch
 open torch.Model
 
 private def tokenInSetMask {batch : UInt64}
-    (tokens : Tensor { shape := #[batch], dtype := .Int64 })
+    (tokens : Tensor { device := device, shape := #[batch], dtype := .Int64 })
     (allow : Array UInt64)
-    : Tensor { shape := #[batch], dtype := .Bool } :=
+    : Tensor { device := device, shape := #[batch], dtype := .Bool } :=
   Id.run do
-    let mut out : Tensor { shape := #[batch], dtype := .Bool } := Tensor.eqScalar tokens (-1)
+    let mut out : Tensor { device := device, shape := #[batch], dtype := .Bool } := Tensor.eqScalar tokens (-1)
     for tok in allow do
-      let isTok : Tensor { shape := #[batch], dtype := .Bool } := Tensor.eqScalar tokens (Int64.ofNat tok.toNat)
+      let isTok : Tensor { device := device, shape := #[batch], dtype := .Bool } := Tensor.eqScalar tokens (Int64.ofNat tok.toNat)
       out := Tensor.logicalOr out isTok
     out
 
 private def eosVectorOnDevice {batch : UInt64}
     (eosTokenIds : Array UInt64)
     (device : Device)
-    : Option (Tensor { shape := #[batch], dtype := .Int64 }) :=
+    : Option (Tensor { device := device, shape := #[batch], dtype := .Int64 }) :=
   match eosTokenIds[0]? with
   | none => none
   | some eosTok =>
-    let eosCpu : Tensor { shape := #[batch], dtype := .Int64 } := Tensor.fullInt #[batch] (Int64.ofNat eosTok.toNat)
-    let eosDev : Tensor { shape := #[batch], dtype := .Int64 } := if eosCpu.device == device then eosCpu else eosCpu.to device
+    let eosCpu : Tensor { device := .CPU, shape := #[batch], dtype := .Int64 } := Tensor.fullInt #[batch] (Int64.ofNat eosTok.toNat)
+    let eosDev : Tensor { device := device, shape := #[batch], dtype := .Int64 } := eosCpu.to device
     some eosDev
 
 /-- Causal-LM output container. -/
 structure CausalLMOutput (cfg : Config) (batch seq : UInt64) where
-  logits : Tensor { shape := #[batch, seq, cfg.vocab_size], dtype := .Float32 }
-  hiddenStates : Option (Array (Tensor { shape := #[batch, seq, cfg.hidden_size], dtype := .Float32 })) := none
+  logits : Tensor { device := device, shape := #[batch, seq, cfg.vocab_size], dtype := .Float32 }
+  hiddenStates : Option (Array (Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := .Float32 })) := none
 
 /-- Full standalone Qwen3 causal language model. -/
 structure Qwen3ForCausalLM (cfg : Config) where
-  model : qwen.Qwen3Model cfg
-  lmHead : Tensor { shape := #[cfg.vocab_size, cfg.hidden_size], dtype := .Float32 }
+  model : qwen.Qwen3Model (device := device) cfg
+  lmHead : Tensor { device := device, shape := #[cfg.vocab_size, cfg.hidden_size], dtype := .Float32 }
   tieWordEmbeddings : Bool := true
   deriving TensorStruct
 
 namespace Qwen3ForCausalLM
 
 /-- Initialize model + LM head. By default, LM head is tied to token embeddings. -/
-def init (cfg : Config) (tieWordEmbeddings : Bool := true) : IO (Qwen3ForCausalLM cfg) := do
-  let model ← qwen.Qwen3Model.init cfg
+def init (cfg : Config) (tieWordEmbeddings : Bool := true) (device : Device := .CPU) : IO (Qwen3ForCausalLM (device := device) cfg) := do
+  let model ← qwen.Qwen3Model.init (device := device) cfg
   let lmHead ←
     if tieWordEmbeddings then
       pure model.embed_tokens
     else
-      initWeight #[cfg.vocab_size, cfg.hidden_size] cfg.hidden_size
+      initWeight (device := device) #[cfg.vocab_size, cfg.hidden_size] cfg.hidden_size
   pure { model, lmHead, tieWordEmbeddings }
 
 /-- Token embedding lookup. -/
 def embedTokens {batch seq : UInt64}
-    (m : Qwen3ForCausalLM cfg)
-    (inputIds : Tensor { shape := #[batch, seq], dtype := .Int64 })
-    : Tensor { shape := #[batch, seq, cfg.hidden_size], dtype := .Float32 } :=
+    (m : Qwen3ForCausalLM (device := device) cfg)
+    (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
+    : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := .Float32 } :=
   Tensor.embedding inputIds m.model.embed_tokens
 
 /-- Forward from pre-computed input embeddings. -/
 def forwardEmbeds {batch seq : UInt64}
-    (m : Qwen3ForCausalLM cfg)
-    (inputsEmbeds : Tensor { shape := #[batch, seq, cfg.hidden_size], dtype := .Float32 })
-    (attnMask : Option (Tensor { shape := #[batch, seq], dtype := .Bool }) := none)
-    : Tensor { shape := #[batch, seq, cfg.vocab_size], dtype := .Float32 } :=
-  let (cos, sin) := qwen.computeFreqsOnDevice seq cfg.head_dim cfg.rope_theta
+    (m : Qwen3ForCausalLM (device := device) cfg)
+    (inputsEmbeds : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := .Float32 })
+    (attnMask : Option (Tensor { device := device, shape := #[batch, seq], dtype := .Bool }) := none)
+    : Tensor { device := device, shape := #[batch, seq, cfg.vocab_size], dtype := .Float32 } :=
+  let (cos, sin) := qwen.computeFreqsOnDevice seq cfg.head_dim cfg.rope_theta device
   let hidden :=
     match attnMask with
     | some mask =>
@@ -96,37 +97,37 @@ def forwardEmbeds {batch seq : UInt64}
 
 /-- Standard forward pass from token IDs. -/
 def forward {batch seq : UInt64}
-    (m : Qwen3ForCausalLM cfg)
-    (inputIds : Tensor { shape := #[batch, seq], dtype := .Int64 })
-    (attnMask : Option (Tensor { shape := #[batch, seq], dtype := .Bool }) := none)
-    : Tensor { shape := #[batch, seq, cfg.vocab_size], dtype := .Float32 } :=
+    (m : Qwen3ForCausalLM (device := device) cfg)
+    (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
+    (attnMask : Option (Tensor { device := device, shape := #[batch, seq], dtype := .Bool }) := none)
+    : Tensor { device := device, shape := #[batch, seq, cfg.vocab_size], dtype := .Float32 } :=
   m.forwardEmbeds (m.embedTokens inputIds) attnMask
 
 /-- Forward pass that also returns per-layer hidden states. -/
 def forwardWithHiddenStates {batch seq : UInt64}
-    (m : Qwen3ForCausalLM cfg)
-    (inputIds : Tensor { shape := #[batch, seq], dtype := .Int64 })
-    (attnMask : Option (Tensor { shape := #[batch, seq], dtype := .Bool }) := none)
-    : CausalLMOutput cfg batch seq :=
-  let (cos, sin) := qwen.computeFreqsOnDevice seq cfg.head_dim cfg.rope_theta
+    (m : Qwen3ForCausalLM (device := device) cfg)
+    (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
+    (attnMask : Option (Tensor { device := device, shape := #[batch, seq], dtype := .Bool }) := none)
+    : CausalLMOutput (device := device) cfg batch seq :=
+  let (cos, sin) := qwen.computeFreqsOnDevice seq cfg.head_dim cfg.rope_theta device
   let hiddenStates :=
     match attnMask with
     | some mask => m.model.forwardWithHiddenStatesMasked cfg inputIds cos sin mask
     | none => m.model.forwardWithHiddenStates cfg inputIds cos sin
-  let finalHidden : Tensor { shape := #[batch, seq, cfg.hidden_size], dtype := .Float32 } :=
-    hiddenStates.getD (hiddenStates.size - 1) (Tensor.zeros #[batch, seq, cfg.hidden_size])
+  let finalHidden : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := .Float32 } :=
+    hiddenStates.getD (hiddenStates.size - 1) (Tensor.zeros (device := device) #[batch, seq, cfg.hidden_size])
   let logits := Tensor.linear3d finalHidden m.lmHead
   { logits, hiddenStates := some hiddenStates }
 
 /-- One-layer KV cache type for cached decoding. -/
 abbrev LayerKVCache (cfg : Config) (batch : UInt64) :=
-  qwen.QwenAttention.KVCache batch cfg.num_key_value_heads cfg.head_dim
+  qwen.QwenAttention.KVCache (device := device) batch cfg.num_key_value_heads cfg.head_dim
 
 private def initLayerKVCaches {batch : UInt64}
-    (m : Qwen3ForCausalLM cfg)
+    (m : Qwen3ForCausalLM (device := device) cfg)
     (maxLen : UInt64)
     (device : Device)
-    : Array (LayerKVCache cfg batch) :=
+    : Array (LayerKVCache (device := device) cfg batch) :=
   m.model.layers.map (fun _ =>
     qwen.QwenAttention.initKVCache
       maxLen
@@ -136,9 +137,9 @@ private def initLayerKVCaches {batch : UInt64}
       device)
 
 private def precomputeDecodeRotary {maxLen : UInt64}
-    (_m : Qwen3ForCausalLM cfg)
+    (_m : Qwen3ForCausalLM (device := device) cfg)
     (device : Device)
-    : Tensor { shape := #[maxLen, cfg.head_dim / 2], dtype := .Float32 } × Tensor { shape := #[maxLen, cfg.head_dim / 2], dtype := .Float32 } :=
+    : Tensor { device := device, shape := #[maxLen, cfg.head_dim / 2], dtype := .Float32 } × Tensor { device := device, shape := #[maxLen, cfg.head_dim / 2], dtype := .Float32 } :=
   qwen.computeFreqsOnDevice
     maxLen
     cfg.head_dim
@@ -146,17 +147,17 @@ private def precomputeDecodeRotary {maxLen : UInt64}
     device
 
 private def decodeStepFromEmbedWithCache {batch maxLen : UInt64}
-    (m : Qwen3ForCausalLM cfg)
-    (cosAll : Tensor { shape := #[maxLen, cfg.head_dim / 2], dtype := .Float32 })
-    (sinAll : Tensor { shape := #[maxLen, cfg.head_dim / 2], dtype := .Float32 })
-    (tokenEmbed : Tensor { shape := #[batch, 1, cfg.hidden_size], dtype := .Float32 })
+    (m : Qwen3ForCausalLM (device := device) cfg)
+    (cosAll : Tensor { device := device, shape := #[maxLen, cfg.head_dim / 2], dtype := .Float32 })
+    (sinAll : Tensor { device := device, shape := #[maxLen, cfg.head_dim / 2], dtype := .Float32 })
+    (tokenEmbed : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := .Float32 })
     (position : UInt64)
-    (caches : Array (LayerKVCache cfg batch))
-    : IO (Tensor { shape := #[batch, cfg.vocab_size], dtype := .Float32 } × Array (LayerKVCache cfg batch)) := do
-  let cos : Tensor { shape := #[1, cfg.head_dim / 2], dtype := .Float32 } := Tensor.sliceChecked cosAll 0 position 1 #[1, cfg.head_dim / 2]
-  let sin : Tensor { shape := #[1, cfg.head_dim / 2], dtype := .Float32 } := Tensor.sliceChecked sinAll 0 position 1 #[1, cfg.head_dim / 2]
+    (caches : Array (LayerKVCache (device := device) cfg batch))
+    : IO (Tensor { device := device, shape := #[batch, cfg.vocab_size], dtype := .Float32 } × Array (LayerKVCache (device := device) cfg batch)) := do
+  let cos : Tensor { device := device, shape := #[1, cfg.head_dim / 2], dtype := .Float32 } := Tensor.sliceChecked cosAll 0 position 1 #[1, cfg.head_dim / 2]
+  let sin : Tensor { device := device, shape := #[1, cfg.head_dim / 2], dtype := .Float32 } := Tensor.sliceChecked sinAll 0 position 1 #[1, cfg.head_dim / 2]
 
-  let mut hidden : Tensor { shape := #[batch, 1, cfg.hidden_size], dtype := .Float32 } := tokenEmbed
+  let mut hidden : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := .Float32 } := tokenEmbed
   let mut nextCaches := caches
 
   for i in [:m.model.layers.size] do
@@ -173,60 +174,60 @@ private def decodeStepFromEmbedWithCache {batch maxLen : UInt64}
     nextCaches := nextCaches.set! i cNext
 
   let hiddenNorm := m.model.norm.forward3d hidden
-  let logits3 : Tensor { shape := #[batch, 1, cfg.vocab_size], dtype := .Float32 } := Tensor.linear3d hiddenNorm m.lmHead
-  let logits2 : Tensor { shape := #[batch, cfg.vocab_size], dtype := .Float32 } := Tensor.reshapeChecked logits3 #[batch, cfg.vocab_size]
+  let logits3 : Tensor { device := device, shape := #[batch, 1, cfg.vocab_size], dtype := .Float32 } := Tensor.linear3d hiddenNorm m.lmHead
+  let logits2 : Tensor { device := device, shape := #[batch, cfg.vocab_size], dtype := .Float32 } := Tensor.reshapeChecked logits3 #[batch, cfg.vocab_size]
   pure (logits2, nextCaches)
 
 private partial def prefillCachesFromEmbeds {batch seq maxLen : UInt64}
-    (m : Qwen3ForCausalLM cfg)
-    (cosAll : Tensor { shape := #[maxLen, cfg.head_dim / 2], dtype := .Float32 })
-    (sinAll : Tensor { shape := #[maxLen, cfg.head_dim / 2], dtype := .Float32 })
-    (inputsEmbeds : Tensor { shape := #[batch, seq, cfg.hidden_size], dtype := .Float32 })
-    (caches : Array (LayerKVCache cfg batch))
+    (m : Qwen3ForCausalLM (device := device) cfg)
+    (cosAll : Tensor { device := device, shape := #[maxLen, cfg.head_dim / 2], dtype := .Float32 })
+    (sinAll : Tensor { device := device, shape := #[maxLen, cfg.head_dim / 2], dtype := .Float32 })
+    (inputsEmbeds : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := .Float32 })
+    (caches : Array (LayerKVCache (device := device) cfg batch))
     (position : Nat)
-    (lastLogits : Tensor { shape := #[batch, cfg.vocab_size], dtype := .Float32 })
-    : IO (Tensor { shape := #[batch, cfg.vocab_size], dtype := .Float32 } × Array (LayerKVCache cfg batch)) := do
+    (lastLogits : Tensor { device := device, shape := #[batch, cfg.vocab_size], dtype := .Float32 })
+    : IO (Tensor { device := device, shape := #[batch, cfg.vocab_size], dtype := .Float32 } × Array (LayerKVCache (device := device) cfg batch)) := do
   if position >= seq.toNat then
     pure (lastLogits, caches)
   else
-    let tok : Tensor { shape := #[batch, 1, cfg.hidden_size], dtype := .Float32 } := Tensor.sliceChecked inputsEmbeds 1 position.toUInt64 1 #[batch, 1, cfg.hidden_size]
+    let tok : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := .Float32 } := Tensor.sliceChecked inputsEmbeds 1 position.toUInt64 1 #[batch, 1, cfg.hidden_size]
     let (logits, caches') ← decodeStepFromEmbedWithCache m cosAll sinAll tok position.toUInt64 caches
     prefillCachesFromEmbeds m cosAll sinAll inputsEmbeds caches' (position + 1) logits
 
 private partial def greedyLoopCached {batch maxLen : UInt64}
-    (m : Qwen3ForCausalLM cfg)
-    (cosAll : Tensor { shape := #[maxLen, cfg.head_dim / 2], dtype := .Float32 })
-    (sinAll : Tensor { shape := #[maxLen, cfg.head_dim / 2], dtype := .Float32 })
+    (m : Qwen3ForCausalLM (device := device) cfg)
+    (cosAll : Tensor { device := device, shape := #[maxLen, cfg.head_dim / 2], dtype := .Float32 })
+    (sinAll : Tensor { device := device, shape := #[maxLen, cfg.head_dim / 2], dtype := .Float32 })
     (eosTokenIds : Array UInt64)
-    (eosVector : Option (Tensor { shape := #[batch], dtype := .Int64 }))
+    (eosVector : Option (Tensor { device := device, shape := #[batch], dtype := .Int64 }))
     (remaining : Nat)
-    (caches : Array (LayerKVCache cfg batch))
-    (lastLogits : Tensor { shape := #[batch, cfg.vocab_size], dtype := .Float32 })
-    (finished : Option (Tensor { shape := #[batch], dtype := .Bool }))
+    (caches : Array (LayerKVCache (device := device) cfg batch))
+    (lastLogits : Tensor { device := device, shape := #[batch, cfg.vocab_size], dtype := .Float32 })
+    (finished : Option (Tensor { device := device, shape := #[batch], dtype := .Bool }))
     {curSeq : UInt64}
-    (curIds : Tensor { shape := #[batch, curSeq], dtype := .Int64 })
-    : IO (Sigma (fun outSeq => Tensor { shape := #[batch, outSeq], dtype := .Int64 })) := do
+    (curIds : Tensor { device := device, shape := #[batch, curSeq], dtype := .Int64 })
+    : IO (Sigma (fun outSeq => Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })) := do
   if remaining == 0 then
     return ⟨curSeq, curIds⟩
 
-  let nextTokRaw : Tensor { shape := #[batch], dtype := .Int64 } := (Tensor.argmax lastLogits 1).reshapeChecked #[batch]
-  let nextTok : Tensor { shape := #[batch], dtype := .Int64 } :=
+  let nextTokRaw : Tensor { device := device, shape := #[batch], dtype := .Int64 } := (Tensor.argmax lastLogits 1).reshapeChecked #[batch]
+  let nextTok : Tensor { device := device, shape := #[batch], dtype := .Int64 } :=
     match eosVector, finished with
     | some eosTok, some doneMask =>
-      let activeMask : Tensor { shape := #[batch], dtype := .Bool } := Tensor.logicalNot doneMask
+      let activeMask : Tensor { device := device, shape := #[batch], dtype := .Bool } := Tensor.logicalNot doneMask
       Tensor.whereSelect activeMask nextTokRaw eosTok
     | _, _ => nextTokRaw
-  let nextCol : Tensor { shape := #[batch, 1], dtype := .Int64 } := Tensor.reshapeChecked nextTok #[batch, 1]
-  let appended : Tensor { shape := #[batch, curSeq + 1], dtype := .Int64 } := Tensor.cat curIds nextCol 1
+  let nextCol : Tensor { device := device, shape := #[batch, 1], dtype := .Int64 } := Tensor.reshapeChecked nextTok #[batch, 1]
+  let appended : Tensor { device := device, shape := #[batch, curSeq + 1], dtype := .Int64 } := Tensor.cat curIds nextCol 1
 
   match eosVector with
   | none =>
-    let nextEmb : Tensor { shape := #[batch, 1, cfg.hidden_size], dtype := .Float32 } := m.embedTokens nextCol
+    let nextEmb : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := .Float32 } := m.embedTokens nextCol
     let (nextLogits, caches') ← decodeStepFromEmbedWithCache m cosAll sinAll nextEmb curSeq caches
     greedyLoopCached m cosAll sinAll eosTokenIds none (remaining - 1) caches' nextLogits none appended
   | some _ =>
-    let reachedEos : Tensor { shape := #[batch], dtype := .Bool } := tokenInSetMask nextTok eosTokenIds
-    let finished' : Tensor { shape := #[batch], dtype := .Bool } :=
+    let reachedEos : Tensor { device := device, shape := #[batch], dtype := .Bool } := tokenInSetMask nextTok eosTokenIds
+    let finished' : Tensor { device := device, shape := #[batch], dtype := .Bool } :=
       match finished with
       | some doneMask => Tensor.logicalOr doneMask reachedEos
       | none => reachedEos
@@ -234,19 +235,19 @@ private partial def greedyLoopCached {batch maxLen : UInt64}
     if !hasActiveRows then
       return ⟨curSeq + 1, appended⟩
     else
-      let nextEmb : Tensor { shape := #[batch, 1, cfg.hidden_size], dtype := .Float32 } := m.embedTokens nextCol
+      let nextEmb : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := .Float32 } := m.embedTokens nextCol
       let (nextLogits, caches') ← decodeStepFromEmbedWithCache m cosAll sinAll nextEmb curSeq caches
       greedyLoopCached m cosAll sinAll eosTokenIds eosVector (remaining - 1) caches' nextLogits (some finished') appended
 
 private partial def greedyLoopUncached {batch : UInt64}
-    (m : Qwen3ForCausalLM cfg)
+    (m : Qwen3ForCausalLM (device := device) cfg)
     (eosTokenIds : Array UInt64)
-    (eosVector : Option (Tensor { shape := #[batch], dtype := .Int64 }))
+    (eosVector : Option (Tensor { device := device, shape := #[batch], dtype := .Int64 }))
     (remaining : Nat)
-    (finished : Option (Tensor { shape := #[batch], dtype := .Bool }))
+    (finished : Option (Tensor { device := device, shape := #[batch], dtype := .Bool }))
     {curSeq : UInt64}
-    (curIds : Tensor { shape := #[batch, curSeq], dtype := .Int64 })
-    : IO (Sigma (fun outSeq => Tensor { shape := #[batch, outSeq], dtype := .Int64 })) := do
+    (curIds : Tensor { device := device, shape := #[batch, curSeq], dtype := .Int64 })
+    : IO (Sigma (fun outSeq => Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })) := do
   if remaining == 0 then
     return ⟨curSeq, curIds⟩
   if curSeq == 0 then
@@ -254,25 +255,25 @@ private partial def greedyLoopUncached {batch : UInt64}
 
   let logits := m.forward curIds none
   let lastPos := curSeq - 1
-  let last3 : Tensor { shape := #[batch, 1, cfg.vocab_size], dtype := .Float32 } :=
+  let last3 : Tensor { device := device, shape := #[batch, 1, cfg.vocab_size], dtype := .Float32 } :=
     Tensor.reshapeChecked (Tensor.sliceChecked logits 1 lastPos 1 #[batch, 1, cfg.vocab_size]) #[batch, 1, cfg.vocab_size]
-  let last2 : Tensor { shape := #[batch, cfg.vocab_size], dtype := .Float32 } := Tensor.reshapeChecked last3 #[batch, cfg.vocab_size]
-  let nextTokRaw : Tensor { shape := #[batch], dtype := .Int64 } := (Tensor.argmax last2 1).reshapeChecked #[batch]
-  let nextTok : Tensor { shape := #[batch], dtype := .Int64 } :=
+  let last2 : Tensor { device := device, shape := #[batch, cfg.vocab_size], dtype := .Float32 } := Tensor.reshapeChecked last3 #[batch, cfg.vocab_size]
+  let nextTokRaw : Tensor { device := device, shape := #[batch], dtype := .Int64 } := (Tensor.argmax last2 1).reshapeChecked #[batch]
+  let nextTok : Tensor { device := device, shape := #[batch], dtype := .Int64 } :=
     match eosVector, finished with
     | some eosTok, some doneMask =>
-      let activeMask : Tensor { shape := #[batch], dtype := .Bool } := Tensor.logicalNot doneMask
+      let activeMask : Tensor { device := device, shape := #[batch], dtype := .Bool } := Tensor.logicalNot doneMask
       Tensor.whereSelect activeMask nextTokRaw eosTok
     | _, _ => nextTokRaw
-  let nextCol : Tensor { shape := #[batch, 1], dtype := .Int64 } := Tensor.reshapeChecked nextTok #[batch, 1]
-  let appended : Tensor { shape := #[batch, curSeq + 1], dtype := .Int64 } := Tensor.cat curIds nextCol 1
+  let nextCol : Tensor { device := device, shape := #[batch, 1], dtype := .Int64 } := Tensor.reshapeChecked nextTok #[batch, 1]
+  let appended : Tensor { device := device, shape := #[batch, curSeq + 1], dtype := .Int64 } := Tensor.cat curIds nextCol 1
 
   match eosVector with
   | none =>
     greedyLoopUncached m eosTokenIds none (remaining - 1) none appended
   | some _ =>
-    let reachedEos : Tensor { shape := #[batch], dtype := .Bool } := tokenInSetMask nextTok eosTokenIds
-    let finished' : Tensor { shape := #[batch], dtype := .Bool } :=
+    let reachedEos : Tensor { device := device, shape := #[batch], dtype := .Bool } := tokenInSetMask nextTok eosTokenIds
+    let finished' : Tensor { device := device, shape := #[batch], dtype := .Bool } :=
       match finished with
       | some doneMask => Tensor.logicalOr doneMask reachedEos
       | none => reachedEos
@@ -284,11 +285,11 @@ private partial def greedyLoopUncached {batch : UInt64}
 
 /-- Greedy generation with static per-layer KV caches. -/
 def generateGreedy {batch seq : UInt64}
-    (m : Qwen3ForCausalLM cfg)
-    (inputIds : Tensor { shape := #[batch, seq], dtype := .Int64 })
+    (m : Qwen3ForCausalLM (device := device) cfg)
+    (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (maxNewTokens : UInt64 := 512)
     (eosTokenIds : Array UInt64 := #[])
-    : IO (Sigma (fun outSeq => Tensor { shape := #[batch, outSeq], dtype := .Int64 })) := do
+    : IO (Sigma (fun outSeq => Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })) := do
   if seq == 0 then
     throw <| IO.userError "generateGreedy requires non-empty prompt sequence"
   if maxNewTokens == 0 then
@@ -300,7 +301,7 @@ def generateGreedy {batch seq : UInt64}
   let eosVector := eosVectorOnDevice (batch := batch) eosTokenIds cacheDevice
   let (cosAll, sinAll) := precomputeDecodeRotary (maxLen := cacheMaxLen) m cacheDevice
   let caches0 := initLayerKVCaches m cacheMaxLen cacheDevice
-  let tok0 : Tensor { shape := #[batch, 1, cfg.hidden_size], dtype := .Float32 } := Tensor.sliceChecked inputsEmbeds 1 0 1 #[batch, 1, cfg.hidden_size]
+  let tok0 : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := .Float32 } := Tensor.sliceChecked inputsEmbeds 1 0 1 #[batch, 1, cfg.hidden_size]
   let (logits0, caches1) ← decodeStepFromEmbedWithCache m cosAll sinAll tok0 0 caches0
   let (lastLogits, cachesPrefill) ←
     prefillCachesFromEmbeds m cosAll sinAll inputsEmbeds caches1 1 logits0
@@ -308,11 +309,11 @@ def generateGreedy {batch seq : UInt64}
 
 /-- Reference greedy generation by full re-forward on each decode step. -/
 def generateGreedyUncached {batch seq : UInt64}
-    (m : Qwen3ForCausalLM cfg)
-    (inputIds : Tensor { shape := #[batch, seq], dtype := .Int64 })
+    (m : Qwen3ForCausalLM (device := device) cfg)
+    (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (maxNewTokens : UInt64 := 512)
     (eosTokenIds : Array UInt64 := #[])
-    : IO (Sigma (fun outSeq => Tensor { shape := #[batch, outSeq], dtype := .Int64 })) := do
+    : IO (Sigma (fun outSeq => Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })) := do
   if seq == 0 then
     throw <| IO.userError "generateGreedy requires non-empty prompt sequence"
   if maxNewTokens == 0 then

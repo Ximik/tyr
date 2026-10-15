@@ -5,11 +5,11 @@ namespace Tyr.AD
 open torch
 open DifferentiableManifold
 
-variable {d : DType} {dev : DevicePolicy}
+variable {d : DType} {dev : Device}
 
 /-- Symmetric positive definite manifold SPD(n). -/
 structure SymmetricPositiveDefinite (n : UInt64) (dtype : DType := .Float32)
-    (device : DevicePolicy := .any) where
+    (device : Device := .CPU) where
   matrix : Tensor ⟨#[n, n], dtype, device⟩
 
 namespace SymmetricPositiveDefinite
@@ -35,7 +35,7 @@ def distance [DType.RealFloating d] (A B : SymmetricPositiveDefinite n d dev) : 
 end SymmetricPositiveDefinite
 
 structure SPDTangent (n : UInt64) (dtype : DType := .Float32)
-    (device : DevicePolicy := .any) where
+    (device : Device := .CPU) where
   vec : Tensor ⟨#[n, n], dtype, device⟩
 
 namespace SPDTangent

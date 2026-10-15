@@ -2,12 +2,13 @@ import Tyr.Model.Flux.TypedOps
 
 namespace torch.flux
 
-private def axisIds {batch seq : UInt64} (ids : Tensor { shape := #[batch, seq, 4], dtype := .Int64 }) (axis : UInt64) : Tensor { shape := #[batch, seq], dtype := .Int64 } :=
+variable {device : Device}
+private def axisIds {batch seq : UInt64} (ids : Tensor { device := device, shape := #[batch, seq, 4], dtype := .Int64 }) (axis : UInt64) : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 } :=
   (sliceTyped ids 2 axis 1).reshapeChecked #[batch, seq]
 
 private def ropeAxis {batch seq : UInt64}
-    (ids : Tensor { shape := #[batch, seq], dtype := .Int64 }) (dim theta : UInt64)
-    : Tensor { shape := #[batch, seq, dim / 2, 2, 2], dtype := .Float32 } :=
+    (ids : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 }) (dim theta : UInt64)
+    : Tensor { device := device, shape := #[batch, seq, dim / 2, 2, 2], dtype := .Float32 } :=
   let scale := Tensor.Preserving.mulScalar ((Tensor.arange (dim / 2)).toFloat32.to ids.device) (2.0 / dim.toFloat)
   let omega := Tensor.Preserving.exp (Tensor.Preserving.mulScalar scale (-Float.log theta.toFloat))
   let pos := Tensor.expand (ids.toFloat32.reshapeChecked #[batch, seq, 1]) #[batch, seq, dim / 2]
@@ -17,15 +18,15 @@ private def ropeAxis {batch seq : UInt64}
   let sin := Tensor.Preserving.sin angle
   let cos := cos.reshapeChecked #[batch, seq, dim / 2, 1]
   let sin := sin.reshapeChecked #[batch, seq, dim / 2, 1]
-  let row0 : Tensor { shape := #[batch, seq, dim / 2, 2], dtype := .Float32 } := qwen35.typedCat cos (Tensor.Preserving.mulScalar sin (-1.0)) 3
-  let row1 : Tensor { shape := #[batch, seq, dim / 2, 2], dtype := .Float32 } := qwen35.typedCat sin cos 3
-  let both : Tensor { shape := #[batch, seq, dim / 2, 4], dtype := .Float32 } := qwen35.typedCat row0 row1 3
+  let row0 : Tensor { device := device, shape := #[batch, seq, dim / 2, 2], dtype := .Float32 } := qwen35.typedCat cos (Tensor.Preserving.mulScalar sin (-1.0)) 3
+  let row1 : Tensor { device := device, shape := #[batch, seq, dim / 2, 2], dtype := .Float32 } := qwen35.typedCat sin cos 3
+  let both : Tensor { device := device, shape := #[batch, seq, dim / 2, 4], dtype := .Float32 } := qwen35.typedCat row0 row1 3
   both.reshapeChecked #[batch, seq, dim / 2, 2, 2]
 
 /-- Four-axis rotary matrices. Each axis dimension is even and their sum is the head dimension. -/
 def ropeEmbed {batch seq head_dim : UInt64}
-    (ids : Tensor { shape := #[batch, seq, 4], dtype := .Int64 }) (axes_dims : Array UInt64) (theta : UInt64 := 2000)
-    : Tensor { shape := #[batch, 1, seq, head_dim / 2, 2, 2], dtype := .Float32 } :=
+    (ids : Tensor { device := device, shape := #[batch, seq, 4], dtype := .Int64 }) (axes_dims : Array UInt64) (theta : UInt64 := 2000)
+    : Tensor { device := device, shape := #[batch, 1, seq, head_dim / 2, 2, 2], dtype := .Float32 } :=
   if axes_dims.size != 4 || axes_dims.any (fun d => d % 2 != 0) ||
       axes_dims.foldl (fun n d => n + d.toNat) 0 != head_dim.toNat || theta == 0 then
     panic! "Flux RoPE requires four even axis dimensions summing to head_dim and a positive theta"
@@ -43,9 +44,9 @@ def ropeEmbed {batch seq head_dim : UInt64}
 
 /-- Apply rotary matrices in Float32 and restore the activation dtype. -/
 def applyRope {batch seq n_head head_dim : UInt64}
-    (x : Tensor { shape := #[batch, seq, n_head, head_dim] })
-    (pe : Tensor { shape := #[batch, 1, seq, head_dim / 2, 2, 2], dtype := .Float32 })
-    : Tensor { shape := #[batch, seq, n_head, head_dim] } :=
+    (x : Tensor { device := device, shape := #[batch, seq, n_head, head_dim] })
+    (pe : Tensor { device := device, shape := #[batch, 1, seq, head_dim / 2, 2, 2], dtype := .Float32 })
+    : Tensor { device := device, shape := #[batch, seq, n_head, head_dim] } :=
   let xf := (transposeAttention x).toFloat32.reshapeChecked #[batch, n_head, seq, head_dim / 2, 1, 2]
   let x0 := Tensor.expand ((sliceTyped xf 5 0 1).reshapeChecked #[batch, n_head, seq, head_dim / 2, 1]) #[batch, n_head, seq, head_dim / 2, 2]
   let x1 := Tensor.expand ((sliceTyped xf 5 1 1).reshapeChecked #[batch, n_head, seq, head_dim / 2, 1]) #[batch, n_head, seq, head_dim / 2, 2]

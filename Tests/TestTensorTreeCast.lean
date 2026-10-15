@@ -6,21 +6,21 @@ namespace Tests.TensorTreeCast
 open torch
 
 structure SourceModel where
-  weight : Tensor { shape := #[2, 2], dtype := .Float32, device := .exact .CPU }
-  norm : Tensor { shape := #[2], dtype := .Float64, device := .exact .CPU }
-  indices : Tensor { shape := #[2], dtype := .Int64 }
+  weight : Tensor { shape := #[2, 2], dtype := .Float32, device := .CPU }
+  norm : Tensor { shape := #[2], dtype := .Float64, device := .CPU }
+  indices : Tensor { shape := #[2], dtype := .Int64, device := .CPU }
   config : Static String
 
 structure TargetModel where
-  weight : Tensor { shape := #[2, 2], dtype := .BFloat16, device := .exact .CPU }
-  norm : Tensor { shape := #[2], dtype := .Float32, device := .exact .CPU }
-  indices : Tensor { shape := #[2], dtype := .Int64 }
+  weight : Tensor { shape := #[2, 2], dtype := .BFloat16, device := .CPU }
+  norm : Tensor { shape := #[2], dtype := .Float32, device := .CPU }
+  indices : Tensor { shape := #[2], dtype := .Int64, device := .CPU }
   config : Static String
 
 derive_tensor_tree_cast SourceModel => TargetModel
 
 structure GenericCastModel (size : UInt64) (dtype : DType) where
-  weight : Tensor { shape := #[size], dtype }
+  weight : Tensor { shape := #[size], dtype, device := .CPU }
   label : Static String
 
 abbrev FloatCastAlias := GenericCastModel 3 .Float32
@@ -34,16 +34,16 @@ example (input : FloatCastAlias) : IO BFloatCastAlias :=
 
 example (_output : BFloatCastAlias) : True := by
   fail_if_success
-    have _ : Tensor { shape := #[3], dtype := .Float32 } := _output.weight
+    have _ : Tensor { shape := #[3], dtype := .Float32, device := .CPU } := _output.weight
   trivial
 
 structure RenamedCastTarget where
-  kernel : Tensor { shape := #[3], dtype := .BFloat16 }
+  kernel : Tensor { shape := #[3], dtype := .BFloat16, device := .CPU }
   label : Static String
 
 structure ReorderedCastTarget where
   label : Static String
-  weight : Tensor { shape := #[3], dtype := .BFloat16 }
+  weight : Tensor { shape := #[3], dtype := .BFloat16, device := .CPU }
 
 /-- error: Tensor tree cast requires the same field names in the same order;
 source fields are [weight, label], target fields are [kernel, label]. -/
@@ -56,8 +56,8 @@ source fields are [weight, label], target fields are [label, weight]. -/
 derive_tensor_tree_cast FloatCastAlias => ReorderedCastTarget
 
 private def source : SourceModel := {
-  weight := Tensor.onesFor { shape := #[2, 2], dtype := .Float32, device := .exact .CPU }
-  norm := Tensor.onesFor { shape := #[2], dtype := .Float64, device := .exact .CPU }
+  weight := Tensor.onesFor { shape := #[2, 2], dtype := .Float32, device := .CPU }
+  norm := Tensor.onesFor { shape := #[2], dtype := .Float64, device := .CPU }
   indices := Tensor.fromInt64Array #[4, 9]
   config := ⟨"mixed target"⟩
 }
@@ -65,7 +65,7 @@ private def source : SourceModel := {
 -- The result carries the target leaf types; it cannot retain the source dtype.
 example (_model : TargetModel) : True := by
   fail_if_success
-    have _ : Tensor { shape := #[2, 2], dtype := .Float32, device := .exact .CPU } := _model.weight
+    have _ : Tensor { shape := #[2, 2], dtype := .Float32, device := .CPU } := _model.weight
   trivial
 
 @[test] def testHeterogeneousTargetRecord : IO Unit := do
@@ -77,12 +77,12 @@ example (_model : TargetModel) : True := by
   LeanTest.assertEqual (← output.weight.toFloatArray) #[1, 1, 1, 1]
   LeanTest.assertEqual (← output.indices.toUInt64Array) #[4, 9]
   LeanTest.assertEqual output.config.val "mixed target"
-  LeanTest.assertTrue (output.weight.staticSpec.device == .exact .CPU)
+  LeanTest.assertTrue (output.weight.staticSpec.device == .CPU)
   LeanTest.assertEqual input.weight.raw.dtype .Float32
   LeanTest.assertEqual input.norm.raw.dtype .Float64
 
-abbrev SourceLeaves := Array (Option (Tensor { shape := #[2], dtype := .Float32 }))
-abbrev TargetLeaves := Array (Option (Tensor { shape := #[2], dtype := .Float64, device := .exact .CPU }))
+abbrev SourceLeaves := Array (Option (Tensor { shape := #[2], dtype := .Float32, device := .CPU }))
+abbrev TargetLeaves := Array (Option (Tensor { shape := #[2], dtype := .Float64, device := .CPU }))
 
 @[test] def testNestedTargetContainers : IO Unit := do
   let input : SourceLeaves := #[some (Tensor.fromFloatArray #[1.25, 2.5]), none,
@@ -95,33 +95,33 @@ abbrev TargetLeaves := Array (Option (Tensor { shape := #[2], dtype := .Float64,
   LeanTest.assertTrue (first.device == .CPU)
   LeanTest.assertEqual (← first.toFloatArray) #[1.25, 2.5]
   let pair ← TensorStruct.castTo
-    (Frozen { shape := #[2], dtype := .BFloat16 } × List (Tensor { shape := #[2], dtype := .Float64 }))
+    (Frozen { shape := #[2], dtype := .BFloat16, device := .CPU } × List (Tensor { shape := #[2], dtype := .Float64, device := .CPU }))
     ((Frozen.mk (Tensor.ones #[2])), [Tensor.ones #[2], Tensor.full #[2] 3])
   LeanTest.assertEqual pair.1.tensor.raw.dtype .BFloat16
   LeanTest.assertEqual pair.2.length 2
   LeanTest.assertEqual pair.2.head!.raw.dtype .Float64
-  let vector : torch.Vector 2 (Tensor { shape := #[2], dtype := .Float32 }) :=
+  let vector : torch.Vector 2 (Tensor { shape := #[2], dtype := .Float32, device := .CPU }) :=
     ⟨#[Tensor.ones #[2], Tensor.full #[2] 3], rfl⟩
   let converted ← TensorStruct.castTo
-    (torch.Vector 2 (Tensor { shape := #[2], dtype := .Float64 })) vector
+    (torch.Vector 2 (Tensor { shape := #[2], dtype := .Float64, device := .CPU })) vector
   LeanTest.assertEqual converted.data.size 2
   LeanTest.assertEqual converted.data[1]!.raw.dtype .Float64
 
 example : True := by
   fail_if_success
     have _ := inferInstanceAs (torch.TensorTreeCast
-      (torch.Vector 2 (Tensor { shape := #[2], dtype := .Float32 }))
-      (torch.Vector 3 (Tensor { shape := #[2], dtype := .Float64 })))
+      (torch.Vector 2 (Tensor { shape := #[2], dtype := .Float32, device := .CPU }))
+      (torch.Vector 3 (Tensor { shape := #[2], dtype := .Float64, device := .CPU })))
   fail_if_success
     have _ := inferInstanceAs (torch.TensorTreeCast
-      (Frozen { shape := #[2], dtype := .Float32 })
-      (Tensor { shape := #[2], dtype := .Float64 }))
+      (Frozen { shape := #[2], dtype := .Float32, device := .CPU })
+      (Tensor { shape := #[2], dtype := .Float64, device := .CPU }))
   trivial
 
 structure WrongShapeModel where
-  weight : Tensor { shape := #[4], dtype := .Float32 }
-  norm : Tensor { shape := #[2], dtype := .Float32 }
-  indices : Tensor { shape := #[2], dtype := .Int64 }
+  weight : Tensor { shape := #[4], dtype := .Float32, device := .CPU }
+  norm : Tensor { shape := #[2], dtype := .Float32, device := .CPU }
+  indices : Tensor { shape := #[2], dtype := .Int64, device := .CPU }
   config : Static String
 
 derive_tensor_tree_cast SourceModel => WrongShapeModel
@@ -136,7 +136,7 @@ derive_tensor_tree_cast SourceModel => WrongShapeModel
     pure true
   LeanTest.assertTrue shapeRejected "A type-tree cast must not implicitly reshape equal-size tensors"
   let dtypeRejected ← try
-    let _ ← TensorStruct.castTo (Array (Tensor { shape := #[2], dtype := .Unknown "typo" }))
+    let _ ← TensorStruct.castTo (Array (Tensor { shape := #[2], dtype := .Unknown "typo", device := .CPU }))
       #[Tensor.ones #[2]]
     pure false
   catch error =>
@@ -147,7 +147,7 @@ derive_tensor_tree_cast SourceModel => WrongShapeModel
 
 @[test] def testDynamicTargetRetainsActualDType : IO Unit := do
   let input := (Tensor.ones #[2]).toBFloat16
-  let output ← TensorStruct.castTo (Tensor { shape := #[2], device := .exact .CPU }) input
+  let output ← TensorStruct.castTo (Tensor { shape := #[2], device := .CPU }) input
   LeanTest.assertEqual output.raw.dtype .BFloat16
   LeanTest.assertEqual output.runtimeShape #[2]
   LeanTest.assertTrue (output.device == .CPU)
@@ -159,7 +159,7 @@ derive_tensor_tree_cast SourceModel => WrongShapeModel
       (Array (Tensor {
         shape := #[2]
         dtype := .Float64
-        device := .exact (.CUDA 18446744073709551615)
+        device := (.CUDA 18446744073709551615)
       })) input
     pure false
   catch error =>

@@ -60,7 +60,7 @@ open torch
   let parameter ← (Tensor.fromFloatArray #[2.0, 3.0]).parameter
   let captured := parameter * parameter
   let loss := Tensor.sumAll captured
-  let gradients := TensorStruct.functionalGrad (fun (temporary : Tensor { shape := #[2], dtype := .Float32 }) =>
+  let gradients := TensorStruct.functionalGrad (fun (temporary : Tensor { shape := #[2], dtype := .Float32, device := .CPU }) =>
     Tensor.sumAll (Tensor.mul captured temporary)) parameter
   LeanTest.assertEqual (← gradients.toFloatArray) #[4.0, 9.0]
   LeanTest.assertEqual (← (← parameter.gradOf).toFloatArray) #[0.0, 0.0]

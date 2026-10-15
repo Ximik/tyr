@@ -212,7 +212,7 @@ inductive Device where
 | CUDA : UInt64 → Device
 | CPU
 | MPS
-deriving Repr, Inhabited, BEq
+deriving Repr, Inhabited, BEq, DecidableEq
 
 opaque TSpec : NonemptyType
 
@@ -222,17 +222,12 @@ def RawTensor : Type := TSpec.type
 
 instance : Nonempty RawTensor := TSpec.property
 
-inductive DevicePolicy where
-  | any
-  | exact (device : Device)
-deriving Repr, BEq
-
-/-- Static specification carried by a typed tensor: shape always; dtype and
-    device policy graded, with defaults meaning "dynamic" / "anywhere". -/
+/-- Tensor indices retain shape and actual placement. The reserved dynamic dtype
+marker is optional; placement must always be supplied, including runtime values. -/
 structure StaticSpec where
   shape : Shape
   dtype : DType := .Unknown "dynamic"
-  device : DevicePolicy := .any
+  device : Device
 deriving Repr, BEq
 
 /-! ## Shape Manipulation Helpers -/

@@ -17,12 +17,12 @@ safetensors_type_provider "Tests/fixtures/safetensors/indexed_dir" as IndexedDir
 safetensors_type_provider "Tests/fixtures/safetensors/provider_errors/nonuniform.safetensors" as NonUniformSafe
 
 -- Default loaders and aggregate records must preserve the generated indices.
-example : IO (Tensor { shape := #[2, 3], dtype := .Float32 }) := SingleSafe.load_linear_weight
+example : IO (Tensor { shape := #[2, 3], dtype := .Float32, device := .CPU }) := SingleSafe.load_linear_weight
 example (_weights : SingleSafe.Weights) : True := by
   fail_if_success
-    have _badShape : Tensor { shape := #[2, 4], dtype := .Float32 } := _weights.linear.weight
+    have _badShape : Tensor { shape := #[2, 4], dtype := .Float32, device := .CPU } := _weights.linear.weight
   fail_if_success
-    have _badDtype : Tensor { shape := #[2, 3], dtype := .Int64 } := _weights.linear.weight
+    have _badDtype : Tensor { shape := #[2, 3], dtype := .Int64, device := .CPU } := _weights.linear.weight
   trivial
 
 private def writeBinCopy (src dst : String) : IO Unit := do
@@ -199,7 +199,7 @@ def testSafeTensorsTypeProviderSingle : IO Unit := do
   let wrongDeviceContract : TensorContract := {
     spec := SingleSafe.linear_weightTensorSpec
     role := .parameter
-    devicePolicy := .exact Device.MPS
+    expectedDevice := some Device.MPS
   }
   LeanTest.assertThrows
     (safetensors.loadTensorWithContract

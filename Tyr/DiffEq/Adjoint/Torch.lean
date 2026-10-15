@@ -9,9 +9,9 @@ open _root_.torch
 
 /-- Differentiable scalar pairing of two tensor trees: the tree dot product as
     a Float32 scalar tensor, kept in the autograd graph. -/
-private def dotStruct [TensorStruct Y] (x y : Y) : Tensor { shape := #[], dtype := .Float32 } :=
+private def dotStruct [TensorStruct Y] (x y : Y) : Tensor { shape := #[], dtype := .Float32, device := .CPU } :=
   let prod := TensorStruct.zipWith Tensor.Preserving.mul x y
-  TensorStruct.fold (fun t acc => Tensor.Preserving.add acc (Tensor.toFloat32 (Tensor.sumAll t)).forgetDevice)
+  TensorStruct.fold (fun t acc => Tensor.Preserving.add acc ((Tensor.toFloat32 (Tensor.sumAll t)).to .CPU))
     (Tensor.zeros #[]) prod
 
 private def vjp

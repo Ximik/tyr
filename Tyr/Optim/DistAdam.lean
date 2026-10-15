@@ -216,10 +216,8 @@ def stepDistributed {σ : StaticSpec} (param : Tensor σ) (grad : Tensor σ) (st
 
   -- 1) materialize local parameter/state slices on the parameter device
   let paramLocal ← sliceFirstDim param start localRows localShape
-  let expAvgBase := if state.expAvg.raw.device == param.raw.device then state.expAvg
-    else state.expAvg.to param.raw.device
-  let expAvgSqBase := if state.expAvgSq.raw.device == param.raw.device then state.expAvgSq
-    else state.expAvgSq.to param.raw.device
+  let expAvgBase := state.expAvg
+  let expAvgSqBase := state.expAvgSq
   let expAvgLocal ← sliceFirstDim expAvgBase start localRows localShape
   let expAvgSqLocal ← sliceFirstDim expAvgSqBase start localRows localShape
 
@@ -408,7 +406,7 @@ def stepSharded {σ : StaticSpec} {rank worldSize : UInt64}
     ```
 -/
 structure ShardedEmbeddingAdam (vocabSize dim : UInt64) (rank worldSize : UInt64)
-    (dtype : DType := .Float32) (device : DevicePolicy := .any) where
+    (dtype : DType := .Float32) (device : Device := .CPU) where
   /-- Sharded embedding weights -/
   weight : ShardedTensor ⟨#[vocabSize, dim], dtype, device⟩ rank worldSize
   /-- Sharded optimizer state -/
@@ -420,7 +418,7 @@ structure ShardedEmbeddingAdam (vocabSize dim : UInt64) (rank worldSize : UInt64
   deriving Repr
 
 /-- Initialize sharded embedding with Adam state -/
-def ShardedEmbeddingAdam.init {vocabSize dim rank worldSize : UInt64} {d : DType} {dev : DevicePolicy}
+def ShardedEmbeddingAdam.init {vocabSize dim rank worldSize : UInt64} {d : DType} {dev : Device}
     (fullWeight : Tensor ⟨#[vocabSize, dim], d, dev⟩) (h : ValidShard rank worldSize)
     : ShardedEmbeddingAdam vocabSize dim rank worldSize d dev :=
   let shardedWeight := ShardedTensor.fromFull fullWeight h
@@ -434,7 +432,7 @@ def ShardedEmbeddingAdam.init {vocabSize dim rank worldSize : UInt64} {d : DType
 
 /-- Forward pass: gather weights and apply embedding lookup -/
 def ShardedEmbeddingAdam.forward {vocabSize dim rank worldSize batch seq : UInt64}
-    {d : DType} {dev : DevicePolicy}
+    {d : DType} {dev : Device}
     (embed : ShardedEmbeddingAdam vocabSize dim rank worldSize d dev)
     (tokens : Tensor ⟨#[batch, seq], .Int64, dev⟩)
     : IO (Tensor ⟨#[batch, seq, dim], d, dev⟩ × ShardedEmbeddingAdam vocabSize dim rank worldSize d dev) := do
@@ -443,7 +441,7 @@ def ShardedEmbeddingAdam.forward {vocabSize dim rank worldSize batch seq : UInt6
   return (output, { embed with weight := newSharded })
 
 /-- Backward/update step: reduce-scatter grad and update local shard -/
-def ShardedEmbeddingAdam.step {vocabSize dim rank worldSize : UInt64} {d : DType} {dev : DevicePolicy}
+def ShardedEmbeddingAdam.step {vocabSize dim rank worldSize : UInt64} {d : DType} {dev : Device}
     (embed : ShardedEmbeddingAdam vocabSize dim rank worldSize d dev)
     (fullGrad : Tensor ⟨#[vocabSize, dim], d, dev⟩)
     (cfg : Config)

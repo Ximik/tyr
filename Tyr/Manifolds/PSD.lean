@@ -5,11 +5,11 @@ namespace Tyr.AD
 open torch
 open DifferentiableManifold
 
-variable {d : DType} {dev : DevicePolicy}
+variable {d : DType} {dev : Device}
 
 /-- Quotient-factor representation for fixed-rank PSD matrices via `Y in R^{n x k}`. -/
 structure PSDFixedRank (n k : UInt64) (dtype : DType := .Float32)
-    (device : DevicePolicy := .any) where
+    (device : Device := .CPU) where
   factor : Tensor ⟨#[n, k], dtype, device⟩
 
 namespace PSDFixedRank
@@ -26,7 +26,7 @@ def random (n k : UInt64) : IO (PSDFixedRank n k) := do
 end PSDFixedRank
 
 structure PSDFixedRankTangent (n k : UInt64) (dtype : DType := .Float32)
-    (device : DevicePolicy := .any) where
+    (device : Device := .CPU) where
   vec : Tensor ⟨#[n, k], dtype, device⟩
 
 namespace PSDFixedRankTangent
@@ -58,7 +58,7 @@ instance psdFixedRankManifold (n k : UInt64) : DifferentiableManifold (PSDFixedR
 
 /-- Elliptope factor manifold: row-wise unit norms in `R^{n x k}`. -/
 structure Elliptope (n k : UInt64) (dtype : DType := .Float32)
-    (device : DevicePolicy := .any) where
+    (device : Device := .CPU) where
   factor : Tensor ⟨#[n, k], dtype, device⟩
 
 namespace Elliptope
@@ -82,7 +82,7 @@ def random (n k : UInt64) : IO (Elliptope n k) := do
 end Elliptope
 
 structure ElliptopeTangent (n k : UInt64) (dtype : DType := .Float32)
-    (device : DevicePolicy := .any) where
+    (device : Device := .CPU) where
   vec : Tensor ⟨#[n, k], dtype, device⟩
 
 namespace ElliptopeTangent

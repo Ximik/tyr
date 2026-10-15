@@ -71,9 +71,9 @@ def testSafeTensorsLoadShardedHfSingleShardPattern : IO Unit := do
   let dir := "/tmp/qwen35_hf_single_shard_pattern"
   ensureDir dir
   let shardPath := s!"{dir}/model.safetensors-00001-of-00001.safetensors"
-  let input : Tensor { shape := #[2, 2], dtype := .Int64 } := (Tensor.fromInt64Array #[1, 2, 3, 4]).reshapeChecked #[2, 2]
+  let input : Tensor { shape := #[2, 2], dtype := .Int64, device := .CPU } := (Tensor.fromInt64Array #[1, 2, 3, 4]).reshapeChecked #[2, 2]
   Tensor.saveSafeTensor input shardPath "model.language_model.embed_tokens.weight"
-  let loaded : Tensor { shape := #[2, 2], dtype := .Int64 } ←
+  let loaded : Tensor { shape := #[2, 2], dtype := .Int64, device := .CPU } ←
     safetensors.loadTensorShardedWithSpec dir "model.language_model.embed_tokens.weight" ⟨#[2, 2], .Int64⟩
   let vals ← loaded.toUInt64Array
   LeanTest.assertEqual vals #[1, 2, 3, 4]

@@ -10,6 +10,7 @@ import Tyr.Model.Flux.Model
 
 namespace torch.flux
 
+variable {device : Device}
 /-- Sampling configuration -/
 structure SamplingConfig where
   /-- Number of sampling steps -/
@@ -59,10 +60,10 @@ def computeTimesteps (image_seq_len : UInt64) (num_steps : Nat) : Array (Float �
     t_curr, t_next: timestep boundaries
     Returns: next state -/
 def eulerStep {s : Shape}
-    (x : Tensor { shape := s })
-    (pred : Tensor { shape := s })
+    (x : Tensor { device := device, shape := s })
+    (pred : Tensor { device := device, shape := s })
     (t_curr t_next : Float)
-    : Tensor { shape := s } :=
+    : Tensor { device := device, shape := s } :=
   let dt := t_next - t_curr
   Tensor.Promoting.add x (Tensor.Preserving.mulScalar pred dt)
 
@@ -72,13 +73,13 @@ def eulerStep {s : Shape}
     model: Flux model
     Returns: [batch, seq, dim] - denoised latents -/
 def denoise {batch img_seq txt_seq : UInt64} (cfg : FluxConfig)
-    (model : FluxModel cfg)
-    (noise : Tensor { shape := #[batch, img_seq, cfg.in_channels] })
-    (txt : Tensor { shape := #[batch, txt_seq, cfg.context_in_dim] })
-    (img_ids : Tensor { shape := #[batch, img_seq, 4], dtype := .Int64 })
-    (txt_ids : Tensor { shape := #[batch, txt_seq, 4], dtype := .Int64 })
+    (model : FluxModel (device := device) cfg)
+    (noise : Tensor { device := device, shape := #[batch, img_seq, cfg.in_channels] })
+    (txt : Tensor { device := device, shape := #[batch, txt_seq, cfg.context_in_dim] })
+    (img_ids : Tensor { device := device, shape := #[batch, img_seq, 4], dtype := .Int64 })
+    (txt_ids : Tensor { device := device, shape := #[batch, txt_seq, 4], dtype := .Int64 })
     (num_steps : Nat := 4)
-    : Tensor { shape := #[batch, img_seq, cfg.in_channels] } :=
+    : Tensor { device := device, shape := #[batch, img_seq, cfg.in_channels] } :=
   let timesteps := computeTimesteps img_seq num_steps
   -- Use fold instead of Id.run do with for loop to avoid runtime bug
   timesteps.foldl (init := noise) fun x (t_curr, t_next) =>
@@ -92,14 +93,14 @@ def denoise {batch img_seq txt_seq : UInt64} (cfg : FluxConfig)
 /-- Sample from pure noise.
     Returns denoised latents ready for VAE decoding. -/
 def sample {batch img_seq txt_seq : UInt64} (cfg : FluxConfig)
-    (model : FluxModel cfg)
-    (txt : Tensor { shape := #[batch, txt_seq, cfg.context_in_dim] })
-    (img_ids : Tensor { shape := #[batch, img_seq, 4], dtype := .Int64 })
-    (txt_ids : Tensor { shape := #[batch, txt_seq, 4], dtype := .Int64 })
+    (model : FluxModel (device := device) cfg)
+    (txt : Tensor { device := device, shape := #[batch, txt_seq, cfg.context_in_dim] })
+    (img_ids : Tensor { device := device, shape := #[batch, img_seq, 4], dtype := .Int64 })
+    (txt_ids : Tensor { device := device, shape := #[batch, txt_seq, 4], dtype := .Int64 })
     (num_steps : Nat := 4)
-    : IO (Tensor { shape := #[batch, img_seq, cfg.in_channels] }) := do
+    : IO (Tensor { device := device, shape := #[batch, img_seq, cfg.in_channels] }) := do
   -- Start from pure noise
-  let noise ← randomWeight #[batch, img_seq, cfg.in_channels]
+  let noise ← randomWeight (device := device) #[batch, img_seq, cfg.in_channels]
   let noise := Tensor.castLike model.img_in (noise.to model.img_in.device)
   pure (denoise cfg model noise txt img_ids txt_ids num_steps)
 
@@ -107,7 +108,7 @@ def sample {batch img_seq txt_seq : UInt64} (cfg : FluxConfig)
     For a 32x32 latent, returns position IDs with 4 axes: [t, h, w, l]
     where t=0 (timestep), h/w are spatial coordinates, l=0 (layer).
     Returns: an indexed Int64 [1, seq, 4] tensor -/
-def computeImagePositionIds (height width : UInt64) : IO (Tensor { shape := #[1, height * width, 4], dtype := .Int64 }) := do
+def computeImagePositionIds (height width : UInt64) (device : Device := .CPU) : IO (Tensor { device := device, shape := #[1, height * width, 4], dtype := .Int64 }) := do
   let values := Array.ofFn (n := (height * width * 4).toNat) fun i =>
     let index := i.val / 4
     let value := match i.val % 4 with
@@ -115,13 +116,13 @@ def computeImagePositionIds (height width : UInt64) : IO (Tensor { shape := #[1,
       | 2 => index % width.toNat
       | _ => 0
     value.toUInt64.toInt64
-  return (Tensor.fromInt64Array values).reshapeChecked #[1, height * width, 4]
+  return ((Tensor.fromInt64Array values).to device).reshapeChecked #[1, height * width, 4]
 
 /-- Text position IDs use the fourth axis for token position. -/
-def computeTextPositionIds (seq_len : UInt64) : IO (Tensor { shape := #[1, seq_len, 4], dtype := .Int64 }) := do
+def computeTextPositionIds (seq_len : UInt64) (device : Device := .CPU) : IO (Tensor { device := device, shape := #[1, seq_len, 4], dtype := .Int64 }) := do
   let values := Array.ofFn (n := (seq_len * 4).toNat) fun i =>
     (if i.val % 4 == 3 then i.val / 4 else 0).toUInt64.toInt64
-  return (Tensor.fromInt64Array values).reshapeChecked #[1, seq_len, 4]
+  return ((Tensor.fromInt64Array values).to device).reshapeChecked #[1, seq_len, 4]
 
 /-- Unpack Flux latents from sequence format to VAE spatial format.
     Flux uses 2×2 spatial patchification, packing 32 channels into 128-dim patches.
@@ -137,8 +138,8 @@ def computeTextPositionIds (seq_len : UInt64) : IO (Tensor { shape := #[1, seq_l
     - VAE input becomes [batch, 32, 32, 32]
     - VAE outputs [batch, 3, 256, 256] (8× upscaling) -/
 def unpackLatents {batch packed_H packed_W : UInt64}
-    (z : Tensor { shape := #[batch, packed_H * packed_W, 128] })
-    : Tensor { shape := #[batch, 32, packed_H * 2, packed_W * 2] } :=
+    (z : Tensor { device := device, shape := #[batch, packed_H * packed_W, 128] })
+    : Tensor { device := device, shape := #[batch, 32, packed_H * 2, packed_W * 2] } :=
   -- Step 1: Reshape sequence to spatial grid with packed channels
   -- [batch, seq, 128] → [batch, packed_H, packed_W, 32, 2, 2]
   let z := Tensor.reshapeChecked z #[batch, packed_H, packed_W, 32, 2, 2]
@@ -155,8 +156,8 @@ def unpackLatents {batch packed_H packed_W : UInt64}
     Input: [batch, 32, H, W] where H and W are divisible by 2
     Output: [batch, (H/2) × (W/2), 128] -/
 def packLatents {batch H W : UInt64}
-    (z : Tensor { shape := #[batch, 32, H, W] })
-    : Tensor { shape := #[batch, (H / 2) * (W / 2), 128] } :=
+    (z : Tensor { device := device, shape := #[batch, 32, H, W] })
+    : Tensor { device := device, shape := #[batch, (H / 2) * (W / 2), 128] } :=
   let packed_H := H / 2
   let packed_W := W / 2
   -- Step 1: Reshape to expose 2×2 patches

@@ -4,10 +4,10 @@ import LeanTest
 open torch
 open torch.flm
 
-private def tinyTokens : Tensor { shape := #[(2 : UInt64), 3], dtype := .Int64 } :=
+private def tinyTokens : Tensor { shape := #[(2 : UInt64), 3], dtype := .Int64, device := .CPU } :=
   Tensor.reshapeChecked (Tensor.fromInt64Array #[0, 1, 2, 3, 4, 0]) #[(2 : UInt64), 3]
 
-private def identityDenoiser : FlowDenoiser 3 5 Unit :=
+private def identityDenoiser : FlowDenoiser (device := .CPU) 3 5 Unit :=
   { forward := fun {_batch} _ x _ _ => pure x
     forwardPure := some (fun {_batch} _ x _ _ => x) }
 

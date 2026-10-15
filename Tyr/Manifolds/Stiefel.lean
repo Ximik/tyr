@@ -10,7 +10,7 @@ namespace Tyr.AD
 open torch
 open DifferentiableManifold
 
-variable {d : DType} {dev : DevicePolicy}
+variable {d : DType} {dev : Device}
 
 /-! ## Stiefel Manifold St(n, p)
 
@@ -30,7 +30,7 @@ The tangent space at X is the horizontal space:
     Constraint: XᵀX = Iₚ (p×p identity).
     The `tall` witness records that orthonormal p-column frames need n ≥ p. -/
 structure Stiefel (n p : UInt64) (dtype : DType := .Float32)
-    (device : DevicePolicy := .any) where
+    (device : Device := .CPU) where
   /-- The underlying n×p matrix -/
   matrix : Tensor ⟨#[n, p], dtype, device⟩
   /-- Orthonormal p-column frames in ℝⁿ require p ≤ n. -/
@@ -62,7 +62,7 @@ end Stiefel
 /-- Tangent vector on the Stiefel manifold.
     Z ∈ TₓSt(n,p) satisfies: XᵀZ + ZᵀX = 0 (XᵀZ is skew-symmetric) -/
 structure StiefelTangent (n p : UInt64) (dtype : DType := .Float32)
-    (device : DevicePolicy := .any) where
+    (device : Device := .CPU) where
   /-- The tangent vector as an n×p matrix -/
   vec : Tensor ⟨#[n, p], dtype, device⟩
 

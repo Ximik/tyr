@@ -5,11 +5,11 @@ namespace Tyr.AD
 open torch
 open DifferentiableManifold
 
-variable {d : DType} {dev : DevicePolicy}
+variable {d : DType} {dev : Device}
 
 /-- Poincare ball model with ambient coordinates in `R^n`, `||x|| < 1`. -/
 structure PoincareBall (n : UInt64) (dtype : DType := .Float32)
-    (device : DevicePolicy := .any) where
+    (device : Device := .CPU) where
   coords : Tensor ⟨#[n], dtype, device⟩
 
 namespace PoincareBall
@@ -38,7 +38,7 @@ def conformalFactor (x : PoincareBall n d dev) : Float :=
 end PoincareBall
 
 structure PoincareBallTangent (n : UInt64) (dtype : DType := .Float32)
-    (device : DevicePolicy := .any) where
+    (device : Device := .CPU) where
   vec : Tensor ⟨#[n], dtype, device⟩
 
 namespace PoincareBallTangent

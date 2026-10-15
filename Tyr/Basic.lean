@@ -9,7 +9,7 @@ It is the lowest-level shared layer used across runtime bindings, model code, an
 ## Major Components
 
 - Core types (in `Tyr.Basic.Types`): `Shape`, `DType`, `Device`, the native
-  `RawTensor` carrier, `DevicePolicy`, and `StaticSpec`,
+  `RawTensor` carrier and `StaticSpec`,
   with DType parsing and pure shape-transform utilities — no native functions,
   so the GPU code generator can use them without linking `libTyrC`.
 - Tensor metadata extraction hooks (`runtimeShape`, dtype/device introspection,
@@ -112,15 +112,12 @@ private def checkSpec (σ : StaticSpec) (raw : RawTensor) : Except String Unit :
     throw s!"Expected shape {reprStr σ.shape}, got {reprStr raw.runtimeShape}"
   if σ.dtype != .Unknown "dynamic" && raw.dtype != σ.dtype then
     throw s!"Expected dtype {σ.dtype}, got {raw.dtype}"
-  match σ.device with
-  | .any => pure ()
-  | .exact expected =>
-      if raw.device != expected then
-        throw s!"Expected device {renderDevice expected}, got {renderDevice raw.device}"
+  if raw.device != σ.device then
+    throw s!"Expected device {renderDevice σ.device}, got {renderDevice raw.device}"
 
-/-- Check shape, dtype and device policy against the native handle. Only the
-reserved `Unknown "dynamic"` dtype makes no dtype claim; any other unknown
-token must match exactly. The `.any` device policy makes no placement claim. -/
+/-- Check shape, dtype and actual placement against the native handle. Only the
+reserved `Unknown "dynamic"` dtype makes no dtype claim; every device index
+must match the native handle exactly. -/
 def validate {σ : StaticSpec} (tensor : Tensor σ) : Except String Unit :=
   checkSpec σ tensor.raw
 
@@ -136,10 +133,7 @@ opaque ofRaw {σ : StaticSpec} (raw : RawTensor) : Except String (Tensor σ) :=
   .error "Tensor.ofRaw requires its checked runtime implementation"
 
 private unsafe def zerosForImpl (σ : StaticSpec) : Tensor σ :=
-  let device := match σ.device with
-    | .any => Device.CPU
-    | .exact device => device
-  let raw := RawTensor.zeros σ.shape false device
+  let raw := RawTensor.zeros σ.shape false σ.device
   let raw := if σ.dtype == DType.Unknown "dynamic" then raw
     else RawTensor.castDType σ.shape raw σ.dtype.canonicalName
   unsafeCast raw
@@ -147,8 +141,8 @@ private unsafe def zerosForImpl (σ : StaticSpec) : Tensor σ :=
 /-- Trusted native allocation boundary used to bootstrap pure typed factories.
 It accepts a specification, never a foreign handle: libtorch creates fresh zeros
 on the requested device and casts them to the requested concrete dtype. Native
-allocation/cast failures throw; `Unknown "dynamic"` uses the native default and
-`.any` placement chooses CPU. Other unknown dtype tokens go through native dtype
+allocation/cast failures throw; `Unknown "dynamic"` uses the native default.
+Other unknown dtype tokens go through native dtype
 parsing and fail instead of silently defaulting. This is the sole unchecked
 native construction boundary.
 -/
@@ -157,15 +151,10 @@ opaque zerosFor (σ : StaticSpec) : Tensor σ := Classical.choice inferInstance
 
 instance {σ : StaticSpec} : Inhabited (Tensor σ) := ⟨zerosFor σ⟩
 
-private unsafe def forgetDeviceImpl {σ : StaticSpec} (tensor : Tensor σ) :
-    Tensor { σ with device := .any } :=
-  unsafeCast tensor
-
-/-- Weaken placement without changing the native handle, shape or dtype. -/
-@[implemented_by forgetDeviceImpl]
-opaque forgetDevice {σ : StaticSpec} (tensor : Tensor σ) :
-    Tensor { σ with device := .any } :=
-  Classical.choice inferInstance
+/-- Package placement as an existential index without weakening its identity. -/
+def packDevice {σ : StaticSpec} (tensor : Tensor σ) :
+    Sigma fun device : Device => Tensor { σ with device } :=
+  ⟨σ.device, tensor⟩
 
 instance {σ : StaticSpec} : ToString (Tensor σ) where
   toString t := RawTensor.toString t.raw

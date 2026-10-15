@@ -10,33 +10,33 @@ private def expectError {α : Type} (result : Except String α) : IO Unit :=
   | .ok _ => LeanTest.fail "Expected a checked unary-operation rejection"
   | .error _ => pure ()
 
-private def magnitude (t : Tensor ⟨#[1], .Complex64, .any⟩) : Float :=
+private def magnitude (t : Tensor ⟨#[1], .Complex64, .CPU⟩) : Float :=
   (Tensor.maxAll (Tensor.abs t)).item
 
-example (x : Tensor ⟨#[2], .Complex64, .any⟩) : Tensor ⟨#[2], .Complex64, .any⟩ :=
+example (x : Tensor ⟨#[2], .Complex64, .CPU⟩) : Tensor ⟨#[2], .Complex64, .CPU⟩ :=
   Tensor.exp (Tensor.sqrt (Tensor.log (Tensor.sin (Tensor.cos (Tensor.atan x)))))
 
-example (x : Tensor ⟨#[2], .Complex128, .any⟩) : Tensor ⟨#[2], .Complex128, .any⟩ :=
+example (x : Tensor ⟨#[2], .Complex128, .CPU⟩) : Tensor ⟨#[2], .Complex128, .CPU⟩ :=
   Tensor.rsqrt (Tensor.tanh (Tensor.sigmoid (Tensor.pow (Tensor.log10 x) 2)))
 
 example {σ : StaticSpec} (input : Tensor σ) :
     Except String (Tensor (σ.withDType input.actualSpec.dtype.atLeastFloat)) :=
   Tensor.Promoting.sqrt? input
 
-example (_x : Tensor ⟨#[2], .Complex64, .any⟩) : True := by
+example (_x : Tensor ⟨#[2], .Complex64, .CPU⟩) : True := by
   fail_if_success have _ := Tensor.gelu _x
   fail_if_success have _ := Tensor.silu _x
   fail_if_success have _ := Tensor.softmax _x
   trivial
 
-example (_x : Tensor ⟨#[2], .Int64, .any⟩) : True := by
+example (_x : Tensor ⟨#[2], .Int64, .CPU⟩) : True := by
   fail_if_success have _ := Tensor.exp _x
   fail_if_success have _ := Tensor.sqrt _x
   fail_if_success have _ := Tensor.log _x
   trivial
 
 @[test] def testComplexSquareRootAndLogarithmBranches : IO Unit := do
-  let negative : Tensor ⟨#[1], .Complex64, .any⟩ :=
+  let negative : Tensor ⟨#[1], .Complex64, .CPU⟩ :=
     (Tensor.fromFloatArray #[-1]).castDType .Complex64
   let one := (Tensor.ones #[1]).castDType .Complex64
   let root := Tensor.sqrt negative
@@ -54,7 +54,7 @@ example (_x : Tensor ⟨#[2], .Int64, .any⟩) : True := by
   LeanTest.assertTrue (root.raw.device == negative.raw.device)
 
 @[test] def testComplexTrigonometricAndActivationValues : IO Unit := do
-  let imaginary : Tensor ⟨#[1], .Complex64, .any⟩ :=
+  let imaginary : Tensor ⟨#[1], .Complex64, .CPU⟩ :=
     Tensor.sqrt ((Tensor.fromFloatArray #[-1]).castDType .Complex64)
   let one := (Tensor.ones #[1]).castDType .Complex64
   let opposite := Tensor.mulScalar imaginary (-1)

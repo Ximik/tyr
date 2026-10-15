@@ -17,6 +17,8 @@ namespace tokenizer
 
 open torch
 
+variable {device : Device}
+
 /-- Token bytes mapping for BPB calculation.
     Maps each token ID to the number of UTF-8 bytes it represents.
     Special tokens have 0 bytes (don't contribute to BPB). -/
@@ -24,15 +26,15 @@ structure TokenBytes where
   /-- Vocabulary size -/
   vocabSize : UInt32
   /-- Bytes per token ID as Int64 tensor of shape [vocabSize] -/
-  bytes : Tensor { shape := #[vocabSize.toUInt64], dtype := .Int64 }
+  bytes : Tensor { shape := #[vocabSize.toUInt64], dtype := .Int64, device := .CPU }
   deriving Repr
 
 /-- Construct the requested Int64 vector, checking its length. -/
-private def int64VectorFromArray (arr : Array Int64) (n : UInt64) : Tensor { shape := #[n], dtype := .Int64 } :=
+private def int64VectorFromArray (arr : Array Int64) (n : UInt64) : Tensor { shape := #[n], dtype := .Int64, device := .CPU } :=
   (Tensor.fromInt64Array arr).reshapeChecked #[n]
 
-private def indexSelect1d {n k : UInt64} (t : Tensor { shape := #[n], dtype := .Int64 })
-    (indices : Tensor { shape := #[k], dtype := .Int64 }) : Tensor { shape := #[k], dtype := .Int64 } :=
+private def indexSelect1d {n k : UInt64} (t : Tensor { shape := #[n], dtype := .Int64, device := device })
+    (indices : Tensor { shape := #[k], dtype := .Int64, device := device }) : Tensor { shape := #[k], dtype := .Int64, device := device } :=
   Tensor.indexSelect t indices
 
 /-- Build token bytes mapping from a BPE tokenizer.
@@ -69,10 +71,10 @@ def TokenBytes.totalBytes (tb : TokenBytes) (tokenIds : Array UInt32) : IO UInt6
 
 /-- Compute total bytes for a 1D tensor of token IDs.
     More efficient than array-based version for tensor inputs. -/
-def TokenBytes.totalBytesFromTensor (tb : TokenBytes) (tokenIds : Tensor { shape := #[n], dtype := .Int64 })
+def TokenBytes.totalBytesFromTensor (tb : TokenBytes) (tokenIds : Tensor { shape := #[n], dtype := .Int64, device := device })
     : IO UInt64 := do
   -- Index into bytes to get byte counts per token
-  let bytesPerToken := indexSelect1d tb.bytes tokenIds
+  let bytesPerToken := indexSelect1d (tb.bytes.to device) tokenIds
   -- Sum all bytes
   let totalFloat := Tensor.item (Tensor.sumAll bytesPerToken)
   return totalFloat.toUInt64
@@ -81,7 +83,7 @@ def TokenBytes.totalBytesFromTensor (tb : TokenBytes) (tokenIds : Tensor { shape
     Only counts bytes for tokens where mask > 0.
     Used in BPB evaluation where we only count trained tokens. -/
 def TokenBytes.totalBytesWithMask (tb : TokenBytes)
-    (tokenIds : Tensor { shape := #[b, s], dtype := .Int64 }) (mask : Tensor { shape := #[b, s], dtype := .Float32 })
+    (tokenIds : Tensor { shape := #[b, s], dtype := .Int64, device := device }) (mask : Tensor { shape := #[b, s], dtype := .Float32, device := device })
     : IO UInt64 := do
   -- Flatten for indexing
   let numTokens := b * s
@@ -90,7 +92,7 @@ def TokenBytes.totalBytesWithMask (tb : TokenBytes)
   let flatMask := mask.reshapeChecked #[numTokens]
 
   -- Get byte counts per token
-  let bytesPerToken := indexSelect1d tb.bytes flatIds
+  let bytesPerToken := indexSelect1d (tb.bytes.to device) flatIds
 
   -- Multiply by mask and sum (mask is Float32, so cast the counts)
   let bytesFloat := bytesPerToken.toFloat32
@@ -102,8 +104,8 @@ def TokenBytes.totalBytesWithMask (tb : TokenBytes)
     dimensions named explicitly. -/
 def TokenBytes.totalBytesWithMask' (tb : TokenBytes)
     {batchSize seqLen : UInt64}
-    (tokenIds : Tensor { shape := #[batchSize, seqLen], dtype := .Int64 })
-    (mask : Tensor { shape := #[batchSize, seqLen], dtype := .Float32 })
+    (tokenIds : Tensor { shape := #[batchSize, seqLen], dtype := .Int64, device := device })
+    (mask : Tensor { shape := #[batchSize, seqLen], dtype := .Float32, device := device })
     : IO UInt64 :=
   tb.totalBytesWithMask tokenIds mask
 
@@ -116,7 +118,7 @@ def TokenBytes.save (tb : TokenBytes) (path : String) : IO Unit := do
     Unlike the legacy loader, the stored tensor is validated against the
     claimed spec (`[vocabSize]`, Int64) and a mismatch is an IO error. -/
 def TokenBytes.load (path : String) (vocabSize : UInt32) : IO TokenBytes := do
-  let bytes ← Tensor.loadTensorExact {shape := #[vocabSize.toUInt64], dtype := .Int64} path
+  let bytes ← Tensor.loadTensorExact {shape := #[vocabSize.toUInt64], dtype := .Int64, device := .CPU} path
   return { vocabSize, bytes }
 
 /-- Create a dummy token bytes mapping for testing.

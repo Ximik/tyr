@@ -10,13 +10,15 @@
   This is the foundation for training GPT models from scratch
   on large datasets like FineWeb.
 -/
-import Tyr
+import Tyr.Torch
 import Examples.GPT.GPT
 import Examples.GPT.Train
 
 namespace Examples.GPT.Pretraining
 
 open torch
+
+variable {device : Device}
 open torch.gpt
 open torch.train
 open torch.Optim
@@ -112,12 +114,12 @@ def cosineSchedule (step : Nat) (warmupSteps totalSteps : Nat) (baseLr : Float) 
 
 /-- Run single training step -/
 def trainStep (cfg : torch.gpt.Config)
-    (params : GPTParams cfg)
-    (opt : GradientTransformation (GPTParams cfg) (AdamWState (GPTParams cfg)))
-    (optState : AdamWState (GPTParams cfg))
-    (x : Tokens #[batchSize, seqLen])
-    (y : Tokens #[batchSize, seqLen])
-    : IO (GPTParams cfg × AdamWState (GPTParams cfg) × Float) := do
+    (params : GPTParams (device := device) cfg)
+    (opt : GradientTransformation (GPTParams (device := device) cfg) (AdamWState (GPTParams (device := device) cfg)))
+    (optState : AdamWState (GPTParams (device := device) cfg))
+    (x : Tokens (device := device) #[batchSize, seqLen])
+    (y : Tokens (device := device) #[batchSize, seqLen])
+    : IO (GPTParams (device := device) cfg × AdamWState (GPTParams (device := device) cfg) × Float) := do
   -- Zero gradients
   TensorStruct.zeroGrads params
 
@@ -143,11 +145,12 @@ def trainStep (cfg : torch.gpt.Config)
 /-- Run the main pretraining loop using simple in-memory data -/
 def runPretraining (cfg : PretrainingConfig)
     (numTokens : UInt64)
-    (trainData : Tokens #[numTokens])
-    (valData : Option (Tokens #[numTokens]))
-    : IO (GPTParams cfg.modelConfig) := do
+    (trainData : Tokens (device := .CPU) #[numTokens])
+    (valData : Option (Tokens (device := .CPU) #[numTokens]))
+    (device : Device := .CPU)
+    : IO (GPTParams (device := device) cfg.modelConfig) := do
   IO.println "Initializing model..."
-  let params ← GPTParams.init cfg.modelConfig Device.CPU
+  let params ← GPTParams.init cfg.modelConfig device
 
   let opt := adamw (lr := cfg.learningRate)
   let optState := opt.init params
@@ -172,11 +175,11 @@ def runPretraining (cfg : PretrainingConfig)
 
     -- Get batch: x = tokens[start:start+seq], y = tokens[start+1:start+seq+1]
     let batchLen := cfg.deviceBatchSize * cfg.seqLen
-    let xFlat : Tokens #[batchLen] := trainData.sliceChecked 0 startIdx batchLen #[batchLen]
-    let yFlat : Tokens #[batchLen] := trainData.sliceChecked 0 (startIdx + 1) batchLen #[batchLen]
+    let xFlat : Tokens (device := .CPU) #[batchLen] := trainData.sliceChecked 0 startIdx batchLen #[batchLen]
+    let yFlat : Tokens (device := .CPU) #[batchLen] := trainData.sliceChecked 0 (startIdx + 1) batchLen #[batchLen]
 
-    let x := Tensor.reshapeChecked xFlat #[cfg.deviceBatchSize, cfg.seqLen]
-    let y := Tensor.reshapeChecked yFlat #[cfg.deviceBatchSize, cfg.seqLen]
+    let x := (Tensor.reshapeChecked xFlat #[cfg.deviceBatchSize, cfg.seqLen]).to device
+    let y := (Tensor.reshapeChecked yFlat #[cfg.deviceBatchSize, cfg.seqLen]).to device
 
     -- Training step
     let (newParams, newOptState, loss) ←
@@ -230,11 +233,11 @@ def main : IO Unit := do
   let trainData ← Tensor.randint 0 cfg.modelConfig.vocab_size.toInt64 #[numTokens]
 
   -- No validation data for simple test
-  let valData : Option (Tokens #[numTokens]) := none
+  let valData : Option (Tokens (device := .CPU) #[numTokens]) := none
 
   -- Run training
   IO.println "Starting training..."
-  let _finalParams ← runPretraining cfg numTokens trainData valData
+  let _finalParams ← runPretraining cfg numTokens trainData valData device
 
   IO.println "Done!"
 

@@ -25,36 +25,36 @@ def runCoreM (x : CoreM α) : IO α := do
   | .error msg =>
       throw (IO.userError (← msg.toMessageData.toString))
 
-opaque frontendPadPrimitive (_base : torch.Tensor { shape := #[2], dtype := .Float32 }) (_padv : torch.Tensor { shape := #[1], dtype := .Float32 }) : torch.Tensor { shape := #[6], dtype := .Float32 } :=
+opaque frontendPadPrimitive (_base : torch.Tensor { shape := #[2], dtype := .Float32, device := .CPU }) (_padv : torch.Tensor { shape := #[1], dtype := .Float32, device := .CPU }) : torch.Tensor { shape := #[6], dtype := .Float32, device := .CPU } :=
   torch.Tensor.zeros #[6]
 
-def ordinaryPadWrapper (base : torch.Tensor { shape := #[2], dtype := .Float32 }) (padv : torch.Tensor { shape := #[1], dtype := .Float32 }) : torch.Tensor { shape := #[6], dtype := .Float32 } :=
+def ordinaryPadWrapper (base : torch.Tensor { shape := #[2], dtype := .Float32, device := .CPU }) (padv : torch.Tensor { shape := #[1], dtype := .Float32, device := .CPU }) : torch.Tensor { shape := #[6], dtype := .Float32, device := .CPU } :=
   frontendPadPrimitive base padv
 
-opaque frontendReshapePrimitive (x : torch.Tensor { shape := #[6], dtype := .Float32 }) : torch.Tensor { shape := #[6], dtype := .Float32 } := x
+opaque frontendReshapePrimitive (x : torch.Tensor { shape := #[6], dtype := .Float32, device := .CPU }) : torch.Tensor { shape := #[6], dtype := .Float32, device := .CPU } := x
 
-def unsupportedCompositeWrapper (base : torch.Tensor { shape := #[2], dtype := .Float32 }) (padv : torch.Tensor { shape := #[1], dtype := .Float32 }) : torch.Tensor { shape := #[6], dtype := .Float32 } :=
+def unsupportedCompositeWrapper (base : torch.Tensor { shape := #[2], dtype := .Float32, device := .CPU }) (padv : torch.Tensor { shape := #[1], dtype := .Float32, device := .CPU }) : torch.Tensor { shape := #[6], dtype := .Float32, device := .CPU } :=
   frontendReshapePrimitive (frontendPadPrimitive base padv)
 
-opaque frontendFrozenPadPrimitive (_base : torch.Tensor { shape := #[2], dtype := .Float32 })
-    (_padv : torch.Frozen { shape := #[1], dtype := .Float32 }) : torch.Tensor { shape := #[6], dtype := .Float32 } :=
+opaque frontendFrozenPadPrimitive (_base : torch.Tensor { shape := #[2], dtype := .Float32, device := .CPU })
+    (_padv : torch.Frozen { shape := #[1], dtype := .Float32, device := .CPU }) : torch.Tensor { shape := #[6], dtype := .Float32, device := .CPU } :=
   torch.Tensor.zeros #[6]
 
-def frozenPadWrapper (base : torch.Tensor { shape := #[2], dtype := .Float32 })
-    (padv : torch.Frozen { shape := #[1], dtype := .Float32 }) : torch.Tensor { shape := #[6], dtype := .Float32 } :=
+def frozenPadWrapper (base : torch.Tensor { shape := #[2], dtype := .Float32, device := .CPU })
+    (padv : torch.Frozen { shape := #[1], dtype := .Float32, device := .CPU }) : torch.Tensor { shape := #[6], dtype := .Float32, device := .CPU } :=
   frontendFrozenPadPrimitive base padv
 
 def TensorTypeAlias (spec : torch.StaticSpec) : Type := torch.Tensor spec
-abbrev AliasedParameter := TensorTypeAlias { shape := #[2], dtype := .Float64 }
-def FrozenTypeAlias : Type := torch.Frozen { shape := #[1], dtype := .Int64 }
+abbrev AliasedParameter := TensorTypeAlias { shape := #[2], dtype := .Float64, device := .CPU }
+def FrozenTypeAlias : Type := torch.Frozen { shape := #[1], dtype := .Int64, device := .CPU }
 
 opaque frontendAliasedPrimitive (_base : AliasedParameter)
     (_padv : (let type := FrozenTypeAlias; type)) :
-    TensorTypeAlias { shape := #[6], dtype := .Float64 } :=
-  torch.Tensor.zerosFor { shape := #[6], dtype := .Float64 }
+    TensorTypeAlias { shape := #[6], dtype := .Float64, device := .CPU } :=
+  torch.Tensor.zerosFor { shape := #[6], dtype := .Float64, device := .CPU }
 
 def aliasedWrapper (base : AliasedParameter) (padv : FrozenTypeAlias) :
-    TensorTypeAlias { shape := #[6], dtype := .Float64 } :=
+    TensorTypeAlias { shape := #[6], dtype := .Float64, device := .CPU } :=
   frontendAliasedPrimitive base padv
 
 opaque frontendRawPrimitive (tensor : torch.RawTensor) : torch.RawTensor := tensor

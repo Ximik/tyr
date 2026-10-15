@@ -11,6 +11,8 @@ import Tyr.Model.Qwen36.ConfigIO
 
 namespace torch.qwen36
 
+variable {device : Device}
+
 namespace hub
 
 open torch.Hub
@@ -37,8 +39,8 @@ export torch.Hub (
 
 end hub
 
-abbrev Qwen36ForCausalLM (cfg : Config) := torch.qwen35.Qwen35ForCausalLM cfg
-abbrev Qwen36ForConditionalGeneration (cfg : VLConfig) := torch.qwen35.Qwen35ForConditionalGeneration cfg
+abbrev Qwen36ForCausalLM (cfg : Config) := torch.qwen35.Qwen35ForCausalLM (device := device) cfg
+abbrev Qwen36ForConditionalGeneration (cfg : VLConfig) := torch.qwen35.Qwen35ForConditionalGeneration (device := device) cfg
 
 namespace Qwen36ForCausalLM
 

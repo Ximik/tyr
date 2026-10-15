@@ -9,9 +9,12 @@ import Tyr.Typed.Neural
 import Tyr.TensorStruct
 import Tyr.Module.Core
 import Tyr.Module.Derive
+import Tyr.TensorStruct.DeriveCast
 import Tyr.Optim
 
 namespace torch.gpt
+
+variable {device : Device}
 
 /-- GPT model configuration -/
 structure Config where
@@ -50,47 +53,47 @@ def Config.nanogpt_gpu_shakespeare : Config :=
 /-- Parameters for a single transformer block -/
 structure BlockParams (n_embd : UInt64) where
   -- Layer norm 1 (pre-attention)
-  ln1_weight : Activation #[n_embd]
-  ln1_bias : Activation #[n_embd]
+  ln1_weight : Activation (device := device) #[n_embd]
+  ln1_bias : Activation (device := device) #[n_embd]
   -- Attention: separate Q, K, V projections (avoids tensor split)
   -- Tensor.linear3d expects weight [out_dim, in_dim], computes x @ W.T
-  q_proj : Activation #[n_embd, n_embd]
-  k_proj : Activation #[n_embd, n_embd]
-  v_proj : Activation #[n_embd, n_embd]
+  q_proj : Activation (device := device) #[n_embd, n_embd]
+  k_proj : Activation (device := device) #[n_embd, n_embd]
+  v_proj : Activation (device := device) #[n_embd, n_embd]
   -- Attention output projection
-  c_proj : Activation #[n_embd, n_embd]
-  c_proj_bias : Activation #[n_embd]
+  c_proj : Activation (device := device) #[n_embd, n_embd]
+  c_proj_bias : Activation (device := device) #[n_embd]
   -- Layer norm 2 (pre-MLP)
-  ln2_weight : Activation #[n_embd]
-  ln2_bias : Activation #[n_embd]
+  ln2_weight : Activation (device := device) #[n_embd]
+  ln2_bias : Activation (device := device) #[n_embd]
   -- MLP: expand then project back
   -- mlp_fc: n_embd -> 4*n_embd, weight shape [out, in] = [4*n_embd, n_embd]
-  mlp_fc : Activation #[4 * n_embd, n_embd]
-  mlp_fc_bias : Activation #[4 * n_embd]
+  mlp_fc : Activation (device := device) #[4 * n_embd, n_embd]
+  mlp_fc_bias : Activation (device := device) #[4 * n_embd]
   -- mlp_proj: 4*n_embd -> n_embd, weight shape [out, in] = [n_embd, 4*n_embd]
-  mlp_proj : Activation #[n_embd, 4 * n_embd]
-  mlp_proj_bias : Activation #[n_embd]
+  mlp_proj : Activation (device := device) #[n_embd, 4 * n_embd]
+  mlp_proj_bias : Activation (device := device) #[n_embd]
   deriving TensorStruct
 
 /-- Full GPT model parameters -/
 structure GPTParams (cfg : Config) where
   -- Embeddings
-  wte : Activation #[cfg.vocab_size, cfg.n_embd]    -- token embeddings
-  wpe : Activation #[cfg.block_size, cfg.n_embd]   -- position embeddings
+  wte : Activation (device := device) #[cfg.vocab_size, cfg.n_embd]    -- token embeddings
+  wpe : Activation (device := device) #[cfg.block_size, cfg.n_embd]   -- position embeddings
   -- Transformer blocks
-  blocks : Array (BlockParams cfg.n_embd)
+  blocks : Array (BlockParams (device := device) cfg.n_embd)
   -- Final layer norm
-  ln_f_weight : Activation #[cfg.n_embd]
-  ln_f_bias : Activation #[cfg.n_embd]
+  ln_f_weight : Activation (device := device) #[cfg.n_embd]
+  ln_f_bias : Activation (device := device) #[cfg.n_embd]
   -- Note: lm_head shares weights with wte (weight tying)
   deriving TensorStruct
 
 /-- Helper to create a leaf parameter tensor: detach then set requires_grad -/
-def makeLeafParam {s : Shape} (t : Activation s) : IO (Activation s) :=
+def makeLeafParam {s : Shape} (t : Activation (device := device) s) : IO (Activation (device := device) s) :=
   TensorOps.leaf t
 
 /-- Initialize block parameters with scaled random weights -/
-def BlockParams.init (n_embd : UInt64) (scale : Float := 0.02) (device : Device := Device.CPU) : IO (BlockParams n_embd) := do
+def BlockParams.init (n_embd : UInt64) (scale : Float := 0.02) (device : Device := Device.CPU) : IO (BlockParams (device := device) n_embd) := do
   -- Create scaled random tensors as leaf tensors on target device
   -- randn * scale creates a non-leaf, so we detach and set requires_grad
   let q_proj ← Tensor.randn #[n_embd, n_embd] false device
@@ -116,7 +119,7 @@ def BlockParams.init (n_embd : UInt64) (scale : Float := 0.02) (device : Device 
   }
 
 /-- Initialize full GPT model -/
-def GPTParams.init (cfg : Config) (device : Device := Device.CPU) : IO (GPTParams cfg) := do
+def GPTParams.init (cfg : Config) (device : Device := Device.CPU) : IO (GPTParams (device := device) cfg) := do
   let wte ← Tensor.randn #[cfg.vocab_size, cfg.n_embd] false device
   let wpe ← Tensor.randn #[cfg.block_size, cfg.n_embd] false device
   let mut blocks := #[]
@@ -133,10 +136,10 @@ def GPTParams.init (cfg : Config) (device : Device := Device.CPU) : IO (GPTParam
 
 /-- Forward pass through a single transformer block with multi-head attention and dropout -/
 def blockForward {n_embd n_head batch seq : UInt64}
-    (params : BlockParams n_embd)
-    (x : Activation #[batch, seq, n_embd])
+    (params : BlockParams (device := device) n_embd)
+    (x : Activation (device := device) #[batch, seq, n_embd])
     (dropout_p : Float := 0.0)
-    (training : Bool := true) : IO (Activation #[batch, seq, n_embd]) := do
+    (training : Bool := true) : IO (Activation (device := device) #[batch, seq, n_embd]) := do
   -- Pre-norm attention
   let h := TensorOps.layerNorm x params.ln1_weight params.ln1_bias
   -- Q, K, V projections: [batch, seq, n_embd] @ [n_embd, n_embd] -> [batch, seq, n_embd]
@@ -176,9 +179,9 @@ def blockForward {n_embd n_head batch seq : UInt64}
 
 /-- Full GPT forward pass with dropout -/
 def forward {cfg : Config} {batch seq : UInt64}
-    (params : GPTParams cfg)
-    (idx : Tokens #[batch, seq])
-    (training : Bool := true) : IO (Activation #[batch, seq, cfg.vocab_size]) := do
+    (params : GPTParams (device := device) cfg)
+    (idx : Tokens (device := device) #[batch, seq])
+    (training : Bool := true) : IO (Activation (device := device) #[batch, seq, cfg.vocab_size]) := do
   -- Token embeddings: [batch, seq] -> [batch, seq, n_embd]
   let tok_emb := TensorOps.embedding idx params.wte
   -- Position embeddings (create position indices): [seq] -> [seq, n_embd]
@@ -188,7 +191,7 @@ def forward {cfg : Config} {batch seq : UInt64}
   -- Expand pos_emb to match batch: [seq, n_embd] -> [batch, seq, n_embd]
   let pos_emb_expanded := Tensor.expand pos_emb #[batch, seq, cfg.n_embd]
   -- Combine embeddings + dropout: [batch, seq, n_embd]
-  let x : Activation #[batch, seq, cfg.n_embd] := Tensor.add tok_emb pos_emb_expanded
+  let x : Activation (device := device) #[batch, seq, cfg.n_embd] := Tensor.add tok_emb pos_emb_expanded
   let x ← TensorOps.dropout x cfg.dropout training
   -- Apply transformer blocks with multi-head attention and dropout
   let mut x := x
@@ -202,10 +205,10 @@ def forward {cfg : Config} {batch seq : UInt64}
 
 /-- Compute cross-entropy loss (training=true enables dropout) -/
 def loss {cfg : Config} {batch seq : UInt64}
-    (params : GPTParams cfg)
-    (idx : Tokens #[batch, seq])
-    (targets : Tokens #[batch, seq])
-    (training : Bool := true) : IO (Activation #[]) := do
+    (params : GPTParams (device := device) cfg)
+    (idx : Tokens (device := device) #[batch, seq])
+    (targets : Tokens (device := device) #[batch, seq])
+    (training : Bool := true) : IO (Activation (device := device) #[]) := do
   let logits ← forward params idx training
   -- Reshape for cross-entropy: (batch*seq, vocab) vs (batch*seq,)
   let logits_flat ← TensorOps.reshape logits #[batch * seq, cfg.vocab_size]
@@ -214,13 +217,13 @@ def loss {cfg : Config} {batch seq : UInt64}
 
 /-- Training state using Optax-style optimizer -/
 structure TrainState (cfg : Config) where
-  params : GPTParams cfg
-  optState : Optim.AdamWState (GPTParams cfg)
+  params : GPTParams (device := device) cfg
+  optState : Optim.AdamWState (GPTParams (device := device) cfg)
   step : Nat
 
 /-- Initialize training state -/
-def TrainState.init (cfg : Config) : IO (TrainState cfg) := do
-  let params ← GPTParams.init cfg
+def TrainState.init (cfg : Config) (device : Device := .CPU) : IO (TrainState (device := device) cfg) := do
+  let params ← GPTParams.init cfg device
   let opt := Optim.adamw (lr := 1e-3)
   return {
     params := params
@@ -231,7 +234,7 @@ def TrainState.init (cfg : Config) : IO (TrainState cfg) := do
 /-- Generate tokens autoregressively from the model
     Takes initial context and generates maxNewTokens more tokens -/
 def generate {cfg : Config}
-    (params : GPTParams cfg)
+    (params : GPTParams (device := device) cfg)
     (context : Array Int64)  -- Initial token IDs
     (maxNewTokens : Nat)
     (temperature : Float := 1.0)
@@ -271,5 +274,12 @@ def generate {cfg : Config}
     tokens := tokens.push nextTokenId
 
   return tokens
+
+
+derive_tensor_tree_cast {source target : Device} {n_embd : UInt64} :
+  BlockParams (device := source) n_embd => BlockParams (device := target) n_embd
+
+derive_tensor_tree_cast {source target : Device} {cfg : Config} :
+  GPTParams (device := source) cfg => GPTParams (device := target) cfg
 
 end torch.gpt

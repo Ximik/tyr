@@ -158,7 +158,7 @@ private opaque reduceScatterImpl (output : @& RawTensor) (input : @& RawTensor)
     including when the static specification leaves either component unrestricted. -/
 private def collectiveOutput {σ : StaticSpec} (shape : Shape) (input : Tensor σ) :
     IO (Tensor (σ.withShape shape)) := do
-  let template := Tensor.zerosFor { shape, dtype := input.raw.dtype, device := .exact input.raw.device }
+  let template := Tensor.zerosFor { shape, dtype := input.raw.dtype, device := input.device }
   let output ← data.cloneInferenceIO template
   match Tensor.ofRaw output.raw with
   | .ok result => pure result
@@ -259,7 +259,7 @@ private def checkedResult {σ : StaticSpec} (operation : String) (dtype : DType)
     (device : Device) (raw : RawTensor) : IO (Tensor σ) :=
   let checked : Except String (Tensor σ) := do
     TensorSpec.checkDType dtype raw.dtype
-    (DevicePolicy.exact device).check raw.device
+    device.check raw.device
     Tensor.ofRaw raw
   match checked with
   | .ok tensor => pure tensor
@@ -275,7 +275,7 @@ private opaque xxtImpl (A : @& RawTensor) : IO RawTensor
 
 /-- `A @ Aᵀ` for an indexed matrix: the result shape is computed from the
     input, not claimed independently. -/
-def xxt {m n : UInt64} {d : DType} {dev : DevicePolicy}
+def xxt {m n : UInt64} {d : DType} {dev : Device}
     (A : Tensor ⟨#[m, n], d, dev⟩) : IO (Tensor ⟨#[m, m], d, dev⟩) := do
   checkedResult "xxt" A.raw.dtype A.device (← xxtImpl A.raw)
 

@@ -5,7 +5,7 @@
   generated RK kernels (`Tyr.GPU.Kernels.RKCombine`), following the
   kernel-op layering used by `Tyr.GPU.Ops.MhaH100`.
 
-  State layout contract: `Tensor { shape := #[1, 1, 64, cols], dtype := .Float32 }` with
+  State layout contract: `Tensor { shape := #[1, 1, 64, cols], dtype := .Float32, device := device }` with
   `cols % 64 == 0` (one 64×64 tile per block, grid x = cols / 64).
 
   Per step this issues 7 vector-field evaluations, 7 `mulScalar` products
@@ -28,24 +28,26 @@ import Tyr.GPU.Kernels.RKCombine
 namespace Tyr.GPU.Ops.RKFused
 
 open torch
+
+variable {device : Device}
 open Tyr.GPU.Kernels
 
 /-- Tile-layout state used by the fused integrator. -/
-abbrev Tile (cols : UInt64) : Type := Tensor { shape := #[1, 1, 64, cols], dtype := .Float32 }
+abbrev Tile (cols : UInt64) : Type := Tensor { shape := #[1, 1, 64, cols], dtype := .Float32, device := device }
 
 /-- Preallocated scratch buffers for one solver instance. -/
 structure Workspace (cols : UInt64) where
-  z : Array (Tile cols)      -- six stage-state buffers (z₂ … z₇)
-  yA : Tile cols             -- ping
-  yB : Tile cols             -- pong
-  err : Tile cols
+  z : Array (Tile (device := device) cols)      -- six stage-state buffers (z₂ … z₇)
+  yA : Tile (device := device) cols             -- ping
+  yB : Tile (device := device) cols             -- pong
+  err : Tile (device := device) cols
 
 /-- Allocate the workspace through IO so every buffer is distinct.
     The buffers are pure scratch (every kernel writes them before any read),
     so the draw distribution is unobservable; `Tensor.randn` is used because
     the typed surface has no uniform `rand` and allocation must stay in IO. -/
-def Workspace.make (cols : UInt64) (device : Device) : IO (Workspace cols) := do
-  let mut z : Array (Tile cols) := #[]
+def Workspace.make (cols : UInt64) (device : Device) : IO (Workspace (device := device) cols) := do
+  let mut z : Array (Tile (device := device) cols) := #[]
   for _ in [:6] do
     z := z.push (← Tensor.randn #[1, 1, 64, cols] false device)
   let yA ← Tensor.randn #[1, 1, 64, cols] false device
@@ -59,13 +61,13 @@ private def dopri5C : Array Float :=
 /-- One fused Dopri5 step: reads the state from `y0`, writes the new state
     into `y1Out` (and the embedded error estimate into `ws.err`). -/
 def dopri5StepFused {cols : UInt64}
-    (vf : Float → Tile cols → Tile cols)
+    (vf : Float → Tile (device := device) cols → Tile (device := device) cols)
     (t h : Float)
-    (y0 : Tile cols) (y1Out : Tile cols)
-    (ws : Workspace cols)
+    (y0 : Tile (device := device) cols) (y1Out : Tile (device := device) cols)
+    (ws : Workspace (device := device) cols)
     (blackwell : Bool) (stream : UInt64) : IO Unit := do
   let gx := cols / 64
-  let kOf := fun (i : Nat) (z : Tile cols) =>
+  let kOf := fun (i : Nat) (z : Tile (device := device) cols) =>
     Tensor.Preserving.mulScalar (vf (t + dopri5C.getD i 0.0 * h) z) h
   let k1 := kOf 0 y0
   let z2 := ws.z.getD 0 y0
@@ -115,16 +117,16 @@ def dopri5StepFused {cols : UInt64}
     steps. Returns the tensor holding the final state (one of the two
     ping-pong buffers; clone it if you need it to outlive the workspace). -/
 def dopri5SolveFused {cols : UInt64}
-    (vf : Float → Tile cols → Tile cols)
+    (vf : Float → Tile (device := device) cols → Tile (device := device) cols)
     (t0 t1 : Float) (steps : Nat)
-    (y0 : Tile cols)
-    (ws : Workspace cols)
-    (blackwell : Bool) (stream : UInt64) : IO (Tile cols) := do
+    (y0 : Tile (device := device) cols)
+    (ws : Workspace (device := device) cols)
+    (blackwell : Bool) (stream : UInt64) : IO (Tile (device := device) cols) := do
   let n := Nat.max steps 1
   let h := (t1 - t0) / Float.ofNat n
   -- fresh copy of the initial state so the caller's tensor is not mutated;
   -- ping-pong between it and the workspace buffers
-  let mut cur : Tile cols := y0 + Tensor.Preserving.mulScalar y0 0.0
+  let mut cur : Tile (device := device) cols := y0 + Tensor.Preserving.mulScalar y0 0.0
   let mut nxt := ws.yA
   for k in [:n] do
     let t := t0 + Float.ofNat k * h

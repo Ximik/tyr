@@ -36,11 +36,11 @@ def runOnce : IO Bool := do
   let a := -0.5   -- drift rate
   let b := 0.3    -- diffusion rate
 
-  let drift : Float → Tensor { shape := #[n], dtype := .Float32 } → Tensor { shape := #[n], dtype := .Float32 } := fun _ y => Tensor.Preserving.mulScalar y a
-  let diffusion : Float → Tensor { shape := #[n], dtype := .Float32 } → Tensor { shape := #[n], dtype := .Float32 } := fun _ y => Tensor.Preserving.mulScalar y b
+  let drift {placement : Device} : Float → Tensor { shape := #[n], dtype := .Float32, device := placement } → Tensor { shape := #[n], dtype := .Float32, device := placement } := fun _ y => Tensor.Preserving.mulScalar y a
+  let diffusion {placement : Device} : Float → Tensor { shape := #[n], dtype := .Float32, device := placement } → Tensor { shape := #[n], dtype := .Float32, device := placement } := fun _ y => Tensor.Preserving.mulScalar y b
 
   -- CPU reference: same EM update, increments from the CPU tensor VBT
-  let cpuTree : VirtualBrownianTree (Tensor { shape := #[n], dtype := .Float32 }) := {
+  let cpuTree : VirtualBrownianTree (Tensor { shape := #[n], dtype := .Float32, device := .CPU }) := {
     t0 := t0, t1 := t1, tol := tol, seed := treeSeed
     shape := Tensor.zeros #[n]
   }
@@ -64,7 +64,7 @@ def runOnce : IO Bool := do
 
   let tGpu0 ← IO.monoMsNow
   let yGpu ← emSolveFused drift diffusion treeSeed t0 t1 tol 24
-    t0 t1 steps y0Dev blackwell stream device
+    t0 t1 steps y0Dev blackwell stream
   let gpuMs := (← IO.monoMsNow) - tGpu0
   let gpuVals ← Tensor.toFloatArray yGpu
 

@@ -9,13 +9,11 @@
   and keep the returned buffers. Storage is reused when safe. We slice the cache
   to `[..., currentLen+1, ...]` for the attention call.
 
-  Buffers are indexed tensors: shape, dtype and device policy are carried in
+  Buffers are indexed tensors: shape, dtype and concrete device are carried in
   the `Tensor` spec. The dtype defaults to BFloat16 (the `Cache.init`
-  allocation dtype) and the device policy defaults to `.any` (the placement is
-  a runtime `Device` argument); appends and views share the cache's spec
-  statically, and still re-check the physical device/dtype at runtime so
-  dynamically-graded (`Unknown`/`.any`) call sites keep the old error
-  behavior. The sequence dimension of an attention view stays runtime
+  allocation dtype); the runtime-selected `Device` is retained in the result
+  type. Appends and views share the cache's spec statically, and still
+  re-check physical device/dtype at native boundaries. The sequence dimension of an attention view stays runtime
   (`validLen` is a value, not a constant), so views are produced by
   `Tensor.sliceChecked`, which validates the claimed spec against the native
   handle.
@@ -48,7 +46,7 @@ open torch.data
 
 /-- KV cache for a single attention layer -/
 structure LayerCache (batch maxSeqLen numKvHeads headDim : UInt64)
-    (dtype : DType := .BFloat16) (device : DevicePolicy := .any) where
+    (dtype : DType := .BFloat16) (device : Device := .CPU) where
   /-- Cached keys: [batch, num_kv_heads, max_seq_len, head_dim] -/
   keys : Tensor ⟨#[batch, numKvHeads, maxSeqLen, headDim], dtype, device⟩
   /-- Cached values: [batch, num_kv_heads, max_seq_len, head_dim] -/
@@ -57,7 +55,7 @@ structure LayerCache (batch maxSeqLen numKvHeads headDim : UInt64)
 
 /-- Full KV cache for all layers -/
 structure Cache (numLayers batch maxSeqLen numKvHeads headDim : UInt64)
-    (dtype : DType := .BFloat16) (device : DevicePolicy := .any) where
+    (dtype : DType := .BFloat16) (device : Device := .CPU) where
   /-- Per-layer KV caches -/
   layers : Array (LayerCache batch maxSeqLen numKvHeads headDim dtype device)
   /-- Current sequence length for each batch element -/
@@ -72,15 +70,15 @@ structure Cache (numLayers batch maxSeqLen numKvHeads headDim : UInt64)
     appended into them — `tyrFlashAttn4d` rejects cross-device inputs. -/
 def Cache.init (numLayers batch maxSeqLen numKvHeads headDim : UInt64)
     (device : Device := Device.CPU)
-    : IO (Cache numLayers batch maxSeqLen numKvHeads headDim) := do
+    : IO (Cache numLayers batch maxSeqLen numKvHeads headDim .BFloat16 device) := do
   if numLayers == 0 || batch == 0 || maxSeqLen == 0 || numKvHeads == 0 || headDim == 0 then
     throw <| IO.userError "KV cache dimensions must be positive"
   -- Pure allocations may be commoned by Lean, even within a single layer.
   -- Each IO clone must execute independently, both for K/V and across layers.
-  let template : Tensor ⟨#[batch, numKvHeads, maxSeqLen, headDim], .BFloat16, .any⟩ :=
+  let template : Tensor ⟨#[batch, numKvHeads, maxSeqLen, headDim], .BFloat16, device⟩ :=
     Tensor.toBFloat16 (Tensor.zeros #[batch, numKvHeads, maxSeqLen, headDim]
       (requiresGrad := false) (device := device))
-  let mut layers : Array (LayerCache batch maxSeqLen numKvHeads headDim) := #[]
+  let mut layers : Array (LayerCache batch maxSeqLen numKvHeads headDim .BFloat16 device) := #[]
   for _ in [:numLayers.toNat] do
     let keys ← cloneInferenceIO template
     let values ← cloneInferenceIO template
@@ -253,7 +251,7 @@ def Cache.attendLayer
   return (cache', output)
 
 /-- TensorStruct instance for LayerCache -/
-instance {batch maxSeqLen numKvHeads headDim : UInt64} {dtype : DType} {device : DevicePolicy}
+instance {batch maxSeqLen numKvHeads headDim : UInt64} {dtype : DType} {device : Device}
     : TensorStruct (LayerCache batch maxSeqLen numKvHeads headDim dtype device) where
   map f c := { keys := TensorStruct.map f c.keys, values := TensorStruct.map f c.values }
   mapM f c := do pure { keys := ← TensorStruct.mapM f c.keys, values := ← TensorStruct.mapM f c.values }
@@ -262,7 +260,7 @@ instance {batch maxSeqLen numKvHeads headDim : UInt64} {dtype : DType} {device :
 
 /-- TensorStruct instance for Cache -/
 instance {numLayers batch maxSeqLen numKvHeads headDim : UInt64} {dtype : DType}
-    {device : DevicePolicy}
+    {device : Device}
     : TensorStruct (Cache numLayers batch maxSeqLen numKvHeads headDim dtype device) where
   map f c := { c with layers := c.layers.map (TensorStruct.map f) }
   mapM f c := do

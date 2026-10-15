@@ -8,7 +8,8 @@ structure VADSignal where
   deriving Repr, Inhabited
 
 structure SileroProvider where
-  iterator : torch.silerovad.VADIterator
+  device : torch.Device
+  iterator : torch.silerovad.VADIterator (device := device)
   residue : Array Float := #[]
   speechActive : Bool := false
 
@@ -31,11 +32,12 @@ def initSileroProvider
     (threshold : Float := 0.5)
     (minSilenceDurationMs : UInt64 := 100)
     (speechPadMs : UInt64 := 30)
+    (device : torch.Device := .CPU)
     : IO SileroProvider := do
-  let model ← torch.silerovad.SileroVAD.load weightsPath
+  let model ← torch.silerovad.SileroVAD.load weightsPath (device := device)
   let runtime := torch.silerovad.SileroVADRuntime.init model
   let it ← torch.silerovad.VADIterator.init runtime threshold 16000 minSilenceDurationMs speechPadMs
-  pure { iterator := it, residue := #[], speechActive := false }
+  pure { device, iterator := it, residue := #[], speechActive := false }
 
 def stepSileroProvider
     (p : SileroProvider)
@@ -60,6 +62,7 @@ def stepSileroProvider
     | none => pure ()
 
   let p' : SileroProvider := {
+    device := p.device
     iterator := it
     residue := rem
     speechActive := active

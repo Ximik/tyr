@@ -50,7 +50,7 @@ scalars, including indexed `Tensor σ` leaves. The `deriving TensorStruct`
 handler lives in `Tyr.Module.Derive`, so import that module when deriving
 instances.
 Traversal callbacks preserve each leaf's complete `StaticSpec` index. A map
-cannot change a leaf's shape, concrete dtype or pinned device policy. Dynamic
+cannot change a leaf's shape, concrete dtype or concrete device. Dynamic
 dtype leaves can be explicitly recast with `TensorStruct.castDType`; changing a
 concrete dtype contract requires a model conversion with a different result type.
 
@@ -64,10 +64,10 @@ import Tyr.Module.Derive
 open torch
 
 structure LinearParams (inDim outDim : UInt64) where
-  weight : Tensor { shape := #[outDim, inDim], dtype := .Float32 }
-  bias : Tensor { shape := #[outDim], dtype := .Float32 }
+  weight : Tensor { shape := #[outDim, inDim], dtype := .Float32, device := .CPU }
+  bias : Tensor { shape := #[outDim], dtype := .Float32, device := .CPU }
   name : Static String
-  runningMean : Frozen { shape := #[outDim], dtype := .Float32 }
+  runningMean : Frozen { shape := #[outDim], dtype := .Float32, device := .CPU }
   deriving TensorStruct
 ```
 
@@ -274,16 +274,17 @@ instance {σ : StaticSpec} : TensorStruct (Tensor σ) where
   zipWith f lhs rhs := f lhs rhs
   fold f init tensor := f tensor init
 
-/-- A heterogeneous shape carrier whose leaves retain an indexed dtype. -/
-abbrev ShapePackedTensor (dtype : DType) := Sigma fun shape : Shape => Tensor { shape := shape, dtype := dtype }
+/-- A heterogeneous shape carrier whose leaves retain their dtype and concrete device. -/
+abbrev ShapePackedTensor (dtype : DType) (device : Device) :=
+  Sigma fun shape : Shape => Tensor { shape, dtype, device }
 
-instance {dtype : DType} : Inhabited (ShapePackedTensor dtype) := ⟨⟨#[], default⟩⟩
+instance {dtype : DType} {device : Device} : Inhabited (ShapePackedTensor dtype device) := ⟨⟨#[], default⟩⟩
 
-instance {dtype : DType} : TensorStruct (ShapePackedTensor dtype) where
+instance {dtype : DType} {device : Device} : TensorStruct (ShapePackedTensor dtype device) where
   map f x := ⟨x.1, f x.2⟩
   mapM f x := do pure ⟨x.1, ← f x.2⟩
   zipWith f x y :=
-    letI : Inhabited (ShapePackedTensor dtype) := ⟨x⟩
+    letI : Inhabited (ShapePackedTensor dtype device) := ⟨x⟩
     if h : y.1 = x.1 then ⟨x.1, f x.2 (h ▸ y.2)⟩
     else panic! s!"TensorStruct shape mismatch: {x.1} vs {y.1}"
   fold f initial x := f x.2 initial
@@ -480,7 +481,8 @@ private def withRawLeaves [TensorStruct α] (template : α) (leaves : Array RawT
     Fresh differentiation variables live entirely inside the native callback;
     only detached gradients escape. Identical input values in different leaves
     remain independent variables. No parameter gradient buffers are mutated. -/
-def functionalGrad [TensorStruct α] (f : α → Tensor { shape := #[], dtype := .Float32 })
+def functionalGrad {device : Device} [TensorStruct α]
+    (f : α → Tensor { shape := #[], dtype := .Float32, device })
     (inputs : α) : α :=
   let gradients := match RawTensor.functionalGrad (rawLeaves inputs)
       (fun leaves => (f (withRawLeaves inputs leaves)).raw) with
@@ -490,7 +492,7 @@ def functionalGrad [TensorStruct α] (f : α → Tensor { shape := #[], dtype :=
 
 /-- Explicitly cast tensor-tree leaves while retaining their original static
 indices. A dynamic dtype permits a native dtype change; a concrete dtype rejects
-a different result. Shape, actual device and pinned placement are preserved.
+a different result. Shape, actual device and placement are preserved.
 Failure is reported through IO instead of substituting a fallback tensor. -/
 def castDType [TensorStruct α] (dtype : DType) (params : α) : IO α :=
   mapM (fun {σ} tensor => do

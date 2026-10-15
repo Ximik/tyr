@@ -48,6 +48,8 @@ end torch.qwen35.hub
 
 namespace torch.qwen35
 
+variable {device : Device}
+
 namespace Qwen35ForCausalLM
 
 /-- Load a text Qwen3.5 checkpoint from local dir or HF repo id. -/
@@ -57,7 +59,7 @@ def loadFromPretrained
     (revision : String := "main")
     (cacheDir : String := Hub.defaultCacheDir)
     (device : Device := Device.CPU)
-    : IO (Sigma (fun cfg => Qwen35ForCausalLM cfg)) := do
+    : IO (Sigma (fun cfg => Qwen35ForCausalLM (device := device) cfg)) := do
   Hub.loadModelFromPretrained
     source
     revision
@@ -79,7 +81,7 @@ def loadFromPretrained
     (revision : String := "main")
     (cacheDir : String := Hub.defaultCacheDir)
     (device : Device := Device.CPU)
-    : IO (Sigma (fun cfg => Qwen35ForConditionalGeneration cfg)) := do
+    : IO (Sigma (fun cfg => Qwen35ForConditionalGeneration (device := device) cfg)) := do
   Hub.loadModelFromPretrained
     source
     revision

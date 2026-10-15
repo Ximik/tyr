@@ -49,6 +49,7 @@ import Tyr.Model.Laguna.Model
 
 namespace torch.laguna
 
+variable {device : Device}
 open torch.Log
 open torch.Model (reqGradFalse)
 open torch.safetensors (pushUnique)
@@ -80,7 +81,7 @@ namespace WeightSource
 
 /-- Load `name` with expected shape `s` (numel-checked, reshaped in C++). -/
 def load (src : WeightSource) (name : String) (s : Shape)
-    (device : Device := Device.CPU) : IO (Tensor { shape := s }) :=
+    (device : Device := Device.CPU) : IO (Tensor { device := device, shape := s }) :=
   match src with
   | .single path => torch.safetensors.loadTensorCandidates path #[name] s device
   | .sharded dir => torch.safetensors.loadTensorShardedCandidates dir #[name] s device
@@ -88,7 +89,7 @@ def load (src : WeightSource) (name : String) (s : Shape)
 /-- Try to load `name`; `none` on any failure (missing tensor, shape
     mismatch, unreadable file). Used for layout probes and optional tensors. -/
 def tryLoad (src : WeightSource) (name : String) (s : Shape)
-    (device : Device := Device.CPU) : IO (Option (Tensor { shape := s })) := do
+    (device : Device := Device.CPU) : IO (Option (Tensor { device := device, shape := s })) := do
   try
     pure (some (← src.load name s device))
   catch _ =>
@@ -96,7 +97,7 @@ def tryLoad (src : WeightSource) (name : String) (s : Shape)
 
 /-- Try each of `names` in order; `none` if none loads. -/
 def tryLoadCandidates (src : WeightSource) (names : Array String) (s : Shape)
-    (device : Device := Device.CPU) : IO (Option (Tensor { shape := s })) := do
+    (device : Device := Device.CPU) : IO (Option (Tensor { device := device, shape := s })) := do
   for n in names do
     if let some t ← src.tryLoad n s device then
       return some t
@@ -105,7 +106,7 @@ def tryLoadCandidates (src : WeightSource) (names : Array String) (s : Shape)
 /-- Load the first of `names` that resolves; throws listing all candidates
     if none loads. -/
 def loadCandidates (src : WeightSource) (names : Array String) (s : Shape)
-    (device : Device := Device.CPU) : IO (Tensor { shape := s }) := do
+    (device : Device := Device.CPU) : IO (Tensor { device := device, shape := s }) := do
   match (← src.tryLoadCandidates names s device) with
   | some t => pure t
   | none => throw <| IO.userError s!"Failed to load tensor: {names}"
@@ -115,7 +116,7 @@ end WeightSource
 /-- Load one attention block (`numHeads` is the per-layer query head count).
     `self_attn.{k,v}_scale` scalars are intentionally not loaded. -/
 private def loadAttention (src : WeightSource) (cfg : Config) (layerIdx numHeads : UInt64)
-    (device : Device) : IO (LagunaAttention cfg numHeads) := do
+    (device : Device) : IO (LagunaAttention (device := device) cfg numHeads) := do
   let p := s!"model.layers.{layerIdx}.self_attn"
   let q ← src.loadCandidates (nameCandidates s!"{p}.q_proj.weight")
     #[numHeads * cfg.head_dim, cfg.hidden_size] device
@@ -141,7 +142,7 @@ private def loadAttention (src : WeightSource) (cfg : Config) (layerIdx numHeads
 
 /-- Load the dense SwiGLU MLP of a `mlp_only_layers` layer. -/
 private def loadDenseMLP (src : WeightSource) (cfg : Config) (layerIdx : UInt64)
-    (device : Device) : IO (LagunaMLP cfg) := do
+    (device : Device) : IO (LagunaMLP (device := device) cfg) := do
   let p := s!"model.layers.{layerIdx}.mlp"
   let gate ← src.loadCandidates (nameCandidates s!"{p}.gate_proj.weight")
     #[cfg.intermediate_size, cfg.hidden_size] device
@@ -157,7 +158,7 @@ private def loadDenseMLP (src : WeightSource) (cfg : Config) (layerIdx : UInt64)
 
 /-- Unused placeholder packed banks for the dense-BF16 expert layout
     (`forward2d` reads `denseExperts` instead). -/
-private def placeholderPackedExperts (cfg : Config) (device : Device) : LagunaPackedExperts cfg :=
+private def placeholderPackedExperts (cfg : Config) (device : Device) : LagunaPackedExperts (device := device) cfg :=
   let e := cfg.num_experts
   let mi := cfg.moe_intermediate_size
   let h := cfg.hidden_size
@@ -180,19 +181,19 @@ private def placeholderPackedExperts (cfg : Config) (device : Device) : LagunaPa
     banks with one `cat` per bank, and the nine banks move to `device` in
     one go — peak extra memory is one layer's banks (~1.4 GB for S-2.1). -/
 private def loadPackedExpertBanks (src : WeightSource) (p : String) (cfg : Config)
-    (device : Device) : IO (LagunaPackedExperts cfg) := do
+    (device : Device) : IO (LagunaPackedExperts (device := device) cfg) := do
   let e := cfg.num_experts
   let mi := cfg.moe_intermediate_size
   let h := cfg.hidden_size
-  let mut gateP : Array (ShapePackedTensor (.Unknown "dynamic")) := Array.mkEmpty e.toNat
-  let mut gateS : Array (ShapePackedTensor (.Unknown "dynamic")) := Array.mkEmpty e.toNat
-  let mut gateG : Array (ShapePackedTensor (.Unknown "dynamic")) := Array.mkEmpty e.toNat
-  let mut upP : Array (ShapePackedTensor (.Unknown "dynamic")) := Array.mkEmpty e.toNat
-  let mut upS : Array (ShapePackedTensor (.Unknown "dynamic")) := Array.mkEmpty e.toNat
-  let mut upG : Array (ShapePackedTensor (.Unknown "dynamic")) := Array.mkEmpty e.toNat
-  let mut downP : Array (ShapePackedTensor (.Unknown "dynamic")) := Array.mkEmpty e.toNat
-  let mut downS : Array (ShapePackedTensor (.Unknown "dynamic")) := Array.mkEmpty e.toNat
-  let mut downG : Array (ShapePackedTensor (.Unknown "dynamic")) := Array.mkEmpty e.toNat
+  let mut gateP : Array (ShapePackedTensor (.Unknown "dynamic") .CPU) := Array.mkEmpty e.toNat
+  let mut gateS : Array (ShapePackedTensor (.Unknown "dynamic") .CPU) := Array.mkEmpty e.toNat
+  let mut gateG : Array (ShapePackedTensor (.Unknown "dynamic") .CPU) := Array.mkEmpty e.toNat
+  let mut upP : Array (ShapePackedTensor (.Unknown "dynamic") .CPU) := Array.mkEmpty e.toNat
+  let mut upS : Array (ShapePackedTensor (.Unknown "dynamic") .CPU) := Array.mkEmpty e.toNat
+  let mut upG : Array (ShapePackedTensor (.Unknown "dynamic") .CPU) := Array.mkEmpty e.toNat
+  let mut downP : Array (ShapePackedTensor (.Unknown "dynamic") .CPU) := Array.mkEmpty e.toNat
+  let mut downS : Array (ShapePackedTensor (.Unknown "dynamic") .CPU) := Array.mkEmpty e.toNat
+  let mut downG : Array (ShapePackedTensor (.Unknown "dynamic") .CPU) := Array.mkEmpty e.toNat
   for i in [:e.toNat] do
     let ep := s!"{p}.experts.{i}"
     -- gate_proj / up_proj: packed [mi, h/2], scales [mi, h/16], global scalar.
@@ -231,7 +232,7 @@ private def loadPackedExpertBanks (src : WeightSource) (p : String) (cfg : Confi
     fused dense BF16 banks (layout A) when `mlp.experts.gate_up_proj`
     resolves, otherwise per-expert NVFP4-packed tensors (layout B). -/
 private def loadSparseMoe (src : WeightSource) (cfg : Config) (layerIdx : UInt64)
-    (device : Device) : IO (LagunaSparseMoeBlock cfg) := do
+    (device : Device) : IO (LagunaSparseMoeBlock (device := device) cfg) := do
   let p := s!"model.layers.{layerIdx}.mlp"
   let e := cfg.num_experts
   let mi := cfg.moe_intermediate_size
@@ -259,9 +260,9 @@ private def loadSparseMoe (src : WeightSource) (cfg : Config) (layerIdx : UInt64
     | some gu => do
       -- Layout A: fused dense banks; dim-1 first half gate, second half up.
       let down ← src.loadCandidates (nameCandidates s!"{p}.experts.down_proj") #[e, h, mi] device
-      let gate3 : Tensor { shape := #[e, mi, h] } := Tensor.reshapeChecked (sliceTyped gu 1 0 mi) #[e, mi, h]
-      let up3 : Tensor { shape := #[e, mi, h] } := Tensor.reshapeChecked (sliceTyped gu 1 mi mi) #[e, mi, h]
-      let dense : LagunaDenseExperts cfg := {
+      let gate3 : Tensor { device := device, shape := #[e, mi, h] } := Tensor.reshapeChecked (sliceTyped gu 1 0 mi) #[e, mi, h]
+      let up3 : Tensor { device := device, shape := #[e, mi, h] } := Tensor.reshapeChecked (sliceTyped gu 1 mi mi) #[e, mi, h]
+      let dense : LagunaDenseExperts (device := device) cfg := {
         gateProj := reqGradFalse gate3
         upProj := reqGradFalse up3
         downProj := reqGradFalse down
@@ -284,7 +285,7 @@ private def loadSparseMoe (src : WeightSource) (cfg : Config) (layerIdx : UInt64
 /-- Load one decoder layer: exactly one attention variant (by
     `Config.layerType`) and one FFN variant (by `Config.isDenseMlpLayer`). -/
 private def loadLayer (src : WeightSource) (cfg : Config) (layerIdx : UInt64)
-    (device : Device) : IO (LagunaLayer cfg) := do
+    (device : Device) : IO (LagunaLayer (device := device) cfg) := do
   let p := s!"model.layers.{layerIdx}"
   let inputNorm ← src.loadCandidates (nameCandidates s!"{p}.input_layernorm.weight")
     #[cfg.hidden_size] device
@@ -328,13 +329,13 @@ private def loadLayer (src : WeightSource) (cfg : Config) (layerIdx : UInt64)
 
 /-- Shared loader core over an abstract weight source. -/
 private def loadCore (src : WeightSource) (desc : String) (cfg : Config)
-    (device : Device) (log : Handlers) : IO (LagunaForCausalLM cfg) := do
+    (device : Device) (log : Handlers) : IO (LagunaForCausalLM (device := device) cfg) := do
   log.onInfo s!"Loading LagunaForCausalLM from {desc}..."
 
   let embedTokens ← src.loadCandidates (nameCandidates "model.embed_tokens.weight")
     #[cfg.vocab_size, cfg.hidden_size] device
 
-  let mut layers : Array (LagunaLayer cfg) := Array.mkEmpty cfg.num_hidden_layers.toNat
+  let mut layers : Array (LagunaLayer (device := device) cfg) := Array.mkEmpty cfg.num_hidden_layers.toNat
   for i in [:cfg.num_hidden_layers.toNat] do
     let layer ← loadLayer src cfg i.toUInt64 device
     layers := layers.push layer
@@ -343,7 +344,7 @@ private def loadCore (src : WeightSource) (desc : String) (cfg : Config)
 
   let normW ← src.loadCandidates (nameCandidates "model.norm.weight") #[cfg.hidden_size] device
 
-  let model : LagunaModel cfg := {
+  let model : LagunaModel (device := device) cfg := {
     embed_tokens := reqGradFalse embedTokens
     layers := layers
     norm := reqGradFalse normW
@@ -368,14 +369,14 @@ namespace LagunaForCausalLM
 def loadSharded (modelDir : String) (cfg : Config := Config.laguna_s_2_1)
     (device : Device := Device.CPU)
     (log : Handlers := {})
-    : IO (LagunaForCausalLM cfg) :=
+    : IO (LagunaForCausalLM (device := device) cfg) :=
   loadCore (.sharded modelDir) modelDir cfg device log
 
 /-- Load a Laguna model from a single HF SafeTensors file. -/
 def load (path : String) (cfg : Config := Config.laguna_s_2_1)
     (device : Device := Device.CPU)
     (log : Handlers := {})
-    : IO (LagunaForCausalLM cfg) :=
+    : IO (LagunaForCausalLM (device := device) cfg) :=
   loadCore (.single path) path cfg device log
 
 end LagunaForCausalLM

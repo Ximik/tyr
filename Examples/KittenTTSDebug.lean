@@ -31,7 +31,7 @@ private def parseFloatLit? (s : String) : Option Float :=
       | _, _ => none
   | _ => none
 
-private def tensorStats {s : Shape} (t : Tensor { shape := s, dtype := .Float32 }) : IO TensorStats := do
+private def tensorStats {device : Device} {s : Shape} (t : Tensor { shape := s, dtype := .Float32, device := device }) : IO TensorStats := do
   let vals ← t.toFloatArray
   if vals.isEmpty then
     pure { shape := t.runtimeShape, min := 0.0, max := 0.0, mean := 0.0, std := 0.0 }
@@ -89,9 +89,9 @@ def main (args : List String) : IO UInt32 := do
   if source.isEmpty then
     return 1
 
-  let seqToCF {batch seq channels : UInt64}
-      (x : Tensor { shape := #[batch, seq, channels], dtype := .Float32 })
-      : Tensor { shape := #[batch, channels, seq], dtype := .Float32 } :=
+  let seqToCF {modelDevice : Device} {batch seq channels : UInt64}
+      (x : Tensor { shape := #[batch, seq, channels], dtype := .Float32, device := modelDevice })
+      : Tensor { shape := #[batch, channels, seq], dtype := .Float32, device := modelDevice } :=
     Tensor.reshapeChecked (Tensor.transpose x 1 2) #[batch, channels, seq]
 
   let log : torch.Log.Handlers := {
@@ -100,19 +100,19 @@ def main (args : List String) : IO UInt32 := do
     onError := fun msg => IO.eprintln s!"error: {msg}"
   }
   let bundle ← Model.loadFromPretrained source (log := log)
+  let modelDevice := bundle.model.bert.embeddings.wordEmbeddings.device
   let checkpointPath := s!"{bundle.modelDir}/model.safetensors"
-  let checkpointTextEncoder ← KokoroCheckpoint.text_encoder.load checkpointPath
+  let checkpointTextEncoder ← KokoroCheckpoint.text_encoder.load checkpointPath (device := modelDevice)
   torch.manualSeed seed
   let out ← bundle.debugPhonemes phonemes voice speed
   let refStyle ← bundle.loadVoiceStyle voice phonemes.toList.length.toUInt64
-  let decoderStyle : Tensor { shape := #[1, bundle.cfg.styleDim], dtype := .Float32 } := sliceTensor refStyle 1 0 bundle.cfg.styleDim
+  let decoderStyle : Tensor { shape := #[1, bundle.cfg.styleDim], dtype := .Float32, device := modelDevice } := sliceTensor refStyle 1 0 bundle.cfg.styleDim
   let ids := bundle.inputIdsFromPhonemes phonemes
   let seq := ids.size.toUInt64
-  let inputIds0 : Tensor { shape := #[1, seq], dtype := .Int64 } := Tensor.reshapeChecked (Tensor.fromInt64Array (ids.map (·.toInt64))) #[1, seq]
-  let device := bundle.model.bert.embeddings.wordEmbeddings.device
-  let inputIds := if inputIds0.device == device then inputIds0 else inputIds0.to device
-  let emb : Tensor { shape := #[1, seq, bundle.cfg.hiddenDim], dtype := .Float32 } := Tensor.embedding inputIds bundle.model.textEncoder.embedding
-  let mut convH : Tensor { shape := #[1, bundle.cfg.hiddenDim, seq], dtype := .Float32 } := seqToCF emb
+  let inputIds0 : Tensor { shape := #[1, seq], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked (Tensor.fromInt64Array (ids.map (·.toInt64))) #[1, seq]
+  let inputIds := inputIds0.to modelDevice
+  let emb : Tensor { shape := #[1, seq, bundle.cfg.hiddenDim], dtype := .Float32, device := modelDevice } := Tensor.embedding inputIds bundle.model.textEncoder.embedding
+  let mut convH : Tensor { shape := #[1, bundle.cfg.hiddenDim, seq], dtype := .Float32, device := modelDevice } := seqToCF emb
   let embStats ← tensorStats emb
   printStats "embedding" embStats
   let some checkpointConv0 := checkpointTextEncoder.cnn[0]?
@@ -148,7 +148,7 @@ def main (args : List String) : IO UInt32 := do
     let convStatsI ← tensorStats convH
     printStats s!"text_conv_{convIdx}" convStatsI
     convIdx := convIdx + 1
-  let textEnc : Tensor { shape := #[1, bundle.cfg.hiddenDim, seq], dtype := .Float32 } := bundle.model.textEncoder.forward inputIds
+  let textEnc : Tensor { shape := #[1, bundle.cfg.hiddenDim, seq], dtype := .Float32, device := modelDevice } := bundle.model.textEncoder.forward inputIds
   IO.println s!"seed={seed}"
   IO.println s!"pred_durations={out.predDurations}"
   IO.println s!"alignment_frames={out.alignmentFrames}"
@@ -163,9 +163,9 @@ def main (args : List String) : IO UInt32 := do
   printStats "n" nStats
   if out.alignmentFrames > 0 then
     let frames := out.alignmentFrames
-    let asr : Tensor { shape := #[1, bundle.cfg.hiddenDim, frames], dtype := .Float32 } := Tensor.reshapeChecked out.asr.2 #[1, bundle.cfg.hiddenDim, frames]
-    let f0Curve : Tensor { shape := #[1, 1, 2 * frames], dtype := .Float32 } := Tensor.reshapeChecked out.f0Curve.2 #[1, 1, 2 * frames]
-    let nCurve : Tensor { shape := #[1, 1, 2 * frames], dtype := .Float32 } := Tensor.reshapeChecked out.nCurve.2 #[1, 1, 2 * frames]
+    let asr : Tensor { shape := #[1, bundle.cfg.hiddenDim, frames], dtype := .Float32, device := modelDevice } := Tensor.reshapeChecked out.asr.2 #[1, bundle.cfg.hiddenDim, frames]
+    let f0Curve : Tensor { shape := #[1, 1, 2 * frames], dtype := .Float32, device := modelDevice } := Tensor.reshapeChecked out.f0Curve.2 #[1, 1, 2 * frames]
+    let nCurve : Tensor { shape := #[1, 1, 2 * frames], dtype := .Float32, device := modelDevice } := Tensor.reshapeChecked out.nCurve.2 #[1, 1, 2 * frames]
     let decoderDebug ← bundle.model.decoder.debugForward asr f0Curve nCurve decoderStyle
     let decoderF0Stats ← tensorStats decoderDebug.f0.2
     let decoderNStats ← tensorStats decoderDebug.n.2

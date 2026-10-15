@@ -121,7 +121,8 @@ private def renderTensorDecls (sourceIsDirectory : Bool) (tensor : TensorSchema)
   let dtypeExpr := renderDTypeExpr tensor.dtype
   let typedReturnType :=
     "(_root_.torch.Tensor { shape := " ++ s!"{declName}Shape, dtype := {dtypeExpr}, " ++
-    "device := _root_.torch.DevicePolicy.any })"
+    "device := device })"
+  let cpuReturnType := typedReturnType.replace "device := device" "device := _root_.torch.Device.CPU"
   let shapeDecl :=
     s!"/-- Static shape for tensor `{tensor.name}`. -/\n" ++
     s!"abbrev {declName}Shape : _root_.torch.Shape := {shapeLit}\n"
@@ -140,27 +141,27 @@ private def renderTensorDecls (sourceIsDirectory : Bool) (tensor : TensorSchema)
     s!"  {declName}Spec.toSpec\n"
   let loadFromHandleDecl :=
     s!"/-- Load `{tensor.name}` from an open SafeTensors handle with checked shape and dtype. -/\n" ++
-    s!"def load_{declName}FromHandle (handle : _root_.torch.safetensors.SafeTensorsHandle) : IO {typedReturnType} :=\n" ++
-    s!"  _root_.torch.safetensors.loadFromHandleWithSpec handle {declName}Spec.name {declName}TensorSpec\n"
+    s!"def load_{declName}FromHandle (handle : _root_.torch.safetensors.SafeTensorsHandle) (device : _root_.torch.Device := _root_.torch.Device.CPU) : IO {typedReturnType} :=\n" ++
+    s!"  _root_.torch.safetensors.loadFromHandleWithSpec handle {declName}Spec.name {declName}TensorSpec device\n"
   let loadDecl :=
     if sourceIsDirectory then
       s!"/-- Load `{tensor.name}` with checked shape and dtype. -/\n" ++
-      s!"def load_{declName} (source : String := defaultSource) : IO {typedReturnType} := do\n" ++
+      s!"def load_{declName} (source : String := defaultSource) (device : _root_.torch.Device := _root_.torch.Device.CPU) : IO {typedReturnType} := do\n" ++
       "  let filePath : String :=\n" ++
       "    if " ++ declName ++ "Spec.sourceFile.isEmpty then source else source ++ \"/\" ++ " ++ declName ++ "Spec.sourceFile\n" ++
-      s!"  _root_.torch.safetensors.loadTensorWithSpec filePath {declName}Spec.name {declName}TensorSpec\n"
+      s!"  _root_.torch.safetensors.loadTensorWithSpec filePath {declName}Spec.name {declName}TensorSpec device\n"
     else
       s!"/-- Load `{tensor.name}` with checked shape and dtype. -/\n" ++
-      s!"def load_{declName} (source : String := defaultSource) : IO {typedReturnType} := do\n" ++
+      s!"def load_{declName} (source : String := defaultSource) (device : _root_.torch.Device := _root_.torch.Device.CPU) : IO {typedReturnType} := do\n" ++
       "  let handle ← _root_.torch.safetensors.openHandle source\n" ++
-      s!"  load_{declName}FromHandle handle\n"
+      s!"  load_{declName}FromHandle handle device\n"
   let typedLoadFromHandleOnDeviceDecl :=
     s!"/-- Load `{tensor.name}` from an open handle, checking shape, dtype, and target device. -/\n" ++
     s!"def load_{declName}TypedFromHandleOnDevice (handle : _root_.torch.safetensors.SafeTensorsHandle) (device : _root_.torch.Device := _root_.torch.Device.CPU) : IO {typedReturnType} :=\n" ++
     s!"  _root_.torch.safetensors.loadFromHandleWithSpec handle {declName}Spec.name {declName}TensorSpec device\n"
   let typedLoadFromHandleDecl :=
     s!"/-- Load `{tensor.name}` from an open handle, checking shape and dtype on CPU. -/\n" ++
-    s!"def load_{declName}TypedFromHandle (handle : _root_.torch.safetensors.SafeTensorsHandle) : IO {typedReturnType} :=\n" ++
+    s!"def load_{declName}TypedFromHandle (handle : _root_.torch.safetensors.SafeTensorsHandle) : IO {cpuReturnType} :=\n" ++
     s!"  load_{declName}TypedFromHandleOnDevice handle\n"
   let typedLoadOnDeviceDecl :=
     if sourceIsDirectory then
@@ -176,7 +177,7 @@ private def renderTensorDecls (sourceIsDirectory : Bool) (tensor : TensorSchema)
       s!"  load_{declName}TypedFromHandleOnDevice handle device\n"
   let typedLoadDecl :=
     s!"/-- Load `{tensor.name}`, checking shape and dtype on CPU. -/\n" ++
-    s!"def load_{declName}Typed (source : String := defaultSource) : IO {typedReturnType} :=\n" ++
+    s!"def load_{declName}Typed (source : String := defaultSource) : IO {cpuReturnType} :=\n" ++
     s!"  load_{declName}TypedOnDevice source\n"
   if sourceIsDirectory then
     #[shapeDecl, specDecl, tensorSpecDecl, loadDecl, typedLoadOnDeviceDecl, typedLoadDecl]
@@ -291,9 +292,9 @@ private inductive TypeRepr where
 private partial def TypeRepr.typeExpr : TypeRepr → String
   | .leaf declName =>
       "_root_.torch.Tensor { shape := " ++ s!"{declName}Shape, dtype := {declName}Spec.dtype, " ++
-      "device := _root_.torch.DevicePolicy.any }"
+      "device := device }"
   | .array elem _ => s!"Array ({elem.typeExpr})"
-  | .struct typeName _ => typeName
+  | .struct typeName _ => s!"({typeName} device)"
 
 private def loaderNameForType (typeName : String) : String :=
   "load_node_" ++ sanitizeIdent (replaceInvalidChars typeName) "node"
@@ -341,7 +342,7 @@ private partial def buildTypeRepr
       let fieldsBlock := if fieldLines.isEmpty then "" else String.intercalate "\n" fieldLines.toList ++ "\n"
       let structDecl :=
         s!"/-- Generated hierarchical checkpoint node `{typeName}`. -/\n" ++
-        s!"structure {typeName} where\n" ++
+        s!"structure {typeName} (device : _root_.torch.Device := _root_.torch.Device.CPU) where\n" ++
         fieldsBlock
       decls := decls.push structDecl
       return (.struct typeName fields, decls, used)
@@ -392,7 +393,7 @@ private partial def buildTypeRepr
   let fieldsBlock := if fieldLines.isEmpty then "" else String.intercalate "\n" fieldLines.toList ++ "\n"
   let structDecl :=
     s!"/-- Generated hierarchical checkpoint node `{typeName}`. -/\n" ++
-    s!"structure {typeName} where\n" ++
+    s!"structure {typeName} (device : _root_.torch.Device := _root_.torch.Device.CPU) where\n" ++
     fieldsBlock
   decls := decls.push structDecl
   return (.struct typeName fields, decls, used)
@@ -428,7 +429,7 @@ private partial def buildInlineLoadExpr
   | .leaf _ =>
       let some leaf := node.leaf?
         | throwError "safetensors_type_provider internal error: missing leaf while building load expression"
-      pure <| if useHandle then s!"load_{leaf.declName}FromHandle {sourceExpr}" else s!"load_{leaf.declName} {sourceExpr}"
+      pure <| if useHandle then s!"load_{leaf.declName}FromHandle {sourceExpr} device" else s!"load_{leaf.declName} {sourceExpr} device"
   | .array elem expectedCount =>
       let indexed := indexedChildren node
       if indexed.size != expectedCount then
@@ -460,7 +461,7 @@ private partial def buildInlineLoadExpr
         assignments := assignments.push s!"{fieldName} := {valueName}"
         i := i + 1
       let recordLiteral := "{" ++ String.intercalate ", " assignments.toList ++ "}"
-      lines := lines.push s!"  pure ({recordLiteral} : {typeName})"
+      lines := lines.push s!"  pure ({recordLiteral} : {typeName} device)"
       pure <| String.intercalate "\n" lines.toList
 
 private partial def buildLoadExpr
@@ -472,7 +473,7 @@ private partial def buildLoadExpr
     : CommandElabM String := do
   match repr with
   | .struct typeName _ =>
-      pure <| if useHandle then s!"{handleLoaderNameForType typeName} {sourceExpr}" else s!"{loaderNameForType typeName} {sourceExpr}"
+      pure <| if useHandle then s!"{handleLoaderNameForType typeName} {sourceExpr} device" else s!"{loaderNameForType typeName} {sourceExpr} device"
   | _ =>
       buildInlineLoadExpr node repr sourceExpr hint useHandle
 
@@ -505,10 +506,10 @@ private partial def buildStructLoaderDecls
           assignments := assignments.push s!"{fieldName} := {valueName}"
           i := i + 1
         let recordLiteral := "{" ++ String.intercalate ", " assignments.toList ++ "}"
-        lines := lines.push s!"  pure ({recordLiteral} : {typeName})"
+        lines := lines.push s!"  pure ({recordLiteral} : {typeName} device)"
         let loaderDecl :=
           s!"/-- Load typed checkpoint node `{typeName}`. -/\n" ++
-          s!"def {loaderNameForType typeName} (source : String := defaultSource) : IO {typeName} :=\n" ++
+          s!"def {loaderNameForType typeName} (source : String := defaultSource) (device : _root_.torch.Device := _root_.torch.Device.CPU) : IO ({typeName} device) :=\n" ++
           indentBlock 2 (String.intercalate "\n" lines.toList) ++ "\n"
         pure (decls.push loaderDecl)
       else
@@ -524,16 +525,16 @@ private partial def buildStructLoaderDecls
           assignments := assignments.push s!"{fieldName} := {valueName}"
           i := i + 1
         let recordLiteral := "{" ++ String.intercalate ", " assignments.toList ++ "}"
-        lines := lines.push s!"  pure ({recordLiteral} : {typeName})"
+        lines := lines.push s!"  pure ({recordLiteral} : {typeName} device)"
         let fromHandleDecl :=
           s!"/-- Load typed checkpoint node `{typeName}` from an open SafeTensors handle. -/\n" ++
-          s!"def {handleLoaderNameForType typeName} (handle : _root_.torch.safetensors.SafeTensorsHandle) : IO {typeName} :=\n" ++
+          s!"def {handleLoaderNameForType typeName} (handle : _root_.torch.safetensors.SafeTensorsHandle) (device : _root_.torch.Device := _root_.torch.Device.CPU) : IO ({typeName} device) :=\n" ++
           indentBlock 2 (String.intercalate "\n" lines.toList) ++ "\n"
         let loaderDecl :=
           s!"/-- Load typed checkpoint node `{typeName}`. -/\n" ++
-          s!"def {loaderNameForType typeName} (source : String := defaultSource) : IO {typeName} := do\n" ++
+          s!"def {loaderNameForType typeName} (source : String := defaultSource) (device : _root_.torch.Device := _root_.torch.Device.CPU) : IO ({typeName} device) := do\n" ++
           "  let handle ← _root_.torch.safetensors.openHandle source\n" ++
-          s!"  {handleLoaderNameForType typeName} handle\n"
+          s!"  {handleLoaderNameForType typeName} handle device\n"
         pure (decls.push fromHandleDecl |>.push loaderDecl)
 
 private partial def buildNamespaceDeclsForChild
@@ -549,9 +550,9 @@ private partial def buildNamespaceDeclsForChild
         let loadExpr ← buildLoadExpr node repr "source" nsName false
         pure #[
           s!"namespace {nsName}\n",
-          s!"abbrev Weights := {repr.typeExpr}\n",
+          s!"abbrev Weights (device : _root_.torch.Device := _root_.torch.Device.CPU) := {repr.typeExpr}\n",
           "/-- Load this checkpoint subtree. -/\n" ++
-            "def load (source : String := defaultSource) : IO Weights :=\n" ++
+            "def load (source : String := defaultSource) (device : _root_.torch.Device := _root_.torch.Device.CPU) : IO (Weights device) :=\n" ++
             indentBlock 2 loadExpr ++ "\n",
           s!"end {nsName}\n"
         ]
@@ -559,14 +560,14 @@ private partial def buildNamespaceDeclsForChild
         let loadFromHandleExpr ← buildLoadExpr node repr "handle" nsName true
         pure #[
           s!"namespace {nsName}\n",
-          s!"abbrev Weights := {repr.typeExpr}\n",
+          s!"abbrev Weights (device : _root_.torch.Device := _root_.torch.Device.CPU) := {repr.typeExpr}\n",
           "/-- Load this checkpoint subtree from an open SafeTensors handle. -/\n" ++
-            "def loadFromHandle (handle : _root_.torch.safetensors.SafeTensorsHandle) : IO Weights :=\n" ++
+            "def loadFromHandle (handle : _root_.torch.safetensors.SafeTensorsHandle) (device : _root_.torch.Device := _root_.torch.Device.CPU) : IO (Weights device) :=\n" ++
             indentBlock 2 loadFromHandleExpr ++ "\n",
           "/-- Load this checkpoint subtree. -/\n" ++
-            "def load (source : String := defaultSource) : IO Weights := do\n" ++
+            "def load (source : String := defaultSource) (device : _root_.torch.Device := _root_.torch.Device.CPU) : IO (Weights device) := do\n" ++
             "  let handle ← _root_.torch.safetensors.openHandle source\n" ++
-            "  loadFromHandle handle\n",
+            "  loadFromHandle handle device\n",
           s!"end {nsName}\n"
         ]
   | .struct _ fields =>
@@ -575,23 +576,23 @@ private partial def buildNamespaceDeclsForChild
           let loadExpr ← buildLoadExpr node repr "source" nsName false
           pure #[
             s!"namespace {nsName}\n",
-            s!"abbrev Weights := {repr.typeExpr}\n",
+            s!"abbrev Weights (device : _root_.torch.Device := _root_.torch.Device.CPU) := {repr.typeExpr}\n",
             "/-- Load this checkpoint subtree. -/\n" ++
-              "def load (source : String := defaultSource) : IO Weights :=\n" ++
+              "def load (source : String := defaultSource) (device : _root_.torch.Device := _root_.torch.Device.CPU) : IO (Weights device) :=\n" ++
               indentBlock 2 loadExpr ++ "\n"
           ]
         else do
           let loadFromHandleExpr ← buildLoadExpr node repr "handle" nsName true
           pure #[
             s!"namespace {nsName}\n",
-            s!"abbrev Weights := {repr.typeExpr}\n",
+            s!"abbrev Weights (device : _root_.torch.Device := _root_.torch.Device.CPU) := {repr.typeExpr}\n",
             "/-- Load this checkpoint subtree from an open SafeTensors handle. -/\n" ++
-              "def loadFromHandle (handle : _root_.torch.safetensors.SafeTensorsHandle) : IO Weights :=\n" ++
+              "def loadFromHandle (handle : _root_.torch.safetensors.SafeTensorsHandle) (device : _root_.torch.Device := _root_.torch.Device.CPU) : IO (Weights device) :=\n" ++
               indentBlock 2 loadFromHandleExpr ++ "\n",
             "/-- Load this checkpoint subtree. -/\n" ++
-              "def load (source : String := defaultSource) : IO Weights := do\n" ++
+              "def load (source : String := defaultSource) (device : _root_.torch.Device := _root_.torch.Device.CPU) : IO (Weights device) := do\n" ++
               "  let handle ← _root_.torch.safetensors.openHandle source\n" ++
-              "  loadFromHandle handle\n"
+              "  loadFromHandle handle device\n"
           ]
       let mut decls : Array String := decls0
       for (fieldName, source, childRepr) in fields do
@@ -665,10 +666,10 @@ private def elabSafeTensorsTypeProviderCore
         if tensorFieldPairs.isEmpty then
           elabGeneratedCommand <|
             "/-- Typed checkpoint record generated by `safetensors_type_provider`. -/\n" ++
-            "abbrev Weights := Unit\n"
+            "abbrev Weights (_device : _root_.torch.Device := _root_.torch.Device.CPU) := Unit\n"
           elabGeneratedCommand <|
             "/-- Load all tensors into a typed checkpoint record. -/\n" ++
-            "def loadAll (source : String := defaultSource) : IO Weights :=\n" ++
+            "def loadAll (source : String := defaultSource) (device : _root_.torch.Device := _root_.torch.Device.CPU) : IO (Weights device) :=\n" ++
             "  pure ()\n"
         else
           let (weightsRepr, weightsTypeDecls, _) ← buildTypeRepr root [] []
@@ -678,27 +679,27 @@ private def elabSafeTensorsTypeProviderCore
             elabGeneratedCommand decl
           for decl in (← buildRootNamespaceDecls root weightsRepr discovered.sourceIsDirectory) do
             elabGeneratedCommand decl
-          if weightsRepr.typeExpr != "Weights" then
-            elabGeneratedCommand s!"abbrev Weights := {weightsRepr.typeExpr}\n"
+          if weightsRepr.typeExpr != "(Weights device)" then
+            elabGeneratedCommand s!"abbrev Weights (device : _root_.torch.Device := _root_.torch.Device.CPU) := {weightsRepr.typeExpr}\n"
           if discovered.sourceIsDirectory then
             let loadExpr ← buildLoadExpr root weightsRepr "source" "weights" false
             let loadAllDecl :=
               "/-- Load all tensors into a typed checkpoint record. -/\n" ++
-              "def loadAll (source : String := defaultSource) : IO Weights :=\n" ++
+              "def loadAll (source : String := defaultSource) (device : _root_.torch.Device := _root_.torch.Device.CPU) : IO (Weights device) :=\n" ++
               indentBlock 2 loadExpr ++ "\n"
             elabGeneratedCommand loadAllDecl
           else
             let loadFromHandleExpr ← buildLoadExpr root weightsRepr "handle" "weights" true
             let loadAllFromHandleDecl :=
               "/-- Load all tensors into a typed checkpoint record from an open SafeTensors handle. -/\n" ++
-              "def loadAllFromHandle (handle : _root_.torch.safetensors.SafeTensorsHandle) : IO Weights :=\n" ++
+              "def loadAllFromHandle (handle : _root_.torch.safetensors.SafeTensorsHandle) (device : _root_.torch.Device := _root_.torch.Device.CPU) : IO (Weights device) :=\n" ++
               indentBlock 2 loadFromHandleExpr ++ "\n"
             elabGeneratedCommand loadAllFromHandleDecl
             let loadAllDecl :=
               "/-- Load all tensors into a typed checkpoint record. -/\n" ++
-              "def loadAll (source : String := defaultSource) : IO Weights := do\n" ++
+              "def loadAll (source : String := defaultSource) (device : _root_.torch.Device := _root_.torch.Device.CPU) : IO (Weights device) := do\n" ++
               "  let handle ← _root_.torch.safetensors.openHandle source\n" ++
-              "  loadAllFromHandle handle\n"
+              "  loadAllFromHandle handle device\n"
             elabGeneratedCommand loadAllDecl
 
         let fieldPairsLit := tensorFieldPairs.map fun (fieldName, tensorName) =>

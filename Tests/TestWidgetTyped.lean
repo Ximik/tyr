@@ -5,14 +5,18 @@ namespace Tests.WidgetTyped
 
 open torch
 
+-- Command elaboration must resolve indexed factory defaults before evaluation.
+#tensor Tensor.randn #[2, 3]
+#tensor Tensor.ones #[2]
+
 private structure DisplayModel where
-  weight : Tensor ⟨#[2, 3], .Float64, .exact .CPU⟩
-  tokens : Option (Tensor { shape := #[2], dtype := .Int64 })
+  weight : Tensor ⟨#[2, 3], .Float64, .CPU⟩
+  tokens : Option (Tensor { shape := #[2], dtype := .Int64, device := .CPU })
   deriving ToModuleDisplay
 
 @[test]
 def testIndexedTensorWidgetMetadataAndGradients : IO Unit := do
-  let weight : Tensor ⟨#[2, 3], .Float64, .exact .CPU⟩ ←
+  let weight : Tensor ⟨#[2, 3], .Float64, .CPU⟩ ←
     (Tensor.onesLike (Tensor.zerosFor _)).setRequiresGrad true
   let loss := Tensor.sumAll (Tensor.Preserving.mulScalar weight 3.0)
   Tensor.backwardLoss loss

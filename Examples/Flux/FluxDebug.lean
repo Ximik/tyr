@@ -24,7 +24,7 @@ private def toFloat32Tree {α : Type} [TensorStruct α] (x : α) : IO α :=
   TensorStruct.castDType .Float32 x
 
 private def toFloat32Embedder {cfg : QwenConfig} {max_seq : UInt64}
-    (e : QwenFluxEmbedder cfg max_seq) : IO (QwenFluxEmbedder cfg max_seq) := do
+    (e : QwenFluxEmbedder (device := .CPU) cfg max_seq) : IO (QwenFluxEmbedder (device := .CPU) cfg max_seq) := do
   let model ← toFloat32Tree e.model
   pure { e with model }
 
@@ -109,7 +109,7 @@ private def saveDebug {σ : StaticSpec} (dir : String) (name : String) (t : Tens
   Tensor.saveTensor t path
 
 /-- Construct indexed token IDs and attention masks from a prompt or token files. -/
-private def promptTokens (cfg : DebugConfig) (prompt : String) : IO (Tensor { shape := #[1, maxSeqLen], dtype := .Int64 } × Tensor { shape := #[1, maxSeqLen], dtype := .Int64 }) := do
+private def promptTokens (cfg : DebugConfig) (prompt : String) : IO (Tensor { shape := #[1, maxSeqLen], dtype := .Int64, device := .CPU } × Tensor { shape := #[1, maxSeqLen], dtype := .Int64, device := .CPU }) := do
   if cfg.useTokenFiles then
     let ids ← loadTokenIds cfg.tokensPath maxSeqLen
     let (padded, defaultMask) := padTokens ids maxSeqLen qwenPadId
@@ -146,7 +146,7 @@ def runDebug (cfg : DebugConfig) (prompt : String) : IO Unit := do
   -- Tokenize and encode text
   let (tokens, attnMask) ← promptTokens cfg prompt
   let txtEmb := qwen.encodeMasked (batch := 1) (seq := maxSeqLen) (maskDtype := .Int64) qwenCfg maxSeqLen tokens attnMask
-  let txtEmb : Tensor { shape := #[1, maxSeqLen, fluxCfg.context_in_dim] } :=
+  let txtEmb : Tensor { shape := #[1, maxSeqLen, fluxCfg.context_in_dim], device := .CPU } :=
     (txtEmb.reshapeChecked #[1, maxSeqLen, fluxCfg.context_in_dim]).forgetDType
 
   saveDebug cfg.debugDir "tokens" tokens
@@ -158,7 +158,7 @@ def runDebug (cfg : DebugConfig) (prompt : String) : IO Unit := do
   let txtSeq := maxSeqLen
   let noiseSpatial ← randomWeight #[1, 128, cfg.latentH, cfg.latentW]
   let noiseSeq := Tensor.permute noiseSpatial #[0, 2, 3, 1]
-  let noise : Tensor { shape := #[1, imgSeq, 128] } := Tensor.reshapeChecked noiseSeq #[1, imgSeq, 128]
+  let noise : Tensor { shape := #[1, imgSeq, 128], device := .CPU } := Tensor.reshapeChecked noiseSeq #[1, imgSeq, 128]
   saveDebug cfg.debugDir "noise" noise
 
   -- Position IDs
@@ -261,9 +261,9 @@ def runDebug (cfg : DebugConfig) (prompt : String) : IO Unit := do
       saveDebug cfg.debugDir "txt_k_rope" txt_k_rope
 
       -- Joint attention
-      let q : Tensor { shape := #[1, txtSeq + imgSeq, fluxCfg.num_heads, fluxCfg.head_dim] } := qwen35.typedCat txt_q_rope img_q_rope 1
-      let k : Tensor { shape := #[1, txtSeq + imgSeq, fluxCfg.num_heads, fluxCfg.head_dim] } := qwen35.typedCat txt_k_rope img_k_rope 1
-      let v : Tensor { shape := #[1, txtSeq + imgSeq, fluxCfg.num_heads, fluxCfg.head_dim] } := qwen35.typedCat txt_v img_v 1
+      let q : Tensor { shape := #[1, txtSeq + imgSeq, fluxCfg.num_heads, fluxCfg.head_dim], device := .CPU } := qwen35.typedCat txt_q_rope img_q_rope 1
+      let k : Tensor { shape := #[1, txtSeq + imgSeq, fluxCfg.num_heads, fluxCfg.head_dim], device := .CPU } := qwen35.typedCat txt_k_rope img_k_rope 1
+      let v : Tensor { shape := #[1, txtSeq + imgSeq, fluxCfg.num_heads, fluxCfg.head_dim], device := .CPU } := qwen35.typedCat txt_v img_v 1
       let q := transposeAttention q
       let k := transposeAttention k
       let v := transposeAttention v
@@ -284,8 +284,8 @@ def runDebug (cfg : DebugConfig) (prompt : String) : IO Unit := do
       let txt_mod1_gate := Tensor.unsqueeze txt_mod1_gate 1
       let txt_mod1_gate := Tensor.expand txt_mod1_gate #[1, txtSeq, fluxCfg.hidden_size]
 
-      let img_mid := img_cur + img_mod1_gate * img_attn
-      let txt_mid := txt_cur + txt_mod1_gate * txt_attn
+      let img_mid := Tensor.Promoting.add img_cur (Tensor.Promoting.mul img_mod1_gate img_attn)
+      let txt_mid := Tensor.Promoting.add txt_cur (Tensor.Promoting.mul txt_mod1_gate txt_attn)
 
       let img_mlp_in := block.img_norm2.forward3d img_mid
       let img_mlp_in := applyModulation img_mlp_in img_mod2_scale img_mod2_shift
@@ -293,7 +293,7 @@ def runDebug (cfg : DebugConfig) (prompt : String) : IO Unit := do
       let img_mlp_proj := Tensor.reshapeChecked img_mlp_proj #[1, imgSeq, 2, mlp_hidden]
       let img_gate := Tensor.reshapeChecked (sliceTyped img_mlp_proj 2 0 1) #[1, imgSeq, mlp_hidden]
       let img_up := Tensor.reshapeChecked (sliceTyped img_mlp_proj 2 1 1) #[1, imgSeq, mlp_hidden]
-      let img_mlp_out := Tensor.Preserving.silu img_gate * img_up
+      let img_mlp_out := Tensor.Promoting.mul (Tensor.Preserving.silu img_gate) img_up
       let img_mlp_out := Tensor.linear3d img_mlp_out block.img_mlp.w2
       saveDebug cfg.debugDir "img_mlp_out" img_mlp_out
 
@@ -303,7 +303,7 @@ def runDebug (cfg : DebugConfig) (prompt : String) : IO Unit := do
       let txt_mlp_proj := Tensor.reshapeChecked txt_mlp_proj #[1, txtSeq, 2, mlp_hidden]
       let txt_gate := Tensor.reshapeChecked (sliceTyped txt_mlp_proj 2 0 1) #[1, txtSeq, mlp_hidden]
       let txt_up := Tensor.reshapeChecked (sliceTyped txt_mlp_proj 2 1 1) #[1, txtSeq, mlp_hidden]
-      let txt_mlp_out := Tensor.Preserving.silu txt_gate * txt_up
+      let txt_mlp_out := Tensor.Promoting.mul (Tensor.Preserving.silu txt_gate) txt_up
       let txt_mlp_out := Tensor.linear3d txt_mlp_out block.txt_mlp.w2
       saveDebug cfg.debugDir "txt_mlp_out" txt_mlp_out
 
@@ -312,8 +312,8 @@ def runDebug (cfg : DebugConfig) (prompt : String) : IO Unit := do
       let txt_mod2_gate := Tensor.unsqueeze txt_mod2_gate 1
       let txt_mod2_gate := Tensor.expand txt_mod2_gate #[1, txtSeq, fluxCfg.hidden_size]
 
-      let img_next := img_mid + img_mod2_gate * img_mlp_out
-      let txt_next := txt_mid + txt_mod2_gate * txt_mlp_out
+      let img_next := Tensor.Promoting.add img_mid (Tensor.Promoting.mul img_mod2_gate img_mlp_out)
+      let txt_next := Tensor.Promoting.add txt_mid (Tensor.Promoting.mul txt_mod2_gate txt_mlp_out)
       saveDebug cfg.debugDir "img1" img_next
       saveDebug cfg.debugDir "txt1" txt_next
 
@@ -333,9 +333,9 @@ def runDebug (cfg : DebugConfig) (prompt : String) : IO Unit := do
   saveDebug cfg.debugDir "latents" latents
 
   -- Decode with VAE
-  let latentsHW : Tensor { shape := #[1, cfg.latentH, cfg.latentW, 128] } :=
+  let latentsHW : Tensor { shape := #[1, cfg.latentH, cfg.latentW, 128], device := .CPU } :=
     Tensor.reshapeChecked latents #[1, cfg.latentH, cfg.latentW, 128]
-  let packedLatents : Tensor { shape := #[1, 128, cfg.latentH, cfg.latentW] } :=
+  let packedLatents : Tensor { shape := #[1, 128, cfg.latentH, cfg.latentW], device := .CPU } :=
     (Tensor.permute latentsHW #[0, 3, 1, 2]).reshapeChecked #[1, 128, cfg.latentH, cfg.latentW]
   saveDebug cfg.debugDir "packed_latents" packedLatents
 

@@ -76,24 +76,24 @@ def runOnce : IO Bool := do
 
   let stream ← torch.cuda_current_stream
 
-  let q ← Tensor.loadTensorExact { shape := #[1, 1, 128, 64], dtype := .BFloat16 } (fixtureFile "q").toString
-  let k ← Tensor.loadTensorExact { shape := #[1, 1, 128, 64], dtype := .BFloat16 } (fixtureFile "k").toString
-  let v ← Tensor.loadTensorExact { shape := #[1, 1, 128, 64], dtype := .BFloat16 } (fixtureFile "v").toString
-  let dO ← Tensor.loadTensorExact { shape := #[1, 1, 128, 64], dtype := .BFloat16 } (fixtureFile "dO").toString
-  let expectedOut ← Tensor.loadTensorExact { shape := #[1, 1, 128, 64], dtype := .BFloat16 } (fixtureFile "expected_o").toString
-  let expectedL ← Tensor.loadTensorExact { shape := #[2, 64], dtype := .Float32 } (fixtureFile "expected_l").toString
-  let expectedDQ ← Tensor.loadTensorExact { shape := #[1, 1, 128, 64], dtype := .Float32 } (fixtureFile "expected_dq").toString
-  let expectedDK ← Tensor.loadTensorExact { shape := #[1, 1, 128, 64], dtype := .Float32 } (fixtureFile "expected_dk").toString
-  let expectedDV ← Tensor.loadTensorExact { shape := #[1, 1, 128, 64], dtype := .Float32 } (fixtureFile "expected_dv").toString
+  let q ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[1, 1, 128, 64], dtype := .BFloat16 } (fixtureFile "q").toString
+  let k ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[1, 1, 128, 64], dtype := .BFloat16 } (fixtureFile "k").toString
+  let v ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[1, 1, 128, 64], dtype := .BFloat16 } (fixtureFile "v").toString
+  let dO ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[1, 1, 128, 64], dtype := .BFloat16 } (fixtureFile "dO").toString
+  let expectedOut ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[1, 1, 128, 64], dtype := .BFloat16 } (fixtureFile "expected_o").toString
+  let expectedL ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[2, 64], dtype := .Float32 } (fixtureFile "expected_l").toString
+  let expectedDQ ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[1, 1, 128, 64], dtype := .Float32 } (fixtureFile "expected_dq").toString
+  let expectedDK ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[1, 1, 128, 64], dtype := .Float32 } (fixtureFile "expected_dk").toString
+  let expectedDV ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[1, 1, 128, 64], dtype := .Float32 } (fixtureFile "expected_dv").toString
 
   let outLse ← Tensor.uniformLike q 0 0
   let lseOut ← Tensor.uniformLike (Tensor.zeros #[2, 64] false (Device.CUDA 0)) 0 0
   tkFlashAttnGb10Fwd2BlockLse.launch q.raw k.raw v.raw outLse.raw lseOut.raw 128 64 1 2 1 128 1 1 0 stream
   let _ ← torch.cuda_synchronize
-  let lFromLse : Tensor { shape := #[2, 64], dtype := .Float32 } := Tensor.Preserving.mulScalar lseOut (-8.0)
+  let lFromLse : Tensor { shape := #[2, 64], dtype := .Float32, device := (.CUDA 0) } := Tensor.Preserving.mulScalar lseOut (-8.0)
 
   let out ← Tensor.uniformLike q 0 0
-  let lOut : Tensor { shape := #[2, 64], dtype := .Float32 } ← Tensor.uniformLike lseOut 0 0
+  let lOut : Tensor { shape := #[2, 64], dtype := .Float32, device := (.CUDA 0) } ← Tensor.uniformLike lseOut 0 0
   tkMhaGb10Fwd2Block.launch q.raw k.raw v.raw out.raw lOut.raw 128 64 1 8 1 128 1 1 0 stream
   let _ ← torch.cuda_synchronize
 
@@ -162,8 +162,8 @@ private def benchmarkForwardSeq (cfg : Benchmark.Config) (stream : UInt64)
   let queryBlocks := (seqLen + rowTileSize - 1) / rowTileSize
   let launchQueryBlocks := if useS768Specialization then seqLen / (4 * rowTileSize) else queryBlocks
   let lBlocks := if useS768Specialization then batch * qHeads * queryBlocks else queryBlocks
-  let lOut : Tensor { shape := #[lBlocks, rowTileSize], dtype := .Float32 } ← Tensor.uniformLike (Tensor.zeros #[lBlocks, rowTileSize] false device) 0 0
-  let expectedL : Tensor { shape := #[lBlocks, rowTileSize], dtype := .Float32 } := Tensor.reshapeChecked expectedL3 #[lBlocks, rowTileSize]
+  let lOut : Tensor { shape := #[lBlocks, rowTileSize], dtype := .Float32, device := (.CUDA 0) } ← Tensor.uniformLike (Tensor.zeros #[lBlocks, rowTileSize] false device) 0 0
+  let expectedL : Tensor { shape := #[lBlocks, rowTileSize], dtype := .Float32, device := (.CUDA 0) } := Tensor.reshapeChecked expectedL3 #[lBlocks, rowTileSize]
   let launch : IO Unit := if useS768Specialization then
     tkMhaGb10FwdS768D64Warp4.launch q.raw k.raw v.raw out.raw lOut.raw seqLen 64 qHeads
       launchQueryBlocks qHeads batch 128 1 1 0 stream
@@ -199,17 +199,17 @@ private def benchmarkBackwardS768 (cfg : Benchmark.Config) (stream : UInt64) (ba
   let dO := dOf.toBFloat16
   let (_, expectedDQ, expectedDK, expectedDV) ← attentionTrainingReference q k v dO
   let out ← Tensor.uniformLike q 0 0
-  let lOut32 : Tensor { shape := #[batch * 384, 32], dtype := .Float32 } ← Tensor.uniformLike (Tensor.zeros #[batch * 384, 32] false device) 0 0
+  let lOut32 : Tensor { shape := #[batch * 384, 32], dtype := .Float32, device := (.CUDA 0) } ← Tensor.uniformLike (Tensor.zeros #[batch * 384, 32] false device) 0 0
   let launchForward := tkMhaGb10FwdS768D64Warp4.launch q.raw k.raw v.raw out.raw lOut32.raw 768 64 16
     6 16 batch 128 1 1 0 stream
   launchForward
-  let lOut : Tensor { shape := #[batch * 768, 16], dtype := .Float32 } := Tensor.reshapeChecked lOut32 #[batch * 768, 16]
+  let lOut : Tensor { shape := #[batch * 768, 16], dtype := .Float32, device := (.CUDA 0) } := Tensor.reshapeChecked lOut32 #[batch * 768, 16]
   torch.cuda_synchronize
   let dVec ← Tensor.uniformLike lOut 0 0
   let dO32 := dO.toFloat32
   let out32 := out.toFloat32
-  let expectedD3 : Tensor { shape := #[batch, 16, 768], dtype := .Float32 } := (Tensor.sumDim (dO32 * out32) 3 false).reshapeChecked #[batch, 16, 768]
-  let expectedD : Tensor { shape := #[batch * 768, 16], dtype := .Float32 } := Tensor.reshapeChecked expectedD3 #[batch * 768, 16]
+  let expectedD3 : Tensor { shape := #[batch, 16, 768], dtype := .Float32, device := (.CUDA 0) } := (Tensor.sumDim (dO32 * out32) 3 false).reshapeChecked #[batch, 16, 768]
+  let expectedD : Tensor { shape := #[batch * 768, 16], dtype := .Float32, device := (.CUDA 0) } := Tensor.reshapeChecked expectedD3 #[batch * 768, 16]
   let dQ ← Tensor.uniformLike q 0 0
   let dK ← Tensor.uniformLike k 0 0
   let dV ← Tensor.uniformLike v 0 0
@@ -277,16 +277,16 @@ private def runBenchmark (args : List String) : IO UInt32 := do
       let (lines, ok) ← benchmarkBackwardS768 cfg stream matrixCase.payload.batch
       s768BackwardLines := s768BackwardLines ++ lines
       s768BackwardOk := s768BackwardOk && ok
-  let q ← Tensor.loadTensorExact { shape := #[1, 1, 128, 64], dtype := .BFloat16 } (fixtureFile "q").toString
-  let k ← Tensor.loadTensorExact { shape := #[1, 1, 128, 64], dtype := .BFloat16 } (fixtureFile "k").toString
-  let v ← Tensor.loadTensorExact { shape := #[1, 1, 128, 64], dtype := .BFloat16 } (fixtureFile "v").toString
-  let expectedOut ← Tensor.loadTensorExact { shape := #[1, 1, 128, 64], dtype := .BFloat16 } (fixtureFile "expected_o").toString
-  let dO ← Tensor.loadTensorExact { shape := #[1, 1, 128, 64], dtype := .BFloat16 } (fixtureFile "dO").toString
-  let expectedDQ ← Tensor.loadTensorExact { shape := #[1, 1, 128, 64], dtype := .Float32 } (fixtureFile "expected_dq").toString
-  let expectedDK ← Tensor.loadTensorExact { shape := #[1, 1, 128, 64], dtype := .Float32 } (fixtureFile "expected_dk").toString
-  let expectedDV ← Tensor.loadTensorExact { shape := #[1, 1, 128, 64], dtype := .Float32 } (fixtureFile "expected_dv").toString
+  let q ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[1, 1, 128, 64], dtype := .BFloat16 } (fixtureFile "q").toString
+  let k ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[1, 1, 128, 64], dtype := .BFloat16 } (fixtureFile "k").toString
+  let v ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[1, 1, 128, 64], dtype := .BFloat16 } (fixtureFile "v").toString
+  let expectedOut ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[1, 1, 128, 64], dtype := .BFloat16 } (fixtureFile "expected_o").toString
+  let dO ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[1, 1, 128, 64], dtype := .BFloat16 } (fixtureFile "dO").toString
+  let expectedDQ ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[1, 1, 128, 64], dtype := .Float32 } (fixtureFile "expected_dq").toString
+  let expectedDK ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[1, 1, 128, 64], dtype := .Float32 } (fixtureFile "expected_dk").toString
+  let expectedDV ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[1, 1, 128, 64], dtype := .Float32 } (fixtureFile "expected_dv").toString
   let out ← Tensor.uniformLike q 0 0
-  let lOut : Tensor { shape := #[2, 64], dtype := .Float32 } ← Tensor.uniformLike (Tensor.zeros #[2, 64] false (Device.CUDA 0)) 0 0
+  let lOut : Tensor { shape := #[2, 64], dtype := .Float32, device := (.CUDA 0) } ← Tensor.uniformLike (Tensor.zeros #[2, 64] false (Device.CUDA 0)) 0 0
   let launch := tkMhaGb10Fwd2Block.launch q.raw k.raw v.raw out.raw lOut.raw
     128 64 1 8 1 128 1 1 0 stream
   launch
@@ -296,8 +296,8 @@ private def runBenchmark (args : List String) : IO UInt32 := do
   let dVec ← Tensor.uniformLike lOut 0 0
   let dO32 := dO.toFloat32
   let out32 := out.toFloat32
-  let expectedD3 : Tensor { shape := #[1, 1, 128], dtype := .Float32 } := (Tensor.sumDim (dO32 * out32) 3 false).reshapeChecked #[1, 1, 128]
-  let expectedD : Tensor { shape := #[2, 64], dtype := .Float32 } := Tensor.reshapeChecked expectedD3 #[2, 64]
+  let expectedD3 : Tensor { shape := #[1, 1, 128], dtype := .Float32, device := (.CUDA 0) } := (Tensor.sumDim (dO32 * out32) 3 false).reshapeChecked #[1, 1, 128]
+  let expectedD : Tensor { shape := #[2, 64], dtype := .Float32, device := (.CUDA 0) } := Tensor.reshapeChecked expectedD3 #[2, 64]
   let dQ ← Tensor.uniformLike (Tensor.zeros #[1, 1, 128, 64] false (Device.CUDA 0)) 0 0
   -- Each mutable gradient buffer is independently allocated through IO.
   let dK ← Tensor.uniformLike dQ 0 0

@@ -23,7 +23,7 @@ import LeanTest
 open torch Examples.GPU.IndexedParity
 
 set_option linter.unusedVariables false in
-example (a : Tensor { shape := #[2], dtype := .Float32 }) (b : Tensor { shape := #[3], dtype := .Float32 }) : True := by
+example (a : Tensor { shape := #[2], dtype := .Float32, device := .CPU }) (b : Tensor { shape := #[3], dtype := .Float32, device := .CPU }) : True := by
   fail_if_success
     have _ := compareTensors "bad shape" a b 0 0
   trivial
@@ -174,8 +174,8 @@ example (inputs : Examples.GPU.RunLayerNorm.LayerNormInputs .Float32) : True := 
   LeanTest.assertTrue (Tensor.allclose dst (Tensor.zerosLike master) 0 0)
 
 set_option linter.unusedVariables false in
-example (a : Tensor { shape := #[2], dtype := .Float32 }) (b : Tensor { shape := #[2], dtype := .BFloat16 })
-    (c : Tensor { shape := #[3], dtype := .Float32 }) : True := by
+example (a : Tensor { shape := #[2], dtype := .Float32, device := .CPU }) (b : Tensor { shape := #[2], dtype := .BFloat16, device := .CPU })
+    (c : Tensor { shape := #[3], dtype := .Float32, device := .CPU }) : True := by
   fail_if_success
     have _ := Tensor.copyInto a b
   fail_if_success
@@ -215,7 +215,7 @@ example (a : Tensor { shape := #[2], dtype := .Float32 }) (b : Tensor { shape :=
   LeanTest.assertTrue (Tensor.allclose lse expectedLse 0 1e-6)
 
 set_option linter.unusedVariables false in
-example (a : Tensor { shape := #[2, 3], dtype := .BFloat16 }) (b : Tensor { shape := #[4, 5], dtype := .BFloat16 }) : True := by
+example (a : Tensor { shape := #[2, 3], dtype := .BFloat16, device := .CPU }) (b : Tensor { shape := #[4, 5], dtype := .BFloat16, device := .CPU }) : True := by
   fail_if_success
     have _ := Examples.GPU.gemmReference a b
   trivial

@@ -13,6 +13,8 @@ import Tyr.Tokenizer.Qwen3
 import Examples.ModelRunner
 
 open torch
+
+variable {device : Device}
 open torch.qwen25omni
 open Examples.ModelRunner
 
@@ -74,8 +76,7 @@ private def defaultConfigForSource (source : String) : Config :=
 
 private def runBatches
     (tok : tokenizer.qwen3.QwenTokenizer)
-    (model : Qwen25OmniForCausalLM cfg)
-    (device : Device)
+    (model : Qwen25OmniForCausalLM (device := device) cfg)
     (args : Args)
     (prompts : Array String)
     : IO Unit := do
@@ -84,9 +85,9 @@ private def runBatches
     let ⟨batch, ⟨seq, (inputIds, promptLens)⟩⟩ ←
       buildBatchInput tok.padToken.toUInt64 chunk (encodePromptToIds tok)
     pure ⟨batch, ⟨seq, (inputIds.to device, promptLens)⟩⟩
-  let decodeBatch (promptLens : Array Nat) {b os : UInt64} (ids : Tensor { shape := #[b, os], dtype := .Int64 }) : IO (Array String) :=
+  let decodeBatch (promptLens : Array Nat) {b os : UInt64} (ids : Tensor { shape := #[b, os], dtype := .Int64, device := device }) : IO (Array String) :=
     decodeGeneratedBatch promptLens ids (fun xs => tokenizer.qwen3.decodeText tok xs)
-  let runGen (b : UInt64) {s : UInt64} (ids : Tensor { shape := #[b, s], dtype := .Int64 }) :=
+  let runGen (b : UInt64) {s : UInt64} (ids : Tensor { shape := #[b, s], dtype := .Int64, device := device }) :=
     model.generateGreedy ids args.maxNewTokens eos
   runGreedyBatches prompts args.batchSize args.maxNewTokens (prompts.size == 1)
     buildBatch runGen decodeBatch
@@ -115,12 +116,11 @@ def runMain (argv : List String) : IO UInt32 := do
   let cfgDefaults := defaultConfigForSource args.source
   let cfg ← Config.loadFromPretrainedDir modelDir cfgDefaults
   let isSharded ← Hub.detectWeightLayout modelDir
-  let modelCpu ←
-    if isSharded then Qwen25OmniForCausalLM.loadSharded modelDir cfg
-    else Qwen25OmniForCausalLM.load s!"{modelDir}/model.safetensors" cfg
-  let model ← moveModelToDevice device modelCpu
+  let model ←
+    if isSharded then Qwen25OmniForCausalLM.loadSharded modelDir cfg (device := device)
+    else Qwen25OmniForCausalLM.load s!"{modelDir}/model.safetensors" cfg (device := device)
 
-  runBatches tok model device args prompts
+  runBatches tok model args prompts
   pure 0
 
 end Examples.Qwen25Omni

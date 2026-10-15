@@ -1,28 +1,43 @@
 import LeanTest
 import Tyr.Module.Derive
 import Tyr.TensorStruct.DeriveCast
+import Tyr.SafeTensors.TypeProvider
 
 namespace Tests.TensorDeviceDeriving
 
 open torch
 
+safetensors_type_provider "Tests/fixtures/safetensors/single.safetensors" as DeviceCheckpoint
+
+-- A runtime-selected device is shared by generated records and every loader.
+example (device : Device) : IO (DeviceCheckpoint.Weights device) :=
+  DeviceCheckpoint.loadAll (device := device)
+
+example (device : Device) :
+    IO (Tensor { shape := #[2, 3], dtype := .Float32, device }) :=
+  DeviceCheckpoint.load_linear_weightTypedOnDevice (device := device)
+
+example (device : Device) (weights : DeviceCheckpoint.Weights device) :
+    Tensor { shape := #[2, 3], dtype := .Float32, device } :=
+  weights.linear.weight
+
 variable {device : Device}
 
 -- Each handler must apply both the implicit device and explicit size correctly.
 structure MappedRecord (size : UInt64) where
-  value : Tensor { shape := #[size], dtype := .Float32, device := .exact device }
+  value : Tensor { shape := #[size], dtype := .Float32, device := device }
   deriving TensorStruct
 
 structure SchemaRecord (size : UInt64) where
-  value : Tensor { shape := #[size], dtype := .Float32, device := .exact device }
+  value : Tensor { shape := #[size], dtype := .Float32, device := device }
   deriving ToTensorStructSchema
 
 structure FlattenRecord (size : UInt64) where
-  value : Tensor { shape := #[size], dtype := .Float32, device := .exact device }
+  value : Tensor { shape := #[size], dtype := .Float32, device := device }
   deriving TensorStructFlatten
 
 structure DeviceBlock (size : UInt64) (dtype : DType) where
-  weight : Tensor { shape := #[size], dtype, device := .exact device }
+  weight : Tensor { shape := #[size], dtype, device := device }
   label : Static String
   deriving Model
 
@@ -55,16 +70,16 @@ example {source target : Device} {size : UInt64}
 
 example (_output : DeviceBlock (device := .CUDA 1) 3 .Float64) : True := by
   fail_if_success
-    have _ : Tensor { shape := #[3], dtype := .Float64, device := .exact .CPU } :=
+    have _ : Tensor { shape := #[3], dtype := .Float64, device := .CPU } :=
       _output.weight
   fail_if_success
-    have _ : Tensor { shape := #[3], dtype := .Float32, device := .exact (.CUDA 1) } :=
+    have _ : Tensor { shape := #[3], dtype := .Float32, device := (.CUDA 1) } :=
       _output.weight
   trivial
 
 private def cpuModel (value : Float) : DeviceModel (device := .CPU) 3 .Float32 :=
   let weight := (Tensor.onesFor
-    { shape := #[3], dtype := .Float32, device := .exact .CPU }).mulScalar value
+    { shape := #[3], dtype := .Float32, device := .CPU }).mulScalar value
   { blocks := #[{ weight, label := ⟨"parameters"⟩ }] }
 
 @[test] def testImplicitDeviceSchemaAndRebuild : IO Unit := do
@@ -96,5 +111,10 @@ private def cpuModel (value : Float) : DeviceModel (device := .CPU) 3 .Float32 :
   LeanTest.assertEqual (← convertedBlock.weight.toFloatArray) #[2, 2, 2]
   LeanTest.assertEqual convertedBlock.label.val "parameters"
   LeanTest.assertEqual originalBlock.weight.raw.dtype .Float32
+
+@[test] def testGeneratedCheckpointDevice : IO Unit := do
+  let weights ← DeviceCheckpoint.loadAll (device := .CPU)
+  LeanTest.assertTrue (weights.linear.weight.device == .CPU)
+  LeanTest.assertEqual (← weights.linear.weight.toFloatArray) #[1, 2, 3, 4, 5, 6]
 
 end Tests.TensorDeviceDeriving

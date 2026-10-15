@@ -6,71 +6,66 @@ open torch
 namespace Tests.TestDeviceCompatibility
 
 -- Known placement conflicts must fail before allocating a native tensor.
-example (_cpu : Tensor ⟨#[2], .Float32, .exact .CPU⟩)
-    (_cuda : Tensor ⟨#[2], .Float32, .exact (.CUDA 0)⟩) : True := by
+example (_cpu : Tensor ⟨#[2], .Float32, .CPU⟩)
+    (_cuda : Tensor ⟨#[2], .Float32, (.CUDA 0)⟩) : True := by
   fail_if_success have _ := _cpu.addB _cuda
   fail_if_success have _ := _cuda.subB _cpu
   fail_if_success have _ := _cpu.mulB _cuda
   fail_if_success have _ := _cuda.divB _cpu
   trivial
 
-example (_cuda0 : Tensor ⟨#[2], .Float32, .exact (.CUDA 0)⟩)
-    (_cuda1 : Tensor ⟨#[2], .Float32, .exact (.CUDA 1)⟩)
-    (_mps : Tensor ⟨#[2], .Float32, .exact .MPS⟩) : True := by
+example (_cuda0 : Tensor ⟨#[2], .Float32, (.CUDA 0)⟩)
+    (_cuda1 : Tensor ⟨#[2], .Float32, (.CUDA 1)⟩)
+    (_mps : Tensor ⟨#[2], .Float32, .MPS⟩) : True := by
   fail_if_success have _ := _cuda0.addB _cuda1
   fail_if_success have _ := _cuda0.mulB _mps
   trivial
 
 -- Rank zero is significant: CPU vectors and accelerator scalars cannot use
 -- the exception, nor can scalars from two different accelerator devices.
-example (_cpuVector : Tensor ⟨#[1], .Float32, .exact .CPU⟩)
-    (_cudaScalar : Tensor ⟨#[], .Float32, .exact (.CUDA 0)⟩)
-    (_mpsScalar : Tensor ⟨#[], .Float32, .exact .MPS⟩) : True := by
+example (_cpuVector : Tensor ⟨#[1], .Float32, .CPU⟩)
+    (_cudaScalar : Tensor ⟨#[], .Float32, (.CUDA 0)⟩)
+    (_mpsScalar : Tensor ⟨#[], .Float32, .MPS⟩) : True := by
   fail_if_success have _ := _cpuVector.addB _cudaScalar
   fail_if_success have _ := _mpsScalar.addB _cpuVector
   fail_if_success have _ := _cudaScalar.addB _mpsScalar
   trivial
 
-example (cpu : Tensor ⟨#[], .Float32, .exact .CPU⟩)
-    (cuda : Tensor ⟨#[2], .Float32, .exact (.CUDA 0)⟩) :
-    Tensor ⟨#[2], .Float32, .exact (.CUDA 0)⟩ := cpu.addB cuda
+example (cpu : Tensor ⟨#[], .Float32, .CPU⟩)
+    (cuda : Tensor ⟨#[2], .Float32, (.CUDA 0)⟩) :
+    Tensor ⟨#[2], .Float32, (.CUDA 0)⟩ := cpu.addB cuda
 
-example (cpu : Tensor ⟨#[], .Float32, .exact .CPU⟩)
-    (cuda : Tensor ⟨#[2], .Float32, .exact (.CUDA 0)⟩) :
-    Tensor ⟨#[2], .Float32, .exact (.CUDA 0)⟩ := cuda.mulB cpu
+example (cpu : Tensor ⟨#[], .Float32, .CPU⟩)
+    (cuda : Tensor ⟨#[2], .Float32, (.CUDA 0)⟩) :
+    Tensor ⟨#[2], .Float32, (.CUDA 0)⟩ := cuda.mulB cpu
 
-example (cpu : Tensor ⟨#[], .Float32, .exact .CPU⟩)
-    (mps : Tensor ⟨#[], .Float32, .exact .MPS⟩) :
-    Tensor ⟨#[], .Float32, .exact .MPS⟩ := mps.addB cpu
+example (cpu : Tensor ⟨#[], .Float32, .CPU⟩)
+    (mps : Tensor ⟨#[], .Float32, .MPS⟩) :
+    Tensor ⟨#[], .Float32, .MPS⟩ := mps.addB cpu
 
-example {index : UInt64} (cpu : Tensor ⟨#[], .Float32, .exact .CPU⟩)
-    (cuda : Tensor ⟨#[], .Float32, .exact (.CUDA index)⟩) :
-    Tensor ⟨#[], .Float32, .exact (.CUDA index)⟩ := cuda.addB cpu
+example {index : UInt64} (cpu : Tensor ⟨#[], .Float32, .CPU⟩)
+    (cuda : Tensor ⟨#[], .Float32, (.CUDA index)⟩) :
+    Tensor ⟨#[], .Float32, (.CUDA index)⟩ := cuda.addB cpu
 
-example {index : UInt64} (left right : Tensor ⟨#[], .Float32, .exact (.CUDA index)⟩) :
-    Tensor ⟨#[], .Float32, .exact (.CUDA index)⟩ := left.addB right
+example {index : UInt64} (left right : Tensor ⟨#[], .Float32, (.CUDA index)⟩) :
+    Tensor ⟨#[], .Float32, (.CUDA index)⟩ := left.addB right
 
--- An unrestricted placement is statically eligible; every operation must
--- still check its actual native device before calling the kernel.
-example : DevicePolicy.PointwiseCompatible
-    ⟨#[2], .Float32, .any⟩ ⟨#[2], .Float32, .exact (.CUDA 0)⟩ := inferInstance
-example : DevicePolicy.PointwiseCompatible
-    ⟨#[2], .Float32, .exact .MPS⟩ ⟨#[2], .Float32, .any⟩ := inferInstance
+-- Shared placement is valid even when its Device value is selected at runtime.
 example {leftShape rightShape : Shape} {leftDType rightDType : DType}
-    {device : DevicePolicy} : DevicePolicy.PointwiseCompatible
+    {device : Device} : Device.PointwiseCompatible
     ⟨leftShape, leftDType, device⟩ ⟨rightShape, rightDType, device⟩ := inferInstance
-example {spec : StaticSpec} : DevicePolicy.PointwiseCompatible spec spec := inferInstance
+example {spec : StaticSpec} : Device.PointwiseCompatible spec spec := inferInstance
 
 example : True := by
   fail_if_success
-    have _ : DevicePolicy.SameDeviceCompatible
-      (.exact .CPU) (.exact (.CUDA 0)) := inferInstance
+    have _ : Device.SameDeviceCompatible
+      (.CPU) ((.CUDA 0)) := inferInstance
   fail_if_success
-    have _ : DevicePolicy.SameDeviceCompatible
-      (.exact (.CUDA 0)) (.exact (.CUDA 1)) := inferInstance
+    have _ : Device.SameDeviceCompatible
+      ((.CUDA 0)) ((.CUDA 1)) := inferInstance
   fail_if_success
-    have _ : DevicePolicy.PointwiseCompatible
-      ⟨#[1], .Float32, .exact .CPU⟩ ⟨#[], .Float32, .exact .MPS⟩ := inferInstance
+    have _ : Device.PointwiseCompatible
+      ⟨#[1], .Float32, .CPU⟩ ⟨#[], .Float32, .MPS⟩ := inferInstance
   trivial
 
 private def expectDevice (result : Except String Device) (expected : Device) : IO Unit := do
@@ -143,16 +138,16 @@ can move to the first non-CPU operand's device. The operand order matters. -/
   let vector := (Tensor.fromFloatArray #[3, 5]).to .CPU
   LeanTest.assertEqual (← (scalar.addB vector).toFloatArray) #[5, 7]
   LeanTest.assertEqual (← (vector.mulB scalar).toFloatArray) #[6, 10]
-  -- The unrestricted-policy path also validates the actual CPU metadata.
-  let unrestricted := Tensor.fromFloatArray #[7, 11]
-  match Tensor.checkPointwise unrestricted vector with
+  -- Independently validate the native CPU metadata.
+  let cpuTensor := Tensor.fromFloatArray #[7, 11]
+  match Tensor.checkPointwise cpuTensor vector with
   | .ok () => pure ()
   | .error message => LeanTest.fail message
-  match Tensor.checkSameDevice unrestricted vector with
+  match Tensor.checkSameDevice cpuTensor vector with
   | .ok () => pure ()
   | .error message => LeanTest.fail message
-  let condition := Tensor.eqScalar unrestricted 7
-  match Tensor.checkSelection condition unrestricted vector with
+  let condition := Tensor.eqScalar cpuTensor 7
+  match Tensor.checkSelection condition cpuTensor vector with
   | .ok () => pure ()
   | .error message => LeanTest.fail message
 

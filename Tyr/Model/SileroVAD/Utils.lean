@@ -11,6 +11,7 @@ import Tyr.Model.Qwen3ASR.Frontend
 
 namespace torch.silerovad
 
+variable {device : Device}
 structure SpeechTimestamp where
   start : Nat
   endPos : Nat
@@ -201,9 +202,9 @@ def timestampsToSeconds
 /-- End-to-end Silero VAD timestamp extraction over raw waveform samples (`16kHz`). -/
 def getSpeechTimestamps
     (audio : Array Float)
-    (runtime : SileroVADRuntime)
+    (runtime : (SileroVADRuntime (device := device)))
     (cfg : TimestampConfig := {})
-    : IO (Array SpeechTimestamp × SileroVADRuntime) := do
+    : IO (Array SpeechTimestamp × (SileroVADRuntime (device := device))) := do
   if cfg.samplingRate != 16000 then
     throw <| IO.userError
       s!"SileroVAD runtime currently supports only 16000Hz inference, got {cfg.samplingRate}"
@@ -213,10 +214,10 @@ def getSpeechTimestamps
 
 def getSpeechTimestampsSeconds
     (audio : Array Float)
-    (runtime : SileroVADRuntime)
+    (runtime : (SileroVADRuntime (device := device)))
     (cfg : TimestampConfig := {})
     (timeResolution : Nat := 1)
-    : IO (Array SpeechTimestampSeconds × SileroVADRuntime) := do
+    : IO (Array SpeechTimestampSeconds × (SileroVADRuntime (device := device))) := do
   let (tss, runtime') ← getSpeechTimestamps audio runtime cfg
   pure (timestampsToSeconds tss cfg.samplingRate timeResolution, runtime')
 
@@ -227,7 +228,7 @@ inductive VADBoundary where
 
 /-- Streaming speech-boundary iterator mirroring Silero `VADIterator`. -/
 structure VADIterator where
-  runtime : SileroVADRuntime
+  runtime : SileroVADRuntime (device := device)
   threshold : Float := 0.5
   samplingRate : UInt64 := 16000
   minSilenceSamples : Nat := 1600
@@ -239,12 +240,11 @@ structure VADIterator where
 namespace VADIterator
 
 def init
-    (runtime : SileroVADRuntime)
+    (runtime : (SileroVADRuntime (device := device)))
     (threshold : Float := 0.5)
     (samplingRate : UInt64 := 16000)
     (minSilenceDurationMs : UInt64 := 100)
-    (speechPadMs : UInt64 := 30)
-    : IO VADIterator := do
+    (speechPadMs : UInt64 := 30) : IO (VADIterator (device := device)) := do
   if samplingRate != 16000 then
     throw <| IO.userError
       s!"SileroVAD iterator currently supports only 16000Hz, got {samplingRate}"
@@ -259,7 +259,7 @@ def init
     currentSample := 0
   }
 
-def reset (it : VADIterator) : VADIterator := {
+def reset (it : (VADIterator (device := device))) : (VADIterator (device := device)) := {
   it with
   runtime := it.runtime.reset
   triggered := false
@@ -267,7 +267,7 @@ def reset (it : VADIterator) : VADIterator := {
   currentSample := 0
 }
 
-def step (it : VADIterator) (chunk : Array Float) : IO (Option VADBoundary × VADIterator) := do
+def step (it : (VADIterator (device := device))) (chunk : Array Float) : IO (Option VADBoundary × (VADIterator (device := device))) := do
   let win := chunk.size
   let (speechProb, rt') ← it.runtime.step chunk it.samplingRate
   let curSample := it.currentSample + win

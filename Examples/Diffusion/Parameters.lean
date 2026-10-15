@@ -10,9 +10,9 @@ shared with the removed NanoProof example.
 -/
 namespace torch.diffusion
 
-abbrev Activation (s : Shape) := Tensor { shape := s, dtype := .Float32 }
-abbrev Tokens (s : Shape) := Tensor { shape := s, dtype := .Int64 }
-abbrev Mask (s : Shape) := Tensor { shape := s, dtype := .Bool }
+abbrev Activation (s : Shape) := Tensor { shape := s, dtype := .Float32, device := .CPU }
+abbrev Tokens (s : Shape) := Tensor { shape := s, dtype := .Int64, device := .CPU }
+abbrev Mask (s : Shape) := Tensor { shape := s, dtype := .Bool, device := .CPU }
 
 structure RotaryCache (seq_len head_dim : UInt64) where
   cos : Activation #[seq_len, head_dim / 2]

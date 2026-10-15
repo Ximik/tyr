@@ -124,7 +124,7 @@ def testNorMuonCheckpointing : IO Unit := do
   -- Simulate state update
   let momentum := Tensor.ones shape
   let secondMoment := Tensor.ones #[]
-  let stateWithData : NorMuon.ParamState ⟨shape, .Float32, .any⟩ := {
+  let stateWithData : NorMuon.ParamState ⟨shape, .Float32, .CPU⟩ := {
     momentumBuffer := some momentum
     secondMoment := some secondMoment
     step := 1

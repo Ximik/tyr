@@ -107,11 +107,11 @@ private def tinyPreprocessorCfg (melBins frames : UInt64) : PreprocessorConfig :
   dither := 0.0
 }
 
-private def withZeroLmHead
-    (model : Qwen3ASRForConditionalGeneration cfg) :
-    Qwen3ASRForConditionalGeneration cfg :=
-  let zeroLmHead : Tensor { shape := #[ThinkerLmVocabSize cfg.thinkerConfig, cfg.thinkerConfig.textConfig.hiddenSize] } :=
-    (Tensor.zeros #[ThinkerLmVocabSize cfg.thinkerConfig, cfg.thinkerConfig.textConfig.hiddenSize]).forgetDType
+private def withZeroLmHead {device : Device}
+    (model : Qwen3ASRForConditionalGeneration (device := device) cfg) :
+    Qwen3ASRForConditionalGeneration (device := device) cfg :=
+  let zeroLmHead : Tensor { shape := #[ThinkerLmVocabSize cfg.thinkerConfig, cfg.thinkerConfig.textConfig.hiddenSize], device := device } :=
+    (Tensor.zeros (device := device) #[ThinkerLmVocabSize cfg.thinkerConfig, cfg.thinkerConfig.textConfig.hiddenSize]).forgetDType
   { model with thinker := { model.thinker with lmHead := zeroLmHead } }
 
 private def mkDeterministicWavSamples (n : Nat) : Array Float := Id.run do
@@ -128,7 +128,7 @@ private def writeDeterministicWavFixture
     (sampleRate : UInt64 := 16000)
     : IO String := do
   let path := s!"/tmp/tyr_qwen3asr_{name}.wav"
-  let wave : Tensor { shape := #[sampleCount], dtype := .Float32 } :=
+  let wave : Tensor { shape := #[sampleCount], dtype := .Float32, device := .CPU } :=
     Tensor.reshapeChecked (Tensor.fromFloatArray (mkDeterministicWavSamples sampleCount.toNat)) #[sampleCount]
   Tensor.saveWav wave path sampleRate
   pure path
@@ -324,6 +324,7 @@ def testQwen3ASRTimestampsRequireForcedAlignerOrHandle : IO Unit := do
   let alignCfg := tinyForcedAlignerCfg
   let alignModel ← Qwen3ASRForConditionalGeneration.init alignCfg
   let aligner : Qwen3ForcedAligner := {
+    device := .CPU
     cfg := alignCfg
     model := alignModel
     tok := tok
@@ -637,7 +638,7 @@ def testQwen3ASRForwardFromMel : IO Unit := do
   LeanTest.assertTrue (Float.isFinite s) "logit sum should be finite"
 
   let idxs := Tensor.argmax logits 2
-  let flat : Tensor { shape := #[batch * outSeq], dtype := .Int64 } := Tensor.reshapeChecked idxs #[batch * outSeq]
+  let flat : Tensor { shape := #[batch * outSeq], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked idxs #[batch * outSeq]
   let toks ← Tensor.toUInt64Array flat
   LeanTest.assertEqual toks.size (batch * outSeq).toNat "flattened argmax token count should match output length"
 
@@ -653,10 +654,10 @@ def testQwen3ASRFaithfulForwardPlaceholderScatter : IO Unit := do
 
   let aTok : Int64 := Int64.ofNat cfg.thinkerConfig.audioTokenId.toNat
   let idsVals : Array Int64 := #[aTok, aTok, aTok, aTok, 1, 2, 3, 4]
-  let inputIds : Tensor { shape := #[batch, seq], dtype := .Int64 } := Tensor.reshapeChecked (Tensor.fromInt64Array idsVals) #[batch, seq]
+  let inputIds : Tensor { shape := #[batch, seq], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked (Tensor.fromInt64Array idsVals) #[batch, seq]
 
   let mel ← Tensor.randn #[batch, cfg.thinkerConfig.audioConfig.numMelBins, frames]
-  let featureMask : Tensor { shape := #[batch, frames], dtype := .Int64 } := Tensor.fullInt #[batch, frames] 1
+  let featureMask : Tensor { shape := #[batch, frames], dtype := .Int64, device := .CPU } := Tensor.fullInt #[batch, frames] 1
 
   let logits ← model.forward inputIds (some mel.forgetDType) (some featureMask) none
   let s := Tensor.item (Tensor.sumAll logits)
@@ -677,9 +678,9 @@ def testQwen3ASRFaithfulForwardPlaceholderMismatchThrows : IO Unit := do
   for i in [:seq.toNat] do
     let v : Int64 := if i.toUInt64 < placeholderCount then aTok else (Int64.ofNat i + 5)
     idsVals := idsVals.push v
-  let inputIds : Tensor { shape := #[batch, seq], dtype := .Int64 } := Tensor.reshapeChecked (Tensor.fromInt64Array idsVals) #[batch, seq]
+  let inputIds : Tensor { shape := #[batch, seq], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked (Tensor.fromInt64Array idsVals) #[batch, seq]
   let mel ← Tensor.randn #[batch, cfg.thinkerConfig.audioConfig.numMelBins, frames]
-  let featureMask : Tensor { shape := #[batch, frames], dtype := .Int64 } := Tensor.fullInt #[batch, frames] 1
+  let featureMask : Tensor { shape := #[batch, frames], dtype := .Int64, device := .CPU } := Tensor.fullInt #[batch, frames] 1
 
   let threw ←
     try
@@ -711,7 +712,7 @@ def testQwen3ASRForwardFromOutputWav : IO Unit := do
   LeanTest.assertTrue (Float.isFinite s) "logit sum from WAV-derived mel should be finite"
 
   let idxs := Tensor.argmax logits 2
-  let flat : Tensor { shape := #[batch * outSeq], dtype := .Int64 } := Tensor.reshapeChecked idxs #[batch * outSeq]
+  let flat : Tensor { shape := #[batch * outSeq], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked idxs #[batch * outSeq]
   let toks ← Tensor.toUInt64Array flat
   LeanTest.assertEqual toks.size (batch * outSeq).toNat "flattened argmax token count should match output length"
 
@@ -778,7 +779,7 @@ def testQwen3ASRFrontendWavWhisperFeatures : IO Unit := do
   let s := Tensor.item (Tensor.sumAll mel)
   LeanTest.assertTrue (Float.isFinite s) "Whisper frontend mel sum should be finite"
 
-  let flatMask : Tensor { shape := #[64], dtype := .Int64 } := Tensor.reshapeChecked fmask #[64]
+  let flatMask : Tensor { shape := #[64], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked fmask #[64]
   let maskVals ← Tensor.toUInt64Array (Tensor.toInt64 flatMask)
   LeanTest.assertEqual maskVals.size 64 "feature mask length should equal configured frames"
   LeanTest.assertTrue (maskVals.all (fun v => v == 1))
@@ -796,7 +797,7 @@ def testQwen3ASRForwardForcedAlignerHead : IO Unit := do
   LeanTest.assertTrue (Float.isFinite s) "forced-aligner logits should be finite"
 
   let idxs := Tensor.argmax logits 2
-  let flat : Tensor { shape := #[batch * seq], dtype := .Int64 } := Tensor.reshapeChecked idxs #[batch * seq]
+  let flat : Tensor { shape := #[batch * seq], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked idxs #[batch * seq]
   let ids ← Tensor.toUInt64Array flat
   LeanTest.assertTrue (ids.all (fun i => i < cfg.thinkerConfig.classifyNum))
     "argmax ids should be within forced-aligner classify_num range"
@@ -809,17 +810,17 @@ def testQwen3ASRForwardWithAuxRopeDeltas : IO Unit := do
   let seq : UInt64 := 6
   let ids ← Tensor.randint 0 cfg.thinkerConfig.textConfig.vocabSize.toInt64 #[batch, seq]
   let attnVals : Array Int64 := #[0, 0, 1, 1, 1, 1]
-  let attnMask : Tensor { shape := #[batch, seq], dtype := .Int64 } := Tensor.reshapeChecked (Tensor.fromInt64Array attnVals) #[batch, seq]
+  let attnMask : Tensor { shape := #[batch, seq], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked (Tensor.fromInt64Array attnVals) #[batch, seq]
   let out ← model.forwardWithAux
     ids
-    (inputFeatures := (none : Option (Tensor { shape := #[batch, cfg.thinkerConfig.audioConfig.numMelBins, 1] })))
-    (featureAttentionMask := (none : Option (Tensor { shape := #[batch, 1], dtype := .Int64 })))
+    (inputFeatures := (none : Option (Tensor { shape := #[batch, cfg.thinkerConfig.audioConfig.numMelBins, 1], device := .CPU })))
+    (featureAttentionMask := (none : Option (Tensor { shape := #[batch, 1], dtype := .Int64, device := .CPU })))
     (attentionMask := some attnMask)
   match out.ropeDeltas with
   | none =>
     LeanTest.fail "forwardWithAux should populate ropeDeltas when attention mask is provided"
   | some d =>
-    let flat : Tensor { shape := #[batch], dtype := .Int64 } := Tensor.reshapeChecked d #[batch]
+    let flat : Tensor { shape := #[batch], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked d #[batch]
     let arr ← Tensor.toUInt64Array (Tensor.toInt64 flat)
     LeanTest.assertEqual arr.size batch.toNat "ropeDeltas batch size should match"
 
@@ -839,19 +840,19 @@ def testQwen3ASRGreedyGenerateFromWav : IO Unit := do
     idsVals := idsVals.push aTok
   idsVals := idsVals.push 5
   idsVals := idsVals.push 9
-  let inputIds : Tensor { shape := #[batch, promptSeq], dtype := .Int64 } := Tensor.reshapeChecked (Tensor.fromInt64Array idsVals) #[batch, promptSeq]
+  let inputIds : Tensor { shape := #[batch, promptSeq], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked (Tensor.fromInt64Array idsVals) #[batch, promptSeq]
 
   let frontendCfg := tinyPreprocessorCfg cfg.thinkerConfig.audioConfig.numMelBins frames
   let frontendOut ← wavToWhisperFeatures frontendCfg wavPath
-  let mel : Tensor { shape := #[1, cfg.thinkerConfig.audioConfig.numMelBins, frames], dtype := .Float32 } := frontendOut.inputFeatures
-  let fmask : Tensor { shape := #[batch, frames], dtype := .Int64 } := frontendOut.featureAttentionMask
+  let mel : Tensor { shape := #[1, cfg.thinkerConfig.audioConfig.numMelBins, frames], dtype := .Float32, device := .CPU } := frontendOut.inputFeatures
+  let fmask : Tensor { shape := #[batch, frames], dtype := .Int64, device := .CPU } := frontendOut.featureAttentionMask
 
   let generated ← model.generateGreedy inputIds (some mel.forgetDType) (some fmask) 3 #[]
   let outSeq := generated.1
   let outIds := generated.2
   LeanTest.assertEqual outSeq (promptSeq + 3) "greedy generation should append max_new_tokens when eos set is empty"
 
-  let flat : Tensor { shape := #[outSeq], dtype := .Int64 } := Tensor.reshapeChecked outIds #[outSeq]
+  let flat : Tensor { shape := #[outSeq], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked outIds #[outSeq]
   let toks ← Tensor.toUInt64Array flat
   LeanTest.assertEqual toks.size outSeq.toNat "generated token tensor should match reported output sequence length"
 
@@ -870,9 +871,9 @@ def testQwen3ASRGreedyCachedMatchesUncached : IO Unit := do
     idsVals := idsVals.push aTok
   idsVals := idsVals.push 7
   idsVals := idsVals.push 11
-  let inputIds : Tensor { shape := #[batch, promptSeq], dtype := .Int64 } := Tensor.reshapeChecked (Tensor.fromInt64Array idsVals) #[batch, promptSeq]
+  let inputIds : Tensor { shape := #[batch, promptSeq], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked (Tensor.fromInt64Array idsVals) #[batch, promptSeq]
   let mel ← Tensor.randn #[batch, cfg.thinkerConfig.audioConfig.numMelBins, frames]
-  let fmask : Tensor { shape := #[batch, frames], dtype := .Int64 } := Tensor.fullInt #[batch, frames] 1
+  let fmask : Tensor { shape := #[batch, frames], dtype := .Int64, device := .CPU } := Tensor.fullInt #[batch, frames] 1
 
   let outCached ← model.generateGreedy inputIds (some mel.forgetDType) (some fmask) 4 #[]
   let outUncached ← model.generateGreedyUncached inputIds (some mel.forgetDType) (some fmask) 4 #[]
@@ -883,8 +884,8 @@ def testQwen3ASRGreedyCachedMatchesUncached : IO Unit := do
   let idsUncached := outUncached.2
 
   LeanTest.assertEqual seqCached seqUncached "cached and uncached generation should produce same output length"
-  let flatCached : Tensor { shape := #[seqCached], dtype := .Int64 } := Tensor.reshapeChecked idsCached #[seqCached]
-  let flatUncached : Tensor { shape := #[seqUncached], dtype := .Int64 } := Tensor.reshapeChecked idsUncached #[seqUncached]
+  let flatCached : Tensor { shape := #[seqCached], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked idsCached #[seqCached]
+  let flatUncached : Tensor { shape := #[seqUncached], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked idsUncached #[seqUncached]
   let toksCached ← Tensor.toUInt64Array flatCached
   let toksUncached ← Tensor.toUInt64Array flatUncached
   LeanTest.assertEqual toksCached toksUncached "cached and uncached generation should produce identical token ids"
@@ -905,9 +906,9 @@ def testQwen3ASRGreedyCachedMatchesUncachedWhenAudioTokenIsGenerated : IO Unit :
     idsVals := idsVals.push aTok
   idsVals := idsVals.push 7
   idsVals := idsVals.push 11
-  let inputIds : Tensor { shape := #[batch, promptSeq], dtype := .Int64 } := Tensor.reshapeChecked (Tensor.fromInt64Array idsVals) #[batch, promptSeq]
+  let inputIds : Tensor { shape := #[batch, promptSeq], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked (Tensor.fromInt64Array idsVals) #[batch, promptSeq]
   let mel ← Tensor.randn #[batch, cfg.thinkerConfig.audioConfig.numMelBins, frames]
-  let fmask : Tensor { shape := #[batch, frames], dtype := .Int64 } := Tensor.fullInt #[batch, frames] 1
+  let fmask : Tensor { shape := #[batch, frames], dtype := .Int64, device := .CPU } := Tensor.fullInt #[batch, frames] 1
 
   let outCached ← model.generateGreedy inputIds (some mel.forgetDType) (some fmask) 4 #[]
   let outUncached ← model.generateGreedyUncached inputIds (some mel.forgetDType) (some fmask) 4 #[]
@@ -919,8 +920,8 @@ def testQwen3ASRGreedyCachedMatchesUncachedWhenAudioTokenIsGenerated : IO Unit :
 
   LeanTest.assertEqual seqCached seqUncached
     "cached and uncached generation should stay aligned even when the generated token equals the audio placeholder id"
-  let flatCached : Tensor { shape := #[seqCached], dtype := .Int64 } := Tensor.reshapeChecked idsCached #[seqCached]
-  let flatUncached : Tensor { shape := #[seqUncached], dtype := .Int64 } := Tensor.reshapeChecked idsUncached #[seqUncached]
+  let flatCached : Tensor { shape := #[seqCached], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked idsCached #[seqCached]
+  let flatUncached : Tensor { shape := #[seqUncached], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked idsUncached #[seqUncached]
   let toksCached ← Tensor.toUInt64Array flatCached
   let toksUncached ← Tensor.toUInt64Array flatUncached
   LeanTest.assertEqual toksCached toksUncached
@@ -937,22 +938,22 @@ def testQwen3ASRMaskedPositionsMatchTrimmedLeftPad : IO Unit := do
   let vocab := cfg.thinkerConfig.textConfig.vocabSize.toInt64
   let ids ← Tensor.randint 0 vocab #[batch, seq]
   let maskVals : Array Int64 := #[0, 0, 1, 1, 1, 1]
-  let attnMask : Tensor { shape := #[batch, seq], dtype := .Int64 } := Tensor.reshapeChecked (Tensor.fromInt64Array maskVals) #[batch, seq]
+  let attnMask : Tensor { shape := #[batch, seq], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked (Tensor.fromInt64Array maskVals) #[batch, seq]
 
   let logitsMasked ← model.forward
     ids
-    (inputFeatures := (none : Option (Tensor { shape := #[batch, cfg.thinkerConfig.audioConfig.numMelBins, 1] })))
-    (featureAttentionMask := (none : Option (Tensor { shape := #[batch, 1], dtype := .Int64 })))
+    (inputFeatures := (none : Option (Tensor { shape := #[batch, cfg.thinkerConfig.audioConfig.numMelBins, 1], device := .CPU })))
+    (featureAttentionMask := (none : Option (Tensor { shape := #[batch, 1], dtype := .Int64, device := .CPU })))
     (attentionMask := some attnMask)
 
-  let idsTrim : Tensor { shape := #[batch, 4], dtype := .Int64 } := Tensor.sliceChecked ids 1 2 4 #[batch, 4]
+  let idsTrim : Tensor { shape := #[batch, 4], dtype := .Int64, device := .CPU } := Tensor.sliceChecked ids 1 2 4 #[batch, 4]
   let logitsTrim ← model.forward
     idsTrim
-    (inputFeatures := (none : Option (Tensor { shape := #[batch, cfg.thinkerConfig.audioConfig.numMelBins, 1] })))
-    (featureAttentionMask := (none : Option (Tensor { shape := #[batch, 1], dtype := .Int64 })))
-    (attentionMask := (none : Option (Tensor { shape := #[batch, 4], dtype := .Int64 })))
+    (inputFeatures := (none : Option (Tensor { shape := #[batch, cfg.thinkerConfig.audioConfig.numMelBins, 1], device := .CPU })))
+    (featureAttentionMask := (none : Option (Tensor { shape := #[batch, 1], dtype := .Int64, device := .CPU })))
+    (attentionMask := (none : Option (Tensor { shape := #[batch, 4], dtype := .Int64, device := .CPU })))
 
-  let logitsMaskedValid : Tensor { shape := #[batch, 4, ThinkerLmVocabSize cfg.thinkerConfig] } := Tensor.sliceChecked logitsMasked 1 2 4 #[batch, 4, ThinkerLmVocabSize cfg.thinkerConfig]
+  let logitsMaskedValid : Tensor { shape := #[batch, 4, ThinkerLmVocabSize cfg.thinkerConfig], device := .CPU } := Tensor.sliceChecked logitsMasked 1 2 4 #[batch, 4, ThinkerLmVocabSize cfg.thinkerConfig]
   let a ← Tensor.toFloatArray (logitsMaskedValid)
   let b ← Tensor.toFloatArray (logitsTrim)
   let mut maxErr : Float := 0.0
@@ -978,12 +979,12 @@ def testQwen3ASRForwardVariableFeatureMask : IO Unit := do
     idsVals := idsVals.push aTok
   idsVals := idsVals.push 3
   idsVals := idsVals.push 4
-  let inputIds : Tensor { shape := #[batch, seq], dtype := .Int64 } := Tensor.reshapeChecked (Tensor.fromInt64Array idsVals) #[batch, seq]
+  let inputIds : Tensor { shape := #[batch, seq], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked (Tensor.fromInt64Array idsVals) #[batch, seq]
   let mel ← Tensor.randn #[batch, cfg.thinkerConfig.audioConfig.numMelBins, frames]
   let mut mask : Array Int64 := #[]
   for i in [:frames.toNat] do
     mask := mask.push (if i.toUInt64 < validFrames then 1 else 0)
-  let featureMask : Tensor { shape := #[batch, frames], dtype := .Int64 } := Tensor.reshapeChecked (Tensor.fromInt64Array mask) #[batch, frames]
+  let featureMask : Tensor { shape := #[batch, frames], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked (Tensor.fromInt64Array mask) #[batch, frames]
 
   let logits ← model.forward inputIds (some mel.forgetDType) (some featureMask) none
   let s := Tensor.item (Tensor.sumAll logits)
@@ -995,7 +996,7 @@ def testQwen3ASRAudioEncoderFeatureDType : IO Unit := do
     { tinyChunkedCfg.thinkerConfig.audioConfig with nWindow := 8, nWindowInfer := 32 }
   let original ← AudioEncoder.init cfg
   let original := TensorStruct.detach original
-  let features : Tensor { shape := #[3, cfg.numMelBins, 32], dtype := .Float32 } := Tensor.reshapeChecked
+  let features : Tensor { shape := #[3, cfg.numMelBins, 32], dtype := .Float32, device := .CPU } := Tensor.reshapeChecked
     (Tensor.sin (Tensor.toFloat32 (Tensor.arange (3 * cfg.numMelBins * 32)))) #[3, cfg.numMelBins, 32]
   for bf16Weights in #[false, true] do
     let encoder ← if bf16Weights then TensorStruct.castDType .BFloat16 original else pure original
@@ -1012,17 +1013,17 @@ def testQwen3ASRAudioEncoderFeatureDType : IO Unit := do
       LeanTest.assertEqual error 0.0 "Automatic feature conversion equals an explicit model-dtype cast"
       LeanTest.assertTrue (Float.isFinite (Tensor.item (Tensor.sumAll (Tensor.toFloat32 audio))))
         "Varlen audio features are finite"
-      let empty : Tensor { shape := #[1, 4, cfg.outputDim] } := Tensor.sliceChecked audio 0 2 1 #[1, 4, cfg.outputDim]
+      let empty : Tensor { shape := #[1, 4, cfg.outputDim], device := .CPU } := Tensor.sliceChecked audio 0 2 1 #[1, 4, cfg.outputDim]
       LeanTest.assertEqual (Tensor.item (Tensor.maxAllChecked (Tensor.abs empty))) 0.0 "Zero-length sample stays zero"
-      let short : Tensor { shape := #[1, 4, cfg.outputDim] } := Tensor.sliceChecked audio 0 1 1 #[1, 4, cfg.outputDim]
-      let padding : Tensor { shape := #[1, 2, cfg.outputDim] } := Tensor.sliceChecked short 1 2 2 #[1, 2, cfg.outputDim]
+      let short : Tensor { shape := #[1, 4, cfg.outputDim], device := .CPU } := Tensor.sliceChecked audio 0 1 1 #[1, 4, cfg.outputDim]
+      let padding : Tensor { shape := #[1, 2, cfg.outputDim], device := .CPU } := Tensor.sliceChecked short 1 2 2 #[1, 2, cfg.outputDim]
       LeanTest.assertEqual (Tensor.item (Tensor.maxAllChecked (Tensor.abs padding))) 0.0 "Short-sample output padding stays zero"
       let dense := encoder.forward mel
       let denseExpected := encoder.forward expectedInput
       LeanTest.assertEqual dense.actualSpec.dtype encoder.conv2d1Weight.actualSpec.dtype "Dense encoder output uses model dtype"
       LeanTest.assertEqual (Tensor.item (Tensor.maxAll (Tensor.abs (Tensor.sub (Tensor.toFloat32 dense) (Tensor.toFloat32 denseExpected))))) 0.0
         "Dense path also aligns features and positional embeddings"
-    let noBatch : Tensor { shape := #[0, cfg.numMelBins, 32], dtype := .Float32 } := Tensor.zeros #[0, cfg.numMelBins, 32]
+    let noBatch : Tensor { shape := #[0, cfg.numMelBins, 32], dtype := .Float32, device := .CPU } := Tensor.zeros #[0, cfg.numMelBins, 32]
     let empty := encoder.forwardVarLen noBatch.forgetDType #[]
     LeanTest.assertEqual empty.runtimeShape #[0, 4, cfg.outputDim] "Empty batch has the declared shape"
     LeanTest.assertEqual empty.actualSpec.dtype encoder.conv2d1Weight.actualSpec.dtype "Empty batch keeps model dtype"
@@ -1036,12 +1037,12 @@ def testQwen3ASRBFloat16VariableLengthGeneration : IO Unit := do
   let original := TensorStruct.detach original
   let model ← TensorStruct.castDType .BFloat16 original
   let aTok := Int64.ofNat cfg.thinkerConfig.audioTokenId.toNat
-  let ids : Tensor { shape := #[2, 6], dtype := .Int64 } := Tensor.reshapeChecked (Tensor.fromInt64Array
+  let ids : Tensor { shape := #[2, 6], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked (Tensor.fromInt64Array
     #[aTok, aTok, aTok, aTok, 7, 9, aTok, aTok, 3, 5, 7, 9]) #[2, 6]
-  let mel : Tensor { shape := #[2, cfg.thinkerConfig.audioConfig.numMelBins, 32], dtype := .Float32 } := Tensor.reshapeChecked
+  let mel : Tensor { shape := #[2, cfg.thinkerConfig.audioConfig.numMelBins, 32], dtype := .Float32, device := .CPU } := Tensor.reshapeChecked
     (Tensor.sin (Tensor.toFloat32 (Tensor.arange (2 * cfg.thinkerConfig.audioConfig.numMelBins * 32))))
     #[2, cfg.thinkerConfig.audioConfig.numMelBins, 32]
-  let mask : Tensor { shape := #[2, 32], dtype := .Int64 } := Tensor.reshapeChecked (Tensor.fromInt64Array
+  let mask : Tensor { shape := #[2, 32], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked (Tensor.fromInt64Array
     ((List.range 32).toArray.map (fun i => if i < 25 then (1 : Int64) else 0) ++
      (List.range 32).toArray.map (fun i => if i < 13 then (1 : Int64) else 0))) #[2, 32]
   let logits ← model.forward ids (some mel.forgetDType) (some mask) none
@@ -1055,7 +1056,7 @@ def testQwen3ASRBFloat16VariableLengthGeneration : IO Unit := do
   LeanTest.assertEqual (← Tensor.toUInt64Array generated.2)
     (← Tensor.toUInt64Array explicit.2)
     "Float32 frontend features produce the same tokens as an explicit BF16 cast"
-  let prefixIds : Tensor { shape := #[2, 6], dtype := .Int64 } := Tensor.sliceChecked generated.2 1 0 6 #[2, 6]
+  let prefixIds : Tensor { shape := #[2, 6], dtype := .Int64, device := .CPU } := Tensor.sliceChecked generated.2 1 0 6 #[2, 6]
   LeanTest.assertEqual (← Tensor.toUInt64Array prefixIds)
     (← Tensor.toUInt64Array ids) "Generation preserves both prompts"
 
@@ -1089,7 +1090,7 @@ def testQwen3ASRForwardVariableFeatureMaskChunkedBatch : IO Unit := do
     idVals := idVals.push (if i.toUInt64 < audioLen0 then aTok else (Int64.ofNat i + 3))
   for i in [:seq.toNat] do
     idVals := idVals.push (if i.toUInt64 < audioLen1 then aTok else (Int64.ofNat i + 17))
-  let inputIds : Tensor { shape := #[batch, seq], dtype := .Int64 } := Tensor.reshapeChecked (Tensor.fromInt64Array idVals) #[batch, seq]
+  let inputIds : Tensor { shape := #[batch, seq], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked (Tensor.fromInt64Array idVals) #[batch, seq]
 
   let mel ← Tensor.randn #[batch, cfg.thinkerConfig.audioConfig.numMelBins, frames]
   let mut maskVals : Array Int64 := #[]
@@ -1097,7 +1098,7 @@ def testQwen3ASRForwardVariableFeatureMaskChunkedBatch : IO Unit := do
     maskVals := maskVals.push (if i.toUInt64 < valid0 then 1 else 0)
   for i in [:frames.toNat] do
     maskVals := maskVals.push (if i.toUInt64 < valid1 then 1 else 0)
-  let featureMask : Tensor { shape := #[batch, frames], dtype := .Int64 } := Tensor.reshapeChecked (Tensor.fromInt64Array maskVals) #[batch, frames]
+  let featureMask : Tensor { shape := #[batch, frames], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked (Tensor.fromInt64Array maskVals) #[batch, frames]
 
   let logits ← model.forward inputIds (some mel.forgetDType) (some featureMask) none
   let s := Tensor.item (Tensor.sumAll logits)
@@ -1110,8 +1111,8 @@ def testQwen3ASRForcedAlignFromOutputIds : IO Unit := do
   let timestampTokenId : UInt64 := 99
   let inputVals : Array Int64 := #[1, 99, 99, 7, 99, 99]
   let outputVals : Array Int64 := #[0, 10, 20, 0, 30, 40]
-  let inputIds : Tensor { shape := #[batch, seq], dtype := .Int64 } := Tensor.reshapeChecked (Tensor.fromInt64Array inputVals) #[batch, seq]
-  let outputIds : Tensor { shape := #[batch, seq], dtype := .Int64 } := Tensor.reshapeChecked (Tensor.fromInt64Array outputVals) #[batch, seq]
+  let inputIds : Tensor { shape := #[batch, seq], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked (Tensor.fromInt64Array inputVals) #[batch, seq]
+  let outputIds : Tensor { shape := #[batch, seq], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked (Tensor.fromInt64Array outputVals) #[batch, seq]
   let wordLists : Array (Array String) := #[#["a", "b"]]
   let results ← alignFromOutputIds inputIds outputIds wordLists timestampTokenId 10.0
   let r := results.getD 0 { items := #[] }
@@ -1130,6 +1131,7 @@ def testQwen3ASRStreamModelPushAudioBoundsAccum : IO Unit := do
   let tok := mkAsciiStreamingTokenizer
   let pre := tinyPreprocessorCfg cfg.thinkerConfig.audioConfig.numMelBins 32
   let sm : StreamModel := {
+    device := .CPU
     cfg := cfg
     model := model
     tok := tok
@@ -1153,6 +1155,7 @@ def testQwen3ASRStreamModelPersistsPromptCache : IO Unit := do
   let tok := mkAsciiStreamingTokenizer
   let pre := tinyPreprocessorCfg cfg.thinkerConfig.audioConfig.numMelBins 32
   let sm : StreamModel := {
+    device := .CPU
     cfg := cfg
     model := model
     tok := tok

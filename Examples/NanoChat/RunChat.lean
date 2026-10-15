@@ -14,6 +14,8 @@ import Examples.NanoChat.ModdedTrain
 namespace torch.NanoChat.Chat
 
 open torch
+
+variable {device : Device}
 open torch.moddedGpt
 open torch.ModdedTrain
 open tokenizer
@@ -182,13 +184,6 @@ private def resolveDevice (env : ChatEnvState) : IO Device := do
   | some "auto" | none => getBestDevice
   | some _ => getBestDevice
 
-private def moveYarnToDevice {headDim maxSeqLen : UInt64}
-    (yarn : YarnRotary headDim maxSeqLen) (device : Device) : YarnRotary headDim maxSeqLen :=
-  { yarn with
-    cos := yarn.cos.to device
-    sin := yarn.sin.to device
-    angularFreq := yarn.angularFreq.to device
-  }
 
 private def findSpecialId? (tok : BPETokenizer) (names : Array String) : Option UInt64 := Id.run do
   for name in names do
@@ -229,9 +224,8 @@ private def buildModelConfig (args : Args) : Config := {
 }
 
 private def sampleNextToken {cfg : Config}
-    (params : ModdedGPTParams cfg)
-    (yarn : YarnRotary cfg.headDim cfg.maxSeqLen)
-    (device : Device)
+    (params : ModdedGPTParams (device := device) cfg)
+    (yarn : YarnRotary (device := device) cfg.headDim cfg.maxSeqLen)
     (temperature : Float)
     (topK : Nat)
     (context : Array UInt64)
@@ -305,20 +299,18 @@ unsafe def main (rawArgs : List String) : IO UInt32 := do
   IO.println s!"  decoding:   max_new={args.maxNewTokens} temp={args.temperature} top_k={args.topK} eos={eosToken}"
   IO.println ""
 
-  let maybeCkpt ← loadCheckpoint cfg checkpointPath
+  let maybeCkpt ← loadCheckpoint cfg checkpointPath (device := device)
   let ckpt ← match maybeCkpt with
     | some ckpt => pure ckpt
     | none => throw <| IO.userError s!"Checkpoint not found or incompatible with current config: {checkpointPath}"
 
-  let paramsOnDeviceRaw ← TensorStruct.mapM (fun t => pure (t.to device)) ckpt.params
-  let paramsOnDevice ← TensorStruct.makeLeafParams paramsOnDeviceRaw
+  let paramsOnDevice ← TensorStruct.makeLeafParams ckpt.params
 
-  let yarn0 ← YarnRotary.init cfg.headDim cfg.maxSeqLen cfg.ropeBase
-  let yarn := moveYarnToDevice yarn0 device
+  let yarn ← YarnRotary.init cfg.headDim cfg.maxSeqLen cfg.ropeBase (device := device)
 
   let encodeFn := fun (text : String) => (tokenizer.encodeWithSpecials tok text).map (·.toUInt64)
   let decodeFn := fun (tokens : Array UInt64) => tokenizer.decode tok (tokens.map (·.toUInt32))
-  let nextTokenFn := sampleNextToken paramsOnDevice yarn device args.temperature args.topK
+  let nextTokenFn := sampleNextToken paramsOnDevice yarn args.temperature args.topK
 
   let runTurn := fun (baseCtx : Array UInt64) (prompt : String) => do
     let promptBody := encodeFn prompt

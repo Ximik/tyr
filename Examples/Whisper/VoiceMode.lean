@@ -243,8 +243,9 @@ private def printInline (s : String) : IO Unit := do
     Runs Whisper on the accumulated audio every `transcribeIntervalSec` seconds
     of new audio, updating the terminal in-place. -/
 private def runOnce
+    {device : torch.Device}
     {cfg : WhisperConfig}
-    (model : WhisperForConditionalGeneration cfg)
+    (model : WhisperForConditionalGeneration (device := device) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (pre : torch.qwen3asr.PreprocessorConfig)
     (args : Args)

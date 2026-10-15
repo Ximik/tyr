@@ -12,7 +12,7 @@ namespace Tests.TestTyped
 def testTypedDefaultsAndPlacement : IO Unit := do
   for dtype in #[DType.UInt8, .Int8, .Int16, .Int32, .Int64, .Float16, .BFloat16,
       .Float32, .Float64, .Bool, .Float8E4M3FN, .Float8E5M2, .Unknown "dynamic"] do
-    let spec : StaticSpec := { shape := #[2, 3], dtype, device := .exact .CPU }
+    let spec : StaticSpec := { shape := #[2, 3], dtype, device := .CPU }
     let tensor : Tensor spec := default
     match tensor.validate with
     | .ok () => pure ()
@@ -26,38 +26,38 @@ def testTypedDefaultsAndPlacement : IO Unit := do
   LeanTest.assertTrue scalar.requiresGrad "Typed autograd metadata should reflect requires_grad."
   LeanTest.assertEqual scalar.item 2.5 "Typed scalar extraction should preserve the value."
 
-example (_matrix : Tensor { shape := #[2, 3], dtype := .Float32 }) : True := by
+example (_matrix : Tensor { shape := #[2, 3], dtype := .Float32, device := .CPU }) : True := by
   fail_if_success
     have _ := Tensor.item _matrix
   trivial
 
 /- Compile-time rejection tests. `fail_if_success` checks elaboration failure
    without inserting sorry-backed declarations into the runtime test module. -/
-example (_x : Tensor { shape := #[2, 3], dtype := .Float32 }) : True := by
+example (_x : Tensor { shape := #[2, 3], dtype := .Float32, device := .CPU }) : True := by
   fail_if_success
-    have _wrongShape : Tensor { shape := #[3, 2], dtype := .Float32 } := _x
+    have _wrongShape : Tensor { shape := #[3, 2], dtype := .Float32, device := .CPU } := _x
   trivial
 
-example (_x : Tensor { shape := #[2, 3], dtype := .Float32 }) (_w : Tensor { shape := #[4, 5], dtype := .Float32 }) : True := by
+example (_x : Tensor { shape := #[2, 3], dtype := .Float32, device := .CPU }) (_w : Tensor { shape := #[4, 5], dtype := .Float32, device := .CPU }) : True := by
   fail_if_success
     have _wrongInnerDims := Tensor.mm _x _w
   trivial
 
-example (_x : Tensor { shape := #[2, 3], dtype := .Float32 }) : True := by
+example (_x : Tensor { shape := #[2, 3], dtype := .Float32, device := .CPU }) : True := by
   fail_if_success
     have _wrongNumel := _x.reshape #[5]
   trivial
 
-example (_x : Tensor { shape := #[2, 3], dtype := .Float32 }) (_w : Tensor { shape := #[3, 4], dtype := .Int64 }) : True := by
+example (_x : Tensor { shape := #[2, 3], dtype := .Float32, device := .CPU }) (_w : Tensor { shape := #[3, 4], dtype := .Int64, device := .CPU }) : True := by
   fail_if_success
     have _wrongDType := Tensor.mm _x _w
   trivial
 
-example (scalar : Tensor ⟨#[], .Float64, .any⟩)
-    (vector : Tensor ⟨#[2], .Float32, .any⟩) : True := by
-  have _correct : Tensor ⟨#[2], .Float32, .any⟩ := scalar.addB vector
+example (scalar : Tensor ⟨#[], .Float64, .CPU⟩)
+    (vector : Tensor ⟨#[2], .Float32, .CPU⟩) : True := by
+  have _correct : Tensor ⟨#[2], .Float32, .CPU⟩ := scalar.addB vector
   fail_if_success
-    have _wrongPrecision : Tensor ⟨#[2], .Float64, .any⟩ := scalar.addB vector
+    have _wrongPrecision : Tensor ⟨#[2], .Float64, .CPU⟩ := scalar.addB vector
   trivial
 
 @[test]
@@ -104,11 +104,11 @@ def testStrictSpecChecks : IO Unit := do
   | .error err => LeanTest.assertTrue (err.containsSubstr "Expected dtype")
 
 @[test]
-def testDevicePolicyChecks : IO Unit := do
-  match DevicePolicy.check (.exact .CPU) .CPU with
+def testDeviceChecks : IO Unit := do
+  match Device.check (.CPU) .CPU with
   | .ok () => pure ()
   | .error err => LeanTest.fail err
-  match DevicePolicy.check (.exact .MPS) .CPU with
+  match Device.check (.MPS) .CPU with
   | .ok () => LeanTest.fail "device mismatch should fail"
   | .error err => LeanTest.assertTrue (err.containsSubstr "Expected device")
 
@@ -169,9 +169,9 @@ def testTypedScalarDtypePromotionMatrix : IO Unit := do
   let dtypes : Array DType := #[.Bool, .UInt8, .Int8, .Int16, .Int32, .Int64,
     .Float16, .BFloat16, .Float32, .Float64]
   for vectorDType in dtypes do
-    let vector : Tensor ⟨#[2], vectorDType, .any⟩ := (Tensor.ones #[2]).castDType vectorDType
+    let vector : Tensor ⟨#[2], vectorDType, .CPU⟩ := (Tensor.ones #[2]).castDType vectorDType
     for scalarDType in dtypes do
-      let scalar : Tensor ⟨#[], scalarDType, .any⟩ := (Tensor.full #[] 2).castDType scalarDType
+      let scalar : Tensor ⟨#[], scalarDType, .CPU⟩ := (Tensor.full #[] 2).castDType scalarDType
       match h : DType.promoteScalar? vectorDType scalarDType with
       | none => LeanTest.fail s!"Expected ordinary scalar promotion for {vectorDType}/{scalarDType}"
       | some result =>
@@ -205,10 +205,10 @@ only the metadata-only libtorch promotion oracle. -/
 def testTypedComplexArithmetic : IO Unit := do
   let complex := (Tensor.fromFloatArray #[-2, 3]).castDType .Complex64
   let double := (Tensor.fromFloatArray #[4, 6]).castDType .Float64
-  let sum : Tensor ⟨#[2], .Complex128, .any⟩ := Tensor.add complex double
-  let difference : Tensor ⟨#[2], .Complex128, .any⟩ := Tensor.sub complex double
-  let product : Tensor ⟨#[2], .Complex128, .any⟩ := Tensor.mul complex double
-  let quotient : Tensor ⟨#[2], .Complex128, .any⟩ := Tensor.div complex double
+  let sum : Tensor ⟨#[2], .Complex128, .CPU⟩ := Tensor.add complex double
+  let difference : Tensor ⟨#[2], .Complex128, .CPU⟩ := Tensor.sub complex double
+  let product : Tensor ⟨#[2], .Complex128, .CPU⟩ := Tensor.mul complex double
+  let quotient : Tensor ⟨#[2], .Complex128, .CPU⟩ := Tensor.div complex double
   assertValid sum "Complex64 + Float64 widens to Complex128"
   assertValid difference "complex subtraction"
   assertValid product "complex multiplication"
@@ -217,8 +217,8 @@ def testTypedComplexArithmetic : IO Unit := do
   LeanTest.assertTrue (Tensor.allclose difference ((Tensor.fromFloatArray #[-6, -3]).castDType .Complex128))
   LeanTest.assertTrue (Tensor.allclose product ((Tensor.fromFloatArray #[-8, 18]).castDType .Complex128))
   LeanTest.assertTrue (Tensor.allclose quotient ((Tensor.fromFloatArray #[-0.5, 0.5]).castDType .Complex128))
-  let magnitude64 : Tensor ⟨#[2], .Float32, .any⟩ := complex.abs
-  let magnitude128 : Tensor ⟨#[2], .Float64, .any⟩ := product.abs
+  let magnitude64 : Tensor ⟨#[2], .Float32, .CPU⟩ := complex.abs
+  let magnitude128 : Tensor ⟨#[2], .Float64, .CPU⟩ := product.abs
   assertValid magnitude64 "Complex64 absolute value is Float32"
   assertValid magnitude128 "Complex128 absolute value is Float64"
   LeanTest.assertEqual (← magnitude64.toFloatArray) #[2, 3]
@@ -228,18 +228,18 @@ def testTypedComplexArithmetic : IO Unit := do
 def testTypedComplexScalarPromotion : IO Unit := do
   let vector := Tensor.fromFloatArray #[1, 2]
   let scalar := (Tensor.full #[] 2).castDType .Complex128
-  let forward : Tensor ⟨#[2], .Complex64, .any⟩ := vector.addB scalar
-  let reverse : Tensor ⟨#[2], .Complex64, .any⟩ := scalar.addB vector
+  let forward : Tensor ⟨#[2], .Complex64, .CPU⟩ := vector.addB scalar
+  let reverse : Tensor ⟨#[2], .Complex64, .CPU⟩ := scalar.addB vector
   assertValid forward "complex scalar raises category but preserves vector precision"
   assertValid reverse "reversed complex scalar broadcasting"
   LeanTest.assertTrue (Tensor.allclose forward reverse)
   LeanTest.assertTrue (Tensor.allclose forward ((Tensor.fromFloatArray #[3, 4]).castDType .Complex64))
   let complexVector := vector.castDType .Complex64
   let doubleScalar := (Tensor.full #[] 2).castDType .Float64
-  let preserved : Tensor ⟨#[2], .Complex64, .any⟩ := complexVector.mulB doubleScalar
+  let preserved : Tensor ⟨#[2], .Complex64, .CPU⟩ := complexVector.mulB doubleScalar
   assertValid preserved "Float64 scalar does not widen a Complex64 vector"
   let complexScalar := (Tensor.full #[] 2).castDType .Complex64
-  let widened : Tensor ⟨#[2], .Complex128, .any⟩ := complexScalar.mulB (vector.castDType .Float64)
+  let widened : Tensor ⟨#[2], .Complex128, .CPU⟩ := complexScalar.mulB (vector.castDType .Float64)
   assertValid widened "Float64 vector raises a Complex64 scalar to Complex128"
   LeanTest.assertTrue (Tensor.allclose widened ((Tensor.fromFloatArray #[2, 4]).castDType .Complex128))
 
@@ -270,7 +270,7 @@ def testTypedRuntimeShapeResults : IO Unit := do
 def testTypedRMSNormWeightContract : IO Unit := do
   let input := (Tensor.ones #[2, 3]).castDType .Float64
   let weight := (Tensor.full #[] 2).castDType .Float64
-  let output : Tensor ⟨#[2, 3], .Float32, .any⟩ := input.rmsNormWeighted weight 0
+  let output : Tensor ⟨#[2, 3], .Float32, .CPU⟩ := input.rmsNormWeighted weight 0
   assertValid output "scalar RMS weight has weak Float64 precision"
   LeanTest.assertEqual (← output.toFloatArray) #[2, 2, 2, 2, 2, 2]
   match (Tensor.ones #[2, 1]).rmsNormWeighted? (Tensor.ones #[3]) with
@@ -391,7 +391,7 @@ def testBroadcastOpsParity : IO Unit := do
     LeanTest.assertTrue (v == 3.0) s!"operator broadcast value, got {v}"
   assertValid (x *ᵇ bias) "operator *ᵇ broadcasts"
   -- a shape-only (dynamic dtype) claim validates against any runtime dtype
-  let dyn : Tensor { shape := #[2, 3] } := (Tensor.ones #[2, 3]).forgetDType
+  let dyn : Tensor { shape := #[2, 3], device := .CPU } := (Tensor.ones #[2, 3]).forgetDType
   assertValid dyn "shape-only claim is dtype-agnostic"
 
 /-- Fully typed model layers: shape and dtype agree end to end, runtime
@@ -424,19 +424,17 @@ def testTypedLayers : IO Unit := do
     "rmsnorm computes in f32 regardless of layer dtype"
   assertValid yBf.toBFloat16 "explicit cast back restores bf16"
 
-/-- Device policy in the spec: `.exact` pins a tensor's placement, `validate`
-    checks it against the runtime device, and spec-preserving ops keep the
-    pin. (Cross-policy application errors are compile-time and covered by
-    the prototype probes in `dev/static_spec_tensor_proto.lean`.) -/
+/-- Placement is part of every spec; admission checks the native device and
+    preserving operations retain the device index. -/
 @[test]
 def testDevicePinnedSpec : IO Unit := do
-  let pinned : Tensor { shape := #[2, 2], dtype := .Float32, device := .exact .CPU } :=
-    Tensor.onesFor { shape := #[2, 2], dtype := .Float32, device := .exact .CPU }
+  let pinned : Tensor { shape := #[2, 2], dtype := .Float32, device := .CPU } :=
+    Tensor.onesFor { shape := #[2, 2], dtype := .Float32, device := .CPU }
   assertValid pinned "CPU-pinned tensor on CPU"
   assertValid pinned.relu "spec-preserving op keeps the pin"
   assertValid (Add.add pinned pinned) "homogeneous add keeps the pin"
   -- A wrong pin is rejected before any indexed value can be constructed.
-  match Tensor.ofRaw (σ := { shape := #[2, 2], dtype := .Float32, device := .exact (.CUDA 0) })
+  match Tensor.ofRaw (σ := { shape := #[2, 2], dtype := .Float32, device := (.CUDA 0) })
       (torch.RawTensor.ones #[2, 2]) with
   | .ok _ => LeanTest.fail "CUDA pin on a CPU tensor should fail construction"
   | .error err => LeanTest.assertTrue (err.containsSubstr "device") s!"got: {err}"

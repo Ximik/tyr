@@ -17,7 +17,7 @@ open torch.gemma4
 def loadImagePatchGrid (cfg : VLConfig) (path : String)
     : IO (Sigma (fun patchRows =>
         Sigma (fun patchCols =>
-          Tensor { shape := #[patchRows, patchCols, VisionConfig.patchDim cfg.vision_config] }))) := do
+          Tensor { device := .CPU, shape := #[patchRows, patchCols, VisionConfig.patchDim cfg.vision_config] }))) := do
   let dyn ← RawTensor.gemma4LoadImage
     path
     cfg.vision_config.patch_size
@@ -33,7 +33,7 @@ def loadImagePatchGrid (cfg : VLConfig) (path : String)
   if patchDim != VisionConfig.patchDim cfg.vision_config then
     throw <| IO.userError
       s!"Gemma4 image patch dim mismatch: expected {VisionConfig.patchDim cfg.vision_config}, got {patchDim}"
-  match Tensor.ofRaw (σ := { shape := #[patchRows, patchCols, VisionConfig.patchDim cfg.vision_config] }) dyn with
+  match Tensor.ofRaw (σ := { device := .CPU, shape := #[patchRows, patchCols, VisionConfig.patchDim cfg.vision_config] }) dyn with
   | .ok grid => pure ⟨patchRows, ⟨patchCols, grid⟩⟩
   | .error message => throw <| IO.userError s!"Gemma4 image tensor: {message}"
 

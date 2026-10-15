@@ -12,9 +12,9 @@ private def cfg : WhisperConfig := {
   maxSourcePositions := 4, maxTargetPositions := 8,
   padTokenId := 0, bosTokenId := 1, eosTokenId := 2, decoderStartTokenId := 1 }
 
-private def features : Tensor { shape := #[1, 4, 5], dtype := .Float32 } :=
+private def features : Tensor { shape := #[1, 4, 5], dtype := .Float32, device := .CPU } :=
   (Tensor.fromFloatArray (Array.ofFn (n := 20) fun i => Float.sin (i.val.toFloat * 0.3))).reshapeChecked #[1, 4, 5]
-private def tokens : Tensor { shape := #[1, 4], dtype := .Int64 } := (Tensor.fromInt64Array #[1, 3, 5, 7]).reshapeChecked #[1, 4]
+private def tokens : Tensor { shape := #[1, 4], dtype := .Int64, device := .CPU } := (Tensor.fromInt64Array #[1, 3, 5, 7]).reshapeChecked #[1, 4]
 
 private def close {σ τ : StaticSpec} (x : Tensor σ) (y : Tensor τ) (tol : Float := 1e-4) : IO Unit := do
   LeanTest.assertEqual x.runtimeShape y.runtimeShape
@@ -179,8 +179,7 @@ private def writeWhisperCheckpoint (dir : System.FilePath) (bf16 : Bool) (badBia
   for bf16 in #[false, true] do
     IO.FS.withTempDir fun dir => do
       writeWhisperCheckpoint dir bf16
-      let loaded ← WhisperForConditionalGeneration.loadSharded dir.toString cfg
-      let model := TensorStruct.map (fun t => t.to .CPU) loaded
+      let model ← WhisperForConditionalGeneration.loadShardedAt dir.toString cfg (device := .CPU)
       let dtype := if bf16 then DType.BFloat16 else .Float32
       LeanTest.assertEqual model.projOut.actualSpec.dtype dtype
       close model.projOut model.model.decoderTokenEmbedding 0

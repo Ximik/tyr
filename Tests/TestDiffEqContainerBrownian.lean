@@ -59,7 +59,7 @@ private def approx (a b tol : Float) : Bool :=
     t0 := 0.0, t1 := 1.0, tol := 1.0e-3, seed := 4242
     shape := #[0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
   }
-  let mkTen : VirtualBrownianTree (Tensor { shape := #[2, 3], dtype := .Float32 }) := {
+  let mkTen : VirtualBrownianTree (Tensor { shape := #[2, 3], dtype := .Float32, device := .CPU }) := {
     t0 := 0.0, t1 := 1.0, tol := 1.0e-3, seed := 4242
     shape := Tensor.zeros #[2, 3]
   }
@@ -72,7 +72,7 @@ private def approx (a b tol : Float) : Bool :=
         s!"tensor[{i}] = {wTen[i]!} ≠ array[{i}] = {wArr[i]!} on [{a}, {b}]"
 
 @[test] def testBrownianTensorIncrementsAdditive : IO Unit := do
-  let tree : VirtualBrownianTree (Tensor { shape := #[4], dtype := .Float32 }) := {
+  let tree : VirtualBrownianTree (Tensor { shape := #[4], dtype := .Float32, device := .CPU }) := {
     t0 := 0.0, t1 := 1.0, tol := 1.0e-3, seed := 99
     shape := Tensor.zeros #[4]
   }
@@ -84,7 +84,7 @@ private def approx (a b tol : Float) : Bool :=
       s!"tensor Brownian component {i} not additive"
 
 @[test] def testBrownianTensorLevyAreasAndReplay : IO Unit := do
-  let tree : VirtualBrownianTree (Tensor { shape := #[3], dtype := .Float32 }) := {
+  let tree : VirtualBrownianTree (Tensor { shape := #[3], dtype := .Float32, device := .CPU }) := {
     t0 := 0.0, t1 := 2.0, tol := 1.0e-3, seed := 7
     shape := Tensor.zeros #[3]
   }
@@ -121,7 +121,7 @@ private def approx (a b tol : Float) : Bool :=
   -- CPU rewrite was measured 5x SLOWER (allocation-bound), so the scalable
   -- path for large noise dims is device-side counter-based sampling.
   for n in ([64, 1024] : List Nat) do
-    let tree : VirtualBrownianTree (Tensor { shape := #[n.toUInt64], dtype := .Float32 }) := {
+    let tree : VirtualBrownianTree (Tensor { shape := #[n.toUInt64], dtype := .Float32, device := .CPU }) := {
       t0 := 0.0, t1 := 1.0, tol := 1.0e-4, seed := 11
       shape := Tensor.zeros #[n.toUInt64]
     }

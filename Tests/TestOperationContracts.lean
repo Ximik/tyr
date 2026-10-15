@@ -17,22 +17,22 @@ private def expectError {α : Type} (result : Except String α) (fragment : Stri
   | .error message => LeanTest.assertTrue (message.containsSubstr fragment) message
 
 -- Invalid domains must be rejected without evaluating a native operation.
-example (_complex : Tensor ⟨#[2], .Complex64, .any⟩)
-    (_empty : Tensor ⟨#[0], .Float32, .any⟩)
-    (_vector : Tensor ⟨#[2], .Float32, .any⟩)
-    (_integer : Tensor ⟨#[2], .Int64, .any⟩) : True := by
+example (_complex : Tensor ⟨#[2], .Complex64, .CPU⟩)
+    (_empty : Tensor ⟨#[0], .Float32, .CPU⟩)
+    (_vector : Tensor ⟨#[2], .Float32, .CPU⟩)
+    (_integer : Tensor ⟨#[2], .Int64, .CPU⟩) : True := by
   fail_if_success have _ := Tensor.relu _complex
   fail_if_success have _ := Tensor.maxAll _empty
   fail_if_success have _ := Tensor.sumDim _vector 1
   fail_if_success have _ := Tensor.meanAll _integer
   trivial
 
-example (x : Tensor ⟨#[2], .Int64, .any⟩) (y : Tensor ⟨#[2], .Float32, .any⟩)
-    (condition : Tensor ⟨#[2], .Bool, .any⟩) : Tensor ⟨#[2], .Float32, .any⟩ :=
+example (x : Tensor ⟨#[2], .Int64, .CPU⟩) (y : Tensor ⟨#[2], .Float32, .CPU⟩)
+    (condition : Tensor ⟨#[2], .Bool, .CPU⟩) : Tensor ⟨#[2], .Float32, .CPU⟩ :=
   Tensor.whereSelect condition x y
 
-example (x : Tensor ⟨#[2], .Int64, .any⟩) (scalar : Tensor ⟨#[], .Float32, .any⟩) :
-    Tensor ⟨#[2], .Float32, .any⟩ := branching.mulTensorScalar x scalar
+example (x : Tensor ⟨#[2], .Int64, .CPU⟩) (scalar : Tensor ⟨#[], .Float32, .CPU⟩) :
+    Tensor ⟨#[2], .Float32, .CPU⟩ := branching.mulTensorScalar x scalar
 
 @[test] def testWherePromotesErasedOperands : IO Unit := do
   let x := (Tensor.fromInt64Array #[1, 2]).forgetDType
@@ -53,7 +53,7 @@ example (x : Tensor ⟨#[2], .Int64, .any⟩) (scalar : Tensor ⟨#[], .Float32,
   let x := Tensor.ones #[2]
   expectError (Tensor.expand? x #[3]) "expand"
   expectError (Tensor.catMany? #[x.packShape, x.packShape] 9 #[4]) "Dimension"
-  expectError (Tensor.catMany? (d := .Float32) (dev := .any) #[] 0 #[0]) "at least one"
+  expectError (Tensor.catMany? (d := .Float32) (dev := .CPU) #[] 0 #[0]) "at least one"
   expectError (Tensor.sumDim? x 1) "axis"
   expectError (Tensor.Preserving.sumDim? x 1) "axis"
   expectError (Tensor.maxAll? (Tensor.zeros #[0])) "nonempty"

@@ -7,11 +7,11 @@ import LeanTest
 open torch
 
 @[test] def testShapePackedTensorTraversalAndCheckpoint : IO Unit := IO.FS.withTempDir fun dir => do
-  let values : Array (ShapePackedTensor .Float32) := #[
+  let values : Array (ShapePackedTensor .Float32 .CPU) := #[
     (Tensor.fromFloatArray #[1, 2]).packShape,
     ((Tensor.fromFloatArray #[3, 4, 5, 6]).reshapeChecked #[2, 2]).packShape ]
   let mapped := TensorStruct.map (fun t => Tensor.Preserving.addScalar t 1) values
-  let moved ← TensorStruct.mapM (fun t => pure (t.to .CPU)) mapped
+  let moved ← TensorStruct.mapM (fun t => pure (t.to t.device)) mapped
   let shapes := TensorStruct.fold (fun t acc => acc.push t.runtimeShape) #[] moved
   LeanTest.assertEqual shapes #[#[2], #[2, 2]]
   let summed := TensorStruct.zipWith Tensor.Preserving.add values moved
@@ -29,14 +29,14 @@ open torch
   LeanTest.assertEqual (← output.toFloatArray) #[1, 3, 6, 4, 9, 15]
 
 @[test] def testShapePackedTensorADRebuild : IO Unit := do
-  let value : ShapePackedTensor .Float32 := ((Tensor.ones #[2, 3]).packShape)
+  let value : ShapePackedTensor .Float32 .CPU := ((Tensor.ones #[2, 3]).packShape)
   let leaves := TensorStructFlatten.flatten value
   LeanTest.assertEqual leaves.size 1
   let rebuilt ← match TensorStructFlatten.rebuildFrom value leaves with
     | .ok result => pure result
     | .error message => throw (IO.userError message)
   LeanTest.assertEqual rebuilt.1 #[2, 3]
-  let wrong : ShapePackedTensor .Float32 := ((Tensor.ones #[3, 2]).packShape)
+  let wrong : ShapePackedTensor .Float32 .CPU := ((Tensor.ones #[3, 2]).packShape)
   match TensorStructFlatten.rebuildFrom value (TensorStructFlatten.flatten wrong) with
   | .ok _ => LeanTest.fail "AD rebuild must reject a different shape with the same element count"
   | .error _ => pure ()

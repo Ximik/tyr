@@ -449,7 +449,7 @@ private def runWithModel {Params : Type} [TensorStruct Params] {maxLen vocab : U
     (bridgeCfg : MoleculeBridgeConfig)
     (labelDFM : Option DistNoisyDiscreteConfig)
     (trainCfg : BranchingTrainConfig)
-    (model : BranchingMoleculeModel maxLen vocab Params)
+    (model : BranchingMoleculeModel (device := opts.device) maxLen vocab Params)
     (initParams : Params)
     (makeLearnedModel : Params → Float → BranchingState MoleculeAtom → IO MoleculeModelPrediction) :
     IO Unit := do
@@ -467,7 +467,6 @@ private def runWithModel {Params : Type} [TensorStruct Params] {maxLen vocab : U
         let loadedParams ← _root_.torch.checkpoint.loadParams initParams checkpointDir "param"
         IO.println s!"loaded molecule checkpoint from {checkpointDir} at iteration={checkpointMeta.iteration} trainLoss={checkpointMeta.trainLoss}"
         pure (loadedParams, checkpointMeta.iteration, some checkpointMeta)
-  let initParams := TensorStruct.map (fun t => t.to opts.device) initParams
   let initParams ← if opts.bf16 then castTreeBFloat16 initParams else pure initParams
   let mut params := initParams
   let mut rng : Rng := { state := opts.seed + 17 }
@@ -479,7 +478,7 @@ private def runWithModel {Params : Type} [TensorStruct Params] {maxLen vocab : U
   rng := rng'
   let initTrain ←
     evalMoleculeLoss (maxLen := maxLen) (vocab := vocab) trainCfg model params fixedTrainBridge
-      labelDFM opts.device (bf16 := opts.bf16)
+      labelDFM (device := opts.device) (bf16 := opts.bf16)
   let mut finalTrain := initTrain
   let mut lastReport := initTrain
 
@@ -549,7 +548,7 @@ private def runWithModel {Params : Type} [TensorStruct Params] {maxLen vocab : U
 
     finalTrain ←
       evalMoleculeLoss (maxLen := maxLen) (vocab := vocab) trainCfg model params fixedTrainBridge
-        labelDFM opts.device (bf16 := opts.bf16)
+        labelDFM (device := opts.device) (bf16 := opts.bf16)
     if !(Float.isFinite finalTrain.total) then
       throw (IO.userError "final train loss is not finite")
     if !(finalTrain.total < initTrain.total) then
@@ -580,7 +579,7 @@ private def runWithModel {Params : Type} [TensorStruct Params] {maxLen vocab : U
   rng := rng'
   let evalReport ←
     evalMoleculeLoss (maxLen := maxLen) (vocab := vocab) trainCfg model params evalBridge
-      labelDFM opts.device (bf16 := opts.bf16)
+      labelDFM (device := opts.device) (bf16 := opts.bf16)
 
   let target := evalStates[0]!
   writeMoleculeXYZ ⟨opts.outputPrefix ++ "_target.xyz"⟩ target
@@ -730,14 +729,14 @@ def run (opts : RunOptions) : IO Unit := do
   torch.manualSeed opts.seed
   if opts.fullArchitecture then
     let model :=
-      fullMoleculeTransformerModel (maxLen := opts.maxLen) (vocab := vocab)
+      fullMoleculeTransformerModel (device := opts.device) (maxLen := opts.maxLen) (vocab := vocab)
         (hidden := opts.hiddenDim) (heads := opts.heads) (headDim := opts.headDim)
         (mlp := opts.mlp) (rff := opts.rffDim) (layers := opts.layers)
         (coordUpdateLayers := opts.coordUpdateLayers)
         (coordTargetCap? := opts.coordTargetCap?)
     let initParams ←
       FullMoleculeTransformerParams.init vocab opts.hiddenDim opts.heads opts.headDim
-        opts.mlp opts.rffDim opts.layers
+        opts.mlp opts.rffDim opts.layers (device := opts.device)
     let makeLearnedModel := fun params =>
       fullMoleculeTransformerIOModel (maxLen := opts.maxLen) (vocab := vocab)
         (hidden := opts.hiddenDim) (heads := opts.heads) (headDim := opts.headDim)
@@ -751,10 +750,10 @@ def run (opts : RunOptions) : IO Unit := do
       model initParams makeLearnedModel
   else
     let model :=
-      moleculeTransformerModel (maxLen := opts.maxLen) (vocab := vocab)
+      moleculeTransformerModel (device := opts.device) (maxLen := opts.maxLen) (vocab := vocab)
         (heads := opts.heads) (headDim := opts.headDim) (mlp := opts.mlp)
         (coordTargetCap? := opts.coordTargetCap?)
-    let initParams ← MoleculeTransformerParams.init vocab opts.heads opts.headDim opts.mlp
+    let initParams ← MoleculeTransformerParams.init vocab opts.heads opts.headDim opts.mlp (device := opts.device)
     let makeLearnedModel := fun params =>
       moleculeTransformerIOModel (maxLen := opts.maxLen) (vocab := vocab)
         (heads := opts.heads) (headDim := opts.headDim) (mlp := opts.mlp)

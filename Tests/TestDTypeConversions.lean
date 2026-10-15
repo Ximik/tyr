@@ -35,15 +35,15 @@ private def expectError {α : Type} (result : Except String α)
 @[test] def testTreeComplexConversionRoundtrip : IO Unit := do
   let original := Tensor.fromFloatArray #[1.25, -2.5]
   let complex ← TensorStruct.castTo
-    (Tensor { shape := #[2], dtype := .Complex128, device := .exact .CPU }) original
+    (Tensor { shape := #[2], dtype := .Complex128, device := .CPU }) original
   let restored ← TensorStruct.castTo
-    (Tensor { shape := #[2], dtype := .Float32, device := .exact .CPU }) complex
+    (Tensor { shape := #[2], dtype := .Float32, device := .CPU }) complex
   LeanTest.assertEqual complex.raw.dtype .Complex128
   LeanTest.assertEqual (← restored.toFloatArray) (← original.toFloatArray)
 
 @[test] def testComplexIdentityFactory : IO Unit := do
-  let identity : Tensor { shape := #[2, 2], dtype := .Complex64, device := .exact .CPU } :=
-    Tensor.eyeFor (n := 2) .Complex64 (.exact .CPU)
+  let identity : Tensor { shape := #[2, 2], dtype := .Complex64, device := .CPU } :=
+    Tensor.eyeFor (n := 2) .Complex64 (.CPU)
   LeanTest.assertEqual identity.raw.dtype .Complex64
   LeanTest.assertTrue (identity.raw.device == .CPU)
   LeanTest.assertTrue identity.validate.toOption.isSome
@@ -57,7 +57,7 @@ private def expectError {α : Type} (result : Except String α)
     | .ok _ => LeanTest.fail s!"Expected unsupported native conversion to {dtype}"
     | .error message => LeanTest.assertTrue (message.containsSubstr "castDType:")
     let rejected ← try
-        let _ ← TensorStruct.castTo (Tensor { shape := #[2], dtype }) original
+        let _ ← TensorStruct.castTo (Tensor { shape := #[2], dtype, device := .CPU }) original
         pure false
       catch error =>
         LeanTest.assertTrue (error.toString.containsSubstr "castTo at <root>")
@@ -104,7 +104,7 @@ private def expectError {α : Type} (result : Except String α)
 @[test] def testErasedFloatPreservingArithmeticValues : IO Unit := do
   let lhs := (Tensor.fromFloatArray #[6, 12]).forgetDType
   let rhs := (Tensor.fromFloatArray #[2, 3]).forgetDType
-  let cases : Array (Array Float × Except String (Tensor { shape := #[2] })) := #[
+  let cases : Array (Array Float × Except String (Tensor { shape := #[2], device := .CPU })) := #[
     (#[8, 15], Tensor.Preserving.add? lhs rhs),
     (#[4, 9], Tensor.Preserving.sub? lhs rhs),
     (#[12, 36], Tensor.Preserving.mul? lhs rhs),
@@ -122,7 +122,7 @@ private def expectError {α : Type} (result : Except String α)
 
 -- The package's proof mentions the supplied tensors' actual metadata. It can
 -- also be supplied as an erased typeclass witness to generic typed code.
-example {s : Shape} {l r : DType} {dev : DevicePolicy}
+example {s : Shape} {l r : DType} {dev : Device}
     (left : Tensor ⟨s, l, dev⟩) (right : Tensor ⟨s, r, dev⟩)
     (result : Tensor.Promoting.Promoted left.actualSpec.dtype right.actualSpec.dtype s dev) :
     DType.promote? left.actualSpec.dtype right.actualSpec.dtype = some result.dtype := by

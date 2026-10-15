@@ -80,8 +80,8 @@ exact CPU placement and the rectangular XXT result shape. -/
 @[test]
 def testDistributedFloatingResultMetadata : IO Unit := do
   for dtype in #[DType.Float32, DType.Float64] do
-    let input := Tensor.onesFor ⟨#[2, 2], dtype, .exact .CPU⟩
-    let rectangular := Tensor.onesFor ⟨#[2, 3], dtype, .exact .CPU⟩
+    let input := Tensor.onesFor ⟨#[2, 2], dtype, .CPU⟩
+    let rectangular := Tensor.onesFor ⟨#[2, 3], dtype, .CPU⟩
     for (operation, result) in #[
         ("xxt", ← dist.xxt rectangular),
         ("baPlusCaa", ← dist.baPlusCaa input 0.5 0.5),

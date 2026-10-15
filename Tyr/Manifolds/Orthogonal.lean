@@ -11,7 +11,7 @@ namespace Tyr.AD
 open torch
 open DifferentiableManifold
 
-variable {d : DType} {dev : DevicePolicy}
+variable {d : DType} {dev : Device}
 
 /-! ## Orthogonal Group O(n)
 
@@ -28,7 +28,7 @@ where exp(S) is the matrix exponential.
 /-- Orthogonal group O(n): n×n orthogonal matrices.
     Constraint: QᵀQ = QQᵀ = I -/
 structure Orthogonal (n : UInt64) (dtype : DType := .Float32)
-    (device : DevicePolicy := .any) where
+    (device : Device := .CPU) where
   /-- The underlying n×n orthogonal matrix -/
   matrix : Tensor ⟨#[n, n], dtype, device⟩
 
@@ -63,7 +63,7 @@ end Orthogonal
 /-- Skew-symmetric matrix: Sᵀ = -S
     Used for tangent space representation of O(n) -/
 structure SkewSymmetric (n : UInt64) (dtype : DType := .Float32)
-    (device : DevicePolicy := .any) where
+    (device : Device := .CPU) where
   /-- The underlying matrix (should satisfy Sᵀ = -S) -/
   matrix : Tensor ⟨#[n, n], dtype, device⟩
 
@@ -95,7 +95,7 @@ end SkewSymmetric
     Represented as Q·S where S is skew-symmetric.
     We store S directly since Q is known from the base point. -/
 structure OrthogonalTangent (n : UInt64) (dtype : DType := .Float32)
-    (device : DevicePolicy := .any) where
+    (device : Device := .CPU) where
   /-- The skew-symmetric component S such that tangent = Q·S -/
   skew : SkewSymmetric n dtype device
 

@@ -2,7 +2,7 @@ import Tyr.Typed.Ops
 
 namespace torch
 
-structure Conv2d (dtype : DType := .Float32) (device : DevicePolicy := .any) where
+structure Conv2d (dtype : DType := .Float32) (device : Device := .CPU) where
   in_channels : UInt64
   out_channels : UInt64
   kernel_size : UInt64 × UInt64
@@ -18,7 +18,7 @@ structure Conv2d (dtype : DType := .Float32) (device : DevicePolicy := .any) whe
 
 
 /-- Initialize weights while preserving the configuration's tensor specification. -/
-def Conv2d.init {d : DType} {dev : DevicePolicy} (c : Conv2d d dev) : IO (Conv2d d dev) := do
+def Conv2d.init {d : DType} {dev : Device} (c : Conv2d d dev) : IO (Conv2d d dev) := do
   if c.groups == 0 || c.in_channels == 0 || c.out_channels == 0 then
     throw (IO.userError "Conv2d requires positive channel and group counts")
   if c.in_channels % c.groups != 0 || c.out_channels % c.groups != 0 then
@@ -31,7 +31,7 @@ def Conv2d.init {d : DType} {dev : DevicePolicy} (c : Conv2d d dev) : IO (Conv2d
   let weight ← Tensor.uniformLike c.weight (-k) k
   return { c with weight }
 
-def Conv2d.outShape {d : DType} {dev : DevicePolicy} (c : Conv2d d dev) (s : Shape) : Shape :=
+def Conv2d.outShape {d : DType} {dev : Device} (c : Conv2d d dev) (s : Shape) : Shape :=
   let (n, _, hin, win) := (s[0]!, s[1]!, s[2]!, s[3]!);
   let (px,py) := c.padding;
   let (sx,sy) := c.stride;

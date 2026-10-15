@@ -5,7 +5,7 @@ namespace Tests.CORETyped
 open torch torch.Eval.CORE
 
 private def zeroTokenizer (s : String) : Array UInt64 := Array.replicate s.length 0
-private def sevenTokenModel : ModelRunner 7 := fun {batch seq} _ =>
+private def sevenTokenModel : ModelRunner (device := .CPU) 7 := fun {batch seq} _ =>
   pure (Tensor.ones #[batch, seq, 7])
 
 @[test] def testCORETypedVocabularyAndLanguageModeling : IO Unit := do

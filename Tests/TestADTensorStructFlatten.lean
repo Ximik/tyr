@@ -8,29 +8,29 @@ open torch
 open LeanTest
 
 structure Inner where
-  bias : Tensor { shape := #[4], dtype := .Float32 }
+  bias : Tensor { shape := #[4], dtype := .Float32, device := .CPU }
   tag : Static String
-  cache : Frozen { shape := #[4], dtype := .Float32 }
+  cache : Frozen { shape := #[4], dtype := .Float32, device := .CPU }
   deriving Model
 
 structure Outer where
-  weight : Tensor { shape := #[2, 4], dtype := .Float32 }
+  weight : Tensor { shape := #[2, 4], dtype := .Float32, device := .CPU }
   inner : Inner
-  gates : torch.Vector 2 (Frozen { shape := #[1], dtype := .Float32 })
-  optScale : Option (Tensor { shape := #[3], dtype := .Float32 })
+  gates : torch.Vector 2 (Frozen { shape := #[1], dtype := .Float32, device := .CPU })
+  optScale : Option (Tensor { shape := #[3], dtype := .Float32, device := .CPU })
   flag : Bool
   deriving Model
 
 set_option linter.unusedVariables false in
-example (wrongShape : Tensor { shape := #[3], dtype := .Float32 }) (wrongDType : Tensor { shape := #[4], dtype := .Int64 }) : True := by
+example (wrongShape : Tensor { shape := #[3], dtype := .Float32, device := .CPU }) (wrongDType : Tensor { shape := #[4], dtype := .Int64, device := .CPU }) : True := by
   fail_if_success
-    have _ : Frozen { shape := #[4], dtype := .Float32 } := ⟨wrongShape⟩
+    have _ : Frozen { shape := #[4], dtype := .Float32, device := .CPU } := ⟨wrongShape⟩
   fail_if_success
-    have _ : Frozen { shape := #[4], dtype := .Float32 } := ⟨wrongDType⟩
+    have _ : Frozen { shape := #[4], dtype := .Float32, device := .CPU } := ⟨wrongDType⟩
   trivial
 
 set_option linter.unusedVariables false in
-example (params : Tensor { shape := #[4], dtype := .Float32 }) : True := by
+example (params : Tensor { shape := #[4], dtype := .Float32, device := .CPU }) : True := by
   fail_if_success
     have _ := TensorStruct.map (fun _ => Tensor.zeros #[3]) params
   fail_if_success
@@ -42,11 +42,11 @@ private def templateOuter : Outer :=
     inner := {
       bias := Tensor.zeros #[4]
       tag := "template-tag"
-      cache := (Tensor.full #[4] 7.0 : Frozen { shape := #[4], dtype := .Float32 })
+      cache := (Tensor.full #[4] 7.0 : Frozen { shape := #[4], dtype := .Float32, device := .CPU })
     }
     gates := ⟨#[
-      (Tensor.full #[1] 10.0 : Frozen { shape := #[1], dtype := .Float32 }),
-      (Tensor.full #[1] 20.0 : Frozen { shape := #[1], dtype := .Float32 })
+      (Tensor.full #[1] 10.0 : Frozen { shape := #[1], dtype := .Float32, device := .CPU }),
+      (Tensor.full #[1] 20.0 : Frozen { shape := #[1], dtype := .Float32, device := .CPU })
     ], rfl⟩
     optScale := some (Tensor.zeros #[3])
     flag := true }
@@ -56,11 +56,11 @@ private def replacementOuter : Outer :=
     inner := {
       bias := Tensor.full #[4] 4.0
       tag := "replacement-tag"
-      cache := (Tensor.full #[4] 8.0 : Frozen { shape := #[4], dtype := .Float32 })
+      cache := (Tensor.full #[4] 8.0 : Frozen { shape := #[4], dtype := .Float32, device := .CPU })
     }
     gates := ⟨#[
-      (Tensor.full #[1] 30.0 : Frozen { shape := #[1], dtype := .Float32 }),
-      (Tensor.full #[1] 40.0 : Frozen { shape := #[1], dtype := .Float32 })
+      (Tensor.full #[1] 30.0 : Frozen { shape := #[1], dtype := .Float32, device := .CPU }),
+      (Tensor.full #[1] 40.0 : Frozen { shape := #[1], dtype := .Float32, device := .CPU })
     ], rfl⟩
     optScale := some (Tensor.full #[3] 5.0)
     flag := false }
@@ -216,12 +216,12 @@ def testTensorStructRebuildRejectsMissingAndExtraLeaves : IO Unit := do
         s!"Extra-leaf diagnostics should explain the unused suffix, got: {err}"
 
 structure MixedParams where
-  weight : Tensor { shape := #[2], dtype := .Float32, device := .exact .CPU }
-  indices : Tensor { shape := #[2], dtype := .Int64 }
+  weight : Tensor { shape := #[2], dtype := .Float32, device := .CPU }
+  indices : Tensor { shape := #[2], dtype := .Int64, device := .CPU }
   deriving Model
 
 private def mixedParams : MixedParams := {
-  weight := (Tensor.onesFor { shape := #[2], dtype := .Float32, device := .exact .CPU }).mulScalar 3.0
+  weight := (Tensor.onesFor { shape := #[2], dtype := .Float32, device := .CPU }).mulScalar 3.0
   indices := Tensor.fullInt #[2] 7
 }
 
@@ -236,7 +236,7 @@ def testTypedModelTraversalAndRebuildPreserveFullSpec : IO Unit := do
   LeanTest.assertTrue ((leaves.map (·.dtype)) == #[.Float32, .Int64])
     "Flattening must retain each leaf's dtype."
   let some first := leaves[0]? | LeanTest.fail "Missing first typed parameter leaf."
-  LeanTest.assertTrue (first.payload.1.device == .exact .CPU)
+  LeanTest.assertTrue (first.payload.1.device == .CPU)
     "Flattening must retain the pinned device policy."
   let rebuilt ← unwrapOrFail (TensorStructFlatten.rebuildFrom original leaves)
   let _ ← unwrapOrFail rebuilt.weight.validate

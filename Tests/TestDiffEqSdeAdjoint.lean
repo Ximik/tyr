@@ -45,9 +45,9 @@ private def mkPath (seed : UInt64) :
   let bV := 0.3
   let (bmPath, wT) := mkPath 2024
   -- args drive the drift; the diffusion coefficient is baked in
-  let drift : ODETerm (Tensor { shape := #[], dtype := .Float32 }) (Tensor { shape := #[], dtype := .Float32 }) :=
+  let drift : ODETerm (Tensor { shape := #[], dtype := .Float32, device := .CPU }) (Tensor { shape := #[], dtype := .Float32, device := .CPU }) :=
     { vectorField := fun _t y a => Tensor.mul a y }
-  let diffusion : ControlTerm (Tensor { shape := #[], dtype := .Float32 }) (Tensor { shape := #[], dtype := .Float32 }) (SpaceTimeLevyArea Time Float) (Tensor { shape := #[], dtype := .Float32 }) :=
+  let diffusion : ControlTerm (Tensor { shape := #[], dtype := .Float32, device := .CPU }) (Tensor { shape := #[], dtype := .Float32, device := .CPU }) (SpaceTimeLevyArea Time Float) (Tensor { shape := #[], dtype := .Float32, device := .CPU }) :=
     ControlTerm.ofPath
       (fun _t y _ => Tensor.mulScalar y bV)
       bmPath
@@ -69,9 +69,9 @@ private def mkPath (seed : UInt64) :
   let bV := 0.3
   let (bmPath, wT) := mkPath 909
   -- args drive the diffusion; the drift coefficient is baked in
-  let drift : ODETerm (Tensor { shape := #[], dtype := .Float32 }) (Tensor { shape := #[], dtype := .Float32 }) :=
+  let drift : ODETerm (Tensor { shape := #[], dtype := .Float32, device := .CPU }) (Tensor { shape := #[], dtype := .Float32, device := .CPU }) :=
     { vectorField := fun _t y _ => Tensor.mulScalar y aV }
-  let diffusion : ControlTerm (Tensor { shape := #[], dtype := .Float32 }) (Tensor { shape := #[], dtype := .Float32 }) (SpaceTimeLevyArea Time Float) (Tensor { shape := #[], dtype := .Float32 }) :=
+  let diffusion : ControlTerm (Tensor { shape := #[], dtype := .Float32, device := .CPU }) (Tensor { shape := #[], dtype := .Float32, device := .CPU }) (SpaceTimeLevyArea Time Float) (Tensor { shape := #[], dtype := .Float32, device := .CPU }) :=
     ControlTerm.ofPath
       (fun _t y b => Tensor.mul b y)
       bmPath

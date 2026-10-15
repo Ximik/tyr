@@ -9,6 +9,8 @@ import Examples.GPT.GPT
 namespace torch.train
 
 open torch
+
+variable {device : Device}
 open torch.gpt
 
 /-- Training configuration -/
@@ -29,9 +31,6 @@ structure TrainConfig where
   device : Device := Device.CPU
   deriving Repr, Inhabited
 
-/-- Move a tensor tree to a device, preserving leaf tensor status. -/
-def toDevice [TensorStruct α] (x : α) (_device : Device) : α := x
-
 /-- Cosine learning rate schedule with warmup -/
 def getLr (cfg : TrainConfig) (iterNum : Nat) : Float :=
   if iterNum < cfg.warmupIters then
@@ -50,7 +49,7 @@ def getLr (cfg : TrainConfig) (iterNum : Nat) : Float :=
 /-- Get a random batch of data from token array
     Returns (x, y) where y = x shifted by 1 position
     Uses a random starting position with batchSize consecutive sequences -/
-def getBatch (trainData : Tokens #[n]) (batchSize blockSize : UInt64) (device : Device := Device.CPU) : IO (Tokens #[batchSize, blockSize] × Tokens #[batchSize, blockSize]) := do
+def getBatch (trainData : Tokens (device := .CPU) #[n]) (batchSize blockSize : UInt64) (device : Device := Device.CPU) : IO (Tokens (device := device) #[batchSize, blockSize] × Tokens (device := device) #[batchSize, blockSize]) := do
   let required := batchSize.toNat * (blockSize.toNat + 1)
   if batchSize == 0 || blockSize == 0 || required > n.toNat then
     throw <| IO.userError "GPT batch requires positive dimensions and enough tokens"
@@ -65,7 +64,7 @@ def getBatch (trainData : Tokens #[n]) (batchSize blockSize : UInt64) (device : 
   return (x.to device, y.to device)
 
 /-- Clip gradients for a single block's parameters -/
-def clipBlockGrads {n_embd : UInt64} (params : BlockParams n_embd) (maxNorm : Float) : IO Unit := do
+def clipBlockGrads {n_embd : UInt64} (params : BlockParams (device := device) n_embd) (maxNorm : Float) : IO Unit := do
   let _ ← Tensor.clipGradNorm params.ln1_weight maxNorm
   let _ ← Tensor.clipGradNorm params.ln1_bias maxNorm
   let _ ← Tensor.clipGradNorm params.q_proj maxNorm
@@ -81,7 +80,7 @@ def clipBlockGrads {n_embd : UInt64} (params : BlockParams n_embd) (maxNorm : Fl
   let _ ← Tensor.clipGradNorm params.mlp_proj_bias maxNorm
 
 /-- Clip gradients for all GPT parameters -/
-def clipGPTGrads {cfg : Config} (params : GPTParams cfg) (maxNorm : Float) : IO Unit := do
+def clipGPTGrads {cfg : Config} (params : GPTParams (device := device) cfg) (maxNorm : Float) : IO Unit := do
   let _ ← Tensor.clipGradNorm params.wte maxNorm
   let _ ← Tensor.clipGradNorm params.wpe maxNorm
   for block in params.blocks do
@@ -92,12 +91,12 @@ def clipGPTGrads {cfg : Config} (params : GPTParams cfg) (maxNorm : Float) : IO 
 /-- Single training step using Optax-style optimizer -/
 def trainStep {modelCfg : Config} {batch seq : UInt64}
     (trainCfg : TrainConfig)
-    (params : GPTParams modelCfg)
-    (optState : Optim.AdamWState (GPTParams modelCfg))
-    (x : Tokens #[batch, seq])
-    (y : Tokens #[batch, seq])
+    (params : GPTParams (device := device) modelCfg)
+    (optState : Optim.AdamWState (GPTParams (device := device) modelCfg))
+    (x : Tokens (device := device) #[batch, seq])
+    (y : Tokens (device := device) #[batch, seq])
     (lr : Float)
-    : IO (GPTParams modelCfg × Optim.AdamWState (GPTParams modelCfg) × Float) := do
+    : IO (GPTParams (device := device) modelCfg × Optim.AdamWState (GPTParams (device := device) modelCfg) × Float) := do
   -- Zero gradients BEFORE forward/backward to prevent gradient accumulation
   TensorStruct.zeroGrads params
 
@@ -132,11 +131,11 @@ def trainStep {modelCfg : Config} {batch seq : UInt64}
     This enables training with larger effective batch sizes on limited memory. -/
 def trainStepWithAccum {modelCfg : Config} {batch seq : UInt64}
     (trainCfg : TrainConfig)
-    (params : GPTParams modelCfg)
-    (optState : Optim.AdamWState (GPTParams modelCfg))
-    (getBatchFn : IO (Tokens #[batch, seq] × Tokens #[batch, seq]))
+    (params : GPTParams (device := device) modelCfg)
+    (optState : Optim.AdamWState (GPTParams (device := device) modelCfg))
+    (getBatchFn : IO (Tokens (device := device) #[batch, seq] × Tokens (device := device) #[batch, seq]))
     (lr : Float)
-    : IO (GPTParams modelCfg × Optim.AdamWState (GPTParams modelCfg) × Float) := do
+    : IO (GPTParams (device := device) modelCfg × Optim.AdamWState (GPTParams (device := device) modelCfg) × Float) := do
   let accumSteps := trainCfg.gradAccumSteps
   let lossScale := 1.0 / accumSteps.toFloat
 
@@ -181,11 +180,10 @@ def perplexity (loss : Float) : Float := Float.exp loss
     Returns average loss over numBatches batches.
     Uses detached parameters to avoid building computation graphs. -/
 def evalLoss {modelCfg : Config}
-    (params : GPTParams modelCfg)
-    (valData : Tokens #[n])
+    (params : GPTParams (device := device) modelCfg)
+    (valData : Tokens (device := .CPU) #[n])
     (batchSize blockSize : UInt64)
     (numBatches : Nat)
-    (device : Device := Device.CPU)
     : IO Float := do
   let params := TensorStruct.detach params
   let mut totalLoss : Float := 0.0
@@ -200,14 +198,14 @@ def evalLoss {modelCfg : Config}
 /-- Main training loop -/
 def trainLoop {modelCfg : Config}
     (trainCfg : TrainConfig)
-    (initParams : GPTParams modelCfg)
-    (initOptState : Optim.AdamWState (GPTParams modelCfg))
-    (trainData : Tokens #[n])
-    : IO (GPTParams modelCfg) := do
+    (initParams : GPTParams (device := trainCfg.device) modelCfg)
+    (initOptState : Optim.AdamWState (GPTParams (device := trainCfg.device) modelCfg))
+    (trainData : Tokens (device := .CPU) #[n])
+    : IO (GPTParams (device := trainCfg.device) modelCfg) := do
   let device := trainCfg.device
-  -- Move model and optimizer state to device
-  let mut params := toDevice initParams device
-  let mut optState := toDevice initOptState device
+  -- Parameters and optimizer buffers already carry the configured device index.
+  let mut params := initParams
+  let mut optState := initOptState
   let mut totalLoss : Float := 0.0
 
   let deviceName := match device with
@@ -248,16 +246,16 @@ def trainLoop {modelCfg : Config}
     Returns trained parameters and best validation loss -/
 def trainLoopWithVal {modelCfg : Config}
     (trainCfg : TrainConfig)
-    (initParams : GPTParams modelCfg)
-    (initOptState : Optim.AdamWState (GPTParams modelCfg))
-    (trainData : Tokens #[nTrain])
-    (valData : Tokens #[nVal])
+    (initParams : GPTParams (device := trainCfg.device) modelCfg)
+    (initOptState : Optim.AdamWState (GPTParams (device := trainCfg.device) modelCfg))
+    (trainData : Tokens (device := .CPU) #[nTrain])
+    (valData : Tokens (device := .CPU) #[nVal])
     (evalBatches : Nat := 10)
-    : IO (GPTParams modelCfg × Float) := do
+    : IO (GPTParams (device := trainCfg.device) modelCfg × Float) := do
   let device := trainCfg.device
-  -- Move model and optimizer state to device
-  let mut params := toDevice initParams device
-  let mut optState := toDevice initOptState device
+  -- Parameters and optimizer buffers already carry the configured device index.
+  let mut params := initParams
+  let mut optState := initOptState
   let mut totalLoss : Float := 0.0
   let mut bestValLoss : Float := 1e10  -- Use large value instead of inf
 
@@ -295,7 +293,7 @@ def trainLoopWithVal {modelCfg : Config}
 
     -- Validation at evalInterval
     if iterNum % trainCfg.evalInterval == 0 && iterNum > 0 then
-      let valLoss ← evalLoss params valData trainCfg.batchSize trainCfg.blockSize evalBatches device
+      let valLoss ← evalLoss params valData trainCfg.batchSize trainCfg.blockSize evalBatches
       let valPpl := perplexity valLoss
       IO.println s!"  val_loss={valLoss}, val_ppl={valPpl}"
       if valLoss < bestValLoss then
@@ -304,7 +302,7 @@ def trainLoopWithVal {modelCfg : Config}
       (← IO.getStdout).flush
 
   -- Final validation
-  let finalValLoss ← evalLoss params valData trainCfg.batchSize trainCfg.blockSize evalBatches device
+  let finalValLoss ← evalLoss params valData trainCfg.batchSize trainCfg.blockSize evalBatches
   let finalValPpl := perplexity finalValLoss
   IO.println s!"Training complete! Final val_loss={finalValLoss}, val_ppl={finalValPpl}"
   IO.println s!"Best val_loss={bestValLoss}"

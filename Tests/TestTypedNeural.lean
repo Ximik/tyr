@@ -5,7 +5,7 @@ import LeanTest
 open torch
 
 @[test] def testTypedAttentionValuesAndMetadata : IO Unit := do
-  let σ : StaticSpec := ⟨#[1, 1, 2, 2], .Float64, .exact .CPU⟩
+  let σ : StaticSpec := ⟨#[1, 1, 2, 2], .Float64, .CPU⟩
   let q := Tensor.zerosFor σ
   let values := ((Tensor.fromFloatArray #[2, 4, 6, 8]).reshape #[1, 1, 2, 2]).castDType .Float64
   let v : Tensor σ ← match Tensor.ofRaw values.raw with
@@ -121,7 +121,7 @@ open torch
 @[test] def testTypedStreamingWav : IO Unit := IO.FS.withTempDir fun dir => do
   let path := (dir / "stream.wav").toString
   Tensor.wavBegin path 16000
-  let emit (chunk : Sigma fun n => Tensor { shape := #[1, 1, n] }) : IO Unit :=
+  let emit (chunk : Sigma fun n => Tensor { shape := #[1, 1, n], device := .CPU }) : IO Unit :=
     Tensor.wavAppend chunk.2 path
   emit ⟨3, (Tensor.fromFloatArray #[-1, 0, 1]).reshapeChecked #[1, 1, 3] |>.forgetDType⟩
   emit ⟨0, (Tensor.zeros #[1, 1, 0]).forgetDType⟩

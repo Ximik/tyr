@@ -93,7 +93,7 @@ def applyInPlace {σ : StaticSpec} (G : Tensor σ) (cfg : Config := {}) : IO (Te
     This is used in Newton-Schulz iterations: C = A @ A.T
     Optimized for symmetric output.
 -/
-def computeXXT {m n : UInt64} {d : DType} {dev : DevicePolicy}
+def computeXXT {m n : UInt64} {d : DType} {dev : Device}
     (A : Tensor ⟨#[m, n], d, dev⟩) : IO (Tensor ⟨#[m, m], d, dev⟩) := do
   dist.xxt A
 

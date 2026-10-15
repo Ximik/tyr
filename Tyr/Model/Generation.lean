@@ -13,6 +13,7 @@ import Tyr.Typed
 
 namespace torch.Model
 
+variable {device : Device}
 open torch
 
 /-! ## Sampling Strategy -/
@@ -24,12 +25,10 @@ inductive SamplingStrategy where
 
 /-- Callback invoked on every generated token during streaming decode.
     Tokens are Int64 vocabulary indices. -/
-abbrev StreamCallback (batch : UInt64) := UInt64 → Tensor { shape := #[batch], dtype := .Int64 } → IO Unit
-
-
+abbrev StreamCallback (batch : UInt64) := UInt64 → Tensor { device := device, shape := #[batch], dtype := .Int64 } → IO Unit
 
 /-- All-false Bool mask on the same placement as `reference`. -/
-private def falseMaskLike {n : UInt64} {dev : DevicePolicy}
+private def falseMaskLike {n : UInt64} {dev : Device}
     (reference : Tensor ⟨#[n], .Int64, dev⟩) : Tensor ⟨#[n], .Bool, dev⟩ :=
   Tensor.eqScalar (Tensor.zerosLike reference) 1
 
@@ -37,9 +36,9 @@ private def falseMaskLike {n : UInt64} {dev : DevicePolicy}
 
 /-- Sample a batch of next tokens from logits according to a strategy. -/
 def sampleFromLogits {batch vocab : UInt64}
-    (logits : Tensor { shape := #[batch, vocab], dtype := .Float32 })
+    (logits : Tensor { device := device, shape := #[batch, vocab], dtype := .Float32 })
     (strategy : SamplingStrategy)
-    : IO (Tensor { shape := #[batch], dtype := .Int64 }) := do
+    : IO (Tensor { device := device, shape := #[batch], dtype := .Int64 }) := do
   match strategy with
   | .greedy =>
     -- `argmax` removes dim 1 via `reduceShape`, which does not reduce at
@@ -66,23 +65,23 @@ def sampleFromLogits {batch vocab : UInt64}
 
 /-- Return a Bool mask of tokens that belong to `values`. -/
 def tokenInSet {n : UInt64}
-    (tokens : Tensor { shape := #[n], dtype := .Int64 })
+    (tokens : Tensor { device := device, shape := #[n], dtype := .Int64 })
     (values : Array UInt64)
-    : Tensor { shape := #[n], dtype := .Bool } :=
+    : Tensor { device := device, shape := #[n], dtype := .Bool } :=
   Id.run do
     let mut mask := falseMaskLike tokens
     for value in values do
-      let hit : Tensor { shape := #[n], dtype := .Bool } := Tensor.eqScalar tokens (Int64.ofNat value.toNat)
+      let hit : Tensor { device := device, shape := #[n], dtype := .Bool } := Tensor.eqScalar tokens (Int64.ofNat value.toNat)
       mask := Tensor.logicalOr mask hit
     return mask
 
 /-- Replace tokens with `eosToken` wherever `finished` is true. -/
 def applyFinishedEos {n : UInt64}
-    (tokens : Tensor { shape := #[n], dtype := .Int64 })
-    (finished : Tensor { shape := #[n], dtype := .Bool })
+    (tokens : Tensor { device := device, shape := #[n], dtype := .Int64 })
+    (finished : Tensor { device := device, shape := #[n], dtype := .Bool })
     (eosToken : UInt64)
-    : Tensor { shape := #[n], dtype := .Int64 } :=
-  let eos : Tensor { shape := #[n], dtype := .Int64 } :=
+    : Tensor { device := device, shape := #[n], dtype := .Int64 } :=
+  let eos : Tensor { device := device, shape := #[n], dtype := .Int64 } :=
     (Tensor.fullInt #[n] (Int64.ofNat eosToken.toNat)).to tokens.device
   Tensor.whereSelect finished eos tokens
 

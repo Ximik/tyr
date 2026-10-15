@@ -579,9 +579,9 @@ private def benchmarkAction (warmup iters repeats : Nat) (action : IO Unit) : IO
 
 private def sdpaEqualRef
     {batch heads seq headDim : UInt64}
-    (qBase kBase vBase dOBase : Tensor { shape := #[batch, heads, seq, headDim], dtype := .BFloat16 })
+    (qBase kBase vBase dOBase : Tensor { shape := #[batch, heads, seq, headDim], dtype := .BFloat16, device := (.CUDA 0) })
     (isCausal : Bool)
-    : IO (Tensor { shape := #[batch, heads, seq, headDim], dtype := .BFloat16 } × Tensor { shape := #[batch, heads, seq, headDim], dtype := .Float32 } × Tensor { shape := #[batch, heads, seq, headDim], dtype := .Float32 } × Tensor { shape := #[batch, heads, seq, headDim], dtype := .Float32 }) := do
+    : IO (Tensor { shape := #[batch, heads, seq, headDim], dtype := .BFloat16, device := (.CUDA 0) } × Tensor { shape := #[batch, heads, seq, headDim], dtype := .Float32, device := (.CUDA 0) } × Tensor { shape := #[batch, heads, seq, headDim], dtype := .Float32, device := (.CUDA 0) } × Tensor { shape := #[batch, heads, seq, headDim], dtype := .Float32, device := (.CUDA 0) }) := do
   let q ← makeLeaf qBase
   let k ← makeLeaf kBase
   let v ← makeLeaf vBase
@@ -592,11 +592,11 @@ private def sdpaEqualRef
 
 private def sdpaGqaRef
     {batch qHeads kvHeads seq headDim : UInt64}
-    (qBase : Tensor { shape := #[batch, qHeads, seq, headDim], dtype := .BFloat16 })
-    (kBase vBase : Tensor { shape := #[batch, kvHeads, seq, headDim], dtype := .BFloat16 })
-    (dOBase : Tensor { shape := #[batch, qHeads, seq, headDim], dtype := .BFloat16 })
+    (qBase : Tensor { shape := #[batch, qHeads, seq, headDim], dtype := .BFloat16, device := (.CUDA 0) })
+    (kBase vBase : Tensor { shape := #[batch, kvHeads, seq, headDim], dtype := .BFloat16, device := (.CUDA 0) })
+    (dOBase : Tensor { shape := #[batch, qHeads, seq, headDim], dtype := .BFloat16, device := (.CUDA 0) })
     (isCausal : Bool)
-    : IO (Tensor { shape := #[batch, qHeads, seq, headDim], dtype := .BFloat16 } × Tensor { shape := #[batch, qHeads, seq, headDim], dtype := .Float32 } × Tensor { shape := #[batch, kvHeads, seq, headDim], dtype := .Float32 } × Tensor { shape := #[batch, kvHeads, seq, headDim], dtype := .Float32 }) := do
+    : IO (Tensor { shape := #[batch, qHeads, seq, headDim], dtype := .BFloat16, device := (.CUDA 0) } × Tensor { shape := #[batch, qHeads, seq, headDim], dtype := .Float32, device := (.CUDA 0) } × Tensor { shape := #[batch, kvHeads, seq, headDim], dtype := .Float32, device := (.CUDA 0) } × Tensor { shape := #[batch, kvHeads, seq, headDim], dtype := .Float32, device := (.CUDA 0) }) := do
   let q ← makeLeaf qBase
   let k ← makeLeaf kBase
   let v ← makeLeaf vBase
@@ -607,9 +607,9 @@ private def sdpaGqaRef
 
 private def tyrEqualOnce
     {batch heads seq headDim : UInt64}
-    (qBase kBase vBase dOBase : Tensor { shape := #[batch, heads, seq, headDim], dtype := .BFloat16 })
+    (qBase kBase vBase dOBase : Tensor { shape := #[batch, heads, seq, headDim], dtype := .BFloat16, device := (.CUDA 0) })
     (isCausal : Bool)
-    : IO (DispatchRoute × Tensor { shape := #[batch, heads, seq, headDim], dtype := .BFloat16 } × Tensor { shape := #[batch, heads, seq, headDim], dtype := .Float32 } × Tensor { shape := #[batch, heads, seq, headDim], dtype := .Float32 } × Tensor { shape := #[batch, heads, seq, headDim], dtype := .Float32 }) := do
+    : IO (DispatchRoute × Tensor { shape := #[batch, heads, seq, headDim], dtype := .BFloat16, device := (.CUDA 0) } × Tensor { shape := #[batch, heads, seq, headDim], dtype := .Float32, device := (.CUDA 0) } × Tensor { shape := #[batch, heads, seq, headDim], dtype := .Float32, device := (.CUDA 0) } × Tensor { shape := #[batch, heads, seq, headDim], dtype := .Float32, device := (.CUDA 0) }) := do
   let q ← makeLeaf qBase
   let k ← makeLeaf kBase
   let v ← makeLeaf vBase
@@ -620,11 +620,11 @@ private def tyrEqualOnce
 
 private def tyrGqaOnce
     {batch qHeads kvHeads seq headDim : UInt64}
-    (qBase : Tensor { shape := #[batch, qHeads, seq, headDim], dtype := .BFloat16 })
-    (kBase vBase : Tensor { shape := #[batch, kvHeads, seq, headDim], dtype := .BFloat16 })
-    (dOBase : Tensor { shape := #[batch, qHeads, seq, headDim], dtype := .BFloat16 })
+    (qBase : Tensor { shape := #[batch, qHeads, seq, headDim], dtype := .BFloat16, device := (.CUDA 0) })
+    (kBase vBase : Tensor { shape := #[batch, kvHeads, seq, headDim], dtype := .BFloat16, device := (.CUDA 0) })
+    (dOBase : Tensor { shape := #[batch, qHeads, seq, headDim], dtype := .BFloat16, device := (.CUDA 0) })
     (isCausal : Bool)
-    : IO (DispatchRoute × Tensor { shape := #[batch, qHeads, seq, headDim], dtype := .BFloat16 } × Tensor { shape := #[batch, qHeads, seq, headDim], dtype := .Float32 } × Tensor { shape := #[batch, kvHeads, seq, headDim], dtype := .Float32 } × Tensor { shape := #[batch, kvHeads, seq, headDim], dtype := .Float32 }) := do
+    : IO (DispatchRoute × Tensor { shape := #[batch, qHeads, seq, headDim], dtype := .BFloat16, device := (.CUDA 0) } × Tensor { shape := #[batch, qHeads, seq, headDim], dtype := .Float32, device := (.CUDA 0) } × Tensor { shape := #[batch, kvHeads, seq, headDim], dtype := .Float32, device := (.CUDA 0) } × Tensor { shape := #[batch, kvHeads, seq, headDim], dtype := .Float32, device := (.CUDA 0) }) := do
   let q ← makeLeaf qBase
   let k ← makeLeaf kBase
   let v ← makeLeaf vBase
@@ -634,15 +634,15 @@ private def tyrGqaOnce
   pure (route, out, (← Tensor.gradOf q).toFloat32, (← Tensor.gradOf k).toFloat32, (← Tensor.gradOf v).toFloat32)
 
 private def sdpaEqualForward {batch heads seq headDim : UInt64}
-    (qBase kBase vBase : Tensor { shape := #[batch, heads, seq, headDim], dtype := .BFloat16 })
+    (qBase kBase vBase : Tensor { shape := #[batch, heads, seq, headDim], dtype := .BFloat16, device := (.CUDA 0) })
     (isCausal : Bool)
-    : Tensor { shape := #[batch, heads, seq, headDim], dtype := .BFloat16 } :=
+    : Tensor { shape := #[batch, heads, seq, headDim], dtype := .BFloat16, device := (.CUDA 0) } :=
   Tensor.attentionGQA qBase kBase vBase 0.0 isCausal
 
 private def tyrEqualForward {batch heads seq headDim : UInt64}
-    (qBase kBase vBase : Tensor { shape := #[batch, heads, seq, headDim], dtype := .BFloat16 })
+    (qBase kBase vBase : Tensor { shape := #[batch, heads, seq, headDim], dtype := .BFloat16, device := (.CUDA 0) })
     (isCausal : Bool)
-    : DispatchRoute × Tensor { shape := #[batch, heads, seq, headDim], dtype := .BFloat16 } :=
+    : DispatchRoute × Tensor { shape := #[batch, heads, seq, headDim], dtype := .BFloat16, device := (.CUDA 0) } :=
   flashAttnWithRoute qBase kBase vBase none 0.0 isCausal none false
 
 private def runEqualHeadsFwdBwd
@@ -725,10 +725,10 @@ private def runEqualHeadsFwdBwd
         dqMae := some <| Tensor.item (Tensor.meanAll (Tensor.abs (dq - dqRef)))
         dkMae := some <| Tensor.item (Tensor.meanAll (Tensor.abs (dk - dkRef)))
         dvMae := some <| Tensor.item (Tensor.meanAll (Tensor.abs (dv - dvRef)))
-        outMax := some <| Tensor.item (Tensor.maxAll (Tensor.abs (out - outRef)))
-        dqMax := some <| Tensor.item (Tensor.maxAll (Tensor.abs (dq - dqRef)))
-        dkMax := some <| Tensor.item (Tensor.maxAll (Tensor.abs (dk - dkRef)))
-        dvMax := some <| Tensor.item (Tensor.maxAll (Tensor.abs (dv - dvRef)))
+        outMax := some <| Tensor.item (Tensor.maxAllChecked (Tensor.abs (out - outRef)))
+        dqMax := some <| Tensor.item (Tensor.maxAllChecked (Tensor.abs (dq - dqRef)))
+        dkMax := some <| Tensor.item (Tensor.maxAllChecked (Tensor.abs (dk - dkRef)))
+        dvMax := some <| Tensor.item (Tensor.maxAllChecked (Tensor.abs (dv - dvRef)))
         outRelL2 := some <| relL2 out outRef
         dqRelL2 := some <| relL2 dq dqRef
         dkRelL2 := some <| relL2 dk dkRef
@@ -839,10 +839,10 @@ private def runGqaFwdBwd
         dqMae := some <| Tensor.item (Tensor.meanAll (Tensor.abs (dq - dqRef)))
         dkMae := some <| Tensor.item (Tensor.meanAll (Tensor.abs (dk - dkRef)))
         dvMae := some <| Tensor.item (Tensor.meanAll (Tensor.abs (dv - dvRef)))
-        outMax := some <| Tensor.item (Tensor.maxAll (Tensor.abs (out - outRef)))
-        dqMax := some <| Tensor.item (Tensor.maxAll (Tensor.abs (dq - dqRef)))
-        dkMax := some <| Tensor.item (Tensor.maxAll (Tensor.abs (dk - dkRef)))
-        dvMax := some <| Tensor.item (Tensor.maxAll (Tensor.abs (dv - dvRef)))
+        outMax := some <| Tensor.item (Tensor.maxAllChecked (Tensor.abs (out - outRef)))
+        dqMax := some <| Tensor.item (Tensor.maxAllChecked (Tensor.abs (dq - dqRef)))
+        dkMax := some <| Tensor.item (Tensor.maxAllChecked (Tensor.abs (dk - dkRef)))
+        dvMax := some <| Tensor.item (Tensor.maxAllChecked (Tensor.abs (dv - dvRef)))
         outRelL2 := some <| relL2 out outRef
         dqRelL2 := some <| relL2 dq dqRef
         dkRelL2 := some <| relL2 dk dkRef
@@ -926,7 +926,7 @@ private def runEqualHeadsForwardOnly
         outOk := some outOk
         correctnessOk := some (routeOk && outOk)
         outMae := some <| Tensor.item (Tensor.meanAll (Tensor.abs (out - outRef)))
-        outMax := some <| Tensor.item (Tensor.maxAll (Tensor.abs (out - outRef)))
+        outMax := some <| Tensor.item (Tensor.maxAllChecked (Tensor.abs (out - outRef)))
         outRelL2 := some <| relL2 out outRef
       }
       let action : IO Unit := do

@@ -9,6 +9,8 @@ import Examples.GPU.Benchmark
 namespace Examples.GPU.RunLayerNorm
 
 open torch
+
+variable {device : Device}
 open Tyr.GPU.Kernels
 
 private def launchBlockX : UInt64 := 32
@@ -23,29 +25,29 @@ def fixtureSpec : FixtureSpec := {
 def fixtureFile (name : String) : System.FilePath :=
   Examples.GPU.fixturePath fixtureSpec name
 
-abbrev LayerNormInput (dtype : DType) := Tensor { shape := #[1, 64, 1024], dtype := dtype }
-abbrev LayerNormWeight (dtype : DType) := Tensor { shape := #[1024], dtype := dtype }
+abbrev LayerNormInput (dtype : DType) (device : Device := .CPU) := Tensor { shape := #[1, 64, 1024], dtype := dtype, device := device }
+abbrev LayerNormWeight (dtype : DType) (device : Device := .CPU) := Tensor { shape := #[1024], dtype := dtype, device := device }
 
-structure LayerNormInputs (dtype : DType) where
-  x : LayerNormInput dtype
-  residual : LayerNormInput dtype
-  weight : LayerNormWeight dtype
-  bias : LayerNormWeight dtype
+structure LayerNormInputs (dtype : DType) (device : Device := .CPU) where
+  x : LayerNormInput dtype device
+  residual : LayerNormInput dtype device
+  weight : LayerNormWeight dtype device
+  bias : LayerNormWeight dtype device
 
 def layerNormReference
-    (inputs : LayerNormInputs .Float32)
-    : LayerNormInput .Float32 × LayerNormInput .Float32 :=
+    (inputs : LayerNormInputs .Float32 device)
+    : LayerNormInput .Float32 device × LayerNormInput .Float32 device :=
   let eps : Float := 1.0e-5
   let expectedResid := inputs.x + inputs.residual
   let expectedOut := Tensor.layerNorm expectedResid inputs.weight inputs.bias eps
   (expectedOut, expectedResid)
 
 def layerNormReferenceBFloat16
-    (inputs : LayerNormInputs .BFloat16)
-    : LayerNormInput .BFloat16 × LayerNormInput .BFloat16 :=
+    (inputs : LayerNormInputs .BFloat16 device)
+    : LayerNormInput .BFloat16 device × LayerNormInput .BFloat16 device :=
   let eps : Float := 1.0e-5
   let expectedResid := inputs.x + inputs.residual
-  let expectedOut32 : LayerNormInput .Float32 :=
+  let expectedOut32 : LayerNormInput .Float32 device :=
     Tensor.layerNorm
       (expectedResid.toFloat32)
       (inputs.weight.toFloat32)
@@ -54,24 +56,24 @@ def layerNormReferenceBFloat16
   let expectedOut := expectedOut32.toBFloat16
   (expectedOut, expectedResid)
 
-def asBFloat16Inputs (inputs : LayerNormInputs .Float32) : LayerNormInputs .BFloat16 := {
+def asBFloat16Inputs (inputs : LayerNormInputs .Float32 device) : LayerNormInputs .BFloat16 device := {
   x := inputs.x.toBFloat16
   residual := inputs.residual.toBFloat16
   weight := inputs.weight.toBFloat16
   bias := inputs.bias.toBFloat16
 }
 
-private def logInputDTypes {dtype : DType} (label : String) (inputs : LayerNormInputs dtype) : IO Unit := do
+private def logInputDTypes {dtype : DType} (label : String) (inputs : LayerNormInputs dtype device) : IO Unit := do
   IO.println <|
     s!"[{suiteName}:{label}] input_dtypes x={inputs.x.dtype} residual={inputs.residual.dtype} " ++
     s!"weight={inputs.weight.dtype} bias={inputs.bias.dtype}"
 
 private def compareResults {dtype : DType}
     (mode : String)
-    (expectedOut : LayerNormInput dtype)
-    (expectedResid : LayerNormInput dtype)
-    (out : LayerNormInput dtype)
-    (outResid : LayerNormInput dtype)
+    (expectedOut : LayerNormInput dtype device)
+    (expectedResid : LayerNormInput dtype device)
+    (out : LayerNormInput dtype device)
+    (outResid : LayerNormInput dtype device)
     (rtol atol : Float)
     : IO Bool := do
   let outCheck := IndexedParity.compareTensors s!"layernorm.{mode}.output" (expectedOut.toFloat32) (out.toFloat32) rtol atol
@@ -80,7 +82,7 @@ private def compareResults {dtype : DType}
   logTensorCheck residCheck
   pure (outCheck.ok && residCheck.ok)
 
-private def runInputs {dtype : DType} (label : String) (inputs : LayerNormInputs dtype) : IO Bool := do
+private def runInputs {dtype : DType} (label : String) (inputs : LayerNormInputs dtype (.CUDA 0)) : IO Bool := do
   logInputDTypes label inputs
   let stream ← torch.cuda_current_stream
   let blackwell ← isBlackwellFamily
@@ -107,9 +109,9 @@ private def runInputs {dtype : DType} (label : String) (inputs : LayerNormInputs
       IO.eprintln s!"[{suiteName}:{label}] unsupported_dtype dtype={dtype}"
       pure false
 
-private def randomInputs (dtype : DType) : IO (LayerNormInputs dtype) := do
+private def randomInputs (dtype : DType) : IO (LayerNormInputs dtype (.CUDA 0)) := do
   let device := Device.CUDA 0
-  let base : LayerNormInputs .Float32 := {
+  let base : LayerNormInputs .Float32 (.CUDA 0) := {
     x := ← Tensor.uniformLike (Tensor.zeros #[1, 64, 1024] false device)
     residual := ← Tensor.uniformLike (Tensor.zeros #[1, 64, 1024] false device)
     weight := ← Tensor.uniformLike (Tensor.zeros #[1024] false device)
@@ -162,14 +164,14 @@ def runOnce : IO Bool := do
   if !(← fixturesPresent fixtureSpec) then
     generateFixtures
 
-  let x ← Tensor.loadTensorExact { shape := #[1, 64, 1024], dtype := .Unknown "dynamic" }
+  let x ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[1, 64, 1024], dtype := .Unknown "dynamic" }
     (fixtureFile "x").toString
   let dtype := x.actualSpec.dtype
-  let inputs : LayerNormInputs dtype := {
+  let inputs : LayerNormInputs dtype (.CUDA 0) := {
     x := x.castDType dtype
-    residual := ← Tensor.loadTensorExact { shape := #[1, 64, 1024], dtype } (fixtureFile "residual").toString
-    weight := ← Tensor.loadTensorExact { shape := #[1024], dtype } (fixtureFile "weight").toString
-    bias := ← Tensor.loadTensorExact { shape := #[1024], dtype } (fixtureFile "bias").toString
+    residual := ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[1, 64, 1024], dtype } (fixtureFile "residual").toString
+    weight := ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[1024], dtype } (fixtureFile "weight").toString
+    bias := ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[1024], dtype } (fixtureFile "bias").toString
   }
   runInputs "fixtures" inputs
 

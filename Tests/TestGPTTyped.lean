@@ -10,19 +10,19 @@ namespace Tests.TestGPTTyped
 set_option linter.unusedVariables false
 
 -- Exact regression: the off-by-one projection must not fit the model field.
-example (n : UInt64) (params : BlockParams n) (scale : Float) : True := by
+example (n : UInt64) (params : BlockParams (device := .CPU) n) (scale : Float) : True := by
   fail_if_success
-    have _bad : IO (BlockParams n) := do
+    have _bad : IO (BlockParams (device := .CPU) n) := do
       let projection ← Tensor.randn #[n, 4*n + 1]
       return { params with mlp_proj := ← makeLeafParam (projection * scale) }
   trivial
 
-example (n : UInt64) (params : BlockParams n) (scale : Float) : IO (BlockParams n) := do
+example (n : UInt64) (params : BlockParams (device := .CPU) n) (scale : Float) : IO (BlockParams (device := .CPU) n) := do
   let projection ← Tensor.randn #[n, 4*n]
   return { params with mlp_proj := ← makeLeafParam (projection * scale) }
 
-example (params : GPTParams Config.tiny_shakespeare)
-    (wrongTokens : Tokens #[1, 3]) (wrongDtype : Activation #[1, 2]) : True := by
+example (params : GPTParams (device := .CPU) Config.tiny_shakespeare)
+    (wrongTokens : Tokens (device := .CPU) #[1, 3]) (wrongDtype : Activation (device := .CPU) #[1, 2]) : True := by
   fail_if_success
     have _ := forward (batch := 1) (seq := 2) params wrongTokens
   fail_if_success
@@ -43,7 +43,7 @@ private def config : Config :=
   if lossValue.isNaN || lossValue.isInf then
     throw (IO.userError "nonfinite GPT loss")
   Tensor.backwardLoss loss
-  let opt := Optim.adamw (α := GPTParams config) (lr := 0.001)
+  let opt := Optim.adamw (α := GPTParams (device := .CPU) config) (lr := 0.001)
   let (updated, _) ← Optim.step opt params (← TensorStruct.grads params) (opt.init params)
   let some block := updated.blocks[0]? | throw (IO.userError "missing GPT block")
   unless block.mlp_proj.raw.runtimeShape == #[4, 16] do
@@ -60,13 +60,13 @@ private def config : Config :=
   unless generated.size == 2 do throw (IO.userError "GPT generation failed")
   let wrong := Tensor.fullInt #[1, 3] 1
   let rejected ← try
-    let _ ← TensorOps.checked (s := #[1, 2]) .Int64 wrong.raw
+    let _ ← TensorOps.checked (device := .CPU) (s := #[1, 2]) .Int64 wrong.raw
     pure false
   catch _ => pure true
   unless rejected do throw (IO.userError "raw shape mismatch was accepted")
   let wrongDtype := Tensor.zeros #[1, 2]
   let rejected ← try
-    let _ ← TensorOps.checked (s := #[1, 2]) .Int64 wrongDtype.raw
+    let _ ← TensorOps.checked (device := .CPU) (s := #[1, 2]) .Int64 wrongDtype.raw
     pure false
   catch _ => pure true
   unless rejected do throw (IO.userError "raw dtype mismatch was accepted")
@@ -83,7 +83,7 @@ private def config : Config :=
     catch _ => pure true
     LeanTest.assertTrue rejected "Invalid batches fail before native sampling/slicing"
   let params ← GPTParams.init config
-  let opt := Optim.adamw (α := GPTParams config) (lr := 0.001)
+  let opt := Optim.adamw (α := GPTParams (device := .CPU) config) (lr := 0.001)
   let trainCfg : train.TrainConfig := { gradAccumSteps := 2, gradClip := 1.0 }
   let (updated, _, value) ← train.trainStepWithAccum trainCfg params (opt.init params)
     (pure (x, y)) 0.001
