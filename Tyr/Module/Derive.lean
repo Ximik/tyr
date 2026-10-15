@@ -169,7 +169,10 @@ private def mkTensorStructInstanceCmd (typeName : Name) : CommandElabM Unit := d
           let paramDecl ← param.fvarId!.getDecl
           pure (mkIdent paramDecl.userName)
 
-        let appliedType ← `($(mkIdent typeName) $paramIdents*)
+        -- `params` includes implicit record parameters such as a shared device.
+        -- Apply every parameter explicitly so it cannot be mistaken for the
+        -- next explicit shape/type argument.
+        let appliedType ← `(@$(mkIdent typeName) $paramIdents*)
 
         -- Generate instance command with binders
         `(command|

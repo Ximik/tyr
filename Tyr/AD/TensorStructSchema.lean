@@ -544,7 +544,7 @@ private def mkTensorStructSchemaInstanceCmd (typeName : Name) : CommandElabM Uni
           let paramDecl ← param.fvarId!.getDecl
           pure (mkIdent paramDecl.userName)
 
-        let appliedType ← `($(mkIdent typeName) $paramIdents*)
+        let appliedType ← `(@$(mkIdent typeName) $paramIdents*)
 
         `(command|
           instance $[$binderStxs]* : ToTensorStructSchema $appliedType where
@@ -626,7 +626,7 @@ private def mkTensorStructFlattenInstanceCmd (typeName : Name) : CommandElabM Un
           let paramDecl ← param.fvarId!.getDecl
           pure (mkIdent paramDecl.userName)
 
-        let appliedType ← `($(mkIdent typeName) $paramIdents*)
+        let appliedType ← `(@$(mkIdent typeName) $paramIdents*)
 
         `(command|
           instance $[$binderStxs]* : TensorStructFlatten $appliedType where

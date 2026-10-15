@@ -11,6 +11,11 @@ own checked cast instance; static metadata is carried from the source.
 
 No destination model or tensor template is constructed. This command is explicit:
 ordinary `deriving TensorStruct` and `deriving Model` keep their existing meaning.
+
+For parameterized records, declare the shared parameters before a colon:
+`derive_tensor_tree_cast {source target : Device} {size : UInt64} :
+  Source (device := source) size => Target (device := target) size`.
+These binders scope over both record types and the generated instance.
 -/
 
 namespace torch
@@ -38,12 +43,16 @@ must already have `TensorTreeCast` instances. -/
 syntax (name := deriveTensorTreeCast)
   "derive_tensor_tree_cast " term " => " term : command
 
-elab_rules : command
-  | `(derive_tensor_tree_cast $sourceType => $targetType) => do
+syntax (name := deriveTensorTreeCastWithBinders)
+  "derive_tensor_tree_cast " bracketedBinder+ " : " term " => " term : command
+
+private def elabTensorTreeCast (binders : Array (TSyntax ``Parser.Term.bracketedBinder))
+    (sourceType targetType : TSyntax `term) : CommandElabM Unit := do
       let (sourceFields, targetFields) ← liftTermElabM do
-        let sourceInfo ← castStructureInfo sourceType
-        let targetInfo ← castStructureInfo targetType
-        return (sourceInfo.fieldNames, targetInfo.fieldNames)
+        Term.elabBinders (binders.map (·.raw)) fun _ => do
+          let sourceInfo ← castStructureInfo sourceType
+          let targetInfo ← castStructureInfo targetType
+          return (sourceInfo.fieldNames, targetInfo.fieldNames)
       let sourceLabels := sourceFields.map castFieldLabel
       let targetLabels := targetFields.map castFieldLabel
       unless sourceLabels == targetLabels do
@@ -56,9 +65,15 @@ elab_rules : command
           $fieldIdent:ident := ← TensorTreeCast.castAt
             (TensorTreeCast.fieldPath _path $(Lean.quote label)) _source.$fieldIdent)
       let instanceCommand ← `(command|
-        instance : TensorTreeCast $sourceType $targetType where
+        instance $[$binders]* : TensorTreeCast $sourceType $targetType where
           castAt _path _source := do
             pure { $[$fields:structInstField],* })
       elabCommand instanceCommand
+
+elab_rules : command
+  | `(derive_tensor_tree_cast $sourceType => $targetType) =>
+      elabTensorTreeCast #[] sourceType targetType
+  | `(derive_tensor_tree_cast $binders:bracketedBinder* : $sourceType => $targetType) =>
+      elabTensorTreeCast binders sourceType targetType
 
 end torch
