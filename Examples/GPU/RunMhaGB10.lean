@@ -42,7 +42,7 @@ def generateFixtures : IO Unit := do
   let v := vf.toBFloat16
   let dO := dOf.toBFloat16
 
-  let expectedOut := Tensor.attentionGQA q k v 0.0 false
+  let expectedOut := Tensor.attentionGQA q k v false
 
   let (_, lse) := attentionReference q k v
   let expectedL := (Tensor.Preserving.mulScalar lse (-8.0)).reshapeChecked #[2, 64]
@@ -152,7 +152,7 @@ private def benchmarkForwardSeq (cfg : Benchmark.Config) (stream : UInt64)
   let q := qf.toBFloat16
   let k := kf.toBFloat16
   let v := vf.toBFloat16
-  let expected := Tensor.attentionGQA q k v 0.0 false
+  let expected := Tensor.attentionGQA q k v false
   let (_, lse) := attentionReference q k v
   let expectedL3 := Tensor.Preserving.mulScalar lse (-8.0)
   let out ← Tensor.uniformLike q 0 0

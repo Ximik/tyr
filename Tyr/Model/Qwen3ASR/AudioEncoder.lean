@@ -87,11 +87,14 @@ def init (cfg : AudioEncoderConfig) (device : Device := .CPU) : IO (AudioAttenti
     qProjWeight, qProjBias, kProjWeight, kProjBias, vProjWeight, vProjBias, outProjWeight, outProjBias
   }
 
-def forward {batch seq : UInt64}
+private def forwardWith {M : Type → Type} [Monad M] {batch seq : UInt64}
+    (attend : (q k v : Tensor { device := device, shape := #[batch, cfg.encoderAttentionHeads, seq, AudioEncoderConfig.headDim cfg] }) →
+      Option (Tensor { device := device, shape := #[batch, seq] }) →
+      M (Tensor { device := device, shape := #[batch, cfg.encoderAttentionHeads, seq, AudioEncoderConfig.headDim cfg] }))
     (m : AudioAttention (device := device) cfg)
     (x : Tensor { device := device, shape := #[batch, seq, cfg.dModel] })
     (attnMask : Option (Tensor { device := device, shape := #[batch, seq] }) := none)
-    : Tensor { device := device, shape := #[batch, seq, cfg.dModel] } :=
+    : M (Tensor { device := device, shape := #[batch, seq, cfg.dModel] }) := do
   let q : Tensor { device := device, shape := #[batch, seq, cfg.encoderAttentionHeads * AudioEncoderConfig.headDim cfg] } :=
     Tensor.affine3d x m.qProjWeight m.qProjBias
   let k : Tensor { device := device, shape := #[batch, seq, cfg.encoderAttentionHeads * AudioEncoderConfig.headDim cfg] } :=
@@ -110,19 +113,41 @@ def forward {batch seq : UInt64}
   let k := Tensor.splitHeads k
   let v := Tensor.splitHeads v
 
-  let out :=
-    match attnMask with
-    | some mask =>
-      Tensor.attentionGQAMask
-        q k v mask cfg.attentionDropout false true
-    | none =>
-      Tensor.attentionGQA
-        q k v cfg.attentionDropout false true
+  let out ← attend q k v attnMask
 
   let out := Tensor.joinHeads out
   let out : Tensor { device := device, shape := #[batch, seq, cfg.encoderAttentionHeads * AudioEncoderConfig.headDim cfg] } :=
     Tensor.reshapeChecked out #[batch, seq, cfg.encoderAttentionHeads * AudioEncoderConfig.headDim cfg]
-  Tensor.affine3d out m.outProjWeight m.outProjBias
+  return Tensor.affine3d out m.outProjWeight m.outProjBias
+
+/-- Deterministic attention: configured dropout is disabled for inference. -/
+def forwardInference {batch seq : UInt64}
+    (m : AudioAttention (device := device) cfg)
+    (x : Tensor { device := device, shape := #[batch, seq, cfg.dModel] })
+    (attnMask : Option (Tensor { device := device, shape := #[batch, seq] }) := none)
+    : Tensor { device := device, shape := #[batch, seq, cfg.dModel] } :=
+  Id.run <| forwardWith (M := Id) (fun q k v mask => pure <| match mask with
+    | some mask => Tensor.attentionGQAMask q k v mask false true
+    | none => Tensor.attentionGQA q k v false true) m x attnMask
+
+/-- Effectful attention. Training honors `cfg.attentionDropout`; evaluation disables it. -/
+def forwardIO {batch seq : UInt64}
+    (m : AudioAttention (device := device) cfg)
+    (x : Tensor { device := device, shape := #[batch, seq, cfg.dModel] })
+    (training : Bool)
+    (attnMask : Option (Tensor { device := device, shape := #[batch, seq] }) := none)
+    : IO (Tensor { device := device, shape := #[batch, seq, cfg.dModel] }) :=
+  forwardWith (fun q k v mask => match mask with
+    | some mask => Tensor.attentionGQAMaskIO q k v mask cfg.attentionDropout training false true
+    | none => Tensor.attentionGQAIO q k v cfg.attentionDropout training false true) m x attnMask
+
+/-- Compatibility alias for deterministic inference. Use `forwardIO` for training. -/
+def forward {batch seq : UInt64}
+    (m : AudioAttention (device := device) cfg)
+    (x : Tensor { device := device, shape := #[batch, seq, cfg.dModel] })
+    (attnMask : Option (Tensor { device := device, shape := #[batch, seq] }) := none)
+    : Tensor { device := device, shape := #[batch, seq, cfg.dModel] } :=
+  m.forwardInference x attnMask
 
 end AudioAttention
 
@@ -149,14 +174,18 @@ def init (cfg : AudioEncoderConfig) (device : Device := .CPU) : IO (AudioEncoder
   let finalLayerNorm ← initLayerNorm (device := device) cfg.dModel 1e-5
   pure { selfAttn, selfAttnLayerNorm, fc1Weight, fc1Bias, fc2Weight, fc2Bias, finalLayerNorm }
 
-def forward {batch seq : UInt64}
+private def forwardWith {M : Type → Type} [Monad M] {batch seq : UInt64}
+    (attend : AudioAttention (device := device) cfg →
+      Tensor { device := device, shape := #[batch, seq, cfg.dModel] } →
+      Option (Tensor { device := device, shape := #[batch, seq] }) →
+      M (Tensor { device := device, shape := #[batch, seq, cfg.dModel] }))
     (m : AudioEncoderLayer (device := device) cfg)
     (x : Tensor { device := device, shape := #[batch, seq, cfg.dModel] })
     (attnMask : Option (Tensor { device := device, shape := #[batch, seq] }) := none)
-    : Tensor { device := device, shape := #[batch, seq, cfg.dModel] } :=
+    : M (Tensor { device := device, shape := #[batch, seq, cfg.dModel] }) := do
   let residual0 := x
   let h0 := m.selfAttnLayerNorm.forward3d x
-  let h1 := m.selfAttn.forward h0 attnMask
+  let h1 ← attend m.selfAttn h0 attnMask
   let h2 := Tensor.Promoting.add residual0 h1
 
   let residual1 := h2
@@ -164,7 +193,32 @@ def forward {batch seq : UInt64}
   let h4 : Tensor { device := device, shape := #[batch, seq, cfg.encoderFfnDim] } := Tensor.affine3d h3 m.fc1Weight m.fc1Bias
   let h5 := activate cfg.activationFunction h4
   let h6 : Tensor { device := device, shape := #[batch, seq, cfg.dModel] } := Tensor.affine3d h5 m.fc2Weight m.fc2Bias
-  Tensor.Promoting.add residual1 h6
+  return Tensor.Promoting.add residual1 h6
+
+/-- Deterministic encoder-layer inference, with attention dropout disabled. -/
+def forwardInference {batch seq : UInt64}
+    (m : AudioEncoderLayer (device := device) cfg)
+    (x : Tensor { device := device, shape := #[batch, seq, cfg.dModel] })
+    (attnMask : Option (Tensor { device := device, shape := #[batch, seq] }) := none)
+    : Tensor { device := device, shape := #[batch, seq, cfg.dModel] } :=
+  Id.run <| forwardWith (M := Id) (fun a x mask => pure (a.forwardInference x mask)) m x attnMask
+
+/-- Training/evaluation execution with explicit attention-dropout effects. -/
+def forwardIO {batch seq : UInt64}
+    (m : AudioEncoderLayer (device := device) cfg)
+    (x : Tensor { device := device, shape := #[batch, seq, cfg.dModel] })
+    (training : Bool)
+    (attnMask : Option (Tensor { device := device, shape := #[batch, seq] }) := none)
+    : IO (Tensor { device := device, shape := #[batch, seq, cfg.dModel] }) :=
+  forwardWith (fun a x mask => a.forwardIO x training mask) m x attnMask
+
+/-- Compatibility alias for deterministic inference. Use `forwardIO` for training. -/
+def forward {batch seq : UInt64}
+    (m : AudioEncoderLayer (device := device) cfg)
+    (x : Tensor { device := device, shape := #[batch, seq, cfg.dModel] })
+    (attnMask : Option (Tensor { device := device, shape := #[batch, seq] }) := none)
+    : Tensor { device := device, shape := #[batch, seq, cfg.dModel] } :=
+  m.forwardInference x attnMask
 
 end AudioEncoderLayer
 
@@ -329,38 +383,44 @@ private def encodePaddedChunk {maxFrames : UInt64}
     Tensor.reshapeChecked x3t #[1, t3, AudioEncoderConfig.convOutInDim cfg]
   Tensor.linear3d xFlat m.convOutWeight
 
-private def runLayersChunkLocal {seq : UInt64}
+private abbrev LayerForward (M : Type → Type) (cfg : AudioEncoderConfig) (device : Device) :=
+  {batch seq : UInt64} → AudioEncoderLayer (device := device) cfg →
+    Tensor { device := device, shape := #[batch, seq, cfg.dModel] } →
+    Option (Tensor { device := device, shape := #[batch, seq] }) →
+    M (Tensor { device := device, shape := #[batch, seq, cfg.dModel] })
+
+private def runLayersChunkLocalWith {M : Type → Type} [Monad M] {seq : UInt64}
+    (layerForward : LayerForward M cfg device)
     (m : AudioEncoder (device := device) cfg)
     (hidden : Tensor { device := device, shape := #[1, seq, cfg.dModel] })
     (chunkLens : Array UInt64)
-    : Tensor { device := device, shape := #[1, seq, cfg.dModel] } :=
+    : M (Tensor { device := device, shape := #[1, seq, cfg.dModel] }) := do
   if seq == 0 then
-    hidden
+    return hidden
+  let mut parts : Array (Sigma (fun shape => Tensor { device := device, shape := shape })) := #[]
+  let mut start : UInt64 := 0
+  for len in chunkLens do
+    if len != 0 then
+      let seg : Tensor { device := device, shape := #[1, len, cfg.dModel] } :=
+        Tensor.sliceChecked hidden 1 start len #[1, len, cfg.dModel]
+      let segOut ← m.layers.foldlM (fun h layer => layerForward layer h none) seg
+      parts := parts.push (Tensor.packShape segOut)
+      start := start + len
+  return if parts.isEmpty then
+    Tensor.castLike hidden ((Tensor.zeros #[1, seq, cfg.dModel] false hidden.device).forgetDType)
   else
-    let parts : Array (Sigma (fun shape => Tensor { device := device, shape := shape })) := Id.run do
-      let mut out : Array (Sigma (fun shape => Tensor { device := device, shape := shape })) := #[]
-      let mut start : UInt64 := 0
-      for len in chunkLens do
-        if len != 0 then
-          let seg : Tensor { device := device, shape := #[1, len, cfg.dModel] } := Tensor.sliceChecked hidden 1 start len #[1, len, cfg.dModel]
-          let segOut := m.layers.foldl (fun h layer => layer.forward h none) seg
-          out := out.push (Tensor.packShape segOut)
-          start := start + len
-      out
-    if parts.isEmpty then
-      Tensor.castLike hidden ((Tensor.zeros #[1, seq, cfg.dModel] false hidden.device).forgetDType)
-    else
-      Tensor.catManyChecked parts 1 #[1, seq, cfg.dModel]
+    Tensor.catManyChecked parts 1 #[1, seq, cfg.dModel]
 
-private def encodeOneSampleVarLen {frames : UInt64}
+private def encodeOneSampleVarLenWith {M : Type → Type} [Monad M] {frames : UInt64}
+    (layerForward : LayerForward M cfg device)
     (m : AudioEncoder (device := device) cfg)
     (sample : Tensor { device := device, shape := #[1, cfg.numMelBins, frames] })
     (featureLen : UInt64)
-    : Tensor { device := device, shape := #[1, AudioEncoderConfig.framesAfterConv3 cfg frames, cfg.outputDim] } :=
+    : M (Tensor { device := device, shape := #[1, AudioEncoderConfig.framesAfterConv3 cfg frames, cfg.outputDim] }) := do
   let outSeq := AudioEncoderConfig.framesAfterConv3 cfg frames
   let featureLen := if featureLen <= frames then featureLen else frames
   if featureLen == 0 then
-    Tensor.castLike sample ((Tensor.zeros #[1, outSeq, cfg.outputDim] false sample.device).forgetDType)
+    return Tensor.castLike sample ((Tensor.zeros #[1, outSeq, cfg.outputDim] false sample.device).forgetDType)
   else
     let chunkLens := buildChunkLengths cfg #[featureLen]
     let maxChunkLen := maxOr chunkLens 1
@@ -406,14 +466,14 @@ private def encodeOneSampleVarLen {frames : UInt64}
 
     let cuCumsum := buildCuChunkLensCumsum cfg #[totalValid] maxChunkAfterCnn
     let attnChunkLens := chunkLensFromCumsum cuCumsum
-    let hiddenChunked := runLayersChunkLocal m hiddenValid attnChunkLens
+    let hiddenChunked ← runLayersChunkLocalWith layerForward m hiddenValid attnChunkLens
 
     let hidden := m.lnPost.forward3d hiddenChunked
     let hidden : Tensor { device := device, shape := #[1, totalValid, cfg.dModel] } := Tensor.affine3d hidden m.proj1Weight m.proj1Bias
     let hidden := activate cfg.activationFunction hidden
     let hidden : Tensor { device := device, shape := #[1, totalValid, cfg.outputDim] } := Tensor.affine3d hidden m.proj2Weight m.proj2Bias
 
-    if totalValid >= outSeq then
+    return if totalValid >= outSeq then
       hidden.sliceChecked 1 0 outSeq #[1, outSeq, cfg.outputDim]
     else
       let padLen := outSeq - totalValid
@@ -421,34 +481,57 @@ private def encodeOneSampleVarLen {frames : UInt64}
         Tensor.castLike hidden ((Tensor.zeros #[1, padLen, cfg.outputDim] false hidden.device).forgetDType)
       Tensor.reshapeChecked (Tensor.cat hidden pad 1) #[1, outSeq, cfg.outputDim]
 
-/-- Varlen/chunked execution path mirroring reference `cu_seqlens` behavior:
-    each sample is chunked from `featureLens`, convolved chunk-wise, then transformed
-    with chunk-local self-attention blocks and finally re-padded to fixed output width. -/
+private def forwardVarLenWith {M : Type → Type} [Monad M] {batch frames : UInt64}
+    (layerForward : LayerForward M cfg device)
+    (m : AudioEncoder (device := device) cfg)
+    (inputFeatures : Tensor { device := device, shape := #[batch, cfg.numMelBins, frames] })
+    (featureLens : Array UInt64)
+    : M (Tensor { device := device, shape := #[batch, AudioEncoderConfig.framesAfterConv3 cfg frames, cfg.outputDim] }) := do
+  let inputFeatures := alignFeatures m inputFeatures
+  let outSeq := AudioEncoderConfig.framesAfterConv3 cfg frames
+  if batch == 0 then
+    return Tensor.castLike inputFeatures ((Tensor.zeros #[batch, outSeq, cfg.outputDim] false inputFeatures.device).forgetDType)
+  let mut rows : Array (Sigma (fun shape => Tensor { device := device, shape := shape })) := #[]
+  for b in [:batch.toNat] do
+    let sample : Tensor { device := device, shape := #[1, cfg.numMelBins, frames] } :=
+      Tensor.sliceChecked inputFeatures 0 b.toUInt64 1 #[1, cfg.numMelBins, frames]
+    let len := featureLens.getD b frames
+    let row ← encodeOneSampleVarLenWith layerForward m sample len
+    rows := rows.push (Tensor.packShape row)
+  return Tensor.catManyChecked rows 0 #[batch, outSeq, cfg.outputDim]
+
+/-- Deterministic chunk-local inference, re-padded to the fixed output width. -/
+def forwardVarLenInference {batch frames : UInt64}
+    (m : AudioEncoder (device := device) cfg)
+    (inputFeatures : Tensor { device := device, shape := #[batch, cfg.numMelBins, frames] })
+    (featureLens : Array UInt64)
+    : Tensor { device := device, shape := #[batch, AudioEncoderConfig.framesAfterConv3 cfg frames, cfg.outputDim] } :=
+  Id.run <| forwardVarLenWith (M := Id)
+    (fun layer x mask => pure (layer.forwardInference x mask)) m inputFeatures featureLens
+
+/-- Chunk-local training/evaluation. Every attention chunk honors the training flag. -/
+def forwardVarLenIO {batch frames : UInt64}
+    (m : AudioEncoder (device := device) cfg)
+    (inputFeatures : Tensor { device := device, shape := #[batch, cfg.numMelBins, frames] })
+    (featureLens : Array UInt64)
+    (training : Bool)
+    : IO (Tensor { device := device, shape := #[batch, AudioEncoderConfig.framesAfterConv3 cfg frames, cfg.outputDim] }) :=
+  forwardVarLenWith (fun layer x mask => layer.forwardIO x training mask) m inputFeatures featureLens
+
+/-- Compatibility alias for deterministic chunk-local inference. -/
 def forwardVarLen {batch frames : UInt64}
     (m : AudioEncoder (device := device) cfg)
     (inputFeatures : Tensor { device := device, shape := #[batch, cfg.numMelBins, frames] })
     (featureLens : Array UInt64)
     : Tensor { device := device, shape := #[batch, AudioEncoderConfig.framesAfterConv3 cfg frames, cfg.outputDim] } :=
-  let inputFeatures := alignFeatures m inputFeatures
-  let outSeq := AudioEncoderConfig.framesAfterConv3 cfg frames
-  if batch == 0 then
-    Tensor.castLike inputFeatures ((Tensor.zeros #[batch, outSeq, cfg.outputDim] false inputFeatures.device).forgetDType)
-  else
-    let rows : Array (Sigma (fun shape => Tensor { device := device, shape := shape })) := Id.run do
-      let mut out : Array (Sigma (fun shape => Tensor { device := device, shape := shape })) := #[]
-      for b in [:batch.toNat] do
-        let sample : Tensor { device := device, shape := #[1, cfg.numMelBins, frames] } := Tensor.sliceChecked inputFeatures 0 b.toUInt64 1 #[1, cfg.numMelBins, frames]
-        let len := featureLens.getD b frames
-        let row : Tensor { device := device, shape := #[1, outSeq, cfg.outputDim] } := encodeOneSampleVarLen m sample len
-        out := out.push (Tensor.packShape row)
-      out
-    Tensor.catManyChecked rows 0 #[batch, outSeq, cfg.outputDim]
+  m.forwardVarLenInference inputFeatures featureLens
 
-def forward {batch frames : UInt64}
+private def forwardWith {M : Type → Type} [Monad M] {batch frames : UInt64}
+    (layerForward : LayerForward M cfg device)
     (m : AudioEncoder (device := device) cfg)
     (inputFeatures : Tensor { device := device, shape := #[batch, cfg.numMelBins, frames] })
     (attnMask : Option (Tensor { device := device, shape := #[batch, AudioEncoderConfig.framesAfterConv3 cfg frames] }) := none)
-    : Tensor { device := device, shape := #[batch, AudioEncoderConfig.framesAfterConv3 cfg frames, cfg.outputDim] } :=
+    : M (Tensor { device := device, shape := #[batch, AudioEncoderConfig.framesAfterConv3 cfg frames, cfg.outputDim] }) := do
   let inputFeatures := alignFeatures m inputFeatures
   let t1 := AudioEncoderConfig.downsampleOnce frames
   let t2 := AudioEncoderConfig.downsampleTwice frames
@@ -477,14 +560,38 @@ def forward {batch frames : UInt64}
   let posBatch : Tensor { device := device, shape := #[batch, t3, cfg.dModel] } := Tensor.expand (Tensor.reshapeChecked pos #[1, t3, cfg.dModel]) #[batch, t3, cfg.dModel]
   let hidden0 := Tensor.Promoting.add xEmb (Tensor.castLike xEmb posBatch)
 
-  let hidden := match attnMask with
-    | some mask => m.layers.foldl (fun h layer => layer.forward h (some mask)) hidden0
-    | none => m.layers.foldl (fun h layer => layer.forward h none) hidden0
+  let hidden ← m.layers.foldlM (fun h layer => layerForward layer h attnMask) hidden0
 
   let hidden := m.lnPost.forward3d hidden
   let hidden : Tensor { device := device, shape := #[batch, t3, cfg.dModel] } := Tensor.affine3d hidden m.proj1Weight m.proj1Bias
   let hidden := activate cfg.activationFunction hidden
-  Tensor.affine3d hidden m.proj2Weight m.proj2Bias
+  return Tensor.affine3d hidden m.proj2Weight m.proj2Bias
+
+/-- Deterministic encoder inference, with attention dropout disabled. -/
+def forwardInference {batch frames : UInt64}
+    (m : AudioEncoder (device := device) cfg)
+    (inputFeatures : Tensor { device := device, shape := #[batch, cfg.numMelBins, frames] })
+    (attnMask : Option (Tensor { device := device, shape := #[batch, AudioEncoderConfig.framesAfterConv3 cfg frames] }) := none)
+    : Tensor { device := device, shape := #[batch, AudioEncoderConfig.framesAfterConv3 cfg frames, cfg.outputDim] } :=
+  Id.run <| forwardWith (M := Id)
+    (fun layer x mask => pure (layer.forwardInference x mask)) m inputFeatures attnMask
+
+/-- Encoder training/evaluation; training uses the configured attention dropout. -/
+def forwardIO {batch frames : UInt64}
+    (m : AudioEncoder (device := device) cfg)
+    (inputFeatures : Tensor { device := device, shape := #[batch, cfg.numMelBins, frames] })
+    (training : Bool)
+    (attnMask : Option (Tensor { device := device, shape := #[batch, AudioEncoderConfig.framesAfterConv3 cfg frames] }) := none)
+    : IO (Tensor { device := device, shape := #[batch, AudioEncoderConfig.framesAfterConv3 cfg frames, cfg.outputDim] }) :=
+  forwardWith (fun layer x mask => layer.forwardIO x training mask) m inputFeatures attnMask
+
+/-- Compatibility alias for deterministic inference. Use `forwardIO` for training. -/
+def forward {batch frames : UInt64}
+    (m : AudioEncoder (device := device) cfg)
+    (inputFeatures : Tensor { device := device, shape := #[batch, cfg.numMelBins, frames] })
+    (attnMask : Option (Tensor { device := device, shape := #[batch, AudioEncoderConfig.framesAfterConv3 cfg frames] }) := none)
+    : Tensor { device := device, shape := #[batch, AudioEncoderConfig.framesAfterConv3 cfg frames, cfg.outputDim] } :=
+  m.forwardInference inputFeatures attnMask
 
 end AudioEncoder
 
@@ -492,6 +599,6 @@ instance {cfg : AudioEncoderConfig} {batch frames : UInt64} :
     Module (AudioEncoder (device := device) cfg)
       (Tensor { device := device, shape := #[batch, cfg.numMelBins, frames] })
       (Tensor { device := device, shape := #[batch, AudioEncoderConfig.framesAfterConv3 cfg frames, cfg.outputDim] }) where
-  forward := fun m x => m.forward x none
+  forward := fun m x => m.forwardInference x none
 
 end torch.qwen3asr

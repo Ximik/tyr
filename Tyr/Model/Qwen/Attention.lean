@@ -115,18 +115,18 @@ private def sdpaGQA {batch n_head n_kv_head seq head_dim : UInt64} {d : DType} {
     (query : Tensor ⟨#[batch, n_head, seq, head_dim], d, dev⟩)
     (key : Tensor ⟨#[batch, n_kv_head, seq, head_dim], d, dev⟩)
     (value : Tensor ⟨#[batch, n_kv_head, seq, head_dim], d, dev⟩)
-    (dropoutP : Float) (isCausal : Bool) (enableGqa : Bool)
+    (isCausal : Bool) (enableGqa : Bool)
     : Tensor ⟨#[batch, n_head, seq, head_dim], d, dev⟩ :=
-  Tensor.attentionGQA query key value dropoutP isCausal enableGqa
+  Tensor.attentionGQA query key value isCausal enableGqa
 
 /-- SDPA with GQA where query and KV sequence lengths differ. -/
 private def sdpaGQAQKV {batch n_head n_kv_head q_seq kv_seq head_dim : UInt64} {d : DType} {dev : Device}
     (query : Tensor ⟨#[batch, n_head, q_seq, head_dim], d, dev⟩)
     (key : Tensor ⟨#[batch, n_kv_head, kv_seq, head_dim], d, dev⟩)
     (value : Tensor ⟨#[batch, n_kv_head, kv_seq, head_dim], d, dev⟩)
-    (dropoutP : Float) (isCausal : Bool) (enableGqa : Bool)
+    (isCausal : Bool) (enableGqa : Bool)
     : Tensor ⟨#[batch, n_head, q_seq, head_dim], d, dev⟩ :=
-  Tensor.attentionGQAQKV query key value dropoutP isCausal enableGqa
+  Tensor.attentionGQAQKV query key value isCausal enableGqa
 
 /-- SDPA with GQA and a [batch, seq] padding mask. The mask dtype stays
     generic: the extern accepts any runtime dtype and the legacy callers
@@ -136,9 +136,9 @@ private def sdpaGQAMask {batch n_head n_kv_head seq head_dim : UInt64} {d dm : D
     (key : Tensor ⟨#[batch, n_kv_head, seq, head_dim], d, dev⟩)
     (value : Tensor ⟨#[batch, n_kv_head, seq, head_dim], d, dev⟩)
     (mask : Tensor ⟨#[batch, seq], dm, dev⟩)
-    (dropoutP : Float) (isCausal : Bool) (enableGqa : Bool)
+    (isCausal : Bool) (enableGqa : Bool)
     : Tensor ⟨#[batch, n_head, seq, head_dim], d, dev⟩ :=
-  Tensor.attentionGQAMask query key value mask dropoutP isCausal enableGqa
+  Tensor.attentionGQAMask query key value mask isCausal enableGqa
 
 /-- Experimental Tyr FlashAttention entry point; output shares the query spec. -/
 private def flashAttn4d {batch nHead nKvHead qSeq kvSeq headDim : UInt64} {d : DType} {dev : Device}
@@ -211,7 +211,7 @@ def forward {batch seq hidden_size num_heads num_kv_heads head_dim : UInt64}
   let v := transposeForAttention v
 
   -- Scaled dot-product attention with GQA
-  let attn_out := sdpaGQA q k v 0.0 is_causal true
+  let attn_out := sdpaGQA q k v is_causal true
 
   -- Transpose back to [batch, seq, num_heads, head_dim]
   let attn_out := transposeFromAttention attn_out
@@ -282,7 +282,7 @@ def forwardStep {batch hidden_size num_heads num_kv_heads head_dim : UInt64}
       if useTyrFlashAttn then
         flashAttn4d qh kAll vAll true
       else
-        sdpaGQAQKV qh kAll vAll 0.0 false true
+        sdpaGQAQKV qh kAll vAll false true
     let attnOut := transposeFromAttention attnOut
     let attnOut := attnOut.reshapeChecked #[batch, 1, num_heads * head_dim]
     let out := Tensor.linear3d attnOut attn.o_proj
@@ -309,7 +309,7 @@ def forwardStep {batch hidden_size num_heads num_kv_heads head_dim : UInt64}
       if useTyrFlashAttn then
         flashAttn4d qh kAll vAll true
       else
-        sdpaGQAQKV qh kAll vAll 0.0 false true
+        sdpaGQAQKV qh kAll vAll false true
     let attnOut := transposeFromAttention attnOut
     let attnOut := attnOut.reshapeChecked #[batch, 1, num_heads * head_dim]
     let out := Tensor.linear3d attnOut attn.o_proj
@@ -358,7 +358,7 @@ def forwardMasked {batch seq hidden_size num_heads num_kv_heads head_dim : UInt6
   let v := transposeForAttention v
 
   -- Scaled dot-product attention with GQA and padding mask
-  let attn_out := sdpaGQAMask q k v attn_mask 0.0 is_causal true
+  let attn_out := sdpaGQAMask q k v attn_mask is_causal true
 
   -- Transpose back to [batch, seq, num_heads, head_dim]
   let attn_out := transposeFromAttention attn_out

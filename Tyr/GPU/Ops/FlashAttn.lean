@@ -85,7 +85,7 @@ def dispatchRoute
   | .portable => .portable
   | _ => .tkKernel
 
-/-- Main typed FlashAttention/SDPA API.
+/-- Pure FlashAttention/SDPA with zero dropout.
     This routes through a torch-registered op (`tyr::flash_attn`) so autograd remains native.
     The indexed adapter checks that native output metadata matches the query. -/
 @[inline] def flashAttn
@@ -94,12 +94,26 @@ def dispatchRoute
     (key : KeyValue (device := device) batch nKvHead kvSeq headDim d)
     (value : KeyValue (device := device) batch nKvHead kvSeq headDim d)
     (attnMask : Option (PaddingMask (device := device) batch kvSeq) := none)
-    (dropoutP : Float := 0.0)
     (isCausal : Bool := false)
     (scale : Option Float := none)
     (enableGqa : Bool := false)
     : Query (device := device) batch nHead qSeq headDim d :=
-  Tensor.flashAttention query key value enableGqa attnMask dropoutP isCausal scale
+  Tensor.flashAttention query key value enableGqa attnMask isCausal scale
+
+/-- Effectful FlashAttention/SDPA. Training uses the configured dropout;
+evaluation passes zero dropout to the native IO operation. -/
+@[inline] def flashAttnIO
+    {batch nHead nKvHead qSeq kvSeq headDim : UInt64} {d : DType}
+    (query : Query (device := device) batch nHead qSeq headDim d)
+    (key : KeyValue (device := device) batch nKvHead kvSeq headDim d)
+    (value : KeyValue (device := device) batch nKvHead kvSeq headDim d)
+    (dropoutP : Float) (training : Bool)
+    (attnMask : Option (PaddingMask (device := device) batch kvSeq) := none)
+    (isCausal : Bool := false)
+    (scale : Option Float := none)
+    (enableGqa : Bool := false)
+    : IO (Query (device := device) batch nHead qSeq headDim d) :=
+  Tensor.flashAttentionIO query key value dropoutP training enableGqa attnMask isCausal scale
 
 /-- Alias matching PyTorch naming. -/
 @[inline] def scaledDotProductAttention
@@ -108,12 +122,25 @@ def dispatchRoute
     (key : KeyValue (device := device) batch nKvHead kvSeq headDim d)
     (value : KeyValue (device := device) batch nKvHead kvSeq headDim d)
     (attnMask : Option (PaddingMask (device := device) batch kvSeq) := none)
-    (dropoutP : Float := 0.0)
     (isCausal : Bool := false)
     (scale : Option Float := none)
     (enableGqa : Bool := false)
     : Query (device := device) batch nHead qSeq headDim d :=
-  flashAttn query key value attnMask dropoutP isCausal scale enableGqa
+  flashAttn query key value attnMask isCausal scale enableGqa
+
+/-- Effectful alias matching PyTorch naming, with explicit training mode. -/
+@[inline] def scaledDotProductAttentionIO
+    {batch nHead nKvHead qSeq kvSeq headDim : UInt64} {d : DType}
+    (query : Query (device := device) batch nHead qSeq headDim d)
+    (key : KeyValue (device := device) batch nKvHead kvSeq headDim d)
+    (value : KeyValue (device := device) batch nKvHead kvSeq headDim d)
+    (dropoutP : Float) (training : Bool)
+    (attnMask : Option (PaddingMask (device := device) batch kvSeq) := none)
+    (isCausal : Bool := false)
+    (scale : Option Float := none)
+    (enableGqa : Bool := false)
+    : IO (Query (device := device) batch nHead qSeq headDim d) :=
+  flashAttnIO query key value dropoutP training attnMask isCausal scale enableGqa
 
 /-- Typed API returning both the dispatch route and the output. -/
 def flashAttnWithRoute
@@ -122,14 +149,31 @@ def flashAttnWithRoute
     (key : KeyValue (device := device) batch nKvHead kvSeq headDim d)
     (value : KeyValue (device := device) batch nKvHead kvSeq headDim d)
     (attnMask : Option (PaddingMask (device := device) batch kvSeq) := none)
-    (dropoutP : Float := 0.0)
     (isCausal : Bool := false)
     (scale : Option Float := none)
     (enableGqa : Bool := false)
     : DispatchRoute × Query (device := device) batch nHead qSeq headDim d :=
-  let route := dispatchRoute query key value attnMask dropoutP isCausal scale enableGqa
-  let out := flashAttn query key value attnMask dropoutP isCausal scale enableGqa
+  let route := dispatchRoute query key value attnMask 0.0 isCausal scale enableGqa
+  let out := flashAttn query key value attnMask isCausal scale enableGqa
   (route, out)
+
+/-- Effectful attention and its route. The descriptor uses the same effective
+dropout as execution, including zero dropout during evaluation. -/
+def flashAttnWithRouteIO
+    {batch nHead nKvHead qSeq kvSeq headDim : UInt64} {d : DType}
+    (query : Query (device := device) batch nHead qSeq headDim d)
+    (key : KeyValue (device := device) batch nKvHead kvSeq headDim d)
+    (value : KeyValue (device := device) batch nKvHead kvSeq headDim d)
+    (dropoutP : Float) (training : Bool)
+    (attnMask : Option (PaddingMask (device := device) batch kvSeq) := none)
+    (isCausal : Bool := false)
+    (scale : Option Float := none)
+    (enableGqa : Bool := false)
+    : IO (DispatchRoute × Query (device := device) batch nHead qSeq headDim d) := do
+  let effectiveDropout := if training then dropoutP else 0.0
+  let route := dispatchRoute query key value attnMask effectiveDropout isCausal scale enableGqa
+  let out ← flashAttnIO query key value dropoutP training attnMask isCausal scale enableGqa
+  pure (route, out)
 
 structure PackedQKV where
   batch : UInt64
@@ -226,8 +270,8 @@ private def parseMaskDyn
     typed API, and returns a shape-indexed existential output. -/
 def flashAttnDyn
     (qDyn kDyn vDyn : RawTensor)
+    (dropoutP : Float) (training : Bool)
     (attnMask : Option RawTensor := none)
-    (dropoutP : Float := 0.0)
     (isCausal : Bool := false)
     (scale : Option Float := none)
     (enableGqa : Bool := false)
@@ -235,8 +279,8 @@ def flashAttnDyn
   let device := qDyn.device
   let packed ← parseQKVDyn qDyn kDyn vDyn
   let typedMask ← parseMaskDyn (device := device) packed.batch packed.kvSeq attnMask
-  let out : Tensor { shape := #[packed.batch, packed.nHead, packed.qSeq, packed.headDim], device := device } :=
-    flashAttn packed.q packed.k packed.v typedMask dropoutP isCausal scale enableGqa
+  let out : Tensor { shape := #[packed.batch, packed.nHead, packed.qSeq, packed.headDim], device := device } ←
+    flashAttnIO packed.q packed.k packed.v dropoutP training typedMask isCausal scale enableGqa
   pure ⟨packed.batch, ⟨packed.nHead, ⟨packed.qSeq, ⟨packed.headDim, out⟩⟩⟩⟩
 
 end Tyr.GPU.Ops.FlashAttn

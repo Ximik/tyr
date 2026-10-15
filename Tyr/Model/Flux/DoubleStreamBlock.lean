@@ -184,7 +184,7 @@ def forward {batch img_seq txt_seq hidden_size num_heads head_dim mlp_hidden : U
   let v := transposeAttention v
 
   -- Joint attention
-  let attn := Tensor.attentionGQA q k v 0.0 false
+  let attn := Tensor.attentionGQA q k v false
 
   -- Transpose back
   let attn := fromAttention attn

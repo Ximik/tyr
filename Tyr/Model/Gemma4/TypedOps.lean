@@ -27,11 +27,30 @@ def routedTextExpertsForward {tokens numExperts topK inter hidden : UInt64}
   x.checkedReplacement (RawTensor.gemma4TextExperts tokens numExperts topK inter hidden
     x.raw gateUp.raw down.raw weights.raw indices.raw)
 
+def maskedAttention? {b h kh qs ks d : UInt64} {dm : DType}
+    (q : Tensor { device := device, shape := #[b, h, qs, d] }) (k v : Tensor { device := device, shape := #[b, kh, ks, d] })
+    (mask : Tensor { device := device, shape := #[b, qs, ks], dtype := dm }) (gqa : Bool := false) :
+    Except String (Tensor { device := device, shape := #[b, h, qs, d] }) := do
+  q.checkedReplacement? (← RawTensor.gemma4MaskedAttention b h kh qs ks d q.raw k.raw v.raw mask.raw gqa)
+
+/-- Deterministic inference attention; dropout is available only through IO. -/
 def maskedAttention {b h kh qs ks d : UInt64} {dm : DType}
     (q : Tensor { device := device, shape := #[b, h, qs, d] }) (k v : Tensor { device := device, shape := #[b, kh, ks, d] })
-    (mask : Tensor { device := device, shape := #[b, qs, ks], dtype := dm }) (dropout : Float := 0.0) (gqa : Bool := false) :
+    (mask : Tensor { device := device, shape := #[b, qs, ks], dtype := dm }) (gqa : Bool := false) :
     Tensor { device := device, shape := #[b, h, qs, d] } :=
-  checked (RawTensor.gemma4MaskedAttention b h kh qs ks d q.raw k.raw v.raw mask.raw dropout gqa)
+  match maskedAttention? q k v mask gqa with
+  | .ok result => result
+  | .error message => panic! s!"Gemma4.maskedAttention: {message}"
+
+def maskedAttentionIO {b h kh qs ks d : UInt64} {dm : DType}
+    (q : Tensor { device := device, shape := #[b, h, qs, d] }) (k v : Tensor { device := device, shape := #[b, kh, ks, d] })
+    (mask : Tensor { device := device, shape := #[b, qs, ks], dtype := dm })
+    (dropout : Float) (training : Bool) (gqa : Bool := false) :
+    IO (Tensor { device := device, shape := #[b, h, qs, d] }) := do
+  let effective ← IO.ofExcept (Tensor.attentionDropout? dropout training)
+  let raw ← RawTensor.gemma4MaskedAttentionIO b h kh qs ks d q.raw k.raw v.raw mask.raw
+    effective gqa
+  IO.ofExcept (q.checkedReplacement? raw)
 
 def zerosDynamicOn {s : Shape} (device : Device) : Tensor { device := device, shape := s } :=
   (Tensor.zeros s false device).forgetDType

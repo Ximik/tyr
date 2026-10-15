@@ -62,7 +62,7 @@ def generateFixtures : IO Unit := do
   let dO := dOf.toBFloat16
 
   -- Forward reference output.
-  let expectedOut := Tensor.attentionGQA q k v 0.0 false
+  let expectedOut := Tensor.attentionGQA q k v false
 
   -- ThunderKittens-style L vector: L = -8 * lse for d=64.
   let (_, lse) := attentionReference q k v

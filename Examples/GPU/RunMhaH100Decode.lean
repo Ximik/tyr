@@ -96,7 +96,7 @@ def generateDecodeFixturesFor (shape : DecodeShape) : IO Unit := do
   let k32 := k.toFloat32
   let v32 := v.toFloat32
   let expected32 := Tensor.attentionGQAQKV
-                      q32 k32 v32 0.0 false true
+                      q32 k32 v32 false true
   let expected := expected32.toBFloat16
 
   Tensor.saveTensor q (decodeFixtureFile shape "q").toString

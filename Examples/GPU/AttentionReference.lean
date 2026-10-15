@@ -26,7 +26,7 @@ def attentionTrainingReference {batch heads seq : UInt64}
   let qRef ← Tensor.setRequiresGrad (Tensor.detach q) true
   let kRef ← Tensor.setRequiresGrad (Tensor.detach k) true
   let vRef ← Tensor.setRequiresGrad (Tensor.detach v) true
-  let output := Tensor.attentionGQA qRef kRef vRef 0.0 false
+  let output := Tensor.attentionGQA qRef kRef vRef false
   Tensor.backwardLoss (Tensor.sumAll (output.toFloat32 * cotangent.toFloat32))
   pure (output, (← Tensor.gradOf qRef).toFloat32, (← Tensor.gradOf kRef).toFloat32,
     (← Tensor.gradOf vRef).toFloat32)

@@ -30,7 +30,7 @@ def oneTorchTrainStep
   let qLeaf ← Tensor.setRequiresGrad (Tensor.detach qM) true
   let kLeaf ← Tensor.setRequiresGrad (Tensor.detach kM) true
   let vLeaf ← Tensor.setRequiresGrad (Tensor.detach vM) true
-  let out : MasterTensor (device := device) := Tensor.attentionGQA qLeaf kLeaf vLeaf 0.0 false
+  let out : MasterTensor (device := device) := Tensor.attentionGQA qLeaf kLeaf vLeaf false
   let diff : MasterTensor (device := device) := out - targetOut32
   let lossT : Tensor { shape := #[], dtype := .Float32, device := device } := Tensor.Preserving.mulScalar (Tensor.meanAll (diff * diff)) 0.5
   Tensor.backwardLoss lossT

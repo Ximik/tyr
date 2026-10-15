@@ -241,7 +241,7 @@ def forward {patchRows patchCols : UInt64}
   let kh : Tensor { device := device, shape := #[1, cfg.num_key_value_heads, tokens, cfg.head_dim] } := transposeAttention k3
   let vh : Tensor { device := device, shape := #[1, cfg.num_key_value_heads, tokens, cfg.head_dim] } := transposeAttention v2
   let attn : Tensor { device := device, shape := #[1, cfg.num_attention_heads, tokens, cfg.head_dim] } :=
-    Tensor.attentionGQA qh kh vh 0.0 false true
+    Tensor.attentionGQA qh kh vh false true
   let out : Tensor { device := device, shape := #[tokens, cfg.hidden_size] } :=
     Tensor.reshapeChecked (transposeAttention attn) #[tokens, cfg.hidden_size]
   m.o_proj.forward2d out

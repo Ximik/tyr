@@ -11,8 +11,8 @@ open torch
   let v : Tensor σ ← match Tensor.ofRaw values.raw with
     | .ok t => pure t
     | .error message => throw <| IO.userError message
-  let full := Tensor.attention q q v 0.0 false
-  let causal := Tensor.attention q q v 0.0 true
+  let full := Tensor.attention q q v false
+  let causal := Tensor.attention q q v true
   for output in #[full, causal] do
     match output.validate with
     | .ok () => pure ()
@@ -61,9 +61,13 @@ open torch
   LeanTest.assertEqual (← result.toFloatArray) #[4, 6, 4, 6]
   LeanTest.assertTrue (result.actualSpec == q.actualSpec)
   for dropout in #[-0.5, 1.5] do
-    match Tensor.flashAttention? q q v (dropout := dropout) with
-    | .ok _ => LeanTest.fail "Invalid FlashAttention dropout must return an error"
-    | .error message => LeanTest.assertTrue (!message.isEmpty)
+    let rejected ← try
+      let _ ← Tensor.flashAttentionIO q q v dropout true
+      pure false
+    catch error =>
+      LeanTest.assertTrue (!error.toString.isEmpty)
+      pure true
+    LeanTest.assertTrue rejected "Invalid FlashAttention dropout must return IO.error"
   let ints := q.castDType .Int64
   match Tensor.flashAttention? ints ints ints with
   | .ok _ => LeanTest.fail "Integer FlashAttention must return an error"

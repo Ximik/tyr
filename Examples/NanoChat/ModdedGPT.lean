@@ -295,8 +295,8 @@ def CausalSelfAttention.forward {batch seq dim headDim numHeads rotaryLen : UInt
   -- Scaled dot-product attention with optional sliding window
   -- Using GQA window function for sliding window, regular SDPA for full context
   let attnOut := match windowSize with
-    | some ws => Tensor.attentionWindow q k v 0.0 true false ws
-    | none => Tensor.attentionGQA q k v 0.0 true
+    | some ws => Tensor.attentionWindow q k v true false ws
+    | none => Tensor.attentionGQA q k v true
 
   -- Transpose back to [batch, seq, numHeads, headDim]
   let attnOut := Tensor.joinHeads attnOut

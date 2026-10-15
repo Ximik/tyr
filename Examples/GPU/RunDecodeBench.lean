@@ -193,7 +193,7 @@ private def runOne (runId : String) (warmup iters repeats : Nat)
   -- SDPA reference output (BF16 in / BF16 out, same as kernel) for parity.
   let outRef : Tensor { shape := #[c.batch, c.qHeads, 1, c.headDim], dtype := .BFloat16, device := (.CUDA 0) } :=
     Tensor.attentionGQAQKV
-      (q.toFloat32) (k.toFloat32) (v.toFloat32) 0.0 false true
+      (q.toFloat32) (k.toFloat32) (v.toFloat32) false true
       |> Tensor.toBFloat16
 
   match backend with
@@ -201,7 +201,7 @@ private def runOne (runId : String) (warmup iters repeats : Nat)
       let sink : Tensor { shape := #[c.batch, c.qHeads, 1, c.headDim], dtype := .BFloat16, device := (.CUDA 0) } ← Tensor.uniformLike q 0 0
       let sinkRef ← IO.mkRef (some sink)
       let action : IO Unit := do
-        let out := Tensor.attentionGQAQKV q k v 0.0 false true
+        let out := Tensor.attentionGQAQKV q k v false true
         let some destination ← sinkRef.swap none
           | throw (IO.userError "Decode benchmark destination is unavailable")
         let updated ← Tensor.copyInto destination out

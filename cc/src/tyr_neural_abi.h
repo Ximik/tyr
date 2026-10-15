@@ -13,14 +13,18 @@ lean_object* lean_torch_cat_dyn(lean_object*, lean_object*);
 lean_object* lean_torch_arange(uint64_t, uint64_t, uint64_t);
 lean_object* lean_torch_tensor_sin(lean_object*, lean_object*);
 lean_object* lean_torch_tensor_cos(lean_object*, lean_object*);
-lean_object* lean_torch_sdpa_gqa(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, lean_object*, lean_object*, lean_object*, double, uint8_t, uint8_t);
-lean_object* lean_torch_sdpa_gqa_mask(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, lean_object*, lean_object*, lean_object*, lean_object*, double, uint8_t, uint8_t);
+lean_object* lean_torch_sdpa_gqa(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, lean_object*, lean_object*, lean_object*, uint8_t, uint8_t);
+lean_object* lean_torch_sdpa_gqa_io(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, lean_object*, lean_object*, lean_object*, double, uint8_t, uint8_t);
+lean_object* lean_torch_sdpa_gqa_mask(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, lean_object*, lean_object*, lean_object*, lean_object*, uint8_t, uint8_t);
+lean_object* lean_torch_sdpa_gqa_mask_io(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, lean_object*, lean_object*, lean_object*, lean_object*, double, uint8_t, uint8_t);
 lean_object* lean_torch_gather(lean_object*, lean_object*, lean_object*, uint64_t, lean_object*);
 lean_object* lean_torch_masked_select(lean_object*, lean_object*, lean_object*);
 lean_object* lean_torch_masked_scatter(lean_object*, lean_object*, lean_object*, lean_object*, lean_object*);
-lean_object* lean_torch_sdpa_gqa_qkv(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, lean_object*, lean_object*, lean_object*, double, uint8_t, uint8_t);
+lean_object* lean_torch_sdpa_gqa_qkv(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, lean_object*, lean_object*, lean_object*, uint8_t, uint8_t);
+lean_object* lean_torch_sdpa_gqa_qkv_io(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, lean_object*, lean_object*, lean_object*, double, uint8_t, uint8_t);
 // Except String RawTensor; borrows Q/K/V and consumes both Option arguments.
-lean_object* lean_torch_tyr_flash_attn_4d(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, lean_object*, lean_object*, lean_object*, lean_object*, double, uint8_t, lean_object*, uint8_t);
+lean_object* lean_torch_tyr_flash_attn_4d(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, lean_object*, lean_object*, lean_object*, lean_object*, uint8_t, lean_object*, uint8_t);
+lean_object* lean_torch_tyr_flash_attn_4d_io(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, lean_object*, lean_object*, lean_object*, lean_object*, double, uint8_t, lean_object*, uint8_t);
 // slice_scatter consumes input, borrows source, and returns a tensor value.
 lean_object* lean_torch_slice_scatter_along_dim(lean_object*, lean_object*, lean_object*, uint64_t, uint64_t, lean_object*);
 lean_object* lean_torch_apply_rotary_emb(uint64_t, uint64_t, uint64_t, uint64_t, lean_object*, lean_object*, lean_object*);
@@ -39,7 +43,8 @@ lean_object* lean_torch_conv1d_group_bias(lean_object*, lean_object*, lean_objec
 lean_object* lean_torch_conv1d_group_bias_checked(lean_object*, lean_object*, lean_object*, lean_object*, lean_object*, lean_object*, uint64_t, uint64_t, uint64_t, uint64_t);
 lean_object* lean_torch_conv_transpose1d_bias(lean_object*, lean_object*, lean_object*, lean_object*, lean_object*, lean_object*, uint64_t, uint64_t, uint64_t, uint64_t);
 lean_object* lean_torch_conv_transpose1d_bias_checked(lean_object*, lean_object*, lean_object*, lean_object*, lean_object*, lean_object*, uint64_t, uint64_t, uint64_t, uint64_t);
-lean_object* lean_torch_sdpa_gqa_window(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, lean_object*, lean_object*, lean_object*, double, uint8_t, uint8_t, uint64_t);
+lean_object* lean_torch_sdpa_gqa_window(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, lean_object*, lean_object*, lean_object*, uint8_t, uint8_t, uint64_t);
+lean_object* lean_torch_sdpa_gqa_window_io(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, lean_object*, lean_object*, lean_object*, double, uint8_t, uint8_t, uint64_t);
 lean_object* lean_torch_tensor_elu(lean_object*, lean_object*);
 lean_object* lean_torch_tensor_log(lean_object*, lean_object*);
 lean_object* lean_torch_safetensors_save(lean_object*, lean_object*, lean_object*, lean_object*);

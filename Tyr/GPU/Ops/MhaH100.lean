@@ -136,7 +136,7 @@ def mhaBwd {seq kvBlocks : UInt64} [Variant (device := device) seq kvBlocks]
 
 private def sdpaFwdPortable {seq : UInt64}
     (q k v : BF16 (device := device) seq) (isCausal : Bool) : BF16 (device := device) seq :=
-  Tensor.attention q k v 0.0 isCausal
+  Tensor.attention q k v isCausal
 
 private def sdpaBwdPortable {seq : UInt64}
     (q k v dO : BF16 (device := device) seq) (isCausal : Bool) : IO (F32 (device := device) seq × F32 (device := device) seq × F32 (device := device) seq) := do
@@ -144,7 +144,7 @@ private def sdpaBwdPortable {seq : UInt64}
   let kLeaf ← Tensor.parameter k
   let vLeaf ← Tensor.parameter v
   let outRef : BF16 (device := device) seq :=
-    Tensor.attention qLeaf kLeaf vLeaf 0.0 isCausal
+    Tensor.attention qLeaf kLeaf vLeaf isCausal
   Tensor.backward outRef dO
   let dQ : F32 (device := device) seq := Tensor.toFloat32 (← Tensor.gradOf qLeaf)
   let dK : F32 (device := device) seq := Tensor.toFloat32 (← Tensor.gradOf kLeaf)

@@ -8,7 +8,10 @@ opaque gemma4TextExperts (tokens numExperts topK inter hidden : UInt64)
 
 @[extern "lean_torch_sdpa_gqa_mask_qkv"]
 opaque gemma4MaskedAttention (batch heads kvHeads qSeq kvSeq dim : UInt64)
-    (query key value mask : @& RawTensor) (dropout : Float) (gqa : Bool) : RawTensor
+    (query key value mask : @& RawTensor) (gqa : Bool) : Except String RawTensor
+@[extern "lean_torch_sdpa_gqa_mask_qkv_io"]
+opaque gemma4MaskedAttentionIO (batch heads kvHeads qSeq kvSeq dim : UInt64)
+    (query key value mask : @& RawTensor) (dropout : Float) (gqa : Bool) : IO RawTensor
 
 @[extern "lean_torch_softcap"]
 opaque gemma4Softcap (shape : Shape) (input : @& RawTensor) (cap : Float) : RawTensor

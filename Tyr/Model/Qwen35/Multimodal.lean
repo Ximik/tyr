@@ -176,7 +176,7 @@ def forward {tokens : UInt64}
   let vh : Tensor { device := device, shape := #[1, cfg.num_heads, tokens, VisionConfig.headDim cfg] } := Tensor.splitHeads v
 
   let attn : Tensor { device := device, shape := #[1, cfg.num_heads, tokens, VisionConfig.headDim cfg] } :=
-    Tensor.attentionGQA qh kh vh 0.0 false true
+    Tensor.attentionGQA qh kh vh false true
   let out : Tensor { device := device, shape := #[1, tokens, cfg.num_heads, VisionConfig.headDim cfg] } := Tensor.joinHeads attn
   let outFlat : Tensor { device := device, shape := #[tokens, cfg.hidden_size] } := Tensor.reshapeChecked out #[tokens, cfg.hidden_size]
   linear2d outFlat m.proj_weight m.proj_bias

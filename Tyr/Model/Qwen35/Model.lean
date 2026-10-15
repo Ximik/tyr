@@ -388,7 +388,7 @@ def forward {batch seq : UInt64}
   let vh : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, seq, cfg.head_dim] } := Tensor.splitHeads v
 
   let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, seq, cfg.head_dim] } :=
-    Tensor.attentionGQA qh kh vh 0.0 is_causal true
+    Tensor.attentionGQA qh kh vh is_causal true
 
   let attn : Tensor { device := device, shape := #[batch, seq, cfg.num_attention_heads, cfg.head_dim] } := Tensor.joinHeads attn
   let attnFlat : Tensor { device := device, shape := #[batch, seq, qLen] } := Tensor.reshapeChecked attn #[batch, seq, qLen]
@@ -443,7 +443,7 @@ def forwardWithCache {batch seq : UInt64}
   let kh : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, seq, cfg.head_dim] } := typedSlice kStore' 2 0 seq
   let vh : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, seq, cfg.head_dim] } := typedSlice vStore' 2 0 seq
   let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, seq, cfg.head_dim] } :=
-    Tensor.attentionGQA qh kh vh 0.0 true true
+    Tensor.attentionGQA qh kh vh true true
 
   let attn : Tensor { device := device, shape := #[batch, seq, cfg.num_attention_heads, cfg.head_dim] } := Tensor.joinHeads attn
   let attnFlat : Tensor { device := device, shape := #[batch, seq, qLen] } := Tensor.reshapeChecked attn #[batch, seq, qLen]
@@ -482,7 +482,7 @@ def forwardMasked {batch seq : UInt64}
   let vh : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, seq, cfg.head_dim] } := Tensor.splitHeads v
 
   let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, seq, cfg.head_dim] } :=
-    Tensor.attentionGQAMask qh kh vh attn_mask 0.0 is_causal true
+    Tensor.attentionGQAMask qh kh vh attn_mask is_causal true
 
   let attn : Tensor { device := device, shape := #[batch, seq, cfg.num_attention_heads, cfg.head_dim] } := Tensor.joinHeads attn
   let attnFlat : Tensor { device := device, shape := #[batch, seq, qLen] } := Tensor.reshapeChecked attn #[batch, seq, qLen]
@@ -533,7 +533,7 @@ def forwardStep {batch : UInt64}
     let kAll : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, kvLen, cfg.head_dim] } := typedSlice kStore' 2 0 kvLen
     let vAll : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, kvLen, cfg.head_dim] } := typedSlice vStore' 2 0 kvLen
     let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, 1, cfg.head_dim] } :=
-      Tensor.attentionGQAQKV qh kAll vAll 0.0 false true
+      Tensor.attentionGQAQKV qh kAll vAll false true
     let attn : Tensor { device := device, shape := #[batch, 1, cfg.num_attention_heads, cfg.head_dim] } := Tensor.joinHeads attn
     let attnFlat : Tensor { device := device, shape := #[batch, 1, qLen] } := Tensor.reshapeChecked attn #[batch, 1, qLen]
     let gated : Tensor { device := device, shape := #[batch, 1, qLen] } := Tensor.Promoting.mul attnFlat (Tensor.Preserving.sigmoid gateFlat)
@@ -555,7 +555,7 @@ def forwardStep {batch : UInt64}
     let kAll : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, kvLen, cfg.head_dim] } := typedSlice kStore' 2 0 kvLen
     let vAll : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, kvLen, cfg.head_dim] } := typedSlice vStore' 2 0 kvLen
     let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, 1, cfg.head_dim] } :=
-      Tensor.attentionGQAQKV qh kAll vAll 0.0 false true
+      Tensor.attentionGQAQKV qh kAll vAll false true
     let attn : Tensor { device := device, shape := #[batch, 1, cfg.num_attention_heads, cfg.head_dim] } := Tensor.joinHeads attn
     let attnFlat : Tensor { device := device, shape := #[batch, 1, qLen] } := Tensor.reshapeChecked attn #[batch, 1, qLen]
     let gated : Tensor { device := device, shape := #[batch, 1, qLen] } := Tensor.Promoting.mul attnFlat (Tensor.Preserving.sigmoid gateFlat)

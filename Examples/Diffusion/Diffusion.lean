@@ -126,7 +126,7 @@ def bidirectionalAttentionForward {batch seq n_embd n_head : UInt64}
   let v := Tensor.splitHeads v
 
   -- Bidirectional attention (is_causal=false)
-  let attn := Tensor.attentionGQA q k v 0.0 false
+  let attn := Tensor.attentionGQA q k v false
 
   -- Reshape back: [batch, n, seq, d] -> [batch, seq, n*d]
   let attn := Tensor.joinHeads attn

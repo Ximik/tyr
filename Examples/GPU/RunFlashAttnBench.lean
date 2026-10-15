@@ -585,7 +585,7 @@ private def sdpaEqualRef
   let q ← makeLeaf qBase
   let k ← makeLeaf kBase
   let v ← makeLeaf vBase
-  let out := Tensor.attentionGQA q k v 0.0 isCausal
+  let out := Tensor.attentionGQA q k v isCausal
   backwardWithCotangent out dOBase
   let _ ← torch.cuda_synchronize
   pure (out, (← Tensor.gradOf q).toFloat32, (← Tensor.gradOf k).toFloat32, (← Tensor.gradOf v).toFloat32)
@@ -600,7 +600,7 @@ private def sdpaGqaRef
   let q ← makeLeaf qBase
   let k ← makeLeaf kBase
   let v ← makeLeaf vBase
-  let out := Tensor.attentionGQAQKV q k v 0.0 isCausal true
+  let out := Tensor.attentionGQAQKV q k v isCausal true
   backwardWithCotangent out dOBase
   let _ ← torch.cuda_synchronize
   pure (out, (← Tensor.gradOf q).toFloat32, (← Tensor.gradOf k).toFloat32, (← Tensor.gradOf v).toFloat32)
@@ -613,7 +613,7 @@ private def tyrEqualOnce
   let q ← makeLeaf qBase
   let k ← makeLeaf kBase
   let v ← makeLeaf vBase
-  let (route, out) := flashAttnWithRoute q k v none 0.0 isCausal none false
+  let (route, out) := flashAttnWithRoute q k v none isCausal none false
   backwardWithCotangent out dOBase
   let _ ← torch.cuda_synchronize
   pure (route, out, (← Tensor.gradOf q).toFloat32, (← Tensor.gradOf k).toFloat32, (← Tensor.gradOf v).toFloat32)
@@ -628,7 +628,7 @@ private def tyrGqaOnce
   let q ← makeLeaf qBase
   let k ← makeLeaf kBase
   let v ← makeLeaf vBase
-  let (route, out) := flashAttnWithRoute q k v none 0.0 isCausal none true
+  let (route, out) := flashAttnWithRoute q k v none isCausal none true
   backwardWithCotangent out dOBase
   let _ ← torch.cuda_synchronize
   pure (route, out, (← Tensor.gradOf q).toFloat32, (← Tensor.gradOf k).toFloat32, (← Tensor.gradOf v).toFloat32)
@@ -637,13 +637,13 @@ private def sdpaEqualForward {batch heads seq headDim : UInt64}
     (qBase kBase vBase : Tensor { shape := #[batch, heads, seq, headDim], dtype := .BFloat16, device := (.CUDA 0) })
     (isCausal : Bool)
     : Tensor { shape := #[batch, heads, seq, headDim], dtype := .BFloat16, device := (.CUDA 0) } :=
-  Tensor.attentionGQA qBase kBase vBase 0.0 isCausal
+  Tensor.attentionGQA qBase kBase vBase isCausal
 
 private def tyrEqualForward {batch heads seq headDim : UInt64}
     (qBase kBase vBase : Tensor { shape := #[batch, heads, seq, headDim], dtype := .BFloat16, device := (.CUDA 0) })
     (isCausal : Bool)
     : DispatchRoute × Tensor { shape := #[batch, heads, seq, headDim], dtype := .BFloat16, device := (.CUDA 0) } :=
-  flashAttnWithRoute qBase kBase vBase none 0.0 isCausal none false
+  flashAttnWithRoute qBase kBase vBase none isCausal none false
 
 private def runEqualHeadsFwdBwd
     {batch heads seq headDim : UInt64}
@@ -689,7 +689,7 @@ private def runEqualHeadsFwdBwd
         let q ← makeLeaf qBase
         let k ← makeLeaf kBase
         let v ← makeLeaf vBase
-        let out := Tensor.attentionGQA q k v 0.0 c.isCausal
+        let out := Tensor.attentionGQA q k v c.isCausal
         backwardWithCotangent out dOBase
         let _ ← torch.cuda_synchronize
       let latencies ← benchmarkAction runMeta.warmupIters runMeta.timedIters runMeta.repeats action
@@ -738,7 +738,7 @@ private def runEqualHeadsFwdBwd
         let q ← makeLeaf qBase
         let k ← makeLeaf kBase
         let v ← makeLeaf vBase
-        let (_, outTimed) := flashAttnWithRoute q k v none 0.0 c.isCausal none false
+        let (_, outTimed) := flashAttnWithRoute q k v none c.isCausal none false
         backwardWithCotangent outTimed dOBase
         let _ ← torch.cuda_synchronize
       let latencies ← benchmarkAction runMeta.warmupIters runMeta.timedIters runMeta.repeats action
@@ -803,7 +803,7 @@ private def runGqaFwdBwd
         let q ← makeLeaf qBase
         let k ← makeLeaf kBase
         let v ← makeLeaf vBase
-        let out := Tensor.attentionGQAQKV q k v 0.0 c.isCausal true
+        let out := Tensor.attentionGQAQKV q k v c.isCausal true
         backwardWithCotangent out dOBase
         let _ ← torch.cuda_synchronize
       let latencies ← benchmarkAction runMeta.warmupIters runMeta.timedIters runMeta.repeats action
@@ -852,7 +852,7 @@ private def runGqaFwdBwd
         let q ← makeLeaf qBase
         let k ← makeLeaf kBase
         let v ← makeLeaf vBase
-        let (_, outTimed) := flashAttnWithRoute q k v none 0.0 c.isCausal none true
+        let (_, outTimed) := flashAttnWithRoute q k v none c.isCausal none true
         backwardWithCotangent outTimed dOBase
         let _ ← torch.cuda_synchronize
       let latencies ← benchmarkAction runMeta.warmupIters runMeta.timedIters runMeta.repeats action
@@ -899,7 +899,7 @@ private def runEqualHeadsForwardOnly
         outRelL2 := some 0.0
       }
       let action : IO Unit := do
-        let _out := Tensor.attentionGQA qBase kBase vBase 0.0 c.isCausal
+        let _out := Tensor.attentionGQA qBase kBase vBase c.isCausal
         let _ ← torch.cuda_synchronize
         pure ()
       let latencies ← benchmarkAction runMeta.warmupIters runMeta.timedIters runMeta.repeats action

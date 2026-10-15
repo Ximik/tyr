@@ -104,7 +104,7 @@ def forward {batch seq hidden_size num_heads head_dim mlp_hidden : UInt64}
   let v := transposeAttention v
 
   -- Scaled dot-product attention (non-causal for diffusion)
-  let attn := Tensor.attentionGQA q k v 0.0 false
+  let attn := Tensor.attentionGQA q k v false
 
   -- Transpose back and reshape
   let attn := fromAttention attn

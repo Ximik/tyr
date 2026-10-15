@@ -89,6 +89,7 @@ jobs:
       - name: Test native attention CPU semantics
         run: |
           bash scripts/test_native_attention.sh cpu
+          bash scripts/test_attention_effects.sh
 
       - name: Test native tensor metadata boundaries
         run: |

@@ -95,7 +95,6 @@ def forwardWithProjectedKV {batch qSeq kvSeq : UInt64}
       qh
       keyStates
       valueStates
-      0.0
       isCausal
       true
   let out : Tensor { device := device, shape := #[batch, qSeq, nHeads, headDim] } := fromAttention attn
@@ -156,7 +155,6 @@ def forwardSelfStep {batch : UInt64}
         qh
         kAll
         vAll
-        0.0
         false
         true
     let out : Tensor { device := device, shape := #[batch, 1, nHeads, headDim] } := fromAttention attn
@@ -184,7 +182,6 @@ def forwardSelfStep {batch : UInt64}
         qh
         kAll
         vAll
-        0.0
         false
         true
     let out : Tensor { device := device, shape := #[batch, 1, nHeads, headDim] } := fromAttention attn

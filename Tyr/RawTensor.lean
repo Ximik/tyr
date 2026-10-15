@@ -156,7 +156,9 @@ def rmsNormWeighted (shape _weightShape : Shape) (x weight : RawTensor) (eps : F
 @[extern "lean_torch_transpose_from_attention"] opaque joinHeads (batch heads seq dim : UInt64)
     (x : @& RawTensor) : RawTensor
 @[extern "lean_torch_sdpa_4d"] opaque attention (batch heads seq dim : UInt64)
-    (q k v : @& RawTensor) (dropout : Float) (causal : Bool := true) : RawTensor
+    (q k v : @& RawTensor) (causal : Bool := true) : Except String RawTensor
+@[extern "lean_torch_sdpa_4d_io"] opaque attentionIO (batch heads seq dim : UInt64)
+    (q k v : @& RawTensor) (dropout : Float) (causal : Bool := true) : IO RawTensor
 @[extern "lean_torch_embedding"] opaque embedding (batch seq vocab embed : UInt64)
     (idx weight : @& RawTensor) (paddingIdx : Option Int := none)
     (maxNorm : Option Float := none) (normType : Float := 2.0)

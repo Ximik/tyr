@@ -27,7 +27,7 @@ def runDecodeCacheParity (device : Device) : IO Bool := do
 
   -- Reference: do attention over the full sequence (causal=true, q_seq=kv_seq).
   let refAll : Tensor { shape := #[batch, qHeads, totalLen, headDim], dtype := .BFloat16, device := device } :=
-    Tensor.attentionGQAQKV qAll kAll vAll 0.0 true true
+    Tensor.attentionGQAQKV qAll kAll vAll true true
 
   -- Build a 1-layer cache, append tokens one at a time, run cached attention.
   let mut cache ← Generator.KVCache.Cache.init 1 batch maxLen kvHeads headDim (device := device)

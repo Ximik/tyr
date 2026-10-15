@@ -24,7 +24,10 @@ import Tests.TestTypedStandalone
 import Tests.TestTensorTreeCast
 import Tests.TestTensorValueUpdates
 import Tests.TestTensorAutogradEffects
+import Tests.TestAttentionEffects
 import Tests.TestAssertions
+import Tests.TestGPTAttentionEffects
+import Tests.TestASRAttentionEffects
 import Tests.TestDistributedValues
 import Tests.TestModuleTyped
 import Tests.TestCoreSmoke

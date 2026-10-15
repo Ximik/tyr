@@ -357,7 +357,7 @@ private def attentionSlidingPrefillWithMask {batch seq : UInt64}
   let kh : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, seq, cfg.head_dim] } := transposeAttention k2
   let vh : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, seq, cfg.head_dim] } := transposeAttention v2
   let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, seq, cfg.head_dim] } :=
-    maskedAttention qh kh vh attnMask 0.0 true
+    maskedAttention qh kh vh attnMask true
   let out : Tensor { device := device, shape := #[batch, seq, cfg.num_attention_heads * cfg.head_dim] } :=
     Tensor.reshapeChecked (transposeAttention attn) #[batch, seq, cfg.num_attention_heads * cfg.head_dim]
   let paddedK : Tensor { device := device, shape := #[batch, Config.maxKVHeads cfg, seq, Config.maxHeadDim cfg] } := padSlidingKVForCache cfg kh
@@ -402,7 +402,7 @@ private def attentionFullPrefillWithMask {batch seq : UInt64}
   let kh : Tensor { device := device, shape := #[batch, Config.fullNumKVHeads cfg, seq, Config.fullHeadDim cfg] } := transposeAttention k2
   let vh : Tensor { device := device, shape := #[batch, Config.fullNumKVHeads cfg, seq, Config.fullHeadDim cfg] } := transposeAttention v2
   let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, seq, Config.fullHeadDim cfg] } :=
-    maskedAttention qh kh vh attnMask 0.0 true
+    maskedAttention qh kh vh attnMask true
   let out : Tensor { device := device, shape := #[batch, seq, cfg.num_attention_heads * Config.fullHeadDim cfg] } :=
     Tensor.reshapeChecked (transposeAttention attn) #[batch, seq, cfg.num_attention_heads * Config.fullHeadDim cfg]
   let paddedK : Tensor { device := device, shape := #[batch, Config.maxKVHeads cfg, seq, Config.maxHeadDim cfg] } := padFullKVForCache cfg kh
@@ -441,7 +441,7 @@ private def attentionSlidingNoCache {batch seq : UInt64}
   let kh : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, seq, cfg.head_dim] } := transposeAttention k2
   let vh : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, seq, cfg.head_dim] } := transposeAttention v2
   let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, seq, cfg.head_dim] } :=
-    Tensor.attentionWindow qh kh vh 0.0 true true cfg.sliding_window
+    Tensor.attentionWindow qh kh vh true true cfg.sliding_window
   let out : Tensor { device := device, shape := #[batch, seq, cfg.num_attention_heads * cfg.head_dim] } :=
     Tensor.reshapeChecked (transposeAttention attn) #[batch, seq, cfg.num_attention_heads * cfg.head_dim]
   oProjSliding cfg m out
@@ -470,7 +470,7 @@ private def attentionFullNoCache {batch seq : UInt64}
   let kh : Tensor { device := device, shape := #[batch, Config.fullNumKVHeads cfg, seq, Config.fullHeadDim cfg] } := transposeAttention k2
   let vh : Tensor { device := device, shape := #[batch, Config.fullNumKVHeads cfg, seq, Config.fullHeadDim cfg] } := transposeAttention v2
   let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, seq, Config.fullHeadDim cfg] } :=
-    Tensor.attentionGQA qh kh vh 0.0 true true
+    Tensor.attentionGQA qh kh vh true true
   let out : Tensor { device := device, shape := #[batch, seq, cfg.num_attention_heads * Config.fullHeadDim cfg] } :=
     Tensor.reshapeChecked (transposeAttention attn) #[batch, seq, cfg.num_attention_heads * Config.fullHeadDim cfg]
   oProjFull cfg m out
@@ -493,7 +493,7 @@ private def attentionSlidingWithCache {batch seq : UInt64}
   | some src =>
     let (kAll0, vAll0) := cacheSliceSliding (kvLen := seq) cfg src
     let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, seq, cfg.head_dim] } :=
-      Tensor.attentionWindow qh kAll0 vAll0 0.0 true true cfg.sliding_window
+      Tensor.attentionWindow qh kAll0 vAll0 true true cfg.sliding_window
     let out : Tensor { device := device, shape := #[batch, seq, cfg.num_attention_heads * cfg.head_dim] } :=
       Tensor.reshapeChecked (transposeAttention attn) #[batch, seq, cfg.num_attention_heads * cfg.head_dim]
     (oProjSliding cfg m out, cache)
@@ -520,7 +520,7 @@ private def attentionSlidingWithCache {batch seq : UInt64}
       maxLen := cache.maxLen
     }
     let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, seq, cfg.head_dim] } :=
-      Tensor.attentionWindow qh kh vh 0.0 true true cfg.sliding_window
+      Tensor.attentionWindow qh kh vh true true cfg.sliding_window
     let out : Tensor { device := device, shape := #[batch, seq, cfg.num_attention_heads * cfg.head_dim] } :=
       Tensor.reshapeChecked (transposeAttention attn) #[batch, seq, cfg.num_attention_heads * cfg.head_dim]
     (oProjSliding cfg m out, cache')
@@ -543,7 +543,7 @@ private def attentionFullWithCache {batch seq : UInt64}
   | some src =>
     let (kAll, vAll) := cacheSliceFull (kvLen := seq) cfg src
     let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, seq, Config.fullHeadDim cfg] } :=
-      Tensor.attentionGQA qh kAll vAll 0.0 true true
+      Tensor.attentionGQA qh kAll vAll true true
     let out : Tensor { device := device, shape := #[batch, seq, cfg.num_attention_heads * Config.fullHeadDim cfg] } :=
       Tensor.reshapeChecked (transposeAttention attn) #[batch, seq, cfg.num_attention_heads * Config.fullHeadDim cfg]
     (oProjFull cfg m out, cache)
@@ -574,7 +574,7 @@ private def attentionFullWithCache {batch seq : UInt64}
       maxLen := cache.maxLen
     }
     let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, seq, Config.fullHeadDim cfg] } :=
-      Tensor.attentionGQA qh kh vh 0.0 true true
+      Tensor.attentionGQA qh kh vh true true
     let out : Tensor { device := device, shape := #[batch, seq, cfg.num_attention_heads * Config.fullHeadDim cfg] } :=
       Tensor.reshapeChecked (transposeAttention attn) #[batch, seq, cfg.num_attention_heads * Config.fullHeadDim cfg]
     (oProjFull cfg m out, cache')
@@ -602,7 +602,7 @@ private def attentionSlidingStep {batch : UInt64}
     let kAll : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, useLen, cfg.head_dim] } := sliceTyped kAll0 2 start useLen
     let vAll : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, useLen, cfg.head_dim] } := sliceTyped vAll0 2 start useLen
     let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, 1, cfg.head_dim] } :=
-      Tensor.attentionGQAQKV qh kAll vAll 0.0 false true
+      Tensor.attentionGQAQKV qh kAll vAll false true
     let out : Tensor { device := device, shape := #[batch, 1, cfg.num_attention_heads * cfg.head_dim] } :=
       Tensor.reshapeChecked (transposeAttention attn) #[batch, 1, cfg.num_attention_heads * cfg.head_dim]
     (oProjSliding cfg m out, cache)
@@ -633,7 +633,7 @@ private def attentionSlidingStep {batch : UInt64}
     let kAll : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, useLen, cfg.head_dim] } := sliceTyped kAll0 2 start useLen
     let vAll : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, useLen, cfg.head_dim] } := sliceTyped vAll0 2 start useLen
     let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, 1, cfg.head_dim] } :=
-      Tensor.attentionGQAQKV qh kAll vAll 0.0 false true
+      Tensor.attentionGQAQKV qh kAll vAll false true
     let out : Tensor { device := device, shape := #[batch, 1, cfg.num_attention_heads * cfg.head_dim] } :=
       Tensor.reshapeChecked (transposeAttention attn) #[batch, 1, cfg.num_attention_heads * cfg.head_dim]
     let cache' : KVCache (device := device) cfg batch := {
@@ -663,7 +663,7 @@ private def attentionFullStep {batch : UInt64}
     let kvLen := src.seq
     let (kAll, vAll) := cacheSliceFull (kvLen := kvLen) cfg src
     let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, 1, Config.fullHeadDim cfg] } :=
-      Tensor.attentionGQAQKV qh kAll vAll 0.0 false true
+      Tensor.attentionGQAQKV qh kAll vAll false true
     let out : Tensor { device := device, shape := #[batch, 1, cfg.num_attention_heads * Config.fullHeadDim cfg] } :=
       Tensor.reshapeChecked (transposeAttention attn) #[batch, 1, cfg.num_attention_heads * Config.fullHeadDim cfg]
     (oProjFull cfg m out, cache)
@@ -694,7 +694,7 @@ private def attentionFullStep {batch : UInt64}
     let vAll : Tensor { device := device, shape := #[batch, Config.fullNumKVHeads cfg, kvLen, Config.fullHeadDim cfg] } :=
       (cacheSliceFull (kvLen := kvLen) cfg { cache with kStoreDyn := kStore'.packShape, vStoreDyn := vStore'.packShape, seq := kvLen }) |>.2
     let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, 1, Config.fullHeadDim cfg] } :=
-      Tensor.attentionGQAQKV qh kAll vAll 0.0 false true
+      Tensor.attentionGQAQKV qh kAll vAll false true
     let out : Tensor { device := device, shape := #[batch, 1, cfg.num_attention_heads * Config.fullHeadDim cfg] } :=
       Tensor.reshapeChecked (transposeAttention attn) #[batch, 1, cfg.num_attention_heads * Config.fullHeadDim cfg]
     let cache' : KVCache (device := device) cfg batch := {

@@ -3141,69 +3141,118 @@ lean_object* lean_torch_cross_entropy_2d_checked(uint64_t n, uint64_t c,
   });
 }
 
+// Shared implementations for the pure zero-dropout and effectful IO exports.
+// All callers enter a checked boundary before borrowing tensors or validating.
+static void checkAttentionInputs(const torch::Tensor& q, const torch::Tensor& k,
+    const torch::Tensor& v, double dropout_p) {
+  TORCH_CHECK(std::isfinite(dropout_p) && dropout_p >= 0.0 && dropout_p <= 1.0,
+      "attention: dropout must be finite and in [0, 1]");
+  TORCH_CHECK(q.dim() == 4 && k.dim() == 4 && v.dim() == 4,
+      "attention: Q/K/V must be rank-4");
+  TORCH_CHECK(q.scalar_type() == k.scalar_type() && k.scalar_type() == v.scalar_type(),
+      "attention: Q/K/V must have the same dtype");
+  TORCH_CHECK(q.device() == k.device() && k.device() == v.device(),
+      "attention: Q/K/V must be on the same device");
+}
+
+static torch::Tensor attentionFromLean(b_lean_obj_arg query, b_lean_obj_arg key,
+    b_lean_obj_arg value, lean_object* bias, double dropout_p, bool causal) {
+  auto q = borrowTensor(query), k = borrowTensor(key), v = borrowTensor(value);
+  checkAttentionInputs(q, k, v, dropout_p);
+  c10::optional<torch::Tensor> mask = c10::nullopt;
+  if (bias != nullptr) {
+    mask = borrowTensor(bias);
+    TORCH_CHECK(mask->device() == q.device(), "attention: bias must be on the Q/K/V device");
+  }
+  return torch::scaled_dot_product_attention(q, k, v, mask, dropout_p, causal);
+}
+
+static torch::Tensor groupedAttentionFromLean(b_lean_obj_arg query, b_lean_obj_arg key,
+    b_lean_obj_arg value, lean_object* mask, double dropout_p, bool causal, bool gqa,
+    tyr_ops::AttentionMaskKind mask_kind = tyr_ops::AttentionMaskKind::Padding,
+    std::optional<uint64_t> window_size = std::nullopt) {
+  auto q = borrowTensor(query), k = borrowTensor(key), v = borrowTensor(value);
+  checkAttentionInputs(q, k, v, dropout_p);
+  c10::optional<torch::Tensor> mask_tensor = c10::nullopt;
+  if (mask != nullptr) {
+    mask_tensor = borrowTensor(mask);
+    TORCH_CHECK(mask_tensor->device() == q.device(), "attention: mask must be on the Q/K/V device");
+  }
+  if (window_size) {
+    // Preserve the existing always-causal window contract and clamp before narrowing.
+    const auto window = static_cast<int64_t>(std::min<uint64_t>(*window_size, q.size(2)));
+    return tyr_ops::bounded_sdpa(q, k, v, mask_tensor, mask_kind,
+        dropout_p, true, c10::nullopt, gqa, window);
+  }
+  if (mask_tensor) {
+    return tyr_ops::bounded_sdpa(q, k, v, mask_tensor, mask_kind,
+        dropout_p, causal, c10::nullopt, gqa);
+  }
+  return tyr_ops::flash_attn_dispatch(q, k, v, c10::nullopt,
+      dropout_p, causal, c10::nullopt, gqa);
+}
+
 lean_object* lean_torch_sdpa_4d(
-  uint64_t /*batch*/,
-  uint64_t /*n_head*/,
-  uint64_t /*seq*/,
-  uint64_t /*head_dim*/,
-  b_lean_obj_arg query,
-  b_lean_obj_arg key,
-  b_lean_obj_arg value,
-  double dropout_p,
-  uint8_t is_causal
-) {
-  auto query_ = borrowTensor(query);
-  auto key_ = borrowTensor(key);
-  auto value_ = borrowTensor(value);
+    uint64_t /*batch*/,
+    uint64_t /*n_head*/,
+    uint64_t /*seq*/,
+    uint64_t /*head_dim*/,
+    b_lean_obj_arg query,
+    b_lean_obj_arg key,
+    b_lean_obj_arg value,
+    uint8_t is_causal) {
+  return tyr::checkedCall("attention", [&] {
+    return fromTorchTensor(attentionFromLean(query, key, value, nullptr, 0.0, is_causal != 0));
+  });
+}
 
-  auto result_ = torch::scaled_dot_product_attention(
-    query_,
-    key_,
-    value_,
-    c10::nullopt,  // attn_mask
-    dropout_p,
-    is_causal
-  );
-
-
-  return fromTorchTensor(result_);
+lean_object* lean_torch_sdpa_4d_io(
+    uint64_t /*batch*/,
+    uint64_t /*n_head*/,
+    uint64_t /*seq*/,
+    uint64_t /*head_dim*/,
+    b_lean_obj_arg query,
+    b_lean_obj_arg key,
+    b_lean_obj_arg value,
+    double dropout_p,
+    uint8_t is_causal) {
+  return tyr::checkedIoCall("attentionIO", [&] {
+    return lean_io_result_mk_ok(fromTorchTensor(attentionFromLean(query, key, value, nullptr, dropout_p, is_causal != 0)));
+  });
 }
 
 // Fused SDPA with an explicit additive float bias [batch, n_head, seq, seq].
 // Replaces the manual matmul -> bias add -> masked_fill -> softmax -> matmul
 // pipeline (and its un-fused backward) for the molecule transformers.
 lean_object* lean_torch_sdpa_4d_bias(
-  uint64_t /*batch*/,
-  uint64_t /*n_head*/,
-  uint64_t /*seq*/,
-  uint64_t /*head_dim*/,
-  b_lean_obj_arg query,
-  b_lean_obj_arg key,
-  b_lean_obj_arg value,
-  b_lean_obj_arg bias,
-  double dropout_p,
-  uint8_t is_causal
-) {
-  auto query_ = borrowTensor(query);
-  auto key_ = borrowTensor(key);
-  auto value_ = borrowTensor(value);
-  auto bias_ = borrowTensor(bias);
+    uint64_t /*batch*/,
+    uint64_t /*n_head*/,
+    uint64_t /*seq*/,
+    uint64_t /*head_dim*/,
+    b_lean_obj_arg query,
+    b_lean_obj_arg key,
+    b_lean_obj_arg value,
+    b_lean_obj_arg bias,
+    uint8_t is_causal) {
+  return tyr::checkedCall("branchingAttentionBias", [&] {
+    return fromTorchTensor(attentionFromLean(query, key, value, bias, 0.0, is_causal != 0));
+  });
+}
 
-  try {
-    auto result_ = torch::scaled_dot_product_attention(
-      query_,
-      key_,
-      value_,
-      bias_,  // attn_mask: additive float bias
-      dropout_p,
-      is_causal
-    );
-    return fromTorchTensor(result_);
-  } catch (const c10::Error& e) {
-    std::fprintf(stderr, "[tyr] sdpa_4d_bias libtorch error:\n%s\n", e.what());
-    std::fflush(stderr);
-    std::abort();
-  }
+lean_object* lean_torch_sdpa_4d_bias_io(
+    uint64_t /*batch*/,
+    uint64_t /*n_head*/,
+    uint64_t /*seq*/,
+    uint64_t /*head_dim*/,
+    b_lean_obj_arg query,
+    b_lean_obj_arg key,
+    b_lean_obj_arg value,
+    b_lean_obj_arg bias,
+    double dropout_p,
+    uint8_t is_causal) {
+  return tyr::checkedIoCall("branchingAttentionBiasIO", [&] {
+    return lean_io_result_mk_ok(fromTorchTensor(attentionFromLean(query, key, value, bias, dropout_p, is_causal != 0)));
+  });
 }
 
 // Whole-tensor copy with matching shape/dtype and destination placement.
@@ -5037,54 +5086,73 @@ lean_object* lean_torch_timestep_embedding(
 // Q: [batch, n_head, seq, head_dim]
 // K, V: [batch, n_kv_head, seq, head_dim]
 lean_object* lean_torch_sdpa_gqa(
-  uint64_t /*batch*/,
-  uint64_t /*n_head*/,
-  uint64_t /*n_kv_head*/,
-  uint64_t /*seq*/,
-  uint64_t /*head_dim*/,
-  b_lean_obj_arg query,
-  b_lean_obj_arg key,
-  b_lean_obj_arg value,
-  double dropout_p,
-  uint8_t is_causal,
-  uint8_t enable_gqa
-) {
-  auto q = borrowTensor(query);
-  auto k = borrowTensor(key);
-  auto v = borrowTensor(value);
+    uint64_t /*batch*/,
+    uint64_t /*n_head*/,
+    uint64_t /*n_kv_head*/,
+    uint64_t /*seq*/,
+    uint64_t /*head_dim*/,
+    b_lean_obj_arg query,
+    b_lean_obj_arg key,
+    b_lean_obj_arg value,
+    uint8_t is_causal,
+    uint8_t enable_gqa) {
+  return tyr::checkedCall("attentionGQA", [&] {
+    return fromTorchTensor(groupedAttentionFromLean(query, key, value, nullptr, 0.0, is_causal != 0, enable_gqa != 0));
+  });
+}
 
-  auto result_ = tyr_ops::flash_attn_dispatch(
-    q, k, v, c10::nullopt, dropout_p, is_causal != 0, c10::nullopt, enable_gqa != 0);
-
-  return fromTorchTensor(result_);
+lean_object* lean_torch_sdpa_gqa_io(
+    uint64_t /*batch*/,
+    uint64_t /*n_head*/,
+    uint64_t /*n_kv_head*/,
+    uint64_t /*seq*/,
+    uint64_t /*head_dim*/,
+    b_lean_obj_arg query,
+    b_lean_obj_arg key,
+    b_lean_obj_arg value,
+    double dropout_p,
+    uint8_t is_causal,
+    uint8_t enable_gqa) {
+  return tyr::checkedIoCall("attentionGQAIO", [&] {
+    return lean_io_result_mk_ok(fromTorchTensor(groupedAttentionFromLean(query, key, value, nullptr, dropout_p, is_causal != 0, enable_gqa != 0)));
+  });
 }
 
 // Scaled dot-product attention with GQA and sliding window support
 // Each position can only attend to the previous window_size positions
 lean_object* lean_torch_sdpa_gqa_window(
-  uint64_t /*batch*/,
-  uint64_t /*n_head*/,
-  uint64_t /*n_kv_head*/,
-  uint64_t /*seq*/,
-  uint64_t /*head_dim*/,
-  b_lean_obj_arg query,
-  b_lean_obj_arg key,
-  b_lean_obj_arg value,
-  double dropout_p,
-  uint8_t /*is_causal*/,
-  uint8_t enable_gqa,
-  uint64_t window_size
-) {
+    uint64_t /*batch*/,
+    uint64_t /*n_head*/,
+    uint64_t /*n_kv_head*/,
+    uint64_t /*seq*/,
+    uint64_t /*head_dim*/,
+    b_lean_obj_arg query,
+    b_lean_obj_arg key,
+    b_lean_obj_arg value,
+    uint8_t is_causal,
+    uint8_t enable_gqa,
+    uint64_t window_size) {
+  return tyr::checkedCall("attentionWindow", [&] {
+    return fromTorchTensor(groupedAttentionFromLean(query, key, value, nullptr, 0.0, is_causal != 0, enable_gqa != 0, tyr_ops::AttentionMaskKind::Padding, window_size));
+  });
+}
 
-  auto q = borrowTensor(query);
-  auto k = borrowTensor(key);
-  auto v = borrowTensor(value);
-  // The public window binding has always been causal, including is_causal=false.
-  // Clamp oversized windows to the sequence length before narrowing to int64_t.
-  const auto window = static_cast<int64_t>(std::min<uint64_t>(window_size, q.size(2)));
-  return fromTorchTensor(tyr_ops::bounded_sdpa(q, k, v, c10::nullopt,
-      tyr_ops::AttentionMaskKind::Padding, dropout_p, true, c10::nullopt,
-      enable_gqa != 0, window));
+lean_object* lean_torch_sdpa_gqa_window_io(
+    uint64_t /*batch*/,
+    uint64_t /*n_head*/,
+    uint64_t /*n_kv_head*/,
+    uint64_t /*seq*/,
+    uint64_t /*head_dim*/,
+    b_lean_obj_arg query,
+    b_lean_obj_arg key,
+    b_lean_obj_arg value,
+    double dropout_p,
+    uint8_t is_causal,
+    uint8_t enable_gqa,
+    uint64_t window_size) {
+  return tyr::checkedIoCall("attentionWindowIO", [&] {
+    return lean_io_result_mk_ok(fromTorchTensor(groupedAttentionFromLean(query, key, value, nullptr, dropout_p, is_causal != 0, enable_gqa != 0, tyr_ops::AttentionMaskKind::Padding, window_size)));
+  });
 }
 
 // Scaled dot-product attention with GQA and explicit attention mask
@@ -5092,74 +5160,115 @@ lean_object* lean_torch_sdpa_gqa_window(
 // K, V: [batch, n_kv_head, seq, head_dim]
 // attn_mask: [batch, seq] - padding mask (1 for valid, 0 for padding)
 lean_object* lean_torch_sdpa_gqa_mask(
-  uint64_t /*batch*/,
-  uint64_t /*n_head*/,
-  uint64_t /*n_kv_head*/,
-  uint64_t /*seq*/,
-  uint64_t /*head_dim*/,
-  b_lean_obj_arg query,
-  b_lean_obj_arg key,
-  b_lean_obj_arg value,
-  b_lean_obj_arg mask,
-  double dropout_p,
-  uint8_t is_causal,
-  uint8_t enable_gqa
-) {
+    uint64_t /*batch*/,
+    uint64_t /*n_head*/,
+    uint64_t /*n_kv_head*/,
+    uint64_t /*seq*/,
+    uint64_t /*head_dim*/,
+    b_lean_obj_arg query,
+    b_lean_obj_arg key,
+    b_lean_obj_arg value,
+    b_lean_obj_arg mask,
+    uint8_t is_causal,
+    uint8_t enable_gqa) {
+  return tyr::checkedCall("attentionGQAMask", [&] {
+    return fromTorchTensor(groupedAttentionFromLean(query, key, value, mask, 0.0, is_causal != 0, enable_gqa != 0));
+  });
+}
 
-  return fromTorchTensor(tyr_ops::bounded_sdpa(
-      borrowTensor(query), borrowTensor(key), borrowTensor(value), borrowTensor(mask),
-      tyr_ops::AttentionMaskKind::Padding, dropout_p, is_causal != 0,
-      c10::nullopt, enable_gqa != 0));
+lean_object* lean_torch_sdpa_gqa_mask_io(
+    uint64_t /*batch*/,
+    uint64_t /*n_head*/,
+    uint64_t /*n_kv_head*/,
+    uint64_t /*seq*/,
+    uint64_t /*head_dim*/,
+    b_lean_obj_arg query,
+    b_lean_obj_arg key,
+    b_lean_obj_arg value,
+    b_lean_obj_arg mask,
+    double dropout_p,
+    uint8_t is_causal,
+    uint8_t enable_gqa) {
+  return tyr::checkedIoCall("attentionGQAMaskIO", [&] {
+    return lean_io_result_mk_ok(fromTorchTensor(groupedAttentionFromLean(query, key, value, mask, dropout_p, is_causal != 0, enable_gqa != 0)));
+  });
 }
 
 // Scaled dot-product attention with GQA and explicit query/key mask.
 // Q: [batch, n_head, q_seq, head_dim]
 // K, V: [batch, n_kv_head, kv_seq, head_dim]
 // attn_mask: [batch, q_seq, kv_seq] - 1 for allowed attention edges, 0 for masked edges
-LEAN_EXPORT lean_object* lean_torch_sdpa_gqa_mask_qkv(
-  uint64_t /*batch*/,
-  uint64_t /*n_head*/,
-  uint64_t /*n_kv_head*/,
-  uint64_t /*q_seq*/,
-  uint64_t /*kv_seq*/,
-  uint64_t /*head_dim*/,
-  b_lean_obj_arg query,
-  b_lean_obj_arg key,
-  b_lean_obj_arg value,
-  b_lean_obj_arg mask,
-  double dropout_p,
-  uint8_t enable_gqa
-) {
+lean_object* lean_torch_sdpa_gqa_mask_qkv(
+    uint64_t /*batch*/,
+    uint64_t /*n_head*/,
+    uint64_t /*n_kv_head*/,
+    uint64_t /*q_seq*/,
+    uint64_t /*kv_seq*/,
+    uint64_t /*head_dim*/,
+    b_lean_obj_arg query,
+    b_lean_obj_arg key,
+    b_lean_obj_arg value,
+    b_lean_obj_arg mask,
+    uint8_t enable_gqa) {
+  return tyr::checkedCall("gemma4MaskedAttention", [&] {
+    return fromTorchTensor(groupedAttentionFromLean(query, key, value, mask, 0.0, false, enable_gqa != 0, tyr_ops::AttentionMaskKind::Edges));
+  });
+}
 
-  return fromTorchTensor(tyr_ops::bounded_sdpa(
-      borrowTensor(query), borrowTensor(key), borrowTensor(value), borrowTensor(mask),
-      tyr_ops::AttentionMaskKind::Edges, dropout_p, false, c10::nullopt, enable_gqa != 0));
+lean_object* lean_torch_sdpa_gqa_mask_qkv_io(
+    uint64_t /*batch*/,
+    uint64_t /*n_head*/,
+    uint64_t /*n_kv_head*/,
+    uint64_t /*q_seq*/,
+    uint64_t /*kv_seq*/,
+    uint64_t /*head_dim*/,
+    b_lean_obj_arg query,
+    b_lean_obj_arg key,
+    b_lean_obj_arg value,
+    b_lean_obj_arg mask,
+    double dropout_p,
+    uint8_t enable_gqa) {
+  return tyr::checkedIoCall("gemma4MaskedAttentionIO", [&] {
+    return lean_io_result_mk_ok(fromTorchTensor(groupedAttentionFromLean(query, key, value, mask, dropout_p, false, enable_gqa != 0, tyr_ops::AttentionMaskKind::Edges)));
+  });
 }
 
 // Scaled dot-product attention with GQA where query and KV sequence lengths may differ.
 // Q: [batch, n_head, q_seq, head_dim]
 // K, V: [batch, n_kv_head, kv_seq, head_dim]
 lean_object* lean_torch_sdpa_gqa_qkv(
-  uint64_t /*batch*/,
-  uint64_t /*n_head*/,
-  uint64_t /*n_kv_head*/,
-  uint64_t /*q_seq*/,
-  uint64_t /*kv_seq*/,
-  uint64_t /*head_dim*/,
-  b_lean_obj_arg query,
-  b_lean_obj_arg key,
-  b_lean_obj_arg value,
-  double dropout_p,
-  uint8_t is_causal,
-  uint8_t enable_gqa
-) {
-  auto q = borrowTensor(query);
-  auto k = borrowTensor(key);
-  auto v = borrowTensor(value);
+    uint64_t /*batch*/,
+    uint64_t /*n_head*/,
+    uint64_t /*n_kv_head*/,
+    uint64_t /*q_seq*/,
+    uint64_t /*kv_seq*/,
+    uint64_t /*head_dim*/,
+    b_lean_obj_arg query,
+    b_lean_obj_arg key,
+    b_lean_obj_arg value,
+    uint8_t is_causal,
+    uint8_t enable_gqa) {
+  return tyr::checkedCall("attentionGQAQKV", [&] {
+    return fromTorchTensor(groupedAttentionFromLean(query, key, value, nullptr, 0.0, is_causal != 0, enable_gqa != 0));
+  });
+}
 
-  auto result_ = tyr_ops::flash_attn_dispatch(
-    q, k, v, c10::nullopt, dropout_p, is_causal != 0, c10::nullopt, enable_gqa != 0);
-  return fromTorchTensor(result_);
+lean_object* lean_torch_sdpa_gqa_qkv_io(
+    uint64_t /*batch*/,
+    uint64_t /*n_head*/,
+    uint64_t /*n_kv_head*/,
+    uint64_t /*q_seq*/,
+    uint64_t /*kv_seq*/,
+    uint64_t /*head_dim*/,
+    b_lean_obj_arg query,
+    b_lean_obj_arg key,
+    b_lean_obj_arg value,
+    double dropout_p,
+    uint8_t is_causal,
+    uint8_t enable_gqa) {
+  return tyr::checkedIoCall("attentionGQAQKVIO", [&] {
+    return lean_io_result_mk_ok(fromTorchTensor(groupedAttentionFromLean(query, key, value, nullptr, dropout_p, is_causal != 0, enable_gqa != 0)));
+  });
 }
 
 // ============================================================================

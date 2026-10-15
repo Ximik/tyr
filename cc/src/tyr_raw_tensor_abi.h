@@ -98,7 +98,8 @@ lean_object* lean_torch_pow(lean_object*, lean_object*, double);
 lean_object* lean_torch_randn(lean_object*, uint8_t, lean_object*);
 lean_object* lean_torch_reshape_exact(lean_object*, lean_object*, lean_object*);
 lean_object* lean_torch_rsqrt(lean_object*, lean_object*);
-lean_object* lean_torch_sdpa_4d(uint64_t, uint64_t, uint64_t, uint64_t, lean_object*, lean_object*, lean_object*, double, uint8_t);
+lean_object* lean_torch_sdpa_4d(uint64_t, uint64_t, uint64_t, uint64_t, lean_object*, lean_object*, lean_object*, uint8_t);
+lean_object* lean_torch_sdpa_4d_io(uint64_t, uint64_t, uint64_t, uint64_t, lean_object*, lean_object*, lean_object*, double, uint8_t);
 // set_requires_grad consumes the tensor and returns IO with its updated value.
 lean_object* lean_torch_set_requires_grad(lean_object*, lean_object*, uint8_t);
 lean_object* lean_torch_sqrt(lean_object*, lean_object*);

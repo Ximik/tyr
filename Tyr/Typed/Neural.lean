@@ -283,27 +283,117 @@ def joinHeads {batch heads seq dim : UInt64} {d : DType} {dev : Device}
     (t : Tensor ⟨#[batch, heads, seq, dim], d, dev⟩) : Tensor ⟨#[batch, seq, heads, dim], d, dev⟩ :=
   checkedNeuralResult "joinHeads" (RawTensor.joinHeads batch heads seq dim t.raw)
 
-/-- Scaled dot-product attention with a checked shape, dtype and placement result. -/
+/-- Dynamic dtype indices still require the actual Q/K/V dtypes to agree. -/
+private def checkAttentionOperands {sq sk sv : StaticSpec}
+    (q : Tensor sq) (k : Tensor sk) (v : Tensor sv) : Except String Unit := do
+  DType.expectedEq q.raw.dtype k.raw.dtype
+  DType.expectedEq q.raw.dtype v.raw.dtype
+  Device.check q.raw.device k.raw.device
+  Device.check q.raw.device v.raw.device
+
+private def attentionResult {σ : StaticSpec} (operation : String) (q : Tensor σ)
+    (result : Except String (Tensor σ)) : Tensor σ :=
+  letI : Inhabited (Tensor σ) := ⟨q⟩
+  match result with
+  | .ok value => value
+  | .error message => panic! s!"Tensor.{operation}: {message}"
+
+private def attentionCheckIO {α : Type} (operation : String)
+    (result : Except String α) : IO α :=
+  match result with
+  | .ok value => pure value
+  | .error message => throw (IO.userError s!"Tensor.{operation}: {message}")
+
+/-- Validate the configured dropout probability before selecting training or
+evaluation behavior. Invalid configurations remain errors during evaluation. -/
+def attentionDropout? (dropout : Float) (training : Bool) : Except String Float := do
+  if dropout.isNaN || dropout.isInf || dropout < 0.0 || dropout > 1.0 then
+    throw "attention dropout must be finite and in [0, 1]"
+  pure (if training then dropout else 0.0)
+
+/-- Zero-dropout attention with recoverable native errors. -/
+def attention? {batch heads seq dim : UInt64} {d : DType} {dev : Device}
+    (q k v : Tensor ⟨#[batch, heads, seq, dim], d, dev⟩)
+    (causal : Bool := true) : Except String (Tensor ⟨#[batch, heads, seq, dim], d, dev⟩) := do
+  checkAttentionOperands q k v
+  let raw ← RawTensor.attention batch heads seq dim
+    q.raw k.raw v.raw causal
+  q.checkedReplacement? raw
+
+/-- Deterministic attention; `attention?` exposes validation and kernel errors. -/
 def attention {batch heads seq dim : UInt64} {d : DType} {dev : Device}
     (q k v : Tensor ⟨#[batch, heads, seq, dim], d, dev⟩)
-    (dropout : Float := 0.0) (causal : Bool := true) :
-    Tensor ⟨#[batch, heads, seq, dim], d, dev⟩ :=
-  q.checkedReplacement (RawTensor.attention batch heads seq dim q.raw k.raw v.raw dropout causal)
+    (causal : Bool := true) : Tensor ⟨#[batch, heads, seq, dim], d, dev⟩ :=
+  attentionResult "attention" q (attention? q k v causal)
 
+/-- Attention with explicit training-mode dropout, sequenced through native IO. -/
+def attentionIO {batch heads seq dim : UInt64} {d : DType} {dev : Device}
+    (q k v : Tensor ⟨#[batch, heads, seq, dim], d, dev⟩)
+    (dropout : Float) (training : Bool) (causal : Bool := true) : IO (Tensor ⟨#[batch, heads, seq, dim], d, dev⟩) := do
+  let effective ← attentionCheckIO "attentionIO" (attentionDropout? dropout training)
+  attentionCheckIO "attentionIO" (checkAttentionOperands q k v)
+  let raw ← RawTensor.attentionIO batch heads seq dim
+    q.raw k.raw v.raw effective causal
+  attentionCheckIO "attentionIO" (q.checkedReplacement? raw)
+
+/-- Zero-dropout attention with recoverable native errors. -/
+def attentionGQA? {batch heads kvHeads seq dim : UInt64} {d : DType} {dev : Device}
+    (q : Tensor ⟨#[batch, heads, seq, dim], d, dev⟩)
+    (k v : Tensor ⟨#[batch, kvHeads, seq, dim], d, dev⟩)
+    (causal : Bool := true) (gqa : Bool := false) : Except String (Tensor ⟨#[batch, heads, seq, dim], d, dev⟩) := do
+  checkAttentionOperands q k v
+  let raw ← RawTensor.attentionGQA batch heads kvHeads seq dim
+    q.raw k.raw v.raw causal gqa
+  q.checkedReplacement? raw
+
+/-- Deterministic attention; `attentionGQA?` exposes validation and kernel errors. -/
 def attentionGQA {batch heads kvHeads seq dim : UInt64} {d : DType} {dev : Device}
     (q : Tensor ⟨#[batch, heads, seq, dim], d, dev⟩)
     (k v : Tensor ⟨#[batch, kvHeads, seq, dim], d, dev⟩)
-    (dropout : Float := 0.0) (causal : Bool := true) (gqa : Bool := false) :
-    Tensor ⟨#[batch, heads, seq, dim], d, dev⟩ :=
-  q.checkedReplacement (RawTensor.attentionGQA batch heads kvHeads seq dim q.raw k.raw v.raw dropout causal gqa)
+    (causal : Bool := true) (gqa : Bool := false) : Tensor ⟨#[batch, heads, seq, dim], d, dev⟩ :=
+  attentionResult "attentionGQA" q (attentionGQA? q k v causal gqa)
 
+/-- Attention with explicit training-mode dropout, sequenced through native IO. -/
+def attentionGQAIO {batch heads kvHeads seq dim : UInt64} {d : DType} {dev : Device}
+    (q : Tensor ⟨#[batch, heads, seq, dim], d, dev⟩)
+    (k v : Tensor ⟨#[batch, kvHeads, seq, dim], d, dev⟩)
+    (dropout : Float) (training : Bool) (causal : Bool := true) (gqa : Bool := false) : IO (Tensor ⟨#[batch, heads, seq, dim], d, dev⟩) := do
+  let effective ← attentionCheckIO "attentionGQAIO" (attentionDropout? dropout training)
+  attentionCheckIO "attentionGQAIO" (checkAttentionOperands q k v)
+  let raw ← RawTensor.attentionGQAIO batch heads kvHeads seq dim
+    q.raw k.raw v.raw effective causal gqa
+  attentionCheckIO "attentionGQAIO" (q.checkedReplacement? raw)
+
+/-- Zero-dropout attention with recoverable native errors. -/
+def attentionGQAMask? {batch heads kvHeads seq dim : UInt64} {d dm : DType} {dev : Device}
+    (q : Tensor ⟨#[batch, heads, seq, dim], d, dev⟩)
+    (k v : Tensor ⟨#[batch, kvHeads, seq, dim], d, dev⟩)
+    (mask : Tensor ⟨#[batch, seq], dm, dev⟩)
+    (causal : Bool := true) (gqa : Bool := false) : Except String (Tensor ⟨#[batch, heads, seq, dim], d, dev⟩) := do
+  checkAttentionOperands q k v
+  let raw ← RawTensor.attentionGQAMask batch heads kvHeads seq dim
+    q.raw k.raw v.raw mask.raw causal gqa
+  q.checkedReplacement? raw
+
+/-- Deterministic attention; `attentionGQAMask?` exposes validation and kernel errors. -/
 def attentionGQAMask {batch heads kvHeads seq dim : UInt64} {d dm : DType} {dev : Device}
     (q : Tensor ⟨#[batch, heads, seq, dim], d, dev⟩)
     (k v : Tensor ⟨#[batch, kvHeads, seq, dim], d, dev⟩)
     (mask : Tensor ⟨#[batch, seq], dm, dev⟩)
-    (dropout : Float := 0.0) (causal : Bool := true) (gqa : Bool := false) :
-    Tensor ⟨#[batch, heads, seq, dim], d, dev⟩ :=
-  q.checkedReplacement (RawTensor.attentionGQAMask batch heads kvHeads seq dim q.raw k.raw v.raw mask.raw dropout causal gqa)
+    (causal : Bool := true) (gqa : Bool := false) : Tensor ⟨#[batch, heads, seq, dim], d, dev⟩ :=
+  attentionResult "attentionGQAMask" q (attentionGQAMask? q k v mask causal gqa)
+
+/-- Attention with explicit training-mode dropout, sequenced through native IO. -/
+def attentionGQAMaskIO {batch heads kvHeads seq dim : UInt64} {d dm : DType} {dev : Device}
+    (q : Tensor ⟨#[batch, heads, seq, dim], d, dev⟩)
+    (k v : Tensor ⟨#[batch, kvHeads, seq, dim], d, dev⟩)
+    (mask : Tensor ⟨#[batch, seq], dm, dev⟩)
+    (dropout : Float) (training : Bool) (causal : Bool := true) (gqa : Bool := false) : IO (Tensor ⟨#[batch, heads, seq, dim], d, dev⟩) := do
+  let effective ← attentionCheckIO "attentionGQAMaskIO" (attentionDropout? dropout training)
+  attentionCheckIO "attentionGQAMaskIO" (checkAttentionOperands q k v)
+  let raw ← RawTensor.attentionGQAMaskIO batch heads kvHeads seq dim
+    q.raw k.raw v.raw mask.raw effective causal gqa
+  attentionCheckIO "attentionGQAMaskIO" (q.checkedReplacement? raw)
 
 /-- Gather has the index tensor's shape, and the source tensor's dtype. -/
 def gather {s indicesShape : Shape} {d : DType} {dev : Device}
@@ -329,38 +419,69 @@ def maskedScatter {s sourceShape : Shape} {d : DType} {dev : Device}
     (source : Tensor ⟨sourceShape, d, dev⟩) : Tensor ⟨s, d, dev⟩ :=
   input.checkedReplacement (RawTensor.maskedScatter s sourceShape input.raw mask.raw source.raw)
 
-/-- Attention over different query and KV lengths, as used in cached decoding. -/
+/-- Zero-dropout attention with recoverable native errors. -/
+def attentionGQAQKV? {batch heads kvHeads qSeq kvSeq dim : UInt64} {d : DType} {dev : Device}
+    (q : Tensor ⟨#[batch, heads, qSeq, dim], d, dev⟩)
+    (k v : Tensor ⟨#[batch, kvHeads, kvSeq, dim], d, dev⟩)
+    (causal : Bool := false) (gqa : Bool := false) : Except String (Tensor ⟨#[batch, heads, qSeq, dim], d, dev⟩) := do
+  checkAttentionOperands q k v
+  let raw ← RawTensor.attentionGQAQKV batch heads kvHeads qSeq kvSeq dim
+    q.raw k.raw v.raw causal gqa
+  q.checkedReplacement? raw
+
+/-- Deterministic attention; `attentionGQAQKV?` exposes validation and kernel errors. -/
 def attentionGQAQKV {batch heads kvHeads qSeq kvSeq dim : UInt64} {d : DType} {dev : Device}
     (q : Tensor ⟨#[batch, heads, qSeq, dim], d, dev⟩)
     (k v : Tensor ⟨#[batch, kvHeads, kvSeq, dim], d, dev⟩)
-    (dropout : Float := 0.0) (causal : Bool := false) (gqa : Bool := false) :=
-  q.checkedReplacement (RawTensor.attentionGQAQKV batch heads kvHeads qSeq kvSeq dim
-    q.raw k.raw v.raw dropout causal gqa)
+    (causal : Bool := false) (gqa : Bool := false) : Tensor ⟨#[batch, heads, qSeq, dim], d, dev⟩ :=
+  attentionResult "attentionGQAQKV" q (attentionGQAQKV? q k v causal gqa)
 
-/-- Native FlashAttention dispatch with recoverable native errors and a
-metadata-checked result. -/
+/-- Attention with explicit training-mode dropout, sequenced through native IO. -/
+def attentionGQAQKVIO {batch heads kvHeads qSeq kvSeq dim : UInt64} {d : DType} {dev : Device}
+    (q : Tensor ⟨#[batch, heads, qSeq, dim], d, dev⟩)
+    (k v : Tensor ⟨#[batch, kvHeads, kvSeq, dim], d, dev⟩)
+    (dropout : Float) (training : Bool) (causal : Bool := false) (gqa : Bool := false) : IO (Tensor ⟨#[batch, heads, qSeq, dim], d, dev⟩) := do
+  let effective ← attentionCheckIO "attentionGQAQKVIO" (attentionDropout? dropout training)
+  attentionCheckIO "attentionGQAQKVIO" (checkAttentionOperands q k v)
+  let raw ← RawTensor.attentionGQAQKVIO batch heads kvHeads qSeq kvSeq dim
+    q.raw k.raw v.raw effective causal gqa
+  attentionCheckIO "attentionGQAQKVIO" (q.checkedReplacement? raw)
+
+/-- Zero-dropout native FlashAttention dispatch with checked metadata and errors. -/
 def flashAttention? {batch heads kvHeads qSeq kvSeq dim : UInt64} {d : DType} {dev : Device}
     (q : Tensor ⟨#[batch, heads, qSeq, dim], d, dev⟩)
     (k v : Tensor ⟨#[batch, kvHeads, kvSeq, dim], d, dev⟩) (gqa : Bool := false)
-    (mask : Option (Tensor { shape := #[batch, kvSeq], device := dev }) := none) (dropout : Float := 0.0)
+    (mask : Option (Tensor { shape := #[batch, kvSeq], device := dev }) := none)
     (causal : Bool := false) (scale : Option Float := none) :
     Except String (Tensor ⟨#[batch, heads, qSeq, dim], d, dev⟩) := do
+  checkAttentionOperands q k v
   let raw ← RawTensor.flashAttention batch heads kvHeads qSeq kvSeq dim
-    q.raw k.raw v.raw (mask.map Tensor.raw) dropout causal scale gqa
+    q.raw k.raw v.raw (mask.map Tensor.raw) causal scale gqa
   q.checkedReplacement? raw
 
-/-- FlashAttention convenience wrapper. Use `flashAttention?` to handle native
-validation or execution failures explicitly. -/
+/-- Zero-dropout FlashAttention. Use `flashAttention?` to handle native errors. -/
 def flashAttention {batch heads kvHeads qSeq kvSeq dim : UInt64} {d : DType} {dev : Device}
     (q : Tensor ⟨#[batch, heads, qSeq, dim], d, dev⟩)
     (k v : Tensor ⟨#[batch, kvHeads, kvSeq, dim], d, dev⟩) (gqa : Bool := false)
-    (mask : Option (Tensor { shape := #[batch, kvSeq], device := dev }) := none) (dropout : Float := 0.0)
+    (mask : Option (Tensor { shape := #[batch, kvSeq], device := dev }) := none)
     (causal : Bool := false) (scale : Option Float := none) :
     Tensor ⟨#[batch, heads, qSeq, dim], d, dev⟩ :=
-  letI : Inhabited (Tensor ⟨#[batch, heads, qSeq, dim], d, dev⟩) := ⟨q⟩
-  match flashAttention? q k v gqa mask dropout causal scale with
-  | .ok result => result
-  | .error message => panic! s!"Tensor.flashAttention: {message}"
+  attentionResult "flashAttention" q (flashAttention? q k v gqa mask causal scale)
+
+/-- FlashAttention with explicit training-mode dropout through native IO.
+Evaluation uses zero dropout, independently of the configured probability. -/
+def flashAttentionIO {batch heads kvHeads qSeq kvSeq dim : UInt64} {d : DType} {dev : Device}
+    (q : Tensor ⟨#[batch, heads, qSeq, dim], d, dev⟩)
+    (k v : Tensor ⟨#[batch, kvHeads, kvSeq, dim], d, dev⟩)
+    (dropout : Float) (training : Bool) (gqa : Bool := false)
+    (mask : Option (Tensor { shape := #[batch, kvSeq], device := dev }) := none)
+    (causal : Bool := false) (scale : Option Float := none) :
+    IO (Tensor ⟨#[batch, heads, qSeq, dim], d, dev⟩) := do
+  let effective ← attentionCheckIO "flashAttentionIO" (attentionDropout? dropout training)
+  attentionCheckIO "flashAttentionIO" (checkAttentionOperands q k v)
+  let raw ← RawTensor.flashAttentionIO batch heads kvHeads qSeq kvSeq dim
+    q.raw k.raw v.raw (mask.map Tensor.raw) effective causal scale gqa
+  attentionCheckIO "flashAttentionIO" (q.checkedReplacement? raw)
 
 def sliceScatter {s sourceShape : Shape} {d : DType} {dev : Device}
     (input : Tensor ⟨s, d, dev⟩) (dim start : UInt64)
@@ -495,11 +616,33 @@ def convTranspose1d {batch cin cout length kernel : UInt64} {d : DType} {dev : D
   | .ok result => result
   | .error message => panic! s!"Tensor.convTranspose1d: {message}"
 
+/-- Zero-dropout attention with recoverable native errors. -/
+def attentionWindow? {batch heads kvHeads seq dim : UInt64} {d : DType} {dev : Device}
+    (q : Tensor ⟨#[batch, heads, seq, dim], d, dev⟩)
+    (k v : Tensor ⟨#[batch, kvHeads, seq, dim], d, dev⟩)
+    (causal : Bool := true) (gqa : Bool := false) (window : UInt64 := 0) : Except String (Tensor ⟨#[batch, heads, seq, dim], d, dev⟩) := do
+  checkAttentionOperands q k v
+  let raw ← RawTensor.attentionWindow batch heads kvHeads seq dim
+    q.raw k.raw v.raw causal gqa window
+  q.checkedReplacement? raw
+
+/-- Deterministic attention; `attentionWindow?` exposes validation and kernel errors. -/
 def attentionWindow {batch heads kvHeads seq dim : UInt64} {d : DType} {dev : Device}
     (q : Tensor ⟨#[batch, heads, seq, dim], d, dev⟩)
     (k v : Tensor ⟨#[batch, kvHeads, seq, dim], d, dev⟩)
-    (dropout : Float := 0.0) (causal : Bool := true) (gqa : Bool := false) (window : UInt64 := 0) :=
-  q.checkedReplacement (RawTensor.attentionWindow batch heads kvHeads seq dim q.raw k.raw v.raw dropout causal gqa window)
+    (causal : Bool := true) (gqa : Bool := false) (window : UInt64 := 0) : Tensor ⟨#[batch, heads, seq, dim], d, dev⟩ :=
+  attentionResult "attentionWindow" q (attentionWindow? q k v causal gqa window)
+
+/-- Attention with explicit training-mode dropout, sequenced through native IO. -/
+def attentionWindowIO {batch heads kvHeads seq dim : UInt64} {d : DType} {dev : Device}
+    (q : Tensor ⟨#[batch, heads, seq, dim], d, dev⟩)
+    (k v : Tensor ⟨#[batch, kvHeads, seq, dim], d, dev⟩)
+    (dropout : Float) (training : Bool) (causal : Bool := true) (gqa : Bool := false) (window : UInt64 := 0) : IO (Tensor ⟨#[batch, heads, seq, dim], d, dev⟩) := do
+  let effective ← attentionCheckIO "attentionWindowIO" (attentionDropout? dropout training)
+  attentionCheckIO "attentionWindowIO" (checkAttentionOperands q k v)
+  let raw ← RawTensor.attentionWindowIO batch heads kvHeads seq dim
+    q.raw k.raw v.raw effective causal gqa window
+  attentionCheckIO "attentionWindowIO" (q.checkedReplacement? raw)
 
 def log? {σ : StaticSpec} (input : Tensor σ) : Except String (Tensor σ) :=
   checkedNeuralUnary? "log" "a floating or complex dtype" DType.isInexact RawTensor.logChecked input

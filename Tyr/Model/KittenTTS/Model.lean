@@ -558,7 +558,7 @@ def forward {seq : UInt64}
   let kh : Tensor { shape := #[1, cfg.numAttentionHeads, seq, AlbertConfig.headDim cfg], dtype := .Float32, device := device } := Tensor.splitHeads k
   let vh : Tensor { shape := #[1, cfg.numAttentionHeads, seq, AlbertConfig.headDim cfg], dtype := .Float32, device := device } := Tensor.splitHeads v
   let attn : Tensor { shape := #[1, cfg.numAttentionHeads, seq, AlbertConfig.headDim cfg], dtype := .Float32, device := device } :=
-    Tensor.attentionGQA qh kh vh 0.0 false true
+    Tensor.attentionGQA qh kh vh false true
   let out4 : Tensor { shape := #[1, seq, cfg.numAttentionHeads, AlbertConfig.headDim cfg], dtype := .Float32, device := device } := Tensor.joinHeads attn
   let out3 : Tensor { shape := #[1, seq, AlbertConfig.allHeadSize cfg], dtype := .Float32, device := device } :=
     Tensor.reshapeChecked out4 #[1, seq, AlbertConfig.allHeadSize cfg]

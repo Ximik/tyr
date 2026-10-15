@@ -255,8 +255,8 @@ def forward {batch seq rotaryDim numHeads : UInt64}
   let vh : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, seq, cfg.head_dim] } := transposeAttention v
   let attn : Tensor { device := device, shape := #[batch, numHeads, seq, cfg.head_dim] } :=
     match window with
-    | some w => Tensor.attentionWindow qh kh vh 0.0 true true w
-    | none => Tensor.attentionGQA qh kh vh 0.0 true true
+    | some w => Tensor.attentionWindow qh kh vh true true w
+    | none => Tensor.attentionGQA qh kh vh true true
   let attn : Tensor { device := device, shape := #[batch, seq, numHeads, cfg.head_dim] } := transposeAttention attn
   gateAndOut cfg m x attn
 
@@ -290,8 +290,8 @@ def forwardWithCache {batch seq rotaryDim numHeads : UInt64}
   }
   let attn : Tensor { device := device, shape := #[batch, numHeads, seq, cfg.head_dim] } :=
     match window with
-    | some w => Tensor.attentionWindow qh kh vh 0.0 true true w
-    | none => Tensor.attentionGQA qh kh vh 0.0 true true
+    | some w => Tensor.attentionWindow qh kh vh true true w
+    | none => Tensor.attentionGQA qh kh vh true true
   let attn : Tensor { device := device, shape := #[batch, seq, numHeads, cfg.head_dim] } := transposeAttention attn
   (gateAndOut cfg m x attn, cache')
 
@@ -335,7 +335,7 @@ def forwardStep {batch rotaryDim numHeads : UInt64}
   -- Every retained key is attendable. Rectangular SDPA must be non-causal:
   -- its causal mode is upper-left aligned and would expose only key zero.
   let attn : Tensor { device := device, shape := #[batch, numHeads, 1, cfg.head_dim] } :=
-    Tensor.attentionGQAQKV qh kAll vAll 0.0 false true
+    Tensor.attentionGQAQKV qh kAll vAll false true
   let attn : Tensor { device := device, shape := #[batch, 1, numHeads, cfg.head_dim] } := transposeAttention attn
   let cache' : KVCache (device := device) cfg batch := {
     kStoreDyn := kStore'.packShape
@@ -381,13 +381,13 @@ private def forwardOwned {batch seq rotaryDim numHeads : UInt64}
   let attn : Tensor { device := device, shape := #[batch, numHeads, seq, cfg.head_dim] } :=
     if prefill then
       match window with
-      | some w => Tensor.attentionWindow qh kh vh 0.0 true true w
-      | none => Tensor.attentionGQA qh kh vh 0.0 true true
+      | some w => Tensor.attentionWindow qh kh vh true true w
+      | none => Tensor.attentionGQA qh kh vh true true
     else
       let useLen := min total cache.maxLen
       let kAll := sliceTyped kStore 2 0 useLen
       let vAll := sliceTyped vStore 2 0 useLen
-      Tensor.attentionGQAQKV qh kAll vAll 0.0 false true
+      Tensor.attentionGQAQKV qh kAll vAll false true
   let out := gateAndOut cfg m x (transposeAttention attn)
   return (out, {
     kStoreDyn := kStore.packShape

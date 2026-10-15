@@ -427,7 +427,7 @@ private def forwardAttention {batch seq : UInt64}
   let vh : Tensor { shape := #[batch, 8, seq, 64], device := device } := Tensor.splitHeads v
 
   let attn : Tensor { shape := #[batch, 8, seq, 64], device := device } :=
-    Tensor.attentionWindow qh kh vh 0.0 true true 250
+    Tensor.attentionWindow qh kh vh true true 250
   let attn : Tensor { shape := #[batch, seq, 8, 64], device := device } := Tensor.joinHeads attn
   let attn : Tensor { shape := #[batch, seq, 512], device := device } := Tensor.reshapeChecked attn #[batch, seq, 512]
   Tensor.linear3d attn layer.oProj

@@ -15,9 +15,13 @@ namespace torch.RawTensor
 @[extern "lean_torch_tensor_sin"] opaque sin (shape : Shape) (t : @& RawTensor) : RawTensor
 @[extern "lean_torch_tensor_cos"] opaque cos (shape : Shape) (t : @& RawTensor) : RawTensor
 @[extern "lean_torch_sdpa_gqa"] opaque attentionGQA (batch heads kvHeads seq dim : UInt64)
-    (q k v : @& RawTensor) (dropout : Float) (causal gqa : Bool) : RawTensor
+    (q k v : @& RawTensor) (causal gqa : Bool) : Except String RawTensor
+@[extern "lean_torch_sdpa_gqa_io"] opaque attentionGQAIO (batch heads kvHeads seq dim : UInt64)
+    (q k v : @& RawTensor) (dropout : Float) (causal gqa : Bool) : IO RawTensor
 @[extern "lean_torch_sdpa_gqa_mask"] opaque attentionGQAMask (batch heads kvHeads seq dim : UInt64)
-    (q k v mask : @& RawTensor) (dropout : Float) (causal gqa : Bool) : RawTensor
+    (q k v mask : @& RawTensor) (causal gqa : Bool) : Except String RawTensor
+@[extern "lean_torch_sdpa_gqa_mask_io"] opaque attentionGQAMaskIO (batch heads kvHeads seq dim : UInt64)
+    (q k v mask : @& RawTensor) (dropout : Float) (causal gqa : Bool) : IO RawTensor
 
 @[extern "lean_torch_gather"] opaque gather (inputShape indexShape : Shape)
     (input : @& RawTensor) (dim : Int64) (indices : @& RawTensor) : RawTensor
@@ -27,10 +31,15 @@ namespace torch.RawTensor
     (input mask source : @& RawTensor) : RawTensor
 
 @[extern "lean_torch_sdpa_gqa_qkv"] opaque attentionGQAQKV (batch heads kvHeads qSeq kvSeq dim : UInt64)
-    (q k v : @& RawTensor) (dropout : Float) (causal gqa : Bool) : RawTensor
+    (q k v : @& RawTensor) (causal gqa : Bool) : Except String RawTensor
+@[extern "lean_torch_sdpa_gqa_qkv_io"] opaque attentionGQAQKVIO (batch heads kvHeads qSeq kvSeq dim : UInt64)
+    (q k v : @& RawTensor) (dropout : Float) (causal gqa : Bool) : IO RawTensor
 @[extern "lean_torch_tyr_flash_attn_4d"] opaque flashAttention (batch heads kvHeads qSeq kvSeq dim : UInt64)
-    (q k v : @& RawTensor) (mask : Option RawTensor) (dropout : Float)
+    (q k v : @& RawTensor) (mask : Option RawTensor)
     (causal : Bool) (scale : Option Float) (gqa : Bool) : Except String RawTensor
+@[extern "lean_torch_tyr_flash_attn_4d_io"] opaque flashAttentionIO (batch heads kvHeads qSeq kvSeq dim : UInt64)
+    (q k v : @& RawTensor) (mask : Option RawTensor) (dropout : Float)
+    (causal : Bool) (scale : Option Float) (gqa : Bool) : IO RawTensor
 @[extern "lean_torch_slice_scatter_along_dim"] opaque sliceScatter (shape sourceShape : Shape)
     (input : RawTensor) (dim start : UInt64) (source : @& RawTensor) : RawTensor
 @[extern "lean_torch_apply_rotary_emb"] opaque applyRotary (batch seq heads dim : UInt64)
@@ -62,7 +71,9 @@ namespace torch.RawTensor
 @[extern "lean_torch_conv_transpose1d_bias_checked"] opaque convTranspose1dChecked (inputShape weightShape biasShape : Shape)
     (input weight bias : @& RawTensor) (stride padding outputPadding dilation : UInt64) : Except String RawTensor
 @[extern "lean_torch_sdpa_gqa_window"] opaque attentionWindow (batch heads kvHeads seq dim : UInt64)
-    (q k v : @& RawTensor) (dropout : Float) (causal gqa : Bool) (window : UInt64) : RawTensor
+    (q k v : @& RawTensor) (causal gqa : Bool) (window : UInt64) : Except String RawTensor
+@[extern "lean_torch_sdpa_gqa_window_io"] opaque attentionWindowIO (batch heads kvHeads seq dim : UInt64)
+    (q k v : @& RawTensor) (dropout : Float) (causal gqa : Bool) (window : UInt64) : IO RawTensor
 
 @[extern "lean_torch_tensor_elu"] opaque elu (shape : Shape) (input : @& RawTensor) : RawTensor
 

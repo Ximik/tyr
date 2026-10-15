@@ -259,14 +259,32 @@ def encodeAudio {batch frames : UInt64}
     (inputFeatures : Tensor { device := device, shape := #[batch, cfg.audioConfig.numMelBins, frames] })
     (attnMask : Option (Tensor { device := device, shape := #[batch, AudioEncoderConfig.framesAfterConv3 cfg.audioConfig frames], dtype := .Int64 }) := none)
     : Tensor { device := device, shape := #[batch, AudioEncoderConfig.framesAfterConv3 cfg.audioConfig frames, cfg.audioConfig.outputDim] } :=
-  m.audioTower.forward inputFeatures (attnMask.map Tensor.forgetDType)
+  m.audioTower.forwardInference inputFeatures (attnMask.map Tensor.forgetDType)
 
 def encodeAudioVarLen {batch frames : UInt64}
     (m : Qwen3ASRThinkerForConditionalGeneration (device := device) cfg)
     (inputFeatures : Tensor { device := device, shape := #[batch, cfg.audioConfig.numMelBins, frames] })
     (featureLens : Array UInt64)
     : Tensor { device := device, shape := #[batch, AudioEncoderConfig.framesAfterConv3 cfg.audioConfig frames, cfg.audioConfig.outputDim] } :=
-  m.audioTower.forwardVarLen inputFeatures featureLens
+  m.audioTower.forwardVarLenInference inputFeatures featureLens
+
+/-- Audio features with explicit training/evaluation attention-dropout effects. -/
+def encodeAudioIO {batch frames : UInt64}
+    (m : Qwen3ASRThinkerForConditionalGeneration (device := device) cfg)
+    (inputFeatures : Tensor { device := device, shape := #[batch, cfg.audioConfig.numMelBins, frames] })
+    (training : Bool)
+    (attnMask : Option (Tensor { device := device, shape := #[batch, AudioEncoderConfig.framesAfterConv3 cfg.audioConfig frames], dtype := .Int64 }) := none)
+    : IO (Tensor { device := device, shape := #[batch, AudioEncoderConfig.framesAfterConv3 cfg.audioConfig frames, cfg.audioConfig.outputDim] }) :=
+  m.audioTower.forwardIO inputFeatures training (attnMask.map Tensor.forgetDType)
+
+/-- Chunked audio features with explicit training/evaluation attention dropout. -/
+def encodeAudioVarLenIO {batch frames : UInt64}
+    (m : Qwen3ASRThinkerForConditionalGeneration (device := device) cfg)
+    (inputFeatures : Tensor { device := device, shape := #[batch, cfg.audioConfig.numMelBins, frames] })
+    (featureLens : Array UInt64)
+    (training : Bool)
+    : IO (Tensor { device := device, shape := #[batch, AudioEncoderConfig.framesAfterConv3 cfg.audioConfig frames, cfg.audioConfig.outputDim] }) :=
+  m.audioTower.forwardVarLenIO inputFeatures featureLens training
 
 private def featureLengthsFromFeatureMask (cfg : ThinkerConfig) {batch featureSeq : UInt64}
     (featureAttentionMask : Tensor { device := device, shape := #[batch, featureSeq], dtype := .Int64 })
@@ -308,6 +326,7 @@ private def buildInputsEmbeds {batch seq frames : UInt64}
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (inputFeatures : Option (Tensor { device := device, shape := #[batch, cfg.audioConfig.numMelBins, frames] }) := none)
     (featureAttentionMask : Option (Tensor { device := device, shape := #[batch, frames], dtype := .Int64 }) := none)
+    (training : Bool := false)
     : IO (Tensor { device := device, shape := #[batch, seq, cfg.textConfig.hiddenSize] }) := do
   let inputsEmbeds0 := embedText m inputIds
   match inputFeatures with
@@ -323,10 +342,10 @@ private def buildInputsEmbeds {batch seq frames : UInt64}
         let featureLens ← featureLengthsFromFeatureMask cfg fm
         let audioLens := AudioEncoderConfig.featExtractOutputLengths featureLens
         let m2d ← audioAttentionMaskFromFeatureMask cfg (audioSeq := audioSeq) fm
-        let raw := encodeAudioVarLen m feats featureLens
+        let raw ← encodeAudioVarLenIO m feats featureLens training
         pure (some audioLens, some m2d, raw)
       | none =>
-        let raw := encodeAudio m feats none
+        let raw ← encodeAudioIO m feats training none
         pure (none, none, raw)
 
     let expectedAudioLens :=
@@ -644,15 +663,16 @@ def prepareInputsForGeneration {batch seq frames : UInt64}
   else
     { inputIds, inputFeatures := none, featureAttentionMask }
 
-/-- Faithful thinker forward shape: text embeddings with in-place audio placeholder replacement. -/
+/-- Text embeddings with audio placeholder replacement. `training` controls audio attention dropout. -/
 def forwardWithAux {batch seq frames : UInt64}
     (m : Qwen3ASRThinkerForConditionalGeneration (device := device) cfg)
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (inputFeatures : Option (Tensor { device := device, shape := #[batch, cfg.audioConfig.numMelBins, frames] }) := none)
     (featureAttentionMask : Option (Tensor { device := device, shape := #[batch, frames], dtype := .Int64 }) := none)
     (attentionMask : Option (Tensor { device := device, shape := #[batch, seq], dtype := .Int64 }) := none)
+    (training : Bool := false)
     : IO (Qwen3ASRThinkerCausalLMOutput (device := device) cfg batch seq) := do
-  let inputsEmbeds ← buildInputsEmbeds m inputIds inputFeatures featureAttentionMask
+  let inputsEmbeds ← buildInputsEmbeds m inputIds inputFeatures featureAttentionMask training
   let logits ←
     match attentionMask with
     | none => pure (forwardEmbeds m inputsEmbeds none)
@@ -684,8 +704,9 @@ def forward {batch seq frames : UInt64}
     (inputFeatures : Option (Tensor { device := device, shape := #[batch, cfg.audioConfig.numMelBins, frames] }) := none)
     (featureAttentionMask : Option (Tensor { device := device, shape := #[batch, frames], dtype := .Int64 }) := none)
     (attentionMask : Option (Tensor { device := device, shape := #[batch, seq], dtype := .Int64 }) := none)
+    (training : Bool := false)
     : IO (Tensor { device := device, shape := #[batch, seq, ThinkerLmVocabSize cfg] }) := do
-  return (← m.forwardWithAux inputIds inputFeatures featureAttentionMask attentionMask).logits
+  return (← m.forwardWithAux inputIds inputFeatures featureAttentionMask attentionMask training).logits
 
 private partial def greedyLoopUncached {batch : UInt64}
     (m : Qwen3ASRThinkerForConditionalGeneration (device := device) cfg)
@@ -880,6 +901,7 @@ def generateGreedyWithPromptCache {seq frames : UInt64}
     maxNewTokens
     eosTokenIds
 
+/-- Deterministic inference from mel features. -/
 def forwardFromMel {batch frames textSeq : UInt64}
     (m : Qwen3ASRThinkerForConditionalGeneration (device := device) cfg)
     (inputFeatures : Tensor { device := device, shape := #[batch, cfg.audioConfig.numMelBins, frames] })
@@ -889,9 +911,21 @@ def forwardFromMel {batch frames textSeq : UInt64}
   let audio := m.encodeAudio inputFeatures
   m.forwardAudioText audio textIds attnMask
 
+
+/-- Mel-feature forward with explicit audio attention training/evaluation. -/
+def forwardFromMelIO {batch frames textSeq : UInt64}
+    (m : Qwen3ASRThinkerForConditionalGeneration (device := device) cfg)
+    (inputFeatures : Tensor { device := device, shape := #[batch, cfg.audioConfig.numMelBins, frames] })
+    (textIds : Tensor { device := device, shape := #[batch, textSeq], dtype := .Int64 })
+    (training : Bool)
+    (attnMask : Option (Tensor { device := device, shape := #[batch, AudioEncoderConfig.framesAfterConv3 cfg.audioConfig frames + textSeq], dtype := .Int64 }) := none)
+    : IO (Tensor { device := device, shape := #[batch, AudioEncoderConfig.framesAfterConv3 cfg.audioConfig frames + textSeq, ThinkerLmVocabSize cfg] }) := do
+  let audio ← m.encodeAudioIO inputFeatures training
+  return m.forwardAudioText audio textIds attnMask
+
 end Qwen3ASRThinkerForConditionalGeneration
 
-/-- Top-level Qwen3-ASR model wrapper (thinker-only inference in this Lean port). -/
+/-- Top-level Qwen3-ASR model wrapper with a thinker and audio encoder. -/
 structure Qwen3ASRForConditionalGeneration (cfg : Qwen3ASRConfig) where
   thinker : Qwen3ASRThinkerForConditionalGeneration (device := device) cfg.thinkerConfig
   supportLanguages : Array String := cfg.supportLanguages
@@ -913,6 +947,7 @@ def forwardText {batch textSeq : UInt64}
     : Tensor { device := device, shape := #[batch, textSeq, ThinkerLmVocabSize cfg.thinkerConfig] } :=
   m.thinker.forwardText textIds attnMask
 
+/-- Deterministic inference from mel features. -/
 def forwardFromMel {batch frames textSeq : UInt64}
     (m : Qwen3ASRForConditionalGeneration (device := device) cfg)
     (inputFeatures : Tensor { device := device, shape := #[batch, cfg.thinkerConfig.audioConfig.numMelBins, frames] })
@@ -921,14 +956,26 @@ def forwardFromMel {batch frames textSeq : UInt64}
     : Tensor { device := device, shape := #[batch, AudioEncoderConfig.framesAfterConv3 cfg.thinkerConfig.audioConfig frames + textSeq, ThinkerLmVocabSize cfg.thinkerConfig] } :=
   m.thinker.forwardFromMel inputFeatures textIds attnMask
 
+
+/-- Mel-feature forward with explicit audio attention training/evaluation. -/
+def forwardFromMelIO {batch frames textSeq : UInt64}
+    (m : Qwen3ASRForConditionalGeneration (device := device) cfg)
+    (inputFeatures : Tensor { device := device, shape := #[batch, cfg.thinkerConfig.audioConfig.numMelBins, frames] })
+    (textIds : Tensor { device := device, shape := #[batch, textSeq], dtype := .Int64 })
+    (training : Bool)
+    (attnMask : Option (Tensor { device := device, shape := #[batch, AudioEncoderConfig.framesAfterConv3 cfg.thinkerConfig.audioConfig frames + textSeq], dtype := .Int64 }) := none)
+    : IO (Tensor { device := device, shape := #[batch, AudioEncoderConfig.framesAfterConv3 cfg.thinkerConfig.audioConfig frames + textSeq, ThinkerLmVocabSize cfg.thinkerConfig] }) :=
+  m.thinker.forwardFromMelIO inputFeatures textIds training attnMask
+
 def forwardWithAux {batch seq frames : UInt64}
     (m : Qwen3ASRForConditionalGeneration (device := device) cfg)
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (inputFeatures : Option (Tensor { device := device, shape := #[batch, cfg.thinkerConfig.audioConfig.numMelBins, frames] }) := none)
     (featureAttentionMask : Option (Tensor { device := device, shape := #[batch, frames], dtype := .Int64 }) := none)
     (attentionMask : Option (Tensor { device := device, shape := #[batch, seq], dtype := .Int64 }) := none)
+    (training : Bool := false)
     : IO (Qwen3ASRThinkerCausalLMOutput (device := device) cfg.thinkerConfig batch seq) :=
-  m.thinker.forwardWithAux inputIds inputFeatures featureAttentionMask attentionMask
+  m.thinker.forwardWithAux inputIds inputFeatures featureAttentionMask attentionMask training
 
 def forward {batch seq frames : UInt64}
     (m : Qwen3ASRForConditionalGeneration (device := device) cfg)
@@ -936,8 +983,9 @@ def forward {batch seq frames : UInt64}
     (inputFeatures : Option (Tensor { device := device, shape := #[batch, cfg.thinkerConfig.audioConfig.numMelBins, frames] }) := none)
     (featureAttentionMask : Option (Tensor { device := device, shape := #[batch, frames], dtype := .Int64 }) := none)
     (attentionMask : Option (Tensor { device := device, shape := #[batch, seq], dtype := .Int64 }) := none)
+    (training : Bool := false)
     : IO (Tensor { device := device, shape := #[batch, seq, ThinkerLmVocabSize cfg.thinkerConfig] }) :=
-  m.thinker.forward inputIds inputFeatures featureAttentionMask attentionMask
+  m.thinker.forward inputIds inputFeatures featureAttentionMask attentionMask training
 
 def generateGreedy {batch seq frames : UInt64}
     (m : Qwen3ASRForConditionalGeneration (device := device) cfg)

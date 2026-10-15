@@ -760,13 +760,7 @@ TORCH_LIBRARY_IMPL(tyr, CompositeImplicitAutograd, m) {
   m.impl("flash_attn", TORCH_FN(tyr_ops::flash_attn_dispatch));
 }
 
-extern "C" LEAN_EXPORT lean_object* lean_torch_tyr_flash_attn_4d(
-    uint64_t /*batch*/,
-    uint64_t /*n_head*/,
-    uint64_t /*n_kv_head*/,
-    uint64_t /*q_seq*/,
-    uint64_t /*kv_seq*/,
-    uint64_t /*head_dim*/,
+static torch::Tensor flashAttentionFromLean(
     b_lean_obj_arg query,
     b_lean_obj_arg key,
     b_lean_obj_arg value,
@@ -775,11 +769,12 @@ extern "C" LEAN_EXPORT lean_object* lean_torch_tyr_flash_attn_4d(
     uint8_t is_causal,
     lean_obj_arg scale,
     uint8_t enable_gqa) {
-  return tyr::checkedCall("flashAttention", [&] {
     // Both options are transferred by Lean; keep them owned even if borrowing
     // Q/K/V or parsing the first option throws before the second is inspected.
     std::unique_ptr<lean_object, decltype(&lean_dec)> mask_owner(attn_mask, lean_dec);
     std::unique_ptr<lean_object, decltype(&lean_dec)> scale_owner(scale, lean_dec);
+    TORCH_CHECK(std::isfinite(dropout_p) && dropout_p >= 0.0 && dropout_p <= 1.0,
+        "flashAttention: dropout must be finite and in [0, 1]");
     auto q = borrowTensor(query);
     auto k = borrowTensor(key);
     auto v = borrowTensor(value);
@@ -787,6 +782,8 @@ extern "C" LEAN_EXPORT lean_object* lean_torch_tyr_flash_attn_4d(
     c10::optional<torch::Tensor> mask_opt = c10::nullopt;
     if (!lean_is_scalar(attn_mask)) {
       mask_opt = borrowTensor(lean_ctor_get(attn_mask, 0));
+      TORCH_CHECK(mask_opt->device() == q.device(),
+          "flashAttention: mask must be on the Q/K/V device");
     }
     mask_owner.reset();
 
@@ -796,8 +793,29 @@ extern "C" LEAN_EXPORT lean_object* lean_torch_tyr_flash_attn_4d(
     }
     scale_owner.reset();
 
-    auto result = tyr_ops::flash_attn_dispatch(
+    return tyr_ops::flash_attn_dispatch(
         q, k, v, mask_opt, dropout_p, is_causal != 0, scale_opt, enable_gqa != 0);
-    return fromTorchTensor(result);
+}
+
+extern "C" LEAN_EXPORT lean_object* lean_torch_tyr_flash_attn_4d(
+    uint64_t /*batch*/, uint64_t /*n_head*/, uint64_t /*n_kv_head*/,
+    uint64_t /*q_seq*/, uint64_t /*kv_seq*/, uint64_t /*head_dim*/,
+    b_lean_obj_arg query, b_lean_obj_arg key, b_lean_obj_arg value,
+    lean_obj_arg attn_mask, uint8_t is_causal, lean_obj_arg scale, uint8_t enable_gqa) {
+  return tyr::checkedCall("flashAttention", [&] {
+    return fromTorchTensor(flashAttentionFromLean(
+        query, key, value, attn_mask, 0.0, is_causal, scale, enable_gqa));
+  });
+}
+
+extern "C" LEAN_EXPORT lean_object* lean_torch_tyr_flash_attn_4d_io(
+    uint64_t /*batch*/, uint64_t /*n_head*/, uint64_t /*n_kv_head*/,
+    uint64_t /*q_seq*/, uint64_t /*kv_seq*/, uint64_t /*head_dim*/,
+    b_lean_obj_arg query, b_lean_obj_arg key, b_lean_obj_arg value,
+    lean_obj_arg attn_mask, double dropout_p, uint8_t is_causal,
+    lean_obj_arg scale, uint8_t enable_gqa) {
+  return tyr::checkedIoCall("flashAttentionIO", [&] {
+    return lean_io_result_mk_ok(fromTorchTensor(flashAttentionFromLean(
+        query, key, value, attn_mask, dropout_p, is_causal, scale, enable_gqa)));
   });
 }

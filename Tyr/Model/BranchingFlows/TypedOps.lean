@@ -90,9 +90,25 @@ def affine2d {batch input output : UInt64} {dev : Device} (x : Tensor { shape :=
 def transposeAttention {b s h d : UInt64} {dev : Device} (x : Tensor { shape := #[b, s, h, d], device := dev }) : Tensor { shape := #[b, h, s, d], device := dev } :=
   x.transpose 1 2
 
+def attentionBias? {b h s d : UInt64} {dev : Device} (q k v : Tensor { shape := #[b, h, s, d], device := dev })
+    (bias : Tensor { shape := #[b, h, s, s], device := dev }) :
+    Except String (Tensor { shape := #[b, h, s, d], device := dev }) := do
+  q.checkedReplacement? (← RawTensor.branchingAttentionBias b h s d q.raw k.raw v.raw bias.raw false)
+
 def attentionBias {b h s d : UInt64} {dev : Device} (q k v : Tensor { shape := #[b, h, s, d], device := dev })
     (bias : Tensor { shape := #[b, h, s, s], device := dev }) : Tensor { shape := #[b, h, s, d], device := dev } :=
-  q.checkedReplacement (RawTensor.branchingAttentionBias b h s d q.raw k.raw v.raw bias.raw 0.0 false)
+  match attentionBias? q k v bias with
+  | .ok result => result
+  | .error message => panic! s!"BranchingFlows.attentionBias: {message}"
+
+def attentionBiasIO {b h s d : UInt64} {dev : Device} (q k v : Tensor { shape := #[b, h, s, d], device := dev })
+    (bias : Tensor { shape := #[b, h, s, s], device := dev })
+    (dropout : Float) (training : Bool) (causal : Bool := false) :
+    IO (Tensor { shape := #[b, h, s, d], device := dev }) := do
+  let effective ← IO.ofExcept (Tensor.attentionDropout? dropout training)
+  let raw ← RawTensor.branchingAttentionBiasIO b h s d q.raw k.raw v.raw bias.raw
+    effective causal
+  IO.ofExcept (q.checkedReplacement? raw)
 
 def fullDynamic (shape : Shape) (value : Float) (requiresGrad : Bool := false) (device : Device := .CPU) (noGrad : requiresGrad = false := by decide) : Tensor { shape := shape, device } :=
   Tensor.Preserving.addScalar (zerosDynamic shape requiresGrad device noGrad) value

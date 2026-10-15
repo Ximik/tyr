@@ -39,8 +39,8 @@ def joinHeads {b h t d : UInt64} (x : Activation (device := device) #[b,h,t,d]) 
   Tensor.joinHeads x
 
 def attention {b h t d : UInt64} (q k v : Activation (device := device) #[b,h,t,d])
-    (dropout : Float) : Activation (device := device) #[b,h,t,d] :=
-  Tensor.attention q k v dropout true
+    (dropout : Float) (training : Bool) : IO (Activation (device := device) #[b,h,t,d]) :=
+  Tensor.attentionIO q k v dropout training true
 
 def embedding {b t v e : UInt64} (idx : Tokens (device := device) #[b,t])
     (weight : Activation (device := device) #[v,e]) : Activation (device := device) #[b,t,e] :=

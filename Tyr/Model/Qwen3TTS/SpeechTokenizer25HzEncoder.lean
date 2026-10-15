@@ -317,7 +317,7 @@ private def forwardAttention {seq : UInt64}
   let kh : Tensor { shape := #[1, 20, seq, 64], device := device } := Tensor.splitHeads k
   let vh : Tensor { shape := #[1, 20, seq, 64], device := device } := Tensor.splitHeads v
 
-  let attn : Tensor { shape := #[1, 20, seq, 64], device := device } := Tensor.attentionGQA qh kh vh 0.0 false
+  let attn : Tensor { shape := #[1, 20, seq, 64], device := device } := Tensor.attentionGQA qh kh vh false
   let attn2 : Tensor { shape := #[1, seq, 20, 64], device := device } := Tensor.joinHeads attn
   let attn3 : Tensor { shape := #[1, seq, 1280], device := device } := Tensor.reshapeChecked attn2 #[1, seq, 1280]
   affine3d attn3 blk.oWeight blk.oBias

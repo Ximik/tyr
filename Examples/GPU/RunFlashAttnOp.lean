@@ -37,7 +37,7 @@ private def nativeDenseCase : IO Bool := do
   let qRef ← Tensor.setRequiresGrad (Tensor.detach q) true
   let kRef ← Tensor.setRequiresGrad (Tensor.detach k) true
   let vRef ← Tensor.setRequiresGrad (Tensor.detach v) true
-  let outRef := Tensor.attentionGQA qRef kRef vRef 0.0 false
+  let outRef := Tensor.attentionGQA qRef kRef vRef false
   FlashBenchReference.backwardWithCotangent outRef dO
   let _ ← torch.cuda_synchronize
   let dqRef := (← Tensor.gradOf qRef).toFloat32
@@ -67,7 +67,7 @@ private def portableCausalCase : IO Bool := do
   let v ← Tensor.setRequiresGrad ((← Tensor.randn #[1, 1, 96, 64] false device).toBFloat16) true
   let dO := (← Tensor.randn #[1, 1, 96, 64] false device).toBFloat16
 
-  let (route, out) := flashAttnWithRoute q k v none 0.0 true none false
+  let (route, out) := flashAttnWithRoute q k v none true none false
   FlashBenchReference.backwardWithCotangent out dO
   let _ ← torch.cuda_synchronize
   let dq := (← Tensor.gradOf q).toFloat32
@@ -77,7 +77,7 @@ private def portableCausalCase : IO Bool := do
   let qRef ← Tensor.setRequiresGrad (Tensor.detach q) true
   let kRef ← Tensor.setRequiresGrad (Tensor.detach k) true
   let vRef ← Tensor.setRequiresGrad (Tensor.detach v) true
-  let outRef := Tensor.attentionGQA qRef kRef vRef 0.0 true
+  let outRef := Tensor.attentionGQA qRef kRef vRef true
   FlashBenchReference.backwardWithCotangent outRef dO
   let _ ← torch.cuda_synchronize
   let dqRef := (← Tensor.gradOf qRef).toFloat32
@@ -107,7 +107,7 @@ private def portableGqaCase : IO Bool := do
   let v ← Tensor.setRequiresGrad ((← Tensor.randn #[1, 2, 96, 64] false device).toBFloat16) true
   let dO := (← Tensor.randn #[1, 4, 96, 64] false device).toBFloat16
 
-  let (route, out) := flashAttnWithRoute q k v none 0.0 false none true
+  let (route, out) := flashAttnWithRoute q k v none false none true
   FlashBenchReference.backwardWithCotangent out dO
   let _ ← torch.cuda_synchronize
   let dq := (← Tensor.gradOf q).toFloat32
@@ -117,7 +117,7 @@ private def portableGqaCase : IO Bool := do
   let qRef ← Tensor.setRequiresGrad (Tensor.detach q) true
   let kRef ← Tensor.setRequiresGrad (Tensor.detach k) true
   let vRef ← Tensor.setRequiresGrad (Tensor.detach v) true
-  let outRef := Tensor.attentionGQAQKV qRef kRef vRef 0.0 false true
+  let outRef := Tensor.attentionGQAQKV qRef kRef vRef false true
   FlashBenchReference.backwardWithCotangent outRef dO
   let _ ← torch.cuda_synchronize
   let dqRef := (← Tensor.gradOf qRef).toFloat32

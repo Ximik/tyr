@@ -159,7 +159,7 @@ def blockForward {n_embd n_head batch seq : UInt64}
   let v := TensorOps.splitHeads v
   -- Scaled dot-product attention with causal masking (with dropout built-in)
   -- Input: [batch, n_head, seq, head_dim], Output: [batch, n_head, seq, head_dim]
-  let attn := TensorOps.attention q k v dropout_p
+  let attn ← TensorOps.attention q k v dropout_p training
   -- Reshape back: [batch, n_head, seq, head_dim] -> [batch, seq, n_head, head_dim] -> [batch, seq, n_embd]
   let attn ← TensorOps.reshape (TensorOps.joinHeads attn) #[batch, seq, n_embd]
   -- Output projection + dropout
