@@ -2485,11 +2485,10 @@ lean_object* lean_torch_resample_soxr_hq(
 
   size_t in_len = lean_array_size(samples);
   if (in_len == 0 || orig_sr == target_sr) {
-    lean_object* passthrough = lean_mk_empty_array();
-    for (size_t i = 0; i < in_len; i++) {
-      passthrough = lean_array_push(passthrough, lean_array_get_core(samples, i));
-    }
-    return lean_io_result_mk_ok(passthrough);
+    // The argument is borrowed. Retain the immutable array for the result;
+    // transferring its borrowed elements individually would leave them dangling.
+    lean_inc(samples);
+    return lean_io_result_mk_ok(samples);
   }
 
   std::vector<float> in_data(in_len);

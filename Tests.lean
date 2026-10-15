@@ -14,6 +14,7 @@ import Tests.TestCheckpointPersistence
 import Tests.TestNanoChatCheckpoint
 import Tests.TestFFIBoundary
 import Tests.TestParquetRecovery
+import Tests.TestResampleOwnership
 import Tests.TestWidgetTyped
 import Tests.TestTypedStandalone
 import Tests.TestTensorTreeCast
