@@ -4,6 +4,7 @@ import Lean.Util.Path
 import Tyr.AD.JaxprLike
 import Tyr.GPU.Codegen.IR
 import Tests.TestADJaxprLikeElabFixture
+import Std.Sync.Mutex
 
 namespace Tests.ADJaxprLike
 
@@ -31,9 +32,24 @@ def runCoreM (x : CoreM α) : IO α := do
   | .ok value => pure value
   | .error msg => throw (IO.userError msg)
 
+-- Cache immutable bases by the ordered import list. Fresh Core.State values
+-- isolate each action's environment updates, while retained bases keep returned
+-- expressions valid and avoid accumulating another region graph on every call.
+private initialize importedEnvironments :
+    Std.Mutex (Array (Array Name × Environment)) ← Std.Mutex.new #[]
+
+private def getImportedEnvironment (imports : Array Name) : IO Environment :=
+  importedEnvironments.atomically do
+    let cached ← get
+    if let some (_, env) := cached.find? (fun entry => entry.1 == imports) then
+      return env
+    Lean.initSearchPath (← Lean.findSysroot)
+    let env ← Lean.importModules (imports.map fun m => { module := m }) {} (loadExts := true)
+    set (cached.push (imports, env))
+    return env
+
 def runCoreMWithImportsResult (imports : Array Name) (x : CoreM α) : IO (Except String α) := do
-  Lean.initSearchPath (← Lean.findSysroot)
-  let env ← Lean.importModules (imports.map fun m => { module := m }) {} (loadExts := true)
+  let env ← getImportedEnvironment imports
   let ctx : Core.Context := { fileName := "<test>", fileMap := default }
   let state : Core.State := { env := env }
   let eio := x.run ctx state

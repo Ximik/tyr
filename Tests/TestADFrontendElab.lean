@@ -1,5 +1,6 @@
 import Tyr
 import LeanTest
+import Std.Sync.Mutex
 
 namespace Tests.ADFrontendElab
 
@@ -8,12 +9,23 @@ open LeanTest
 open Tyr.AD.Frontend
 open Tyr.AD.JaxprLike
 
+-- Imported compacted regions outlive an Environment value. Retain one immutable
+-- base rather than importing the entire module graph again for every test.
+-- Keep the regions alive because returned frontend expressions may refer to them.
+private initialize importedEnvironment : Std.Mutex (Option Environment) ← Std.Mutex.new none
+
+private def getImportedEnvironment : IO Environment :=
+  importedEnvironment.atomically do
+    if let some env := ← get then
+      return env
+    Lean.initSearchPath (← Lean.findSysroot)
+    let env ← Lean.importModules
+      #[{ module := `Tests.TestADFrontendElab }] {} (loadExts := true)
+    set (some env)
+    return env
+
 def runCoreM (x : CoreM α) : IO α := do
-  Lean.initSearchPath (← Lean.findSysroot)
-  let env ← Lean.importModules
-    #[{ module := `Tests.TestADFrontendElab }]
-    {}
-    (loadExts := true)
+  let env ← getImportedEnvironment
   -- CoreM.run uses this baseline; the default zero charges earlier tests too.
   let initHeartbeats ← IO.getNumHeartbeats
   let ctx : Core.Context := { fileName := "<test>", fileMap := default, initHeartbeats }
@@ -24,6 +36,17 @@ def runCoreM (x : CoreM α) : IO α := do
   | .ok (value, _) => pure value
   | .error msg =>
       throw (IO.userError (← msg.toMessageData.toString))
+
+@[test]
+unsafe def testImportedEnvironmentReusePreservesTestIsolation : IO Unit := do
+  let original ← runCoreM do
+    let env ← getEnv
+    setEnv (env.setMainModule `testOnlyEnvironmentMutation)
+    return env
+  let next ← runCoreM getEnv
+  assertTrue (ptrEq original next) "Repeated tests must share their immutable imported base"
+  assertEqual original.mainModule next.mainModule
+    "A test's environment updates must not enter the shared base"
 
 opaque frontendPadPrimitive (_base : torch.Tensor { shape := #[2], dtype := .Float32, device := .CPU }) (_padv : torch.Tensor { shape := #[1], dtype := .Float32, device := .CPU }) : torch.Tensor { shape := #[6], dtype := .Float32, device := .CPU } :=
   torch.Tensor.zeros #[6]
