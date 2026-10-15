@@ -372,15 +372,17 @@ import Tyr.Typed.Neural
 import Tyr.GPU.Kernels.Copy
 open torch Tyr.GPU.Kernels
 
-def copyTile : IO (Tensor { shape := #[1, 1, 64, 64], dtype := .Float32, device := .CUDA 0 }) := do
+def copyTile : IO (Σ device : Device,
+    Tensor { shape := #[1, 1, 64, 64], dtype := .Float32, device := device }) := do
+  let device ← Device.cuda 0
   let input ← Tensor.uniformLike
-    (Tensor.zeros #[1, 1, 64, 64] false (.CUDA 0))
+    (Tensor.zeros #[1, 1, 64, 64] (device := device))
   let output ← Tensor.uniformLike input 0 0
   let stream ← torch.cuda_current_stream
   copy64x64Float4.launch input.raw output.raw 1 1 1 512 1 1 0 stream
   --                                          grid  block   smem stream
   torch.cuda_synchronize
-  pure output
+  pure ⟨device, output⟩
 ```
 
 Only the launch boundary receives raw handles; host values retain their indexed

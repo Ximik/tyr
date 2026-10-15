@@ -99,14 +99,22 @@ the per-model `Weights` modules (`Tyr/Model/Qwen35/Weights.lean`,
 - `tryLoadTensor` / `tryLoadTensorSharded` return `none` on **any** failure —
   missing tensor, shape mismatch, unreadable file.
 - `tryLoadOptionalTensor` / `tryLoadOptionalTensorSharded` return `none` only when
-  the tensor is absent (detected by the `isMissingTensorError` message heuristic,
-  `Tyr/SafeTensors/Load.lean:39-41`); other errors are rethrown.
+  the tensor is absent. They use the exact missing-entry diagnostics in
+  `Tyr/SafeTensors/Exact.lean`; malformed metadata, file and device errors are
+  rethrown.
 
-On top of these sit candidate-name fallbacks — `tryLoadTensorCandidates`,
-`tryLoadTensorShardedCandidates`, and the throwing `loadTensorCandidates` /
-`loadTensorShardedCandidates` — which try an array of alternative names (model
-families use `pushUnique` to build prefix-variant lists, e.g. with and without a
-`language_model.` prefix).
+Candidate-name fallbacks try an array of alternative names. The
+`tryLoadTensorCandidates` variants suppress all failures;
+`tryLoadOptionalTensorCandidates` and its sharded counterpart skip only absent
+entries. The throwing `loadTensorCandidates` / `loadTensorShardedCandidates`
+also skip only absent entries: a malformed present tensor stops the search.
+Model families use `pushUnique` to build prefix-variant lists, e.g. with and
+without a `language_model.` prefix.
+
+These helpers return `SomeDTypeTensor shape device`, optionally wrapped in
+`Option`. The package retains the checkpoint's exact dtype as `.1` and the
+indexed tensor as `.2`; loading does not cast to a default dtype. Connected
+weights can use `atDType?` to check agreement with one shared dtype witness.
 
 ### The `safetensors_type_provider` command
 
@@ -286,10 +294,13 @@ SafeTensors export.
 | `tryLoadTensor` / `tryLoadTensorSharded` | any error occurs |
 | `tryLoadOptionalTensor` / `tryLoadOptionalTensorSharded` | tensor is missing (other errors rethrown) |
 | `tryLoadTensorCandidates` / `tryLoadTensorShardedCandidates` | no candidate name loads |
-| `loadTensorCandidates` / `loadTensorShardedCandidates` | throwing variants of the above |
+| `tryLoadOptionalTensorCandidates` / `tryLoadOptionalTensorShardedCandidates` | every candidate is absent; other errors rethrown |
+| `loadTensorCandidates` / `loadTensorShardedCandidates` | never return `none`; throw if all candidates are absent or a present entry is invalid |
 
 All take `(path|dir) (name[s]) (s : Shape) (device : Device := Device.CPU)` and
-return `IO (Option (Tensor { shape := s, device := device }))` resp. `IO (Tensor { shape := s, device := device })`; dtype follows the file.
+return `IO (Option (SomeDTypeTensor s device))` or, for the required loaders,
+`IO (SomeDTypeTensor s device)`. The dtype follows the file and remains in the
+dependent result rather than being erased.
 
 ### Hub (`torch.Hub`, `Tyr/Hub.lean`)
 

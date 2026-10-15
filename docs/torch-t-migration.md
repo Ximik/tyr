@@ -4,8 +4,8 @@ The public tensor type is `torch.Tensor σ`. The former `torch.T shape` was a
 transparent alias for a single native handle type: different shapes were
 definitionally equal. Its declaration and production callers have been removed.
 The shape/dtype convenience aliases `DTensor` and `STensor` have also been
-removed; public signatures now use `Tensor` with a complete or partial
-`StaticSpec` directly. The sections below retain the migration history and its
+removed; public signatures now use `Tensor` with a complete `StaticSpec`
+directly. Every shape, dtype, and device index is mandatory. The sections below retain the migration history and its
 validation checkpoints; older inventories and uses of the removed names describe
 those checkpoints. GPU hardware qualification remains separate from removal of
 the declarations.
@@ -17,21 +17,36 @@ The current `StaticSpec` requires `device : Device` alongside shape and dtype.
 core API. A runtime-selected device remains a concrete dependent index;
 loaders return the requested placement, model records share it across fields,
 and unknown placements are packaged existentially. Tensor-tree conversion
-names its destination device in the target type. The older sections below are
-historical checkpoints: snippets that omit device or use a placement policy
-predate this migration. See [the typed guide](core/typed.md) for current code.
+names its destination device in the target type. `Device.CPU` is always
+available; accelerator placements are acquired through `Device.cuda index` or
+`Device.mps` in IO. A `DeviceKind` description cannot substitute for an acquired
+placement. Pure specification-based constants and `Inhabited (Tensor spec)`
+require `DType.ConstantSupported spec.dtype spec.device`; runtime-selected
+support is acquired before construction. Deterministic constructors return
+tensors directly; their checked factory twins have been removed.
+
+Current code spells a known dtype as `Tensor ⟨shape, dtype, device⟩` and packages
+an unknown checkpoint dtype as `SomeDTypeTensor shape device`. A runtime shape
+can be retained as `Σ shape : Shape, Tensor ⟨shape, dtype, device⟩`. These are
+complete indices, including when their values are selected at runtime.
+
+The older sections below are historical checkpoints: snippets that omit dtype
+or device, use a placement policy, or describe removed factories predate the
+current API. See [the typed guide](core/typed.md) for current code.
 
 ## 2026-10-14 follow-up: remove the convenience aliases
 
-`DTensor s d` becomes `Tensor { shape := s, dtype := d }`; `STensor s` becomes
-`Tensor { shape := s }`. This preserves the existing shape, dtype, and device
-claims without changing native representation. Source signatures, generated
-loaders, examples, tests, and current API guides now use the canonical spelling.
-An existential shape remains explicit as `Sigma (fun s => Tensor { shape := s })`.
+At this intermediate checkpoint, `DTensor s d` became
+`Tensor { shape := s, dtype := d }` and `STensor s` became
+`Tensor { shape := s }`. Those historical spellings preserved the then-existing
+defaults while removing aliases. They are no longer valid: the subsequent
+dtype/device migration requires every index explicitly, as shown above.
+Likewise, the intermediate shape package
+`Sigma (fun s => Tensor { shape := s })` has been replaced with complete indices.
 
 The unused `torch.TT`, `SomeDTensor`, and `Tensor.assumeDType` names are removed
-as well. `Tensor.toSome` now accepts any `Tensor σ` and returns `Sigma Tensor`,
-preserving its entire specification, including device policy. Raw handles still
+as well. `Tensor.toSome` accepts any `Tensor σ` and returns `Sigma Tensor`,
+preserving its entire specification, including concrete placement. Raw handles still
 enter checked code through `Tensor.ofRaw`; removing aliases adds no unchecked
 conversions.
 
@@ -51,23 +66,22 @@ checks shape, dtype, and device before construction. Core operation adapters
 now validate native outputs as well, including tuples and IO results.
 
 `checkedReplacement?` compares actual dtype and placement against the original
-handle, so a dynamic specification cannot hide metadata changes in preserving
+handle, so runtime-selected indices cannot hide metadata changes in preserving
 operations. Copy adapters check actual shape and dtype before mutation. The
 BranchingFlows batch-staging path now explicitly casts floating fields when
 copying Float32 batches into BF16 storage.
 Intentional model-tree conversion uses `TensorStruct.castTo TargetType source`:
 the destination type specifies dtype and placement separately for each leaf.
-`TensorStruct.castDType` remains a uniform convenience operation within the same
-declared structure type, checking every converted leaf against its original
-specification. A conflicting concrete dtype produces an error.
+`deriving TensorStruct` and `deriving Model` supply same-record conversions;
+`castTo` returns the explicitly selected destination type.
 
-Only the reserved `.Unknown "dynamic"` token weakens a dtype claim; arbitrary
-unknown or misspelled tokens are no longer wildcards. `castDType?`, `castLike?`,
-and `reshapeChecked?` return metadata validation errors through `Except`. Reshape checks native
-element counts and rejects unsigned extents that would become negative native
-dimensions. `reifyDType` recovers an existential native dtype while retaining
-shape and device policy. Explicit weakening remains available; a shared dynamic
-index does not establish equality of two actual dtypes.
+Every specification now requires an exact dtype and device. The wildcard default
+and `forgetDType` have been removed. `castDType?`, `castLike?`, and
+`reshapeChecked?` return metadata validation errors through `Except`. Reshape
+checks native element counts and rejects unsigned extents that would become
+negative native dimensions. `reifyDType` packages an exact runtime dtype while
+retaining shape and placement; hidden dtypes must be checked for equality before
+an operation requiring the same dtype.
 
 The remaining native construction trust is `zerosFor`: it allocates fresh
 storage from the requested spec to bootstrap pure defaults, accepts no foreign
@@ -107,19 +121,19 @@ def preparePair (source : StoredPair) : IO RuntimePair :=
 Each tensor retains its shape. A concrete target dtype requests a native cast;
 the concrete target device requests an explicit move. `castTo` submits dtype and
 placement together in a single native conversion, allowing an MPS Float32
-source to request CPU Float64 directly. A dynamic target dtype retains the source dtype. Target placement is always
+source to request CPU Float64 directly. An existential `SomeDTypeTensor` target retains the source dtype and witness. Target placement is always
 concrete; use a shared device parameter when the conversion should preserve it.
 Container lengths, option branches, frozen roles, and static values are
 preserved. Within `castTo`, metadata validation failures and caught native
 conversion exceptions produce IO errors with the leaf's structural path.
 
-`TensorTreeCast SourceType TargetType` describes the traversal. For records,
+`TensorTreeCast SourceType TargetType` describes the traversal. Ordinary
+`deriving TensorStruct` and `deriving Model` generate casts between
+parameterizations of the same record. For different record types,
 `import Tyr.TensorStruct.DeriveCast` enables
 `derive_tensor_tree_cast SourceType => TargetType`, matching field names and
 declaration order. The [typed tensor guide](core/typed.md#models-differentiation-and-persistence)
-contains a complete record example. `TensorStruct.castDType dtype params`
-remains useful for uniform conversion of dynamic leaves within one declared
-structure type; its original concrete leaf specifications still apply.
+contains a complete record example.
 
 The raw-admission and type-tree changes pass the strict 1,876-job build across
 all nine required CPU runners, `Examples`, `TestGPUE2E`, and `TestGPUGB10E2E`.
@@ -168,7 +182,11 @@ surface, not a proof that every native operation obeys its specification.
 
 ### Eliminating the remaining type names
 
-| Existing spelling | Canonical spelling | Effect |
+The following table records the review's intermediate alias-only replacement,
+before mandatory dtype and placement were introduced. Its incomplete tensor
+records are historical examples, not valid current declarations.
+
+| Removed spelling | Historical replacement | Contract at that checkpoint |
 | --- | --- | --- |
 | `DTensor s d` | `Tensor { shape := s, dtype := d }` | Same shape/dtype contract and unrestricted device |
 | `STensor s` | `Tensor { shape := s }` | Same shape contract and dynamic dtype/device |

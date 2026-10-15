@@ -280,12 +280,14 @@ import Tyr.GPU.Kernels.MhaH100
 
 open torch Tyr.GPU.Kernels
 
+-- Acquire `device ← Device.cuda 0` before preparing these inputs.
 -- Inputs must be contiguous BF16 tensors on compatible CUDA hardware.
-def mhaForward (q k v : Tensor { shape := #[1, 1, 128, 64], dtype := .BFloat16, device := .CUDA 0 }) := do
+def mhaForward {device : Device}
+    (q k v : Tensor { shape := #[1, 1, 128, 64], dtype := .BFloat16, device := device }) := do
   let stream ← torch.cuda_current_stream
   let out ← Tensor.uniformLike q 0 0
   let lOut ← Tensor.uniformLike
-    (Tensor.zeros #[2, 64] false (.CUDA 0)) 0 0
+    (Tensor.zeros #[2, 64] (device := device)) 0 0
   tkMhaH100Fwd2Block.launch q.raw k.raw v.raw out.raw lOut.raw
     128 64 1 2 1 128 1 1 0 stream
   torch.cuda_synchronize
@@ -309,8 +311,9 @@ import Tyr.GPU.Ops.FlashAttn
 open torch Tyr.GPU.Ops.FlashAttn
 
 -- q, k, and v must be trainable leaves for gradient extraction.
-def attentionGradient (q k v dO : Tensor { shape := #[1, 1, 128, 64], dtype := .BFloat16, device := .CUDA 0 })
-    : IO (DispatchRoute × Tensor { shape := #[1, 1, 128, 64], dtype := .Float32, device := .CUDA 0 }) := do
+def attentionGradient {device : Device}
+    (q k v dO : Tensor { shape := #[1, 1, 128, 64], dtype := .BFloat16, device := device })
+    : IO (DispatchRoute × Tensor { shape := #[1, 1, 128, 64], dtype := .Float32, device := device }) := do
   let (route, out) := flashAttnWithRoute q k v
   Tensor.backward out dO
   pure (route, (← Tensor.gradOf q).toFloat32)
@@ -327,9 +330,11 @@ import Examples.GPU.Parity
 open torch Tyr.GPU.Ops.RKFused
 
 -- dy/dt = -y on a [1, 1, 64, 64] CUDA state, 200 fixed steps
+let device ← Device.cuda 0
+let y0 ← Tensor.uniformLike (Tensor.ones #[1, 1, 64, 64] (device := device)) 1 1
 let blackwell ← isBlackwellFamily
 let stream ← torch.cuda_current_stream
-let ws ← Workspace.make 64 (Device.CUDA 0)
+let ws ← Workspace.make 64 device
 let y1 ← dopri5SolveFused (fun _t y => Tensor.mulScalar y (-1.0))
   0.0 1.0 200 y0 ws blackwell stream
 ```

@@ -101,15 +101,20 @@ each leaf keeps its shape, and container lengths and `Static`/`Frozen` roles are
 preserved. Dtype and device changes happen together in one native conversion.
 Validation and native conversion errors report the affected field or index.
 
-Import `Tyr.TensorStruct.Cast` for supported leaf and container conversions. For
-records, import `Tyr.TensorStruct.DeriveCast` and declare
+Import `Tyr.TensorStruct.Cast` for supported leaf and container conversions.
+`deriving TensorStruct` and `deriving Model` automatically provide casts between
+parameterizations of the same record. Each corresponding field must have a
+`TensorTreeCast` instance; ordinary `map` and `mapM` still preserve every leaf's
+complete specification. Conversion happens only when `castTo` is explicitly called.
+
+For different record types, import `Tyr.TensorStruct.DeriveCast` and declare
 `derive_tensor_tree_cast SourceType => TargetType`. This matches fields by name
 and order without allocating a destination template. See the
 [complete record example](typed.md#models-differentiation-and-persistence).
 
-`TensorStruct.castDType dtype source` is the uniform convenience for dynamic
-dtype leaves within the same declared type; concrete leaf specifications still
-apply. Ordinary `map` and `mapM` retain each leaf's complete specification.
+Both forms preserve metadata and reject tensor shape changes. Automatic deriving
+supports dependent type parameters; fields whose types depend on earlier field
+values require a manual cast instance.
 
 ## Persistence and AD
 

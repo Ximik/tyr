@@ -252,7 +252,8 @@ def decodeStep {batch maxLen kvHeads : UInt64}
   let cache' ← cache'.incrementSeqLens
   pure (cache', out)
 
--- let cache ← KVCache.Cache.init 1 batch maxLen kvHeads 128 (device := .CUDA 0)
+-- let device ← Device.cuda 0
+-- let cache ← KVCache.Cache.init 1 batch maxLen kvHeads 128 (device := device)
 ```
 
 The harness checks this token-by-token path against a single dense

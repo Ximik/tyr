@@ -11,18 +11,26 @@ Inference uses explicitly detached tensors rather than ambient gradient-mode sco
 ```lean
 import Tyr.Typed
 import Tyr.Typed.Neural
+import Tyr.Torch
 open torch
 
 abbrev Activations := Tensor { shape := #[32, 128], dtype := .Float32, device := .CPU }
-abbrev PinnedActivations := Tensor {
+abbrev PinnedActivations (device : Device) := Tensor {
   shape := #[32, 128]
   dtype := .BFloat16
-  device := (.CUDA 0)
+  device := device
 }
+
+def allocateCUDAActivations : IO (Σ device : Device, PinnedActivations device) := do
+  let device ← Device.cuda 0
+  let support ← DType.BFloat16.acquireConstantSupport device
+  let _ := support.down
+  pure ⟨device, Tensor.zerosFor ⟨#[32, 128], .BFloat16, device⟩⟩
 ```
 
-Every specification supplies a concrete `device`. Omitting dtype leaves it
-`.Unknown "dynamic"`, while retaining exact shape and placement. `shape`, `dtype`,
+Every specification supplies exact shape, dtype, and device indices. There is
+no wildcard default. `SomeDTypeTensor` packages a runtime dtype without erasing
+it. `shape`, `dtype`,
 `device`, and `staticSpec` describe the index; `actualSpec` and `runtimeDevice`
 inspect native metadata. Runtime-selected devices can appear directly in
 result types, or be packaged as `Sigma fun device => Tensor { shape := shape,
@@ -44,12 +52,25 @@ Factories live in `torch.Tensor`:
 - `fullInt` creates Int64 tensors.
 - `fromFloatArray` and `fromInt64Array` retain the host array length in the shape.
 - `randn` and `uniformLike` return fresh random tensors in `IO`.
-- `zerosFor` and `onesFor` accept a complete specification.
+- `zerosFor`, `onesFor`, and `eyeFor` require exact dtype/device constant support.
 - `toFloat32`, `toBFloat16`, and `castDType` change the dtype index.
 
 Pure factories are suitable for values. When independent mutable storage is
 required, use an allocation/copy API with an explicit ownership discipline;
 repeating a pure expression does not establish independent storage.
+
+`Device.CPU` is always available. Acquire accelerators with `Device.cuda index`
+or `Device.mps` in IO before constructing tensors. The result carries the exact
+placement in tensor indices. A raw `DeviceKind` description cannot be passed in
+its place.
+
+The erased class `DType.ConstantSupported dtype device` establishes that the
+constant factory paths support this exact pair and represent zero and one.
+Common supported combinations have static instances. For a runtime-selected
+pair, acquire evidence once with `dtype.acquireConstantSupport device` and
+install `support.down` as a local instance. `Inhabited (Tensor spec)` requires
+the same evidence; `default` cannot allocate an unsupported specification.
+This capability does not imply support for arbitrary arithmetic kernels.
 
 ## Arithmetic, transforms, and reductions
 
@@ -76,20 +97,22 @@ claimed result of a runtime slice. Other transforms include `transpose`,
 
 Use `Tensor.packShape` to package a runtime-dependent shape existentially.
 `catMany?` accepts indexed existential tensors and checks the requested output
-specification; `catManyChecked` reports a mismatch through Lean's panic mechanism.
+specification; `catManyChecked` prints a diagnostic and aborts on mismatch.
 A dynamic shape does not require pretending that a tensor is a scalar.
 
 Reduction indices follow native accumulation rules. For example, integer sums
 may accumulate in Int64. `Tensor.Preserving` provides explicit runtime-checked
-adapters for generic or shape-only tensors. Its binary arithmetic checks actual
-operand promotion and rejects a change to the left operand's dtype, then checks
-result metadata. Use the `?` variants to handle these rejections; convenience
-wrappers use Lean's panic fallback. Deliberate mixed-precision computation needs
-explicit input conversions or a witnessed promoting operation.
+adapters for tensors with runtime-selected dtype indices. Its binary arithmetic
+checks actual operand promotion and rejects a change to the left operand's
+dtype, then checks result metadata. Use the `?` variants to handle these
+rejections; convenience wrappers use the original input as Lean's panic
+fallback. Deliberate mixed-precision computation needs explicit input
+conversions or a witnessed promoting operation.
 `Tensor.Promoting` provides the latter when dtypes are known only at runtime:
-its checked variants return the computed dtype with a promotion witness, and
-its convenience wrappers retain that native result under a dynamic dtype index.
-They do not coerce operands to the left operand's dtype.
+its checked binary and host-scalar variants return the computed dtype with a
+promotion witness. Its unary convenience wrappers express their computed dtype
+directly in the result index. These operations preserve the promoted native
+dtype without coercing it to an input's dtype.
 The arithmetic `?` variants also return native kernel failures through `Except`.
 The checked matrix, expansion, concatenation, and reduction APIs provide
 recoverable errors for their respective checks and native calls; this does not

@@ -37,9 +37,11 @@ def exampleTensor : Tensor { shape := #[2, 3], dtype := .Float32, device := .CPU
 ```
 
 `Tensor σ` records shape, dtype, and concrete device. The example fixes shape, dtype,
-and CPU placement. `Device` supports CPU, CUDA, and
-MPS; `getBestDevice` from `Tyr.Torch` selects MPS, then CUDA, then CPU based on
-availability. Native handles are confined to adapters behind the indexed API.
+and CPU placement. `Device.CPU` is always available; acquire accelerators with
+`Device.cuda index` or `Device.mps` in IO. `getBestDevice` from `Tyr.Torch`
+acquires MPS, then CUDA, then CPU according to availability. The acquired value
+remains the device index for subsequent tensor operations. Native handles are
+confined to adapters behind the indexed API.
 
 ## Dependencies
 

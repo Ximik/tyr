@@ -21,23 +21,34 @@ The native carrier is opaque. Public tensors index it with a specification
 ```lean
 abbrev Shape := Array UInt64
 
-inductive Device where
-  | CUDA : UInt64 → Device
+inductive DeviceKind where
+  | CUDA : UInt64 → DeviceKind
   | CPU
   | MPS
+
+-- Device.Valid admits CPU directly; accelerator validity is opaque and
+-- established by the native IO acquisition boundary.
+def Device := { kind : DeviceKind // Device.Valid kind }
 
 opaque TSpec : NonemptyType
 def RawTensor : Type := TSpec.type
 ```
 
+`Device.CPU` is available directly. `Device.cuda index : IO Device` and
+`Device.mps : IO Device` check availability before returning an accelerator
+placement. The validity proof erases; native calls still receive the existing
+tagged device representation. `DeviceKind` is descriptive metadata and cannot
+be used where an acquired device is required.
+
 `Tensor σ` uses a private opaque carrier indexed by `StaticSpec`. It has no
 public constructor or structural recursor, and different indices are not
 definitionally interchangeable. `Tensor.raw` exposes the unindexed handle;
 `Tensor.ofRaw` admits it only after checking native shape, dtype, and concrete
-device. The reserved dtype `Unknown "dynamic"` weakens only the dtype claim;
-every indexed tensor names its actual device. An arbitrary unknown dtype token
-does not bypass the check. `zerosFor` accepts only a specification and supplies the native zero
-factory used by `Inhabited`.
+device. Every index is required and exact; an unknown dtype token does not
+bypass the check. Runtime-selected dtypes and devices remain in dependent
+packages rather than weakening the tensor contract. `zerosFor` accepts a
+specification with `DType.ConstantSupported` evidence and supplies the native
+zero factory used by the equally constrained `Inhabited` instance.
 
 Runtime representation casts are private **unsafe** implementations behind
 opaque public declarations. Their safety does not depend on name privacy:
@@ -144,8 +155,8 @@ initialization and repeated backward on the same forward value.
 
 Pure attention exports always pass literal zero dropout to native SDPA and do
 not accept a dropout probability. Their `?` adapters return validation and
-kernel errors through `Except String`; convenience wrappers use the usual
-panic fallback. Configurable attention dropout uses separate native IO exports
+kernel errors through `Except String`; convenience wrappers print a diagnostic
+and abort on failure. Configurable attention dropout uses separate native IO exports
 and typed `attentionIO`, `attentionGQAIO`, `attentionGQAMaskIO`,
 `attentionGQAQKVIO`, `attentionWindowIO`, and `flashAttentionIO` adapters.
 These take required dropout and training arguments after the tensor operands.
@@ -191,8 +202,8 @@ hardware qualification.
 
 Native result carriers must match the Lean declaration on every path.
 `scripts/check_ffi_recovery.py` inventories recoverable declarations in
-`Tyr/RawTensor.lean`, its submodules, `Tyr/Basic.lean`, `Tyr/Torch.lean`,
-`Tyr/Distributed.lean`, and the Parquet FFI in
+`Tyr/RawTensor.lean`, its submodules, `Tyr/Basic.lean`,
+`Tyr/ConstantSupport.lean`, `Tyr/Torch.lean`, `Tyr/Distributed.lean`, and the Parquet FFI in
 `Tyr/Data/Pretraining.lean`. It requires every native implementation, including
 inactive platform branches, to enter the common exception guard before doing
 C++ work. The CPU tooling job runs this check alongside ABI and runtime
@@ -203,7 +214,8 @@ this source gate's reviewed scope.
 `RawTensor.flashAttention` and `RawTensor.transpose` return
 `Except String RawTensor`; their typed `Tensor.flashAttention?` and
 `Tensor.transpose?` adapters preserve recoverable failures and check successful
-results. The convenience variants use Lean's panic fallback on errors.
+results. The convenience variants call `nativeInvariantFailure` on errors;
+it prints a diagnostic and aborts without allocating or returning a default tensor.
 `Tensor.randint` reports invalid bounds and device failures through `IO.Error`.
 The native `randn`/`rand` factories and dropout also catch failures at their IO boundary;
 those random factories enable requested gradients after device transfer so their
@@ -218,13 +230,17 @@ valid promotion pairs. Fused `affine3d?` checks the actual dtype and device of
 both its weight and bias before calling the checked native kernel. Scalar
 spectral and nuclear norms also expose checked `?` variants for dtype, backend,
 and factorization failures. The checked expansion, concatenation, and reduction
-families follow the same result-carrier contract. Their pure convenience
-wrappers use Lean's panic fallback after receiving an error.
+families follow the same result-carrier contract. Tensor-result conveniences
+using `checkedResult` or `checkedUpdate` abort with a diagnostic after receiving
+an error. The `Preserving` binary and host-scalar conveniences still use the
+original input as Lean's panic fallback; scalar norm conveniences also retain
+Lean's panic mechanism. Use the corresponding `?` APIs for recoverable errors.
 
 Selection has separate static and runtime entry points. `argmax`, `maxLast3d`,
 and `topKLast2d` require ordered dtypes and the appropriate axis, nonempty-axis,
 or top-k bound proofs. Their `?` variants check actual metadata and retain native
-errors; the `*Checked` conveniences perform those checks with a panic fallback.
+errors; the `*Checked` conveniences perform those checks and abort with a
+diagnostic on failure.
 `crossEntropy` and `crossEntropyNone` require real floating logits and Int64
 targets. Their `?` variants use checked native exports that validate target
 labels against the class range, allowing the default ignored label `-100`,
@@ -269,9 +285,15 @@ CPU checks do not qualify NCCL or GPU stream behavior.
 STFT preserves its IO error contract even for invalid native FFT parameters.
 Apple image and video preprocessing catches C++ failures at each IO entry point;
 temporary native media resources are released during unwinding.
-IO initializers use checked `zerosIO`, `onesIO`, or `eyeForIO` allocation and
-conversion, so invalid dimensions or placement do not escape through a pure
-factory before parameter creation.
+Deterministic `zeros`, `ones`, and `eye` factories are pure values, including
+their specification-based variants. Accelerator placements are acquired in IO;
+dtype/device support for constant construction is carried by the erased
+`DType.ConstantSupported` class. Runtime acquisition validates the actual
+conversion paths and exact zero/one values before issuing evidence, with a
+static fast path for known supported pairs. Dtype recognition and an existing
+tensor do not establish constant factory support. Parameter creation and explicit inference
+cloning remain IO operations when a caller needs fresh trainable identity or
+independent mutable storage.
 
 These adapters check operation preconditions before native execution. Equal
 concrete device indices tie tensors to the same placement; checked FFI adapters
@@ -300,8 +322,10 @@ this failure mode (own `ffi_crash_probe` exe, not part of the test suite).
 
 `TensorStruct.functionalGrad` invokes a pure Lean callback with temporary
 autograd leaves and returns detached derivatives. Setup and gradient-engine
-failures return the raw API's `Except.error`; the typed convenience API uses a
-panic fallback. The callback must return normally. A native exception from an
+failures return the raw API's `Except.error`; the typed convenience API uses
+Lean's panic mechanism for that error carrier. Missing leaves or invalid leaf
+metadata abort through `nativeInvariantFailure` during tree reconstruction.
+The callback must return normally. A native exception from an
 unguarded pure operation inside a compiled callback terminates with an explicit
 diagnostic, because returning after unwinding generated Lean frames would leave
 their owned references unreleased. Interpreter callback exceptions are also

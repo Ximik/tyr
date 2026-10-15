@@ -14,6 +14,8 @@ data, and persistence operations. `import Tyr` aggregates the library.
 | --- | --- |
 | `Tyr.Basic.Types` | Raw carrier, specifications, dtype/device types, pure shape helpers |
 | `Tyr.Basic` | Indexed carrier, checked raw admission, native metadata, native zero factory |
+| `Tyr.ConstantSupport.Types` | Erased constant-construction capability for an exact dtype and device |
+| `Tyr.ConstantSupport` | Runtime acquisition of dtype/device constant support |
 | `Tyr.Typed.DType` | Partial dtype promotion and accumulation rules |
 | `Tyr.Typed.Promotion` | Erased proof classes for successful dtype promotion |
 | `Tyr.Typed.Spec` | Shape and result-spec algebra |
@@ -34,7 +36,7 @@ Every `StaticSpec` names an actual device. Dtype may remain dynamic:
 import Tyr.Typed
 open torch
 
-abbrev DynamicDType := Tensor { shape := #[2, 3], device := .CPU }
+abbrev RuntimeDType := SomeDTypeTensor #[2, 3] .CPU
 abbrev FloatWeights := Tensor {
   shape := #[2, 3], dtype := .Float32, device := .CPU
 }
@@ -43,17 +45,17 @@ abbrev PlacedWeights (device : Device) := Tensor {
 }
 ```
 
-The device field is mandatory; there is no wildcard placement policy or
+Shape, dtype, and device are mandatory; there is no wildcard placement policy or
 `forgetDevice`. A runtime-selected `device : Device` can occur in the result
 type of a factory or loader. Models share that parameter across their tensor
 fields and forward inputs. An unknown placement is packaged existentially,
 for example `Sigma fun device => PlacedWeights device`; unpacking it exposes
 the same device index for subsequent operations without copying storage.
 
-Omitting dtype uses `.Unknown "dynamic"`. Two such tensors may have different
-native dtypes. Only that reserved token is a wildcard; other unrecognized dtype
-tokens must match exactly. Preserving adapters inspect actual dtypes and reject
-unintended promotion. Copying rejects a dtype mismatch before mutation.
+Every dtype index is an exact claim. Omitting it is a compile error, and no
+unknown token bypasses admission checks. Preserving adapters inspect actual
+dtypes and reject unintended promotion. Copying rejects a dtype mismatch before
+mutation.
 
 For runtime-selected dtypes, use `SomeDTypeTensor shape device` to retain an
 exact existential index. Its `ExactDType` witness excludes the reserved wildcard:
@@ -65,7 +67,7 @@ def packageWeights (tensor : FloatWeights) : SomeDTypeTensor #[2, 3] .CPU :=
 
 `packDType` packages a statically exact index using an explicit exclusion proof.
 `tensor.reifyDType` reads the native dtype and returns a checked exact package;
-it also accepts legacy wildcard inputs. `SomeDTypeTensor.ofRaw` validates the
+`SomeDTypeTensor.ofRaw` validates the
 requested shape and device at a native boundary. These operations retain values
 and autograd identity without casting or cloning the tensor. The existential
 itself is an ordinary Lean wrapper.
@@ -79,9 +81,36 @@ metadata claims and do not promise native kernel support.
 Models should retain shared dtype parameters across their related leaves. For
 example, `Sigma fun dtype : ExactDType => Qwen3Model cfg dtype.val` preserves
 agreement across a Qwen model. Mixed precision models need an explicit tree of
-dtype parameters for their distinct tensor roles. The wildcard default,
-`forgetDType`, and legacy promoting conveniences remain migration work; the
-exact package has no implicit coercion back to those wildcard tensors.
+dtype parameters for their distinct tensor roles. There is no `forgetDType`,
+wildcard default, or promoting convenience that discards its result dtype.
+Checked promotion returns its result witness; statically witnessed promotion
+returns a tensor indexed by the computed dtype.
+
+Pure constant construction requires an acquired placement and supported dtype.
+`Device.CPU` is available directly; `Device.cuda index` and `Device.mps` acquire
+accelerator placements in IO. A placement description (`DeviceKind`) alone
+cannot authorize construction. `zerosFor`, `onesFor`, and `eyeFor` require
+`DType.ConstantSupported dtype device`. Static instances cover common supported
+pairs; a runtime-selected pair obtains the same erased evidence at setup:
+
+```lean
+import Tyr.Typed
+open torch
+
+def inspectConstants (dtype : DType) (device : Device) : IO Unit := do
+  let support ← dtype.acquireConstantSupport device
+  let _ := support.down
+  let values := Tensor.onesFor ⟨#[2, 3], dtype, device⟩
+  IO.println values
+```
+
+Acquisition uses the conservative static table when possible, otherwise checks
+the actual conversion paths with small temporary tensors. It verifies exact
+zero and one values: recognizing a dtype is insufficient, and Float8E8M0FNU
+cannot represent zero. This witness covers constant creation, not arbitrary
+operators. Constant construction returns tensors directly; validation errors
+belong to capability acquisition. `Inhabited (Tensor spec)` requires the same
+support, so `default` provides no bypass for unsupported dtypes.
 
 Qwen3-TTS now loads the whole model under a `DTypeLayout` witness:
 `loadSharded` returns `Σ dtypes, Qwen3TTSForConditionalGeneration cfg dtypes`.
@@ -203,7 +232,8 @@ dtype. They then validate the result's shape, dtype, and device. The host-scalar
 adapters `addScalar?`, `mulScalar?`, and `divScalar?` likewise check the actual
 dtype against weak scalar promotion. These adapters do not
 introduce a static promotion instance or conceal a change behind a dynamic
-index; the corresponding convenience wrappers use Lean's panic fallback.
+index; the corresponding convenience wrappers use the original input as Lean's
+panic fallback.
 For example, a dynamic BF16 left operand and Float32 right operand are rejected
 because their result would be Float32. Mixed-precision algorithms must make an
 intended conversion explicit before using a preserving adapter, or expose the
@@ -216,11 +246,10 @@ actual operand dtypes, construct a promotion witness, and validate the result
 at its computed dtype. The returned `Promoted` package exposes `dtype`,
 `witness`, and `tensor`; division additionally applies its integer-to-floating
 result rule. Host-scalar variants such as `mulScalar?` return `ScalarPromoted`
-with a `ScalarPromotes` witness. No input
-cast is needed. Their convenience wrappers, such as `Tensor.Promoting.mul`,
-return a shape-indexed tensor with dynamic dtype, retaining the promoted native
-value. For example, BF16 activations multiplied by Float32 routing weights
-produce Float32, while BF16 activations multiplied by an Int64 mask remain BF16.
+with a `ScalarPromotes` witness. No input cast is needed, and the result's dtype
+remains part of its tensor index. For example, BF16 activations multiplied by
+Float32 routing weights produce Float32, while BF16 activations multiplied by an
+Int64 mask remain BF16.
 The `?` arithmetic variants report unsupported promotion, placement mismatches,
 and native kernel failures. A valid promotion witness still does not guarantee
 that a kernel exists.
@@ -262,11 +291,17 @@ The result follows the non-CPU operand when this exception applies.
 
 ```lean
 import Tyr.Typed
+import Tyr.Torch
 open torch
 
-example (scalar : Tensor ⟨#[], .Float32, .CPU⟩)
-    (vector : Tensor ⟨#[2], .Float32, .CUDA 0⟩) :
-    Tensor ⟨#[2], .Float32, .CUDA 0⟩ := scalar.addB vector
+def addHostScalar {device : Device} (scalar : Tensor ⟨#[], .Float32, .CPU⟩)
+    (vector : Tensor ⟨#[2], .Float32, device⟩) :
+    Tensor ⟨#[2], .Float32, device⟩ := scalar.addB vector
+
+example : IO Unit := do
+  let device ← Device.cuda 0
+  let vector := Tensor.ones #[2] (device := device)
+  IO.println (addHostScalar (Tensor.full #[] 2.0) vector)
 ```
 
 The same-shape `add`/`sub`/`mul`/`div` APIs require one shared device index;
@@ -289,8 +324,10 @@ domains, including nonempty maximum inputs and valid reduction axes. `expand?`
 checks the requested broadcast, while `cat?` and `catMany?` validate placement
 and the returned shape. These APIs and the arithmetic/matrix `?` families return
 native operation failures through `Except String`. Their pure convenience
-wrappers use Lean's panic fallback; callers that need to handle failure should
-use the checked variants. This contract applies to those adapters, not every
+wrappers call `nativeInvariantFailure` on error: the native boundary prints a
+diagnostic and aborts the process, without allocating or returning a default
+tensor. Callers that need to handle failure should use the checked variants.
+This contract applies to those adapters, not every
 raw native declaration. Static rules and metadata checks do not prove an extern's
 implementation correct.
 
@@ -301,7 +338,7 @@ axis zero. `maxLast3d` requires a nonempty last axis, while `topKLast2d` require
 proofs automatically. For runtime dimensions or dynamic dtypes, the matching
 `?` variants return domain, range, and native errors through `Except String`.
 The `argmaxChecked`, `maxLast3dChecked`, and `topKLast2dChecked` conveniences
-perform the same runtime checks and use Lean's panic fallback on failure.
+perform the same runtime checks and abort with a diagnostic on failure.
 Selected values retain the actual input dtype; indices have dtype Int64.
 
 `crossEntropy` and `crossEntropyNone` require `DType.RealFloating` for logits
@@ -311,7 +348,8 @@ Their checked native boundary validates labels before loss dispatch: each label
 must be in `[0, C)` or equal the default ignored label `-100`.
 `crossEntropy?` and `crossEntropyNone?` recover dtype, label, and native failures.
 For dynamic dtype indices, `crossEntropyChecked` and `crossEntropyNoneChecked`
-provide pure runtime-checked conveniences with the same panic fallback.
+provide pure runtime-checked conveniences that abort with a diagnostic on
+failure.
 `ChatSFT.maskedCrossEntropy?` retains errors through reshaping, mask arithmetic,
 reduction, and scalar extraction. Its mask must have a real numeric or Bool
 dtype; the pure wrapper requires that domain as type-level evidence.
@@ -327,7 +365,7 @@ checked native kernels. Convolution does not implicitly promote its operands,
 including when their dtype indices are dynamic. Invalid convolution parameters
 and unavailable kernels return `Except.error`; successful outputs are checked
 against the computed spatial shape and input dtype/device. The corresponding
-names without `?` use Lean's panic fallback on failure.
+names without `?` abort with a diagnostic on failure.
 The `conv2dBias` result shape broadcasts singleton stride, padding, and dilation
 arrays across both spatial axes, matching the native operation.
 
@@ -378,9 +416,14 @@ There is no public unchecked raw constructor or implicit coercion to
 `RawTensor`. The opaque carrier prevents anonymous construction, structural
 elimination, and record updates from replacing a checked handle. Native adapters use explicit
 `.raw` access and validate returned handles. `checkedReplacement?` additionally
-checks that actual dtype and device are unchanged, including for partial specs.
-The native `zerosFor` factory bootstraps pure defaults from a requested spec;
-it accepts no foreign handle and trusts native allocation/casting. Native
+checks that actual dtype and device are unchanged, including when the exact
+indices were selected at runtime. Its pure `checkedReplacement` adapter retains
+the original tensor as Lean's panic fallback. The separate `checkedUpdate`
+adapter aborts with a diagnostic on failure and retains no original tensor or
+default allocation.
+The native `zerosFor` factory bootstraps pure defaults from a requested spec
+with constant-support evidence; it accepts no foreign handle and trusts native
+allocation/casting. Native
 metadata, allocation, and the C ABI remain trusted and covered by parity tests
 and ABI audits.
 Pure factory calls may share allocations; distinct storage requires an effectful
@@ -414,7 +457,7 @@ A scalar is `#[]`; it is never a substitute for an unknown shape.
 element counts and rejects wrapped negative extents before invoking the native
 reshape. `castDType?` and `castLike?` perform real dtype conversions and validate
 the result, returning native conversion failures through `Except`. Their pure
-convenience wrappers, along with `sliceChecked`, use Lean's panic fallback on
+convenience wrappers, along with `sliceChecked`, abort with a diagnostic on
 failure; use the `Except` variants when an
 error must be handled. Exact file loading checks the stored layout
 before returning a tensor; it does not repair a mismatch by reshaping.
@@ -458,8 +501,9 @@ That entry point chooses the conversion order for the backend: MPS-to-CPU
 transfers retain the source dtype until they reach CPU, then apply the requested
 cast. This lets an MPS Float32 tensor request CPU Float64 without an unsupported
 MPS Float64 intermediate.
-A dynamic target dtype retains the source's actual dtype. The target always
-names a concrete device. Every leaf keeps its shape, so callers perform any reshape
+An existential `SomeDTypeTensor` target retains the source's exact dtype and
+its witness. The target always names a concrete device. Every leaf keeps its
+shape, so callers perform any reshape
 explicitly beforehand.
 
 `TensorTreeCast SourceType TargetType` supplies the traversal. Products, arrays,
@@ -470,10 +514,16 @@ same declaration order and delegates each field to its cast instance. For
 `castTo`, metadata validation failures and caught native conversion exceptions
 produce IO errors containing the field or element path.
 
-`TensorStruct.castDType dtype params` is a uniform convenience operation for
-the same declared structure type. It validates each converted leaf against its
-original specification, allowing dynamic dtype leaves to change and reporting
-an error for a conflicting concrete dtype.
+For parameterizations of one record, `deriving TensorStruct` (or `deriving Model`)
+automatically supplies the cast traversal. A record such as `Weights dtype device`
+can therefore use `castTo (Weights .BFloat16 .CPU) source` without a separate
+derivation command. Each paired field must support the conversion; static
+metadata is copied, never coerced. The explicit `derive_tensor_tree_cast` command
+is needed only for different record types, as in the example above.
+
+Type and value parameters may depend on earlier parameters. Records with fields
+whose types depend on earlier field values require a manual cast instance.
+Ordinary `map` and `mapM` always preserve their original leaf specifications.
 
 The indexed autograd API includes effectful `parameter` and `setRequiresGrad`,
 pure `detach` and `grad`, plus `gradOf`,

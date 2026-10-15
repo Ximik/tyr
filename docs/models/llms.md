@@ -200,8 +200,12 @@ structure FlowDenoiser (seq vocab : UInt64) (Params : Type) where
 | `initWeight` | `(shape : Shape) → (fanIn : UInt64) → (dtype : DType := .Float32) → (device : Device := .CPU) → IO (Tensor { shape := shape, dtype := dtype, device := device })` |
 | `initBias` | `(shape : Shape) → (dtype : DType := .Float32) → (device : Device := .CPU) → IO (Tensor { shape := shape, dtype := dtype, device := device })` |
 | `reqGradFalse` | `Tensor σ → Tensor σ` |
-| `dequantizeFP8` | `Tensor { shape := #[out, in], device := device } → Tensor { shape := #[out/128, in/128], device := device } → Tensor { shape := #[out, in], dtype := .Float32, device := device }` |
-| `dequantizeFP8Experts` | `Tensor { shape := #[e, out, in], device := device } → Tensor { shape := #[e, out/128, in/128], device := device } → Tensor { shape := #[e, out, in], dtype := .Float32, device := device }` |
+| `dequantizeFP8` | `Tensor ⟨#[out, in], weightDType, device⟩ → Tensor ⟨#[out/128, in/128], scaleDType, device⟩ → Tensor ⟨#[out, in], .Float32, device⟩` |
+| `dequantizeFP8Experts` | `Tensor ⟨#[e, out, in], weightDType, device⟩ → Tensor ⟨#[e, out/128, in/128], scaleDType, device⟩ → Tensor ⟨#[e, out, in], .Float32, device⟩` |
+
+The dequantization helpers retain independent input indices `weightDType` and
+`scaleDType`. Both inputs are explicitly converted to Float32 for blockwise
+dequantization; they need not share their stored dtype.
 
 ### Qwen3 (`torch.qwen3`)
 
