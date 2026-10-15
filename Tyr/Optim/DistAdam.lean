@@ -116,12 +116,12 @@ def stepSingle {σ : StaticSpec} (param : Tensor σ) (grad : Tensor σ) (state :
   let g := Tensor.detach grad
 
   -- Update first moment: m = beta1 * m + (1 - beta1) * g
-  let expAvg := Add.add (Tensor.Preserving.mulScalar state.expAvg beta1)
+  let expAvg := Tensor.Preserving.add (Tensor.Preserving.mulScalar state.expAvg beta1)
     (Tensor.Preserving.mulScalar g (1.0 - beta1))
 
   -- Update second moment: v = beta2 * v + (1 - beta2) * g^2
-  let gSquared := Mul.mul g g
-  let expAvgSq := Add.add (Tensor.Preserving.mulScalar state.expAvgSq beta2)
+  let gSquared := Tensor.Preserving.mul g g
+  let expAvgSq := Tensor.Preserving.add (Tensor.Preserving.mulScalar state.expAvgSq beta2)
     (Tensor.Preserving.mulScalar gSquared (1.0 - beta2))
 
   -- Bias correction
@@ -138,12 +138,12 @@ def stepSingle {σ : StaticSpec} (param : Tensor σ) (grad : Tensor σ) (state :
   -- Apply weight decay (decoupled)
   let paramDecayed := if wd > 0.0 then
       let decay := Tensor.Preserving.mulScalar (Tensor.detach param) (lr * wd)
-      Sub.sub (Tensor.detach param) decay
+      Tensor.Preserving.sub (Tensor.detach param) decay
     else
       Tensor.detach param
 
   -- Apply update
-  let newParam := Sub.sub paramDecayed scaledUpdate
+  let newParam := Tensor.Preserving.sub paramDecayed scaledUpdate
   let newParam ← Tensor.parameter newParam
 
   let newState : ParamState σ := {
@@ -232,10 +232,10 @@ def stepDistributed {σ : StaticSpec} (param : Tensor σ) (grad : Tensor σ) (st
   let g := Tensor.detach gradLocal
 
   -- 3) local Adam update on shard
-  let newExpAvg := Add.add (Tensor.Preserving.mulScalar expAvgLocal beta1)
+  let newExpAvg := Tensor.Preserving.add (Tensor.Preserving.mulScalar expAvgLocal beta1)
     (Tensor.Preserving.mulScalar g (1.0 - beta1))
-  let gSquared := Mul.mul g g
-  let newExpAvgSq := Add.add (Tensor.Preserving.mulScalar expAvgSqLocal beta2)
+  let gSquared := Tensor.Preserving.mul g g
+  let newExpAvgSq := Tensor.Preserving.add (Tensor.Preserving.mulScalar expAvgSqLocal beta2)
     (Tensor.Preserving.mulScalar gSquared (1.0 - beta2))
   let biasCorrection1 := 1.0 - Float.pow beta1 step.toFloat
   let biasCorrection2 := 1.0 - Float.pow beta2 step.toFloat
@@ -248,10 +248,10 @@ def stepDistributed {σ : StaticSpec} (param : Tensor σ) (grad : Tensor σ) (st
   let paramDecayed :=
     if wd > 0.0 then
       let decay := Tensor.Preserving.mulScalar paramLocal (lr * wd)
-      Sub.sub paramLocal decay
+      Tensor.Preserving.sub paramLocal decay
     else
       paramLocal
-  let newLocalParam := Sub.sub paramDecayed scaledUpdate
+  let newLocalParam := Tensor.Preserving.sub paramDecayed scaledUpdate
 
   -- 4) all-gather updated local shard and optimizer shards back to replicated form
   let gatherAs (label : String) (shard : Tensor (σ.withShape localShape)) : IO (Tensor σ) := do
@@ -350,12 +350,12 @@ def stepSharded {σ : StaticSpec} {rank worldSize : UInt64}
   let g := Tensor.detach localGrad
 
   -- 2. Update first moment: m = beta1 * m + (1 - beta1) * g
-  let expAvg := Add.add (Tensor.Preserving.mulScalar state.expAvg.shard beta1)
+  let expAvg := Tensor.Preserving.add (Tensor.Preserving.mulScalar state.expAvg.shard beta1)
     (Tensor.Preserving.mulScalar g (1.0 - beta1))
 
   -- 3. Update second moment: v = beta2 * v + (1 - beta2) * g^2
-  let gSquared := Mul.mul g g
-  let expAvgSq := Add.add (Tensor.Preserving.mulScalar state.expAvgSq.shard beta2)
+  let gSquared := Tensor.Preserving.mul g g
+  let expAvgSq := Tensor.Preserving.add (Tensor.Preserving.mulScalar state.expAvgSq.shard beta2)
     (Tensor.Preserving.mulScalar gSquared (1.0 - beta2))
 
   -- 4. Bias correction
@@ -373,12 +373,12 @@ def stepSharded {σ : StaticSpec} {rank worldSize : UInt64}
   let paramLocal := Tensor.detach param.shard
   let paramDecayed := if wd > 0.0 then
       let decay := Tensor.Preserving.mulScalar paramLocal (lr * wd)
-      Sub.sub paramLocal decay
+      Tensor.Preserving.sub paramLocal decay
     else
       paramLocal
 
   -- 7. Apply update to local shard
-  let newLocal := Sub.sub paramDecayed scaledUpdate
+  let newLocal := Tensor.Preserving.sub paramDecayed scaledUpdate
   let newLocal ← Tensor.parameter newLocal
 
   -- 8. Update sharded parameter (mark cache as stale)

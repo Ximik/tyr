@@ -74,7 +74,7 @@ def zero (n p : UInt64) : StiefelTangent n p d dev :=
 
 /-- Add two tangent vectors -/
 def add (v w : StiefelTangent n p d dev) : StiefelTangent n p d dev :=
-  ⟨Add.add v.vec w.vec⟩
+  ⟨Tensor.Preserving.add v.vec w.vec⟩
 
 /-- Scale a tangent vector -/
 def smul (s : Float) (v : StiefelTangent n p d dev) : StiefelTangent n p d dev :=
@@ -87,9 +87,9 @@ def project (X : Stiefel n p d dev) (Z : Tensor ⟨#[n, p], d, dev⟩) : Stiefel
   -- X^T @ Z : [p, p]
   let XtZ := Tensor.mm (Tensor.transpose2d X.matrix) Z
   -- sym(X^T Z) = (X^T Z + (X^T Z)^T) / 2
-  let sym := Tensor.Preserving.mulScalar (Add.add XtZ (Tensor.transpose2d XtZ)) 0.5
+  let sym := Tensor.Preserving.mulScalar (Tensor.Preserving.add XtZ (Tensor.transpose2d XtZ)) 0.5
   -- Z - X @ sym(X^T Z)
-  ⟨Sub.sub Z (Tensor.mm X.matrix sym)⟩
+  ⟨Tensor.Preserving.sub Z (Tensor.mm X.matrix sym)⟩
 
 end StiefelTangent
 
@@ -107,7 +107,7 @@ instance stiefelManifold (n p : UInt64) : DifferentiableManifold (Stiefel n p d 
   flat := id
   exp X Z :=
     -- QR retraction: R(X, Z) = qr(X + Z).Q
-    let (Q, _R) := Tensor.qrReduced (Add.add X.matrix Z.vec) X.tall
+    let (Q, _R) := Tensor.qrReduced (Tensor.Preserving.add X.matrix Z.vec) X.tall
     ⟨Q, X.tall⟩
 
 end Tyr.AD

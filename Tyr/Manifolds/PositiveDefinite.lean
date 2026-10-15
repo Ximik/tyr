@@ -15,7 +15,7 @@ structure SymmetricPositiveDefinite (n : UInt64) (dtype : DType := .Float32)
 namespace SymmetricPositiveDefinite
 
 private def symm {n : UInt64} (A : Tensor ⟨#[n, n], d, dev⟩) : Tensor ⟨#[n, n], d, dev⟩ :=
-  Tensor.Preserving.mulScalar (Add.add A (Tensor.transpose2d A)) 0.5
+  Tensor.Preserving.mulScalar (Tensor.Preserving.add A (Tensor.transpose2d A)) 0.5
 
 /-- Project ambient matrix to SPD via `exp(sym(A))`. -/
 def project (n : UInt64) (A : Tensor ⟨#[n, n], d, dev⟩) : SymmetricPositiveDefinite n d dev :=
@@ -41,12 +41,12 @@ structure SPDTangent (n : UInt64) (dtype : DType := .Float32)
 namespace SPDTangent
 
 def zero (n : UInt64) : SPDTangent n d dev := ⟨Tensor.zerosFor ⟨#[n, n], d, dev⟩⟩
-def add (a b : SPDTangent n d dev) : SPDTangent n d dev := ⟨Add.add a.vec b.vec⟩
+def add (a b : SPDTangent n d dev) : SPDTangent n d dev := ⟨Tensor.Preserving.add a.vec b.vec⟩
 def smul (s : Float) (v : SPDTangent n d dev) : SPDTangent n d dev := ⟨Tensor.Preserving.mulScalar v.vec s⟩
 
 def project (x : SymmetricPositiveDefinite n d dev) (V : Tensor ⟨#[n, n], d, dev⟩) : SPDTangent n d dev :=
   let _ := x
-  ⟨Tensor.Preserving.mulScalar (Add.add V (Tensor.transpose2d V)) 0.5⟩
+  ⟨Tensor.Preserving.mulScalar (Tensor.Preserving.add V (Tensor.transpose2d V)) 0.5⟩
 
 end SPDTangent
 
@@ -62,9 +62,9 @@ instance spdManifold (n : UInt64) : DifferentiableManifold (SymmetricPositiveDef
   flat := id
   exp x v :=
     let lx := Tensor.matrixLog x.matrix
-    SymmetricPositiveDefinite.project n (Add.add lx v.vec)
+    SymmetricPositiveDefinite.project n (Tensor.Preserving.add lx v.vec)
   retract x v :=
     let lx := Tensor.matrixLog x.matrix
-    SymmetricPositiveDefinite.project n (Add.add lx v.vec)
+    SymmetricPositiveDefinite.project n (Tensor.Preserving.add lx v.vec)
 
 end Tyr.AD

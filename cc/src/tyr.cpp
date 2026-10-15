@@ -458,24 +458,7 @@ lean_object* lean_torch_get_shape(lean_obj_arg s, b_lean_obj_arg t) {
 lean_object* lean_torch_get_dtype(lean_obj_arg s, b_lean_obj_arg t) {
   lean_dec(s);
     auto tensor = borrowTensor(t);
-    std::string dtype_str;
-
-    auto dtype = tensor.dtype();
-    if (dtype == torch::kFloat32) dtype_str = "Float32";
-    else if (dtype == torch::kFloat64) dtype_str = "Float64";
-    else if (dtype == torch::kFloat16) dtype_str = "Float16";
-    else if (dtype == torch::kBFloat16) dtype_str = "BFloat16";
-    else if (dtype == torch::kInt64) dtype_str = "Int64";
-    else if (dtype == torch::kInt32) dtype_str = "Int32";
-    else if (dtype == torch::kInt16) dtype_str = "Int16";
-    else if (dtype == torch::kInt8) dtype_str = "Int8";
-    else if (dtype == torch::kUInt8) dtype_str = "UInt8";
-    else if (dtype == torch::kBool) dtype_str = "Bool";
-    else if (dtype == torch::kFloat8_e4m3fn) dtype_str = "float8_e4m3fn";
-    else if (dtype == torch::kFloat8_e5m2) dtype_str = "float8_e5m2";
-    else dtype_str = c10::toString(tensor.scalar_type());
-
-    return lean_mk_string(dtype_str.c_str());
+    return lean_mk_string(tyr::metadata::dtypeName(tensor.scalar_type()));
 }
 
 // Get device as string
@@ -3642,6 +3625,11 @@ static std::string jsonEscape(const std::string& s) {
 }
 
 static std::optional<torch::ScalarType> parseDtype(const std::string& dtype) {
+  return tyr::metadata::parseDtype(dtype);
+}
+
+// Supported storage types have matching dtypeSize and writer tags below.
+static std::optional<torch::ScalarType> parseSafeTensorDtype(const std::string& dtype) {
   if (dtype == "F32" || dtype == "float32") return torch::kFloat32;
   if (dtype == "F64" || dtype == "float64") return torch::kFloat64;
   if (dtype == "F16" || dtype == "float16") return torch::kFloat16;
@@ -3668,6 +3656,30 @@ extern "C" LEAN_EXPORT lean_object* lean_torch_cast_dtype(
   return fromTorchTensor(borrowTensor(tensor).to(*dtype));
 }
 
+extern "C" LEAN_EXPORT lean_object* lean_torch_cast_dtype_checked(
+    lean_obj_arg shape, b_lean_obj_arg tensor, b_lean_obj_arg tag) {
+  OwnedLeanObject shape_owner(shape, lean_dec);
+  auto error = [](const std::string& message) {
+    auto* result = lean_alloc_ctor(0, 1, 0);
+    lean_ctor_set(result, 0, lean_mk_string(("castDType: " + message).c_str()));
+    return result;
+  };
+  try {
+    auto source = borrowTensor(tensor);
+    TORCH_CHECK(source.sizes().vec() == getShape(shape), "source tensor shape mismatch");
+    const auto dtype = parseDtype(lean_string_cstr(tag));
+    TORCH_CHECK(dtype.has_value(), "Unsupported target dtype tag: ", lean_string_cstr(tag));
+    auto converted = source.to(*dtype);
+    auto* result = lean_alloc_ctor(1, 1, 0);
+    lean_ctor_set(result, 0, fromTorchTensor(std::move(converted)));
+    return result;
+  } catch (const c10::Error& e) {
+    return error(e.what_without_backtrace());
+  } catch (const std::exception& e) {
+    return error(e.what());
+  }
+}
+
 extern "C" LEAN_EXPORT lean_object* lean_torch_convert_tensor(
     lean_obj_arg shape, b_lean_obj_arg tensor, b_lean_obj_arg device,
     b_lean_obj_arg dtype_option) {
@@ -3687,9 +3699,14 @@ extern "C" LEAN_EXPORT lean_object* lean_torch_convert_tensor(
     }
     const auto target_device = getDevice(device);
 
-    // A single conversion avoids unsupported intermediate tensors, such as
-    // Float64 on MPS when moving MPS/Float32 to CPU/Float64 or the reverse.
-    auto converted = source.to(target_device, target_dtype);
+    // One checked FFI operation chooses a backend-compatible conversion order.
+    // PyTorch's MPS-to-CPU copy casts on MPS, so a combined request for CPU
+    // Float64 would still require an unsupported MPS Float64 intermediate.
+    // Transfer first in this direction; CPU-to-MPS already casts on CPU.
+    auto converted = source.is_mps() && target_device.is_cpu() &&
+                             source.scalar_type() != target_dtype
+        ? source.to(target_device).to(target_dtype)
+        : source.to(target_device, target_dtype);
     return lean_io_result_mk_ok(fromTorchTensor(converted));
   } catch (const c10::Error& e) {
     return mkC10IoError("convertIO", e);
@@ -4073,7 +4090,7 @@ public:
       throw std::runtime_error("SafeTensors load error: malformed dtype value.");
     }
     e.dtype_name = obj.substr(dtype_quote_start + 1, dtype_quote_end - dtype_quote_start - 1);
-    auto dtype_opt = parseDtype(e.dtype_name);
+    auto dtype_opt = parseSafeTensorDtype(e.dtype_name);
     if (!dtype_opt.has_value()) {
       throw std::runtime_error("SafeTensors load error: unsupported dtype '" + e.dtype_name + "'.");
     }

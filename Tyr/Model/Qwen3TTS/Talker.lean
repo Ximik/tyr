@@ -482,7 +482,7 @@ private def generateFrameFromLastHidden {batch : UInt64} (cfg : TalkerConfig)
       tokenCols := tokenCols.push nextCode2d
 
       let nextEmb := TalkerCodePredictor.embedGroupTokens m.codePredictor g nextCode2d
-      summedEmb := summedEmb + nextEmb
+      summedEmb := Tensor.Promoting.add summedEmb nextEmb
 
       if g + 1 < residualGroups then
         let (cpHiddenNext, cpCachesNext) ← cpStep nextEmb cpPos cpCaches
@@ -711,7 +711,7 @@ def streamCodes {batch seq : UInt64} (cfg : TalkerConfig)
             else
               padEmbed
         | none => padEmbed
-      let nextEmb : Tensor { shape := #[batch, 1, cfg.hiddenSize] } := frameOut.summedEmbedding + trailingAdd
+      let nextEmb : Tensor { shape := #[batch, 1, cfg.hiddenSize] } := Tensor.Promoting.add frameOut.summedEmbedding trailingAdd
       let nextPos : UInt64 := seq + step.toUInt64
       let cos : Tensor { shape := #[1, cfg.headDim / 2], dtype := .Float32 } := Tensor.sliceChecked cosAll 0 nextPos 1 #[1, cfg.headDim / 2]
       let sin : Tensor { shape := #[1, cfg.headDim / 2], dtype := .Float32 } := Tensor.sliceChecked sinAll 0 nextPos 1 #[1, cfg.headDim / 2]

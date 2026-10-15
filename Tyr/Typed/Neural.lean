@@ -30,18 +30,20 @@ def forgetDType {σ : StaticSpec} (t : Tensor σ) : Tensor { σ with dtype := .U
   checkedNeuralResult "forgetDType" t.raw
 
 /-- Checked dtype conversion. Only the reserved `dynamic` dtype weakens the
-claim without casting; unsupported target tokens return an error. -/
+claim without casting. Unsupported tokens and native conversions return errors;
+recognizing a dtype does not promise that a backend implements its conversion. -/
 def castDType? {σ : StaticSpec} (t : Tensor σ) (dtype : DType) :
     Except String (Tensor (σ.withDType dtype)) := do
-  let raw ← match dtype.safeTensorTag? with
-    | some tag => pure (RawTensor.castDType σ.shape t.raw tag)
-    | none =>
+  let converted : Except String RawTensor := match dtype with
+    | .Unknown _ =>
         if dtype == .Unknown "dynamic" then pure t.raw
         else throw s!"Unsupported target dtype {dtype}"
+    | _ => RawTensor.castDTypeChecked σ.shape t.raw dtype.canonicalName
+  let raw ← converted
   DevicePolicy.check (.exact t.raw.device) raw.device
-  Tensor.ofRaw raw
+  Tensor.ofRaw (σ := σ.withDType dtype) raw
 
-/-- Cast to a concrete dtype; use `castDType?` to handle an unsupported token. -/
+/-- Cast to a concrete dtype; use `castDType?` to handle conversion failures. -/
 def castDType {σ : StaticSpec} (t : Tensor σ) (dtype : DType) : Tensor (σ.withDType dtype) :=
   match t.castDType? dtype with
   | .ok result => result
@@ -52,13 +54,14 @@ An unsupported native dtype may only be retained when both inputs already agree.
 def castLike? {σ τ : StaticSpec} (reference : Tensor τ) (t : Tensor σ) :
     Except String (Tensor (σ.withDType τ.dtype)) := do
   let dtype := reference.raw.dtype
-  let raw ← if t.raw.dtype == dtype then pure t.raw else
-    match dtype.safeTensorTag? with
-    | some tag => pure (RawTensor.castDType σ.shape t.raw tag)
-    | none => throw s!"Unsupported reference dtype {dtype}"
+  let converted : Except String RawTensor := if t.raw.dtype == dtype then pure t.raw else
+    match dtype with
+    | .Unknown _ => throw s!"Unsupported reference dtype {dtype}"
+    | _ => RawTensor.castDTypeChecked σ.shape t.raw dtype.canonicalName
+  let raw ← converted
   TensorSpec.checkDType dtype raw.dtype
   DevicePolicy.check (.exact t.raw.device) raw.device
-  Tensor.ofRaw raw
+  Tensor.ofRaw (σ := σ.withDType τ.dtype) raw
 
 /-- Match the reference's native dtype; use `castLike?` for recoverable errors. -/
 def castLike {σ τ : StaticSpec} (reference : Tensor τ) (t : Tensor σ) :

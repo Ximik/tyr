@@ -113,7 +113,7 @@ def forward {batch seq hidden_size num_heads head_dim mlp_hidden : UInt64}
   let mlp := Tensor.reshapeChecked mlp #[batch, seq, 2, mlp_hidden]
   let gate := Tensor.reshapeChecked (sliceTyped mlp 2 0 1) #[batch, seq, mlp_hidden]
   let up := Tensor.reshapeChecked (sliceTyped mlp 2 1 1) #[batch, seq, mlp_hidden]
-  let mlp_out := Tensor.Preserving.silu gate * up
+  let mlp_out := Tensor.Promoting.mul (Tensor.Preserving.silu gate) up
 
   -- Concatenate attention and MLP outputs
   let combined : Tensor { shape := #[batch, seq, num_heads * head_dim + mlp_hidden] } := qwen35.typedCat attn mlp_out 2  -- [batch, seq, hidden + mlp_hidden]
@@ -124,7 +124,7 @@ def forward {batch seq hidden_size num_heads head_dim mlp_hidden : UInt64}
   -- Apply gate and residual
   let mod_gate := Tensor.unsqueeze mod_gate 1
   let mod_gate := Tensor.expand mod_gate #[batch, seq, hidden_size]
-  x + mod_gate * out
+  Tensor.Promoting.add x (Tensor.Promoting.mul mod_gate out)
 
 end SingleStreamBlock
 

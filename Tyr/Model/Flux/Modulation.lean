@@ -90,6 +90,6 @@ def applyModulation {batch seq hidden_size : UInt64}
   let shift := Tensor.expand shift #[batch, seq, hidden_size]
   -- Apply: (1 + scale) * x + shift
   let scale := Tensor.Preserving.addScalar scale 1.0
-  scale * x + shift
+  Tensor.Promoting.add (Tensor.Promoting.mul scale x) shift
 
 end torch.flux

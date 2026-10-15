@@ -227,12 +227,12 @@ def forward {batch seq : UInt64}
     : Tensor { shape := #[batch, seq, cfg.dModel] } :=
   let h0 := m.selfAttnLayerNorm.forward3d x
   let h1 := m.selfAttn.forwardSelf h0 (isCausal := false)
-  let x1 := x + h1
+  let x1 := Tensor.Promoting.add x h1
   let h2 := m.finalLayerNorm.forward3d x1
   let h3 : Tensor { shape := #[batch, seq, cfg.encoderFfnDim] } := Tensor.affine3d h2 m.fc1Weight m.fc1Bias
   let h4 := activate cfg.activationFunction h3
   let h5 : Tensor { shape := #[batch, seq, cfg.dModel] } := Tensor.affine3d h4 m.fc2Weight m.fc2Bias
-  x1 + h5
+  Tensor.Promoting.add x1 h5
 
 end WhisperEncoderLayer
 
@@ -279,15 +279,15 @@ def forward {batch seq encSeq : UInt64}
     : Tensor { shape := #[batch, seq, cfg.dModel] } :=
   let h0 := m.selfAttnLayerNorm.forward3d x
   let h1 := m.selfAttn.forwardSelf h0 (isCausal := true)
-  let x1 := x + h1
+  let x1 := Tensor.Promoting.add x h1
   let h2 := m.encoderAttnLayerNorm.forward3d x1
   let h3 := m.encoderAttn.forwardCross h2 encoderHidden (isCausal := false)
-  let x2 := x1 + h3
+  let x2 := Tensor.Promoting.add x1 h3
   let h4 := m.finalLayerNorm.forward3d x2
   let h5 : Tensor { shape := #[batch, seq, cfg.decoderFfnDim] } := Tensor.affine3d h4 m.fc1Weight m.fc1Bias
   let h6 := activate cfg.activationFunction h5
   let h7 : Tensor { shape := #[batch, seq, cfg.dModel] } := Tensor.affine3d h6 m.fc2Weight m.fc2Bias
-  x2 + h7
+  Tensor.Promoting.add x2 h7
 
 /-- One-token decoder layer step with incremental self KV cache and precomputed cross KV. -/
 def forwardStepCached {batch encSeq : UInt64}
@@ -299,15 +299,15 @@ def forwardStepCached {batch encSeq : UInt64}
     : Tensor { shape := #[batch, 1, cfg.dModel] } × WhisperAttention.KVCache batch cfg.decoderAttentionHeads (cfg.dModel / cfg.decoderAttentionHeads) :=
   let h0 := m.selfAttnLayerNorm.forward3d x
   let (h1a, selfCache') := m.selfAttn.forwardSelfStep h0 selfCache
-  let x1 := x + h1a
+  let x1 := Tensor.Promoting.add x h1a
   let h2 := m.encoderAttnLayerNorm.forward3d x1
   let h3 := m.encoderAttn.forwardWithProjectedKV h2 crossK crossV (isCausal := false)
-  let x2 := x1 + h3
+  let x2 := Tensor.Promoting.add x1 h3
   let h4 := m.finalLayerNorm.forward3d x2
   let h5 : Tensor { shape := #[batch, 1, cfg.decoderFfnDim] } := Tensor.affine3d h4 m.fc1Weight m.fc1Bias
   let h6 := activate cfg.activationFunction h5
   let h7 : Tensor { shape := #[batch, 1, cfg.dModel] } := Tensor.affine3d h6 m.fc2Weight m.fc2Bias
-  (x2 + h7, selfCache')
+  (Tensor.Promoting.add x2 h7, selfCache')
 
 end WhisperDecoderLayer
 
@@ -387,7 +387,7 @@ def encode {batch frames : UInt64}
   let pos : Tensor { shape := #[outSeq, cfg.dModel] } := sliceTyped m.encoderPositionalEmbedding 0 0 outSeq
   let posB : Tensor { shape := #[batch, outSeq, cfg.dModel] } :=
     Tensor.expand (Tensor.reshapeChecked pos #[1, outSeq, cfg.dModel]) #[batch, outSeq, cfg.dModel]
-  let mut h : Tensor { shape := #[batch, outSeq, cfg.dModel] } := x2t + posB
+  let mut h : Tensor { shape := #[batch, outSeq, cfg.dModel] } := Tensor.Promoting.add x2t posB
   for layer in m.encoderLayers do
     h := layer.forward h
   pure (m.encoderLayerNorm.forward3d h)
@@ -404,7 +404,7 @@ def decode {batch seq encSeq : UInt64}
   let pos : Tensor { shape := #[seq, cfg.dModel] } := sliceTyped m.decoderPositionalEmbedding 0 0 seq
   let posB : Tensor { shape := #[batch, seq, cfg.dModel] } :=
     Tensor.expand (Tensor.reshapeChecked pos #[1, seq, cfg.dModel]) #[batch, seq, cfg.dModel]
-  let mut h : Tensor { shape := #[batch, seq, cfg.dModel] } := tokEmb + posB
+  let mut h : Tensor { shape := #[batch, seq, cfg.dModel] } := Tensor.Promoting.add tokEmb posB
   for layer in m.decoderLayers do
     h := layer.forward h encoderHidden
   pure (m.decoderLayerNorm.forward3d h)
@@ -486,7 +486,7 @@ def decodeStepWithCache {batch encSeq : UInt64}
   let pos : Tensor { shape := #[1, cfg.dModel] } := sliceTyped m.model.decoderPositionalEmbedding 0 position 1
   let posB : Tensor { shape := #[batch, 1, cfg.dModel] } :=
     Tensor.expand (Tensor.reshapeChecked pos #[1, 1, cfg.dModel]) #[batch, 1, cfg.dModel]
-  let mut h : Tensor { shape := #[batch, 1, cfg.dModel] } := tokEmb + posB
+  let mut h : Tensor { shape := #[batch, 1, cfg.dModel] } := Tensor.Promoting.add tokEmb posB
   let mut nextCaches := selfCaches
   for i in [:m.model.decoderLayers.size] do
     let layer ←

@@ -66,7 +66,7 @@ def forward {batch channels height width : UInt64}
   let q_t := Tensor.transpose q 1 2  -- [batch, spatial, channels]
   let scale := Float.sqrt channels.toFloat
   let attn_weights := bmm q_t k  -- [batch, spatial, spatial]
-  let attn_weights := attn_weights / scale
+  let attn_weights := Tensor.Preserving.divScalar attn_weights scale
   let attn_weights := Tensor.Preserving.softmax attn_weights (-1)
 
   -- V: [batch, channels, spatial]
@@ -82,7 +82,7 @@ def forward {batch channels height width : UInt64}
   let out := Tensor.conv2dBias out attn.proj_out.weight attn.proj_out.bias #[1, 1] #[0, 0]
   let out := Tensor.reshapeChecked out #[batch, channels, height, width]
 
-  x + out
+  Tensor.Promoting.add x out
 
 end AttnBlock
 

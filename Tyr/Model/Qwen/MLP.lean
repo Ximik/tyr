@@ -61,7 +61,7 @@ def forward {batch seq hidden_size intermediate_size : UInt64}
 
   -- SwiGLU: silu(gate) * up
   let gate_silu := Tensor.Preserving.silu gate
-  let hidden := Mul.mul gate_silu up
+  let hidden := Tensor.Preserving.mul gate_silu up
 
   -- Down projection
   Tensor.linear3d hidden mlp.down_proj

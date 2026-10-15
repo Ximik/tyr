@@ -26,34 +26,118 @@ inductive DType where
 | Bool
 | Float8E4M3FN
 | Float8E5M2
+| Complex32
+| Complex64
+| Complex128
+| QInt8
+| QUInt8
+| QInt32
+| QUInt4x2
+| QUInt2x4
+| Bits1x8
+| Bits2x4
+| Bits4x2
+| Bits8
+| Bits16
+| Float8E5M2FNUZ
+| Float8E4M3FNUZ
+| UInt16
+| UInt32
+| UInt64
+| UInt1
+| UInt2
+| UInt3
+| UInt4
+| UInt5
+| UInt6
+| UInt7
+| Int1
+| Int2
+| Int3
+| Int4
+| Int5
+| Int6
+| Int7
+| Float8E8M0FNU
+| Float4E2M1FNX2
 | Unknown (raw : String)
 deriving Repr, Inhabited, BEq, DecidableEq
 
-private def normalizeDTypeToken (raw : String) : String :=
-  String.ofList <| raw.toList.map Char.toLower
+/-- Every concrete ScalarType in the pinned PyTorch 2.10 runtime, excluding
+its Undefined/NumOptions sentinels. Recognition does not imply that a backend
+implements arithmetic, conversion, or allocation for that dtype. The first
+12 entries preserve Tyr's existing concrete constructor tags. -/
+def DType.all : Array DType := #[
+  .UInt8, .Int8, .Int16, .Int32, .Int64, .Float16, .BFloat16, .Float32, .Float64, .Bool, .Float8E4M3FN, .Float8E5M2,
+  .Complex32, .Complex64, .Complex128, .QInt8, .QUInt8, .QInt32,
+  .QUInt4x2, .QUInt2x4, .Bits1x8, .Bits2x4, .Bits4x2, .Bits8,
+  .Bits16, .Float8E5M2FNUZ, .Float8E4M3FNUZ, .UInt16, .UInt32, .UInt64,
+  .UInt1, .UInt2, .UInt3, .UInt4, .UInt5, .UInt6,
+  .UInt7, .Int1, .Int2, .Int3, .Int4, .Int5,
+  .Int6, .Int7, .Float8E8M0FNU, .Float4E2M1FNX2
+]
 
-/-- Parse a dtype token used by Tyr, PyTorch metadata, or SafeTensors headers. -/
+private def normalizeDTypeToken (raw : String) : String :=
+  let token := String.ofList <| raw.toList.map Char.toLower
+  if token.startsWith "torch." then (token.drop 6).toString else token
+
+/-- Parse Tyr canonical names, native ScalarType names, Python torch dtype
+spellings (with optional `torch.` prefix), and supported SafeTensors tags. -/
 def DType.ofString? (raw : String) : Option DType :=
   match normalizeDTypeToken raw with
-  | "u8" | "uint8" => some .UInt8
-  | "i8" | "int8" => some .Int8
-  | "i16" | "int16" => some .Int16
-  | "i32" | "int32" => some .Int32
-  | "i64" | "int64" | "long" => some .Int64
-  | "f16" | "float16" | "half" => some .Float16
-  | "bf16" | "bfloat16" => some .BFloat16
-  | "f32" | "float32" | "float" => some .Float32
-  | "f64" | "float64" | "double" => some .Float64
+  | "uint8" | "byte" | "u8" => some .UInt8
+  | "int8" | "char" | "i8" => some .Int8
+  | "int16" | "short" | "i16" => some .Int16
+  | "int32" | "int" | "i32" => some .Int32
+  | "int64" | "long" | "i64" => some .Int64
+  | "float16" | "half" | "f16" => some .Float16
+  | "bfloat16" | "bf16" => some .BFloat16
+  | "float32" | "float" | "f32" => some .Float32
+  | "float64" | "double" | "f64" => some .Float64
   | "bool" => some .Bool
-  | "f8_e4m3" | "float8_e4m3fn" => some .Float8E4M3FN
-  | "f8_e5m2" | "float8_e5m2" => some .Float8E5M2
+  | "float8e4m3fn" | "float8_e4m3fn" | "f8_e4m3" => some .Float8E4M3FN
+  | "float8e5m2" | "float8_e5m2" | "f8_e5m2" => some .Float8E5M2
+  | "complex32" | "complexhalf" | "chalf" => some .Complex32
+  | "complex64" | "complexfloat" | "cfloat" => some .Complex64
+  | "complex128" | "complexdouble" | "cdouble" => some .Complex128
+  | "qint8" => some .QInt8
+  | "quint8" => some .QUInt8
+  | "qint32" => some .QInt32
+  | "quint4x2" => some .QUInt4x2
+  | "quint2x4" => some .QUInt2x4
+  | "bits1x8" => some .Bits1x8
+  | "bits2x4" => some .Bits2x4
+  | "bits4x2" => some .Bits4x2
+  | "bits8" => some .Bits8
+  | "bits16" => some .Bits16
+  | "float8e5m2fnuz" | "float8_e5m2fnuz" => some .Float8E5M2FNUZ
+  | "float8e4m3fnuz" | "float8_e4m3fnuz" => some .Float8E4M3FNUZ
+  | "uint16" | "u16" => some .UInt16
+  | "uint32" | "u32" => some .UInt32
+  | "uint64" | "u64" => some .UInt64
+  | "uint1" | "bit" => some .UInt1
+  | "uint2" => some .UInt2
+  | "uint3" => some .UInt3
+  | "uint4" => some .UInt4
+  | "uint5" => some .UInt5
+  | "uint6" => some .UInt6
+  | "uint7" => some .UInt7
+  | "int1" => some .Int1
+  | "int2" => some .Int2
+  | "int3" => some .Int3
+  | "int4" => some .Int4
+  | "int5" => some .Int5
+  | "int6" => some .Int6
+  | "int7" => some .Int7
+  | "float8e8m0fnu" | "float8_e8m0fnu" => some .Float8E8M0FNU
+  | "float4e2m1fnx2" | "float4_e2m1fn_x2" => some .Float4E2M1FNX2
   | _ => none
 
 /-- Parse a dtype token, preserving unknown tokens in `DType.Unknown`. -/
 def DType.parse (raw : String) : DType :=
   (DType.ofString? raw).getD (.Unknown raw)
 
-/-- Canonical name for a dtype in Tyr metadata. -/
+/-- Canonical name for a dtype in Tyr metadata. Complex widths count both components. -/
 def DType.canonicalName : DType → String
   | .UInt8 => "UInt8"
   | .Int8 => "Int8"
@@ -67,10 +151,45 @@ def DType.canonicalName : DType → String
   | .Bool => "Bool"
   | .Float8E4M3FN => "Float8E4M3FN"
   | .Float8E5M2 => "Float8E5M2"
+  | .Complex32 => "Complex32"
+  | .Complex64 => "Complex64"
+  | .Complex128 => "Complex128"
+  | .QInt8 => "QInt8"
+  | .QUInt8 => "QUInt8"
+  | .QInt32 => "QInt32"
+  | .QUInt4x2 => "QUInt4x2"
+  | .QUInt2x4 => "QUInt2x4"
+  | .Bits1x8 => "Bits1x8"
+  | .Bits2x4 => "Bits2x4"
+  | .Bits4x2 => "Bits4x2"
+  | .Bits8 => "Bits8"
+  | .Bits16 => "Bits16"
+  | .Float8E5M2FNUZ => "Float8E5M2FNUZ"
+  | .Float8E4M3FNUZ => "Float8E4M3FNUZ"
+  | .UInt16 => "UInt16"
+  | .UInt32 => "UInt32"
+  | .UInt64 => "UInt64"
+  | .UInt1 => "UInt1"
+  | .UInt2 => "UInt2"
+  | .UInt3 => "UInt3"
+  | .UInt4 => "UInt4"
+  | .UInt5 => "UInt5"
+  | .UInt6 => "UInt6"
+  | .UInt7 => "UInt7"
+  | .Int1 => "Int1"
+  | .Int2 => "Int2"
+  | .Int3 => "Int3"
+  | .Int4 => "Int4"
+  | .Int5 => "Int5"
+  | .Int6 => "Int6"
+  | .Int7 => "Int7"
+  | .Float8E8M0FNU => "Float8E8M0FNU"
+  | .Float4E2M1FNX2 => "Float4E2M1FNX2"
   | .Unknown raw =>
       if raw.isEmpty then "Unknown" else s!"Unknown({raw})"
 
-/-- SafeTensors dtype tag for this dtype, if representable in the format. -/
+/-- A dtype tag supported by Tyr's current native SafeTensors reader/writer.
+This is deliberately narrower than the full PyTorch dtype inventory. -/
 def DType.safeTensorTag? : DType → Option String
   | .UInt8 => some "U8"
   | .Int8 => some "I8"
@@ -84,7 +203,7 @@ def DType.safeTensorTag? : DType → Option String
   | .Bool => some "BOOL"
   | .Float8E4M3FN => some "F8_E4M3"
   | .Float8E5M2 => some "F8_E5M2"
-  | .Unknown _ => none
+  | _ => none
 
 instance : ToString DType where
   toString := DType.canonicalName

@@ -25,7 +25,7 @@ instance {n m : UInt64} {d : DType} {dev : DevicePolicy} :
 def Affine.step {batch n m : UInt64} {d : DType} {dev : DevicePolicy}
     (a : @Affine n m d dev) (input : Tensor ⟨#[batch, m], d, dev⟩) :
     Tensor ⟨#[batch, n], d, dev⟩ :=
-  Add.add (Tensor.mm input a.w) (Tensor.expand a.b #[batch, n])
+  Tensor.Preserving.add (Tensor.mm input a.w) (Tensor.expand a.b #[batch, n])
 
 instance {batch n m : UInt64} {d : DType} {dev : DevicePolicy} :
     Module (@Affine n m d dev) (Tensor ⟨#[batch, m], d, dev⟩)

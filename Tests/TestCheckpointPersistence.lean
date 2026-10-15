@@ -37,7 +37,7 @@ def testMetadataRejectsIncompleteAndUnknownVersions : IO Unit := IO.FS.withTempD
 private def assertTensorEqual {σ : StaticSpec} (a b : Tensor σ) : IO Unit := do
   assertTrue (a.runtimeShape == b.runtimeShape) "checkpoint shape"
   assertTrue (a.dtype == b.dtype) "checkpoint dtype"
-  let error := Tensor.item (Tensor.sumAll (Tensor.abs (Sub.sub a b)))
+  let error := Tensor.item (Tensor.sumAll (Tensor.abs (Tensor.Preserving.sub a b)))
   assertTrue (!error.isNaN && !error.isInf && error < 1e-7) s!"checkpoint tensor error {error}"
 
 @[test]

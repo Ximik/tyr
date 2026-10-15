@@ -68,7 +68,7 @@ end Conv2dParams
 
 /-- Swish activation: x * sigmoid(x) -/
 def swish {s : Shape} (x : Tensor { shape := s }) : Tensor { shape := s } :=
-  x * Tensor.Preserving.sigmoid x
+  Tensor.Promoting.mul x (Tensor.Preserving.sigmoid x)
 
 /-- Residual block for VAE decoder.
     norm1 → swish → conv1 → norm2 → swish → conv2 (+ skip connection) -/
@@ -123,7 +123,7 @@ def forward {batch in_ch out_ch height width : UInt64}
     | some conv => Tensor.reshapeChecked (Tensor.conv2dBias x conv.weight conv.bias #[1, 1] #[0, 0]) #[batch, out_ch, height, width]
     | none => Tensor.reshapeChecked x #[batch, out_ch, height, width]
 
-  h + skip
+  Tensor.Promoting.add h skip
 
 end ResnetBlock
 

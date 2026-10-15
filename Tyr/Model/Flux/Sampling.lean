@@ -64,7 +64,7 @@ def eulerStep {s : Shape}
     (t_curr t_next : Float)
     : Tensor { shape := s } :=
   let dt := t_next - t_curr
-  x + (pred * dt)
+  Tensor.Promoting.add x (Tensor.Preserving.mulScalar pred dt)
 
 /-- Denoise latents using rectified flow.
     noise: [batch, seq, dim] - starting noise

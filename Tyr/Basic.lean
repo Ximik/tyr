@@ -35,6 +35,10 @@ namespace RawTensor
 @[extern "lean_torch_cast_dtype"] opaque castDType (shape : Shape) (t : @& RawTensor)
     (tag : @& String) : RawTensor
 
+/-- Convert dtype with native validation/conversion failures carried explicitly. -/
+@[extern "lean_torch_cast_dtype_checked"] opaque castDTypeChecked (shape : Shape)
+    (t : @& RawTensor) (tag : @& String) : Except String RawTensor
+
 -- Preserve the existing C ABI's shape argument without exposing a shape-indexed
 -- raw type. Metadata queries inspect the native tensor, never this argument.
 @[extern "lean_torch_to_string"] private opaque toStringImpl
@@ -136,11 +140,8 @@ private unsafe def zerosForImpl (σ : StaticSpec) : Tensor σ :=
     | .any => Device.CPU
     | .exact device => device
   let raw := RawTensor.zeros σ.shape false device
-  let raw := match σ.dtype.safeTensorTag? with
-    | some tag => RawTensor.castDType σ.shape raw tag
-    | none =>
-        if σ.dtype == DType.Unknown "dynamic" then raw
-        else RawTensor.castDType σ.shape raw σ.dtype.canonicalName
+  let raw := if σ.dtype == DType.Unknown "dynamic" then raw
+    else RawTensor.castDType σ.shape raw σ.dtype.canonicalName
   unsafeCast raw
 
 /-- Trusted native allocation boundary used to bootstrap pure typed factories.

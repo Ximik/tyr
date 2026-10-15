@@ -55,7 +55,7 @@ def cosDynamic {s : Shape} (x : Tensor { shape := s }) : Tensor { shape := s } :
 
 def affine2d {batch input output : UInt64} (x : Tensor { shape := #[batch, input] })
     (w : Tensor { shape := #[output, input] }) (bias : Tensor { shape := #[output] }) : Tensor { shape := #[batch, output] } :=
-  Tensor.linear x w + (bias.reshapeChecked #[1, output]).expand #[batch, output]
+  Tensor.Promoting.add (Tensor.linear x w) ((bias.reshapeChecked #[1, output]).expand #[batch, output])
 
 def transposeAttention {b s h d : UInt64} (x : Tensor { shape := #[b, s, h, d] }) : Tensor { shape := #[b, h, s, d] } :=
   x.transpose 1 2
@@ -65,7 +65,7 @@ def attentionBias {b h s d : UInt64} (q k v : Tensor { shape := #[b, h, s, d] })
   q.checkedReplacement (RawTensor.branchingAttentionBias b h s d q.raw k.raw v.raw bias.raw 0.0 false)
 
 def fullDynamic (shape : Shape) (value : Float) (requiresGrad : Bool := false) (device : Device := .CPU) (noGrad : requiresGrad = false := by decide) : Tensor { shape := shape } :=
-  zerosDynamic shape requiresGrad device noGrad + value
+  Tensor.Preserving.addScalar (zerosDynamic shape requiresGrad device noGrad) value
 
 /-- Recast a tree only when each leaf's static dtype permits BF16. -/
 def castTreeBFloat16 {α : Type} [TensorStruct α] (params : α) : IO α :=

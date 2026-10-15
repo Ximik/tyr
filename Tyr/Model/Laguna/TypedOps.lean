@@ -22,8 +22,8 @@ def scatterAdd {s t : Shape} (input : Tensor { shape := s }) (dim : Int64)
 def transposeMatrixBatch {b m n : UInt64} {d : DType}
     (x : Tensor { shape := #[b, m, n], dtype := d }) : Tensor { shape := #[b, n, m], dtype := d } := x.transpose 1 2
 
-def mulSame {s : Shape} (x y : Tensor { shape := s }) : Tensor { shape := s } := x * y
-def addSame {s : Shape} (x y : Tensor { shape := s }) : Tensor { shape := s } := x + y
+def mulSame {s : Shape} (x y : Tensor { shape := s }) : Tensor { shape := s } := Tensor.Promoting.mul x y
+def addSame {s : Shape} (x y : Tensor { shape := s }) : Tensor { shape := s } := Tensor.Promoting.add x y
 
 def transposeAttention {b s h d : UInt64} {dt : DType}
     (x : Tensor { shape := #[b, s, h, d], dtype := dt }) : Tensor { shape := #[b, h, s, d], dtype := dt } := x.transpose 1 2

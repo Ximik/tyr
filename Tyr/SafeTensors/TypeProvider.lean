@@ -99,19 +99,8 @@ private def renderShapeLit (shape : Shape) : String :=
   "#[" ++ String.intercalate ", " dims ++ "]"
 
 private def renderDTypeExpr : DType → String
-  | .UInt8 => "_root_.torch.DType.UInt8"
-  | .Int8 => "_root_.torch.DType.Int8"
-  | .Int16 => "_root_.torch.DType.Int16"
-  | .Int32 => "_root_.torch.DType.Int32"
-  | .Int64 => "_root_.torch.DType.Int64"
-  | .Float16 => "_root_.torch.DType.Float16"
-  | .BFloat16 => "_root_.torch.DType.BFloat16"
-  | .Float32 => "_root_.torch.DType.Float32"
-  | .Float64 => "_root_.torch.DType.Float64"
-  | .Bool => "_root_.torch.DType.Bool"
-  | .Float8E4M3FN => "_root_.torch.DType.Float8E4M3FN"
-  | .Float8E5M2 => "_root_.torch.DType.Float8E5M2"
   | .Unknown raw => s!"(_root_.torch.DType.Unknown {leanStringLit raw})"
+  | dtype => s!"_root_.torch.DType.{dtype.canonicalName}"
 
 private def parseGeneratedCommand (source : String) : CommandElabM Syntax := do
   let env ← getEnv

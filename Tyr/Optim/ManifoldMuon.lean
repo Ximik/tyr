@@ -123,19 +123,19 @@ instance {m n : UInt64} {d : DType} {dev : DevicePolicy} :
 
 /-- Symmetric part of a square matrix. -/
 def sym {n : UInt64} (A : Tensor ⟨#[n, n], d, dev⟩) : Tensor ⟨#[n, n], d, dev⟩ :=
-  Tensor.Preserving.mulScalar (Add.add A (Tensor.transpose2d A)) 0.5
+  Tensor.Preserving.mulScalar (Tensor.Preserving.add A (Tensor.transpose2d A)) 0.5
 
 /-- Project an ambient matrix to the Stiefel tangent space at W. -/
 def tangentProject {m n : UInt64} (W : Tensor ⟨#[m, n], d, dev⟩) (G : Tensor ⟨#[m, n], d, dev⟩) :
     Tensor ⟨#[m, n], d, dev⟩ :=
   let XtG := Tensor.mm (Tensor.transpose2d W) G
   let correction := Tensor.mm W (sym XtG)
-  Sub.sub G correction
+  Tensor.Preserving.sub G correction
 
 /-- Tangent-constraint residual matrix: `WᵀA + AᵀW`. -/
 def tangentResidual {m n : UInt64} (W : Tensor ⟨#[m, n], d, dev⟩) (A : Tensor ⟨#[m, n], d, dev⟩) :
     Tensor ⟨#[n, n], d, dev⟩ :=
-  Add.add (Tensor.mm (Tensor.transpose2d W) A) (Tensor.mm (Tensor.transpose2d A) W)
+  Tensor.Preserving.add (Tensor.mm (Tensor.transpose2d W) A) (Tensor.mm (Tensor.transpose2d A) W)
 
 private def solveConverged (cfg : Config) (iter residual dualDelta : Float) : Bool :=
   iter >= cfg.minSolveSteps.toFloat &&
@@ -145,8 +145,8 @@ private def solveConverged (cfg : Config) (iter residual dualDelta : Float) : Bo
 /-- Dual objective estimate used for diagnostics. -/
 private def dualObjectiveEstimate {m n : UInt64} (W G : Tensor ⟨#[m, n], d, dev⟩)
     (lambda : Tensor ⟨#[n, n], d, dev⟩) : Float :=
-  let lambdaPlus := Add.add lambda (Tensor.transpose2d lambda)
-  let adjusted := Add.add G (Tensor.Preserving.mulScalar (Tensor.mm W lambdaPlus) 2.0)
+  let lambdaPlus := Tensor.Preserving.add lambda (Tensor.transpose2d lambda)
+  let adjusted := Tensor.Preserving.add G (Tensor.Preserving.mulScalar (Tensor.mm W lambdaPlus) 2.0)
   0.0 - Tensor.nuclearNorm adjusted
 
 /--
@@ -165,13 +165,13 @@ def solveDirectionDualAscent {m n : UInt64}
   for i in [:cfg.dualAscentSteps] do
     if !converged then
       let lambdaPrev := lambda
-      let lambdaPlus := Add.add lambda (Tensor.transpose2d lambda)
-      let adjusted := Add.add G (Tensor.Preserving.mulScalar (Tensor.mm W lambdaPlus) 2.0)
+      let lambdaPlus := Tensor.Preserving.add lambda (Tensor.transpose2d lambda)
+      let adjusted := Tensor.Preserving.add G (Tensor.Preserving.mulScalar (Tensor.mm W lambdaPlus) 2.0)
       signedDir ← PolarExpress.apply adjusted { numIters := cfg.numIters }
       let h := tangentResidual W signedDir
-      lambda := Add.add lambda (Tensor.Preserving.mulScalar h cfg.dualAscentLr)
+      lambda := Tensor.Preserving.add lambda (Tensor.Preserving.mulScalar h cfg.dualAscentLr)
       residual := Tensor.frobeniusNorm h
-      dualDelta := Tensor.frobeniusNorm (Sub.sub lambda lambdaPrev)
+      dualDelta := Tensor.frobeniusNorm (Tensor.Preserving.sub lambda lambdaPrev)
       iterations := i + 1
       converged := solveConverged cfg iterations.toFloat residual dualDelta
   let diag : SolveDiagnostics := {
@@ -202,15 +202,15 @@ def solveDirectionFixedPoint {m n : UInt64}
   for i in [:cfg.dualAscentSteps] do
     if !converged then
       let lambdaPrev := lambda
-      let lambdaPlus := Add.add lambda (Tensor.transpose2d lambda)
-      let adjusted := Add.add G (Tensor.Preserving.mulScalar (Tensor.mm W lambdaPlus) 2.0)
+      let lambdaPlus := Tensor.Preserving.add lambda (Tensor.transpose2d lambda)
+      let adjusted := Tensor.Preserving.add G (Tensor.Preserving.mulScalar (Tensor.mm W lambdaPlus) 2.0)
       signedDir ← PolarExpress.apply adjusted { numIters := cfg.numIters }
       let h := tangentResidual W signedDir
-      let candidate := Sub.sub lambda (Tensor.Preserving.mulScalar h cfg.dualAscentLr)
-      lambda := Add.add (Tensor.Preserving.mulScalar lambda (1.0 - damp))
+      let candidate := Tensor.Preserving.sub lambda (Tensor.Preserving.mulScalar h cfg.dualAscentLr)
+      lambda := Tensor.Preserving.add (Tensor.Preserving.mulScalar lambda (1.0 - damp))
         (Tensor.Preserving.mulScalar candidate damp)
       residual := Tensor.frobeniusNorm h
-      dualDelta := Tensor.frobeniusNorm (Sub.sub lambda lambdaPrev)
+      dualDelta := Tensor.frobeniusNorm (Tensor.Preserving.sub lambda lambdaPrev)
       iterations := i + 1
       converged := solveConverged cfg iterations.toFloat residual dualDelta
   let diag : SolveDiagnostics := {
@@ -254,7 +254,7 @@ def stepSingleWithDiagnostics {m n : UInt64}
 
   -- Nesterov-style blend (aligned with NorMuon's momentum semantics).
   let newMomentum := NorMuon.updateMomentum gRaw state.momentumBuffer cfg.momentum
-  let nesterovGrad := Add.add (Tensor.Preserving.mulScalar gRaw (1.0 - cfg.momentum))
+  let nesterovGrad := Tensor.Preserving.add (Tensor.Preserving.mulScalar gRaw (1.0 - cfg.momentum))
     (Tensor.Preserving.mulScalar newMomentum cfg.momentum)
 
   -- Optional dual-ascent solve in ambient space.
@@ -290,7 +290,7 @@ def stepSingleWithDiagnostics {m n : UInt64}
   let effectiveLr := cfg.lr * lrMul * aspectScale
 
   -- Ambient update + Stiefel retraction.
-  let updated := Sub.sub param (Tensor.Preserving.mulScalar tangentUnit effectiveLr)
+  let updated := Tensor.Preserving.sub param (Tensor.Preserving.mulScalar tangentUnit effectiveLr)
   let retracted := retractStiefel updated
   let newParam ← Tensor.parameter (Tensor.detach retracted)
 

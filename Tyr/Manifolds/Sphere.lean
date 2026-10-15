@@ -15,7 +15,7 @@ structure Sphere (n : UInt64) (dtype : DType := .Float32)
 namespace Sphere
 
 private def dot {n : UInt64} (a b : Tensor ⟨#[n], d, dev⟩) : Float :=
-  Tensor.item (Tensor.sumAll (Mul.mul a b))
+  Tensor.item (Tensor.sumAll (Tensor.Preserving.mul a b))
 
 /-- Project ambient vector to the unit sphere. -/
 def project (n : UInt64) (v : Tensor ⟨#[n], d, dev⟩) : Sphere n d dev :=
@@ -44,14 +44,14 @@ namespace SphereTangent
 def project (x : Sphere n d dev) (v : Tensor ⟨#[n], d, dev⟩) : SphereTangent n d dev :=
   let xDotV := Sphere.dot x.coords v
   let correction := Tensor.Preserving.mulScalar x.coords xDotV
-  ⟨Sub.sub v correction⟩
+  ⟨Tensor.Preserving.sub v correction⟩
 
 /-- Zero tangent vector. -/
 def zero (n : UInt64) : SphereTangent n d dev := ⟨Tensor.zerosFor ⟨#[n], d, dev⟩⟩
 
 /-- Add tangent vectors. -/
 def add (a b : SphereTangent n d dev) : SphereTangent n d dev :=
-  ⟨Add.add a.vec b.vec⟩
+  ⟨Tensor.Preserving.add a.vec b.vec⟩
 
 /-- Scale tangent vector. -/
 def smul (s : Float) (v : SphereTangent n d dev) : SphereTangent n d dev :=
@@ -75,9 +75,9 @@ instance sphereManifold (n : UInt64) : DifferentiableManifold (Sphere n d dev) w
       let dir := Tensor.Preserving.mulScalar v.vec (1.0 / nv)
       let c := Float.cos nv
       let s := Float.sin nv
-      let y := Add.add (Tensor.Preserving.mulScalar x.coords c) (Tensor.Preserving.mulScalar dir s)
+      let y := Tensor.Preserving.add (Tensor.Preserving.mulScalar x.coords c) (Tensor.Preserving.mulScalar dir s)
       Sphere.project n y
   retract x v :=
-    Sphere.project n (Add.add x.coords v.vec)
+    Sphere.project n (Tensor.Preserving.add x.coords v.vec)
 
 end Tyr.AD

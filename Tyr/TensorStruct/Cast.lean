@@ -48,9 +48,9 @@ private def castTensorAt {σ τ : StaticSpec} (path : String)
     -- Unknown native dtype tokens can be retained exactly, but are never used
     -- to request an unsupported conversion or treated as a wildcard.
     let dtypeTag ← if targetDType == sourceDType then pure none else
-      match targetDType.safeTensorTag? with
-      | some tag => pure (some tag)
-      | none => throw (IO.userError s!"Unsupported target dtype {targetDType}")
+      match targetDType with
+      | .Unknown _ => throw (IO.userError s!"Unsupported target dtype {targetDType}")
+      | _ => pure (some targetDType.canonicalName)
     let targetDevice := match τ.device with
       | .any => tensor.raw.device
       | .exact device => device

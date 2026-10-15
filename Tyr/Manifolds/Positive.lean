@@ -35,7 +35,7 @@ structure PositiveTangent (m n : UInt64) (dtype : DType := .Float32)
 namespace PositiveTangent
 
 def zero (m n : UInt64) : PositiveTangent m n d dev := ⟨Tensor.zerosFor ⟨#[m, n], d, dev⟩⟩
-def add (a b : PositiveTangent m n d dev) : PositiveTangent m n d dev := ⟨Add.add a.vec b.vec⟩
+def add (a b : PositiveTangent m n d dev) : PositiveTangent m n d dev := ⟨Tensor.Preserving.add a.vec b.vec⟩
 def smul (s : Float) (v : PositiveTangent m n d dev) : PositiveTangent m n d dev := ⟨Tensor.Preserving.mulScalar v.vec s⟩
 
 end PositiveTangent
@@ -50,22 +50,22 @@ instance positiveManifold (m n : UInt64) : DifferentiableManifold (Positive m n 
   scaleTangent s v := PositiveTangent.smul s v
   sharp := by
     intro x g
-    let sq := Mul.mul x.matrix x.matrix
-    exact ⟨Mul.mul g.vec sq⟩
+    let sq := Tensor.Preserving.mul x.matrix x.matrix
+    exact ⟨Tensor.Preserving.mul g.vec sq⟩
   flat := by
     intro x v
-    let sq := Mul.mul x.matrix x.matrix
+    let sq := Tensor.Preserving.mul x.matrix x.matrix
     let sqSafe := Tensor.Preserving.addScalar sq 1e-12
     exact ⟨Tensor.Preserving.div v.vec sqSafe⟩
   exp x v :=
-    let quad := Mul.mul v.vec v.vec
+    let quad := Tensor.Preserving.mul v.vec v.vec
     let denom := Tensor.Preserving.mulScalar x.matrix 2.0
     let second := Tensor.Preserving.div quad (Tensor.Preserving.addScalar denom 1e-12)
-    Positive.project m n (Add.add (Add.add x.matrix v.vec) second)
+    Positive.project m n (Tensor.Preserving.add (Tensor.Preserving.add x.matrix v.vec) second)
   retract x v :=
-    let quad := Mul.mul v.vec v.vec
+    let quad := Tensor.Preserving.mul v.vec v.vec
     let denom := Tensor.Preserving.mulScalar x.matrix 2.0
     let second := Tensor.Preserving.div quad (Tensor.Preserving.addScalar denom 1e-12)
-    Positive.project m n (Add.add (Add.add x.matrix v.vec) second)
+    Positive.project m n (Tensor.Preserving.add (Tensor.Preserving.add x.matrix v.vec) second)
 
 end Tyr.AD

@@ -40,17 +40,17 @@ def signatureVec (n : UInt64) : Tensor ⟨#[n + 1], d, dev⟩ :=
 
 /-- Minkowski inner product (signature (n,1)) as Float. -/
 def minkowskiInner (x y : Tensor ⟨#[n + 1], d, dev⟩) : Float :=
-  Tensor.item (Tensor.sumAll (Mul.mul (Mul.mul x y) (signatureVec n)))
+  Tensor.item (Tensor.sumAll (Tensor.Preserving.mul (Tensor.Preserving.mul x y) (signatureVec n)))
 
 /-- Project an ambient vector to the hyperboloid (future sheet).
     Keeps the spatial part and recomputes the time coordinate. -/
 def project (n : UInt64) (v : Tensor ⟨#[n + 1], d, dev⟩) : Hyperbolic n d dev :=
-  let spatial := Mul.mul v (spatialMask n)
-  let spatialSq := Tensor.item (Tensor.sumAll (Mul.mul spatial spatial))
+  let spatial := Tensor.Preserving.mul v (spatialMask n)
+  let spatialSq := Tensor.item (Tensor.sumAll (Tensor.Preserving.mul spatial spatial))
   let t := Float.sqrt (spatialSq + 1.0)
   let tVec := Tensor.Preserving.mulScalar (Tensor.onesFor ⟨#[1], d, dev⟩) t
   let timeVec := Tensor.cat (Tensor.zerosFor ⟨#[n], d, dev⟩) tVec 0
-  ⟨Add.add spatial timeVec⟩
+  ⟨Tensor.Preserving.add spatial timeVec⟩
 
 /-- Normalize a time-like vector to the hyperboloid using Minkowski norm. -/
 def normalize (n : UInt64) (v : Tensor ⟨#[n + 1], d, dev⟩) : Hyperbolic n d dev :=
@@ -86,7 +86,7 @@ def zero (n : UInt64) : HyperbolicTangent n d dev :=
 
 /-- Add two tangent vectors. -/
 def add (v w : HyperbolicTangent n d dev) : HyperbolicTangent n d dev :=
-  ⟨Add.add v.vec w.vec⟩
+  ⟨Tensor.Preserving.add v.vec w.vec⟩
 
 /-- Scale a tangent vector. -/
 def smul (s : Float) (v : HyperbolicTangent n d dev) : HyperbolicTangent n d dev :=
@@ -95,11 +95,11 @@ def smul (s : Float) (v : HyperbolicTangent n d dev) : HyperbolicTangent n d dev
 /-- Project an ambient vector to the tangent space at X (Minkowski-orthogonal). -/
 def project (X : Hyperbolic n d dev) (V : Tensor ⟨#[n + 1], d, dev⟩) : HyperbolicTangent n d dev :=
   let alpha := -Hyperbolic.minkowskiInner X.coords V / Hyperbolic.minkowskiInner X.coords X.coords
-  ⟨Add.add V (Tensor.Preserving.mulScalar X.coords alpha)⟩
+  ⟨Tensor.Preserving.add V (Tensor.Preserving.mulScalar X.coords alpha)⟩
 
 /-- Apply the Minkowski metric (signature (n,1)) to a vector: flips last coord. -/
 def applyMetric (v : Tensor ⟨#[n + 1], d, dev⟩) : Tensor ⟨#[n + 1], d, dev⟩ :=
-  Mul.mul v (Hyperbolic.signatureVec n)
+  Tensor.Preserving.mul v (Hyperbolic.signatureVec n)
 
 end HyperbolicTangent
 
@@ -116,8 +116,8 @@ instance hyperbolicManifold (n : UInt64) : DifferentiableManifold (Hyperbolic n 
   sharp v := ⟨HyperbolicTangent.applyMetric v.vec⟩
   flat v := ⟨HyperbolicTangent.applyMetric v.vec⟩
   exp X V :=
-    Hyperbolic.normalize n (Add.add X.coords V.vec)
+    Hyperbolic.normalize n (Tensor.Preserving.add X.coords V.vec)
   retract X V :=
-    Hyperbolic.normalize n (Add.add X.coords V.vec)
+    Hyperbolic.normalize n (Tensor.Preserving.add X.coords V.vec)
 
 end Tyr.AD

@@ -42,12 +42,12 @@ def invMatrix {dim : UInt64} {d : DType} {dev : DevicePolicy} (dm : DiagonalMass
 /-- Apply the diagonal mass to a vector. -/
 def apply {dim : UInt64} {d : DType} {dev : DevicePolicy} (dm : DiagonalMass dim d dev)
     (x : Tensor ⟨#[dim], d, dev⟩) : Tensor ⟨#[dim], d, dev⟩ :=
-  Mul.mul dm.diag x
+  Tensor.Preserving.mul dm.diag x
 
 /-- Apply the inverse diagonal mass to a vector. -/
 def applyInv {dim : UInt64} {d : DType} {dev : DevicePolicy} (dm : DiagonalMass dim d dev)
     (x : Tensor ⟨#[dim], d, dev⟩) : Tensor ⟨#[dim], d, dev⟩ :=
-  Mul.mul dm.invDiag x
+  Tensor.Preserving.mul dm.invDiag x
 
 end DiagonalMass
 
@@ -74,7 +74,7 @@ private def scaleColumns {rank dim : UInt64} {d : DType} {dev : DevicePolicy}
   let scaleRow : Tensor ⟨#[1, dim], d, dev⟩ :=
     Tensor.reshape scale #[1, dim] (by simp [TensorSpec.numelOfShape])
   let scaleFull : Tensor ⟨#[rank, dim], d, dev⟩ := Tensor.expand scaleRow #[rank, dim]
-  Mul.mul matrix scaleFull
+  Tensor.Preserving.mul matrix scaleFull
 
 private def vectorToColumn {n : UInt64} {d : DType} {dev : DevicePolicy}
     (v : Tensor ⟨#[n], d, dev⟩) : Tensor ⟨#[n, 1], d, dev⟩ :=
@@ -93,7 +93,7 @@ def gram {rank dim : UInt64} {d : DType} {dev : DevicePolicy} (K : MetricFactor 
 def denseMetric {rank dim : UInt64} {d : DType} {dev : DevicePolicy}
     (D : DiagonalMass dim d dev)
     (K : MetricFactor rank dim d dev) : Tensor ⟨#[dim, dim], d, dev⟩ :=
-  Add.add D.toMatrix K.gram
+  Tensor.Preserving.add D.toMatrix K.gram
 
 /-- Apply `K` to a vector. -/
 def apply {rank dim : UInt64} {d : DType} {dev : DevicePolicy} (K : MetricFactor rank dim d dev)
@@ -110,14 +110,14 @@ def applyRegularized {rank dim : UInt64} {d : DType} {dev : DevicePolicy}
     (D : DiagonalMass dim d dev)
     (K : MetricFactor rank dim d dev)
     (x : Tensor ⟨#[dim], d, dev⟩) : Tensor ⟨#[dim], d, dev⟩ :=
-  Add.add (D.apply x) (K.applyTranspose (K.apply x))
+  Tensor.Preserving.add (D.apply x) (K.applyTranspose (K.apply x))
 
 /-- Woodbury inner matrix `I + K D^{-1} K^T`. -/
 def woodburyInner {rank dim : UInt64} {d : DType} {dev : DevicePolicy}
     (D : DiagonalMass dim d dev)
     (K : MetricFactor rank dim d dev) : Tensor ⟨#[rank, rank], d, dev⟩ :=
   let kd := scaleColumns K.matrix D.invDiag
-  Add.add (Tensor.eyeFor d dev) (Tensor.mm kd (Tensor.transpose2d K.matrix))
+  Tensor.Preserving.add (Tensor.eyeFor d dev) (Tensor.mm kd (Tensor.transpose2d K.matrix))
 
 /-- Solve `(D + K^T K) x = g` using the Woodbury identity. -/
 def solveWoodbury {rank dim : UInt64} {d : DType} {dev : DevicePolicy}
@@ -130,7 +130,7 @@ def solveWoodbury {rank dim : UInt64} {d : DType} {dev : DevicePolicy}
   let correctionArg := K.apply base
   let correctionInner := columnToVector (Tensor.mm innerInv (vectorToColumn correctionArg))
   let correction := D.applyInv (K.applyTranspose correctionInner)
-  Sub.sub base correction
+  Tensor.Preserving.sub base correction
 
 end MetricFactor
 

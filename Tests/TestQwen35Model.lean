@@ -313,6 +313,47 @@ def testQwen35MoeInitAndForward : IO Unit := do
     "moe forward should return [batch, seq, vocab]"
 
 @[test]
+def testQwen35BFloat16ExpertsFloat32Routing : IO Unit := do
+  let cfg : Config := { tinyMoeCfg with
+    hidden_size := 2
+    num_experts := 2
+    num_experts_per_tok := 2
+    moe_intermediate_size := 1
+  }
+  -- Both experts compute SiLU(1). Float32 routing weights sum to one,
+  -- so weighting must preserve that value rather than sum unweighted experts.
+  let experts : Qwen35MoeExperts cfg := {
+    gate_up_proj := (Tensor.full #[2, 2, 2] 0.5).toBFloat16.forgetDType
+    down_proj := (Tensor.ones #[2, 2, 1]).toBFloat16.forgetDType
+  }
+  let hidden := (Tensor.ones #[1, 2]).toBFloat16.forgetDType
+  let weights := (Tensor.fromFloatArray #[0.25, 0.75]).reshapeChecked #[1, 2] |>.forgetDType
+  let indices := (Tensor.fromInt64Array #[0, 1]).reshapeChecked #[1, 2]
+  let actual := experts.forward2d cfg hidden weights indices
+  LeanTest.assertEqual actual.actualSpec.dtype .BFloat16
+  for value in (← actual.toFloatArray) do
+    LeanTest.assertTrue (approxEq value 0.73046875 0.005)
+      s!"Float32 routing weights must scale BF16 expert outputs: got {value}"
+
+@[test]
+def testQwen35BFloat16IntegerPaddingMask : IO Unit := do
+  let initialized ← Qwen35GatedDeltaNet.init tinyDenseCfg
+  let net ← TensorStruct.castDType .BFloat16 initialized
+  let hidden := (Tensor.ones #[2, 2, tinyDenseCfg.hidden_size]).toBFloat16
+  let mask := (Tensor.fromInt64Array #[1, 0, 0, 1]).reshapeChecked #[2, 2]
+  let expanded := Tensor.expand (mask.reshapeChecked #[2, 2, 1]) #[2, 2, tinyDenseCfg.hidden_size]
+  let masked := Tensor.mul hidden expanded
+  let (expected, _, _) := net.forward tinyDenseCfg masked.forgetDType
+  let (actual, _, _) := net.forward tinyDenseCfg hidden.forgetDType (some mask)
+  LeanTest.assertEqual actual.actualSpec.dtype .BFloat16
+  let expectedValues ← expected.toFloatArray
+  let actualValues ← actual.toFloatArray
+  LeanTest.assertEqual actualValues.size expectedValues.size
+  for i in [:actualValues.size] do
+    LeanTest.assertTrue (approxEq actualValues[i]! expectedValues[i]! 1e-6)
+      "integer padding masks must use native promotion without widening BF16 activations"
+
+@[test]
 def testQwen35ConfigLoad : IO Unit := do
   let path := "/tmp/qwen35_config_test.json"
   let json :=

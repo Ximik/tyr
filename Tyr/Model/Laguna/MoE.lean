@@ -72,16 +72,16 @@ def route {tokens : UInt64}
   let logits :=
     if cfg.moe_router_logit_softcapping > 0.0 then
       let c := cfg.moe_router_logit_softcapping
-      Tensor.Preserving.tanh (logits0 / c) * c
+      Tensor.Promoting.mulScalar (Tensor.Preserving.tanh (Tensor.Promoting.divScalar logits0 c)) c
     else logits0
   let scores := Tensor.Preserving.sigmoid logits
   let selectionScores := match r.eScoreCorrectionBias with
-    | some bias => scores + Tensor.expand (floatDynamic bias) #[tokens, cfg.num_experts]
+    | some bias => Tensor.Promoting.add scores (Tensor.expand (floatDynamic bias) #[tokens, cfg.num_experts])
     | none => scores
   let (_, topIdx) := topK2d selectionScores cfg.num_experts_per_tok 1
   let weights := Tensor.gather scores 1 topIdx
   let weights := if cfg.norm_topk_prob then
-      weights / Tensor.expand (Tensor.Preserving.sumDim weights 1 true) #[tokens, cfg.num_experts_per_tok]
+      Tensor.Promoting.div weights (Tensor.expand (Tensor.Preserving.sumDim weights 1 true) #[tokens, cfg.num_experts_per_tok])
     else weights
   pure (topIdx, Tensor.castLike x weights)
 

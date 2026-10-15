@@ -335,7 +335,7 @@ instance {σ : StaticSpec} : AnchorMerge (Tensor σ) where
     else
       let wa := Tensor.Preserving.mulScalar a w1.toFloat
       let wb := Tensor.Preserving.mulScalar b w2.toFloat
-      Tensor.Preserving.divScalar (Add.add wa wb) total
+      Tensor.Preserving.divScalar (Tensor.Preserving.add wa wb) total
 
 instance [AnchorMerge α] [AnchorMerge β] : AnchorMerge (α × β) where
   merge a b w1 w2 :=

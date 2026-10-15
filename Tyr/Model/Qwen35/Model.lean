@@ -28,10 +28,10 @@ private def l2NormLast4d {b s h d : UInt64}
     (eps : Float := 1e-6)
     : Tensor { shape := #[b, s, h, d] } :=
   let flat : Tensor { shape := #[b * s * h, d] } := Tensor.reshapeChecked x #[b * s * h, d]
-  let n2 : Tensor { shape := #[b * s * h, 1] } := Tensor.Preserving.sumDim (flat * flat) 1 true
-  let inv : Tensor { shape := #[b * s * h, 1] } := rsqrtDynamic (n2 + eps)
+  let n2 : Tensor { shape := #[b * s * h, 1] } := Tensor.Preserving.sumDim (Tensor.Promoting.mul flat flat) 1 true
+  let inv : Tensor { shape := #[b * s * h, 1] } := rsqrtDynamic (Tensor.Preserving.addScalar n2 eps)
   let inv : Tensor { shape := #[b * s * h, d] } := Tensor.expand inv #[b * s * h, d]
-  Tensor.reshapeChecked (flat * inv) #[b, s, h, d]
+  Tensor.reshapeChecked (Tensor.Promoting.mul flat inv) #[b, s, h, d]
 
 private def applyMaskToPaddingStates {batch seq hidden : UInt64}
     (x : Tensor { shape := #[batch, seq, hidden] })
@@ -43,9 +43,11 @@ private def applyMaskToPaddingStates {batch seq hidden : UInt64}
     match attentionMask with
     | none => x
     | some m =>
-      let mf : Tensor { shape := #[batch, seq] } := floatDynamic m
-      let me : Tensor { shape := #[batch, seq, hidden] } := Tensor.expand (Tensor.reshapeChecked mf #[batch, seq, 1]) #[batch, seq, hidden]
-      x * me
+      -- Keep the integer mask: native promotion with floating activations
+      -- retains their dtype instead of introducing an unnecessary Float32 value.
+      let me : Tensor { shape := #[batch, seq, hidden], dtype := .Int64 } :=
+        Tensor.expand (Tensor.reshapeChecked m #[batch, seq, 1]) #[batch, seq, hidden]
+      Tensor.Promoting.mul x me
 
 /-- Qwen3.5 RMSNorm with `(1 + weight)` scaling. -/
 structure Qwen35RMSNorm (dim : UInt64) where
@@ -75,13 +77,13 @@ def forward2d {n dim : UInt64}
     (x : Tensor { shape := #[n, dim] })
     : Tensor { shape := #[n, dim] } :=
   let xf : Tensor { shape := #[n, dim] } := floatDynamic x
-  let var : Tensor { shape := #[n, 1] } := Tensor.Preserving.meanDim (xf * xf) 1 true
-  let inv : Tensor { shape := #[n, 1] } := rsqrtDynamic (var + m.eps)
+  let var : Tensor { shape := #[n, 1] } := Tensor.Preserving.meanDim (Tensor.Promoting.mul xf xf) 1 true
+  let inv : Tensor { shape := #[n, 1] } := rsqrtDynamic (Tensor.Preserving.addScalar var m.eps)
   let inv : Tensor { shape := #[n, dim] } := Tensor.expand inv #[n, dim]
-  let normed : Tensor { shape := #[n, dim] } := xf * inv
+  let normed : Tensor { shape := #[n, dim] } := Tensor.Promoting.mul xf inv
   let scale1 : Tensor { shape := #[dim] } := Tensor.Preserving.addScalar (floatDynamic m.weight) 1.0
   let scale : Tensor { shape := #[n, dim] } := Tensor.expand (Tensor.reshapeChecked scale1 #[1, dim]) #[n, dim]
-  Tensor.castLike x (normed * scale)
+  Tensor.castLike x (Tensor.Promoting.mul normed scale)
 
 def forward3d {batch seq dim : UInt64}
     (m : Qwen35RMSNorm dim)
@@ -109,13 +111,13 @@ def forward2d {n dim : UInt64}
     (gate : Tensor { shape := #[n, dim] })
     : Tensor { shape := #[n, dim] } :=
   let xf : Tensor { shape := #[n, dim] } := floatDynamic x
-  let var : Tensor { shape := #[n, 1] } := Tensor.Preserving.meanDim (xf * xf) 1 true
-  let inv : Tensor { shape := #[n, 1] } := rsqrtDynamic (var + m.eps)
+  let var : Tensor { shape := #[n, 1] } := Tensor.Preserving.meanDim (Tensor.Promoting.mul xf xf) 1 true
+  let inv : Tensor { shape := #[n, 1] } := rsqrtDynamic (Tensor.Preserving.addScalar var m.eps)
   let inv : Tensor { shape := #[n, dim] } := Tensor.expand inv #[n, dim]
-  let normed : Tensor { shape := #[n, dim] } := xf * inv
+  let normed : Tensor { shape := #[n, dim] } := Tensor.Promoting.mul xf inv
   let scale : Tensor { shape := #[n, dim] } := Tensor.expand (Tensor.reshapeChecked (floatDynamic m.weight) #[1, dim]) #[n, dim]
   let g : Tensor { shape := #[n, dim] } := Tensor.Preserving.silu (floatDynamic gate)
-  Tensor.castLike x (normed * scale * g)
+  Tensor.castLike x (Tensor.Promoting.mul (Tensor.Promoting.mul normed scale) g)
 
 end Qwen35RMSNormGated
 
@@ -142,7 +144,7 @@ def forward2d {tokens hidden inter : UInt64}
   let upDyn : Tensor { shape := #[tokens, inter] } := einsumChecked "oh,th->to" m.up_proj x
   let gate : Tensor { shape := #[tokens, inter] } := Tensor.reshapeChecked gateDyn #[tokens, inter]
   let up : Tensor { shape := #[tokens, inter] } := Tensor.reshapeChecked upDyn #[tokens, inter]
-  let hid : Tensor { shape := #[tokens, inter] } := Tensor.Preserving.silu gate * up
+  let hid : Tensor { shape := #[tokens, inter] } := Tensor.Promoting.mul (Tensor.Preserving.silu gate) up
   let outDyn : Tensor { shape := #[tokens, hidden] } := einsumChecked "ho,to->th" m.down_proj hid
   Tensor.reshapeChecked outDyn #[tokens, hidden]
 
@@ -150,7 +152,7 @@ def forward {batch seq hidden inter : UInt64}
     (m : Qwen35MLP hidden inter)
     (x : Tensor { shape := #[batch, seq, hidden] })
     : Tensor { shape := #[batch, seq, hidden] } :=
-  Tensor.linear3d (Tensor.Preserving.silu (Tensor.linear3d x m.gate_proj) * Tensor.linear3d x m.up_proj) m.down_proj
+  Tensor.linear3d (Tensor.Promoting.mul (Tensor.Preserving.silu (Tensor.linear3d x m.gate_proj)) (Tensor.linear3d x m.up_proj)) m.down_proj
 
 end Qwen35MLP
 
@@ -176,7 +178,7 @@ def forward {tokens : UInt64}
   let (topValsRaw, topIdx) := topK2d probs cfg.num_experts_per_tok 1
   let denom : Tensor { shape := #[tokens, 1] } := Tensor.Preserving.sumDim topValsRaw 1 true
   let denom : Tensor { shape := #[tokens, cfg.num_experts_per_tok] } := Tensor.expand denom #[tokens, cfg.num_experts_per_tok]
-  let topVals : Tensor { shape := #[tokens, cfg.num_experts_per_tok] } := Tensor.Preserving.div topValsRaw denom
+  let topVals : Tensor { shape := #[tokens, cfg.num_experts_per_tok] } := Tensor.Promoting.div topValsRaw denom
   (probs, topVals, topIdx)
 
 end Qwen35TopKRouter
@@ -224,7 +226,7 @@ def forward2d {tokens : UInt64}
       let gate : Tensor { shape := #[tokens, cfg.moe_intermediate_size] } := typedSlice gu 1 0 cfg.moe_intermediate_size
       let up : Tensor { shape := #[tokens, cfg.moe_intermediate_size] } :=
         typedSlice gu 1 cfg.moe_intermediate_size cfg.moe_intermediate_size
-      let inter : Tensor { shape := #[tokens, cfg.moe_intermediate_size] } := Tensor.Preserving.silu gate * up
+      let inter : Tensor { shape := #[tokens, cfg.moe_intermediate_size] } := Tensor.Promoting.mul (Tensor.Preserving.silu gate) up
 
       let down2d : Tensor { shape := #[cfg.num_experts, cfg.hidden_size * cfg.moe_intermediate_size] } :=
         Tensor.reshapeChecked m.down_proj #[cfg.num_experts, cfg.hidden_size * cfg.moe_intermediate_size]
@@ -238,7 +240,7 @@ def forward2d {tokens : UInt64}
 
       let w2d : Tensor { shape := #[tokens, 1] } := typedSlice topVals 1 slot.toUInt64 1
       let w : Tensor { shape := #[tokens, cfg.hidden_size] } := Tensor.expand w2d #[tokens, cfg.hidden_size]
-      acc := acc + out * w
+      acc := Tensor.Promoting.add acc (Tensor.Promoting.mul out w)
 
     -- Restore the model dtype so downstream layers see consistent dtypes.
     return Tensor.castLike hidden acc
@@ -287,7 +289,7 @@ def forward {batch seq : UInt64}
   let gate : Tensor { shape := #[tokens, cfg.hidden_size] } :=
     Tensor.expand (Tensor.Preserving.sigmoid gate1) #[tokens, cfg.hidden_size]
 
-  Tensor.reshapeChecked (expertOut + sharedOut * gate) #[batch, seq, cfg.hidden_size]
+  Tensor.reshapeChecked (Tensor.Promoting.add expertOut (Tensor.Promoting.mul sharedOut gate)) #[batch, seq, cfg.hidden_size]
 
 end Qwen35SparseMoeBlock
 
@@ -388,7 +390,7 @@ def forward {batch seq : UInt64}
 
   let attn : Tensor { shape := #[batch, seq, cfg.num_attention_heads, cfg.head_dim] } := Tensor.joinHeads attn
   let attnFlat : Tensor { shape := #[batch, seq, qLen] } := Tensor.reshapeChecked attn #[batch, seq, qLen]
-  let gated : Tensor { shape := #[batch, seq, qLen] } := attnFlat * Tensor.Preserving.sigmoid gateFlat
+  let gated : Tensor { shape := #[batch, seq, qLen] } := Tensor.Promoting.mul attnFlat (Tensor.Preserving.sigmoid gateFlat)
   Tensor.linear3d gated m.o_proj
 
 /-- Forward pass with optional KV-cache update (for batch prefill). -/
@@ -443,7 +445,7 @@ def forwardWithCache {batch seq : UInt64}
 
   let attn : Tensor { shape := #[batch, seq, cfg.num_attention_heads, cfg.head_dim] } := Tensor.joinHeads attn
   let attnFlat : Tensor { shape := #[batch, seq, qLen] } := Tensor.reshapeChecked attn #[batch, seq, qLen]
-  let gated : Tensor { shape := #[batch, seq, qLen] } := attnFlat * Tensor.Preserving.sigmoid gateFlat
+  let gated : Tensor { shape := #[batch, seq, qLen] } := Tensor.Promoting.mul attnFlat (Tensor.Preserving.sigmoid gateFlat)
   (Tensor.linear3d gated m.o_proj, cache')
 
 def forwardMasked {batch seq : UInt64}
@@ -482,7 +484,7 @@ def forwardMasked {batch seq : UInt64}
 
   let attn : Tensor { shape := #[batch, seq, cfg.num_attention_heads, cfg.head_dim] } := Tensor.joinHeads attn
   let attnFlat : Tensor { shape := #[batch, seq, qLen] } := Tensor.reshapeChecked attn #[batch, seq, qLen]
-  let gated : Tensor { shape := #[batch, seq, qLen] } := attnFlat * Tensor.Preserving.sigmoid gateFlat
+  let gated : Tensor { shape := #[batch, seq, qLen] } := Tensor.Promoting.mul attnFlat (Tensor.Preserving.sigmoid gateFlat)
   Tensor.linear3d gated m.o_proj
 
 def forwardStep {batch : UInt64}
@@ -532,7 +534,7 @@ def forwardStep {batch : UInt64}
       Tensor.attentionGQAQKV qh kAll vAll 0.0 false true
     let attn : Tensor { shape := #[batch, 1, cfg.num_attention_heads, cfg.head_dim] } := Tensor.joinHeads attn
     let attnFlat : Tensor { shape := #[batch, 1, qLen] } := Tensor.reshapeChecked attn #[batch, 1, qLen]
-    let gated : Tensor { shape := #[batch, 1, qLen] } := attnFlat * Tensor.Preserving.sigmoid gateFlat
+    let gated : Tensor { shape := #[batch, 1, qLen] } := Tensor.Promoting.mul attnFlat (Tensor.Preserving.sigmoid gateFlat)
     let out : Tensor { shape := #[batch, 1, cfg.hidden_size] } := Tensor.linear3d gated m.o_proj
     let cache' : KVCache cfg batch := {
       kStoreDyn := Tensor.packShape kStore'
@@ -554,7 +556,7 @@ def forwardStep {batch : UInt64}
       Tensor.attentionGQAQKV qh kAll vAll 0.0 false true
     let attn : Tensor { shape := #[batch, 1, cfg.num_attention_heads, cfg.head_dim] } := Tensor.joinHeads attn
     let attnFlat : Tensor { shape := #[batch, 1, qLen] } := Tensor.reshapeChecked attn #[batch, 1, qLen]
-    let gated : Tensor { shape := #[batch, 1, qLen] } := attnFlat * Tensor.Preserving.sigmoid gateFlat
+    let gated : Tensor { shape := #[batch, 1, qLen] } := Tensor.Promoting.mul attnFlat (Tensor.Preserving.sigmoid gateFlat)
     let out : Tensor { shape := #[batch, 1, cfg.hidden_size] } := Tensor.linear3d gated m.o_proj
     let cache' : KVCache cfg batch := {
       kStoreDyn := Tensor.packShape kStore'
@@ -716,8 +718,8 @@ def forward {batch seq : UInt64}
     Tensor.expand (Tensor.reshapeChecked m.dt_bias #[1, 1, cfg.linear_num_value_heads]) #[batch, seq, cfg.linear_num_value_heads]
   let aExp : Tensor { shape := #[batch, seq, cfg.linear_num_value_heads] } :=
     Tensor.expand (Tensor.reshapeChecked (Tensor.Preserving.exp (floatDynamic m.a_log)) #[1, 1, cfg.linear_num_value_heads]) #[batch, seq, cfg.linear_num_value_heads]
-  let gPos : Tensor { shape := #[batch, seq, cfg.linear_num_value_heads] } := softplusDynamic (floatDynamic (a + dt))
-  let g : Tensor { shape := #[batch, seq, cfg.linear_num_value_heads] } := Tensor.Preserving.mulScalar (gPos * aExp) (-1.0)
+  let gPos : Tensor { shape := #[batch, seq, cfg.linear_num_value_heads] } := softplusDynamic (floatDynamic (Tensor.Promoting.add a dt))
+  let g : Tensor { shape := #[batch, seq, cfg.linear_num_value_heads] } := Tensor.Preserving.mulScalar (Tensor.Promoting.mul gPos aExp) (-1.0)
 
   let rep := Config.linearKVRepeat cfg
   let q : Tensor { shape := #[batch, seq, cfg.linear_num_value_heads, cfg.linear_key_head_dim] } :=
@@ -839,7 +841,7 @@ def forward {batch seq : UInt64}
       let (y, _, _) := l.forward cfg h1 attnMask none none false
       y
     | _, _, _, _ => h1
-  let h2 := residual1 + mixed
+  let h2 := Tensor.Promoting.add residual1 mixed
 
   let residual2 := h2
   let h3 := layer.post_attention_layernorm.forward3d h2
@@ -848,7 +850,7 @@ def forward {batch seq : UInt64}
     | some mlp, _ => mlp.forward h3
     | _, some moe => moe.forward cfg h3
     | _, _ => h3
-  residual2 + ffn
+  Tensor.Promoting.add residual2 ffn
 
 /-- Forward pass with optional cache update (for batch prefill). -/
 def forwardWithCache {batch seq : UInt64}
@@ -886,7 +888,7 @@ def forwardWithCache {batch seq : UInt64}
         (out, c')
       | none => (h1, cache)
 
-  let h2 := residual1 + mixed
+  let h2 := Tensor.Promoting.add residual1 mixed
   let residual2 := h2
   let h3 := layer.post_attention_layernorm.forward3d h2
   let ffn :=
@@ -894,7 +896,7 @@ def forwardWithCache {batch seq : UInt64}
     | some mlp, _ => mlp.forward h3
     | _, some moe => moe.forward cfg h3
     | _, _ => h3
-  (residual2 + ffn, cache')
+  (Tensor.Promoting.add residual2 ffn, cache')
 
 def forwardStep {batch : UInt64}
     (cfg : Config)
@@ -933,7 +935,7 @@ def forwardStep {batch : UInt64}
         (out, c')
       | none => (h1, cache)
 
-  let h2 := residual1 + mixed
+  let h2 := Tensor.Promoting.add residual1 mixed
   let residual2 := h2
   let h3 := layer.post_attention_layernorm.forward3d h2
   let ffn :=
@@ -941,7 +943,7 @@ def forwardStep {batch : UInt64}
     | some mlp, _ => mlp.forward h3
     | _, some moe => moe.forward cfg h3
     | _, _ => h3
-  (residual2 + ffn, cache1)
+  (Tensor.Promoting.add residual2 ffn, cache1)
 
 end Qwen35Layer
 

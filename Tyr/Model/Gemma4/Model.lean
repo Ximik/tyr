@@ -43,11 +43,11 @@ def forward2d {n dim : UInt64}
     (x : Tensor { shape := #[n, dim] })
     : Tensor { shape := #[n, dim] } :=
   let xf : Tensor { shape := #[n, dim] } := floatDynamic x
-  let var : Tensor { shape := #[n, 1] } := Tensor.Preserving.meanDim (xf * xf) 1 true
-  let inv : Tensor { shape := #[n, 1] } := rsqrtDynamic (var + m.eps)
+  let var : Tensor { shape := #[n, 1] } := Tensor.Preserving.meanDim (Tensor.Promoting.mul xf xf) 1 true
+  let inv : Tensor { shape := #[n, 1] } := rsqrtDynamic (Tensor.Preserving.addScalar var m.eps)
   let inv : Tensor { shape := #[n, dim] } := Tensor.expand inv #[n, dim]
   let scale : Tensor { shape := #[n, dim] } := Tensor.expand (Tensor.reshapeChecked (floatDynamic m.weight) #[1, dim]) #[n, dim]
-  Tensor.castLike x (xf * inv * scale)
+  Tensor.castLike x (Tensor.Promoting.mul (Tensor.Promoting.mul xf inv) scale)
 
 def forward3d {batch seq dim : UInt64}
     (m : Gemma4RMSNorm dim)
@@ -70,10 +70,10 @@ private def rmsNormNoScale2d {n dim : UInt64}
     (eps : Float := 1e-6)
     : Tensor { shape := #[n, dim] } :=
   let xf : Tensor { shape := #[n, dim] } := floatDynamic x
-  let var : Tensor { shape := #[n, 1] } := Tensor.Preserving.meanDim (xf * xf) 1 true
-  let inv : Tensor { shape := #[n, 1] } := rsqrtDynamic (var + eps)
+  let var : Tensor { shape := #[n, 1] } := Tensor.Preserving.meanDim (Tensor.Promoting.mul xf xf) 1 true
+  let inv : Tensor { shape := #[n, 1] } := rsqrtDynamic (Tensor.Preserving.addScalar var eps)
   let inv : Tensor { shape := #[n, dim] } := Tensor.expand inv #[n, dim]
-  Tensor.castLike x (xf * inv)
+  Tensor.castLike x (Tensor.Promoting.mul xf inv)
 
 private def rmsNormNoScale4d {a b c dim : UInt64}
     (x : Tensor { shape := #[a, b, c, dim] })
@@ -89,11 +89,11 @@ private def rmsNormWeighted4dSlice {a b c dim maxDim : UInt64}
     : Tensor { shape := #[a, b, c, dim] } :=
   let w : Tensor { shape := #[dim] } := sliceTyped weight 0 0 dim
   let xf : Tensor { shape := #[a * b * c, dim] } := Tensor.reshapeChecked x #[a * b * c, dim]
-  let var : Tensor { shape := #[a * b * c, 1] } := Tensor.Preserving.meanDim (xf * xf) 1 true
-  let inv : Tensor { shape := #[a * b * c, 1] } := rsqrtDynamic (var + eps)
+  let var : Tensor { shape := #[a * b * c, 1] } := Tensor.Preserving.meanDim (Tensor.Promoting.mul xf xf) 1 true
+  let inv : Tensor { shape := #[a * b * c, 1] } := rsqrtDynamic (Tensor.Preserving.addScalar var eps)
   let inv : Tensor { shape := #[a * b * c, dim] } := Tensor.expand inv #[a * b * c, dim]
   let scale : Tensor { shape := #[a * b * c, dim] } := Tensor.expand (Tensor.reshapeChecked (floatDynamic w) #[1, dim]) #[a * b * c, dim]
-  Tensor.castLike x (Tensor.reshapeChecked (xf * inv * scale) #[a, b, c, dim])
+  Tensor.castLike x (Tensor.reshapeChecked (Tensor.Promoting.mul (Tensor.Promoting.mul xf inv) scale) #[a, b, c, dim])
 
 private def rmsNormNoScale4dSlice {a b c dim : UInt64}
     (x : Tensor { shape := #[a, b, c, dim] })
@@ -117,7 +117,7 @@ def forward {batch seq : UInt64}
     (m : Gemma4MLP cfg)
     (x : Tensor { shape := #[batch, seq, cfg.hidden_size] })
     : Tensor { shape := #[batch, seq, cfg.hidden_size] } :=
-  Tensor.linear3d (Tensor.Preserving.gelu (Tensor.linear3d x m.gate_proj) * Tensor.linear3d x m.up_proj) m.down_proj
+  Tensor.linear3d (Tensor.Promoting.mul (Tensor.Preserving.gelu (Tensor.linear3d x m.gate_proj)) (Tensor.linear3d x m.up_proj)) m.down_proj
 
 end Gemma4MLP
 
@@ -140,19 +140,19 @@ def forward {tokens : UInt64}
   let scaleRoot := 1.0 / Float.sqrt cfg.hidden_size.toFloat
   let scale : Tensor { shape := #[tokens, cfg.hidden_size] } :=
     Tensor.expand (Tensor.reshapeChecked (floatDynamic m.scale) #[1, cfg.hidden_size]) #[tokens, cfg.hidden_size]
-  let normed : Tensor { shape := #[tokens, cfg.hidden_size] } := Tensor.Preserving.mulScalar (normed * scale) scaleRoot
+  let normed : Tensor { shape := #[tokens, cfg.hidden_size] } := Tensor.Preserving.mulScalar (Tensor.Promoting.mul normed scale) scaleRoot
   let logitsDyn : Tensor { shape := #[tokens, cfg.num_experts] } := einsumChecked "eh,th->te" (floatDynamic m.proj) normed
   let logits : Tensor { shape := #[tokens, cfg.num_experts] } := Tensor.reshapeChecked logitsDyn #[tokens, cfg.num_experts]
   let probs : Tensor { shape := #[tokens, cfg.num_experts] } := Tensor.Preserving.softmax logits (-1)
   let (topValsRaw, topIdx) := topK2d probs cfg.top_k_experts 1
   let denom : Tensor { shape := #[tokens, 1] } := Tensor.Preserving.sumDim topValsRaw 1 true
   let denom : Tensor { shape := #[tokens, cfg.top_k_experts] } := Tensor.expand denom #[tokens, cfg.top_k_experts]
-  let topVals : Tensor { shape := #[tokens, cfg.top_k_experts] } := Tensor.Preserving.div topValsRaw denom
+  let topVals : Tensor { shape := #[tokens, cfg.top_k_experts] } := Tensor.Promoting.div topValsRaw denom
   let flatIdx : Tensor { shape := #[tokens * cfg.top_k_experts], dtype := .Int64 } := Tensor.reshapeChecked topIdx #[tokens * cfg.top_k_experts]
   let scalesFlat : Tensor { shape := #[tokens * cfg.top_k_experts] } :=
     Tensor.indexSelect m.per_expert_scale flatIdx
   let scales : Tensor { shape := #[tokens, cfg.top_k_experts] } := Tensor.reshapeChecked scalesFlat #[tokens, cfg.top_k_experts]
-  (probs, topVals * scales, topIdx)
+  (probs, Tensor.Promoting.mul topVals scales, topIdx)
 
 end Gemma4TextRouter
 
@@ -795,7 +795,7 @@ private def applyLayerScalar {batch seq : UInt64}
     (x : Tensor { shape := #[batch, seq, cfg.hidden_size] })
     : Tensor { shape := #[batch, seq, cfg.hidden_size] } :=
   let s : Tensor { shape := #[batch, seq, cfg.hidden_size] } := Tensor.expand (Tensor.reshapeChecked scale #[1, 1, 1]) #[batch, seq, cfg.hidden_size]
-  x * s
+  Tensor.Promoting.mul x s
 
 private def applyPerLayerInput {batch seq : UInt64}
     (cfg : Config)
@@ -806,10 +806,10 @@ private def applyPerLayerInput {batch seq : UInt64}
   let residual := hidden
   let gated : Tensor { shape := #[batch, seq, cfg.hidden_size_per_layer_input] } :=
     Tensor.Preserving.gelu (Tensor.linear3d hidden block.per_layer_input_gate)
-  let mixed := gated * perLayerInput
+  let mixed := Tensor.Promoting.mul gated perLayerInput
   let projected : Tensor { shape := #[batch, seq, cfg.hidden_size] } := Tensor.linear3d mixed block.per_layer_projection
   let projected := block.post_per_layer_input_norm.forward3d projected
-  residual + projected
+  Tensor.Promoting.add residual projected
 
 def forward {batch seq : UInt64}
     (cfg : Config)
@@ -824,7 +824,7 @@ def forward {batch seq : UInt64}
   let residual1 := x
   let h1 := layer.input_layernorm.forward3d x
   let attn := layer.self_attn.forward cfg layer.layerType h1 slidingCos slidingSin fullCos fullSin
-  let h2 := residual1 + layer.post_attention_layernorm.forward3d attn
+  let h2 := Tensor.Promoting.add residual1 (layer.post_attention_layernorm.forward3d attn)
 
   let residual2 := h2
   let h3 := layer.pre_feedforward_layernorm.forward3d h2
@@ -840,10 +840,10 @@ def forward {batch seq : UInt64}
         moe.pre_feedforward_layernorm_2.forward2d routerInput
       let expert2d := moe.experts.forward2d cfg expertInput2d topVals topIdx
       let expert3d : Tensor { shape := #[batch, seq, cfg.hidden_size] } := Tensor.reshapeChecked expert2d #[batch, seq, cfg.hidden_size]
-      denseBranch + moe.post_feedforward_layernorm_2.forward3d expert3d
+      Tensor.Promoting.add denseBranch (moe.post_feedforward_layernorm_2.forward3d expert3d)
     | none =>
       mlpOut
-  let h4 := residual2 + layer.post_feedforward_layernorm.forward3d ffCombined
+  let h4 := Tensor.Promoting.add residual2 (layer.post_feedforward_layernorm.forward3d ffCombined)
   let h5 :=
     match layer.per_layer_input, perLayerInput with
     | some block, some p => applyPerLayerInput cfg block h4 p
@@ -875,7 +875,7 @@ def forwardWithCache {batch seq : UInt64}
       fullSin
       layerCache
       sharedSource
-  let h2 := residual1 + layer.post_attention_layernorm.forward3d attn
+  let h2 := Tensor.Promoting.add residual1 (layer.post_attention_layernorm.forward3d attn)
 
   let residual2 := h2
   let h3 := layer.pre_feedforward_layernorm.forward3d h2
@@ -891,10 +891,10 @@ def forwardWithCache {batch seq : UInt64}
         moe.pre_feedforward_layernorm_2.forward2d routerInput
       let expert2d := moe.experts.forward2d cfg expertInput2d topVals topIdx
       let expert3d : Tensor { shape := #[batch, seq, cfg.hidden_size] } := Tensor.reshapeChecked expert2d #[batch, seq, cfg.hidden_size]
-      denseBranch + moe.post_feedforward_layernorm_2.forward3d expert3d
+      Tensor.Promoting.add denseBranch (moe.post_feedforward_layernorm_2.forward3d expert3d)
     | none =>
       mlpOut
-  let h4 := residual2 + layer.post_feedforward_layernorm.forward3d ffCombined
+  let h4 := Tensor.Promoting.add residual2 (layer.post_feedforward_layernorm.forward3d ffCombined)
   let h5 :=
     match layer.per_layer_input, perLayerInput with
     | some block, some p => applyPerLayerInput cfg block h4 p
@@ -926,7 +926,7 @@ def forwardStep {batch : UInt64}
       fullSin
       layerCache
       sharedSource
-  let h2 := residual1 + layer.post_attention_layernorm.forward3d attn
+  let h2 := Tensor.Promoting.add residual1 (layer.post_attention_layernorm.forward3d attn)
 
   let residual2 := h2
   let h3 := layer.pre_feedforward_layernorm.forward3d h2
@@ -941,10 +941,10 @@ def forwardStep {batch : UInt64}
         moe.pre_feedforward_layernorm_2.forward2d routerInput
       let expert2d := moe.experts.forward2d cfg expertInput2d topVals topIdx
       let expert3d : Tensor { shape := #[batch, 1, cfg.hidden_size] } := Tensor.reshapeChecked expert2d #[batch, 1, cfg.hidden_size]
-      denseBranch + moe.post_feedforward_layernorm_2.forward3d expert3d
+      Tensor.Promoting.add denseBranch (moe.post_feedforward_layernorm_2.forward3d expert3d)
     | none =>
       mlpOut
-  let h4 := residual2 + layer.post_feedforward_layernorm.forward3d ffCombined
+  let h4 := Tensor.Promoting.add residual2 (layer.post_feedforward_layernorm.forward3d ffCombined)
   let h5 :=
     match layer.per_layer_input, perLayerInput with
     | some block, some p => applyPerLayerInput cfg block h4 p
@@ -978,7 +978,7 @@ def forwardPrefillWithMask {batch seq : UInt64}
       slidingAttnMask
       fullAttnMask
       layerCache
-  let h2 := residual1 + layer.post_attention_layernorm.forward3d attn
+  let h2 := Tensor.Promoting.add residual1 (layer.post_attention_layernorm.forward3d attn)
 
   let residual2 := h2
   let h3 := layer.pre_feedforward_layernorm.forward3d h2
@@ -994,10 +994,10 @@ def forwardPrefillWithMask {batch seq : UInt64}
         moe.pre_feedforward_layernorm_2.forward2d routerInput
       let expert2d := moe.experts.forward2d cfg expertInput2d topVals topIdx
       let expert3d : Tensor { shape := #[batch, seq, cfg.hidden_size] } := Tensor.reshapeChecked expert2d #[batch, seq, cfg.hidden_size]
-      denseBranch + moe.post_feedforward_layernorm_2.forward3d expert3d
+      Tensor.Promoting.add denseBranch (moe.post_feedforward_layernorm_2.forward3d expert3d)
     | none =>
       mlpOut
-  let h4 := residual2 + layer.post_feedforward_layernorm.forward3d ffCombined
+  let h4 := Tensor.Promoting.add residual2 (layer.post_feedforward_layernorm.forward3d ffCombined)
   let h5 :=
     match layer.per_layer_input, perLayerInput with
     | some block, some p => applyPerLayerInput cfg block h4 p
@@ -1057,7 +1057,7 @@ def computePerLayerInputs {batch seq : UInt64}
     let proj4d : Tensor { shape := #[batch, seq, cfg.num_hidden_layers, cfg.hidden_size_per_layer_input] } :=
       Tensor.reshapeChecked projFlat #[batch, seq, cfg.num_hidden_layers, cfg.hidden_size_per_layer_input]
     let proj4d := projNorm.forward4d proj4d
-    some (Tensor.Preserving.mulScalar (proj4d + tokEmb) (Float.sqrt 0.5))
+    some (Tensor.Preserving.mulScalar (Tensor.Promoting.add proj4d tokEmb) (Float.sqrt 0.5))
   | _, _, _ =>
     none
 

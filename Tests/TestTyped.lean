@@ -70,10 +70,10 @@ def testDTypePromotionPolicy : IO Unit := do
   LeanTest.assertEqual (DType.promote .Int8 .UInt8) .Int16
   LeanTest.assertEqual DType.Float8E4M3FN.bitWidth? (some 8)
   LeanTest.assertEqual DType.Float8E5M2.bitWidth? (some 8)
-  LeanTest.assertEqual (DType.meanResult .Int64) .Float32
-    "integer means should promote to a floating dtype"
-  LeanTest.assertEqual (DType.sumResult .Float8E4M3FN) .Float32
-    "float8 reductions should accumulate as f32 in the typed policy"
+  LeanTest.assertEqual (DType.meanResult .Int64) .Int64
+    "mean does not implicitly cast integer inputs; the operation must reject them"
+  LeanTest.assertEqual (DType.sumResult .Float8E4M3FN) .Float8E4M3FN
+    "a dtype rule must not invent an FP32 cast or promise a Float8 reduction kernel"
 
 @[test]
 def testTensorSpecAlgebra : IO Unit := do
@@ -148,7 +148,11 @@ def testTypedDtypePromotionMatrix : IO Unit := do
     let a ← safetensors.loadTensorWithSpec path lhs.canonicalName ⟨#[1], lhs⟩
     for rhs in dtypes do
       let b ← safetensors.loadTensorWithSpec path rhs.canonicalName ⟨#[1], rhs⟩
-      assertValid (Tensor.add a b) s!"{lhs} + {rhs}"
+      match h : DType.promote? lhs rhs with
+      | none => LeanTest.fail s!"Expected ordinary dtype promotion for {lhs}/{rhs}"
+      | some result => do
+          letI : DType.Promotes lhs rhs result := ⟨h⟩
+          assertValid (Tensor.add a b) s!"{lhs} + {rhs}"
   let u8 ← safetensors.loadTensorWithSpec path "UInt8" ⟨#[1], .UInt8⟩
   let i8 ← safetensors.loadTensorWithSpec path "Int8" ⟨#[1], .Int8⟩
   LeanTest.assertEqual (← (Tensor.add u8 i8).toFloatArray) #[254.0]
@@ -165,15 +169,27 @@ def testTypedScalarDtypePromotionMatrix : IO Unit := do
   let dtypes : Array DType := #[.Bool, .UInt8, .Int8, .Int16, .Int32, .Int64,
     .Float16, .BFloat16, .Float32, .Float64]
   for vectorDType in dtypes do
-    let vector := (Tensor.ones #[2]).castDType vectorDType
+    let vector : Tensor ⟨#[2], vectorDType, .any⟩ := (Tensor.ones #[2]).castDType vectorDType
     for scalarDType in dtypes do
-      let scalar := (Tensor.full #[] 2).castDType scalarDType
-      assertValid (vector.addB scalar) s!"{vectorDType} vector + {scalarDType} scalar"
-      assertValid (scalar.addB vector) s!"{scalarDType} scalar + {vectorDType} vector"
-      assertValid (vector.mulB scalar) s!"{vectorDType} vector * {scalarDType} scalar"
-      assertValid (scalar.divB vector) s!"{scalarDType} scalar / {vectorDType} vector"
+      let scalar : Tensor ⟨#[], scalarDType, .any⟩ := (Tensor.full #[] 2).castDType scalarDType
+      match h : DType.promoteScalar? vectorDType scalarDType with
+      | none => LeanTest.fail s!"Expected ordinary scalar promotion for {vectorDType}/{scalarDType}"
+      | some result =>
+          letI vectorScalarPromotion : TensorSpec.Promotes
+              ⟨#[2], vectorDType⟩ ⟨#[], scalarDType⟩ result := ⟨h⟩
+          letI scalarVectorPromotion : TensorSpec.Promotes
+              ⟨#[], scalarDType⟩ ⟨#[2], vectorDType⟩ result := ⟨h⟩
+          do
+            assertValid (vector.addB scalar) s!"{vectorDType} vector + {scalarDType} scalar"
+            assertValid (scalar.addB vector) s!"{scalarDType} scalar + {vectorDType} vector"
+            assertValid (vector.mulB scalar) s!"{vectorDType} vector * {scalarDType} scalar"
+            assertValid (scalar.divB vector) s!"{scalarDType} scalar / {vectorDType} vector"
       let lhs := (Tensor.ones #[]).castDType vectorDType
-      assertValid (lhs.addB scalar) s!"{vectorDType} scalar + {scalarDType} scalar"
+      match h : DType.promote? vectorDType scalarDType with
+      | none => LeanTest.fail s!"Expected ordinary scalar/scalar promotion for {vectorDType}/{scalarDType}"
+      | some result => do
+          letI : TensorSpec.Promotes ⟨#[], vectorDType⟩ ⟨#[], scalarDType⟩ result := ⟨h⟩
+          assertValid (lhs.addB scalar) s!"{vectorDType} scalar + {scalarDType} scalar"
   let scalar := (Tensor.full #[] 2).castDType .Float64
   let vector := Tensor.ones #[2]
   assertValid (scalar.subB vector) "Float64 scalar - Float32 vector"
@@ -182,6 +198,50 @@ def testTypedScalarDtypePromotionMatrix : IO Unit := do
   let vectorSpec : TensorSpec := ⟨#[2], .Float32⟩
   LeanTest.assertTrue (TensorSpec.pointwise? scalarSpec vectorSpec == some ⟨#[2], .Float32⟩)
   LeanTest.assertTrue (TensorSpec.division? scalarSpec vectorSpec == some ⟨#[2], .Float32⟩)
+
+/-- Exercise complex dtype indices through actual Tyr native operations, not
+only the metadata-only libtorch promotion oracle. -/
+@[test]
+def testTypedComplexArithmetic : IO Unit := do
+  let complex := (Tensor.fromFloatArray #[-2, 3]).castDType .Complex64
+  let double := (Tensor.fromFloatArray #[4, 6]).castDType .Float64
+  let sum : Tensor ⟨#[2], .Complex128, .any⟩ := Tensor.add complex double
+  let difference : Tensor ⟨#[2], .Complex128, .any⟩ := Tensor.sub complex double
+  let product : Tensor ⟨#[2], .Complex128, .any⟩ := Tensor.mul complex double
+  let quotient : Tensor ⟨#[2], .Complex128, .any⟩ := Tensor.div complex double
+  assertValid sum "Complex64 + Float64 widens to Complex128"
+  assertValid difference "complex subtraction"
+  assertValid product "complex multiplication"
+  assertValid quotient "complex division"
+  LeanTest.assertTrue (Tensor.allclose sum ((Tensor.fromFloatArray #[2, 9]).castDType .Complex128))
+  LeanTest.assertTrue (Tensor.allclose difference ((Tensor.fromFloatArray #[-6, -3]).castDType .Complex128))
+  LeanTest.assertTrue (Tensor.allclose product ((Tensor.fromFloatArray #[-8, 18]).castDType .Complex128))
+  LeanTest.assertTrue (Tensor.allclose quotient ((Tensor.fromFloatArray #[-0.5, 0.5]).castDType .Complex128))
+  let magnitude64 : Tensor ⟨#[2], .Float32, .any⟩ := complex.abs
+  let magnitude128 : Tensor ⟨#[2], .Float64, .any⟩ := product.abs
+  assertValid magnitude64 "Complex64 absolute value is Float32"
+  assertValid magnitude128 "Complex128 absolute value is Float64"
+  LeanTest.assertEqual (← magnitude64.toFloatArray) #[2, 3]
+  LeanTest.assertEqual (← magnitude128.toFloatArray) #[8, 18]
+
+@[test]
+def testTypedComplexScalarPromotion : IO Unit := do
+  let vector := Tensor.fromFloatArray #[1, 2]
+  let scalar := (Tensor.full #[] 2).castDType .Complex128
+  let forward : Tensor ⟨#[2], .Complex64, .any⟩ := vector.addB scalar
+  let reverse : Tensor ⟨#[2], .Complex64, .any⟩ := scalar.addB vector
+  assertValid forward "complex scalar raises category but preserves vector precision"
+  assertValid reverse "reversed complex scalar broadcasting"
+  LeanTest.assertTrue (Tensor.allclose forward reverse)
+  LeanTest.assertTrue (Tensor.allclose forward ((Tensor.fromFloatArray #[3, 4]).castDType .Complex64))
+  let complexVector := vector.castDType .Complex64
+  let doubleScalar := (Tensor.full #[] 2).castDType .Float64
+  let preserved : Tensor ⟨#[2], .Complex64, .any⟩ := complexVector.mulB doubleScalar
+  assertValid preserved "Float64 scalar does not widen a Complex64 vector"
+  let complexScalar := (Tensor.full #[] 2).castDType .Complex64
+  let widened : Tensor ⟨#[2], .Complex128, .any⟩ := complexScalar.mulB (vector.castDType .Float64)
+  assertValid widened "Float64 vector raises a Complex64 scalar to Complex128"
+  LeanTest.assertTrue (Tensor.allclose widened ((Tensor.fromFloatArray #[2, 4]).castDType .Complex128))
 
 @[test]
 def testTypedRuntimeShapeResults : IO Unit := do

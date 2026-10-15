@@ -49,6 +49,8 @@ lean_object* lean_torch_uniform_like(lean_object*, lean_object*, double, double)
 lean_object* lean_torch_abs(lean_object*, lean_object*);
 lean_object* lean_torch_to(lean_object*, lean_object*, lean_object*);
 lean_object* lean_torch_cast_dtype(lean_object*, lean_object*, lean_object*);
+// Except String RawTensor; consumes shape and borrows tensor/tag.
+lean_object* lean_torch_cast_dtype_checked(lean_object*, lean_object*, lean_object*);
 lean_object* lean_torch_convert_tensor(lean_object*, lean_object*, lean_object*, lean_object*);
 uint8_t lean_torch_requires_grad(lean_object*, lean_object*);
 double lean_torch_l2_norm(uint64_t, lean_object*);

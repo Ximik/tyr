@@ -23,7 +23,7 @@ private def addBias2d {n d : UInt64}
     (x : Tensor { shape := #[n, d] })
     (b : Tensor { shape := #[d] })
     : Tensor { shape := #[n, d] } :=
-  x + Tensor.expand (Tensor.reshapeChecked b #[1, d]) #[n, d]
+  Tensor.Promoting.add x (Tensor.expand (Tensor.reshapeChecked b #[1, d]) #[n, d])
 
 private def linear2d {tokens in_dim out_dim : UInt64}
     (x : Tensor { shape := #[tokens, in_dim] })
@@ -206,8 +206,8 @@ def forward {tokens : UInt64}
     (m : Qwen35VisionBlock cfg)
     (x : Tensor { shape := #[tokens, cfg.hidden_size] })
     : Tensor { shape := #[tokens, cfg.hidden_size] } :=
-  let h1 := x + m.attn.forward cfg (m.norm1.forward2d x)
-  h1 + m.mlp.forward cfg (m.norm2.forward2d h1)
+  let h1 := Tensor.Promoting.add x (m.attn.forward cfg (m.norm1.forward2d x))
+  Tensor.Promoting.add h1 (m.mlp.forward cfg (m.norm2.forward2d h1))
 
 end Qwen35VisionBlock
 
@@ -298,7 +298,7 @@ def forward {nPatches : UInt64}
   let x0 : Tensor { shape := #[nPatches, cfg.hidden_size] } := m.patch_embed.forward cfg patchifiedPixels
   let posIds : Tensor { shape := #[nPatches], dtype := .Int64 } := (Tensor.arange nPatches).to patchifiedPixels.device
   let pos : Tensor { shape := #[nPatches, cfg.hidden_size] } := Tensor.embedding1d posIds m.pos_embed
-  let mut x : Tensor { shape := #[nPatches, cfg.hidden_size] } := x0 + pos
+  let mut x : Tensor { shape := #[nPatches, cfg.hidden_size] } := Tensor.Promoting.add x0 pos
 
   for i in [:m.blocks.size] do
     match m.blocks[i]? with

@@ -26,7 +26,7 @@ private def shapeNumel (s : Shape) : UInt64 :=
   s.foldl (fun acc d => acc * d) 1
 
 private def treeDot [TensorStruct α] (x y : α) : Float :=
-  let prod := TensorStruct.zipWith Mul.mul x y
+  let prod := TensorStruct.zipWith Tensor.Preserving.mul x y
   TensorStruct.fold (fun t acc => acc + Tensor.item (Tensor.sumAll t)) 0.0 prod
 
 private def gradStruct [TensorStruct α] (loss : Tensor τ) (x : α) : α :=
@@ -41,7 +41,7 @@ private def clipScale [TensorStruct α] (x : α) (maxNorm : Float) : α :=
     TensorStruct.scale x (maxNorm / norm)
 
 private def applyMass [TensorStruct α] (mass : α) (x : α) : α :=
-  TensorStruct.zipWith Mul.mul mass x
+  TensorStruct.zipWith Tensor.Preserving.mul mass x
 
 private def applyInvMass [TensorStruct α] (mass : α) (x : α) : α :=
   TensorStruct.zipWith (fun d v => Tensor.Preserving.div v d) mass x
@@ -121,7 +121,7 @@ private def paramVjpFromPrepared [TensorStruct Params] {s : Shape}
     (output : Tensor { shape := s, dtype := .Float32 })
     (params : Params)
     (adjOutput : Tensor { shape := s, dtype := .Float32 }) : Params :=
-  let loss := Tensor.sumAll (Mul.mul output (Tensor.detach adjOutput))
+  let loss := Tensor.sumAll (Tensor.Preserving.mul output (Tensor.detach adjOutput))
   TensorStruct.detach (gradStruct loss params)
 
 private def buildTreeFactorFromOutputFactor [TensorStruct Params] {s : Shape} {rank : UInt64}
@@ -264,7 +264,7 @@ private def sampledFisherCotangentRows
       let sampledIdx ← Tensor.multinomial probs 1 false
       let base : Tensor { shape := #[tokenCount, vocab], dtype := .Float32 } := Tensor.zerosLike probs
       let sampledOneHot := Tensor.scatter2d base 1 sampledIdx srcOnes
-      let rowFlat := Tensor.Preserving.mulScalar (Sub.sub sampledOneHot probs) scale
+      let rowFlat := Tensor.Preserving.mulScalar (Tensor.Preserving.sub sampledOneHot probs) scale
       let row : Tensor { shape := #[batch, seq, vocab], dtype := .Float32 } := Tensor.reshapeChecked rowFlat #[batch, seq, vocab]
       let ⟨rest, hRest⟩ ← sampleRows n
       pure ⟨row :: rest, by simp [hRest]⟩

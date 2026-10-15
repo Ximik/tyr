@@ -37,7 +37,7 @@ instance {inDim outDim batch : UInt64} :
   forward m x :=
     let y := Tensor.linear x m.weight
     match m.bias with
-    | some b => Add.add y (Tensor.expand b #[batch, outDim])
+    | some b => Tensor.Preserving.add y (Tensor.expand b #[batch, outDim])
     | none => y
 ```
 

@@ -77,9 +77,9 @@ def principalAngles (X₁ X₂ : Grassmann n p d dev) : Tensor ⟨#[p], d, dev�
 def distance (X₁ X₂ : Grassmann n p d dev) : Float :=
   let P₁ := projectionMatrix X₁
   let P₂ := projectionMatrix X₂
-  let diff := Sub.sub P₁ P₂
+  let diff := Tensor.Preserving.sub P₁ P₂
   -- ||P₁ - P₂||_F / √2 is the chordal (projection-Frobenius) distance
-  let frobSq := Tensor.item (Tensor.sumAll (Mul.mul diff diff))
+  let frobSq := Tensor.item (Tensor.sumAll (Tensor.Preserving.mul diff diff))
   Float.sqrt frobSq / Float.sqrt 2.0
 
 end Grassmann
@@ -99,7 +99,7 @@ def zero (n p : UInt64) : GrassmannTangent n p d dev :=
 
 /-- Add two tangent vectors -/
 def add (v w : GrassmannTangent n p d dev) : GrassmannTangent n p d dev :=
-  ⟨Add.add v.vec w.vec⟩
+  ⟨Tensor.Preserving.add v.vec w.vec⟩
 
 /-- Scale a tangent vector -/
 def smul (s : Float) (v : GrassmannTangent n p d dev) : GrassmannTangent n p d dev :=
@@ -112,11 +112,11 @@ def project (X : Grassmann n p d dev) (V : Tensor ⟨#[n, p], d, dev⟩) : Grass
   -- (I - X @ X^T) @ V = V - X @ (X^T @ V)
   let XtV := Tensor.mm (Tensor.transpose2d X.matrix) V  -- [p, p]
   let XXtV := Tensor.mm X.matrix XtV                    -- [n, p]
-  ⟨Sub.sub V XXtV⟩
+  ⟨Tensor.Preserving.sub V XXtV⟩
 
 /-- Inner product of tangent vectors (induced by Frobenius norm) -/
 def inner (v w : GrassmannTangent n p d dev) : Float :=
-  Tensor.item (Tensor.sumAll (Mul.mul v.vec w.vec))
+  Tensor.item (Tensor.sumAll (Tensor.Preserving.mul v.vec w.vec))
 
 /-- Norm of tangent vector -/
 def norm (v : GrassmannTangent n p d dev) : Float :=
@@ -131,7 +131,7 @@ namespace Grassmann
 def log (X Y : Grassmann n p d dev) : GrassmannTangent n p d dev :=
   let XtY := Tensor.mm (Tensor.transpose2d X.matrix) Y.matrix        -- [p, p]
   let invXtY := Tensor.inv XtY
-  let proj := Sub.sub Y.matrix (Tensor.mm X.matrix XtY)              -- (I - X Xᵀ) Y
+  let proj := Tensor.Preserving.sub Y.matrix (Tensor.mm X.matrix XtY)              -- (I - X Xᵀ) Y
   let A := Tensor.mm proj invXtY                                     -- [n, p]
   let (U, S, Vh) := Tensor.svdReduced A X.tall                       -- U [n,p], S [p], Vh [p,p]
   let theta := Tensor.Preserving.atan S
@@ -155,7 +155,7 @@ instance grassmannManifold (n p : UInt64) : DifferentiableManifold (Grassmann n 
   exp X Z :=
     -- QR-based retraction: R(X, Z) = qr(X + Z).Q
     -- This is a first-order approximation to the geodesic
-    let (Q, _R) := Tensor.qrReduced (Add.add X.matrix Z.vec) X.tall
+    let (Q, _R) := Tensor.qrReduced (Tensor.Preserving.add X.matrix Z.vec) X.tall
     ⟨Q, X.tall⟩
 
 end Tyr.AD

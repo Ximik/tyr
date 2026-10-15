@@ -50,7 +50,7 @@ private def addBias3d {batch channels frames : UInt64}
     (bias : Tensor { shape := #[channels] }) : Tensor { shape := #[batch, channels, frames] } :=
   let b : Tensor { shape := #[1, channels, 1] } := Tensor.reshapeChecked bias #[1, channels, 1]
   let be : Tensor { shape := #[batch, channels, frames] } := Tensor.expand b #[batch, channels, frames]
-  x + be
+  Tensor.Promoting.add x be
 
 private def getOrFirst! [Inhabited α] (xs : Array α) (i : Nat) : α :=
   match xs[i]? with
@@ -112,7 +112,7 @@ def forward {batch frames channels seChannels : UInt64}
     Tensor.reshapeChecked (Tensor.conv1d h1 m.conv2Weight 1 0 1) #[batch, channels, 1]
   let gate1 := Tensor.Preserving.sigmoid (addBias3d h2 m.conv2Bias)
   let gate : Tensor { shape := #[batch, channels, frames] } := Tensor.expand gate1 #[batch, channels, frames]
-  x * gate
+  Tensor.Promoting.mul x gate
 
 end SqueezeExcitationBlock
 
@@ -154,7 +154,7 @@ def forward {batch frames channels scale kernelSize dilation : UInt64}
       for i in [1:scale.toNat] do
         let part := getOrFirst! parts i
         let block := getOrFirst! m.blocks (i - 1)
-        let input := if i == 1 then part else part + prev
+        let input := if i == 1 then part else Tensor.Promoting.add part prev
         let out := TimeDelayNetBlock.forward block input
         outputs := outputs.push out
         prev := out
@@ -191,7 +191,7 @@ def forward {batch frames inChannels outChannels res2netScale seChannels kernelS
   let h2 := Res2NetBlock.forward m.res2net h1
   let h3 := TimeDelayNetBlock.forward m.tdnn2 h2
   let h4 := SqueezeExcitationBlock.forward m.seBlock h3
-  h4 + residual
+  Tensor.Promoting.add h4 residual
 
 end SqueezeExcitationRes2NetBlock
 
@@ -219,8 +219,8 @@ def forward {batch frames channels attentionChannels : UInt64}
   let mean1 : Tensor { shape := #[batch, channels, 1] } := Tensor.reshapeChecked mean #[batch, channels, 1]
   let meanRep : Tensor { shape := #[batch, channels, frames] } := Tensor.expand mean1 #[batch, channels, frames]
 
-  let diff := x - meanRep
-  let var : Tensor { shape := #[batch, channels] } := Tensor.reshapeChecked (Tensor.Preserving.meanDim (diff * diff) 2 false) #[batch, channels]
+  let diff := Tensor.Promoting.sub x meanRep
+  let var : Tensor { shape := #[batch, channels] } := Tensor.reshapeChecked (Tensor.Preserving.meanDim (Tensor.Promoting.mul diff diff) 2 false) #[batch, channels]
   let std : Tensor { shape := #[batch, channels] } := Tensor.Preserving.sqrt (Tensor.Preserving.addScalar var m.eps)
   let std1 : Tensor { shape := #[batch, channels, 1] } := Tensor.reshapeChecked std #[batch, channels, 1]
   let stdRep : Tensor { shape := #[batch, channels, frames] } := Tensor.expand std1 #[batch, channels, frames]
@@ -234,12 +234,12 @@ def forward {batch frames channels attentionChannels : UInt64}
   let att3 := addBias3d att2 m.convBias
   let attention : Tensor { shape := #[batch, channels, frames] } := Tensor.Preserving.softmax att3 2
 
-  let weightedMean : Tensor { shape := #[batch, channels] } := Tensor.reshapeChecked (Tensor.Preserving.sumDim (attention * x) 2 false) #[batch, channels]
+  let weightedMean : Tensor { shape := #[batch, channels] } := Tensor.reshapeChecked (Tensor.Preserving.sumDim (Tensor.Promoting.mul attention x) 2 false) #[batch, channels]
   let weightedMean1 : Tensor { shape := #[batch, channels, 1] } := Tensor.reshapeChecked weightedMean #[batch, channels, 1]
   let weightedMeanRep : Tensor { shape := #[batch, channels, frames] } := Tensor.expand weightedMean1 #[batch, channels, frames]
 
-  let centered := x - weightedMeanRep
-  let weightedVar : Tensor { shape := #[batch, channels] } := Tensor.reshapeChecked (Tensor.Preserving.sumDim (attention * (centered * centered)) 2 false) #[batch, channels]
+  let centered := Tensor.Promoting.sub x weightedMeanRep
+  let weightedVar : Tensor { shape := #[batch, channels] } := Tensor.reshapeChecked (Tensor.Preserving.sumDim (Tensor.Promoting.mul attention (Tensor.Promoting.mul centered centered)) 2 false) #[batch, channels]
   let weightedStd : Tensor { shape := #[batch, channels] } := Tensor.Preserving.sqrt (Tensor.Preserving.addScalar weightedVar m.eps)
 
   let pooled : Tensor { shape := #[batch, channels * 2] } := Tensor.reshapeChecked (Tensor.cat weightedMean weightedStd 1) #[batch, channels * 2]

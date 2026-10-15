@@ -64,13 +64,13 @@ private def addBias3d {batch channels frames : UInt64}
     (x : Tensor { shape := #[batch, channels, frames] })
     (bias : Tensor { shape := #[channels] }) : Tensor { shape := #[batch, channels, frames] } :=
   let b : Tensor { shape := #[1, channels, 1] } := Tensor.reshapeChecked bias #[1, channels, 1]
-  x + Tensor.expand b #[batch, channels, frames]
+  Tensor.Promoting.add x (Tensor.expand b #[batch, channels, frames])
 
 private def scale3d {batch seq dim : UInt64}
     (x : Tensor { shape := #[batch, seq, dim] })
     (scale : Tensor { shape := #[dim] }) : Tensor { shape := #[batch, seq, dim] } :=
   let s : Tensor { shape := #[1, 1, dim] } := Tensor.reshapeChecked scale #[1, 1, dim]
-  x * Tensor.expand s #[batch, seq, dim]
+  Tensor.Promoting.mul x (Tensor.expand s #[batch, seq, dim])
 
 private def clampMin1d {n : UInt64} (x : Tensor { shape := #[n] }) (minVal : Float) : Tensor { shape := #[n] } :=
   let minT := Tensor.castLike x (Tensor.full #[n] minVal false x.device)
@@ -403,7 +403,7 @@ private def forwardResBlock {batch frames inC hiddenC : UInt64}
   let h2 : Tensor { shape := #[batch, hiddenC, frames] } := Tensor.Preserving.elu h1
   let h3 : Tensor { shape := #[batch, inC, frames] } :=
     causalConvConstant h2 blk.conv2Weight (some blk.conv2Bias) 1 1
-  residual + h3
+  Tensor.Promoting.add residual h3
 
 private def forwardAttention {batch seq : UInt64}
     (layer : EncoderTransformerLayer)
@@ -439,7 +439,7 @@ private def forwardTransformerLayer {batch seq : UInt64}
   let h1 : Tensor { shape := #[batch, seq, 512] } :=
     Tensor.layerNorm x layer.inputLayerNormWeight layer.inputLayerNormBias 1e-5
   let h2 : Tensor { shape := #[batch, seq, 512] } := forwardAttention layer h1 cos sin
-  let h3 : Tensor { shape := #[batch, seq, 512] } := residual1 + scale3d h2 layer.selfAttnLayerScale
+  let h3 : Tensor { shape := #[batch, seq, 512] } := Tensor.Promoting.add residual1 (scale3d h2 layer.selfAttnLayerScale)
 
   let residual2 := h3
   let h4 : Tensor { shape := #[batch, seq, 512] } :=
@@ -447,12 +447,12 @@ private def forwardTransformerLayer {batch seq : UInt64}
   let h5 : Tensor { shape := #[batch, seq, 2048] } := Tensor.linear3d h4 layer.fc1
   let h6 : Tensor { shape := #[batch, seq, 2048] } := Tensor.Preserving.gelu h5
   let h7 : Tensor { shape := #[batch, seq, 512] } := Tensor.linear3d h6 layer.fc2
-  residual2 + scale3d h7 layer.mlpLayerScale
+  Tensor.Promoting.add residual2 (scale3d h7 layer.mlpLayerScale)
 
 private def codebookEmbedding (cb : EncoderCodebook) : Tensor { shape := #[2048, 256] } :=
   let usage : Tensor { shape := #[2048] } := clampMin1d cb.clusterUsage 1e-5
   let usage2d : Tensor { shape := #[2048, 256] } := Tensor.expand (Tensor.reshapeChecked usage #[2048, 1]) #[2048, 256]
-  Tensor.Preserving.div cb.embedSum usage2d
+  Tensor.Promoting.div cb.embedSum usage2d
 
 private def quantizeWithCodebook {batch frames : UInt64}
     (cb : EncoderCodebook)
@@ -462,13 +462,13 @@ private def quantizeWithCodebook {batch frames : UInt64}
   let xFlat : Tensor { shape := #[batch * frames, 256] } :=
     Tensor.reshapeChecked (Tensor.transpose x 1 2) #[batch * frames, 256]
 
-  let x2 : Tensor { shape := #[batch * frames, 1] } := Tensor.reshapeChecked (Tensor.Preserving.sumDim (xFlat * xFlat) 1 true) #[batch * frames, 1]
-  let e2 : Tensor { shape := #[2048, 1] } := Tensor.reshapeChecked (Tensor.Preserving.sumDim (embed * embed) 1 true) #[2048, 1]
+  let x2 : Tensor { shape := #[batch * frames, 1] } := Tensor.reshapeChecked (Tensor.Preserving.sumDim (Tensor.Promoting.mul xFlat xFlat) 1 true) #[batch * frames, 1]
+  let e2 : Tensor { shape := #[2048, 1] } := Tensor.reshapeChecked (Tensor.Preserving.sumDim (Tensor.Promoting.mul embed embed) 1 true) #[2048, 1]
   let dot : Tensor { shape := #[batch * frames, 2048] } := Tensor.mm xFlat (Tensor.transpose2d embed)
   let x2e : Tensor { shape := #[batch * frames, 2048] } := Tensor.expand x2 #[batch * frames, 2048]
   let e2Row : Tensor { shape := #[1, 2048] } := Tensor.reshapeChecked (Tensor.transpose2d e2) #[1, 2048]
   let e2e : Tensor { shape := #[batch * frames, 2048] } := Tensor.expand e2Row #[batch * frames, 2048]
-  let dist : Tensor { shape := #[batch * frames, 2048] } := x2e + e2e - Tensor.Preserving.mulScalar dot 2.0
+  let dist : Tensor { shape := #[batch * frames, 2048] } := Tensor.Promoting.sub (Tensor.Promoting.add x2e e2e) (Tensor.Preserving.mulScalar dot 2.0)
 
   let idxFlat : Tensor { shape := #[batch * frames], dtype := .Int64 } := Tensor.reshapeChecked (Tensor.argmax (Tensor.Preserving.mulScalar dist (-1.0)) 1) #[batch * frames]
   let quantFlat : Tensor { shape := #[batch * frames, 256] } := Tensor.embedding1d idxFlat embed
@@ -488,7 +488,7 @@ private def rvqEncode {batch frames k : UInt64}
   for i in [:numLayers] do
     let cb := rvq.codebooks[i]!
     let (idx, quantized) := quantizeWithCodebook cb residual
-    residual := residual - quantized
+    residual := Tensor.Promoting.sub residual quantized
     allIndices := allIndices.push idx
   stack2dDyn (batch := batch) (frames := frames) (k := k) allIndices
 

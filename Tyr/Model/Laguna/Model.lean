@@ -76,11 +76,11 @@ private def rmsNormWeighted2d {n dim : UInt64}
     (eps : Float)
     : Tensor { shape := #[n, dim] } :=
   let xf : Tensor { shape := #[n, dim] } := floatDynamic x
-  let var : Tensor { shape := #[n, 1] } := Tensor.Preserving.meanDim (xf * xf) 1 true
-  let inv : Tensor { shape := #[n, 1] } := rsqrtDynamic (var + eps)
+  let var : Tensor { shape := #[n, 1] } := Tensor.Preserving.meanDim (Tensor.Promoting.mul xf xf) 1 true
+  let inv : Tensor { shape := #[n, 1] } := rsqrtDynamic (Tensor.Promoting.addScalar var eps)
   let inv : Tensor { shape := #[n, dim] } := Tensor.expand inv #[n, dim]
   let w : Tensor { shape := #[n, dim] } := Tensor.expand (Tensor.reshapeChecked (floatDynamic weight) #[1, dim]) #[n, dim]
-  Tensor.castLike x (xf * inv * w)
+  Tensor.castLike x (Tensor.Promoting.mul (Tensor.Promoting.mul xf inv) w)
 
 /-- FP32 RMSNorm over the last dim of a 3D `[batch, seq, dim]` tensor. -/
 private def rmsNormWeighted3d {batch seq dim : UInt64}
@@ -123,7 +123,9 @@ def forward {batch seq : UInt64}
     (m : LagunaMLP cfg)
     (x : Tensor { shape := #[batch, seq, cfg.hidden_size] })
     : Tensor { shape := #[batch, seq, cfg.hidden_size] } :=
-  Tensor.linear3d (Tensor.Preserving.silu (Tensor.linear3d x m.gate_proj) * Tensor.linear3d x m.up_proj) m.down_proj
+  Tensor.linear3d
+    (Tensor.Promoting.mul (Tensor.Preserving.silu (Tensor.linear3d x m.gate_proj))
+      (Tensor.linear3d x m.up_proj)) m.down_proj
 
 end LagunaMLP
 
@@ -226,7 +228,7 @@ private def gateAndOut {batch seq numHeads : UInt64}
   let gate4 : Tensor { shape := #[batch, seq, numHeads, cfg.head_dim] } :=
     Tensor.expand (Tensor.unsqueeze gate 3) #[batch, seq, numHeads, cfg.head_dim]
   let gated : Tensor { shape := #[batch, seq, numHeads * cfg.head_dim] } :=
-    Tensor.reshapeChecked (attn * gate4) #[batch, seq, numHeads * cfg.head_dim]
+    Tensor.reshapeChecked (Tensor.Promoting.mul attn gate4) #[batch, seq, numHeads * cfg.head_dim]
   Tensor.linear3d gated m.o_proj
 
 /-- Uncached full-sequence forward: implicit causal attention for full layers,
@@ -552,10 +554,10 @@ def forward {batch seq : UInt64}
       let sin : Tensor { shape := #[seq, cfg.rotaryDimSliding / 2], dtype := .Float32 } := sliceRotaryRows tables.slidingSin 0 seq
       pure (a.forward (rotaryDim := cfg.rotaryDimSliding) cfg h1 cos sin (some cfg.sliding_window))
     | _, _ => pure h1
-  let h2 := x + mixed
+  let h2 := Tensor.Promoting.add x mixed
   let h3 := rmsNormWeighted3d layer.post_attention_layernorm h2 cfg.rms_norm_eps
   let ffn ← ffnForward cfg layer h3
-  pure (h2 + ffn)
+  pure (Tensor.Promoting.add h2 ffn)
 
 /-- Batch prefill with KV-cache update (fresh cache; see
     `LagunaAttention.forwardWithCache`). -/
@@ -582,10 +584,10 @@ def forwardWithCache {batch seq : UInt64}
         a.forwardWithCache (rotaryDim := cfg.rotaryDimSliding) cfg h1 cos sin (some cfg.sliding_window) kv
       pure (out, { cache with kvCaches := cache.kvCaches.set! layerIdx kv' })
     | _, _, _ => pure (h1, cache)
-  let h2 := x + mixed
+  let h2 := Tensor.Promoting.add x mixed
   let h3 := rmsNormWeighted3d layer.post_attention_layernorm h2 cfg.rms_norm_eps
   let ffn ← ffnForward cfg layer h3
-  pure (h2 + ffn, cache')
+  pure (Tensor.Promoting.add h2 ffn, cache')
 
 /-- Single-token decode step with KV-cache update. -/
 def forwardStep {batch : UInt64}
@@ -612,10 +614,10 @@ def forwardStep {batch : UInt64}
         a.forwardStep (rotaryDim := cfg.rotaryDimSliding) cfg h1 cos sin (some cfg.sliding_window) kv
       pure (out, { cache with kvCaches := cache.kvCaches.set! layerIdx kv' })
     | _, _, _ => pure (h1, cache)
-  let h2 := x + mixed
+  let h2 := Tensor.Promoting.add x mixed
   let h3 := rmsNormWeighted3d layer.post_attention_layernorm h2 cfg.rms_norm_eps
   let ffn ← ffnForward cfg layer h3
-  pure (h2 + ffn, cache')
+  pure (Tensor.Promoting.add h2 ffn, cache')
 
 private def forwardOwned {batch seq : UInt64}
     (cfg : Config) (layer : LagunaLayer cfg)
@@ -634,10 +636,10 @@ private def forwardOwned {batch seq : UInt64}
       a.forwardOwned (rotaryDim := cfg.rotaryDimSliding) cfg h1 cos sin
         (some cfg.sliding_window) prefill kv
     | _, _ => throw <| IO.userError "Laguna cache session requires attention in every layer"
-  let h2 := x + mixed
+  let h2 := Tensor.Promoting.add x mixed
   let h3 := rmsNormWeighted3d layer.post_attention_layernorm h2 cfg.rms_norm_eps
   let ffn ← ffnForward cfg layer h3
-  return (h2 + ffn, kv')
+  return (Tensor.Promoting.add h2 ffn, kv')
 
 end LagunaLayer
 

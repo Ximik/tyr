@@ -43,16 +43,16 @@ namespace ObliqueTangent
 /-- Project ambient direction to tangent space at `X`. -/
 def project (X : Oblique m n d dev) (V : Tensor ⟨#[m, n], d, dev⟩) : ObliqueTangent m n d dev :=
   let colDotsRow : Tensor ⟨#[1, n], d, dev⟩ :=
-    Tensor.Preserving.sumDim (Mul.mul X.matrix V) 0 true
+    Tensor.Preserving.sumDim (Tensor.Preserving.mul X.matrix V) 0 true
   let colDots : Tensor ⟨#[m, n], d, dev⟩ := Tensor.expand colDotsRow #[m, n]
-  ⟨Sub.sub V (Mul.mul X.matrix colDots)⟩
+  ⟨Tensor.Preserving.sub V (Tensor.Preserving.mul X.matrix colDots)⟩
 
 /-- Zero tangent vector. -/
 def zero (m n : UInt64) : ObliqueTangent m n d dev := ⟨Tensor.zerosFor ⟨#[m, n], d, dev⟩⟩
 
 /-- Add tangent vectors. -/
 def add (a b : ObliqueTangent m n d dev) : ObliqueTangent m n d dev :=
-  ⟨Add.add a.vec b.vec⟩
+  ⟨Tensor.Preserving.add a.vec b.vec⟩
 
 /-- Scale tangent vector. -/
 def smul (s : Float) (v : ObliqueTangent m n d dev) : ObliqueTangent m n d dev :=
@@ -71,8 +71,8 @@ instance obliqueManifold (m n : UInt64) : DifferentiableManifold (Oblique m n d 
   sharp := id
   flat := id
   exp x v :=
-    Oblique.project m n (Add.add x.matrix v.vec)
+    Oblique.project m n (Tensor.Preserving.add x.matrix v.vec)
   retract x v :=
-    Oblique.project m n (Add.add x.matrix v.vec)
+    Oblique.project m n (Tensor.Preserving.add x.matrix v.vec)
 
 end Tyr.AD

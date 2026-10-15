@@ -93,6 +93,10 @@ jobs:
         run: |
           bash scripts/test_native_tensor_metadata.sh
 
+      - name: Check dtype promotion against pinned libtorch
+        run: |
+          bash scripts/test_dtype_promotion.sh
+
       - name: Test native tensor argument ownership
         run: |
           bash scripts/test_native_tensor_ownership.sh

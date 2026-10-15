@@ -84,10 +84,10 @@ private def rmsNormNoScale2d {n dim : UInt64}
     (eps : Float := 1e-6)
     : Tensor { shape := #[n, dim] } :=
   let xf : Tensor { shape := #[n, dim] } := floatDynamic x
-  let var : Tensor { shape := #[n, 1] } := Tensor.Preserving.meanDim (xf * xf) 1 true
-  let inv : Tensor { shape := #[n, 1] } := rsqrtDynamic (var + eps)
+  let var : Tensor { shape := #[n, 1] } := Tensor.Preserving.meanDim (Tensor.Promoting.mul xf xf) 1 true
+  let inv : Tensor { shape := #[n, 1] } := rsqrtDynamic (Tensor.Preserving.addScalar var eps)
   let inv : Tensor { shape := #[n, dim] } := Tensor.expand inv #[n, dim]
-  Tensor.castLike x (xf * inv)
+  Tensor.castLike x (Tensor.Promoting.mul xf inv)
 
 private def rmsNormNoScale4d {a b c dim : UInt64}
     (x : Tensor { shape := #[a, b, c, dim] })
@@ -174,7 +174,7 @@ def forward {patchRows patchCols : UInt64}
   let yIds : Tensor { shape := #[tokens], dtype := .Int64 } := yIdsCpu.to hidden.device
   let xPos : Tensor { shape := #[tokens, cfg.vision_config.hidden_size] } := Tensor.embedding1d xIds xTable
   let yPos : Tensor { shape := #[tokens, cfg.vision_config.hidden_size] } := Tensor.embedding1d yIds yTable
-  hidden + xPos + yPos
+  Tensor.Promoting.add (Tensor.Promoting.add hidden xPos) yPos
 
 end Gemma4VisionPatchEmbedder
 
@@ -193,7 +193,7 @@ def forward {tokens : UInt64}
     : Tensor { shape := #[tokens, cfg.hidden_size] } :=
   let gate : Tensor { shape := #[tokens, cfg.intermediate_size] } := m.gate_proj.forward2d x
   let up : Tensor { shape := #[tokens, cfg.intermediate_size] } := m.up_proj.forward2d x
-  m.down_proj.forward2d (Tensor.Preserving.gelu gate * up)
+  m.down_proj.forward2d (Tensor.Promoting.mul (Tensor.Preserving.gelu gate) up)
 
 end Gemma4VisionMLP
 
@@ -265,11 +265,11 @@ def forward {patchRows patchCols : UInt64}
   let residual1 := x
   let h1 := m.input_layernorm.forward2d x
   let attn := m.self_attn.forward (patchRows := patchRows) (patchCols := patchCols) cfg h1
-  let h2 := residual1 + m.post_attention_layernorm.forward2d attn
+  let h2 := Tensor.Promoting.add residual1 (m.post_attention_layernorm.forward2d attn)
   let residual2 := h2
   let h3 := m.pre_feedforward_layernorm.forward2d h2
   let mlp := m.mlp.forward cfg h3
-  residual2 + m.post_feedforward_layernorm.forward2d mlp
+  Tensor.Promoting.add residual2 (m.post_feedforward_layernorm.forward2d mlp)
 
 end Gemma4VisionBlock
 
@@ -323,7 +323,7 @@ def forward {patchRows patchCols : UInt64}
         Tensor.expand (Tensor.reshapeChecked bias #[1, cfg.vision_config.hidden_size]) #[nTok, cfg.vision_config.hidden_size]
       let scale : Tensor { shape := #[nTok, cfg.vision_config.hidden_size] } :=
         Tensor.expand (Tensor.reshapeChecked scale #[1, cfg.vision_config.hidden_size]) #[nTok, cfg.vision_config.hidden_size]
-      (pooled - bias) * scale
+      Tensor.Promoting.mul (Tensor.Promoting.sub pooled bias) scale
     | _, _ =>
       pooled
 

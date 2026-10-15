@@ -130,12 +130,12 @@ def scale_by_adam [TensorStruct α] (b1 : Float := 0.9) (b2 : Float := 0.999) (e
     -- Update biased first moment estimate: mu = b1 * mu + (1 - b1) * g
     let mu := TensorStruct.zipWith (fun m g =>
       let g_d := Tensor.detach g
-      Add.add (Tensor.Preserving.mulScalar m b1) (Tensor.Preserving.mulScalar g_d (1.0 - b1))
+      Tensor.Preserving.add (Tensor.Preserving.mulScalar m b1) (Tensor.Preserving.mulScalar g_d (1.0 - b1))
     ) state.mu grads
     -- Update biased second moment estimate: nu = b2 * nu + (1 - b2) * g^2
     let nu := TensorStruct.zipWith (fun v g =>
       let g_d := Tensor.detach g
-      Add.add (Tensor.Preserving.mulScalar v b2) (Tensor.Preserving.mulScalar (Mul.mul g_d g_d) (1.0 - b2))
+      Tensor.Preserving.add (Tensor.Preserving.mulScalar v b2) (Tensor.Preserving.mulScalar (Tensor.Preserving.mul g_d g_d) (1.0 - b2))
     ) state.nu grads
     -- Bias correction
     let bc1 := 1.0 - Float.pow b1 count.toFloat
@@ -154,7 +154,7 @@ def add_decayed_weights [TensorStruct α] (decay : Float) : GradientTransformati
   update params grads state :=
     let updates := TensorStruct.zipWith (fun p g =>
       let p_d := Tensor.detach p
-      Add.add g (Tensor.Preserving.mulScalar p_d decay)
+      Tensor.Preserving.add g (Tensor.Preserving.mulScalar p_d decay)
     ) params grads
     (updates, state)
 
@@ -163,7 +163,7 @@ def trace [TensorStruct α] (decay : Float) : GradientTransformation α (TraceSt
   init model := { trace := TensorStruct.map Tensor.zerosLike model }
   update _params grads state :=
     let new_trace := TensorStruct.zipWith (fun t g =>
-      Add.add (Tensor.Preserving.mulScalar t decay) g
+      Tensor.Preserving.add (Tensor.Preserving.mulScalar t decay) g
     ) state.trace grads
     (new_trace, { trace := new_trace })
 
@@ -213,7 +213,7 @@ def sgd [TensorStruct α] (lr : Float) : GradientTransformation α EmptyState :=
 def apply_updates [TensorStruct α] (params : α) (updates : α) : IO α :=
   let updated := TensorStruct.zipWith (fun p u =>
     let p_d := Tensor.detach p
-    Add.add p_d u
+    Tensor.Preserving.add p_d u
   ) params updates
   TensorStruct.mapM Tensor.parameter updated
 

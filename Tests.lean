@@ -38,6 +38,9 @@ import Tests.TestADJaxprLikeExtract
 import Tests.TestADTensorStructSchema
 import Tests.TestADTensorStructFlatten
 import Tests.TestTyped
+import Tests.TestDTypeMetadata
+import Tests.TestDTypeConversions
+import Tests.TestDTypeWitness
 import Tests.TestGPTTyped
 import Tests.TestADFrontendSignature
 import Tests.TestADFrontendElab

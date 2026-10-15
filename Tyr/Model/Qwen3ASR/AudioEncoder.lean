@@ -157,14 +157,14 @@ def forward {batch seq : UInt64}
   let residual0 := x
   let h0 := m.selfAttnLayerNorm.forward3d x
   let h1 := m.selfAttn.forward h0 attnMask
-  let h2 := residual0 + h1
+  let h2 := Tensor.Promoting.add residual0 h1
 
   let residual1 := h2
   let h3 := m.finalLayerNorm.forward3d h2
   let h4 : Tensor { shape := #[batch, seq, cfg.encoderFfnDim] } := Tensor.affine3d h3 m.fc1Weight m.fc1Bias
   let h5 := activate cfg.activationFunction h4
   let h6 : Tensor { shape := #[batch, seq, cfg.dModel] } := Tensor.affine3d h5 m.fc2Weight m.fc2Bias
-  residual1 + h6
+  Tensor.Promoting.add residual1 h6
 
 end AudioEncoderLayer
 
@@ -382,7 +382,7 @@ private def encodeOneSampleVarLen {frames : UInt64}
           let padded : Tensor { shape := #[1, cfg.numMelBins, maxChunkLen] } :=
             padRightFrames (cfg := cfg) (frames := len) (maxFrames := maxChunkLen) chunk
           let emb : Tensor { shape := #[1, tChunk, cfg.dModel] } := encodePaddedChunk m padded
-          let embPos := emb + Tensor.castLike emb posBatch
+          let embPos := Tensor.Promoting.add emb (Tensor.castLike emb posBatch)
           let availLen := if desiredLen <= tChunk then desiredLen else tChunk
           let seg0 : Tensor { shape := #[1, availLen, cfg.dModel] } := Tensor.sliceChecked embPos 1 0 availLen #[1, availLen, cfg.dModel]
           let segDyn : Sigma (fun shape => Tensor { shape := shape }) :=
@@ -475,7 +475,7 @@ def forward {batch frames : UInt64}
 
   let pos : Tensor { shape := #[t3, cfg.dModel] } := sinusoidPosition (seq := t3) (dim := cfg.dModel) (device := xEmb.device)
   let posBatch : Tensor { shape := #[batch, t3, cfg.dModel] } := Tensor.expand (Tensor.reshapeChecked pos #[1, t3, cfg.dModel]) #[batch, t3, cfg.dModel]
-  let hidden0 := xEmb + Tensor.castLike xEmb posBatch
+  let hidden0 := Tensor.Promoting.add xEmb (Tensor.castLike xEmb posBatch)
 
   let hidden := match attnMask with
     | some mask => m.layers.foldl (fun h layer => layer.forward h (some mask)) hidden0

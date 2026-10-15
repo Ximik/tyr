@@ -14,7 +14,7 @@ private def assertTreeEqual [TensorStruct α] (actual expected : α) : IO Unit :
   let describe := fun (value : α) =>
     TensorStruct.fold (fun {_s} t acc => acc.push (t.runtimeShape, t.raw.dtype)) #[] value
   assertTrue (describe actual == describe expected) "checkpoint tensor traversal metadata"
-  let errors := TensorStruct.zipWith (fun a b => Tensor.abs (Sub.sub a b)) actual expected
+  let errors := TensorStruct.zipWith (fun a b => Tensor.Preserving.abs (Tensor.Preserving.sub a b)) actual expected
   let error := TensorStruct.fold (fun {_s} t acc => acc + Tensor.item (Tensor.sumAll t)) 0.0 errors
   assertTrue (error.isFinite && error < 1e-6) s!"checkpoint tensor difference {error}"
 

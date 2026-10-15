@@ -259,13 +259,13 @@ private def addBias3d {batch channels frames : UInt64}
     (x : Tensor { shape := #[batch, channels, frames] })
     (bias : Tensor { shape := #[channels] }) : Tensor { shape := #[batch, channels, frames] } :=
   let b : Tensor { shape := #[1, channels, 1] } := Tensor.reshapeChecked bias #[1, channels, 1]
-  x + Tensor.expand b #[batch, channels, frames]
+  Tensor.Promoting.add x (Tensor.expand b #[batch, channels, frames])
 
 private def scale3d {batch seq dim : UInt64}
     (x : Tensor { shape := #[batch, seq, dim] })
     (scale : Tensor { shape := #[dim] }) : Tensor { shape := #[batch, seq, dim] } :=
   let s : Tensor { shape := #[1, 1, dim] } := Tensor.reshapeChecked scale #[1, 1, dim]
-  x * Tensor.expand s #[batch, seq, dim]
+  Tensor.Promoting.mul x (Tensor.expand s #[batch, seq, dim])
 
 private def clampWave {s : Shape} (x : Tensor { shape := s }) : Tensor { shape := s } :=
   Tensor.Preserving.clampFloat x (-1.0) 1.0
@@ -554,7 +554,7 @@ private def decodeCodebook {batch frames : UInt64}
     (codes : Tensor { shape := #[batch, frames], dtype := .Int64 }) : Tensor { shape := #[batch, 256, frames] } :=
   let usage : Tensor { shape := #[2048] } := clampMin1d cb.clusterUsage 1e-5
   let usage2d : Tensor { shape := #[2048, 256] } := Tensor.expand (Tensor.reshapeChecked usage #[2048, 1]) #[2048, 256]
-  let embedding : Tensor { shape := #[2048, 256] } := Tensor.Preserving.div cb.embeddingSum usage2d
+  let embedding : Tensor { shape := #[2048, 256] } := Tensor.Promoting.div cb.embeddingSum usage2d
   let q : Tensor { shape := #[batch, frames, 256] } := Tensor.embedding codes embedding
   Tensor.reshapeChecked (Tensor.transpose q 1 2) #[batch, 256, frames]
 
@@ -571,7 +571,7 @@ private def decodeRVQSlice {batch groups frames : UInt64}
       let code3 : Tensor { shape := #[batch, 1, frames], dtype := .Int64 } := Tensor.sliceChecked codes 1 idx 1 #[batch, 1, frames]
       let code2 : Tensor { shape := #[batch, frames], dtype := .Int64 } := Tensor.reshapeChecked code3 #[batch, frames]
       let q := decodeCodebook cb code2
-      quantized := quantized + q
+      quantized := Tensor.Promoting.add quantized q
       off := off + 1
     let out : Tensor { shape := #[batch, 512, frames] } :=
       Tensor.reshapeChecked (Tensor.conv1d quantized rvq.outputProj 1 0 1) #[batch, 512, frames]
@@ -582,7 +582,7 @@ private def decodeSplitRVQ {batch frames : UInt64}
     (codes : Tensor { shape := #[batch, 16, frames], dtype := .Int64 }) : Tensor { shape := #[batch, 512, frames] } :=
   let first := decodeRVQSlice m.rvqFirst codes 0
   let rest := decodeRVQSlice m.rvqRest codes 1
-  first + rest
+  Tensor.Promoting.add first rest
 
 private def causalConv1d {batch inC outC frames kernel : UInt64}
     (x : Tensor { shape := #[batch, inC, frames] })
@@ -626,11 +626,12 @@ private def snakeBeta {batch channels frames : UInt64}
   let betaE : Tensor { shape := #[batch, channels, frames] } :=
     Tensor.expand (Tensor.reshapeChecked (Tensor.Preserving.exp beta) #[1, channels, 1]) #[batch, channels, frames]
   let sin2 : Tensor { shape := #[batch, channels, frames] } :=
-    let z := Tensor.Preserving.sin (x * alphaE); z * z
+    let z := Tensor.Preserving.sin (Tensor.Promoting.mul x alphaE)
+    Tensor.Promoting.mul z z
   let eps : Tensor { shape := #[batch, channels, frames] } := Tensor.castLike x (Tensor.full #[batch, channels, frames] 0.000000001 false x.device)
-  let denom := betaE + eps
-  let invDenom : Tensor { shape := #[batch, channels, frames] } := Tensor.Preserving.div (Tensor.castLike x (Tensor.ones #[batch, channels, frames] false x.device)) denom
-  x + invDenom * sin2
+  let denom := Tensor.Promoting.add betaE eps
+  let invDenom : Tensor { shape := #[batch, channels, frames] } := Tensor.Promoting.div (Tensor.castLike x (Tensor.ones #[batch, channels, frames] false x.device)) denom
+  Tensor.Promoting.add x (Tensor.Promoting.mul invDenom sin2)
 
 private def forwardConvNeXt {batch frames : UInt64}
     (blk : UpsampleConvNeXtBlock)
@@ -644,7 +645,7 @@ private def forwardConvNeXt {batch frames : UInt64}
   let h5 : Tensor { shape := #[batch, frames, 1024] } := Tensor.affine3d h4 blk.pwconv2Weight blk.pwconv2Bias
   let h6 : Tensor { shape := #[batch, frames, 1024] } := scale3d h5 blk.gamma
   let h7 : Tensor { shape := #[batch, 1024, frames] } := Tensor.reshapeChecked (Tensor.transpose h6 1 2) #[batch, 1024, frames]
-  residual + h7
+  Tensor.Promoting.add residual h7
 
 private def forwardAttention {batch seq : UInt64}
     (layer : DecoderTransformerLayer)
@@ -680,16 +681,16 @@ private def forwardTransformerLayer {batch seq : UInt64}
   let norm1 : RMSNorm 512 (.Unknown "dynamic") := { weight := layer.inputLayernormWeight, eps := ⟨1e-5⟩ }
   let h1 : Tensor { shape := #[batch, seq, 512] } := norm1.forward3d x
   let h2 : Tensor { shape := #[batch, seq, 512] } := forwardAttention layer h1 cos sin
-  let h3 : Tensor { shape := #[batch, seq, 512] } := residual1 + scale3d h2 layer.selfAttnLayerScale
+  let h3 : Tensor { shape := #[batch, seq, 512] } := Tensor.Promoting.add residual1 (scale3d h2 layer.selfAttnLayerScale)
 
   let residual2 := h3
   let norm2 : RMSNorm 512 (.Unknown "dynamic") := { weight := layer.postAttentionLayernormWeight, eps := ⟨1e-5⟩ }
   let h4 : Tensor { shape := #[batch, seq, 512] } := norm2.forward3d h3
   let gate : Tensor { shape := #[batch, seq, 1024] } := Tensor.linear3d h4 layer.gateProj
   let up : Tensor { shape := #[batch, seq, 1024] } := Tensor.linear3d h4 layer.upProj
-  let mlpIn : Tensor { shape := #[batch, seq, 1024] } := Tensor.Preserving.silu gate * up
+  let mlpIn : Tensor { shape := #[batch, seq, 1024] } := Tensor.Promoting.mul (Tensor.Preserving.silu gate) up
   let mlpOut : Tensor { shape := #[batch, seq, 512] } := Tensor.linear3d mlpIn layer.downProj
-  residual2 + scale3d mlpOut layer.mlpLayerScale
+  Tensor.Promoting.add residual2 (scale3d mlpOut layer.mlpLayerScale)
 
 private def forwardPreTransformer {batch frames : UInt64}
     (m : SpeechTokenizer12HzDecoder)
@@ -715,7 +716,7 @@ private def forwardResidualUnit {batch frames dim : UInt64}
   let h2 := causalConv1d h1 u.conv1Weight u.conv1Bias u.conv1Dilation
   let h3 := snakeBeta h2 u.act2Alpha u.act2Beta
   let h4 := causalConv1d h3 u.conv2Weight u.conv2Bias
-  residual + h4
+  Tensor.Promoting.add residual h4
 
 private def forwardDecoderBlock {batch frames inDim outDim upRate : UInt64}
     (blk : DecoderBlock inDim outDim upRate)

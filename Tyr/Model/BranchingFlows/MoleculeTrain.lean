@@ -210,7 +210,7 @@ def packBranchingMolecule (cfg : BranchingTrainConfig)
 
   let timeScaled := result.t.map (fun t => ((t * cfg.timeScale).toUInt64).toInt64)
   let t := Tensor.reshapeChecked (Tensor.fromInt64Array timeScaled) #[batchU]
-  let t := (floatDynamic t) / cfg.timeScale
+  let t := Tensor.Promoting.divScalar (floatDynamic t) cfg.timeScale
 
   return ⟨batchU, {
     t,
@@ -246,9 +246,9 @@ private def moleculeMaskedWeightedCrossEntropy {batch maxLen vocab : UInt64}
   let mask2 := Tensor.reshapeChecked mask #[n]
   let weights2 := Tensor.reshapeChecked weights #[n]
   let per := Tensor.crossEntropyNone logits2 targets2
-  let masked := per * mask2 * weights2
+  let masked := Tensor.Promoting.mul (Tensor.Promoting.mul per mask2) weights2
   let denom := Tensor.sumAll mask2
-  Tensor.Preserving.div (Tensor.sumAll masked) (denom + (1.0e-8 : Float))
+  Tensor.Promoting.div (Tensor.sumAll masked) (Tensor.Promoting.addScalar denom 1.0e-8)
 
 private def moleculeFlowLossScale {batch maxLen : UInt64}
     (t : Tensor { shape := #[batch] }) : Tensor { shape := #[batch, maxLen] } :=
@@ -261,27 +261,28 @@ private def moleculeMaskedWeightedMSE3d {batch maxLen dim : UInt64}
     (mask weights : Tensor { shape := #[batch, maxLen] }) : Tensor { shape := #[] } :=
   let mask3 := Tensor.expand (Tensor.unsqueeze mask 2) #[batch, maxLen, dim]
   let weights3 := Tensor.expand (Tensor.unsqueeze weights 2) #[batch, maxLen, dim]
-  let diff := pred - target
-  let sq := diff * diff
-  let masked := sq * mask3 * weights3
+  let diff := Tensor.Promoting.sub pred target
+  let sq := Tensor.Promoting.mul diff diff
+  let masked := Tensor.Promoting.mul (Tensor.Promoting.mul sq mask3) weights3
   let denom := Tensor.sumAll mask3
-  Tensor.Preserving.div (Tensor.sumAll masked) (denom + (1.0e-8 : Float))
+  Tensor.Promoting.div (Tensor.sumAll masked) (Tensor.Promoting.addScalar denom 1.0e-8)
 
 private def moleculeMaskedWeightedSplitPoissonLoss {batch maxLen : UInt64}
     (logits target mask weights : Tensor { shape := #[batch, maxLen] }) : Tensor { shape := #[] } :=
   let mu := Tensor.Preserving.exp (Tensor.Preserving.clampFloat logits (-100.0) 11.0)
   let safeTarget := Tensor.Preserving.clampFloat target 1.0e-8 1.0e20
-  let per := mu - target * logDynamic mu - (target - target * logDynamic safeTarget)
-  let masked := per * mask * weights
+  let per := Tensor.Promoting.sub (Tensor.Promoting.sub mu (Tensor.Promoting.mul target (logDynamic mu)))
+    (Tensor.Promoting.sub target (Tensor.Promoting.mul target (logDynamic safeTarget)))
+  let masked := Tensor.Promoting.mul (Tensor.Promoting.mul per mask) weights
   let denom := Tensor.sumAll mask
-  Tensor.Preserving.div (Tensor.sumAll masked) (denom + (1.0e-8 : Float))
+  Tensor.Promoting.div (Tensor.sumAll masked) (Tensor.Promoting.addScalar denom 1.0e-8)
 
 private def moleculeMaskedWeightedBCEWithLogits {batch maxLen : UInt64}
     (logits target mask weights : Tensor { shape := #[batch, maxLen] }) : Tensor { shape := #[] } :=
-  let per := softplusDynamic logits - target * logits
-  let loss := Tensor.sumAll (per * mask * weights)
+  let per := Tensor.Promoting.sub (softplusDynamic logits) (Tensor.Promoting.mul target logits)
+  let loss := Tensor.sumAll (Tensor.Promoting.mul (Tensor.Promoting.mul per mask) weights)
   let denom := Tensor.sumAll mask
-  Tensor.Preserving.div loss (denom + (1.0e-8 : Float))
+  Tensor.Promoting.div loss (Tensor.Promoting.addScalar denom 1.0e-8)
 
 structure BranchingMoleculeLossReport where
   total : Float
@@ -308,10 +309,13 @@ def moleculeLossTensors {batch maxLen vocab : UInt64}
   let splitLoss := moleculeMaskedWeightedSplitPoissonLoss splitLogits packed.splitsTarget mask flowScale
   let delLoss := moleculeMaskedWeightedBCEWithLogits delLogits packed.delTarget mask flowScale
   let totalLoss :=
-    coordLoss * cfg.anchorWeight * cfg.coordWeight +
-    labelLoss * cfg.anchorWeight * cfg.labelWeight +
-    splitLoss * cfg.splitsWeight +
-    delLoss * cfg.delWeight
+    Tensor.Promoting.add
+      (Tensor.Promoting.add
+        (Tensor.Promoting.add
+          (Tensor.Promoting.mulScalar (Tensor.Promoting.mulScalar coordLoss cfg.anchorWeight) cfg.coordWeight)
+          (Tensor.Promoting.mulScalar (Tensor.Promoting.mulScalar labelLoss cfg.anchorWeight) cfg.labelWeight))
+        (Tensor.Promoting.mulScalar splitLoss cfg.splitsWeight))
+      (Tensor.Promoting.mulScalar delLoss cfg.delWeight)
   (totalLoss, coordLoss, labelLoss, splitLoss, delLoss)
 
 /-- Host-side loss report from the loss tensors (syncs on read). -/
@@ -421,10 +425,10 @@ def moleculeMuonStep [TensorStruct Params]
     (numIters : UInt64 := 5) : IO (Params × MoleculeMuonState Params) := do
   let rawGrads := TensorStruct.map Tensor.detach grads
   let momentum := TensorStruct.zipWith (fun old grad =>
-    Tensor.Preserving.mulScalar old momentumCoeff + Tensor.Preserving.mulScalar grad (1.0 - momentumCoeff))
+    Tensor.Preserving.add (Tensor.Preserving.mulScalar old momentumCoeff) (Tensor.Preserving.mulScalar grad (1.0 - momentumCoeff)))
     state.momentum rawGrads
   let nesterov := TensorStruct.zipWith (fun grad mom =>
-    Tensor.Preserving.mulScalar grad (1.0 - momentumCoeff) + Tensor.Preserving.mulScalar mom momentumCoeff)
+    Tensor.Preserving.add (Tensor.Preserving.mulScalar grad (1.0 - momentumCoeff)) (Tensor.Preserving.mulScalar mom momentumCoeff))
     rawGrads momentum
   let orth ← TensorStruct.mapM (fun {σ} grad => do
     let direction ← moleculeMuonOrthogonalize grad numIters
@@ -436,9 +440,8 @@ def moleculeMuonStep [TensorStruct Params]
   let params' := TensorStruct.zipWith (fun param direction =>
     let p := Tensor.detach param
     let update :=
-      direction +
-      Tensor.Preserving.mulScalar p (lr * weightDecay)
-    p - update) params orth
+      Tensor.Preserving.add direction (Tensor.Preserving.mulScalar p (lr * weightDecay))
+    Tensor.Preserving.sub p update) params orth
   let params' ← TensorStruct.makeLeafParams params'
   return (params', { momentum, step := state.step + 1 })
 
@@ -455,10 +458,10 @@ def moleculeMuonStepT [TensorStruct Params]
     (numIters : UInt64 := 5) : IO (Params × MoleculeMuonState Params) := do
   let rawGrads := TensorStruct.map Tensor.detach grads
   let momentum := TensorStruct.zipWith (fun old grad =>
-    Tensor.Preserving.mulScalar old momentumCoeff + Tensor.Preserving.mulScalar grad (1.0 - momentumCoeff))
+    Tensor.Preserving.add (Tensor.Preserving.mulScalar old momentumCoeff) (Tensor.Preserving.mulScalar grad (1.0 - momentumCoeff)))
     state.momentum rawGrads
   let nesterov := TensorStruct.zipWith (fun grad mom =>
-    Tensor.Preserving.mulScalar grad (1.0 - momentumCoeff) + Tensor.Preserving.mulScalar mom momentumCoeff)
+    Tensor.Preserving.add (Tensor.Preserving.mulScalar grad (1.0 - momentumCoeff)) (Tensor.Preserving.mulScalar mom momentumCoeff))
     rawGrads momentum
   let orth ← TensorStruct.mapM (fun {σ} grad => do
     let direction ← moleculeMuonOrthogonalize grad numIters
@@ -469,9 +472,8 @@ def moleculeMuonStepT [TensorStruct Params]
   let params' := TensorStruct.zipWith (fun param direction =>
     let p := Tensor.detach param
     let update :=
-      direction +
-      Tensor.Preserving.mulScalar (mulTensorScalar p lrT) weightDecay
-    p - update) params orth
+      Tensor.Preserving.add direction (Tensor.Preserving.mulScalar (mulTensorScalar p lrT) weightDecay)
+    Tensor.Preserving.sub p update) params orth
   let params' ← TensorStruct.makeLeafParams params'
   return (params', { momentum, step := state.step + 1 })
 

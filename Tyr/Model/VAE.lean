@@ -45,7 +45,7 @@ def invNormalize (ae : AutoEncoder) (z : Tensor { shape := #[1, 128, 16, 16] }) 
   -- Expand channel statistics over the spatial dimensions.
   let scale := Tensor.expand scale #[1, 128, 16, 16]
   let mean := Tensor.expand mean #[1, 128, 16, 16]
-  z * scale + mean
+  Tensor.Promoting.add (Tensor.Promoting.mul z scale) mean
 
 /-- Unpack latents from packed format to VAE decoder format (16x16 packed → 32x32 unpacked).
     Packed: [1, 128, 16, 16]

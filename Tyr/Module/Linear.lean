@@ -40,7 +40,7 @@ def forward2d {in_dim out_dim batch : UInt64} {d : DType} {dev : DevicePolicy}
     (x : Tensor ⟨#[batch, in_dim], d, dev⟩) : Tensor ⟨#[batch, out_dim], d, dev⟩ :=
   let y := Tensor.linear x lin.weight
   match lin.bias with
-  | some b => Add.add y (Tensor.expand b #[batch, out_dim])
+  | some b => Tensor.Preserving.add y (Tensor.expand b #[batch, out_dim])
   | none => y
 
 /-- Forward pass for 3D input [batch, seq, in_dim] -> [batch, seq, out_dim] -/

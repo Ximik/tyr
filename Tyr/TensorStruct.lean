@@ -116,7 +116,7 @@ def averageParams [TensorStruct α] (a b : α) : α :=
 open torch
 
 def blendVec {n : Nat} [TensorStruct α] (a b : Vector n α) : Vector n α :=
-  TensorStruct.zipWith (fun x y => x + y) a b
+  TensorStruct.zipWith Tensor.Preserving.add a b
 ```
 
 Unlike `Array`/`List`, `Vector n α` encodes length in the type, so mismatched zip sizes
@@ -508,11 +508,11 @@ def scale [TensorStruct α] (model : α) (s : Float) : α :=
 
 /-- Element-wise addition of two structures -/
 def add [TensorStruct α] (a b : α) : α :=
-  zipWith Add.add a b
+  zipWith Tensor.Preserving.add a b
 
 /-- Element-wise subtraction of two structures -/
 def sub [TensorStruct α] (a b : α) : α :=
-  zipWith Sub.sub a b
+  zipWith Tensor.Preserving.sub a b
 
 /-- Check if all tensors in the structure satisfy a predicate -/
 def all [TensorStruct α] (p : ∀ {σ}, Tensor σ → Bool) (model : α) : Bool :=

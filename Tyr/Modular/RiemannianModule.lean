@@ -116,7 +116,7 @@ private def linearApplyParam {inDim outDim : UInt64} {d : DType} {dev : DevicePo
   let (dW, dB) := splitLinearUpdate (inDim := inDim) (outDim := outDim) update
   let weightPart := linearApplyInput dW x
   if useBias then
-    Add.add weightPart dB
+    Tensor.Preserving.add weightPart dB
   else
     weightPart
 

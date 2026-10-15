@@ -97,7 +97,7 @@ open torch
     let w := if bf16 then weights.toBFloat16.forgetDType else weights.forgetDType
     let norm : RMSNorm 4 (.Unknown "dynamic") := { weight := w, eps := ⟨0.01⟩ }
     let normalized := Tensor.rmsNormWeighted x.toFloat32 (Tensor.ones #[4]) 0.01
-    let expected := (Tensor.castLike x normalized) * (w.expand #[1, 2, 4])
+    let expected := Tensor.Preserving.mul (Tensor.castLike x normalized) (w.expand #[1, 2, 4])
     let outputs := #[norm.forward3d x,
       (norm.forward2d (x.reshapeChecked #[2, 4])).reshapeChecked #[1, 2, 4],
       (norm.forward4d (x.reshapeChecked #[1, 1, 2, 4])).reshapeChecked #[1, 2, 4],

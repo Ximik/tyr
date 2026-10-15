@@ -1,138 +1,262 @@
 import Tyr.Basic
 
 /-!
-# Typed dtype policy
+# PyTorch dtype algebra
 
-LeanMLX-style dtype algebra for Tyr's typed facade.
-
-This module is intentionally pure: it does not change the runtime tensor
-representation.  It gives higher layers a single place to ask what dtype an
-operation should produce before they wrap or validate native tensor handles.
+These rules describe the pinned PyTorch 2.10 scalar types, including types
+with restricted kernel support. Promotion is partial: `none` means PyTorch
+has no result dtype for the pair. `Tyr.Typed.Promotion` turns successful
+results into erased, type-level witnesses used by typed arithmetic.
 -/
 
-namespace torch
+namespace torch.DType
 
-namespace DType
+@[reducible] def isKnown : DType → _root_.Bool
+  | .Unknown _ => false
+  | _ => true
 
-def isBool : DType → _root_.Bool
+@[reducible] def isBool : DType → _root_.Bool
   | .Bool => true
   | _ => false
 
-def isUnsignedIntegral : DType → _root_.Bool
-  | .UInt8 => true
+/-- Integral classification follows c10; sub-byte shell types are separate. -/
+@[reducible] def isUnsignedIntegral : DType → _root_.Bool
+  | .UInt8 | .UInt16 | .UInt32 | .UInt64 => true
   | _ => false
 
-def isSignedIntegral : DType → _root_.Bool
+@[reducible] def isSignedIntegral : DType → _root_.Bool
   | .Int8 | .Int16 | .Int32 | .Int64 => true
   | _ => false
 
-def isIntegral (dtype : DType) : _root_.Bool :=
+@[reducible] def isIntegral (dtype : DType) : _root_.Bool :=
   dtype.isUnsignedIntegral || dtype.isSignedIntegral
 
-def isFloating : DType → _root_.Bool
-  | .Float16 | .BFloat16 | .Float32 | .Float64
-  | .Float8E4M3FN | .Float8E5M2 => true
+@[reducible] def isFloat8 : DType → _root_.Bool
+  | .Float8E4M3FN | .Float8E5M2 | .Float8E4M3FNUZ | .Float8E5M2FNUZ
+  | .Float8E8M0FNU => true
   | _ => false
 
-def isInexact : DType → _root_.Bool :=
-  isFloating
+/-- Floating classification does not imply that a backend implements math
+kernels for this dtype. In particular Float8 and packed Float4 are shell types. -/
+@[reducible] def isFloating (dtype : DType) : _root_.Bool :=
+  match dtype with
+  | .Float16 | .BFloat16 | .Float32 | .Float64 | .Float4E2M1FNX2 => true
+  | _ => dtype.isFloat8
 
-def isDifferentiable : DType → _root_.Bool :=
-  isInexact
+@[reducible] def isComplex : DType → _root_.Bool
+  | .Complex32 | .Complex64 | .Complex128 => true
+  | _ => false
 
-def isIndex : DType → _root_.Bool
+@[reducible] def isQuantized : DType → _root_.Bool
+  | .QInt8 | .QUInt8 | .QInt32 | .QUInt4x2 | .QUInt2x4 => true
+  | _ => false
+
+@[reducible] def isBits : DType → _root_.Bool
+  | .Bits1x8 | .Bits2x4 | .Bits4x2 | .Bits8 | .Bits16 => true
+  | _ => false
+
+@[reducible] def isBarebonesUnsigned : DType → _root_.Bool
+  | .UInt1 | .UInt2 | .UInt3 | .UInt4 | .UInt5 | .UInt6 | .UInt7
+  | .UInt16 | .UInt32 | .UInt64 => true
+  | _ => false
+
+/-- The 13 scalar types in PyTorch's ordinary promotion table. -/
+@[reducible] def isStandard (dtype : DType) : _root_.Bool :=
+  match dtype with
+  | .Bool | .UInt8 | .Int8 | .Int16 | .Int32 | .Int64
+  | .Float16 | .BFloat16 | .Float32 | .Float64
+  | .Complex32 | .Complex64 | .Complex128 => true
+  | _ => false
+
+@[reducible] def isInexact (dtype : DType) : _root_.Bool :=
+  dtype.isFloating || dtype.isComplex
+
+@[reducible] def isDifferentiable : DType → _root_.Bool := isInexact
+
+@[reducible] def isIndex : DType → _root_.Bool
   | .UInt8 | .Int32 | .Int64 => true
   | _ => false
 
+/-- Logical precision in bits, rather than the size of a packed storage cell.
+For opaque bits containers the width describes the whole container. -/
 def bitWidth? : DType → Option Nat
-  | .Bool => some 1
-  | .UInt8 | .Int8 | .Float8E4M3FN | .Float8E5M2 => some 8
-  | .Int16 => some 16
-  | .Int32 | .Float32 => some 32
-  | .Int64 | .Float64 => some 64
-  | .Float16 | .BFloat16 => some 16
+  | .Bool | .UInt1 | .Int1 => some 1
+  | .UInt2 | .Int2 | .QUInt2x4 => some 2
+  | .UInt3 | .Int3 => some 3
+  | .UInt4 | .Int4 | .QUInt4x2 | .Float4E2M1FNX2 => some 4
+  | .UInt5 | .Int5 => some 5
+  | .UInt6 | .Int6 => some 6
+  | .UInt7 | .Int7 => some 7
+  | .UInt8 | .Int8 | .QInt8 | .QUInt8
+  | .Float8E4M3FN | .Float8E5M2 | .Float8E4M3FNUZ | .Float8E5M2FNUZ
+  | .Float8E8M0FNU | .Bits1x8 | .Bits2x4 | .Bits4x2 | .Bits8 => some 8
+  | .Int16 | .UInt16 | .Float16 | .BFloat16 | .Bits16 => some 16
+  | .Int32 | .UInt32 | .Float32 | .Complex32 | .QInt32 => some 32
+  | .Int64 | .UInt64 | .Float64 | .Complex64 => some 64
+  | .Complex128 => some 128
   | .Unknown _ => none
 
-def atLeastFloat : DType → DType
-  | .Bool | .UInt8
-  | .Int8 | .Int16 | .Int32 | .Int64
-  | .Float8E4M3FN | .Float8E5M2 => .Float32
+/-- Integer true division uses Tyr's Float32 default. Floating and complex
+inputs retain their dtype; kernel availability is a separate precondition. -/
+@[reducible] def atLeastFloat : DType → DType
+  | .Bool | .UInt8 | .UInt16 | .UInt32 | .UInt64
+  | .Int8 | .Int16 | .Int32 | .Int64 => .Float32
   | dtype => dtype
 
-private def intRank : DType → Nat
-  | .Bool => 0
-  | .UInt8 => 1
-  | .Int8 => 2
-  | .Int16 => 3
-  | .Int32 => 4
-  | .Int64 => 5
-  | _ => 0
+@[reducible] private def promoteIntegral : DType → DType → DType
+  | .Int64, _ | _, .Int64 => .Int64
+  | .Int32, _ | _, .Int32 => .Int32
+  | .Int16, _ | _, .Int16 => .Int16
+  | .UInt8, .Int8 | .Int8, .UInt8 => .Int16
+  | .Int8, _ | _, .Int8 => .Int8
+  | .UInt8, _ | _, .UInt8 => .UInt8
+  | _, _ => .Bool
 
-private def promoteIntegral (lhs rhs : DType) : DType :=
-  -- Neither eight-bit type contains the full range of the other.
-  if (lhs == .UInt8 && rhs == .Int8) || (lhs == .Int8 && rhs == .UInt8) then
-    .Int16
-  else
-    match Nat.max (intRank lhs) (intRank rhs) with
-    | 0 => .Bool
-    | 1 => .UInt8
-    | 2 => .Int8
-    | 3 => .Int16
-    | 4 => .Int32
-    | _ => .Int64
-
-def promote : DType → DType → DType
-  | .Unknown raw, _ => .Unknown raw
-  | _, .Unknown raw => .Unknown raw
+@[reducible] private def promoteStandard : DType → DType → DType
+  | .Complex128, _ | _, .Complex128 => .Complex128
+  | .Complex64, .Float64 | .Float64, .Complex64
+  | .Complex32, .Float64 | .Float64, .Complex32 => .Complex128
+  | .Complex64, _ | _, .Complex64 => .Complex64
+  | .Complex32, .Float32 | .Float32, .Complex32
+  | .Complex32, .BFloat16 | .BFloat16, .Complex32 => .Complex64
+  | .Complex32, _ | _, .Complex32 => .Complex32
   | .Float64, _ | _, .Float64 => .Float64
   | .Float32, _ | _, .Float32 => .Float32
   | .Float16, .BFloat16 | .BFloat16, .Float16 => .Float32
   | .Float16, _ | _, .Float16 => .Float16
   | .BFloat16, _ | _, .BFloat16 => .BFloat16
-  | .Float8E4M3FN, .Float8E4M3FN => .Float8E4M3FN
-  | .Float8E5M2, .Float8E5M2 => .Float8E5M2
-  | .Float8E4M3FN, _ | _, .Float8E4M3FN => .Float32
-  | .Float8E5M2, _ | _, .Float8E5M2 => .Float32
   | lhs, rhs => promoteIntegral lhs rhs
 
-/-- A zero-dimensional tensor raises the dtype category of a non-scalar
-operand, but does not raise precision within that category. This is libtorch's
-tensor-scalar rule; two scalars and two non-scalars use `promote` instead. -/
-def promoteScalar (tensor scalar : DType) : DType :=
-  match tensor, scalar with
-  | .Unknown raw, _ | _, .Unknown raw => .Unknown raw
+/-- Constructor equality that reduces during promotion instance synthesis. -/
+@[reducible] private def sameKnownDType : DType → DType → _root_.Bool
+  | .UInt8, .UInt8 => true
+  | .Int8, .Int8 => true
+  | .Int16, .Int16 => true
+  | .Int32, .Int32 => true
+  | .Int64, .Int64 => true
+  | .Float16, .Float16 => true
+  | .BFloat16, .BFloat16 => true
+  | .Float32, .Float32 => true
+  | .Float64, .Float64 => true
+  | .Bool, .Bool => true
+  | .Float8E4M3FN, .Float8E4M3FN => true
+  | .Float8E5M2, .Float8E5M2 => true
+  | .Complex32, .Complex32 => true
+  | .Complex64, .Complex64 => true
+  | .Complex128, .Complex128 => true
+  | .QInt8, .QInt8 => true
+  | .QUInt8, .QUInt8 => true
+  | .QInt32, .QInt32 => true
+  | .QUInt4x2, .QUInt4x2 => true
+  | .QUInt2x4, .QUInt2x4 => true
+  | .Bits1x8, .Bits1x8 => true
+  | .Bits2x4, .Bits2x4 => true
+  | .Bits4x2, .Bits4x2 => true
+  | .Bits8, .Bits8 => true
+  | .Bits16, .Bits16 => true
+  | .Float8E5M2FNUZ, .Float8E5M2FNUZ => true
+  | .Float8E4M3FNUZ, .Float8E4M3FNUZ => true
+  | .UInt16, .UInt16 => true
+  | .UInt32, .UInt32 => true
+  | .UInt64, .UInt64 => true
+  | .UInt1, .UInt1 => true
+  | .UInt2, .UInt2 => true
+  | .UInt3, .UInt3 => true
+  | .UInt4, .UInt4 => true
+  | .UInt5, .UInt5 => true
+  | .UInt6, .UInt6 => true
+  | .UInt7, .UInt7 => true
+  | .Int1, .Int1 => true
+  | .Int2, .Int2 => true
+  | .Int3, .Int3 => true
+  | .Int4, .Int4 => true
+  | .Int5, .Int5 => true
+  | .Int6, .Int6 => true
+  | .Int7, .Int7 => true
+  | .Float8E8M0FNU, .Float8E8M0FNU => true
+  | .Float4E2M1FNX2, .Float4E2M1FNX2 => true
+  | _, _ => false
+
+/-- Exact result of `torch.promote_types` for every known dtype in PyTorch
+2.10. Undefined results and native rejections are both `none`. Unknown tokens,
+including the dynamic wildcard, never establish a static promotion.
+Constructor matches keep this reducible during typeclass synthesis.
+No arithmetic kernel availability is implied by a successful result. -/
+@[reducible] def promote? (lhs rhs : DType) : Option DType :=
+  match lhs, rhs with
+  | .Unknown _, _ | _, .Unknown _ => none
   | _, _ =>
-    if tensor.isFloating then tensor
-    else if scalar.isFloating then scalar
-    else if tensor.isBool then promote tensor scalar
-    else tensor
+    match sameKnownDType lhs rhs with
+    | true => some lhs
+    | false =>
+      match lhs.isQuantized, rhs.isQuantized, lhs.isBits, rhs.isBits,
+          lhs.isFloat8, rhs.isFloat8 with
+      | true, _, _, _, _, _ | _, true, _, _, _, _
+      | _, _, true, _, _, _ | _, _, _, true, _, _
+      | _, _, _, _, true, _ | _, _, _, _, _, true => none
+      | _, _, _, _, _, _ =>
+        match lhs.isBarebonesUnsigned, rhs.isBarebonesUnsigned with
+        | false, false =>
+          match lhs.isStandard, rhs.isStandard with
+          | true, true => some (promoteStandard lhs rhs)
+          | _, _ => none
+        | _, _ =>
+          match lhs.isFloating, rhs.isFloating with
+          | true, _ => some lhs
+          | _, true => some rhs
+          | _, _ => none
 
-def absResult : DType → DType
+@[reducible] def toComplex? : DType → Option DType
+  | .Float16 | .Complex32 => some .Complex32
+  | .BFloat16 | .Float32 | .Complex64 => some .Complex64
+  | .Float64 | .Complex128 => some .Complex128
+  | _ => none
+
+/-- Result-type combination for a dimensioned tensor and a zero-dimensional
+(non-wrapped) tensor. The dimensioned operand determines precision within its
+category. This is distinct from `promote?`, and deliberately does not claim
+that an arithmetic kernel exists for the result. -/
+@[reducible] def promoteScalar? (tensor scalar : DType) : Option DType :=
+  match tensor, scalar with
+  | .Unknown _, _ | _, .Unknown _ => none
+  | _, _ =>
+    match tensor.isComplex, scalar.isComplex with
+    | true, _ => some tensor
+    | false, true =>
+      match tensor.isFloating with
+      | true => tensor.toComplex?
+      | false => some scalar
+    | false, false =>
+      match tensor.isFloating, tensor.isBool, scalar.isFloating with
+      | true, _, _ => some tensor
+      | false, true, _ | false, _, true => promote? tensor scalar
+      | _, _, _ => some tensor
+
+/-- Complex absolute values are real. -/
+@[reducible] def absResult : DType → DType
+  | .Complex32 => .Float16
+  | .Complex64 => .Float32
+  | .Complex128 => .Float64
   | dtype => dtype
 
-def sumResult : DType → DType
-  | .Bool | .UInt8 | .Int8 | .Int16 | .Int32 => .Int64
-  | .Float8E4M3FN | .Float8E5M2 => .Float32
+@[reducible] def sumResult : DType → DType
+  | .Bool | .UInt8 | .UInt16 | .UInt32 | .UInt64
+  | .Int8 | .Int16 | .Int32 | .Int64 => .Int64
   | dtype => dtype
 
-def prodResult : DType → DType :=
-  sumResult
+@[reducible] def prodResult : DType → DType := sumResult
 
-def meanResult (dtype : DType) : DType :=
-  promote (sumResult dtype) (atLeastFloat dtype)
+/-- Mean does not implicitly convert integer tensors; such inputs must be
+rejected by the operation or converted explicitly. -/
+@[reducible] def meanResult (dtype : DType) : DType := dtype
 
-def divideResult (dtype : DType) : DType :=
-  atLeastFloat dtype
+@[reducible] def divideResult (dtype : DType) : DType := dtype.atLeastFloat
 
 def canRepresentSafeTensors (dtype : DType) : _root_.Bool :=
   dtype.safeTensorTag?.isSome
 
 def expectedEq (expected actual : DType) : Except String Unit :=
-  if actual == expected then
-    .ok ()
-  else
-    .error s!"Expected dtype {expected}, got {actual}"
+  if actual == expected then .ok ()
+  else .error s!"Expected dtype {expected}, got {actual}"
 
-end DType
-
-end torch
+end torch.DType

@@ -60,7 +60,7 @@ structure BranchingModelContinuous (maxLen dim : UInt64) (Params : Type) where
     → IO (Tensor { shape := #[batch, maxLen, dim] } × Tensor { shape := #[batch, maxLen] } × Tensor { shape := #[batch, maxLen] })
 
 private def floatMask {batch maxLen : UInt64} (pad flow : Tensor { shape := #[batch, maxLen] }) : Tensor { shape := #[batch, maxLen] } :=
-  pad * flow
+  Tensor.Promoting.mul pad flow
 
 private def maskedCrossEntropy {batch maxLen vocab : UInt64}
     (logits : Tensor { shape := #[batch, maxLen, vocab] })
@@ -71,42 +71,43 @@ private def maskedCrossEntropy {batch maxLen vocab : UInt64}
   let targets2 := Tensor.reshapeChecked targets #[n]
   let mask2 := Tensor.reshapeChecked mask #[n]
   let per := Tensor.crossEntropyNone logits2 targets2
-  let masked := per * mask2
+  let masked := Tensor.Promoting.mul per mask2
   let denom := Tensor.sumAll mask2
-  Tensor.Preserving.div (Tensor.sumAll masked) (denom + (1.0e-8 : Float))
+  Tensor.Promoting.div (Tensor.sumAll masked) (Tensor.Promoting.addScalar denom 1.0e-8)
 
 private def maskedMSE {batch maxLen : UInt64}
     (pred target mask : Tensor { shape := #[batch, maxLen] }) : Tensor { shape := #[] } :=
-  let diff := pred - target
-  let sq := diff * diff
-  let masked := sq * mask
+  let diff := Tensor.Promoting.sub pred target
+  let sq := Tensor.Promoting.mul diff diff
+  let masked := Tensor.Promoting.mul sq mask
   let denom := Tensor.sumAll mask
-  Tensor.Preserving.div (Tensor.sumAll masked) (denom + (1.0e-8 : Float))
+  Tensor.Promoting.div (Tensor.sumAll masked) (Tensor.Promoting.addScalar denom 1.0e-8)
 
 private def maskedMSE3d {batch maxLen dim : UInt64}
     (pred target : Tensor { shape := #[batch, maxLen, dim] }) (mask : Tensor { shape := #[batch, maxLen] }) : Tensor { shape := #[] } :=
   let mask3 := Tensor.expand (Tensor.unsqueeze mask 2) #[batch, maxLen, dim]
-  let diff := pred - target
-  let sq := diff * diff
-  let masked := sq * mask3
+  let diff := Tensor.Promoting.sub pred target
+  let sq := Tensor.Promoting.mul diff diff
+  let masked := Tensor.Promoting.mul sq mask3
   let denom := Tensor.sumAll mask3
-  Tensor.Preserving.div (Tensor.sumAll masked) (denom + (1.0e-8 : Float))
+  Tensor.Promoting.div (Tensor.sumAll masked) (Tensor.Promoting.addScalar denom 1.0e-8)
 
 def maskedSplitPoissonLoss {batch maxLen : UInt64}
     (logits target mask : Tensor { shape := #[batch, maxLen] }) : Tensor { shape := #[] } :=
   let mu := Tensor.Preserving.exp (Tensor.Preserving.clampFloat logits (-100.0) 11.0)
   let safeTarget := Tensor.Preserving.clampFloat target 1.0e-8 1.0e20
-  let per := mu - target * logDynamic mu - (target - target * logDynamic safeTarget)
-  let masked := per * mask
+  let per := Tensor.Promoting.sub (Tensor.Promoting.sub mu (Tensor.Promoting.mul target (logDynamic mu)))
+    (Tensor.Promoting.sub target (Tensor.Promoting.mul target (logDynamic safeTarget)))
+  let masked := Tensor.Promoting.mul per mask
   let denom := Tensor.sumAll mask
-  Tensor.Preserving.div (Tensor.sumAll masked) (denom + (1.0e-8 : Float))
+  Tensor.Promoting.div (Tensor.sumAll masked) (Tensor.Promoting.addScalar denom 1.0e-8)
 
 def maskedBCEWithLogits {batch maxLen : UInt64}
     (logits target mask : Tensor { shape := #[batch, maxLen] }) : Tensor { shape := #[] } :=
-  let per := softplusDynamic logits - target * logits
-  let loss := Tensor.sumAll (per * mask)
+  let per := Tensor.Promoting.sub (softplusDynamic logits) (Tensor.Promoting.mul target logits)
+  let loss := Tensor.sumAll (Tensor.Promoting.mul per mask)
   let denom := Tensor.sumAll mask
-  Tensor.Preserving.div loss (denom + (1.0e-8 : Float))
+  Tensor.Promoting.div loss (Tensor.Promoting.addScalar denom 1.0e-8)
 
 def packBranchingNat (cfg : BranchingTrainConfig) (result : BranchingBridgeResult Nat)
     : IO (Sigma fun batch => BranchingBatch batch cfg.maxLen) := do
@@ -169,7 +170,7 @@ def packBranchingNat (cfg : BranchingTrainConfig) (result : BranchingBridgeResul
 
   let timeScaled := result.t.map (fun t => ((t * cfg.timeScale).toUInt64).toInt64)
   let t := Tensor.reshapeChecked (Tensor.fromInt64Array timeScaled) #[batchU]
-  let t := (floatDynamic t) / cfg.timeScale
+  let t := Tensor.Promoting.divScalar (floatDynamic t) cfg.timeScale
 
   return ⟨batchU, { t, state, anchor, padmask, flowmask, splitsTarget, delTarget }⟩
 
@@ -257,7 +258,7 @@ def packBranchingTensor {dim : UInt64} (cfg : BranchingTrainConfig)
 
   let timeScaled := result.t.map (fun t => ((t * cfg.timeScale).toUInt64).toInt64)
   let t := Tensor.reshapeChecked (Tensor.fromInt64Array timeScaled) #[batchU]
-  let t := (floatDynamic t) / cfg.timeScale
+  let t := Tensor.Promoting.divScalar (floatDynamic t) cfg.timeScale
 
   return ⟨batchU, { t, state, anchor, padmask, flowmask, splitsTarget, delTarget }⟩
 
@@ -287,7 +288,10 @@ def trainStep {maxLen vocab : UInt64} {Params : Type} [TensorStruct Params]
   let anchorLoss := maskedCrossEntropy anchorLogits packed.anchor mask
   let splitLoss := maskedSplitPoissonLoss splitLogits packed.splitsTarget mask
   let delLoss := maskedBCEWithLogits delLogits packed.delTarget mask
-  let totalLoss := anchorLoss * cfg.anchorWeight + splitLoss * cfg.splitsWeight + delLoss * cfg.delWeight
+  let totalLoss := Tensor.Promoting.add
+    (Tensor.Promoting.add (Tensor.Promoting.mulScalar anchorLoss cfg.anchorWeight)
+      (Tensor.Promoting.mulScalar splitLoss cfg.splitsWeight))
+    (Tensor.Promoting.mulScalar delLoss cfg.delWeight)
 
   Tensor.backwardLoss totalLoss
   if cfg.gradClip > 0 then
@@ -324,7 +328,10 @@ def trainStepContinuous {maxLen dim : UInt64} {Params : Type} [TensorStruct Para
   let anchorLoss := maskedMSE3d anchorPred packed.anchor mask
   let splitLoss := maskedSplitPoissonLoss splitLogits packed.splitsTarget mask
   let delLoss := maskedBCEWithLogits delLogits packed.delTarget mask
-  let totalLoss := anchorLoss * cfg.anchorWeight + splitLoss * cfg.splitsWeight + delLoss * cfg.delWeight
+  let totalLoss := Tensor.Promoting.add
+    (Tensor.Promoting.add (Tensor.Promoting.mulScalar anchorLoss cfg.anchorWeight)
+      (Tensor.Promoting.mulScalar splitLoss cfg.splitsWeight))
+    (Tensor.Promoting.mulScalar delLoss cfg.delWeight)
 
   Tensor.backwardLoss totalLoss
   if cfg.gradClip > 0 then

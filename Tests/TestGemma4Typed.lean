@@ -123,6 +123,7 @@ private def roundTrip {α : Type} [TensorStruct α] (params : α) (dir : String)
   let x := (weight #[2, 8] 0.7).toBFloat16.forgetDType
   let (probs, weights, indices) := router.forward c x
   LeanTest.assertEqual probs.actualSpec.dtype .Float32
+  LeanTest.assertEqual weights.actualSpec.dtype .Float32
   LeanTest.assertEqual indices.actualSpec.dtype .Int64
   for v in (← weights.toFloatArray) do LeanTest.assertTrue v.isFinite
   let rows ← probs.toFloatArray
@@ -149,7 +150,8 @@ private def roundTrip {α : Type} [TensorStruct α] (params : α) (dir : String)
       let g := Tensor.linear row (gu.sliceChecked 0 0 6 #[6, 4])
       let u := Tensor.linear row (gu.sliceChecked 0 6 6 #[6, 4])
       let dw := (down.sliceChecked 0 e 1 #[1, 4, 6]).reshapeChecked #[4, 6]
-      sum := sum + Tensor.Preserving.mulScalar (Tensor.linear (Tensor.Preserving.gelu g * u) dw) scales[token * 2 + slot]!
+      sum := Tensor.Promoting.add sum (Tensor.Preserving.mulScalar
+        (Tensor.linear (Tensor.Promoting.mul (Tensor.Preserving.gelu g) u) dw) scales[token * 2 + slot]!)
     expected := Tensor.sliceScatter expected 0 token.toUInt64 sum
   close actual expected 1e-6
 

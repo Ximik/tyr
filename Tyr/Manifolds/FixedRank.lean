@@ -40,7 +40,7 @@ structure FixedRankTangent (m n k : UInt64) (dtype : DType := .Float32)
 namespace FixedRankTangent
 
 def zero (m n k : UInt64) : FixedRankTangent m n k d dev := ⟨Tensor.zerosFor ⟨#[m, n], d, dev⟩⟩
-def add (a b : FixedRankTangent m n k d dev) : FixedRankTangent m n k d dev := ⟨Add.add a.vec b.vec⟩
+def add (a b : FixedRankTangent m n k d dev) : FixedRankTangent m n k d dev := ⟨Tensor.Preserving.add a.vec b.vec⟩
 def smul (s : Float) (v : FixedRankTangent m n k d dev) : FixedRankTangent m n k d dev := ⟨Tensor.Preserving.mulScalar v.vec s⟩
 
 def project (x : FixedRankEmbedded m n k d dev) (V : Tensor ⟨#[m, n], d, dev⟩) : FixedRankTangent m n k d dev :=
@@ -59,7 +59,7 @@ instance fixedRankEmbeddedManifold (m n k : UInt64) : DifferentiableManifold (Fi
   scaleTangent s v := FixedRankTangent.smul s v
   sharp := id
   flat := id
-  exp x v := FixedRankEmbedded.project m n k (Add.add x.matrix v.vec) x.rankBound
-  retract x v := FixedRankEmbedded.project m n k (Add.add x.matrix v.vec) x.rankBound
+  exp x v := FixedRankEmbedded.project m n k (Tensor.Preserving.add x.matrix v.vec) x.rankBound
+  retract x v := FixedRankEmbedded.project m n k (Tensor.Preserving.add x.matrix v.vec) x.rankBound
 
 end Tyr.AD

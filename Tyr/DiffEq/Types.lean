@@ -230,14 +230,14 @@ instance [DiffEqElem α] : DiffEqElem (Option α) where
     | _, _ => panic! "DiffEqElem.div: Option mismatch (some vs none)"
 
 instance (priority := 50) [TensorStruct α] : DiffEqElem α where
-  abs := TensorStruct.map Tensor.abs
+  abs := TensorStruct.map Tensor.Preserving.abs
   max := TensorStruct.zipWith Tensor.maximum
   addScalar s := TensorStruct.map (fun t => Tensor.Preserving.addScalar t s)
   div := TensorStruct.zipWith Tensor.Preserving.div
 
 instance (priority := 50) [TensorStruct α] : DiffEqSeminorm α where
   rms x := TensorStruct.fold (fun t acc => max acc (Float.sqrt (
-    Tensor.item (Tensor.sumAll (Mul.mul t t)) / (TensorSpec.numelOfShape t.shape).toFloat))) 0.0 x
+    Tensor.item (Tensor.sumAll (Tensor.Preserving.mul t t)) / (TensorSpec.numelOfShape t.shape).toFloat))) 0.0 x
 
 @[inline] def axpy [DiffEqSpace α] (a : Scalar) (x y : α) : α :=
   DiffEqSpace.add (DiffEqSpace.scale a x) y

@@ -418,7 +418,7 @@ def stepGenericManifoldSingle {m n : UInt64} {d : DType} {dev : DevicePolicy}
   let gRaw := Tensor.detach grad
   let momentum := getScheduledMomentum cfg step
   let newMomentum := NorMuon.updateMomentum gRaw state.momentumBuffer momentum
-  let nesterovGrad := Add.add (Tensor.Preserving.mulScalar gRaw (1.0 - momentum))
+  let nesterovGrad := Tensor.Preserving.add (Tensor.Preserving.mulScalar gRaw (1.0 - momentum))
     (Tensor.Preserving.mulScalar newMomentum momentum)
   let aspectScale := NorMuon.aspectRatioScale #[m, n]
   let effectiveLr := cfg.matrixLr * lrMul * aspectScale

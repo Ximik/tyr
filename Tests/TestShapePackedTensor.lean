@@ -14,7 +14,7 @@ open torch
   let moved ← TensorStruct.mapM (fun t => pure (t.to .CPU)) mapped
   let shapes := TensorStruct.fold (fun t acc => acc.push t.runtimeShape) #[] moved
   LeanTest.assertEqual shapes #[#[2], #[2, 2]]
-  let summed := TensorStruct.zipWith Add.add values moved
+  let summed := TensorStruct.zipWith Tensor.Preserving.add values moved
   LeanTest.assertEqual (← summed[0]!.2.toFloatArray) #[3, 5]
   LeanTest.assertEqual (← summed[1]!.2.toFloatArray) #[7, 9, 11, 13]
   checkpoint.saveParams summed dir.toString

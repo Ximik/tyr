@@ -41,18 +41,29 @@ namespace StaticSpec
 /-- A CPU scalar can participate in an operation on another device. Keep a
 left scalar's placement claim only when both policies agree. -/
 @[reducible] def pointwiseDevice (l r : StaticSpec) : DevicePolicy :=
-  if l.shape.isEmpty && !(l.device == r.device) then .any else l.device
+  match l.shape.toList, l.device, r.device with
+  | _ :: _, device, _ => device
+  | [], .exact .CPU, .exact .CPU => .exact .CPU
+  | [], .exact .MPS, .exact .MPS => .exact .MPS
+  | [], .exact (.CUDA lhs), .exact (.CUDA rhs) =>
+      match lhs == rhs with
+      | true => .exact (.CUDA lhs)
+      | false => .any
+  | [], _, _ => .any
 
 /-- Result spec of a broadcasting pointwise op, including the weaker dtype
-promotion of zero-dimensional tensors. -/
-@[reducible] def pointwise (l r : StaticSpec) : StaticSpec :=
+promotion of zero-dimensional tensors. Dtype promotion must be witnessed;
+shape compatibility remains a separate precondition. -/
+@[reducible] def pointwise (l r : StaticSpec) {result : DType}
+    [TensorSpec.Promotes l.toTensorSpec r.toTensorSpec result] : StaticSpec :=
   { shape := TensorSpec.broadcastShape l.shape r.shape
-    dtype := TensorSpec.pointwiseDType l.toTensorSpec r.toTensorSpec
+    dtype := result
     device := l.pointwiseDevice r }
 
 /-- Result spec of true division: pointwise, then floated. -/
-@[reducible] def division (l r : StaticSpec) : StaticSpec :=
-  { l.pointwise r with dtype := (TensorSpec.pointwiseDType l.toTensorSpec r.toTensorSpec).atLeastFloat }
+@[reducible] def division (l r : StaticSpec) {result : DType}
+    [TensorSpec.Promotes l.toTensorSpec r.toTensorSpec result] : StaticSpec :=
+  { l.pointwise r with dtype := result.atLeastFloat }
 
 /-- Result spec of a full reduction with sum accumulation rules. -/
 @[reducible] def sumSpec (σ : StaticSpec) : StaticSpec :=

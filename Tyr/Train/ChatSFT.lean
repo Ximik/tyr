@@ -163,7 +163,8 @@ def SFTBatch.ofConversationBatch (batch : ConversationBatch) : SFTBatch :=
     promoted sum-accumulation dtype of logits and mask (Float32 when both are
     Float32).
 -/
-def maskedCrossEntropy {batch seq vocab : UInt64} {d m : DType} {dev : DevicePolicy}
+def maskedCrossEntropy {batch seq vocab : UInt64} {d m result : DType} {dev : DevicePolicy}
+    [DType.Promotes d m result]
     (logits : Tensor ⟨#[batch, seq, vocab], d, dev⟩)
     (targets : Tensor ⟨#[batch, seq], .Int64, dev⟩)
     (mask : Tensor ⟨#[batch, seq], m, dev⟩)
@@ -262,7 +263,8 @@ def prepareSFTBatch (convs : Array TokenizedConversation) (maxLen : Nat) (padTok
 
     forwardFn should take inputs [batch, seq] and return logits [batch, seq, vocab]
 -/
-def sftForward {batch seq vocab : UInt64} {d m : DType} {dev : DevicePolicy}
+def sftForward {batch seq vocab : UInt64} {d m result : DType} {dev : DevicePolicy}
+    [DType.Promotes d m result]
     (forwardFn : Tensor ⟨#[batch, seq], .Int64, dev⟩ → IO (Tensor ⟨#[batch, seq, vocab], d, dev⟩))
     (inputs : Tensor ⟨#[batch, seq], .Int64, dev⟩)
     (targets : Tensor ⟨#[batch, seq], .Int64, dev⟩)

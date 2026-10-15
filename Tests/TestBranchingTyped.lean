@@ -103,7 +103,7 @@ private def roundTrip {α : Type} [TensorStruct α] (params : α) (dir : String)
     LeanTest.assertEqual state.step 1
     LeanTest.assertTrue report.total.isFinite
     LeanTest.assertEqual trained.coordW.actualSpec.dtype (if bf16 then .BFloat16 else .Float32)
-    LeanTest.assertTrue (Tensor.item (Tensor.sumAll (Tensor.abs (trained.coordW - params.coordW))) > 0)
+    LeanTest.assertTrue (Tensor.item (Tensor.sumAll (Tensor.abs (Tensor.Promoting.sub trained.coordW params.coordW))) > 0)
     let prediction ← moleculeTransformerPrediction (maxLen := 2) (vocab := 2) 0 trained 0.25 fixture.Xt[0]!
     LeanTest.assertEqual prediction.coordTargets.size 1
     let loaded ← roundTrip trained dir.toString

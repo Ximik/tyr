@@ -151,13 +151,13 @@ private def addBias2d {n d : UInt64}
     (x : Tensor { shape := #[n, d] })
     (bias : Tensor { shape := #[d] }) : Tensor { shape := #[n, d] } :=
   let b : Tensor { shape := #[1, d] } := Tensor.reshapeChecked bias #[1, d]
-  x + Tensor.expand b #[n, d]
+  Tensor.Promoting.add x (Tensor.expand b #[n, d])
 
 private def addBias3d {batch channels frames : UInt64}
     (x : Tensor { shape := #[batch, channels, frames] })
     (bias : Tensor { shape := #[channels] }) : Tensor { shape := #[batch, channels, frames] } :=
   let b : Tensor { shape := #[1, channels, 1] } := Tensor.reshapeChecked bias #[1, channels, 1]
-  x + Tensor.expand b #[batch, channels, frames]
+  Tensor.Promoting.add x (Tensor.expand b #[batch, channels, frames])
 
 private def conv1dWithBias {batch inC outC inFrames outFrames kernel : UInt64}
     (x : Tensor { shape := #[batch, inC, inFrames] })
@@ -180,7 +180,7 @@ private def scale3d {batch seq dim : UInt64}
     (x : Tensor { shape := #[batch, seq, dim] })
     (scale : Tensor { shape := #[dim] }) : Tensor { shape := #[batch, seq, dim] } :=
   let s : Tensor { shape := #[1, 1, dim] } := Tensor.reshapeChecked scale #[1, 1, dim]
-  x * Tensor.expand s #[batch, seq, dim]
+  Tensor.Promoting.mul x (Tensor.expand s #[batch, seq, dim])
 
 private def conv2Frames (melFrames : UInt64) : UInt64 :=
   (melFrames + 1) / 2
@@ -325,13 +325,13 @@ private def forwardBlock {seq : UInt64}
     (x : Tensor { shape := #[1, seq, 1280] }) : Tensor { shape := #[1, seq, 1280] } :=
   let h0 : Tensor { shape := #[1, seq, 1280] } := Tensor.layerNorm x blk.attnLnWeight blk.attnLnBias 1e-5
   let a : Tensor { shape := #[1, seq, 1280] } := forwardAttention blk h0
-  let x1 : Tensor { shape := #[1, seq, 1280] } := x + a
+  let x1 : Tensor { shape := #[1, seq, 1280] } := Tensor.Promoting.add x a
 
   let h1 : Tensor { shape := #[1, seq, 1280] } := Tensor.layerNorm x1 blk.mlpLnWeight blk.mlpLnBias 1e-5
   let m0 : Tensor { shape := #[1, seq, 5120] } := affine3d h1 blk.fc1Weight blk.fc1Bias
   let m1 : Tensor { shape := #[1, seq, 5120] } := Tensor.Preserving.gelu m0
   let m2 : Tensor { shape := #[1, seq, 1280] } := affine3d m1 blk.fc2Weight blk.fc2Bias
-  x1 + m2
+  Tensor.Promoting.add x1 m2
 
 private def encodeMelChunk {melFrames : UInt64}
     (m : SpeechTokenizer25HzEncoder)
@@ -351,7 +351,7 @@ private def encodeMelChunk {melFrames : UInt64}
       let xSeq0 : Tensor { shape := #[1, c2Frames, 1280] } := Tensor.reshapeChecked (Tensor.transpose h2 1 2) #[1, c2Frames, 1280]
       let pos : Tensor { shape := #[c2Frames, 1280] } := Tensor.sliceChecked m.positionalEmbedding 0 0 c2Frames #[c2Frames, 1280]
       let pos3 : Tensor { shape := #[1, c2Frames, 1280] } := Tensor.reshapeChecked pos #[1, c2Frames, 1280]
-      let mut xSeq : Tensor { shape := #[1, c2Frames, 1280] } := xSeq0 + pos3
+      let mut xSeq : Tensor { shape := #[1, c2Frames, 1280] } := Tensor.Promoting.add xSeq0 pos3
 
       for blk in m.blocks do
         xSeq := forwardBlock blk xSeq
@@ -362,13 +362,13 @@ private def encodeMelChunk {melFrames : UInt64}
       let vqSeq : Tensor { shape := #[qFrames, 1280] } :=
         Tensor.reshapeChecked (Tensor.transpose (Tensor.reshapeChecked vqDown #[1, 1280, qFrames]) 1 2) #[qFrames, 1280]
 
-      let x2 : Tensor { shape := #[qFrames, 1] } := Tensor.reshapeChecked (Tensor.Preserving.sumDim (vqSeq * vqSeq) 1 true) #[qFrames, 1]
-      let e2 : Tensor { shape := #[32768, 1] } := Tensor.reshapeChecked (Tensor.Preserving.sumDim (m.vqCodebook * m.vqCodebook) 1 true) #[32768, 1]
+      let x2 : Tensor { shape := #[qFrames, 1] } := Tensor.reshapeChecked (Tensor.Preserving.sumDim (Tensor.Promoting.mul vqSeq vqSeq) 1 true) #[qFrames, 1]
+      let e2 : Tensor { shape := #[32768, 1] } := Tensor.reshapeChecked (Tensor.Preserving.sumDim (Tensor.Promoting.mul m.vqCodebook m.vqCodebook) 1 true) #[32768, 1]
       let dot : Tensor { shape := #[qFrames, 32768] } := Tensor.mm vqSeq (Tensor.transpose2d m.vqCodebook)
       let x2e : Tensor { shape := #[qFrames, 32768] } := Tensor.expand x2 #[qFrames, 32768]
       let e2Row : Tensor { shape := #[1, 32768] } := Tensor.reshapeChecked (Tensor.transpose2d e2) #[1, 32768]
       let e2e : Tensor { shape := #[qFrames, 32768] } := Tensor.expand e2Row #[qFrames, 32768]
-      let dist : Tensor { shape := #[qFrames, 32768] } := x2e + e2e - Tensor.Preserving.mulScalar dot 2.0
+      let dist : Tensor { shape := #[qFrames, 32768] } := Tensor.Promoting.sub (Tensor.Promoting.add x2e e2e) (Tensor.Preserving.mulScalar dot 2.0)
       Tensor.reshapeChecked (Tensor.argmax (Tensor.Preserving.mulScalar dist (-1.0)) 1) #[vqFrames melFrames]
 
 private def appendAll (dst src : Array UInt64) : Array UInt64 :=

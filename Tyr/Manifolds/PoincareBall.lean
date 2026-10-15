@@ -44,7 +44,7 @@ structure PoincareBallTangent (n : UInt64) (dtype : DType := .Float32)
 namespace PoincareBallTangent
 
 def zero (n : UInt64) : PoincareBallTangent n d dev := ⟨Tensor.zerosFor ⟨#[n], d, dev⟩⟩
-def add (a b : PoincareBallTangent n d dev) : PoincareBallTangent n d dev := ⟨Add.add a.vec b.vec⟩
+def add (a b : PoincareBallTangent n d dev) : PoincareBallTangent n d dev := ⟨Tensor.Preserving.add a.vec b.vec⟩
 def smul (s : Float) (v : PoincareBallTangent n d dev) : PoincareBallTangent n d dev := ⟨Tensor.Preserving.mulScalar v.vec s⟩
 
 end PoincareBallTangent
@@ -59,7 +59,7 @@ instance poincareBallManifold (n : UInt64) : DifferentiableManifold (PoincareBal
   scaleTangent s v := PoincareBallTangent.smul s v
   sharp := id
   flat := id
-  exp x v := PoincareBall.project n (Add.add x.coords v.vec)
-  retract x v := PoincareBall.project n (Add.add x.coords v.vec)
+  exp x v := PoincareBall.project n (Tensor.Preserving.add x.coords v.vec)
+  retract x v := PoincareBall.project n (Tensor.Preserving.add x.coords v.vec)
 
 end Tyr.AD

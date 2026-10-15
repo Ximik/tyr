@@ -45,7 +45,7 @@ def forward2d {inDim outDim batch : UInt64} {d : DType} {dev : DevicePolicy}
     Tensor ⟨#[batch, outDim], d, dev⟩ :=
   let y := Tensor.linear x lin.weight
   match lin.bias with
-  | some b => Add.add y (b.expand #[batch, outDim])
+  | some b => Tensor.Preserving.add y (b.expand #[batch, outDim])
   | none => y
 
 /-- Forward for 3D input `[batch, seq, inDim] → [batch, seq, outDim]`. -/
@@ -77,26 +77,35 @@ visible in the type rather than hidden. Cast back explicitly for HF-style
 dtype restoration. -/
 
 /-- Forward for 2D input `[seq, dim]`. -/
-def forward2d {dim seq : UInt64} {d : DType} {dev : DevicePolicy}
+def forward2d {dim seq : UInt64} {d result : DType} {dev : DevicePolicy}
+    [DType.Promotes .Float32 d result]
     (rn : RMSNorm dim d dev) (x : Tensor ⟨#[seq, dim], d, dev⟩)
     (float : d.isFloating = true := by decide) :
     Tensor ⟨#[seq, dim], DType.promote .Float32 d, dev⟩ :=
+  letI : TensorSpec.Promotes ⟨#[seq, dim], .Float32⟩ ⟨#[dim], d⟩ result :=
+    ⟨DType.Promotes.valid⟩
   Tensor.rmsNormWeighted x rn.weight rn.eps float
 
 /-- Forward for 3D input `[batch, seq, dim]`. -/
-def forward3d {dim batch seq : UInt64} {d : DType} {dev : DevicePolicy}
+def forward3d {dim batch seq : UInt64} {d result : DType} {dev : DevicePolicy}
+    [DType.Promotes .Float32 d result]
     (rn : RMSNorm dim d dev) (x : Tensor ⟨#[batch, seq, dim], d, dev⟩)
     (float : d.isFloating = true := by decide) :
     Tensor ⟨#[batch, seq, dim], DType.promote .Float32 d, dev⟩ :=
+  letI : TensorSpec.Promotes ⟨#[batch, seq, dim], .Float32⟩ ⟨#[dim], d⟩ result :=
+    ⟨DType.Promotes.valid⟩
   Tensor.rmsNormWeighted x rn.weight rn.eps float
 
 /-- Forward for 4D input `[batch, seq, nHead, headDim]`, normalizing the
     last dimension. -/
-def forward4d {batch seq nHead headDim : UInt64} {d : DType} {dev : DevicePolicy}
+def forward4d {batch seq nHead headDim : UInt64} {d result : DType} {dev : DevicePolicy}
+    [DType.Promotes .Float32 d result]
     (rn : RMSNorm headDim d dev)
     (x : Tensor ⟨#[batch, seq, nHead, headDim], d, dev⟩)
     (float : d.isFloating = true := by decide) :
     Tensor ⟨#[batch, seq, nHead, headDim], DType.promote .Float32 d, dev⟩ :=
+  letI : TensorSpec.Promotes ⟨#[batch, seq, nHead, headDim], .Float32⟩ ⟨#[headDim], d⟩ result :=
+    ⟨DType.Promotes.valid⟩
   Tensor.rmsNormWeighted x rn.weight rn.eps float
 
 end RMSNorm

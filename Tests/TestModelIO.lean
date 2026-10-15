@@ -127,7 +127,7 @@ def testStateDictSimulation : IO Unit := do
   LeanTest.assertThrows (loadFromList (malformed :: stateList.drop 1) params) (some "shape")
   
   -- Verify loaded matches original
-  let diff := TensorStruct.zipWith Sub.sub params loadedParams
+  let diff := TensorStruct.zipWith Tensor.Preserving.sub params loadedParams
   let totalDiff := TensorStruct.fold (fun {_s} t acc => acc + Tensor.item (Tensor.sumAll (Tensor.abs t))) 0.0 diff
   
   LeanTest.assertTrue (totalDiff < 1e-6) "Loaded parameters should match saved ones"

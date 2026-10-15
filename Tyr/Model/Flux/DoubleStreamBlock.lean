@@ -204,8 +204,8 @@ def forward {batch img_seq txt_seq hidden_size num_heads head_dim mlp_hidden : U
   let txt_mod1_gate := Tensor.expand txt_mod1_gate #[batch, txt_seq, hidden_size]
 
   -- Residual + gated attention
-  let img := img + img_mod1_gate * img_attn
-  let txt := txt + txt_mod1_gate * txt_attn
+  let img := Tensor.Promoting.add img (Tensor.Promoting.mul img_mod1_gate img_attn)
+  let txt := Tensor.Promoting.add txt (Tensor.Promoting.mul txt_mod1_gate txt_attn)
 
   -- MLP paths with second modulation
   let img_mlp_in := block.img_norm2.forward3d img
@@ -214,11 +214,11 @@ def forward {batch img_seq txt_seq hidden_size num_heads head_dim mlp_hidden : U
   let img_mlp_proj := Tensor.reshapeChecked img_mlp_proj #[batch, img_seq, 2, mlp_hidden]
   let img_gate := Tensor.reshapeChecked (sliceTyped img_mlp_proj 2 0 1) #[batch, img_seq, mlp_hidden]
   let img_up := Tensor.reshapeChecked (sliceTyped img_mlp_proj 2 1 1) #[batch, img_seq, mlp_hidden]
-  let img_mlp_out := Tensor.Preserving.silu img_gate * img_up
+  let img_mlp_out := Tensor.Promoting.mul (Tensor.Preserving.silu img_gate) img_up
   let img_mlp_out := Tensor.linear3d img_mlp_out block.img_mlp.w2
   let img_mod2_gate := Tensor.unsqueeze img_mod2_gate 1
   let img_mod2_gate := Tensor.expand img_mod2_gate #[batch, img_seq, hidden_size]
-  let img := img + img_mod2_gate * img_mlp_out
+  let img := Tensor.Promoting.add img (Tensor.Promoting.mul img_mod2_gate img_mlp_out)
 
   let txt_mlp_in := block.txt_norm2.forward3d txt
   let txt_mlp_in := applyModulation txt_mlp_in txt_mod2_scale txt_mod2_shift
@@ -226,11 +226,11 @@ def forward {batch img_seq txt_seq hidden_size num_heads head_dim mlp_hidden : U
   let txt_mlp_proj := Tensor.reshapeChecked txt_mlp_proj #[batch, txt_seq, 2, mlp_hidden]
   let txt_gate := Tensor.reshapeChecked (sliceTyped txt_mlp_proj 2 0 1) #[batch, txt_seq, mlp_hidden]
   let txt_up := Tensor.reshapeChecked (sliceTyped txt_mlp_proj 2 1 1) #[batch, txt_seq, mlp_hidden]
-  let txt_mlp_out := Tensor.Preserving.silu txt_gate * txt_up
+  let txt_mlp_out := Tensor.Promoting.mul (Tensor.Preserving.silu txt_gate) txt_up
   let txt_mlp_out := Tensor.linear3d txt_mlp_out block.txt_mlp.w2
   let txt_mod2_gate := Tensor.unsqueeze txt_mod2_gate 1
   let txt_mod2_gate := Tensor.expand txt_mod2_gate #[batch, txt_seq, hidden_size]
-  let txt := txt + txt_mod2_gate * txt_mlp_out
+  let txt := Tensor.Promoting.add txt (Tensor.Promoting.mul txt_mod2_gate txt_mlp_out)
 
   (img, txt)
 
