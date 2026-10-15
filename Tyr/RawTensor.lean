@@ -42,6 +42,9 @@ The source shape is checked before conversion and never reshaped. -/
 
 @[extern "lean_torch_item"] opaque item (shape : Shape) (t : @& RawTensor) : Float
 
+@[extern "lean_torch_item_checked"] opaque itemChecked (shape : Shape)
+    (t : @& RawTensor) : Except String Float
+
 @[extern "lean_torch_gt"] opaque gt (shape : Shape) (a b : @& RawTensor) : RawTensor
 
 @[extern "lean_torch_where"] opaque whereSelect (shape : Shape) (condition a b : @& RawTensor) : RawTensor
@@ -164,6 +167,8 @@ def rmsNormWeighted (shape _weightShape : Shape) (x weight : RawTensor) (eps : F
     (scaleGradByFreq : Bool := false) (sparse : Bool := false) : RawTensor
 @[extern "lean_torch_cross_entropy_2d"] opaque crossEntropy (n c : UInt64)
     (logits targets : @& RawTensor) : RawTensor
+@[extern "lean_torch_cross_entropy_2d_checked"] opaque crossEntropyChecked (n c : UInt64)
+    (logits targets : @& RawTensor) : Except String RawTensor
 
 end torch.RawTensor
 
@@ -257,6 +262,10 @@ namespace torch.RawTensor
 /-- Argmax along a dimension (Int64 indices). The shape argument is unread natively. -/
 @[extern "lean_torch_argmax"] opaque argmax (shape : Shape) (t : @& RawTensor) (dim : UInt64) : RawTensor
 
+/-- Recoverable argmax, including dtype, empty-axis and kernel failures. -/
+@[extern "lean_torch_argmax_checked"] opaque argmaxChecked (shape : Shape)
+    (t : @& RawTensor) (dim : UInt64) : Except String RawTensor
+
 /-- Top-k logit filter (entries outside the top k become -inf), shape-preserving. -/
 @[extern "lean_torch_topk_filter"] opaque topKFilter (shape : Shape) (logits : @& RawTensor) (k : UInt64) : RawTensor
 
@@ -274,9 +283,16 @@ namespace torch.RawTensor
 @[extern "lean_torch_index_select"] opaque indexSelect (n k : UInt64) (data : @& RawTensor)
     (dim : Int64) (indices : @& RawTensor) : RawTensor
 
+/-- Checked vector indexing. Bounds are validated before device indexing so
+invalid accelerator indices cannot trigger a device assertion. -/
+@[extern "lean_torch_index_select_checked"] opaque indexSelectChecked (n k : UInt64)
+    (data : @& RawTensor) (dim : Int64) (indices : @& RawTensor) : Except String RawTensor
+
 /-- Per-element cross entropy (no reduction): logits [n, c], Int64 targets [n]. -/
 @[extern "lean_torch_cross_entropy_none"] opaque crossEntropyNone (n c : UInt64)
     (logits : @& RawTensor) (targets : @& RawTensor) : RawTensor
+@[extern "lean_torch_cross_entropy_none_checked"] opaque crossEntropyNoneChecked (n c : UInt64)
+    (logits targets : @& RawTensor) : Except String RawTensor
 
 /-- Extract an Int64 scalar. The shape argument is unread natively. -/
 @[extern "lean_torch_item_int"] opaque itemInt (shape : Shape) (t : @& RawTensor) : Int64
@@ -289,6 +305,8 @@ namespace torch.RawTensor
 
 @[extern "lean_torch_conv1d"] opaque conv1d (inputShape weightShape : Shape)
     (input weight : @& RawTensor) (stride padding dilation : UInt64) : RawTensor
+@[extern "lean_torch_conv1d_checked"] opaque conv1dChecked (inputShape weightShape : Shape)
+    (input weight : @& RawTensor) (stride padding dilation : UInt64) : Except String RawTensor
 @[extern "lean_torch_tensor_to_float_array_dynamic"] opaque toFloatArray
     (t : @& RawTensor) : IO (Array Float)
 @[extern "lean_torch_any"] opaque any (shape : Shape) (t : @& RawTensor) : Bool

@@ -1171,6 +1171,21 @@ lean_object* lean_torch_tensor_cross_entropy(lean_obj_arg s, b_lean_obj_arg a, b
 }
 
 // Cross entropy with no reduction (per-element loss)
+static void validateCrossEntropyTargets(b_lean_obj_arg logits, b_lean_obj_arg targets) {
+  const auto input = borrowTensor(logits);
+  const auto labels = borrowTensor(targets);
+  TORCH_CHECK(input.dim() == 2 && labels.dim() == 1 && input.size(0) == labels.size(0),
+              "cross entropy requires logits [N,C] and targets [N]");
+  TORCH_CHECK(input.is_floating_point() && !input.is_complex(),
+              "cross entropy requires real floating logits");
+  TORCH_CHECK(labels.scalar_type() == torch::kInt64, "cross entropy requires Int64 targets");
+  TORCH_CHECK(input.device() == labels.device(), "cross entropy requires matching devices");
+  // Validate before dispatch so invalid labels do not cause an asynchronous
+  // device-side assertion. Preserve PyTorch's default ignore_index = -100.
+  TORCH_CHECK(((labels == -100) | ((labels >= 0) & (labels < input.size(1)))).all().item<bool>(),
+              "cross entropy target is outside the class range (except ignore_index -100)");
+}
+
 lean_object* lean_torch_cross_entropy_none(uint64_t /*n*/, uint64_t /*c*/, b_lean_obj_arg logits, b_lean_obj_arg targets) {
   auto logits_ = borrowTensor(logits);
   auto targets_ = borrowTensor(targets);
@@ -1179,6 +1194,13 @@ lean_object* lean_torch_cross_entropy_none(uint64_t /*n*/, uint64_t /*c*/, b_lea
   return fromTorchTensor(result_);
 }
 
+lean_object* lean_torch_cross_entropy_none_checked(uint64_t n, uint64_t c,
+    b_lean_obj_arg logits, b_lean_obj_arg targets) {
+  return tyr::checkedCall("crossEntropyNone", [&] {
+    validateCrossEntropyTargets(logits, targets);
+    return lean_torch_cross_entropy_none(n, c, logits, targets);
+  });
+}
 
 lean_object *lean_torch_to_string(lean_obj_arg shape, b_lean_obj_arg t) {
   lean_dec(shape);
@@ -1314,6 +1336,16 @@ lean_object* lean_torch_conv2d_bias(
   return fromTorchTensor(output_);
 }
 
+lean_object* lean_torch_conv2d_bias_checked(
+    lean_obj_arg input_shape, lean_obj_arg weight_shape, lean_obj_arg bias_shape,
+    b_lean_obj_arg input, b_lean_obj_arg weight, b_lean_obj_arg bias,
+    lean_obj_arg stride, lean_obj_arg padding, lean_obj_arg dilation) {
+  return tyr::checkedCall("conv2dBias", [&] {
+    return lean_torch_conv2d_bias(input_shape, weight_shape, bias_shape,
+      input, weight, bias, stride, padding, dilation);
+  });
+}
+
 lean_object* lean_torch_conv1d(
   lean_obj_arg input_shape,
   lean_obj_arg weight_shape,
@@ -1333,6 +1365,15 @@ lean_object* lean_torch_conv1d(
     .dilation(dilation);
   auto output_ = torch::nn::functional::conv1d(input_, weight_, options);
   return fromTorchTensor(output_);
+}
+
+lean_object* lean_torch_conv1d_checked(
+    lean_obj_arg input_shape, lean_obj_arg weight_shape,
+    b_lean_obj_arg input, b_lean_obj_arg weight,
+    uint64_t stride, uint64_t padding, uint64_t dilation) {
+  return tyr::checkedCall("conv1d", [&] {
+    return lean_torch_conv1d(input_shape, weight_shape, input, weight, stride, padding, dilation);
+  });
 }
 
 lean_object* lean_torch_conv1d_group_bias(
@@ -1363,6 +1404,16 @@ lean_object* lean_torch_conv1d_group_bias(
     static_cast<int64_t>(groups)
   );
   return fromTorchTensor(output_);
+}
+
+lean_object* lean_torch_conv1d_group_bias_checked(
+    lean_obj_arg input_shape, lean_obj_arg weight_shape, lean_obj_arg bias_shape,
+    b_lean_obj_arg input, b_lean_obj_arg weight, b_lean_obj_arg bias,
+    uint64_t stride, uint64_t padding, uint64_t dilation, uint64_t groups) {
+  return tyr::checkedCall("conv1dGroups", [&] {
+    return lean_torch_conv1d_group_bias(input_shape, weight_shape, bias_shape,
+      input, weight, bias, stride, padding, dilation, groups);
+  });
 }
 
 lean_object* lean_torch_adaptive_avg_pool2d(
@@ -2424,6 +2475,13 @@ double lean_torch_item(lean_obj_arg s, b_lean_obj_arg input) {
   return result;
 }
 
+lean_object* lean_torch_item_checked(lean_obj_arg s, b_lean_obj_arg input) {
+  return tyr::checkedCall("item", [&] {
+    lean_dec(s);
+    return lean_box_float(borrowTensor(input).item<double>());
+  });
+}
+
 // Item extraction as int64
 uint64_t lean_torch_item_int(lean_obj_arg s, b_lean_obj_arg input) {
   lean_dec(s);
@@ -2439,6 +2497,15 @@ lean_object* lean_torch_argmax(lean_obj_arg s, b_lean_obj_arg input, uint64_t di
   auto dim_ = static_cast<int64_t>(dim);
   auto result_ = torch::argmax(input_, dim_);
   return fromTorchTensor(result_);
+}
+
+lean_object* lean_torch_argmax_checked(lean_obj_arg s, b_lean_obj_arg input, uint64_t dim) {
+  return tyr::checkedCall("argmax", [&] {
+    lean_dec(s);
+    TORCH_CHECK(dim <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max()),
+      "argmax axis is not representable as a nonnegative signed 64-bit integer");
+    return fromTorchTensor(torch::argmax(borrowTensor(input), static_cast<int64_t>(dim)));
+  });
 }
 
 // Create tensor from Array Int64
@@ -2658,6 +2725,33 @@ lean_object* lean_torch_index_select(
   }
   auto result_ = torch::index_select(input_, static_cast<int64_t>(dim), indices_);
   return fromTorchTensor(result_);
+}
+
+lean_object* lean_torch_index_select_checked(
+    uint64_t /*n*/, uint64_t /*k*/, b_lean_obj_arg input,
+    uint64_t dim_bits, b_lean_obj_arg indices) {
+  return tyr::checkedCall("indexSelect", [&] {
+    auto data = borrowTensor(input);
+    auto index = borrowTensor(indices);
+    auto dim = std::bit_cast<int64_t>(dim_bits);
+    TORCH_CHECK(data.dim() == 1 && index.dim() == 1,
+      "indexSelect requires vector data and indices");
+    TORCH_CHECK(dim == 0 || dim == -1, "indexSelect vector axis must be zero");
+    TORCH_CHECK(index.scalar_type() == torch::kInt64 || index.scalar_type() == torch::kInt32,
+      "indexSelect requires Int64 or Int32 indices");
+    TORCH_CHECK(data.device() == index.device(), "indexSelect requires matching devices");
+    // Validate before launching device indexing: CUDA out-of-bounds indexing
+    // may assert asynchronously and poison the context instead of throwing.
+    // Device-local comparisons copy only one validity bit back to the host.
+    // If a backend lacks those kernels, the checked boundary returns an error
+    // before it can launch indexing with unvalidated values.
+    const auto limit = data.size(0);
+    if (index.numel() > 0) {
+      TORCH_CHECK((index.ge(0) & index.lt(limit)).all().item<bool>(),
+        "indexSelect index is out of range for length ", limit);
+    }
+    return fromTorchTensor(torch::index_select(data, 0, index));
+  });
 }
 
 // Slice a 1D tensor: data[start:end]
@@ -3039,6 +3133,14 @@ lean_object* lean_torch_cross_entropy_2d(
 }
 
 // Scaled dot-product attention for 4D tensors
+lean_object* lean_torch_cross_entropy_2d_checked(uint64_t n, uint64_t c,
+    b_lean_obj_arg logits, b_lean_obj_arg targets) {
+  return tyr::checkedCall("crossEntropy", [&] {
+    validateCrossEntropyTargets(logits, targets);
+    return lean_torch_cross_entropy_2d(n, c, logits, targets);
+  });
+}
+
 lean_object* lean_torch_sdpa_4d(
   uint64_t /*batch*/,
   uint64_t /*n_head*/,
@@ -5149,6 +5251,21 @@ lean_object* lean_torch_max_dim_3d(uint64_t /*d0*/, uint64_t /*d1*/, uint64_t /*
   return result;
 }
 
+lean_object* lean_torch_max_dim_3d_checked(uint64_t /*d0*/, uint64_t /*d1*/, uint64_t /*d2*/,
+    b_lean_obj_arg input, uint64_t dim) {
+  return tyr::checkedCall("maxLast3d", [&] {
+    TORCH_CHECK(dim <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max()),
+      "maxLast3d axis is not representable as a nonnegative signed 64-bit integer");
+    auto [values, indices] = torch::max(borrowTensor(input), static_cast<int64_t>(dim));
+    OwnedLeanObject values_owner(fromTorchTensor(values), lean_dec);
+    OwnedLeanObject indices_owner(fromTorchTensor(indices), lean_dec);
+    auto* result = lean_alloc_ctor(0, 2, 0);
+    lean_ctor_set(result, 0, values_owner.release());
+    lean_ctor_set(result, 1, indices_owner.release());
+    return result;
+  });
+}
+
 // Boolean any (returns true if any element is true)
 uint8_t lean_torch_any(lean_obj_arg s, b_lean_obj_arg input) {
   lean_dec(s);
@@ -5234,6 +5351,23 @@ lean_object* lean_torch_topk_2d(uint64_t /*d1*/, uint64_t /*d2*/,
   lean_ctor_set(result, 0, fromTorchTensor(values));
   lean_ctor_set(result, 1, fromTorchTensor(indices));
   return result;
+}
+
+lean_object* lean_torch_topk_2d_checked(uint64_t /*d1*/, uint64_t /*d2*/,
+    b_lean_obj_arg input, uint64_t k, uint64_t dim) {
+  return tyr::checkedCall("topKLast2d", [&] {
+    TORCH_CHECK(k <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) &&
+      dim <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max()),
+      "topKLast2d k and axis must be nonnegative signed 64-bit integers");
+    auto [values, indices] = torch::topk(borrowTensor(input), static_cast<int64_t>(k),
+      static_cast<int64_t>(dim));
+    OwnedLeanObject values_owner(fromTorchTensor(values), lean_dec);
+    OwnedLeanObject indices_owner(fromTorchTensor(indices), lean_dec);
+    auto* result = lean_alloc_ctor(0, 2, 0);
+    lean_ctor_set(result, 0, values_owner.release());
+    lean_ctor_set(result, 1, indices_owner.release());
+    return result;
+  });
 }
 
 // ============================================================================
@@ -5426,6 +5560,16 @@ lean_object* lean_torch_conv_transpose1d_bias(
       .output_padding(static_cast<int64_t>(output_padding))
       .dilation(static_cast<int64_t>(dilation)));
   return fromTorchTensor(result_);
+}
+
+lean_object* lean_torch_conv_transpose1d_bias_checked(
+    lean_obj_arg input_shape, lean_obj_arg weight_shape, lean_obj_arg bias_shape,
+    b_lean_obj_arg input, b_lean_obj_arg weight, b_lean_obj_arg bias,
+    uint64_t stride, uint64_t padding, uint64_t output_padding, uint64_t dilation) {
+  return tyr::checkedCall("convTranspose1d", [&] {
+    return lean_torch_conv_transpose1d_bias(input_shape, weight_shape, bias_shape,
+      input, weight, bias, stride, padding, output_padding, dilation);
+  });
 }
 
 // 2D spatial dropout

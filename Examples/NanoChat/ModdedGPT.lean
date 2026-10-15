@@ -606,7 +606,7 @@ def loss {cfg : Config} {batch seq : UInt64}
   -- Reshape for cross-entropy: (batch*seq, vocab) vs (batch*seq,)
   let logitsFlat := Tensor.reshapeChecked logits #[batch * seq, cfg.vocabSize]
   let targetsFlat := Tensor.reshapeChecked targets #[batch * seq]
-  return Tensor.crossEntropy logitsFlat targetsFlat
+  IO.ofExcept (Tensor.crossEntropy? logitsFlat targetsFlat)
 
 
 /-! Device transfers are type-directed across every model leaf. -/

@@ -8,6 +8,7 @@ extern "C" {
 // copy_ consumes destination, borrows source, and returns IO RawTensor.
 lean_object* lean_torch_copy_(lean_object*, lean_object*, lean_object*);
 lean_object* lean_torch_conv2d_bias(lean_object*, lean_object*, lean_object*, lean_object*, lean_object*, lean_object*, lean_object*, lean_object*, lean_object*);
+lean_object* lean_torch_conv2d_bias_checked(lean_object*, lean_object*, lean_object*, lean_object*, lean_object*, lean_object*, lean_object*, lean_object*, lean_object*);
 lean_object* lean_torch_cat_dyn(lean_object*, lean_object*);
 lean_object* lean_torch_arange(uint64_t, uint64_t, uint64_t);
 lean_object* lean_torch_tensor_sin(lean_object*, lean_object*);
@@ -35,7 +36,9 @@ lean_object* lean_torch_ge(lean_object*, lean_object*, lean_object*);
 lean_object* lean_torch_lt_scalar(lean_object*, lean_object*, double);
 lean_object* lean_torch_masked_fill(lean_object*, lean_object*, lean_object*, double);
 lean_object* lean_torch_conv1d_group_bias(lean_object*, lean_object*, lean_object*, lean_object*, lean_object*, lean_object*, uint64_t, uint64_t, uint64_t, uint64_t);
+lean_object* lean_torch_conv1d_group_bias_checked(lean_object*, lean_object*, lean_object*, lean_object*, lean_object*, lean_object*, uint64_t, uint64_t, uint64_t, uint64_t);
 lean_object* lean_torch_conv_transpose1d_bias(lean_object*, lean_object*, lean_object*, lean_object*, lean_object*, lean_object*, uint64_t, uint64_t, uint64_t, uint64_t);
+lean_object* lean_torch_conv_transpose1d_bias_checked(lean_object*, lean_object*, lean_object*, lean_object*, lean_object*, lean_object*, uint64_t, uint64_t, uint64_t, uint64_t);
 lean_object* lean_torch_sdpa_gqa_window(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, lean_object*, lean_object*, lean_object*, double, uint8_t, uint8_t, uint64_t);
 lean_object* lean_torch_tensor_elu(lean_object*, lean_object*);
 lean_object* lean_torch_tensor_log(lean_object*, lean_object*);
@@ -49,7 +52,9 @@ lean_object* lean_torch_wav_finalize(lean_object*);
 lean_object* lean_torch_load_u16_bin(uint64_t, lean_object*);
 lean_object* lean_torch_linspace(double, double, uint64_t, uint8_t);
 lean_object* lean_torch_max_dim_3d(uint64_t, uint64_t, uint64_t, lean_object*, uint64_t);
+lean_object* lean_torch_max_dim_3d_checked(uint64_t, uint64_t, uint64_t, lean_object*, uint64_t);
 lean_object* lean_torch_topk_2d(uint64_t, uint64_t, lean_object*, uint64_t, uint64_t);
+lean_object* lean_torch_topk_2d_checked(uint64_t, uint64_t, lean_object*, uint64_t, uint64_t);
 lean_object* lean_torch_get(lean_object*, lean_object*, lean_object*);
 lean_object* lean_torch_unbind(lean_object*, lean_object*, lean_object*);
 lean_object* lean_torch_logspace(double, double, uint64_t, double, uint8_t);

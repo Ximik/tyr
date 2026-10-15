@@ -61,6 +61,7 @@ lean_object* lean_torch_convert_tensor(lean_object*, lean_object*, lean_object*,
 uint8_t lean_torch_requires_grad(lean_object*, lean_object*);
 double lean_torch_l2_norm(uint64_t, lean_object*);
 double lean_torch_item(lean_object*, lean_object*);
+lean_object* lean_torch_item_checked(lean_object*, lean_object*);
 lean_object* lean_torch_gt(lean_object*, lean_object*, lean_object*);
 lean_object* lean_torch_where(lean_object*, lean_object*, lean_object*, lean_object*);
 // grad_of: borrowed tensor -> IO detached snapshot; zero_grad: borrowed tensor -> IO Unit.
@@ -72,6 +73,7 @@ lean_object* lean_torch_affine3d_checked(uint64_t, uint64_t, uint64_t, uint64_t,
 lean_object* lean_torch_bmm4d(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, lean_object*, lean_object*);
 lean_object* lean_torch_cat2(lean_object*, lean_object*, lean_object*, lean_object*, lean_object*);
 lean_object* lean_torch_cross_entropy_2d(uint64_t, uint64_t, lean_object*, lean_object*);
+lean_object* lean_torch_cross_entropy_2d_checked(uint64_t, uint64_t, lean_object*, lean_object*);
 lean_object* lean_torch_detach(lean_object*, lean_object*);
 lean_object* lean_torch_div(lean_object*, lean_object*, lean_object*);
 lean_object* lean_torch_div_scalar(lean_object*, lean_object*, double);
@@ -125,17 +127,21 @@ lean_object* lean_torch_unsqueeze(lean_object*, lean_object*, lean_object*);
 lean_object* lean_torch_zeros(lean_object*, uint8_t, lean_object*);
 lean_object* lean_torch_zeros_like(lean_object*, lean_object*);
 lean_object* lean_torch_argmax(lean_object*, lean_object*, uint64_t);
+lean_object* lean_torch_argmax_checked(lean_object*, lean_object*, uint64_t);
 lean_object* lean_torch_topk_filter(lean_object*, lean_object*, uint64_t);
 lean_object* lean_torch_topp_filter(lean_object*, lean_object*, double);
 lean_object* lean_torch_eq_scalar(lean_object*, lean_object*, uint64_t);
 lean_object* lean_torch_from_int64_array(lean_object*);
 lean_object* lean_torch_index_select(uint64_t, uint64_t, lean_object*, uint64_t, lean_object*);
+lean_object* lean_torch_index_select_checked(uint64_t, uint64_t, lean_object*, uint64_t, lean_object*);
 lean_object* lean_torch_cross_entropy_none(uint64_t, uint64_t, lean_object*, lean_object*);
+lean_object* lean_torch_cross_entropy_none_checked(uint64_t, uint64_t, lean_object*, lean_object*);
 uint64_t lean_torch_item_int(lean_object*, lean_object*);
 lean_object* lean_torch_logical_not(lean_object*, lean_object*);
 lean_object* lean_torch_logical_and(lean_object*, lean_object*, lean_object*);
 
 lean_object* lean_torch_conv1d(lean_object*, lean_object*, lean_object*, lean_object*, uint64_t, uint64_t, uint64_t);
+lean_object* lean_torch_conv1d_checked(lean_object*, lean_object*, lean_object*, lean_object*, uint64_t, uint64_t, uint64_t);
 lean_object* lean_torch_tensor_to_float_array_dynamic(lean_object*);
 
 uint8_t lean_torch_any(lean_object*, lean_object*);

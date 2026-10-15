@@ -300,7 +300,8 @@ def generateFLMWithSolver {seq vocab batch : UInt64} {Params : Type}
       | none =>
           throw (IO.userError "generateFLM solve did not save a terminal state")
   let dataPred := finalFlowProjection cfg timeMap forwardPure params tFinalModel zBeforeFinal
-  pure ((Tensor.argmax dataPred 2).reshapeChecked #[batch, seq])
+  let indices ← IO.ofExcept (Tensor.argmax? dataPred 2)
+  IO.ofExcept (indices.reshapeChecked? #[batch, seq])
 
 /-- Generate tokens through DiffEq Euler from Gaussian noise to one-hot data. -/
 def generateFLM {seq vocab batch : UInt64} {Params : Type}

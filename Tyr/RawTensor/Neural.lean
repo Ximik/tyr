@@ -8,6 +8,8 @@ namespace torch.RawTensor
 
 @[extern "lean_torch_conv2d_bias"] opaque conv2dBias (inputShape weightShape biasShape : Shape)
     (input weight bias : @& RawTensor) (stride padding dilation : Array UInt64) : RawTensor
+@[extern "lean_torch_conv2d_bias_checked"] opaque conv2dBiasChecked (inputShape weightShape biasShape : Shape)
+    (input weight bias : @& RawTensor) (stride padding dilation : Array UInt64) : Except String RawTensor
 @[extern "lean_torch_cat_dyn"] opaque catMany (tensors : @& Array RawTensor) (dim : Int) : RawTensor
 @[extern "lean_torch_arange"] opaque arange (start stop step : UInt64) : RawTensor
 @[extern "lean_torch_tensor_sin"] opaque sin (shape : Shape) (t : @& RawTensor) : RawTensor
@@ -53,8 +55,12 @@ namespace torch.RawTensor
 
 @[extern "lean_torch_conv1d_group_bias"] opaque conv1dGroups (inputShape weightShape biasShape : Shape)
     (input weight bias : @& RawTensor) (stride padding dilation groups : UInt64) : RawTensor
+@[extern "lean_torch_conv1d_group_bias_checked"] opaque conv1dGroupsChecked (inputShape weightShape biasShape : Shape)
+    (input weight bias : @& RawTensor) (stride padding dilation groups : UInt64) : Except String RawTensor
 @[extern "lean_torch_conv_transpose1d_bias"] opaque convTranspose1d (inputShape weightShape biasShape : Shape)
     (input weight bias : @& RawTensor) (stride padding outputPadding dilation : UInt64) : RawTensor
+@[extern "lean_torch_conv_transpose1d_bias_checked"] opaque convTranspose1dChecked (inputShape weightShape biasShape : Shape)
+    (input weight bias : @& RawTensor) (stride padding outputPadding dilation : UInt64) : Except String RawTensor
 @[extern "lean_torch_sdpa_gqa_window"] opaque attentionWindow (batch heads kvHeads seq dim : UInt64)
     (q k v : @& RawTensor) (dropout : Float) (causal gqa : Bool) (window : UInt64) : RawTensor
 
@@ -81,8 +87,12 @@ namespace torch.RawTensor
 @[extern "lean_torch_linspace"] opaque linspace (start stop : Float) (count : UInt64) (requiresGrad : Bool) (noGrad : requiresGrad = false := by decide) : RawTensor
 @[extern "lean_torch_max_dim_3d"] opaque maxLast3d (batch seq vocab : UInt64)
     (input : @& RawTensor) (dim : UInt64) : RawTensor × RawTensor
+@[extern "lean_torch_max_dim_3d_checked"] opaque maxLast3dChecked (batch seq vocab : UInt64)
+    (input : @& RawTensor) (dim : UInt64) : Except String (RawTensor × RawTensor)
 @[extern "lean_torch_topk_2d"] opaque topKLast2d (rows cols : UInt64)
     (input : @& RawTensor) (k dim : UInt64) : RawTensor × RawTensor
+@[extern "lean_torch_topk_2d_checked"] opaque topKLast2dChecked (rows cols : UInt64)
+    (input : @& RawTensor) (k dim : UInt64) : Except String (RawTensor × RawTensor)
 
 @[extern "lean_torch_get"] opaque getOp (shape : Shape) (input : @& RawTensor) (idx : Int) : RawTensor
 @[extern "lean_torch_unbind"] opaque unbind (shape : Shape) (input : @& RawTensor) (dim : Nat) : Array RawTensor

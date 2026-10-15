@@ -148,7 +148,7 @@ private def maskedCrossEntropy {batch maxLen vocab : UInt64}
   let logits2 := Tensor.reshapeChecked logits #[n, vocab]
   let targets2 := Tensor.reshapeChecked targets #[n]
   let mask2 := Tensor.reshapeChecked mask #[n]
-  let per := Tensor.crossEntropyNone logits2 targets2
+  let per := Tensor.crossEntropyNoneChecked logits2 targets2
   let masked := Tensor.Promoting.mul per mask2
   let denom := Tensor.sumAll mask2
   Tensor.Promoting.div (Tensor.sumAll masked) (Tensor.Promoting.addScalar denom 1.0e-8)

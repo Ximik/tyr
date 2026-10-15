@@ -336,7 +336,7 @@ def evaluateLM {seq vocab : UInt64}
 
   -- Get argmax predictions at each position: [1, seq]
   -- predictions[i] is the predicted token for position i+1
-  let predictions := Tensor.argmax logits 2
+  let predictions ← IO.ofExcept (Tensor.argmax? logits 2)
 
   -- Flatten to 1D for easier slicing
   let predsFlat := Tensor.reshapeChecked predictions #[seq]

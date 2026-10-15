@@ -230,6 +230,38 @@ def convExtent (input kernel stride padding dilation : UInt64) : UInt64 :=
   ((input.toNat + 2 * padding.toNat - (dilation.toNat * (kernel.toNat - 1) + 1)) /
     stride.toNat + 1).toUInt64
 
+/-- Project a spatial parameter, repeating singleton arrays as native conv2d does.
+Only lengths one and two are valid; the native operation still receives the
+original array and rejects invalid lengths. The zero for a missing entry only
+makes the result index total and is never supplied as a native default. -/
+def conv2dParam (values : Array UInt64) (axis : Nat) : UInt64 :=
+  values.getD (if values.size == 1 then 0 else axis) 0
+
+private def checkConvolutionOperands {σ τ υ : StaticSpec}
+    (input : Tensor σ) (weight : Tensor τ) (bias : Tensor υ) : Except String Unit := do
+  DType.expectedEq input.raw.dtype weight.raw.dtype
+  DType.expectedEq input.raw.dtype bias.raw.dtype
+  Tensor.checkSameDevice input weight
+  Tensor.checkSameDevice input bias
+
+/-- Checked convolution, including actual dtype equality for dynamic operands.
+Native stride, padding and dilation errors remain recoverable. -/
+def conv2dBias? {batch cin cout height width kh kw : UInt64} {d : DType} {dev : Device}
+    (input : Tensor ⟨#[batch, cin, height, width], d, dev⟩)
+    (weight : Tensor ⟨#[cout, cin, kh, kw], d, dev⟩)
+    (bias : Tensor ⟨#[cout], d, dev⟩)
+    (stride : Array UInt64 := #[1, 1]) (padding : Array UInt64 := #[0, 0])
+    (dilation : Array UInt64 := #[1, 1]) :
+    Except String (Tensor ⟨#[batch, cout,
+      convExtent height kh (conv2dParam stride 0) (conv2dParam padding 0) (conv2dParam dilation 0),
+      convExtent width kw (conv2dParam stride 1) (conv2dParam padding 1) (conv2dParam dilation 1)], d, dev⟩) := do
+  checkConvolutionOperands input weight bias
+  let raw ← RawTensor.conv2dBiasChecked input.shape weight.shape bias.shape
+    input.raw weight.raw bias.raw stride padding dilation
+  DType.expectedEq input.raw.dtype raw.dtype
+  Tensor.ofRaw raw
+
+/-- Biased two-dimensional convolution; `conv2dBias?` returns argument errors. -/
 def conv2dBias {batch cin cout height width kh kw : UInt64} {d : DType} {dev : Device}
     (input : Tensor ⟨#[batch, cin, height, width], d, dev⟩)
     (weight : Tensor ⟨#[cout, cin, kh, kw], d, dev⟩)
@@ -237,10 +269,9 @@ def conv2dBias {batch cin cout height width kh kw : UInt64} {d : DType} {dev : D
     (stride : Array UInt64 := #[1, 1]) (padding : Array UInt64 := #[0, 0])
     (dilation : Array UInt64 := #[1, 1]) :
     Tensor ⟨#[batch, cout,
-      convExtent height kh (stride.getD 0 1) (padding.getD 0 0) (dilation.getD 0 1),
-      convExtent width kw (stride.getD 1 1) (padding.getD 1 0) (dilation.getD 1 1)], d, dev⟩ :=
-  match Tensor.ofRaw (RawTensor.conv2dBias input.shape weight.shape bias.shape
-      input.raw weight.raw bias.raw stride padding dilation) with
+      convExtent height kh (conv2dParam stride 0) (conv2dParam padding 0) (conv2dParam dilation 0),
+      convExtent width kw (conv2dParam stride 1) (conv2dParam padding 1) (conv2dParam dilation 1)], d, dev⟩ :=
+  match conv2dBias? input weight bias stride padding dilation with
   | .ok result => result
   | .error message => panic! s!"Tensor.conv2dBias: {message}"
 
@@ -419,24 +450,48 @@ def maskedFill {s : Shape} {d : DType} {dev : Device}
   input.checkedReplacement (RawTensor.maskedFill s input.raw mask.raw value)
 
 /-- Grouped convolution checks channel grouping at the native boundary. -/
+def conv1dGroups? {batch cin cout cinPerGroup length kernel : UInt64} {d : DType} {dev : Device}
+    (input : Tensor ⟨#[batch, cin, length], d, dev⟩)
+    (weight : Tensor ⟨#[cout, cinPerGroup, kernel], d, dev⟩) (bias : Tensor ⟨#[cout], d, dev⟩)
+    (stride : UInt64 := 1) (padding : UInt64 := 0) (dilation : UInt64 := 1) (groups : UInt64 := 1) :
+    Except String (Tensor ⟨#[batch, cout, convExtent length kernel stride padding dilation], d, dev⟩) := do
+  checkConvolutionOperands input weight bias
+  let raw ← RawTensor.conv1dGroupsChecked input.shape weight.shape bias.shape
+    input.raw weight.raw bias.raw stride padding dilation groups
+  DType.expectedEq input.raw.dtype raw.dtype
+  Tensor.ofRaw raw
+
+/-- Grouped convolution; use `conv1dGroups?` for recoverable argument errors. -/
 def conv1dGroups {batch cin cout cinPerGroup length kernel : UInt64} {d : DType} {dev : Device}
     (input : Tensor ⟨#[batch, cin, length], d, dev⟩)
     (weight : Tensor ⟨#[cout, cinPerGroup, kernel], d, dev⟩) (bias : Tensor ⟨#[cout], d, dev⟩)
     (stride : UInt64 := 1) (padding : UInt64 := 0) (dilation : UInt64 := 1) (groups : UInt64 := 1) :
     Tensor ⟨#[batch, cout, convExtent length kernel stride padding dilation], d, dev⟩ :=
-  match Tensor.ofRaw (RawTensor.conv1dGroups input.shape weight.shape bias.shape
-      input.raw weight.raw bias.raw stride padding dilation groups) with
+  match conv1dGroups? input weight bias stride padding dilation groups with
   | .ok result => result
   | .error message => panic! s!"Tensor.conv1dGroups: {message}"
 
+/-- Checked transposed convolution, including native output-padding validation. -/
+def convTranspose1d? {batch cin cout length kernel : UInt64} {d : DType} {dev : Device}
+    (input : Tensor ⟨#[batch, cin, length], d, dev⟩)
+    (weight : Tensor ⟨#[cin, cout, kernel], d, dev⟩) (bias : Tensor ⟨#[cout], d, dev⟩)
+    (stride : UInt64 := 1) (padding : UInt64 := 0) (outputPadding : UInt64 := 0) (dilation : UInt64 := 1) :
+    Except String (Tensor ⟨#[batch, cout, ((length.toNat - 1) * stride.toNat + dilation.toNat * (kernel.toNat - 1)
+      + outputPadding.toNat + 1 - 2 * padding.toNat).toUInt64], d, dev⟩) := do
+  checkConvolutionOperands input weight bias
+  let raw ← RawTensor.convTranspose1dChecked input.shape weight.shape bias.shape
+    input.raw weight.raw bias.raw stride padding outputPadding dilation
+  DType.expectedEq input.raw.dtype raw.dtype
+  Tensor.ofRaw raw
+
+/-- Transposed convolution; `convTranspose1d?` returns argument errors. -/
 def convTranspose1d {batch cin cout length kernel : UInt64} {d : DType} {dev : Device}
     (input : Tensor ⟨#[batch, cin, length], d, dev⟩)
     (weight : Tensor ⟨#[cin, cout, kernel], d, dev⟩) (bias : Tensor ⟨#[cout], d, dev⟩)
     (stride : UInt64 := 1) (padding : UInt64 := 0) (outputPadding : UInt64 := 0) (dilation : UInt64 := 1) :
     Tensor ⟨#[batch, cout, ((length.toNat - 1) * stride.toNat + dilation.toNat * (kernel.toNat - 1)
       + outputPadding.toNat + 1 - 2 * padding.toNat).toUInt64], d, dev⟩ :=
-  match Tensor.ofRaw (RawTensor.convTranspose1d input.shape weight.shape bias.shape
-      input.raw weight.raw bias.raw stride padding outputPadding dilation) with
+  match convTranspose1d? input weight bias stride padding outputPadding dilation with
   | .ok result => result
   | .error message => panic! s!"Tensor.convTranspose1d: {message}"
 
@@ -512,23 +567,55 @@ def loadU16Bin (count : UInt64) (path : String) : IO (Tensor { shape := #[count]
 def linspace (start stop : Float) (count : UInt64) : Tensor { shape := #[count], dtype := .Float32, device := .CPU } :=
   checkedNeuralResult "linspace" (RawTensor.linspace start stop count false)
 
-/-- Reduce the last axis, preserving floating values and Int64 index metadata. -/
-def maxLast3d {batch seq vocab : UInt64} {d : DType} {dev : Device}
+/-- Reduce the last axis with recoverable ordered-domain, empty-axis and
+native kernel failures. Values preserve the actual input dtype. -/
+def maxLast3d? {batch seq vocab : UInt64} {d : DType} {dev : Device}
+    (input : Tensor ⟨#[batch, seq, vocab], d, dev⟩) :
+    Except String (Tensor ⟨#[batch, seq], d, dev⟩ × Tensor ⟨#[batch, seq], .Int64, dev⟩) := do
+  DType.checkOrdered input.raw.dtype
+  if vocab == 0 then throw "maxLast3d requires a nonempty reduction axis"
+  let (values, indices) ← RawTensor.maxLast3dChecked batch seq vocab input.raw 2
+  return (← Tensor.checkedUpdate? input.raw.dtype input.raw.device values, ← Tensor.ofRaw indices)
+
+/-- Runtime-checked pure convenience; use `maxLast3d?` to retain errors. -/
+def maxLast3dChecked {batch seq vocab : UInt64} {d : DType} {dev : Device}
     (input : Tensor ⟨#[batch, seq, vocab], d, dev⟩) :
     Tensor ⟨#[batch, seq], d, dev⟩ × Tensor ⟨#[batch, seq], .Int64, dev⟩ :=
-  let (values, indices) := RawTensor.maxLast3d batch seq vocab input.raw 2
-  match Tensor.ofRaw values, Tensor.ofRaw indices with
-  | .ok values, .ok indices => (values, indices)
-  | .error message, _ | _, .error message => panic! s!"Tensor.maxLast3d: {message}"
+  match maxLast3d? input with
+  | .ok result => result
+  | .error message => panic! s!"Tensor.maxLast3d: {message}"
 
-/-- Select the largest `k` entries in each row. -/
-def topKLast2d {rows cols : UInt64} {d : DType} {dev : Device}
+/-- Reduce a nonempty last axis of an ordered tensor. -/
+def maxLast3d {batch seq vocab : UInt64} {d : DType} {dev : Device} [DType.Ordered d]
+    (input : Tensor ⟨#[batch, seq, vocab], d, dev⟩)
+    (_nonempty : 0 < vocab.toNat := by exact of_decide_eq_true rfl) :
+    Tensor ⟨#[batch, seq], d, dev⟩ × Tensor ⟨#[batch, seq], .Int64, dev⟩ :=
+  maxLast3dChecked input
+
+/-- Select the largest `k` entries per row, preserving the actual input dtype.
+Runtime dtype/range and native kernel failures are recoverable. -/
+def topKLast2d? {rows cols : UInt64} {d : DType} {dev : Device}
+    (input : Tensor ⟨#[rows, cols], d, dev⟩) (k : UInt64) :
+    Except String (Tensor ⟨#[rows, k], d, dev⟩ × Tensor ⟨#[rows, k], .Int64, dev⟩) := do
+  DType.checkOrdered input.raw.dtype
+  if k > cols then throw s!"topKLast2d k={k} exceeds the row width {cols}"
+  let (values, indices) ← RawTensor.topKLast2dChecked rows cols input.raw k 1
+  return (← Tensor.checkedUpdate? input.raw.dtype input.raw.device values, ← Tensor.ofRaw indices)
+
+/-- Runtime-checked pure convenience; use `topKLast2d?` to retain errors. -/
+def topKLast2dChecked {rows cols : UInt64} {d : DType} {dev : Device}
     (input : Tensor ⟨#[rows, cols], d, dev⟩) (k : UInt64) :
     Tensor ⟨#[rows, k], d, dev⟩ × Tensor ⟨#[rows, k], .Int64, dev⟩ :=
-  let (values, indices) := RawTensor.topKLast2d rows cols input.raw k 1
-  match Tensor.ofRaw values, Tensor.ofRaw indices with
-  | .ok values, .ok indices => (values, indices)
-  | .error message, _ | _, .error message => panic! s!"Tensor.topKLast2d: {message}"
+  match topKLast2d? input k with
+  | .ok result => result
+  | .error message => panic! s!"Tensor.topKLast2d: {message}"
+
+/-- Select the largest `k` entries of ordered rows with sufficient width. -/
+def topKLast2d {rows cols : UInt64} {d : DType} {dev : Device} [DType.Ordered d]
+    (input : Tensor ⟨#[rows, cols], d, dev⟩) (k : UInt64)
+    (_range : k.toNat ≤ cols.toNat := by exact of_decide_eq_true rfl) :
+    Tensor ⟨#[rows, k], d, dev⟩ × Tensor ⟨#[rows, k], .Int64, dev⟩ :=
+  topKLast2dChecked input k
 
 /-- End-exclusive integer range, with overflow-safe length computation. -/
 def rangeLength (start stop step : UInt64) : UInt64 :=

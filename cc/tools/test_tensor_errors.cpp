@@ -71,6 +71,56 @@ Object flash(lean_object* q, lean_object* k, lean_object* v, double dropout = 0,
   return Object(lean_torch_tyr_flash_attn_4d(1, 1, 1, 2, 2, 2,
     q, k, v, mask, dropout, 0, scale, 0), lean_dec);
 }
+void checkedCrossEntropy(bool unreduced, int invalid) {
+  Object logits(invalid == 1 ? lean_torch_full_int(shape({2, 2}), 0)
+                            : lean_torch_full(shape({2, 2}), 0, 0, lean_box(1)), lean_dec);
+  Object labels(lean_torch_full_int(shape({2}), invalid == 2 ? 2 : 0), lean_dec);
+  Object result(unreduced
+    ? CHECKED(lean_torch_cross_entropy_none)(2, 2, logits.get(), labels.get())
+    : CHECKED(lean_torch_cross_entropy_2d)(2, 2, logits.get(), labels.get()), lean_dec);
+  if (invalid) {
+    exceptError(result.get(), "crossEntropy");
+  } else {
+    Object observed(lean_torch_tensor_to_float_array_dynamic(exceptValue(result.get())), lean_dec);
+    require(lean_io_result_is_ok(observed.get()), "Could not inspect loss values");
+    auto* array = lean_io_result_get_value(observed.get());
+    require(lean_array_size(array) == (unreduced ? 2 : 1), "Unexpected loss result shape");
+    for (size_t i = 0; i < lean_array_size(array); ++i)
+      require(std::abs(lean_unbox_float(lean_array_get_core(array, i)) - std::log(2.0)) < 1e-6,
+              "Incorrect cross entropy value");
+  }
+  require(logits->m_rc == 1 && labels->m_rc == 1, "Cross entropy changed borrowed references");
+}
+
+void checkedItem(bool invalid) {
+  Object input(lean_torch_full(shape(invalid ? std::initializer_list<uint64_t>{2}
+                                          : std::initializer_list<uint64_t>{}),
+                             3.25, 0, lean_box(1)), lean_dec);
+  Object result(lean_torch_item_checked(shape({}), input.get()), lean_dec);
+  if (invalid) {
+    exceptError(result.get(), "item");
+  } else {
+    require(!lean_is_scalar(result.get()) && !lean_is_external(result.get()) &&
+            lean_obj_tag(result.get()) == 1, "Expected Except.ok scalar carrier");
+    require(lean_unbox_float(lean_ctor_get(result.get(), 0)) == 3.25,
+            "Incorrect boxed Float payload");
+  }
+  require(input->m_rc == 1, "Item changed borrowed references");
+}
+
+void checkedIndexSelect(int scenario) {
+  const uint64_t size = scenario == 3 ? 0 : 2;
+  const uint64_t count = scenario == 3 ? 0 : 1;
+  const uint64_t id = scenario == 1 ? UINT64_MAX : scenario == 2 ? 2 : 0;
+  Object input(lean_torch_full(shape({size}), 3.25, 0, lean_box(1)), lean_dec);
+  Object indices(lean_torch_full_int(shape({count}), id), lean_dec);
+  Object result(lean_torch_index_select_checked(size, count, input.get(), 0, indices.get()), lean_dec);
+  if (scenario == 1 || scenario == 2) exceptError(result.get(), "indexSelect");
+  else values(exceptValue(result.get()), count, 3.25);
+  require(input->m_rc == 1 && indices->m_rc == 1,
+          "Index selection changed borrowed references");
+}
+
 void flashSuccess() {
   auto q = full({1, 1, 2, 2}), v = full({1, 1, 2, 2}, 7);
   auto result = flash(q.get(), q.get(), v.get());
@@ -510,6 +560,43 @@ void checkedLinalgFailures() {
   exceptError(log.get(), "matrixLog");
 }
 #endif
+void checkedArgmax(int mode) {
+  auto original = full({2, mode == 2 ? 0u : 3u}, 7);
+  auto input = mode == 1 ? cast(original.get(), "Complex64") :
+    Object(retain(original.get()), lean_dec);
+  Object dims(shape({2, mode == 2 ? 0u : 3u}), lean_dec);
+  const auto refs = input->m_rc;
+  Object invalid(lean_mk_string("not a tensor"), lean_dec);
+  const uint64_t dim = mode == 3 ? std::numeric_limits<uint64_t>::max() : 1;
+  Object result(CHECKED(lean_torch_argmax)(retain(dims.get()),
+    mode == 4 ? invalid.get() : input.get(), dim), lean_dec);
+  if (mode == 0) values(exceptValue(result.get()), 2, 0);
+  else exceptError(result.get(), "argmax");
+  require(dims->m_rc == 1 && input->m_rc == refs && invalid->m_rc == 1,
+    "checked argmax changed borrowed refs or leaked shape");
+}
+
+void checkedSelectionPair(bool topK, int mode) {
+  auto original = topK ? full({2, 3}, 7) : full({1, 2, mode == 2 ? 0u : 3u}, 7);
+  auto input = mode == 1 ? cast(original.get(), "Complex64") :
+    Object(retain(original.get()), lean_dec);
+  const auto refs = input->m_rc;
+  const uint64_t k = mode == 2 ? 4 : mode == 3 ? std::numeric_limits<uint64_t>::max() : 2;
+  Object result(topK ? CHECKED(lean_torch_topk_2d)(2, 3, input.get(), k, 1) :
+    CHECKED(lean_torch_max_dim_3d)(1, 2, 3, input.get(), 2), lean_dec);
+  if (mode != 0) exceptError(result.get(), topK ? "topKLast2d" : "maxLast3d");
+  else {
+    require(!lean_is_scalar(result.get()) && !lean_is_external(result.get()) &&
+      lean_obj_tag(result.get()) == 1, "Expected Except.ok selection pair");
+    auto* pair = lean_ctor_get(result.get(), 0);
+    require(!lean_is_scalar(pair) && !lean_is_external(pair) && lean_obj_tag(pair) == 0,
+      "Expected selection value/index pair");
+    values(lean_ctor_get(pair, 0), topK ? 4 : 2, 7);
+    Object dtype(lean_torch_get_dtype(shape({}), lean_ctor_get(pair, 1)), lean_dec);
+    require(std::string(lean_string_cstr(dtype.get())) == "Int64", "Selection index dtype changed");
+  }
+  require(input->m_rc == refs, "checked selection changed borrowed references");
+}
 } // namespace
 
 int main() {
@@ -523,6 +610,20 @@ int main() {
     }
   };
   run("flash/success-carrier", flashSuccess);
+  run("checked/item-success", [] { checkedItem(false); });
+  run("checked/item-shape-error", [] { checkedItem(true); });
+  run("checked/indexSelect-success", [] { checkedIndexSelect(0); });
+  run("checked/indexSelect-negative-error", [] { checkedIndexSelect(1); });
+  run("checked/indexSelect-bounds-error", [] { checkedIndexSelect(2); });
+  run("checked/indexSelect-empty", [] { checkedIndexSelect(3); });
+  for (bool unreduced : {false, true}) {
+    run(unreduced ? "checked/crossEntropyNone-success" : "checked/crossEntropy-success",
+        [&] { checkedCrossEntropy(unreduced, 0); });
+    run(unreduced ? "checked/crossEntropyNone-dtype-error" : "checked/crossEntropy-dtype-error",
+        [&] { checkedCrossEntropy(unreduced, 1); });
+    run(unreduced ? "checked/crossEntropyNone-label-error" : "checked/crossEntropy-label-error",
+        [&] { checkedCrossEntropy(unreduced, 2); });
+  }
   run("flash/dropout-error", flashDropout);
   run("flash/rank-error", flashRank);
   run("flash/dtype-error", flashDType);
@@ -546,6 +647,18 @@ int main() {
   run("transpose/axis-error", [] { transpose(true); });
   run("transpose/wrapped-axis-error", [] { transpose(false, true); });
   run("transpose/scalar-success", transposeScalar);
+  run("checked/argmax-success", [] { checkedArgmax(0); });
+  run("checked/argmax-complex-error", [] { checkedArgmax(1); });
+  run("checked/argmax-empty-error", [] { checkedArgmax(2); });
+  run("checked/argmax-wrapped-axis-error", [] { checkedArgmax(3); });
+  run("checked/argmax-owned-shape-early-error", [] { checkedArgmax(4); });
+  run("checked/maxLast3d-success", [] { checkedSelectionPair(false, 0); });
+  run("checked/maxLast3d-complex-error", [] { checkedSelectionPair(false, 1); });
+  run("checked/maxLast3d-empty-error", [] { checkedSelectionPair(false, 2); });
+  run("checked/topKLast2d-success", [] { checkedSelectionPair(true, 0); });
+  run("checked/topKLast2d-complex-error", [] { checkedSelectionPair(true, 1); });
+  run("checked/topKLast2d-range-error", [] { checkedSelectionPair(true, 2); });
+  run("checked/topKLast2d-wrapped-k-error", [] { checkedSelectionPair(true, 3); });
   run("checked/expand-error", [] { checkedExpand(true); });
   run("checked/expand-success", [] { checkedExpand(false); });
   run("checked/cat-error", [] { checkedCat(true); });

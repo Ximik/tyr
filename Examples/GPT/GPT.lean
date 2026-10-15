@@ -213,7 +213,7 @@ def loss {cfg : Config} {batch seq : UInt64}
   -- Reshape for cross-entropy: (batch*seq, vocab) vs (batch*seq,)
   let logits_flat ← TensorOps.reshape logits #[batch * seq, cfg.vocab_size]
   let targets_flat ← TensorOps.reshape targets #[batch * seq]
-  return TensorOps.crossEntropy logits_flat targets_flat
+  IO.ofExcept (Tensor.crossEntropy? logits_flat targets_flat)
 
 /-- Training state using Optax-style optimizer -/
 structure TrainState (cfg : Config) where

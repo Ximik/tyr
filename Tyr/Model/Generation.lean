@@ -44,7 +44,8 @@ def sampleFromLogits {batch vocab : UInt64}
     -- `argmax` removes dim 1 via `reduceShape`, which does not reduce at
     -- symbolic dims; `reshapeChecked` re-establishes `#[batch]` with a
     -- runtime check.
-    pure (Tensor.reshapeChecked (Tensor.argmax logits 1) #[batch])
+    let indices ← IO.ofExcept (Tensor.argmax? logits 1)
+    IO.ofExcept (Tensor.reshapeChecked? indices #[batch])
   | .multinomial temperature topK topP =>
     if temperature <= 0.0 then
       throw <| IO.userError s!"multinomial sampling requires temperature > 0, got {temperature}"

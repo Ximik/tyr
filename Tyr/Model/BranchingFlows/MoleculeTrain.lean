@@ -246,7 +246,7 @@ private def moleculeMaskedWeightedCrossEntropy {batch maxLen vocab : UInt64}
   let targets2 := Tensor.reshapeChecked targets #[n]
   let mask2 := Tensor.reshapeChecked mask #[n]
   let weights2 := Tensor.reshapeChecked weights #[n]
-  let per := Tensor.crossEntropyNone logits2 targets2
+  let per := Tensor.crossEntropyNoneChecked logits2 targets2
   let masked := Tensor.Promoting.mul (Tensor.Promoting.mul per mask2) weights2
   let denom := Tensor.sumAll mask2
   Tensor.Promoting.div (Tensor.sumAll masked) (Tensor.Promoting.addScalar denom 1.0e-8)

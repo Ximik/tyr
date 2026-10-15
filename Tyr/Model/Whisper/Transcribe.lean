@@ -614,7 +614,8 @@ private def argmaxTokenFromLogits {vocab : UInt64}
     let id := p.1.toUInt32
     if !(isForbiddenToken rules id) then
       return id
-  let nextTokRaw : Tensor { device := device, shape := #[1], dtype := .Int64 } := (Tensor.argmax logits 1).reshapeChecked #[1]
+  let indices ← IO.ofExcept (Tensor.argmax? logits 1)
+  let nextTokRaw : Tensor { device := device, shape := #[1], dtype := .Int64 } ← IO.ofExcept (indices.reshapeChecked? #[1])
   let nextVals ← Tensor.toUInt64Array nextTokRaw
   pure (nextVals.getD 0 fallback).toUInt32
 

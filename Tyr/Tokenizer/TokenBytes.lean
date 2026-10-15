@@ -34,8 +34,15 @@ private def int64VectorFromArray (arr : Array Int64) (n : UInt64) : Tensor { sha
   (Tensor.fromInt64Array arr).reshapeChecked #[n]
 
 private def indexSelect1d {n k : UInt64} (t : Tensor { shape := #[n], dtype := .Int64, device := device })
-    (indices : Tensor { shape := #[k], dtype := .Int64, device := device }) : Tensor { shape := #[k], dtype := .Int64, device := device } :=
-  Tensor.indexSelect t indices
+    (indices : Tensor { shape := #[k], dtype := .Int64, device := device }) :
+    IO (Tensor { shape := #[k], dtype := .Int64, device := device }) :=
+  IO.ofExcept (Tensor.indexSelect? t indices)
+
+/-- Transfer the byte table without leaving the IO error boundary. -/
+private def bytesAt (tb : TokenBytes) (device : Device) :
+    IO (Tensor { shape := #[tb.vocabSize.toUInt64], dtype := .Int64, device }) := do
+  let raw ← RawTensor.convertIO tb.bytes.shape tb.bytes.raw device none
+  IO.ofExcept (Tensor.ofRaw raw)
 
 /-- Build token bytes mapping from a BPE tokenizer.
     For each token:
@@ -64,9 +71,10 @@ def TokenBytes.totalBytes (tb : TokenBytes) (tokenIds : Array UInt32) : IO UInt6
   -- Convert token IDs to Int64 tensor for indexing
   let idxTensor := int64VectorFromArray (tokenIds.map (·.toNat.toInt64)) tokenIds.size.toUInt64
   -- Use index_select to get byte counts for each token
-  let bytesPerToken := indexSelect1d tb.bytes idxTensor
+  let bytesPerToken ← indexSelect1d tb.bytes idxTensor
   -- Sum all bytes
-  let totalFloat := Tensor.item (Tensor.sumAll bytesPerToken)
+  let total ← IO.ofExcept (Tensor.sumAll? bytesPerToken)
+  let totalFloat ← IO.ofExcept (Tensor.item? total)
   return totalFloat.toUInt64
 
 /-- Compute total bytes for a 1D tensor of token IDs.
@@ -74,9 +82,10 @@ def TokenBytes.totalBytes (tb : TokenBytes) (tokenIds : Array UInt32) : IO UInt6
 def TokenBytes.totalBytesFromTensor (tb : TokenBytes) (tokenIds : Tensor { shape := #[n], dtype := .Int64, device := device })
     : IO UInt64 := do
   -- Index into bytes to get byte counts per token
-  let bytesPerToken := indexSelect1d (tb.bytes.to device) tokenIds
+  let bytesPerToken ← indexSelect1d (← bytesAt tb device) tokenIds
   -- Sum all bytes
-  let totalFloat := Tensor.item (Tensor.sumAll bytesPerToken)
+  let total ← IO.ofExcept (Tensor.sumAll? bytesPerToken)
+  let totalFloat ← IO.ofExcept (Tensor.item? total)
   return totalFloat.toUInt64
 
 /-- Compute total bytes with a loss mask.
@@ -88,16 +97,17 @@ def TokenBytes.totalBytesWithMask (tb : TokenBytes)
   -- Flatten for indexing
   let numTokens := b * s
 
-  let flatIds := tokenIds.reshapeChecked #[numTokens]
-  let flatMask := mask.reshapeChecked #[numTokens]
+  let flatIds ← IO.ofExcept (tokenIds.reshapeChecked? #[numTokens])
+  let flatMask ← IO.ofExcept (mask.reshapeChecked? #[numTokens])
 
   -- Get byte counts per token
-  let bytesPerToken := indexSelect1d (tb.bytes.to device) flatIds
+  let bytesPerToken ← indexSelect1d (← bytesAt tb device) flatIds
 
   -- Multiply by mask and sum (mask is Float32, so cast the counts)
-  let bytesFloat := bytesPerToken.toFloat32
-  let maskedBytes := bytesFloat * flatMask
-  let total := Tensor.item (Tensor.sumAll maskedBytes)
+  let bytesFloat ← IO.ofExcept (bytesPerToken.castDType? .Float32)
+  let maskedBytes ← IO.ofExcept (Tensor.Preserving.mul? bytesFloat flatMask)
+  let summed ← IO.ofExcept (Tensor.sumAll? maskedBytes)
+  let total ← IO.ofExcept (Tensor.item? summed)
   return total.toUInt64
 
 /-- Compute total bytes with a loss mask, with the batch and sequence

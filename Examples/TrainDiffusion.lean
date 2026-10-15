@@ -142,7 +142,7 @@ def sampleAnimated {cfg : Config}
 
     let logits := forward params x t rotaryCache
     let probs := Tensor.softmax (logits / temperature)
-    let (confidences, predictedTokens) := Tensor.maxLast3d probs
+    let (confidences, predictedTokens) ← IO.ofExcept (Tensor.maxLast3d? probs)
 
     -- Extract arrays for display
     let tokensArr ← tensorToArray (Tensor.reshapeChecked x #[cfg.seq_len])
@@ -192,7 +192,7 @@ def sampleAnimated {cfg : Config}
     -- Update tokens (top-k decoding)
     let negInf := Tensor.full #[1, cfg.seq_len] (-1e10)
     let maskedConf := Tensor.whereSelect maskedPositions confidences negInf
-    let (_, topkIdx) := Tensor.topKLast2d maskedConf k
+    let (_, topkIdx) ← IO.ofExcept (Tensor.topKLast2d? maskedConf k)
     let selectMask := Tensor.scatter2d (Tensor.zeros #[1, cfg.seq_len]) 1
                         (topkIdx) (Tensor.ones #[1, k])
     let finalMask := Tensor.logicalAnd (Tensor.lt (Tensor.zeros #[1, cfg.seq_len]) selectMask) maskedPositions
@@ -272,7 +272,7 @@ def sampleAnimatedMultiple {cfg : Config}
 
       let logits := forward params x t rotaryCache
       let probs := Tensor.softmax (logits / temperature)
-      let (confidences, predictedTokens) := Tensor.maxLast3d probs
+      let (confidences, predictedTokens) ← IO.ofExcept (Tensor.maxLast3d? probs)
 
       -- Extract arrays for display
       let tokensArr ← tensorToArray (Tensor.reshapeChecked x #[cfg.seq_len])
@@ -322,7 +322,7 @@ def sampleAnimatedMultiple {cfg : Config}
       -- Update tokens
       let negInf := Tensor.full #[1, cfg.seq_len] (-1e10)
       let maskedConf := Tensor.whereSelect maskedPositions confidences negInf
-      let (_, topkIdx) := Tensor.topKLast2d maskedConf k
+      let (_, topkIdx) ← IO.ofExcept (Tensor.topKLast2d? maskedConf k)
       let selectMask := Tensor.scatter2d (Tensor.zeros #[1, cfg.seq_len]) 1
                           (topkIdx) (Tensor.ones #[1, k])
       let finalMask := Tensor.logicalAnd (Tensor.lt (Tensor.zeros #[1, cfg.seq_len]) selectMask) maskedPositions

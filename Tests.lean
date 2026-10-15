@@ -15,6 +15,10 @@ import Tests.TestNanoChatCheckpoint
 import Tests.TestFFIBoundary
 import Tests.TestParquetRecovery
 import Tests.TestResampleOwnership
+import Tests.TestTokenBytesRecovery
+import Tests.TestSelectionContracts
+import Tests.TestLossContracts
+import Tests.TestConvolutionContracts
 import Tests.TestWidgetTyped
 import Tests.TestTypedStandalone
 import Tests.TestTensorTreeCast

@@ -498,7 +498,8 @@ private partial def greedyLoopCached {batch maxLen : UInt64}
   if remaining == 0 then
     return ⟨curSeq, curIds⟩
 
-  let nextTokRaw : Tensor { device := device, shape := #[batch], dtype := .Int64 } := (Tensor.argmax lastLogits 1).reshapeChecked #[batch]
+  let indices ← IO.ofExcept (Tensor.argmax? lastLogits 1)
+  let nextTokRaw : Tensor { device := device, shape := #[batch], dtype := .Int64 } ← IO.ofExcept (indices.reshapeChecked? #[batch])
   let nextTok : Tensor { device := device, shape := #[batch], dtype := .Int64 } :=
     match eosVector, finished with
     | some eosTok, some doneMask =>
@@ -718,7 +719,8 @@ private partial def greedyLoopUncached {batch : UInt64}
   let last3 : Tensor { device := device, shape := #[batch, 1, ThinkerLmVocabSize cfg] } :=
     Tensor.reshapeChecked (Tensor.sliceChecked logits 1 lastPos 1 #[batch, 1, ThinkerLmVocabSize cfg]) #[batch, 1, ThinkerLmVocabSize cfg]
   let last2 : Tensor { device := device, shape := #[batch, ThinkerLmVocabSize cfg] } := Tensor.reshapeChecked last3 #[batch, ThinkerLmVocabSize cfg]
-  let nextTokRaw : Tensor { device := device, shape := #[batch], dtype := .Int64 } := (Tensor.argmax last2 1).reshapeChecked #[batch]
+  let indices ← IO.ofExcept (Tensor.argmax? last2 1)
+  let nextTokRaw : Tensor { device := device, shape := #[batch], dtype := .Int64 } ← IO.ofExcept (indices.reshapeChecked? #[batch])
   let nextTok : Tensor { device := device, shape := #[batch], dtype := .Int64 } :=
     match eosVector, finished with
     | some eosTok, some doneMask =>

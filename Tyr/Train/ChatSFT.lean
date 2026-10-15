@@ -166,29 +166,46 @@ def SFTBatch.ofConversationBatch (batch : ConversationBatch) : SFTBatch (device 
     promoted sum-accumulation dtype of logits and mask (Float32 when both are
     Float32).
 -/
-def maskedCrossEntropy {batch seq vocab : UInt64} {d m result : DType} {dev : Device}
+def maskedCrossEntropy? {batch seq vocab : UInt64} {d m result : DType} {dev : Device}
     [DType.Promotes d m result]
     (logits : Tensor ⟨#[batch, seq, vocab], d, dev⟩)
     (targets : Tensor ⟨#[batch, seq], .Int64, dev⟩)
     (mask : Tensor ⟨#[batch, seq], m, dev⟩)
-    : Tensor ⟨#[], (DType.promote d m).sumResult, dev⟩ :=
+    : Except String (Tensor ⟨#[], (DType.promote d m).sumResult, dev⟩) := do
+  if !(mask.raw.dtype.isBool || mask.raw.dtype.isIntegral || mask.raw.dtype.isRealFloating) then
+    throw "maskedCrossEntropy requires a real numeric or Bool mask"
   -- Flatten for cross-entropy
   let batchSeq := batch * seq
-  let logitsFlat := logits.reshapeChecked #[batchSeq, vocab]
-  let targetsFlat := targets.reshapeChecked #[batchSeq]
+  let logitsFlat ← logits.reshapeChecked? #[batchSeq, vocab]
+  let targetsFlat ← targets.reshapeChecked? #[batchSeq]
   -- Compute per-element loss
-  let lossesFlat := Tensor.crossEntropyNone logitsFlat targetsFlat
+  let lossesFlat ← Tensor.crossEntropyNone? logitsFlat targetsFlat
   -- Apply mask and compute mean over valid positions
-  let maskFlat := mask.reshapeChecked #[batchSeq]
-  let maskedLosses := Tensor.mul lossesFlat maskFlat
+  let maskFlat ← mask.reshapeChecked? #[batchSeq]
+  Tensor.checkPointwise lossesFlat maskFlat
+  let maskedLosses : Tensor ⟨#[batchSeq], DType.promote d m, dev⟩ ←
+    Tensor.ofRaw (← RawTensor.mulChecked #[batchSeq] lossesFlat.raw maskFlat.raw)
   -- Sum losses and divide by number of valid tokens
-  let totalLoss := Tensor.sumAll maskedLosses
-  let numValid := Tensor.sumAll maskFlat
+  let totalLoss ← Tensor.sumAll? maskedLosses
+  let numValid ← Tensor.sumAll? maskFlat
   -- Divide by number of valid tokens to get mean loss
   -- Use scalar multiplication with the reciprocal to avoid tensor division
-  let numValidFloat := Tensor.item numValid
+  let numValidFloat ← Tensor.item? numValid
   let epsFloat : Float := 1e-8
-  Tensor.Preserving.mulScalar totalLoss (1.0 / (numValidFloat + epsFloat))
+  Tensor.Preserving.mulScalar? totalLoss (1.0 / (numValidFloat + epsFloat))
+
+/-- Pure masked loss over real floating logits. Use `maskedCrossEntropy?` to
+recover invalid target labels or unsupported native kernels. -/
+def maskedCrossEntropy {batch seq vocab : UInt64} {d m result : DType} {dev : Device}
+    [DType.RealFloating d] [DType.Promotes d m result]
+    (logits : Tensor ⟨#[batch, seq, vocab], d, dev⟩)
+    (targets : Tensor ⟨#[batch, seq], .Int64, dev⟩)
+    (mask : Tensor ⟨#[batch, seq], m, dev⟩)
+    (_maskDomain : (m.isBool || m.isIntegral || m.isRealFloating) = true := by first | rfl | decide) :
+    Tensor ⟨#[], (DType.promote d m).sumResult, dev⟩ :=
+  match maskedCrossEntropy? logits targets mask with
+  | .ok loss => loss
+  | .error message => panic! s!"maskedCrossEntropy: {message}"
 
 /-! ## Data Preparation -/
 
@@ -276,7 +293,7 @@ def sftForward {batch seq vocab : UInt64} {d m result : DType} {dev : Device}
   -- Get logits from model
   let logits ← forwardFn inputs
   -- Compute masked loss
-  return maskedCrossEntropy logits targets mask
+  IO.ofExcept (maskedCrossEntropy? logits targets mask)
 
 /-- Evaluate validation loss over multiple batches.
 
@@ -302,7 +319,7 @@ def evalValidationLoss [TensorStruct Params]
     let batch := moveBatchToDevice batch device
     if batch.numValidTokens > 0 then
       let ⟨_, logits⟩ ← forwardFn params batch.inputs
-      let loss := maskedCrossEntropy logits batch.targets batch.mask
+      let loss ← IO.ofExcept (maskedCrossEntropy? logits batch.targets batch.mask)
       totalLoss := totalLoss + Tensor.item loss * batch.numValidTokens.toFloat
       totalValid := totalValid + batch.numValidTokens
 
