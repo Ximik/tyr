@@ -882,10 +882,16 @@ def sliceChecked {σ : StaticSpec} (t : Tensor σ) (dim : Nat) (start len : UInt
   | .ok r => r
   | .error message => nativeInvariantFailure s!"Tensor.sliceChecked: {message}"
 
-/-- Vector-Jacobian product: for `y = f(x)` and output cotangent `dy`, returns
-    the input cotangent, checked against `x`'s spec. -/
-def grad {σ τ : StaticSpec} (y : Tensor τ) (x : Tensor σ) (dy : Tensor τ) : Tensor σ :=
-  x.checkedReplacement (RawTensor.grad σ.shape τ.shape y.raw x.raw dy.raw)
+/-- Vector-Jacobian product, checked against `x`'s spec. Saved intermediates
+are released by default. As in PyTorch, omitted retention follows `createGraph`.
+Unused inputs produce zero gradients; parameter gradient buffers are unchanged. -/
+def grad {σ τ : StaticSpec} (y : Tensor τ) (x : Tensor σ) (dy : Tensor τ)
+    (retainGraph : Option Bool := none) (createGraph : Bool := false) : IO (Tensor σ) := do
+  let raw ← RawTensor.grad σ.shape τ.shape y.raw x.raw dy.raw
+    (retainGraph.getD createGraph) createGraph
+  match x.checkedReplacement? raw with
+  | .ok gradient => pure gradient
+  | .error message => throw (IO.userError s!"Tensor.grad: {message}")
 
 /-- 1-D Float32 tensor from a host array; the result shape records the actual
     array length. -/
@@ -1059,9 +1065,11 @@ def logSoftmax {σ : StaticSpec} (t : Tensor σ) (dim : Int32 := -1)
     (_real : σ.dtype.isRealFloating = true := by first | rfl | exact DType.isRealFloating_of_realFloating | decide) : Tensor σ :=
   unaryResult "logSoftmax" t (logSoftmax? t dim)
 
-/-- Backward pass from a scalar loss (gradient = 1.0). -/
-def backwardLoss {d : DType} {dev : Device} (loss : Tensor ⟨#[], d, dev⟩) : IO Unit :=
-  RawTensor.backwardLoss loss.raw
+/-- Backward from a scalar loss (gradient = 1.0). Saved intermediates are released
+by default; omitted retention follows `createGraph`, as in PyTorch. -/
+def backwardLoss {d : DType} {dev : Device} (loss : Tensor ⟨#[], d, dev⟩)
+    (retainGraph : Option Bool := none) (createGraph : Bool := false) : IO Unit :=
+  RawTensor.backwardLoss loss.raw (retainGraph.getD createGraph) createGraph
 
 /-! ## Autograd and fused layer primitives -/
 
@@ -1076,9 +1084,10 @@ def gradOf {σ : StaticSpec} (t : Tensor σ) : IO (Tensor σ) := do
   | .ok gradient => pure gradient
   | .error message => throw (IO.userError s!"Tensor.gradOf: {message}")
 
-/-- Clear the parameter's accumulated gradient in place. -/
-def zeroGrad {σ : StaticSpec} (t : Tensor σ) : IO Unit :=
-  RawTensor.zeroGrad t.shape t.raw
+/-- Clear accumulated gradients. The default releases the gradient and breaks
+cycles created by higher-order backward. Pass false to zero an existing buffer. -/
+def zeroGrad {σ : StaticSpec} (t : Tensor σ) (setToNone : Bool := true) : IO Unit :=
+  RawTensor.zeroGrad t.shape t.raw setToNone
 
 
 /-- Change the autograd flag without changing other aliases. Creating mutable

@@ -1,4 +1,5 @@
 import LeanTest
+import Tests.Assertions
 import Tyr.Typed.Neural
 import Tyr.Torch
 import Tyr.RawTensor.Gemma4
@@ -94,12 +95,12 @@ example (_q : AttentionTensor) (_mask : Tensor ⟨#[1, 16], .Bool, .CPU⟩) : Tr
   manualSeed 42
   let expectedNext ← Tensor.randn #[8]
   manualSeed 42
-  Tensor.backwardLoss loss
+  Tensor.backwardLoss loss (retainGraph := some true)
   let firstGradient ← v.gradOf
   let firstValues ← firstGradient.toFloatArray
   LeanTest.assertTrue (firstValues.any (· > 0))
   v.zeroGrad
-  Tensor.backwardLoss loss
+  Tensor.backwardLoss loss (retainGraph := some true)
   LeanTest.assertEqual (← (← v.gradOf).toFloatArray) firstValues
   let actualNext ← Tensor.randn #[8]
   LeanTest.assertEqual (← actualNext.toFloatArray) (← expectedNext.toFloatArray)
@@ -113,6 +114,7 @@ example (_q : AttentionTensor) (_mask : Tensor ⟨#[1, 16], .Bool, .CPU⟩) : Tr
   LeanTest.assertEqual (← (← v.gradOf).toFloatArray) firstValues
     "A later forward must preserve a surviving graph's sampled mask"
   LeanTest.assertEqual (← firstGradient.toFloatArray) firstValues
+  Tests.assertThrows (Tensor.backwardLoss loss) "backward through the graph a second time"
 
 @[test] def testAttentionProbabilityErrorsAreRecoverable : IO Unit := do
   let q : AttentionTensor := Tensor.zeros #[1, 1, 16, 4]

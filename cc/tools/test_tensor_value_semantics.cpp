@@ -105,7 +105,7 @@ Object gradient(lean_object* input) {
 #endif
 }
 void zeroGrad(lean_object* input) {
-  Object result(lean_torch_zero_grad(shape({2, 2}), input), lean_dec);
+  Object result(lean_torch_zero_grad(shape({2, 2}), input, 1), lean_dec);
 #ifndef TYR_LEGACY_VALUE_UPDATES
   require(lean_io_result_is_ok(result.get()), "zeroGrad failed");
 #endif

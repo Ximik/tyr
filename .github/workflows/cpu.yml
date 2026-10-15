@@ -110,6 +110,10 @@ jobs:
         run: |
           bash scripts/test_native_tensor_values.sh
 
+      - name: Test autograd graph release and explicit retention
+        run: |
+          bash scripts/test_native_autograd_lifetime.sh
+
       - name: Check recoverable native tensor errors
         run: |
           bash scripts/test_native_tensor_errors.sh

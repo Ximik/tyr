@@ -104,11 +104,11 @@ private def alignDType {shape : Shape} {device : Device}
   let recovered ← IO.ofExcept (packed.atDType? float32)
   LeanTest.assertTrue recovered.requiresGrad
   LeanTest.assertFalse recovered.hasGradFn
-  Tensor.backwardLoss (Tensor.sumAll (recovered * recovered))
+  let intermediate := recovered * recovered
+  Tensor.backwardLoss (Tensor.sumAll intermediate) (retainGraph := some true)
   LeanTest.assertEqual (← (← parameter.gradOf).toFloatArray) #[4, 6]
   LeanTest.assertEqual (← (← recovered.gradOf).toFloatArray) #[4, 6]
   parameter.zeroGrad
-  let intermediate := parameter * parameter
   let graph ← IO.ofExcept intermediate.reifyDType
   let recoveredGraph ← IO.ofExcept (graph.atDType? float32)
   LeanTest.assertTrue recoveredGraph.requiresGrad

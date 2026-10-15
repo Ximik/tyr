@@ -69,8 +69,9 @@ The source shape is checked before conversion and never reshaped. -/
     An undefined gradient is represented by a zero tensor. -/
 @[extern "lean_torch_grad_of"] opaque gradOf (shape : Shape) (t : @& RawTensor) : IO RawTensor
 
-/-- Clear the tensor's accumulated gradient in place. -/
-@[extern "lean_torch_zero_grad"] opaque zeroGrad (shape : Shape) (t : @& RawTensor) : IO Unit
+/-- Clear accumulated gradients, optionally releasing their native graph/storage. -/
+@[extern "lean_torch_zero_grad"] opaque zeroGrad (shape : Shape) (t : @& RawTensor)
+    (setToNone : Bool) : IO Unit
 
 @[extern "lean_torch_tensor_add"] opaque add (shape : Shape) (a b : @& RawTensor) : RawTensor
 
@@ -225,8 +226,15 @@ namespace torch.RawTensor
 @[extern "lean_torch_stack_1d"] opaque stack1d (k n : UInt64) (tensors : Array RawTensor)
     (dim : Int64 := 0) : RawTensor
 
-/-- Vector-Jacobian product: gradient of `y` w.r.t. `x` under cotangent `dy`. -/
-@[extern "lean_torch_tensor_grad"] opaque grad (sx sy : Shape) (y x dy : @& RawTensor) : RawTensor
+/-- A vector-Jacobian product consumes saved graph intermediates unless retained.
+The effective retention flag is resolved by the typed API from `createGraph`. -/
+@[extern "lean_torch_tensor_grad"] opaque grad (sx sy : Shape) (y x dy : @& RawTensor)
+    (retainGraph createGraph : Bool) : IO RawTensor
+
+/-- Differentiate all supplied leaves in one engine invocation. -/
+@[extern "lean_torch_tensor_grad_many"] opaque gradMany
+    (output : @& RawTensor) (inputs : @& Array RawTensor) (cotangent : @& RawTensor)
+    (retainGraph createGraph : Bool) : IO (Array RawTensor)
 
 /-- 1-D Float32 tensor from a host array. -/
 @[extern "lean_torch_from_float_array"] opaque fromFloatArray (arr : @& Array Float) : RawTensor
@@ -252,7 +260,8 @@ namespace torch.RawTensor
 @[extern "lean_torch_log_softmax"] opaque logSoftmax (t : @& RawTensor) (dim : Int32 := -1) : RawTensor
 
 /-- Backward pass from a scalar loss (gradient = 1.0). -/
-@[extern "lean_torch_backward_loss"] opaque backwardLoss (loss : @& RawTensor) : IO Unit
+@[extern "lean_torch_backward_loss"] opaque backwardLoss (loss : @& RawTensor)
+    (retainGraph createGraph : Bool) : IO Unit
 
 /-- Argmax along a dimension (Int64 indices). The shape argument is unread natively. -/
 @[extern "lean_torch_argmax"] opaque argmax (shape : Shape) (t : @& RawTensor) (dim : UInt64) : RawTensor

@@ -611,9 +611,9 @@ def count [TensorStruct α] (model : α) : Nat :=
 def grads [TensorStruct α] (model : α) : IO α :=
   mapM Tensor.gradOf model
 
-/-- Clear all accumulated gradients in the structure in place. -/
-def zeroGrads [TensorStruct α] (model : α) : IO Unit := do
-  let _ ← mapM (fun t => do Tensor.zeroGrad t; pure t) model
+/-- Clear all accumulated gradients, releasing their buffers by default. -/
+def zeroGrads [TensorStruct α] (model : α) (setToNone : Bool := true) : IO Unit := do
+  let _ ← mapM (fun t => do Tensor.zeroGrad t setToNone; pure t) model
   pure ()
 
 /-- Detach all tensors from the computation graph -/
@@ -645,6 +645,28 @@ private def withRawLeaves [TensorStruct α] (template : α) (leaves : Array RawT
         | .ok tensor => tensor
         | .error message => nativeInvariantFailure s!"functionalGrad: {message}"))
     template).run 0).1
+
+/-- Differentiate an existing output with respect to every tensor leaf in one
+native engine invocation. This does not accumulate parameter gradients. Saved
+intermediates are released unless retained; omitted retention follows `createGraph`.
+Unused leaves receive zero gradients. -/
+def grad {σ : StaticSpec} [TensorStruct α]
+    (output : Tensor σ) (inputs : α) (cotangent : Tensor σ)
+    (retainGraph : Option Bool := none) (createGraph : Bool := false) : IO α := do
+  let gradients ← RawTensor.gradMany output.raw (rawLeaves inputs) cotangent.raw
+    (retainGraph.getD createGraph) createGraph
+  let (result, count) ← ((mapM (m := StateT Nat IO) (fun {τ} _ => do
+    let index ← get
+    set (index + 1)
+    match gradients[index]? with
+    | none => throw (IO.userError "TensorStruct.grad: missing gradient leaf")
+    | some raw =>
+      match Tensor.ofRaw (σ := τ) raw with
+      | .ok tensor => pure tensor
+      | .error message => throw (IO.userError s!"TensorStruct.grad: {message}")) inputs).run 0)
+  if count != gradients.size then
+    throw (IO.userError "TensorStruct.grad: unexpected gradient leaves")
+  pure result
 
 /-- Pure first derivatives of a scalar-valued function over a tensor tree.
     Fresh differentiation variables live entirely inside the native callback;

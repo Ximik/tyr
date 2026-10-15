@@ -34,12 +34,13 @@ private def close {σ τ : StaticSpec} (x : Tensor σ) (y : Tensor τ) (tol : Fl
   let expected := (Tensor.fromFloatArray #[-1.34164025, -0.44721342, 0.44721342, 1.34164025,
     -1.34164025, -0.44721342, 0.44721342, 1.34164025]).reshapeChecked #[1, 2, 2, 2]
   close y expected
-  let grad := Tensor.grad y x ((Tensor.ones #[1, 2, 2, 2]))
+  let grad ← Tensor.grad y x (Tensor.ones #[1, 2, 2, 2]) (retainGraph := some true)
   close grad (Tensor.zeros #[1, 2, 2, 2])
   let seed := (Tensor.fromFloatArray #[1, 0, 0, 0, 1, 0, 0, 0]).reshapeChecked #[1, 2, 2, 2]
-  let gradient := Tensor.grad y x seed
+  let gradient ← Tensor.grad y x seed
   close gradient ((Tensor.fromFloatArray #[0.268328, -0.357771, -0.089443, 0.178885,
     0.268328, -0.357771, -0.089443, 0.178885]).reshapeChecked #[1, 2, 2, 2])
+  Tests.assertThrows (Tensor.grad y x seed) "backward through the graph a second time"
 
 @[test] def testVAEUpsampleAndOddDownsample : IO Unit := do
   let x := (Tensor.fromFloatArray #[1, 2, 3, 4, 5, 6]).reshapeChecked #[1, 1, 2, 3]

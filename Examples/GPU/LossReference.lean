@@ -17,7 +17,7 @@ def referenceTraining {rows : UInt64}
   let logitsF := logits.toFloat32
   let losses := Tensor.crossEntropyNone logitsF targets
   let mean := Tensor.crossEntropy logitsF targets
-  let gradient := Tensor.grad mean logits (Tensor.onesLike mean)
+  let gradient ← Tensor.grad mean logits (Tensor.onesLike mean)
   return (losses, mean, gradient)
 
 end Examples.GPU.RunLoss

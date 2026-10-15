@@ -111,7 +111,7 @@ namespace torch.RawTensor
     (base : Float) (requiresGrad : Bool) (noGrad : requiresGrad = false := by decide) : RawTensor
 
 @[extern "lean_torch_backward_unit"] opaque backward (shape : Shape)
-    (output cotangent : @& RawTensor) : IO Unit
+    (output cotangent : @& RawTensor) (retainGraph createGraph : Bool) : IO Unit
 @[extern "lean_torch_has_grad_fn"] opaque hasGradFn (shape : Shape)
     (input : @& RawTensor) : Bool
 

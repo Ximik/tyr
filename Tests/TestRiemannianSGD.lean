@@ -1,4 +1,5 @@
 import LeanTest
+import Tests.Assertions
 import Tyr.Module.Linear
 import Tyr.Modular.RiemannianModule
 import Tyr.Optim.RiemannianSGD
@@ -8,6 +9,23 @@ namespace Tests.RiemannianSGD
 open LeanTest
 open torch
 open Tyr.Modular
+
+@[test]
+def testTreePullbackAfterOutputCotangentReleasesGraph : IO Unit := do
+  let initial : Tensor ⟨#[1], .Float32, .CPU⟩ × Tensor ⟨#[1], .Float32, .CPU⟩ :=
+    (Tensor.fromFloatArray #[2], Tensor.fromFloatArray #[3])
+  let params ← TensorStruct.makeLeafParams initial
+  let prediction := params.1 * params.1 + params.2 * params.2
+  let loss := prediction * prediction
+  -- Differentiating only as far as prediction must leave its upstream graph usable.
+  let outputCotangent ← Tensor.grad loss prediction (Tensor.onesLike loss)
+  LeanTest.assertEqual (← outputCotangent.toFloatArray) #[26]
+  -- Both parameter leaves share the same forward graph and are pulled back together.
+  let gradient ← TensorStruct.grad prediction params outputCotangent
+  LeanTest.assertEqual (← gradient.1.toFloatArray) #[104]
+  LeanTest.assertEqual (← gradient.2.toFloatArray) #[156]
+  Tests.assertThrows (TensorStruct.grad prediction params outputCotangent)
+    "backward through the graph a second time"
 
 @[test]
 def testLinearRiemannianMSEStepProducesFiniteDiagnostics : IO Unit := do

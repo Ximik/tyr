@@ -716,9 +716,11 @@ def logspace (start stop : Float) (steps : UInt64) (base : Float := 10.0) :
   | .ok result => result
   | .error message => nativeInvariantFailure s!"Tensor.logspace: {message}"
 
-/-- Backpropagate an explicit cotangent through the output graph. -/
-def backward {σ : StaticSpec} (output cotangent : Tensor σ) : IO Unit :=
-  RawTensor.backward σ.shape output.raw cotangent.raw
+/-- Backpropagate an explicit cotangent. Saved intermediates are released by
+default; omitted retention follows `createGraph`, as in PyTorch. -/
+def backward {σ : StaticSpec} (output cotangent : Tensor σ)
+    (retainGraph : Option Bool := none) (createGraph : Bool := false) : IO Unit :=
+  RawTensor.backward σ.shape output.raw cotangent.raw (retainGraph.getD createGraph) createGraph
 
 def hasGradFn {σ : StaticSpec} (input : Tensor σ) : Bool :=
   RawTensor.hasGradFn σ.shape input.raw

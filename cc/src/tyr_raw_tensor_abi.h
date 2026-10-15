@@ -36,14 +36,17 @@ lean_object* lean_torch_tensor_atan(lean_object*, lean_object*);
 lean_object* lean_torch_max_all(lean_object*);
 lean_object* lean_torch_stack_1d(uint64_t, uint64_t, lean_object*, uint64_t);
 lean_object* lean_torch_functional_grad(lean_object*, lean_object*);
-lean_object* lean_torch_tensor_grad(lean_object*, lean_object*, lean_object*, lean_object*, lean_object*);
+// IO derivatives; consume shape metadata and borrow tensors. Flags are effective
+// retain_graph/create_graph values, with optional defaults resolved by Lean.
+lean_object* lean_torch_tensor_grad(lean_object*, lean_object*, lean_object*, lean_object*, lean_object*, uint8_t, uint8_t);
+lean_object* lean_torch_tensor_grad_many(lean_object*, lean_object*, lean_object*, uint8_t, uint8_t);
 lean_object* lean_torch_from_float_array(lean_object*);
 lean_object* lean_torch_multinomial(lean_object*, lean_object*, uint64_t, uint8_t);
 lean_object* lean_torch_scatter_2d(uint64_t, uint64_t, uint64_t, lean_object*, uint64_t, lean_object*, lean_object*);
 uint8_t lean_torch_allclose(lean_object*, lean_object*, double, double);
 uint8_t lean_torch_is_leaf(lean_object*);
 lean_object* lean_torch_log_softmax(lean_object*, uint32_t);
-lean_object* lean_torch_backward_loss(lean_object*);
+lean_object* lean_torch_backward_loss(lean_object*, uint8_t, uint8_t);
 double lean_torch_frobenius_norm(uint64_t, uint64_t, lean_object*);
 lean_object* lean_torch_row_norms(uint64_t, uint64_t, lean_object*);
 double lean_torch_max_row_norm(uint64_t, uint64_t, lean_object*);
@@ -60,9 +63,10 @@ double lean_torch_item(lean_object*, lean_object*);
 lean_object* lean_torch_item_checked(lean_object*, lean_object*);
 lean_object* lean_torch_gt(lean_object*, lean_object*, lean_object*);
 lean_object* lean_torch_where(lean_object*, lean_object*, lean_object*, lean_object*);
-// grad_of: borrowed tensor -> IO detached snapshot; zero_grad: borrowed tensor -> IO Unit.
+// grad_of: borrowed tensor -> IO detached snapshot; zero_grad: clear to None
+// when the final flag is true, otherwise zero the existing gradient in place.
 lean_object* lean_torch_grad_of(lean_object*, lean_object*);
-lean_object* lean_torch_zero_grad(lean_object*, lean_object*);
+lean_object* lean_torch_zero_grad(lean_object*, lean_object*, uint8_t);
 lean_object* lean_torch_add_scalar(lean_object*, lean_object*, double);
 lean_object* lean_torch_affine3d(uint64_t, uint64_t, uint64_t, uint64_t, lean_object*, lean_object*, lean_object*);
 lean_object* lean_torch_affine3d_checked(uint64_t, uint64_t, uint64_t, uint64_t, lean_object*, lean_object*, lean_object*);

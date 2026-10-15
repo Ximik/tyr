@@ -881,39 +881,43 @@ lean_object* lean_torch_atan2(lean_obj_arg s, b_lean_obj_arg y, b_lean_obj_arg x
   return fromTorchTensor(out_);
 }
 
-lean_object* lean_torch_tensor_grad(lean_obj_arg s, lean_obj_arg s_out, b_lean_obj_arg output, b_lean_obj_arg input, b_lean_obj_arg grad_output) {
-  lean_dec(s);
-  lean_dec(s_out);
-  auto output_ = borrowTensor(output);
-  auto input_ = borrowTensor(input);
-  auto grad_output_ = borrowTensor(grad_output);
-
-  torch::autograd::variable_list out_v({output_});
-  torch::autograd::variable_list in_v({input_});
-  torch::autograd::variable_list grad_out_v({grad_output_});    
-  // Keep the graph for callers that request multiple grads from the same output
-  // (e.g. structured VJP over many leaves).
-  auto grad_in_v = torch::autograd::grad(
-      out_v, in_v, grad_out_v,
-      /*retain_graph=*/true,
-      /*create_graph=*/false,
-      /*allow_unused=*/true);
-
-  auto grad_in = grad_in_v[0];
-  if (!grad_in.defined()) {
-    // Lean callers expect a concrete tensor result even when the input is unused.
-    grad_in = torch::zeros_like(input_);
-  }
-  return fromTorchTensor(grad_in);
+lean_object* lean_torch_tensor_grad(lean_obj_arg s, lean_obj_arg s_out,
+    b_lean_obj_arg output, b_lean_obj_arg input, b_lean_obj_arg grad_output,
+    uint8_t retain_graph, uint8_t create_graph) {
+  return tyr::checkedIoCall("grad", [&] {
+    OwnedLeanObject shape_owner(s, lean_dec);
+    OwnedLeanObject output_shape_owner(s_out, lean_dec);
+    auto output_ = borrowTensor(output);
+    auto input_ = borrowTensor(input);
+    auto grad_output_ = borrowTensor(grad_output);
+    auto gradients = torch::autograd::grad({output_}, {input_}, {grad_output_},
+        retain_graph != 0, create_graph != 0, /*allow_unused=*/true);
+    auto gradient = gradients[0].defined() ? gradients[0] : torch::zeros_like(input_);
+    return lean_io_result_mk_ok(fromTorchTensor(std::move(gradient)));
+  });
 }
 
-lean_object* lean_torch_backward(lean_obj_arg /* shape */, b_lean_obj_arg output, b_lean_obj_arg grad_output) {
-  auto out_ = borrowTensor(output);
-  auto grad_output_ = borrowTensor(grad_output);
-  out_.backward(grad_output_);
-
-  lean_inc(output);
-  return output;
+lean_object* lean_torch_tensor_grad_many(b_lean_obj_arg output,
+    b_lean_obj_arg inputs, b_lean_obj_arg grad_output,
+    uint8_t retain_graph, uint8_t create_graph) {
+  return tyr::checkedIoCall("gradMany", [&] {
+    std::vector<torch::Tensor> input_tensors;
+    const size_t size = lean_array_size(inputs);
+    input_tensors.reserve(size);
+    for (size_t i = 0; i < size; ++i)
+      input_tensors.push_back(borrowTensor(lean_array_get_core(inputs, i)));
+    std::vector<torch::Tensor> gradients;
+    if (size != 0)
+      gradients = torch::autograd::grad({borrowTensor(output)}, input_tensors,
+          {borrowTensor(grad_output)}, retain_graph != 0, create_graph != 0,
+          /*allow_unused=*/true);
+    OwnedLeanObject result(lean_mk_empty_array(), lean_dec);
+    for (size_t i = 0; i < size; ++i) {
+      auto gradient = gradients[i].defined() ? gradients[i] : torch::zeros_like(input_tensors[i]);
+      result.reset(lean_array_push(result.release(), fromTorchTensor(std::move(gradient))));
+    }
+    return lean_io_result_mk_ok(result.release());
+  });
 }
 
 uint8_t lean_torch_allclose(b_lean_obj_arg a, b_lean_obj_arg b, double rtol, double atol) {
@@ -941,13 +945,15 @@ lean_object* lean_torch_grad_of(lean_obj_arg shape, b_lean_obj_arg x) {
 }
 
 // Zero gradients
-lean_object* lean_torch_zero_grad(lean_obj_arg shape, b_lean_obj_arg x) {
+lean_object* lean_torch_zero_grad(lean_obj_arg shape, b_lean_obj_arg x, uint8_t set_to_none) {
   return tyr::checkedIoCall("zeroGrad", [&] {
   lean_dec(shape);
   try {
     torch::NoGradGuard guard;
     auto x_ = borrowTensor(x);
-    if (x_.grad().defined()) {
+    if (set_to_none != 0) {
+        x_.mutable_grad() = torch::Tensor();
+    } else if (x_.grad().defined()) {
         x_.grad().zero_();
     }
     return lean_io_result_mk_ok(lean_box(0));
@@ -1001,7 +1007,9 @@ lean_object* lean_torch_functional_grad(b_lean_obj_arg inputs, lean_obj_arg f) {
     TORCH_CHECK(loss.numel() == 1, "functionalGrad: expected scalar output");
     std::vector<torch::Tensor> gradients(size);
     if (size != 0 && loss.requires_grad()) {
-      gradients = torch::autograd::grad({loss}, leaves, {}, /*retain_graph=*/true,
+      // Only nodes on paths to these fresh leaves execute. Captured older graph
+      // branches cannot depend on the leaves and remain outside this traversal.
+      gradients = torch::autograd::grad({loss}, leaves, {}, /*retain_graph=*/false,
                                         /*create_graph=*/false, /*allow_unused=*/true);
     }
     OwnedLeanObject result(lean_mk_empty_array(), lean_dec);
@@ -1122,33 +1130,6 @@ lean_object* lean_torch_with_no_grad(lean_obj_arg /* shape */, lean_obj_arg func
     // For now, this is a placeholder for the infrastructure
     return func;
 }
-
-// Higher-order gradients
-lean_object* lean_torch_grad_grad(lean_obj_arg /* sx */, lean_obj_arg /* sy */, lean_obj_arg /* sz */,
-                                  b_lean_obj_arg z, b_lean_obj_arg y, b_lean_obj_arg x,
-                                  b_lean_obj_arg grad_z, b_lean_obj_arg grad_y) {
-    auto z_ = borrowTensor(z);
-    auto y_ = borrowTensor(y);
-    auto x_ = borrowTensor(x);
-    auto grad_z_ = borrowTensor(grad_z);
-    auto grad_y_ = borrowTensor(grad_y);
-
-    // First compute dz/dy
-    torch::autograd::variable_list out_v1({z_});
-    torch::autograd::variable_list in_v1({y_});
-    torch::autograd::variable_list grad_out_v1({grad_z_});
-    auto grad_y_computed = torch::autograd::grad(out_v1, in_v1, grad_out_v1, true, true);
-
-    // Then compute d(dz/dy)/dx
-    torch::autograd::variable_list out_v2({grad_y_computed[0]});
-    torch::autograd::variable_list in_v2({x_});
-    torch::autograd::variable_list grad_out_v2({grad_y_});
-    auto grad_x_second = torch::autograd::grad(out_v2, in_v2, grad_out_v2);
-    // Intermediate tensors (grad_y_computed, etc.) auto-released on scope exit
-    return fromTorchTensor(grad_x_second[0]);
-}
-
-
 
 lean_object* lean_torch_tensor_softmax(lean_obj_arg shape, b_lean_obj_arg a, uint32_t dim_bits) {
   lean_dec(shape);
@@ -2608,13 +2589,14 @@ lean_object* lean_torch_resample_soxr_hq(b_lean_obj_arg samples,
 }
 
 // Backward pass
-lean_object* lean_torch_backward_unit(lean_obj_arg s, b_lean_obj_arg output, b_lean_obj_arg grad_output) {
+lean_object* lean_torch_backward_unit(lean_obj_arg s, b_lean_obj_arg output,
+    b_lean_obj_arg grad_output, uint8_t retain_graph, uint8_t create_graph) {
   return tyr::checkedIoCall("backward", [&] {
   lean_dec(s);
   try {
     auto output_ = borrowTensor(output);
     auto grad_output_ = borrowTensor(grad_output);
-    output_.backward(grad_output_, /*retain_graph=*/true);
+    output_.backward(grad_output_, retain_graph != 0, create_graph != 0);
     return lean_io_result_mk_ok(lean_box(0));
   } catch (const c10::Error& e) {
     return mkC10IoError("Backward failed", e);
@@ -2929,11 +2911,12 @@ lean_object* lean_torch_to_long(lean_obj_arg s, b_lean_obj_arg input) {
 }
 
 // Backward pass that only requires the loss (assumes gradient of 1.0)
-lean_object* lean_torch_backward_loss(b_lean_obj_arg loss) {
+lean_object* lean_torch_backward_loss(b_lean_obj_arg loss,
+    uint8_t retain_graph, uint8_t create_graph) {
   return tyr::checkedIoCall("backwardLoss", [&] {
   try {
     auto loss_ = borrowTensor(loss);
-    loss_.backward({}, /*retain_graph=*/true);
+    loss_.backward({}, retain_graph != 0, create_graph != 0);
     return lean_io_result_mk_ok(lean_box(0));
   } catch (const c10::Error& e) {
     return mkC10IoError("Backward loss failed", e);

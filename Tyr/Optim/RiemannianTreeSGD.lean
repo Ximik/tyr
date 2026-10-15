@@ -31,9 +31,6 @@ private def treeDot [TensorStruct α] [FloatingTensorStruct α] (x y : α) : Flo
   let prod := FloatingTensorStruct.zipWith Tensor.mul x y
   TensorStruct.fold (fun t acc => acc + Tensor.item (Tensor.sumAll t)) 0.0 prod
 
-private def gradStruct [TensorStruct α] (loss : Tensor τ) (x : α) : α :=
-  TensorStruct.map (fun t => Tensor.grad loss t (Tensor.onesLike loss)) x
-
 private def clipScale [TensorStruct α] [FloatingTensorStruct α] (x : α) (maxNorm : Float) : α :=
   let sqNorm := treeDot x x
   let norm := Float.sqrt sqNorm
@@ -122,39 +119,36 @@ end TreeMetricFactor
 private def paramVjpFromPrepared [TensorStruct Params] [FloatingTensorStruct Params] {s : Shape}
     (output : Tensor { shape := s, dtype := .Float32, device := device })
     (params : Params)
-    (adjOutput : Tensor { shape := s, dtype := .Float32, device := device }) : Params :=
-  let loss := Tensor.sumAll (Tensor.mul output (Tensor.detach adjOutput))
-  TensorStruct.detach (gradStruct loss params)
-
-private def buildTreeFactorFromOutputFactor [TensorStruct Params] [FloatingTensorStruct Params] {s : Shape} {rank : UInt64}
-    (output : Tensor { shape := s, dtype := .Float32, device := device })
-    (params : Params)
-    (outputFactor : MetricFactor rank (shapeNumel s) .Float32 device) : TreeMetricFactor Params rank := by
-  let rows :=
-    ((List.range rank.toNat).toArray.map fun i =>
-      let rowFlat : Tensor { shape := #[shapeNumel s], dtype := .Float32, device := device } :=
-        Tensor.reshapeChecked (Tensor.sliceChecked outputFactor.matrix 0 (UInt64.ofNat i) 1 #[1, shapeNumel s])
-          #[shapeNumel s]
-      let rowCotangent : Tensor { shape := s, dtype := .Float32, device := device } := Tensor.reshapeChecked rowFlat s
-      paramVjpFromPrepared output params rowCotangent)
-  exact {
-    rows := rows
-    rows_size := by
-      simp [rows]
-  }
+    (adjOutput : Tensor { shape := s, dtype := .Float32, device := device })
+    (retainGraph : Bool := false) : IO Params := do
+  let gradient ← TensorStruct.grad output params (Tensor.detach adjOutput)
+    (retainGraph := some retainGraph)
+  pure (TensorStruct.detach gradient)
 
 private def buildTreeFactorFromCotangentRows [TensorStruct Params] [FloatingTensorStruct Params] {s : Shape} {rank : UInt64}
     (output : Tensor { shape := s, dtype := .Float32, device := device })
     (params : Params)
     (rows : Array (Tensor { shape := s, dtype := .Float32, device := device }))
-    (rows_size : rows.size = rank.toNat) : TreeMetricFactor Params rank := by
-  let pulled :=
-    rows.map (fun row => paramVjpFromPrepared output params row)
-  exact {
-    rows := pulled
-    rows_size := by
-      simp [pulled, rows_size]
-  }
+    (rows_size : rows.size = rank.toNat) : IO (TreeMetricFactor Params rank) := do
+  let indices : torch.Vector rank.toNat (Fin rank.toNat) :=
+    ⟨(List.finRange rank.toNat).toArray, by simp⟩
+  let pulled ← indices.mapM fun i =>
+    let row := rows[i.val]'(by rw [rows_size]; exact i.isLt)
+    -- Each row shares the forward graph; the final pullback releases it.
+    paramVjpFromPrepared output params row (i.val + 1 < rank.toNat)
+  pure { rows := pulled.data, rows_size := pulled.size_eq }
+
+private def buildTreeFactorFromOutputFactor [TensorStruct Params] [FloatingTensorStruct Params] {s : Shape} {rank : UInt64}
+    (output : Tensor { shape := s, dtype := .Float32, device := device })
+    (params : Params)
+    (outputFactor : MetricFactor rank (shapeNumel s) .Float32 device) : IO (TreeMetricFactor Params rank) := do
+  let rows :=
+    ((List.range rank.toNat).toArray.map fun i =>
+      let rowFlat : Tensor { shape := #[shapeNumel s], dtype := .Float32, device := device } :=
+        Tensor.reshapeChecked (Tensor.sliceChecked outputFactor.matrix 0 (UInt64.ofNat i) 1 #[1, shapeNumel s])
+          #[shapeNumel s]
+      Tensor.reshapeChecked rowFlat s)
+  buildTreeFactorFromCotangentRows output params rows (by simp [rows])
 
 private def finalizePreparedStepWithTreeFactor
     {Params : Type} [TensorStruct Params] [FloatingTensorStruct Params]
@@ -194,8 +188,8 @@ private def stepPreparedWithFactorAndMass
     (outputCotangent : Tensor { shape := s, dtype := .Float32, device := device })
     (lr : Float)
     : IO (StepResult (device := device) Params s) := do
-  let gradient := paramVjpFromPrepared predictionReq paramsReq outputCotangent
-  let factor := buildTreeFactorFromOutputFactor predictionReq paramsReq outputFactor
+  let gradient ← paramVjpFromPrepared predictionReq paramsReq outputCotangent (rank != 0)
+  let factor ← buildTreeFactorFromOutputFactor predictionReq paramsReq outputFactor
   finalizePreparedStepWithTreeFactor params predictionReq mass factor gradient lr
 
 /-- Whole-model tree step with explicit output cotangent and output-space factor. -/
@@ -242,8 +236,8 @@ private def prepareCrossEntropyStep
   let targetsFlat : Tensor { shape := #[batch * seq], dtype := .Int64, device := device } :=
     Tensor.reshapeChecked targets #[batch * seq]
   let lossT ← IO.ofExcept (Tensor.crossEntropy? logitsFlat targetsFlat)
-  let outputCotangent := Tensor.detach (Tensor.grad lossT predictionReq (Tensor.onesLike lossT))
-  pure (paramsReq, predictionReq, lossT, outputCotangent)
+  let outputCotangent ← Tensor.grad lossT predictionReq (Tensor.onesLike lossT)
+  pure (paramsReq, predictionReq, lossT, Tensor.detach outputCotangent)
 
 private def sampledFisherCotangentRows
     {batch seq vocab : UInt64}
@@ -282,7 +276,7 @@ private def sampledFisherTreeFactor
     (paramsReq : Params)
     (rows : Array (Tensor { shape := #[batch, seq, vocab], dtype := .Float32, device := device }))
     (rows_size : rows.size = rank.toNat)
-    : TreeMetricFactor Params rank :=
+    : IO (TreeMetricFactor Params rank) :=
   buildTreeFactorFromCotangentRows predictionReq paramsReq rows rows_size
 
 /-- Cross-entropy step for tensor-logit models with unit diagonal mass. -/
@@ -302,8 +296,9 @@ def stepCrossEntropy
     { matrix := Tensor.eyeFor .Float32 device }
   let mass := TensorStruct.map Tensor.onesLike params
   if gradClip > 0.0 then
-    let paramGrad := clipScale (paramVjpFromPrepared predictionReq paramsReq outputCotangent) gradClip
-    let factor := buildTreeFactorFromOutputFactor predictionReq paramsReq outputFactor
+    let gradient ← paramVjpFromPrepared predictionReq paramsReq outputCotangent (outDim != 0)
+    let paramGrad := clipScale gradient gradClip
+    let factor ← buildTreeFactorFromOutputFactor predictionReq paramsReq outputFactor
     let update := TreeMetricFactor.solveWoodbury mass factor paramGrad
     let inner := TreeMetricFactor.woodburyInner mass factor
     let innerInv := Tensor.inv inner
@@ -342,10 +337,10 @@ def stepCrossEntropySampledFisher
   let (paramsReq, predictionReq, lossT, outputCotangent) ←
     prepareCrossEntropyStep params forward targets
   let mass := TensorStruct.map Tensor.onesLike params
-  let gradient0 := paramVjpFromPrepared predictionReq paramsReq outputCotangent
-  let gradient := if gradClip > 0.0 then clipScale gradient0 gradClip else gradient0
   let ⟨rows, hRows⟩ ← sampledFisherCotangentRows predictionReq probeCount
-  let factor :=
+  let gradient0 ← paramVjpFromPrepared predictionReq paramsReq outputCotangent (probeCount != 0)
+  let gradient := if gradClip > 0.0 then clipScale gradient0 gradClip else gradient0
+  let factor ←
     sampledFisherTreeFactor
       (rank := probeCount)
       predictionReq paramsReq rows hRows
