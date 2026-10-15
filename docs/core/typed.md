@@ -26,7 +26,7 @@ data, and persistence operations. `import Tyr` aggregates the library.
 | `Tyr.TensorStruct.DeriveCast` | Derive field-wise casts between explicitly selected record types |
 | `Tyr.RawTensor` and submodules | Native declarations without static guarantees |
 
-## Concrete placement and optional dtype claims
+## Concrete placement and dtype claims
 
 Every `StaticSpec` names an actual device. Dtype may remain dynamic:
 
@@ -54,6 +54,34 @@ Omitting dtype uses `.Unknown "dynamic"`. Two such tensors may have different
 native dtypes. Only that reserved token is a wildcard; other unrecognized dtype
 tokens must match exactly. Preserving adapters inspect actual dtypes and reject
 unintended promotion. Copying rejects a dtype mismatch before mutation.
+
+For runtime-selected dtypes, use `SomeDTypeTensor shape device` to retain an
+exact existential index. Its `ExactDType` witness excludes the reserved wildcard:
+
+```lean
+def packageWeights (tensor : FloatWeights) : SomeDTypeTensor #[2, 3] .CPU :=
+  tensor.packDType (by decide)
+```
+
+`packDType` packages a statically exact index using an explicit exclusion proof.
+`tensor.reifyDType` reads the native dtype and returns a checked exact package;
+it also accepts legacy wildcard inputs. `SomeDTypeTensor.ofRaw` validates the
+requested shape and device at a native boundary. These operations retain values
+and autograd identity without casting or cloning the tensor. The existential
+itself is an ordinary Lean wrapper.
+
+Unpacking exposes the exact dtype through `packed.1.val` and the tensor through
+`packed.2`. `sameDType?` supplies checked equality evidence before combining two
+packages in an operation requiring a shared dtype. `atDType?` checks a requested
+exact index; it performs no conversion. Other unknown dtype tokens remain exact
+metadata claims and do not promise native kernel support.
+
+Models should retain shared dtype parameters across their related leaves. For
+example, `Sigma fun dtype : ExactDType => Qwen3Model cfg dtype.val` preserves
+agreement across a Qwen model. Mixed precision models need an explicit tree of
+dtype parameters for their distinct tensor roles. The wildcard default,
+`forgetDType`, and legacy promoting conveniences remain migration work; the
+exact package has no implicit coercion back to those wildcard tensors.
 
 `tensor.staticSpec`, `shape`, `dtype`, and `device` describe the declared index.
 `tensor.actualSpec` and `runtimeDevice` inspect native metadata. `tensor.to target`

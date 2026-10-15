@@ -56,6 +56,55 @@ shape compatibility remains a separate precondition. -/
 
 end StaticSpec
 
+/-- An exact dtype claim, excluding the legacy claim-erasing marker.
+Other unknown tokens remain exact metadata; this witness does not imply that
+a native backend implements arithmetic or conversion for that dtype. -/
+abbrev ExactDType := { dtype : DType // dtype ≠ .Unknown "dynamic" }
+
+namespace ExactDType
+
+/-- Validate a runtime dtype before using it as an exact index. -/
+def ofDType? (dtype : DType) : Except String ExactDType :=
+  if h : dtype = .Unknown "dynamic" then
+    .error "The reserved dynamic dtype marker is not an exact dtype"
+  else
+    .ok ⟨dtype, h⟩
+
+end ExactDType
+
+/-- Hide which exact dtype a tensor has while retaining its shape and device.
+Unlike a bare Sigma over DType, this package cannot select the legacy wildcard.
+Packaging retains the native handle; the Sigma itself is a Lean wrapper. -/
+abbrev SomeDTypeTensor (shape : Shape) (device : Device) :=
+  Sigma fun dtype : ExactDType => Tensor ⟨shape, dtype.val, device⟩
+
+namespace SomeDTypeTensor
+
+/-- Recover native dtype metadata and validate the full requested shape/device
+contract without converting values or changing autograd identity. -/
+def ofRaw {shape : Shape} {device : Device} (raw : RawTensor) :
+    Except String (SomeDTypeTensor shape device) := do
+  let dtype ← ExactDType.ofDType? raw.dtype
+  let tensor ← Tensor.ofRaw (σ := ⟨shape, dtype.val, device⟩) raw
+  pure ⟨dtype, tensor⟩
+
+/-- Compare exact existential indices before using an operation that requires
+one shared dtype. This returns equality evidence, never a dtype conversion. -/
+def sameDType? {shape otherShape : Shape} {device otherDevice : Device}
+    (left : SomeDTypeTensor shape device) (right : SomeDTypeTensor otherShape otherDevice) :
+    Except String (PLift (left.1 = right.1)) :=
+  if h : left.1 = right.1 then .ok ⟨h⟩
+  else .error s!"Expected the same dtype, got {left.1.val} and {right.1.val}"
+
+/-- Recover a requested exact index by equality, with no native cast. -/
+def atDType? {shape : Shape} {device : Device}
+    (tensor : SomeDTypeTensor shape device) (dtype : ExactDType) :
+    Except String (Tensor ⟨shape, dtype.val, device⟩) :=
+  if h : tensor.1 = dtype then .ok (h ▸ tensor.2)
+  else .error s!"Expected dtype {dtype.val}, got {tensor.1.val}"
+
+end SomeDTypeTensor
+
 namespace Tensor
 
 def toTensor {σ : StaticSpec} (t : Tensor σ) : RawTensor :=
@@ -188,14 +237,18 @@ def ofTensorWithContract {shape : Shape} (contract : TensorContract) (raw : RawT
 def toSome {σ : StaticSpec} (tensor : Tensor σ) : Sigma Tensor :=
   ⟨σ, tensor⟩
 
-/-- Recover the native dtype as an existential index without casting values or
-forgetting shape or placement. The resulting tensor passes the checked raw
-boundary, including when the input carries the dynamic dtype marker. -/
+/-- Package an already exact index without native inspection or conversion.
+The exclusion proof is explicit; a legacy wildcard must use checked reification. -/
+def packDType {σ : StaticSpec} (tensor : Tensor σ)
+    (exact : σ.dtype ≠ .Unknown "dynamic") : SomeDTypeTensor σ.shape σ.device :=
+  ⟨⟨σ.dtype, exact⟩, tensor⟩
+
+/-- Recover the native dtype as an exact existential index without casting
+values, detaching the graph, or forgetting shape/placement. Checked admission
+also excludes the reserved wildcard, including for legacy dynamic inputs. -/
 def reifyDType {σ : StaticSpec} (tensor : Tensor σ) :
-    Except String (Sigma fun dtype : DType => Tensor { σ with dtype }) := do
-  let dtype := tensor.raw.dtype
-  let typed ← ofRaw (σ := { σ with dtype }) tensor.raw
-  pure ⟨dtype, typed⟩
+    Except String (SomeDTypeTensor σ.shape σ.device) :=
+  SomeDTypeTensor.ofRaw tensor.raw
 
 end Tensor
 

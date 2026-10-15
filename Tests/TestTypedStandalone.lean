@@ -159,7 +159,7 @@ def testExistentialTensorPreservesFullSpec : IO Unit := do
   match (Tensor.onesFor spec).forgetDType.reifyDType with
   | .error message => LeanTest.fail message
   | .ok ⟨dtype, tensor⟩ =>
-      LeanTest.assertEqual dtype .Float64
+      LeanTest.assertEqual dtype.val .Float64
       LeanTest.assertEqual tensor.runtimeShape #[2, 3]
       LeanTest.assertTrue (tensor.staticSpec.device == .CPU)
         "Recovering the native dtype must retain the concrete device"
