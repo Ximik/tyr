@@ -27,6 +27,8 @@ namespace Examples.GPU
 open Lean (Json)
 open torch
 
+variable {device : Device}
+
 inductive DecodeBackend where
   | tyrRuntime
   | torchSdpa
@@ -179,7 +181,7 @@ private structure DecodeRow where
 
 private def runOne (runId : String) (warmup iters repeats : Nat)
     (c : DecodeBenchCase) (backend : DecodeBackend) : IO DecodeRow := do
-  let device := Device.CUDA 0
+  let device ← Device.cuda 0
   let stream ← torch.cuda_current_stream
   let qShape : Shape := #[c.batch, c.qHeads, 1, c.headDim]
   let kvShape : Shape := #[c.batch, c.kvHeads, c.kvSeq, c.headDim]
@@ -191,14 +193,14 @@ private def runOne (runId : String) (warmup iters repeats : Nat)
   let v := vBase.toBFloat16
 
   -- SDPA reference output (BF16 in / BF16 out, same as kernel) for parity.
-  let outRef : Tensor { shape := #[c.batch, c.qHeads, 1, c.headDim], dtype := .BFloat16, device := (.CUDA 0) } :=
+  let outRef : Tensor { shape := #[c.batch, c.qHeads, 1, c.headDim], dtype := .BFloat16, device := device } :=
     Tensor.attentionGQAQKV
       (q.toFloat32) (k.toFloat32) (v.toFloat32) false true
       |> Tensor.toBFloat16
 
   match backend with
   | .torchSdpa =>
-      let sink : Tensor { shape := #[c.batch, c.qHeads, 1, c.headDim], dtype := .BFloat16, device := (.CUDA 0) } ← Tensor.uniformLike q 0 0
+      let sink : Tensor { shape := #[c.batch, c.qHeads, 1, c.headDim], dtype := .BFloat16, device := device } ← Tensor.uniformLike q 0 0
       let sinkRef ← IO.mkRef (some sink)
       let action : IO Unit := do
         let out := Tensor.attentionGQAQKV q k v false true
@@ -221,14 +223,14 @@ private def runOne (runId : String) (warmup iters repeats : Nat)
   | .tyrRuntime =>
       let routeActual := expectedRouteFor c
       -- Correctness once before timing.
-      let outActual : Tensor { shape := #[c.batch, c.qHeads, 1, c.headDim], dtype := .BFloat16, device := (.CUDA 0) } :=
+      let outActual : Tensor { shape := #[c.batch, c.qHeads, 1, c.headDim], dtype := .BFloat16, device := device } :=
         Tensor.flashAttention q k v true
       let _ ← torch.cuda_synchronize
       let outMae := Tensor.item (Tensor.meanAll (Tensor.abs (outActual - outRef)))
       let outMax := Tensor.item (Tensor.maxAllChecked (Tensor.abs (outActual - outRef)))
       let okRoute := routeActual == c.expectedTyrRoute
       let okOut := Tensor.allclose outRef outActual 5.0e-2 5.0e-2
-      let sink : Tensor { shape := #[c.batch, c.qHeads, 1, c.headDim], dtype := .BFloat16, device := (.CUDA 0) } ← Tensor.uniformLike q 0 0
+      let sink : Tensor { shape := #[c.batch, c.qHeads, 1, c.headDim], dtype := .BFloat16, device := device } ← Tensor.uniformLike q 0 0
       let sinkRef ← IO.mkRef (some sink)
       let action : IO Unit := do
         let out := Tensor.flashAttention q k v true

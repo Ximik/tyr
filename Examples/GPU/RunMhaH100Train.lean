@@ -8,6 +8,8 @@ import Tyr.GPU.Kernels.MhaH100
 namespace Examples.GPU
 
 open torch
+
+variable {device : Device}
 open Tyr.GPU.Kernels
 
 private def contractLabel : String := "dq_direct_kv_sweep_store_add"
@@ -16,48 +18,49 @@ private def headDim : Nat := 64
 private def kvTiles : Nat := 2
 
 structure TrainSetup where
+  device : Device
   stream : UInt64
-  targetOut : MhaTensor
-  targetOut32 : MasterTensor
-  qInit : MasterTensor
-  kInit : MasterTensor
-  vInit : MasterTensor
+  targetOut : MhaTensor (device := device)
+  targetOut32 : MasterTensor (device := device)
+  qInit : MasterTensor (device := device)
+  kInit : MasterTensor (device := device)
+  vInit : MasterTensor (device := device)
 
-def forwardMha (q k v : MhaTensor) (stream : UInt64) : IO (MhaTensor × LTensor) := do
+def forwardMha (q k v : MhaTensor (device := device)) (stream : UInt64) : IO (MhaTensor (device := device) × LTensor (device := device)) := do
   let out ← Tensor.uniformLike q 0 0
-  let lOut : LTensor ← Tensor.uniformLike (Tensor.zeros #[2, 64] false (Device.CUDA 0)) 0 0
+  let lOut : LTensor (device := device) ← Tensor.uniformLike (Tensor.zeros #[2, 64] false device) 0 0
   tkMhaH100Fwd2Block.launch q.raw k.raw v.raw out.raw lOut.raw 128 64 1 2 1 128 1 1 0 stream
   pure (out, lOut)
 
 def backwardMha
-    (q k v dO : MhaTensor)
-    (lOut : LTensor)
-    (out : MhaTensor)
+    (q k v dO : MhaTensor (device := device))
+    (lOut : LTensor (device := device))
+    (out : MhaTensor (device := device))
     (stream : UInt64)
-    : IO (MasterTensor × MasterTensor × MasterTensor) := do
+    : IO (MasterTensor (device := device) × MasterTensor (device := device) × MasterTensor (device := device)) := do
   let dVec ← Tensor.uniformLike lOut 0 0
   tkMhaH100BwdPrep2Block.launch dO.raw out.raw dVec.raw 128 64 1 2 1 128 1 1 0 stream
 
-  let dQ : MasterTensor ← Tensor.uniformLike (Tensor.zeros #[1, 1, 128, 64] false (Device.CUDA 0)) 0 0
-  let dK : MasterTensor ← Tensor.uniformLike (Tensor.zeros #[1, 1, 128, 64] false (Device.CUDA 0)) 0 0
-  let dV : MasterTensor ← Tensor.uniformLike (Tensor.zeros #[1, 1, 128, 64] false (Device.CUDA 0)) 0 0
+  let dQ : MasterTensor (device := device) ← Tensor.uniformLike (Tensor.zeros #[1, 1, 128, 64] false device) 0 0
+  let dK : MasterTensor (device := device) ← Tensor.uniformLike (Tensor.zeros #[1, 1, 128, 64] false device) 0 0
+  let dV : MasterTensor (device := device) ← Tensor.uniformLike (Tensor.zeros #[1, 1, 128, 64] false device) 0 0
   tkMhaH100Bwd2BlockDq.launch q.raw k.raw v.raw dO.raw lOut.raw dVec.raw dQ.raw 128 64 1 2 1 128 1 1 0 stream
   tkMhaH100Bwd2BlockKvSweep.launch q.raw k.raw v.raw dO.raw lOut.raw dVec.raw dQ.raw dK.raw dV.raw 128 64 1 2 1 128 1 1 0 stream
   pure (dQ, dK, dV)
 
-def mkNoisyInit (targetF : MasterTensor) (noiseScale : Float) : IO MasterTensor := do
-  let noise : MasterTensor ← Tensor.randn #[1, 1, 128, 64] false (.CUDA 0)
+def mkNoisyInit (targetF : MasterTensor (device := device)) (noiseScale : Float) : IO (MasterTensor (device := device)) := do
+  let noise : MasterTensor (device := device) ← Tensor.randn #[1, 1, 128, 64] false device
   pure (targetF + (noise * noiseScale))
 
 def oneKernelTrainStep
-    (qM kM vM : MasterTensor)
-    (targetOut : MhaTensor)
+    (qM kM vM : MasterTensor (device := device))
+    (targetOut : MhaTensor (device := device))
     (stream : UInt64)
     (lr : Float)
-    : IO (MasterTensor × MasterTensor × MasterTensor × Tensor { shape := #[], dtype := .Float32, device := (.CUDA 0) }) := do
-  let q : MhaTensor := qM.toBFloat16
-  let k : MhaTensor := kM.toBFloat16
-  let v : MhaTensor := vM.toBFloat16
+    : IO (MasterTensor (device := device) × MasterTensor (device := device) × MasterTensor (device := device) × Tensor { shape := #[], dtype := .Float32, device := device }) := do
+  let q : MhaTensor (device := device) := qM.toBFloat16
+  let k : MhaTensor (device := device) := kM.toBFloat16
+  let v : MhaTensor (device := device) := vM.toBFloat16
   let (out, lOut) ← forwardMha q k v stream
   let (lossT, dO) := lossAndGradOut out targetOut
   let (dQ, dK, dV) ← backwardMha q k v dO lOut out stream
@@ -70,26 +73,26 @@ def makeSetup (noiseScale : Float) : IO (Option TrainSetup) := do
   if !(← torch.cuda_is_available) then
     return none
 
-  let device := Device.CUDA 0
+  let device ← Device.cuda 0
   let stream ← torch.cuda_current_stream
 
   -- Ground-truth tensors defining the training target.
-  let qTargetF : MasterTensor ← Tensor.randn #[1, 1, 128, 64] false device
-  let kTargetF : MasterTensor ← Tensor.randn #[1, 1, 128, 64] false device
-  let vTargetF : MasterTensor ← Tensor.randn #[1, 1, 128, 64] false device
-  let qTarget : MhaTensor := qTargetF.toBFloat16
-  let kTarget : MhaTensor := kTargetF.toBFloat16
-  let vTarget : MhaTensor := vTargetF.toBFloat16
+  let qTargetF : MasterTensor (device := device) ← Tensor.randn #[1, 1, 128, 64] false device
+  let kTargetF : MasterTensor (device := device) ← Tensor.randn #[1, 1, 128, 64] false device
+  let vTargetF : MasterTensor (device := device) ← Tensor.randn #[1, 1, 128, 64] false device
+  let qTarget : MhaTensor (device := device) := qTargetF.toBFloat16
+  let kTarget : MhaTensor (device := device) := kTargetF.toBFloat16
+  let vTarget : MhaTensor (device := device) := vTargetF.toBFloat16
   let (targetOut, _) ← forwardMha qTarget kTarget vTarget stream
 
   let qInit ← mkNoisyInit qTargetF noiseScale
   let kInit ← mkNoisyInit kTargetF noiseScale
   let vInit ← mkNoisyInit vTargetF noiseScale
-  let targetOut32 : MasterTensor := targetOut.toFloat32
+  let targetOut32 : MasterTensor (device := device) := targetOut.toFloat32
   let _ ← torch.cuda_synchronize
 
   return some {
-    stream, targetOut, targetOut32, qInit, kInit, vInit
+    device, stream, targetOut, targetOut32, qInit, kInit, vInit
   }
 
 private def parseArgNat (args : List String) (flag : String) (default : Nat) : Nat := Id.run do

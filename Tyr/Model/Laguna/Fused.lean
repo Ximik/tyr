@@ -60,10 +60,11 @@ private def lagunaMoeFp4CheckShape
     Returns BF16 `[tokens, hidden]` with `Σ_p w[t,p] · expert_{idx[t,p]}(x[t])`. -/
 def lagunaMoeFp4Forward
     {xs ids ws gp gs gg up us ug dp ds dg : Shape}
-    (x : Tensor { device := device, shape := xs }) (topIdx : Tensor { device := device, shape := ids, dtype := .Int64 }) (topW : Tensor { device := device, shape := ws })
-    (gatePacked : Tensor { device := device, shape := gp }) (gateScale : Tensor { device := device, shape := gs }) (gateGlobal : Tensor { device := device, shape := gg })
-    (upPacked : Tensor { device := device, shape := up }) (upScale : Tensor { device := device, shape := us }) (upGlobal : Tensor { device := device, shape := ug })
-    (downPacked : Tensor { device := device, shape := dp }) (downScale : Tensor { device := device, shape := ds }) (downGlobal : Tensor { device := device, shape := dg })
+    {xd wd gpd gsd ggd upd usd ugd dpd dsd dgd : DType}
+    (x : Tensor { device := device, shape := xs, dtype := xd }) (topIdx : Tensor { device := device, shape := ids, dtype := .Int64 }) (topW : Tensor { device := device, shape := ws, dtype := wd })
+    (gatePacked : Tensor { device := device, shape := gp, dtype := gpd }) (gateScale : Tensor { device := device, shape := gs, dtype := gsd }) (gateGlobal : Tensor { device := device, shape := gg, dtype := ggd })
+    (upPacked : Tensor { device := device, shape := up, dtype := upd }) (upScale : Tensor { device := device, shape := us, dtype := usd }) (upGlobal : Tensor { device := device, shape := ug, dtype := ugd })
+    (downPacked : Tensor { device := device, shape := dp, dtype := dpd }) (downScale : Tensor { device := device, shape := ds, dtype := dsd }) (downGlobal : Tensor { device := device, shape := dg, dtype := dgd })
     (numExperts moeInt hidden : UInt64) : IO (Tensor { device := device, shape := xs, dtype := .BFloat16 }) := do
   if hidden == 0 || hidden % 32 != 0 then
     lagunaMoeFp4Fail s!"hidden={hidden} must be a positive multiple of 32"
@@ -71,7 +72,7 @@ def lagunaMoeFp4Forward
     lagunaMoeFp4Fail s!"moeInt={moeInt} must be a positive multiple of 32"
   if numExperts == 0 then
     lagunaMoeFp4Fail "numExperts must be positive"
-  match x.device with
+  match x.device.kind with
   | .CUDA _ => pure ()
   | _ => lagunaMoeFp4Fail "x must be on a CUDA device"
   if x.actualSpec.dtype != .BFloat16 then lagunaMoeFp4Fail "x must be BF16"
@@ -81,8 +82,8 @@ def lagunaMoeFp4Forward
     lagunaMoeFp4Fail "packed banks must be UInt8"
   if gateGlobal.actualSpec.dtype != .Float32 || upGlobal.actualSpec.dtype != .Float32 || downGlobal.actualSpec.dtype != .Float32 then
     lagunaMoeFp4Fail "global scales must be Float32"
-  -- Note: F8_E4M3 scales report `Unknown` through `lean_torch_get_dtype`;
-  -- their dtype is checked authoritatively on the C++ side.
+  if gateScale.actualSpec.dtype != .Float8E4M3FN || upScale.actualSpec.dtype != .Float8E4M3FN || downScale.actualSpec.dtype != .Float8E4M3FN then
+    lagunaMoeFp4Fail "block scales must be Float8E4M3FN"
   let xs := x.runtimeShape
   if xs.size != 2 || xs.getD 1 0 != hidden then
     lagunaMoeFp4Fail s!"x must be [tokens, hidden={hidden}], got {xs}"

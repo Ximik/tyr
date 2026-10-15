@@ -69,11 +69,13 @@ def testDistributedRejectsPromotedIntegerResults : IO Unit := do
     (some "newtonSchulzStep: Expected dtype Int64, got Float32")
   Tests.assertThrows (dist.cautiousUpdate input input 0.1 0.1)
     (some "cautiousUpdate: Expected dtype Int64, got Float32")
-  Tests.assertThrows (dist.baPlusCaa input.forgetDType 0.5 0.5)
+  let packed ← IO.ofExcept input.reifyDType
+  let input := packed.2
+  Tests.assertThrows (dist.baPlusCaa input 0.5 0.5)
     (some "baPlusCaa: Expected dtype Int64, got Float32")
-  Tests.assertThrows (dist.newtonSchulzStep input.forgetDType 0.5 0.5 0.5)
+  Tests.assertThrows (dist.newtonSchulzStep input 0.5 0.5 0.5)
     (some "newtonSchulzStep: Expected dtype Int64, got Float32")
-  Tests.assertThrows (dist.cautiousUpdate input.forgetDType input.forgetDType 0.1 0.1)
+  Tests.assertThrows (dist.cautiousUpdate input input 0.1 0.1)
     (some "cautiousUpdate: Expected dtype Int64, got Float32")
 
 /-- Successful native results retain the full claimed metadata, including an
@@ -81,6 +83,8 @@ exact CPU placement and the rectangular XXT result shape. -/
 @[test]
 def testDistributedFloatingResultMetadata : IO Unit := do
   for dtype in #[DType.Float32, DType.Float64] do
+    let support ← dtype.acquireConstantSupport .CPU
+    let _ := support.down
     let input := Tensor.onesFor ⟨#[2, 2], dtype, .CPU⟩
     let rectangular := Tensor.onesFor ⟨#[2, 3], dtype, .CPU⟩
     for (operation, result) in #[

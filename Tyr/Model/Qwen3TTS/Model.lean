@@ -21,7 +21,7 @@ structure VoiceClonePromptItem (cfg : Qwen3TTSConfig) (dtype : ExactDType := flo
   refSpeakerEmbedding : Tensor { shape := #[cfg.speakerEncoderConfig.encDim], dtype := dtype.val, device := device }
   xVectorOnlyMode : Bool := false
   iclMode : Bool := false
-  deriving Inhabited
+  deriving Nonempty
 
 /-- Top-level Qwen3-TTS conditional generation model. -/
 structure Qwen3TTSForConditionalGeneration (cfg : Qwen3TTSConfig) (dtypes : DTypeLayout := {}) where

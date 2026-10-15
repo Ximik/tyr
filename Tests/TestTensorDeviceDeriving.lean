@@ -68,12 +68,12 @@ example {source target : Device} {size : UInt64}
     IO (DeviceModel (device := target) size .Float64) :=
   TensorStruct.castTo (DeviceModel (device := target) size .Float64) input
 
-example (_output : DeviceBlock (device := .CUDA 1) 3 .Float64) : True := by
+example {otherDevice : Device} (_output : DeviceBlock (device := otherDevice) 3 .Float64) : True := by
   fail_if_success
     have _ : Tensor { shape := #[3], dtype := .Float64, device := .CPU } :=
       _output.weight
   fail_if_success
-    have _ : Tensor { shape := #[3], dtype := .Float32, device := (.CUDA 1) } :=
+    have _ : Tensor { shape := #[3], dtype := .Float32, device := otherDevice } :=
       _output.weight
   trivial
 

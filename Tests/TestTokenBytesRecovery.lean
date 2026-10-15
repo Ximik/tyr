@@ -63,9 +63,9 @@ private def checkDevice (device : Device) : IO Unit := do
 
 @[test] def testTokenByteDevicePreservation : IO Unit := do
   checkDevice .CPU
-  if ← mps_is_available then checkDevice .MPS
+  if ← mps_is_available then checkDevice (← Device.mps)
   else IO.println "SKIP TokenBytes MPS: unavailable"
-  if ← cuda_is_available then checkDevice (.CUDA 0)
+  if ← cuda_is_available then checkDevice (← Device.cuda 0)
   else IO.println "SKIP TokenBytes CUDA: unavailable"
 
 end Tests.TokenBytesRecovery

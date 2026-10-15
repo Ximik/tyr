@@ -1,28 +1,36 @@
-import Tyr.Model.Qwen35.TypedOps
 import Tyr.Model.Utils
 import Tyr.Module.LayerNorm
 
 namespace torch.whisper
 
-variable {device : Device}
-def initWeightDynamic (s : Shape) (fanIn : UInt64) (device : Device := .CPU) : IO (Tensor { device := device, shape := s }) :=
-  Model.initWeight s fanIn (.Unknown "dynamic") device
-def initBiasDynamic (s : Shape) (device : Device := .CPU) : IO (Tensor { device := device, shape := s }) := Model.initBias s (.Unknown "dynamic") device
-def zerosDynamic (s : Shape) (grad : Bool := false) (device : Device := .CPU)
-    (_noGrad : grad = false := by decide) : Tensor { device := device, shape := s } :=
-  (Tensor.zeros s false device).forgetDType
+variable {device : Device} {dtype : DType}
+def initWeightFor (s : Shape) (fanIn : UInt64) (device : Device := .CPU)
+    (dtype : DType := .Float32) : IO (Tensor { device := device, shape := s, dtype }) :=
+  Model.initWeight s fanIn dtype device
+def initBiasFor (s : Shape) (device : Device := .CPU)
+    (dtype : DType := .Float32) : IO (Tensor { device := device, shape := s, dtype }) :=
+  Model.initBias s dtype device
+def zerosFor (s : Shape) (grad : Bool := false) (device : Device := .CPU)
+    (_noGrad : grad = false := by decide) (dtype : DType := .Float32)
+    [DType.ConstantSupported dtype device] :
+    Tensor { device := device, shape := s, dtype } :=
+  Tensor.zerosFor { shape := s, dtype, device }
 
-def initLayerNorm (dim : UInt64) (eps : Float := 1e-5) (device : Device := .CPU) : IO (LayerNorm (device := device) dim (.Unknown "dynamic")) := do
+def initLayerNorm (dim : UInt64) (eps : Float := 1e-5) (device : Device := .CPU)
+    (dtype : DType := .Float32) : IO (LayerNorm (device := device) dim dtype) := do
+  IO.ofExcept (Shape.validateAllocation #[dim])
+  let support ← dtype.acquireConstantSupport device
+  let _ := support.down
   pure {
-    weight := (← (← Tensor.onesIO #[dim] device).forgetDType.parameter)
-    bias := (← (← Tensor.zerosIO #[dim] device).forgetDType.parameter)
+    weight := (← (Tensor.onesFor { shape := #[dim], dtype, device }).parameter)
+    bias := (← (Tensor.zerosFor { shape := #[dim], dtype, device }).parameter)
     eps := ⟨eps⟩ }
 
 def sliceTyped {s : Shape} {d : DType} (x : Tensor { device := device, shape := s, dtype := d }) (dim : Nat) (start len : UInt64) : Tensor { device := device, shape := (s.set! dim len), dtype := d } :=
   x.sliceChecked dim start len (s.set! dim len)
 
-def transposeAttention {b s h d : UInt64} (x : Tensor { device := device, shape := #[b, s, h, d] }) : Tensor { device := device, shape := #[b, h, s, d] } := x.transpose 1 2
+def transposeAttention {b s h d : UInt64} (x : Tensor { device := device, shape := #[b, s, h, d], dtype }) : Tensor { device := device, shape := #[b, h, s, d], dtype } := x.transpose 1 2
 
-def fromAttention {b h s d : UInt64} (x : Tensor { device := device, shape := #[b, h, s, d] }) : Tensor { device := device, shape := #[b, s, h, d] } := x.transpose 1 2
+def fromAttention {b h s d : UInt64} (x : Tensor { device := device, shape := #[b, h, s, d], dtype }) : Tensor { device := device, shape := #[b, s, h, d], dtype } := x.transpose 1 2
 
 end torch.whisper

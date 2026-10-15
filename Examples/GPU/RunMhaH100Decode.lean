@@ -23,6 +23,8 @@ import Examples.GPU.FixtureRunner
 namespace Examples.GPU
 
 open torch
+
+variable {device : Device}
 open torch.Generator
 
 /-- One decode test case. -/
@@ -81,7 +83,7 @@ def generateDecodeFixturesFor (shape : DecodeShape) : IO Unit := do
   if !(← torch.cuda_is_available) then
     throw <| IO.userError "CUDA is not available; cannot generate decode fixtures."
   IO.FS.createDirAll (decodeFixtureSpec shape).dir
-  let device := Device.CUDA 0
+  let device ← Device.cuda 0
 
   let qf ← Tensor.randn (shapeQ shape) false device
   let kf ← Tensor.randn (shapeKV shape) false device
@@ -113,17 +115,18 @@ def runDecodeOnceFor (shape : DecodeShape) : IO Bool := do
     IO.eprintln "CUDA is not available on this host."
     return false
 
+  let device ← Device.cuda 0
   if !(← fixturesPresent (decodeFixtureSpec shape)) then
     generateDecodeFixturesFor shape
 
-  let q ← Tensor.loadTensorExact { device := .CUDA 0, shape := shapeQ shape, dtype := .BFloat16 } (decodeFixtureFile shape "q").toString
-  let k ← Tensor.loadTensorExact { device := .CUDA 0, shape := shapeKV shape, dtype := .BFloat16 } (decodeFixtureFile shape "k").toString
-  let v ← Tensor.loadTensorExact { device := .CUDA 0, shape := shapeKV shape, dtype := .BFloat16 } (decodeFixtureFile shape "v").toString
-  let expected ← Tensor.loadTensorExact { device := .CUDA 0, shape := shapeQ shape, dtype := .BFloat16 } (decodeFixtureFile shape "expected_o").toString
+  let q ← Tensor.loadTensorExact { device := device, shape := shapeQ shape, dtype := .BFloat16 } (decodeFixtureFile shape "q").toString
+  let k ← Tensor.loadTensorExact { device := device, shape := shapeKV shape, dtype := .BFloat16 } (decodeFixtureFile shape "k").toString
+  let v ← Tensor.loadTensorExact { device := device, shape := shapeKV shape, dtype := .BFloat16 } (decodeFixtureFile shape "v").toString
+  let expected ← Tensor.loadTensorExact { device := device, shape := shapeQ shape, dtype := .BFloat16 } (decodeFixtureFile shape "expected_o").toString
 
   -- Route through the production op. select_route picks tkMhaH100Decode[64]
   -- when shape is eligible; else falls back to SDPA.
-  let actual : Tensor { shape := (shapeQ shape), dtype := .BFloat16, device := (.CUDA 0) } :=
+  let actual : Tensor { shape := (shapeQ shape), dtype := .BFloat16, device := device } :=
     Tensor.flashAttention q k v true
   let _ ← torch.cuda_synchronize
 
@@ -155,7 +158,7 @@ def runCacheParityOnce : IO Bool := do
   if !(← torch.cuda_is_available) then
     IO.eprintln "CUDA is not available on this host."
     return false
-  runDecodeCacheParity (.CUDA 0)
+  runDecodeCacheParity (← Device.cuda 0)
 
 /-- Combined runner: every shape in `decodeShapes` must pass, then the cache
     parity test must pass. Returns `0` only when all passed. -/

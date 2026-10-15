@@ -169,18 +169,19 @@ private def resolveTokenizerPath (args : Args) : IO String := do
     else
       pure s!"{p}/tokenizer.bin"
 
-private def deviceToString : Device → String
-  | Device.MPS => "MPS"
-  | Device.CPU => "CPU"
-  | Device.CUDA n => s!"CUDA:{n}"
+private def deviceToString (device : Device) : String :=
+  match device.kind with
+  | DeviceKind.MPS => "MPS"
+  | DeviceKind.CPU => "CPU"
+  | DeviceKind.CUDA n => s!"CUDA:{n}"
 
 private def resolveDevice (env : ChatEnvState) : IO Device := do
   let requested? := env.requestedDevice?
   match requested? with
   | some "cpu" => pure Device.CPU
-  | some "mps" => pure Device.MPS
+  | some "mps" => Device.mps
   | some "cuda" =>
-    if ← cuda_is_available then pure (Device.CUDA 0) else pure Device.CPU
+    if ← cuda_is_available then Device.cuda 0 else pure Device.CPU
   | some "auto" | none => getBestDevice
   | some _ => getBestDevice
 

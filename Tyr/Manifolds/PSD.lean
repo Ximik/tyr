@@ -31,7 +31,7 @@ structure PSDFixedRankTangent (n k : UInt64) (dtype : DType := .Float32)
 
 namespace PSDFixedRankTangent
 
-def zero (n k : UInt64) : PSDFixedRankTangent n k d dev := ⟨Tensor.zerosFor ⟨#[n, k], d, dev⟩⟩
+def zero [DType.ConstantSupported d dev] (n k : UInt64) : PSDFixedRankTangent n k d dev := ⟨Tensor.zerosFor ⟨#[n, k], d, dev⟩⟩
 def add (a b : PSDFixedRankTangent n k d dev) : PSDFixedRankTangent n k d dev := ⟨Tensor.Preserving.add a.vec b.vec⟩
 def smul (s : Float) (v : PSDFixedRankTangent n k d dev) : PSDFixedRankTangent n k d dev := ⟨Tensor.Preserving.mulScalar v.vec s⟩
 
@@ -87,7 +87,7 @@ structure ElliptopeTangent (n k : UInt64) (dtype : DType := .Float32)
 
 namespace ElliptopeTangent
 
-def zero (n k : UInt64) : ElliptopeTangent n k d dev := ⟨Tensor.zerosFor ⟨#[n, k], d, dev⟩⟩
+def zero [DType.ConstantSupported d dev] (n k : UInt64) : ElliptopeTangent n k d dev := ⟨Tensor.zerosFor ⟨#[n, k], d, dev⟩⟩
 def add (a b : ElliptopeTangent n k d dev) : ElliptopeTangent n k d dev := ⟨Tensor.Preserving.add a.vec b.vec⟩
 def smul (s : Float) (v : ElliptopeTangent n k d dev) : ElliptopeTangent n k d dev := ⟨Tensor.Preserving.mulScalar v.vec s⟩
 

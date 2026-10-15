@@ -1,4 +1,5 @@
 import LeanTest
+import Tests.Devices
 import Tyr.Typed.Ops
 import Tyr.Modular.RiemannianModule
 
@@ -56,12 +57,13 @@ private def addPacked (x y : Sigma fun device => Tensor ⟨#[2], .Float32, devic
     | .ok result => pure result
     | .error message => LeanTest.fail message
   LeanTest.assertEqual (← sum.toFloatArray) #[7, 10]
-  match x.atDevice? (.CUDA 7) with
-  | .ok _ => LeanTest.fail "CPU tensor acquired CUDA identity without transfer"
-  | .error _ => pure ()
-  match Tensor.ofRaw (σ := ⟨#[2], .Float32, .CUDA 7⟩) x.raw with
-  | .ok _ => LeanTest.fail "raw CPU handle passed CUDA admission"
-  | .error _ => pure ()
+  for device in ← Tests.acceleratorDevices do
+    match x.atDevice? device with
+    | .ok _ => LeanTest.fail "CPU tensor acquired accelerator identity without transfer"
+    | .error _ => pure ()
+    match Tensor.ofRaw (σ := ⟨#[2], .Float32, device⟩) x.raw with
+    | .ok _ => LeanTest.fail "raw CPU handle passed accelerator admission"
+    | .error _ => pure ()
   let moved : Tensor ⟨#[2], .Float32, .CPU⟩ := x.to .CPU
   LeanTest.assertEqual (← moved.toFloatArray) #[2, 3]
   LeanTest.assertTrue (moved.runtimeDevice == moved.device)

@@ -56,11 +56,11 @@ private def loadLinearWeightSharded (modelDir : String) (baseName : String) (out
   let bases := baseNameCandidates baseName
   for b in bases do
     let wName := s!"{b}.weight"
-    if let some w ← tryLoadTensorSharded (device := device) modelDir wName #[outDim, inDim] then
+    if let some ⟨_, w⟩ ← tryLoadTensorSharded (device := device) modelDir wName #[outDim, inDim] then
       let scaleName := s!"{b}.weight_scale_inv"
       let scaleInvOpt ← tryLoadTensorSharded (device := device) modelDir scaleName #[outDim / 128, inDim / 128]
       return match scaleInvOpt with
-        | some s => dequantizeFP8 w s
+        | some ⟨_, s⟩ => dequantizeFP8 w s
         | none => w.toFloat32
   throw <| IO.userError s!"Failed to load linear weight (sharded): {baseName}"
 
@@ -69,11 +69,11 @@ private def loadLinearWeight (path : String) (baseName : String) (outDim inDim :
   let bases := baseNameCandidates baseName
   for b in bases do
     let wName := s!"{b}.weight"
-    if let some w ← tryLoadTensor (device := device) path wName #[outDim, inDim] then
+    if let some ⟨_, w⟩ ← tryLoadTensor (device := device) path wName #[outDim, inDim] then
       let scaleName := s!"{b}.weight_scale_inv"
       let scaleInvOpt ← tryLoadTensor (device := device) path scaleName #[outDim / 128, inDim / 128]
       return match scaleInvOpt with
-        | some s => dequantizeFP8 w s
+        | some ⟨_, s⟩ => dequantizeFP8 w s
         | none => w.toFloat32
   throw <| IO.userError s!"Failed to load linear weight: {baseName}"
 
@@ -92,8 +92,8 @@ private def loadAttentionSharded (modelDir : String) (layerIdx : UInt64)
     k_proj := reqGradFalse kProj
     v_proj := reqGradFalse vProj
     o_proj := reqGradFalse oProj
-    q_norm := qNorm.map (fun w => reqGradFalse w.toFloat32)
-    k_norm := kNorm.map (fun w => reqGradFalse w.toFloat32)
+    q_norm := qNorm.map (fun ⟨_, w⟩ => reqGradFalse w.toFloat32)
+    k_norm := kNorm.map (fun ⟨_, w⟩ => reqGradFalse w.toFloat32)
   }
 
 private def loadAttention (path : String) (layerIdx : UInt64)
@@ -111,8 +111,8 @@ private def loadAttention (path : String) (layerIdx : UInt64)
     k_proj := reqGradFalse kProj
     v_proj := reqGradFalse vProj
     o_proj := reqGradFalse oProj
-    q_norm := qNorm.map (fun w => reqGradFalse w.toFloat32)
-    k_norm := kNorm.map (fun w => reqGradFalse w.toFloat32)
+    q_norm := qNorm.map (fun ⟨_, w⟩ => reqGradFalse w.toFloat32)
+    k_norm := kNorm.map (fun ⟨_, w⟩ => reqGradFalse w.toFloat32)
   }
 
 private def loadMLPSharded (modelDir : String) (layerIdx : UInt64)
@@ -143,12 +143,12 @@ private def loadMLP (path : String) (layerIdx : UInt64)
 
 private def loadRMSNormSharded (modelDir : String) (name : String) (dim : UInt64)
     (device : Device := .CPU) : IO (RMSNorm (device := device) dim) := do
-  let w ← loadTensorShardedCandidates (device := device) modelDir (tensorNameCandidates s!"{name}.weight") #[dim]
+  let ⟨_, w⟩ ← loadTensorShardedCandidates (device := device) modelDir (tensorNameCandidates s!"{name}.weight") #[dim]
   pure { weight := reqGradFalse w.toFloat32, eps := ⟨1e-6⟩ }
 
 private def loadRMSNorm (path : String) (name : String) (dim : UInt64)
     (device : Device := .CPU) : IO (RMSNorm (device := device) dim) := do
-  let w ← loadTensorCandidates (device := device) path (tensorNameCandidates s!"{name}.weight") #[dim]
+  let ⟨_, w⟩ ← loadTensorCandidates (device := device) path (tensorNameCandidates s!"{name}.weight") #[dim]
   pure { weight := reqGradFalse w.toFloat32, eps := ⟨1e-6⟩ }
 
 private def loadLayerSharded (modelDir : String) (layerIdx : UInt64) (cfg : Config)
@@ -182,7 +182,7 @@ private def loadLayer (path : String) (layerIdx : UInt64) (cfg : Config)
 private def loadThinkerModelSharded (modelDir : String) (cfg : Config) (log : Handlers := {})
     (device : Device := .CPU) : IO (qwen.Qwen3Model (device := device) cfg) := do
   log.onInfo s!"Loading Qwen2.5-Omni thinker model from {modelDir}..."
-  let embed ← loadTensorShardedCandidates (device := device) modelDir (tensorNameCandidates "model.embed_tokens.weight") #[cfg.vocab_size, cfg.hidden_size]
+  let ⟨_, embed⟩ ← loadTensorShardedCandidates (device := device) modelDir (tensorNameCandidates "model.embed_tokens.weight") #[cfg.vocab_size, cfg.hidden_size]
   let embed := reqGradFalse embed.toFloat32
 
   let mut layers : Array (qwen.QwenLayer (device := device) cfg.hidden_size cfg.num_attention_heads cfg.num_key_value_heads cfg.head_dim cfg.intermediate_size) := #[]
@@ -198,7 +198,7 @@ private def loadThinkerModelSharded (modelDir : String) (cfg : Config) (log : Ha
 private def loadThinkerModel (path : String) (cfg : Config) (log : Handlers := {})
     (device : Device := .CPU) : IO (qwen.Qwen3Model (device := device) cfg) := do
   log.onInfo s!"Loading Qwen2.5-Omni thinker model from {path}..."
-  let embed ← loadTensorCandidates (device := device) path (tensorNameCandidates "model.embed_tokens.weight") #[cfg.vocab_size, cfg.hidden_size]
+  let ⟨_, embed⟩ ← loadTensorCandidates (device := device) path (tensorNameCandidates "model.embed_tokens.weight") #[cfg.vocab_size, cfg.hidden_size]
   let embed := reqGradFalse embed.toFloat32
 
   let mut layers : Array (qwen.QwenLayer (device := device) cfg.hidden_size cfg.num_attention_heads cfg.num_key_value_heads cfg.head_dim cfg.intermediate_size) := #[]
@@ -230,7 +230,7 @@ def loadSharded (modelDir : String) (cfg : Config := Config.qwen25omni_3B)
   let lmHeadOpt ← tryLoadTensorShardedCandidates (device := device) modelDir lmHeadCandidates #[cfg.vocab_size, cfg.hidden_size]
   let (lmHead, tieWordEmbeddings) ←
     match lmHeadOpt with
-    | some w => pure (reqGradFalse w.toFloat32, false)
+    | some ⟨_, w⟩ => pure (reqGradFalse w.toFloat32, false)
     | none => do
       log.onInfo "  lm_head.weight not found; using tied embeddings."
       pure (reqGradFalse model.embed_tokens, true)
@@ -244,7 +244,7 @@ def load (path : String) (cfg : Config := Config.qwen25omni_3B)
   let lmHeadOpt ← tryLoadTensorCandidates (device := device) path lmHeadCandidates #[cfg.vocab_size, cfg.hidden_size]
   let (lmHead, tieWordEmbeddings) ←
     match lmHeadOpt with
-    | some w => pure (reqGradFalse w.toFloat32, false)
+    | some ⟨_, w⟩ => pure (reqGradFalse w.toFloat32, false)
     | none => do
       log.onInfo "  lm_head.weight not found; using tied embeddings."
       pure (reqGradFalse model.embed_tokens, true)

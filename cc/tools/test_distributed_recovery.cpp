@@ -108,16 +108,7 @@ lean_object* shape(std::initializer_list<uint64_t> dims) {
 }
 Object tensor(std::initializer_list<uint64_t> dims) {
   // Device.CPU is constructor 1; constructor 0 is CUDA with an index payload.
-  Object result(lean_torch_ones_checked(shape(dims), lean_box(1)), lean_dec);
-  if (lean_obj_tag(result.get()) == 0) {
-    auto* message = lean_ctor_get(result.get(), 0);
-    throw std::runtime_error(std::string("test tensor allocation failed: ") +
-      lean_string_cstr(message));
-  }
-  require(lean_obj_tag(result.get()) == 1, "test tensor allocation returned invalid Except tag");
-  auto* raw = lean_ctor_get(result.get(), 0);
-  lean_inc(raw);
-  return Object(raw, lean_dec);
+  return Object(lean_torch_ones(shape(dims), 0, lean_box(1)), lean_dec);
 }
 } // namespace
 

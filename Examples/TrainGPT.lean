@@ -93,15 +93,15 @@ def main : IO Unit := do
   let device ←
     match requestedDevice?.map String.toLower with
     | some "auto" => getBestDevice
-    | some "cuda" => pure (Device.CUDA 0)
-    | some "mps" => pure Device.MPS
+    | some "cuda" => Device.cuda 0
+    | some "mps" => Device.mps
     | some "cpu" => pure Device.CPU
     | some _ => pure Device.CPU
     | none => pure Device.CPU
-  let deviceName := match device with
-    | Device.MPS => "MPS (Apple Silicon)"
-    | Device.CUDA n => s!"CUDA:{n}"
-    | Device.CPU => "CPU"
+  let deviceName := match device.kind with
+    | DeviceKind.MPS => "MPS (Apple Silicon)"
+    | DeviceKind.CUDA n => s!"CUDA:{n}"
+    | DeviceKind.CPU => "CPU"
   IO.println s!"Using device: {deviceName}"
   IO.println ""
 

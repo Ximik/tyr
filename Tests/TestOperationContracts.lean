@@ -35,10 +35,11 @@ example (x : Tensor ⟨#[2], .Int64, .CPU⟩) (scalar : Tensor ⟨#[], .Float32,
     Tensor ⟨#[2], .Float32, .CPU⟩ := branching.mulTensorScalar x scalar
 
 @[test] def testWherePromotesErasedOperands : IO Unit := do
-  let x := (Tensor.fromInt64Array #[1, 2]).forgetDType
-  let y := (Tensor.fromFloatArray #[9.5, 8.5]).forgetDType
+  let x := (Tensor.fromInt64Array #[1, 2])
+  let y := (Tensor.fromFloatArray #[9.5, 8.5])
   let condition := Tensor.eqScalar (Tensor.fromInt64Array #[0, 0]) 1
-  let result := Tensor.Promoting.whereSelect condition x y
+  let promoted ← checked (Tensor.Promoting.whereSelect? condition x y)
+  let result := promoted.tensor
   LeanTest.assertEqual result.raw.dtype .Float32
   LeanTest.assertEqual (← result.toFloatArray) #[9.5, 8.5]
 
@@ -68,7 +69,7 @@ example (x : Tensor ⟨#[2], .Int64, .CPU⟩) (scalar : Tensor ⟨#[], .Float32,
   let complex := (Tensor.fromFloatArray #[2, 4]).castDType .Complex64
   expectError (Tensor.relu? complex) "real numeric"
   expectError (Tensor.maxAll? complex) "real or Bool"
-  let integer := (Tensor.fromInt64Array #[2, 4]).forgetDType
+  let integer := (Tensor.fromInt64Array #[2, 4])
   expectError (Tensor.Preserving.meanDim? integer 0) "floating or complex"
   expectError (Tensor.meanAll? integer) "floating or complex"
   let mean := Tensor.meanAll complex
@@ -77,24 +78,28 @@ example (x : Tensor ⟨#[2], .Int64, .CPU⟩) (scalar : Tensor ⟨#[], .Float32,
   let maximum ← checked (Tensor.maxAll? (Tensor.fromInt64Array #[2, 4]))
   LeanTest.assertEqual maximum.itemInt 4
 
+example (_left : Tensor ⟨#[2, 2], .BFloat16, .CPU⟩)
+    (_right : Tensor ⟨#[2, 2], .Float32, .CPU⟩)
+    (_input : Tensor ⟨#[1, 2, 2], .Float32, .CPU⟩)
+    (_bias : Tensor ⟨#[2], .Float32, .CPU⟩)
+    (_otherBias : Tensor ⟨#[2], .Float64, .CPU⟩) : True := by
+  fail_if_success have _ := Tensor.mm? _left _right
+  fail_if_success have _ := Tensor.matmul? _left _right
+  fail_if_success have _ := Tensor.linear? _left _right
+  fail_if_success have _ := Tensor.affine3d? _input _left _bias
+  fail_if_success have _ := Tensor.affine3d? _input _right _otherBias
+  trivial
+
 @[test] def testMatrixActualDTypeEquality : IO Unit := do
-  let left := (Tensor.ones #[2, 2]).toBFloat16.forgetDType
-  let right := (Tensor.ones #[2, 2]).forgetDType
-  expectError (Tensor.mm? left right) "Expected dtype BFloat16, got Float32"
-  expectError (Tensor.matmul? left right) "Expected dtype BFloat16, got Float32"
-  expectError (Tensor.linear? left right) "Expected dtype BFloat16, got Float32"
+  let left := (Tensor.ones #[2, 2]).toBFloat16
   let product ← checked (Tensor.mm? left left)
   LeanTest.assertEqual product.raw.dtype .BFloat16
   LeanTest.assertEqual (← product.toFloatArray) #[2, 2, 2, 2]
 
 @[test] def testAffineActualDTypeEquality : IO Unit := do
-  let input := (Tensor.full #[1, 2, 2] 3).forgetDType
-  let weight := (Tensor.full #[2, 2] 2).forgetDType
-  let bias := (Tensor.ones #[2]).forgetDType
-  let otherWeight := (weight.castDType .Float64).forgetDType
-  let otherBias := (bias.castDType .Float64).forgetDType
-  expectError (Tensor.affine3d? input otherWeight bias) "Expected dtype Float32, got Float64"
-  expectError (Tensor.affine3d? input weight otherBias) "Expected dtype Float32, got Float64"
+  let input := (Tensor.full #[1, 2, 2] 3)
+  let weight := (Tensor.full #[2, 2] 2)
+  let bias := (Tensor.ones #[2])
   let result ← checked (Tensor.affine3d? input weight bias)
   LeanTest.assertEqual result.raw.dtype .Float32
   LeanTest.assertEqual (← result.toFloatArray) #[13, 13, 13, 13]
@@ -120,7 +125,7 @@ example {d : DType} [DType.FloatingOrComplex d]
     let input := real.castDType dtype
     LeanTest.assertEqual (← checked (Tensor.spectralNorm? input)) 4
     LeanTest.assertEqual (← checked (Tensor.nuclearNorm? input)) 7
-  let integers := (real.castDType .Int64).forgetDType
+  let integers := (real.castDType .Int64)
   expectError (Tensor.spectralNorm? integers) "floating or complex"
   expectError (Tensor.nuclearNorm? integers) "floating or complex"
   let halfComplex := real.castDType .Complex32

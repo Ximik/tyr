@@ -94,7 +94,7 @@ structure GrassmannTangent (n p : UInt64) (dtype : DType := .Float32)
 namespace GrassmannTangent
 
 /-- Zero tangent vector -/
-def zero (n p : UInt64) : GrassmannTangent n p d dev :=
+def zero [DType.ConstantSupported d dev] (n p : UInt64) : GrassmannTangent n p d dev :=
   ⟨Tensor.zerosFor ⟨#[n, p], d, dev⟩⟩
 
 /-- Add two tangent vectors -/

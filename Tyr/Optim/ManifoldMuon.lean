@@ -260,6 +260,8 @@ def stepSingleWithDiagnostics {m n : UInt64}
     (Tensor.Preserving.mulScalar newMomentum cfg.momentum)
 
   -- Optional dual-ascent solve in ambient space.
+  let support ← d.acquireConstantSupport dev
+  let _ := support.down
   let dual0 := state.dualVar.getD (Tensor.zerosFor ⟨#[n, n], d, dev⟩)
   let (signedDir, dualVar', solveDiag) ←
     if cfg.dualAscentSteps == 0 then
@@ -324,8 +326,8 @@ def stepGroupLocal {m n : UInt64}
     : IO (Array (Tensor ⟨#[m, n], d, dev⟩) × Array (ParamState m n d dev)) := do
   let mut outParams : Array (Tensor ⟨#[m, n], d, dev⟩) := #[]
   let mut outStates : Array (ParamState m n d dev) := #[]
-  for i in [:params.size] do
-    let p := params[i]!
+  for h : i in [:params.size] do
+    let p := params[i]
     let g := grads[i]?.getD (Tensor.zerosLike p)
     let st := states[i]?.getD (initParamState p)
     let (p', st') ← stepSingle p g st cfg lrMul
@@ -355,8 +357,8 @@ def stepDistributedGroup {m n : UInt64}
     return (← stepGroupLocal params grads states cfg lrMul)
 
   let mut reducedGrads : Array (Tensor ⟨#[m, n], d, dev⟩) := #[]
-  for i in [:params.size] do
-    let p := params[i]!
+  for h : i in [:params.size] do
+    let p := params[i]
     let g := Tensor.detach (grads[i]?.getD (Tensor.zerosLike p))
     let g ← dist.allReduce g .avg
     reducedGrads := reducedGrads.push g

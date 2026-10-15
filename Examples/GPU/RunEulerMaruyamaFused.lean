@@ -26,7 +26,7 @@ def runOnce : IO Bool := do
     return false
 
   seedFixtures suiteName 271828
-  let device := Device.CUDA 0
+  let device ← Device.cuda 0
   let n : UInt64 := 16384
   let treeSeed : UInt64 := 9001
   let tol := 1.0e-4

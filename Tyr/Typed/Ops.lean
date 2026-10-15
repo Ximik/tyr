@@ -25,6 +25,8 @@
     mismatches fail to compile instead of throwing inside libtorch.
 -/
 import Tyr.RawTensor
+import Tyr.ConstantSupport
+import Tyr.Shape.Allocation
 import Tyr.Typed.Tensor
 import Tyr.Typed.Domain
 
@@ -33,59 +35,20 @@ namespace torch
 namespace Tensor
 
 /-- Only return native results that satisfy their complete output specification.
-A mismatch uses the valid default through Lean's panic mechanism. This also
+A mismatch terminates at the native invariant boundary. This also
 catches wrapped UInt64 dimensions interpreted natively as negative axes or
 inferred extents. -/
 private def checkedResult {σ : StaticSpec} (operation : String)
     (result : Except String (Tensor σ)) : Tensor σ :=
   match result with
   | .ok result => result
-  | .error message => panic! s!"Tensor.{operation}: {message}"
+  | .error message => nativeInvariantFailure s!"Tensor.{operation}: {message}"
 
 /-! ## Creation
 
 The runtime defaults are Float32 for float factories and Int64 for
 `fullInt`; the indices state exactly that. Factories with a device argument
 index their result by that device, and host factories return CPU tensors. -/
-
-/-- Constant allocation with shape, placement, and native failures returned explicitly. -/
-def zeros? (shape : Shape) (device : Device := .CPU) :
-    Except String (Tensor { shape, dtype := .Float32, device }) := do
-  Tensor.ofRaw (← RawTensor.zerosChecked shape device)
-
-def ones? (shape : Shape) (device : Device := .CPU) :
-    Except String (Tensor { shape, dtype := .Float32, device }) := do
-  Tensor.ofRaw (← RawTensor.onesChecked shape device)
-
-private def factoryIO {α : Type} (result : Except String α) : IO α :=
-  match result with
-  | .ok value => pure value
-  | .error message => throw (IO.userError message)
-
-def zerosIO (shape : Shape) (device : Device := .CPU) :
-    IO (Tensor { shape, dtype := .Float32, device }) := factoryIO (zeros? shape device)
-
-def onesIO (shape : Shape) (device : Device := .CPU) :
-    IO (Tensor { shape, dtype := .Float32, device }) := factoryIO (ones? shape device)
-
-private def constantFor? (σ : StaticSpec) (native : Shape → Device → Except String RawTensor) :
-    Except String (Tensor σ) := do
-  let raw ← native σ.shape σ.device
-  let raw ← if σ.dtype.isKnown then
-      RawTensor.castDTypeChecked σ.shape raw σ.dtype.canonicalName
-    else pure raw
-  Tensor.ofRaw raw
-
-/-- Checked constant creation at a complete specification; dynamic dtype defaults to Float32. -/
-def zerosFor? (σ : StaticSpec) : Except String (Tensor σ) :=
-  constantFor? σ (fun shape device => RawTensor.zerosChecked shape device)
-
-def onesFor? (σ : StaticSpec) : Except String (Tensor σ) :=
-  constantFor? σ (fun shape device => RawTensor.onesChecked shape device)
-
-def zerosForIO (σ : StaticSpec) : IO (Tensor σ) := factoryIO (zerosFor? σ)
-
-def onesForIO (σ : StaticSpec) : IO (Tensor σ) := factoryIO (onesFor? σ)
 
 def zeros (shape : Shape) (requiresGrad : Bool := false)
     (device : Device := Device.CPU) (noGrad : requiresGrad = false := by exact of_decide_eq_true rfl) : Tensor { shape, dtype := .Float32, device } :=
@@ -126,10 +89,9 @@ def uniformLike {σ : StaticSpec} (reference : Tensor σ) (lo : Float := 0.0)
   | .error message => throw (IO.userError s!"uniformLike: {message}")
 
 /-- A valid one value for a complete specification, mirroring `zerosFor`. -/
-def onesFor (σ : StaticSpec) : Tensor σ :=
+def onesFor (σ : StaticSpec) [DType.ConstantSupported σ.dtype σ.device] : Tensor σ :=
   let raw := RawTensor.ones σ.shape false σ.device
-  let raw := if σ.dtype.isKnown then
-    RawTensor.castDType σ.shape raw σ.dtype.canonicalName else raw
+  let raw := RawTensor.castDType σ.shape raw σ.dtype.canonicalName
   checkedResult "onesFor" (Tensor.ofRaw raw)
 
 /-- Transfer a tensor to the requested device, preserving its shape and dtype.
@@ -265,28 +227,15 @@ def inv {n : UInt64} {d : DType} {dev : Device}
   t.checkedReplacement (RawTensor.inv n t.raw)
 
 /-- Float32 identity matrix on CPU. -/
-def eye? (n : UInt64) : Except String (Tensor ⟨#[n, n], .Float32, .CPU⟩) := do
-  Tensor.ofRaw (← RawTensor.eyeChecked n)
-
-def eyeIO (n : UInt64) : IO (Tensor ⟨#[n, n], .Float32, .CPU⟩) := factoryIO (eye? n)
-
-/-- Allocate and convert an identity matrix without leaving the recoverable boundary. -/
-def eyeForIO {n : UInt64} (d : DType) (dev : Device := .CPU) : IO (Tensor ⟨#[n, n], d, dev⟩) := do
-  let raw ← IO.ofExcept (RawTensor.eyeChecked n)
-  let target := if d == .Unknown "dynamic" then none else some d.canonicalName
-  let raw ← RawTensor.convertIO #[n, n] raw dev target
-  IO.ofExcept (Tensor.ofRaw raw)
-
-/-- Float32 identity matrix on CPU. -/
 def eye (n : UInt64) : Tensor ⟨#[n, n], .Float32, .CPU⟩ :=
   checkedResult "eye" (Tensor.ofRaw (RawTensor.eye n))
 
 /-- Identity matrix for a complete specification. The native factory produces
     Float32 on CPU; the value is cast and moved to match the specification. -/
-def eyeFor {n : UInt64} (d : DType) (dev : Device := .CPU) : Tensor ⟨#[n, n], d, dev⟩ :=
+def eyeFor {n : UInt64} (d : DType) (dev : Device := .CPU)
+    [DType.ConstantSupported d dev] : Tensor ⟨#[n, n], d, dev⟩ :=
   let raw := RawTensor.eye n
-  let raw := if d == .Unknown "dynamic" then raw
-    else RawTensor.castDType #[n, n] raw d.canonicalName
+  let raw := RawTensor.castDType #[n, n] raw d.canonicalName
   let raw := RawTensor.toDevice #[n, n] raw dev
   checkedResult "eyeFor" (Tensor.ofRaw raw)
 
@@ -326,7 +275,7 @@ def svdReduced {m n : UInt64} {d : DType} {dev : Device}
     Tensor ⟨#[m, n], d, dev⟩ × Tensor ⟨#[n], d.realResult, dev⟩ × Tensor ⟨#[n, n], d, dev⟩ :=
   match svdReduced? t _tall with
   | .ok result => result
-  | .error message => panic! s!"Tensor.svdReduced: {message}"
+  | .error message => nativeInvariantFailure s!"Tensor.svdReduced: {message}"
 
 /-- Real singular values of a square matrix in descending order, with
 recoverable native dtype, backend, and factorization failures. -/
@@ -516,7 +465,7 @@ private def unaryResult {σ : StaticSpec} (operation : String) (t : Tensor σ)
   | .ok result => result
   | .error message =>
     letI : Inhabited (Tensor σ) := ⟨t⟩
-    panic! s!"Tensor.{operation}: {message}"
+    nativeInvariantFailure s!"Tensor.{operation}: {message}"
 
 def exp? {σ : StaticSpec} (t : Tensor σ) : Except String (Tensor σ) :=
   checkedUnary? "exp" "a floating or complex dtype" DType.isInexact RawTensor.expChecked t
@@ -882,7 +831,7 @@ def sliceChecked {σ : StaticSpec} (t : Tensor σ) (dim : Nat) (start len : UInt
     (shape' : Shape) : Tensor (σ.withShape shape') :=
   match Tensor.ofRaw (RawTensor.slice σ.shape t.raw dim.toUInt64 start len) with
   | .ok r => r
-  | .error message => panic! s!"Tensor.sliceChecked: {message}"
+  | .error message => nativeInvariantFailure s!"Tensor.sliceChecked: {message}"
 
 /-- Vector-Jacobian product: for `y = f(x)` and output cotangent `dy`, returns
     the input cotangent, checked against `x`'s spec. -/
@@ -1158,8 +1107,6 @@ def mul {σ : StaticSpec} (lhs rhs : Tensor σ) : Tensor σ :=
       letI : Inhabited (Tensor σ) := ⟨lhs⟩
       panic! s!"Tensor.Preserving.mul: {message}"
 
-
-
 /-- Absolute value for generic algorithms that require dtype preservation.
 Complex absolute value is real; use `Tensor.abs` to expose that result type. -/
 def abs? {σ : StaticSpec} (t : Tensor σ) : Except String (Tensor σ) := do
@@ -1192,7 +1139,7 @@ def sumDim {σ : StaticSpec} (t : Tensor σ) (dim : Nat) (keepdim : Bool := fals
     Tensor (σ.withShape (reduceShape σ.shape dim keepdim)) :=
   match sumDim? t dim keepdim with
   | .ok result => result
-  | .error message => panic! s!"Tensor sumDim: {message}"
+  | .error message => nativeInvariantFailure s!"Tensor sumDim: {message}"
 
 /-- Host floating scalars use PyTorch's weak Float32 category. Validate the
 actual result dtype before invoking a generic preserving operation. -/
@@ -1384,7 +1331,7 @@ def conv1d {batch inChannels outChannels length kernel : UInt64}
         stride.toNat + 1).toUInt64], d, dev⟩ :=
   match conv1d? input weight stride padding dilation with
   | .ok result => result
-  | .error message => panic! s!"Tensor.conv1d: {message}"
+  | .error message => nativeInvariantFailure s!"Tensor.conv1d: {message}"
 
 /-- Copy tensor values to a host Float array through the native conversion. -/
 def toFloatArray {σ : StaticSpec} (t : Tensor σ) : IO (Array Float) :=
@@ -1416,12 +1363,6 @@ structure Promoted (lhs rhs : DType) (shape : Shape) (device : Device)
   witness : DType.Promotes lhs rhs dtype
   tensor : Tensor ⟨shape, resultDType dtype, device⟩
 
-/-- Forget the selected dtype index without converting the result's values. -/
-def Promoted.toDynamic? {lhs rhs : DType} {shape : Shape} {device : Device}
-    {resultDType : DType → DType} (result : Promoted lhs rhs shape device resultDType) :
-    Except String (Tensor ⟨shape, .Unknown "dynamic", device⟩) :=
-  Tensor.ofRaw result.tensor.raw
-
 /-- Runtime selection retains the actual promotion witness and never casts
 the selected values back to the left input dtype. -/
 def whereSelect? {s : Shape} {l r : DType} {dev : Device}
@@ -1436,11 +1377,6 @@ def whereSelect? {s : Shape} {l r : DType} {dev : Device}
       (← RawTensor.whereSelectChecked s condition.raw left.raw right.raw)
     pure { dtype, witness := ⟨h⟩, tensor }
 
-def whereSelect {s : Shape} {l r : DType} {dev : Device}
-    (condition : Tensor ⟨s, .Bool, dev⟩) (left : Tensor ⟨s, l, dev⟩)
-    (right : Tensor ⟨s, r, dev⟩) : Tensor ⟨s, .Unknown "dynamic", dev⟩ :=
-  checkedResult "Promoting.whereSelect" do (← whereSelect? condition left right).toDynamic?
-
 /-- Rank-aware promotion evidence for runtime broadcasting, including the
 weaker precision of zero-dimensional tensor operands. -/
 structure PointwisePromoted (lhs rhs : TensorSpec) (shape : Shape) (device : Device)
@@ -1448,12 +1384,6 @@ structure PointwisePromoted (lhs rhs : TensorSpec) (shape : Shape) (device : Dev
   dtype : DType
   witness : TensorSpec.Promotes lhs rhs dtype
   tensor : Tensor ⟨shape, resultDType dtype, device⟩
-
-def PointwisePromoted.toDynamic? {lhs rhs : TensorSpec} {shape : Shape}
-    {device : Device} {resultDType : DType → DType}
-    (result : PointwisePromoted lhs rhs shape device resultDType) :
-    Except String (Tensor ⟨shape, .Unknown "dynamic", device⟩) :=
-  Tensor.ofRaw result.tensor.raw
 
 private def broadcastBinary? {σ τ : StaticSpec} (operation : String)
     (native : Shape → RawTensor → RawTensor → Except String RawTensor)
@@ -1483,10 +1413,6 @@ def mulB? {σ τ : StaticSpec} (left : Tensor σ) (right : Tensor τ) (out : Sha
 
 def divB? {σ τ : StaticSpec} (left : Tensor σ) (right : Tensor τ) (out : Shape) :=
   broadcastBinary? "div" RawTensor.divChecked DType.divideResult left right out
-
-def mulB {σ τ : StaticSpec} (left : Tensor σ) (right : Tensor τ) (out : Shape) :
-    Tensor ⟨out, .Unknown "dynamic", σ.pointwiseDevice τ⟩ :=
-  checkedResult "Promoting.mulB" do (← mulB? left right out).toDynamic?
 
 private def binary? {s : Shape} {l r : DType} {dev : Device}
     (operation : String) (native : Shape → RawTensor → RawTensor → Except String RawTensor)
@@ -1538,44 +1464,12 @@ def maximum? {s : Shape} {l r : DType} {dev : Device}
   DType.checkOrdered right.raw.dtype
   binary? "maximum" RawTensor.maximumChecked id left right
 
-def maximum {s : Shape} {l r : DType} {dev : Device}
-    (left : Tensor ⟨s, l, dev⟩) (right : Tensor ⟨s, r, dev⟩) :
-    Tensor ⟨s, .Unknown "dynamic", dev⟩ :=
-  checkedResult "Promoting.maximum" do (← maximum? left right).toDynamic?
-
-/-- Runtime-promoting arithmetic with a dynamic result index. No operand or
-result is cast back to an input dtype. Use `add?` to retain the promotion witness. -/
-def add {s : Shape} {l r : DType} {dev : Device}
-    (left : Tensor ⟨s, l, dev⟩) (right : Tensor ⟨s, r, dev⟩) :
-    Tensor ⟨s, .Unknown "dynamic", dev⟩ :=
-  checkedResult "Promoting.add" do (← add? left right).toDynamic?
-
-def sub {s : Shape} {l r : DType} {dev : Device}
-    (left : Tensor ⟨s, l, dev⟩) (right : Tensor ⟨s, r, dev⟩) :
-    Tensor ⟨s, .Unknown "dynamic", dev⟩ :=
-  checkedResult "Promoting.sub" do (← sub? left right).toDynamic?
-
-def mul {s : Shape} {l r : DType} {dev : Device}
-    (left : Tensor ⟨s, l, dev⟩) (right : Tensor ⟨s, r, dev⟩) :
-    Tensor ⟨s, .Unknown "dynamic", dev⟩ :=
-  checkedResult "Promoting.mul" do (← mul? left right).toDynamic?
-
-def div {s : Shape} {l r : DType} {dev : Device}
-    (left : Tensor ⟨s, l, dev⟩) (right : Tensor ⟨s, r, dev⟩) :
-    Tensor ⟨s, .Unknown "dynamic", dev⟩ :=
-  checkedResult "Promoting.div" do (← div? left right).toDynamic?
-
 /-- Promotion by a host Float, using PyTorch's default Float32 scalar category.
 The input dtype parameter is the actual metadata of the supplied tensor. -/
 structure ScalarPromoted (input : DType) (shape : Shape) (device : Device) where
   dtype : DType
   witness : DType.ScalarPromotes input .Float32 dtype
   tensor : Tensor ⟨shape, dtype, device⟩
-
-def ScalarPromoted.toDynamic? {input : DType} {shape : Shape} {device : Device}
-    (result : ScalarPromoted input shape device) :
-    Except String (Tensor ⟨shape, .Unknown "dynamic", device⟩) :=
-  Tensor.ofRaw result.tensor.raw
 
 private def scalar? {σ : StaticSpec} (operation : String)
     (native : Shape → RawTensor → Float → Except String RawTensor) (input : Tensor σ) (value : Float) :
@@ -1606,71 +1500,54 @@ def divScalar? {σ : StaticSpec} (input : Tensor σ) (value : Float) :
     Except String (ScalarPromoted input.actualSpec.dtype σ.shape σ.device) :=
   scalar? "divScalar" RawTensor.divScalarChecked input value
 
-def addScalar {σ : StaticSpec} (input : Tensor σ) (value : Float) :
-    Tensor ⟨σ.shape, .Unknown "dynamic", σ.device⟩ :=
-  checkedResult "Promoting.addScalar" do (← addScalar? input value).toDynamic?
-
-def subScalar {σ : StaticSpec} (input : Tensor σ) (value : Float) :
-    Tensor ⟨σ.shape, .Unknown "dynamic", σ.device⟩ :=
-  checkedResult "Promoting.subScalar" do (← subScalar? input value).toDynamic?
-
-def mulScalar {σ : StaticSpec} (input : Tensor σ) (value : Float) :
-    Tensor ⟨σ.shape, .Unknown "dynamic", σ.device⟩ :=
-  checkedResult "Promoting.mulScalar" do (← mulScalar? input value).toDynamic?
-
-def divScalar {σ : StaticSpec} (input : Tensor σ) (value : Float) :
-    Tensor ⟨σ.shape, .Unknown "dynamic", σ.device⟩ :=
-  checkedResult "Promoting.divScalar" do (← divScalar? input value).toDynamic?
-
 /-- Runtime unary promotion records the actual input dtype in the result
 index. Integral and Bool inputs produce Float32; inexact inputs retain their
 dtype. Native domain or kernel failures remain recoverable. -/
 private def unary? {σ : StaticSpec}
     (native : Shape → RawTensor → Except String RawTensor) (input : Tensor σ) :
-    Except String (Tensor (σ.withDType input.actualSpec.dtype.atLeastFloat)) := do
-  Tensor.checkedUpdate? input.actualSpec.dtype.atLeastFloat input.raw.device
+    Except String (Tensor (σ.withDType σ.dtype.atLeastFloat)) := do
+  Tensor.checkedUpdate? σ.dtype.atLeastFloat input.raw.device
     (← native σ.shape input.raw)
 
 def exp? {σ : StaticSpec} (input : Tensor σ) :
-    Except String (Tensor (σ.withDType input.actualSpec.dtype.atLeastFloat)) :=
+    Except String (Tensor (σ.withDType σ.dtype.atLeastFloat)) :=
   unary? RawTensor.expChecked input
 
 def exp {σ : StaticSpec} (input : Tensor σ) :
-    Tensor (σ.withDType (.Unknown "dynamic")) :=
-  checkedResult "Promoting.exp" do Tensor.ofRaw (← exp? input).raw
+    Tensor (σ.withDType σ.dtype.atLeastFloat) :=
+  checkedResult "Promoting.exp" (exp? input)
 
 def sqrt? {σ : StaticSpec} (input : Tensor σ) :
-    Except String (Tensor (σ.withDType input.actualSpec.dtype.atLeastFloat)) :=
+    Except String (Tensor (σ.withDType σ.dtype.atLeastFloat)) :=
   unary? RawTensor.sqrtChecked input
 
 def sqrt {σ : StaticSpec} (input : Tensor σ) :
-    Tensor (σ.withDType (.Unknown "dynamic")) :=
-  checkedResult "Promoting.sqrt" do Tensor.ofRaw (← sqrt? input).raw
+    Tensor (σ.withDType σ.dtype.atLeastFloat) :=
+  checkedResult "Promoting.sqrt" (sqrt? input)
 
 def rsqrt? {σ : StaticSpec} (input : Tensor σ) :
-    Except String (Tensor (σ.withDType input.actualSpec.dtype.atLeastFloat)) :=
+    Except String (Tensor (σ.withDType σ.dtype.atLeastFloat)) :=
   unary? RawTensor.rsqrtChecked input
 
 def rsqrt {σ : StaticSpec} (input : Tensor σ) :
-    Tensor (σ.withDType (.Unknown "dynamic")) :=
-  checkedResult "Promoting.rsqrt" do Tensor.ofRaw (← rsqrt? input).raw
+    Tensor (σ.withDType σ.dtype.atLeastFloat) :=
+  checkedResult "Promoting.rsqrt" (rsqrt? input)
 
 def atan? {σ : StaticSpec} (input : Tensor σ) :
-    Except String (Tensor (σ.withDType input.actualSpec.dtype.atLeastFloat)) :=
+    Except String (Tensor (σ.withDType σ.dtype.atLeastFloat)) :=
   unary? RawTensor.atanChecked input
 
 def atan {σ : StaticSpec} (input : Tensor σ) :
-    Tensor (σ.withDType (.Unknown "dynamic")) :=
-  checkedResult "Promoting.atan" do Tensor.ofRaw (← atan? input).raw
+    Tensor (σ.withDType σ.dtype.atLeastFloat) :=
+  checkedResult "Promoting.atan" (atan? input)
 
 def pow? {σ : StaticSpec} (input : Tensor σ) (exponent : Float) :
-    Except String (Tensor (σ.withDType input.actualSpec.dtype.atLeastFloat)) :=
+    Except String (Tensor (σ.withDType σ.dtype.atLeastFloat)) :=
   unary? (fun shape raw => RawTensor.powChecked shape raw exponent) input
 
 def pow {σ : StaticSpec} (input : Tensor σ) (exponent : Float) :
-    Tensor (σ.withDType (.Unknown "dynamic")) :=
-  checkedResult "Promoting.pow" do Tensor.ofRaw (← pow? input exponent).raw
-
+    Tensor (σ.withDType σ.dtype.atLeastFloat) :=
+  checkedResult "Promoting.pow" (pow? input exponent)
 
 end Promoting
 

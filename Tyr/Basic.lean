@@ -1,4 +1,5 @@
 import Tyr.Basic.Types
+import Tyr.ConstantSupport.Types
 
 /-!
 # Tyr.Basic
@@ -75,6 +76,12 @@ def stats (t : RawTensor) : String := statsImpl #[] t
 
 end RawTensor
 
+/-- Stop execution when a trusted native operation violates its result
+contract. This never manufactures a fallback value. -/
+@[extern "lean_torch_native_invariant_failure"]
+opaque nativeInvariantFailure {α : Type} [Nonempty α] (message : @& String) : α :=
+  Classical.choice inferInstance
+
 -- Keep the representation opaque even to constructor/cases/unfold tactics.
 -- The body establishes nonemptiness without adding an axiom; it does not make
 -- different specification indices definitionally equal in the kernel.
@@ -102,7 +109,8 @@ private unsafe def rawImpl {σ : StaticSpec} (tensor : Tensor σ) : RawTensor :=
 opaque raw {σ : StaticSpec} (tensor : Tensor σ) : RawTensor :=
   Classical.choice inferInstance
 
-private def renderDevice : Device → String
+private def renderDevice (device : Device) : String :=
+  match device.kind with
   | .CPU => "CPU"
   | .MPS => "MPS"
   | .CUDA index => s!"CUDA:{index}"
@@ -110,14 +118,13 @@ private def renderDevice : Device → String
 private def checkSpec (σ : StaticSpec) (raw : RawTensor) : Except String Unit := do
   if raw.runtimeShape != σ.shape then
     throw s!"Expected shape {reprStr σ.shape}, got {reprStr raw.runtimeShape}"
-  if σ.dtype != .Unknown "dynamic" && raw.dtype != σ.dtype then
+  if raw.dtype != σ.dtype then
     throw s!"Expected dtype {σ.dtype}, got {raw.dtype}"
   if raw.device != σ.device then
     throw s!"Expected device {renderDevice σ.device}, got {renderDevice raw.device}"
 
-/-- Check shape, dtype and actual placement against the native handle. Only the
-reserved `Unknown "dynamic"` dtype makes no dtype claim; every device index
-must match the native handle exactly. -/
+/-- Check exact shape, dtype and actual placement against the native handle.
+Unknown dtype tokens are exact metadata, never wildcard specifications. -/
 def validate {σ : StaticSpec} (tensor : Tensor σ) : Except String Unit :=
   checkSpec σ tensor.raw
 
@@ -132,24 +139,22 @@ claim in the destination specification against native metadata. -/
 opaque ofRaw {σ : StaticSpec} (raw : RawTensor) : Except String (Tensor σ) :=
   .error "Tensor.ofRaw requires its checked runtime implementation"
 
-private unsafe def zerosForImpl (σ : StaticSpec) : Tensor σ :=
+private unsafe def zerosForImpl (σ : StaticSpec)
+    [DType.ConstantSupported σ.dtype σ.device] : Tensor σ :=
   let raw := RawTensor.zeros σ.shape false σ.device
-  let raw := if σ.dtype == DType.Unknown "dynamic" then raw
-    else RawTensor.castDType σ.shape raw σ.dtype.canonicalName
+  let raw := RawTensor.castDType σ.shape raw σ.dtype.canonicalName
   unsafeCast raw
 
-/-- Trusted native allocation boundary used to bootstrap pure typed factories.
-It accepts a specification, never a foreign handle: libtorch creates fresh zeros
-on the requested device and casts them to the requested concrete dtype. Native
-allocation/cast failures throw; `Unknown "dynamic"` uses the native default.
-Other unknown dtype tokens go through native dtype
-parsing and fail instead of silently defaulting. This is the sole unchecked
-native construction boundary.
--/
+/-- Trusted native allocation boundary for a supported constant specification.
+The placement has already been acquired, and the capability establishes support
+for the requested dtype. Allocation failures follow the runtime failure policy.
+This boundary accepts a specification, never an unchecked foreign handle. -/
 @[implemented_by zerosForImpl]
-opaque zerosFor (σ : StaticSpec) : Tensor σ := Classical.choice inferInstance
+opaque zerosFor (σ : StaticSpec) [DType.ConstantSupported σ.dtype σ.device] :
+    Tensor σ := Classical.choice inferInstance
 
-instance {σ : StaticSpec} : Inhabited (Tensor σ) := ⟨zerosFor σ⟩
+instance {σ : StaticSpec} [DType.ConstantSupported σ.dtype σ.device] :
+    Inhabited (Tensor σ) := ⟨zerosFor σ⟩
 
 /-- Package placement as an existential index without weakening its identity. -/
 def packDevice {σ : StaticSpec} (tensor : Tensor σ) :

@@ -1,7 +1,9 @@
 import LeanTest
+import Tests.Devices
 import Tyr.Typed
 import Tyr.Typed.Neural
 import Tyr.TensorStruct
+import Tyr.TensorStruct.Cast
 
 /-! This module intentionally imports no compatibility or legacy runtime API. -/
 
@@ -27,6 +29,8 @@ example : True := by
     have _ := @torch.Tensor.assumeSpec
   fail_if_success
     have _ := @torch.Tensor.mk
+  fail_if_success
+    have _ := @torch.Tensor.forgetDType
   trivial
 
 example (_x : Tensor { shape := #[2, 3], dtype := .Float32, device := .CPU }) : True := by
@@ -55,12 +59,15 @@ def testRawAdmissionRejectsFalseClaims : IO Unit := do
   let rejected : Array StaticSpec := #[
     { shape := #[6], dtype := .Float32, device := .CPU },
     { shape := #[2, 3], dtype := .Int64, device := .CPU },
-    { shape := #[2, 3], dtype := .Float32, device := (.CUDA 0) },
-    { shape := #[2, 3], dtype := .Unknown "Float32_typo", device := .CPU }]
+    { shape := #[2, 3], dtype := .Unknown "Float32_typo", device := .CPU },
+    { shape := #[2, 3], dtype := .Unknown "dynamic", device := .CPU }]
+  for device in ← Tests.acceleratorDevices do
+    LeanTest.assertTrue (Tensor.ofRaw (σ := ⟨raw.runtimeShape, raw.dtype, device⟩) raw).toOption.isNone
+      "A CPU handle cannot be admitted at an acquired accelerator placement"
   for spec in rejected do
     LeanTest.assertTrue ((Tensor.ofRaw (σ := spec) raw).toOption.isNone)
       s!"Raw admission must reject {reprStr spec}"
-  match Tensor.ofRaw (σ := { shape := #[2, 3], device := .CPU }) raw with
+  match Tensor.ofRaw (σ := { shape := #[2, 3], dtype := .Float32, device := .CPU }) raw with
   | .error message => LeanTest.fail message
   | .ok tensor =>
       LeanTest.assertEqual (← tensor.toFloatArray) #[7, 7, 7, 7, 7, 7]
@@ -69,18 +76,20 @@ def testRawAdmissionRejectsFalseClaims : IO Unit := do
   LeanTest.assertTrue ((Tensor.ofTensor (shape := #[2, 3]) .Int64 raw).toOption.isNone)
     "Checked raw conversion must not cast the native dtype"
 
+example (_destination : Tensor ⟨#[2], .Int64, .CPU⟩)
+    (_source : Tensor ⟨#[2], .Float32, .CPU⟩) : True := by
+  fail_if_success have _ := Tensor.copyInto _destination _source
+  trivial
+
 @[test]
 def testErasedDTypeCopyRejectsBeforeMutation : IO Unit := do
   let destination := Tensor.fullInt #[2] 9
   let source := Tensor.fromFloatArray #[1.75, 2.25]
-  let rejected ← try
-    let _ ← Tensor.copyInto destination.forgetDType source.forgetDType
-    pure false
-  catch error =>
-    LeanTest.assertTrue (error.toString.containsSubstr "dtype")
+  match Tensor.ofRaw (σ := destination.staticSpec) source.raw with
+  | .error error =>
+    LeanTest.assertTrue (error.containsSubstr "dtype")
       "Copy rejection must explain the dtype mismatch"
-    pure true
-  LeanTest.assertTrue rejected "Dtype erasure must not enable an implicit converting copy"
+  | .ok _ => LeanTest.fail "Raw admission must reject an implicit converting copy"
   LeanTest.assertEqual (← destination.toFloatArray) #[9, 9]
     "Rejected copy must leave the destination unchanged"
   let destination ← Tensor.copyInto destination source.toInt64
@@ -89,15 +98,15 @@ def testErasedDTypeCopyRejectsBeforeMutation : IO Unit := do
 
 @[test]
 def testPreservingReplacementChecksErasedDType : IO Unit := do
-  let original := (Tensor.fullInt #[2] 9).forgetDType
+  let original := (Tensor.fullInt #[2] 9)
   LeanTest.assertTrue ((original.checkedReplacement? (Tensor.ones #[2]).raw).toOption.isNone)
-    "A preserving adapter must reject dtype drift even for a partial specification"
+    "A preserving adapter must reject dtype drift"
   match original.checkedReplacement? (Tensor.fullInt #[2] 4).raw with
   | .error message => LeanTest.fail message
   | .ok replacement => LeanTest.assertEqual (← replacement.toFloatArray) #[4, 4]
-  let smallInts := ((Tensor.ones #[2, 2]).castDType .Int32).forgetDType
+  let smallInts := ((Tensor.ones #[2, 2]).castDType .Int32)
   LeanTest.assertTrue ((Tensor.Preserving.sumDim? smallInts 0).toOption.isNone)
-    "Erased Int32 accumulation must not masquerade as a dtype-preserving reduction"
+    "Int32 accumulation must not masquerade as a dtype-preserving reduction"
   let reduced := Tensor.sumDim smallInts 0
   LeanTest.assertEqual reduced.raw.dtype .Int64
     "The ordinary reduction still permits native integer accumulation"
@@ -121,16 +130,13 @@ def testExplicitConversionsCheckNativeResults : IO Unit := do
   LeanTest.assertTrue ((original.reshapeChecked? #[18446744073709551615]).toOption.isNone)
     "Wrapped negative extents must not act as native shape inference"
   let pinned := Tensor.onesFor { shape := #[2], dtype := .Float32, device := .CPU }
-  let converted ← TensorStruct.castDType .BFloat16 pinned.forgetDType
+  let converted ← TensorStruct.castTo (Tensor ⟨#[2], .BFloat16, .CPU⟩) pinned
   LeanTest.assertEqual converted.raw.dtype .BFloat16
   LeanTest.assertTrue (converted.staticSpec.device == .CPU)
     "Explicit tree conversion retains placement policy"
   LeanTest.assertEqual (← converted.toFloatArray) #[1, 1]
-  let rejected ← try
-    let _ ← TensorStruct.castDType .BFloat16 pinned
-    pure false
-  catch _ => pure true
-  LeanTest.assertTrue rejected "A tree cast cannot contradict a leaf's concrete dtype index"
+  LeanTest.assertEqual pinned.raw.dtype .Float32
+    "A tree cast preserves the original tensor's concrete dtype"
 
 @[test]
 def testFoundationTypedOperationsAndRawMetadata : IO Unit := do
@@ -156,7 +162,7 @@ def testExistentialTensorPreservesFullSpec : IO Unit := do
   | .ok () => pure ()
   | .error message => LeanTest.fail message
   LeanTest.assertEqual (← packed.snd.toFloatArray) #[1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
-  match (Tensor.onesFor spec).forgetDType.reifyDType with
+  match (Tensor.onesFor spec).reifyDType with
   | .error message => LeanTest.fail message
   | .ok ⟨dtype, tensor⟩ =>
       LeanTest.assertEqual dtype.val .Float64

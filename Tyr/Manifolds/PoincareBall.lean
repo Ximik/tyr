@@ -43,7 +43,7 @@ structure PoincareBallTangent (n : UInt64) (dtype : DType := .Float32)
 
 namespace PoincareBallTangent
 
-def zero (n : UInt64) : PoincareBallTangent n d dev := ⟨Tensor.zerosFor ⟨#[n], d, dev⟩⟩
+def zero [DType.ConstantSupported d dev] (n : UInt64) : PoincareBallTangent n d dev := ⟨Tensor.zerosFor ⟨#[n], d, dev⟩⟩
 def add (a b : PoincareBallTangent n d dev) : PoincareBallTangent n d dev := ⟨Tensor.Preserving.add a.vec b.vec⟩
 def smul (s : Float) (v : PoincareBallTangent n d dev) : PoincareBallTangent n d dev := ⟨Tensor.Preserving.mulScalar v.vec s⟩
 

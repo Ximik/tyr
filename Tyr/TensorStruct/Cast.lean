@@ -44,7 +44,7 @@ private def castTensorAt {σ τ : StaticSpec} (path : String)
     -- A type-directed cast never reshapes data, even for equal element counts.
     checked (TensorSpec.checkShape τ.shape σ.shape)
     let sourceDType := tensor.raw.dtype
-    let targetDType := if τ.dtype == .Unknown "dynamic" then sourceDType else τ.dtype
+    let targetDType := τ.dtype
     -- Unknown native dtype tokens can be retained exactly, but are never used
     -- to request an unsupported conversion or treated as a wildcard.
     let dtypeTag ← if targetDType == sourceDType then pure none else
@@ -57,7 +57,7 @@ private def castTensorAt {σ τ : StaticSpec} (path : String)
     let raw ← if dtypeTag.isNone && targetDevice == tensor.raw.device then
         pure tensor.raw
       else RawTensor.convertIO σ.shape tensor.raw targetDevice dtypeTag
-    -- Check retained metadata too, even when the destination index is dynamic.
+    -- Check retained metadata as well as requested conversions.
     checked (TensorSpec.checkDType targetDType raw.dtype)
     checked (Device.check targetDevice raw.device)
     checked (Tensor.ofRaw raw)
@@ -66,6 +66,26 @@ private def castTensorAt {σ τ : StaticSpec} (path : String)
 
 instance {σ τ : StaticSpec} : TensorTreeCast (Tensor σ) (Tensor τ) where
   castAt := castTensorAt
+
+/-- Preserve the hidden dtype while explicitly converting shape-compatible
+placement. An existential destination does not request a dtype conversion. -/
+instance {shape targetShape : Shape} {device targetDevice : Device} :
+    TensorTreeCast (SomeDTypeTensor shape device) (SomeDTypeTensor targetShape targetDevice) where
+  castAt path source := do
+    let tensor : Tensor ⟨targetShape, source.1.val, targetDevice⟩ ←
+      castTensorAt path source.2
+    pure ⟨source.1, tensor⟩
+
+instance {shape : Shape} {device : Device} {τ : StaticSpec} :
+    TensorTreeCast (SomeDTypeTensor shape device) (Tensor τ) where
+  castAt path source := castTensorAt path source.2
+
+instance {σ : StaticSpec} {shape : Shape} {device : Device} :
+    TensorTreeCast (Tensor σ) (SomeDTypeTensor shape device) where
+  castAt path source := do
+    let packed ← checked source.reifyDType
+    let tensor : Tensor ⟨shape, packed.1.val, device⟩ ← castTensorAt path packed.2
+    pure ⟨packed.1, tensor⟩
 
 instance {σ τ : StaticSpec} : TensorTreeCast (Frozen σ) (Frozen τ) where
   castAt path source := do
@@ -152,8 +172,8 @@ end TensorTreeCast
 namespace TensorStruct
 
 /-- Convert to the destination tree of tensor types, with no allocated target
-template. A dynamic target dtype preserves the source dtype; each target has a
-concrete device, and differing target dtypes/devices request real native conversions.
+template. Each target has an exact dtype and device; differing target
+dtypes/devices request real native conversions.
 Shape mismatches and unsupported dtype targets report their structural path. -/
 def castTo (β : Type) {α : Type} [TensorTreeCast α β] (source : α) : IO β :=
   TensorTreeCast.castAt "" source

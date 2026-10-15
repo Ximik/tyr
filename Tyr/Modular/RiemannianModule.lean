@@ -130,7 +130,7 @@ private def linearApplyParamAdjoint {inDim outDim : UInt64} {d : DType} {dev : D
   let outer : Tensor ⟨#[outDim, inDim], d, dev⟩ :=
     Tensor.mm (vectorToColumn y) (Tensor.reshape x #[1, inDim] (by simp [TensorSpec.numelOfShape]))
   let weightPart : Tensor ⟨#[outDim * inDim], d, dev⟩ := Tensor.reshapeChecked outer #[outDim * inDim]
-  let biasPart : Tensor ⟨#[outDim], d, dev⟩ := if useBias then y else Tensor.zerosFor _
+  let biasPart : Tensor ⟨#[outDim], d, dev⟩ := if useBias then y else Tensor.zerosLike y
   let joined := Tensor.cat weightPart biasPart 0
   Tensor.reshapeChecked joined #[outDim * inDim + outDim]
 

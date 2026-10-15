@@ -25,11 +25,13 @@ private def close {σ τ : StaticSpec} (x : Tensor σ) (y : Tensor τ) (tol : Fl
       s!"Whisper mismatch at {i}: {xs[i]!} vs {ys[i]!}, tolerance {tol}"
 
 @[test] def testWhisperCachedDecodeDTypesAndParity : IO Unit := do
-  let original ← WhisperForConditionalGeneration.init cfg
-  let original := TensorStruct.detach original
   for bf16 in #[false, true] do
-    let model ← if bf16 then TensorStruct.castDType .BFloat16 original else pure original
-    let encoded ← model.encode features.forgetDType
+    let dtype := if bf16 then DType.BFloat16 else .Float32
+    let support ← dtype.acquireConstantSupport .CPU
+    let _ := support.down
+    let model ← WhisperForConditionalGeneration.init cfg (dtype := dtype)
+    let model := TensorStruct.detach model
+    let encoded ← model.encode features
     LeanTest.assertEqual encoded.runtimeShape #[1, 3, 8]
     LeanTest.assertEqual encoded.actualSpec.dtype (if bf16 then .BFloat16 else .Float32)
     let expected ← model.decode tokens encoded
@@ -51,7 +53,7 @@ private def close {σ τ : StaticSpec} (x : Tensor σ) (y : Tensor τ) (tol : Fl
 
 @[test] def testWhisperCacheCapacityAndPositionErrors : IO Unit := do
   let model ← WhisperForConditionalGeneration.init cfg
-  let encoded ← model.encode features.forgetDType
+  let encoded ← model.encode features
   let cross ← model.precomputeCrossCaches encoded
   let caches := model.initLayerKVCaches (batch := 1) 1 .CPU
   let tok := tokens.sliceChecked 1 0 1 #[1, 1]
@@ -82,16 +84,16 @@ private def close {σ τ : StaticSpec} (x : Tensor σ) (y : Tensor τ) (tol : Fl
   LeanTest.assertTrue badHeads
   let model ← WhisperForConditionalGeneration.init cfg
   let tooLong ← try
-    let _ ← model.encode ((Tensor.zeros #[1, 4, 10]).forgetDType)
+    let _ ← model.encode ((Tensor.zeros #[1, 4, 10]))
     pure false
   catch e => pure ((toString e).contains "max_source_positions")
   LeanTest.assertTrue tooLong
   let emptyRejected ← try
-    let _ ← model.encode ((Tensor.zeros #[1, 4, 0]).forgetDType)
+    let _ ← model.encode ((Tensor.zeros #[1, 4, 0]))
     pure false
   catch e => pure ((toString e).contains "input frame")
   LeanTest.assertTrue emptyRejected
-  let encoded ← model.encode features.forgetDType
+  let encoded ← model.encode features
   let decoderTooLong ← try
     let _ ← model.decode (Tensor.fullInt #[1, 9] 1) encoded
     pure false
@@ -106,8 +108,8 @@ private def roundTrip {α : Type} [TensorStruct α] (value : α) (dir : String) 
 @[test] def testWhisperIndexedCheckpoint : IO Unit := IO.FS.withTempDir fun dir => do
   let model ← WhisperForConditionalGeneration.init cfg
   let restored ← roundTrip model dir.toString
-  let encoded ← model.encode features.forgetDType
-  let other ← restored.encode features.forgetDType
+  let encoded ← model.encode features
+  let other ← restored.encode features
   close encoded other 0
   close (← model.decode tokens encoded) (← restored.decode tokens other) 0
 
@@ -115,9 +117,9 @@ private def roundTrip {α : Type} [TensorStruct α] (value : α) (dir : String) 
   let audioCfg := { cfg with maxSourcePositions := 16, maxTargetPositions := 16, eosTokenId := 15 }
   let model ← WhisperForConditionalGeneration.init audioCfg
   let model := TensorStruct.detach model
-  let norm : LayerNorm 8 (.Unknown "dynamic") := {
-    weight := zerosDynamic #[8], bias := (Tensor.ones #[8]).forgetDType }
-  let projection := Tensor.sliceScatter (zerosDynamic #[16, 8]) 0 0 ((Tensor.ones #[1, 8]).forgetDType)
+  let norm : LayerNorm 8 .Float32 := {
+    weight := zerosFor #[8], bias := (Tensor.ones #[8]) }
+  let projection := Tensor.sliceScatter (zerosFor #[16, 8]) 0 0 ((Tensor.ones #[1, 8]))
   let model := { model with model := { model.model with decoderLayerNorm := norm }, projOut := projection }
   let tok : tokenizer.qwen3.QwenTokenizer := { (default : tokenizer.qwen3.QwenTokenizer) with
     vocabSize := 16, idToToken := Array.replicate 16 "a" }
@@ -136,7 +138,8 @@ private def roundTrip {α : Type} [TensorStruct α] (value : α) (dir : String) 
       LeanTest.assertEqual result.tokenIds #[0, 0]
       LeanTest.assertEqual result.text "aa"
 
-private def writeWhisperCheckpoint (dir : System.FilePath) (bf16 : Bool) (badBias : Bool := false) : IO Unit := do
+private def writeWhisperCheckpoint (dir : System.FilePath) (bf16 : Bool) (badBias : Bool := false)
+    (mismatchedDType : String := "") : IO Unit := do
   let mut entries : Array (String × Array Nat) := #[
     ("model.encoder.conv1.weight", #[8, 4, 3]), ("model.encoder.conv1.bias", #[8]),
     ("model.encoder.conv2.weight", #[8, 8, 3]), ("model.encoder.conv2.bias", #[8]),
@@ -162,11 +165,12 @@ private def writeWhisperCheckpoint (dir : System.FilePath) (bf16 : Bool) (badBia
   let mut index : List (String × Lean.Json) := []
   let mut data := ByteArray.empty
   for (name, shape) in entries do
+    let entryBf16 := if name == mismatchedDType then !bf16 else bf16
     let start := data.size
     for _ in [:shape.foldl (· * ·) 1] do
-      data := data ++ (if bf16 then ByteArray.mk #[0, 62] else ByteArray.mk #[0, 0, 0, 62])
+      data := data ++ (if entryBf16 then ByteArray.mk #[0, 62] else ByteArray.mk #[0, 0, 0, 62])
     fields := fields ++ [(name, Lean.Json.mkObj [
-      ("dtype", Lean.toJson (if bf16 then "BF16" else "F32")),
+      ("dtype", Lean.toJson (if entryBf16 then "BF16" else "F32")),
       ("shape", Lean.toJson shape), ("data_offsets", Lean.toJson #[start, data.size])])]
     index := index ++ [(name, Lean.toJson "model.safetensors")]
   let header := (Lean.Json.mkObj fields).compress.toUTF8
@@ -179,14 +183,15 @@ private def writeWhisperCheckpoint (dir : System.FilePath) (bf16 : Bool) (badBia
   for bf16 in #[false, true] do
     IO.FS.withTempDir fun dir => do
       writeWhisperCheckpoint dir bf16
-      let model ← WhisperForConditionalGeneration.loadShardedAt dir.toString cfg (device := .CPU)
+      let ⟨storedDType, model⟩ ← WhisperForConditionalGeneration.loadShardedAt dir.toString cfg (device := .CPU)
       let dtype := if bf16 then DType.BFloat16 else .Float32
+      LeanTest.assertEqual storedDType.val dtype
       LeanTest.assertEqual model.projOut.actualSpec.dtype dtype
       close model.projOut model.model.decoderTokenEmbedding 0
       let some layer := model.model.decoderLayers[0]? | throw (IO.userError "missing decoder layer")
       LeanTest.assertEqual layer.selfAttn.kProjBias.actualSpec.dtype dtype
       close layer.selfAttn.kProjBias (Tensor.zeros #[8]) 0
-      let encoded ← model.encode features.forgetDType
+      let encoded ← model.encode features
       let logits ← model.decode tokens encoded
       LeanTest.assertEqual logits.actualSpec.dtype dtype
       for v in (← logits.toFloatArray) do LeanTest.assertTrue v.isFinite
@@ -198,5 +203,16 @@ private def writeWhisperCheckpoint (dir : System.FilePath) (bf16 : Bool) (badBia
       pure false
     catch _ => pure true
     LeanTest.assertTrue rejected "malformed optional bias must not be treated as absent"
+
+@[test] def testWhisperRejectsInconsistentStoredDTypes : IO Unit := do
+  for name in #["model.decoder.embed_tokens.weight", "model.encoder.layer_norm.weight",
+      "model.decoder.layers.0.self_attn.q_proj.bias"] do
+    IO.FS.withTempDir fun dir => do
+      writeWhisperCheckpoint dir true (mismatchedDType := name)
+      let rejected ← try
+        let _ ← WhisperForConditionalGeneration.loadShardedAt dir.toString cfg (device := .CPU)
+        pure false
+      catch _ => pure true
+      LeanTest.assertTrue rejected s!"inconsistent stored dtype must be rejected: {name}"
 
 end Tests.WhisperTyped

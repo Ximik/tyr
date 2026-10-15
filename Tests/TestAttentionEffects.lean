@@ -156,8 +156,8 @@ example (_q : AttentionTensor) (_mask : Tensor ⟨#[1, 16], .Bool, .CPU⟩) : Tr
   let (_, trainingOutput) ← Tyr.GPU.Ops.FlashAttn.flashAttnWithRouteIO q q v 1 true
   LeanTest.assertEqual (← trainingOutput.toFloatArray) (Array.replicate 64 0)
   let dynEval ← Tyr.GPU.Ops.FlashAttn.flashAttnDyn q.raw q.raw v.raw 1 false
-  LeanTest.assertEqual (← dynEval.2.2.2.2.toFloatArray) (← pureOutput.toFloatArray)
+  LeanTest.assertEqual (← dynEval.2.2.2.2.2.toFloatArray) (← pureOutput.toFloatArray)
   let dynTraining ← Tyr.GPU.Ops.FlashAttn.flashAttnDyn q.raw q.raw v.raw 1 true
-  LeanTest.assertEqual (← dynTraining.2.2.2.2.toFloatArray) (Array.replicate 64 0)
+  LeanTest.assertEqual (← dynTraining.2.2.2.2.2.toFloatArray) (Array.replicate 64 0)
 
 end Tests.AttentionEffects

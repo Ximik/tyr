@@ -12,6 +12,8 @@ import Examples.GPU.Parity
 namespace Examples.GPU.RunCopy
 
 open torch
+
+variable {device : Device}
 open Tyr.GPU.Kernels
 open Examples.GPU.Benchmark
 
@@ -22,7 +24,7 @@ def runOnce : IO Bool := do
     return false
 
   seedFixtures suiteName 1001
-  let device := Device.CUDA 0
+  let device ← Device.cuda 0
   let input ← Tensor.uniformLike (Tensor.zeros #[1, 1, 64, 64] false device)
   let output ← Tensor.uniformLike input 0 0
   let stream ← torch.cuda_current_stream
@@ -34,10 +36,11 @@ def runOnce : IO Bool := do
 
 private def runBenchmark (args : List String) : IO UInt32 := do
   if !(← requireCuda suiteName) then return 1
+  let device ← Device.cuda 0
   let cfg ← parseConfig args "copy_bench"
 
   seedFixtures suiteName 1001
-  let input ← Tensor.uniformLike (Tensor.zeros #[1, 1, 64, 64] false (Device.CUDA 0))
+  let input ← Tensor.uniformLike (Tensor.zeros #[1, 1, 64, 64] false device)
   let tyrOut ← Tensor.uniformLike input 0 0
   let torchOut ← Tensor.uniformLike input 0 0
   let stream ← torch.cuda_current_stream

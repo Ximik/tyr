@@ -1,3 +1,4 @@
+import Tyr.Torch
 import Tests.Assertions
 import Tyr.Model.FLM
 import LeanTest
@@ -10,8 +11,14 @@ def testFLMSamplingAllocationFailuresAreRecoverable : IO Unit := do
   let invalid : UInt64 := 18446744073709551615
   Tests.assertThrows (sampleTau (device := .CPU) {} invalid)
   Tests.assertThrows (samplePsdTimes (device := .CPU) invalid)
-  Tests.assertThrows (sampleTau (device := .CUDA 128) {} 2)
-  Tests.assertThrows (samplePsdTimes (device := .CUDA 128) 2)
+  Tests.assertThrows (do
+    let device ← Device.cuda 128
+    let _ ← sampleTau (device := device) {} 2
+    pure ())
+  Tests.assertThrows (do
+    let device ← Device.cuda 128
+    let _ ← samplePsdTimes (device := device) 2
+    pure ())
 
 private def tinyTokens : Tensor { shape := #[(2 : UInt64), 3], dtype := .Int64, device := .CPU } :=
   Tensor.reshapeChecked (Tensor.fromInt64Array #[0, 1, 2, 3, 4, 0]) #[(2 : UInt64), 3]

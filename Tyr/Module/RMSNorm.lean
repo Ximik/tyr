@@ -5,6 +5,7 @@
   Used in LLaMA, Qwen, and other modern transformer architectures.
 -/
 import Tyr.Typed.Neural
+import Tyr.ConstantSupport
 import Tyr.TensorStruct
 import Tyr.Module.Core
 import Tyr.Module.Derive
@@ -29,7 +30,10 @@ namespace RMSNorm
 /-- Initialize RMSNorm with ones for weight -/
 def init (dim : UInt64) (eps : Float := 1e-6) (dtype : DType := .Float32)
     (device : Device := .CPU) : IO (RMSNorm dim dtype device) := do
-  let weight ← Tensor.parameter (← Tensor.onesForIO { shape := #[dim], dtype, device })
+  let support ← dtype.acquireConstantSupport device
+  let _ := support.down
+  IO.ofExcept (Shape.validateAllocation #[dim])
+  let weight ← Tensor.parameter (Tensor.onesFor { shape := #[dim], dtype, device })
   pure { weight, eps := ⟨eps⟩ }
 
 /-- Forward pass for 2D input [seq, dim] -/

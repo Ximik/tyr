@@ -56,7 +56,7 @@ def streamFromTalkerInputs {seq : UInt64}
     (m : Qwen3TTSForConditionalGeneration (device := device) cfg dtypes)
     (talkerInputs : Tensor { shape := #[1, seq, cfg.talkerConfig.hiddenSize], dtype := dtypes.talker.val, device := device })
     (opts : StreamingOptions (device := device) cfg dtypes.talker := {})
-    (speechDecoder? : Option (SpeechTokenizer12HzDecoder (device := device)) := none)
+    (speechDecoder? : Option (Σ codecDTypes : SpeechTokenizerDTypes, SpeechTokenizer12HzDecoder (device := device) codecDTypes) := none)
     (callbacks : (StreamingCallbacks (device := device)) := {})
     : IO StreamingResult := do
   let canStreamDecode : Bool :=
@@ -66,7 +66,7 @@ def streamFromTalkerInputs {seq : UInt64}
   let decodeStateRef? : Option (IO.Ref (SpeechTokenizer12HzDecoder.DecodeStreamState (device := device) 1)) ←
     if canStreamDecode then
       match speechDecoder? with
-      | some dec =>
+      | some ⟨_, dec⟩ =>
         let st : SpeechTokenizer12HzDecoder.DecodeStreamState (device := device) 1 :=
           SpeechTokenizer12HzDecoder.initDecodeStreamState
             opts.decodeChunkSize opts.decodeLeftContext dec.preConvWeight.device
@@ -86,7 +86,7 @@ def streamFromTalkerInputs {seq : UInt64}
       codeRowsRef.modify (fun rows => rows.push rowVals)
       callbacks.onCodeFrame step rowVals
       match speechDecoder?, decodeStateRef? with
-      | some dec, some stRef =>
+      | some ⟨codecDTypes, dec⟩, some stRef =>
           let frame16a : Tensor { shape := #[1, 16, 1], dtype := .Int64, device := device } := Tensor.reshapeChecked frame #[1, 16, 1]
           let frame16 : Tensor { shape := #[1, 16, 1], dtype := .Int64, device := device } :=
             frame16a.to dec.preConvWeight.device
@@ -94,7 +94,7 @@ def streamFromTalkerInputs {seq : UInt64}
           let (st', chunks) := dec.pushDecodeStream st frame16
           stRef.set st'
           for chunk in chunks do
-            callbacks.onAudioChunk ⟨chunk.1, (← IO.ofExcept chunk.2.reifyDType)⟩
+            callbacks.onAudioChunk ⟨chunk.1, ⟨codecDTypes.compute, chunk.2⟩⟩
       | _, _ =>
           pure ()
 
@@ -108,11 +108,11 @@ def streamFromTalkerInputs {seq : UInt64}
     opts.subtalkerTemperaturesByGroup opts.subtalkerTopKsByGroup opts.subtalkerTopPsByGroup
 
   match speechDecoder?, decodeStateRef? with
-  | some dec, some stRef =>
+  | some ⟨codecDTypes, dec⟩, some stRef =>
       let st ← stRef.get
       let (_stFinal, chunks) := dec.flushDecodeStream st
       for chunk in chunks do
-        callbacks.onAudioChunk ⟨chunk.1, (← IO.ofExcept chunk.2.reifyDType)⟩
+        callbacks.onAudioChunk ⟨chunk.1, ⟨codecDTypes.compute, chunk.2⟩⟩
   | _, _ =>
       pure ()
 

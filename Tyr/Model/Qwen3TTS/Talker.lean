@@ -33,13 +33,13 @@ abbrev TalkerLayer (cfg : TalkerConfig) (dtype : ExactDType := float32DType) :=
 abbrev CodePredictorLayer (cfg : TalkerCodePredictorConfig) (dtype : ExactDType := float32DType) :=
   qwen.QwenLayer (device := device) cfg.hiddenSize cfg.numAttentionHeads cfg.numKeyValueHeads cfg.headDim cfg.intermediateSize dtype.val
 
-private def getOrFirst! [Inhabited α] (xs : Array α) (i : Nat) : α :=
+private def getOrFirst! [Nonempty α] (xs : Array α) (i : Nat) : α :=
   match xs[i]? with
   | some x => x
   | none =>
     match xs[0]? with
     | some x => x
-    | none => panic! "empty array"
+    | none => nativeInvariantFailure "Qwen3TTS talker: empty array"
 
 private def ensureAtLeastOne (n : Nat) : Nat :=
   if n == 0 then 1 else n
@@ -368,11 +368,11 @@ private def applyRepetitionPenalty {batch vocab histLen : UInt64}
     let penalizedPos := Tensor.Preserving.divScalar gathered penalty
     let penalized : Tensor { shape := #[batch, histLen], dtype := dtype.val, device := device } :=
       match Tensor.Promoting.whereSelect? negMask penalizedNeg penalizedPos with
-      | .error message => panic! s!"Qwen3TTS repetition penalty: {message}"
+      | .error message => nativeInvariantFailure s!"Qwen3TTS repetition penalty: {message}"
       | .ok promoted =>
         match Tensor.ofRaw promoted.tensor.raw with
         | .ok result => result
-        | .error message => panic! s!"Qwen3TTS repetition penalty: {message}"
+        | .error message => nativeInvariantFailure s!"Qwen3TTS repetition penalty: {message}"
     Tensor.scatter2d logits (-1) history penalized
 
 /-- Sample a full codec frame from the current talker hidden state `[batch,1,hidden]`. -/
@@ -439,6 +439,8 @@ private def generateFrameFromLastHidden {batch : UInt64} (cfg : TalkerConfig)
             cpSinRaw.to cpDevice
           (cpCosAll, cpSinAll)
 
+    let support ← dtype.val.acquireConstantSupport cpDevice
+    let _ := support.down
     let mut cpCachesInit : Array (qwen.QwenAttention.KVCache batch cpCfg.numKeyValueHeads cpCfg.headDim dtype.val) := #[]
     for _ in [:cpCfg.numHiddenLayers.toNat] do
       cpCachesInit := cpCachesInit.push
@@ -526,9 +528,11 @@ def generateFrame {batch seq : UInt64} (cfg : TalkerConfig)
     (subtalkerTopPsByGroup : Option (Array Float) := none)
     : IO (FrameGenerationOutput (dtype := dtype) (device := device) batch cfg.numCodeGroups cfg.hiddenSize) := do
   if cfg.numCodeGroups == 0 then
+    let support ← dtype.val.acquireConstantSupport device
+    let _ := support.down
     return {
       codes := (Tensor.fullInt #[batch, cfg.numCodeGroups] 0).to talkerInputs.device
-      summedEmbedding := (← Tensor.zerosForIO { shape := #[batch, 1, cfg.hiddenSize], dtype := dtype.val, device := talkerInputs.device })
+      summedEmbedding := (Tensor.zerosFor { shape := #[batch, 1, cfg.hiddenSize], dtype := dtype.val, device := talkerInputs.device })
     }
 
   let hidden := TalkerModel.forwardEmbeds cfg m.model talkerInputs attnMask
@@ -628,6 +632,8 @@ def streamCodes {batch seq : UInt64} (cfg : TalkerConfig)
         s!"Talker layer/cache mismatch: model has {m.model.layers.size} layers but cfg.numHiddenLayers={cfg.numHiddenLayers}."
 
     let cacheDevice := talkerInputs.device
+    let support ← dtype.val.acquireConstantSupport cacheDevice
+    let _ := support.down
     let cacheMaxLen : UInt64 := seq + maxFrames + 1
     let mut caches : Array (qwen.QwenAttention.KVCache batch cfg.numKeyValueHeads cfg.headDim dtype.val) := #[]
     for _ in [:cfg.numHiddenLayers.toNat] do
@@ -644,7 +650,7 @@ def streamCodes {batch seq : UInt64} (cfg : TalkerConfig)
     let sinAll : Tensor { shape := #[seq + maxFrames + 1, cfg.headDim / 2], dtype := .Float32, device := device } :=
       sinRaw.to cacheDevice
     let mut lastHidden : Tensor { shape := #[batch, 1, cfg.hiddenSize], dtype := dtype.val, device := device } :=
-      (← Tensor.zerosForIO { shape := #[batch, 1, cfg.hiddenSize], dtype := dtype.val, device := cacheDevice })
+      (Tensor.zerosFor { shape := #[batch, 1, cfg.hiddenSize], dtype := dtype.val, device := cacheDevice })
     let mut pos : UInt64 := 0
     while pos < seq do
       let xIn : Tensor { shape := #[batch, 1, cfg.hiddenSize], dtype := dtype.val, device := device } := Tensor.sliceChecked talkerInputs 1 pos 1 #[batch, 1, cfg.hiddenSize]
@@ -670,7 +676,7 @@ def streamCodes {batch seq : UInt64} (cfg : TalkerConfig)
     let mut lengths : Array UInt64 := Array.replicate batch.toNat maxFrames
     let mut historyCols : Array (Tensor { shape := #[batch, 1], dtype := .Int64, device := device }) := #[]
     let defaultPadEmbed : Tensor { shape := #[batch, 1, cfg.hiddenSize], dtype := dtype.val, device := device } :=
-      (← Tensor.zerosForIO { shape := #[batch, 1, cfg.hiddenSize], dtype := dtype.val, device := cacheDevice })
+      (Tensor.zerosFor { shape := #[batch, 1, cfg.hiddenSize], dtype := dtype.val, device := cacheDevice })
     let padEmbed : Tensor { shape := #[batch, 1, cfg.hiddenSize], dtype := dtype.val, device := device } := ttsPadEmbed.getD defaultPadEmbed
     let cpMaxSeq : UInt64 := cfg.numCodeGroups + 1
     let (cpCosRaw, cpSinRaw) := Tensor.rotaryFreqs cpMaxSeq cfg.codePredictorConfig.headDim cfg.codePredictorConfig.ropeTheta

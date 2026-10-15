@@ -3,48 +3,101 @@ import LeanTest
 import Tyr.Typed.Layers
 import Tyr.Module.RMSNorm
 import Tyr.Model.Utils
+import Tyr.Model.Flux.TypedOps
+import Tyr.Model.KittenTTS.TypedOps
+import Tyr.Model.Qwen35.Multimodal
+import Tyr.Model.Whisper.TypedOps
+import Tyr.Torch
 
 open torch
 
+-- There is one deterministic factory, with no checked or effectful twin at
+-- either the indexed or raw native layer.
+example : True := by
+  fail_if_success have _ := @Tensor.ones?
+  fail_if_success have _ := @Tensor.zeros?
+  fail_if_success have _ := @Tensor.onesFor?
+  fail_if_success have _ := @Tensor.zerosFor?
+  fail_if_success have _ := @Tensor.eye?
+  fail_if_success have _ := @Tensor.onesIO
+  fail_if_success have _ := @Tensor.zerosIO
+  fail_if_success have _ := @Tensor.onesForIO
+  fail_if_success have _ := @Tensor.zerosForIO
+  fail_if_success have _ := @Tensor.eyeIO
+  fail_if_success have _ := @Tensor.eyeForIO
+  fail_if_success have _ := @RawTensor.onesChecked
+  fail_if_success have _ := @RawTensor.zerosChecked
+  fail_if_success have _ := @RawTensor.eyeChecked
+  trivial
+
+example : True := by
+  fail_if_success have _ := Tensor.onesFor ⟨#[2], .QInt8, .CPU⟩
+  fail_if_success have _ := Tensor.zerosFor ⟨#[2], .Unknown "invalid", .CPU⟩
+  fail_if_success have _ := Tensor.eyeFor (n := 2) .Float8E8M0FNU .CPU
+  fail_if_success have _ : Tensor ⟨#[2], .QInt8, .CPU⟩ := default
+  trivial
+
 namespace Tests.TestFactoryRecovery
 
-/-- UInt64 overflow becomes a negative native extent, so failure precedes allocation. -/
+/-- Invalid runtime dimensions are rejected before pure factory evaluation. -/
 @[test]
-def testInitializerShapeFailuresAreRecoverable : IO Unit := do
+def testInitializerShapeValidation : IO Unit := do
   let invalid : UInt64 := 18446744073709551615
   Tests.assertThrows (Typed.RMSNorm.init invalid)
   Tests.assertThrows (RMSNorm.init invalid)
   Tests.assertThrows (Model.initBias #[invalid])
-  Tests.assertThrows (Tensor.eyeIO invalid)
+  Tests.assertThrows (IO.ofExcept (Shape.validateAllocation #[invalid, invalid]))
+  Tests.assertThrows (IO.ofExcept (Shape.validateAllocation #[0, 4294967296, 4294967296]))
+  IO.ofExcept (Shape.validateAllocation #[4294967296, 0, 4294967296])
 
-/-- CUDA indices above DeviceIndex's range are invalid independently of hardware. -/
+/-- Model initializers must reject dimensions before evaluating pure constants. -/
 @[test]
-def testInitializerDeviceFailuresAreRecoverable : IO Unit := do
-  let invalid : Device := .CUDA 128
-  Tests.assertThrows (Typed.RMSNorm.init 2 (device := invalid))
-  Tests.assertThrows (RMSNorm.init 2 (device := invalid))
-  Tests.assertThrows (Model.initBias #[2] (device := invalid))
-  Tests.assertThrows (Tensor.eyeForIO (n := 2) .Float32 invalid)
+def testModelConstantInitializerShapeValidation : IO Unit := do
+  let invalid : UInt64 := 9223372036854775808
+  Tests.assertThrows (flux.initLayerNorm invalid)
+  Tests.assertThrows (whisper.initLayerNorm invalid)
+  Tests.assertThrows (qwen35.Qwen35RMSNorm.initZeroCentered invalid)
+  Tests.assertThrows (qwen35.Qwen35RMSNorm.initOneCentered invalid)
+  Tests.assertThrows (qwen35.Qwen35RMSNormGated.init invalid)
+  Tests.assertThrows (qwen35.Qwen35VisionLayerNorm.init invalid)
+  let norm ← flux.initLayerNorm 2
+  LeanTest.assertEqual (← norm.weight.toFloatArray) #[1.0, 1.0]
+  LeanTest.assertEqual (← norm.bias.toFloatArray) #[0.0, 0.0]
+  LeanTest.assertTrue norm.weight.requiresGrad
+
+/-- Random factories retain their effects while validating the pure template. -/
+@[test]
+def testRandomTemplateShapeValidation : IO Unit := do
+  let invalid : Shape := #[9223372036854775808]
+  Tests.assertThrows (kittentts.uniformTensor (device := .CPU) invalid 0 1)
+  Tests.assertThrows (kittentts.randTensor invalid)
+  Tests.assertThrows (qwen35.randDynamic invalid)
+  let values ← kittentts.uniformTensor (device := .CPU) #[2] 0 1
+  LeanTest.assertTrue ((← values.toFloatArray).all fun x => x >= 0 && x <= 1)
+  LeanTest.assertEqual values.runtimeShape #[2]
+
+/-- Device validation is a separate acquisition, before constructing tensors. -/
+@[test]
+def testDeviceAcquisitionPrecedesInitialization : IO Unit := do
+  Tests.assertThrows (Device.cuda 128)
 
 @[test]
-def testCheckedConstantFactoriesPreserveSpecification : IO Unit := do
-  let zeros ← Tensor.zerosForIO { shape := #[2], dtype := .Float64, device := .CPU }
-  let ones ← Tensor.onesForIO { shape := #[2], dtype := .BFloat16, device := .CPU }
+def testPureConstantFactoriesPreserveSpecification : IO Unit := do
+  let zeros := Tensor.zerosFor { shape := #[2], dtype := .Float64, device := .CPU }
+  let ones := Tensor.onesFor { shape := #[2], dtype := .BFloat16, device := .CPU }
   LeanTest.assertEqual zeros.raw.dtype .Float64
   LeanTest.assertEqual ones.raw.dtype .BFloat16
   LeanTest.assertEqual (← zeros.toFloatArray) #[0.0, 0.0]
   LeanTest.assertEqual (← ones.toFloatArray) #[1.0, 1.0]
   LeanTest.assertTrue (!zeros.requiresGrad && !ones.requiresGrad)
-  let dynamic ← Tensor.onesForIO { shape := #[2], device := .CPU }
-  LeanTest.assertEqual dynamic.raw.dtype .Float32
-  Tests.assertThrows
-    (Tensor.zerosForIO { shape := #[2], dtype := .Unknown "invalid", device := .CPU })
-  Tests.assertThrows
-    (Tensor.onesForIO { shape := #[2], dtype := .QInt8, device := .CPU })
+  let single := Tensor.ones #[2]
+  LeanTest.assertEqual single.raw.dtype .Float32
+  Tests.assertThrows ((DType.Unknown "invalid").acquireConstantSupport .CPU)
+  Tests.assertThrows (DType.QInt8.acquireConstantSupport .CPU)
   let norm ← RMSNorm.init 2 (dtype := .Float64)
   LeanTest.assertEqual norm.weight.raw.dtype .Float64
   LeanTest.assertTrue norm.weight.requiresGrad
-  let identity ← Tensor.eyeForIO (n := 2) .Float64
+  let identity := Tensor.eyeFor (n := 2) .Float64
   LeanTest.assertEqual identity.raw.dtype .Float64
   LeanTest.assertEqual (← identity.toFloatArray) #[1.0, 0.0, 0.0, 1.0]
 

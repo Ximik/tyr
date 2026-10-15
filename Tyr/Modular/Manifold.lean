@@ -130,7 +130,7 @@ def init [MatrixManifoldCarrier M device] (in_dim out_dim : UInt64)
   let w0 ← Tensor.randn #[out_dim, in_dim] false device
   let weight ← makeLeafWeight (MatrixManifoldCarrier.project (device := device) h w0)
   let bias ← if withBias then do
-      pure (some (← Tensor.parameter (← Tensor.zerosIO #[out_dim] device)))
+      pure (some (← Tensor.parameter (Tensor.zeros #[out_dim] (device := device))))
     else
       pure none
   pure { weight, bias }

@@ -16,7 +16,7 @@ import Examples.ModelRunner
 
 open torch
 
-variable {device : Device}
+variable {device : Device} {dtype : DType}
 open torch.Model
 open torch.laguna
 open Examples.ModelRunner
@@ -90,7 +90,7 @@ private def encodePromptToIds
     Uses generateStream; the first callback marks the end of prefill. -/
 private def runBench
     (cfg : Config)
-    (model : LagunaForCausalLM (device := device) cfg)
+    (model : LagunaForCausalLM (device := device) cfg dtype)
     {b seq : UInt64}
     (inputIds : Tensor { shape := #[b, seq], dtype := .Int64, device := device })
     (promptLen : UInt64)
@@ -122,7 +122,7 @@ private def runBench
 private def runTextBatches
     (tok : tokenizer.laguna.LagunaTokenizer)
     (cfg : Config)
-    (model : LagunaForCausalLM (device := device) cfg)
+    (model : LagunaForCausalLM (device := device) cfg dtype)
     (args : Args)
     (prompts : Array String)
     : IO Unit := do
@@ -179,7 +179,7 @@ def runMain (argv : List String) : IO UInt32 := do
   let model ←
     if isSharded then LagunaForCausalLM.loadSharded modelDir cfg device
     else LagunaForCausalLM.load s!"{modelDir}/model.safetensors" cfg device
-  runTextBatches tok cfg model args prompts
+  runTextBatches tok cfg model.2 args prompts
   pure 0
 
 end Examples.Laguna

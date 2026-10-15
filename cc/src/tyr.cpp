@@ -89,6 +89,7 @@
 #include "tyr_owned_kv_abi.h"
 #include "tyr_neural_abi.h"
 #include "tyr_torch_abi.h"
+#include "tyr_constant_support_abi.h"
 #include <torch/torch.h>
 #include <ATen/ATen.h>
 #include "tyr_attention.h"
@@ -478,7 +479,15 @@ lean_object* lean_torch_get_device(lean_obj_arg s, b_lean_obj_arg t) {
     return lean_mk_string(stream.str().c_str());
 }
 
-// Get device as Device enum (CUDA=0, CPU=1, MPS=2)
+lean_object* lean_torch_native_invariant_failure(b_lean_obj_arg message) {
+  std::fprintf(stderr, "[tyr] native tensor contract violation: %s\n",
+    lean_string_cstr(message));
+  std::fflush(stderr);
+  std::abort();
+}
+
+// Device's validity proof erases, retaining DeviceKind (CUDA=0, CPU=1, MPS=2).
+// An existing tensor is evidence that its actual placement was acquired.
 lean_object* lean_torch_get_device_enum(lean_obj_arg s, b_lean_obj_arg t) {
   lean_dec(s);
     auto tensor = borrowTensor(t);
@@ -649,7 +658,7 @@ lean_object* lean_torch_full(lean_obj_arg s, double value, uint8_t requires_grad
   OwnedLeanObject device_owner(device, lean_dec);
   auto device_ = getDevice(device);
   device_owner.reset();
-  auto t = torch::full(getShape(s), value, torch::TensorOptions().requires_grad(requires_grad).device(device_));
+  auto t = torch::full(getShape(s), value, torch::TensorOptions().dtype(torch::kFloat32).requires_grad(requires_grad).device(device_));
   s_owner.reset();
   return fromTorchTensor(t);
 }
@@ -659,7 +668,7 @@ lean_object* lean_torch_zeros(lean_obj_arg s, uint8_t requires_grad, lean_obj_ar
   OwnedLeanObject device_owner(device, lean_dec);
   auto device_ = getDevice(device);
   device_owner.reset();
-  auto t = torch::zeros(getShape(s), torch::TensorOptions().requires_grad(requires_grad).device(device_));
+  auto t = torch::zeros(getShape(s), torch::TensorOptions().dtype(torch::kFloat32).requires_grad(requires_grad).device(device_));
   s_owner.reset();
   return fromTorchTensor(t);
 }
@@ -669,27 +678,9 @@ lean_object* lean_torch_ones(lean_obj_arg s, uint8_t requires_grad, lean_obj_arg
   OwnedLeanObject device_owner(device, lean_dec);
   auto device_ = getDevice(device);
   device_owner.reset();
-  auto t = torch::ones(getShape(s), torch::TensorOptions().requires_grad(requires_grad).device(device_));
+  auto t = torch::ones(getShape(s), torch::TensorOptions().dtype(torch::kFloat32).requires_grad(requires_grad).device(device_));
   s_owner.reset();
   return fromTorchTensor(t);
-}
-
-lean_object* lean_torch_zeros_checked(lean_obj_arg shape, lean_obj_arg device) {
-  return tyr::checkedCall("zeros", [&] {
-    return lean_torch_zeros(shape, 0, device);
-  });
-}
-
-lean_object* lean_torch_ones_checked(lean_obj_arg shape, lean_obj_arg device) {
-  return tyr::checkedCall("ones", [&] {
-    return lean_torch_ones(shape, 0, device);
-  });
-}
-
-lean_object* lean_torch_eye_checked(uint64_t n) {
-  return tyr::checkedCall("eye", [&] {
-    return lean_torch_eye(n, 0);
-  });
 }
 
 lean_object* lean_torch_zeros_like(lean_obj_arg s, b_lean_obj_arg self) {
@@ -739,21 +730,21 @@ lean_object* lean_torch_arange(uint64_t start, uint64_t stop, uint64_t step) {
 lean_object* lean_torch_eye(uint64_t n, uint8_t requires_grad) {
   TORCH_CHECK(n <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max()),
               "eye: dimension must fit in signed 64 bits");
-  auto t = torch::eye(n, torch::TensorOptions().requires_grad(requires_grad));
+  auto t = torch::eye(n, torch::TensorOptions().dtype(torch::kFloat32).requires_grad(requires_grad));
   return fromTorchTensor(t);
 }
 
 lean_object* lean_torch_linspace(double start, double stop, uint64_t steps, uint8_t requires_grad) {
   TORCH_CHECK(steps <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max()),
               "linspace: steps must fit in signed 64 bits");
-  auto t = torch::linspace(start, stop, steps, torch::TensorOptions().requires_grad(requires_grad));
+  auto t = torch::linspace(start, stop, steps, torch::TensorOptions().dtype(torch::kFloat32).requires_grad(requires_grad));
   return fromTorchTensor(t);
 }
 
 lean_object* lean_torch_logspace(double start, double stop, uint64_t steps, double base, uint8_t requires_grad) {
   TORCH_CHECK(steps <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max()),
               "logspace: steps must fit in signed 64 bits");
-  auto t = torch::logspace(start, stop, steps, base, torch::TensorOptions().requires_grad(requires_grad));
+  auto t = torch::logspace(start, stop, steps, base, torch::TensorOptions().dtype(torch::kFloat32).requires_grad(requires_grad));
   return fromTorchTensor(t);
 }
 
@@ -5507,7 +5498,66 @@ lean_object* lean_torch_topk_2d_checked(uint64_t /*d1*/, uint64_t /*d2*/,
 // New operations: Device availability, gather/scatter, einsum, interpolate
 // ============================================================================
 
+lean_object* lean_torch_acquire_constant_support(
+    b_lean_obj_arg dtype, b_lean_obj_arg device) {
+  return tyr::checkedIoCall("DType.acquireConstantSupport", [&] {
+    const auto scalar_type = tyr::metadata::scalarTypeFromLeanDTypeTag(lean_obj_tag(dtype));
+    TORCH_CHECK(scalar_type.has_value(), "Unknown dtype has no constant factory support");
+    const auto placement = getDevice(device);
+    const auto options = torch::TensorOptions().dtype(torch::kFloat32);
+    const auto check = [&](const torch::Tensor& expected, const torch::Tensor& actual) {
+      TORCH_CHECK(actual.scalar_type() == *scalar_type && actual.device() == placement,
+        "Constant conversion returned incorrect dtype or placement");
+      TORCH_CHECK(torch::equal(expected, actual.to(torch::kCPU).to(torch::kFloat32)),
+        "Dtype cannot represent exact zero and one constants: ",
+        tyr::metadata::dtypeName(*scalar_type));
+    };
+    // Match the factory paths, rather than treating dtype recognition or an
+    // existing tensor as proof that allocation/conversion kernels are present.
+    const auto zeros = torch::zeros({2, 2}, options);
+    const auto ones = torch::ones({2, 2}, options);
+    const auto identity = torch::eye(2, options);
+    check(zeros, torch::zeros({2, 2}, options.device(placement)).to(*scalar_type));
+    check(ones, torch::ones({2, 2}, options.device(placement)).to(*scalar_type));
+    check(identity, identity.to(*scalar_type).to(placement));
+    // PLift of the erased ConstantSupported proposition has Unit representation.
+    return lean_io_result_mk_ok(lean_box(0));
+  });
+}
+
 // Check if CUDA is available
+lean_object* lean_torch_device_cuda(uint64_t index) {
+  return tyr::checkedIoCall("Device.cuda", [&] {
+    TORCH_CHECK(index <= static_cast<uint64_t>(std::numeric_limits<c10::DeviceIndex>::max()),
+      "CUDA device index is outside the native DeviceIndex range: ", index);
+    TORCH_CHECK(torch::cuda::is_available(), "CUDA is not available");
+    const auto count = torch::cuda::device_count();
+    TORCH_CHECK(index < count, "CUDA device index ", index,
+      " is outside the available device count ", count);
+    // Exercise initialization as part of acquisition, before admitting a
+    // placement into pure tensor code. No tensor storage is retained.
+    (void)torch::empty({0}, torch::TensorOptions().dtype(torch::kFloat32)
+      .device(torch::Device(torch::kCUDA, static_cast<c10::DeviceIndex>(index))));
+    lean_object* device = lean_alloc_ctor(0, 0, 8);
+    lean_ctor_set_uint64(device, 0, index);
+    return lean_io_result_mk_ok(device);
+  });
+}
+
+lean_object* lean_torch_device_mps() {
+  return tyr::checkedIoCall("Device.mps", [&] {
+#ifdef __APPLE__
+    const int debug_flag = std::getenv("TYR_DEBUG_MPS") != nullptr ? 1 : 0;
+    TORCH_CHECK(tyr_apple_mps_is_available(debug_flag), "MPS is not available");
+    (void)torch::empty({0}, torch::TensorOptions().dtype(torch::kFloat32)
+      .device(torch::kMPS));
+    return lean_io_result_mk_ok(lean_box(2));
+#else
+    return mkIoUserError("MPS is not available");
+#endif
+  });
+}
+
 lean_object* lean_torch_cuda_is_available() {
   return tyr::checkedIoCall("cuda_is_available", [&] {
   try {

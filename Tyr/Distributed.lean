@@ -1,5 +1,6 @@
 import Tyr.TensorStruct
 import Tyr.Inference.OwnedKV
+import Tyr.ConstantSupport
 
 /-!
 # Tyr.Distributed
@@ -161,11 +162,13 @@ def broadcast {σ : StaticSpec} (tensor : Tensor σ) (srcRank : UInt64) : IO (Te
 private opaque reduceScatterImpl (output : @& RawTensor) (input : @& RawTensor)
     (op : UInt8) (asyncOp : UInt8) : IO UInt64
 
-/-- Allocate private collective storage with the input's actual dtype and device,
-    including when the static specification leaves either component unrestricted. -/
-private def collectiveOutput {σ : StaticSpec} (shape : Shape) (input : Tensor σ) :
+/-- Allocate private collective storage with the input's exact dtype and device. -/
+private def collectiveOutput {σ : StaticSpec} (shape : Shape) (_input : Tensor σ) :
     IO (Tensor (σ.withShape shape)) := do
-  let template ← Tensor.zerosForIO { shape, dtype := input.raw.dtype, device := input.device }
+  IO.ofExcept (Shape.validateAllocation shape)
+  let support ← σ.dtype.acquireConstantSupport σ.device
+  let _ := support.down
+  let template := Tensor.zerosFor { shape, dtype := σ.dtype, device := σ.device }
   let output ← data.cloneInferenceIO template
   match Tensor.ofRaw output.raw with
   | .ok result => pure result

@@ -12,31 +12,32 @@ import Tyr.Model.VAE.ResnetBlock
 
 namespace torch.vae
 
-variable {device : Device}
+variable {device : Device} {dtype : DType}
 /-- Self-attention block for VAE.
     Applies spatial attention using 1×1 convolutions. -/
-structure AttnBlock (channels : UInt64) where
+structure AttnBlock (channels : UInt64) (dtype : DType := .Float32) where
   /-- GroupNorm before attention -/
-  norm : GroupNormParams (device := device) 32 channels
+  norm : GroupNormParams (device := device) (dtype := dtype) 32 channels
   /-- Query projection (1×1 conv) -/
-  q : Conv2dParams (device := device) channels channels 1 0
+  q : Conv2dParams (device := device) (dtype := dtype) channels channels 1 0
   /-- Key projection (1×1 conv) -/
-  k : Conv2dParams (device := device) channels channels 1 0
+  k : Conv2dParams (device := device) (dtype := dtype) channels channels 1 0
   /-- Value projection (1×1 conv) -/
-  v : Conv2dParams (device := device) channels channels 1 0
+  v : Conv2dParams (device := device) (dtype := dtype) channels channels 1 0
   /-- Output projection (1×1 conv) -/
-  proj_out : Conv2dParams (device := device) channels channels 1 0
+  proj_out : Conv2dParams (device := device) (dtype := dtype) channels channels 1 0
   deriving TensorStruct
+
 
 namespace AttnBlock
 
 /-- Initialize attention block -/
-def init (channels : UInt64) (device : Device := .CPU) : IO (AttnBlock (device := device) channels) := do
-  let norm ← GroupNormParams.init (device := device) 32 channels
-  let q ← Conv2dParams.init (device := device) channels channels 1 0
-  let k ← Conv2dParams.init (device := device) channels channels 1 0
-  let v ← Conv2dParams.init (device := device) channels channels 1 0
-  let proj_out ← Conv2dParams.init (device := device) channels channels 1 0
+def init (channels : UInt64) (device : Device := .CPU) (dtype : DType := .Float32) : IO (AttnBlock (device := device) (dtype := dtype) channels) := do
+  let norm ← GroupNormParams.init (dtype := dtype) (device := device) 32 channels
+  let q ← Conv2dParams.init (dtype := dtype) (device := device) channels channels 1 0
+  let k ← Conv2dParams.init (dtype := dtype) (device := device) channels channels 1 0
+  let v ← Conv2dParams.init (dtype := dtype) (device := device) channels channels 1 0
+  let proj_out ← Conv2dParams.init (dtype := dtype) (device := device) channels channels 1 0
   pure { norm, q, k, v, proj_out }
 
 /-- Forward pass for attention block.
@@ -45,9 +46,9 @@ def init (channels : UInt64) (device : Device := .CPU) : IO (AttnBlock (device :
 
     Applies single-head spatial self-attention. -/
 def forward {batch channels height width : UInt64}
-    (attn : AttnBlock (device := device) channels)
-    (x : Tensor { device := device, shape := #[batch, channels, height, width] })
-    : Tensor { device := device, shape := #[batch, channels, height, width] } :=
+    (attn : AttnBlock (device := device) (dtype := dtype) channels)
+    (x : Tensor { dtype := dtype, device := device, shape := #[batch, channels, height, width] })
+    : Tensor { dtype := dtype, device := device, shape := #[batch, channels, height, width] } :=
   let h := attn.norm.forward x
 
   -- Project to Q, K, V
@@ -83,7 +84,7 @@ def forward {batch channels height width : UInt64}
   let out := Tensor.conv2dBias out attn.proj_out.weight attn.proj_out.bias #[1, 1] #[0, 0]
   let out := Tensor.reshapeChecked out #[batch, channels, height, width]
 
-  Tensor.Promoting.add x out
+  Tensor.Preserving.add x out
 
 end AttnBlock
 

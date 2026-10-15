@@ -34,6 +34,7 @@
   earlier copy at `Examples/NanoChat/Generator/KVCache.lean` is a thin
   re-export shim.) -/
 import Tyr.Torch
+import Tyr.ConstantSupport
 import Tyr.Typed.Neural
 import Tyr.Inference.OwnedKV
 import Tyr.TensorStruct
@@ -65,7 +66,7 @@ structure Cache (numLayers batch maxSeqLen numKvHeads headDim : UInt64)
   deriving Repr, Inhabited
 
 /-- Initialize empty KV cache for given dimensions.
-    `device` defaults to CPU; pass `Device.CUDA n` (or a non-default value) so
+    `device` defaults to CPU; pass a device acquired with `Device.cuda n` so
     the cache buffers live on the same device as the Q/K/V tensors that will be
     appended into them — `tyrFlashAttn4d` rejects cross-device inputs. -/
 def Cache.init (numLayers batch maxSeqLen numKvHeads headDim : UInt64)
@@ -73,9 +74,12 @@ def Cache.init (numLayers batch maxSeqLen numKvHeads headDim : UInt64)
     : IO (Cache numLayers batch maxSeqLen numKvHeads headDim .BFloat16 device) := do
   if numLayers == 0 || batch == 0 || maxSeqLen == 0 || numKvHeads == 0 || headDim == 0 then
     throw <| IO.userError "KV cache dimensions must be positive"
-  -- Checked allocation/conversion failures propagate through IO. Each clone
-  -- owns independent cache storage, both for K/V and across layers.
-  let template ← Tensor.zerosForIO
+  let support ← DType.BFloat16.acquireConstantSupport device
+  let _ := support.down
+  IO.ofExcept (Shape.validateAllocation #[batch, numKvHeads, maxSeqLen, headDim])
+  -- The pure zero template can be shared. Each explicit IO clone owns
+  -- independent cache storage, both for K/V and across layers.
+  let template := Tensor.zerosFor
     ⟨#[batch, numKvHeads, maxSeqLen, headDim], .BFloat16, device⟩
   let mut layers : Array (LayerCache batch maxSeqLen numKvHeads headDim .BFloat16 device) := #[]
   for _ in [:numLayers.toNat] do

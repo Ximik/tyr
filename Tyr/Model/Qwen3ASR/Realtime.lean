@@ -3,7 +3,7 @@ import Tyr.Tokenizer.Qwen3
 
 namespace torch.qwen3asr
 
-variable {device : Device}
+variable {device : Device} {dtype : DType}
 /-- Coherent transcript assembly state for overlap-window streaming.
     `stableText` is append-only; `unstableText` may change each hop. -/
 structure RealtimeTranscriptState where
@@ -110,7 +110,7 @@ def finalizeTranscriptState
     unless called by a realtime loop. -/
 def decodeOverlapStep
     {cfg : Qwen3ASRConfig}
-    (m : Qwen3ASRForConditionalGeneration (device := device) cfg)
+    (m : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (preprocessor : PreprocessorConfig)
     (audio16kWindow : Array Float)

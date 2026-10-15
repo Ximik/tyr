@@ -39,8 +39,10 @@ export torch.Hub (
 
 end hub
 
-abbrev Qwen36ForCausalLM (cfg : Config) := torch.qwen35.Qwen35ForCausalLM (device := device) cfg
-abbrev Qwen36ForConditionalGeneration (cfg : VLConfig) := torch.qwen35.Qwen35ForConditionalGeneration (device := device) cfg
+abbrev Qwen36ForCausalLM (cfg : Config) (dtype : DType := .Float32) := torch.qwen35.Qwen35ForCausalLM (device := device) cfg dtype
+abbrev Qwen36ForConditionalGeneration (cfg : VLConfig) (dtype : DType := .Float32)
+    (visionDType : DType := .Float32) :=
+  torch.qwen35.Qwen35ForConditionalGeneration (device := device) cfg dtype visionDType
 
 namespace Qwen36ForCausalLM
 

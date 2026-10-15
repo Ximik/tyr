@@ -54,25 +54,24 @@ open torch
   LeanTest.assertEqual (← updated.toFloatArray) #[7, 7]
 
 @[test] def testDynamicCopyPreservesDTypeAndRejectsImplicitCast : IO Unit := do
-  let original := (Tensor.fullInt #[2] 3).forgetDType
-  let copied ← Tensor.copyInto original (Tensor.fullInt #[2] 7).forgetDType
+  let original := (Tensor.fullInt #[2] 3)
+  let copied ← Tensor.copyInto original (Tensor.fullInt #[2] 7)
   LeanTest.assertEqual copied.raw.dtype DType.Int64
   LeanTest.assertTrue (copied.raw.device == original.raw.device)
   LeanTest.assertEqual (← copied.toFloatArray) #[7, 7]
-  let rejected ← try
-    let _ ← Tensor.copyInto original (Tensor.full #[2] 1.75).forgetDType
-    pure false
-  catch _ => pure true
-  LeanTest.assertTrue rejected "Dynamic dtype does not permit implicit converting copies"
+  let mismatched := (Tensor.full #[2] 1.75).raw
+  let rejected := Tensor.checkedUpdate? (σ := original.staticSpec) .Int64 .CPU mismatched
+  LeanTest.assertTrue rejected.toOption.isNone
+    "A consumed update result must retain the destination's exact dtype"
   LeanTest.assertEqual (← original.toFloatArray) #[3, 3]
 
 @[test] def testDynamicRequiresGradPreservesNativeMetadata : IO Unit := do
-  let original := ((Tensor.full #[2] 3).castDType .Float64).forgetDType
+  let original := ((Tensor.full #[2] 3).castDType .Float64)
   let trainable ← original.setRequiresGrad true
   LeanTest.assertEqual trainable.raw.dtype DType.Float64
   LeanTest.assertTrue (trainable.raw.device == original.raw.device)
   LeanTest.assertEqual (← trainable.toFloatArray) #[3, 3]
-  LeanTest.assertTrue trainable.requiresGrad "The returned dynamic tensor must enable autograd"
+  LeanTest.assertTrue trainable.requiresGrad "The returned tensor must enable autograd"
   LeanTest.assertTrue (!original.requiresGrad) "Changing autograd flags must preserve aliases"
 
 end Tests.TensorValueUpdates

@@ -145,12 +145,13 @@ derive_tensor_tree_cast SourceModel => WrongShapeModel
     pure true
   LeanTest.assertTrue dtypeRejected "Unsupported target dtype must fail"
 
-@[test] def testDynamicTargetRetainsActualDType : IO Unit := do
+@[test] def testExistentialTargetRetainsActualDType : IO Unit := do
   let input := (Tensor.ones #[2]).toBFloat16
-  let output ← TensorStruct.castTo (Tensor { shape := #[2], device := .CPU }) input
-  LeanTest.assertEqual output.raw.dtype .BFloat16
-  LeanTest.assertEqual output.runtimeShape #[2]
-  LeanTest.assertTrue (output.device == .CPU)
+  let output ← TensorStruct.castTo (SomeDTypeTensor #[2] .CPU) input
+  LeanTest.assertEqual output.1.val .BFloat16
+  LeanTest.assertEqual output.2.raw.dtype .BFloat16
+  LeanTest.assertEqual output.2.runtimeShape #[2]
+  LeanTest.assertTrue (output.2.device == .CPU)
 
 @[test] def testTreeCastReportsNativeError : IO Unit := do
   let input := #[Tensor.ones #[2]]
@@ -158,16 +159,16 @@ derive_tensor_tree_cast SourceModel => WrongShapeModel
     let _ ← TensorStruct.castTo
       (Array (Tensor {
         shape := #[2]
-        dtype := .Float64
-        device := (.CUDA 18446744073709551615)
+        dtype := .QInt8
+        device := .CPU
       })) input
     pure false
   catch error =>
     LeanTest.assertTrue (error.toString.containsSubstr "[0]" &&
-      error.toString.containsSubstr "CUDA device index")
+      error.toString.containsSubstr "cast")
       "Native conversion errors must retain the tensor's structural path"
     pure true
-  LeanTest.assertTrue rejected "An invalid CUDA index must return an IO error"
+  LeanTest.assertTrue rejected "An unsupported quantized conversion must return an IO error"
   LeanTest.assertEqual input[0]!.raw.dtype .Float32
   LeanTest.assertEqual (← input[0]!.toFloatArray) #[1, 1]
 

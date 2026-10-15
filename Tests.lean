@@ -3,6 +3,7 @@ import Tests.TestFlowfusionTyped
 import Tests.TestFluxTyped
 import Tests.TestVAETyped
 import Tests.TestGemma4Typed
+import Tests.TestGemma4DTypes
 import Tests.TestShapePackedTensor
 import Tests.TestCORETyped
 import Tests.Test
@@ -23,8 +24,11 @@ import Tests.TestConvolutionContracts
 import Tests.TestWidgetTyped
 import Tests.TestTypedStandalone
 import Tests.TestExactDType
+import Tests.TestExactDTypeContracts
 import Tests.TestExactSafeTensors
 import Tests.TestTensorTreeCast
+import Tests.TestTensorStructDeriveCast
+import Tests.TestLagunaDTypes
 import Tests.TestTensorValueUpdates
 import Tests.TestTensorAutogradEffects
 import Tests.TestAttentionEffects
@@ -164,13 +168,16 @@ import Tests.TestNanoChatTokens
 import Tests.TestNanoChatTasks
 import Tests.TestNanoGPTCopy
 import Tests.TestQwen3ASR
+import Tests.TestQwen3ASRWeights
 import Tests.TestSileroVAD
 import Tests.TestQwenTypedLoading
 import Tests.TestQwen3Model
 import Tests.TestQwen3TTS
 import Tests.TestSpeechTokenizerConfig
+import Tests.TestSpeechTokenizerDTypes
 import Tests.TestKittenTTS
 import Tests.TestQwen35Model
+import Tests.TestQwen35DTypes
 import Tests.TestQwen35Multimodal
 import Tests.TestQwen35Pretrained
 import Tests.TestQwen36Model
@@ -194,4 +201,7 @@ import Tests.TestTensorConstruction
 import Tests.TestTensorDeviceDeriving
 
 import Tests.TestDeviceIdentity
+import Tests.TestDeviceAcquisition
 import Tests.TestFactoryRecovery
+
+import Tests.TestConstantSupport

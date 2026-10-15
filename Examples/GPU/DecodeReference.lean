@@ -57,7 +57,8 @@ def runDecodeCacheParity (device : Device) : IO Bool := do
     let pos : UInt64 := i.toUInt64
     let refStep : Tensor { shape := #[batch, qHeads, 1, headDim], dtype := .BFloat16, device := device } :=
       Tensor.sliceChecked refAll 2 pos 1 #[batch, qHeads, 1, headDim]
-    let cachedStep := acc[i]!
+    let some cachedStep := acc[i]? |
+      throw <| IO.userError s!"Missing cached decode output at step {i}"
     let diff := Tensor.abs (cachedStep - refStep)
     let maxAbs := Tensor.item (Tensor.maxAll diff)
     if maxAbs > maxAbsAll then maxAbsAll := maxAbs

@@ -23,91 +23,92 @@ import Tyr.Model.VAE.Upsample
 
 namespace torch.vae
 
-variable {device : Device}
+variable {device : Device} {dtype : DType}
 /-- Full VAE Decoder (BFL format).
     Decodes [batch, 32, H, W] latents to [batch, 3, 8*H, 8*W] images. -/
-structure Decoder where
+structure Decoder (dtype : DType := .Float32) where
   /-- Post-quantization 1x1 conv -/
-  post_quant_conv : Conv2dParams (device := device) 32 32 1 0
+  post_quant_conv : Conv2dParams (device := device) (dtype := dtype) 32 32 1 0
   /-- Initial conv from z_channels to block_in -/
-  conv_in : Conv2dParams (device := device) 32 512 3 1
+  conv_in : Conv2dParams (device := device) (dtype := dtype) 32 512 3 1
 
   /-- Middle block: resnet + attention + resnet -/
-  mid_block_1 : ResnetBlock (device := device) 512 512
-  mid_attn : AttnBlock (device := device) 512
-  mid_block_2 : ResnetBlock (device := device) 512 512
+  mid_block_1 : ResnetBlock (device := device) (dtype := dtype) 512 512
+  mid_attn : AttnBlock (device := device) (dtype := dtype) 512
+  mid_block_2 : ResnetBlock (device := device) (dtype := dtype) 512 512
 
   /-- Up block 3 (lowest res): 512→512, 3 blocks, upsample -/
-  up_3_block_0 : ResnetBlock (device := device) 512 512
-  up_3_block_1 : ResnetBlock (device := device) 512 512
-  up_3_block_2 : ResnetBlock (device := device) 512 512
-  up_3_upsample : Upsample (device := device) 512
+  up_3_block_0 : ResnetBlock (device := device) (dtype := dtype) 512 512
+  up_3_block_1 : ResnetBlock (device := device) (dtype := dtype) 512 512
+  up_3_block_2 : ResnetBlock (device := device) (dtype := dtype) 512 512
+  up_3_upsample : Upsample (device := device) (dtype := dtype) 512
 
   /-- Up block 2: 512→512, 3 blocks, upsample -/
-  up_2_block_0 : ResnetBlock (device := device) 512 512
-  up_2_block_1 : ResnetBlock (device := device) 512 512
-  up_2_block_2 : ResnetBlock (device := device) 512 512
-  up_2_upsample : Upsample (device := device) 512
+  up_2_block_0 : ResnetBlock (device := device) (dtype := dtype) 512 512
+  up_2_block_1 : ResnetBlock (device := device) (dtype := dtype) 512 512
+  up_2_block_2 : ResnetBlock (device := device) (dtype := dtype) 512 512
+  up_2_upsample : Upsample (device := device) (dtype := dtype) 512
 
   /-- Up block 1: 512→256, 3 blocks, upsample -/
-  up_1_block_0 : ResnetBlock (device := device) 512 256  -- has nin_shortcut
-  up_1_block_1 : ResnetBlock (device := device) 256 256
-  up_1_block_2 : ResnetBlock (device := device) 256 256
-  up_1_upsample : Upsample (device := device) 256
+  up_1_block_0 : ResnetBlock (device := device) (dtype := dtype) 512 256  -- has nin_shortcut
+  up_1_block_1 : ResnetBlock (device := device) (dtype := dtype) 256 256
+  up_1_block_2 : ResnetBlock (device := device) (dtype := dtype) 256 256
+  up_1_upsample : Upsample (device := device) (dtype := dtype) 256
 
   /-- Up block 0 (highest res): 256→128, 3 blocks, no upsample -/
-  up_0_block_0 : ResnetBlock (device := device) 256 128  -- has nin_shortcut
-  up_0_block_1 : ResnetBlock (device := device) 128 128
-  up_0_block_2 : ResnetBlock (device := device) 128 128
+  up_0_block_0 : ResnetBlock (device := device) (dtype := dtype) 256 128  -- has nin_shortcut
+  up_0_block_1 : ResnetBlock (device := device) (dtype := dtype) 128 128
+  up_0_block_2 : ResnetBlock (device := device) (dtype := dtype) 128 128
 
   /-- Final normalization -/
-  norm_out : GroupNormParams (device := device) 32 128
+  norm_out : GroupNormParams (device := device) (dtype := dtype) 32 128
 
   /-- Final conv to RGB -/
-  conv_out : Conv2dParams (device := device) 128 3 3 1
+  conv_out : Conv2dParams (device := device) (dtype := dtype) 128 3 3 1
 
   deriving TensorStruct
+
 
 namespace Decoder
 
 /-- Initialize decoder -/
-def init (device : Device := .CPU) : IO (Decoder (device := device)) := do
+def init (device : Device := .CPU) (dtype : DType := .Float32) : IO (Decoder (device := device) (dtype := dtype)) := do
   -- Post-quant conv
-  let post_quant_conv ← Conv2dParams.init (device := device) 32 32 1 0
+  let post_quant_conv ← Conv2dParams.init (dtype := dtype) (device := device) 32 32 1 0
   -- Initial conv
-  let conv_in ← Conv2dParams.init (device := device) 32 512 3 1
+  let conv_in ← Conv2dParams.init (dtype := dtype) (device := device) 32 512 3 1
 
   -- Middle block
-  let mid_block_1 ← ResnetBlock.init (device := device) 512 512
-  let mid_attn ← AttnBlock.init (device := device) 512
-  let mid_block_2 ← ResnetBlock.init (device := device) 512 512
+  let mid_block_1 ← ResnetBlock.init (dtype := dtype) (device := device) 512 512
+  let mid_attn ← AttnBlock.init (dtype := dtype) (device := device) 512
+  let mid_block_2 ← ResnetBlock.init (dtype := dtype) (device := device) 512 512
 
   -- Up block 3 (512→512)
-  let up_3_block_0 ← ResnetBlock.init (device := device) 512 512
-  let up_3_block_1 ← ResnetBlock.init (device := device) 512 512
-  let up_3_block_2 ← ResnetBlock.init (device := device) 512 512
-  let up_3_upsample ← Upsample.init (device := device) 512
+  let up_3_block_0 ← ResnetBlock.init (dtype := dtype) (device := device) 512 512
+  let up_3_block_1 ← ResnetBlock.init (dtype := dtype) (device := device) 512 512
+  let up_3_block_2 ← ResnetBlock.init (dtype := dtype) (device := device) 512 512
+  let up_3_upsample ← Upsample.init (dtype := dtype) (device := device) 512
 
   -- Up block 2 (512→512)
-  let up_2_block_0 ← ResnetBlock.init (device := device) 512 512
-  let up_2_block_1 ← ResnetBlock.init (device := device) 512 512
-  let up_2_block_2 ← ResnetBlock.init (device := device) 512 512
-  let up_2_upsample ← Upsample.init (device := device) 512
+  let up_2_block_0 ← ResnetBlock.init (dtype := dtype) (device := device) 512 512
+  let up_2_block_1 ← ResnetBlock.init (dtype := dtype) (device := device) 512 512
+  let up_2_block_2 ← ResnetBlock.init (dtype := dtype) (device := device) 512 512
+  let up_2_upsample ← Upsample.init (dtype := dtype) (device := device) 512
 
   -- Up block 1 (512→256)
-  let up_1_block_0 ← ResnetBlock.init (device := device) 512 256
-  let up_1_block_1 ← ResnetBlock.init (device := device) 256 256
-  let up_1_block_2 ← ResnetBlock.init (device := device) 256 256
-  let up_1_upsample ← Upsample.init (device := device) 256
+  let up_1_block_0 ← ResnetBlock.init (dtype := dtype) (device := device) 512 256
+  let up_1_block_1 ← ResnetBlock.init (dtype := dtype) (device := device) 256 256
+  let up_1_block_2 ← ResnetBlock.init (dtype := dtype) (device := device) 256 256
+  let up_1_upsample ← Upsample.init (dtype := dtype) (device := device) 256
 
   -- Up block 0 (256→128)
-  let up_0_block_0 ← ResnetBlock.init (device := device) 256 128
-  let up_0_block_1 ← ResnetBlock.init (device := device) 128 128
-  let up_0_block_2 ← ResnetBlock.init (device := device) 128 128
+  let up_0_block_0 ← ResnetBlock.init (dtype := dtype) (device := device) 256 128
+  let up_0_block_1 ← ResnetBlock.init (dtype := dtype) (device := device) 128 128
+  let up_0_block_2 ← ResnetBlock.init (dtype := dtype) (device := device) 128 128
 
   -- Final layers
-  let norm_out ← GroupNormParams.init (device := device) 32 128
-  let conv_out ← Conv2dParams.init (device := device) 128 3 3 1
+  let norm_out ← GroupNormParams.init (dtype := dtype) (device := device) 32 128
+  let conv_out ← Conv2dParams.init (dtype := dtype) (device := device) 128 3 3 1
 
   pure {
     post_quant_conv
@@ -125,9 +126,9 @@ def init (device : Device := .CPU) : IO (Decoder (device := device)) := do
     Input: [batch, 32, H, W] latent
     Output: [batch, 3, 8*H, 8*W] RGB image -/
 def forward {batch height width : UInt64}
-    (dec : (Decoder (device := device)))
-    (z : Tensor { device := device, shape := #[batch, 32, height, width] })
-    : Tensor { device := device, shape := #[batch, 3, height * 2 * 2 * 2, width * 2 * 2 * 2] } :=
+    (dec : (Decoder (device := device) (dtype := dtype)))
+    (z : Tensor { dtype := dtype, device := device, shape := #[batch, 32, height, width] })
+    : Tensor { dtype := dtype, device := device, shape := #[batch, 3, height * 2 * 2 * 2, width * 2 * 2 * 2] } :=
   -- Post-quant conv: [batch, 32, 32, 32] → [batch, 32, 32, 32]
   let z := Tensor.conv2dBias z dec.post_quant_conv.weight dec.post_quant_conv.bias #[1, 1] #[0, 0]
   let z := Tensor.reshapeChecked z #[batch, 32, height, width]
@@ -166,7 +167,7 @@ def forward {batch height width : UInt64}
 /-- Decode latents to image (batch=1 specialized version).
     Input: [1, 32, 32, 32] latent
     Output: [1, 3, 256, 256] RGB image -/
-def forward1 (dec : (Decoder (device := device))) (z : Tensor { device := device, shape := #[1, 32, 32, 32] }) : Tensor { device := device, shape := #[1, 3, 256, 256] } :=
+def forward1 (dec : (Decoder (device := device) (dtype := dtype))) (z : Tensor { dtype := dtype, device := device, shape := #[1, 32, 32, 32] }) : Tensor { dtype := dtype, device := device, shape := #[1, 3, 256, 256] } :=
   dec.forward z
 
 end Decoder

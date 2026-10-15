@@ -45,7 +45,7 @@ import Tyr.Model.Laguna.Pretrained
 
 open torch
 
-variable {device : Device}
+variable {device : Device} {dtype : DType}
 open torch.Model
 open torch.laguna
 
@@ -55,7 +55,8 @@ private def check (cond : Bool) (msg : String) : IO Unit := do
   else
     throw (IO.userError s!"FAIL: {msg}")
 
-private def deviceLabel : Device → String
+private def deviceLabel (device : Device) : String :=
+  match device.kind with
   | .CPU => "cpu"
   | .CUDA i => s!"cuda:{i}"
   | .MPS => "mps"
@@ -80,19 +81,19 @@ private def maxErrors {σ τ : StaticSpec} (got : Tensor σ) (expected : Tensor 
 
 /-- Sorted top-k id set per row of a shape-indexed logits tensor (`[n, vocab]`, or
     `[vocab]` which is treated as one row). -/
-private def topkIdSets {s : Shape} (logits : Tensor { shape := s, device := device }) (k : UInt64) : IO (Array (Array UInt64)) := do
+private def topkIdSets {s : Shape} (logits : Tensor { shape := s, device := device, dtype := dtype }) (k : UInt64) : IO (Array (Array UInt64)) := do
   let sh := Tensor.runtimeShape logits
   let (n, v) :=
     if sh.size == 1 then (1, sh.getD 0 0)
     else (sh.getD 0 0, sh.getD 1 0)
-  let l2 : Tensor { shape := #[n, v], device := device } := Tensor.reshapeChecked logits #[n, v]
+  let l2 : Tensor { shape := #[n, v], device := device, dtype := dtype } := Tensor.reshapeChecked logits #[n, v]
   let (_, idx) := qwen35.topK2d l2 k 1
   let flat ← Tensor.toUInt64Array (idx)
   pure (Array.ofFn (n := n.toNat) fun r =>
     (flat.extract (r.val * k.toNat) (r.val * k.toNat + k.toNat)).qsort (fun a b => a < b))
 
 /-- Abs-diff gate + top-5-set gate for one logits tensor. -/
-private def checkLogits {s t : Shape} (lbl name : String) (got : Tensor { shape := s, device := device }) (ref : Tensor { shape := t, device := device }) (tol : Float) : IO Unit := do
+private def checkLogits {s t : Shape} {refDType : DType} (lbl name : String) (got : Tensor { shape := s, device := device, dtype := dtype }) (ref : Tensor { shape := t, device := device, dtype := refDType }) (tol : Float) : IO Unit := do
   let (maxAbs, maxRel) ← maxErrors got ref
   IO.println s!"  [{lbl}] {name}: maxAbs={maxAbs} maxRel={maxRel} (tol={tol})"
   check (maxAbs ≤ tol) s!"[{lbl}] {name} maxAbs={maxAbs} ≤ {tol}"
@@ -101,7 +102,7 @@ private def checkLogits {s t : Shape} (lbl name : String) (got : Tensor { shape 
   check (gotSets == refSets) s!"[{lbl}] {name} top-5 id sets match at every position"
 
 /-- Abs-diff report + gate for hidden-state diagnostics. -/
-private def checkClose {s t : Shape} (lbl name : String) (got : Tensor { shape := s, device := device }) (ref : Tensor { shape := t, device := device }) (tol : Float) : IO Unit := do
+private def checkClose {s t : Shape} {refDType : DType} (lbl name : String) (got : Tensor { shape := s, device := device, dtype := dtype }) (ref : Tensor { shape := t, device := device, dtype := refDType }) (tol : Float) : IO Unit := do
   let (maxAbs, maxRel) ← maxErrors got ref
   IO.println s!"  [{lbl}] {name}: maxAbs={maxAbs} maxRel={maxRel} (tol={tol})"
   check (maxAbs ≤ tol) s!"[{lbl}] {name} maxAbs={maxAbs} ≤ {tol}"
@@ -136,6 +137,7 @@ private def runFixture (device : Device) : IO Unit := do
   -- 2. Checkpoint load (dense-fused expert layout; weights are BF16 as stored).
   let log : torch.Log.Handlers := { onInfo := fun m => IO.println s!"  {m}" }
   let modelB16 ← LagunaForCausalLM.load s!"{fixtureDir}/model.safetensors" cfg device log
+  let modelB16 := modelB16.2
   let layer0b ←
     match modelB16.model.layers[0]? with
     | some l => pure l
@@ -160,7 +162,7 @@ private def runFixture (device : Device) : IO Unit := do
   -- top-5 sets at 4 positions of logits_b and diverges from gen_ids at step 4.
   -- FP32 compute tests the math itself (which is what parity means here);
   -- the BF16 pass below is informational.
-  let model : LagunaForCausalLM (device := device) cfg ← TensorStruct.castDType .Float32 modelB16
+  let model : LagunaForCausalLM (device := device) cfg ← TensorStruct.castTo (LagunaForCausalLM (device := device) cfg .Float32) modelB16
   let layer0 ←
     match model.model.layers[0]? with
     | some l => pure l
@@ -169,16 +171,21 @@ private def runFixture (device : Device) : IO Unit := do
   -- References (fp32, CPU) moved to the comparison device.
   let refPath := s!"{fixtureDir}/reference.safetensors"
   let logitsARef ← torch.safetensors.loadTensorCandidates refPath #["logits_a"] #[7, 1024]
+  let logitsARef := logitsARef.2
   let logitsBRef ← torch.safetensors.loadTensorCandidates refPath #["logits_b"] #[20, 1024]
+  let logitsBRef := logitsBRef.2
   let genLastRef ← torch.safetensors.loadTensorCandidates refPath #["gen_logits_last"] #[1024]
+  let genLastRef := genLastRef.2
   let hiddenL0Ref ← torch.safetensors.loadTensorCandidates refPath #["hidden_a_l0"] #[7, 256]
+  let hiddenL0Ref := hiddenL0Ref.2
   let hiddenFinRef ← torch.safetensors.loadTensorCandidates refPath #["hidden_a_final"] #[7, 256]
+  let hiddenFinRef := hiddenFinRef.2
 
   let idsA : Tensor { shape := #[1, 7], dtype := .Int64, device := device } := mkIds promptA device
   let idsB : Tensor { shape := #[1, 20], dtype := .Int64, device := device } := mkIds promptB device
 
   -- Hidden-state diagnostics for input A (layer-0 output, final hidden).
-  let x0 : Tensor { shape := #[1, 7, cfg.hidden_size], device := device } := Tensor.embedding idsA model.model.embed_tokens
+  let x0 : Tensor { shape := #[1, 7, cfg.hidden_size], device := device, dtype := .Float32 } := Tensor.embedding idsA model.model.embed_tokens
   let tables ← precomputeRotaryTables cfg 7 x0.device
   let h0 ← layer0.forward cfg x0 tables
   checkClose lbl "hidden_a_l0" (h0)
@@ -207,7 +214,7 @@ private def runFixture (device : Device) : IO Unit := do
   --    A ++ gen_ids[0..15)).
   let idsFull := mkIds (promptA ++ (genRef.extract 0 15).map (fun t => Int64.ofNat t.toNat)) device
   let logitsFull ← model.forward cfg idsFull
-  let lastLogits : Tensor { shape := #[1024], device := device } := Tensor.reshapeChecked (sliceTyped logitsFull 1 21 1) #[1024]
+  let lastLogits : Tensor { shape := #[1024], device := device, dtype := .Float32 } := Tensor.reshapeChecked (sliceTyped logitsFull 1 21 1) #[1024]
   checkLogits lbl "gen_logits_last" (lastLogits)
     ((genLastRef.to device)) 0.05
 
@@ -245,6 +252,7 @@ private def runRealSmoke (modelDir : String) (numLayers : UInt64) (device : Devi
   let log : torch.Log.Handlers := { onInfo := fun m => IO.println s!"  {m}" }
   let t0 ← IO.monoMsNow
   let model ← LagunaForCausalLM.loadSharded modelDir cfg device log
+  let model := model.2
   let t1 ← IO.monoMsNow
   IO.println s!"  loaded {numLayers}/{cfg0.num_hidden_layers} layers in {t1 - t0} ms"
 
@@ -265,13 +273,13 @@ private def runRealSmoke (modelDir : String) (numLayers : UInt64) (device : Devi
       check moe.denseExperts.isNone "layer 1 uses NVFP4-packed expert banks"
       check (moe.router.eScoreCorrectionBias.isSome)
         "layer 1 router e_score_correction_bias loaded (experts.* key)"
-      let sh := Tensor.runtimeShape moe.experts.gatePacked
+      let sh := Tensor.runtimeShape moe.experts.gatePacked.2
       check (sh == #[cfg.num_experts, cfg.moe_intermediate_size, cfg.hidden_size / 2])
         s!"layer 1 gatePacked bank shape {sh} == [{cfg.num_experts}, {cfg.moe_intermediate_size}, {cfg.hidden_size / 2}]"
-      let shD := Tensor.runtimeShape moe.experts.downPacked
+      let shD := Tensor.runtimeShape moe.experts.downPacked.2
       check (shD == #[cfg.num_experts, cfg.hidden_size, cfg.moe_intermediate_size / 2])
         s!"layer 1 downPacked bank shape {shD}"
-      let shG := Tensor.runtimeShape moe.experts.gateGlobal
+      let shG := Tensor.runtimeShape moe.experts.gateGlobal.2
       check (shG == #[cfg.num_experts]) s!"layer 1 gateGlobal bank shape {shG}"
     | none => throw (IO.userError "layer 1 missing sparse MoE block")
 
@@ -287,12 +295,13 @@ def main (args : List String) : IO Unit := do
   | [] =>
     runFixture Device.CPU
     if ← torch.cuda_is_available then
-      runFixture (Device.CUDA 0)
+      let device ← Device.cuda 0
+      runFixture device
       torch.cuda_synchronize
     else
       IO.println "CUDA not available; skipped CUDA parity."
     IO.println "All Laguna parity tests passed."
   | dir :: rest =>
     let numLayers := ((rest.getD 0 "2").toNat?.getD 2).toUInt64
-    let device := if rest.getD 1 "cpu" == "cuda" then Device.CUDA 0 else Device.CPU
+    let device ← if rest.getD 1 "cpu" == "cuda" then Device.cuda 0 else pure Device.CPU
     runRealSmoke dir numLayers device

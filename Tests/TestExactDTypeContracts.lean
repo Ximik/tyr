@@ -1,0 +1,58 @@
+import Tests.Devices
+import Tyr.Typed.Neural
+import LeanTest
+import Tests.Assertions
+
+open torch
+
+namespace Tests.ExactDTypeContracts
+
+-- Missing dtype information must be represented explicitly, never by a default
+-- tensor index that allows differently typed values to share the same type.
+example : True := by
+  fail_if_success
+    have _ : StaticSpec := { shape := #[2], device := .CPU }
+  trivial
+
+example (_left : Tensor ⟨#[2], .Float32, .CPU⟩) : True := by
+  fail_if_success
+    have _ := _left.forgetDType
+  trivial
+
+example (_left : Tensor ⟨#[2], .Float32, .CPU⟩)
+    (_right : Tensor ⟨#[2], .Float64, .CPU⟩) : True := by
+  fail_if_success
+    have _ := Tensor.Promoting.add _left _right
+  trivial
+
+@[test] def testUnknownDTypeIsNeverAWildcard : IO Unit := do
+  let input := Tensor.ones #[2]
+  match Tensor.ofRaw (σ := ⟨#[2], .Unknown "dynamic", .CPU⟩) input.raw with
+  | .ok _ => throw (IO.userError "Unknown dtype must not admit Float32 values")
+  | .error _ => pure ()
+  match input.castDType? (.Unknown "dynamic") with
+  | .ok _ => throw (IO.userError "Unknown dtype must not be a no-op cast")
+  | .error _ => pure ()
+
+@[test] def testRuntimePromotionRetainsItsResultIndex : IO Unit := do
+  let left := Tensor.ones #[2]
+  let right := (Tensor.ones #[2]).castDType .Float64
+  let result ← IO.ofExcept (Tensor.Promoting.add? left right)
+  LeanTest.assertEqual result.dtype .Float64
+  LeanTest.assertEqual result.tensor.raw.dtype result.dtype
+  LeanTest.assertEqual (← result.tensor.toFloatArray) #[2.0, 2.0]
+
+@[test] def testFileLoadingRetainsItsDTypeWitness : IO Unit := do
+  IO.FS.withTempDir fun directory => do
+    let path := (directory / "weights.pt").toString
+    let input := (Tensor.fromFloatArray #[1.25, 2.5]).toBFloat16
+    input.saveTensor path
+    let packed ← SomeDTypeTensor.loadTensorExact #[2] .CPU path
+    LeanTest.assertEqual packed.1.val .BFloat16
+    LeanTest.assertEqual packed.2.raw.dtype packed.1.val
+    LeanTest.assertEqual (← packed.2.toFloatArray) #[1.25, 2.5]
+    Tests.assertThrows (SomeDTypeTensor.loadTensorExact #[1, 2] .CPU path)
+    for device in ← Tests.acceleratorDevices do
+      Tests.assertThrows (SomeDTypeTensor.loadTensorExact #[2] device path)
+
+end Tests.ExactDTypeContracts

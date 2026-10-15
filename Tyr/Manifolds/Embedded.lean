@@ -31,7 +31,7 @@ def retractAmbientStep [DifferentiableManifold M] [EmbeddedManifold M]
 
 end EmbeddedManifold
 
-instance tensorEmbedded {σ : StaticSpec} : EmbeddedManifold (Tensor σ) where
+instance tensorEmbedded {σ : StaticSpec} [DType.ConstantSupported σ.dtype σ.device] : EmbeddedManifold (Tensor σ) where
   Ambient := Tensor σ
   toAmbient := id
   projectAmbientTangent := id
@@ -41,7 +41,7 @@ instance stiefelEmbedded (n p : UInt64) : EmbeddedManifold (Stiefel n p d dev) w
   toAmbient := fun x => x.matrix
   projectAmbientTangent := fun {x} Z => StiefelTangent.project x Z
 
-instance orthogonalEmbedded (n : UInt64) : EmbeddedManifold (Orthogonal n d dev) where
+instance orthogonalEmbedded [DType.ConstantSupported d dev] (n : UInt64) : EmbeddedManifold (Orthogonal n d dev) where
   Ambient := Tensor ⟨#[n, n], d, dev⟩
   toAmbient := fun x => x.matrix
   projectAmbientTangent := fun {x} Z => OrthogonalTangent.fromAmbient x Z
@@ -51,7 +51,7 @@ instance grassmannEmbedded (n p : UInt64) : EmbeddedManifold (Grassmann n p d de
   toAmbient := fun x => x.matrix
   projectAmbientTangent := fun {x} Z => GrassmannTangent.project x Z
 
-instance hyperbolicEmbedded (n : UInt64) : EmbeddedManifold (Hyperbolic n d dev) where
+instance hyperbolicEmbedded [DType.ConstantSupported d dev] (n : UInt64) : EmbeddedManifold (Hyperbolic n d dev) where
   Ambient := Tensor ⟨#[n + 1], d, dev⟩
   toAmbient := fun x => x.coords
   projectAmbientTangent := fun {x} Z => HyperbolicTangent.project x Z

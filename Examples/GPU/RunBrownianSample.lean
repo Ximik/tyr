@@ -22,7 +22,7 @@ def runOnce : IO Bool := do
     return false
 
   seedFixtures suiteName 271828
-  let device := Device.CUDA 0
+  let device ← Device.cuda 0
   let n : UInt64 := 4096
   let rootKey := PRNGKey.foldIn (PRNGKey.fromUInt64 99) 0x56544152
   let out ← Tensor.uniformLike (Tensor.zeros #[n] false device) 0 0

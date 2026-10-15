@@ -67,25 +67,25 @@ private def expectError {α : Type} (result : Except String α)
 
 @[test] def testErasedUnsupportedPromotionIsRejectedBeforeNativeArithmetic : IO Unit := do
   let path := "Tests/fixtures/typed/dtype_scalars.safetensors"
-  let floating := (Tensor.ones #[1]).forgetDType
+  let floating := (Tensor.ones #[1])
   for dtype in #[DType.Float8E4M3FN, DType.Float8E5M2] do
     let stored ← safetensors.loadTensorWithSpec path dtype.canonicalName ⟨#[1], dtype⟩
-    let erased := stored.forgetDType
-    LeanTest.assertEqual erased.raw.dtype dtype
+    let exact := stored
+    LeanTest.assertEqual exact.raw.dtype dtype
     -- These pairs have no native promotion. Reaching a raw arithmetic call
     -- would throw across its pure FFI boundary, so returning Except is essential.
-    expectError (Tensor.Preserving.add? erased floating) "Unsupported dtype promotion"
-    expectError (Tensor.Preserving.sub? erased floating) "Unsupported dtype promotion"
-    expectError (Tensor.Preserving.mul? erased floating) "Unsupported dtype promotion"
-    expectError (Tensor.Preserving.div? erased floating) "Unsupported dtype promotion"
-    expectError (Tensor.Preserving.add? floating erased) "Unsupported dtype promotion"
-    expectError (Tensor.Preserving.sub? floating erased) "Unsupported dtype promotion"
-    expectError (Tensor.Preserving.mul? floating erased) "Unsupported dtype promotion"
-    expectError (Tensor.Preserving.div? floating erased) "Unsupported dtype promotion"
+    expectError (Tensor.Promoting.add? exact floating) "Unsupported dtype promotion"
+    expectError (Tensor.Promoting.sub? exact floating) "Unsupported dtype promotion"
+    expectError (Tensor.Promoting.mul? exact floating) "Unsupported dtype promotion"
+    expectError (Tensor.Promoting.div? exact floating) "Unsupported dtype promotion"
+    expectError (Tensor.Promoting.add? floating exact) "Unsupported dtype promotion"
+    expectError (Tensor.Promoting.sub? floating exact) "Unsupported dtype promotion"
+    expectError (Tensor.Promoting.mul? floating exact) "Unsupported dtype promotion"
+    expectError (Tensor.Promoting.div? floating exact) "Unsupported dtype promotion"
 
 @[test] def testErasedIntegerPromotionDoesNotPassPreservingChecks : IO Unit := do
   for dtype in #[DType.Int32, DType.Int64] do
-    let integers := ((Tensor.fromFloatArray #[6, 12]).castDType dtype).forgetDType
+    let integers := ((Tensor.fromFloatArray #[6, 12]).castDType dtype)
     let expected := s!"Expected dtype {dtype}, got Float32"
     expectError (Tensor.Preserving.div? integers integers) expected
     expectError (Tensor.Preserving.addScalar? integers 2) expected
@@ -95,16 +95,16 @@ private def expectError {α : Type} (result : Except String α)
     LeanTest.assertEqual (← integers.toFloatArray) #[6, 12]
 
 @[test] def testErasedBoolSubtractionIsRejected : IO Unit := do
-  let floating := (Tensor.ones #[2]).forgetDType
-  let booleans := ((Tensor.ones #[2]).castDType .Bool).forgetDType
+  let floating := (Tensor.ones #[2])
+  let booleans := ((Tensor.ones #[2]).castDType .Bool)
   expectError (Tensor.Preserving.sub? booleans booleans) "Bool operands"
-  expectError (Tensor.Preserving.sub? booleans floating) "Bool operands"
-  expectError (Tensor.Preserving.sub? floating booleans) "Bool operands"
+  expectError (Tensor.Promoting.sub? booleans floating) "Bool operands"
+  expectError (Tensor.Promoting.sub? floating booleans) "Bool operands"
 
 @[test] def testErasedFloatPreservingArithmeticValues : IO Unit := do
-  let lhs := (Tensor.fromFloatArray #[6, 12]).forgetDType
-  let rhs := (Tensor.fromFloatArray #[2, 3]).forgetDType
-  let cases : Array (Array Float × Except String (Tensor { shape := #[2], device := .CPU })) := #[
+  let lhs := (Tensor.fromFloatArray #[6, 12])
+  let rhs := (Tensor.fromFloatArray #[2, 3])
+  let cases : Array (Array Float × Except String (Tensor { shape := #[2], dtype := .Float32, device := .CPU })) := #[
     (#[8, 15], Tensor.Preserving.add? lhs rhs),
     (#[4, 9], Tensor.Preserving.sub? lhs rhs),
     (#[12, 36], Tensor.Preserving.mul? lhs rhs),
@@ -135,8 +135,8 @@ example {σ : StaticSpec} (input : Tensor σ)
   result.witness.valid
 
 @[test] def testRuntimeMixedFloatPromotion : IO Unit := do
-  let left := ((Tensor.fromFloatArray #[6, 12]).castDType .BFloat16).forgetDType
-  let right := (Tensor.fromFloatArray #[2, 3]).forgetDType
+  let left := ((Tensor.fromFloatArray #[6, 12]).castDType .BFloat16)
+  let right := (Tensor.fromFloatArray #[2, 3])
   for (expected, pending) in #[(#[8, 15], Tensor.Promoting.add? left right),
       (#[4, 9], Tensor.Promoting.sub? left right),
       (#[12, 36], Tensor.Promoting.mul? left right)] do
@@ -149,16 +149,16 @@ example {σ : StaticSpec} (input : Tensor σ)
   LeanTest.assertEqual quotient.dtype .Float32
   LeanTest.assertEqual quotient.tensor.raw.dtype .Float32
   LeanTest.assertEqual (← quotient.tensor.toFloatArray) #[3, 4]
-  let erased := Tensor.Promoting.add left right
-  LeanTest.assertEqual erased.raw.dtype .Float32
-  LeanTest.assertEqual (← erased.toFloatArray) #[8, 15]
+  let exact : Tensor ⟨#[2], .Float32, .CPU⟩ := Tensor.add left right
+  LeanTest.assertEqual exact.raw.dtype .Float32
+  LeanTest.assertEqual (← exact.toFloatArray) #[8, 15]
   LeanTest.assertEqual left.raw.dtype .BFloat16
   LeanTest.assertEqual (← left.toFloatArray) #[6, 12]
   LeanTest.assertEqual (← right.toFloatArray) #[2, 3]
 
 @[test] def testRuntimeMixedIntegerPromotion : IO Unit := do
-  let left := ((Tensor.fromFloatArray #[250, 1]).castDType .UInt8).forgetDType
-  let right := ((Tensor.fromFloatArray #[-1, 2]).castDType .Int8).forgetDType
+  let left := ((Tensor.fromFloatArray #[250, 1]).castDType .UInt8)
+  let right := ((Tensor.fromFloatArray #[-1, 2]).castDType .Int8)
   let result ← checked (Tensor.Promoting.add? left right)
   LeanTest.assertEqual result.dtype .Int16
   LeanTest.assertEqual result.tensor.raw.dtype .Int16
@@ -168,20 +168,20 @@ example {σ : StaticSpec} (input : Tensor σ)
   LeanTest.assertEqual right.raw.dtype .Int8
 
 @[test] def testRuntimeIntegerDivisionPromotion : IO Unit := do
-  let left := ((Tensor.fromFloatArray #[6, 12]).castDType .Int32).forgetDType
-  let right := ((Tensor.fromFloatArray #[2, 3]).castDType .Int64).forgetDType
+  let left := ((Tensor.fromFloatArray #[6, 12]).castDType .Int32)
+  let right := ((Tensor.fromFloatArray #[2, 3]).castDType .Int64)
   let result ← checked (Tensor.Promoting.div? left right)
   -- Ordinary promotion is Int64, but true division produces Float32.
   LeanTest.assertEqual result.dtype .Int64
   LeanTest.assertEqual result.tensor.raw.dtype .Float32
   LeanTest.assertTrue result.tensor.validate.toOption.isSome
   LeanTest.assertEqual (← result.tensor.toFloatArray) #[3, 4]
-  LeanTest.assertEqual (Tensor.Promoting.div left right).raw.dtype .Float32
+  LeanTest.assertEqual (Tensor.div left right).raw.dtype .Float32
   LeanTest.assertEqual left.raw.dtype .Int32
   LeanTest.assertEqual right.raw.dtype .Int64
 
 @[test] def testRuntimeHostFloatScalarPromotion : IO Unit := do
-  let input := ((Tensor.fromFloatArray #[6, 12]).castDType .Int32).forgetDType
+  let input := ((Tensor.fromFloatArray #[6, 12]).castDType .Int32)
   for (expected, pending) in #[(#[6.5, 12.5], Tensor.Promoting.addScalar? input 0.5),
       (#[5.5, 11.5], Tensor.Promoting.subScalar? input 0.5),
       (#[3, 6], Tensor.Promoting.mulScalar? input 0.5),
@@ -191,24 +191,24 @@ example {σ : StaticSpec} (input : Tensor σ)
     LeanTest.assertEqual result.tensor.raw.dtype .Float32
     LeanTest.assertTrue result.tensor.validate.toOption.isSome
     LeanTest.assertEqual (← result.tensor.toFloatArray) expected
-  LeanTest.assertEqual (Tensor.Promoting.addScalar input 0.5).raw.dtype .Float32
+  LeanTest.assertEqual (Tensor.addScalar input 0.5).raw.dtype .Float32
   LeanTest.assertEqual input.raw.dtype .Int32
   LeanTest.assertEqual (← input.toFloatArray) #[6, 12]
 
 @[test] def testRuntimeUndefinedPromotionIsRejected : IO Unit := do
   let path := "Tests/fixtures/typed/dtype_scalars.safetensors"
-  let floating := (Tensor.ones #[1]).forgetDType
+  let floating := (Tensor.ones #[1])
   for dtype in #[DType.Float8E4M3FN, DType.Float8E5M2] do
     let stored ← safetensors.loadTensorWithSpec path dtype.canonicalName ⟨#[1], dtype⟩
-    let erased := stored.forgetDType
-    expectError (Tensor.Promoting.add? erased floating) "Unsupported dtype promotion"
-    expectError (Tensor.Promoting.sub? erased floating) "Unsupported dtype promotion"
-    expectError (Tensor.Promoting.mul? erased floating) "Unsupported dtype promotion"
-    expectError (Tensor.Promoting.div? erased floating) "Unsupported dtype promotion"
+    let exact := stored
+    expectError (Tensor.Promoting.add? exact floating) "Unsupported dtype promotion"
+    expectError (Tensor.Promoting.sub? exact floating) "Unsupported dtype promotion"
+    expectError (Tensor.Promoting.mul? exact floating) "Unsupported dtype promotion"
+    expectError (Tensor.Promoting.div? exact floating) "Unsupported dtype promotion"
 
 @[test] def testRuntimeBoolSubtractionIsRejected : IO Unit := do
-  let floating := (Tensor.ones #[2]).forgetDType
-  let booleans := ((Tensor.ones #[2]).castDType .Bool).forgetDType
+  let floating := (Tensor.ones #[2])
+  let booleans := ((Tensor.ones #[2]).castDType .Bool)
   expectError (Tensor.Promoting.sub? booleans booleans) "Bool operands"
   expectError (Tensor.Promoting.sub? booleans floating) "Bool operands"
   expectError (Tensor.Promoting.sub? floating booleans) "Bool operands"

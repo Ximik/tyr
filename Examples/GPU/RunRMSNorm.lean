@@ -82,7 +82,7 @@ private def compareResults {dtype : DType}
   logTensorCheck residCheck
   pure (outCheck.ok && residCheck.ok)
 
-private def runInputs {dtype : DType} (label : String) (inputs : RMSNormInputs dtype (.CUDA 0)) : IO Bool := do
+private def runInputs {dtype : DType} (label : String) (inputs : RMSNormInputs dtype device) : IO Bool := do
   logInputDTypes label inputs
   let stream ← torch.cuda_current_stream
   let blackwell ← isBlackwellFamily
@@ -109,9 +109,8 @@ private def runInputs {dtype : DType} (label : String) (inputs : RMSNormInputs d
       IO.eprintln s!"[{suiteName}:{label}] unsupported_dtype dtype={dtype}"
       pure false
 
-private def randomInputs (dtype : DType) : IO (RMSNormInputs dtype (.CUDA 0)) := do
-  let device := Device.CUDA 0
-  let base : RMSNormInputs .Float32 (.CUDA 0) := {
+private def randomInputs (dtype : DType) (device : Device) : IO (RMSNormInputs dtype device) := do
+  let base : RMSNormInputs .Float32 device := {
     x := ← Tensor.uniformLike (Tensor.zeros #[1, 64, 1024] false device)
     residual := ← Tensor.uniformLike (Tensor.zeros #[1, 64, 1024] false device)
     weight := ← Tensor.uniformLike (Tensor.zeros #[1024] false device)
@@ -126,7 +125,7 @@ def generateFixtures : IO Unit := do
     throw <| IO.userError "CUDA is not available; cannot generate rmsnorm fixtures."
 
   IO.FS.createDirAll fixtureSpec.dir
-  let inputs ← randomInputs .Float32
+  let inputs ← randomInputs .Float32 (← Device.cuda 0)
   let vendoredInputs := asBFloat16Inputs inputs
   let (expectedOut, expectedResid) := rmsNormReferenceBFloat16 vendoredInputs
 
@@ -147,35 +146,36 @@ def runFloat32Once : IO Bool := do
   if !(← requireCuda suiteName) then
     return false
   seedFixtures s!"{suiteName}.f32" 0
-  runInputs "random_f32" (← randomInputs .Float32)
+  runInputs "random_f32" (← randomInputs .Float32 (← Device.cuda 0))
 
 def runBFloat16Once : IO Bool := do
   if !(← requireCuda suiteName) then
     return false
   seedFixtures s!"{suiteName}.bf16" 0
-  runInputs "random_bf16" (← randomInputs .BFloat16)
+  runInputs "random_bf16" (← randomInputs .BFloat16 (← Device.cuda 0))
 
 def runOnce : IO Bool := do
   if !(← requireCuda suiteName) then
     return false
 
+  let device ← Device.cuda 0
   if !(← fixturesPresent fixtureSpec) then
     generateFixtures
 
-  let x ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[1, 64, 1024], dtype := .Unknown "dynamic" }
+  let x ← SomeDTypeTensor.loadTensorExact #[1, 64, 1024] device
     (fixtureFile "x").toString
-  let dtype := x.actualSpec.dtype
-  let inputs : RMSNormInputs dtype (.CUDA 0) := {
-    x := x.castDType dtype
-    residual := ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[1, 64, 1024], dtype } (fixtureFile "residual").toString
-    weight := ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[1024], dtype } (fixtureFile "weight").toString
+  let dtype := x.1.val
+  let inputs : RMSNormInputs dtype device := {
+    x := x.2
+    residual := ← Tensor.loadTensorExact { device := device, shape := #[1, 64, 1024], dtype } (fixtureFile "residual").toString
+    weight := ← Tensor.loadTensorExact { device := device, shape := #[1024], dtype } (fixtureFile "weight").toString
   }
   runInputs "fixtures" inputs
 
 
 private def benchmarkFloat32 (cfg : Benchmark.Config) (stream : UInt64)
     (_blackwell : Bool) : IO (String × Bool) := do
-  let inputs ← randomInputs .Float32
+  let inputs ← randomInputs .Float32 (← Device.cuda 0)
   let (expectedOut, expectedResid) := rmsNormReference inputs
   let out ← Tensor.uniformLike inputs.x 0 0
   let outResid ← Tensor.uniformLike inputs.residual 0 0
@@ -192,7 +192,7 @@ private def benchmarkFloat32 (cfg : Benchmark.Config) (stream : UInt64)
 
 private def benchmarkBFloat16 (cfg : Benchmark.Config) (stream : UInt64)
     (_blackwell : Bool) : IO (String × Bool) := do
-  let inputs ← randomInputs .BFloat16
+  let inputs ← randomInputs .BFloat16 (← Device.cuda 0)
   let (expectedOut, expectedResid) := rmsNormReferenceBFloat16 inputs
   let out ← Tensor.uniformLike inputs.x 0 0
   let outResid ← Tensor.uniformLike inputs.residual 0 0
@@ -269,16 +269,16 @@ def referenceTraining {rows : UInt64}
 
 private def benchmarkTrainingShape (cfg : Benchmark.Config) (stream : UInt64)
     (caseLabel : String) (rows : UInt64) : IO (Array String × Bool) := do
-  let device := Device.CUDA 0
-  let x : Tensor { shape := #[rows, hiddenDim], dtype := .BFloat16, device := (.CUDA 0) } :=
+  let device ← Device.cuda 0
+  let x : Tensor { shape := #[rows, hiddenDim], dtype := .BFloat16, device := device } :=
     (← Tensor.randn #[rows, hiddenDim] false device).toBFloat16
-  let residual : Tensor { shape := #[rows, hiddenDim], dtype := .BFloat16, device := (.CUDA 0) } :=
+  let residual : Tensor { shape := #[rows, hiddenDim], dtype := .BFloat16, device := device } :=
     (← Tensor.randn #[rows, hiddenDim] false device).toBFloat16
-  let weight : Tensor { shape := #[hiddenDim], dtype := .BFloat16, device := (.CUDA 0) } :=
+  let weight : Tensor { shape := #[hiddenDim], dtype := .BFloat16, device := device } :=
     (← Tensor.randn #[hiddenDim] false device).toBFloat16
-  let gradOut : Tensor { shape := #[rows, hiddenDim], dtype := .BFloat16, device := (.CUDA 0) } :=
+  let gradOut : Tensor { shape := #[rows, hiddenDim], dtype := .BFloat16, device := device } :=
     (← Tensor.randn #[rows, hiddenDim] false device).toBFloat16
-  let gradOutResid : Tensor { shape := #[rows, hiddenDim], dtype := .BFloat16, device := (.CUDA 0) } :=
+  let gradOutResid : Tensor { shape := #[rows, hiddenDim], dtype := .BFloat16, device := device } :=
     (← Tensor.randn #[rows, hiddenDim] false device).toBFloat16
 
   let (expectedOut, expectedResid, expectedInv, expectedGradInput, expectedGradWeight) :=

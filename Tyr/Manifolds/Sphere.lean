@@ -47,7 +47,7 @@ def project (x : Sphere n d dev) (v : Tensor ⟨#[n], d, dev⟩) : SphereTangent
   ⟨Tensor.Preserving.sub v correction⟩
 
 /-- Zero tangent vector. -/
-def zero (n : UInt64) : SphereTangent n d dev := ⟨Tensor.zerosFor ⟨#[n], d, dev⟩⟩
+def zero [DType.ConstantSupported d dev] (n : UInt64) : SphereTangent n d dev := ⟨Tensor.zerosFor ⟨#[n], d, dev⟩⟩
 
 /-- Add tangent vectors. -/
 def add (a b : SphereTangent n d dev) : SphereTangent n d dev :=

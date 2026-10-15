@@ -18,8 +18,8 @@ abbrev Query (batch nHead qSeq headDim : UInt64) (d : DType) : Type :=
 /-- Key/value layout: `[batch, nKvHead, kvSeq, headDim]`, sharing the query dtype. -/
 abbrev KeyValue (batch nKvHead kvSeq headDim : UInt64) (d : DType) : Type :=
   Tensor { shape := #[batch, nKvHead, kvSeq, headDim], dtype := d, device := device }
-/-- Padding-mask layout: `[batch, kvSeq]`; the mask dtype stays dynamic. -/
-abbrev PaddingMask (batch kvSeq : UInt64) : Type := Tensor { shape := #[batch, kvSeq], device := device }
+/-- Padding-mask layout with an existential exact dtype. -/
+abbrev PaddingMask (batch kvSeq : UInt64) : Type := SomeDTypeTensor #[batch, kvSeq] device
 
 inductive DispatchRoute where
   | tkKernel
@@ -182,16 +182,17 @@ structure PackedQKV where
   qSeq : UInt64
   kvSeq : UInt64
   headDim : UInt64
-  q : Tensor { shape := #[batch, nHead, qSeq, headDim], device := device }
-  k : Tensor { shape := #[batch, nKvHead, kvSeq, headDim], device := device }
-  v : Tensor { shape := #[batch, nKvHead, kvSeq, headDim], device := device }
+  dtype : ExactDType
+  q : Tensor { shape := #[batch, nHead, qSeq, headDim], dtype := dtype.val, device := device }
+  k : Tensor { shape := #[batch, nKvHead, kvSeq, headDim], dtype := dtype.val, device := device }
+  v : Tensor { shape := #[batch, nKvHead, kvSeq, headDim], dtype := dtype.val, device := device }
 
 abbrev DynOut :=
   Sigma (fun batch =>
     Sigma (fun nHead =>
       Sigma (fun qSeq =>
         Sigma (fun headDim =>
-          Tensor { shape := #[batch, nHead, qSeq, headDim], device := device }))))
+          SomeDTypeTensor #[batch, nHead, qSeq, headDim] device))))
 
 private def checkedRaw {σ : StaticSpec} (label : String) (raw : RawTensor) : IO (Tensor σ) :=
   match Tensor.ofRaw raw with
@@ -232,9 +233,10 @@ private def parseQKVDyn (qDyn kDyn vDyn : RawTensor) : IO (PackedQKV (device := 
   if !(kHeadDim == headDim && vHeadDim == headDim) then
     throw <| IO.userError s!"flashAttnDyn: head_dim mismatch q={headDim} k={kHeadDim} v={vHeadDim}"
 
-  let q : Tensor { shape := #[batch, nHead, qSeq, headDim], device := device } ← checkedRaw "query" qDyn
-  let k : Tensor { shape := #[batch, nKvHead, kvSeq, headDim], device := device } ← checkedRaw "key" kDyn
-  let v : Tensor { shape := #[batch, nKvHead, kvSeq, headDim], device := device } ← checkedRaw "value" vDyn
+  let dtype ← IO.ofExcept (ExactDType.ofDType? qDyn.dtype)
+  let q : Tensor { shape := #[batch, nHead, qSeq, headDim], dtype := dtype.val, device := device } ← checkedRaw "query" qDyn
+  let k : Tensor { shape := #[batch, nKvHead, kvSeq, headDim], dtype := dtype.val, device := device } ← checkedRaw "key" kDyn
+  let v : Tensor { shape := #[batch, nKvHead, kvSeq, headDim], dtype := dtype.val, device := device } ← checkedRaw "value" vDyn
   pure {
     batch := batch
     nHead := nHead
@@ -242,6 +244,7 @@ private def parseQKVDyn (qDyn kDyn vDyn : RawTensor) : IO (PackedQKV (device := 
     qSeq := qSeq
     kvSeq := kvSeq
     headDim := headDim
+    dtype := dtype
     q := q
     k := k
     v := v
@@ -262,7 +265,7 @@ private def parseMaskDyn
       if !(gotBatch == batch && gotKvSeq == kvSeq) then
         throw <| IO.userError
           s!"flashAttnDyn: attn_mask shape mismatch expected=[{batch},{kvSeq}] got=[{gotBatch},{gotKvSeq}]"
-      let mask : PaddingMask (device := device) batch kvSeq ← checkedRaw "attn_mask" maskDyn
+      let mask : PaddingMask (device := device) batch kvSeq ← IO.ofExcept (SomeDTypeTensor.ofRaw maskDyn)
       pure (some mask)
 
 /-- Fully general existential adapter:
@@ -279,8 +282,8 @@ def flashAttnDyn
   let device := qDyn.device
   let packed ← parseQKVDyn qDyn kDyn vDyn
   let typedMask ← parseMaskDyn (device := device) packed.batch packed.kvSeq attnMask
-  let out : Tensor { shape := #[packed.batch, packed.nHead, packed.qSeq, packed.headDim], device := device } ←
+  let out : Tensor { shape := #[packed.batch, packed.nHead, packed.qSeq, packed.headDim], dtype := packed.dtype.val, device := device } ←
     flashAttnIO packed.q packed.k packed.v dropoutP training typedMask isCausal scale enableGqa
-  pure ⟨packed.batch, ⟨packed.nHead, ⟨packed.qSeq, ⟨packed.headDim, out⟩⟩⟩⟩
+  pure ⟨packed.batch, ⟨packed.nHead, ⟨packed.qSeq, ⟨packed.headDim, ⟨packed.dtype, out⟩⟩⟩⟩⟩
 
 end Tyr.GPU.Ops.FlashAttn

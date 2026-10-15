@@ -19,7 +19,7 @@ import Examples.ModelRunner
 
 open torch
 
-variable {device : Device}
+variable {device : Device} {dtype visionDType projectorDType : DType}
 open torch.Model
 open torch.gemma4
 open Examples.ModelRunner
@@ -155,7 +155,7 @@ private def movePatchGridTo {cfg : VLConfig} {sourceDevice : Device} (device : D
 private def runTextBatches
     (tok : tokenizer.gemma4.GemmaTokenizer)
     (cfg : Config)
-    (model : Gemma4ForCausalLM (device := device) cfg)
+    (model : Gemma4ForCausalLM (device := device) cfg dtype)
     (args : Args)
     (prompts : Array String)
     : IO Unit := do
@@ -177,11 +177,11 @@ private def runTextBatches
 private def runMultimodalBatches
     (tok : tokenizer.gemma4.GemmaTokenizer)
     (cfg : VLConfig)
-    (model : Gemma4ForConditionalGeneration (device := device) cfg)
+    (model : Gemma4ForConditionalGeneration (device := device) cfg dtype visionDType projectorDType)
     (args : Args)
     (prompts : Array String)
     (imageSoftTokenCounts : Array UInt64)
-    (imageFeatures : Option (ImageFeatures (device := device) cfg))
+    (imageFeatures : Option (ImageFeatures (device := device) cfg projectorDType))
     : IO Unit := do
   let generationStopIds := eosStopTokenIds tok cfg.text_config
   let buildBatch chunk := do
@@ -236,7 +236,7 @@ def runMain (argv : List String) : IO UInt32 := do
   if useMultimodal && hasImages then
     let cfg ← VLConfig.loadFromPretrainedDir modelDir {}
     let isSharded ← Hub.detectWeightLayout modelDir
-    let model ←
+    let ⟨_textDType, _visionDType, _projectorDType, model⟩ ←
       if isSharded then Gemma4ForConditionalGeneration.loadSharded modelDir cfg (device := device)
       else Gemma4ForConditionalGeneration.load s!"{modelDir}/model.safetensors" cfg (device := device)
 
@@ -258,7 +258,7 @@ def runMain (argv : List String) : IO UInt32 := do
       IO.println "Warning: --multimodal requested without --image; running text-only path."
     let cfg ← Config.loadFromPretrainedDir modelDir Config.gemma4_E4B
     let isSharded ← Hub.detectWeightLayout modelDir
-    let model ←
+    let ⟨_dtype, model⟩ ←
       if isSharded then Gemma4ForCausalLM.loadSharded modelDir cfg (device := device)
       else Gemma4ForCausalLM.load s!"{modelDir}/model.safetensors" cfg (device := device)
     runTextBatches tok cfg model args prompts

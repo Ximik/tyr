@@ -14,27 +14,27 @@ import Tyr.Inference.OwnedKV
 
 namespace torch.branching
 
-variable {device : Device}
+variable {device : Device} {dtype : DType}
 open torch
 
-structure BranchingMoleculeBatch (batch maxLen : UInt64) where
-  t : Tensor { device := device, shape := #[batch] }
-  coord : Tensor { device := device, shape := #[batch, maxLen, 3] }
-  coordAnchor : Tensor { device := device, shape := #[batch, maxLen, 3] }
+structure BranchingMoleculeBatch (batch maxLen : UInt64) (dtype : DType := .Float32) where
+  t : Tensor { dtype := dtype, device := device, shape := #[batch] }
+  coord : Tensor { dtype := dtype, device := device, shape := #[batch, maxLen, 3] }
+  coordAnchor : Tensor { dtype := dtype, device := device, shape := #[batch, maxLen, 3] }
   label : Tensor { device := device, shape := #[batch, maxLen], dtype := .Int64 }
   labelAnchor : Tensor { device := device, shape := #[batch, maxLen], dtype := .Int64 }
-  labelLossScale : Tensor { device := device, shape := #[batch, maxLen] }
+  labelLossScale : Tensor { dtype := dtype, device := device, shape := #[batch, maxLen] }
   padmask : Tensor { device := device, shape := #[batch, maxLen], dtype := .Int64 }
   flowmask : Tensor { device := device, shape := #[batch, maxLen], dtype := .Int64 }
-  splitsTarget : Tensor { device := device, shape := #[batch, maxLen] }
-  delTarget : Tensor { device := device, shape := #[batch, maxLen] }
-  deriving Repr
+  splitsTarget : Tensor { dtype := dtype, device := device, shape := #[batch, maxLen] }
+  delTarget : Tensor { dtype := dtype, device := device, shape := #[batch, maxLen] }
+  deriving Repr, TensorStruct
 
 namespace BranchingMoleculeBatch
 
 def toDevice {batch maxLen : UInt64}
-    (targetDevice : Device) (x : BranchingMoleculeBatch (device := device) batch maxLen) :
-    BranchingMoleculeBatch (device := targetDevice) batch maxLen :=
+    (targetDevice : Device) (x : BranchingMoleculeBatch (dtype := dtype) (device := device) batch maxLen) :
+    BranchingMoleculeBatch (dtype := dtype) (device := targetDevice) batch maxLen :=
   { t := x.t.to targetDevice
     coord := x.coord.to targetDevice
     coordAnchor := x.coordAnchor.to targetDevice
@@ -46,30 +46,25 @@ def toDevice {batch maxLen : UInt64}
     splitsTarget := x.splitsTarget.to targetDevice
     delTarget := x.delTarget.to targetDevice }
 
-/-- Cast the float fields of a packed batch to bfloat16 (labels/masks stay
-    integral). Used by the `--dtype bf16` experiment: halves bandwidth on the
-    model's hot path; the optimizer then also runs in bf16. -/
-def castBFloat16 {batch maxLen : UInt64}
-    (x : BranchingMoleculeBatch (device := device) batch maxLen) : BranchingMoleculeBatch (device := device) batch maxLen :=
-  { t := bfloatDynamic x.t
-    coord := bfloatDynamic x.coord
-    coordAnchor := bfloatDynamic x.coordAnchor
-    label := x.label
-    labelAnchor := x.labelAnchor
-    labelLossScale := bfloatDynamic x.labelLossScale
-    padmask := x.padmask
-    flowmask := x.flowmask
-    splitsTarget := bfloatDynamic x.splitsTarget
-    delTarget := bfloatDynamic x.delTarget }
+/-- Explicit conversion of floating batch fields; labels and masks remain Int64. -/
+def castDType {batch maxLen : UInt64} (target : DType)
+    (x : BranchingMoleculeBatch (device := device) batch maxLen dtype) :
+    IO (BranchingMoleculeBatch (device := device) batch maxLen target) :=
+  TensorStruct.castTo _ x
 
-/-- Allocate a static batch of zero buffers (float fields f32, integral fields
-    i64), optionally bf16-cast — the CUDA-graph static input buffer.
-    Effectful clones prevent equal-shaped fields from sharing mutable storage. -/
-def zeros (batch maxLen : UInt64) (device : Device) (bf16 : Bool := false) :
-    IO (BranchingMoleculeBatch (device := device) batch maxLen) := do
-  let f (s : Shape) : IO (Tensor { device := device, shape := s }) := data.cloneInferenceIO (zerosDynamic s false device)
+def castBFloat16 {batch maxLen : UInt64}
+    (x : BranchingMoleculeBatch (device := device) batch maxLen dtype) :
+    IO (BranchingMoleculeBatch (device := device) batch maxLen .BFloat16) :=
+  x.castDType .BFloat16
+
+/-- Allocate independent buffers at the requested floating dtype, with Int64 labels and masks. -/
+def zeros (batch maxLen : UInt64) (device : Device) (dtype : DType := .Float32) :
+    IO (BranchingMoleculeBatch (dtype := dtype) (device := device) batch maxLen) := do
+  let support ← dtype.acquireConstantSupport device
+  let _ := support.down
+  let f (s : Shape) : IO (Tensor { dtype := dtype, device := device, shape := s }) := data.cloneInferenceIO (zerosDynamic s false device (dtype := dtype))
   let i (s : Shape) : IO (Tensor { device := device, shape := s, dtype := .Int64 }) := data.cloneInferenceIO ((Tensor.fullInt s 0).to device)
-  let b : BranchingMoleculeBatch (device := device) batch maxLen := {
+  let b : BranchingMoleculeBatch (dtype := dtype) (device := device) batch maxLen := {
     t := ← f #[batch]
     coord := ← f #[batch, maxLen, 3]
     coordAnchor := ← f #[batch, maxLen, 3]
@@ -81,7 +76,7 @@ def zeros (batch maxLen : UInt64) (device : Device) (bf16 : Bool := false) :
     splitsTarget := ← f #[batch, maxLen]
     delTarget := ← f #[batch, maxLen]
   }
-  pure (if bf16 then b.castBFloat16 else b)
+  pure b
 
 /-- Return a buffer batch containing the freshly packed batch. Retained
 destination aliases preserve their values. The batch
@@ -89,10 +84,10 @@ destination aliases preserve their values. The batch
     existentials / structure projections); runtime shapes must match. Float
     fields are explicitly cast to the buffer dtype for BF16 staging; integral
     fields must already match the destination dtype. -/
-def copyInto {b1 b2 m1 m2 : UInt64}
-    (dst : BranchingMoleculeBatch (device := device) b1 m1)
-    (src : BranchingMoleculeBatch (device := device) b2 m2) :
-    IO (BranchingMoleculeBatch (device := device) b1 m1) := do
+def copyInto {source : DType} {b1 b2 m1 m2 : UInt64}
+    (dst : BranchingMoleculeBatch (dtype := dtype) (device := device) b1 m1)
+    (src : BranchingMoleculeBatch (dtype := source) (device := device) b2 m2) :
+    IO (BranchingMoleculeBatch (dtype := dtype) (device := device) b1 m1) := do
   return {
     t := ← copyIntoChecked dst.t (Tensor.castLike dst.t src.t)
     coord := ← copyIntoChecked dst.coord (Tensor.castLike dst.coord src.coord)
@@ -107,7 +102,7 @@ def copyInto {b1 b2 m1 m2 : UInt64}
 
 /-- Force every constructed field eagerly (see `touchTensor`). -/
 def eval {batch maxLen : UInt64}
-    (b : BranchingMoleculeBatch (device := device) batch maxLen) : IO (BranchingMoleculeBatch (device := device) batch maxLen) := do
+    (b : BranchingMoleculeBatch (dtype := dtype) (device := device) batch maxLen) : IO (BranchingMoleculeBatch (dtype := dtype) (device := device) batch maxLen) := do
   touchTensor b.t
   touchTensor b.coord
   touchTensor b.coordAnchor
@@ -122,10 +117,10 @@ def eval {batch maxLen : UInt64}
 
 end BranchingMoleculeBatch
 
-structure BranchingMoleculeModel (maxLen vocab : UInt64) (Params : Type) where
-  forward : {batch : UInt64} → Params → Tensor { device := device, shape := #[batch, maxLen, 3] } → Tensor { device := device, shape := #[batch, maxLen], dtype := .Int64 } → Tensor { device := device, shape := #[batch] }
+structure BranchingMoleculeModel (maxLen vocab : UInt64) (Params : Type) (dtype : DType := .Float32) where
+  forward : {batch : UInt64} → Params → Tensor { dtype := dtype, device := device, shape := #[batch, maxLen, 3] } → Tensor { device := device, shape := #[batch, maxLen], dtype := .Int64 } → Tensor { dtype := dtype, device := device, shape := #[batch] }
     → Tensor { device := device, shape := #[batch, maxLen], dtype := .Int64 }
-    → IO (Tensor { device := device, shape := #[batch, maxLen, 3] } × Tensor { device := device, shape := #[batch, maxLen, vocab] } × Tensor { device := device, shape := #[batch, maxLen] } × Tensor { device := device, shape := #[batch, maxLen] })
+    → IO (Tensor { dtype := dtype, device := device, shape := #[batch, maxLen, 3] } × Tensor { dtype := dtype, device := device, shape := #[batch, maxLen, vocab] } × Tensor { dtype := dtype, device := device, shape := #[batch, maxLen] } × Tensor { dtype := dtype, device := device, shape := #[batch, maxLen] })
 
 private def coordOffset (maxLenNat bi j k : Nat) : Nat :=
   (bi * maxLenNat + j) * 3 + k
@@ -138,7 +133,7 @@ private def writeVec3 (arr : Array Float) (offset : Nat) (v : Vec3) : Array Floa
 def packBranchingMolecule (cfg : BranchingTrainConfig)
     (result : BranchingBridgeResult MoleculeAtom)
     (labelDFM : Option DistNoisyDiscreteConfig := none)
-    : IO (Sigma fun batch => BranchingMoleculeBatch (device := .CPU) batch cfg.maxLen) := do
+    : IO (Sigma fun batch => BranchingMoleculeBatch (dtype := .Float32) (device := .CPU) batch cfg.maxLen) := do
   let batchNat := result.t.size
   if result.Xt.size != batchNat then
     throw (IO.userError "BranchingBridgeResult.Xt size mismatch")
@@ -211,7 +206,7 @@ def packBranchingMolecule (cfg : BranchingTrainConfig)
 
   let timeScaled := result.t.map (fun t => ((t * cfg.timeScale).toUInt64).toInt64)
   let t := Tensor.reshapeChecked (Tensor.fromInt64Array timeScaled) #[batchU]
-  let t := Tensor.Promoting.divScalar (floatDynamic t) cfg.timeScale
+  let t := Tensor.Preserving.divScalar (floatDynamic t) cfg.timeScale
 
   return ⟨batchU, {
     t,
@@ -229,61 +224,69 @@ def packBranchingMolecule (cfg : BranchingTrainConfig)
 def packBranchingMoleculeWithDFM (cfg : BranchingTrainConfig)
     (labelDFM : DistNoisyDiscreteConfig)
     (result : BranchingBridgeResult MoleculeAtom)
-    : IO (Sigma fun batch => BranchingMoleculeBatch (device := .CPU) batch cfg.maxLen) :=
+    : IO (Sigma fun batch => BranchingMoleculeBatch (dtype := .Float32) (device := .CPU) batch cfg.maxLen) :=
   packBranchingMolecule cfg result (labelDFM := some labelDFM)
 
 private def moleculeMask {batch maxLen : UInt64}
-    (pad flow : Tensor { device := device, shape := #[batch, maxLen], dtype := .Int64 }) : Tensor { device := device, shape := #[batch, maxLen] } :=
+    (pad flow : Tensor { device := device, shape := #[batch, maxLen], dtype := .Int64 }) : Tensor { dtype := .Float32, device := device, shape := #[batch, maxLen] } :=
   floatDynamic (pad * flow)
 
+-- F32 masks intentionally promote BF16/F16 losses to F32 without converting operands.
+variable [DType.Promotes dtype .Float32 .Float32] [DType.Promotes .Float32 dtype .Float32]
+
 private def moleculeMaskedWeightedCrossEntropy {batch maxLen vocab : UInt64}
-    (logits : Tensor { device := device, shape := #[batch, maxLen, vocab] })
+    (logits : Tensor { dtype := dtype, device := device, shape := #[batch, maxLen, vocab] })
     (targets : Tensor { device := device, shape := #[batch, maxLen], dtype := .Int64 })
-    (mask : Tensor { device := device, shape := #[batch, maxLen] })
-    (weights : Tensor { device := device, shape := #[batch, maxLen] }) : Tensor { device := device, shape := #[] } :=
+    (mask : Tensor { dtype := .Float32, device := device, shape := #[batch, maxLen] })
+    (weights : Tensor { dtype := dtype, device := device, shape := #[batch, maxLen] }) : Tensor { dtype := .Float32, device := device, shape := #[] } :=
   let n : UInt64 := batch * maxLen
   let logits2 := Tensor.reshapeChecked logits #[n, vocab]
   let targets2 := Tensor.reshapeChecked targets #[n]
   let mask2 := Tensor.reshapeChecked mask #[n]
   let weights2 := Tensor.reshapeChecked weights #[n]
   let per := Tensor.crossEntropyNoneChecked logits2 targets2
-  let masked := Tensor.Promoting.mul (Tensor.Promoting.mul per mask2) weights2
+  let masked := Tensor.mul (Tensor.mul per mask2) weights2
   let denom := Tensor.sumAll mask2
-  Tensor.Promoting.div (Tensor.sumAll masked) (Tensor.Promoting.addScalar denom 1.0e-8)
+  Tensor.Preserving.div (Tensor.sumAll masked) (Tensor.Preserving.addScalar denom 1.0e-8)
 
 private def moleculeFlowLossScale {batch maxLen : UInt64}
-    (t : Tensor { device := device, shape := #[batch] }) : Tensor { device := device, shape := #[batch, maxLen] } :=
-  let remaining : Tensor { device := device, shape := #[batch] } := Tensor.Preserving.addScalar (Tensor.Preserving.mulScalar t (-1.0)) 1.2
-  let scale : Tensor { device := device, shape := #[batch] } := powDynamic remaining (-1.0)
+    (t : Tensor { dtype := dtype, device := device, shape := #[batch] }) : Tensor { dtype := dtype, device := device, shape := #[batch, maxLen] } :=
+  let remaining : Tensor { dtype := dtype, device := device, shape := #[batch] } := Tensor.Preserving.addScalar (Tensor.Preserving.mulScalar t (-1.0)) 1.2
+  let scale : Tensor { dtype := dtype, device := device, shape := #[batch] } := powDynamic remaining (-1.0)
   Tensor.expand (Tensor.unsqueeze scale 1) #[batch, maxLen]
 
 private def moleculeMaskedWeightedMSE3d {batch maxLen dim : UInt64}
-    (pred target : Tensor { device := device, shape := #[batch, maxLen, dim] })
-    (mask weights : Tensor { device := device, shape := #[batch, maxLen] }) : Tensor { device := device, shape := #[] } :=
+    (pred target : Tensor { dtype := dtype, device := device, shape := #[batch, maxLen, dim] })
+    (mask : Tensor { dtype := .Float32, device := device, shape := #[batch, maxLen] })
+    (weights : Tensor { dtype := dtype, device := device, shape := #[batch, maxLen] }) : Tensor { dtype := .Float32, device := device, shape := #[] } :=
   let mask3 := Tensor.expand (Tensor.unsqueeze mask 2) #[batch, maxLen, dim]
   let weights3 := Tensor.expand (Tensor.unsqueeze weights 2) #[batch, maxLen, dim]
-  let diff := Tensor.Promoting.sub pred target
-  let sq := Tensor.Promoting.mul diff diff
-  let masked := Tensor.Promoting.mul (Tensor.Promoting.mul sq mask3) weights3
+  let diff := Tensor.Preserving.sub pred target
+  let sq := Tensor.Preserving.mul diff diff
+  let masked := Tensor.mul (Tensor.mul sq mask3) weights3
   let denom := Tensor.sumAll mask3
-  Tensor.Promoting.div (Tensor.sumAll masked) (Tensor.Promoting.addScalar denom 1.0e-8)
+  Tensor.Preserving.div (Tensor.sumAll masked) (Tensor.Preserving.addScalar denom 1.0e-8)
 
 private def moleculeMaskedWeightedSplitPoissonLoss {batch maxLen : UInt64}
-    (logits target mask weights : Tensor { device := device, shape := #[batch, maxLen] }) : Tensor { device := device, shape := #[] } :=
+    (logits target : Tensor { dtype := dtype, device := device, shape := #[batch, maxLen] })
+    (mask : Tensor { dtype := .Float32, device := device, shape := #[batch, maxLen] })
+    (weights : Tensor { dtype := dtype, device := device, shape := #[batch, maxLen] }) : Tensor { dtype := .Float32, device := device, shape := #[] } :=
   let mu := Tensor.Preserving.exp (Tensor.Preserving.clampFloat logits (-100.0) 11.0)
   let safeTarget := Tensor.Preserving.clampFloat target 1.0e-8 1.0e20
-  let per := Tensor.Promoting.sub (Tensor.Promoting.sub mu (Tensor.Promoting.mul target (logDynamic mu)))
-    (Tensor.Promoting.sub target (Tensor.Promoting.mul target (logDynamic safeTarget)))
-  let masked := Tensor.Promoting.mul (Tensor.Promoting.mul per mask) weights
+  let per := Tensor.Preserving.sub (Tensor.Preserving.sub mu (Tensor.Preserving.mul target (logDynamic mu)))
+    (Tensor.Preserving.sub target (Tensor.Preserving.mul target (logDynamic safeTarget)))
+  let masked := Tensor.mul (Tensor.mul per mask) weights
   let denom := Tensor.sumAll mask
-  Tensor.Promoting.div (Tensor.sumAll masked) (Tensor.Promoting.addScalar denom 1.0e-8)
+  Tensor.Preserving.div (Tensor.sumAll masked) (Tensor.Preserving.addScalar denom 1.0e-8)
 
 private def moleculeMaskedWeightedBCEWithLogits {batch maxLen : UInt64}
-    (logits target mask weights : Tensor { device := device, shape := #[batch, maxLen] }) : Tensor { device := device, shape := #[] } :=
-  let per := Tensor.Promoting.sub (softplusDynamic logits) (Tensor.Promoting.mul target logits)
-  let loss := Tensor.sumAll (Tensor.Promoting.mul (Tensor.Promoting.mul per mask) weights)
+    (logits target : Tensor { dtype := dtype, device := device, shape := #[batch, maxLen] })
+    (mask : Tensor { dtype := .Float32, device := device, shape := #[batch, maxLen] })
+    (weights : Tensor { dtype := dtype, device := device, shape := #[batch, maxLen] }) : Tensor { dtype := .Float32, device := device, shape := #[] } :=
+  let per := Tensor.Preserving.sub (softplusDynamic logits) (Tensor.Preserving.mul target logits)
+  let loss := Tensor.sumAll (Tensor.mul (Tensor.mul per mask) weights)
   let denom := Tensor.sumAll mask
-  Tensor.Promoting.div loss (Tensor.Promoting.addScalar denom 1.0e-8)
+  Tensor.Preserving.div loss (Tensor.Preserving.addScalar denom 1.0e-8)
 
 structure BranchingMoleculeLossReport where
   total : Float
@@ -297,12 +300,12 @@ structure BranchingMoleculeLossReport where
     readback — safe to run inside a CUDA graph capture region. -/
 def moleculeLossTensors {batch maxLen vocab : UInt64}
     (cfg : BranchingTrainConfig)
-    (packed : BranchingMoleculeBatch (device := device) batch maxLen)
-    (coordPred : Tensor { device := device, shape := #[batch, maxLen, 3] })
-    (labelLogits : Tensor { device := device, shape := #[batch, maxLen, vocab] })
-    (splitLogits : Tensor { device := device, shape := #[batch, maxLen] })
-    (delLogits : Tensor { device := device, shape := #[batch, maxLen] }) :
-    Tensor { device := device, shape := #[] } × Tensor { device := device, shape := #[] } × Tensor { device := device, shape := #[] } × Tensor { device := device, shape := #[] } × Tensor { device := device, shape := #[] } :=
+    (packed : BranchingMoleculeBatch (dtype := dtype) (device := device) batch maxLen)
+    (coordPred : Tensor { dtype := dtype, device := device, shape := #[batch, maxLen, 3] })
+    (labelLogits : Tensor { dtype := dtype, device := device, shape := #[batch, maxLen, vocab] })
+    (splitLogits : Tensor { dtype := dtype, device := device, shape := #[batch, maxLen] })
+    (delLogits : Tensor { dtype := dtype, device := device, shape := #[batch, maxLen] }) :
+    Tensor { dtype := .Float32, device := device, shape := #[] } × Tensor { dtype := .Float32, device := device, shape := #[] } × Tensor { dtype := .Float32, device := device, shape := #[] } × Tensor { dtype := .Float32, device := device, shape := #[] } × Tensor { dtype := .Float32, device := device, shape := #[] } :=
   let mask := moleculeMask packed.padmask packed.flowmask
   let flowScale := moleculeFlowLossScale (maxLen := maxLen) packed.t
   let coordLoss := moleculeMaskedWeightedMSE3d coordPred packed.coordAnchor mask flowScale
@@ -310,18 +313,18 @@ def moleculeLossTensors {batch maxLen vocab : UInt64}
   let splitLoss := moleculeMaskedWeightedSplitPoissonLoss splitLogits packed.splitsTarget mask flowScale
   let delLoss := moleculeMaskedWeightedBCEWithLogits delLogits packed.delTarget mask flowScale
   let totalLoss :=
-    Tensor.Promoting.add
-      (Tensor.Promoting.add
-        (Tensor.Promoting.add
-          (Tensor.Promoting.mulScalar (Tensor.Promoting.mulScalar coordLoss cfg.anchorWeight) cfg.coordWeight)
-          (Tensor.Promoting.mulScalar (Tensor.Promoting.mulScalar labelLoss cfg.anchorWeight) cfg.labelWeight))
-        (Tensor.Promoting.mulScalar splitLoss cfg.splitsWeight))
-      (Tensor.Promoting.mulScalar delLoss cfg.delWeight)
+    Tensor.Preserving.add
+      (Tensor.Preserving.add
+        (Tensor.Preserving.add
+          (Tensor.Preserving.mulScalar (Tensor.Preserving.mulScalar coordLoss cfg.anchorWeight) cfg.coordWeight)
+          (Tensor.Preserving.mulScalar (Tensor.Preserving.mulScalar labelLoss cfg.anchorWeight) cfg.labelWeight))
+        (Tensor.Preserving.mulScalar splitLoss cfg.splitsWeight))
+      (Tensor.Preserving.mulScalar delLoss cfg.delWeight)
   (totalLoss, coordLoss, labelLoss, splitLoss, delLoss)
 
 /-- Host-side loss report from the loss tensors (syncs on read). -/
 def moleculeLossReport
-    (total coord label splits del : Tensor { device := device, shape := #[] }) : BranchingMoleculeLossReport := {
+    (total coord label splits del : Tensor { dtype := .Float32, device := device, shape := #[] }) : BranchingMoleculeLossReport := {
   total := Tensor.item total,
   coord := Tensor.item coord,
   label := Tensor.item label,
@@ -331,19 +334,19 @@ def moleculeLossReport
 
 def moleculeLosses {batch maxLen vocab : UInt64}
     (cfg : BranchingTrainConfig)
-    (packed : BranchingMoleculeBatch (device := device) batch maxLen)
-    (coordPred : Tensor { device := device, shape := #[batch, maxLen, 3] })
-    (labelLogits : Tensor { device := device, shape := #[batch, maxLen, vocab] })
-    (splitLogits : Tensor { device := device, shape := #[batch, maxLen] })
-    (delLogits : Tensor { device := device, shape := #[batch, maxLen] }) :
-    Tensor { device := device, shape := #[] } × BranchingMoleculeLossReport :=
+    (packed : BranchingMoleculeBatch (dtype := dtype) (device := device) batch maxLen)
+    (coordPred : Tensor { dtype := dtype, device := device, shape := #[batch, maxLen, 3] })
+    (labelLogits : Tensor { dtype := dtype, device := device, shape := #[batch, maxLen, vocab] })
+    (splitLogits : Tensor { dtype := dtype, device := device, shape := #[batch, maxLen] })
+    (delLogits : Tensor { dtype := dtype, device := device, shape := #[batch, maxLen] }) :
+    Tensor { dtype := .Float32, device := device, shape := #[] } × BranchingMoleculeLossReport :=
   let (totalLoss, coordLoss, labelLoss, splitLoss, delLoss) :=
     moleculeLossTensors cfg packed coordPred labelLogits splitLogits delLogits
   (totalLoss, moleculeLossReport totalLoss coordLoss labelLoss splitLoss delLoss)
 
 def trainStepMolecule {maxLen vocab : UInt64} {Params : Type} [TensorStruct Params]
     (cfg : BranchingTrainConfig)
-    (model : BranchingMoleculeModel (device := device) maxLen vocab Params)
+    (model : BranchingMoleculeModel (dtype := dtype) (device := device) maxLen vocab Params)
     (params : Params)
     (optState : Optim.AdamWState Params)
     (result : BranchingBridgeResult MoleculeAtom)
@@ -359,7 +362,7 @@ def trainStepMolecule {maxLen vocab : UInt64} {Params : Type} [TensorStruct Para
   TensorStruct.zeroGrads params
   if cfg.maxLen != maxLen then throw <| IO.userError "BranchingFlows model/config maxLen mismatch"
   let ⟨batch, packedCpu⟩ ← packBranchingMolecule { cfg with maxLen := maxLen } result labelDFM
-  let packed := packedCpu.toDevice device
+  let packed ← (packedCpu.toDevice device).castDType dtype
   let (coordPred, labelLogits, splitLogits, delLogits) ←
     model.forward (batch := batch) params packed.coord packed.label packed.t packed.padmask
   let (totalLoss, report) :=
@@ -452,7 +455,7 @@ def moleculeMuonStep [TensorStruct Params]
 def moleculeMuonStepT [TensorStruct Params]
     (params grads : Params)
     (state : MoleculeMuonState Params)
-    (lrT : Tensor { device := device, shape := #[] })
+    (lrT : Tensor { dtype := .Float32, device := device, shape := #[] })
     (weightDecay : Float := 0.01)
     (momentumCoeff : Float := 0.95)
     (numIters : UInt64 := 5) : IO (Params × MoleculeMuonState Params) := do
@@ -483,11 +486,11 @@ def moleculeMuonStepT [TensorStruct Params]
     the capture region). Used by the CUDA-graph training loop. -/
 def trainStepMoleculeMuonCoreT {batch maxLen vocab : UInt64} {Params : Type} [TensorStruct Params]
     (cfg : BranchingTrainConfig)
-    (model : BranchingMoleculeModel (device := device) maxLen vocab Params)
+    (model : BranchingMoleculeModel (dtype := dtype) (device := device) maxLen vocab Params)
     (params : Params)
     (optState : MoleculeMuonState Params)
-    (packed : BranchingMoleculeBatch (device := device) batch maxLen)
-    (lrT : Tensor { device := device, shape := #[] })
+    (packed : BranchingMoleculeBatch (dtype := dtype) (device := device) batch maxLen)
+    (lrT : Tensor { dtype := .Float32, device := device, shape := #[] })
     (_labelDFM : Option DistNoisyDiscreteConfig := none)
     (momentumCoeff : Float := 0.95)
     (numIters : UInt64 := 5)
@@ -496,7 +499,7 @@ def trainStepMoleculeMuonCoreT {batch maxLen vocab : UInt64} {Params : Type} [Te
         let _ ← Tensor.clipGradNorm tensor maxNorm
         pure tensor) params
       pure ())
-    : IO (Params × MoleculeMuonState Params × (Tensor { device := device, shape := #[] } × Tensor { device := device, shape := #[] } × Tensor { device := device, shape := #[] } × Tensor { device := device, shape := #[] } × Tensor { device := device, shape := #[] })) := do
+    : IO (Params × MoleculeMuonState Params × (Tensor { dtype := .Float32, device := device, shape := #[] } × Tensor { dtype := .Float32, device := device, shape := #[] } × Tensor { dtype := .Float32, device := device, shape := #[] } × Tensor { dtype := .Float32, device := device, shape := #[] } × Tensor { dtype := .Float32, device := device, shape := #[] })) := do
   let params ← TensorStruct.makeLeafParams params
   TensorStruct.zeroGrads params
   let (coordPred, labelLogits, splitLogits, delLogits) ←
@@ -513,7 +516,7 @@ def trainStepMoleculeMuonCoreT {batch maxLen vocab : UInt64} {Params : Type} [Te
 
 def trainStepMoleculeMuon {maxLen vocab : UInt64} {Params : Type} [TensorStruct Params]
     (cfg : BranchingTrainConfig)
-    (model : BranchingMoleculeModel (device := device) maxLen vocab Params)
+    (model : BranchingMoleculeModel (dtype := dtype) (device := device) maxLen vocab Params)
     (params : Params)
     (optState : MoleculeMuonState Params)
     (result : BranchingBridgeResult MoleculeAtom)
@@ -527,7 +530,6 @@ def trainStepMoleculeMuon {maxLen vocab : UInt64} {Params : Type} [TensorStruct 
         pure tensor) params
       pure ())
     (timePhases : Bool := false)
-    (bf16 : Bool := false)
     : IO (Params × MoleculeMuonState Params × BranchingMoleculeLossReport) := do
   let t0 ← IO.monoMsNow
   let params ← TensorStruct.makeLeafParams params
@@ -535,7 +537,7 @@ def trainStepMoleculeMuon {maxLen vocab : UInt64} {Params : Type} [TensorStruct 
   if cfg.maxLen != maxLen then throw <| IO.userError "BranchingFlows model/config maxLen mismatch"
   let ⟨batch, packedCpu⟩ ← packBranchingMolecule { cfg with maxLen := maxLen } result labelDFM
   let packedDev := packedCpu.toDevice device
-  let packed := if bf16 then packedDev.castBFloat16 else packedDev
+  let packed ← packedDev.castDType dtype
   if timePhases then torch.cuda_synchronize
   let t1 ← IO.monoMsNow
   let (coordPred, labelLogits, splitLogits, delLogits) ←
@@ -562,17 +564,16 @@ def trainStepMoleculeMuon {maxLen vocab : UInt64} {Params : Type} [TensorStruct 
 
 def evalMoleculeLoss {maxLen vocab : UInt64} {Params : Type} [TensorStruct Params]
     (cfg : BranchingTrainConfig)
-    (model : BranchingMoleculeModel (device := device) maxLen vocab Params)
+    (model : BranchingMoleculeModel (dtype := dtype) (device := device) maxLen vocab Params)
     (params : Params)
     (result : BranchingBridgeResult MoleculeAtom)
     (labelDFM : Option DistNoisyDiscreteConfig := none)
-    (bf16 : Bool := false)
     : IO BranchingMoleculeLossReport := do
   let params := TensorStruct.detach params
   if cfg.maxLen != maxLen then throw <| IO.userError "BranchingFlows model/config maxLen mismatch"
   let ⟨batch, packedCpu⟩ ← packBranchingMolecule { cfg with maxLen := maxLen } result labelDFM
   let packedDev := packedCpu.toDevice device
-  let packed := if bf16 then packedDev.castBFloat16 else packedDev
+  let packed ← packedDev.castDType dtype
   let (coordPred, labelLogits, splitLogits, delLogits) ←
     model.forward (batch := batch) params packed.coord packed.label packed.t packed.padmask
   let (_, report) :=

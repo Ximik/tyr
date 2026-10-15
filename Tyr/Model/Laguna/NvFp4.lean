@@ -55,10 +55,10 @@ private def e2m1LutHi : Tensor { device := .CPU, shape := #[256], dtype := .Floa
       (i.e. one global scale per leading slice)
 
     Returns BF16 tensor of runtime shape `[lead, out, in]`. -/
-private def dequantCore
+private def dequantCore {pd sd : DType}
     (lead outFeatures inFeatures : UInt64)
-    (packed : Tensor { device := device, shape := #[lead, outFeatures, inFeatures / 2] })
-    (scales : Tensor { device := device, shape := #[lead, outFeatures, inFeatures / 16] })
+    (packed : Tensor { device := device, shape := #[lead, outFeatures, inFeatures / 2], dtype := pd })
+    (scales : Tensor { device := device, shape := #[lead, outFeatures, inFeatures / 16], dtype := sd })
     (globalB : Tensor { device := device, shape := #[lead, 1, 1, 1], dtype := .Float32 })
     : IO (Tensor { device := device, shape := #[lead, outFeatures, inFeatures], dtype := .BFloat16 }) := do
   if inFeatures % 16 != 0 then
@@ -99,8 +99,8 @@ def dequantMatrix {ps ss gs : Shape} {pd sd gd : DType}
   if gs != #[] && gs != #[1] then
     throw <| IO.userError s!"nvfp4: global scale must be scalar or [1], got {gs}"
   let globalB := globalScale.toFloat32.reshapeChecked #[1, 1, 1, 1]
-  let packed3 := packed.forgetDType.reshapeChecked #[1, outFeatures, inFeatures / 2]
-  let scales3 := scales.forgetDType.reshapeChecked #[1, outFeatures, inFeatures / 16]
+  let packed3 := packed.reshapeChecked #[1, outFeatures, inFeatures / 2]
+  let scales3 := scales.reshapeChecked #[1, outFeatures, inFeatures / 16]
   let out3 ← dequantCore 1 outFeatures inFeatures packed3 scales3 globalB
   pure (out3.reshapeChecked #[outFeatures, inFeatures])
 
@@ -114,7 +114,7 @@ def dequantBank {ps ss gs : Shape} {pd sd gd : DType}
   checkShape "global scale" globalScale #[numExperts]
   let globalB := globalScale.toFloat32.reshapeChecked #[numExperts, 1, 1, 1]
   dequantCore numExperts outFeatures inFeatures
-    (packed.forgetDType.reshapeChecked #[numExperts, outFeatures, inFeatures / 2])
-    (scales.forgetDType.reshapeChecked #[numExperts, outFeatures, inFeatures / 16]) globalB
+    (packed.reshapeChecked #[numExperts, outFeatures, inFeatures / 2])
+    (scales.reshapeChecked #[numExperts, outFeatures, inFeatures / 16]) globalB
 
 end torch.laguna.nvfp4

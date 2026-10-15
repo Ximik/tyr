@@ -498,8 +498,8 @@ private def resolveRuntimeDevice : IO Device := do
   let requested := (← IO.getEnv "TYR_DEVICE").map String.toLower
   match requested with
   | some "cpu" => pure Device.CPU
-  | some "cuda" => pure (Device.CUDA 0)
-  | some "mps" => pure Device.MPS
+  | some "cuda" => Device.cuda 0
+  | some "mps" => Device.mps
   | some "auto" => getBestDevice
   | some _ => getBestDevice
   | none => getBestDevice
@@ -518,9 +518,9 @@ def runEndToEnd (args : Args) : IO Unit := do
     match bridgeCfgBase.deviceMap with
     | some _ => bridgeCfgBase
     | none =>
-        match targetDevice with
-        | Device.MPS => { bridgeCfgBase with deviceMap := some "mps" }
-        | Device.CUDA _ => { bridgeCfgBase with deviceMap := some "cuda" }
+        match targetDevice.kind with
+        | DeviceKind.MPS => { bridgeCfgBase with deviceMap := some "mps" }
+        | DeviceKind.CUDA _ => { bridgeCfgBase with deviceMap := some "cuda" }
         | _ => bridgeCfgBase
 
   IO.println "=== Qwen3-TTS End-to-End (Lean) ==="
@@ -643,7 +643,7 @@ def runEndToEnd (args : Args) : IO Unit := do
           IO.println s!"Loading Lean speech-tokenizer decoder from {speechTokenizerDir}..."
           let dec ← SpeechTokenizer12HzDecoder.loadFromDir speechTokenizerDir targetDevice
           ensureParentDir wavPath
-          Tensor.wavBegin wavPath dec.outputSampleRate
+          Tensor.wavBegin wavPath dec.2.outputSampleRate
           pure (some dec)
         catch e =>
           usePythonDecodeAfterStream := !args.skipDecode
@@ -744,7 +744,7 @@ def runEndToEnd (args : Args) : IO Unit := do
             | some d => expandHome d
             | none => pure s!"{modelDir}/speech_tokenizer"
           IO.println s!"Loading Lean speech-tokenizer decoder from {speechTokenizerDir}..."
-          let speechDecoder ← SpeechTokenizer12HzDecoder.loadFromDir speechTokenizerDir targetDevice
+          let ⟨_, speechDecoder⟩ ← SpeechTokenizer12HzDecoder.loadFromDir speechTokenizerDir targetDevice
           let trimmed16 : Tensor { shape := #[codeLen, 16], dtype := .Int64, device := targetDevice } := Tensor.reshapeChecked trimmed #[codeLen, 16]
           if args.streamingDecode then
             speechDecoder.decodeFrameMajorChunkedToWav

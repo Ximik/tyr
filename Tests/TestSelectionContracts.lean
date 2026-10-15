@@ -47,7 +47,7 @@ example (_complex : Tensor ⟨#[1, 1, 2], .Complex64, .CPU⟩)
   let (values, topIndices) ← checked (Tensor.topKLast2d? x 2)
   LeanTest.assertEqual (← values.toFloatArray) #[4, 2, 5, 3]
   LeanTest.assertEqual (← topIndices.toFloatArray) #[1, 2, 0, 1]
-  let dynamic := (x.castDType .Float64).forgetDType
+  let dynamic := (x.castDType .Float64)
   let (dynamicValues, _) ← checked (Tensor.topKLast2d? dynamic 2)
   LeanTest.assertEqual dynamicValues.raw.dtype .Float64
   let (empty, emptyIndices) ← checked (Tensor.topKLast2d? (Tensor.zeros #[2, 0]) 0)

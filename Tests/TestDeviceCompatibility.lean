@@ -5,133 +5,130 @@ open torch
 
 namespace Tests.TestDeviceCompatibility
 
--- Known placement conflicts must fail before allocating a native tensor.
-example (_cpu : Tensor ⟨#[2], .Float32, .CPU⟩)
-    (_cuda : Tensor ⟨#[2], .Float32, (.CUDA 0)⟩) : True := by
+-- Unrelated acquired placements require equality evidence before tensor operations.
+example {cuda : Device} (_cpu : Tensor ⟨#[2], .Float32, .CPU⟩)
+    (_cuda : Tensor ⟨#[2], .Float32, cuda⟩) : True := by
   fail_if_success have _ := _cpu.addB _cuda
   fail_if_success have _ := _cuda.subB _cpu
   fail_if_success have _ := _cpu.mulB _cuda
   fail_if_success have _ := _cuda.divB _cpu
   trivial
 
-example (_cuda0 : Tensor ⟨#[2], .Float32, (.CUDA 0)⟩)
-    (_cuda1 : Tensor ⟨#[2], .Float32, (.CUDA 1)⟩)
-    (_mps : Tensor ⟨#[2], .Float32, .MPS⟩) : True := by
+example {cuda0 cuda1 mps : Device}
+    (_cuda0 : Tensor ⟨#[2], .Float32, cuda0⟩)
+    (_cuda1 : Tensor ⟨#[2], .Float32, cuda1⟩)
+    (_mps : Tensor ⟨#[2], .Float32, mps⟩) : True := by
   fail_if_success have _ := _cuda0.addB _cuda1
   fail_if_success have _ := _cuda0.mulB _mps
   trivial
 
--- Rank zero is significant: CPU vectors and accelerator scalars cannot use
--- the exception, nor can scalars from two different accelerator devices.
-example (_cpuVector : Tensor ⟨#[1], .Float32, .CPU⟩)
-    (_cudaScalar : Tensor ⟨#[], .Float32, (.CUDA 0)⟩)
-    (_mpsScalar : Tensor ⟨#[], .Float32, .MPS⟩) : True := by
+-- A CPU vector does not get the rank-zero exception.
+example {cuda mps : Device} (_cpuVector : Tensor ⟨#[1], .Float32, .CPU⟩)
+    (_cudaScalar : Tensor ⟨#[], .Float32, cuda⟩)
+    (_mpsScalar : Tensor ⟨#[], .Float32, mps⟩) : True := by
   fail_if_success have _ := _cpuVector.addB _cudaScalar
   fail_if_success have _ := _mpsScalar.addB _cpuVector
   fail_if_success have _ := _cudaScalar.addB _mpsScalar
   trivial
 
-example (cpu : Tensor ⟨#[], .Float32, .CPU⟩)
-    (cuda : Tensor ⟨#[2], .Float32, (.CUDA 0)⟩) :
-    Tensor ⟨#[2], .Float32, (.CUDA 0)⟩ := cpu.addB cuda
+example {device : Device} (cpu : Tensor ⟨#[], .Float32, .CPU⟩)
+    (other : Tensor ⟨#[2], .Float32, device⟩) :
+    Tensor ⟨#[2], .Float32, device⟩ := cpu.addB other
 
-example (cpu : Tensor ⟨#[], .Float32, .CPU⟩)
-    (cuda : Tensor ⟨#[2], .Float32, (.CUDA 0)⟩) :
-    Tensor ⟨#[2], .Float32, (.CUDA 0)⟩ := cuda.mulB cpu
+example {device : Device} (cpu : Tensor ⟨#[], .Float32, .CPU⟩)
+    (other : Tensor ⟨#[2], .Float32, device⟩) :
+    Tensor ⟨#[2], .Float32, device⟩ := other.mulB cpu
 
-example (cpu : Tensor ⟨#[], .Float32, .CPU⟩)
-    (mps : Tensor ⟨#[], .Float32, .MPS⟩) :
-    Tensor ⟨#[], .Float32, .MPS⟩ := mps.addB cpu
+example {device : Device} (cpu : Tensor ⟨#[], .Float32, .CPU⟩)
+    (other : Tensor ⟨#[], .Float32, device⟩) :
+    Tensor ⟨#[], .Float32, device⟩ := by
+  rcases device with ⟨kind, valid⟩
+  cases kind <;> exact other.addB cpu
 
-example {index : UInt64} (cpu : Tensor ⟨#[], .Float32, .CPU⟩)
-    (cuda : Tensor ⟨#[], .Float32, (.CUDA index)⟩) :
-    Tensor ⟨#[], .Float32, (.CUDA index)⟩ := cuda.addB cpu
+example {device : Device} (left right : Tensor ⟨#[], .Float32, device⟩) :
+    Tensor ⟨#[], .Float32, device⟩ := by
+  rcases device with ⟨kind, valid⟩
+  cases kind <;> exact left.addB right
 
-example {index : UInt64} (left right : Tensor ⟨#[], .Float32, (.CUDA index)⟩) :
-    Tensor ⟨#[], .Float32, (.CUDA index)⟩ := left.addB right
-
--- Shared placement is valid even when its Device value is selected at runtime.
 example {leftShape rightShape : Shape} {leftDType rightDType : DType}
     {device : Device} : Device.PointwiseCompatible
     ⟨leftShape, leftDType, device⟩ ⟨rightShape, rightDType, device⟩ := inferInstance
 example {spec : StaticSpec} : Device.PointwiseCompatible spec spec := inferInstance
 
-example : True := by
+example {_left _right : Device} : True := by
   fail_if_success
-    have _ : Device.SameDeviceCompatible
-      (.CPU) ((.CUDA 0)) := inferInstance
+    have _ : Device.SameDeviceCompatible .CPU _left := inferInstance
   fail_if_success
-    have _ : Device.SameDeviceCompatible
-      ((.CUDA 0)) ((.CUDA 1)) := inferInstance
+    have _ : Device.SameDeviceCompatible _left _right := inferInstance
   fail_if_success
     have _ : Device.PointwiseCompatible
-      ⟨#[1], .Float32, .CPU⟩ ⟨#[], .Float32, .MPS⟩ := inferInstance
+      ⟨#[1], .Float32, .CPU⟩ ⟨#[], .Float32, _right⟩ := inferInstance
   trivial
 
-private def expectDevice (result : Except String Device) (expected : Device) : IO Unit := do
+private def expectDeviceKind (result : Except String DeviceKind) (expected : DeviceKind) : IO Unit := do
   match result with
   | .ok actual =>
       LeanTest.assertTrue (actual == expected)
         s!"Expected device {expected.render}, got {actual.render}"
   | .error message => LeanTest.fail message
 
-private def expectMismatch (result : Except String Device) : IO Unit := do
+private def expectMismatch (result : Except String DeviceKind) : IO Unit := do
   match result with
   | .ok device => LeanTest.fail s!"Unexpectedly accepted device {device.render}"
   | .error _ => pure ()
 
 /-- These are metadata checks, not accelerator execution tests. No CUDA or MPS
 tensor is allocated by this test. -/
-@[test] def testPointwiseDeviceMetadata : IO Unit := do
-  for device in #[Device.CPU, .MPS, .CUDA 0, .CUDA 1] do
-    expectDevice (Device.pointwiseResult? #[2, 1] device #[3] device) device
-    expectDevice (Device.pointwiseResult? #[] .CPU #[2] device) device
-    expectDevice (Device.pointwiseResult? #[2] device #[] .CPU) device
-    expectDevice (Device.pointwiseResult? #[] .CPU #[] device) device
-    expectDevice (Device.pointwiseResult? #[] device #[] .CPU) device
-  for (left, right) in #[(Device.CPU, Device.CUDA 0), (.CPU, .MPS),
+@[test] def testPointwiseDeviceKindMetadata : IO Unit := do
+  for device in #[DeviceKind.CPU, .MPS, .CUDA 0, .CUDA 1] do
+    expectDeviceKind (DeviceKind.pointwiseResult? #[2, 1] device #[3] device) device
+    expectDeviceKind (DeviceKind.pointwiseResult? #[] .CPU #[2] device) device
+    expectDeviceKind (DeviceKind.pointwiseResult? #[2] device #[] .CPU) device
+    expectDeviceKind (DeviceKind.pointwiseResult? #[] .CPU #[] device) device
+    expectDeviceKind (DeviceKind.pointwiseResult? #[] device #[] .CPU) device
+  for (left, right) in #[(DeviceKind.CPU, DeviceKind.CUDA 0), (.CPU, .MPS),
       (.CUDA 0, .CUDA 1), (.CUDA 0, .MPS)] do
-    expectMismatch (Device.pointwiseResult? #[2] left #[2] right)
-    expectMismatch (Device.pointwiseResult? #[2] right #[2] left)
+    expectMismatch (DeviceKind.pointwiseResult? #[2] left #[2] right)
+    expectMismatch (DeviceKind.pointwiseResult? #[2] right #[2] left)
   -- A size-one or empty CPU vector is still not a zero-dimensional scalar.
-  expectMismatch (Device.pointwiseResult? #[1] .CPU #[2] (.CUDA 0))
-  expectMismatch (Device.pointwiseResult? #[0] .CPU #[0] .MPS)
-  expectMismatch (Device.pointwiseResult? #[2] .CPU #[] (.CUDA 0))
-  expectMismatch (Device.pointwiseResult? #[] .MPS #[2] .CPU)
-  expectMismatch (Device.pointwiseResult? #[] (.CUDA 0) #[] (.CUDA 1))
-  expectMismatch (Device.pointwiseResult? #[] .MPS #[] (.CUDA 0))
+  expectMismatch (DeviceKind.pointwiseResult? #[1] .CPU #[2] (.CUDA 0))
+  expectMismatch (DeviceKind.pointwiseResult? #[0] .CPU #[0] .MPS)
+  expectMismatch (DeviceKind.pointwiseResult? #[2] .CPU #[] (.CUDA 0))
+  expectMismatch (DeviceKind.pointwiseResult? #[] .MPS #[2] .CPU)
+  expectMismatch (DeviceKind.pointwiseResult? #[] (.CUDA 0) #[] (.CUDA 1))
+  expectMismatch (DeviceKind.pointwiseResult? #[] .MPS #[] (.CUDA 0))
 
-@[test] def testStrictDeviceMetadata : IO Unit := do
-  for device in #[Device.CPU, .MPS, .CUDA 0, .CUDA 1] do
-    expectDevice (Device.sameResult? device device) device
-  for (left, right) in #[(Device.CPU, Device.CUDA 0), (.CPU, .MPS),
+@[test] def testStrictDeviceKindMetadata : IO Unit := do
+  for device in #[DeviceKind.CPU, .MPS, .CUDA 0, .CUDA 1] do
+    expectDeviceKind (DeviceKind.sameResult? device device) device
+  for (left, right) in #[(DeviceKind.CPU, DeviceKind.CUDA 0), (.CPU, .MPS),
       (.CUDA 0, .CUDA 1), (.CUDA 0, .MPS)] do
-    expectMismatch (Device.sameResult? left right)
-    expectMismatch (Device.sameResult? right left)
+    expectMismatch (DeviceKind.sameResult? left right)
+    expectMismatch (DeviceKind.sameResult? right left)
 
 /-- `where` has a separate rule: every scalar, including an accelerator scalar,
 can move to the first non-CPU operand's device. The operand order matters. -/
-@[test] def testSelectionDeviceMetadata : IO Unit := do
-  expectDevice (Device.selectionResult? #[] .CPU #[] .CPU #[] .CPU) .CPU
-  for device in #[Device.MPS, .CUDA 0, .CUDA 1] do
-    expectDevice (Device.selectionResult? #[2] device #[2] device #[2] device) device
-    expectDevice (Device.selectionResult? #[] .CPU #[2] device #[2] device) device
-    expectDevice (Device.selectionResult? #[2] device #[] .CPU #[2] device) device
-    expectDevice (Device.selectionResult? #[2] device #[2] device #[] .CPU) device
-    expectDevice (Device.selectionResult? #[] device #[] .CPU #[] .CPU) device
-    expectDevice (Device.selectionResult? #[] .CPU #[] device #[] .CPU) device
-    expectDevice (Device.selectionResult? #[] .CPU #[] .CPU #[] device) device
+@[test] def testSelectionDeviceKindMetadata : IO Unit := do
+  expectDeviceKind (DeviceKind.selectionResult? #[] .CPU #[] .CPU #[] .CPU) .CPU
+  for device in #[DeviceKind.MPS, .CUDA 0, .CUDA 1] do
+    expectDeviceKind (DeviceKind.selectionResult? #[2] device #[2] device #[2] device) device
+    expectDeviceKind (DeviceKind.selectionResult? #[] .CPU #[2] device #[2] device) device
+    expectDeviceKind (DeviceKind.selectionResult? #[2] device #[] .CPU #[2] device) device
+    expectDeviceKind (DeviceKind.selectionResult? #[2] device #[2] device #[] .CPU) device
+    expectDeviceKind (DeviceKind.selectionResult? #[] device #[] .CPU #[] .CPU) device
+    expectDeviceKind (DeviceKind.selectionResult? #[] .CPU #[] device #[] .CPU) device
+    expectDeviceKind (DeviceKind.selectionResult? #[] .CPU #[] .CPU #[] device) device
   -- Different accelerator indices are allowed for scalar relocation by where,
   -- although the same pair is invalid for ordinary binary pointwise arithmetic.
-  expectDevice (Device.selectionResult? #[] (.CUDA 0) #[] (.CUDA 1) #[] .CPU) (.CUDA 0)
-  expectDevice (Device.selectionResult? #[] .CPU #[] (.CUDA 1) #[] (.CUDA 0)) (.CUDA 1)
-  expectDevice (Device.selectionResult? #[] .MPS #[] (.CUDA 0) #[] .CPU) .MPS
-  expectMismatch (Device.pointwiseResult? #[] (.CUDA 0) #[] (.CUDA 1))
+  expectDeviceKind (DeviceKind.selectionResult? #[] (.CUDA 0) #[] (.CUDA 1) #[] .CPU) (.CUDA 0)
+  expectDeviceKind (DeviceKind.selectionResult? #[] .CPU #[] (.CUDA 1) #[] (.CUDA 0)) (.CUDA 1)
+  expectDeviceKind (DeviceKind.selectionResult? #[] .MPS #[] (.CUDA 0) #[] .CPU) .MPS
+  expectMismatch (DeviceKind.pointwiseResult? #[] (.CUDA 0) #[] (.CUDA 1))
   -- Non-scalars cannot relocate, including a one-element vector.
-  expectMismatch (Device.selectionResult? #[2] (.CUDA 0) #[2] (.CUDA 1) #[2] (.CUDA 0))
-  expectMismatch (Device.selectionResult? #[2] .CPU #[2] (.CUDA 0) #[2] (.CUDA 0))
-  expectMismatch (Device.selectionResult? #[2] .MPS #[1] .CPU #[2] .MPS)
-  expectMismatch (Device.selectionResult? #[] (.CUDA 0) #[2] (.CUDA 1) #[] .CPU)
+  expectMismatch (DeviceKind.selectionResult? #[2] (.CUDA 0) #[2] (.CUDA 1) #[2] (.CUDA 0))
+  expectMismatch (DeviceKind.selectionResult? #[2] .CPU #[2] (.CUDA 0) #[2] (.CUDA 0))
+  expectMismatch (DeviceKind.selectionResult? #[2] .MPS #[1] .CPU #[2] .MPS)
+  expectMismatch (DeviceKind.selectionResult? #[] (.CUDA 0) #[2] (.CUDA 1) #[] .CPU)
 
 @[test] def testCPUScalarPointwiseValues : IO Unit := do
   let scalar := (Tensor.full #[] 2).to .CPU

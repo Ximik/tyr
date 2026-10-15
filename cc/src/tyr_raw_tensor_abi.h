@@ -6,10 +6,6 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-// Except String RawTensor; consumes shape and device, always nontrainable.
-lean_object* lean_torch_zeros_checked(lean_object*, lean_object*);
-lean_object* lean_torch_ones_checked(lean_object*, lean_object*);
-
 // Basic metadata calls consume their legacy shape argument and borrow the tensor.
 lean_object* lean_torch_to_string(lean_object*, lean_object*);
 lean_object* lean_torch_get_shape(lean_object*, lean_object*);
@@ -18,6 +14,7 @@ lean_object* lean_torch_get_device_enum(lean_object*, lean_object*);
 lean_object* lean_torch_get_device(lean_object*, lean_object*);
 lean_object* lean_torch_get_values(lean_object*, lean_object*, uint64_t);
 lean_object* lean_torch_get_stats(lean_object*, lean_object*);
+lean_object* lean_torch_native_invariant_failure(lean_object*);
 
 lean_object* lean_torch_slice_along_dim(lean_object*, lean_object*, uint64_t, uint64_t, uint64_t);
 lean_object* lean_torch_clamp_float(lean_object*, lean_object*, double, double);
@@ -26,7 +23,6 @@ lean_object* lean_torch_matrix_exp(uint64_t, lean_object*);
 lean_object* lean_torch_matrix_log(uint64_t, lean_object*);
 lean_object* lean_torch_inv(uint64_t, lean_object*);
 lean_object* lean_torch_eye(uint64_t, uint8_t);
-lean_object* lean_torch_eye_checked(uint64_t);
 lean_object* lean_torch_qr(uint64_t, uint64_t, lean_object*);
 lean_object* lean_torch_qr_reduced(uint64_t, uint64_t, lean_object*);
 lean_object* lean_torch_svd(uint64_t, uint64_t, lean_object*);

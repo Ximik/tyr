@@ -125,9 +125,10 @@ private def uiPrintInline (s : String) : IO Unit := do
 
 private def transcribeWavStreamed
     {device : torch.Device}
+    {dtype : torch.ExactDType}
     (modelDir : String)
     {cfg : Qwen3ASRConfig}
-    (model : Qwen3ASRForConditionalGeneration (device := device) cfg)
+    (model : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype.val) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (pre : PreprocessorConfig)
     (wavPath : String)
@@ -151,6 +152,7 @@ private def transcribeWavStreamed
       pure decodeMode
   let sm : StreamModel := {
     device := device
+    dtype := dtype
     cfg := cfg
     model := model
     tok := tok
@@ -216,7 +218,7 @@ def runMain (argv : List String) : IO UInt32 := do
   let cfg ← Qwen3ASRConfig.loadFromPretrainedDir modelDir
   let tok ← tokenizer.qwen3.loadTokenizer modelDir
   let pre ← PreprocessorConfig.loadFromPretrainedDir modelDir
-  let ⟨_device, model⟩ ← Qwen3ASRForConditionalGeneration.loadSharded modelDir cfg
+  let ⟨_device, dtype, model⟩ ← Qwen3ASRForConditionalGeneration.loadSharded modelDir cfg
   IO.println s!"Qwen3-ASR target device: {repr model.thinker.lmHead.device}"
   let forcedAligner ←
     match args.alignerSource with
@@ -227,6 +229,7 @@ def runMain (argv : List String) : IO UInt32 := do
   let out ←
     if args.streamOutput && !args.returnTimeStamps && forcedAligner.isNone then
       transcribeWavStreamed
+        (dtype := dtype)
         modelDir
         model
         tok

@@ -17,9 +17,9 @@ open torch
 open torch.branching
 
 structure MoleculeToyParams (vocab : UInt64) where
-  coordW : Tensor { shape := #[3, 3], device := .CPU }
-  coordB : Tensor { shape := #[3], device := .CPU }
-  labelTable : Tensor { shape := #[vocab, vocab], device := .CPU }
+  coordW : Tensor { dtype := .Float32, shape := #[3, 3], device := .CPU }
+  coordB : Tensor { dtype := .Float32, shape := #[3], device := .CPU }
+  labelTable : Tensor { dtype := .Float32, shape := #[vocab, vocab], device := .CPU }
   deriving TensorStruct
 
 namespace MoleculeToyParams

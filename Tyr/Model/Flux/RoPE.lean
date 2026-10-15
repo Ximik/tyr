@@ -2,7 +2,7 @@ import Tyr.Model.Flux.TypedOps
 
 namespace torch.flux
 
-variable {device : Device}
+variable {device : Device} {dtype : DType}
 private def axisIds {batch seq : UInt64} (ids : Tensor { device := device, shape := #[batch, seq, 4], dtype := .Int64 }) (axis : UInt64) : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 } :=
   (sliceTyped ids 2 axis 1).reshapeChecked #[batch, seq]
 
@@ -29,7 +29,7 @@ def ropeEmbed {batch seq head_dim : UInt64}
     : Tensor { device := device, shape := #[batch, 1, seq, head_dim / 2, 2, 2], dtype := .Float32 } :=
   if axes_dims.size != 4 || axes_dims.any (fun d => d % 2 != 0) ||
       axes_dims.foldl (fun n d => n + d.toNat) 0 != head_dim.toNat || theta == 0 then
-    panic! "Flux RoPE requires four even axis dimensions summing to head_dim and a positive theta"
+    nativeInvariantFailure "Flux RoPE requires four even axis dimensions summing to head_dim and a positive theta"
   else
     let d0 := axes_dims[0]!
     let d1 := axes_dims[1]!
@@ -44,9 +44,9 @@ def ropeEmbed {batch seq head_dim : UInt64}
 
 /-- Apply rotary matrices in Float32 and restore the activation dtype. -/
 def applyRope {batch seq n_head head_dim : UInt64}
-    (x : Tensor { device := device, shape := #[batch, seq, n_head, head_dim] })
+    (x : Tensor { dtype := dtype, device := device, shape := #[batch, seq, n_head, head_dim] })
     (pe : Tensor { device := device, shape := #[batch, 1, seq, head_dim / 2, 2, 2], dtype := .Float32 })
-    : Tensor { device := device, shape := #[batch, seq, n_head, head_dim] } :=
+    : Tensor { dtype := dtype, device := device, shape := #[batch, seq, n_head, head_dim] } :=
   let xf := (transposeAttention x).toFloat32.reshapeChecked #[batch, n_head, seq, head_dim / 2, 1, 2]
   let x0 := Tensor.expand ((sliceTyped xf 5 0 1).reshapeChecked #[batch, n_head, seq, head_dim / 2, 1]) #[batch, n_head, seq, head_dim / 2, 2]
   let x1 := Tensor.expand ((sliceTyped xf 5 1 1).reshapeChecked #[batch, n_head, seq, head_dim / 2, 1]) #[batch, n_head, seq, head_dim / 2, 2]

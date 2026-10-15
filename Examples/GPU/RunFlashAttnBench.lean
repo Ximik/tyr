@@ -25,6 +25,8 @@ namespace Examples.GPU
 
 open Lean (Json)
 open torch
+
+variable {device : Device}
 open Examples.GPU.FlashBenchReference
 open Tyr.GPU.Ops.FlashAttn
 
@@ -579,9 +581,9 @@ private def benchmarkAction (warmup iters repeats : Nat) (action : IO Unit) : IO
 
 private def sdpaEqualRef
     {batch heads seq headDim : UInt64}
-    (qBase kBase vBase dOBase : Tensor { shape := #[batch, heads, seq, headDim], dtype := .BFloat16, device := (.CUDA 0) })
+    (qBase kBase vBase dOBase : Tensor { shape := #[batch, heads, seq, headDim], dtype := .BFloat16, device := device })
     (isCausal : Bool)
-    : IO (Tensor { shape := #[batch, heads, seq, headDim], dtype := .BFloat16, device := (.CUDA 0) } × Tensor { shape := #[batch, heads, seq, headDim], dtype := .Float32, device := (.CUDA 0) } × Tensor { shape := #[batch, heads, seq, headDim], dtype := .Float32, device := (.CUDA 0) } × Tensor { shape := #[batch, heads, seq, headDim], dtype := .Float32, device := (.CUDA 0) }) := do
+    : IO (Tensor { shape := #[batch, heads, seq, headDim], dtype := .BFloat16, device := device } × Tensor { shape := #[batch, heads, seq, headDim], dtype := .Float32, device := device } × Tensor { shape := #[batch, heads, seq, headDim], dtype := .Float32, device := device } × Tensor { shape := #[batch, heads, seq, headDim], dtype := .Float32, device := device }) := do
   let q ← makeLeaf qBase
   let k ← makeLeaf kBase
   let v ← makeLeaf vBase
@@ -592,11 +594,11 @@ private def sdpaEqualRef
 
 private def sdpaGqaRef
     {batch qHeads kvHeads seq headDim : UInt64}
-    (qBase : Tensor { shape := #[batch, qHeads, seq, headDim], dtype := .BFloat16, device := (.CUDA 0) })
-    (kBase vBase : Tensor { shape := #[batch, kvHeads, seq, headDim], dtype := .BFloat16, device := (.CUDA 0) })
-    (dOBase : Tensor { shape := #[batch, qHeads, seq, headDim], dtype := .BFloat16, device := (.CUDA 0) })
+    (qBase : Tensor { shape := #[batch, qHeads, seq, headDim], dtype := .BFloat16, device := device })
+    (kBase vBase : Tensor { shape := #[batch, kvHeads, seq, headDim], dtype := .BFloat16, device := device })
+    (dOBase : Tensor { shape := #[batch, qHeads, seq, headDim], dtype := .BFloat16, device := device })
     (isCausal : Bool)
-    : IO (Tensor { shape := #[batch, qHeads, seq, headDim], dtype := .BFloat16, device := (.CUDA 0) } × Tensor { shape := #[batch, qHeads, seq, headDim], dtype := .Float32, device := (.CUDA 0) } × Tensor { shape := #[batch, kvHeads, seq, headDim], dtype := .Float32, device := (.CUDA 0) } × Tensor { shape := #[batch, kvHeads, seq, headDim], dtype := .Float32, device := (.CUDA 0) }) := do
+    : IO (Tensor { shape := #[batch, qHeads, seq, headDim], dtype := .BFloat16, device := device } × Tensor { shape := #[batch, qHeads, seq, headDim], dtype := .Float32, device := device } × Tensor { shape := #[batch, kvHeads, seq, headDim], dtype := .Float32, device := device } × Tensor { shape := #[batch, kvHeads, seq, headDim], dtype := .Float32, device := device }) := do
   let q ← makeLeaf qBase
   let k ← makeLeaf kBase
   let v ← makeLeaf vBase
@@ -607,9 +609,9 @@ private def sdpaGqaRef
 
 private def tyrEqualOnce
     {batch heads seq headDim : UInt64}
-    (qBase kBase vBase dOBase : Tensor { shape := #[batch, heads, seq, headDim], dtype := .BFloat16, device := (.CUDA 0) })
+    (qBase kBase vBase dOBase : Tensor { shape := #[batch, heads, seq, headDim], dtype := .BFloat16, device := device })
     (isCausal : Bool)
-    : IO (DispatchRoute × Tensor { shape := #[batch, heads, seq, headDim], dtype := .BFloat16, device := (.CUDA 0) } × Tensor { shape := #[batch, heads, seq, headDim], dtype := .Float32, device := (.CUDA 0) } × Tensor { shape := #[batch, heads, seq, headDim], dtype := .Float32, device := (.CUDA 0) } × Tensor { shape := #[batch, heads, seq, headDim], dtype := .Float32, device := (.CUDA 0) }) := do
+    : IO (DispatchRoute × Tensor { shape := #[batch, heads, seq, headDim], dtype := .BFloat16, device := device } × Tensor { shape := #[batch, heads, seq, headDim], dtype := .Float32, device := device } × Tensor { shape := #[batch, heads, seq, headDim], dtype := .Float32, device := device } × Tensor { shape := #[batch, heads, seq, headDim], dtype := .Float32, device := device }) := do
   let q ← makeLeaf qBase
   let k ← makeLeaf kBase
   let v ← makeLeaf vBase
@@ -620,11 +622,11 @@ private def tyrEqualOnce
 
 private def tyrGqaOnce
     {batch qHeads kvHeads seq headDim : UInt64}
-    (qBase : Tensor { shape := #[batch, qHeads, seq, headDim], dtype := .BFloat16, device := (.CUDA 0) })
-    (kBase vBase : Tensor { shape := #[batch, kvHeads, seq, headDim], dtype := .BFloat16, device := (.CUDA 0) })
-    (dOBase : Tensor { shape := #[batch, qHeads, seq, headDim], dtype := .BFloat16, device := (.CUDA 0) })
+    (qBase : Tensor { shape := #[batch, qHeads, seq, headDim], dtype := .BFloat16, device := device })
+    (kBase vBase : Tensor { shape := #[batch, kvHeads, seq, headDim], dtype := .BFloat16, device := device })
+    (dOBase : Tensor { shape := #[batch, qHeads, seq, headDim], dtype := .BFloat16, device := device })
     (isCausal : Bool)
-    : IO (DispatchRoute × Tensor { shape := #[batch, qHeads, seq, headDim], dtype := .BFloat16, device := (.CUDA 0) } × Tensor { shape := #[batch, qHeads, seq, headDim], dtype := .Float32, device := (.CUDA 0) } × Tensor { shape := #[batch, kvHeads, seq, headDim], dtype := .Float32, device := (.CUDA 0) } × Tensor { shape := #[batch, kvHeads, seq, headDim], dtype := .Float32, device := (.CUDA 0) }) := do
+    : IO (DispatchRoute × Tensor { shape := #[batch, qHeads, seq, headDim], dtype := .BFloat16, device := device } × Tensor { shape := #[batch, qHeads, seq, headDim], dtype := .Float32, device := device } × Tensor { shape := #[batch, kvHeads, seq, headDim], dtype := .Float32, device := device } × Tensor { shape := #[batch, kvHeads, seq, headDim], dtype := .Float32, device := device }) := do
   let q ← makeLeaf qBase
   let k ← makeLeaf kBase
   let v ← makeLeaf vBase
@@ -634,15 +636,15 @@ private def tyrGqaOnce
   pure (route, out, (← Tensor.gradOf q).toFloat32, (← Tensor.gradOf k).toFloat32, (← Tensor.gradOf v).toFloat32)
 
 private def sdpaEqualForward {batch heads seq headDim : UInt64}
-    (qBase kBase vBase : Tensor { shape := #[batch, heads, seq, headDim], dtype := .BFloat16, device := (.CUDA 0) })
+    (qBase kBase vBase : Tensor { shape := #[batch, heads, seq, headDim], dtype := .BFloat16, device := device })
     (isCausal : Bool)
-    : Tensor { shape := #[batch, heads, seq, headDim], dtype := .BFloat16, device := (.CUDA 0) } :=
+    : Tensor { shape := #[batch, heads, seq, headDim], dtype := .BFloat16, device := device } :=
   Tensor.attentionGQA qBase kBase vBase isCausal
 
 private def tyrEqualForward {batch heads seq headDim : UInt64}
-    (qBase kBase vBase : Tensor { shape := #[batch, heads, seq, headDim], dtype := .BFloat16, device := (.CUDA 0) })
+    (qBase kBase vBase : Tensor { shape := #[batch, heads, seq, headDim], dtype := .BFloat16, device := device })
     (isCausal : Bool)
-    : DispatchRoute × Tensor { shape := #[batch, heads, seq, headDim], dtype := .BFloat16, device := (.CUDA 0) } :=
+    : DispatchRoute × Tensor { shape := #[batch, heads, seq, headDim], dtype := .BFloat16, device := device } :=
   flashAttnWithRoute qBase kBase vBase none isCausal none false
 
 private def runEqualHeadsFwdBwd
@@ -653,7 +655,7 @@ private def runEqualHeadsFwdBwd
     (jsonlOut? : Option System.FilePath)
     (emitJsonlStdout : Bool)
     : IO SummaryRow := do
-  let device := Device.CUDA 0
+  let device ← Device.cuda 0
   let qBase := (← Tensor.randn #[batch, heads, seq, headDim] false device).toBFloat16
   let kBase := (← Tensor.randn #[batch, heads, seq, headDim] false device).toBFloat16
   let vBase := (← Tensor.randn #[batch, heads, seq, headDim] false device).toBFloat16
@@ -767,7 +769,7 @@ private def runGqaFwdBwd
     (jsonlOut? : Option System.FilePath)
     (emitJsonlStdout : Bool)
     : IO SummaryRow := do
-  let device := Device.CUDA 0
+  let device ← Device.cuda 0
   let qBase := (← Tensor.randn #[batch, qHeads, seq, headDim] false device).toBFloat16
   let kBase := (← Tensor.randn #[batch, kvHeads, seq, headDim] false device).toBFloat16
   let vBase := (← Tensor.randn #[batch, kvHeads, seq, headDim] false device).toBFloat16
@@ -881,7 +883,7 @@ private def runEqualHeadsForwardOnly
     (jsonlOut? : Option System.FilePath)
     (emitJsonlStdout : Bool)
     : IO SummaryRow := do
-  let device := Device.CUDA 0
+  let device ← Device.cuda 0
   let qBase := (← Tensor.randn #[batch, heads, seq, headDim] false device).toBFloat16
   let kBase := (← Tensor.randn #[batch, heads, seq, headDim] false device).toBFloat16
   let vBase := (← Tensor.randn #[batch, heads, seq, headDim] false device).toBFloat16

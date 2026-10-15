@@ -34,7 +34,7 @@ structure PositiveTangent (m n : UInt64) (dtype : DType := .Float32)
 
 namespace PositiveTangent
 
-def zero (m n : UInt64) : PositiveTangent m n d dev := ⟨Tensor.zerosFor ⟨#[m, n], d, dev⟩⟩
+def zero [DType.ConstantSupported d dev] (m n : UInt64) : PositiveTangent m n d dev := ⟨Tensor.zerosFor ⟨#[m, n], d, dev⟩⟩
 def add (a b : PositiveTangent m n d dev) : PositiveTangent m n d dev := ⟨Tensor.Preserving.add a.vec b.vec⟩
 def smul (s : Float) (v : PositiveTangent m n d dev) : PositiveTangent m n d dev := ⟨Tensor.Preserving.mulScalar v.vec s⟩
 

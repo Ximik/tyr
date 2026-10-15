@@ -29,7 +29,7 @@ def init (in_dim out_dim : UInt64) (withBias : Bool := true) (device : Device :=
   let weight ← IO.ofExcept (Tensor.Preserving.mulScalar? w std)
   let weight ← Tensor.parameter weight
   let bias ← if withBias then do
-    let b ← Tensor.parameter (← Tensor.zerosIO #[out_dim] device)
+    let b ← Tensor.parameter (Tensor.zeros #[out_dim] (device := device))
     pure (some b)
   else
     pure none

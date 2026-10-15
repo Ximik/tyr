@@ -208,7 +208,7 @@ example (_a : Tensor ⟨#[2], .UInt16, .CPU⟩)
   trivial
 
 -- The homogeneous instances must not bypass missing promotion evidence.
-example (_a _b : Tensor { shape := #[2], device := .CPU }) : True := by
+example {dtype : DType} (_a _b : Tensor { shape := #[2], dtype, device := .CPU }) : True := by
   fail_if_success have _ := Tensor.add _a _b
   fail_if_success have _ := _a + _b
   fail_if_success have _ := _a.addB _b

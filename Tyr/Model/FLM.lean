@@ -84,7 +84,8 @@ def oneHot {batch seq vocab : UInt64} (tokens : Tensor { device := device, shape
 
 /-- Sample uniformly from the configured training time interval. -/
 def sampleTau (cfg : FlowConfig) (batch : UInt64) : IO (Tensor { device := device, shape := #[batch], dtype := .Float32 }) := do
-  let eps ← Tensor.uniformLike (← Tensor.zerosIO #[batch] device)
+  IO.ofExcept (Shape.validateAllocation #[batch])
+  let eps ← Tensor.uniformLike (Tensor.zeros #[batch] (device := device))
   pure (eps * (cfg.tMax - cfg.tMin) + cfg.tMin)
 
 /-- Continuous FLM corruption: `x_t = (1 - t) noise + t one_hot(x_1)`. -/
@@ -400,8 +401,9 @@ def diagonalLossGivenTau {batch seq vocab : UInt64} {Params : Type}
 
 /-- Sample off-diagonal PSD times with midpoint `u`. -/
 def samplePsdTimes (batch : UInt64) : IO (SemigroupTimes (device := device) batch) := do
-  let dTau ← Tensor.uniformLike (← Tensor.zerosIO #[batch] device)
-  let eps ← Tensor.uniformLike (← Tensor.zerosIO #[batch] device)
+  IO.ofExcept (Shape.validateAllocation #[batch])
+  let dTau ← Tensor.uniformLike (Tensor.zeros #[batch] (device := device))
+  let eps ← Tensor.uniformLike (Tensor.zeros #[batch] (device := device))
   let one := Tensor.onesLike dTau
   let tauS := eps * (one - dTau)
   let tauT := tauS + dTau

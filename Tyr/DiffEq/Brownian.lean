@@ -1123,7 +1123,7 @@ private def tensorPackLike {σ : StaticSpec} (_ref : Tensor σ) (vals : Array Fl
   let flat := Tensor.fromFloatArray vals
   match Tensor.ofRaw (σ := σ) (Tensor.reshapeChecked flat σ.shape).raw with
   | .ok t => t
-  | .error message => panic! s!"tensorPackLike: {message}"
+  | .error message => nativeInvariantFailure s!"tensorPackLike: {message}"
 
 instance {σ : StaticSpec} : VirtualBrownianTreeOps (Tensor σ) where
   increment path t0 t1 := Id.run do

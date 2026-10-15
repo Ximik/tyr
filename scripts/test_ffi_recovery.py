@@ -18,6 +18,7 @@ class RecoveryTests(unittest.TestCase):
         (self.root / "cc/src").mkdir(parents=True)
         self.write("Tyr/Basic.lean", "")
         self.write("Tyr/Torch.lean", "")
+        self.write("Tyr/ConstantSupport.lean", "")
         self.write("Tyr/Distributed.lean", "")
         self.write("Tyr/Data/Pretraining.lean", "")
         self.declare()
@@ -144,6 +145,30 @@ abbrev NativeResult := IO RawTensor
 ''')
         self.assertTrue(any("unrecognized extern result constructor NativeResult" in error
                             for error in self.errors()))
+
+    def test_polymorphic_invariant_failure_must_only_report_and_abort(self):
+        self.write("Tyr/Basic.lean", '''
+@[extern "lean_torch_native_invariant_failure"]
+opaque nativeInvariantFailure {α : Type} [Nonempty α] (message : @& String) : α
+''')
+        body = ('std::fprintf(stderr, "failure: %s\\n", lean_string_cstr(message)); '
+                'std::fflush(stderr); std::abort();')
+        self.native(body, "cc/src/tyr.cpp", "lean_torch_native_invariant_failure")
+        self.assertEqual(self.errors(), [])
+        self.assertEqual(audit(self.root)[1]["noreturn definitions"], 1)
+        for invalid in ['return lean_box(0);', 'allocate(); ' + body,
+                        body.replace('std::abort();', 'throw error();')]:
+            with self.subTest(body=invalid):
+                self.native(invalid, "cc/src/tyr.cpp", "lean_torch_native_invariant_failure")
+                self.assertTrue(any("must contain only" in error for error in self.errors()))
+
+    def test_polymorphic_result_exception_is_specific_to_the_abort_export(self):
+        for path, symbol in [("Tyr/Basic.lean", "lean_torch_other"),
+                             ("Tyr/RawTensor.lean", "lean_torch_native_invariant_failure")]:
+            with self.subTest(path=path, symbol=symbol):
+                self.write(path, f'@[extern "{symbol}"] opaque other {{α : Type}} : α\n')
+                self.assertTrue(any("unrecognized extern result constructor α" in error
+                                    for error in self.errors()))
 
     def test_except_error_type_must_match_native_string_payload(self):
         for result in ["Except UInt64 RawTensor", "Except String.Custom RawTensor"]:

@@ -1,3 +1,4 @@
+import Tests.Devices
 import LeanTest
 import Tyr.Typed
 import Tyr.Typed.Neural
@@ -11,7 +12,9 @@ namespace Tests.TestTyped
 @[test]
 def testTypedDefaultsAndPlacement : IO Unit := do
   for dtype in #[DType.UInt8, .Int8, .Int16, .Int32, .Int64, .Float16, .BFloat16,
-      .Float32, .Float64, .Bool, .Float8E4M3FN, .Float8E5M2, .Unknown "dynamic"] do
+      .Float32, .Float64, .Bool, .Float8E4M3FN, .Float8E5M2] do
+    let support ← dtype.acquireConstantSupport .CPU
+    let _ := support.down
     let spec : StaticSpec := { shape := #[2, 3], dtype, device := .CPU }
     let tensor : Tensor spec := default
     match tensor.validate with
@@ -108,9 +111,10 @@ def testDeviceChecks : IO Unit := do
   match Device.check (.CPU) .CPU with
   | .ok () => pure ()
   | .error err => LeanTest.fail err
-  match Device.check (.MPS) .CPU with
-  | .ok () => LeanTest.fail "device mismatch should fail"
-  | .error err => LeanTest.assertTrue (err.containsSubstr "Expected device")
+  for device in ← Tests.acceleratorDevices do
+    match Device.check device .CPU with
+    | .ok () => LeanTest.fail "device mismatch should fail"
+    | .error err => LeanTest.assertTrue (err.containsSubstr "Expected device")
 
 /-- Assert that a typed tensor's runtime metadata matches its phantom spec
     (shape, dtype, and device policy). -/
@@ -390,9 +394,10 @@ def testBroadcastOpsParity : IO Unit := do
   for v in opVals do
     LeanTest.assertTrue (v == 3.0) s!"operator broadcast value, got {v}"
   assertValid (x *ᵇ bias) "operator *ᵇ broadcasts"
-  -- a shape-only (dynamic dtype) claim validates against any runtime dtype
-  let dyn : Tensor { shape := #[2, 3], device := .CPU } := (Tensor.ones #[2, 3]).forgetDType
-  assertValid dyn "shape-only claim is dtype-agnostic"
+  -- Runtime dtype packaging retains the exact witness rather than a wildcard.
+  let packed ← IO.ofExcept ((Tensor.ones #[2, 3]).reifyDType)
+  LeanTest.assertEqual packed.1.val .Float32
+  assertValid packed.2 "existential dtype keeps exact metadata"
 
 /-- Fully typed model layers: shape and dtype agree end to end, runtime
     metadata matches the phantom claims, and values are sane. -/
@@ -434,10 +439,12 @@ def testDevicePinnedSpec : IO Unit := do
   assertValid pinned.relu "spec-preserving op keeps the pin"
   assertValid (Add.add pinned pinned) "homogeneous add keeps the pin"
   -- A wrong pin is rejected before any indexed value can be constructed.
-  match Tensor.ofRaw (σ := { shape := #[2, 2], dtype := .Float32, device := (.CUDA 0) })
-      (torch.RawTensor.ones #[2, 2]) with
-  | .ok _ => LeanTest.fail "CUDA pin on a CPU tensor should fail construction"
-  | .error err => LeanTest.assertTrue (err.containsSubstr "device") s!"got: {err}"
+  for device in ← Tests.acceleratorDevices do
+    match Tensor.ofRaw (σ := { shape := #[2, 2], dtype := .Float32, device })
+        (torch.RawTensor.ones #[2, 2]) with
+    | .ok _ => LeanTest.fail "Accelerator pin on a CPU tensor should fail construction"
+    | .error err => LeanTest.assertTrue (err.containsSubstr "device") s!"got: {err}"
+
 
 /-- The stack bridge consumes the temporary raw array; Lean must not release it twice. -/
 @[test]

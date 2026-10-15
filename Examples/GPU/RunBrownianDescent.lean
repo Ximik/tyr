@@ -26,7 +26,7 @@ def runOnce : IO Bool := do
     return false
 
   seedFixtures suiteName 161803
-  let device := Device.CUDA 0
+  let device ← Device.cuda 0
   let n : UInt64 := 16384
   let treeSeed : UInt64 := 4242
   let tol := 1.0e-4
@@ -50,7 +50,7 @@ def runOnce : IO Bool := do
 
     let out ← Tensor.uniformLike (Tensor.zeros #[n] false device)
     let tGpu0 ← IO.monoMsNow
-    vbtIncrementDevice treeSeed 0.0 1.0 tol 24 tA tB out n blackwell stream
+    vbtIncrementDevice treeSeed 0.0 1.0 tol 24 tA tB out n blackwell stream device
     let _ ← torch.cuda_synchronize
     let gpuMs := (← IO.monoMsNow) - tGpu0
     let gpuVals ← Tensor.toFloatArray out

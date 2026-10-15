@@ -35,7 +35,7 @@ structure Orthogonal (n : UInt64) (dtype : DType := .Float32)
 namespace Orthogonal
 
 /-- Identity element -/
-def identity (n : UInt64) : Orthogonal n d dev :=
+def identity [DType.ConstantSupported d dev] (n : UInt64) : Orthogonal n d dev :=
   ⟨Tensor.eyeFor d dev⟩
 
 /-- Create a random orthogonal matrix via QR decomposition. -/
@@ -70,7 +70,7 @@ structure SkewSymmetric (n : UInt64) (dtype : DType := .Float32)
 namespace SkewSymmetric
 
 /-- Zero skew-symmetric matrix -/
-def zero (n : UInt64) : SkewSymmetric n d dev :=
+def zero [DType.ConstantSupported d dev] (n : UInt64) : SkewSymmetric n d dev :=
   ⟨Tensor.zerosFor ⟨#[n, n], d, dev⟩⟩
 
 /-- Create a skew-symmetric matrix from any matrix: (A - Aᵀ)/2 -/
@@ -102,7 +102,7 @@ structure OrthogonalTangent (n : UInt64) (dtype : DType := .Float32)
 namespace OrthogonalTangent
 
 /-- Zero tangent -/
-def zero (n : UInt64) : OrthogonalTangent n d dev :=
+def zero [DType.ConstantSupported d dev] (n : UInt64) : OrthogonalTangent n d dev :=
   ⟨SkewSymmetric.zero n⟩
 
 /-- Create tangent from skew-symmetric matrix -/
@@ -128,7 +128,7 @@ end OrthogonalTangent
 
 /-- Orthogonal group as a DifferentiableManifold.
     Uses the matrix exponential for the proper exponential map: exp_Q(Q·S) = Q·exp(S). -/
-instance orthogonalManifold (n : UInt64) : DifferentiableManifold (Orthogonal n d dev) where
+instance orthogonalManifold [DType.ConstantSupported d dev] (n : UInt64) : DifferentiableManifold (Orthogonal n d dev) where
   Tangent _ := OrthogonalTangent n d dev
   Cotangent _ := OrthogonalTangent n d dev
   zeroTangent _ := OrthogonalTangent.zero n

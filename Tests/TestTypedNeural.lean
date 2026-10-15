@@ -74,8 +74,7 @@ open torch
   | .error message => LeanTest.assertTrue (!message.isEmpty)
 
 @[test] def testTypedRandintRecoverableErrors : IO Unit := do
-  for (low, high, device) in #[(3, 3, Device.CPU), (4, 3, Device.CPU),
-      (0, 2, Device.CUDA 18446744073709551615)] do
+  for (low, high, device) in #[(3, 3, Device.CPU), (4, 3, Device.CPU)] do
     let rejected ← try
         let _ ← Tensor.randint low high #[2] device
         pure false
@@ -96,10 +95,10 @@ open torch
   let values := (Tensor.fromFloatArray
     #[0.17, -0.41, 0.83, 1.27, 0.9, 0.5, -0.7, 1.1]).reshapeChecked #[1, 2, 4]
   let weights := Tensor.fromFloatArray #[0.73, 1.19, -0.67, 1.53]
-  for bf16 in #[false, true] do
-    let x := if bf16 then values.toBFloat16.forgetDType else values.forgetDType
-    let w := if bf16 then weights.toBFloat16.forgetDType else weights.forgetDType
-    let norm : RMSNorm 4 (.Unknown "dynamic") := { weight := w, eps := ⟨0.01⟩ }
+  for dtype in #[DType.Float32, .BFloat16] do
+    let x := values.castDType dtype
+    let w := weights.castDType dtype
+    let norm : RMSNorm 4 dtype := { weight := w, eps := ⟨0.01⟩ }
     let normalized := Tensor.rmsNormWeighted x.toFloat32 (Tensor.ones #[4]) 0.01
     let expected := Tensor.Preserving.mul (Tensor.castLike x normalized) (w.expand #[1, 2, 4])
     let outputs := #[norm.forward3d x,
@@ -125,11 +124,11 @@ open torch
 @[test] def testTypedStreamingWav : IO Unit := IO.FS.withTempDir fun dir => do
   let path := (dir / "stream.wav").toString
   Tensor.wavBegin path 16000
-  let emit (chunk : Sigma fun n => Tensor { shape := #[1, 1, n], device := .CPU }) : IO Unit :=
-    Tensor.wavAppend chunk.2 path
-  emit ⟨3, (Tensor.fromFloatArray #[-1, 0, 1]).reshapeChecked #[1, 1, 3] |>.forgetDType⟩
-  emit ⟨0, (Tensor.zeros #[1, 1, 0]).forgetDType⟩
-  emit ⟨2, (Tensor.fromFloatArray #[0.5, -0.5]).reshapeChecked #[1, 1, 2] |>.toBFloat16 |>.forgetDType⟩
+  let emit (chunk : Sigma fun n => SomeDTypeTensor #[1, 1, n] .CPU) : IO Unit :=
+    Tensor.wavAppend chunk.2.2 path
+  emit ⟨3, ((Tensor.fromFloatArray #[-1, 0, 1]).reshapeChecked #[1, 1, 3]).packDType (by decide)⟩
+  emit ⟨0, (Tensor.zeros #[1, 1, 0]).packDType (by decide)⟩
+  emit ⟨2, ((Tensor.fromFloatArray #[0.5, -0.5]).reshapeChecked #[1, 1, 2]).toBFloat16.packDType (by decide)⟩
   Tensor.wavFinalize path
   let bytes ← IO.FS.readBinFile path
   LeanTest.assertEqual bytes.size 54 "Five mono PCM16 samples plus the WAV header"

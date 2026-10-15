@@ -117,7 +117,7 @@ example (_x : Tensor ⟨#[2, 2], .Unknown "dynamic", .CPU⟩) : True := by
           "General real matrix logarithm did not reconstruct its input"
 
 @[test] def testDynamicComplexResultsRetainActualRealDtype : IO Unit := do
-  let input := (diagonal .Complex128).forgetDType
+  let input := (diagonal .Complex128)
   match Tensor.rowNorms? input, Tensor.svdvals? input, Tensor.svdReduced? input with
   | .ok norms, .ok values, .ok (u, singular, vh) =>
     for tensor in #[norms, values, singular] do
@@ -128,13 +128,12 @@ example (_x : Tensor ⟨#[2, 2], .Unknown "dynamic", .CPU⟩) : True := by
     LeanTest.assertEqual (← singular.toFloatArray) #[4, 3]
     LeanTest.assertEqual u.raw.dtype .Complex128
     LeanTest.assertEqual vh.raw.dtype .Complex128
-  | _, _, _ => LeanTest.fail "Valid dynamic complex factorization was rejected"
+  | _, _, _ => LeanTest.fail "Valid exact complex factorization was rejected"
 
 @[test] def testMatrixLogRejectsInvalidRuntimeDomain : IO Unit := do
   expectError (Tensor.matrixLog? (diagonal .Complex64))
-  expectError (Tensor.matrixLog? (diagonal .Complex64).forgetDType)
-  expectError (Tensor.matrixLog? (diagonal .Int64).forgetDType)
-  let input := (diagonal .Float32).forgetDType
+  expectError (Tensor.matrixLog? (diagonal .Int64))
+  let input := (diagonal .Float32)
   match Tensor.matrixLog? input with
   | .error message => LeanTest.fail message
   | .ok result =>

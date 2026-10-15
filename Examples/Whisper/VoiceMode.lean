@@ -245,7 +245,7 @@ private def printInline (s : String) : IO Unit := do
 private def runOnce
     {device : torch.Device}
     {cfg : WhisperConfig}
-    (model : WhisperForConditionalGeneration (device := device) cfg)
+    (model : WhisperForConditionalGeneration (device := device) (dtype := dtype) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (pre : torch.qwen3asr.PreprocessorConfig)
     (args : Args)

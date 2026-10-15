@@ -30,7 +30,7 @@ example (_logits : Tensor ⟨#[1, 2, 2], .Float32, .CPU⟩)
   let logits := Tensor.zeros #[2, 2]
   let targets := Tensor.fromInt64Array #[0, 1]
   for dtype in #[DType.Int64, .Bool, .Complex64] do
-    let invalid := (logits.castDType dtype).forgetDType
+    let invalid := (logits.castDType dtype)
     expectError (Tensor.crossEntropy? invalid targets)
     expectError (Tensor.crossEntropyNone? invalid targets)
   for labels in #[#[0, 2], #[-1, 1]] do

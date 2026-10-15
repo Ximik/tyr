@@ -26,7 +26,9 @@ written once and reused across many models.
   treated as non-trainable.
 - `Vector n α`: length-indexed container for compile-time-safe `zipWith`.
 - `TensorStruct` utilities: `count`, `grads`, `zeroGrads`, `detach`,
-  `requiresGrad`, `makeLeafParams`, `castDType`, `scale`, `add`, `sub`.
+  `requiresGrad`, `makeLeafParams`, `scale`, `add`, `sub`.
+- `TensorStruct.castTo`: explicit conversion to a destination tensor-tree type
+  (provided by `Tyr.TensorStruct.Cast`).
 
 ## Traversal Semantics
 
@@ -48,11 +50,11 @@ This module defines the `TensorStruct` class and instances for containers
 (`Array`, `List`, `Vector`, `Option`), wrappers (`Static`, `Frozen`), and
 scalars, including indexed `Tensor σ` leaves. The `deriving TensorStruct`
 handler lives in `Tyr.Module.Derive`, so import that module when deriving
-instances.
+instances. Deriving also supplies `TensorTreeCast` between parameterizations of
+the same record, recursively using the corresponding field conversions.
 Traversal callbacks preserve each leaf's complete `StaticSpec` index. A map
-cannot change a leaf's shape, concrete dtype or concrete device. Dynamic
-dtype leaves can be explicitly recast with `TensorStruct.castDType`; changing a
-concrete dtype contract requires a model conversion with a different result type.
+cannot change a leaf's shape, dtype or device. Use `TensorStruct.castTo` with an
+explicit destination type to convert dtype or device; shape changes are rejected.
 
 ## Examples
 
@@ -278,7 +280,7 @@ instance {σ : StaticSpec} : TensorStruct (Tensor σ) where
 abbrev ShapePackedTensor (dtype : DType) (device : Device) :=
   Sigma fun shape : Shape => Tensor { shape, dtype, device }
 
-instance {dtype : DType} {device : Device} : Inhabited (ShapePackedTensor dtype device) := ⟨⟨#[], default⟩⟩
+instance {dtype : DType} {device : Device} [DType.ConstantSupported dtype device] : Inhabited (ShapePackedTensor dtype device) := ⟨⟨#[], default⟩⟩
 
 instance {dtype : DType} {device : Device} : TensorStruct (ShapePackedTensor dtype device) where
   map f x := ⟨x.1, f x.2⟩
@@ -287,6 +289,17 @@ instance {dtype : DType} {device : Device} : TensorStruct (ShapePackedTensor dty
     letI : Inhabited (ShapePackedTensor dtype device) := ⟨x⟩
     if h : y.1 = x.1 then ⟨x.1, f x.2 (h ▸ y.2)⟩
     else panic! s!"TensorStruct shape mismatch: {x.1} vs {y.1}"
+  fold f initial x := f x.2 initial
+
+/-- Existential dtypes remain exact during traversals. Zipping requires actual
+equality of the hidden indices before the two leaves can share an operation. -/
+instance {shape : Shape} {device : Device} : TensorStruct (SomeDTypeTensor shape device) where
+  map f x := ⟨x.1, f x.2⟩
+  mapM f x := do pure ⟨x.1, ← f x.2⟩
+  zipWith f x y :=
+    letI : Inhabited (SomeDTypeTensor shape device) := ⟨x⟩
+    if h : y.1 = x.1 then ⟨x.1, f x.2 (h ▸ y.2)⟩
+    else panic! s!"TensorStruct dtype mismatch: {x.1.val} vs {y.1.val}"
   fold f initial x := f x.2 initial
 
 /-!
@@ -471,10 +484,10 @@ private def withRawLeaves [TensorStruct α] (template : α) (leaves : Array RawT
     let index ← get
     set (index + 1)
     pure (match leaves[index]? with
-      | none => panic! "functionalGrad: missing leaf"
+      | none => nativeInvariantFailure "functionalGrad: missing leaf"
       | some raw => match Tensor.ofRaw (σ := σ) raw with
         | .ok tensor => tensor
-        | .error message => panic! s!"functionalGrad: {message}"))
+        | .error message => nativeInvariantFailure s!"functionalGrad: {message}"))
     template).run 0).1
 
 /-- Pure first derivatives of a scalar-valued function over a tensor tree.
@@ -489,20 +502,6 @@ def functionalGrad {device : Device} [TensorStruct α]
     | .ok gradients => gradients
     | .error message => panic! message
   withRawLeaves inputs gradients
-
-/-- Explicitly cast tensor-tree leaves while retaining their original static
-indices. A dynamic dtype permits a native dtype change; a concrete dtype rejects
-a different result. Shape, actual device and placement are preserved.
-Failure is reported through IO instead of substituting a fallback tensor. -/
-def castDType [TensorStruct α] (dtype : DType) (params : α) : IO α :=
-  mapM (fun {σ} tensor => do
-    let result : Except String (Tensor σ) := do
-      let converted ← tensor.castDType? dtype
-      Tensor.ofRaw converted.raw
-    match result with
-    | .ok converted => pure converted
-    | .error message =>
-        throw <| IO.userError s!"TensorStruct.castDType to {dtype}: {message}") params
 
 /-- Apply a scalar multiplication to all tensors -/
 def scale [TensorStruct α] (model : α) (s : Float) : α :=

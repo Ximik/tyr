@@ -10,7 +10,7 @@ namespace Tyr.AD
 open torch
 open DifferentiableManifold
 
-variable {d : DType} {dev : Device}
+variable {d : DType} {dev : Device} [DType.ConstantSupported d dev]
 
 /-! ## Hyperbolic Manifold H^n (hyperboloid model)
 

@@ -8,21 +8,22 @@ import Tyr.Tokenizer.Qwen3
 
 namespace torch.qwen3asr
 
-variable {device : Device}
+variable {device : Device} {dtype : DType}
 /-- Separate streaming-native model wrapper.
     This is intentionally parallel to the existing model API so baseline paths
     keep zero additional runtime overhead. -/
 structure StreamModel where
   cfg : Qwen3ASRConfig
   device : Device
-  model : Qwen3ASRForConditionalGeneration (device := device) cfg
+  dtype : ExactDType
+  model : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype.val) cfg
   tok : tokenizer.qwen3.QwenTokenizer
   preprocessor : PreprocessorConfig
   modelDir : String
 
 /-- Streaming session mutable state.
     Carries rolling ASR state plus reusable decode prompt cache. -/
-structure StreamSession (cfg : Qwen3ASRConfig) where
+structure StreamSession (cfg : Qwen3ASRConfig) (dtype : DType := .Float32) where
   chunkSec : Float := 2.0
   hopSec : Float := 0.5
   chunkSamples : Nat := 32000
@@ -32,8 +33,8 @@ structure StreamSession (cfg : Qwen3ASRConfig) where
   language : Option String := none
   textConsensus : Tyr.Text.ConsensusState := {}
   sileroVAD : Option Tyr.Text.SileroProvider := none
-  decodeCache : Option (StreamingDecodeCache (device := device) cfg) := none
-  promptCache : Option (StreamingPromptCache (device := device) cfg) := none
+  decodeCache : Option (StreamingDecodeCache (device := device) (dtype := dtype) cfg) := none
+  promptCache : Option (StreamingPromptCache (device := device) (dtype := dtype) cfg) := none
   encoderCachedFrames : UInt64 := 0
   decoderCachedTokens : UInt64 := 0
 
@@ -61,8 +62,8 @@ def loadFromPretrained
   let cfg ← Qwen3ASRConfig.loadFromPretrainedDir modelDir
   let tok ← tokenizer.qwen3.loadTokenizer modelDir
   let preprocessor ← PreprocessorConfig.loadFromPretrainedDir modelDir
-  let ⟨device, model⟩ ← Qwen3ASRForConditionalGeneration.loadSharded modelDir cfg
-  pure { cfg, device, model, tok, preprocessor, modelDir }
+  let ⟨device, dtype, model⟩ ← Qwen3ASRForConditionalGeneration.loadSharded modelDir cfg
+  pure { cfg, device, dtype, model, tok, preprocessor, modelDir }
 
 def newSession
     (m : StreamModel)
@@ -77,7 +78,7 @@ def newSession
     (freezeAfterSteps : Nat := 4)
     (mutableTailTokensWhileSpeech : Nat := 6)
     (sileroVADPath : Option String := none)
-    : IO (StreamSession (device := m.device) m.cfg) := do
+    : IO (StreamSession (device := m.device) (dtype := m.dtype.val) m.cfg) := do
   if chunkSec <= 0.0 || hopSec <= 0.0 then
     throw <| IO.userError "chunkSec and hopSec must be > 0"
   let cCfg : Tyr.Text.ConsensusConfig := {
@@ -119,10 +120,10 @@ def newSession
     stabilization signals. -/
 def pushAudio
     (m : StreamModel)
-    (s : StreamSession (device := m.device) m.cfg)
+    (s : StreamSession (device := m.device) (dtype := m.dtype.val) m.cfg)
     (pcm16k : Array Float)
     (maxNewTokens : UInt64 := 128)
-    : IO ((StreamSession (device := m.device) m.cfg) × StreamStepOutput) := do
+    : IO ((StreamSession (device := m.device) (dtype := m.dtype.val) m.cfg) × StreamStepOutput) := do
   let mut s' := s
   let vadSignal : Tyr.Text.VADSignal ←
     match s'.sileroVAD with
@@ -168,9 +169,9 @@ def pushAudio
 
 def flush
     (m : StreamModel)
-    (s : StreamSession (device := m.device) m.cfg)
+    (s : StreamSession (device := m.device) (dtype := m.dtype.val) m.cfg)
     (maxNewTokens : UInt64 := 128)
-    : IO ((StreamSession (device := m.device) m.cfg) × StreamStepOutput) := do
+    : IO ((StreamSession (device := m.device) (dtype := m.dtype.val) m.cfg) × StreamStepOutput) := do
   let beforeChunkId := s.asrState.chunkId
   let (asrNext, decodeCacheNext) ← finishStreamingTranscribeWithModelStateCached
     m.model

@@ -6,7 +6,7 @@ import Tyr.Typed.Device
 
 `Tensor σ` retains shape, dtype and actual placement. A runtime `Device` value
 can be an index; unknown placement is packaged existentially, never erased.
-Only `Unknown "dynamic"` relaxes the dtype claim. Checked admission validates
+Every dtype is an exact claim. Checked admission validates
 all indices against native metadata. The indexed carrier has no allocation or
 public unchecked constructor; FFI adapters use the explicit `.raw` projection.
 -/
@@ -77,6 +77,10 @@ Unlike a bare Sigma over DType, this package cannot select the legacy wildcard.
 Packaging retains the native handle; the Sigma itself is a Lean wrapper. -/
 abbrev SomeDTypeTensor (shape : Shape) (device : Device) :=
   Sigma fun dtype : ExactDType => Tensor ⟨shape, dtype.val, device⟩
+
+/-- Logical nonemptiness does not supply an allocating default for an unknown dtype. -/
+instance {shape : Shape} {device : Device} : Nonempty (SomeDTypeTensor shape device) :=
+  ⟨⟨⟨.Float32, by decide⟩, Classical.choice inferInstance⟩⟩
 
 namespace SomeDTypeTensor
 
@@ -178,20 +182,20 @@ def actualSpec {σ : StaticSpec} (t : Tensor σ) : TensorSpec :=
 /-- Validate a value update using metadata captured before consuming its input.
 The original tensor is deliberately absent: retaining it through result
 validation would prevent native ownership transfer and storage reuse.
-Dynamic specifications still preserve the actual dtype and placement. -/
+Runtime-selected indices still preserve the actual dtype and placement. -/
 def checkedUpdate? {σ : StaticSpec} (expectedDType : DType) (expectedDevice : Device)
     (raw : RawTensor) : Except String (Tensor σ) := do
   TensorSpec.checkDType expectedDType raw.dtype
   expectedDevice.check raw.device
   ofRaw raw
 
-/-- Pure value-update adapter. Its panic fallback is the valid default for the
-static specification, so the adapter never retains the consumed input. -/
+/-- Pure value-update adapter. A violated native result contract stops execution
+without constructing a default tensor or retaining the consumed input. -/
 def checkedUpdate {σ : StaticSpec} (expectedDType : DType) (expectedDevice : Device)
     (raw : RawTensor) : Tensor σ :=
   match checkedUpdate? expectedDType expectedDevice raw with
   | .ok tensor => tensor
-  | .error message => panic! s!"Tensor update: {message}"
+  | .error message => nativeInvariantFailure s!"Tensor update: {message}"
 
 /-- Check a replacement against both the static index and the original native
 dtype/device. Dynamic index components must not hide a metadata change in an
@@ -238,14 +242,14 @@ def toSome {σ : StaticSpec} (tensor : Tensor σ) : Sigma Tensor :=
   ⟨σ, tensor⟩
 
 /-- Package an already exact index without native inspection or conversion.
-The exclusion proof is explicit; a legacy wildcard must use checked reification. -/
+The exclusion proof rejects the unsupported legacy marker. -/
 def packDType {σ : StaticSpec} (tensor : Tensor σ)
     (exact : σ.dtype ≠ .Unknown "dynamic") : SomeDTypeTensor σ.shape σ.device :=
   ⟨⟨σ.dtype, exact⟩, tensor⟩
 
 /-- Recover the native dtype as an exact existential index without casting
 values, detaching the graph, or forgetting shape/placement. Checked admission
-also excludes the reserved wildcard, including for legacy dynamic inputs. -/
+also excludes the unsupported legacy marker. -/
 def reifyDType {σ : StaticSpec} (tensor : Tensor σ) :
     Except String (SomeDTypeTensor σ.shape σ.device) :=
   SomeDTypeTensor.ofRaw tensor.raw

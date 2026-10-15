@@ -39,7 +39,7 @@ structure FixedRankTangent (m n k : UInt64) (dtype : DType := .Float32)
 
 namespace FixedRankTangent
 
-def zero (m n k : UInt64) : FixedRankTangent m n k d dev := ⟨Tensor.zerosFor ⟨#[m, n], d, dev⟩⟩
+def zero [DType.ConstantSupported d dev] (m n k : UInt64) : FixedRankTangent m n k d dev := ⟨Tensor.zerosFor ⟨#[m, n], d, dev⟩⟩
 def add (a b : FixedRankTangent m n k d dev) : FixedRankTangent m n k d dev := ⟨Tensor.Preserving.add a.vec b.vec⟩
 def smul (s : Float) (v : FixedRankTangent m n k d dev) : FixedRankTangent m n k d dev := ⟨Tensor.Preserving.mulScalar v.vec s⟩
 

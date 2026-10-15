@@ -1,4 +1,5 @@
 import LeanTest
+import Tests.Devices
 import Tyr.Basic
 
 -- Variables used only inside a deliberately failing tactic count as unused.
@@ -57,7 +58,8 @@ elab "tensorPrivateImplementation% " name:ident : term =>
 
 /-- error: (kernel) invalid declaration, it uses unsafe declaration '_private.Tyr.Basic.0.torch.Tensor.zerosForImpl' -/
 #guard_msgs in
-def privateImplementationBypass (σ : StaticSpec) : Tensor σ :=
+def privateImplementationBypass (σ : StaticSpec)
+    [DType.ConstantSupported σ.dtype σ.device] : Tensor σ :=
   (tensorPrivateImplementation% torch.Tensor.zerosForImpl) σ
 
 @[test]
@@ -79,8 +81,10 @@ def testCheckedAdmissionAndOpaqueAccessors : IO Unit := do
   let rejected : Array StaticSpec := #[
     { spec with shape := #[99] },
     { spec with dtype := .Int64 },
-    { spec with device := (.CUDA 7) },
     { spec with dtype := .Unknown "Float32_typo" }]
+  for device in ← Tests.acceleratorDevices do
+    LeanTest.assertTrue (Tensor.ofRaw (σ := ⟨raw.runtimeShape, raw.dtype, device⟩) raw).toOption.isNone
+      "A CPU handle cannot be admitted at an acquired accelerator placement"
   for wrong in rejected do
     LeanTest.assertTrue (Tensor.ofRaw (σ := wrong) raw).toOption.isNone
       s!"Checked admission must reject {reprStr wrong}"

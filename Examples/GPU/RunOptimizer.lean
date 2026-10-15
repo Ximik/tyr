@@ -8,6 +8,8 @@ import Examples.GPU.Benchmark
 namespace Examples.GPU.RunOptimizer
 
 open torch
+
+variable {device : Device}
 open Tyr.GPU.Kernels.Optimizer
 
 private structure OptimizerShape where
@@ -35,19 +37,19 @@ private def optimizerMatrix : LeanBenchmark.Matrix OptimizerShape := {
 
 private def benchmarkShape (cfg : Benchmark.Config) (stream : UInt64)
     (caseLabel : String) (elements : UInt64) : IO (String × Bool) := do
-  let device := Device.CUDA 0
-  let master : Tensor { shape := #[elements], dtype := .Float32, device := (.CUDA 0) } ← Tensor.randn #[elements] false device
-  let masterOriginal : Tensor { shape := #[elements], dtype := .Float32, device := (.CUDA 0) } ← Tensor.randn #[elements] false device
+  let device ← Device.cuda 0
+  let master : Tensor { shape := #[elements], dtype := .Float32, device := device } ← Tensor.randn #[elements] false device
+  let masterOriginal : Tensor { shape := #[elements], dtype := .Float32, device := device } ← Tensor.randn #[elements] false device
   let masterOriginal ← Tensor.copyInto masterOriginal master
-  let gradF : Tensor { shape := #[elements], dtype := .Float32, device := (.CUDA 0) } ← Tensor.randn #[elements] false device
-  let grad : Tensor { shape := #[elements], dtype := .BFloat16, device := (.CUDA 0) } := gradF.toBFloat16
-  let gradBackupF : Tensor { shape := #[elements], dtype := .Float32, device := (.CUDA 0) } ← Tensor.randn #[elements] false device
-  let gradBackup : Tensor { shape := #[elements], dtype := .BFloat16, device := (.CUDA 0) } := gradBackupF.toBFloat16
+  let gradF : Tensor { shape := #[elements], dtype := .Float32, device := device } ← Tensor.randn #[elements] false device
+  let grad : Tensor { shape := #[elements], dtype := .BFloat16, device := device } := gradF.toBFloat16
+  let gradBackupF : Tensor { shape := #[elements], dtype := .Float32, device := device } ← Tensor.randn #[elements] false device
+  let gradBackup : Tensor { shape := #[elements], dtype := .BFloat16, device := device } := gradBackupF.toBFloat16
   let gradBackup ← Tensor.copyInto gradBackup grad
-  let model : Tensor { shape := #[elements], dtype := .BFloat16, device := (.CUDA 0) } := master.toBFloat16
-  let moment1 : Tensor { shape := #[elements], dtype := .Float32, device := (.CUDA 0) } ← Tensor.randn #[elements] false device
-  let moment2 : Tensor { shape := #[elements], dtype := .Float32, device := (.CUDA 0) } ← Tensor.randn #[elements] false device
-  let zeroMoment : Tensor { shape := #[elements], dtype := .Float32, device := (.CUDA 0) } := Tensor.zerosLike master
+  let model : Tensor { shape := #[elements], dtype := .BFloat16, device := device } := master.toBFloat16
+  let moment1 : Tensor { shape := #[elements], dtype := .Float32, device := device } ← Tensor.randn #[elements] false device
+  let moment2 : Tensor { shape := #[elements], dtype := .Float32, device := device } ← Tensor.randn #[elements] false device
+  let zeroMoment : Tensor { shape := #[elements], dtype := .Float32, device := device } := Tensor.zerosLike master
   let moment1 ← Tensor.copyInto moment1 zeroMoment
   let moment2 ← Tensor.copyInto moment2 zeroMoment
   let learningRate : Float := 3.0e-4
@@ -61,9 +63,9 @@ private def benchmarkShape (cfg : Benchmark.Config) (stream : UInt64)
     referenceUpdate masterOriginal grad moment1 moment2 learningRate beta1 beta2 epsilon
       weightDecay invBias1 invBias2
   let blocks := (elements + 255) / 256
-  let launch (master : Tensor { shape := #[elements], dtype := .Float32, device := (.CUDA 0) })
-      (model grad : Tensor { shape := #[elements], dtype := .BFloat16, device := (.CUDA 0) })
-      (moment1 moment2 : Tensor { shape := #[elements], dtype := .Float32, device := (.CUDA 0) }) : IO Unit :=
+  let launch (master : Tensor { shape := #[elements], dtype := .Float32, device := device })
+      (model grad : Tensor { shape := #[elements], dtype := .BFloat16, device := device })
+      (moment1 moment2 : Tensor { shape := #[elements], dtype := .Float32, device := device }) : IO Unit :=
     adamWMasterBf16.launch master.raw model.raw grad.raw moment1.raw moment2.raw elements
       learningRate.toFloat32 beta1.toFloat32 beta2.toFloat32 epsilon.toFloat32
       weightDecay.toFloat32 invBias1.toFloat32 invBias2.toFloat32
@@ -77,7 +79,7 @@ private def benchmarkShape (cfg : Benchmark.Config) (stream : UInt64)
   let preV := IndexedParity.compareTensors s!"optimizer.{caseLabel}.moment2" expectedV moment2 2e-5 2e-5
   for check in #[preMaster, preModel, preM, preV] do logTensorCheck check
 
-  let zeroMaster : Tensor { shape := #[elements], dtype := .Float32, device := (.CUDA 0) } ← Tensor.randn #[elements] false device
+  let zeroMaster : Tensor { shape := #[elements], dtype := .Float32, device := device } ← Tensor.randn #[elements] false device
   let master ← Tensor.copyInto master zeroMaster
   let model ← Tensor.copyInto model (zeroMaster.toBFloat16)
   let grad ← Tensor.copyInto grad (Tensor.zerosLike grad)
@@ -85,7 +87,7 @@ private def benchmarkShape (cfg : Benchmark.Config) (stream : UInt64)
   let moment2 ← Tensor.copyInto moment2 zeroMoment
   launch master model grad moment1 moment2
   torch.cuda_synchronize
-  let zeroExpectedMaster : Tensor { shape := #[elements], dtype := .Float32, device := (.CUDA 0) } :=
+  let zeroExpectedMaster : Tensor { shape := #[elements], dtype := .Float32, device := device } :=
     zeroMaster * (1.0 - learningRate * weightDecay)
   let zeroExpectedModel := zeroExpectedMaster.toBFloat16
   let zeroMasterCheck :=
@@ -99,7 +101,7 @@ private def benchmarkShape (cfg : Benchmark.Config) (stream : UInt64)
   for check in #[zeroMasterCheck, zeroModelCheck, zeroMCheck, zeroVCheck] do
     logTensorCheck check
 
-  let resetMaster : Tensor { shape := #[elements], dtype := .Float32, device := (.CUDA 0) } ← Tensor.randn #[elements] false device
+  let resetMaster : Tensor { shape := #[elements], dtype := .Float32, device := device } ← Tensor.randn #[elements] false device
   let master ← Tensor.copyInto master resetMaster
   let model ← Tensor.copyInto model (resetMaster.toBFloat16)
   let grad ← Tensor.copyInto grad gradBackup

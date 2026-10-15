@@ -7,6 +7,7 @@
 import Lean
 import Tyr.Torch
 import Tyr.TensorStruct
+import Tyr.TensorStruct.DeriveCast
 import Tyr.AD.TensorStructSchema
 
 open Lean Elab Command Term Meta
@@ -22,7 +23,9 @@ What it handles well:
 
 - field-wise traversal for structures,
 - parametric structures (it generates binders for type/shape parameters),
-- recursive use of existing `TensorStruct` instances on fields.
+- recursive use of existing `TensorStruct` instances on fields,
+- explicit conversions between parameterizations of the same record through
+  derived `TensorTreeCast` instances.
 
 Current limits:
 
@@ -46,8 +49,8 @@ When generating a TensorStruct instance, each field is handled based on its type
 ```lean
 -- Define your structure
 structure MyLayer where
-  weight : Tensor { shape := #[n, m], dtype := .Float32 }
-  bias : Tensor { shape := #[n], dtype := .Float32 }
+  weight : Tensor { shape := #[n, m], dtype := .Float32, device := .CPU }
+  bias : Tensor { shape := #[n], dtype := .Float32, device := .CPU }
   config : Static Config
 
 -- Manually create instance (the macro would generate this)
@@ -162,7 +165,10 @@ private def mkTensorStructInstanceCmd (typeName : Name) : CommandElabM Unit := d
           let paramName := paramDecl.userName
           let paramType ← Meta.inferType param
           let paramTypeStx ← PrettyPrinter.delab paramType
-          `(bracketedBinder| {$(mkIdent paramName) : $paramTypeStx})
+          if paramDecl.binderInfo == .instImplicit then
+            `(bracketedBinder| [$(mkIdent paramName) : $paramTypeStx])
+          else
+            `(bracketedBinder| {$(mkIdent paramName) : $paramTypeStx})
 
         -- Build the applied type
         let paramIdents ← paramBinders.toArray.mapM fun param => do
@@ -194,6 +200,7 @@ def mkTensorStructHandler (typeNames : Array Name) : CommandElabM Bool := do
 
   for typeName in typeNames do
     mkTensorStructInstanceCmd typeName
+    deriveTensorTreeCastFor typeName
 
   return true
 

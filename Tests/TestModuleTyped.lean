@@ -105,13 +105,15 @@ example : True := by
   fail_if_success
     have _ : Conv2d := {
       in_channels := 4, out_channels := 6, kernel_size := (2, 3), groups := 2
-      weight := Tensor.zeros #[6, 4, 2, 3] }
+      weight := Tensor.zeros #[6, 4, 2, 3]
+      outputBias := Tensor.zeros #[6] }
   trivial
 
 @[test]
 def testConv2dIndexedInitialization : IO Unit := do
   let config : Conv2d .Float64 (.CPU) := {
     in_channels := 4, out_channels := 6, kernel_size := (2, 3), groups := 2
+    weight := Tensor.zerosFor _
     outputBias := Tensor.onesLike (Tensor.zerosFor _) }
   let initialized ← config.init
   match initialized.weight.validate, initialized.outputBias.validate with
@@ -138,6 +140,8 @@ def testConv2dIndexedInitialization : IO Unit := do
 @[test]
 def testUniformLikeDTypeAndErrors : IO Unit := do
   for dtype in #[DType.Float16, .BFloat16, .Float32, .Float64] do
+    let support ← dtype.acquireConstantSupport .CPU
+    let _ := support.down
     let reference : Tensor ⟨#[2, 3], dtype, .CPU⟩ := Tensor.zerosFor _
     let sample ← Tensor.uniformLike reference (-0.25) 0.5
     match sample.validate with
@@ -162,10 +166,14 @@ def testUniformLikeDTypeAndErrors : IO Unit := do
 @[test]
 def testConv2dRejectsInvalidInitialization : IO Unit := do
   let configs : Array Conv2d := #[
-    { in_channels := 4, out_channels := 6, kernel_size := (2, 3), groups := 0 },
-    { in_channels := 3, out_channels := 4, kernel_size := (2, 3), groups := 2 },
-    { in_channels := 4, out_channels := 3, kernel_size := (2, 3), groups := 2 },
-    { in_channels := 4, out_channels := 6, kernel_size := (0, 3), groups := 2 }]
+    { in_channels := 4, out_channels := 6, kernel_size := (2, 3), groups := 0
+      weight := Tensor.zerosFor _, outputBias := Tensor.zerosFor _ },
+    { in_channels := 3, out_channels := 4, kernel_size := (2, 3), groups := 2
+      weight := Tensor.zerosFor _, outputBias := Tensor.zerosFor _ },
+    { in_channels := 4, out_channels := 3, kernel_size := (2, 3), groups := 2
+      weight := Tensor.zerosFor _, outputBias := Tensor.zerosFor _ },
+    { in_channels := 4, out_channels := 6, kernel_size := (0, 3), groups := 2
+      weight := Tensor.zerosFor _, outputBias := Tensor.zerosFor _ }]
   for config in configs do
     let rejected ← try
       let _ ← config.init

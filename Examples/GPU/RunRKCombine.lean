@@ -13,6 +13,8 @@ import Examples.GPU.IndexedParity
 namespace Examples.GPU.RunRKCombine
 
 open torch
+
+variable {device : Device}
 open Tyr.GPU.Kernels
 
 def suiteName : String := "rk_combine"
@@ -25,9 +27,9 @@ private def bHat : Array Float :=
   #[1951.0 / 21600.0, 0.0, 22642.0 / 50085.0, 451.0 / 720.0,
     -12231.0 / 42400.0, 649.0 / 6300.0, 1.0 / 60.0]
 
-private def combineRef (y0 : Tensor { shape := #[1, 1, 64, 64], dtype := .Float32, device := (.CUDA 0) }) (ks : Array (Tensor { shape := #[1, 1, 64, 64], dtype := .Float32, device := (.CUDA 0) }))
-    (weights : Array Float) (base : Option (Tensor { shape := #[1, 1, 64, 64], dtype := .Float32, device := (.CUDA 0) })) : Tensor { shape := #[1, 1, 64, 64], dtype := .Float32, device := (.CUDA 0) } := Id.run do
-  let mut acc : Tensor { shape := #[1, 1, 64, 64], dtype := .Float32, device := (.CUDA 0) } :=
+private def combineRef (y0 : Tensor { shape := #[1, 1, 64, 64], dtype := .Float32, device := device }) (ks : Array (Tensor { shape := #[1, 1, 64, 64], dtype := .Float32, device := device }))
+    (weights : Array Float) (base : Option (Tensor { shape := #[1, 1, 64, 64], dtype := .Float32, device := device })) : Tensor { shape := #[1, 1, 64, 64], dtype := .Float32, device := device } := Id.run do
+  let mut acc : Tensor { shape := #[1, 1, 64, 64], dtype := .Float32, device := device } :=
     match base with
     | some t => t
     | none => Tensor.Preserving.mulScalar y0 0.0
@@ -42,9 +44,9 @@ def runOnce : IO Bool := do
     return false
 
   seedFixtures suiteName 7117
-  let device := Device.CUDA 0
+  let device ← Device.cuda 0
   let y0 ← Tensor.uniformLike (Tensor.zeros #[1, 1, 64, 64] false device)
-  let mut ks : Array (Tensor { shape := #[1, 1, 64, 64], dtype := .Float32, device := (.CUDA 0) }) := #[]
+  let mut ks : Array (Tensor { shape := #[1, 1, 64, 64], dtype := .Float32, device := device }) := #[]
   for _ in [:7] do
     ks := ks.push (← Tensor.uniformLike (Tensor.zeros #[1, 1, 64, 64] false device))
   -- IO allocation keeps mutable output buffers distinct under compiler CSE.

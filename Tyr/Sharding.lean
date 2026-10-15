@@ -142,7 +142,7 @@ def ShardedTensor.fromFull {σ : StaticSpec} {rank worldSize : UInt64}
   let shard : Tensor (σ.withShape shardShape) :=
     match Tensor.ofRaw shardedRaw with
     | .ok t => t
-    | .error message => panic! s!"ShardedTensor.fromFull: {message}"
+    | .error message => nativeInvariantFailure s!"ShardedTensor.fromFull: {message}"
 
   { shard := shard
     cachedFull := some full
@@ -330,6 +330,7 @@ structure ShardedAdamState (σ : StaticSpec) (rank worldSize : UInt64) where
 
 /-- Initialize sharded Adam state with zeros -/
 def ShardedAdamState.init {σ : StaticSpec} {rank worldSize : UInt64}
+    [DType.ConstantSupported σ.dtype σ.device]
     (param : MaybeSharded σ rank worldSize) : ShardedAdamState σ rank worldSize :=
   match param with
   | .replicated _ => {

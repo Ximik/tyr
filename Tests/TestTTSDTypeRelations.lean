@@ -9,7 +9,7 @@ open torch torch.qwen3tts
 example (cfg : TalkerConfig) (_model : TalkerModel (device := .CPU) cfg)
     (_foreign : Tensor ⟨#[cfg.vocabSize, cfg.hiddenSize], .Float64, .CPU⟩) : True := by
   fail_if_success
-    have _ : TalkerModel (device := .CPU) cfg := { _model with codecEmbedding := _foreign.forgetDType }
+    have _ : TalkerModel (device := .CPU) cfg := { _model with codecEmbedding := _foreign }
   trivial
 
 

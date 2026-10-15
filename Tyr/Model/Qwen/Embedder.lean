@@ -56,7 +56,7 @@ private def catAlong {s : Shape} {d : DType} {dev : Device}
     : Tensor ⟨out, d, dev⟩ :=
   match Tensor.catMany? (tensors.map Tensor.packShape) dim out with
   | .ok t => t
-  | .error message => panic! s!"QwenFluxEmbedder cat: {message}"
+  | .error message => nativeInvariantFailure s!"QwenFluxEmbedder cat: {message}"
 
 /-- Encode text tokens to Flux-compatible embeddings.
     Input: [batch, seq] token IDs

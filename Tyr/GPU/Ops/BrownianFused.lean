@@ -90,7 +90,7 @@ def vbtIncrementDevice {s : Shape}
     (tA tB : Float)
     (out : Tensor { shape := s, dtype := .Float32, device := device }) (n : UInt64)
     (blackwell : Bool) (stream : UInt64)
-    (device : Device := Device.CUDA 0) : IO Unit := do
+    (device : Device) : IO Unit := do
   let schedA := buildValueSchedule T0 T1 tol maxDepth tA
   let schedB := buildValueSchedule T0 T1 tol maxDepth tB
   let lenA := (schedA.size / 6).toUInt64

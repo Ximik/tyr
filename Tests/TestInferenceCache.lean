@@ -1,6 +1,7 @@
 import Tyr.Typed.Neural
 import Tyr.Inference.KVCache
 import LeanTest
+import Tests.Devices
 
 namespace Tests.InferenceCache
 
@@ -39,8 +40,9 @@ private def rejected (action : IO α) (label : String) : IO Unit := do
     "A false shape claim is rejected before inference clone admission"
   LeanTest.assertTrue ((Tensor.ofRaw (σ := ⟨#[2], .Int64, .CPU⟩) src.raw).toOption.isNone)
     "A false dtype claim is rejected before inference clone admission"
-  LeanTest.assertTrue ((Tensor.ofRaw (σ := ⟨#[2], .Float32, .MPS⟩) src.raw).toOption.isNone)
-    "A false device claim is rejected before inference clone admission"
+  for device in ← Tests.acceleratorDevices do
+    LeanTest.assertTrue ((Tensor.ofRaw (σ := ⟨#[2], .Float32, device⟩) src.raw).toOption.isNone)
+      "A false device claim is rejected before inference clone admission"
 
 @[test] def testInferenceCacheAllocationsAreIndependent : IO Unit := do
   let initial ← Cache.init 2 1 4 1 2
@@ -132,7 +134,10 @@ private def rejected (action : IO α) (label : String) : IO Unit := do
 @[test] def testInferenceCacheAllocationFailuresAreRecoverable : IO Unit := do
   rejected (Cache.init 1 1 18446744073709551615 1 1)
     "Cache initialization must report an unrepresentable extent through IO"
-  rejected (Cache.init 1 1 1 1 1 (device := .CUDA 128))
-    "Cache initialization must report an invalid device through IO"
+  rejected (do
+    let device ← Device.cuda 128
+    let _ ← Cache.init 1 1 1 1 1 (device := device)
+    pure ())
+    "Device acquisition must reject an invalid placement before cache initialization"
 
 end Tests.InferenceCache

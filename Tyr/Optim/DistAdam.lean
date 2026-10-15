@@ -305,6 +305,7 @@ structure ShardedParamState (σ : StaticSpec) (rank worldSize : UInt64) where
 
 /-- Initialize sharded parameter state with zeros -/
 def initShardedParamState {σ : StaticSpec} {rank worldSize : UInt64}
+    [DType.ConstantSupported σ.dtype σ.device]
     (_param : ShardedTensor σ rank worldSize) : ShardedParamState σ rank worldSize :=
   let shardSpec := σ.withShape (shardedShape σ.shape ⟨.first, worldSize, rank⟩)
   {
@@ -419,6 +420,7 @@ structure ShardedEmbeddingAdam (vocabSize dim : UInt64) (rank worldSize : UInt64
 
 /-- Initialize sharded embedding with Adam state -/
 def ShardedEmbeddingAdam.init {vocabSize dim rank worldSize : UInt64} {d : DType} {dev : Device}
+    [DType.ConstantSupported d dev]
     (fullWeight : Tensor ⟨#[vocabSize, dim], d, dev⟩) (h : ValidShard rank worldSize)
     : ShardedEmbeddingAdam vocabSize dim rank worldSize d dev :=
   let shardedWeight := ShardedTensor.fromFull fullWeight h

@@ -8,6 +8,8 @@ import Examples.GPU.FixtureRunner
 namespace Examples.GPU
 
 open torch
+
+variable {device : Device}
 open Tyr.GPU.Kernels.FlashAttn3
 
 def fa3FixtureSpec : FixtureSpec := {
@@ -23,7 +25,7 @@ def generateFa3Fixtures : IO Unit := do
     throw <| IO.userError "CUDA is not available; cannot generate flash attention fixtures."
 
   IO.FS.createDirAll fa3FixtureSpec.dir
-  let device := Device.CUDA 0
+  let device ← Device.cuda 0
 
   let qf ← Tensor.randn #[1, 1, 256, 64] false device
   let kf ← Tensor.randn #[1, 1, 256, 64] false device
@@ -47,16 +49,17 @@ def runFa3Once : IO Bool := do
     IO.eprintln "CUDA is not available on this host."
     return false
 
+  let device ← Device.cuda 0
   if !(← fixturesPresent fa3FixtureSpec) then
     generateFa3Fixtures
 
-  let q ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[1, 1, 256, 64], dtype := .BFloat16 } (fa3FixtureFile "q").toString
-  let k ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[1, 1, 256, 64], dtype := .BFloat16 } (fa3FixtureFile "k").toString
-  let v ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[1, 1, 256, 64], dtype := .BFloat16 } (fa3FixtureFile "v").toString
-  let expectedOut ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[1, 1, 256, 64], dtype := .BFloat16 } (fa3FixtureFile "expected_o").toString
+  let q ← Tensor.loadTensorExact { device := device, shape := #[1, 1, 256, 64], dtype := .BFloat16 } (fa3FixtureFile "q").toString
+  let k ← Tensor.loadTensorExact { device := device, shape := #[1, 1, 256, 64], dtype := .BFloat16 } (fa3FixtureFile "k").toString
+  let v ← Tensor.loadTensorExact { device := device, shape := #[1, 1, 256, 64], dtype := .BFloat16 } (fa3FixtureFile "v").toString
+  let expectedOut ← Tensor.loadTensorExact { device := device, shape := #[1, 1, 256, 64], dtype := .BFloat16 } (fa3FixtureFile "expected_o").toString
 
   let outFwd ← Tensor.uniformLike q 0 0
-  let lseOut ← Tensor.uniformLike (Tensor.zeros #[1, 1, 256] false (Device.CUDA 0)) 0 0
+  let lseOut ← Tensor.uniformLike (Tensor.zeros #[1, 1, 256] false device) 0 0
   let stream ← torch.cuda_current_stream
 
   -- FA3 kernel expect seqLenQ, seqLenK, headDim as KVal

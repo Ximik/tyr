@@ -25,20 +25,21 @@ def parseNatArg (name : String) (v : String) : IO UInt64 := do
 
 /-! ## Device resolution -/
 
-def deviceToString : Device → String
-  | Device.MPS => "MPS"
-  | Device.CPU => "CPU"
-  | Device.CUDA n => s!"CUDA:{n}"
+def deviceToString (device : Device) : String :=
+  match device.kind with
+  | DeviceKind.MPS => "MPS"
+  | DeviceKind.CPU => "CPU"
+  | DeviceKind.CUDA n => s!"CUDA:{n}"
 
 def resolveDevice (arg : String) : IO (Device × Option String) := do
   let requested := arg.trimAscii.toString.toLower
   match requested with
   | "auto" => return (← getBestDevice, none)
   | "cpu" => pure (.CPU, none)
-  | "mps" => pure (.MPS, none)
+  | "mps" => pure (← Device.mps, none)
   | "cuda" =>
       if ← cuda_is_available then
-        pure (.CUDA 0, none)
+        pure (← Device.cuda 0, none)
       else
         pure (.CPU, some "Warning: --device cuda requested but CUDA is unavailable; falling back to CPU.")
   | _ =>
@@ -46,7 +47,7 @@ def resolveDevice (arg : String) : IO (Device × Option String) := do
         match (requested.drop 5).toNat? with
         | some idx =>
             if ← cuda_is_available then
-              pure (.CUDA idx.toUInt64, none)
+              pure (← Device.cuda idx.toUInt64, none)
             else
               pure (.CPU, some s!"Warning: --device cuda:{idx} requested but CUDA is unavailable; falling back to CPU.")
         | none => pure (.CPU, some s!"Warning: invalid device selector '{arg}'; falling back to CPU.")

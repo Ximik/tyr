@@ -59,7 +59,7 @@ def loadFromPretrained
     (revision : String := "main")
     (cacheDir : String := Hub.defaultCacheDir)
     (device : Device := Device.CPU)
-    : IO (Sigma (fun cfg => Qwen35ForCausalLM (device := device) cfg)) := do
+    : IO (Sigma (fun cfg => Σ dtype : ExactDType, Qwen35ForCausalLM (device := device) cfg dtype.val)) := do
   Hub.loadModelFromPretrained
     source
     revision
@@ -81,7 +81,7 @@ def loadFromPretrained
     (revision : String := "main")
     (cacheDir : String := Hub.defaultCacheDir)
     (device : Device := Device.CPU)
-    : IO (Sigma (fun cfg => Qwen35ForConditionalGeneration (device := device) cfg)) := do
+    : IO (Sigma (fun cfg => Σ dtype : ExactDType, Σ visionDType : ExactDType, Qwen35ForConditionalGeneration (device := device) cfg dtype.val visionDType.val)) := do
   Hub.loadModelFromPretrained
     source
     revision

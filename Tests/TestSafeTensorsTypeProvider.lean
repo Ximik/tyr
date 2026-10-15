@@ -1,3 +1,4 @@
+import Tests.Devices
 /-
   Tests/TestSafeTensorsTypeProvider.lean
 
@@ -197,18 +198,19 @@ def testSafeTensorsTypeProviderSingle : IO Unit := do
       "linear.weight"
       wrongDTypeSpec)
     (some "Expected dtype")
-  let wrongDeviceContract : TensorContract := {
-    spec := SingleSafe.linear_weightTensorSpec
-    role := .parameter
-    expectedDevice := some Device.MPS
-  }
-  Tests.assertThrows
-    (safetensors.loadTensorWithContract
-      "Tests/fixtures/safetensors/single.safetensors"
-      "linear.weight"
-      wrongDeviceContract
-      Device.CPU)
-    (some "Expected device")
+  for device in ← Tests.acceleratorDevices do
+    let wrongDeviceContract : TensorContract := {
+      spec := SingleSafe.linear_weightTensorSpec
+      role := .parameter
+      expectedDevice := some device
+    }
+    Tests.assertThrows
+      (safetensors.loadTensorWithContract
+        "Tests/fixtures/safetensors/single.safetensors"
+        "linear.weight"
+        wrongDeviceContract
+        Device.CPU)
+      (some "Expected device")
 
   let weights ← SingleSafe.loadAll
   LeanTest.assertTrue (weights.linear.weight.runtimeShape == #[2, 3])

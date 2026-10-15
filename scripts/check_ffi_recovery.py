@@ -2,7 +2,8 @@
 """Require complete exception guards on audited recoverable native exports.
 
 Inventory is derived from IO/Except result types in Tyr/RawTensor.lean, its
-submodules, Tyr/Basic.lean, Tyr/Torch.lean, Tyr/Distributed.lean, and the Parquet FFI in
+submodules, Tyr/Basic.lean, Tyr/Torch.lean, Tyr/ConstantSupport.lean,
+Tyr/Distributed.lean, and the Parquet FFI in
 Tyr/Data/Pretraining.lean.
 Other native subsystems are outside this explicitly reviewed scope.
 Every source definition, including inactive
@@ -31,6 +32,16 @@ NATIVE_SUFFIXES = {".cpp", ".cc", ".cxx", ".cu", ".mm", ".c", ".h", ".hpp"}
 # alias must not silently hide an IO/Except export from the inventory.
 PURE_RESULT_HEADS = {"RawTensor", "Bool", "Float", "String", "Shape", "Device",
                      "FloatArray", "Int64", "Array"}
+
+# This one polymorphic extern never returns a value. Audit its complete native
+# body instead of permitting arbitrary type variables to hide IO/Except aliases.
+POLYMORPHIC_ABORT = ("Tyr/Basic.lean", "lean_torch_native_invariant_failure", "α")
+FIXED_ABORT_BODY = [
+    "std", "::", "fprintf", "(", "stderr", ",", "<string>", ",",
+    "lean_string_cstr", "(", "message", ")", ")", ";",
+    "std", "::", "fflush", "(", "stderr", ")", ";",
+    "std", "::", "abort", "(", ")", ";",
+]
 
 # These build configurations only construct a fixed Lean IO.error; they run no
 # C++/LibTorch operation. The body still has to match FIXED_IO_ERROR exactly.
@@ -185,7 +196,9 @@ def lean_exports(source: str, path: str) -> list[Export]:
         if j + 1 < len(ts) and ts[j + 1].text == ".":
             raise ValueError(f"{path}:{ts[i].line}: qualified extern result constructor; "
                              "resolve its carrier explicitly for the recovery audit")
-        if carrier in {"IO", "Except"}:
+        if (path, symbol[1:-1], carrier) == POLYMORPHIC_ABORT:
+            exports.append(Export(symbol[1:-1], "NoReturn", path, ts[i].line))
+        elif carrier in {"IO", "Except"}:
             if carrier == "Except":
                 error_type = j + 1
                 if error_type < len(ts) and ts[error_type].text == "_root_":
@@ -256,6 +269,7 @@ def audit(root: Path) -> tuple[list[str], Counter]:
     errors = []
     exports = {}
     lean_paths = [root / "Tyr/Basic.lean", root / "Tyr/RawTensor.lean", root / "Tyr/Torch.lean",
+                  root / "Tyr/ConstantSupport.lean",
                   root / "Tyr/Distributed.lean",
                   root / "Tyr/Data/Pretraining.lean",
                   *sorted((root / "Tyr/RawTensor").rglob("*.lean"))]
@@ -287,6 +301,14 @@ def audit(root: Path) -> tuple[list[str], Counter]:
         if not implementations[symbol]:
             errors.append(f"{source}: no recognized native definition for {symbol}")
         for definition in implementations[symbol]:
+            if export.carrier == "NoReturn":
+                if [t.text for t in definition.body] == FIXED_ABORT_BODY:
+                    counts["noreturn definitions"] += 1
+                else:
+                    errors.append(
+                        f"{definition.path}:{definition.line}: {symbol} from {source} must contain only "
+                        "fprintf of the borrowed message, fflush(stderr), and std::abort()")
+                continue
             if guarded_body(definition.body, export.carrier):
                 counts["guarded definitions"] += 1
                 continue

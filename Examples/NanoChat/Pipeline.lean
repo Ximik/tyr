@@ -1594,10 +1594,10 @@ def supervisedFineTune (cfg : NanoChatConfig) : PipelineM Unit := do
     device := trainDevice
   }
 
-  let deviceStr := match trainDevice with
-    | Device.CPU => "cpu"
-    | Device.MPS => "mps"
-    | Device.CUDA idx => s!"cuda:{idx}"
+  let deviceStr := match trainDevice.kind with
+    | DeviceKind.CPU => "cpu"
+    | DeviceKind.MPS => "mps"
+    | DeviceKind.CUDA idx => s!"cuda:{idx}"
   log s!"SFT config: epochs={sftCfg.numEpochs}, batch={sftCfg.deviceBatchSize}"
   log s!"Learning rates: embed={sftCfg.embeddingLr}, matrix={sftCfg.matrixLr}"
   log s!"SFT device: {deviceStr}"

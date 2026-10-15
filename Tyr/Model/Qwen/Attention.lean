@@ -76,11 +76,12 @@ structure KVCache (batch num_kv_heads head_dim : UInt64) (dtype : DType := .Floa
 /-- Empty static KV cache with fixed capacity `maxLen`. -/
 def initKVCache {batch num_kv_heads head_dim : UInt64}
     (maxLen : UInt64)
-    (device : Device := Device.CPU) (dtype : DType := .Float32) : KVCache (device := device) batch num_kv_heads head_dim dtype :=
+    (device : Device := Device.CPU) (dtype : DType := .Float32)
+    [DType.ConstantSupported dtype device] : KVCache (device := device) batch num_kv_heads head_dim dtype :=
   let k0 : Tensor { device := device, shape := #[batch, num_kv_heads, maxLen, head_dim], dtype := dtype } :=
-    (Tensor.zeros #[batch, num_kv_heads, maxLen, head_dim] false device).castDType dtype
+    Tensor.zerosFor ⟨#[batch, num_kv_heads, maxLen, head_dim], dtype, device⟩
   let v0 : Tensor { device := device, shape := #[batch, num_kv_heads, maxLen, head_dim], dtype := dtype } :=
-    (Tensor.zeros #[batch, num_kv_heads, maxLen, head_dim] false device).castDType dtype
+    Tensor.zerosFor ⟨#[batch, num_kv_heads, maxLen, head_dim], dtype, device⟩
   { kStoreDyn := ⟨_, k0⟩, vStoreDyn := ⟨_, v0⟩, seq := 0, maxLen := maxLen }
 
 /-- Recover the statically-shaped store from its existential carrier,
@@ -90,7 +91,7 @@ private def expectStore {batch num_kv_heads head_dim : UInt64}
     : Tensor { device := device, shape := #[batch, num_kv_heads, maxLen, head_dim], dtype := dtype } :=
   match Tensor.ofRaw store.2.raw with
   | .ok t => t
-  | .error message => panic! s!"QwenAttention.KVCache store: {message}"
+  | .error message => nativeInvariantFailure s!"QwenAttention.KVCache store: {message}"
 
 /-! ## Extern adapters
 
@@ -161,7 +162,7 @@ private def meanDimTo {s : Shape} {d : DType} {dev : Device}
     : Tensor ⟨out, d, dev⟩ :=
   match Tensor.ofRaw (RawTensor.mean s t.raw (some #[dim.toUInt64]) keepdim) with
   | .ok r => r
-  | .error message => panic! s!"QwenAttention.meanDim: {message}"
+  | .error message => nativeInvariantFailure s!"QwenAttention.meanDim: {message}"
 
 /-- Apply RMS normalization along the last dimension (per-head norm).
     Input: [batch, seq, n_heads, head_dim], norm: [head_dim]

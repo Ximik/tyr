@@ -12,7 +12,7 @@ import Tyr.Model.Qwen3ASR.Weights
 
 namespace torch.qwen3asr.hub
 
-variable {device : Device}
+variable {device : Device} {dtype : DType}
 open torch.Hub
 
 structure DownloadOptions where
@@ -87,7 +87,7 @@ def loadFromPretrained
     (defaults : Qwen3ASRConfig := {})
     (revision : String := "main")
     (cacheDir : String := Hub.defaultCacheDir)
-    : IO (Σ cfg, Σ device : Device, Qwen3ASRForConditionalGeneration (device := device) cfg) := do
+    : IO (Σ cfg, Σ device : Device, Σ dtype : ExactDType, Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype.val) cfg) := do
   let modelDir ← torch.Hub.resolvePretrainedDir source {
     revision := revision
     cacheDir := cacheDir

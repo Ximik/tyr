@@ -55,19 +55,19 @@ private def addBias3d {batch channels frames : UInt64}
   let be : Tensor { shape := #[batch, channels, frames], dtype := dtype.val, device := device } := Tensor.expand b #[batch, channels, frames]
   Tensor.Preserving.add x be
 
-private def getOrFirst! [Inhabited α] (xs : Array α) (i : Nat) : α :=
+private def getOrFirst! [Nonempty α] (xs : Array α) (i : Nat) : α :=
   match xs[i]? with
   | some x => x
   | none =>
     match xs[0]? with
     | some x => x
-    | none => panic! "empty array"
+    | none => nativeInvariantFailure "Qwen3TTS speaker encoder: empty array"
 
 /-- TDNN block used throughout ECAPA speaker encoder: Conv1d + ReLU. -/
 structure TimeDelayNetBlock (inChannels outChannels kernelSize dilation : UInt64) (dtype : ExactDType := float32DType) where
   weight : Tensor { shape := #[outChannels, inChannels, kernelSize], dtype := dtype.val, device := device }
   bias : Tensor { shape := #[outChannels], dtype := dtype.val, device := device }
-  deriving TensorStruct, Inhabited
+  deriving TensorStruct, Nonempty
 
 namespace TimeDelayNetBlock
 

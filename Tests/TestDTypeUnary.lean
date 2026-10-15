@@ -20,7 +20,7 @@ example (x : Tensor ⟨#[2], .Complex128, .CPU⟩) : Tensor ⟨#[2], .Complex128
   Tensor.rsqrt (Tensor.tanh (Tensor.sigmoid (Tensor.pow (Tensor.log10 x) 2)))
 
 example {σ : StaticSpec} (input : Tensor σ) :
-    Except String (Tensor (σ.withDType input.actualSpec.dtype.atLeastFloat)) :=
+    Except String (Tensor (σ.withDType σ.dtype.atLeastFloat)) :=
   Tensor.Promoting.sqrt? input
 
 example (_x : Tensor ⟨#[2], .Complex64, .CPU⟩) : True := by
@@ -69,7 +69,7 @@ example (_x : Tensor ⟨#[2], .Int64, .CPU⟩) : True := by
     ((magnitude (Tensor.atan (Tensor.mulScalar imaginary 0.5)) - Float.log 3 / 2).abs < 1e-5)
 
 @[test] def testPreservingUnaryRejectsErasedIntegralInputs : IO Unit := do
-  let input := ((Tensor.fromFloatArray #[1, 4]).castDType .Int64).forgetDType
+  let input := ((Tensor.fromFloatArray #[1, 4]).castDType .Int64)
   for result in #[Tensor.Preserving.exp? input, Tensor.Preserving.sqrt? input,
       Tensor.Preserving.rsqrt? input, Tensor.Preserving.log? input,
       Tensor.Preserving.log10? input, Tensor.Preserving.sin? input,
@@ -83,7 +83,7 @@ example (_x : Tensor ⟨#[2], .Int64, .CPU⟩) : True := by
   LeanTest.assertEqual (← input.toFloatArray) #[1, 4]
 
 @[test] def testUnaryBackendAndDomainErrorsAreRecoverable : IO Unit := do
-  let complex := ((Tensor.ones #[2]).castDType .Complex64).forgetDType
+  let complex := ((Tensor.ones #[2]).castDType .Complex64)
   expectError (Tensor.gelu? complex)
   expectError (Tensor.silu? complex)
   expectError (Tensor.elu? complex)
@@ -95,7 +95,7 @@ example (_x : Tensor ⟨#[2], .Int64, .CPU⟩) : True := by
   expectError (Tensor.sqrt? shell)
 
 @[test] def testRuntimeUnaryPromotionOfErasedIntegers : IO Unit := do
-  let input := ((Tensor.fromFloatArray #[1, 4]).castDType .Int32).forgetDType
+  let input := ((Tensor.fromFloatArray #[1, 4]).castDType .Int32)
   let cases := #[(#[1, 2], Tensor.Promoting.sqrt? input),
     (#[0, Float.log 4], Tensor.Promoting.log? input),
     (#[Float.cos 1, Float.cos 4], Tensor.Promoting.cos? input),
@@ -121,7 +121,7 @@ example (_x : Tensor ⟨#[2], .Int64, .CPU⟩) : True := by
   LeanTest.assertEqual (← input.toFloatArray) #[1, 4]
 
 @[test] def testRuntimeUnaryPromotionRetainsComplexDtype : IO Unit := do
-  let input := ((Tensor.fromFloatArray #[-1]).castDType .Complex64).forgetDType
+  let input := ((Tensor.fromFloatArray #[-1]).castDType .Complex64)
   match Tensor.Promoting.sqrt? input with
   | .error message => LeanTest.fail message
   | .ok result =>

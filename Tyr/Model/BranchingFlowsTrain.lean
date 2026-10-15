@@ -33,82 +33,82 @@ structure BranchingTrainConfig where
   deriving Repr
 
 structure BranchingBatch (batch maxLen : UInt64) where
-  t : Tensor { device := device, shape := #[batch] }
+  t : Tensor { dtype := .Float32, device := device, shape := #[batch] }
   state : Tensor { device := device, shape := #[batch, maxLen], dtype := .Int64 }
   anchor : Tensor { device := device, shape := #[batch, maxLen], dtype := .Int64 }
-  padmask : Tensor { device := device, shape := #[batch, maxLen] }
-  flowmask : Tensor { device := device, shape := #[batch, maxLen] }
-  splitsTarget : Tensor { device := device, shape := #[batch, maxLen] }
-  delTarget : Tensor { device := device, shape := #[batch, maxLen] }
+  padmask : Tensor { dtype := .Float32, device := device, shape := #[batch, maxLen] }
+  flowmask : Tensor { dtype := .Float32, device := device, shape := #[batch, maxLen] }
+  splitsTarget : Tensor { dtype := .Float32, device := device, shape := #[batch, maxLen] }
+  delTarget : Tensor { dtype := .Float32, device := device, shape := #[batch, maxLen] }
   deriving Repr
 
 structure BranchingContinuousBatch (batch maxLen dim : UInt64) where
-  t : Tensor { device := device, shape := #[batch] }
-  state : Tensor { device := device, shape := #[batch, maxLen, dim] }
-  anchor : Tensor { device := device, shape := #[batch, maxLen, dim] }
-  padmask : Tensor { device := device, shape := #[batch, maxLen] }
-  flowmask : Tensor { device := device, shape := #[batch, maxLen] }
-  splitsTarget : Tensor { device := device, shape := #[batch, maxLen] }
-  delTarget : Tensor { device := device, shape := #[batch, maxLen] }
+  t : Tensor { dtype := .Float32, device := device, shape := #[batch] }
+  state : Tensor { dtype := .Float32, device := device, shape := #[batch, maxLen, dim] }
+  anchor : Tensor { dtype := .Float32, device := device, shape := #[batch, maxLen, dim] }
+  padmask : Tensor { dtype := .Float32, device := device, shape := #[batch, maxLen] }
+  flowmask : Tensor { dtype := .Float32, device := device, shape := #[batch, maxLen] }
+  splitsTarget : Tensor { dtype := .Float32, device := device, shape := #[batch, maxLen] }
+  delTarget : Tensor { dtype := .Float32, device := device, shape := #[batch, maxLen] }
   deriving Repr
 
 structure BranchingModel (maxLen vocab : UInt64) (Params : Type) where
-  forward : {batch : UInt64} → Params → Tensor { device := device, shape := #[batch, maxLen], dtype := .Int64 } → Tensor { device := device, shape := #[batch] }
-    → IO (Tensor { device := device, shape := #[batch, maxLen, vocab] } × Tensor { device := device, shape := #[batch, maxLen] } × Tensor { device := device, shape := #[batch, maxLen] })
+  forward : {batch : UInt64} → Params → Tensor { device := device, shape := #[batch, maxLen], dtype := .Int64 } → Tensor { dtype := .Float32, device := device, shape := #[batch] }
+    → IO (Tensor { dtype := .Float32, device := device, shape := #[batch, maxLen, vocab] } × Tensor { dtype := .Float32, device := device, shape := #[batch, maxLen] } × Tensor { dtype := .Float32, device := device, shape := #[batch, maxLen] })
 
 structure BranchingModelContinuous (maxLen dim : UInt64) (Params : Type) where
-  forward : {batch : UInt64} → Params → Tensor { device := device, shape := #[batch, maxLen, dim] } → Tensor { device := device, shape := #[batch] }
-    → IO (Tensor { device := device, shape := #[batch, maxLen, dim] } × Tensor { device := device, shape := #[batch, maxLen] } × Tensor { device := device, shape := #[batch, maxLen] })
+  forward : {batch : UInt64} → Params → Tensor { dtype := .Float32, device := device, shape := #[batch, maxLen, dim] } → Tensor { dtype := .Float32, device := device, shape := #[batch] }
+    → IO (Tensor { dtype := .Float32, device := device, shape := #[batch, maxLen, dim] } × Tensor { dtype := .Float32, device := device, shape := #[batch, maxLen] } × Tensor { dtype := .Float32, device := device, shape := #[batch, maxLen] })
 
-private def floatMask {batch maxLen : UInt64} (pad flow : Tensor { device := device, shape := #[batch, maxLen] }) : Tensor { device := device, shape := #[batch, maxLen] } :=
-  Tensor.Promoting.mul pad flow
+private def floatMask {batch maxLen : UInt64} (pad flow : Tensor { dtype := .Float32, device := device, shape := #[batch, maxLen] }) : Tensor { dtype := .Float32, device := device, shape := #[batch, maxLen] } :=
+  Tensor.Preserving.mul pad flow
 
 private def maskedCrossEntropy {batch maxLen vocab : UInt64}
-    (logits : Tensor { device := device, shape := #[batch, maxLen, vocab] })
+    (logits : Tensor { dtype := .Float32, device := device, shape := #[batch, maxLen, vocab] })
     (targets : Tensor { device := device, shape := #[batch, maxLen], dtype := .Int64 })
-    (mask : Tensor { device := device, shape := #[batch, maxLen] }) : Tensor { device := device, shape := #[] } :=
+    (mask : Tensor { dtype := .Float32, device := device, shape := #[batch, maxLen] }) : Tensor { dtype := .Float32, device := device, shape := #[] } :=
   let n : UInt64 := batch * maxLen
   let logits2 := Tensor.reshapeChecked logits #[n, vocab]
   let targets2 := Tensor.reshapeChecked targets #[n]
   let mask2 := Tensor.reshapeChecked mask #[n]
   let per := Tensor.crossEntropyNoneChecked logits2 targets2
-  let masked := Tensor.Promoting.mul per mask2
+  let masked := Tensor.Preserving.mul per mask2
   let denom := Tensor.sumAll mask2
-  Tensor.Promoting.div (Tensor.sumAll masked) (Tensor.Promoting.addScalar denom 1.0e-8)
+  Tensor.Preserving.div (Tensor.sumAll masked) (Tensor.Preserving.addScalar denom 1.0e-8)
 
 private def maskedMSE {batch maxLen : UInt64}
-    (pred target mask : Tensor { device := device, shape := #[batch, maxLen] }) : Tensor { device := device, shape := #[] } :=
-  let diff := Tensor.Promoting.sub pred target
-  let sq := Tensor.Promoting.mul diff diff
-  let masked := Tensor.Promoting.mul sq mask
+    (pred target mask : Tensor { dtype := .Float32, device := device, shape := #[batch, maxLen] }) : Tensor { dtype := .Float32, device := device, shape := #[] } :=
+  let diff := Tensor.Preserving.sub pred target
+  let sq := Tensor.Preserving.mul diff diff
+  let masked := Tensor.Preserving.mul sq mask
   let denom := Tensor.sumAll mask
-  Tensor.Promoting.div (Tensor.sumAll masked) (Tensor.Promoting.addScalar denom 1.0e-8)
+  Tensor.Preserving.div (Tensor.sumAll masked) (Tensor.Preserving.addScalar denom 1.0e-8)
 
 private def maskedMSE3d {batch maxLen dim : UInt64}
-    (pred target : Tensor { device := device, shape := #[batch, maxLen, dim] }) (mask : Tensor { device := device, shape := #[batch, maxLen] }) : Tensor { device := device, shape := #[] } :=
+    (pred target : Tensor { dtype := .Float32, device := device, shape := #[batch, maxLen, dim] }) (mask : Tensor { dtype := .Float32, device := device, shape := #[batch, maxLen] }) : Tensor { dtype := .Float32, device := device, shape := #[] } :=
   let mask3 := Tensor.expand (Tensor.unsqueeze mask 2) #[batch, maxLen, dim]
-  let diff := Tensor.Promoting.sub pred target
-  let sq := Tensor.Promoting.mul diff diff
-  let masked := Tensor.Promoting.mul sq mask3
+  let diff := Tensor.Preserving.sub pred target
+  let sq := Tensor.Preserving.mul diff diff
+  let masked := Tensor.Preserving.mul sq mask3
   let denom := Tensor.sumAll mask3
-  Tensor.Promoting.div (Tensor.sumAll masked) (Tensor.Promoting.addScalar denom 1.0e-8)
+  Tensor.Preserving.div (Tensor.sumAll masked) (Tensor.Preserving.addScalar denom 1.0e-8)
 
 def maskedSplitPoissonLoss {batch maxLen : UInt64}
-    (logits target mask : Tensor { device := device, shape := #[batch, maxLen] }) : Tensor { device := device, shape := #[] } :=
+    (logits target mask : Tensor { dtype := .Float32, device := device, shape := #[batch, maxLen] }) : Tensor { dtype := .Float32, device := device, shape := #[] } :=
   let mu := Tensor.Preserving.exp (Tensor.Preserving.clampFloat logits (-100.0) 11.0)
   let safeTarget := Tensor.Preserving.clampFloat target 1.0e-8 1.0e20
-  let per := Tensor.Promoting.sub (Tensor.Promoting.sub mu (Tensor.Promoting.mul target (logDynamic mu)))
-    (Tensor.Promoting.sub target (Tensor.Promoting.mul target (logDynamic safeTarget)))
-  let masked := Tensor.Promoting.mul per mask
+  let per := Tensor.Preserving.sub (Tensor.Preserving.sub mu (Tensor.Preserving.mul target (logDynamic mu)))
+    (Tensor.Preserving.sub target (Tensor.Preserving.mul target (logDynamic safeTarget)))
+  let masked := Tensor.Preserving.mul per mask
   let denom := Tensor.sumAll mask
-  Tensor.Promoting.div (Tensor.sumAll masked) (Tensor.Promoting.addScalar denom 1.0e-8)
+  Tensor.Preserving.div (Tensor.sumAll masked) (Tensor.Preserving.addScalar denom 1.0e-8)
 
 def maskedBCEWithLogits {batch maxLen : UInt64}
-    (logits target mask : Tensor { device := device, shape := #[batch, maxLen] }) : Tensor { device := device, shape := #[] } :=
-  let per := Tensor.Promoting.sub (softplusDynamic logits) (Tensor.Promoting.mul target logits)
-  let loss := Tensor.sumAll (Tensor.Promoting.mul per mask)
+    (logits target mask : Tensor { dtype := .Float32, device := device, shape := #[batch, maxLen] }) : Tensor { dtype := .Float32, device := device, shape := #[] } :=
+  let per := Tensor.Preserving.sub (softplusDynamic logits) (Tensor.Preserving.mul target logits)
+  let loss := Tensor.sumAll (Tensor.Preserving.mul per mask)
   let denom := Tensor.sumAll mask
-  Tensor.Promoting.div loss (Tensor.Promoting.addScalar denom 1.0e-8)
+  Tensor.Preserving.div loss (Tensor.Preserving.addScalar denom 1.0e-8)
 
 def packBranchingNat (cfg : BranchingTrainConfig) (result : BranchingBridgeResult Nat)
     (device : Device := .CPU)
@@ -172,20 +172,20 @@ def packBranchingNat (cfg : BranchingTrainConfig) (result : BranchingBridgeResul
 
   let timeScaled := result.t.map (fun t => ((t * cfg.timeScale).toUInt64).toInt64)
   let t := Tensor.reshapeChecked ((Tensor.fromInt64Array timeScaled).to device) #[batchU]
-  let t := Tensor.Promoting.divScalar (floatDynamic t) cfg.timeScale
+  let t := Tensor.Preserving.divScalar (floatDynamic t) cfg.timeScale
 
   return ⟨batchU, { t, state, anchor, padmask, flowmask, splitsTarget, delTarget }⟩
 
-private def stack1dDyn {dim : UInt64} (tensors : Array (Tensor { device := device, shape := #[dim] })) (len : UInt64)
-    : Tensor { device := device, shape := #[len, dim] } :=
+private def stack1dDyn {dim : UInt64} (tensors : Array (Tensor { dtype := .Float32, device := device, shape := #[dim] })) (len : UInt64)
+    : Tensor { dtype := .Float32, device := device, shape := #[len, dim] } :=
   if tensors.isEmpty then
     Tensor.reshapeChecked (zerosDynamic (device := device) #[0, dim]) #[len, dim]
   else
     let unsq := tensors.map (fun t => Tensor.unsqueeze t 0) -- [1, dim]
     Tensor.catManyChecked (unsq.map Tensor.packShape) 0 #[len, dim]
 
-private def stackBatch2d {batch maxLen dim : UInt64} (tensors : Array (Tensor { device := device, shape := #[maxLen, dim] })) :
-    Tensor { device := device, shape := #[batch, maxLen, dim] } :=
+private def stackBatch2d {batch maxLen dim : UInt64} (tensors : Array (Tensor { dtype := .Float32, device := device, shape := #[maxLen, dim] })) :
+    Tensor { dtype := .Float32, device := device, shape := #[batch, maxLen, dim] } :=
   if tensors.isEmpty then
     Tensor.reshapeChecked (zerosDynamic (device := device) #[0, maxLen, dim]) #[batch, maxLen, dim]
   else
@@ -193,7 +193,7 @@ private def stackBatch2d {batch maxLen dim : UInt64} (tensors : Array (Tensor { 
     Tensor.catManyChecked (unsq.map Tensor.packShape) 0 #[batch, maxLen, dim]
 
 def packBranchingTensor {dim : UInt64} (cfg : BranchingTrainConfig)
-    (result : BranchingBridgeResult (Tensor { device := device, shape := #[dim] }))
+    (result : BranchingBridgeResult (Tensor { dtype := .Float32, device := device, shape := #[dim] }))
     : IO (Sigma fun batch => BranchingContinuousBatch (device := device) batch cfg.maxLen dim) := do
   let batchNat := result.t.size
   if result.Xt.size != batchNat then
@@ -206,8 +206,8 @@ def packBranchingTensor {dim : UInt64} (cfg : BranchingTrainConfig)
     throw (IO.userError "BranchingBridgeResult.del size mismatch")
 
   let maxLenNat := cfg.maxLen.toNat
-  let mut paddedStates : Array (Tensor { device := device, shape := #[cfg.maxLen, dim] }) := #[]
-  let mut paddedAnchors : Array (Tensor { device := device, shape := #[cfg.maxLen, dim] }) := #[]
+  let mut paddedStates : Array (Tensor { dtype := .Float32, device := device, shape := #[cfg.maxLen, dim] }) := #[]
+  let mut paddedAnchors : Array (Tensor { dtype := .Float32, device := device, shape := #[cfg.maxLen, dim] }) := #[]
   let mut padArr : Array Int64 := Array.replicate (batchNat * maxLenNat) 0
   let mut flowArr : Array Int64 := Array.replicate (batchNat * maxLenNat) 0
   let mut splitsArr : Array Int64 := Array.replicate (batchNat * maxLenNat) 0
@@ -231,7 +231,7 @@ def packBranchingTensor {dim : UInt64} (cfg : BranchingTrainConfig)
     let xs := stack1dDyn (dim := dim) x.state lenU
     let xa := stack1dDyn (dim := dim) anchors lenU
     let padU := cfg.maxLen - lenU
-    let padT : Tensor { device := device, shape := #[padU, dim] } := zerosDynamic (device := device) #[padU, dim]
+    let padT : Tensor { dtype := .Float32, device := device, shape := #[padU, dim] } := zerosDynamic (device := device) #[padU, dim]
     let xsPad := Tensor.reshapeChecked (Tensor.cat xs padT 0) #[cfg.maxLen, dim]
     let xaPad := Tensor.reshapeChecked (Tensor.cat xa padT 0) #[cfg.maxLen, dim]
     paddedStates := paddedStates.push xsPad
@@ -260,7 +260,7 @@ def packBranchingTensor {dim : UInt64} (cfg : BranchingTrainConfig)
 
   let timeScaled := result.t.map (fun t => ((t * cfg.timeScale).toUInt64).toInt64)
   let t := Tensor.reshapeChecked ((Tensor.fromInt64Array timeScaled).to device) #[batchU]
-  let t := Tensor.Promoting.divScalar (floatDynamic t) cfg.timeScale
+  let t := Tensor.Preserving.divScalar (floatDynamic t) cfg.timeScale
 
   return ⟨batchU, { t, state, anchor, padmask, flowmask, splitsTarget, delTarget }⟩
 
@@ -290,10 +290,10 @@ def trainStep {maxLen vocab : UInt64} {Params : Type} [TensorStruct Params]
   let anchorLoss := maskedCrossEntropy anchorLogits packed.anchor mask
   let splitLoss := maskedSplitPoissonLoss splitLogits packed.splitsTarget mask
   let delLoss := maskedBCEWithLogits delLogits packed.delTarget mask
-  let totalLoss := Tensor.Promoting.add
-    (Tensor.Promoting.add (Tensor.Promoting.mulScalar anchorLoss cfg.anchorWeight)
-      (Tensor.Promoting.mulScalar splitLoss cfg.splitsWeight))
-    (Tensor.Promoting.mulScalar delLoss cfg.delWeight)
+  let totalLoss := Tensor.Preserving.add
+    (Tensor.Preserving.add (Tensor.Preserving.mulScalar anchorLoss cfg.anchorWeight)
+      (Tensor.Preserving.mulScalar splitLoss cfg.splitsWeight))
+    (Tensor.Preserving.mulScalar delLoss cfg.delWeight)
 
   Tensor.backwardLoss totalLoss
   if cfg.gradClip > 0 then
@@ -316,7 +316,7 @@ def trainStepContinuous {maxLen dim : UInt64} {Params : Type} [TensorStruct Para
     (model : BranchingModelContinuous (device := device) maxLen dim Params)
     (params : Params)
     (optState : Optim.AdamWState Params)
-    (result : BranchingBridgeResult (Tensor { device := device, shape := #[dim] }))
+    (result : BranchingBridgeResult (Tensor { dtype := .Float32, device := device, shape := #[dim] }))
     (lr : Float)
     (clipGrads : Params → Float → IO Unit := fun _ _ => pure ())
     : IO (Params × Optim.AdamWState Params × BranchingLossReport) := do
@@ -330,10 +330,10 @@ def trainStepContinuous {maxLen dim : UInt64} {Params : Type} [TensorStruct Para
   let anchorLoss := maskedMSE3d anchorPred packed.anchor mask
   let splitLoss := maskedSplitPoissonLoss splitLogits packed.splitsTarget mask
   let delLoss := maskedBCEWithLogits delLogits packed.delTarget mask
-  let totalLoss := Tensor.Promoting.add
-    (Tensor.Promoting.add (Tensor.Promoting.mulScalar anchorLoss cfg.anchorWeight)
-      (Tensor.Promoting.mulScalar splitLoss cfg.splitsWeight))
-    (Tensor.Promoting.mulScalar delLoss cfg.delWeight)
+  let totalLoss := Tensor.Preserving.add
+    (Tensor.Preserving.add (Tensor.Preserving.mulScalar anchorLoss cfg.anchorWeight)
+      (Tensor.Preserving.mulScalar splitLoss cfg.splitsWeight))
+    (Tensor.Preserving.mulScalar delLoss cfg.delWeight)
 
   Tensor.backwardLoss totalLoss
   if cfg.gradClip > 0 then

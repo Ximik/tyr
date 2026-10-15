@@ -290,14 +290,14 @@ def encodeAudioToCodes
   let codesPath ← expandHome codesPath
   ensureParentDir codesPath
   if (← isTokenizer25Hz speechTokenizerDir) then
-    let encoder25 ← SpeechTokenizer25HzEncoder.loadFromDir speechTokenizerDir device
+    let ⟨_, encoder25⟩ ← SpeechTokenizer25HzEncoder.loadFromDir speechTokenizerDir device
     let wave ← loadResampledMonoWav audioPath encoder25.inputSampleRate
     if wave.isEmpty then
       throw <| IO.userError s!"Audio encode input is empty: {audioPath}"
     let (groups, vals) ← encoder25.encodeWaveToCodes wave
     IO.FS.writeFile codesPath (formatCodesRows vals groups)
   else
-    let encoder ← SpeechTokenizer12HzEncoder.loadFromDirFlexible speechTokenizerDir device
+    let ⟨_, encoder⟩ ← SpeechTokenizer12HzEncoder.loadFromDirFlexible speechTokenizerDir device
     let wave ← loadResampledMonoWav audioPath encoder.inputSampleRate
     if wave.isEmpty then
       throw <| IO.userError s!"Audio encode input is empty: {audioPath}"

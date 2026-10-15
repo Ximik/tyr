@@ -10,6 +10,7 @@
 -/
 import Tyr.Typed
 import Tyr.Typed.Neural
+import Tyr.ConstantSupport
 
 namespace torch.Model
 
@@ -27,7 +28,10 @@ def initWeight (shape : Shape) (fanIn : UInt64) (dtype : DType := .Float32) (dev
 
 /-- Zero bias tensor with requires_grad=true. -/
 def initBias (shape : Shape) (dtype : DType := .Float32) (device : Device := .CPU) : IO (Tensor { device := device, shape := shape, dtype := dtype }) := do
-  Tensor.parameter (← Tensor.zerosForIO { shape, dtype, device })
+  let support ← dtype.acquireConstantSupport device
+  let _ : DType.ConstantSupported dtype device := support.down
+  IO.ofExcept (Shape.validateAllocation shape)
+  Tensor.parameter (Tensor.zerosFor { shape, dtype, device })
 
 /-- Mark a loaded pretrained tensor as frozen (requires_grad=false). -/
 def reqGradFalse {σ : StaticSpec} (t : Tensor σ) : Tensor σ :=
@@ -53,9 +57,9 @@ def dequantizeFP8 {outDim inDim : UInt64} {weightDType scaleDType : DType}
 
 /-- Dequantize FP8 expert weights with blockwise inverse scales per expert.
     weight: [experts, out, in], scale_inv: [experts, out/128, in/128]. -/
-def dequantizeFP8Experts {experts outDim inDim : UInt64}
-    (weight : Tensor { device := device, shape := #[experts, outDim, inDim] })
-    (scaleInv : Tensor { device := device, shape := #[experts, outDim / 128, inDim / 128] })
+def dequantizeFP8Experts {experts outDim inDim : UInt64} {weightDType scaleDType : DType}
+    (weight : Tensor { device := device, shape := #[experts, outDim, inDim], dtype := weightDType })
+    (scaleInv : Tensor { device := device, shape := #[experts, outDim / 128, inDim / 128], dtype := scaleDType })
     : Tensor { device := device, shape := #[experts, outDim, inDim], dtype := .Float32 } :=
   let outBlocks := outDim / 128
   let inBlocks := inDim / 128

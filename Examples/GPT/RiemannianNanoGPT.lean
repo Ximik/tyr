@@ -185,17 +185,17 @@ def runBenchmark (cfg : PrototypeConfig := PrototypeConfig.tiny) : IO RunStats :
   runSteps cfg cfg.benchmarkSteps
 
 private def deviceName (device : Device) : String :=
-  match device with
-  | Device.MPS => "MPS (Apple Silicon)"
-  | Device.CUDA n => s!"CUDA:{n}"
-  | Device.CPU => "CPU"
+  match device.kind with
+  | DeviceKind.MPS => "MPS (Apple Silicon)"
+  | DeviceKind.CUDA n => s!"CUDA:{n}"
+  | DeviceKind.CPU => "CPU"
 
 private def resolveDeviceFromEnv : IO Device := do
   let requestedDevice? := (← IO.getEnv "TYR_DEVICE")
   match requestedDevice?.map String.toLower with
   | some "auto" => getBestDevice
-  | some "cuda" => pure (Device.CUDA 0)
-  | some "mps" => pure Device.MPS
+  | some "cuda" => Device.cuda 0
+  | some "mps" => Device.mps
   | some "cpu" => pure Device.CPU
   | some _ => pure Device.CPU
   | none => pure Device.CPU

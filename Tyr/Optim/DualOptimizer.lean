@@ -379,6 +379,8 @@ private def stepOnManifoldFamilyKnown {m n : UInt64} {d : DType} {dev : Device}
       let g := Tyr.AD.StiefelTangent.project x (Tensor.transpose2d ambientGrad)
       pure (Tensor.transpose2d (Tyr.AD.DualMapGeometry.dualMapStep x g lr).matrix)
   | .orthogonal =>
+    let support ← d.acquireConstantSupport dev
+    let _ := support.down
     -- Orthogonal requires square matrices.
     if h : m = n then
       let pSquare : Tensor ⟨#[n, n], d, dev⟩ := by simpa [h] using param
@@ -498,8 +500,8 @@ def stepMatrixGroupLocal {m n : UInt64} {d : DType} {dev : Device}
     : IO (Array (Tensor ⟨#[m, n], d, dev⟩) × Array (MatrixParamState m n d dev)) := do
   let mut outParams : Array (Tensor ⟨#[m, n], d, dev⟩) := #[]
   let mut outStates : Array (MatrixParamState m n d dev) := #[]
-  for i in [:params.size] do
-    let p := params[i]!
+  for h : i in [:params.size] do
+    let p := params[i]
     let g := grads[i]?.getD (Tensor.zerosLike p)
     let st := match states[i]? with
       | some s => s
@@ -581,8 +583,8 @@ def stepMatrixGroupDistributed {m n : UInt64} {d : DType} {dev : Device}
           stepMatrixGroupLocal params grads states cfg step lrMul wdMul
         else
           let mut reducedGrads : Array (Tensor ⟨#[m, n], d, dev⟩) := #[]
-          for i in [:params.size] do
-            let p := params[i]!
+          for h : i in [:params.size] do
+            let p := params[i]
             let g := Tensor.detach (grads[i]?.getD (Tensor.zerosLike p))
             let g ← dist.allReduce g .avg
             reducedGrads := reducedGrads.push g

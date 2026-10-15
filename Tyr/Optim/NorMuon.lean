@@ -321,8 +321,8 @@ private def stepGroupLocal {σ : StaticSpec}
     : IO (Array (Tensor σ) × Array (ParamState σ)) := do
   let mut outParams : Array (Tensor σ) := #[]
   let mut outStates : Array (ParamState σ) := #[]
-  for i in [:params.size] do
-    let p := params[i]!
+  for h : i in [:params.size] do
+    let p := params[i]
     let g := grads[i]?.getD (Tensor.zerosLike p)
     let st := states[i]?.getD (initParamState p)
     let (p', st') ← stepSingle p g st cfg lrMul wdMul
@@ -344,8 +344,7 @@ def stepDistributedGroup {σ : StaticSpec}
     (states : Array (ParamState σ))
     (cfg : Config) (lrMul wdMul : Float := 1.0)
     : IO (Array (Tensor σ) × Array (ParamState σ)) := do
-  if params.isEmpty then
-    return (params, states)
+  let some template := params[0]? | return (params, states)
 
   let isDist ← dist.isInitialized
   if !cfg.distributed || !isDist then
@@ -358,7 +357,7 @@ def stepDistributedGroup {σ : StaticSpec}
   let rank ← dist.getRank
   let ws := worldSize.toNat
   let rankNat := rank.toNat
-  let zeroBuf := Tensor.zerosLike params[0]!
+  let zeroBuf := Tensor.zerosLike template
   let mut outParams := params
   let mut outStates := states
   let mut base : Nat := 0
@@ -372,11 +371,11 @@ def stepDistributedGroup {σ : StaticSpec}
       rsInputs := rsInputs.push g
 
     let ownerIdx := base + rankNat
-    let gradOwner := if ownerIdx < params.size then Tensor.zerosLike params[ownerIdx]!
+    let gradOwner := if h : ownerIdx < params.size then Tensor.zerosLike params[ownerIdx]
       else Tensor.zerosLike zeroBuf
     let gradOwner ← dist.reduceScatterList gradOwner rsInputs .avg
 
-    let mut ownerParam := if ownerIdx < params.size then params[ownerIdx]! else zeroBuf
+    let mut ownerParam := if h : ownerIdx < params.size then params[ownerIdx] else zeroBuf
     let mut ownerState := states[ownerIdx]?.getD (initParamState ownerParam)
     if ownerIdx < params.size then
       let (p', st') ← stepSingle ownerParam gradOwner ownerState cfg lrMul wdMul
@@ -387,7 +386,7 @@ def stepDistributedGroup {σ : StaticSpec}
     let mut gatherParams : Array (Tensor σ) := #[]
     for j in [:ws] do
       let idx := base + j
-      let t := if idx < params.size then params[idx]! else zeroBuf
+      let t := if h : idx < params.size then params[idx] else zeroBuf
       gatherParams := gatherParams.push (Tensor.detach t)
     let agInput := if ownerIdx < params.size then ownerParam else zeroBuf
     gatherParams ← dist.allGatherList gatherParams agInput
@@ -396,7 +395,7 @@ def stepDistributedGroup {σ : StaticSpec}
     let mut gatherMomentum : Array (Tensor σ) := #[]
     for j in [:ws] do
       let idx := base + j
-      let t := if idx < params.size then params[idx]! else zeroBuf
+      let t := if h : idx < params.size then params[idx] else zeroBuf
       gatherMomentum := gatherMomentum.push (Tensor.zerosLike t)
     let agMomentum := ownerState.momentumBuffer.getD (Tensor.zerosLike agInput)
     gatherMomentum ← dist.allGatherList gatherMomentum agMomentum
@@ -404,11 +403,15 @@ def stepDistributedGroup {σ : StaticSpec}
     for j in [:ws] do
       let idx := base + j
       if idx < params.size then
-        let pSynced ← Tensor.parameter (Tensor.detach gatherParams[j]!)
+        let some gatheredParam := gatherParams[j]? |
+          throw (IO.userError "NorMuon.stepDistributedGroup: gathered parameter list is too short")
+        let some gatheredMomentum := gatherMomentum[j]? |
+          throw (IO.userError "NorMuon.stepDistributedGroup: gathered momentum list is too short")
+        let pSynced ← Tensor.parameter (Tensor.detach gatheredParam)
         outParams := outParams.set! idx pSynced
         let prevState := outStates[idx]?.getD (initParamState pSynced)
         let stSynced : ParamState σ := {
-          momentumBuffer := some (Tensor.detach gatherMomentum[j]!)
+          momentumBuffer := some (Tensor.detach gatheredMomentum)
           secondMoment := prevState.secondMoment
           step := prevState.step + 1
         }

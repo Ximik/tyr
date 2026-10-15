@@ -765,7 +765,7 @@ namespace AdaIN1d
 
 def init (styleDim channels : UInt64) (device : Device := .CPU) : IO (AdaIN1d (device := device) styleDim channels) := do
   let fc ← LinearNorm.init (device := device) styleDim (2 * channels)
-  let normWeight ← Tensor.parameter (← Tensor.onesIO #[channels] device)
+  let normWeight ← Tensor.parameter (Tensor.ones #[channels] (device := device))
   let normBias ← initBias (device := device) #[channels]
   pure { fc, normWeight, normBias }
 
@@ -929,8 +929,8 @@ def init (channels kernel styleDim : UInt64) (device : Device := .CPU) : IO (Ada
     convs2 := convs2.push (← Conv1dParams.init (device := device) channels channels kernel 1 ((kernel - 1) / 2) 1)
     norms1 := norms1.push (← AdaIN1d.init (device := device) styleDim channels)
     norms2 := norms2.push (← AdaIN1d.init (device := device) styleDim channels)
-    alpha1 := alpha1.push ((← Tensor.onesIO #[1, channels, 1] device))
-    alpha2 := alpha2.push ((← Tensor.onesIO #[1, channels, 1] device))
+    alpha1 := alpha1.push ((Tensor.ones #[1, channels, 1] (device := device)))
+    alpha2 := alpha2.push ((Tensor.ones #[1, channels, 1] (device := device)))
   pure { convs1, convs2, norms1, norms2, alpha1, alpha2 }
 
 def forward {frames channels kernel styleDim : UInt64}
@@ -1051,7 +1051,7 @@ namespace AdaIN1dDyn
 
 def init (styleDim channels : UInt64) (device : Device := .CPU) : IO (AdaIN1dDyn (device := device) styleDim) := do
   let fc ← LinearNorm.init (device := device) styleDim (2 * channels)
-  let normWeight : Tensor { shape := #[channels], dtype := .Float32, device := device } ← Tensor.parameter (← Tensor.onesIO #[channels] device)
+  let normWeight : Tensor { shape := #[channels], dtype := .Float32, device := device } ← Tensor.parameter (Tensor.ones #[channels] (device := device))
   let normBias ← initBias (device := device) #[channels]
   pure {
     fcWeight := Tensor.packShape fc.weight
@@ -1192,8 +1192,8 @@ def init (styleDim channels kernel : UInt64) (dilations : Array UInt64) (device 
     convs2 := convs2.push (← WNConv1dDyn.init (device := device) channels channels kernel 1 ((kernel - 1) / 2) 1)
     norms1 := norms1.push (← AdaIN1dDyn.init (device := device) styleDim channels)
     norms2 := norms2.push (← AdaIN1dDyn.init (device := device) styleDim channels)
-    alpha1 := alpha1.push (Tensor.packShape ((← Tensor.onesIO #[1, channels, 1] device)))
-    alpha2 := alpha2.push (Tensor.packShape ((← Tensor.onesIO #[1, channels, 1] device)))
+    alpha1 := alpha1.push (Tensor.packShape ((Tensor.ones #[1, channels, 1] (device := device))))
+    alpha2 := alpha2.push (Tensor.packShape ((Tensor.ones #[1, channels, 1] (device := device))))
   pure { convs1, convs2, norms1, norms2, alpha1, alpha2 }
 
 def forward {frames channels styleDim : UInt64}
@@ -1828,7 +1828,7 @@ def synthesizeIds {seq : UInt64}
   match (← prepareSynthesis m inputIds refStyle speed) with
   | none =>
     pure {
-      audio := Tensor.packShape (← Tensor.zerosIO #[1, 1, 0] (modelDevice m))
+      audio := Tensor.packShape (Tensor.zeros #[1, 1, 0] (device := modelDevice m))
       predDurations := #[]
       alignmentFrames := 0
     }
@@ -1855,10 +1855,10 @@ def debugSynthesizeIds {seq : UInt64}
   | none =>
     let device := modelDevice m
     pure {
-      asr := Tensor.packShape (← Tensor.zerosIO #[1, cfg.hiddenDim, 0] device)
-      f0Curve := Tensor.packShape (← Tensor.zerosIO #[1, 1, 0] device)
-      nCurve := Tensor.packShape (← Tensor.zerosIO #[1, 1, 0] device)
-      audio := Tensor.packShape (← Tensor.zerosIO #[1, 1, 0] device)
+      asr := Tensor.packShape (Tensor.zeros #[1, cfg.hiddenDim, 0] (device := device))
+      f0Curve := Tensor.packShape (Tensor.zeros #[1, 1, 0] (device := device))
+      nCurve := Tensor.packShape (Tensor.zeros #[1, 1, 0] (device := device))
+      audio := Tensor.packShape (Tensor.zeros #[1, 1, 0] (device := device))
       predDurations := #[]
       alignmentFrames := 0
     }

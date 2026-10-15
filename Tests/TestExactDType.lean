@@ -1,4 +1,5 @@
 import LeanTest
+import Tests.Devices
 import Tyr.Typed.Neural
 
 namespace Tests.ExactDType
@@ -33,7 +34,7 @@ example (_tensor : Tensor ⟨#[2], .Unknown "dynamic", .CPU⟩) : True := by
     have _ := _tensor.packDType (by decide)
   trivial
 
-example (_packed : SomeDTypeTensor #[2] .CPU) : True := by
+example {_otherDevice : Device} (_packed : SomeDTypeTensor #[2] .CPU) : True := by
   fail_if_success
     have _ : Tensor ⟨#[2], .Unknown "dynamic", .CPU⟩ := _packed
   fail_if_success
@@ -41,14 +42,14 @@ example (_packed : SomeDTypeTensor #[2] .CPU) : True := by
   fail_if_success
     have _ : Tensor ⟨#[2], .Float32, .CPU⟩ := _packed.2
   fail_if_success
-    have _ : SomeDTypeTensor #[2] (.CUDA 0) := _packed
+    have _ : SomeDTypeTensor #[2] _otherDevice := _packed
   trivial
 
 private abbrev float32 : torch.ExactDType := ⟨.Float32, by decide⟩
 
 @[test] def testExactDTypeReificationRetainsValuesAndMetadata : IO Unit := do
   for dtype in #[DType.Float32, .BFloat16, .Int64, .Complex64] do
-    let source := ((Tensor.fromFloatArray #[2, -3]).castDType dtype).forgetDType
+    let source := ((Tensor.fromFloatArray #[2, -3]).castDType dtype)
     let packed ← IO.ofExcept source.reifyDType
     let index ← IO.ofExcept (reifiedIndex source)
     LeanTest.assertEqual packed.1.val dtype
@@ -68,8 +69,9 @@ private abbrev float32 : torch.ExactDType := ⟨.Float32, by decide⟩
   LeanTest.assertEqual (← packed.2.toFloatArray) #[2, -3]
   LeanTest.assertTrue
     (SomeDTypeTensor.ofRaw (shape := #[3]) (device := .CPU) raw).toOption.isNone
-  LeanTest.assertTrue
-    (SomeDTypeTensor.ofRaw (shape := #[2]) (device := .CUDA 0) raw).toOption.isNone
+  for device in ← Tests.acceleratorDevices do
+    LeanTest.assertTrue
+      (SomeDTypeTensor.ofRaw (shape := #[2]) (device := device) raw).toOption.isNone
   LeanTest.assertTrue (torch.ExactDType.ofDType? (.Unknown "dynamic")).toOption.isNone
   -- Unknown metadata tokens remain exact, not permissions to reinterpret data.
   let future ← IO.ofExcept (torch.ExactDType.ofDType? (.Unknown "future_dtype"))
@@ -85,11 +87,11 @@ private def alignDType {shape : Shape} {device : Device}
 
 @[test] def testExactDTypeEqualityBeforeSharedDTypeUse : IO Unit := do
   let source := (Tensor.fromFloatArray #[1, 2, 3, 4]).reshapeChecked #[2, 2]
-  let left ← IO.ofExcept source.forgetDType.reifyDType
-  let right ← IO.ofExcept source.forgetDType.reifyDType
+  let left ← IO.ofExcept source.reifyDType
+  let right ← IO.ofExcept source.reifyDType
   let aligned ← IO.ofExcept (alignDType left right)
   LeanTest.assertEqual (← (Tensor.mm left.2 aligned).toFloatArray) #[7, 10, 15, 22]
-  let different ← IO.ofExcept (source.castDType .BFloat16).forgetDType.reifyDType
+  let different ← IO.ofExcept (source.castDType .BFloat16).reifyDType
   LeanTest.assertTrue (left.sameDType? different).toOption.isNone
   LeanTest.assertTrue (left.atDType? ⟨.Int64, by decide⟩).toOption.isNone
   let recovered ← IO.ofExcept (left.atDType? float32)
@@ -98,7 +100,7 @@ private def alignDType {shape : Shape} {device : Device}
 @[test] def testExactDTypePackagingPreservesAutogradIdentity : IO Unit := do
   let parameter ← (Tensor.fromFloatArray #[2, 3]).parameter
   let staticallyPacked := parameter.packDType (by decide)
-  let packed ← IO.ofExcept staticallyPacked.2.forgetDType.reifyDType
+  let packed ← IO.ofExcept staticallyPacked.2.reifyDType
   let recovered ← IO.ofExcept (packed.atDType? float32)
   LeanTest.assertTrue recovered.requiresGrad
   LeanTest.assertFalse recovered.hasGradFn
@@ -107,7 +109,7 @@ private def alignDType {shape : Shape} {device : Device}
   LeanTest.assertEqual (← (← recovered.gradOf).toFloatArray) #[4, 6]
   parameter.zeroGrad
   let intermediate := parameter * parameter
-  let graph ← IO.ofExcept intermediate.forgetDType.reifyDType
+  let graph ← IO.ofExcept intermediate.reifyDType
   let recoveredGraph ← IO.ofExcept (graph.atDType? float32)
   LeanTest.assertTrue recoveredGraph.requiresGrad
   LeanTest.assertTrue recoveredGraph.hasGradFn
@@ -118,7 +120,7 @@ private def alignDType {shape : Shape} {device : Device}
   let negative : Tensor ⟨#[1], .Complex64, .CPU⟩ :=
     (Tensor.full #[1] (-4)).castDType .Complex64
   let imaginary := Tensor.sqrt negative
-  let packed ← IO.ofExcept imaginary.forgetDType.reifyDType
+  let packed ← IO.ofExcept imaginary.reifyDType
   let recovered ← IO.ofExcept (packed.atDType? ⟨.Complex64, by decide⟩)
   LeanTest.assertEqual (← (Tensor.abs recovered).toFloatArray) #[2]
   LeanTest.assertEqual (← (recovered * recovered).toFloatArray) #[-4]

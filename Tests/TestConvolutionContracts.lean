@@ -17,14 +17,14 @@ private def expectError {α : Type} (result : Except String α) (fragment : Stri
     LeanTest.assertTrue (!message.isEmpty)
     LeanTest.assertTrue (message.containsSubstr fragment) message
 
-example (_input : Tensor ⟨#[1, 1, 3], .Float32, .CPU⟩)
-    (_weight : Tensor ⟨#[1, 1, 2], .Float32, .CUDA 0⟩) : True := by
+example {otherDevice : Device} (_input : Tensor ⟨#[1, 1, 3], .Float32, .CPU⟩)
+    (_weight : Tensor ⟨#[1, 1, 2], .Float32, otherDevice⟩) : True := by
   fail_if_success have _ := Tensor.conv1d? _input _weight
   trivial
 
-example (_input : Tensor ⟨#[1, 1, 3, 3], .Float32, .CPU⟩)
+example {otherDevice : Device} (_input : Tensor ⟨#[1, 1, 3, 3], .Float32, .CPU⟩)
     (_weight : Tensor ⟨#[1, 1, 2, 2], .Float32, .CPU⟩)
-    (_bias : Tensor ⟨#[1], .Float32, .CUDA 0⟩) : True := by
+    (_bias : Tensor ⟨#[1], .Float32, otherDevice⟩) : True := by
   fail_if_success have _ := Tensor.conv2dBias? _input _weight _bias
   trivial
 
@@ -40,24 +40,33 @@ example (input : Tensor ⟨#[1, 1, 5, 5], .Float32, .CPU⟩)
     Tensor ⟨#[1, 1, 3, 3], .Float32, .CPU⟩ :=
   Tensor.conv2dBias input weight bias (dilation := #[2])
 
+example (_image : Tensor ⟨#[1, 1, 3, 3], .Float32, .CPU⟩)
+    (_square : Tensor ⟨#[1, 1, 2, 2], .Float32, .CPU⟩)
+    (_otherSquare : Tensor ⟨#[1, 1, 2, 2], .Float64, .CPU⟩)
+    (_line : Tensor ⟨#[1, 1, 3], .Float32, .CPU⟩)
+    (_kernel : Tensor ⟨#[1, 1, 2], .Float32, .CPU⟩)
+    (_otherKernel : Tensor ⟨#[1, 1, 2], .Float64, .CPU⟩)
+    (_bias : Tensor ⟨#[1], .Float32, .CPU⟩)
+    (_otherBias : Tensor ⟨#[1], .Float64, .CPU⟩) : True := by
+  fail_if_success have _ := Tensor.conv2dBias? _image _otherSquare _bias
+  fail_if_success have _ := Tensor.conv2dBias? _image _square _otherBias
+  fail_if_success have _ := Tensor.conv1d? _line _otherKernel
+  fail_if_success have _ := Tensor.conv1dGroups? _line _otherKernel _bias
+  fail_if_success have _ := Tensor.conv1dGroups? _line _kernel _otherBias
+  fail_if_success have _ := Tensor.convTranspose1d? _line _otherKernel _bias
+  fail_if_success have _ := Tensor.convTranspose1d? _line _kernel _otherBias
+  trivial
+
 @[test]
 def testConvolutionMetadataFailureIsRecoverable : IO Unit := do
-  let input := (Tensor.ones #[1, 1, 3, 3]).forgetDType
-  let weight := (Tensor.ones #[1, 1, 2, 2]).forgetDType
-  let bias := (Tensor.zeros #[1]).forgetDType
-  let otherWeight := (weight.castDType .Float64).forgetDType
-  let otherBias := (bias.castDType .Float64).forgetDType
-  expectError (Tensor.conv2dBias? input otherWeight bias) "Expected dtype Float32, got Float64"
-  expectError (Tensor.conv2dBias? input weight otherBias) "Expected dtype Float32, got Float64"
-  let line := (Tensor.ones #[1, 1, 3]).forgetDType
-  let kernel := (Tensor.ones #[1, 1, 2]).forgetDType
-  let otherKernel := (kernel.castDType .Float64).forgetDType
-  expectError (Tensor.conv1d? line otherKernel) "Expected dtype Float32, got Float64"
-  expectError (Tensor.conv1dGroups? line otherKernel bias) "Expected dtype Float32, got Float64"
-  expectError (Tensor.conv1dGroups? line kernel otherBias) "Expected dtype Float32, got Float64"
-  expectError (Tensor.convTranspose1d? line otherKernel bias) "Expected dtype Float32, got Float64"
-  expectError (Tensor.convTranspose1d? line kernel otherBias) "Expected dtype Float32, got Float64"
-  let output ← checked (Tensor.conv2dBias? (input.castDType .Float64).forgetDType otherWeight otherBias)
+  let input := Tensor.ones #[1, 1, 3, 3]
+  let weight := Tensor.ones #[1, 1, 2, 2]
+  let bias := Tensor.zeros #[1]
+  -- A runtime-loaded dtype must match before it can enter the shared-dtype API.
+  let loaded ← checked ((weight.castDType .Float64).reifyDType)
+  expectError (loaded.atDType? ⟨.Float32, by decide⟩) "dtype"
+  let output ← checked (Tensor.conv2dBias? (input.castDType .Float64)
+    (weight.castDType .Float64) (bias.castDType .Float64))
   LeanTest.assertEqual output.raw.dtype .Float64
   LeanTest.assertEqual (← output.toFloatArray) #[4, 4, 4, 4]
 

@@ -9,7 +9,7 @@ variable {device : Device}
 private def checked {s : Shape} (raw : RawTensor) : Tensor { shape := s, dtype := .Float32, device := device } :=
   match Tensor.ofRaw raw with
   | .ok result => result
-  | .error message => panic! s!"KittenTTS tensor boundary: {message}"
+  | .error message => nativeInvariantFailure s!"KittenTTS tensor boundary: {message}"
 
 def catTo {s t : Shape} {d : DType} (x : Tensor { shape := s, dtype := d, device := device }) (y : Tensor { shape := t, dtype := d, device := device }) (dim : Nat) :
     Tensor { shape := (TensorSpec.catShape s t dim), dtype := d, device := device } := Tensor.cat x y dim
@@ -25,11 +25,13 @@ def bmm {batch rows inner cols : UInt64} (a : Tensor { shape := #[batch, rows, i
     (b.reshapeChecked #[batch, 1, inner, cols])).reshapeChecked #[batch, rows, cols]
 
 def uniformTensor (shape : Shape) (lo hi : Float) : IO (Tensor { shape := shape, dtype := .Float32, device := device }) := do
-  Tensor.uniformLike (← Tensor.zerosIO shape device) lo hi
+  IO.ofExcept (Shape.validateAllocation shape)
+  Tensor.uniformLike (Tensor.zeros shape (device := device)) lo hi
 
 def randTensor (shape : Shape) (requiresGrad : Bool := false) (device : Device := .CPU) :
     IO (Tensor { shape := shape, dtype := .Float32, device := device }) := do
-  let sample ← Tensor.uniformLike (← Tensor.zerosIO shape device)
+  IO.ofExcept (Shape.validateAllocation shape)
+  let sample ← Tensor.uniformLike (Tensor.zeros shape (device := device))
   if requiresGrad then sample.parameter else pure sample
 
 def leakyRelu {s : Shape} (x : Tensor { shape := s, dtype := .Float32, device := device }) (slope : Float := 0.01) : Tensor { shape := s, dtype := .Float32, device := device } :=

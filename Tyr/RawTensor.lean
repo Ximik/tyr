@@ -4,12 +4,6 @@ import Tyr.Basic
 Model code should use `torch.Tensor`; only typed adapters call this module. -/
 namespace torch.RawTensor
 
-/-- Nontrainable constant factories with recoverable native failures. -/
-@[extern "lean_torch_zeros_checked"] opaque zerosChecked (shape : Shape)
-    (device : Device := .CPU) : Except String RawTensor
-@[extern "lean_torch_ones_checked"] opaque onesChecked (shape : Shape)
-    (device : Device := .CPU) : Except String RawTensor
-
 @[extern "lean_torch_ones"] opaque ones (shape : Shape) (requiresGrad : Bool := false) (device : Device := .CPU) (noGrad : requiresGrad = false := by decide) : RawTensor
 
 @[extern "lean_torch_randn"] opaque randn (shape : Shape) (requiresGrad : Bool := false) (device : Device := .CPU) : IO RawTensor
@@ -193,7 +187,6 @@ namespace torch.RawTensor
     (lo hi : Float) : IO RawTensor
 
 @[extern "lean_torch_eye"] opaque eye (n : UInt64) (requiresGrad : Bool := false) (noGrad : requiresGrad = false := by decide) : RawTensor
-@[extern "lean_torch_eye_checked"] opaque eyeChecked (n : UInt64) : Except String RawTensor
 
 /-- Complete QR: returns (Q, R) with Q m×m and R m×n. -/
 @[extern "lean_torch_qr"] opaque qr (m n : UInt64) (t : @& RawTensor) : RawTensor × RawTensor

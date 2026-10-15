@@ -208,11 +208,57 @@ def DType.safeTensorTag? : DType → Option String
 instance : ToString DType where
   toString := DType.canonicalName
 
-inductive Device where
-| CUDA : UInt64 → Device
+/-! A placement description does not grant access to a runtime device. -/
+inductive DeviceKind where
+| CUDA : UInt64 → DeviceKind
 | CPU
 | MPS
 deriving Repr, Inhabited, BEq, DecidableEq
+
+namespace Device
+
+-- Availability is established at the runtime acquisition boundary. In
+-- particular, exposing the subtype constructor must not allow callers to
+-- manufacture accelerator access by constructing a proof themselves.
+private opaque AcceleratorAvailable (_kind : DeviceKind) : Prop := True
+
+/-- CPU is always available; accelerator availability is opaque to pure code. -/
+def Valid : DeviceKind → Prop
+  | .CPU => True
+  | kind => AcceleratorAvailable kind
+
+end Device
+
+/-- An acquired runtime placement. The validity proof erases, retaining the
+native DeviceKind representation and exact placement identity in tensor types.
+Use `Device.cuda` or `Device.mps` to acquire accelerator placements in IO. -/
+def Device := { kind : DeviceKind // Device.Valid kind }
+
+namespace Device
+
+/-- A descriptive view of an acquired placement; descriptions cannot be used
+where an acquired `Device` is required. -/
+def kind (device : Device) : DeviceKind := device.val
+
+/-- The host device is available without runtime acquisition. -/
+@[match_pattern]
+def CPU : Device := ⟨.CPU, trivial⟩
+
+instance : Inhabited Device := ⟨CPU⟩
+
+instance : Repr Device where
+  reprPrec device precedence := reprPrec device.kind precedence
+
+instance : BEq Device where
+  beq left right := left.kind == right.kind
+
+instance : DecidableEq Device := fun left right =>
+  if same : left.val = right.val then
+    .isTrue (Subtype.ext same)
+  else
+    .isFalse (fun sameDevice => same (congrArg Subtype.val sameDevice))
+
+end Device
 
 opaque TSpec : NonemptyType
 
@@ -222,11 +268,11 @@ def RawTensor : Type := TSpec.type
 
 instance : Nonempty RawTensor := TSpec.property
 
-/-- Tensor indices retain shape and actual placement. The reserved dynamic dtype
-marker is optional; placement must always be supplied, including runtime values. -/
+/-- Tensor indices retain exact shape, dtype and actual placement.
+Every field is required, including when its value is known only at runtime. -/
 structure StaticSpec where
   shape : Shape
-  dtype : DType := .Unknown "dynamic"
+  dtype : DType
   device : Device
 deriving Repr, BEq
 

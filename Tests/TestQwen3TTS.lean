@@ -101,6 +101,8 @@ def testQwen3TTSBFloat16IncrementalCache : IO Unit := do
   let (cos, sin) := Tensor.rotaryFreqs 5 4 10000
   for bf16 in #[false, true] do
     let dtype := if bf16 then DType.BFloat16 else .Float32
+    let support ← dtype.acquireConstantSupport .CPU
+    let _ := support.down
     let raw ← qwen.QwenLayer.init 8 2 1 4 16 (dtype := dtype)
     let raw := TensorStruct.detach raw
     let layer := { raw with

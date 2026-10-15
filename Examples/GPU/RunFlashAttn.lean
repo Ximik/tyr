@@ -9,6 +9,8 @@ import Examples.GPU.FixtureRunner
 namespace Examples.GPU.RunFlashAttn
 
 open torch
+
+variable {device : Device}
 open Tyr.GPU.Kernels
 
 def suiteName : String := "flashattn"
@@ -26,7 +28,7 @@ def generateFixtures : IO Unit := do
     throw <| IO.userError "CUDA is not available; cannot generate flash attention fixtures."
 
   IO.FS.createDirAll fixtureSpec.dir
-  let device := Device.CUDA 0
+  let device ← Device.cuda 0
 
   let qf ← Tensor.randn #[1, 1, 128, 64] false device
   let kf ← Tensor.randn #[1, 1, 128, 64] false device
@@ -52,18 +54,19 @@ def runOnce : IO Bool := do
   if !(← requireCuda suiteName) then
     return false
 
+  let device ← Device.cuda 0
   if !(← fixturesPresent fixtureSpec) then
     generateFixtures
 
-  let q ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[1, 1, 128, 64], dtype := .BFloat16 } (fixtureFile "q").toString
-  let k ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[1, 1, 128, 64], dtype := .BFloat16 } (fixtureFile "k").toString
-  let v ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[1, 1, 128, 64], dtype := .BFloat16 } (fixtureFile "v").toString
-  let expectedOut ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[1, 1, 128, 64], dtype := .BFloat16 } (fixtureFile "expected_o").toString
-  let expectedLse ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[2, 64], dtype := .Float32 } (fixtureFile "expected_lse").toString
+  let q ← Tensor.loadTensorExact { device := device, shape := #[1, 1, 128, 64], dtype := .BFloat16 } (fixtureFile "q").toString
+  let k ← Tensor.loadTensorExact { device := device, shape := #[1, 1, 128, 64], dtype := .BFloat16 } (fixtureFile "k").toString
+  let v ← Tensor.loadTensorExact { device := device, shape := #[1, 1, 128, 64], dtype := .BFloat16 } (fixtureFile "v").toString
+  let expectedOut ← Tensor.loadTensorExact { device := device, shape := #[1, 1, 128, 64], dtype := .BFloat16 } (fixtureFile "expected_o").toString
+  let expectedLse ← Tensor.loadTensorExact { device := device, shape := #[2, 64], dtype := .Float32 } (fixtureFile "expected_lse").toString
 
   let outFwd ← Tensor.uniformLike q 0 0
   let outFwdLse ← Tensor.uniformLike q 0 0
-  let lseOut ← Tensor.uniformLike (Tensor.zeros #[2, 64] false (Device.CUDA 0)) 0 0
+  let lseOut ← Tensor.uniformLike (Tensor.zeros #[2, 64] false device) 0 0
   let stream ← torch.cuda_current_stream
 
   -- grid=(1,2,1): one CTA per 64-row query tile.

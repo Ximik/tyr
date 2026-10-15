@@ -6,8 +6,8 @@ import LeanTest
 
 open torch
 
-private def randnDynamic (shape : Shape) : IO (Tensor { shape := shape, device := .CPU }) := do
-  return (← Tensor.randn shape).forgetDType
+private def randnDynamic (shape : Shape) : IO (Tensor { shape := shape, device := .CPU, dtype := .Float32 }) := do
+  return (← Tensor.randn shape)
 open torch.Model
 open torch.qwen35
 
@@ -164,9 +164,9 @@ def testQwen35MultimodalGenerateStreamWithImageAndVideoFeatures : IO Unit := do
   let ids : Tensor { shape := #[1, 8], dtype := .Int64, device := .CPU } :=
     Tensor.reshapeChecked (Tensor.fromInt64Array #[2, 50, 50, 51, 51, 51, 9, 10]) #[1, 8]
 
-  let imageFeat : Tensor { shape := #[2, tinyVLCfg.vision_config.out_hidden_size], device := .CPU } ←
+  let imageFeat : Tensor { shape := #[2, tinyVLCfg.vision_config.out_hidden_size], device := .CPU, dtype := .Float32 } ←
     randnDynamic #[2, tinyVLCfg.vision_config.out_hidden_size]
-  let videoFeat : Tensor { shape := #[3, tinyVLCfg.vision_config.out_hidden_size], device := .CPU } ←
+  let videoFeat : Tensor { shape := #[3, tinyVLCfg.vision_config.out_hidden_size], device := .CPU, dtype := .Float32 } ←
     randnDynamic #[3, tinyVLCfg.vision_config.out_hidden_size]
 
   let callbacksRef ← IO.mkRef (0 : Nat)

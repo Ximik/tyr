@@ -143,8 +143,10 @@ private def loadCodePredictorProjectionSharded (modelDir : String) (cfg : Talker
   | some w, some b => pure (reqGradFalse w, reqGradFalse b)
   | none, none =>
     if cp.hiddenSize == cfg.hiddenSize then
-      let w ← Tensor.eyeForIO (n := cp.hiddenSize) dtype.val device
-      let b ← Tensor.zerosForIO { shape := #[cp.hiddenSize], dtype := dtype.val, device }
+      let support ← dtype.val.acquireConstantSupport device
+      let _ := support.down
+      let w := Tensor.eyeFor (n := cp.hiddenSize) dtype.val device
+      let b := Tensor.zerosFor { shape := #[cp.hiddenSize], dtype := dtype.val, device }
       pure (w.reshapeChecked #[cfg.codePredictorConfig.hiddenSize, cfg.hiddenSize], b)
     else
       throw <| IO.userError

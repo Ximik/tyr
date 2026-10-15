@@ -114,6 +114,7 @@ def applyRegularized {rank dim : UInt64} {d : DType} {dev : Device}
 
 /-- Woodbury inner matrix `I + K D^{-1} K^T`. -/
 def woodburyInner {rank dim : UInt64} {d : DType} {dev : Device}
+    [DType.ConstantSupported d dev]
     (D : DiagonalMass dim d dev)
     (K : MetricFactor rank dim d dev) : Tensor ⟨#[rank, rank], d, dev⟩ :=
   let kd := scaleColumns K.matrix D.invDiag
@@ -121,6 +122,7 @@ def woodburyInner {rank dim : UInt64} {d : DType} {dev : Device}
 
 /-- Solve `(D + K^T K) x = g` using the Woodbury identity. -/
 def solveWoodbury {rank dim : UInt64} {d : DType} {dev : Device}
+    [DType.ConstantSupported d dev]
     (D : DiagonalMass dim d dev)
     (K : MetricFactor rank dim d dev)
     (g : Tensor ⟨#[dim], d, dev⟩) : Tensor ⟨#[dim], d, dev⟩ :=

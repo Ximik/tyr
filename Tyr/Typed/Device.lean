@@ -10,16 +10,16 @@ boundaries such as file loading and external native handles.
 
 namespace torch
 
-namespace Device
+namespace DeviceKind
 
-def render : Device → String
+def render : DeviceKind → String
   | .CPU => "CPU"
   | .MPS => "MPS"
   | .CUDA idx => s!"CUDA:{idx}"
 
 /-- Validate actual placement for operations that require one device.
 The check is independent of the typed indices and also guards raw boundaries. -/
-def sameResult? (left right : Device) : Except String Device :=
+def sameResult? (left right : DeviceKind) : Except String DeviceKind :=
   if left == right then
     .ok left
   else
@@ -28,8 +28,8 @@ def sameResult? (left right : Device) : Except String Device :=
 /-- Validate binary pointwise placement and determine the result device. PyTorch
 allows a rank-zero CPU operand on another operand's device. A one-element
 vector is not a scalar, and accelerator scalars do not get this exception. -/
-def pointwiseResult? (leftShape : Shape) (left : Device)
-    (rightShape : Shape) (right : Device) : Except String Device :=
+def pointwiseResult? (leftShape : Shape) (left : DeviceKind)
+    (rightShape : Shape) (right : DeviceKind) : Except String DeviceKind :=
   if left == right then
     .ok left
   else if left == .CPU && leftShape.isEmpty then
@@ -44,9 +44,9 @@ left, right order, or CPU if all inputs are on CPU. Rank-zero operands on other
 devices are relocated by the native operation; non-scalars must already be on
 the selected device. Unlike binary arithmetic, this also permits relocation of
 an accelerator scalar. This checks placement only, not broadcasting or dtype. -/
-def selectionResult? (conditionShape : Shape) (condition : Device)
-    (leftShape : Shape) (left : Device) (rightShape : Shape) (right : Device) :
-    Except String Device := do
+def selectionResult? (conditionShape : Shape) (condition : DeviceKind)
+    (leftShape : Shape) (left : DeviceKind) (rightShape : Shape) (right : DeviceKind) :
+    Except String DeviceKind := do
   let result := if condition != .CPU then condition else if left != .CPU then left else right
   for (label, shape, device) in #[
       ("condition", conditionShape, condition), ("left", leftShape, left),
@@ -54,6 +54,31 @@ def selectionResult? (conditionShape : Shape) (condition : Device)
     if device != result && !(result != .CPU && shape.isEmpty) then
       throw s!"Incompatible selection device: {label} is {device.render} at shape {shape}, expected {result.render}; only rank-zero operands may move to the selected device"
   pure result
+
+end DeviceKind
+
+namespace Device
+
+def render (device : Device) : String := device.kind.render
+
+/-- Validate acquired placement identity at a native boundary. -/
+def sameResult? (left right : Device) : Except String Device := do
+  let _ ← DeviceKind.sameResult? left.kind right.kind
+  pure left
+
+/-- Validate placement descriptions and retain an already acquired result device. -/
+def pointwiseResult? (leftShape : Shape) (left : Device)
+    (rightShape : Shape) (right : Device) : Except String Device := do
+  let result ← DeviceKind.pointwiseResult? leftShape left.kind rightShape right.kind
+  pure (if result == left.kind then left else right)
+
+/-- Scalar relocation selects one of the acquired input placements. -/
+def selectionResult? (conditionShape : Shape) (condition : Device)
+    (leftShape : Shape) (left : Device) (rightShape : Shape) (right : Device) :
+    Except String Device := do
+  let result ← DeviceKind.selectionResult? conditionShape condition.kind
+    leftShape left.kind rightShape right.kind
+  pure (if result == condition.kind then condition else if result == left.kind then left else right)
 
 /-- Equality evidence for a same-device operation. Runtime-selected devices can
 be related by checking equality before entering a shared-device operation. -/

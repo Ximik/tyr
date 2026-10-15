@@ -86,6 +86,7 @@ jobs:
           python3 scripts/check_ffi_abi.py --header cc/src/tyr_float_buffer_abi.h --generated .lake/build/ir/Tyr/Audio/FloatBuffer.c --require-complete
           python3 scripts/check_ffi_abi.py --header cc/src/tyr_parquet_abi.h --generated .lake/build/ir/Tyr/Data/Pretraining.c --require-complete --symbol-prefix lean_parquet_
           python3 scripts/check_ffi_abi.py --header cc/src/tyr_torch_abi.h --generated .lake/build/ir/Tyr/Torch.c --require-complete
+          python3 scripts/check_ffi_abi.py --header cc/src/tyr_constant_support_abi.h --generated .lake/build/ir/Tyr/ConstantSupport.c --require-complete
           python3 scripts/check_ffi_abi.py --header cc/src/tyr_distributed_abi.h --generated .lake/build/ir/Tyr/Distributed.c --require-complete
 
       - name: Test native attention CPU semantics

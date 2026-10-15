@@ -7,6 +7,8 @@
 extern "C" {
 #endif
 lean_object* lean_torch_cuda_is_available();
+lean_object* lean_torch_device_cuda(uint64_t);
+lean_object* lean_torch_device_mps();
 lean_object* lean_torch_cuda_current_stream();
 lean_object* lean_torch_cuda_synchronize();
 lean_object* lean_torch_cuda_event_create();

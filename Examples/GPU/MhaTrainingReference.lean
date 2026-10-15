@@ -5,9 +5,9 @@ open torch
 
 variable {device : Device}
 
-abbrev MhaTensor (device : Device := .CUDA 0) := Tensor { shape := #[1, 1, 128, 64], dtype := .BFloat16, device := device }   -- bf16 kernel inputs/outputs
-abbrev MasterTensor (device : Device := .CUDA 0) := Tensor { shape := #[1, 1, 128, 64], dtype := .Float32, device := device } -- fp32 optimizer state
-abbrev LTensor (device : Device := .CUDA 0) := Tensor { shape := #[2, 64], dtype := .Float32, device := device }
+abbrev MhaTensor (device : Device) := Tensor { shape := #[1, 1, 128, 64], dtype := .BFloat16, device := device }   -- bf16 kernel inputs/outputs
+abbrev MasterTensor (device : Device) := Tensor { shape := #[1, 1, 128, 64], dtype := .Float32, device := device } -- fp32 optimizer state
+abbrev LTensor (device : Device) := Tensor { shape := #[2, 64], dtype := .Float32, device := device }
 def nElems : Float := 8192.0
 
 def lossAndGradOut (out targetOut : MhaTensor (device := device)) : Tensor { shape := #[], dtype := .Float32, device := device } × MhaTensor (device := device) :=

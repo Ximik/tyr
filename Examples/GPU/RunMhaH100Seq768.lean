@@ -8,11 +8,13 @@ import Examples.GPU.FixtureRunner
 namespace Examples.GPU
 
 open torch
+
+variable {device : Device}
 open Tyr.GPU.Kernels
 
-private abbrev MhaTensor := Tensor { shape := #[1, 1, 768, 64], dtype := .Float32, device := (.CUDA 0) }
-private abbrev LTensor := Tensor { shape := #[12, 64], dtype := .Float32, device := (.CUDA 0) }
-private abbrev GradTiles := Tensor { shape := #[12, 64, 64], dtype := .Float32, device := (.CUDA 0) }
+private abbrev MhaTensor (device : Device) := Tensor { shape := #[1, 1, 768, 64], dtype := .Float32, device := device }
+private abbrev LTensor (device : Device) := Tensor { shape := #[12, 64], dtype := .Float32, device := device }
+private abbrev GradTiles (device : Device) := Tensor { shape := #[12, 64, 64], dtype := .Float32, device := device }
 
 private def contractLabel : String := "dq_direct_kv_sweep_store_add"
 private def seqLen : Nat := 768
@@ -35,9 +37,9 @@ def fixtureFile (name : String) : System.FilePath :=
 private def partialDumpFile (name : String) : System.FilePath :=
   fixtureSpec.dir / name
 
-private def dumpAccumulatedGrads (dK dV : MhaTensor) : IO Unit := do
-  let dKTiles : GradTiles := Tensor.reshapeChecked dK #[12, 64, 64]
-  let dVTiles : GradTiles := Tensor.reshapeChecked dV #[12, 64, 64]
+private def dumpAccumulatedGrads (dK dV : MhaTensor (device := device)) : IO Unit := do
+  let dKTiles : GradTiles (device := device) := Tensor.reshapeChecked dK #[12, 64, 64]
+  let dVTiles : GradTiles (device := device) := Tensor.reshapeChecked dV #[12, 64, 64]
   let dKPath := partialDumpFile "diag_dK_accum_tiles.pt"
   let dVPath := partialDumpFile "diag_dV_accum_tiles.pt"
   Tensor.saveTensor dKTiles dKPath.toString
@@ -49,7 +51,7 @@ def generateFixtures : IO Unit := do
     throw <| IO.userError "CUDA is not available; cannot generate mha_h100_768x64 fixtures."
 
   IO.FS.createDirAll fixtureSpec.dir
-  let device := Device.CUDA 0
+  let device ← Device.cuda 0
 
   let qf ← Tensor.randn #[1, 1, 768, 64] false device
   let kf ← Tensor.randn #[1, 1, 768, 64] false device
@@ -87,26 +89,27 @@ def runOnce (dumpPartials : Bool := false) : IO Bool := do
     IO.eprintln "CUDA is not available on this host."
     return false
 
+  let device ← Device.cuda 0
   if !(← fixturesPresent fixtureSpec) then
     generateFixtures
 
   let stream ← torch.cuda_current_stream
 
-  let q ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[1, 1, 768, 64], dtype := .BFloat16 } (fixtureFile "q").toString
-  let k ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[1, 1, 768, 64], dtype := .BFloat16 } (fixtureFile "k").toString
-  let v ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[1, 1, 768, 64], dtype := .BFloat16 } (fixtureFile "v").toString
-  let dO ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[1, 1, 768, 64], dtype := .BFloat16 } (fixtureFile "dO").toString
-  let expectedOut ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[1, 1, 768, 64], dtype := .BFloat16 } (fixtureFile "expected_o").toString
-  let expectedL ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[12, 64], dtype := .Float32 } (fixtureFile "expected_l").toString
-  let expectedDQ ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[1, 1, 768, 64], dtype := .Float32 } (fixtureFile "expected_dq").toString
-  let expectedDK ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[1, 1, 768, 64], dtype := .Float32 } (fixtureFile "expected_dk").toString
-  let expectedDV ← Tensor.loadTensorExact { device := .CUDA 0, shape := #[1, 1, 768, 64], dtype := .Float32 } (fixtureFile "expected_dv").toString
+  let q ← Tensor.loadTensorExact { device := device, shape := #[1, 1, 768, 64], dtype := .BFloat16 } (fixtureFile "q").toString
+  let k ← Tensor.loadTensorExact { device := device, shape := #[1, 1, 768, 64], dtype := .BFloat16 } (fixtureFile "k").toString
+  let v ← Tensor.loadTensorExact { device := device, shape := #[1, 1, 768, 64], dtype := .BFloat16 } (fixtureFile "v").toString
+  let dO ← Tensor.loadTensorExact { device := device, shape := #[1, 1, 768, 64], dtype := .BFloat16 } (fixtureFile "dO").toString
+  let expectedOut ← Tensor.loadTensorExact { device := device, shape := #[1, 1, 768, 64], dtype := .BFloat16 } (fixtureFile "expected_o").toString
+  let expectedL ← Tensor.loadTensorExact { device := device, shape := #[12, 64], dtype := .Float32 } (fixtureFile "expected_l").toString
+  let expectedDQ ← Tensor.loadTensorExact { device := device, shape := #[1, 1, 768, 64], dtype := .Float32 } (fixtureFile "expected_dq").toString
+  let expectedDK ← Tensor.loadTensorExact { device := device, shape := #[1, 1, 768, 64], dtype := .Float32 } (fixtureFile "expected_dk").toString
+  let expectedDV ← Tensor.loadTensorExact { device := device, shape := #[1, 1, 768, 64], dtype := .Float32 } (fixtureFile "expected_dv").toString
 
   let outLse ← Tensor.uniformLike q 0 0
-  let lseOut ← Tensor.uniformLike (Tensor.zeros #[12, 64] false (Device.CUDA 0)) 0 0
+  let lseOut ← Tensor.uniformLike (Tensor.zeros #[12, 64] false device) 0 0
   tkFlashAttnFwd12BlockLse.launch q.raw k.raw v.raw outLse.raw lseOut.raw 768 64 1 12 1 128 1 1 0 stream
   let _ ← torch.cuda_synchronize
-  let lFromLse : LTensor := Tensor.Preserving.mulScalar lseOut (-8.0)
+  let lFromLse : LTensor (device := device) := Tensor.Preserving.mulScalar lseOut (-8.0)
 
   let out ← Tensor.uniformLike q 0 0
   let lOut ← Tensor.uniformLike lseOut 0 0
@@ -117,9 +120,9 @@ def runOnce (dumpPartials : Bool := false) : IO Bool := do
   tkMhaH100BwdPrep2Block.launch dO.raw out.raw dVec.raw 768 64 1 12 1 128 1 1 0 stream
   let _ ← torch.cuda_synchronize
 
-  let dQ : MhaTensor ← Tensor.uniformLike (Tensor.zeros #[1, 1, 768, 64] false (Device.CUDA 0)) 0 0
-  let dK : MhaTensor ← Tensor.uniformLike (Tensor.zeros #[1, 1, 768, 64] false (Device.CUDA 0)) 0 0
-  let dV : MhaTensor ← Tensor.uniformLike (Tensor.zeros #[1, 1, 768, 64] false (Device.CUDA 0)) 0 0
+  let dQ : MhaTensor (device := device) ← Tensor.uniformLike (Tensor.zeros #[1, 1, 768, 64] false device) 0 0
+  let dK : MhaTensor (device := device) ← Tensor.uniformLike (Tensor.zeros #[1, 1, 768, 64] false device) 0 0
+  let dV : MhaTensor (device := device) ← Tensor.uniformLike (Tensor.zeros #[1, 1, 768, 64] false device) 0 0
   tkMhaH100Bwd12BlockDq.launch q.raw k.raw v.raw dO.raw lOut.raw dVec.raw dQ.raw 768 64 1 12 1 128 1 1 0 stream
   tkMhaH100Bwd12BlockKvSweep.launch q.raw k.raw v.raw dO.raw lOut.raw dVec.raw dQ.raw dK.raw dV.raw 768 64 1 12 1 128 1 1 0 stream
   let _ ← torch.cuda_synchronize

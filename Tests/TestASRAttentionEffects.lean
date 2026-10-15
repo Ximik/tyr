@@ -12,17 +12,17 @@ private def cfg : AudioEncoderConfig :=
     outputDim := 2, downsampleHiddenSize := 2, nWindow := 8, nWindowInfer := 8 }
 
 private def attention : AudioAttention (device := .CPU) cfg :=
-  { qProjWeight := (Tensor.zeros #[2, 2]).forgetDType
-    qProjBias := (Tensor.zeros #[2]).forgetDType
-    kProjWeight := (Tensor.zeros #[2, 2]).forgetDType
-    kProjBias := (Tensor.zeros #[2]).forgetDType
-    vProjWeight := (Tensor.eye 2).forgetDType
-    vProjBias := (Tensor.zeros #[2]).forgetDType
-    outProjWeight := (Tensor.eye 2).forgetDType
-    outProjBias := (Tensor.fromFloatArray #[0.25, -0.5]).forgetDType }
+  { qProjWeight := (Tensor.zeros #[2, 2])
+    qProjBias := (Tensor.zeros #[2])
+    kProjWeight := (Tensor.zeros #[2, 2])
+    kProjBias := (Tensor.zeros #[2])
+    vProjWeight := (Tensor.eye 2)
+    vProjBias := (Tensor.zeros #[2])
+    outProjWeight := (Tensor.eye 2)
+    outProjBias := (Tensor.fromFloatArray #[0.25, -0.5]) }
 
-private def input : Tensor { shape := #[1, 2, 2], device := .CPU } :=
-  ((Tensor.fromFloatArray #[2, 4, 6, 8]).reshapeChecked #[1, 2, 2]).forgetDType
+private def input : Tensor { dtype := .Float32, shape := #[1, 2, 2], device := .CPU } :=
+  ((Tensor.fromFloatArray #[2, 4, 6, 8]).reshapeChecked #[1, 2, 2])
 
 private def assertClose (actual expected : Array Float) : IO Unit := do
   LeanTest.assertEqual actual.size expected.size
@@ -35,20 +35,20 @@ private def assertClose (actual expected : Array Float) : IO Unit := do
   assertClose (← (attention.forward input).toFloatArray) #[4.25, 5.5, 4.25, 5.5]
 
 @[test] def testASRMaskedAttentionInferenceDisablesConfiguredDropout : IO Unit := do
-  let mask := ((Tensor.fromInt64Array #[1, 1]).reshapeChecked #[1, 2]).forgetDType
+  let mask := ((Tensor.fromInt64Array #[1, 1]).reshapeChecked #[1, 2])
   assertClose (← (attention.forward input (some mask)).toFloatArray) #[4.25, 5.5, 4.25, 5.5]
 
 @[test] def testASRAttentionTrainingHonorsConfiguredDropout : IO Unit := do
   -- p=1 drops all attention probabilities, leaving only the output bias.
   assertClose (← (← attention.forwardIO input true).toFloatArray) #[0.25, -0.5, 0.25, -0.5]
-  let mask := ((Tensor.fromInt64Array #[1, 1]).reshapeChecked #[1, 2]).forgetDType
+  let mask := ((Tensor.fromInt64Array #[1, 1]).reshapeChecked #[1, 2])
   assertClose (← (← attention.forwardIO input true (some mask)).toFloatArray)
     #[0.25, -0.5, 0.25, -0.5]
 
 @[test] def testASRAttentionEvaluationMatchesInference : IO Unit := do
   assertClose (← (← attention.forwardIO input false).toFloatArray)
     (← (attention.forwardInference input).toFloatArray)
-  let mask := ((Tensor.fromInt64Array #[1, 1]).reshapeChecked #[1, 2]).forgetDType
+  let mask := ((Tensor.fromInt64Array #[1, 1]).reshapeChecked #[1, 2])
   assertClose (← (← attention.forwardIO input false (some mask)).toFloatArray)
     (← (attention.forwardInference input (some mask)).toFloatArray)
 
@@ -66,7 +66,7 @@ private def assertClose (actual expected : Array Float) : IO Unit := do
   let reference := { model with layers := model.layers.map fun (layer : AudioEncoderLayer (device := .CPU) cfg) =>
     { layer with selfAttn := { layer.selfAttn with
         outProjWeight := Tensor.zerosLike layer.selfAttn.outProjWeight } } }
-  let features := (Tensor.ones #[1, 8, 32]).forgetDType
+  let features := (Tensor.ones #[1, 8, 32])
   assertClose (← (← model.forwardIO features true).toFloatArray)
     (← (reference.forwardInference features).toFloatArray)
   assertClose (← (← model.forwardVarLenIO features #[24] true).toFloatArray)
@@ -94,7 +94,7 @@ private def expectDropoutError (action : IO α) : IO Unit := do
 @[test] def testASRParentFeatureTrainingPropagatesDropout : IO Unit := do
   -- Invalid configuration must reach an IO attention boundary instead of pure inference.
   let model ← Qwen3ASRForConditionalGeneration.init (parentCfg 2.0)
-  let features := (Tensor.ones #[1, 8, 32]).forgetDType
+  let features := (Tensor.ones #[1, 8, 32])
   let textIds := (Tensor.fromInt64Array #[1]).reshapeChecked #[1, 1]
   let placeholders := (Tensor.fromInt64Array #[7, 7, 7, 7]).reshapeChecked #[1, 4]
   let featureMask := (Tensor.fullInt #[1, 32] 1)
@@ -110,7 +110,7 @@ private def expectDropoutError (action : IO α) : IO Unit := do
 
 @[test] def testASRParentTrainingFlagControlsRNG : IO Unit := do
   let model ← Qwen3ASRForConditionalGeneration.init (parentCfg 0.5)
-  let features := (Tensor.ones #[1, 8, 32]).forgetDType
+  let features := (Tensor.ones #[1, 8, 32])
   let textIds := (Tensor.fromInt64Array #[1]).reshapeChecked #[1, 1]
   let placeholders := (Tensor.fromInt64Array #[7, 7, 7, 7]).reshapeChecked #[1, 4]
   let featureMask := Tensor.fullInt #[1, 32] 1

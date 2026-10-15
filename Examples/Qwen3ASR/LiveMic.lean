@@ -287,7 +287,7 @@ def runMain (argv : List String) : IO UInt32 := do
   let cfg ← Qwen3ASRConfig.loadFromPretrainedDir modelDir
   let tok ← tokenizer.qwen3.loadTokenizer modelDir
   let pre ← PreprocessorConfig.loadFromPretrainedDir modelDir
-  let ⟨_device, model⟩ ← Qwen3ASRForConditionalGeneration.loadSharded modelDir cfg
+  let ⟨_device, _dtype, model⟩ ← Qwen3ASRForConditionalGeneration.loadSharded modelDir cfg
 
   let hopSamples := toSamples args.hopSec
   let silenceSamples := toSamples args.silenceSec

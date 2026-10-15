@@ -21,7 +21,7 @@ private def reportCase
   IO.println s!"{name} route={routeName route} route_ok={routeOk} out_ok={outOk} dq_ok={dqOk} dk_ok={dkOk} dv_ok={dvOk} out_mae={outMae} dq_mae={dqMae} dk_mae={dkMae} dv_mae={dvMae} out_max={outMax} dq_max={dqMax} dk_max={dkMax} dv_max={dvMax}"
 
 private def nativeDenseCase : IO Bool := do
-  let device := Device.CUDA 0
+  let device ← Device.cuda 0
   let q ← Tensor.setRequiresGrad ((← Tensor.randn #[1, 1, 128, 64] false device).toBFloat16) true
   let k ← Tensor.setRequiresGrad ((← Tensor.randn #[1, 1, 128, 64] false device).toBFloat16) true
   let v ← Tensor.setRequiresGrad ((← Tensor.randn #[1, 1, 128, 64] false device).toBFloat16) true
@@ -61,7 +61,7 @@ private def nativeDenseCase : IO Bool := do
   pure (routeOk && outOk && dqOk && dkOk && dvOk)
 
 private def portableCausalCase : IO Bool := do
-  let device := Device.CUDA 0
+  let device ← Device.cuda 0
   let q ← Tensor.setRequiresGrad ((← Tensor.randn #[1, 1, 96, 64] false device).toBFloat16) true
   let k ← Tensor.setRequiresGrad ((← Tensor.randn #[1, 1, 96, 64] false device).toBFloat16) true
   let v ← Tensor.setRequiresGrad ((← Tensor.randn #[1, 1, 96, 64] false device).toBFloat16) true
@@ -101,7 +101,7 @@ private def portableCausalCase : IO Bool := do
   pure (routeOk && outOk && dqOk && dkOk && dvOk)
 
 private def portableGqaCase : IO Bool := do
-  let device := Device.CUDA 0
+  let device ← Device.cuda 0
   let q ← Tensor.setRequiresGrad ((← Tensor.randn #[1, 4, 96, 64] false device).toBFloat16) true
   let k ← Tensor.setRequiresGrad ((← Tensor.randn #[1, 2, 96, 64] false device).toBFloat16) true
   let v ← Tensor.setRequiresGrad ((← Tensor.randn #[1, 2, 96, 64] false device).toBFloat16) true

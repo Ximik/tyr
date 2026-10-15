@@ -40,7 +40,8 @@ private def maxErrors {s : Shape} {d e : DType}
     maxRel := max maxRel (diff / (b[i]!.abs + 1e-6))
   pure (maxAbs, maxRel)
 
-private def deviceLabel : Device → String
+private def deviceLabel (device : Device) : String :=
+  match device.kind with
   | .CPU => "cpu"
   | .CUDA i => s!"cuda:{i}"
   | .MPS => "mps"
@@ -58,9 +59,13 @@ private def findFixture : IO String := do
 /-- Load the four tensors of one case, run dequant on `device`, and report. -/
 private def runMatrixCase (path : String) (device : Device) : IO Unit := do
   let packed ← torch.safetensors.loadTensorCandidates path #["m_packed"] #[64, 64]
+  let packed := packed.2
   let scales ← torch.safetensors.loadTensorCandidates path #["m_scales"] #[64, 8]
+  let scales := scales.2
   let globalS ← torch.safetensors.loadTensorCandidates path #["m_global"] #[1]
+  let globalS := globalS.2
   let expected ← torch.safetensors.loadTensorCandidates path #["m_expected"] #[64, 128]
+  let expected := expected.2
   if device == Device.CPU then
     check (packed.actualSpec.dtype == .UInt8) s!"m_packed loads as UInt8 (got {packed.actualSpec.dtype})"
     check (globalS.actualSpec.dtype == .Float32) s!"m_global loads as Float32 (got {globalS.actualSpec.dtype})"
@@ -88,9 +93,13 @@ private def runMatrixCase (path : String) (device : Device) : IO Unit := do
 
 private def runBankCase (path : String) (device : Device) : IO Unit := do
   let packed ← torch.safetensors.loadTensorCandidates path #["b_packed"] #[4, 32, 32]
+  let packed := packed.2
   let scales ← torch.safetensors.loadTensorCandidates path #["b_scales"] #[4, 32, 4]
+  let scales := scales.2
   let globalS ← torch.safetensors.loadTensorCandidates path #["b_global"] #[4]
+  let globalS := globalS.2
   let expected ← torch.safetensors.loadTensorCandidates path #["b_expected"] #[4, 32, 64]
+  let expected := expected.2
   let got ← nvfp4.dequantBank (packed.to device) (scales.to device) (globalS.to device) 4 32 64
   let (maxAbs, maxRel) ← maxErrors got (expected.to device)
   IO.println s!"  dequantBank [{deviceLabel device}]: maxAbs={maxAbs} maxRel={maxRel}"
@@ -106,7 +115,7 @@ def main : IO Unit := do
 
   if ← torch.cuda_is_available then
     IO.println "-- dequantMatrix / dequantBank on CUDA"
-    let device := Device.CUDA 0
+    let device ← Device.cuda 0
     runMatrixCase path device
     runBankCase path device
     torch.cuda_synchronize

@@ -5,6 +5,21 @@ through `Tyr.Typed` and `Tyr.Typed.Neural`, using `torch.Tensor` indices. -/
 
 namespace torch
 
+namespace Device
+
+/-- Acquire an available CUDA device, checking its ordinal before producing a
+placement that pure tensor operations can accept. -/
+@[extern "lean_torch_device_cuda"]
+opaque cuda (index : UInt64 := 0) : IO Device :=
+  throw (IO.userError "Device.cuda requires the native runtime")
+
+/-- Acquire the MPS device after checking backend availability. -/
+@[extern "lean_torch_device_mps"]
+opaque mps : IO Device :=
+  throw (IO.userError "Device.mps requires the native runtime")
+
+end Device
+
 /-- Check if CUDA is available -/
 @[extern "lean_torch_cuda_is_available"]
 opaque cuda_is_available : IO Bool
@@ -82,8 +97,8 @@ def mps_is_available_stable (retries : Nat := 4) (delayMs : Nat := 250) : IO Boo
 
 /-- Get the best available device: MPS > CUDA > CPU -/
 def getBestDevice : IO Device := do
-  if ← mps_is_available_stable then return Device.MPS
-  if ← cuda_is_available then return Device.CUDA 0
+  if ← mps_is_available_stable then return ← Device.mps
+  if ← cuda_is_available then return ← Device.cuda 0
   return Device.CPU
 
 /-- Compute output shape for slicing along a dimension -/

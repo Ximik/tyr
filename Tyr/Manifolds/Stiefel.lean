@@ -47,7 +47,7 @@ def random (n p : UInt64) (h : p.toNat ≤ n.toNat := by decide) : IO (Stiefel n
   return ⟨Q, h⟩
 
 /-- Identity element for St(n, n) = O(n) -/
-def identity (n : UInt64) : Stiefel n n d dev :=
+def identity [DType.ConstantSupported d dev] (n : UInt64) : Stiefel n n d dev :=
   ⟨Tensor.eyeFor d dev, Nat.le_refl _⟩
 
 /-- Project a general matrix to the Stiefel manifold using QR decomposition.
@@ -69,7 +69,7 @@ structure StiefelTangent (n p : UInt64) (dtype : DType := .Float32)
 namespace StiefelTangent
 
 /-- Zero tangent vector -/
-def zero (n p : UInt64) : StiefelTangent n p d dev :=
+def zero [DType.ConstantSupported d dev] (n p : UInt64) : StiefelTangent n p d dev :=
   ⟨Tensor.zerosFor ⟨#[n, p], d, dev⟩⟩
 
 /-- Add two tangent vectors -/

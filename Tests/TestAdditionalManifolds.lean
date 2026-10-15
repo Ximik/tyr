@@ -84,9 +84,9 @@ example (_x : Sphere 3) (_v : Tensor { shape := #[3], dtype := .Float64, device 
     have _ := SphereTangent.project _x _v
   trivial
 
-example (_x : PoincareBall 3 .Float64 (.CPU)) : True := by
+example {_otherDevice : Device} (_x : PoincareBall 3 .Float64 (.CPU)) : True := by
   fail_if_success
-    have _wrongDevice : PoincareBall 3 .Float64 ((.CUDA 0)) := _x
+    have _wrongDevice : PoincareBall 3 .Float64 (_otherDevice) := _x
   fail_if_success
     have _wrongShape : PoincareBall 4 .Float64 (.CPU) := _x
   trivial

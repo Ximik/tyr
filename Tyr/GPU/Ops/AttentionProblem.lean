@@ -113,7 +113,7 @@ structure AttentionProblem where
   kvSeq : UInt64
   headDim : UInt64
   dtype : DType
-  device : Device
+  device : DeviceKind
   arch : GpuArch := .SM90
   mode : AttentionMode := .densePrefill
   maskKind : AttentionMaskKind := .none
@@ -151,7 +151,7 @@ def ofQKV
     (q : Tensor { shape := #[batch, nHead, qSeq, headDim], dtype := d, device := device })
     (k : Tensor { shape := #[batch, nKvHead, kvSeq, headDim], dtype := d, device := device })
     (v : Tensor { shape := #[batch, nKvHead, kvSeq, headDim], dtype := d, device := device })
-    (attnMask : Option (Tensor { shape := #[batch, kvSeq], device := device }) := none)
+    (attnMask : Option (SomeDTypeTensor #[batch, kvSeq] device) := none)
     (dropoutP : Float := 0.0)
     (isCausal : Bool := false)
     (scale : Option Float := none)
@@ -170,7 +170,7 @@ def ofQKV
       kvSeq := kvSeq
       headDim := headDim
       dtype := q.raw.dtype
-      device := q.raw.device
+      device := q.raw.device.kind
       arch := arch
       mode := inferMode qSeq kvSeq windowSize
       maskKind := if attnMask.isSome then .padding else .none
@@ -185,7 +185,7 @@ def ofQKV
 def selfAttention
     (seq : UInt64)
     (headDim : UInt64 := 64)
-    (device : Device := .CUDA 0)
+    (device : DeviceKind := .CUDA 0)
     (dtype : DType := .BFloat16)
     (isCausal : Bool := false)
     (arch : GpuArch := .SM90)

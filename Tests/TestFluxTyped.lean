@@ -1,6 +1,7 @@
 import Tyr.Model.Flux
 import Tyr.Checkpoint
 import LeanTest
+import Tests.Assertions
 
 open torch torch.flux
 namespace Tests.FluxTyped
@@ -10,6 +11,12 @@ private def cfg : FluxConfig := {
   num_double_layers := 1, num_single_layers := 1,
   context_in_dim := 6, in_channels := 4, time_dim := 5,
   mlp_ratio := 2, axes_dims := #[2, 2, 2, 2] }
+
+example (_model : FluxModel (device := .CPU) cfg .BFloat16)
+    (_weight : Tensor ⟨#[cfg.hidden_size, cfg.in_channels], .Float32, .CPU⟩) : True := by
+  fail_if_success
+    have _ : FluxModel (device := .CPU) cfg .BFloat16 := { _model with img_in := _weight }
+  trivial
 
 private def close {σ τ : StaticSpec} (x : Tensor σ) (y : Tensor τ) (tol : Float := 1e-5) : IO Unit := do
   LeanTest.assertEqual x.runtimeShape y.runtimeShape
@@ -33,8 +40,8 @@ private def close {σ τ : StaticSpec} (x : Tensor σ) (y : Tensor τ) (tol : Fl
   let c := Float.cos 1
   let s := Float.sin 1
   let expected := (Tensor.fromFloatArray #[c - s, s + c, 1, 1, 1, 1, 1, 1]).reshapeChecked #[1, 1, 1, 8]
-  close (applyRope ((Tensor.ones #[1, 1, 1, 8]).forgetDType) pe) expected
-  let x := (Tensor.ones #[1, 1, 1, 8]).toBFloat16.forgetDType
+  close (applyRope ((Tensor.ones #[1, 1, 1, 8])) pe) expected
+  let x := (Tensor.ones #[1, 1, 1, 8]).toBFloat16
   let y := applyRope x pe
   LeanTest.assertEqual y.actualSpec.dtype .BFloat16
   close y expected.toBFloat16 0.0
@@ -58,7 +65,8 @@ private def close {σ τ : StaticSpec} (x : Tensor σ) (y : Tensor τ) (tol : Fl
   let text ← randomWeight #[2, 3, 6]
   let text := text.detach
   for bf16 in #[false, true] do
-    let model ← if bf16 then TensorStruct.castDType .BFloat16 initial else pure initial
+    let dtype := if bf16 then DType.BFloat16 else .Float32
+    let model ← TensorStruct.castTo (FluxModel (device := .CPU) cfg dtype) initial
     let image := Tensor.castLike model.img_in image
     let text := Tensor.castLike model.txt_in text
     let y := model.forward cfg image text (Tensor.full #[2] 0.5) imageIds textIds
@@ -72,7 +80,7 @@ private def close {σ τ : StaticSpec} (x : Tensor σ) (y : Tensor τ) (tol : Fl
 
 @[test] def testFluxLatentPackRoundTrip : IO Unit := do
   let values := Array.ofFn (n := 2 * 32 * 4 * 6) fun i => i.val.toFloat
-  let spatial := (Tensor.fromFloatArray values).reshapeChecked #[2, 32, 4, 6] |>.forgetDType
+  let spatial := (Tensor.fromFloatArray values).reshapeChecked #[2, 32, 4, 6]
   let packed := packLatents spatial
   LeanTest.assertEqual packed.runtimeShape #[2, 6, 128]
   close (unpackLatents (packed_H := 2) (packed_W := 3) packed) spatial 0.0
@@ -80,7 +88,7 @@ private def close {σ τ : StaticSpec} (x : Tensor σ) (y : Tensor τ) (tol : Fl
   LeanTest.assertEqual (actual.extract 0 8) #[0, 1, 6, 7, 24, 25, 30, 31]
 
 @[test] def testFluxPPMNativeBoundary : IO Unit := IO.FS.withTempDir fun dir => do
-  let image := (Tensor.fromFloatArray #[1, -1, -1, 1, -1, -1]).reshapeChecked #[1, 3, 1, 2] |>.forgetDType
+  let image := (Tensor.fromFloatArray #[1, -1, -1, 1, -1, -1]).reshapeChecked #[1, 3, 1, 2]
   let path := dir / "tiny.ppm"
   saveImagePPM image path.toString
   let bytes ← IO.FS.readBinFile path
@@ -96,12 +104,13 @@ private def roundTrip {α : Type} [TensorStruct α] (value : α) (dir : String) 
   let restored ← roundTrip model dir.toString
   let imageIds ← computeImagePositionIds 1 2
   let textIds ← computeTextPositionIds 3
-  let x := (Tensor.ones #[1, 2, 4]).forgetDType
-  let txt := (Tensor.ones #[1, 3, 6]).forgetDType
+  let x := (Tensor.ones #[1, 2, 4])
+  let txt := (Tensor.ones #[1, 3, 6])
   let t := Tensor.full #[1] 0.5
   close (model.forward cfg x txt t imageIds textIds) (restored.forward cfg x txt t imageIds textIds) 0.0
 
-private def writeFluxCheckpoint (path : System.FilePath) (bf16 : Bool) : IO Unit := do
+private def writeFluxCheckpoint (path : System.FilePath) (bf16 : Bool)
+    (foreignName : String := "") : IO Unit := do
   let mut entries : Array (String × Array Nat) := #[
     ("img_in.weight", #[16, 4]), ("txt_in.weight", #[16, 6]),
     ("time_in.in_layer.weight", #[16, 5]), ("time_in.out_layer.weight", #[16, 16]),
@@ -125,6 +134,7 @@ private def writeFluxCheckpoint (path : System.FilePath) (bf16 : Bool) : IO Unit
   let mut fields : List (String × Lean.Json) := []
   let mut data := ByteArray.empty
   for (name, shape) in entries do
+    let bf16 := if name == foreignName then !bf16 else bf16
     let start := data.size
     for _ in [:shape.foldl (· * ·) 1] do
       data := data ++ (if bf16 then ByteArray.mk #[0, 62] else ByteArray.mk #[0, 0, 0, 62])
@@ -140,7 +150,7 @@ private def writeFluxCheckpoint (path : System.FilePath) (bf16 : Bool) : IO Unit
   for bf16 in #[false, true] do
     let path := dir / (if bf16 then "bf16.safetensors" else "fp32.safetensors")
     writeFluxCheckpoint path bf16
-    let model ← loadFluxModel path.toString cfg
+    let ⟨_, model⟩ ← loadFluxModel path.toString cfg
     LeanTest.assertEqual model.double_blocks.size 1
     LeanTest.assertEqual model.single_blocks.size 1
     let dtype := if bf16 then DType.BFloat16 else .Float32
@@ -154,5 +164,9 @@ private def writeFluxCheckpoint (path : System.FilePath) (bf16 : Bool) : IO Unit
     let y := model.forward cfg image text (Tensor.full #[1] 0.5) imageIds textIds
     LeanTest.assertEqual y.actualSpec.dtype dtype
     for v in (← y.toFloatArray) do LeanTest.assertTrue v.isFinite
+  let mixedPath := dir / "mixed.safetensors"
+  writeFluxCheckpoint mixedPath false "txt_in.weight"
+  Tests.assertThrows (loadFluxModel mixedPath.toString cfg)
+    (some "Flux tensor 'txt_in.weight'")
 
 end Tests.FluxTyped

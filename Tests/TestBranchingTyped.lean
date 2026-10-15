@@ -21,7 +21,7 @@ private def fixture : BranchingBridgeResult MoleculeAtom := {
   LeanTest.assertEqual packed.label.actualSpec.dtype .Int64
   LeanTest.assertEqual packed.padmask.actualSpec.dtype .Int64
   LeanTest.assertEqual packed.coord.actualSpec.dtype .Float32
-  let buffer ← BranchingMoleculeBatch.zeros 1 2 .CPU true
+  let buffer ← BranchingMoleculeBatch.zeros 1 2 .CPU .BFloat16
   let copied ← buffer.copyInto packed
   LeanTest.assertEqual copied.coord.actualSpec.dtype .BFloat16
   LeanTest.assertEqual copied.t.actualSpec.dtype .BFloat16
@@ -31,17 +31,16 @@ private def fixture : BranchingBridgeResult MoleculeAtom := {
   LeanTest.assertEqual (← copied.labelAnchor.toUInt64Array) #[1, 0]
   LeanTest.assertEqual (← copied.padmask.toUInt64Array) #[1, 0]
   LeanTest.assertEqual (← copied.coord.toFloatArray) (← packed.coord.toBFloat16.toFloatArray)
-  let rejected ← try
-    let _ ← castTreeBFloat16 (Tensor.ones #[2])
-    pure false
-  catch _ => pure true
-  LeanTest.assertTrue rejected "A fixed Float32 leaf must not silently become BF16"
+  let original := Tensor.ones #[2]
+  let converted ← TensorStruct.castTo (Tensor { shape := #[2], dtype := .BFloat16, device := .CPU }) original
+  LeanTest.assertEqual converted.actualSpec.dtype .BFloat16
+  LeanTest.assertEqual original.actualSpec.dtype .Float32
 
 @[test] def testBranchingStaticCopyRejectsImplicitCastAndBroadcast : IO Unit := do
   let dst ← data.cloneInferenceIO (Tensor.fullInt #[2] 7)
   let fractional := Tensor.fromFloatArray #[1.75, 2.25]
   let dtypeError ← try
-    let _ ← copyIntoChecked? dst.forgetDType fractional.forgetDType
+    let _ ← copyIntoChecked? dst fractional
     pure none
   catch error => pure (some error.toString)
   LeanTest.assertTrue (dtypeError.any (·.containsSubstr "dtype mismatch"))
@@ -71,7 +70,7 @@ private def fixture : BranchingBridgeResult MoleculeAtom := {
   LeanTest.assertEqual (← scalarResult.toFloatArray) (← (param - scalarDirection).toFloatArray)
   let lrTensor := (Tensor.fromFloatArray #[lr]).reshapeChecked #[]
   let tensorDirection := (mulTensorScalar (Tensor.Preserving.mulScalar native aspect) lrTensor).toFloat32
-  let (tensorResult, _) ← moleculeMuonStepT param grad state lrTensor.forgetDType 0.0 0.95 5
+  let (tensorResult, _) ← moleculeMuonStepT param grad state lrTensor 0.0 0.95 5
   LeanTest.assertEqual (← tensorResult.toFloatArray) (← (param - tensorDirection).toFloatArray)
   LeanTest.assertEqual scalarResult.actualSpec.dtype .Float32
 
@@ -92,41 +91,65 @@ private def roundTrip {α : Type} [TensorStruct α] (params : α) (dir : String)
   checkpoint.saveParams params dir
   checkpoint.loadParams params dir
 
-@[test] def testBranchingMoleculeTypedTrainingAndCheckpoint : IO Unit := IO.FS.withTempDir fun dir => do
+private def checkBranchingTypedTraining (dtype : DType)
+    [DType.Promotes dtype .Float32 .Float32] [DType.Promotes .Float32 dtype .Float32]
+    [DType.NonBool dtype] : IO Unit := IO.FS.withTempDir fun dir => do
   let cfg : BranchingTrainConfig := { maxLen := 2, gradClip := 1.0 }
-  for bf16 in #[false, true] do
-    let initial ← MoleculeTransformerParams.init 2 1 4 4
-    let params ← if bf16 then castTreeBFloat16 initial else pure initial
-    let model := moleculeTransformerModel (maxLen := 2) (vocab := 2) (heads := 1) (headDim := 4) (mlp := 4)
-    let (trained, state, report) ← trainStepMoleculeMuon cfg model params
-      (initMoleculeMuonState params) fixture 0.01 (bf16 := bf16)
-    LeanTest.assertEqual state.step 1
-    LeanTest.assertTrue report.total.isFinite
-    LeanTest.assertEqual trained.coordW.actualSpec.dtype (if bf16 then .BFloat16 else .Float32)
-    LeanTest.assertTrue (Tensor.item (Tensor.sumAll (Tensor.abs (Tensor.Promoting.sub trained.coordW params.coordW))) > 0)
-    let prediction ← moleculeTransformerPrediction (maxLen := 2) (vocab := 2) 0 trained 0.25 fixture.Xt[0]!
-    LeanTest.assertEqual prediction.coordTargets.size 1
-    let loaded ← roundTrip trained dir.toString
-    let ⟨_, packed0⟩ ← packBranchingMolecule cfg fixture
-    let packed := if bf16 then packed0.castBFloat16 else packed0
-    let (a, b, c, d) ← model.forward trained packed.coord packed.label packed.t packed.padmask
-    let (a', b', c', d') ← model.forward loaded packed.coord packed.label packed.t packed.padmask
-    LeanTest.assertEqual (← a.toFloatArray) (← a'.toFloatArray)
-    LeanTest.assertEqual (← b.toFloatArray) (← b'.toFloatArray)
-    LeanTest.assertEqual (← c.toFloatArray) (← c'.toFloatArray)
-    LeanTest.assertEqual (← d.toFloatArray) (← d'.toFloatArray)
+  let initial ← MoleculeTransformerParams.init 2 1 4 4
+  let params ← TensorStruct.castTo (MoleculeTransformerParams (device := .CPU) 2 1 4 4 dtype) initial
+  let model := moleculeTransformerModel (maxLen := 2) (vocab := 2) (heads := 1) (headDim := 4) (mlp := 4)
+  let (trained, state, report) ← trainStepMoleculeMuon cfg model params
+    (initMoleculeMuonState params) fixture 0.01
+  LeanTest.assertEqual state.step 1
+  LeanTest.assertTrue report.total.isFinite
+  LeanTest.assertEqual trained.coordW.actualSpec.dtype dtype
+  LeanTest.assertTrue (Tensor.item (Tensor.sumAll (Tensor.abs (Tensor.Preserving.sub trained.coordW params.coordW))) > 0)
+  let prediction ← moleculeTransformerPrediction (maxLen := 2) (vocab := 2) 0 trained 0.25 fixture.Xt[0]!
+  LeanTest.assertEqual prediction.coordTargets.size 1
+  let loaded ← roundTrip trained dir.toString
+  let ⟨_, packed0⟩ ← packBranchingMolecule cfg fixture
+  let packed ← packed0.castDType dtype
+  let (a, b, c, d) ← model.forward trained packed.coord packed.label packed.t packed.padmask
+  let losses := moleculeLossTensors cfg packed a b c d
+  let total : Tensor { shape := #[], dtype := .Float32, device := .CPU } := losses.1
+  LeanTest.assertEqual total.actualSpec.dtype .Float32
+  let (a', b', c', d') ← model.forward loaded packed.coord packed.label packed.t packed.padmask
+  LeanTest.assertEqual (← a.toFloatArray) (← a'.toFloatArray)
+  LeanTest.assertEqual (← b.toFloatArray) (← b'.toFloatArray)
+  LeanTest.assertEqual (← c.toFloatArray) (← c'.toFloatArray)
+  LeanTest.assertEqual (← d.toFloatArray) (← d'.toFloatArray)
+
+@[test] def testBranchingMoleculeTypedTrainingAndCheckpoint : IO Unit := do
+  checkBranchingTypedTraining .Float32
+  checkBranchingTypedTraining .BFloat16
+
+private def checkBranchingFullTransformer (dtype : DType)
+    [DType.Promotes dtype .Float32 .Float32] [DType.Promotes .Float32 dtype .Float32]
+    [DType.NonBool dtype] : IO Unit := do
+  let initial ← FullMoleculeTransformerParams.init 2 4 1 4 4 2 2
+  let params ← TensorStruct.castTo (FullMoleculeTransformerParams (device := .CPU) 2 4 1 4 4 2 2 dtype) initial
+  let ⟨_, packed0⟩ ← packBranchingMolecule { maxLen := 2 } fixture
+  let packed ← packed0.castDType dtype
+  let (a, _, _, _) ← params.forward packed.coord packed.label packed.t packed.padmask
+  let (cos, sin) := Tensor.rotaryFreqs 2 4
+  let (b, _, _, _) ← params.forwardFreqs packed.coord packed.label packed.t packed.padmask cos sin
+  LeanTest.assertEqual (← a.toFloatArray) (← b.toFloatArray)
+  LeanTest.assertEqual a.actualSpec.dtype dtype
+  for value in (← a.toFloatArray) do LeanTest.assertTrue value.isFinite
+  let prediction ← fullMoleculeTransformerPrediction (maxLen := 2) (vocab := 2) 0 params 0.25 fixture.Xt[0]!
+  LeanTest.assertEqual prediction.coordTargets.size 1
 
 @[test] def testBranchingFullTransformerRotaryAndBF16 : IO Unit := do
-  for bf16 in #[false, true] do
-    let initial ← FullMoleculeTransformerParams.init 2 4 1 4 4 2 2
-    let params ← if bf16 then castTreeBFloat16 initial else pure initial
-    let ⟨_, packed0⟩ ← packBranchingMolecule { maxLen := 2 } fixture
-    let packed := if bf16 then packed0.castBFloat16 else packed0
-    let (a, _, _, _) ← params.forward packed.coord packed.label packed.t packed.padmask
-    let (cos, sin) := Tensor.rotaryFreqs 2 4
-    let (b, _, _, _) ← params.forwardFreqs packed.coord packed.label packed.t packed.padmask cos.forgetDType sin.forgetDType
-    LeanTest.assertEqual (← a.toFloatArray) (← b.toFloatArray)
-    LeanTest.assertEqual a.actualSpec.dtype (if bf16 then .BFloat16 else .Float32)
-    for value in (← a.toFloatArray) do LeanTest.assertTrue value.isFinite
-    let prediction ← fullMoleculeTransformerPrediction (maxLen := 2) (vocab := 2) 0 params 0.25 fixture.Xt[0]!
-    LeanTest.assertEqual prediction.coordTargets.size 1
+  checkBranchingFullTransformer .Float32
+  checkBranchingFullTransformer .BFloat16
+
+-- A BF16 model cannot accidentally consume a Float32 batch; conversion must
+-- choose an explicit target record before the model is called.
+example (_params : MoleculeTransformerParams (device := .CPU) 2 1 4 4 .BFloat16)
+    (_batch : BranchingMoleculeBatch (device := .CPU) 1 2 .Float32) : True := by
+  fail_if_success have _ := _params.forward _batch.coord _batch.label _batch.t _batch.padmask
+  trivial
+
+example (_batch : BranchingMoleculeBatch (device := .CPU) 1 2 .Float32) :
+    IO (BranchingMoleculeBatch (device := .CPU) 1 2 .BFloat16) :=
+  TensorStruct.castTo _ _batch

@@ -36,7 +36,7 @@ private def normalizeVectorL2 {n : UInt64}
   else
     Tensor.Preserving.mulScalar v (1.0 / vnorm)
 
-private def minkowskiAbsNorm {n : UInt64} (v : Tensor ⟨#[n + 1], d, dev⟩) : Float :=
+private def minkowskiAbsNorm [DType.ConstantSupported d dev] {n : UInt64} (v : Tensor ⟨#[n + 1], d, dev⟩) : Float :=
   Float.sqrt (Float.abs (Hyperbolic.minkowskiInner v v))
 
 /--
@@ -131,7 +131,7 @@ Orthogonal-group adapter for dual-map optimization.
 
 Uses ambient spectral/nuclear norms and normalizes the skew parameterization.
 -/
-instance orthogonalDualMapGeometry (n : UInt64) [DType.FloatingOrComplex d] :
+instance orthogonalDualMapGeometry [DType.ConstantSupported d dev] (n : UInt64) [DType.FloatingOrComplex d] :
     DualMapGeometry (Orthogonal n d dev) where
   tangentNorm := fun {x} (v : OrthogonalTangent n d dev) =>
     Tensor.spectralNorm (OrthogonalTangent.toAmbient x v)
@@ -166,7 +166,7 @@ Applies the Minkowski metric to map cotangent to ambient tangent direction,
 projects to the tangent space at the current point, then applies L2
 normalization for a bounded update direction.
 -/
-instance hyperbolicDualMapGeometry (n : UInt64) : DualMapGeometry (Hyperbolic n d dev) where
+instance hyperbolicDualMapGeometry [DType.ConstantSupported d dev] (n : UInt64) : DualMapGeometry (Hyperbolic n d dev) where
   tangentNorm := fun {x} (v : HyperbolicTangent n d dev) =>
     let _ := x
     minkowskiAbsNorm v.vec

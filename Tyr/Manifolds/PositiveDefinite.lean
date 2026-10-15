@@ -40,7 +40,7 @@ structure SPDTangent (n : UInt64) (dtype : DType := .Float32)
 
 namespace SPDTangent
 
-def zero (n : UInt64) : SPDTangent n d dev := ⟨Tensor.zerosFor ⟨#[n, n], d, dev⟩⟩
+def zero [DType.ConstantSupported d dev] (n : UInt64) : SPDTangent n d dev := ⟨Tensor.zerosFor ⟨#[n, n], d, dev⟩⟩
 def add (a b : SPDTangent n d dev) : SPDTangent n d dev := ⟨Tensor.Preserving.add a.vec b.vec⟩
 def smul (s : Float) (v : SPDTangent n d dev) : SPDTangent n d dev := ⟨Tensor.Preserving.mulScalar v.vec s⟩
 

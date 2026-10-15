@@ -307,16 +307,16 @@ def resolveTrainingDevice (_rank localRank : UInt64) (isDistributed : Bool) : IO
   let requested? := (← IO.getEnv "TYR_DEVICE").map String.toLower
   match requested? with
   | some "cpu" => pure Device.CPU
-  | some "mps" => pure Device.MPS
-  | some "cuda" => pure (Device.CUDA cudaOrdinal)
+  | some "mps" => Device.mps
+  | some "cuda" => Device.cuda cudaOrdinal
   | some "auto" | none =>
     if isDistributed then
-      if ← cuda_is_available then pure (Device.CUDA cudaOrdinal) else pure Device.CPU
+      if ← cuda_is_available then Device.cuda cudaOrdinal else pure Device.CPU
     else
       getBestDevice
   | some _ =>
     if isDistributed then
-      if ← cuda_is_available then pure (Device.CUDA cudaOrdinal) else pure Device.CPU
+      if ← cuda_is_available then Device.cuda cudaOrdinal else pure Device.CPU
     else
       getBestDevice
 

@@ -12,9 +12,8 @@ structure Conv2d (dtype : DType := .Float32) (device : Device := .CPU) where
   groups : UInt64 := 1
   bias : Bool := true
 
-  weight : Tensor ⟨#[out_channels, in_channels/groups, kernel_size.fst, kernel_size.snd], dtype, device⟩ :=
-    Tensor.zerosFor _
-  outputBias : Tensor ⟨#[out_channels], dtype, device⟩ := Tensor.zerosFor _
+  weight : Tensor ⟨#[out_channels, in_channels/groups, kernel_size.fst, kernel_size.snd], dtype, device⟩
+  outputBias : Tensor ⟨#[out_channels], dtype, device⟩
 
 
 /-- Initialize weights while preserving the configuration's tensor specification. -/

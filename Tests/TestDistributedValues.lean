@@ -37,6 +37,13 @@ def testUninitializedCollectivesReturnErrors : IO Unit := do
   LeanTest.assertEqual (← input.toFloatArray) #[2.0, 3.0]
 
 @[test]
+def testInvalidCollectiveOutputExtentReturnsError : IO Unit := do
+  let input := Tensor.fromFloatArray #[1.0]
+  Tests.assertThrows (dist.allGather 9223372036854775808 input)
+    (some "Tensor extent")
+  LeanTest.assertEqual (← input.toFloatArray) #[1.0]
+
+@[test]
 def testInvalidDistributedDeviceIndicesReturnErrors : IO Unit := do
   for index in #[128, 256, 18446744073709551615] do
     Tests.assertThrows (dist.setCudaDevice index) (some "device")
@@ -95,12 +102,12 @@ def checkTwoRankValues (rank : UInt64) : IO Unit := do
   LeanTest.assertTrue scattered.requiresGrad
 
   -- A dynamic static dtype must not turn native integer collectives into FP32.
-  let integerInput := (Tensor.fromInt64Array #[(rank.toNat + 1).toInt64]).forgetDType
+  let integerInput := (Tensor.fromInt64Array #[(rank.toNat + 1).toInt64])
   let integerGathered ← dist.allGather 2 integerInput
   LeanTest.assertEqual integerGathered.raw.dtype .Int64
   LeanTest.assertEqual (← integerGathered.toFloatArray) #[1.0, 2.0]
   let integerChunks := (Tensor.fromInt64Array
-    #[(rank.toNat + 1).toInt64, (rank.toNat + 11).toInt64]).forgetDType
+    #[(rank.toNat + 1).toInt64, (rank.toNat + 11).toInt64])
   let integerScattered ← dist.reduceScatter 2 integerChunks .sum
   LeanTest.assertEqual integerScattered.raw.dtype .Int64
   LeanTest.assertEqual (← integerScattered.toFloatArray) #[if rank == 0 then 3.0 else 23.0]

@@ -208,10 +208,10 @@ def trainLoop {modelCfg : Config}
   let mut optState := initOptState
   let mut totalLoss : Float := 0.0
 
-  let deviceName := match device with
-    | Device.MPS => "MPS"
-    | Device.CUDA n => s!"CUDA:{n}"
-    | Device.CPU => "CPU"
+  let deviceName := match device.kind with
+    | DeviceKind.MPS => "MPS"
+    | DeviceKind.CUDA n => s!"CUDA:{n}"
+    | DeviceKind.CPU => "CPU"
   IO.println s!"Starting training for {trainCfg.maxIters} iterations on {deviceName}..."
   IO.println s!"  batch_size={trainCfg.batchSize}, block_size={trainCfg.blockSize}"
   IO.println s!"  lr={trainCfg.learningRate}, warmup={trainCfg.warmupIters}"
@@ -259,10 +259,10 @@ def trainLoopWithVal {modelCfg : Config}
   let mut totalLoss : Float := 0.0
   let mut bestValLoss : Float := 1e10  -- Use large value instead of inf
 
-  let deviceName := match device with
-    | Device.MPS => "MPS"
-    | Device.CUDA n => s!"CUDA:{n}"
-    | Device.CPU => "CPU"
+  let deviceName := match device.kind with
+    | DeviceKind.MPS => "MPS"
+    | DeviceKind.CUDA n => s!"CUDA:{n}"
+    | DeviceKind.CPU => "CPU"
   IO.println s!"Starting training for {trainCfg.maxIters} iterations on {deviceName}..."
   IO.println s!"  batch_size={trainCfg.batchSize}, block_size={trainCfg.blockSize}"
   IO.println s!"  lr={trainCfg.learningRate}, warmup={trainCfg.warmupIters}"

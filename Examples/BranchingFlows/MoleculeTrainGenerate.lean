@@ -273,7 +273,7 @@ partial def parseArgsLoop (args : List String) (opts : RunOptions) : IO RunOptio
   | "--device" :: value :: rest =>
       match value with
       | "cpu" => parseArgsLoop rest { opts with device := Device.CPU }
-      | "cuda" | "cuda:0" => parseArgsLoop rest { opts with device := Device.CUDA 0 }
+      | "cuda" | "cuda:0" => parseArgsLoop rest { opts with device := ← Device.cuda 0 }
       | _ => throw (IO.userError s!"--device expects cpu or cuda, got '{value}'")
   | "--dtype" :: value :: rest =>
       match value with
@@ -416,7 +416,8 @@ private def lineagePath (outPrefix : String) (sampleCount sample : Nat) : String
 private def architectureName (opts : RunOptions) : String :=
   if opts.fullArchitecture then "full" else "compact"
 
-private def deviceName : Device → String
+private def deviceName (device : Device) : String :=
+  match device.kind with
   | .CPU => "cpu"
   | .MPS => "mps"
   | .CUDA i => s!"cuda:{i}"
@@ -442,14 +443,16 @@ private def loadMuonOptimState [TensorStruct Params]
     | none => throw (IO.userError s!"invalid Muon optimizer count in {muonCountPath dir}")
   pure { momentum := TensorStruct.map Tensor.detach momentum, step := count }
 
-private def runWithModel {Params : Type} [TensorStruct Params] {maxLen vocab : UInt64}
+private def runWithModel {dtype : DType}
+    [DType.Promotes dtype .Float32 .Float32] [DType.Promotes .Float32 dtype .Float32]
+    {Params : Type} [TensorStruct Params] {maxLen vocab : UInt64}
     (opts : RunOptions)
     (recordsCount usableCount : Nat)
     (trainStates evalStates : Array (BranchingState MoleculeAtom))
     (bridgeCfg : MoleculeBridgeConfig)
     (labelDFM : Option DistNoisyDiscreteConfig)
     (trainCfg : BranchingTrainConfig)
-    (model : BranchingMoleculeModel (device := opts.device) maxLen vocab Params)
+    (model : BranchingMoleculeModel (dtype := dtype) (device := opts.device) maxLen vocab Params)
     (initParams : Params)
     (makeLearnedModel : Params → Float → BranchingState MoleculeAtom → IO MoleculeModelPrediction) :
     IO Unit := do
@@ -467,7 +470,6 @@ private def runWithModel {Params : Type} [TensorStruct Params] {maxLen vocab : U
         let loadedParams ← _root_.torch.checkpoint.loadParams initParams checkpointDir "param"
         IO.println s!"loaded molecule checkpoint from {checkpointDir} at iteration={checkpointMeta.iteration} trainLoss={checkpointMeta.trainLoss}"
         pure (loadedParams, checkpointMeta.iteration, some checkpointMeta)
-  let initParams ← if opts.bf16 then castTreeBFloat16 initParams else pure initParams
   let mut params := initParams
   let mut rng : Rng := { state := opts.seed + 17 }
 
@@ -478,7 +480,7 @@ private def runWithModel {Params : Type} [TensorStruct Params] {maxLen vocab : U
   rng := rng'
   let initTrain ←
     evalMoleculeLoss (maxLen := maxLen) (vocab := vocab) trainCfg model params fixedTrainBridge
-      labelDFM (device := opts.device) (bf16 := opts.bf16)
+      labelDFM (device := opts.device)
   let mut finalTrain := initTrain
   let mut lastReport := initTrain
 
@@ -534,7 +536,7 @@ private def runWithModel {Params : Type} [TensorStruct Params] {maxLen vocab : U
       let t1 ← IO.monoMsNow
       let (params', optState', report) ←
         trainStepMoleculeMuon (maxLen := maxLen) (vocab := vocab) trainCfg model
-          params optState bridgeBatch lr labelDFM (device := opts.device) (timePhases := opts.timePhases) (bf16 := opts.bf16)
+          params optState bridgeBatch lr labelDFM (device := opts.device) (timePhases := opts.timePhases)
       params := params'
       optState := optState'
       lastReport := report
@@ -548,7 +550,7 @@ private def runWithModel {Params : Type} [TensorStruct Params] {maxLen vocab : U
 
     finalTrain ←
       evalMoleculeLoss (maxLen := maxLen) (vocab := vocab) trainCfg model params fixedTrainBridge
-        labelDFM (device := opts.device) (bf16 := opts.bf16)
+        labelDFM (device := opts.device)
     if !(Float.isFinite finalTrain.total) then
       throw (IO.userError "final train loss is not finite")
     if !(finalTrain.total < initTrain.total) then
@@ -579,7 +581,7 @@ private def runWithModel {Params : Type} [TensorStruct Params] {maxLen vocab : U
   rng := rng'
   let evalReport ←
     evalMoleculeLoss (maxLen := maxLen) (vocab := vocab) trainCfg model params evalBridge
-      labelDFM (device := opts.device) (bf16 := opts.bf16)
+      labelDFM (device := opts.device)
 
   let target := evalStates[0]!
   writeMoleculeXYZ ⟨opts.outputPrefix ++ "_target.xyz"⟩ target
@@ -646,7 +648,9 @@ private def runWithModel {Params : Type} [TensorStruct Params] {maxLen vocab : U
     IO.println s!"wrote lineage-aware raw trajectories under {opts.outputPrefix}_*trajectory.jsonl"
     IO.println s!"wrote learned branching trajectory frames under {opts.outputPrefix}_*step*.xyz"
 
-def run (opts : RunOptions) : IO Unit := do
+private def runAt (dtype : DType)
+    [DType.Promotes dtype .Float32 .Float32] [DType.Promotes .Float32 dtype .Float32]
+    [DType.NonBool dtype] (opts : RunOptions) : IO Unit := do
   if opts.generateOnly && opts.resumeCheckpoint?.isNone then
     throw (IO.userError "--generate-only requires --resume-checkpoint")
   if opts.generateOnly && !opts.generate then
@@ -729,7 +733,7 @@ def run (opts : RunOptions) : IO Unit := do
   torch.manualSeed opts.seed
   if opts.fullArchitecture then
     let model :=
-      fullMoleculeTransformerModel (device := opts.device) (maxLen := opts.maxLen) (vocab := vocab)
+      fullMoleculeTransformerModel (dtype := dtype) (device := opts.device) (maxLen := opts.maxLen) (vocab := vocab)
         (hidden := opts.hiddenDim) (heads := opts.heads) (headDim := opts.headDim)
         (mlp := opts.mlp) (rff := opts.rffDim) (layers := opts.layers)
         (coordUpdateLayers := opts.coordUpdateLayers)
@@ -737,6 +741,9 @@ def run (opts : RunOptions) : IO Unit := do
     let initParams ←
       FullMoleculeTransformerParams.init vocab opts.hiddenDim opts.heads opts.headDim
         opts.mlp opts.rffDim opts.layers (device := opts.device)
+    let initParams ← TensorStruct.castTo
+      (FullMoleculeTransformerParams (device := opts.device) vocab opts.hiddenDim opts.heads opts.headDim
+        opts.mlp opts.rffDim opts.layers dtype) initParams
     let makeLearnedModel := fun params =>
       fullMoleculeTransformerIOModel (maxLen := opts.maxLen) (vocab := vocab)
         (hidden := opts.hiddenDim) (heads := opts.heads) (headDim := opts.headDim)
@@ -750,10 +757,12 @@ def run (opts : RunOptions) : IO Unit := do
       model initParams makeLearnedModel
   else
     let model :=
-      moleculeTransformerModel (device := opts.device) (maxLen := opts.maxLen) (vocab := vocab)
+      moleculeTransformerModel (dtype := dtype) (device := opts.device) (maxLen := opts.maxLen) (vocab := vocab)
         (heads := opts.heads) (headDim := opts.headDim) (mlp := opts.mlp)
         (coordTargetCap? := opts.coordTargetCap?)
     let initParams ← MoleculeTransformerParams.init vocab opts.heads opts.headDim opts.mlp (device := opts.device)
+    let initParams ← TensorStruct.castTo
+      (MoleculeTransformerParams (device := opts.device) vocab opts.heads opts.headDim opts.mlp dtype) initParams
     let makeLearnedModel := fun params =>
       moleculeTransformerIOModel (maxLen := opts.maxLen) (vocab := vocab)
         (heads := opts.heads) (headDim := opts.headDim) (mlp := opts.mlp)
@@ -763,6 +772,9 @@ def run (opts : RunOptions) : IO Unit := do
     runWithModel (maxLen := opts.maxLen) (vocab := vocab)
       opts records.size states.size trainStates evalStates bridgeCfg labelDFM trainCfg
       model initParams makeLearnedModel
+
+def run (opts : RunOptions) : IO Unit :=
+  if opts.bf16 then runAt .BFloat16 opts else runAt .Float32 opts
 
 def _root_.main (args : List String) : IO UInt32 := do
   let opts ← parseOptions args

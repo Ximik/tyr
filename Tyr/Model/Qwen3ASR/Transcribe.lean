@@ -17,7 +17,7 @@ import Tyr.Tokenizer.Qwen3
 
 namespace torch.qwen3asr
 
-variable {device : Device}
+variable {device : Device} {dtype : DType}
 /-- One offline ASR transcription result. -/
 structure ASRTranscription where
   language : String
@@ -30,7 +30,8 @@ structure ASRTranscription where
 structure Qwen3ForcedAligner where
   cfg : Qwen3ASRConfig
   device : Device
-  model : Qwen3ASRForConditionalGeneration (device := device) cfg
+  dtype : ExactDType
+  model : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype.val) cfg
   tok : tokenizer.qwen3.QwenTokenizer
   preprocessor : PreprocessorConfig
 
@@ -176,7 +177,7 @@ private def isFrontendReuseCompatible
   base.dither == align.dither
 
 private def modelDevice {cfg : Qwen3ASRConfig}
-    (model : Qwen3ASRForConditionalGeneration (device := device) cfg) : Device :=
+    (model : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg) : Device :=
   model.thinker.textModel.embed_tokens.device
 
 private def validateForcedLanguage
@@ -271,7 +272,7 @@ private def extractAudioLenFromFeatureMask {cfg : Qwen3ASRConfig} {frames : UInt
 
 private def alignSingleWithModel
     {alignCfg : Qwen3ASRConfig}
-    (alignModel : Qwen3ASRForConditionalGeneration (device := device) alignCfg)
+    (alignModel : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) alignCfg)
     (alignTok : tokenizer.qwen3.QwenTokenizer)
     (text : String)
     (language : String)
@@ -305,7 +306,7 @@ private def alignSingleWithModel
         alignModel.alignPrepared
           inputIdsAlign
           #[wordList]
-          (inputFeatures := some (Tensor.reshapeChecked inputFeaturesDev #[1, alignCfg.thinkerConfig.audioConfig.numMelBins, frames]).forgetDType)
+          (inputFeatures := some (Tensor.reshapeChecked inputFeaturesDev #[1, alignCfg.thinkerConfig.audioConfig.numMelBins, frames]))
           (featureAttentionMask := some featureAttentionMaskDev)
           (attentionMask := (none : Option (Tensor { device := device, shape := #[1, seqAlign], dtype := .Int64 })))
           (timestampTokenId := alignCfg.timestampTokenId)
@@ -331,7 +332,7 @@ private def alignSingleWithForcedAligner
 
 private def maybeAlignTimestamps
     {cfg : Qwen3ASRConfig}
-    (model : Qwen3ASRForConditionalGeneration (device := device) cfg)
+    (model : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (preprocessor : PreprocessorConfig)
     (forcedAligner : Option Qwen3ForcedAligner := none)
@@ -363,7 +364,7 @@ private def maybeAlignTimestamps
 
 private def transcribeWithFrontend
     {cfg : Qwen3ASRConfig}
-    (model : Qwen3ASRForConditionalGeneration (device := device) cfg)
+    (model : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (preprocessor : PreprocessorConfig)
     (forcedAligner : Option Qwen3ForcedAligner := none)
@@ -391,7 +392,7 @@ private def transcribeWithFrontend
     do
       model.generateGreedy
         inputIds
-        (inputFeatures := some (Tensor.reshapeChecked inputFeaturesDev #[1, cfg.thinkerConfig.audioConfig.numMelBins, frames]).forgetDType)
+        (inputFeatures := some (Tensor.reshapeChecked inputFeaturesDev #[1, cfg.thinkerConfig.audioConfig.numMelBins, frames]))
         (featureAttentionMask := some featureAttentionMaskDev)
         (maxNewTokens := maxNewTokens)
         (eosTokenIds := eosTokenIds)
@@ -407,7 +408,7 @@ private def transcribeWithFrontend
 /-- Offline ASR for one in-memory 16k mono waveform. -/
 def transcribeWaveform
     {cfg : Qwen3ASRConfig}
-    (model : Qwen3ASRForConditionalGeneration (device := device) cfg)
+    (model : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (preprocessor : PreprocessorConfig)
     (audio16k : Array Float)
@@ -538,7 +539,7 @@ private def addRowToBuckets
     Returns `none` when inputs are not batch-collatable (e.g. multi-chunk split). -/
 private def tryTranscribeWaveformsBatchedChunk
     {cfg : Qwen3ASRConfig}
-    (model : Qwen3ASRForConditionalGeneration (device := device) cfg)
+    (model : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (preprocessor : PreprocessorConfig)
     (audios16k : Array (Array Float))
@@ -618,7 +619,7 @@ private def tryTranscribeWaveformsBatchedChunk
         do
           model.generateGreedy
             (inputIdsCpu.to dev)
-            (inputFeatures := some (Tensor.reshapeChecked (inputFeaturesCpu.to dev) #[batch, cfg.thinkerConfig.audioConfig.numMelBins, frames]).forgetDType)
+            (inputFeatures := some (Tensor.reshapeChecked (inputFeaturesCpu.to dev) #[batch, cfg.thinkerConfig.audioConfig.numMelBins, frames]))
             (featureAttentionMask := some (featureAttentionMaskCpu.to dev))
             (maxNewTokens := maxNewTokens)
             (eosTokenIds := eosTokenIds)
@@ -649,7 +650,7 @@ private def tryTranscribeWaveformsBatchedChunk
 /-- Offline ASR for a batch of in-memory 16k mono waveforms. -/
 def transcribeWaveforms
     {cfg : Qwen3ASRConfig}
-    (model : Qwen3ASRForConditionalGeneration (device := device) cfg)
+    (model : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (preprocessor : PreprocessorConfig)
     (audios16k : Array (Array Float))
@@ -707,7 +708,7 @@ def transcribeWaveforms
 /-- Offline ASR from one WAV path. WAV is normalized/resampled to 16k first. -/
 def transcribeWav
     {cfg : Qwen3ASRConfig}
-    (model : Qwen3ASRForConditionalGeneration (device := device) cfg)
+    (model : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (preprocessor : PreprocessorConfig)
     (wavPath : String)
@@ -726,7 +727,7 @@ def transcribeWav
     Supports path/URL/base64/in-memory waveform+sample-rate forms. -/
 def transcribeAudioInput
     {cfg : Qwen3ASRConfig}
-    (model : Qwen3ASRForConditionalGeneration (device := device) cfg)
+    (model : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (preprocessor : PreprocessorConfig)
     (audio : ASRAudioInput)
@@ -745,7 +746,7 @@ def transcribeAudioInput
     local path / URL / base64 payload. -/
 def transcribeAudioSource
     {cfg : Qwen3ASRConfig}
-    (model : Qwen3ASRForConditionalGeneration (device := device) cfg)
+    (model : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (preprocessor : PreprocessorConfig)
     (source : String)
@@ -771,7 +772,7 @@ def transcribeAudioSource
 /-- Offline ASR from WAV paths. WAVs are normalized/resampled to 16k first. -/
 def transcribeWavs
     {cfg : Qwen3ASRConfig}
-    (model : Qwen3ASRForConditionalGeneration (device := device) cfg)
+    (model : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (preprocessor : PreprocessorConfig)
     (wavPaths : Array String)
@@ -803,7 +804,7 @@ def transcribeWavs
     Inputs can mix path/URL/base64/in-memory waveform forms. -/
 def transcribeAudioInputs
     {cfg : Qwen3ASRConfig}
-    (model : Qwen3ASRForConditionalGeneration (device := device) cfg)
+    (model : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (preprocessor : PreprocessorConfig)
     (audios : Array ASRAudioInput)
@@ -834,7 +835,7 @@ def transcribeAudioInputs
 /-- Offline ASR from string sources with auto-detection per source string. -/
 def transcribeAudioSources
     {cfg : Qwen3ASRConfig}
-    (model : Qwen3ASRForConditionalGeneration (device := device) cfg)
+    (model : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (preprocessor : PreprocessorConfig)
     (sources : Array String)
@@ -877,8 +878,8 @@ def loadFromPretrained
       s!"Requested aligner source is not a forced-aligner checkpoint (model_type={cfg.thinkerConfig.modelType})"
   let tok ← tokenizer.qwen3.loadTokenizer modelDir
   let preprocessor ← PreprocessorConfig.loadFromPretrainedDir modelDir
-  let ⟨device, model⟩ ← Qwen3ASRForConditionalGeneration.loadSharded modelDir cfg
-  pure { cfg, device, model, tok, preprocessor }
+  let ⟨device, dtype, model⟩ ← Qwen3ASRForConditionalGeneration.loadSharded modelDir cfg
+  pure { cfg, device, dtype, model, tok, preprocessor }
 
 private def validateAlignLanguage (aligner : Qwen3ForcedAligner) (language : String) : IO String := do
   let ln ←
@@ -1015,7 +1016,7 @@ namespace Qwen3ASRForConditionalGeneration
 
 /-- Method-style offline ASR for one waveform. -/
 def transcribeWaveform
-    (m : Qwen3ASRForConditionalGeneration (device := device) cfg)
+    (m : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (preprocessor : PreprocessorConfig)
     (audio16k : Array Float)
@@ -1031,7 +1032,7 @@ def transcribeWaveform
 
 /-- Method-style offline ASR for multiple waveforms. -/
 def transcribeWaveforms
-    (m : Qwen3ASRForConditionalGeneration (device := device) cfg)
+    (m : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (preprocessor : PreprocessorConfig)
     (audios16k : Array (Array Float))
@@ -1048,7 +1049,7 @@ def transcribeWaveforms
 
 /-- Method-style offline ASR from one WAV path. -/
 def transcribeWav
-    (m : Qwen3ASRForConditionalGeneration (device := device) cfg)
+    (m : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (preprocessor : PreprocessorConfig)
     (wavPath : String)
@@ -1064,7 +1065,7 @@ def transcribeWav
 
 /-- Method-style offline ASR from one unified audio input. -/
 def transcribeAudioInput
-    (m : Qwen3ASRForConditionalGeneration (device := device) cfg)
+    (m : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (preprocessor : PreprocessorConfig)
     (audio : ASRAudioInput)
@@ -1080,7 +1081,7 @@ def transcribeAudioInput
 
 /-- Method-style offline ASR from string source with auto-detection. -/
 def transcribeAudioSource
-    (m : Qwen3ASRForConditionalGeneration (device := device) cfg)
+    (m : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (preprocessor : PreprocessorConfig)
     (source : String)
@@ -1096,7 +1097,7 @@ def transcribeAudioSource
 
 /-- Method-style offline ASR from WAV paths. -/
 def transcribeWavs
-    (m : Qwen3ASRForConditionalGeneration (device := device) cfg)
+    (m : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (preprocessor : PreprocessorConfig)
     (wavPaths : Array String)
@@ -1113,7 +1114,7 @@ def transcribeWavs
 
 /-- Method-style offline ASR from unified audio inputs. -/
 def transcribeAudioInputs
-    (m : Qwen3ASRForConditionalGeneration (device := device) cfg)
+    (m : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (preprocessor : PreprocessorConfig)
     (audios : Array ASRAudioInput)
@@ -1130,7 +1131,7 @@ def transcribeAudioInputs
 
 /-- Method-style offline ASR from string sources with auto-detection. -/
 def transcribeAudioSources
-    (m : Qwen3ASRForConditionalGeneration (device := device) cfg)
+    (m : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (preprocessor : PreprocessorConfig)
     (sources : Array String)

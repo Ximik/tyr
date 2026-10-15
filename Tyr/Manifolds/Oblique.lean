@@ -48,7 +48,7 @@ def project (X : Oblique m n d dev) (V : Tensor ⟨#[m, n], d, dev⟩) : Oblique
   ⟨Tensor.Preserving.sub V (Tensor.Preserving.mul X.matrix colDots)⟩
 
 /-- Zero tangent vector. -/
-def zero (m n : UInt64) : ObliqueTangent m n d dev := ⟨Tensor.zerosFor ⟨#[m, n], d, dev⟩⟩
+def zero [DType.ConstantSupported d dev] (m n : UInt64) : ObliqueTangent m n d dev := ⟨Tensor.zerosFor ⟨#[m, n], d, dev⟩⟩
 
 /-- Add tangent vectors. -/
 def add (a b : ObliqueTangent m n d dev) : ObliqueTangent m n d dev :=
