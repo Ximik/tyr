@@ -173,6 +173,10 @@ hardware qualification.
 ### Error strategy
 
 Native result carriers must match the Lean declaration on every path.
+`scripts/check_ffi_recovery.py` inventories recoverable RawTensor declarations
+and requires their native implementations to enter the common exception guard
+before doing C++ work. The CPU tooling job runs this check alongside ABI and
+runtime regressions; fixed platform-unavailable stubs are checked separately.
 `RawTensor.flashAttention` and `RawTensor.transpose` return
 `Except String RawTensor`; their typed `Tensor.flashAttention?` and
 `Tensor.transpose?` adapters preserve recoverable failures and check successful
@@ -187,9 +191,19 @@ including borrowed-reference preservation and cleanup on invalid input.
 Core arithmetic and matrix adapters use checked native exports returning
 `Except String RawTensor`. Typed `Tensor.Promoting` and `Tensor.Preserving`
 arithmetic `?` APIs preserve those errors, including missing kernels for otherwise
-valid promotion pairs. The checked expansion, concatenation, and reduction
+valid promotion pairs. Fused `affine3d?` checks the actual dtype and device of
+both its weight and bias before calling the checked native kernel. Scalar
+spectral and nuclear norms also expose checked `?` variants for dtype, backend,
+and factorization failures. The checked expansion, concatenation, and reduction
 families follow the same result-carrier contract. Their pure convenience
 wrappers use Lean's panic fallback after receiving an error.
+
+STFT preserves its IO error contract even for invalid native FFT parameters.
+Apple image and video preprocessing catches C++ failures at each IO entry point;
+temporary native media resources are released during unwinding.
+IO initializers use checked `zerosIO`, `onesIO`, or `eyeForIO` allocation and
+conversion, so invalid dimensions or placement do not escape through a pure
+factory before parameter creation.
 
 These adapters check operation preconditions before native execution. Equal
 concrete device indices tie tensors to the same placement; checked FFI adapters
