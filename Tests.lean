@@ -23,6 +23,7 @@ import Tests.TestConvolutionContracts
 import Tests.TestWidgetTyped
 import Tests.TestTypedStandalone
 import Tests.TestExactDType
+import Tests.TestExactSafeTensors
 import Tests.TestTensorTreeCast
 import Tests.TestTensorValueUpdates
 import Tests.TestTensorAutogradEffects

@@ -37,9 +37,9 @@ def reqGradFalse {σ : StaticSpec} (t : Tensor σ) : Tensor σ :=
     weight: [out, in], scale_inv: [out/128, in/128]. Returns float32 weights.
     The block reshapes are runtime-validated (`reshapeChecked`): the block
     factors are symbolic UInt64 division, so no static numel proof exists. -/
-def dequantizeFP8 {outDim inDim : UInt64}
-    (weight : Tensor { device := device, shape := #[outDim, inDim] })
-    (scaleInv : Tensor { device := device, shape := #[outDim / 128, inDim / 128] })
+def dequantizeFP8 {outDim inDim : UInt64} {weightDType scaleDType : DType}
+    (weight : Tensor { device := device, shape := #[outDim, inDim], dtype := weightDType })
+    (scaleInv : Tensor { device := device, shape := #[outDim / 128, inDim / 128], dtype := scaleDType })
     : Tensor { device := device, shape := #[outDim, inDim], dtype := .Float32 } :=
   let outBlocks := outDim / 128
   let inBlocks := inDim / 128

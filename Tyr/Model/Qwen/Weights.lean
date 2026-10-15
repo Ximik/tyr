@@ -5,15 +5,14 @@
   Maps HuggingFace weight names to Tyr structure.
   Supports both single-file and sharded HuggingFace models.
 
-  Consumes the typed `Tyr/SafeTensors/Load` API: loads arrive as
-  shape-indexed `Tensor { shape := s }` (dtype follows the file), and are bridged into
-  the Float32-pinned structure fields with `Tensor.toFloat32`. The cast
-  also covers BF16 checkpoints, which the legacy pipeline only survived
-  when weights happened to be Float32 on disk.
+  Consumes the exact `Tyr/SafeTensors/Exact` API: each load retains the
+  stored dtype in a dependent package. The caller explicitly converts its
+  tensor to the Float32 structure fields. FP8 weights and block scales keep
+  independent dtype indices until the existing Float32 dequantization step.
 -/
 import Tyr.Typed
 import Tyr.Log
-import Tyr.SafeTensors.Load
+import Tyr.SafeTensors.Exact
 import Tyr.Model.Utils
 import Tyr.Model.Qwen.Config
 import Tyr.Model.Qwen.Model
@@ -24,19 +23,18 @@ namespace torch.qwen
 variable {device : Device}
 open torch.Log
 open torch.Model (dequantizeFP8)
-open torch.safetensors (tryLoadTensor tryLoadTensorSharded)
+open torch.safetensors (loadTensorExact loadTensorShardedExact
+  loadOptionalTensorExact loadOptionalTensorShardedExact)
 
-/-- Load a required tensor from a sharded checkpoint, throwing if absent. -/
-private def loadRequiredSharded (modelDir : String) (name : String) (s : Shape) (device : Device := .CPU) : IO (Tensor { device := device, shape := s }) := do
-  match (← tryLoadTensorSharded (device := device) modelDir name s) with
-  | some t => pure t
-  | none => throw <| IO.userError s!"Failed to load tensor (sharded): {name}"
+/-- Load a required tensor with its exact stored dtype from a sharded checkpoint. -/
+private def loadRequiredSharded (modelDir : String) (name : String) (s : Shape)
+    (device : Device := .CPU) : IO (SomeDTypeTensor s device) :=
+  loadTensorShardedExact modelDir name s device
 
-/-- Load a required tensor from a single SafeTensors file, throwing if absent. -/
-private def loadRequired (path : String) (name : String) (s : Shape) (device : Device := .CPU) : IO (Tensor { device := device, shape := s }) := do
-  match (← tryLoadTensor (device := device) path name s) with
-  | some t => pure t
-  | none => throw <| IO.userError s!"Failed to load tensor: {name}"
+/-- Load a required tensor with its exact stored dtype from a single file. -/
+private def loadRequired (path : String) (name : String) (s : Shape)
+    (device : Device := .CPU) : IO (SomeDTypeTensor s device) :=
+  loadTensorExact path name s device
 
 /-- Load a (potentially FP8-quantized) linear weight from sharded SafeTensors.
     If a matching weight_scale_inv exists, dequantize to float32;
@@ -44,10 +42,10 @@ private def loadRequired (path : String) (name : String) (s : Shape) (device : D
 private def loadLinearWeightSharded (modelDir : String) (name : String) (outDim inDim : UInt64)
     (device : Device := .CPU) : IO (Tensor { device := device, shape := #[outDim, inDim], dtype := .Float32 }) := do
   let w ← loadRequiredSharded (device := device) modelDir s!"{name}.weight" #[outDim, inDim]
-  let scaleInvOpt ← tryLoadTensorSharded (device := device) modelDir s!"{name}.weight_scale_inv" #[outDim / 128, inDim / 128]
+  let scaleInvOpt ← loadOptionalTensorShardedExact (device := device) modelDir s!"{name}.weight_scale_inv" #[outDim / 128, inDim / 128]
   match scaleInvOpt with
-  | some s => pure (dequantizeFP8 w s)
-  | none => pure w.toFloat32
+  | some s => pure (dequantizeFP8 w.2 s.2)
+  | none => pure w.2.toFloat32
 
 /-- Load a (potentially FP8-quantized) linear weight from a single SafeTensors file.
     If a matching weight_scale_inv exists, dequantize to float32;
@@ -55,10 +53,10 @@ private def loadLinearWeightSharded (modelDir : String) (name : String) (outDim 
 private def loadLinearWeight (path : String) (name : String) (outDim inDim : UInt64)
     (device : Device := .CPU) : IO (Tensor { device := device, shape := #[outDim, inDim], dtype := .Float32 }) := do
   let w ← loadRequired (device := device) path s!"{name}.weight" #[outDim, inDim]
-  let scaleInv ← tryLoadTensor (device := device) path s!"{name}.weight_scale_inv" #[outDim / 128, inDim / 128]
+  let scaleInv ← loadOptionalTensorExact (device := device) path s!"{name}.weight_scale_inv" #[outDim / 128, inDim / 128]
   match scaleInv with
-  | some s => pure (dequantizeFP8 w s)
-  | none => pure w.toFloat32
+  | some s => pure (dequantizeFP8 w.2 s.2)
+  | none => pure w.2.toFloat32
 
 /-- Load a single attention layer from sharded SafeTensors.
     Optionally loads Q/K norms if present (for Flux Klein text encoder). -/
@@ -76,12 +74,12 @@ def loadAttentionSharded (modelDir : String) (layerIdx : UInt64)
 
   -- Optionally load Q/K norms (Flux Klein text encoder has these)
   let q_norm ← if loadQKNorms then
-    tryLoadTensorSharded (device := device) modelDir s!"{layerPrefix}.q_norm.weight" #[head_dim]
+    loadOptionalTensorShardedExact (device := device) modelDir s!"{layerPrefix}.q_norm.weight" #[head_dim]
   else
     pure none
 
   let k_norm ← if loadQKNorms then
-    tryLoadTensorSharded (device := device) modelDir s!"{layerPrefix}.k_norm.weight" #[head_dim]
+    loadOptionalTensorShardedExact (device := device) modelDir s!"{layerPrefix}.k_norm.weight" #[head_dim]
   else
     pure none
 
@@ -90,8 +88,8 @@ def loadAttentionSharded (modelDir : String) (layerIdx : UInt64)
     k_proj := Tensor.detach k_proj
     v_proj := Tensor.detach v_proj
     o_proj := Tensor.detach o_proj
-    q_norm := q_norm.map (fun t => Tensor.detach t.toFloat32)
-    k_norm := k_norm.map (fun t => Tensor.detach t.toFloat32)
+    q_norm := q_norm.map (fun t => Tensor.detach t.2.toFloat32)
+    k_norm := k_norm.map (fun t => Tensor.detach t.2.toFloat32)
   }
 
 /-- Load a single MLP layer from sharded SafeTensors -/
@@ -114,7 +112,7 @@ def loadMLPSharded (modelDir : String) (layerIdx : UInt64)
 def loadRMSNormSharded (modelDir : String) (name : String) (dim : UInt64)
     (device : Device := .CPU) : IO (RMSNorm (device := device) dim) := do
   let scale ← loadRequiredSharded (device := device) modelDir s!"{name}.weight" #[dim]
-  pure { weight := Tensor.detach scale.toFloat32, eps := ⟨1e-6⟩ }
+  pure { weight := Tensor.detach scale.2.toFloat32, eps := ⟨1e-6⟩ }
 
 /-- Load a single transformer layer from sharded SafeTensors -/
 def loadLayerSharded (modelDir : String) (layerIdx : UInt64) (cfg : QwenConfig)
@@ -140,7 +138,7 @@ def loadQwen3ModelSharded (modelDir : String) (cfg : QwenConfig := QwenConfig.qw
 
   -- Token embeddings
   let embed_tokens ← loadRequiredSharded (device := device) modelDir "model.embed_tokens.weight" #[cfg.vocab_size, cfg.hidden_size]
-  let embed_tokens := Tensor.detach embed_tokens.toFloat32
+  let embed_tokens := Tensor.detach embed_tokens.2.toFloat32
   log.onInfo "  Loaded embed_tokens"
 
   -- Layers
@@ -200,7 +198,7 @@ def loadMLP (path : String) (layerIdx : UInt64)
 def loadRMSNorm (path : String) (name : String) (dim : UInt64)
     (device : Device := .CPU) : IO (RMSNorm (device := device) dim) := do
   let scale ← loadRequired (device := device) path s!"{name}.weight" #[dim]
-  pure { weight := Tensor.detach scale.toFloat32, eps := ⟨1e-6⟩ }
+  pure { weight := Tensor.detach scale.2.toFloat32, eps := ⟨1e-6⟩ }
 
 /-- Load a single transformer layer from SafeTensors (single file) -/
 def loadLayer (path : String) (layerIdx : UInt64) (cfg : QwenConfig)
@@ -222,7 +220,7 @@ def loadQwen3Model (path : String) (cfg : QwenConfig := QwenConfig.qwen3_4B)
 
   -- Token embeddings
   let embed_tokens ← loadRequired (device := device) path "model.embed_tokens.weight" #[cfg.vocab_size, cfg.hidden_size]
-  let embed_tokens := Tensor.detach embed_tokens.toFloat32
+  let embed_tokens := Tensor.detach embed_tokens.2.toFloat32
   log.onInfo "  Loaded embed_tokens"
 
   -- Layers
