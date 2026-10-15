@@ -150,7 +150,10 @@ def blockForward {n_embd n_head batch seq : UInt64}
   let v := nn.transpose_for_attention (reshape v #[batch, seq, n_head, head_dim])
   -- Scaled dot-product attention with causal masking (with dropout built-in)
   -- Input: [batch, n_head, seq, head_dim], Output: [batch, n_head, seq, head_dim]
-  let attn := nn.scaled_dot_product_attention q k v dropout_p true
+  -- SDPA applies dropout whenever `dropout_p > 0` and has no `training` flag, so gate it here.
+  -- TODO: the pure SDPA signature hides its RNG use; it should not type-check without an
+  -- explicit training flag or PRNG key, like `nn.dropout`.
+  let attn := nn.scaled_dot_product_attention q k v (if training then dropout_p else 0.0) true
   -- Reshape back: [batch, n_head, seq, head_dim] -> [batch, seq, n_head, head_dim] -> [batch, seq, n_embd]
   let attn := reshape (nn.transpose_from_attention attn) #[batch, seq, n_embd]
   -- Output projection + dropout
