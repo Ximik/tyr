@@ -444,15 +444,15 @@ private def ppoUpdate
         (Tensor.maximum (Tensor.Preserving.mulScalar surr1 (-1.0))
           (Tensor.Preserving.mulScalar surr2 (-1.0)))
         (-1.0)
-      let policyLoss := Tensor.Preserving.mulScalar (Tensor.meanAll minSurr rfl) (-1.0)
+      let policyLoss := Tensor.Preserving.mulScalar (Tensor.meanAll minSurr) (-1.0)
 
       let valueErr := values - retT
-      let valueLoss := Tensor.meanAll (valueErr * valueErr) rfl
+      let valueLoss := Tensor.meanAll (valueErr * valueErr)
 
       let probs := Tensor.softmax logits (-1) rfl
       let entropyTerms := probs * logProbsAll
       let entropyPer := Tensor.sumDim entropyTerms 1 false
-      let entropy := Tensor.Preserving.mulScalar (Tensor.meanAll entropyPer rfl) (-1.0)
+      let entropy := Tensor.Preserving.mulScalar (Tensor.meanAll entropyPer) (-1.0)
 
       let totalLoss :=
         policyLoss +
@@ -732,9 +732,9 @@ private def alphaZeroUpdate
       let (logits, values) := AlphaGradNet.forward working obs
       let logProbs := Tensor.logSoftmax logits (-1) rfl
       let policyPer := Tensor.sumDim (policyT * logProbs) 1 false
-      let policyLoss := Tensor.Preserving.mulScalar (Tensor.meanAll policyPer rfl) (-1.0)
+      let policyLoss := Tensor.Preserving.mulScalar (Tensor.meanAll policyPer) (-1.0)
       let valueErr := values - valueT
-      let valueLoss := Tensor.meanAll (valueErr * valueErr) rfl
+      let valueLoss := Tensor.meanAll (valueErr * valueErr)
       let totalLoss := policyLoss + Tensor.Preserving.mulScalar valueLoss cfg.valueCoef
 
       Tensor.backwardLoss totalLoss

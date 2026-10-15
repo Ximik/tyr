@@ -9,7 +9,9 @@ private def checked {σ : StaticSpec} (raw : RawTensor) : Tensor σ :=
   | .error message => panic! s!"Laguna tensor boundary: {message}"
 
 def mulBroadcast {s t out : Shape} (a : Tensor { shape := s }) (b : Tensor { shape := t }) : Tensor { shape := out } :=
-  checked (RawTensor.mul s a.raw b.raw)
+  match Tensor.Promoting.mulB? a b out with
+  | .ok result => checked result.tensor.raw
+  | .error message => panic! s!"Laguna.mulBroadcast: {message}"
 
 def bmm {b m n k : UInt64} (x : Tensor { shape := #[b, m, k] }) (y : Tensor { shape := #[b, k, n] }) :
     Tensor { shape := #[b, m, n] } :=

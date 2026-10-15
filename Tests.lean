@@ -39,6 +39,10 @@ import Tests.TestADTensorStructSchema
 import Tests.TestADTensorStructFlatten
 import Tests.TestTyped
 import Tests.TestDTypeMetadata
+import Tests.TestOperationContracts
+import Tests.TestDeviceCompatibility
+import Tests.TestComplexResults
+import Tests.TestDTypeUnary
 import Tests.TestDTypeConversions
 import Tests.TestDTypeWitness
 import Tests.TestGPTTyped

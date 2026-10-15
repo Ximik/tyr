@@ -15,9 +15,9 @@ def floatDynamic {s : Shape} {d : DType} (x : Tensor { shape := s, dtype := d })
   x.toFloat32.forgetDType
 def bfloatDynamic {s : Shape} (x : Tensor { shape := s }) : Tensor { shape := s } := x.toBFloat16.forgetDType
 
-def logDynamic {s : Shape} (x : Tensor { shape := s }) : Tensor { shape := s } := x.checkedReplacement (RawTensor.log s x.raw)
+def logDynamic {s : Shape} (x : Tensor { shape := s }) : Tensor { shape := s } := Tensor.Promoting.log x
 def softplusDynamic {s : Shape} (x : Tensor { shape := s }) : Tensor { shape := s } := x.checkedReplacement (RawTensor.branchingSoftplus s x.raw)
-def powDynamic {s : Shape} (x : Tensor { shape := s }) (n : Float) : Tensor { shape := s } := x.checkedReplacement (RawTensor.pow s x.raw n)
+def powDynamic {s : Shape} (x : Tensor { shape := s }) (n : Float) : Tensor { shape := s } := Tensor.Promoting.pow x n
 
 def sliceTyped {s out : Shape} {d : DType} (x : Tensor { shape := s, dtype := d }) (dim : Nat) (start len : UInt64) : Tensor { shape := out, dtype := d } :=
   x.sliceChecked dim start len out
@@ -48,10 +48,38 @@ def copyIntoChecked {σ τ : StaticSpec} (dst : Tensor σ) (src : Tensor τ) : I
 
 def touchTensor {σ : StaticSpec} (t : Tensor σ) : IO Unit := RawTensor.touch σ.shape t.raw
 
-def mulTensorScalar {σ : StaticSpec} {d : DType} (x : Tensor σ) (scalar : Tensor { shape := #[], dtype := d }) : Tensor σ :=
-  x.checkedReplacement (RawTensor.mulTensorScalar σ.shape x.raw scalar.raw)
+/-- A tensor learning rate follows rank-aware PyTorch promotion, including
+weak scalar precision. The result is never restored to the input dtype. -/
+def mulTensorScalar {σ : StaticSpec} {d result : DType}
+    [TensorSpec.Promotes σ.toTensorSpec ⟨#[], d⟩ result]
+    (x : Tensor σ) (scalar : Tensor { shape := #[], dtype := d }) :
+    Tensor ⟨σ.shape, result, σ.pointwiseDevice ⟨#[], d, .any⟩⟩ :=
+  let result := do
+    Tensor.checkPointwise x scalar
+    Tensor.ofRaw (← RawTensor.mulTensorScalarChecked σ.shape x.raw scalar.raw)
+  match result with
+  | .ok tensor => tensor
+  | .error message => panic! s!"BranchingFlows.mulTensorScalar: {message}"
 
-def cosDynamic {s : Shape} (x : Tensor { shape := s }) : Tensor { shape := s } := x.checkedReplacement (RawTensor.cos s x.raw)
+def mulTensorScalar? {σ : StaticSpec} {d : DType}
+    (x : Tensor σ) (scalar : Tensor { shape := #[], dtype := d }) :=
+  Tensor.Promoting.mulB? x scalar σ.shape
+
+/-- Optimizer updates explicitly require native dtype preservation. This
+checked adapter rejects any promoted result instead of casting it back. -/
+def mulTensorScalarPreserving? {σ : StaticSpec} {d : DType}
+    (x : Tensor σ) (scalar : Tensor { shape := #[], dtype := d }) :
+    Except String (Tensor σ) := do
+  let result ← mulTensorScalar? x scalar
+  x.checkedReplacement? result.tensor.raw
+
+def mulTensorScalarPreserving {σ : StaticSpec} {d : DType}
+    (x : Tensor σ) (scalar : Tensor { shape := #[], dtype := d }) : Tensor σ :=
+  match mulTensorScalarPreserving? x scalar with
+  | .ok tensor => tensor
+  | .error message => panic! s!"BranchingFlows.mulTensorScalarPreserving: {message}"
+
+def cosDynamic {s : Shape} (x : Tensor { shape := s }) : Tensor { shape := s } := Tensor.Promoting.cos x
 
 def affine2d {batch input output : UInt64} (x : Tensor { shape := #[batch, input] })
     (w : Tensor { shape := #[output, input] }) (bias : Tensor { shape := #[output] }) : Tensor { shape := #[batch, output] } :=

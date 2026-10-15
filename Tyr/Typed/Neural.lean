@@ -86,7 +86,12 @@ def rmsNormPreserving {σ : StaticSpec} {w : Shape}
     (x : Tensor σ) (weight : Tensor (σ.withShape w)) (eps : Float := 1e-6) : Tensor σ :=
   -- HF checkpoints round the normalized activation before multiplying weights.
   let restored := Tensor.castLike x (rmsNorm x eps)
-  x.checkedReplacement (RawTensor.mul σ.shape restored.raw weight.raw)
+  let result := do
+    Tensor.checkPointwise restored weight
+    x.checkedReplacement? (← RawTensor.mulChecked σ.shape restored.raw weight.raw)
+  match result with
+  | .ok tensor => tensor
+  | .error message => panic! s!"Tensor.rmsNormPreserving: {message}"
 
 /-- Package a tensor's shape existentially; this does not erase its shape claim. -/
 def packShape {s : Shape} {d : DType} {dev : DevicePolicy} (t : Tensor ⟨s, d, dev⟩) :
@@ -96,8 +101,11 @@ def packShape {s : Shape} {d : DType} {dev : DevicePolicy} (t : Tensor ⟨s, d, 
 Inputs retain their individual shape indices rather than pretending to be scalars. -/
 def catMany? {d : DType} {dev : DevicePolicy}
     (tensors : Array (Sigma (fun shape => Tensor ⟨shape, d, dev⟩)))
-    (dim : Int) (shape : Shape) : Except String (Tensor ⟨shape, d, dev⟩) :=
-  Tensor.ofRaw (RawTensor.catMany (tensors.map fun t => t.2.raw) dim)
+    (dim : Int) (shape : Shape) : Except String (Tensor ⟨shape, d, dev⟩) := do
+  let some first := tensors[0]? | throw "catMany requires at least one tensor"
+  for t in tensors do
+    Tensor.checkSameDevice first.2 t.2
+  Tensor.ofRaw (← RawTensor.catManyChecked (tensors.map fun t => t.2.raw) dim)
 
 def catManyChecked {d : DType} {dev : DevicePolicy}
     (tensors : Array (Sigma (fun shape => Tensor ⟨shape, d, dev⟩)))
@@ -109,43 +117,110 @@ def catManyChecked {d : DType} {dev : DevicePolicy}
 def arange (stop : UInt64) : Tensor { shape := #[stop], dtype := .Int64 } :=
   checkedNeuralResult "arange" (RawTensor.arange 0 stop 1)
 
-def sin {σ : StaticSpec} (t : Tensor σ)
-    (_float : σ.dtype.isFloating = true := by first | rfl | decide) : Tensor σ :=
-  t.checkedReplacement (RawTensor.sin σ.shape t.raw)
+private def checkedNeuralUnary? {σ : StaticSpec} (operation domain : String)
+    (accepts : DType → Bool) (native : Shape → RawTensor → Except String RawTensor)
+    (t : Tensor σ) : Except String (Tensor σ) := do
+  if !accepts t.raw.dtype then
+    throw s!"{operation} requires {domain}, got {t.raw.dtype}"
+  t.checkedReplacement? (← native σ.shape t.raw)
 
-def cos {σ : StaticSpec} (t : Tensor σ)
-    (_float : σ.dtype.isFloating = true := by first | rfl | decide) : Tensor σ :=
-  t.checkedReplacement (RawTensor.cos σ.shape t.raw)
-
-namespace Preserving
-/-- Metadata-checked activation for models whose checkpoint dtype is dynamic. -/
-def gelu {σ : StaticSpec} (t : Tensor σ) : Tensor σ :=
-  t.checkedReplacement (RawTensor.gelu σ.shape t.raw)
-def silu {σ : StaticSpec} (t : Tensor σ) : Tensor σ :=
-  t.checkedReplacement (RawTensor.silu σ.shape t.raw)
-def sigmoid {σ : StaticSpec} (t : Tensor σ) : Tensor σ :=
-  t.checkedReplacement (RawTensor.sigmoid σ.shape t.raw)
-def tanh {σ : StaticSpec} (t : Tensor σ) : Tensor σ :=
-  t.checkedReplacement (RawTensor.tanh σ.shape t.raw)
-def softmax {σ : StaticSpec} (t : Tensor σ) (dim : Int32 := -1) : Tensor σ :=
-  t.checkedReplacement (RawTensor.softmax σ.shape t.raw dim)
-/-- Mean for floating checkpoint tensors with a possibly dynamic dtype index. -/
-def meanDim {σ : StaticSpec} (t : Tensor σ) (dim : Nat) (keepdim : Bool := false) :
-    Tensor (σ.withShape (reduceShape σ.shape dim keepdim)) :=
-  let raw := RawTensor.mean σ.shape t.raw (some #[dim.toUInt64]) keepdim
-  let result := do
-    TensorSpec.checkDType t.raw.dtype raw.dtype
-    DevicePolicy.check (.exact t.raw.device) raw.device
-    Tensor.ofRaw raw
+private def neuralUnaryResult {σ : StaticSpec} (operation : String) (t : Tensor σ)
+    (result : Except String (Tensor σ)) : Tensor σ :=
   match result with
   | .ok result => result
+  | .error message =>
+    letI : Inhabited (Tensor σ) := ⟨t⟩
+    panic! s!"Tensor.{operation}: {message}"
+
+def sin? {σ : StaticSpec} (t : Tensor σ) : Except String (Tensor σ) :=
+  checkedNeuralUnary? "sin" "a floating or complex dtype" DType.isInexact RawTensor.sinChecked t
+
+def sin {σ : StaticSpec} (t : Tensor σ)
+    (_domain : σ.dtype.isInexact = true := by first | rfl | decide) : Tensor σ :=
+  neuralUnaryResult "sin" t (sin? t)
+
+def cos? {σ : StaticSpec} (t : Tensor σ) : Except String (Tensor σ) :=
+  checkedNeuralUnary? "cos" "a floating or complex dtype" DType.isInexact RawTensor.cosChecked t
+
+def cos {σ : StaticSpec} (t : Tensor σ)
+    (_domain : σ.dtype.isInexact = true := by first | rfl | decide) : Tensor σ :=
+  neuralUnaryResult "cos" t (cos? t)
+
+def elu? {σ : StaticSpec} (t : Tensor σ) : Except String (Tensor σ) :=
+  checkedNeuralUnary? "elu" "a standard real floating dtype" DType.isRealFloating RawTensor.eluChecked t
+
+def elu {σ : StaticSpec} (t : Tensor σ)
+    (_domain : σ.dtype.isRealFloating = true := by first | rfl | decide) : Tensor σ :=
+  neuralUnaryResult "elu" t (elu? t)
+
+namespace Preserving
+/-- Runtime-domain and native-error checks for checkpoint activations. -/
+def gelu? {σ : StaticSpec} (t : Tensor σ) : Except String (Tensor σ) :=
+  Tensor.gelu? t
+
+def gelu {σ : StaticSpec} (t : Tensor σ) : Tensor σ :=
+  neuralUnaryResult "Preserving.gelu" t (gelu? t)
+
+def silu? {σ : StaticSpec} (t : Tensor σ) : Except String (Tensor σ) :=
+  Tensor.silu? t
+
+def silu {σ : StaticSpec} (t : Tensor σ) : Tensor σ :=
+  neuralUnaryResult "Preserving.silu" t (silu? t)
+
+def sigmoid? {σ : StaticSpec} (t : Tensor σ) : Except String (Tensor σ) :=
+  Tensor.sigmoid? t
+
+def sigmoid {σ : StaticSpec} (t : Tensor σ) : Tensor σ :=
+  neuralUnaryResult "Preserving.sigmoid" t (sigmoid? t)
+
+def tanh? {σ : StaticSpec} (t : Tensor σ) : Except String (Tensor σ) :=
+  Tensor.tanh? t
+
+def tanh {σ : StaticSpec} (t : Tensor σ) : Tensor σ :=
+  neuralUnaryResult "Preserving.tanh" t (tanh? t)
+
+def softmax? {σ : StaticSpec} (t : Tensor σ) (dim : Int32 := -1) : Except String (Tensor σ) :=
+  Tensor.softmax? t dim
+
+def softmax {σ : StaticSpec} (t : Tensor σ) (dim : Int32 := -1) : Tensor σ :=
+  neuralUnaryResult "Preserving.softmax" t (softmax? t dim)
+
+/-- Mean for floating or complex checkpoint tensors; invalid axes, integral
+inputs and missing kernels are recoverable errors. -/
+def meanDim? {σ : StaticSpec} (t : Tensor σ) (dim : Nat) (keepdim : Bool := false) :
+    Except String (Tensor (σ.withShape (reduceShape σ.shape dim keepdim))) := do
+  DType.checkMean t.raw.dtype
+  if dim >= max 1 σ.shape.size then
+    throw s!"Reduction axis {dim} is out of range for rank {σ.shape.size}"
+  let raw ← RawTensor.meanChecked σ.shape t.raw (some #[dim.toUInt64]) keepdim
+  TensorSpec.checkDType t.raw.dtype raw.dtype
+  DevicePolicy.check (.exact t.raw.device) raw.device
+  Tensor.ofRaw raw
+
+def meanDim {σ : StaticSpec} (t : Tensor σ) (dim : Nat) (keepdim : Bool := false) :
+    Tensor (σ.withShape (reduceShape σ.shape dim keepdim)) :=
+  match meanDim? t dim keepdim with
+  | .ok result => result
   | .error message => panic! s!"Tensor.meanDim: {message}"
+def exp? {σ : StaticSpec} (t : Tensor σ) : Except String (Tensor σ) := Tensor.exp? t
+
 def exp {σ : StaticSpec} (t : Tensor σ) : Tensor σ :=
-  t.checkedReplacement (RawTensor.exp σ.shape t.raw)
+  neuralUnaryResult "Preserving.exp" t (exp? t)
+
+def sin? {σ : StaticSpec} (t : Tensor σ) : Except String (Tensor σ) := Tensor.sin? t
+
 def sin {σ : StaticSpec} (t : Tensor σ) : Tensor σ :=
-  t.checkedReplacement (RawTensor.sin σ.shape t.raw)
+  neuralUnaryResult "Preserving.sin" t (sin? t)
+
+def cos? {σ : StaticSpec} (t : Tensor σ) : Except String (Tensor σ) := Tensor.cos? t
+
+def cos {σ : StaticSpec} (t : Tensor σ) : Tensor σ :=
+  neuralUnaryResult "Preserving.cos" t (cos? t)
+
+def elu? {σ : StaticSpec} (t : Tensor σ) : Except String (Tensor σ) := Tensor.elu? t
+
 def elu {σ : StaticSpec} (t : Tensor σ) : Tensor σ :=
-  t.checkedReplacement (RawTensor.elu σ.shape t.raw)
+  neuralUnaryResult "Preserving.elu" t (elu? t)
 end Preserving
 
 /-- Spatial extent computed without fixed-width arithmetic wrapping. -/
@@ -289,17 +364,50 @@ def stft {n winLength : UInt64} (input : Tensor { shape := #[n], dtype := .Float
   | .ok t => pure ⟨shape, t⟩
   | .error message => throw <| IO.userError s!"Tensor.stft: {message}"
 
+def log10? {σ : StaticSpec} (input : Tensor σ) : Except String (Tensor σ) :=
+  checkedNeuralUnary? "log10" "a floating or complex dtype" DType.isInexact RawTensor.log10Checked input
+
 def log10 {σ : StaticSpec} (input : Tensor σ)
-    (_float : σ.dtype.isFloating = true := by first | rfl | decide) : Tensor σ :=
-  input.checkedReplacement (RawTensor.log10 σ.shape input.raw)
+    (_inexact : σ.dtype.isInexact = true := by first | rfl | decide) : Tensor σ :=
+  neuralUnaryResult "log10" input (log10? input)
+
+namespace Preserving
+
+def log10? {σ : StaticSpec} (input : Tensor σ) : Except String (Tensor σ) := Tensor.log10? input
+
+def log10 {σ : StaticSpec} (input : Tensor σ) : Tensor σ :=
+  neuralUnaryResult "Preserving.log10" input (log10? input)
+
+end Preserving
 
 def saveWav {σ : StaticSpec} (input : Tensor σ) (path : String) (sampleRate : UInt64 := 24000) : IO Unit :=
   RawTensor.saveWav σ.shape input.raw path sampleRate
 
+def lt? {s : Shape} {d : DType} {dev : DevicePolicy} (a b : Tensor ⟨s, d, dev⟩) :
+    Except String (Tensor ⟨s, .Bool, dev⟩) := do
+  DType.checkOrdered a.raw.dtype
+  DType.checkOrdered b.raw.dtype
+  Tensor.checkPointwise a b
+  Tensor.ofRaw (← RawTensor.ltChecked s a.raw b.raw)
+
 def lt {s : Shape} {d : DType} {dev : DevicePolicy} (a b : Tensor ⟨s, d, dev⟩) :
-    Tensor ⟨s, .Bool, dev⟩ := checkedNeuralResult "lt" (RawTensor.lt s a.raw b.raw)
+    Tensor ⟨s, .Bool, dev⟩ :=
+  match lt? a b with
+  | .ok result => result
+  | .error message => panic! s!"Tensor.lt: {message}"
+
+def ge? {s : Shape} {d : DType} {dev : DevicePolicy} (a b : Tensor ⟨s, d, dev⟩) :
+    Except String (Tensor ⟨s, .Bool, dev⟩) := do
+  DType.checkOrdered a.raw.dtype
+  DType.checkOrdered b.raw.dtype
+  Tensor.checkPointwise a b
+  Tensor.ofRaw (← RawTensor.geChecked s a.raw b.raw)
+
 def ge {s : Shape} {d : DType} {dev : DevicePolicy} (a b : Tensor ⟨s, d, dev⟩) :
-    Tensor ⟨s, .Bool, dev⟩ := checkedNeuralResult "ge" (RawTensor.ge s a.raw b.raw)
+    Tensor ⟨s, .Bool, dev⟩ :=
+  match ge? a b with
+  | .ok result => result
+  | .error message => panic! s!"Tensor.ge: {message}"
 def ltScalar {s : Shape} {d : DType} {dev : DevicePolicy} (input : Tensor ⟨s, d, dev⟩) (value : Float) :
     Tensor ⟨s, .Bool, dev⟩ := checkedNeuralResult "ltScalar" (RawTensor.ltScalar s input.raw value)
 def maskedFill {s : Shape} {d : DType} {dev : DevicePolicy}
@@ -334,9 +442,21 @@ def attentionWindow {batch heads kvHeads seq dim : UInt64} {d : DType} {dev : De
     (dropout : Float := 0.0) (causal : Bool := true) (gqa : Bool := false) (window : UInt64 := 0) :=
   q.checkedReplacement (RawTensor.attentionWindow batch heads kvHeads seq dim q.raw k.raw v.raw dropout causal gqa window)
 
+def log? {σ : StaticSpec} (input : Tensor σ) : Except String (Tensor σ) :=
+  checkedNeuralUnary? "log" "a floating or complex dtype" DType.isInexact RawTensor.logChecked input
+
 def log {σ : StaticSpec} (input : Tensor σ)
-    (_float : σ.dtype.isFloating = true := by first | rfl | decide) : Tensor σ :=
-  input.checkedReplacement (RawTensor.log σ.shape input.raw)
+    (_inexact : σ.dtype.isInexact = true := by first | rfl | decide) : Tensor σ :=
+  neuralUnaryResult "log" input (log? input)
+
+namespace Preserving
+
+def log? {σ : StaticSpec} (input : Tensor σ) : Except String (Tensor σ) := Tensor.log? input
+
+def log {σ : StaticSpec} (input : Tensor σ) : Tensor σ :=
+  neuralUnaryResult "Preserving.log" input (log? input)
+
+end Preserving
 
 def saveSafeTensor {σ : StaticSpec} (input : Tensor σ) (path name : String) : IO Unit :=
   RawTensor.saveSafeTensor σ.shape path name input.raw
@@ -440,5 +560,63 @@ def findTokenPositions {n : UInt64} {dev : DevicePolicy}
   match Tensor.ofRaw (σ := ⟨#[count], .Int64, dev⟩) raw with
   | .ok result => pure ⟨count, result⟩
   | .error message => throw (IO.userError s!"Tensor.findTokenPositions: {message}")
+
+namespace Promoting
+
+private def unaryNeural? {σ : StaticSpec}
+    (native : Shape → RawTensor → Except String RawTensor) (input : Tensor σ) :
+    Except String (Tensor (σ.withDType input.actualSpec.dtype.atLeastFloat)) := do
+  Tensor.checkedUpdate? input.actualSpec.dtype.atLeastFloat input.raw.device
+    (← native σ.shape input.raw)
+
+def log? {σ : StaticSpec} (input : Tensor σ) :
+    Except String (Tensor (σ.withDType input.actualSpec.dtype.atLeastFloat)) :=
+  unaryNeural? RawTensor.logChecked input
+
+def log {σ : StaticSpec} (input : Tensor σ) :
+    Tensor (σ.withDType (.Unknown "dynamic")) :=
+  let result : Except String (Tensor (σ.withDType (.Unknown "dynamic"))) := do
+    Tensor.ofRaw (← log? input).raw
+  match result with
+  | .ok result => result
+  | .error message => panic! s!"Tensor.Promoting.log: {message}"
+
+def log10? {σ : StaticSpec} (input : Tensor σ) :
+    Except String (Tensor (σ.withDType input.actualSpec.dtype.atLeastFloat)) :=
+  unaryNeural? RawTensor.log10Checked input
+
+def log10 {σ : StaticSpec} (input : Tensor σ) :
+    Tensor (σ.withDType (.Unknown "dynamic")) :=
+  let result : Except String (Tensor (σ.withDType (.Unknown "dynamic"))) := do
+    Tensor.ofRaw (← log10? input).raw
+  match result with
+  | .ok result => result
+  | .error message => panic! s!"Tensor.Promoting.log10: {message}"
+
+def sin? {σ : StaticSpec} (input : Tensor σ) :
+    Except String (Tensor (σ.withDType input.actualSpec.dtype.atLeastFloat)) :=
+  unaryNeural? RawTensor.sinChecked input
+
+def sin {σ : StaticSpec} (input : Tensor σ) :
+    Tensor (σ.withDType (.Unknown "dynamic")) :=
+  let result : Except String (Tensor (σ.withDType (.Unknown "dynamic"))) := do
+    Tensor.ofRaw (← sin? input).raw
+  match result with
+  | .ok result => result
+  | .error message => panic! s!"Tensor.Promoting.sin: {message}"
+
+def cos? {σ : StaticSpec} (input : Tensor σ) :
+    Except String (Tensor (σ.withDType input.actualSpec.dtype.atLeastFloat)) :=
+  unaryNeural? RawTensor.cosChecked input
+
+def cos {σ : StaticSpec} (input : Tensor σ) :
+    Tensor (σ.withDType (.Unknown "dynamic")) :=
+  let result : Except String (Tensor (σ.withDType (.Unknown "dynamic"))) := do
+    Tensor.ofRaw (← cos? input).raw
+  match result with
+  | .ok result => result
+  | .error message => panic! s!"Tensor.Promoting.cos: {message}"
+
+end Promoting
 
 end torch.Tensor

@@ -118,9 +118,9 @@ private def loadBlock (path : String) (device : Device) : IO (LagunaSparseMoeBlo
 private def maxErrors {s : Shape} {d e : DType}
     (got : Tensor { shape := s, dtype := d }) (expected : Tensor { shape := s, dtype := e }) : IO (Float × Float) := do
   let ad := Tensor.abs (got.toFloat32 - expected.toFloat32)
-  let maxAbs := (Tensor.maxAll ad).item
+  let maxAbs := (Tensor.maxAllChecked ad).item
   let denom := Tensor.Preserving.addScalar (Tensor.abs expected.toFloat32) 1e-3
-  let maxRel := (Tensor.maxAll (ad / denom)).item
+  let maxRel := (Tensor.maxAllChecked (ad / denom)).item
   pure (maxAbs, maxRel)
 
 /-- Tile `src` (flattened, then moved to `device`) out to exactly `shape`'s

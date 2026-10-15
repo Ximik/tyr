@@ -231,7 +231,7 @@ instance [DiffEqElem α] : DiffEqElem (Option α) where
 
 instance (priority := 50) [TensorStruct α] : DiffEqElem α where
   abs := TensorStruct.map Tensor.Preserving.abs
-  max := TensorStruct.zipWith Tensor.maximum
+  max := TensorStruct.zipWith Tensor.Preserving.maximum
   addScalar s := TensorStruct.map (fun t => Tensor.Preserving.addScalar t s)
   div := TensorStruct.zipWith Tensor.Preserving.div
 

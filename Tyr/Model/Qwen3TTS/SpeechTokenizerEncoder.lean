@@ -74,7 +74,7 @@ private def scale3d {batch seq dim : UInt64}
 
 private def clampMin1d {n : UInt64} (x : Tensor { shape := #[n] }) (minVal : Float) : Tensor { shape := #[n] } :=
   let minT := Tensor.castLike x (Tensor.full #[n] minVal false x.device)
-  Tensor.whereSelect (Tensor.ltScalar x minVal) minT x
+  Tensor.Promoting.whereSelect (Tensor.ltScalar x minVal) minT x
 
 private def stack2dDyn {batch frames k : UInt64}
     (tensors : Array (Tensor { shape := #[batch, frames], dtype := .Int64 })) : Tensor { shape := #[k, batch, frames], dtype := .Int64 } :=

@@ -363,7 +363,7 @@ private def applyRepetitionPenalty {batch vocab histLen : UInt64}
     let negMask : Tensor { shape := #[batch, histLen], dtype := .Bool } := Tensor.ltScalar gathered 0.0
     let penalizedNeg := Tensor.Preserving.mulScalar gathered penalty
     let penalizedPos := Tensor.Preserving.divScalar gathered penalty
-    let penalized : Tensor { shape := #[batch, histLen] } := Tensor.whereSelect negMask penalizedNeg penalizedPos
+    let penalized : Tensor { shape := #[batch, histLen] } := Tensor.Promoting.whereSelect negMask penalizedNeg penalizedPos
     Tensor.scatter2d logits (-1) history penalized
 
 /-- Sample a full codec frame from the current talker hidden state `[batch,1,hidden]`. -/

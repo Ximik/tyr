@@ -27,7 +27,7 @@ def random (n : UInt64) : IO (SymmetricPositiveDefinite n) := do
   pure (project n A)
 
 /-- Affine-invariant inspired distance proxy using `log(inv(A) B)`. -/
-def distance (A B : SymmetricPositiveDefinite n d dev) : Float :=
+def distance [DType.RealFloating d] (A B : SymmetricPositiveDefinite n d dev) : Float :=
   let rel := Tensor.mm (Tensor.inv A.matrix) B.matrix
   let logRel := Tensor.matrixLog rel
   Tensor.frobeniusNorm logRel
@@ -50,7 +50,8 @@ def project (x : SymmetricPositiveDefinite n d dev) (V : Tensor ⟨#[n, n], d, d
 
 end SPDTangent
 
-instance spdManifold (n : UInt64) : DifferentiableManifold (SymmetricPositiveDefinite n d dev) where
+instance spdManifold (n : UInt64) [DType.RealFloating d] :
+    DifferentiableManifold (SymmetricPositiveDefinite n d dev) where
   Tangent _ := SPDTangent n d dev
   Cotangent _ := SPDTangent n d dev
   zeroTangent x := ⟨Tensor.zerosLike x.matrix⟩

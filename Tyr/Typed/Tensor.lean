@@ -38,18 +38,16 @@ namespace StaticSpec
 @[reducible] def withDType (σ : StaticSpec) (dtype : DType) : StaticSpec :=
   { σ with dtype }
 
-/-- A CPU scalar can participate in an operation on another device. Keep a
-left scalar's placement claim only when both policies agree. -/
+/-- A CPU scalar follows the other operand's placement; all other left
+operands keep their placement policy. This selects an output policy, assuming
+callers separately check static and actual device compatibility. -/
 @[reducible] def pointwiseDevice (l r : StaticSpec) : DevicePolicy :=
-  match l.shape.toList, l.device, r.device with
-  | _ :: _, device, _ => device
-  | [], .exact .CPU, .exact .CPU => .exact .CPU
-  | [], .exact .MPS, .exact .MPS => .exact .MPS
-  | [], .exact (.CUDA lhs), .exact (.CUDA rhs) =>
-      match lhs == rhs with
-      | true => .exact (.CUDA lhs)
-      | false => .any
-  | [], _, _ => .any
+  match l.shape.toList with
+  | _ :: _ => l.device
+  | [] =>
+      match l.device with
+      | .exact .CPU => r.device
+      | device => device
 
 /-- Result spec of a broadcasting pointwise op, including the weaker dtype
 promotion of zero-dimensional tensors. Dtype promotion must be witnessed;
@@ -97,6 +95,29 @@ def device {σ : StaticSpec} (t : Tensor σ) : Device :=
 /-- Actual native shape, as distinct from the static `shape` index. -/
 def runtimeShape {σ : StaticSpec} (t : Tensor σ) : Shape :=
   t.raw.runtimeShape
+
+/-- Check actual native placement before binary pointwise execution, including
+for two tensors whose static policies are both `.any`. -/
+def checkPointwise {σ τ : StaticSpec} (left : Tensor σ) (right : Tensor τ) :
+    Except String Unit := do
+  let _ ← Device.pointwiseResult? left.runtimeShape left.device
+    right.runtimeShape right.device
+  pure ()
+
+/-- Check actual native placement for operations without the CPU scalar
+exception, such as matrix multiplication and concatenation. -/
+def checkSameDevice {σ τ : StaticSpec} (left : Tensor σ) (right : Tensor τ) :
+    Except String Unit := do
+  let _ ← Device.sameResult? left.device right.device
+  pure ()
+
+/-- Validate the selection-specific scalar relocation rule before native
+`where` execution. Placement is selected in condition, left, right order. -/
+def checkSelection {σ τ υ : StaticSpec} (condition : Tensor σ)
+    (left : Tensor τ) (right : Tensor υ) : Except String Unit := do
+  let _ ← Device.selectionResult? condition.runtimeShape condition.device
+    left.runtimeShape left.device right.runtimeShape right.device
+  pure ()
 
 /-- Runtime metadata actually carried by the handle. -/
 def actualSpec {σ : StaticSpec} (t : Tensor σ) : TensorSpec :=

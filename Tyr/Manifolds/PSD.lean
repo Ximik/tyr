@@ -66,9 +66,9 @@ namespace Elliptope
 private def normalizeRows {n k : UInt64} (Y : Tensor ⟨#[n, k], d, dev⟩) : Tensor ⟨#[n, k], d, dev⟩ :=
   let norms := Tensor.rowNorms Y
   let safeNorms := Tensor.Preserving.addScalar norms 1e-12
-  let normsCol : Tensor ⟨#[n, 1], d, dev⟩ := Tensor.reshape safeNorms #[n, 1] (by simp [TensorSpec.numelOfShape])
-  let expanded : Tensor ⟨#[n, k], d, dev⟩ := Tensor.expand normsCol #[n, k]
-  Tensor.Preserving.div Y expanded
+  let normsCol : Tensor ⟨#[n, 1], d.realResult, dev⟩ := Tensor.reshape safeNorms #[n, 1] (by simp [TensorSpec.numelOfShape])
+  let expanded : Tensor ⟨#[n, k], d.realResult, dev⟩ := Tensor.expand normsCol #[n, k]
+  Tensor.Preserving.div Y (Tensor.castLike Y expanded)
 
 /-- Project ambient matrix to row-normalized elliptope factor. -/
 def project (n k : UInt64) (Y : Tensor ⟨#[n, k], d, dev⟩) : Elliptope n k d dev :=

@@ -16,7 +16,7 @@ instance {σ : StaticSpec} : DiffEqSpace (Tensor σ) where
 
 instance {σ : StaticSpec} : DiffEqElem (Tensor σ) where
   abs := Tensor.Preserving.abs
-  max := Tensor.maximum
+  max := Tensor.Preserving.maximum
   addScalar := fun value tensor => Tensor.Preserving.addScalar tensor value
   div := Tensor.Preserving.div
 

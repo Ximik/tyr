@@ -275,7 +275,7 @@ def testTypedRMSNormWeightContract : IO Unit := do
   LeanTest.assertEqual (← output.toFloatArray) #[2, 2, 2, 2, 2, 2]
   match (Tensor.ones #[2, 1]).rmsNormWeighted? (Tensor.ones #[3]) with
   | .ok _ => LeanTest.fail "RMS weight must not expand the claimed input shape"
-  | .error message => LeanTest.assertTrue (message.containsSubstr "Expected shape")
+  | .error message => LeanTest.assertTrue (message.containsSubstr "cannot broadcast")
 
 /-- The typed wrappers re-index the phantom dtype according to the promotion
     algebra in `Tyr.Typed.DType`. These tests run the real ops and assert the

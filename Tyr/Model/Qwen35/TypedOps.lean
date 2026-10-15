@@ -27,9 +27,9 @@ def topK2d {rows cols : UInt64} (x : Tensor { shape := #[rows, cols] }) (k dim :
   (checked values, checked indices)
 
 def rsqrtDynamic {s : Shape} (x : Tensor { shape := s }) : Tensor { shape := s } :=
-  checked (RawTensor.rsqrt s x.raw)
+  Tensor.Promoting.rsqrt x
 def logDynamic {s : Shape} (x : Tensor { shape := s }) : Tensor { shape := s } :=
-  checked (RawTensor.log s x.raw)
+  Tensor.Promoting.log x
 def softplusDynamic {s : Shape} (x : Tensor { shape := s }) : Tensor { shape := s } :=
   checked (RawTensor.softplus s x.raw)
 def floatDynamic {s : Shape} {d : DType} (x : Tensor { shape := s, dtype := d }) : Tensor { shape := s } := x.toFloat32.forgetDType

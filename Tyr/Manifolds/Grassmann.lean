@@ -66,7 +66,7 @@ def projectionMatrix (X : Grassmann n p d dev) : Tensor ⟨#[n, n], d, dev⟩ :=
 /-- Principal angles between two subspaces.
     Returns the cosines of the principal angles (singular values of X₁ᵀX₂).
     The singular values σᵢ = cos(θᵢ) where θᵢ are the principal angles. -/
-def principalAngles (X₁ X₂ : Grassmann n p d dev) : Tensor ⟨#[p], d, dev⟩ :=
+def principalAngles (X₁ X₂ : Grassmann n p d dev) : Tensor ⟨#[p], d.realResult, dev⟩ :=
   -- σ = svdvals(X₁ᵀ @ X₂)
   Tensor.svdvals (Tensor.mm (Tensor.transpose2d X₁.matrix) X₂.matrix)
 
@@ -135,7 +135,7 @@ def log (X Y : Grassmann n p d dev) : GrassmannTangent n p d dev :=
   let A := Tensor.mm proj invXtY                                     -- [n, p]
   let (U, S, Vh) := Tensor.svdReduced A X.tall                       -- U [n,p], S [p], Vh [p,p]
   let theta := Tensor.Preserving.atan S
-  let Theta := Tensor.diagflat theta
+  let Theta := Tensor.castLike U (Tensor.diagflat theta)
   ⟨Tensor.mm (Tensor.mm U Theta) Vh⟩
 
 end Grassmann

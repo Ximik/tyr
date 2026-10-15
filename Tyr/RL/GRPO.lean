@@ -98,7 +98,7 @@ def computeAdvantages (rewards : Array Float) : Array Float :=
 
 /-- Compute advantages from a tensor of rewards -/
 def computeAdvantagesTensor (rewards : Tensor { shape := #[b], dtype := .Float32 }) : Tensor { shape := #[b], dtype := .Float32 } :=
-  let mu := Tensor.meanAll rewards rfl
+  let mu := Tensor.meanAll rewards
   let muExpanded := Tensor.expand mu #[b]
   rewards - muExpanded
 

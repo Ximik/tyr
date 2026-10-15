@@ -272,7 +272,7 @@ private def clampWave {s : Shape} (x : Tensor { shape := s }) : Tensor { shape :
 
 private def clampMin1d {n : UInt64} (x : Tensor { shape := #[n] }) (minVal : Float) : Tensor { shape := #[n] } :=
   let minT := Tensor.castLike x (Tensor.full #[n] minVal false x.device)
-  Tensor.whereSelect (Tensor.ltScalar x minVal) minT x
+  Tensor.Promoting.whereSelect (Tensor.ltScalar x minVal) minT x
 
 structure QuantizerCodebook where
   clusterUsage : Tensor { shape := #[2048] }

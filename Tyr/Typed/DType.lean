@@ -43,6 +43,21 @@ kernels for this dtype. In particular Float8 and packed Float4 are shell types. 
   | .Float16 | .BFloat16 | .Float32 | .Float64 | .Float4E2M1FNX2 => true
   | _ => dtype.isFloat8
 
+/-- Standard real floating dtypes, excluding complex and shell formats. This
+domain does not imply that a particular backend implements every operation. -/
+@[reducible] def isRealFloating : DType → _root_.Bool
+  | .Float16 | .BFloat16 | .Float32 | .Float64 => true
+  | _ => false
+
+/-- Erased evidence that a dtype belongs to the standard real floating domain. -/
+class RealFloating (dtype : DType) : Prop where
+  valid : dtype.isRealFloating = true
+
+instance : RealFloating .Float16 := ⟨rfl⟩
+instance : RealFloating .BFloat16 := ⟨rfl⟩
+instance : RealFloating .Float32 := ⟨rfl⟩
+instance : RealFloating .Float64 := ⟨rfl⟩
+
 @[reducible] def isComplex : DType → _root_.Bool
   | .Complex32 | .Complex64 | .Complex128 => true
   | _ => false
@@ -232,12 +247,16 @@ that an arithmetic kernel exists for the result. -/
       | false, true, _ | false, _, true => promote? tensor scalar
       | _, _, _ => some tensor
 
-/-- Complex absolute values are real. -/
-@[reducible] def absResult : DType → DType
+/-- The real component dtype of a complex tensor. Magnitudes, norms, and
+singular values use this dtype; non-complex dtypes are unchanged. -/
+@[reducible] def realResult : DType → DType
   | .Complex32 => .Float16
   | .Complex64 => .Float32
   | .Complex128 => .Float64
   | dtype => dtype
+
+/-- Complex absolute values are real. -/
+@[reducible] def absResult : DType → DType := realResult
 
 @[reducible] def sumResult : DType → DType
   | .Bool | .UInt8 | .UInt16 | .UInt32 | .UInt64

@@ -560,7 +560,7 @@ def waveformToWhisperFeatures
     Tensor.mm (Tensor.transpose2d melFilter) powerSpec
   let logSpec : Tensor { shape := #[melBins, expectedFrames], dtype := .Float32 } :=
     Tensor.log10 (Tensor.Preserving.clampFloat melPower (1e-10 : Float) (1e10 : Float))
-  let maxVal := Tensor.item (Tensor.maxAll logSpec)
+  let maxVal := Tensor.item (Tensor.maxAllChecked logSpec)
   let floored : Tensor { shape := #[melBins, expectedFrames], dtype := .Float32 } :=
     Tensor.Preserving.clampFloat logSpec (maxVal - (8.0 : Float)) (1e10 : Float)
   let normalized : Tensor { shape := #[melBins, expectedFrames], dtype := .Float32 } := (floored + (4.0 : Float)) / (4.0 : Float)
@@ -676,7 +676,7 @@ def waveformToWhisperFeaturesDynamic
       Tensor.mm (Tensor.transpose2d melFilter) powerSpec
     let logSpec : Tensor { shape := #[melBins, frames], dtype := .Float32 } :=
       Tensor.log10 (Tensor.Preserving.clampFloat melPower (1e-10 : Float) (1e10 : Float))
-    let maxVal := Tensor.item (Tensor.maxAll logSpec)
+    let maxVal := Tensor.item (Tensor.maxAllChecked logSpec)
     let floored : Tensor { shape := #[melBins, frames], dtype := .Float32 } :=
       Tensor.Preserving.clampFloat logSpec (maxVal - (8.0 : Float)) (1e10 : Float)
     let normalized : Tensor { shape := #[melBins, frames], dtype := .Float32 } := (floored + (4.0 : Float)) / (4.0 : Float)

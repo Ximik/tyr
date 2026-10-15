@@ -237,7 +237,7 @@ def stepSingle {σ : StaticSpec} (param : Tensor σ) (grad : Tensor σ) (state :
     (Tensor.Preserving.mulScalar newMomentum cfg.momentum)
   -- Zero gradients should stay zero; this avoids entering Newton-Schulz on
   -- exact zeros while preserving reference Muon semantics.
-  let nesterovAbsMax := Tensor.item (Tensor.maxAll (Tensor.abs nesterovGrad))
+  let nesterovAbsMax := Tensor.item (Tensor.maxAllChecked (Tensor.abs nesterovGrad))
   let aspectScale := aspectRatioScale σ.shape
   let effectiveLr := cfg.lr * lrMul * aspectScale
   let wd := cfg.weightDecay * wdMul

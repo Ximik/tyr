@@ -80,7 +80,7 @@ def forward {batch frames inChannels outChannels kernelSize dilation : UInt64}
   let y : Tensor { shape := #[batch, outChannels, frames] } :=
     Tensor.reshapeChecked (Tensor.conv1d x m.weight 1 (samePadding kernelSize dilation) dilation)
       #[batch, outChannels, frames]
-  Tensor.relu (addBias3d y m.bias)
+  Tensor.Preserving.relu (addBias3d y m.bias)
 
 end TimeDelayNetBlock
 
@@ -107,7 +107,7 @@ def forward {batch frames channels seChannels : UInt64}
   let mean : Tensor { shape := #[batch, channels, 1] } := Tensor.reshapeChecked (Tensor.Preserving.meanDim x 2 true) #[batch, channels, 1]
   let h1 : Tensor { shape := #[batch, seChannels, 1] } :=
     Tensor.reshapeChecked (Tensor.conv1d mean m.conv1Weight 1 0 1) #[batch, seChannels, 1]
-  let h1 := Tensor.relu (addBias3d h1 m.conv1Bias)
+  let h1 := Tensor.Preserving.relu (addBias3d h1 m.conv1Bias)
   let h2 : Tensor { shape := #[batch, channels, 1] } :=
     Tensor.reshapeChecked (Tensor.conv1d h1 m.conv2Weight 1 0 1) #[batch, channels, 1]
   let gate1 := Tensor.Preserving.sigmoid (addBias3d h2 m.conv2Bias)

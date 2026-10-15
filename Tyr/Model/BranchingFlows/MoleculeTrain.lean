@@ -467,12 +467,12 @@ def moleculeMuonStepT [TensorStruct Params]
     let direction ← moleculeMuonOrthogonalize grad numIters
     let (rows, cols) := flattenedMatrixShape σ.shape
     let aspect := Float.sqrt (max 1.0 (rows.toFloat / cols.toFloat))
-    let scaled := mulTensorScalar (Tensor.Preserving.mulScalar direction aspect) lrT
+    let scaled := mulTensorScalarPreserving (Tensor.Preserving.mulScalar direction aspect) lrT
     pure (Tensor.castLike (σ := σ.withDType .BFloat16) (τ := σ) grad scaled)) nesterov
   let params' := TensorStruct.zipWith (fun param direction =>
     let p := Tensor.detach param
     let update :=
-      Tensor.Preserving.add direction (Tensor.Preserving.mulScalar (mulTensorScalar p lrT) weightDecay)
+      Tensor.Preserving.add direction (Tensor.Preserving.mulScalar (mulTensorScalarPreserving p lrT) weightDecay)
     Tensor.Preserving.sub p update) params orth
   let params' ← TensorStruct.makeLeafParams params'
   return (params', { momentum, step := state.step + 1 })

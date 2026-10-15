@@ -32,7 +32,7 @@ private def initLayerNorm (dim : UInt64) (eps : Float := 1e-5) : IO (LayerNorm d
 
 private def activate {s : Shape} (name : String) (x : Tensor { shape := s }) : Tensor { shape := s } :=
   if name == "relu" then
-    Tensor.relu x
+    Tensor.Preserving.relu x
   else if name == "silu" then
     Tensor.Preserving.silu x
   else

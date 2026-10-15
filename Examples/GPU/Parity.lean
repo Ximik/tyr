@@ -66,7 +66,7 @@ def compareTensors {s : Shape} {expectedDtype actualDtype : DType}
   let ok := Tensor.allclose expected actual rtol atol
   let diff := (actual - expected).abs
   let mae := diff.meanAll.item
-  let maxErr := diff.maxAll.item
+  let maxErr := diff.maxAllChecked.item
   { label, ok, mae, maxErr, rtol, atol }
 
 /-- Print one tensor comparison in a stable machine-readable format. -/

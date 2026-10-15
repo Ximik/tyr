@@ -15,7 +15,7 @@ open torch.Model
 
 private def activate {s : Shape} (name : String) (x : Tensor { shape := s }) : Tensor { shape := s } :=
   if name == "relu" then
-    Tensor.relu x
+    Tensor.Preserving.relu x
   else
     Tensor.Preserving.gelu x
 
