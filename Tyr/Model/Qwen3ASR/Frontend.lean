@@ -560,10 +560,10 @@ def waveformToWhisperFeatures
   let melPower : Tensor { device := .CPU, shape := #[melBins, expectedFrames], dtype := .Float32 } :=
     Tensor.mm (Tensor.transpose2d melFilter) powerSpec
   let logSpec : Tensor { device := .CPU, shape := #[melBins, expectedFrames], dtype := .Float32 } :=
-    Tensor.log10 (Tensor.Preserving.clampFloat melPower (1e-10 : Float) (1e10 : Float))
+    Tensor.log10 (Tensor.clampFloat melPower (1e-10 : Float) (1e10 : Float))
   let maxVal := Tensor.item (Tensor.maxAllChecked logSpec)
   let floored : Tensor { device := .CPU, shape := #[melBins, expectedFrames], dtype := .Float32 } :=
-    Tensor.Preserving.clampFloat logSpec (maxVal - (8.0 : Float)) (1e10 : Float)
+    Tensor.clampFloat logSpec (maxVal - (8.0 : Float)) (1e10 : Float)
   let normalized : Tensor { device := .CPU, shape := #[melBins, expectedFrames], dtype := .Float32 } := (floored + (4.0 : Float)) / (4.0 : Float)
   let inputFeatures : Tensor { device := .CPU, shape := #[1, melBins, expectedFrames], dtype := .Float32 } :=
     Tensor.reshape normalized #[1, melBins, expectedFrames] (by simp [TensorSpec.numelOfShape])
@@ -675,10 +675,10 @@ def waveformToWhisperFeaturesDynamic
     let melPower : Tensor { device := runDevice, shape := #[melBins, frames], dtype := .Float32 } :=
       Tensor.mm (Tensor.transpose2d melFilter) powerSpec
     let logSpec : Tensor { device := runDevice, shape := #[melBins, frames], dtype := .Float32 } :=
-      Tensor.log10 (Tensor.Preserving.clampFloat melPower (1e-10 : Float) (1e10 : Float))
+      Tensor.log10 (Tensor.clampFloat melPower (1e-10 : Float) (1e10 : Float))
     let maxVal := Tensor.item (Tensor.maxAllChecked logSpec)
     let floored : Tensor { device := runDevice, shape := #[melBins, frames], dtype := .Float32 } :=
-      Tensor.Preserving.clampFloat logSpec (maxVal - (8.0 : Float)) (1e10 : Float)
+      Tensor.clampFloat logSpec (maxVal - (8.0 : Float)) (1e10 : Float)
     let normalized : Tensor { device := runDevice, shape := #[melBins, frames], dtype := .Float32 } := (floored + (4.0 : Float)) / (4.0 : Float)
     let inputFeatures : Tensor { device := runDevice, shape := #[1, melBins, frames], dtype := .Float32 } :=
       Tensor.reshape normalized #[1, melBins, frames] (by simp [TensorSpec.numelOfShape])

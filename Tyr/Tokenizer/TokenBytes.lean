@@ -105,7 +105,7 @@ def TokenBytes.totalBytesWithMask (tb : TokenBytes)
 
   -- Multiply by mask and sum (mask is Float32, so cast the counts)
   let bytesFloat ← IO.ofExcept (bytesPerToken.castDType? .Float32)
-  let maskedBytes ← IO.ofExcept (Tensor.Preserving.mul? bytesFloat flatMask)
+  let maskedBytes ← IO.ofExcept (Tensor.mul? bytesFloat flatMask)
   let summed ← IO.ofExcept (Tensor.sumAll? maskedBytes)
   let total ← IO.ofExcept (Tensor.item? summed)
   return total.toUInt64

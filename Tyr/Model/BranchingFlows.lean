@@ -328,14 +328,14 @@ instance : AnchorMerge Float where
     let total := (w1 + w2).toFloat
     if total == 0.0 then a else (a * w1.toFloat + b * w2.toFloat) / total
 
-instance {σ : StaticSpec} : AnchorMerge (Tensor σ) where
+instance {σ : StaticSpec} [DType.RealFloating σ.dtype] : AnchorMerge (Tensor σ) where
   merge a b w1 w2 :=
     let total := (w1 + w2).toFloat
     if total == 0.0 then a
     else
-      let wa := Tensor.Preserving.mulScalar a w1.toFloat
-      let wb := Tensor.Preserving.mulScalar b w2.toFloat
-      Tensor.Preserving.divScalar (Tensor.Preserving.add wa wb) total
+      let wa := Tensor.mulScalar a w1.toFloat
+      let wb := Tensor.mulScalar b w2.toFloat
+      Tensor.divScalar (Tensor.add wa wb) total
 
 instance [AnchorMerge α] [AnchorMerge β] : AnchorMerge (α × β) where
   merge a b w1 w2 :=

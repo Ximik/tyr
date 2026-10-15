@@ -12,6 +12,7 @@ import Tyr.Module.Derive
 namespace torch.flux
 
 variable {device : Device} {dtype : DType}
+variable [DType.RealFloating dtype]
 /-- Create sinusoidal timestep embeddings.
     This is implemented as an extern function for efficiency.
     t: [batch] timestep tensor (values typically in [0, 1])
@@ -48,10 +49,12 @@ def numMods (isDouble : Bool) : UInt64 :=
 
 /-- Initialize modulation layer -/
 def init (hidden_size : UInt64) (isDouble : Bool := false) (device : Device := .CPU) (dtype : DType := .Float32) : IO (Modulation (device := device) (dtype := dtype) hidden_size isDouble) := do
+  let floating ← IO.ofExcept (DType.realFloating? dtype)
+  let _ := floating.down
   let outDim := if isDouble then 6 * hidden_size else 3 * hidden_size
   let std := Float.sqrt (2.0 / hidden_size.toFloat)
   let w ← randomWeight (dtype := dtype) (device := device) #[outDim, hidden_size]
-  pure { lin := (← Tensor.parameter (Tensor.Preserving.mulScalar w std)) }
+  pure { lin := (← Tensor.parameter (Tensor.mulScalar w std)) }
 
 /-- Initialize modulation with zero weights (for dummy/placeholder modulation).
     Used when modulation is at model level instead of per-block. -/
@@ -68,7 +71,7 @@ def forward {batch hidden_size : UInt64} (isDouble : Bool)
     (vec : Tensor { dtype := dtype, device := device, shape := #[batch, hidden_size] })
     : Tensor { dtype := dtype, device := device, shape := #[batch, if isDouble then 6 else 3, hidden_size] } :=
   -- Apply SiLU activation first
-  let vec := Tensor.Preserving.silu vec
+  let vec := Tensor.silu vec
   -- Project to modulation vectors
   let out := Tensor.linear vec mod.lin  -- [batch, num_mods * hidden_size]
   -- Reshape to [batch, num_mods, hidden_size]
@@ -92,7 +95,7 @@ def applyModulation {batch seq hidden_size : UInt64}
   let scale := Tensor.expand scale #[batch, seq, hidden_size]
   let shift := Tensor.expand shift #[batch, seq, hidden_size]
   -- Apply: (1 + scale) * x + shift
-  let scale := Tensor.Preserving.addScalar scale 1.0
-  Tensor.Preserving.add (Tensor.Preserving.mul scale x) shift
+  let scale := Tensor.addScalar scale 1.0
+  Tensor.add (Tensor.mul scale x) shift
 
 end torch.flux

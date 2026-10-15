@@ -58,6 +58,14 @@ instance : RealFloating .BFloat16 := ⟨rfl⟩
 instance : RealFloating .Float32 := ⟨rfl⟩
 instance : RealFloating .Float64 := ⟨rfl⟩
 
+/-- Validate a runtime-selected dtype before using real floating algorithms. -/
+def realFloating? (dtype : DType) : Except String (PLift (RealFloating dtype)) :=
+  if valid : dtype.isRealFloating = true then .ok ⟨⟨valid⟩⟩
+  else .error s!"Expected a standard real floating dtype, got {dtype}"
+
+@[simp] theorem isRealFloating_of_realFloating {dtype : DType} [h : RealFloating dtype] :
+    dtype.isRealFloating = true := h.valid
+
 @[reducible] def isComplex : DType → _root_.Bool
   | .Complex32 | .Complex64 | .Complex128 => true
   | _ => false
@@ -288,5 +296,72 @@ def canRepresentSafeTensors (dtype : DType) : _root_.Bool :=
 def expectedEq (expected actual : DType) : Except String Unit :=
   if actual == expected then .ok ()
   else .error s!"Expected dtype {expected}, got {actual}"
+
+
+/-! Real floating computations retain their dtype where the natural result
+rule says so. These equalities only rewrite indices; they never cast values. -/
+
+@[simp] theorem isFloating_of_realFloating {dtype : DType} [h : RealFloating dtype] :
+    dtype.isFloating = true := by
+  cases dtype <;> first | rfl | cases h.valid
+
+@[simp] theorem isInexact_of_realFloating {dtype : DType} [h : RealFloating dtype] :
+    dtype.isInexact = true := by
+  cases dtype <;> first | rfl | cases h.valid
+
+@[simp] theorem isDifferentiable_of_realFloating {dtype : DType} [h : RealFloating dtype] :
+    dtype.isDifferentiable = true := by
+  cases dtype <;> first | rfl | cases h.valid
+
+@[simp] theorem isComplex_of_realFloating {dtype : DType} [h : RealFloating dtype] :
+    dtype.isComplex = false := by
+  cases dtype <;> first | rfl | cases h.valid
+
+@[simp] theorem isBool_of_realFloating {dtype : DType} [h : RealFloating dtype] :
+    dtype.isBool = false := by
+  cases dtype <;> first | rfl | cases h.valid
+
+@[simp] theorem atLeastFloat_of_realFloating {dtype : DType} [h : RealFloating dtype] :
+    dtype.atLeastFloat = dtype := by
+  cases dtype <;> first | rfl | cases h.valid
+
+@[simp] theorem realResult_of_realFloating {dtype : DType} [h : RealFloating dtype] :
+    dtype.realResult = dtype := by
+  cases dtype <;> first | rfl | cases h.valid
+
+@[simp] theorem absResult_of_realFloating {dtype : DType} [h : RealFloating dtype] :
+    dtype.absResult = dtype := by
+  cases dtype <;> first | rfl | cases h.valid
+
+@[simp] theorem sumResult_of_realFloating {dtype : DType} [h : RealFloating dtype] :
+    dtype.sumResult = dtype := by
+  cases dtype <;> first | rfl | cases h.valid
+
+@[simp] theorem prodResult_of_realFloating {dtype : DType} [h : RealFloating dtype] :
+    dtype.prodResult = dtype := by
+  cases dtype <;> first | rfl | cases h.valid
+
+@[simp] theorem divideResult_of_realFloating {dtype : DType} [h : RealFloating dtype] :
+    dtype.divideResult = dtype := by
+  cases dtype <;> first | rfl | cases h.valid
+
+
+instance {dtype : DType} [h : RealFloating dtype] : RealFloating dtype.atLeastFloat := by
+  simpa only [atLeastFloat_of_realFloating] using h
+
+instance {dtype : DType} [h : RealFloating dtype] : RealFloating dtype.realResult := by
+  simpa only [realResult_of_realFloating] using h
+
+instance {dtype : DType} [h : RealFloating dtype] : RealFloating dtype.absResult := by
+  simpa only [absResult_of_realFloating] using h
+
+instance {dtype : DType} [h : RealFloating dtype] : RealFloating dtype.sumResult := by
+  simpa only [sumResult_of_realFloating] using h
+
+instance {dtype : DType} [h : RealFloating dtype] : RealFloating dtype.prodResult := by
+  simpa only [prodResult_of_realFloating] using h
+
+instance {dtype : DType} [h : RealFloating dtype] : RealFloating dtype.divideResult := by
+  simpa only [divideResult_of_realFloating] using h
 
 end torch.DType

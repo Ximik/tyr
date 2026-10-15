@@ -65,6 +65,7 @@ import Tyr.Model.Generation
 namespace torch.laguna
 
 variable {device : Device} {dtype : DType}
+variable [DType.RealFloating dtype]
 open torch
 open torch.Model torch.qwen35
 
@@ -78,11 +79,11 @@ private def rmsNormWeighted2d {n dim : UInt64}
     (eps : Float)
     : Tensor { dtype := dtype, device := device, shape := #[n, dim] } :=
   let xf : Tensor { dtype := .Float32, device := device, shape := #[n, dim] } := floatDynamic x
-  let var : Tensor { dtype := .Float32, device := device, shape := #[n, 1] } := Tensor.Preserving.meanDim (Tensor.Preserving.mul xf xf) 1 true
-  let inv : Tensor { dtype := .Float32, device := device, shape := #[n, 1] } := rsqrtDynamic (Tensor.Preserving.addScalar var eps)
+  let var : Tensor { dtype := .Float32, device := device, shape := #[n, 1] } := Tensor.meanDim (Tensor.mul xf xf) 1 true
+  let inv : Tensor { dtype := .Float32, device := device, shape := #[n, 1] } := rsqrtDynamic (Tensor.addScalar var eps)
   let inv : Tensor { dtype := .Float32, device := device, shape := #[n, dim] } := Tensor.expand inv #[n, dim]
   let w : Tensor { dtype := .Float32, device := device, shape := #[n, dim] } := Tensor.expand (Tensor.reshapeChecked (floatDynamic weight.2) #[1, dim]) #[n, dim]
-  Tensor.castLike x (Tensor.Preserving.mul (Tensor.Preserving.mul xf inv) w)
+  Tensor.castLike x (Tensor.mul (Tensor.mul xf inv) w)
 
 /-- FP32 RMSNorm over the last dim of a 3D `[batch, seq, dim]` tensor. -/
 private def rmsNormWeighted3d {batch seq dim : UInt64}
@@ -127,7 +128,7 @@ def forward {batch seq : UInt64}
     (x : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] })
     : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] } :=
   Tensor.linear3d
-    (Tensor.Preserving.mul (Tensor.Preserving.silu (Tensor.linear3d x m.gate_proj))
+    (Tensor.mul (Tensor.silu (Tensor.linear3d x m.gate_proj))
       (Tensor.linear3d x m.up_proj)) m.down_proj
 
 end LagunaMLP
@@ -232,7 +233,7 @@ private def gateAndOut {batch seq numHeads : UInt64}
   let gate4 : Tensor { dtype := dtype, device := device, shape := #[batch, seq, numHeads, cfg.head_dim] } :=
     Tensor.expand (Tensor.unsqueeze gate 3) #[batch, seq, numHeads, cfg.head_dim]
   let gated : Tensor { dtype := dtype, device := device, shape := #[batch, seq, numHeads * cfg.head_dim] } :=
-    Tensor.reshapeChecked (Tensor.Preserving.mul attn gate4) #[batch, seq, numHeads * cfg.head_dim]
+    Tensor.reshapeChecked (Tensor.mul attn gate4) #[batch, seq, numHeads * cfg.head_dim]
   Tensor.linear3d gated m.o_proj
 
 /-- Uncached full-sequence forward: implicit causal attention for full layers,
@@ -460,9 +461,9 @@ private def initPackedExperts (cfg : Config) (device : Device := .CPU) : IO (Lag
   let gatePacked ← Tensor.randint 0 256 #[e, mi, h / 2] (device := device)
   let upPacked ← Tensor.randint 0 256 #[e, mi, h / 2] (device := device)
   let downPacked ← Tensor.randint 0 256 #[e, h, mi / 2] (device := device)
-  let gateScale := Tensor.Preserving.mulScalar (← randDynamic (device := device) #[e, mi, h / 16]) scaleVal
-  let upScale := Tensor.Preserving.mulScalar (← randDynamic (device := device) #[e, mi, h / 16]) scaleVal
-  let downScale := Tensor.Preserving.mulScalar (← randDynamic (device := device) #[e, h, mi / 16]) scaleVal
+  let gateScale := Tensor.mulScalar (← randDynamic (device := device) #[e, mi, h / 16]) scaleVal
+  let upScale := Tensor.mulScalar (← randDynamic (device := device) #[e, mi, h / 16]) scaleVal
+  let downScale := Tensor.mulScalar (← randDynamic (device := device) #[e, h, mi / 16]) scaleVal
   pure {
     gatePacked := gatePacked.packDType (by simp)
     gateScale := gateScale.packDType (by simp)
@@ -559,10 +560,10 @@ def forward {batch seq : UInt64}
       let sin : Tensor { device := device, shape := #[seq, cfg.rotaryDimSliding / 2], dtype := .Float32 } := sliceRotaryRows tables.slidingSin 0 seq
       pure (a.forward (rotaryDim := cfg.rotaryDimSliding) cfg h1 cos sin (some cfg.sliding_window))
     | _, _ => pure h1
-  let h2 := Tensor.Preserving.add x mixed
+  let h2 := Tensor.add x mixed
   let h3 := rmsNormWeighted3d layer.post_attention_layernorm h2 cfg.rms_norm_eps
   let ffn ← ffnForward cfg layer h3
-  pure (Tensor.Preserving.add h2 ffn)
+  pure (Tensor.add h2 ffn)
 
 /-- Batch prefill with KV-cache update (fresh cache; see
     `LagunaAttention.forwardWithCache`). -/
@@ -589,10 +590,10 @@ def forwardWithCache {batch seq : UInt64}
         a.forwardWithCache (rotaryDim := cfg.rotaryDimSliding) cfg h1 cos sin (some cfg.sliding_window) kv
       pure (out, { cache with kvCaches := cache.kvCaches.set! layerIdx kv' })
     | _, _, _ => pure (h1, cache)
-  let h2 := Tensor.Preserving.add x mixed
+  let h2 := Tensor.add x mixed
   let h3 := rmsNormWeighted3d layer.post_attention_layernorm h2 cfg.rms_norm_eps
   let ffn ← ffnForward cfg layer h3
-  pure (Tensor.Preserving.add h2 ffn, cache')
+  pure (Tensor.add h2 ffn, cache')
 
 /-- Single-token decode step with KV-cache update. -/
 def forwardStep {batch : UInt64}
@@ -619,10 +620,10 @@ def forwardStep {batch : UInt64}
         a.forwardStep (rotaryDim := cfg.rotaryDimSliding) cfg h1 cos sin (some cfg.sliding_window) kv
       pure (out, { cache with kvCaches := cache.kvCaches.set! layerIdx kv' })
     | _, _, _ => pure (h1, cache)
-  let h2 := Tensor.Preserving.add x mixed
+  let h2 := Tensor.add x mixed
   let h3 := rmsNormWeighted3d layer.post_attention_layernorm h2 cfg.rms_norm_eps
   let ffn ← ffnForward cfg layer h3
-  pure (Tensor.Preserving.add h2 ffn, cache')
+  pure (Tensor.add h2 ffn, cache')
 
 private def forwardOwned {batch seq : UInt64}
     (cfg : Config) (layer : LagunaLayer (device := device) (dtype := dtype) cfg)
@@ -641,10 +642,10 @@ private def forwardOwned {batch seq : UInt64}
       a.forwardOwned (rotaryDim := cfg.rotaryDimSliding) cfg h1 cos sin
         (some cfg.sliding_window) prefill kv
     | _, _ => throw <| IO.userError "Laguna cache session requires attention in every layer"
-  let h2 := Tensor.Preserving.add x mixed
+  let h2 := Tensor.add x mixed
   let h3 := rmsNormWeighted3d layer.post_attention_layernorm h2 cfg.rms_norm_eps
   let ffn ← ffnForward cfg layer h3
-  return (Tensor.Preserving.add h2 ffn, kv')
+  return (Tensor.add h2 ffn, kv')
 
 end LagunaLayer
 
@@ -662,8 +663,10 @@ structure LagunaModel (cfg : Config) (dtype : DType := .Float32) where
 namespace LagunaModel
 
 def init (cfg : Config) (device : Device := .CPU) (dtype : DType := .Float32) : IO (LagunaModel (device := device) (dtype := dtype) cfg) := do
+  let floating ← IO.ofExcept (DType.realFloating? dtype)
+  let _ := floating.down
   let embRaw ← randnDynamic (device := device) (dtype := dtype) #[cfg.vocab_size, cfg.hidden_size]
-  let embedTokens ← Tensor.parameter (Tensor.Preserving.mulScalar embRaw 0.02)
+  let embedTokens ← Tensor.parameter (Tensor.mulScalar embRaw 0.02)
   let mut layers : Array (LagunaLayer (device := device) (dtype := dtype) cfg) := Array.mkEmpty cfg.num_hidden_layers.toNat
   for i in [:cfg.num_hidden_layers.toNat] do
     layers := layers.push (← LagunaLayer.init (device := device) (dtype := dtype) cfg i.toUInt64)

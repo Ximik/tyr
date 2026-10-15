@@ -27,14 +27,14 @@ structure StepResult (Params : Type) (s : Shape) where
 private def shapeNumel (s : Shape) : UInt64 :=
   s.foldl (fun acc d => acc * d) 1
 
-private def treeDot [TensorStruct α] (x y : α) : Float :=
-  let prod := TensorStruct.zipWith Tensor.Preserving.mul x y
+private def treeDot [TensorStruct α] [FloatingTensorStruct α] (x y : α) : Float :=
+  let prod := FloatingTensorStruct.zipWith Tensor.mul x y
   TensorStruct.fold (fun t acc => acc + Tensor.item (Tensor.sumAll t)) 0.0 prod
 
 private def gradStruct [TensorStruct α] (loss : Tensor τ) (x : α) : α :=
   TensorStruct.map (fun t => Tensor.grad loss t (Tensor.onesLike loss)) x
 
-private def clipScale [TensorStruct α] (x : α) (maxNorm : Float) : α :=
+private def clipScale [TensorStruct α] [FloatingTensorStruct α] (x : α) (maxNorm : Float) : α :=
   let sqNorm := treeDot x x
   let norm := Float.sqrt sqNorm
   if norm <= maxNorm || norm == 0.0 then
@@ -42,13 +42,13 @@ private def clipScale [TensorStruct α] (x : α) (maxNorm : Float) : α :=
   else
     TensorStruct.scale x (maxNorm / norm)
 
-private def applyMass [TensorStruct α] (mass : α) (x : α) : α :=
-  TensorStruct.zipWith Tensor.Preserving.mul mass x
+private def applyMass [TensorStruct α] [FloatingTensorStruct α] (mass : α) (x : α) : α :=
+  FloatingTensorStruct.zipWith Tensor.mul mass x
 
-private def applyInvMass [TensorStruct α] (mass : α) (x : α) : α :=
-  TensorStruct.zipWith (fun d v => Tensor.Preserving.div v d) mass x
+private def applyInvMass [TensorStruct α] [FloatingTensorStruct α] (mass : α) (x : α) : α :=
+  FloatingTensorStruct.zipWith (fun d v => by simpa using Tensor.div v d) mass x
 
-private def weightedInvDot [TensorStruct α] (mass : α) (x y : α) : Float :=
+private def weightedInvDot [TensorStruct α] [FloatingTensorStruct α] (mass : α) (x y : α) : Float :=
   treeDot (applyInvMass mass x) y
 
 /-- Tree-valued low-rank factor on parameter space. -/
@@ -62,7 +62,7 @@ private def rowAt {Params : Type} {rank : UInt64}
     (K : TreeMetricFactor Params rank) (i : Fin rank.toNat) : Params :=
   K.rows[i.val]'(by simp [K.rows_size])
 
-def apply {Params : Type} [TensorStruct Params] {rank : UInt64}
+def apply {Params : Type} [TensorStruct Params] [FloatingTensorStruct Params] {rank : UInt64}
     (K : TreeMetricFactor Params rank)
     (x : Params) : Tensor { shape := #[rank], dtype := .Float32, device := .CPU } :=
   let coeffs :=
@@ -71,7 +71,7 @@ def apply {Params : Type} [TensorStruct Params] {rank : UInt64}
       treeDot row x)
   Tensor.reshapeChecked (Tensor.fromFloatArray coeffs) #[rank]
 
-def applyTranspose {Params : Type} [TensorStruct Params] {rank : UInt64}
+def applyTranspose {Params : Type} [TensorStruct Params] [FloatingTensorStruct Params] {rank : UInt64}
     (K : TreeMetricFactor Params rank)
     (prototype : Params)
     (coeffs : Tensor { shape := #[rank], dtype := .Float32, device := .CPU }) : Params :=
@@ -84,7 +84,7 @@ def applyTranspose {Params : Type} [TensorStruct Params] {rank : UInt64}
       acc := TensorStruct.add acc (TensorStruct.scale row coeff)
     pure acc
 
-def woodburyInner {Params : Type} [TensorStruct Params] {rank : UInt64}
+def woodburyInner {Params : Type} [TensorStruct Params] [FloatingTensorStruct Params] {rank : UInt64}
     (mass : Params)
     (K : TreeMetricFactor Params rank) : Tensor { shape := #[rank, rank], dtype := .Float32, device := .CPU } :=
   let entries : Array Float := Id.run do
@@ -98,13 +98,13 @@ def woodburyInner {Params : Type} [TensorStruct Params] {rank : UInt64}
     pure acc
   Tensor.reshapeChecked (Tensor.fromFloatArray entries) #[rank, rank]
 
-def applyRegularized {Params : Type} [TensorStruct Params] {rank : UInt64}
+def applyRegularized {Params : Type} [TensorStruct Params] [FloatingTensorStruct Params] {rank : UInt64}
     (mass : Params)
     (K : TreeMetricFactor Params rank)
     (x : Params) : Params :=
   TensorStruct.add (applyMass mass x) (K.applyTranspose x (K.apply x))
 
-def solveWoodbury {Params : Type} [TensorStruct Params] {rank : UInt64}
+def solveWoodbury {Params : Type} [TensorStruct Params] [FloatingTensorStruct Params] {rank : UInt64}
     (mass : Params)
     (K : TreeMetricFactor Params rank)
     (g : Params) : Params :=
@@ -119,14 +119,14 @@ def solveWoodbury {Params : Type} [TensorStruct Params] {rank : UInt64}
 
 end TreeMetricFactor
 
-private def paramVjpFromPrepared [TensorStruct Params] {s : Shape}
+private def paramVjpFromPrepared [TensorStruct Params] [FloatingTensorStruct Params] {s : Shape}
     (output : Tensor { shape := s, dtype := .Float32, device := device })
     (params : Params)
     (adjOutput : Tensor { shape := s, dtype := .Float32, device := device }) : Params :=
-  let loss := Tensor.sumAll (Tensor.Preserving.mul output (Tensor.detach adjOutput))
+  let loss := Tensor.sumAll (Tensor.mul output (Tensor.detach adjOutput))
   TensorStruct.detach (gradStruct loss params)
 
-private def buildTreeFactorFromOutputFactor [TensorStruct Params] {s : Shape} {rank : UInt64}
+private def buildTreeFactorFromOutputFactor [TensorStruct Params] [FloatingTensorStruct Params] {s : Shape} {rank : UInt64}
     (output : Tensor { shape := s, dtype := .Float32, device := device })
     (params : Params)
     (outputFactor : MetricFactor rank (shapeNumel s) .Float32 device) : TreeMetricFactor Params rank := by
@@ -143,7 +143,7 @@ private def buildTreeFactorFromOutputFactor [TensorStruct Params] {s : Shape} {r
       simp [rows]
   }
 
-private def buildTreeFactorFromCotangentRows [TensorStruct Params] {s : Shape} {rank : UInt64}
+private def buildTreeFactorFromCotangentRows [TensorStruct Params] [FloatingTensorStruct Params] {s : Shape} {rank : UInt64}
     (output : Tensor { shape := s, dtype := .Float32, device := device })
     (params : Params)
     (rows : Array (Tensor { shape := s, dtype := .Float32, device := device }))
@@ -157,7 +157,7 @@ private def buildTreeFactorFromCotangentRows [TensorStruct Params] {s : Shape} {
   }
 
 private def finalizePreparedStepWithTreeFactor
-    {Params : Type} [TensorStruct Params]
+    {Params : Type} [TensorStruct Params] [FloatingTensorStruct Params]
     {s : Shape} {rank : UInt64}
     (params : Params)
     (predictionReq : Tensor { shape := s, dtype := .Float32, device := device })
@@ -184,7 +184,7 @@ private def finalizePreparedStepWithTreeFactor
   }
 
 private def stepPreparedWithFactorAndMass
-    {Params : Type} [TensorStruct Params]
+    {Params : Type} [TensorStruct Params] [FloatingTensorStruct Params]
     {s : Shape} {rank : UInt64}
     (params : Params)
     (paramsReq : Params)
@@ -200,7 +200,7 @@ private def stepPreparedWithFactorAndMass
 
 /-- Whole-model tree step with explicit output cotangent and output-space factor. -/
 def stepWithFactorAndMass
-    {Params : Type} [TensorStruct Params]
+    {Params : Type} [TensorStruct Params] [FloatingTensorStruct Params]
     {s : Shape} {rank : UInt64}
     (params : Params)
     (forward : Params → IO (Tensor { shape := s, dtype := .Float32, device := device }))
@@ -216,7 +216,7 @@ def stepWithFactorAndMass
 
 /-- Whole-model tree step with unit diagonal mass. -/
 def stepWithFactor
-    {Params : Type} [TensorStruct Params]
+    {Params : Type} [TensorStruct Params] [FloatingTensorStruct Params]
     {s : Shape} {rank : UInt64}
     (params : Params)
     (forward : Params → IO (Tensor { shape := s, dtype := .Float32, device := device }))
@@ -228,7 +228,7 @@ def stepWithFactor
   stepWithFactorAndMass params forward mass outputFactor outputCotangent lr
 
 private def prepareCrossEntropyStep
-    {Params : Type} [TensorStruct Params]
+    {Params : Type} [TensorStruct Params] [FloatingTensorStruct Params]
     {batch seq vocab : UInt64}
     (params : Params)
     (forward : Params → IO (Tensor { shape := #[batch, seq, vocab], dtype := .Float32, device := device }))
@@ -265,7 +265,7 @@ private def sampledFisherCotangentRows
       let sampledIdx ← Tensor.multinomial probs 1 false
       let base : Tensor { shape := #[tokenCount, vocab], dtype := .Float32, device := device } := Tensor.zerosLike probs
       let sampledOneHot := Tensor.scatter2d base 1 sampledIdx srcOnes
-      let rowFlat := Tensor.Preserving.mulScalar (Tensor.Preserving.sub sampledOneHot probs) scale
+      let rowFlat := Tensor.mulScalar (Tensor.sub sampledOneHot probs) scale
       let row : Tensor { shape := #[batch, seq, vocab], dtype := .Float32, device := device } := Tensor.reshapeChecked rowFlat #[batch, seq, vocab]
       let ⟨rest, hRest⟩ ← sampleRows n
       pure ⟨row :: rest, by simp [hRest]⟩
@@ -276,7 +276,7 @@ private def sampledFisherCotangentRows
   pure ⟨rows, hRows⟩
 
 private def sampledFisherTreeFactor
-    {Params : Type} [TensorStruct Params]
+    {Params : Type} [TensorStruct Params] [FloatingTensorStruct Params]
     {batch seq vocab : UInt64} {rank : UInt64}
     (predictionReq : Tensor { shape := #[batch, seq, vocab], dtype := .Float32, device := device })
     (paramsReq : Params)
@@ -287,7 +287,7 @@ private def sampledFisherTreeFactor
 
 /-- Cross-entropy step for tensor-logit models with unit diagonal mass. -/
 def stepCrossEntropy
-    {Params : Type} [TensorStruct Params]
+    {Params : Type} [TensorStruct Params] [FloatingTensorStruct Params]
     {batch seq vocab : UInt64}
     (params : Params)
     (forward : Params → IO (Tensor { shape := #[batch, seq, vocab], dtype := .Float32, device := device }))
@@ -330,7 +330,7 @@ def stepCrossEntropy
 /-- Cross-entropy step using a sampled logits-Fisher pullback factor.
     The loss gradient remains exact; only the output metric factor is sketched. -/
 def stepCrossEntropySampledFisher
-    {Params : Type} [TensorStruct Params]
+    {Params : Type} [TensorStruct Params] [FloatingTensorStruct Params]
     {batch seq vocab : UInt64}
     (params : Params)
     (forward : Params → IO (Tensor { shape := #[batch, seq, vocab], dtype := .Float32, device := device }))

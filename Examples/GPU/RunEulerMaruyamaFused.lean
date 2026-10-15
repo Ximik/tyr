@@ -36,8 +36,8 @@ def runOnce : IO Bool := do
   let a := -0.5   -- drift rate
   let b := 0.3    -- diffusion rate
 
-  let drift {placement : Device} : Float → Tensor { shape := #[n], dtype := .Float32, device := placement } → Tensor { shape := #[n], dtype := .Float32, device := placement } := fun _ y => Tensor.Preserving.mulScalar y a
-  let diffusion {placement : Device} : Float → Tensor { shape := #[n], dtype := .Float32, device := placement } → Tensor { shape := #[n], dtype := .Float32, device := placement } := fun _ y => Tensor.Preserving.mulScalar y b
+  let drift {placement : Device} : Float → Tensor { shape := #[n], dtype := .Float32, device := placement } → Tensor { shape := #[n], dtype := .Float32, device := placement } := fun _ y => Tensor.mulScalar y a
+  let diffusion {placement : Device} : Float → Tensor { shape := #[n], dtype := .Float32, device := placement } → Tensor { shape := #[n], dtype := .Float32, device := placement } := fun _ y => Tensor.mulScalar y b
 
   -- CPU reference: same EM update, increments from the CPU tensor VBT
   let cpuTree : VirtualBrownianTree (Tensor { shape := #[n], dtype := .Float32, device := .CPU }) := {
@@ -53,7 +53,7 @@ def runOnce : IO Bool := do
     let tA := t0 + Float.ofNat k * h
     let tB := t0 + Float.ofNat (k + 1) * h
     let inc := VirtualBrownianTree.increment cpuTree tA tB
-    yCpu := Tensor.add (Tensor.add yCpu (Tensor.Preserving.mulScalar (drift tA yCpu) h))
+    yCpu := Tensor.add (Tensor.add yCpu (Tensor.mulScalar (drift tA yCpu) h))
       (Tensor.mul (diffusion tA yCpu) inc.W)
   let cpuVals ← Tensor.toFloatArray yCpu
   let cpuMs := (← IO.monoMsNow) - tCpu0

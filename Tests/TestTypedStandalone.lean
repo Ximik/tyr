@@ -96,8 +96,13 @@ def testErasedDTypeCopyRejectsBeforeMutation : IO Unit := do
   LeanTest.assertEqual (← destination.toFloatArray) #[1, 2]
     "Explicit native conversion remains available"
 
+example (_input : Tensor ⟨#[2, 2], .Int32, .CPU⟩) : True := by
+  fail_if_success
+    have _ : Tensor ⟨#[2], .Int32, .CPU⟩ := Tensor.sumDim _input 0
+  trivial
+
 @[test]
-def testPreservingReplacementChecksErasedDType : IO Unit := do
+def testReplacementChecksExactDType : IO Unit := do
   let original := (Tensor.fullInt #[2] 9)
   LeanTest.assertTrue ((original.checkedReplacement? (Tensor.ones #[2]).raw).toOption.isNone)
     "A preserving adapter must reject dtype drift"
@@ -105,8 +110,6 @@ def testPreservingReplacementChecksErasedDType : IO Unit := do
   | .error message => LeanTest.fail message
   | .ok replacement => LeanTest.assertEqual (← replacement.toFloatArray) #[4, 4]
   let smallInts := ((Tensor.ones #[2, 2]).castDType .Int32)
-  LeanTest.assertTrue ((Tensor.Preserving.sumDim? smallInts 0).toOption.isNone)
-    "Int32 accumulation must not masquerade as a dtype-preserving reduction"
   let reduced := Tensor.sumDim smallInts 0
   LeanTest.assertEqual reduced.raw.dtype .Int64
     "The ordinary reduction still permits native integer accumulation"

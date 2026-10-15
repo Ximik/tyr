@@ -131,7 +131,7 @@ private def loadVisionBlock (path : String) (cfg : VisionConfig) (layerIdx : UIn
 
 private def loadVisionModelSharded (modelDir : String) (cfg : VisionConfig)
     (device : Device := Device.CPU)
-    : IO (Σ dtype : ExactDType, Qwen35VisionModel (device := device) cfg dtype.val) := do
+    : IO (Σ dtype : RealFloatingDType, Qwen35VisionModel (device := device) cfg dtype.val) := do
   let convW ← loadTensorShardedCandidates
     modelDir
     (visionNameCandidates "model.visual.patch_embed.proj.weight")
@@ -143,6 +143,8 @@ private def loadVisionModelSharded (modelDir : String) (cfg : VisionConfig)
     #[cfg.hidden_size]
     device
   let dtype := convW.1
+  let floating ← IO.ofExcept dtype.val.realFloating?
+  let _ := floating.down
   let patchW : Tensor { device := device, shape := #[cfg.hidden_size, VisionConfig.patchDim cfg], dtype := dtype.val } :=
     Tensor.reshapeChecked convW.2 #[cfg.hidden_size, VisionConfig.patchDim cfg]
   let patchEmbed : Qwen35VisionPatchEmbed (dtype := dtype.val) (device := device) cfg := {
@@ -192,7 +194,7 @@ private def loadVisionModelSharded (modelDir : String) (cfg : VisionConfig)
     linear_fc2_bias := reqGradFalse (← requireDType dtype fc2B)
   }
 
-  pure ⟨dtype, {
+  pure ⟨RealFloatingDType.ofDType dtype.val, {
     patch_embed := patchEmbed
     pos_embed := reqGradFalse (← requireDType dtype posEmbed)
     blocks := blocks
@@ -201,7 +203,7 @@ private def loadVisionModelSharded (modelDir : String) (cfg : VisionConfig)
 
 private def loadVisionModel (path : String) (cfg : VisionConfig)
     (device : Device := Device.CPU)
-    : IO (Σ dtype : ExactDType, Qwen35VisionModel (device := device) cfg dtype.val) := do
+    : IO (Σ dtype : RealFloatingDType, Qwen35VisionModel (device := device) cfg dtype.val) := do
   let convW ← loadTensorCandidates
     path
     (visionNameCandidates "model.visual.patch_embed.proj.weight")
@@ -213,6 +215,8 @@ private def loadVisionModel (path : String) (cfg : VisionConfig)
     #[cfg.hidden_size]
     device
   let dtype := convW.1
+  let floating ← IO.ofExcept dtype.val.realFloating?
+  let _ := floating.down
   let patchW : Tensor { device := device, shape := #[cfg.hidden_size, VisionConfig.patchDim cfg], dtype := dtype.val } :=
     Tensor.reshapeChecked convW.2 #[cfg.hidden_size, VisionConfig.patchDim cfg]
   let patchEmbed : Qwen35VisionPatchEmbed (dtype := dtype.val) (device := device) cfg := {
@@ -262,7 +266,7 @@ private def loadVisionModel (path : String) (cfg : VisionConfig)
     linear_fc2_bias := reqGradFalse (← requireDType dtype fc2B)
   }
 
-  pure ⟨dtype, {
+  pure ⟨RealFloatingDType.ofDType dtype.val, {
     patch_embed := patchEmbed
     pos_embed := reqGradFalse (← requireDType dtype posEmbed)
     blocks := blocks
@@ -275,7 +279,7 @@ namespace Qwen35ForConditionalGeneration
 def loadSharded (modelDir : String) (cfg : VLConfig := {})
     (device : Device := Device.CPU)
     (log : Handlers := {})
-    : IO (Σ dtype : ExactDType, Σ visionDType : ExactDType,
+    : IO (Σ dtype : RealFloatingDType, Σ visionDType : RealFloatingDType,
       Qwen35ForConditionalGeneration (device := device) cfg dtype.val visionDType.val) := do
   log.onInfo s!"Loading Qwen35ForConditionalGeneration (device := device) from {modelDir}..."
   if cfg.vision_config.out_hidden_size != cfg.text_config.hidden_size then
@@ -291,7 +295,7 @@ def loadSharded (modelDir : String) (cfg : VLConfig := {})
 def load (path : String) (cfg : VLConfig := {})
     (device : Device := Device.CPU)
     (log : Handlers := {})
-    : IO (Σ dtype : ExactDType, Σ visionDType : ExactDType,
+    : IO (Σ dtype : RealFloatingDType, Σ visionDType : RealFloatingDType,
       Qwen35ForConditionalGeneration (device := device) cfg dtype.val visionDType.val) := do
   log.onInfo s!"Loading Qwen35ForConditionalGeneration (device := device) from {path}..."
   if cfg.vision_config.out_hidden_size != cfg.text_config.hidden_size then

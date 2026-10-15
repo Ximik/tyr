@@ -5,7 +5,7 @@ namespace Tyr.AD
 open torch
 open DifferentiableManifold
 
-variable {d : DType} {dev : Device}
+variable {d : DType} {dev : Device} [DType.RealFloating d]
 
 /-- Positive manifold of elementwise-positive `m x n` matrices. -/
 structure Positive (m n : UInt64) (dtype : DType := .Float32)
@@ -18,12 +18,12 @@ private def eps : Float := 1e-6
 
 /-- Project to positive matrices via clamping. -/
 def project (m n : UInt64) (A : Tensor ⟨#[m, n], d, dev⟩) : Positive m n d dev :=
-  ⟨Tensor.Preserving.clampFloat A eps 1e12⟩
+  ⟨Tensor.clampFloat A eps 1e12⟩
 
 /-- Random positive point. -/
 def random (m n : UInt64) : IO (Positive m n) := do
   let A ← Tensor.randn #[m, n]
-  pure (project m n (Tensor.Preserving.addScalar (Tensor.abs A) eps))
+  pure (project m n (Tensor.addScalar (Tensor.abs A) eps))
 
 end Positive
 
@@ -35,8 +35,8 @@ structure PositiveTangent (m n : UInt64) (dtype : DType := .Float32)
 namespace PositiveTangent
 
 def zero [DType.ConstantSupported d dev] (m n : UInt64) : PositiveTangent m n d dev := ⟨Tensor.zerosFor ⟨#[m, n], d, dev⟩⟩
-def add (a b : PositiveTangent m n d dev) : PositiveTangent m n d dev := ⟨Tensor.Preserving.add a.vec b.vec⟩
-def smul (s : Float) (v : PositiveTangent m n d dev) : PositiveTangent m n d dev := ⟨Tensor.Preserving.mulScalar v.vec s⟩
+def add (a b : PositiveTangent m n d dev) : PositiveTangent m n d dev := ⟨Tensor.add a.vec b.vec⟩
+def smul (s : Float) (v : PositiveTangent m n d dev) : PositiveTangent m n d dev := ⟨Tensor.mulScalar v.vec s⟩
 
 end PositiveTangent
 
@@ -50,22 +50,24 @@ instance positiveManifold (m n : UInt64) : DifferentiableManifold (Positive m n 
   scaleTangent s v := PositiveTangent.smul s v
   sharp := by
     intro x g
-    let sq := Tensor.Preserving.mul x.matrix x.matrix
-    exact ⟨Tensor.Preserving.mul g.vec sq⟩
+    let sq := Tensor.mul x.matrix x.matrix
+    exact ⟨Tensor.mul g.vec sq⟩
   flat := by
     intro x v
-    let sq := Tensor.Preserving.mul x.matrix x.matrix
-    let sqSafe := Tensor.Preserving.addScalar sq 1e-12
-    exact ⟨Tensor.Preserving.div v.vec sqSafe⟩
+    let sq := Tensor.mul x.matrix x.matrix
+    let sqSafe := Tensor.addScalar sq 1e-12
+    exact ⟨by simpa using Tensor.div v.vec sqSafe⟩
   exp x v :=
-    let quad := Tensor.Preserving.mul v.vec v.vec
-    let denom := Tensor.Preserving.mulScalar x.matrix 2.0
-    let second := Tensor.Preserving.div quad (Tensor.Preserving.addScalar denom 1e-12)
-    Positive.project m n (Tensor.Preserving.add (Tensor.Preserving.add x.matrix v.vec) second)
+    let quad := Tensor.mul v.vec v.vec
+    let denom := Tensor.mulScalar x.matrix 2.0
+    let second : Tensor ⟨#[m, n], d, dev⟩ := by
+      simpa using Tensor.div quad (Tensor.addScalar denom 1e-12)
+    Positive.project m n (Tensor.add (Tensor.add x.matrix v.vec) second)
   retract x v :=
-    let quad := Tensor.Preserving.mul v.vec v.vec
-    let denom := Tensor.Preserving.mulScalar x.matrix 2.0
-    let second := Tensor.Preserving.div quad (Tensor.Preserving.addScalar denom 1e-12)
-    Positive.project m n (Tensor.Preserving.add (Tensor.Preserving.add x.matrix v.vec) second)
+    let quad := Tensor.mul v.vec v.vec
+    let denom := Tensor.mulScalar x.matrix 2.0
+    let second : Tensor ⟨#[m, n], d, dev⟩ := by
+      simpa using Tensor.div quad (Tensor.addScalar denom 1e-12)
+    Positive.project m n (Tensor.add (Tensor.add x.matrix v.vec) second)
 
 end Tyr.AD

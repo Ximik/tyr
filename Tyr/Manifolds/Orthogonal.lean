@@ -11,7 +11,7 @@ namespace Tyr.AD
 open torch
 open DifferentiableManifold
 
-variable {d : DType} {dev : Device}
+variable {d : DType} {dev : Device} [DType.RealFloating d]
 
 /-! ## Orthogonal Group O(n)
 
@@ -75,19 +75,19 @@ def zero [DType.ConstantSupported d dev] (n : UInt64) : SkewSymmetric n d dev :=
 
 /-- Create a skew-symmetric matrix from any matrix: (A - Aᵀ)/2 -/
 def fromMatrix (mat : Tensor ⟨#[n, n], d, dev⟩) : SkewSymmetric n d dev :=
-  ⟨Tensor.Preserving.mulScalar (Tensor.Preserving.sub mat (Tensor.transpose2d mat)) 0.5⟩
+  ⟨Tensor.mulScalar (Tensor.sub mat (Tensor.transpose2d mat)) 0.5⟩
 
 /-- Add two skew-symmetric matrices -/
 def add (S T : SkewSymmetric n d dev) : SkewSymmetric n d dev :=
-  ⟨Tensor.Preserving.add S.matrix T.matrix⟩
+  ⟨Tensor.add S.matrix T.matrix⟩
 
 /-- Scale a skew-symmetric matrix -/
 def smul (s : Float) (S : SkewSymmetric n d dev) : SkewSymmetric n d dev :=
-  ⟨Tensor.Preserving.mulScalar S.matrix s⟩
+  ⟨Tensor.mulScalar S.matrix s⟩
 
 /-- Frobenius inner product -/
 def inner (S T : SkewSymmetric n d dev) : Float :=
-  Tensor.item (Tensor.sumAll (Tensor.Preserving.mul S.matrix T.matrix))
+  Tensor.item (Tensor.sumAll (Tensor.mul S.matrix T.matrix))
 
 end SkewSymmetric
 

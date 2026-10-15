@@ -69,13 +69,15 @@ def testQwen3TTSRMSNormModelDType : IO Unit := do
       0.3, -1.1, 0.7, 0.2, -0.5, 0.8, 1.4, -0.2]) #[2, 3, 4]
   let weight : Tensor { shape := #[4], dtype := .Float32, device := .CPU } := Tensor.reshapeChecked (Tensor.fromFloatArray #[0.73, 1.19, -0.67, 1.53]) #[4]
   for bf16 in #[false, true] do
-    let dtype := if bf16 then DType.BFloat16 else .Float32
+    let selected : RealFloatingDType :=
+      if bf16 then ⟨.BFloat16, by decide⟩ else ⟨.Float32, by decide⟩
+    let dtype := selected.val
     let x := input.castDType dtype
     let w := weight.castDType dtype
     let norm : RMSNorm 4 dtype := { weight := w, eps := ⟨0.01⟩ }
     let normalized := Tensor.rmsNormWeighted x.toFloat32 (Tensor.ones #[4]) 0.01
     let expected : Tensor { shape := #[2, 3, 4], dtype, device := .CPU } :=
-      Tensor.Preserving.mul
+      Tensor.mul
         (normalized.castDType dtype)
         (w.expand #[2, 3, 4])
     let actual := norm.forward3d x
@@ -97,15 +99,17 @@ def testQwen3TTSRMSNormModelDType : IO Unit := do
 def testQwen3TTSBFloat16IncrementalCache : IO Unit := do
   torch.manualSeed 7341
   let inputs : Tensor { shape := #[1, 5, 8], dtype := .Float32, device := .CPU } := Tensor.reshapeChecked
-    (Tensor.Preserving.mulScalar (Tensor.sin (Tensor.toFloat32 (Tensor.arange 40))) 0.5) #[1, 5, 8]
+    (Tensor.mulScalar (Tensor.sin (Tensor.toFloat32 (Tensor.arange 40))) 0.5) #[1, 5, 8]
   let (cos, sin) := Tensor.rotaryFreqs 5 4 10000
   for bf16 in #[false, true] do
-    let dtype := if bf16 then DType.BFloat16 else .Float32
+    let selected : RealFloatingDType :=
+      if bf16 then ⟨.BFloat16, by decide⟩ else ⟨.Float32, by decide⟩
+    let dtype := selected.val
     let support ← dtype.acquireConstantSupport .CPU
     let _ := support.down
     let raw ← qwen.QwenLayer.init 8 2 1 4 16 (dtype := dtype)
     let raw := TensorStruct.detach raw
-    let layer := { raw with
+    let layer : qwen.QwenLayer (device := .CPU) 8 2 1 4 16 dtype := { raw with
       self_attn := TensorStruct.scale raw.self_attn 0.25
       mlp := TensorStruct.scale raw.mlp 0.25 }
     let x := inputs.castDType dtype
@@ -266,7 +270,7 @@ def testQwen3TTSSpeakerEmbeddingAlignsFeatureDType : IO Unit := do
   let features : Tensor { shape := #[2, 12, cfg.speakerEncoderConfig.melDim], dtype := .Float32, device := .CPU } ←
     Tensor.randn #[2, 12, cfg.speakerEncoderConfig.melDim]
   for bf16Weights in #[false, true] do
-    let speaker : ExactDType := if bf16Weights then ⟨.BFloat16, by decide⟩ else float32DType
+    let speaker : RealFloatingDType := if bf16Weights then ⟨.BFloat16, by decide⟩ else float32DType
     let model ← Qwen3TTSForConditionalGeneration.init cfg (dtypes := { speaker })
     let some enc := model.speakerEncoder
       | throw <| IO.userError "Missing test speaker encoder"

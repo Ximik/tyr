@@ -9,7 +9,7 @@ namespace Tyr.AD
 open torch
 open DifferentiableManifold
 
-variable {d : DType} {dev : Device}
+variable {d : DType} {dev : Device} [DType.RealFloating d]
 
 /--
 Manifolds that admit a distinguished ambient representation together with
@@ -31,7 +31,7 @@ def retractAmbientStep [DifferentiableManifold M] [EmbeddedManifold M]
 
 end EmbeddedManifold
 
-instance tensorEmbedded {σ : StaticSpec} [DType.ConstantSupported σ.dtype σ.device] : EmbeddedManifold (Tensor σ) where
+instance tensorEmbedded {σ : StaticSpec} [DType.RealFloating σ.dtype] [DType.ConstantSupported σ.dtype σ.device] : EmbeddedManifold (Tensor σ) where
   Ambient := Tensor σ
   toAmbient := id
   projectAmbientTangent := id

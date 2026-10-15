@@ -26,7 +26,7 @@ open torch
 
 @[test] def testBackwardPreservesReusablePureGraph : IO Unit := do
   let fresh ← Tensor.randn #[2]
-  let expected ← (Tensor.Preserving.mulScalar fresh 2.0).toFloatArray
+  let expected ← (Tensor.mulScalar fresh 2.0).toFloatArray
   let parameter ← fresh.parameter
   let loss := Tensor.sumAll (parameter * parameter)
   Tensor.backwardLoss loss
@@ -37,7 +37,7 @@ open torch
 
 @[test] def testExplicitBackwardPreservesReusablePureGraph : IO Unit := do
   let fresh ← Tensor.randn #[2]
-  let expected ← (Tensor.Preserving.mulScalar fresh 2.0).toFloatArray
+  let expected ← (Tensor.mulScalar fresh 2.0).toFloatArray
   let parameter ← fresh.parameter
   let output := parameter * parameter
   Tensor.backward output (Tensor.onesLike output)
@@ -48,7 +48,7 @@ open torch
 @[test] def testFunctionalGradSeparatesEqualTreeLeaves : IO Unit := do
   let input := Tensor.fromFloatArray #[2.0, 3.0]
   let gradients := TensorStruct.functionalGrad
-    (fun (left, right) => Tensor.sumAll (left * left + Tensor.Preserving.mulScalar right 3.0))
+    (fun (left, right) => Tensor.sumAll (left * left + Tensor.mulScalar right 3.0))
     (input, input)
   LeanTest.assertEqual (← gradients.1.toFloatArray) #[4.0, 6.0]
   LeanTest.assertEqual (← gradients.2.toFloatArray) #[3.0, 3.0]

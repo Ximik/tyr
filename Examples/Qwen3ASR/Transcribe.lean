@@ -125,7 +125,7 @@ private def uiPrintInline (s : String) : IO Unit := do
 
 private def transcribeWavStreamed
     {device : torch.Device}
-    {dtype : torch.ExactDType}
+    {dtype : torch.RealFloatingDType}
     (modelDir : String)
     {cfg : Qwen3ASRConfig}
     (model : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype.val) cfg)

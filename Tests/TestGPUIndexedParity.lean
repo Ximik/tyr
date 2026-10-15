@@ -67,9 +67,12 @@ example (a : Tensor { shape := #[2], dtype := .Float32, device := .CPU }) (b : T
     LeanTest.assertEqual dqOut.actualSpec.dtype dtype
     LeanTest.assertEqual dkOut.actualSpec.dtype dtype
     LeanTest.assertTrue (Tensor.allclose qOut.toFloat32 (signs.expand #[1, 2, 2, 64]) 0 0)
-    LeanTest.assertTrue (Tensor.allclose kOut.toFloat32 (Tensor.Preserving.mulScalar (signs.expand #[1, 2, 1, 64]) 2.0) 0 0)
-    LeanTest.assertTrue (Tensor.allclose dqOut.toFloat32 (Tensor.Preserving.mulScalar (signs.expand #[1, 2, 2, 64]) (-3.0)) 0 0)
-    LeanTest.assertTrue (Tensor.allclose dkOut.toFloat32 (Tensor.Preserving.mulScalar (signs.expand #[1, 2, 1, 64]) (-4.0)) 0 0)
+    let expectedK := Tensor.mulScalar (signs.expand #[1, 2, 1, 64]) 2.0
+    let expectedDQ := Tensor.mulScalar (signs.expand #[1, 2, 2, 64]) (-3.0)
+    let expectedDK := Tensor.mulScalar (signs.expand #[1, 2, 1, 64]) (-4.0)
+    LeanTest.assertTrue (Tensor.allclose kOut.toFloat32 expectedK 0 0)
+    LeanTest.assertTrue (Tensor.allclose dqOut.toFloat32 expectedDQ 0 0)
+    LeanTest.assertTrue (Tensor.allclose dkOut.toFloat32 expectedDK 0 0)
 
 set_option linter.unusedVariables false in
 example (inputs : Examples.GPU.RunLayerNorm.LayerNormInputs .Float32) : True := by

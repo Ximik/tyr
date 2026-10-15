@@ -170,10 +170,12 @@ private def resolveWhisperDevice (log : Handlers := {}) : IO Device := do
   | none => getBestDevice
 
 def loadShardedAt (modelDir : String) (cfg : WhisperConfig := {}) (log : Handlers := {})
-    (device : Device) : IO (Σ dtype : ExactDType, WhisperForConditionalGeneration (device := device) (dtype := dtype.val) cfg) := do
+    (device : Device) : IO (Σ dtype : RealFloatingDType, WhisperForConditionalGeneration (device := device) (dtype := dtype.val) cfg) := do
   log.onInfo s!"Loading Whisper weights from {modelDir}..."
   let ⟨dtype, encoderConv1Weight⟩ ← safetensors.loadTensorShardedExact modelDir
     "model.encoder.conv1.weight" #[cfg.dModel, cfg.numMelBins, 3] device
+  let floating ← IO.ofExcept (DType.realFloating? dtype.val)
+  let _ := floating.down
   let model ← loadModelSharded (dtype := dtype) (device := device) modelDir cfg encoderConv1Weight
   let projOut ←
     match (← loadOptional (device := device) dtype modelDir "proj_out.weight" #[cfg.vocabSize, cfg.dModel]) with
@@ -182,11 +184,11 @@ def loadShardedAt (modelDir : String) (cfg : WhisperConfig := {}) (log : Handler
       log.onInfo "  proj_out.weight not found; tying output projection to decoder token embeddings."
       pure model.decoderTokenEmbedding
   log.onInfo s!"Whisper target device: {repr device}"
-  pure ⟨dtype, { model, projOut }⟩
+  pure ⟨RealFloatingDType.ofDType dtype.val, { model, projOut }⟩
 
 /-- Load using the environment-selected device, retaining that index in the result. -/
 def loadSharded (modelDir : String) (cfg : WhisperConfig := {}) (log : Handlers := {}) :
-    IO (Σ device : Device, Σ dtype : ExactDType, WhisperForConditionalGeneration (device := device) (dtype := dtype.val) cfg) := do
+    IO (Σ device : Device, Σ dtype : RealFloatingDType, WhisperForConditionalGeneration (device := device) (dtype := dtype.val) cfg) := do
   let device ← resolveWhisperDevice log
   let model ← loadShardedAt modelDir cfg log device
   pure ⟨device, model⟩

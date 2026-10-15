@@ -1,4 +1,5 @@
 import Tyr.Module.Core
+import Tyr.Module.Derive
 import Tyr.Differentiable
 
 namespace torch
@@ -8,6 +9,8 @@ structure Affine {n m : UInt64} (dtype : DType := .Float32)
     (device : Device := .CPU) where
   w : Tensor ⟨#[m, n], dtype, device⟩
   b : Tensor ⟨#[n], dtype, device⟩
+
+derive_tensor_struct_for Affine
 
 instance {n m : UInt64} {d : DType} {dev : Device} :
     TensorStruct (@Affine n m d dev) where
@@ -22,12 +25,12 @@ instance {n m : UInt64} {d : DType} {dev : Device} :
   grad a := do pure ⟨← Tensor.gradOf a.w, ← Tensor.gradOf a.b⟩
 
 /-- Apply an affine map to a batch, retaining dtype and device. -/
-def Affine.step {batch n m : UInt64} {d : DType} {dev : Device}
+def Affine.step {batch n m : UInt64} {d : DType} {dev : Device} [DType.Promotes d d d]
     (a : @Affine n m d dev) (input : Tensor ⟨#[batch, m], d, dev⟩) :
     Tensor ⟨#[batch, n], d, dev⟩ :=
-  Tensor.Preserving.add (Tensor.mm input a.w) (Tensor.expand a.b #[batch, n])
+  Tensor.add (Tensor.mm input a.w) (Tensor.expand a.b #[batch, n])
 
-instance {batch n m : UInt64} {d : DType} {dev : Device} :
+instance {batch n m : UInt64} {d : DType} {dev : Device} [DType.Promotes d d d] :
     Module (@Affine n m d dev) (Tensor ⟨#[batch, m], d, dev⟩)
       (Tensor ⟨#[batch, n], d, dev⟩) where
   forward := Affine.step

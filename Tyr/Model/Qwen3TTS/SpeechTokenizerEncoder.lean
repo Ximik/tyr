@@ -67,19 +67,20 @@ private def addBias3d {batch channels frames : UInt64}
     (x : Tensor { shape := #[batch, channels, frames], dtype := dtypes.compute.val, device := device })
     (bias : Tensor { shape := #[channels], dtype := dtypes.compute.val, device := device }) : Tensor { shape := #[batch, channels, frames], dtype := dtypes.compute.val, device := device } :=
   let b : Tensor { shape := #[1, channels, 1], dtype := dtypes.compute.val, device := device } := Tensor.reshapeChecked bias #[1, channels, 1]
-  Tensor.Preserving.add x (Tensor.expand b #[batch, channels, frames])
+  Tensor.add x (Tensor.expand b #[batch, channels, frames])
 
 private def scale3d {batch seq dim : UInt64}
     (x : Tensor { shape := #[batch, seq, dim], dtype := dtypes.compute.val, device := device })
     (scale : Tensor { shape := #[dim], dtype := dtypes.compute.val, device := device }) : Tensor { shape := #[batch, seq, dim], dtype := dtypes.compute.val, device := device } :=
   let s : Tensor { shape := #[1, 1, dim], dtype := dtypes.compute.val, device := device } := Tensor.reshapeChecked scale #[1, 1, dim]
-  Tensor.Preserving.mul x (Tensor.expand s #[batch, seq, dim])
+  Tensor.mul x (Tensor.expand s #[batch, seq, dim])
 
 private def clampMin1d {n : UInt64} {dtype : DType}
+    [DType.Ordered dtype] [DType.Promotes dtype dtype dtype]
     (x : Tensor { shape := #[n], dtype, device := device }) (minVal : Float)
     : Tensor { shape := #[n], dtype, device := device } :=
   let minT := Tensor.castLike x (Tensor.full #[n] minVal false x.device)
-  Tensor.Preserving.maximum x minT
+  Tensor.maximum x minT
 
 private def stack2dDyn {batch frames k : UInt64}
     (tensors : Array (Tensor { shape := #[batch, frames], dtype := .Int64, device := device })) : Tensor { shape := #[k, batch, frames], dtype := .Int64, device := device } :=
@@ -163,26 +164,26 @@ private def loadResBlock
     (namePrefix : String)
     (inC hiddenC : UInt64)
     : IO (EncoderResBlock (device := device) (dtypes := dtypes) inC hiddenC) := do
-  let conv1Weight ← loadFrozen (dtype := dtypes.compute) weightsPath s!"{namePrefix}.1.conv.weight" #[hiddenC, inC, 3]
-  let conv1Bias ← loadFrozen (dtype := dtypes.compute) weightsPath s!"{namePrefix}.1.conv.bias" #[hiddenC]
-  let conv2Weight ← loadFrozen (dtype := dtypes.compute) weightsPath s!"{namePrefix}.3.conv.weight" #[inC, hiddenC, 1]
-  let conv2Bias ← loadFrozen (dtype := dtypes.compute) weightsPath s!"{namePrefix}.3.conv.bias" #[inC]
+  let conv1Weight ← loadFrozen (dtype := dtypes.compute.toExactDType) weightsPath s!"{namePrefix}.1.conv.weight" #[hiddenC, inC, 3]
+  let conv1Bias ← loadFrozen (dtype := dtypes.compute.toExactDType) weightsPath s!"{namePrefix}.1.conv.bias" #[hiddenC]
+  let conv2Weight ← loadFrozen (dtype := dtypes.compute.toExactDType) weightsPath s!"{namePrefix}.3.conv.weight" #[inC, hiddenC, 1]
+  let conv2Bias ← loadFrozen (dtype := dtypes.compute.toExactDType) weightsPath s!"{namePrefix}.3.conv.bias" #[inC]
   pure { conv1Weight, conv1Bias, conv2Weight, conv2Bias }
 
 private def loadTransformerLayer (weightsPath : String) (i : Nat) : IO (EncoderTransformerLayer (device := device) (dtypes := dtypes)) := do
   let p := s!"encoder.encoder_transformer.layers.{i}"
-  let inputLayerNormWeight ← loadFrozen (dtype := dtypes.compute) weightsPath s!"{p}.input_layernorm.weight" #[512]
-  let inputLayerNormBias ← loadFrozen (dtype := dtypes.compute) weightsPath s!"{p}.input_layernorm.bias" #[512]
-  let qProj ← loadFrozen (dtype := dtypes.compute) weightsPath s!"{p}.self_attn.q_proj.weight" #[512, 512]
-  let kProj ← loadFrozen (dtype := dtypes.compute) weightsPath s!"{p}.self_attn.k_proj.weight" #[512, 512]
-  let vProj ← loadFrozen (dtype := dtypes.compute) weightsPath s!"{p}.self_attn.v_proj.weight" #[512, 512]
-  let oProj ← loadFrozen (dtype := dtypes.compute) weightsPath s!"{p}.self_attn.o_proj.weight" #[512, 512]
-  let selfAttnLayerScale ← loadFrozen (dtype := dtypes.compute) weightsPath s!"{p}.self_attn_layer_scale.scale" #[512]
-  let postAttentionLayerNormWeight ← loadFrozen (dtype := dtypes.compute) weightsPath s!"{p}.post_attention_layernorm.weight" #[512]
-  let postAttentionLayerNormBias ← loadFrozen (dtype := dtypes.compute) weightsPath s!"{p}.post_attention_layernorm.bias" #[512]
-  let fc1 ← loadFrozen (dtype := dtypes.compute) weightsPath s!"{p}.mlp.fc1.weight" #[2048, 512]
-  let fc2 ← loadFrozen (dtype := dtypes.compute) weightsPath s!"{p}.mlp.fc2.weight" #[512, 2048]
-  let mlpLayerScale ← loadFrozen (dtype := dtypes.compute) weightsPath s!"{p}.mlp_layer_scale.scale" #[512]
+  let inputLayerNormWeight ← loadFrozen (dtype := dtypes.compute.toExactDType) weightsPath s!"{p}.input_layernorm.weight" #[512]
+  let inputLayerNormBias ← loadFrozen (dtype := dtypes.compute.toExactDType) weightsPath s!"{p}.input_layernorm.bias" #[512]
+  let qProj ← loadFrozen (dtype := dtypes.compute.toExactDType) weightsPath s!"{p}.self_attn.q_proj.weight" #[512, 512]
+  let kProj ← loadFrozen (dtype := dtypes.compute.toExactDType) weightsPath s!"{p}.self_attn.k_proj.weight" #[512, 512]
+  let vProj ← loadFrozen (dtype := dtypes.compute.toExactDType) weightsPath s!"{p}.self_attn.v_proj.weight" #[512, 512]
+  let oProj ← loadFrozen (dtype := dtypes.compute.toExactDType) weightsPath s!"{p}.self_attn.o_proj.weight" #[512, 512]
+  let selfAttnLayerScale ← loadFrozen (dtype := dtypes.compute.toExactDType) weightsPath s!"{p}.self_attn_layer_scale.scale" #[512]
+  let postAttentionLayerNormWeight ← loadFrozen (dtype := dtypes.compute.toExactDType) weightsPath s!"{p}.post_attention_layernorm.weight" #[512]
+  let postAttentionLayerNormBias ← loadFrozen (dtype := dtypes.compute.toExactDType) weightsPath s!"{p}.post_attention_layernorm.bias" #[512]
+  let fc1 ← loadFrozen (dtype := dtypes.compute.toExactDType) weightsPath s!"{p}.mlp.fc1.weight" #[2048, 512]
+  let fc2 ← loadFrozen (dtype := dtypes.compute.toExactDType) weightsPath s!"{p}.mlp.fc2.weight" #[512, 2048]
+  let mlpLayerScale ← loadFrozen (dtype := dtypes.compute.toExactDType) weightsPath s!"{p}.mlp_layer_scale.scale" #[512]
   pure {
     inputLayerNormWeight
     inputLayerNormBias
@@ -208,7 +209,7 @@ private def loadEncodeRVQ
     (namePrefix : String)
     (numCodebooks : Nat)
     : IO (EncodeRVQ (device := device) (dtypes := dtypes)) := do
-  let inputProj ← loadFrozen (dtype := dtypes.compute) weightsPath s!"{namePrefix}.input_proj.weight" #[256, 512, 1]
+  let inputProj ← loadFrozen (dtype := dtypes.compute.toExactDType) weightsPath s!"{namePrefix}.input_proj.weight" #[256, 512, 1]
   let mut codebooks : Array (EncoderCodebook (device := device) (dtypes := dtypes)) := #[]
   for i in [:numCodebooks] do
     let cb ← loadEncoderCodebook weightsPath s!"{namePrefix}.layers.{i}.codebook"
@@ -226,33 +227,33 @@ def loadFromDir (speechTokenizerDir : String) (device : Device := Device.CPU) : 
   let dtypes ← SpeechTokenizerDTypes.load weightsPath "encoder.encoder.layers.0.conv.weight" #[64, 1, 7]
     "encoder.quantizer.semantic_residual_vector_quantizer.layers.0.codebook.cluster_usage" "encoder.quantizer.semantic_residual_vector_quantizer.layers.0.codebook.embed_sum" device
 
-  let conv0Weight ← loadFrozen (dtype := dtypes.compute) weightsPath "encoder.encoder.layers.0.conv.weight" #[64, 1, 7]
-  let conv0Bias ← loadFrozen (dtype := dtypes.compute) weightsPath "encoder.encoder.layers.0.conv.bias" #[64]
+  let conv0Weight ← loadFrozen (dtype := dtypes.compute.toExactDType) weightsPath "encoder.encoder.layers.0.conv.weight" #[64, 1, 7]
+  let conv0Bias ← loadFrozen (dtype := dtypes.compute.toExactDType) weightsPath "encoder.encoder.layers.0.conv.bias" #[64]
   let res1 ← loadResBlock weightsPath "encoder.encoder.layers.1.block" 64 32
-  let down1Weight ← loadFrozen (dtype := dtypes.compute) weightsPath "encoder.encoder.layers.3.conv.weight" #[128, 64, 8]
-  let down1Bias ← loadFrozen (dtype := dtypes.compute) weightsPath "encoder.encoder.layers.3.conv.bias" #[128]
+  let down1Weight ← loadFrozen (dtype := dtypes.compute.toExactDType) weightsPath "encoder.encoder.layers.3.conv.weight" #[128, 64, 8]
+  let down1Bias ← loadFrozen (dtype := dtypes.compute.toExactDType) weightsPath "encoder.encoder.layers.3.conv.bias" #[128]
 
   let res2 ← loadResBlock weightsPath "encoder.encoder.layers.4.block" 128 64
-  let down2Weight ← loadFrozen (dtype := dtypes.compute) weightsPath "encoder.encoder.layers.6.conv.weight" #[256, 128, 10]
-  let down2Bias ← loadFrozen (dtype := dtypes.compute) weightsPath "encoder.encoder.layers.6.conv.bias" #[256]
+  let down2Weight ← loadFrozen (dtype := dtypes.compute.toExactDType) weightsPath "encoder.encoder.layers.6.conv.weight" #[256, 128, 10]
+  let down2Bias ← loadFrozen (dtype := dtypes.compute.toExactDType) weightsPath "encoder.encoder.layers.6.conv.bias" #[256]
 
   let res3 ← loadResBlock weightsPath "encoder.encoder.layers.7.block" 256 128
-  let down3Weight ← loadFrozen (dtype := dtypes.compute) weightsPath "encoder.encoder.layers.9.conv.weight" #[512, 256, 12]
-  let down3Bias ← loadFrozen (dtype := dtypes.compute) weightsPath "encoder.encoder.layers.9.conv.bias" #[512]
+  let down3Weight ← loadFrozen (dtype := dtypes.compute.toExactDType) weightsPath "encoder.encoder.layers.9.conv.weight" #[512, 256, 12]
+  let down3Bias ← loadFrozen (dtype := dtypes.compute.toExactDType) weightsPath "encoder.encoder.layers.9.conv.bias" #[512]
 
   let res4 ← loadResBlock weightsPath "encoder.encoder.layers.10.block" 512 256
-  let down4Weight ← loadFrozen (dtype := dtypes.compute) weightsPath "encoder.encoder.layers.12.conv.weight" #[1024, 512, 16]
-  let down4Bias ← loadFrozen (dtype := dtypes.compute) weightsPath "encoder.encoder.layers.12.conv.bias" #[1024]
+  let down4Weight ← loadFrozen (dtype := dtypes.compute.toExactDType) weightsPath "encoder.encoder.layers.12.conv.weight" #[1024, 512, 16]
+  let down4Bias ← loadFrozen (dtype := dtypes.compute.toExactDType) weightsPath "encoder.encoder.layers.12.conv.bias" #[1024]
 
-  let finalConvWeight ← loadFrozen (dtype := dtypes.compute) weightsPath "encoder.encoder.layers.14.conv.weight" #[512, 1024, 3]
-  let finalConvBias ← loadFrozen (dtype := dtypes.compute) weightsPath "encoder.encoder.layers.14.conv.bias" #[512]
+  let finalConvWeight ← loadFrozen (dtype := dtypes.compute.toExactDType) weightsPath "encoder.encoder.layers.14.conv.weight" #[512, 1024, 3]
+  let finalConvBias ← loadFrozen (dtype := dtypes.compute.toExactDType) weightsPath "encoder.encoder.layers.14.conv.bias" #[512]
 
   let mut transformerLayers : Array (EncoderTransformerLayer (device := device) (dtypes := dtypes)) := #[]
   for i in [:8] do
     let layer ← loadTransformerLayer weightsPath i
     transformerLayers := transformerLayers.push layer
 
-  let downsampleWeight ← loadFrozen (dtype := dtypes.compute) weightsPath "encoder.downsample.conv.weight" #[512, 512, 4]
+  let downsampleWeight ← loadFrozen (dtype := dtypes.compute.toExactDType) weightsPath "encoder.downsample.conv.weight" #[512, 512, 4]
   let semanticRVQ ← loadEncodeRVQ weightsPath "encoder.quantizer.semantic_residual_vector_quantizer" 1
   -- Match Qwen3-TTS `encoder_valid_num_quantizers=16`: first 15 acoustic groups.
   let acousticRVQ ← loadEncodeRVQ weightsPath "encoder.quantizer.acoustic_residual_vector_quantizer" 15
@@ -293,33 +294,33 @@ def loadFromDirFlexible (speechTokenizerDir : String) (device : Device := Device
   let dtypes ← SpeechTokenizerDTypes.load weightsPath "encoder.encoder.layers.0.conv.weight" #[64, 1, 7]
     "encoder.quantizer.semantic_residual_vector_quantizer.layers.0.codebook.cluster_usage" "encoder.quantizer.semantic_residual_vector_quantizer.layers.0.codebook.embed_sum" device
 
-  let conv0Weight ← loadFrozen (dtype := dtypes.compute) weightsPath "encoder.encoder.layers.0.conv.weight" #[64, 1, 7]
-  let conv0Bias ← loadFrozen (dtype := dtypes.compute) weightsPath "encoder.encoder.layers.0.conv.bias" #[64]
+  let conv0Weight ← loadFrozen (dtype := dtypes.compute.toExactDType) weightsPath "encoder.encoder.layers.0.conv.weight" #[64, 1, 7]
+  let conv0Bias ← loadFrozen (dtype := dtypes.compute.toExactDType) weightsPath "encoder.encoder.layers.0.conv.bias" #[64]
   let res1 ← loadResBlock weightsPath "encoder.encoder.layers.1.block" 64 32
-  let down1Weight ← loadFrozen (dtype := dtypes.compute) weightsPath "encoder.encoder.layers.3.conv.weight" #[128, 64, 8]
-  let down1Bias ← loadFrozen (dtype := dtypes.compute) weightsPath "encoder.encoder.layers.3.conv.bias" #[128]
+  let down1Weight ← loadFrozen (dtype := dtypes.compute.toExactDType) weightsPath "encoder.encoder.layers.3.conv.weight" #[128, 64, 8]
+  let down1Bias ← loadFrozen (dtype := dtypes.compute.toExactDType) weightsPath "encoder.encoder.layers.3.conv.bias" #[128]
 
   let res2 ← loadResBlock weightsPath "encoder.encoder.layers.4.block" 128 64
-  let down2Weight ← loadFrozen (dtype := dtypes.compute) weightsPath "encoder.encoder.layers.6.conv.weight" #[256, 128, 10]
-  let down2Bias ← loadFrozen (dtype := dtypes.compute) weightsPath "encoder.encoder.layers.6.conv.bias" #[256]
+  let down2Weight ← loadFrozen (dtype := dtypes.compute.toExactDType) weightsPath "encoder.encoder.layers.6.conv.weight" #[256, 128, 10]
+  let down2Bias ← loadFrozen (dtype := dtypes.compute.toExactDType) weightsPath "encoder.encoder.layers.6.conv.bias" #[256]
 
   let res3 ← loadResBlock weightsPath "encoder.encoder.layers.7.block" 256 128
-  let down3Weight ← loadFrozen (dtype := dtypes.compute) weightsPath "encoder.encoder.layers.9.conv.weight" #[512, 256, 12]
-  let down3Bias ← loadFrozen (dtype := dtypes.compute) weightsPath "encoder.encoder.layers.9.conv.bias" #[512]
+  let down3Weight ← loadFrozen (dtype := dtypes.compute.toExactDType) weightsPath "encoder.encoder.layers.9.conv.weight" #[512, 256, 12]
+  let down3Bias ← loadFrozen (dtype := dtypes.compute.toExactDType) weightsPath "encoder.encoder.layers.9.conv.bias" #[512]
 
   let res4 ← loadResBlock weightsPath "encoder.encoder.layers.10.block" 512 256
-  let down4Weight ← loadFrozen (dtype := dtypes.compute) weightsPath "encoder.encoder.layers.12.conv.weight" #[1024, 512, 16]
-  let down4Bias ← loadFrozen (dtype := dtypes.compute) weightsPath "encoder.encoder.layers.12.conv.bias" #[1024]
+  let down4Weight ← loadFrozen (dtype := dtypes.compute.toExactDType) weightsPath "encoder.encoder.layers.12.conv.weight" #[1024, 512, 16]
+  let down4Bias ← loadFrozen (dtype := dtypes.compute.toExactDType) weightsPath "encoder.encoder.layers.12.conv.bias" #[1024]
 
-  let finalConvWeight ← loadFrozen (dtype := dtypes.compute) weightsPath "encoder.encoder.layers.14.conv.weight" #[512, 1024, 3]
-  let finalConvBias ← loadFrozen (dtype := dtypes.compute) weightsPath "encoder.encoder.layers.14.conv.bias" #[512]
+  let finalConvWeight ← loadFrozen (dtype := dtypes.compute.toExactDType) weightsPath "encoder.encoder.layers.14.conv.weight" #[512, 1024, 3]
+  let finalConvBias ← loadFrozen (dtype := dtypes.compute.toExactDType) weightsPath "encoder.encoder.layers.14.conv.bias" #[512]
 
   let mut transformerLayers : Array (EncoderTransformerLayer (device := device) (dtypes := dtypes)) := #[]
   for i in [:8] do
     let layer ← loadTransformerLayer weightsPath i
     transformerLayers := transformerLayers.push layer
 
-  let downsampleWeight ← loadFrozen (dtype := dtypes.compute) weightsPath "encoder.downsample.conv.weight" #[512, 512, 4]
+  let downsampleWeight ← loadFrozen (dtype := dtypes.compute.toExactDType) weightsPath "encoder.downsample.conv.weight" #[512, 512, 4]
   let semanticRVQ ← loadEncodeRVQ weightsPath "encoder.quantizer.semantic_residual_vector_quantizer" semanticLayers
   let acousticRVQ ← loadEncodeRVQ weightsPath "encoder.quantizer.acoustic_residual_vector_quantizer" acousticLayers
 
@@ -406,13 +407,13 @@ private def forwardResBlock {batch frames inC hiddenC : UInt64}
     (blk : EncoderResBlock (device := device) (dtypes := dtypes) inC hiddenC)
     (x : Tensor { shape := #[batch, inC, frames], dtype := dtypes.compute.val, device := device }) : Tensor { shape := #[batch, inC, frames], dtype := dtypes.compute.val, device := device } :=
   let residual := x
-  let h0 : Tensor { shape := #[batch, inC, frames], dtype := dtypes.compute.val, device := device } := Tensor.Preserving.elu x
+  let h0 : Tensor { shape := #[batch, inC, frames], dtype := dtypes.compute.val, device := device } := Tensor.elu x
   let h1 : Tensor { shape := #[batch, hiddenC, frames], dtype := dtypes.compute.val, device := device } :=
     causalConvConstant h0 blk.conv1Weight (some blk.conv1Bias) 1 1
-  let h2 : Tensor { shape := #[batch, hiddenC, frames], dtype := dtypes.compute.val, device := device } := Tensor.Preserving.elu h1
+  let h2 : Tensor { shape := #[batch, hiddenC, frames], dtype := dtypes.compute.val, device := device } := Tensor.elu h1
   let h3 : Tensor { shape := #[batch, inC, frames], dtype := dtypes.compute.val, device := device } :=
     causalConvConstant h2 blk.conv2Weight (some blk.conv2Bias) 1 1
-  Tensor.Preserving.add residual h3
+  Tensor.add residual h3
 
 private def forwardAttention {batch seq : UInt64}
     (layer : (EncoderTransformerLayer (device := device) (dtypes := dtypes)))
@@ -448,15 +449,15 @@ private def forwardTransformerLayer {batch seq : UInt64}
   let h1 : Tensor { shape := #[batch, seq, 512], dtype := dtypes.compute.val, device := device } :=
     Tensor.layerNorm x layer.inputLayerNormWeight layer.inputLayerNormBias 1e-5
   let h2 : Tensor { shape := #[batch, seq, 512], dtype := dtypes.compute.val, device := device } := forwardAttention layer h1 cos sin
-  let h3 : Tensor { shape := #[batch, seq, 512], dtype := dtypes.compute.val, device := device } := Tensor.Preserving.add residual1 (scale3d h2 layer.selfAttnLayerScale)
+  let h3 : Tensor { shape := #[batch, seq, 512], dtype := dtypes.compute.val, device := device } := Tensor.add residual1 (scale3d h2 layer.selfAttnLayerScale)
 
   let residual2 := h3
   let h4 : Tensor { shape := #[batch, seq, 512], dtype := dtypes.compute.val, device := device } :=
     Tensor.layerNorm h3 layer.postAttentionLayerNormWeight layer.postAttentionLayerNormBias 1e-5
   let h5 : Tensor { shape := #[batch, seq, 2048], dtype := dtypes.compute.val, device := device } := Tensor.linear3d h4 layer.fc1
-  let h6 : Tensor { shape := #[batch, seq, 2048], dtype := dtypes.compute.val, device := device } := Tensor.Preserving.gelu h5
+  let h6 : Tensor { shape := #[batch, seq, 2048], dtype := dtypes.compute.val, device := device } := Tensor.gelu h5
   let h7 : Tensor { shape := #[batch, seq, 512], dtype := dtypes.compute.val, device := device } := Tensor.linear3d h6 layer.fc2
-  Tensor.Preserving.add residual2 (scale3d h7 layer.mlpLayerScale)
+  Tensor.add residual2 (scale3d h7 layer.mlpLayerScale)
 
 private def codebookEmbedding (cb : (EncoderCodebook (device := device) (dtypes := dtypes))) : Tensor { shape := #[2048, 256], dtype := dtypes.compute.val, device := device } :=
   let usage : Tensor { shape := #[2048], dtype := dtypes.usage.val, device := device } := clampMin1d cb.clusterUsage 1e-5
@@ -471,15 +472,15 @@ private def quantizeWithCodebook {batch frames : UInt64}
   let xFlat : Tensor { shape := #[batch * frames, 256], dtype := dtypes.compute.val, device := device } :=
     Tensor.reshapeChecked (Tensor.transpose x 1 2) #[batch * frames, 256]
 
-  let x2 : Tensor { shape := #[batch * frames, 1], dtype := dtypes.compute.val, device := device } := Tensor.reshapeChecked (Tensor.Preserving.sumDim (Tensor.Preserving.mul xFlat xFlat) 1 true) #[batch * frames, 1]
-  let e2 : Tensor { shape := #[2048, 1], dtype := dtypes.compute.val, device := device } := Tensor.reshapeChecked (Tensor.Preserving.sumDim (Tensor.Preserving.mul embed embed) 1 true) #[2048, 1]
+  let x2 : Tensor { shape := #[batch * frames, 1], dtype := dtypes.compute.val, device := device } := by simpa using (Tensor.reshapeChecked (Tensor.sumDim (Tensor.mul xFlat xFlat) 1 true) #[batch * frames, 1])
+  let e2 : Tensor { shape := #[2048, 1], dtype := dtypes.compute.val, device := device } := by simpa using (Tensor.reshapeChecked (Tensor.sumDim (Tensor.mul embed embed) 1 true) #[2048, 1])
   let dot : Tensor { shape := #[batch * frames, 2048], dtype := dtypes.compute.val, device := device } := Tensor.mm xFlat (Tensor.transpose2d embed)
   let x2e : Tensor { shape := #[batch * frames, 2048], dtype := dtypes.compute.val, device := device } := Tensor.expand x2 #[batch * frames, 2048]
   let e2Row : Tensor { shape := #[1, 2048], dtype := dtypes.compute.val, device := device } := Tensor.reshapeChecked (Tensor.transpose2d e2) #[1, 2048]
   let e2e : Tensor { shape := #[batch * frames, 2048], dtype := dtypes.compute.val, device := device } := Tensor.expand e2Row #[batch * frames, 2048]
-  let dist : Tensor { shape := #[batch * frames, 2048], dtype := dtypes.compute.val, device := device } := Tensor.Preserving.sub (Tensor.Preserving.add x2e e2e) (Tensor.Preserving.mulScalar dot 2.0)
+  let dist : Tensor { shape := #[batch * frames, 2048], dtype := dtypes.compute.val, device := device } := Tensor.sub (Tensor.add x2e e2e) (Tensor.mulScalar dot 2.0)
 
-  let idxFlat : Tensor { shape := #[batch * frames], dtype := .Int64, device := device } := Tensor.reshapeChecked (Tensor.argmaxChecked (Tensor.Preserving.mulScalar dist (-1.0)) 1) #[batch * frames]
+  let idxFlat : Tensor { shape := #[batch * frames], dtype := .Int64, device := device } := Tensor.reshapeChecked (Tensor.argmaxChecked (Tensor.mulScalar dist (-1.0)) 1) #[batch * frames]
   let quantFlat : Tensor { shape := #[batch * frames, 256], dtype := dtypes.compute.val, device := device } := Tensor.embedding1d idxFlat embed
   let quant : Tensor { shape := #[batch, 256, frames], dtype := dtypes.compute.val, device := device } :=
     Tensor.reshapeChecked (Tensor.transpose (Tensor.reshapeChecked quantFlat #[batch, frames, 256]) 1 2) #[batch, 256, frames]
@@ -499,7 +500,7 @@ private def rvqEncode {batch frames k : UInt64}
       | some codebook => codebook
       | none => nativeInvariantFailure s!"Speech tokenizer: missing codebook {i}"
     let (idx, quantized) := quantizeWithCodebook cb residual
-    residual := Tensor.Preserving.sub residual quantized
+    residual := Tensor.sub residual quantized
     allIndices := allIndices.push idx
   stack2dDyn (batch := batch) (frames := frames) (k := k) allIndices
 
@@ -519,21 +520,21 @@ def encodeWithRoPEOffset {batch samples : UInt64}
   let h0 : Tensor { shape := #[batch, 64, samples], dtype := dtypes.compute.val, device := device } := causalConvConstant audio m.conv0Weight (some m.conv0Bias) 1 1
   let h1 : Tensor { shape := #[batch, 64, samples], dtype := dtypes.compute.val, device := device } := forwardResBlock m.res1 h0
 
-  let h2In : Tensor { shape := #[batch, 64, samples], dtype := dtypes.compute.val, device := device } := Tensor.Preserving.elu h1
+  let h2In : Tensor { shape := #[batch, 64, samples], dtype := dtypes.compute.val, device := device } := Tensor.elu h1
   let h2 : Tensor { shape := #[batch, 128, t1], dtype := dtypes.compute.val, device := device } := causalConvConstant h2In m.down1Weight (some m.down1Bias) 4 1
   let h3 : Tensor { shape := #[batch, 128, t1], dtype := dtypes.compute.val, device := device } := forwardResBlock m.res2 h2
 
-  let h4In : Tensor { shape := #[batch, 128, t1], dtype := dtypes.compute.val, device := device } := Tensor.Preserving.elu h3
+  let h4In : Tensor { shape := #[batch, 128, t1], dtype := dtypes.compute.val, device := device } := Tensor.elu h3
   let h4 : Tensor { shape := #[batch, 256, t2], dtype := dtypes.compute.val, device := device } := causalConvConstant h4In m.down2Weight (some m.down2Bias) 5 1
   let h5 : Tensor { shape := #[batch, 256, t2], dtype := dtypes.compute.val, device := device } := forwardResBlock m.res3 h4
 
-  let h6In : Tensor { shape := #[batch, 256, t2], dtype := dtypes.compute.val, device := device } := Tensor.Preserving.elu h5
+  let h6In : Tensor { shape := #[batch, 256, t2], dtype := dtypes.compute.val, device := device } := Tensor.elu h5
   let h6 : Tensor { shape := #[batch, 512, t3], dtype := dtypes.compute.val, device := device } := causalConvConstant h6In m.down3Weight (some m.down3Bias) 6 1
   let h7 : Tensor { shape := #[batch, 512, t3], dtype := dtypes.compute.val, device := device } := forwardResBlock m.res4 h6
 
-  let h8In : Tensor { shape := #[batch, 512, t3], dtype := dtypes.compute.val, device := device } := Tensor.Preserving.elu h7
+  let h8In : Tensor { shape := #[batch, 512, t3], dtype := dtypes.compute.val, device := device } := Tensor.elu h7
   let h8 : Tensor { shape := #[batch, 1024, t4], dtype := dtypes.compute.val, device := device } := causalConvConstant h8In m.down4Weight (some m.down4Bias) 8 1
-  let h9In : Tensor { shape := #[batch, 1024, t4], dtype := dtypes.compute.val, device := device } := Tensor.Preserving.elu h8
+  let h9In : Tensor { shape := #[batch, 1024, t4], dtype := dtypes.compute.val, device := device } := Tensor.elu h8
   let h9 : Tensor { shape := #[batch, 512, t4], dtype := dtypes.compute.val, device := device } := causalConvConstant h9In m.finalConvWeight (some m.finalConvBias) 1 1
 
   let x0 : Tensor { shape := #[batch, t4, 512], dtype := dtypes.compute.val, device := device } := Tensor.reshapeChecked (Tensor.transpose h9 1 2) #[batch, t4, 512]
@@ -546,7 +547,7 @@ def encodeWithRoPEOffset {batch samples : UInt64}
   let cos : Tensor { shape := #[t4, 32], dtype := .Float32, device := device } := Tensor.sliceChecked cosAll 0 ropeStartPos t4 #[t4, 32]
   let sin : Tensor { shape := #[t4, 32], dtype := .Float32, device := device } := Tensor.sliceChecked sinAll 0 ropeStartPos t4 #[t4, 32]
   let x1 := m.transformerLayers.foldl (fun h layer => forwardTransformerLayer layer h cos sin) x0
-  let x2 : Tensor { shape := #[batch, 512, t4], dtype := dtypes.compute.val, device := device } := Tensor.reshapeChecked (Tensor.transpose x1 1 2) #[batch, 512, t4]
+  let x2 : Tensor { shape := #[batch, 512, t4], dtype := dtypes.compute.val, device := device } := by simpa using (Tensor.reshapeChecked (Tensor.transpose x1 1 2) #[batch, 512, t4])
 
   let x3 : Tensor { shape := #[batch, 512, t5], dtype := dtypes.compute.val, device := device } := causalConvReplicate x2 m.downsampleWeight none 2 1
 
@@ -572,21 +573,21 @@ def encodeWithRoPEOffsetDynamic {batch samples : UInt64}
   let h0 : Tensor { shape := #[batch, 64, samples], dtype := dtypes.compute.val, device := device } := causalConvConstant audio m.conv0Weight (some m.conv0Bias) 1 1
   let h1 : Tensor { shape := #[batch, 64, samples], dtype := dtypes.compute.val, device := device } := forwardResBlock m.res1 h0
 
-  let h2In : Tensor { shape := #[batch, 64, samples], dtype := dtypes.compute.val, device := device } := Tensor.Preserving.elu h1
+  let h2In : Tensor { shape := #[batch, 64, samples], dtype := dtypes.compute.val, device := device } := Tensor.elu h1
   let h2 : Tensor { shape := #[batch, 128, t1], dtype := dtypes.compute.val, device := device } := causalConvConstant h2In m.down1Weight (some m.down1Bias) 4 1
   let h3 : Tensor { shape := #[batch, 128, t1], dtype := dtypes.compute.val, device := device } := forwardResBlock m.res2 h2
 
-  let h4In : Tensor { shape := #[batch, 128, t1], dtype := dtypes.compute.val, device := device } := Tensor.Preserving.elu h3
+  let h4In : Tensor { shape := #[batch, 128, t1], dtype := dtypes.compute.val, device := device } := Tensor.elu h3
   let h4 : Tensor { shape := #[batch, 256, t2], dtype := dtypes.compute.val, device := device } := causalConvConstant h4In m.down2Weight (some m.down2Bias) 5 1
   let h5 : Tensor { shape := #[batch, 256, t2], dtype := dtypes.compute.val, device := device } := forwardResBlock m.res3 h4
 
-  let h6In : Tensor { shape := #[batch, 256, t2], dtype := dtypes.compute.val, device := device } := Tensor.Preserving.elu h5
+  let h6In : Tensor { shape := #[batch, 256, t2], dtype := dtypes.compute.val, device := device } := Tensor.elu h5
   let h6 : Tensor { shape := #[batch, 512, t3], dtype := dtypes.compute.val, device := device } := causalConvConstant h6In m.down3Weight (some m.down3Bias) 6 1
   let h7 : Tensor { shape := #[batch, 512, t3], dtype := dtypes.compute.val, device := device } := forwardResBlock m.res4 h6
 
-  let h8In : Tensor { shape := #[batch, 512, t3], dtype := dtypes.compute.val, device := device } := Tensor.Preserving.elu h7
+  let h8In : Tensor { shape := #[batch, 512, t3], dtype := dtypes.compute.val, device := device } := Tensor.elu h7
   let h8 : Tensor { shape := #[batch, 1024, t4], dtype := dtypes.compute.val, device := device } := causalConvConstant h8In m.down4Weight (some m.down4Bias) 8 1
-  let h9In : Tensor { shape := #[batch, 1024, t4], dtype := dtypes.compute.val, device := device } := Tensor.Preserving.elu h8
+  let h9In : Tensor { shape := #[batch, 1024, t4], dtype := dtypes.compute.val, device := device } := Tensor.elu h8
   let h9 : Tensor { shape := #[batch, 512, t4], dtype := dtypes.compute.val, device := device } := causalConvConstant h9In m.finalConvWeight (some m.finalConvBias) 1 1
 
   let x0 : Tensor { shape := #[batch, t4, 512], dtype := dtypes.compute.val, device := device } := Tensor.reshapeChecked (Tensor.transpose h9 1 2) #[batch, t4, 512]
@@ -599,7 +600,7 @@ def encodeWithRoPEOffsetDynamic {batch samples : UInt64}
   let cos : Tensor { shape := #[t4, 32], dtype := .Float32, device := device } := Tensor.sliceChecked cosAll 0 ropeStartPos t4 #[t4, 32]
   let sin : Tensor { shape := #[t4, 32], dtype := .Float32, device := device } := Tensor.sliceChecked sinAll 0 ropeStartPos t4 #[t4, 32]
   let x1 := m.transformerLayers.foldl (fun h layer => forwardTransformerLayer layer h cos sin) x0
-  let x2 : Tensor { shape := #[batch, 512, t4], dtype := dtypes.compute.val, device := device } := Tensor.reshapeChecked (Tensor.transpose x1 1 2) #[batch, 512, t4]
+  let x2 : Tensor { shape := #[batch, 512, t4], dtype := dtypes.compute.val, device := device } := by simpa using (Tensor.reshapeChecked (Tensor.transpose x1 1 2) #[batch, 512, t4])
 
   let x3 : Tensor { shape := #[batch, 512, t5], dtype := dtypes.compute.val, device := device } := causalConvReplicate x2 m.downsampleWeight none 2 1
 

@@ -3,22 +3,23 @@ import Tyr.Model.Flux.TypedOps
 namespace torch.flux
 
 variable {device : Device} {dtype : DType}
+variable [DType.RealFloating dtype]
 private def axisIds {batch seq : UInt64} (ids : Tensor { device := device, shape := #[batch, seq, 4], dtype := .Int64 }) (axis : UInt64) : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 } :=
   (sliceTyped ids 2 axis 1).reshapeChecked #[batch, seq]
 
 private def ropeAxis {batch seq : UInt64}
     (ids : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 }) (dim theta : UInt64)
     : Tensor { device := device, shape := #[batch, seq, dim / 2, 2, 2], dtype := .Float32 } :=
-  let scale := Tensor.Preserving.mulScalar ((Tensor.arange (dim / 2)).toFloat32.to ids.device) (2.0 / dim.toFloat)
-  let omega := Tensor.Preserving.exp (Tensor.Preserving.mulScalar scale (-Float.log theta.toFloat))
+  let scale := Tensor.mulScalar ((Tensor.arange (dim / 2)).toFloat32.to ids.device) (2.0 / dim.toFloat)
+  let omega := Tensor.exp (Tensor.mulScalar scale (-Float.log theta.toFloat))
   let pos := Tensor.expand (ids.toFloat32.reshapeChecked #[batch, seq, 1]) #[batch, seq, dim / 2]
   let omega := Tensor.expand (omega.reshapeChecked #[1, 1, dim / 2]) #[batch, seq, dim / 2]
   let angle := pos * omega
   let cos := Tensor.cos angle
-  let sin := Tensor.Preserving.sin angle
+  let sin := Tensor.sin angle
   let cos := cos.reshapeChecked #[batch, seq, dim / 2, 1]
   let sin := sin.reshapeChecked #[batch, seq, dim / 2, 1]
-  let row0 : Tensor { device := device, shape := #[batch, seq, dim / 2, 2], dtype := .Float32 } := qwen35.typedCat cos (Tensor.Preserving.mulScalar sin (-1.0)) 3
+  let row0 : Tensor { device := device, shape := #[batch, seq, dim / 2, 2], dtype := .Float32 } := qwen35.typedCat cos (Tensor.mulScalar sin (-1.0)) 3
   let row1 : Tensor { device := device, shape := #[batch, seq, dim / 2, 2], dtype := .Float32 } := qwen35.typedCat sin cos 3
   let both : Tensor { device := device, shape := #[batch, seq, dim / 2, 4], dtype := .Float32 } := qwen35.typedCat row0 row1 3
   both.reshapeChecked #[batch, seq, dim / 2, 2, 2]

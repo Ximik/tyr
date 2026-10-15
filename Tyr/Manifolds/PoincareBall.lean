@@ -5,7 +5,7 @@ namespace Tyr.AD
 open torch
 open DifferentiableManifold
 
-variable {d : DType} {dev : Device}
+variable {d : DType} {dev : Device} [DType.RealFloating d]
 
 /-- Poincare ball model with ambient coordinates in `R^n`, `||x|| < 1`. -/
 structure PoincareBall (n : UInt64) (dtype : DType := .Float32)
@@ -23,12 +23,12 @@ def project (n : UInt64) (v : Tensor ⟨#[n], d, dev⟩) : PoincareBall n d dev 
   if norm < maxNorm then
     ⟨v⟩
   else
-    ⟨Tensor.Preserving.mulScalar v (maxNorm / (norm + 1e-12))⟩
+    ⟨Tensor.mulScalar v (maxNorm / (norm + 1e-12))⟩
 
 /-- Random point in the unit ball. -/
 def random (n : UInt64) : IO (PoincareBall n) := do
   let v ← Tensor.randn #[n]
-  pure (project n (Tensor.Preserving.mulScalar v 0.5))
+  pure (project n (Tensor.mulScalar v 0.5))
 
 /-- Conformal factor lambda(x) = 2 / (1 - ||x||^2). -/
 def conformalFactor (x : PoincareBall n d dev) : Float :=
@@ -44,8 +44,8 @@ structure PoincareBallTangent (n : UInt64) (dtype : DType := .Float32)
 namespace PoincareBallTangent
 
 def zero [DType.ConstantSupported d dev] (n : UInt64) : PoincareBallTangent n d dev := ⟨Tensor.zerosFor ⟨#[n], d, dev⟩⟩
-def add (a b : PoincareBallTangent n d dev) : PoincareBallTangent n d dev := ⟨Tensor.Preserving.add a.vec b.vec⟩
-def smul (s : Float) (v : PoincareBallTangent n d dev) : PoincareBallTangent n d dev := ⟨Tensor.Preserving.mulScalar v.vec s⟩
+def add (a b : PoincareBallTangent n d dev) : PoincareBallTangent n d dev := ⟨Tensor.add a.vec b.vec⟩
+def smul (s : Float) (v : PoincareBallTangent n d dev) : PoincareBallTangent n d dev := ⟨Tensor.mulScalar v.vec s⟩
 
 end PoincareBallTangent
 
@@ -59,7 +59,7 @@ instance poincareBallManifold (n : UInt64) : DifferentiableManifold (PoincareBal
   scaleTangent s v := PoincareBallTangent.smul s v
   sharp := id
   flat := id
-  exp x v := PoincareBall.project n (Tensor.Preserving.add x.coords v.vec)
-  retract x v := PoincareBall.project n (Tensor.Preserving.add x.coords v.vec)
+  exp x v := PoincareBall.project n (Tensor.add x.coords v.vec)
+  retract x v := PoincareBall.project n (Tensor.add x.coords v.vec)
 
 end Tyr.AD

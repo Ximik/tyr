@@ -277,8 +277,8 @@ def runDebug (cfg : DebugConfig) (prompt : String) : IO Unit := do
       let txt_mod1_gate := Tensor.unsqueeze txt_mod1_gate 1
       let txt_mod1_gate := Tensor.expand txt_mod1_gate #[1, txtSeq, fluxCfg.hidden_size]
 
-      let img_mid := Tensor.Preserving.add img_cur (Tensor.Preserving.mul img_mod1_gate img_attn)
-      let txt_mid := Tensor.Preserving.add txt_cur (Tensor.Preserving.mul txt_mod1_gate txt_attn)
+      let img_mid := Tensor.add img_cur (Tensor.mul img_mod1_gate img_attn)
+      let txt_mid := Tensor.add txt_cur (Tensor.mul txt_mod1_gate txt_attn)
 
       let img_mlp_in := block.img_norm2.forward3d img_mid
       let img_mlp_in := applyModulation img_mlp_in img_mod2_scale img_mod2_shift
@@ -286,7 +286,7 @@ def runDebug (cfg : DebugConfig) (prompt : String) : IO Unit := do
       let img_mlp_proj := Tensor.reshapeChecked img_mlp_proj #[1, imgSeq, 2, mlp_hidden]
       let img_gate := Tensor.reshapeChecked (sliceTyped img_mlp_proj 2 0 1) #[1, imgSeq, mlp_hidden]
       let img_up := Tensor.reshapeChecked (sliceTyped img_mlp_proj 2 1 1) #[1, imgSeq, mlp_hidden]
-      let img_mlp_out := Tensor.Preserving.mul (Tensor.Preserving.silu img_gate) img_up
+      let img_mlp_out := Tensor.mul (Tensor.silu img_gate) img_up
       let img_mlp_out := Tensor.linear3d img_mlp_out block.img_mlp.w2
       saveDebug cfg.debugDir "img_mlp_out" img_mlp_out
 
@@ -296,7 +296,7 @@ def runDebug (cfg : DebugConfig) (prompt : String) : IO Unit := do
       let txt_mlp_proj := Tensor.reshapeChecked txt_mlp_proj #[1, txtSeq, 2, mlp_hidden]
       let txt_gate := Tensor.reshapeChecked (sliceTyped txt_mlp_proj 2 0 1) #[1, txtSeq, mlp_hidden]
       let txt_up := Tensor.reshapeChecked (sliceTyped txt_mlp_proj 2 1 1) #[1, txtSeq, mlp_hidden]
-      let txt_mlp_out := Tensor.Preserving.mul (Tensor.Preserving.silu txt_gate) txt_up
+      let txt_mlp_out := Tensor.mul (Tensor.silu txt_gate) txt_up
       let txt_mlp_out := Tensor.linear3d txt_mlp_out block.txt_mlp.w2
       saveDebug cfg.debugDir "txt_mlp_out" txt_mlp_out
 
@@ -305,8 +305,8 @@ def runDebug (cfg : DebugConfig) (prompt : String) : IO Unit := do
       let txt_mod2_gate := Tensor.unsqueeze txt_mod2_gate 1
       let txt_mod2_gate := Tensor.expand txt_mod2_gate #[1, txtSeq, fluxCfg.hidden_size]
 
-      let img_next := Tensor.Preserving.add img_mid (Tensor.Preserving.mul img_mod2_gate img_mlp_out)
-      let txt_next := Tensor.Preserving.add txt_mid (Tensor.Preserving.mul txt_mod2_gate txt_mlp_out)
+      let img_next := Tensor.add img_mid (Tensor.mul img_mod2_gate img_mlp_out)
+      let txt_next := Tensor.add txt_mid (Tensor.mul txt_mod2_gate txt_mlp_out)
       saveDebug cfg.debugDir "img1" img_next
       saveDebug cfg.debugDir "txt1" txt_next
 

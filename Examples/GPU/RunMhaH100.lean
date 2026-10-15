@@ -68,7 +68,7 @@ def generateFixtures : IO Unit := do
 
   -- ThunderKittens-style L vector: L = -8 * lse for d=64.
   let (_, lse) := attentionReference q k v
-  let expectedL := (Tensor.Preserving.mulScalar lse (-8.0)).reshapeChecked #[2, 64]
+  let expectedL := (Tensor.mulScalar lse (-8.0)).reshapeChecked #[2, 64]
 
   -- Backward references from PyTorch autograd.
   let (_, expectedDQ, expectedDK, expectedDV) ← attentionTrainingReference q k v dO
@@ -115,7 +115,7 @@ def runOnce (dumpPartials : Bool := false) : IO Bool := do
   let lseOut ← Tensor.uniformLike (Tensor.zeros #[2, 64] false device) 0 0
   tkFlashAttnFwd2BlockLse.launch q.raw k.raw v.raw outLse.raw lseOut.raw 128 64 1 2 1 128 1 1 0 stream
   let _ ← torch.cuda_synchronize
-  let lFromLse : LTensor (device := device) := Tensor.Preserving.mulScalar lseOut (-8.0)
+  let lFromLse : LTensor (device := device) := Tensor.mulScalar lseOut (-8.0)
 
   let out ← Tensor.uniformLike q 0 0
   let lOut ← Tensor.uniformLike lseOut 0 0

@@ -36,7 +36,7 @@ def runOnce : IO Bool := do
 
   -- generic pure solver path
   let term : ODETerm (Tensor { shape := S, dtype := .Float32, device := device }) Unit :=
-    { vectorField := fun _t y _ => Tensor.Preserving.mulScalar y (-1.0) }
+    { vectorField := fun _t y _ => Tensor.mulScalar y (-1.0) }
   let solver :=
     Dopri5.solver (Term := ODETerm (Tensor { shape := S, dtype := .Float32, device := device }) Unit)
       (Y := Tensor { shape := S, dtype := .Float32, device := device }) (VF := Tensor { shape := S, dtype := .Float32, device := device }) (Args := Unit)
@@ -58,7 +58,7 @@ def runOnce : IO Bool := do
   let stream ← torch.cuda_current_stream
   let ws ← Workspace.make 64 device
   let tf0 ← IO.monoMsNow
-  let yFused ← dopri5SolveFused (fun _t y => Tensor.Preserving.mulScalar y (-1.0))
+  let yFused ← dopri5SolveFused (fun _t y => Tensor.mulScalar y (-1.0))
     0.0 1.0 steps y0 ws blackwell stream
   let fusedMs := (← IO.monoMsNow) - tf0
 

@@ -32,11 +32,11 @@ private def combineRef (y0 : Tensor { shape := #[1, 1, 64, 64], dtype := .Float3
   let mut acc : Tensor { shape := #[1, 1, 64, 64], dtype := .Float32, device := device } :=
     match base with
     | some t => t
-    | none => Tensor.Preserving.mulScalar y0 0.0
+    | none => Tensor.mulScalar y0 0.0
   for i in [:ks.size] do
     let w := weights.getD i 0.0
     if w != 0.0 then
-      acc := Tensor.add acc (Tensor.Preserving.mulScalar (ks.getD i y0) w)
+      acc := Tensor.add acc (Tensor.mulScalar (ks.getD i y0) w)
   return acc
 
 def runOnce : IO Bool := do

@@ -10,11 +10,11 @@ open torch
   let values : Array (ShapePackedTensor .Float32 .CPU) := #[
     (Tensor.fromFloatArray #[1, 2]).packShape,
     ((Tensor.fromFloatArray #[3, 4, 5, 6]).reshapeChecked #[2, 2]).packShape ]
-  let mapped := TensorStruct.map (fun t => Tensor.Preserving.addScalar t 1) values
+  let mapped := FloatingTensorStruct.map (fun t => Tensor.addScalar t 1) values
   let moved ← TensorStruct.mapM (fun t => pure (t.to t.device)) mapped
   let shapes := TensorStruct.fold (fun t acc => acc.push t.runtimeShape) #[] moved
   LeanTest.assertEqual shapes #[#[2], #[2, 2]]
-  let summed := TensorStruct.zipWith Tensor.Preserving.add values moved
+  let summed := FloatingTensorStruct.zipWith Tensor.add values moved
   LeanTest.assertEqual (← summed[0]!.2.toFloatArray) #[3, 5]
   LeanTest.assertEqual (← summed[1]!.2.toFloatArray) #[7, 9, 11, 13]
   checkpoint.saveParams summed dir.toString

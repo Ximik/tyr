@@ -65,11 +65,11 @@ private def fixture : BranchingBridgeResult MoleculeAtom := {
   let native ← Optim.PolarExpress.muonOrthogonalize nesterov 5
   let aspect := Float.sqrt 1.5
   let lr := 0.0137
-  let scalarDirection := (Tensor.Preserving.mulScalar native (lr * aspect)).toFloat32
+  let scalarDirection := (Tensor.mulScalar native (lr * aspect)).toFloat32
   let (scalarResult, _) ← moleculeMuonStep param grad state lr 0.0 0.95 5
   LeanTest.assertEqual (← scalarResult.toFloatArray) (← (param - scalarDirection).toFloatArray)
   let lrTensor := (Tensor.fromFloatArray #[lr]).reshapeChecked #[]
-  let tensorDirection := (mulTensorScalar (Tensor.Preserving.mulScalar native aspect) lrTensor).toFloat32
+  let tensorDirection := (mulTensorScalar (Tensor.mulScalar native aspect) lrTensor).toFloat32
   let (tensorResult, _) ← moleculeMuonStepT param grad state lrTensor 0.0 0.95 5
   LeanTest.assertEqual (← tensorResult.toFloatArray) (← (param - tensorDirection).toFloatArray)
   LeanTest.assertEqual scalarResult.actualSpec.dtype .Float32
@@ -91,7 +91,7 @@ private def roundTrip {α : Type} [TensorStruct α] (params : α) (dir : String)
   checkpoint.saveParams params dir
   checkpoint.loadParams params dir
 
-private def checkBranchingTypedTraining (dtype : DType)
+private def checkBranchingTypedTraining (dtype : DType) [DType.RealFloating dtype]
     [DType.Promotes dtype .Float32 .Float32] [DType.Promotes .Float32 dtype .Float32]
     [DType.NonBool dtype] : IO Unit := IO.FS.withTempDir fun dir => do
   let cfg : BranchingTrainConfig := { maxLen := 2, gradClip := 1.0 }
@@ -103,7 +103,7 @@ private def checkBranchingTypedTraining (dtype : DType)
   LeanTest.assertEqual state.step 1
   LeanTest.assertTrue report.total.isFinite
   LeanTest.assertEqual trained.coordW.actualSpec.dtype dtype
-  LeanTest.assertTrue (Tensor.item (Tensor.sumAll (Tensor.abs (Tensor.Preserving.sub trained.coordW params.coordW))) > 0)
+  LeanTest.assertTrue (Tensor.item (Tensor.sumAll (Tensor.abs (Tensor.sub trained.coordW params.coordW))) > 0)
   let prediction ← moleculeTransformerPrediction (maxLen := 2) (vocab := 2) 0 trained 0.25 fixture.Xt[0]!
   LeanTest.assertEqual prediction.coordTargets.size 1
   let loaded ← roundTrip trained dir.toString
@@ -123,7 +123,7 @@ private def checkBranchingTypedTraining (dtype : DType)
   checkBranchingTypedTraining .Float32
   checkBranchingTypedTraining .BFloat16
 
-private def checkBranchingFullTransformer (dtype : DType)
+private def checkBranchingFullTransformer (dtype : DType) [DType.RealFloating dtype]
     [DType.Promotes dtype .Float32 .Float32] [DType.Promotes .Float32 dtype .Float32]
     [DType.NonBool dtype] : IO Unit := do
   let initial ← FullMoleculeTransformerParams.init 2 4 1 4 4 2 2

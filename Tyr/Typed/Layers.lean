@@ -31,7 +31,7 @@ def init (inDim outDim : UInt64) (withBias : Bool := true) (device : Device := .
     IO (Linear inDim outDim .Float32 device) := do
   let std := Float.sqrt (2.0 / inDim.toFloat)
   let w ← Tensor.randn #[outDim, inDim] (device := device)
-  let scaled ← IO.ofExcept (Tensor.Preserving.mulScalar? w std)
+  let scaled ← IO.ofExcept (Tensor.mulScalar? w std)
   let weight ← scaled.parameter
   let bias ←
     if withBias then
@@ -42,11 +42,12 @@ def init (inDim outDim : UInt64) (withBias : Bool := true) (device : Device := .
 
 /-- Forward for 2D input `[batch, inDim] → [batch, outDim]`. -/
 def forward2d {inDim outDim batch : UInt64} {d : DType} {dev : Device}
+    [DType.Promotes d d d]
     (lin : Linear inDim outDim d dev) (x : Tensor ⟨#[batch, inDim], d, dev⟩) :
     Tensor ⟨#[batch, outDim], d, dev⟩ :=
   let y := Tensor.linear x lin.weight
   match lin.bias with
-  | some b => Tensor.Preserving.add y (b.expand #[batch, outDim])
+  | some b => Tensor.add y (b.expand #[batch, outDim])
   | none => y
 
 /-- Forward for 3D input `[batch, seq, inDim] → [batch, seq, outDim]`. -/

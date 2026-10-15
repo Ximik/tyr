@@ -29,9 +29,12 @@ structure QwenMLP (hidden_size intermediate_size : UInt64) (dtype : DType := .Fl
 namespace QwenMLP
 
 variable {dtype : DType}
+variable [DType.RealFloating dtype]
 
 /-- Initialize MLP layers with random weights -/
 def init (hidden_size intermediate_size : UInt64) (dtype : DType := .Float32) (device : Device := .CPU) : IO (QwenMLP (device := device) hidden_size intermediate_size dtype) := do
+  let floating ← IO.ofExcept (DType.realFloating? dtype)
+  let _ := floating.down
   let std := Float.sqrt (2.0 / hidden_size.toFloat)
 
   let gate ← Tensor.randn (device := device) #[intermediate_size, hidden_size]
@@ -42,9 +45,9 @@ def init (hidden_size intermediate_size : UInt64) (dtype : DType := .Float32) (d
   let down := down.castDType dtype
 
   pure {
-    gate_proj := (← Tensor.parameter (Tensor.Preserving.mulScalar gate std))
-    up_proj := (← Tensor.parameter (Tensor.Preserving.mulScalar up std))
-    down_proj := (← Tensor.parameter (Tensor.Preserving.mulScalar down std))
+    gate_proj := (← Tensor.parameter (Tensor.mulScalar gate std))
+    up_proj := (← Tensor.parameter (Tensor.mulScalar up std))
+    down_proj := (← Tensor.parameter (Tensor.mulScalar down std))
   }
 
 /-- Forward pass for MLP.
@@ -61,8 +64,8 @@ def forward {batch seq hidden_size intermediate_size : UInt64}
   let up := Tensor.linear3d x mlp.up_proj      -- [batch, seq, intermediate_size]
 
   -- SwiGLU: silu(gate) * up
-  let gate_silu := Tensor.Preserving.silu gate
-  let hidden := Tensor.Preserving.mul gate_silu up
+  let gate_silu := Tensor.silu gate
+  let hidden := Tensor.mul gate_silu up
 
   -- Down projection
   Tensor.linear3d hidden mlp.down_proj

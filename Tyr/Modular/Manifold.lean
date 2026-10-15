@@ -154,7 +154,7 @@ def applyDualMapUpdate [MatrixManifoldCarrier M device] {in_dim out_dim : UInt64
   let bias' ←
     match lin.bias, biasGrad? with
     | some b, some g => do
-      pure (some (← Tensor.parameter (Sub.sub b (Tensor.Preserving.mulScalar g lr))))
+      pure (some (← Tensor.parameter (Sub.sub b (Tensor.mulScalar g lr))))
     | some b, none => pure (some b)
     | none, _ => pure none
   pure { lin with weight := weight', bias := bias' }
@@ -226,6 +226,47 @@ instance [VectorManifoldCarrier V device] (n : UInt64) : TensorStruct (ManifoldV
   }
   fold f init p := TensorStruct.fold f init (VectorManifoldCarrier.toVector (device := device) p.value)
 
+instance {P : StaticSpec → Prop} [MatrixManifoldCarrier M device] (in_dim out_dim : UInt64)
+    [TensorStructFor.Fact (P ⟨#[out_dim, in_dim], .Float32, device⟩)]
+    [TensorStructFor.Fact (P ⟨#[out_dim], .Float32, device⟩)] :
+    TensorStructFor P (ManifoldLinear (device := device) M in_dim out_dim) where
+  map f lin := {
+    weight := MatrixManifoldCarrier.reAmbient (device := device) lin.weight
+      (TensorStructFor.map f (MatrixManifoldCarrier.toMatrix (device := device) lin.weight))
+    bias := TensorStructFor.map f lin.bias
+  }
+  mapM f lin := do
+    let w ← TensorStructFor.mapM f (MatrixManifoldCarrier.toMatrix (device := device) lin.weight)
+    let bias ← TensorStructFor.mapM f lin.bias
+    pure { weight := MatrixManifoldCarrier.reAmbient (device := device) lin.weight w, bias }
+  zipWith f a b := {
+    weight := MatrixManifoldCarrier.reAmbient (device := device) a.weight
+      (TensorStructFor.zipWith f (MatrixManifoldCarrier.toMatrix (device := device) a.weight)
+        (MatrixManifoldCarrier.toMatrix (device := device) b.weight))
+    bias := TensorStructFor.zipWith f a.bias b.bias
+  }
+  fold f init lin :=
+    TensorStructFor.fold f
+      (TensorStructFor.fold f init (MatrixManifoldCarrier.toMatrix (device := device) lin.weight)) lin.bias
+
+instance {P : StaticSpec → Prop} [VectorManifoldCarrier V device] (n : UInt64)
+    [TensorStructFor.Fact
+      (P ⟨#[VectorManifoldCarrier.ambientDim (device := device) (V := V) n], .Float32, device⟩)] :
+    TensorStructFor P (ManifoldVectorParam (device := device) V n) where
+  map f p := {
+    value := VectorManifoldCarrier.fromAmbientUnchecked (device := device)
+      (TensorStructFor.map f (VectorManifoldCarrier.toVector (device := device) p.value))
+  }
+  mapM f p := do
+    let v ← TensorStructFor.mapM f (VectorManifoldCarrier.toVector (device := device) p.value)
+    pure { value := VectorManifoldCarrier.fromAmbientUnchecked (device := device) v }
+  zipWith f a b := {
+    value := VectorManifoldCarrier.fromAmbientUnchecked (device := device)
+      (TensorStructFor.zipWith f (VectorManifoldCarrier.toVector (device := device) a.value)
+        (VectorManifoldCarrier.toVector (device := device) b.value))
+  }
+  fold f init p := TensorStructFor.fold f init (VectorManifoldCarrier.toVector (device := device) p.value)
+
 instance [MatrixManifoldCarrier M device] (in_dim out_dim : UInt64) :
     NormedModule (ManifoldLinear (device := device) M in_dim out_dim) where
   norm lin :=
@@ -243,25 +284,25 @@ instance [MatrixManifoldCarrier M device] (in_dim out_dim : UInt64) :
   normalize lin :=
     let w := MatrixManifoldCarrier.toMatrix (device := device) lin.weight
     let sNorm := Tensor.spectralNorm w
-    let w' := if sNorm == 0.0 then w else Tensor.Preserving.mulScalar w (1.0 / sNorm)
+    let w' := if sNorm == 0.0 then w else Tensor.mulScalar w (1.0 / sNorm)
     let weight := MatrixManifoldCarrier.projectLike (device := device) lin.weight w'
     let bias :=
       match lin.bias with
       | some b =>
         let bNorm := Tensor.l2Norm b
-        if bNorm == 0.0 then some b else some (Tensor.Preserving.mulScalar b (1.0 / bNorm))
+        if bNorm == 0.0 then some b else some (Tensor.mulScalar b (1.0 / bNorm))
       | none => none
     { lin with weight, bias }
   normalizeDual lin :=
     let w := MatrixManifoldCarrier.toMatrix (device := device) lin.weight
     let fnorm := Tensor.frobeniusNorm w
-    let w' := if fnorm == 0.0 then w else Tensor.Preserving.mulScalar w (1.0 / fnorm)
+    let w' := if fnorm == 0.0 then w else Tensor.mulScalar w (1.0 / fnorm)
     let weight := MatrixManifoldCarrier.projectLike (device := device) lin.weight w'
     let bias :=
       match lin.bias with
       | some b =>
         let bNorm := Tensor.l2Norm b
-        if bNorm == 0.0 then some b else some (Tensor.Preserving.mulScalar b (1.0 / bNorm))
+        if bNorm == 0.0 then some b else some (Tensor.mulScalar b (1.0 / bNorm))
       | none => none
     { lin with weight, bias }
 
@@ -275,13 +316,13 @@ instance [VectorManifoldCarrier V device] (n : UInt64) :
     let n' := n
     let v := VectorManifoldCarrier.toVector (device := device) p.value
     let d := Tensor.l2Norm v
-    let v' := if d == 0.0 then v else Tensor.Preserving.mulScalar v (1.0 / d)
+    let v' := if d == 0.0 then v else Tensor.mulScalar v (1.0 / d)
     { value := VectorManifoldCarrier.project (device := device) n' v' }
   normalizeDual p :=
     let n' := n
     let v := VectorManifoldCarrier.toVector (device := device) p.value
     let d := Tensor.l2Norm v
-    let v' := if d == 0.0 then v else Tensor.Preserving.mulScalar v (1.0 / d)
+    let v' := if d == 0.0 then v else Tensor.mulScalar v (1.0 / d)
     { value := VectorManifoldCarrier.project (device := device) n' v' }
 
 /-- Convenience alias: manifold-linear with Stiefel-constrained weights. -/

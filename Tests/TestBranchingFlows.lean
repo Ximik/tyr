@@ -953,8 +953,8 @@ def testMoleculeMuonUpdatesMatrixAndVectorLeaves : IO Unit := do
   let params : Tensor { dtype := .Float32, shape := #[2, 2], device := .CPU } × Tensor { dtype := .Float32, shape := #[2], device := .CPU } := (matrix, vector)
   let state := initMoleculeMuonState params
   let (updated, state') ← moleculeMuonStep params grads state 0.01 0.0 0.95 5
-  let matrixDelta := Tensor.item (Tensor.sumAll (Tensor.abs (Tensor.Preserving.sub updated.1 params.1)))
-  let vectorDelta := Tensor.item (Tensor.sumAll (Tensor.abs (Tensor.Preserving.sub updated.2 params.2)))
+  let matrixDelta := Tensor.item (Tensor.sumAll (Tensor.abs (Tensor.sub updated.1 params.1)))
+  let vectorDelta := Tensor.item (Tensor.sumAll (Tensor.abs (Tensor.sub updated.2 params.2)))
   LeanTest.assertTrue (Float.isFinite matrixDelta && matrixDelta > 0.0)
     s!"Muon should update matrix leaves, delta={matrixDelta}"
   LeanTest.assertTrue (Float.isFinite vectorDelta && vectorDelta > 0.0)

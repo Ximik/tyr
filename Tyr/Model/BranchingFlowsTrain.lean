@@ -61,7 +61,7 @@ structure BranchingModelContinuous (maxLen dim : UInt64) (Params : Type) where
     → IO (Tensor { dtype := .Float32, device := device, shape := #[batch, maxLen, dim] } × Tensor { dtype := .Float32, device := device, shape := #[batch, maxLen] } × Tensor { dtype := .Float32, device := device, shape := #[batch, maxLen] })
 
 private def floatMask {batch maxLen : UInt64} (pad flow : Tensor { dtype := .Float32, device := device, shape := #[batch, maxLen] }) : Tensor { dtype := .Float32, device := device, shape := #[batch, maxLen] } :=
-  Tensor.Preserving.mul pad flow
+  Tensor.mul pad flow
 
 private def maskedCrossEntropy {batch maxLen vocab : UInt64}
     (logits : Tensor { dtype := .Float32, device := device, shape := #[batch, maxLen, vocab] })
@@ -72,43 +72,43 @@ private def maskedCrossEntropy {batch maxLen vocab : UInt64}
   let targets2 := Tensor.reshapeChecked targets #[n]
   let mask2 := Tensor.reshapeChecked mask #[n]
   let per := Tensor.crossEntropyNoneChecked logits2 targets2
-  let masked := Tensor.Preserving.mul per mask2
+  let masked := Tensor.mul per mask2
   let denom := Tensor.sumAll mask2
-  Tensor.Preserving.div (Tensor.sumAll masked) (Tensor.Preserving.addScalar denom 1.0e-8)
+  Tensor.div (Tensor.sumAll masked) (Tensor.addScalar denom 1.0e-8)
 
 private def maskedMSE {batch maxLen : UInt64}
     (pred target mask : Tensor { dtype := .Float32, device := device, shape := #[batch, maxLen] }) : Tensor { dtype := .Float32, device := device, shape := #[] } :=
-  let diff := Tensor.Preserving.sub pred target
-  let sq := Tensor.Preserving.mul diff diff
-  let masked := Tensor.Preserving.mul sq mask
+  let diff := Tensor.sub pred target
+  let sq := Tensor.mul diff diff
+  let masked := Tensor.mul sq mask
   let denom := Tensor.sumAll mask
-  Tensor.Preserving.div (Tensor.sumAll masked) (Tensor.Preserving.addScalar denom 1.0e-8)
+  Tensor.div (Tensor.sumAll masked) (Tensor.addScalar denom 1.0e-8)
 
 private def maskedMSE3d {batch maxLen dim : UInt64}
     (pred target : Tensor { dtype := .Float32, device := device, shape := #[batch, maxLen, dim] }) (mask : Tensor { dtype := .Float32, device := device, shape := #[batch, maxLen] }) : Tensor { dtype := .Float32, device := device, shape := #[] } :=
   let mask3 := Tensor.expand (Tensor.unsqueeze mask 2) #[batch, maxLen, dim]
-  let diff := Tensor.Preserving.sub pred target
-  let sq := Tensor.Preserving.mul diff diff
-  let masked := Tensor.Preserving.mul sq mask3
+  let diff := Tensor.sub pred target
+  let sq := Tensor.mul diff diff
+  let masked := Tensor.mul sq mask3
   let denom := Tensor.sumAll mask3
-  Tensor.Preserving.div (Tensor.sumAll masked) (Tensor.Preserving.addScalar denom 1.0e-8)
+  Tensor.div (Tensor.sumAll masked) (Tensor.addScalar denom 1.0e-8)
 
 def maskedSplitPoissonLoss {batch maxLen : UInt64}
     (logits target mask : Tensor { dtype := .Float32, device := device, shape := #[batch, maxLen] }) : Tensor { dtype := .Float32, device := device, shape := #[] } :=
-  let mu := Tensor.Preserving.exp (Tensor.Preserving.clampFloat logits (-100.0) 11.0)
-  let safeTarget := Tensor.Preserving.clampFloat target 1.0e-8 1.0e20
-  let per := Tensor.Preserving.sub (Tensor.Preserving.sub mu (Tensor.Preserving.mul target (logDynamic mu)))
-    (Tensor.Preserving.sub target (Tensor.Preserving.mul target (logDynamic safeTarget)))
-  let masked := Tensor.Preserving.mul per mask
+  let mu := Tensor.exp (Tensor.clampFloat logits (-100.0) 11.0)
+  let safeTarget := Tensor.clampFloat target 1.0e-8 1.0e20
+  let per := Tensor.sub (Tensor.sub mu (Tensor.mul target (logDynamic mu)))
+    (Tensor.sub target (Tensor.mul target (logDynamic safeTarget)))
+  let masked := Tensor.mul per mask
   let denom := Tensor.sumAll mask
-  Tensor.Preserving.div (Tensor.sumAll masked) (Tensor.Preserving.addScalar denom 1.0e-8)
+  Tensor.div (Tensor.sumAll masked) (Tensor.addScalar denom 1.0e-8)
 
 def maskedBCEWithLogits {batch maxLen : UInt64}
     (logits target mask : Tensor { dtype := .Float32, device := device, shape := #[batch, maxLen] }) : Tensor { dtype := .Float32, device := device, shape := #[] } :=
-  let per := Tensor.Preserving.sub (softplusDynamic logits) (Tensor.Preserving.mul target logits)
-  let loss := Tensor.sumAll (Tensor.Preserving.mul per mask)
+  let per := Tensor.sub (softplusDynamic logits) (Tensor.mul target logits)
+  let loss := Tensor.sumAll (Tensor.mul per mask)
   let denom := Tensor.sumAll mask
-  Tensor.Preserving.div loss (Tensor.Preserving.addScalar denom 1.0e-8)
+  Tensor.div loss (Tensor.addScalar denom 1.0e-8)
 
 def packBranchingNat (cfg : BranchingTrainConfig) (result : BranchingBridgeResult Nat)
     (device : Device := .CPU)
@@ -172,7 +172,7 @@ def packBranchingNat (cfg : BranchingTrainConfig) (result : BranchingBridgeResul
 
   let timeScaled := result.t.map (fun t => ((t * cfg.timeScale).toUInt64).toInt64)
   let t := Tensor.reshapeChecked ((Tensor.fromInt64Array timeScaled).to device) #[batchU]
-  let t := Tensor.Preserving.divScalar (floatDynamic t) cfg.timeScale
+  let t := Tensor.divScalar (floatDynamic t) cfg.timeScale
 
   return ⟨batchU, { t, state, anchor, padmask, flowmask, splitsTarget, delTarget }⟩
 
@@ -260,7 +260,7 @@ def packBranchingTensor {dim : UInt64} (cfg : BranchingTrainConfig)
 
   let timeScaled := result.t.map (fun t => ((t * cfg.timeScale).toUInt64).toInt64)
   let t := Tensor.reshapeChecked ((Tensor.fromInt64Array timeScaled).to device) #[batchU]
-  let t := Tensor.Preserving.divScalar (floatDynamic t) cfg.timeScale
+  let t := Tensor.divScalar (floatDynamic t) cfg.timeScale
 
   return ⟨batchU, { t, state, anchor, padmask, flowmask, splitsTarget, delTarget }⟩
 
@@ -271,7 +271,7 @@ structure BranchingLossReport where
   del : Float
   deriving Repr
 
-def trainStep {maxLen vocab : UInt64} {Params : Type} [TensorStruct Params]
+def trainStep {maxLen vocab : UInt64} {Params : Type} [TensorStruct Params] [FloatingTensorStruct Params]
     (cfg : BranchingTrainConfig)
     (model : BranchingModel (device := device) maxLen vocab Params)
     (params : Params)
@@ -290,10 +290,10 @@ def trainStep {maxLen vocab : UInt64} {Params : Type} [TensorStruct Params]
   let anchorLoss := maskedCrossEntropy anchorLogits packed.anchor mask
   let splitLoss := maskedSplitPoissonLoss splitLogits packed.splitsTarget mask
   let delLoss := maskedBCEWithLogits delLogits packed.delTarget mask
-  let totalLoss := Tensor.Preserving.add
-    (Tensor.Preserving.add (Tensor.Preserving.mulScalar anchorLoss cfg.anchorWeight)
-      (Tensor.Preserving.mulScalar splitLoss cfg.splitsWeight))
-    (Tensor.Preserving.mulScalar delLoss cfg.delWeight)
+  let totalLoss := Tensor.add
+    (Tensor.add (Tensor.mulScalar anchorLoss cfg.anchorWeight)
+      (Tensor.mulScalar splitLoss cfg.splitsWeight))
+    (Tensor.mulScalar delLoss cfg.delWeight)
 
   Tensor.backwardLoss totalLoss
   if cfg.gradClip > 0 then
@@ -311,7 +311,7 @@ def trainStep {maxLen vocab : UInt64} {Params : Type} [TensorStruct Params]
   }
   return (params', optState', report)
 
-def trainStepContinuous {maxLen dim : UInt64} {Params : Type} [TensorStruct Params]
+def trainStepContinuous {maxLen dim : UInt64} {Params : Type} [TensorStruct Params] [FloatingTensorStruct Params]
     (cfg : BranchingTrainConfig)
     (model : BranchingModelContinuous (device := device) maxLen dim Params)
     (params : Params)
@@ -330,10 +330,10 @@ def trainStepContinuous {maxLen dim : UInt64} {Params : Type} [TensorStruct Para
   let anchorLoss := maskedMSE3d anchorPred packed.anchor mask
   let splitLoss := maskedSplitPoissonLoss splitLogits packed.splitsTarget mask
   let delLoss := maskedBCEWithLogits delLogits packed.delTarget mask
-  let totalLoss := Tensor.Preserving.add
-    (Tensor.Preserving.add (Tensor.Preserving.mulScalar anchorLoss cfg.anchorWeight)
-      (Tensor.Preserving.mulScalar splitLoss cfg.splitsWeight))
-    (Tensor.Preserving.mulScalar delLoss cfg.delWeight)
+  let totalLoss := Tensor.add
+    (Tensor.add (Tensor.mulScalar anchorLoss cfg.anchorWeight)
+      (Tensor.mulScalar splitLoss cfg.splitsWeight))
+    (Tensor.mulScalar delLoss cfg.delWeight)
 
   Tensor.backwardLoss totalLoss
   if cfg.gradClip > 0 then

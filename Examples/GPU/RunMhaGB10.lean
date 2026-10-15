@@ -47,7 +47,7 @@ def generateFixtures : IO Unit := do
   let expectedOut := Tensor.attentionGQA q k v false
 
   let (_, lse) := attentionReference q k v
-  let expectedL := (Tensor.Preserving.mulScalar lse (-8.0)).reshapeChecked #[2, 64]
+  let expectedL := (Tensor.mulScalar lse (-8.0)).reshapeChecked #[2, 64]
   let (_, expectedDQ, expectedDK, expectedDV) ← attentionTrainingReference q k v dO
 
   Tensor.saveTensor q (fixtureFile "q").toString
@@ -93,7 +93,7 @@ def runOnce : IO Bool := do
   let lseOut ← Tensor.uniformLike (Tensor.zeros #[2, 64] false device) 0 0
   tkFlashAttnGb10Fwd2BlockLse.launch q.raw k.raw v.raw outLse.raw lseOut.raw 128 64 1 2 1 128 1 1 0 stream
   let _ ← torch.cuda_synchronize
-  let lFromLse : Tensor { shape := #[2, 64], dtype := .Float32, device := device } := Tensor.Preserving.mulScalar lseOut (-8.0)
+  let lFromLse : Tensor { shape := #[2, 64], dtype := .Float32, device := device } := Tensor.mulScalar lseOut (-8.0)
 
   let out ← Tensor.uniformLike q 0 0
   let lOut : Tensor { shape := #[2, 64], dtype := .Float32, device := device } ← Tensor.uniformLike lseOut 0 0
@@ -157,7 +157,7 @@ private def benchmarkForwardSeq (cfg : Benchmark.Config) (stream : UInt64)
   let v := vf.toBFloat16
   let expected := Tensor.attentionGQA q k v false
   let (_, lse) := attentionReference q k v
-  let expectedL3 := Tensor.Preserving.mulScalar lse (-8.0)
+  let expectedL3 := Tensor.mulScalar lse (-8.0)
   let out ← Tensor.uniformLike q 0 0
   let useS768Specialization := seqLen == 768
   let useLongSchedule := seqLen >= 2048

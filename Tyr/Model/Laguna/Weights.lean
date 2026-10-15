@@ -359,13 +359,14 @@ private def loadLayer (src : WeightSource) (cfg : Config) (layerIdx : UInt64)
 
 /-- Shared loader core over an abstract weight source. -/
 private def loadCore (src : WeightSource) (desc : String) (cfg : Config)
-    (device : Device) (log : Handlers) : IO (Σ dtype : ExactDType, LagunaForCausalLM (device := device) cfg dtype.val) := do
+    (device : Device) (log : Handlers) : IO (Σ dtype : RealFloatingDType, LagunaForCausalLM (device := device) cfg dtype.val) := do
   log.onInfo s!"Loading LagunaForCausalLM from {desc}..."
 
   let embedTokens ← src.loadCandidates (nameCandidates "model.embed_tokens.weight")
     #[cfg.vocab_size, cfg.hidden_size] device
 
   let dtype := embedTokens.1
+  let floating ← IO.ofExcept (DType.realFloating? dtype.val)
   let mut layers : Array (LagunaLayer (device := device) cfg dtype.val) := Array.mkEmpty cfg.num_hidden_layers.toNat
   for i in [:cfg.num_hidden_layers.toNat] do
     let layer ← loadLayer src cfg i.toUInt64 device dtype
@@ -391,7 +392,8 @@ private def loadCore (src : WeightSource) (desc : String) (cfg : Config)
       pure (reqGradFalse model.embed_tokens, true)
 
   log.onInfo "Loaded LagunaForCausalLM weights."
-  pure ⟨dtype, { model := model, lmHead := lmHead, tieWordEmbeddings := tieWordEmbeddings }⟩
+  pure ⟨⟨dtype.val, floating.down.valid⟩,
+    { model := model, lmHead := lmHead, tieWordEmbeddings := tieWordEmbeddings }⟩
 
 namespace LagunaForCausalLM
 
@@ -400,14 +402,14 @@ namespace LagunaForCausalLM
 def loadSharded (modelDir : String) (cfg : Config := Config.laguna_s_2_1)
     (device : Device := Device.CPU)
     (log : Handlers := {})
-    : IO (Σ dtype : ExactDType, LagunaForCausalLM (device := device) cfg dtype.val) :=
+    : IO (Σ dtype : RealFloatingDType, LagunaForCausalLM (device := device) cfg dtype.val) :=
   loadCore (.sharded modelDir) modelDir cfg device log
 
 /-- Load a Laguna model from a single HF SafeTensors file. -/
 def load (path : String) (cfg : Config := Config.laguna_s_2_1)
     (device : Device := Device.CPU)
     (log : Handlers := {})
-    : IO (Σ dtype : ExactDType, LagunaForCausalLM (device := device) cfg dtype.val) :=
+    : IO (Σ dtype : RealFloatingDType, LagunaForCausalLM (device := device) cfg dtype.val) :=
   loadCore (.single path) path cfg device log
 
 end LagunaForCausalLM

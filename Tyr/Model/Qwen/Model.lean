@@ -32,14 +32,17 @@ structure Qwen3Model (cfg : QwenConfig) (dtype : DType := .Float32) where
 namespace Qwen3Model
 
 variable {dtype : DType}
+variable [DType.RealFloating dtype]
 
 /-- Initialize a Qwen3 model with random weights -/
 def init (cfg : QwenConfig) (dtype : DType := .Float32) (device : Device := .CPU) : IO (Qwen3Model (device := device) cfg dtype) := do
+  let floating ← IO.ofExcept (DType.realFloating? dtype)
+  let _ := floating.down
   -- Token embeddings
   let emb ← Tensor.randn (device := device) #[cfg.vocab_size, cfg.hidden_size]
   let emb := emb.castDType dtype
   let std := 0.02  -- Standard embedding init
-  let embed_tokens ← Tensor.parameter (Tensor.Preserving.mulScalar emb std)
+  let embed_tokens ← Tensor.parameter (Tensor.mulScalar emb std)
 
   -- Initialize layers
   let mut layers := #[]

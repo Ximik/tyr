@@ -4,6 +4,7 @@ import Tyr.Tokenizer.Qwen3
 namespace torch.qwen3asr
 
 variable {device : Device} {dtype : DType}
+variable [DType.RealFloating dtype]
 /-- Coherent transcript assembly state for overlap-window streaming.
     `stableText` is append-only; `unstableText` may change each hop. -/
 structure RealtimeTranscriptState where

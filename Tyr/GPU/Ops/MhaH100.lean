@@ -123,7 +123,7 @@ def mhaBwd {seq kvBlocks : UInt64} [Variant (device := device) seq kvBlocks]
   let cfg := { LaunchCfg.default kvBlocks stream with sharedMem := bwdPrepSharedMem }
   let bwdCfg := { cfg with gridX := kvBlocks / 2, gridY := 1, blockX := 384, sharedMem := bwdSweepSharedMem }
 
-  let dVec : L (device := device) kvBlocks := Tensor.Preserving.mulScalar ctx.lOut 0.0
+  let dVec : L (device := device) kvBlocks := Tensor.mulScalar ctx.lOut 0.0
   launchBwdPrep (seq := seq) (kvBlocks := kvBlocks) dO ctx.out dVec cfg
 
   let dQ : F32 (device := device) seq := Tensor.zeros #[1, 1, seq, 64] false q.device

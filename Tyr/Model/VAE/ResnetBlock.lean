@@ -12,6 +12,7 @@ import Tyr.Module.Derive
 namespace torch.vae
 
 variable {device : Device} {dtype : DType}
+variable [DType.RealFloating dtype]
 /-- GroupNorm parameters for VAE.
     Weight and bias for affine transformation. -/
 structure GroupNormParams (num_groups channels : UInt64) (dtype : DType := .Float32) where
@@ -53,6 +54,8 @@ namespace Conv2dParams
 
 /-- Initialize Conv2d with Kaiming init -/
 def init (in_ch out_ch kernel_size : UInt64) (padding : UInt64 := 0) (device : Device := .CPU) (dtype : DType := .Float32) : IO (Conv2dParams (device := device) (dtype := dtype) in_ch out_ch kernel_size padding) := do
+  let floating ← IO.ofExcept (DType.realFloating? dtype)
+  let _ := floating.down
   let support ← dtype.acquireConstantSupport device
   let _ := support.down
   let std := Float.sqrt (2.0 / (in_ch * kernel_size * kernel_size).toFloat)
@@ -60,7 +63,7 @@ def init (in_ch out_ch kernel_size : UInt64) (padding : UInt64 := 0) (device : D
   let w ← IO.ofExcept (w.castDType? dtype)
   let b := Tensor.zerosFor { shape := #[out_ch], dtype, device }
   pure {
-    weight := (← Tensor.parameter (Tensor.Preserving.mulScalar w std))
+    weight := (← Tensor.parameter (Tensor.mulScalar w std))
     bias := (← Tensor.parameter b)
   }
 
@@ -76,7 +79,7 @@ end Conv2dParams
 
 /-- Swish activation: x * sigmoid(x) -/
 def swish {s : Shape} (x : Tensor { dtype := dtype, device := device, shape := s }) : Tensor { dtype := dtype, device := device, shape := s } :=
-  Tensor.Preserving.mul x (Tensor.Preserving.sigmoid x)
+  Tensor.mul x (Tensor.sigmoid x)
 
 /-- Residual block for VAE decoder.
     norm1 → swish → conv1 → norm2 → swish → conv2 (+ skip connection) -/
@@ -132,7 +135,7 @@ def forward {batch in_ch out_ch height width : UInt64}
     | some conv => Tensor.reshapeChecked (Tensor.conv2dBias x conv.weight conv.bias #[1, 1] #[0, 0]) #[batch, out_ch, height, width]
     | none => Tensor.reshapeChecked x #[batch, out_ch, height, width]
 
-  Tensor.Preserving.add h skip
+  Tensor.add h skip
 
 end ResnetBlock
 

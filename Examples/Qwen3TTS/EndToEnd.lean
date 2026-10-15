@@ -354,7 +354,7 @@ private def saveTokenIds (path : String) (ids : Array UInt64) : IO Unit := do
 
 /-- External conditioning embeddings are explicitly converted to the talker
 execution dtype after exact admission of their stored dtype. -/
-private def loadSpeakerEmbedding? (cfg : Qwen3TTSConfig) (dtype : ExactDType)
+private def loadSpeakerEmbedding? (cfg : Qwen3TTSConfig) (dtype : RealFloatingDType)
     (path? : Option String)
     : IO (Option (Tensor { shape := #[1, 1, cfg.talkerConfig.hiddenSize], dtype := dtype.val, device })) := do
   match path? with
@@ -463,7 +463,7 @@ private def buildTalkerInputsEquivalent
   let padScaffold : Tensor { shape := #[1, codecInputLen - 2, hidden], dtype := dtypes.talker.val, device := device } := Tensor.expand ttsPadEmbed #[1, codecInputLen - 2, hidden]
   let scaffold0 : Tensor { shape := #[1, codecInputLen - 1, hidden], dtype := dtypes.talker.val, device := device } :=
     qwen35.typedCat padScaffold ttsBosEmbed 1
-  let scaffold : Tensor { shape := #[1, codecInputLen - 1, hidden], dtype := dtypes.talker.val, device := device } := Tensor.Preserving.add scaffold0 codecPrefix
+  let scaffold : Tensor { shape := #[1, codecInputLen - 1, hidden], dtype := dtypes.talker.val, device := device } := Tensor.add scaffold0 codecPrefix
   let partA : Tensor { shape := #[1, 3 + (codecInputLen - 1), hidden], dtype := dtypes.talker.val, device := device } := qwen35.typedCat roleEmbed scaffold 1
 
   let textMainTensor : Tensor { shape := #[1, textMainLen], dtype := .Int64, device := device } := idsTensor1 textMainIds
@@ -472,11 +472,11 @@ private def buildTalkerInputsEquivalent
   let codecPadIds : Tensor { shape := #[1, textMainLen + 1], dtype := .Int64, device := device } :=
     (Tensor.fullInt #[1, textMainLen + 1] (Int64.ofNat cfg.talkerConfig.codecPadId.toNat)).to device
   let codecPadEmbed : Tensor { shape := #[1, textMainLen + 1, hidden], dtype := dtypes.talker.val, device := device } := TalkerModel.embedCodec model.talker.model codecPadIds
-  let partB : Tensor { shape := #[1, textMainLen + 1, hidden], dtype := dtypes.talker.val, device := device } := Tensor.Preserving.add textPlusEos codecPadEmbed
+  let partB : Tensor { shape := #[1, textMainLen + 1, hidden], dtype := dtypes.talker.val, device := device } := Tensor.add textPlusEos codecPadEmbed
 
   let codecBosOnlyIds : Tensor { shape := #[1, 1], dtype := .Int64, device := device } := (Tensor.fullInt #[1, 1] (Int64.ofNat cfg.talkerConfig.codecBosId.toNat)).to device
   let codecBosEmbed : Tensor { shape := #[1, 1, hidden], dtype := dtypes.talker.val, device := device } := TalkerModel.embedCodec model.talker.model codecBosOnlyIds
-  let partC : Tensor { shape := #[1, 1, hidden], dtype := dtypes.talker.val, device := device } := Tensor.Preserving.add ttsPadEmbed codecBosEmbed
+  let partC : Tensor { shape := #[1, 1, hidden], dtype := dtypes.talker.val, device := device } := Tensor.add ttsPadEmbed codecBosEmbed
 
   let partABLen : UInt64 := (3 + (codecInputLen - 1)) + (textMainLen + 1)
   let partAB : Tensor { shape := #[1, partABLen, hidden], dtype := dtypes.talker.val, device := device } := qwen35.typedCat partA partB 1
@@ -744,7 +744,7 @@ def runEndToEnd (args : Args) : IO Unit := do
             | some d => expandHome d
             | none => pure s!"{modelDir}/speech_tokenizer"
           IO.println s!"Loading Lean speech-tokenizer decoder from {speechTokenizerDir}..."
-          let ⟨_, speechDecoder⟩ ← SpeechTokenizer12HzDecoder.loadFromDir speechTokenizerDir targetDevice
+          let ⟨_codecDTypes, speechDecoder⟩ ← SpeechTokenizer12HzDecoder.loadFromDir speechTokenizerDir targetDevice
           let trimmed16 : Tensor { shape := #[codeLen, 16], dtype := .Int64, device := targetDevice } := Tensor.reshapeChecked trimmed #[codeLen, 16]
           if args.streamingDecode then
             speechDecoder.decodeFrameMajorChunkedToWav

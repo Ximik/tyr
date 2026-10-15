@@ -1,5 +1,6 @@
 import LeanTest
 import Tyr.Module.Affine
+import Tyr.Module.Linear
 import Tyr.Module.Conv2d
 import Tyr.Module.Derive
 import Tyr.Torch
@@ -7,6 +8,16 @@ import Tyr.Torch
 namespace Tests.ModuleTyped
 
 open torch
+
+-- Bias addition needs homogeneous promotion; integral and complex linear maps remain valid.
+example (layer : Linear 2 3 .Int32) (x : Tensor ⟨#[4, 2], .Int32, .CPU⟩) :
+    Tensor ⟨#[4, 3], .Int32, .CPU⟩ := layer.forward2d x
+example (layer : Linear 2 3 .Complex64) (x : Tensor ⟨#[4, 2], .Complex64, .CPU⟩) :
+    Tensor ⟨#[4, 3], .Complex64, .CPU⟩ := layer.forward2d x
+example (layer : @Affine 3 2 .Complex128 .CPU) (x : Tensor ⟨#[4, 2], .Complex128, .CPU⟩) :
+    Tensor ⟨#[4, 3], .Complex128, .CPU⟩ := layer.step x
+example : FloatingTensorStruct (Linear 2 3 .Float64) := inferInstance
+example : FloatingTensorStruct (@Affine 3 2 .Float64 .CPU) := inferInstance
 
 example (_a : Affine (n := 2) (m := 3)) (_x : Tensor { shape := #[4, 2], dtype := .Float32, device := .CPU }) : True := by
   fail_if_success
@@ -55,25 +66,25 @@ def testAffineNonSquareForwardAndGradient : IO Unit := do
   let weight : Tensor ⟨#[3, 2], .Float64, .CPU⟩ := Tensor.onesLike (Tensor.zerosFor _)
   let bias : Tensor ⟨#[2], .Float64, .CPU⟩ := Tensor.onesLike (Tensor.zerosFor _)
   let a : @Affine 2 3 .Float64 (.CPU) := {
-    w := ← Tensor.parameter (Tensor.Preserving.mulScalar weight 3.0)
-    b := ← Tensor.parameter (Tensor.Preserving.mulScalar bias 5.0) }
+    w := ← Tensor.parameter (Tensor.mulScalar weight 3.0)
+    b := ← Tensor.parameter (Tensor.mulScalar bias 5.0) }
   let input : Tensor ⟨#[4, 3], .Float64, .CPU⟩ :=
-    Tensor.Preserving.mulScalar (Tensor.onesLike (Tensor.zerosFor _)) 2.0
+    Tensor.mulScalar (Tensor.onesFor ⟨#[4, 3], .Float64, .CPU⟩) 2.0
   let output : Tensor ⟨#[4, 2], .Float64, .CPU⟩ := Module.forward a input
   match output.validate with
   | .ok () => pure ()
   | .error message => LeanTest.fail message
   LeanTest.assertTrue
-    (Tensor.frobeniusNorm (Sub.sub output (Tensor.Preserving.mulScalar (Tensor.onesLike output) 23.0)) < 1e-10)
+    (Tensor.frobeniusNorm (Sub.sub output (Tensor.mulScalar (Tensor.onesLike output) 23.0)) < 1e-10)
     "Affine must compute input @ weight + bias with distinct input/output dimensions"
   let loss := Tensor.sumAll output
   Tensor.backwardLoss loss
   let gradient : @Affine 2 3 .Float64 (.CPU) ← differentiable.grad a
   LeanTest.assertTrue
-    (Tensor.frobeniusNorm (Sub.sub gradient.w (Tensor.Preserving.mulScalar weight 8.0)) < 1e-10)
+    (Tensor.frobeniusNorm (Sub.sub gradient.w (Tensor.mulScalar weight 8.0)) < 1e-10)
     "Affine weight gradient must sum all four input rows"
   LeanTest.assertTrue
-    (Tensor.l2Norm (Sub.sub gradient.b (Tensor.Preserving.mulScalar bias 4.0)) < 1e-10)
+    (Tensor.l2Norm (Sub.sub gradient.b (Tensor.mulScalar bias 4.0)) < 1e-10)
     "Affine bias gradient must count batch rows"
   let tensorGradient : Tensor ⟨#[3, 2], .Float64, .CPU⟩ ← differentiable.grad a.w
   LeanTest.assertEqual (Tensor.frobeniusNorm (Sub.sub tensorGradient gradient.w)) 0.0

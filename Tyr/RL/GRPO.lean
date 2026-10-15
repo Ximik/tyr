@@ -205,19 +205,19 @@ def computePGLoss
   -- Normalize by valid tokens, passes, and examples
   -- Add small epsilon to avoid division by zero (equivalent to clamp(min=1))
   let numValid := Tensor.sumAll mask
-  let numValidSafe := Tensor.Preserving.addScalar numValid 1e-8
-  let pgObjNorm := Tensor.Preserving.div pgObj numValidSafe
-  let pgObjNorm := Tensor.Preserving.divScalar pgObjNorm (numPasses.toFloat * examplesPerRank.toFloat)
+  let numValidSafe := Tensor.addScalar numValid 1e-8
+  let pgObjNorm := Tensor.div pgObj numValidSafe
+  let pgObjNorm := Tensor.divScalar pgObjNorm (numPasses.toFloat * examplesPerRank.toFloat)
 
   -- Return negative (we minimize loss, not maximize objective)
-  Tensor.Preserving.mulScalar pgObjNorm (-1.0)
+  Tensor.mulScalar pgObjNorm (-1.0)
 
 /-- Get log probabilities from model cross-entropy output.
     In nanochat: logp = -model(inputs, targets, loss_reduction='none')
 
     The model returns NLL = -log(p), so we negate to get log(p). -/
-def negateToLogProb {σ : StaticSpec} (nllPerToken : Tensor σ) : Tensor σ :=
-  Tensor.Preserving.mulScalar nllPerToken (-1.0)
+def negateToLogProb {σ : StaticSpec} [DType.RealFloating σ.dtype] (nllPerToken : Tensor σ) : Tensor σ :=
+  Tensor.mulScalar nllPerToken (-1.0)
 
 /-! ## Training State -/
 
@@ -766,7 +766,7 @@ def trainLoop (b t : UInt64)
 
     This variant accumulates gradients across all generated samples and applies
     a single AdamW update to the model parameters. -/
-def grpoStepWithModelUpdate (b t : UInt64) [TensorStruct P]
+def grpoStepWithModelUpdate (b t : UInt64) [TensorStruct P] [FloatingTensorStruct P]
     (params : P)
     (optState : Optim.AdamWState P)
     (rollouts : Array RolloutBatch)
@@ -848,7 +848,7 @@ def grpoStepWithModelUpdate (b t : UInt64) [TensorStruct P]
     | some loss => pure loss
     | none => throw <| IO.userError "grpoStepWithModelUpdate: no losses accumulated"
 
-  let meanLossTensor := Tensor.Preserving.divScalar totalLoss rewards.size.toFloat
+  let meanLossTensor := Tensor.divScalar totalLoss rewards.size.toFloat
   Tensor.backwardLoss meanLossTensor
 
   -- Synchronize gradients in distributed runs.
@@ -879,7 +879,7 @@ def grpoStepWithModelUpdate (b t : UInt64) [TensorStruct P]
   return (newParams, newOptState, result, newState)
 
 /-- GRPO training loop that updates model parameters each step. -/
-def trainLoopWithUpdates (b t : UInt64) [TensorStruct P]
+def trainLoopWithUpdates (b t : UInt64) [TensorStruct P] [FloatingTensorStruct P]
     (getPromptFn : Nat → IO (Array UInt64 × String × String))  -- step → (tokens, text, answer)
     (generateOneFn : P → Array UInt64 → IO UInt64)
     (forwardFn : P → Tensor { shape := #[b, t], dtype := .Int64, device := device } → Tensor { shape := #[b, t], dtype := .Int64, device := device } → IO (Tensor { shape := #[b, t], dtype := .Float32, device := device }))
@@ -969,7 +969,7 @@ def trainOnPrompts (b t : UInt64)
   trainLoop b t getPromptFn generateOneFn forwardFn decodeFn rewardFn config numSteps callbacks
 
 /-- Prompt-array convenience wrapper for the update-enabled GRPO loop. -/
-def trainOnPromptsWithUpdates (b t : UInt64) [TensorStruct P]
+def trainOnPromptsWithUpdates (b t : UInt64) [TensorStruct P] [FloatingTensorStruct P]
     (prompts : Array (Array UInt64 × String × String))  -- (tokens, text, answer)
     (generateOneFn : P → Array UInt64 → IO UInt64)
     (forwardFn : P → Tensor { shape := #[b, t], dtype := .Int64, device := device } → Tensor { shape := #[b, t], dtype := .Int64, device := device } → IO (Tensor { shape := #[b, t], dtype := .Float32, device := device }))

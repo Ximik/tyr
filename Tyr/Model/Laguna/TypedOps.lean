@@ -4,6 +4,7 @@ import Tyr.RawTensor.Laguna
 namespace torch.laguna
 
 variable {device : Device} {dtype : DType}
+variable [DType.RealFloating dtype]
 private def checked {σ : StaticSpec} (raw : RawTensor) : Tensor σ :=
   match Tensor.ofRaw raw with
   | .ok tensor => tensor
@@ -25,8 +26,8 @@ def scatterAdd {s t : Shape} (input : Tensor { dtype := dtype, device := device,
 def transposeMatrixBatch {b m n : UInt64} {d : DType}
     (x : Tensor { device := device, shape := #[b, m, n], dtype := d }) : Tensor { device := device, shape := #[b, n, m], dtype := d } := x.transpose 1 2
 
-def mulSame {s : Shape} (x y : Tensor { dtype := dtype, device := device, shape := s }) : Tensor { dtype := dtype, device := device, shape := s } := Tensor.Preserving.mul x y
-def addSame {s : Shape} (x y : Tensor { dtype := dtype, device := device, shape := s }) : Tensor { dtype := dtype, device := device, shape := s } := Tensor.Preserving.add x y
+def mulSame {s : Shape} (x y : Tensor { dtype := dtype, device := device, shape := s }) : Tensor { dtype := dtype, device := device, shape := s } := Tensor.mul x y
+def addSame {s : Shape} (x y : Tensor { dtype := dtype, device := device, shape := s }) : Tensor { dtype := dtype, device := device, shape := s } := Tensor.add x y
 
 def transposeAttention {b s h d : UInt64} {dt : DType}
     (x : Tensor { device := device, shape := #[b, s, h, d], dtype := dt }) : Tensor { device := device, shape := #[b, h, s, d], dtype := dt } := x.transpose 1 2

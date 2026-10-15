@@ -10,7 +10,7 @@ namespace Tyr.AD
 open torch
 open DifferentiableManifold
 
-variable {d : DType} {dev : Device} [DType.ConstantSupported d dev]
+variable {d : DType} {dev : Device} [DType.RealFloating d] [DType.ConstantSupported d dev]
 
 /-! ## Hyperbolic Manifold H^n (hyperboloid model)
 
@@ -36,34 +36,34 @@ def spatialMask (n : UInt64) : Tensor ⟨#[n + 1], d, dev⟩ :=
 /-- Minkowski signature vector [1, …, 1, -1] of the ambient space. -/
 def signatureVec (n : UInt64) : Tensor ⟨#[n + 1], d, dev⟩ :=
   Tensor.cat (Tensor.onesFor ⟨#[n], d, dev⟩)
-    (Tensor.Preserving.mulScalar (Tensor.onesFor ⟨#[1], d, dev⟩) (-1.0)) 0
+    (Tensor.mulScalar (Tensor.onesFor ⟨#[1], d, dev⟩) (-1.0)) 0
 
 /-- Minkowski inner product (signature (n,1)) as Float. -/
 def minkowskiInner (x y : Tensor ⟨#[n + 1], d, dev⟩) : Float :=
-  Tensor.item (Tensor.sumAll (Tensor.Preserving.mul (Tensor.Preserving.mul x y) (signatureVec n)))
+  Tensor.item (Tensor.sumAll (Tensor.mul (Tensor.mul x y) (signatureVec (d := d) n)))
 
 /-- Project an ambient vector to the hyperboloid (future sheet).
     Keeps the spatial part and recomputes the time coordinate. -/
 def project (n : UInt64) (v : Tensor ⟨#[n + 1], d, dev⟩) : Hyperbolic n d dev :=
-  let spatial := Tensor.Preserving.mul v (spatialMask n)
-  let spatialSq := Tensor.item (Tensor.sumAll (Tensor.Preserving.mul spatial spatial))
+  let spatial := Tensor.mul v (spatialMask (d := d) n)
+  let spatialSq := Tensor.item (Tensor.sumAll (Tensor.mul spatial spatial))
   let t := Float.sqrt (spatialSq + 1.0)
-  let tVec := Tensor.Preserving.mulScalar (Tensor.onesFor ⟨#[1], d, dev⟩) t
+  let tVec := Tensor.mulScalar (Tensor.onesFor ⟨#[1], d, dev⟩) t
   let timeVec := Tensor.cat (Tensor.zerosFor ⟨#[n], d, dev⟩) tVec 0
-  ⟨Tensor.Preserving.add spatial timeVec⟩
+  ⟨Tensor.add spatial timeVec⟩
 
 /-- Normalize a time-like vector to the hyperboloid using Minkowski norm. -/
 def normalize (n : UInt64) (v : Tensor ⟨#[n + 1], d, dev⟩) : Hyperbolic n d dev :=
   let inner := minkowskiInner v v
   let scale := 1.0 / Float.sqrt (-inner)
-  ⟨Tensor.Preserving.mulScalar v scale⟩
+  ⟨Tensor.mulScalar v scale⟩
 
 /-- Random point on H^n via random spatial coordinates and derived time coord. -/
 def random (n : UInt64) : IO (Hyperbolic n) := do
   let spatial ← Tensor.randn #[n]
   let spatialSq := Tensor.item (Tensor.sumAll (Mul.mul spatial spatial))
   let t := Float.sqrt (spatialSq + 1.0)
-  let tVec := Tensor.Preserving.mulScalar (Tensor.onesFor ⟨#[1], .Float32, .CPU⟩) t
+  let tVec := Tensor.mulScalar (Tensor.onesFor ⟨#[1], .Float32, .CPU⟩) t
   return ⟨Tensor.cat spatial tVec 0⟩
 
 /-- Origin point (0, ..., 0, 1). -/
@@ -86,20 +86,20 @@ def zero (n : UInt64) : HyperbolicTangent n d dev :=
 
 /-- Add two tangent vectors. -/
 def add (v w : HyperbolicTangent n d dev) : HyperbolicTangent n d dev :=
-  ⟨Tensor.Preserving.add v.vec w.vec⟩
+  ⟨Tensor.add v.vec w.vec⟩
 
 /-- Scale a tangent vector. -/
 def smul (s : Float) (v : HyperbolicTangent n d dev) : HyperbolicTangent n d dev :=
-  ⟨Tensor.Preserving.mulScalar v.vec s⟩
+  ⟨Tensor.mulScalar v.vec s⟩
 
 /-- Project an ambient vector to the tangent space at X (Minkowski-orthogonal). -/
 def project (X : Hyperbolic n d dev) (V : Tensor ⟨#[n + 1], d, dev⟩) : HyperbolicTangent n d dev :=
   let alpha := -Hyperbolic.minkowskiInner X.coords V / Hyperbolic.minkowskiInner X.coords X.coords
-  ⟨Tensor.Preserving.add V (Tensor.Preserving.mulScalar X.coords alpha)⟩
+  ⟨Tensor.add V (Tensor.mulScalar X.coords alpha)⟩
 
 /-- Apply the Minkowski metric (signature (n,1)) to a vector: flips last coord. -/
 def applyMetric (v : Tensor ⟨#[n + 1], d, dev⟩) : Tensor ⟨#[n + 1], d, dev⟩ :=
-  Tensor.Preserving.mul v (Hyperbolic.signatureVec n)
+  Tensor.mul v (Hyperbolic.signatureVec (d := d) n)
 
 end HyperbolicTangent
 
@@ -116,8 +116,8 @@ instance hyperbolicManifold (n : UInt64) : DifferentiableManifold (Hyperbolic n 
   sharp v := ⟨HyperbolicTangent.applyMetric v.vec⟩
   flat v := ⟨HyperbolicTangent.applyMetric v.vec⟩
   exp X V :=
-    Hyperbolic.normalize n (Tensor.Preserving.add X.coords V.vec)
+    Hyperbolic.normalize n (Tensor.add X.coords V.vec)
   retract X V :=
-    Hyperbolic.normalize n (Tensor.Preserving.add X.coords V.vec)
+    Hyperbolic.normalize n (Tensor.add X.coords V.vec)
 
 end Tyr.AD

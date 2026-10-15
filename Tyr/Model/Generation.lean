@@ -51,7 +51,7 @@ def sampleFromLogits {batch vocab : UInt64}
       throw <| IO.userError s!"multinomial sampling requires temperature > 0, got {temperature}"
     let scaled :=
       if temperature == 1.0 then logits
-      else Tensor.Preserving.mulScalar logits (1.0 / temperature)
+      else Tensor.mulScalar logits (1.0 / temperature)
     let filtered :=
       if topK == 0 then scaled
       else Tensor.topKFilter scaled topK

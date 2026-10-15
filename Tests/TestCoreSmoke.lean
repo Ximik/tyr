@@ -95,7 +95,7 @@ def testTensorStructCount : IO Unit := do
 
 @[test]
 def testTensorStructMapReachesEveryLeaf : IO Unit := do
-  let shifted := TensorStruct.map (fun t => Tensor.Preserving.addScalar t 1.0) smokeParams
+  let shifted := FloatingTensorStruct.map (fun t => Tensor.addScalar t 1.0) smokeParams
   let total := TensorStruct.fold (fun {_s} t acc => acc + Tensor.item (Tensor.sumAll t)) 0.0 shifted
   LeanTest.assertEqual total 8.0
     s!"all-ones leaves (2x3 + 2 elements) should sum to 8, got {total}"

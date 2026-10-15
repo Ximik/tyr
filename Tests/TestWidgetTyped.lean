@@ -18,7 +18,7 @@ private structure DisplayModel where
 def testIndexedTensorWidgetMetadataAndGradients : IO Unit := do
   let weight : Tensor ⟨#[2, 3], .Float64, .CPU⟩ ←
     (Tensor.onesLike (Tensor.zerosFor _)).setRequiresGrad true
-  let loss := Tensor.sumAll (Tensor.Preserving.mulScalar weight 3.0)
+  let loss := Tensor.sumAll (Tensor.mulScalar weight 3.0)
   Tensor.backwardLoss loss
   let props ← tensorToPropsNamed weight "weight" #["out", "in"]
   LeanTest.assertEqual props.shape #[2, 3] "Widget shape"

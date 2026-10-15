@@ -438,13 +438,13 @@ private def ppoUpdate
 
       let ratio := Tensor.exp (selectedLogProbs - oldLogT) rfl
       let surr1 := ratio * advT
-      let clipped := Tensor.Preserving.clampFloat ratio (1.0 - cfg.clipEps) (1.0 + cfg.clipEps)
+      let clipped := Tensor.clampFloat ratio (1.0 - cfg.clipEps) (1.0 + cfg.clipEps)
       let surr2 := clipped * advT
-      let minSurr := Tensor.Preserving.mulScalar
-        (Tensor.maximum (Tensor.Preserving.mulScalar surr1 (-1.0))
-          (Tensor.Preserving.mulScalar surr2 (-1.0)))
+      let minSurr := Tensor.mulScalar
+        (Tensor.maximum (Tensor.mulScalar surr1 (-1.0))
+          (Tensor.mulScalar surr2 (-1.0)))
         (-1.0)
-      let policyLoss := Tensor.Preserving.mulScalar (Tensor.meanAll minSurr) (-1.0)
+      let policyLoss := Tensor.mulScalar (Tensor.meanAll minSurr) (-1.0)
 
       let valueErr := values - retT
       let valueLoss := Tensor.meanAll (valueErr * valueErr)
@@ -452,12 +452,12 @@ private def ppoUpdate
       let probs := Tensor.softmax logits (-1) rfl
       let entropyTerms := probs * logProbsAll
       let entropyPer := Tensor.sumDim entropyTerms 1 false
-      let entropy := Tensor.Preserving.mulScalar (Tensor.meanAll entropyPer) (-1.0)
+      let entropy := Tensor.mulScalar (Tensor.meanAll entropyPer) (-1.0)
 
       let totalLoss :=
         policyLoss +
-        Tensor.Preserving.mulScalar valueLoss cfg.valueCoef -
-        Tensor.Preserving.mulScalar entropy cfg.entropyCoef
+        Tensor.mulScalar valueLoss cfg.valueCoef -
+        Tensor.mulScalar entropy cfg.entropyCoef
 
       Tensor.backwardLoss totalLoss
       let grads ← TensorStruct.grads working
@@ -732,10 +732,10 @@ private def alphaZeroUpdate
       let (logits, values) := AlphaGradNet.forward working obs
       let logProbs := Tensor.logSoftmax logits (-1) rfl
       let policyPer := Tensor.sumDim (policyT * logProbs) 1 false
-      let policyLoss := Tensor.Preserving.mulScalar (Tensor.meanAll policyPer) (-1.0)
+      let policyLoss := Tensor.mulScalar (Tensor.meanAll policyPer) (-1.0)
       let valueErr := values - valueT
       let valueLoss := Tensor.meanAll (valueErr * valueErr)
-      let totalLoss := policyLoss + Tensor.Preserving.mulScalar valueLoss cfg.valueCoef
+      let totalLoss := policyLoss + Tensor.mulScalar valueLoss cfg.valueCoef
 
       Tensor.backwardLoss totalLoss
       let grads ← TensorStruct.grads working

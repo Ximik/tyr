@@ -52,7 +52,7 @@ def loadFromPretrained
     (revision : String := "main")
     (cacheDir : String := Hub.defaultCacheDir)
     (device : Device := .CPU)
-    : IO (Sigma (fun cfg => Σ dtype : ExactDType, Gemma4ForCausalLM (device := device) cfg dtype.val)) := do
+    : IO (Sigma (fun cfg => Σ dtype : RealFloatingDType, Gemma4ForCausalLM (device := device) cfg dtype.val)) := do
   Hub.loadModelFromPretrained
     source
     revision

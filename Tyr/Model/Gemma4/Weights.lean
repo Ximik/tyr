@@ -485,7 +485,7 @@ namespace Gemma4ForCausalLM
 /-- Load Gemma 4 model from a sharded HF SafeTensors directory. -/
 def loadSharded (modelDir : String) (cfg : Config := Config.gemma4_E4B)
     (log : Handlers := {}) (device : Device := .CPU)
-    : IO (Σ dtype : ExactDType, Gemma4ForCausalLM (device := device) cfg dtype.val) := do
+    : IO (Σ dtype : RealFloatingDType, Gemma4ForCausalLM (device := device) cfg dtype.val) := do
   log.onInfo s!"Loading Gemma4ForCausalLM (device := device) from {modelDir}..."
 
   let embedTokens ←
@@ -494,6 +494,8 @@ def loadSharded (modelDir : String) (cfg : Config := Config.gemma4_E4B)
       "model.language_model.embed_tokens"
       #[cfg.vocab_size, cfg.hidden_size]
   let dtype := embedTokens.1
+  let floating ← IO.ofExcept dtype.val.realFloating?
+  let _ := floating.down
 
   let embedTokensPerLayer ←
     if Config.hasPerLayerInput cfg then
@@ -553,7 +555,7 @@ def loadSharded (modelDir : String) (cfg : Config := Config.gemma4_E4B)
         throw <| IO.userError "lm_head not found and tie_word_embeddings=false"
 
   log.onInfo "Loaded Gemma4ForCausalLM (device := device) weights."
-  pure ⟨dtype, {
+  pure ⟨RealFloatingDType.ofDType dtype.val, {
     model := model
     lmHead := lmHead
     tieWordEmbeddings := cfg.tie_word_embeddings
@@ -562,7 +564,7 @@ def loadSharded (modelDir : String) (cfg : Config := Config.gemma4_E4B)
 /-- Load Gemma 4 model from a single HF SafeTensors file. -/
 def load (path : String) (cfg : Config := Config.gemma4_E4B)
     (log : Handlers := {}) (device : Device := .CPU)
-    : IO (Σ dtype : ExactDType, Gemma4ForCausalLM (device := device) cfg dtype.val) := do
+    : IO (Σ dtype : RealFloatingDType, Gemma4ForCausalLM (device := device) cfg dtype.val) := do
   log.onInfo s!"Loading Gemma4ForCausalLM (device := device) from {path}..."
 
   let embedTokens ←
@@ -571,6 +573,8 @@ def load (path : String) (cfg : Config := Config.gemma4_E4B)
       "model.language_model.embed_tokens"
       #[cfg.vocab_size, cfg.hidden_size]
   let dtype := embedTokens.1
+  let floating ← IO.ofExcept dtype.val.realFloating?
+  let _ := floating.down
 
   let embedTokensPerLayer ←
     if Config.hasPerLayerInput cfg then
@@ -630,7 +634,7 @@ def load (path : String) (cfg : Config := Config.gemma4_E4B)
         throw <| IO.userError "lm_head not found and tie_word_embeddings=false"
 
   log.onInfo "Loaded Gemma4ForCausalLM (device := device) weights."
-  pure ⟨dtype, {
+  pure ⟨RealFloatingDType.ofDType dtype.val, {
     model := model
     lmHead := lmHead
     tieWordEmbeddings := cfg.tie_word_embeddings

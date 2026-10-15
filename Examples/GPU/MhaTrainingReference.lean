@@ -14,7 +14,7 @@ def lossAndGradOut (out targetOut : MhaTensor (device := device)) : Tensor { sha
   let out32 : MasterTensor (device := device) := out.toFloat32
   let tgt32 : MasterTensor (device := device) := targetOut.toFloat32
   let diff : MasterTensor (device := device) := out32 - tgt32
-  let lossT : Tensor { shape := #[], dtype := .Float32, device := device } := Tensor.Preserving.mulScalar (Tensor.meanAll (diff * diff)) 0.5
+  let lossT : Tensor { shape := #[], dtype := .Float32, device := device } := Tensor.mulScalar (Tensor.meanAll (diff * diff)) 0.5
   let dO32 : MasterTensor (device := device) := diff / nElems
   let dO : MhaTensor (device := device) := dO32.toBFloat16
   (lossT, dO)
@@ -32,7 +32,7 @@ def oneTorchTrainStep
   let vLeaf ← Tensor.setRequiresGrad (Tensor.detach vM) true
   let out : MasterTensor (device := device) := Tensor.attentionGQA qLeaf kLeaf vLeaf false
   let diff : MasterTensor (device := device) := out - targetOut32
-  let lossT : Tensor { shape := #[], dtype := .Float32, device := device } := Tensor.Preserving.mulScalar (Tensor.meanAll (diff * diff)) 0.5
+  let lossT : Tensor { shape := #[], dtype := .Float32, device := device } := Tensor.mulScalar (Tensor.meanAll (diff * diff)) 0.5
   Tensor.backwardLoss lossT
   let dQ : MasterTensor (device := device) ← Tensor.gradOf qLeaf
   let dK : MasterTensor (device := device) ← Tensor.gradOf kLeaf

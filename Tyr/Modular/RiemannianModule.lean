@@ -113,13 +113,14 @@ private def linearApplyInputAdjoint {inDim outDim : UInt64} {d : DType} {dev : D
   columnToVector (Tensor.mm (Tensor.transpose2d weight) (vectorToColumn y))
 
 private def linearApplyParam {inDim outDim : UInt64} {d : DType} {dev : Device}
+    [DType.Promotes d d d]
     (x : Tensor ⟨#[inDim], d, dev⟩)
     (useBias : Bool)
     (update : Tensor ⟨#[outDim * inDim + outDim], d, dev⟩) : Tensor ⟨#[outDim], d, dev⟩ :=
   let (dW, dB) := splitLinearUpdate (inDim := inDim) (outDim := outDim) update
   let weightPart := linearApplyInput dW x
   if useBias then
-    Tensor.Preserving.add weightPart dB
+    Tensor.add weightPart dB
   else
     weightPart
 
@@ -189,11 +190,11 @@ instance linearRiemannianModule (inDim outDim : UInt64) :
   paramMass _ := DiagonalMass.ones (device := device) (outDim * inDim + outDim)
   applyAmbientUpdate lin update lr := do
     let (dW, dB) := splitLinearUpdate (inDim := inDim) (outDim := outDim) update
-    let weight' ← Tensor.parameter (Sub.sub lin.weight (Tensor.Preserving.mulScalar dW lr))
+    let weight' ← Tensor.parameter (Sub.sub lin.weight (Tensor.mulScalar dW lr))
     let bias' ←
       match lin.bias with
       | some b => do
-        pure (some (← Tensor.parameter (Sub.sub b (Tensor.Preserving.mulScalar dB lr))))
+        pure (some (← Tensor.parameter (Sub.sub b (Tensor.mulScalar dB lr))))
       | none => pure none
     pure { lin with weight := weight', bias := bias' }
 
@@ -224,13 +225,13 @@ instance manifoldLinearRiemannianModule
   applyAmbientUpdate lin update lr := do
     let (dW, dB) := splitLinearUpdate (inDim := inDim) (outDim := outDim) update
     let updatedMatrix := Sub.sub (MatrixManifoldCarrier.toMatrix (device := device) lin.weight)
-      (Tensor.Preserving.mulScalar dW lr)
+      (Tensor.mulScalar dW lr)
     let weight' := MatrixManifoldCarrier.projectLike (device := device) lin.weight updatedMatrix
     let weight' ← makeManifoldLeaf weight'
     let bias' ←
       match lin.bias with
       | some b => do
-        pure (some (← Tensor.parameter (Sub.sub b (Tensor.Preserving.mulScalar dB lr))))
+        pure (some (← Tensor.parameter (Sub.sub b (Tensor.mulScalar dB lr))))
       | none => pure none
     pure { lin with weight := weight', bias := bias' }
 

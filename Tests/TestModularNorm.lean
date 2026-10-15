@@ -202,7 +202,7 @@ example (_weight : torch.Tensor { shape := #[2, 3], dtype := .Float32, device :=
 def testIndexedEmbeddingLookupGradientAndNorms : IO Unit := do
   let weight : torch.Tensor ⟨#[3, 2], .Float64, .CPU⟩ :=
     torch.Tensor.onesLike (torch.Tensor.zerosFor _)
-  let weight ← (torch.Tensor.Preserving.mulScalar weight 2.0).setRequiresGrad true
+  let weight ← (torch.Tensor.mulScalar weight 2.0).setRequiresGrad true
   let emb : Embedding 3 2 .Float64 (.CPU) := ⟨weight⟩
   let tokens : torch.Tensor ⟨#[2, 3], .Int64, .CPU⟩ :=
     torch.Tensor.onesLike (torch.Tensor.zerosFor _)

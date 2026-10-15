@@ -998,7 +998,9 @@ def testQwen3ASRAudioEncoderFeatureDType : IO Unit := do
   let features : Tensor { shape := #[3, cfg.numMelBins, 32], dtype := .Float32, device := .CPU } := Tensor.reshapeChecked
     (Tensor.sin (Tensor.toFloat32 (Tensor.arange (3 * cfg.numMelBins * 32)))) #[3, cfg.numMelBins, 32]
   for bf16Weights in #[false, true] do
-    let modelDType := if bf16Weights then DType.BFloat16 else .Float32
+    let selected : RealFloatingDType :=
+      if bf16Weights then ⟨.BFloat16, by decide⟩ else ⟨.Float32, by decide⟩
+    let modelDType := selected.val
     let encoder ← AudioEncoder.init cfg (dtype := modelDType)
     let encoder := TensorStruct.detach encoder
     for bf16Features in #[false, true] do

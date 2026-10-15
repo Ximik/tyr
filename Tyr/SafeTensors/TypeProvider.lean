@@ -10,10 +10,12 @@
   - typed tensor specs
   - typed per-tensor load helpers
   - hierarchical typed checkpoint record (`Weights`) with `loadAll`
+  - structural traversal and leaf-type capabilities for every generated record
   - generated schema table for introspection from Lean
 -/
 import Lean
 import Tyr.SafeTensors.Schema
+import Tyr.Module.Derive
 
 open Lean Elab Command
 
@@ -128,7 +130,7 @@ private def renderTensorDecls (sourceIsDirectory : Bool) (tensor : TensorSchema)
     s!"abbrev {declName}Shape : _root_.torch.Shape := {shapeLit}\n"
   let specDecl :=
     s!"/-- Tensor schema for `{tensor.name}`. -/\n" ++
-    s!"def {declName}Spec : _root_.torch.safetensors.TensorSchema :=\n" ++
+    s!"abbrev {declName}Spec : _root_.torch.safetensors.TensorSchema :=\n" ++
     "  {\n" ++
     s!"    name := {leanStringLit tensor.name},\n" ++
     s!"    dtype := {dtypeExpr},\n" ++
@@ -343,7 +345,7 @@ private partial def buildTypeRepr
       let structDecl :=
         s!"/-- Generated hierarchical checkpoint node `{typeName}`. -/\n" ++
         s!"structure {typeName} (device : _root_.torch.Device := _root_.torch.Device.CPU) where\n" ++
-        fieldsBlock
+        fieldsBlock ++ "  deriving _root_.torch.TensorStruct\n"
       decls := decls.push structDecl
       return (.struct typeName fields, decls, used)
 
@@ -394,7 +396,7 @@ private partial def buildTypeRepr
   let structDecl :=
     s!"/-- Generated hierarchical checkpoint node `{typeName}`. -/\n" ++
     s!"structure {typeName} (device : _root_.torch.Device := _root_.torch.Device.CPU) where\n" ++
-    fieldsBlock
+    fieldsBlock ++ "  deriving _root_.torch.TensorStruct\n"
   decls := decls.push structDecl
   return (.struct typeName fields, decls, used)
 

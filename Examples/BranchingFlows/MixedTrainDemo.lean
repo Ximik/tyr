@@ -25,7 +25,7 @@ private def uniformTimeDist : TimeDist :=
 
 private def linBridge2d (_ : Unit) (x0 x1 : Tensor { dtype := .Float32, shape := #[2], device := .CPU }) (t0 t1 : Float) : Tensor { dtype := .Float32, shape := #[2], device := .CPU } :=
   let dt := t1 - t0
-  Tensor.Preserving.add x0 (Tensor.Preserving.mulScalar (Tensor.Preserving.sub x1 x0) dt)
+  Tensor.add x0 (Tensor.mulScalar (Tensor.sub x1 x0) dt)
 
 private def discreteBridge (_ : Unit) (_x0 x1 : Nat) (_t0 _t1 : Float) : Nat :=
   x1
@@ -149,33 +149,33 @@ private def maskedCrossEntropy {batch maxLen vocab : UInt64}
   let targets2 := Tensor.reshapeChecked targets #[n]
   let mask2 := Tensor.reshapeChecked mask #[n]
   let per := Tensor.crossEntropyNoneChecked logits2 targets2
-  let masked := Tensor.Preserving.mul per mask2
+  let masked := Tensor.mul per mask2
   let denom := Tensor.sumAll mask2
-  Tensor.Preserving.div (Tensor.sumAll masked) (Tensor.Preserving.addScalar denom 1.0e-8)
+  Tensor.div (Tensor.sumAll masked) (Tensor.addScalar denom 1.0e-8)
 
 private def maskedMSE {batch maxLen : UInt64}
     (pred target mask : Tensor { dtype := .Float32, shape := #[batch, maxLen], device := .CPU }) : Tensor { dtype := .Float32, shape := #[], device := .CPU } :=
-  let diff := Tensor.Preserving.sub pred target
-  let sq := Tensor.Preserving.mul diff diff
-  let masked := Tensor.Preserving.mul sq mask
+  let diff := Tensor.sub pred target
+  let sq := Tensor.mul diff diff
+  let masked := Tensor.mul sq mask
   let denom := Tensor.sumAll mask
-  Tensor.Preserving.div (Tensor.sumAll masked) (Tensor.Preserving.addScalar denom 1.0e-8)
+  Tensor.div (Tensor.sumAll masked) (Tensor.addScalar denom 1.0e-8)
 
 private def maskedMSE3d {batch maxLen dim : UInt64}
     (pred target : Tensor { dtype := .Float32, shape := #[batch, maxLen, dim], device := .CPU }) (mask : Tensor { dtype := .Float32, shape := #[batch, maxLen], device := .CPU }) : Tensor { dtype := .Float32, shape := #[], device := .CPU } :=
   let mask3 := Tensor.expand (Tensor.unsqueeze mask 2) #[batch, maxLen, dim]
-  let diff := Tensor.Preserving.sub pred target
-  let sq := Tensor.Preserving.mul diff diff
-  let masked := Tensor.Preserving.mul sq mask3
+  let diff := Tensor.sub pred target
+  let sq := Tensor.mul diff diff
+  let masked := Tensor.mul sq mask3
   let denom := Tensor.sumAll mask3
-  Tensor.Preserving.div (Tensor.sumAll masked) (Tensor.Preserving.addScalar denom 1.0e-8)
+  Tensor.div (Tensor.sumAll masked) (Tensor.addScalar denom 1.0e-8)
 
 private def maskedBCEWithLogits {batch maxLen : UInt64}
     (logits target mask : Tensor { dtype := .Float32, shape := #[batch, maxLen], device := .CPU }) : Tensor { dtype := .Float32, shape := #[], device := .CPU } :=
-  let probs := Tensor.Preserving.sigmoid logits
+  let probs := Tensor.sigmoid logits
   let loss := binaryCrossEntropySum probs target mask
   let denom := Tensor.sumAll mask
-  Tensor.Preserving.div loss (Tensor.Preserving.addScalar denom 1.0e-8)
+  Tensor.div loss (Tensor.addScalar denom 1.0e-8)
 
 def runDemo : IO Unit := do
   let vocab : UInt64 := 3
@@ -244,7 +244,7 @@ def runDemo : IO Unit := do
     let t2 := Tensor.unsqueeze t1 1
     let tExp := Tensor.expand t2 #[batchU, maxLen, 1]
     let timeEmb := Tensor.affine3d tExp paramsTrain.timeW paramsTrain.timeB
-    let hiddenState := Tensor.Preserving.tanh (Tensor.Preserving.add (Tensor.Preserving.add contEmb discEmb) timeEmb)
+    let hiddenState := Tensor.tanh (Tensor.add (Tensor.add contEmb discEmb) timeEmb)
 
     let predLoc := Tensor.affine3d hiddenState paramsTrain.locW paramsTrain.locB
     let predTok := Tensor.affine3d hiddenState paramsTrain.proj paramsTrain.tokB
@@ -253,12 +253,12 @@ def runDemo : IO Unit := do
     let splitLogits := split3.reshapeChecked #[batchU, maxLen]
     let delLogits := del3.reshapeChecked #[batchU, maxLen]
 
-    let mask := Tensor.Preserving.mul packedDisc.padmask packedDisc.flowmask
+    let mask := Tensor.mul packedDisc.padmask packedDisc.flowmask
     let contLoss := maskedMSE3d predLoc packedCont.anchor mask
     let discLoss := maskedCrossEntropy predTok packedDisc.anchor mask
     let splitLoss := maskedMSE splitLogits packedDisc.splitsTarget mask
     let delLoss := maskedBCEWithLogits delLogits packedDisc.delTarget mask
-    let total := Tensor.Preserving.add (Tensor.Preserving.add (Tensor.Preserving.add contLoss discLoss) splitLoss) delLoss
+    let total := Tensor.add (Tensor.add (Tensor.add contLoss discLoss) splitLoss) delLoss
 
     torch.Tensor.backwardLoss total
     if cfg.gradClip > 0 then
@@ -297,13 +297,13 @@ def runDemo : IO Unit := do
   let t2 := Tensor.unsqueeze t1 1
   let tExp := Tensor.expand t2 #[batchU, maxLen, 1]
   let timeEmb := Tensor.affine3d tExp params.timeW params.timeB
-  let hiddenState := Tensor.Preserving.tanh (Tensor.Preserving.add (Tensor.Preserving.add contEmb discEmb) timeEmb)
+  let hiddenState := Tensor.tanh (Tensor.add (Tensor.add contEmb discEmb) timeEmb)
   let predLoc := Tensor.affine3d hiddenState params.locW params.locB
 
   Tensor.saveTensor predLoc "examples_branching_mixed_pred.pt"
   Tensor.saveTensor packedCont.anchor "examples_branching_mixed_anchor.pt"
   Tensor.saveTensor packedDisc.anchor "examples_branching_mixed_tokens.pt"
-  let plotMask := Tensor.Preserving.mul packedDisc.padmask packedDisc.flowmask
+  let plotMask := Tensor.mul packedDisc.padmask packedDisc.flowmask
   Tensor.saveTensor plotMask "examples_branching_mixed_mask.pt"
   IO.println "Wrote examples_branching_mixed_pred.pt, examples_branching_mixed_anchor.pt, examples_branching_mixed_tokens.pt, examples_branching_mixed_mask.pt"
 

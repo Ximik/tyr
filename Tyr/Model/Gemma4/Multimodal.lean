@@ -19,6 +19,8 @@ import Tyr.Model.Gemma4.VLConfig
 namespace torch.gemma4
 
 variable {device : Device} {dtype visionDType projectorDType inputDType : DType}
+variable [DType.RealFloating dtype] [DType.RealFloating visionDType]
+variable [DType.RealFloating projectorDType] [DType.RealFloating inputDType]
 variable [DType.ConstantSupported dtype device]
 
 open torch
@@ -39,10 +41,10 @@ private def reqGradFalse {s : Shape} (t : Tensor { device := device, shape := s,
   Tensor.detach t
 
 private def clampMin {s : Shape} (x : Tensor { device := device, shape := s, dtype := dtype }) (lo : Float) : Tensor { device := device, shape := s, dtype := dtype } :=
-  Tensor.Preserving.clampFloat x lo (Float.ofBits 0x7ff0000000000000)
+  Tensor.clampFloat x lo (Float.ofBits 0x7ff0000000000000)
 
 private def clampMax {s : Shape} (x : Tensor { device := device, shape := s, dtype := dtype }) (hi : Float) : Tensor { device := device, shape := s, dtype := dtype } :=
-  Tensor.Preserving.clampFloat x (Float.ofBits 0xfff0000000000000) hi
+  Tensor.clampFloat x (Float.ofBits 0xfff0000000000000) hi
 
 private def clampRange {s : Shape}
     (x : Tensor { device := device, shape := s, dtype := dtype })
@@ -65,7 +67,7 @@ private def linear2d {tokens inDim outDim : UInt64}
   Tensor.reshapeChecked yDyn #[tokens, outDim]
 
 private def countMask2d {batch seq : UInt64} (mask : Tensor { device := device, shape := #[batch, seq], dtype := .Bool }) : IO UInt64 := do
-  let row : Tensor { device := device, shape := #[batch], dtype := .Int64 } := Tensor.reshapeChecked (Tensor.Preserving.sumDim (Tensor.toInt64 mask) 1 false) #[batch]
+  let row : Tensor { device := device, shape := #[batch], dtype := .Int64 } := Tensor.reshapeChecked (Tensor.sumDim (Tensor.toInt64 mask) 1 false) #[batch]
   let counts ← Tensor.toUInt64Array row
   pure (counts.foldl (· + ·) 0)
 
@@ -87,10 +89,10 @@ private def rmsNormNoScale2d {n dim : UInt64}
     (eps : Float := 1e-6)
     : Tensor { device := device, shape := #[n, dim], dtype := dtype } :=
   let xf : Tensor { device := device, shape := #[n, dim], dtype := .Float32 } := floatDynamic x
-  let var : Tensor { device := device, shape := #[n, 1], dtype := .Float32 } := Tensor.Preserving.meanDim (Tensor.Preserving.mul xf xf) 1 true
-  let inv : Tensor { device := device, shape := #[n, 1], dtype := .Float32 } := rsqrtDynamic (Tensor.Preserving.addScalar var eps)
+  let var : Tensor { device := device, shape := #[n, 1], dtype := .Float32 } := Tensor.meanDim (Tensor.mul xf xf) 1 true
+  let inv : Tensor { device := device, shape := #[n, 1], dtype := .Float32 } := rsqrtDynamic (Tensor.addScalar var eps)
   let inv : Tensor { device := device, shape := #[n, dim], dtype := .Float32 } := Tensor.expand inv #[n, dim]
-  Tensor.castLike x (Tensor.Preserving.mul xf inv)
+  Tensor.castLike x (Tensor.mul xf inv)
 
 private def rmsNormNoScale4d {a b c dim : UInt64}
     (x : Tensor { device := device, shape := #[a, b, c, dim], dtype := dtype })
@@ -164,7 +166,7 @@ def forward {patchRows patchCols : UInt64}
   let tokens := patchRows * patchCols
   let flat : Tensor { device := device, shape := #[tokens, VisionConfig.patchDim cfg.vision_config], dtype := inputDType } :=
     Tensor.reshapeChecked patchGrid #[tokens, VisionConfig.patchDim cfg.vision_config]
-  let flat := Tensor.Preserving.mulScalar (Tensor.Preserving.addScalar flat (-0.5)) 2.0
+  let flat := Tensor.mulScalar (Tensor.addScalar flat (-0.5)) 2.0
   let hidden : Tensor { device := device, shape := #[tokens, cfg.vision_config.hidden_size], dtype := dtype } := m.input_proj.forward2d flat
   let xTable : Tensor { device := device, shape := #[cfg.vision_config.position_embedding_size, cfg.vision_config.hidden_size], dtype := m.position_embedding_table.1.val } :=
     Tensor.reshapeChecked (sliceTyped m.position_embedding_table.2 0 0 1)
@@ -196,7 +198,7 @@ def forward {tokens : UInt64}
     : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype } :=
   let gate : Tensor { device := device, shape := #[tokens, cfg.intermediate_size], dtype := dtype } := m.gate_proj.forward2d x
   let up : Tensor { device := device, shape := #[tokens, cfg.intermediate_size], dtype := dtype } := m.up_proj.forward2d x
-  m.down_proj.forward2d (Tensor.Preserving.mul (Tensor.Preserving.gelu gate) up)
+  m.down_proj.forward2d (Tensor.mul (Tensor.gelu gate) up)
 
 end Gemma4VisionMLP
 
@@ -238,7 +240,7 @@ def forward {patchRows patchCols : UInt64}
     apply2dRotaryEmb k2 patchRows patchCols cfg.rope_theta
 
   let qh : Tensor { device := device, shape := #[1, cfg.num_attention_heads, tokens, cfg.head_dim], dtype := dtype } :=
-    Tensor.Preserving.mulScalar (transposeAttention q3) (Float.sqrt cfg.head_dim.toFloat)
+    Tensor.mulScalar (transposeAttention q3) (Float.sqrt cfg.head_dim.toFloat)
   let kh : Tensor { device := device, shape := #[1, cfg.num_key_value_heads, tokens, cfg.head_dim], dtype := dtype } := transposeAttention k3
   let vh : Tensor { device := device, shape := #[1, cfg.num_key_value_heads, tokens, cfg.head_dim], dtype := dtype } := transposeAttention v2
   let attn : Tensor { device := device, shape := #[1, cfg.num_attention_heads, tokens, cfg.head_dim], dtype := dtype } :=
@@ -288,8 +290,8 @@ namespace Gemma4VisionModel
 private def poolFeatures {patchRows patchCols : UInt64}
     (cfg : VLConfig)
     (x : Tensor { device := device, shape := #[patchRows * patchCols, cfg.vision_config.hidden_size], dtype := dtype })
-    : Tensor { device := device, shape := #[(patchRows / cfg.vision_config.pooling_kernel_size) * (patchCols / cfg.vision_config.pooling_kernel_size),
-        cfg.vision_config.hidden_size], dtype := dtype } :=
+    : SomeDTypeTensor #[(patchRows / cfg.vision_config.pooling_kernel_size) * (patchCols / cfg.vision_config.pooling_kernel_size),
+        cfg.vision_config.hidden_size] device :=
   let pool := cfg.vision_config.pooling_kernel_size
   let pooledRows := patchRows / pool
   let pooledCols := patchCols / pool
@@ -300,9 +302,11 @@ private def poolFeatures {patchRows patchCols : UInt64}
     avgPool2d xNchw pool
   let pooledNhwc : Tensor { device := device, shape := #[1, pooledRows, pooledCols, cfg.vision_config.hidden_size], dtype := dtype } :=
     (Tensor.permute pooled #[0, 2, 3, 1]).reshapeChecked #[1, pooledRows, pooledCols, cfg.vision_config.hidden_size]
-  Tensor.Preserving.mulScalar
-    (Tensor.reshapeChecked pooledNhwc #[pooledRows * pooledCols, cfg.vision_config.hidden_size])
-    (Float.sqrt cfg.vision_config.hidden_size.toFloat)
+  match Tensor.Promoting.mulScalar?
+      (Tensor.reshapeChecked pooledNhwc #[pooledRows * pooledCols, cfg.vision_config.hidden_size])
+      (Float.sqrt cfg.vision_config.hidden_size.toFloat) with
+  | .ok result => packExactTensor result.tensor
+  | .error message => nativeInvariantFailure s!"Gemma4 vision pooling: {message}"
 
 def forward {patchRows patchCols : UInt64}
     (cfg : VLConfig)
@@ -326,9 +330,9 @@ def forward {patchRows patchCols : UInt64}
         Tensor.expand (Tensor.reshapeChecked bias.2 #[1, cfg.vision_config.hidden_size]) #[nTok, cfg.vision_config.hidden_size]
       let scale : Tensor { device := device, shape := #[nTok, cfg.vision_config.hidden_size], dtype := scale.1.val } :=
         Tensor.expand (Tensor.reshapeChecked scale.2 #[1, cfg.vision_config.hidden_size]) #[nTok, cfg.vision_config.hidden_size]
-      promotedMul (promotedSub pooled bias).2 scale
+      promotedMul (promotedSub pooled.2 bias).2 scale
     | _, _ =>
-      packExactTensor pooled
+      pooled
 
 end Gemma4VisionModel
 

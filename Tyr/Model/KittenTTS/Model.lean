@@ -75,10 +75,10 @@ private def instanceNormCF {batch channels frames : UInt64}
     (x : Tensor { shape := #[batch, channels, frames], dtype := .Float32, device := device })
     (eps : Float := 1e-5)
     : Tensor { shape := #[batch, channels, frames], dtype := .Float32, device := device } :=
-  let mean : Tensor { shape := #[batch, channels, 1], dtype := .Float32, device := device } := Tensor.Preserving.meanDim x 2 true
+  let mean : Tensor { shape := #[batch, channels, 1], dtype := .Float32, device := device } := Tensor.meanDim x 2 true
   let meanE : Tensor { shape := #[batch, channels, frames], dtype := .Float32, device := device } := Tensor.expand mean #[batch, channels, frames]
   let centered : Tensor { shape := #[batch, channels, frames], dtype := .Float32, device := device } := x - meanE
-  let var : Tensor { shape := #[batch, channels, 1], dtype := .Float32, device := device } := Tensor.Preserving.meanDim (centered * centered) 2 true
+  let var : Tensor { shape := #[batch, channels, 1], dtype := .Float32, device := device } := Tensor.meanDim (centered * centered) 2 true
   let invStd : Tensor { shape := #[batch, channels, 1], dtype := .Float32, device := device } := Tensor.rsqrt (var + eps)
   let invStdE : Tensor { shape := #[batch, channels, frames], dtype := .Float32, device := device } := Tensor.expand invStd #[batch, channels, frames]
   centered * invStdE

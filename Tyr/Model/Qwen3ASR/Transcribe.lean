@@ -18,6 +18,7 @@ import Tyr.Tokenizer.Qwen3
 namespace torch.qwen3asr
 
 variable {device : Device} {dtype : DType}
+variable [DType.RealFloating dtype]
 /-- One offline ASR transcription result. -/
 structure ASRTranscription where
   language : String
@@ -30,7 +31,7 @@ structure ASRTranscription where
 structure Qwen3ForcedAligner where
   cfg : Qwen3ASRConfig
   device : Device
-  dtype : ExactDType
+  dtype : RealFloatingDType
   model : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype.val) cfg
   tok : tokenizer.qwen3.QwenTokenizer
   preprocessor : PreprocessorConfig

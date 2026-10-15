@@ -244,7 +244,7 @@ def referenceTraining {rows : UInt64}
   let gradOutF : Tensor { shape := #[rows, hiddenDim], dtype := .Float32, device := device } := gradOut.toFloat32
   let gradOutResidF : Tensor { shape := #[rows, hiddenDim], dtype := .Float32, device := device } := gradOutResid.toFloat32
   let inv2d : Tensor { shape := #[rows, 1], dtype := .Float32, device := device } :=
-    Tensor.rsqrt (Tensor.Preserving.meanDim (residF * residF) 1 true + rmsNormEps)
+    Tensor.rsqrt (Tensor.meanDim (residF * residF) 1 true + rmsNormEps)
   let expectedInv : Tensor { shape := #[rows], dtype := .Float32, device := device } := Tensor.reshapeChecked inv2d #[rows]
   let invFull : Tensor { shape := #[rows, hiddenDim], dtype := .Float32, device := device } := Tensor.expand inv2d #[rows, hiddenDim]
   let weight2d : Tensor { shape := #[1, hiddenDim], dtype := .Float32, device := device } := Tensor.reshapeChecked weightF #[1, hiddenDim]
@@ -257,7 +257,7 @@ def referenceTraining {rows : UInt64}
   let dot : Tensor { shape := #[rows, 1], dtype := .Float32, device := device } :=
     Tensor.sumDim (weightedGrad * residF) 1 true
   let correction : Tensor { shape := #[rows, 1], dtype := .Float32, device := device } :=
-    Tensor.Preserving.mulScalar (dot * inv2d * inv2d * inv2d) 0.0009765625
+    Tensor.mulScalar (dot * inv2d * inv2d * inv2d) 0.0009765625
   let correctionFull : Tensor { shape := #[rows, hiddenDim], dtype := .Float32, device := device } :=
     Tensor.expand correction #[rows, hiddenDim]
   let expectedGradInput : Tensor { shape := #[rows, hiddenDim], dtype := .BFloat16, device := device } :=

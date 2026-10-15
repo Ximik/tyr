@@ -447,7 +447,7 @@ It is an inventory aid, not the completion criterion.
   matrices via the transposed projection instead of the legacy mislabeled
   reduced QR. New typed ops with audited ABI entries: `eye`/`eyeFor`, `qr`,
   `qrReduced`, `svdReduced`, `svdvals`, `diagflat`, `spectralNorm`,
-  `nuclearNorm`, `Preserving.atan`, `maxAll`, `stack1d`, `grad` (VJP),
+  `nuclearNorm`, `atan`, `maxAll`, `stack1d`, `grad` (VJP),
   `fromFloatArray`, `multinomial`, `scatter2d`, `crossEntropy`, `layerNorm`,
   `onesFor`, `reshapeChecked`/`sliceChecked` (runtime-validated). The
   `max_all`/`min_all`/`multinomial` externs dropped their never-read shape

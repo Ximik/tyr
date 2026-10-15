@@ -18,6 +18,7 @@ import Tyr.Model.Flux.DoubleStreamBlock
 namespace torch.flux
 
 variable {device : Device} {dtype : DType}
+variable [DType.RealFloating dtype]
 /-- MLP embedder for timestep -/
 structure MLPEmbedder (in_dim hidden_dim : UInt64) (dtype : DType := .Float32) where
   /-- First Tensor.linear layer -/
@@ -31,12 +32,14 @@ namespace MLPEmbedder
 
 /-- Initialize MLP embedder -/
 def init (in_dim hidden_dim : UInt64) (device : Device := .CPU) (dtype : DType := .Float32) : IO (MLPEmbedder (device := device) (dtype := dtype) in_dim hidden_dim) := do
+  let floating ← IO.ofExcept (DType.realFloating? dtype)
+  let _ := floating.down
   let std := Float.sqrt (2.0 / in_dim.toFloat)
   let in_l ← randomWeight (dtype := dtype) (device := device) #[hidden_dim, in_dim]
   let out_l ← randomWeight (dtype := dtype) (device := device) #[hidden_dim, hidden_dim]
   pure {
-    in_layer := (← Tensor.parameter (Tensor.Preserving.mulScalar in_l std))
-    out_layer := (← Tensor.parameter (Tensor.Preserving.mulScalar out_l std))
+    in_layer := (← Tensor.parameter (Tensor.mulScalar in_l std))
+    out_layer := (← Tensor.parameter (Tensor.mulScalar out_l std))
   }
 
 /-- Forward pass: linear → SiLU → linear -/
@@ -45,7 +48,7 @@ def forward {batch in_dim hidden_dim : UInt64}
     (x : Tensor { dtype := dtype, device := device, shape := #[batch, in_dim] })
     : Tensor { dtype := dtype, device := device, shape := #[batch, hidden_dim] } :=
   let h := Tensor.linear x emb.in_layer
-  let h := Tensor.Preserving.silu h
+  let h := Tensor.silu h
   Tensor.linear h emb.out_layer
 
 end MLPEmbedder
@@ -88,6 +91,8 @@ namespace FluxModel
 
 /-- Initialize Flux model -/
 def init (cfg : FluxConfig) (device : Device := .CPU) (dtype : DType := .Float32) : IO (FluxModel (device := device) (dtype := dtype) cfg) := do
+  let floating ← IO.ofExcept (DType.realFloating? dtype)
+  let _ := floating.down
   let std := Float.sqrt (2.0 / cfg.hidden_size.toFloat)
 
   -- Input projections
@@ -122,8 +127,8 @@ def init (cfg : FluxConfig) (device : Device := .CPU) (dtype : DType := .Float32
   let final_mod ← randomWeight (dtype := dtype) (device := device) #[cfg.hidden_size * 2, cfg.hidden_size]
 
   pure {
-    img_in := (← Tensor.parameter (Tensor.Preserving.mulScalar img_in std))
-    txt_in := (← Tensor.parameter (Tensor.Preserving.mulScalar txt_in std))
+    img_in := (← Tensor.parameter (Tensor.mulScalar img_in std))
+    txt_in := (← Tensor.parameter (Tensor.mulScalar txt_in std))
     time_in
     double_blocks
     single_blocks
@@ -132,8 +137,8 @@ def init (cfg : FluxConfig) (device : Device := .CPU) (dtype : DType := .Float32
     single_stream_modulation
     final_layer := {
       norm
-      linear := (← Tensor.parameter (Tensor.Preserving.mulScalar final_linear std))
-      modulation := (← Tensor.parameter (Tensor.Preserving.mulScalar final_mod std))
+      linear := (← Tensor.parameter (Tensor.mulScalar final_linear std))
+      modulation := (← Tensor.parameter (Tensor.mulScalar final_mod std))
     }
   }
 
@@ -208,7 +213,7 @@ def forward {batch img_seq txt_seq : UInt64} (cfg : FluxConfig)
   let img_out := Tensor.reshapeChecked img_slice #[batch, img_seq, cfg.hidden_size]
 
   -- Final layer with modulation
-  let mod := Tensor.Preserving.silu vec
+  let mod := Tensor.silu vec
   let mod2 := Tensor.linear mod model.final_layer.modulation  -- [batch, hidden_size * 2]
   let shift_slice := sliceTyped mod2 1 0 cfg.hidden_size
   let scale_slice := sliceTyped mod2 1 cfg.hidden_size cfg.hidden_size

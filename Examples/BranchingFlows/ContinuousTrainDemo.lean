@@ -27,7 +27,7 @@ private def uniformTimeDist : TimeDist :=
 private def linBridge {dim : UInt64} (_ : Unit)
     (x0 x1 : Tensor { dtype := .Float32, shape := #[dim], device := .CPU }) (t0 t1 : Float) : Tensor { dtype := .Float32, shape := #[dim], device := .CPU } :=
   let dt := t1 - t0
-  Tensor.Preserving.add x0 (Tensor.Preserving.mulScalar (Tensor.Preserving.sub x1 x0) dt)
+  Tensor.add x0 (Tensor.mulScalar (Tensor.sub x1 x0) dt)
 
 structure ToyParams (dim : UInt64) where
   W : Tensor { dtype := .Float32, shape := #[dim, dim], device := .CPU }

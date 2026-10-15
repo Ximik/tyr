@@ -22,7 +22,7 @@ open torch
 def initWeight (shape : Shape) (fanIn : UInt64) (dtype : DType := .Float32) (device : Device := .CPU) : IO (Tensor { device := device, shape := shape, dtype := dtype }) := do
   let std := Float.sqrt (2.0 / fanIn.toFloat)
   let w ← Tensor.randn shape (device := device)
-  let w ← IO.ofExcept (Tensor.Preserving.mulScalar? w std)
+  let w ← IO.ofExcept (Tensor.mulScalar? w std)
   let w ← IO.ofExcept (w.castDType? dtype)
   Tensor.parameter w
 

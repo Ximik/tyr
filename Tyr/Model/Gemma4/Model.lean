@@ -19,6 +19,7 @@ import Tyr.Model.Generation
 namespace torch.gemma4
 
 variable {device : Device} {dtype : DType}
+variable [DType.RealFloating dtype]
 variable [DType.ConstantSupported dtype device]
 
 open torch
@@ -46,11 +47,11 @@ def forward2d {n dim : UInt64}
     (x : Tensor { device := device, shape := #[n, dim], dtype := dtype })
     : Tensor { device := device, shape := #[n, dim], dtype := dtype } :=
   let xf : Tensor { device := device, shape := #[n, dim], dtype := .Float32 } := floatDynamic x
-  let var : Tensor { device := device, shape := #[n, 1], dtype := .Float32 } := Tensor.Preserving.meanDim (Tensor.Preserving.mul xf xf) 1 true
-  let inv : Tensor { device := device, shape := #[n, 1], dtype := .Float32 } := rsqrtDynamic (Tensor.Preserving.addScalar var m.eps)
+  let var : Tensor { device := device, shape := #[n, 1], dtype := .Float32 } := Tensor.meanDim (Tensor.mul xf xf) 1 true
+  let inv : Tensor { device := device, shape := #[n, 1], dtype := .Float32 } := rsqrtDynamic (Tensor.addScalar var m.eps)
   let inv : Tensor { device := device, shape := #[n, dim], dtype := .Float32 } := Tensor.expand inv #[n, dim]
   let scale : Tensor { device := device, shape := #[n, dim], dtype := .Float32 } := Tensor.expand (Tensor.reshapeChecked (floatDynamic m.weight.2) #[1, dim]) #[n, dim]
-  Tensor.castLike x (Tensor.Preserving.mul (Tensor.Preserving.mul xf inv) scale)
+  Tensor.castLike x (Tensor.mul (Tensor.mul xf inv) scale)
 
 def forward3d {batch seq dim : UInt64}
     (m : Gemma4RMSNorm (device := device) dim)
@@ -73,10 +74,10 @@ private def rmsNormNoScale2d {n dim : UInt64}
     (eps : Float := 1e-6)
     : Tensor { device := device, shape := #[n, dim], dtype := dtype } :=
   let xf : Tensor { device := device, shape := #[n, dim], dtype := .Float32 } := floatDynamic x
-  let var : Tensor { device := device, shape := #[n, 1], dtype := .Float32 } := Tensor.Preserving.meanDim (Tensor.Preserving.mul xf xf) 1 true
-  let inv : Tensor { device := device, shape := #[n, 1], dtype := .Float32 } := rsqrtDynamic (Tensor.Preserving.addScalar var eps)
+  let var : Tensor { device := device, shape := #[n, 1], dtype := .Float32 } := Tensor.meanDim (Tensor.mul xf xf) 1 true
+  let inv : Tensor { device := device, shape := #[n, 1], dtype := .Float32 } := rsqrtDynamic (Tensor.addScalar var eps)
   let inv : Tensor { device := device, shape := #[n, dim], dtype := .Float32 } := Tensor.expand inv #[n, dim]
-  Tensor.castLike x (Tensor.Preserving.mul xf inv)
+  Tensor.castLike x (Tensor.mul xf inv)
 
 private def rmsNormNoScale4d {a b c dim : UInt64}
     (x : Tensor { device := device, shape := #[a, b, c, dim], dtype := dtype })
@@ -92,11 +93,11 @@ private def rmsNormWeighted4dSlice {a b c dim maxDim : UInt64} {weightDType : DT
     : Tensor { device := device, shape := #[a, b, c, dim], dtype := dtype } :=
   let w : Tensor { device := device, shape := #[dim], dtype := weightDType } := sliceTyped weight 0 0 dim
   let xf : Tensor { device := device, shape := #[a * b * c, dim], dtype := dtype } := Tensor.reshapeChecked x #[a * b * c, dim]
-  let var : Tensor { device := device, shape := #[a * b * c, 1], dtype := dtype } := Tensor.Preserving.meanDim (Tensor.Preserving.mul xf xf) 1 true
-  let inv : Tensor { device := device, shape := #[a * b * c, 1], dtype := dtype } := rsqrtDynamic (Tensor.Preserving.addScalar var eps)
+  let var : Tensor { device := device, shape := #[a * b * c, 1], dtype := dtype } := Tensor.meanDim (Tensor.mul xf xf) 1 true
+  let inv : Tensor { device := device, shape := #[a * b * c, 1], dtype := dtype } := rsqrtDynamic (Tensor.addScalar var eps)
   let inv : Tensor { device := device, shape := #[a * b * c, dim], dtype := dtype } := Tensor.expand inv #[a * b * c, dim]
   let scale : Tensor { device := device, shape := #[a * b * c, dim], dtype := .Float32 } := Tensor.expand (Tensor.reshapeChecked (floatDynamic w) #[1, dim]) #[a * b * c, dim]
-  Tensor.castLike x (Tensor.reshapeChecked ((promotedMul (Tensor.Preserving.mul xf inv) scale).2) #[a, b, c, dim])
+  Tensor.castLike x (Tensor.reshapeChecked ((promotedMul (Tensor.mul xf inv) scale).2) #[a, b, c, dim])
 
 private def rmsNormNoScale4dSlice {a b c dim : UInt64}
     (x : Tensor { device := device, shape := #[a, b, c, dim], dtype := dtype })
@@ -120,7 +121,7 @@ def forward {batch seq : UInt64}
     (m : Gemma4MLP (dtype := dtype) (device := device) cfg)
     (x : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
     : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } :=
-  Tensor.linear3d (Tensor.Preserving.mul (Tensor.Preserving.gelu (Tensor.linear3d x m.gate_proj)) (Tensor.linear3d x m.up_proj)) m.down_proj
+  Tensor.linear3d (Tensor.mul (Tensor.gelu (Tensor.linear3d x m.gate_proj)) (Tensor.linear3d x m.up_proj)) m.down_proj
 
 end Gemma4MLP
 
@@ -144,16 +145,17 @@ def forward {tokens : UInt64}
   let scale : Tensor ⟨#[tokens, cfg.hidden_size], .Float32, device⟩ :=
     Tensor.expand (Tensor.reshapeChecked (floatDynamic m.scale.2) #[1, cfg.hidden_size]) #[tokens, cfg.hidden_size]
   let normed : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := .Float32 } :=
-    match Tensor.ofRaw (promotedMul normed scale).2.raw with
-    | .ok tensor => Tensor.Preserving.mulScalar tensor scaleRoot
+    match Tensor.ofRaw (σ := ⟨#[tokens, cfg.hidden_size], .Float32, device⟩)
+        (promotedMul normed scale).2.raw with
+    | .ok tensor => Tensor.mulScalar tensor scaleRoot
     | .error message => nativeInvariantFailure s!"Gemma4 router computation: {message}"
   let logitsDyn : Tensor { device := device, shape := #[tokens, cfg.num_experts], dtype := .Float32 } := einsumChecked "eh,th->te" (floatDynamic m.proj.2) normed
   let logits : Tensor { device := device, shape := #[tokens, cfg.num_experts], dtype := .Float32 } := Tensor.reshapeChecked logitsDyn #[tokens, cfg.num_experts]
-  let probs : Tensor { device := device, shape := #[tokens, cfg.num_experts], dtype := .Float32 } := Tensor.Preserving.softmax logits (-1)
+  let probs : Tensor { device := device, shape := #[tokens, cfg.num_experts], dtype := .Float32 } := Tensor.softmax logits (-1)
   let (topValsRaw, topIdx) := topK2d probs cfg.top_k_experts 1
-  let denom : Tensor { device := device, shape := #[tokens, 1], dtype := .Float32 } := Tensor.Preserving.sumDim topValsRaw 1 true
+  let denom : Tensor { device := device, shape := #[tokens, 1], dtype := .Float32 } := Tensor.sumDim topValsRaw 1 true
   let denom : Tensor { device := device, shape := #[tokens, cfg.top_k_experts], dtype := .Float32 } := Tensor.expand denom #[tokens, cfg.top_k_experts]
-  let topVals : Tensor { device := device, shape := #[tokens, cfg.top_k_experts], dtype := .Float32 } := Tensor.Preserving.div topValsRaw denom
+  let topVals : Tensor { device := device, shape := #[tokens, cfg.top_k_experts], dtype := .Float32 } := Tensor.div topValsRaw denom
   let flatIdx : Tensor { device := device, shape := #[tokens * cfg.top_k_experts], dtype := .Int64 } := Tensor.reshapeChecked topIdx #[tokens * cfg.top_k_experts]
   let scalesFlat : Tensor { device := device, shape := #[tokens * cfg.top_k_experts], dtype := m.per_expert_scale.1.val } :=
     Tensor.indexSelect m.per_expert_scale.2 flatIdx
@@ -357,7 +359,7 @@ private def attentionSlidingPrefillWithMask {batch seq : UInt64}
   let k2 : Tensor { device := device, shape := #[batch, seq, cfg.num_key_value_heads, cfg.head_dim], dtype := dtype } := Tensor.applyRotary k1 cos sin
   let v2 : Tensor { device := device, shape := #[batch, seq, cfg.num_key_value_heads, cfg.head_dim], dtype := dtype } := rmsNormNoScale4dSlice vRaw cfg.rms_norm_eps
   let qh : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, seq, cfg.head_dim], dtype := dtype } :=
-    Tensor.Preserving.mulScalar (transposeAttention q2) (attentionScale cfg.head_dim)
+    Tensor.mulScalar (transposeAttention q2) (attentionScale cfg.head_dim)
   let kh : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, seq, cfg.head_dim], dtype := dtype } := transposeAttention k2
   let vh : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, seq, cfg.head_dim], dtype := dtype } := transposeAttention v2
   let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, seq, cfg.head_dim], dtype := dtype } :=
@@ -402,7 +404,7 @@ private def attentionFullPrefillWithMask {batch seq : UInt64}
   let k2 : Tensor { device := device, shape := #[batch, seq, Config.fullNumKVHeads cfg, Config.fullHeadDim cfg], dtype := dtype } := Tensor.applyRotary k1 cos sin
   let v2 : Tensor { device := device, shape := #[batch, seq, Config.fullNumKVHeads cfg, Config.fullHeadDim cfg], dtype := dtype } := rmsNormNoScale4dSlice vRaw cfg.rms_norm_eps
   let qh : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, seq, Config.fullHeadDim cfg], dtype := dtype } :=
-    Tensor.Preserving.mulScalar (transposeAttention q2) (attentionScale (Config.fullHeadDim cfg))
+    Tensor.mulScalar (transposeAttention q2) (attentionScale (Config.fullHeadDim cfg))
   let kh : Tensor { device := device, shape := #[batch, Config.fullNumKVHeads cfg, seq, Config.fullHeadDim cfg], dtype := dtype } := transposeAttention k2
   let vh : Tensor { device := device, shape := #[batch, Config.fullNumKVHeads cfg, seq, Config.fullHeadDim cfg], dtype := dtype } := transposeAttention v2
   let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, seq, Config.fullHeadDim cfg], dtype := dtype } :=
@@ -441,7 +443,7 @@ private def attentionSlidingNoCache {batch seq : UInt64}
   let k2 : Tensor { device := device, shape := #[batch, seq, cfg.num_key_value_heads, cfg.head_dim], dtype := dtype } := Tensor.applyRotary k1 cos sin
   let v2 : Tensor { device := device, shape := #[batch, seq, cfg.num_key_value_heads, cfg.head_dim], dtype := dtype } := rmsNormNoScale4dSlice v0 cfg.rms_norm_eps
   let qh : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, seq, cfg.head_dim], dtype := dtype } :=
-    Tensor.Preserving.mulScalar (transposeAttention q2) (attentionScale cfg.head_dim)
+    Tensor.mulScalar (transposeAttention q2) (attentionScale cfg.head_dim)
   let kh : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, seq, cfg.head_dim], dtype := dtype } := transposeAttention k2
   let vh : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, seq, cfg.head_dim], dtype := dtype } := transposeAttention v2
   let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, seq, cfg.head_dim], dtype := dtype } :=
@@ -470,7 +472,7 @@ private def attentionFullNoCache {batch seq : UInt64}
   let k2 : Tensor { device := device, shape := #[batch, seq, Config.fullNumKVHeads cfg, Config.fullHeadDim cfg], dtype := dtype } := Tensor.applyRotary k1 cos sin
   let v2 : Tensor { device := device, shape := #[batch, seq, Config.fullNumKVHeads cfg, Config.fullHeadDim cfg], dtype := dtype } := rmsNormNoScale4dSlice vRaw cfg.rms_norm_eps
   let qh : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, seq, Config.fullHeadDim cfg], dtype := dtype } :=
-    Tensor.Preserving.mulScalar (transposeAttention q2) (attentionScale (Config.fullHeadDim cfg))
+    Tensor.mulScalar (transposeAttention q2) (attentionScale (Config.fullHeadDim cfg))
   let kh : Tensor { device := device, shape := #[batch, Config.fullNumKVHeads cfg, seq, Config.fullHeadDim cfg], dtype := dtype } := transposeAttention k2
   let vh : Tensor { device := device, shape := #[batch, Config.fullNumKVHeads cfg, seq, Config.fullHeadDim cfg], dtype := dtype } := transposeAttention v2
   let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, seq, Config.fullHeadDim cfg], dtype := dtype } :=
@@ -492,7 +494,7 @@ private def attentionSlidingWithCache {batch seq : UInt64}
   let q1 := rmsNormWeighted4dSlice m.q_norm.weight.2 q0 m.q_norm.eps
   let q2 : Tensor { device := device, shape := #[batch, seq, cfg.num_attention_heads, cfg.head_dim], dtype := dtype } := Tensor.applyRotary q1 cos sin
   let qh : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, seq, cfg.head_dim], dtype := dtype } :=
-    Tensor.Preserving.mulScalar (transposeAttention q2) (attentionScale cfg.head_dim)
+    Tensor.mulScalar (transposeAttention q2) (attentionScale cfg.head_dim)
   match sharedSource with
   | some src =>
     let (kAll0, vAll0) := cacheSliceSliding (kvLen := seq) cfg src
@@ -542,7 +544,7 @@ private def attentionFullWithCache {batch seq : UInt64}
   let q1 := rmsNormWeighted4dSlice m.q_norm.weight.2 q0 m.q_norm.eps
   let q2 : Tensor { device := device, shape := #[batch, seq, cfg.num_attention_heads, Config.fullHeadDim cfg], dtype := dtype } := Tensor.applyRotary q1 cos sin
   let qh : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, seq, Config.fullHeadDim cfg], dtype := dtype } :=
-    Tensor.Preserving.mulScalar (transposeAttention q2) (attentionScale (Config.fullHeadDim cfg))
+    Tensor.mulScalar (transposeAttention q2) (attentionScale (Config.fullHeadDim cfg))
   match sharedSource with
   | some src =>
     let (kAll, vAll) := cacheSliceFull (kvLen := seq) cfg src
@@ -596,7 +598,7 @@ private def attentionSlidingStep {batch : UInt64}
   let q1 := rmsNormWeighted4dSlice m.q_norm.weight.2 q0 m.q_norm.eps
   let q2 : Tensor { device := device, shape := #[batch, 1, cfg.num_attention_heads, cfg.head_dim], dtype := dtype } := Tensor.applyRotary q1 cos sin
   let qh : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, 1, cfg.head_dim], dtype := dtype } :=
-    Tensor.Preserving.mulScalar (transposeAttention q2) (attentionScale cfg.head_dim)
+    Tensor.mulScalar (transposeAttention q2) (attentionScale cfg.head_dim)
   match sharedSource with
   | some src =>
     let kvLen := src.seq
@@ -661,7 +663,7 @@ private def attentionFullStep {batch : UInt64}
   let q1 := rmsNormWeighted4dSlice m.q_norm.weight.2 q0 m.q_norm.eps
   let q2 : Tensor { device := device, shape := #[batch, 1, cfg.num_attention_heads, Config.fullHeadDim cfg], dtype := dtype } := Tensor.applyRotary q1 cos sin
   let qh : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, 1, Config.fullHeadDim cfg], dtype := dtype } :=
-    Tensor.Preserving.mulScalar (transposeAttention q2) (attentionScale (Config.fullHeadDim cfg))
+    Tensor.mulScalar (transposeAttention q2) (attentionScale (Config.fullHeadDim cfg))
   match sharedSource with
   | some src =>
     let kvLen := src.seq
@@ -801,7 +803,7 @@ private def applyLayerScalar {batch seq : UInt64}
     (x : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
     : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } :=
   let s : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } := Tensor.expand (Tensor.reshapeChecked scale #[1, 1, 1]) #[batch, seq, cfg.hidden_size]
-  Tensor.Preserving.mul x s
+  Tensor.mul x s
 
 private def applyPerLayerInput {batch seq : UInt64}
     (cfg : Config)
@@ -811,11 +813,11 @@ private def applyPerLayerInput {batch seq : UInt64}
     : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } :=
   let residual := hidden
   let gated : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size_per_layer_input], dtype := dtype } :=
-    Tensor.Preserving.gelu (Tensor.linear3d hidden block.per_layer_input_gate)
-  let mixed := Tensor.Preserving.mul gated perLayerInput
+    Tensor.gelu (Tensor.linear3d hidden block.per_layer_input_gate)
+  let mixed := Tensor.mul gated perLayerInput
   let projected : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } := Tensor.linear3d mixed block.per_layer_projection
   let projected := block.post_per_layer_input_norm.forward3d projected
-  Tensor.Preserving.add residual projected
+  Tensor.add residual projected
 
 def forward {batch seq : UInt64}
     (cfg : Config)
@@ -830,7 +832,7 @@ def forward {batch seq : UInt64}
   let residual1 := x
   let h1 := layer.input_layernorm.forward3d x
   let attn := layer.self_attn.forward cfg layer.layerType h1 slidingCos slidingSin fullCos fullSin
-  let h2 := Tensor.Preserving.add residual1 (layer.post_attention_layernorm.forward3d attn)
+  let h2 := Tensor.add residual1 (layer.post_attention_layernorm.forward3d attn)
 
   let residual2 := h2
   let h3 := layer.pre_feedforward_layernorm.forward3d h2
@@ -846,10 +848,10 @@ def forward {batch seq : UInt64}
         moe.pre_feedforward_layernorm_2.forward2d routerInput
       let expert2d := moe.experts.forward2d cfg expertInput2d topVals.2 topIdx
       let expert3d : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } := Tensor.reshapeChecked expert2d #[batch, seq, cfg.hidden_size]
-      Tensor.Preserving.add denseBranch (moe.post_feedforward_layernorm_2.forward3d expert3d)
+      Tensor.add denseBranch (moe.post_feedforward_layernorm_2.forward3d expert3d)
     | none =>
       mlpOut
-  let h4 := Tensor.Preserving.add residual2 (layer.post_feedforward_layernorm.forward3d ffCombined)
+  let h4 := Tensor.add residual2 (layer.post_feedforward_layernorm.forward3d ffCombined)
   let h5 :=
     match layer.per_layer_input, perLayerInput with
     | some block, some p => applyPerLayerInput cfg block h4 p
@@ -881,7 +883,7 @@ def forwardWithCache {batch seq : UInt64}
       fullSin
       layerCache
       sharedSource
-  let h2 := Tensor.Preserving.add residual1 (layer.post_attention_layernorm.forward3d attn)
+  let h2 := Tensor.add residual1 (layer.post_attention_layernorm.forward3d attn)
 
   let residual2 := h2
   let h3 := layer.pre_feedforward_layernorm.forward3d h2
@@ -897,10 +899,10 @@ def forwardWithCache {batch seq : UInt64}
         moe.pre_feedforward_layernorm_2.forward2d routerInput
       let expert2d := moe.experts.forward2d cfg expertInput2d topVals.2 topIdx
       let expert3d : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } := Tensor.reshapeChecked expert2d #[batch, seq, cfg.hidden_size]
-      Tensor.Preserving.add denseBranch (moe.post_feedforward_layernorm_2.forward3d expert3d)
+      Tensor.add denseBranch (moe.post_feedforward_layernorm_2.forward3d expert3d)
     | none =>
       mlpOut
-  let h4 := Tensor.Preserving.add residual2 (layer.post_feedforward_layernorm.forward3d ffCombined)
+  let h4 := Tensor.add residual2 (layer.post_feedforward_layernorm.forward3d ffCombined)
   let h5 :=
     match layer.per_layer_input, perLayerInput with
     | some block, some p => applyPerLayerInput cfg block h4 p
@@ -932,7 +934,7 @@ def forwardStep {batch : UInt64}
       fullSin
       layerCache
       sharedSource
-  let h2 := Tensor.Preserving.add residual1 (layer.post_attention_layernorm.forward3d attn)
+  let h2 := Tensor.add residual1 (layer.post_attention_layernorm.forward3d attn)
 
   let residual2 := h2
   let h3 := layer.pre_feedforward_layernorm.forward3d h2
@@ -947,10 +949,10 @@ def forwardStep {batch : UInt64}
         moe.pre_feedforward_layernorm_2.forward2d routerInput
       let expert2d := moe.experts.forward2d cfg expertInput2d topVals.2 topIdx
       let expert3d : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := dtype } := Tensor.reshapeChecked expert2d #[batch, 1, cfg.hidden_size]
-      Tensor.Preserving.add denseBranch (moe.post_feedforward_layernorm_2.forward3d expert3d)
+      Tensor.add denseBranch (moe.post_feedforward_layernorm_2.forward3d expert3d)
     | none =>
       mlpOut
-  let h4 := Tensor.Preserving.add residual2 (layer.post_feedforward_layernorm.forward3d ffCombined)
+  let h4 := Tensor.add residual2 (layer.post_feedforward_layernorm.forward3d ffCombined)
   let h5 :=
     match layer.per_layer_input, perLayerInput with
     | some block, some p => applyPerLayerInput cfg block h4 p
@@ -984,7 +986,7 @@ def forwardPrefillWithMask {batch seq : UInt64}
       slidingAttnMask
       fullAttnMask
       layerCache
-  let h2 := Tensor.Preserving.add residual1 (layer.post_attention_layernorm.forward3d attn)
+  let h2 := Tensor.add residual1 (layer.post_attention_layernorm.forward3d attn)
 
   let residual2 := h2
   let h3 := layer.pre_feedforward_layernorm.forward3d h2
@@ -1000,10 +1002,10 @@ def forwardPrefillWithMask {batch seq : UInt64}
         moe.pre_feedforward_layernorm_2.forward2d routerInput
       let expert2d := moe.experts.forward2d cfg expertInput2d topVals.2 topIdx
       let expert3d : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } := Tensor.reshapeChecked expert2d #[batch, seq, cfg.hidden_size]
-      Tensor.Preserving.add denseBranch (moe.post_feedforward_layernorm_2.forward3d expert3d)
+      Tensor.add denseBranch (moe.post_feedforward_layernorm_2.forward3d expert3d)
     | none =>
       mlpOut
-  let h4 := Tensor.Preserving.add residual2 (layer.post_feedforward_layernorm.forward3d ffCombined)
+  let h4 := Tensor.add residual2 (layer.post_feedforward_layernorm.forward3d ffCombined)
   let h5 :=
     match layer.per_layer_input, perLayerInput with
     | some block, some p => applyPerLayerInput cfg block h4 p
@@ -1041,7 +1043,7 @@ def embedTokens {batch seq : UInt64}
     (m : Gemma4Model (dtype := dtype) (device := device) cfg)
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } :=
-  Tensor.Preserving.mulScalar (Tensor.embedding inputIds m.embed_tokens) (Float.sqrt cfg.hidden_size.toFloat)
+  Tensor.mulScalar (Tensor.embedding inputIds m.embed_tokens) (Float.sqrt cfg.hidden_size.toFloat)
 
 def computePerLayerInputs {batch seq : UInt64}
     (cfg : Config)
@@ -1052,18 +1054,18 @@ def computePerLayerInputs {batch seq : UInt64}
   match m.embed_tokens_per_layer, m.per_layer_model_projection, m.per_layer_projection_norm with
   | some tokEmbTable, some projW, some projNorm =>
     let tokEmbFlat : Tensor { device := device, shape := #[batch, seq, cfg.num_hidden_layers * cfg.hidden_size_per_layer_input], dtype := dtype } :=
-      Tensor.Preserving.mulScalar
+      Tensor.mulScalar
         (Tensor.embedding inputIds tokEmbTable)
         (Float.sqrt cfg.hidden_size_per_layer_input.toFloat)
     let tokEmb : Tensor { device := device, shape := #[batch, seq, cfg.num_hidden_layers, cfg.hidden_size_per_layer_input], dtype := dtype } :=
       Tensor.reshapeChecked tokEmbFlat #[batch, seq, cfg.num_hidden_layers, cfg.hidden_size_per_layer_input]
     let projScale := 1.0 / Float.sqrt cfg.hidden_size.toFloat
     let projFlat : Tensor { device := device, shape := #[batch, seq, cfg.num_hidden_layers * cfg.hidden_size_per_layer_input], dtype := dtype } :=
-      Tensor.Preserving.mulScalar (Tensor.linear3d inputsEmbeds projW) projScale
+      Tensor.mulScalar (Tensor.linear3d inputsEmbeds projW) projScale
     let proj4d : Tensor { device := device, shape := #[batch, seq, cfg.num_hidden_layers, cfg.hidden_size_per_layer_input], dtype := dtype } :=
       Tensor.reshapeChecked projFlat #[batch, seq, cfg.num_hidden_layers, cfg.hidden_size_per_layer_input]
     let proj4d := projNorm.forward4d proj4d
-    some (Tensor.Preserving.mulScalar (Tensor.Preserving.add proj4d tokEmb) (Float.sqrt 0.5))
+    some (Tensor.mulScalar (Tensor.add proj4d tokEmb) (Float.sqrt 0.5))
   | _, _, _ =>
     none
 

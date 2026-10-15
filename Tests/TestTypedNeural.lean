@@ -95,12 +95,13 @@ open torch
   let values := (Tensor.fromFloatArray
     #[0.17, -0.41, 0.83, 1.27, 0.9, 0.5, -0.7, 1.1]).reshapeChecked #[1, 2, 4]
   let weights := Tensor.fromFloatArray #[0.73, 1.19, -0.67, 1.53]
-  for dtype in #[DType.Float32, .BFloat16] do
+  for selected in #[RealFloatingDType.ofDType .Float32, RealFloatingDType.ofDType .BFloat16] do
+    let dtype := selected.val
     let x := values.castDType dtype
     let w := weights.castDType dtype
     let norm : RMSNorm 4 dtype := { weight := w, eps := ⟨0.01⟩ }
     let normalized := Tensor.rmsNormWeighted x.toFloat32 (Tensor.ones #[4]) 0.01
-    let expected := Tensor.Preserving.mul (Tensor.castLike x normalized) (w.expand #[1, 2, 4])
+    let expected := Tensor.mul (Tensor.castLike x normalized) (w.expand #[1, 2, 4])
     let outputs := #[norm.forward3d x,
       (norm.forward2d (x.reshapeChecked #[2, 4])).reshapeChecked #[1, 2, 4],
       (norm.forward4d (x.reshapeChecked #[1, 1, 2, 4])).reshapeChecked #[1, 2, 4],

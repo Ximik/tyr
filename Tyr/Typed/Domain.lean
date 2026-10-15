@@ -39,6 +39,18 @@ instance {dtype : DType} [h : InDomain (reluDomain dtype)] : Relu dtype := ⟨h.
 instance {dtype : DType} [h : InDomain (orderedDomain dtype)] : Ordered dtype := ⟨h.valid⟩
 instance {dtype : DType} [h : InDomain (meanDomain dtype)] : Mean dtype := ⟨h.valid⟩
 
+instance {dtype : DType} [h : RealFloating dtype] : Relu dtype := by
+  constructor
+  cases dtype <;> first | rfl | cases h.valid
+
+instance {dtype : DType} [h : RealFloating dtype] : Ordered dtype := by
+  constructor
+  cases dtype <;> first | rfl | cases h.valid
+
+instance {dtype : DType} [h : RealFloating dtype] : Mean dtype := by
+  constructor
+  cases dtype <;> first | rfl | cases h.valid
+
 def checkRelu (dtype : DType) : Except String Unit :=
   if dtype.reluDomain then .ok ()
   else .error s!"relu requires a real numeric dtype, got {dtype}"

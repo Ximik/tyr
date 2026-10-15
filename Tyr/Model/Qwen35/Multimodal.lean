@@ -17,6 +17,7 @@ import Tyr.Model.Utils
 namespace torch.qwen35
 
 variable {device : Device} {dtype visionDType : DType}
+variable [DType.RealFloating dtype] [DType.RealFloating visionDType]
 variable [DType.ConstantSupported dtype device]
 
 open torch
@@ -26,7 +27,7 @@ private def addBias2d {n d : UInt64}
     (x : Tensor { device := device, shape := #[n, d], dtype := dtype })
     (b : Tensor { device := device, shape := #[d], dtype := dtype })
     : Tensor { device := device, shape := #[n, d], dtype := dtype } :=
-  Tensor.Preserving.add x (Tensor.expand (Tensor.reshapeChecked b #[1, d]) #[n, d])
+  Tensor.add x (Tensor.expand (Tensor.reshapeChecked b #[1, d]) #[n, d])
 
 private def linear2d {tokens in_dim out_dim : UInt64}
     (x : Tensor { device := device, shape := #[tokens, in_dim], dtype := dtype })
@@ -101,7 +102,7 @@ def forward {tokens : UInt64}
     : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype } :=
   let h : Tensor { device := device, shape := #[tokens, cfg.intermediate_size], dtype := dtype } :=
     linear2d x m.linear_fc1_weight m.linear_fc1_bias
-  linear2d (Tensor.Preserving.gelu h) m.linear_fc2_weight m.linear_fc2_bias
+  linear2d (Tensor.gelu h) m.linear_fc2_weight m.linear_fc2_bias
 
 end Qwen35VisionMLP
 
@@ -210,8 +211,8 @@ def forward {tokens : UInt64}
     (m : Qwen35VisionBlock (dtype := dtype) (device := device) cfg)
     (x : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype })
     : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype } :=
-  let h1 := Tensor.Preserving.add x (m.attn.forward cfg (m.norm1.forward2d x))
-  Tensor.Preserving.add h1 (m.mlp.forward cfg (m.norm2.forward2d h1))
+  let h1 := Tensor.add x (m.attn.forward cfg (m.norm1.forward2d x))
+  Tensor.add h1 (m.mlp.forward cfg (m.norm2.forward2d h1))
 
 end Qwen35VisionBlock
 
@@ -259,7 +260,7 @@ def forward {tokens : UInt64}
   let h : Tensor { device := device, shape := #[mergedTokens, cfg.hidden_size * mergeUnit], dtype := dtype } :=
     linear2d grouped m.linear_fc1_weight m.linear_fc1_bias
   pure <|
-    linear2d (Tensor.Preserving.gelu h) m.linear_fc2_weight m.linear_fc2_bias
+    linear2d (Tensor.gelu h) m.linear_fc2_weight m.linear_fc2_bias
 
 end Qwen35VisionPatchMerger
 
@@ -276,7 +277,7 @@ namespace Qwen35VisionModel
 def init (cfg : VisionConfig) (device : Device := .CPU) (dtype : DType := .Float32) : IO (Qwen35VisionModel (dtype := dtype) (device := device) cfg) := do
   let patchEmbed ← Qwen35VisionPatchEmbed.init (dtype := dtype) (device := device) cfg
   let posRaw ← Tensor.randn (device := device) #[cfg.num_position_embeddings, cfg.hidden_size]
-  let posEmbed ← Tensor.parameter (← IO.ofExcept ((Tensor.Preserving.mulScalar posRaw 0.02).castDType? dtype))
+  let posEmbed ← Tensor.parameter (← IO.ofExcept ((Tensor.mulScalar posRaw 0.02).castDType? dtype))
 
   let mut blocks : Array (Qwen35VisionBlock (dtype := dtype) (device := device) cfg) := #[]
   for _ in [:cfg.depth.toNat] do
@@ -302,7 +303,7 @@ def forward {nPatches : UInt64}
   let x0 : Tensor { device := device, shape := #[nPatches, cfg.hidden_size], dtype := dtype } := m.patch_embed.forward cfg patchifiedPixels
   let posIds : Tensor { device := device, shape := #[nPatches], dtype := .Int64 } := (Tensor.arange nPatches).to patchifiedPixels.device
   let pos : Tensor { device := device, shape := #[nPatches, cfg.hidden_size], dtype := dtype } := Tensor.embedding1d posIds m.pos_embed
-  let mut x : Tensor { device := device, shape := #[nPatches, cfg.hidden_size], dtype := dtype } := Tensor.Preserving.add x0 pos
+  let mut x : Tensor { device := device, shape := #[nPatches, cfg.hidden_size], dtype := dtype } := Tensor.add x0 pos
 
   for i in [:m.blocks.size] do
     match m.blocks[i]? with

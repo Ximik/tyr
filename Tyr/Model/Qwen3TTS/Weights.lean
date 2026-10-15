@@ -15,7 +15,7 @@ import Tyr.Model.Qwen3TTS.Model
 
 namespace torch.qwen3tts
 
-variable {device : Device} {dtype : ExactDType}
+variable {device : Device} {dtype : RealFloatingDType}
 
 open torch.Log
 
@@ -26,7 +26,7 @@ open torch.Model (reqGradFalse)
 private def loadTensorShardedTarget (modelDir : String) (name : String) (s : Shape) :
     IO (Tensor { shape := s, dtype := dtype.val, device }) := do
   let packed ← safetensors.loadTensorShardedExact modelDir name s device
-  match packed.atDType? dtype with
+  match packed.atDType? dtype.toExactDType with
   | .ok tensor => pure tensor
   | .error message => throw <| IO.userError s!"Qwen3TTS tensor '{name}': {message}"
 
@@ -36,7 +36,7 @@ private def loadOptionalTensorShardedTarget (modelDir : String) (name : String) 
   match ← safetensors.loadOptionalTensorShardedExact modelDir name s device with
   | none => pure none
   | some packed =>
-    match packed.atDType? dtype with
+    match packed.atDType? dtype.toExactDType with
     | .ok tensor => pure (some tensor)
     | .error message => throw <| IO.userError s!"Qwen3TTS tensor '{name}': {message}"
 
@@ -374,22 +374,28 @@ def loadSharded
   let codecEmbedding ← safetensors.loadTensorShardedExact modelDir
     "talker.model.codec_embedding.weight"
     #[cfg.talkerConfig.vocabSize, cfg.talkerConfig.hiddenSize] targetDevice
+  let talkerFloating ← IO.ofExcept (DType.realFloating? codecEmbedding.1.val)
+  let _ := talkerFloating.down
+  let talkerDType := RealFloatingDType.ofDType codecEmbedding.1.val
   let talker ← loadTalkerForConditionalGenerationSharded
-    (device := targetDevice) (dtype := codecEmbedding.1) modelDir cfg.talkerConfig codecEmbedding.2
+    (device := targetDevice) (dtype := talkerDType) modelDir cfg.talkerConfig codecEmbedding.2
 
   if cfg.ttsModelType == "base" then
     let scfg := cfg.speakerEncoderConfig
     let firstWeight ← safetensors.loadTensorShardedExact modelDir
       "speaker_encoder.blocks.0.conv.weight"
       #[scfg.encChannels.getD 0 512, scfg.melDim, scfg.encKernelSizes.getD 0 5] targetDevice
+    let speakerFloating ← IO.ofExcept (DType.realFloating? firstWeight.1.val)
+    let _ := speakerFloating.down
+    let speakerDType := RealFloatingDType.ofDType firstWeight.1.val
     let speakerEncoder ← loadSpeakerEncoderSharded
-      (device := targetDevice) (dtype := firstWeight.1) modelDir scfg
+      (device := targetDevice) (dtype := speakerDType) modelDir scfg
     log.onInfo "Loaded Qwen3TTS weights (real checkpoint tensors)."
-    return ⟨{ talker := codecEmbedding.1, speaker := firstWeight.1 },
+    return ⟨{ talker := talkerDType, speaker := speakerDType },
       { talker, speakerEncoder := some speakerEncoder }⟩
   else
     log.onInfo "Loaded Qwen3TTS weights (real checkpoint tensors)."
-    return ⟨{ talker := codecEmbedding.1, speaker := codecEmbedding.1 },
+    return ⟨{ talker := talkerDType, speaker := talkerDType },
       { talker, speakerEncoder := none }⟩
 
 end Qwen3TTSForConditionalGeneration

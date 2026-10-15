@@ -119,13 +119,13 @@ instance staticManifold {α : Type} : DifferentiableManifold (Static α) where
 
 /-- TensorStruct types form Euclidean spaces (product manifold).
     tangent = cotangent = primal type, using TensorStruct.zipWith for operations. -/
-instance tensorStructEuclidean [s : TensorStruct α] [Inhabited α] : EuclideanSpace α where
+instance tensorStructEuclidean [s : TensorStruct α] [torch.FloatingTensorStruct α] [Inhabited α] : EuclideanSpace α where
   zero := default
-  add := TensorStruct.zipWith torch.Tensor.Preserving.add
-  smul scalar m := TensorStruct.map (torch.Tensor.Preserving.mulScalar · scalar) m
+  add := torch.FloatingTensorStruct.zipWith (fun a b => torch.Tensor.add a b)
+  smul scalar m := torch.FloatingTensorStruct.map (fun t => torch.Tensor.mulScalar t scalar) m
   -- Inner product: sum of all element-wise products across tensors
   inner a b :=
-    let product := TensorStruct.zipWith torch.Tensor.Preserving.mul a b
+    let product := torch.FloatingTensorStruct.zipWith (fun a b => torch.Tensor.mul a b) a b
     TensorStruct.fold (fun t acc => acc + torch.Tensor.item (torch.Tensor.sumAll t)) 0.0 product
 
 /-- Gradient descent step using exponential map / retraction.

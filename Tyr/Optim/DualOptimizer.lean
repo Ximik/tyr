@@ -22,7 +22,7 @@ open torch
 open NorMuon (ParamLabel)
 open Tyr.Modular
 
-variable {d : DType} {dev : Device}
+variable {d : DType} {dev : Device} [DType.RealFloating d]
 
 /-- Matrix optimizer backend selection (experimental). -/
 inductive MatrixOptimizerKind where
@@ -357,8 +357,7 @@ def MatrixParamState.backendName {m n : UInt64} {d : DType} {dev : Device}
   | .manifoldMuon _ => "manifoldMuon"
   | .genericManifold _ => "genericManifold"
 
-private def stepOnManifoldFamilyKnown {m n : UInt64} {d : DType} {dev : Device}
-    [DType.FloatingOrComplex d]
+private def stepOnManifoldFamily {m n : UInt64} {d : DType} {dev : Device} [DType.RealFloating d]
     (family : MatrixManifoldFamily)
     (param : Tensor ⟨#[m, n], d, dev⟩)
     (ambientGrad : Tensor ⟨#[m, n], d, dev⟩)
@@ -402,22 +401,6 @@ private def stepOnManifoldFamilyKnown {m n : UInt64} {d : DType} {dev : Device}
       let g := Tyr.AD.GrassmannTangent.project x (Tensor.transpose2d ambientGrad)
       pure (Tensor.transpose2d (Tyr.AD.DualMapGeometry.dualMapStep x g lr).matrix)
 
-/-- Reify the actual dtype before entering geometry requiring floating evidence.
-This checks metadata equality without casting either input. -/
-private def stepOnManifoldFamily {m n : UInt64} {d : DType} {dev : Device}
-    (family : MatrixManifoldFamily)
-    (param ambientGrad : Tensor ⟨#[m, n], d, dev⟩) (lr : Float) :
-    IO (Tensor ⟨#[m, n], d, dev⟩) := do
-  let actual := param.raw.dtype
-  if h : (actual.isRealFloating || actual.isComplex) = true then
-    let _ : DType.FloatingOrComplex actual := ⟨h⟩
-    let param ← IO.ofExcept (Tensor.ofRaw (σ := ⟨#[m, n], actual, dev⟩) param.raw)
-    let grad ← IO.ofExcept (Tensor.ofRaw (σ := ⟨#[m, n], actual, dev⟩) ambientGrad.raw)
-    let result ← stepOnManifoldFamilyKnown family param grad lr
-    IO.ofExcept (Tensor.ofRaw result.raw)
-  else
-    throw (IO.userError s!"Manifold optimization requires a floating or complex dtype, got {actual}")
-
 /--
 Single matrix step for the generic manifold path using `DualMapGeometry`.
 
@@ -426,7 +409,7 @@ This path is intentionally simple and composable:
 - manifold-family-specific projection/retraction from `Tyr.Manifolds`,
 - no specialized dual-ascent state.
 -/
-def stepGenericManifoldSingle {m n : UInt64} {d : DType} {dev : Device}
+def stepGenericManifoldSingle {m n : UInt64} {d : DType} {dev : Device} [DType.RealFloating d]
     (param : Tensor ⟨#[m, n], d, dev⟩)
     (grad : Tensor ⟨#[m, n], d, dev⟩)
     (state : GenericManifoldState m n d dev)
@@ -437,8 +420,8 @@ def stepGenericManifoldSingle {m n : UInt64} {d : DType} {dev : Device}
   let gRaw := Tensor.detach grad
   let momentum := getScheduledMomentum cfg step
   let newMomentum := NorMuon.updateMomentum gRaw state.momentumBuffer momentum
-  let nesterovGrad := Tensor.Preserving.add (Tensor.Preserving.mulScalar gRaw (1.0 - momentum))
-    (Tensor.Preserving.mulScalar newMomentum momentum)
+  let nesterovGrad := Tensor.add (Tensor.mulScalar gRaw (1.0 - momentum))
+    (Tensor.mulScalar newMomentum momentum)
   let aspectScale := NorMuon.aspectRatioScale #[m, n]
   let effectiveLr := cfg.matrixLr * lrMul * aspectScale
   let updated ← stepOnManifoldFamily cfg.matrixManifold param nesterovGrad effectiveLr
@@ -456,7 +439,7 @@ def stepGenericManifoldSingle {m n : UInt64} {d : DType} {dev : Device}
     stepping with it would silently drop the accumulated momentum state, so this
     throws `IO.userError` instead of re-initializing. Fresh state for a first step
     should be built with `initMatrixParamState cfg`. -/
-def stepMatrixSingle {m n : UInt64} {d : DType} {dev : Device}
+def stepMatrixSingle {m n : UInt64} {d : DType} {dev : Device} [DType.RealFloating d]
     (param : Tensor ⟨#[m, n], d, dev⟩)
     (grad : Tensor ⟨#[m, n], d, dev⟩)
     (state : MatrixParamState m n d dev)
@@ -489,7 +472,7 @@ def stepMatrixSingle {m n : UInt64} {d : DType} {dev : Device}
       return (p', .genericManifold st')
 
 /-- Local matrix-group step that composes `stepMatrixSingle` over each parameter. -/
-def stepMatrixGroupLocal {m n : UInt64} {d : DType} {dev : Device}
+def stepMatrixGroupLocal {m n : UInt64} {d : DType} {dev : Device} [DType.RealFloating d]
     (params : Array (Tensor ⟨#[m, n], d, dev⟩))
     (grads : Array (Tensor ⟨#[m, n], d, dev⟩))
     (states : Array (MatrixParamState m n d dev))
@@ -543,7 +526,7 @@ Fast-paths:
 Fallback:
 - generic manifold path does gradient all-reduce then local per-parameter updates.
 -/
-def stepMatrixGroupDistributed {m n : UInt64} {d : DType} {dev : Device}
+def stepMatrixGroupDistributed {m n : UInt64} {d : DType} {dev : Device} [DType.RealFloating d]
     (params : Array (Tensor ⟨#[m, n], d, dev⟩))
     (grads : Array (Tensor ⟨#[m, n], d, dev⟩))
     (states : Array (MatrixParamState m n d dev))
@@ -610,7 +593,7 @@ Build a backend operations bundle for a matrix parameter shape.
 This keeps optimizer composition explicit: call-sites can choose backend ops once,
 then reuse the same `init/step` closures regardless of matrix backend kind.
 -/
-def matrixBackendOps {m n : UInt64} {d : DType} {dev : Device}
+def matrixBackendOps {m n : UInt64} {d : DType} {dev : Device} [DType.RealFloating d]
     (cfg : Config)
     (step : Nat)
     (lrMul : Float := 1.0)
@@ -623,7 +606,7 @@ def matrixBackendOps {m n : UInt64} {d : DType} {dev : Device}
 }
 
 /-- Build matrix backend ops for a specific parameter label from a backend spec. -/
-def matrixBackendOpsForLabel {m n : UInt64} {d : DType} {dev : Device}
+def matrixBackendOpsForLabel {m n : UInt64} {d : DType} {dev : Device} [DType.RealFloating d]
     (spec : MatrixBackendSpec)
     (label : ParamLabel)
     (step : Nat)

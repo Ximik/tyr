@@ -192,7 +192,9 @@ def maskedCrossEntropy? {batch seq vocab : UInt64} {d m result : DType} {dev : D
   -- Use scalar multiplication with the reciprocal to avoid tensor division
   let numValidFloat ← Tensor.item? numValid
   let epsFloat : Float := 1e-8
-  Tensor.Preserving.mulScalar? totalLoss (1.0 / (numValidFloat + epsFloat))
+  let floating ← DType.realFloating? (DType.promote d m).sumResult
+  let _ := floating.down
+  Tensor.mulScalar? totalLoss (1.0 / (numValidFloat + epsFloat))
 
 /-- Pure masked loss over real floating logits. Use `maskedCrossEntropy?` to
 recover invalid target labels or unsupported native kernels. -/
@@ -406,7 +408,7 @@ def artifactCallbacks
     - numTrainExamples: Total training examples (for computing iterations)
     - logger: Logging callback
 -/
-def trainLoop [TensorStruct P]
+def trainLoop [TensorStruct P] [FloatingTensorStruct P]
     (cfg : SFTConfig)
     (params : P)
     (optState : Optim.AdamWState P)
@@ -471,7 +473,7 @@ def trainLoop [TensorStruct P]
         -- Compute masked loss
         let loss := lossFn logits batch.targets batch.mask
         -- Scale loss for accumulation
-        let scaledLoss := Tensor.Preserving.mulScalar loss (1.0 / gradAccumSteps.toFloat)
+        let scaledLoss := Tensor.mulScalar loss (1.0 / gradAccumSteps.toFloat)
         -- Backward pass (gradients accumulate)
         Tensor.backwardLoss scaledLoss
 
@@ -545,7 +547,7 @@ def makeTaskDataGenerator
     `forwardFn` takes Int64 token inputs `[batch, seq]` and returns Float32
     logits `[batch, seq, vocab]`; `lossFn` computes the scalar masked loss
     (`maskedCrossEntropy` fits the signature directly). -/
-def trainSFT [TensorStruct P]
+def trainSFT [TensorStruct P] [FloatingTensorStruct P]
     (cfg : SFTConfig)
     (params : P)
     (forwardFn : P → {b s : UInt64} → Tensor { shape := #[b, s], dtype := .Int64, device := device } →

@@ -24,6 +24,7 @@ What it handles well:
 - field-wise traversal for structures,
 - parametric structures (it generates binders for type/shape parameters),
 - recursive use of existing `TensorStruct` instances on fields,
+- capability-aware `TensorStructFor P` traversal when every field supports `P`,
 - explicit conversions between parameterizations of the same record through
   derived `TensorTreeCast` instances.
 
@@ -32,6 +33,10 @@ Current limits:
 - it is not a fully customizable deriving framework,
 - it assumes each field already has a suitable `TensorStruct` instance,
 - non-structure or highly custom traversal policies still require manual instances.
+
+For a record that already has a custom `TensorStruct` instance,
+`derive_tensor_struct_for RecordName` generates only the capability-aware
+field traversal. It does not replace the existing structural instance.
 
 ### Field Type Handling
 
@@ -193,6 +198,79 @@ private def mkTensorStructInstanceCmd (typeName : Name) : CommandElabM Unit := d
 
     elabCommand instCmd
 
+/-- Derive constrained traversal independently of structural traversal. Each
+field contributes its own capability requirement, resolved only when the
+resulting record instance is used with a particular leaf predicate. -/
+private def mkTensorStructForInstanceCmd (typeName : Name) : CommandElabM Unit := do
+  let env ← getEnv
+  let some info := getStructureInfo? env typeName
+    | throwError "{typeName} is not a structure"
+  let some (.inductInfo inductiveInfo) := env.find? typeName
+    | throwError "{typeName} is not an inductive type"
+  let mapFields ← info.fieldNames.mapM fun field => do
+    let field := mkIdent field
+    `(Lean.Parser.Term.structInstField| $field:ident := TensorStructFor.map f x.$field)
+  let mapMBinds ← info.fieldNames.mapM fun field => do
+    let field := mkIdent field
+    `(doElem| let $field ← TensorStructFor.mapM f x.$field)
+  let mapMFields ← info.fieldNames.mapM fun field => do
+    let field := mkIdent field
+    `(Lean.Parser.Term.structInstField| $field:ident := $field)
+  let zipFields ← info.fieldNames.mapM fun field => do
+    let field := mkIdent field
+    `(Lean.Parser.Term.structInstField| $field:ident := TensorStructFor.zipWith f x.$field y.$field)
+  let mut foldExpr ← `(init)
+  for field in info.fieldNames do
+    let field := mkIdent field
+    foldExpr ← `(TensorStructFor.fold f $foldExpr x.$field)
+  let command ← liftTermElabM do
+    forallTelescopeReducing inductiveInfo.type fun parameters _ => do
+      let parameters := parameters.extract 0 inductiveInfo.numParams
+      let predicate := mkIdent `_tensorLeafPredicate
+      let mut binders : Array (TSyntax ``Parser.Term.bracketedBinder) := #[
+        ← `(bracketedBinder| {$predicate : StaticSpec → Prop})]
+      for parameter in parameters do
+        let declaration ← parameter.fvarId!.getDecl
+        let type ← withOptions (·.setBool `pp.explicit true) <|
+          PrettyPrinter.delab declaration.type
+        let binder ← if declaration.binderInfo == .instImplicit then
+          `(bracketedBinder| [$(mkIdent declaration.userName) : $type])
+        else
+          `(bracketedBinder| {$(mkIdent declaration.userName) : $type})
+        binders := binders.push binder
+      let constructor := Lean.mkConst inductiveInfo.ctors.head!
+        (inductiveInfo.levelParams.map Level.param)
+      let fieldBinders ← forallTelescopeReducing
+          (← inferType (mkAppN constructor parameters)) fun fields _ =>
+        fields.mapM fun field => do
+          let type ← inferType field
+          if fields.any (fun previous => type.containsFVar previous.fvarId!) then
+            throwError "Automatic TensorStructFor derivation does not support dependent fields; use a manual instance."
+          let type ← withOptions (·.setBool `pp.explicit true) <| PrettyPrinter.delab type
+          `(bracketedBinder| [TensorStructFor $predicate $type])
+      binders := binders ++ fieldBinders
+      let arguments ← parameters.mapM fun parameter =>
+        return mkIdent (← parameter.fvarId!.getDecl).userName
+      let appliedType ← `(@$(mkIdent typeName) $arguments*)
+      `(command|
+        instance $[$binders]* : TensorStructFor $predicate $appliedType where
+          map f x := { $[$mapFields:structInstField],* }
+          mapM f x := do
+            $[$mapMBinds:doElem]*
+            pure { $[$mapMFields:structInstField],* }
+          zipWith f x y := { $[$zipFields:structInstField],* }
+          fold f init x := $foldExpr)
+  elabCommand command
+
+/-- Add only capability-aware traversal to a record with a custom TensorStruct
+instance. Field traversal remains structural and uses each field's instances. -/
+syntax (name := deriveTensorStructFor) "derive_tensor_struct_for " ident : command
+
+elab_rules : command
+  | `(derive_tensor_struct_for $typeName:ident) => do
+    let typeName ← liftCoreM <| realizeGlobalConstNoOverloadWithInfo typeName
+    mkTensorStructForInstanceCmd typeName
+
 open Lean Elab Deriving in
 /-- Deriving handler for TensorStruct -/
 def mkTensorStructHandler (typeNames : Array Name) : CommandElabM Bool := do
@@ -201,6 +279,7 @@ def mkTensorStructHandler (typeNames : Array Name) : CommandElabM Bool := do
   for typeName in typeNames do
     mkTensorStructInstanceCmd typeName
     deriveTensorTreeCastFor typeName
+    mkTensorStructForInstanceCmd typeName
 
   return true
 

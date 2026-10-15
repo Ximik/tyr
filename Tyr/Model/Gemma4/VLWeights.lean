@@ -229,30 +229,34 @@ private def loadVisionPatchEmbedder (path : String) (cfg : VLConfig)
     position_embedding_table := freezeStored posEmbed
   }⟩
 
-private def loadVisionModelSharded (modelDir : String) (cfg : VLConfig) : IO (Σ dtype : ExactDType, Gemma4VisionModel (device := device) cfg dtype.val) := do
+private def loadVisionModelSharded (modelDir : String) (cfg : VLConfig) : IO (Σ dtype : RealFloatingDType, Gemma4VisionModel (device := device) cfg dtype.val) := do
   let patchEmbedder ← loadVisionPatchEmbedderSharded modelDir cfg
   let dtype := patchEmbedder.1
+  let floating ← IO.ofExcept dtype.val.realFloating?
+  let _ := floating.down
   let mut blocks : Array (Gemma4VisionBlock (dtype := dtype.val) (device := device) cfg.vision_config) := #[]
   for i in [:cfg.vision_config.num_hidden_layers.toNat] do
     blocks := blocks.push (← loadVisionBlockSharded modelDir cfg.vision_config i.toUInt64)
   let stdBias ← tryLoadVisionParameterSharded (s := #[cfg.vision_config.hidden_size]) modelDir "model.vision_tower.std_bias"
   let stdScale ← tryLoadVisionParameterSharded (s := #[cfg.vision_config.hidden_size]) modelDir "model.vision_tower.std_scale"
-  pure ⟨dtype, {
+  pure ⟨RealFloatingDType.ofDType dtype.val, {
     patch_embedder := patchEmbedder.2
     blocks := blocks
     std_bias := stdBias.map freezeStored
     std_scale := stdScale.map freezeStored
   }⟩
 
-private def loadVisionModel (path : String) (cfg : VLConfig) : IO (Σ dtype : ExactDType, Gemma4VisionModel (device := device) cfg dtype.val) := do
+private def loadVisionModel (path : String) (cfg : VLConfig) : IO (Σ dtype : RealFloatingDType, Gemma4VisionModel (device := device) cfg dtype.val) := do
   let patchEmbedder ← loadVisionPatchEmbedder path cfg
   let dtype := patchEmbedder.1
+  let floating ← IO.ofExcept dtype.val.realFloating?
+  let _ := floating.down
   let mut blocks : Array (Gemma4VisionBlock (dtype := dtype.val) (device := device) cfg.vision_config) := #[]
   for i in [:cfg.vision_config.num_hidden_layers.toNat] do
     blocks := blocks.push (← loadVisionBlock path cfg.vision_config i.toUInt64)
   let stdBias ← tryLoadVisionParameter (s := #[cfg.vision_config.hidden_size]) path "model.vision_tower.std_bias"
   let stdScale ← tryLoadVisionParameter (s := #[cfg.vision_config.hidden_size]) path "model.vision_tower.std_scale"
-  pure ⟨dtype, {
+  pure ⟨RealFloatingDType.ofDType dtype.val, {
     patch_embedder := patchEmbedder.2
     blocks := blocks
     std_bias := stdBias.map freezeStored
@@ -260,29 +264,33 @@ private def loadVisionModel (path : String) (cfg : VLConfig) : IO (Σ dtype : Ex
   }⟩
 
 private def loadVisionProjectorSharded (modelDir : String) (cfg : VLConfig)
-    : IO (Σ dtype : ExactDType, Gemma4MultimodalEmbedder (device := device) cfg dtype.val) := do
+    : IO (Σ dtype : RealFloatingDType, Gemma4MultimodalEmbedder (device := device) cfg dtype.val) := do
   let embedProj ←
     loadVisionParameterSharded
       (s := #[cfg.text_config.hidden_size, cfg.vision_config.hidden_size])
       modelDir
       "model.embed_vision.embedding_projection"
-  pure ⟨embedProj.1, { embedding_projection := reqGradFalse embedProj.2 }⟩
+  let floating ← IO.ofExcept embedProj.1.val.realFloating?
+  let _ := floating.down
+  pure ⟨RealFloatingDType.ofDType embedProj.1.val, { embedding_projection := reqGradFalse embedProj.2 }⟩
 
 private def loadVisionProjector (path : String) (cfg : VLConfig)
-    : IO (Σ dtype : ExactDType, Gemma4MultimodalEmbedder (device := device) cfg dtype.val) := do
+    : IO (Σ dtype : RealFloatingDType, Gemma4MultimodalEmbedder (device := device) cfg dtype.val) := do
   let embedProj ←
     loadVisionParameter
       (s := #[cfg.text_config.hidden_size, cfg.vision_config.hidden_size])
       path
       "model.embed_vision.embedding_projection"
-  pure ⟨embedProj.1, { embedding_projection := reqGradFalse embedProj.2 }⟩
+  let floating ← IO.ofExcept embedProj.1.val.realFloating?
+  let _ := floating.down
+  pure ⟨RealFloatingDType.ofDType embedProj.1.val, { embedding_projection := reqGradFalse embedProj.2 }⟩
 
 namespace Gemma4ForConditionalGeneration
 
 /-- Load Gemma 4 multimodal model from a sharded HF SafeTensors directory. -/
 def loadSharded (modelDir : String) (cfg : VLConfig := {})
     (log : Handlers := {}) (device : Device := .CPU)
-    : IO (Σ textDType : ExactDType, Σ visionDType : ExactDType, Σ projectorDType : ExactDType,
+    : IO (Σ textDType : RealFloatingDType, Σ visionDType : RealFloatingDType, Σ projectorDType : RealFloatingDType,
       Gemma4ForConditionalGeneration (device := device) cfg textDType.val visionDType.val projectorDType.val) := do
   log.onInfo s!"Loading Gemma4ForConditionalGeneration (device := device) from {modelDir}..."
   let visionTower ← loadVisionModelSharded modelDir cfg
@@ -298,7 +306,7 @@ def loadSharded (modelDir : String) (cfg : VLConfig := {})
 /-- Load Gemma 4 multimodal model from a single HF SafeTensors file. -/
 def load (path : String) (cfg : VLConfig := {})
     (log : Handlers := {}) (device : Device := .CPU)
-    : IO (Σ textDType : ExactDType, Σ visionDType : ExactDType, Σ projectorDType : ExactDType,
+    : IO (Σ textDType : RealFloatingDType, Σ visionDType : RealFloatingDType, Σ projectorDType : RealFloatingDType,
       Gemma4ForConditionalGeneration (device := device) cfg textDType.val visionDType.val projectorDType.val) := do
   log.onInfo s!"Loading Gemma4ForConditionalGeneration (device := device) from {path}..."
   let visionTower ← loadVisionModel path cfg

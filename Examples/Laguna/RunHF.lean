@@ -17,6 +17,7 @@ import Examples.ModelRunner
 open torch
 
 variable {device : Device} {dtype : DType}
+variable [DType.RealFloating dtype]
 open torch.Model
 open torch.laguna
 open Examples.ModelRunner

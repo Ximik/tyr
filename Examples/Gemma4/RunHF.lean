@@ -152,7 +152,7 @@ private def movePatchGridTo {cfg : VLConfig} {sourceDevice : Device} (device : D
   match x with
   | ⟨patchRows, ⟨patchCols, grid⟩⟩ => ⟨patchRows, ⟨patchCols, grid.to device⟩⟩
 
-private def runTextBatches
+private def runTextBatches [DType.RealFloating dtype]
     (tok : tokenizer.gemma4.GemmaTokenizer)
     (cfg : Config)
     (model : Gemma4ForCausalLM (device := device) cfg dtype)
@@ -174,7 +174,7 @@ private def runTextBatches
     (prompts.size == 1) buildBatch runGen runGenStream decodeBatch
     (makeStreamCallback (fun x => tokenizer.gemma4.decodeOne tok x))
 
-private def runMultimodalBatches
+private def runMultimodalBatches [DType.RealFloating dtype]
     (tok : tokenizer.gemma4.GemmaTokenizer)
     (cfg : VLConfig)
     (model : Gemma4ForConditionalGeneration (device := device) cfg dtype visionDType projectorDType)

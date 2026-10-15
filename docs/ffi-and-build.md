@@ -224,17 +224,15 @@ results remain leaf parameters.
 including borrowed-reference preservation and cleanup on invalid input.
 
 Core arithmetic and matrix adapters use checked native exports returning
-`Except String RawTensor`. Typed `Tensor.Promoting` and `Tensor.Preserving`
-arithmetic `?` APIs preserve those errors, including missing kernels for otherwise
+`Except String RawTensor`. Ordinary typed arithmetic and `Tensor.Promoting`
+`?` APIs preserve those errors, including missing kernels for otherwise
 valid promotion pairs. Fused `affine3d?` checks the actual dtype and device of
 both its weight and bias before calling the checked native kernel. Scalar
 spectral and nuclear norms also expose checked `?` variants for dtype, backend,
 and factorization failures. The checked expansion, concatenation, and reduction
 families follow the same result-carrier contract. Tensor-result conveniences
 using `checkedResult` or `checkedUpdate` abort with a diagnostic after receiving
-an error. The `Preserving` binary and host-scalar conveniences still use the
-original input as Lean's panic fallback; scalar norm conveniences also retain
-Lean's panic mechanism. Use the corresponding `?` APIs for recoverable errors.
+an error. Scalar norm conveniences retain Lean's panic mechanism. Use the corresponding `?` APIs for recoverable errors.
 
 Selection has separate static and runtime entry points. `argmax`, `maxLast3d`,
 and `topKLast2d` require ordered dtypes and the appropriate axis, nonempty-axis,

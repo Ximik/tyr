@@ -89,7 +89,7 @@ private abbrev YSpec : StaticSpec := { shape := #[2], dtype := .Float32, device 
   let dt := 1.0 / steps.toFloat
   -- tensor state, n = 64
   let tTerm : ODETerm (Tensor { shape := #[64], dtype := .Float32, device := .CPU }) Unit :=
-    { vectorField := fun _t y _ => Tensor.Preserving.mulScalar y (-1.0) }
+    { vectorField := fun _t y _ => Tensor.mulScalar y (-1.0) }
   let tSolver :=
     Dopri5.solver (Term := ODETerm (Tensor { shape := #[64], dtype := .Float32, device := .CPU }) Unit)
       (Y := Tensor { shape := #[64], dtype := .Float32, device := .CPU }) (VF := Tensor { shape := #[64], dtype := .Float32, device := .CPU }) (Args := Unit)

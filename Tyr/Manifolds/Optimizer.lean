@@ -18,7 +18,7 @@ namespace Tyr.AD
 open torch
 open DifferentiableManifold
 
-variable {d : DType} {dev : Device}
+variable {d : DType} {dev : Device} [DType.RealFloating d]
 
 private def normalizeMatrixFrobenius {m n : UInt64}
     (A : Tensor ⟨#[m, n], d, dev⟩) : Tensor ⟨#[m, n], d, dev⟩ :=
@@ -26,7 +26,7 @@ private def normalizeMatrixFrobenius {m n : UInt64}
   if fnorm == 0.0 then
     A
   else
-    Tensor.Preserving.mulScalar A (1.0 / fnorm)
+    Tensor.mulScalar A (1.0 / fnorm)
 
 private def normalizeVectorL2 {n : UInt64}
     (v : Tensor ⟨#[n], d, dev⟩) : Tensor ⟨#[n], d, dev⟩ :=
@@ -34,7 +34,7 @@ private def normalizeVectorL2 {n : UInt64}
   if vnorm == 0.0 then
     v
   else
-    Tensor.Preserving.mulScalar v (1.0 / vnorm)
+    Tensor.mulScalar v (1.0 / vnorm)
 
 private def minkowskiAbsNorm [DType.ConstantSupported d dev] {n : UInt64} (v : Tensor ⟨#[n + 1], d, dev⟩) : Float :=
   Float.sqrt (Float.abs (Hyperbolic.minkowskiInner v v))
@@ -114,7 +114,7 @@ Stiefel geometry adapter with spectral/nuclear norms and projected dual map.
 The dual map is implemented as tangent projection followed by unit Frobenius
 normalization as a practical approximation.
 -/
-instance stiefelDualMapGeometry (m n : UInt64) [DType.FloatingOrComplex d] :
+instance stiefelDualMapGeometry (m n : UInt64) [DType.RealFloating d] :
     DualMapGeometry (Stiefel m n d dev) where
   tangentNorm := fun {x} (v : StiefelTangent m n d dev) =>
     let _ := x
@@ -131,7 +131,7 @@ Orthogonal-group adapter for dual-map optimization.
 
 Uses ambient spectral/nuclear norms and normalizes the skew parameterization.
 -/
-instance orthogonalDualMapGeometry [DType.ConstantSupported d dev] (n : UInt64) [DType.FloatingOrComplex d] :
+instance orthogonalDualMapGeometry [DType.ConstantSupported d dev] (n : UInt64) [DType.RealFloating d] :
     DualMapGeometry (Orthogonal n d dev) where
   tangentNorm := fun {x} (v : OrthogonalTangent n d dev) =>
     Tensor.spectralNorm (OrthogonalTangent.toAmbient x v)
@@ -147,7 +147,7 @@ Grassmann adapter for dual-map optimization.
 
 Projects gradients to the horizontal tangent space and normalizes step size.
 -/
-instance grassmannDualMapGeometry (n p : UInt64) [DType.FloatingOrComplex d] :
+instance grassmannDualMapGeometry (n p : UInt64) [DType.RealFloating d] :
     DualMapGeometry (Grassmann n p d dev) where
   tangentNorm := fun {x} (v : GrassmannTangent n p d dev) =>
     let _ := x

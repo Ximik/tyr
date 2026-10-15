@@ -72,6 +72,39 @@ def ofDType? (dtype : DType) : Except String ExactDType :=
 
 end ExactDType
 
+/-- A runtime-selected standard real floating dtype. Model loaders return this
+index when their forward operations require real floating arithmetic; exact
+storage-only dtypes remain `ExactDType`. -/
+abbrev RealFloatingDType := { dtype : DType // dtype.isRealFloating = true }
+
+namespace RealFloatingDType
+
+instance (dtype : RealFloatingDType) : DType.RealFloating dtype.val :=
+  ⟨dtype.property⟩
+
+/-- Package a statically established real floating dtype. -/
+def ofDType (dtype : DType) [h : DType.RealFloating dtype] : RealFloatingDType :=
+  ⟨dtype, h.valid⟩
+
+/-- Validate a runtime-selected compute dtype while retaining its exact value. -/
+def ofDType? (dtype : DType) : Except String RealFloatingDType :=
+  if valid : dtype.isRealFloating = true then .ok ⟨dtype, valid⟩
+  else .error s!"Expected a standard real floating dtype, got {dtype}"
+
+/-- Refine exact checkpoint metadata to the standard real floating domain. -/
+def ofExact? (dtype : ExactDType) : Except String RealFloatingDType :=
+  ofDType? dtype.val
+
+/-- Real floating dtypes are also exact metadata claims. -/
+def toExactDType (dtype : RealFloatingDType) : ExactDType :=
+  ⟨dtype.val, by
+    intro h
+    have valid := dtype.property
+    rw [h] at valid
+    contradiction⟩
+
+end RealFloatingDType
+
 /-- Hide which exact dtype a tensor has while retaining its shape and device.
 Unlike a bare Sigma over DType, this package cannot select the legacy wildcard.
 Packaging retains the native handle; the Sigma itself is a Lean wrapper. -/

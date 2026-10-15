@@ -443,9 +443,9 @@ private def loadMuonOptimState [TensorStruct Params]
     | none => throw (IO.userError s!"invalid Muon optimizer count in {muonCountPath dir}")
   pure { momentum := TensorStruct.map Tensor.detach momentum, step := count }
 
-private def runWithModel {dtype : DType}
+private def runWithModel {dtype : DType} [DType.RealFloating dtype]
     [DType.Promotes dtype .Float32 .Float32] [DType.Promotes .Float32 dtype .Float32]
-    {Params : Type} [TensorStruct Params] {maxLen vocab : UInt64}
+    {Params : Type} [TensorStruct Params] [FloatingTensorStruct Params] {maxLen vocab : UInt64}
     (opts : RunOptions)
     (recordsCount usableCount : Nat)
     (trainStates evalStates : Array (BranchingState MoleculeAtom))
@@ -648,7 +648,7 @@ private def runWithModel {dtype : DType}
     IO.println s!"wrote lineage-aware raw trajectories under {opts.outputPrefix}_*trajectory.jsonl"
     IO.println s!"wrote learned branching trajectory frames under {opts.outputPrefix}_*step*.xyz"
 
-private def runAt (dtype : DType)
+private def runAt (dtype : DType) [DType.RealFloating dtype]
     [DType.Promotes dtype .Float32 .Float32] [DType.Promotes .Float32 dtype .Float32]
     [DType.NonBool dtype] (opts : RunOptions) : IO Unit := do
   if opts.generateOnly && opts.resumeCheckpoint?.isNone then

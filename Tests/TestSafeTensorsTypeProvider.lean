@@ -8,6 +8,7 @@ import Tests.Devices
 -/
 import Tests.Assertions
 import Tyr.SafeTensors
+import Tyr.Module.Derive
 import LeanTest
 
 open torch
@@ -17,6 +18,25 @@ safetensors_type_provider "Tests/fixtures/safetensors/sharded" as ShardedSafe
 safetensors_type_provider "Tests/fixtures/safetensors/indexed.safetensors" as IndexedSafe
 safetensors_type_provider "Tests/fixtures/safetensors/indexed_dir" as IndexedDirSafe
 safetensors_type_provider "Tests/fixtures/safetensors/provider_errors/nonuniform.safetensors" as NonUniformSafe
+safetensors_type_provider "Tests/fixtures/safetensors/traversal.safetensors" as TraversalSafe
+
+-- Generated records expose traversal capabilities from their declared leaf types.
+example : TensorStruct TraversalSafe.Weights := inferInstance
+example : FloatingTensorStruct TraversalSafe.WeightsWeights := inferInstance
+example : True := by
+  fail_if_success
+    have _ : FloatingTensorStruct TraversalSafe.Weights := inferInstance
+  trivial
+
+@[test] def testSafeTensorsTypeProviderTraversalCapabilities : IO Unit := do
+  let weights ← TraversalSafe.loadAll
+  let doubled := TensorStruct.scale weights.weights 2.0
+  LeanTest.assertEqual (← doubled.left.toFloatArray) #[2.0, 4.0]
+  LeanTest.assertEqual (← doubled.right.toFloatArray) #[6.0]
+  let combined := Tensor.add weights.weights.left doubled.left
+  LeanTest.assertEqual (← combined.toFloatArray) #[3.0, 6.0]
+  let detached := TensorStruct.detach weights
+  LeanTest.assertEqual (← detached.step.toFloatArray) #[7.0]
 
 -- Default loaders and aggregate records must preserve the generated indices.
 example : IO (Tensor { shape := #[2, 3], dtype := .Float32, device := .CPU }) := SingleSafe.load_linear_weight

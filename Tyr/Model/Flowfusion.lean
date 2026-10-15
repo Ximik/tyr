@@ -1,5 +1,6 @@
 import Tyr.Typed.Neural
 import Tyr.TensorStruct
+import Tyr.Module.Derive
 
 /-!
   Minimal Flowfusion-style abstractions.
@@ -31,6 +32,8 @@ instance [TensorStruct α] : TensorStruct (MaskedState α cmaskSpec lmaskSpec) w
   zipWith f x y := { x with state := TensorStruct.zipWith f x.state y.state }
   fold f init x := TensorStruct.fold f init x.state
 
+derive_tensor_struct_for MaskedState
+
 namespace MaskedState
 
 /-- Convenience constructor preserving both mask specifications. -/
@@ -57,6 +60,8 @@ instance [TensorStruct α] : TensorStruct (Guide α cmaskSpec lmaskSpec) where
     pure { x with value := value' }
   zipWith f x y := { x with value := TensorStruct.zipWith f x.value y.value }
   fold f init x := TensorStruct.fold f init x.value
+
+derive_tensor_struct_for Guide
 
 namespace Guide
 

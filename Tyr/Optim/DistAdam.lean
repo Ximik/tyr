@@ -19,6 +19,7 @@
   Based on modded-nanogpt's DistAdam implementation.
 -/
 import Tyr.TensorStruct
+import Tyr.Module.Derive
 import Tyr.Distributed
 import Tyr.Sharding
 
@@ -93,6 +94,8 @@ instance {σ : StaticSpec} : TensorStruct (ParamState σ) where
     let acc := TensorStruct.fold f acc ps.expAvg
     TensorStruct.fold f acc ps.expAvgSq
 
+derive_tensor_struct_for ParamState
+
 /-- Single Adam update step for one parameter.
 
     Standard Adam with bias correction:
@@ -103,7 +106,7 @@ instance {σ : StaticSpec} : TensorStruct (ParamState σ) where
     update = lr * m_hat / (sqrt(v_hat) + eps)
     param = param - update - lr * wd * param  (decoupled WD)
 -/
-def stepSingle {σ : StaticSpec} (param : Tensor σ) (grad : Tensor σ) (state : ParamState σ)
+def stepSingle {σ : StaticSpec} [DType.RealFloating σ.dtype] (param : Tensor σ) (grad : Tensor σ) (state : ParamState σ)
     (cfg : Config) (lrMul : Float := 1.0) (wdMul : Float := 1.0) : IO (Tensor σ × ParamState σ) := do
   let step := state.step + 1
   let beta1 := cfg.beta1
@@ -116,34 +119,34 @@ def stepSingle {σ : StaticSpec} (param : Tensor σ) (grad : Tensor σ) (state :
   let g := Tensor.detach grad
 
   -- Update first moment: m = beta1 * m + (1 - beta1) * g
-  let expAvg := Tensor.Preserving.add (Tensor.Preserving.mulScalar state.expAvg beta1)
-    (Tensor.Preserving.mulScalar g (1.0 - beta1))
+  let expAvg := Tensor.add (Tensor.mulScalar state.expAvg beta1)
+    (Tensor.mulScalar g (1.0 - beta1))
 
   -- Update second moment: v = beta2 * v + (1 - beta2) * g^2
-  let gSquared := Tensor.Preserving.mul g g
-  let expAvgSq := Tensor.Preserving.add (Tensor.Preserving.mulScalar state.expAvgSq beta2)
-    (Tensor.Preserving.mulScalar gSquared (1.0 - beta2))
+  let gSquared := Tensor.mul g g
+  let expAvgSq := Tensor.add (Tensor.mulScalar state.expAvgSq beta2)
+    (Tensor.mulScalar gSquared (1.0 - beta2))
 
   -- Bias correction
   let biasCorrection1 := 1.0 - Float.pow beta1 step.toFloat
   let biasCorrection2 := 1.0 - Float.pow beta2 step.toFloat
 
   -- Compute step: lr * m_hat / (sqrt(v_hat) + eps)
-  let mHat := Tensor.Preserving.divScalar expAvg biasCorrection1
-  let vHat := Tensor.Preserving.divScalar expAvgSq biasCorrection2
-  let denominator := Tensor.Preserving.addScalar (Tensor.Preserving.sqrt vHat) eps
-  let update := Tensor.Preserving.div mHat denominator
-  let scaledUpdate := Tensor.Preserving.mulScalar update lr
+  let mHat := Tensor.divScalar expAvg biasCorrection1
+  let vHat := Tensor.divScalar expAvgSq biasCorrection2
+  let denominator := Tensor.addScalar (Tensor.sqrt vHat) eps
+  let update : Tensor _ := by simpa using Tensor.div mHat denominator
+  let scaledUpdate := Tensor.mulScalar update lr
 
   -- Apply weight decay (decoupled)
   let paramDecayed := if wd > 0.0 then
-      let decay := Tensor.Preserving.mulScalar (Tensor.detach param) (lr * wd)
-      Tensor.Preserving.sub (Tensor.detach param) decay
+      let decay := Tensor.mulScalar (Tensor.detach param) (lr * wd)
+      Tensor.sub (Tensor.detach param) decay
     else
       Tensor.detach param
 
   -- Apply update
-  let newParam := Tensor.Preserving.sub paramDecayed scaledUpdate
+  let newParam := Tensor.sub paramDecayed scaledUpdate
   let newParam ← Tensor.parameter newParam
 
   let newState : ParamState σ := {
@@ -181,7 +184,7 @@ private def sliceFirstDim {σ : StaticSpec} (t : Tensor σ) (start len : UInt64)
   | .ok r => pure r
   | .error message => throw (IO.userError s!"DistAdam.stepDistributed slice: {message}")
 
-def stepDistributed {σ : StaticSpec} (param : Tensor σ) (grad : Tensor σ) (state : ParamState σ)
+def stepDistributed {σ : StaticSpec} [DType.RealFloating σ.dtype] (param : Tensor σ) (grad : Tensor σ) (state : ParamState σ)
     (cfg : Config) (lrMul : Float := 1.0) (wdMul : Float := 1.0) : IO (Tensor σ × ParamState σ) := do
   if !cfg.distributed then
     return (← stepSingle param grad state cfg lrMul wdMul)
@@ -230,26 +233,26 @@ def stepDistributed {σ : StaticSpec} (param : Tensor σ) (grad : Tensor σ) (st
   let g := Tensor.detach gradLocal
 
   -- 3) local Adam update on shard
-  let newExpAvg := Tensor.Preserving.add (Tensor.Preserving.mulScalar expAvgLocal beta1)
-    (Tensor.Preserving.mulScalar g (1.0 - beta1))
-  let gSquared := Tensor.Preserving.mul g g
-  let newExpAvgSq := Tensor.Preserving.add (Tensor.Preserving.mulScalar expAvgSqLocal beta2)
-    (Tensor.Preserving.mulScalar gSquared (1.0 - beta2))
+  let newExpAvg := Tensor.add (Tensor.mulScalar expAvgLocal beta1)
+    (Tensor.mulScalar g (1.0 - beta1))
+  let gSquared := Tensor.mul g g
+  let newExpAvgSq := Tensor.add (Tensor.mulScalar expAvgSqLocal beta2)
+    (Tensor.mulScalar gSquared (1.0 - beta2))
   let biasCorrection1 := 1.0 - Float.pow beta1 step.toFloat
   let biasCorrection2 := 1.0 - Float.pow beta2 step.toFloat
-  let mHat := Tensor.Preserving.divScalar newExpAvg biasCorrection1
-  let vHat := Tensor.Preserving.divScalar newExpAvgSq biasCorrection2
-  let denominator := Tensor.Preserving.addScalar (Tensor.Preserving.sqrt vHat) eps
-  let update := Tensor.Preserving.div mHat denominator
-  let scaledUpdate := Tensor.Preserving.mulScalar update lr
+  let mHat := Tensor.divScalar newExpAvg biasCorrection1
+  let vHat := Tensor.divScalar newExpAvgSq biasCorrection2
+  let denominator := Tensor.addScalar (Tensor.sqrt vHat) eps
+  let update : Tensor _ := by simpa using Tensor.div mHat denominator
+  let scaledUpdate := Tensor.mulScalar update lr
 
   let paramDecayed :=
     if wd > 0.0 then
-      let decay := Tensor.Preserving.mulScalar paramLocal (lr * wd)
-      Tensor.Preserving.sub paramLocal decay
+      let decay := Tensor.mulScalar paramLocal (lr * wd)
+      Tensor.sub paramLocal decay
     else
       paramLocal
-  let newLocalParam := Tensor.Preserving.sub paramDecayed scaledUpdate
+  let newLocalParam := Tensor.sub paramDecayed scaledUpdate
 
   -- 4) all-gather updated local shard and optimizer shards back to replicated form
   let gatherAs (label : String) (shard : Tensor (σ.withShape localShape)) : IO (Tensor σ) := do
@@ -328,7 +331,7 @@ def initShardedParamState {σ : StaticSpec} {rank worldSize : UInt64}
     - Gradient communication is reduce-scatter (same bandwidth as all-reduce)
     - Parameter gather only happens once per forward pass
 -/
-def stepSharded {σ : StaticSpec} {rank worldSize : UInt64}
+def stepSharded {σ : StaticSpec} [DType.RealFloating σ.dtype] {rank worldSize : UInt64}
     (param : ShardedTensor σ rank worldSize)
     (fullGrad : Tensor σ)
     (state : ShardedParamState σ rank worldSize)
@@ -349,35 +352,35 @@ def stepSharded {σ : StaticSpec} {rank worldSize : UInt64}
   let g := Tensor.detach localGrad
 
   -- 2. Update first moment: m = beta1 * m + (1 - beta1) * g
-  let expAvg := Tensor.Preserving.add (Tensor.Preserving.mulScalar state.expAvg.shard beta1)
-    (Tensor.Preserving.mulScalar g (1.0 - beta1))
+  let expAvg := Tensor.add (Tensor.mulScalar state.expAvg.shard beta1)
+    (Tensor.mulScalar g (1.0 - beta1))
 
   -- 3. Update second moment: v = beta2 * v + (1 - beta2) * g^2
-  let gSquared := Tensor.Preserving.mul g g
-  let expAvgSq := Tensor.Preserving.add (Tensor.Preserving.mulScalar state.expAvgSq.shard beta2)
-    (Tensor.Preserving.mulScalar gSquared (1.0 - beta2))
+  let gSquared := Tensor.mul g g
+  let expAvgSq := Tensor.add (Tensor.mulScalar state.expAvgSq.shard beta2)
+    (Tensor.mulScalar gSquared (1.0 - beta2))
 
   -- 4. Bias correction
   let biasCorrection1 := 1.0 - Float.pow beta1 step.toFloat
   let biasCorrection2 := 1.0 - Float.pow beta2 step.toFloat
 
   -- 5. Compute update: lr * m_hat / (sqrt(v_hat) + eps)
-  let mHat := Tensor.Preserving.divScalar expAvg biasCorrection1
-  let vHat := Tensor.Preserving.divScalar expAvgSq biasCorrection2
-  let denominator := Tensor.Preserving.addScalar (Tensor.Preserving.sqrt vHat) eps
-  let update := Tensor.Preserving.div mHat denominator
-  let scaledUpdate := Tensor.Preserving.mulScalar update lr
+  let mHat := Tensor.divScalar expAvg biasCorrection1
+  let vHat := Tensor.divScalar expAvgSq biasCorrection2
+  let denominator := Tensor.addScalar (Tensor.sqrt vHat) eps
+  let update : Tensor _ := by simpa using Tensor.div mHat denominator
+  let scaledUpdate := Tensor.mulScalar update lr
 
   -- 6. Apply weight decay (decoupled) to local shard
   let paramLocal := Tensor.detach param.shard
   let paramDecayed := if wd > 0.0 then
-      let decay := Tensor.Preserving.mulScalar paramLocal (lr * wd)
-      Tensor.Preserving.sub paramLocal decay
+      let decay := Tensor.mulScalar paramLocal (lr * wd)
+      Tensor.sub paramLocal decay
     else
       paramLocal
 
   -- 7. Apply update to local shard
-  let newLocal := Tensor.Preserving.sub paramDecayed scaledUpdate
+  let newLocal := Tensor.sub paramDecayed scaledUpdate
   let newLocal ← Tensor.parameter newLocal
 
   -- 8. Update sharded parameter (mark cache as stale)
@@ -443,7 +446,7 @@ def ShardedEmbeddingAdam.forward {vocabSize dim rank worldSize batch seq : UInt6
   return (output, { embed with weight := newSharded })
 
 /-- Backward/update step: reduce-scatter grad and update local shard -/
-def ShardedEmbeddingAdam.step {vocabSize dim rank worldSize : UInt64} {d : DType} {dev : Device}
+def ShardedEmbeddingAdam.step {vocabSize dim rank worldSize : UInt64} {d : DType} {dev : Device} [DType.RealFloating d]
     (embed : ShardedEmbeddingAdam vocabSize dim rank worldSize d dev)
     (fullGrad : Tensor ⟨#[vocabSize, dim], d, dev⟩)
     (cfg : Config)

@@ -11,7 +11,7 @@ example (_rvq : RVQDecode (device := .CPU))
     have _ : RVQDecode (device := .CPU) := { _rvq with outputProj := _weight }
   trivial
 
-private def bf16 : ExactDType := ⟨.BFloat16, by decide⟩
+private abbrev bf16 : RealFloatingDType := ⟨.BFloat16, by decide⟩
 
 example (_layout : SpeechTokenizerDTypes)
     (_codebook : QuantizerCodebook (device := .CPU) _layout)
@@ -26,7 +26,7 @@ example (_layout : SpeechTokenizerDTypes)
 example : True := by
   fail_if_success
     have _ : SpeechTokenizerDTypes := {
-      compute := bf16, usage := float32DType, sum := bf16,
+      compute := bf16, usage := float32DType.toExactDType, sum := bf16.toExactDType,
       promoted := .Float32, promotion := ⟨rfl⟩, resultEq := rfl }
   trivial
 
@@ -35,7 +35,7 @@ example : True := by
   -- BF16; neither source is converted to make matrix multiplication typecheck.
   for (compute, usage, sum) in #[(float32DType, float32DType, bf16),
       (float32DType, bf16, float32DType), (bf16, bf16, bf16)] do
-    let layout ← IO.ofExcept (SpeechTokenizerDTypes.ofDTypes? compute usage sum)
+    let layout ← IO.ofExcept (SpeechTokenizerDTypes.ofDTypes? compute.toExactDType usage.toExactDType sum.toExactDType)
     let sums ← IO.ofExcept ((Tensor.fromFloatArray #[6, 8]).castDType? layout.sum.val)
     let counts ← IO.ofExcept ((Tensor.fromFloatArray #[2, 4]).castDType? layout.usage.val)
     let result : Tensor ⟨#[2], layout.compute.val, .CPU⟩ := layout.divideCodebook sums counts
@@ -47,7 +47,7 @@ example : True := by
     LeanTest.assertEqual (← counts.toFloatArray) #[2, 4]
 
 @[test] def testSpeechCodebookRejectsWrongProjectionPrecision : IO Unit := do
-  let invalid := SpeechTokenizerDTypes.ofDTypes? bf16 float32DType bf16
+  let invalid := SpeechTokenizerDTypes.ofDTypes? bf16.toExactDType float32DType.toExactDType bf16.toExactDType
   match invalid with
   | .ok _ => throw (IO.userError "Mixed BF16/F32 codebook cannot feed a BF16 projection")
   | .error message =>

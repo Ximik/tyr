@@ -16,9 +16,9 @@ private def lossMask : Tensor { shape := #[2, 3], dtype := .Bool, device := .CPU
   LeanTest.assertEqual scaled.getLmask.actualSpec.dtype .Bool
   LeanTest.assertEqual scaled.getLmask.runtimeShape #[2, 3]
   let calls ← IO.mkRef (0 : Nat)
-  let mapped ← TensorStruct.mapM (fun t => do
+  let mapped ← FloatingTensorStruct.mapM (fun t => do
     calls.modify (· + 1)
-    pure (Tensor.Preserving.mulScalar t 2)) wrapped
+    pure (Tensor.mulScalar t 2)) wrapped
   LeanTest.assertEqual (← calls.get) 1
   LeanTest.assertEqual (← mapped.state.toFloatArray) #[4, 4]
   LeanTest.assertEqual (← mapped.getCmask.toFloatArray) #[0.25, 0.25]

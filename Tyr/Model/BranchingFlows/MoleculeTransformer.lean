@@ -12,6 +12,7 @@ import Tyr.Model.BranchingFlows.MoleculeTrain
 namespace torch.branching
 
 variable {device : Device} {dtype : DType}
+variable [DType.RealFloating dtype]
 variable [DType.Promotes dtype .Float32 .Float32] [DType.Promotes .Float32 dtype .Float32]
 variable [DType.NonBool dtype]
 open torch
@@ -56,16 +57,18 @@ private def boundCoordTarget {s : Shape} (coord : Tensor { dtype, device := devi
   match cap? with
   | some cap =>
       if cap > 0.0 then
-        Tensor.Preserving.mulScalar (Tensor.Preserving.tanh (Tensor.Preserving.divScalar coord cap)) cap
+        Tensor.mulScalar (Tensor.tanh (Tensor.divScalar coord cap)) cap
       else
         coord
   | none => coord
 
 private def randnScaled (shape : Shape) (scale : Float) : IO (Tensor { dtype, device := device, shape := shape }) := do
   let x ← randnDynamic (dtype := dtype) (device := device) shape
-  pure (Tensor.Preserving.mulScalar x scale)
+  pure (Tensor.mulScalar x scale)
 
 def init (vocab heads headDim mlp : UInt64) (device : Device := .CPU) (dtype : DType := .Float32) : IO (MoleculeTransformerParams (dtype := dtype) (device := device) vocab heads headDim mlp) := do
+  let floating ← IO.ofExcept (DType.realFloating? dtype)
+  let _ := floating.down
   let support ← dtype.acquireConstantSupport device
   let _ := support.down
   let initScale := 0.05
@@ -98,7 +101,7 @@ def init (vocab heads headDim mlp : UInt64) (device : Device := .CPU) (dtype : D
     vB := zerosDynamic (dtype := dtype) (device := device) #[heads * headDim],
     oW,
     oB := zerosDynamic (dtype := dtype) (device := device) #[heads * headDim],
-    pairDistSlope := Tensor.Preserving.addScalar (zerosDynamic (dtype := dtype) (device := device) #[heads]) (-4.0),
+    pairDistSlope := Tensor.addScalar (zerosDynamic (dtype := dtype) (device := device) #[heads]) (-4.0),
     mlpLnWeight := onesDynamic (dtype := dtype) (device := device) #[heads * headDim],
     mlpLnBias := zerosDynamic (dtype := dtype) (device := device) #[heads * headDim],
     fc1W,
@@ -121,8 +124,8 @@ private def pairwiseDistanceSq {batch maxLen : UInt64}
   let cj0 : Tensor { dtype, device := device, shape := #[batch, 1, maxLen, 3] } := coord.reshapeChecked #[batch, 1, maxLen, 3]
   let ci : Tensor { dtype, device := device, shape := #[batch, maxLen, maxLen, 3] } := Tensor.expand ci0 #[batch, maxLen, maxLen, 3]
   let cj : Tensor { dtype, device := device, shape := #[batch, maxLen, maxLen, 3] } := Tensor.expand cj0 #[batch, maxLen, maxLen, 3]
-  let diff := Tensor.Preserving.sub ci cj
-  (Tensor.Preserving.sumDim (Tensor.Preserving.mul diff diff) 3 false).reshapeChecked #[batch, maxLen, maxLen]
+  let diff := Tensor.sub ci cj
+  by simpa using (Tensor.sumDim (Tensor.mul diff diff) 3 false).reshapeChecked #[batch, maxLen, maxLen]
 
 private def spatialAttention {batch maxLen vocab heads headDim mlp : UInt64}
     (params : MoleculeTransformerParams (dtype := dtype) (device := device) vocab heads headDim mlp)
@@ -141,14 +144,14 @@ private def spatialAttention {batch maxLen vocab heads headDim mlp : UInt64}
   let dist : Tensor { dtype, device := device, shape := #[batch, maxLen, maxLen] } := pairwiseDistanceSq coord
   let slope : Tensor { dtype, device := device, shape := #[heads] } := softplusDynamic params.pairDistSlope
   let distBias : Tensor { dtype, device := device, shape := #[batch, heads, maxLen, maxLen] } :=
-    Tensor.Preserving.mul
+    Tensor.mul
       (Tensor.expand (Tensor.reshapeChecked slope #[1, heads, 1, 1]) #[batch, heads, maxLen, maxLen])
       (Tensor.expand (Tensor.reshapeChecked dist #[batch, 1, maxLen, maxLen]) #[batch, heads, maxLen, maxLen])
   let keyMask0 : Tensor { dtype := .Float32, device := device, shape := #[batch, 1, 1, maxLen] } := (floatDynamic padmask).reshapeChecked #[batch, 1, 1, maxLen]
   -- (1 - keyMask) · -1e9, computed on-device (a `zerosDynamic`-based masked_fill
   -- would be CPU-resident and crash on CUDA inputs).
   let maskTerm : Tensor { dtype := .Float32, device := device, shape := #[batch, 1, 1, maxLen] } :=
-    Tensor.Preserving.mulScalar (Tensor.Preserving.addScalar (Tensor.Preserving.mulScalar keyMask0 (-1.0)) 1.0) (-1.0e9)
+    Tensor.mulScalar (Tensor.addScalar (Tensor.mulScalar keyMask0 (-1.0)) 1.0) (-1.0e9)
   let bias : Tensor { dtype := .Float32, device := device, shape := #[batch, heads, maxLen, maxLen] } :=
     Tensor.sub (Tensor.expand maskTerm #[batch, heads, maxLen, maxLen]) distBias
   let ctx : Tensor { dtype, device := device, shape := #[batch, heads, maxLen, headDim] } :=
@@ -174,14 +177,14 @@ def forward {batch maxLen vocab heads headDim mlp : UInt64}
   let time0 : Tensor { dtype, device := device, shape := #[batch, 1, 1] } := t.reshapeChecked #[batch, 1, 1]
   let timeIn : Tensor { dtype, device := device, shape := #[batch, maxLen, 1] } := Tensor.expand time0 #[batch, maxLen, 1]
   let timeEmb : Tensor { dtype, device := device, shape := #[batch, maxLen, heads * headDim] } := Tensor.affine3d timeIn params.timeW params.timeB
-  let h0 := Tensor.Preserving.add (Tensor.Preserving.add coordEmb labelEmb) timeEmb
+  let h0 := Tensor.add (Tensor.add coordEmb labelEmb) timeEmb
   let h1n := Tensor.layerNorm h0 params.attnLnWeight params.attnLnBias 1.0e-5
   let attnOut := spatialAttention params coord padmask h1n
-  let h1 := Tensor.Preserving.add h0 attnOut
+  let h1 := Tensor.add h0 attnOut
   let h2n := Tensor.layerNorm h1 params.mlpLnWeight params.mlpLnBias 1.0e-5
-  let mlp1 := Tensor.Preserving.gelu (Tensor.affine3d h2n params.fc1W params.fc1B)
+  let mlp1 := Tensor.gelu (Tensor.affine3d h2n params.fc1W params.fc1B)
   let mlp2 := Tensor.affine3d mlp1 params.fc2W params.fc2B
-  let h := Tensor.Preserving.add h1 mlp2
+  let h := Tensor.add h1 mlp2
   let coordRaw : Tensor { dtype, device := device, shape := #[batch, maxLen, 3] } := Tensor.affine3d h params.coordHeadW params.coordHeadB
   let coordPred := boundCoordTarget coordRaw coordTargetCap?
   let labelLogits : Tensor { dtype, device := device, shape := #[batch, maxLen, vocab] } := Tensor.affine3d h params.labelHeadW params.labelHeadB
@@ -255,10 +258,12 @@ namespace FullMoleculeTransformerLayerParams
 
 private def randnScaled (shape : Shape) (scale : Float) : IO (Tensor { dtype, device := device, shape := shape }) := do
   let x ← randnDynamic (dtype := dtype) (device := device) shape
-  pure (Tensor.Preserving.mulScalar x scale)
+  pure (Tensor.mulScalar x scale)
 
 def init (hidden heads headDim mlp rff : UInt64) (device : Device := .CPU) (dtype : DType := .Float32) :
     IO (FullMoleculeTransformerLayerParams (dtype := dtype) (device := device) hidden heads headDim mlp rff) := do
+  let floating ← IO.ofExcept (DType.realFloating? dtype)
+  let _ := floating.down
   let support ← dtype.acquireConstantSupport device
   let _ := support.down
   let initScale := 0.02
@@ -303,17 +308,19 @@ private def boundCoordTarget {s : Shape} (coord : Tensor { dtype, device := devi
   match cap? with
   | some cap =>
       if cap > 0.0 then
-        Tensor.Preserving.mulScalar (Tensor.Preserving.tanh (Tensor.Preserving.divScalar coord cap)) cap
+        Tensor.mulScalar (Tensor.tanh (Tensor.divScalar coord cap)) cap
       else
         coord
   | none => coord
 
 private def randnScaled (shape : Shape) (scale : Float) : IO (Tensor { dtype, device := device, shape := shape }) := do
   let x ← randnDynamic (dtype := dtype) (device := device) shape
-  pure (Tensor.Preserving.mulScalar x scale)
+  pure (Tensor.mulScalar x scale)
 
 def init (vocab hidden heads headDim mlp rff layers : UInt64) (device : Device := .CPU) (dtype : DType := .Float32) :
     IO (FullMoleculeTransformerParams (dtype := dtype) (device := device) vocab hidden heads headDim mlp rff layers) := do
+  let floating ← IO.ofExcept (DType.realFloating? dtype)
+  let _ := floating.down
   let support ← dtype.acquireConstantSupport device
   let _ := support.down
   let coordRffW ← randnScaled #[rff, 3] 1.0
@@ -359,15 +366,15 @@ private def pairwiseDistanceSq {batch maxLen : UInt64}
   let cj0 : Tensor { dtype, device := device, shape := #[batch, 1, maxLen, 3] } := coord.reshapeChecked #[batch, 1, maxLen, 3]
   let ci : Tensor { dtype, device := device, shape := #[batch, maxLen, maxLen, 3] } := Tensor.expand ci0 #[batch, maxLen, maxLen, 3]
   let cj : Tensor { dtype, device := device, shape := #[batch, maxLen, maxLen, 3] } := Tensor.expand cj0 #[batch, maxLen, maxLen, 3]
-  let diff := Tensor.Preserving.sub ci cj
-  (Tensor.Preserving.sumDim (Tensor.Preserving.mul diff diff) 3 false).reshapeChecked #[batch, maxLen, maxLen]
+  let diff := Tensor.sub ci cj
+  by simpa using (Tensor.sumDim (Tensor.mul diff diff) 3 false).reshapeChecked #[batch, maxLen, maxLen]
 
 private def coordRffEmbedding {batch maxLen vocab hidden heads headDim mlp rff layers : UInt64}
     (params : FullMoleculeTransformerParams (dtype := dtype) (device := device) vocab hidden heads headDim mlp rff layers)
     (coord : Tensor { dtype, device := device, shape := #[batch, maxLen, 3] }) : Tensor { dtype, device := device, shape := #[batch, maxLen, hidden] } :=
   let flat : Tensor { dtype, device := device, shape := #[batch * maxLen, 3] } := Tensor.reshapeChecked coord #[batch * maxLen, 3]
   let phase : Tensor { dtype, device := device, shape := #[batch * maxLen, rff] } := affine2d flat params.coordRffW params.coordRffB
-  let featFlat : Tensor { dtype, device := device, shape := #[batch * maxLen, rff * 2] } := (Tensor.cat (Tensor.Preserving.sin phase) (cosDynamic phase) 1).reshapeChecked #[batch * maxLen, rff * 2]
+  let featFlat : Tensor { dtype, device := device, shape := #[batch * maxLen, rff * 2] } := (Tensor.cat (Tensor.sin phase) (cosDynamic phase) 1).reshapeChecked #[batch * maxLen, rff * 2]
   let features : Tensor { dtype, device := device, shape := #[batch, maxLen, rff * 2] } := Tensor.reshapeChecked featFlat #[batch, maxLen, rff * 2]
   Tensor.affine3d features params.coordProjW params.coordProjB
 
@@ -377,7 +384,7 @@ private def pairRffFeatures {batch maxLen vocab hidden heads headDim mlp rff lay
   let dist : Tensor { dtype, device := device, shape := #[batch, maxLen, maxLen] } := pairwiseDistanceSq coord
   let distFlat : Tensor { dtype, device := device, shape := #[batch * maxLen * maxLen, 1] } := Tensor.reshapeChecked dist #[batch * maxLen * maxLen, 1]
   let phase : Tensor { dtype, device := device, shape := #[batch * maxLen * maxLen, rff] } := affine2d distFlat params.pairRffW params.pairRffB
-  (Tensor.cat (Tensor.Preserving.sin phase) (cosDynamic phase) 1).reshapeChecked #[batch * maxLen * maxLen, rff * 2]
+  (Tensor.cat (Tensor.sin phase) (cosDynamic phase) 1).reshapeChecked #[batch * maxLen * maxLen, rff * 2]
 
 private def pairAttentionBiasFrom {batch maxLen hidden heads headDim mlp rff : UInt64}
     (layer : FullMoleculeTransformerLayerParams (dtype := dtype) (device := device) hidden heads headDim mlp rff)
@@ -413,7 +420,7 @@ private def spatialAttention {batch maxLen vocab hidden heads headDim mlp rff la
   -- (1 - keyMask) · -1e9, computed on-device (a `zerosDynamic`-based masked_fill
   -- would be CPU-resident and crash on CUDA inputs).
   let maskTerm : Tensor { dtype := .Float32, device := device, shape := #[batch, 1, 1, maxLen] } :=
-    Tensor.Preserving.mulScalar (Tensor.Preserving.addScalar (Tensor.Preserving.mulScalar keyMask0 (-1.0)) 1.0) (-1.0e9)
+    Tensor.mulScalar (Tensor.addScalar (Tensor.mulScalar keyMask0 (-1.0)) 1.0) (-1.0e9)
   let bias : Tensor { dtype := .Float32, device := device, shape := #[batch, heads, maxLen, maxLen] } :=
     Tensor.add pairBias (Tensor.expand maskTerm #[batch, heads, maxLen, maxLen])
   let ctx : Tensor { dtype, device := device, shape := #[batch, heads, maxLen, headDim] } :=
@@ -435,15 +442,15 @@ private def forwardLayer {batch maxLen vocab hidden heads headDim mlp rff layers
     Tensor { dtype, device := device, shape := #[batch, maxLen, hidden] } × Tensor { dtype, device := device, shape := #[batch, maxLen, 3] } :=
   let h1n := Tensor.layerNorm h layer.attnLnWeight layer.attnLnBias 1.0e-5
   let attnOut := spatialAttention params layer pairFeatures padmask ropeCos ropeSin h1n
-  let h1 := Tensor.Preserving.add h attnOut
+  let h1 := Tensor.add h attnOut
   let h2n := Tensor.layerNorm h1 layer.mlpLnWeight layer.mlpLnBias 1.0e-5
-  let mlp1 := Tensor.Preserving.gelu (Tensor.affine3d h2n layer.fc1W layer.fc1B)
+  let mlp1 := Tensor.gelu (Tensor.affine3d h2n layer.fc1W layer.fc1B)
   let mlp2 := Tensor.affine3d mlp1 layer.fc2W layer.fc2B
-  let h2 := Tensor.Preserving.add h1 mlp2
+  let h2 := Tensor.add h1 mlp2
   if applyCoordUpdate then
     let coordN := Tensor.layerNorm h2 layer.coordLnWeight layer.coordLnBias 1.0e-5
     let delta : Tensor { dtype, device := device, shape := #[batch, maxLen, 3] } := Tensor.affine3d coordN layer.coordUpdateW layer.coordUpdateB
-    (h2, Tensor.Preserving.add coord delta)
+    (h2, Tensor.add coord delta)
   else
     (h2, coord)
 
@@ -470,7 +477,7 @@ def forwardFreqs {batch maxLen vocab hidden heads headDim mlp rff layers : UInt6
   let time0 : Tensor { dtype, device := device, shape := #[batch, 1, 1] } := t.reshapeChecked #[batch, 1, 1]
   let timeIn : Tensor { dtype, device := device, shape := #[batch, maxLen, 1] } := Tensor.expand time0 #[batch, maxLen, 1]
   let timeEmb : Tensor { dtype, device := device, shape := #[batch, maxLen, hidden] } := Tensor.affine3d timeIn params.timeW params.timeB
-  let mut h := Tensor.Preserving.add (Tensor.Preserving.add coordEmb labelEmb) timeEmb
+  let mut h := Tensor.add (Tensor.add coordEmb labelEmb) timeEmb
   let mut runningCoord := coord
   let updateStart := if params.blocks.size > coordUpdateLayers then params.blocks.size - coordUpdateLayers else 0
   -- RFF pair features depend only on the running coordinates: shared by all
@@ -488,7 +495,7 @@ def forwardFreqs {batch maxLen vocab hidden heads headDim mlp rff layers : UInt6
     i := i + 1
   let hFinal := Tensor.layerNorm h params.finalLnWeight params.finalLnBias 1.0e-5
   let coordDelta : Tensor { dtype, device := device, shape := #[batch, maxLen, 3] } := Tensor.affine3d hFinal params.coordHeadW params.coordHeadB
-  let coordPred := boundCoordTarget (Tensor.Preserving.add runningCoord coordDelta) coordTargetCap?
+  let coordPred := boundCoordTarget (Tensor.add runningCoord coordDelta) coordTargetCap?
   let labelLogits : Tensor { dtype, device := device, shape := #[batch, maxLen, vocab] } := Tensor.affine3d hFinal params.labelHeadW params.labelHeadB
   let split3 : Tensor { dtype, device := device, shape := #[batch, maxLen, 1] } := Tensor.affine3d hFinal params.splitHeadW params.splitHeadB
   let del3 : Tensor { dtype, device := device, shape := #[batch, maxLen, 1] } := Tensor.affine3d hFinal params.delHeadW params.delHeadB

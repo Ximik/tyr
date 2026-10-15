@@ -22,6 +22,7 @@ import Tyr.Model.Utils
 namespace torch.qwen3asr
 
 variable {device : Device} {dtype featureDType : DType}
+variable [DType.RealFloating dtype]
 open torch.Model
 
 abbrev TextQwenConfig (cfg : ThinkerConfig) : qwen.QwenConfig :=

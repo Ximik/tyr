@@ -29,7 +29,7 @@ def testMetricFactorPullbackMatchesExplicitMatmul : IO Unit := do
 def testWoodburySolveMatchesDenseInverse : IO Unit := do
   let kMat ← Tensor.randn #[3, 5]
   let rawDiag ← Tensor.randn #[5]
-  let diag := Tensor.Preserving.addScalar (Tensor.abs rawDiag) 1.0
+  let diag := Tensor.addScalar (Tensor.abs rawDiag) 1.0
   let g ← Tensor.randn #[5]
   let factor : MetricFactor 3 5 := { matrix := kMat }
   let mass : DiagonalMass 5 := { diag := diag }

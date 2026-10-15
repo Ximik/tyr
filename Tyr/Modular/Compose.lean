@@ -13,6 +13,7 @@
   - Parallel: ||w|| = √(||w₁||² + ||w₂||²) for ℓ₂ combination
 -/
 import Tyr.Modular.Norm
+import Tyr.Module.Derive
 
 namespace Tyr.Modular
 
@@ -31,6 +32,8 @@ We provide a `Sequential` wrapper to distinguish composition semantics.
 structure Sequential (M₁ M₂ : Type) where
   first : M₁
   second : M₂
+
+derive_tensor_struct_for Sequential
 
 namespace Sequential
 

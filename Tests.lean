@@ -205,3 +205,6 @@ import Tests.TestDeviceAcquisition
 import Tests.TestFactoryRecovery
 
 import Tests.TestConstantSupport
+
+import Tests.TestNoPreserving
+import Tests.TestTensorStructConstraints

@@ -17,6 +17,7 @@ import Tyr.Model.Flux.QKNorm
 namespace torch.flux
 
 variable {device : Device} {dtype : DType}
+variable [DType.RealFloating dtype]
 /-- Single-stream transformer block.
     Processes concatenated image + text tokens with shared attention.
     Uses fused QKV + MLP projection for efficiency. -/
@@ -42,6 +43,8 @@ namespace SingleStreamBlock
 /-- Initialize single-stream block -/
 def init (hidden_size num_heads head_dim mlp_hidden : UInt64)
     (device : Device := .CPU) (dtype : DType := .Float32) : IO (SingleStreamBlock (device := device) (dtype := dtype) hidden_size num_heads head_dim mlp_hidden) := do
+  let floating ← IO.ofExcept (DType.realFloating? dtype)
+  let _ := floating.down
   let pre_norm ← initLayerNorm (dtype := dtype) (device := device) hidden_size
   let qkv_dim := num_heads * head_dim * 3
   let mlp_in := mlp_hidden * 2
@@ -53,8 +56,8 @@ def init (hidden_size num_heads head_dim mlp_hidden : UInt64)
   let norm ← QKNorm.init (dtype := dtype) (device := device) head_dim
   pure {
     pre_norm
-    linear1 := (← Tensor.parameter (Tensor.Preserving.mulScalar l1 std))
-    linear2 := (← Tensor.parameter (Tensor.Preserving.mulScalar l2 std))
+    linear1 := (← Tensor.parameter (Tensor.mulScalar l1 std))
+    linear2 := (← Tensor.parameter (Tensor.mulScalar l2 std))
     norm
   }
 
@@ -115,7 +118,7 @@ def forward {batch seq hidden_size num_heads head_dim mlp_hidden : UInt64}
   let mlp := Tensor.reshapeChecked mlp #[batch, seq, 2, mlp_hidden]
   let gate := Tensor.reshapeChecked (sliceTyped mlp 2 0 1) #[batch, seq, mlp_hidden]
   let up := Tensor.reshapeChecked (sliceTyped mlp 2 1 1) #[batch, seq, mlp_hidden]
-  let mlp_out := Tensor.Preserving.mul (Tensor.Preserving.silu gate) up
+  let mlp_out := Tensor.mul (Tensor.silu gate) up
 
   -- Concatenate attention and MLP outputs
   let combined : Tensor { dtype := dtype, device := device, shape := #[batch, seq, num_heads * head_dim + mlp_hidden] } := qwen35.typedCat attn mlp_out 2  -- [batch, seq, hidden + mlp_hidden]
@@ -126,7 +129,7 @@ def forward {batch seq hidden_size num_heads head_dim mlp_hidden : UInt64}
   -- Apply gate and residual
   let mod_gate := Tensor.unsqueeze mod_gate 1
   let mod_gate := Tensor.expand mod_gate #[batch, seq, hidden_size]
-  Tensor.Preserving.add x (Tensor.Preserving.mul mod_gate out)
+  Tensor.add x (Tensor.mul mod_gate out)
 
 end SingleStreamBlock
 

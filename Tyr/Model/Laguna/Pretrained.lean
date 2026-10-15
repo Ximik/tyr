@@ -39,14 +39,14 @@ namespace torch.laguna
 namespace LagunaForCausalLM
 
 /-- Load a Laguna checkpoint from a local dir or HF repo id.
-    Returns the resolved config, exact compute dtype, and indexed model. -/
+    Returns the resolved config, validated real floating compute dtype, and indexed model. -/
 def loadFromPretrained
     (source : String)
     (defaults : Config := Config.laguna_s_2_1)
     (revision : String := "main")
     (cacheDir : String := Hub.defaultCacheDir)
     (device : Device := Device.CPU)
-    : IO (Σ cfg : Config, Σ dtype : ExactDType, LagunaForCausalLM (device := device) cfg dtype.val) := do
+    : IO (Σ cfg : Config, Σ dtype : RealFloatingDType, LagunaForCausalLM (device := device) cfg dtype.val) := do
   Hub.loadModelFromPretrained
     source
     revision

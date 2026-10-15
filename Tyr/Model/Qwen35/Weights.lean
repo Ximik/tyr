@@ -494,11 +494,13 @@ namespace Qwen35ForCausalLM
 def loadSharded (modelDir : String) (cfg : Config := Config.qwen35_9B)
     (device : Device := Device.CPU)
     (log : Handlers := {})
-    : IO (Σ dtype : ExactDType, Qwen35ForCausalLM (device := device) cfg dtype.val) := do
+    : IO (Σ dtype : RealFloatingDType, Qwen35ForCausalLM (device := device) cfg dtype.val) := do
   log.onInfo s!"Loading Qwen35ForCausalLM (device := device) from {modelDir}..."
 
   let embedTokens ← loadTensorShardedCandidates modelDir (nameCandidates "model.embed_tokens.weight") #[cfg.vocab_size, cfg.hidden_size] device
   let dtype := embedTokens.1
+  let floating ← IO.ofExcept dtype.val.realFloating?
+  let _ := floating.down
 
   let mut layers : Array (Qwen35Layer (dtype := dtype.val) (device := device) cfg) := #[]
   for i in [:cfg.num_hidden_layers.toNat] do
@@ -531,17 +533,19 @@ def loadSharded (modelDir : String) (cfg : Config := Config.qwen35_9B)
       pure (reqGradFalse model.embed_tokens, true)
 
   log.onInfo "Loaded Qwen35ForCausalLM (device := device) weights."
-  pure ⟨dtype, { model := model, lmHead := lmHead, tieWordEmbeddings := tieWordEmbeddings }⟩
+  pure ⟨RealFloatingDType.ofDType dtype.val, { model := model, lmHead := lmHead, tieWordEmbeddings := tieWordEmbeddings }⟩
 
 /-- Load Qwen3.5 model from a single HF SafeTensors file. -/
 def load (path : String) (cfg : Config := Config.qwen35_9B)
     (device : Device := Device.CPU)
     (log : Handlers := {})
-    : IO (Σ dtype : ExactDType, Qwen35ForCausalLM (device := device) cfg dtype.val) := do
+    : IO (Σ dtype : RealFloatingDType, Qwen35ForCausalLM (device := device) cfg dtype.val) := do
   log.onInfo s!"Loading Qwen35ForCausalLM (device := device) from {path}..."
 
   let embedTokens ← loadTensorCandidates path (nameCandidates "model.embed_tokens.weight") #[cfg.vocab_size, cfg.hidden_size] device
   let dtype := embedTokens.1
+  let floating ← IO.ofExcept dtype.val.realFloating?
+  let _ := floating.down
 
   let mut layers : Array (Qwen35Layer (dtype := dtype.val) (device := device) cfg) := #[]
   for i in [:cfg.num_hidden_layers.toNat] do
@@ -572,7 +576,7 @@ def load (path : String) (cfg : Config := Config.qwen35_9B)
       pure (reqGradFalse model.embed_tokens, true)
 
   log.onInfo "Loaded Qwen35ForCausalLM (device := device) weights."
-  pure ⟨dtype, { model := model, lmHead := lmHead, tieWordEmbeddings := tieWordEmbeddings }⟩
+  pure ⟨RealFloatingDType.ofDType dtype.val, { model := model, lmHead := lmHead, tieWordEmbeddings := tieWordEmbeddings }⟩
 
 end Qwen35ForCausalLM
 

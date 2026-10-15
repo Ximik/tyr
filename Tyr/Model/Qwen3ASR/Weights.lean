@@ -245,18 +245,20 @@ private def resolveAsrDevice (log : Handlers := {}) : IO Device := do
 
 /-- Load Qwen3-ASR model from HuggingFace sharded SafeTensors directory. -/
 def loadShardedAt (modelDir : String) (cfg : Qwen3ASRConfig := {}) (log : Handlers := {})
-    (device : Device) : IO (Σ dtype : ExactDType, Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype.val) cfg) := do
+    (device : Device) : IO (Σ dtype : RealFloatingDType, Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype.val) cfg) := do
   log.onInfo s!"Loading Qwen3-ASR weights from {modelDir}..."
   let ⟨dtype, conv2d1Weight⟩ ← safetensors.loadTensorShardedExact modelDir
     "thinker.audio_tower.conv2d1.weight" #[cfg.thinkerConfig.audioConfig.downsampleHiddenSize, 1, 3, 3] device
+  let floating ← IO.ofExcept (DType.realFloating? dtype.val)
+  let _ := floating.down
   let thinker ← loadThinkerSharded (dtype := dtype) (device := device) modelDir cfg.thinkerConfig conv2d1Weight
   log.onInfo s!"Qwen3-ASR target device: {repr device}"
   log.onInfo "Loaded Qwen3-ASR weights."
-  pure ⟨dtype, { thinker, supportLanguages := cfg.supportLanguages }⟩
+  pure ⟨RealFloatingDType.ofDType dtype.val, { thinker, supportLanguages := cfg.supportLanguages }⟩
 
 /-- Load using the environment-selected device, retaining that index in the result. -/
 def loadSharded (modelDir : String) (cfg : Qwen3ASRConfig := {}) (log : Handlers := {}) :
-    IO (Σ device : Device, Σ dtype : ExactDType, Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype.val) cfg) := do
+    IO (Σ device : Device, Σ dtype : RealFloatingDType, Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype.val) cfg) := do
   let device ← resolveAsrDevice log
   let model ← loadShardedAt modelDir cfg log device
   pure ⟨device, model⟩

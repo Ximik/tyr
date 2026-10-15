@@ -5,6 +5,7 @@ import Tyr.Model.Utils
 namespace torch.qwen35
 
 variable {device : Device} {dtype : DType}
+variable [DType.RealFloating dtype]
 
 private def checked {σ : StaticSpec} (raw : RawTensor) : Tensor σ :=
   match Tensor.ofRaw raw with
@@ -45,9 +46,9 @@ def topK2d {rows cols : UInt64} (x : Tensor { device := device, shape := #[rows,
   (checked values, checked indices)
 
 def rsqrtDynamic {s : Shape} (x : Tensor { device := device, shape := s, dtype := dtype }) : Tensor { device := device, shape := s, dtype := dtype } :=
-  Tensor.Preserving.rsqrt x
+  Tensor.rsqrt x
 def logDynamic {s : Shape} (x : Tensor { device := device, shape := s, dtype := dtype }) : Tensor { device := device, shape := s, dtype := dtype } :=
-  Tensor.Preserving.log x
+  Tensor.log x
 def softplusDynamic {s : Shape} (x : Tensor { device := device, shape := s, dtype := dtype }) : Tensor { device := device, shape := s, dtype := dtype } :=
   checked (RawTensor.softplus s x.raw)
 def floatDynamic {s : Shape} {d : DType} (x : Tensor { device := device, shape := s, dtype := d }) : Tensor { device := device, shape := s, dtype := .Float32 } := x.toFloat32

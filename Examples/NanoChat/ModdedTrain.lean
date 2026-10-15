@@ -1327,12 +1327,12 @@ def syncGradients {cfg : moddedGpt.Config} (params : ModdedGPTParams (device := 
   if isDistributed then dist.allReduceGrads grads .avg else pure grads
 
 /-- Clip a gradient value without modifying its parameter's gradient accumulator. -/
-private def clipGradientValue {σ : StaticSpec} (gradient : Tensor σ) (maxNorm : Float) :
+private def clipGradientValue {σ : StaticSpec} [DType.RealFloating σ.dtype] (gradient : Tensor σ) (maxNorm : Float) :
     Tensor σ :=
   let values := gradient.toFloat32
   let norm := Float.sqrt (Tensor.sumAll (values * values)).item
   if norm > maxNorm then
-    Tensor.Preserving.mulScalar gradient (maxNorm / norm)
+    Tensor.mulScalar gradient (maxNorm / norm)
   else gradient
 
 /-- Distributed training step with gradient synchronization.
@@ -1376,7 +1376,7 @@ def trainStepDistributed {cfg : moddedGpt.Config} {batch seq : UInt64}
   -- Synchronize the snapshots once and clip those exact values before updating.
   let grads ← syncGradients params
   let grads := if gradClip > 0 then
-    TensorStruct.map (fun gradient => clipGradientValue gradient gradClip) grads
+    FloatingTensorStruct.map (fun gradient => clipGradientValue gradient gradClip) grads
   else grads
 
   -- Get current learning rate from schedule

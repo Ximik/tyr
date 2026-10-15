@@ -179,7 +179,7 @@ def maskedMean {batch seq : UInt64} (loss validTokens : Tensor { device := devic
   Tensor.div nlls (denom + eps)
 
 /-- Optimizer step for an FLM loss. `validTokens` is a float mask. -/
-def trainStep {seq vocab batch : UInt64} {Params : Type} [TensorStruct Params]
+def trainStep {seq vocab batch : UInt64} {Params : Type} [TensorStruct Params] [FloatingTensorStruct Params]
     (cfg : FlowConfig)
     (timeMap : (TimeMap (device := device)))
     (model : FlowDenoiser (device := device) seq vocab Params)

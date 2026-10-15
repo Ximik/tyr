@@ -131,54 +131,23 @@ def sin? {σ : StaticSpec} (t : Tensor σ) : Except String (Tensor σ) :=
   checkedNeuralUnary? "sin" "a floating or complex dtype" DType.isInexact RawTensor.sinChecked t
 
 def sin {σ : StaticSpec} (t : Tensor σ)
-    (_domain : σ.dtype.isInexact = true := by first | rfl | decide) : Tensor σ :=
+    (_domain : σ.dtype.isInexact = true := by first | rfl | exact DType.isInexact_of_realFloating | decide) : Tensor σ :=
   neuralUnaryResult "sin" t (sin? t)
 
 def cos? {σ : StaticSpec} (t : Tensor σ) : Except String (Tensor σ) :=
   checkedNeuralUnary? "cos" "a floating or complex dtype" DType.isInexact RawTensor.cosChecked t
 
 def cos {σ : StaticSpec} (t : Tensor σ)
-    (_domain : σ.dtype.isInexact = true := by first | rfl | decide) : Tensor σ :=
+    (_domain : σ.dtype.isInexact = true := by first | rfl | exact DType.isInexact_of_realFloating | decide) : Tensor σ :=
   neuralUnaryResult "cos" t (cos? t)
 
 def elu? {σ : StaticSpec} (t : Tensor σ) : Except String (Tensor σ) :=
   checkedNeuralUnary? "elu" "a standard real floating dtype" DType.isRealFloating RawTensor.eluChecked t
 
 def elu {σ : StaticSpec} (t : Tensor σ)
-    (_domain : σ.dtype.isRealFloating = true := by first | rfl | decide) : Tensor σ :=
+    (_domain : σ.dtype.isRealFloating = true := by first | rfl | exact DType.isRealFloating_of_realFloating | decide) : Tensor σ :=
   neuralUnaryResult "elu" t (elu? t)
 
-namespace Preserving
-/-- Runtime-domain and native-error checks for checkpoint activations. -/
-def gelu? {σ : StaticSpec} (t : Tensor σ) : Except String (Tensor σ) :=
-  Tensor.gelu? t
-
-def gelu {σ : StaticSpec} (t : Tensor σ) : Tensor σ :=
-  neuralUnaryResult "Preserving.gelu" t (gelu? t)
-
-def silu? {σ : StaticSpec} (t : Tensor σ) : Except String (Tensor σ) :=
-  Tensor.silu? t
-
-def silu {σ : StaticSpec} (t : Tensor σ) : Tensor σ :=
-  neuralUnaryResult "Preserving.silu" t (silu? t)
-
-def sigmoid? {σ : StaticSpec} (t : Tensor σ) : Except String (Tensor σ) :=
-  Tensor.sigmoid? t
-
-def sigmoid {σ : StaticSpec} (t : Tensor σ) : Tensor σ :=
-  neuralUnaryResult "Preserving.sigmoid" t (sigmoid? t)
-
-def tanh? {σ : StaticSpec} (t : Tensor σ) : Except String (Tensor σ) :=
-  Tensor.tanh? t
-
-def tanh {σ : StaticSpec} (t : Tensor σ) : Tensor σ :=
-  neuralUnaryResult "Preserving.tanh" t (tanh? t)
-
-def softmax? {σ : StaticSpec} (t : Tensor σ) (dim : Int32 := -1) : Except String (Tensor σ) :=
-  Tensor.softmax? t dim
-
-def softmax {σ : StaticSpec} (t : Tensor σ) (dim : Int32 := -1) : Tensor σ :=
-  neuralUnaryResult "Preserving.softmax" t (softmax? t dim)
 
 /-- Mean for floating or complex checkpoint tensors; invalid axes, integral
 inputs and missing kernels are recoverable errors. -/
@@ -192,31 +161,12 @@ def meanDim? {σ : StaticSpec} (t : Tensor σ) (dim : Nat) (keepdim : Bool := fa
   Device.check t.raw.device raw.device
   Tensor.ofRaw raw
 
-def meanDim {σ : StaticSpec} (t : Tensor σ) (dim : Nat) (keepdim : Bool := false) :
+def meanDim {σ : StaticSpec} [DType.Mean σ.dtype] (t : Tensor σ) (dim : Nat) (keepdim : Bool := false)
+    (_axis : dim < max 1 σ.shape.size := by exact of_decide_eq_true rfl) :
     Tensor (σ.withShape (reduceShape σ.shape dim keepdim)) :=
   match meanDim? t dim keepdim with
   | .ok result => result
   | .error message => nativeInvariantFailure s!"Tensor.meanDim: {message}"
-def exp? {σ : StaticSpec} (t : Tensor σ) : Except String (Tensor σ) := Tensor.exp? t
-
-def exp {σ : StaticSpec} (t : Tensor σ) : Tensor σ :=
-  neuralUnaryResult "Preserving.exp" t (exp? t)
-
-def sin? {σ : StaticSpec} (t : Tensor σ) : Except String (Tensor σ) := Tensor.sin? t
-
-def sin {σ : StaticSpec} (t : Tensor σ) : Tensor σ :=
-  neuralUnaryResult "Preserving.sin" t (sin? t)
-
-def cos? {σ : StaticSpec} (t : Tensor σ) : Except String (Tensor σ) := Tensor.cos? t
-
-def cos {σ : StaticSpec} (t : Tensor σ) : Tensor σ :=
-  neuralUnaryResult "Preserving.cos" t (cos? t)
-
-def elu? {σ : StaticSpec} (t : Tensor σ) : Except String (Tensor σ) := Tensor.elu? t
-
-def elu {σ : StaticSpec} (t : Tensor σ) : Tensor σ :=
-  neuralUnaryResult "Preserving.elu" t (elu? t)
-end Preserving
 
 /-- Spatial extent computed without fixed-width arithmetic wrapping. -/
 def convExtent (input kernel stride padding dilation : UInt64) : UInt64 :=
@@ -516,17 +466,9 @@ def log10? {σ : StaticSpec} (input : Tensor σ) : Except String (Tensor σ) :=
   checkedNeuralUnary? "log10" "a floating or complex dtype" DType.isInexact RawTensor.log10Checked input
 
 def log10 {σ : StaticSpec} (input : Tensor σ)
-    (_inexact : σ.dtype.isInexact = true := by first | rfl | decide) : Tensor σ :=
+    (_inexact : σ.dtype.isInexact = true := by first | rfl | exact DType.isInexact_of_realFloating | decide) : Tensor σ :=
   neuralUnaryResult "log10" input (log10? input)
 
-namespace Preserving
-
-def log10? {σ : StaticSpec} (input : Tensor σ) : Except String (Tensor σ) := Tensor.log10? input
-
-def log10 {σ : StaticSpec} (input : Tensor σ) : Tensor σ :=
-  neuralUnaryResult "Preserving.log10" input (log10? input)
-
-end Preserving
 
 def saveWav {σ : StaticSpec} (input : Tensor σ) (path : String) (sampleRate : UInt64 := 24000) : IO Unit :=
   RawTensor.saveWav σ.shape input.raw path sampleRate
@@ -640,17 +582,9 @@ def log? {σ : StaticSpec} (input : Tensor σ) : Except String (Tensor σ) :=
   checkedNeuralUnary? "log" "a floating or complex dtype" DType.isInexact RawTensor.logChecked input
 
 def log {σ : StaticSpec} (input : Tensor σ)
-    (_inexact : σ.dtype.isInexact = true := by first | rfl | decide) : Tensor σ :=
+    (_inexact : σ.dtype.isInexact = true := by first | rfl | exact DType.isInexact_of_realFloating | decide) : Tensor σ :=
   neuralUnaryResult "log" input (log? input)
 
-namespace Preserving
-
-def log? {σ : StaticSpec} (input : Tensor σ) : Except String (Tensor σ) := Tensor.log? input
-
-def log {σ : StaticSpec} (input : Tensor σ) : Tensor σ :=
-  neuralUnaryResult "Preserving.log" input (log? input)
-
-end Preserving
 
 def saveSafeTensor {σ : StaticSpec} (input : Tensor σ) (path name : String) : IO Unit :=
   RawTensor.saveSafeTensor σ.shape path name input.raw

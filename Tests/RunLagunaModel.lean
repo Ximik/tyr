@@ -260,7 +260,7 @@ private def withStableRoutes (cfg : Config) (m : LagunaForCausalLM (device := de
   { m with model := { m.model with layers := m.model.layers.map fun layer =>
       { layer with sparseMoe := layer.sparseMoe.map fun moe =>
           let bias : Tensor { shape := #[cfg.num_experts], device := device, dtype := .Float32 } := Tensor.reshapeChecked
-            (Tensor.Preserving.mulScalar (floatDynamic ((Tensor.arange cfg.num_experts).to moe.router.weight.2.device)) 2.0)
+            (Tensor.mulScalar (floatDynamic ((Tensor.arange cfg.num_experts).to moe.router.weight.2.device)) 2.0)
             #[cfg.num_experts]
           { moe with router := { moe.router with eScoreCorrectionBias := some (bias.packDType (by simp)) } } } } }
 
@@ -282,7 +282,8 @@ private def floatReference (cfg : Config) (m : LagunaForCausalLM (device := devi
     pure { layer with sparseMoe }
   pure { m with model := { m.model with layers } }
 
-private def runCacheParityModel (cfg : Config) (device : Device) (lbl : String)
+private def runCacheParityModel {dtype : DType} [DType.RealFloating dtype]
+    (cfg : Config) (device : Device) (lbl : String)
     (model : LagunaForCausalLM (device := device) cfg dtype) (tol : Float) (bf16Diagnostic := false) : IO Unit := do
   let support ← dtype.acquireConstantSupport device
   let _ := support.down
@@ -415,6 +416,8 @@ private def runBf16LayerCacheParity (cfg : Config) (device : Device) (lbl : Stri
   check (violations == 0) s!"(a) [{lbl}] every attention cache output satisfies the BF16 mixed bound ({violations} violations)"
 
 private def runCacheParity (cfg : Config) (device : Device) (bf16 : Bool) (tol : Float) : IO Unit := do
+  let _ : DType.RealFloating (if bf16 then .BFloat16 else .Float32) := by
+    cases bf16 <;> exact ⟨rfl⟩
   let lbl := s!"{deviceLabel device}{(if bf16 then "/bf16" else "/fp32")}"
   torch.manualSeed 1234
   let model := withStableRoutes cfg (← moveModel (← LagunaForCausalLM.init cfg) device bf16)
@@ -504,6 +507,8 @@ BF16 MoE uses stable expert selection and compares identical decode positions
 against the functional cache. The 0.1 bound permits BF16 reduction rounding
 when ring order permutes paired keys/values; FP32 retains the tight bound. -/
 private def runOwnedCacheCheck (device : Device) (bf16 : Bool := false) : IO Unit := do
+  let _ : DType.RealFloating (if bf16 then .BFloat16 else .Float32) := by
+    cases bf16 <;> exact ⟨rfl⟩
   let support ← (if bf16 then DType.BFloat16 else DType.Float32).acquireConstantSupport device
   let _ := support.down
   let cfg := if bf16 then lagunaTiny else denseTiny

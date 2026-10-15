@@ -83,35 +83,49 @@ private def expectError {α : Type} (result : Except String α)
     expectError (Tensor.Promoting.mul? floating exact) "Unsupported dtype promotion"
     expectError (Tensor.Promoting.div? floating exact) "Unsupported dtype promotion"
 
-@[test] def testErasedIntegerPromotionDoesNotPassPreservingChecks : IO Unit := do
+@[test] def testRuntimeIntegerScalarPromotionRetainsResultDType : IO Unit := do
   for dtype in #[DType.Int32, DType.Int64] do
-    let integers := ((Tensor.fromFloatArray #[6, 12]).castDType dtype)
-    let expected := s!"Expected dtype {dtype}, got Float32"
-    expectError (Tensor.Preserving.div? integers integers) expected
-    expectError (Tensor.Preserving.addScalar? integers 2) expected
-    expectError (Tensor.Preserving.mulScalar? integers 2) expected
-    expectError (Tensor.Preserving.divScalar? integers 2) expected
+    let integers := (Tensor.fromFloatArray #[6, 12]).castDType dtype
+    let division ← checked (Tensor.Promoting.div? integers integers)
+    LeanTest.assertEqual division.tensor.raw.dtype .Float32
+    LeanTest.assertEqual (← division.tensor.toFloatArray) #[1, 1]
+    for pending in #[Tensor.Promoting.addScalar? integers 2,
+        Tensor.Promoting.mulScalar? integers 2, Tensor.Promoting.divScalar? integers 2] do
+      let promoted ← checked pending
+      LeanTest.assertEqual promoted.tensor.raw.dtype .Float32
+      LeanTest.assertTrue promoted.tensor.validate.toOption.isSome
     LeanTest.assertEqual integers.raw.dtype dtype
     LeanTest.assertEqual (← integers.toFloatArray) #[6, 12]
+
+@[test] def testInt64TrueDivisionReturnsFloat32 : IO Unit := do
+  let numerator := Tensor.fromInt64Array #[6]
+  let denominator := Tensor.fromInt64Array #[2]
+  let result : Tensor ⟨#[1], .Float32, .CPU⟩ := Tensor.div numerator denominator
+  LeanTest.assertEqual result.raw.dtype .Float32
+  LeanTest.assertEqual (← result.toFloatArray) #[3]
+
+example (_left _right : Tensor ⟨#[2], .Bool, .CPU⟩) : True := by
+  fail_if_success have _ := Tensor.sub _left _right
+  trivial
 
 @[test] def testErasedBoolSubtractionIsRejected : IO Unit := do
   let floating := (Tensor.ones #[2])
   let booleans := ((Tensor.ones #[2]).castDType .Bool)
-  expectError (Tensor.Preserving.sub? booleans booleans) "Bool operands"
+  expectError (Tensor.Promoting.sub? booleans booleans) "Bool operands"
   expectError (Tensor.Promoting.sub? booleans floating) "Bool operands"
   expectError (Tensor.Promoting.sub? floating booleans) "Bool operands"
 
-@[test] def testErasedFloatPreservingArithmeticValues : IO Unit := do
+@[test] def testFloatingArithmeticRetainsResultDTypeAndValues : IO Unit := do
   let lhs := (Tensor.fromFloatArray #[6, 12])
   let rhs := (Tensor.fromFloatArray #[2, 3])
   let cases : Array (Array Float × Except String (Tensor { shape := #[2], dtype := .Float32, device := .CPU })) := #[
-    (#[8, 15], Tensor.Preserving.add? lhs rhs),
-    (#[4, 9], Tensor.Preserving.sub? lhs rhs),
-    (#[12, 36], Tensor.Preserving.mul? lhs rhs),
-    (#[3, 4], Tensor.Preserving.div? lhs rhs),
-    (#[8, 14], Tensor.Preserving.addScalar? lhs 2),
-    (#[12, 24], Tensor.Preserving.mulScalar? lhs 2),
-    (#[3, 6], Tensor.Preserving.divScalar? lhs 2)]
+    (#[8, 15], Tensor.add? lhs rhs),
+    (#[4, 9], Tensor.sub? lhs rhs),
+    (#[12, 36], Tensor.mul? lhs rhs),
+    (#[3, 4], Tensor.div? lhs rhs),
+    (#[8, 14], Tensor.addScalar? lhs 2),
+    (#[12, 24], Tensor.mulScalar? lhs 2),
+    (#[3, 6], Tensor.divScalar? lhs 2)]
   for (expected, result) in cases do
     let output ← checked result
     LeanTest.assertEqual output.raw.dtype .Float32

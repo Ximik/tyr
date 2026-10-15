@@ -9,13 +9,14 @@ import Tyr.Tokenizer.Qwen3
 namespace torch.qwen3asr
 
 variable {device : Device} {dtype : DType}
+variable [DType.RealFloating dtype]
 /-- Separate streaming-native model wrapper.
     This is intentionally parallel to the existing model API so baseline paths
     keep zero additional runtime overhead. -/
 structure StreamModel where
   cfg : Qwen3ASRConfig
   device : Device
-  dtype : ExactDType
+  dtype : RealFloatingDType
   model : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype.val) cfg
   tok : tokenizer.qwen3.QwenTokenizer
   preprocessor : PreprocessorConfig

@@ -26,7 +26,9 @@ private def close {σ τ : StaticSpec} (x : Tensor σ) (y : Tensor τ) (tol : Fl
 
 @[test] def testWhisperCachedDecodeDTypesAndParity : IO Unit := do
   for bf16 in #[false, true] do
-    let dtype := if bf16 then DType.BFloat16 else .Float32
+    let selected : RealFloatingDType :=
+      if bf16 then ⟨.BFloat16, by decide⟩ else ⟨.Float32, by decide⟩
+    let dtype := selected.val
     let support ← dtype.acquireConstantSupport .CPU
     let _ := support.down
     let model ← WhisperForConditionalGeneration.init cfg (dtype := dtype)

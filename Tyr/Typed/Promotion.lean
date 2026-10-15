@@ -51,6 +51,33 @@ instance {tensor scalar result : DType}
     [h : SomeResult (promoteScalar? tensor scalar) result] :
     ScalarPromotes tensor scalar result := ⟨h.valid⟩
 
+/-- Standard real floating tensors keep their dtype in homogeneous arithmetic. -/
+instance {dtype : DType} [h : RealFloating dtype] : Promotes dtype dtype dtype := by
+  constructor
+  cases dtype <;> first | rfl | cases h.valid
+
+/-- A host Float is a weak scalar: standard floating tensor precision wins. -/
+instance {dtype : DType} [h : RealFloating dtype] : ScalarPromotes dtype .Float32 dtype := by
+  constructor
+  cases dtype <;> first | rfl | cases h.valid
+
+instance {dtype : DType} [h : RealFloating dtype] : NonBool dtype := by
+  constructor
+  cases dtype <;> first | rfl | cases h.valid
+
+/-- Homogeneous complex arithmetic preserves its precision as well. -/
+instance {dtype : DType} [h : FloatingOrComplex dtype] : Promotes dtype dtype dtype := by
+  constructor
+  cases dtype <;> first | rfl | cases h.valid
+
+instance {dtype : DType} [h : FloatingOrComplex dtype] : ScalarPromotes dtype .Float32 dtype := by
+  constructor
+  cases dtype <;> first | rfl | cases h.valid
+
+instance {dtype : DType} [h : FloatingOrComplex dtype] : NonBool dtype := by
+  constructor
+  cases dtype <;> first | rfl | cases h.valid
+
 /-- The ordinary promotion result, available only with a valid witness. -/
 @[reducible] def promote (lhs rhs : DType) {result : DType}
     [Promotes lhs rhs result] : DType := result

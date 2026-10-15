@@ -57,7 +57,7 @@ def emStepFused {n : UInt64}
     (schedA schedB : DeviceSchedule (device := device))
     (y0 : Tensor { shape := #[n], dtype := .Float32, device := device }) (y1Out : Tensor { shape := #[n], dtype := .Float32, device := device })
     (blackwell : Bool) (stream : UInt64) : IO Unit := do
-  let fh := Tensor.Preserving.mulScalar (drift t y0) h
+  let fh := Tensor.mulScalar (drift t y0) h
   let g := diffusion t y0
   let root := tensorRootState treeSeed
   if blackwell then
@@ -88,7 +88,7 @@ def emSolveFused {n : UInt64}
     let t := t0 + Float.ofNat k * h
     scheds := scheds.push (DeviceSchedule.make T0 T1 tol maxDepth t device)
   -- fresh copy of the initial state; ping-pong with one scratch buffer
-  let mut cur : Tensor { shape := #[n], dtype := .Float32, device := device } := y0 + Tensor.Preserving.mulScalar y0 0.0
+  let mut cur : Tensor { shape := #[n], dtype := .Float32, device := device } := y0 + Tensor.mulScalar y0 0.0
   let mut nxt ← Tensor.randn #[n] false device
   for k in [:m] do
     let t := t0 + Float.ofNat k * h

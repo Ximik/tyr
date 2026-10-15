@@ -106,7 +106,7 @@ def testDistAdamCheckpointing : IO Unit := do
   LeanTest.assertEqual totalElements 200 "DistAdam state should have 200 elements"
 
   -- Verify map works
-  let stateOnes := TensorStruct.map (fun t => Tensor.Preserving.addScalar t 1.0) state
+  let stateOnes := FloatingTensorStruct.map (fun t => Tensor.addScalar t 1.0) state
   let sumOnes := TensorStruct.fold (fun {_s} t acc => acc + Tensor.item (Tensor.sumAll t)) 0.0 stateOnes
   LeanTest.assertEqual sumOnes 200.0 "Mapped state should sum to 200"
 

@@ -5,7 +5,7 @@ namespace Tyr.AD
 open torch
 open DifferentiableManifold
 
-variable {d : DType} {dev : Device}
+variable {d : DType} {dev : Device} [DType.RealFloating d]
 
 /-- Quotient-factor representation for fixed-rank PSD matrices via `Y in R^{n x k}`. -/
 structure PSDFixedRank (n k : UInt64) (dtype : DType := .Float32)
@@ -32,14 +32,14 @@ structure PSDFixedRankTangent (n k : UInt64) (dtype : DType := .Float32)
 namespace PSDFixedRankTangent
 
 def zero [DType.ConstantSupported d dev] (n k : UInt64) : PSDFixedRankTangent n k d dev := ⟨Tensor.zerosFor ⟨#[n, k], d, dev⟩⟩
-def add (a b : PSDFixedRankTangent n k d dev) : PSDFixedRankTangent n k d dev := ⟨Tensor.Preserving.add a.vec b.vec⟩
-def smul (s : Float) (v : PSDFixedRankTangent n k d dev) : PSDFixedRankTangent n k d dev := ⟨Tensor.Preserving.mulScalar v.vec s⟩
+def add (a b : PSDFixedRankTangent n k d dev) : PSDFixedRankTangent n k d dev := ⟨Tensor.add a.vec b.vec⟩
+def smul (s : Float) (v : PSDFixedRankTangent n k d dev) : PSDFixedRankTangent n k d dev := ⟨Tensor.mulScalar v.vec s⟩
 
 /-- Horizontal projection proxy akin Stiefel projection in factor space. -/
 def project (x : PSDFixedRank n k d dev) (V : Tensor ⟨#[n, k], d, dev⟩) : PSDFixedRankTangent n k d dev :=
   let YtV := Tensor.mm (Tensor.transpose2d x.factor) V
-  let sym := Tensor.Preserving.mulScalar (Tensor.Preserving.add YtV (Tensor.transpose2d YtV)) 0.5
-  ⟨Tensor.Preserving.sub V (Tensor.mm x.factor sym)⟩
+  let sym := Tensor.mulScalar (Tensor.add YtV (Tensor.transpose2d YtV)) 0.5
+  ⟨Tensor.sub V (Tensor.mm x.factor sym)⟩
 
 end PSDFixedRankTangent
 
@@ -53,8 +53,8 @@ instance psdFixedRankManifold (n k : UInt64) : DifferentiableManifold (PSDFixedR
   scaleTangent s v := PSDFixedRankTangent.smul s v
   sharp := id
   flat := id
-  exp x v := ⟨Tensor.Preserving.add x.factor v.vec⟩
-  retract x v := ⟨Tensor.Preserving.add x.factor v.vec⟩
+  exp x v := ⟨Tensor.add x.factor v.vec⟩
+  retract x v := ⟨Tensor.add x.factor v.vec⟩
 
 /-- Elliptope factor manifold: row-wise unit norms in `R^{n x k}`. -/
 structure Elliptope (n k : UInt64) (dtype : DType := .Float32)
@@ -65,10 +65,10 @@ namespace Elliptope
 
 private def normalizeRows {n k : UInt64} (Y : Tensor ⟨#[n, k], d, dev⟩) : Tensor ⟨#[n, k], d, dev⟩ :=
   let norms := Tensor.rowNorms Y
-  let safeNorms := Tensor.Preserving.addScalar norms 1e-12
+  let safeNorms := Tensor.addScalar norms 1e-12
   let normsCol : Tensor ⟨#[n, 1], d.realResult, dev⟩ := Tensor.reshape safeNorms #[n, 1] (by simp [TensorSpec.numelOfShape])
-  let expanded : Tensor ⟨#[n, k], d.realResult, dev⟩ := Tensor.expand normsCol #[n, k]
-  Tensor.Preserving.div Y (Tensor.castLike Y expanded)
+  let expanded : Tensor ⟨#[n, k], d, dev⟩ := by simpa using Tensor.expand normsCol #[n, k]
+  by simpa using Tensor.div Y expanded
 
 /-- Project ambient matrix to row-normalized elliptope factor. -/
 def project (n k : UInt64) (Y : Tensor ⟨#[n, k], d, dev⟩) : Elliptope n k d dev :=
@@ -88,15 +88,15 @@ structure ElliptopeTangent (n k : UInt64) (dtype : DType := .Float32)
 namespace ElliptopeTangent
 
 def zero [DType.ConstantSupported d dev] (n k : UInt64) : ElliptopeTangent n k d dev := ⟨Tensor.zerosFor ⟨#[n, k], d, dev⟩⟩
-def add (a b : ElliptopeTangent n k d dev) : ElliptopeTangent n k d dev := ⟨Tensor.Preserving.add a.vec b.vec⟩
-def smul (s : Float) (v : ElliptopeTangent n k d dev) : ElliptopeTangent n k d dev := ⟨Tensor.Preserving.mulScalar v.vec s⟩
+def add (a b : ElliptopeTangent n k d dev) : ElliptopeTangent n k d dev := ⟨Tensor.add a.vec b.vec⟩
+def smul (s : Float) (v : ElliptopeTangent n k d dev) : ElliptopeTangent n k d dev := ⟨Tensor.mulScalar v.vec s⟩
 
 /-- Project ambient direction to row-wise tangent space (`<y_i, v_i> = 0`). -/
 def project (x : Elliptope n k d dev) (V : Tensor ⟨#[n, k], d, dev⟩) : ElliptopeTangent n k d dev :=
   let rowDotsCol : Tensor ⟨#[n, 1], d, dev⟩ :=
-    Tensor.Preserving.sumDim (Tensor.Preserving.mul x.factor V) 1 true
+    by simpa using Tensor.sumDim (Tensor.mul x.factor V) 1 true
   let rowDots : Tensor ⟨#[n, k], d, dev⟩ := Tensor.expand rowDotsCol #[n, k]
-  ⟨Tensor.Preserving.sub V (Tensor.Preserving.mul x.factor rowDots)⟩
+  ⟨Tensor.sub V (Tensor.mul x.factor rowDots)⟩
 
 end ElliptopeTangent
 
@@ -110,7 +110,7 @@ instance elliptopeManifold (n k : UInt64) : DifferentiableManifold (Elliptope n 
   scaleTangent s v := ElliptopeTangent.smul s v
   sharp := id
   flat := id
-  exp x v := Elliptope.project n k (Tensor.Preserving.add x.factor v.vec)
-  retract x v := Elliptope.project n k (Tensor.Preserving.add x.factor v.vec)
+  exp x v := Elliptope.project n k (Tensor.add x.factor v.vec)
+  retract x v := Elliptope.project n k (Tensor.add x.factor v.vec)
 
 end Tyr.AD

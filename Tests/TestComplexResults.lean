@@ -103,7 +103,8 @@ example (_x : Tensor ⟨#[2, 2], .Unknown "dynamic", .CPU⟩) : True := by
 @[test] def testMatrixLogGeneralRealRoundtrips : IO Unit := do
   -- Preserve general real inputs: nonsymmetric diagonalizable matrices, real
   -- rotations, and the nonsymmetric inv(A) B intermediate used by SPD.distance.
-  for dtype in #[DType.Float32, DType.Float64] do
+  for selected in #[RealFloatingDType.ofDType .Float32, RealFloatingDType.ofDType .Float64] do
+    let dtype := selected.val
     for data in #[#[2.0, 1.0, 0.0, 3.0], #[0.0, -1.0, 1.0, 0.0],
         #[1.0, 0.5, 1.0, 2.0]] do
       let input := ((Tensor.fromFloatArray data).reshapeChecked #[2, 2]).castDType dtype
@@ -112,7 +113,7 @@ example (_x : Tensor ⟨#[2, 2], .Unknown "dynamic", .CPU⟩) : True := by
       | .ok logarithm =>
         LeanTest.assertEqual logarithm.raw.dtype dtype
         LeanTest.assertTrue (logarithm.raw.device == input.raw.device)
-        let error := Tensor.frobeniusNorm (Tensor.Preserving.sub (Tensor.matrixExp logarithm) input)
+        let error := Tensor.frobeniusNorm (Tensor.sub (Tensor.matrixExp logarithm) input)
         LeanTest.assertTrue (error < if dtype == .Float64 then 1e-10 else 1e-5)
           "General real matrix logarithm did not reconstruct its input"
 

@@ -13,7 +13,7 @@ example (cfg : TalkerConfig) (_model : TalkerModel (device := .CPU) cfg)
   trivial
 
 
-private def bf16 : ExactDType := ⟨.BFloat16, by decide⟩
+private abbrev bf16 : RealFloatingDType := ⟨.BFloat16, by decide⟩
 
 example (cfg : TalkerConfig)
     (_model : TalkerForConditionalGeneration (device := .CPU) cfg bf16)

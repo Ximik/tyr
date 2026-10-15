@@ -6,6 +6,7 @@ import Tyr.TensorStruct
 namespace torch.branching
 
 variable {dtype : DType}
+variable [DType.RealFloating dtype]
 
 def zerosDynamic (shape : Shape) (requiresGrad : Bool := false) (device : Device := .CPU)
     (_noGrad : requiresGrad = false := by decide) (dtype : DType := .Float32)
@@ -23,9 +24,9 @@ def floatDynamic {s : Shape} {d : DType} {dev : Device} (x : Tensor { shape := s
   x.toFloat32
 def bfloatDynamic {s : Shape} {d : DType} {dev : Device} (x : Tensor { shape := s, dtype := d, device := dev }) : Tensor { shape := s, dtype := .BFloat16, device := dev } := x.toBFloat16
 
-def logDynamic {s : Shape} {dev : Device} (x : Tensor { shape := s, dtype, device := dev }) : Tensor { shape := s, dtype, device := dev } := Tensor.Preserving.log x
+def logDynamic {s : Shape} {dev : Device} (x : Tensor { shape := s, dtype, device := dev }) : Tensor { shape := s, dtype, device := dev } := Tensor.log x
 def softplusDynamic {s : Shape} {dev : Device} (x : Tensor { shape := s, dtype, device := dev }) : Tensor { shape := s, dtype, device := dev } := x.checkedReplacement (RawTensor.branchingSoftplus s x.raw)
-def powDynamic {s : Shape} {dev : Device} (x : Tensor { shape := s, dtype, device := dev }) (n : Float) : Tensor { shape := s, dtype, device := dev } := Tensor.Preserving.pow x n
+def powDynamic {s : Shape} {dev : Device} (x : Tensor { shape := s, dtype, device := dev }) (n : Float) : Tensor { shape := s, dtype, device := dev } := Tensor.pow x n
 
 def sliceTyped {s out : Shape} {d : DType} {dev : Device} (x : Tensor { shape := s, dtype := d, device := dev }) (dim : Nat) (start len : UInt64) : Tensor { shape := out, dtype := d, device := dev } :=
   x.sliceChecked dim start len out
@@ -74,25 +75,11 @@ def mulTensorScalar? {σ : StaticSpec} {d : DType} {scalarDevice : Device}
     (x : Tensor σ) (scalar : Tensor { shape := #[], dtype := d, device := scalarDevice }) :=
   Tensor.Promoting.mulB? x scalar σ.shape
 
-/-- Optimizer updates explicitly require native dtype preservation. This
-checked adapter rejects any promoted result instead of casting it back. -/
-def mulTensorScalarPreserving? {σ : StaticSpec} {d : DType} {scalarDevice : Device}
-    (x : Tensor σ) (scalar : Tensor { shape := #[], dtype := d, device := scalarDevice }) :
-    Except String (Tensor σ) := do
-  let result ← mulTensorScalar? x scalar
-  x.checkedReplacement? result.tensor.raw
-
-def mulTensorScalarPreserving {σ : StaticSpec} {d : DType} {scalarDevice : Device}
-    (x : Tensor σ) (scalar : Tensor { shape := #[], dtype := d, device := scalarDevice }) : Tensor σ :=
-  match mulTensorScalarPreserving? x scalar with
-  | .ok tensor => tensor
-  | .error message => nativeInvariantFailure s!"BranchingFlows.mulTensorScalarPreserving: {message}"
-
-def cosDynamic {s : Shape} {dev : Device} (x : Tensor { dtype := dtype, shape := s, device := dev }) : Tensor { dtype := dtype, shape := s, device := dev } := Tensor.Preserving.cos x
+def cosDynamic {s : Shape} {dev : Device} (x : Tensor { dtype := dtype, shape := s, device := dev }) : Tensor { dtype := dtype, shape := s, device := dev } := Tensor.cos x
 
 def affine2d {batch input output : UInt64} {dev : Device} (x : Tensor { dtype := dtype, shape := #[batch, input], device := dev })
     (w : Tensor { dtype := dtype, shape := #[output, input], device := dev }) (bias : Tensor { dtype := dtype, shape := #[output], device := dev }) : Tensor { dtype := dtype, shape := #[batch, output], device := dev } :=
-  Tensor.Preserving.add (Tensor.linear x w) ((bias.reshapeChecked #[1, output]).expand #[batch, output])
+  Tensor.add (Tensor.linear x w) ((bias.reshapeChecked #[1, output]).expand #[batch, output])
 
 def transposeAttention {b s h d : UInt64} {dev : Device} (x : Tensor { dtype := dtype, shape := #[b, s, h, d], device := dev }) : Tensor { dtype := dtype, shape := #[b, h, s, d], device := dev } :=
   x.transpose 1 2
@@ -118,8 +105,8 @@ def attentionBiasIO {biasDType : DType} {b h s d : UInt64} {dev : Device} (q k v
   IO.ofExcept (q.checkedReplacement? raw)
 
 def fullDynamic (shape : Shape) (value : Float) (requiresGrad : Bool := false) (device : Device := .CPU) (noGrad : requiresGrad = false := by decide) (dtype : DType := .Float32)
-    [DType.ConstantSupported dtype device] : Tensor { dtype := dtype, shape := shape, device } :=
-  Tensor.Preserving.addScalar (zerosDynamic shape requiresGrad device noGrad dtype) value
+    [DType.ConstantSupported dtype device] [DType.RealFloating dtype] : Tensor { dtype := dtype, shape := shape, device } :=
+  Tensor.addScalar (zerosDynamic shape requiresGrad device noGrad dtype) value
 
 def binaryCrossEntropySum {s : Shape} {dev : Device} (input target weight : Tensor { dtype := dtype, shape := s, device := dev }) : Tensor { dtype := dtype, shape := #[], device := dev } :=
   match Tensor.ofRaw (RawTensor.branchingBCE s input.raw target.raw (some weight.raw) "sum") with

@@ -117,7 +117,7 @@ def referenceTraining {device : Device} {batch seqLen qHeads kvHeads : UInt64} {
     (gradQ : Tensor { shape := #[batch, seqLen, qHeads, 64], dtype := dtype, device := device })
     (gradK : Tensor { shape := #[batch, seqLen, kvHeads, 64], dtype := dtype, device := device })
     (cos sin : Tensor { shape := #[seqLen, 32], dtype := .Float32, device := device }) :=
-  let negSin := Tensor.Preserving.mulScalar sin (-1.0)
+  let negSin := Tensor.mulScalar sin (-1.0)
   (Tensor.applyRotary q cos sin, Tensor.applyRotary k cos sin,
     Tensor.applyRotary gradQ cos negSin, Tensor.applyRotary gradK cos negSin)
 
@@ -136,10 +136,10 @@ private def benchmarkTrainingShape (cfg : Benchmark.Config) (caseLabel : String)
   let (cos, sin) := Tensor.rotaryFreqs seqLen 64 10000.0 device
   let (expectedQ, expectedK, expectedGradQ, expectedGradK) :=
     referenceTraining q k gradQ gradK cos sin
-  let qOut := Tensor.Preserving.mulScalar q 0.0
-  let kOut := Tensor.Preserving.mulScalar k 0.0
-  let gradQOut := Tensor.Preserving.mulScalar gradQ 0.0
-  let gradKOut := Tensor.Preserving.mulScalar gradK 0.0
+  let qOut := Tensor.mulScalar q 0.0
+  let kOut := Tensor.mulScalar k 0.0
+  let gradQOut := Tensor.mulScalar gradQ 0.0
+  let gradKOut := Tensor.mulScalar gradK 0.0
   let qRows := batch * seqLen * qHeads
   let kRows := batch * seqLen * kvHeads
   let totalPairs := (if qRows > kRows then qRows else kRows) * 32

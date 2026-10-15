@@ -34,7 +34,7 @@ private def loadWeight (path : String) (names : Array String) (shape : Shape)
   | .error message => throw <| IO.userError s!"VAE tensor '{name}': {message}"
 
 /-- Load GroupNorm parameters -/
-def loadGroupNorm (path : String) (name : String) (num_groups channels : UInt64)
+def loadGroupNorm [DType.RealFloating dtype] (path : String) (name : String) (num_groups channels : UInt64)
     (device : Device := .CPU) : IO (GroupNormParams (device := device) (dtype := dtype) num_groups channels) := do
   let weight ← loadWeight (dtype := dtype) (device := device) path #[s!"{name}.weight"] #[channels]
   let bias ← loadWeight (dtype := dtype) (device := device) path #[s!"{name}.bias"] #[channels]
@@ -44,7 +44,7 @@ def loadGroupNorm (path : String) (name : String) (num_groups channels : UInt64)
   }
 
 /-- Load Conv2d parameters -/
-def loadConv2dAtDType (path : String) (name : String)
+def loadConv2dAtDType [DType.RealFloating dtype] (path : String) (name : String)
     (in_ch out_ch kernel_size padding : UInt64)
     (device : Device := .CPU) : IO (Conv2dParams (device := device) (dtype := dtype) in_ch out_ch kernel_size padding) := do
   let weight ← loadWeight (dtype := dtype) (device := device) path #[s!"{name}.weight"] #[out_ch, in_ch, kernel_size, kernel_size]
@@ -57,14 +57,16 @@ def loadConv2dAtDType (path : String) (name : String)
 /-- Load a convolution with its stored dtype, checking that bias agrees. -/
 def loadConv2d (path : String) (name : String)
     (in_ch out_ch kernel_size padding : UInt64) (device : Device := .CPU) :
-    IO (Σ dtype : ExactDType, Conv2dParams (device := device) in_ch out_ch kernel_size padding dtype.val) := do
+    IO (Σ dtype : RealFloatingDType, Conv2dParams (device := device) in_ch out_ch kernel_size padding dtype.val) := do
   let anchor ← safetensors.loadTensorExact path s!"{name}.weight"
     #[out_ch, in_ch, kernel_size, kernel_size] device
+  let floating ← IO.ofExcept (DType.realFloating? anchor.1.val)
+  let _ := floating.down
   let conv ← loadConv2dAtDType (dtype := anchor.1.val) path name in_ch out_ch kernel_size padding device
-  pure ⟨anchor.1, conv⟩
+  pure ⟨RealFloatingDType.ofDType anchor.1.val, conv⟩
 
 /-- Load ResnetBlock (same in/out channels) from Diffusers format -/
-def loadResnetBlockSame (path : String) (name : String) (ch : UInt64)
+def loadResnetBlockSame [DType.RealFloating dtype] (path : String) (name : String) (ch : UInt64)
     (device : Device := .CPU) : IO (ResnetBlock (device := device) (dtype := dtype) ch ch) := do
   let norm1 ← loadGroupNorm (dtype := dtype) (device := device) path s!"{name}.norm1" 32 ch
   let conv1 ← loadConv2dAtDType (dtype := dtype) (device := device) path s!"{name}.conv1" ch ch 3 1
@@ -73,7 +75,7 @@ def loadResnetBlockSame (path : String) (name : String) (ch : UInt64)
   pure { norm1, conv1, norm2, conv2, nin_shortcut := none }
 
 /-- Load ResnetBlock with channel change (has conv_shortcut) from Diffusers format -/
-def loadResnetBlockChange (path : String) (name : String) (in_ch out_ch : UInt64)
+def loadResnetBlockChange [DType.RealFloating dtype] (path : String) (name : String) (in_ch out_ch : UInt64)
     (device : Device := .CPU) : IO (ResnetBlock (device := device) (dtype := dtype) in_ch out_ch) := do
   let norm1 ← loadGroupNorm (dtype := dtype) (device := device) path s!"{name}.norm1" 32 in_ch
   let conv1 ← loadConv2dAtDType (dtype := dtype) (device := device) path s!"{name}.conv1" in_ch out_ch 3 1
@@ -85,7 +87,7 @@ def loadResnetBlockChange (path : String) (name : String) (in_ch out_ch : UInt64
 
 /-- Load AttnBlock from Diffusers format
     Diffusers uses: to_q, to_k, to_v, to_out.0, group_norm -/
-def loadAttnBlock (path : String) (name : String) (channels : UInt64)
+def loadAttnBlock [DType.RealFloating dtype] (path : String) (name : String) (channels : UInt64)
     (device : Device := .CPU) : IO (AttnBlock (device := device) (dtype := dtype) channels) := do
   let norm ← loadGroupNorm (dtype := dtype) (device := device) path s!"{name}.group_norm" 32 channels
   let q ← loadConv2dAtDType (dtype := dtype) (device := device) path s!"{name}.to_q" channels channels 1 0
@@ -95,13 +97,13 @@ def loadAttnBlock (path : String) (name : String) (channels : UInt64)
   pure { norm, q, k, v, proj_out }
 
 /-- Load Upsample from Diffusers format -/
-def loadUpsample (path : String) (name : String) (channels : UInt64)
+def loadUpsample [DType.RealFloating dtype] (path : String) (name : String) (channels : UInt64)
     (device : Device := .CPU) : IO (Upsample (device := device) (dtype := dtype) channels) := do
   let conv ← loadConv2dAtDType (dtype := dtype) (device := device) path s!"{name}.conv" channels channels 3 1
   pure { conv }
 
 /-- Load full VAE Decoder from SafeTensors (HuggingFace Diffusers format). -/
-def loadDecoderAtDType (path : String) (log : Handlers := {}) (device : Device := .CPU) : IO (Decoder (device := device) dtype) := do
+def loadDecoderAtDType [DType.RealFloating dtype] (path : String) (log : Handlers := {}) (device : Device := .CPU) : IO (Decoder (device := device) dtype) := do
   log.onInfo s!"Loading VAE Decoder from {path}..."
 
   -- Post-quant conv is at root level in Diffusers format
@@ -171,9 +173,11 @@ def loadDecoderAtDType (path : String) (log : Handlers := {}) (device : Device :
 
 /-- Load the decoder without converting the checkpoint precision. -/
 def loadDecoder (path : String) (log : Handlers := {}) (device : Device := .CPU) :
-    IO (Σ dtype : ExactDType, Decoder (device := device) dtype.val) := do
+    IO (Σ dtype : RealFloatingDType, Decoder (device := device) dtype.val) := do
   let anchor ← safetensors.loadTensorExact path "post_quant_conv.weight" #[32, 32, 1, 1] device
+  let floating ← IO.ofExcept (DType.realFloating? anchor.1.val)
+  let _ := floating.down
   let decoder ← loadDecoderAtDType (dtype := anchor.1.val) path log device
-  pure ⟨anchor.1, decoder⟩
+  pure ⟨RealFloatingDType.ofDType anchor.1.val, decoder⟩
 
 end torch.vae

@@ -68,7 +68,7 @@ def dopri5StepFused {cols : UInt64}
     (blackwell : Bool) (stream : UInt64) : IO Unit := do
   let gx := cols / 64
   let kOf := fun (i : Nat) (z : Tile (device := device) cols) =>
-    Tensor.Preserving.mulScalar (vf (t + dopri5C.getD i 0.0 * h) z) h
+    Tensor.mulScalar (vf (t + dopri5C.getD i 0.0 * h) z) h
   let k1 := kOf 0 y0
   let z2 := ws.z.getD 0 y0
   if blackwell then
@@ -126,7 +126,7 @@ def dopri5SolveFused {cols : UInt64}
   let h := (t1 - t0) / Float.ofNat n
   -- fresh copy of the initial state so the caller's tensor is not mutated;
   -- ping-pong between it and the workspace buffers
-  let mut cur : Tile (device := device) cols := y0 + Tensor.Preserving.mulScalar y0 0.0
+  let mut cur : Tile (device := device) cols := y0 + Tensor.mulScalar y0 0.0
   let mut nxt := ws.yA
   for k in [:n] do
     let t := t0 + Float.ofNat k * h

@@ -76,7 +76,7 @@ def testParameterUpdate : IO Unit := do
   let params ← ModdedGPTParams.init cfg
   
   -- Apply update: p = p + 1
-  let updatedParams := TensorStruct.map (fun t => Tensor.Preserving.addScalar t 1.0) params
+  let updatedParams := FloatingTensorStruct.map (fun t => Tensor.addScalar t 1.0) params
   
   -- Check one tensor to verify update
   let embedSumOriginal := Tensor.item (Tensor.sumAll params.embed)
@@ -128,7 +128,7 @@ def testStateDictSimulation : IO Unit := do
   Tests.assertThrows (loadFromList (malformed :: stateList.drop 1) params) (some "shape")
   
   -- Verify loaded matches original
-  let diff := TensorStruct.zipWith Tensor.Preserving.sub params loadedParams
+  let diff := FloatingTensorStruct.zipWith Tensor.sub params loadedParams
   let totalDiff := TensorStruct.fold (fun {_s} t acc => acc + Tensor.item (Tensor.sumAll (Tensor.abs t))) 0.0 diff
   
   LeanTest.assertTrue (totalDiff < 1e-6) "Loaded parameters should match saved ones"

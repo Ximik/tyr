@@ -21,6 +21,8 @@ written once and reused across many models.
 
 - `TensorStruct`: typeclass with four core operations over tensor leaves:
   `map`, `mapM`, `zipWith`, and `fold`.
+- `TensorStructFor P`: the same traversals with evidence that every visited
+  leaf satisfies `P`; `FloatingTensorStruct` supplies real floating arithmetic.
 - `Static α`: marks non-tensor metadata that should be skipped during traversal.
 - `Frozen σ`: marks tensor fields that should remain in the structure but are typically
   treated as non-trainable.
@@ -50,8 +52,9 @@ This module defines the `TensorStruct` class and instances for containers
 (`Array`, `List`, `Vector`, `Option`), wrappers (`Static`, `Frozen`), and
 scalars, including indexed `Tensor σ` leaves. The `deriving TensorStruct`
 handler lives in `Tyr.Module.Derive`, so import that module when deriving
-instances. Deriving also supplies `TensorTreeCast` between parameterizations of
-the same record, recursively using the corresponding field conversions.
+instances. Deriving also supplies conditional `TensorStructFor` instances and
+`TensorTreeCast` between parameterizations of the same record, recursively using
+the corresponding field capabilities and conversions.
 Traversal callbacks preserve each leaf's complete `StaticSpec` index. A map
 cannot change a leaf's shape, dtype or device. Use `TensorStruct.castTo` with an
 explicit destination type to convert dtype or device; shape changes are rejected.
@@ -108,7 +111,7 @@ def numScalars [TensorStruct α] (x : α) : Nat :=
 ```lean
 open torch
 
-def averageParams [TensorStruct α] (a b : α) : α :=
+def averageParams [FloatingTensorStruct α] (a b : α) : α :=
   TensorStruct.scale (TensorStruct.add a b) 0.5
 ```
 
@@ -117,8 +120,8 @@ def averageParams [TensorStruct α] (a b : α) : α :=
 ```lean
 open torch
 
-def blendVec {n : Nat} [TensorStruct α] (a b : Vector n α) : Vector n α :=
-  TensorStruct.zipWith Tensor.Preserving.add a b
+def blendVec {n : Nat} [FloatingTensorStruct α] (a b : Vector n α) : Vector n α :=
+  FloatingTensorStruct.zipWith (fun a b => Tensor.add a b) a b
 ```
 
 Unlike `Array`/`List`, `Vector n α` encodes length in the type, so mismatched zip sizes
@@ -269,6 +272,55 @@ class TensorStruct (α : Type) where
   zipWith : (∀ {σ}, Tensor σ → Tensor σ → Tensor σ) → α → α → α
   -- Fold over tensors
   fold {β : Type} : (∀ {σ}, Tensor σ → β → β) → β → α → β
+
+/-- A tensor-tree traversal whose leaves all satisfy `P`. Every callback receives
+the evidence for its actual leaf index. This is separate from `TensorStruct`:
+structural traversal alone does not justify arithmetic on arbitrary dtypes. -/
+class TensorStructFor (P : StaticSpec → Prop) (α : Type) where
+  map : (∀ {σ}, P σ → Tensor σ → Tensor σ) → α → α
+  mapM {m : Type → Type} [Monad m] :
+    (∀ {σ}, P σ → Tensor σ → m (Tensor σ)) → α → m α
+  zipWith : (∀ {σ}, P σ → Tensor σ → Tensor σ → Tensor σ) → α → α → α
+  fold {β : Type} : (∀ {σ}, P σ → Tensor σ → β → β) → β → α → β
+
+/-- Package arbitrary leaf predicates for instance search, independently of
+whether the predicate itself is declared as a typeclass. -/
+class TensorStructFor.Fact (proposition : Prop) : Prop where
+  out : proposition
+
+/-- Tensor trees whose traversed leaves use standard real floating dtypes.
+Frozen leaves participate, while Static metadata remains outside the constraint. -/
+abbrev FloatingTensorStruct (α : Type) :=
+  TensorStructFor (fun σ => DType.RealFloating σ.dtype) α
+
+instance {dtype : DType} [proof : DType.RealFloating dtype] :
+    TensorStructFor.Fact (DType.RealFloating dtype) := ⟨proof⟩
+
+namespace FloatingTensorStruct
+
+/-- Traverse floating leaves with their dtype capability installed locally. -/
+def map [FloatingTensorStruct α]
+    (f : ∀ {σ}, [DType.RealFloating σ.dtype] → Tensor σ → Tensor σ) : α → α :=
+  TensorStructFor.map (P := fun σ => DType.RealFloating σ.dtype)
+    (fun {σ} proof tensor => @f σ proof tensor)
+
+def mapM {m : Type → Type} [Monad m] [FloatingTensorStruct α]
+    (f : ∀ {σ}, [DType.RealFloating σ.dtype] → Tensor σ → m (Tensor σ)) : α → m α :=
+  TensorStructFor.mapM (P := fun σ => DType.RealFloating σ.dtype)
+    (fun {σ} proof tensor => @f σ proof tensor)
+
+def zipWith [FloatingTensorStruct α]
+    (f : ∀ {σ}, [DType.RealFloating σ.dtype] → Tensor σ → Tensor σ → Tensor σ) :
+    α → α → α :=
+  TensorStructFor.zipWith (P := fun σ => DType.RealFloating σ.dtype)
+    (fun {σ} proof lhs rhs => @f σ proof lhs rhs)
+
+def fold [FloatingTensorStruct α]
+    (f : ∀ {σ}, [DType.RealFloating σ.dtype] → Tensor σ → β → β) : β → α → β :=
+  TensorStructFor.fold (P := fun σ => DType.RealFloating σ.dtype)
+    (fun {σ} proof tensor initial => @f σ proof tensor initial)
+
+end FloatingTensorStruct
 
 instance {σ : StaticSpec} : TensorStruct (Tensor σ) where
   map f tensor := f tensor
@@ -440,6 +492,110 @@ instance : TensorStruct String where
   zipWith _ s _ := s
   fold _ init _ := init
 
+/-! ## Capability-aware traversals
+
+Container instances preserve the ordinary traversal's order and metadata policy.
+Existential indices require evidence for every index the container can contain;
+discovering a dtype at runtime does not create floating arithmetic evidence.
+-/
+
+instance {P : StaticSpec → Prop} {σ : StaticSpec} [proof : TensorStructFor.Fact (P σ)] :
+    TensorStructFor P (Tensor σ) where
+  map f tensor := f proof.out tensor
+  mapM f tensor := f proof.out tensor
+  zipWith f lhs rhs := f proof.out lhs rhs
+  fold f initial tensor := f proof.out tensor initial
+
+instance {P : StaticSpec → Prop} {dtype : DType} {device : Device}
+    [proof : ∀ shape, TensorStructFor.Fact (P ⟨shape, dtype, device⟩)] :
+    TensorStructFor P (ShapePackedTensor dtype device) where
+  map f tensor := ⟨tensor.1, f (proof tensor.1).out tensor.2⟩
+  mapM f tensor := do pure ⟨tensor.1, ← f (proof tensor.1).out tensor.2⟩
+  zipWith f lhs rhs :=
+    letI : Inhabited (ShapePackedTensor dtype device) := ⟨lhs⟩
+    if h : rhs.1 = lhs.1 then ⟨lhs.1, f (proof lhs.1).out lhs.2 (h ▸ rhs.2)⟩
+    else panic! s!"TensorStructFor shape mismatch: {lhs.1} vs {rhs.1}"
+  fold f initial tensor := f (proof tensor.1).out tensor.2 initial
+
+instance {P : StaticSpec → Prop} {shape : Shape} {device : Device}
+    [proof : ∀ dtype : ExactDType, TensorStructFor.Fact (P ⟨shape, dtype.val, device⟩)] :
+    TensorStructFor P (SomeDTypeTensor shape device) where
+  map f tensor := ⟨tensor.1, f (proof tensor.1).out tensor.2⟩
+  mapM f tensor := do pure ⟨tensor.1, ← f (proof tensor.1).out tensor.2⟩
+  zipWith f lhs rhs :=
+    letI : Inhabited (SomeDTypeTensor shape device) := ⟨lhs⟩
+    if h : rhs.1 = lhs.1 then ⟨lhs.1, f (proof lhs.1).out lhs.2 (h ▸ rhs.2)⟩
+    else panic! s!"TensorStructFor dtype mismatch: {lhs.1.val} vs {rhs.1.val}"
+  fold f initial tensor := f (proof tensor.1).out tensor.2 initial
+
+instance {P : StaticSpec → Prop} [TensorStructFor P α] [TensorStructFor P β] :
+    TensorStructFor P (α × β) where
+  map f value := (TensorStructFor.map f value.1, TensorStructFor.map f value.2)
+  mapM f value := do
+    pure (← TensorStructFor.mapM f value.1, ← TensorStructFor.mapM f value.2)
+  zipWith f lhs rhs :=
+    (TensorStructFor.zipWith f lhs.1 rhs.1, TensorStructFor.zipWith f lhs.2 rhs.2)
+  fold f initial value :=
+    TensorStructFor.fold f (TensorStructFor.fold f initial value.1) value.2
+
+instance {P : StaticSpec → Prop} [TensorStructFor P α] : TensorStructFor P (Array α) where
+  map f values := values.map (TensorStructFor.map f)
+  mapM f values := values.mapM (TensorStructFor.mapM f)
+  zipWith f lhs rhs :=
+    if lhs.size == rhs.size then Array.zipWith (TensorStructFor.zipWith f) lhs rhs
+    else panic! "TensorStructFor.zipWith: Array size mismatch (use Vector for type safety)"
+  fold f initial values := values.foldl (fun acc value => TensorStructFor.fold f acc value) initial
+
+instance {P : StaticSpec → Prop} [TensorStructFor P α] : TensorStructFor P (List α) where
+  map f values := values.map (TensorStructFor.map f)
+  mapM f values := values.mapM (TensorStructFor.mapM f)
+  zipWith f lhs rhs :=
+    if lhs.length == rhs.length then List.zipWith (TensorStructFor.zipWith f) lhs rhs
+    else panic! "TensorStructFor.zipWith: List length mismatch (use Vector for type safety)"
+  fold f initial values := values.foldl (fun acc value => TensorStructFor.fold f acc value) initial
+
+instance {P : StaticSpec → Prop} {n : Nat} [TensorStructFor P α] :
+    TensorStructFor P (Vector n α) where
+  map f values := Vector.map (TensorStructFor.map f) values
+  mapM f values := Vector.mapM (TensorStructFor.mapM f) values
+  zipWith f lhs rhs := Vector.zipWith (TensorStructFor.zipWith f) lhs rhs
+  fold f initial values := values.data.foldl
+    (fun acc value => TensorStructFor.fold f acc value) initial
+
+instance {P : StaticSpec → Prop} [TensorStructFor P α] : TensorStructFor P (Option α) where
+  map f value := value.map (TensorStructFor.map f)
+  mapM f value := match value with
+    | some value => do pure (some (← TensorStructFor.mapM f value))
+    | none => pure none
+  zipWith f lhs rhs := match lhs, rhs with
+    | some lhs, some rhs => some (TensorStructFor.zipWith f lhs rhs)
+    | _, _ => none
+  fold f initial value := match value with
+    | some value => TensorStructFor.fold f initial value
+    | none => initial
+
+instance {P : StaticSpec → Prop} {σ : StaticSpec} [TensorStructFor.Fact (P σ)] :
+    TensorStructFor P (Frozen σ) where
+  map f value := ⟨TensorStructFor.map f value.tensor⟩
+  mapM f value := do pure ⟨← TensorStructFor.mapM f value.tensor⟩
+  zipWith f lhs rhs := ⟨TensorStructFor.zipWith f lhs.tensor rhs.tensor⟩
+  fold f initial value := TensorStructFor.fold f initial value.tensor
+
+@[reducible] private def metadataTraversal (P : StaticSpec → Prop) (α : Type) : TensorStructFor P α where
+  map _ value := value
+  mapM _ value := pure value
+  zipWith _ lhs _ := lhs
+  fold _ initial _ := initial
+
+instance {P : StaticSpec → Prop} : TensorStructFor P (Static α) := metadataTraversal P _
+instance {P : StaticSpec → Prop} : TensorStructFor P Bool := metadataTraversal P _
+instance {P : StaticSpec → Prop} : TensorStructFor P Float := metadataTraversal P _
+instance {P : StaticSpec → Prop} : TensorStructFor P UInt8 := metadataTraversal P _
+instance {P : StaticSpec → Prop} : TensorStructFor P UInt64 := metadataTraversal P _
+instance {P : StaticSpec → Prop} : TensorStructFor P Nat := metadataTraversal P _
+instance {P : StaticSpec → Prop} : TensorStructFor P Int := metadataTraversal P _
+instance {P : StaticSpec → Prop} : TensorStructFor P String := metadataTraversal P _
+
 /-! ## TensorStruct Utility Methods
 
 Convenient operations for common tensor tree manipulations.
@@ -504,16 +660,16 @@ def functionalGrad {device : Device} [TensorStruct α]
   withRawLeaves inputs gradients
 
 /-- Apply a scalar multiplication to all tensors -/
-def scale [TensorStruct α] (model : α) (s : Float) : α :=
-  map (fun t => Tensor.Preserving.mulScalar t s) model
+def scale [FloatingTensorStruct α] (model : α) (s : Float) : α :=
+  FloatingTensorStruct.map (fun t => Tensor.mulScalar t s) model
 
 /-- Element-wise addition of two structures -/
-def add [TensorStruct α] (a b : α) : α :=
-  zipWith Tensor.Preserving.add a b
+def add [FloatingTensorStruct α] (a b : α) : α :=
+  FloatingTensorStruct.zipWith (fun lhs rhs => Tensor.add lhs rhs) a b
 
 /-- Element-wise subtraction of two structures -/
-def sub [TensorStruct α] (a b : α) : α :=
-  zipWith Tensor.Preserving.sub a b
+def sub [FloatingTensorStruct α] (a b : α) : α :=
+  FloatingTensorStruct.zipWith (fun lhs rhs => Tensor.sub lhs rhs) a b
 
 /-- Check if all tensors in the structure satisfy a predicate -/
 def all [TensorStruct α] (p : ∀ {σ}, Tensor σ → Bool) (model : α) : Bool :=

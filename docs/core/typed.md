@@ -53,8 +53,7 @@ for example `Sigma fun device => PlacedWeights device`; unpacking it exposes
 the same device index for subsequent operations without copying storage.
 
 Every dtype index is an exact claim. Omitting it is a compile error, and no
-unknown token bypasses admission checks. Preserving adapters inspect actual
-dtypes and reject unintended promotion. Copying rejects a dtype mismatch before
+unknown token bypasses admission checks. Checked adapters validate actual dtypes against their computed result indices. Copying rejects a dtype mismatch before
 mutation.
 
 For runtime-selected dtypes, use `SomeDTypeTensor shape device` to retain an
@@ -79,7 +78,7 @@ exact index; it performs no conversion. Other unknown dtype tokens remain exact
 metadata claims and do not promise native kernel support.
 
 Models should retain shared dtype parameters across their related leaves. For
-example, `Sigma fun dtype : ExactDType => Qwen3Model cfg dtype.val` preserves
+example, `Sigma fun dtype : RealFloatingDType => Qwen35ForCausalLM cfg dtype.val` preserves
 agreement across a Qwen model. Mixed precision models need an explicit tree of
 dtype parameters for their distinct tensor roles. There is no `forgetDType`,
 wildcard default, or promoting convenience that discards its result dtype.
@@ -225,20 +224,28 @@ two nonscalar Float64/Float32 tensors.
 Float32 default scalar category. Broadcasting uses `TensorSpec.Promotes`, which
 selects the appropriate rule from the operand ranks.
 
-Runtime-typed parameter trees can use the explicit `Tensor.Preserving.add?`,
-`sub?`, and `mul?` adapters. They inspect actual dtypes before arithmetic and
-reject undefined promotion or a result that would change the left operand's
-dtype. They then validate the result's shape, dtype, and device. The host-scalar
-adapters `addScalar?`, `mulScalar?`, and `divScalar?` likewise check the actual
-dtype against weak scalar promotion. These adapters do not
-introduce a static promotion instance or conceal a change behind a dynamic
-index; the corresponding convenience wrappers use the original input as Lean's
-panic fallback.
-For example, a dynamic BF16 left operand and Float32 right operand are rejected
-because their result would be Float32. Mixed-precision algorithms must make an
-intended conversion explicit before using a preserving adapter, or expose the
-promoted result through a witness. The checked arithmetic adapters also return
-native kernel failures through `Except.error`.
+Generic floating algorithms accept `[DType.RealFloating d]` and use ordinary
+operations. The constraint proves homogeneous and weak-scalar promotion and
+provides equality lemmas for result dtypes such as `atLeastFloat` and `sumResult`.
+A proof-only `by simpa using Tensor.div x y` can therefore establish the original
+floating index without a native conversion.
+
+Tensor-tree arithmetic uses `FloatingTensorStruct α`, the specialization of
+`TensorStructFor P α` to real-floating leaves. Its traversals supply dtype evidence
+to each callback. `deriving TensorStruct` generates conditional constrained
+traversals alongside structural traversal; records with a custom structural
+instance can use `derive_tensor_struct_for TypeName`. Integer leaves do not gain
+a floating instance. Model loaders validate compute dtypes when loading and
+return `RealFloatingDType` indices. Unpacking the loaded package automatically
+supplies `DType.RealFloating dtype.val`; forward code does not repeat admission
+checks. Independent storage roles retain their own exact dtype indices.
+Use the promoting API when changing dtype is intended.
+
+The SafeTensors type provider emits concrete shape/dtype indices and derives
+structural and constrained traversals for its generated records. Loading checks
+the actual tensors against that schema. A floating subtree can then be passed
+to typed arithmetic directly, while an integer leaf prevents the whole tree
+from acquiring a floating constraint.
 
 Use `Tensor.Promoting.add?`, `sub?`, `mul?`, and `div?` when input dtype indices
 are dynamic and the operation should follow native promotion. They inspect the

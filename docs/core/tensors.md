@@ -101,13 +101,17 @@ specification; `catManyChecked` prints a diagnostic and aborts on mismatch.
 A dynamic shape does not require pretending that a tensor is a scalar.
 
 Reduction indices follow native accumulation rules. For example, integer sums
-may accumulate in Int64. `Tensor.Preserving` provides explicit runtime-checked
-adapters for tensors with runtime-selected dtype indices. Its binary arithmetic
-checks actual operand promotion and rejects a change to the left operand's
-dtype, then checks result metadata. Use the `?` variants to handle these
-rejections; convenience wrappers use the original input as Lean's panic
-fallback. Deliberate mixed-precision computation needs explicit input
-conversions or a witnessed promoting operation.
+may accumulate in Int64 and integer division produces floating output. Ordinary
+operations expose those result dtypes in their types. Generic real-floating
+algorithms accept `DType.RealFloating d`; its proof instances establish valid
+promotion, and its equality lemmas simplify result indices without converting
+native data. `FloatingTensorStruct` supplies that evidence at each leaf of a
+parameter tree. Model loaders validate compute dtypes and retain the evidence
+in `RealFloatingDType`; generated SafeTensors records retain concrete indices
+and derived tree constraints. There are no same-dtype adapters that reject promotion and
+return an input as a fallback.
+Deliberate mixed-precision computation needs explicit input conversions or a
+witnessed promoting operation.
 `Tensor.Promoting` provides the latter when dtypes are known only at runtime:
 its checked binary and host-scalar variants return the computed dtype with a
 promotion witness. Its unary convenience wrappers express their computed dtype

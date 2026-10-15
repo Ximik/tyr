@@ -15,7 +15,7 @@ variable {device : Device} {dtypes : DTypeLayout}
 namespace Qwen3TTSForConditionalGeneration
 
 /-- Runtime options for streaming generation from prepared talker inputs. -/
-structure StreamingOptions (cfg : Qwen3TTSConfig) (dtype : ExactDType := float32DType) where
+structure StreamingOptions (cfg : Qwen3TTSConfig) (dtype : RealFloatingDType := float32DType) where
   maxFrames : UInt64 := 256
   minNewTokens : UInt64 := 2
   temperature : Float := 0.9
@@ -94,7 +94,7 @@ def streamFromTalkerInputs {seq : UInt64}
           let (st', chunks) := dec.pushDecodeStream st frame16
           stRef.set st'
           for chunk in chunks do
-            callbacks.onAudioChunk ⟨chunk.1, ⟨codecDTypes.compute, chunk.2⟩⟩
+            callbacks.onAudioChunk ⟨chunk.1, ⟨codecDTypes.compute.toExactDType, chunk.2⟩⟩
       | _, _ =>
           pure ()
 
@@ -112,7 +112,7 @@ def streamFromTalkerInputs {seq : UInt64}
       let st ← stRef.get
       let (_stFinal, chunks) := dec.flushDecodeStream st
       for chunk in chunks do
-        callbacks.onAudioChunk ⟨chunk.1, ⟨codecDTypes.compute, chunk.2⟩⟩
+        callbacks.onAudioChunk ⟨chunk.1, ⟨codecDTypes.compute.toExactDType, chunk.2⟩⟩
   | _, _ =>
       pure ()
 

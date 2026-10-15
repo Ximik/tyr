@@ -91,7 +91,8 @@ private def close {σ τ : StaticSpec} (x : Tensor σ) (y : Tensor τ) (tol : Fl
 
 @[test] def testGemma4GenerationDTypesAndStreaming : IO Unit := do
   for bf16 in #[false, true] do
-    let dtype := if bf16 then DType.BFloat16 else .Float32
+    let selected : RealFloatingDType := if bf16 then ⟨.BFloat16, rfl⟩ else ⟨.Float32, rfl⟩
+    let dtype := selected.val
     let support ← dtype.acquireConstantSupport .CPU
     let _ := support.down
     let m := textModel cfg dtype
@@ -153,8 +154,8 @@ private def roundTrip {α : Type} [TensorStruct α] (params : α) (dir : String)
       let g := Tensor.linear row (gu.sliceChecked 0 0 6 #[6, 4])
       let u := Tensor.linear row (gu.sliceChecked 0 6 6 #[6, 4])
       let dw := (down.sliceChecked 0 e 1 #[1, 4, 6]).reshapeChecked #[4, 6]
-      sum := Tensor.Preserving.add sum (Tensor.Preserving.mulScalar
-        (Tensor.linear (Tensor.Preserving.mul (Tensor.Preserving.gelu g) u) dw) scales[token * 2 + slot]!)
+      sum := Tensor.add sum (Tensor.mulScalar
+        (Tensor.linear (Tensor.mul (Tensor.gelu g) u) dw) scales[token * 2 + slot]!)
     expected := Tensor.sliceScatter expected 0 token.toUInt64 sum
   close actual expected 1e-6
 
@@ -212,7 +213,9 @@ private def multimodalModel (dtype : DType := .Float32) : Gemma4ForConditionalGe
 
 @[test] def testGemma4MultimodalDTypesAndPlaceholderChecks : IO Unit := do
   for bf16 in #[false, true] do
-    let m := multimodalModel (if bf16 then .BFloat16 else .Float32)
+    let selected : RealFloatingDType := if bf16 then ⟨.BFloat16, rfl⟩ else ⟨.Float32, rfl⟩
+    let dtype := selected.val
+    let m := multimodalModel dtype
     let features := m.getImageFeatures vlCfg (weight #[4, 4, 12] 0.1)
     LeanTest.assertEqual features.actualSpec.dtype (if bf16 then .BFloat16 else .Float32)
     let prompt := (Tensor.fromInt64Array #[2, 15, 15, 15, 15, 3, 4]).reshapeChecked #[1, 7]

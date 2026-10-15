@@ -15,6 +15,7 @@ import Tyr.Tokenizer.Qwen3
 namespace torch.qwen3asr
 
 variable {device : Device} {dtype : DType}
+variable [DType.RealFloating dtype]
 private def asrTextTag : String := "<asr_text>"
 private def languagePrefix : String := "language "
 

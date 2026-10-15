@@ -18,6 +18,7 @@ import Tyr.Tokenizer.Qwen3
 namespace torch.whisper
 
 variable {device : Device} {dtype : DType}
+variable [DType.RealFloating dtype]
 open torch.qwen3asr
 
 structure WhisperTranscription where
@@ -29,7 +30,7 @@ structure WhisperTranscription where
 structure WhisperBundle where
   cfg : WhisperConfig
   device : Device
-  dtype : ExactDType
+  dtype : RealFloatingDType
   model : WhisperForConditionalGeneration (device := device) (dtype := dtype.val) cfg
   tok : tokenizer.qwen3.QwenTokenizer
   preprocessor : PreprocessorConfig
@@ -584,7 +585,7 @@ private def filteredSamplingLogits {vocab : UInt64}
     if temperature == 1.0 then
       logits
     else
-      Tensor.Preserving.mulScalar logits (1.0 / temperature)
+      Tensor.mulScalar logits (1.0 / temperature)
   let topK' := clampTopK topK vocab
   let filtered :=
     if topK' == 0 then

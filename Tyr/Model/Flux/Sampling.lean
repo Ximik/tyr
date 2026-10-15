@@ -11,6 +11,7 @@ import Tyr.Model.Flux.Model
 namespace torch.flux
 
 variable {device : Device} {dtype : DType}
+variable [DType.RealFloating dtype]
 /-- Sampling configuration -/
 structure SamplingConfig where
   /-- Number of sampling steps -/
@@ -65,7 +66,7 @@ def eulerStep {s : Shape}
     (t_curr t_next : Float)
     : Tensor { dtype := dtype, device := device, shape := s } :=
   let dt := t_next - t_curr
-  Tensor.Preserving.add x (Tensor.Preserving.mulScalar pred dt)
+  Tensor.add x (Tensor.mulScalar pred dt)
 
 /-- Denoise latents using rectified flow.
     noise: [batch, seq, dim] - starting noise

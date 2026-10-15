@@ -12,6 +12,7 @@
   Based on modded-nanogpt's NorMuon implementation.
 -/
 import Tyr.TensorStruct
+import Tyr.Module.Derive
 import Tyr.Typed.Neural
 import Tyr.Distributed
 import Tyr.Optim.PolarExpress
@@ -114,6 +115,8 @@ instance {σ : StaticSpec} : TensorStruct (ParamState σ) where
       | some t => TensorStruct.fold f acc t
       | none => acc
 
+derive_tensor_struct_for ParamState
+
 /-- Full NorMuon optimizer state -/
 structure State where
   /-- Configuration -/
@@ -140,34 +143,35 @@ def State.init (cfg : Config) : IO State := do
 
     This reduces variance of the update while maintaining direction.
 -/
-def applyVarianceReduction {σ : StaticSpec} (grad : Tensor σ)
+def applyVarianceReduction {σ : StaticSpec} [DType.RealFloating σ.dtype] (grad : Tensor σ)
     (secondMoment : Option (Tensor σ.sumSpec))
     (beta2 : Float) (step : Nat) : IO (Tensor σ × Tensor σ.sumSpec) := do
   let eps : Float := 1e-8
 
   -- Compute mean of squared gradients over all entries
-  let gradSquared := Tensor.Preserving.mul grad grad
+  let gradSquared := Tensor.mul grad grad
   let numel := (TensorSpec.numelOfShape σ.shape).toFloat
-  let newSecondMoment :=
-    Tensor.Preserving.divScalar (Tensor.sumAll gradSquared) numel
+  let sumSquared : Tensor (σ.withShape #[]) := by simpa using Tensor.sumAll gradSquared
+  let newSecondMoment := Tensor.divScalar sumSquared numel
 
   -- Update EMA of second moment
   let updatedSecondMoment ← match secondMoment with
     | some sm =>
-      let b2 := Tensor.Preserving.mulScalar sm beta2
-      let g2 := Tensor.Preserving.mulScalar newSecondMoment (1.0 - beta2)
-      pure (Tensor.Preserving.add b2 g2)
+      let sm : Tensor (σ.withShape #[]) := by simpa using sm
+      let b2 := Tensor.mulScalar sm beta2
+      let g2 := Tensor.mulScalar newSecondMoment (1.0 - beta2)
+      pure (Tensor.add b2 g2)
     | none => pure newSecondMoment
 
   -- Bias correction
   let biasCorrection := 1.0 - Float.pow beta2 (step + 1).toFloat
-  let correctedMoment := Tensor.Preserving.divScalar updatedSecondMoment biasCorrection
+  let correctedMoment := Tensor.divScalar updatedSecondMoment biasCorrection
 
   -- Normalize gradient by sqrt(second moment)
   let scale := 1.0 / Float.sqrt (Tensor.item correctedMoment + eps)
-  let normalizedGrad := Tensor.Preserving.mulScalar grad scale
+  let normalizedGrad := Tensor.mulScalar grad scale
 
-  return (normalizedGrad, updatedSecondMoment)
+  return (normalizedGrad, by simpa using updatedSecondMoment)
 
 /-- Apply cautious weight decay.
 
@@ -189,14 +193,14 @@ def applyCautiousWeightDecay {σ : StaticSpec} (param grad : Tensor σ) (wd : Fl
     Matches nanochat Muon:
     buf_t = momentum * buf_{t-1} + (1 - momentum) * g
 -/
-def updateMomentum {σ : StaticSpec} (orthGrad : Tensor σ)
+def updateMomentum {σ : StaticSpec} [DType.RealFloating σ.dtype] (orthGrad : Tensor σ)
     (momentumBuffer : Option (Tensor σ)) (momentum : Float) : Tensor σ :=
   match momentumBuffer with
   | some buf =>
-    let decayed := Tensor.Preserving.mulScalar buf momentum
-    let scaled := Tensor.Preserving.mulScalar orthGrad (1.0 - momentum)
-    Tensor.Preserving.add decayed scaled
-  | none => Tensor.Preserving.mulScalar orthGrad (1.0 - momentum)
+    let decayed := Tensor.mulScalar buf momentum
+    let scaled := Tensor.mulScalar orthGrad (1.0 - momentum)
+    Tensor.add decayed scaled
+  | none => Tensor.mulScalar orthGrad (1.0 - momentum)
 
 /-- Compute aspect ratio scaling for a tensor shape.
     For 2D matrices: sqrt(max(1, height/width))
@@ -225,7 +229,7 @@ def aspectRatioScale (shape : Shape) : Float :=
     5. Apply decoupled weight decay (AdamW-style, matching DistAdam):
        `param ← param - effectiveLr * weightDecay * wdMul * param`
 -/
-def stepSingle {σ : StaticSpec} (param : Tensor σ) (grad : Tensor σ) (state : ParamState σ)
+def stepSingle {σ : StaticSpec} [DType.RealFloating σ.dtype] (param : Tensor σ) (grad : Tensor σ) (state : ParamState σ)
     (cfg : Config) (lrMul wdMul : Float) : IO (Tensor σ × ParamState σ) := do
   -- Match nanochat ordering:
   -- 1) momentum buffer update on raw gradients
@@ -233,8 +237,8 @@ def stepSingle {σ : StaticSpec} (param : Tensor σ) (grad : Tensor σ) (state :
   -- 3) orthogonalize blended update
   let gRaw := Tensor.detach grad
   let newMomentum := updateMomentum gRaw state.momentumBuffer cfg.momentum
-  let nesterovGrad := Tensor.Preserving.add (Tensor.Preserving.mulScalar gRaw (1.0 - cfg.momentum))
-    (Tensor.Preserving.mulScalar newMomentum cfg.momentum)
+  let nesterovGrad := Tensor.add (Tensor.mulScalar gRaw (1.0 - cfg.momentum))
+    (Tensor.mulScalar newMomentum cfg.momentum)
   -- Zero gradients should stay zero; this avoids entering Newton-Schulz on
   -- exact zeros while preserving reference Muon semantics.
   let nesterovAbsMax := Tensor.item (Tensor.maxAllChecked (Tensor.abs nesterovGrad))
@@ -243,8 +247,8 @@ def stepSingle {σ : StaticSpec} (param : Tensor σ) (grad : Tensor σ) (state :
   let wd := cfg.weightDecay * wdMul
   -- Apply weight decay (decoupled, AdamW-style), matching DistAdam.
   let paramDecayed := if wd > 0.0 then
-      let decay := Tensor.Preserving.mulScalar (Tensor.detach param) (effectiveLr * wd)
-      Tensor.Preserving.sub (Tensor.detach param) decay
+      let decay := Tensor.mulScalar (Tensor.detach param) (effectiveLr * wd)
+      Tensor.sub (Tensor.detach param) decay
     else
       Tensor.detach param
   let update ← if nesterovAbsMax == 0.0 then
@@ -254,7 +258,7 @@ def stepSingle {σ : StaticSpec} (param : Tensor σ) (grad : Tensor σ) (state :
       -- Match native Muon: scale in BF16, then restore the parameter dtype
       -- for subtraction. Never claim the BF16 kernel result has the input dtype.
       pure (Tensor.castLike param (Tensor.mulScalar (Tensor.detach orthGrad) effectiveLr))
-  let newParam := Tensor.Preserving.sub paramDecayed update
+  let newParam := Tensor.sub paramDecayed update
   let newParam ← Tensor.parameter (Tensor.detach newParam)
 
   let newState : ParamState σ := {
@@ -272,7 +276,7 @@ def stepSingle {σ : StaticSpec} (param : Tensor σ) (grad : Tensor σ) (state :
     2. Only `ownerRank` computes the Muon update and advances state.
     3. Broadcast updated parameter (and momentum buffer) from owner.
 -/
-def stepDistributedOwner {σ : StaticSpec} (param : Tensor σ) (grad : Tensor σ)
+def stepDistributedOwner {σ : StaticSpec} [DType.RealFloating σ.dtype] (param : Tensor σ) (grad : Tensor σ)
     (state : ParamState σ)
     (cfg : Config) (lrMul wdMul : Float) (ownerRank : UInt64) :
     IO (Tensor σ × ParamState σ) := do
@@ -313,7 +317,7 @@ def stepDistributedOwner {σ : StaticSpec} (param : Tensor σ) (grad : Tensor σ
   return (newParam, newState)
 
 /-- Local (non-distributed) Muon step for a homogeneous parameter group. -/
-private def stepGroupLocal {σ : StaticSpec}
+private def stepGroupLocal {σ : StaticSpec} [DType.RealFloating σ.dtype]
     (params : Array (Tensor σ))
     (grads : Array (Tensor σ))
     (states : Array (ParamState σ))
@@ -338,7 +342,7 @@ private def stepGroupLocal {σ : StaticSpec}
     - Gradients are averaged with `reduce_scatter` over explicit per-rank lists.
     - Updated owner parameters are replicated with `all_gather`.
 -/
-def stepDistributedGroup {σ : StaticSpec}
+def stepDistributedGroup {σ : StaticSpec} [DType.RealFloating σ.dtype]
     (params : Array (Tensor σ))
     (grads : Array (Tensor σ))
     (states : Array (ParamState σ))
@@ -433,12 +437,12 @@ def stepDistributedGroup {σ : StaticSpec}
     paths therefore apply `weightDecay` inconsistently; the coupled form also
     interacts with momentum, unlike true AdamW.
 -/
-def stepAdamLike {σ : StaticSpec} (param : Tensor σ) (grad : Tensor σ) (state : ParamState σ)
+def stepAdamLike {σ : StaticSpec} [DType.RealFloating σ.dtype] (param : Tensor σ) (grad : Tensor σ) (state : ParamState σ)
     (cfg : Config) (lrMul wdMul : Float) : IO (Tensor σ × ParamState σ) := do
   -- Simple SGD with momentum for non-matrix params
   let effectiveWd := cfg.weightDecay * wdMul
   let gradWithWd := if effectiveWd > 0 then
-      Tensor.Preserving.add grad (Tensor.Preserving.mulScalar param effectiveWd)
+      Tensor.add grad (Tensor.mulScalar param effectiveWd)
     else
       grad
 
@@ -447,8 +451,8 @@ def stepAdamLike {σ : StaticSpec} (param : Tensor σ) (grad : Tensor σ) (state
 
   -- Apply update
   let effectiveLr := cfg.lr * lrMul
-  let update := Tensor.Preserving.mulScalar newMomentum effectiveLr
-  let newParam := Tensor.Preserving.sub param update
+  let update := Tensor.mulScalar newMomentum effectiveLr
+  let newParam := Tensor.sub param update
   let newParam ← Tensor.parameter (Tensor.detach newParam)
 
   let newState : ParamState σ := {

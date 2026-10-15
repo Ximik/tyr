@@ -7,10 +7,10 @@ open torch
 variable {device : Device}
 
 def relL2
-    {s : Shape} {dtype : DType}
+    {s : Shape} {dtype : DType} [DType.RealFloating dtype]
     (actual ref : Tensor { shape := s, dtype := dtype, device := device }) : Float :=
   let diffNorm :=
-    Tensor.item <| Tensor.sqrt <| Tensor.sumAll <| Tensor.pow ((Tensor.Preserving.sub actual ref).toFloat32) 2.0
+    Tensor.item <| Tensor.sqrt <| Tensor.sumAll <| Tensor.pow ((Tensor.sub actual ref).toFloat32) 2.0
   let refNorm :=
     Tensor.item <| Tensor.sqrt <| Tensor.sumAll <| Tensor.pow (ref.toFloat32) 2.0
   if refNorm <= 1.0e-12 then diffNorm else diffNorm / refNorm

@@ -238,9 +238,9 @@ over an explicit noise tensor, `sample` (`:94`) drawing fresh noise.
 spatial format `[batch, 32, H, W]` and the 2×2-patchified sequence format
 `[batch, (H/2)·(W/2), 128]`. Weights load from a Flux2 HuggingFace SafeTensors file with
 `loadFluxModel path (cfg := FluxConfig.klein4B)`. Its result is
-`IO (Σ dtype : ExactDType, FluxModel (device := device) cfg dtype.val)`:
-the loader retains the input projection's dtype and checks connected weights
-against it. Timestep and RoPE calculations retain their explicit Float32 paths.
+`IO (Σ dtype : RealFloatingDType, FluxModel (device := device) cfg dtype.val)`:
+the loader validates the input projection's floating dtype and checks connected
+weights against it, retaining that evidence for forward computation. Timestep and RoPE calculations retain their explicit Float32 paths.
 Text conditioning
 is **not** part of this module: the model consumes pre-computed embeddings
 (`context_in_dim := 7680`), produced in the demo by a Qwen encoder — see
@@ -316,7 +316,7 @@ Flux + VAE:
 
 | Entry point | Signature (abridged) | Location |
 | --- | --- | --- |
-| `loadFluxModel` | `(path : String) (cfg := FluxConfig.klein4B) … (device := .CPU) : IO (Σ dtype : ExactDType, FluxModel (device := device) cfg dtype.val)` | `Flux/Weights.lean` |
+| `loadFluxModel` | `(path : String) (cfg := FluxConfig.klein4B) … (device := .CPU) : IO (Σ dtype : RealFloatingDType, FluxModel (device := device) cfg dtype.val)` | `Flux/Weights.lean` |
 | `computeImagePositionIds` / `computeTextPositionIds` | `[1, seq, 4]` RoPE ids | `Flux/Sampling.lean:109,131` |
 | `denoise` | Euler rectified-flow loop, `num_steps := 4` | `Flux/Sampling.lean:74` |
 | `sample` | fresh noise → `denoise` | `Flux/Sampling.lean:94` |

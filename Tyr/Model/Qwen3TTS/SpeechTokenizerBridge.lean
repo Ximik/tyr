@@ -219,7 +219,7 @@ private def computeSpeakerMelFromWave
     freqBins.toNat melDim.toNat sampleRate.toNat fminHz melMaxHz
   let melFilter : Tensor { shape := #[freqBins, melDim], dtype := .Float32, device := .CPU } := Tensor.reshapeChecked (Tensor.fromFloatArray melFlat) #[freqBins, melDim]
   let melPow : Tensor { shape := #[melDim, frames], dtype := .Float32, device := .CPU } := Tensor.mm (Tensor.transpose2d melFilter) mag
-  let melLog : Tensor { shape := #[melDim, frames], dtype := .Float32, device := .CPU } := Tensor.log (Tensor.Preserving.clampFloat melPow (1e-5 : Float) (1e10 : Float))
+  let melLog : Tensor { shape := #[melDim, frames], dtype := .Float32, device := .CPU } := Tensor.log (Tensor.clampFloat melPow (1e-5 : Float) (1e10 : Float))
   let melFrameMajor : Tensor { shape := #[frames, melDim], dtype := .Float32, device := .CPU } := Tensor.transpose2d melLog
   let mel3 : Tensor { shape := #[1, frames, melDim], dtype := .Float32, device := .CPU } := Tensor.reshapeChecked melFrameMajor #[1, frames, melDim]
   pure ⟨frames, mel3⟩
@@ -290,14 +290,14 @@ def encodeAudioToCodes
   let codesPath ← expandHome codesPath
   ensureParentDir codesPath
   if (← isTokenizer25Hz speechTokenizerDir) then
-    let ⟨_, encoder25⟩ ← SpeechTokenizer25HzEncoder.loadFromDir speechTokenizerDir device
+    let ⟨_dtype, encoder25⟩ ← SpeechTokenizer25HzEncoder.loadFromDir speechTokenizerDir device
     let wave ← loadResampledMonoWav audioPath encoder25.inputSampleRate
     if wave.isEmpty then
       throw <| IO.userError s!"Audio encode input is empty: {audioPath}"
     let (groups, vals) ← encoder25.encodeWaveToCodes wave
     IO.FS.writeFile codesPath (formatCodesRows vals groups)
   else
-    let ⟨_, encoder⟩ ← SpeechTokenizer12HzEncoder.loadFromDirFlexible speechTokenizerDir device
+    let ⟨_dtypes, encoder⟩ ← SpeechTokenizer12HzEncoder.loadFromDirFlexible speechTokenizerDir device
     let wave ← loadResampledMonoWav audioPath encoder.inputSampleRate
     if wave.isEmpty then
       throw <| IO.userError s!"Audio encode input is empty: {audioPath}"

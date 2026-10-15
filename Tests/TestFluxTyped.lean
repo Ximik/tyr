@@ -65,7 +65,9 @@ private def close {σ τ : StaticSpec} (x : Tensor σ) (y : Tensor τ) (tol : Fl
   let text ← randomWeight #[2, 3, 6]
   let text := text.detach
   for bf16 in #[false, true] do
-    let dtype := if bf16 then DType.BFloat16 else .Float32
+    let selected : RealFloatingDType :=
+      if bf16 then ⟨.BFloat16, by decide⟩ else ⟨.Float32, by decide⟩
+    let dtype := selected.val
     let model ← TensorStruct.castTo (FluxModel (device := .CPU) cfg dtype) initial
     let image := Tensor.castLike model.img_in image
     let text := Tensor.castLike model.txt_in text
@@ -150,7 +152,7 @@ private def writeFluxCheckpoint (path : System.FilePath) (bf16 : Bool)
   for bf16 in #[false, true] do
     let path := dir / (if bf16 then "bf16.safetensors" else "fp32.safetensors")
     writeFluxCheckpoint path bf16
-    let ⟨_, model⟩ ← loadFluxModel path.toString cfg
+    let ⟨storedDType, model⟩ ← loadFluxModel path.toString cfg
     LeanTest.assertEqual model.double_blocks.size 1
     LeanTest.assertEqual model.single_blocks.size 1
     let dtype := if bf16 then DType.BFloat16 else .Float32

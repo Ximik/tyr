@@ -267,9 +267,10 @@ with `encode`, `decode`, and the incremental path `initLayerKVCaches` +
 `projOut` to the token embedding when missing, and picks a device from `TYR_DEVICE`
 (`cpu`/`cuda`/`mps`/`auto`), falling back to `getBestDevice`. Its result packages
 placement and checkpoint precision as
-`Σ device : Device, Σ dtype : ExactDType, WhisperForConditionalGeneration (device := device) cfg dtype.val`.
+`Σ device : Device, Σ dtype : RealFloatingDType, WhisperForConditionalGeneration (device := device) cfg dtype.val`.
 Use `loadShardedAt` to request an acquired device explicitly; its result retains
-the dtype witness. Bundles retain both indices alongside the model.
+the dtype witness. Compute dtype validation occurs during loading, and bundles
+retain the proof alongside the model.
 
 The user API (`Tyr/Model/Whisper/Transcribe.lean`) is a bundle plus transcribe functions:
 
@@ -277,7 +278,7 @@ The user API (`Tyr/Model/Whisper/Transcribe.lean`) is a bundle plus transcribe f
 structure WhisperBundle where
   cfg : WhisperConfig
   device : Device
-  dtype : ExactDType
+  dtype : RealFloatingDType
   model : WhisperForConditionalGeneration (device := device) cfg dtype.val
   tok : tokenizer.qwen3.QwenTokenizer
   preprocessor : PreprocessorConfig
@@ -285,6 +286,7 @@ structure WhisperBundle where
 def loadFromPretrainedDir (modelDir : String) : IO WhisperBundle
 
 def transcribeWav {cfg : WhisperConfig} {device : Device} {dtype : DType}
+    [DType.RealFloating dtype]
     (model : WhisperForConditionalGeneration (device := device) cfg dtype)
     (tok : tokenizer.qwen3.QwenTokenizer) (pre : PreprocessorConfig)
     (wavPath : String) (language : String := "en")

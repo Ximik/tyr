@@ -232,7 +232,7 @@ def testParseStaticIndices : IO Unit := do
 @[test]
 def testDetachedInferencePreservesTrainableInputOnException : IO Unit := do
   let parameter ← Tensor.parameter (Tensor.full #[] 3)
-  let inference := Tensor.Preserving.mulScalar parameter.detach 2
+  let inference := Tensor.mulScalar parameter.detach 2
   LeanTest.assertTrue (!inference.requiresGrad && !inference.hasGradFn)
     "Explicit detached inference has no autograd graph"
   LeanTest.assertEqual inference.item 6.0

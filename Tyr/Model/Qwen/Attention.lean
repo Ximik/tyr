@@ -39,9 +39,12 @@ structure QwenAttention (hidden_size num_heads num_kv_heads head_dim : UInt64) (
 namespace QwenAttention
 
 variable {dtype : DType}
+variable [DType.RealFloating dtype]
 
 /-- Initialize attention layers with random weights -/
 def init (hidden_size num_heads num_kv_heads head_dim : UInt64) (dtype : DType := .Float32) (device : Device := .CPU) : IO (QwenAttention (device := device) hidden_size num_heads num_kv_heads head_dim dtype) := do
+  let floating ← IO.ofExcept (DType.realFloating? dtype)
+  let _ := floating.down
   let std := Float.sqrt (2.0 / hidden_size.toFloat)
 
   let q ← Tensor.randn (device := device) #[num_heads * head_dim, hidden_size]
@@ -54,10 +57,10 @@ def init (hidden_size num_heads num_kv_heads head_dim : UInt64) (dtype : DType :
   let o := o.castDType dtype
 
   pure {
-    q_proj := (← Tensor.parameter (Tensor.Preserving.mulScalar q std))
-    k_proj := (← Tensor.parameter (Tensor.Preserving.mulScalar k std))
-    v_proj := (← Tensor.parameter (Tensor.Preserving.mulScalar v std))
-    o_proj := (← Tensor.parameter (Tensor.Preserving.mulScalar o std))
+    q_proj := (← Tensor.parameter (Tensor.mulScalar q std))
+    k_proj := (← Tensor.parameter (Tensor.mulScalar k std))
+    v_proj := (← Tensor.parameter (Tensor.mulScalar v std))
+    o_proj := (← Tensor.parameter (Tensor.mulScalar o std))
   }
 
 /-- Incremental KV cache for one attention layer.

@@ -14,7 +14,7 @@ example (_conv : Conv2dParams (device := .CPU) 1 1 3 1 .Float32)
       { _conv with weight := _weight }
   trivial
 
-private def mixedStatistics : AutoEncoderDTypes := {
+private abbrev mixedStatistics : AutoEncoderDTypes := {
   compute := ⟨.Float32, by decide⟩, mean := ⟨.BFloat16, by decide⟩,
   variance := ⟨.Float32, by decide⟩, scaled := .Float32,
   scalePromotion := ⟨rfl⟩, offsetPromotion := ⟨rfl⟩ }
@@ -57,7 +57,9 @@ private def close {σ τ : StaticSpec} (x : Tensor σ) (y : Tensor τ) (tol : Fl
   let attn ← AttnBlock.init 32
   let block ← ResnetBlock.init 32 64
   for bf16 in #[false, true] do
-    let dtype := if bf16 then DType.BFloat16 else .Float32
+    let selected : RealFloatingDType :=
+      if bf16 then ⟨.BFloat16, by decide⟩ else ⟨.Float32, by decide⟩
+    let dtype := selected.val
     let attn ← TensorStruct.castTo (AttnBlock (device := .CPU) 32 dtype) attn
     let block ← TensorStruct.castTo (ResnetBlock (device := .CPU) 32 64 dtype) block
     let x ← Tensor.randn #[2, 32, 2, 3]

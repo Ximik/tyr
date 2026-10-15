@@ -18,7 +18,8 @@ private def cfg : Config := { LagunaConfig.laguna_s_2_1 with
   num_key_value_heads := 1, head_dim := 4, num_experts := 0 }
 
 /-- One checkpoint per case: native checkpoint metadata is cached by path. -/
-private def writeFixture (directory : System.FilePath) (mode : Nat) : IO Unit := do
+private def writeFixture (directory : System.FilePath) (mode : Nat)
+    (computeDType : String := "BF16") : IO Unit := do
   let headShape := if mode == 2 then #[cfg.vocab_size, cfg.hidden_size + 1]
     else #[cfg.vocab_size, cfg.hidden_size]
   let entries := #[
@@ -30,9 +31,10 @@ private def writeFixture (directory : System.FilePath) (mode : Nat) : IO Unit :=
   for (name, shape, bf16) in entries do
     let start := bytes.size
     for _ in [:shape.foldl (fun n d => n * d.toNat) 1] do
-      bytes := bytes ++ (if bf16 then ByteArray.mk #[0, 62] else ByteArray.mk #[0, 0, 0, 62])
+      bytes := bytes ++ (if bf16 && computeDType == "BF16" then ByteArray.mk #[0, 62]
+        else ByteArray.mk #[0, 0, 0, 62])
     header := header ++ [(name, Lean.Json.mkObj [
-      ("dtype", Lean.toJson (if bf16 then "BF16" else "F32")),
+      ("dtype", Lean.toJson (if bf16 then computeDType else "F32")),
       ("shape", Lean.toJson (shape.map UInt64.toNat)),
       ("data_offsets", Lean.toJson #[start, bytes.size])])]
   let json := (Lean.Json.mkObj header).compress.toUTF8
@@ -56,6 +58,15 @@ private def writeFixture (directory : System.FilePath) (mode : Nat) : IO Unit :=
         let logits ← model.forward cfg ids
         LeanTest.assertEqual logits.actualSpec.dtype .BFloat16
         LeanTest.assertTrue ((← logits.toFloatArray).all Float.isFinite)
+
+@[test] def testLagunaLoaderRejectsNonFloatingCompute : IO Unit := do
+  for sharded in #[false, true] do
+    IO.FS.withTempDir fun directory => do
+      writeFixture directory 0 "I32"
+      Tests.assertThrows (do
+        if sharded then discard <| LagunaForCausalLM.loadSharded directory.toString cfg
+        else discard <| LagunaForCausalLM.load (directory / "model.safetensors").toString cfg)
+        (some "Expected a standard real floating dtype")
 
 @[test] def testLagunaLoaderRejectsIncompatibleHead : IO Unit := do
   for sharded in #[false, true] do

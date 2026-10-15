@@ -11,11 +11,11 @@ private def tinyConfig : moddedGpt.Config := {
   maxSeqLen := 8, blockSize := 8, numValueEmbeds := 1
 }
 
-private def assertTreeEqual [TensorStruct α] (actual expected : α) : IO Unit := do
+private def assertTreeEqual [TensorStruct α] [FloatingTensorStruct α] (actual expected : α) : IO Unit := do
   let describe := fun (value : α) =>
     TensorStruct.fold (fun {_s} t acc => acc.push (t.runtimeShape, t.raw.dtype)) #[] value
   assertTrue (describe actual == describe expected) "checkpoint tensor traversal metadata"
-  let errors := TensorStruct.zipWith (fun a b => Tensor.Preserving.abs (Tensor.Preserving.sub a b)) actual expected
+  let errors := FloatingTensorStruct.zipWith (fun a b => (by simpa using Tensor.abs (Tensor.sub a b))) actual expected
   let error := TensorStruct.fold (fun {_s} t acc => acc + Tensor.item (Tensor.sumAll t)) 0.0 errors
   assertTrue (error.isFinite && error < 1e-6) s!"checkpoint tensor difference {error}"
 
@@ -28,9 +28,9 @@ private def markedMuon {s : Shape} (step : Nat) : Optim.NorMuon.ParamState ⟨s,
 
 private def trainedCheckpoint : IO (Checkpoint (device := .CPU) tinyConfig) := do
   let initialParams ← moddedGpt.ModdedGPTParams.init tinyConfig
-  let params := TensorStruct.map (fun t => Tensor.Preserving.addScalar (Tensor.zerosLike t) 0.25) initialParams
+  let params := FloatingTensorStruct.map (fun t => Tensor.addScalar (Tensor.zerosLike t) 0.25) initialParams
   let initialOpt := OptimizerState.init tinyConfig params 0.023 0.017
-  let grads := TensorStruct.map (fun t => Tensor.Preserving.addScalar (Tensor.zerosLike t) 0.125) params
+  let grads := FloatingTensorStruct.map (fun t => Tensor.addScalar (Tensor.zerosLike t) 0.125) params
   let opt := Optim.adamw (α := moddedGpt.ModdedGPTParams (device := .CPU) tinyConfig) (lr := 0.023) (weight_decay := 0.017)
   let (params, adamState) ← Optim.step opt params grads initialOpt.adamState
   let (_, embedState) ← Optim.DistAdam.stepSingle params.embed grads.embed
@@ -104,7 +104,7 @@ private def metadata (tokens : UInt64) : CheckpointMetadata := {
   assertTrue detached "optimizer buffers should be detached"
 
   -- Compare the next update, including bias correction and Muon momentum.
-  let grads := TensorStruct.map (fun t => Tensor.Preserving.addScalar (Tensor.zerosLike t) 0.125) original.params
+  let grads := FloatingTensorStruct.map (fun t => Tensor.addScalar (Tensor.zerosLike t) 0.125) original.params
   let opt := Optim.adamw (α := moddedGpt.ModdedGPTParams (device := .CPU) tinyConfig)
     (lr := original.optState.baseLr) (weight_decay := original.optState.weightDecay)
   let (expectedParams, expectedAdam) ← Optim.step opt original.params grads original.optState.adamState

@@ -13,6 +13,7 @@ import Tyr.Model.VAE.ResnetBlock
 namespace torch.vae
 
 variable {device : Device} {dtype : DType}
+variable [DType.RealFloating dtype]
 /-- Self-attention block for VAE.
     Applies spatial attention using 1×1 convolutions. -/
 structure AttnBlock (channels : UInt64) (dtype : DType := .Float32) where
@@ -68,8 +69,8 @@ def forward {batch channels height width : UInt64}
   let q_t := Tensor.transpose q 1 2  -- [batch, spatial, channels]
   let scale := Float.sqrt channels.toFloat
   let attn_weights := bmm q_t k  -- [batch, spatial, spatial]
-  let attn_weights := Tensor.Preserving.divScalar attn_weights scale
-  let attn_weights := Tensor.Preserving.softmax attn_weights (-1)
+  let attn_weights := Tensor.divScalar attn_weights scale
+  let attn_weights := Tensor.softmax attn_weights (-1)
 
   -- V: [batch, channels, spatial]
   -- attn_weights @ Vᵀ = [batch, spatial, spatial] @ [batch, spatial, channels]
@@ -84,7 +85,7 @@ def forward {batch channels height width : UInt64}
   let out := Tensor.conv2dBias out attn.proj_out.weight attn.proj_out.bias #[1, 1] #[0, 0]
   let out := Tensor.reshapeChecked out #[batch, channels, height, width]
 
-  Tensor.Preserving.add x out
+  Tensor.add x out
 
 end AttnBlock
 

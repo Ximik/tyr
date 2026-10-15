@@ -40,8 +40,8 @@ def bn_eps : Float := 1e-4
     Formula: z * sqrt(running_var + eps) + running_mean -/
 def invNormalize (ae : (AutoEncoder (device := device) dtypes)) (z : Tensor { dtype := dtypes.compute.val, device := device, shape := #[1, 128, 16, 16] }) : Tensor { dtype := dtypes.compute.val, device := device, shape := #[1, 128, 16, 16] } :=
   -- Compute scale: sqrt(running_var + eps)
-  let var_plus_eps := Tensor.Preserving.addScalar ae.bn_running_var bn_eps
-  let scale := Tensor.Preserving.sqrt var_plus_eps
+  let var_plus_eps := Tensor.addScalar ae.bn_running_var bn_eps
+  let scale := Tensor.sqrt var_plus_eps
   -- Reshape and expand for element-wise ops: [128] → [1, 128, 1, 1] → [1, 128, 16, 16]
   let scale := Tensor.reshapeChecked scale #[1, 128, 1, 1]
   let mean := Tensor.reshapeChecked ae.bn_running_mean #[1, 128, 1, 1]
@@ -88,7 +88,7 @@ def loadAutoEncoder (path : String) (log : Handlers := {}) (device : Device := .
   let dtypes ← IO.ofExcept (AutoEncoderDTypes.ofDTypes? compute.1 mean.1 variance.1)
   let decoder ← loadDecoderAtDType (dtype := dtypes.compute.val) path log device
   let bn_running_mean ← IO.ofExcept (mean.atDType? dtypes.mean)
-  let bn_running_var ← IO.ofExcept (variance.atDType? dtypes.variance)
+  let bn_running_var ← IO.ofExcept (variance.atDType? dtypes.variance.toExactDType)
   log.onInfo "AutoEncoder loaded successfully!"
   pure ⟨dtypes, {
     decoder

@@ -56,7 +56,6 @@ example (x : Tensor ⟨#[2], .Int64, .CPU⟩) (scalar : Tensor ⟨#[], .Float32,
   expectError (Tensor.catMany? #[x.packShape, x.packShape] 9 #[4]) "Dimension"
   expectError (Tensor.catMany? (d := .Float32) (dev := .CPU) #[] 0 #[0]) "at least one"
   expectError (Tensor.sumDim? x 1) "axis"
-  expectError (Tensor.Preserving.sumDim? x 1) "axis"
   expectError (Tensor.maxAll? (Tensor.zeros #[0])) "nonempty"
   let expanded ← checked (Tensor.expand? (Tensor.ones #[1]) #[3])
   LeanTest.assertEqual (← expanded.toFloatArray) #[1, 1, 1]
@@ -70,7 +69,7 @@ example (x : Tensor ⟨#[2], .Int64, .CPU⟩) (scalar : Tensor ⟨#[], .Float32,
   expectError (Tensor.relu? complex) "real numeric"
   expectError (Tensor.maxAll? complex) "real or Bool"
   let integer := (Tensor.fromInt64Array #[2, 4])
-  expectError (Tensor.Preserving.meanDim? integer 0) "floating or complex"
+  expectError (Tensor.meanDim? integer 0) "floating or complex"
   expectError (Tensor.meanAll? integer) "floating or complex"
   let mean := Tensor.meanAll complex
   LeanTest.assertEqual mean.raw.dtype .Complex64
@@ -138,7 +137,7 @@ example {d : DType} [DType.FloatingOrComplex d]
   let x := (Tensor.ones #[2]).castDType .Complex32
   -- Promotion exists, but the pinned CPU backend lacks ComplexHalf division.
   expectError (Tensor.Promoting.div? x x) "div"
-  expectError (Tensor.Preserving.div? x x) "div"
+  expectError (Tensor.div? x x) "div"
 
 @[test] def testRuntimeBroadcastPromotion : IO Unit := do
   let x := Tensor.fromInt64Array #[2, 4]
@@ -147,6 +146,8 @@ example {d : DType} [DType.FloatingOrComplex d]
   LeanTest.assertEqual result.dtype .Float32
   LeanTest.assertEqual (← result.tensor.toFloatArray) #[1, 2]
   expectError (Tensor.Promoting.mulB? x scalar #[3]) "broadcast"
-  expectError (branching.mulTensorScalarPreserving? x scalar) "Expected dtype Int64"
+  let native : Tensor ⟨#[2], .Float32, .CPU⟩ := branching.mulTensorScalar x scalar
+  LeanTest.assertEqual native.raw.dtype .Float32
+  LeanTest.assertEqual (← native.toFloatArray) #[1, 2]
 
 end Tests.OperationContracts

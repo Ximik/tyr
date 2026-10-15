@@ -128,12 +128,14 @@ def loadMLPEmbedder (path : String) (name : String) (in_dim hidden_dim : UInt64)
 /-- Load full Flux model from SafeTensors -/
 def loadFluxModel (path : String) (cfg : FluxConfig := FluxConfig.klein4B)
     (log : Handlers := {})
-    (device : Device := .CPU) : IO (Σ dtype : ExactDType, FluxModel (device := device) cfg dtype.val) := do
+    (device : Device := .CPU) : IO (Σ dtype : RealFloatingDType, FluxModel (device := device) cfg dtype.val) := do
   log.onInfo s!"Loading Flux model from {path}..."
 
   -- Input projections
   let anchor ← safetensors.loadTensorExact path "img_in.weight" #[cfg.hidden_size, cfg.in_channels] device
   let dtype := anchor.1.val
+  let floating ← IO.ofExcept (DType.realFloating? dtype)
+  let _ := floating.down
   let img_in := anchor.2
   let txt_in ← loadWeight (dtype := dtype) (device := device) path #["txt_in.weight"] #[cfg.hidden_size, cfg.context_in_dim]
   log.onInfo "  Loaded input projections"
@@ -168,7 +170,7 @@ def loadFluxModel (path : String) (cfg : FluxConfig := FluxConfig.klein4B)
   log.onInfo "  Loaded final layer"
 
   log.onInfo "Flux model loaded successfully!"
-  pure ⟨anchor.1, {
+  pure ⟨RealFloatingDType.ofDType dtype, {
     img_in := Tensor.detach img_in
     txt_in := Tensor.detach txt_in
     time_in

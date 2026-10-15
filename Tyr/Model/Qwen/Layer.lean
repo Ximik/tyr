@@ -35,6 +35,7 @@ structure QwenLayer (hidden_size num_heads num_kv_heads head_dim intermediate_si
 namespace QwenLayer
 
 variable {dtype : DType}
+variable [DType.RealFloating dtype]
 
 /-- Initialize a transformer layer -/
 def init (hidden_size num_heads num_kv_heads head_dim intermediate_size : UInt64)
@@ -62,13 +63,13 @@ def forward {batch seq hidden_size num_heads num_kv_heads head_dim intermediate_
   let residual := x
   let x : Tensor { device := device, shape := #[batch, seq, hidden_size], dtype := dtype } := layer.input_layernorm.forward3dPreserving x
   let x := layer.self_attn.forward x cos sin is_causal
-  let x : Tensor { device := device, shape := #[batch, seq, hidden_size], dtype := dtype } := Tensor.Preserving.add residual x
+  let x : Tensor { device := device, shape := #[batch, seq, hidden_size], dtype := dtype } := Tensor.add residual x
 
   -- Pre-norm MLP
   let residual := x
   let x : Tensor { device := device, shape := #[batch, seq, hidden_size], dtype := dtype } := layer.post_attention_layernorm.forward3dPreserving x
   let x := layer.mlp.forward x
-  Tensor.Preserving.add residual x
+  Tensor.add residual x
 
 /-- Incremental one-token transformer layer step with attention KV cache.
     Input/output: `[batch, 1, hidden_size]`. -/
@@ -83,13 +84,13 @@ def forwardStep {batch hidden_size num_heads num_kv_heads head_dim intermediate_
   let residual1 := x
   let x1 : Tensor { device := device, shape := #[batch, 1, hidden_size], dtype := dtype } := layer.input_layernorm.forward3dPreserving x
   let (attnOut, cache') := layer.self_attn.forwardStep x1 cos sin cache
-  let h1 : Tensor { device := device, shape := #[batch, 1, hidden_size], dtype := dtype } := Tensor.Preserving.add residual1 attnOut
+  let h1 : Tensor { device := device, shape := #[batch, 1, hidden_size], dtype := dtype } := Tensor.add residual1 attnOut
 
   -- Pre-norm MLP.
   let residual2 := h1
   let h2 : Tensor { device := device, shape := #[batch, 1, hidden_size], dtype := dtype } := layer.post_attention_layernorm.forward3dPreserving h1
   let h3 := layer.mlp.forward h2
-  (Tensor.Preserving.add residual2 h3, cache')
+  (Tensor.add residual2 h3, cache')
 
 def forwardMasked {batch seq hidden_size num_heads num_kv_heads head_dim intermediate_size : UInt64}
     {maskDtype : DType}
@@ -104,13 +105,13 @@ def forwardMasked {batch seq hidden_size num_heads num_kv_heads head_dim interme
   let residual := x
   let x : Tensor { device := device, shape := #[batch, seq, hidden_size], dtype := dtype } := layer.input_layernorm.forward3dPreserving x
   let x := layer.self_attn.forwardMasked x cos sin attn_mask is_causal
-  let x : Tensor { device := device, shape := #[batch, seq, hidden_size], dtype := dtype } := Tensor.Preserving.add residual x
+  let x : Tensor { device := device, shape := #[batch, seq, hidden_size], dtype := dtype } := Tensor.add residual x
 
   -- Pre-norm MLP
   let residual := x
   let x : Tensor { device := device, shape := #[batch, seq, hidden_size], dtype := dtype } := layer.post_attention_layernorm.forward3dPreserving x
   let x := layer.mlp.forward x
-  Tensor.Preserving.add residual x
+  Tensor.add residual x
 
 end QwenLayer
 

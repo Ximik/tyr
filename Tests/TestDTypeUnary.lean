@@ -68,16 +68,16 @@ example (_x : Tensor ⟨#[2], .Int64, .CPU⟩) : True := by
   LeanTest.assertTrue
     ((magnitude (Tensor.atan (Tensor.mulScalar imaginary 0.5)) - Float.log 3 / 2).abs < 1e-5)
 
-@[test] def testPreservingUnaryRejectsErasedIntegralInputs : IO Unit := do
+@[test] def testCheckedUnaryRejectsUnsupportedIntegralDomain : IO Unit := do
   let input := ((Tensor.fromFloatArray #[1, 4]).castDType .Int64)
-  for result in #[Tensor.Preserving.exp? input, Tensor.Preserving.sqrt? input,
-      Tensor.Preserving.rsqrt? input, Tensor.Preserving.log? input,
-      Tensor.Preserving.log10? input, Tensor.Preserving.sin? input,
-      Tensor.Preserving.cos? input, Tensor.Preserving.atan? input,
-      Tensor.Preserving.sigmoid? input, Tensor.Preserving.tanh? input,
-      Tensor.Preserving.pow? input 0.5, Tensor.Preserving.gelu? input,
-      Tensor.Preserving.silu? input, Tensor.Preserving.elu? input,
-      Tensor.Preserving.softmax? input, Tensor.logSoftmax? input] do
+  for result in #[Tensor.exp? input, Tensor.sqrt? input,
+      Tensor.rsqrt? input, Tensor.log? input,
+      Tensor.log10? input, Tensor.sin? input,
+      Tensor.cos? input, Tensor.atan? input,
+      Tensor.sigmoid? input, Tensor.tanh? input,
+      Tensor.pow? input 0.5, Tensor.gelu? input,
+      Tensor.silu? input, Tensor.elu? input,
+      Tensor.softmax? input, Tensor.logSoftmax? input] do
     expectError result
   LeanTest.assertEqual input.raw.dtype .Int64
   LeanTest.assertEqual (← input.toFloatArray) #[1, 4]

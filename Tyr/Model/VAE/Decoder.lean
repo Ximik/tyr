@@ -24,6 +24,7 @@ import Tyr.Model.VAE.Upsample
 namespace torch.vae
 
 variable {device : Device} {dtype : DType}
+variable [DType.RealFloating dtype]
 /-- Full VAE Decoder (BFL format).
     Decodes [batch, 32, H, W] latents to [batch, 3, 8*H, 8*W] images. -/
 structure Decoder (dtype : DType := .Float32) where

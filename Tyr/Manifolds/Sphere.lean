@@ -5,7 +5,7 @@ namespace Tyr.AD
 open torch
 open DifferentiableManifold
 
-variable {d : DType} {dev : Device}
+variable {d : DType} {dev : Device} [DType.RealFloating d]
 
 /-- Real sphere S^{n-1} represented as unit-norm vectors in `R^n`. -/
 structure Sphere (n : UInt64) (dtype : DType := .Float32)
@@ -15,16 +15,16 @@ structure Sphere (n : UInt64) (dtype : DType := .Float32)
 namespace Sphere
 
 private def dot {n : UInt64} (a b : Tensor ⟨#[n], d, dev⟩) : Float :=
-  Tensor.item (Tensor.sumAll (Tensor.Preserving.mul a b))
+  Tensor.item (Tensor.sumAll (Tensor.mul a b))
 
 /-- Project ambient vector to the unit sphere. -/
 def project (n : UInt64) (v : Tensor ⟨#[n], d, dev⟩) : Sphere n d dev :=
   let norm := Tensor.l2Norm v
   let eps := 1e-12
   if norm <= eps then
-    ⟨Tensor.Preserving.mulScalar (Tensor.onesLike v) (1.0 / Float.sqrt n.toFloat)⟩
+    ⟨Tensor.mulScalar (Tensor.onesLike v) (1.0 / Float.sqrt n.toFloat)⟩
   else
-    ⟨Tensor.Preserving.mulScalar v (1.0 / norm)⟩
+    ⟨Tensor.mulScalar v (1.0 / norm)⟩
 
 /-- Random point on the sphere. -/
 def random (n : UInt64) : IO (Sphere n) := do
@@ -43,19 +43,19 @@ namespace SphereTangent
 /-- Orthogonal projection to the tangent space at `x`. -/
 def project (x : Sphere n d dev) (v : Tensor ⟨#[n], d, dev⟩) : SphereTangent n d dev :=
   let xDotV := Sphere.dot x.coords v
-  let correction := Tensor.Preserving.mulScalar x.coords xDotV
-  ⟨Tensor.Preserving.sub v correction⟩
+  let correction := Tensor.mulScalar x.coords xDotV
+  ⟨Tensor.sub v correction⟩
 
 /-- Zero tangent vector. -/
 def zero [DType.ConstantSupported d dev] (n : UInt64) : SphereTangent n d dev := ⟨Tensor.zerosFor ⟨#[n], d, dev⟩⟩
 
 /-- Add tangent vectors. -/
 def add (a b : SphereTangent n d dev) : SphereTangent n d dev :=
-  ⟨Tensor.Preserving.add a.vec b.vec⟩
+  ⟨Tensor.add a.vec b.vec⟩
 
 /-- Scale tangent vector. -/
 def smul (s : Float) (v : SphereTangent n d dev) : SphereTangent n d dev :=
-  ⟨Tensor.Preserving.mulScalar v.vec s⟩
+  ⟨Tensor.mulScalar v.vec s⟩
 
 end SphereTangent
 
@@ -72,12 +72,12 @@ instance sphereManifold (n : UInt64) : DifferentiableManifold (Sphere n d dev) w
   exp x v :=
     let nv := Tensor.l2Norm v.vec
     if nv <= 1e-12 then x else
-      let dir := Tensor.Preserving.mulScalar v.vec (1.0 / nv)
+      let dir := Tensor.mulScalar v.vec (1.0 / nv)
       let c := Float.cos nv
       let s := Float.sin nv
-      let y := Tensor.Preserving.add (Tensor.Preserving.mulScalar x.coords c) (Tensor.Preserving.mulScalar dir s)
+      let y := Tensor.add (Tensor.mulScalar x.coords c) (Tensor.mulScalar dir s)
       Sphere.project n y
   retract x v :=
-    Sphere.project n (Tensor.Preserving.add x.coords v.vec)
+    Sphere.project n (Tensor.add x.coords v.vec)
 
 end Tyr.AD

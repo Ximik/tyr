@@ -125,7 +125,7 @@ def testIndexedPoincareRetraction : IO Unit := do
   let zero : Tensor ⟨#[3], .Float64, .CPU⟩ := Tensor.zerosFor _
   let x := PoincareBall.project 3 (Tensor.onesLike zero)
   let tangent : PoincareBallTangent 3 .Float64 (.CPU) :=
-    ⟨Tensor.Preserving.mulScalar x.coords 10.0⟩
+    ⟨Tensor.mulScalar x.coords 10.0⟩
   let y : PoincareBall 3 .Float64 (.CPU) :=
     DifferentiableManifold.retract x tangent
   match y.coords.validate with
@@ -161,14 +161,14 @@ example (_x : PSDFixedRank 2 3) : True := by
 @[test]
 def testIndexedColumnAndRowTangents : IO Unit := do
   let row : Tensor ⟨#[1, 3], .Float64, .CPU⟩ := Tensor.onesLike (Tensor.zerosFor _)
-  let input := Tensor.cat row (Tensor.Preserving.mulScalar row 2.0) 0
+  let input := Tensor.cat row (Tensor.mulScalar row 2.0) 0
   let first : Tensor ⟨#[2, 1], .Float64, .CPU⟩ := Tensor.onesLike (Tensor.zerosFor _)
   let rest : Tensor ⟨#[2, 2], .Float64, .CPU⟩ := Tensor.zerosFor _
   let direction := Tensor.cat first rest 1
   let columns := Oblique.project 2 3 input
   let columnTangent := ObliqueTangent.project columns direction
   assertValid columnTangent.vec
-  let columnDots := Tensor.Preserving.sumDim (Mul.mul columns.matrix columnTangent.vec) 0 true
+  let columnDots := Tensor.sumDim (Mul.mul columns.matrix columnTangent.vec) 0 true
   LeanTest.assertTrue (Tensor.frobeniusNorm columnDots < 1e-10)
     "Oblique tangent must be orthogonal to each column"
   let moved : Oblique 2 3 .Float64 (.CPU) :=
@@ -179,7 +179,7 @@ def testIndexedColumnAndRowTangents : IO Unit := do
   let rows := Elliptope.project 2 3 input
   let rowTangent := ElliptopeTangent.project rows direction
   assertValid rowTangent.vec
-  let rowDots := Tensor.Preserving.sumDim (Mul.mul rows.factor rowTangent.vec) 1 true
+  let rowDots := Tensor.sumDim (Mul.mul rows.factor rowTangent.vec) 1 true
   LeanTest.assertTrue (Tensor.frobeniusNorm rowDots < 1e-10)
     "Elliptope tangent must be orthogonal to each row"
   let movedRows : Elliptope 2 3 .Float64 (.CPU) :=
@@ -191,7 +191,7 @@ def testIndexedColumnAndRowTangents : IO Unit := do
 @[test]
 def testIndexedPositiveMetricAndRetraction : IO Unit := do
   let ones : Tensor ⟨#[2, 3], .Float64, .CPU⟩ := Tensor.onesLike (Tensor.zerosFor _)
-  let x := Positive.project 2 3 (Tensor.Preserving.mulScalar ones 2.0)
+  let x := Positive.project 2 3 (Tensor.mulScalar ones 2.0)
   let g : PositiveTangent 2 3 .Float64 (.CPU) := ⟨ones⟩
   let sharp : PositiveTangent 2 3 .Float64 (.CPU) :=
     DifferentiableManifold.sharp (x := x) g
@@ -200,16 +200,16 @@ def testIndexedPositiveMetricAndRetraction : IO Unit := do
   LeanTest.assertTrue (Tensor.frobeniusNorm (Sub.sub flat.vec g.vec) < 1e-10)
     "Positive metric maps should invert each other within regularization error"
   let step : PositiveTangent 2 3 .Float64 (.CPU) :=
-    ⟨Tensor.Preserving.mulScalar ones (-1.0)⟩
+    ⟨Tensor.mulScalar ones (-1.0)⟩
   let y : Positive 2 3 .Float64 (.CPU) := DifferentiableManifold.retract x step
   assertValid y.matrix
   LeanTest.assertTrue
-    (Tensor.frobeniusNorm (Sub.sub y.matrix (Tensor.Preserving.mulScalar ones 1.25)) < 1e-10)
+    (Tensor.frobeniusNorm (Sub.sub y.matrix (Tensor.mulScalar ones 1.25)) < 1e-10)
     "Positive retraction should include the quadratic correction"
   let clamped := Positive.project 2 3 step.vec
   assertValid clamped.matrix
   LeanTest.assertTrue
-    (Tensor.frobeniusNorm (Sub.sub clamped.matrix (Tensor.Preserving.mulScalar ones 1e-6)) < 1e-10)
+    (Tensor.frobeniusNorm (Sub.sub clamped.matrix (Tensor.mulScalar ones 1e-6)) < 1e-10)
     "Negative entries must clamp to the positive floor without changing dtype"
 
 @[test]
@@ -217,7 +217,7 @@ def testIndexedSPDMatrixFunctions : IO Unit := do
   let zero : Tensor ⟨#[2, 2], .Float64, .CPU⟩ := Tensor.zerosFor _
   let identity := Tensor.matrixExp zero
   let x := SymmetricPositiveDefinite.project 2
-    (Tensor.Preserving.mulScalar (Tensor.onesLike zero) 0.1)
+    (Tensor.mulScalar (Tensor.onesLike zero) 0.1)
   assertValid x.matrix
   let inverseProduct := Tensor.mm (Tensor.inv x.matrix) x.matrix
   LeanTest.assertTrue (Tensor.frobeniusNorm (Sub.sub inverseProduct identity) < 1e-10)
@@ -227,7 +227,7 @@ def testIndexedSPDMatrixFunctions : IO Unit := do
     "Real SPD logarithm/exponential should roundtrip"
   LeanTest.assertTrue (SymmetricPositiveDefinite.distance x x < 1e-10)
     "SPD self-distance must be approximately zero"
-  let tangent := SPDTangent.project x (Tensor.Preserving.mulScalar identity 0.1)
+  let tangent := SPDTangent.project x (Tensor.mulScalar identity 0.1)
   let y : SymmetricPositiveDefinite 2 .Float64 (.CPU) :=
     DifferentiableManifold.retract x tangent
   assertValid y.matrix
@@ -242,14 +242,14 @@ def testIndexedPSDFactorShapeAndUpdate : IO Unit := do
   let ambient : Tensor ⟨#[2, 2], .Float64, .CPU⟩ := x.toPSD
   assertValid ambient
   LeanTest.assertTrue
-    (Tensor.frobeniusNorm (Sub.sub ambient (Tensor.Preserving.mulScalar (Tensor.onesLike ambient) 3.0)) < 1e-10)
+    (Tensor.frobeniusNorm (Sub.sub ambient (Tensor.mulScalar (Tensor.onesLike ambient) 3.0)) < 1e-10)
     "PSD factor must produce the correctly shaped Gram matrix"
   let tangent : PSDFixedRankTangent 2 3 .Float64 (.CPU) :=
-    ⟨Tensor.Preserving.mulScalar ones 0.5⟩
+    ⟨Tensor.mulScalar ones 0.5⟩
   let y : PSDFixedRank 2 3 .Float64 (.CPU) := DifferentiableManifold.retract x tangent
   assertValid y.factor
   LeanTest.assertTrue
-    (Tensor.frobeniusNorm (Sub.sub y.toPSD (Tensor.Preserving.mulScalar (Tensor.onesLike ambient) 6.75)) < 1e-10)
+    (Tensor.frobeniusNorm (Sub.sub y.toPSD (Tensor.mulScalar (Tensor.onesLike ambient) 6.75)) < 1e-10)
     "PSD update must retain its factor dimensions and produce the expected Gram matrix"
 
 example (_a : Tensor { shape := #[2, 3], dtype := .Float32, device := .CPU }) : True := by
@@ -266,18 +266,18 @@ example (_a : Tensor { shape := #[2, 3], dtype := .Float32, device := .CPU }) : 
 @[test]
 def testIndexedFixedRankSlicingAndUpdate : IO Unit := do
   let ones : Tensor ⟨#[2, 3], .Float64, .CPU⟩ := Tensor.onesLike (Tensor.zerosFor _)
-  let input := Tensor.Preserving.mulScalar ones 2.0
+  let input := Tensor.mulScalar ones 2.0
   let x := FixedRankEmbedded.project 2 3 1 input
   assertValid x.matrix
   LeanTest.assertTrue
-    (Tensor.frobeniusNorm (Sub.sub x.matrix (Tensor.Preserving.mulScalar ones 4.0)) < 1e-10)
+    (Tensor.frobeniusNorm (Sub.sub x.matrix (Tensor.mulScalar ones 4.0)) < 1e-10)
     "Rank-one approximation should use the requested column and row slices"
   let tangent : FixedRankTangent 2 3 1 .Float64 (.CPU) := ⟨ones⟩
   let y : FixedRankEmbedded 2 3 1 .Float64 (.CPU) :=
     DifferentiableManifold.retract x tangent
   assertValid y.matrix
   LeanTest.assertTrue
-    (Tensor.frobeniusNorm (Sub.sub y.matrix (Tensor.Preserving.mulScalar ones 25.0)) < 1e-10)
+    (Tensor.frobeniusNorm (Sub.sub y.matrix (Tensor.mulScalar ones 25.0)) < 1e-10)
     "Retraction should preserve valid rank bounds and apply the factor-product approximation"
   let empty := FixedRankEmbedded.project 2 3 0 input
   assertValid empty.matrix
@@ -288,7 +288,7 @@ def testIndexedFixedRankSlicingAndUpdate : IO Unit := do
   let interior : Tensor ⟨#[2, 2], .Float64, .CPU⟩ := Tensor.slice input 1 1 2
   assertValid interior
   LeanTest.assertTrue
-    (Tensor.frobeniusNorm (Sub.sub interior (Tensor.Preserving.mulScalar (Tensor.onesLike interior) 2.0)) < 1e-10)
+    (Tensor.frobeniusNorm (Sub.sub interior (Tensor.mulScalar (Tensor.onesLike interior) 2.0)) < 1e-10)
     "Nonzero-start exact slice should preserve values and metadata"
 
 end Tests.AdditionalManifolds
