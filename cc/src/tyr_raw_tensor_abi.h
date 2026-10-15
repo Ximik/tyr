@@ -137,6 +137,52 @@ lean_object* lean_torch_tensor_to_uint64_array_dynamic(lean_object*);
 
 lean_object* lean_torch_randint(uint64_t, uint64_t, lean_object*, uint8_t, lean_object*);
 
+// Checked variants return Except String with the same payload and argument ownership.
+lean_object* lean_torch_svd_checked(uint64_t, uint64_t, lean_object*);
+lean_object* lean_torch_svdvals_checked(uint64_t, uint64_t, lean_object*);
+lean_object* lean_torch_max_all_checked(lean_object*);
+lean_object* lean_torch_frobenius_norm_checked(uint64_t, uint64_t, lean_object*);
+lean_object* lean_torch_row_norms_checked(uint64_t, uint64_t, lean_object*);
+lean_object* lean_torch_max_row_norm_checked(uint64_t, uint64_t, lean_object*);
+lean_object* lean_torch_abs_checked(lean_object*, lean_object*);
+lean_object* lean_torch_l2_norm_checked(uint64_t, lean_object*);
+lean_object* lean_torch_where_checked(lean_object*, lean_object*, lean_object*, lean_object*);
+lean_object* lean_torch_add_scalar_checked(lean_object*, lean_object*, double);
+lean_object* lean_torch_bmm4d_checked(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, lean_object*, lean_object*);
+lean_object* lean_torch_div_checked(lean_object*, lean_object*, lean_object*);
+lean_object* lean_torch_div_scalar_checked(lean_object*, lean_object*, double);
+lean_object* lean_torch_expand_checked(lean_object*, lean_object*, lean_object*);
+lean_object* lean_torch_linear_checked(uint64_t, uint64_t, uint64_t, lean_object*, lean_object*);
+lean_object* lean_torch_linear3d_checked(uint64_t, uint64_t, uint64_t, uint64_t, lean_object*, lean_object*);
+lean_object* lean_torch_matmul_checked(lean_object*, lean_object*, lean_object*, lean_object*);
+lean_object* lean_torch_matmul3d_2d_checked(uint64_t, uint64_t, uint64_t, uint64_t, lean_object*, lean_object*);
+lean_object* lean_torch_mean_checked(lean_object*, lean_object*, lean_object*, uint8_t);
+lean_object* lean_torch_mm_checked(uint64_t, uint64_t, uint64_t, lean_object*, lean_object*);
+lean_object* lean_torch_mul_scalar_checked(lean_object*, lean_object*, double);
+lean_object* lean_torch_reshape_exact_checked(lean_object*, lean_object*, lean_object*);
+lean_object* lean_torch_sub_scalar_checked(lean_object*, lean_object*, double);
+lean_object* lean_torch_sum_checked(lean_object*, lean_object*, lean_object*, uint8_t);
+lean_object* lean_torch_tensor_add_checked(lean_object*, lean_object*, lean_object*);
+lean_object* lean_torch_tensor_mul_checked(lean_object*, lean_object*, lean_object*);
+lean_object* lean_torch_tensor_relu_checked(lean_object*, lean_object*);
+lean_object* lean_torch_tensor_sub_checked(lean_object*, lean_object*, lean_object*);
+lean_object* lean_torch_rms_norm_weighted_checked(lean_object*, lean_object*, lean_object*, lean_object*, double);
+lean_object* lean_torch_matrix_log_checked(uint64_t, lean_object*);
+lean_object* lean_torch_tensor_exp_checked(lean_object*, lean_object*);
+lean_object* lean_torch_sqrt_checked(lean_object*, lean_object*);
+lean_object* lean_torch_rsqrt_checked(lean_object*, lean_object*);
+lean_object* lean_torch_tensor_sigmoid_checked(lean_object*, lean_object*);
+lean_object* lean_torch_tensor_tanh_checked(lean_object*, lean_object*);
+lean_object* lean_torch_tensor_gelu_checked(lean_object*, lean_object*);
+lean_object* lean_torch_tensor_silu_checked(lean_object*, lean_object*);
+lean_object* lean_torch_pow_checked(lean_object*, lean_object*, double);
+lean_object* lean_torch_tensor_atan_checked(lean_object*, lean_object*);
+lean_object* lean_torch_tensor_softmax_checked(lean_object*, lean_object*, uint32_t);
+lean_object* lean_torch_log_softmax_checked(lean_object*, uint32_t);
+lean_object* lean_torch_maximum_checked(lean_object*, lean_object*, lean_object*);
+lean_object* lean_torch_gt_checked(lean_object*, lean_object*, lean_object*);
+lean_object* lean_torch_logical_and_checked(lean_object*, lean_object*, lean_object*);
+lean_object* lean_torch_cat2_checked(lean_object*, lean_object*, lean_object*, lean_object*, lean_object*);
 #ifdef __cplusplus
 }
 #endif

@@ -12,3 +12,8 @@ namespace torch.RawTensor
 @[extern "lean_torch_binary_cross_entropy"] opaque branchingBCE (shape : Shape)
     (input target : @& RawTensor) (weight : Option RawTensor) (reduction : String) : RawTensor
 end torch.RawTensor
+
+namespace torch.RawTensor
+@[extern "lean_torch_mul_tensor_scalar_checked"] opaque mulTensorScalarChecked (shape : Shape)
+    (input scalar : @& RawTensor) : Except String RawTensor
+end torch.RawTensor

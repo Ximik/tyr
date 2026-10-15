@@ -1,6 +1,9 @@
 #include "tyr_raw_tensor_abi.h"
 #include "tyr_neural_abi.h"
+#include "tyr_branching_abi.h"
+#include "tyr_checked_result.h"
 #include <bit>
+#include <cmath>
 #include <functional>
 #include <iostream>
 #include <limits>
@@ -11,6 +14,14 @@
 extern "C" void lean_initialize();
 // Kept for native ABI compatibility; no current Lean declaration uses rand.
 extern "C" lean_object* lean_torch_rand(lean_object*, int, lean_object*);
+
+// Tests-first mode applies the checked contract to the previous raw boundary.
+// It must fail: native errors escape and successful results lack Except.ok.
+#ifdef TYR_CHECKED_BASELINE
+#define CHECKED(F) F
+#else
+#define CHECKED(F) F##_checked
+#endif
 
 namespace {
 using Object = std::unique_ptr<lean_object, decltype(&lean_dec)>;
@@ -186,6 +197,263 @@ void transposeScalar() {
   Object result(lean_torch_transpose(shape({}), input.get(), 0, 0), lean_dec);
   values(exceptValue(result.get()), 1, 5);
 }
+
+Object cast(lean_object* input, const char* dtype) {
+  Object tag(lean_mk_string(dtype), lean_dec);
+  Object dims(lean_torch_get_shape(shape({}), input), lean_dec);
+  Object result(lean_torch_cast_dtype_checked(retain(dims.get()), input, tag.get()), lean_dec);
+  return Object(retain(exceptValue(result.get())), lean_dec);
+}
+
+void checkedExpand(bool invalid) {
+  auto input = full({2}, 3);
+  Object dims(shape({2}), lean_dec), target(shape({invalid ? 3u : 2u}), lean_dec);
+  Object result(CHECKED(lean_torch_expand)(retain(dims.get()), input.get(), retain(target.get())), lean_dec);
+  if (invalid) exceptError(result.get(), "expand");
+  else values(exceptValue(result.get()), 2, 3);
+  require(dims->m_rc == 1 && target->m_rc == 1 && input->m_rc == 1,
+    "checked expand ownership imbalance");
+}
+
+void checkedCat(bool invalid) {
+  auto first = full({2, 2}, 3), second = full({invalid ? 3u : 2u, 2}, 3);
+  Object tensors(lean_alloc_array(2, 2), lean_dec);
+  lean_array_set_core(tensors.get(), 0, retain(first.get()));
+  lean_array_set_core(tensors.get(), 1, retain(second.get()));
+  Object result(CHECKED(lean_torch_cat_dyn)(tensors.get(), lean_int64_to_int(1)), lean_dec);
+  if (invalid) exceptError(result.get(), "catMany");
+  else values(exceptValue(result.get()), 8, 3);
+  require(tensors->m_rc == 1 && first->m_rc == 2 && second->m_rc == 2,
+    "checked cat changed borrowed array ownership");
+}
+
+using Reduction = lean_object* (*)(lean_object*, lean_object*, lean_object*, uint8_t);
+void checkedReduction(Reduction operation, const char* context, bool invalidAxis, bool integral = false) {
+  auto input = integral ? Object(lean_torch_full_int(shape({2}), 3), lean_dec) : full({2}, 3);
+  Object dims(shape({2}), lean_dec), axes(some(shape({invalidAxis ? 1u : 0u})), lean_dec);
+  Object result(operation(retain(dims.get()), input.get(), retain(axes.get()), 0), lean_dec);
+  if (invalidAxis || integral) exceptError(result.get(), context);
+  else values(exceptValue(result.get()), 1, std::string(context) == "sum" ? 6 : 3);
+  require(dims->m_rc == 1 && axes->m_rc == 1 && input->m_rc == 1,
+    "checked reduction ownership imbalance");
+}
+
+void checkedMax(bool invalid) {
+  auto input = full({invalid ? 0u : 2u}, 3);
+  Object result(CHECKED(lean_torch_max_all)(input.get()), lean_dec);
+  if (invalid) exceptError(result.get(), "maxAll");
+  else values(exceptValue(result.get()), 1, 3);
+  require(input->m_rc == 1, "checked max changed borrowed tensor ownership");
+}
+
+void checkedRelu(bool invalid) {
+  auto original = full({2}, 3);
+  auto input = invalid ? cast(original.get(), "Complex64") : Object(retain(original.get()), lean_dec);
+  Object dims(shape({2}), lean_dec);
+  const auto refs = input->m_rc;
+  Object result(CHECKED(lean_torch_tensor_relu)(retain(dims.get()), input.get()), lean_dec);
+  if (invalid) exceptError(result.get(), "relu");
+  else values(exceptValue(result.get()), 2, 3);
+  require(dims->m_rc == 1 && input->m_rc == refs, "checked relu ownership imbalance");
+}
+
+using Binary = lean_object* (*)(lean_object*, lean_object*, lean_object*);
+void checkedBinary(Binary operation, const char* context, bool invalid) {
+  auto a = full({2}, 6), b = full({invalid ? 3u : 2u}, 2);
+  Object dims(shape({2}), lean_dec);
+  Object result(operation(retain(dims.get()), a.get(), b.get()), lean_dec);
+  if (invalid) exceptError(result.get(), context);
+  else values(exceptValue(result.get()), 2,
+    std::string(context) == "add" ? 8 : std::string(context) == "sub" ? 4 :
+    std::string(context) == "div" ? 3 : 12);
+  require(dims->m_rc == 1 && a->m_rc == 1 && b->m_rc == 1, "checked arithmetic ownership imbalance");
+}
+
+using Scalar = lean_object* (*)(lean_object*, lean_object*, double);
+void checkedScalar(Scalar operation, const char* context, bool invalid) {
+  auto original = full({2}, 6);
+  auto input = invalid ? cast(original.get(), "Float8E4M3FN") : Object(retain(original.get()), lean_dec);
+  Object dims(shape({2}), lean_dec);
+  const auto refs = input->m_rc;
+  Object result(operation(retain(dims.get()), input.get(), 2), lean_dec);
+  if (invalid) exceptError(result.get(), context);
+  else values(exceptValue(result.get()), 2,
+    std::string(context) == "addScalar" ? 8 : std::string(context) == "subScalar" ? 4 :
+    std::string(context) == "divScalar" ? 3 : 12);
+  require(dims->m_rc == 1 && input->m_rc == refs, "checked scalar arithmetic ownership imbalance");
+}
+
+void checkedWhere(bool invalid) {
+  auto a = full({2}, 3), b = full({2}, 8);
+  auto condition = invalid ? Object(retain(a.get()), lean_dec) : cast(a.get(), "Bool");
+  Object result(CHECKED(lean_torch_where)(shape({2}), condition.get(), a.get(), b.get()), lean_dec);
+  if (invalid) exceptError(result.get(), "whereSelect");
+  else values(exceptValue(result.get()), 2, 3);
+}
+
+void checkedMatrices(bool invalid) {
+  auto original = full({2, 2}, 2);
+  auto input = invalid ? cast(original.get(), "Bool") : Object(retain(original.get()), lean_dec);
+  const auto refs = input->m_rc;
+  auto check = [&](lean_object* raw, const char* context) {
+    Object result(raw, lean_dec);
+    if (invalid) exceptError(result.get(), context);
+    else values(exceptValue(result.get()), 4, 8);
+    require(input->m_rc == refs, "checked matrix operation changed borrowed tensor ownership");
+  };
+  check(CHECKED(lean_torch_mm)(2, 2, 2, input.get(), input.get()), "mm");
+  check(CHECKED(lean_torch_matmul)(shape({2, 2}), shape({2, 2}), input.get(), input.get()), "matmul");
+  check(CHECKED(lean_torch_linear)(2, 2, 2, input.get(), input.get()), "linear");
+  check(CHECKED(lean_torch_linear3d)(1, 2, 2, 2, input.get(), input.get()), "linear3d");
+  check(CHECKED(lean_torch_matmul3d_2d)(1, 2, 2, 2, input.get(), input.get()), "matmul3d");
+  check(CHECKED(lean_torch_bmm4d)(1, 1, 2, 2, 2, input.get(), input.get()), "bmm4d");
+}
+
+void checkedEarlyFailure() {
+  Object invalid(lean_mk_string("not a tensor"), lean_dec), dims(shape({2}), lean_dec);
+  Object target(shape({2}), lean_dec), axes(some(shape({0})), lean_dec);
+  Object expanded(CHECKED(lean_torch_expand)(retain(dims.get()), invalid.get(), retain(target.get())), lean_dec);
+  exceptError(expanded.get(), "borrowTensor");
+  Object reduced(CHECKED(lean_torch_sum)(retain(dims.get()), invalid.get(), retain(axes.get()), 0), lean_dec);
+  exceptError(reduced.get(), "borrowTensor");
+  require(invalid->m_rc == 1 && dims->m_rc == 1 && target->m_rc == 1 && axes->m_rc == 1,
+    "checked early failure leaked owned parameters or changed borrowed argument");
+}
+
+void checkedExceptionKinds() {
+  static_assert(noexcept(tyr::checkedCall("test", []() -> lean_object* { return lean_box(0); })));
+  Object owned(shape({2}), lean_dec);
+  auto check = [&](int kind) {
+    Object result(tyr::checkedCall("firewall", [&]() -> lean_object* {
+      Object transferred(retain(owned.get()), lean_dec);
+      if (kind == 0) TORCH_CHECK(false, "libtorch test error");
+      if (kind == 1) throw std::runtime_error("standard test error");
+      throw 7;
+    }), lean_dec);
+    exceptError(result.get(), kind == 0 ? "libtorch test error" :
+      kind == 1 ? "standard test error" : "unknown native exception");
+    require(owned->m_rc == 1, "Exception firewall failed to unwind native ownership guards");
+  };
+  for (int kind : {0, 1, 2}) check(kind);
+}
+
+void checkedComplexDivision() {
+  auto real = full({2}, 3);
+  auto complex = cast(real.get(), "Complex32");
+  Object result(CHECKED(lean_torch_div)(shape({2}), complex.get(), complex.get()), lean_dec);
+  exceptError(result.get(), "ComplexHalf");
+}
+
+void checkedMixedMatrix() {
+  auto real = full({2, 2}, 3);
+  auto other = cast(real.get(), "Float64");
+  Object result(CHECKED(lean_torch_mm)(2, 2, 2, real.get(), other.get()), lean_dec);
+  exceptError(result.get(), "dtype");
+}
+
+using Unary = lean_object* (*)(lean_object*, lean_object*);
+void checkedUnary(Unary operation, const char* context, bool invalid) {
+  auto input = full({2}, 1);
+  Object bad(lean_mk_string("not a tensor"), lean_dec), dims(shape({2}), lean_dec);
+  Object result(operation(retain(dims.get()), invalid ? bad.get() : input.get()), lean_dec);
+  if (invalid) exceptError(result.get(), context);
+  else {
+    Object array(lean_torch_tensor_to_float_array_dynamic(exceptValue(result.get())), lean_dec);
+    require(lean_io_result_is_ok(array.get()), "Checked unary success has invalid tensor payload");
+    auto* data = lean_io_result_get_value(array.get());
+    require(lean_array_size(data) == 2 && std::isfinite(lean_unbox_float(lean_array_get_core(data, 0))),
+      "Checked unary returned wrong shape or invalid values for unit input");
+  }
+  require(dims->m_rc == 1 && input->m_rc == 1 && bad->m_rc == 1, "Checked unary ownership imbalance");
+}
+
+void checkedMaximum(bool nanLeft, bool nanRight) {
+  auto a = full({2}, nanLeft ? std::numeric_limits<double>::quiet_NaN() : 2);
+  auto b = full({2}, nanRight ? std::numeric_limits<double>::quiet_NaN() : 3);
+#ifdef TYR_CHECKED_BASELINE
+  Object condition(lean_torch_gt(shape({2}), a.get(), b.get()), lean_dec);
+  Object result(lean_torch_where(shape({2}), condition.get(), a.get(), b.get()), lean_dec);
+  auto* tensor = result.get();
+#else
+  Object result(lean_torch_maximum_checked(shape({2}), a.get(), b.get()), lean_dec);
+  auto* tensor = exceptValue(result.get());
+#endif
+  Object array(lean_torch_tensor_to_float_array_dynamic(tensor), lean_dec);
+  require(lean_io_result_is_ok(array.get()), "Could not inspect maximum result");
+  auto* data = lean_io_result_get_value(array.get());
+  require(lean_array_size(data) == 2, "maximum changed shape");
+  const auto value = lean_unbox_float(lean_array_get_core(data, 0));
+  require((nanLeft || nanRight) ? std::isnan(value) : value == 3,
+    "maximum must propagate NaN from either operand");
+}
+
+void checkedUnaryParameterErrors() {
+  auto input = full({2}, 1);
+  Object dims(shape({2}), lean_dec);
+  Object softmax(CHECKED(lean_torch_tensor_softmax)(retain(dims.get()), input.get(), 9), lean_dec);
+  exceptError(softmax.get(), "softmax");
+  Object logSoftmax(CHECKED(lean_torch_log_softmax)(input.get(), 9), lean_dec);
+  exceptError(logSoftmax.get(), "logSoftmax");
+  auto complex = cast(input.get(), "Complex64");
+  Object gelu(CHECKED(lean_torch_tensor_gelu)(retain(dims.get()), complex.get()), lean_dec);
+  exceptError(gelu.get(), "gelu");
+  auto fp8 = cast(input.get(), "Float8E4M3FN");
+  Object pow(CHECKED(lean_torch_pow)(retain(dims.get()), fp8.get(), 2), lean_dec);
+  exceptError(pow.get(), "pow");
+  require(dims->m_rc == 1 && input->m_rc == 1, "Checked parameterized unary ownership imbalance");
+}
+
+void checkedComparison(Binary operation, const char* context, bool invalid) {
+  auto a = full({2}, 6), b = full({invalid ? 3u : 2u}, 2);
+  Object dims(shape({2}), lean_dec);
+  Object result(operation(retain(dims.get()), a.get(), b.get()), lean_dec);
+  if (invalid) exceptError(result.get(), context);
+  else values(exceptValue(result.get()), 2, std::string(context) == "lt" ? 0 : 1);
+  require(dims->m_rc == 1 && a->m_rc == 1 && b->m_rc == 1, "Checked comparison ownership imbalance");
+}
+
+void checkedCatPair(bool invalid) {
+  auto a = full({2, 2}, 3), b = full({invalid ? 3u : 2u, 2}, 3);
+  Object first(shape({2, 2}), lean_dec), second(shape({invalid ? 3u : 2u, 2}), lean_dec);
+  Object result(CHECKED(lean_torch_cat2)(retain(first.get()), retain(second.get()), a.get(), b.get(),
+    lean_int64_to_int(1)), lean_dec);
+  if (invalid) exceptError(result.get(), "cat");
+  else values(exceptValue(result.get()), 8, 3);
+  require(first->m_rc == 1 && second->m_rc == 1 && a->m_rc == 1 && b->m_rc == 1,
+    "Checked pair concatenation ownership imbalance");
+}
+
+#ifndef TYR_CHECKED_BASELINE
+void checkedRMS(bool invalid) {
+  auto input = full({2, 2}, 3), weight = full({invalid ? 3u : 2u}, 2);
+  Object dims(shape({2, 2}), lean_dec), weightDims(shape({invalid ? 3u : 2u}), lean_dec);
+  Object result(lean_torch_rms_norm_weighted_checked(retain(dims.get()), retain(weightDims.get()),
+    input.get(), weight.get(), 0), lean_dec);
+  if (invalid) exceptError(result.get(), "rmsNormWeighted");
+  else values(exceptValue(result.get()), 4, 2);
+  require(dims->m_rc == 1 && weightDims->m_rc == 1 && input->m_rc == 1 && weight->m_rc == 1,
+    "checked weighted RMS ownership imbalance");
+}
+
+void checkedLinalgFailures() {
+  Object input(lean_torch_full_int(shape({2, 2}), 3), lean_dec);
+  Object rows(lean_torch_row_norms_checked(2, 2, input.get()), lean_dec);
+  exceptError(rows.get(), "rowNorms");
+  Object svd(lean_torch_svd_checked(2, 2, input.get()), lean_dec);
+  exceptError(svd.get(), "svd");
+  Object svdvals(lean_torch_svdvals_checked(2, 2, input.get()), lean_dec);
+  exceptError(svdvals.get(), "svdvals");
+  Object l2(lean_torch_l2_norm_checked(4, input.get()), lean_dec);
+  exceptError(l2.get(), "l2Norm");
+  Object frob(lean_torch_frobenius_norm_checked(2, 2, input.get()), lean_dec);
+  exceptError(frob.get(), "frobeniusNorm");
+  Object max(lean_torch_max_row_norm_checked(2, 2, input.get()), lean_dec);
+  exceptError(max.get(), "maxRowNorm");
+  auto singular = full({2, 2}, 0);
+  Object log(lean_torch_matrix_log_checked(2, singular.get()), lean_dec);
+  exceptError(log.get(), "matrixLog");
+}
+#endif
 } // namespace
 
 int main() {
@@ -222,6 +490,67 @@ int main() {
   run("transpose/axis-error", [] { transpose(true); });
   run("transpose/wrapped-axis-error", [] { transpose(false, true); });
   run("transpose/scalar-success", transposeScalar);
+  run("checked/expand-error", [] { checkedExpand(true); });
+  run("checked/expand-success", [] { checkedExpand(false); });
+  run("checked/cat-error", [] { checkedCat(true); });
+  run("checked/cat-success", [] { checkedCat(false); });
+  run("checked/sum-axis-error", [] { checkedReduction(CHECKED(lean_torch_sum), "sum", true); });
+  run("checked/sum-success", [] { checkedReduction(CHECKED(lean_torch_sum), "sum", false); });
+  run("checked/mean-axis-error", [] { checkedReduction(CHECKED(lean_torch_mean), "mean", true); });
+  run("checked/mean-integral-error", [] { checkedReduction(CHECKED(lean_torch_mean), "mean", false, true); });
+  run("checked/mean-success", [] { checkedReduction(CHECKED(lean_torch_mean), "mean", false); });
+  run("checked/max-empty-error", [] { checkedMax(true); });
+  run("checked/max-success", [] { checkedMax(false); });
+  run("checked/relu-complex-error", [] { checkedRelu(true); });
+  run("checked/relu-success", [] { checkedRelu(false); });
+  for (bool invalid : {false, true}) {
+    run(invalid ? "checked/add-error" : "checked/add-success", [&] { checkedBinary(CHECKED(lean_torch_tensor_add), "add", invalid); });
+    run(invalid ? "checked/sub-error" : "checked/sub-success", [&] { checkedBinary(CHECKED(lean_torch_tensor_sub), "sub", invalid); });
+    run(invalid ? "checked/mul-error" : "checked/mul-success", [&] { checkedBinary(CHECKED(lean_torch_tensor_mul), "mul", invalid); });
+    run(invalid ? "checked/div-error" : "checked/div-success", [&] { checkedBinary(CHECKED(lean_torch_div), "div", invalid); });
+    run(invalid ? "checked/mulTensorScalar-error" : "checked/mulTensorScalar-success", [&] { checkedBinary(CHECKED(lean_torch_mul_tensor_scalar), "mulTensorScalar", invalid); });
+    run(invalid ? "checked/addScalar-error" : "checked/addScalar-success", [&] { checkedScalar(CHECKED(lean_torch_add_scalar), "addScalar", invalid); });
+    run(invalid ? "checked/subScalar-error" : "checked/subScalar-success", [&] { checkedScalar(CHECKED(lean_torch_sub_scalar), "subScalar", invalid); });
+    run(invalid ? "checked/mulScalar-error" : "checked/mulScalar-success", [&] { checkedScalar(CHECKED(lean_torch_mul_scalar), "mulScalar", invalid); });
+    run(invalid ? "checked/divScalar-error" : "checked/divScalar-success", [&] { checkedScalar(CHECKED(lean_torch_div_scalar), "divScalar", invalid); });
+    run(invalid ? "checked/where-error" : "checked/where-success", [&] { checkedWhere(invalid); });
+    run(invalid ? "checked/matrices-kernel-error" : "checked/matrices-success", [&] { checkedMatrices(invalid); });
+  }
+  run("checked/owned-arguments-early-error", checkedEarlyFailure);
+  run("checked/exception-kinds", checkedExceptionKinds);
+  run("checked/Complex32-division-kernel-error", checkedComplexDivision);
+  run("checked/mm-mixed-dtype-error", checkedMixedMatrix);
+  for (bool invalid : {false, true}) {
+    run(invalid ? "checked/exp-error" : "checked/exp-success", [&] { checkedUnary(CHECKED(lean_torch_tensor_exp), "exp", invalid); });
+    run(invalid ? "checked/sqrt-error" : "checked/sqrt-success", [&] { checkedUnary(CHECKED(lean_torch_sqrt), "sqrt", invalid); });
+    run(invalid ? "checked/rsqrt-error" : "checked/rsqrt-success", [&] { checkedUnary(CHECKED(lean_torch_rsqrt), "rsqrt", invalid); });
+    run(invalid ? "checked/sigmoid-error" : "checked/sigmoid-success", [&] { checkedUnary(CHECKED(lean_torch_tensor_sigmoid), "sigmoid", invalid); });
+    run(invalid ? "checked/tanh-error" : "checked/tanh-success", [&] { checkedUnary(CHECKED(lean_torch_tensor_tanh), "tanh", invalid); });
+    run(invalid ? "checked/gelu-error" : "checked/gelu-success", [&] { checkedUnary(CHECKED(lean_torch_tensor_gelu), "gelu", invalid); });
+    run(invalid ? "checked/silu-error" : "checked/silu-success", [&] { checkedUnary(CHECKED(lean_torch_tensor_silu), "silu", invalid); });
+    run(invalid ? "checked/log-error" : "checked/log-success", [&] { checkedUnary(CHECKED(lean_torch_tensor_log), "log", invalid); });
+    run(invalid ? "checked/log10-error" : "checked/log10-success", [&] { checkedUnary(CHECKED(lean_torch_tensor_log10), "log10", invalid); });
+    run(invalid ? "checked/sin-error" : "checked/sin-success", [&] { checkedUnary(CHECKED(lean_torch_tensor_sin), "sin", invalid); });
+    run(invalid ? "checked/cos-error" : "checked/cos-success", [&] { checkedUnary(CHECKED(lean_torch_tensor_cos), "cos", invalid); });
+    run(invalid ? "checked/atan-error" : "checked/atan-success", [&] { checkedUnary(CHECKED(lean_torch_tensor_atan), "atan", invalid); });
+    run(invalid ? "checked/elu-error" : "checked/elu-success", [&] { checkedUnary(CHECKED(lean_torch_tensor_elu), "elu", invalid); });
+  }
+  run("checked/maximum-success", [] { checkedMaximum(false, false); });
+  run("checked/maximum-left-nan", [] { checkedMaximum(true, false); });
+  run("checked/maximum-right-nan", [] { checkedMaximum(false, true); });
+  run("checked/unary-parameter-errors", checkedUnaryParameterErrors);
+  for (bool invalid : {false, true}) {
+    run(invalid ? "checked/gt-error" : "checked/gt-success", [&] { checkedComparison(CHECKED(lean_torch_gt), "gt", invalid); });
+    run(invalid ? "checked/lt-error" : "checked/lt-success", [&] { checkedComparison(CHECKED(lean_torch_lt), "lt", invalid); });
+    run(invalid ? "checked/ge-error" : "checked/ge-success", [&] { checkedComparison(CHECKED(lean_torch_ge), "ge", invalid); });
+    run(invalid ? "checked/logicalAnd-error" : "checked/logicalAnd-success", [&] { checkedComparison(CHECKED(lean_torch_logical_and), "logicalAnd", invalid); });
+    run(invalid ? "checked/cat-pair-error" : "checked/cat-pair-success", [&] { checkedCatPair(invalid); });
+  }
+#ifndef TYR_CHECKED_BASELINE
+  run("checked/rms-success", [] { checkedRMS(false); });
+  run("checked/rms-shape-error", [] { checkedRMS(true); });
+  run("checked/linalg-errors", checkedLinalgFailures);
+#endif
   std::cout << failures << " native error-carrier failures\n";
   return failures == 0 ? 0 : 1;
 }

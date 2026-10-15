@@ -293,3 +293,108 @@ cannot export the temporary leaves; only detached derivatives are returned. -/
     (inputs : @& Array RawTensor) (f : Array RawTensor → RawTensor) :
     Except String (Array RawTensor)
 end torch.RawTensor
+
+namespace torch.RawTensor
+/-- Recover native execution failures without unwinding across Lean frames. -/
+@[extern "lean_torch_tensor_add_checked"] opaque addChecked (shape : Shape) (a b : @& RawTensor) : Except String RawTensor
+
+@[extern "lean_torch_tensor_sub_checked"] opaque subChecked (shape : Shape) (a b : @& RawTensor) : Except String RawTensor
+
+@[extern "lean_torch_tensor_mul_checked"] opaque mulChecked (shape : Shape) (a b : @& RawTensor) : Except String RawTensor
+
+@[extern "lean_torch_div_checked"] opaque divChecked (shape : Shape) (a b : @& RawTensor) : Except String RawTensor
+
+@[extern "lean_torch_tensor_relu_checked"] opaque reluChecked (shape : Shape) (t : @& RawTensor) : Except String RawTensor
+
+@[extern "lean_torch_abs_checked"] opaque absChecked (shape : Shape) (t : @& RawTensor) : Except String RawTensor
+
+@[extern "lean_torch_expand_checked"] opaque expandChecked (shape : Shape) (t : @& RawTensor) (target : Array UInt64) : Except String RawTensor
+
+@[extern "lean_torch_reshape_exact_checked"] opaque reshapeChecked (shape : Shape) (t : @& RawTensor) (target : @& Shape) : Except String RawTensor
+
+@[extern "lean_torch_sum_checked"] opaque sumChecked (shape : Shape) (t : @& RawTensor) (dims : Option (Array UInt64)) (keepdim : Bool) : Except String RawTensor
+
+@[extern "lean_torch_mean_checked"] opaque meanChecked (shape : Shape) (t : @& RawTensor) (dims : Option (Array UInt64)) (keepdim : Bool) : Except String RawTensor
+
+@[extern "lean_torch_max_all_checked"] opaque maxAllChecked (t : @& RawTensor) : Except String RawTensor
+
+@[extern "lean_torch_where_checked"] opaque whereSelectChecked (shape : Shape) (condition a b : @& RawTensor) : Except String RawTensor
+
+@[extern "lean_torch_matmul_checked"] opaque matmulChecked (s1 s2 : Shape) (a b : @& RawTensor) : Except String RawTensor
+
+@[extern "lean_torch_mm_checked"] opaque mmChecked (m n k : UInt64) (a b : @& RawTensor) : Except String RawTensor
+
+@[extern "lean_torch_linear_checked"] opaque linearChecked (m n b : UInt64) (a b : @& RawTensor) : Except String RawTensor
+
+@[extern "lean_torch_linear3d_checked"] opaque linear3dChecked (batch seq inDim outDim : UInt64) (a b : @& RawTensor) : Except String RawTensor
+
+@[extern "lean_torch_matmul3d_2d_checked"] opaque matmul3dChecked (batch seq k n : UInt64) (a b : @& RawTensor) : Except String RawTensor
+
+@[extern "lean_torch_bmm4d_checked"] opaque bmm4dChecked (b h m k n : UInt64) (a b : @& RawTensor) : Except String RawTensor
+
+@[extern "lean_torch_row_norms_checked"] opaque rowNormsChecked (m n : UInt64) (t : @& RawTensor) : Except String RawTensor
+
+@[extern "lean_torch_svd_checked"] opaque svdChecked (m n : UInt64) (t : @& RawTensor) : Except String (RawTensor × RawTensor × RawTensor)
+
+@[extern "lean_torch_svdvals_checked"] opaque svdvalsChecked (m n : UInt64) (t : @& RawTensor) : Except String RawTensor
+
+@[extern "lean_torch_add_scalar_checked"] opaque addScalarChecked (shape : Shape) (t : @& RawTensor) (value : Float) : Except String RawTensor
+
+@[extern "lean_torch_sub_scalar_checked"] opaque subScalarChecked (shape : Shape) (t : @& RawTensor) (value : Float) : Except String RawTensor
+
+@[extern "lean_torch_mul_scalar_checked"] opaque mulScalarChecked (shape : Shape) (t : @& RawTensor) (value : Float) : Except String RawTensor
+
+@[extern "lean_torch_div_scalar_checked"] opaque divScalarChecked (shape : Shape) (t : @& RawTensor) (value : Float) : Except String RawTensor
+
+@[extern "lean_torch_l2_norm_checked"] opaque l2NormChecked (n : UInt64) (t : @& RawTensor) : Except String Float
+
+@[extern "lean_torch_frobenius_norm_checked"] opaque frobeniusNormChecked (m n : UInt64) (t : @& RawTensor) : Except String Float
+
+@[extern "lean_torch_max_row_norm_checked"] opaque maxRowNormChecked (m n : UInt64) (t : @& RawTensor) : Except String Float
+
+@[extern "lean_torch_rms_norm_weighted_checked"] opaque rmsNormWeightedChecked (shape weightShape : Shape)
+    (x weight : @& RawTensor) (eps : Float := 1e-6) : Except String RawTensor
+
+@[extern "lean_torch_matrix_log_checked"] opaque matrixLogChecked (n : UInt64) (t : @& RawTensor) : Except String RawTensor
+
+def sumAllChecked (shape : Shape) (t : RawTensor) : Except String RawTensor := sumChecked shape t none false
+
+def meanAllChecked (shape : Shape) (t : RawTensor) : Except String RawTensor := meanChecked shape t none false
+end torch.RawTensor
+
+namespace torch.RawTensor
+@[extern "lean_torch_tensor_exp_checked"] opaque expChecked (shape : Shape) (t : @& RawTensor) : Except String RawTensor
+
+@[extern "lean_torch_sqrt_checked"] opaque sqrtChecked (shape : Shape) (t : @& RawTensor) : Except String RawTensor
+
+@[extern "lean_torch_rsqrt_checked"] opaque rsqrtChecked (shape : Shape) (t : @& RawTensor) : Except String RawTensor
+
+@[extern "lean_torch_tensor_sigmoid_checked"] opaque sigmoidChecked (shape : Shape) (t : @& RawTensor) : Except String RawTensor
+
+@[extern "lean_torch_tensor_tanh_checked"] opaque tanhChecked (shape : Shape) (t : @& RawTensor) : Except String RawTensor
+
+@[extern "lean_torch_tensor_gelu_checked"] opaque geluChecked (shape : Shape) (t : @& RawTensor) : Except String RawTensor
+
+@[extern "lean_torch_tensor_silu_checked"] opaque siluChecked (shape : Shape) (t : @& RawTensor) : Except String RawTensor
+
+@[extern "lean_torch_pow_checked"] opaque powChecked (shape : Shape) (t : @& RawTensor) (exponent : Float) : Except String RawTensor
+
+@[extern "lean_torch_tensor_atan_checked"] opaque atanChecked (shape : Shape) (t : @& RawTensor) : Except String RawTensor
+
+@[extern "lean_torch_tensor_softmax_checked"] opaque softmaxChecked (shape : Shape) (t : @& RawTensor) (dim : Int32 := -1) : Except String RawTensor
+
+@[extern "lean_torch_log_softmax_checked"] opaque logSoftmaxChecked (t : @& RawTensor) (dim : Int32 := -1) : Except String RawTensor
+end torch.RawTensor
+
+namespace torch.RawTensor
+@[extern "lean_torch_maximum_checked"] opaque maximumChecked (shape : Shape)
+    (a b : @& RawTensor) : Except String RawTensor
+end torch.RawTensor
+
+namespace torch.RawTensor
+@[extern "lean_torch_gt_checked"] opaque gtChecked (shape : Shape) (a b : @& RawTensor) : Except String RawTensor
+
+@[extern "lean_torch_logical_and_checked"] opaque logicalAndChecked (shape : Shape) (a b : @& RawTensor) : Except String RawTensor
+
+@[extern "lean_torch_cat2_checked"] opaque catChecked (s1 s2 : Shape) (a b : @& RawTensor) (dim : Int) : Except String RawTensor
+end torch.RawTensor

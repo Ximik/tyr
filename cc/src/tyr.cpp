@@ -92,6 +92,7 @@
 #include <ATen/ATen.h>
 #include "tyr_attention.h"
 #include "tyr_tensor_metadata.h"
+#include "tyr_checked_result.h"
 
 #include <ATen/Generator.h>
 #include <ATen/Context.h>
@@ -1881,27 +1882,14 @@ lean_object* lean_torch_mm(uint64_t m, uint64_t n, uint64_t k, b_lean_obj_arg in
 
 // Tensor operations (essential for attention mechanisms)
 lean_object* lean_torch_transpose(lean_obj_arg s, b_lean_obj_arg input, uint64_t dim0, uint64_t dim1) {
-  lean_dec(s);
-  auto error = [](const std::string& message) {
-    auto* result = lean_alloc_ctor(0, 1, 0);
-    lean_ctor_set(result, 0, lean_mk_string(("transpose: " + message).c_str()));
-    return result;
-  };
-  try {
+  return tyr::checkedCall("transpose", [&] {
+    lean_dec(s);
     auto input_ = borrowTensor(input);
-    // libtorch accepts axis zero on a scalar, but UInt64 axes must never wrap
-    // into its negative-axis convention before validation.
+    // libtorch accepts axis zero on a scalar; reject wrapped UInt64 axes.
     const auto axes = static_cast<uint64_t>(std::max<int64_t>(1, input_.dim()));
     TORCH_CHECK(dim0 < axes && dim1 < axes, "dimension out of range");
-    auto result_ = torch::transpose(input_, static_cast<int64_t>(dim0), static_cast<int64_t>(dim1));
-    auto* result = lean_alloc_ctor(1, 1, 0);
-    lean_ctor_set(result, 0, fromTorchTensor(result_));
-    return result;
-  } catch (const c10::Error& e) {
-    return error(e.what_without_backtrace());
-  } catch (const std::exception& e) {
-    return error(e.what());
-  }
+    return fromTorchTensor(torch::transpose(input_, static_cast<int64_t>(dim0), static_cast<int64_t>(dim1)));
+  });
 }
 
 lean_object* lean_torch_cat(lean_obj_arg /*s*/, b_lean_obj_arg tensors, lean_obj_arg dim_obj) {
@@ -3658,26 +3646,14 @@ extern "C" LEAN_EXPORT lean_object* lean_torch_cast_dtype(
 
 extern "C" LEAN_EXPORT lean_object* lean_torch_cast_dtype_checked(
     lean_obj_arg shape, b_lean_obj_arg tensor, b_lean_obj_arg tag) {
-  OwnedLeanObject shape_owner(shape, lean_dec);
-  auto error = [](const std::string& message) {
-    auto* result = lean_alloc_ctor(0, 1, 0);
-    lean_ctor_set(result, 0, lean_mk_string(("castDType: " + message).c_str()));
-    return result;
-  };
-  try {
+  return tyr::checkedCall("castDType", [&] {
+    OwnedLeanObject shape_owner(shape, lean_dec);
     auto source = borrowTensor(tensor);
     TORCH_CHECK(source.sizes().vec() == getShape(shape), "source tensor shape mismatch");
     const auto dtype = parseDtype(lean_string_cstr(tag));
     TORCH_CHECK(dtype.has_value(), "Unsupported target dtype tag: ", lean_string_cstr(tag));
-    auto converted = source.to(*dtype);
-    auto* result = lean_alloc_ctor(1, 1, 0);
-    lean_ctor_set(result, 0, fromTorchTensor(std::move(converted)));
-    return result;
-  } catch (const c10::Error& e) {
-    return error(e.what_without_backtrace());
-  } catch (const std::exception& e) {
-    return error(e.what());
-  }
+    return fromTorchTensor(source.to(*dtype));
+  });
 }
 
 extern "C" LEAN_EXPORT lean_object* lean_torch_convert_tensor(
@@ -5903,6 +5879,265 @@ double lean_torch_frobenius_norm(
 ) {
   auto A = borrowTensor(A_obj);
   return A.norm().item<double>();
+}
+
+// Checked native entry points. Legacy pure implementations above are called
+// entirely inside the native firewall; they never unwind through Lean code.
+lean_object* lean_torch_tensor_add_checked(lean_obj_arg s, b_lean_obj_arg a, b_lean_obj_arg b) {
+  return tyr::checkedCall("add", [&] { return lean_torch_tensor_add(s, a, b); });
+}
+
+lean_object* lean_torch_tensor_sub_checked(lean_obj_arg s, b_lean_obj_arg a, b_lean_obj_arg b) {
+  return tyr::checkedCall("sub", [&] { return lean_torch_tensor_sub(s, a, b); });
+}
+
+lean_object* lean_torch_tensor_mul_checked(lean_obj_arg s, b_lean_obj_arg a, b_lean_obj_arg b) {
+  return tyr::checkedCall("mul", [&] { return lean_torch_tensor_mul(s, a, b); });
+}
+
+lean_object* lean_torch_div_checked(lean_obj_arg s, b_lean_obj_arg a, b_lean_obj_arg b) {
+  return tyr::checkedCall("div", [&] { return lean_torch_div(s, a, b); });
+}
+
+lean_object* lean_torch_tensor_relu_checked(lean_obj_arg s, b_lean_obj_arg t) {
+  return tyr::checkedCall("relu", [&] { return lean_torch_tensor_relu(s, t); });
+}
+
+lean_object* lean_torch_abs_checked(lean_obj_arg s, b_lean_obj_arg t) {
+  return tyr::checkedCall("abs", [&] { return lean_torch_abs(s, t); });
+}
+
+lean_object* lean_torch_expand_checked(lean_obj_arg s, b_lean_obj_arg t, lean_obj_arg target) {
+  return tyr::checkedCall("expand", [&] { return lean_torch_expand(s, t, target); });
+}
+
+lean_object* lean_torch_reshape_exact_checked(lean_obj_arg s, b_lean_obj_arg t, b_lean_obj_arg target) {
+  return tyr::checkedCall("reshape", [&] { return lean_torch_reshape_exact(s, t, target); });
+}
+
+lean_object* lean_torch_sum_checked(lean_obj_arg s, b_lean_obj_arg t, lean_obj_arg dims, uint8_t keepdim) {
+  return tyr::checkedCall("sum", [&] { return lean_torch_sum(s, t, dims, keepdim); });
+}
+
+lean_object* lean_torch_mean_checked(lean_obj_arg s, b_lean_obj_arg t, lean_obj_arg dims, uint8_t keepdim) {
+  return tyr::checkedCall("mean", [&] { return lean_torch_mean(s, t, dims, keepdim); });
+}
+
+lean_object* lean_torch_max_all_checked(b_lean_obj_arg t) {
+  return tyr::checkedCall("maxAll", [&] { return lean_torch_max_all(t); });
+}
+
+lean_object* lean_torch_where_checked(lean_obj_arg s, b_lean_obj_arg condition, b_lean_obj_arg a, b_lean_obj_arg b) {
+  return tyr::checkedCall("whereSelect", [&] { return lean_torch_where(s, condition, a, b); });
+}
+
+lean_object* lean_torch_matmul_checked(lean_obj_arg s1, lean_obj_arg s2, b_lean_obj_arg a, b_lean_obj_arg b) {
+  return tyr::checkedCall("matmul", [&] { return lean_torch_matmul(s1, s2, a, b); });
+}
+
+lean_object* lean_torch_mm_checked(uint64_t m, uint64_t n, uint64_t k, b_lean_obj_arg a, b_lean_obj_arg b) {
+  return tyr::checkedCall("mm", [&] { return lean_torch_mm(m, n, k, a, b); });
+}
+
+lean_object* lean_torch_linear_checked(uint64_t m, uint64_t n, uint64_t batch, b_lean_obj_arg a, b_lean_obj_arg b) {
+  return tyr::checkedCall("linear", [&] { return lean_torch_linear(m, n, batch, a, b); });
+}
+
+lean_object* lean_torch_linear3d_checked(uint64_t batch, uint64_t seq, uint64_t k, uint64_t n, b_lean_obj_arg a, b_lean_obj_arg b) {
+  return tyr::checkedCall("linear3d", [&] { return lean_torch_linear3d(batch, seq, k, n, a, b); });
+}
+
+lean_object* lean_torch_matmul3d_2d_checked(uint64_t batch, uint64_t seq, uint64_t k, uint64_t n, b_lean_obj_arg a, b_lean_obj_arg b) {
+  return tyr::checkedCall("matmul3d", [&] { return lean_torch_matmul3d_2d(batch, seq, k, n, a, b); });
+}
+
+lean_object* lean_torch_bmm4d_checked(uint64_t batch, uint64_t heads, uint64_t m, uint64_t k, uint64_t n, b_lean_obj_arg a, b_lean_obj_arg b) {
+  return tyr::checkedCall("bmm4d", [&] { return lean_torch_bmm4d(batch, heads, m, k, n, a, b); });
+}
+
+lean_object* lean_torch_row_norms_checked(uint64_t m, uint64_t n, b_lean_obj_arg t) {
+  return tyr::checkedCall("rowNorms", [&] { return lean_torch_row_norms(m, n, t); });
+}
+
+lean_object* lean_torch_svd_checked(uint64_t m, uint64_t n, b_lean_obj_arg t) {
+  return tyr::checkedCall("svd", [&] { return lean_torch_svd(m, n, t); });
+}
+
+lean_object* lean_torch_svdvals_checked(uint64_t m, uint64_t n, b_lean_obj_arg t) {
+  return tyr::checkedCall("svdvals", [&] { return lean_torch_svdvals(m, n, t); });
+}
+
+lean_object* lean_torch_add_scalar_checked(lean_obj_arg s, b_lean_obj_arg t, double value) {
+  return tyr::checkedCall("addScalar", [&] { return lean_torch_add_scalar(s, t, value); });
+}
+
+lean_object* lean_torch_sub_scalar_checked(lean_obj_arg s, b_lean_obj_arg t, double value) {
+  return tyr::checkedCall("subScalar", [&] { return lean_torch_sub_scalar(s, t, value); });
+}
+
+lean_object* lean_torch_mul_scalar_checked(lean_obj_arg s, b_lean_obj_arg t, double value) {
+  return tyr::checkedCall("mulScalar", [&] { return lean_torch_mul_scalar(s, t, value); });
+}
+
+lean_object* lean_torch_div_scalar_checked(lean_obj_arg s, b_lean_obj_arg t, double value) {
+  return tyr::checkedCall("divScalar", [&] { return lean_torch_div_scalar(s, t, value); });
+}
+
+lean_object* lean_torch_l2_norm_checked(uint64_t n, b_lean_obj_arg t) {
+  return tyr::checkedCall("l2Norm", [&] { return lean_box_float(lean_torch_l2_norm(n, t)); });
+}
+
+lean_object* lean_torch_frobenius_norm_checked(uint64_t m, uint64_t n, b_lean_obj_arg t) {
+  return tyr::checkedCall("frobeniusNorm", [&] { return lean_box_float(lean_torch_frobenius_norm(m, n, t)); });
+}
+
+lean_object* lean_torch_max_row_norm_checked(uint64_t m, uint64_t n, b_lean_obj_arg t) {
+  return tyr::checkedCall("maxRowNorm", [&] { return lean_box_float(lean_torch_max_row_norm(m, n, t)); });
+}
+
+lean_object* lean_torch_mul_tensor_scalar_checked(lean_obj_arg s, b_lean_obj_arg input, b_lean_obj_arg scalar) {
+  return tyr::checkedCall("mulTensorScalar", [&] {
+    return lean_torch_mul_tensor_scalar(s, input, scalar);
+  });
+}
+
+lean_object* lean_torch_cat_dyn_checked(b_lean_obj_arg tensors, lean_obj_arg dim) {
+  return tyr::checkedCall("catMany", [&] {
+    OwnedLeanObject dim_owner(dim, lean_dec);
+    TORCH_CHECK(lean_is_array(tensors), "expected array");
+    const auto axis = lean_int64_of_int(dim);
+    OwnedLeanObject roundtrip(lean_int64_to_int(axis), lean_dec);
+    TORCH_CHECK(lean_int_dec_eq(dim, roundtrip.get()), "axis must fit in signed 64 bits");
+    std::vector<torch::Tensor> inputs;
+    for (size_t i = 0; i < lean_array_size(tensors); ++i)
+      inputs.push_back(borrowTensor(lean_array_get_core(tensors, i)));
+    return fromTorchTensor(torch::cat(inputs, axis));
+  });
+}
+
+lean_object* lean_torch_rms_norm_weighted_checked(lean_obj_arg shape, lean_obj_arg weight_shape,
+    b_lean_obj_arg input, b_lean_obj_arg weight, double eps) {
+  return tyr::checkedCall("rmsNormWeighted", [&] {
+    lean_dec(shape);
+    lean_dec(weight_shape);
+    auto xf = borrowTensor(input).to(torch::kFloat32);
+    auto w = borrowTensor(weight);
+    auto variance = torch::mean(xf * xf, {std::max<int64_t>(0, xf.dim() - 1)}, true);
+    return fromTorchTensor((xf * torch::rsqrt(variance + eps)) * w);
+  });
+}
+
+lean_object* lean_torch_matrix_log_checked(uint64_t n, b_lean_obj_arg input) {
+  return tyr::checkedCall("matrixLog", [&] {
+    auto tensor = borrowTensor(input);
+    TORCH_CHECK(at::isFloatingType(tensor.scalar_type()), "requires a real floating dtype");
+    TORCH_CHECK(torch::isfinite(tensor).all().item<bool>(), "requires finite input");
+    auto result = lean_torch_matrix_log(n, input);
+    OwnedLeanObject owner(result, lean_dec);
+    TORCH_CHECK(torch::isfinite(borrowTensor(result)).all().item<bool>(),
+      "matrix logarithm has no finite real result");
+    return owner.release();
+  });
+}
+
+lean_object* lean_torch_tensor_exp_checked(lean_obj_arg s, b_lean_obj_arg t) {
+  return tyr::checkedCall("exp", [&] { return lean_torch_tensor_exp(s, t); });
+}
+
+lean_object* lean_torch_sqrt_checked(lean_obj_arg s, b_lean_obj_arg t) {
+  return tyr::checkedCall("sqrt", [&] { return lean_torch_sqrt(s, t); });
+}
+
+lean_object* lean_torch_rsqrt_checked(lean_obj_arg s, b_lean_obj_arg t) {
+  return tyr::checkedCall("rsqrt", [&] { return lean_torch_rsqrt(s, t); });
+}
+
+lean_object* lean_torch_tensor_sigmoid_checked(lean_obj_arg s, b_lean_obj_arg t) {
+  return tyr::checkedCall("sigmoid", [&] { return lean_torch_tensor_sigmoid(s, t); });
+}
+
+lean_object* lean_torch_tensor_tanh_checked(lean_obj_arg s, b_lean_obj_arg t) {
+  return tyr::checkedCall("tanh", [&] { return lean_torch_tensor_tanh(s, t); });
+}
+
+lean_object* lean_torch_tensor_gelu_checked(lean_obj_arg s, b_lean_obj_arg t) {
+  return tyr::checkedCall("gelu", [&] { return lean_torch_tensor_gelu(s, t); });
+}
+
+lean_object* lean_torch_tensor_silu_checked(lean_obj_arg s, b_lean_obj_arg t) {
+  return tyr::checkedCall("silu", [&] { return lean_torch_tensor_silu(s, t); });
+}
+
+lean_object* lean_torch_pow_checked(lean_obj_arg s, b_lean_obj_arg t, double value) {
+  return tyr::checkedCall("pow", [&] { return lean_torch_pow(s, t, value); });
+}
+
+lean_object* lean_torch_tensor_atan_checked(lean_obj_arg s, b_lean_obj_arg t) {
+  return tyr::checkedCall("atan", [&] { return lean_torch_tensor_atan(s, t); });
+}
+
+lean_object* lean_torch_tensor_softmax_checked(lean_obj_arg s, b_lean_obj_arg t, uint32_t dim) {
+  return tyr::checkedCall("softmax", [&] { return lean_torch_tensor_softmax(s, t, dim); });
+}
+
+lean_object* lean_torch_log_softmax_checked(b_lean_obj_arg t, uint32_t dim) {
+  return tyr::checkedCall("logSoftmax", [&] { return lean_torch_log_softmax(t, dim); });
+}
+
+lean_object* lean_torch_tensor_log_checked(lean_obj_arg s, b_lean_obj_arg t) {
+  return tyr::checkedCall("log", [&] { return lean_torch_tensor_log(s, t); });
+}
+
+lean_object* lean_torch_tensor_log10_checked(lean_obj_arg s, b_lean_obj_arg t) {
+  return tyr::checkedCall("log10", [&] { return lean_torch_tensor_log10(s, t); });
+}
+
+lean_object* lean_torch_tensor_sin_checked(lean_obj_arg s, b_lean_obj_arg t) {
+  return tyr::checkedCall("sin", [&] { return lean_torch_tensor_sin(s, t); });
+}
+
+lean_object* lean_torch_tensor_cos_checked(lean_obj_arg s, b_lean_obj_arg t) {
+  return tyr::checkedCall("cos", [&] { return lean_torch_tensor_cos(s, t); });
+}
+
+lean_object* lean_torch_tensor_elu_checked(lean_obj_arg s, b_lean_obj_arg t) {
+  return tyr::checkedCall("elu", [&] { return lean_torch_tensor_elu(s, t); });
+}
+
+lean_object* lean_torch_maximum_checked(lean_obj_arg s, b_lean_obj_arg a, b_lean_obj_arg b) {
+  return tyr::checkedCall("maximum", [&] {
+    lean_dec(s);
+    return fromTorchTensor(torch::maximum(borrowTensor(a), borrowTensor(b)));
+  });
+}
+
+lean_object* lean_torch_gt_checked(lean_obj_arg s, b_lean_obj_arg a, b_lean_obj_arg b) {
+  return tyr::checkedCall("gt", [&] { return lean_torch_gt(s, a, b); });
+}
+
+lean_object* lean_torch_logical_and_checked(lean_obj_arg s, b_lean_obj_arg a, b_lean_obj_arg b) {
+  return tyr::checkedCall("logicalAnd", [&] { return lean_torch_logical_and(s, a, b); });
+}
+
+lean_object* lean_torch_cat2_checked(lean_obj_arg s1, lean_obj_arg s2,
+    b_lean_obj_arg a, b_lean_obj_arg b, lean_obj_arg dim) {
+  return tyr::checkedCall("cat", [&] {
+    lean_dec(s1);
+    lean_dec(s2);
+    OwnedLeanObject dim_owner(dim, lean_dec);
+    const auto axis = lean_int64_of_int(dim);
+    OwnedLeanObject roundtrip(lean_int64_to_int(axis), lean_dec);
+    TORCH_CHECK(lean_int_dec_eq(dim, roundtrip.get()), "axis must fit in signed 64 bits");
+    return fromTorchTensor(torch::cat({borrowTensor(a), borrowTensor(b)}, axis));
+  });
+}
+
+lean_object* lean_torch_lt_checked(lean_obj_arg s, b_lean_obj_arg a, b_lean_obj_arg b) {
+  return tyr::checkedCall("lt", [&] { return lean_torch_lt(s, a, b); });
+}
+
+lean_object* lean_torch_ge_checked(lean_obj_arg s, b_lean_obj_arg a, b_lean_obj_arg b) {
+  return tyr::checkedCall("ge", [&] { return lean_torch_ge(s, a, b); });
 }
 
 }

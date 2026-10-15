@@ -94,3 +94,25 @@ namespace torch.RawTensor
     (tokens : @& RawTensor) (token : Int64) : IO RawTensor
 
 end torch.RawTensor
+
+namespace torch.RawTensor
+@[extern "lean_torch_cat_dyn_checked"] opaque catManyChecked (tensors : @& Array RawTensor) (dim : Int) : Except String RawTensor
+end torch.RawTensor
+
+namespace torch.RawTensor
+@[extern "lean_torch_tensor_log_checked"] opaque logChecked (shape : Shape) (input : @& RawTensor) : Except String RawTensor
+
+@[extern "lean_torch_tensor_log10_checked"] opaque log10Checked (shape : Shape) (input : @& RawTensor) : Except String RawTensor
+
+@[extern "lean_torch_tensor_sin_checked"] opaque sinChecked (shape : Shape) (t : @& RawTensor) : Except String RawTensor
+
+@[extern "lean_torch_tensor_cos_checked"] opaque cosChecked (shape : Shape) (t : @& RawTensor) : Except String RawTensor
+
+@[extern "lean_torch_tensor_elu_checked"] opaque eluChecked (shape : Shape) (input : @& RawTensor) : Except String RawTensor
+end torch.RawTensor
+
+namespace torch.RawTensor
+@[extern "lean_torch_lt_checked"] opaque ltChecked (shape : Shape) (a b : @& RawTensor) : Except String RawTensor
+
+@[extern "lean_torch_ge_checked"] opaque geChecked (shape : Shape) (a b : @& RawTensor) : Except String RawTensor
+end torch.RawTensor
