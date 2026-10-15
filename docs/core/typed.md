@@ -257,6 +257,43 @@ use the checked variants. This contract applies to those adapters, not every
 raw native declaration. Static rules and metadata checks do not prove an extern's
 implementation correct.
 
+`argmax`, `maxLast3d`, and `topKLast2d` require `DType.Ordered` evidence.
+`argmax` also requires a valid, nonempty reduction axis; scalar input permits
+axis zero. `maxLast3d` requires a nonempty last axis, while `topKLast2d` requires
+`k ≤ cols` and permits `k = 0`. Concrete dimensions usually discharge these
+proofs automatically. For runtime dimensions or dynamic dtypes, the matching
+`?` variants return domain, range, and native errors through `Except String`.
+The `argmaxChecked`, `maxLast3dChecked`, and `topKLast2dChecked` conveniences
+perform the same runtime checks and use Lean's panic fallback on failure.
+Selected values retain the actual input dtype; indices have dtype Int64.
+
+`crossEntropy` and `crossEntropyNone` require `DType.RealFloating` for logits
+of shape `[N, C]` and Int64 targets of shape `[N]` on the same device.
+The first returns a scalar mean loss; the second returns one loss per row.
+Their checked native boundary validates labels before loss dispatch: each label
+must be in `[0, C)` or equal the default ignored label `-100`.
+`crossEntropy?` and `crossEntropyNone?` recover dtype, label, and native failures.
+For dynamic dtype indices, `crossEntropyChecked` and `crossEntropyNoneChecked`
+provide pure runtime-checked conveniences with the same panic fallback.
+`ChatSFT.maskedCrossEntropy?` retains errors through reshaping, mask arithmetic,
+reduction, and scalar extraction. Its mask must have a real numeric or Bool
+dtype; the pure wrapper requires that domain as type-level evidence.
+
+`indexSelect?` validates vector indices before native indexing, including on
+accelerators, and preserves the data dtype and device. `TokenBytes` uses it
+through IO so invalid token IDs return errors. `sumAll?` and `item?` retain
+reduction and host-scalar conversion failures for recoverable callers.
+
+`conv1d?`, `conv2dBias?`, `conv1dGroups?`, and `convTranspose1d?` check actual
+dtype and device equality across input, weight, and any bias before invoking
+checked native kernels. Convolution does not implicitly promote its operands,
+including when their dtype indices are dynamic. Invalid convolution parameters
+and unavailable kernels return `Except.error`; successful outputs are checked
+against the computed spatial shape and input dtype/device. The corresponding
+names without `?` use Lean's panic fallback on failure.
+The `conv2dBias` result shape broadcasts singleton stride, padding, and dilation
+arrays across both spatial axes, matching the native operation.
+
 After building the dtype modules, run `bash scripts/test_dtype_promotion.sh`
 to compare all 46² promotion pairs and all four scalar/vector rank combinations
 against an independently enumerated native runtime inventory. The harness also

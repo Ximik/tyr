@@ -173,10 +173,15 @@ hardware qualification.
 ### Error strategy
 
 Native result carriers must match the Lean declaration on every path.
-`scripts/check_ffi_recovery.py` inventories recoverable RawTensor declarations
-and requires their native implementations to enter the common exception guard
-before doing C++ work. The CPU tooling job runs this check alongside ABI and
-runtime regressions; fixed platform-unavailable stubs are checked separately.
+`scripts/check_ffi_recovery.py` inventories recoverable declarations in
+`Tyr/RawTensor.lean`, its submodules, `Tyr/Basic.lean`, and the Parquet FFI in
+`Tyr/Data/Pretraining.lean`. It requires every native implementation, including
+inactive platform branches, to enter the common exception guard before doing
+C++ work. The CPU tooling job runs this check alongside ABI and runtime
+regressions; reviewed fixed platform-unavailable stubs are checked separately.
+Both Arrow-enabled and Arrow-disabled Parquet implementations use the guard,
+including error-message construction. Other native subsystems remain outside
+this source gate's reviewed scope.
 `RawTensor.flashAttention` and `RawTensor.transpose` return
 `Except String RawTensor`; their typed `Tensor.flashAttention?` and
 `Tensor.transpose?` adapters preserve recoverable failures and check successful
@@ -197,6 +202,25 @@ spectral and nuclear norms also expose checked `?` variants for dtype, backend,
 and factorization failures. The checked expansion, concatenation, and reduction
 families follow the same result-carrier contract. Their pure convenience
 wrappers use Lean's panic fallback after receiving an error.
+
+Selection has separate static and runtime entry points. `argmax`, `maxLast3d`,
+and `topKLast2d` require ordered dtypes and the appropriate axis, nonempty-axis,
+or top-k bound proofs. Their `?` variants check actual metadata and retain native
+errors; the `*Checked` conveniences perform those checks with a panic fallback.
+`crossEntropy` and `crossEntropyNone` require real floating logits and Int64
+targets. Their `?` variants use checked native exports that validate target
+labels against the class range, allowing the default ignored label `-100`,
+before dispatching the loss kernel. Dynamic logits can use the corresponding
+`*Checked` conveniences. The four convolution adapters `conv1d?`, `conv2dBias?`,
+`conv1dGroups?`, and `convTranspose1d?` validate actual dtype/device equality,
+retain native argument and kernel errors, and check successful result metadata.
+These contracts do not extend to every raw selection, loss, or convolution export.
+
+Checked vector indexing validates index bounds before accelerator dispatch,
+so invalid token IDs do not reach a device-side indexing assertion. Token-byte
+totals use this boundary together with checked transfer, arithmetic, reduction,
+and scalar extraction. Equal-rate audio resampling retains the borrowed input
+array before returning it, preserving ownership of its boxed Float values.
 
 STFT preserves its IO error contract even for invalid native FFT parameters.
 Apple image and video preprocessing catches C++ failures at each IO entry point;
