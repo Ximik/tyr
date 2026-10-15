@@ -1,7 +1,7 @@
 # Tensor specifications and checked boundaries
 
 `torch.Tensor σ` is Tyr's public tensor type. Its `StaticSpec` index survives
-Lean typechecking and records shape, dtype, and device policy. The underlying
+Lean typechecking and records shape, dtype, and concrete device. The underlying
 `RawTensor` is a native LibTorch handle used by implementation adapters.
 
 ## Imports and implementation layers
@@ -26,35 +26,78 @@ data, and persistence operations. `import Tyr` aggregates the library.
 | `Tyr.TensorStruct.DeriveCast` | Derive field-wise casts between explicitly selected record types |
 | `Tyr.RawTensor` and submodules | Native declarations without static guarantees |
 
-## Graded claims
+## Concrete placement and optional dtype claims
 
-A specification can make strong or partial claims:
+Every `StaticSpec` names an actual device. Dtype may remain dynamic:
 
 ```lean
 import Tyr.Typed
 open torch
 
-abbrev ShapeOnly := Tensor { shape := #[2, 3] }
-abbrev ShapeAndDType := Tensor { shape := #[2, 3], dtype := .Float32 }
-abbrev FullySpecified := Tensor {
-  shape := #[2, 3], dtype := .Float32, device := .exact .CPU
+abbrev DynamicDType := Tensor { shape := #[2, 3], device := .CPU }
+abbrev FloatWeights := Tensor {
+  shape := #[2, 3], dtype := .Float32, device := .CPU
+}
+abbrev PlacedWeights (device : Device) := Tensor {
+  shape := #[2, 3], dtype := .Float32, device := device
 }
 ```
 
-Omitting dtype uses `.Unknown "dynamic"`; omitting device policy uses `.any`.
-These dynamic components do not assert that a tensor has any particular native
-dtype or location. All three examples use the same `Tensor` carrier.
-Generic operations should retain a `StaticSpec` or explicit dtype/device
-parameters instead of discarding claims through a shape-only specification.
-Two shape-only tensors do not necessarily have the same native dtype, even when
-their static dtype is the same `.Unknown "dynamic"` value. Only that reserved
-token is a wildcard; other unrecognized dtype tokens must match exactly.
-Preserving adapters compare actual dtypes, and copying rejects a dtype mismatch
-before mutation. Use an explicit cast when conversion is intended.
+The device field is mandatory; there is no wildcard placement policy or
+`forgetDevice`. A runtime-selected `device : Device` can occur in the result
+type of a factory or loader. Models share that parameter across their tensor
+fields and forward inputs. An unknown placement is packaged existentially,
+for example `Sigma fun device => PlacedWeights device`; unpacking it exposes
+the same device index for subsequent operations without copying storage.
 
-Use `tensor.staticSpec` for declared claims, `tensor.actualSpec` for native shape
-and dtype, and `tensor.device` for native placement. `forgetDevice` weakens a
-placement policy without moving or copying storage.
+Omitting dtype uses `.Unknown "dynamic"`. Two such tensors may have different
+native dtypes. Only that reserved token is a wildcard; other unrecognized dtype
+tokens must match exactly. Preserving adapters inspect actual dtypes and reject
+unintended promotion. Copying rejects a dtype mismatch before mutation.
+
+`tensor.staticSpec`, `shape`, `dtype`, and `device` describe the declared index.
+`tensor.actualSpec` and `runtimeDevice` inspect native metadata. `tensor.to target`
+performs a device conversion and returns a tensor indexed by `target`.
+`atDevice?` checks equality with a requested device without transferring storage;
+`sameDevice?` exposes checked equality evidence for two device indices.
+
+### Sharing a device across a model
+
+Section parameters become implicit record parameters when tensor fields use them.
+The deriving handlers retain those parameters:
+
+```lean
+import Tyr.Module.Derive
+open torch
+
+variable {device : Device}
+
+structure Projection (inputDim outputDim : UInt64) where
+  weight : Tensor {
+    shape := #[outputDim, inputDim], dtype := .Float32, device := device
+  }
+  deriving TensorStruct
+
+def Projection.init (inputDim outputDim : UInt64) (device : Device) :
+    IO (Projection (device := device) inputDim outputDim) := do
+  let weight ← Tensor.randn #[outputDim, inputDim] (device := device)
+  return { weight := ← Tensor.parameter weight }
+
+def Projection.forward {inputDim outputDim batch : UInt64}
+    (model : Projection (device := device) inputDim outputDim)
+    (input : Tensor ⟨#[batch, inputDim], .Float32, device⟩) :
+    Tensor ⟨#[batch, outputDim], .Float32, device⟩ :=
+  Tensor.linear input model.weight
+
+def packProjection {inputDim outputDim : UInt64}
+    (model : Projection (device := device) inputDim outputDim) :
+    Sigma (fun placement => Projection (device := placement) inputDim outputDim) :=
+  ⟨device, model⟩
+```
+
+The existential package changes only how the device is exposed to the caller;
+it does not transfer or clone tensor storage. A requested-device loader can
+return `Projection (device := device) ...` directly instead.
 
 ## Shape and dtype rules
 
@@ -83,7 +126,7 @@ import Tyr.Typed
 open torch
 
 -- Tensor.add has this same shape/dtype/device signature.
-def combine {s : Shape} {l r result : DType} {dev : DevicePolicy}
+def combine {s : Shape} {l r result : DType} {dev : Device}
     [DType.Promotes l r result]
     (left : Tensor ⟨s, l, dev⟩) (right : Tensor ⟨s, r, dev⟩) :
     Tensor ⟨s, result, dev⟩ :=
@@ -153,22 +196,21 @@ before native execution. Their `PointwisePromoted` package carries
 condition; `Tensor.Promoting.whereSelect?` provides the corresponding checked
 runtime witness. Selection does not cast the result back to the left dtype.
 
-Matrix multiplication requires operands with matching dtype and device policy.
+Matrix multiplication requires operands with matching dtype and concrete device.
 The checked `matmul?`, `mm?`, `linear?`, `linear3d?`, `matmul3d?`, and `bmm4d?`
 adapters verify actual dtype and device equality before calling native code.
 Elementwise promotion never supplies an implicit matrix cast.
 
 ## Device compatibility
 
-Two `.any` policies do not prove that two native tensors occupy the same device.
-The arithmetic adapters described above check actual placement before execution,
-including when both inputs share the same static policy. Matrix multiplication
-and concatenation require equal actual devices.
+A tensor's concrete device is part of its type. Equal device indices tie inputs
+to the same placement; independently loaded existential tensors must establish
+equality before a shared-device operation. Checked adapters also inspect native
+metadata at the FFI boundary. Matrix multiplication and concatenation require
+equal actual devices.
 
-Broadcasting arithmetic additionally requires
-`DevicePolicy.PointwiseCompatible leftSpec rightSpec`. Its instances reject known
-conflicts such as exact CPU/CUDA vectors or CUDA:0/CUDA:1 vectors. An unrestricted
-policy is statically eligible, but still undergoes the runtime check. The binary
+Broadcasting arithmetic requires `Device.PointwiseCompatible leftSpec rightSpec`.
+Its instances reject CPU/CUDA vectors and CUDA:0/CUDA:1 vectors. The binary
 pointwise exception permits a rank-zero CPU tensor on the other operand's
 device; a size-one vector and an accelerator scalar do not get that exception.
 The result follows the non-CPU operand when this exception applies.
@@ -177,14 +219,14 @@ The result follows the non-CPU operand when this exception applies.
 import Tyr.Typed
 open torch
 
-example (scalar : Tensor ⟨#[], .Float32, .exact .CPU⟩)
-    (vector : Tensor ⟨#[2], .Float32, .exact (.CUDA 0)⟩) :
-    Tensor ⟨#[2], .Float32, .exact (.CUDA 0)⟩ := scalar.addB vector
+example (scalar : Tensor ⟨#[], .Float32, .CPU⟩)
+    (vector : Tensor ⟨#[2], .Float32, .CUDA 0⟩) :
+    Tensor ⟨#[2], .Float32, .CUDA 0⟩ := scalar.addB vector
 ```
 
-The same-shape `add`/`sub`/`mul`/`div` APIs retain a shared static policy;
-use their broadcasting variants when the static policies differ, including for
-two scalar tensors. `whereSelect` follows a separate native rule: it selects
+The same-shape `add`/`sub`/`mul`/`div` APIs require one shared device index;
+use their broadcasting variants when the devices differ, including for two
+scalar tensors. `whereSelect` follows a separate native rule: it selects
 the first non-CPU device in condition, left, right order, and relocates rank-zero
 operands to that device. This includes accelerator scalars. Non-scalars must
 already occupy the selected device. Tyr checks this rule before native execution,
@@ -218,16 +260,16 @@ checks arithmetic result dtypes separately from unavailable kernels.
 import Tyr.Typed
 open torch
 
-def checkRaw (raw : RawTensor) : Except String (Tensor { shape := #[2, 3], dtype := .Float32 }) :=
+def checkRaw (raw : RawTensor) : Except String (Tensor { shape := #[2, 3], dtype := .Float32, device := .CPU }) :=
   Tensor.ofRaw raw
 ```
 
 `Tensor.ofRaw` checks all claims in the destination index. `Tensor.ofTensor` and
-`ofTensor?` check a requested shape and dtype; `ofTensorWithContract` also checks
-a `TensorContract` placement policy. `Tensor.validate` audits an existing indexed
+`ofTensor?` check a requested shape and dtype and index the result by
+`raw.device`; `ofTensorWithContract` also checks an optional expected placement. `Tensor.validate` audits an existing indexed
 value against its current native metadata.
 
-`TensorContract` contains a `TensorSpec`, a device policy, and a descriptive
+`TensorContract` contains a `TensorSpec`, an optional `expectedDevice`, and a descriptive
 `TensorRole`. The role does not itself enforce a runtime invariant.
 
 There is no public unchecked raw constructor or implicit coercion to
@@ -255,13 +297,13 @@ import Tyr.Typed
 import Tyr.Typed.Neural
 open torch
 
-def matchingPositions (tokens : Tensor { shape := #[4], dtype := .Int64 }) :=
+def matchingPositions (tokens : Tensor { shape := #[4], dtype := .Int64, device := .CPU }) :=
   Tensor.findTokenPositions tokens 7
 ```
 
-This returns `IO (Sigma fun count => Tensor { shape := #[count], dtype := .Int64 })`.
+This returns `IO (Sigma fun count => Tensor { shape := #[count], dtype := .Int64, device := .CPU })`.
 `Tensor.packShape` packages an existing indexed tensor's shape while retaining
-its dtype and device-policy parameters. `catMany?` accepts an array of such
+its dtype and device parameters. `catMany?` accepts an array of such
 packages and validates a requested result shape. `Tensor.toSome` instead returns
 `Sigma Tensor`, retaining the complete specification as an existential witness.
 A scalar is `#[]`; it is never a substitute for an unknown shape.
@@ -278,7 +320,7 @@ before returning a tensor; it does not repair a mismatch by reshaping.
 ## Models, differentiation, and persistence
 
 `TensorStruct` traversals preserve each leaf's complete specification. Typed
-parameters therefore retain shape, dtype, and device-policy information through
+parameters therefore retain shape, dtype, and device information through
 mapping, folding, flattening, and generated AD boundaries.
 
 Use `TensorStruct.castTo TargetType source` to choose each leaf's dtype and
@@ -290,15 +332,15 @@ import Tyr.TensorStruct.DeriveCast
 open torch
 
 structure StoredWeights where
-  weight : Tensor { shape := #[2, 3], dtype := .Float32 }
-  indices : Frozen { shape := #[2], dtype := .Int64 }
+  weight : Tensor { shape := #[2, 3], dtype := .Float32, device := .CPU }
+  indices : Frozen { shape := #[2], dtype := .Int64, device := .CPU }
   config : Static String
 
 structure RuntimeWeights where
   weight : Tensor {
-    shape := #[2, 3], dtype := .BFloat16, device := .exact .CPU
+    shape := #[2, 3], dtype := .BFloat16, device := .CPU
   }
-  indices : Frozen { shape := #[2], dtype := .Int64 }
+  indices : Frozen { shape := #[2], dtype := .Int64, device := .CPU }
   config : Static String
 
 derive_tensor_tree_cast StoredWeights => RuntimeWeights
@@ -308,14 +350,14 @@ def prepareWeights (source : StoredWeights) : IO RuntimeWeights :=
 ```
 
 The destination type supplies every leaf specification. A concrete dtype
-requests a native cast, and `.exact device` requests placement on that device.
+requests a native cast, and the destination device requests placement on that device.
 `castTo` requests dtype and placement through one checked native entry point.
 That entry point chooses the conversion order for the backend: MPS-to-CPU
 transfers retain the source dtype until they reach CPU, then apply the requested
 cast. This lets an MPS Float32 tensor request CPU Float64 without an unsupported
 MPS Float64 intermediate.
-A dynamic target dtype retains the source's actual dtype; `.any` retains its
-actual placement. Every leaf keeps its shape, so callers perform any reshape
+A dynamic target dtype retains the source's actual dtype. The target always
+names a concrete device. Every leaf keeps its shape, so callers perform any reshape
 explicitly beforehand.
 
 `TensorTreeCast SourceType TargetType` supplies the traversal. Products, arrays,

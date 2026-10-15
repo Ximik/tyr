@@ -33,10 +33,10 @@ def RawTensor : Type := TSpec.type
 `Tensor σ` uses a private opaque carrier indexed by `StaticSpec`. It has no
 public constructor or structural recursor, and different indices are not
 definitionally interchangeable. `Tensor.raw` exposes the unindexed handle;
-`Tensor.ofRaw` admits it only after checking native shape, dtype, and device
-policy. The reserved dtype `Unknown "dynamic"` and device policy `.any` weaken
-their respective claims; an arbitrary unknown dtype token does not bypass the
-check. `zerosFor` accepts only a specification and supplies the native zero
+`Tensor.ofRaw` admits it only after checking native shape, dtype, and concrete
+device. The reserved dtype `Unknown "dynamic"` weakens only the dtype claim;
+every indexed tensor names its actual device. An arbitrary unknown dtype token
+does not bypass the check. `zerosFor` accepts only a specification and supplies the native zero
 factory used by `Inhabited`.
 
 Runtime representation casts are private **unsafe** implementations behind
@@ -191,8 +191,9 @@ valid promotion pairs. The checked expansion, concatenation, and reduction
 families follow the same result-carrier contract. Their pure convenience
 wrappers use Lean's panic fallback after receiving an error.
 
-These adapters check operation preconditions before native execution. Matching
-`.any` device policies never establish actual-device equality. Binary arithmetic
+These adapters check operation preconditions before native execution. Equal
+concrete device indices tie tensors to the same placement; checked FFI adapters
+validate native metadata as well. Binary arithmetic
 permits CPU rank-zero operands on another device; matrix multiplication and
 concatenation require equal actual devices. Selection validates its separate
 native scalar relocation rule. Metadata checks and static witnesses describe
@@ -447,13 +448,13 @@ import Tyr.SafeTensors.Schema
 open torch
 
 def nativeExample : IO Unit := do
-  let x : Tensor { shape := #[2, 2], dtype := .Float32 } := Tensor.ones #[2, 2]
+  let x : Tensor { shape := #[2, 2], dtype := .Float32, device := .CPU } := Tensor.ones #[2, 2]
   let y := Tensor.add x x
   let z ← Tensor.randn #[2, 2]
   IO.println s!"values: {← y.toFloatArray}, random shape: {z.runtimeShape}"
   IO.println s!"live tensors: {← torch.get_live_tensors}"
 
-def loadCheckedWeight (path : String) : IO (Tensor { shape := #[768, 768], dtype := .Float32 }) := do
+def loadCheckedWeight (path : String) : IO (Tensor { shape := #[768, 768], dtype := .Float32, device := .CPU }) := do
   let handle ← safetensors.openHandle path
   safetensors.loadFromHandleWithSpec handle "layer.weight" ⟨#[768, 768], .Float32⟩
 ```

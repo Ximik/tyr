@@ -160,10 +160,12 @@ molecule case (`BranchingModel` in `BranchingFlowsTrain.lean:50` is the discrete
 analog):
 
 ```lean
+variable {device : Device}
+
 structure BranchingMoleculeModel (maxLen vocab : UInt64) (Params : Type) where
-  forward : {batch : UInt64} → Params → Tensor { shape := #[batch, maxLen, 3] } → Tensor { shape := #[batch, maxLen], dtype := .Int64 } → Tensor { shape := #[batch] }
-    → Tensor { shape := #[batch, maxLen], dtype := .Int64 }
-    → IO (Tensor { shape := #[batch, maxLen, 3] } × Tensor { shape := #[batch, maxLen, vocab] } × Tensor { shape := #[batch, maxLen] } × Tensor { shape := #[batch, maxLen] })
+  forward : {batch : UInt64} → Params → Tensor { shape := #[batch, maxLen, 3], device := device } → Tensor { shape := #[batch, maxLen], dtype := .Int64, device := device } → Tensor { shape := #[batch], device := device }
+    → Tensor { shape := #[batch, maxLen], dtype := .Int64, device := device }
+    → IO (Tensor { shape := #[batch, maxLen, 3], device := device } × Tensor { shape := #[batch, maxLen, vocab], device := device } × Tensor { shape := #[batch, maxLen], device := device } × Tensor { shape := #[batch, maxLen], device := device })
 ```
 
 `packBranchingNat` / `packBranchingTensor` (`:107`, `:188`) pack discrete-token and
@@ -214,14 +216,16 @@ timestep embedding is a C++ FFI extern (`@[extern "lean_torch_timestep_embedding
 embeddings, timesteps, and both position-ID tensors, returning the velocity prediction:
 
 ```lean
+variable {device : Device}
+
 def forward {batch img_seq txt_seq : UInt64} (cfg : FluxConfig)
-    (model : FluxModel cfg)
-    (img : Tensor { shape := #[batch, img_seq, cfg.in_channels] })
-    (txt : Tensor { shape := #[batch, txt_seq, cfg.context_in_dim] })
-    (timesteps : Tensor { shape := #[batch], dtype := .Float32 })
-    (img_ids : Tensor { shape := #[batch, img_seq, 4], dtype := .Int64 })
-    (txt_ids : Tensor { shape := #[batch, txt_seq, 4], dtype := .Int64 })
-    : Tensor { shape := #[batch, img_seq, cfg.in_channels] }
+    (model : FluxModel (device := device) cfg)
+    (img : Tensor { shape := #[batch, img_seq, cfg.in_channels], device := device })
+    (txt : Tensor { shape := #[batch, txt_seq, cfg.context_in_dim], device := device })
+    (timesteps : Tensor { shape := #[batch], dtype := .Float32, device := device })
+    (img_ids : Tensor { shape := #[batch, img_seq, 4], dtype := .Int64, device := device })
+    (txt_ids : Tensor { shape := #[batch, txt_seq, 4], dtype := .Int64, device := device })
+    : Tensor { shape := #[batch, img_seq, cfg.in_channels], device := device }
 ```
 
 `Sampling.lean` implements the Flux2 schedule (`computeTimesteps image_seq_len num_steps`,
@@ -249,15 +253,18 @@ up-groups with `Upsample`s, GroupNorm + swish + `conv_out` — decoding
 packed latents, and the full decode pipeline:
 
 ```lean
+variable {device : Device}
+
 structure AutoEncoder where
-  decoder : Decoder
-  bn_running_mean : Tensor { shape := #[128] }
-  bn_running_var : Tensor { shape := #[128] }
+  decoder : Decoder (device := device)
+  bn_running_mean : Tensor { shape := #[128], device := device }
+  bn_running_var : Tensor { shape := #[128], device := device }
   deriving TensorStruct
 
-def AutoEncoder.invNormalize (ae : AutoEncoder) (z : Tensor { shape := #[1, 128, 16, 16] }) : Tensor { shape := #[1, 128, 16, 16] }
-def AutoEncoder.decode (ae : AutoEncoder) (z : Tensor { shape := #[1, 128, 16, 16] }) : Tensor { shape := #[1, 3, 256, 256] }
-def loadAutoEncoder (path : String) (log : Handlers := {}) : IO AutoEncoder
+def AutoEncoder.invNormalize (ae : AutoEncoder (device := device)) (z : Tensor { shape := #[1, 128, 16, 16], device := device }) : Tensor { shape := #[1, 128, 16, 16], device := device }
+def AutoEncoder.decode (ae : AutoEncoder (device := device)) (z : Tensor { shape := #[1, 128, 16, 16], device := device }) : Tensor { shape := #[1, 3, 256, 256], device := device }
+def loadAutoEncoder (path : String) (log : Handlers := {})
+    (device : Device := .CPU) : IO (AutoEncoder (device := device))
 ```
 
 **Caveat.** `invNormalize`, `unpackLatents16x16`, `decode`, and `Decoder.forward1` are
@@ -300,7 +307,7 @@ Flux + VAE:
 | `sample` | fresh noise → `denoise` | `Flux/Sampling.lean:94` |
 | `packLatents` / `unpackLatents` | VAE spatial ↔ packed sequence | `Flux/Sampling.lean:156,174` |
 | `loadAutoEncoder` | decoder + BN stats from SafeTensors | `VAE.lean:77` |
-| `AutoEncoder.decode` | `Tensor { shape := #[1,128,16,16] } → Tensor { shape := #[1,3,256,256] }` | `VAE.lean:66` |
+| `AutoEncoder.decode` | `Tensor { shape := #[1,128,16,16], device := device } → Tensor { shape := #[1,3,256,256], device := device }` | `VAE.lean:66` |
 
 ## Usage examples
 
@@ -379,8 +386,8 @@ import Tyr.Model.VAE
 import Tyr.Model.Flux.Weights
 import Tyr.Model.Flux
 open torch torch.qwen torch.vae torch.flux
-def fluxExample (qwenDir : String) (tokens : Tensor { shape := #[1, 512], dtype := .Int64 })
-    (attnMask : Tensor { shape := #[1, 512], dtype := .Bool }) : IO Unit := do
+def fluxExample (qwenDir : String) (tokens : Tensor { shape := #[1, 512], dtype := .Int64, device := .CPU })
+    (attnMask : Tensor { shape := #[1, 512], dtype := .Bool, device := .CPU }) : IO Unit := do
 
   -- text encoder (Qwen), diffusion model, and latent decoder
   let qwen ← loadQwenFluxEmbedderSharded qwenDir QwenConfig.fluxKleinTextEncoder 512 #[8, 17, 26]
@@ -389,16 +396,16 @@ def fluxExample (qwenDir : String) (tokens : Tensor { shape := #[1, 512], dtype 
 
   -- encode prompt, prepare noise and RoPE position ids
   let txtEmb := qwen.encodeMasked QwenConfig.fluxKleinTextEncoder 512 tokens attnMask
-  let txtEmb : Tensor { shape := #[1, 512, FluxConfig.klein4B.context_in_dim] } :=
+  let txtEmb : Tensor { shape := #[1, 512, FluxConfig.klein4B.context_in_dim], device := .CPU } :=
     (txtEmb.reshapeChecked #[1, 512, FluxConfig.klein4B.context_in_dim]).forgetDType
   let noiseSeq := Tensor.permute (← randomWeight #[1, 128, 16, 16]) #[0, 2, 3, 1]
-  let noise : Tensor { shape := #[1, 256, 128] } := Tensor.reshapeChecked noiseSeq #[1, 256, 128]
+  let noise : Tensor { shape := #[1, 256, 128], device := .CPU } := Tensor.reshapeChecked noiseSeq #[1, 256, 128]
   let imgIds ← computeImagePositionIds 16 16
   let txtIds ← computeTextPositionIds 512
 
   -- denoise and decode
   let latents := denoise FluxConfig.klein4B flux noise txtEmb imgIds txtIds 4
-  let packed : Tensor { shape := #[1, 128, 16, 16] } :=
+  let packed : Tensor { shape := #[1, 128, 16, 16], device := .CPU } :=
     (Tensor.permute (Tensor.reshapeChecked latents #[1, 16, 16, 128]) #[0, 3, 1, 2]).reshapeChecked #[1, 128, 16, 16]
   let image := vae.decoder.forward1 (AutoEncoder.unpackLatents16x16 (vae.invNormalize packed))
   saveImagePPM image "output.ppm"
@@ -407,7 +414,7 @@ def fluxExample (qwenDir : String) (tokens : Tensor { shape := #[1, 512], dtype 
 ## Related guides
 
 - [core/tensors.md](../core/tensors.md) — `Tensor σ`, shapes, and indexed operations behind every forward here
-- [core/tensorstruct.md](../core/tensorstruct.md) — the traversal class that makes whole models device-movable and checkpointable
+- [core/tensorstruct.md](../core/tensorstruct.md) — parameter traversal, checkpointing, and target-type conversion
 - [autodiff.md](../autodiff.md) — `Tensor.backwardLoss` as used by `trainStepMolecule`
 - [optimization.md](../optimization.md) — `Optim.adamw` and optimizer state
 - [serialization.md](../serialization.md) — SafeTensors loading and checkpoint save/resume

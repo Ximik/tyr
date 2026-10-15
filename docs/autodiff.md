@@ -301,17 +301,17 @@ import Tyr
 open torch Tyr.AD.Frontend Tyr.AD.JaxprLike
 
 structure Params where
-  padv : Tensor { shape := #[1], dtype := .Float32 }
+  padv : Tensor { shape := #[1], dtype := .Float32, device := .CPU }
   label : Static String
   deriving TensorStruct, ToTensorStructSchema, TensorStructFlatten
 
 structure Inputs where
-  base : Tensor { shape := #[2], dtype := .Float32 }
+  base : Tensor { shape := #[2], dtype := .Float32, device := .CPU }
   tag : Static String
   deriving TensorStruct, ToTensorStructSchema, TensorStructFlatten
 
 structure Outputs where
-  loss : Tensor { shape := #[], dtype := .Float32 }
+  loss : Tensor { shape := #[], dtype := .Float32, device := .CPU }
   label : Static String
   deriving TensorStruct, ToTensorStructSchema, TensorStructFlatten
 

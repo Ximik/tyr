@@ -10,6 +10,17 @@ validation checkpoints; older inventories and uses of the removed names describe
 those checkpoints. GPU hardware qualification remains separate from removal of
 the declarations.
 
+## Current placement architecture
+
+The current `StaticSpec` requires `device : Device` alongside shape and dtype.
+`DevicePolicy`, `.any`, `.exact`, and `forgetDevice` have been removed from the
+core API. A runtime-selected device remains a concrete dependent index;
+loaders return the requested placement, model records share it across fields,
+and unknown placements are packaged existentially. Tensor-tree conversion
+names its destination device in the target type. The older sections below are
+historical checkpoints: snippets that omit device or use a placement policy
+predate this migration. See [the typed guide](core/typed.md) for current code.
+
 ## 2026-10-14 follow-up: remove the convenience aliases
 
 `DTensor s d` becomes `Tensor { shape := s, dtype := d }`; `STensor s` becomes
@@ -82,22 +93,22 @@ import Tyr.TensorStruct.Cast
 open torch
 
 abbrev StoredPair :=
-  Tensor { shape := #[2, 3], dtype := .Float32 } ×
-  Frozen { shape := #[2], dtype := .Int64 }
+  Tensor { shape := #[2, 3], dtype := .Float32, device := .CPU } ×
+  Frozen { shape := #[2], dtype := .Int64, device := .CPU }
 
 abbrev RuntimePair :=
-  Tensor { shape := #[2, 3], dtype := .BFloat16, device := .exact .CPU } ×
-  Frozen { shape := #[2], dtype := .Int64 }
+  Tensor { shape := #[2, 3], dtype := .BFloat16, device := .CPU } ×
+  Frozen { shape := #[2], dtype := .Int64, device := .CPU }
 
 def preparePair (source : StoredPair) : IO RuntimePair :=
   TensorStruct.castTo RuntimePair source
 ```
 
 Each tensor retains its shape. A concrete target dtype requests a native cast;
-an exact target device requests an explicit move. `castTo` submits dtype and
+the concrete target device requests an explicit move. `castTo` submits dtype and
 placement together in a single native conversion, allowing an MPS Float32
-source to request CPU Float64 directly. Dynamic target dtype and unrestricted
-target placement retain the corresponding source metadata.
+source to request CPU Float64 directly. A dynamic target dtype retains the source dtype. Target placement is always
+concrete; use a shared device parameter when the conversion should preserve it.
 Container lengths, option branches, frozen roles, and static values are
 preserved. Within `castTo`, metadata validation failures and caught native
 conversion exceptions produce IO errors with the leaf's structural path.

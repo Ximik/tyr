@@ -12,16 +12,18 @@ pretrained safetensors checkpoints, not training code.
 
 All five families follow the same idiom as the rest of `Tyr/Model`:
 
-The `Tensor { shape := shape }` fields shown below preserve their shape index
-while leaving dtype and placement dynamic. They do not assert Float32 or a particular device;
+The `Tensor { shape := shape, device := device }` fields shown below preserve their shape index
+with a shared concrete device and dynamic dtype. They do not assert Float32;
 checked loading and model adapters validate the metadata they require.
 
 - A plain **config structure** (e.g. `WhisperConfig`, `Qwen3ASRConfig`) with field
   defaults, parsed from a checkpoint's `config.json` via
   `<Config>.loadFromPretrainedDir modelDir`.
 - A **parameter structure indexed by the config**, with shapes computed from config
-  fields at the type level and `deriving TensorStruct`, so whole models can be
-  device-mapped (`TensorStruct.map (fun t => t.to device)`) and frozen generically.
+  fields at the type level and one shared device parameter. `deriving TensorStruct`
+  supports parameter traversal and detachment. Loaders request a concrete device;
+  converting an existing model uses `TensorStruct.castTo` with a target model type
+  and a `TensorTreeCast` instance.
   See [TensorStruct](../core/tensorstruct.md).
 - Weights loaded from safetensors with shape-checked names, sharded variants for
   multi-file checkpoints through the checked `Tyr.SafeTensors` loaders; see
@@ -84,7 +86,7 @@ structure Qwen3TTSForConditionalGeneration (cfg : Qwen3TTSConfig) where
   codebooks 1..N from codebook-0 context. Both reuse the Qwen LLM layer — `TalkerLayer
   cfg` is an abbrev for `qwen.QwenLayer` (Talker.lean:26).
 - **Speaker encoder** (`SpeakerEncoder.lean`): ECAPA-TDNN producing
-  `Tensor { shape := #[batch, cfg.speakerEncoderConfig.encDim] }` embeddings from mel features; only
+  `Tensor { shape := #[batch, cfg.speakerEncoderConfig.encDim], device := device }` embeddings from mel features; only
   present for `ttsModelType == "base"`. Used for voice cloning via
   `VoiceClonePromptItem` (Model.lean:17).
 - **Speech tokenizer decoder** (`SpeechTokenizer.lean:263`): `SpeechTokenizer12HzDecoder`
@@ -108,16 +110,18 @@ A Qwen3-ASR "thinker" port covering offline transcription, streaming, and forced
 alignment. Import `Tyr.Model.Qwen3ASR`.
 
 ```lean
+variable {device : Device}
+
 structure Qwen3ASRThinkerForConditionalGeneration (cfg : ThinkerConfig) where
-  audioTower : AudioEncoder cfg.audioConfig
-  textModel : qwen.Qwen3Model (TextQwenConfig cfg) (.Unknown "dynamic")
-  audioProjectionWeight : Tensor { shape := #[cfg.textConfig.hiddenSize, cfg.audioConfig.outputDim] }
-  audioProjectionBias : Tensor { shape := #[cfg.textConfig.hiddenSize] }
-  lmHead : Tensor { shape := #[ThinkerLmVocabSize cfg, cfg.textConfig.hiddenSize] }
+  audioTower : AudioEncoder (device := device) cfg.audioConfig
+  textModel : qwen.Qwen3Model (device := device) (TextQwenConfig cfg) (.Unknown "dynamic")
+  audioProjectionWeight : Tensor { shape := #[cfg.textConfig.hiddenSize, cfg.audioConfig.outputDim], device := device }
+  audioProjectionBias : Tensor { shape := #[cfg.textConfig.hiddenSize], device := device }
+  lmHead : Tensor { shape := #[ThinkerLmVocabSize cfg, cfg.textConfig.hiddenSize], device := device }
   deriving TensorStruct
 
 structure Qwen3ASRForConditionalGeneration (cfg : Qwen3ASRConfig) where
-  thinker : Qwen3ASRThinkerForConditionalGeneration cfg.thinkerConfig
+  thinker : Qwen3ASRThinkerForConditionalGeneration (device := device) cfg.thinkerConfig
   supportLanguages : Array String := cfg.supportLanguages
   deriving TensorStruct
 ```
@@ -220,9 +224,11 @@ HF Whisper fields (`numMelBins`, `dModel`, `encoderLayers`, `decoderLayers`,
 `maxTargetPositions`, suppress-token lists, ...). The model split:
 
 ```lean
+variable {device : Device}
+
 structure WhisperForConditionalGeneration (cfg : WhisperConfig) where
-  model : WhisperModel cfg      -- encoder + decoder stacks
-  projOut : Tensor { shape := #[cfg.vocabSize, cfg.dModel] }
+  model : WhisperModel (device := device) cfg      -- encoder + decoder stacks
+  projOut : Tensor { shape := #[cfg.vocabSize, cfg.dModel], device := device }
   deriving TensorStruct
 ```
 
@@ -230,14 +236,18 @@ with `encode`, `decode`, and the incremental path `initLayerKVCaches` +
 `precomputeCrossCaches` + `decodeStepWithCache` (`Tyr/Model/Whisper/Model.lean`).
 `WhisperForConditionalGeneration.loadSharded modelDir cfg` loads HF-layout weights, ties
 `projOut` to the token embedding when missing, and picks a device from `TYR_DEVICE`
-(`cpu`/`cuda`/`mps`/`auto`), falling back to `getBestDevice`.
+(`cpu`/`cuda`/`mps`/`auto`), falling back to `getBestDevice`. Its result packages
+that placement as `Σ device, WhisperForConditionalGeneration (device := device) cfg`.
+Use `loadShardedAt` to request a device explicitly; bundles retain the device
+alongside the indexed model.
 
 The user API (`Tyr/Model/Whisper/Transcribe.lean`) is a bundle plus transcribe functions:
 
 ```lean
 structure WhisperBundle where
   cfg : WhisperConfig
-  model : WhisperForConditionalGeneration cfg
+  device : Device
+  model : WhisperForConditionalGeneration (device := device) cfg
   tok : tokenizer.qwen3.QwenTokenizer
   preprocessor : PreprocessorConfig
 
@@ -344,7 +354,7 @@ let modelDir ← hub.resolvePretrainedDir "Qwen/Qwen3-ASR-0.6B" {}
 let cfg ← Qwen3ASRConfig.loadFromPretrainedDir modelDir
 let tok ← tokenizer.qwen3.loadTokenizer modelDir
 let pre ← PreprocessorConfig.loadFromPretrainedDir modelDir
-let model ← Qwen3ASRForConditionalGeneration.loadSharded modelDir cfg
+let ⟨device, model⟩ ← Qwen3ASRForConditionalGeneration.loadSharded modelDir cfg
 let outs ← model.transcribeWavs tok pre #["MLKDream.wav"]
   (languages := #[some "English"]) (returnTimeStamps := false)
 IO.println (outs.getD 0 default).text
@@ -394,7 +404,7 @@ combine these models with the `Tyr/Audio` capture layer — see
 
 - [Getting started](../getting-started.md) — build and run the examples
 - [Tensors](../core/tensors.md) — the indexed `Tensor σ` used throughout these models
-- [TensorStruct](../core/tensorstruct.md) — generic device mapping of whole models
+- [TensorStruct](../core/tensorstruct.md) — parameter traversal and typed model conversion
 - [Serialization](../serialization.md) — safetensors loading and the type provider
 - [LLM models](llms.md) — the Qwen layers reused by Qwen3TTS and Qwen3ASR
 - [Audio capture and playback](../audio.md) — microphone/speaker IO (`Tyr/Audio`)

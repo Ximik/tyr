@@ -1,30 +1,30 @@
 const shapeCases = {
   valid: {
-    source: `def project
-    (x : Tensor { shape := #[32, 768], dtype := .Float32 })
-    (weight : Tensor { shape := #[512, 768], dtype := .Float32 }) :
-    Tensor { shape := #[32, 512], dtype := .Float32 } :=
+    source: `def project {device : Device}
+    (x : Tensor { shape := #[32, 768], dtype := .Float32, device := device })
+    (weight : Tensor { shape := #[512, 768], dtype := .Float32, device := device }) :
+    Tensor { shape := #[32, 512], dtype := .Float32, device := device } :=
   linear x weight`,
-    result: `project
-  (x : Tensor { shape := #[32, 768], dtype := Float32 })
-  (weight : Tensor { shape := #[512, 768], dtype := Float32 }) :
-  Tensor { shape := #[32, 512], dtype := Float32 }
+    result: `project {device : Device}
+  (x : Tensor { shape := #[32, 768], dtype := Float32, device := device })
+  (weight : Tensor { shape := #[512, 768], dtype := Float32, device := device }) :
+  Tensor { shape := #[32, 512], dtype := Float32, device := device }
 
 Accepted during elaboration.`,
     className: 'ok-line'
   },
   invalid: {
-    source: `def brokenProject
-    (x : Tensor { shape := #[32, 768], dtype := .Float32 })
-    (weight : Tensor { shape := #[768, 512], dtype := .Float32 }) :
-    Tensor { shape := #[32, 768], dtype := .Float32 } :=
+    source: `def brokenProject {device : Device}
+    (x : Tensor { shape := #[32, 768], dtype := .Float32, device := device })
+    (weight : Tensor { shape := #[768, 512], dtype := .Float32, device := device }) :
+    Tensor { shape := #[32, 768], dtype := .Float32, device := device } :=
   linear x weight`,
     result: `error: Application type mismatch
 
 The argument weight has type
-  Tensor { shape := #[768, 512], dtype := Float32 }
+  Tensor { shape := #[768, 512], dtype := Float32, device := device }
 but is expected to have type
-  Tensor { shape := #[768, 768], dtype := Float32 }
+  Tensor { shape := #[768, 768], dtype := Float32, device := device }
 in the application
   x.linear weight
 

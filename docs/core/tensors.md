@@ -2,7 +2,7 @@
 
 Use `Tyr.Typed` for tensor operations and `Tyr.Typed.Neural` for additional
 neural, storage, and data adapters. The public type is `torch.Tensor σ`, where
-`σ : StaticSpec` records shape, dtype, and device policy. `Tyr.Torch` supplies
+`σ : StaticSpec` records shape, dtype, and concrete device. `Tyr.Torch` supplies
 runtime services such as device discovery, CUDA streams/events, and RNG seeding.
 Inference uses explicitly detached tensors rather than ambient gradient-mode scopes.
 
@@ -13,19 +13,20 @@ import Tyr.Typed
 import Tyr.Typed.Neural
 open torch
 
-abbrev Activations := Tensor { shape := #[32, 128], dtype := .Float32 }
+abbrev Activations := Tensor { shape := #[32, 128], dtype := .Float32, device := .CPU }
 abbrev PinnedActivations := Tensor {
   shape := #[32, 128]
   dtype := .BFloat16
-  device := .exact (.CUDA 0)
+  device := (.CUDA 0)
 }
 ```
 
-`Tensor { shape := shape, dtype := dtype }` leaves placement unrestricted.
-`Tensor { shape := shape }` also leaves dtype dynamic. A dynamic dtype or `.any` placement makes no claim about that
-component; `actualSpec` and `device` report native metadata. `shape`, `dtype`, and
-`staticSpec` describe the declared index. Different shape/dtype indices are not
-interchangeable.
+Every specification supplies a concrete `device`. Omitting dtype leaves it
+`.Unknown "dynamic"`, while retaining exact shape and placement. `shape`, `dtype`,
+`device`, and `staticSpec` describe the index; `actualSpec` and `runtimeDevice`
+inspect native metadata. Runtime-selected devices can appear directly in
+result types, or be packaged as `Sigma fun device => Tensor { shape := shape,
+dtype := dtype, device := device }` when the caller does not select placement.
 
 `RawTensor` is the native handle used by adapters in `Tyr.RawTensor` and its
 submodules. It is not the model-facing tensor type. `Tensor.ofRaw` validates
@@ -58,14 +59,14 @@ repeating a pure expression does not establish independent storage.
 These erased proofs establish the promotion rule; they do not establish that
 the operator has a kernel for that dtype and device. Operator-specific domain
 constraints reject inputs such as complex ReLU and integral mean. Matrix multiplication
-requires compatible dimensions and matching dtype and device policy, and checks
+requires compatible dimensions and matching dtype and concrete device, and checks
 actual dtype/device equality before execution. `linear` consumes an `[outDim, inDim]` weight matrix;
 `linear3d` handles batched sequences.
 
-Broadcasting arithmetic uses `DevicePolicy.PointwiseCompatible` to reject known
+Broadcasting arithmetic uses `Device.PointwiseCompatible` to reject known
 placement conflicts. A rank-zero CPU operand can participate on another device;
-a size-one vector cannot. Even matching `.any` policies require actual-device
-validation. Selection has its own scalar relocation rule; see
+a size-one vector cannot. Native metadata is validated at checked boundaries.
+Selection has its own scalar relocation rule; see
 [device compatibility](typed.md#device-compatibility).
 
 `reshape` requires equal element counts. `reshapeChecked` validates a requested
@@ -119,9 +120,9 @@ import Tyr.Typed.Neural
 open torch
 
 def classifierStep {batch inDim classes : UInt64}
-    (weight : Tensor { shape := #[classes, inDim], dtype := .Float32 })
-    (input : Tensor { shape := #[batch, inDim], dtype := .Float32 })
-    (targets : Tensor { shape := #[batch], dtype := .Int64 }) : IO Float := do
+    (weight : Tensor { shape := #[classes, inDim], dtype := .Float32, device := .CPU })
+    (input : Tensor { shape := #[batch, inDim], dtype := .Float32, device := .CPU })
+    (targets : Tensor { shape := #[batch], dtype := .Int64, device := .CPU }) : IO Float := do
   let logits := Tensor.linear input weight
   let loss := Tensor.crossEntropy logits targets
   Tensor.backwardLoss loss

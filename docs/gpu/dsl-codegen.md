@@ -372,7 +372,7 @@ import Tyr.Typed.Neural
 import Tyr.GPU.Kernels.Copy
 open torch Tyr.GPU.Kernels
 
-def copyTile : IO (Tensor { shape := #[1, 1, 64, 64], dtype := .Float32 }) := do
+def copyTile : IO (Tensor { shape := #[1, 1, 64, 64], dtype := .Float32, device := .CUDA 0 }) := do
   let input ← Tensor.uniformLike
     (Tensor.zeros #[1, 1, 64, 64] false (.CUDA 0))
   let output ← Tensor.uniformLike input 0 0

@@ -36,7 +36,7 @@ structure GradientTransformation (α : Type) (S : Type) where
 `update` returns *transformed gradients*, not new parameters — that is what makes
 transformations composable via `chain` (`Tyr/Optim.lean:173`). State types (`EmptyState`,
 `ScaleByAdamState α`, `TraceState α`, `ChainState S1 S2`, `ScaleByScheduleState`) all have
-`TensorStruct` instances, so optimizer state can be mapped, moved between devices, and
+`TensorStruct` instances, so optimizer state can be mapped and
 checkpointed with the same machinery as model parameters (see
 [tensorstruct.md](core/tensorstruct.md)).
 
@@ -96,7 +96,7 @@ Three ways in:
 - Concrete manifold families are structures wrapping one shape-typed tensor with a
   matching tangent structure and `project`/`random` constructors (table below).
   The table shows default Float32/unrestricted-placement tensors; manifold
-  carriers also retain explicit dtype and device-policy parameters.
+  carriers also retain explicit dtype and device parameters.
 
 `abbrev Differentiable := DifferentiableManifold` (`Basic.lean:143`) is a
 backward-compatibility alias.
@@ -105,18 +105,18 @@ Concrete families (all in `Tyr.AD`, one file each under `Tyr/Manifolds/`):
 
 | Type | Constraint | Retraction / exp |
 |---|---|---|
-| `Stiefel n p` | `XᵀX = Iₚ`, `matrix : Tensor { shape := #[n, p], dtype := .Float32 }` | QR of `X + Z` |
+| `Stiefel n p` | `XᵀX = Iₚ`, `matrix : Tensor { shape := #[n, p], dtype := .Float32, device := .CPU }` | QR of `X + Z` |
 | `Orthogonal n` | `QᵀQ = I`, tangent stored as `SkewSymmetric n` | `Q · exp(S)` via `linalg.matrix_exp`, then QR |
 | `Grassmann n p` | `XᵀX = Iₚ` modulo `O(p)`, tangent `XᵀZ = 0` | QR of `X + Z` |
-| `Sphere n` | unit-norm `coords : Tensor { shape := #[n], dtype := .Float32 }` | geodesic `exp`; normalize for `retract` |
+| `Sphere n` | unit-norm `coords : Tensor { shape := #[n], dtype := .Float32, device := .CPU }` | geodesic `exp`; normalize for `retract` |
 | `Oblique m n` | unit-norm columns | column normalization |
 | `Positive m n` | elementwise-positive | second-order step `x + v + v²/(2x)`, then clamp; `sharp` scales by `x²` |
 | `SymmetricPositiveDefinite n` | SPD | log-Euclidean: `project(matrix_log X + v)` |
-| `PSDFixedRank n k` | `Y Yᵀ` factor, `Y : Tensor { shape := #[n, k], dtype := .Float32 }` | addition in factor space |
+| `PSDFixedRank n k` | `Y Yᵀ` factor, `Y : Tensor { shape := #[n, k], dtype := .Float32, device := .CPU }` | addition in factor space |
 | `Elliptope n k` | row-wise unit norms | row normalization |
 | `FixedRankEmbedded m n k` | rank ≤ `k` | slice-based low-rank projection |
 | `PoincareBall n` | `‖x‖ < 1` | Euclidean add + ball projection (`sharp`/`flat` are `id` — not the Poincaré metric) |
-| `Hyperbolic n` | hyperboloid `⟨x,x⟩_L = -1`, `coords : Tensor { shape := #[n+1], dtype := .Float32 }` | Minkowski normalize; `sharp`/`flat` apply the Minkowski metric |
+| `Hyperbolic n` | hyperboloid `⟨x,x⟩_L = -1`, `coords : Tensor { shape := #[n+1], dtype := .Float32, device := .CPU }` | Minkowski normalize; `sharp`/`flat` apply the Minkowski metric |
 
 Grassmann also ships geometry extras: `principalAngles`, `distance` (chordal, despite the
 geodesic docstring), and a `log` map (`Grassmann.lean:62-136`).
@@ -240,13 +240,13 @@ Entry points:
 
 ```lean
 def stepCrossEntropy [TensorStruct Params]
-    (params : Params) (forward : Params → IO (Tensor { shape := #[batch, seq, vocab], dtype := .Float32 }))
-    (targets : Tensor { shape := #[batch, seq], dtype := .Int64 }) (lr : Float) (gradClip : Float := 0.0)
+    (params : Params) (forward : Params → IO (Tensor { shape := #[batch, seq, vocab], dtype := .Float32, device := .CPU }))
+    (targets : Tensor { shape := #[batch, seq], dtype := .Int64, device := .CPU }) (lr : Float) (gradClip : Float := 0.0)
     : IO (StepResult Params #[batch, seq, vocab])                -- RiemannianTreeSGD.lean:290
 
 def stepCrossEntropySampledFisher [TensorStruct Params]
-    (params : Params) (forward : Params → IO (Tensor { shape := #[batch, seq, vocab], dtype := .Float32 }))
-    (targets : Tensor { shape := #[batch, seq], dtype := .Int64 }) (probeCount : UInt64) (lr : Float) (gradClip : Float := 0.0)
+    (params : Params) (forward : Params → IO (Tensor { shape := #[batch, seq, vocab], dtype := .Float32, device := .CPU }))
+    (targets : Tensor { shape := #[batch, seq], dtype := .Int64, device := .CPU }) (probeCount : UInt64) (lr : Float) (gradClip : Float := 0.0)
     : IO (StepResult Params #[batch, seq, vocab])                -- :332
 ```
 

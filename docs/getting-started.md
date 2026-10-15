@@ -32,12 +32,12 @@ A first program uses indexed tensors:
 import Tyr.Typed
 open torch
 
-def exampleTensor : Tensor { shape := #[2, 3], dtype := .Float32 } :=
+def exampleTensor : Tensor { shape := #[2, 3], dtype := .Float32, device := .CPU } :=
   Tensor.ones #[2, 3]
 ```
 
-`Tensor σ` records shape, dtype, and device policy. The example fixes shape and
-dtype while leaving placement unrestricted. `Device` supports CPU, CUDA, and
+`Tensor σ` records shape, dtype, and concrete device. The example fixes shape, dtype,
+and CPU placement. `Device` supports CPU, CUDA, and
 MPS; `getBestDevice` from `Tyr.Torch` selects MPS, then CUDA, then CPU based on
 availability. Native handles are confined to adapters behind the indexed API.
 

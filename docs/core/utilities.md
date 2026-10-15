@@ -26,7 +26,7 @@ The threading model is JAX-style: you never mutate a key, you derive new ones. `
 
 The main consumer is the DiffEq Brownian-path code, which folds hashed interval bounds into keys so an entire Brownian path is a pure function of `(seed, t0, t1)` (`Tyr/DiffEq/Brownian.lean:161-176`). The same arithmetic is replicated element-wise on the GPU by the `BrownianSample` kernel (`Tyr/GPU/Kernels/BrownianSample.lean`) so device draws agree with the CPU per element; `Examples/GPU/RunBrownianSample.lean` is the parity harness.
 
-Contrast with tensor RNG: `Tensor.randn (s : Shape) ... : IO (Tensor { shape := s, dtype := .Float32 })` lives behind the libtorch FFI, runs in `IO`, and is seeded globally via `manualSeed` (`Tyr/Torch.lean:1065`). `PRNGKey` is for value-level randomness in pure Lean code.
+Contrast with tensor RNG: `Tensor.randn (s : Shape) ... : IO (Tensor { shape := s, dtype := .Float32, device := .CPU })` lives behind the libtorch FFI, runs in `IO`, and is seeded globally via `manualSeed` (`Tyr/Torch.lean:1065`). `PRNGKey` is for value-level randomness in pure Lean code.
 
 `Tyr.PRNG` is not re-exported by the root `Tyr.lean`; import it directly.
 

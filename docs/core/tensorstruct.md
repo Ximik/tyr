@@ -1,8 +1,8 @@
 # TensorStruct: traversable indexed tensor trees
 
 `torch.TensorStruct` provides generic traversal of model parameters and state.
-Every tensor leaf retains its complete `StaticSpec`: shape, dtype, and device
-policy. Optimizers, checkpointing, and AD can operate over parameter structures
+Every tensor leaf retains its complete `StaticSpec`: shape, dtype, and concrete
+device. Optimizers, checkpointing, and AD can operate over parameter structures
 without erasing those indices.
 
 ## Traversal contract
@@ -32,8 +32,8 @@ import Tyr.Module.Derive
 open torch
 
 structure LinearParameters (inDim outDim : UInt64) where
-  weight : Tensor { shape := #[outDim, inDim], dtype := .Float32 }
-  bias : Tensor { shape := #[outDim], dtype := .Float32 }
+  weight : Tensor { shape := #[outDim, inDim], dtype := .Float32, device := .CPU }
+  bias : Tensor { shape := #[outDim], dtype := .Float32, device := .CPU }
   name : Static String
   deriving TensorStruct
 
@@ -56,7 +56,7 @@ Generated schemas retain tensor metadata and distinguish parameter participation
 | Container | Behavior |
 | --- | --- |
 | `Tensor σ` | One indexed leaf |
-| `ShapePackedTensor dtype` | Existential shape with a fixed dtype; zip checks shape equality |
+| `ShapePackedTensor dtype device` | Existential shape with a fixed dtype and concrete device; zip checks shape equality |
 | `Array α`, `List α` | Elementwise traversal; zip panics on unequal lengths |
 | `Vector n α` | Length-indexed traversal and zip |
 | `Option α` | Traverses `some`; mismatched zip variants yield `none` |

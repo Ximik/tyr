@@ -4,7 +4,7 @@ A deep learning framework for Lean 4 with a typed tensor facade over LibTorch.
 
 ## Overview
 
-Use `torch.Tensor` for shape, dtype, and device-policy indices in model code.
+Use `torch.Tensor` for shape, dtype, and device indices in model code.
 Native adapters use `RawTensor` handles internally; checked constructors validate
 external metadata before exposing indexed tensors.
 
@@ -12,7 +12,7 @@ external metadata before exposing indexed tensors.
 import Tyr.Typed
 open torch
 
-def forward : Tensor { shape := #[32, 512], dtype := .Float32 } :=
+def forward : Tensor { shape := #[32, 512], dtype := .Float32, device := .CPU } :=
   let x := Tensor.ones #[32, 768]
   let w := Tensor.ones #[512, 768]
   x.linear w
@@ -195,12 +195,12 @@ Notes:
 
 ### Typed and Raw Tensors
 
-`Tensor σ` tracks shape, dtype, and a device policy in one static specification:
+`Tensor σ` tracks shape, dtype, and a concrete device in one static specification:
 
 ```lean
 def project {m k n : UInt64}
-    (x : Tensor { shape := #[m, k], dtype := .Float32 }) (w : Tensor { shape := #[k, n], dtype := .Float32 }) :
-    Tensor { shape := #[m, n], dtype := .Float32 } :=
+    (x : Tensor { shape := #[m, k], dtype := .Float32, device := .CPU }) (w : Tensor { shape := #[k, n], dtype := .Float32, device := .CPU }) :
+    Tensor { shape := #[m, n], dtype := .Float32, device := .CPU } :=
   x.mm w
 ```
 
@@ -231,7 +231,7 @@ Batch dimensions may come from runtime configuration while remaining in the tens
 ```lean
 let iter := BatchIterator.new shard 8 256
 let (batch, iter') ← iter.next
--- batch : Option (Tensor { shape := #[iter.batchSize, iter.seqLen], dtype := .Int64 })
+-- batch : Option (Tensor { shape := #[iter.batchSize, iter.seqLen], dtype := .Int64, device := .CPU })
 ```
 
 ### SafeTensors Type Provider

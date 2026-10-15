@@ -28,7 +28,7 @@ unrelated roots:
 - `Tyr.Text` (`Tyr/Text/`) — streaming-ASR utilities; no umbrella module and
   not re-exported by `import Tyr`.
 
-Token tensors use `Tensor { shape := shape, dtype := .Int64 }`; training masks use `Tensor { shape := shape, dtype := .Float32 }` (see [core/tensors.md](core/tensors.md)).
+Token tensors use `Tensor { shape := shape, dtype := .Int64, device := .CPU }`; training masks use `Tensor { shape := shape, dtype := .Float32, device := .CPU }` (see [core/tensors.md](core/tensors.md)).
 
 ### BPE tokenizer stack
 
@@ -136,7 +136,7 @@ Batch shapes remain indexed even when their dimensions come from runtime state.
 the dependent result type on the next call; no shape erasure is needed.
 
 `SequentialBatchIterator (n b s : UInt64)` also carries dimensions in its type
-and returns optional pairs of `Tensor { shape := #[b, s], dtype := .Int64 }`, shifted by one token.
+and returns optional pairs of `Tensor { shape := #[b, s], dtype := .Int64, device := .CPU }`, shifted by one token.
 It lives in `Examples.GPT.GPTDataLoader`, alongside `BatchIterator.nextGPT`
 and the distributed GPT batching and scheduling helpers. These GPT helpers
 retain both the input and target dimensions and their Int64 dtype.
@@ -267,12 +267,12 @@ assembles a pretraining → midtraining → SFT sequence.
 | `DataShard.loadFromFile` | `(path) (shardIdx numShards bosToken : UInt64) : IO (Σ n, DataShard n)` | `Tyr/DataLoader.lean:239` |
 | `DataShard.load` / `loadValidationData` | Return `IO (Σ n, DataShard n)` with the real partition length | `Tyr/DataLoader.lean` |
 | `DistributedDataGenerator.cursor` / `.restoreCursor` | Versioned `StreamCursor` capture and validated restore | `Tyr/DataLoader.lean` |
-| `BatchIterator.new` / `.next` | `(shard) (batchSize seqLen : UInt64) : BatchIterator` / `IO (Option (Tensor { shape := #[iter.batchSize, iter.seqLen], dtype := .Int64 }) × BatchIterator)` | `Tyr/DataLoader.lean:288,291` |
+| `BatchIterator.new` / `.next` | `(shard) (batchSize seqLen : UInt64) : BatchIterator` / `IO (Option (Tensor { shape := #[iter.batchSize, iter.seqLen], dtype := .Int64, device := .CPU }) × BatchIterator)` | `Tyr/DataLoader.lean:288,291` |
 | `DistributedDataGenerator.init` | `(config : Config) (batchSize seqLen : UInt64) : IO DistributedDataGenerator` | `Tyr/DataLoader.lean:323` |
-| `DistributedDataGenerator.nextBatch` | `IO (Option (Tensor { shape := #[gen.iterator.batchSize, gen.iterator.seqLen], dtype := .Int64 }) × DistributedDataGenerator)` | `Tyr/DataLoader.lean:333` |
-| `BatchIterator.nextGPT` | `IO (Option (Tensor { shape := #[iter.batchSize, iter.seqLen], dtype := .Int64 } × Tensor { shape := #[iter.batchSize, iter.seqLen], dtype := .Int64 }) × BatchIterator)` (input/target shift) | `Examples/GPT/GPTDataLoader.lean:23` |
+| `DistributedDataGenerator.nextBatch` | `IO (Option (Tensor { shape := #[gen.iterator.batchSize, gen.iterator.seqLen], dtype := .Int64, device := .CPU }) × DistributedDataGenerator)` | `Tyr/DataLoader.lean:333` |
+| `BatchIterator.nextGPT` | `IO (Option (Tensor { shape := #[iter.batchSize, iter.seqLen], dtype := .Int64, device := .CPU } × Tensor { shape := #[iter.batchSize, iter.seqLen], dtype := .Int64, device := .CPU }) × BatchIterator)` (input/target shift) | `Examples/GPT/GPTDataLoader.lean:23` |
 | `DistributedDataGenerator.nextBatchGPT` / `updateForStepGPT` | GPT batch + modded-nanogpt schedule | `Examples/GPT/GPTDataLoader.lean:60,84` |
-| `SequentialLoader.fromFile` / `SequentialBatchIterator.new` / `.next` | fixed-dim Shakespeare-style loading, `Tensor { shape := #[b, s], dtype := .Int64 }` batches | `Examples/GPT/GPTDataLoader.lean:118,159,166` |
+| `SequentialLoader.fromFile` / `SequentialBatchIterator.new` / `.next` | fixed-dim Shakespeare-style loading, `Tensor { shape := #[b, s], dtype := .Int64, device := .CPU }` batches | `Examples/GPT/GPTDataLoader.lean:118,159,166` |
 | `loadShakespeareData` | `(trainPath valPath) (batchSize seqLen) : IO (Σ n, SequentialBatchIterator n .. × Option (Σ m, SequentialLoader m))` — one-shot Shakespeare setup | `Examples/GPT/GPTDataLoader.lean:188` |
 
 ### Parquet / downloads — `torch.Data.Pretraining`, `torch.Data.Download`, `torch.Data.HuggingFace`
@@ -347,7 +347,7 @@ def nextTokenCount (gen : DistributedDataGenerator) : IO Nat := do
   match batch? with
   | none => pure 0
   | some batch =>
-    let indexed : Tensor { shape := #[gen.iterator.batchSize, gen.iterator.seqLen], dtype := .Int64 } := batch
+    let indexed : Tensor { shape := #[gen.iterator.batchSize, gen.iterator.seqLen], dtype := .Int64, device := .CPU } := batch
     pure (← indexed.toUInt64Array).size
 ```
 
@@ -366,7 +366,7 @@ open torch.DataLoader
 
 let ⟨n, loader⟩ ← SequentialLoader.fromFile "data/shakespeare_char/train.bin"
 let iter : SequentialBatchIterator n 4 32 := SequentialBatchIterator.new loader 4 32
-let (pair?, iter') := iter.next    -- pair? : Option (Tensor { shape := #[4, 32], dtype := .Int64 } × Tensor { shape := #[4, 32], dtype := .Int64 })
+let (pair?, iter') := iter.next    -- pair? : Option (Tensor { shape := #[4, 32], dtype := .Int64, device := .CPU } × Tensor { shape := #[4, 32], dtype := .Int64, device := .CPU })
 ```
 
 Midtraining/SFT token stream over a task mixture — reconstructed example

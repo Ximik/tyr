@@ -77,7 +77,9 @@ uniform lengths across the batch.
 
 Both cache structures have `TensorStruct` instances
 (`Tyr/Inference/KVCache.lean:162`), so generic traversals (`map`, `mapM`,
-`zipWith`, `fold`) — device moves, dtype casts — work over whole caches. See
+`zipWith`, `fold`) preserve each leaf specification. Device conversion requires
+a destination type and `TensorTreeCast` instance; dtype conversion uses the
+checked cast APIs. See
 [TensorStruct](core/tensorstruct.md).
 
 ## Key APIs
@@ -159,7 +161,8 @@ the async tone has finished (hazard documented at
 `LayerCache batch maxSeqLen numKvHeads headDim dtype device` stores indexed key
 and value tensors of shape `#[batch, numKvHeads, maxSeqLen, headDim]`.
 `Cache` adds a layer count, an array of layer caches, sequence lengths, and capacity.
-The default dtype is BFloat16 and the default placement policy is unrestricted.
+The default dtype is BFloat16. The device parameter is concrete; `Cache.init`
+defaults to CPU and indexes its result by the requested device.
 
 | Operation | Behavior |
 | --- | --- |
@@ -241,10 +244,10 @@ open torch torch.Generator
 
 def decodeStep {batch maxLen kvHeads : UInt64}
     (cache : KVCache.Cache 1 batch maxLen kvHeads 128)
-    (q : Tensor { shape := #[batch, 32, 1, 128], dtype := .BFloat16 })
-    (k v : Tensor { shape := #[batch, kvHeads, 1, 128], dtype := .BFloat16 }) :
+    (q : Tensor { shape := #[batch, 32, 1, 128], dtype := .BFloat16, device := .CPU })
+    (k v : Tensor { shape := #[batch, kvHeads, 1, 128], dtype := .BFloat16, device := .CPU }) :
     IO (KVCache.Cache 1 batch maxLen kvHeads 128 ×
-      Tensor { shape := #[batch, 32, 1, 128], dtype := .BFloat16 }) := do
+      Tensor { shape := #[batch, 32, 1, 128], dtype := .BFloat16, device := .CPU }) := do
   let (cache', out) ← cache.attendLayer (numQHeads := 32) 0 q k v (enableGqa := true)
   let cache' ← cache'.incrementSeqLens
   pure (cache', out)

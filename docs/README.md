@@ -41,7 +41,7 @@ Two kinds of documentation exist:
   (`map`/`mapM`/`zipWith`/`fold`), `Vector`, `Static`, `Frozen`, and the
   `deriving` handlers.
 - [Typed facade](core/typed.md) — `Tensor (σ : StaticSpec)`: phantom-typed
-  tensors tracking shape, dtype, and device policy.
+  tensors tracking shape, dtype, and concrete device.
 - [Utilities](core/utilities.md) — deterministic `PRNGKey` splitting, the
   `Log.Handlers` pattern, and the `#tensor` / `#module` infoview widgets.
 

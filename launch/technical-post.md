@@ -24,12 +24,12 @@ Many assumptions in an ML program are relations between values. The output
 width of one layer must equal the input width of the next; two operands must
 have compatible dtypes and devices; a reshape must preserve the number of
 elements. An ordinary tensor type says that a value is a tensor. A dependent
-tensor type can also state its shape, dtype, or device policy, because values
+tensor type can also state its shape, dtype, or concrete device, because values
 such as dimensions occur in the type itself.
 
 This moves a class of consistency checks from execution to program
 elaboration. The relationships are compositional: if one function returns
-`Tensor { shape := #[batch, hidden] }` and the next requires that shape, Lean checks their
+`Tensor { shape := #[batch, hidden], device := .CPU }` and the next requires that shape, Lean checks their
 connection even when `batch` and `hidden` are symbolic. The point is not to
 encode every property of a learned system in a type. Data-dependent dimensions,
 imported checkpoints, device availability, allocation, and floating-point
@@ -41,7 +41,7 @@ relations and runtime checks at external boundaries.
 The contract for a linear projection makes the relationship explicit:
 
 ```lean
-def linear {m n b : UInt64} {d : DType} {dev : DevicePolicy}
+def linear {m n b : UInt64} {d : DType} {dev : Device}
     (x      : Tensor ⟨#[b, m], d, dev⟩)
     (weight : Tensor ⟨#[n, m], d, dev⟩) :
     Tensor ⟨#[b, n], d, dev⟩ :=
@@ -49,15 +49,15 @@ def linear {m n b : UInt64} {d : DType} {dev : DevicePolicy}
 ```
 
 The same `m` occurs in both inputs, `b` is preserved, and `n` becomes the
-output width. The dtype and device policy must also agree.
+output width. The dtype and concrete device must also agree.
 
 A small use site specializes that contract to ordinary model dimensions:
 
 ```lean
 def project
-    (x : Tensor { shape := #[32, 768], dtype := .Float32 })
-    (weight : Tensor { shape := #[512, 768], dtype := .Float32 }) :
-    Tensor { shape := #[32, 512], dtype := .Float32 } :=
+    (x : Tensor { shape := #[32, 768], dtype := .Float32, device := .CPU })
+    (weight : Tensor { shape := #[512, 768], dtype := .Float32, device := .CPU }) :
+    Tensor { shape := #[32, 512], dtype := .Float32, device := .CPU } :=
   linear x weight
 ```
 
@@ -77,10 +77,10 @@ The invalid case cannot assign one value to the two occurrences of `m`, so
 compilation stops at this stage.
 
 The accepted program does not carry a second, shape-rich tensor
-representation at runtime. Tyr's `Tensor σ` is a typed view whose
-`StaticSpec` index is phantom; its only field is the existing raw tensor
-handle. Lean compiles the ordinary program and its call to the external symbol
-`lean_torch_linear`. The C++ bridge passes the two handles to
+representation at runtime. Tyr's `Tensor σ` uses an opaque indexed carrier backed by the existing raw
+tensor handle. Its `StaticSpec` records shape, dtype, and a concrete device;
+checked native admission validates those claims. Lean compiles the ordinary program and its call to the external symbol
+`lean_torch_linear_checked`. The C++ bridge passes the two handles to
 `torch::linear`, and LibTorch dispatches according to their actual device
 placement.
 
@@ -132,7 +132,7 @@ includes a declaration of the form
 
 ```lean
 Weights.load_embed_weightTyped :
-  IO (Tensor { shape := #[2, 2], dtype := DType.Float32 })
+  IO (Tensor { shape := #[2, 2], dtype := DType.Float32, device := .CPU })
 ```
 
 The focused example is:

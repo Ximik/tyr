@@ -383,14 +383,14 @@ def eventExample : IO Unit := do
 -- 4. Neural-ODE-style gradient: backsolve adjoint through an RK4 solve
 --    of dy/dt = a * y on scalar tensors.
 def adjointExample : IO Unit := do
-  let term : ODETerm (Tensor { shape := #[], dtype := .Float32 }) (Tensor { shape := #[], dtype := .Float32 }) := { vectorField := fun _t y a => Tensor.mul a y }
+  let term : ODETerm (Tensor { shape := #[], dtype := .Float32, device := .CPU }) (Tensor { shape := #[], dtype := .Float32, device := .CPU }) := { vectorField := fun _t y a => Tensor.mul a y }
   let solver :=
-    RK4.solver (Term := ODETerm (Tensor { shape := #[], dtype := .Float32 }) (Tensor { shape := #[], dtype := .Float32 })) (Y := Tensor { shape := #[], dtype := .Float32 }) (VF := Tensor { shape := #[], dtype := .Float32 }) (Args := Tensor { shape := #[], dtype := .Float32 })
+    RK4.solver (Term := ODETerm (Tensor { shape := #[], dtype := .Float32, device := .CPU }) (Tensor { shape := #[], dtype := .Float32, device := .CPU })) (Y := Tensor { shape := #[], dtype := .Float32, device := .CPU }) (VF := Tensor { shape := #[], dtype := .Float32, device := .CPU }) (Args := Tensor { shape := #[], dtype := .Float32, device := .CPU })
   let adjSolver :=
     RK4.solver
-      (Term := ODETerm (AdjointState (Tensor { shape := #[], dtype := .Float32 }) (Tensor { shape := #[], dtype := .Float32 })) (Tensor { shape := #[], dtype := .Float32 }))
-      (Y := AdjointState (Tensor { shape := #[], dtype := .Float32 }) (Tensor { shape := #[], dtype := .Float32 })) (VF := AdjointState (Tensor { shape := #[], dtype := .Float32 }) (Tensor { shape := #[], dtype := .Float32 }))
-      (Args := Tensor { shape := #[], dtype := .Float32 })
+      (Term := ODETerm (AdjointState (Tensor { shape := #[], dtype := .Float32, device := .CPU }) (Tensor { shape := #[], dtype := .Float32, device := .CPU })) (Tensor { shape := #[], dtype := .Float32, device := .CPU }))
+      (Y := AdjointState (Tensor { shape := #[], dtype := .Float32, device := .CPU }) (Tensor { shape := #[], dtype := .Float32, device := .CPU })) (VF := AdjointState (Tensor { shape := #[], dtype := .Float32, device := .CPU }) (Tensor { shape := #[], dtype := .Float32, device := .CPU }))
+      (Args := Tensor { shape := #[], dtype := .Float32, device := .CPU })
   let a := Tensor.full #[] 0.3
   let sol := diffeqsolve term solver 0.0 1.0 (some 0.01) (Tensor.full #[] 2.0) a
     (saveat := { steps := true }) (controller := ({} : ConstantStepSize))

@@ -134,7 +134,7 @@ structure ShardedTensor (σ : StaticSpec) (rank worldSize : UInt64)
   cacheIsStale : Bool := true
 ```
 
-Operations retain the full tensor's dtype and device policy:
+Operations retain the full tensor's dtype and concrete device:
 
 - `ShardedTensor.fromFull full proof shardDim` slices a `Tensor σ` and checks
   the local shard metadata. The proof establishes `rank < worldSize`.
@@ -257,13 +257,15 @@ step per iteration. Each batch carries its runtime dimensions as fields, and
 its tensor types depend on those fields:
 
 ```lean
+variable {device : Device}
+
 structure SFTBatch where
   batchSize seqLen : UInt64
-  inputs targets : Tensor { shape := #[batchSize, seqLen], dtype := .Int64 }
-  mask : Tensor { shape := #[batchSize, seqLen], dtype := .Float32 }
+  inputs targets : Tensor { shape := #[batchSize, seqLen], dtype := .Int64, device := device }
+  mask : Tensor { shape := #[batchSize, seqLen], dtype := .Float32, device := device }
   numValidTokens : Nat
 
-def maskedCrossEntropy {batch seq vocab : UInt64} {d m result : DType} {dev : DevicePolicy}
+def maskedCrossEntropy {batch seq vocab : UInt64} {d m result : DType} {dev : Device}
     [DType.Promotes d m result]
     (logits : Tensor ⟨#[batch, seq, vocab], d, dev⟩)
     (targets : Tensor ⟨#[batch, seq], .Int64, dev⟩)
@@ -274,13 +276,14 @@ def maskedCrossEntropy {batch seq vocab : UInt64} {d m result : DType} {dev : De
 The main entry is generic over the parameter tree:
 
 ```lean
-def trainLoop [TensorStruct P]
+def trainLoop {device : Device} [TensorStruct P]
     (cfg : SFTConfig) (params : P) (optState : Optim.AdamWState P)
-    (forwardFn : P → {b s : UInt64} → Tensor { shape := #[b, s], dtype := .Int64 } →
-      IO (Σ v : UInt64, Tensor { shape := #[b, s, v], dtype := .Float32 }))
-    (lossFn : {b s v : UInt64} → Tensor { shape := #[b, s, v], dtype := .Float32 } →
-      Tensor { shape := #[b, s], dtype := .Int64 } → Tensor { shape := #[b, s], dtype := .Float32 } → Tensor { shape := #[], dtype := .Float32 })
-    (trainDataFn : IO SFTBatch) (valDataFn : Option (IO SFTBatch) := none)
+    (forwardFn : P → {b s : UInt64} → Tensor { shape := #[b, s], dtype := .Int64, device := device } →
+      IO (Σ v : UInt64, Tensor { shape := #[b, s, v], dtype := .Float32, device := device }))
+    (lossFn : {b s v : UInt64} → Tensor { shape := #[b, s, v], dtype := .Float32, device := device } →
+      Tensor { shape := #[b, s], dtype := .Int64, device := device } → Tensor { shape := #[b, s], dtype := .Float32, device := device } → Tensor { shape := #[], dtype := .Float32, device := device })
+    (trainDataFn : IO (SFTBatch (device := .CPU)))
+    (valDataFn : Option (IO (SFTBatch (device := .CPU))) := none)
     (numTrainExamples : Nat := 10000) (callbacks : Callbacks := {})
     : IO (P × Optim.AdamWState P × SFTState)
 ```
@@ -288,7 +291,8 @@ def trainLoop [TensorStruct P]
 `SFTConfig` (`Tyr/Train/ChatSFT.lean:30`) holds epochs/iterations, batch
 geometry (`deviceBatchSize`, `targetExamplesPerStep` — `gradAccumSteps` is
 derived per world size), LRs, `maxSeqLen`, eval cadences, `device`, and
-`logInterval`. Inside the loop (`Tyr/Train/ChatSFT.lean:404-473`):
+`logInterval`. The loop checks that `cfg.device` matches the forward function’s
+concrete device, then moves CPU data batches to that device. Inside the loop (`Tyr/Train/ChatSFT.lean:404-473`):
 `gradAccumSteps` micro-batches accumulate gradients, averaged via
 `dist.allReduceGrads .avg` when distributed, then one `Optim.adamw` step at
 `cfg.embeddingLr * cfg.initLrFrac * linearLRMultiplier ...`. Note the loop
@@ -297,7 +301,7 @@ uses one AdamW over the whole tree — the `matrixLr`, `unembeddingLr`,
 the file header advertising a dual Muon/Adam optimizer.
 
 Data plumbing: `makeTaskDataGenerator (iter : TaskIterator) (maxLen)
-(padTokenId) : IO (IO SFTBatch)` adapts the task-mixture iterator from
+(padTokenId) : IO (IO (SFTBatch (device := .CPU)))` adapts the task-mixture iterator from
 `Tyr.Data.Task` (see [Data](data.md)); `prepareSFTBatch` builds the shifted
 input/target/mask triple directly. `Callbacks` (`onTrainStep`, `onValidation`)
 compose via `Callbacks.combine`; `artifactCallbacks artifacts "sft"` logs to
@@ -311,9 +315,9 @@ trust region, no importance weights, no clipping, advantage
 
 ```lean
 def computeAdvantages (rewards : Array Float) : Array Float
-def computePGLoss (logProbs : Tensor { shape := #[b, t], dtype := .Float32 })
-    (advantages : Tensor { shape := #[b], dtype := .Float32 }) (mask : Tensor { shape := #[b, t], dtype := .Float32 })
-    (numPasses : UInt64 := 1) (examplesPerRank : UInt64 := 1) : Tensor { shape := #[], dtype := .Float32 }
+def computePGLoss {device : Device} (logProbs : Tensor { shape := #[b, t], dtype := .Float32, device := device })
+    (advantages : Tensor { shape := #[b], dtype := .Float32, device := device }) (mask : Tensor { shape := #[b, t], dtype := .Float32, device := device })
+    (numPasses : UInt64 := 1) (examplesPerRank : UInt64 := 1) : Tensor { shape := #[], dtype := .Float32, device := device }
 ```
 
 Rewards are pluggable; `mathReward` parses the GSM8K `#### <answer>` marker,
@@ -329,7 +333,7 @@ The update-capable training loop:
 def trainOnPromptsWithUpdates (b t : UInt64) [TensorStruct P]
     (prompts : Array (Array UInt64 × String × String))   -- (tokens, text, answer)
     (generateOneFn : P → Array UInt64 → IO UInt64)
-    (forwardFn : P → Tensor { shape := #[b, t], dtype := .Int64 } → Tensor { shape := #[b, t], dtype := .Int64 } → IO (Tensor { shape := #[b, t], dtype := .Float32 }))  -- (params, input, target) → per-token NLL
+    (forwardFn : P → Tensor { shape := #[b, t], dtype := .Int64, device := .CPU } → Tensor { shape := #[b, t], dtype := .Int64, device := .CPU } → IO (Tensor { shape := #[b, t], dtype := .Float32, device := .CPU }))  -- (params, input, target) → per-token NLL
     (params : P) (optState : Optim.AdamWState P)
     (decodeFn : Array UInt64 → String) (rewardFn : String → String → Float)
     (config : GRPOConfig) (numEpochs : Nat := 1) (callbacks : Callbacks := {})
