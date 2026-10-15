@@ -13,6 +13,7 @@ import Tests.TestCheckpoint
 import Tests.TestCheckpointPersistence
 import Tests.TestNanoChatCheckpoint
 import Tests.TestFFIBoundary
+import Tests.TestParquetRecovery
 import Tests.TestWidgetTyped
 import Tests.TestTypedStandalone
 import Tests.TestTensorTreeCast

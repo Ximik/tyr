@@ -84,6 +84,7 @@ jobs:
           python3 scripts/check_ffi_abi.py --header cc/src/tyr_vae_abi.h --generated .lake/build/ir/Tyr/RawTensor/VAE.c
           python3 scripts/check_ffi_abi.py --header cc/src/tyr_flux_abi.h --generated .lake/build/ir/Tyr/RawTensor/Flux.c
           python3 scripts/check_ffi_abi.py --header cc/src/tyr_float_buffer_abi.h --generated .lake/build/ir/Tyr/Audio/FloatBuffer.c --require-complete
+          python3 scripts/check_ffi_abi.py --header cc/src/tyr_parquet_abi.h --generated .lake/build/ir/Tyr/Data/Pretraining.c --require-complete --symbol-prefix lean_parquet_
 
       - name: Test native attention CPU semantics
         run: |
@@ -177,6 +178,7 @@ jobs:
         run: |
           python3 scripts/check_ffi_recovery.py
           python3 scripts/test_ffi_recovery.py
+          python3 scripts/test_ffi_abi.py
           python3 scripts/test_inventory.py
           python3 scripts/test_test_inventory.py
           python3 scripts/test_distributed_values_runner.py

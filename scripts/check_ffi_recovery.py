@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Require complete exception guards on recoverable RawTensor native exports.
+"""Require complete exception guards on audited recoverable native exports.
 
 Inventory is derived from IO/Except result types in Tyr/RawTensor.lean, its
-submodules, and Tyr/Basic.lean. Every source definition, including inactive
+submodules, Tyr/Basic.lean, and the Parquet FFI in Tyr/Data/Pretraining.lean.
+Other native subsystems are outside this explicitly reviewed scope.
+Every source definition, including inactive
 platform branches, must contain only a checkedCall/checkedIoCall return with a
 literal context and reference-capture lambda. This forbids throwable work in
 argument evaluation before the guard as well as statements before/after it.
@@ -253,6 +255,7 @@ def audit(root: Path) -> tuple[list[str], Counter]:
     errors = []
     exports = {}
     lean_paths = [root / "Tyr/Basic.lean", root / "Tyr/RawTensor.lean",
+                  root / "Tyr/Data/Pretraining.lean",
                   *sorted((root / "Tyr/RawTensor").rglob("*.lean"))]
     for path in lean_paths:
         label = path.relative_to(root).as_posix()

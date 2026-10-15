@@ -6,7 +6,9 @@ the other side of this contract because tyr.cpp includes tyr_ffi_abi.h.
 This intentionally checks the named, audited boundaries in that header; it
 does not claim that the remaining legacy FFI surface has been audited. Use
 --require-complete for an adapter whose recognized declarations must all appear
-in the audited header.
+in the audited header. Add --symbol-prefix to scope generated declarations when
+an adapter also references imports from other native subsystems; every audited
+header declaration must belong to that scope.
 """
 
 import argparse
@@ -18,15 +20,17 @@ import sys
 ROOT = Path(__file__).resolve().parent.parent
 DECLARATION = re.compile(
     r"\b(lean_object\s*\*|uint(?:8|16|32|64)_t|size_t|double|float|void)"
-    r"\s+(lean_(?:torch|float_buffer)_\w+)\s*\(([^()]*)\)\s*;"
+    r"\s+(lean_(?:torch|float_buffer|parquet)_\w+)\s*\(([^()]*)\)\s*;"
 )
 
 
-def declarations(path: Path) -> dict[str, tuple[str, tuple[str, ...]]]:
+def declarations(path: Path, symbol_prefix: str | None = None) -> dict[str, tuple[str, tuple[str, ...]]]:
     source = re.sub(r"/\*.*?\*/|//[^\n]*", "", path.read_text(), flags=re.S)
     result = {}
     for match in DECLARATION.finditer(source):
         ret, name, args = match.groups()
+        if symbol_prefix is not None and not name.startswith(symbol_prefix):
+            continue
         signature = (
             re.sub(r"\s+", "", ret),
             tuple(re.sub(r"\s+", "", arg) for arg in args.split(",") if arg.strip()),
@@ -35,6 +39,12 @@ def declarations(path: Path) -> dict[str, tuple[str, tuple[str, ...]]]:
             raise ValueError(f"{path}: conflicting declarations for {name}")
         result[name] = signature
     return result
+
+
+def symbol_prefix(value: str) -> str:
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z_0-9]*", value):
+        raise argparse.ArgumentTypeError("expected a nonempty C identifier prefix")
+    return value
 
 
 def main() -> int:
@@ -47,20 +57,26 @@ def main() -> int:
     ])
     parser.add_argument("--require-complete", action="store_true",
                         help="reject generated declarations missing from the audited header")
+    parser.add_argument("--symbol-prefix", type=symbol_prefix,
+                        help="audit only generated symbols with this prefix; the entire header must match")
     args = parser.parse_args()
     try:
         expected = declarations(args.header)
+        if not expected:
+            raise ValueError("audited header contains no declarations")
+        if args.symbol_prefix is not None:
+            outside = sorted(name for name in expected if not name.startswith(args.symbol_prefix))
+            if outside:
+                raise ValueError("audited header declarations outside --symbol-prefix "
+                                 f"{args.symbol_prefix}: {', '.join(outside)}")
         generated = {}
         for source in args.generated:
-            for name, signature in declarations(source).items():
+            for name, signature in declarations(source, args.symbol_prefix).items():
                 if name in generated and generated[name] != signature:
                     raise ValueError(f"{source}: conflicting declarations for {name}")
                 generated[name] = signature
     except (OSError, ValueError) as error:
         print(f"FFI ABI check: {error}", file=sys.stderr)
-        return 1
-    if not expected:
-        print("FFI ABI check: audited header contains no declarations", file=sys.stderr)
         return 1
     errors = []
     for name, signature in expected.items():

@@ -7,6 +7,8 @@
 
 #include <lean/lean.h>
 #include <string>
+#include "tyr_checked_result.h"
+#include "tyr_parquet_abi.h"
 
 #if defined(__has_include)
 #if __has_include(<arrow/api.h>) && __has_include(<arrow/io/file.h>) && __has_include(<parquet/arrow/reader.h>) && __has_include(<parquet/file_reader.h>)
@@ -93,7 +95,8 @@ static lean_object* mk_row_group_data(const std::vector<std::string>& documents)
 // Lists all .parquet files in a directory, sorted by name.
 // ============================================================================
 
-lean_object* lean_parquet_list_files(b_lean_obj_arg dir_path, lean_object* /* world */) {
+lean_object* lean_parquet_list_files(b_lean_obj_arg dir_path) {
+    return tyr::checkedIoCall("Parquet.listFiles", [&] {
     std::string path = lean_string_cstr(dir_path);
 
     // Check if directory exists
@@ -121,6 +124,7 @@ lean_object* lean_parquet_list_files(b_lean_obj_arg dir_path, lean_object* /* wo
     std::sort(parquet_files.begin(), parquet_files.end());
 
     return mk_io_ok(mk_string_array(parquet_files));
+    });
 }
 
 // ============================================================================
@@ -128,7 +132,8 @@ lean_object* lean_parquet_list_files(b_lean_obj_arg dir_path, lean_object* /* wo
 // Gets metadata (row group count, row count, column names) for a parquet file.
 // ============================================================================
 
-lean_object* lean_parquet_get_metadata(b_lean_obj_arg file_path, lean_object* /* world */) {
+lean_object* lean_parquet_get_metadata(b_lean_obj_arg file_path) {
+    return tyr::checkedIoCall("Parquet.getMetadata", [&] {
     std::string path = lean_string_cstr(file_path);
 
     // Open file
@@ -163,6 +168,7 @@ lean_object* lean_parquet_get_metadata(b_lean_obj_arg file_path, lean_object* /*
     }
 
     return mk_io_ok(mk_parquet_metadata(num_row_groups, num_rows, columns));
+    });
 }
 
 // ============================================================================
@@ -171,7 +177,8 @@ lean_object* lean_parquet_get_metadata(b_lean_obj_arg file_path, lean_object* /*
 // ============================================================================
 
 lean_object* lean_parquet_read_row_group(b_lean_obj_arg file_path, uint64_t row_group_idx,
-                                          b_lean_obj_arg text_column, lean_object* /* world */) {
+                                          b_lean_obj_arg text_column) {
+    return tyr::checkedIoCall("Parquet.readRowGroup", [&] {
     std::string path = lean_string_cstr(file_path);
     std::string column_name = lean_string_cstr(text_column);
 
@@ -251,6 +258,7 @@ lean_object* lean_parquet_read_row_group(b_lean_obj_arg file_path, uint64_t row_
     }
 
     return mk_io_ok(mk_row_group_data(documents));
+    });
 }
 
 // ============================================================================
@@ -258,10 +266,12 @@ lean_object* lean_parquet_read_row_group(b_lean_obj_arg file_path, uint64_t row_
 // Checks if a file exists.
 // ============================================================================
 
-lean_object* lean_parquet_file_exists(b_lean_obj_arg file_path, lean_object* /* world */) {
+lean_object* lean_parquet_file_exists(b_lean_obj_arg file_path) {
+    return tyr::checkedIoCall("Parquet.fileExists", [&] {
     std::string path = lean_string_cstr(file_path);
     bool exists = fs::exists(path) && fs::is_regular_file(path);
     return mk_io_ok(lean_box(exists ? 1 : 0));
+    });
 }
 
 // ============================================================================
@@ -406,7 +416,8 @@ static std::string arrow_value_to_json(const std::shared_ptr<arrow::Array>& arr,
 // Returns Array String where each string is a JSON object for one row.
 // ============================================================================
 
-lean_object* lean_parquet_read_as_json(b_lean_obj_arg file_path, lean_object* /* world */) {
+lean_object* lean_parquet_read_as_json(b_lean_obj_arg file_path) {
+    return tyr::checkedIoCall("Parquet.readAsJson", [&] {
     std::string path = lean_string_cstr(file_path);
 
     // Open file
@@ -469,6 +480,7 @@ lean_object* lean_parquet_read_as_json(b_lean_obj_arg file_path, lean_object* /*
     }
 
     return mk_io_ok(mk_string_array(json_rows));
+    });
 }
 
 // ============================================================================
@@ -477,8 +489,8 @@ lean_object* lean_parquet_read_as_json(b_lean_obj_arg file_path, lean_object* /*
 // More memory-efficient for large files.
 // ============================================================================
 
-lean_object* lean_parquet_read_row_group_as_json(b_lean_obj_arg file_path, uint64_t row_group_idx,
-                                                   lean_object* /* world */) {
+lean_object* lean_parquet_read_row_group_as_json(b_lean_obj_arg file_path, uint64_t row_group_idx) {
+    return tyr::checkedIoCall("Parquet.readRowGroupAsJson", [&] {
     std::string path = lean_string_cstr(file_path);
 
     // Open file
@@ -547,6 +559,7 @@ lean_object* lean_parquet_read_row_group_as_json(b_lean_obj_arg file_path, uint6
     }
 
     return mk_io_ok(mk_string_array(json_rows));
+    });
 }
 
 } // extern "C"
@@ -564,28 +577,40 @@ static lean_object* parquet_unavailable() {
     return mk_io_error("Parquet support unavailable: build without Arrow/Parquet development headers");
 }
 
-lean_object* lean_parquet_list_files(b_lean_obj_arg, lean_object*) {
-    return parquet_unavailable();
+lean_object* lean_parquet_list_files(b_lean_obj_arg) {
+    return tyr::checkedIoCall("Parquet.listFiles", [&] {
+        return parquet_unavailable();
+    });
 }
 
-lean_object* lean_parquet_get_metadata(b_lean_obj_arg, lean_object*) {
-    return parquet_unavailable();
+lean_object* lean_parquet_get_metadata(b_lean_obj_arg) {
+    return tyr::checkedIoCall("Parquet.getMetadata", [&] {
+        return parquet_unavailable();
+    });
 }
 
-lean_object* lean_parquet_read_row_group(b_lean_obj_arg, uint64_t, b_lean_obj_arg, lean_object*) {
-    return parquet_unavailable();
+lean_object* lean_parquet_read_row_group(b_lean_obj_arg, uint64_t, b_lean_obj_arg) {
+    return tyr::checkedIoCall("Parquet.readRowGroup", [&] {
+        return parquet_unavailable();
+    });
 }
 
-lean_object* lean_parquet_file_exists(b_lean_obj_arg, lean_object*) {
-    return parquet_unavailable();
+lean_object* lean_parquet_file_exists(b_lean_obj_arg) {
+    return tyr::checkedIoCall("Parquet.fileExists", [&] {
+        return parquet_unavailable();
+    });
 }
 
-lean_object* lean_parquet_read_as_json(b_lean_obj_arg, lean_object*) {
-    return parquet_unavailable();
+lean_object* lean_parquet_read_as_json(b_lean_obj_arg) {
+    return tyr::checkedIoCall("Parquet.readAsJson", [&] {
+        return parquet_unavailable();
+    });
 }
 
-lean_object* lean_parquet_read_row_group_as_json(b_lean_obj_arg, uint64_t, lean_object*) {
-    return parquet_unavailable();
+lean_object* lean_parquet_read_row_group_as_json(b_lean_obj_arg, uint64_t) {
+    return tyr::checkedIoCall("Parquet.readRowGroupAsJson", [&] {
+        return parquet_unavailable();
+    });
 }
 
 } // extern "C"

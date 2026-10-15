@@ -14,8 +14,10 @@ class RecoveryTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         (self.root / "Tyr/RawTensor").mkdir(parents=True)
+        (self.root / "Tyr/Data").mkdir(parents=True)
         (self.root / "cc/src").mkdir(parents=True)
         self.write("Tyr/Basic.lean", "")
+        self.write("Tyr/Data/Pretraining.lean", "")
         self.declare()
         self.native('return tyr::checkedIoCall("example", [&] { return run(); });')
 
@@ -45,6 +47,48 @@ class RecoveryTests(unittest.TestCase):
         self.assertEqual(len(errors), 1)
         self.assertIn("Tyr/RawTensor/New.lean:1", errors[0])
         self.assertIn("no recognized native definition for new_export", errors[0])
+
+    def test_pretraining_io_declarations_are_in_scope_without_symbol_list(self):
+        self.write("Tyr/Data/Pretraining.lean", '''
+@[extern "lean_parquet_get_metadata"] opaque metadata : IO ParquetMetadata
+@[extern "lean_parquet_future_operation"] opaque futureOperation : IO Unit
+''')
+        self.native('return read_metadata();', "cc/src/tyr_parquet.cpp",
+                    "lean_parquet_get_metadata")
+        errors = self.errors()
+        self.assertTrue(any("lean_parquet_get_metadata from Tyr/Data/Pretraining.lean:2" in error
+                            and "must contain only" in error for error in errors))
+        self.assertTrue(any("no recognized native definition for lean_parquet_future_operation" in error
+                            for error in errors))
+
+    def test_parquet_arrow_and_disabled_variants_are_both_checked(self):
+        symbol = "lean_parquet_get_metadata"
+        self.write("Tyr/Data/Pretraining.lean",
+                   f'@[extern "{symbol}"] opaque metadata : IO ParquetMetadata\n')
+        guarded = 'return tyr::checkedIoCall("metadata", [&] { return read_metadata(); });'
+        unavailable = 'return tyr::checkedIoCall("metadata", [&] { return parquet_unavailable(); });'
+
+        def variants(enabled, disabled):
+            self.write("cc/src/tyr_parquet.cpp",
+                       f'#if TYR_HAS_ARROW\nlean_object* {symbol}() {{ {enabled} }}\n'
+                       f'#else\nlean_object* {symbol}() {{ {disabled} }}\n#endif\n')
+
+        variants(guarded, unavailable)
+        self.assertEqual(self.errors(), [])
+        self.assertEqual(audit(self.root)[1]["guarded definitions"], 3)
+        variants('return read_metadata();', unavailable)
+        self.assertTrue(any("cc/src/tyr_parquet.cpp:2" in error for error in self.errors()))
+        for disabled in ['return parquet_unavailable();', 'std::string message; ' + unavailable]:
+            with self.subTest(disabled=disabled):
+                variants(guarded, disabled)
+                self.assertTrue(any("cc/src/tyr_parquet.cpp:4" in error for error in self.errors()))
+
+    def test_unreviewed_native_modules_are_not_silently_claimed_in_scope(self):
+        (self.root / "Tyr/GPU").mkdir()
+        self.write("Tyr/GPU/Unreviewed.lean",
+                   '@[extern "unreviewed_gpu_export"] opaque launch : IO Unit\n')
+        self.native('return unguarded();', "cc/src/unreviewed.cpp", "unreviewed_gpu_export")
+        self.assertEqual(self.errors(), [])
 
     def test_io_in_argument_and_comments_is_not_a_result(self):
         declarations = lean_exports('''
