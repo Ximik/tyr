@@ -47,7 +47,8 @@ structure WorkHandle where
   id : UInt64
   deriving Repr, BEq, Inhabited
 
-/-- Wait for an async operation to complete. -/
+/-- Await an async operation, reporting failure or abortion and consuming its
+    handle. A second wait on the same handle is an error. -/
 @[extern "lean_torch_dist_wait"]
 private opaque waitImpl (workId : UInt64) : IO Unit
 
@@ -64,11 +65,15 @@ def wait (handle : WorkHandle) : IO Unit :=
     - masterPort: Port for rendezvous
     - rank: This process's rank (0 to worldSize-1)
     - worldSize: Total number of processes
+
+    Invalid bounds and unavailable/unknown backends fail before rendezvous.
+    Initialization publishes process-group state only after construction succeeds.
 -/
 @[extern "lean_torch_dist_init_process_group"]
 opaque initProcessGroup (backend masterAddr : @& String) (masterPort rank worldSize : UInt64) : IO Unit
 
-/-- Set the current CUDA device for this process (typically LOCAL_RANK). -/
+/-- Set the current CUDA device for this process (typically LOCAL_RANK).
+    Indices outside the native DeviceIndex range fail on every build. -/
 @[extern "lean_torch_dist_set_cuda_device"]
 opaque setCudaDevice (device : UInt64) : IO Unit
 
@@ -84,7 +89,9 @@ opaque getWorldSize : IO UInt64
 @[extern "lean_torch_dist_is_initialized"]
 opaque isInitialized : IO Bool
 
-/-- Destroy the process group and clean up resources -/
+/-- Await pending work and release all process-group resources. Cleanup attempts
+    every pending work item and resets state even when waiting fails, then reports
+    the first failure. Calling this while uninitialized is safe. -/
 @[extern "lean_torch_dist_destroy_process_group"]
 opaque destroyProcessGroup : IO Unit
 
@@ -231,10 +238,14 @@ def allGatherList {σ : StaticSpec} (outputs : Array (Tensor σ)) (input : Tenso
 
 /-! ## Async Operation Handling -/
 
-/-- Check if an async operation is complete (non-blocking) -/
+/-- Poll for successful completion without consuming the work handle.
+    Pending work returns false; failed work or an unknown handle returns an error.
+    Call `wait` even after a true result to synchronize and release the work. -/
 @[extern "lean_torch_dist_is_completed"]
 private opaque isCompletedImpl (workId : UInt64) : IO Bool
 
+/-- Observe completion without releasing the handle. `wait` remains required
+    after successful polling; an unknown or already consumed handle is an error. -/
 def WorkHandle.isCompleted (handle : WorkHandle) : IO Bool :=
   isCompletedImpl handle.id
 
@@ -344,13 +355,20 @@ def cautiousUpdate {σ : StaticSpec} (param update : Tensor σ) (lr wd : Float) 
 
 /-! ## Helper Functions -/
 
-/-- Run a distributed computation with proper initialization and cleanup -/
+/-- Run a distributed computation and always clean up after a successful init.
+    If both the action and cleanup fail, preserve the action error; after a
+    successful action, report any cleanup error instead of returning its result. -/
 def withDistributed (backend masterAddr : String) (masterPort rank worldSize : UInt64)
     (action : IO α) : IO α := do
   initProcessGroup backend masterAddr masterPort rank worldSize
-  let result ← action
-  destroyProcessGroup
-  return result
+  let result ← action.toBaseIO
+  let cleanup ← destroyProcessGroup.toBaseIO
+  match result with
+  | .error error => throw error
+  | .ok value =>
+    match cleanup with
+    | .error error => throw error
+    | .ok _ => pure value
 
 /-- Get rank and world size as a pair -/
 def getRankAndWorldSize : IO (UInt64 × UInt64) := do

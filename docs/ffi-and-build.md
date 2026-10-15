@@ -191,7 +191,8 @@ hardware qualification.
 
 Native result carriers must match the Lean declaration on every path.
 `scripts/check_ffi_recovery.py` inventories recoverable declarations in
-`Tyr/RawTensor.lean`, its submodules, `Tyr/Basic.lean`, `Tyr/Torch.lean`, and the Parquet FFI in
+`Tyr/RawTensor.lean`, its submodules, `Tyr/Basic.lean`, `Tyr/Torch.lean`,
+`Tyr/Distributed.lean`, and the Parquet FFI in
 `Tyr/Data/Pretraining.lean`. It requires every native implementation, including
 inactive platform branches, to enter the common exception guard before doing
 C++ work. The CPU tooling job runs this check alongside ABI and runtime
@@ -246,6 +247,24 @@ generated `Tyr/Torch.c`. `scripts/test_native_torch_recovery.sh` exercises the
 resampler size failures, borrowed arrays, and runtime error carriers. This
 exception guard does not establish CUDA graph lifecycle or stream correctness;
 those GPU-specific contracts still require repair and qualification.
+
+All distributed and polar IO exports enter the common guard and have complete
+declarations in `cc/src/tyr_distributed_abi.h`, checked against generated
+`Tyr/Distributed.c`. Process-group initialization checks port, rank, world size,
+and backend availability before rendezvous, then publishes state only after
+construction succeeds. CUDA device indices are checked before narrowing on every
+build. Synchronous collective success carries a boxed UInt64 zero; asynchronous
+success carries the pending-work handle. Polling is observational: it retains
+handles for synchronization and reports completed failures or unknown IDs.
+Waiting consumes the handle even when the backend reports an error or abort.
+Teardown attempts every pending wait and resets
+the group and store before reporting its first error. `withDistributed` attempts
+cleanup after both successful and failed actions, preserving the action's error
+if cleanup also fails. `scripts/test_native_distributed_recovery.sh` checks ABI
+carriers and invalid metadata against the library, plus work-lifecycle errors
+with a fake backend. The separate two-rank Gloo lane checks collective values,
+successful cleanup, reinitialization, and cleanup after an action error. These
+CPU checks do not qualify NCCL or GPU stream behavior.
 
 STFT preserves its IO error contract even for invalid native FFT parameters.
 Apple image and video preprocessing catches C++ failures at each IO entry point;

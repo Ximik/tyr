@@ -18,6 +18,7 @@ class RecoveryTests(unittest.TestCase):
         (self.root / "cc/src").mkdir(parents=True)
         self.write("Tyr/Basic.lean", "")
         self.write("Tyr/Torch.lean", "")
+        self.write("Tyr/Distributed.lean", "")
         self.write("Tyr/Data/Pretraining.lean", "")
         self.declare()
         self.native('return tyr::checkedIoCall("example", [&] { return run(); });')
@@ -72,6 +73,21 @@ class RecoveryTests(unittest.TestCase):
         self.assertTrue(any("lean_torch_resample_soxr_hq from Tyr/Torch.lean:2" in error
                             and "must contain only" in error for error in errors))
         self.assertTrue(any("no recognized native definition for lean_torch_future_runtime_operation" in error
+                            for error in errors))
+
+    def test_distributed_and_polar_io_are_in_scope_without_symbol_list(self):
+        self.write("Tyr/Distributed.lean", '''
+@[extern "lean_torch_dist_get_rank"] opaque rank : IO UInt64
+@[extern "lean_torch_xxt"] opaque xxt (t : @& RawTensor) : IO RawTensor
+@[extern "lean_torch_dist_future"] opaque future : IO Unit
+''')
+        self.native('std::lock_guard lock(mutex); return tyr::checkedIoCall("rank", [&] { return rank(); });',
+                    "cc/src/tyr_distributed.cpp", "lean_torch_dist_get_rank")
+        self.native('return xxt();', "cc/src/tyr_polar.cpp", "lean_torch_xxt")
+        errors = self.errors()
+        for symbol in ["lean_torch_dist_get_rank", "lean_torch_xxt"]:
+            self.assertTrue(any(symbol in error and "must contain only" in error for error in errors))
+        self.assertTrue(any("no recognized native definition for lean_torch_dist_future" in error
                             for error in errors))
 
     def test_parquet_arrow_and_disabled_variants_are_both_checked(self):

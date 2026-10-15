@@ -1,4 +1,5 @@
 import LeanTest
+import Tests.Assertions
 import Tyr.Module.Derive
 import Tyr.Distributed
 
@@ -34,6 +35,30 @@ def testUninitializedCollectivesReturnErrors : IO Unit := do
     pure true
   LeanTest.assertTrue rejectedAsync "An async launch failure must return an IO error"
   LeanTest.assertEqual (← input.toFloatArray) #[2.0, 3.0]
+
+@[test]
+def testInvalidDistributedDeviceIndicesReturnErrors : IO Unit := do
+  for index in #[128, 256, 18446744073709551615] do
+    Tests.assertThrows (dist.setCudaDevice index) (some "device")
+
+@[test]
+def testInvalidDistributedInitMetadataReturnsErrors : IO Unit := do
+  LeanTest.assertFalse (← dist.isInitialized)
+  -- Every case is rejected before opening a rendezvous socket, including when
+  -- the selected backend is unavailable in the native build.
+  let cases : Array (String × UInt64 × UInt64 × UInt64 × String) := #[
+    ("gloo", 65536, 0, 1, "master_port"),
+    ("gloo", 0, 0, 0, "world_size"),
+    ("gloo", 0, 0, 2147483648, "world_size"),
+    ("gloo", 0, 1, 1, "rank"),
+    ("gloo", 0, 18446744073709551615, 1, "rank"),
+    ("unsupported", 0, 0, 1, "backend")]
+  for (backend, port, rank, worldSize, detail) in cases do
+    Tests.assertThrows (dist.initProcessGroup backend "127.0.0.1" port rank worldSize)
+      (some detail)
+    LeanTest.assertFalse (← dist.isInitialized)
+    dist.destroyProcessGroup
+  LeanTest.assertFalse (← dist.isInitialized)
 
 /-- Run on each of exactly two ranks in an initialized CPU process group.
     Retained inputs and earlier results detect writes into shared storage. -/
@@ -91,5 +116,29 @@ def checkTwoRankValues (rank : UInt64) : IO Unit := do
   LeanTest.assertEqual (← completedTree.1.toFloatArray) #[3.0]
   LeanTest.assertEqual (← completedTree.2.toFloatArray) #[3.0]
   LeanTest.assertTrue (completedTree.1.requiresGrad && completedTree.2.requiresGrad)
+
+/-- Exercise normal cleanup, reinitialization, and cleanup after an action error
+    on a real two-rank Gloo group. This is run by the bounded separate launcher. -/
+def checkTwoRankSession (rank port : UInt64) : IO Unit := do
+  let result ← dist.withDistributed "gloo" "127.0.0.1" port rank 2 do
+    checkTwoRankValues rank
+    dist.barrier
+    pure (rank + 7)
+  LeanTest.assertEqual result (rank + 7)
+  LeanTest.assertFalse (← dist.isInitialized)
+    "A successful distributed action must release its process group"
+
+  let failure ← try
+    dist.withDistributed "gloo" "127.0.0.1" port rank 2 do
+      dist.barrier
+      throw (IO.userError "intentional distributed action failure")
+    pure none
+  catch error => pure (some error.toString)
+  let retained ← dist.isInitialized
+  -- Also clean up the unfixed baseline, so a failing regression leaves no peer.
+  if retained then dist.destroyProcessGroup
+  LeanTest.assertEqual failure (some "intentional distributed action failure")
+  LeanTest.assertFalse retained
+    "A failing distributed action must release its process group"
 
 end Tests.DistributedValues

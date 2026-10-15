@@ -67,6 +67,14 @@ def WorkHandle.isCompleted (handle : WorkHandle) : IO Bool
 def waitAll (handles : Array WorkHandle) : IO Unit
 ```
 
+For explicit work handles, `isCompleted` only observes successful completion. It
+returns false while pending and reports failed work or an unknown handle as an
+error. Polling retains the handle, including after an error, so `wait` or teardown
+can drain it. Call `wait` after a successful poll to establish backend stream
+synchronization and release the handle. Waiting consumes a handle even when the
+operation fails or is aborted; a second wait is an error. `waitAll` attempts every
+handle before reporting the first error.
+
 For whole models, TensorStruct-aware helpers map the collective over every
 leaf (`Tyr/Distributed.lean:280-311`) — the functions most loops call:
 
@@ -100,8 +108,12 @@ check on Linux and macOS. It qualifies Gloo CPU collectives, not multi-GPU NCCL
 behavior. Builds without Gloo still run the ordinary error-path and
 async-interface tests in `Tests.TestDistributedValues`.
 
-`dist.withDistributed` (`Tyr/Distributed.lean:261`) brackets init/action/teardown
-for a single process group (no teardown if the action throws). A
+`dist.withDistributed` brackets init/action/teardown for a single process group.
+After successful initialization it runs teardown even if the action fails,
+preserving the action's error when cleanup also fails. Teardown drains every
+pending work item and resets process-group state before reporting its first
+failure. Invalid initialization arguments fail before rendezvous, and process-group
+state is published only after native construction succeeds. A
 `DistributedSampler` (`Tyr/Distributed.lean:318-423`) shards a dataset
 deterministically per rank with an LCG-seeded Fisher–Yates shuffle; the
 examples currently shard data ad hoc instead.
