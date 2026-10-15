@@ -142,6 +142,23 @@ release unused outputs and use detached inputs for inference to avoid retaining
 unneeded graphs. `Tests/TestAutogradIdentity.lean` covers independent parameter
 initialization and repeated backward on the same forward value.
 
+Pure attention exports always pass literal zero dropout to native SDPA and do
+not accept a dropout probability. Their `?` adapters return validation and
+kernel errors through `Except String`; convenience wrappers use the usual
+panic fallback. Configurable attention dropout uses separate native IO exports
+and typed `attentionIO`, `attentionGQAIO`, `attentionGQAMaskIO`,
+`attentionGQAQKVIO`, `attentionWindowIO`, and `flashAttentionIO` adapters.
+These take required dropout and training arguments after the tensor operands.
+Evaluation uses zero dropout; training retains the configured probability.
+The IO adapters validate the original probability as finite and in `[0, 1]`
+before selecting either mode, so invalid configuration also fails in evaluation.
+An IO caller must bind that operation rather than wrap a pure stochastic call
+in `pure`. The sampled mask stays in the native autograd graph for backward.
+The GPU wrappers and GPT example follow this split; GPT evaluation disables
+attention dropout as well as its residual and embedding dropout.
+Zero dropout removes this RNG dependency, without promising cross-device or
+cross-kernel bitwise reproducibility.
+
 Inference uses explicit values, without a thread-local gradient-mode scope:
 
 ```lean

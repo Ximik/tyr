@@ -132,6 +132,19 @@ is a standard Qwen3 model (see [LLM models](llms.md)). Generation is greedy:
 `generateGreedy`, `generateGreedyUncached`, and `generateGreedyWithPromptCache` over
 per-layer `LayerKVCache` / reusable `StreamingPromptCache`.
 
+The audio attention, encoder layer, and encoder expose pure `forwardInference`
+and effectful `forwardIO` methods. The existing `forward` names are inference
+aliases. `AudioEncoder.forwardVarLenInference` and `forwardVarLenIO` preserve
+the same split for chunked, variable-length input; `forwardVarLen` remains an
+inference alias. The IO methods take an explicit training flag and use
+`cfg.attentionDropout` only during training. Parent model entry points include
+`encodeAudioIO`, `encodeAudioVarLenIO`, and `forwardFromMelIO`; the existing IO
+`forward` and `forwardWithAux` accept a final optional training flag, defaulting
+to false. Inference and transcription therefore use zero attention dropout.
+When attention executes through IO, the configured probability is validated as
+finite and in `[0, 1]` even in evaluation mode. Pure inference does not read it.
+This does not implement the other currently unused configuration dropout fields.
+
 Configs are layered (`Tyr/Model/Qwen3ASR/Config.lean`): `AudioEncoderConfig`,
 `TextConfig` (with `toQwenConfig`), `ThinkerConfig`, `Qwen3ASRConfig`.
 `ThinkerConfig.isForcedAligner` detects aligner checkpoints by `model_type`, and

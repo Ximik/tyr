@@ -1275,9 +1275,11 @@ The remaining concatenation callers now keep existentially indexed Int64 chunks
 in the data loader, using `Tensor.catMany?` to report metadata failures through
 the existing IO error paths. The Qwen embedder uses the same typed boundary.
 
-`Tensor.flashAttention` accepts the existing padding mask, dropout, causal,
-and scale options. GPU dispatch and inference caching share that metadata-checked
-adapter. The legacy `torch.nn` declarations and their unused simplified focal
+At this stage, `Tensor.flashAttention` accepted padding mask, dropout, causal,
+and scale options. The current interface moves configurable dropout to
+`Tensor.flashAttentionIO`; pure attention always uses zero dropout. GPU dispatch
+and inference caching share the metadata-checked adapters. The legacy `torch.nn`
+declarations and their unused simplified focal
 and triplet loss helpers have been removed.
 
 The core ABI checker reads declarations across the remaining compatibility

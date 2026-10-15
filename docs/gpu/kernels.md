@@ -161,7 +161,7 @@ def flashAttn
     (query : Query (device := device) batch nHead qSeq headDim d)
     (key value : KeyValue (device := device) batch nKvHead kvSeq headDim d)
     (attnMask : Option (PaddingMask (device := device) batch kvSeq) := none)
-    (dropoutP : Float := 0.0) (isCausal : Bool := false)
+    (isCausal : Bool := false)
     (scale : Option Float := none) (enableGqa : Bool := false)
     : Query (device := device) batch nHead qSeq headDim d
 ```
@@ -174,14 +174,27 @@ C++ `select_route` (`cc/src/tyr_ops.cpp:314`) mirrors the Lean-side selector
 and calls the generated `lean_launch_*` launchers for covered shapes, PyTorch
 SDPA otherwise. Companions in the same module:
 
-- `scaledDotProductAttention` — PyTorch-named alias.
+- `scaledDotProductAttention` — PyTorch-named alias, also with zero dropout.
+- `flashAttnIO`, `scaledDotProductAttentionIO`, `flashAttnWithRouteIO` — effectful
+  variants with required `(dropoutP : Float) (training : Bool)` immediately after
+  Q/K/V, followed by mask, causal, scale, and GQA arguments. Training uses the
+  configured probability; evaluation uses zero. The route result describes the
+  effective probability used by execution. The original probability must be
+  finite and in `[0, 1]` even during evaluation.
 - `dispatchRoute`, `flashAttnWithRoute` — expose the `.tkKernel` vs `.portable`
-  decision (`DispatchRoute`) for observability.
+  decision (`DispatchRoute`) for observability. The pure execution wrapper uses
+  zero dropout; the descriptive classifier can inspect arbitrary probabilities.
 - `currentSpecialization`, `supportsTkMhaKernel`, `attentionProblem` — typed
   probes over the same selector.
 - `flashAttnDyn` — native-boundary adapter: takes rank-4 `RawTensor` handles,
-  validates runtime shapes, packs them into the typed API, and returns a
-  `Sigma`-typed existential (`DynOut`).
+  required dropout and training arguments, then optional mask/causal/scale/GQA
+  arguments. It validates runtime shapes, calls the typed IO operation, and
+  returns a `Sigma`-typed existential (`DynOut`) in IO.
+
+Pure attention never samples a dropout mask. This does not promise bitwise
+reproducibility across GPU kernels, backend settings, or devices. Dropout
+sampling belongs to IO even when its result participates in a reusable native
+autograd graph.
 
 ### Ops: H100 MHA (`Tyr.GPU.Ops.MhaH100`)
 

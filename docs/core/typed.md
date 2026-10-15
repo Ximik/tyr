@@ -299,6 +299,26 @@ to compare all 46² promotion pairs and all four scalar/vector rank combinations
 against an independently enumerated native runtime inventory. The harness also
 checks arithmetic result dtypes separately from unavailable kernels.
 
+## Attention and dropout
+
+Attention separates pure inference from stochastic execution. `Tensor.attention`,
+the GQA/masked/window variants, and `Tensor.flashAttention` accept no dropout
+probability and use zero dropout. Their `?` forms retain validation and native
+kernel errors. To train with dropout, bind the corresponding IO operation:
+
+```lean
+let output ← Tensor.attentionIO query key value dropout training isCausal
+```
+
+The required dropout and training arguments follow the tensor operands;
+remaining causal, GQA, mask, window, and scale options retain their operation's
+order. Training uses the supplied probability; evaluation uses zero. The IO
+adapters first validate the original probability as finite and in `[0, 1]`,
+including during evaluation. The operation preserves the native autograd graph,
+including the sampled mask.
+Pure attention's zero-dropout contract is not a guarantee of bitwise
+reproducibility across devices or backend algorithms.
+
 ## Boundary validation
 
 ```lean
