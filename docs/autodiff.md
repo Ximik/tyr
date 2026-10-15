@@ -2,7 +2,7 @@
 
 Tyr has three AD-relevant layers, and which one you want depends on the job:
 
-- **Indexed LibTorch autograd** — runtime, tape-based reverse mode on `Tensor σ`, exposed through `Tensor.backwardLoss`, `Tensor.backward`, and `Tensor.gradOf`. See [core/tensors.md](core/tensors.md). Global gradient-mode controls remain in `torch.autograd`; `torch.differentiable` is a separate lightweight gradient interface.
+- **Indexed LibTorch autograd** — runtime, tape-based reverse mode on `Tensor σ`, exposed through `Tensor.backwardLoss`, `Tensor.backward`, `Tensor.grad`, and `Tensor.gradOf`. See [core/tensors.md](core/tensors.md). Inference uses explicitly detached inputs; `torch.differentiable` is a separate lightweight gradient interface.
 - **IR-level JVP/VJP** (`Tyr/AutoGrad.lean`, namespace `Tyr.AD`) — compile-time, source-to-source forward- and reverse-mode transforms over Lean compiler IR (`Lean.IR.FnBody`), driven by rule registries and the `@[jvp]` / `@[vjp]` / `@[autodiff]` attributes.
 - **Elimination-based AD** (`Tyr/AD/`, 41 files) — a Graphax/JAX-style stack that normalizes code into a jaxpr-like equation IR, extracts local Jacobians as sparse linear maps, and accumulates the full Jacobian by vertex elimination on a bipartite graph, with pluggable elimination orders including an AlphaGrad-style MCTS planner.
 
@@ -349,8 +349,13 @@ Day-to-day training uses libtorch's tape through the FFI. The idiom is
 independent snapshots; `TensorStruct.zeroGrads params` clears accumulated
 gradients in IO without changing those snapshots. Leaf parameters are prepared
 with `let parameter ← Tensor.parameter t` or `let params ← TensorStruct.makeLeafParams tree`.
-These effectful calls create independent gradient identities. Backward retains the graph
-so surviving pure forward values can be reused. Evaluation explicitly detaches models
+These effectful calls create independent gradient identities. Backward releases saved
+intermediates by default. Use `(retainGraph := some true)` when another pass through
+the same graph is needed, and release on the final pass. Omitted retention follows
+`createGraph`, whose default is false. `Tensor.grad` and `TensorStruct.grad` return
+gradients in IO without accumulating parameter gradients and use the same options.
+Pure forward computations may be shared; repeating a pure expression does not
+guarantee a fresh graph. Evaluation explicitly detaches models
 and floating inputs; ambient `no_grad` scopes are no longer exposed.
 See [core/tensors.md](core/tensors.md), [core/tensorstruct.md](core/tensorstruct.md),
 and [optimization.md](optimization.md).

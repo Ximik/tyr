@@ -130,9 +130,20 @@ without changing retained aliases. `parameter : Tensor σ → IO (Tensor σ)` al
 creates an independent detached trainable leaf. `gradOf : IO (Tensor σ)` returns a detached, independent snapshot of
 accumulated gradients. Later backward passes, clipping, and `zeroGrad : IO Unit`
 do not change a previously returned gradient snapshot.
+`zeroGrad` and `TensorStruct.zeroGrads` default to `setToNone := true`, releasing
+the gradient buffer and breaking cycles created by `backward(createGraph := true)`.
+Pass `(setToNone := false)` to zero an existing buffer instead. `Tensor.grad`
+is preferable for higher derivatives because it does not accumulate into `.grad`.
 `backwardLoss` takes a scalar loss; `backward` takes an output and an explicit
-cotangent with the same specification. Both retain the graph for reuse; its saved
-storage remains live while outputs are reachable. `hasGradFn` inspects graph ownership.
+cotangent with the same specification. Both release saved backward intermediates
+by default. Pass `(retainGraph := some true)` for intentional reuse, then release
+on the final pass. Omitted retention follows `createGraph`, whose default is
+`false`, matching PyTorch. `Tensor.grad` returns a cotangent in IO without
+accumulating parameter gradients and follows the same lifetime options.
+The tensor values remain readable after backward, but another backward through
+consumed saved state returns an IO error. Pure forward expressions may be shared;
+repeating an equal expression does not promise a fresh graph. `hasGradFn` reports
+the presence of a gradient function, not whether saved intermediates remain usable.
 `copyInto : Tensor σ → Tensor σ → IO (Tensor σ)` returns the updated destination.
 Always use its result: retained aliases keep their original values. Native code
 consumes the destination reference and reuses storage only after proving native

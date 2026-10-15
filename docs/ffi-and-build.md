@@ -139,6 +139,9 @@ keeping the original tensor as a fallback.
 
 Gradient accumulation remains explicit mutable state: backward, clipping, and
 `zeroGrad` are IO operations, and `gradOf` returns an independent snapshot in IO.
+`zeroGrad` defaults to releasing `.grad` (`setToNone := true`), including the
+reference cycle possible after higher-order backward. False zeros an existing
+gradient buffer. Use `Tensor.grad` for higher derivatives without accumulation.
 `setRequiresGrad` is also effectful. Pure constant factories create tensors
 without gradient identity; use `Tensor.parameter` or
 `TensorStruct.makeLeafParams` to create independent trainable leaves. Repeating
@@ -146,12 +149,16 @@ an equal pure allocation may share its result, so pure factories do not promise
 fresh storage. `data.cloneInferenceIO` supplies an independent detached copy
 when storage freshness is required.
 
-Pure forward computations may also be shared. The public backward operations
-retain their graph so evaluating backward does not invalidate a surviving
-forward value. Graph storage remains alive while that value is reachable;
-release unused outputs and use detached inputs for inference to avoid retaining
-unneeded graphs. `Tests/TestAutogradIdentity.lean` covers independent parameter
-initialization and repeated backward on the same forward value.
+Pure forward computations may also be shared. Public backward operations and
+`Tensor.grad` consume saved intermediates by default, matching PyTorch. The
+`retainGraph : Option Bool` argument defaults to `createGraph` (itself false).
+Explicit retention permits another backward pass; the final pass can release
+saved state while tensor values remain readable. Repeating a pure expression does
+not guarantee a fresh graph, and reuse of consumed saved state returns an IO error.
+`TensorStruct.grad` computes all leaf gradients in one engine invocation, so a
+tree traversal does not require a retaining backward for each leaf.
+`Tests/TestAutogradIdentity.lean` and `scripts/test_native_autograd_lifetime.sh`
+cover default release, explicit retention, higher derivatives, and tree gradients.
 
 Pure attention exports always pass literal zero dropout to native SDPA and do
 not accept a dropout probability. Their `?` adapters return validation and
@@ -318,8 +325,12 @@ synchronization calls `cudaDeviceSynchronize` via cudart directly
 (`cc/src/tyr.cpp:311-352`). `Tests/FfiCrashProbe.lean` is a manual probe for
 this failure mode (own `ffi_crash_probe` exe, not part of the test suite).
 
-`TensorStruct.functionalGrad` invokes a pure Lean callback with temporary
-autograd leaves and returns detached derivatives. Setup and gradient-engine
+`TensorStruct.functionalGrad` invokes a pure Lean callback with fresh detached
+autograd leaves and returns detached first derivatives. It releases saved
+intermediates in its private backward traversal: native `autograd::grad` executes
+only paths to the requested fresh leaves, so older captured graph branches are
+not consumed. Native regressions cover repeated calls and later differentiation
+of captured graphs. Setup and gradient-engine
 failures return the raw API's `Except.error`; the typed convenience API uses
 Lean's panic mechanism for that error carrier. Missing leaves or invalid leaf
 metadata abort through `nativeInvariantFailure` during tree reconstruction.
@@ -582,7 +593,7 @@ lake exe ffi_crash_probe
 
 - [Getting started](getting-started.md) — the day-one build path this chapter explains
 - [Core tensors](core/tensors.md) — the indexed tensor API and native adapter boundary
-- [Autodiff](autodiff.md) — gradient bindings (`lean_torch_backward` and friends)
+- [Autodiff](autodiff.md) — gradient bindings (`lean_torch_backward_loss` and friends)
 - [Serialization](serialization.md) — safetensors handles and sharded loading
 - [Distributed training](distributed.md) — the `torch.dist` collectives over c10d
 - [GPU DSL codegen](gpu/dsl-codegen.md) — where the generated `.cu` kernels come from

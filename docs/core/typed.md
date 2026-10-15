@@ -533,10 +533,14 @@ whose types depend on earlier field values require a manual cast instance.
 Ordinary `map` and `mapM` always preserve their original leaf specifications.
 
 The indexed autograd API includes effectful `parameter` and `setRequiresGrad`,
-pure `detach` and `grad`, plus `gradOf`,
+pure `detach`, plus effectful `grad`, `gradOf`,
 `backwardLoss`, and explicit-cotangent `backward`. `gradOf` reads an independent
 gradient snapshot in IO; `zeroGrad` clears accumulated gradients in IO. Backward
-retains the graph for surviving forward values. Inference explicitly detaches model
+and `grad` release saved intermediates by default. Their `retainGraph : Option Bool`
+option defaults to `createGraph` (itself false); explicit retention supports
+multiple passes followed by a final releasing pass. Pure forward expressions can
+share a graph, and reuse of consumed saved state returns an IO error.
+Inference explicitly detaches model
 parameters and floating inputs. Value
 updates consume a tensor and return its replacement, preserving retained aliases.
 Typed adapters capture actual dtype/device before the native call and validate

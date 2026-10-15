@@ -80,16 +80,22 @@ All utilities below require `[TensorStruct α]`:
 - `count` counts tensor leaves.
 - `grads : α → IO α` obtains an independent gradient snapshot tree;
   `zeroGrads : α → IO Unit` clears the parameters' accumulated gradients.
+  Its optional `setToNone` argument defaults to true to release their storage;
+  false zeros existing gradient buffers.
 - `detach : α → α` removes graph participation explicitly.
 - `requiresGrad : α → Bool → IO α` changes autograd flags.
 - `makeLeafParams : α → IO α` creates independent trainable leaves.
+- `grad` computes a vector-Jacobian product for all leaves in one native call,
+  returns a tree in IO, and releases saved intermediates by default. It accepts
+  the same `retainGraph` and `createGraph` options as `Tensor.grad`.
 - `functionalGrad` differentiates a scalar function using private temporary leaves
-  and returns detached gradients without accumulating parameter gradients.
+  and returns detached first derivatives without accumulating parameter gradients.
+  Its private backward traversal releases saved intermediates.
 - `scale`, `add`, and `sub` transform matching parameter trees.
 - `all` and `any` evaluate specification-polymorphic leaf predicates.
 
-Generic scalar scaling uses a preserving adapter. Its runtime metadata check
-matters for dtypes where native scalar arithmetic could change the result dtype.
+Generic scalar scaling requires `FloatingTensorStruct` evidence and uses ordinary
+typed arithmetic. It does not convert a promoted result back to the input dtype.
 A traversal preserves indices, not unique storage ownership; use explicit
 allocation/copy APIs when independent mutable storage is required.
 
