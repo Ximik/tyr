@@ -17,7 +17,7 @@ data, and persistence operations. `import Tyr` aggregates the library.
 | `Tyr.Typed.DType` | Partial dtype promotion and accumulation rules |
 | `Tyr.Typed.Promotion` | Erased proof classes for successful dtype promotion |
 | `Tyr.Typed.Spec` | Shape and result-spec algebra |
-| `Tyr.Typed.Device` | Placement policies and tensor contracts |
+| `Tyr.Typed.Device` | Static placement eligibility, native-device checks, and tensor contracts |
 | `Tyr.Typed.Tensor` | Checked constructors, validation, existential packaging |
 | `Tyr.Typed.Ops` | Arithmetic, shape transforms, reductions, autograd, host arrays |
 | `Tyr.Typed.Neural` | Neural, data, storage, and dynamic-shape adapters |
@@ -104,8 +104,9 @@ also have no witness; callers must choose an explicit conversion. A promotion
 witness proves that Tyr's promotion function returns that dtype; it is not a
 proof of the native implementation or kernel availability. Operator conditions
 are separate: `Tensor.sub` additionally requires `DType.NonBool` for each operand.
-Integer sums use their specified accumulation dtype, and floating-only math
-requires a floating dtype.
+Integer sums use their specified accumulation dtype. Operator-specific domain
+witnesses reject invalid static inputs, such as complex ReLU or integral mean;
+checked variants inspect actual dtypes when those indices are dynamic.
 
 Broadcasting distinguishes zero-dimensional scalar tensors from nonscalars:
 within the same dtype category, the nonscalar's precision wins. A Float64 scalar
@@ -126,8 +127,8 @@ index; the corresponding convenience wrappers use Lean's panic fallback.
 For example, a dynamic BF16 left operand and Float32 right operand are rejected
 because their result would be Float32. Mixed-precision algorithms must make an
 intended conversion explicit before using a preserving adapter, or expose the
-promoted result through a witness. These checks do not convert arbitrary native
-kernel failures into `Except.error`.
+promoted result through a witness. The checked arithmetic adapters also return
+native kernel failures through `Except.error`.
 
 Use `Tensor.Promoting.add?`, `sub?`, `mul?`, and `div?` when input dtype indices
 are dynamic and the operation should follow native promotion. They inspect the
@@ -140,13 +141,71 @@ cast is needed. Their convenience wrappers, such as `Tensor.Promoting.mul`,
 return a shape-indexed tensor with dynamic dtype, retaining the promoted native
 value. For example, BF16 activations multiplied by Float32 routing weights
 produce Float32, while BF16 activations multiplied by an Int64 mask remain BF16.
-The `?` variants report unsupported promotion and metadata mismatches; native
-kernel availability remains a separate requirement.
+The `?` arithmetic variants report unsupported promotion, placement mismatches,
+and native kernel failures. A valid promotion witness still does not guarantee
+that a kernel exists.
+
+Runtime broadcasting uses `Tensor.Promoting.addB?`, `subB?`, `mulB?`, and `divB?`.
+They take an explicit output shape and check it against the broadcast result
+before native execution. Their `PointwisePromoted` package carries
+`TensorSpec.Promotes` evidence tied to the operands' actual ranks and dtypes.
+`Tensor.whereSelect` promotes its two value operands and requires a Bool
+condition; `Tensor.Promoting.whereSelect?` provides the corresponding checked
+runtime witness. Selection does not cast the result back to the left dtype.
 
 Matrix multiplication requires operands with matching dtype and device policy.
-Matching `.any` policies do not prove matching actual devices: native device
-compatibility still matters. Static shape and dtype rules complement runtime
-checks; they do not verify the implementation of an extern.
+The checked `matmul?`, `mm?`, `linear?`, `linear3d?`, `matmul3d?`, and `bmm4d?`
+adapters verify actual dtype and device equality before calling native code.
+Elementwise promotion never supplies an implicit matrix cast.
+
+## Device compatibility
+
+Two `.any` policies do not prove that two native tensors occupy the same device.
+The arithmetic adapters described above check actual placement before execution,
+including when both inputs share the same static policy. Matrix multiplication
+and concatenation require equal actual devices.
+
+Broadcasting arithmetic additionally requires
+`DevicePolicy.PointwiseCompatible leftSpec rightSpec`. Its instances reject known
+conflicts such as exact CPU/CUDA vectors or CUDA:0/CUDA:1 vectors. An unrestricted
+policy is statically eligible, but still undergoes the runtime check. The binary
+pointwise exception permits a rank-zero CPU tensor on the other operand's
+device; a size-one vector and an accelerator scalar do not get that exception.
+The result follows the non-CPU operand when this exception applies.
+
+```lean
+import Tyr.Typed
+open torch
+
+example (scalar : Tensor ⟨#[], .Float32, .exact .CPU⟩)
+    (vector : Tensor ⟨#[2], .Float32, .exact (.CUDA 0)⟩) :
+    Tensor ⟨#[2], .Float32, .exact (.CUDA 0)⟩ := scalar.addB vector
+```
+
+The same-shape `add`/`sub`/`mul`/`div` APIs retain a shared static policy;
+use their broadcasting variants when the static policies differ, including for
+two scalar tensors. `whereSelect` follows a separate native rule: it selects
+the first non-CPU device in condition, left, right order, and relocates rank-zero
+operands to that device. This includes accelerator scalars. Non-scalars must
+already occupy the selected device. Tyr checks this rule before native execution,
+matching the [pinned PyTorch implementation](https://github.com/pytorch/pytorch/blob/449b1768410104d3ed79d3bcfe4ba1d65c7f22c0/aten/src/ATen/native/TensorCompare.cpp#L541-L594).
+
+`Tests.TestDeviceCompatibility` covers static rejection, metadata rules for
+CPU/MPS/CUDA indices, and CPU numerical execution. The accelerator metadata cases
+do not allocate accelerator tensors or establish hardware qualification.
+
+## Operator checks and failures
+
+Static promotion, domain, and shape evidence is separate from backend kernel
+availability. `relu?`, `maxAll?`, `sumDim?`, and `meanAll?` check their supported
+domains, including nonempty maximum inputs and valid reduction axes. `expand?`
+checks the requested broadcast, while `cat?` and `catMany?` validate placement
+and the returned shape. These APIs and the arithmetic/matrix `?` families return
+native operation failures through `Except String`. Their pure convenience
+wrappers use Lean's panic fallback; callers that need to handle failure should
+use the checked variants. This contract applies to those adapters, not every
+raw native declaration. Static rules and metadata checks do not prove an extern's
+implementation correct.
 
 After building the dtype modules, run `bash scripts/test_dtype_promotion.sh`
 to compare all 46² promotion pairs and all four scalar/vector rank combinations

@@ -184,6 +184,22 @@ results remain leaf parameters.
 `scripts/test_native_tensor_errors.sh` exercises success and failure carriers,
 including borrowed-reference preservation and cleanup on invalid input.
 
+Core arithmetic and matrix adapters use checked native exports returning
+`Except String RawTensor`. Typed `Tensor.Promoting` and `Tensor.Preserving`
+arithmetic `?` APIs preserve those errors, including missing kernels for otherwise
+valid promotion pairs. The checked expansion, concatenation, and reduction
+families follow the same result-carrier contract. Their pure convenience
+wrappers use Lean's panic fallback after receiving an error.
+
+These adapters check operation preconditions before native execution. Matching
+`.any` device policies never establish actual-device equality. Binary arithmetic
+permits CPU rank-zero operands on another device; matrix multiplication and
+concatenation require equal actual devices. Selection validates its separate
+native scalar relocation rule. Metadata checks and static witnesses describe
+valid inputs and result claims; they do not prove backend kernel availability
+or the C++ implementation itself. The [typed guide](core/typed.md#device-compatibility)
+describes these contracts and their tests.
+
 Many pure ops are unguarded. Type indices do not validate native execution;
 typed adapters check metadata at selected boundaries. A global
 `std::terminate` handler (`cc/src/tyr.cpp:267-301`)

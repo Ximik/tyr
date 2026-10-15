@@ -56,10 +56,17 @@ repeating a pure expression does not establish independent storage.
 `DType.Promotes` witness for the result dtype. Their `addB`, `subB`, `mulB`, and
 `divB` variants additionally support broadcasting through `TensorSpec.Promotes`.
 These erased proofs establish the promotion rule; they do not establish that
-the operator has a kernel for that dtype and device. Floating-only operations
-require a floating dtype. Matrix multiplication requires compatible dimensions and matching dtype
-and device policy. `linear` consumes an `[outDim, inDim]` weight matrix;
+the operator has a kernel for that dtype and device. Operator-specific domain
+constraints reject inputs such as complex ReLU and integral mean. Matrix multiplication
+requires compatible dimensions and matching dtype and device policy, and checks
+actual dtype/device equality before execution. `linear` consumes an `[outDim, inDim]` weight matrix;
 `linear3d` handles batched sequences.
+
+Broadcasting arithmetic uses `DevicePolicy.PointwiseCompatible` to reject known
+placement conflicts. A rank-zero CPU operand can participate on another device;
+a size-one vector cannot. Even matching `.any` policies require actual-device
+validation. Selection has its own scalar relocation rule; see
+[device compatibility](typed.md#device-compatibility).
 
 `reshape` requires equal element counts. `reshapeChecked` validates a requested
 runtime shape. In both cases `#[]` means a scalar. `sliceChecked` validates the
@@ -82,6 +89,10 @@ explicit input conversions or a witnessed promoting operation.
 its checked variants return the computed dtype with a promotion witness, and
 its convenience wrappers retain that native result under a dynamic dtype index.
 They do not coerce operands to the left operand's dtype.
+The arithmetic `?` variants also return native kernel failures through `Except`.
+The checked matrix, expansion, concatenation, and reduction APIs provide
+recoverable errors for their respective checks and native calls; this does not
+extend to every raw native operation. See [operator checks](typed.md#operator-checks-and-failures).
 
 ## Autograd and mutation
 
