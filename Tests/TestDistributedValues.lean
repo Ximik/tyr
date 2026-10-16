@@ -126,7 +126,7 @@ def checkTwoRankValues (rank : UInt64) : IO Unit := do
 
 /-- Exercise normal cleanup, reinitialization, and cleanup after an action error
     on a real two-rank Gloo group. This is run by the bounded separate launcher. -/
-def checkTwoRankSession (rank port : UInt64) : IO Unit := do
+def checkTwoRankSession (rank port restartPort : UInt64) : IO Unit := do
   let result ← dist.withDistributed "gloo" "127.0.0.1" port rank 2 do
     checkTwoRankValues rank
     dist.barrier
@@ -135,8 +135,10 @@ def checkTwoRankSession (rank port : UInt64) : IO Unit := do
   LeanTest.assertFalse (← dist.isInitialized)
     "A successful distributed action must release its process group"
 
+  -- Cleanup is local: the first barrier does not guarantee that rank 0 has
+  -- closed its TCPStore before rank 1 starts rendezvous again.
   let failure ← try
-    dist.withDistributed "gloo" "127.0.0.1" port rank 2 do
+    dist.withDistributed "gloo" "127.0.0.1" restartPort rank 2 do
       dist.barrier
       throw (IO.userError "intentional distributed action failure")
     pure none

@@ -26,10 +26,18 @@ class DistributedRunnerTests(unittest.TestCase):
         return json.loads((self.logs / "report.json").read_text())
 
     def test_success_requires_both_ranks(self):
-        self.fixture('print("passed on rank", sys.argv[1])\n')
-        self.assertEqual(run_two_ranks(self.executable, self.logs, 10, 29500), 0)
+        self.fixture('assert len(sys.argv) == 4\n'
+                     'assert 0 < int(sys.argv[2]) < 65536\n'
+                     'assert 0 < int(sys.argv[3]) < 65536\n'
+                     'assert sys.argv[2] != sys.argv[3]\n'
+                     'print("passed on rank", sys.argv[1], "ports", *sys.argv[2:])\n')
+        self.assertEqual(run_two_ranks(self.executable, self.logs, 10), 0)
         self.assertEqual([rank["exit_code"] for rank in self.report()["ranks"]], [0, 0])
-        self.assertIn("rank 1", (self.logs / "rank-1.log").read_text())
+        report = self.report()
+        self.assertNotEqual(report["port"], report["restart_port"])
+        for rank in range(2):
+            self.assertIn(f"rank {rank} ports {report['port']} {report['restart_port']}",
+                          (self.logs / f"rank-{rank}.log").read_text())
 
     def test_failed_rank_reaps_blocked_peer(self):
         self.fixture('if sys.argv[1] == "1":\n    print("fixture failure"); sys.exit(7)\ntime.sleep(60)\n')

@@ -25,12 +25,15 @@ def run_two_ranks(executable: Path, log_dir: Path, timeout: float, port: int | N
         raise ValueError(f"Missing {executable}; run lake build --wfail RunDistributedValues")
     if not math.isfinite(timeout) or timeout <= 0:
         raise ValueError("Timeout must be finite and positive")
-    if port is None:
-        with socket.socket() as reservation:
-            reservation.bind(("127.0.0.1", 0))
-            port = reservation.getsockname()[1]
-    if not 0 < port < 65536:
+    if port is not None and not 0 < port < 65536:
         raise ValueError("Port must be in [1, 65535]")
+    # Reserve both simultaneously so the restarted session cannot reconnect to
+    # the first session's TCPStore while rank 0 is still tearing it down.
+    with socket.socket() as first, socket.socket() as second:
+        first.bind(("127.0.0.1", port if port is not None else 0))
+        second.bind(("127.0.0.1", 0))
+        port = first.getsockname()[1]
+        restart_port = second.getsockname()[1]
 
     log_dir.mkdir(parents=True, exist_ok=True)
     processes = []
@@ -41,7 +44,7 @@ def run_two_ranks(executable: Path, log_dir: Path, timeout: float, port: int | N
             for rank in range(2):
                 log = files.enter_context((log_dir / f"rank-{rank}.log").open("w"))
                 processes.append(subprocess.Popen(
-                    [str(executable), str(rank), str(port)], cwd=REPO,
+                    [str(executable), str(rank), str(port), str(restart_port)], cwd=REPO,
                     stdout=log, stderr=subprocess.STDOUT))
             while True:
                 codes = [process.poll() for process in processes]
@@ -73,6 +76,7 @@ def run_two_ranks(executable: Path, log_dir: Path, timeout: float, port: int | N
                 "failure": failure,
                 "executable": str(executable),
                 "port": port,
+                "restart_port": restart_port,
                 "seconds": time.monotonic() - started,
                 "ranks": [{"rank": rank, "exit_code": process.returncode,
                            "log": f"rank-{rank}.log"}
@@ -94,7 +98,7 @@ def main() -> int:
     parser.add_argument("--executable", type=Path, default=REPO / ".lake/build/bin/RunDistributedValues")
     parser.add_argument("--log-dir", type=Path, default=REPO / "output/ci/distributed")
     parser.add_argument("--timeout", type=float, default=60)
-    parser.add_argument("--port", type=int, help="Rendezvous port; otherwise select an available localhost port")
+    parser.add_argument("--port", type=int, help="First-session rendezvous port; the restart always uses a separate available port")
     args = parser.parse_args()
     try:
         return run_two_ranks(args.executable, args.log_dir, args.timeout, args.port)
