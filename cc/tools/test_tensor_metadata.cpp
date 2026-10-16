@@ -1,6 +1,5 @@
 #include "tyr_tensor_metadata.h"
-#include "tyr_neural_abi.h"
-#include "tyr_torch_abi.h"
+#include "generated/tyr_ffi.h"
 #include <ATen/Context.h>
 #include <lean/lean.h>
 #include <torch/torch.h>

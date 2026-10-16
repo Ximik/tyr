@@ -1,6 +1,4 @@
-#include "tyr_raw_tensor_abi.h"
-#include "tyr_neural_abi.h"
-#include "tyr_branching_abi.h"
+#include "generated/tyr_ffi.h"
 #include "tyr_checked_result.h"
 #include <bit>
 #include <cmath>

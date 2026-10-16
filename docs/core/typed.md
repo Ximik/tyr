@@ -432,7 +432,7 @@ The native `zerosFor` factory bootstraps pure defaults from a requested spec
 with constant-support evidence; it accepts no foreign handle and trusts native
 allocation/casting. Native
 metadata, allocation, and the C ABI remain trusted and covered by parity tests
-and ABI audits.
+and the generated FFI header.
 Pure factory calls may share allocations; distinct storage requires an effectful
 allocation boundary such as `data.cloneInferenceIO`.
 Model and example code should compose typed operations instead of rebuilding

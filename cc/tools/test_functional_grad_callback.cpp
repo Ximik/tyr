@@ -1,5 +1,4 @@
-#include "tyr_raw_tensor_abi.h"
-#include "tyr_torch_abi.h"
+#include "generated/tyr_ffi.h"
 #include <iostream>
 #include <memory>
 #include <stdexcept>

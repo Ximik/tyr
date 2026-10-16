@@ -134,9 +134,26 @@ target libtyr pkg : Dynlib := do
         }
         IO.FS.writeFile stamp gpuKernels
     pure (job.map fun _ => ())
-  let codegenJob := stubsJob.mix cudaJob
 
-  -- 3. make, on every build: Make decides what to recompile. The library's
+  -- 3. C prototypes of every `TyrFFI` extern, which `libTyrC`'s sources include.
+  let some ffiGenerator ← findLeanExe? `GenerateFfiHeader
+    | error "lakefile.lean: no GenerateFfiHeader executable"
+  let some ffiLib ← findLeanLib? `TyrFFI
+    | error "lakefile.lean: no TyrFFI library"
+  let ffiModules ← ffiLib.getModuleArray
+  let ffiHeader := generatedDir / "tyr_ffi.h"
+  let mut ffiInputs := (← ffiGenerator.exe.fetch).map fun _ => ()
+  for mod in ffiModules do
+    ffiInputs := ffiInputs.mix (← mod.olean.fetch)
+  let ffiJob ← buildFileAfterDep ffiHeader ffiInputs fun _ =>
+    proc {
+      cmd := ffiGenerator.file.toString
+      args := #[ffiHeader.toString] ++ ffiModules.map (·.name.toString)
+      env := generatorEnv
+    }
+  let codegenJob := stubsJob.mix cudaJob |>.mix (ffiJob.map fun _ => ())
+
+  -- 4. make, on every build: Make decides what to recompile. The library's
   --    content is its trace, so an unchanged library rebuilds nothing else.
   let libJob ← codegenJob.mapM fun _ => do
     let jobs ← match (← IO.getEnv "TYR_MAKE_JOBS").bind nonEmptyTrimmed? with
@@ -166,6 +183,19 @@ lean_lib Tyr where
   precompileModules := true
   -- Linked into every executable that imports a Tyr module and into the
   -- precompiled module libraries; not into the codegen executables.
+  moreLinkLibs := #[`@/libtyr]
+
+/-- Every `@[extern]` declaration of `Tyr`. Declared after `Tyr` and before
+    `TyrCodegen`, so `TyrCodegen` keeps `Tyr.Basic.Types`. Not precompiled, so
+    its `.olean` files build without `libTyrC`: the `libtyr` target generates
+    `libTyrC`'s FFI header from them. The declared functions are in `libTyrC`,
+    so linking needs it. -/
+lean_lib TyrFFI where
+  roots := #[`Tyr.Basic, `Tyr.ConstantSupport, `Tyr.RawTensor, `Tyr.Audio.AppleInput,
+    `Tyr.Audio.AppleOutput]
+  globs := #[.one `Tyr.Basic, .andSubmodules `Tyr.ConstantSupport, .andSubmodules `Tyr.RawTensor,
+    .one `Tyr.Audio.FloatBuffer, .one `Tyr.Audio.AppleInput, .one `Tyr.Audio.AppleOutput]
+  precompileModules := false
   moreLinkLibs := #[`@/libtyr]
 
 /-- Codegen-only sub-library. Declared after `Tyr`: Lake gives a module to the
@@ -238,6 +268,11 @@ lean_exe mctx_bench where
 lean_exe GenerateGpuKernels where
   root := `Tyr.GPU.GenerateGpuKernels
   supportInterpreter := true
+
+/-- Write the C prototypes of `TyrFFI`'s extern declarations. Imports only
+    `Lean`, so it does not link `libTyrC`. -/
+lean_exe GenerateFfiHeader where
+  root := `Tyr.GenerateFfiHeader
 
 /-- Compile registered @[tileir_kernel] declarations through NVIDIA TileIR tooling. -/
 lean_exe GenerateTileIRKernels where

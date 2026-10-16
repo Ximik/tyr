@@ -43,9 +43,7 @@ torch::Tensor unitBorrowTensor(b_lean_obj_arg value) {
 }
 #endif
 
-#include "tyr_distributed_abi.h"
-#include "tyr_raw_tensor_abi.h"
-#include "tyr_torch_abi.h"
+#include "generated/tyr_ffi.h"
 #include <cstdio>
 #include <functional>
 #include <limits>

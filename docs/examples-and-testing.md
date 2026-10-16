@@ -207,7 +207,9 @@ and is the authoritative source for running them.
 Test-side executables: `test_runner`, `test_runner_experimental`,
 `RunRiemannianNanoGPTTests`, `ffi_crash_probe`, and the standalone suites
 listed under "Test tiers" above. Two codegen tools (`GenerateGpuKernels`,
-`GenerateTileIRKernels`) are covered in [gpu/dsl-codegen.md](gpu/dsl-codegen.md).
+`GenerateTileIRKernels`) are covered in [gpu/dsl-codegen.md](gpu/dsl-codegen.md);
+`GenerateFfiHeader`, which writes `libTyrC`'s FFI header, is covered in
+[ffi-and-build.md](ffi-and-build.md).
 
 ## Usage example
 

@@ -503,8 +503,6 @@ Reproducible focused acceptance:
 ```sh
 lake build test_typed_models
 lake env .lake/build/bin/test_typed_models
-python3 scripts/check_ffi_abi.py --header cc/src/tyr_raw_tensor_abi.h --generated .lake/build/ir/Tyr/Basic.c .lake/build/ir/Tyr/RawTensor.c
-python3 scripts/check_ffi_abi.py
 ```
 
 The native runner passes **69 tests, zero failures or skips** on the local CPU.
@@ -559,9 +557,6 @@ outstanding. GitHub CLI reports successful CI for older commit
 ```sh
 lake build test_typed_models
 lake env .lake/build/bin/test_typed_models
-python3 scripts/check_ffi_abi.py --header cc/src/tyr_neural_abi.h --generated .lake/build/ir/Tyr/RawTensor/Neural.c
-python3 scripts/check_ffi_abi.py --header cc/src/tyr_raw_tensor_abi.h --generated .lake/build/ir/Tyr/Basic.c .lake/build/ir/Tyr/RawTensor.c
-python3 scripts/check_ffi_abi.py
 ```
 
 This is a verified continuation checkpoint, not full migration acceptance.

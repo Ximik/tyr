@@ -110,14 +110,19 @@ are rejected.
 
 `scripts/test_native_tensor_ownership.sh` checks reference counts across
 successful calls and native exception paths. It also checks that borrowed
-tensor handles remain valid. The ABI checker cannot distinguish owned and
-borrowed arguments: both appear as `lean_object*` in generated C.
+tensor handles remain valid. The generated FFI header cannot enforce owned
+versus borrowed arguments: `lean_obj_arg` and `b_lean_obj_arg` are both
+`lean_object*`.
 
-FloatBuffer has its own audited header, `cc/src/tyr_float_buffer_abi.h`.
-Its `Nat` inputs are boxed Lean objects, its pure `Float` result is a native
-`double`, and its IO results use Lean's result wrapper. CI compares every
-recognized declaration in the generated FloatBuffer adapter with the header
-using `scripts/check_ffi_abi.py --require-complete`.
+### Generated FFI header
+
+Every `@[extern]` of `Tyr` lives in the `TyrFFI` library (`Tyr.Basic`,
+`Tyr.ConstantSupport`, `Tyr.RawTensor` and its submodules, `Tyr.Audio`'s
+FloatBuffer and Apple I/O). It is not precompiled, so it builds before
+`libTyrC`. The `libtyr` target runs `GenerateFfiHeader` over it, writing
+`cc/src/generated/tyr_ffi.h` from Lean's compiled extern declarations, and
+`cc/src` and `cc/tools` include that header. A C++ definition whose signature
+differs from its Lean declaration is a compile error.
 
 ### Consuming tensor updates
 
@@ -263,15 +268,12 @@ array before returning it, preserving ownership of its boxed Float values.
 The resampler computes its output length with checked integer arithmetic before
 narrowing it or allocating output storage, and its native body returns C++ failures through
 `IO.Error`. The runtime-service exports in `Tyr.Torch` use the same exception
-guard and have a complete ABI header, `cc/src/tyr_torch_abi.h`, checked against
-generated `Tyr/Torch.c`. `scripts/test_native_torch_recovery.sh` exercises the
+guard. `scripts/test_native_torch_recovery.sh` exercises the
 resampler size failures, borrowed arrays, and runtime error carriers. This
 exception guard does not establish CUDA graph lifecycle or stream correctness;
 those GPU-specific contracts still require repair and qualification.
 
-All distributed and polar IO exports enter the common guard and have complete
-declarations in `cc/src/tyr_distributed_abi.h`, checked against generated
-`Tyr/Distributed.c`. Process-group initialization checks port, rank, world size,
+All distributed and polar IO exports enter the common guard. Process-group initialization checks port, rank, world size,
 and backend availability before rendezvous, then publishes state only after
 construction succeeds. CUDA device indices are checked before narrowing on every
 build. Synchronous collective success carries a boxed UInt64 zero; asynchronous
@@ -401,7 +403,12 @@ change. `tyr_ops.cpp` calls launchers only after a runtime Hopper check (`device
    so their `.olean` files build without it. Lake reruns the generator when
    it, a kernel module's `.olean` or `-Kkernels` changes. Without CUDA the
    Makefile ignores generated `.cu` files and links the weak launcher stubs.
-3. Runs `make -jN -C cc dylib` on every build (`N` = `TYR_MAKE_JOBS`, or the
+3. Writes `cc/src/generated/tyr_ffi.h` (all builds; see "Generated FFI header"
+   above) by running the `GenerateFfiHeader` executable over every `TyrFFI`
+   module. Like the GPU generator, it imports only `Lean` and links no
+   `libTyrC`, and `TyrFFI` is not precompiled. Lake reruns it when it or a
+   `TyrFFI` module's `.olean` changes.
+4. Runs `make -jN -C cc dylib` on every build (`N` = `TYR_MAKE_JOBS`, or the
    CPU count); a no-op run takes well under a second. Make alone decides what
    to recompile. The target's trace is the content of `libTyrC`, so if it is
    unchanged (e.g. after a comment-only edit) nothing downstream relinks.

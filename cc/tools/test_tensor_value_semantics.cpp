@@ -1,7 +1,4 @@
-#include "tyr_raw_tensor_abi.h"
-#include "tyr_neural_abi.h"
-#include "tyr_branching_abi.h"
-#include "tyr_owned_kv_abi.h"
+#include "generated/tyr_ffi.h"
 #include <torch/torch.h>
 #include <atomic>
 #include <functional>

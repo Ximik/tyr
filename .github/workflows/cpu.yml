@@ -69,26 +69,6 @@ jobs:
           python3 scripts/test_inventory.py --build --wfail
           lake build --wfail RunDistributedValues
 
-      - name: Verify audited FFI ABI declarations
-        run: |
-          python3 scripts/check_ffi_abi.py
-          python3 scripts/check_ffi_abi.py --header cc/src/tyr_raw_tensor_abi.h --generated .lake/build/ir/Tyr/Basic.c .lake/build/ir/Tyr/RawTensor.c
-          python3 scripts/check_ffi_abi.py --header cc/src/tyr_owned_kv_abi.h --generated .lake/build/ir/Tyr/RawTensor/OwnedKV.c
-          python3 scripts/check_ffi_abi.py --header cc/src/tyr_neural_abi.h --generated .lake/build/ir/Tyr/RawTensor/Neural.c
-          python3 scripts/check_ffi_abi.py --header cc/src/tyr_safetensors_abi.h --generated .lake/build/ir/Tyr/RawTensor/SafeTensors.c
-          python3 scripts/check_ffi_abi.py --header cc/src/tyr_qwen35_abi.h --generated .lake/build/ir/Tyr/RawTensor/Qwen35.c
-          python3 scripts/check_ffi_abi.py --header cc/src/tyr_kittentts_abi.h --generated .lake/build/ir/Tyr/RawTensor/KittenTTS.c
-          python3 scripts/check_ffi_abi.py --header cc/src/tyr_branching_abi.h --generated .lake/build/ir/Tyr/RawTensor/BranchingFlows.c
-          python3 scripts/check_ffi_abi.py --header cc/src/tyr_laguna_abi.h --generated .lake/build/ir/Tyr/RawTensor/Laguna.c
-          python3 scripts/check_ffi_abi.py --header cc/src/tyr_gemma4_abi.h --generated .lake/build/ir/Tyr/RawTensor/Gemma4.c
-          python3 scripts/check_ffi_abi.py --header cc/src/tyr_vae_abi.h --generated .lake/build/ir/Tyr/RawTensor/VAE.c
-          python3 scripts/check_ffi_abi.py --header cc/src/tyr_flux_abi.h --generated .lake/build/ir/Tyr/RawTensor/Flux.c
-          python3 scripts/check_ffi_abi.py --header cc/src/tyr_float_buffer_abi.h --generated .lake/build/ir/Tyr/Audio/FloatBuffer.c --require-complete
-          python3 scripts/check_ffi_abi.py --header cc/src/tyr_parquet_abi.h --generated .lake/build/ir/Tyr/RawTensor/Parquet.c --require-complete --symbol-prefix lean_parquet_
-          python3 scripts/check_ffi_abi.py --header cc/src/tyr_torch_abi.h --generated .lake/build/ir/Tyr/RawTensor/Runtime.c --require-complete
-          python3 scripts/check_ffi_abi.py --header cc/src/tyr_constant_support_abi.h --generated .lake/build/ir/Tyr/ConstantSupport.c --require-complete
-          python3 scripts/check_ffi_abi.py --header cc/src/tyr_distributed_abi.h --generated .lake/build/ir/Tyr/RawTensor/Distributed.c --require-complete
-
       - name: Test native attention CPU semantics
         run: |
           bash scripts/test_native_attention.sh cpu
@@ -188,7 +168,6 @@ jobs:
         run: |
           python3 scripts/check_ffi_recovery.py
           python3 scripts/test_ffi_recovery.py
-          python3 scripts/test_ffi_abi.py
           python3 scripts/test_inventory.py
           python3 scripts/test_test_inventory.py
           python3 scripts/test_distributed_values_runner.py

@@ -1,4 +1,4 @@
-#include "tyr_qwen35_abi.h"
+#include "generated/tyr_ffi.h"
 #include "tyr_tensor.h"
 #include <torch/torch.h>
 

@@ -9,7 +9,7 @@
  */
 
 #include <lean/lean.h>
-#include "tyr_distributed_abi.h"
+#include "generated/tyr_ffi.h"
 #include "tyr_checked_result.h"
 #include <torch/torch.h>
 

@@ -9,7 +9,7 @@ platform branches, must contain only a checkedCall/checkedIoCall return with a
 literal context and reference-capture lambda. This forbids throwable work in
 argument evaluation before the guard as well as statements before/after it.
 
-This is a conservative source convention check, complementary to check_ffi_abi.py
+This is a conservative source convention check, complementary to the generated FFI header
 and native runtime tests. It does not prove C++ exception interoperability or
 the implementation of tyr_checked_result.h. Macro-generated exports and result
 type aliases require explicit scanner support rather than silently passing.

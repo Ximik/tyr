@@ -1,5 +1,5 @@
 #include <lean/lean.h>
-#include "tyr_float_buffer_abi.h"
+#include "generated/tyr_ffi.h"
 #include <cmath>
 #include <cstring>
 #include <cstdlib>

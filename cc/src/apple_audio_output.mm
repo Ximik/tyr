@@ -1,4 +1,4 @@
-#include <lean/lean.h>
+#include "generated/tyr_ffi.h"
 
 #include <cmath>
 #include <cstring>
@@ -156,16 +156,14 @@ extern "C" {
 lean_object* lean_tyr_audio_output_beep(
     double freq_hz,
     uint64_t duration_ms,
-    uint64_t sample_rate,
-    lean_object* /*w*/) {
+    uint64_t sample_rate) {
   return play_tone_sync(freq_hz, duration_ms, sample_rate);
 }
 
 lean_object* lean_tyr_audio_output_beep_async(
     double freq_hz,
     uint64_t duration_ms,
-    uint64_t sample_rate,
-    lean_object* /*w*/) {
+    uint64_t sample_rate) {
   std::thread([=]() { play_tone_core(freq_hz, duration_ms, sample_rate); }).detach();
   return lean_io_result_mk_ok(lean_box(0));
 }
@@ -185,12 +183,12 @@ static lean_object* mk_io_error(const char* msg) {
 extern "C" {
 
 lean_object* lean_tyr_audio_output_beep(
-    double, uint64_t, uint64_t, lean_object* /*w*/) {
+    double, uint64_t, uint64_t) {
   return mk_io_error("audio output is only supported on macOS");
 }
 
 lean_object* lean_tyr_audio_output_beep_async(
-    double, uint64_t, uint64_t, lean_object* /*w*/) {
+    double, uint64_t, uint64_t) {
   return mk_io_error("audio output is only supported on macOS");
 }
 

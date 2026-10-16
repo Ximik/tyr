@@ -187,8 +187,9 @@ structures; see [serialization](../serialization.md).
 
 Native adapters contain `@[extern]` declarations over `RawTensor`. Their ABI must
 match the C++ definitions, including boxed versus unboxed arguments and ownership.
-After building the adapters, run `python3 scripts/check_ffi_abi.py`. Additional
-per-module ABI audits are listed in the CPU CI workflow and qualification script.
+The `libtyr` build generates `cc/src/generated/tyr_ffi.h` from Lean's compiled
+extern declarations (`TyrFFI`), and `libTyrC`'s sources include it, so a
+signature mismatch fails to compile. Ownership is not part of the C types.
 
 `Tests.TestTyped`, `Tests.TestTypedNeural`, and `Tests.TestFFIBoundary` cover static
 rejections, native metadata, numerical behavior, and ABI-sensitive calls. CPU

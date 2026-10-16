@@ -1,11 +1,4 @@
-#include "tyr_safetensors_abi.h"
-#include "tyr_flux_abi.h"
-#include "tyr_vae_abi.h"
-#include "tyr_gemma4_abi.h"
-#include "tyr_branching_abi.h"
-#include "tyr_laguna_abi.h"
-#include "tyr_kittentts_abi.h"
-#include "tyr_qwen35_abi.h"
+#include "generated/tyr_ffi.h"
 /*
  * tyr.cpp - Lean 4 ↔ LibTorch FFI Bindings
  *
@@ -84,12 +77,6 @@
 #include <chrono>
 #include <thread>
 #include <lean/lean.h>
-#include "tyr_ffi_abi.h"
-#include "tyr_raw_tensor_abi.h"
-#include "tyr_owned_kv_abi.h"
-#include "tyr_neural_abi.h"
-#include "tyr_torch_abi.h"
-#include "tyr_constant_support_abi.h"
 #include <torch/torch.h>
 #include <ATen/ATen.h>
 #include "tyr_attention.h"

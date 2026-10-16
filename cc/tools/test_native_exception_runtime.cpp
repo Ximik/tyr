@@ -4,7 +4,7 @@
 #include <ATen/Functions.h>
 #include <c10/util/Exception.h>
 #include <lean/lean.h>
-#include "../src/tyr_torch_abi.h"
+#include "../src/generated/tyr_ffi.h"
 #include <cstdio>
 #include <cstring>
 #include <stdexcept>

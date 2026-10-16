@@ -54,7 +54,7 @@
  * the Lean symbol resolvable.
  */
 
-#include "tyr_laguna_abi.h"
+#include "generated/tyr_ffi.h"
 
 #ifndef __CUDACC__
 

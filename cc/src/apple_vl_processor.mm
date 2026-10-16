@@ -1,5 +1,4 @@
-#include "tyr_gemma4_abi.h"
-#include "tyr_qwen35_abi.h"
+#include "generated/tyr_ffi.h"
 #include "tyr_checked_result.h"
 /*
  * apple_vl_processor.mm

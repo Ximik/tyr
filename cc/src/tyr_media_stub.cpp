@@ -1,5 +1,4 @@
-#include "tyr_gemma4_abi.h"
-#include "tyr_qwen35_abi.h"
+#include "generated/tyr_ffi.h"
 /*
  * tyr_media_stub.cpp
  *

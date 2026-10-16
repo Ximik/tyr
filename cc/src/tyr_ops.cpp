@@ -1,4 +1,4 @@
-#include "tyr_neural_abi.h"
+#include "generated/tyr_ffi.h"
 #include <cmath>
 #include <iostream>
 #include <limits>

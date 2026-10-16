@@ -8,7 +8,7 @@
 #include <lean/lean.h>
 #include <string>
 #include "tyr_checked_result.h"
-#include "tyr_parquet_abi.h"
+#include "generated/tyr_ffi.h"
 
 #if defined(__has_include)
 #if __has_include(<arrow/api.h>) && __has_include(<arrow/io/file.h>) && __has_include(<parquet/arrow/reader.h>) && __has_include(<parquet/file_reader.h>)

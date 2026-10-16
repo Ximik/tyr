@@ -33,8 +33,7 @@ Use `loadFromHandleWithSpec`, `loadTensorWithSpec`, or
 `IO (Tensor { shape := spec.shape, dtype := spec.dtype, device := device })`. The result is indexed by the requested device, which defaults to CPU.
 Contract variants also carry a role and optional expected-device metadata.
 
-The native header `cc/src/tyr_safetensors_abi.h` and generated-C audit cover all
-four loading entry points. `Tensor.saveSafeTensor tensor path name` writes one
+The generated FFI header covers all four loading entry points. `Tensor.saveSafeTensor tensor path name` writes one
 tensor under a named key. Training snapshots use the separate checkpoint APIs.
 
 ### Runtime schema introspection
