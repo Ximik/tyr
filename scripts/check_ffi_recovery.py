@@ -2,9 +2,7 @@
 """Require complete exception guards on audited recoverable native exports.
 
 Inventory is derived from IO/Except result types in Tyr/RawTensor.lean, its
-submodules, Tyr/Basic.lean, Tyr/Torch.lean, Tyr/ConstantSupport.lean,
-Tyr/Distributed.lean, and the Parquet FFI in
-Tyr/Data/Pretraining.lean.
+submodules except OwnedKV, Tyr/Basic.lean, and Tyr/ConstantSupport.lean.
 Other native subsystems are outside this explicitly reviewed scope.
 Every source definition, including inactive
 platform branches, must contain only a checkedCall/checkedIoCall return with a
@@ -268,11 +266,10 @@ def guarded_body(body: tuple[Token, ...], carrier: str) -> bool:
 def audit(root: Path) -> tuple[list[str], Counter]:
     errors = []
     exports = {}
-    lean_paths = [root / "Tyr/Basic.lean", root / "Tyr/RawTensor.lean", root / "Tyr/Torch.lean",
+    lean_paths = [root / "Tyr/Basic.lean", root / "Tyr/RawTensor.lean",
                   root / "Tyr/ConstantSupport.lean",
-                  root / "Tyr/Distributed.lean",
-                  root / "Tyr/Data/Pretraining.lean",
-                  *sorted((root / "Tyr/RawTensor").rglob("*.lean"))]
+                  *sorted(path for path in (root / "Tyr/RawTensor").rglob("*.lean")
+                          if path.name != "OwnedKV.lean")]
     for path in lean_paths:
         label = path.relative_to(root).as_posix()
         try:

@@ -1,7 +1,7 @@
 #pragma once
 #include <lean/lean.h>
 
-// Complete ABI for Tyr/Distributed.lean, including its polar kernels.
+// Complete ABI for Tyr/RawTensor/Distributed.lean, including its polar kernels.
 // IO world arguments are erased; every heap input below is borrowed.
 #ifdef __cplusplus
 extern "C" {

@@ -56,7 +56,7 @@ fi
 lake build "${targets[@]}"
 python3 scripts/check_ffi_abi.py
 python3 scripts/check_ffi_abi.py --header cc/src/tyr_raw_tensor_abi.h --generated .lake/build/ir/Tyr/Basic.c .lake/build/ir/Tyr/RawTensor.c
-python3 scripts/check_ffi_abi.py --header cc/src/tyr_owned_kv_abi.h --generated .lake/build/ir/Tyr/Inference/OwnedKV.c
+python3 scripts/check_ffi_abi.py --header cc/src/tyr_owned_kv_abi.h --generated .lake/build/ir/Tyr/RawTensor/OwnedKV.c
 python3 scripts/check_ffi_abi.py --header cc/src/tyr_neural_abi.h --generated .lake/build/ir/Tyr/RawTensor/Neural.c
 python3 scripts/check_ffi_abi.py --header cc/src/tyr_safetensors_abi.h --generated .lake/build/ir/Tyr/RawTensor/SafeTensors.c
 python3 scripts/check_ffi_abi.py --header cc/src/tyr_qwen35_abi.h --generated .lake/build/ir/Tyr/RawTensor/Qwen35.c

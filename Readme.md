@@ -283,7 +283,7 @@ Monitor tensor leaks via `get_live_tensors` which tracks outstanding C++ tensors
 
 ### Adding New Tensor Operations
 
-1. Add Lean declaration in `Tyr/Torch.lean` with `@[extern "lean_torch_xxx"]`
+1. Add Lean declaration in `Tyr/RawTensor.lean` or a `Tyr/RawTensor/` submodule with `@[extern "lean_torch_xxx"]`
 2. Implement in `cc/src/tyr.cpp` following reference counting conventions
 3. Rebuild: `lake build`
 

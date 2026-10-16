@@ -1,7 +1,7 @@
 #pragma once
 #include <lean/lean.h>
 
-// Complete runtime-service ABI, audited against generated Tyr/Torch.c.
+// Complete runtime-service ABI, audited against generated Tyr/RawTensor/Runtime.c.
 // IO's world argument is erased. Heap inputs are borrowed, never consumed.
 #ifdef __cplusplus
 extern "C" {

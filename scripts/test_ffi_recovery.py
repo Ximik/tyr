@@ -14,13 +14,9 @@ class RecoveryTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         (self.root / "Tyr/RawTensor").mkdir(parents=True)
-        (self.root / "Tyr/Data").mkdir(parents=True)
         (self.root / "cc/src").mkdir(parents=True)
         self.write("Tyr/Basic.lean", "")
-        self.write("Tyr/Torch.lean", "")
         self.write("Tyr/ConstantSupport.lean", "")
-        self.write("Tyr/Distributed.lean", "")
-        self.write("Tyr/Data/Pretraining.lean", "")
         self.declare()
         self.native('return tyr::checkedIoCall("example", [&] { return run(); });')
 
@@ -52,32 +48,32 @@ class RecoveryTests(unittest.TestCase):
         self.assertIn("no recognized native definition for new_export", errors[0])
 
     def test_pretraining_io_declarations_are_in_scope_without_symbol_list(self):
-        self.write("Tyr/Data/Pretraining.lean", '''
+        self.write("Tyr/RawTensor/Parquet.lean", '''
 @[extern "lean_parquet_get_metadata"] opaque metadata : IO ParquetMetadata
 @[extern "lean_parquet_future_operation"] opaque futureOperation : IO Unit
 ''')
         self.native('return read_metadata();', "cc/src/tyr_parquet.cpp",
                     "lean_parquet_get_metadata")
         errors = self.errors()
-        self.assertTrue(any("lean_parquet_get_metadata from Tyr/Data/Pretraining.lean:2" in error
+        self.assertTrue(any("lean_parquet_get_metadata from Tyr/RawTensor/Parquet.lean:2" in error
                             and "must contain only" in error for error in errors))
         self.assertTrue(any("no recognized native definition for lean_parquet_future_operation" in error
                             for error in errors))
 
     def test_torch_runtime_io_declarations_are_in_scope_without_symbol_list(self):
-        self.write("Tyr/Torch.lean", '''
+        self.write("Tyr/RawTensor/Runtime.lean", '''
 @[extern "lean_torch_resample_soxr_hq"] opaque resample : IO (Array Float)
 @[extern "lean_torch_future_runtime_operation"] opaque future : IO Unit
 ''')
         self.native('return resample();', "cc/src/tyr.cpp", "lean_torch_resample_soxr_hq")
         errors = self.errors()
-        self.assertTrue(any("lean_torch_resample_soxr_hq from Tyr/Torch.lean:2" in error
+        self.assertTrue(any("lean_torch_resample_soxr_hq from Tyr/RawTensor/Runtime.lean:2" in error
                             and "must contain only" in error for error in errors))
         self.assertTrue(any("no recognized native definition for lean_torch_future_runtime_operation" in error
                             for error in errors))
 
     def test_distributed_and_polar_io_are_in_scope_without_symbol_list(self):
-        self.write("Tyr/Distributed.lean", '''
+        self.write("Tyr/RawTensor/Distributed.lean", '''
 @[extern "lean_torch_dist_get_rank"] opaque rank : IO UInt64
 @[extern "lean_torch_xxt"] opaque xxt (t : @& RawTensor) : IO RawTensor
 @[extern "lean_torch_dist_future"] opaque future : IO Unit
@@ -93,7 +89,7 @@ class RecoveryTests(unittest.TestCase):
 
     def test_parquet_arrow_and_disabled_variants_are_both_checked(self):
         symbol = "lean_parquet_get_metadata"
-        self.write("Tyr/Data/Pretraining.lean",
+        self.write("Tyr/RawTensor/Parquet.lean",
                    f'@[extern "{symbol}"] opaque metadata : IO ParquetMetadata\n')
         guarded = 'return tyr::checkedIoCall("metadata", [&] { return read_metadata(); });'
         unavailable = 'return tyr::checkedIoCall("metadata", [&] { return parquet_unavailable(); });'

@@ -1,7 +1,7 @@
 #pragma once
 #include <lean/lean.h>
 
-// Compare with Tyr/Inference/OwnedKV.lean generated C. Lean 4.29 erases the
+// Compare with Tyr/RawTensor/OwnedKV.lean generated C. Lean 4.29 erases the
 // IO world argument. Shapes are owned; clone borrows its source. Slice copy
 // consumes its destination, borrows its source, and returns IO RawTensor.
 #ifdef __cplusplus

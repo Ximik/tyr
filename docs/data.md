@@ -144,7 +144,7 @@ retain both the input and target dimensions and their Int64 dtype.
 ### Parquet pretraining loaders
 
 `torch.Data.Pretraining` (`Tyr/Data/Pretraining.lean`) binds Apache Arrow
-through `@[extern]` declarations implemented in `cc/src/tyr_parquet.cpp` (with
+through `@[extern]` declarations in `Tyr/RawTensor/Parquet.lean`, implemented in `cc/src/tyr_parquet.cpp` (with
 stubs when Arrow is absent): `listParquetFiles`, `getParquetMetadata`,
 `readRowGroup`, `readParquetAsJson`, `readRowGroupAsJson`
 (`Pretraining.lean:48-74`). On top sit `RowGroupIterator` (rank-strided row
@@ -279,7 +279,7 @@ assembles a pretraining → midtraining → SFT sequence.
 
 | API | Signature | Location |
 | --- | --- | --- |
-| `listParquetFiles`, `getParquetMetadata`, `readRowGroup`, `readParquetAsJson`, `readRowGroupAsJson` | `@[extern]` opaque IO functions | `Tyr/Data/Pretraining.lean:48-74` |
+| `listParquetFiles`, `getParquetMetadata`, `readRowGroup`, `readParquetAsJson`, `readRowGroupAsJson` | `@[extern]` opaque IO functions | `Tyr/RawTensor/Parquet.lean` |
 | `RowGroupIterator.init` / `.next` | `(dataPath) (rank worldSize : UInt64) (log := {})` / `IO (Option RowGroupData × _)` | `Pretraining.lean:189,229` |
 | `StreamingLoaderState.init` / `.nextBatch` / `.getCheckpoint` / `.resume` | streaming windows with resume | `Pretraining.lean:419,496,534,538` |
 | `lossToBPB` | `(loss : Float) (numTokens numBytes : Nat) : Float` | `Pretraining.lean:368` |

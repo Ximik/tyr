@@ -1,4 +1,5 @@
 import Tyr.Typed.Tensor
+import Tyr.RawTensor.OwnedKV
 
 /- Tyr/Inference/OwnedKV.lean
 
@@ -9,15 +10,7 @@ import Tyr.Typed.Tensor
 
 namespace torch.data
 
-/-- Checked native slice update, consuming the destination reference. -/
-@[extern "lean_torch_copy_slice_io"]
-private opaque copySliceIORaw (dstShape srcShape : Shape) (dst : RawTensor)
-    (dim start : UInt64) (src : @& RawTensor) : IO RawTensor
-
-/-- Raw ABI for the effectful inference clone. The shape argument is passed
-for ABI compatibility only; the native side never reads it. -/
-@[extern "lean_torch_clone_inference_io"]
-private opaque cloneInferenceIORaw (shape : Shape) (src : @& RawTensor) : IO RawTensor
+open torch.data.Native
 
 /-- Return the destination with the requested slice replaced. Retained aliases
 keep their original values. The native operation disables autograd for the copy. -/

@@ -183,7 +183,7 @@ private def validateFrontendRegistration
       | .error err =>
           throwError m!"invalid `ad_frontend` for `{declName}`:\n{err}"
 
-builtin_initialize frontendAttr : ParametricAttribute FrontendRegistration ←
+initialize frontendAttr : ParametricAttribute FrontendRegistration ←
   registerParametricAttribute {
     name := `adFrontendAttr
     descr := "Register direct frontend AD artifacts for elimination-based AD"
