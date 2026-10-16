@@ -142,61 +142,59 @@ private def mkTensorStructInstanceCmd (typeName : Name) : CommandElabM Unit := d
     let fnameId := mkIdent fname
     foldExpr ← `(TensorStruct.fold f $foldExpr x.$fnameId)
 
-  -- Get the type parameters
-  let numParams := indInfo.numParams
+  -- Parameters of the structure, bound by every generated declaration.
+  let (binderStxs, appliedType) ← liftTermElabM do
+    Meta.forallTelescopeReducing indInfo.type fun params _ => do
+      let params := params[:indInfo.numParams].toArray
+      let binders ← params.mapM fun param => do
+        let paramDecl ← param.fvarId!.getDecl
+        let paramTypeStx ← PrettyPrinter.delab (← Meta.inferType param)
+        if paramDecl.binderInfo == .instImplicit then
+          `(bracketedBinder| [$(mkIdent paramDecl.userName) : $paramTypeStx])
+        else
+          `(bracketedBinder| {$(mkIdent paramDecl.userName) : $paramTypeStx})
+      let paramIdents ← params.mapM fun param => do
+        pure (mkIdent (← param.fvarId!.getDecl).userName)
+      -- `params` includes implicit record parameters such as a shared device.
+      -- Apply every parameter explicitly so it cannot be mistaken for the
+      -- next explicit shape/type argument.
+      return (binders, ← `(@$(mkIdent typeName) $paramIdents*))
 
-  if numParams == 0 then
-    -- No parameters - simple instance
-    let typeId := mkIdent typeName
-    let instCmd ← `(command|
-      instance : TensorStruct $typeId where
-        map f x := { $[$mapFields:structInstField],* }
-        mapM f x := do
-          $[$mapMBinds:doElem]*
-          pure { $[$mapMFields:structInstField],* }
-        zipWith f x y := { $[$zipFields:structInstField],* }
-        fold f init x := $foldExpr
-    )
-    elabCommand instCmd
-  else
-    -- Has parameters - need to build binders
-    let instCmd ← liftTermElabM do
-      Meta.forallTelescopeReducing indInfo.type fun params _ => do
-        let paramBinders := params[:numParams]
-
-        -- Build implicit binder syntax for each parameter
-        let binderStxs ← paramBinders.toArray.mapM fun param => do
-          let paramDecl ← param.fvarId!.getDecl
-          let paramName := paramDecl.userName
-          let paramType ← Meta.inferType param
-          let paramTypeStx ← PrettyPrinter.delab paramType
-          if paramDecl.binderInfo == .instImplicit then
-            `(bracketedBinder| [$(mkIdent paramName) : $paramTypeStx])
-          else
-            `(bracketedBinder| {$(mkIdent paramName) : $paramTypeStx})
-
-        -- Build the applied type
-        let paramIdents ← paramBinders.toArray.mapM fun param => do
-          let paramDecl ← param.fvarId!.getDecl
-          pure (mkIdent paramDecl.userName)
-
-        -- `params` includes implicit record parameters such as a shared device.
-        -- Apply every parameter explicitly so it cannot be mistaken for the
-        -- next explicit shape/type argument.
-        let appliedType ← `(@$(mkIdent typeName) $paramIdents*)
-
-        -- Generate instance command with binders
-        `(command|
-          instance $[$binderStxs]* : TensorStruct $appliedType where
-            map f x := { $[$mapFields:structInstField],* }
-            mapM f x := do
-              $[$mapMBinds:doElem]*
-              pure { $[$mapMFields:structInstField],* }
-            zipWith f x y := { $[$zipFields:structInstField],* }
-            fold f init x := $foldExpr
-        )
-
-    elabCommand instCmd
+  -- The traversals are separate non-inlined functions that the instance calls.
+  -- Inlined instance methods would paste every nested structure's traversal
+  -- into its parent, making a model's traversal one function of its whole tree.
+  let helper (suffix : String) :=
+    mkIdent (`_root_ ++ privateToUserName typeName ++ Name.mkSimple s!"tensorStruct{suffix}")
+  let (mapFn, mapMFn, zipFn, foldFn) :=
+    (helper "Map", helper "MapM", helper "ZipWith", helper "Fold")
+  elabCommand (← `(command|
+    @[noinline] private def $mapFn $[$binderStxs]*
+        (f : ∀ {σ : _root_.torch.StaticSpec}, _root_.torch.Tensor σ → _root_.torch.Tensor σ)
+        (x : $appliedType) : $appliedType :=
+      { $[$mapFields:structInstField],* }))
+  elabCommand (← `(command|
+    @[noinline] private def $mapMFn $[$binderStxs]* {m : Type → Type} [Monad m]
+        (f : ∀ {σ : _root_.torch.StaticSpec}, _root_.torch.Tensor σ → m (_root_.torch.Tensor σ))
+        (x : $appliedType) : m $appliedType := do
+      $[$mapMBinds:doElem]*
+      pure { $[$mapMFields:structInstField],* }))
+  elabCommand (← `(command|
+    @[noinline] private def $zipFn $[$binderStxs]*
+        (f : ∀ {σ : _root_.torch.StaticSpec},
+          _root_.torch.Tensor σ → _root_.torch.Tensor σ → _root_.torch.Tensor σ)
+        (x y : $appliedType) : $appliedType :=
+      { $[$zipFields:structInstField],* }))
+  elabCommand (← `(command|
+    @[noinline] private def $foldFn $[$binderStxs]* {β : Type}
+        (f : ∀ {σ : _root_.torch.StaticSpec}, _root_.torch.Tensor σ → β → β)
+        (init : β) (x : $appliedType) : β :=
+      $foldExpr))
+  elabCommand (← `(command|
+    instance $[$binderStxs]* : TensorStruct $appliedType where
+      map f x := $mapFn f x
+      mapM f x := $mapMFn f x
+      zipWith f x y := $zipFn f x y
+      fold f init x := $foldFn f init x))
 
 /-- Derive constrained traversal independently of structural traversal. Each
 field contributes its own capability requirement, resolved only when the
