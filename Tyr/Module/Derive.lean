@@ -221,7 +221,7 @@ private def mkTensorStructForInstanceCmd (typeName : Name) : CommandElabM Unit :
   for field in info.fieldNames do
     let field := mkIdent field
     foldExpr ← `(TensorStructFor.fold f $foldExpr x.$field)
-  let command ← liftTermElabM do
+  let (binders, predicate, appliedType) ← liftTermElabM do
     forallTelescopeReducing inductiveInfo.type fun parameters _ => do
       let parameters := parameters.extract 0 inductiveInfo.numParams
       let predicate := mkIdent `_tensorLeafPredicate
@@ -249,16 +249,42 @@ private def mkTensorStructForInstanceCmd (typeName : Name) : CommandElabM Unit :
       binders := binders ++ fieldBinders
       let arguments ← parameters.mapM fun parameter =>
         return mkIdent (← parameter.fvarId!.getDecl).userName
-      let appliedType ← `(@$(mkIdent typeName) $arguments*)
-      `(command|
-        instance $[$binders]* : TensorStructFor $predicate $appliedType where
-          map f x := { $[$mapFields:structInstField],* }
-          mapM f x := do
-            $[$mapMBinds:doElem]*
-            pure { $[$mapMFields:structInstField],* }
-          zipWith f x y := { $[$zipFields:structInstField],* }
-          fold f init x := $foldExpr)
-  elabCommand command
+      return (binders, predicate, ← `(@$(mkIdent typeName) $arguments*))
+  -- Separate non-inlined traversals, as for `TensorStruct` above.
+  let helper (suffix : String) :=
+    mkIdent (`_root_ ++ privateToUserName typeName ++ Name.mkSimple s!"tensorStructFor{suffix}")
+  let (mapFn, mapMFn, zipFn, foldFn) :=
+    (helper "Map", helper "MapM", helper "ZipWith", helper "Fold")
+  elabCommand (← `(command|
+    @[noinline] private def $mapFn $[$binders]*
+        (f : ∀ {σ : _root_.torch.StaticSpec}, $predicate σ →
+          _root_.torch.Tensor σ → _root_.torch.Tensor σ)
+        (x : $appliedType) : $appliedType :=
+      { $[$mapFields:structInstField],* }))
+  elabCommand (← `(command|
+    @[noinline] private def $mapMFn $[$binders]* {m : Type → Type} [Monad m]
+        (f : ∀ {σ : _root_.torch.StaticSpec}, $predicate σ →
+          _root_.torch.Tensor σ → m (_root_.torch.Tensor σ))
+        (x : $appliedType) : m $appliedType := do
+      $[$mapMBinds:doElem]*
+      pure { $[$mapMFields:structInstField],* }))
+  elabCommand (← `(command|
+    @[noinline] private def $zipFn $[$binders]*
+        (f : ∀ {σ : _root_.torch.StaticSpec}, $predicate σ →
+          _root_.torch.Tensor σ → _root_.torch.Tensor σ → _root_.torch.Tensor σ)
+        (x y : $appliedType) : $appliedType :=
+      { $[$zipFields:structInstField],* }))
+  elabCommand (← `(command|
+    @[noinline] private def $foldFn $[$binders]* {β : Type}
+        (f : ∀ {σ : _root_.torch.StaticSpec}, $predicate σ → _root_.torch.Tensor σ → β → β)
+        (init : β) (x : $appliedType) : β :=
+      $foldExpr))
+  elabCommand (← `(command|
+    instance $[$binders]* : TensorStructFor $predicate $appliedType where
+      map f x := $mapFn f x
+      mapM f x := $mapMFn f x
+      zipWith f x y := $zipFn f x y
+      fold f init x := $foldFn f init x))
 
 /-- Add only capability-aware traversal to a record with a custom TensorStruct
 instance. Field traversal remains structural and uses each field's instances. -/

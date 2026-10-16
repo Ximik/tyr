@@ -48,6 +48,33 @@ private def castFieldTypes (constructor : Expr) (parameters : Array Expr) :
         throwError "Automatic TensorTreeCast derivation does not support fields whose types depend on earlier field values; use a manual TensorTreeCast instance."
       pure type
 
+/-- The cast is a separate non-inlined function that the instance calls.
+Inlined instance methods would paste every nested record's cast into its
+parent, making a model's cast one function of its whole tree. -/
+private def elabCastInstance (castFn : Ident)
+    (binders : Array (TSyntax ``Parser.Term.bracketedBinder))
+    (sourceType targetType : Term)
+    (fields : Array (TSyntax ``Parser.Term.structInstField)) : CommandElabM Unit := do
+  elabCommand (← `(command|
+    @[noinline] private def $castFn $[$binders]* (_path : String) (_source : $sourceType) :
+        IO $targetType := do
+      pure { $[$fields:structInstField],* }))
+  elabCommand (← `(command|
+    instance $[$binders]* : TensorTreeCast $sourceType $targetType where
+      castAt path source := $castFn path source))
+
+/-- A private declaration name under `typeName` not yet used in this module. -/
+private def freshCastName (typeName : Name) (base : String) : CommandElabM Ident := do
+  let env ← getEnv
+  let mut index := 0
+  repeat
+    let suffix := if index == 0 then base else s!"{base}{index}"
+    let name := privateToUserName typeName ++ Name.mkSimple suffix
+    unless env.contains (mkPrivateName env name) do
+      return mkIdent (`_root_ ++ name)
+    index := index + 1
+  unreachable!
+
 /-- Generate the same-record conversion provided by `deriving TensorStruct`.
 Every parameter has distinct source and target values; conversion is available
 only when each corresponding field has a checked `TensorTreeCast` instance. -/
@@ -63,7 +90,7 @@ def deriveTensorTreeCastFor (typeName : Name) : CommandElabM Unit := do
     `(Lean.Parser.Term.structInstField|
       $fieldId:ident := ← TensorTreeCast.castAt
         (TensorTreeCast.fieldPath _path $(Lean.quote label)) _source.$fieldId)
-  let command ← liftTermElabM do
+  let (binders, sourceType, targetType) ← liftTermElabM do
     forallTelescopeReducing inductiveInfo.type fun parameters _ => do
       let parameters := parameters.extract 0 inductiveInfo.numParams
       withCastParameters parameters "source" fun source =>
@@ -91,11 +118,8 @@ def deriveTensorTreeCastFor (typeName : Name) : CommandElabM Unit := do
             return mkIdent (← parameter.fvarId!.getDecl).userName
           let sourceType ← `(@$(mkIdent typeName) $sourceArguments*)
           let targetType ← `(@$(mkIdent typeName) $targetArguments*)
-          `(command|
-            instance $[$binders]* : TensorTreeCast $sourceType $targetType where
-              castAt _path _source := do
-                pure { $[$fields:structInstField],* })
-  elabCommand command
+          return (binders, sourceType, targetType)
+  elabCastInstance (← freshCastName typeName "tensorTreeCast") binders sourceType targetType fields
 
 private def castFieldLabel : Name → String
   | .anonymous => "_"
@@ -123,11 +147,10 @@ syntax (name := deriveTensorTreeCastWithBinders)
 
 private def elabTensorTreeCast (binders : Array (TSyntax ``Parser.Term.bracketedBinder))
     (sourceType targetType : TSyntax `term) : CommandElabM Unit := do
-      let (sourceFields, targetFields) ← liftTermElabM do
+      let (sourceInfo, targetInfo) ← liftTermElabM do
         Term.elabBinders (binders.map (·.raw)) fun _ => do
-          let sourceInfo ← castStructureInfo sourceType
-          let targetInfo ← castStructureInfo targetType
-          return (sourceInfo.fieldNames, targetInfo.fieldNames)
+          return (← castStructureInfo sourceType, ← castStructureInfo targetType)
+      let (sourceFields, targetFields) := (sourceInfo.fieldNames, targetInfo.fieldNames)
       let sourceLabels := sourceFields.map castFieldLabel
       let targetLabels := targetFields.map castFieldLabel
       unless sourceLabels == targetLabels do
@@ -139,11 +162,9 @@ private def elabTensorTreeCast (binders : Array (TSyntax ``Parser.Term.bracketed
         `(Lean.Parser.Term.structInstField|
           $fieldIdent:ident := ← TensorTreeCast.castAt
             (TensorTreeCast.fieldPath _path $(Lean.quote label)) _source.$fieldIdent)
-      let instanceCommand ← `(command|
-        instance $[$binders]* : TensorTreeCast $sourceType $targetType where
-          castAt _path _source := do
-            pure { $[$fields:structInstField],* })
-      elabCommand instanceCommand
+      let castName := s!"tensorTreeCastTo{(privateToUserName targetInfo.structName).getString!}"
+      elabCastInstance (← freshCastName sourceInfo.structName castName)
+        binders sourceType targetType fields
 
 elab_rules : command
   | `(derive_tensor_tree_cast $sourceType => $targetType) =>
