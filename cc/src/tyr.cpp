@@ -292,8 +292,9 @@ std::vector<int64_t> getShape(b_lean_obj_arg s) {
 
 torch::Device getDevice(b_lean_obj_arg device) {
   const auto tag = lean_obj_tag(device);
-  TORCH_CHECK(tag != 0 || !lean_is_scalar(device), "Malformed Lean CUDA device constructor");
-  const auto cuda_index = tag == 0 ? lean_ctor_get_uint64(device, 0) : 0;
+  const bool cuda = tag == static_cast<unsigned>(tyr::lean::DeviceKind::CUDA);
+  TORCH_CHECK(!cuda || !lean_is_scalar(device), "Malformed Lean CUDA device constructor");
+  const auto cuda_index = cuda ? lean_ctor_get_uint64(device, 0) : 0;
   const auto result = tyr::metadata::deviceFromLeanTag(tag, cuda_index);
 #ifdef __APPLE__
   if (result.is_mps()) {
@@ -473,26 +474,22 @@ lean_object* lean_torch_native_invariant_failure(b_lean_obj_arg message) {
   std::abort();
 }
 
-// Device's validity proof erases, retaining DeviceKind (CUDA=0, CPU=1, MPS=2).
+// Device's validity proof erases, retaining DeviceKind.
 // An existing tensor is evidence that its actual placement was acquired.
 lean_object* lean_torch_get_device_enum(lean_obj_arg s, b_lean_obj_arg t) {
   lean_dec(s);
     auto tensor = borrowTensor(t);
     auto device = tensor.device();
 
+    // leanDeviceTag rejects every unsupported backend.
     const auto tag = tyr::metadata::leanDeviceTag(device);
-    if (tag == 0) {
-        // CUDA tag=0, constructor with 1 field (device index)
-        lean_object* obj = lean_alloc_ctor(0, 0, 8);
+    if (tag == static_cast<unsigned>(tyr::lean::DeviceKind::CUDA)) {
+        // The only constructor with a field: the device index.
+        lean_object* obj = lean_alloc_ctor(tag, 0, 8);
         lean_ctor_set_uint64(obj, 0, device.index());
         return obj;
-    } else if (tag == 1) {
-        // CPU tag=1, scalar constructor
-        return lean_box(1);
-    } else { // leanDeviceTag rejects every unsupported backend.
-        // MPS tag=2, scalar constructor
-        return lean_box(2);
     }
+    return lean_box(tag);
 }
 
 // Get tensor values as flat Array Float (up to max_elements)

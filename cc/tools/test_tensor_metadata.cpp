@@ -54,26 +54,29 @@ void requireError(const std::string& fragment, Action action) {
 void testDeviceConversion() {
   using tyr::metadata::deviceFromLeanTag;
   using tyr::metadata::leanDeviceTag;
+  constexpr auto cuda = static_cast<unsigned>(tyr::lean::DeviceKind::CUDA);
+  constexpr auto cpu = static_cast<unsigned>(tyr::lean::DeviceKind::CPU);
+  constexpr auto mps = static_cast<unsigned>(tyr::lean::DeviceKind::MPS);
   const auto max_index = static_cast<uint64_t>(std::numeric_limits<c10::DeviceIndex>::max());
-  require(deviceFromLeanTag(1).is_cpu(), "CPU must decode to CPU");
-  require(deviceFromLeanTag(0, 0).index() == 0, "CUDA zero must retain its index");
-  require(deviceFromLeanTag(0, max_index).index() == max_index,
+  require(deviceFromLeanTag(cpu).is_cpu(), "CPU must decode to CPU");
+  require(deviceFromLeanTag(cuda, 0).index() == 0, "CUDA zero must retain its index");
+  require(deviceFromLeanTag(cuda, max_index).index() == max_index,
           "Largest representable CUDA index must remain unchanged");
   for (const auto index : {max_index + 1, uint64_t{255}, uint64_t{256},
                           std::numeric_limits<uint64_t>::max()}) {
-    requireError("CUDA device index", [=] { (void)deviceFromLeanTag(0, index); });
+    requireError("CUDA device index", [=] { (void)deviceFromLeanTag(cuda, index); });
   }
-  requireError("Invalid Lean Device constructor tag", [] { (void)deviceFromLeanTag(3); });
+  requireError("Invalid Lean Device constructor tag", [] { (void)deviceFromLeanTag(mps + 1); });
 #ifdef __APPLE__
-  require(deviceFromLeanTag(2).is_mps(), "Apple MPS must decode to MPS without CPU fallback");
+  require(deviceFromLeanTag(mps).is_mps(), "Apple MPS must decode to MPS without CPU fallback");
 #else
-  requireError("MPS devices are unsupported", [] { (void)deviceFromLeanTag(2); });
+  requireError("MPS devices are unsupported", [] { (void)deviceFromLeanTag(mps); });
 #endif
-  require(leanDeviceTag(c10::Device(c10::DeviceType::CPU)) == 1,
+  require(leanDeviceTag(c10::Device(c10::DeviceType::CPU)) == cpu,
           "Native CPU must encode as CPU");
-  require(leanDeviceTag(c10::Device(c10::DeviceType::CUDA, 0)) == 0,
+  require(leanDeviceTag(c10::Device(c10::DeviceType::CUDA, 0)) == cuda,
           "Native CUDA must encode as CUDA");
-  require(leanDeviceTag(c10::Device(c10::DeviceType::MPS)) == 2,
+  require(leanDeviceTag(c10::Device(c10::DeviceType::MPS)) == mps,
           "Native MPS must encode as MPS");
   requireError("Unsupported native tensor device", [] {
     (void)leanDeviceTag(c10::Device(c10::DeviceType::Meta));
@@ -112,7 +115,7 @@ void testDtypeRegistry() {
             "Canonical native dtype metadata must roundtrip");
   }
   for (bool present : seen) require(present, "Missing native ScalarType entry");
-  require(!scalarTypeFromLeanDTypeTag(46), "Unknown payload is not a concrete dtype tag");
+  require(!scalarTypeFromLeanDTypeTag(static_cast<unsigned>(tyr::lean::DType::Unknown)), "Unknown payload is not a concrete dtype tag");
   require(!parseDtype("Undefined") && !parseDtype("NumOptions") && !parseDtype("dynamic"),
           "Sentinels and wildcard tokens must not request a native dtype");
   require(parseDtype("chalf") == c10::ScalarType::ComplexHalf &&
@@ -153,7 +156,8 @@ std::string dtypeThroughRawABI(const std::filesystem::path& directory,
   auto* raw = tensor.get();
   LeanObject dtype_name(lean_torch_get_dtype(lean_alloc_array(0, 0), raw), lean_dec);
   LeanObject device(lean_torch_get_device_enum(lean_alloc_array(0, 0), raw), lean_dec);
-  require(lean_is_scalar(device.get()) && lean_unbox(device.get()) == 1,
+  require(lean_is_scalar(device.get()) &&
+              lean_unbox(device.get()) == static_cast<unsigned>(tyr::lean::DeviceKind::CPU),
           "RawTensor CPU metadata must report CPU");
   return lean_string_cstr(dtype_name.get());
 }

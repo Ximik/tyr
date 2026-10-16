@@ -124,6 +124,12 @@ FloatBuffer and Apple I/O). It is not precompiled, so it builds before
 `cc/src` and `cc/tools` include that header. A C++ definition whose signature
 differs from its Lean declaration is a compile error.
 
+The header also defines `tyr::lean::DType` and `tyr::lean::DeviceKind`, the
+constructor tags of those Lean inductives. `cc/include/tyr_tensor_metadata.h`
+maps them to LibTorch types; a `static_assert` requires one dtype entry per
+concrete constructor in Lean's order, so reordering, inserting, or renaming a
+constructor fails to compile instead of silently mapping the wrong dtype.
+
 ### Consuming tensor updates
 
 Value updates receive their destination as an owned `lean_obj_arg`, acquire a
