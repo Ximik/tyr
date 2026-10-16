@@ -101,6 +101,16 @@ target libtyr pkg : Dynlib := do
     for mod in modules do
       inputs := inputs.mix (← mod.olean.fetch)
     return inputs
+  -- Runs a generator when its inputs' trace changes. Unlike `buildFileAfterDep`,
+  -- this does not delete `output` first: generators leave unchanged files
+  -- untouched, so Make recompiles only what actually changed.
+  let generate (name : String) (inputs : Job Unit) (output : FilePath)
+      (cmd : FilePath) (args : Array String) (extraTrace := BuildTrace.nil) :
+      SpawnM (Job Unit) :=
+    inputs.mapM fun _ => do
+      addTrace extraTrace
+      buildUnlessUpToDate output (← getTrace) (pkg.buildDir / "codegen" / s!"{name}.trace") do
+        proc { cmd := cmd.toString, args, env := generatorEnv }
 
   -- 1. Placeholder launchers for every kernel in `TyrKernels` (all builds):
   --    kernels whose CUDA is not compiled still link.
@@ -108,12 +118,8 @@ target libtyr pkg : Dynlib := do
     | error "lakefile.lean: no TyrKernels library"
   let allKernels ← kernelLib.getModuleArray
   let stubsFile := generatedDir / "tyr_gpu_kernel_stubs.cpp"
-  let stubsJob ← buildFileAfterDep stubsFile (← generatorInputs allKernels) fun _ =>
-    proc {
-      cmd := generator.file.toString
-      args := #["--stubs", stubsFile.toString] ++ allKernels.map (·.name.toString)
-      env := generatorEnv
-    }
+  let stubsJob ← generate "gpu-stubs" (← generatorInputs allKernels) stubsFile generator.file
+    (#["--stubs", stubsFile.toString] ++ allKernels.map (·.name.toString))
 
   -- 2. CUDA for the `-Kkernels` modules (CUDA builds only). Lake reruns it when
   --    the generator, one of those modules or `-Kkernels` changes.
@@ -123,17 +129,9 @@ target libtyr pkg : Dynlib := do
       let some mod ← findModule? name.toName
         | error s!"-Kkernels: unknown module {name}"
       modules := modules.push mod
-    let stamp := pkg.buildDir / "gpu-codegen.stamp"
-    let job ← buildFileAfterDep stamp (← generatorInputs modules)
-      (extraDepTrace := pure (BuildTrace.ofHash (Hash.ofString gpuKernels) "-Kkernels"))
-      fun _ => do
-        proc {
-          cmd := generator.file.toString
-          args := kernelModules ++ #["--out-dir", generatedDir.toString]
-          env := generatorEnv
-        }
-        IO.FS.writeFile stamp gpuKernels
-    pure (job.map fun _ => ())
+    generate "gpu-cuda" (← generatorInputs modules) generatedDir generator.file
+      (kernelModules ++ #["--out-dir", generatedDir.toString])
+      (extraTrace := BuildTrace.ofHash (Hash.ofString gpuKernels) "-Kkernels")
 
   -- 3. C prototypes of every `TyrFFI` extern, which `libTyrC`'s sources include.
   let some ffiGenerator ← findLeanExe? `GenerateFfiHeader
@@ -145,13 +143,9 @@ target libtyr pkg : Dynlib := do
   let mut ffiInputs := (← ffiGenerator.exe.fetch).map fun _ => ()
   for mod in ffiModules do
     ffiInputs := ffiInputs.mix (← mod.olean.fetch)
-  let ffiJob ← buildFileAfterDep ffiHeader ffiInputs fun _ =>
-    proc {
-      cmd := ffiGenerator.file.toString
-      args := #[ffiHeader.toString] ++ ffiModules.map (·.name.toString)
-      env := generatorEnv
-    }
-  let codegenJob := stubsJob.mix cudaJob |>.mix (ffiJob.map fun _ => ())
+  let ffiJob ← generate "ffi-header" ffiInputs ffiHeader ffiGenerator.file
+    (#[ffiHeader.toString] ++ ffiModules.map (·.name.toString))
+  let codegenJob := stubsJob.mix cudaJob |>.mix ffiJob
 
   -- 4. make, on every build: Make decides what to recompile. The library's
   --    content is its trace, so an unchanged library rebuilds nothing else.
