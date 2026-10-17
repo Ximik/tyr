@@ -335,6 +335,11 @@ lean_exe RunRiemannianNanoGPT where
   root := `Examples.GPT.RunRiemannianNanoGPT
   supportInterpreter := true
 
+/-- Toy: IO-lifted tensor ops and the `IO (Tensor _)` reuse linter. -/
+lean_exe IOLiftDemo where
+  root := `Examples.IOLift.Main
+  supportInterpreter := true
+
 /-- Diffusion training executable -/
 lean_exe TrainDiffusion where
   root := `Examples.TrainDiffusion
