@@ -104,8 +104,7 @@ and reaps its remaining processes if either rank fails or the 60-second deadline
 expires. Per-rank logs and `report.json` go to `output/ci/distributed`; `--log-dir`,
 `--timeout`, and `--port` can override these defaults. CPU CI runs this numerical
 check on Linux and macOS. It qualifies Gloo CPU collectives, not multi-GPU NCCL
-behavior. Builds without Gloo still run the ordinary error-path and
-async-interface tests in `Tests.TestDistributedValues`.
+behavior.
 
 `dist.withDistributed` brackets init/action/teardown for a single process group.
 After successful initialization it runs teardown even if the action fails,
