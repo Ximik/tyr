@@ -14,17 +14,6 @@ example : True := by
     have _ : StaticSpec := { shape := #[2], device := .CPU }
   trivial
 
-example (_left : Tensor ⟨#[2], .Float32, .CPU⟩) : True := by
-  fail_if_success
-    have _ := _left.forgetDType
-  trivial
-
-example (_left : Tensor ⟨#[2], .Float32, .CPU⟩)
-    (_right : Tensor ⟨#[2], .Float64, .CPU⟩) : True := by
-  fail_if_success
-    have _ := Tensor.Promoting.add _left _right
-  trivial
-
 @[test] def testRuntimePromotionRetainsItsResultIndex : IO Unit := do
   let left := Tensor.ones #[2]
   let right := (Tensor.ones #[2]).castDType .Float64

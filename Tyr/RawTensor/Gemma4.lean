@@ -7,20 +7,20 @@ opaque gemma4TextExperts (tokens numExperts topK inter hidden : UInt64)
     (hiddenStates gateUpProj downProj topVals topIdx : @& RawTensor) : RawTensor
 
 @[extern "lean_torch_sdpa_gqa_mask_qkv"]
-opaque gemma4MaskedAttention (batch heads kvHeads qSeq kvSeq dim : UInt64)
+opaque gemma4MaskedAttention
     (query key value mask : @& RawTensor) (gqa : Bool) : Except String RawTensor
 @[extern "lean_torch_sdpa_gqa_mask_qkv_io"]
-opaque gemma4MaskedAttentionIO (batch heads kvHeads qSeq kvSeq dim : UInt64)
+opaque gemma4MaskedAttentionIO
     (query key value mask : @& RawTensor) (dropout : Float) (gqa : Bool) : IO RawTensor
 
 @[extern "lean_torch_softcap"]
-opaque gemma4Softcap (shape : Shape) (input : @& RawTensor) (cap : Float) : RawTensor
+opaque gemma4Softcap (input : @& RawTensor) (cap : Float) : RawTensor
 
 @[extern "lean_torch_media_load_image_patch_grid_gemma4"]
 opaque gemma4LoadImage (path : @& String) (patchSize poolingKernelSize maxSoftTokens : UInt64)
     (rescaleFactor : Float) : IO RawTensor
 
-@[extern "lean_torch_avg_pool2d"] opaque gemma4AvgPool2d (shape : Shape)
+@[extern "lean_torch_avg_pool2d"] opaque gemma4AvgPool2d
     (input : @& RawTensor) (kernel stride padding : Array UInt64) : RawTensor
 
 end torch.RawTensor

@@ -171,11 +171,6 @@ static std::pair<torch::Tensor, torch::Tensor> qwen35_recurrent_gated_delta_rule
 extern "C" {
 
 lean_object* lean_torch_qwen35_chunk_gated_delta_rule(
-    uint64_t /*batch*/,
-    uint64_t /*seq*/,
-    uint64_t /*n_head*/,
-    uint64_t /*kdim*/,
-    uint64_t /*vdim*/,
     b_lean_obj_arg query,
     b_lean_obj_arg key,
     b_lean_obj_arg value,
@@ -194,11 +189,6 @@ lean_object* lean_torch_qwen35_chunk_gated_delta_rule(
 }
 
 lean_object* lean_torch_qwen35_recurrent_gated_delta_rule(
-    uint64_t /*batch*/,
-    uint64_t /*seq*/,
-    uint64_t /*n_head*/,
-    uint64_t /*kdim*/,
-    uint64_t /*vdim*/,
     b_lean_obj_arg query,
     b_lean_obj_arg key,
     b_lean_obj_arg value,

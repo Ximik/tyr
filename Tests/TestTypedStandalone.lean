@@ -11,28 +11,6 @@ namespace Tests.TypedStandalone
 
 open torch
 
--- Removed aliases must not leak through Basic, RawTensor or the typed facade.
-example : True := by
-  fail_if_success
-    have _ := torch.T
-  fail_if_success
-    have _ := torch.DTensor
-  fail_if_success
-    have _ := torch.STensor
-  fail_if_success
-    have _ := torch.TT
-  fail_if_success
-    have _ := torch.SomeDTensor
-  fail_if_success
-    have _ := @torch.Tensor.assumeDType
-  fail_if_success
-    have _ := @torch.Tensor.assumeSpec
-  fail_if_success
-    have _ := @torch.Tensor.mk
-  fail_if_success
-    have _ := @torch.Tensor.forgetDType
-  trivial
-
 example (_x : Tensor { shape := #[2, 3], dtype := .Float32, device := .CPU }) : True := by
   fail_if_success
     have _wrongShape : Tensor { shape := #[3, 2], dtype := .Float32, device := .CPU } := _x

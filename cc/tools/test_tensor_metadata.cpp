@@ -133,11 +133,11 @@ unsigned dtypeThroughRawABI(const std::filesystem::path& directory,
                             c10::ScalarType dtype, const std::string& name) {
   auto tensor = loadThroughRawABI(directory, dtype, name);
   auto* raw = tensor.get();
-  LeanObject device(lean_torch_get_device_enum(lean_alloc_array(0, 0), raw), lean_dec);
+  LeanObject device(lean_torch_get_device_enum(raw), lean_dec);
   require(lean_is_scalar(device.get()) &&
               lean_unbox(device.get()) == static_cast<unsigned>(tyr::lean::DeviceKind::CPU),
           "RawTensor CPU metadata must report CPU");
-  return lean_torch_get_dtype_enum(lean_alloc_array(0, 0), raw);
+  return lean_torch_get_dtype_enum(raw);
 }
 
 // `Option DType`: `some` holds the boxed constructor tag.
@@ -166,16 +166,16 @@ void requireConverted(const std::filesystem::path& directory, lean_object* raw, 
                       c10::DeviceType device, const std::string& context) {
   // Inspect placement before serialization: loading onto CPU below is only a
   // way to inspect full scalar values without reaching into a RawTensor handle.
-  LeanObject native_device(lean_torch_get_device_enum(lean_alloc_array(0, 0), raw), lean_dec);
+  LeanObject native_device(lean_torch_get_device_enum(raw), lean_dec);
   const auto expected_device = tyr::metadata::leanDeviceTag(c10::Device(device));
   require(lean_is_scalar(native_device.get()) && lean_unbox(native_device.get()) == expected_device,
           context + " returned the wrong device");
-  require(lean_torch_get_dtype_enum(lean_alloc_array(0, 0), raw) == tyr::metadata::leanDTypeTag(dtype),
+  require(lean_torch_get_dtype_enum(raw) == tyr::metadata::leanDTypeTag(dtype),
           context + " reported the wrong dtype");
 
   const auto path = directory / "converted_scalar.pt";
   LeanObject path_object(lean_mk_string(path.string().c_str()), lean_dec);
-  LeanObject saved(lean_torch_save_tensor(lean_alloc_array(0, 0), raw, path_object.get()), lean_dec);
+  LeanObject saved(lean_torch_save_tensor(raw, path_object.get()), lean_dec);
   requireIoSuccess(saved.get(), context + " save for value inspection");
   std::vector<torch::Tensor> tensors;
   torch::load(tensors, path.string(), c10::Device(c10::DeviceType::CPU));

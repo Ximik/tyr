@@ -798,8 +798,6 @@ static torch::Tensor flashAttentionFromLean(
 }
 
 extern "C" LEAN_EXPORT lean_object* lean_torch_tyr_flash_attn_4d(
-    uint64_t /*batch*/, uint64_t /*n_head*/, uint64_t /*n_kv_head*/,
-    uint64_t /*q_seq*/, uint64_t /*kv_seq*/, uint64_t /*head_dim*/,
     b_lean_obj_arg query, b_lean_obj_arg key, b_lean_obj_arg value,
     lean_obj_arg attn_mask, uint8_t is_causal, lean_obj_arg scale, uint8_t enable_gqa) {
   return tyr::checkedCall("flashAttention", [&] {
@@ -809,8 +807,6 @@ extern "C" LEAN_EXPORT lean_object* lean_torch_tyr_flash_attn_4d(
 }
 
 extern "C" LEAN_EXPORT lean_object* lean_torch_tyr_flash_attn_4d_io(
-    uint64_t /*batch*/, uint64_t /*n_head*/, uint64_t /*n_kv_head*/,
-    uint64_t /*q_seq*/, uint64_t /*kv_seq*/, uint64_t /*head_dim*/,
     b_lean_obj_arg query, b_lean_obj_arg key, b_lean_obj_arg value,
     lean_obj_arg attn_mask, double dropout_p, uint8_t is_causal,
     lean_obj_arg scale, uint8_t enable_gqa) {

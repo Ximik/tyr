@@ -307,24 +307,16 @@ def testCausalMaskFunction : IO Unit := do
 
 /-! ## Constraints Tests: DivisibleBy -/
 
-/-- Test DivisibleBy instances exist for common sizes -/
-@[test]
-def testDivisibleByInstances : IO Unit := do
-  -- These should compile if instances exist
-  let _ : DivisibleBy 64 16 := inferInstance
-  let _ : DivisibleBy 128 16 := inferInstance
-  let _ : DivisibleBy 256 16 := inferInstance
-  let _ : DivisibleBy 64 8 := inferInstance
-  let _ : DivisibleBy 128 32 := inferInstance
-  let _ : DivisibleBy 256 128 := inferInstance
-  pure ()
+-- DivisibleBy instances exist for common sizes.
+example : DivisibleBy 64 16 := inferInstance
+example : DivisibleBy 128 16 := inferInstance
+example : DivisibleBy 256 16 := inferInstance
+example : DivisibleBy 64 8 := inferInstance
+example : DivisibleBy 128 32 := inferInstance
+example : DivisibleBy 256 128 := inferInstance
 
-/-- Test Mult16 alias -/
-@[test]
-def testMult16Alias : IO Unit := do
-  let _ : Mult16 64 := inferInstance
-  let _ : Mult16 128 := inferInstance
-  pure ()
+example : Mult16 64 := inferInstance
+example : Mult16 128 := inferInstance
 
 /-- Test constrained MMA compiles with valid dimensions -/
 @[test]
@@ -342,29 +334,10 @@ def testConstrainedMMA : IO Unit := do
 
 /-! ## Constraints Tests: Architecture Capabilities -/
 
-/-- Test HasTMA instance for SM90 -/
-@[test]
-def testHasTMASM90 : IO Unit := do
-  let _ : HasTMA Arch.SM90 := inferInstance
-  pure ()
-
-/-- Test HasWGMMA instance for SM90 -/
-@[test]
-def testHasWGMMASM90 : IO Unit := do
-  let _ : HasWGMMA Arch.SM90 := inferInstance
-  pure ()
-
-/-- Test HasFP8 instance for SM90 -/
-@[test]
-def testHasFP8SM90 : IO Unit := do
-  let _ : HasFP8 Arch.SM90 := inferInstance
-  pure ()
-
-/-- Test HasCluster instance for SM90 -/
-@[test]
-def testHasClusterSM90 : IO Unit := do
-  let _ : HasCluster Arch.SM90 := inferInstance
-  pure ()
+example : HasTMA Arch.SM90 := inferInstance
+example : HasWGMMA Arch.SM90 := inferInstance
+example : HasFP8 Arch.SM90 := inferInstance
+example : HasCluster Arch.SM90 := inferInstance
 
 /-! ## Macros Tests: Double Buffering -/
 

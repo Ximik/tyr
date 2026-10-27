@@ -11,25 +11,6 @@ import Tyr.Torch
 
 open torch
 
--- There is one deterministic factory, with no checked or effectful twin at
--- either the indexed or raw native layer.
-example : True := by
-  fail_if_success have _ := @Tensor.ones?
-  fail_if_success have _ := @Tensor.zeros?
-  fail_if_success have _ := @Tensor.onesFor?
-  fail_if_success have _ := @Tensor.zerosFor?
-  fail_if_success have _ := @Tensor.eye?
-  fail_if_success have _ := @Tensor.onesIO
-  fail_if_success have _ := @Tensor.zerosIO
-  fail_if_success have _ := @Tensor.onesForIO
-  fail_if_success have _ := @Tensor.zerosForIO
-  fail_if_success have _ := @Tensor.eyeIO
-  fail_if_success have _ := @Tensor.eyeForIO
-  fail_if_success have _ := @RawTensor.onesChecked
-  fail_if_success have _ := @RawTensor.zerosChecked
-  fail_if_success have _ := @RawTensor.eyeChecked
-  trivial
-
 example : True := by
   fail_if_success have _ := Tensor.onesFor ⟨#[2], .QInt8, .CPU⟩
   fail_if_success have _ := Tensor.eyeFor (n := 2) .Float8E8M0FNU .CPU

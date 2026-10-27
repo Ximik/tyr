@@ -52,16 +52,7 @@ private def validParquet : ByteArray := ByteArray.mk #[
 def testParquetReadersRemainUsableAfterErrors : IO Unit := IO.FS.withTempDir fun dir => do
   let path := dir / "valid.parquet"
   IO.FS.writeBinFile path validParquet
-  let available ← try
-    LeanTest.assertTrue (← parquetFileExists path.toString)
-    pure true
-  catch error =>
-    if error.toString.containsSubstr "Parquet support unavailable" then
-      pure false
-    else throw error
-  if !available then
-    IO.println "Skipping Parquet success fixture: Arrow/Parquet support is unavailable"
-    return
+  LeanTest.assertTrue (← parquetFileExists path.toString)
   let malformed := dir / "malformed.bin"
   IO.FS.writeFile malformed "not a parquet file"
   expectFailure (getParquetMetadata malformed.toString)

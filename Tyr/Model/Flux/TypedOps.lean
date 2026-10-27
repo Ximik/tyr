@@ -33,6 +33,6 @@ def transposeAttention {b s h d : UInt64} {dt : DType} (x : Tensor { device := d
 def fromAttention {b h s d : UInt64} {dt : DType} (x : Tensor { device := device, shape := #[b, h, s, d], dtype := dt }) : Tensor { device := device, shape := #[b, s, h, d], dtype := dt } := x.transpose 1 2
 
 def saveImagePPM {b h w : UInt64} (image : Tensor { dtype := dtype, device := device, shape := #[b, 3, h, w] }) (path : String) : IO Unit :=
-  RawTensor.savePPM image.shape (image.to .CPU).raw path
+  RawTensor.savePPM (image.to .CPU).raw path
 
 end torch.flux

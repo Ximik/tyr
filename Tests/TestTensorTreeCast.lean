@@ -109,13 +109,13 @@ abbrev TargetLeaves := Array (Option (Tensor { shape := #[2], dtype := .Float64,
 
 example : True := by
   fail_if_success
-    have _ := inferInstanceAs (torch.TensorTreeCast
+    have _ : torch.TensorTreeCast
       (torch.Vector 2 (Tensor { shape := #[2], dtype := .Float32, device := .CPU }))
-      (torch.Vector 3 (Tensor { shape := #[2], dtype := .Float64, device := .CPU })))
+      (torch.Vector 3 (Tensor { shape := #[2], dtype := .Float64, device := .CPU })) := inferInstance
   fail_if_success
-    have _ := inferInstanceAs (torch.TensorTreeCast
+    have _ : torch.TensorTreeCast
       (Frozen { shape := #[2], dtype := .Float32, device := .CPU })
-      (Tensor { shape := #[2], dtype := .Float64, device := .CPU }))
+      (Tensor { shape := #[2], dtype := .Float64, device := .CPU }) := inferInstance
   trivial
 
 structure WrongShapeModel where

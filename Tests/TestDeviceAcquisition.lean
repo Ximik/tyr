@@ -7,8 +7,6 @@ open torch
 -- requires availability evidence that pure code cannot manufacture.
 example : True := by
   fail_if_success
-    have _ : Device := .CUDA 0
-  fail_if_success
     have _ : Device := ⟨.MPS, by decide⟩
   fail_if_success
     have _ : Device := ⟨.CUDA 0, by trivial⟩

@@ -180,7 +180,7 @@ private def firstDimShardShape (s : Shape) (worldSize : UInt64) : Shape :=
     the runtime handle against the computed target shape. -/
 private def sliceFirstDim {σ : StaticSpec} (t : Tensor σ) (start len : UInt64)
     (shape' : Shape) : IO (Tensor (σ.withShape shape')) := do
-  match Tensor.ofRaw (RawTensor.slice σ.shape t.raw 0 start len) with
+  match Tensor.ofRaw (RawTensor.slice t.raw 0 start len) with
   | .ok r => pure r
   | .error message => throw (IO.userError s!"DistAdam.stepDistributed slice: {message}")
 

@@ -40,11 +40,6 @@ def isFiniteFloat (x : Float) : Bool :=
 /-! ## 1. C++ FFI Smoke Tests -/
 
 @[test]
-def testDistributedFFI : IO Unit := do
-  let _isInit ← dist.isInitialized
-  LeanTest.assertTrue true
-
-@[test]
 def testPolarExpressFFI : IO Unit := do
   -- Test XXT: A @ A.T
   let A ← Tensor.randn #[32, 32] false

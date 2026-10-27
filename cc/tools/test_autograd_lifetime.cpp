@@ -45,15 +45,15 @@ Object backwardLoss(lean_object* loss, bool retain = false, bool create = false)
 Object backward(lean_object* output, lean_object* cotangent, bool retain = false,
                 bool create = false) {
 #ifdef TYR_LEGACY_AUTOGRAD_ABI
-  return Object(lean_torch_backward_unit(shape({2}), output, cotangent), lean_dec);
+  return Object(lean_torch_backward_unit(output, cotangent), lean_dec);
 #else
-  return Object(lean_torch_backward_unit(shape({2}), output, cotangent, retain, create), lean_dec);
+  return Object(lean_torch_backward_unit(output, cotangent, retain, create), lean_dec);
 #endif
 }
 #ifndef TYR_LEGACY_AUTOGRAD_ABI
 Object grad(lean_object* output, lean_object* input, lean_object* cotangent,
             bool retain = false, bool create = false) {
-  return Object(lean_torch_tensor_grad(shape({2}), shape({2}), output, input,
+  return Object(lean_torch_tensor_grad(output, input,
                                        cotangent, retain, create), lean_dec);
 }
 #endif
@@ -133,7 +133,7 @@ void higherOrderBackward(bool scalarLoss) {
   auto firstGradient = wrap(input.grad());
   // PyTorch documents the cycle created by backward(create_graph=true).
   // Exercise the public cleanup boundary, retaining our derivative value.
-  Object cleared(lean_torch_zero_grad(shape({2}), inputObject.get(), 1), lean_dec);
+  Object cleared(lean_torch_zero_grad(inputObject.get(), 1), lean_dec);
   ok(cleared);
   require(!input.grad().defined(), "zeroGrad(setToNone=true) did not clear derivative history");
   require(native(firstGradient.get()).requires_grad(), "Backward ignored createGraph");
@@ -146,18 +146,18 @@ void gradientCleanupModes() {
   auto input = leaf();
   auto inputObject = wrap(input), loss = wrap(input.square().sum());
   ok(backwardLoss(loss.get()));
-  Object snapshotResult(lean_torch_grad_of(shape({2}), inputObject.get()), lean_dec);
+  Object snapshotResult(lean_torch_grad_of(inputObject.get()), lean_dec);
   ok(snapshotResult);
   auto snapshot = native(lean_io_result_get_value(snapshotResult.get()));
-  Object zeroed(lean_torch_zero_grad(shape({2}), inputObject.get(), 0), lean_dec);
+  Object zeroed(lean_torch_zero_grad(inputObject.get(), 0), lean_dec);
   ok(zeroed);
   require(input.grad().defined() && input.grad().equal(torch::zeros_like(input)),
           "zeroGrad(setToNone=false) did not preserve a zeroed gradient buffer");
-  Object cleared(lean_torch_zero_grad(shape({2}), inputObject.get(), 1), lean_dec);
+  Object cleared(lean_torch_zero_grad(inputObject.get(), 1), lean_dec);
   ok(cleared);
   require(!input.grad().defined(), "zeroGrad(setToNone=true) did not remove the gradient buffer");
   require(snapshot.equal(torch::tensor({4.0f, 6.0f})), "Gradient cleanup changed a detached snapshot");
-  Object missingResult(lean_torch_grad_of(shape({2}), inputObject.get()), lean_dec);
+  Object missingResult(lean_torch_grad_of(inputObject.get()), lean_dec);
   ok(missingResult);
   require(native(lean_io_result_get_value(missingResult.get())).equal(torch::zeros_like(input)),
           "Missing gradient no longer reads as a zero snapshot");
@@ -194,17 +194,11 @@ void invalidCotangentIsRecoverable() {
   auto right = wrap(torch::ones_like(input));
   ok(grad(output.get(), inputObject.get(), right.get()));
 }
-void failedGradReleasesOwnedShapes() {
+void failedGradReturnsError() {
   auto input = leaf();
   auto inputObject = wrap(input), output = wrap(input.square()), wrong = wrap(torch::ones({3}));
-  Object inputShape(shape({2}), lean_dec), outputShape(shape({2}), lean_dec);
-  lean_inc(inputShape.get());
-  lean_inc(outputShape.get());
-  Object result(lean_torch_tensor_grad(inputShape.get(), outputShape.get(), output.get(),
-      inputObject.get(), wrong.get(), 0, 0), lean_dec);
+  Object result(lean_torch_tensor_grad(output.get(), inputObject.get(), wrong.get(), 0, 0), lean_dec);
   error(result);
-  require(lean_is_exclusive(inputShape.get()) && lean_is_exclusive(outputShape.get()),
-          "Failed grad leaked an owned shape reference");
 }
 #endif
 
@@ -262,7 +256,7 @@ int main(int argc, char** argv) {
       gradientCleanupModes();
       manyInputsShareOneTraversal();
       invalidCotangentIsRecoverable();
-      failedGradReleasesOwnedShapes();
+      failedGradReturnsError();
 #endif
     }
     functionalGradPreservesCapturedGraph(false);

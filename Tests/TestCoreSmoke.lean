@@ -56,11 +56,11 @@ private def recordingHandlers (ref : IO.Ref (Array String)) : torch.Log.Handlers
 @[test]
 def testDefaultLogHandlersAreSilentNoOps : IO Unit := do
   let h : torch.Log.Handlers := {}
-  -- Defaults are `fun _ => pure ()`: invoking them must not fail or record anywhere.
-  h.onInfo "info"
-  h.onWarn "warn"
-  h.onError "error"
-  LeanTest.assertTrue true "default handlers should be silent no-ops"
+  let (output, _) ← IO.FS.withIsolatedStreams do
+    h.onInfo "info"
+    h.onWarn "warn"
+    h.onError "error"
+  LeanTest.assertEqual output "" (some "default handlers must write nothing to stdout or stderr")
 
 @[test]
 def testLogHandlersCombineReachesBothSinks : IO Unit := do

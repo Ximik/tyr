@@ -65,10 +65,10 @@ const char* name(Update update) {
 bool sliced(Update update) { return update == Update::CacheSlice || update == Update::PureSlice; }
 Object apply(Update update, lean_object* destination, lean_object* source) {
   lean_object* result;
-  if (update == Update::Copy) result = lean_torch_copy_(shape({2, 2}), destination, source);
-  else if (update == Update::Branching) result = lean_torch_copy_inplace(shape({2, 2}), destination, source);
-  else if (update == Update::CacheSlice) result = lean_torch_copy_slice_io(shape({2, 2}), shape({1, 2}), destination, 0, 0, source);
-  else result = lean_torch_slice_scatter_along_dim(shape({2, 2}), shape({1, 2}), destination, 0, 0, source);
+  if (update == Update::Copy) result = lean_torch_copy_(destination, source);
+  else if (update == Update::Branching) result = lean_torch_copy_inplace(destination, source);
+  else if (update == Update::CacheSlice) result = lean_torch_copy_slice_io(destination, 0, 0, source);
+  else result = lean_torch_slice_scatter_along_dim(destination, 0, 0, source);
 #ifdef TYR_LEGACY_VALUE_UPDATES
   // Baseline-only adapter for the previous borrowed destination / Unit ABI.
   if (update == Update::Copy || update == Update::CacheSlice) {
@@ -84,7 +84,7 @@ Object apply(Update update, lean_object* destination, lean_object* source) {
 #endif
 }
 Object requiresGrad(lean_object* input, bool enabled) {
-  auto* result = lean_torch_set_requires_grad(shape({2, 2}), input, enabled);
+  auto* result = lean_torch_set_requires_grad(input, enabled);
 #ifdef TYR_LEGACY_VALUE_UPDATES
   lean_dec(input);
 #endif
@@ -96,13 +96,13 @@ Object requiresGrad(lean_object* input, bool enabled) {
 }
 Object gradient(lean_object* input) {
 #ifdef TYR_LEGACY_VALUE_UPDATES
-  return Object(lean_torch_grad_of(shape({2, 2}), input), lean_dec);
+  return Object(lean_torch_grad_of(input), lean_dec);
 #else
-  return ioTensor(lean_torch_grad_of(shape({2, 2}), input));
+  return ioTensor(lean_torch_grad_of(input));
 #endif
 }
 void zeroGrad(lean_object* input) {
-  Object result(lean_torch_zero_grad(shape({2, 2}), input, 1), lean_dec);
+  Object result(lean_torch_zero_grad(input, 1), lean_dec);
 #ifndef TYR_LEGACY_VALUE_UPDATES
   require(lean_io_result_is_ok(result.get()), "zeroGrad failed");
 #endif
@@ -272,7 +272,7 @@ void requiresGradAliases() {
 void requiresGradGraph() {
   auto input = full(1, true);
   auto leaf = native(input.get());
-  Object nonleaf(lean_torch_tensor_mul(shape({2, 2}), input.get(), input.get()), lean_dec);
+  Object nonleaf(lean_torch_tensor_mul(input.get(), input.get()), lean_dec);
   auto* identity = lean_get_external_data(nonleaf.get());
   auto output = requiresGrad(nonleaf.release(), true);
   require(lean_get_external_data(output.get()) == identity, "No-op requiresGrad replaced autograd identity");
@@ -286,7 +286,7 @@ void requiresGradUniqueAndRejectedNonleaf() {
   auto* identity = lean_get_external_data(input.get());
   auto enabled = requiresGrad(input.release(), true);
   require(lean_get_external_data(enabled.get()) == identity, "Unique requiresGrad update did not reuse TensorImpl");
-  Object nonleaf(lean_torch_tensor_mul(shape({2, 2}), enabled.get(), enabled.get()), lean_dec);
+  Object nonleaf(lean_torch_tensor_mul(enabled.get(), enabled.get()), lean_dec);
   bool rejected = false;
   try { auto result = requiresGrad(retain(nonleaf.get()), false); }
   catch (const std::exception&) { rejected = true; }
@@ -311,7 +311,7 @@ void gradientSnapshot() {
   auto input = full(1, true);
   native(input.get()).sum().backward();
   auto saved = gradient(input.get());
-  Object clipped(lean_torch_clip_grad_norm_(shape({2, 2}), input.get(), 1), lean_dec);
+  Object clipped(lean_torch_clip_grad_norm_(input.get(), 1), lean_dec);
   require(lean_io_result_is_ok(clipped.get()), "Gradient clipping failed");
   isFull(saved.get(), 1, "Gradient clipping mutated prior gradient snapshot");
   zeroGrad(input.get());

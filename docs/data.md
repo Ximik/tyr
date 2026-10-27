@@ -144,8 +144,7 @@ retain both the input and target dimensions and their Int64 dtype.
 ### Parquet pretraining loaders
 
 `torch.Data.Pretraining` (`Tyr/Data/Pretraining.lean`) binds Apache Arrow
-through `@[extern]` declarations in `Tyr/RawTensor/Parquet.lean`, implemented in `cc/src/tyr_parquet.cpp` (with
-stubs when Arrow is absent): `listParquetFiles`, `getParquetMetadata`,
+through `@[extern]` declarations in `Tyr/RawTensor/Parquet.lean`, implemented in `cc/src/tyr_parquet.cpp`: `listParquetFiles`, `getParquetMetadata`,
 `readRowGroup`, `readParquetAsJson`, `readRowGroupAsJson`
 (`Pretraining.lean:48-74`). On top sit `RowGroupIterator` (rank-strided row
 groups, `:189`), a `TokenBuffer` ring, and `StreamingLoaderState` (`:405`),

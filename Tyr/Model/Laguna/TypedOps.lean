@@ -17,11 +17,11 @@ def mulBroadcast {s t out : Shape} (a : Tensor { dtype := dtype, device := devic
 
 def bmm {b m n k : UInt64} (x : Tensor { dtype := dtype, device := device, shape := #[b, m, k] }) (y : Tensor { dtype := dtype, device := device, shape := #[b, k, n] }) :
     Tensor { dtype := dtype, device := device, shape := #[b, m, n] } :=
-  checked (RawTensor.lagunaBmm b m n k x.raw y.raw)
+  checked (RawTensor.lagunaBmm x.raw y.raw)
 
 def scatterAdd {s t : Shape} (input : Tensor { dtype := dtype, device := device, shape := s }) (dim : Int64)
     (indices : Tensor { device := device, shape := t, dtype := .Int64 }) (src : Tensor { dtype := dtype, device := device, shape := t }) : Tensor { dtype := dtype, device := device, shape := s } :=
-  input.checkedReplacement (RawTensor.lagunaScatterAdd s input.raw dim indices.raw src.raw)
+  input.checkedReplacement (RawTensor.lagunaScatterAdd input.raw dim indices.raw src.raw)
 
 def transposeMatrixBatch {b m n : UInt64} {d : DType}
     (x : Tensor { device := device, shape := #[b, m, n], dtype := d }) : Tensor { device := device, shape := #[b, n, m], dtype := d } := x.transpose 1 2
@@ -40,6 +40,6 @@ def randnDynamic (shape : Shape) (device : Device := .CPU) (dtype : DType := .Fl
   IO.ofExcept ((← Tensor.randn (device := device) shape).castDType? dtype)
 
 def hasGradFn {σ : StaticSpec} (x : Tensor σ) : Bool :=
-  RawTensor.lagunaHasGradFn σ.shape x.raw
+  RawTensor.lagunaHasGradFn x.raw
 
 end torch.laguna
