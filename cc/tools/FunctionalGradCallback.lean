@@ -7,15 +7,14 @@ private def Raw : Type := RawSpec.type
 private instance : Nonempty Raw := RawSpec.property
 
 @[extern "lean_torch_reshape_exact"] private opaque reshape
-    (shape : Array UInt64) (input : @& Raw) (target : @& Array UInt64) : Raw
+    (input : @& Raw) (target : @& Array UInt64) : Raw
 @[extern "lean_torch_sum"] private opaque sum
-    (shape : Array UInt64) (input : @& Raw) (dims : Option (Array UInt64))
-    (keepdim : Bool) : Raw
+    (input : @& Raw) (dims : Option (Array UInt64)) (keepdim : Bool) : Raw
 
 @[export tyr_test_callback_sum] private def sumCallback
     (fallback : Raw) (inputs : Array Raw) : Raw :=
   match inputs[0]? with
-  | some input => sum #[2] input none false
+  | some input => sum input none false
   | none => fallback
 
 @[export tyr_test_callback_identity] private def identityCallback
@@ -25,5 +24,5 @@ private instance : Nonempty Raw := RawSpec.property
 @[export tyr_test_callback_throw] private def throwingCallback
     (fallback : Raw) (inputs : Array Raw) : Raw :=
   match inputs[0]? with
-  | some input => reshape #[2] input #[3]
+  | some input => reshape input #[3]
   | none => fallback
