@@ -22,7 +22,7 @@ def timestepEmbedding {batch : UInt64}
     (t : Tensor { device := device, shape := #[batch], dtype := .Float32 }) (dim : UInt64)
     (max_period : Float := 10000.0) (time_factor : Float := 1000.0)
     : Tensor { device := device, shape := #[batch, dim], dtype := .Float32 } :=
-  match Tensor.ofRaw (RawTensor.timestepEmbedding batch t.raw dim max_period time_factor) with
+  match Tensor.ofRaw (RawTensor.timestepEmbedding t.raw dim max_period time_factor) with
   | .ok value => value
   | .error message => nativeInvariantFailure s!"Flux timestep embedding: {message}"
 

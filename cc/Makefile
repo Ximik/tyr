@@ -15,7 +15,7 @@ LEAN_INCLUDE := $(LEAN_HOME)/include
 
 # TORCH FLAGS
 TORCHDIR=../external/wheels/torch
-TORCH_INC_FLAGS=-I$(TORCHDIR)/include -I$(TORCHDIR)/include/torch/csrc/api/include  -I$(TORCHDIR)/include/TH  -I$(TORCHDIR)/include/THC
+TORCH_INC_FLAGS=-isystem $(TORCHDIR)/include -isystem $(TORCHDIR)/include/torch/csrc/api/include -isystem $(TORCHDIR)/include/TH -isystem $(TORCHDIR)/include/THC
 TORCH_LIBPATH=$(TORCHDIR)/lib
 TORCH_CUDA_VENDOR_LIBPATH=../external/wheels/nvidia/cu13/lib
 TKDIR=../external/git/ThunderKittens
@@ -42,7 +42,7 @@ ARROW_LIBS := $(wildcard $(ARROW_DIR)/libarrow.*.dylib $(ARROW_DIR)/libparquet.*
 else
 ARROW_LIBS := $(wildcard $(ARROW_DIR)/libarrow.so.* $(ARROW_DIR)/libparquet.so.*)
 endif
-ARROW_INC_FLAGS := -I$(ARROW_DIR)/include
+ARROW_INC_FLAGS := -isystem $(ARROW_DIR)/include
 ARROW_LINK_FLAGS := $(ARROW_LIBS)
 
 
@@ -107,7 +107,7 @@ endif
 CXX_STD ?= c++20
 CXX_STD_FLAG := --std=$(CXX_STD)
 EXTRA_CXX_FLAGS := -fPIC -O3 -Wall -Wno-sign-compare \
-		 -Wno-unused-parameter -Wno-missing-field-initializers -Wno-comment
+		 -Wunused-parameter -Wno-missing-field-initializers -Wno-comment
 NVCCFLAGS := -std=c++20 -O3 --use_fast_math --expt-extended-lambda --expt-relaxed-constexpr
 NVCCFLAGS += -lineinfo -Xcompiler -fPIC
 NVCCFLAGS += -D__CUDA_NO_HALF_OPERATORS__ -D__CUDA_NO_HALF_CONVERSIONS__
@@ -158,7 +158,7 @@ NVCCFLAGS += -gencode arch=$(GPU_COMPUTE),code=$(GPU_CODE)
 ifneq ($(wildcard $(TORCHDIR)/include/torch/csrc/distributed/c10d/ProcessGroupGloo.hpp),)
 ifneq ($(wildcard $(GLOO_DIR)/gloo/algorithm.h),)
 EXTRA_CXX_FLAGS += -DUSE_C10D_GLOO
-TORCH_INC_FLAGS += -I$(GLOO_DIR)
+TORCH_INC_FLAGS += -isystem $(GLOO_DIR)
 endif
 endif
 ifneq ($(wildcard $(TORCHDIR)/include/torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp),)

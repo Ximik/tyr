@@ -184,7 +184,7 @@ def maskedCrossEntropy? {batch seq vocab : UInt64} {d m result : DType} {dev : D
   let maskFlat ← mask.reshapeChecked? #[batchSeq]
   Tensor.checkPointwise lossesFlat maskFlat
   let maskedLosses : Tensor ⟨#[batchSeq], DType.promote d m, dev⟩ ←
-    Tensor.ofRaw (← RawTensor.mulChecked #[batchSeq] lossesFlat.raw maskFlat.raw)
+    Tensor.ofRaw (← RawTensor.mulChecked lossesFlat.raw maskFlat.raw)
   -- Sum losses and divide by number of valid tokens
   let totalLoss ← Tensor.sumAll? maskedLosses
   let numValid ← Tensor.sumAll? maskFlat

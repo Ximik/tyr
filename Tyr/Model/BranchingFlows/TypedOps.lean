@@ -25,7 +25,7 @@ def floatDynamic {s : Shape} {d : DType} {dev : Device} (x : Tensor { shape := s
 def bfloatDynamic {s : Shape} {d : DType} {dev : Device} (x : Tensor { shape := s, dtype := d, device := dev }) : Tensor { shape := s, dtype := .BFloat16, device := dev } := x.toBFloat16
 
 def logDynamic {s : Shape} {dev : Device} (x : Tensor { shape := s, dtype, device := dev }) : Tensor { shape := s, dtype, device := dev } := Tensor.log x
-def softplusDynamic {s : Shape} {dev : Device} (x : Tensor { shape := s, dtype, device := dev }) : Tensor { shape := s, dtype, device := dev } := x.checkedReplacement (RawTensor.branchingSoftplus s x.raw)
+def softplusDynamic {s : Shape} {dev : Device} (x : Tensor { shape := s, dtype, device := dev }) : Tensor { shape := s, dtype, device := dev } := x.checkedReplacement (RawTensor.branchingSoftplus x.raw)
 def powDynamic {s : Shape} {dev : Device} (x : Tensor { shape := s, dtype, device := dev }) (n : Float) : Tensor { shape := s, dtype, device := dev } := Tensor.pow x n
 
 def sliceTyped {s out : Shape} {d : DType} {dev : Device} (x : Tensor { shape := s, dtype := d, device := dev }) (dim : Nat) (start len : UInt64) : Tensor { shape := out, dtype := d, device := dev } :=
@@ -46,7 +46,7 @@ def copyIntoChecked? {σ τ : StaticSpec} (dst : Tensor σ) (src : Tensor τ) :
     throw (IO.userError s!"BranchingFlows static buffer dtype mismatch: {dst.actualSpec.dtype} vs {src.actualSpec.dtype}; cast the source explicitly before copying")
   let dtype := dst.raw.dtype
   let device := dst.raw.device
-  let raw ← RawTensor.copyInplace σ.shape dst.raw src.raw
+  let raw ← RawTensor.copyInplace dst.raw src.raw
   match Tensor.checkedUpdate? dtype device raw with
   | .ok result => pure result
   | .error message => throw (IO.userError s!"BranchingFlows static buffer copy: {message}")
@@ -55,7 +55,7 @@ def copyIntoChecked? {σ τ : StaticSpec} (dst : Tensor σ) (src : Tensor τ) :
 def copyIntoChecked {σ τ : StaticSpec} (dst : Tensor σ) (src : Tensor τ) : IO (Tensor σ) :=
   copyIntoChecked? dst src
 
-def touchTensor {σ : StaticSpec} (t : Tensor σ) : IO Unit := RawTensor.touch σ.shape t.raw
+def touchTensor {σ : StaticSpec} (t : Tensor σ) : IO Unit := RawTensor.touch t.raw
 
 /-- A tensor learning rate follows rank-aware PyTorch promotion, including
 weak scalar precision. The result is never restored to the input dtype. -/
@@ -66,7 +66,7 @@ def mulTensorScalar {σ : StaticSpec} {d result : DType} {scalarDevice : Device}
     Tensor ⟨σ.shape, result, σ.pointwiseDevice ⟨#[], d, scalarDevice⟩⟩ :=
   let result := do
     Tensor.checkPointwise x scalar
-    Tensor.ofRaw (← RawTensor.mulTensorScalarChecked σ.shape x.raw scalar.raw)
+    Tensor.ofRaw (← RawTensor.mulTensorScalarChecked x.raw scalar.raw)
   match result with
   | .ok tensor => tensor
   | .error message => nativeInvariantFailure s!"BranchingFlows.mulTensorScalar: {message}"
@@ -87,7 +87,7 @@ def transposeAttention {b s h d : UInt64} {dev : Device} (x : Tensor { dtype := 
 def attentionBias? {biasDType : DType} {b h s d : UInt64} {dev : Device} (q k v : Tensor { dtype := dtype, shape := #[b, h, s, d], device := dev })
     (bias : Tensor { dtype := biasDType, shape := #[b, h, s, s], device := dev }) :
     Except String (Tensor { dtype := dtype, shape := #[b, h, s, d], device := dev }) := do
-  q.checkedReplacement? (← RawTensor.branchingAttentionBias b h s d q.raw k.raw v.raw bias.raw false)
+  q.checkedReplacement? (← RawTensor.branchingAttentionBias q.raw k.raw v.raw bias.raw false)
 
 def attentionBias {biasDType : DType} {b h s d : UInt64} {dev : Device} (q k v : Tensor { dtype := dtype, shape := #[b, h, s, d], device := dev })
     (bias : Tensor { dtype := biasDType, shape := #[b, h, s, s], device := dev }) : Tensor { dtype := dtype, shape := #[b, h, s, d], device := dev } :=
@@ -100,7 +100,7 @@ def attentionBiasIO {biasDType : DType} {b h s d : UInt64} {dev : Device} (q k v
     (dropout : Float) (training : Bool) (causal : Bool := false) :
     IO (Tensor { dtype := dtype, shape := #[b, h, s, d], device := dev }) := do
   let effective ← IO.ofExcept (Tensor.attentionDropout? dropout training)
-  let raw ← RawTensor.branchingAttentionBiasIO b h s d q.raw k.raw v.raw bias.raw
+  let raw ← RawTensor.branchingAttentionBiasIO q.raw k.raw v.raw bias.raw
     effective causal
   IO.ofExcept (q.checkedReplacement? raw)
 
@@ -109,7 +109,7 @@ def fullDynamic (shape : Shape) (value : Float) (requiresGrad : Bool := false) (
   Tensor.addScalar (zerosDynamic shape requiresGrad device noGrad dtype) value
 
 def binaryCrossEntropySum {s : Shape} {dev : Device} (input target weight : Tensor { dtype := dtype, shape := s, device := dev }) : Tensor { dtype := dtype, shape := #[], device := dev } :=
-  match Tensor.ofRaw (RawTensor.branchingBCE s input.raw target.raw (some weight.raw) "sum") with
+  match Tensor.ofRaw (RawTensor.branchingBCE input.raw target.raw (some weight.raw) "sum") with
   | .ok result => result
   | .error message => nativeInvariantFailure s!"BranchingFlows binary cross entropy: {message}"
 

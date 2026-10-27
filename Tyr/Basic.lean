@@ -33,7 +33,7 @@ namespace RawTensor
 @[extern "lean_torch_zeros"] opaque zeros (shape : Shape) (requiresGrad : Bool := false)
     (device : Device := .CPU) (noGrad : requiresGrad = false := by decide) : RawTensor
 
-@[extern "lean_torch_cast_dtype"] opaque castDType (shape : Shape) (t : @& RawTensor)
+@[extern "lean_torch_cast_dtype"] opaque castDType (t : @& RawTensor)
     (dtype : DType) : RawTensor
 
 /-- Convert dtype with native validation/conversion failures carried explicitly. -/
@@ -43,36 +43,36 @@ namespace RawTensor
 -- Preserve the existing C ABI's shape argument without exposing a shape-indexed
 -- raw type. Metadata queries inspect the native tensor, never this argument.
 @[extern "lean_torch_to_string"] private opaque toStringImpl
-    (shape : Shape) (t : @& RawTensor) : String
+    (t : @& RawTensor) : String
 
-def toString (t : RawTensor) : String := toStringImpl #[] t
+def toString (t : RawTensor) : String := toStringImpl t
 
 instance : ToString RawTensor := ⟨RawTensor.toString⟩
 instance : Repr RawTensor where
   reprPrec t _ := RawTensor.toString t
 
 @[extern "lean_torch_get_shape"] private opaque runtimeShapeImpl
-    (shape : Shape) (t : @& RawTensor) : Shape
+    (t : @& RawTensor) : Shape
 @[extern "lean_torch_get_dtype_enum"] private opaque dtypeImpl
-    (shape : Shape) (t : @& RawTensor) : DType
+    (t : @& RawTensor) : DType
 @[extern "lean_torch_get_device_enum"] private opaque deviceImpl
-    (shape : Shape) (t : @& RawTensor) : Device
+    (t : @& RawTensor) : Device
 @[extern "lean_torch_get_device"] private opaque deviceStrImpl
-    (shape : Shape) (t : @& RawTensor) : String
+    (t : @& RawTensor) : String
 @[extern "lean_torch_get_values"] private opaque getValuesImpl
-    (shape : Shape) (t : @& RawTensor) (maxElements : UInt64) : FloatArray
+    (t : @& RawTensor) (maxElements : UInt64) : FloatArray
 @[extern "lean_torch_get_stats"] private opaque statsImpl
-    (shape : Shape) (t : @& RawTensor) : String
+    (t : @& RawTensor) : String
 
 /-- Native metadata, independent of any static tensor specification. -/
-def runtimeShape (t : RawTensor) : Shape := runtimeShapeImpl #[] t
-def dtype (t : RawTensor) : DType := dtypeImpl #[] t
+def runtimeShape (t : RawTensor) : Shape := runtimeShapeImpl t
+def dtype (t : RawTensor) : DType := dtypeImpl t
 def dtypeStr (t : RawTensor) : String := t.dtype.canonicalName
-def device (t : RawTensor) : Device := deviceImpl #[] t
-def deviceStr (t : RawTensor) : String := deviceStrImpl #[] t
+def device (t : RawTensor) : Device := deviceImpl t
+def deviceStr (t : RawTensor) : String := deviceStrImpl t
 def getValues (t : RawTensor) (maxElements : UInt64 := 1000) : FloatArray :=
-  getValuesImpl #[] t maxElements
-def stats (t : RawTensor) : String := statsImpl #[] t
+  getValuesImpl t maxElements
+def stats (t : RawTensor) : String := statsImpl t
 
 end RawTensor
 
@@ -141,7 +141,7 @@ opaque ofRaw {σ : StaticSpec} (raw : RawTensor) : Except String (Tensor σ) :=
 private unsafe def zerosForImpl (σ : StaticSpec)
     [DType.ConstantSupported σ.dtype σ.device] : Tensor σ :=
   let raw := RawTensor.zeros σ.shape false σ.device
-  let raw := RawTensor.castDType σ.shape raw σ.dtype
+  let raw := RawTensor.castDType raw σ.dtype
   unsafeCast raw
 
 /-- Trusted native allocation boundary for a supported constant specification.

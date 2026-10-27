@@ -12,12 +12,12 @@ opaque lagunaMoeFp4Forward
     (downPacked : @& RawTensor) (downScale : @& RawTensor) (downGlobal : @& RawTensor)
     (numExperts : UInt64) (moeInt : UInt64) (hidden : UInt64) : IO RawTensor
 
-@[extern "lean_torch_bmm"] opaque lagunaBmm (b m n k : UInt64)
+@[extern "lean_torch_bmm"] opaque lagunaBmm
     (input mat2 : @& RawTensor) : RawTensor
-@[extern "lean_torch_scatter_add"] opaque lagunaScatterAdd (shape : Shape)
+@[extern "lean_torch_scatter_add"] opaque lagunaScatterAdd
     (input : @& RawTensor) (dim : Int64) (indices src : @& RawTensor) : RawTensor
 
-@[extern "lean_torch_has_grad_fn"] opaque lagunaHasGradFn (shape : Shape)
+@[extern "lean_torch_has_grad_fn"] opaque lagunaHasGradFn
     (input : @& RawTensor) : Bool
 
 end torch.RawTensor

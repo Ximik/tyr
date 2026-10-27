@@ -136,7 +136,7 @@ def ShardedTensor.fromFull {σ : StaticSpec} {rank worldSize : UInt64}
       let fullDim := σ.shape.getD d 0
       let offset := shardOffset fullDim worldSize rank
       let size := shardSize fullDim worldSize rank
-      RawTensor.slice σ.shape full.raw d.toUInt64 offset size
+      RawTensor.slice full.raw d.toUInt64 offset size
     | none => full.raw
 
   let shard : Tensor (σ.withShape shardShape) :=

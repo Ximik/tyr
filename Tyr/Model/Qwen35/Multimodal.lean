@@ -68,7 +68,7 @@ def forward2d {tokens dim : UInt64}
     (x : Tensor { device := device, shape := #[tokens, dim], dtype := dtype })
     : Tensor { device := device, shape := #[tokens, dim], dtype := dtype } :=
   let x3 : Tensor { device := device, shape := #[1, tokens, dim], dtype := dtype } := Tensor.reshapeChecked x #[1, tokens, dim]
-  let y3 : Tensor { device := device, shape := #[1, tokens, dim], dtype := dtype } := x3.checkedReplacement (RawTensor.layerNorm 1 tokens dim x3.raw m.weight.2.raw m.bias.2.raw m.eps)
+  let y3 : Tensor { device := device, shape := #[1, tokens, dim], dtype := dtype } := x3.checkedReplacement (RawTensor.layerNorm x3.raw m.weight.2.raw m.bias.2.raw m.eps)
   Tensor.reshapeChecked y3 #[tokens, dim]
 
 end Qwen35VisionLayerNorm

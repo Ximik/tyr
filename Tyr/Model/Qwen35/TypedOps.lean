@@ -38,11 +38,11 @@ def transposeSeq {batch seq dim : UInt64} {d : DType} (x : Tensor { device := de
     Tensor { device := device, shape := #[batch, dim, seq], dtype := d } := x.transpose 1 2
 
 def einsumChecked {s t out : Shape} (equation : String) (x : Tensor { device := device, shape := s, dtype := dtype }) (y : Tensor { device := device, shape := t, dtype := dtype }) : Tensor { device := device, shape := out, dtype := dtype } :=
-  checked (RawTensor.einsum2 s t equation x.raw y.raw)
+  checked (RawTensor.einsum2 equation x.raw y.raw)
 
 def topK2d {rows cols : UInt64} (x : Tensor { device := device, shape := #[rows, cols], dtype := dtype }) (k dim : UInt64) :
     Tensor { device := device, shape := #[rows, k], dtype := dtype } × Tensor { device := device, shape := #[rows, k], dtype := .Int64 } :=
-  let (values, indices) := RawTensor.topK2d rows cols x.raw k dim
+  let (values, indices) := RawTensor.topK2d x.raw k dim
   (checked values, checked indices)
 
 def rsqrtDynamic {s : Shape} (x : Tensor { device := device, shape := s, dtype := dtype }) : Tensor { device := device, shape := s, dtype := dtype } :=
@@ -50,7 +50,7 @@ def rsqrtDynamic {s : Shape} (x : Tensor { device := device, shape := s, dtype :
 def logDynamic {s : Shape} (x : Tensor { device := device, shape := s, dtype := dtype }) : Tensor { device := device, shape := s, dtype := dtype } :=
   Tensor.log x
 def softplusDynamic {s : Shape} (x : Tensor { device := device, shape := s, dtype := dtype }) : Tensor { device := device, shape := s, dtype := dtype } :=
-  checked (RawTensor.softplus s x.raw)
+  checked (RawTensor.softplus x.raw)
 def floatDynamic {s : Shape} {d : DType} (x : Tensor { device := device, shape := s, dtype := d }) : Tensor { device := device, shape := s, dtype := .Float32 } := x.toFloat32
 
 /-- Explicit-dtype constants for shape-parametric model code. -/
@@ -83,7 +83,7 @@ def initDynamicBias (shape : Shape) (device : Device := .CPU) (dtype : DType := 
 def convGroups {batch cin cout cinGroup length kernel : UInt64} {out : Shape}
     (input : Tensor { device := device, shape := #[batch, cin, length], dtype := dtype }) (weight : Tensor { device := device, shape := #[cout, cinGroup, kernel], dtype := dtype })
     (bias : Tensor { device := device, shape := #[cout], dtype := dtype }) (stride padding dilation groups : UInt64) : Tensor { device := device, shape := out, dtype := dtype } :=
-  checked (RawTensor.conv1dGroups input.shape weight.shape bias.shape input.raw weight.raw bias.raw
+  checked (RawTensor.conv1dGroups input.raw weight.raw bias.raw
     stride padding dilation groups)
 
 def falseMaskTyped {n : UInt64} (device : Device) : Tensor { device := device, shape := #[n], dtype := .Bool } :=
@@ -95,7 +95,7 @@ def chunkGatedDeltaRule {batch seq n_head kdim vdim : UInt64}
     (g : Tensor { device := device, shape := #[batch, seq, n_head], dtype := .Float32 })
     (beta : Tensor { device := device, shape := #[batch, seq, n_head], dtype := dtype }) :
     Tensor { device := device, shape := #[batch, seq, n_head, vdim], dtype := dtype } × Tensor { device := device, shape := #[batch, n_head, kdim, vdim], dtype := .Float32 } :=
-  let (out, state) := RawTensor.qwen35Chunk batch seq n_head kdim vdim query.raw key.raw value.raw g.raw beta.raw
+  let (out, state) := RawTensor.qwen35Chunk query.raw key.raw value.raw g.raw beta.raw
   (checked out, checked state)
 
 def recurrentGatedDeltaRule {batch seq n_head kdim vdim : UInt64}
@@ -105,7 +105,7 @@ def recurrentGatedDeltaRule {batch seq n_head kdim vdim : UInt64}
     (beta : Tensor { device := device, shape := #[batch, seq, n_head], dtype := dtype })
     (initialState : Tensor { device := device, shape := #[batch, n_head, kdim, vdim], dtype := .Float32 }) :
     Tensor { device := device, shape := #[batch, seq, n_head, vdim], dtype := dtype } × Tensor { device := device, shape := #[batch, n_head, kdim, vdim], dtype := .Float32 } :=
-  let (out, state) := RawTensor.qwen35Recurrent batch seq n_head kdim vdim
+  let (out, state) := RawTensor.qwen35Recurrent
     query.raw key.raw value.raw g.raw beta.raw initialState.raw
   (checked out, checked state)
 

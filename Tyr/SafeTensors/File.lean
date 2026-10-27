@@ -161,7 +161,7 @@ def safeTensorsLoadFromHandle (handle : SafeTensorsHandle) (name : String) (shap
     (entry.dataEnd - entry.dataStart).toUInt64 entry.dtype entry.shape
   if shape.isEmpty then
     return raw
-  match reshapeChecked entry.shape raw shape with
+  match reshapeChecked raw shape with
   | .ok reshaped => pure reshaped
   | .error _ =>
     throw <| IO.userError "SafeTensors load error: loaded tensor size does not match requested shape."
@@ -176,16 +176,16 @@ def safeTensorsLoadSharded (dir name : String) (shape : Shape) : IO RawTensor :=
 
 def safeTensorsLoadOnDevice (path name : String) (device : Device) : IO RawTensor := do
   let raw ← safeTensorsLoad path name #[]
-  pure (toDevice raw.runtimeShape raw device)
+  pure (toDevice raw device)
 
 def safeTensorsLoadShardedOnDevice (dir name : String) (device : Device) : IO RawTensor := do
   let raw ← safeTensorsLoadSharded dir name #[]
-  pure (toDevice raw.runtimeShape raw device)
+  pure (toDevice raw device)
 
 def safeTensorsLoadFromHandleOnDevice (handle : SafeTensorsHandle) (name : String)
     (device : Device) : IO RawTensor := do
   let raw ← safeTensorsLoadFromHandle handle name #[]
-  pure (toDevice raw.runtimeShape raw device)
+  pure (toDevice raw device)
 
 /-- Write `input` as the only tensor of a new SafeTensors file at `path`. -/
 def saveSafeTensor (path name : String) (input : RawTensor) : IO Unit := do

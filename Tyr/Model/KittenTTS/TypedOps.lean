@@ -35,14 +35,14 @@ def randTensor (shape : Shape) (requiresGrad : Bool := false) (device : Device :
   if requiresGrad then sample.parameter else pure sample
 
 def leakyRelu {s : Shape} (x : Tensor { shape := s, dtype := .Float32, device := device }) (slope : Float := 0.01) : Tensor { shape := s, dtype := .Float32, device := device } :=
-  checked (RawTensor.leakyRelu s x.raw slope)
-def floorTensor {s : Shape} (x : Tensor { shape := s, dtype := .Float32, device := device }) : Tensor { shape := s, dtype := .Float32, device := device } := checked (RawTensor.floor s x.raw)
-def atan2Tensor {s : Shape} (y x : Tensor { shape := s, dtype := .Float32, device := device }) : Tensor { shape := s, dtype := .Float32, device := device } := checked (RawTensor.atan2 s y.raw x.raw)
-def cumsumTensor {s : Shape} (x : Tensor { shape := s, dtype := .Float32, device := device }) (dim : Int64) : Tensor { shape := s, dtype := .Float32, device := device } := checked (RawTensor.cumsum s x.raw dim)
+  checked (RawTensor.leakyRelu x.raw slope)
+def floorTensor {s : Shape} (x : Tensor { shape := s, dtype := .Float32, device := device }) : Tensor { shape := s, dtype := .Float32, device := device } := checked (RawTensor.floor x.raw)
+def atan2Tensor {s : Shape} (y x : Tensor { shape := s, dtype := .Float32, device := device }) : Tensor { shape := s, dtype := .Float32, device := device } := checked (RawTensor.atan2 y.raw x.raw)
+def cumsumTensor {s : Shape} (x : Tensor { shape := s, dtype := .Float32, device := device }) (dim : Int64) : Tensor { shape := s, dtype := .Float32, device := device } := checked (RawTensor.cumsum x.raw dim)
 
 def resizeTensor {batch channels frames : UInt64} (x : Tensor { shape := #[batch, channels, frames], dtype := .Float32, device := device })
     (outFrames : UInt64) (mode : String) : Tensor { shape := #[batch, channels, outFrames], dtype := .Float32, device := device } :=
-  checked (RawTensor.interpolate x.shape x.raw #[outFrames] mode false)
+  checked (RawTensor.interpolate x.raw #[outFrames] mode false)
 
 def istftTensor {s : Shape} (input : Tensor { shape := s, dtype := .Float32, device := device }) (nFft hopLength winLength : UInt64)
     (window : Tensor { shape := #[winLength], dtype := .Float32, device := device }) (center normalized : Bool) (length : UInt64) :
@@ -55,6 +55,6 @@ def sliceTensor {s : Shape} {d : DType} (x : Tensor { shape := s, dtype := d, de
 def stftTensor {n winLength : UInt64} {out : Shape} (input : Tensor { shape := #[n], dtype := .Float32, device := device })
     (nFft hopLength : UInt64) (window : Tensor { shape := #[winLength], dtype := .Float32, device := device })
     (center normalized : Bool) : Tensor { shape := out, dtype := .Float32, device := device } :=
-  checked (RawTensor.stft n input.raw nFft hopLength winLength window.raw center normalized)
+  checked (RawTensor.stft input.raw nFft hopLength winLength window.raw center normalized)
 
 end torch.kittentts

@@ -88,12 +88,11 @@ comment: `lean_obj_arg` parameters are owned — the callee must `lean_dec` them
 `lean_dec`, use `borrowTensor`. Release unused owned arguments before any
 throwable work. For arguments that must be parsed, use scoped ownership so
 exceptions and early returns release them too. The bulk elementwise macros
-release their unused shape before invoking libtorch:
+borrow their tensors and invoke libtorch directly:
 
 ```cpp
 #define BINOP_FUN(F) \
-lean_object* lean_torch_tensor_##F(lean_obj_arg s, b_lean_obj_arg a, b_lean_obj_arg b) { \
-  lean_dec(s); \
+lean_object* lean_torch_tensor_##F(b_lean_obj_arg a, b_lean_obj_arg b) { \
   auto a_ = borrowTensor(a); \
   auto b_ = borrowTensor(b); \
   auto c_ = torch::F(a_, b_); \

@@ -423,7 +423,7 @@ int main() {
     expectSuccess(lean_torch_muon_orthogonalize(raw.get(), 1));
     expectSuccess(lean_torch_cautious_update(raw.get(), raw.get(), 0.1, 0.1));
     require(lean_is_exclusive(raw.get()), "borrowed polar input leaked");
-    Object values(lean_torch_get_values(shape({}), raw.get(), 4), lean_dec);
+    Object values(lean_torch_get_values(raw.get(), 4), lean_dec);
     require(lean_sarray_size(values.get()) == 4, "input shape changed");
     auto* data = reinterpret_cast<double*>(lean_sarray_cptr(values.get()));
     for (size_t i = 0; i < 4; ++i) require(data[i] == 1, "borrowed polar input mutated");

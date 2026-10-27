@@ -23,7 +23,7 @@ def leaf {s : Shape} (t : Activation (device := device) s) : IO (Activation (dev
 def reshape {s : Shape} {d : DType} (t : Tensor { shape := s, dtype := d, device := device }) (target : Shape) : IO (Tensor { shape := target, dtype := d, device := device }) := do
   unless TensorSpec.numelOfShape s == TensorSpec.numelOfShape target do
     throw (IO.userError "GPT reshape changes the element count")
-  checked d (RawTensor.reshape s t.raw target)
+  checked d (RawTensor.reshape t.raw target)
 
 def dropout {s : Shape} (t : Activation (device := device) s) (p : Float) (training : Bool) : IO (Activation (device := device) s) := do
   Tensor.dropout t p training
