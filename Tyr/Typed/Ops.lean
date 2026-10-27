@@ -1219,7 +1219,7 @@ def toUInt64Array {s : Shape} {dev : Device}
 /-- Uniform integral samples in the half-open interval `[low, high)`. -/
 def randint (low high : Int64) (shape : Shape) (device : Device := .CPU) :
     IO (Tensor { shape := shape, dtype := .Int64, device }) := do
-  let raw ← RawTensor.randint low high shape false device
+  let raw ← RawTensor.randint low high shape device
   match Tensor.ofRaw raw with
   | .ok result => pure result
   | .error message => throw (IO.userError s!"Tensor.randint: {message}")

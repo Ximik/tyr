@@ -582,7 +582,7 @@ lean_object* lean_torch_uniform_like(lean_obj_arg shape, b_lean_obj_arg referenc
   });
 }
 
-lean_object* lean_torch_randint(uint64_t lowBits, uint64_t highBits, lean_obj_arg s, uint8_t /*requires_grad*/, lean_obj_arg device) {
+lean_object* lean_torch_randint(uint64_t lowBits, uint64_t highBits, lean_obj_arg s, lean_obj_arg device) {
   return tyr::checkedIoCall("randint", [&] {
   OwnedLeanObject s_owner(s, lean_dec);
   OwnedLeanObject device_owner(device, lean_dec);
@@ -1276,12 +1276,9 @@ lean_object* lean_torch_embedding(
   b_lean_obj_arg input,
   b_lean_obj_arg weight,
   lean_obj_arg padding_idx,
-  lean_obj_arg max_norm,
-  double norm_type,
   uint8_t scale_grad_by_freq,
   uint8_t sparse
 ) {
-  lean_dec(max_norm); // Currently unused by the native embedding operation.
   OwnedLeanObject padding_idx_owner(padding_idx, lean_dec);
   auto input_ = borrowTensor(input);
   auto weight_ = borrowTensor(weight);
@@ -1310,12 +1307,9 @@ lean_object* lean_torch_embedding_1d(
   b_lean_obj_arg input,
   b_lean_obj_arg weight,
   lean_obj_arg padding_idx,
-  lean_obj_arg max_norm,
-  double norm_type,
   uint8_t scale_grad_by_freq,
   uint8_t sparse
 ) {
-  lean_dec(max_norm); // Currently unused by the native embedding operation.
   OwnedLeanObject padding_idx_owner(padding_idx, lean_dec);
   auto input_ = borrowTensor(input);
   auto weight_ = borrowTensor(weight);

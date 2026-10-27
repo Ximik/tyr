@@ -155,11 +155,9 @@ def rmsNormWeighted (shape _weightShape : Shape) (x weight : RawTensor) (eps : F
     (q k v : @& RawTensor) (dropout : Float) (causal : Bool := true) : IO RawTensor
 @[extern "lean_torch_embedding"] opaque embedding
     (idx weight : @& RawTensor) (paddingIdx : Option Int := none)
-    (maxNorm : Option Float := none) (normType : Float := 2.0)
     (scaleGradByFreq : Bool := false) (sparse : Bool := false) : RawTensor
 @[extern "lean_torch_embedding_1d"] opaque embedding1d
     (idx weight : @& RawTensor) (paddingIdx : Option Int := none)
-    (maxNorm : Option Float := none) (normType : Float := 2.0)
     (scaleGradByFreq : Bool := false) (sparse : Bool := false) : RawTensor
 @[extern "lean_torch_cross_entropy_2d"] opaque crossEntropy
     (logits targets : @& RawTensor) : RawTensor
@@ -316,7 +314,7 @@ invalid accelerator indices cannot trigger a device assertion. -/
 @[extern "lean_torch_tensor_to_uint64_array_dynamic"] opaque toUInt64Array
     (t : @& RawTensor) : IO (Array UInt64)
 @[extern "lean_torch_randint"] opaque randint (low high : Int64) (shape : Shape)
-    (requiresGrad : Bool) (device : Device) : IO RawTensor
+    (device : Device) : IO RawTensor
 
 end torch.RawTensor
 

@@ -169,7 +169,7 @@ void randintError(bool invalidDevice) {
   lean_ctor_set_uint64(cuda, 0, std::numeric_limits<uint64_t>::max());
   Object device(invalidDevice ? cuda : lean_box(1), lean_dec);
   if (!invalidDevice) lean_dec(cuda);
-  Object result(lean_torch_randint(3, invalidDevice ? 4 : 3, retain(dims.get()), 0,
+  Object result(lean_torch_randint(3, invalidDevice ? 4 : 3, retain(dims.get()),
     retain(device.get())), lean_dec);
   require(lean_io_result_is_error(result.get()), "randint did not return IO.error");
   require(dims->m_rc == 1, "randint leaked shape on failure");
@@ -177,7 +177,7 @@ void randintError(bool invalidDevice) {
 }
 void randintSigned() {
   Object result(lean_torch_randint(std::bit_cast<uint64_t>(int64_t{-7}),
-    std::bit_cast<uint64_t>(int64_t{-6}), shape({4}), 0, lean_box(1)), lean_dec);
+    std::bit_cast<uint64_t>(int64_t{-6}), shape({4}), lean_box(1)), lean_dec);
   require(lean_io_result_is_ok(result.get()), "Valid signed randint failed");
   values(lean_io_result_get_value(result.get()), 4, -7);
 }
