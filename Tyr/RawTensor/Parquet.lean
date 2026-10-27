@@ -3,9 +3,7 @@ namespace torch.Data.Pretraining
 /-! ## Parquet FFI Declarations
 
 FFI declarations for parquet file operations. These are implemented in
-`cc/src/tyr_parquet.cpp` using Apache Arrow. When Arrow/Parquet development
-headers are unavailable at build time, the C++ side falls back to stubs that
-fail with an IO error ("Parquet support unavailable").
+`cc/src/tyr_parquet.cpp` using Apache Arrow.
 -/
 
 /-- Parquet file metadata -/

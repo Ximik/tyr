@@ -152,15 +152,13 @@ NVCCFLAGS += -DKITTENS_$(GPU_FAMILY)
 
 NVCCFLAGS += -gencode arch=$(GPU_COMPUTE),code=$(GPU_CODE)
 
-# Optional distributed backend toggles based on available LibTorch artifacts.
 # The pinned torch wheels include Gloo's implementation but omit its public
 # headers. deps/git.lock supplies the exact matching upstream header revision.
-ifneq ($(wildcard $(TORCHDIR)/include/torch/csrc/distributed/c10d/ProcessGroupGloo.hpp),)
-ifneq ($(wildcard $(GLOO_DIR)/gloo/algorithm.h),)
+# ProcessGroupGloo.hpp declares nothing unless USE_C10D_GLOO is defined.
 EXTRA_CXX_FLAGS += -DUSE_C10D_GLOO
 TORCH_INC_FLAGS += -isystem $(GLOO_DIR)
-endif
-endif
+
+# Optional distributed backend toggles based on available LibTorch artifacts.
 ifneq ($(wildcard $(TORCHDIR)/include/torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp),)
 ifneq ($(wildcard $(TORCH_LIBPATH)/libtorch_cuda.*),)
 ifneq ($(wildcard $(TORCH_LIBPATH)/libc10_cuda.*),)
@@ -346,6 +344,10 @@ check-deps:
 	fi
 	@if [ ! -f "$(TORCHDIR)/include/torch/csrc/api/include/torch/torch.h" ] || [ ! -d "$(TORCH_LIBPATH)" ]; then \
 		echo "Missing LibTorch at $(TORCHDIR). Run: deps/fetch.sh"; \
+		exit 1; \
+	fi
+	@if [ ! -f "$(GLOO_DIR)/gloo/algorithm.h" ]; then \
+		echo "Missing Gloo headers at $(GLOO_DIR). Run: deps/fetch.sh"; \
 		exit 1; \
 	fi
 	@if [ "$(words $(ARROW_LIBS))" != 2 ]; then \

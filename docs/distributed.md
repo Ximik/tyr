@@ -24,11 +24,10 @@ The layers compose bottom-up; each one is usable independently. All Lean
 modules are re-exported from the umbrella `Tyr.lean` (`Tyr.lean:30-54`) and
 live in `torch.*` namespaces. The C++ side is a single global
 `c10d::ProcessGroup` plus a `TCPStore` in `cc/src/tyr_distributed.cpp`; NCCL
-and Gloo are compile-time gated (`USE_C10D_NCCL` and `USE_C10D_GLOO`). The pinned
-CPU and CUDA dependencies include Gloo: `deps/fetch.sh` fetches the headers at
-the exact submodule revision used by the pinned PyTorch wheel, and the native
-build enables Gloo when those headers are present. Custom LibTorch builds must
-also provide a compatible Gloo implementation. Async
+is compile-time gated (`USE_C10D_NCCL`) and Gloo is always built. `deps/fetch.sh`
+fetches the Gloo headers at the exact submodule revision used by the pinned
+PyTorch wheel, and the native build stops if they are missing. Custom LibTorch
+builds must also provide a compatible Gloo implementation. Async
 work items live in a global map keyed by `UInt64` work ids.
 
 ### Collectives: `torch.dist` (`Tyr/Distributed.lean`)

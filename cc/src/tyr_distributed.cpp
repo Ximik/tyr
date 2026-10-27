@@ -23,17 +23,10 @@
 #define TYR_HAS_NCCL 1
 #endif
 
-#if defined(USE_C10D_GLOO)
 #include <torch/csrc/distributed/c10d/ProcessGroupGloo.hpp>
-#define TYR_HAS_GLOO 1
-#endif
 
 #ifndef TYR_HAS_NCCL
 #define TYR_HAS_NCCL 0
-#endif
-
-#ifndef TYR_HAS_GLOO
-#define TYR_HAS_GLOO 0
 #endif
 
 #include <memory>
@@ -81,11 +74,7 @@ BackendKind validateInit(const std::string& backend, uint64_t port,
     if (rank >= world_size)
         throw std::invalid_argument("rank must be less than world_size");
     if (backend == "gloo") {
-#if TYR_HAS_GLOO
         return BackendKind::Gloo;
-#else
-        throw std::invalid_argument("Gloo backend requested but ProcessGroupGloo is unavailable in this build");
-#endif
     }
     if (backend == "nccl") {
 #if TYR_HAS_NCCL
@@ -202,12 +191,10 @@ lean_object* lean_torch_dist_init_process_group(
                   store, native_rank, native_world_size, options);
   #endif
           } else {
-  #if TYR_HAS_GLOO
               auto options = c10d::ProcessGroupGloo::Options::create();
               options->devices.push_back(c10d::ProcessGroupGloo::createDefaultDevice());
               process_group = c10::make_intrusive<c10d::ProcessGroupGloo>(
                   store, native_rank, native_world_size, options);
-  #endif
           }
 
           // Local RAII owns both resources until construction has fully succeeded.

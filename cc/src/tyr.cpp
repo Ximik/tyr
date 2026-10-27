@@ -109,16 +109,7 @@ torch::Tensor flash_attn_dispatch(
     bool enable_gqa);
 }
 
-#if defined(__has_include)
-#if __has_include(<soxr.h>)
-#define TYR_HAS_SOXR 1
 #include <soxr.h>
-#else
-#define TYR_HAS_SOXR 0
-#endif
-#else
-#define TYR_HAS_SOXR 0
-#endif
 
 #if defined(__has_include)
 #if __has_include(<c10/cuda/CUDAStream.h>) && __has_include(<c10/cuda/CUDAFunctions.h>) && __has_include(<cuda_runtime_api.h>)
@@ -1795,7 +1786,6 @@ lean_object* lean_torch_resample_soxr_hq(b_lean_obj_arg samples,
   const size_t out_len = static_cast<size_t>(output_length);
   std::vector<float> out_data(out_len, 0.0f);
 
-#if TYR_HAS_SOXR
   size_t idone = 0;
   size_t odone = 0;
   auto io_spec = soxr_io_spec(SOXR_FLOAT32_I, SOXR_FLOAT32_I);
@@ -1816,10 +1806,6 @@ lean_object* lean_torch_resample_soxr_hq(b_lean_obj_arg samples,
       out_data[i] = 0.0f;
     }
   }
-#else
-  return lean_io_result_mk_error(lean_mk_io_user_error(
-    lean_mk_string("resampleSoxrHQ requires libsoxr (soxr.h not found at build time)")));
-#endif
 
   // Allocate the checked capacity directly, avoiding growth beyond that bound.
   lean_object* out = lean_alloc_array(out_len, out_len);
