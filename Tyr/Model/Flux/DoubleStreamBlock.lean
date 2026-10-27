@@ -4,7 +4,7 @@
   Double-stream transformer block for Flux.
   Processes image and text tokens with separate paths but joint attention.
 -/
-import Tyr.Torch
+import Tyr.Model.Flux.TypedOps
 import Tyr.TensorStruct
 import Tyr.Module.Core
 import Tyr.Module.Derive
@@ -16,85 +16,96 @@ import Tyr.Model.Flux.QKNorm
 
 namespace torch.flux
 
+variable {device : Device} {dtype : DType}
+variable [DType.RealFloating dtype]
 /-- Self-attention layer for double-stream block -/
-structure SelfAttention (hidden_size num_heads head_dim : UInt64) where
+structure SelfAttention (hidden_size num_heads head_dim : UInt64) (dtype : DType := .Float32) where
   /-- QKV projection: [hidden * 3, hidden] -/
-  qkv : T #[num_heads * head_dim * 3, hidden_size]
+  qkv : Tensor { dtype := dtype, device := device, shape := #[num_heads * head_dim * 3, hidden_size] }
   /-- QK normalization -/
-  norm : QKNorm head_dim
+  norm : QKNorm (device := device) (dtype := dtype) head_dim
   /-- Output projection: [hidden, hidden] -/
-  proj : T #[hidden_size, num_heads * head_dim]
+  proj : Tensor { dtype := dtype, device := device, shape := #[hidden_size, num_heads * head_dim] }
   deriving TensorStruct
 
+
 /-- SwiGLU MLP for double-stream block -/
-structure SwiGLUMLP (hidden_size mlp_hidden : UInt64) where
+structure SwiGLUMLP (hidden_size mlp_hidden : UInt64) (dtype : DType := .Float32) where
   /-- Linear in: gate and up projection fused -/
-  w1 : T #[mlp_hidden * 2, hidden_size]
+  w1 : Tensor { dtype := dtype, device := device, shape := #[mlp_hidden * 2, hidden_size] }
   /-- Linear out: down projection -/
-  w2 : T #[hidden_size, mlp_hidden]
+  w2 : Tensor { dtype := dtype, device := device, shape := #[hidden_size, mlp_hidden] }
   deriving TensorStruct
+
 
 /-- Double-stream transformer block.
     Processes image and text tokens with separate paths but joint attention. -/
-structure DoubleStreamBlock (hidden_size num_heads head_dim mlp_hidden : UInt64) where
+structure DoubleStreamBlock (hidden_size num_heads head_dim mlp_hidden : UInt64) (dtype : DType := .Float32) where
   /-- Image path normalization -/
-  img_norm1 : LayerNorm hidden_size
+  img_norm1 : LayerNorm (device := device) hidden_size dtype
   /-- Image self-attention -/
-  img_attn : SelfAttention hidden_size num_heads head_dim
+  img_attn : SelfAttention (device := device) (dtype := dtype) hidden_size num_heads head_dim
   /-- Image MLP normalization -/
-  img_norm2 : LayerNorm hidden_size
+  img_norm2 : LayerNorm (device := device) hidden_size dtype
   /-- Image MLP -/
-  img_mlp : SwiGLUMLP hidden_size mlp_hidden
+  img_mlp : SwiGLUMLP (device := device) (dtype := dtype) hidden_size mlp_hidden
 
   /-- Text path normalization -/
-  txt_norm1 : LayerNorm hidden_size
+  txt_norm1 : LayerNorm (device := device) hidden_size dtype
   /-- Text self-attention -/
-  txt_attn : SelfAttention hidden_size num_heads head_dim
+  txt_attn : SelfAttention (device := device) (dtype := dtype) hidden_size num_heads head_dim
   /-- Text MLP normalization -/
-  txt_norm2 : LayerNorm hidden_size
+  txt_norm2 : LayerNorm (device := device) hidden_size dtype
   /-- Text MLP -/
-  txt_mlp : SwiGLUMLP hidden_size mlp_hidden
+  txt_mlp : SwiGLUMLP (device := device) (dtype := dtype) hidden_size mlp_hidden
 
   deriving TensorStruct
+
 
 namespace DoubleStreamBlock
 
 /-- Initialize self-attention -/
 def initSelfAttention (hidden_size num_heads head_dim : UInt64)
-    : IO (SelfAttention hidden_size num_heads head_dim) := do
+    (device : Device := .CPU) (dtype : DType := .Float32) : IO (SelfAttention (device := device) (dtype := dtype) hidden_size num_heads head_dim) := do
+  let floating ← IO.ofExcept (DType.realFloating? dtype)
+  let _ := floating.down
   let std := Float.sqrt (2.0 / hidden_size.toFloat)
-  let qkv ← torch.randn #[num_heads * head_dim * 3, hidden_size]
-  let proj ← torch.randn #[hidden_size, num_heads * head_dim]
-  let norm := QKNorm.init head_dim
+  let qkv ← randomWeight (dtype := dtype) (device := device) #[num_heads * head_dim * 3, hidden_size]
+  let proj ← randomWeight (dtype := dtype) (device := device) #[hidden_size, num_heads * head_dim]
+  let norm ← QKNorm.init (dtype := dtype) (device := device) head_dim
   pure {
-    qkv := autograd.set_requires_grad (mul_scalar qkv std) true
+    qkv := (← Tensor.parameter (Tensor.mulScalar qkv std))
     norm
-    proj := autograd.set_requires_grad (mul_scalar proj std) true
+    proj := (← Tensor.parameter (Tensor.mulScalar proj std))
   }
 
 /-- Initialize SwiGLU MLP -/
 def initMLP (hidden_size mlp_hidden : UInt64)
-    : IO (SwiGLUMLP hidden_size mlp_hidden) := do
+    (device : Device := .CPU) (dtype : DType := .Float32) : IO (SwiGLUMLP (device := device) (dtype := dtype) hidden_size mlp_hidden) := do
+  let floating ← IO.ofExcept (DType.realFloating? dtype)
+  let _ := floating.down
   let std := Float.sqrt (2.0 / hidden_size.toFloat)
-  let w1 ← torch.randn #[mlp_hidden * 2, hidden_size]
-  let w2 ← torch.randn #[hidden_size, mlp_hidden]
+  let w1 ← randomWeight (dtype := dtype) (device := device) #[mlp_hidden * 2, hidden_size]
+  let w2 ← randomWeight (dtype := dtype) (device := device) #[hidden_size, mlp_hidden]
   pure {
-    w1 := autograd.set_requires_grad (mul_scalar w1 std) true
-    w2 := autograd.set_requires_grad (mul_scalar w2 std) true
+    w1 := (← Tensor.parameter (Tensor.mulScalar w1 std))
+    w2 := (← Tensor.parameter (Tensor.mulScalar w2 std))
   }
 
 /-- Initialize double-stream block -/
 def init (hidden_size num_heads head_dim mlp_hidden : UInt64)
-    : IO (DoubleStreamBlock hidden_size num_heads head_dim mlp_hidden) := do
-  let img_norm1 := LayerNorm.init hidden_size
-  let img_attn ← initSelfAttention hidden_size num_heads head_dim
-  let img_norm2 := LayerNorm.init hidden_size
-  let img_mlp ← initMLP hidden_size mlp_hidden
+    (device : Device := .CPU) (dtype : DType := .Float32) : IO (DoubleStreamBlock (device := device) (dtype := dtype) hidden_size num_heads head_dim mlp_hidden) := do
+  let floating ← IO.ofExcept (DType.realFloating? dtype)
+  let _ := floating.down
+  let img_norm1 ← initLayerNorm (dtype := dtype) (device := device) hidden_size
+  let img_attn ← initSelfAttention (dtype := dtype) (device := device) hidden_size num_heads head_dim
+  let img_norm2 ← initLayerNorm (dtype := dtype) (device := device) hidden_size
+  let img_mlp ← initMLP (dtype := dtype) (device := device) hidden_size mlp_hidden
 
-  let txt_norm1 := LayerNorm.init hidden_size
-  let txt_attn ← initSelfAttention hidden_size num_heads head_dim
-  let txt_norm2 := LayerNorm.init hidden_size
-  let txt_mlp ← initMLP hidden_size mlp_hidden
+  let txt_norm1 ← initLayerNorm (dtype := dtype) (device := device) hidden_size
+  let txt_attn ← initSelfAttention (dtype := dtype) (device := device) hidden_size num_heads head_dim
+  let txt_norm2 ← initLayerNorm (dtype := dtype) (device := device) hidden_size
+  let txt_mlp ← initMLP (dtype := dtype) (device := device) hidden_size mlp_hidden
 
   pure {
     img_norm1, img_attn, img_norm2, img_mlp
@@ -108,33 +119,34 @@ def init (hidden_size num_heads head_dim mlp_hidden : UInt64)
     pe: RoPE embeddings
     Returns: (img_out, txt_out) -/
 def forward {batch img_seq txt_seq hidden_size num_heads head_dim mlp_hidden : UInt64}
-    (block : DoubleStreamBlock hidden_size num_heads head_dim mlp_hidden)
-    (img : T #[batch, img_seq, hidden_size])
-    (txt : T #[batch, txt_seq, hidden_size])
-    (img_pe txt_pe : T #[])  -- RoPE for image and text
-    (mod_img : T #[batch, 6, hidden_size])
-    (mod_txt : T #[batch, 6, hidden_size])
-    : T #[batch, img_seq, hidden_size] × T #[batch, txt_seq, hidden_size] :=
+    (block : DoubleStreamBlock (device := device) (dtype := dtype) hidden_size num_heads head_dim mlp_hidden)
+    (img : Tensor { dtype := dtype, device := device, shape := #[batch, img_seq, hidden_size] })
+    (txt : Tensor { dtype := dtype, device := device, shape := #[batch, txt_seq, hidden_size] })
+    (img_pe : Tensor { device := device, shape := #[batch, 1, img_seq, head_dim / 2, 2, 2], dtype := .Float32 })
+    (txt_pe : Tensor { device := device, shape := #[batch, 1, txt_seq, head_dim / 2, 2, 2], dtype := .Float32 })  -- RoPE for image and text
+    (mod_img : Tensor { dtype := dtype, device := device, shape := #[batch, 6, hidden_size] })
+    (mod_txt : Tensor { dtype := dtype, device := device, shape := #[batch, 6, hidden_size] })
+    : Tensor { dtype := dtype, device := device, shape := #[batch, img_seq, hidden_size] } × Tensor { dtype := dtype, device := device, shape := #[batch, txt_seq, hidden_size] } :=
   -- Split modulation into two triplets for attention and MLP
-  let img_mod1 := data.slice mod_img 1 0 3
-  let img_mod2 := data.slice mod_img 1 3 3
-  let txt_mod1 := data.slice mod_txt 1 0 3
-  let txt_mod2 := data.slice mod_txt 1 3 3
+  let img_mod1 := sliceTyped mod_img 1 0 3
+  let img_mod2 := sliceTyped mod_img 1 3 3
+  let txt_mod1 := sliceTyped mod_txt 1 0 3
+  let txt_mod2 := sliceTyped mod_txt 1 3 3
 
   -- Modulation order is (shift, scale, gate)
-  let img_mod1_shift := reshape (data.slice img_mod1 1 0 1) #[batch, hidden_size]
-  let img_mod1_scale := reshape (data.slice img_mod1 1 1 1) #[batch, hidden_size]
-  let img_mod1_gate := reshape (data.slice img_mod1 1 2 1) #[batch, hidden_size]
-  let img_mod2_shift := reshape (data.slice img_mod2 1 0 1) #[batch, hidden_size]
-  let img_mod2_scale := reshape (data.slice img_mod2 1 1 1) #[batch, hidden_size]
-  let img_mod2_gate := reshape (data.slice img_mod2 1 2 1) #[batch, hidden_size]
+  let img_mod1_shift := Tensor.reshapeChecked (sliceTyped img_mod1 1 0 1) #[batch, hidden_size]
+  let img_mod1_scale := Tensor.reshapeChecked (sliceTyped img_mod1 1 1 1) #[batch, hidden_size]
+  let img_mod1_gate := Tensor.reshapeChecked (sliceTyped img_mod1 1 2 1) #[batch, hidden_size]
+  let img_mod2_shift := Tensor.reshapeChecked (sliceTyped img_mod2 1 0 1) #[batch, hidden_size]
+  let img_mod2_scale := Tensor.reshapeChecked (sliceTyped img_mod2 1 1 1) #[batch, hidden_size]
+  let img_mod2_gate := Tensor.reshapeChecked (sliceTyped img_mod2 1 2 1) #[batch, hidden_size]
 
-  let txt_mod1_shift := reshape (data.slice txt_mod1 1 0 1) #[batch, hidden_size]
-  let txt_mod1_scale := reshape (data.slice txt_mod1 1 1 1) #[batch, hidden_size]
-  let txt_mod1_gate := reshape (data.slice txt_mod1 1 2 1) #[batch, hidden_size]
-  let txt_mod2_shift := reshape (data.slice txt_mod2 1 0 1) #[batch, hidden_size]
-  let txt_mod2_scale := reshape (data.slice txt_mod2 1 1 1) #[batch, hidden_size]
-  let txt_mod2_gate := reshape (data.slice txt_mod2 1 2 1) #[batch, hidden_size]
+  let txt_mod1_shift := Tensor.reshapeChecked (sliceTyped txt_mod1 1 0 1) #[batch, hidden_size]
+  let txt_mod1_scale := Tensor.reshapeChecked (sliceTyped txt_mod1 1 1 1) #[batch, hidden_size]
+  let txt_mod1_gate := Tensor.reshapeChecked (sliceTyped txt_mod1 1 2 1) #[batch, hidden_size]
+  let txt_mod2_shift := Tensor.reshapeChecked (sliceTyped txt_mod2 1 0 1) #[batch, hidden_size]
+  let txt_mod2_scale := Tensor.reshapeChecked (sliceTyped txt_mod2 1 1 1) #[batch, hidden_size]
+  let txt_mod2_gate := Tensor.reshapeChecked (sliceTyped txt_mod2 1 2 1) #[batch, hidden_size]
 
   -- Image path: norm1 + modulation
   let img_norm := block.img_norm1.forward3d img
@@ -145,20 +157,20 @@ def forward {batch img_seq txt_seq hidden_size num_heads head_dim mlp_hidden : U
   let txt_mod := applyModulation txt_norm txt_mod1_scale txt_mod1_shift
 
   -- Project to Q, K, V for both
-  let img_qkv := linear3d img_mod block.img_attn.qkv
-  let txt_qkv := linear3d txt_mod block.txt_attn.qkv
+  let img_qkv := Tensor.linear3d img_mod block.img_attn.qkv
+  let txt_qkv := Tensor.linear3d txt_mod block.txt_attn.qkv
 
   -- Reshape QKV
-  let img_qkv := reshape img_qkv #[batch, img_seq, 3, num_heads, head_dim]
-  let txt_qkv := reshape txt_qkv #[batch, txt_seq, 3, num_heads, head_dim]
+  let img_qkv := Tensor.reshapeChecked img_qkv #[batch, img_seq, 3, num_heads, head_dim]
+  let txt_qkv := Tensor.reshapeChecked txt_qkv #[batch, txt_seq, 3, num_heads, head_dim]
 
-  let img_q := reshape (data.slice img_qkv 2 0 1) #[batch, img_seq, num_heads, head_dim]
-  let img_k := reshape (data.slice img_qkv 2 1 1) #[batch, img_seq, num_heads, head_dim]
-  let img_v := reshape (data.slice img_qkv 2 2 1) #[batch, img_seq, num_heads, head_dim]
+  let img_q := Tensor.reshapeChecked (sliceTyped img_qkv 2 0 1) #[batch, img_seq, num_heads, head_dim]
+  let img_k := Tensor.reshapeChecked (sliceTyped img_qkv 2 1 1) #[batch, img_seq, num_heads, head_dim]
+  let img_v := Tensor.reshapeChecked (sliceTyped img_qkv 2 2 1) #[batch, img_seq, num_heads, head_dim]
 
-  let txt_q := reshape (data.slice txt_qkv 2 0 1) #[batch, txt_seq, num_heads, head_dim]
-  let txt_k := reshape (data.slice txt_qkv 2 1 1) #[batch, txt_seq, num_heads, head_dim]
-  let txt_v := reshape (data.slice txt_qkv 2 2 1) #[batch, txt_seq, num_heads, head_dim]
+  let txt_q := Tensor.reshapeChecked (sliceTyped txt_qkv 2 0 1) #[batch, txt_seq, num_heads, head_dim]
+  let txt_k := Tensor.reshapeChecked (sliceTyped txt_qkv 2 1 1) #[batch, txt_seq, num_heads, head_dim]
+  let txt_v := Tensor.reshapeChecked (sliceTyped txt_qkv 2 2 1) #[batch, txt_seq, num_heads, head_dim]
 
   -- QK normalization
   let (img_q, img_k) := block.img_attn.norm.forward img_q img_k
@@ -172,64 +184,64 @@ def forward {batch img_seq txt_seq hidden_size num_heads head_dim mlp_hidden : U
 
   -- Concatenate for joint attention
   -- q: [batch, img_seq + txt_seq, num_heads, head_dim]
-  let q := nn.cat txt_q img_q 1
-  let k := nn.cat txt_k img_k 1
-  let v := nn.cat txt_v img_v 1
+  let q : Tensor { dtype := dtype, device := device, shape := #[batch, txt_seq + img_seq, num_heads, head_dim] } := qwen35.typedCat txt_q img_q 1
+  let k : Tensor { dtype := dtype, device := device, shape := #[batch, txt_seq + img_seq, num_heads, head_dim] } := qwen35.typedCat txt_k img_k 1
+  let v : Tensor { dtype := dtype, device := device, shape := #[batch, txt_seq + img_seq, num_heads, head_dim] } := qwen35.typedCat txt_v img_v 1
 
   -- Transpose for attention
-  let q := nn.transpose_for_attention q
-  let k := nn.transpose_for_attention k
-  let v := nn.transpose_for_attention v
+  let q := transposeAttention q
+  let k := transposeAttention k
+  let v := transposeAttention v
 
   -- Joint attention
-  let attn := nn.scaled_dot_product_attention q k v 0.0 false
+  let attn := Tensor.attentionGQA q k v false
 
   -- Transpose back
-  let attn := nn.transpose_from_attention attn
+  let attn := fromAttention attn
   -- Split back to img and txt
-  let txt_attn := data.slice attn 1 0 txt_seq
-  let img_attn := data.slice attn 1 txt_seq img_seq
-  let img_attn := reshape img_attn #[batch, img_seq, num_heads * head_dim]
-  let txt_attn := reshape txt_attn #[batch, txt_seq, num_heads * head_dim]
+  let txt_attn := sliceTyped attn 1 0 txt_seq
+  let img_attn := sliceTyped attn 1 txt_seq img_seq
+  let img_attn := Tensor.reshapeChecked img_attn #[batch, img_seq, num_heads * head_dim]
+  let txt_attn := Tensor.reshapeChecked txt_attn #[batch, txt_seq, num_heads * head_dim]
 
   -- Output projections
-  let img_attn := linear3d img_attn block.img_attn.proj
-  let txt_attn := linear3d txt_attn block.txt_attn.proj
+  let img_attn := Tensor.linear3d img_attn block.img_attn.proj
+  let txt_attn := Tensor.linear3d txt_attn block.txt_attn.proj
 
   -- Apply gates
-  let img_mod1_gate := nn.unsqueeze img_mod1_gate 1
-  let img_mod1_gate := nn.expand img_mod1_gate #[batch, img_seq, hidden_size]
-  let txt_mod1_gate := nn.unsqueeze txt_mod1_gate 1
-  let txt_mod1_gate := nn.expand txt_mod1_gate #[batch, txt_seq, hidden_size]
+  let img_mod1_gate := Tensor.unsqueeze img_mod1_gate 1
+  let img_mod1_gate := Tensor.expand img_mod1_gate #[batch, img_seq, hidden_size]
+  let txt_mod1_gate := Tensor.unsqueeze txt_mod1_gate 1
+  let txt_mod1_gate := Tensor.expand txt_mod1_gate #[batch, txt_seq, hidden_size]
 
   -- Residual + gated attention
-  let img := img + img_mod1_gate * img_attn
-  let txt := txt + txt_mod1_gate * txt_attn
+  let img := Tensor.add img (Tensor.mul img_mod1_gate img_attn)
+  let txt := Tensor.add txt (Tensor.mul txt_mod1_gate txt_attn)
 
   -- MLP paths with second modulation
   let img_mlp_in := block.img_norm2.forward3d img
   let img_mlp_in := applyModulation img_mlp_in img_mod2_scale img_mod2_shift
-  let img_mlp_proj := linear3d img_mlp_in block.img_mlp.w1
-  let img_mlp_proj := reshape img_mlp_proj #[batch, img_seq, 2, mlp_hidden]
-  let img_gate := reshape (data.slice img_mlp_proj 2 0 1) #[batch, img_seq, mlp_hidden]
-  let img_up := reshape (data.slice img_mlp_proj 2 1 1) #[batch, img_seq, mlp_hidden]
-  let img_mlp_out := nn.silu img_gate * img_up
-  let img_mlp_out := linear3d img_mlp_out block.img_mlp.w2
-  let img_mod2_gate := nn.unsqueeze img_mod2_gate 1
-  let img_mod2_gate := nn.expand img_mod2_gate #[batch, img_seq, hidden_size]
-  let img := img + img_mod2_gate * img_mlp_out
+  let img_mlp_proj := Tensor.linear3d img_mlp_in block.img_mlp.w1
+  let img_mlp_proj := Tensor.reshapeChecked img_mlp_proj #[batch, img_seq, 2, mlp_hidden]
+  let img_gate := Tensor.reshapeChecked (sliceTyped img_mlp_proj 2 0 1) #[batch, img_seq, mlp_hidden]
+  let img_up := Tensor.reshapeChecked (sliceTyped img_mlp_proj 2 1 1) #[batch, img_seq, mlp_hidden]
+  let img_mlp_out := Tensor.mul (Tensor.silu img_gate) img_up
+  let img_mlp_out := Tensor.linear3d img_mlp_out block.img_mlp.w2
+  let img_mod2_gate := Tensor.unsqueeze img_mod2_gate 1
+  let img_mod2_gate := Tensor.expand img_mod2_gate #[batch, img_seq, hidden_size]
+  let img := Tensor.add img (Tensor.mul img_mod2_gate img_mlp_out)
 
   let txt_mlp_in := block.txt_norm2.forward3d txt
   let txt_mlp_in := applyModulation txt_mlp_in txt_mod2_scale txt_mod2_shift
-  let txt_mlp_proj := linear3d txt_mlp_in block.txt_mlp.w1
-  let txt_mlp_proj := reshape txt_mlp_proj #[batch, txt_seq, 2, mlp_hidden]
-  let txt_gate := reshape (data.slice txt_mlp_proj 2 0 1) #[batch, txt_seq, mlp_hidden]
-  let txt_up := reshape (data.slice txt_mlp_proj 2 1 1) #[batch, txt_seq, mlp_hidden]
-  let txt_mlp_out := nn.silu txt_gate * txt_up
-  let txt_mlp_out := linear3d txt_mlp_out block.txt_mlp.w2
-  let txt_mod2_gate := nn.unsqueeze txt_mod2_gate 1
-  let txt_mod2_gate := nn.expand txt_mod2_gate #[batch, txt_seq, hidden_size]
-  let txt := txt + txt_mod2_gate * txt_mlp_out
+  let txt_mlp_proj := Tensor.linear3d txt_mlp_in block.txt_mlp.w1
+  let txt_mlp_proj := Tensor.reshapeChecked txt_mlp_proj #[batch, txt_seq, 2, mlp_hidden]
+  let txt_gate := Tensor.reshapeChecked (sliceTyped txt_mlp_proj 2 0 1) #[batch, txt_seq, mlp_hidden]
+  let txt_up := Tensor.reshapeChecked (sliceTyped txt_mlp_proj 2 1 1) #[batch, txt_seq, mlp_hidden]
+  let txt_mlp_out := Tensor.mul (Tensor.silu txt_gate) txt_up
+  let txt_mlp_out := Tensor.linear3d txt_mlp_out block.txt_mlp.w2
+  let txt_mod2_gate := Tensor.unsqueeze txt_mod2_gate 1
+  let txt_mod2_gate := Tensor.expand txt_mod2_gate #[batch, txt_seq, hidden_size]
+  let txt := Tensor.add txt (Tensor.mul txt_mod2_gate txt_mlp_out)
 
   (img, txt)
 

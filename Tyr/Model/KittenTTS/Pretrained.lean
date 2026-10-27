@@ -1,3 +1,4 @@
+import Tyr.SafeTensors.Schema
 /-
   Tyr/Model/KittenTTS/Pretrained.lean
 
@@ -164,12 +165,15 @@ end torch.kittentts.hub
 
 namespace torch.kittentts
 
+variable {device : Device}
+
 open torch.Log
 open torch.Hub
 
 structure PretrainedBundle where
   cfg : KittenTTSConfig
-  model : Model cfg
+  device : Device
+  model : Model (device := device) cfg
   vocab : VocabMap
   modelDir : String
   source : String
@@ -195,19 +199,19 @@ def inputIdsFromPhonemes (bundle : PretrainedBundle) (phonemes : String) : Array
   encodePhonemeIds bundle.vocab phonemes
 
 def loadVoiceStyle (bundle : PretrainedBundle) (voice : String) (phonemeCount : UInt64)
-    : IO (T #[1, KittenTTSConfig.fullStyleDim bundle.cfg]) := do
+    : IO (Tensor { shape := #[1, KittenTTSConfig.fullStyleDim bundle.cfg], dtype := .Float32, device := bundle.device }) := do
   let voicePath ← hub.ensureVoiceSafetensors bundle.source bundle.revision bundle.modelDir voice
-  let table : T #[510, 1, KittenTTSConfig.fullStyleDim bundle.cfg] ←
-    safetensors.loadTensor voicePath "voice" #[510, 1, KittenTTSConfig.fullStyleDim bundle.cfg]
+  let table : Tensor { shape := #[510, 1, KittenTTSConfig.fullStyleDim bundle.cfg], dtype := .Float32, device := bundle.device } ←
+    safetensors.loadTensorWithSpec voicePath "voice" ⟨#[510, 1, KittenTTSConfig.fullStyleDim bundle.cfg], .Float32⟩ bundle.device
   let idx := voiceIndexOfPhonemeCount phonemeCount
-  let style : T #[1, 1, KittenTTSConfig.fullStyleDim bundle.cfg] := data.slice table 0 idx 1
-  pure (reshape style #[1, KittenTTSConfig.fullStyleDim bundle.cfg])
+  let style : Tensor { shape := #[1, 1, KittenTTSConfig.fullStyleDim bundle.cfg], dtype := .Float32, device := bundle.device } := sliceTensor table 0 idx 1
+  pure (Tensor.reshapeChecked style #[1, KittenTTSConfig.fullStyleDim bundle.cfg])
 
 def synthesizePhonemes (bundle : PretrainedBundle) (phonemes : String) (voice : String) (speed : Float := 1.0)
-    : IO KittenTTSOutput := do
+    : IO (KittenTTSOutput (device := bundle.device)) := do
   let ids := bundle.inputIdsFromPhonemes phonemes
   let seq := ids.size.toUInt64
-  let inputIds : T #[1, seq] := reshape (data.fromInt64Array (ids.map (·.toInt64))) #[1, seq]
+  let inputIds : Tensor { shape := #[1, seq], dtype := .Int64, device := bundle.device } := (Tensor.reshapeChecked (Tensor.fromInt64Array (ids.map (·.toInt64))) #[1, seq]).to bundle.device
   let refStyle ← bundle.loadVoiceStyle voice phonemes.toList.length.toUInt64
   bundle.model.synthesizeIds inputIds refStyle speed
 
@@ -217,14 +221,14 @@ def synthesizePhonemesToFile
     (voice : String)
     (outPath : String)
     (speed : Float := 1.0)
-    : IO KittenTTSOutput := do
+    : IO (KittenTTSOutput (device := bundle.device)) := do
   let out ← bundle.synthesizePhonemes phonemes voice speed
   let outPath ← expandHome outPath
   ensureParentDir outPath
   if outPath.endsWith ".safetensors" then
-    safetensors.saveTensor outPath "audio" out.audio
+    Tensor.saveSafeTensor out.audio.2 outPath "audio"
   else
-    data.saveWav out.audio outPath bundle.cfg.sampleRate
+    Tensor.saveWav out.audio.2 outPath bundle.cfg.sampleRate
   pure out
 
 def synthesizePhonemesToWav
@@ -233,22 +237,22 @@ def synthesizePhonemesToWav
     (voice : String)
     (wavPath : String)
     (speed : Float := 1.0)
-    : IO KittenTTSOutput :=
+    : IO (KittenTTSOutput (device := bundle.device)) :=
   synthesizePhonemesToFile bundle phonemes voice wavPath speed
 
 def predictPhonemeDurations (bundle : PretrainedBundle) (phonemes : String) (voice : String) (speed : Float := 1.0)
     : IO KittenTTSDurationPrediction := do
   let ids := bundle.inputIdsFromPhonemes phonemes
   let seq := ids.size.toUInt64
-  let inputIds : T #[1, seq] := reshape (data.fromInt64Array (ids.map (·.toInt64))) #[1, seq]
+  let inputIds : Tensor { shape := #[1, seq], dtype := .Int64, device := bundle.device } := (Tensor.reshapeChecked (Tensor.fromInt64Array (ids.map (·.toInt64))) #[1, seq]).to bundle.device
   let refStyle ← bundle.loadVoiceStyle voice phonemes.toList.length.toUInt64
   bundle.model.predictDurations inputIds refStyle speed
 
 def debugPhonemes (bundle : PretrainedBundle) (phonemes : String) (voice : String) (speed : Float := 1.0)
-    : IO KittenTTSDebugOutput := do
+    : IO (KittenTTSDebugOutput (device := bundle.device)) := do
   let ids := bundle.inputIdsFromPhonemes phonemes
   let seq := ids.size.toUInt64
-  let inputIds : T #[1, seq] := reshape (data.fromInt64Array (ids.map (·.toInt64))) #[1, seq]
+  let inputIds : Tensor { shape := #[1, seq], dtype := .Int64, device := bundle.device } := (Tensor.reshapeChecked (Tensor.fromInt64Array (ids.map (·.toInt64))) #[1, seq]).to bundle.device
   let refStyle ← bundle.loadVoiceStyle voice phonemes.toList.length.toUInt64
   bundle.model.debugSynthesizeIds inputIds refStyle speed
 
@@ -269,7 +273,7 @@ def loadFromPretrained
   let loaded ← Model.loadAutoConfig s!"{modelDir}/model.safetensors" cfg0 (log := log)
   let cfg := loaded.cfg
   let model := loaded.model
-  pure { cfg, model, vocab, modelDir, source, revision, cacheDir }
+  pure { cfg, device := loaded.device, model, vocab, modelDir, source, revision, cacheDir }
 
 end Model
 

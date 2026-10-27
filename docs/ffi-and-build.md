@@ -15,22 +15,49 @@ boundary itself.
 
 ### The tensor contract
 
-On the Lean side a tensor is opaque and shape-indexed (`Tyr/Basic.lean:23`,
-`Tyr/Basic.lean:101-108`):
+The native carrier is opaque. Public tensors index it with a specification
+(`Tyr.Basic.Types` and `Tyr.Basic`):
 
 ```lean
 abbrev Shape := Array UInt64
 
-inductive Device where
-  | CUDA : UInt64 → Device
+inductive DeviceKind where
+  | CUDA : UInt64 → DeviceKind
   | CPU
   | MPS
 
+-- Device.Valid admits CPU directly; accelerator validity is opaque and
+-- established by the native IO acquisition boundary.
+def Device := { kind : DeviceKind // Device.Valid kind }
+
 opaque TSpec : NonemptyType
-def T (_ : Shape) : Type := TSpec.type
+def RawTensor : Type := TSpec.type
 ```
 
-At runtime, `T s` is a Lean external object whose payload is a raw
+`Device.CPU` is available directly. `Device.cuda index : IO Device` and
+`Device.mps : IO Device` check availability before returning an accelerator
+placement. The validity proof erases; native calls still receive the existing
+tagged device representation. `DeviceKind` is descriptive metadata and cannot
+be used where an acquired device is required.
+
+`Tensor σ` uses a private opaque carrier indexed by `StaticSpec`. It has no
+public constructor or structural recursor, and different indices are not
+definitionally interchangeable. `Tensor.raw` exposes the unindexed handle;
+`Tensor.ofRaw` admits it only after checking native shape, dtype, and concrete
+device. Every index is required and exact. Runtime-selected dtypes and devices remain in dependent
+packages rather than weakening the tensor contract. `zerosFor` accepts a
+specification with `DType.ConstantSupported` evidence and supplies the native
+zero factory used by the equally constrained `Inhabited` instance.
+
+Runtime representation casts are private **unsafe** implementations behind
+opaque public declarations. Their safety does not depend on name privacy:
+safe Lean code cannot use them even if it discovers their private names.
+`Tests/TestTensorConstruction.lean` checks attempted construction, record
+updates, index conversion, tactic-based construction, and private implementation
+access, alongside checked native admission. These are runtime metadata checks,
+not kernel proofs about LibTorch's implementation.
+
+At runtime, `RawTensor` is a Lean external object whose payload is a raw
 `c10::TensorImpl*`. The external class is registered with a finalizer that
 decrements the intrusive pointer (`cc/src/tyr.cpp:149-161`). Three functions
 govern ownership across the boundary — declared in the 15-line header
@@ -52,22 +79,24 @@ intrusive ref; Lean passes it back → `borrowTensor` increfs and reclaims a
 `torch::Tensor` that decrefs on scope exit; Lean's GC finalizes the external
 object → `deleteTorchTensorFinalize` releases Lean's ref. A global
 `std::atomic<int64_t> g_live_lean_tensors` (`cc/src/tyr.cpp:145`) counts
-tensors currently handed to Lean and is the first thing to check when memory
-grows unboundedly.
+tensors currently handed to Lean. This counter does not include leaked Lean
+shape arrays, options, or other arguments; their ownership needs separate checks.
 
 Lean-side ownership conventions, documented in the `cc/src/tyr.cpp:1-54` header
 comment: `lean_obj_arg` parameters are owned — the callee must `lean_dec` them
 (typical for shape arrays); `b_lean_obj_arg` parameters are borrowed — never
-`lean_dec`, use `borrowTensor`. The bulk elementwise ops are generated from
-macros that show the pattern (`cc/src/tyr.cpp:615-660`):
+`lean_dec`, use `borrowTensor`. Release unused owned arguments before any
+throwable work. For arguments that must be parsed, use scoped ownership so
+exceptions and early returns release them too. The bulk elementwise macros
+release their unused shape before invoking libtorch:
 
 ```cpp
 #define BINOP_FUN(F) \
 lean_object* lean_torch_tensor_##F(lean_obj_arg s, b_lean_obj_arg a, b_lean_obj_arg b) { \
+  lean_dec(s); \
   auto a_ = borrowTensor(a); \
   auto b_ = borrowTensor(b); \
   auto c_ = torch::F(a_, b_); \
-  lean_dec(s); \
   return fromTorchTensor(c_); \
 }
 BINOP_FUN(add) BINOP_FUN(sub) BINOP_FUN(mul)
@@ -75,32 +104,275 @@ BINOP_FUN(add) BINOP_FUN(sub) BINOP_FUN(mul)
 
 `getDevice` (`cc/src/tyr.cpp:212`) maps the `Device` constructors by tag —
 0 = `CUDA idx`, 1 = `CPU`, 2 = `MPS` (with a `std::call_once` MPS warmup on
-Apple; falls back to CPU off Apple).
+Apple). Unsupported MPS requests and CUDA indices outside the native range
+are rejected.
+
+`scripts/test_native_tensor_ownership.sh` checks reference counts across
+successful calls and native exception paths. It also checks that borrowed
+tensor handles remain valid. The generated FFI header cannot enforce owned
+versus borrowed arguments: `lean_obj_arg` and `b_lean_obj_arg` are both
+`lean_object*`.
+
+### Generated FFI header
+
+Every `@[extern]` of `Tyr` lives in the `TyrFFI` library (`Tyr.Basic`,
+`Tyr.ConstantSupport`, `Tyr.RawTensor` and its submodules, `Tyr.Audio`'s
+FloatBuffer and Apple I/O). It is not precompiled, so it builds before
+`libTyrC`. The `libtyr` target runs `GenerateFfiHeader` over it, writing
+`cc/src/generated/tyr_ffi.h` from Lean's compiled extern declarations, and
+`cc/src` and `cc/tools` include that header. A C++ definition whose signature
+differs from its Lean declaration is a compile error.
+
+The header can only check definitions that Lean declares. After linking,
+`GenerateFfiHeader --check-exports` therefore lists the `lean_*` symbols that
+`libTyrC` exports (`nm`) and fails the build on any that is neither a `TyrFFI`
+extern nor a `TyrKernels` launcher. A native helper that Lean does not call
+must be `static` or carry a name outside the `lean_` prefixes that
+`cc/map/libTyrC.map` exports.
+
+The header also defines `tyr::lean::DType`, `tyr::lean::DeviceKind` and
+`tyr::lean::ReduceOp`, the constructor tags of those Lean inductives, and their
+constructor counts.
+`cc/include/tyr_tensor_metadata.h` maps them to LibTorch types; `static_assert`s
+require one dtype entry per constructor in Lean's order and a distinct
+ScalarType per entry, so reordering, inserting, or renaming a constructor fails
+to compile instead of silently mapping the wrong dtype. `DType` has only
+nullary constructors, so it crosses the ABI as its `uint8_t` tag in both
+directions: `RawTensor.dtype` reads a tag, and casts and conversions send one.
+Dtype names exist only in Lean. SafeTensors headers are parsed and written by
+`Tyr.SafeTensors.File`, with names and element widths from
+`DType.safeTensorFormat?`; native code only reads and writes tensor bytes, and
+checks each byte count against LibTorch's element size.
+
+### Consuming tensor updates
+
+Value updates receive their destination as an owned `lean_obj_arg`, acquire a
+native owning handle, and release the consumed Lean reference before inspecting
+native ownership. A surviving Lean alias keeps its external wrapper and that
+wrapper's native reference alive. Native uniqueness can therefore rule out
+surviving Lean aliases after this handoff without synchronizing the two counters.
+Borrowed sources continue to use `borrowTensor` and must not be decremented.
+
+TensorImpl uniqueness alone does not establish exclusive storage ownership.
+The reuse path also checks storage and version ownership and excludes views,
+autograd metadata, weak observers, foreign storage, and accelerator storage.
+Only ordinary CPU allocations satisfying these checks are reused. Other inputs
+are copied before writing. Every value update returns its resulting tensor;
+callers must retain that result. The typed adapter captures dtype and device
+before the call and validates the result with `Tensor.checkedUpdate?`, without
+keeping the original tensor as a fallback.
+
+Gradient accumulation remains explicit mutable state: backward, clipping, and
+`zeroGrad` are IO operations, and `gradOf` returns an independent snapshot in IO.
+`zeroGrad` defaults to releasing `.grad` (`setToNone := true`), including the
+reference cycle possible after higher-order backward. False zeros an existing
+gradient buffer. Use `Tensor.grad` for higher derivatives without accumulation.
+`setRequiresGrad` is also effectful. Pure constant factories create tensors
+without gradient identity; use `Tensor.parameter` or
+`TensorStruct.makeLeafParams` to create independent trainable leaves. Repeating
+an equal pure allocation may share its result, so pure factories do not promise
+fresh storage. `data.cloneInferenceIO` supplies an independent detached copy
+when storage freshness is required.
+
+Pure forward computations may also be shared. Public backward operations and
+`Tensor.grad` consume saved intermediates by default, matching PyTorch. The
+`retainGraph : Option Bool` argument defaults to `createGraph` (itself false).
+Explicit retention permits another backward pass; the final pass can release
+saved state while tensor values remain readable. Repeating a pure expression does
+not guarantee a fresh graph, and reuse of consumed saved state returns an IO error.
+`TensorStruct.grad` computes all leaf gradients in one engine invocation, so a
+tree traversal does not require a retaining backward for each leaf.
+`Tests/TestAutogradIdentity.lean` and `scripts/test_native_autograd_lifetime.sh`
+cover default release, explicit retention, higher derivatives, and tree gradients.
+
+Pure attention exports always pass literal zero dropout to native SDPA and do
+not accept a dropout probability. Their `?` adapters return validation and
+kernel errors through `Except String`; convenience wrappers print a diagnostic
+and abort on failure. Configurable attention dropout uses separate native IO exports
+and typed `attentionIO`, `attentionGQAIO`, `attentionGQAMaskIO`,
+`attentionGQAQKVIO`, `attentionWindowIO`, and `flashAttentionIO` adapters.
+These take required dropout and training arguments after the tensor operands.
+Evaluation uses zero dropout; training retains the configured probability.
+The IO adapters validate the original probability as finite and in `[0, 1]`
+before selecting either mode, so invalid configuration also fails in evaluation.
+An IO caller must bind that operation rather than wrap a pure stochastic call
+in `pure`. The sampled mask stays in the native autograd graph for backward.
+The GPU wrappers and GPT example follow this split; GPT evaluation disables
+attention dropout as well as its residual and embedding dropout.
+Zero dropout removes this RNG dependency, without promising cross-device or
+cross-kernel bitwise reproducibility.
+
+Inference uses explicit values, without a thread-local gradient-mode scope:
+
+```lean
+let inferenceModel := TensorStruct.detach model
+let inferenceInput := Tensor.detach input
+let output := forward inferenceModel inferenceInput
+```
+
+Detach every floating input that can carry gradients, including cached
+activations and auxiliary embeddings. Detaching only the output still constructs
+the forward graph. Generic callbacks must receive detached model parameters
+explicitly; a wrapper cannot detach parameters hidden in a closure. The former
+public `no_grad` / `noGrad` scopes and ambient mode setters are removed because
+Lean may move or share pure expressions across IO actions. Native guards remain
+local to specific operations such as gradient snapshots and cache copies, where
+the operation's semantics explicitly require detached results.
+
+`scripts/test_native_tensor_values.sh` checks actual exported operations against
+Lean aliases, native aliases, storage views, weak observers, and saved autograd
+inputs. It also verifies unique CPU reuse and gradient snapshot stability.
+The Lean regressions cover returned-value use, metadata checks, and effect order.
+
+The BranchingFlows molecule training CUDA-graph option currently uses its eager
+training path with a notice: replay requires stable mutable buffer addresses,
+which returned-value updates do not promise. A future graph implementation needs
+an explicit mutable-buffer API. GPU benchmark kernels still require separate
+hardware qualification.
 
 ### Error strategy
 
-Pure ops are unguarded: shapes are checked by Lean's type system before
-crossing the FFI, so a global `std::terminate` handler (`cc/src/tyr.cpp:267-301`)
+Native result carriers must match the Lean declaration on every path.
+`scripts/check_ffi_recovery.py` inventories recoverable declarations in
+`Tyr/RawTensor.lean`, its submodules (runtime services, distributed, and
+Parquet included; OwnedKV excluded), `Tyr/Basic.lean`, and
+`Tyr/ConstantSupport.lean`. It requires every native implementation, including
+inactive platform branches, to enter the common exception guard before doing
+C++ work. The CPU tooling job runs this check alongside ABI and runtime
+regressions; reviewed fixed platform-unavailable stubs are checked separately.
+Both Arrow-enabled and Arrow-disabled Parquet implementations use the guard,
+including error-message construction. Other native subsystems remain outside
+this source gate's reviewed scope.
+`RawTensor.flashAttention` and `RawTensor.transpose` return
+`Except String RawTensor`; their typed `Tensor.flashAttention?` and
+`Tensor.transpose?` adapters preserve recoverable failures and check successful
+results. The convenience variants call `nativeInvariantFailure` on errors;
+it prints a diagnostic and aborts without allocating or returning a default tensor.
+`Tensor.randint` reports invalid bounds and device failures through `IO.Error`.
+The native `randn`/`rand` factories and dropout also catch failures at their IO boundary;
+those random factories enable requested gradients after device transfer so their
+results remain leaf parameters.
+`scripts/test_native_tensor_errors.sh` exercises success and failure carriers,
+including borrowed-reference preservation and cleanup on invalid input.
+
+Core arithmetic and matrix adapters use checked native exports returning
+`Except String RawTensor`. Ordinary typed arithmetic and `Tensor.Promoting`
+`?` APIs preserve those errors, including missing kernels for otherwise
+valid promotion pairs. Fused `affine3d?` checks the actual dtype and device of
+both its weight and bias before calling the checked native kernel. Scalar
+spectral and nuclear norms also expose checked `?` variants for dtype, backend,
+and factorization failures. The checked expansion, concatenation, and reduction
+families follow the same result-carrier contract. Tensor-result conveniences
+using `checkedResult` or `checkedUpdate` abort with a diagnostic after receiving
+an error. Scalar norm conveniences retain Lean's panic mechanism. Use the corresponding `?` APIs for recoverable errors.
+
+Selection has separate static and runtime entry points. `argmax`, `maxLast3d`,
+and `topKLast2d` require ordered dtypes and the appropriate axis, nonempty-axis,
+or top-k bound proofs. Their `?` variants check actual metadata and retain native
+errors; the `*Checked` conveniences perform those checks and abort with a
+diagnostic on failure.
+`crossEntropy` and `crossEntropyNone` require real floating logits and Int64
+targets. Their `?` variants use checked native exports that validate target
+labels against the class range, allowing the default ignored label `-100`,
+before dispatching the loss kernel. Dynamic logits can use the corresponding
+`*Checked` conveniences. The four convolution adapters `conv1d?`, `conv2dBias?`,
+`conv1dGroups?`, and `convTranspose1d?` validate actual dtype/device equality,
+retain native argument and kernel errors, and check successful result metadata.
+These contracts do not extend to every raw selection, loss, or convolution export.
+
+Checked vector indexing validates index bounds before accelerator dispatch,
+so invalid token IDs do not reach a device-side indexing assertion. Token-byte
+totals use this boundary together with checked transfer, arithmetic, reduction,
+and scalar extraction. Equal-rate audio resampling retains the borrowed input
+array before returning it, preserving ownership of its boxed Float values.
+The resampler computes its output length with checked integer arithmetic before
+narrowing it or allocating output storage, and its native body returns C++ failures through
+`IO.Error`. The runtime-service exports in `Tyr.Torch` use the same exception
+guard. `scripts/test_native_torch_recovery.sh` exercises the
+resampler size failures, borrowed arrays, and runtime error carriers. This
+exception guard does not establish CUDA graph lifecycle or stream correctness;
+those GPU-specific contracts still require repair and qualification.
+
+All distributed and polar IO exports enter the common guard. Process-group initialization checks port, rank, world size,
+and backend availability before rendezvous, then publishes state only after
+construction succeeds. CUDA device indices are checked before narrowing on every
+build. Synchronous collective success carries a boxed UInt64 zero; asynchronous
+success carries the pending-work handle. Polling is observational: it retains
+handles for synchronization and reports completed failures or unknown IDs.
+Waiting consumes the handle even when the backend reports an error or abort.
+Teardown attempts every pending wait and resets
+the group and store before reporting its first error. `withDistributed` attempts
+cleanup after both successful and failed actions, preserving the action's error
+if cleanup also fails. `scripts/test_native_distributed_recovery.sh` checks ABI
+carriers and invalid metadata against the library, plus work-lifecycle errors
+with a fake backend. The separate two-rank Gloo lane checks collective values,
+successful cleanup, reinitialization, and cleanup after an action error. These
+CPU checks do not qualify NCCL or GPU stream behavior.
+
+STFT preserves its IO error contract even for invalid native FFT parameters.
+Apple image and video preprocessing catches C++ failures at each IO entry point;
+temporary native media resources are released during unwinding.
+Deterministic `zeros`, `ones`, and `eye` factories are pure values, including
+their specification-based variants. Accelerator placements are acquired in IO;
+dtype/device support for constant construction is carried by the erased
+`DType.ConstantSupported` class. Runtime acquisition validates the actual
+conversion paths and exact zero/one values before issuing evidence, with a
+static fast path for known supported pairs. Dtype recognition and an existing
+tensor do not establish constant factory support. Parameter creation and explicit inference
+cloning remain IO operations when a caller needs fresh trainable identity or
+independent mutable storage.
+
+These adapters check operation preconditions before native execution. Equal
+concrete device indices tie tensors to the same placement; checked FFI adapters
+validate native metadata as well. Binary arithmetic
+permits CPU rank-zero operands on another device; matrix multiplication and
+concatenation require equal actual devices. Selection validates its separate
+native scalar relocation rule. Metadata checks and static witnesses describe
+valid inputs and result claims; they do not prove backend kernel availability
+or the C++ implementation itself. The [typed guide](core/typed.md#device-compatibility)
+describes these contracts and their tests.
+
+Many pure ops are unguarded. Type indices do not validate native execution;
+typed adapters check metadata at selected boundaries. A global
+`std::terminate` handler (`cc/src/tyr.cpp:267-301`)
 prints the pending `c10::Error`'s user-facing text and aborts, instead of
 dumping libtorch's backtrace. Set `TYR_VERBOSE_ERRORS=1` for the full report.
-IO-flavored entry points (safetensors, parquet, process groups) catch and
-return `lean_io_result_mk_error` values instead. Two sites carry workarounds
+IO entry points such as safetensors, parquet, and process groups catch and
+return `lean_io_result_mk_error` values instead. A native exception must be
+caught before crossing a generated Lean call frame: Lean's reference-count
+cleanup does not run during C++ stack unwinding. Two sites carry workarounds
 for a libc++abi/libstdc++ exception-ABI mismatch (Lean's toolchain vs.
 libtorch's): `lean_torch_manual_seed` seeds only the CPU generator, and CUDA
 synchronization calls `cudaDeviceSynchronize` via cudart directly
 (`cc/src/tyr.cpp:311-352`). `Tests/FfiCrashProbe.lean` is a manual probe for
 this failure mode (own `ffi_crash_probe` exe, not part of the test suite).
 
+`TensorStruct.functionalGrad` invokes a pure Lean callback with fresh detached
+autograd leaves and returns detached first derivatives. It releases saved
+intermediates in its private backward traversal: native `autograd::grad` executes
+only paths to the requested fresh leaves, so older captured graph branches are
+not consumed. Native regressions cover repeated calls and later differentiation
+of captured graphs. Setup and gradient-engine
+failures return the raw API's `Except.error`; the typed convenience API uses
+Lean's panic mechanism for that error carrier. Missing leaves or invalid leaf
+metadata abort through `nativeInvariantFailure` during tree reconstruction.
+The callback must return normally. A native exception from an
+unguarded pure operation inside a compiled callback terminates with an explicit
+diagnostic, because returning after unwinding generated Lean frames would leave
+their owned references unreleased. Interpreter callback exceptions are also
+unrecoverable. This API does not make arbitrary pure native failures recoverable.
+`scripts/test_functional_grad_callback.sh` checks normal derivatives, recoverable
+setup/result errors without leaks, and fatal callback errors in separate processes.
+
 ### Translation units in `cc/src`
 
 | File | Exports | Bound from |
 |---|---|---|
-| `tyr.cpp` (5236 lines) | ~235 `lean_torch_*` entry points: creation, elementwise, reductions, shape ops, linalg, norms, autograd, safetensors, sampling, soxr resampling | mostly `Tyr/Torch.lean` (245 `@[extern]`) |
-| `tyr_ops.cpp` | flash-attention router `tyr_ops::flash_attn_dispatch` + `lean_torch_tyr_flash_attn_4d` | `Tyr/Torch.lean:1197` |
-| `tyr_distributed.cpp` | 15 `lean_torch_dist_*` c10d wrappers (TCPStore, NCCL/Gloo, async work handles) | `Tyr/Distributed.lean` |
+| `tyr.cpp` (5378 lines) | 291 `lean_torch_*` entry points: creation, elementwise, reductions, shape ops, linalg, norms, autograd, safetensors, sampling, soxr resampling | `Tyr.RawTensor` and its adapter submodules |
+| `tyr_ops.cpp` | flash-attention router `tyr_ops::flash_attn_dispatch` + `lean_torch_tyr_flash_attn_4d` | `Tyr.RawTensor.Neural` |
+| `tyr_distributed.cpp` | 15 `lean_torch_dist_*` c10d wrappers (TCPStore, NCCL/Gloo, async work handles) | `Tyr/RawTensor/Distributed.lean` |
 | `tyr_polar.cpp` | `lean_torch_xxt`, `ba_plus_cAA`, `newton_schulz_step`, `polar_express`, `muon_orthogonalize`, `cautious_update` | manifold/optimizer modules |
-| `tyr_parquet.cpp` | 6 `lean_parquet_*` Arrow/Parquet readers, `__has_include`-gated | `Tyr/Data/Pretraining.lean:48-73` |
-| `tyr_execution.cpp` | `lean_exec_python_sandboxed`, `lean_exec_shell_sandboxed` (fork + rlimit sandbox) | `Examples/NanoChat/Eval/Execution.lean:82` |
+| `tyr_parquet.cpp` | 6 `lean_parquet_*` Arrow/Parquet readers, `__has_include`-gated | `Tyr/RawTensor/Parquet.lean` |
 | `tyr_qwen35.cpp` | `lean_torch_qwen35_{chunk,recurrent}_gated_delta_rule` linear attention | `Tyr/Model/Qwen35/Model.lean:50,60` |
 | `float_buffer.cpp` | `lean_float_buffer_*` streaming-audio ring buffer | `Tyr/Audio/FloatBuffer.lean` |
 | `apple_*.mm` (Darwin only) | MPS probing, VL image/video preprocessing, mic I/O | `Tyr/Audio/Apple*.lean` |
@@ -150,10 +422,17 @@ change. `tyr_ops.cpp` calls launchers only after a runtime Hopper check (`device
    so their `.olean` files build without it. Lake reruns the generator when
    it, a kernel module's `.olean` or `-Kkernels` changes. Without CUDA the
    Makefile ignores generated `.cu` files and links the weak launcher stubs.
-3. Runs `make -jN -C cc dylib` on every build (`N` = `TYR_MAKE_JOBS`, or the
+3. Writes `cc/src/generated/tyr_ffi.h` (all builds; see "Generated FFI header"
+   above) by running the `GenerateFfiHeader` executable over every `TyrFFI`
+   module. Like the GPU generator, it imports only `Lean` and links no
+   `libTyrC`, and `TyrFFI` is not precompiled. Lake reruns it when it or a
+   `TyrFFI` module's `.olean` changes.
+4. Runs `make -jN -C cc dylib` on every build (`N` = `TYR_MAKE_JOBS`, or the
    CPU count); a no-op run takes well under a second. Make alone decides what
    to recompile. The target's trace is the content of `libTyrC`, so if it is
    unchanged (e.g. after a comment-only edit) nothing downstream relinks.
+5. Checks `libTyrC`'s exports against the `TyrFFI` and `TyrKernels` externs
+   (`GenerateFfiHeader --check-exports`; see "Generated FFI header" above).
 
 Make uses compiler dependency files for C, C++, Objective-C++, and CUDA, so
 header changes rebuild their consumers. `cc/build/build-flags.txt` lists every
@@ -167,7 +446,8 @@ not compile LibTorch or CUDA and does not modify workspace build artifacts.
 
 The Makefile takes every native dependency from `external/` — libtorch
 (`external/wheels/torch`), soxr (built from the `external/git/soxr` checkout without
-cmake), Arrow/Parquet (`external/wheels/pyarrow`, linked by the file names the
+cmake), Gloo headers (`external/git/gloo`, pinned to the wheel's matching
+PyTorch submodule revision), Arrow/Parquet (`external/wheels/pyarrow`, linked by the file names the
 wheel provides, e.g. `libarrow.so.2500`), and the CUDA runtime and NCCL (`external/wheels/nvidia`, CUDA
 variant only); `deps/fetch.sh` populates them. It probes only Lean
 (`lean --print-prefix`) and the CUDA toolkit (`nvcc`). GPU targets are a table
@@ -282,14 +562,14 @@ C++ side, what you touch when adding a binding (`cc/src/tyr.cpp`):
 | `mkIoUserError` / `mkC10IoError` :234-244 | wrap errors as `IO.Error` results |
 | `lean_torch_get_live_tensors` :307 | leak gauge, bound as `torch.get_live_tensors` |
 
-Lean side (`Tyr/Torch.lean:1060-1065`):
+Lean side (`Tyr.Torch`):
 
 ```lean
 @[extern "lean_torch_get_live_tensors"]
 opaque get_live_tensors : IO UInt64
 
 @[extern "lean_torch_manual_seed"]
-opaque manual_seed (seed : UInt64) : IO Unit
+opaque manualSeed (seed : UInt64) : IO Unit
 ```
 
 Makefile targets: `all` (default) and `dylib` (both build `libTyrC`),
@@ -301,37 +581,30 @@ missing.
 
 ## Usage example
 
-Reconstructed example (from `Tests/FfiCrashProbe.lean`, `Tyr/Torch.lean:44-51,
-984-989`, `Tyr/Distributed.lean:61-119`):
+This example uses indexed operations; native handles remain inside the adapters.
+The checkpoint function checks stored shape and dtype before returning.
 
 ```lean
 import Tyr.Torch
-import Tyr.Distributed
-
+import Tyr.Typed.Neural
+import Tyr.SafeTensors.Schema
 open torch
 
-def main : IO Unit := do
-  -- Pure ops on the Lean side; shapes are compile-time checked.
-  let x : T #[2, 2] := torch.ones #[2, 2]
-  let y := torch.add x x                -- → lean_torch_tensor_add
-  let z ← torch.randn #[2, 2]           -- IO: randomness
-
-  -- Device transfer; on a CUDA-less machine this aborts via the
-  -- terminate handler with a trimmed c10::Error message.
-  let zg := z.to (.CUDA 0)
-
-  -- Leak gauge: count of tensors currently handed to Lean.
+def nativeExample : IO Unit := do
+  let x : Tensor { shape := #[2, 2], dtype := .Float32, device := .CPU } := Tensor.ones #[2, 2]
+  let y := Tensor.add x x
+  let z ← Tensor.randn #[2, 2]
+  IO.println s!"values: {← y.toFloatArray}, random shape: {z.runtimeShape}"
   IO.println s!"live tensors: {← torch.get_live_tensors}"
 
-  -- Safetensors handle (external-class object with a per-file cache).
-  let h ← safetensors.openHandle "model.safetensors"
-  let w ← safetensors.loadFromHandle h "layer.weight" #[768, 768]
-
-  -- Distributed, launched via torchrun (see scripts/nanochat/).
-  torch.dist.initProcessGroup "nccl" "127.0.0.1" 29500 rank worldSize
-  torch.dist.allReduce y .sum
-  torch.dist.destroyProcessGroup
+def loadCheckedWeight (path : String) : IO (Tensor { shape := #[768, 768], dtype := .Float32, device := .CPU }) := do
+  let handle ← safetensors.openHandle path
+  safetensors.loadFromHandleWithSpec handle "layer.weight" ⟨#[768, 768], .Float32⟩
 ```
+
+`Tests.FfiCrashProbe` is a separate intentional device-error probe. It is not a
+normal unit test. Distributed examples require their own process-group setup;
+see [distributed training](distributed.md).
 
 Build and run through Lake:
 
@@ -347,8 +620,8 @@ lake exe ffi_crash_probe
 ## Related guides
 
 - [Getting started](getting-started.md) — the day-one build path this chapter explains
-- [Core tensors](core/tensors.md) — the `T s` API surface the FFI implements
-- [Autodiff](autodiff.md) — gradient bindings (`lean_torch_backward` and friends)
+- [Core tensors](core/tensors.md) — the indexed tensor API and native adapter boundary
+- [Autodiff](autodiff.md) — gradient bindings (`lean_torch_backward_loss` and friends)
 - [Serialization](serialization.md) — safetensors handles and sharded loading
 - [Distributed training](distributed.md) — the `torch.dist` collectives over c10d
 - [GPU DSL codegen](gpu/dsl-codegen.md) — where the generated `.cu` kernels come from

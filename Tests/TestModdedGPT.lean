@@ -11,7 +11,8 @@
   5. Model forward tests
   6. Training step tests
 -/
-import Tyr
+import Tests.Assertions
+import Tyr.Typed.Neural
 import Tyr.Distributed
 import Tyr.Sharding
 import Examples.NanoChat.ModdedGPT
@@ -46,16 +47,56 @@ def testDistributedFFI : IO Unit := do
 @[test]
 def testPolarExpressFFI : IO Unit := do
   -- Test XXT: A @ A.T
-  let A ← randn #[32, 32] false
+  let A ← Tensor.randn #[32, 32] false
   let _xxt ← dist.xxt A
 
   -- Test polar express orthogonalization
-  let G ← randn #[64, 64] false
+  let G ← Tensor.randn #[64, 64] false
   let orthG ← dist.polarExpress G 5
 
   -- Verify result is not all zeros
-  let norm := nn.item (nn.meanAll (nn.abs orthG))
+  let norm := Tensor.item (Tensor.meanAll (Tensor.abs orthG))
   LeanTest.assertTrue (norm > 0.0) "Orthogonalized gradient should be non-zero"
+
+/-- The native scalar arithmetic promotes Int64 to Float32. The indexed
+boundary must reject this instead of returning a tensor with a false dtype. -/
+@[test]
+def testDistributedRejectsPromotedIntegerResults : IO Unit := do
+  let input := Tensor.fullInt #[2, 2] 1
+  Tests.assertThrows (dist.baPlusCaa input 0.5 0.5)
+    (some "baPlusCaa: Expected dtype Int64, got Float32")
+  Tests.assertThrows (dist.newtonSchulzStep input 0.5 0.5 0.5)
+    (some "newtonSchulzStep: Expected dtype Int64, got Float32")
+  Tests.assertThrows (dist.cautiousUpdate input input 0.1 0.1)
+    (some "cautiousUpdate: Expected dtype Int64, got Float32")
+  let packed ← IO.ofExcept input.reifyDType
+  let input := packed.2
+  Tests.assertThrows (dist.baPlusCaa input 0.5 0.5)
+    (some "baPlusCaa: Expected dtype Int64, got Float32")
+  Tests.assertThrows (dist.newtonSchulzStep input 0.5 0.5 0.5)
+    (some "newtonSchulzStep: Expected dtype Int64, got Float32")
+  Tests.assertThrows (dist.cautiousUpdate input input 0.1 0.1)
+    (some "cautiousUpdate: Expected dtype Int64, got Float32")
+
+/-- Successful native results retain the full claimed metadata, including an
+exact CPU placement and the rectangular XXT result shape. -/
+@[test]
+def testDistributedFloatingResultMetadata : IO Unit := do
+  for dtype in #[DType.Float32, DType.Float64] do
+    let support ← dtype.acquireConstantSupport .CPU
+    let _ := support.down
+    let input := Tensor.onesFor ⟨#[2, 2], dtype, .CPU⟩
+    let rectangular := Tensor.onesFor ⟨#[2, 3], dtype, .CPU⟩
+    for (operation, result) in #[
+        ("xxt", ← dist.xxt rectangular),
+        ("baPlusCaa", ← dist.baPlusCaa input 0.5 0.5),
+        ("newtonSchulzStep", ← dist.newtonSchulzStep input 0.5 0.5 0.5),
+        ("polarExpress", ← dist.polarExpress input 1),
+        ("cautiousUpdate", ← dist.cautiousUpdate input input 0.1 0.1)] do
+      LeanTest.assertEqual result.runtimeShape #[2, 2] operation
+      LeanTest.assertEqual result.actualSpec.dtype dtype operation
+      LeanTest.assertTrue (result.device == .CPU) s!"{operation}: result must stay on CPU"
+      LeanTest.assertTrue result.validate.isOk s!"{operation}: static spec must match native metadata"
 
 /-! ## 2. Pure Function Tests (Schedules) -/
 
@@ -99,9 +140,9 @@ def testSchedules : IO Unit := do
 @[test]
 def testNorMuon : IO Unit := do
   -- Create a parameter and gradient
-  let param ← randn #[64, 64] false
-  let param := autograd.set_requires_grad param true
-  let grad ← randn #[64, 64] false
+  let param ← Tensor.randn #[64, 64] false
+  let param ← Tensor.setRequiresGrad param true
+  let grad ← Tensor.randn #[64, 64] false
 
   -- Initialize state
   let state := NorMuon.initParamState param
@@ -111,7 +152,7 @@ def testNorMuon : IO Unit := do
   let (newParam, newState) ← NorMuon.stepAdamLike param grad state cfg 1.0 1.0
 
   -- Verify param changed
-  let diff := nn.item (nn.meanAll (nn.abs (autograd.detach newParam - autograd.detach param)))
+  let diff := Tensor.item (Tensor.meanAll (Tensor.abs (Tensor.detach newParam - Tensor.detach param)))
   LeanTest.assertTrue (diff > 0) "Parameter should have changed after optimizer step"
 
   -- Verify state updated
@@ -120,9 +161,9 @@ def testNorMuon : IO Unit := do
 @[test]
 def testDistAdam : IO Unit := do
   -- Create a parameter and gradient
-  let param ← randn #[128, 64] false
-  let param := autograd.set_requires_grad param true
-  let grad ← randn #[128, 64] false
+  let param ← Tensor.randn #[128, 64] false
+  let param ← Tensor.setRequiresGrad param true
+  let grad ← Tensor.randn #[128, 64] false
 
   -- Initialize state
   let state := DistAdam.initParamState param
@@ -132,7 +173,7 @@ def testDistAdam : IO Unit := do
   let (newParam, newState) ← DistAdam.stepSingle param grad state cfg 1.0 1.0
 
   -- Verify param changed
-  let diff := nn.item (nn.meanAll (nn.abs (autograd.detach newParam - autograd.detach param)))
+  let diff := Tensor.item (Tensor.meanAll (Tensor.abs (Tensor.detach newParam - Tensor.detach param)))
   LeanTest.assertTrue (diff > 0) "Parameter should have changed after optimizer step"
 
   -- Verify state updated
@@ -193,7 +234,7 @@ def testYarnRotary : IO Unit := do
   let yarn ← YarnRotary.init headDim maxSeqLen
 
   -- Check cos/sin are non-zero
-  let cosNorm := nn.item (nn.meanAll (nn.abs yarn.cos))
+  let cosNorm := Tensor.item (Tensor.meanAll (Tensor.abs yarn.cos))
 
   LeanTest.assertTrue (cosNorm > 0) "Cos should be non-zero"
 
@@ -218,14 +259,14 @@ def testModdedGPTForward : IO Unit := do
   -- Create input
   let batchSize : UInt64 := 2
   let seqLen : UInt64 := 32
-  let input ← randint 0 cfg.vocabSize.toInt64 #[batchSize, seqLen]
+  let input ← Tensor.randint 0 cfg.vocabSize.toInt64 #[batchSize, seqLen]
 
   -- Forward pass (window pattern is in cfg)
   let logits ← forward params yarn input
 
   -- Check output
-  let logitsMean := nn.item (nn.meanAll logits)
-  let logitsMax := nn.item (nn.maxAll (nn.abs logits))
+  let logitsMean := Tensor.item (Tensor.meanAll logits)
+  let logitsMax := Tensor.item (Tensor.maxAll (Tensor.abs logits))
 
   -- Verify softcapping (values should be bounded)
   LeanTest.assertTrue (logitsMax < 35.0) s!"Logits should be softcapped below 35, got {logitsMax}"
@@ -253,12 +294,12 @@ def testLoss : IO Unit := do
   -- Create input and targets
   let batchSize : UInt64 := 2
   let seqLen : UInt64 := 32
-  let input ← randint 0 cfg.vocabSize.toInt64 #[batchSize, seqLen]
-  let targets ← randint 0 cfg.vocabSize.toInt64 #[batchSize, seqLen]
+  let input ← Tensor.randint 0 cfg.vocabSize.toInt64 #[batchSize, seqLen]
+  let targets ← Tensor.randint 0 cfg.vocabSize.toInt64 #[batchSize, seqLen]
 
   -- Compute loss (window pattern is now in cfg)
   let lossT ← moddedGpt.loss params yarn input targets
-  let lossVal := nn.item lossT
+  let lossVal := Tensor.item lossT
 
   LeanTest.assertTrue (isFiniteFloat lossVal) "Loss should be finite"
   LeanTest.assertTrue (lossVal > 0) "Loss should be positive"
@@ -279,3 +320,16 @@ def testDataLoader : IO Unit := do
   let tps := tokensPerStep 8 2048 1
   LeanTest.assertEqual tps (8 * 2048)
 
+
+@[test] def testMuonBFloat16Boundary : IO Unit := do
+  let grad := (Tensor.fromFloatArray #[0.13, -0.27, 0.41, 0.59, -0.71, 0.83]).reshapeChecked #[2, 3]
+  let param := Tensor.ones #[2, 3]
+  let orth ← dist.muonOrthogonalize grad 5
+  LeanTest.assertEqual orth.actualSpec.dtype DType.BFloat16
+  LeanTest.assertEqual orth.runtimeShape #[2, 3]
+  let cfg : NorMuon.Config := { momentum := 0.0, lr := 0.023, weightDecay := 0.0 }
+  let (updated, state) ← NorMuon.stepSingle param grad (NorMuon.initParamState param) cfg 1.0 1.0
+  let expected := param - (Tensor.mulScalar orth cfg.lr).toFloat32
+  LeanTest.assertEqual updated.actualSpec.dtype DType.Float32
+  LeanTest.assertEqual (← updated.toFloatArray) (← expected.toFloatArray)
+  LeanTest.assertEqual state.step 1

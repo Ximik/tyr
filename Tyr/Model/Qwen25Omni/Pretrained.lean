@@ -11,6 +11,7 @@ import Tyr.Model.Qwen25Omni.Weights
 
 namespace torch.qwen25omni.hub
 
+variable {device : Device}
 open torch.Hub
 
 /-- Qwen2.5-Omni model ids (HF collection `Qwen/qwen25-omni`). -/
@@ -46,7 +47,7 @@ def loadFromPretrained
     (defaults : Config := Config.qwen25omni_3B)
     (revision : String := "main")
     (cacheDir : String := Hub.defaultCacheDir)
-    : IO (Sigma (fun cfg => Qwen25OmniForCausalLM cfg)) := do
+    (device : Device := .CPU) : IO (Sigma (fun cfg => Qwen25OmniForCausalLM (device := device) cfg)) := do
   Hub.loadModelFromPretrained
     source
     revision
@@ -54,8 +55,8 @@ def loadFromPretrained
     hub.tokenizerFiles
     (fun modelDir cfg => Config.loadFromPretrainedDir modelDir cfg)
     defaults
-    (fun modelDir cfg => Qwen25OmniForCausalLM.loadSharded modelDir cfg)
-    (fun path cfg => Qwen25OmniForCausalLM.load path cfg)
+    (fun modelDir cfg => Qwen25OmniForCausalLM.loadSharded (device := device) modelDir cfg)
+    (fun path cfg => Qwen25OmniForCausalLM.load (device := device) path cfg)
 
 end Qwen25OmniForCausalLM
 

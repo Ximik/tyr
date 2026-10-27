@@ -1,3 +1,4 @@
+import Tests.Devices
 /-
   Tests/TestSafeTensorsTypeProvider.lean
 
@@ -5,7 +6,9 @@
   - runtime safetensors schema introspection
   - elaboration-time `safetensors_type_provider`
 -/
+import Tests.Assertions
 import Tyr.SafeTensors
+import Tyr.Module.Derive
 import LeanTest
 
 open torch
@@ -15,6 +18,34 @@ safetensors_type_provider "Tests/fixtures/safetensors/sharded" as ShardedSafe
 safetensors_type_provider "Tests/fixtures/safetensors/indexed.safetensors" as IndexedSafe
 safetensors_type_provider "Tests/fixtures/safetensors/indexed_dir" as IndexedDirSafe
 safetensors_type_provider "Tests/fixtures/safetensors/provider_errors/nonuniform.safetensors" as NonUniformSafe
+safetensors_type_provider "Tests/fixtures/safetensors/traversal.safetensors" as TraversalSafe
+
+-- Generated records expose traversal capabilities from their declared leaf types.
+example : TensorStruct TraversalSafe.Weights := inferInstance
+example : FloatingTensorStruct TraversalSafe.WeightsWeights := inferInstance
+example : True := by
+  fail_if_success
+    have _ : FloatingTensorStruct TraversalSafe.Weights := inferInstance
+  trivial
+
+@[test] def testSafeTensorsTypeProviderTraversalCapabilities : IO Unit := do
+  let weights ← TraversalSafe.loadAll
+  let doubled := TensorStruct.scale weights.weights 2.0
+  LeanTest.assertEqual (← doubled.left.toFloatArray) #[2.0, 4.0]
+  LeanTest.assertEqual (← doubled.right.toFloatArray) #[6.0]
+  let combined := Tensor.add weights.weights.left doubled.left
+  LeanTest.assertEqual (← combined.toFloatArray) #[3.0, 6.0]
+  let detached := TensorStruct.detach weights
+  LeanTest.assertEqual (← detached.step.toFloatArray) #[7.0]
+
+-- Default loaders and aggregate records must preserve the generated indices.
+example : IO (Tensor { shape := #[2, 3], dtype := .Float32, device := .CPU }) := SingleSafe.load_linear_weight
+example (_weights : SingleSafe.Weights) : True := by
+  fail_if_success
+    have _badShape : Tensor { shape := #[2, 4], dtype := .Float32, device := .CPU } := _weights.linear.weight
+  fail_if_success
+    have _badDtype : Tensor { shape := #[2, 3], dtype := .Int64, device := .CPU } := _weights.linear.weight
+  trivial
 
 private def writeBinCopy (src dst : String) : IO Unit := do
   let bytes ← IO.FS.readBinFile src
@@ -26,7 +57,7 @@ private def writeIndexDir (name indexJson : String) : IO String := do
   IO.FS.writeFile s!"{dir}/model.safetensors.index.json" indexJson
   pure dir
 
-private def tensorValues {s : Shape} (t : T s) : Array Float :=
+private def tensorValues (t : RawTensor) : Array Float :=
   t.getValues 1024 |>.toList.toArray
 
 private def headerPrefix (size : UInt64) : ByteArray := Id.run do
@@ -39,11 +70,11 @@ private def headerPrefix (size : UInt64) : ByteArray := Id.run do
 def testSafeTensorsHeaderReadBounds : IO Unit := IO.FS.withTempDir fun dir => do
   let path := (dir / "bounded.safetensors").toString
   IO.FS.writeBinFile path (ByteArray.mk #[1, 2, 3])
-  LeanTest.assertThrows (safetensors.introspect path) (some "missing 8-byte header size")
+  Tests.assertThrows (safetensors.introspect path) (some "missing 8-byte header size")
   IO.FS.writeBinFile path (headerPrefix 4096)
-  LeanTest.assertThrows (safetensors.introspect path) (some "header exceeds file size")
+  Tests.assertThrows (safetensors.introspect path) (some "header exceeds file size")
   IO.FS.writeBinFile path (headerPrefix (safetensors.maxHeaderBytes + 1).toUInt64)
-  LeanTest.assertThrows (safetensors.introspect path) (some "byte limit")
+  Tests.assertThrows (safetensors.introspect path) (some "byte limit")
   let header := "{\"x\":{\"dtype\":\"F32\",\"shape\":[1],\"data_offsets\":[0,4]}}".toUTF8
   -- Payload bytes are deliberately not UTF-8 and must not enter JSON parsing.
   IO.FS.writeBinFile path (headerPrefix header.size.toUInt64 ++ header ++ ByteArray.mk #[255, 254, 253, 252])
@@ -101,28 +132,28 @@ def testSafeTensorsIntrospectionIndexValidationErrors : IO Unit := do
   let missingWeightMapDir ← writeIndexDir
     "index_missing_weight_map"
     "{\"metadata\":{}}"
-  LeanTest.assertThrows
+  Tests.assertThrows
     (safetensors.introspect missingWeightMapDir)
     (some "missing 'weight_map'")
 
   let nonObjectWeightMapDir ← writeIndexDir
     "index_non_object_weight_map"
     "{\"weight_map\":[]}"
-  LeanTest.assertThrows
+  Tests.assertThrows
     (safetensors.introspect nonObjectWeightMapDir)
     (some "'weight_map' must be a JSON object")
 
   let nonStringWeightMapDir ← writeIndexDir
     "index_non_string_weight_map"
     "{\"weight_map\":{\"embed.weight\":123}}"
-  LeanTest.assertThrows
+  Tests.assertThrows
     (safetensors.introspect nonStringWeightMapDir)
     (some "has non-string shard filename")
 
   let missingShardDir ← writeIndexDir
     "index_missing_shard"
     "{\"weight_map\":{\"embed.weight\":\"missing-shard-does-not-exist.safetensors\"}}"
-  LeanTest.assertThrows
+  Tests.assertThrows
     (safetensors.introspect missingShardDir)
     (some "referenced shard does not exist")
 
@@ -132,7 +163,7 @@ def testSafeTensorsIntrospectionIndexValidationErrors : IO Unit := do
   writeBinCopy
     "Tests/fixtures/safetensors/sharded/part1.safetensors"
     s!"{missingTensorDir}/part1.safetensors"
-  LeanTest.assertThrows
+  Tests.assertThrows
     (safetensors.introspect missingTensorDir)
     (some "tensor 'proj.bias' not found in shard 'part1.safetensors'")
 
@@ -141,14 +172,14 @@ def testSafeTensorsIntrospectionIndexPathSafety : IO Unit := do
   let traversalDir ← writeIndexDir
     "index_unsafe_traversal"
     "{\"weight_map\":{\"embed.weight\":\"../part1.safetensors\"}}"
-  LeanTest.assertThrows
+  Tests.assertThrows
     (safetensors.introspect traversalDir)
     (some "unsafe shard path")
 
   let absoluteDir ← writeIndexDir
     "index_unsafe_absolute"
     "{\"weight_map\":{\"embed.weight\":\"/tmp/evil.safetensors\"}}"
-  LeanTest.assertThrows
+  Tests.assertThrows
     (safetensors.introspect absoluteDir)
     (some "unsafe shard path")
 
@@ -169,7 +200,7 @@ def testSafeTensorsTypeProviderSingle : IO Unit := do
     "generated TensorSpec should expose shape and dtype through the shared spec layer"
   let typed ← SingleSafe.load_linear_weightTyped
   LeanTest.assertTrue (Tensor.actualSpec typed == SingleSafe.linear_weightTensorSpec)
-    "checked typed loader should validate runtime metadata before returning DTensor"
+    "checked typed loader should validate runtime metadata before returning Tensor"
   LeanTest.assertEqual (Tensor.dtype typed) DType.Float32
     "checked typed loader should carry dtype in the return type"
   let handle ← safetensors.openHandle "Tests/fixtures/safetensors/single.safetensors"
@@ -181,24 +212,25 @@ def testSafeTensorsTypeProviderSingle : IO Unit := do
     "single-file provider should expose a checked per-tensor from-handle loader"
 
   let wrongDTypeSpec : TensorSpec := { SingleSafe.linear_weightTensorSpec with dtype := DType.BFloat16 }
-  LeanTest.assertThrows
+  Tests.assertThrows
     (safetensors.loadTensorWithSpec
       "Tests/fixtures/safetensors/single.safetensors"
       "linear.weight"
       wrongDTypeSpec)
     (some "Expected dtype")
-  let wrongDeviceContract : TensorContract := {
-    spec := SingleSafe.linear_weightTensorSpec
-    role := .parameter
-    devicePolicy := .exact Device.MPS
-  }
-  LeanTest.assertThrows
-    (safetensors.loadTensorWithContract
-      "Tests/fixtures/safetensors/single.safetensors"
-      "linear.weight"
-      wrongDeviceContract
-      Device.CPU)
-    (some "Expected device")
+  for device in ← Tests.acceleratorDevices do
+    let wrongDeviceContract : TensorContract := {
+      spec := SingleSafe.linear_weightTensorSpec
+      role := .parameter
+      expectedDevice := some device
+    }
+    Tests.assertThrows
+      (safetensors.loadTensorWithContract
+        "Tests/fixtures/safetensors/single.safetensors"
+        "linear.weight"
+        wrongDeviceContract
+        Device.CPU)
+      (some "Expected device")
 
   let weights ← SingleSafe.loadAll
   LeanTest.assertTrue (weights.linear.weight.runtimeShape == #[2, 3])
@@ -245,8 +277,8 @@ def testSafeTensorsTypeProviderIndexedHierarchy : IO Unit := do
   LeanTest.assertEqual IndexedSafe.tensorCount 2 "indexed fixture should have two tensors"
   let direct0 ← IndexedSafe.load_layers_0_weight
   let direct1 ← IndexedSafe.load_layers_1_weight
-  let directVals0 := tensorValues direct0
-  let directVals1 := tensorValues direct1
+  let directVals0 := tensorValues direct0.raw
+  let directVals1 := tensorValues direct1.raw
   LeanTest.assertTrue (directVals0 != directVals1)
     "indexed fixture should use distinct tensor values across numeric siblings"
   let weights ← IndexedSafe.loadAll
@@ -259,9 +291,9 @@ def testSafeTensorsTypeProviderIndexedHierarchy : IO Unit := do
     "first indexed subtree should expose typed nested tensor"
   LeanTest.assertTrue (layer1.weight.runtimeShape == #[2])
     "second indexed subtree should expose typed nested tensor"
-  LeanTest.assertTrue (tensorValues layer0.weight == directVals0)
+  LeanTest.assertTrue (tensorValues layer0.weight.raw == directVals0)
     "loadAll should preserve the first indexed tensor values"
-  LeanTest.assertTrue (tensorValues layer1.weight == directVals1)
+  LeanTest.assertTrue (tensorValues layer1.weight.raw == directVals1)
     "loadAll should preserve later indexed tensor values instead of repeating the first"
   let handle ← safetensors.openHandle "Tests/fixtures/safetensors/indexed.safetensors"
   let weightsFromHandle ← IndexedSafe.loadAllFromHandle handle
@@ -269,9 +301,9 @@ def testSafeTensorsTypeProviderIndexedHierarchy : IO Unit := do
     | throw <| IO.userError "expected first indexed layer from loadAllFromHandle"
   let some handleLayer1 := weightsFromHandle.layers[1]?
     | throw <| IO.userError "expected second indexed layer from loadAllFromHandle"
-  LeanTest.assertTrue (tensorValues handleLayer0.weight == directVals0)
+  LeanTest.assertTrue (tensorValues handleLayer0.weight.raw == directVals0)
     "loadAllFromHandle should preserve the first indexed tensor values"
-  LeanTest.assertTrue (tensorValues handleLayer1.weight == directVals1)
+  LeanTest.assertTrue (tensorValues handleLayer1.weight.raw == directVals1)
     "loadAllFromHandle should preserve later indexed tensor values"
   let layers ← IndexedSafe.layers.load
   LeanTest.assertEqual layers.size 2 "hierarchical namespace loader should load array subtree"
@@ -279,18 +311,18 @@ def testSafeTensorsTypeProviderIndexedHierarchy : IO Unit := do
     | throw <| IO.userError "expected first indexed layer from namespace loader"
   let some nsLayer1 := layers[1]?
     | throw <| IO.userError "expected second indexed layer from namespace loader"
-  LeanTest.assertTrue (tensorValues nsLayer0.weight == directVals0)
+  LeanTest.assertTrue (tensorValues nsLayer0.weight.raw == directVals0)
     "namespace array loader should preserve the first indexed tensor values"
-  LeanTest.assertTrue (tensorValues nsLayer1.weight == directVals1)
+  LeanTest.assertTrue (tensorValues nsLayer1.weight.raw == directVals1)
     "namespace array loader should preserve later indexed tensor values"
   let layersFromHandle ← IndexedSafe.layers.loadFromHandle handle
   let some nsHandleLayer0 := layersFromHandle[0]?
     | throw <| IO.userError "expected first indexed layer from namespace handle loader"
   let some nsHandleLayer1 := layersFromHandle[1]?
     | throw <| IO.userError "expected second indexed layer from namespace handle loader"
-  LeanTest.assertTrue (tensorValues nsHandleLayer0.weight == directVals0)
+  LeanTest.assertTrue (tensorValues nsHandleLayer0.weight.raw == directVals0)
     "namespace handle loader should preserve the first indexed tensor values"
-  LeanTest.assertTrue (tensorValues nsHandleLayer1.weight == directVals1)
+  LeanTest.assertTrue (tensorValues nsHandleLayer1.weight.raw == directVals1)
     "namespace handle loader should preserve later indexed tensor values"
 
 @[test]
@@ -319,3 +351,28 @@ def testSafeTensorsTypeProviderNonUniformIndexedHierarchy : IO Unit := do
   let layers ← NonUniformSafe.layers.load
   LeanTest.assertTrue (layers.i0.weight.runtimeShape == #[1])
     "hierarchical namespace loader should work for non-uniform subtree"
+
+/-- The default generated loader enforces dtype, not just its header shape. -/
+@[test]
+def testSafeTensorsDefaultLoaderRejectsDtype : IO Unit := IO.FS.withTempDir fun dir => do
+  let path := (dir / "wrong-dtype.safetensors").toString
+  let header := "{\"linear.weight\":{\"dtype\":\"I32\",\"shape\":[2,3],\"data_offsets\":[0,24]}}".toUTF8
+  IO.FS.writeBinFile path
+    (headerPrefix header.size.toUInt64 ++ header ++ ByteArray.mk (Array.replicate 24 0))
+  Tests.assertThrows (SingleSafe.load_linear_weight path) (some "dtype")
+
+/-- Equal element counts must not permit a different stored layout. -/
+@[test]
+def testSafeTensorsContractRejectsReshapedLayout : IO Unit := do
+  let path := "Tests/fixtures/safetensors/single.safetensors"
+  Tests.assertThrows
+    (safetensors.loadTensorWithSpec path "linear.weight" ⟨#[3, 2], .Float32⟩)
+    (some "shape")
+  let handle ← safetensors.openHandle path
+  Tests.assertThrows
+    (safetensors.loadFromHandleWithSpec handle "linear.weight" ⟨#[3, 2], .Float32⟩)
+    (some "shape")
+  Tests.assertThrows
+    (safetensors.loadTensorShardedWithSpec "Tests/fixtures/safetensors/sharded"
+      "embed.weight" ⟨#[1, 4], .Float32⟩)
+    (some "shape")

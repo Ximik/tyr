@@ -7,7 +7,8 @@
   - LSTM cell decoder
   - Final speech-probability head
 -/
-import Tyr.Torch
+import Tyr.Typed
+import Tyr.SafeTensors.Exact
 import Tyr.TensorStruct
 import Tyr.Module.Core
 import Tyr.Module.Derive
@@ -15,6 +16,7 @@ import Tyr.Model.Utils
 
 namespace torch.silerovad
 
+variable {device : Device}
 open torch.Model
 
 private def sampleRate16k : UInt64 := 16000
@@ -24,31 +26,31 @@ private def combinedInputSamples : Nat := chunkSizeSamples + contextSizeSamples
 private def rightReflectPad : Nat := 64
 private def preparedInputSamples : Nat := combinedInputSamples + rightReflectPad
 
-private def reqGradFalse {s : Shape} (t : T s) : T s :=
-  autograd.set_requires_grad t false
-
 private def addBias2d {n d : UInt64}
-    (x : T #[n, d])
-    (b : T #[d])
-    : T #[n, d] :=
-  x + nn.expand (reshape b #[1, d]) #[n, d]
+    (x : Tensor { device := device, shape := #[n, d], dtype := .Float32 }) (b : Tensor { device := device, shape := #[d], dtype := .Float32 })
+    : Tensor { device := device, shape := #[n, d], dtype := .Float32 } :=
+  x + (b.reshapeChecked #[1, d]).expand #[n, d]
 
 private def addBias3d {batch channels frames : UInt64}
-    (x : T #[batch, channels, frames])
-    (b : T #[channels])
-    : T #[batch, channels, frames] :=
-  let b1 : T #[1, channels, 1] := reshape b #[1, channels, 1]
-  let be : T #[batch, channels, frames] := nn.expand b1 #[batch, channels, frames]
-  x + be
+    (x : Tensor { device := device, shape := #[batch, channels, frames], dtype := .Float32 })
+    (b : Tensor { device := device, shape := #[channels], dtype := .Float32 })
+    : Tensor { device := device, shape := #[batch, channels, frames], dtype := .Float32 } :=
+  x + (b.reshapeChecked #[1, channels, 1]).expand #[batch, channels, frames]
 
 private def linear2d {batch inDim outDim : UInt64}
-    (x : T #[batch, inDim])
-    (w : T #[outDim, inDim])
-    (b : T #[outDim])
-    : T #[batch, outDim] :=
-  let yDyn : T #[] := torch.einsum2 "oi,bi->bo" w x
-  let y : T #[batch, outDim] := reshape yDyn #[batch, outDim]
-  addBias2d y b
+    (x : Tensor { device := device, shape := #[batch, inDim], dtype := .Float32 })
+    (w : Tensor { device := device, shape := #[outDim, inDim], dtype := .Float32 })
+    (b : Tensor { device := device, shape := #[outDim], dtype := .Float32 }) : Tensor { device := device, shape := #[batch, outDim], dtype := .Float32 } :=
+  addBias2d (Tensor.linear x w) b
+
+private def loadWeight (path name : String) (shape : Shape) (device : Device := .CPU) : IO (Tensor { device := device, shape := shape, dtype := .Float32 }) := do
+  try
+    let stored ← safetensors.loadTensorExact path name shape device
+    -- The checkpoint retains its exact dtype until this model's explicit
+    -- Float32 inference policy is applied through the checked conversion.
+    IO.ofExcept (stored.2.castDType? .Float32)
+  catch error =>
+    throw <| IO.userError s!"SileroVAD tensor '{name}': {error}"
 
 private partial def reflectIndex (n : Int) (i : Int) : Int :=
   if n <= 1 then
@@ -82,56 +84,56 @@ def reflectPadRight (xs : Array Float) (pad : Nat) : Array Float :=
 
 /-- LSTM state for one-stream Silero-VAD inference (`batch=1`). -/
 structure VADLstmState where
-  h : T #[1, 128]
-  c : T #[1, 128]
+  h : Tensor { device := device, shape := #[1, 128], dtype := .Float32 }
+  c : Tensor { device := device, shape := #[1, 128], dtype := .Float32 }
   deriving TensorStruct
 
 namespace VADLstmState
 
-def zero (device : Device := Device.CPU) : VADLstmState := {
-  h := torch.zeros #[1, 128] false device
-  c := torch.zeros #[1, 128] false device
+def zero (device : Device := Device.CPU) : (VADLstmState (device := device)) := {
+  h := Tensor.zeros #[1, 128] false device
+  c := Tensor.zeros #[1, 128] false device
 }
 
 end VADLstmState
 
 /-- Lean module matching `TinySileroVAD` weight layout. -/
 structure SileroVAD where
-  stftConvWeight : T #[258, 1, 256]
-  conv1Weight : T #[128, 129, 3]
-  conv1Bias : T #[128]
-  conv2Weight : T #[64, 128, 3]
-  conv2Bias : T #[64]
-  conv3Weight : T #[64, 64, 3]
-  conv3Bias : T #[64]
-  conv4Weight : T #[128, 64, 3]
-  conv4Bias : T #[128]
-  lstmWeightIH : T #[512, 128]
-  lstmWeightHH : T #[512, 128]
-  lstmBiasIH : T #[512]
-  lstmBiasHH : T #[512]
-  finalConvWeight : T #[1, 128, 1]
-  finalConvBias : T #[1]
+  stftConvWeight : Tensor { device := device, shape := #[258, 1, 256], dtype := .Float32 }
+  conv1Weight : Tensor { device := device, shape := #[128, 129, 3], dtype := .Float32 }
+  conv1Bias : Tensor { device := device, shape := #[128], dtype := .Float32 }
+  conv2Weight : Tensor { device := device, shape := #[64, 128, 3], dtype := .Float32 }
+  conv2Bias : Tensor { device := device, shape := #[64], dtype := .Float32 }
+  conv3Weight : Tensor { device := device, shape := #[64, 64, 3], dtype := .Float32 }
+  conv3Bias : Tensor { device := device, shape := #[64], dtype := .Float32 }
+  conv4Weight : Tensor { device := device, shape := #[128, 64, 3], dtype := .Float32 }
+  conv4Bias : Tensor { device := device, shape := #[128], dtype := .Float32 }
+  lstmWeightIH : Tensor { device := device, shape := #[512, 128], dtype := .Float32 }
+  lstmWeightHH : Tensor { device := device, shape := #[512, 128], dtype := .Float32 }
+  lstmBiasIH : Tensor { device := device, shape := #[512], dtype := .Float32 }
+  lstmBiasHH : Tensor { device := device, shape := #[512], dtype := .Float32 }
+  finalConvWeight : Tensor { device := device, shape := #[1, 128, 1], dtype := .Float32 }
+  finalConvBias : Tensor { device := device, shape := #[1], dtype := .Float32 }
   deriving TensorStruct
 
 namespace SileroVAD
 
-def init : IO SileroVAD := do
-  let stftConvWeight ← initWeight #[258, 1, 256] 256
-  let conv1Weight ← initWeight #[128, 129, 3] (129 * 3)
-  let conv1Bias := initBias #[128]
-  let conv2Weight ← initWeight #[64, 128, 3] (128 * 3)
-  let conv2Bias := initBias #[64]
-  let conv3Weight ← initWeight #[64, 64, 3] (64 * 3)
-  let conv3Bias := initBias #[64]
-  let conv4Weight ← initWeight #[128, 64, 3] (64 * 3)
-  let conv4Bias := initBias #[128]
-  let lstmWeightIH ← initWeight #[512, 128] 128
-  let lstmWeightHH ← initWeight #[512, 128] 128
-  let lstmBiasIH := initBias #[512]
-  let lstmBiasHH := initBias #[512]
-  let finalConvWeight ← initWeight #[1, 128, 1] 128
-  let finalConvBias := initBias #[1]
+def init (device : Device := .CPU) : IO (SileroVAD (device := device)) := do
+  let stftConvWeight ← initWeight (device := device) #[258, 1, 256] 256
+  let conv1Weight ← initWeight (device := device) #[128, 129, 3] (129 * 3)
+  let conv1Bias ← initBias (device := device) #[128]
+  let conv2Weight ← initWeight (device := device) #[64, 128, 3] (128 * 3)
+  let conv2Bias ← initBias (device := device) #[64]
+  let conv3Weight ← initWeight (device := device) #[64, 64, 3] (64 * 3)
+  let conv3Bias ← initBias (device := device) #[64]
+  let conv4Weight ← initWeight (device := device) #[128, 64, 3] (64 * 3)
+  let conv4Bias ← initBias (device := device) #[128]
+  let lstmWeightIH ← initWeight (device := device) #[512, 128] 128
+  let lstmWeightHH ← initWeight (device := device) #[512, 128] 128
+  let lstmBiasIH ← initBias (device := device) #[512]
+  let lstmBiasHH ← initBias (device := device) #[512]
+  let finalConvWeight ← initWeight (device := device) #[1, 128, 1] 128
+  let finalConvBias ← initBias (device := device) #[1]
   pure {
     stftConvWeight
     conv1Weight
@@ -151,22 +153,22 @@ def init : IO SileroVAD := do
   }
 
 /-- Load pretrained Silero-VAD tiny safetensors checkpoint. -/
-def load (path : String) : IO SileroVAD := do
-  let stftConvWeight ← safetensors.loadTensor path "stft_conv.weight" #[258, 1, 256]
-  let conv1Weight ← safetensors.loadTensor path "conv1.weight" #[128, 129, 3]
-  let conv1Bias ← safetensors.loadTensor path "conv1.bias" #[128]
-  let conv2Weight ← safetensors.loadTensor path "conv2.weight" #[64, 128, 3]
-  let conv2Bias ← safetensors.loadTensor path "conv2.bias" #[64]
-  let conv3Weight ← safetensors.loadTensor path "conv3.weight" #[64, 64, 3]
-  let conv3Bias ← safetensors.loadTensor path "conv3.bias" #[64]
-  let conv4Weight ← safetensors.loadTensor path "conv4.weight" #[128, 64, 3]
-  let conv4Bias ← safetensors.loadTensor path "conv4.bias" #[128]
-  let lstmWeightIH ← safetensors.loadTensor path "lstm_cell.weight_ih" #[512, 128]
-  let lstmWeightHH ← safetensors.loadTensor path "lstm_cell.weight_hh" #[512, 128]
-  let lstmBiasIH ← safetensors.loadTensor path "lstm_cell.bias_ih" #[512]
-  let lstmBiasHH ← safetensors.loadTensor path "lstm_cell.bias_hh" #[512]
-  let finalConvWeight ← safetensors.loadTensor path "final_conv.weight" #[1, 128, 1]
-  let finalConvBias ← safetensors.loadTensor path "final_conv.bias" #[1]
+def load (path : String) (device : Device := .CPU) : IO (SileroVAD (device := device)) := do
+  let stftConvWeight ← loadWeight (device := device) path "stft_conv.weight" #[258, 1, 256]
+  let conv1Weight ← loadWeight (device := device) path "conv1.weight" #[128, 129, 3]
+  let conv1Bias ← loadWeight (device := device) path "conv1.bias" #[128]
+  let conv2Weight ← loadWeight (device := device) path "conv2.weight" #[64, 128, 3]
+  let conv2Bias ← loadWeight (device := device) path "conv2.bias" #[64]
+  let conv3Weight ← loadWeight (device := device) path "conv3.weight" #[64, 64, 3]
+  let conv3Bias ← loadWeight (device := device) path "conv3.bias" #[64]
+  let conv4Weight ← loadWeight (device := device) path "conv4.weight" #[128, 64, 3]
+  let conv4Bias ← loadWeight (device := device) path "conv4.bias" #[128]
+  let lstmWeightIH ← loadWeight (device := device) path "lstm_cell.weight_ih" #[512, 128]
+  let lstmWeightHH ← loadWeight (device := device) path "lstm_cell.weight_hh" #[512, 128]
+  let lstmBiasIH ← loadWeight (device := device) path "lstm_cell.bias_ih" #[512]
+  let lstmBiasHH ← loadWeight (device := device) path "lstm_cell.bias_hh" #[512]
+  let finalConvWeight ← loadWeight (device := device) path "final_conv.weight" #[1, 128, 1]
+  let finalConvBias ← loadWeight (device := device) path "final_conv.bias" #[1]
   pure {
     stftConvWeight := reqGradFalse stftConvWeight
     conv1Weight := reqGradFalse conv1Weight
@@ -186,84 +188,84 @@ def load (path : String) : IO SileroVAD := do
   }
 
 private def lstmCellStep
-    (m : SileroVAD)
-    (x : T #[1, 128])
-    (st : VADLstmState)
-    : VADLstmState := Id.run do
-  let gatesIH : T #[1, 512] := linear2d x m.lstmWeightIH m.lstmBiasIH
-  let gatesHH : T #[1, 512] := linear2d st.h m.lstmWeightHH m.lstmBiasHH
-  let gates : T #[1, 512] := gatesIH + gatesHH
+    (m : (SileroVAD (device := device)))
+    (x : Tensor { device := device, shape := #[1, 128], dtype := .Float32 })
+    (st : (VADLstmState (device := device)))
+    : (VADLstmState (device := device)) := Id.run do
+  let gatesIH : Tensor { device := device, shape := #[1, 512], dtype := .Float32 } := linear2d x m.lstmWeightIH m.lstmBiasIH
+  let gatesHH : Tensor { device := device, shape := #[1, 512], dtype := .Float32 } := linear2d st.h m.lstmWeightHH m.lstmBiasHH
+  let gates : Tensor { device := device, shape := #[1, 512], dtype := .Float32 } := gatesIH + gatesHH
 
-  let iGateRaw : T #[1, 128] := data.slice gates 1 0 128
-  let fGateRaw : T #[1, 128] := data.slice gates 1 128 128
-  let gGateRaw : T #[1, 128] := data.slice gates 1 256 128
-  let oGateRaw : T #[1, 128] := data.slice gates 1 384 128
+  let iGateRaw : Tensor { device := device, shape := #[1, 128], dtype := .Float32 } := Tensor.slice gates 1 0 128
+  let fGateRaw : Tensor { device := device, shape := #[1, 128], dtype := .Float32 } := Tensor.slice gates 1 128 128
+  let gGateRaw : Tensor { device := device, shape := #[1, 128], dtype := .Float32 } := Tensor.slice gates 1 256 128
+  let oGateRaw : Tensor { device := device, shape := #[1, 128], dtype := .Float32 } := Tensor.slice gates 1 384 128
 
-  let iGate : T #[1, 128] := nn.sigmoid iGateRaw
-  let fGate : T #[1, 128] := nn.sigmoid fGateRaw
-  let gGate : T #[1, 128] := nn.tanh gGateRaw
-  let oGate : T #[1, 128] := nn.sigmoid oGateRaw
+  let iGate : Tensor { device := device, shape := #[1, 128], dtype := .Float32 } := Tensor.sigmoid iGateRaw
+  let fGate : Tensor { device := device, shape := #[1, 128], dtype := .Float32 } := Tensor.sigmoid fGateRaw
+  let gGate : Tensor { device := device, shape := #[1, 128], dtype := .Float32 } := Tensor.tanh gGateRaw
+  let oGate : Tensor { device := device, shape := #[1, 128], dtype := .Float32 } := Tensor.sigmoid oGateRaw
 
-  let cNext : T #[1, 128] := fGate * st.c + iGate * gGate
-  let hNext : T #[1, 128] := oGate * nn.tanh cNext
+  let cNext : Tensor { device := device, shape := #[1, 128], dtype := .Float32 } := fGate * st.c + iGate * gGate
+  let hNext : Tensor { device := device, shape := #[1, 128], dtype := .Float32 } := oGate * Tensor.tanh cNext
   { h := hNext, c := cNext }
 
 /-- Core forward pass.
     Input must be one prepared chunk with shape `[1, 640]`:
     (`64` context + `512` chunk) with additional right reflect padding `64`. -/
 def forwardPrepared
-    (m : SileroVAD)
-    (xPrepared : T #[1, preparedInputSamples.toUInt64])
-    (state : VADLstmState)
-    : T #[1, 1] × VADLstmState := Id.run do
-  let x0 : T #[1, 1, preparedInputSamples.toUInt64] :=
-    reshape xPrepared #[1, 1, preparedInputSamples.toUInt64]
+    (m : (SileroVAD (device := device)))
+    (xPrepared : Tensor { device := device, shape := #[1, preparedInputSamples.toUInt64], dtype := .Float32 })
+    (state : (VADLstmState (device := device)))
+    : Tensor { device := device, shape := #[1, 1], dtype := .Float32 } × (VADLstmState (device := device)) := Id.run do
+  let x0 : Tensor { device := device, shape := #[1, 1, preparedInputSamples.toUInt64], dtype := .Float32 } :=
+    Tensor.reshapeChecked xPrepared #[1, 1, preparedInputSamples.toUInt64]
 
-  let stft : T #[1, 258, 4] :=
-    reshape (nn.conv1d x0 m.stftConvWeight 128 0 1) #[1, 258, 4]
-  let re : T #[1, 129, 4] := data.slice stft 1 0 129
-  let im : T #[1, 129, 4] := data.slice stft 1 129 129
-  let mag : T #[1, 129, 4] := nn.sqrt (re * re + im * im)
+  let stft : Tensor { device := device, shape := #[1, 258, 4], dtype := .Float32 } :=
+    Tensor.reshapeChecked (Tensor.conv1d x0 m.stftConvWeight 128 0 1) #[1, 258, 4]
+  let re : Tensor { device := device, shape := #[1, 129, 4], dtype := .Float32 } := Tensor.slice stft 1 0 129
+  let im : Tensor { device := device, shape := #[1, 129, 4], dtype := .Float32 } := Tensor.slice stft 1 129 129
+  let mag : Tensor { device := device, shape := #[1, 129, 4], dtype := .Float32 } := Tensor.sqrt (re * re + im * im)
 
-  let h1 : T #[1, 128, 4] :=
-    nn.relu (addBias3d (reshape (nn.conv1d mag m.conv1Weight 1 1 1) #[1, 128, 4]) m.conv1Bias)
-  let h2 : T #[1, 64, 2] :=
-    nn.relu (addBias3d (reshape (nn.conv1d h1 m.conv2Weight 2 1 1) #[1, 64, 2]) m.conv2Bias)
-  let h3 : T #[1, 64, 1] :=
-    nn.relu (addBias3d (reshape (nn.conv1d h2 m.conv3Weight 2 1 1) #[1, 64, 1]) m.conv3Bias)
-  let h4 : T #[1, 128, 1] :=
-    nn.relu (addBias3d (reshape (nn.conv1d h3 m.conv4Weight 1 1 1) #[1, 128, 1]) m.conv4Bias)
+  let h1 : Tensor { device := device, shape := #[1, 128, 4], dtype := .Float32 } :=
+    Tensor.relu (addBias3d (Tensor.reshapeChecked (Tensor.conv1d mag m.conv1Weight 1 1 1) #[1, 128, 4]) m.conv1Bias)
+  let h2 : Tensor { device := device, shape := #[1, 64, 2], dtype := .Float32 } :=
+    Tensor.relu (addBias3d (Tensor.reshapeChecked (Tensor.conv1d h1 m.conv2Weight 2 1 1) #[1, 64, 2]) m.conv2Bias)
+  let h3 : Tensor { device := device, shape := #[1, 64, 1], dtype := .Float32 } :=
+    Tensor.relu (addBias3d (Tensor.reshapeChecked (Tensor.conv1d h2 m.conv3Weight 2 1 1) #[1, 64, 1]) m.conv3Bias)
+  let h4 : Tensor { device := device, shape := #[1, 128, 1], dtype := .Float32 } :=
+    Tensor.relu (addBias3d (Tensor.reshapeChecked (Tensor.conv1d h3 m.conv4Weight 1 1 1) #[1, 128, 1]) m.conv4Bias)
 
-  let xFlat : T #[1, 128] := reshape h4 #[1, 128]
+  let xFlat : Tensor { device := device, shape := #[1, 128], dtype := .Float32 } := Tensor.reshapeChecked h4 #[1, 128]
   let state' := lstmCellStep m xFlat state
-  let hAct : T #[1, 128, 1] := reshape (nn.relu state'.h) #[1, 128, 1]
+  let hAct : Tensor { device := device, shape := #[1, 128, 1], dtype := .Float32 } := Tensor.reshapeChecked (Tensor.relu state'.h) #[1, 128, 1]
 
-  let y0 : T #[1, 1, 1] :=
-    reshape (nn.conv1d hAct m.finalConvWeight 1 0 1) #[1, 1, 1]
-  let y1 : T #[1, 1, 1] := addBias3d y0 m.finalConvBias
-  let y2 : T #[1, 1, 1] := nn.sigmoid y1
-  let y : T #[1, 1] := reshape y2 #[1, 1]
+  let y0 : Tensor { device := device, shape := #[1, 1, 1], dtype := .Float32 } :=
+    Tensor.reshapeChecked (Tensor.conv1d hAct m.finalConvWeight 1 0 1) #[1, 1, 1]
+  let y1 : Tensor { device := device, shape := #[1, 1, 1], dtype := .Float32 } := addBias3d y0 m.finalConvBias
+  let y2 : Tensor { device := device, shape := #[1, 1, 1], dtype := .Float32 } := Tensor.sigmoid y1
+  let y : Tensor { device := device, shape := #[1, 1], dtype := .Float32 } := Tensor.reshapeChecked y2 #[1, 1]
   (y, state')
 
 end SileroVAD
 
 /-- Stateful streaming wrapper mirroring Silero-VAD chunk inference (`16k`, `512` samples). -/
 structure SileroVADRuntime where
-  model : SileroVAD
-  state : VADLstmState
+  model : SileroVAD (device := device)
+  state : VADLstmState (device := device)
   context : Array Float := Array.replicate contextSizeSamples 0.0
   lastSamplingRate : UInt64 := sampleRate16k
 
 namespace SileroVADRuntime
 
-def init (model : SileroVAD) (device : Device := Device.CPU) : SileroVADRuntime := {
+def init (model : (SileroVAD (device := device))) : (SileroVADRuntime (device := device)) := {
   model
   state := VADLstmState.zero device
   context := Array.replicate contextSizeSamples 0.0
   lastSamplingRate := sampleRate16k
 }
 
-def reset (rt : SileroVADRuntime) : SileroVADRuntime := {
+def reset (rt : (SileroVADRuntime (device := device))) : (SileroVADRuntime (device := device)) := {
   rt with
   state := VADLstmState.zero rt.state.h.device
   context := Array.replicate contextSizeSamples 0.0
@@ -289,7 +291,7 @@ private def splitEvery (xs : Array Float) (n : Nat) : Array (Array Float) :=
         i := i + n
       out
 
-private def prepareChunkTensor (context chunk : Array Float) : IO (T #[1, preparedInputSamples.toUInt64] × Array Float) := do
+private def prepareChunkTensor (context chunk : Array Float) : IO (Tensor { device := device, shape := #[1, preparedInputSamples.toUInt64], dtype := .Float32 } × Array Float) := do
   if context.size != contextSizeSamples then
     throw <| IO.userError
       s!"SileroVAD context size mismatch: expected {contextSizeSamples}, got {context.size}"
@@ -306,14 +308,14 @@ private def prepareChunkTensor (context chunk : Array Float) : IO (T #[1, prepar
     throw <| IO.userError
       s!"SileroVAD prepared input size mismatch: expected {preparedInputSamples}, got {prepared.size}"
 
-  let x : T #[1, preparedInputSamples.toUInt64] :=
-    reshape (data.fromFloatArray prepared) #[1, preparedInputSamples.toUInt64]
+  let x : Tensor { device := device, shape := #[1, preparedInputSamples.toUInt64], dtype := .Float32 } :=
+    Tensor.reshapeChecked ((Tensor.fromFloatArray prepared).to device) #[1, preparedInputSamples.toUInt64]
   let nextContext := combined.extract (combined.size - contextSizeSamples) combined.size
   pure (x, nextContext)
 
 /-- One `512`-sample chunk inference step (`16kHz` only). -/
-def step (rt : SileroVADRuntime) (chunk : Array Float) (samplingRate : UInt64 := sampleRate16k)
-    : IO (Float × SileroVADRuntime) := do
+def step (rt : (SileroVADRuntime (device := device))) (chunk : Array Float) (samplingRate : UInt64 := sampleRate16k)
+    : IO (Float × (SileroVADRuntime (device := device))) := do
   if samplingRate != sampleRate16k then
     throw <| IO.userError
       s!"SileroVAD runtime currently supports only {sampleRate16k}Hz, got {samplingRate}"
@@ -325,7 +327,7 @@ def step (rt : SileroVADRuntime) (chunk : Array Float) (samplingRate : UInt64 :=
       rt
   let (x, nextContext) ← prepareChunkTensor rt0.context chunk
   let (out, nextState) := rt0.model.forwardPrepared x rt0.state
-  let vals ← data.tensorToFloatArray' out
+  let vals ← Tensor.toFloatArray out
   let prob := vals.getD 0 0.0
   pure (prob, {
     rt0 with
@@ -335,8 +337,8 @@ def step (rt : SileroVADRuntime) (chunk : Array Float) (samplingRate : UInt64 :=
   })
 
 /-- Full-audio probability forward (one probability per 512-sample chunk). -/
-def audioForward (rt : SileroVADRuntime) (audio : Array Float) (samplingRate : UInt64 := sampleRate16k)
-    : IO (Array Float × SileroVADRuntime) := do
+def audioForward (rt : (SileroVADRuntime (device := device))) (audio : Array Float) (samplingRate : UInt64 := sampleRate16k)
+    : IO (Array Float × (SileroVADRuntime (device := device))) := do
   if samplingRate != sampleRate16k then
     throw <| IO.userError
       s!"SileroVAD runtime currently supports only {sampleRate16k}Hz, got {samplingRate}"

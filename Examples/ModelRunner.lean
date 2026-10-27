@@ -10,6 +10,8 @@ import Tyr.Model.Generation
 import Tyr.TensorStruct
 
 open torch
+
+variable {device : Device}
 open torch.Model
 
 namespace Examples.ModelRunner
@@ -23,20 +25,21 @@ def parseNatArg (name : String) (v : String) : IO UInt64 := do
 
 /-! ## Device resolution -/
 
-def deviceToString : Device → String
-  | Device.MPS => "MPS"
-  | Device.CPU => "CPU"
-  | Device.CUDA n => s!"CUDA:{n}"
+def deviceToString (device : Device) : String :=
+  match device.kind with
+  | DeviceKind.MPS => "MPS"
+  | DeviceKind.CPU => "CPU"
+  | DeviceKind.CUDA n => s!"CUDA:{n}"
 
 def resolveDevice (arg : String) : IO (Device × Option String) := do
   let requested := arg.trimAscii.toString.toLower
   match requested with
   | "auto" => return (← getBestDevice, none)
   | "cpu" => pure (.CPU, none)
-  | "mps" => pure (.MPS, none)
+  | "mps" => pure (← Device.mps, none)
   | "cuda" =>
       if ← cuda_is_available then
-        pure (.CUDA 0, none)
+        pure (← Device.cuda 0, none)
       else
         pure (.CPU, some "Warning: --device cuda requested but CUDA is unavailable; falling back to CPU.")
   | _ =>
@@ -44,7 +47,7 @@ def resolveDevice (arg : String) : IO (Device × Option String) := do
         match (requested.drop 5).toNat? with
         | some idx =>
             if ← cuda_is_available then
-              pure (.CUDA idx.toUInt64, none)
+              pure (← Device.cuda idx.toUInt64, none)
             else
               pure (.CPU, some s!"Warning: --device cuda:{idx} requested but CUDA is unavailable; falling back to CPU.")
         | none => pure (.CPU, some s!"Warning: invalid device selector '{arg}'; falling back to CPU.")
@@ -71,11 +74,8 @@ def loadPrompts (promptFile : Option String) (defaultPrompt : String) : IO (Arra
 
 /-! ## Model device movement -/
 
-def moveModelToDevice [TensorStruct α] (device : Device) (x : α) : IO α :=
-  TensorStruct.mapM (fun t => pure (t.to device)) x
-
-def moveSigmaTensorTo {d : UInt64} (device : Device)
-    (x : Sigma (fun n => T #[n, d])) : Sigma (fun n => T #[n, d]) :=
+def moveSigmaTensorTo {d : UInt64} {dtype : DType} {sourceDevice : Device} (device : Device)
+    (x : Sigma (fun n => Tensor { shape := #[n, d], dtype := dtype, device := sourceDevice })) : Sigma (fun n => Tensor { shape := #[n, d], dtype := dtype, device := device }) :=
   match x with
   | ⟨n, t⟩ => ⟨n, t.to device⟩
 
@@ -85,7 +85,7 @@ def buildBatchInputWithEncoder
     (padToken : UInt64)
     (prompts : Array String)
     (encode : String → IO (Array UInt64))
-    : IO (Sigma (fun batch => Sigma (fun seq => T #[batch, seq] × Array Nat))) := do
+    : IO (Sigma (fun batch => Sigma (fun seq => Tensor { shape := #[batch, seq], dtype := .Int64, device := .CPU } × Array Nat))) := do
   let mut encoded : Array (Array UInt64) := #[]
   for prompt in prompts do
     encoded := encoded.push (← encode prompt)
@@ -107,14 +107,14 @@ def buildBatchInputWithEncoder
       row := row.push padToken.toInt64
     flat := flat ++ row
 
-  let inputIds : T #[batch, seq] := reshape (data.fromInt64Array flat) #[batch, seq]
+  let inputIds : Tensor { shape := #[batch, seq], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked (Tensor.fromInt64Array flat) #[batch, seq]
   pure ⟨batch, ⟨seq, (inputIds, promptLens)⟩⟩
 
 def buildBatchInput
     (padToken : UInt64)
     (prompts : Array String)
     (encode : String → Array UInt64)
-    : IO (Sigma (fun batch => Sigma (fun seq => T #[batch, seq] × Array Nat))) := do
+    : IO (Sigma (fun batch => Sigma (fun seq => Tensor { shape := #[batch, seq], dtype := .Int64, device := .CPU } × Array Nat))) := do
   buildBatchInputWithEncoder padToken prompts (fun s => pure (encode s))
 
 /-! ## Generation output formatting -/
@@ -122,13 +122,13 @@ def buildBatchInput
 def generatedIdsFromBatch
     (promptLens : Array Nat)
     {batch outSeq : UInt64}
-    (ids : T #[batch, outSeq])
+    (ids : Tensor { shape := #[batch, outSeq], dtype := .Int64, device := device })
     : IO (Array (Array UInt64)) := do
   let mut out : Array (Array UInt64) := #[]
   for i in [:batch.toNat] do
-    let row2 : T #[1, outSeq] := data.slice ids 0 i.toUInt64 1
-    let row1 : T #[outSeq] := reshape (data.toLong row2) #[outSeq]
-    let vals ← data.tensorToUInt64Array row1
+    let row2 : Tensor { shape := #[1, outSeq], dtype := .Int64, device := device } := ids.sliceChecked 0 i.toUInt64 1 #[1, outSeq]
+    let row1 : Tensor { shape := #[outSeq], dtype := .Int64, device := device } := Tensor.reshapeChecked row2 #[outSeq]
+    let vals ← Tensor.toUInt64Array row1
     let promptLen := promptLens.getD i 0
     let gen :=
       if vals.size <= promptLen then
@@ -169,7 +169,7 @@ def printGeneratedIds
 def decodeGeneratedBatch
     (promptLens : Array Nat)
     {batch outSeq : UInt64}
-    (ids : T #[batch, outSeq])
+    (ids : Tensor { shape := #[batch, outSeq], dtype := .Int64, device := device })
     (decodeText : Array UInt32 → String)
     : IO (Array String) := do
   let generatedIds ← generatedIdsFromBatch promptLens ids
@@ -181,9 +181,9 @@ def makeStreamCallback
     (decodeOne : UInt32 → String)
     {batch : UInt64}
     (chunkStart : Nat)
-    : StreamCallback batch := fun _step nextTok => do
-  let flat : T #[batch] := reshape (data.toLong nextTok) #[batch]
-  let vals ← data.tensorToUInt64Array flat
+    : StreamCallback (device := device) batch := fun _step nextTok => do
+  let flat : Tensor { shape := #[batch], dtype := .Int64, device := device } := Tensor.reshapeChecked nextTok #[batch]
+  let vals ← Tensor.toUInt64Array flat
   if batch == 1 then
     match vals[0]? with
     | some v => IO.print (decodeOne v.toUInt32)
@@ -202,11 +202,11 @@ def runGenerationBatches
     (stream : Bool)
     (debugIds : Bool)
     (singleOnly : Bool)
-    (buildBatch : Array String → IO (Sigma (fun b => Sigma (fun s => T #[b, s] × Array Nat))))
-    (runGenerate : (b : UInt64) → {s : UInt64} → T #[b, s] → IO (Sigma (fun os => T #[b, os])))
-    (runGenerateStream : (b : UInt64) → {s : UInt64} → T #[b, s] → StreamCallback b → IO (Sigma (fun os => T #[b, os])))
-    (decodeBatch : Array Nat → {b os : UInt64} → T #[b, os] → IO (Array String))
-    (makeStreamCallback : {b : UInt64} → Nat → StreamCallback b)
+    (buildBatch : Array String → IO (Sigma (fun b => Sigma (fun s => Tensor { shape := #[b, s], dtype := .Int64, device := device } × Array Nat))))
+    (runGenerate : (b : UInt64) → {s : UInt64} → Tensor { shape := #[b, s], dtype := .Int64, device := device } → IO (Sigma (fun os => Tensor { shape := #[b, os], dtype := .Int64, device := device })))
+    (runGenerateStream : (b : UInt64) → {s : UInt64} → Tensor { shape := #[b, s], dtype := .Int64, device := device } → StreamCallback (device := device) b → IO (Sigma (fun os => Tensor { shape := #[b, os], dtype := .Int64, device := device })))
+    (decodeBatch : Array Nat → {b os : UInt64} → Tensor { shape := #[b, os], dtype := .Int64, device := device } → IO (Array String))
+    (makeStreamCallback : {b : UInt64} → Nat → StreamCallback (device := device) b)
     : IO Unit := do
   let chunkSize := Nat.max 1 batchSize.toNat
   let mut start : Nat := 0
@@ -241,9 +241,9 @@ def runGreedyBatches
     (batchSize : UInt64)
     (_maxNewTokens : UInt64)
     (singleOnly : Bool)
-    (buildBatch : Array String → IO (Sigma (fun b => Sigma (fun s => T #[b, s] × Array Nat))))
-    (runGenerate : (b : UInt64) → {s : UInt64} → T #[b, s] → IO (Sigma (fun os => T #[b, os])))
-    (decodeBatch : Array Nat → {b os : UInt64} → T #[b, os] → IO (Array String))
+    (buildBatch : Array String → IO (Sigma (fun b => Sigma (fun s => Tensor { shape := #[b, s], dtype := .Int64, device := device } × Array Nat))))
+    (runGenerate : (b : UInt64) → {s : UInt64} → Tensor { shape := #[b, s], dtype := .Int64, device := device } → IO (Sigma (fun os => Tensor { shape := #[b, os], dtype := .Int64, device := device })))
+    (decodeBatch : Array Nat → {b os : UInt64} → Tensor { shape := #[b, os], dtype := .Int64, device := device } → IO (Array String))
     : IO Unit := do
   let chunkSize := Nat.max 1 batchSize.toNat
   let mut start : Nat := 0

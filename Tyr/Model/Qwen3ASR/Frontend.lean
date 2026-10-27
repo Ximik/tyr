@@ -8,13 +8,15 @@
   - feature attention-mask generation
 -/
 import Tyr.Torch
+import Tyr.Typed.Neural
 import Tyr.Model.Qwen3ASR.PreprocessorConfig
 
 namespace torch.qwen3asr
 
+variable {device : Device}
 structure WhisperFrontendOutput (melBins frames : UInt64) where
-  inputFeatures : T #[1, melBins, frames]
-  featureAttentionMask : T #[1, frames]
+  inputFeatures : Tensor { device := device, shape := #[1, melBins, frames], dtype := .Float32 }
+  featureAttentionMask : Tensor { device := device, shape := #[1, frames], dtype := .Int64 }
 
 /-- Unified ASR audio input surface, matching upstream-style entry forms. -/
 inductive ASRAudioInput where
@@ -491,7 +493,7 @@ private def adjustMaskLength (vals : Array Int64) (target : Nat) : Array Int64 :
 def waveformToWhisperFeatures
     (cfg : PreprocessorConfig)
     (wave : Array Float)
-    : IO (WhisperFrontendOutput cfg.featureSize (PreprocessorConfig.expectedFrames cfg)) := do
+    : IO (WhisperFrontendOutput (device := .CPU) cfg.featureSize (PreprocessorConfig.expectedFrames cfg)) := do
   let targetSamples := PreprocessorConfig.expectedSampleCount cfg
   let expectedFrames := PreprocessorConfig.expectedFrames cfg
   let nFft := if cfg.nFft == 0 then 400 else cfg.nFft
@@ -510,16 +512,17 @@ def waveformToWhisperFeatures
     else
       prepared0
 
-  let wav0 : T #[targetSamples] := reshape (data.fromFloatArray prepared) #[targetSamples]
+  let wav0 : Tensor { device := .CPU, shape := #[targetSamples], dtype := .Float32 } :=
+    Tensor.reshapeChecked (Tensor.fromFloatArray prepared) #[targetSamples]
   let wav ←
     if cfg.dither == 0.0 then
       pure wav0
     else
-      let noise ← randn #[targetSamples]
+      let noise ← Tensor.randn (device := .CPU) #[targetSamples]
       pure (wav0 + noise * cfg.dither)
 
-  let window : T #[nFft] := signal.hannWindow nFft
-  let stftDyn : T #[] := signal.stft1d (n := targetSamples) wav nFft hop nFft window true false
+  let window : Tensor { device := .CPU, shape := #[nFft], dtype := .Float32 } := Tensor.hannWindow nFft
+  let ⟨_, stftDyn⟩ ← Tensor.stft wav nFft hop window true false
   let stftShape := stftDyn.runtimeShape
   if stftShape.size < 3 then
     throw <| IO.userError s!"Unexpected STFT rank {stftShape.size}, expected 3"
@@ -535,7 +538,7 @@ def waveformToWhisperFeatures
     throw <| IO.userError
       s!"STFT frames mismatch: got={droppedFrames}, expected={expectedFrames} (stft_frames={stftFrames})"
 
-  let stftVals ← data.tensorToFloatArray' stftDyn
+  let stftVals ← stftDyn.toFloatArray
   let freqNat := freqBins.toNat
   let stftFramesNat := stftFrames.toNat
   let framesNat := expectedFrames.toNat
@@ -550,18 +553,24 @@ def waveformToWhisperFeatures
       powerFlat := powerFlat.push (re * re + im * im)
 
   let melFilterFlat := buildSlaneyMelFilterBankFlat freqNat melBins.toNat cfg.samplingRate.toNat
-  let powerSpec : T #[freqBins, expectedFrames] := reshape (data.fromFloatArray powerFlat) #[freqBins, expectedFrames]
-  let melFilter : T #[freqBins, melBins] := reshape (data.fromFloatArray melFilterFlat) #[freqBins, melBins]
-  let melPower : T #[melBins, expectedFrames] := nn.mm (nn.transpose2d melFilter) powerSpec
-  let logSpec : T #[melBins, expectedFrames] := nn.log10 (clampFloat melPower (1e-10 : Float) (1e10 : Float))
-  let maxVal := nn.item (nn.maxAll logSpec)
-  let floored : T #[melBins, expectedFrames] := clampFloat logSpec (maxVal - (8.0 : Float)) (1e10 : Float)
-  let normalized : T #[melBins, expectedFrames] := (floored + (4.0 : Float)) / (4.0 : Float)
-  let inputFeatures : T #[1, melBins, expectedFrames] := reshape normalized #[1, melBins, expectedFrames]
+  let powerSpec : Tensor { device := .CPU, shape := #[freqBins, expectedFrames], dtype := .Float32 } :=
+    Tensor.reshapeChecked (Tensor.fromFloatArray powerFlat) #[freqBins, expectedFrames]
+  let melFilter : Tensor { device := .CPU, shape := #[freqBins, melBins], dtype := .Float32 } :=
+    Tensor.reshapeChecked (Tensor.fromFloatArray melFilterFlat) #[freqBins, melBins]
+  let melPower : Tensor { device := .CPU, shape := #[melBins, expectedFrames], dtype := .Float32 } :=
+    Tensor.mm (Tensor.transpose2d melFilter) powerSpec
+  let logSpec : Tensor { device := .CPU, shape := #[melBins, expectedFrames], dtype := .Float32 } :=
+    Tensor.log10 (Tensor.clampFloat melPower (1e-10 : Float) (1e10 : Float))
+  let maxVal := Tensor.item (Tensor.maxAllChecked logSpec)
+  let floored : Tensor { device := .CPU, shape := #[melBins, expectedFrames], dtype := .Float32 } :=
+    Tensor.clampFloat logSpec (maxVal - (8.0 : Float)) (1e10 : Float)
+  let normalized : Tensor { device := .CPU, shape := #[melBins, expectedFrames], dtype := .Float32 } := (floored + (4.0 : Float)) / (4.0 : Float)
+  let inputFeatures : Tensor { device := .CPU, shape := #[1, melBins, expectedFrames], dtype := .Float32 } :=
+    Tensor.reshape normalized #[1, melBins, expectedFrames] (by simp [TensorSpec.numelOfShape])
 
   let maskVals := buildFeatureAttentionMask validLenNat targetSamples.toNat hop.toNat cfg.returnAttentionMask
-  let featureAttentionMask : T #[1, expectedFrames] :=
-    reshape (data.fromInt64Array maskVals) #[1, expectedFrames]
+  let featureAttentionMask : Tensor { device := .CPU, shape := #[1, expectedFrames], dtype := .Int64 } :=
+    Tensor.reshapeChecked (Tensor.fromInt64Array maskVals) #[1, expectedFrames]
 
   pure { inputFeatures, featureAttentionMask }
 
@@ -574,7 +583,7 @@ def waveformToWhisperFeaturesDynamic
     (minSeconds : Float := 0.5)
     (maxSeconds : Option Float := none)
     (device : Device := Device.CPU)
-    : IO (Sigma (fun frames => WhisperFrontendOutput cfg.featureSize frames)) := do
+    : IO (Sigma (fun frames => WhisperFrontendOutput (device := device) cfg.featureSize frames)) := do
   let nFft := if cfg.nFft == 0 then 400 else cfg.nFft
   let hop := if cfg.hopLength == 0 then 160 else cfg.hopLength
   let melBins := cfg.featureSize
@@ -617,22 +626,24 @@ def waveformToWhisperFeaturesDynamic
 
   let runOnDevice
       (runDevice : Device)
-      : IO (Sigma (fun frames => WhisperFrontendOutput cfg.featureSize frames)) := do
-    let wav0Cpu : T #[targetSamples] := reshape (data.fromFloatArray prepared) #[targetSamples]
-    let wav0 : T #[targetSamples] :=
-      if wav0Cpu.device == runDevice then wav0Cpu else wav0Cpu.to runDevice
+      : IO (Sigma (fun frames => WhisperFrontendOutput (device := runDevice) cfg.featureSize frames)) := do
+    let wav0Cpu : Tensor { device := .CPU, shape := #[targetSamples], dtype := .Float32 } :=
+      Tensor.reshapeChecked (Tensor.fromFloatArray prepared) #[targetSamples]
+    let wav0 : Tensor { device := runDevice, shape := #[targetSamples], dtype := .Float32 } :=
+      wav0Cpu.to runDevice
     let wav ←
       if cfg.dither == 0.0 then
         pure wav0
       else
-        let noise0 ← randn #[targetSamples]
-        let noise : T #[targetSamples] :=
-          if noise0.device == wav0.device then noise0 else noise0.to wav0.device
+        let noise0 ← Tensor.randn (device := runDevice) #[targetSamples]
+        let noise : Tensor { device := runDevice, shape := #[targetSamples], dtype := .Float32 } :=
+          noise0
         pure (wav0 + noise * cfg.dither)
 
-    let windowCpu : T #[nFft] := signal.hannWindow nFft
-    let window : T #[nFft] := if windowCpu.device == wav.device then windowCpu else windowCpu.to wav.device
-    let stftDyn : T #[] := signal.stft1d (n := targetSamples) wav nFft hop nFft window true false
+    let windowCpu : Tensor { device := .CPU, shape := #[nFft], dtype := .Float32 } := Tensor.hannWindow nFft
+    let window : Tensor { device := runDevice, shape := #[nFft], dtype := .Float32 } :=
+      windowCpu.to runDevice
+    let ⟨_, stftDyn⟩ ← Tensor.stft wav nFft hop window true false
     let stftShape := stftDyn.runtimeShape
     if stftShape.size < 3 then
       throw <| IO.userError s!"Unexpected STFT rank {stftShape.size}, expected 3"
@@ -644,50 +655,59 @@ def waveformToWhisperFeaturesDynamic
       throw <| IO.userError s!"Unexpected STFT packed size {packed}, expected 2"
 
     let frames := if stftFrames > 0 then stftFrames - 1 else 0
-    let stft : T #[freqBins, stftFrames, 2] := reshape stftDyn #[freqBins, stftFrames, 2]
-    let stftTrim : T #[freqBins, frames, 2] := data.slice stft 1 0 frames
-    let re3 : T #[freqBins, frames, 1] := data.slice stftTrim 2 0 1
-    let im3 : T #[freqBins, frames, 1] := data.slice stftTrim 2 1 1
-    let re : T #[freqBins, frames] := reshape re3 #[freqBins, frames]
-    let im : T #[freqBins, frames] := reshape im3 #[freqBins, frames]
-    let powerSpec : T #[freqBins, frames] := re * re + im * im
+    let stft : Tensor { device := runDevice, shape := #[freqBins, stftFrames, 2], dtype := .Float32 } :=
+      Tensor.reshapeChecked stftDyn #[freqBins, stftFrames, 2]
+    let stftTrim : Tensor { device := runDevice, shape := #[freqBins, frames, 2], dtype := .Float32 } :=
+      Tensor.sliceChecked stft 1 0 frames #[freqBins, frames, 2]
+    let re3 : Tensor { device := runDevice, shape := #[freqBins, frames, 1], dtype := .Float32 } :=
+      Tensor.sliceChecked stftTrim 2 0 1 #[freqBins, frames, 1]
+    let im3 : Tensor { device := runDevice, shape := #[freqBins, frames, 1], dtype := .Float32 } :=
+      Tensor.sliceChecked stftTrim 2 1 1 #[freqBins, frames, 1]
+    let re : Tensor { device := runDevice, shape := #[freqBins, frames], dtype := .Float32 } := Tensor.reshapeChecked re3 #[freqBins, frames]
+    let im : Tensor { device := runDevice, shape := #[freqBins, frames], dtype := .Float32 } := Tensor.reshapeChecked im3 #[freqBins, frames]
+    let powerSpec : Tensor { device := runDevice, shape := #[freqBins, frames], dtype := .Float32 } := re * re + im * im
 
     let melFilterFlat := buildSlaneyMelFilterBankFlat freqBins.toNat melBins.toNat cfg.samplingRate.toNat
-    let melFilterCpu : T #[freqBins, melBins] := reshape (data.fromFloatArray melFilterFlat) #[freqBins, melBins]
-    let melFilter : T #[freqBins, melBins] :=
-      if melFilterCpu.device == powerSpec.device then melFilterCpu else melFilterCpu.to powerSpec.device
-    let melPower : T #[melBins, frames] := nn.mm (nn.transpose2d melFilter) powerSpec
-    let logSpec : T #[melBins, frames] := nn.log10 (clampFloat melPower (1e-10 : Float) (1e10 : Float))
-    let maxVal := nn.item (nn.maxAll logSpec)
-    let floored : T #[melBins, frames] := clampFloat logSpec (maxVal - (8.0 : Float)) (1e10 : Float)
-    let normalized : T #[melBins, frames] := (floored + (4.0 : Float)) / (4.0 : Float)
-    let inputFeatures : T #[1, melBins, frames] := reshape normalized #[1, melBins, frames]
+    let melFilterCpu : Tensor { device := .CPU, shape := #[freqBins, melBins], dtype := .Float32 } :=
+      Tensor.reshapeChecked (Tensor.fromFloatArray melFilterFlat) #[freqBins, melBins]
+    let melFilter : Tensor { device := runDevice, shape := #[freqBins, melBins], dtype := .Float32 } :=
+      melFilterCpu.to runDevice
+    let melPower : Tensor { device := runDevice, shape := #[melBins, frames], dtype := .Float32 } :=
+      Tensor.mm (Tensor.transpose2d melFilter) powerSpec
+    let logSpec : Tensor { device := runDevice, shape := #[melBins, frames], dtype := .Float32 } :=
+      Tensor.log10 (Tensor.clampFloat melPower (1e-10 : Float) (1e10 : Float))
+    let maxVal := Tensor.item (Tensor.maxAllChecked logSpec)
+    let floored : Tensor { device := runDevice, shape := #[melBins, frames], dtype := .Float32 } :=
+      Tensor.clampFloat logSpec (maxVal - (8.0 : Float)) (1e10 : Float)
+    let normalized : Tensor { device := runDevice, shape := #[melBins, frames], dtype := .Float32 } := (floored + (4.0 : Float)) / (4.0 : Float)
+    let inputFeatures : Tensor { device := runDevice, shape := #[1, melBins, frames], dtype := .Float32 } :=
+      Tensor.reshape normalized #[1, melBins, frames] (by simp [TensorSpec.numelOfShape])
 
     let maskVals0 := buildFeatureAttentionMask validLenNat targetSamples.toNat hop.toNat cfg.returnAttentionMask
     let maskVals := adjustMaskLength maskVals0 frames.toNat
-    let featureAttentionMaskCpu : T #[1, frames] :=
-      reshape (data.fromInt64Array maskVals) #[1, frames]
-    let featureAttentionMask : T #[1, frames] :=
-      if featureAttentionMaskCpu.device == inputFeatures.device then
-        featureAttentionMaskCpu
-      else
-        featureAttentionMaskCpu.to inputFeatures.device
+    let featureAttentionMaskCpu : Tensor { device := .CPU, shape := #[1, frames], dtype := .Int64 } :=
+      Tensor.reshapeChecked (Tensor.fromInt64Array maskVals) #[1, frames]
+    let featureAttentionMask : Tensor { device := runDevice, shape := #[1, frames], dtype := .Int64 } :=
+      featureAttentionMaskCpu.to runDevice
 
     pure ⟨frames, { inputFeatures, featureAttentionMask }⟩
 
   if device == Device.CPU then
-    runOnDevice Device.CPU
+    runOnDevice device
   else
     try
       runOnDevice device
     catch _ =>
-      runOnDevice Device.CPU
+      let ⟨frames, output⟩ ← runOnDevice Device.CPU
+      pure ⟨frames, {
+        inputFeatures := output.inputFeatures.to device
+        featureAttentionMask := output.featureAttentionMask.to device }⟩
 
 /-- Load WAV, resample to preprocessor sampling rate, then extract Whisper-style features. -/
 def wavToWhisperFeatures
     (cfg : PreprocessorConfig)
     (path : String)
-    : IO (WhisperFrontendOutput cfg.featureSize (PreprocessorConfig.expectedFrames cfg)) := do
+    : IO (WhisperFrontendOutput (device := .CPU) cfg.featureSize (PreprocessorConfig.expectedFrames cfg)) := do
   let (sr, wav) ← loadMonoPcm16Wav path
   let wavTarget ←
     if sr == cfg.samplingRate || sr == 0 || cfg.samplingRate == 0 then
@@ -704,7 +724,7 @@ def wavToWhisperFeaturesDynamic
     (minSeconds : Float := 0.5)
     (maxSeconds : Option Float := none)
     (device : Device := Device.CPU)
-    : IO (Sigma (fun frames => WhisperFrontendOutput cfg.featureSize frames)) := do
+    : IO (Sigma (fun frames => WhisperFrontendOutput (device := device) cfg.featureSize frames)) := do
   let (sr, wav) ← loadMonoPcm16Wav path
   let wavTarget ←
     if sr == cfg.samplingRate || sr == 0 || cfg.samplingRate == 0 then
@@ -715,7 +735,8 @@ def wavToWhisperFeaturesDynamic
 
 /-- Backward-compatible convenience wrapper.
     This now runs the faithful Whisper-style frontend instead of pseudo-mel. -/
-def wavToPseudoMel {melBins frames : UInt64} (path : String) : IO (T #[1, melBins, frames]) := do
+def wavToPseudoMel {melBins frames : UInt64} (path : String) :
+    IO (Tensor { device := .CPU, shape := #[1, melBins, frames], dtype := .Float32 }) := do
   let cfg : PreprocessorConfig := {
     featureSize := melBins
     samplingRate := 16000
@@ -728,10 +749,10 @@ def wavToPseudoMel {melBins frames : UInt64} (path : String) : IO (T #[1, melBin
     dither := 0.0
   }
   let out ← wavToWhisperFeatures cfg path
-  pure out.inputFeatures
+  pure (Tensor.reshapeChecked out.inputFeatures #[1, melBins, frames])
 
-def fullFeatureAttentionMask {frames : UInt64} : T #[1, frames] :=
-  full_int #[1, frames] 1
+def fullFeatureAttentionMask {frames : UInt64} : Tensor { device := device, shape := #[1, frames], dtype := .Int64 } :=
+  (Tensor.fullInt #[1, frames] 1).to device
 
 def normalizeAudioTo16kFromWav (path : String) : IO (Array Float) := do
   let path ← expandHome path

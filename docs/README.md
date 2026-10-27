@@ -35,13 +35,13 @@ Two kinds of documentation exist:
 - [Getting started](getting-started.md) — dependencies, build, environment,
   tests, running examples and GPU parity suites.
 - [Tensors and the torch FFI](core/tensors.md) — `Shape`, the shape-indexed
-  tensor type `T s`, pure shape arithmetic, and the `torch` namespace of
-  libtorch bindings.
+  tensor type `Tensor σ`, pure specification arithmetic, and checked native
+  adapter boundaries.
 - [TensorStruct](core/tensorstruct.md) — the pytree-style traversal typeclass
   (`map`/`mapM`/`zipWith`/`fold`), `Vector`, `Static`, `Frozen`, and the
   `deriving` handlers.
 - [Typed facade](core/typed.md) — `Tensor (σ : StaticSpec)`: phantom-typed
-  tensors tracking shape, dtype, and device policy.
+  tensors tracking shape, dtype, and concrete device.
 - [Utilities](core/utilities.md) — deterministic `PRNGKey` splitting, the
   `Log.Handlers` pattern, and the `#tensor` / `#module` infoview widgets.
 

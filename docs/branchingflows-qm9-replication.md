@@ -72,6 +72,29 @@ Evaluation:
 - PoseBusters metrics are used in the appendix, in addition to distributional
   comparisons of atom counts and molecular descriptors.
 
+## Indexed tensor validation
+
+The BranchingFlows models and training interfaces use indexed tensors. Labels
+and molecule masks are Int64; floating weights retain their checkpoint dtype.
+Float32/BF16 CPU tests cover forward/backward, Muon rounding, parameter
+checkpoint round trips and inference. Mutable static batches allocate each
+field independently through IO, preventing aliasing between equal-shaped
+label and mask buffers. CUDA capture/replay still needs hardware qualification.
+
+The small standalone training demonstrations can be run with:
+
+```sh
+lake exe BranchingFlowsDiscreteTrain
+lake exe BranchingFlowsContinuousTrain
+lake exe BranchingFlowsMixedTrain
+lake exe BranchingFlowsMoleculeTrain
+lake exe BranchingFlowsMoleculeTransformerTrain
+```
+
+The mixed demo writes four `examples_branching_mixed_*.pt` plotting tensors in
+its working directory. These smoke examples and the small dataset CLI
+checkpoint/resume check do not establish paper-scale QM9 quality.
+
 ## Tyr Mapping
 
 Already close:

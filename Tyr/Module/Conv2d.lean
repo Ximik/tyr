@@ -1,9 +1,8 @@
-import Tyr.Basic
-import Tyr.Torch
+import Tyr.Typed.Ops
 
 namespace torch
 
-structure Conv2d where
+structure Conv2d (dtype : DType := .Float32) (device : Device := .CPU) where
   in_channels : UInt64
   out_channels : UInt64
   kernel_size : UInt64 × UInt64
@@ -13,16 +12,25 @@ structure Conv2d where
   groups : UInt64 := 1
   bias : Bool := true
 
-  weight : T #[out_channels, in_channels/groups, kernel_size.fst, kernel_size.snd] := torch.zeros #[out_channels, in_channels/groups, kernel_size.fst, kernel_size.snd]
-  outputBias : T #[out_channels] := torch.zeros #[out_channels]
+  weight : Tensor ⟨#[out_channels, in_channels/groups, kernel_size.fst, kernel_size.snd], dtype, device⟩
+  outputBias : Tensor ⟨#[out_channels], dtype, device⟩
 
 
-def Conv2d.init (c : Conv2d) : IO Conv2d := do
-  let k := (Float.ofNat (c.groups.toNat) / Float.ofNat (c.in_channels * c.kernel_size.fst * c.kernel_size.snd).toNat).sqrt;
-  let weight ← uniform c.weight.shape (min := -k) (max := k);
-  return { c with weight := weight }
+/-- Initialize weights while preserving the configuration's tensor specification. -/
+def Conv2d.init {d : DType} {dev : Device} (c : Conv2d d dev) : IO (Conv2d d dev) := do
+  if c.groups == 0 || c.in_channels == 0 || c.out_channels == 0 then
+    throw (IO.userError "Conv2d requires positive channel and group counts")
+  if c.in_channels % c.groups != 0 || c.out_channels % c.groups != 0 then
+    throw (IO.userError "Conv2d groups must divide both input and output channels")
+  if c.kernel_size.fst == 0 || c.kernel_size.snd == 0 then
+    throw (IO.userError "Conv2d requires positive kernel dimensions")
+  let fanIn := (c.in_channels.toNat / c.groups.toNat) *
+    c.kernel_size.fst.toNat * c.kernel_size.snd.toNat
+  let k := 1.0 / Float.sqrt (Float.ofNat fanIn)
+  let weight ← Tensor.uniformLike c.weight (-k) k
+  return { c with weight }
 
-def Conv2d.outShape (c : Conv2d) (s : Shape) : Shape :=
+def Conv2d.outShape {d : DType} {dev : Device} (c : Conv2d d dev) (s : Shape) : Shape :=
   let (n, _, hin, win) := (s[0]!, s[1]!, s[2]!, s[3]!);
   let (px,py) := c.padding;
   let (sx,sy) := c.stride;
@@ -33,3 +41,4 @@ def Conv2d.outShape (c : Conv2d) (s : Shape) : Shape :=
   #[n, c.out_channels, hout, wout]
 
 
+end torch

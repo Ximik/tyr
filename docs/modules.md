@@ -31,32 +31,35 @@ A blanket instance lifts any `Module` to `ModuleIO` (`Core.lean:103`). Applicati
 The concrete layers are plain structures indexed by `UInt64` dimensions, deriving `TensorStruct` and `ToModuleDisplay` (widget rendering, see `Tyr/Widget.lean:805`):
 
 ```lean
--- Tyr/Module/Linear.lean:15 — y = xWᵀ (+ b), PyTorch weight layout
-structure Linear (in_dim out_dim : UInt64) where
-  weight : T #[out_dim, in_dim]
-  bias : Option (T #[out_dim]) := none
+structure Linear (in_dim out_dim : UInt64) (dtype : DType := .Float32)
+    (device : Device := .CPU) where
+  weight : Tensor ⟨#[out_dim, in_dim], dtype, device⟩
+  bias : Option (Tensor ⟨#[out_dim], dtype, device⟩) := none
+  deriving TensorStruct, ToModuleDisplay
 
--- Tyr/Module/LayerNorm.lean:16 — normalizes over the last dimension
-structure LayerNorm (dim : UInt64) where
-  weight : T #[dim]
-  bias : T #[dim]
+structure LayerNorm (dim : UInt64) (dtype : DType := .Float32)
+    (device : Device := .CPU) where
+  weight : Tensor ⟨#[dim], dtype, device⟩
+  bias : Tensor ⟨#[dim], dtype, device⟩
   eps : Static Float := ⟨1e-5⟩
+  deriving TensorStruct, ToModuleDisplay
 
--- Tyr/Module/RMSNorm.lean:18 — no bias, no mean subtraction (LLaMA/Qwen style)
-structure RMSNorm (dim : UInt64) where
-  weight : T #[dim]
+structure RMSNorm (dim : UInt64) (dtype : DType := .Float32)
+    (device : Device := .CPU) where
+  weight : Tensor ⟨#[dim], dtype, device⟩
   eps : Static Float := ⟨1e-6⟩
+  deriving TensorStruct, ToModuleDisplay
 ```
 
-`Linear.init` uses Kaiming/He initialization (`std = sqrt(2 / in_dim)`) and marks every parameter as a trainable autograd leaf (`Linear.lean:23-35`); `LayerNorm.init` / `RMSNorm.init` do the same with ones/zeros. Each layer exposes explicit `forwardNd` functions plus `Module` instances for the common arities (see the API table below).
+`Linear.init` uses Kaiming/He initialization (`std = sqrt(2 / in_dim)`) and marks every parameter as a trainable autograd leaf (`Linear.lean:23-35`); `LayerNorm.init` / `RMSNorm.init` do the same with ones/zeros. All three trainable initializers return `IO` so repeated equal initializations receive independent gradient identities. Each layer exposes explicit `forwardNd` functions plus `Module` instances for the common arities (see the API table below).
 
-Two legacy files also live under `Tyr/Module/`: `Affine.lean` (uses the old lowercase `differentiable` class, no `TensorStruct`/`Module` instance) and `Conv2d.lean` (runtime rather than type-level hyperparameters). Neither has call sites in the repository; new code should use `Linear` or model-specific convolution parameters.
+`Affine.lean` provides an indexed affine map with `[input, output]` weights, `TensorStruct` and `Module` instances, and typed gradient extraction. Its forward operation is `input @ weight + bias`; `Linear` uses the transposed weight convention instead. `Conv2d.lean` has runtime hyperparameters with indexed weight and bias fields; initialization validates grouped-channel dimensions and retains dtype and device. It currently has no model call sites.
 
 ### Deriving parameter-tree instances
 
 `Tyr/Module/Derive.lean` registers two deriving handlers (`Derive.lean:212-216`):
 
-- `deriving TensorStruct` — generates field-wise `map` / `mapM` / `zipWith` / `fold` for a structure. Every field type must already have a `TensorStruct` instance; `Tyr/TensorStruct.lean` provides them for `T s`, `Option α`, `Array α`, `List α`, `Vector n α`, `Static α`, and `Frozen s`, and `Derive.lean:89` adds the pair instance `α × β`. Parametric structures (shape or type parameters) are supported.
+- `deriving TensorStruct` — generates field-wise `map` / `mapM` / `zipWith` / `fold` for a structure. Every field type must already have a `TensorStruct` instance; `Tyr/TensorStruct.lean` provides them for `Tensor σ`, `Option α`, `Array α`, `List α`, `Vector n α`, `Static α`, and `Frozen σ`; `Derive.lean` adds the pair instance `α × β`. Parametric structures (shape or type parameters) are supported.
 - `deriving Model` — one-shot derivation of `TensorStruct` + `ToTensorStructSchema` + `TensorStructFlatten` (`Derive.lean:200-210`; `Model` is a marker class at `Tyr/TensorStruct.lean:243`, the two schema handlers come from `Tyr/AD/TensorStructSchema.lean`). Use it when the structure should also serialize/flatten, e.g. for checkpointing.
 
 For hand-written instances, `mapTensor` / `mapFrozen` / `mapStatic` (`Derive.lean:64-71`) are small helpers for the common field kinds.
@@ -110,51 +113,66 @@ def budgetedSequentialLRs [NormedModule M]
 `Tyr/Modular/Manifold.lean` lets a linear layer's weight *live on* a matrix manifold instead of being projected after the fact. The carrier interfaces are:
 
 ```lean
-class MatrixManifoldCarrier (M : UInt64 → UInt64 → Type) where
-  ShapeOK : UInt64 → UInt64 → Prop := fun _ _ => True
-  project : {m n : UInt64} → [ShapeFact (ShapeOK m n)] → T #[m, n] → M m n
-  toMatrix : {m n : UInt64} → [ShapeFact (ShapeOK m n)] → M m n → T #[m, n]
-  fromAmbientUnchecked : {m n : UInt64} → [ShapeFact (ShapeOK m n)] → T #[m, n] → M m n
-  dualMapStep : {m n : UInt64} → [ShapeFact (ShapeOK m n)] → M m n → T #[m, n] → Float → M m n
+class MatrixManifoldCarrier (M : UInt64 → UInt64 → Type)
+    (device : outParam Device) where
+  /-- Project an ambient matrix to the manifold, given a legality witness. -/
+  project : {m n : UInt64} → MatrixShapeOK m n → AmbientMatrix (device := device) m n → M m n
+  /-- Convert manifold value to its ambient matrix representation. -/
+  toMatrix : {m n : UInt64} → M m n → AmbientMatrix (device := device) m n
+  /-- Replace the ambient contents of an existing manifold value, keeping its
+      shape witnesses. Does not re-project; the caller asserts validity. -/
+  reAmbient : {m n : UInt64} → M m n → AmbientMatrix (device := device) m n → M m n
+  /-- Re-project onto the manifold, reusing an existing value's witnesses. -/
+  projectLike : {m n : UInt64} → M m n → AmbientMatrix (device := device) m n → M m n
+  /-- Take one geometry-aware step and retract on-manifold. -/
+  dualMapStep : {m n : UInt64} → M m n → AmbientMatrix (device := device) m n → Float → M m n
 ```
 
-`ShapeFact` (`Manifold.lean:13`) is a prop-wrapping class used to pass shape witnesses through instances. Instances exist for `Stiefel` and `Grassmann` (any shape) and `OrthogonalMatrix` (`ShapeOK m n := m = n`, square only); `VectorManifoldCarrier` is instantiated for `Hyperbolic` with ambient dimension `n + 1`. The layer types:
+`MatrixShapeOK m n` is the explicit proof that the ambient matrix has at least
+as many rows as columns. Projection takes this proof directly; `projectLike`
+reuses the witnesses of an existing value. Ambient matrices/vectors are indexed
+Float32 tensors. Carrier instances support Stiefel, Grassmann, and orthogonal
+matrices, with a separate vector-carrier interface for hyperbolic parameters.
+The layer types:
 
 ```lean
-structure ManifoldLinear (M : UInt64 → UInt64 → Type) [MatrixManifoldCarrier M]
+variable {device : Device}
+
+structure ManifoldLinear (M : UInt64 → UInt64 → Type) [MatrixManifoldCarrier M device]
     (in_dim out_dim : UInt64) where
   weight : M out_dim in_dim
-  bias : Option (T #[out_dim]) := none
+  bias : Option (Tensor { shape := #[out_dim], dtype := .Float32, device := device }) := none
 
-structure ManifoldVectorParam (V : UInt64 → Type) [VectorManifoldCarrier V] (n : UInt64) where
+structure ManifoldVectorParam (V : UInt64 → Type) [VectorManifoldCarrier V device] (n : UInt64) where
   value : V n
 ```
 
 `ManifoldLinear.init` projects random weights onto the manifold and re-wraps them as trainable leaves; `forward2d` runs through `toMatrix`; `applyDualMapUpdate` takes a geometry-aware `dualMapStep` on the weight and a plain Euclidean step on the bias (`Manifold.lean:131-169`). Aliases: `StiefelLinear`, `GrassmannLinear`, `OrthogonalLinear dim` (square), `HyperbolicVector n` (`Manifold.lean:303-312`). Both types have `TensorStruct` and `NormedModule` instances (spectral-norm based, like `Linear`).
 
-`ManifoldUpdatable` (`Manifold.lean:324`) is a composable update interface — `Cotangent : P → Type` plus `applyUpdate : (p : P) → Cotangent p → Float → P` — with instances for both manifold types, pairs, and `Sequential`, so tree-shaped parameter structures get geometry-aware steps via `ManifoldUpdatable.step`. `applyMatrixBudgetFromModules` (`Manifold.lean:367`) compiles modular sensitivities of a module array into the `matrix` budget multiplier of a `torch.Optim.DualOptimizer.Config` and sets `useModularBudget := true`.
+`ManifoldUpdatable` (`Manifold.lean:324`) is a composable update interface — `Cotangent : P → Type` plus `applyUpdate : (p : P) → Cotangent p → Float → IO P` — with instances for both manifold types, pairs, and `Sequential`, so tree-shaped parameter structures get geometry-aware steps via `ManifoldUpdatable.step`. `applyMatrixBudgetFromModules` (`Manifold.lean:367`) compiles modular sensitivities of a module array into the `matrix` budget multiplier of a `torch.Optim.DualOptimizer.Config` and sets `useModularBudget := true`.
 
 ### Metric factors and the Riemannian recursion
 
 `Tyr/Modular/MetricFactor.lean` provides the linear algebra for low-rank pullback metrics:
 
-- `MetricFactor rank dim` wraps `matrix : T #[rank, dim]`, a factor `K` of the PSD metric `KᵀK`.
-- `DiagonalMass dim` wraps `diag : T #[dim]` (`ones`, `ofScalar`, `toMatrix`, `invDiag`, `apply`, `applyInv`).
+- `MetricFactor rank dim` (default Float32 and CPU placement) wraps `matrix : Tensor { shape := #[rank, dim], dtype := .Float32, device := .CPU }`, a factor `K` of the PSD metric `KᵀK`.
+- `DiagonalMass dim` with the same defaults wraps `diag : Tensor { shape := #[dim], dtype := .Float32, device := .CPU }` (`ones`, `ofScalar`, `toMatrix`, `invDiag`, `apply`, `applyInv`).
 - Operations: `pullback` along a Jacobian, `gram` (`KᵀK`), `denseMetric D K = D + KᵀK`, `apply` / `applyTranspose` / `applyRegularized`, and `solveWoodbury D K g` solving `(D + KᵀK)x = g` via the Woodbury identity with inner matrix `I + K D⁻¹ Kᵀ` (`MetricFactor.lean:109-119`).
 
 `Tyr/Modular/RiemannianModule.lean:32` turns a leaf module into a tape-based, locally-linearizable unit for recursive metric-factor propagation:
 
 ```lean
-class RiemannianModule (M : Type) (inDim outDim : UInt64) where
+class RiemannianModule (M : Type) (inDim outDim : UInt64)
+    (device : outParam Device) where
   paramDim : UInt64
   Tape : Type
-  forwardWithTape : M → T #[inDim] → T #[outDim] × Tape
-  localLinearization : M → Tape → LocalLinearization inDim paramDim outDim
-  paramMass : M → DiagonalMass paramDim
-  applyAmbientUpdate : M → T #[paramDim] → Float → M
+  forwardWithTape : M → Tensor { shape := #[inDim], dtype := .Float32, device := device } → Tensor { shape := #[outDim], dtype := .Float32, device := device } × Tape
+  localLinearization : M → Tape → LocalLinearization (device := device) inDim paramDim outDim
+  paramMass : M → DiagonalMass paramDim .Float32 device
+  applyAmbientUpdate : M → Tensor { shape := #[paramDim], dtype := .Float32, device := device } → Float → IO M
 ```
 
-`LocalLinearization` (`RiemannianModule.lean:13`) bundles operator-form Jacobians (`applyA`, `applyAT`, `applyB`, `applyBT`) plus dense `materializeA` / `materializeB` for tests and factor pullbacks via row-wise adjoints. Instances exist for `torch.Linear` (parameter dim `out·in + out`, tape = input vector) and `ManifoldLinear` (ambient update re-projects onto the manifold). `backwardLeafStep` performs one layer's metric solve + update + factor/cotangent propagation and returns `LayerStepDiagnostics` (gradient/update/residual norms, inner condition estimate); `sequentialForwardWithTape` / `sequentialBackwardMetricStep` handle two-layer `Sequential` compositions. These are the building blocks consumed by `Tyr.Optim.RiemannianSGD`.
+`LocalLinearization` (`RiemannianModule.lean:13`) bundles operator-form Jacobians (`applyA`, `applyAT`, `applyB`, `applyBT`) with `LocalLinearization.materializeA` / `materializeB` helpers for tests and factor pullbacks via row-wise adjoints. Instances exist for `torch.Linear` (parameter dim `out·in + out`, tape = input vector) and `ManifoldLinear` (ambient update re-projects onto the manifold). `backwardLeafStep` performs one layer's metric solve + update + factor/cotangent propagation and returns `LayerStepDiagnostics` (gradient/update/residual norms, inner condition estimate); `sequentialForwardWithTape` / `sequentialBackwardMetricStep` handle two-layer `Sequential` compositions. These are the building blocks consumed by `Tyr.Optim.RiemannianSGD`.
 
 ## Key APIs
 
@@ -162,8 +180,8 @@ Built-in layers (all in namespace `torch`):
 
 | Layer | Init | Forward functions | `Module` instances |
 |---|---|---|---|
-| `Linear in_dim out_dim` | `Linear.init (in_dim out_dim) (withBias := true) : IO (Linear in_dim out_dim)` | `forward2d : T #[b,i] → T #[b,o]`, `forward3d : T #[b,s,i] → T #[b,s,o]` | 2D and 3D |
-| `LayerNorm dim` | `LayerNorm.init (dim) (eps := 1e-5)`, `LayerNorm.initNoAffine` | `forward3d : T #[b,s,d] → T #[b,s,d]` | 3D only |
+| `Linear in_dim out_dim` | `Linear.init (in_dim out_dim) (withBias := true) : IO (Linear in_dim out_dim)` | `forward2d : Tensor { shape := #[b,i], dtype := .Float32, device := .CPU } → Tensor { shape := #[b,o], dtype := .Float32, device := .CPU }`, `forward3d : Tensor { shape := #[b,s,i], dtype := .Float32, device := .CPU } → Tensor { shape := #[b,s,o], dtype := .Float32, device := .CPU }` | 2D and 3D |
+| `LayerNorm dim` | `LayerNorm.init (dim) (eps := 1e-5)`, `LayerNorm.initNoAffine` | `forward3d : Tensor { shape := #[b,s,d], dtype := .Float32, device := .CPU } → Tensor { shape := #[b,s,d], dtype := .Float32, device := .CPU }` | 3D only |
 | `RMSNorm dim` | `RMSNorm.init (dim) (eps := 1e-6)` | `forward2d`, `forward3d`, `forward4d`, `forward5d` | 2D and 3D |
 
 Note: `RMSNorm.forward5d` (`RMSNorm.lean:48`) is misnamed — it is a 4D forward on the attention layout `[batch, n_head, seq, head_dim]`; `forward4d` uses `[batch, seq, n_head, head_dim]`. Neither 4D variant has a `Module` instance.
@@ -191,16 +209,17 @@ def GroupBudget.ofSensitivities (cfg : BudgetConfig)
     (matrix embedding lmHead scalar : Float) : GroupBudget
 
 -- Tyr/Modular/Manifold.lean
-def ManifoldLinear.init [MatrixManifoldCarrier M] (in_dim out_dim : UInt64)
-    [ShapeFact (MatrixManifoldCarrier.ShapeOK (M := M) out_dim in_dim)]
-    (withBias : Bool := true) : IO (ManifoldLinear M in_dim out_dim)
-def ManifoldLinear.applyDualMapUpdate [MatrixManifoldCarrier M] {in_dim out_dim : UInt64}
-    [ShapeFact (MatrixManifoldCarrier.ShapeOK (M := M) out_dim in_dim)]
-    (lin : ManifoldLinear M in_dim out_dim)
-    (weightGrad : T #[out_dim, in_dim]) (biasGrad? : Option (T #[out_dim]))
-    (lr : Float) : ManifoldLinear M in_dim out_dim
+variable {device : Device}
+
+def ManifoldLinear.init [MatrixManifoldCarrier M device] (in_dim out_dim : UInt64)
+    (withBias : Bool := true) (h : MatrixShapeOK out_dim in_dim := by decide)
+    : IO (ManifoldLinear (device := device) M in_dim out_dim)
+def ManifoldLinear.applyDualMapUpdate [MatrixManifoldCarrier M device] {in_dim out_dim : UInt64}
+    (lin : ManifoldLinear (device := device) M in_dim out_dim)
+    (weightGrad : Tensor { shape := #[out_dim, in_dim], dtype := .Float32, device := device }) (biasGrad? : Option (Tensor { shape := #[out_dim], dtype := .Float32, device := device }))
+    (lr : Float) : IO (ManifoldLinear (device := device) M in_dim out_dim)
 def ManifoldUpdatable.step [ManifoldUpdatable P]
-    (params : P) (grad : ManifoldUpdatable.Cotangent params) (lr : Float) : P
+    (params : P) (grad : ManifoldUpdatable.Cotangent params) (lr : Float) : IO P
 def applyMatrixBudgetFromModules [NormedModule M]
     (optCfg : torch.Optim.DualOptimizer.Config)
     (budgetCfg : BudgetConfig := {}) (modules : Array M)
@@ -232,9 +251,9 @@ def PolicyNet.init (obsDim hidden actionDim : UInt64)
   pure { fc1, policyHead, valueHead }
 
 def PolicyNet.forward {batch obsDim hidden actionDim : UInt64}
-    (net : PolicyNet obsDim hidden actionDim) (x : T #[batch, obsDim])
-    : T #[batch, actionDim] × T #[batch, 1] :=
-  let h := nn.relu (Linear.forward2d net.fc1 x)
+    (net : PolicyNet obsDim hidden actionDim) (x : Tensor { shape := #[batch, obsDim], dtype := .Float32, device := .CPU })
+    : Tensor { shape := #[batch, actionDim], dtype := .Float32, device := .CPU } × Tensor { shape := #[batch, 1], dtype := .Float32, device := .CPU } :=
+  let h := Tensor.relu (Linear.forward2d net.fc1 x)
   (Linear.forward2d net.policyHead h, Linear.forward2d net.valueHead h)
 ```
 
@@ -275,26 +294,26 @@ import Tyr.Manifolds
 
 open torch Tyr.Modular
 
-let layer ← ManifoldLinear.init (M := Tyr.AD.Stiefel) 8 16 true
-let gW ← randn #[16, 8] false
-let gB ← randn #[16] false
-let layer' := ManifoldLinear.applyDualMapUpdate layer gW (some gB) 0.02
-
--- The weight remains on the manifold after the update: WᵀW ≈ I
-let w := MatrixManifoldCarrier.toMatrix layer'.weight
-let wtW := nn.mm (nn.transpose2d w) w   -- ≈ eye 8
+def manifoldStepExample : IO Unit := do
+  let layer ← ManifoldLinear.init (M := Tyr.AD.Stiefel) 8 16 true
+  let gW ← Tensor.randn #[16, 8] false
+  let gB ← Tensor.randn #[16] false
+  let layer' := ManifoldLinear.applyDualMapUpdate layer gW (some gB) 0.02
+  let w := MatrixManifoldCarrier.toMatrix (M := Tyr.AD.Stiefel) layer'.weight
+  let wtW := Tensor.mm (Tensor.transpose2d w) w
+  IO.println s!"Gram shape: {wtW.runtimeShape}" -- #[8, 8], approximately identity
 ```
 
 ## Caveats and rough edges
 
 - The `Module` / `ModuleIO` / `ModuleCtx` classes are thinly adopted: instances exist for the three built-in layers and two audio encoders (`Tyr/Model/Qwen3ASR/AudioEncoder.lean:470`, `Tyr/Model/Qwen3TTS/SpeakerEncoder.lean:314`), and the `|>` / `|>!` notations and `TrainingCtx` have no production call sites. Most model code calls `Linear.forward2d`-style functions directly, as in the examples above.
 - The `Tyr/Module.lean` umbrella re-exports `Core`, `Derive`, `Linear`, `LayerNorm`, `Affine`, and `Conv2d` — but **not** `RMSNorm`. Write `import Tyr.Module.RMSNorm` explicitly (this is what `Tyr/Model/Qwen/Model.lean:10` and others do).
-- `Affine` and `Conv2d` are legacy: no `TensorStruct`/`Module` instances, no call sites.
-- There is no shared `Embedding` in `Tyr/Module`; the `Embedding` used for modular norms is `Tyr.Modular.Embedding` (`Atomic.lean:128`) and is currently only exercised by tests. There is no `NormedModule` instance for `RMSNorm`.
+- `Affine` has indexed parameters and typed module/gradient interfaces, currently exercised by tests. `Conv2d` has indexed parameters and checked initialization, but no `TensorStruct`/`Module` instances or model call sites.
+- There is no shared `Embedding` in `Tyr/Module`; the embedding table used for modular norms is `Tyr.Modular.Embedding` and is currently only exercised by tests. Its indexed weights preserve dtype and concrete device, and `Embedding.forward` requires Int64 token tensors. The underlying typed `Tensor.embedding` and `Tensor.embedding1d` operations are also used by GPT. There is no `NormedModule` instance for `RMSNorm`.
 
 ## Related guides
 
-- [Tensors](core/tensors.md) — `T s`, shapes, and the tensor operations used by layer forwards
+- [Tensors](core/tensors.md) — `Tensor σ`, shapes, and the tensor operations used by layer forwards
 - [TensorStruct](core/tensorstruct.md) — the parameter-tree class that `deriving TensorStruct` generates
 - [Autodiff](autodiff.md) — autograd leaves, `requires_grad`, and gradient extraction
 - [Serialization](serialization.md) — checkpointing structures derived with `Model`

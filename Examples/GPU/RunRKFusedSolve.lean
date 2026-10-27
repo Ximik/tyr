@@ -10,11 +10,13 @@
 import Tyr.Torch
 import Tyr.DiffEq
 import Tyr.GPU.Ops.RKFused
-import Examples.GPU.Parity
+import Examples.GPU.IndexedParity
 
 namespace Examples.GPU.RunRKFusedSolve
 
 open torch
+
+variable {device : Device}
 open torch.DiffEq
 open Tyr.GPU.Ops.RKFused
 
@@ -27,21 +29,21 @@ def runOnce : IO Bool := do
     return false
 
   seedFixtures suiteName 31415
-  let device := Device.CUDA 0
-  let y0 ← torch.rand S false device
+  let device ← Device.cuda 0
+  let y0 ← Tensor.uniformLike (Tensor.zeros S false device)
   let steps := 200
   let dt := 1.0 / steps.toFloat
 
   -- generic pure solver path
-  let term : ODETerm (T S) Unit :=
-    { vectorField := fun _t y _ => mul_scalar y (-1.0) }
+  let term : ODETerm (Tensor { shape := S, dtype := .Float32, device := device }) Unit :=
+    { vectorField := fun _t y _ => Tensor.mulScalar y (-1.0) }
   let solver :=
-    Dopri5.solver (Term := ODETerm (T S) Unit)
-      (Y := T S) (VF := T S) (Args := Unit)
+    Dopri5.solver (Term := ODETerm (Tensor { shape := S, dtype := .Float32, device := device }) Unit)
+      (Y := Tensor { shape := S, dtype := .Float32, device := device }) (VF := Tensor { shape := S, dtype := .Float32, device := device }) (Args := Unit)
   let tg0 ← IO.monoMsNow
   let sol :=
-    diffeqsolve (Term := ODETerm (T S) Unit)
-      (Y := T S) (VF := T S) (Control := Time) (Args := Unit)
+    diffeqsolve (Term := ODETerm (Tensor { shape := S, dtype := .Float32, device := device }) Unit)
+      (Y := Tensor { shape := S, dtype := .Float32, device := device }) (VF := Tensor { shape := S, dtype := .Float32, device := device }) (Control := Time) (Args := Unit)
       (Controller := ConstantStepSize)
       term solver 0.0 1.0 (some dt) y0 () (saveat := { t1 := true })
   let yGeneric :=
@@ -56,13 +58,13 @@ def runOnce : IO Bool := do
   let stream ← torch.cuda_current_stream
   let ws ← Workspace.make 64 device
   let tf0 ← IO.monoMsNow
-  let yFused ← dopri5SolveFused (fun _t y => mul_scalar y (-1.0))
+  let yFused ← dopri5SolveFused (fun _t y => Tensor.mulScalar y (-1.0))
     0.0 1.0 steps y0 ws blackwell stream
   let fusedMs := (← IO.monoMsNow) - tf0
 
   IO.eprintln s!"[{suiteName}] {steps} steps on [1,1,64,64]: generic {genericMs}ms, fused {fusedMs}ms"
 
-  reportTensorComparison s!"{suiteName}.endpoint" yGeneric yFused 1e-4 1e-4
+  IndexedParity.reportTensorComparison s!"{suiteName}.endpoint" yGeneric yFused 1e-4 1e-4
 
 def main (_ : List String) : IO UInt32 := do
   let ok ← runOnce

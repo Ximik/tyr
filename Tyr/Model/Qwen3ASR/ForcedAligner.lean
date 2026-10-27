@@ -6,11 +6,12 @@
   - timestamp monotonic fixup
   - conversion from thinker logits/output IDs to structured spans
 -/
-import Tyr.Torch
+import Tyr.Typed
 import Tyr.Model.Qwen3ASR.Config
 
 namespace torch.qwen3asr
 
+variable {device : Device}
 structure ForcedAlignItem where
   text : String
   startTime : Float
@@ -272,15 +273,15 @@ def parseTimestamp (wordList : Array String) (timestampMs : Array UInt64) : Forc
 end Qwen3ForceAlignProcessor
 
 private def extractTimestampRows {batch seq : UInt64}
-    (inputIds : T #[batch, seq])
-    (outputIds : T #[batch, seq])
+    (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
+    (outputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (timestampTokenId : UInt64)
     (timestampSegmentTime : Float)
     : IO (Array (Array UInt64)) := do
-  let inFlat : T #[batch * seq] := reshape (data.toLong inputIds) #[batch * seq]
-  let outFlat : T #[batch * seq] := reshape (data.toLong outputIds) #[batch * seq]
-  let inVals ← data.tensorToUInt64Array inFlat
-  let outVals ← data.tensorToUInt64Array outFlat
+  let inFlat : Tensor { device := device, shape := #[batch * seq], dtype := .Int64 } := Tensor.reshapeChecked (Tensor.toInt64 inputIds) #[batch * seq]
+  let outFlat : Tensor { device := device, shape := #[batch * seq], dtype := .Int64 } := Tensor.reshapeChecked (Tensor.toInt64 outputIds) #[batch * seq]
+  let inVals ← Tensor.toUInt64Array inFlat
+  let outVals ← Tensor.toUInt64Array outFlat
   let mut rows : Array (Array UInt64) := Array.mkEmpty batch.toNat
   for b in [:batch.toNat] do
     let mut ts : Array UInt64 := #[]
@@ -294,8 +295,8 @@ private def extractTimestampRows {batch seq : UInt64}
   pure rows
 
 def alignFromOutputIds {batch seq : UInt64}
-    (inputIds : T #[batch, seq])
-    (outputIds : T #[batch, seq])
+    (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
+    (outputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (wordLists : Array (Array String))
     (timestampTokenId : UInt64)
     (timestampSegmentTime : Float := 1.0)
@@ -308,14 +309,15 @@ def alignFromOutputIds {batch seq : UInt64}
     out := out.push (Qwen3ForceAlignProcessor.parseTimestamp words ts)
   pure out
 
-def alignFromLogits {batch seq vocab : UInt64}
-    (inputIds : T #[batch, seq])
-    (logits : T #[batch, seq, vocab])
+def alignFromLogits {batch seq vocab : UInt64} {dtype : DType}
+    (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
+    (logits : Tensor { device := device, shape := #[batch, seq, vocab], dtype := dtype })
     (wordLists : Array (Array String))
     (timestampTokenId : UInt64)
     (timestampSegmentTime : Float := 1.0)
     : IO (Array ForcedAlignResult) := do
-  let (_vals, outputIds) := max_dim_3d logits 2
+  let indices ← IO.ofExcept (Tensor.argmax? logits 2)
+  let outputIds ← IO.ofExcept (indices.reshapeChecked? #[batch, seq])
   alignFromOutputIds inputIds outputIds wordLists timestampTokenId timestampSegmentTime
 
 end torch.qwen3asr

@@ -72,8 +72,8 @@ def isFiniteFloat (x : Float) : Bool :=
   !x.isNaN && !x.isInf
 
 /-- Random character-token stream in Shakespeare-sized vocab (65) by default. -/
-def mkShakespeareLikeStream (cfg : PrototypeConfig) : IO (T #[cfg.streamTokens]) := do
-  randint 0 cfg.modelConfig.vocab_size.toInt64 #[cfg.streamTokens]
+def mkShakespeareLikeStream (cfg : PrototypeConfig) : IO (Tokens (device := .CPU) #[cfg.streamTokens]) := do
+  Tensor.randint 0 cfg.modelConfig.vocab_size.toInt64 #[cfg.streamTokens]
 
 private def validateConfig (cfg : PrototypeConfig) : IO Unit := do
   let needed := cfg.trainConfig.batchSize * (cfg.trainConfig.blockSize + 1)
@@ -100,7 +100,7 @@ private def runSteps (cfg : PrototypeConfig) (steps : Nat) : IO RunStats := do
   for step in [:steps] do
     let lr := torch.train.getLr cfg.trainConfig step
     if cfg.useGradAccum then
-      let getBatchFn : IO (T #[cfg.trainConfig.batchSize, cfg.trainConfig.blockSize] × T #[cfg.trainConfig.batchSize, cfg.trainConfig.blockSize]) :=
+      let getBatchFn : IO (Tokens (device := cfg.trainConfig.device) #[cfg.trainConfig.batchSize, cfg.trainConfig.blockSize] × Tokens (device := cfg.trainConfig.device) #[cfg.trainConfig.batchSize, cfg.trainConfig.blockSize]) :=
         torch.train.getBatch stream cfg.trainConfig.batchSize cfg.trainConfig.blockSize cfg.trainConfig.device
       let (nextParams, nextOptState, lossVal) ←
         torch.train.trainStepWithAccum cfg.trainConfig params optState getBatchFn lr

@@ -18,6 +18,8 @@ import Tyr.Tokenizer.Gemma4
 import Examples.ModelRunner
 
 open torch
+
+variable {device : Device} {dtype visionDType projectorDType : DType}
 open torch.Model
 open torch.gemma4
 open Examples.ModelRunner
@@ -146,15 +148,14 @@ private def eosStopTokenIds (tok : tokenizer.gemma4.GemmaTokenizer) (cfg : Confi
       | none => pure ()
     out
 
-private def movePatchGridTo {cfg : VLConfig} (device : Device) (x : ImagePatchGrid cfg) : ImagePatchGrid cfg :=
+private def movePatchGridTo {cfg : VLConfig} {sourceDevice : Device} (device : Device) (x : ImagePatchGrid (device := sourceDevice) cfg) : ImagePatchGrid (device := device) cfg :=
   match x with
   | ⟨patchRows, ⟨patchCols, grid⟩⟩ => ⟨patchRows, ⟨patchCols, grid.to device⟩⟩
 
-private def runTextBatches
+private def runTextBatches [DType.RealFloating dtype]
     (tok : tokenizer.gemma4.GemmaTokenizer)
     (cfg : Config)
-    (model : Gemma4ForCausalLM cfg)
-    (device : Device)
+    (model : Gemma4ForCausalLM (device := device) cfg dtype)
     (args : Args)
     (prompts : Array String)
     : IO Unit := do
@@ -163,25 +164,24 @@ private def runTextBatches
     let ⟨batch, ⟨seq, (inputIds, promptLens)⟩⟩ ←
       buildBatchInputWithEncoder tok.padToken.toUInt64 chunk (fun p => pure (encodePromptToIds tok args.enableThinking p))
     pure ⟨batch, ⟨seq, (inputIds.to device, promptLens)⟩⟩
-  let decodeBatch (promptLens : Array Nat) {b os : UInt64} (ids : T #[b, os]) : IO (Array String) :=
+  let decodeBatch (promptLens : Array Nat) {b os : UInt64} (ids : Tensor { shape := #[b, os], dtype := .Int64, device := device }) : IO (Array String) :=
     decodeGeneratedBatch promptLens ids (fun xs => tokenizer.gemma4.decodeText tok xs)
-  let runGen (b : UInt64) {s : UInt64} (ids : T #[b, s]) :=
+  let runGen (b : UInt64) {s : UInt64} (ids : Tensor { shape := #[b, s], dtype := .Int64, device := device }) :=
     model.generate cfg ids args.maxNewTokens .greedy generationStopIds
-  let runGenStream (b : UInt64) {s : UInt64} (ids : T #[b, s]) (cb : StreamCallback b) :=
+  let runGenStream (b : UInt64) {s : UInt64} (ids : Tensor { shape := #[b, s], dtype := .Int64, device := device }) (cb : StreamCallback (device := device) b) :=
     model.generateStream cfg ids cb args.maxNewTokens .greedy generationStopIds
   runGenerationBatches prompts args.batchSize args.maxNewTokens args.stream args.debugIds
     (prompts.size == 1) buildBatch runGen runGenStream decodeBatch
     (makeStreamCallback (fun x => tokenizer.gemma4.decodeOne tok x))
 
-private def runMultimodalBatches
+private def runMultimodalBatches [DType.RealFloating dtype]
     (tok : tokenizer.gemma4.GemmaTokenizer)
     (cfg : VLConfig)
-    (model : Gemma4ForConditionalGeneration cfg)
-    (device : Device)
+    (model : Gemma4ForConditionalGeneration (device := device) cfg dtype visionDType projectorDType)
     (args : Args)
     (prompts : Array String)
     (imageSoftTokenCounts : Array UInt64)
-    (imageFeatures : Option (ImageFeatures cfg))
+    (imageFeatures : Option (ImageFeatures (device := device) cfg projectorDType))
     : IO Unit := do
   let generationStopIds := eosStopTokenIds tok cfg.text_config
   let buildBatch chunk := do
@@ -189,15 +189,15 @@ private def runMultimodalBatches
       buildBatchInputWithEncoder tok.padToken.toUInt64 chunk
         (encodePromptToIdsMultimodal tok args.enableThinking imageSoftTokenCounts)
     pure ⟨batch, ⟨seq, (inputIds.to device, promptLens)⟩⟩
-  let decodeBatch (promptLens : Array Nat) {b os : UInt64} (ids : T #[b, os]) : IO (Array String) :=
+  let decodeBatch (promptLens : Array Nat) {b os : UInt64} (ids : Tensor { shape := #[b, os], dtype := .Int64, device := device }) : IO (Array String) :=
     decodeGeneratedBatch promptLens ids (fun xs => tokenizer.gemma4.decodeText tok xs)
-  let runGen (b : UInt64) {s : UInt64} (ids : T #[b, s]) :=
+  let runGen (b : UInt64) {s : UInt64} (ids : Tensor { shape := #[b, s], dtype := .Int64, device := device }) :=
     let imageFeaturesChunk :=
       match imageFeatures with
       | some ⟨_nTok, feats⟩ => some <| Gemma4ForConditionalGeneration.repeatFeaturesForBatch (batch := b) cfg feats
       | none => none
     model.generate cfg ids args.maxNewTokens .greedy generationStopIds imageFeaturesChunk
-  let runGenStream (b : UInt64) {s : UInt64} (ids : T #[b, s]) (cb : StreamCallback b) :=
+  let runGenStream (b : UInt64) {s : UInt64} (ids : Tensor { shape := #[b, s], dtype := .Int64, device := device }) (cb : StreamCallback (device := device) b) :=
     let imageFeaturesChunk :=
       match imageFeatures with
       | some ⟨_nTok, feats⟩ => some <| Gemma4ForConditionalGeneration.repeatFeaturesForBatch (batch := b) cfg feats
@@ -236,12 +236,11 @@ def runMain (argv : List String) : IO UInt32 := do
   if useMultimodal && hasImages then
     let cfg ← VLConfig.loadFromPretrainedDir modelDir {}
     let isSharded ← Hub.detectWeightLayout modelDir
-    let modelCpu ←
-      if isSharded then Gemma4ForConditionalGeneration.loadSharded modelDir cfg
-      else Gemma4ForConditionalGeneration.load s!"{modelDir}/model.safetensors" cfg
-    let model ← moveModelToDevice device modelCpu
+    let ⟨_textDType, _visionDType, _projectorDType, model⟩ ←
+      if isSharded then Gemma4ForConditionalGeneration.loadSharded modelDir cfg (device := device)
+      else Gemma4ForConditionalGeneration.load s!"{modelDir}/model.safetensors" cfg (device := device)
 
-    let mut imageGrids : Array (ImagePatchGrid cfg) := #[]
+    let mut imageGrids : Array (ImagePatchGrid (device := device) cfg) := #[]
     let mut imageSoftTokenCounts : Array UInt64 := #[]
     for p in args.imagePaths do
       IO.println s!"Loading image patches from {p}..."
@@ -253,17 +252,16 @@ def runMain (argv : List String) : IO UInt32 := do
       imageGrids := imageGrids.push grid
 
     let imageFeatures ← model.getImageFeaturesMany cfg imageGrids
-    runMultimodalBatches tok cfg model device args prompts imageSoftTokenCounts imageFeatures
+    runMultimodalBatches tok cfg model args prompts imageSoftTokenCounts imageFeatures
   else
     if useMultimodal && !hasImages then
       IO.println "Warning: --multimodal requested without --image; running text-only path."
     let cfg ← Config.loadFromPretrainedDir modelDir Config.gemma4_E4B
     let isSharded ← Hub.detectWeightLayout modelDir
-    let modelCpu ←
-      if isSharded then Gemma4ForCausalLM.loadSharded modelDir cfg
-      else Gemma4ForCausalLM.load s!"{modelDir}/model.safetensors" cfg
-    let model ← moveModelToDevice device modelCpu
-    runTextBatches tok cfg model device args prompts
+    let ⟨_dtype, model⟩ ←
+      if isSharded then Gemma4ForCausalLM.loadSharded modelDir cfg (device := device)
+      else Gemma4ForCausalLM.load s!"{modelDir}/model.safetensors" cfg (device := device)
+    runTextBatches tok cfg model args prompts
 
   pure 0
 

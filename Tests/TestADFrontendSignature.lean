@@ -1,4 +1,5 @@
-import Tyr
+import Tyr.AD.Frontend.API
+import Tyr.Module.Derive
 import LeanTest
 
 namespace Tests.ADFrontendSignature
@@ -7,57 +8,60 @@ open torch
 open LeanTest
 open Tyr.AD.Frontend
 
+private def allclose {σ : StaticSpec} (lhs rhs : Tensor σ) : Bool :=
+  Tensor.allclose lhs rhs
+
 structure Model where
-  weight : T #[2, 4]
-  bias : T #[2]
-  cache : Frozen #[2]
+  weight : Tensor { shape := #[2, 4], dtype := .Float32, device := .CPU }
+  bias : Tensor { shape := #[2], dtype := .Float32, device := .CPU }
+  cache : Frozen { shape := #[2], dtype := .Float32, device := .CPU }
   name : Static String
   deriving TensorStruct, ToTensorStructSchema, TensorStructFlatten
 
 structure InputBundle where
-  x : T #[4]
-  scale : Option (T #[1])
+  x : Tensor { shape := #[4], dtype := .Float32, device := .CPU }
+  scale : Option (Tensor { shape := #[1], dtype := .Float32, device := .CPU })
   flag : Bool
   deriving TensorStruct, ToTensorStructSchema, TensorStructFlatten
 
 structure OutputBundle where
-  logits : T #[2]
+  logits : Tensor { shape := #[2], dtype := .Float32, device := .CPU }
   label : Static String
   deriving TensorStruct, ToTensorStructSchema, TensorStructFlatten
 
 private def sampleModel : Model :=
-  { weight := full #[2, 4] 2.0
-    bias := full #[2] 3.0
-    cache := (full #[2] 4.0 : Frozen #[2])
+  { weight := Tensor.full #[2, 4] 2.0
+    bias := Tensor.full #[2] 3.0
+    cache := (Tensor.full #[2] 4.0 : Frozen { shape := #[2], dtype := .Float32, device := .CPU })
     name := "model" }
 
 private def sampleInput : InputBundle :=
-  { x := full #[4] 5.0
-    scale := some (full #[1] 6.0)
+  { x := Tensor.full #[4] 5.0
+    scale := some (Tensor.full #[1] 6.0)
     flag := true }
 
 private def inputWithoutScale : InputBundle :=
-  { x := full #[4] 5.0
+  { x := Tensor.full #[4] 5.0
     scale := none
     flag := true }
 
 private def sampleOutput : OutputBundle :=
-  { logits := full #[2] 7.0
+  { logits := Tensor.full #[2] 7.0
     label := "out" }
 
 private def replacementOutput : OutputBundle :=
-  { logits := full #[2] 9.0
+  { logits := Tensor.full #[2] 9.0
     label := "replacement" }
 
 private def replacementModel : Model :=
-  { weight := full #[2, 4] 8.0
-    bias := full #[2] 9.0
-    cache := (full #[2] 10.0 : Frozen #[2])
+  { weight := Tensor.full #[2, 4] 8.0
+    bias := Tensor.full #[2] 9.0
+    cache := (Tensor.full #[2] 10.0 : Frozen { shape := #[2], dtype := .Float32, device := .CPU })
     name := "replacement-model" }
 
 private def replacementInput : InputBundle :=
-  { x := full #[4] 11.0
-    scale := some (full #[1] 12.0)
+  { x := Tensor.full #[4] 11.0
+    scale := some (Tensor.full #[1] 12.0)
     flag := false }
 
 private def unwrapOrFail {α : Type} (result : Except String α) : IO α :=
@@ -98,18 +102,18 @@ private def fakeStructuredFrontend : StructuredFrontendFunction Model InputBundl
           pure replacementInvarLeaves
       } }
 
-private def sampleScalarLoss : T #[] :=
-  full #[] 13.0
+private def sampleScalarLoss : Tensor { shape := #[], dtype := .Float32, device := .CPU } :=
+  Tensor.full #[] 13.0
 
-private def replacementScalarLoss : T #[] :=
-  full #[] 17.0
+private def replacementScalarLoss : Tensor { shape := #[], dtype := .Float32, device := .CPU } :=
+  Tensor.full #[] 17.0
 
 private def scalarLossSignature : FrontendADSignature :=
   { params := #[FrontendBoundary.ofValue sampleModel .diffAndFrozen]
     inputs := #[FrontendBoundary.ofValue sampleInput .diffOnly]
     outputs := #[FrontendBoundary.ofValue sampleScalarLoss .diffOnly] }
 
-private def fakeScalarLossFrontend : StructuredFrontendFunction Model InputBundle (T #[]) :=
+private def fakeScalarLossFrontend : StructuredFrontendFunction Model InputBundle (Tensor { shape := #[], dtype := .Float32, device := .CPU }) :=
   { signature := scalarLossSignature
     evalFlat := fun invarLeaves => do
       if invarLeaves.size != scalarLossSignature.paramLeafCount + scalarLossSignature.inputLeafCount then
@@ -169,6 +173,22 @@ def testFrontendBoundaryMatchesFlattenSelection : IO Unit := do
   let expectedRoles : Array TensorLeafRole := #[.diff, .diff, .frozen]
   LeanTest.assertTrue ((leaves.map (·.role)) == expectedRoles)
     s!"Flattened roles should track the selected schema, got {reprStr (leaves.map (·.role))}"
+  LeanTest.assertTrue ((sampleSignature.paramBindings.map (·.dtype)) ==
+      #[some "Float32", some "Float32", some "Float32"])
+    "Frontend bindings must retain the typed and frozen leaf dtypes."
+
+@[test]
+def testFrontendBoundaryRejectsWrongDTypeAndShape : IO Unit := do
+  let boundary := FrontendBoundary.ofValue sampleModel .diffAndFrozen
+  let leaves := TensorStructFlatten.flatten sampleModel
+  let wrongDType := leaves.set! 0 (TensorLeafValue.ofTensor .diff (Tensor.fullInt #[2, 4] 1))
+  let wrongShape := leaves.set! 0 (TensorLeafValue.ofTensor .diff (Tensor.zeros #[8]))
+  for (badLeaves, detail) in #[(wrongDType, "dtype"), (wrongShape, "shape")] do
+    match boundary.validateFlattenedLeaves badLeaves with
+    | .ok _ => LeanTest.fail s!"Frontend boundary accepted invalid {detail}."
+    | .error message =>
+        LeanTest.assertTrue (message.containsSubstr "weight" && message.containsSubstr detail)
+          s!"Boundary diagnostic should identify field and {detail}: {message}"
 
 @[test]
 def testFrontendBoundaryRejectsDynamicLeafMismatch : IO Unit := do

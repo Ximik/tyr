@@ -1,3 +1,11 @@
+import Tests.TestWhisperTyped
+import Tests.TestFlowfusionTyped
+import Tests.TestFluxTyped
+import Tests.TestVAETyped
+import Tests.TestGemma4Typed
+import Tests.TestGemma4DTypes
+import Tests.TestShapePackedTensor
+import Tests.TestCORETyped
 import Tests.Test
 import Tests.TestDataLoader
 import Tests.TestInferenceCache
@@ -6,6 +14,29 @@ import Tests.TestCheckpoint
 import Tests.TestCheckpointPersistence
 import Tests.TestNanoChatCheckpoint
 import Tests.TestFFIBoundary
+import Tests.TestParquetRecovery
+import Tests.TestResampleOwnership
+import Tests.TestTorchRecovery
+import Tests.TestTokenBytesRecovery
+import Tests.TestSelectionContracts
+import Tests.TestLossContracts
+import Tests.TestConvolutionContracts
+import Tests.TestWidgetTyped
+import Tests.TestTypedStandalone
+import Tests.TestExactDType
+import Tests.TestExactDTypeContracts
+import Tests.TestExactSafeTensors
+import Tests.TestTensorTreeCast
+import Tests.TestTensorStructDeriveCast
+import Tests.TestLagunaDTypes
+import Tests.TestTensorValueUpdates
+import Tests.TestTensorAutogradEffects
+import Tests.TestAttentionEffects
+import Tests.TestAssertions
+import Tests.TestGPTAttentionEffects
+import Tests.TestASRAttentionEffects
+import Tests.TestDistributedValues
+import Tests.TestModuleTyped
 import Tests.TestCoreSmoke
 import Tests.TestModelIO
 import Tests.TestPipeline
@@ -24,6 +55,14 @@ import Tests.TestADJaxprLikeExtract
 import Tests.TestADTensorStructSchema
 import Tests.TestADTensorStructFlatten
 import Tests.TestTyped
+import Tests.TestDTypeMetadata
+import Tests.TestOperationContracts
+import Tests.TestDeviceCompatibility
+import Tests.TestComplexResults
+import Tests.TestDTypeUnary
+import Tests.TestDTypeConversions
+import Tests.TestDTypeWitness
+import Tests.TestGPTTyped
 import Tests.TestADFrontendSignature
 import Tests.TestADFrontendElab
 import Tests.TestADGraphaxAlphaGradParity
@@ -121,6 +160,7 @@ import Tests.TestDiffEqSteadyStateEventParity
 import Tests.TestGPUDSL
 import Tests.TestGPUKernels
 import Tests.TestGPUCoverage
+import Tests.TestGPUIndexedParity
 import Tests.TestGPUTileIR
 import Tests.TestTileIRGenerateMain
 import Tests.TestDiffusion
@@ -128,12 +168,16 @@ import Tests.TestNanoChatTokens
 import Tests.TestNanoChatTasks
 import Tests.TestNanoGPTCopy
 import Tests.TestQwen3ASR
+import Tests.TestQwen3ASRWeights
 import Tests.TestSileroVAD
+import Tests.TestQwenTypedLoading
 import Tests.TestQwen3Model
 import Tests.TestQwen3TTS
 import Tests.TestSpeechTokenizerConfig
+import Tests.TestSpeechTokenizerDTypes
 import Tests.TestKittenTTS
 import Tests.TestQwen35Model
+import Tests.TestQwen35DTypes
 import Tests.TestQwen35Multimodal
 import Tests.TestQwen35Pretrained
 import Tests.TestQwen36Model
@@ -145,3 +189,22 @@ import Tests.TestFLM
 
 -- Note: `Tests.TestBranchingFlows` is currently routed through
 -- `TestsExperimental.lean` until `Tyr/Model/BranchingFlows.lean` is stabilized.
+
+import Tests.TestTypedNeural
+
+import Tests.TestTTSTypedLoading
+import Tests.TestTTSDTypeRelations
+import Tests.TestFloatBuffer
+
+import Tests.TestAutogradIdentity
+import Tests.TestTensorConstruction
+import Tests.TestTensorDeviceDeriving
+
+import Tests.TestDeviceIdentity
+import Tests.TestDeviceAcquisition
+import Tests.TestFactoryRecovery
+
+import Tests.TestConstantSupport
+
+import Tests.TestNoPreserving
+import Tests.TestTensorStructConstraints

@@ -3,39 +3,50 @@
 
   Pretrained weight loading for Lean Qwen3-ASR port.
 -/
-import Tyr.Torch
+import Tyr.Typed.Neural
 import Tyr.TensorStruct
 import Tyr.Log
-import Tyr.SafeTensors.Load
+import Tyr.SafeTensors.Exact
 import Tyr.Module.RMSNorm
 import Tyr.Model.Utils
 import Tyr.Model.Qwen3ASR.Model
 
 namespace torch.qwen3asr
 
+variable {device : Device}
 open torch.Log
 open torch.Model (reqGradFalse)
-open torch.safetensors (tryLoadTensorSharded)
+
+private def loadWeight (dtype : DType) (modelDir name : String) (shape : Shape)
+    (device : Device) : IO (Tensor { shape, dtype := dtype, device }) := do
+  let packed ← safetensors.loadTensorShardedExact modelDir name shape device
+  IO.ofExcept (packed.atDType? dtype)
+
+private def loadOptional (dtype : DType) (modelDir name : String) (shape : Shape)
+    (device : Device) : IO (Option (Tensor { shape, dtype := dtype, device })) := do
+  match ← safetensors.loadOptionalTensorShardedExact modelDir name shape device with
+  | none => pure none
+  | some packed => pure (some (← IO.ofExcept (packed.atDType? dtype)))
 
 private def loadLayerNormSharded (modelDir : String) (name : String) (dim : UInt64)
-    : IO (LayerNorm dim) := do
-  let w ← safetensors.loadTensorSharded modelDir s!"{name}.weight" #[dim]
-  let b ← safetensors.loadTensorSharded modelDir s!"{name}.bias" #[dim]
+    (dtype : DType) (device : Device := .CPU) : IO (LayerNorm (device := device) dim dtype) := do
+  let w ← loadWeight (dtype := dtype) (device := device) modelDir s!"{name}.weight" #[dim]
+  let b ← loadWeight (dtype := dtype) (device := device) modelDir s!"{name}.bias" #[dim]
   pure { weight := reqGradFalse w, bias := reqGradFalse b, eps := ⟨1e-5⟩ }
 
 private def loadAudioAttentionSharded (modelDir : String) (namePrefix : String) (cfg : AudioEncoderConfig)
-    : IO (AudioAttention cfg) := do
+    (dtype : DType) (device : Device := .CPU) : IO (AudioAttention (device := device) (dtype := dtype) cfg) := do
   let headDim := AudioEncoderConfig.headDim cfg
   let projDim := cfg.encoderAttentionHeads * headDim
-  let qProjWeight ← safetensors.loadTensorSharded modelDir s!"{namePrefix}.q_proj.weight" #[projDim, cfg.dModel]
-  let qProjBias ← safetensors.loadTensorSharded modelDir s!"{namePrefix}.q_proj.bias" #[projDim]
-  let kProjWeight ← safetensors.loadTensorSharded modelDir s!"{namePrefix}.k_proj.weight" #[projDim, cfg.dModel]
-  let kProjBias ← safetensors.loadTensorSharded modelDir s!"{namePrefix}.k_proj.bias" #[projDim]
-  let vProjWeight ← safetensors.loadTensorSharded modelDir s!"{namePrefix}.v_proj.weight" #[projDim, cfg.dModel]
-  let vProjBias ← safetensors.loadTensorSharded modelDir s!"{namePrefix}.v_proj.bias" #[projDim]
-  let outProjWeight ← safetensors.loadTensorSharded modelDir s!"{namePrefix}.out_proj.weight"
+  let qProjWeight ← loadWeight (dtype := dtype) (device := device) modelDir s!"{namePrefix}.q_proj.weight" #[projDim, cfg.dModel]
+  let qProjBias ← loadWeight (dtype := dtype) (device := device) modelDir s!"{namePrefix}.q_proj.bias" #[projDim]
+  let kProjWeight ← loadWeight (dtype := dtype) (device := device) modelDir s!"{namePrefix}.k_proj.weight" #[projDim, cfg.dModel]
+  let kProjBias ← loadWeight (dtype := dtype) (device := device) modelDir s!"{namePrefix}.k_proj.bias" #[projDim]
+  let vProjWeight ← loadWeight (dtype := dtype) (device := device) modelDir s!"{namePrefix}.v_proj.weight" #[projDim, cfg.dModel]
+  let vProjBias ← loadWeight (dtype := dtype) (device := device) modelDir s!"{namePrefix}.v_proj.bias" #[projDim]
+  let outProjWeight ← loadWeight (dtype := dtype) (device := device) modelDir s!"{namePrefix}.out_proj.weight"
     #[cfg.dModel, projDim]
-  let outProjBias ← safetensors.loadTensorSharded modelDir s!"{namePrefix}.out_proj.bias" #[cfg.dModel]
+  let outProjBias ← loadWeight (dtype := dtype) (device := device) modelDir s!"{namePrefix}.out_proj.bias" #[cfg.dModel]
   pure {
     qProjWeight := reqGradFalse qProjWeight
     qProjBias := reqGradFalse qProjBias
@@ -48,15 +59,15 @@ private def loadAudioAttentionSharded (modelDir : String) (namePrefix : String) 
   }
 
 private def loadAudioLayerSharded (modelDir : String) (layerIdx : UInt64) (cfg : AudioEncoderConfig)
-    : IO (AudioEncoderLayer cfg) := do
+    (dtype : DType) (device : Device := .CPU) : IO (AudioEncoderLayer (device := device) (dtype := dtype) cfg) := do
   let p := s!"thinker.audio_tower.layers.{layerIdx}"
-  let selfAttn ← loadAudioAttentionSharded modelDir s!"{p}.self_attn" cfg
-  let selfAttnLayerNorm ← loadLayerNormSharded modelDir s!"{p}.self_attn_layer_norm" cfg.dModel
-  let fc1Weight ← safetensors.loadTensorSharded modelDir s!"{p}.fc1.weight" #[cfg.encoderFfnDim, cfg.dModel]
-  let fc1Bias ← safetensors.loadTensorSharded modelDir s!"{p}.fc1.bias" #[cfg.encoderFfnDim]
-  let fc2Weight ← safetensors.loadTensorSharded modelDir s!"{p}.fc2.weight" #[cfg.dModel, cfg.encoderFfnDim]
-  let fc2Bias ← safetensors.loadTensorSharded modelDir s!"{p}.fc2.bias" #[cfg.dModel]
-  let finalLayerNorm ← loadLayerNormSharded modelDir s!"{p}.final_layer_norm" cfg.dModel
+  let selfAttn ← loadAudioAttentionSharded (dtype := dtype) (device := device) modelDir s!"{p}.self_attn" cfg
+  let selfAttnLayerNorm ← loadLayerNormSharded (dtype := dtype) (device := device) modelDir s!"{p}.self_attn_layer_norm" cfg.dModel
+  let fc1Weight ← loadWeight (dtype := dtype) (device := device) modelDir s!"{p}.fc1.weight" #[cfg.encoderFfnDim, cfg.dModel]
+  let fc1Bias ← loadWeight (dtype := dtype) (device := device) modelDir s!"{p}.fc1.bias" #[cfg.encoderFfnDim]
+  let fc2Weight ← loadWeight (dtype := dtype) (device := device) modelDir s!"{p}.fc2.weight" #[cfg.dModel, cfg.encoderFfnDim]
+  let fc2Bias ← loadWeight (dtype := dtype) (device := device) modelDir s!"{p}.fc2.bias" #[cfg.dModel]
+  let finalLayerNorm ← loadLayerNormSharded (dtype := dtype) (device := device) modelDir s!"{p}.final_layer_norm" cfg.dModel
   pure {
     selfAttn
     selfAttnLayerNorm
@@ -68,37 +79,37 @@ private def loadAudioLayerSharded (modelDir : String) (layerIdx : UInt64) (cfg :
   }
 
 private def loadAudioEncoderSharded (modelDir : String) (cfg : AudioEncoderConfig)
-    : IO (AudioEncoder cfg) := do
-  let conv2d1Weight ← safetensors.loadTensorSharded modelDir "thinker.audio_tower.conv2d1.weight"
-    #[cfg.downsampleHiddenSize, 1, 3, 3]
-  let conv2d1Bias ← safetensors.loadTensorSharded modelDir "thinker.audio_tower.conv2d1.bias"
+    (dtype : DType) (device : Device)
+    (conv2d1Weight : Tensor { shape := #[cfg.downsampleHiddenSize, 1, 3, 3], dtype := dtype, device }) :
+    IO (AudioEncoder (device := device) (dtype := dtype) cfg) := do
+  let conv2d1Bias ← loadWeight (dtype := dtype) (device := device) modelDir "thinker.audio_tower.conv2d1.bias"
     #[cfg.downsampleHiddenSize]
-  let conv2d2Weight ← safetensors.loadTensorSharded modelDir "thinker.audio_tower.conv2d2.weight"
+  let conv2d2Weight ← loadWeight (dtype := dtype) (device := device) modelDir "thinker.audio_tower.conv2d2.weight"
     #[cfg.downsampleHiddenSize, cfg.downsampleHiddenSize, 3, 3]
-  let conv2d2Bias ← safetensors.loadTensorSharded modelDir "thinker.audio_tower.conv2d2.bias"
+  let conv2d2Bias ← loadWeight (dtype := dtype) (device := device) modelDir "thinker.audio_tower.conv2d2.bias"
     #[cfg.downsampleHiddenSize]
-  let conv2d3Weight ← safetensors.loadTensorSharded modelDir "thinker.audio_tower.conv2d3.weight"
+  let conv2d3Weight ← loadWeight (dtype := dtype) (device := device) modelDir "thinker.audio_tower.conv2d3.weight"
     #[cfg.downsampleHiddenSize, cfg.downsampleHiddenSize, 3, 3]
-  let conv2d3Bias ← safetensors.loadTensorSharded modelDir "thinker.audio_tower.conv2d3.bias"
+  let conv2d3Bias ← loadWeight (dtype := dtype) (device := device) modelDir "thinker.audio_tower.conv2d3.bias"
     #[cfg.downsampleHiddenSize]
 
-  let convOutWeight ← safetensors.loadTensorSharded modelDir "thinker.audio_tower.conv_out.weight"
+  let convOutWeight ← loadWeight (dtype := dtype) (device := device) modelDir "thinker.audio_tower.conv_out.weight"
     #[cfg.dModel, AudioEncoderConfig.convOutInDim cfg]
 
-  let mut layers : Array (AudioEncoderLayer cfg) := #[]
+  let mut layers : Array (AudioEncoderLayer (device := device) (dtype := dtype) cfg) := #[]
   for i in [:cfg.encoderLayers.toNat] do
-    let layer ← loadAudioLayerSharded modelDir i.toUInt64 cfg
+    let layer ← loadAudioLayerSharded (dtype := dtype) (device := device) modelDir i.toUInt64 cfg
     layers := layers.push layer
 
-  let lnPost ← loadLayerNormSharded modelDir "thinker.audio_tower.ln_post" cfg.dModel
+  let lnPost ← loadLayerNormSharded (dtype := dtype) (device := device) modelDir "thinker.audio_tower.ln_post" cfg.dModel
 
-  let proj1Weight ← safetensors.loadTensorSharded modelDir "thinker.audio_tower.proj1.weight"
+  let proj1Weight ← loadWeight (dtype := dtype) (device := device) modelDir "thinker.audio_tower.proj1.weight"
     #[cfg.dModel, cfg.dModel]
-  let proj1Bias ← safetensors.loadTensorSharded modelDir "thinker.audio_tower.proj1.bias"
+  let proj1Bias ← loadWeight (dtype := dtype) (device := device) modelDir "thinker.audio_tower.proj1.bias"
     #[cfg.dModel]
-  let proj2Weight ← safetensors.loadTensorSharded modelDir "thinker.audio_tower.proj2.weight"
+  let proj2Weight ← loadWeight (dtype := dtype) (device := device) modelDir "thinker.audio_tower.proj2.weight"
     #[cfg.outputDim, cfg.dModel]
-  let proj2Bias ← safetensors.loadTensorSharded modelDir "thinker.audio_tower.proj2.bias"
+  let proj2Bias ← loadWeight (dtype := dtype) (device := device) modelDir "thinker.audio_tower.proj2.bias"
     #[cfg.outputDim]
 
   pure {
@@ -118,36 +129,36 @@ private def loadAudioEncoderSharded (modelDir : String) (cfg : AudioEncoderConfi
   }
 
 private def loadRMSNormSharded (modelDir : String) (name : String) (dim : UInt64) (eps : Float)
-    : IO (RMSNorm dim) := do
-  let w ← safetensors.loadTensorSharded modelDir s!"{name}.weight" #[dim]
+    (dtype : DType) (device : Device := .CPU) : IO (RMSNorm (device := device) dim dtype) := do
+  let w ← loadWeight (dtype := dtype) (device := device) modelDir s!"{name}.weight" #[dim]
   pure { weight := reqGradFalse w, eps := ⟨eps⟩ }
 
 private def loadQwenAttentionSharded (modelDir : String) (namePrefix : String)
     (hiddenSize numHeads numKVHeads headDim : UInt64)
-    : IO (qwen.QwenAttention hiddenSize numHeads numKVHeads headDim) := do
-  let qProj ← safetensors.loadTensorSharded modelDir s!"{namePrefix}.q_proj.weight" #[numHeads * headDim, hiddenSize]
-  let kProj ← safetensors.loadTensorSharded modelDir s!"{namePrefix}.k_proj.weight" #[numKVHeads * headDim, hiddenSize]
-  let vProj ← safetensors.loadTensorSharded modelDir s!"{namePrefix}.v_proj.weight" #[numKVHeads * headDim, hiddenSize]
-  let oProj ← safetensors.loadTensorSharded modelDir s!"{namePrefix}.o_proj.weight" #[hiddenSize, numHeads * headDim]
-  let qNorm ← tryLoadTensorSharded modelDir s!"{namePrefix}.q_norm.weight" #[headDim]
-  let kNorm ← tryLoadTensorSharded modelDir s!"{namePrefix}.k_norm.weight" #[headDim]
+    (dtype : DType) (device : Device := .CPU) : IO (qwen.QwenAttention (device := device) hiddenSize numHeads numKVHeads headDim dtype) := do
+  let qProj ← loadWeight (dtype := dtype) (device := device) modelDir s!"{namePrefix}.q_proj.weight" #[numHeads * headDim, hiddenSize]
+  let kProj ← loadWeight (dtype := dtype) (device := device) modelDir s!"{namePrefix}.k_proj.weight" #[numKVHeads * headDim, hiddenSize]
+  let vProj ← loadWeight (dtype := dtype) (device := device) modelDir s!"{namePrefix}.v_proj.weight" #[numKVHeads * headDim, hiddenSize]
+  let oProj ← loadWeight (dtype := dtype) (device := device) modelDir s!"{namePrefix}.o_proj.weight" #[hiddenSize, numHeads * headDim]
+  let qNorm ← loadOptional (dtype := dtype) (device := device) modelDir s!"{namePrefix}.q_norm.weight" #[headDim]
+  let kNorm ← loadOptional (dtype := dtype) (device := device) modelDir s!"{namePrefix}.k_norm.weight" #[headDim]
   pure {
     q_proj := reqGradFalse qProj
     k_proj := reqGradFalse kProj
     v_proj := reqGradFalse vProj
     o_proj := reqGradFalse oProj
-    q_norm := qNorm.map reqGradFalse
-    k_norm := kNorm.map reqGradFalse
+    q_norm := qNorm.map (fun w => reqGradFalse w)
+    k_norm := kNorm.map (fun w => reqGradFalse w)
   }
 
 private def loadQwenMLPSharded (modelDir : String) (namePrefix : String)
     (hiddenSize intermediateSize : UInt64)
-    : IO (qwen.QwenMLP hiddenSize intermediateSize) := do
-  let gateProj ← safetensors.loadTensorSharded modelDir s!"{namePrefix}.gate_proj.weight"
+    (dtype : DType) (device : Device := .CPU) : IO (qwen.QwenMLP (device := device) hiddenSize intermediateSize dtype) := do
+  let gateProj ← loadWeight (dtype := dtype) (device := device) modelDir s!"{namePrefix}.gate_proj.weight"
     #[intermediateSize, hiddenSize]
-  let upProj ← safetensors.loadTensorSharded modelDir s!"{namePrefix}.up_proj.weight"
+  let upProj ← loadWeight (dtype := dtype) (device := device) modelDir s!"{namePrefix}.up_proj.weight"
     #[intermediateSize, hiddenSize]
-  let downProj ← safetensors.loadTensorSharded modelDir s!"{namePrefix}.down_proj.weight"
+  let downProj ← loadWeight (dtype := dtype) (device := device) modelDir s!"{namePrefix}.down_proj.weight"
     #[hiddenSize, intermediateSize]
   pure {
     gate_proj := reqGradFalse gateProj
@@ -156,24 +167,24 @@ private def loadQwenMLPSharded (modelDir : String) (namePrefix : String)
   }
 
 private def loadQwenLayerSharded (modelDir : String) (layerIdx : UInt64) (cfg : TextConfig)
-    : IO (qwen.QwenLayer cfg.hiddenSize cfg.numAttentionHeads cfg.numKeyValueHeads cfg.headDim cfg.intermediateSize) := do
+    (dtype : DType) (device : Device := .CPU) : IO (qwen.QwenLayer (device := device) cfg.hiddenSize cfg.numAttentionHeads cfg.numKeyValueHeads cfg.headDim cfg.intermediateSize dtype) := do
   let p := s!"thinker.model.layers.{layerIdx}"
-  let inputLayernorm ← loadRMSNormSharded modelDir s!"{p}.input_layernorm" cfg.hiddenSize cfg.rmsNormEps
-  let selfAttn ← loadQwenAttentionSharded modelDir s!"{p}.self_attn"
+  let inputLayernorm ← loadRMSNormSharded (dtype := dtype) (device := device) modelDir s!"{p}.input_layernorm" cfg.hiddenSize cfg.rmsNormEps
+  let selfAttn ← loadQwenAttentionSharded (dtype := dtype) (device := device) modelDir s!"{p}.self_attn"
     cfg.hiddenSize cfg.numAttentionHeads cfg.numKeyValueHeads cfg.headDim
-  let postAttentionLayernorm ← loadRMSNormSharded modelDir s!"{p}.post_attention_layernorm" cfg.hiddenSize cfg.rmsNormEps
-  let mlp ← loadQwenMLPSharded modelDir s!"{p}.mlp" cfg.hiddenSize cfg.intermediateSize
+  let postAttentionLayernorm ← loadRMSNormSharded (dtype := dtype) (device := device) modelDir s!"{p}.post_attention_layernorm" cfg.hiddenSize cfg.rmsNormEps
+  let mlp ← loadQwenMLPSharded (dtype := dtype) (device := device) modelDir s!"{p}.mlp" cfg.hiddenSize cfg.intermediateSize
   pure { input_layernorm := inputLayernorm, self_attn := selfAttn, post_attention_layernorm := postAttentionLayernorm, mlp }
 
 private def loadTextModelSharded (modelDir : String) (cfg : TextConfig)
-    : IO (qwen.Qwen3Model (TextConfig.toQwenConfig cfg)) := do
-  let embedTokens ← safetensors.loadTensorSharded modelDir "thinker.model.embed_tokens.weight"
+    (dtype : DType) (device : Device := .CPU) : IO (qwen.Qwen3Model (device := device) (TextConfig.toQwenConfig cfg) dtype) := do
+  let embedTokens ← loadWeight (dtype := dtype) (device := device) modelDir "thinker.model.embed_tokens.weight"
     #[cfg.vocabSize, cfg.hiddenSize]
-  let mut layers : Array (qwen.QwenLayer cfg.hiddenSize cfg.numAttentionHeads cfg.numKeyValueHeads cfg.headDim cfg.intermediateSize) := #[]
+  let mut layers : Array (qwen.QwenLayer (device := device) cfg.hiddenSize cfg.numAttentionHeads cfg.numKeyValueHeads cfg.headDim cfg.intermediateSize dtype) := #[]
   for i in [:cfg.numHiddenLayers.toNat] do
-    let layer ← loadQwenLayerSharded modelDir i.toUInt64 cfg
+    let layer ← loadQwenLayerSharded (dtype := dtype) (device := device) modelDir i.toUInt64 cfg
     layers := layers.push layer
-  let norm ← loadRMSNormSharded modelDir "thinker.model.norm" cfg.hiddenSize cfg.rmsNormEps
+  let norm ← loadRMSNormSharded (dtype := dtype) (device := device) modelDir "thinker.model.norm" cfg.hiddenSize cfg.rmsNormEps
   pure {
     embed_tokens := reqGradFalse embedTokens
     layers
@@ -181,24 +192,28 @@ private def loadTextModelSharded (modelDir : String) (cfg : TextConfig)
   }
 
 private def loadThinkerSharded (modelDir : String) (cfg : ThinkerConfig)
-    : IO (Qwen3ASRThinkerForConditionalGeneration cfg) := do
-  let audioTower ← loadAudioEncoderSharded modelDir cfg.audioConfig
-  let textModel ← loadTextModelSharded modelDir cfg.textConfig
+    (dtype : DType) (device : Device)
+    (conv2d1Weight : Tensor { shape := #[cfg.audioConfig.downsampleHiddenSize, 1, 3, 3], dtype := dtype, device }) :
+    IO (Qwen3ASRThinkerForConditionalGeneration (device := device) (dtype := dtype) cfg) := do
+  let support ← dtype.acquireConstantSupport device
+  let _ := support.down
+  let audioTower ← loadAudioEncoderSharded (dtype := dtype) (device := device) modelDir cfg.audioConfig conv2d1Weight
+  let textModel ← loadTextModelSharded (dtype := dtype) (device := device) modelDir cfg.textConfig
 
   let audioProjectionWeight ←
     if h : cfg.audioConfig.outputDim = cfg.textConfig.hiddenSize then
-      let eye : T #[cfg.textConfig.hiddenSize, cfg.textConfig.hiddenSize] :=
-        castLike audioTower.proj2Weight (reqGradFalse (torch.eye cfg.textConfig.hiddenSize false))
-      let eye' : T #[cfg.textConfig.hiddenSize, cfg.audioConfig.outputDim] := by
+      let eye : Tensor { dtype := dtype, device := device, shape := #[cfg.textConfig.hiddenSize, cfg.textConfig.hiddenSize] } :=
+        (Tensor.eyeFor (n := cfg.textConfig.hiddenSize) dtype device)
+      let eye' : Tensor { dtype := dtype, device := device, shape := #[cfg.textConfig.hiddenSize, cfg.audioConfig.outputDim] } := by
         simpa [h] using eye
       pure eye'
     else
       throw <| IO.userError
         s!"Qwen3-ASR checkpoint expects audio output dim == text hidden dim, got {cfg.audioConfig.outputDim} and {cfg.textConfig.hiddenSize}"
   let audioProjectionBias :=
-    castLike audioTower.proj2Weight (reqGradFalse (torch.zeros #[cfg.textConfig.hiddenSize]))
+    (Tensor.zerosFor { shape := #[cfg.textConfig.hiddenSize], dtype := dtype, device })
 
-  let lmHead ← safetensors.loadTensorSharded modelDir "thinker.lm_head.weight"
+  let lmHead ← loadWeight (dtype := dtype) (device := device) modelDir "thinker.lm_head.weight"
     #[ThinkerConfig.lmHeadOutDim cfg, cfg.textConfig.hiddenSize]
 
   pure {
@@ -219,26 +234,34 @@ private def resolveAsrDevice (log : Handlers := {}) : IO Device := do
   | some "cpu" => pure Device.CPU
   | some "cuda" =>
     if ← cuda_is_available then
-      pure (Device.CUDA 0)
+      Device.cuda 0
     else
       log.onWarn "TYR_DEVICE=cuda requested but CUDA is unavailable; falling back to auto device selection."
       getBestDevice
-  | some "mps" => pure Device.MPS
+  | some "mps" => Device.mps
   | some "auto" => getBestDevice
   | some _ => getBestDevice
   | none => getBestDevice
 
 /-- Load Qwen3-ASR model from HuggingFace sharded SafeTensors directory. -/
-def loadSharded (modelDir : String) (cfg : Qwen3ASRConfig := {}) (log : Handlers := {})
-    : IO (Qwen3ASRForConditionalGeneration cfg) := do
+def loadShardedAt (modelDir : String) (cfg : Qwen3ASRConfig := {}) (log : Handlers := {})
+    (device : Device) : IO (Σ dtype : RealFloatingDType, Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype.val) cfg) := do
   log.onInfo s!"Loading Qwen3-ASR weights from {modelDir}..."
-  let thinker ← loadThinkerSharded modelDir cfg.thinkerConfig
-  let targetDevice ← resolveAsrDevice log
-  let thinker :=
-    TensorStruct.map (fun t => t.to targetDevice) thinker
-  log.onInfo s!"Qwen3-ASR target device: {repr targetDevice}"
+  let ⟨dtype, conv2d1Weight⟩ ← safetensors.loadTensorShardedExact modelDir
+    "thinker.audio_tower.conv2d1.weight" #[cfg.thinkerConfig.audioConfig.downsampleHiddenSize, 1, 3, 3] device
+  let floating ← IO.ofExcept (DType.realFloating? dtype)
+  let _ := floating.down
+  let thinker ← loadThinkerSharded (dtype := dtype) (device := device) modelDir cfg.thinkerConfig conv2d1Weight
+  log.onInfo s!"Qwen3-ASR target device: {repr device}"
   log.onInfo "Loaded Qwen3-ASR weights."
-  pure { thinker, supportLanguages := cfg.supportLanguages }
+  pure ⟨RealFloatingDType.ofDType dtype, { thinker, supportLanguages := cfg.supportLanguages }⟩
+
+/-- Load using the environment-selected device, retaining that index in the result. -/
+def loadSharded (modelDir : String) (cfg : Qwen3ASRConfig := {}) (log : Handlers := {}) :
+    IO (Σ device : Device, Σ dtype : RealFloatingDType, Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype.val) cfg) := do
+  let device ← resolveAsrDevice log
+  let model ← loadShardedAt modelDir cfg log device
+  pure ⟨device, model⟩
 
 end Qwen3ASRForConditionalGeneration
 

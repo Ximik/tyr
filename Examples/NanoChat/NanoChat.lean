@@ -30,4 +30,3 @@ import Examples.NanoChat.Generator.Engine
 -- Tasks & Evaluation
 import Examples.NanoChat.Tasks.LLM
 import Examples.NanoChat.Eval.CORE
-import Examples.NanoChat.Eval.Execution

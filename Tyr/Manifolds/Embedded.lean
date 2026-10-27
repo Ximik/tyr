@@ -3,12 +3,13 @@ import Tyr.Manifolds.Stiefel
 import Tyr.Manifolds.Orthogonal
 import Tyr.Manifolds.Grassmann
 import Tyr.Manifolds.Hyperbolic
-import Tyr.Module.Derive
 
 namespace Tyr.AD
 
 open torch
 open DifferentiableManifold
+
+variable {d : DType} {dev : Device} [DType.RealFloating d]
 
 /--
 Manifolds that admit a distinguished ambient representation together with
@@ -30,28 +31,28 @@ def retractAmbientStep [DifferentiableManifold M] [EmbeddedManifold M]
 
 end EmbeddedManifold
 
-instance tensorEmbedded {s : Shape} : EmbeddedManifold (T s) where
-  Ambient := T s
+instance tensorEmbedded {σ : StaticSpec} [DType.RealFloating σ.dtype] [DType.ConstantSupported σ.dtype σ.device] : EmbeddedManifold (Tensor σ) where
+  Ambient := Tensor σ
   toAmbient := id
   projectAmbientTangent := id
 
-instance stiefelEmbedded (n p : UInt64) : EmbeddedManifold (Stiefel n p) where
-  Ambient := T #[n, p]
+instance stiefelEmbedded (n p : UInt64) : EmbeddedManifold (Stiefel n p d dev) where
+  Ambient := Tensor ⟨#[n, p], d, dev⟩
   toAmbient := fun x => x.matrix
   projectAmbientTangent := fun {x} Z => StiefelTangent.project x Z
 
-instance orthogonalEmbedded (n : UInt64) : EmbeddedManifold (Orthogonal n) where
-  Ambient := T #[n, n]
+instance orthogonalEmbedded [DType.ConstantSupported d dev] (n : UInt64) : EmbeddedManifold (Orthogonal n d dev) where
+  Ambient := Tensor ⟨#[n, n], d, dev⟩
   toAmbient := fun x => x.matrix
   projectAmbientTangent := fun {x} Z => OrthogonalTangent.fromAmbient x Z
 
-instance grassmannEmbedded (n p : UInt64) : EmbeddedManifold (Grassmann n p) where
-  Ambient := T #[n, p]
+instance grassmannEmbedded (n p : UInt64) : EmbeddedManifold (Grassmann n p d dev) where
+  Ambient := Tensor ⟨#[n, p], d, dev⟩
   toAmbient := fun x => x.matrix
   projectAmbientTangent := fun {x} Z => GrassmannTangent.project x Z
 
-instance hyperbolicEmbedded (n : UInt64) : EmbeddedManifold (Hyperbolic n) where
-  Ambient := T #[n + 1]
+instance hyperbolicEmbedded [DType.ConstantSupported d dev] (n : UInt64) : EmbeddedManifold (Hyperbolic n d dev) where
+  Ambient := Tensor ⟨#[n + 1], d, dev⟩
   toAmbient := fun x => x.coords
   projectAmbientTangent := fun {x} Z => HyperbolicTangent.project x Z
 

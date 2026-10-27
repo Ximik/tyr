@@ -20,6 +20,7 @@ TORCH_LIBPATH=$(TORCHDIR)/lib
 TORCH_CUDA_VENDOR_LIBPATH=../external/wheels/nvidia/cu13/lib
 TKDIR=../external/git/ThunderKittens
 TK_INC_FLAGS=-I$(TKDIR)/include -I$(TKDIR)/prototype
+GLOO_DIR ?= ../external/git/gloo
 SOXR_DIR=../external/git/soxr
 SOXR_BUILD_DIR=build/soxr
 SOXR_INC_FLAGS=-I$(SOXR_DIR)/src -I$(SOXR_BUILD_DIR)
@@ -152,6 +153,14 @@ NVCCFLAGS += -DKITTENS_$(GPU_FAMILY)
 NVCCFLAGS += -gencode arch=$(GPU_COMPUTE),code=$(GPU_CODE)
 
 # Optional distributed backend toggles based on available LibTorch artifacts.
+# The pinned torch wheels include Gloo's implementation but omit its public
+# headers. deps/git.lock supplies the exact matching upstream header revision.
+ifneq ($(wildcard $(TORCHDIR)/include/torch/csrc/distributed/c10d/ProcessGroupGloo.hpp),)
+ifneq ($(wildcard $(GLOO_DIR)/gloo/algorithm.h),)
+EXTRA_CXX_FLAGS += -DUSE_C10D_GLOO
+TORCH_INC_FLAGS += -I$(GLOO_DIR)
+endif
+endif
 ifneq ($(wildcard $(TORCHDIR)/include/torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp),)
 ifneq ($(wildcard $(TORCH_LIBPATH)/libtorch_cuda.*),)
 ifneq ($(wildcard $(TORCH_LIBPATH)/libc10_cuda.*),)
@@ -184,7 +193,6 @@ SRCS := \
 	tyr_polar.cpp\
 	tyr_media_stub.cpp\
 	tyr_parquet.cpp\
-	tyr_execution.cpp\
 	float_buffer.cpp
 MM_SRCS :=
 ifeq ($(UNAME_S),Darwin)
@@ -301,7 +309,7 @@ DYLIB_LINK_FLAGS := $(DYLIB_LEAN_FLAGS) \
 # them. It is rewritten only when its content changes (FORCE runs the recipe
 # every time; an unchanged timestamp leaves dependents alone).
 shell_quote = '$(subst ','"'"',$(1))'
-BUILD_FLAGS_KEYS := CC CXX NVCC LEAN_HOME TORCHDIR SOXR_DIR TKDIR \
+BUILD_FLAGS_KEYS := CC CXX NVCC LEAN_HOME TORCHDIR SOXR_DIR TKDIR GLOO_DIR \
 	CXX_STD_FLAG EXTRA_CXX_FLAGS CPP_CUDA_FLAGS NVCCFLAGS SOXR_CFLAGS \
 	TORCH_INC_FLAGS CUDA_INC_FLAGS NCCL_INC_FLAGS ARROW_INC_FLAGS \
 	GPU GPU_FAMILY GPU_COMPUTE GPU_CODE HAS_NVCC HAS_CUDA_TOOLKIT \

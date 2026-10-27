@@ -4,7 +4,7 @@
   Query-Key normalization for Flux attention.
   Applies RMSNorm to Q and K independently.
 -/
-import Tyr.Torch
+import Tyr.Model.Flux.TypedOps
 import Tyr.TensorStruct
 import Tyr.Module.Core
 import Tyr.Module.Derive
@@ -12,38 +12,41 @@ import Tyr.Module.RMSNorm
 
 namespace torch.flux
 
+variable {device : Device} {dtype : DType}
 /-- Query-Key normalization.
     Applies RMSNorm to queries and keys for stable attention. -/
-structure QKNorm (head_dim : UInt64) where
-  query_norm : RMSNorm head_dim
-  key_norm : RMSNorm head_dim
+structure QKNorm (head_dim : UInt64) (dtype : DType := .Float32) where
+  query_norm : RMSNorm (device := device) head_dim dtype
+  key_norm : RMSNorm (device := device) head_dim dtype
   deriving TensorStruct
+
 
 namespace QKNorm
 
 /-- Initialize QK normalization -/
-def init (head_dim : UInt64) (eps : Float := 1e-6) : QKNorm head_dim :=
-  { query_norm := RMSNorm.init head_dim eps
-  , key_norm := RMSNorm.init head_dim eps }
+def init (head_dim : UInt64) (eps : Float := 1e-6) (device : Device := .CPU) (dtype : DType := .Float32) : IO (QKNorm (device := device) (dtype := dtype) head_dim) := do
+  pure {
+    query_norm := (← RMSNorm.init (dtype := dtype) (device := device) head_dim eps)
+    key_norm := (← RMSNorm.init (dtype := dtype) (device := device) head_dim eps) }
 
 /-- Forward pass: normalize Q and K.
     q, k: [batch, seq, n_head, head_dim] or [batch, n_head, seq, head_dim]
     Returns normalized (q, k) -/
 def forward {batch seq n_head head_dim : UInt64}
-    (qkn : QKNorm head_dim)
-    (q : T #[batch, seq, n_head, head_dim])
-    (k : T #[batch, seq, n_head, head_dim])
-    : T #[batch, seq, n_head, head_dim] × T #[batch, seq, n_head, head_dim] :=
+    (qkn : QKNorm (device := device) (dtype := dtype) head_dim)
+    (q : Tensor { dtype := dtype, device := device, shape := #[batch, seq, n_head, head_dim] })
+    (k : Tensor { dtype := dtype, device := device, shape := #[batch, seq, n_head, head_dim] })
+    : Tensor { dtype := dtype, device := device, shape := #[batch, seq, n_head, head_dim] } × Tensor { dtype := dtype, device := device, shape := #[batch, seq, n_head, head_dim] } :=
   let q_norm := qkn.query_norm.forward4d q
   let k_norm := qkn.key_norm.forward4d k
   (q_norm, k_norm)
 
 /-- Forward for attention-transposed format: [batch, n_head, seq, head_dim] -/
 def forwardAttn {batch n_head seq head_dim : UInt64}
-    (qkn : QKNorm head_dim)
-    (q : T #[batch, n_head, seq, head_dim])
-    (k : T #[batch, n_head, seq, head_dim])
-    : T #[batch, n_head, seq, head_dim] × T #[batch, n_head, seq, head_dim] :=
+    (qkn : QKNorm (device := device) (dtype := dtype) head_dim)
+    (q : Tensor { dtype := dtype, device := device, shape := #[batch, n_head, seq, head_dim] })
+    (k : Tensor { dtype := dtype, device := device, shape := #[batch, n_head, seq, head_dim] })
+    : Tensor { dtype := dtype, device := device, shape := #[batch, n_head, seq, head_dim] } × Tensor { dtype := dtype, device := device, shape := #[batch, n_head, seq, head_dim] } :=
   let q_norm := qkn.query_norm.forward5d q
   let k_norm := qkn.key_norm.forward5d k
   (q_norm, k_norm)

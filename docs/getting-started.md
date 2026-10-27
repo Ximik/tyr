@@ -26,21 +26,22 @@ day one:
 - **Executables** — `lean_exe` targets rooted in `Tests.*` and `Examples.*`;
   binaries land in `.lake/build/bin/`.
 
-The runtime types a first program touches:
+A first program uses indexed tensors:
 
 ```lean
--- Tyr/Basic.lean:101
-inductive Device where
-  | CUDA : UInt64 → Device
-  | CPU
-  | MPS
+import Tyr.Typed
+open torch
 
--- Tyr/Basic.lean:108  -- the shape-indexed tensor type
-def T (_ : Shape) : Type := TSpec.type
-
--- Tyr/Torch.lean:152  -- MPS > CUDA > CPU
-def getBestDevice : IO Device
+def exampleTensor : Tensor { shape := #[2, 3], dtype := .Float32, device := .CPU } :=
+  Tensor.ones #[2, 3]
 ```
+
+`Tensor σ` records shape, dtype, and concrete device. The example fixes shape, dtype,
+and CPU placement. `Device.CPU` is always available; acquire accelerators with
+`Device.cuda index` or `Device.mps` in IO. `getBestDevice` from `Tyr.Torch`
+acquires MPS, then CUDA, then CPU according to availability. The acquired value
+remains the device index for subsequent tensor operations. Native handles are
+confined to adapters behind the indexed API.
 
 ## Dependencies
 
@@ -269,7 +270,7 @@ def main : IO Unit := do
 
   -- data/shakespeare_char/train.bin ships in the repo (nanoGPT u16 format)
   let nTrain ← data.binFileTokenCount "data/shakespeare_char/train.bin"
-  let trainData ← data.loadU16Bin nTrain "data/shakespeare_char/train.bin"
+  let trainData ← Tensor.loadU16Bin nTrain "data/shakespeare_char/train.bin"
 
   let params ← GPTParams.init modelCfg trainCfg.device
   let opt := Optim.adamw (lr := trainCfg.learningRate) -- Optim.lean:190
@@ -283,7 +284,7 @@ framework.
 
 ## Related guides
 
-- [Core tensors](core/tensors.md) — `T s`, shapes, devices, and the ops you call next
+- [Core tensors](core/tensors.md) — `Tensor σ`, shapes, dtypes, devices, and the ops you call next
 - [Data loading](data.md) — batch iterators and file formats beyond raw `.bin`
 - [FFI and build internals](ffi-and-build.md) — `cc/` reference counting and link layout
 - [Examples and testing](examples-and-testing.md) — full example catalog and test conventions

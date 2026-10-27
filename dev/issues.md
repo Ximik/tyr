@@ -40,7 +40,7 @@ public launch article.
   - `Tyr/NN/*.lean`: Move functional primitives to dedicated files.
 
 ### A02: TensorStruct Higher-Kinded Data (HKD)
-- **Issue**: `TensorStruct` is hardcoded to `T s` leaves. This makes generic `tree_transpose` (e.g., `Model (Array α) -> Array (Model α)`) nearly impossible to express cleanly.
+- **Issue**: `TensorStruct` traverses indexed `Tensor σ` leaves. This makes generic `tree_transpose` (e.g., `Model (Array α) -> Array (Model α)`) nearly impossible to express cleanly.
 - **Recommendation**: Refactor model structures to be parameterized by a leaf provider: `Linear (f : Shape -> Type)`.
 
 ### A03: Redundant Linear/Affine Wrappers

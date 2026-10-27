@@ -29,7 +29,7 @@ Most model code should consume higher-level APIs rather than manipulating this l
 
 namespace Tyr.AD
 
-open torch (Static TensorStruct T)
+open torch (Static TensorStruct)
 open Lean.IR
 
 -- Manifold types (DifferentiableManifold, Stiefel, Orthogonal, Grassmann, etc.)

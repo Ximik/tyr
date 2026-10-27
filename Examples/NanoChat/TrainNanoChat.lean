@@ -118,10 +118,11 @@ def getRankFromEnv (env : TrainEnvState) : UInt64 :=
   env.rank?.getD (getLocalRankFromEnv env)
 
 /-- Render a device for logging. -/
-def deviceToString : Device → String
-  | Device.MPS => "MPS"
-  | Device.CPU => "CPU"
-  | Device.CUDA n => s!"CUDA:{n}"
+def deviceToString (device : Device) : String :=
+  match device.kind with
+  | DeviceKind.MPS => "MPS"
+  | DeviceKind.CPU => "CPU"
+  | DeviceKind.CUDA n => s!"CUDA:{n}"
 
 /-- Resolve training device from TYR_DEVICE.
     In distributed mode, CUDA ordinal follows LOCAL_RANK (per-node index). -/
@@ -130,16 +131,16 @@ def resolveTrainingDevice (_rank localRank : UInt64) (isDistributed : Bool) (env
   let requested? := env.requestedDevice?
   match requested? with
   | some "cpu" => pure Device.CPU
-  | some "mps" => pure Device.MPS
-  | some "cuda" => pure (Device.CUDA cudaOrdinal)
+  | some "mps" => Device.mps
+  | some "cuda" => Device.cuda cudaOrdinal
   | some "auto" | none =>
     if isDistributed then
-      if ← cuda_is_available then pure (Device.CUDA cudaOrdinal) else pure Device.CPU
+      if ← cuda_is_available then Device.cuda cudaOrdinal else pure Device.CPU
     else
       getBestDevice
   | some _ =>
     if isDistributed then
-      if ← cuda_is_available then pure (Device.CUDA cudaOrdinal) else pure Device.CPU
+      if ← cuda_is_available then Device.cuda cudaOrdinal else pure Device.CPU
     else
       getBestDevice
 

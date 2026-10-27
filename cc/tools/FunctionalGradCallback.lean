@@ -1,0 +1,29 @@
+import Init
+
+-- Compile the callback with Lean's real ownership transformations, while
+-- avoiding project module builds in this native subprocess regression.
+private opaque RawSpec : NonemptyType := ⟨Unit, inferInstance⟩
+private def Raw : Type := RawSpec.type
+private instance : Nonempty Raw := RawSpec.property
+
+@[extern "lean_torch_reshape_exact"] private opaque reshape
+    (shape : Array UInt64) (input : @& Raw) (target : @& Array UInt64) : Raw
+@[extern "lean_torch_sum"] private opaque sum
+    (shape : Array UInt64) (input : @& Raw) (dims : Option (Array UInt64))
+    (keepdim : Bool) : Raw
+
+@[export tyr_test_callback_sum] private def sumCallback
+    (fallback : Raw) (inputs : Array Raw) : Raw :=
+  match inputs[0]? with
+  | some input => sum #[2] input none false
+  | none => fallback
+
+@[export tyr_test_callback_identity] private def identityCallback
+    (fallback : Raw) (inputs : Array Raw) : Raw :=
+  inputs[0]?.getD fallback
+
+@[export tyr_test_callback_throw] private def throwingCallback
+    (fallback : Raw) (inputs : Array Raw) : Raw :=
+  match inputs[0]? with
+  | some input => reshape #[2] input #[3]
+  | none => fallback

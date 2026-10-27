@@ -65,15 +65,10 @@ def weightedSum {s : Nat} [DiffEqSpace Y] (coeffs : Vector s Time)
 class DiffEqSeminorm (α : Type) where
   rms : α → Scalar
 
-instance (priority := 50) [TensorStruct α] : DiffEqSpace α where
+instance (priority := 50) [TensorStruct α] [FloatingTensorStruct α] : DiffEqSpace α where
   add := TensorStruct.add
   sub := TensorStruct.sub
   scale s x := TensorStruct.scale x s
-
-instance {s : Shape} : DiffEqSpace (T s) where
-  add := torch.add
-  sub := torch.sub
-  scale s x := torch.mul_scalar x s
 
 instance : DiffEqSpace Float where
   add := (· + ·)
@@ -234,32 +229,15 @@ instance [DiffEqElem α] : DiffEqElem (Option α) where
     | none, none => none
     | _, _ => panic! "DiffEqElem.div: Option mismatch (some vs none)"
 
-private def tensorMaximum {s : Shape} (a b : T s) : T s :=
-  where_ (gt a b) a b
+instance (priority := 50) [TensorStruct α] [FloatingTensorStruct α] : DiffEqElem α where
+  abs := FloatingTensorStruct.map (fun t => by simpa using Tensor.abs t)
+  max := FloatingTensorStruct.zipWith Tensor.maximum
+  addScalar s := FloatingTensorStruct.map (fun t => Tensor.addScalar t s)
+  div := FloatingTensorStruct.zipWith (fun a b => by simpa using Tensor.div a b)
 
-instance {s : Shape} : DiffEqElem (T s) where
-  abs := nn.abs
-  max := tensorMaximum
-  addScalar s x := add_scalar x s
-  div := nn.div
-
-private def rmsTensor {s : Shape} (t : T s) : Float :=
-  let sq := mul t t
-  let mean := nn.meanAll sq
-  let root := nn.sqrt mean
-  nn.item root
-
-instance {s : Shape} : DiffEqSeminorm (T s) where
-  rms := rmsTensor
-
-instance (priority := 50) [TensorStruct α] : DiffEqElem α where
-  abs := TensorStruct.map (fun t => nn.abs t)
-  max := TensorStruct.zipWith tensorMaximum
-  addScalar s := TensorStruct.map (fun t => add_scalar t s)
-  div := TensorStruct.zipWith nn.div
-
-instance (priority := 50) [TensorStruct α] : DiffEqSeminorm α where
-  rms x := TensorStruct.fold (fun t acc => max acc (DiffEqSeminorm.rms t)) 0.0 x
+instance (priority := 50) [TensorStruct α] [FloatingTensorStruct α] : DiffEqSeminorm α where
+  rms x := FloatingTensorStruct.fold (fun t acc => max acc (Float.sqrt (
+    Tensor.item (Tensor.sumAll (Tensor.mul t t)) / (TensorSpec.numelOfShape t.shape).toFloat))) 0.0 x
 
 @[inline] def axpy [DiffEqSpace α] (a : Scalar) (x y : α) : α :=
   DiffEqSpace.add (DiffEqSpace.scale a x) y

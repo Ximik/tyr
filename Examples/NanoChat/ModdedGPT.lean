@@ -15,13 +15,16 @@
 
   Architecture: 11 layers, 6 heads, 128 head_dim, 768 model_dim
 -/
-import Tyr.Torch
+import Tyr.Typed.Neural
 import Tyr.TensorStruct
 import Tyr.Module.Derive
+import Tyr.TensorStruct.DeriveCast
 
 namespace torch.moddedGpt
 
 open torch
+
+variable {device : Device}
 
 /-- Model configuration matching modded-nanogpt -/
 structure Config where
@@ -102,24 +105,24 @@ def computeWindowSizes (cfg : Config) : Array (Option UInt64) := Id.run do
 -/
 structure YarnRotary (headDim maxSeqLen : UInt64) where
   /-- Cosine frequencies [maxSeqLen, headDim/2] for half-truncated RoPE -/
-  cos : T #[maxSeqLen, headDim / 2]
+  cos : Tensor { shape := #[maxSeqLen, headDim / 2], dtype := .Float32, device := device }
   /-- Sine frequencies [maxSeqLen, headDim/2] for half-truncated RoPE -/
-  sin : T #[maxSeqLen, headDim / 2]
+  sin : Tensor { shape := #[maxSeqLen, headDim / 2], dtype := .Float32, device := device }
   /-- Base angular frequencies [headDim/2] -/
-  angularFreq : T #[headDim / 2]
+  angularFreq : Tensor { shape := #[headDim / 2], dtype := .Float32, device := device }
   /-- Attention scale factor -/
   attnScale : Float := 0.1
   deriving Repr
 
 /-- Initialize YaRN rotary embeddings -/
-def YarnRotary.init (headDim maxSeqLen : UInt64) (base : Float := 500000.0)
-    : IO (YarnRotary headDim maxSeqLen) := do
+def YarnRotary.init (headDim maxSeqLen : UInt64) (base : Float := 500000.0) (device : Device := .CPU)
+    : IO (YarnRotary (device := device) headDim maxSeqLen) := do
   -- computeFreqs returns [maxSeqLen, headDim/2]
-  let (cosHalf, sinHalf) ← rotary.computeFreqs maxSeqLen headDim base
-  let angularFreq := zeros #[headDim / 2]
+  let (cosHalf, sinHalf) := Tensor.rotaryFreqs maxSeqLen headDim base
+  let angularFreq := Tensor.zeros (device := device) #[headDim / 2]
   return {
-    cos := cosHalf
-    sin := sinHalf
+    cos := cosHalf.to device
+    sin := sinHalf.to device
     angularFreq := angularFreq
     attnScale := 0.1
   }
@@ -129,8 +132,8 @@ def YarnRotary.init (headDim maxSeqLen : UInt64) (base : Float := 500000.0)
     When extending to longer sequences, we interpolate the
     rotary frequencies to maintain position information.
 -/
-def YarnRotary.applyExtension (yarn : YarnRotary headDim maxSeqLen)
-    (_oldWindow _newWindow : UInt64) : YarnRotary headDim maxSeqLen :=
+def YarnRotary.applyExtension (yarn : YarnRotary (device := device) headDim maxSeqLen)
+    (_oldWindow _newWindow : UInt64) : YarnRotary (device := device) headDim maxSeqLen :=
   -- YaRN frequency interpolation would go here
   -- For now, return unchanged
   yarn
@@ -140,19 +143,19 @@ def YarnRotary.applyExtension (yarn : YarnRotary headDim maxSeqLen)
 /-- Arguments passed to attention layers during forward pass -/
 structure AttnArgs (batch maxSeq nHead headDim : UInt64) where
   /-- Value embeddings for current layer (optional) -/
-  valueEmbed : Option (T #[batch, maxSeq, nHead * headDim])
+  valueEmbed : Option (Tensor { shape := #[batch, maxSeq, nHead * headDim], dtype := .Float32, device := device })
   /-- SA (scaled attention) lambda for this layer -/
   saLambda : Float
   /-- Cumulative sequence lengths for variable-length attention -/
-  seqlens : Option (T #[batch + 1])
+  seqlens : Option (Tensor { shape := #[batch + 1], dtype := .Int64, device := device })
   /-- Short window size (in blocks) -/
   wsShort : UInt64
   /-- Long window size (in blocks) -/
   wsLong : UInt64
   /-- Cosine frequencies for RoPE -/
-  cos : T #[maxSeq, headDim]
+  cos : Tensor { shape := #[maxSeq, headDim], dtype := .Float32, device := device }
   /-- Sine frequencies for RoPE -/
-  sin : T #[maxSeq, headDim]
+  sin : Tensor { shape := #[maxSeq, headDim], dtype := .Float32, device := device }
   /-- Attention scale factor -/
   attnScale : Float
   /-- Whether to shift keys for induction -/
@@ -164,7 +167,7 @@ structure AttnArgs (batch maxSeq nHead headDim : UInt64) where
 /-- Linear layer that can optionally use FP8 quantization -/
 structure CastedLinear (inDim outDim : UInt64) where
   /-- Weight matrix [outDim, inDim] -/
-  weight : T #[outDim, inDim]
+  weight : Tensor { shape := #[outDim, inDim], dtype := .Float32, device := device }
   /-- Whether to use FP8 training (requires H100+) -/
   useFp8 : Bool := false
   /-- Learning rate multiplier -/
@@ -175,11 +178,11 @@ structure CastedLinear (inDim outDim : UInt64) where
 
 /-- Initialize CastedLinear with scaled random weights -/
 def CastedLinear.init (inDim outDim : UInt64) (scale : Float := 0.02)
-    (lrMul wdMul : Float := 1.0) : IO (CastedLinear inDim outDim) := do
-  let weight ← randn #[outDim, inDim] false
-  let scaledWeight := mul_scalar weight scale
+    (lrMul wdMul : Float := 1.0) (device : Device := .CPU) : IO (CastedLinear (device := device) inDim outDim) := do
+  let weight ← Tensor.randn (device := device) #[outDim, inDim] false
+  let scaledWeight := Tensor.mulScalar weight scale
   return {
-    weight := autograd.set_requires_grad (autograd.detach scaledWeight) true
+    weight := ← Tensor.parameter (Tensor.detach scaledWeight)
     useFp8 := false
     lrMul := lrMul
     wdMul := wdMul
@@ -187,9 +190,9 @@ def CastedLinear.init (inDim outDim : UInt64) (scale : Float := 0.02)
 
 /-- Forward pass for CastedLinear (3D input) -/
 def CastedLinear.forward {batch seq inDim outDim : UInt64}
-    (layer : CastedLinear inDim outDim) (x : T #[batch, seq, inDim])
-    : T #[batch, seq, outDim] :=
-  linear3d x layer.weight
+    (layer : CastedLinear (device := device) inDim outDim) (x : Tensor { shape := #[batch, seq, inDim], dtype := .Float32, device := device })
+    : Tensor { shape := #[batch, seq, outDim], dtype := .Float32, device := device } :=
+  Tensor.linear3d x layer.weight
 
 /-! ## Causal Self-Attention -/
 
@@ -201,106 +204,106 @@ def CastedLinear.forward {batch seq inDim outDim : UInt64}
     - Variable window sizes for sliding window attention
     - Zero-initialized output projection (modded-nanogpt style)
 
-    Weight shapes for linear3d: [out_dim, in_dim] since it computes x @ W.T
+    Weight shapes for Tensor.linear3d: [out_dim, in_dim] since it computes x @ W.T
 -/
 structure CausalSelfAttention (dim headDim numHeads : UInt64) where
   /-- Query projection [numHeads * headDim, dim] -/
-  wQ : T #[numHeads * headDim, dim]
+  wQ : Tensor { shape := #[numHeads * headDim, dim], dtype := .Float32, device := device }
   /-- Key projection [numHeads * headDim, dim] -/
-  wK : T #[numHeads * headDim, dim]
+  wK : Tensor { shape := #[numHeads * headDim, dim], dtype := .Float32, device := device }
   /-- Value projection [numHeads * headDim, dim] -/
-  wV : T #[numHeads * headDim, dim]
+  wV : Tensor { shape := #[numHeads * headDim, dim], dtype := .Float32, device := device }
   /-- Output projection [dim, numHeads * headDim] -/
-  wO : T #[dim, numHeads * headDim]
+  wO : Tensor { shape := #[dim, numHeads * headDim], dtype := .Float32, device := device }
   deriving Repr, TensorStruct
 
 /-- Initialize CausalSelfAttention with proper initialization -/
-def CausalSelfAttention.init (dim headDim numHeads : UInt64)
-    : IO (CausalSelfAttention dim headDim numHeads) := do
+def CausalSelfAttention.init (dim headDim numHeads : UInt64) (device : Device := .CPU)
+    : IO (CausalSelfAttention (device := device) dim headDim numHeads) := do
   -- Uniform init with bound = sqrt(3) * (1/sqrt(dim)) for same std as normal
   let s := Float.sqrt 3.0 / Float.sqrt dim.toFloat
-  -- Weight shapes: [out_dim, in_dim] for linear3d
-  let wQ ← randn #[numHeads * headDim, dim] false
-  let wQ := mul_scalar wQ s
-  let wK ← randn #[numHeads * headDim, dim] false
-  let wK := mul_scalar wK s
-  let wV ← randn #[numHeads * headDim, dim] false
-  let wV := mul_scalar wV s
+  -- Weight shapes: [out_dim, in_dim] for Tensor.linear3d
+  let wQ ← Tensor.randn (device := device) #[numHeads * headDim, dim] false
+  let wQ := Tensor.mulScalar wQ s
+  let wK ← Tensor.randn (device := device) #[numHeads * headDim, dim] false
+  let wK := Tensor.mulScalar wK s
+  let wV ← Tensor.randn (device := device) #[numHeads * headDim, dim] false
+  let wV := Tensor.mulScalar wV s
   -- Output projection initialized to zero (modded-nanogpt style)
-  let wO := zeros #[dim, numHeads * headDim]
+  let wO := Tensor.zeros (device := device) #[dim, numHeads * headDim]
   return {
-    wQ := autograd.set_requires_grad (autograd.detach wQ) true
-    wK := autograd.set_requires_grad (autograd.detach wK) true
-    wV := autograd.set_requires_grad (autograd.detach wV) true
-    wO := autograd.set_requires_grad (autograd.detach wO) true
+    wQ := ← Tensor.parameter (Tensor.detach wQ)
+    wK := ← Tensor.parameter (Tensor.detach wK)
+    wV := ← Tensor.parameter (Tensor.detach wV)
+    wO := ← Tensor.parameter (Tensor.detach wO)
   }
 
 /-- Functional RMSNorm (no learnable parameters) -/
-def rmsNorm3d {batch seq dim : UInt64} (x : T #[batch, seq, dim]) : T #[batch, seq, dim] :=
-  nn.rmsNorm x
+def rmsNorm3d {batch seq dim : UInt64} (x : Tensor { shape := #[batch, seq, dim], dtype := .Float32, device := device }) : Tensor { shape := #[batch, seq, dim], dtype := .Float32, device := device } :=
+  Tensor.rmsNorm x
 
 /-- Forward pass for attention with rotary embeddings and QK norm.
     x: [batch, seq, dim]
     Returns: [batch, seq, dim] -/
 def CausalSelfAttention.forward {batch seq dim headDim numHeads rotaryLen : UInt64}
-    (attn : CausalSelfAttention dim headDim numHeads)
-    (x : T #[batch, seq, dim])
-    (yarn : YarnRotary headDim rotaryLen)
+    (attn : CausalSelfAttention (device := device) dim headDim numHeads)
+    (x : Tensor { shape := #[batch, seq, dim], dtype := .Float32, device := device })
+    (yarn : YarnRotary (device := device) headDim rotaryLen)
     (windowSize : Option UInt64 := none)
-    (valueEmbed : Option (T #[batch, seq, numHeads * headDim]) := none)
-    (valueMix : T #[] := zeros #[])
-    : T #[batch, seq, dim] :=
+    (valueEmbed : Option (Tensor { shape := #[batch, seq, numHeads * headDim], dtype := .Float32, device := device }) := none)
+    (valueMix : Tensor { shape := #[], dtype := .Float32, device := device } := Tensor.zeros (device := device) #[])
+    : Tensor { shape := #[batch, seq, dim], dtype := .Float32, device := device } :=
   -- Project to Q, K, V: [batch, seq, numHeads * headDim]
-  let q := linear3d x attn.wQ
-  let k := linear3d x attn.wK
-  let vBase := linear3d x attn.wV
+  let q := Tensor.linear3d x attn.wQ
+  let k := Tensor.linear3d x attn.wK
+  let vBase := Tensor.linear3d x attn.wV
 
   -- Value-embedding blend (modded-nanogpt style): v := (1-λ)*v + λ*ve.
   let v := match valueEmbed with
     | some ve =>
-      let mix := nn.sigmoid valueMix
-      let one : T #[] := (ones #[]).to mix.device
+      let mix := Tensor.sigmoid valueMix
+      let one : Tensor { shape := #[], dtype := .Float32, device := device } := (Tensor.ones (device := device) #[]).to mix.device
       let oneMinus := one - mix
-      let mixExpanded := nn.expand mix #[batch, seq, numHeads * headDim]
-      let oneMinusExpanded := nn.expand oneMinus #[batch, seq, numHeads * headDim]
+      let mixExpanded := Tensor.expand mix #[batch, seq, numHeads * headDim]
+      let oneMinusExpanded := Tensor.expand oneMinus #[batch, seq, numHeads * headDim]
       (vBase * oneMinusExpanded) + (ve * mixExpanded)
     | none =>
       vBase
 
   -- Reshape to [batch, seq, numHeads, headDim] for rotary/attention
-  let q := reshape q #[batch, seq, numHeads, headDim]
-  let k := reshape k #[batch, seq, numHeads, headDim]
-  let v := reshape v #[batch, seq, numHeads, headDim]
+  let q := Tensor.reshapeChecked q #[batch, seq, numHeads, headDim]
+  let k := Tensor.reshapeChecked k #[batch, seq, numHeads, headDim]
+  let v := Tensor.reshapeChecked v #[batch, seq, numHeads, headDim]
 
   -- Slice rotary embeddings to seq length (cos/sin are [rotaryLen, headDim])
-  let cos := data.slice2d yarn.cos 0 seq
-  let sin := data.slice2d yarn.sin 0 seq
+  let cos := Tensor.sliceChecked yarn.cos 0 0 seq #[seq, headDim / 2]
+  let sin := Tensor.sliceChecked yarn.sin 0 0 seq #[seq, headDim / 2]
 
   -- Apply rotary embeddings (uses half-dim rotation)
-  let q := rotary.applyRotaryEmb q cos sin
-  let k := rotary.applyRotaryEmb k cos sin
+  let q := Tensor.applyRotary q cos sin
+  let k := Tensor.applyRotary k cos sin
 
   -- QK normalization (nanochat style: normalize queries and keys)
-  let q := nn.rmsNorm q
-  let k := nn.rmsNorm k
+  let q := Tensor.rmsNorm q
+  let k := Tensor.rmsNorm k
 
   -- Transpose to [batch, numHeads, seq, headDim] for attention
-  let q := nn.transpose_for_attention q
-  let k := nn.transpose_for_attention k
-  let v := nn.transpose_for_attention v
+  let q := Tensor.splitHeads q
+  let k := Tensor.splitHeads k
+  let v := Tensor.splitHeads v
 
   -- Scaled dot-product attention with optional sliding window
   -- Using GQA window function for sliding window, regular SDPA for full context
   let attnOut := match windowSize with
-    | some ws => nn.scaledDotProductAttentionGQAWindow q k v 0.0 true false ws
-    | none => nn.scaled_dot_product_attention q k v 0.0 true
+    | some ws => Tensor.attentionWindow q k v true false ws
+    | none => Tensor.attentionGQA q k v true
 
   -- Transpose back to [batch, seq, numHeads, headDim]
-  let attnOut := nn.transpose_from_attention attnOut
+  let attnOut := Tensor.joinHeads attnOut
 
   -- Reshape to [batch, seq, numHeads * headDim] and project
-  let attnOut := reshape attnOut #[batch, seq, numHeads * headDim]
-  let output := linear3d attnOut attn.wO
+  let attnOut := Tensor.reshapeChecked attnOut #[batch, seq, numHeads * headDim]
+  let output := Tensor.linear3d attnOut attn.wO
 
   output
 
@@ -318,32 +321,33 @@ def CausalSelfAttention.forward {batch seq dim headDim numHeads rotaryLen : UInt
 -/
 structure MLP (dim : UInt64) where
   /-- Expansion weights [4*dim, dim] -/
-  cFc : T #[4 * dim, dim]
+  cFc : Tensor { shape := #[4 * dim, dim], dtype := .Float32, device := device }
   /-- Projection weights [4*dim, dim] (transposed layout) -/
-  cProj : T #[4 * dim, dim]
+  cProj : Tensor { shape := #[4 * dim, dim], dtype := .Float32, device := device }
   deriving Repr, TensorStruct
 
 /-- Initialize MLP with scaled weights -/
-def MLP.init (dim : UInt64) : IO (MLP dim) := do
-  let cFc ← randn #[4 * dim, dim] false
+def MLP.init (dim : UInt64) (device : Device := .CPU) : IO (MLP (device := device) dim) := do
+  let cFc ← Tensor.randn (device := device) #[4 * dim, dim] false
   -- c_proj initialized to zero (modded-nanogpt style)
-  let cProj := zeros #[4 * dim, dim]
+  let cProj := Tensor.zeros (device := device) #[4 * dim, dim]
   return {
-    cFc := autograd.set_requires_grad (autograd.detach (mul_scalar cFc 0.02)) true
-    cProj := autograd.set_requires_grad (autograd.detach cProj) true
+    cFc := ← Tensor.parameter (Tensor.detach (Tensor.mulScalar cFc 0.02))
+    cProj := ← Tensor.parameter (Tensor.detach cProj)
   }
 
 /-- Forward pass for MLP with ReLU^2 activation -/
-def MLP.forward {batch seq dim : UInt64} (mlp : MLP dim) (x : T #[batch, seq, dim])
-    : IO (T #[batch, seq, dim]) := do
+def MLP.forward {batch seq dim : UInt64} (mlp : MLP (device := device) dim) (x : Tensor { shape := #[batch, seq, dim], dtype := .Float32, device := device })
+    : IO (Tensor { shape := #[batch, seq, dim], dtype := .Float32, device := device }) := do
   -- x @ c_fc.T -> [batch, seq, 4*dim]
-  let h := linear3d x mlp.cFc
+  let h := Tensor.linear3d x mlp.cFc
   -- ReLU^2 activation
-  let h := nn.reluSquared h
+  let h := Tensor.relu h
+  let h := h * h
   -- h @ c_proj -> [batch, seq, dim] (transposed weight layout)
   -- Note: In transposed layout, we use the transpose for the projection
-  let cProjT := nn.transpose2d mlp.cProj
-  let out := linear3d h cProjT
+  let cProjT := Tensor.transpose2d mlp.cProj
+  let out := Tensor.linear3d h cProjT
   return out
 
 /-! ## Transformer Block -/
@@ -355,28 +359,28 @@ def MLP.forward {batch seq dim : UInt64} (mlp : MLP dim) (x : T #[batch, seq, di
 -/
 structure Block (dim headDim numHeads : UInt64) where
   /-- Attention layer (None for layer 6) -/
-  attn : Option (CausalSelfAttention dim headDim numHeads)
+  attn : Option (CausalSelfAttention (device := device) dim headDim numHeads)
   /-- MLP layer -/
-  mlp : MLP dim
+  mlp : MLP (device := device) dim
   deriving Repr, TensorStruct
 
-instance {inDim outDim : UInt64} : Inhabited (CastedLinear inDim outDim) where
-  default := { weight := zeros _ }
+instance {inDim outDim : UInt64} : Inhabited (CastedLinear (device := device) inDim outDim) where
+  default := { weight := Tensor.zeros (device := device) _ }
 
-instance {dim : UInt64} : Inhabited (MLP dim) where
-  default := { cFc := zeros _, cProj := zeros _ }
+instance {dim : UInt64} : Inhabited (MLP (device := device) dim) where
+  default := { cFc := Tensor.zeros (device := device) _, cProj := Tensor.zeros (device := device) _ }
 
-instance {dim headDim numHeads : UInt64} : Inhabited (CausalSelfAttention dim headDim numHeads) where
-  default := { wQ := zeros _, wK := zeros _, wV := zeros _, wO := zeros _ }
+instance {dim headDim numHeads : UInt64} : Inhabited (CausalSelfAttention (device := device) dim headDim numHeads) where
+  default := { wQ := Tensor.zeros (device := device) _, wK := Tensor.zeros (device := device) _, wV := Tensor.zeros (device := device) _, wO := Tensor.zeros (device := device) _ }
 
-instance {dim headDim numHeads : UInt64} : Inhabited (Block dim headDim numHeads) where
+instance {dim headDim numHeads : UInt64} : Inhabited (Block (device := device) dim headDim numHeads) where
   default := { attn := none, mlp := default }
 
 /-- Initialize Block -/
-def Block.init (dim headDim numHeads : UInt64) (skipAttn : Bool := false)
-    : IO (Block dim headDim numHeads) := do
-  let attn ← if skipAttn then pure none else Option.some <$> CausalSelfAttention.init dim headDim numHeads
-  let mlp ← MLP.init dim
+def Block.init (dim headDim numHeads : UInt64) (skipAttn : Bool := false) (device : Device := .CPU)
+    : IO (Block (device := device) dim headDim numHeads) := do
+  let attn ← if skipAttn then pure none else Option.some <$> CausalSelfAttention.init (device := device) dim headDim numHeads
+  let mlp ← MLP.init (device := device) dim
   return { attn := attn, mlp := mlp }
 
 /-! ## Full Model Parameters -/
@@ -392,40 +396,41 @@ def Block.init (dim headDim numHeads : UInt64) (skipAttn : Bool := false)
 -/
 structure Scalars (nLayer : UInt64) where
   /-- All scalars packed into one tensor for efficiency -/
-  values : T #[nLayer * 4 + 8]  -- 4 per layer + 8 global
+  values : Tensor { shape := #[nLayer * 4 + 8], dtype := .Float32, device := device }  -- 4 per layer + 8 global
   deriving Repr, TensorStruct
 
 /-- Initialize scalars with modded-nanogpt defaults -/
-def Scalars.init (nLayer : UInt64) : Scalars nLayer := {
-  values := autograd.set_requires_grad (mul_scalar (ones #[nLayer * 4 + 8]) 1.1) true
-}
+def Scalars.init (nLayer : UInt64) (device : Device := .CPU) : IO (Scalars (device := device) nLayer) := do
+  pure {
+    values := ← Tensor.parameter (Tensor.mulScalar (Tensor.ones (device := device) #[nLayer * 4 + 8]) 1.1)
+  }
 
 /-! ## Scalar/Value Helper Utilities -/
 
 /-- Extract scalar tensor at `idx` from a 1D tensor. -/
-private def scalarAt {n : UInt64} (values : T #[n]) (idx : UInt64) : T #[] :=
-  let oneElem : T #[1] := data.slice1d (n := n) (m := 1) values idx.toInt64 (idx.toInt64 + 1)
-  reshape oneElem #[]
+private def scalarAt {n : UInt64} (values : Tensor { shape := #[n], dtype := .Float32, device := device }) (idx : UInt64) : Tensor { shape := #[], dtype := .Float32, device := device } :=
+  let oneElem : Tensor { shape := #[1], dtype := .Float32, device := device } := Tensor.sliceChecked values 0 idx 1 #[1]
+  Tensor.reshapeChecked oneElem #[]
 
 /-- Extract scalar at `idx` and squash to (0, 1). -/
-private def scalarSigmoidAt {n : UInt64} (values : T #[n]) (idx : UInt64) : T #[] :=
-  nn.sigmoid (scalarAt values idx)
+private def scalarSigmoidAt {n : UInt64} (values : Tensor { shape := #[n], dtype := .Float32, device := device }) (idx : UInt64) : Tensor { shape := #[], dtype := .Float32, device := device } :=
+  Tensor.sigmoid (scalarAt values idx)
 
 /-- Scale a tensor by a scalar tensor, keeping gradient flow through the scalar. -/
-private def scaleByScalar {s : Shape} (x : T s) (scalar : T #[]) : T s :=
-  let expanded := nn.expand scalar s
+private def scaleByScalar {s : Shape} (x : Tensor { shape := s, dtype := .Float32, device := device }) (scalar : Tensor { shape := #[], dtype := .Float32, device := device }) : Tensor { shape := s, dtype := .Float32, device := device } :=
+  let expanded := Tensor.expand scalar s
   x * expanded
 
 /-- Blend two tensors with scalar weights. -/
-private def blendByScalars {s : Shape} (x y : T s) (sx sy : T #[]) : T s :=
+private def blendByScalars {s : Shape} (x y : Tensor { shape := s, dtype := .Float32, device := device }) (sx sy : Tensor { shape := #[], dtype := .Float32, device := device }) : Tensor { shape := s, dtype := .Float32, device := device } :=
   scaleByScalar x sx + scaleByScalar y sy
 
 /-- Value-embedding routing pattern used by modded-nanogpt:
     assign value embeddings to early and late layers, skip middle layers. -/
 private def layerValueEmbed {cfg : Config} {batch seq : UInt64}
-    (valueEmbeds : Array (T #[batch, seq, cfg.modelDim]))
+    (valueEmbeds : Array (Tensor { shape := #[batch, seq, cfg.modelDim], dtype := .Float32, device := device }))
     (layerIdx : Nat)
-    : Option (T #[batch, seq, cfg.modelDim]) := Id.run do
+    : Option (Tensor { shape := #[batch, seq, cfg.modelDim], dtype := .Float32, device := device }) := Id.run do
   let nLayers := cfg.nLayer.toNat
   let nValue := valueEmbeds.size
   if nLayers == 0 || nValue == 0 then
@@ -441,47 +446,48 @@ private def layerValueEmbed {cfg : Config} {batch seq : UInt64}
 /-- Full modded GPT model parameters -/
 structure ModdedGPTParams (cfg : Config) where
   /-- Token embeddings [vocabSize, modelDim] -/
-  embed : T #[cfg.vocabSize, cfg.modelDim]
+  embed : Tensor { shape := #[cfg.vocabSize, cfg.modelDim], dtype := .Float32, device := device }
   /-- Smear gate (forward-shift tokens) -/
-  smearGate : CastedLinear 12 1
+  smearGate : CastedLinear (device := device) 12 1
   /-- Value embeddings (3 separate layers) -/
-  valueEmbeds : Array (T #[cfg.vocabSize, cfg.modelDim])
+  valueEmbeds : Array (Tensor { shape := #[cfg.vocabSize, cfg.modelDim], dtype := .Float32, device := device })
   /-- Transformer blocks -/
-  blocks : Array (Block cfg.modelDim cfg.headDim cfg.nHead)
+  blocks : Array (Block (device := device) cfg.modelDim cfg.headDim cfg.nHead)
   /-- Language model head (weight-tied with embed in forward) -/
-  lmHead : CastedLinear cfg.modelDim cfg.vocabSize
+  lmHead : CastedLinear (device := device) cfg.modelDim cfg.vocabSize
   /-- Learnable scalars -/
-  scalars : Scalars cfg.nLayer
+  scalars : Scalars (device := device) cfg.nLayer
   deriving Repr, TensorStruct
 
 /-- Initialize full model -/
-def ModdedGPTParams.init (cfg : Config) : IO (ModdedGPTParams cfg) := do
+def ModdedGPTParams.init (cfg : Config) (device : Device := .CPU) : IO (ModdedGPTParams (device := device) cfg) := do
   -- Token embeddings
-  let embed ← randn #[cfg.vocabSize, cfg.modelDim] false
-  let embed := autograd.set_requires_grad (autograd.detach (mul_scalar embed 0.02)) true
+  let embed ← Tensor.randn (device := device) #[cfg.vocabSize, cfg.modelDim] false
+  let embed ← Tensor.setRequiresGrad (Tensor.detach (Tensor.mulScalar embed 0.02)) true
 
   -- Smear gate
-  let smearGate ← CastedLinear.init 12 1 0.02
+  let smearGate ← CastedLinear.init (device := device) 12 1 0.02
 
   -- Value embeddings (3 layers)
   let mut valueEmbeds := #[]
   for _ in [:cfg.numValueEmbeds] do
-    let ve ← randn #[cfg.vocabSize, cfg.modelDim] false
-    valueEmbeds := valueEmbeds.push (autograd.set_requires_grad (autograd.detach (mul_scalar ve 0.02)) true)
+    let ve ← Tensor.randn (device := device) #[cfg.vocabSize, cfg.modelDim] false
+    let ve ← Tensor.parameter (Tensor.mulScalar ve 0.02)
+    valueEmbeds := valueEmbeds.push ve
 
   -- Transformer blocks
   let mut blocks := #[]
   for i in [:cfg.nLayer.toNat] do
     -- Layer 6 (0-indexed: 5) has attention skipped
     let skipAttn := i == 5
-    let block ← Block.init cfg.modelDim cfg.headDim cfg.nHead skipAttn
+    let block ← Block.init (device := device) cfg.modelDim cfg.headDim cfg.nHead skipAttn
     blocks := blocks.push block
 
   -- LM head
-  let lmHead ← CastedLinear.init cfg.modelDim cfg.vocabSize 0.02
+  let lmHead ← CastedLinear.init (device := device) cfg.modelDim cfg.vocabSize 0.02
 
   -- Scalars
-  let scalars := Scalars.init cfg.nLayer
+  let scalars ← Scalars.init (device := device) cfg.nLayer
 
   return {
     embed := embed
@@ -505,20 +511,22 @@ def ModdedGPTParams.init (cfg : Config) : IO (ModdedGPTParams cfg) := do
     6. Softcapped logits
 -/
 def forward {cfg : Config} {batch seq : UInt64}
-    (params : ModdedGPTParams cfg)
-    (yarn : YarnRotary cfg.headDim cfg.maxSeqLen)
-    (inputSeq : T #[batch, seq])
+    (params : ModdedGPTParams (device := device) cfg)
+    (yarn : YarnRotary (device := device) cfg.headDim cfg.maxSeqLen)
+    (inputSeq : Tensor { shape := #[batch, seq], dtype := .Int64, device := device })
     (_training : Bool := true)
-    : IO (T #[batch, seq, cfg.vocabSize]) := do
+    : IO (Tensor { shape := #[batch, seq, cfg.vocabSize], dtype := .Float32, device := device }) := do
+  if cfg.modelDim < 12 then
+    throw (IO.userError "ModdedGPT requires modelDim >= 12 for the smear gate")
   -- 1) Token embedding + lightweight smear-style modulation.
-  let tokEmb := nn.embedding inputSeq params.embed
-  let smearIn : T #[batch, seq, 12] := data.slice tokEmb 2 0 12
-  let smearGate := nn.sigmoid (params.smearGate.forward smearIn)
-  let smearGateExpanded := nn.expand smearGate #[batch, seq, cfg.modelDim]
-  let x0 := nn.rmsNorm (tokEmb + (tokEmb * smearGateExpanded))
+  let tokEmb := Tensor.embedding inputSeq params.embed
+  let smearIn : Tensor { shape := #[batch, seq, 12], dtype := .Float32, device := device } := Tensor.sliceChecked tokEmb 2 0 12 #[batch, seq, 12]
+  let smearGate := Tensor.sigmoid (params.smearGate.forward smearIn)
+  let smearGateExpanded := Tensor.expand smearGate #[batch, seq, cfg.modelDim]
+  let x0 := Tensor.rmsNorm (tokEmb + (tokEmb * smearGateExpanded))
 
   -- Precompute token value embeddings and global scalar controls.
-  let valueEmbeds := params.valueEmbeds.map (nn.embedding inputSeq ·)
+  let valueEmbeds := params.valueEmbeds.map (Tensor.embedding inputSeq ·)
   let scalarBaseGlobal := cfg.nLayer * 4
   let valueMix := scalarSigmoidAt params.scalars.values scalarBaseGlobal
   let skipMix := scalarSigmoidAt params.scalars.values (scalarBaseGlobal + 1)
@@ -526,10 +534,10 @@ def forward {cfg : Config} {batch seq : UInt64}
 
   -- 2) Apply transformer blocks with value embeddings and scalar-gated residuals.
   let mut x := x0
-  let mut skipConnection : Option (T #[batch, seq, cfg.modelDim]) := none
+  let mut skipConnection : Option (Tensor { shape := #[batch, seq, cfg.modelDim], dtype := .Float32, device := device }) := none
 
   for i in [:cfg.nLayer.toNat] do
-    let block : Block cfg.modelDim cfg.headDim cfg.nHead := params.blocks[i]!
+    let block : Block (device := device) cfg.modelDim cfg.headDim cfg.nHead := params.blocks[i]!
     let scalarBase := (i.toUInt64) * 4
     let lamX := scalarSigmoidAt params.scalars.values scalarBase
     let lamX0 := scalarSigmoidAt params.scalars.values (scalarBase + 1)
@@ -549,14 +557,15 @@ def forward {cfg : Config} {batch seq : UInt64}
     match block.attn with
     | some attn =>
       -- Pre-norm (RMSNorm before attention)
-      let xNormed := nn.rmsNorm xIn
-      let layerVE := layerValueEmbed (cfg := cfg) valueEmbeds i
+      let xNormed := Tensor.rmsNorm xIn
+      let layerVE := (layerValueEmbed (cfg := cfg) valueEmbeds i).map
+        (fun t => t.reshapeChecked #[batch, seq, cfg.nHead * cfg.headDim])
       -- Apply attention with rotary embeddings/window and optional value embedding.
       let attnOut := attn.forward xNormed yarn windowSize layerVE valueMix
       -- Residual connection
       let x' := xIn + scaleByScalar attnOut lamAttn
       -- Pre-norm before MLP
-      let xMlpNormed := nn.rmsNorm x'
+      let xMlpNormed := Tensor.rmsNorm x'
       -- Apply MLP
       let h ← block.mlp.forward xMlpNormed
       -- Residual connection
@@ -570,33 +579,60 @@ def forward {cfg : Config} {batch seq : UInt64}
       | none =>
         x := xIn
       -- Pre-norm before MLP
-      let xNormed := nn.rmsNorm x
+      let xNormed := Tensor.rmsNorm x
       let h ← block.mlp.forward xNormed
       x := x + scaleByScalar h lamMlp
 
   -- 3) Final layer norm / projection / softcap.
-  let xNormed := nn.rmsNorm (scaleByScalar x finalScale)
+  let xNormed := Tensor.rmsNorm (scaleByScalar x finalScale)
 
   -- Final projection to vocab
   let logits := params.lmHead.forward xNormed
 
   -- Softcap logits
-  let logitsCapped := nn.softcap logits cfg.softcapValue
+  let logitsCapped := Tensor.mulScalar (Tensor.tanh (Tensor.divScalar logits cfg.softcapValue)) cfg.softcapValue
 
   return logitsCapped
 
 /-- Compute cross-entropy loss -/
 def loss {cfg : Config} {batch seq : UInt64}
-    (params : ModdedGPTParams cfg)
-    (yarn : YarnRotary cfg.headDim cfg.maxSeqLen)
-    (inputSeq : T #[batch, seq])
-    (targets : T #[batch, seq])
+    (params : ModdedGPTParams (device := device) cfg)
+    (yarn : YarnRotary (device := device) cfg.headDim cfg.maxSeqLen)
+    (inputSeq : Tensor { shape := #[batch, seq], dtype := .Int64, device := device })
+    (targets : Tensor { shape := #[batch, seq], dtype := .Int64, device := device })
     (training : Bool := true)
-    : IO (T #[]) := do
+    : IO (Tensor { shape := #[], dtype := .Float32, device := device }) := do
   let logits ← forward params yarn inputSeq training
   -- Reshape for cross-entropy: (batch*seq, vocab) vs (batch*seq,)
-  let logitsFlat := reshape logits #[batch * seq, cfg.vocabSize]
-  let targetsFlat := reshape targets #[batch * seq]
-  return nn.cross_entropy logitsFlat targetsFlat
+  let logitsFlat := Tensor.reshapeChecked logits #[batch * seq, cfg.vocabSize]
+  let targetsFlat := Tensor.reshapeChecked targets #[batch * seq]
+  IO.ofExcept (Tensor.crossEntropy? logitsFlat targetsFlat)
+
+
+/-! Device transfers are type-directed across every model leaf. -/
+
+derive_tensor_tree_cast {source target : Device} {headDim maxSeqLen : UInt64} :
+  YarnRotary (device := source) headDim maxSeqLen => YarnRotary (device := target) headDim maxSeqLen
+
+derive_tensor_tree_cast {source target : Device} {batch maxSeq nHead headDim : UInt64} :
+  AttnArgs (device := source) batch maxSeq nHead headDim => AttnArgs (device := target) batch maxSeq nHead headDim
+
+derive_tensor_tree_cast {source target : Device} {inDim outDim : UInt64} :
+  CastedLinear (device := source) inDim outDim => CastedLinear (device := target) inDim outDim
+
+derive_tensor_tree_cast {source target : Device} {dim headDim numHeads : UInt64} :
+  CausalSelfAttention (device := source) dim headDim numHeads => CausalSelfAttention (device := target) dim headDim numHeads
+
+derive_tensor_tree_cast {source target : Device} {dim : UInt64} :
+  MLP (device := source) dim => MLP (device := target) dim
+
+derive_tensor_tree_cast {source target : Device} {dim headDim numHeads : UInt64} :
+  Block (device := source) dim headDim numHeads => Block (device := target) dim headDim numHeads
+
+derive_tensor_tree_cast {source target : Device} {nLayer : UInt64} :
+  Scalars (device := source) nLayer => Scalars (device := target) nLayer
+
+derive_tensor_tree_cast {source target : Device} {cfg : Config} :
+  ModdedGPTParams (device := source) cfg => ModdedGPTParams (device := target) cfg
 
 end torch.moddedGpt

@@ -15,12 +15,14 @@
    The key design point is that the public API is now centered on a runtime
    problem descriptor rather than a handful of ad hoc fixed-shape predicates.
 -/
-import Tyr.Torch
+import Tyr.Typed.Ops
 import Tyr.GPU.Types
 
 namespace Tyr.GPU.Ops
 
 open torch
+
+variable {device : Device}
 open Tyr.GPU
 
 /-- High-level attention execution mode. -/
@@ -111,7 +113,7 @@ structure AttentionProblem where
   kvSeq : UInt64
   headDim : UInt64
   dtype : DType
-  device : Device
+  device : DeviceKind
   arch : GpuArch := .SM90
   mode : AttentionMode := .densePrefill
   maskKind : AttentionMaskKind := .none
@@ -141,13 +143,15 @@ def inferMode (qSeq kvSeq : UInt64) (windowSize : Option UInt64 := none) : Atten
       else
         .densePrefill
 
-/-- Construct a runtime problem descriptor from typed Q/K/V tensors. -/
+/-- Construct a runtime problem descriptor from typed Q/K/V tensors.
+    The Q/K/V dtype is shared statically; the descriptor still records the
+    runtime dtype/device of the query handle, as before. -/
 def ofQKV
-    {batch nHead nKvHead qSeq kvSeq headDim : UInt64}
-    (q : T #[batch, nHead, qSeq, headDim])
-    (k : T #[batch, nKvHead, kvSeq, headDim])
-    (v : T #[batch, nKvHead, kvSeq, headDim])
-    (attnMask : Option (T #[batch, kvSeq]) := none)
+    {batch nHead nKvHead qSeq kvSeq headDim : UInt64} {d : DType}
+    (q : Tensor { shape := #[batch, nHead, qSeq, headDim], dtype := d, device := device })
+    (k : Tensor { shape := #[batch, nKvHead, kvSeq, headDim], dtype := d, device := device })
+    (v : Tensor { shape := #[batch, nKvHead, kvSeq, headDim], dtype := d, device := device })
+    (attnMask : Option (SomeDTypeTensor #[batch, kvSeq] device) := none)
     (dropoutP : Float := 0.0)
     (isCausal : Bool := false)
     (scale : Option Float := none)
@@ -155,8 +159,9 @@ def ofQKV
     (windowSize : Option UInt64 := none)
     (arch : GpuArch := .SM90)
     : AttentionProblem :=
-    let _sameDType := q.dtype == k.dtype && k.dtype == v.dtype
-    let _sameDevice := q.device == k.device && k.device == v.device
+    -- K/V carry the shared layout indices; only Q supplies runtime metadata.
+    let _ := k
+    let _ := v
     {
       batch := batch
       numQHeads := nHead
@@ -164,8 +169,8 @@ def ofQKV
       qSeq := qSeq
       kvSeq := kvSeq
       headDim := headDim
-      dtype := q.dtype
-      device := q.device
+      dtype := q.raw.dtype
+      device := q.raw.device.kind
       arch := arch
       mode := inferMode qSeq kvSeq windowSize
       maskKind := if attnMask.isSome then .padding else .none
@@ -180,7 +185,7 @@ def ofQKV
 def selfAttention
     (seq : UInt64)
     (headDim : UInt64 := 64)
-    (device : Device := .CUDA 0)
+    (device : DeviceKind := .CUDA 0)
     (dtype : DType := .BFloat16)
     (isCausal : Bool := false)
     (arch : GpuArch := .SM90)

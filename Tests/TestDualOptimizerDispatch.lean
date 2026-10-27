@@ -15,7 +15,7 @@ open torch.Optim.DualOptimizer
 
 @[test]
 def testMatrixStateInitializationDispatch : IO Unit := do
-  let p ← randn #[8, 4] false
+  let p ← Tensor.randn #[8, 4]
 
   let cfgNor : Config := { matrixOptimizer := .norMuon }
   let stNor := initMatrixParamState cfgNor p
@@ -97,10 +97,10 @@ def testManifoldMuonConfigForwardsSolverKnobs : IO Unit := do
 
 @[test]
 def testStepMatrixSingleStiefelConstraint : IO Unit := do
-  let pRaw ← randn #[8, 4] false
-  let p := autograd.set_requires_grad
-    (autograd.detach (torch.Optim.ManifoldMuon.retractStiefel pRaw)) true
-  let g ← randn #[8, 4] false
+  let pRaw ← Tensor.randn #[8, 4]
+  let p ← Tensor.setRequiresGrad
+    (Tensor.detach (torch.Optim.ManifoldMuon.retractStiefel pRaw)) true
+  let g ← Tensor.randn #[8, 4]
 
   let cfg : Config := {
     matrixOptimizer := .manifoldMuon
@@ -111,9 +111,9 @@ def testStepMatrixSingleStiefelConstraint : IO Unit := do
   let st0 := initMatrixParamState cfg p
   let (p1, st1) ← stepMatrixSingle p g st0 cfg 0 1.0 1.0
 
-  let wtW := nn.mm (nn.transpose2d p1) p1
-  let I := eye 4
-  LeanTest.assertTrue (allclose wtW I (rtol := 1e-4) (atol := 1e-5))
+  let wtW := Tensor.mm (Tensor.transpose2d p1) p1
+  let I := Tensor.eye 4
+  LeanTest.assertTrue (Tensor.allclose wtW I (rtol := 1e-4) (atol := 1e-5))
     "Specialized Stiefel path should preserve W^T W ≈ I"
   match st1 with
   | .manifoldMuon _ => pure ()
@@ -121,10 +121,10 @@ def testStepMatrixSingleStiefelConstraint : IO Unit := do
 
 @[test]
 def testStepMatrixSingleGrassmannConstraint : IO Unit := do
-  let pRaw ← randn #[9, 3] false
-  let p := autograd.set_requires_grad
-    (autograd.detach (Tyr.AD.Grassmann.project 9 3 pRaw).matrix) true
-  let g ← randn #[9, 3] false
+  let pRaw ← Tensor.randn #[9, 3]
+  let p ← Tensor.setRequiresGrad
+    (Tensor.detach (Tyr.AD.Grassmann.project 9 3 pRaw).matrix) true
+  let g ← Tensor.randn #[9, 3]
 
   let cfg : Config := {
     matrixOptimizer := .manifoldMuon
@@ -134,9 +134,9 @@ def testStepMatrixSingleGrassmannConstraint : IO Unit := do
   let st0 := initMatrixParamState cfg p
   let (p1, st1) ← stepMatrixSingle p g st0 cfg 0 1.0 1.0
 
-  let xtx := nn.mm (nn.transpose2d p1) p1
-  let I := eye 3
-  LeanTest.assertTrue (allclose xtx I (rtol := 1e-4) (atol := 1e-5))
+  let xtx := Tensor.mm (Tensor.transpose2d p1) p1
+  let I := Tensor.eye 3
+  LeanTest.assertTrue (Tensor.allclose xtx I (rtol := 1e-4) (atol := 1e-5))
     "Generic Grassmann path should preserve X^T X ≈ I"
   match st1 with
   | .genericManifold _ => pure ()
@@ -144,10 +144,10 @@ def testStepMatrixSingleGrassmannConstraint : IO Unit := do
 
 @[test]
 def testStepMatrixSingleOrthogonalSquareConstraint : IO Unit := do
-  let pRaw ← randn #[6, 6] false
-  let p := autograd.set_requires_grad
-    (autograd.detach (Tyr.AD.Orthogonal.project 6 pRaw).matrix) true
-  let g ← randn #[6, 6] false
+  let pRaw ← Tensor.randn #[6, 6]
+  let p ← Tensor.setRequiresGrad
+    (Tensor.detach (Tyr.AD.Orthogonal.project 6 pRaw).matrix) true
+  let g ← Tensor.randn #[6, 6]
 
   let cfg : Config := {
     matrixOptimizer := .manifoldMuon
@@ -157,9 +157,9 @@ def testStepMatrixSingleOrthogonalSquareConstraint : IO Unit := do
   let st0 := initMatrixParamState cfg p
   let (p1, st1) ← stepMatrixSingle p g st0 cfg 0 1.0 1.0
 
-  let qtq := nn.mm (nn.transpose2d p1) p1
-  let I := eye 6
-  LeanTest.assertTrue (allclose qtq I (rtol := 1e-4) (atol := 1e-5))
+  let qtq := Tensor.mm (Tensor.transpose2d p1) p1
+  let I := Tensor.eye 6
+  LeanTest.assertTrue (Tensor.allclose qtq I (rtol := 1e-4) (atol := 1e-5))
     "Generic orthogonal path should preserve Q^T Q ≈ I for square matrices"
   match st1 with
   | .genericManifold _ => pure ()
@@ -167,10 +167,10 @@ def testStepMatrixSingleOrthogonalSquareConstraint : IO Unit := do
 
 @[test]
 def testStepMatrixSingleOrthogonalNonSquareFails : IO Unit := do
-  let pRaw ← randn #[8, 4] false
-  let p := autograd.set_requires_grad
-    (autograd.detach (Tyr.AD.Stiefel.project 8 4 pRaw).matrix) true
-  let g ← randn #[8, 4] false
+  let pRaw ← Tensor.randn #[8, 4]
+  let p ← Tensor.setRequiresGrad
+    (Tensor.detach (Tyr.AD.Stiefel.project 8 4 pRaw).matrix) true
+  let g ← Tensor.randn #[8, 4]
 
   let cfg : Config := {
     matrixOptimizer := .manifoldMuon
@@ -195,14 +195,14 @@ def testMatrixBackendOpsComposable : IO Unit := do
   }
   let ops := matrixBackendOps (m := 12) (n := 4) cfg 0 1.0 1.0
 
-  let p0Raw ← randn #[12, 4] false
-  let p1Raw ← randn #[12, 4] false
-  let p0 := autograd.set_requires_grad
-    (autograd.detach (Tyr.AD.Grassmann.project 12 4 p0Raw).matrix) true
-  let p1 := autograd.set_requires_grad
-    (autograd.detach (Tyr.AD.Grassmann.project 12 4 p1Raw).matrix) true
-  let g0 ← randn #[12, 4] false
-  let g1 ← randn #[12, 4] false
+  let p0Raw ← Tensor.randn #[12, 4]
+  let p1Raw ← Tensor.randn #[12, 4]
+  let p0 ← Tensor.setRequiresGrad
+    (Tensor.detach (Tyr.AD.Grassmann.project 12 4 p0Raw).matrix) true
+  let p1 ← Tensor.setRequiresGrad
+    (Tensor.detach (Tyr.AD.Grassmann.project 12 4 p1Raw).matrix) true
+  let g0 ← Tensor.randn #[12, 4]
+  let g1 ← Tensor.randn #[12, 4]
 
   let s0 := ops.initState p0
   let s1 := ops.initState p1
@@ -218,13 +218,13 @@ def testMatrixBackendOpsBenchmarkPositive : IO Unit := do
     matrixManifold := .grassmann
     matrixLr := 0.01
   }
-  let mut p := (Tyr.AD.Grassmann.project 20 6 (← randn #[20, 6] false)).matrix
-  p := autograd.set_requires_grad (autograd.detach p) true
+  let mut p := (Tyr.AD.Grassmann.project 20 6 (← Tensor.randn #[20, 6])).matrix
+  p ← Tensor.parameter p
   let mut st := initMatrixParamState cfg p
 
   let t0 ← IO.monoNanosNow
   for _ in [:3] do
-    let g ← randn #[20, 6] false
+    let g ← Tensor.randn #[20, 6]
     let (p', st') ← stepMatrixSingle p g st cfg 0 1.0 1.0
     p := p'
     st := st'

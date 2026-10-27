@@ -38,7 +38,7 @@ def decode (tokens : Array Int64) : String :=
 
 /-- Train with data of known size (legacy, no validation) -/
 def runTraining {n : UInt64} (modelCfg : Config) (trainCfg : TrainConfig)
-    (trainData : T #[n]) : IO (GPTParams modelCfg) := do
+    (trainData : Tokens (device := .CPU) #[n]) : IO (GPTParams (device := trainCfg.device) modelCfg) := do
   IO.println ""
   IO.println "Initializing model..."
   -- Create model directly on target device
@@ -58,8 +58,8 @@ def runTraining {n : UInt64} (modelCfg : Config) (trainCfg : TrainConfig)
 
 /-- Train with validation data and checkpointing -/
 def runTrainingWithVal {nTrain nVal : UInt64} (modelCfg : Config) (trainCfg : TrainConfig)
-    (trainData : T #[nTrain]) (valData : T #[nVal])
-    (checkpointDir : Option String := none) : IO (GPTParams modelCfg) := do
+    (trainData : Tokens (device := .CPU) #[nTrain]) (valData : Tokens (device := .CPU) #[nVal])
+    (checkpointDir : Option String := none) : IO (GPTParams (device := trainCfg.device) modelCfg) := do
   IO.println ""
   IO.println "Initializing model..."
   -- Create model directly on target device
@@ -93,15 +93,15 @@ def main : IO Unit := do
   let device ←
     match requestedDevice?.map String.toLower with
     | some "auto" => getBestDevice
-    | some "cuda" => pure (Device.CUDA 0)
-    | some "mps" => pure Device.MPS
+    | some "cuda" => Device.cuda 0
+    | some "mps" => Device.mps
     | some "cpu" => pure Device.CPU
     | some _ => pure Device.CPU
     | none => pure Device.CPU
-  let deviceName := match device with
-    | Device.MPS => "MPS (Apple Silicon)"
-    | Device.CUDA n => s!"CUDA:{n}"
-    | Device.CPU => "CPU"
+  let deviceName := match device.kind with
+    | DeviceKind.MPS => "MPS (Apple Silicon)"
+    | DeviceKind.CUDA n => s!"CUDA:{n}"
+    | DeviceKind.CPU => "CPU"
   IO.println s!"Using device: {deviceName}"
   IO.println ""
 
@@ -154,13 +154,13 @@ def main : IO Unit := do
     -- Load training data
     let nTrain ← data.binFileTokenCount "data/shakespeare_char/train.bin"
     IO.println s!"Training set: {nTrain} tokens"
-    let trainData ← data.loadU16Bin nTrain "data/shakespeare_char/train.bin"
+    let trainData ← Tensor.loadU16Bin nTrain "data/shakespeare_char/train.bin"
 
     -- Use validation if available
     if valFileExists then
       let nVal ← data.binFileTokenCount "data/shakespeare_char/val.bin"
       IO.println s!"Validation set: {nVal} tokens"
-      let valData ← data.loadU16Bin nVal "data/shakespeare_char/val.bin"
+      let valData ← Tensor.loadU16Bin nVal "data/shakespeare_char/val.bin"
       IO.println "Training with validation..."
       runTrainingWithVal modelCfg trainCfg trainData valData (some "checkpoints/gpt")
     else
@@ -169,7 +169,7 @@ def main : IO Unit := do
   else
     IO.println "Shakespeare data not found, using random tokens for testing..."
     let numTokens : UInt64 := 10000
-    let tokens ← randint 0 modelCfg.vocab_size.toInt64 #[numTokens]
+    let tokens ← Tensor.randint 0 modelCfg.vocab_size.toInt64 #[numTokens]
     runTraining modelCfg trainCfg tokens
 
   -- Generate some text

@@ -71,8 +71,9 @@ opaque <name>.launch
     (sharedMem : UInt64) (stream : CudaStream) : IO Unit
 ```
 
-Pointer parameters become untyped `@& Tensor` arguments (any `T s` is
-accepted; shape checking is the caller's problem at this layer), `KVal`
+Pointer parameters become borrowed `RawTensor` arguments (`Tensor` in the
+codegen namespace is an alias for that native carrier; indexed callers pass
+`.raw` and must satisfy the kernel contract), `KVal`
 scalars become Lean scalars, and `CudaStream` is `UInt64`
 (`Tyr/GPU/Codegen/TileTypes.lean:212`) — `torch.cuda_current_stream : IO
 UInt64` provides it (`Tyr/Torch.lean:121`). The generated C++ launcher wraps
@@ -155,41 +156,60 @@ The main user-facing entry (`Tyr/GPU/Ops/FlashAttn.lean:87`):
 
 ```lean
 def flashAttn
-    (query : Query batch nHead qSeq headDim)        -- T #[batch, nHead, qSeq, headDim]
-    (key value : KeyValue batch nKvHead kvSeq headDim)
-    (attnMask : Option (PaddingMask batch kvSeq) := none)
-    (dropoutP : Float := 0.0) (isCausal : Bool := false)
+    {device : Device}
+    {batch nHead nKvHead qSeq kvSeq headDim : UInt64} {d : DType}
+    (query : Query (device := device) batch nHead qSeq headDim d)
+    (key value : KeyValue (device := device) batch nKvHead kvSeq headDim d)
+    (attnMask : Option (PaddingMask (device := device) batch kvSeq) := none)
+    (isCausal : Bool := false)
     (scale : Option Float := none) (enableGqa : Bool := false)
-    : Query batch nHead qSeq headDim
+    : Query (device := device) batch nHead qSeq headDim d
 ```
 
-It forwards to `torch.nn.tyrFlashAttn4d` (`Tyr/Torch.lean:1198`), i.e. the
+It forwards to `Tensor.flashAttention` in `Tyr.Typed.Neural`, i.e. the
 C++ operator `tyr::flash_attn` registered via `TORCH_LIBRARY(tyr, …)` with a
 `CompositeImplicitAutograd` implementation (`cc/src/tyr_ops.cpp:818-824`), so
-`torch.autograd.backward` works through it with no custom Lean-side rule. The
+`Tensor.backward` works through it with no custom Lean-side rule. The
 C++ `select_route` (`cc/src/tyr_ops.cpp:314`) mirrors the Lean-side selector
 and calls the generated `lean_launch_*` launchers for covered shapes, PyTorch
 SDPA otherwise. Companions in the same module:
 
-- `scaledDotProductAttention` — PyTorch-named alias.
+- `scaledDotProductAttention` — PyTorch-named alias, also with zero dropout.
+- `flashAttnIO`, `scaledDotProductAttentionIO`, `flashAttnWithRouteIO` — effectful
+  variants with required `(dropoutP : Float) (training : Bool)` immediately after
+  Q/K/V, followed by mask, causal, scale, and GQA arguments. Training uses the
+  configured probability; evaluation uses zero. The route result describes the
+  effective probability used by execution. The original probability must be
+  finite and in `[0, 1]` even during evaluation.
 - `dispatchRoute`, `flashAttnWithRoute` — expose the `.tkKernel` vs `.portable`
-  decision (`DispatchRoute`) for observability.
+  decision (`DispatchRoute`) for observability. The pure execution wrapper uses
+  zero dropout; the descriptive classifier can inspect arbitrary probabilities.
 - `currentSpecialization`, `supportsTkMhaKernel`, `attentionProblem` — typed
   probes over the same selector.
-- `flashAttnDyn` — shape-erased adapter: takes rank-4 `T #[]` tensors,
-  validates runtime shapes, packs them into the typed API, and returns a
-  `Sigma`-typed existential (`DynOut`).
+- `flashAttnDyn` — native-boundary adapter: takes rank-4 `RawTensor` handles,
+  required dropout and training arguments, then optional mask/causal/scale/GQA
+  arguments. It validates runtime shapes, calls the typed IO operation, and
+  returns a `Sigma`-typed existential (`DynOut`) in IO.
+
+Pure attention never samples a dropout mask. This does not promise bitwise
+reproducibility across GPU kernels, backend settings, or devices. Dropout
+sampling belongs to IO even when its result participates in a reusable native
+autograd graph.
 
 ### Ops: H100 MHA (`Tyr.GPU.Ops.MhaH100`)
 
 Explicit two-call forward/backward over the `MhaH100` kernels. Shapes are
-fixed: `BF16 seq := T #[1, 1, seq, 64]`, per-tile vector
-`L kvBlocks := T #[1, 1, 1, kvBlocks * 64]`. Variant selection is a typeclass:
+fixed: `BF16 seq := Tensor { shape := #[1, 1, seq, 64], dtype := .BFloat16, device := device }`, per-tile vector
+`L kvBlocks := Tensor { shape := #[1, 1, 1, kvBlocks * 64], dtype := .Float32, device := device }`.
+The aliases and contexts share an implicit concrete `device`; CUDA kernel
+entry points still require supported CUDA hardware. Variant selection is a typeclass:
 
 ```lean
-class Variant (seq kvBlocks : UInt64) where
-  launchFwd : BF16 seq → BF16 seq → BF16 seq → BF16 seq → L kvBlocks → LaunchCfg → IO Unit
-  launchBwd : BF16 seq → … → F32 seq → LaunchCfg → IO Unit
+class Variant {device : Device} (seq kvBlocks : UInt64) where
+  launchFwd : BF16 (device := device) seq → BF16 (device := device) seq →
+    BF16 (device := device) seq → BF16 (device := device) seq →
+    L (device := device) kvBlocks → LaunchCfg → IO Unit
+  launchBwd : BF16 (device := device) seq → … → F32 (device := device) seq → LaunchCfg → IO Unit
 -- instances: Variant 128 2 and Variant 768 12
 ```
 
@@ -233,13 +253,13 @@ Eligibility details live in `currentTkBaseEligible` / `currentTkDecodeEligible`
 ### Ops: fused simulation kernels
 
 - `Tyr.GPU.Ops.RKFused` — fused fixed-step Dopri5 on tile states
-  `Tile cols := T #[1, 1, 64, cols]` (`cols % 64 == 0`):
-  `Workspace.make cols device : IO (Workspace cols)` (scratch allocated through
+  `Tile cols := Tensor { shape := #[1, 1, 64, cols], dtype := .Float32, device := device }` (`cols % 64 == 0`):
+  `Workspace.make cols device : IO (Workspace (device := device) cols)` (scratch allocated through
   `IO`, see the aliasing caveat below),
   `dopri5StepFused`, and
   `dopri5SolveFused (vf : Float → Tile cols → Tile cols) (t0 t1 : Float) (steps : Nat) (y0) (ws) (blackwell) (stream) : IO (Tile cols)`.
 - `Tyr.GPU.Ops.SDEFused` — fused fixed-step Euler–Maruyama on flat states
-  `T #[n]`: `emStepFused` (one launch per step; noise drawn inline by the VBT
+  `Tensor { shape := #[n], dtype := .Float32, device := device }`: `emStepFused` (one launch per step; noise drawn inline by the VBT
   descent kernel) and `emSolveFused`, with `DeviceSchedule.make` precomputing
   the Brownian value-query schedules.
 - `Tyr.GPU.Ops.BrownianFused` — host side of the device virtual Brownian
@@ -250,34 +270,32 @@ Eligibility details live in `currentTkBaseEligible` / `currentTkDecodeEligible`
 
 ## Usage examples
 
-Raw launcher — reconstructed example (from
-`Examples/GPU/RunMhaH100.lean` and `Examples/GPU/RunCopy.lean`):
+Raw forward launcher — example based on
+`Examples/GPU/RunMhaH100.lean`:
 
 ```lean
 import Tyr.Torch
+import Tyr.Typed.Neural
 import Tyr.GPU.Kernels.MhaH100
 
 open torch Tyr.GPU.Kernels
 
--- q k v dO : T #[1, 1, 128, 64]  (BF16, CUDA)
-let stream ← torch.cuda_current_stream
-
--- forward: ptrs, then KVal scalars (seq, head_dim), grid, block, sharedMem, stream
-let out  := torch.zeros_like q
-let lOut : T #[2, 64] := torch.zeros #[2, 64] false (Device.CUDA 0)
-tkMhaH100Fwd2Block.launch q k v out lOut 128 64  1 2 1  128 1 1  0 stream
-let _ ← torch.cuda_synchronize
-
--- backward: prep computes the D vector, KvSweep accumulates dQ/dK/dV
-let dVec : T #[2, 64] := torch.mul_scalar lOut 0.0
-tkMhaH100BwdPrep2Block.launch dO out dVec 128 64 1 2 1 128 1 1 0 stream
-let dQ := torch.zeros #[1, 1, 128, 64] false (Device.CUDA 0)
-let dK := torch.zeros #[1, 1, 128, 64] false (Device.CUDA 0)
-let dV := torch.zeros #[1, 1, 128, 64] false (Device.CUDA 0)
-tkMhaH100Bwd2BlockKvSweep.launch q k v dO lOut dVec dQ dK dV 128 64 1 2 1 128 1 1 0 stream
-let _ ← torch.cuda_synchronize
+-- Acquire `device ← Device.cuda 0` before preparing these inputs.
+-- Inputs must be contiguous BF16 tensors on compatible CUDA hardware.
+def mhaForward {device : Device}
+    (q k v : Tensor { shape := #[1, 1, 128, 64], dtype := .BFloat16, device := device }) := do
+  let stream ← torch.cuda_current_stream
+  let out ← Tensor.uniformLike q 0 0
+  let lOut ← Tensor.uniformLike
+    (Tensor.zeros #[2, 64] (device := device)) 0 0
+  tkMhaH100Fwd2Block.launch q.raw k.raw v.raw out.raw lOut.raw
+    128 64 1 2 1 128 1 1 0 stream
+  torch.cuda_synchronize
+  pure (out, lOut)
 ```
 
+The full forward/backward sequence, including independently allocated gradient
+buffers and synchronization, is in `Examples/GPU/RunMhaH100.lean`.
 The convention is positional: kernel pointer/scalar arguments in declaration
 order, then `grid_x grid_y grid_z`, `block_x block_y block_z`, `sharedMem`
 (`0` = generated default), `stream`. For the 2-block MHA forward, `grid_y = 2`
@@ -287,15 +305,18 @@ Typed op with route inspection and autograd — reconstructed example (from
 `Examples/GPU/RunFlashAttnOp.lean`):
 
 ```lean
-import Tyr.Torch
+import Tyr.Typed.Neural
 import Tyr.GPU.Ops.FlashAttn
 
 open torch Tyr.GPU.Ops.FlashAttn
 
--- q k v : T #[1, 1, 128, 64] BF16 CUDA leaves with requires_grad
-let (route, out) := flashAttnWithRoute q k v   -- route = .tkKernel for seq=128 non-causal
-torch.autograd.backward out dO                  -- grads flow through tyr::flash_attn
-let dq := torch.toFloat' (torch.autograd.grad_of q)
+-- q, k, and v must be trainable leaves for gradient extraction.
+def attentionGradient {device : Device}
+    (q k v dO : Tensor { shape := #[1, 1, 128, 64], dtype := .BFloat16, device := device })
+    : IO (DispatchRoute × Tensor { shape := #[1, 1, 128, 64], dtype := .Float32, device := device }) := do
+  let (route, out) := flashAttnWithRoute q k v
+  Tensor.backward out dO
+  pure (route, (← Tensor.gradOf q).toFloat32)
 ```
 
 Fused ODE solve — reconstructed example (from
@@ -309,10 +330,12 @@ import Examples.GPU.Parity
 open torch Tyr.GPU.Ops.RKFused
 
 -- dy/dt = -y on a [1, 1, 64, 64] CUDA state, 200 fixed steps
+let device ← Device.cuda 0
+let y0 ← Tensor.uniformLike (Tensor.ones #[1, 1, 64, 64] (device := device)) 1 1
 let blackwell ← isBlackwellFamily
 let stream ← torch.cuda_current_stream
-let ws ← Workspace.make 64 (Device.CUDA 0)
-let y1 ← dopri5SolveFused (fun _t y => mul_scalar y (-1.0))
+let ws ← Workspace.make 64 device
+let y1 ← dopri5SolveFused (fun _t y => Tensor.mulScalar y (-1.0))
   0.0 1.0 200 y0 ws blackwell stream
 ```
 
@@ -359,7 +382,7 @@ parts:
 
 ## Caveats
 
-- **Mutation hides behind pure types.** Kernels mutate `T s` tensors that
+- **Mutation hides behind pure types.** Kernels mutate indexed tensors that
   look pure at the Lean level. Allocate every mutable scratch buffer through
   `IO` (like `Workspace.make` does): identical pure factory expressions get
   common-subexpression-eliminated into one shared tensor, and two kernel
@@ -384,8 +407,8 @@ parts:
 - [Getting started](../getting-started.md) — build options (`-Kkernels`) and the parity-script flow
 - [Examples and testing](../examples-and-testing.md) — building and running the `Examples/GPU/Run*` harnesses and test suites
 - [FFI and build](../ffi-and-build.md) — `cc/`, `libTyrC`, and how generated CUDA reaches the linker
-- [Core tensors](../core/tensors.md) — `T s`, `Device`, the `torch.*` FFI used at the launch boundary
-- [Autodiff](../autodiff.md) — `torch.autograd`, which is what makes `tyr::flash_attn` differentiable
+- [Core tensors](../core/tensors.md) — `Tensor σ`, `Device`, and native handles used at the launch boundary
+- [Autodiff](../autodiff.md) — indexed autograd adapters for the native `tyr::flash_attn` graph
 - [diffeq.md](../diffeq.md) — the generic solvers the fused RK/SDE ops accelerate
 - [ThunderKittens porting status](thunderkittens-porting-status.md) — source-to-Lean parity matrix for the kernel catalog
 

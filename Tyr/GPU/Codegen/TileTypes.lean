@@ -198,15 +198,15 @@ def CRT.imagId {dtype : GpuFloat} {rows cols : Nat} {layout : TileLayout}
 
 /-! ## FFI Types for Kernel Launching
 
-For now, we reuse `torch.TSpec.type` (all `torch.T s` share the same underlying type)
-so kernels can be launched directly with existing torch tensors.
+Kernel launchers consume `torch.RawTensor`, the native libtorch handle.
+Typed callers pass `tensor.raw`; kernel codegen carries its own tile indices.
 
 Streams are represented as raw `UInt64` (interpreted as `cudaStream_t`).
 Use `0` for the default stream.
 -/
 
 /-- Untyped tensor handle for FFI (backed by libtorch). -/
-abbrev Tensor : Type := torch.T #[]
+abbrev Tensor : Type := torch.RawTensor
 
 /-- CUDA stream handle for kernel launches (`cudaStream_t` cast to `UInt64`). -/
 abbrev CudaStream : Type := UInt64

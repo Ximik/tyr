@@ -11,6 +11,7 @@ import Tyr.Model.Laguna.Weights
 
 namespace torch.laguna.hub
 
+variable {device : Device}
 open torch.Hub
 
 /-- Public poolside Laguna repo ids explicitly covered by Tyr as of 2026-07-22. -/
@@ -38,14 +39,14 @@ namespace torch.laguna
 namespace LagunaForCausalLM
 
 /-- Load a Laguna checkpoint from a local dir or HF repo id.
-    Returns the resolved config and model as a dependent pair. -/
+    Returns the resolved config, validated real floating compute dtype, and indexed model. -/
 def loadFromPretrained
     (source : String)
     (defaults : Config := Config.laguna_s_2_1)
     (revision : String := "main")
     (cacheDir : String := Hub.defaultCacheDir)
     (device : Device := Device.CPU)
-    : IO (Sigma (fun cfg => LagunaForCausalLM cfg)) := do
+    : IO (Σ cfg : Config, Σ dtype : RealFloatingDType, LagunaForCausalLM (device := device) cfg dtype.val) := do
   Hub.loadModelFromPretrained
     source
     revision

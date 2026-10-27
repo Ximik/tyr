@@ -1,376 +1,204 @@
-# Shape-indexed tensors and the torch FFI
+# Indexed tensors and the native boundary
 
-## Purpose & when to use
+Use `Tyr.Typed` for tensor operations and `Tyr.Typed.Neural` for additional
+neural, storage, and data adapters. The public type is `torch.Tensor σ`, where
+`σ : StaticSpec` records shape, dtype, and concrete device. `Tyr.Torch` supplies
+runtime services such as device discovery, CUDA streams/events, and RNG seeding.
+Inference uses explicitly detached tensors rather than ambient gradient-mode scopes.
 
-`Tyr/Basic.lean` and `Tyr/Torch.lean` provide the raw LibTorch interface. `T s`
-is a reducible alias for one opaque handle type: its `Shape` argument is an
-annotation, and different raw shapes are definitionally equal. The pure shape
-arithmetic documents expected results but cannot make raw calls shape-safe.
-Use the [typed facade](typed.md), `Tensor σ`, for static shape checks and
-checked raw boundaries. `Tyr/Torch.lean` exposes creation, arithmetic, `nn`
-functional ops, autograd, SafeTensors IO, rotary embeddings, and linear algebra.
-Import it directly for a narrow dependency footprint; `import Tyr` re-exports
-both interfaces.
-
-## Architecture & main abstractions
-
-### The phantom shape index
-
-Everything lives in `namespace torch` (`Tyr/Basic.lean:21`).
+## Tensor specifications
 
 ```lean
-abbrev Shape := Array UInt64                       -- Tyr/Basic.lean:23
-
-opaque TSpec : NonemptyType
-def T (_ : Shape) : Type := TSpec.type             -- Tyr/Basic.lean:107-108
-```
-
-`T s` is a phantom-typed opaque handle: the shape index is erased at runtime and the C++ side never sees it. `Nonempty (T s)` comes from `TSpec.property` (`Tyr/Basic.lean:203`); `Inhabited (T s)` is synthesized as `zeros s` (`Tyr/Torch.lean:60`). Because the index is a compile-time value, shapes like `T #[batch, seq, n_embd]` appear directly in signatures and dimension mismatches are elaboration errors.
-
-Supporting types:
-
-```lean
-inductive DType where                                -- Tyr/Basic.lean:25
-  | UInt8 | Int8 | Int16 | Int32 | Int64
-  | Float16 | BFloat16 | Float32 | Float64 | Bool
-  | Float8E4M3FN | Float8E5M2
-  | Unknown (raw : String)
-
-inductive Device where                               -- Tyr/Basic.lean:101
-  | CUDA : UInt64 → Device
-  | CPU
-  | MPS
-```
-
-`DType` carries parsers/normalizers for PyTorch and SafeTensors metadata
-(`DType.ofString?`, `DType.parse`, `DType.canonicalName`, `DType.safeTensorTag?`).
-Raw `T s` does not enforce shape, dtype, or device. Read actual metadata through
-the FFI below, or use `Tensor.ofTensor` / `Tensor.ofTensorWithContract` to check
-it when entering the [typed facade](typed.md).
-
-### Pure shape arithmetic
-
-Result shapes are computed by total, pure Lean functions, so the type checker evaluates them during elaboration (`Tyr/Basic.lean:113-202`):
-
-| Function | Computes |
-|---|---|
-| `unsqueezeShape s dim` / `squeezeShape s dim` | insert/remove a size-1 dim |
-| `transposeShape s dim0 dim1` | swap two dims |
-| `reduceShape s dim keepdim` | reduction along `dim` |
-| `replaceAtDim s dim newSize` | overwrite one dim (used by `topk_values`, `multinomial`) |
-| `stackShape s n dim` / `unbindShape s dim` | stack / unbind |
-| `matmulShape s1 s2` | full PyTorch matmul broadcast rules |
-
-`matmulShape` (`Tyr/Basic.lean:179`) implements the complete PyTorch contract: 1D·1D → `#[]` (dot product), 1D·2D, 2D·1D, 2D·2D, and ND·ND with broadcast batch dims. It is total and returns `#[]` for invalid inputs — it does **not** prove the multiplication is legal; a bad call fails at runtime in C++, not at compile time.
-
-`Tyr/Torch.lean` adds the conv/pool shape family as plain Lean functions: `convOutputSize`, `convTransposeOutputSize`, `conv1dShape`, `convTranspose1dShape`, `conv2dShape`, `conv3dShape`, `poolOutputSize`, `pool2dShape` (`Tyr/Torch.lean:179-246`), plus `permuteShape` (`:309`), `catShape` (`:657`), `sliceShape` (`:851`), `slicedShape` (`:171`).
-
-### The FFI pattern: opaque externs and shape re-tagging
-
-Every binding is an `@[extern "lean_torch_*"] opaque` declaration; the Lean signature is a *claim* about what the C++ function does. Two patterns recur:
-
-1. **Direct typed bindings** — the result shape is a closed function of the inputs, e.g. `nn.mm : T #[m, k] → T #[k, n] → T #[m, n]` (`Tyr/Torch.lean:569`).
-2. **Shape-erased binding + pure re-tag** — the C++ result comes back as `T #[]` and a Lean `def` re-tags it with `reshape`:
-
-```lean
-@[extern "lean_torch_matmul"] private opaque matmul_impl {s1 s2 : Shape}
-    (a : @& T s1) (b : @& T s2) : T #[]
-
-def matmul {s1 s2 : Shape} (a : T s1) (b : T s2) : T (matmulShape s1 s2) :=
-  reshape (matmul_impl a b) (matmulShape s1 s2)    -- Tyr/Torch.lean:564-565
-```
-
-`cat`, `expand`, `sumDim`, `meanDim`, and `slice1d` follow the same pattern. This is the trust boundary of the whole design: if the Lean shape logic and the C++ behavior drift apart, you get a runtime wrong-shape bug the type system cannot catch.
-
-A few bindings are genuinely effectful and live in `IO`: `rand`, `randn`, `randint`, `nn.dropout*`, `nn.multinomial`, the autograd graph controls, and all file IO. Creation functions that are deterministic (`zeros`, `ones`, `full`, `eye`, `arange`, `linspace`) are pure.
-
-### Namespaces
-
-`Tyr/Torch.lean` is one long `namespace torch` with nested scopes:
-
-| Namespace | Lines | Contents |
-|---|---|---|
-| (top level) | 37-318, 1243-1483 | creation, arithmetic, `linear`/`affine*`, device/runtime, comparison/logical, indexing/gather/scatter, einsum, `focal_loss`/`triplet_margin_loss` |
-| `torch.autograd` | 251-283, 767-771, 1053-1058 | gradient queries, graph control, backward |
-| `torch.nn` | 320-764, 1108-1241 | conv/pool, norms, losses, activations, attention, sampling filters |
-| `torch.data` | 774-936 | binary/token IO, WAV/PPM, media preprocessing, array conversion |
-| `torch.signal` | 938-975 | STFT/ISTFT/RFFT, Hann window |
-| `torch.safetensors` | 978-1050 | SafeTensors load/save, sharded loading |
-| `torch.rotary` | 1067-1106 | RoPE frequency precomputation and application |
-| `torch.linalg` | 1489-1565 | QR/SVD/exp/log/inv, matrix norms |
-
-## Key APIs
-
-Only what a user actually touches; signatures abbreviated where defaults are obvious. `@[extern]`/`opaque` omitted for readability.
-
-### Creation
-
-```lean
-zeros  (s : Shape) (requires_grad : Bool := false) (device : Device := .CPU) : T s
-ones   (s : Shape) (requires_grad : Bool := false) (device : Device := .CPU) : T s
-full   (s : Shape) (value : Float) ... : T s
-rand   (s : Shape) ... : IO (T s)        -- uniform [0, 1)
-randn  (s : Shape) ... : IO (T s)        -- unit normal
-randint (low high : Int64) (s : Shape) ... : IO (T s)
-arange (start stop : UInt64) (step : UInt64 := 1) : T #[(stop - start)/step]
-eye (n : UInt64) ... : T #[n, n]
-linspace / logspace (start stop : Float) (steps : UInt64) ... : T #[steps]
-zeros_like / ones_like {s} (t : T s) : T s
-uniform (s : Shape) (min max : Float) : IO (T s)   -- pure-Lean composite, Tyr/Torch.lean:88
-zerosOn / onesOn {s} (device : Device) : T s       -- Tyr/Torch.lean:1313-1318
-```
-
-### Arithmetic and scalar ops
-
-Same-shape `add`/`sub`/`mul {s} (t t' : T s) : T s` with `Add`/`Sub`/`Mul` instances; scalar `mul_scalar`/`div_scalar`/`add_scalar`/`sub_scalar` with `HMul`/`HDiv`/`HAdd`/`HSub (T s) Float (T s)` instances (`Tyr/Torch.lean:62-85`). Elementwise math: `relu`, `relu6`, `rsqrt`, `sqrt`, `abs`, `pow`, `exp`, `log`, `log10`, `cos`, `sin`, `atan`, `atan2`, `floor`, `div`. Casts: `toFloat'`, `toBFloat16'`, `toLong`, `castLike`, `restoreInputDType`.
-
-Broadcasting multiplication is the one quirk to know:
-
-```lean
-opaque mul' {s1 s2 : Shape} (t1 : @& T s1) (t2 : @& T s2) : T s2   -- Tyr/Torch.lean:103
-instance {s1 s2 : Shape} : HMul (T s1) (T s2) (T s2)                -- Tyr/Torch.lean:105
-```
-
-The result is typed as the *right* operand's shape regardless of actual broadcast semantics — fine for the dominant `normed * weight` idiom (as in `nn.rmsNormWeighted`), a silent shape-lie in general. A side effect of having both this and the scalar `HMul (T s) Float (T s)` instance: bare numeric literals are captured by the tensor-tensor instance, so write `w * (0.02 : Float)`, not `w * 0.02` (an `OfScientific (T …)` synthesis error otherwise); named `Float` bindings like GPT's `q_proj * scale` work unannotated.
-
-### Shape transforms
-
-```lean
-reshape {s} (t : T s) (s' : Shape) : T s'                  -- the universal escape hatch
-permute {s} (t : T s) (permutation : Array UInt64) : T (permuteShape s permutation)
-transpose {s} (input : T s) (dim0 dim1 : UInt64) : T (transposeShape s ...)
-unsqueeze / squeeze {s} (input : T s) (dim : Nat) : T (unsqueezeShape s dim) / ...
-expand {s} (input : T s) (targetShape : Shape) : T targetShape
-tensor_repeat {s} (input : T s) (repeats : Array UInt64) : T s
-cat {s1 s2} (t1 : T s1) (t2 : T s2) (dim : Nat) : T (catShape s1 s2 dim)
-eraseShape {s} (t : T s) : T #[]                           -- Tyr/Torch.lean:648
-T.slice {s} (self : T s) (dim start stop step) : T s       -- shape-preserving slice
-T.getOp {s} (self : T s) (idx : Int) : T (s[1:].toArray)   -- index first dim
-T.to {s} (self : T s) (device : Device) : T s              -- device move
-unbind {s} (t : T s) (dim : Nat := 0) : Array (T (unbindShape s dim))
-stack1d {n k} (tensors : Array (T #[n])) (dim : Int64 := 0)
-  : T (if dim == 0 then #[k, n] else #[n, k])
-```
-
-### Matmul family
-
-```lean
-nn.matmul {s1 s2} (a : T s1) (b : T s2) : T (matmulShape s1 s2)   -- generic, reshape-retagged
-nn.mm       {m n k} (input : T #[m, k]) (mat2 : T #[k, n]) : T #[m, n]
-nn.bmm      {b m n k} : T #[b, m, k] → T #[b, k, n] → T #[b, m, n]
-nn.bmm4d    {b h m k n} : T #[b, h, m, k] → T #[b, h, k, n] → T #[b, h, m, n]
-nn.matmul3d {batch seq k n} : T #[batch, seq, k] → T #[k, n] → T #[batch, seq, n]
-linear  {m n b} (x : T #[b, m]) (M : T #[n, m]) : T #[b, n]              -- top-level
-affine  ... (bias : T #[n]) : T #[b, n]
-linear3d / affine3d : T #[batch, seq, in_dim] → T #[out_dim, in_dim] → T #[batch, seq, out_dim]
-```
-
-Head-layout helpers for attention: `nn.transpose2d`, `nn.transpose3d_12`, `nn.reshape_to_heads`, `nn.reshape_from_heads`, `nn.transpose_for_attention`, `nn.transpose_from_attention` (`Tyr/Torch.lean:594-620`).
-
-### Reductions and scalar extraction
-
-```lean
-nn.sumAll / nn.meanAll / nn.maxAll / nn.minAll {s} (t : T s) : T #[]
-nn.sumDim / nn.meanDim {s} (t : T s) (dim : Nat) (keepdim : Bool := false)
-  : T (reduceShape s dim keepdim)
-nn.cumsum {s} (input : T s) (dim : Int64) : T s
-nn.argmax {s} (t : T s) (dim : UInt64) : T (reduceShape s dim.toNat false)
-nn.item {s} (t : T s) : Float        nn.itemInt {s} (t : T s) : Int64
-allclose {s} (a b : T s) (rtol : Float := 1e-05) (atol : Float := 1e-08) : Bool   -- top-level
-```
-
-### Autograd (`torch.autograd`)
-
-```lean
-grad {sx sy} (y : T sy) (x : T sx) (dy : T sy) : T sx          -- VJP, Tyr/Torch.lean:253
-pullback (f : T sx → T sy) (x : T sx) (dy : T sy) : T sx       -- pure-Lean wrapper
-backward {s} (output : T s) (grad_output : T s) : IO Unit      -- Tyr/Torch.lean:769
-backwardLoss {s} (loss : T s) : IO Unit                        -- scalar loss, grad = 1.0
-grad_of / zero_grad / detach / clone / retain_grad {s} (x : T s) : T s
-set_requires_grad {s} (x : T s) (requires_grad : Bool) : T s
-accumulate_grad / set_grad {s} (x grad : T s) : T s
-is_leaf / has_grad_fn {s} (x : T s) : Bool
-set_grad_enabled (enabled : Bool) : IO Unit ; is_grad_enabled : IO Bool
-no_grad {α} (action : IO α) : IO α    -- try/finally restore, Tyr/Torch.lean:275
-grad_grad {sx sy sz} (z y x grad_z grad_y) : T sx              -- second-order
-```
-
-The standard training idiom is `autograd.backwardLoss loss` followed by `autograd.grad_of param` (usually via `TensorStruct.grads`, see [tensorstruct.md](tensorstruct.md)). Leaf parameters are created with `set_requires_grad (detach t) true` since arithmetic results are non-leaves. Gradient clipping lives in `nn`: `clip_grad_norm_ (param) (max_norm) : IO Float`, `clip_grad_value_ (param) (clip_value) : IO Unit`.
-
-### Neural network functional (`torch.nn`)
-
-Activations: `sigmoid`, `silu`, `gelu`, `elu`, `tanh`, `softplus`, `leaky_relu`, `softmax (dim : Int32 := -1)`, `log_softmax (dim : Int := -1)`, `softmax_dim (dim : Int64)`, `softcap (cap := 15.0)`; pure-Lean composites `rmsNorm`, `rmsNormWeighted`, `reluSquared` (`Tyr/Torch.lean:1212-1229`).
-
-Normalization: `layer_norm` (3D, shape-aware), `layer_norm'` (generic), fused `layer_norm_gelu`/`layer_norm_relu`/`layer_norm_silu`, `batch_norm`, `group_norm`, `instance_norm`.
-
-Losses — all return `T #[]` scalars unless noted:
-
-```lean
-nn.cross_entropy {n c} (logits : T #[n, c]) (targets : T #[n]) : T #[]
-nn.cross_entropy_none {n c} (logits : T #[n, c]) (targets : T #[n]) : T #[n]
-nn.nll_loss / nn.nll_loss_none, nn.mse_loss, nn.l1_loss, nn.smooth_l1_loss,
-nn.binary_cross_entropy (input target : T s) (reduction : String := "mean")
-focal_loss, triplet_margin_loss   -- top-level simplified wrappers, Tyr/Torch.lean:1443,1462
-```
-
-Conv/pool (result shapes from the pure helpers above): `conv1d`, `conv1d_group_bias`, `conv2d`, `conv2d_bias`, `conv3d`, `conv_transpose1d_bias`, `max_pool2d`, `avg_pool2d`, `adaptive_avg_pool2d`. `conv_transpose2d` returns `T #[]` — its shape depends on all parameters and is computed at runtime (`Tyr/Torch.lean:366`).
-
-Other: `embedding`/`embedding1d`, `dropout`/`dropout2d`/`dropout3d` (in `IO`), `tril`, `masked_fill`, `masked_select`, `masked_scatter`, `topk_values`, `multinomial`, `topKFilter`, `topPFilter` (sampling), `squeezeDim`.
-
-### Attention
-
-```lean
-nn.scaled_dot_product_attention  {batch n_head seq head_dim}      -- 4D, causal default
-nn.scaledDotProductAttentionGQA         -- K/V heads ≠ Q heads
-nn.scaledDotProductAttentionGQAQKV      -- q_seq ≠ kv_seq (KV-cache decode)
-nn.scaledDotProductAttentionGQAWindow   -- sliding window
-nn.scaledDotProductAttentionGQAMask     -- [batch, seq] padding mask
-nn.scaledDotProductAttentionGQAMaskQKV  -- [batch, q_seq, kv_seq] edge mask
-nn.tyrFlashAttn4d                       -- Tyr flash attention; ThunderKittens H100
-                                        -- kernels for validated shapes, SDPA
-                                        -- fallback otherwise (Tyr/Torch.lean:1197)
-```
-
-All take `dropout_p`, `is_causal`, `enable_gqa` arguments and return `T #[batch, n_head, q_seq, head_dim]`.
-
-### Comparison, masking, indexing
-
-`lt`, `lt_scalar`, `gt`, `ge`, `eq`, `eq_scalar` (elementwise, boolean tensors), `where_`, `logical_not`, `logical_and`, `logicalOr` (De Morgan composite), `any : T s → Bool`, `falseMask`, `full_int`. Max/indices: `max_dim_3d : T #[d0,d1,d2] → T #[d0,d1] × T #[d0,d1]`, `topk`, `topk_2d`. Indexing: `indexSelect`, `index_select_1d`, `gather`, `scatter`, `scatter_add`, `scatter_2d`, `clamp`, `clampFloat`, `einsum`/`einsum2` (shape-erased), `interpolate`/`interpolate_scale` (shape-erased). Note: `max_dim` (`Tyr/Torch.lean:1283`) carries its own "signature is incorrect" warning — use `max_dim_3d`.
-
-### Devices and runtime
-
-```lean
-cuda_is_available : IO Bool          mps_is_available : IO Bool
-mps_is_available_stable (retries := 4) (delayMs := 250) : IO Bool  -- retry wrapper
-getBestDevice : IO Device            -- MPS > CUDA > CPU, Tyr/Torch.lean:152
-cuda_current_stream : IO UInt64      cuda_synchronize : IO Unit
-manualSeed (seed : UInt64) : IO Unit       -- CPU + CUDA generators
-get_live_tensors : IO UInt64               -- leak/debug probe
-```
-
-### Metadata and introspection (`Tyr/Basic.lean`)
-
-```lean
-T.runtimeShape {s} (t : T s) : Array UInt64        -- actual runtime shape
-T.dtype / T.dtypeStr {s} (t : T s) : DType / String
-T.device / T.deviceStr {s} (t : T s) : Device / String
-T.getValues {s} (t : T s) (maxElements : UInt64 := 1000) : FloatArray
-T.stats {s} (t : T s) : String                     -- JSON {min, max, mean, std}
-T.toString / T.print ; T.shape {s} (_t : T s) : Shape := s   -- the static index
-```
-
-These exist mainly for the infoview widgets, but are the right tool for debugging and test assertions (`t.runtimeShape == #[2, 3]`).
-
-### Data, signal, and media
-
-`torch.data`: `loadU16Bin`/`binFileTokenCount` (uint16 token corpora), `loadF32Bin`, `fromInt64Array`, `fromFloatArray` (both `T #[]`), `saveTensor`/`loadTensor` (raw single-tensor files), `saveWav`/`wavBegin`/`wavAppend`/`wavFinalize`, `savePPMExplicit`, `slice1d`/`slice`/`slice2d`/`sliceScatter`, `toLong`, `tensorToUInt64Array*`, `tensorToFloatArray'`, `findBosPositions`, `resampleSoxrHQ` (libsoxr HQ resampling), `fileExists`. Apple-only media preprocessing: `loadImagePatchified`, `loadVideoPatchified`, `loadGemma4ImagePatchGrid` (shape-erased, need macOS media frameworks).
-
-`torch.signal`: `hannWindow (n) : T #[n]`, `stft1d`, `istft1d`, `rfft1d` (all shape-erased outputs).
-
-### SafeTensors (`torch.safetensors`)
-
-```lean
-opaque SafeTensorsHandle : Type
-openHandle (path : String) : IO SafeTensorsHandle
-loadFromHandle (handle) (name : String) (shape : Shape) : IO (T shape)
-loadTensor (path name : String) (s : Shape) : IO (T s)
-loadTensorSharded (dir name : String) (s : Shape) : IO (T s)
-saveTensor (path name : String) (t : T s) : IO Unit
-saveTensors (path) (entries : Array (String × T #[]))
-            (metadata : Array (String × String) := #[]) : IO Unit
-```
-
-`*OnDevice` variants (`loadFromHandleOnDevice`, `loadTensorOnDevice`, `loadTensorShardedOnDevice`) load then move. The caller supplies the expected shape; it is trusted, not checked against the file header. For the elaboration-time type provider that generates shape-correct loaders from a SafeTensors file, see [serialization.md](../serialization.md).
-
-### Rotary embeddings (`torch.rotary`)
-
-```lean
-computeFreqs / computeFreqsPure (seqLen headDim : UInt64) (base : Float := 10000.0)
-  : IO (T #[seqLen, headDim/2] × T #[seqLen, headDim/2])   -- (cos, sin)
-computeFreqsOnDevice / ...Pure  -- with explicit device
-applyRotaryEmb {batch seq n_head head_dim}
-  (x : T #[batch, seq, n_head, head_dim])
-  (cos sin : T #[seq, head_dim / 2]) : T #[batch, seq, n_head, head_dim]
-```
-
-### Linear algebra (`torch.linalg`)
-
-Matrix decompositions and functions for manifold optimization (`Tyr/Torch.lean:1489-1565`): `qr`, `qr_reduced`, `svd : T #[m,n] → T #[m, min m n] × T #[min m n] × T #[min m n, n]`, `svdvals`, `matrix_exp`, `matrix_log`, `inv`, `diag`, `diagflat`. Norms returning `Float`: `spectralNorm`, `nuclearNorm`, `maxRowNorm`, `l2Norm`, `frobeniusNorm`; `rowNorms : T #[n,d] → T #[n]`.
-
-### The dynamic corner: `T #[]`
-
-A growing set of APIs uses `T #[]` for dynamically shaped handles: `einsum`,
-`interpolate`, `conv_transpose2d`, `squeezeDim`, `masked_select`, `cat_dyn`, the
-media loaders, `stft1d`/`istft1d`/`rfft1d`, `fromInt64Array`/`fromFloatArray`.
-`eraseShape` preserves the handle. For compatibility, raw `reshape t #[]`
-also preserves it; this does **not** turn a one-element vector into a scalar.
-Use `reshapeExact t #[]` for actual scalar reshape. `Tensor.reshape` always
-uses exact semantics and requires a proof that the element count is unchanged.
-
-The audited creation, indexing, unbind, and reshape ABI declarations live in
-`cc/src/tyr_ffi_abi.h`. C++ compilation checks the implementations against this
-header. After `lake build Tyr.Torch:c`, run `python3 scripts/check_ffi_abi.py`
-to compare it with Lean's generated declarations. `Tests.TestFFIBoundary`
-checks native boxed indices, axes, 64-bit range values, and reshape semantics.
-
-## Usage example
-
-Reconstructed example (from `Examples/GPT/GPT.lean:87-115,197-207`, `Examples/GPT/Train.lean:110-145`, `Tests/TestAutoGrad.lean:232-268`):
-
-```lean
+import Tyr.Typed
+import Tyr.Typed.Neural
 import Tyr.Torch
-
 open torch
 
-/-- Leaf-parameter idiom: detach, then require grad (GPT.lean:87-89). -/
-def makeLeafParam {s : Shape} (t : T s) : T s :=
-  autograd.set_requires_grad (autograd.detach t) true
+abbrev Activations := Tensor { shape := #[32, 128], dtype := .Float32, device := .CPU }
+abbrev PinnedActivations (device : Device) := Tensor {
+  shape := #[32, 128]
+  dtype := .BFloat16
+  device := device
+}
 
-/-- One classifier step: forward, scalar loss, backward, clip, read loss. -/
-def step {batch inDim numClasses : UInt64}
-    (w : T #[numClasses, inDim]) (x : T #[batch, inDim]) (y : T #[batch])
-    : IO Float := do
-  let logits := linear x w                    -- T #[batch, numClasses]
-  let loss := nn.cross_entropy logits y       -- T #[], scalar (GPT.lean:207)
-  autograd.backwardLoss loss                  -- accumulates ∂loss/∂w (Train.lean:125)
-  let _ ← nn.clip_grad_norm_ w 1.0            -- in-place grad clip (Train.lean:86)
-  let _grad : T #[numClasses, inDim] := autograd.grad_of w
-  pure (nn.item loss)                         -- scalar to Float (Train.lean:136)
-
-def main : IO Unit := do
-  manualSeed 42
-  let device ← getBestDevice                  -- MPS > CUDA > CPU
-  let w0 ← randn #[10, 32] false device       -- IO; non-leaf after scaling
-  let w := makeLeafParam (w0 * (0.02 : Float))  -- scalar HMul instance
-  let x ← randn #[4, 32] false device
-  let y : T #[4] := reshape (data.fromInt64Array #[1, 2, 3, 4]) #[4]
-  let loss ← step w x y
-  -- Evaluation under no_grad: graph building disabled, restored on exit
-  autograd.no_grad do
-    let logits := linear x w
-    IO.println s!"loss={loss}, logits shape={logits.runtimeShape}, stats={logits.stats}"
+def allocateCUDAActivations : IO (Σ device : Device, PinnedActivations device) := do
+  let device ← Device.cuda 0
+  let support ← DType.BFloat16.acquireConstantSupport device
+  let _ := support.down
+  pure ⟨device, Tensor.zerosFor ⟨#[32, 128], .BFloat16, device⟩⟩
 ```
 
-Shape-level checking happens at elaboration: `nn.matmul (x : T #[2, 3]) (w : T #[3, 4])` has type `T (matmulShape #[2, 3] #[3, 4])`, which reduces to `T #[2, 4]` — a `[2,3] @ [4,3]` mistake fails to typecheck.
+Every specification supplies exact shape, dtype, and device indices. There is
+no wildcard default. `SomeDTypeTensor` packages a runtime dtype without erasing
+it. `shape`, `dtype`,
+`device`, and `staticSpec` describe the index; `actualSpec` and `runtimeDevice`
+inspect native metadata. Runtime-selected devices can appear directly in
+result types, or be packaged as `Sigma fun device => Tensor { shape := shape,
+dtype := dtype, device := device }` when the caller does not select placement.
 
-## Pitfalls
+`RawTensor` is the native handle used by adapters in `Tyr.RawTensor` and its
+submodules. It is not the model-facing tensor type. `Tensor.ofRaw` validates
+shape, dtype, and placement and returns `Except String (Tensor σ)`.
+There is no public unchecked raw constructor or implicit raw coercion. Native
+adapters use explicit `.raw` access and validate returned handles. Static
+indices alone do not prove a native implementation correct: metadata extraction
+and the native zero factory remain trusted native boundaries.
 
-- `matmulShape` is total and returns `#[]` on invalid input; shape *compatibility* is not proven, only shape *arithmetic* is tracked. Bad contractions fail in C++ at runtime.
-- `mul'`'s `HMul (T s1) (T s2) (T s2)` instance types the result as the right operand even when broadcasting would produce something else (`Tyr/Torch.lean:103-106`).
-- `reshape`, and wrappers built on it (`matmul`, `cat`, `expand`, `sumDim`, …), re-tag shapes without runtime verification — the Lean-side shape helper is the source of truth and must match C++ behavior.
-- `rand`/`randn`/`randint`/`dropout` are in `IO`; deterministic creation and most pure math are not.
-- Naming is inconsistent (snake_case `mul_scalar`, `no_grad` vs. camelCase `manualSeed`, `eraseShape`, `zerosOn`); `focal_loss`'s docstring points at a nonexistent `nn.cross_entropy_loss` — the real names are `nn.cross_entropy`/`nn.cross_entropy_none` (`Tyr/Torch.lean:1442`).
-- `torch.class differentiable` (`Tyr/Torch.lean:289`) is a near-unused experiment, not the AD system — for Tyr's actual autodiff see [autodiff.md](../autodiff.md).
+## Creation and conversion
+
+Factories live in `torch.Tensor`:
+
+- `zeros`, `ones`, and `full` create Float32 tensors.
+- `fullInt` creates Int64 tensors.
+- `fromFloatArray` and `fromInt64Array` retain the host array length in the shape.
+- `randn` and `uniformLike` return fresh random tensors in `IO`.
+- `zerosFor`, `onesFor`, and `eyeFor` require exact dtype/device constant support.
+- `toFloat32`, `toBFloat16`, and `castDType` change the dtype index.
+
+Pure factories are suitable for values. When independent mutable storage is
+required, use an allocation/copy API with an explicit ownership discipline;
+repeating a pure expression does not establish independent storage.
+
+`Device.CPU` is always available. Acquire accelerators with `Device.cuda index`
+or `Device.mps` in IO before constructing tensors. The result carries the exact
+placement in tensor indices. A raw `DeviceKind` description cannot be passed in
+its place.
+
+The erased class `DType.ConstantSupported dtype device` establishes that the
+constant factory paths support this exact pair and represent zero and one.
+Common supported combinations have static instances. For a runtime-selected
+pair, acquire evidence once with `dtype.acquireConstantSupport device` and
+install `support.down` as a local instance. `Inhabited (Tensor spec)` requires
+the same evidence; `default` cannot allocate an unsupported specification.
+This capability does not imply support for arbitrary arithmetic kernels.
+
+## Arithmetic, transforms, and reductions
+
+`Tensor.add`, `sub`, `mul`, and `div` take equal shapes and require a
+`DType.Promotes` witness for the result dtype. Their `addB`, `subB`, `mulB`, and
+`divB` variants additionally support broadcasting through `TensorSpec.Promotes`.
+These erased proofs establish the promotion rule; they do not establish that
+the operator has a kernel for that dtype and device. Operator-specific domain
+constraints reject inputs such as complex ReLU and integral mean. Matrix multiplication
+requires compatible dimensions and matching dtype and concrete device, and checks
+actual dtype/device equality before execution. `linear` consumes an `[outDim, inDim]` weight matrix;
+`linear3d` handles batched sequences.
+
+Broadcasting arithmetic uses `Device.PointwiseCompatible` to reject known
+placement conflicts. A rank-zero CPU operand can participate on another device;
+a size-one vector cannot. Native metadata is validated at checked boundaries.
+Selection has its own scalar relocation rule; see
+[device compatibility](typed.md#device-compatibility).
+
+`reshape` requires equal element counts. `reshapeChecked` validates a requested
+runtime shape. In both cases `#[]` means a scalar. `sliceChecked` validates the
+claimed result of a runtime slice. Other transforms include `transpose`,
+`permute`, `unsqueeze`, `squeeze`, and `unbind`.
+
+Use `Tensor.packShape` to package a runtime-dependent shape existentially.
+`catMany?` accepts indexed existential tensors and checks the requested output
+specification; `catManyChecked` prints a diagnostic and aborts on mismatch.
+A dynamic shape does not require pretending that a tensor is a scalar.
+
+Reduction indices follow native accumulation rules. For example, integer sums
+may accumulate in Int64 and integer division produces floating output. Ordinary
+operations expose those result dtypes in their types. Generic real-floating
+algorithms accept `DType.RealFloating d`; its proof instances establish valid
+promotion, and its equality lemmas simplify result indices without converting
+native data. `FloatingTensorStruct` supplies that evidence at each leaf of a
+parameter tree. Model loaders validate compute dtypes and retain the evidence
+in `RealFloatingDType`; generated SafeTensors records retain concrete indices
+and derived tree constraints. There are no same-dtype adapters that reject promotion and
+return an input as a fallback.
+Deliberate mixed-precision computation needs explicit input conversions or a
+witnessed promoting operation.
+`Tensor.Promoting` provides the latter when dtypes are known only at runtime:
+its checked binary and host-scalar variants return the computed dtype with a
+promotion witness. Its unary convenience wrappers express their computed dtype
+directly in the result index. These operations preserve the promoted native
+dtype without coercing it to an input's dtype.
+The arithmetic `?` variants also return native kernel failures through `Except`.
+The checked matrix, expansion, concatenation, and reduction APIs provide
+recoverable errors for their respective checks and native calls; this does not
+extend to every raw native operation. See [operator checks](typed.md#operator-checks-and-failures).
+
+## Autograd and mutation
+
+`setRequiresGrad`, `detach`, and `gradOf` retain the tensor specification.
+`setRequiresGrad : Tensor σ → Bool → IO (Tensor σ)` returns the requested flag
+without changing retained aliases. `parameter : Tensor σ → IO (Tensor σ)` always
+creates an independent detached trainable leaf. `gradOf : IO (Tensor σ)` returns a detached, independent snapshot of
+accumulated gradients. Later backward passes, clipping, and `zeroGrad : IO Unit`
+do not change a previously returned gradient snapshot.
+`zeroGrad` and `TensorStruct.zeroGrads` default to `setToNone := true`, releasing
+the gradient buffer and breaking cycles created by `backward(createGraph := true)`.
+Pass `(setToNone := false)` to zero an existing buffer instead. `Tensor.grad`
+is preferable for higher derivatives because it does not accumulate into `.grad`.
+`backwardLoss` takes a scalar loss; `backward` takes an output and an explicit
+cotangent with the same specification. Both release saved backward intermediates
+by default. Pass `(retainGraph := some true)` for intentional reuse, then release
+on the final pass. Omitted retention follows `createGraph`, whose default is
+`false`, matching PyTorch. `Tensor.grad` returns a cotangent in IO without
+accumulating parameter gradients and follows the same lifetime options.
+The tensor values remain readable after backward, but another backward through
+consumed saved state returns an IO error. Pure forward expressions may be shared;
+repeating an equal expression does not promise a fresh graph. `hasGradFn` reports
+the presence of a gradient function, not whether saved intermediates remain usable.
+`copyInto : Tensor σ → Tensor σ → IO (Tensor σ)` returns the updated destination.
+Always use its result: retained aliases keep their original values. Native code
+consumes the destination reference and reuses storage only after proving native
+ownership permits it; otherwise it copies. Inference `data.copySliceIO` follows
+the same returned-value contract. Reuse currently covers ordinary uniquely owned
+CPU storage; accelerator, view, autograd, and externally backed storage take the
+copying path.
+
+```lean
+import Tyr.Typed
+import Tyr.Typed.Neural
+open torch
+
+def classifierStep {batch inDim classes : UInt64}
+    (weight : Tensor { shape := #[classes, inDim], dtype := .Float32, device := .CPU })
+    (input : Tensor { shape := #[batch, inDim], dtype := .Float32, device := .CPU })
+    (targets : Tensor { shape := #[batch], dtype := .Int64, device := .CPU }) : IO Float := do
+  let logits := Tensor.linear input weight
+  let loss := Tensor.crossEntropy logits targets
+  Tensor.backwardLoss loss
+  pure loss.item
+```
+
+The caller is responsible for creating trainable leaf parameters and managing
+accumulated gradients. See [autodiff](../autodiff.md) for the separate staged AD
+system and [tensor structures](tensorstruct.md) for parameter-tree traversal.
+
+## Neural operations and persistence
+
+`Tyr.Typed.Neural` includes attention/GQA, checked native flash-attention dispatch,
+rotary embeddings, spectral/audio helpers, and file adapters. Linear algebra and
+norm operations are available under `Tensor`, rather than separate legacy
+functional namespaces.
+
+`Tensor.saveTensor` writes a tensor. `Tensor.loadTensorExact σ path` requires the
+stored shape to match and validates dtype and placement. SafeTensors loaders in
+`Tyr.SafeTensors` validate stored metadata and can generate indexed parameter
+structures; see [serialization](../serialization.md).
+
+## Verification
+
+Native adapters contain `@[extern]` declarations over `RawTensor`. Their ABI must
+match the C++ definitions, including boxed versus unboxed arguments and ownership.
+The `libtyr` build generates `cc/src/generated/tyr_ffi.h` from Lean's compiled
+extern declarations (`TyrFFI`), and `libTyrC`'s sources include it, so a
+signature mismatch fails to compile. Ownership is not part of the C types.
+
+`Tests.TestTyped`, `Tests.TestTypedNeural`, and `Tests.TestFFIBoundary` cover static
+rejections, native metadata, numerical behavior, and ABI-sensitive calls. CPU
+parity and GPU target compilation do not establish runtime GPU qualification.
 
 ## Related guides
 
-- [typed.md](typed.md) — `Tensor (σ : StaticSpec)`: dtype and device policy in the type, checked constructors.
-- [tensorstruct.md](tensorstruct.md) — PyTree-style traversal over parameter structures (`TensorStruct.grads`, `zeroGrads`).
-- [utilities.md](utilities.md) — PRNG, logging, and the `#tensor`/`#module` infoview widgets that consume the metadata FFI.
-- [../autodiff.md](../autodiff.md) — the `Tyr/AD` forward/reverse-mode system layered above `torch.autograd`.
-- [../serialization.md](../serialization.md) — SafeTensors type provider, checkpoints, HuggingFace hub.
-- [../ffi-and-build.md](../ffi-and-build.md) — the C++ side (`cc/src/tyr*.cpp`), libtorch linkage, build configuration.
-- [../modules.md](../modules.md) — `Linear`, `RMSNorm`, and other modules built on these ops.
-- [../getting-started.md](../getting-started.md), [../examples-and-testing.md](../examples-and-testing.md) — end-to-end training examples and the test suite.
-
-Exhaustive per-symbol documentation for everything referenced here is generated by doc-gen4; see `docbuild/`.
+- [Typed specifications](typed.md)
+- [Tensor structures](tensorstruct.md)
+- [Modules](../modules.md)
+- [FFI and build](../ffi-and-build.md)
+- [Examples and testing](../examples-and-testing.md)

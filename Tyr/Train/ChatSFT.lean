@@ -16,6 +16,7 @@
   weight decay, and no gradient clipping yet.
 -/
 import Tyr.Torch
+import Tyr.Typed
 import Tyr.TensorStruct
 import Tyr.Module
 import Tyr.Optim
@@ -26,6 +27,8 @@ import Tyr.Train.RunLedger
 namespace torch.Train.ChatSFT
 
 open torch
+
+variable {device : Device}
 open torch.Data.Task
 open torch.dist
 
@@ -99,33 +102,38 @@ structure SFTState where
 
 /-! ## SFT Batch -/
 
-/-- SFT batch with inputs, targets, and mask -/
+/-- SFT batch with inputs, targets, and mask.
+
+    The batch and sequence dimensions are runtime values carried as fields;
+    the tensors are indexed by them, so `inputs`, `targets` and `mask` always
+    agree on shape. -/
 structure SFTBatch where
-  /-- Input token IDs: [batch, seq] as Int64 tensor -/
-  inputs : T #[]
-  /-- Target token IDs: [batch, seq] as Int64 tensor -/
-  targets : T #[]
-  /-- Training mask: [batch, seq] as Float tensor (1.0 = train, 0.0 = ignore) -/
-  mask : T #[]
   /-- Batch size -/
   batchSize : UInt64
   /-- Sequence length -/
   seqLen : UInt64
+  /-- Input token IDs: [batchSize, seqLen] as Int64 tensor -/
+  inputs : Tensor { shape := #[batchSize, seqLen], dtype := .Int64, device := device }
+  /-- Target token IDs: [batchSize, seqLen] as Int64 tensor -/
+  targets : Tensor { shape := #[batchSize, seqLen], dtype := .Int64, device := device }
+  /-- Training mask: [batchSize, seqLen] as Float32 tensor (1.0 = train, 0.0 = ignore) -/
+  mask : Tensor { shape := #[batchSize, seqLen], dtype := .Float32, device := device }
   /-- Number of valid (non-masked) target tokens -/
   numValidTokens : Nat
   deriving Repr
 
 /-- Create an empty SFT batch -/
-def SFTBatch.empty : SFTBatch :=
-  { inputs := zeros #[0, 0]
-  , targets := zeros #[0, 0]
-  , mask := zeros #[0, 0]
-  , batchSize := 0
+def SFTBatch.empty : SFTBatch (device := .CPU) :=
+  { batchSize := 0
   , seqLen := 0
+  , inputs := Tensor.fullInt #[0, 0] 0
+  , targets := Tensor.fullInt #[0, 0] 0
+  , mask := Tensor.zeros #[0, 0]
   , numValidTokens := 0 }
 
 /-- Move all tensor fields of an SFT batch to a target device. -/
-private def moveBatchToDevice (batch : SFTBatch) (device : Device) : SFTBatch :=
+private def moveBatchToDevice {source : Device} (batch : SFTBatch (device := source))
+    (device : Device) : SFTBatch (device := device) :=
   { batch with
     inputs := batch.inputs.to device
     targets := batch.targets.to device
@@ -133,18 +141,15 @@ private def moveBatchToDevice (batch : SFTBatch) (device : Device) : SFTBatch :=
   }
 
 /-- Convert a collated conversation batch into the SFT batch format. -/
-def SFTBatch.ofConversationBatch (batch : ConversationBatch) : SFTBatch :=
-  let shape := batch.tokens.runtimeShape
-  let batchSize := shape.getD 0 0
-  let seqLen := shape.getD 1 0
-  let numValidInt := nn.itemInt (nn.sumAll batch.mask)
-  let numValidTokens := if numValidInt <= 0 then 0 else numValidInt.toUInt64.toNat
+def SFTBatch.ofConversationBatch (batch : ConversationBatch) : SFTBatch (device := .CPU) :=
+  let numValidFloat := Tensor.item (Tensor.sumAll batch.mask)
+  let numValidTokens := if numValidFloat <= 0 then 0 else numValidFloat.toUInt64.toNat
   {
+    batchSize := batch.batchSize
+    seqLen := batch.seqLen
     inputs := batch.tokens
     targets := batch.tokens
     mask := batch.mask
-    batchSize := batchSize
-    seqLen := seqLen
     numValidTokens := numValidTokens
   }
 
@@ -154,35 +159,62 @@ def SFTBatch.ofConversationBatch (batch : ConversationBatch) : SFTBatch :=
     Only positions where mask > 0 contribute to the loss.
 
     logits: [batch, seq, vocab] - Model output logits
-    targets: [batch, seq] - Target token IDs
+    targets: [batch, seq] - Target token IDs (Int64)
     mask: [batch, seq] - Training mask (1.0 = train, 0.0 = ignore)
 
-    Returns scalar loss averaged over valid positions.
+    Returns scalar loss averaged over valid positions. The result dtype is the
+    promoted sum-accumulation dtype of logits and mask (Float32 when both are
+    Float32).
 -/
-def maskedCrossEntropy {batch seq vocab : UInt64}
-    (logits : T #[batch, seq, vocab])
-    (targets : T #[batch, seq])
-    (mask : T #[batch, seq])
-    : T #[] :=
+def maskedCrossEntropy? {batch seq vocab : UInt64} {d m result : DType} {dev : Device}
+    [DType.Promotes d m result]
+    (logits : Tensor ⟨#[batch, seq, vocab], d, dev⟩)
+    (targets : Tensor ⟨#[batch, seq], .Int64, dev⟩)
+    (mask : Tensor ⟨#[batch, seq], m, dev⟩)
+    : Except String (Tensor ⟨#[], (DType.promote d m).sumResult, dev⟩) := do
+  if !(mask.raw.dtype.isBool || mask.raw.dtype.isIntegral || mask.raw.dtype.isRealFloating) then
+    throw "maskedCrossEntropy requires a real numeric or Bool mask"
   -- Flatten for cross-entropy
   let batchSeq := batch * seq
-  let logitsFlat := reshape logits #[batchSeq, vocab]
-  let targetsFlat := reshape targets #[batchSeq]
+  let logitsFlat ← logits.reshapeChecked? #[batchSeq, vocab]
+  let targetsFlat ← targets.reshapeChecked? #[batchSeq]
   -- Compute per-element loss
-  let lossesFlat := nn.cross_entropy_none logitsFlat targetsFlat
+  let lossesFlat ← Tensor.crossEntropyNone? logitsFlat targetsFlat
   -- Apply mask and compute mean over valid positions
-  let maskFlat := reshape mask #[batchSeq]
-  let maskedLosses := mul lossesFlat maskFlat
+  let maskFlat ← mask.reshapeChecked? #[batchSeq]
+  Tensor.checkPointwise lossesFlat maskFlat
+  let maskedLosses : Tensor ⟨#[batchSeq], DType.promote d m, dev⟩ ←
+    Tensor.ofRaw (← RawTensor.mulChecked #[batchSeq] lossesFlat.raw maskFlat.raw)
   -- Sum losses and divide by number of valid tokens
-  let totalLoss := nn.sumAll maskedLosses
-  let numValid := nn.sumAll maskFlat
+  let totalLoss ← Tensor.sumAll? maskedLosses
+  let numValid ← Tensor.sumAll? maskFlat
   -- Divide by number of valid tokens to get mean loss
-  -- Use mul_scalar with reciprocal to avoid needing tensor division
-  let numValidFloat := nn.item numValid
+  -- Use scalar multiplication with the reciprocal to avoid tensor division
+  let numValidFloat ← Tensor.item? numValid
   let epsFloat : Float := 1e-8
-  mul_scalar totalLoss (1.0 / (numValidFloat + epsFloat))
+  let floating ← DType.realFloating? (DType.promote d m).sumResult
+  let _ := floating.down
+  Tensor.mulScalar? totalLoss (1.0 / (numValidFloat + epsFloat))
+
+/-- Pure masked loss over real floating logits. Use `maskedCrossEntropy?` to
+recover invalid target labels or unsupported native kernels. -/
+def maskedCrossEntropy {batch seq vocab : UInt64} {d m result : DType} {dev : Device}
+    [DType.RealFloating d] [DType.Promotes d m result]
+    (logits : Tensor ⟨#[batch, seq, vocab], d, dev⟩)
+    (targets : Tensor ⟨#[batch, seq], .Int64, dev⟩)
+    (mask : Tensor ⟨#[batch, seq], m, dev⟩)
+    (_maskDomain : (m.isBool || m.isIntegral || m.isRealFloating) = true := by first | rfl | decide) :
+    Tensor ⟨#[], (DType.promote d m).sumResult, dev⟩ :=
+  match maskedCrossEntropy? logits targets mask with
+  | .ok loss => loss
+  | .error message => nativeInvariantFailure s!"maskedCrossEntropy: {message}"
 
 /-! ## Data Preparation -/
+
+/-- Build an Int64 token tensor from host data over the raw FFI boundary.
+    `reshapeChecked` validates the result metadata (shape and Int64 dtype). -/
+private def int64TensorFromArray (arr : Array Int64) : Tensor { shape := #[arr.size.toUInt64], dtype := .Int64, device := .CPU } :=
+  Tensor.fromInt64Array arr
 
 /-- Prepare SFT batch from tokenized conversations.
     Creates input/target pairs where targets are shifted and masked.
@@ -193,7 +225,7 @@ def maskedCrossEntropy {batch seq vocab : UInt64}
     - Mask: mask[1:] (shifted to align with targets)
 -/
 def prepareSFTBatch (convs : Array TokenizedConversation) (maxLen : Nat) (padTokenId : UInt64)
-    : IO SFTBatch := do
+    : IO (SFTBatch (device := .CPU)) := do
   let batchSize := convs.size
   if batchSize == 0 then
     return SFTBatch.empty
@@ -230,23 +262,19 @@ def prepareSFTBatch (convs : Array TokenizedConversation) (maxLen : Nat) (padTok
         allMasks := allMasks.push 0.0  -- Don't train on padding
 
   -- Convert to tensors
-  let inputsTensor := data.fromInt64Array allInputs
-  let inputsTensor := reshape inputsTensor #[batchSize.toUInt64, seqLen.toUInt64]
-
-  let targetsTensor := data.fromInt64Array allTargets
-  let targetsTensor := reshape targetsTensor #[batchSize.toUInt64, seqLen.toUInt64]
-
-  -- Convert float mask to tensor via Int64 (workaround: no fromFloatArray)
-  let maskInt := allMasks.map (fun m => if m > 0.5 then (1 : Int64) else 0)
-  let maskTensor := data.fromInt64Array maskInt
-  let maskTensor := toFloat' (reshape maskTensor #[batchSize.toUInt64, seqLen.toUInt64])
+  let inputsTensor := (int64TensorFromArray allInputs).reshapeChecked
+    #[batchSize.toUInt64, seqLen.toUInt64]
+  let targetsTensor := (int64TensorFromArray allTargets).reshapeChecked
+    #[batchSize.toUInt64, seqLen.toUInt64]
+  let maskTensor := (Tensor.fromFloatArray allMasks).reshapeChecked
+    #[batchSize.toUInt64, seqLen.toUInt64]
 
   return {
+    batchSize := batchSize.toUInt64
+    seqLen := seqLen.toUInt64
     inputs := inputsTensor
     targets := targetsTensor
     mask := maskTensor
-    batchSize := batchSize.toUInt64
-    seqLen := seqLen.toUInt64
     numValidTokens
   }
 
@@ -257,24 +285,34 @@ def prepareSFTBatch (convs : Array TokenizedConversation) (maxLen : Nat) (padTok
 
     forwardFn should take inputs [batch, seq] and return logits [batch, seq, vocab]
 -/
-def sftForward {batch seq vocab : UInt64}
-    (forwardFn : T #[batch, seq] → IO (T #[batch, seq, vocab]))
-    (inputs : T #[batch, seq])
-    (targets : T #[batch, seq])
-    (mask : T #[batch, seq])
-    : IO (T #[]) := do
+def sftForward {batch seq vocab : UInt64} {d m result : DType} {dev : Device}
+    [DType.Promotes d m result]
+    (forwardFn : Tensor ⟨#[batch, seq], .Int64, dev⟩ → IO (Tensor ⟨#[batch, seq, vocab], d, dev⟩))
+    (inputs : Tensor ⟨#[batch, seq], .Int64, dev⟩)
+    (targets : Tensor ⟨#[batch, seq], .Int64, dev⟩)
+    (mask : Tensor ⟨#[batch, seq], m, dev⟩)
+    : IO (Tensor ⟨#[], (DType.promote d m).sumResult, dev⟩) := do
   -- Get logits from model
   let logits ← forwardFn inputs
   -- Compute masked loss
-  return maskedCrossEntropy logits targets mask
+  IO.ofExcept (maskedCrossEntropy? logits targets mask)
 
-/-- Evaluate validation loss over multiple batches -/
-def evalValidationLoss
-    (dataFn : IO SFTBatch)
-    (forwardFn : T #[] → IO (T #[]))  -- Generic forward: inputs → logits
+/-- Evaluate validation loss over multiple batches.
+
+    The loss of each batch is the masked mean per-token cross entropy; batches
+    are weighted by their valid-token counts so the result is the global
+    masked mean over all evaluated tokens. -/
+def evalValidationLoss [TensorStruct Params]
+    (params : Params)
+    (dataFn : IO (SFTBatch (device := .CPU)))
+    (forwardFn : Params → {b s : UInt64} → Tensor { shape := #[b, s], dtype := .Int64, device := device } →
+      IO (Σ v : UInt64, Tensor { shape := #[b, s, v], dtype := .Float32, device := device }))
     (numSteps : Nat)
-    (device : Device := Device.CPU)
-    : IO Float := autograd.no_grad do
+    (targetDevice : Device := device)
+    : IO Float := do
+  if targetDevice != device then
+    throw (IO.userError "Validation device differs from the model forward device")
+  let params := TensorStruct.detach params
   let mut totalLoss : Float := 0.0
   let mut totalValid : Nat := 0
 
@@ -282,19 +320,9 @@ def evalValidationLoss
     let batch ← dataFn
     let batch := moveBatchToDevice batch device
     if batch.numValidTokens > 0 then
-      let logits ← forwardFn batch.inputs
-      -- Reshape for loss computation (dimensions come from batch)
-      let batchSeq := batch.batchSize * batch.seqLen
-      let logitsFlat := reshape logits #[batchSeq]
-      let targetsFlat := reshape batch.targets #[batchSeq]
-      let maskFlat := reshape batch.mask #[batchSeq]
-      -- Compute loss using standard cross-entropy then mask
-      let lossPerToken := nn.cross_entropy_none
-        (reshape logitsFlat #[batchSeq, 1])  -- Placeholder vocab dim
-        targetsFlat
-      let maskedLoss := mul lossPerToken maskFlat
-      let batchLoss := nn.sumAll maskedLoss
-      totalLoss := totalLoss + nn.item batchLoss
+      let ⟨_, logits⟩ ← forwardFn params batch.inputs
+      let loss ← IO.ofExcept (maskedCrossEntropy? logits batch.targets batch.mask)
+      totalLoss := totalLoss + Tensor.item loss * batch.numValidTokens.toFloat
       totalValid := totalValid + batch.numValidTokens
 
   if totalValid == 0 then
@@ -372,24 +400,29 @@ def artifactCallbacks
     - cfg: Training configuration
     - params: Model parameters to train (must implement TensorStruct)
     - optState: Initial optimizer state
-    - forwardFn: Forward pass function that takes params and inputs, returns logits
+    - forwardFn: Forward pass function that takes params and Int64 inputs
+      `[batch, seq]`, returns Float32 logits `[batch, seq, vocab]`
     - lossFn: Loss function that takes logits, targets, mask, returns scalar loss
     - trainDataFn: Function to get next training batch
     - valDataFn: Function to get next validation batch (optional)
     - numTrainExamples: Total training examples (for computing iterations)
     - logger: Logging callback
 -/
-def trainLoop [TensorStruct P]
+def trainLoop [TensorStruct P] [FloatingTensorStruct P]
     (cfg : SFTConfig)
     (params : P)
     (optState : Optim.AdamWState P)
-    (forwardFn : P → T #[] → IO (T #[]))  -- params → inputs → logits
-    (lossFn : T #[] → T #[] → T #[] → T #[])  -- logits → targets → mask → loss
-    (trainDataFn : IO SFTBatch)
-    (valDataFn : Option (IO SFTBatch) := none)
+    (forwardFn : P → {b s : UInt64} → Tensor { shape := #[b, s], dtype := .Int64, device := device } →
+      IO (Σ v : UInt64, Tensor { shape := #[b, s, v], dtype := .Float32, device := device }))  -- params → inputs → logits
+    (lossFn : {b s v : UInt64} → Tensor { shape := #[b, s, v], dtype := .Float32, device := device } → Tensor { shape := #[b, s], dtype := .Int64, device := device } →
+      Tensor { shape := #[b, s], dtype := .Float32, device := device } → Tensor { shape := #[], dtype := .Float32, device := device })  -- logits → targets → mask → loss
+    (trainDataFn : IO (SFTBatch (device := .CPU)))
+    (valDataFn : Option (IO (SFTBatch (device := .CPU))) := none)
     (numTrainExamples : Nat := 10000)
     (callbacks : Callbacks := {})
     : IO (P × Optim.AdamWState P × SFTState) := do
+  if cfg.device != device then
+    throw (IO.userError "Training device differs from the model forward device")
   let isDistributed ← dist.isInitialized
   let worldSizeU64 ← if isDistributed then dist.getWorldSize else pure 1
   let worldSize := worldSizeU64.toNat
@@ -403,7 +436,7 @@ def trainLoop [TensorStruct P]
 
   let gradAccumSteps := max 1 (cfg.gradAccumSteps worldSize)
 
-  let mut currentParams := TensorStruct.makeLeafParams params
+  let mut currentParams ← TensorStruct.makeLeafParams params
   let mut currentOptState := optState
   let mut state : SFTState := {}
 
@@ -414,7 +447,7 @@ def trainLoop [TensorStruct P]
     -- Validation evaluation
     if let some valFn := valDataFn then
       if isLastStep || (step > 0 && step % cfg.evalEvery == 0) then
-        let valLoss ← evalValidationLoss valFn (forwardFn currentParams) cfg.evalSteps cfg.device
+        let valLoss ← evalValidationLoss currentParams valFn forwardFn cfg.evalSteps cfg.device
         callbacks.onValidation step valLoss
         if valLoss < state.bestValLoss then
           state := { state with bestValLoss := valLoss }
@@ -423,7 +456,8 @@ def trainLoop [TensorStruct P]
       break
 
     -- Zero gradients at start of accumulation
-    let workingParams := TensorStruct.zeroGrads (TensorStruct.makeLeafParams currentParams)
+    let workingParams ← TensorStruct.makeLeafParams currentParams
+    TensorStruct.zeroGrads workingParams
 
     -- Gradient accumulation loop
     let mut accumLoss : Float := 0.0
@@ -431,19 +465,19 @@ def trainLoop [TensorStruct P]
 
     for _ in [:gradAccumSteps] do
       let batch ← trainDataFn
-      let batch := moveBatchToDevice batch cfg.device
+      let batch := moveBatchToDevice batch device
 
       if batch.numValidTokens > 0 then
         -- Forward pass
-        let logits ← forwardFn workingParams batch.inputs
+        let ⟨_, logits⟩ ← forwardFn workingParams batch.inputs
         -- Compute masked loss
         let loss := lossFn logits batch.targets batch.mask
         -- Scale loss for accumulation
-        let scaledLoss := mul_scalar loss (1.0 / gradAccumSteps.toFloat)
+        let scaledLoss := Tensor.mulScalar loss (1.0 / gradAccumSteps.toFloat)
         -- Backward pass (gradients accumulate)
-        autograd.backwardLoss scaledLoss
+        Tensor.backwardLoss scaledLoss
 
-        accumLoss := accumLoss + nn.item loss
+        accumLoss := accumLoss + Tensor.item loss
         numTokens := numTokens + batch.numValidTokens
 
     -- LR schedule: linear decay with initial warmup fraction
@@ -451,15 +485,12 @@ def trainLoop [TensorStruct P]
     let lr := cfg.embeddingLr * cfg.initLrFrac * lrm
 
     -- Synchronize gradients across ranks in distributed training.
-    if isDistributed then
-      let gradsToSync := TensorStruct.grads workingParams
-      let _ ← dist.allReduceGrads gradsToSync .avg
-      pure ()
+    let grads ← TensorStruct.grads workingParams
+    let grads ← if isDistributed then dist.allReduceGrads grads .avg else pure grads
 
-    -- Extract gradients and update parameters.
-    let grads := TensorStruct.grads workingParams
+    -- Update parameters from the synchronized gradient snapshots.
     let opt := Optim.adamw (lr := lr) (b1 := 0.9) (b2 := 0.999)
-    let (newParams, newOptState) := Optim.step opt workingParams grads currentOptState
+    let (newParams, newOptState) ← Optim.step opt workingParams grads currentOptState
 
     currentParams := newParams
     currentOptState := newOptState
@@ -486,7 +517,7 @@ def makeTaskDataGenerator
     (iter : TaskIterator)
     (_maxLen : Nat)
     (_padTokenId : UInt64)
-    : IO (IO SFTBatch) := do
+    : IO (IO (SFTBatch (device := .CPU))) := do
   let iterRef ← IO.mkRef iter
   return do
     let mut currentIter ← iterRef.get
@@ -513,14 +544,17 @@ def makeTaskDataGenerator
 /-- Simple SFT training helper for models with standard interface.
     Wraps trainLoop with common defaults.
 
-    Note: lossFn must handle the actual shape computation since
-    we use shape-erased tensors (T #[]). -/
-def trainSFT [TensorStruct P]
+    `forwardFn` takes Int64 token inputs `[batch, seq]` and returns Float32
+    logits `[batch, seq, vocab]`; `lossFn` computes the scalar masked loss
+    (`maskedCrossEntropy` fits the signature directly). -/
+def trainSFT [TensorStruct P] [FloatingTensorStruct P]
     (cfg : SFTConfig)
     (params : P)
-    (forwardFn : P → T #[] → IO (T #[]))
-    (lossFn : T #[] → T #[] → T #[] → T #[])
-    (trainDataFn : IO SFTBatch)
+    (forwardFn : P → {b s : UInt64} → Tensor { shape := #[b, s], dtype := .Int64, device := device } →
+      IO (Σ v : UInt64, Tensor { shape := #[b, s, v], dtype := .Float32, device := device }))
+    (lossFn : {b s v : UInt64} → Tensor { shape := #[b, s, v], dtype := .Float32, device := device } → Tensor { shape := #[b, s], dtype := .Int64, device := device } →
+      Tensor { shape := #[b, s], dtype := .Float32, device := device } → Tensor { shape := #[], dtype := .Float32, device := device })
+    (trainDataFn : IO (SFTBatch (device := .CPU)))
     (numTrainExamples : Nat)
     : IO (P × SFTState) := do
   -- Initialize optimizer state via the adamw optimizer

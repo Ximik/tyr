@@ -16,7 +16,7 @@ namespace Tests.DiffEqTyped
 private def approx (a b tol : Float) : Bool :=
   Float.abs (a - b) < tol
 
-private abbrev YSpec : StaticSpec := { shape := #[2], dtype := .Float32 }
+private abbrev YSpec : StaticSpec := { shape := #[2], dtype := .Float32, device := .CPU }
 
 @[test] def testTypedTensorOdeSolve : IO Unit := do
   -- dy/dt = -y, y(0) = (1, 2)  ⇒  y(1) = e⁻¹ · (1, 2)
@@ -26,8 +26,8 @@ private abbrev YSpec : StaticSpec := { shape := #[2], dtype := .Float32 }
     Heun.solver
       (Term := ODETerm (Tensor YSpec) Unit)
       (Y := Tensor YSpec) (VF := Tensor YSpec) (Args := Unit)
-  let y0 : Tensor YSpec := Tensor.assumeSpec (torch.full #[2] 1.0)
-  let y0 := DiffEqSpace.add y0 (Tensor.assumeSpec (torch.full #[2] 0.0))
+  let y0 : Tensor YSpec := Tensor.full #[2] 1.0
+  let y0 := DiffEqSpace.add y0 (Tensor.full #[2] 0.0)
   let sol :=
     diffeqsolve
       (Term := ODETerm (Tensor YSpec) Unit)
@@ -43,7 +43,7 @@ private abbrev YSpec : StaticSpec := { shape := #[2], dtype := .Float32 }
       match yT.validate with
       | .ok () => pure ()
       | .error err => LeanTest.fail s!"typed state failed validation after solve: {err}"
-      let vals ← data.tensorToFloatArray' yT.raw
+      let vals ← Tensor.toFloatArray yT
       LeanTest.assertEqual vals.size 2 "state keeps its shape"
       let expected := Float.exp (-1.0)
       for v in vals do
@@ -59,7 +59,7 @@ private abbrev YSpec : StaticSpec := { shape := #[2], dtype := .Float32 }
     Dopri5.solver
       (Term := ODETerm (Tensor YSpec) Unit)
       (Y := Tensor YSpec) (VF := Tensor YSpec) (Args := Unit)
-  let y0 : Tensor YSpec := Tensor.assumeSpec (torch.full #[2] 1.0)
+  let y0 : Tensor YSpec := Tensor.full #[2] 1.0
   let controller : PIDController := { rtol := 1.0e-6, atol := 1.0e-8 }
   let sol :=
     diffeqsolve
@@ -76,7 +76,7 @@ private abbrev YSpec : StaticSpec := { shape := #[2], dtype := .Float32 }
       match yT.validate with
       | .ok () => pure ()
       | .error err => LeanTest.fail s!"typed state failed validation: {err}"
-      let vals ← data.tensorToFloatArray' yT.raw
+      let vals ← Tensor.toFloatArray yT
       for v in vals do
         LeanTest.assertTrue (approx v (Float.exp (-1.0)) 1.0e-4)
           s!"adaptive y(1) expected ≈ {Float.exp (-1.0)}, got {v}"
@@ -88,18 +88,18 @@ private abbrev YSpec : StaticSpec := { shape := #[2], dtype := .Float32 }
   let steps := 500
   let dt := 1.0 / steps.toFloat
   -- tensor state, n = 64
-  let tTerm : ODETerm (T #[64]) Unit :=
-    { vectorField := fun _t y _ => mul_scalar y (-1.0) }
+  let tTerm : ODETerm (Tensor { shape := #[64], dtype := .Float32, device := .CPU }) Unit :=
+    { vectorField := fun _t y _ => Tensor.mulScalar y (-1.0) }
   let tSolver :=
-    Dopri5.solver (Term := ODETerm (T #[64]) Unit)
-      (Y := T #[64]) (VF := T #[64]) (Args := Unit)
+    Dopri5.solver (Term := ODETerm (Tensor { shape := #[64], dtype := .Float32, device := .CPU }) Unit)
+      (Y := Tensor { shape := #[64], dtype := .Float32, device := .CPU }) (VF := Tensor { shape := #[64], dtype := .Float32, device := .CPU }) (Args := Unit)
   let t0 ← IO.monoMsNow
   let tSol :=
-    diffeqsolve (Term := ODETerm (T #[64]) Unit)
-      (Y := T #[64]) (VF := T #[64]) (Control := Time) (Args := Unit)
+    diffeqsolve (Term := ODETerm (Tensor { shape := #[64], dtype := .Float32, device := .CPU }) Unit)
+      (Y := Tensor { shape := #[64], dtype := .Float32, device := .CPU }) (VF := Tensor { shape := #[64], dtype := .Float32, device := .CPU }) (Control := Time) (Args := Unit)
       (Controller := ConstantStepSize)
-      tTerm tSolver 0.0 1.0 (some dt) (torch.ones #[64]) () (saveat := { t1 := true })
-  let tFinal := nn.item (nn.sumAll ((tSol.ys.getD #[]).getD 0 (torch.ones #[64])))
+      tTerm tSolver 0.0 1.0 (some dt) (Tensor.ones #[64]) () (saveat := { t1 := true })
+  let tFinal := Tensor.item (Tensor.sumAll ((tSol.ys.getD #[]).getD 0 (Tensor.ones #[64])))
   let tensorMs := (← IO.monoMsNow) - t0
   -- Float state (pure Lean, no FFI)
   let fTerm : ODETerm Float Unit := { vectorField := fun _t y _ => -y }

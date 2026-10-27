@@ -3,7 +3,7 @@
 
   Pretrained weight loading for standalone Qwen3 causal-LM.
 -/
-import Tyr.Torch
+import Tyr.Typed
 import Tyr.Log
 import Tyr.SafeTensors.Load
 import Tyr.Model.Utils
@@ -12,6 +12,7 @@ import Tyr.Model.Qwen3.Model
 
 namespace torch.qwen3
 
+variable {device : Device}
 open torch.Log
 open torch.Model (reqGradFalse)
 open torch.safetensors (tryLoadOptionalTensor tryLoadOptionalTensorSharded)
@@ -22,14 +23,14 @@ namespace Qwen3ForCausalLM
     Falls back to tied embeddings if `lm_head.weight` is absent. -/
 def loadSharded (modelDir : String) (cfg : Config := Config.qwen3_4B)
     (log : Handlers := {})
-    : IO (Qwen3ForCausalLM cfg) := do
+    (device : Device := .CPU) : IO (Qwen3ForCausalLM (device := device) cfg) := do
   log.onInfo s!"Loading Qwen3ForCausalLM from {modelDir}..."
-  let model ← qwen.loadQwen3ModelSharded modelDir cfg false log
+  let model ← qwen.loadQwen3ModelSharded (device := device) modelDir cfg false log
 
-  let lmHeadOpt ← tryLoadOptionalTensorSharded modelDir "lm_head.weight" #[cfg.vocab_size, cfg.hidden_size]
+  let lmHeadOpt ← tryLoadOptionalTensorSharded (device := device) modelDir "lm_head.weight" #[cfg.vocab_size, cfg.hidden_size]
   let (lmHead, tieWordEmbeddings) ←
     match lmHeadOpt with
-    | some w => pure (reqGradFalse w, false)
+    | some ⟨_, w⟩ => pure (reqGradFalse w.toFloat32, false)
     | none => do
       log.onInfo "  lm_head.weight not found; using tied embeddings."
       pure (model.embed_tokens, true)
@@ -41,14 +42,14 @@ def loadSharded (modelDir : String) (cfg : Config := Config.qwen3_4B)
     Falls back to tied embeddings if `lm_head.weight` is absent. -/
 def load (path : String) (cfg : Config := Config.qwen3_4B)
     (log : Handlers := {})
-    : IO (Qwen3ForCausalLM cfg) := do
+    (device : Device := .CPU) : IO (Qwen3ForCausalLM (device := device) cfg) := do
   log.onInfo s!"Loading Qwen3ForCausalLM from {path}..."
-  let model ← qwen.loadQwen3Model path cfg log
+  let model ← qwen.loadQwen3Model (device := device) path cfg log
 
-  let lmHeadOpt ← tryLoadOptionalTensor path "lm_head.weight" #[cfg.vocab_size, cfg.hidden_size]
+  let lmHeadOpt ← tryLoadOptionalTensor (device := device) path "lm_head.weight" #[cfg.vocab_size, cfg.hidden_size]
   let (lmHead, tieWordEmbeddings) ←
     match lmHeadOpt with
-    | some w => pure (reqGradFalse w, false)
+    | some ⟨_, w⟩ => pure (reqGradFalse w.toFloat32, false)
     | none => do
       log.onInfo "  lm_head.weight not found; using tied embeddings."
       pure (model.embed_tokens, true)

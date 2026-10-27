@@ -48,10 +48,11 @@ class DiffEqElem (α : Type) where
 ```
 
 `Time` and `Scalar` are both `Float` abbreviations. Instances exist for
-`Float`, raw tensors `T s`, `[TensorStruct α]` model trees (priority 50, so
+`Float`, indexed `Tensor σ` values, `[TensorStruct α]` model trees (priority 50, so
 network parameters can be integrated directly), pairs, `Fin n → α`,
 `Vector n α`, `List`, `Array`, `Option`. `Tyr/DiffEq/Typed.lean` adds the same
-instances for the spec-typed `Tensor (σ : StaticSpec)` via `Tensor.assumeSpec`.
+instances for `Tensor (σ : StaticSpec)` using indexed arithmetic and metadata-checked
+preserving scalar operations.
 Arithmetic operators are opt-in: bring `DiffEqArithmetic.hAddInst`,
 `hSubInst`, `hMulInst`, `smulInst` in as `local instance`s for `+`, `-`, `*`.
 
@@ -260,7 +261,10 @@ structure AdjointResult (Y Args : Type) where
 ```
 
 `Adjoint/Torch.lean` implements this for any `[TensorStruct Y] [TensorStruct Args]`
-via `TensorStruct.makeLeafParams` and `autograd.grad`. Entry points:
+via `TensorStruct.functionalGrad`: temporary differentiation leaves stay inside a
+pure callback boundary and only detached derivatives escape. The primal is evaluated
+separately on detached inputs, preserving static metadata without exporting temporary
+leaf identities. Entry points:
 
 | Function | Mode |
 |---|---|
@@ -379,19 +383,19 @@ def eventExample : IO Unit := do
 -- 4. Neural-ODE-style gradient: backsolve adjoint through an RK4 solve
 --    of dy/dt = a * y on scalar tensors.
 def adjointExample : IO Unit := do
-  let term : ODETerm (T #[]) (T #[]) := { vectorField := fun _t y a => mul a y }
+  let term : ODETerm (Tensor { shape := #[], dtype := .Float32, device := .CPU }) (Tensor { shape := #[], dtype := .Float32, device := .CPU }) := { vectorField := fun _t y a => Tensor.mul a y }
   let solver :=
-    RK4.solver (Term := ODETerm (T #[]) (T #[])) (Y := T #[]) (VF := T #[]) (Args := T #[])
+    RK4.solver (Term := ODETerm (Tensor { shape := #[], dtype := .Float32, device := .CPU }) (Tensor { shape := #[], dtype := .Float32, device := .CPU })) (Y := Tensor { shape := #[], dtype := .Float32, device := .CPU }) (VF := Tensor { shape := #[], dtype := .Float32, device := .CPU }) (Args := Tensor { shape := #[], dtype := .Float32, device := .CPU })
   let adjSolver :=
     RK4.solver
-      (Term := ODETerm (AdjointState (T #[]) (T #[])) (T #[]))
-      (Y := AdjointState (T #[]) (T #[])) (VF := AdjointState (T #[]) (T #[]))
-      (Args := T #[])
-  let a := full #[] 0.3
-  let sol := diffeqsolve term solver 0.0 1.0 (some 0.01) (full #[] 2.0) a
+      (Term := ODETerm (AdjointState (Tensor { shape := #[], dtype := .Float32, device := .CPU }) (Tensor { shape := #[], dtype := .Float32, device := .CPU })) (Tensor { shape := #[], dtype := .Float32, device := .CPU }))
+      (Y := AdjointState (Tensor { shape := #[], dtype := .Float32, device := .CPU }) (Tensor { shape := #[], dtype := .Float32, device := .CPU })) (VF := AdjointState (Tensor { shape := #[], dtype := .Float32, device := .CPU }) (Tensor { shape := #[], dtype := .Float32, device := .CPU }))
+      (Args := Tensor { shape := #[], dtype := .Float32, device := .CPU })
+  let a := Tensor.full #[] 0.3
+  let sol := diffeqsolve term solver 0.0 1.0 (some 0.01) (Tensor.full #[] 2.0) a
     (saveat := { steps := true }) (controller := ({} : ConstantStepSize))
-  match backsolveAdjoint term adjSolver sol a (ones #[]) with
-  | some adj => IO.println s!"∂L/∂y₀ and ∂L/∂a computed"  -- adj.adjY0, adj.adjArgs
+  match backsolveAdjoint term adjSolver sol a (Tensor.ones #[]) with
+  | some _adj => IO.println s!"∂L/∂y₀ and ∂L/∂a computed"  -- adj.adjY0, adj.adjArgs
   | none => IO.println "adjoint solve failed"
 ```
 
@@ -403,7 +407,7 @@ generative modeling; `Examples/GPU/RunRKFusedSolve.lean` is a fused CUDA bench.
 ## Related guides
 
 - [Automatic differentiation](autodiff.md) — the `autograd.grad` engine behind `Adjoint/Torch.lean`
-- [Tensors](core/tensors.md) — `T s`, the raw tensor state type
+- [Tensors](core/tensors.md) — `Tensor σ`, the indexed tensor state type
 - [TensorStruct](core/tensorstruct.md) — model-tree states for neural ODEs
 - [Typed tensors](core/typed.md) — `Tensor σ` states with static shape/dtype specs
 - [Event skeleton](event-skeleton.md) — the hybrid-systems representation the DiffEq bridge projects into

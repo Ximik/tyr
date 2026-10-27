@@ -8,6 +8,8 @@
  */
 
 #include <lean/lean.h>
+#include "generated/tyr_ffi.h"
+#include "tyr_checked_result.h"
 #include <torch/torch.h>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/TCPStore.hpp>
@@ -39,6 +41,7 @@
 #include <mutex>
 #include <limits>
 #include <unordered_map>
+#include <stdexcept>
 
 // Forward declarations from tyr.cpp
 extern lean_object* fromTorchTensor(torch::Tensor t);
@@ -58,16 +61,53 @@ std::mutex g_dist_mutex;
 std::unordered_map<uint64_t, c10::intrusive_ptr<c10d::Work>> g_pending_work;
 std::atomic<uint64_t> g_next_work_id{1};
 
-// Reduce operations mapping
-c10d::ReduceOp::RedOpType reduceOpFromInt(uint8_t op) {
-    switch (op) {
-        case 0: return c10d::ReduceOp::SUM;
-        case 1: return c10d::ReduceOp::AVG;
-        case 2: return c10d::ReduceOp::PRODUCT;
-        case 3: return c10d::ReduceOp::MIN;
-        case 4: return c10d::ReduceOp::MAX;
-        default: return c10d::ReduceOp::SUM;
+// Work::wait throws on failure but returns false on abortion. Both outcomes
+// must prevent exposing a collective result as successfully completed.
+void waitForCompletion(const c10::intrusive_ptr<c10d::Work>& work) {
+    if (!work->wait())
+        throw std::runtime_error("Distributed operation was aborted");
+}
+
+enum class BackendKind { Gloo, Nccl };
+
+// Validate before creating a TCPStore or narrowing UInt64 fields to libtorch's
+// native index types. In particular, unavailable backends must not rendezvous.
+BackendKind validateInit(const std::string& backend, uint64_t port,
+                         uint64_t rank, uint64_t world_size) {
+    if (port > std::numeric_limits<uint16_t>::max())
+        throw std::invalid_argument("master_port must be in [0, 65535]");
+    if (world_size == 0 || world_size > static_cast<uint64_t>(std::numeric_limits<int>::max()))
+        throw std::invalid_argument("world_size must be in [1, INT_MAX]");
+    if (rank >= world_size)
+        throw std::invalid_argument("rank must be less than world_size");
+    if (backend == "gloo") {
+#if TYR_HAS_GLOO
+        return BackendKind::Gloo;
+#else
+        throw std::invalid_argument("Gloo backend requested but ProcessGroupGloo is unavailable in this build");
+#endif
     }
+    if (backend == "nccl") {
+#if TYR_HAS_NCCL
+        return BackendKind::Nccl;
+#else
+        throw std::invalid_argument("NCCL backend requested but ProcessGroupNCCL is unavailable in this build");
+#endif
+    }
+    throw std::invalid_argument("Unsupported backend: " + backend);
+}
+
+static_assert(tyr::lean::ReduceOpCount == 5, "reduceOpFromLean must map every Lean ReduceOp");
+
+c10d::ReduceOp::RedOpType reduceOpFromLean(uint8_t op) {
+    switch (static_cast<tyr::lean::ReduceOp>(op)) {
+        case tyr::lean::ReduceOp::sum: return c10d::ReduceOp::SUM;
+        case tyr::lean::ReduceOp::avg: return c10d::ReduceOp::AVG;
+        case tyr::lean::ReduceOp::product: return c10d::ReduceOp::PRODUCT;
+        case tyr::lean::ReduceOp::min: return c10d::ReduceOp::MIN;
+        case tyr::lean::ReduceOp::max: return c10d::ReduceOp::MAX;
+    }
+    throw std::invalid_argument("Invalid Lean ReduceOp tag: " + std::to_string(op));
 }
 
 void maybeSetCurrentCudaDeviceFromTensor(const torch::Tensor& t) {
@@ -90,189 +130,188 @@ extern "C" {
  * This should be called with LOCAL_RANK before NCCL collectives to avoid
  * duplicate-device communicator initialization.
  */
-lean_object* lean_torch_dist_set_cuda_device(uint64_t device, lean_object* /*w*/) {
-    try {
-#if TYR_HAS_NCCL
-        if (!torch::cuda::is_available()) {
-            return lean_io_result_mk_ok(lean_box(0));
-        }
-        c10::cuda::set_device(static_cast<c10::DeviceIndex>(device));
-#else
-        (void)device;
-#endif
-        return lean_io_result_mk_ok(lean_box(0));
-    } catch (const std::exception& e) {
-        return lean_io_result_mk_error(lean_mk_io_user_error(
-            lean_mk_string(("Failed to set CUDA device: " + std::string(e.what())).c_str())));
-    }
+lean_object* lean_torch_dist_set_cuda_device(uint64_t device) {
+  return tyr::checkedIoCall("lean_torch_dist_set_cuda_device", [&] {
+      try {
+          if (device > static_cast<uint64_t>(std::numeric_limits<c10::DeviceIndex>::max()))
+              throw std::invalid_argument("CUDA device index exceeds the native DeviceIndex range");
+  #if TYR_HAS_NCCL
+          if (!torch::cuda::is_available()) {
+              return lean_io_result_mk_ok(lean_box(0));
+          }
+          c10::cuda::set_device(static_cast<c10::DeviceIndex>(device));
+  #else
+          (void)device;
+  #endif
+          return lean_io_result_mk_ok(lean_box(0));
+      } catch (const std::exception& e) {
+          return lean_io_result_mk_error(lean_mk_io_user_error(
+              lean_mk_string(("Failed to set CUDA device: " + std::string(e.what())).c_str())));
+      }
+  });
 }
 
 /**
  * Initialize the distributed process group.
  *
- * @param backend_obj - String: "nccl", "gloo", or "mpi"
+ * @param backend_obj - String: "nccl" or "gloo"
  * @param master_addr_obj - String: Master address (e.g., "localhost")
  * @param master_port - Port number for rendezvous
  * @param rank - This process's rank
  * @param world_size - Total number of processes
- * @param w - Lean world token
  */
 lean_object* lean_torch_dist_init_process_group(
     b_lean_obj_arg backend_obj,
     b_lean_obj_arg master_addr_obj,
     uint64_t master_port,
     uint64_t rank,
-    uint64_t world_size,
-    lean_object* w
+    uint64_t world_size
 ) {
-    std::lock_guard<std::mutex> lock(g_dist_mutex);
+  return tyr::checkedIoCall("lean_torch_dist_init_process_group", [&] {
+      std::lock_guard<std::mutex> lock(g_dist_mutex);
 
-    if (g_initialized) {
-        return lean_io_result_mk_error(lean_mk_io_user_error(
-            lean_mk_string("Process group already initialized")));
-    }
+      if (g_initialized) {
+          return lean_io_result_mk_error(lean_mk_io_user_error(
+              lean_mk_string("Process group already initialized")));
+      }
 
-    try {
-        std::string backend(lean_string_cstr(backend_obj));
-        std::string master_addr(lean_string_cstr(master_addr_obj));
+      try {
+          std::string backend(lean_string_cstr(backend_obj));
+          std::string master_addr(lean_string_cstr(master_addr_obj));
 
-        if (master_port > static_cast<uint64_t>(std::numeric_limits<uint16_t>::max())) {
-            return lean_io_result_mk_error(lean_mk_io_user_error(
-                lean_mk_string(("Invalid master_port: " + std::to_string(master_port) +
-                    " is out of range [0, 65535]").c_str())));
-        }
+          const auto kind = validateInit(backend, master_port, rank, world_size);
+          const auto native_rank = static_cast<int>(rank);
+          const auto native_world_size = static_cast<int>(world_size);
 
-        g_rank = static_cast<int>(rank);
-        g_world_size = static_cast<int>(world_size);
+          // Create TCP store for rendezvous
+          bool is_master = (rank == 0);
+          auto store_opts = c10d::TCPStoreOptions();
+          store_opts.port = static_cast<uint16_t>(master_port);
+          store_opts.isServer = is_master;
+          store_opts.numWorkers = native_world_size;
+          store_opts.waitWorkers = true;
 
-        // Create TCP store for rendezvous
-        bool is_master = (rank == 0);
-        auto store_opts = c10d::TCPStoreOptions();
-        store_opts.port = static_cast<uint16_t>(master_port);
-        store_opts.isServer = is_master;
-        store_opts.numWorkers = static_cast<int>(world_size);
-        store_opts.waitWorkers = true;
+          auto store = c10::make_intrusive<c10d::TCPStore>(master_addr, store_opts);
+          c10::intrusive_ptr<c10d::Backend> process_group;
 
-        g_store = c10::make_intrusive<c10d::TCPStore>(master_addr, store_opts);
+          if (kind == BackendKind::Nccl) {
+  #if TYR_HAS_NCCL
+              auto options = c10d::ProcessGroupNCCL::Options::create();
+              options->is_high_priority_stream = true;
+              process_group = c10::make_intrusive<c10d::ProcessGroupNCCL>(
+                  store, native_rank, native_world_size, options);
+  #endif
+          } else {
+  #if TYR_HAS_GLOO
+              auto options = c10d::ProcessGroupGloo::Options::create();
+              options->devices.push_back(c10d::ProcessGroupGloo::createDefaultDevice());
+              process_group = c10::make_intrusive<c10d::ProcessGroupGloo>(
+                  store, native_rank, native_world_size, options);
+  #endif
+          }
 
-        if (backend == "nccl") {
-#if TYR_HAS_NCCL
-            auto options = c10d::ProcessGroupNCCL::Options::create();
-            options->is_high_priority_stream = true;
-            g_process_group = c10::make_intrusive<c10d::ProcessGroupNCCL>(
-                g_store, g_rank, g_world_size, options);
-#else
-            return lean_io_result_mk_error(lean_mk_io_user_error(
-                lean_mk_string("NCCL backend requested but ProcessGroupNCCL is unavailable in this build")));
-#endif
-        } else if (backend == "gloo") {
-#if TYR_HAS_GLOO
-            auto options = c10d::ProcessGroupGloo::Options::create();
-            g_process_group = c10d::ProcessGroupGloo::createProcessGroupGloo(
-                g_store, g_rank, g_world_size, options);
-#else
-            return lean_io_result_mk_error(lean_mk_io_user_error(
-                lean_mk_string("Gloo backend requested but ProcessGroupGloo is unavailable in this build")));
-#endif
-        } else {
-            return lean_io_result_mk_error(lean_mk_io_user_error(
-                lean_mk_string(("Unsupported backend: " + backend).c_str())));
-        }
+          // Local RAII owns both resources until construction has fully succeeded.
+          g_store = std::move(store);
+          g_process_group = std::move(process_group);
+          g_rank = native_rank;
+          g_world_size = native_world_size;
+          g_initialized = true;
+          return lean_io_result_mk_ok(lean_box(0));
 
-        g_initialized = true;
-        return lean_io_result_mk_ok(lean_box(0));
-
-    } catch (const std::exception& e) {
-        return lean_io_result_mk_error(lean_mk_io_user_error(
-            lean_mk_string(("Failed to init process group: " + std::string(e.what())).c_str())));
-    }
+      } catch (const std::exception& e) {
+          return lean_io_result_mk_error(lean_mk_io_user_error(
+              lean_mk_string(("Failed to init process group: " + std::string(e.what())).c_str())));
+      }
+  });
 }
 
 /**
  * Get the rank of this process.
  */
-lean_object* lean_torch_dist_get_rank(lean_object* w) {
-    std::lock_guard<std::mutex> lock(g_dist_mutex);
-    if (!g_initialized) {
-        return lean_io_result_mk_error(lean_mk_io_user_error(
-            lean_mk_string("Process group not initialized")));
-    }
-    return lean_io_result_mk_ok(lean_box_uint64(static_cast<uint64_t>(g_rank)));
+lean_object* lean_torch_dist_get_rank() {
+  return tyr::checkedIoCall("lean_torch_dist_get_rank", [&] {
+      std::lock_guard<std::mutex> lock(g_dist_mutex);
+      if (!g_initialized) {
+          return lean_io_result_mk_error(lean_mk_io_user_error(
+              lean_mk_string("Process group not initialized")));
+      }
+      return lean_io_result_mk_ok(lean_box_uint64(static_cast<uint64_t>(g_rank)));
+  });
 }
 
 /**
  * Get the world size (total number of processes).
  */
-lean_object* lean_torch_dist_get_world_size(lean_object* w) {
-    std::lock_guard<std::mutex> lock(g_dist_mutex);
-    if (!g_initialized) {
-        return lean_io_result_mk_error(lean_mk_io_user_error(
-            lean_mk_string("Process group not initialized")));
-    }
-    return lean_io_result_mk_ok(lean_box_uint64(static_cast<uint64_t>(g_world_size)));
+lean_object* lean_torch_dist_get_world_size() {
+  return tyr::checkedIoCall("lean_torch_dist_get_world_size", [&] {
+      std::lock_guard<std::mutex> lock(g_dist_mutex);
+      if (!g_initialized) {
+          return lean_io_result_mk_error(lean_mk_io_user_error(
+              lean_mk_string("Process group not initialized")));
+      }
+      return lean_io_result_mk_ok(lean_box_uint64(static_cast<uint64_t>(g_world_size)));
+  });
 }
 
 /**
  * Check if distributed is initialized.
  */
-lean_object* lean_torch_dist_is_initialized(lean_object* w) {
-    std::lock_guard<std::mutex> lock(g_dist_mutex);
-    return lean_io_result_mk_ok(lean_box(g_initialized ? 1 : 0));
+lean_object* lean_torch_dist_is_initialized() {
+  return tyr::checkedIoCall("lean_torch_dist_is_initialized", [&] {
+      std::lock_guard<std::mutex> lock(g_dist_mutex);
+      return lean_io_result_mk_ok(lean_box(g_initialized ? 1 : 0));
+  });
 }
 
 /**
  * Destroy the process group and clean up resources.
  */
-lean_object* lean_torch_dist_destroy_process_group(lean_object* w) {
-    std::lock_guard<std::mutex> lock(g_dist_mutex);
-
-    if (!g_initialized) {
-        return lean_io_result_mk_ok(lean_box(0)); // Already destroyed
-    }
-
-    try {
-        // Wait for all pending work
-        for (auto& [id, work] : g_pending_work) {
-            if (work) {
-                work->wait();
-            }
-        }
-        g_pending_work.clear();
-
-        // Reset process group
-        g_process_group.reset();
-        g_store.reset();
-        g_initialized = false;
-        g_rank = 0;
-        g_world_size = 1;
-
-        return lean_io_result_mk_ok(lean_box(0));
-    } catch (const std::exception& e) {
-        return lean_io_result_mk_error(lean_mk_io_user_error(
-            lean_mk_string(("Failed to destroy process group: " + std::string(e.what())).c_str())));
-    }
+lean_object* lean_torch_dist_destroy_process_group() {
+  return tyr::checkedIoCall("lean_torch_dist_destroy_process_group", [&] {
+      std::lock_guard<std::mutex> lock(g_dist_mutex);
+      // Attempt every wait, including after an earlier failure. Always release
+      // residual state, even when initialization never reached its commit point.
+      std::exception_ptr first_error;
+      for (auto& [id, work] : g_pending_work) {
+          try {
+              if (work) waitForCompletion(work);
+          } catch (...) {
+              if (!first_error) first_error = std::current_exception();
+          }
+      }
+      g_pending_work.clear();
+      g_process_group.reset();
+      g_store.reset();
+      g_initialized = false;
+      g_rank = 0;
+      g_world_size = 1;
+      if (first_error) std::rethrow_exception(first_error);
+      return lean_io_result_mk_ok(lean_box(0));
+  });
 }
 
 /**
  * Barrier - synchronize all processes.
  */
-lean_object* lean_torch_dist_barrier(lean_object* w) {
-    std::lock_guard<std::mutex> lock(g_dist_mutex);
+lean_object* lean_torch_dist_barrier() {
+  return tyr::checkedIoCall("lean_torch_dist_barrier", [&] {
+      std::lock_guard<std::mutex> lock(g_dist_mutex);
 
-    if (!g_initialized) {
-        return lean_io_result_mk_error(lean_mk_io_user_error(
-            lean_mk_string("Process group not initialized")));
-    }
+      if (!g_initialized) {
+          return lean_io_result_mk_error(lean_mk_io_user_error(
+              lean_mk_string("Process group not initialized")));
+      }
 
-    try {
-        c10d::BarrierOptions opts;
-        auto work = g_process_group->barrier(opts);
-        work->wait();
-        return lean_io_result_mk_ok(lean_box(0));
-    } catch (const std::exception& e) {
-        return lean_io_result_mk_error(lean_mk_io_user_error(
-            lean_mk_string(("Barrier failed: " + std::string(e.what())).c_str())));
-    }
+      try {
+          c10d::BarrierOptions opts;
+          auto work = g_process_group->barrier(opts);
+          waitForCompletion(work);
+          return lean_io_result_mk_ok(lean_box(0));
+      } catch (const std::exception& e) {
+          return lean_io_result_mk_error(lean_mk_io_user_error(
+              lean_mk_string(("Barrier failed: " + std::string(e.what())).c_str())));
+      }
+  });
 }
 
 /**
@@ -281,44 +320,42 @@ lean_object* lean_torch_dist_barrier(lean_object* w) {
  * @param tensor - Input/output tensor (in-place reduction)
  * @param op - Reduce operation (0=SUM, 1=AVG, 2=PRODUCT, 3=MIN, 4=MAX)
  * @param async_op - If true, returns work ID for async wait
- * @param w - Lean world token
  */
 lean_object* lean_torch_dist_all_reduce(
-    lean_obj_arg /*s*/,
     b_lean_obj_arg tensor,
     uint8_t op,
-    uint8_t async_op,
-    lean_object* w
-) {
-    std::lock_guard<std::mutex> lock(g_dist_mutex);
+    uint8_t async_op) {
+  return tyr::checkedIoCall("lean_torch_dist_all_reduce", [&] {
+      std::lock_guard<std::mutex> lock(g_dist_mutex);
 
-    if (!g_initialized) {
-        return lean_io_result_mk_error(lean_mk_io_user_error(
-            lean_mk_string("Process group not initialized")));
-    }
+      if (!g_initialized) {
+          return lean_io_result_mk_error(lean_mk_io_user_error(
+              lean_mk_string("Process group not initialized")));
+      }
 
-    try {
-        auto t = borrowTensor(tensor);
-        maybeSetCurrentCudaDeviceFromTensor(t);
-        std::vector<torch::Tensor> tensors = {t};
+      try {
+          auto t = borrowTensor(tensor);
+          maybeSetCurrentCudaDeviceFromTensor(t);
+          std::vector<torch::Tensor> tensors = {t};
 
-        c10d::AllreduceOptions opts;
-        opts.reduceOp = c10d::ReduceOp(reduceOpFromInt(op));
+          c10d::AllreduceOptions opts;
+          opts.reduceOp = c10d::ReduceOp(reduceOpFromLean(op));
 
-        auto work = g_process_group->allreduce(tensors, opts);
+          auto work = g_process_group->allreduce(tensors, opts);
 
-        if (async_op) {
-            uint64_t work_id = g_next_work_id++;
-            g_pending_work[work_id] = work;
-            return lean_io_result_mk_ok(lean_box_uint64(work_id));
-        } else {
-            work->wait();
-            return lean_io_result_mk_ok(lean_box(0));
-        }
-    } catch (const std::exception& e) {
-        return lean_io_result_mk_error(lean_mk_io_user_error(
-            lean_mk_string(("All-reduce failed: " + std::string(e.what())).c_str())));
-    }
+          if (async_op) {
+              uint64_t work_id = g_next_work_id++;
+              g_pending_work[work_id] = work;
+              return lean_io_result_mk_ok(lean_box_uint64(work_id));
+          } else {
+              waitForCompletion(work);
+              return lean_io_result_mk_ok(lean_box_uint64(0));
+          }
+      } catch (const std::exception& e) {
+          return lean_io_result_mk_error(lean_mk_io_user_error(
+              lean_mk_string(("All-reduce failed: " + std::string(e.what())).c_str())));
+      }
+  });
 }
 
 /**
@@ -326,37 +363,37 @@ lean_object* lean_torch_dist_all_reduce(
  *
  * @param tensor - Input/output tensor
  * @param src_rank - Source rank to broadcast from
- * @param w - Lean world token
  */
 lean_object* lean_torch_dist_broadcast(
-    lean_obj_arg /*s*/,
     b_lean_obj_arg tensor,
-    uint64_t src_rank,
-    lean_object* w
-) {
-    std::lock_guard<std::mutex> lock(g_dist_mutex);
+    uint64_t src_rank) {
+  return tyr::checkedIoCall("lean_torch_dist_broadcast", [&] {
+      std::lock_guard<std::mutex> lock(g_dist_mutex);
 
-    if (!g_initialized) {
-        return lean_io_result_mk_error(lean_mk_io_user_error(
-            lean_mk_string("Process group not initialized")));
-    }
+      if (!g_initialized) {
+          return lean_io_result_mk_error(lean_mk_io_user_error(
+              lean_mk_string("Process group not initialized")));
+      }
 
-    try {
-        auto t = borrowTensor(tensor);
-        maybeSetCurrentCudaDeviceFromTensor(t);
-        std::vector<torch::Tensor> tensors = {t};
+      try {
+          if (src_rank >= static_cast<uint64_t>(g_world_size))
+              throw std::invalid_argument("broadcast source rank must be less than world_size");
+          auto t = borrowTensor(tensor);
+          maybeSetCurrentCudaDeviceFromTensor(t);
+          std::vector<torch::Tensor> tensors = {t};
 
-        c10d::BroadcastOptions opts;
-        opts.rootRank = static_cast<int>(src_rank);
+          c10d::BroadcastOptions opts;
+          opts.rootRank = static_cast<int>(src_rank);
 
-        auto work = g_process_group->broadcast(tensors, opts);
-        work->wait();
+          auto work = g_process_group->broadcast(tensors, opts);
+          waitForCompletion(work);
 
-        return lean_io_result_mk_ok(lean_box(0));
-    } catch (const std::exception& e) {
-        return lean_io_result_mk_error(lean_mk_io_user_error(
-            lean_mk_string(("Broadcast failed: " + std::string(e.what())).c_str())));
-    }
+          return lean_io_result_mk_ok(lean_box(0));
+      } catch (const std::exception& e) {
+          return lean_io_result_mk_error(lean_mk_io_user_error(
+              lean_mk_string(("Broadcast failed: " + std::string(e.what())).c_str())));
+      }
+  });
 }
 
 /**
@@ -367,59 +404,56 @@ lean_object* lean_torch_dist_broadcast(
  * @param input - Input tensor to reduce
  * @param op - Reduce operation
  * @param async_op - If true, returns work ID
- * @param w - Lean world token
  */
 lean_object* lean_torch_dist_reduce_scatter_tensor(
-    lean_obj_arg /*s_out*/,
-    lean_obj_arg /*s_in*/,
     b_lean_obj_arg output,
     b_lean_obj_arg input,
     uint8_t op,
-    uint8_t async_op,
-    lean_object* w
-) {
-    std::lock_guard<std::mutex> lock(g_dist_mutex);
+    uint8_t async_op) {
+  return tyr::checkedIoCall("lean_torch_dist_reduce_scatter_tensor", [&] {
+      std::lock_guard<std::mutex> lock(g_dist_mutex);
 
-    if (!g_initialized) {
-        return lean_io_result_mk_error(lean_mk_io_user_error(
-            lean_mk_string("Process group not initialized")));
-    }
+      if (!g_initialized) {
+          return lean_io_result_mk_error(lean_mk_io_user_error(
+              lean_mk_string("Process group not initialized")));
+      }
 
-    try {
-        auto out_tensor = borrowTensor(output);
-        auto in_tensor = borrowTensor(input);
-        maybeSetCurrentCudaDeviceFromTensor(out_tensor);
+      try {
+          auto out_tensor = borrowTensor(output);
+          auto in_tensor = borrowTensor(input);
+          maybeSetCurrentCudaDeviceFromTensor(out_tensor);
 
-        c10d::ReduceScatterOptions opts;
-        opts.reduceOp = c10d::ReduceOp(reduceOpFromInt(op));
+          c10d::ReduceScatterOptions opts;
+          opts.reduceOp = c10d::ReduceOp(reduceOpFromLean(op));
 
-        // reduce_scatter_tensor expects output and a list of inputs (one per rank)
-        std::vector<torch::Tensor> input_tensors;
-        // Split input tensor into world_size chunks
-        auto chunks = in_tensor.chunk(g_world_size);
-        for (auto& chunk : chunks) {
-            input_tensors.push_back(chunk);
-        }
+          // reduce_scatter_tensor expects output and a list of inputs (one per rank)
+          std::vector<torch::Tensor> input_tensors;
+          // Split input tensor into world_size chunks
+          auto chunks = in_tensor.chunk(g_world_size);
+          for (auto& chunk : chunks) {
+              input_tensors.push_back(chunk);
+          }
 
-        std::vector<torch::Tensor> output_tensors = {out_tensor};
-        std::vector<std::vector<torch::Tensor>> input_tensor_lists = {input_tensors};
-        auto work = g_process_group->reduce_scatter(
-            output_tensors,
-            input_tensor_lists,
-            opts);
+          std::vector<torch::Tensor> output_tensors = {out_tensor};
+          std::vector<std::vector<torch::Tensor>> input_tensor_lists = {input_tensors};
+          auto work = g_process_group->reduce_scatter(
+              output_tensors,
+              input_tensor_lists,
+              opts);
 
-        if (async_op) {
-            uint64_t work_id = g_next_work_id++;
-            g_pending_work[work_id] = work;
-            return lean_io_result_mk_ok(lean_box_uint64(work_id));
-        } else {
-            work->wait();
-            return lean_io_result_mk_ok(lean_box(0));
-        }
-    } catch (const std::exception& e) {
-        return lean_io_result_mk_error(lean_mk_io_user_error(
-            lean_mk_string(("Reduce-scatter failed: " + std::string(e.what())).c_str())));
-    }
+          if (async_op) {
+              uint64_t work_id = g_next_work_id++;
+              g_pending_work[work_id] = work;
+              return lean_io_result_mk_ok(lean_box_uint64(work_id));
+          } else {
+              waitForCompletion(work);
+              return lean_io_result_mk_ok(lean_box_uint64(0));
+          }
+      } catch (const std::exception& e) {
+          return lean_io_result_mk_error(lean_mk_io_user_error(
+              lean_mk_string(("Reduce-scatter failed: " + std::string(e.what())).c_str())));
+      }
+  });
 }
 
 /**
@@ -431,55 +465,53 @@ lean_object* lean_torch_dist_reduce_scatter_tensor(
  * @param output - Output tensor for this rank
  * @param inputs - Array of input tensors (must have length world_size)
  * @param op - Reduce operation
- * @param w - Lean world token
  */
 lean_object* lean_torch_dist_reduce_scatter_list(
-    lean_obj_arg /*s*/,
     b_lean_obj_arg output,
     b_lean_obj_arg inputs,
-    uint8_t op,
-    lean_object* w
-) {
-    std::lock_guard<std::mutex> lock(g_dist_mutex);
+    uint8_t op) {
+  return tyr::checkedIoCall("lean_torch_dist_reduce_scatter_list", [&] {
+      std::lock_guard<std::mutex> lock(g_dist_mutex);
 
-    if (!g_initialized) {
-        return lean_io_result_mk_error(lean_mk_io_user_error(
-            lean_mk_string("Process group not initialized")));
-    }
+      if (!g_initialized) {
+          return lean_io_result_mk_error(lean_mk_io_user_error(
+              lean_mk_string("Process group not initialized")));
+      }
 
-    try {
-        auto out_tensor = borrowTensor(output);
-        maybeSetCurrentCudaDeviceFromTensor(out_tensor);
+      try {
+          auto out_tensor = borrowTensor(output);
+          maybeSetCurrentCudaDeviceFromTensor(out_tensor);
 
-        size_t n = lean_array_size(inputs);
-        if (n != static_cast<size_t>(g_world_size)) {
-            return lean_io_result_mk_error(lean_mk_io_user_error(
-                lean_mk_string("reduce_scatter_list requires inputs length == world size")));
-        }
+          size_t n = lean_array_size(inputs);
+          if (n != static_cast<size_t>(g_world_size)) {
+              return lean_io_result_mk_error(lean_mk_io_user_error(
+                  lean_mk_string("reduce_scatter_list requires inputs length == world size")));
+          }
 
-        std::vector<torch::Tensor> input_tensors;
-        input_tensors.reserve(n);
-        for (size_t i = 0; i < n; i++) {
-            auto tensor_obj = lean_array_get_core(inputs, i);
-            input_tensors.push_back(borrowTensor(tensor_obj));
-        }
+          std::vector<torch::Tensor> input_tensors;
+          input_tensors.reserve(n);
+          for (size_t i = 0; i < n; i++) {
+              auto tensor_obj = lean_array_get_core(inputs, i);
+              input_tensors.push_back(borrowTensor(tensor_obj));
+          }
 
-        c10d::ReduceScatterOptions opts;
-        opts.reduceOp = c10d::ReduceOp(reduceOpFromInt(op));
+          c10d::ReduceScatterOptions opts;
+          opts.reduceOp = c10d::ReduceOp(reduceOpFromLean(op));
 
-        std::vector<torch::Tensor> output_tensors = {out_tensor};
-        std::vector<std::vector<torch::Tensor>> input_tensor_lists = {input_tensors};
-        auto work = g_process_group->reduce_scatter(
-            output_tensors,
-            input_tensor_lists,
-            opts);
-        work->wait();
+          std::vector<torch::Tensor> output_tensors = {out_tensor};
+          std::vector<std::vector<torch::Tensor>> input_tensor_lists = {input_tensors};
+          auto work = g_process_group->reduce_scatter(
+              output_tensors,
+              input_tensor_lists,
+              opts);
+          waitForCompletion(work);
 
-        return lean_io_result_mk_ok(lean_box(0));
-    } catch (const std::exception& e) {
-        return lean_io_result_mk_error(lean_mk_io_user_error(
-            lean_mk_string(("Reduce-scatter(list) failed: " + std::string(e.what())).c_str())));
-    }
+          return lean_io_result_mk_ok(lean_box(0));
+      } catch (const std::exception& e) {
+          return lean_io_result_mk_error(lean_mk_io_user_error(
+              lean_mk_string(("Reduce-scatter(list) failed: " + std::string(e.what())).c_str())));
+      }
+  });
 }
 
 /**
@@ -488,53 +520,50 @@ lean_object* lean_torch_dist_reduce_scatter_list(
  * @param output - Output tensor (concatenated from all ranks)
  * @param input - Input tensor from this rank
  * @param async_op - If true, returns work ID
- * @param w - Lean world token
  */
 lean_object* lean_torch_dist_all_gather_into_tensor(
-    lean_obj_arg /*s_out*/,
-    lean_obj_arg /*s_in*/,
     b_lean_obj_arg output,
     b_lean_obj_arg input,
-    uint8_t async_op,
-    lean_object* w
-) {
-    std::lock_guard<std::mutex> lock(g_dist_mutex);
+    uint8_t async_op) {
+  return tyr::checkedIoCall("lean_torch_dist_all_gather_into_tensor", [&] {
+      std::lock_guard<std::mutex> lock(g_dist_mutex);
 
-    if (!g_initialized) {
-        return lean_io_result_mk_error(lean_mk_io_user_error(
-            lean_mk_string("Process group not initialized")));
-    }
+      if (!g_initialized) {
+          return lean_io_result_mk_error(lean_mk_io_user_error(
+              lean_mk_string("Process group not initialized")));
+      }
 
-    try {
-        auto out_tensor = borrowTensor(output);
-        auto in_tensor = borrowTensor(input);
-        maybeSetCurrentCudaDeviceFromTensor(in_tensor);
+      try {
+          auto out_tensor = borrowTensor(output);
+          auto in_tensor = borrowTensor(input);
+          maybeSetCurrentCudaDeviceFromTensor(in_tensor);
 
-        // Split output into world_size chunks to receive each rank's data
-        auto output_chunks = out_tensor.chunk(g_world_size);
-        std::vector<torch::Tensor> output_list;
-        for (auto& chunk : output_chunks) {
-            output_list.push_back(chunk);
-        }
+          // Split output into world_size chunks to receive each rank's data
+          auto output_chunks = out_tensor.chunk(g_world_size);
+          std::vector<torch::Tensor> output_list;
+          for (auto& chunk : output_chunks) {
+              output_list.push_back(chunk);
+          }
 
-        std::vector<std::vector<torch::Tensor>> output_tensor_lists = {output_list};
-        std::vector<torch::Tensor> input_tensors = {in_tensor};
-        auto work = g_process_group->allgather(
-            output_tensor_lists,
-            input_tensors);
+          std::vector<std::vector<torch::Tensor>> output_tensor_lists = {output_list};
+          std::vector<torch::Tensor> input_tensors = {in_tensor};
+          auto work = g_process_group->allgather(
+              output_tensor_lists,
+              input_tensors);
 
-        if (async_op) {
-            uint64_t work_id = g_next_work_id++;
-            g_pending_work[work_id] = work;
-            return lean_io_result_mk_ok(lean_box_uint64(work_id));
-        } else {
-            work->wait();
-            return lean_io_result_mk_ok(lean_box(0));
-        }
-    } catch (const std::exception& e) {
-        return lean_io_result_mk_error(lean_mk_io_user_error(
-            lean_mk_string(("All-gather failed: " + std::string(e.what())).c_str())));
-    }
+          if (async_op) {
+              uint64_t work_id = g_next_work_id++;
+              g_pending_work[work_id] = work;
+              return lean_io_result_mk_ok(lean_box_uint64(work_id));
+          } else {
+              waitForCompletion(work);
+              return lean_io_result_mk_ok(lean_box_uint64(0));
+          }
+      } catch (const std::exception& e) {
+          return lean_io_result_mk_error(lean_mk_io_user_error(
+              lean_mk_string(("All-gather failed: " + std::string(e.what())).c_str())));
+      }
+  });
 }
 
 /**
@@ -545,99 +574,99 @@ lean_object* lean_torch_dist_all_gather_into_tensor(
  *
  * @param outputs - Array of output tensors (must have length world_size)
  * @param input - Input tensor from this rank
- * @param w - Lean world token
  */
 lean_object* lean_torch_dist_all_gather_list(
-    lean_obj_arg /*s*/,
     b_lean_obj_arg outputs,
-    b_lean_obj_arg input,
-    lean_object* w
-) {
-    std::lock_guard<std::mutex> lock(g_dist_mutex);
+    b_lean_obj_arg input) {
+  return tyr::checkedIoCall("lean_torch_dist_all_gather_list", [&] {
+      std::lock_guard<std::mutex> lock(g_dist_mutex);
 
-    if (!g_initialized) {
-        return lean_io_result_mk_error(lean_mk_io_user_error(
-            lean_mk_string("Process group not initialized")));
-    }
+      if (!g_initialized) {
+          return lean_io_result_mk_error(lean_mk_io_user_error(
+              lean_mk_string("Process group not initialized")));
+      }
 
-    try {
-        auto in_tensor = borrowTensor(input);
-        maybeSetCurrentCudaDeviceFromTensor(in_tensor);
+      try {
+          auto in_tensor = borrowTensor(input);
+          maybeSetCurrentCudaDeviceFromTensor(in_tensor);
 
-        size_t n = lean_array_size(outputs);
-        if (n != static_cast<size_t>(g_world_size)) {
-            return lean_io_result_mk_error(lean_mk_io_user_error(
-                lean_mk_string("all_gather_list requires outputs length == world size")));
-        }
+          size_t n = lean_array_size(outputs);
+          if (n != static_cast<size_t>(g_world_size)) {
+              return lean_io_result_mk_error(lean_mk_io_user_error(
+                  lean_mk_string("all_gather_list requires outputs length == world size")));
+          }
 
-        std::vector<torch::Tensor> output_list;
-        output_list.reserve(n);
-        for (size_t i = 0; i < n; i++) {
-            auto tensor_obj = lean_array_get_core(outputs, i);
-            output_list.push_back(borrowTensor(tensor_obj));
-        }
+          std::vector<torch::Tensor> output_list;
+          output_list.reserve(n);
+          for (size_t i = 0; i < n; i++) {
+              auto tensor_obj = lean_array_get_core(outputs, i);
+              output_list.push_back(borrowTensor(tensor_obj));
+          }
 
-        std::vector<std::vector<torch::Tensor>> output_tensor_lists = {output_list};
-        std::vector<torch::Tensor> input_tensors = {in_tensor};
-        auto work = g_process_group->allgather(
-            output_tensor_lists,
-            input_tensors);
-        work->wait();
+          std::vector<std::vector<torch::Tensor>> output_tensor_lists = {output_list};
+          std::vector<torch::Tensor> input_tensors = {in_tensor};
+          auto work = g_process_group->allgather(
+              output_tensor_lists,
+              input_tensors);
+          waitForCompletion(work);
 
-        return lean_io_result_mk_ok(lean_box(0));
-    } catch (const std::exception& e) {
-        return lean_io_result_mk_error(lean_mk_io_user_error(
-            lean_mk_string(("All-gather(list) failed: " + std::string(e.what())).c_str())));
-    }
+          return lean_io_result_mk_ok(lean_box(0));
+      } catch (const std::exception& e) {
+          return lean_io_result_mk_error(lean_mk_io_user_error(
+              lean_mk_string(("All-gather(list) failed: " + std::string(e.what())).c_str())));
+      }
+  });
 }
 
 /**
  * Wait for an async operation to complete.
  *
  * @param work_id - Work ID returned from async operation
- * @param w - Lean world token
  */
-lean_object* lean_torch_dist_wait(uint64_t work_id, lean_object* w) {
-    std::lock_guard<std::mutex> lock(g_dist_mutex);
+lean_object* lean_torch_dist_wait(uint64_t work_id) {
+  return tyr::checkedIoCall("lean_torch_dist_wait", [&] {
+      std::lock_guard<std::mutex> lock(g_dist_mutex);
 
-    auto it = g_pending_work.find(work_id);
-    if (it == g_pending_work.end()) {
-        return lean_io_result_mk_error(lean_mk_io_user_error(
-            lean_mk_string("Invalid work ID")));
-    }
+      auto it = g_pending_work.find(work_id);
+      if (it == g_pending_work.end()) {
+          return lean_io_result_mk_error(lean_mk_io_user_error(
+              lean_mk_string("Invalid work ID")));
+      }
 
-    try {
-        it->second->wait();
-        g_pending_work.erase(it);
-        return lean_io_result_mk_ok(lean_box(0));
-    } catch (const std::exception& e) {
-        g_pending_work.erase(it);
-        return lean_io_result_mk_error(lean_mk_io_user_error(
-            lean_mk_string(("Wait failed: " + std::string(e.what())).c_str())));
-    }
+      // Remove before waiting so both standard and unknown exceptions release the
+      // handle exactly once; the local owning pointer keeps work alive until exit.
+      auto work = std::move(it->second);
+      g_pending_work.erase(it);
+      waitForCompletion(work);
+      return lean_io_result_mk_ok(lean_box(0));
+  });
 }
 
 /**
- * Check if an async operation is complete (non-blocking).
+ * Check if an async operation completed successfully (non-blocking).
+ * Polling retains the handle; wait must still synchronize and release it.
  *
  * @param work_id - Work ID
- * @param w - Lean world token
  * @return Bool - true if complete
  */
-lean_object* lean_torch_dist_is_completed(uint64_t work_id, lean_object* w) {
-    std::lock_guard<std::mutex> lock(g_dist_mutex);
+lean_object* lean_torch_dist_is_completed(uint64_t work_id) {
+  return tyr::checkedIoCall("lean_torch_dist_is_completed", [&] {
+      std::lock_guard<std::mutex> lock(g_dist_mutex);
 
-    auto it = g_pending_work.find(work_id);
-    if (it == g_pending_work.end()) {
-        // Not found means already completed and cleaned up
-        return lean_io_result_mk_ok(lean_box(1));
-    }
+      auto it = g_pending_work.find(work_id);
+      if (it == g_pending_work.end()) {
+          return lean_io_result_mk_error(lean_mk_io_user_error(
+              lean_mk_string("Invalid work ID")));
+      }
 
-    bool completed = it->second->isCompleted();
-    if (completed) {
-        g_pending_work.erase(it);
-    }
-    return lean_io_result_mk_ok(lean_box(completed ? 1 : 0));
+      const auto& work = it->second;
+      bool completed = work->isCompleted();
+      if (completed && !work->isSuccess()) {
+          if (auto error = work->exception()) std::rethrow_exception(error);
+          throw std::runtime_error("Distributed operation did not complete successfully");
+      }
+      return lean_io_result_mk_ok(lean_box(completed ? 1 : 0));
+  });
 }
 
 } // extern "C"

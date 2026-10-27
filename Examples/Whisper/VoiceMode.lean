@@ -128,7 +128,7 @@ private partial def parseArgsLoop (xs : List String) (acc : Args) : IO Args := d
       IO.println "  --no-beeps                 Disable audio feedback beeps"
       IO.println "  --beam-size <n>            Beam search width (default: 1)"
       IO.println "  --max-no-speech-exits <n>  Exit continuous after N silent rounds (default: 3)"
-      throw <| IO.userError ""
+      pure acc
   | x :: _ =>
       throw <| IO.userError s!"Unknown argument: {x}"
 
@@ -243,8 +243,10 @@ private def printInline (s : String) : IO Unit := do
     Runs Whisper on the accumulated audio every `transcribeIntervalSec` seconds
     of new audio, updating the terminal in-place. -/
 private def runOnce
+    {dtype : torch.DType} [torch.DType.RealFloating dtype]
+    {device : torch.Device}
     {cfg : WhisperConfig}
-    (model : WhisperForConditionalGeneration cfg)
+    (model : WhisperForConditionalGeneration (device := device) (dtype := dtype) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (pre : torch.qwen3asr.PreprocessorConfig)
     (args : Args)
@@ -353,6 +355,7 @@ private def runOnce
 
 def runMain (argv : List String) : IO UInt32 := do
   let args ← parseArgs argv
+  if argv.contains "--help" then return 0
 
   IO.println "Loading Whisper model..."
   let bundle ← loadFromPretrainedDir args.modelDir

@@ -18,12 +18,16 @@ import Lean.Data.Json.Basic
 import Lean.Data.Json.Printer
 import Lean.Data.Json.FromToJson
 import Tyr.Torch
+import Examples.GPU.FlashBenchReference
 import Tyr.GPU.Ops.FlashAttn
 
 namespace Examples.GPU
 
 open Lean (Json)
 open torch
+
+variable {device : Device}
+open Examples.GPU.FlashBenchReference
 open Tyr.GPU.Ops.FlashAttn
 
 inductive Backend where
@@ -246,15 +250,6 @@ private def qTokensPerSec (c : BenchCase) (latencyMs : Float) : Float :=
     0.0
   else
     (c.batch.toFloat * c.qSeq.toFloat) / (latencyMs / 1000.0)
-
-private def relL2
-    {s : Shape}
-    (actual ref : T s) : Float :=
-  let diffNorm :=
-    torch.nn.item <| torch.nn.sqrt <| torch.nn.sumAll <| torch.nn.pow (torch.toFloat' (actual - ref)) 2.0
-  let refNorm :=
-    torch.nn.item <| torch.nn.sqrt <| torch.nn.sumAll <| torch.nn.pow (torch.toFloat' ref) 2.0
-  if refNorm <= 1.0e-12 then diffNorm else diffNorm / refNorm
 
 private structure Correctness where
   routeActual : String := "n/a"
@@ -569,12 +564,6 @@ private def printHumanSummary (row : SummaryRow) : IO Unit := do
 private def flashAttentionUnsupportedReason : String :=
   "repo-local FA3 baseline is disabled: generated FlashAttn3 CUDA requires kittens::tma::fence_view_async_shared, which is absent in the vendored ThunderKittens checkout"
 
-private def makeLeaf {s : Shape} (base : T s) : T s :=
-  torch.autograd.set_requires_grad (torch.autograd.detach base) true
-
-private def backwardWithCotangent {s : Shape} (out dOut : T s) : IO Unit :=
-  torch.autograd.backwardLoss (torch.nn.sumAll (out * dOut))
-
 private def benchmarkAction (warmup iters repeats : Nat) (action : IO Unit) : IO (Array Float) := do
   let mut latencies : Array Float := #[]
   for _ in [:repeats] do
@@ -592,71 +581,71 @@ private def benchmarkAction (warmup iters repeats : Nat) (action : IO Unit) : IO
 
 private def sdpaEqualRef
     {batch heads seq headDim : UInt64}
-    (qBase kBase vBase dOBase : T #[batch, heads, seq, headDim])
+    (qBase kBase vBase dOBase : Tensor { shape := #[batch, heads, seq, headDim], dtype := .BFloat16, device := device })
     (isCausal : Bool)
-    : IO (T #[batch, heads, seq, headDim] × T #[batch, heads, seq, headDim] × T #[batch, heads, seq, headDim] × T #[batch, heads, seq, headDim]) := do
-  let q := makeLeaf qBase
-  let k := makeLeaf kBase
-  let v := makeLeaf vBase
-  let out := torch.nn.scaled_dot_product_attention q k v 0.0 isCausal
+    : IO (Tensor { shape := #[batch, heads, seq, headDim], dtype := .BFloat16, device := device } × Tensor { shape := #[batch, heads, seq, headDim], dtype := .Float32, device := device } × Tensor { shape := #[batch, heads, seq, headDim], dtype := .Float32, device := device } × Tensor { shape := #[batch, heads, seq, headDim], dtype := .Float32, device := device }) := do
+  let q ← makeLeaf qBase
+  let k ← makeLeaf kBase
+  let v ← makeLeaf vBase
+  let out := Tensor.attentionGQA q k v isCausal
   backwardWithCotangent out dOBase
   let _ ← torch.cuda_synchronize
-  pure (out, torch.toFloat' (torch.autograd.grad_of q), torch.toFloat' (torch.autograd.grad_of k), torch.toFloat' (torch.autograd.grad_of v))
+  pure (out, (← Tensor.gradOf q).toFloat32, (← Tensor.gradOf k).toFloat32, (← Tensor.gradOf v).toFloat32)
 
 private def sdpaGqaRef
     {batch qHeads kvHeads seq headDim : UInt64}
-    (qBase : T #[batch, qHeads, seq, headDim])
-    (kBase vBase : T #[batch, kvHeads, seq, headDim])
-    (dOBase : T #[batch, qHeads, seq, headDim])
+    (qBase : Tensor { shape := #[batch, qHeads, seq, headDim], dtype := .BFloat16, device := device })
+    (kBase vBase : Tensor { shape := #[batch, kvHeads, seq, headDim], dtype := .BFloat16, device := device })
+    (dOBase : Tensor { shape := #[batch, qHeads, seq, headDim], dtype := .BFloat16, device := device })
     (isCausal : Bool)
-    : IO (T #[batch, qHeads, seq, headDim] × T #[batch, qHeads, seq, headDim] × T #[batch, kvHeads, seq, headDim] × T #[batch, kvHeads, seq, headDim]) := do
-  let q := makeLeaf qBase
-  let k := makeLeaf kBase
-  let v := makeLeaf vBase
-  let out := torch.nn.scaledDotProductAttentionGQAQKV q k v 0.0 isCausal true
+    : IO (Tensor { shape := #[batch, qHeads, seq, headDim], dtype := .BFloat16, device := device } × Tensor { shape := #[batch, qHeads, seq, headDim], dtype := .Float32, device := device } × Tensor { shape := #[batch, kvHeads, seq, headDim], dtype := .Float32, device := device } × Tensor { shape := #[batch, kvHeads, seq, headDim], dtype := .Float32, device := device }) := do
+  let q ← makeLeaf qBase
+  let k ← makeLeaf kBase
+  let v ← makeLeaf vBase
+  let out := Tensor.attentionGQAQKV q k v isCausal true
   backwardWithCotangent out dOBase
   let _ ← torch.cuda_synchronize
-  pure (out, torch.toFloat' (torch.autograd.grad_of q), torch.toFloat' (torch.autograd.grad_of k), torch.toFloat' (torch.autograd.grad_of v))
+  pure (out, (← Tensor.gradOf q).toFloat32, (← Tensor.gradOf k).toFloat32, (← Tensor.gradOf v).toFloat32)
 
 private def tyrEqualOnce
     {batch heads seq headDim : UInt64}
-    (qBase kBase vBase dOBase : T #[batch, heads, seq, headDim])
+    (qBase kBase vBase dOBase : Tensor { shape := #[batch, heads, seq, headDim], dtype := .BFloat16, device := device })
     (isCausal : Bool)
-    : IO (DispatchRoute × T #[batch, heads, seq, headDim] × T #[batch, heads, seq, headDim] × T #[batch, heads, seq, headDim] × T #[batch, heads, seq, headDim]) := do
-  let q := makeLeaf qBase
-  let k := makeLeaf kBase
-  let v := makeLeaf vBase
-  let (route, out) := flashAttnWithRoute q k v none 0.0 isCausal none false
+    : IO (DispatchRoute × Tensor { shape := #[batch, heads, seq, headDim], dtype := .BFloat16, device := device } × Tensor { shape := #[batch, heads, seq, headDim], dtype := .Float32, device := device } × Tensor { shape := #[batch, heads, seq, headDim], dtype := .Float32, device := device } × Tensor { shape := #[batch, heads, seq, headDim], dtype := .Float32, device := device }) := do
+  let q ← makeLeaf qBase
+  let k ← makeLeaf kBase
+  let v ← makeLeaf vBase
+  let (route, out) := flashAttnWithRoute q k v none isCausal none false
   backwardWithCotangent out dOBase
   let _ ← torch.cuda_synchronize
-  pure (route, out, torch.toFloat' (torch.autograd.grad_of q), torch.toFloat' (torch.autograd.grad_of k), torch.toFloat' (torch.autograd.grad_of v))
+  pure (route, out, (← Tensor.gradOf q).toFloat32, (← Tensor.gradOf k).toFloat32, (← Tensor.gradOf v).toFloat32)
 
 private def tyrGqaOnce
     {batch qHeads kvHeads seq headDim : UInt64}
-    (qBase : T #[batch, qHeads, seq, headDim])
-    (kBase vBase : T #[batch, kvHeads, seq, headDim])
-    (dOBase : T #[batch, qHeads, seq, headDim])
+    (qBase : Tensor { shape := #[batch, qHeads, seq, headDim], dtype := .BFloat16, device := device })
+    (kBase vBase : Tensor { shape := #[batch, kvHeads, seq, headDim], dtype := .BFloat16, device := device })
+    (dOBase : Tensor { shape := #[batch, qHeads, seq, headDim], dtype := .BFloat16, device := device })
     (isCausal : Bool)
-    : IO (DispatchRoute × T #[batch, qHeads, seq, headDim] × T #[batch, qHeads, seq, headDim] × T #[batch, kvHeads, seq, headDim] × T #[batch, kvHeads, seq, headDim]) := do
-  let q := makeLeaf qBase
-  let k := makeLeaf kBase
-  let v := makeLeaf vBase
-  let (route, out) := flashAttnWithRoute q k v none 0.0 isCausal none true
+    : IO (DispatchRoute × Tensor { shape := #[batch, qHeads, seq, headDim], dtype := .BFloat16, device := device } × Tensor { shape := #[batch, qHeads, seq, headDim], dtype := .Float32, device := device } × Tensor { shape := #[batch, kvHeads, seq, headDim], dtype := .Float32, device := device } × Tensor { shape := #[batch, kvHeads, seq, headDim], dtype := .Float32, device := device }) := do
+  let q ← makeLeaf qBase
+  let k ← makeLeaf kBase
+  let v ← makeLeaf vBase
+  let (route, out) := flashAttnWithRoute q k v none isCausal none true
   backwardWithCotangent out dOBase
   let _ ← torch.cuda_synchronize
-  pure (route, out, torch.toFloat' (torch.autograd.grad_of q), torch.toFloat' (torch.autograd.grad_of k), torch.toFloat' (torch.autograd.grad_of v))
+  pure (route, out, (← Tensor.gradOf q).toFloat32, (← Tensor.gradOf k).toFloat32, (← Tensor.gradOf v).toFloat32)
 
 private def sdpaEqualForward {batch heads seq headDim : UInt64}
-    (qBase kBase vBase : T #[batch, heads, seq, headDim])
+    (qBase kBase vBase : Tensor { shape := #[batch, heads, seq, headDim], dtype := .BFloat16, device := device })
     (isCausal : Bool)
-    : T #[batch, heads, seq, headDim] :=
-  torch.nn.scaled_dot_product_attention qBase kBase vBase 0.0 isCausal
+    : Tensor { shape := #[batch, heads, seq, headDim], dtype := .BFloat16, device := device } :=
+  Tensor.attentionGQA qBase kBase vBase isCausal
 
 private def tyrEqualForward {batch heads seq headDim : UInt64}
-    (qBase kBase vBase : T #[batch, heads, seq, headDim])
+    (qBase kBase vBase : Tensor { shape := #[batch, heads, seq, headDim], dtype := .BFloat16, device := device })
     (isCausal : Bool)
-    : DispatchRoute × T #[batch, heads, seq, headDim] :=
-  flashAttnWithRoute qBase kBase vBase none 0.0 isCausal none false
+    : DispatchRoute × Tensor { shape := #[batch, heads, seq, headDim], dtype := .BFloat16, device := device } :=
+  flashAttnWithRoute qBase kBase vBase none isCausal none false
 
 private def runEqualHeadsFwdBwd
     {batch heads seq headDim : UInt64}
@@ -666,11 +655,11 @@ private def runEqualHeadsFwdBwd
     (jsonlOut? : Option System.FilePath)
     (emitJsonlStdout : Bool)
     : IO SummaryRow := do
-  let device := Device.CUDA 0
-  let qBase := torch.toBFloat16' (← torch.randn #[batch, heads, seq, headDim] false device)
-  let kBase := torch.toBFloat16' (← torch.randn #[batch, heads, seq, headDim] false device)
-  let vBase := torch.toBFloat16' (← torch.randn #[batch, heads, seq, headDim] false device)
-  let dOBase := torch.toBFloat16' (← torch.randn #[batch, heads, seq, headDim] false device)
+  let device ← Device.cuda 0
+  let qBase := (← Tensor.randn #[batch, heads, seq, headDim] false device).toBFloat16
+  let kBase := (← Tensor.randn #[batch, heads, seq, headDim] false device).toBFloat16
+  let vBase := (← Tensor.randn #[batch, heads, seq, headDim] false device).toBFloat16
+  let dOBase := (← Tensor.randn #[batch, heads, seq, headDim] false device).toBFloat16
 
   let (outRef, dqRef, dkRef, dvRef) ← sdpaEqualRef qBase kBase vBase dOBase c.isCausal
 
@@ -699,10 +688,10 @@ private def runEqualHeadsFwdBwd
         dvRelL2 := some 0.0
       }
       let action : IO Unit := do
-        let q := makeLeaf qBase
-        let k := makeLeaf kBase
-        let v := makeLeaf vBase
-        let out := torch.nn.scaled_dot_product_attention q k v 0.0 c.isCausal
+        let q ← makeLeaf qBase
+        let k ← makeLeaf kBase
+        let v ← makeLeaf vBase
+        let out := Tensor.attentionGQA q k v c.isCausal
         backwardWithCotangent out dOBase
         let _ ← torch.cuda_synchronize
       let latencies ← benchmarkAction runMeta.warmupIters runMeta.timedIters runMeta.repeats action
@@ -722,10 +711,10 @@ private def runEqualHeadsFwdBwd
       let (route, out, dq, dk, dv) ← tyrEqualOnce qBase kBase vBase dOBase c.isCausal
       let routeActual := routeName route
       let routeOk := routeActual == c.expectedTyrRoute
-      let outOk := torch.allclose outRef out 3e-2 3e-2
-      let dqOk := torch.allclose dqRef dq 3e-2 3e-2
-      let dkOk := torch.allclose dkRef dk 3e-2 3e-2
-      let dvOk := torch.allclose dvRef dv 3e-2 3e-2
+      let outOk := Tensor.allclose outRef out 3e-2 3e-2
+      let dqOk := Tensor.allclose dqRef dq 3e-2 3e-2
+      let dkOk := Tensor.allclose dkRef dk 3e-2 3e-2
+      let dvOk := Tensor.allclose dvRef dv 3e-2 3e-2
       let corr : Correctness := {
         routeActual := routeActual
         routeOk := some routeOk
@@ -734,24 +723,24 @@ private def runEqualHeadsFwdBwd
         dkOk := some dkOk
         dvOk := some dvOk
         correctnessOk := some (routeOk && outOk && dqOk && dkOk && dvOk)
-        outMae := some <| torch.nn.item (torch.nn.meanAll (torch.nn.abs (out - outRef)))
-        dqMae := some <| torch.nn.item (torch.nn.meanAll (torch.nn.abs (dq - dqRef)))
-        dkMae := some <| torch.nn.item (torch.nn.meanAll (torch.nn.abs (dk - dkRef)))
-        dvMae := some <| torch.nn.item (torch.nn.meanAll (torch.nn.abs (dv - dvRef)))
-        outMax := some <| torch.nn.item (torch.nn.maxAll (torch.nn.abs (out - outRef)))
-        dqMax := some <| torch.nn.item (torch.nn.maxAll (torch.nn.abs (dq - dqRef)))
-        dkMax := some <| torch.nn.item (torch.nn.maxAll (torch.nn.abs (dk - dkRef)))
-        dvMax := some <| torch.nn.item (torch.nn.maxAll (torch.nn.abs (dv - dvRef)))
+        outMae := some <| Tensor.item (Tensor.meanAll (Tensor.abs (out - outRef)))
+        dqMae := some <| Tensor.item (Tensor.meanAll (Tensor.abs (dq - dqRef)))
+        dkMae := some <| Tensor.item (Tensor.meanAll (Tensor.abs (dk - dkRef)))
+        dvMae := some <| Tensor.item (Tensor.meanAll (Tensor.abs (dv - dvRef)))
+        outMax := some <| Tensor.item (Tensor.maxAllChecked (Tensor.abs (out - outRef)))
+        dqMax := some <| Tensor.item (Tensor.maxAllChecked (Tensor.abs (dq - dqRef)))
+        dkMax := some <| Tensor.item (Tensor.maxAllChecked (Tensor.abs (dk - dkRef)))
+        dvMax := some <| Tensor.item (Tensor.maxAllChecked (Tensor.abs (dv - dvRef)))
         outRelL2 := some <| relL2 out outRef
         dqRelL2 := some <| relL2 dq dqRef
         dkRelL2 := some <| relL2 dk dkRef
         dvRelL2 := some <| relL2 dv dvRef
       }
       let action : IO Unit := do
-        let q := makeLeaf qBase
-        let k := makeLeaf kBase
-        let v := makeLeaf vBase
-        let (_, outTimed) := flashAttnWithRoute q k v none 0.0 c.isCausal none false
+        let q ← makeLeaf qBase
+        let k ← makeLeaf kBase
+        let v ← makeLeaf vBase
+        let (_, outTimed) := flashAttnWithRoute q k v none c.isCausal none false
         backwardWithCotangent outTimed dOBase
         let _ ← torch.cuda_synchronize
       let latencies ← benchmarkAction runMeta.warmupIters runMeta.timedIters runMeta.repeats action
@@ -780,11 +769,11 @@ private def runGqaFwdBwd
     (jsonlOut? : Option System.FilePath)
     (emitJsonlStdout : Bool)
     : IO SummaryRow := do
-  let device := Device.CUDA 0
-  let qBase := torch.toBFloat16' (← torch.randn #[batch, qHeads, seq, headDim] false device)
-  let kBase := torch.toBFloat16' (← torch.randn #[batch, kvHeads, seq, headDim] false device)
-  let vBase := torch.toBFloat16' (← torch.randn #[batch, kvHeads, seq, headDim] false device)
-  let dOBase := torch.toBFloat16' (← torch.randn #[batch, qHeads, seq, headDim] false device)
+  let device ← Device.cuda 0
+  let qBase := (← Tensor.randn #[batch, qHeads, seq, headDim] false device).toBFloat16
+  let kBase := (← Tensor.randn #[batch, kvHeads, seq, headDim] false device).toBFloat16
+  let vBase := (← Tensor.randn #[batch, kvHeads, seq, headDim] false device).toBFloat16
+  let dOBase := (← Tensor.randn #[batch, qHeads, seq, headDim] false device).toBFloat16
 
   let (outRef, dqRef, dkRef, dvRef) ← sdpaGqaRef qBase kBase vBase dOBase c.isCausal
 
@@ -813,10 +802,10 @@ private def runGqaFwdBwd
         dvRelL2 := some 0.0
       }
       let action : IO Unit := do
-        let q := makeLeaf qBase
-        let k := makeLeaf kBase
-        let v := makeLeaf vBase
-        let out := torch.nn.scaledDotProductAttentionGQAQKV q k v 0.0 c.isCausal true
+        let q ← makeLeaf qBase
+        let k ← makeLeaf kBase
+        let v ← makeLeaf vBase
+        let out := Tensor.attentionGQAQKV q k v c.isCausal true
         backwardWithCotangent out dOBase
         let _ ← torch.cuda_synchronize
       let latencies ← benchmarkAction runMeta.warmupIters runMeta.timedIters runMeta.repeats action
@@ -836,10 +825,10 @@ private def runGqaFwdBwd
       let (route, out, dq, dk, dv) ← tyrGqaOnce qBase kBase vBase dOBase c.isCausal
       let routeActual := routeName route
       let routeOk := routeActual == c.expectedTyrRoute
-      let outOk := torch.allclose outRef out 1e-5 1e-5
-      let dqOk := torch.allclose dqRef dq 1e-5 1e-5
-      let dkOk := torch.allclose dkRef dk 1e-5 1e-5
-      let dvOk := torch.allclose dvRef dv 1e-5 1e-5
+      let outOk := Tensor.allclose outRef out 1e-5 1e-5
+      let dqOk := Tensor.allclose dqRef dq 1e-5 1e-5
+      let dkOk := Tensor.allclose dkRef dk 1e-5 1e-5
+      let dvOk := Tensor.allclose dvRef dv 1e-5 1e-5
       let corr : Correctness := {
         routeActual := routeActual
         routeOk := some routeOk
@@ -848,24 +837,24 @@ private def runGqaFwdBwd
         dkOk := some dkOk
         dvOk := some dvOk
         correctnessOk := some (routeOk && outOk && dqOk && dkOk && dvOk)
-        outMae := some <| torch.nn.item (torch.nn.meanAll (torch.nn.abs (out - outRef)))
-        dqMae := some <| torch.nn.item (torch.nn.meanAll (torch.nn.abs (dq - dqRef)))
-        dkMae := some <| torch.nn.item (torch.nn.meanAll (torch.nn.abs (dk - dkRef)))
-        dvMae := some <| torch.nn.item (torch.nn.meanAll (torch.nn.abs (dv - dvRef)))
-        outMax := some <| torch.nn.item (torch.nn.maxAll (torch.nn.abs (out - outRef)))
-        dqMax := some <| torch.nn.item (torch.nn.maxAll (torch.nn.abs (dq - dqRef)))
-        dkMax := some <| torch.nn.item (torch.nn.maxAll (torch.nn.abs (dk - dkRef)))
-        dvMax := some <| torch.nn.item (torch.nn.maxAll (torch.nn.abs (dv - dvRef)))
+        outMae := some <| Tensor.item (Tensor.meanAll (Tensor.abs (out - outRef)))
+        dqMae := some <| Tensor.item (Tensor.meanAll (Tensor.abs (dq - dqRef)))
+        dkMae := some <| Tensor.item (Tensor.meanAll (Tensor.abs (dk - dkRef)))
+        dvMae := some <| Tensor.item (Tensor.meanAll (Tensor.abs (dv - dvRef)))
+        outMax := some <| Tensor.item (Tensor.maxAllChecked (Tensor.abs (out - outRef)))
+        dqMax := some <| Tensor.item (Tensor.maxAllChecked (Tensor.abs (dq - dqRef)))
+        dkMax := some <| Tensor.item (Tensor.maxAllChecked (Tensor.abs (dk - dkRef)))
+        dvMax := some <| Tensor.item (Tensor.maxAllChecked (Tensor.abs (dv - dvRef)))
         outRelL2 := some <| relL2 out outRef
         dqRelL2 := some <| relL2 dq dqRef
         dkRelL2 := some <| relL2 dk dkRef
         dvRelL2 := some <| relL2 dv dvRef
       }
       let action : IO Unit := do
-        let q := makeLeaf qBase
-        let k := makeLeaf kBase
-        let v := makeLeaf vBase
-        let (_, outTimed) := flashAttnWithRoute q k v none 0.0 c.isCausal none true
+        let q ← makeLeaf qBase
+        let k ← makeLeaf kBase
+        let v ← makeLeaf vBase
+        let (_, outTimed) := flashAttnWithRoute q k v none c.isCausal none true
         backwardWithCotangent outTimed dOBase
         let _ ← torch.cuda_synchronize
       let latencies ← benchmarkAction runMeta.warmupIters runMeta.timedIters runMeta.repeats action
@@ -894,10 +883,10 @@ private def runEqualHeadsForwardOnly
     (jsonlOut? : Option System.FilePath)
     (emitJsonlStdout : Bool)
     : IO SummaryRow := do
-  let device := Device.CUDA 0
-  let qBase := torch.toBFloat16' (← torch.randn #[batch, heads, seq, headDim] false device)
-  let kBase := torch.toBFloat16' (← torch.randn #[batch, heads, seq, headDim] false device)
-  let vBase := torch.toBFloat16' (← torch.randn #[batch, heads, seq, headDim] false device)
+  let device ← Device.cuda 0
+  let qBase := (← Tensor.randn #[batch, heads, seq, headDim] false device).toBFloat16
+  let kBase := (← Tensor.randn #[batch, heads, seq, headDim] false device).toBFloat16
+  let vBase := (← Tensor.randn #[batch, heads, seq, headDim] false device).toBFloat16
   let outRef := sdpaEqualForward qBase kBase vBase c.isCausal
   match backend with
   | .flashAttention =>
@@ -912,7 +901,7 @@ private def runEqualHeadsForwardOnly
         outRelL2 := some 0.0
       }
       let action : IO Unit := do
-        let _out := torch.nn.scaled_dot_product_attention qBase kBase vBase 0.0 c.isCausal
+        let _out := Tensor.attentionGQA qBase kBase vBase c.isCausal
         let _ ← torch.cuda_synchronize
         pure ()
       let latencies ← benchmarkAction runMeta.warmupIters runMeta.timedIters runMeta.repeats action
@@ -932,14 +921,14 @@ private def runEqualHeadsForwardOnly
       let (route, out) := tyrEqualForward qBase kBase vBase c.isCausal
       let routeActual := routeName route
       let routeOk := routeActual == c.expectedTyrRoute
-      let outOk := torch.allclose outRef out 3e-2 3e-2
+      let outOk := Tensor.allclose outRef out 3e-2 3e-2
       let corr : Correctness := {
         routeActual := routeActual
         routeOk := some routeOk
         outOk := some outOk
         correctnessOk := some (routeOk && outOk)
-        outMae := some <| torch.nn.item (torch.nn.meanAll (torch.nn.abs (out - outRef)))
-        outMax := some <| torch.nn.item (torch.nn.maxAll (torch.nn.abs (out - outRef)))
+        outMae := some <| Tensor.item (Tensor.meanAll (Tensor.abs (out - outRef)))
+        outMax := some <| Tensor.item (Tensor.maxAllChecked (Tensor.abs (out - outRef)))
         outRelL2 := some <| relL2 out outRef
       }
       let action : IO Unit := do

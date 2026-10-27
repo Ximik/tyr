@@ -42,23 +42,23 @@ def directPadStub (_x _padv : Nat) : Nat := 0
 attribute [ad_frontend Tests.ADJaxprLikeElabFixture.directPadFrontend] directPadStub
 
 structure StructuredPadInput where
-  base : T #[2]
-  padv : T #[1]
+  base : Tensor { shape := #[2], dtype := .Float32, device := .CPU }
+  padv : Tensor { shape := #[1], dtype := .Float32, device := .CPU }
   tag : Static String
   deriving TensorStruct, ToTensorStructSchema, TensorStructFlatten
 
 structure StructuredPadOutput where
-  y : T #[6]
+  y : Tensor { shape := #[6], dtype := .Float32, device := .CPU }
   label : Static String
   deriving TensorStruct, ToTensorStructSchema, TensorStructFlatten
 
 def sampleStructuredPadInput : StructuredPadInput :=
-  { base := zeros #[2]
-    padv := zeros #[1]
+  { base := Tensor.zeros #[2]
+    padv := Tensor.zeros #[1]
     tag := "input" }
 
 def sampleStructuredPadOutput : StructuredPadOutput :=
-  { y := zeros #[6]
+  { y := Tensor.zeros #[6]
     label := "output" }
 
 def structuredPadFrontendSig : FrontendADSignature := {
@@ -72,18 +72,18 @@ def structuredPadFrontendSig : FrontendADSignature := {
 
 def structuredPadFrontendJaxpr : LeanJaxpr := {
   invars := #[
-    { id := 10, ty := Lean.IR.IRType.object, metaInfo := { participation := .diff, shape := some #[2] } },
-    { id := 11, ty := Lean.IR.IRType.object, metaInfo := { participation := .diff, shape := some #[1] } }
+    { id := 10, ty := Lean.IR.IRType.object, metaInfo := { participation := .diff, dtype := some "Float32", shape := some #[2] } },
+    { id := 11, ty := Lean.IR.IRType.object, metaInfo := { participation := .diff, dtype := some "Float32", shape := some #[1] } }
   ]
   eqns := #[
     {
       op := Tyr.AD.JaxprLike.padAliasOpName
       invars := #[
-        { id := 10, ty := Lean.IR.IRType.object, metaInfo := { participation := .diff, shape := some #[2] } },
-        { id := 11, ty := Lean.IR.IRType.object, metaInfo := { participation := .diff, shape := some #[1] } }
+        { id := 10, ty := Lean.IR.IRType.object, metaInfo := { participation := .diff, dtype := some "Float32", shape := some #[2] } },
+        { id := 11, ty := Lean.IR.IRType.object, metaInfo := { participation := .diff, dtype := some "Float32", shape := some #[1] } }
       ]
       outvars := #[
-        { id := 12, ty := Lean.IR.IRType.object, metaInfo := { participation := .diff, shape := some #[6] } }
+        { id := 12, ty := Lean.IR.IRType.object, metaInfo := { participation := .diff, dtype := some "Float32", shape := some #[6] } }
       ]
       params := #[
         Tyr.AD.JaxprLike.OpParam.mkNats .padLow #[1],
@@ -94,7 +94,7 @@ def structuredPadFrontendJaxpr : LeanJaxpr := {
     }
   ]
   outvars := #[
-    { id := 12, ty := Lean.IR.IRType.object, metaInfo := { participation := .diff, shape := some #[6] } }
+    { id := 12, ty := Lean.IR.IRType.object, metaInfo := { participation := .diff, dtype := some "Float32", shape := some #[6] } }
   ]
 }
 
@@ -104,48 +104,48 @@ def structuredPadFrontend : FrontendRegistration := {
 }
 
 def directStructuredPadStub (_inp : StructuredPadInput) : StructuredPadOutput :=
-  { y := zeros #[6]
+  { y := Tensor.zeros #[6]
     label := "stub" }
 
 attribute [ad_frontend Tests.ADJaxprLikeElabFixture.structuredPadFrontend] directStructuredPadStub
 
 structure RuntimePadParams where
-  padv : T #[1]
+  padv : Tensor { shape := #[1], dtype := .Float32, device := .CPU }
   label : Static String
   deriving TensorStruct, ToTensorStructSchema, TensorStructFlatten
 
 structure RuntimePadInput where
-  base : T #[2]
+  base : Tensor { shape := #[2], dtype := .Float32, device := .CPU }
   tag : Static String
   deriving TensorStruct, ToTensorStructSchema, TensorStructFlatten
 
 structure RuntimePadOutput where
-  loss : T #[]
+  loss : Tensor { shape := #[], dtype := .Float32, device := .CPU }
   label : Static String
   deriving TensorStruct, ToTensorStructSchema, TensorStructFlatten
 
 def sampleRuntimePadParams : RuntimePadParams :=
-  { padv := full #[1] 2.0
+  { padv := Tensor.full #[1] 2.0
     label := "params" }
 
 def sampleRuntimePadInput : RuntimePadInput :=
-  { base := full #[2] 3.0
+  { base := Tensor.full #[2] 3.0
     tag := "input" }
 
 def sampleRuntimePadOutput : RuntimePadOutput :=
-  { loss := full #[] 4.0
+  { loss := Tensor.full #[] 4.0
     label := "output" }
 
 def replacementRuntimePadParams : RuntimePadParams :=
-  { padv := full #[1] 5.0
+  { padv := Tensor.full #[1] 5.0
     label := "replacement-params" }
 
 def replacementRuntimePadInput : RuntimePadInput :=
-  { base := full #[2] 6.0
+  { base := Tensor.full #[2] 6.0
     tag := "replacement-input" }
 
 def replacementRuntimePadOutput : RuntimePadOutput :=
-  { loss := full #[] 7.0
+  { loss := Tensor.full #[] 7.0
     label := "replacement-output" }
 
 def runtimePadFrontendSig : FrontendADSignature := {
@@ -162,18 +162,18 @@ def runtimePadFrontendSig : FrontendADSignature := {
 
 def runtimePadFrontendJaxpr : LeanJaxpr := {
   invars := #[
-    { id := 20, ty := Lean.IR.IRType.object, metaInfo := { participation := .diff, shape := some #[1] } },
-    { id := 21, ty := Lean.IR.IRType.object, metaInfo := { participation := .diff, shape := some #[2] } }
+    { id := 20, ty := Lean.IR.IRType.object, metaInfo := { participation := .diff, dtype := some "Float32", shape := some #[1] } },
+    { id := 21, ty := Lean.IR.IRType.object, metaInfo := { participation := .diff, dtype := some "Float32", shape := some #[2] } }
   ]
   eqns := #[
     {
       op := `test.runtime_frontend_loss
       invars := #[
-        { id := 20, ty := Lean.IR.IRType.object, metaInfo := { participation := .diff, shape := some #[1] } },
-        { id := 21, ty := Lean.IR.IRType.object, metaInfo := { participation := .diff, shape := some #[2] } }
+        { id := 20, ty := Lean.IR.IRType.object, metaInfo := { participation := .diff, dtype := some "Float32", shape := some #[1] } },
+        { id := 21, ty := Lean.IR.IRType.object, metaInfo := { participation := .diff, dtype := some "Float32", shape := some #[2] } }
       ]
       outvars := #[
-        { id := 22, ty := Lean.IR.IRType.object, metaInfo := { participation := .diff, shape := some #[] } }
+        { id := 22, ty := Lean.IR.IRType.object, metaInfo := { participation := .diff, dtype := some "Float32", shape := some #[] } }
       ]
       params := #[
         Tyr.AD.JaxprLike.OpParam.mkName .sourceOp `Graphax.runtime_frontend_loss
@@ -181,7 +181,7 @@ def runtimePadFrontendJaxpr : LeanJaxpr := {
     }
   ]
   outvars := #[
-    { id := 22, ty := Lean.IR.IRType.object, metaInfo := { participation := .diff, shape := some #[] } }
+    { id := 22, ty := Lean.IR.IRType.object, metaInfo := { participation := .diff, dtype := some "Float32", shape := some #[] } }
   ]
 }
 
@@ -219,7 +219,7 @@ def runtimePadFrontend : FrontendRegistration := {
 }
 
 def runtimeStructuredPadStub (_params : RuntimePadParams) (_inp : RuntimePadInput) : RuntimePadOutput :=
-  { loss := full #[] 0.0
+  { loss := Tensor.full #[] 0.0
     label := "stub" }
 
 attribute [ad_frontend Tests.ADJaxprLikeElabFixture.runtimePadFrontend] runtimeStructuredPadStub

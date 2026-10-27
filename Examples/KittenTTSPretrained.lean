@@ -47,5 +47,5 @@ def main (args : List String) : IO UInt32 := do
   IO.println s!"saved_audio={outPath}"
   IO.println s!"alignment_frames={out.alignmentFrames}"
   IO.println s!"pred_durations={out.predDurations}"
-  IO.println s!"audio_shape={out.audio.runtimeShape}"
+  IO.println s!"audio_shape={out.audio.1}"
   pure 0

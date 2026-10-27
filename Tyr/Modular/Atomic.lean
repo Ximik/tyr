@@ -16,7 +16,7 @@ import Tyr.Module.LayerNorm
 
 namespace Tyr.Modular
 
-open torch.linalg
+open torch
 
 /-! ## Linear Layer
 
@@ -29,44 +29,45 @@ The dual norm (for gradients) is the nuclear norm:
 Input sensitivity ν = ||W||_σ since ||Wx||₂ ≤ ||W||_σ ||x||₂.
 -/
 
-instance (in_dim out_dim : UInt64) : NormedModule (torch.Linear in_dim out_dim) where
+instance (in_dim out_dim : UInt64) {d : DType} {dev : Device} [DType.FloatingOrComplex d] :
+    NormedModule (torch.Linear in_dim out_dim d dev) where
   norm m :=
-    let weightNorm := spectralNorm m.weight
+    let weightNorm := Tensor.spectralNorm m.weight
     match m.bias with
-    | some b => floatMax weightNorm (l2Norm b)
+    | some b => floatMax weightNorm (Tensor.l2Norm b)
     | none => weightNorm
 
   dualNorm m :=
-    let weightDual := nuclearNorm m.weight
+    let weightDual := Tensor.nuclearNorm m.weight
     match m.bias with
-    | some b => weightDual + l2Norm b
+    | some b => weightDual + Tensor.l2Norm b
     | none => weightDual
 
-  nu m := spectralNorm m.weight
+  nu m := Tensor.spectralNorm m.weight
 
   mu _ := 1.0  -- For well-normed modules
 
   normalize m :=
-    let σ := spectralNorm m.weight
+    let σ := Tensor.spectralNorm m.weight
     if σ == 0.0 then m else
-    let normalizedWeight := torch.mul_scalar m.weight (1.0 / σ)
+    let normalizedWeight := Tensor.mulScalar m.weight (1.0 / σ)
     match m.bias with
     | some b =>
-      let bNorm := l2Norm b
-      let normalizedBias := if bNorm == 0.0 then b else torch.mul_scalar b (1.0 / bNorm)
+      let bNorm := Tensor.l2Norm b
+      let normalizedBias := if bNorm == 0.0 then b else Tensor.mulScalar b (1.0 / bNorm)
       { m with weight := normalizedWeight, bias := some normalizedBias }
     | none => { m with weight := normalizedWeight }
 
   normalizeDual m :=
     -- For spectral norm, the dual normalization involves SVD projection
     -- For now, use Frobenius normalization as an approximation
-    let fNorm := frobeniusNorm m.weight
+    let fNorm := Tensor.frobeniusNorm m.weight
     if fNorm == 0.0 then m else
-    let normalizedWeight := torch.mul_scalar m.weight (1.0 / fNorm)
+    let normalizedWeight := Tensor.mulScalar m.weight (1.0 / fNorm)
     match m.bias with
     | some b =>
-      let bNorm := l2Norm b
-      let normalizedBias := if bNorm == 0.0 then b else torch.mul_scalar b (1.0 / bNorm)
+      let bNorm := Tensor.l2Norm b
+      let normalizedBias := if bNorm == 0.0 then b else Tensor.mulScalar b (1.0 / bNorm)
       { m with weight := normalizedWeight, bias := some normalizedBias }
     | none => { m with weight := normalizedWeight }
 
@@ -79,16 +80,17 @@ The modular norm combines them via ℓ₂:
 Input sensitivity ν depends on the activation range, typically O(1).
 -/
 
-instance (dim : UInt64) : NormedModule (torch.LayerNorm dim) where
+instance (dim : UInt64) {d : DType} {dev : Device} [DType.FloatingOrComplex d] :
+    NormedModule (torch.LayerNorm dim d dev) where
   norm m :=
-    let wNorm := l2Norm m.weight
-    let bNorm := l2Norm m.bias
+    let wNorm := Tensor.l2Norm m.weight
+    let bNorm := Tensor.l2Norm m.bias
     Float.sqrt (wNorm * wNorm + bNorm * bNorm)
 
   dualNorm m :=
     -- Dual of ℓ₂ is ℓ₂
-    let wNorm := l2Norm m.weight
-    let bNorm := l2Norm m.bias
+    let wNorm := Tensor.l2Norm m.weight
+    let bNorm := Tensor.l2Norm m.bias
     Float.sqrt (wNorm * wNorm + bNorm * bNorm)
 
   nu _ := 1.0  -- LayerNorm approximately preserves scale
@@ -97,23 +99,23 @@ instance (dim : UInt64) : NormedModule (torch.LayerNorm dim) where
 
   normalize m :=
     -- Compute norm inline to avoid recursion
-    let wNorm := l2Norm m.weight
-    let bNorm := l2Norm m.bias
+    let wNorm := Tensor.l2Norm m.weight
+    let bNorm := Tensor.l2Norm m.bias
     let n := Float.sqrt (wNorm * wNorm + bNorm * bNorm)
     if n == 0.0 then m else
     { m with
-      weight := torch.mul_scalar m.weight (1.0 / n)
-      bias := torch.mul_scalar m.bias (1.0 / n) }
+      weight := Tensor.mulScalar m.weight (1.0 / n)
+      bias := Tensor.mulScalar m.bias (1.0 / n) }
 
   normalizeDual m :=
     -- Compute dual norm inline
-    let wNorm := l2Norm m.weight
-    let bNorm := l2Norm m.bias
+    let wNorm := Tensor.l2Norm m.weight
+    let bNorm := Tensor.l2Norm m.bias
     let n := Float.sqrt (wNorm * wNorm + bNorm * bNorm)
     if n == 0.0 then m else
     { m with
-      weight := torch.mul_scalar m.weight (1.0 / n)
-      bias := torch.mul_scalar m.bias (1.0 / n) }
+      weight := Tensor.mulScalar m.weight (1.0 / n)
+      bias := Tensor.mulScalar m.bias (1.0 / n) }
 
 /-! ## Embedding Layer
 
@@ -125,57 +127,62 @@ The dual norm is the sum of row norms (ℓ₁ of row ℓ₂ norms).
 -/
 
 /-- Embedding table: maps discrete tokens to continuous vectors -/
-structure Embedding (vocabSize dim : UInt64) where
-  weight : torch.T #[vocabSize, dim]
+structure Embedding (vocabSize dim : UInt64) (dtype : torch.DType := .Float32)
+    (device : torch.Device := .CPU) where
+  weight : torch.Tensor ⟨#[vocabSize, dim], dtype, device⟩
+
+derive_tensor_struct_for Embedding
+
+variable {dtype : torch.DType} {device : torch.Device}
 
 namespace Embedding
 
-instance : torch.TensorStruct (Embedding vocabSize dim) where
-  map f e := { weight := f e.weight }
+instance : torch.TensorStruct (Embedding vocabSize dim dtype device) where
+  map f e := { weight := torch.TensorStruct.map f e.weight }
   mapM f e := do
-    let w' ← f e.weight
+    let w' ← torch.TensorStruct.mapM f e.weight
     pure { weight := w' }
-  zipWith f e1 e2 := { weight := f e1.weight e2.weight }
-  fold f init e := f e.weight init
+  zipWith f e1 e2 := { weight := torch.TensorStruct.zipWith f e1.weight e2.weight }
+  fold f init e := torch.TensorStruct.fold f init e.weight
 
 /-- Initialize with small random values -/
 def init (vocabSize dim : UInt64) : IO (Embedding vocabSize dim) := do
   let std := 1.0 / Float.sqrt dim.toFloat
-  let w ← torch.randn #[vocabSize, dim]
-  let weight := torch.mul_scalar w std
-  let weight := torch.autograd.set_requires_grad weight true
+  let w ← torch.Tensor.randn #[vocabSize, dim]
+  let weight := torch.Tensor.mulScalar w std
+  let weight ← torch.Tensor.parameter weight
   pure { weight }
 
 /-- Lookup embeddings for a batch of token indices -/
 def forward {vocabSize dim batch seq : UInt64}
-    (emb : Embedding vocabSize dim)
-    (indices : torch.T #[batch, seq]) : torch.T #[batch, seq, dim] :=
-  torch.nn.embedding indices emb.weight
+    (emb : Embedding vocabSize dim dtype device)
+    (indices : torch.Tensor ⟨#[batch, seq], .Int64, device⟩) : torch.Tensor ⟨#[batch, seq, dim], dtype, device⟩ :=
+  torch.Tensor.embedding indices emb.weight
 
 end Embedding
 
-instance (vocabSize dim : UInt64) : NormedModule (Embedding vocabSize dim) where
-  norm m := maxRowNorm m.weight
+instance (vocabSize dim : UInt64) [DType.FloatingOrComplex dtype] : NormedModule (Embedding vocabSize dim dtype device) where
+  norm m := torch.Tensor.maxRowNorm m.weight
 
   dualNorm m :=
     -- Sum of row norms
-    let norms := rowNorms m.weight
-    torch.nn.item (torch.nn.sumAll norms)
+    let norms := torch.Tensor.rowNorms m.weight
+    torch.Tensor.item (torch.Tensor.sumAll norms)
 
-  nu m := maxRowNorm m.weight
+  nu m := torch.Tensor.maxRowNorm m.weight
 
   mu _ := 1.0
 
   normalize m :=
-    let n := maxRowNorm m.weight
+    let n := torch.Tensor.maxRowNorm m.weight
     if n == 0.0 then m else
-    { weight := torch.mul_scalar m.weight (1.0 / n) }
+    { weight := torch.Tensor.mulScalar m.weight (1.0 / n) }
 
   normalizeDual m :=
     -- Compute dual norm inline to avoid recursion
-    let norms := rowNorms m.weight
-    let n := torch.nn.item (torch.nn.sumAll norms)
+    let norms := torch.Tensor.rowNorms m.weight
+    let n := torch.Tensor.item (torch.Tensor.sumAll norms)
     if n == 0.0 then m else
-    { weight := torch.mul_scalar m.weight (1.0 / n) }
+    { weight := torch.Tensor.mulScalar m.weight (1.0 / n) }
 
 end Tyr.Modular

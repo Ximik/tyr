@@ -101,6 +101,16 @@ target libtyr pkg : Dynlib := do
     for mod in modules do
       inputs := inputs.mix (← mod.olean.fetch)
     return inputs
+  -- Runs a generator when its inputs' trace changes. Unlike `buildFileAfterDep`,
+  -- this does not delete `output` first: generators leave unchanged files
+  -- untouched, so Make recompiles only what actually changed.
+  let generate (name : String) (inputs : Job Unit) (output : FilePath)
+      (cmd : FilePath) (args : Array String) (extraTrace := BuildTrace.nil) :
+      SpawnM (Job Unit) :=
+    inputs.mapM fun _ => do
+      addTrace extraTrace
+      buildUnlessUpToDate output (← getTrace) (pkg.buildDir / "codegen" / s!"{name}.trace") do
+        proc { cmd := cmd.toString, args, env := generatorEnv }
 
   -- 1. Placeholder launchers for every kernel in `TyrKernels` (all builds):
   --    kernels whose CUDA is not compiled still link.
@@ -108,12 +118,8 @@ target libtyr pkg : Dynlib := do
     | error "lakefile.lean: no TyrKernels library"
   let allKernels ← kernelLib.getModuleArray
   let stubsFile := generatedDir / "tyr_gpu_kernel_stubs.cpp"
-  let stubsJob ← buildFileAfterDep stubsFile (← generatorInputs allKernels) fun _ =>
-    proc {
-      cmd := generator.file.toString
-      args := #["--stubs", stubsFile.toString] ++ allKernels.map (·.name.toString)
-      env := generatorEnv
-    }
+  let stubsJob ← generate "gpu-stubs" (← generatorInputs allKernels) stubsFile generator.file
+    (#["--stubs", stubsFile.toString] ++ allKernels.map (·.name.toString))
 
   -- 2. CUDA for the `-Kkernels` modules (CUDA builds only). Lake reruns it when
   --    the generator, one of those modules or `-Kkernels` changes.
@@ -123,20 +129,25 @@ target libtyr pkg : Dynlib := do
       let some mod ← findModule? name.toName
         | error s!"-Kkernels: unknown module {name}"
       modules := modules.push mod
-    let stamp := pkg.buildDir / "gpu-codegen.stamp"
-    let job ← buildFileAfterDep stamp (← generatorInputs modules)
-      (extraDepTrace := pure (BuildTrace.ofHash (Hash.ofString gpuKernels) "-Kkernels"))
-      fun _ => do
-        proc {
-          cmd := generator.file.toString
-          args := kernelModules ++ #["--out-dir", generatedDir.toString]
-          env := generatorEnv
-        }
-        IO.FS.writeFile stamp gpuKernels
-    pure (job.map fun _ => ())
-  let codegenJob := stubsJob.mix cudaJob
+    generate "gpu-cuda" (← generatorInputs modules) generatedDir generator.file
+      (kernelModules ++ #["--out-dir", generatedDir.toString])
+      (extraTrace := BuildTrace.ofHash (Hash.ofString gpuKernels) "-Kkernels")
 
-  -- 3. make, on every build: Make decides what to recompile. The library's
+  -- 3. C prototypes of every `TyrFFI` extern, which `libTyrC`'s sources include.
+  let some ffiGenerator ← findLeanExe? `GenerateFfiHeader
+    | error "lakefile.lean: no GenerateFfiHeader executable"
+  let some ffiLib ← findLeanLib? `TyrFFI
+    | error "lakefile.lean: no TyrFFI library"
+  let ffiModules ← ffiLib.getModuleArray
+  let ffiHeader := generatedDir / "tyr_ffi.h"
+  let mut ffiInputs := (← ffiGenerator.exe.fetch).map fun _ => ()
+  for mod in ffiModules do
+    ffiInputs := ffiInputs.mix (← mod.olean.fetch)
+  let ffiJob ← generate "ffi-header" ffiInputs ffiHeader ffiGenerator.file
+    (#[ffiHeader.toString] ++ ffiModules.map (·.name.toString))
+  let codegenJob := stubsJob.mix cudaJob |>.mix ffiJob
+
+  -- 4. make, on every build: Make decides what to recompile. The library's
   --    content is its trace, so an unchanged library rebuilds nothing else.
   let libJob ← codegenJob.mapM fun _ => do
     let jobs ← match (← IO.getEnv "TYR_MAKE_JOBS").bind nonEmptyTrimmed? with
@@ -153,9 +164,25 @@ target libtyr pkg : Dynlib := do
         ("TYR_GPU_CODEGEN_MODULE", some gpuKernels)
       ]
     }
-    setTrace (← computeTrace tyrCLib)
+    let libTrace ← computeTrace tyrCLib
+    setTrace libTrace
+    return libTrace
+
+  -- 5. Every `lean_*` symbol the library exports must be a Lean extern (a
+  --    `TyrFFI` declaration or a kernel launcher); the generated header only
+  --    checks definitions Lean declares. The library keeps its own trace.
+  let checkModules := ffiModules ++ allKernels
+  let checkJob ← (libJob.mix ffiInputs |>.mix (← generatorInputs allKernels)).mapM fun _ => do
+    buildUnlessUpToDate tyrCLib (← getTrace) (pkg.buildDir / "codegen" / "ffi-exports.trace") do
+      proc {
+        cmd := ffiGenerator.file.toString
+        args := #["--check-exports", tyrCLib.toString] ++ checkModules.map (·.name.toString)
+        env := generatorEnv
+      }
+  let doneJob ← (libJob.zipWith (fun libTrace _ => libTrace) checkJob).mapM fun libTrace => do
+    setTrace libTrace
     return tyrCLib
-  return libJob.map fun path => { path, name := "TyrC" }
+  return doneJob.map fun path => { path, name := "TyrC" }
 
 /-! ## Lean Library -/
 
@@ -166,6 +193,19 @@ lean_lib Tyr where
   precompileModules := true
   -- Linked into every executable that imports a Tyr module and into the
   -- precompiled module libraries; not into the codegen executables.
+  moreLinkLibs := #[`@/libtyr]
+
+/-- Every `@[extern]` declaration of `Tyr`. Declared after `Tyr` and before
+    `TyrCodegen`, so `TyrCodegen` keeps `Tyr.Basic.Types`. Not precompiled, so
+    its `.olean` files build without `libTyrC`: the `libtyr` target generates
+    `libTyrC`'s FFI header from them. The declared functions are in `libTyrC`,
+    so linking needs it. -/
+lean_lib TyrFFI where
+  roots := #[`Tyr.Basic, `Tyr.ConstantSupport, `Tyr.RawTensor, `Tyr.Audio.AppleInput,
+    `Tyr.Audio.AppleOutput]
+  globs := #[.one `Tyr.Basic, .andSubmodules `Tyr.ConstantSupport, .andSubmodules `Tyr.RawTensor,
+    .one `Tyr.Audio.FloatBuffer, .one `Tyr.Audio.AppleInput, .one `Tyr.Audio.AppleOutput]
+  precompileModules := false
   moreLinkLibs := #[`@/libtyr]
 
 /-- Codegen-only sub-library. Declared after `Tyr`: Lake gives a module to the
@@ -224,6 +264,11 @@ lean_exe test_runner where
   root := `Tests.RunTests
   supportInterpreter := true
 
+/-- Two-rank CPU collective value regressions; launched by scripts/test_distributed_values.py. -/
+lean_exe RunDistributedValues where
+  root := `Tests.RunDistributedValues
+  supportInterpreter := true
+
 /-- Native tensor-free MCTS search and allocation microbenchmarks. -/
 lean_exe mctx_bench where
   root := `benchmarks.Mctx
@@ -234,6 +279,11 @@ lean_exe GenerateGpuKernels where
   root := `Tyr.GPU.GenerateGpuKernels
   supportInterpreter := true
 
+/-- Write the C prototypes of `TyrFFI`'s extern declarations. Imports only
+    `Lean`, so it does not link `libTyrC`. -/
+lean_exe GenerateFfiHeader where
+  root := `Tyr.GenerateFfiHeader
+
 /-- Compile registered @[tileir_kernel] declarations through NVIDIA TileIR tooling. -/
 lean_exe GenerateTileIRKernels where
   root := `Tyr.GPU.GenerateTileIRKernels
@@ -242,6 +292,16 @@ lean_exe GenerateTileIRKernels where
 /-- Experimental test runner for unstable/in-progress modules. -/
 lean_exe test_runner_experimental where
   root := `Tests.RunTestsExperimental
+  supportInterpreter := true
+
+/-- BranchingFlows discrete-token training demonstration. -/
+lean_exe BranchingFlowsDiscreteTrain where
+  root := `Examples.BranchingFlows.DiscreteTrainDemo
+  supportInterpreter := true
+
+/-- BranchingFlows mixed continuous/token training demonstration. -/
+lean_exe BranchingFlowsMixedTrain where
+  root := `Examples.BranchingFlows.MixedTrainDemo
   supportInterpreter := true
 
 /-- BranchingFlows continuous overfit training check. -/
@@ -611,4 +671,9 @@ lean_exe RunMhaH100Seq768 where
 /-- End-to-end Blackwell/B200 BF16 GEMM validation. -/
 lean_exe RunB200Bf16Gemm where
   root := `Examples.GPU.RunB200Bf16Gemm
+  supportInterpreter := true
+
+/-- Focused native acceptance path while model tensor migration is in progress. -/
+lean_exe test_typed_models where
+  root := `Tests.RunTypedModels
   supportInterpreter := true

@@ -63,6 +63,7 @@ structure TensorLeafSpec where
   path : TensorLeafPath := {}
   role : TensorLeafRole := .diff
   shape : Option (Array Nat) := none
+  dtype : Option String := none
   deriving Repr, BEq, Inhabited, DecidableEq
 
 /-- Structural schema for a `TensorStruct` value. -/
@@ -117,16 +118,18 @@ end TensorLeafSelection
 /-- Runtime tensor payload for one flattened structured leaf. -/
 structure TensorLeafValue where
   role : TensorLeafRole := .diff
-  payload : Sigma T
-  deriving Repr
+  payload : Sigma Tensor
+
+instance : Repr TensorLeafValue where
+  reprPrec leaf _ := s!"TensorLeafValue({reprStr leaf.role}, {reprStr leaf.payload.1})"
 
 namespace TensorLeafValue
 
-def ofTensor {s : Shape} (role : TensorLeafRole) (t : T s) : TensorLeafValue :=
-  { role := role, payload := ⟨s, t⟩ }
+def ofTensor {σ : StaticSpec} (role : TensorLeafRole) (t : Tensor σ) : TensorLeafValue :=
+  { role := role, payload := ⟨σ, t⟩ }
 
 def typedShape (leaf : TensorLeafValue) : Shape :=
-  leaf.payload.1
+  leaf.payload.1.shape
 
 def shape (leaf : TensorLeafValue) : Array Nat :=
   shapeToNatArray leaf.typedShape
@@ -215,20 +218,49 @@ private def takeLeaf
         s!"needed leaf #{idx}, but only {leaves.size} were provided."
 
 private def expectLeaf
-    {s : Shape}
+    {σ : StaticSpec}
     (expectedRole : TensorLeafRole)
     (path : TensorLeafPath)
     (leaf : TensorLeafValue) :
-    Except String (T s) := do
+    Except String (Tensor σ) := do
   if leaf.role != expectedRole then
     throw <| s!"Tensor leaf role mismatch at {renderPath path}: " ++
       s!"expected {reprStr expectedRole}, got {reprStr leaf.role}."
-  let ⟨leafShape, leafTensor⟩ := leaf.payload
-  if h : leafShape = s then
-    pure (h ▸ leafTensor)
-  else
+  let ⟨leafSpec, leafTensor⟩ := leaf.payload
+  if leafSpec.shape != σ.shape then
     throw <| s!"Tensor leaf shape mismatch at {renderPath path}: " ++
-      s!"expected {shapeToString s}, got {shapeToString leafShape}."
+      s!"expected {shapeToString σ.shape}, got {shapeToString leafSpec.shape}."
+  -- Validate both the incoming claim and the destination contract. This also
+  -- catches malformed handles constructed through unsafe native adapters.
+  match leafTensor.validate *> Tensor.ofRaw (σ := σ) leafTensor.raw with
+  | .ok tensor => pure tensor
+  | .error message => throw s!"Tensor leaf mismatch at {renderPath path}: {message}"
+
+instance {σ : StaticSpec} : ToTensorStructSchema (Tensor σ) where
+  describeLeaves _ path := #[{
+    path, role := .diff, shape := some (shapeToNatArray σ.shape), dtype := some σ.dtype.canonicalName
+  }]
+
+instance {σ : StaticSpec} : TensorStructFlatten (Tensor σ) where
+  flattenAt tensor _ selection :=
+    if selection.includesRole .diff then #[TensorLeafValue.ofTensor .diff tensor] else #[]
+  rebuildAt _ path selection leaves := do
+    if selection.includesRole .diff then
+      let leaf ← takeLeaf path leaves
+      match expectLeaf .diff path leaf with
+      | .ok tensor => pure tensor
+      | .error message => throw message
+    else
+      throw s!"Internal error: selection {reprStr selection} excluded diff leaf at {renderPath path}."
+
+instance {dtype : DType} {device : Device} : ToTensorStructSchema (ShapePackedTensor dtype device) where
+  describeLeaves tensor path := ToTensorStructSchema.describeLeaves tensor.2 path
+
+instance {dtype : DType} {device : Device} : TensorStructFlatten (ShapePackedTensor dtype device) where
+  flattenAt tensor path selection := TensorStructFlatten.flattenAt tensor.2 path selection
+  rebuildAt template path selection leaves := do
+    let value ← TensorStructFlatten.rebuildAt template.2 path selection leaves
+    pure ⟨template.1, value⟩
 
 private def describeListLeaves
     [ToTensorStructSchema α]
@@ -242,38 +274,16 @@ private def describeListLeaves
     ToTensorStructSchema.describeLeaves x (path.pushIndex idx) ++
       describeListLeaves rest path (idx + 1)
 
-instance {s : Shape} : ToTensorStructSchema (T s) where
-  typeName := Name.anonymous
-  describeLeaves _ path := #[{
-    path := path
-    role := .diff
-    shape := some (shapeToNatArray s)
-  }]
-
-instance {s : Shape} : TensorStructFlatten (T s) where
-  flattenAt t _ selection :=
-    if TensorLeafSelection.includesRole selection .diff then
-      #[TensorLeafValue.ofTensor .diff t]
-    else
-      #[]
-  rebuildAt _ path selection leaves := do
-    if TensorLeafSelection.includesRole selection .diff then
-      let leaf ← takeLeaf path leaves
-      match expectLeaf (s := s) .diff path leaf with
-      | .ok t => pure t
-      | .error err => throw err
-    else
-      throw <| s!"Internal error: selection {reprStr selection} excluded diff leaf at {renderPath path}."
-
-instance {s : Shape} : ToTensorStructSchema (Frozen s) where
+instance {σ : StaticSpec} : ToTensorStructSchema (Frozen σ) where
   typeName := Name.anonymous
   describeLeaves _ path := #[{
     path := path
     role := .frozen
-    shape := some (shapeToNatArray s)
+    shape := some (shapeToNatArray σ.shape)
+    dtype := some σ.dtype.canonicalName
   }]
 
-instance {s : Shape} : TensorStructFlatten (Frozen s) where
+instance {σ : StaticSpec} : TensorStructFlatten (Frozen σ) where
   flattenAt fr _ selection :=
     if TensorLeafSelection.includesRole selection .frozen then
       #[TensorLeafValue.ofTensor .frozen fr.tensor]
@@ -282,7 +292,7 @@ instance {s : Shape} : TensorStructFlatten (Frozen s) where
   rebuildAt fr path selection leaves := do
     if TensorLeafSelection.includesRole selection .frozen then
       let leaf ← takeLeaf path leaves
-      match expectLeaf (s := s) .frozen path leaf with
+      match expectLeaf (σ := σ) .frozen path leaf with
       | .ok t => pure { tensor := t }
       | .error err => throw err
     else
@@ -530,7 +540,7 @@ private def mkTensorStructSchemaInstanceCmd (typeName : Name) : CommandElabM Uni
           let paramDecl ← param.fvarId!.getDecl
           pure (mkIdent paramDecl.userName)
 
-        let appliedType ← `($(mkIdent typeName) $paramIdents*)
+        let appliedType ← `(@$(mkIdent typeName) $paramIdents*)
 
         `(command|
           instance $[$binderStxs]* : ToTensorStructSchema $appliedType where
@@ -612,7 +622,7 @@ private def mkTensorStructFlattenInstanceCmd (typeName : Name) : CommandElabM Un
           let paramDecl ← param.fvarId!.getDecl
           pure (mkIdent paramDecl.userName)
 
-        let appliedType ← `($(mkIdent typeName) $paramIdents*)
+        let appliedType ← `(@$(mkIdent typeName) $paramIdents*)
 
         `(command|
           instance $[$binderStxs]* : TensorStructFlatten $appliedType where

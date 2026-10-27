@@ -15,6 +15,9 @@ import Tyr.Tokenizer.Laguna
 import Examples.ModelRunner
 
 open torch
+
+variable {device : Device} {dtype : DType}
+variable [DType.RealFloating dtype]
 open torch.Model
 open torch.laguna
 open Examples.ModelRunner
@@ -88,9 +91,9 @@ private def encodePromptToIds
     Uses generateStream; the first callback marks the end of prefill. -/
 private def runBench
     (cfg : Config)
-    (model : LagunaForCausalLM cfg)
+    (model : LagunaForCausalLM (device := device) cfg dtype)
     {b seq : UInt64}
-    (inputIds : T #[b, seq])
+    (inputIds : Tensor { shape := #[b, seq], dtype := .Int64, device := device })
     (promptLen : UInt64)
     (maxNewTokens : UInt64)
     (eos : Array UInt64)
@@ -98,7 +101,7 @@ private def runBench
   let firstMsRef ← IO.mkRef 0
   let tokenCount ← IO.mkRef 0
   let startMs ← IO.monoMsNow
-  let cb : StreamCallback b := fun _step _ids => do
+  let cb : StreamCallback (device := device) b := fun _step _ids => do
     let n ← tokenCount.get
     tokenCount.set (n + 1)
     if n == 0 then
@@ -120,8 +123,7 @@ private def runBench
 private def runTextBatches
     (tok : tokenizer.laguna.LagunaTokenizer)
     (cfg : Config)
-    (model : LagunaForCausalLM cfg)
-    (device : Device)
+    (model : LagunaForCausalLM (device := device) cfg dtype)
     (args : Args)
     (prompts : Array String)
     : IO Unit := do
@@ -131,7 +133,7 @@ private def runTextBatches
     let prompt := prompts[0]?.getD args.prompt
     let ⟨batch, ⟨seq, (inputIds0, promptLens)⟩⟩ ←
       buildBatchInputWithEncoder tokenizer.laguna.padTokenId.toUInt64 #[prompt] (fun p => pure (encodePromptToIds tok args.enableThinking p))
-    let inputIds : T #[batch, seq] := inputIds0.to device
+    let inputIds : Tensor { shape := #[batch, seq], dtype := .Int64, device := device } := inputIds0.to device
     let promptLen := (promptLens[0]?.getD 0).toUInt64
     -- warmup (also builds rope tables / caches), then measured run
     IO.println "Warming up..."
@@ -143,11 +145,11 @@ private def runTextBatches
       let ⟨batch, ⟨seq, (inputIds, promptLens)⟩⟩ ←
         buildBatchInputWithEncoder tokenizer.laguna.padTokenId.toUInt64 chunk (fun p => pure (encodePromptToIds tok args.enableThinking p))
       pure ⟨batch, ⟨seq, (inputIds.to device, promptLens)⟩⟩
-    let decodeBatch (promptLens : Array Nat) {b os : UInt64} (ids : T #[b, os]) : IO (Array String) :=
+    let decodeBatch (promptLens : Array Nat) {b os : UInt64} (ids : Tensor { shape := #[b, os], dtype := .Int64, device := device }) : IO (Array String) :=
       decodeGeneratedBatch promptLens ids (fun xs => tokenizer.laguna.decodeTokens tok xs)
-    let runGen (b : UInt64) {s : UInt64} (ids : T #[b, s]) :=
+    let runGen (b : UInt64) {s : UInt64} (ids : Tensor { shape := #[b, s], dtype := .Int64, device := device }) :=
       model.generate cfg ids args.maxNewTokens .greedy eos
-    let runGenStream (b : UInt64) {s : UInt64} (ids : T #[b, s]) (cb : StreamCallback b) :=
+    let runGenStream (b : UInt64) {s : UInt64} (ids : Tensor { shape := #[b, s], dtype := .Int64, device := device }) (cb : StreamCallback (device := device) b) :=
       model.generateStream cfg ids cb args.maxNewTokens .greedy eos
     runGenerationBatches prompts args.batchSize args.maxNewTokens args.stream args.debugIds
       (prompts.size == 1) buildBatch runGen runGenStream decodeBatch
@@ -178,7 +180,7 @@ def runMain (argv : List String) : IO UInt32 := do
   let model ←
     if isSharded then LagunaForCausalLM.loadSharded modelDir cfg device
     else LagunaForCausalLM.load s!"{modelDir}/model.safetensors" cfg device
-  runTextBatches tok cfg model device args prompts
+  runTextBatches tok cfg model.2 args prompts
   pure 0
 
 end Examples.Laguna

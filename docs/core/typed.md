@@ -1,377 +1,559 @@
-# Typed tensors: the `Tyr/Typed` facade
+# Tensor specifications and checked boundaries
 
-## Purpose and when to use
+`torch.Tensor σ` is Tyr's public tensor type. Its `StaticSpec` index survives
+Lean typechecking and records shape, dtype, and concrete device. The underlying
+`RawTensor` is a native LibTorch handle used by implementation adapters.
 
-`Tyr/Typed` is a phantom-typed layer over Tyr's raw tensor handle `T s`.
-It grades each tensor by a single `StaticSpec` index — shape, dtype, and device
-policy — so that shape mismatches, non-broadcastable operands, and dtype- or
-device-mismatched matmuls fail at compile time instead of inside libtorch.
-Use it for new model code where you want the type checker to catch wiring
-errors, and for boundary checks (weight loading, solver states) where you want
-an explicit runtime audit of static claims. The raw `T s` FFI surface stays
-fully available underneath. Its shape annotation is not enforced because
-`T s` is a reducible alias independent of `s`; use checked constructors when
-crossing from that API into `Tensor`.
+## Imports and implementation layers
 
-The design is LeanMLX-inspired: dtype promotion and result-spec computation
-happen in a pure algebra, while device placement stays a runtime property that
-the type only constrains through a policy.
+`import Tyr.Typed` provides specifications, tensor constructors, core operations,
+and typed layer helpers. Add `import Tyr.Typed.Neural` for additional neural,
+data, and persistence operations. `import Tyr` aggregates the library.
 
-## Architecture and main abstractions
-
-The facade is six modules under `Tyr/Typed/`, aggregated by `Tyr/Typed.lean`
-(itself re-exported by `Tyr.lean`). They build on each other in layers:
-
-| Module | Contents |
+| Module | Responsibility |
 | --- | --- |
-| `Tyr/Typed/DType.lean` | Pure dtype algebra: promotion and reduction-result rules |
-| `Tyr/Typed/Spec.lean` | `TensorSpec` (shape + dtype) and pure result-spec computation |
-| `Tyr/Typed/Device.lean` | `DevicePolicy`, `TensorRole`, `TensorContract` placement contracts |
-| `Tyr/Typed/Tensor.lean` | `StaticSpec`, the `Tensor σ` wrapper, checked constructors, `validate` |
-| `Tyr/Typed/Ops.lean` | Typed wrappers over the `torch.*` / `torch.nn.*` FFI ops |
-| `Tyr/Typed/Layers.lean` | `Typed.Linear`, `Typed.RMSNorm` — migration templates for model code |
+| `Tyr.Basic.Types` | Raw carrier, specifications, dtype/device types, pure shape helpers |
+| `Tyr.Basic` | Indexed carrier, checked raw admission, native metadata, native zero factory |
+| `Tyr.ConstantSupport.Types` | Erased constant-construction capability for an exact dtype and device |
+| `Tyr.ConstantSupport` | Runtime acquisition of dtype/device constant support |
+| `Tyr.Typed.DType` | Partial dtype promotion and accumulation rules |
+| `Tyr.Typed.Promotion` | Erased proof classes for successful dtype promotion |
+| `Tyr.Typed.Spec` | Shape and result-spec algebra |
+| `Tyr.Typed.Device` | Static placement eligibility, native-device checks, and tensor contracts |
+| `Tyr.Typed.Tensor` | Checked constructors, validation, existential packaging |
+| `Tyr.Typed.Ops` | Arithmetic, shape transforms, reductions, autograd, host arrays |
+| `Tyr.Typed.Neural` | Neural, data, storage, and dynamic-shape adapters |
+| `Tyr.Typed.Layers` | Parameter structures and typed layer operations |
+| `Tyr.TensorStruct.Cast` | Convert a tensor tree to the specifications in a destination type |
+| `Tyr.TensorStruct.DeriveCast` | Derive field-wise casts between explicitly selected record types |
+| `Tyr.RawTensor` and submodules | Native declarations without static guarantees |
 
-Everything lives in `namespace torch` (the layers in `torch.Typed`).
+## Concrete placement and dtype claims
 
-### The spec index and the tensor
-
-The central types (`Tyr/Typed/Tensor.lean:29`, `Tyr/Typed/Tensor.lean:65`):
-
-```lean
-structure StaticSpec where
-  shape : Shape
-  dtype : DType := .Unknown "dynamic"   -- default: no dtype claim
-  device : DevicePolicy := .any         -- default: any placement
-
-structure Tensor (σ : StaticSpec) where
-  private mk ::
-  raw : T σ.shape
-
-abbrev DTensor (shape : Shape) (dtype : DType) : Type :=
-  Tensor { shape, dtype }
-abbrev TT (shape : Shape) (dtype : DType) : Type := DTensor shape dtype
-```
-
-`Tensor σ` is a single-field structure around the same opaque libtorch handle
-`T σ.shape` used everywhere else in Tyr (`Tyr/Basic.lean:108`). The `σ` index
-is phantom: it is erased at runtime, no FFI signature changes, and wrapping or
-unwrapping is free. `Tensor.toTensor` (and a `CoeOut` instance) unwraps;
-`Tensor.assumeSpec` wraps.
-
-The defaults are graded claims: `Tensor { shape := #[2, 3] }` claims only the
-shape, while `Tensor { shape := #[2, 3], dtype := .Float32, device := .exact (.CUDA 0) }`
-pins all three. `DTensor s d` is the common shape+dtype instantiation.
-
-### The pure spec algebra
-
-Result types are computed by pure functions, so the type checker can see them:
-
-- `DType.promote : DType → DType → DType` (`Tyr/Typed/DType.lean:80`) encodes
-  PyTorch-flavored promotion (f32 absorbs f16/bf16, mixed f16+bf16 gives f32,
-  integers promote by rank with `UInt8 + Int8 → Int16`, `Unknown` is sticky). Helpers `sumResult`,
-  `meanResult`, `divideResult`, `atLeastFloat`, and predicates `isFloating`,
-  `isIntegral`, `isBool`, `isIndex` describe reduction and division results.
-- `TensorSpec := { shape : Shape, dtype : DType }` (`Tyr/Typed/Spec.lean:12`)
-  with `broadcastShapes?`, `broadcastList?`, `matmulShape?`, `pointwise?`,
-  `division?`, `matmul?` — `Option`-returning checked computation — plus the
-  total `broadcastShape` (junk `#[]` on failure) for use in type indices, and
-  `checkShape` / `checkDType` / `checkCompatible` for runtime validation.
-- `StaticSpec.pointwise`, `StaticSpec.division`, `StaticSpec.sumSpec`
-  (`Tyr/Typed/Tensor.lean:47-62`) lift the same rules to full specs; the
-  pointwise result inherits the *left* operand's device policy.
-
-### Device policy and contracts
-
-Device is deliberately not a hard type-level placement (`Tyr/Typed/Device.lean`):
-
-```lean
-inductive DevicePolicy where
-  | any
-  | exact (device : Device)
-
-inductive TensorRole where
-  | activation | parameter | index | mask | logits | loss | cache | quantScale
-
-structure TensorContract where
-  spec : TensorSpec
-  role : TensorRole := .activation
-  devicePolicy : DevicePolicy := .any
-```
-
-A policy states which placements the type admits; the actual placement is still
-the runtime `device` argument of the creation ops. `TensorContract.check`
-verifies shape, dtype, and device against runtime metadata — `role` is
-documentation-only metadata and is not checked. Contracts are the boundary
-mechanism used by the SafeTensors loader (see
-[Serialization](../serialization.md)).
-
-### Boundary API: checked constructors and validation
-
-Crossing from raw `T s` into the facade (`Tyr/Typed/Tensor.lean`):
-
-- `Tensor.assumeSpec` / `Tensor.assumeDType` — wrap unconditionally. Every
-  typed op uses this internally, so each op encodes an assumption about
-  libtorch behavior; the parity tests in `Tests/TestTyped.lean` exist to keep
-  those assumptions honest. Treat it as the escape hatch it is in your own code.
-- `Tensor.ofTensor?` / `Tensor.ofTensor` — wrap after checking both the runtime
-  shape and dtype (`Option` / `Except String`). The raw type annotation alone
-  is not evidence of a tensor's actual shape.
-- `Tensor.ofTensorWithContract` — full contract check (shape, dtype, device).
-- `Tensor.validate : Tensor σ → Except String Unit` (`Tyr/Typed/Tensor.lean:118`)
-  — audit every phantom claim against the runtime handle. Shape is always
-  checked; an `.Unknown _` dtype matches anything; `.any` accepts any device.
-
-### What is actually enforced
-
-Compile time:
-
-- Same-shape elementwise ops unify the shape index — mismatches do not compile.
-- The matmul family requires both operands to share dtype *and* device policy.
-- The specialized matmuls (`mm`, `linear`, `linear3d`, `matmul3d`, `bmm4d`,
-  `affine3d`) encode inner-dimension agreement in the types.
-- Broadcasting ops carry a `rfl`-discharged proof that the shapes broadcast —
-  incompatible pairs fail to compile (for concrete shapes).
-- Float-only math (`exp`, `sqrt`, `tanh`, …) requires an
-  `σ.dtype.isFloating = true` proof, found by `decide` for literal dtypes.
-
-Runtime only:
-
-- Generic `Tensor.matmul` computes its result shape with the total
-  `matmulShape` from `Tyr/Basic.lean:179` (unchecked, junk on bad input) — the
-  checked `TensorSpec.matmulShape?` is *not* in its type. Prefer the
-  specialized variants when you want static shape checking.
-- Dtype claims of FFI results are assumed, not proven; they are validated by
-  running the parity tests, not by the compiler.
-- The device policy is propagated through types but only *enforced* by
-  `validate` / contract checks; ops do not consult the runtime device.
-
-Coverage is deliberately partial: creation, casts, elementwise, scalar and
-float-unary math, the matmul family, broadcasting, two reductions, shape ops,
-`affine3d`, `rmsNormWeighted`, and `setRequiresGrad`. There are no typed conv,
-attention, or loss wrappers yet, and `Typed.Linear` / `Typed.RMSNorm` are the
-only layers — they are templates to copy, not a module library.
-
-## Key APIs
-
-All of the following are in `namespace torch.Tensor` unless noted. Signatures
-abridged (default arguments omitted where they only pass through to the FFI).
-
-### Construction and casts
-
-| Function | Signature | Notes |
-| --- | --- | --- |
-| `zeros`, `ones` | `(shape : Shape) → Tensor { shape, dtype := .Float32 }` | `requiresGrad`, `device` defaults |
-| `full` | `(shape : Shape) (value : Float) → Tensor { shape, dtype := .Float32 }` | |
-| `fullInt` | `(shape : Shape) (value : Int64) → Tensor { shape, dtype := .Int64 }` | |
-| `randn` | `(shape : Shape) → IO (Tensor { shape, dtype := .Float32 })` | |
-| `zerosLike`, `onesLike` | `Tensor σ → Tensor σ` | |
-| `toFloat32`, `toBFloat16`, `toInt64` | `Tensor σ → Tensor (σ.withDType …)` | |
-
-### Elementwise and scalar arithmetic
-
-```lean
--- Same shape and device policy; dtypes promote (div additionally floats ints):
-def add {s : Shape} {l r : DType} {dev : DevicePolicy}
-    (a : Tensor ⟨s, l, dev⟩) (b : Tensor ⟨s, r, dev⟩) :
-    Tensor ⟨s, DType.promote l r, dev⟩
--- sub, mul analogous; div : Tensor ⟨s, (DType.promote l r).atLeastFloat, dev⟩
-```
-
-- `HAdd`/`HSub`/`HMul`/`HDiv` instances give `+ - * /` the promoting types.
-- Homogeneous `Add`/`Sub`/`Mul` instances (same `σ`, dtype-preserving) exist
-  for code generic over the spec, where `DType.promote d d` does not reduce.
-  No homogeneous `Div` — true division changes integer dtypes.
-- `addScalar`/`subScalar`/`mulScalar`/`divScalar : Tensor σ → Float → Tensor (σ.withDType σ.dtype.atLeastFloat)`,
-  with matching `HAdd (Tensor σ) Float …` etc. instances.
-
-### Unary math
-
-`relu`, `abs` are spec-preserving for all dtypes. The float-only family takes
-a proof auto-parameter `(_float : σ.dtype.isFloating = true := by decide)`:
-
-```lean
-def exp {σ : StaticSpec} (t : Tensor σ)
-    (_float : σ.dtype.isFloating = true := by decide) : Tensor σ
--- same shape: sqrt, rsqrt, sigmoid, tanh, gelu, silu, pow (exponent : Float),
--- softmax (dim : Int32 := -1)
-```
-
-Integer tensors must be cast first (`.toFloat32`).
-
-### Matmul family
-
-Operands must share dtype `d` and device policy `dev`:
-
-```lean
-def matmul (a : Tensor ⟨s1, d, dev⟩) (b : Tensor ⟨s2, d, dev⟩) :
-    Tensor ⟨matmulShape s1 s2, d, dev⟩                 -- unchecked result shape
-def mm     (a : Tensor ⟨#[m, k], d, dev⟩) (b : Tensor ⟨#[k, n], d, dev⟩) :
-    Tensor ⟨#[m, n], d, dev⟩
-def linear (x : Tensor ⟨#[b, m], d, dev⟩) (weight : Tensor ⟨#[n, m], d, dev⟩) :
-    Tensor ⟨#[b, n], d, dev⟩                           -- x @ Wᵀ
-def linear3d  (x : Tensor ⟨#[b, s, i], d, dev⟩) (w : Tensor ⟨#[o, i], d, dev⟩) :
-    Tensor ⟨#[b, s, o], d, dev⟩
-def matmul3d  (a : Tensor ⟨#[b, s, k], d, dev⟩) (b : Tensor ⟨#[k, n], d, dev⟩) :
-    Tensor ⟨#[b, s, n], d, dev⟩
-def bmm4d     (a : Tensor ⟨#[b, h, m, k], d, dev⟩) (x : Tensor ⟨#[b, h, k, n], d, dev⟩) :
-    Tensor ⟨#[b, h, m, n], d, dev⟩
-def affine3d  (x : Tensor ⟨#[b, s, i], d, dev⟩) (w : Tensor ⟨#[o, i], d, dev⟩)
-    (bias : Tensor ⟨#[o], d, dev⟩) : Tensor ⟨#[b, s, o], d, dev⟩
-```
-
-### Broadcasting
-
-```lean
-def addB (a : Tensor σ₁) (b : Tensor σ₂)
-    (_h : (TensorSpec.broadcastShapes? σ₁.shape σ₂.shape).isSome = true := by rfl) :
-    Tensor (σ₁.pointwise σ₂)
--- subB, mulB analogous; divB : Tensor (σ₁.division σ₂)
-
-def broadcastTo (t : Tensor σ) (target : Shape)
-    (_h : TensorSpec.broadcastsTo σ.shape target := by rfl) :
-    Tensor (σ.withShape target)     -- checked, expand view
-def expand (t : Tensor σ) (target : Shape) : Tensor (σ.withShape target)
-    -- unchecked, for symbolic dims; libtorch validates at runtime
-```
-
-Scoped operators expand to the `…B` functions (`Tyr/Typed/Ops.lean:376-379`),
-available under `open torch`:
-
-```lean
-scoped infixl:65 " +ᵇ " => Tensor.addB   -- also -ᵇ
-scoped infixl:70 " *ᵇ " => Tensor.mulB   -- also /ᵇ
-```
-
-They are notation rather than instances on purpose: instance resolution never
-runs auto-param tactics, so only a plain application gets the broadcastability
-proof discharged. The result spec is `σ₁.pointwise σ₂` — promoted dtype, left
-operand's device policy. At runtime the operands pass through a `reshape #[]`
-type erasure and libtorch broadcasts natively; no expansion is materialized.
-
-### Reductions and shape ops
-
-```lean
-def sumAll  (t : Tensor σ) : Tensor σ.sumSpec        -- shape #[], dtype sumResult
-def meanAll (t : Tensor σ) (_float : σ.dtype.isFloating = true := by decide) :
-    Tensor (σ.withShape #[])
-
-def reshape (t : Tensor σ) (shape' : Shape)
-    (_h : TensorSpec.numelOfShape σ.shape = TensorSpec.numelOfShape shape' := by decide) :
-    Tensor (σ.withShape shape')
-def permute     (t : Tensor σ) (p : Array UInt64) :
-    Tensor (σ.withShape (permuteShape σ.shape p))
-def transpose   (t : Tensor σ) (dim0 dim1 : UInt64) :
-    Tensor (σ.withShape (transposeShape σ.shape dim0.toNat dim1.toNat))
-def transpose2d (t : Tensor ⟨#[m, n], d, dev⟩) : Tensor ⟨#[n, m], d, dev⟩
-def unsqueeze   (t : Tensor σ) (dim : Nat) :
-    Tensor (σ.withShape (unsqueezeShape σ.shape dim))   -- squeeze analogous
-def cat (t1 : Tensor ⟨s1, d, dev⟩) (t2 : Tensor ⟨s2, d, dev⟩) (dim : Nat) :
-    Tensor ⟨nn.catShape s1 s2 dim, d, dev⟩
-```
-
-An empty reshape target denotes a scalar, so only a one-element tensor can
-reshape to `#[]`. This differs from the legacy raw empty-target erasure
-convention. For symbolic shapes, supply the element-count proof explicitly.
-The CPU runtime tests compare all 100 pairs of regular supported dtypes
-against real addition; float8 storage widths and metadata are tested separately
-because float8 CPU arithmetic is not generally supported by LibTorch.
-
-### Layers (`namespace torch.Typed`, `Tyr/Typed/Layers.lean`)
-
-```lean
-structure Linear (inDim outDim : UInt64) (d : DType) (dev : DevicePolicy := .any) where
-  weight : Tensor ⟨#[outDim, inDim], d, dev⟩
-  bias : Option (Tensor ⟨#[outDim], d, dev⟩) := none
-
-Linear.init (inDim outDim : UInt64) (withBias : Bool := true) :
-    IO (Linear inDim outDim .Float32)          -- Kaiming-style, requiresGrad
-Linear.forward2d (lin : Linear i o d dev) (x : Tensor ⟨#[b, i], d, dev⟩) :
-    Tensor ⟨#[b, o], d, dev⟩
-Linear.forward3d (lin : Linear i o d dev) (x : Tensor ⟨#[b, s, i], d, dev⟩) :
-    Tensor ⟨#[b, s, o], d, dev⟩
-
-structure RMSNorm (dim : UInt64) (d : DType) (dev : DevicePolicy := .any) where
-  weight : Tensor ⟨#[dim], d, dev⟩
-  eps : Float := 1e-6
-
-RMSNorm.init (dim : UInt64) (eps : Float := 1e-6) : RMSNorm dim .Float32
--- forward2d / forward3d / forward4d take an input whose last dimension is
--- `dim` and return the same shape with the upcast dtype, e.g.:
-RMSNorm.forward3d (rn : RMSNorm dim d dev) (x : Tensor ⟨#[b, s, dim], d, dev⟩)
-    (float : d.isFloating = true := by decide) :
-    Tensor ⟨#[b, s, dim], DType.promote .Float32 d, dev⟩
-```
-
-The RMSNorm result type advertises a real runtime behavior: `nn.rmsNormWeighted`
-computes in Float32 for stability and does not cast back, so a bf16 layer
-returns an f32 tensor (`promote .Float32 .BFloat16 = .Float32`). Cast back
-explicitly (`.toBFloat16`) where HF-style dtype restoration is wanted.
-
-## Usage example
-
-Reconstructed example (from `Tests/TestTyped.lean` and
-`launch/demos/shape_safety.lean`):
+Every `StaticSpec` names an actual device. Dtype may remain dynamic:
 
 ```lean
 import Tyr.Typed
-
 open torch
 
--- Batch and feature dimensions are visible in the type; the result shape is
--- computed by the type checker.
-def project
-    (x : Tensor { shape := #[32, 768], dtype := .Float32 })
-    (weight : Tensor { shape := #[512, 768], dtype := .Float32 }) :
-    Tensor { shape := #[32, 512], dtype := .Float32 } :=
-  Tensor.linear x weight
-
--- A tiny typed stack: Linear followed by RMSNorm, Float32, any device.
-def forward
-    (lin : Typed.Linear 768 512 .Float32)
-    (rn : Typed.RMSNorm 512 .Float32)
-    (x : Tensor ⟨#[2, 16, 768], .Float32, .any⟩) :
-    Tensor ⟨#[2, 16, 512], .Float32, .any⟩ :=
-  rn.forward3d (lin.forward3d x)
-
--- Compile-time-checked broadcasting: bias add with native libtorch broadcast.
-def addBias
-    (x : Tensor ⟨#[2, 16, 512], .Float32, .any⟩)
-    (bias : Tensor ⟨#[512], .Float32, .any⟩) :
-    Tensor ⟨#[2, 16, 512], .Float32, .any⟩ :=
-  x +ᵇ bias
-
-def run : IO Unit := do
-  let lin ← Typed.Linear.init 768 512
-  let rn := Typed.RMSNorm.init 512
-  let x ← Tensor.randn #[2, 16, 768]
-  let y := addBias (forward lin rn x) (Tensor.zeros #[512])
-  -- Audit the phantom claims against the live runtime handle.
-  match y.validate with
-  | .ok () => IO.println s!"ok: {y.raw.runtimeShape}, dtype {y.raw.dtype}"
-  | .error err => throw (IO.userError err)
+abbrev RuntimeDType := SomeDTypeTensor #[2, 3] .CPU
+abbrev FloatWeights := Tensor {
+  shape := #[2, 3], dtype := .Float32, device := .CPU
+}
+abbrev PlacedWeights (device : Device) := Tensor {
+  shape := #[2, 3], dtype := .Float32, device := device
+}
 ```
 
-For the negative case, `launch/demos/shape_mismatch.lean` is an intentionally
-rejected file: passing a `#[768, 512]` weight where `linear` expects
-`#[n, 768]` fails to compile, with the expected and actual shapes in the error.
+Shape, dtype, and device are mandatory; there is no wildcard placement policy or
+`forgetDevice`. A runtime-selected `device : Device` can occur in the result
+type of a factory or loader. Models share that parameter across their tensor
+fields and forward inputs. An unknown placement is packaged existentially,
+for example `Sigma fun device => PlacedWeights device`; unpacking it exposes
+the same device index for subsequent operations without copying storage.
 
-Boundary-checking a raw tensor (the pattern used by the SafeTensors loader in
-`Tyr/SafeTensors/Schema.lean:62-71`):
+Every dtype index is an exact claim: `DType` has one constructor per native
+scalar type and no wildcard. Omitting it is a compile error. Checked adapters validate actual dtypes against their computed result indices. Copying rejects a dtype mismatch before
+mutation.
+
+For runtime-selected dtypes, use `SomeDTypeTensor shape device` to retain an
+exact existential index:
 
 ```lean
-def checkRaw (raw : T #[2, 3]) : Except String (DTensor #[2, 3] .Float32) :=
-  Tensor.ofTensor .Float32 raw
+def packageWeights (tensor : FloatWeights) : SomeDTypeTensor #[2, 3] .CPU :=
+  tensor.packDType
 ```
+
+`packDType` packages a statically known index.
+`tensor.reifyDType` reads the native dtype and returns a checked exact package;
+`SomeDTypeTensor.ofRaw` validates the
+requested shape and device at a native boundary. These operations retain values
+and autograd identity without casting or cloning the tensor. The existential
+itself is an ordinary Lean wrapper.
+
+Unpacking exposes the exact dtype through `packed.1.val` and the tensor through
+`packed.2`. `sameDType?` supplies checked equality evidence before combining two
+packages in an operation requiring a shared dtype. `atDType?` checks a requested
+exact index; it performs no conversion. Other unknown dtype tokens remain exact
+metadata claims and do not promise native kernel support.
+
+Models should retain shared dtype parameters across their related leaves. For
+example, `Sigma fun dtype : RealFloatingDType => Qwen35ForCausalLM cfg dtype.val` preserves
+agreement across a Qwen model. Mixed precision models need an explicit tree of
+dtype parameters for their distinct tensor roles. There is no `forgetDType`,
+wildcard default, or promoting convenience that discards its result dtype.
+Checked promotion returns its result witness; statically witnessed promotion
+returns a tensor indexed by the computed dtype.
+
+Pure constant construction requires an acquired placement and supported dtype.
+`Device.CPU` is available directly; `Device.cuda index` and `Device.mps` acquire
+accelerator placements in IO. A placement description (`DeviceKind`) alone
+cannot authorize construction. `zerosFor`, `onesFor`, and `eyeFor` require
+`DType.ConstantSupported dtype device`. Static instances cover common supported
+pairs; a runtime-selected pair obtains the same erased evidence at setup:
+
+```lean
+import Tyr.Typed
+open torch
+
+def inspectConstants (dtype : DType) (device : Device) : IO Unit := do
+  let support ← dtype.acquireConstantSupport device
+  let _ := support.down
+  let values := Tensor.onesFor ⟨#[2, 3], dtype, device⟩
+  IO.println values
+```
+
+Acquisition uses the conservative static table when possible, otherwise checks
+the actual conversion paths with small temporary tensors. It verifies exact
+zero and one values: recognizing a dtype is insufficient, and Float8E8M0FNU
+cannot represent zero. This witness covers constant creation, not arbitrary
+operators. Constant construction returns tensors directly; validation errors
+belong to capability acquisition. `Inhabited (Tensor spec)` requires the same
+support, so `default` provides no bypass for unsupported dtypes.
+
+Qwen3-TTS now loads the whole model under a `DTypeLayout` witness:
+`loadSharded` returns `Σ dtypes, Qwen3TTSForConditionalGeneration cfg dtypes`.
+The talker, code predictor, embeddings, heads, and caches share one checked dtype;
+the speaker encoder retains a separate dtype. Present checkpoint entries must
+match their group's shape and dtype. Only absent optional keys are suppressed,
+and the predictor's identity projection fallback requires both projection keys
+to be absent and equal hidden sizes. The example explicitly converts speaker
+conditioning embeddings to the talker dtype without converting stored weights.
+
+`tensor.staticSpec`, `shape`, `dtype`, and `device` describe the declared index.
+`tensor.actualSpec` and `runtimeDevice` inspect native metadata. `tensor.to target`
+performs a device conversion and returns a tensor indexed by `target`.
+`atDevice?` checks equality with a requested device without transferring storage;
+`sameDevice?` exposes checked equality evidence for two device indices.
+
+### Sharing a device across a model
+
+Section parameters become implicit record parameters when tensor fields use them.
+The deriving handlers retain those parameters:
+
+```lean
+import Tyr.Module.Derive
+open torch
+
+variable {device : Device}
+
+structure Projection (inputDim outputDim : UInt64) where
+  weight : Tensor {
+    shape := #[outputDim, inputDim], dtype := .Float32, device := device
+  }
+  deriving TensorStruct
+
+def Projection.init (inputDim outputDim : UInt64) (device : Device) :
+    IO (Projection (device := device) inputDim outputDim) := do
+  let weight ← Tensor.randn #[outputDim, inputDim] (device := device)
+  return { weight := ← Tensor.parameter weight }
+
+def Projection.forward {inputDim outputDim batch : UInt64}
+    (model : Projection (device := device) inputDim outputDim)
+    (input : Tensor ⟨#[batch, inputDim], .Float32, device⟩) :
+    Tensor ⟨#[batch, outputDim], .Float32, device⟩ :=
+  Tensor.linear input model.weight
+
+def packProjection {inputDim outputDim : UInt64}
+    (model : Projection (device := device) inputDim outputDim) :
+    Sigma (fun placement => Projection (device := placement) inputDim outputDim) :=
+  ⟨device, model⟩
+```
+
+The existential package changes only how the device is exposed to the caller;
+it does not transfer or clone tensor storage. A requested-device loader can
+return `Projection (device := device) ...` directly instead.
+
+## Shape and dtype rules
+
+`TensorSpec.broadcastShapes?` and `matmulShape?` return `Option Shape`.
+Broadcasting and generic matrix multiplication require compatibility evidence;
+concrete valid dimensions are usually discharged automatically. Specialized
+operations such as `linear`, `linear3d`, and `bmm4d` encode their dimension
+relationships directly in their argument types.
+
+`DType.all` contains all 46 concrete scalar types in the pinned PyTorch 2.10
+runtime: ordinary numeric types, Complex32/64/128, quantized types, packed bits,
+low-bit integers, and Float8/Float4 formats. Complex widths count both real and
+imaginary components. `DType.ofString?` accepts canonical, native, and Python
+names such as `Complex64`, `ComplexFloat`, and `torch.complex64`. Recognition
+does not promise allocation, conversion, or arithmetic kernels on every backend.
+SafeTensors support remains limited to the formats returned by `safeTensorTag?`.
+
+Dtype promotion is partial. `DType.promote? l r` returns `some result` only when
+PyTorch defines the pair. Typed arithmetic carries this result as an erased
+`Prop` witness, `DType.Promotes l r result`, whose `valid` field proves
+`DType.promote? l r = some result`. The result parameter is inferred for concrete
+dtypes. Generic forward functions carry the constraint explicitly:
+
+```lean
+import Tyr.Typed
+open torch
+
+-- Tensor.add has this same shape/dtype/device signature.
+def combine {s : Shape} {l r result : DType} {dev : Device}
+    [DType.Promotes l r result]
+    (left : Tensor ⟨s, l, dev⟩) (right : Tensor ⟨s, r, dev⟩) :
+    Tensor ⟨s, result, dev⟩ :=
+  Tensor.add left right
+
+example : DType.Promotes .Float16 .BFloat16 .Float32 := inferInstance
+example : DType.Promotes .Complex32 .BFloat16 .Complex64 := inferInstance
+example {l r result : DType} [h : DType.Promotes l r result] :
+    DType.promote? l r = some result := h.valid
+
+example : DType.ScalarPromotes .Float32 .Float64 .Float32 := inferInstance
+example : DType.NonBool .Float32 := inferInstance
+```
+
+Unsupported mixed shell-type pairs, such as Float8E4M3FN with Float32,
+also have no witness; callers must choose an explicit conversion. A promotion
+witness proves that Tyr's promotion function returns that dtype; it is not a
+proof of the native implementation or kernel availability. Operator conditions
+are separate: `Tensor.sub` additionally requires `DType.NonBool` for each operand.
+Integer sums use their specified accumulation dtype. Operator-specific domain
+witnesses reject invalid static inputs, such as complex ReLU or integral mean;
+checked variants inspect actual dtypes when those indices are dynamic.
+
+Broadcasting distinguishes zero-dimensional scalar tensors from nonscalars:
+within the same dtype category, the nonscalar's precision wins. A Float64 scalar
+plus a Float32 vector therefore returns Float32. This is different from adding
+two nonscalar Float64/Float32 tensors.
+`DType.ScalarPromotes` expresses this rule; host `Float` arithmetic uses the
+Float32 default scalar category. Broadcasting uses `TensorSpec.Promotes`, which
+selects the appropriate rule from the operand ranks.
+
+Generic floating algorithms accept `[DType.RealFloating d]` and use ordinary
+operations. The constraint proves homogeneous and weak-scalar promotion and
+provides equality lemmas for result dtypes such as `atLeastFloat` and `sumResult`.
+A proof-only `by simpa using Tensor.div x y` can therefore establish the original
+floating index without a native conversion.
+
+Tensor-tree arithmetic uses `FloatingTensorStruct α`, the specialization of
+`TensorStructFor P α` to real-floating leaves. Its traversals supply dtype evidence
+to each callback. `deriving TensorStruct` generates conditional constrained
+traversals alongside structural traversal; records with a custom structural
+instance can use `derive_tensor_struct_for TypeName`. Integer leaves do not gain
+a floating instance. Model loaders validate compute dtypes when loading and
+return `RealFloatingDType` indices. Unpacking the loaded package automatically
+supplies `DType.RealFloating dtype.val`; forward code does not repeat admission
+checks. Independent storage roles retain their own exact dtype indices.
+Use the promoting API when changing dtype is intended.
+
+The SafeTensors type provider emits concrete shape/dtype indices and derives
+structural and constrained traversals for its generated records. Loading checks
+the actual tensors against that schema. A floating subtree can then be passed
+to typed arithmetic directly, while an integer leaf prevents the whole tree
+from acquiring a floating constraint.
+
+Use `Tensor.Promoting.add?`, `sub?`, `mul?`, and `div?` when input dtype indices
+are dynamic and the operation should follow native promotion. They inspect the
+actual operand dtypes, construct a promotion witness, and validate the result
+at its computed dtype. The returned `Promoted` package exposes `dtype`,
+`witness`, and `tensor`; division additionally applies its integer-to-floating
+result rule. Host-scalar variants such as `mulScalar?` return `ScalarPromoted`
+with a `ScalarPromotes` witness. No input cast is needed, and the result's dtype
+remains part of its tensor index. For example, BF16 activations multiplied by
+Float32 routing weights produce Float32, while BF16 activations multiplied by an
+Int64 mask remain BF16.
+The `?` arithmetic variants report unsupported promotion, placement mismatches,
+and native kernel failures. A valid promotion witness still does not guarantee
+that a kernel exists.
+
+Runtime broadcasting uses `Tensor.Promoting.addB?`, `subB?`, `mulB?`, and `divB?`.
+They take an explicit output shape and check it against the broadcast result
+before native execution. Their `PointwisePromoted` package carries
+`TensorSpec.Promotes` evidence tied to the operands' actual ranks and dtypes.
+`Tensor.whereSelect` promotes its two value operands and requires a Bool
+condition; `Tensor.Promoting.whereSelect?` provides the corresponding checked
+runtime witness. Selection does not cast the result back to the left dtype.
+
+Matrix multiplication requires operands with matching dtype and concrete device.
+The checked `matmul?`, `mm?`, `linear?`, `linear3d?`, `matmul3d?`, and `bmm4d?`
+adapters verify actual dtype and device equality before calling native code.
+Elementwise promotion never supplies an implicit matrix cast.
+
+`Tensor.matrixLog?` accepts standard real floating matrices, including supported
+nonsymmetric matrices and real rotations. Its eigendecomposition-based solver
+rejects non-real or nonfinite outputs and checks that exponentiating the result
+reconstructs the input with a dtype-scaled relative tolerance. Defective or
+numerically unstable inputs can return an error even when a real logarithm
+exists; this is a solver limitation, not a restriction to positive definite
+matrices. Use the checked variant when those numerical failures must be handled.
+
+## Device compatibility
+
+A tensor's concrete device is part of its type. Equal device indices tie inputs
+to the same placement; independently loaded existential tensors must establish
+equality before a shared-device operation. Checked adapters also inspect native
+metadata at the FFI boundary. Matrix multiplication and concatenation require
+equal actual devices.
+
+Broadcasting arithmetic requires `Device.PointwiseCompatible leftSpec rightSpec`.
+Its instances reject CPU/CUDA vectors and CUDA:0/CUDA:1 vectors. The binary
+pointwise exception permits a rank-zero CPU tensor on the other operand's
+device; a size-one vector and an accelerator scalar do not get that exception.
+The result follows the non-CPU operand when this exception applies.
+
+```lean
+import Tyr.Typed
+import Tyr.Torch
+open torch
+
+def addHostScalar {device : Device} (scalar : Tensor ⟨#[], .Float32, .CPU⟩)
+    (vector : Tensor ⟨#[2], .Float32, device⟩) :
+    Tensor ⟨#[2], .Float32, device⟩ := scalar.addB vector
+
+example : IO Unit := do
+  let device ← Device.cuda 0
+  let vector := Tensor.ones #[2] (device := device)
+  IO.println (addHostScalar (Tensor.full #[] 2.0) vector)
+```
+
+The same-shape `add`/`sub`/`mul`/`div` APIs require one shared device index;
+use their broadcasting variants when the devices differ, including for two
+scalar tensors. `whereSelect` follows a separate native rule: it selects
+the first non-CPU device in condition, left, right order, and relocates rank-zero
+operands to that device. This includes accelerator scalars. Non-scalars must
+already occupy the selected device. Tyr checks this rule before native execution,
+matching the [pinned PyTorch implementation](https://github.com/pytorch/pytorch/blob/449b1768410104d3ed79d3bcfe4ba1d65c7f22c0/aten/src/ATen/native/TensorCompare.cpp#L541-L594).
+
+`Tests.TestDeviceCompatibility` covers static rejection, metadata rules for
+CPU/MPS/CUDA indices, and CPU numerical execution. The accelerator metadata cases
+do not allocate accelerator tensors or establish hardware qualification.
+
+## Operator checks and failures
+
+Static promotion, domain, and shape evidence is separate from backend kernel
+availability. `relu?`, `maxAll?`, `sumDim?`, and `meanAll?` check their supported
+domains, including nonempty maximum inputs and valid reduction axes. `expand?`
+checks the requested broadcast, while `cat?` and `catMany?` validate placement
+and the returned shape. These APIs and the arithmetic/matrix `?` families return
+native operation failures through `Except String`. Their pure convenience
+wrappers call `nativeInvariantFailure` on error: the native boundary prints a
+diagnostic and aborts the process, without allocating or returning a default
+tensor. Callers that need to handle failure should use the checked variants.
+This contract applies to those adapters, not every
+raw native declaration. Static rules and metadata checks do not prove an extern's
+implementation correct.
+
+`argmax`, `maxLast3d`, and `topKLast2d` require `DType.Ordered` evidence.
+`argmax` also requires a valid, nonempty reduction axis; scalar input permits
+axis zero. `maxLast3d` requires a nonempty last axis, while `topKLast2d` requires
+`k ≤ cols` and permits `k = 0`. Concrete dimensions usually discharge these
+proofs automatically. For runtime dimensions or dynamic dtypes, the matching
+`?` variants return domain, range, and native errors through `Except String`.
+The `argmaxChecked`, `maxLast3dChecked`, and `topKLast2dChecked` conveniences
+perform the same runtime checks and abort with a diagnostic on failure.
+Selected values retain the actual input dtype; indices have dtype Int64.
+
+`crossEntropy` and `crossEntropyNone` require `DType.RealFloating` for logits
+of shape `[N, C]` and Int64 targets of shape `[N]` on the same device.
+The first returns a scalar mean loss; the second returns one loss per row.
+Their checked native boundary validates labels before loss dispatch: each label
+must be in `[0, C)` or equal the default ignored label `-100`.
+`crossEntropy?` and `crossEntropyNone?` recover dtype, label, and native failures.
+For dynamic dtype indices, `crossEntropyChecked` and `crossEntropyNoneChecked`
+provide pure runtime-checked conveniences that abort with a diagnostic on
+failure.
+`ChatSFT.maskedCrossEntropy?` retains errors through reshaping, mask arithmetic,
+reduction, and scalar extraction. Its mask must have a real numeric or Bool
+dtype; the pure wrapper requires that domain as type-level evidence.
+
+`indexSelect?` validates vector indices before native indexing, including on
+accelerators, and preserves the data dtype and device. `TokenBytes` uses it
+through IO so invalid token IDs return errors. `sumAll?` and `item?` retain
+reduction and host-scalar conversion failures for recoverable callers.
+
+`conv1d?`, `conv2dBias?`, `conv1dGroups?`, and `convTranspose1d?` check actual
+dtype and device equality across input, weight, and any bias before invoking
+checked native kernels. Convolution does not implicitly promote its operands,
+including when their dtype indices are dynamic. Invalid convolution parameters
+and unavailable kernels return `Except.error`; successful outputs are checked
+against the computed spatial shape and input dtype/device. The corresponding
+names without `?` abort with a diagnostic on failure.
+The `conv2dBias` result shape broadcasts singleton stride, padding, and dilation
+arrays across both spatial axes, matching the native operation.
+
+After building the dtype modules, run `bash scripts/test_dtype_promotion.sh`
+to compare all 46² promotion pairs and all four scalar/vector rank combinations
+against an independently enumerated native runtime inventory. The harness also
+checks arithmetic result dtypes separately from unavailable kernels.
+
+## Attention and dropout
+
+Attention separates pure inference from stochastic execution. `Tensor.attention`,
+the GQA/masked/window variants, and `Tensor.flashAttention` accept no dropout
+probability and use zero dropout. Their `?` forms retain validation and native
+kernel errors. To train with dropout, bind the corresponding IO operation:
+
+```lean
+let output ← Tensor.attentionIO query key value dropout training isCausal
+```
+
+The required dropout and training arguments follow the tensor operands;
+remaining causal, GQA, mask, window, and scale options retain their operation's
+order. Training uses the supplied probability; evaluation uses zero. The IO
+adapters first validate the original probability as finite and in `[0, 1]`,
+including during evaluation. The operation preserves the native autograd graph,
+including the sampled mask.
+Pure attention's zero-dropout contract is not a guarantee of bitwise
+reproducibility across devices or backend algorithms.
+
+## Boundary validation
+
+```lean
+import Tyr.Typed
+open torch
+
+def checkRaw (raw : RawTensor) : Except String (Tensor { shape := #[2, 3], dtype := .Float32, device := .CPU }) :=
+  Tensor.ofRaw raw
+```
+
+`Tensor.ofRaw` checks all claims in the destination index. `Tensor.ofTensor` and
+`ofTensor?` check a requested shape and dtype and index the result by
+`raw.device`; `ofTensorWithContract` also checks an optional expected placement. `Tensor.validate` audits an existing indexed
+value against its current native metadata.
+
+`TensorContract` contains a `TensorSpec`, an optional `expectedDevice`, and a descriptive
+`TensorRole`. The role does not itself enforce a runtime invariant.
+
+There is no public unchecked raw constructor or implicit coercion to
+`RawTensor`. The opaque carrier prevents anonymous construction, structural
+elimination, and record updates from replacing a checked handle. Native adapters use explicit
+`.raw` access and validate returned handles. `checkedReplacement?` additionally
+checks that actual dtype and device are unchanged, including when the exact
+indices were selected at runtime. Its pure `checkedReplacement` adapter retains
+the original tensor as Lean's panic fallback. The separate `checkedUpdate`
+adapter aborts with a diagnostic on failure and retains no original tensor or
+default allocation.
+The native `zerosFor` factory bootstraps pure defaults from a requested spec
+with constant-support evidence; it accepts no foreign handle and trusts native
+allocation/casting. Native
+metadata, allocation, and the C ABI remain trusted and covered by parity tests
+and the generated FFI header.
+Pure factory calls may share allocations; distinct storage requires an effectful
+allocation boundary such as `data.cloneInferenceIO`.
+Model and example code should compose typed operations instead of rebuilding
+indexed tensors from their raw handles. Raw input adapters should use `ofRaw`;
+IO APIs can turn its error into a contextual `IO.userError`.
+
+## Runtime-dependent shapes
+
+A shape may depend on a Lean runtime value and still occur in a dependent result
+type. If the native computation determines it, package it existentially:
+
+```lean
+import Tyr.Typed
+import Tyr.Typed.Neural
+open torch
+
+def matchingPositions (tokens : Tensor { shape := #[4], dtype := .Int64, device := .CPU }) :=
+  Tensor.findTokenPositions tokens 7
+```
+
+This returns `IO (Sigma fun count => Tensor { shape := #[count], dtype := .Int64, device := .CPU })`.
+`Tensor.packShape` packages an existing indexed tensor's shape while retaining
+its dtype and device parameters. `catMany?` accepts an array of such
+packages and validates a requested result shape. `Tensor.toSome` instead returns
+`Sigma Tensor`, retaining the complete specification as an existential witness.
+A scalar is `#[]`; it is never a substitute for an unknown shape.
+
+`reshape` requires equal element counts. `reshapeChecked?` checks runtime
+element counts and rejects wrapped negative extents before invoking the native
+reshape. `castDType?` and `castLike?` perform real dtype conversions and validate
+the result, returning native conversion failures through `Except`. Their pure
+convenience wrappers, along with `sliceChecked`, abort with a diagnostic on
+failure; use the `Except` variants when an
+error must be handled. Exact file loading checks the stored layout
+before returning a tensor; it does not repair a mismatch by reshaping.
+
+## Models, differentiation, and persistence
+
+`TensorStruct` traversals preserve each leaf's complete specification. Typed
+parameters therefore retain shape, dtype, and device information through
+mapping, folding, flattening, and generated AD boundaries.
+
+Use `TensorStruct.castTo TargetType source` to choose each leaf's dtype and
+placement in the destination Lean type. For example, a model can request BF16
+weights and retain Int64 indices:
+
+```lean
+import Tyr.TensorStruct.DeriveCast
+open torch
+
+structure StoredWeights where
+  weight : Tensor { shape := #[2, 3], dtype := .Float32, device := .CPU }
+  indices : Frozen { shape := #[2], dtype := .Int64, device := .CPU }
+  config : Static String
+
+structure RuntimeWeights where
+  weight : Tensor {
+    shape := #[2, 3], dtype := .BFloat16, device := .CPU
+  }
+  indices : Frozen { shape := #[2], dtype := .Int64, device := .CPU }
+  config : Static String
+
+derive_tensor_tree_cast StoredWeights => RuntimeWeights
+
+def prepareWeights (source : StoredWeights) : IO RuntimeWeights :=
+  TensorStruct.castTo RuntimeWeights source
+```
+
+The destination type supplies every leaf specification. A concrete dtype
+requests a native cast, and the destination device requests placement on that device.
+`castTo` requests dtype and placement through one checked native entry point.
+That entry point chooses the conversion order for the backend: MPS-to-CPU
+transfers retain the source dtype until they reach CPU, then apply the requested
+cast. This lets an MPS Float32 tensor request CPU Float64 without an unsupported
+MPS Float64 intermediate.
+An existential `SomeDTypeTensor` target retains the source's exact dtype and
+its witness. The target always names a concrete device. Every leaf keeps its
+shape, so callers perform any reshape
+explicitly beforehand.
+
+`TensorTreeCast SourceType TargetType` supplies the traversal. Products, arrays,
+lists, options, and fixed-length vectors compose supported leaf casts. Array and
+list lengths, option branches, vector lengths, `Frozen` roles, and `Static`
+values are preserved. The record command requires matching field names in the
+same declaration order and delegates each field to its cast instance. For
+`castTo`, metadata validation failures and caught native conversion exceptions
+produce IO errors containing the field or element path.
+
+For parameterizations of one record, `deriving TensorStruct` (or `deriving Model`)
+automatically supplies the cast traversal. A record such as `Weights dtype device`
+can therefore use `castTo (Weights .BFloat16 .CPU) source` without a separate
+derivation command. Each paired field must support the conversion; static
+metadata is copied, never coerced. The explicit `derive_tensor_tree_cast` command
+is needed only for different record types, as in the example above.
+
+Type and value parameters may depend on earlier parameters. Records with fields
+whose types depend on earlier field values require a manual cast instance.
+Ordinary `map` and `mapM` always preserve their original leaf specifications.
+
+The indexed autograd API includes effectful `parameter` and `setRequiresGrad`,
+pure `detach`, plus effectful `grad`, `gradOf`,
+`backwardLoss`, and explicit-cotangent `backward`. `gradOf` reads an independent
+gradient snapshot in IO; `zeroGrad` clears accumulated gradients in IO. Backward
+and `grad` release saved intermediates by default. Their `retainGraph : Option Bool`
+option defaults to `createGraph` (itself false); explicit retention supports
+multiple passes followed by a final releasing pass. Pure forward expressions can
+share a graph, and reuse of consumed saved state returns an IO error.
+Inference explicitly detaches model
+parameters and floating inputs. Value
+updates consume a tensor and return its replacement, preserving retained aliases.
+Typed adapters capture actual dtype/device before the native call and validate
+the replacement without retaining the consumed tensor. Indexing a tensor does
+not establish unique storage ownership.
+
+SafeTensors schema/type-provider loaders check shape, dtype, and requested
+placement. Checkpoint persistence uses exact tensor loading and preserves the
+specifications supplied by its template parameter structure.
 
 ## Related guides
 
-- [Raw tensors and the FFI surface](tensors.md) — `T s`, `Shape`, `DType`, `Device`, and the `torch.*` ops this facade wraps.
-- [TensorStruct](tensorstruct.md) — tree traversals over parameter structures (works on raw `T s`).
-- [Core utilities](utilities.md) — PRNG, logging, widgets.
-- [Serialization](../serialization.md) — SafeTensors schema introspection and contract-checked loading built on `TensorContract`.
-- [Autodiff](../autodiff.md) — gradients; the typed layer only exposes `setRequiresGrad`.
-- [DiffEq](../diffeq.md) — `Tyr/DiffEq/Typed.lean` adds `DiffEqSpace`/`DiffEqElem`/`DiffEqSeminorm` instances for `Tensor σ`.
-- [Examples and testing](../examples-and-testing.md) — `Tests/TestTyped.lean` is the executable spec of the promotion algebra.
-
-For an exhaustive symbol listing, see the doc-gen4 API reference generated from
-`docbuild/`; this chapter is a guide, not a symbol dump.
+- [Tensor operations and examples](tensors.md)
+- [Tensor structures](tensorstruct.md)
+- [Serialization](../serialization.md)
+- [Autodiff](../autodiff.md)
+- [Examples and testing](../examples-and-testing.md)

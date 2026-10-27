@@ -19,6 +19,8 @@ import Tyr.Tokenizer.Qwen35
 import Examples.ModelRunner
 
 open torch
+
+variable {device : Device} {dtype visionDType : DType}
 open torch.Model
 open torch.qwen35
 open Examples.ModelRunner
@@ -137,11 +139,10 @@ private def eosFromCfg (cfg : Config) : Array UInt64 :=
   | some id => #[id]
   | none => #[]
 
-private def runTextBatches
+private def runTextBatches [DType.RealFloating dtype]
     (tok : tokenizer.qwen35.QwenTokenizer)
     (cfg : Config)
-    (model : Qwen35ForCausalLM cfg)
-    (device : Device)
+    (model : Qwen35ForCausalLM (device := device) cfg dtype)
     (args : Args)
     (prompts : Array String)
     : IO Unit := do
@@ -150,27 +151,26 @@ private def runTextBatches
     let ⟨batch, ⟨seq, (inputIds, promptLens)⟩⟩ ←
       buildBatchInputWithEncoder tok.padToken.toUInt64 chunk (fun p => pure (encodePromptToIds tok args.enableThinking p))
     pure ⟨batch, ⟨seq, (inputIds.to device, promptLens)⟩⟩
-  let decodeBatch (promptLens : Array Nat) {b os : UInt64} (ids : T #[b, os]) : IO (Array String) :=
+  let decodeBatch (promptLens : Array Nat) {b os : UInt64} (ids : Tensor { shape := #[b, os], dtype := .Int64, device := device }) : IO (Array String) :=
     decodeGeneratedBatch promptLens ids (fun xs => tokenizer.qwen35.decodeText tok xs)
-  let runGen (b : UInt64) {s : UInt64} (ids : T #[b, s]) :=
+  let runGen (b : UInt64) {s : UInt64} (ids : Tensor { shape := #[b, s], dtype := .Int64, device := device }) :=
     model.generate cfg ids args.maxNewTokens .greedy eos
-  let runGenStream (b : UInt64) {s : UInt64} (ids : T #[b, s]) (cb : StreamCallback b) :=
+  let runGenStream (b : UInt64) {s : UInt64} (ids : Tensor { shape := #[b, s], dtype := .Int64, device := device }) (cb : StreamCallback (device := device) b) :=
     model.generateStream cfg ids cb args.maxNewTokens .greedy eos
   runGenerationBatches prompts args.batchSize args.maxNewTokens args.stream args.debugIds
     (prompts.size == 1) buildBatch runGen runGenStream decodeBatch
     (makeStreamCallback (fun x => tokenizer.qwen35.decodeOne tok x))
 
-private def runMultimodalBatches
+private def runMultimodalBatches [DType.RealFloating dtype]
     (tok : tokenizer.qwen35.QwenTokenizer)
     (cfg : VLConfig)
-    (model : Qwen35ForConditionalGeneration cfg)
-    (device : Device)
+    (model : Qwen35ForConditionalGeneration (device := device) cfg dtype visionDType)
     (args : Args)
     (prompts : Array String)
     (imageTokenCount : UInt64)
     (videoTokenCount : UInt64)
-    (imageFeatures : Option (Sigma (fun n => T #[n, cfg.vision_config.out_hidden_size])))
-    (videoFeatures : Option (Sigma (fun n => T #[n, cfg.vision_config.out_hidden_size])))
+    (imageFeatures : Option (Sigma (fun n => Tensor { shape := #[n, cfg.vision_config.out_hidden_size], dtype := visionDType, device := device })))
+    (videoFeatures : Option (Sigma (fun n => Tensor { shape := #[n, cfg.vision_config.out_hidden_size], dtype := visionDType, device := device })))
     : IO Unit := do
   let eos := eosFromCfg cfg.text_config
   let buildBatch chunk := do
@@ -178,11 +178,11 @@ private def runMultimodalBatches
     let ⟨batch, ⟨seq, (inputIds, promptLens)⟩⟩ ←
       buildBatchInputWithEncoder tok.padToken.toUInt64 chunk (fun p => pure (enc p))
     pure ⟨batch, ⟨seq, (inputIds.to device, promptLens)⟩⟩
-  let decodeBatch (promptLens : Array Nat) {b os : UInt64} (ids : T #[b, os]) : IO (Array String) :=
+  let decodeBatch (promptLens : Array Nat) {b os : UInt64} (ids : Tensor { shape := #[b, os], dtype := .Int64, device := device }) : IO (Array String) :=
     decodeGeneratedBatch promptLens ids (fun xs => tokenizer.qwen35.decodeText tok xs)
-  let runGen (b : UInt64) {s : UInt64} (ids : T #[b, s]) :=
+  let runGen (b : UInt64) {s : UInt64} (ids : Tensor { shape := #[b, s], dtype := .Int64, device := device }) :=
     model.generate cfg ids args.maxNewTokens .greedy eos imageFeatures videoFeatures
-  let runGenStream (b : UInt64) {s : UInt64} (ids : T #[b, s]) (cb : StreamCallback b) :=
+  let runGenStream (b : UInt64) {s : UInt64} (ids : Tensor { shape := #[b, s], dtype := .Int64, device := device }) (cb : StreamCallback (device := device) b) :=
     model.generateStream cfg ids cb args.maxNewTokens .greedy eos imageFeatures videoFeatures
   runGenerationBatches prompts args.batchSize args.maxNewTokens args.stream args.debugIds
     (prompts.size == 1) buildBatch runGen runGenStream decodeBatch
@@ -216,7 +216,7 @@ def runMain (argv : List String) : IO UInt32 := do
   if useMultimodal then
     let cfg ← VLConfig.loadFromPretrainedDir modelDir {}
     let isSharded ← Hub.detectWeightLayout modelDir
-    let model ←
+    let ⟨_textDType, visionDType, model⟩ ←
       if isSharded then Qwen35ForConditionalGeneration.loadSharded modelDir cfg device
       else Qwen35ForConditionalGeneration.load s!"{modelDir}/model.safetensors" cfg device
     let imagePatches? ←
@@ -235,14 +235,14 @@ def runMain (argv : List String) : IO UInt32 := do
     let imageFeatures? ←
       match imagePatches? with
       | some ⟨nPatches, patches⟩ =>
-        let feats ← model.getImageFeatures cfg patches
+        let feats ← model.getImageFeatures cfg (← IO.ofExcept (patches.castDType? visionDType.val))
         let nTok := VisionConfig.mergedTokenCount cfg.vision_config nPatches
         pure (some ⟨nTok, feats⟩)
       | none => pure none
     let videoFeatures? ←
       match videoPatches? with
       | some ⟨nPatches, patches⟩ =>
-        let feats ← model.getVideoFeatures cfg patches
+        let feats ← model.getVideoFeatures cfg (← IO.ofExcept (patches.castDType? visionDType.val))
         let nTok := VisionConfig.mergedTokenCount cfg.vision_config nPatches
         pure (some ⟨nTok, feats⟩)
       | none => pure none
@@ -254,16 +254,16 @@ def runMain (argv : List String) : IO UInt32 := do
       IO.println "Warning: --multimodal enabled but no --image/--video provided; running text-only path."
 
     runMultimodalBatches
-      tok cfg model device args prompts
+      tok cfg model args prompts
       imageTokenCount videoTokenCount
       imageFeatures? videoFeatures?
   else
     let cfg ← Config.loadFromPretrainedDir modelDir Config.qwen35_9B
     let isSharded ← Hub.detectWeightLayout modelDir
-    let model ←
+    let ⟨_dtype, model⟩ ←
       if isSharded then Qwen35ForCausalLM.loadSharded modelDir cfg device
       else Qwen35ForCausalLM.load s!"{modelDir}/model.safetensors" cfg device
-    runTextBatches tok cfg model device args prompts
+    runTextBatches tok cfg model args prompts
 
   pure 0
 

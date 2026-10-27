@@ -1,10 +1,13 @@
 import Tyr.Torch
+import Tyr.Typed.Ops
 
 /-! Shared helpers for GPU end-to-end parity checks. -/
 
 namespace Examples.GPU
 
 open torch
+
+variable {device : Device}
 
 private def normalizedEnvOr (name fallback : String) (normalize : String → String) : IO String := do
   match (← IO.getEnv name) with
@@ -56,13 +59,16 @@ def requireCuda (suite : String) : IO Bool := do
     return false
   pure true
 
-/-- Compute allclose plus mean/max absolute error for one tensor comparison. -/
-def compareTensors {s : Shape}
-    (label : String) (expected actual : T s) (rtol atol : Float) : TensorCheck :=
-  let ok := torch.allclose expected actual rtol atol
-  let diff := torch.nn.abs (actual - expected)
-  let mae := torch.nn.item (torch.nn.meanAll diff)
-  let maxErr := torch.nn.item (torch.nn.maxAll diff)
+/-- Compare equal shapes across storage dtypes, computing GPU parity metrics in Float32. -/
+def compareTensors {s : Shape} {expectedDtype actualDtype : DType}
+    (label : String) (expected : Tensor { shape := s, dtype := expectedDtype, device := device }) (actual : Tensor { shape := s, dtype := actualDtype, device := device })
+    (rtol atol : Float) : TensorCheck :=
+  let expected := expected.toFloat32
+  let actual := actual.toFloat32
+  let ok := Tensor.allclose expected actual rtol atol
+  let diff := (actual - expected).abs
+  let mae := diff.meanAll.item
+  let maxErr := diff.maxAllChecked.item
   { label, ok, mae, maxErr, rtol, atol }
 
 /-- Print one tensor comparison in a stable machine-readable format. -/
@@ -71,8 +77,8 @@ def logTensorCheck (check : TensorCheck) : IO Unit := do
     s!"{check.label} ok={check.ok} mae={check.mae} max={check.maxErr} rtol={check.rtol} atol={check.atol}"
 
 /-- Report allclose plus mean/max absolute error for one tensor comparison. -/
-def reportTensorComparison {s : Shape}
-    (label : String) (expected actual : T s) (rtol atol : Float) : IO Bool := do
+def reportTensorComparison {s : Shape} {expectedDtype actualDtype : DType}
+    (label : String) (expected : Tensor { shape := s, dtype := expectedDtype, device := device }) (actual : Tensor { shape := s, dtype := actualDtype, device := device }) (rtol atol : Float) : IO Bool := do
   let check := compareTensors label expected actual rtol atol
   logTensorCheck check
   pure check.ok

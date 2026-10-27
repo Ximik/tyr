@@ -11,8 +11,8 @@ open torch.DiffEq
 private def approx (a b tol : Float) : Bool :=
   Float.abs (a - b) < tol
 
-private def getY1 {S C : Type} (label : String) (sol : Solution (T #[]) S C) (fallback : T #[]) :
-    IO (T #[]) := do
+private def getY1 {S C : Type} (label : String) (sol : Solution (Tensor { shape := #[], dtype := .Float32, device := .CPU }) S C) (fallback : Tensor { shape := #[], dtype := .Float32, device := .CPU }) :
+    IO (Tensor { shape := #[], dtype := .Float32, device := .CPU }) := do
   match sol.ys with
   | some ys =>
       if ys.size == 0 then
@@ -25,171 +25,171 @@ private def getY1 {S C : Type} (label : String) (sol : Solution (T #[]) S C) (fa
       return fallback
 
 @[test] def testBacksolveAdjointLinearODE : IO Unit := do
-  let term : ODETerm (T #[]) (T #[]) := { vectorField := fun _t y a => mul a y }
+  let term : ODETerm (Tensor { shape := #[], dtype := .Float32, device := .CPU }) (Tensor { shape := #[], dtype := .Float32, device := .CPU }) := { vectorField := fun _t y a => Tensor.mul a y }
   let solver :=
     RK4.solver
-      (Term := ODETerm (T #[]) (T #[]))
-      (Y := T #[])
-      (VF := T #[])
-      (Args := T #[])
+      (Term := ODETerm (Tensor { shape := #[], dtype := .Float32, device := .CPU }) (Tensor { shape := #[], dtype := .Float32, device := .CPU }))
+      (Y := Tensor { shape := #[], dtype := .Float32, device := .CPU })
+      (VF := Tensor { shape := #[], dtype := .Float32, device := .CPU })
+      (Args := Tensor { shape := #[], dtype := .Float32, device := .CPU })
   let adjSolver :=
     RK4.solver
-      (Term := ODETerm (AdjointState (T #[]) (T #[])) (T #[]))
-      (Y := AdjointState (T #[]) (T #[]))
-      (VF := AdjointState (T #[]) (T #[]))
-      (Args := T #[])
-  let y0 := full #[] 2.0
-  let a := full #[] 0.3
+      (Term := ODETerm (AdjointState (Tensor { shape := #[], dtype := .Float32, device := .CPU }) (Tensor { shape := #[], dtype := .Float32, device := .CPU })) (Tensor { shape := #[], dtype := .Float32, device := .CPU }))
+      (Y := AdjointState (Tensor { shape := #[], dtype := .Float32, device := .CPU }) (Tensor { shape := #[], dtype := .Float32, device := .CPU }))
+      (VF := AdjointState (Tensor { shape := #[], dtype := .Float32, device := .CPU }) (Tensor { shape := #[], dtype := .Float32, device := .CPU }))
+      (Args := Tensor { shape := #[], dtype := .Float32, device := .CPU })
+  let y0 := Tensor.full #[] 2.0
+  let a := Tensor.full #[] 0.3
   let t0 := 0.0
   let t1 := 1.0
   let dt0 := some 0.01
   let sol :=
     diffeqsolve
-      (Term := ODETerm (T #[]) (T #[]))
-      (Y := T #[])
-      (VF := T #[])
+      (Term := ODETerm (Tensor { shape := #[], dtype := .Float32, device := .CPU }) (Tensor { shape := #[], dtype := .Float32, device := .CPU }))
+      (Y := Tensor { shape := #[], dtype := .Float32, device := .CPU })
+      (VF := Tensor { shape := #[], dtype := .Float32, device := .CPU })
       (Control := Time)
-      (Args := T #[])
+      (Args := Tensor { shape := #[], dtype := .Float32, device := .CPU })
       (Controller := ConstantStepSize)
       term solver t0 t1 dt0 y0 a (saveat := { steps := true })
-  let adjY1 := ones #[]
+  let adjY1 := Tensor.ones #[]
   match backsolveAdjoint term adjSolver sol a adjY1 with
   | none => LeanTest.fail "Expected adjoint result"
   | some adj => do
       let eps := 1.0e-3
-      let y0p := add_scalar y0 eps
-      let y0m := add_scalar y0 (-eps)
+      let y0p := Tensor.addScalar y0 eps
+      let y0m := Tensor.addScalar y0 (-eps)
       let solp :=
         diffeqsolve
-          (Term := ODETerm (T #[]) (T #[]))
-          (Y := T #[])
-          (VF := T #[])
+          (Term := ODETerm (Tensor { shape := #[], dtype := .Float32, device := .CPU }) (Tensor { shape := #[], dtype := .Float32, device := .CPU }))
+          (Y := Tensor { shape := #[], dtype := .Float32, device := .CPU })
+          (VF := Tensor { shape := #[], dtype := .Float32, device := .CPU })
           (Control := Time)
-          (Args := T #[])
+          (Args := Tensor { shape := #[], dtype := .Float32, device := .CPU })
           (Controller := ConstantStepSize)
           term solver t0 t1 dt0 y0p a (saveat := { t1 := true })
       let solm :=
         diffeqsolve
-          (Term := ODETerm (T #[]) (T #[]))
-          (Y := T #[])
-          (VF := T #[])
+          (Term := ODETerm (Tensor { shape := #[], dtype := .Float32, device := .CPU }) (Tensor { shape := #[], dtype := .Float32, device := .CPU }))
+          (Y := Tensor { shape := #[], dtype := .Float32, device := .CPU })
+          (VF := Tensor { shape := #[], dtype := .Float32, device := .CPU })
           (Control := Time)
-          (Args := T #[])
+          (Args := Tensor { shape := #[], dtype := .Float32, device := .CPU })
           (Controller := ConstantStepSize)
           term solver t0 t1 dt0 y0m a (saveat := { t1 := true })
       let y1p ← getY1 "y0+eps" solp y0
       let y1m ← getY1 "y0-eps" solm y0
-      let lp := nn.item y1p
-      let lm := nn.item y1m
+      let lp := Tensor.item y1p
+      let lm := Tensor.item y1m
       let fdY0 := (lp - lm) / (2.0 * eps)
 
-      let ap := add_scalar a eps
-      let am := add_scalar a (-eps)
+      let ap := Tensor.addScalar a eps
+      let am := Tensor.addScalar a (-eps)
       let solap :=
         diffeqsolve
-          (Term := ODETerm (T #[]) (T #[]))
-          (Y := T #[])
-          (VF := T #[])
+          (Term := ODETerm (Tensor { shape := #[], dtype := .Float32, device := .CPU }) (Tensor { shape := #[], dtype := .Float32, device := .CPU }))
+          (Y := Tensor { shape := #[], dtype := .Float32, device := .CPU })
+          (VF := Tensor { shape := #[], dtype := .Float32, device := .CPU })
           (Control := Time)
-          (Args := T #[])
+          (Args := Tensor { shape := #[], dtype := .Float32, device := .CPU })
           (Controller := ConstantStepSize)
           term solver t0 t1 dt0 y0 ap (saveat := { t1 := true })
       let solam :=
         diffeqsolve
-          (Term := ODETerm (T #[]) (T #[]))
-          (Y := T #[])
-          (VF := T #[])
+          (Term := ODETerm (Tensor { shape := #[], dtype := .Float32, device := .CPU }) (Tensor { shape := #[], dtype := .Float32, device := .CPU }))
+          (Y := Tensor { shape := #[], dtype := .Float32, device := .CPU })
+          (VF := Tensor { shape := #[], dtype := .Float32, device := .CPU })
           (Control := Time)
-          (Args := T #[])
+          (Args := Tensor { shape := #[], dtype := .Float32, device := .CPU })
           (Controller := ConstantStepSize)
           term solver t0 t1 dt0 y0 am (saveat := { t1 := true })
       let y1ap ← getY1 "a+eps" solap y0
       let y1am ← getY1 "a-eps" solam y0
-      let lap := nn.item y1ap
-      let lam := nn.item y1am
+      let lap := Tensor.item y1ap
+      let lam := Tensor.item y1am
       let fdA := (lap - lam) / (2.0 * eps)
 
-      let adjY0 := nn.item adj.adjY0
-      let adjA := nn.item adj.adjArgs
+      let adjY0 := Tensor.item adj.adjY0
+      let adjA := Tensor.item adj.adjArgs
       LeanTest.assertTrue (approx adjY0 fdY0 1.0e-2)
         s!"adjoint dy0 expected {fdY0}, got {adjY0}"
       LeanTest.assertTrue (approx adjA fdA 1.0e-2)
         s!"adjoint da expected {fdA}, got {adjA}"
 
 @[test] def testDirectAdjointLinearODE : IO Unit := do
-  let term : ODETerm (T #[]) (T #[]) := { vectorField := fun _t y a => mul a y }
+  let term : ODETerm (Tensor { shape := #[], dtype := .Float32, device := .CPU }) (Tensor { shape := #[], dtype := .Float32, device := .CPU }) := { vectorField := fun _t y a => Tensor.mul a y }
   let solver :=
     Euler.solver
-      (Term := ODETerm (T #[]) (T #[]))
-      (Y := T #[])
-      (VF := T #[])
-      (Args := T #[])
-  let y0 := full #[] 2.0
-  let a := full #[] 0.3
+      (Term := ODETerm (Tensor { shape := #[], dtype := .Float32, device := .CPU }) (Tensor { shape := #[], dtype := .Float32, device := .CPU }))
+      (Y := Tensor { shape := #[], dtype := .Float32, device := .CPU })
+      (VF := Tensor { shape := #[], dtype := .Float32, device := .CPU })
+      (Args := Tensor { shape := #[], dtype := .Float32, device := .CPU })
+  let y0 := Tensor.full #[] 2.0
+  let a := Tensor.full #[] 0.3
   let t0 := 0.0
   let t1 := 1.0
   let dt0 := some 0.01
-  let adjY1 := ones #[]
+  let adjY1 := Tensor.ones #[]
   let (_, adjOpt) :=
     diffeqsolveDirectAdjoint term solver t0 t1 dt0 y0 a adjY1 (saveat := { t1 := true })
   match adjOpt with
   | none => LeanTest.fail "Expected direct adjoint result"
   | some adj => do
       let eps := 1.0e-3
-      let y0p := add_scalar y0 eps
-      let y0m := add_scalar y0 (-eps)
+      let y0p := Tensor.addScalar y0 eps
+      let y0m := Tensor.addScalar y0 (-eps)
       let solp :=
         diffeqsolve
-          (Term := ODETerm (T #[]) (T #[]))
-          (Y := T #[])
-          (VF := T #[])
+          (Term := ODETerm (Tensor { shape := #[], dtype := .Float32, device := .CPU }) (Tensor { shape := #[], dtype := .Float32, device := .CPU }))
+          (Y := Tensor { shape := #[], dtype := .Float32, device := .CPU })
+          (VF := Tensor { shape := #[], dtype := .Float32, device := .CPU })
           (Control := Time)
-          (Args := T #[])
+          (Args := Tensor { shape := #[], dtype := .Float32, device := .CPU })
           (Controller := ConstantStepSize)
           term solver t0 t1 dt0 y0p a (saveat := { t1 := true })
       let solm :=
         diffeqsolve
-          (Term := ODETerm (T #[]) (T #[]))
-          (Y := T #[])
-          (VF := T #[])
+          (Term := ODETerm (Tensor { shape := #[], dtype := .Float32, device := .CPU }) (Tensor { shape := #[], dtype := .Float32, device := .CPU }))
+          (Y := Tensor { shape := #[], dtype := .Float32, device := .CPU })
+          (VF := Tensor { shape := #[], dtype := .Float32, device := .CPU })
           (Control := Time)
-          (Args := T #[])
+          (Args := Tensor { shape := #[], dtype := .Float32, device := .CPU })
           (Controller := ConstantStepSize)
           term solver t0 t1 dt0 y0m a (saveat := { t1 := true })
       let y1p ← getY1 "y0+eps" solp y0
       let y1m ← getY1 "y0-eps" solm y0
-      let lp := nn.item y1p
-      let lm := nn.item y1m
+      let lp := Tensor.item y1p
+      let lm := Tensor.item y1m
       let fdY0 := (lp - lm) / (2.0 * eps)
 
-      let ap := add_scalar a eps
-      let am := add_scalar a (-eps)
+      let ap := Tensor.addScalar a eps
+      let am := Tensor.addScalar a (-eps)
       let solap :=
         diffeqsolve
-          (Term := ODETerm (T #[]) (T #[]))
-          (Y := T #[])
-          (VF := T #[])
+          (Term := ODETerm (Tensor { shape := #[], dtype := .Float32, device := .CPU }) (Tensor { shape := #[], dtype := .Float32, device := .CPU }))
+          (Y := Tensor { shape := #[], dtype := .Float32, device := .CPU })
+          (VF := Tensor { shape := #[], dtype := .Float32, device := .CPU })
           (Control := Time)
-          (Args := T #[])
+          (Args := Tensor { shape := #[], dtype := .Float32, device := .CPU })
           (Controller := ConstantStepSize)
           term solver t0 t1 dt0 y0 ap (saveat := { t1 := true })
       let solam :=
         diffeqsolve
-          (Term := ODETerm (T #[]) (T #[]))
-          (Y := T #[])
-          (VF := T #[])
+          (Term := ODETerm (Tensor { shape := #[], dtype := .Float32, device := .CPU }) (Tensor { shape := #[], dtype := .Float32, device := .CPU }))
+          (Y := Tensor { shape := #[], dtype := .Float32, device := .CPU })
+          (VF := Tensor { shape := #[], dtype := .Float32, device := .CPU })
           (Control := Time)
-          (Args := T #[])
+          (Args := Tensor { shape := #[], dtype := .Float32, device := .CPU })
           (Controller := ConstantStepSize)
           term solver t0 t1 dt0 y0 am (saveat := { t1 := true })
       let y1ap ← getY1 "a+eps" solap y0
       let y1am ← getY1 "a-eps" solam y0
-      let lap := nn.item y1ap
-      let lam := nn.item y1am
+      let lap := Tensor.item y1ap
+      let lam := Tensor.item y1am
       let fdA := (lap - lam) / (2.0 * eps)
 
-      let adjY0 := nn.item adj.adjY0
-      let adjA := nn.item adj.adjArgs
+      let adjY0 := Tensor.item adj.adjY0
+      let adjA := Tensor.item adj.adjArgs
       LeanTest.assertTrue (approx adjY0 fdY0 1.0e-2)
         s!"direct adjoint dy0 expected {fdY0}, got {adjY0}"
       LeanTest.assertTrue (approx adjA fdA 1.0e-2)

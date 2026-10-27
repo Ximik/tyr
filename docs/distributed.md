@@ -24,7 +24,11 @@ The layers compose bottom-up; each one is usable independently. All Lean
 modules are re-exported from the umbrella `Tyr.lean` (`Tyr.lean:30-54`) and
 live in `torch.*` namespaces. The C++ side is a single global
 `c10d::ProcessGroup` plus a `TCPStore` in `cc/src/tyr_distributed.cpp`; NCCL
-is compile-time gated (`USE_C10D_NCCL`), Gloo always available for CPU. Async
+and Gloo are compile-time gated (`USE_C10D_NCCL` and `USE_C10D_GLOO`). The pinned
+CPU and CUDA dependencies include Gloo: `deps/fetch.sh` fetches the headers at
+the exact submodule revision used by the pinned PyTorch wheel, and the native
+build enables Gloo when those headers are present. Custom LibTorch builds must
+also provide a compatible Gloo implementation. Async
 work items live in a global map keyed by `UInt64` work ids.
 
 ### Collectives: `torch.dist` (`Tyr/Distributed.lean`)
@@ -41,22 +45,35 @@ opaque destroyProcessGroup : IO Unit
 opaque barrier : IO Unit
 ```
 
-Collectives operate in place on shape-typed tensors. `ReduceOp` is
-`sum | avg | product | min | max` (`Tyr/Distributed.lean:29`). Sync wrappers
-return `IO Unit`; `*Async` variants return a `WorkHandle`:
+Collectives preserve input values and return independent results. Private native
+collectives write only into fresh effectfully allocated buffers. `ReduceOp` is
+`sum | avg | product | min | max`. An asynchronous reduction returns an awaiting
+action; execute that action once to wait and obtain the completed tensor. A tensor
+whose storage is still being written is never exposed to the caller.
 
 ```lean
-def allReduce  (tensor : T s) (op : ReduceOp := .sum) : IO Unit
-def allReduceAsync (tensor : T s) (op : ReduceOp := .sum) : IO WorkHandle
-opaque broadcast (tensor : @& T s) (srcRank : UInt64) : IO Unit
-def reduceScatter (output : T sOut) (input : T sIn) (op : ReduceOp := .sum) : IO Unit
-def allGather (output : T sOut) (input : T sIn) : IO Unit
+def allReduce {σ : StaticSpec} (tensor : Tensor σ) (op : ReduceOp := .sum) : IO (Tensor σ)
+def allReduceAsync {σ : StaticSpec} (tensor : Tensor σ) (op : ReduceOp := .sum) : IO (IO (Tensor σ))
+def broadcast {σ : StaticSpec} (tensor : Tensor σ) (srcRank : UInt64) : IO (Tensor σ)
+def reduceScatter {σ : StaticSpec} (worldSize : UInt64) (input : Tensor σ)
+    (op : ReduceOp := .sum)
+    : IO (Tensor (σ.withShape (σ.shape.set! 0 (σ.shape.getD 0 0 / worldSize))))
+def allGather {σ : StaticSpec} (worldSize : UInt64) (input : Tensor σ)
+    : IO (Tensor (σ.withShape (σ.shape.set! 0 (σ.shape.getD 0 0 * worldSize))))
 
 structure WorkHandle where id : UInt64
-opaque wait (handle : WorkHandle) : IO Unit
+def wait (handle : WorkHandle) : IO Unit
 def WorkHandle.isCompleted (handle : WorkHandle) : IO Bool
 def waitAll (handles : Array WorkHandle) : IO Unit
 ```
+
+For explicit work handles, `isCompleted` only observes successful completion. It
+returns false while pending and reports failed work or an unknown handle as an
+error. Polling retains the handle, including after an error, so `wait` or teardown
+can drain it. Call `wait` after a successful poll to establish backend stream
+synchronization and release the handle. Waiting consumes a handle even when the
+operation fails or is aborted; a second wait is an error. `waitAll` attempts every
+handle before reporting the first error.
 
 For whole models, TensorStruct-aware helpers map the collective over every
 leaf (`Tyr/Distributed.lean:280-311`) — the functions most loops call:
@@ -64,23 +81,46 @@ leaf (`Tyr/Distributed.lean:280-311`) — the functions most loops call:
 ```lean
 def broadcastParams [TensorStruct α] (params : α) : IO α          -- from rank 0
 def allReduceGrads [TensorStruct α] (grads : α) (op := .avg) : IO α
-def allReduceGradsAsync [TensorStruct α] (grads : α) (op := .avg) : IO (α × Array WorkHandle)
+def allReduceGradsAsync [TensorStruct α] (grads : α) (op := .avg) : IO (IO α)
 ```
 
 The standard data-parallel recipe: `broadcastParams` once after init, local
 forward/backward per rank, `allReduceGrads .avg` after backward, one
-identical optimizer step on every rank (see
+identical optimizer step on every rank using the returned gradient tree (see
 `Examples/NanoChat/ModdedTrain.lean:1167-1196`).
 
-`dist.withDistributed` (`Tyr/Distributed.lean:261`) brackets init/action/teardown
-for a single process group (no teardown if the action throws). A
+`Tests/RunDistributedValues.lean` checks retained inputs and earlier outputs,
+repeated list collectives, actual integer dtypes behind dynamic specifications,
+trainability flags, and async completion on two CPU ranks:
+
+```sh
+deps/fetch.sh cpu
+lake build --wfail RunDistributedValues
+lake env python3 scripts/test_distributed_values.py
+```
+
+Use `deps/fetch.sh cuda` instead when the checkout has a CUDA configuration.
+The runner selects a localhost rendezvous port, starts both ranks, and terminates
+and reaps its remaining processes if either rank fails or the 60-second deadline
+expires. Per-rank logs and `report.json` go to `output/ci/distributed`; `--log-dir`,
+`--timeout`, and `--port` can override these defaults. CPU CI runs this numerical
+check on Linux and macOS. It qualifies Gloo CPU collectives, not multi-GPU NCCL
+behavior. Builds without Gloo still run the ordinary error-path and
+async-interface tests in `Tests.TestDistributedValues`.
+
+`dist.withDistributed` brackets init/action/teardown for a single process group.
+After successful initialization it runs teardown even if the action fails,
+preserving the action's error when cleanup also fails. Teardown drains every
+pending work item and resets process-group state before reporting its first
+failure. Invalid initialization arguments fail before rendezvous, and process-group
+state is published only after native construction succeeds. A
 `DistributedSampler` (`Tyr/Distributed.lean:318-423`) shards a dataset
 deterministically per rank with an LCG-seeded Fisher–Yates shuffle; the
 examples currently shard data ad hoc instead.
 
 `Tyr/Distributed.lean` also hosts the Polar Express / Muon FFI kernels
 (`polarExpress`, `muonOrthogonalize`, `newtonSchulzStep`, `cautiousUpdate`,
-`Tyr/Distributed.lean:208-256`) — orthogonalization math, not communication;
+native declarations in `Tyr/RawTensor/Distributed.lean`) — orthogonalization math, not communication;
 see [Optimization](optimization.md).
 
 ### Sharding: `torch.Sharding` (`Tyr/Sharding.lean`)
@@ -99,21 +139,23 @@ def shardedShape (s : Shape) (spec : ShardSpec) : Shape
 
 abbrev ValidShard (rank worldSize : UInt64) := rank < worldSize
 
-structure ShardedTensor (fullShape : Shape) (rank worldSize : UInt64) (shardDim := .first) where
-  shard : T (shardedShape fullShape ⟨shardDim, worldSize, rank⟩)
-  cachedFull : Option (T fullShape) := none
+structure ShardedTensor (σ : StaticSpec) (rank worldSize : UInt64)
+    (shardDim : ShardDim := .first) where
+  shard : Tensor (σ.withShape (shardedShape σ.shape ⟨shardDim, worldSize, rank⟩))
+  cachedFull : Option (Tensor σ) := none
   cacheIsStale : Bool := true
 ```
 
-Operations (`Tyr/Sharding.lean:115-183`):
+Operations retain the full tensor's dtype and concrete device:
 
-```lean
-def ShardedTensor.fromFull (full : T s) (_h : ValidShard rank worldSize) (shardDim := .first)
-    : ShardedTensor s rank worldSize shardDim
-def ShardedTensor.gather : IO (T s × ShardedTensor s rank worldSize sd)        -- allGather + cache
-def ShardedTensor.scatterGrad (fullGrad : T s) : IO (T (shardedShape ...))     -- reduceScatter .sum
-def ShardedTensor.updateShard (newShard : ...) : ShardedTensor ...             -- marks cache stale
-```
+- `ShardedTensor.fromFull full proof shardDim` slices a `Tensor σ` and checks
+  the local shard metadata. The proof establishes `rank < worldSize`.
+- `sharded.gather` returns `IO (Tensor σ × ShardedTensor σ rank worldSize sd)`
+  and caches the gathered value. A fresh collective requires equal-sized shards.
+- `sharded.scatterGrad fullGrad` reduces/scatters a `Tensor σ` and checks the
+  result against `σ.withShape (shardedShape σ.shape ⟨sd, worldSize, rank⟩)`.
+- `sharded.updateShard newShard` accepts that same indexed local specification
+  and marks the cache stale.
 
 This is the ZeRO pattern: keep one shard of each parameter (and optimizer
 state) per rank, `gather` lazily for the forward pass, `scatterGrad` the
@@ -223,26 +265,37 @@ def runDueEvaluators (evaluators : Array (Evaluator α)) (ctx : α) (step : Nat)
 
 A nanochat-style supervised fine-tuning loop: masked cross-entropy over
 assistant tokens only, gradient accumulation, linear LR decay, one AdamW
-step per iteration. Batches are shape-erased (`T #[]`) since conversation
-batches vary in length:
+step per iteration. Each batch carries its runtime dimensions as fields, and
+its tensor types depend on those fields:
 
 ```lean
+variable {device : Device}
+
 structure SFTBatch where
-  inputs targets mask : T #[]      -- [batch, seq]; mask 1.0 = train, 0.0 = ignore
   batchSize seqLen : UInt64
+  inputs targets : Tensor { shape := #[batchSize, seqLen], dtype := .Int64, device := device }
+  mask : Tensor { shape := #[batchSize, seqLen], dtype := .Float32, device := device }
   numValidTokens : Nat
 
-def maskedCrossEntropy (logits : T #[batch, seq, vocab]) (targets mask : T #[batch, seq]) : T #[]
+def maskedCrossEntropy {batch seq vocab : UInt64} {d m result : DType} {dev : Device}
+    [DType.Promotes d m result]
+    (logits : Tensor ⟨#[batch, seq, vocab], d, dev⟩)
+    (targets : Tensor ⟨#[batch, seq], .Int64, dev⟩)
+    (mask : Tensor ⟨#[batch, seq], m, dev⟩)
+    : Tensor ⟨#[], (DType.promote d m).sumResult, dev⟩
 ```
 
 The main entry is generic over the parameter tree:
 
 ```lean
-def trainLoop [TensorStruct P]
+def trainLoop {device : Device} [TensorStruct P]
     (cfg : SFTConfig) (params : P) (optState : Optim.AdamWState P)
-    (forwardFn : P → T #[] → IO (T #[]))          -- params → inputs → logits
-    (lossFn : T #[] → T #[] → T #[] → T #[])      -- logits → targets → mask → loss
-    (trainDataFn : IO SFTBatch) (valDataFn : Option (IO SFTBatch) := none)
+    (forwardFn : P → {b s : UInt64} → Tensor { shape := #[b, s], dtype := .Int64, device := device } →
+      IO (Σ v : UInt64, Tensor { shape := #[b, s, v], dtype := .Float32, device := device }))
+    (lossFn : {b s v : UInt64} → Tensor { shape := #[b, s, v], dtype := .Float32, device := device } →
+      Tensor { shape := #[b, s], dtype := .Int64, device := device } → Tensor { shape := #[b, s], dtype := .Float32, device := device } → Tensor { shape := #[], dtype := .Float32, device := device })
+    (trainDataFn : IO (SFTBatch (device := .CPU)))
+    (valDataFn : Option (IO (SFTBatch (device := .CPU))) := none)
     (numTrainExamples : Nat := 10000) (callbacks : Callbacks := {})
     : IO (P × Optim.AdamWState P × SFTState)
 ```
@@ -250,7 +303,8 @@ def trainLoop [TensorStruct P]
 `SFTConfig` (`Tyr/Train/ChatSFT.lean:30`) holds epochs/iterations, batch
 geometry (`deviceBatchSize`, `targetExamplesPerStep` — `gradAccumSteps` is
 derived per world size), LRs, `maxSeqLen`, eval cadences, `device`, and
-`logInterval`. Inside the loop (`Tyr/Train/ChatSFT.lean:404-473`):
+`logInterval`. The loop checks that `cfg.device` matches the forward function’s
+concrete device, then moves CPU data batches to that device. Inside the loop (`Tyr/Train/ChatSFT.lean:404-473`):
 `gradAccumSteps` micro-batches accumulate gradients, averaged via
 `dist.allReduceGrads .avg` when distributed, then one `Optim.adamw` step at
 `cfg.embeddingLr * cfg.initLrFrac * linearLRMultiplier ...`. Note the loop
@@ -259,7 +313,7 @@ uses one AdamW over the whole tree — the `matrixLr`, `unembeddingLr`,
 the file header advertising a dual Muon/Adam optimizer.
 
 Data plumbing: `makeTaskDataGenerator (iter : TaskIterator) (maxLen)
-(padTokenId) : IO (IO SFTBatch)` adapts the task-mixture iterator from
+(padTokenId) : IO (IO (SFTBatch (device := .CPU)))` adapts the task-mixture iterator from
 `Tyr.Data.Task` (see [Data](data.md)); `prepareSFTBatch` builds the shifted
 input/target/mask triple directly. `Callbacks` (`onTrainStep`, `onValidation`)
 compose via `Callbacks.combine`; `artifactCallbacks artifacts "sft"` logs to
@@ -273,8 +327,9 @@ trust region, no importance weights, no clipping, advantage
 
 ```lean
 def computeAdvantages (rewards : Array Float) : Array Float
-def computePGLoss (logProbs : T #[b, t]) (advantages : T #[b]) (mask : T #[b, t])
-    (numPasses : UInt64 := 1) (examplesPerRank : UInt64 := 1) : T #[]
+def computePGLoss {device : Device} (logProbs : Tensor { shape := #[b, t], dtype := .Float32, device := device })
+    (advantages : Tensor { shape := #[b], dtype := .Float32, device := device }) (mask : Tensor { shape := #[b, t], dtype := .Float32, device := device })
+    (numPasses : UInt64 := 1) (examplesPerRank : UInt64 := 1) : Tensor { shape := #[], dtype := .Float32, device := device }
 ```
 
 Rewards are pluggable; `mathReward` parses the GSM8K `#### <answer>` marker,
@@ -290,7 +345,7 @@ The update-capable training loop:
 def trainOnPromptsWithUpdates (b t : UInt64) [TensorStruct P]
     (prompts : Array (Array UInt64 × String × String))   -- (tokens, text, answer)
     (generateOneFn : P → Array UInt64 → IO UInt64)
-    (forwardFn : P → T #[b, t] → T #[b, t] → IO (T #[b, t]))  -- (params, input, target) → per-token NLL
+    (forwardFn : P → Tensor { shape := #[b, t], dtype := .Int64, device := .CPU } → Tensor { shape := #[b, t], dtype := .Int64, device := .CPU } → IO (Tensor { shape := #[b, t], dtype := .Float32, device := .CPU }))  -- (params, input, target) → per-token NLL
     (params : P) (optState : Optim.AdamWState P)
     (decodeFn : Array UInt64 → String) (rewardFn : String → String → Float)
     (config : GRPOConfig) (numEpochs : Nat := 1) (callbacks : Callbacks := {})
@@ -336,7 +391,7 @@ def main : IO Unit :=
       let trainDataFn ← ChatSFT.makeTaskDataGenerator taskIterator sftCfg.maxSeqLen chatTokens.assistantEnd
       let callbacks := consoleSFTCallbacks.combine (ChatSFT.artifactCallbacks runArtifacts "sft")
       let optState := (Optim.adamw (lr := sftCfg.embeddingLr)).init params
-      -- forwardFn/lossFn are shape-erased; grads all-reduced inside when distributed
+      -- forwardFn/lossFn preserve batch dimensions; grads all-reduced inside when distributed
       let (params', optState', sftState) ← ChatSFT.trainLoop sftCfg
         params optState forwardFn lossFn trainDataFn none numTrainExamples callbacks
       if (← get).isMaster then
@@ -360,8 +415,8 @@ if worldSize > 1 then
   dist.initProcessGroup "nccl" masterAddr masterPort rank worldSize
 let params ← dist.broadcastParams params        -- identical starting point
 -- per step: local forward/backward, then
-let grads := TensorStruct.grads params
-let _ ← dist.allReduceGrads grads .avg          -- identical gradients everywhere
+let grads ← TensorStruct.grads params
+let grads ← dist.allReduceGrads grads .avg      -- use the returned reduced values
 -- ... identical optimizer step on every rank; teardown at the end:
 if isDistributed then dist.barrier; dist.destroyProcessGroup
 ```
@@ -390,7 +445,7 @@ Script knobs (`TORCHRUN_BIN`, `NPROC_PER_NODE`, `SKIP_BUILD`, `TYR_DEVICE`,
 ## Related guides
 
 - [Getting started](getting-started.md) — torchrun wrappers, `TYR_DEVICE`, build prerequisites.
-- [Tensors](core/tensors.md) — `T s`, `Shape`, `Device`, the ops used by the collectives.
+- [Tensors](core/tensors.md) — `Tensor σ`, `Shape`, `Device`, the ops used by the collectives.
 - [TensorStruct](core/tensorstruct.md) — the traversal that powers `broadcastParams` / `allReduceGrads`.
 - [Optimization](optimization.md) — `Optim.adamw` / `AdamWState` used by both recipe loops, and the Polar Express kernels hosted in `Tyr/Distributed.lean`.
 - [Data](data.md) — `TaskIterator` and conversation batches behind `makeTaskDataGenerator`.

@@ -18,6 +18,7 @@ import Tyr.GPU.Codegen.Attribute
 import Tyr.GPU.Kernels.MhaH100Decode
 import Tyr.GPU.Ops.AttentionProblem
 import LeanTest
+import Std.Sync.Mutex
 
 namespace Tests.GPUKernels
 
@@ -78,13 +79,25 @@ private unsafe def evalKernelConstExprForTest (constName : Lean.Name) : Lean.Cor
         (Lean.mkConst ``Tyr.GPU.Codegen.Kernel)
         value
 
+-- Keep imported compacted regions alive for returned kernel expressions, and
+-- reuse the immutable base across decode variants instead of importing again.
+private initialize kernelTestEnvironment : Std.Mutex (Option Lean.Environment) ←
+  Std.Mutex.new none
+
+private unsafe def getKernelTestEnvironment : IO Lean.Environment :=
+  kernelTestEnvironment.atomically do
+    if let some env := ← get then
+      return env
+    Lean.initSearchPath (← Lean.findSysroot)
+    Lean.enableInitializersExecution
+    let env ← Lean.importModules
+      #[{ module := `LeanTest }, { module := `Tyr.GPU.Kernels.MhaH100Decode }]
+      {} (loadExts := true)
+    set (some env)
+    return env
+
 private unsafe def evalKernelForTest (kernelConst : Lean.Name) : IO Kernel := do
-  Lean.initSearchPath (← Lean.findSysroot)
-  Lean.enableInitializersExecution
-  let env ← Lean.importModules
-    #[{ module := `LeanTest }, { module := `Tyr.GPU.Kernels.MhaH100Decode }]
-    {}
-    (loadExts := true)
+  let env ← getKernelTestEnvironment
   runCoreWithEnv env <|
     evalKernelConstExprForTest kernelConst
 

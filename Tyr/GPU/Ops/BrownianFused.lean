@@ -10,13 +10,15 @@
   `t·10⁶ < 2²⁴` for exact f32 representation (trees over [0, ~16] in
   seconds at the CPU sampler's microsecond tag resolution).
 -/
-import Tyr.Torch
+import Tyr.Typed.Ops
 import Tyr.PRNG
 import Tyr.GPU.Kernels.BrownianSample
 
 namespace Tyr.GPU.Ops.BrownianFused
 
 open torch
+
+variable {device : Device}
 open Tyr.GPU.Kernels
 
 /-- `timeToUInt32` of the CPU sampler, as an exactly-f32 Float. -/
@@ -69,9 +71,11 @@ partial def buildValueSchedule (T0 T1 tol : Float) (maxDepth : Nat)
       depth := depth - 1
   return out
 
-/-- Upload a schedule to the device as a flat Float32 tensor. -/
-def uploadSchedule (sched : Array Float) (device : Device) : T #[] :=
-  (data.fromFloatArray sched).to device
+/-- Upload a schedule to the device as a flat Float32 tensor; the result
+    shape records the schedule length. -/
+def uploadSchedule (sched : Array Float) (device : Device) :
+    Tensor { shape := #[sched.size.toUInt64], dtype := .Float32, device := device } :=
+  (Tensor.fromFloatArray sched).to device
 
 /-- Per-element key-root for a tensor-valued tree: the same derivation as
     the CPU `VirtualBrownianTreeOps (T s)` instance (array tag). -/
@@ -79,13 +83,14 @@ def tensorRootState (treeSeed : UInt64) : UInt64 :=
   (PRNGKey.foldIn (PRNGKey.fromUInt64 treeSeed) 0x56544152).state
 
 /-- Launch the device VBT increment `out[i] = w_i(tB) − w_i(tA)` for `n`
-    elements. `out` must be a CUDA Float32 tensor with `n` elements. -/
+    elements. `out` must be a CUDA Float32 tensor with `n` elements (the dtype
+    is now static; placement is still checked by the launcher). -/
 def vbtIncrementDevice {s : Shape}
     (treeSeed : UInt64) (T0 T1 tol : Float) (maxDepth : Nat)
     (tA tB : Float)
-    (out : T s) (n : UInt64)
+    (out : Tensor { shape := s, dtype := .Float32, device := device }) (n : UInt64)
     (blackwell : Bool) (stream : UInt64)
-    (device : Device := Device.CUDA 0) : IO Unit := do
+    (device : Device) : IO Unit := do
   let schedA := buildValueSchedule T0 T1 tol maxDepth tA
   let schedB := buildValueSchedule T0 T1 tol maxDepth tB
   let lenA := (schedA.size / 6).toUInt64
@@ -96,10 +101,10 @@ def vbtIncrementDevice {s : Shape}
   -- the kernel's per-thread range strides by blockDim only: one block,
   -- threads stride the elements
   if blackwell then
-    vbtIncrementBlackwell.launch out devA devB root n lenA lenB
+    vbtIncrementBlackwell.launch out.raw devA.raw devB.raw root n lenA lenB
       1 1 1 256 1 1 0 stream
   else
-    vbtIncrement.launch out devA devB root n lenA lenB
+    vbtIncrement.launch out.raw devA.raw devB.raw root n lenA lenB
       1 1 1 256 1 1 0 stream
 
 end Tyr.GPU.Ops.BrownianFused

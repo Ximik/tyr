@@ -4,22 +4,22 @@ A deep learning framework for Lean 4 with a typed tensor facade over LibTorch.
 
 ## Overview
 
-Use `torch.Tensor` for compile-time shape and dtype checks in new model code.
-The raw `torch.T s` interface remains available for existing models and native
-interop; its shape argument is an annotation and does not enforce shape equality.
+Use `torch.Tensor` for shape, dtype, and device indices in model code.
+Native adapters use `RawTensor` handles internally; checked constructors validate
+external metadata before exposing indexed tensors.
 
 ```lean
 import Tyr.Typed
 open torch
 
-def forward : DTensor #[32, 512] .Float32 :=
+def forward : Tensor { shape := #[32, 512], dtype := .Float32, device := .CPU } :=
   let x := Tensor.ones #[32, 768]
   let w := Tensor.ones #[512, 768]
   x.linear w
 
 -- Replacing w with Tensor.ones #[768, 512] is a type error.
 -- Raw handles cross into this facade through Tensor.ofTensor, which checks
--- their actual shape and dtype. Tensor.assumeSpec explicitly bypasses checks.
+-- their actual shape and dtype. Raw handles enter through Tensor.ofRaw.
 ```
 
 ## Dependencies
@@ -195,21 +195,20 @@ Notes:
 
 ### Typed and Raw Tensors
 
-`Tensor σ` tracks shape, dtype, and a device policy in one static specification:
+`Tensor σ` tracks shape, dtype, and a concrete device in one static specification:
 
 ```lean
 def project {m k n : UInt64}
-    (x : DTensor #[m, k] .Float32) (w : DTensor #[k, n] .Float32) :
-    DTensor #[m, n] .Float32 :=
+    (x : Tensor { shape := #[m, k], dtype := .Float32, device := .CPU }) (w : Tensor { shape := #[k, n], dtype := .Float32, device := .CPU }) :
+    Tensor { shape := #[m, n], dtype := .Float32, device := .CPU } :=
   x.mm w
 ```
 
-The underlying `T s` is a reducible alias for one opaque tensor handle type;
-different shape annotations on raw tensors are definitionally equal. Use
-`Tensor.ofTensor` at raw boundaries and `Tensor.validate` when auditing a
-typed value. `Tensor.reshape` requires equal element counts and treats `#[]`
-as a scalar. Legacy raw `reshape t #[]` retains its shape-erasure behavior;
-`reshapeExact` provides real scalar reshaping at the raw level.
+The native carrier is `RawTensor`; model code uses indexed `Tensor σ` values.
+Use `Tensor.ofRaw` at native boundaries and `Tensor.validate` when auditing an
+indexed value. `Tensor.reshape` requires equal element counts and treats `#[]`
+as a scalar. Runtime-dependent shapes can be packaged existentially without
+losing the tensor's shape index.
 
 ### TensorStruct Typeclass
 
@@ -217,26 +216,22 @@ Generic traversal over structures containing tensors:
 
 ```lean
 class TensorStruct (α : Type) where
-  map     : (∀ {s}, T s → T s) → α → α
-  mapM    : (∀ {s}, T s → m (T s)) → α → m α
-  zipWith : (∀ {s}, T s → T s → T s) → α → α → α
-  fold    : (∀ {s}, T s → β → β) → β → α → β
+  map : (∀ {σ}, Tensor σ → Tensor σ) → α → α
+  mapM {m : Type → Type} [Monad m] : (∀ {σ}, Tensor σ → m (Tensor σ)) → α → m α
+  zipWith : (∀ {σ}, Tensor σ → Tensor σ → Tensor σ) → α → α → α
+  fold {β : Type} : (∀ {σ}, Tensor σ → β → β) → β → α → β
 ```
 
 Use `Vector n α` instead of `Array α` for type-safe `zipWith` operations.
 
 ### Data Loading
 
-Two patterns for different use cases:
+Batch dimensions may come from runtime configuration while remaining in the tensor type:
 
 ```lean
--- Fixed dimensions (raw tensor API):
-let iter := SequentialBatchIterator.new loader 8 256
-let (batch, iter') := iter.next  -- Returns T #[8, 256]
-
--- Dynamic dimensions:
 let iter := BatchIterator.new shard 8 256
-let (batch, iter') ← iter.next   -- Returns T #[] (erased)
+let (batch, iter') ← iter.next
+-- batch : Option (Tensor { shape := #[iter.batchSize, iter.seqLen], dtype := .Int64, device := .CPU })
 ```
 
 ### SafeTensors Type Provider
@@ -288,7 +283,7 @@ Monitor tensor leaks via `get_live_tensors` which tracks outstanding C++ tensors
 
 ### Adding New Tensor Operations
 
-1. Add Lean declaration in `Tyr/Torch.lean` with `@[extern "lean_torch_xxx"]`
+1. Add Lean declaration in `Tyr/RawTensor.lean` or a `Tyr/RawTensor/` submodule with `@[extern "lean_torch_xxx"]`
 2. Implement in `cc/src/tyr.cpp` following reference counting conventions
 3. Rebuild: `lake build`
 

@@ -1106,21 +1106,26 @@ field tensor supplies the runtime shape; sampling runs the scalar core per
 element on the CPU and packs the result, which is adequate for typical
 noise dimensions (batched device-side sampling is a possible follow-up). -/
 
-private def tensorFloatChild {s : Shape} (path : VirtualBrownianTree (T s)) (i : Nat) :
+private def tensorFloatChild {σ : StaticSpec} (path : VirtualBrownianTree (Tensor σ)) (i : Nat) :
     VirtualBrownianTree Float :=
   -- Same tag as `splitArrayIdx` so tensors and float arrays agree per element.
   let root := PRNGKey.foldIn (baseKey path.seed) 0x56544152
   let childSeed := (PRNGKey.foldIn root (UInt32.ofNat i)).state
   mkChildPath path childSeed 0.0
 
-private def tensorNumel {s : Shape} (ref : T s) : Nat :=
-  ref.runtimeShape.foldl (fun acc d => acc * d.toNat) 1
+private def tensorNumel {σ : StaticSpec} (ref : Tensor σ) : Nat :=
+  (Tensor.runtimeShape ref).foldl (fun acc d => acc * d.toNat) 1
 
-/-- Pack per-element values into a tensor with `ref`'s runtime shape. -/
-private def tensorPackLike {s : Shape} (ref : T s) (vals : Array Float) : T s :=
-  reshape (reshape (data.fromFloatArray vals) ref.runtimeShape) s
+/-- Pack per-element values into a tensor with `ref`'s shape. The packed values
+    are Float32 on CPU; the claimed spec is validated against the packed handle
+    (dtype and placement must match or this panics). -/
+private def tensorPackLike {σ : StaticSpec} (_ref : Tensor σ) (vals : Array Float) : Tensor σ :=
+  let flat := Tensor.fromFloatArray vals
+  match Tensor.ofRaw (σ := σ) (Tensor.reshapeChecked flat σ.shape).raw with
+  | .ok t => t
+  | .error message => nativeInvariantFailure s!"tensorPackLike: {message}"
 
-instance {s : Shape} : VirtualBrownianTreeOps (T s) where
+instance {σ : StaticSpec} : VirtualBrownianTreeOps (Tensor σ) where
   increment path t0 t1 := Id.run do
     let n := tensorNumel path.shape
     let mut ws : Array Float := Array.mkEmpty n

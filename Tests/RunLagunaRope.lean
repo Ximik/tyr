@@ -9,13 +9,14 @@
     1. YaRN diagnostics: correction range (low, high) == (9, 18); inv_freq matches.
     2. CPU tables match the python reference (max abs diff < 1e-5).
     3. CUDA tables match the python reference (< 1e-5) and the CPU tables bitwise.
-    4. Sliding table layout equivalence with `rotary.computeFreqsOnDevicePure`.
-    5. End-to-end `applyRotaryPartial` / `rotary.applyRotaryEmb` vs HF
+    4. Sliding table layout equivalence with `Tensor.rotaryFreqs`.
+    5. End-to-end `applyRotaryPartial` / `Tensor.applyRotary` vs HF
        `apply_rotary_pos_emb` (partial YaRN, full-width sliding, decode-step).
 -/
 import Tyr.Model.Laguna.Config
 import Tyr.Model.Laguna.Rope
 import Tyr.Torch
+import Tyr.SafeTensors.Load
 
 open torch torch.laguna
 
@@ -25,8 +26,8 @@ private def check (cond : Bool) (msg : String) : IO Unit := do
   else
     throw (IO.userError s!"FAIL: {msg}")
 
-private def floatsOf (t : T #[]) : IO (Array Float) :=
-  data.tensorToFloatArray' t
+private def floatsOf {σ : StaticSpec} (t : Tensor σ) : IO (Array Float) :=
+  Tensor.toFloatArray t
 
 private def maxAbsDiff (a b : Array Float) : IO Float := do
   if a.size != b.size then
@@ -37,7 +38,7 @@ private def maxAbsDiff (a b : Array Float) : IO Float := do
     if d > m then m := d
   pure m
 
-private def tensorMaxAbsDiff (a b : T #[]) : IO Float := do
+private def tensorMaxAbsDiff {σ τ : StaticSpec} (a : Tensor σ) (b : Tensor τ) : IO Float := do
   maxAbsDiff (← floatsOf a) (← floatsOf b)
 
 private def findFixture : IO String := do
@@ -51,16 +52,20 @@ private def findFixture : IO String := do
   throw (IO.userError "rope_reference.safetensors not found (run from repo root)")
 
 /-- Run the table-comparison suite against the python reference for one set of tables. -/
-private def checkTablesAgainstReference (path : String) (tables : LagunaRotaryTables)
+private def checkTablesAgainstReference {device : Device} (path : String) (tables : LagunaRotaryTables (device := device))
     (tag : String) (tol : Float) : IO Unit := do
-  let refSlidingCos ← safetensors.loadTensor path "sliding_cos" #[1024, 64]
-  let refSlidingSin ← safetensors.loadTensor path "sliding_sin" #[1024, 64]
-  let refFullCos ← safetensors.loadTensor path "full_cos" #[1024, 32]
-  let refFullSin ← safetensors.loadTensor path "full_sin" #[1024, 32]
-  let d1 ← tensorMaxAbsDiff tables.slidingCos (nn.eraseShape refSlidingCos)
-  let d2 ← tensorMaxAbsDiff tables.slidingSin (nn.eraseShape refSlidingSin)
-  let d3 ← tensorMaxAbsDiff tables.fullCos (nn.eraseShape refFullCos)
-  let d4 ← tensorMaxAbsDiff tables.fullSin (nn.eraseShape refFullSin)
+  let refSlidingCos ← safetensors.loadTensorCandidates path #["sliding_cos"] #[1024, 64]
+  let refSlidingCos := refSlidingCos.2
+  let refSlidingSin ← safetensors.loadTensorCandidates path #["sliding_sin"] #[1024, 64]
+  let refSlidingSin := refSlidingSin.2
+  let refFullCos ← safetensors.loadTensorCandidates path #["full_cos"] #[1024, 32]
+  let refFullCos := refFullCos.2
+  let refFullSin ← safetensors.loadTensorCandidates path #["full_sin"] #[1024, 32]
+  let refFullSin := refFullSin.2
+  let d1 ← tensorMaxAbsDiff tables.slidingCos.2 refSlidingCos
+  let d2 ← tensorMaxAbsDiff tables.slidingSin.2 refSlidingSin
+  let d3 ← tensorMaxAbsDiff tables.fullCos.2 refFullCos
+  let d4 ← tensorMaxAbsDiff tables.fullSin.2 refFullSin
   check (d1 < tol) s!"[{tag}] sliding_cos max|Δ| = {d1} (< {tol})"
   check (d2 < tol) s!"[{tag}] sliding_sin max|Δ| = {d2} (< {tol})"
   check (d3 < tol) s!"[{tag}] full_cos (YaRN) max|Δ| = {d3} (< {tol})"
@@ -80,85 +85,91 @@ def main : IO Unit := do
   let invFreq := yarnInvFreq cfg
   IO.println s!"YaRN inv_freq[0..4] (lean): {invFreq[0]!} {invFreq[1]!} {invFreq[2]!} {invFreq[3]!} {invFreq[4]!}"
   check (invFreq.size == 32) s!"YaRN inv_freq has 32 entries (got {invFreq.size})"
-  let refInv ← safetensors.loadTensor path "yarn_inv_freq" #[32]
-  let dInv ← maxAbsDiff invFreq (← floatsOf (nn.eraseShape refInv))
+  let refInv ← safetensors.loadTensorCandidates path #["yarn_inv_freq"] #[32]
+  let refInv := refInv.2
+  let dInv ← maxAbsDiff invFreq (← floatsOf refInv)
   check (dInv < 1e-6) s!"YaRN inv_freq matches python reference (max|Δ| = {dInv})"
 
   -- 2. CPU tables vs python reference.
   let cpuTables ← precomputeRotaryTables cfg maxLen Device.CPU
-  check (cpuTables.slidingCos.runtimeShape == #[1024, 64])
-    s!"slidingCos shape = {cpuTables.slidingCos.runtimeShape}"
-  check (cpuTables.slidingSin.runtimeShape == #[1024, 64])
-    s!"slidingSin shape = {cpuTables.slidingSin.runtimeShape}"
-  check (cpuTables.fullCos.runtimeShape == #[1024, 32])
-    s!"fullCos shape = {cpuTables.fullCos.runtimeShape}"
-  check (cpuTables.fullSin.runtimeShape == #[1024, 32])
-    s!"fullSin shape = {cpuTables.fullSin.runtimeShape}"
-  check (cpuTables.slidingCos.dtype == .Float32) "slidingCos dtype is Float32"
-  check (cpuTables.fullCos.dtype == .Float32) "fullCos dtype is Float32"
+  check (cpuTables.slidingCos.2.runtimeShape == #[1024, 64])
+    s!"slidingCos shape = {cpuTables.slidingCos.2.runtimeShape}"
+  check (cpuTables.slidingSin.2.runtimeShape == #[1024, 64])
+    s!"slidingSin shape = {cpuTables.slidingSin.2.runtimeShape}"
+  check (cpuTables.fullCos.2.runtimeShape == #[1024, 32])
+    s!"fullCos shape = {cpuTables.fullCos.2.runtimeShape}"
+  check (cpuTables.fullSin.2.runtimeShape == #[1024, 32])
+    s!"fullSin shape = {cpuTables.fullSin.2.runtimeShape}"
+  check (cpuTables.slidingCos.2.dtype == .Float32) "slidingCos dtype is Float32"
+  check (cpuTables.fullCos.2.dtype == .Float32) "fullCos dtype is Float32"
   checkTablesAgainstReference path cpuTables "cpu" 1e-5
 
   -- 3. Layout equivalence with the C++ fast path.
   let (fastCos, fastSin) :=
-    rotary.computeFreqsOnDevicePure maxLen cfg.rotaryDimSliding cfg.rope_theta_sliding Device.CPU
+    Tensor.rotaryFreqs maxLen cfg.rotaryDimSliding cfg.rope_theta_sliding Device.CPU
   check (fastCos.runtimeShape == #[1024, 64])
     s!"computeFreqsOnDevicePure sliding shape = {fastCos.runtimeShape}"
-  let dFastCos ← tensorMaxAbsDiff cpuTables.slidingCos (nn.eraseShape fastCos)
-  let dFastSin ← tensorMaxAbsDiff cpuTables.slidingSin (nn.eraseShape fastSin)
+  let dFastCos ← tensorMaxAbsDiff cpuTables.slidingCos.2 fastCos
+  let dFastSin ← tensorMaxAbsDiff cpuTables.slidingSin.2 fastSin
   -- Same formula and layout; the C++ table accumulates p * inv_freq in fp32
   -- while ours is computed in double, so they agree to ~6e-5 at p = 1023.
   check (dFastCos < 2e-4 && dFastSin < 2e-4)
     s!"sliding table layout == computeFreqsOnDevicePure (max|Δcos| = {dFastCos}, max|Δsin| = {dFastSin})"
 
   -- 4. End-to-end apply tests vs HF apply_rotary_pos_emb (CPU).
-  let q ← safetensors.loadTensor path "q_in" #[1, 16, 4, 128]
+  let q ← safetensors.loadTensorCandidates path #["q_in"] #[1, 16, 4, 128]
+  let q := q.2
   -- Full-attention layer: partial rotary (rotary_dim = 64) with the YaRN table.
-  let fullCos16 : T #[16, 32] := sliceRotaryRows cpuTables.fullCos 0 16
-  let fullSin16 : T #[16, 32] := sliceRotaryRows cpuTables.fullSin 0 16
+  let fullCos16 : Tensor { shape := #[16, 32], dtype := .Float32, device := .CPU } := sliceRotaryRows cpuTables.fullCos 0 16
+  let fullSin16 : Tensor { shape := #[16, 32], dtype := .Float32, device := .CPU } := sliceRotaryRows cpuTables.fullSin 0 16
   let qFull := applyRotaryPartial (rotary_dim := 64) q fullCos16 fullSin16
-  let refQFull ← safetensors.loadTensor path "q_out_full_yarn" #[1, 16, 4, 128]
-  let dQFull ← tensorMaxAbsDiff (nn.eraseShape qFull) (nn.eraseShape refQFull)
+  let refQFull ← safetensors.loadTensorCandidates path #["q_out_full_yarn"] #[1, 16, 4, 128]
+  let refQFull := refQFull.2
+  let dQFull ← tensorMaxAbsDiff qFull refQFull
   check (dQFull < 1e-4) s!"applyRotaryPartial (YaRN, prefill) vs HF: max|Δ| = {dQFull}"
   -- Sliding layer: full-width rotary (rotary_dim = head_dim = 128), direct apply.
-  let slCos16 : T #[16, 64] := sliceRotaryRows cpuTables.slidingCos 0 16
-  let slSin16 : T #[16, 64] := sliceRotaryRows cpuTables.slidingSin 0 16
-  let qSlide := rotary.applyRotaryEmb q slCos16 slSin16
-  let refQSlide ← safetensors.loadTensor path "q_out_sliding" #[1, 16, 4, 128]
-  let dQSlide ← tensorMaxAbsDiff (nn.eraseShape qSlide) (nn.eraseShape refQSlide)
+  let slCos16 : Tensor { shape := #[16, 64], dtype := .Float32, device := .CPU } := sliceRotaryRows cpuTables.slidingCos 0 16
+  let slSin16 : Tensor { shape := #[16, 64], dtype := .Float32, device := .CPU } := sliceRotaryRows cpuTables.slidingSin 0 16
+  let qSlide := Tensor.applyRotary q slCos16 slSin16
+  let refQSlide ← safetensors.loadTensorCandidates path #["q_out_sliding"] #[1, 16, 4, 128]
+  let refQSlide := refQSlide.2
+  let dQSlide ← tensorMaxAbsDiff qSlide refQSlide
   check (dQSlide < 1e-4) s!"applyRotaryEmb (sliding, prefill) vs HF: max|Δ| = {dQSlide}"
   -- applyRotaryPartial must agree with the direct apply for rotary_dim == head_dim
   -- (empty pass-through slice).
   let qSlide2 := applyRotaryPartial (rotary_dim := 128) q slCos16 slSin16
-  let dQSlide2 ← tensorMaxAbsDiff (nn.eraseShape qSlide2) (nn.eraseShape refQSlide)
+  let dQSlide2 ← tensorMaxAbsDiff qSlide2 refQSlide
   check (dQSlide2 < 1e-4) s!"applyRotaryPartial (full-width sliding) vs HF: max|Δ| = {dQSlide2}"
   -- Decode step: single row at position 5 through the partial YaRN path.
-  let cos1 : T #[1, 32] := sliceRotaryRows cpuTables.fullCos 5 1
-  let sin1 : T #[1, 32] := sliceRotaryRows cpuTables.fullSin 5 1
-  let q5 : T #[1, 1, 4, 128] := data.slice q 1 5 1
+  let cos1 : Tensor { shape := #[1, 32], dtype := .Float32, device := .CPU } := sliceRotaryRows cpuTables.fullCos 5 1
+  let sin1 : Tensor { shape := #[1, 32], dtype := .Float32, device := .CPU } := sliceRotaryRows cpuTables.fullSin 5 1
+  let q5 := q.sliceChecked 1 5 1 #[1, 1, 4, 128]
   let qPos5 := applyRotaryPartial (rotary_dim := 64) q5 cos1 sin1
-  let refQPos5 ← safetensors.loadTensor path "q_out_full_yarn_pos5" #[1, 1, 4, 128]
-  let dQPos5 ← tensorMaxAbsDiff (nn.eraseShape qPos5) (nn.eraseShape refQPos5)
+  let refQPos5 ← safetensors.loadTensorCandidates path #["q_out_full_yarn_pos5"] #[1, 1, 4, 128]
+  let refQPos5 := refQPos5.2
+  let dQPos5 ← tensorMaxAbsDiff qPos5 refQPos5
   check (dQPos5 < 1e-4) s!"applyRotaryPartial (YaRN, decode pos 5) vs HF: max|Δ| = {dQPos5}"
 
   -- 5. CUDA tables and apply.
   if ← cuda_is_available then
-    let gpuTables ← precomputeRotaryTables cfg maxLen (Device.CUDA 0)
-    check (gpuTables.slidingCos.device == Device.CUDA 0) "slidingCos is on CUDA"
-    check (gpuTables.fullCos.device == Device.CUDA 0) "fullCos is on CUDA"
-    check (gpuTables.slidingCos.runtimeShape == #[1024, 64])
-      s!"[cuda] slidingCos shape = {gpuTables.slidingCos.runtimeShape}"
-    check (gpuTables.fullCos.runtimeShape == #[1024, 32])
-      s!"[cuda] fullCos shape = {gpuTables.fullCos.runtimeShape}"
+    let device ← Device.cuda 0
+    let gpuTables ← precomputeRotaryTables cfg maxLen device
+    check (gpuTables.slidingCos.2.device == device) "slidingCos is on CUDA"
+    check (gpuTables.fullCos.2.device == device) "fullCos is on CUDA"
+    check (gpuTables.slidingCos.2.runtimeShape == #[1024, 64])
+      s!"[cuda] slidingCos shape = {gpuTables.slidingCos.2.runtimeShape}"
+    check (gpuTables.fullCos.2.runtimeShape == #[1024, 32])
+      s!"[cuda] fullCos shape = {gpuTables.fullCos.2.runtimeShape}"
     checkTablesAgainstReference path gpuTables "cuda" 1e-5
     -- CPU and CUDA tables are the same uploaded values.
-    let dGpuCpu ← tensorMaxAbsDiff gpuTables.fullCos cpuTables.fullCos
+    let dGpuCpu ← tensorMaxAbsDiff gpuTables.fullCos.2 cpuTables.fullCos.2
     check (dGpuCpu == 0.0) s!"cuda vs cpu fullCos identical (max|Δ| = {dGpuCpu})"
     -- Apply on device.
-    let qGpu : T #[1, 16, 4, 128] := q.to (Device.CUDA 0)
-    let gpuFullCos16 : T #[16, 32] := sliceRotaryRows gpuTables.fullCos 0 16
-    let gpuFullSin16 : T #[16, 32] := sliceRotaryRows gpuTables.fullSin 0 16
+    let qGpu : Tensor { shape := #[1, 16, 4, 128], dtype := q.dtype, device := device } := q.to device
+    let gpuFullCos16 : Tensor { shape := #[16, 32], dtype := .Float32, device := device } := sliceRotaryRows gpuTables.fullCos 0 16
+    let gpuFullSin16 : Tensor { shape := #[16, 32], dtype := .Float32, device := device } := sliceRotaryRows gpuTables.fullSin 0 16
     let qFullGpu := applyRotaryPartial (rotary_dim := 64) qGpu gpuFullCos16 gpuFullSin16
-    let dQFullGpu ← tensorMaxAbsDiff (nn.eraseShape qFullGpu) (nn.eraseShape refQFull)
+    let dQFullGpu ← tensorMaxAbsDiff qFullGpu refQFull
     check (dQFullGpu < 1e-4) s!"[cuda] applyRotaryPartial (YaRN, prefill) vs HF: max|Δ| = {dQFullGpu}"
   else
     IO.println "SKIP: CUDA not available, skipping CUDA table tests"

@@ -1,4 +1,5 @@
 import Tyr.TensorStruct
+import Tyr.Module.Derive
 
 /-!
 # Tyr.Optim
@@ -91,6 +92,11 @@ instance [TensorStruct S1] [TensorStruct S2] : TensorStruct (ChainState S1 S2) w
     let acc' := TensorStruct.fold f acc s.fst
     TensorStruct.fold f acc' s.snd
 
+derive_tensor_struct_for EmptyState
+derive_tensor_struct_for ScaleByAdamState
+derive_tensor_struct_for TraceState
+derive_tensor_struct_for ChainState
+
 /-! ## Gradient Transformation
 
 A gradient transformation consists of:
@@ -111,59 +117,59 @@ structure GradientTransformation (α : Type) (S : Type) where
 /-! ## Basic Transformations -/
 
 /-- Scale gradients by a constant factor -/
-def scale [TensorStruct α] (stepSize : Float) : GradientTransformation α EmptyState where
+def scale [TensorStruct α] [FloatingTensorStruct α] (stepSize : Float) : GradientTransformation α EmptyState where
   init _ := {}
   update _params grads state :=
-    (TensorStruct.map (fun t => mul_scalar t stepSize) grads, state)
+    (FloatingTensorStruct.map (fun t => Tensor.mulScalar t stepSize) grads, state)
 
 /-- Scale by Adam: EMA of gradients and squared gradients with bias correction -/
-def scale_by_adam [TensorStruct α] (b1 : Float := 0.9) (b2 : Float := 0.999) (eps : Float := 1e-8)
+def scale_by_adam [TensorStruct α] [FloatingTensorStruct α] (b1 : Float := 0.9) (b2 : Float := 0.999) (eps : Float := 1e-8)
     : GradientTransformation α (ScaleByAdamState α) where
   init model := {
     count := 0
     -- Use zeros_like to create state tensors on same device as model
-    mu := TensorStruct.map torch.zeros_like model
-    nu := TensorStruct.map torch.zeros_like model
+    mu := TensorStruct.map Tensor.zerosLike model
+    nu := TensorStruct.map Tensor.zerosLike model
   }
   update _params grads state :=
     let count := state.count + 1
     -- Update biased first moment estimate: mu = b1 * mu + (1 - b1) * g
-    let mu := TensorStruct.zipWith (fun m g =>
-      let g_d := autograd.detach g
-      add (mul_scalar m b1) (mul_scalar g_d (1.0 - b1))
+    let mu := FloatingTensorStruct.zipWith (fun m g =>
+      let g_d := Tensor.detach g
+      Tensor.add (Tensor.mulScalar m b1) (Tensor.mulScalar g_d (1.0 - b1))
     ) state.mu grads
     -- Update biased second moment estimate: nu = b2 * nu + (1 - b2) * g^2
-    let nu := TensorStruct.zipWith (fun v g =>
-      let g_d := autograd.detach g
-      add (mul_scalar v b2) (mul_scalar (mul g_d g_d) (1.0 - b2))
+    let nu := FloatingTensorStruct.zipWith (fun v g =>
+      let g_d := Tensor.detach g
+      Tensor.add (Tensor.mulScalar v b2) (Tensor.mulScalar (Tensor.mul g_d g_d) (1.0 - b2))
     ) state.nu grads
     -- Bias correction
     let bc1 := 1.0 - Float.pow b1 count.toFloat
     let bc2 := 1.0 - Float.pow b2 count.toFloat
     -- Compute updates: mu_hat / (sqrt(nu_hat) + eps)
-    let updates := TensorStruct.zipWith (fun m v =>
-      let m_hat := div_scalar m bc1
-      let v_hat := div_scalar v bc2
-      nn.div m_hat (add_scalar (nn.sqrt v_hat) eps)
+    let updates := FloatingTensorStruct.zipWith (fun m v =>
+      let m_hat : Tensor _ := by simpa using Tensor.divScalar m bc1
+      let v_hat : Tensor _ := by simpa using Tensor.divScalar v bc2
+      by simpa using Tensor.div m_hat (Tensor.addScalar (Tensor.sqrt v_hat) eps)
     ) mu nu
     (updates, { count, mu, nu })
 
 /-- Add weight decay to gradients: g' = g + decay * p -/
-def add_decayed_weights [TensorStruct α] (decay : Float) : GradientTransformation α EmptyState where
+def add_decayed_weights [TensorStruct α] [FloatingTensorStruct α] (decay : Float) : GradientTransformation α EmptyState where
   init _ := {}
   update params grads state :=
-    let updates := TensorStruct.zipWith (fun p g =>
-      let p_d := autograd.detach p
-      add g (mul_scalar p_d decay)
+    let updates := FloatingTensorStruct.zipWith (fun p g =>
+      let p_d := Tensor.detach p
+      Tensor.add g (Tensor.mulScalar p_d decay)
     ) params grads
     (updates, state)
 
 /-- Accumulate momentum trace: trace = decay * trace + g -/
-def trace [TensorStruct α] (decay : Float) : GradientTransformation α (TraceState α) where
-  init model := { trace := TensorStruct.map torch.zeros_like model }
+def trace [TensorStruct α] [FloatingTensorStruct α] (decay : Float) : GradientTransformation α (TraceState α) where
+  init model := { trace := TensorStruct.map Tensor.zerosLike model }
   update _params grads state :=
-    let new_trace := TensorStruct.zipWith (fun t g =>
-      add (mul_scalar t decay) g
+    let new_trace := FloatingTensorStruct.zipWith (fun t g =>
+      Tensor.add (Tensor.mulScalar t decay) g
     ) state.trace grads
     (new_trace, { trace := new_trace })
 
@@ -187,7 +193,7 @@ abbrev AdamWState (α : Type) := ChainState (ScaleByAdamState α) (ChainState Em
 
     Equivalent to: scale_by_adam → add_decayed_weights → scale(-lr)
 -/
-def adamw [TensorStruct α] (lr : Float := 1e-3) (b1 : Float := 0.9) (b2 : Float := 0.999)
+def adamw [TensorStruct α] [FloatingTensorStruct α] (lr : Float := 1e-3) (b1 : Float := 0.9) (b2 : Float := 0.999)
     (eps : Float := 1e-8) (weight_decay : Float := 0.01) : GradientTransformation α (AdamWState α) :=
   chain (scale_by_adam b1 b2 eps)
     (chain (add_decayed_weights weight_decay)
@@ -197,12 +203,12 @@ def adamw [TensorStruct α] (lr : Float := 1e-3) (b1 : Float := 0.9) (b2 : Float
 abbrev SGDState (α : Type) := ChainState (TraceState α) EmptyState
 
 /-- SGD with momentum -/
-def sgd_momentum [TensorStruct α] (lr : Float) (momentum : Float := 0.9)
+def sgd_momentum [TensorStruct α] [FloatingTensorStruct α] (lr : Float) (momentum : Float := 0.9)
     : GradientTransformation α (SGDState α) :=
   chain (trace momentum) (scale (-lr))
 
 /-- Simple SGD (no momentum) -/
-def sgd [TensorStruct α] (lr : Float) : GradientTransformation α EmptyState :=
+def sgd [TensorStruct α] [FloatingTensorStruct α] (lr : Float) : GradientTransformation α EmptyState :=
   scale (-lr)
 
 /-! ## Applying Updates -/
@@ -210,20 +216,21 @@ def sgd [TensorStruct α] (lr : Float) : GradientTransformation α EmptyState :=
 /-- Apply gradient updates to parameters: p' = p + updates
 
     Handles detaching and re-enabling requires_grad for training. -/
-def apply_updates [TensorStruct α] (params : α) (updates : α) : α :=
-  TensorStruct.zipWith (fun p u =>
-    let p_d := autograd.detach p
-    let p_new := add p_d u
-    autograd.set_requires_grad p_new true
+def apply_updates [TensorStruct α] [FloatingTensorStruct α] (params : α) (updates : α) : IO α :=
+  let updated := FloatingTensorStruct.zipWith (fun p u =>
+    let p_d := Tensor.detach p
+    Tensor.add p_d u
   ) params updates
+  TensorStruct.mapM Tensor.parameter updated
 
 /-- Full optimizer step: transform gradients and apply to parameters
 
     Returns (new_params, new_state) -/
-def step [TensorStruct α] (opt : GradientTransformation α S) (params grads : α) (state : S)
-    : (α × S) :=
+def step [TensorStruct α] [FloatingTensorStruct α] (opt : GradientTransformation α S) (params grads : α) (state : S)
+    : IO (α × S) := do
   let (updates, newState) := opt.update params grads state
-  (apply_updates params updates, newState)
+  let params ← apply_updates params updates
+  pure (params, newState)
 
 /-! ## Schedule-Based Scaling
 
@@ -245,6 +252,8 @@ instance : TensorStruct ScaleByScheduleState where
   zipWith _ s _ := s
   fold _ acc _ := acc
 
+derive_tensor_struct_for ScaleByScheduleState
+
 /-- Scale updates by a step-dependent schedule.
 
     At each step, multiplies all updates by `schedule(count)` and increments
@@ -252,12 +261,12 @@ instance : TensorStruct ScaleByScheduleState where
     learning rate schedules into optimizer chains.
 
     Example: `chain (scale_by_adam) (chain (scale_by_schedule mySchedule) (scale (-1.0)))` -/
-def scale_by_schedule [TensorStruct α] (schedule : Schedule)
+def scale_by_schedule [TensorStruct α] [FloatingTensorStruct α] (schedule : Schedule)
     : GradientTransformation α ScaleByScheduleState where
   init _ := { count := 0 }
   update _params grads state :=
     let s := schedule state.count
-    let updates := TensorStruct.map (fun t => mul_scalar t s) grads
+    let updates := FloatingTensorStruct.map (fun t => Tensor.mulScalar t s) grads
     (updates, { count := state.count + 1 })
 
 /-! ## Schedule-Aware High-Level Optimizers -/
@@ -272,7 +281,7 @@ abbrev AdamWScheduleState (α : Type) :=
 
     The schedule receives the optimizer's internal step count and should return
     the learning rate for that step. -/
-def adamw_schedule [TensorStruct α] (lr_schedule : Schedule)
+def adamw_schedule [TensorStruct α] [FloatingTensorStruct α] (lr_schedule : Schedule)
     (b1 : Float := 0.9) (b2 : Float := 0.999) (eps : Float := 1e-8)
     (weight_decay : Float := 0.01) : GradientTransformation α (AdamWScheduleState α) :=
   chain (scale_by_adam b1 b2 eps)
@@ -285,21 +294,21 @@ abbrev SGDScheduleState (α : Type) :=
   ChainState (TraceState α) (ChainState ScaleByScheduleState EmptyState)
 
 /-- SGD with momentum and a learning rate schedule. -/
-def sgd_momentum_schedule [TensorStruct α] (lr_schedule : Schedule) (momentum : Float := 0.9)
+def sgd_momentum_schedule [TensorStruct α] [FloatingTensorStruct α] (lr_schedule : Schedule) (momentum : Float := 0.9)
     : GradientTransformation α (SGDScheduleState α) :=
   chain (trace momentum)
     (chain (scale_by_schedule lr_schedule)
            (scale (-1.0)))
 
 /-- SGD (no momentum) with a learning rate schedule. -/
-def sgd_schedule [TensorStruct α] (lr_schedule : Schedule)
+def sgd_schedule [TensorStruct α] [FloatingTensorStruct α] (lr_schedule : Schedule)
     : GradientTransformation α (ChainState ScaleByScheduleState EmptyState) :=
   chain (scale_by_schedule lr_schedule) (scale (-1.0))
 
 /-! ## Gradient Clipping (TODO)
 
-def clip_by_global_norm [TensorStruct α] (max_norm : Float) : GradientTransformation α EmptyState
-def clip_by_value [TensorStruct α] (min_val max_val : Float) : GradientTransformation α EmptyState
+def clip_by_global_norm [TensorStruct α] [FloatingTensorStruct α] (max_norm : Float) : GradientTransformation α EmptyState
+def clip_by_value [TensorStruct α] [FloatingTensorStruct α] (min_val max_val : Float) : GradientTransformation α EmptyState
 -/
 
 end torch.Optim

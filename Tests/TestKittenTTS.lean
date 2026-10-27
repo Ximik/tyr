@@ -1,5 +1,5 @@
-import Tyr
-import Tyr.Model.KittenTTS
+import Tyr.Model.KittenTTS.Model
+import Tyr.Checkpoint
 import LeanTest
 
 open torch
@@ -44,8 +44,8 @@ private def tinyCfg : KittenTTSConfig :=
 def testKittenTTSInitAndForward : IO Unit := do
   let cfg := tinyCfg
   let model ← Model.init cfg
-  let inputIds : T #[1, 5] ← randint 0 cfg.nToken.toInt64 #[1, 5]
-  let refStyle : T #[1, KittenTTSConfig.fullStyleDim cfg] ← randn #[1, KittenTTSConfig.fullStyleDim cfg]
+  let inputIds : Tensor { shape := #[1, 5], dtype := .Int64, device := .CPU } ← Tensor.randint 0 cfg.nToken.toInt64 #[1, 5]
+  let refStyle : Tensor { shape := #[1, KittenTTSConfig.fullStyleDim cfg], dtype := .Float32, device := .CPU } ← Tensor.randn #[1, KittenTTSConfig.fullStyleDim cfg]
   torch.manualSeed 12345
   let out ← model.synthesizeIds inputIds refStyle
   torch.manualSeed 12345
@@ -57,7 +57,7 @@ def testKittenTTSInitAndForward : IO Unit := do
     "debug synthesis should preserve duration predictions"
   LeanTest.assertEqual debugOut.alignmentFrames out.alignmentFrames
     "debug synthesis should preserve alignment length"
-  let audioShape := out.audio.runtimeShape
+  let audioShape := out.audio.2.runtimeShape
   LeanTest.assertEqual (audioShape.getD 0 0) 1 "audio batch dimension should be 1"
   LeanTest.assertEqual (audioShape.getD 1 0) 1 "audio channel dimension should be 1"
   LeanTest.assertEqual
@@ -65,8 +65,8 @@ def testKittenTTSInitAndForward : IO Unit := do
     (GeneratorConfig.waveSamples cfg.generator (2 * out.alignmentFrames))
     "audio sample length should match the full iSTFT vocoder expansion"
 
-  let audioVals ← data.tensorToFloatArray' out.audio
-  let debugAudioVals ← data.tensorToFloatArray' debugOut.audio
+  let audioVals ← Tensor.toFloatArray out.audio.2
+  let debugAudioVals ← Tensor.toFloatArray debugOut.audio.2
   LeanTest.assertTrue (!audioVals.isEmpty) "audio output should contain samples"
   LeanTest.assertEqual debugAudioVals.size audioVals.size
     "debug synthesis audio should match the regular forward path sample count"
@@ -87,3 +87,24 @@ def testKittenTTSInitAndForward : IO Unit := do
   LeanTest.assertTrue
     (maxDiff <= 1e-6)
     s!"debug synthesis audio should stay numerically aligned with the normal forward path (maxDiff={maxDiff}, avgDiff={avgDiff}, maxIdx={maxIdx})"
+
+-- Keep this generic to avoid expanding the entire model traversal into test C code.
+@[noinline, nospecialize]
+private def roundTripParams {α : Type} [TensorStruct α] (model template : α) (dir : String) : IO α := do
+  checkpoint.saveParams model dir
+  checkpoint.loadParams template dir
+
+@[test]
+def testKittenTTSIndexedCheckpointRoundTrip : IO Unit := IO.FS.withTempDir fun dir => do
+  let model ← Model.init tinyCfg
+  let template ← Model.init tinyCfg
+  let loaded ← roundTripParams model template dir.toString
+  let inputIds := (Tensor.fromInt64Array #[1, 2, 3]).reshapeChecked #[1, 3]
+  let style : Tensor { shape := #[1, KittenTTSConfig.fullStyleDim tinyCfg], dtype := .Float32, device := .CPU } := Tensor.zeros _
+  torch.manualSeed 42
+  let expected ← model.synthesizeIds inputIds style
+  torch.manualSeed 42
+  let actual ← loaded.synthesizeIds inputIds style
+  LeanTest.assertEqual actual.predDurations expected.predDurations
+  LeanTest.assertEqual actual.audio.1 expected.audio.1
+  LeanTest.assertEqual (← actual.audio.2.toFloatArray) (← expected.audio.2.toFloatArray)

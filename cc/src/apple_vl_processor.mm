@@ -1,3 +1,5 @@
+#include "generated/tyr_ffi.h"
+#include "tyr_checked_result.h"
 /*
  * apple_vl_processor.mm
  *
@@ -29,6 +31,37 @@ static lean_object* mk_io_error(const std::string& msg) {
   return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string(msg.c_str())));
 }
 
+// CoreFoundation Create/Copy ownership and pixel-buffer locks must survive C++
+// exceptions from the vectors and tensor allocations in the media pipeline.
+class ScopedCFRelease {
+  CFTypeRef value_;
+public:
+  explicit ScopedCFRelease(CFTypeRef value) : value_(value) {}
+  ScopedCFRelease(const ScopedCFRelease&) = delete;
+  ScopedCFRelease& operator=(const ScopedCFRelease&) = delete;
+  ~ScopedCFRelease() { reset(); }
+  void reset() {
+    if (value_) CFRelease(value_);
+    value_ = nullptr;
+  }
+};
+
+class ScopedPixelBufferLock {
+  CVPixelBufferRef value_;
+public:
+  explicit ScopedPixelBufferLock(CVPixelBufferRef value)
+      : value_(CVPixelBufferLockBaseAddress(value, kCVPixelBufferLock_ReadOnly) == kCVReturnSuccess
+                   ? value : nullptr) {}
+  ScopedPixelBufferLock(const ScopedPixelBufferLock&) = delete;
+  ScopedPixelBufferLock& operator=(const ScopedPixelBufferLock&) = delete;
+  ~ScopedPixelBufferLock() { reset(); }
+  bool locked() const { return value_ != nullptr; }
+  void reset() {
+    if (value_) CVPixelBufferUnlockBaseAddress(value_, kCVPixelBufferLock_ReadOnly);
+    value_ = nullptr;
+  }
+};
+
 static bool load_image_rgb_f32(
     const std::string& path,
     int& width,
@@ -43,13 +76,15 @@ static bool load_image_rgb_f32(
     }
 
     CGImageSourceRef src = CGImageSourceCreateWithURL((__bridge CFURLRef)url, nullptr);
+    ScopedCFRelease src_owner(src);
     if (src == nullptr) {
       err = "Failed to open image with ImageIO";
       return false;
     }
 
     CGImageRef img = CGImageSourceCreateImageAtIndex(src, 0, nullptr);
-    CFRelease(src);
+    ScopedCFRelease img_owner(img);
+    src_owner.reset();
     if (img == nullptr) {
       err = "Failed to decode image";
       return false;
@@ -58,13 +93,13 @@ static bool load_image_rgb_f32(
     width = static_cast<int>(CGImageGetWidth(img));
     height = static_cast<int>(CGImageGetHeight(img));
     if (width <= 0 || height <= 0) {
-      CGImageRelease(img);
       err = "Decoded image has invalid dimensions";
       return false;
     }
 
     std::vector<uint8_t> rgba(static_cast<size_t>(width) * static_cast<size_t>(height) * 4);
     CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
+    ScopedCFRelease color_space_owner(colorSpace);
     CGContextRef ctx = CGBitmapContextCreate(
       rgba.data(),
       width,
@@ -74,16 +109,16 @@ static bool load_image_rgb_f32(
       colorSpace,
       kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big
     );
-    CGColorSpaceRelease(colorSpace);
+    ScopedCFRelease context_owner(ctx);
+    color_space_owner.reset();
     if (ctx == nullptr) {
-      CGImageRelease(img);
       err = "Failed to create bitmap context";
       return false;
     }
 
     CGContextDrawImage(ctx, CGRectMake(0, 0, width, height), img);
-    CGContextRelease(ctx);
-    CGImageRelease(img);
+    context_owner.reset();
+    img_owner.reset();
 
     rgb.resize(static_cast<size_t>(width) * static_cast<size_t>(height) * 3);
     for (size_t i = 0; i < static_cast<size_t>(width) * static_cast<size_t>(height); ++i) {
@@ -443,6 +478,7 @@ static bool load_video_patchified_streaming(
 
     while (reader.status == AVAssetReaderStatusReading) {
       CMSampleBufferRef sample = [output copyNextSampleBuffer];
+      ScopedCFRelease sample_owner(sample);
       if (sample == nullptr) {
         break;
       }
@@ -450,23 +486,23 @@ static bool load_video_patchified_streaming(
       bool keep_frame = (decoded_frames % frame_stride) == 0;
       ++decoded_frames;
       if (!keep_frame) {
-        CFRelease(sample);
         continue;
       }
 
       CVImageBufferRef imgBuf = CMSampleBufferGetImageBuffer(sample);
       if (imgBuf == nullptr) {
-        CFRelease(sample);
         continue;
       }
       CVPixelBufferRef px = (CVPixelBufferRef)imgBuf;
-      CVPixelBufferLockBaseAddress(px, kCVPixelBufferLock_ReadOnly);
+      ScopedPixelBufferLock pixel_lock(px);
+      if (!pixel_lock.locked()) {
+        err = "Failed to lock video pixel buffer";
+        return false;
+      }
 
       int fw = static_cast<int>(CVPixelBufferGetWidth(px));
       int fh = static_cast<int>(CVPixelBufferGetHeight(px));
       if (fw <= 0 || fh <= 0) {
-        CVPixelBufferUnlockBaseAddress(px, kCVPixelBufferLock_ReadOnly);
-        CFRelease(sample);
         continue;
       }
 
@@ -475,8 +511,6 @@ static bool load_video_patchified_streaming(
         height = fh;
       }
       if (fw != width || fh != height) {
-        CVPixelBufferUnlockBaseAddress(px, kCVPixelBufferLock_ReadOnly);
-        CFRelease(sample);
         err = "Video frames have inconsistent dimensions";
         return false;
       }
@@ -497,8 +531,8 @@ static bool load_video_patchified_streaming(
         }
       }
 
-      CVPixelBufferUnlockBaseAddress(px, kCVPixelBufferLock_ReadOnly);
-      CFRelease(sample);
+      pixel_lock.reset();
+      sample_owner.reset();
 
       if (!have_grid) {
         if (!build_patch_grid(width, height, in_channels, patch_size, temporal_patch_size, grid, err)) {
@@ -561,8 +595,8 @@ lean_object* lean_torch_media_load_image_patchified(
     b_lean_obj_arg path_obj,
     uint64_t in_channels,
     uint64_t patch_size,
-    uint64_t temporal_patch_size,
-    lean_object* /*w*/) {
+    uint64_t temporal_patch_size) {
+  return tyr::checkedIoCall("loadImagePatchified", [&] {
   const char* path_c = lean_string_cstr(path_obj);
   std::string path(path_c);
 
@@ -591,6 +625,7 @@ lean_object* lean_torch_media_load_image_patchified(
       {static_cast<int64_t>(n_patches), static_cast<int64_t>(patch_dim)},
       torch::TensorOptions().dtype(torch::kFloat32)).clone();
   return lean_io_result_mk_ok(fromTorchTensor(t));
+  });
 }
 
 lean_object* lean_torch_media_load_video_patchified(
@@ -599,8 +634,8 @@ lean_object* lean_torch_media_load_video_patchified(
     uint64_t patch_size,
     uint64_t temporal_patch_size,
     uint64_t max_frames,
-    uint64_t frame_stride,
-    lean_object* /*w*/) {
+    uint64_t frame_stride) {
+  return tyr::checkedIoCall("loadVideoPatchified", [&] {
   const char* path_c = lean_string_cstr(path_obj);
   std::string path(path_c);
 
@@ -619,6 +654,7 @@ lean_object* lean_torch_media_load_video_patchified(
       {static_cast<int64_t>(n_patches), static_cast<int64_t>(patch_dim)},
       torch::TensorOptions().dtype(torch::kFloat32)).clone();
   return lean_io_result_mk_ok(fromTorchTensor(t));
+  });
 }
 
 LEAN_EXPORT lean_object* lean_torch_media_load_image_patch_grid_gemma4(
@@ -626,8 +662,8 @@ LEAN_EXPORT lean_object* lean_torch_media_load_image_patch_grid_gemma4(
     uint64_t patch_size,
     uint64_t pooling_kernel_size,
     uint64_t max_soft_tokens,
-    double rescale_factor,
-    lean_object* /*w*/) {
+    double rescale_factor) {
+  return tyr::checkedIoCall("loadGemma4ImagePatchGrid", [&] {
   const char* path_c = lean_string_cstr(path_obj);
   std::string path(path_c);
 
@@ -679,6 +715,7 @@ LEAN_EXPORT lean_object* lean_torch_media_load_image_patch_grid_gemma4(
       },
       torch::TensorOptions().dtype(torch::kFloat32)).clone();
   return lean_io_result_mk_ok(fromTorchTensor(t));
+  });
 }
 
 } // extern "C"
@@ -691,8 +728,7 @@ lean_object* lean_torch_media_load_image_patchified(
     b_lean_obj_arg /*path_obj*/,
     uint64_t /*in_channels*/,
     uint64_t /*patch_size*/,
-    uint64_t /*temporal_patch_size*/,
-    lean_object* /*w*/) {
+    uint64_t /*temporal_patch_size*/) {
   return lean_io_result_mk_error(lean_mk_io_user_error(
     lean_mk_string("Apple media path requires macOS build")));
 }
@@ -703,8 +739,7 @@ lean_object* lean_torch_media_load_video_patchified(
     uint64_t /*patch_size*/,
     uint64_t /*temporal_patch_size*/,
     uint64_t /*max_frames*/,
-    uint64_t /*frame_stride*/,
-    lean_object* /*w*/) {
+    uint64_t /*frame_stride*/) {
   return lean_io_result_mk_error(lean_mk_io_user_error(
     lean_mk_string("Apple media path requires macOS build")));
 }

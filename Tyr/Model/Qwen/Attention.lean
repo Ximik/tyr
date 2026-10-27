@@ -3,119 +3,199 @@
 
   Grouped Query Attention (GQA) for Qwen3.
   Uses fewer key-value heads than query heads for efficiency.
+
+  Indexed shapes and a shared dtype parameter preserve Float32 and BF16
+  execution. Native attention operations live behind typed adapters.
 -/
-import Tyr.Torch
+import Tyr.Typed.Neural
 import Tyr.TensorStruct
 import Tyr.Module.Core
 import Tyr.Module.Derive
 import Tyr.Model.Qwen.Config
+import Tyr.Model.Qwen.RoPE
 
 namespace torch.qwen
 
+variable {device : Device}
 /-- Qwen attention with Grouped Query Attention (GQA).
     Query heads: num_attention_heads
     Key/Value heads: num_key_value_heads (typically 4 for Qwen3-4B)
     Each KV head is shared across multiple query heads. -/
-structure QwenAttention (hidden_size num_heads num_kv_heads head_dim : UInt64) where
+structure QwenAttention (hidden_size num_heads num_kv_heads head_dim : UInt64) (dtype : DType := .Float32) where
   /-- Query projection: [hidden_size, hidden_size] -/
-  q_proj : T #[num_heads * head_dim, hidden_size]
+  q_proj : Tensor { device := device, shape := #[num_heads * head_dim, hidden_size], dtype := dtype }
   /-- Key projection: [kv_dim, hidden_size] -/
-  k_proj : T #[num_kv_heads * head_dim, hidden_size]
+  k_proj : Tensor { device := device, shape := #[num_kv_heads * head_dim, hidden_size], dtype := dtype }
   /-- Value projection: [kv_dim, hidden_size] -/
-  v_proj : T #[num_kv_heads * head_dim, hidden_size]
+  v_proj : Tensor { device := device, shape := #[num_kv_heads * head_dim, hidden_size], dtype := dtype }
   /-- Output projection: [hidden_size, hidden_size] -/
-  o_proj : T #[hidden_size, num_heads * head_dim]
+  o_proj : Tensor { device := device, shape := #[hidden_size, num_heads * head_dim], dtype := dtype }
   /-- Optional Q norm (per-head normalization for Flux Klein text encoder) -/
-  q_norm : Option (T #[head_dim]) := none
+  q_norm : Option (Tensor { device := device, shape := #[head_dim], dtype := dtype }) := none
   /-- Optional K norm (per-head normalization for Flux Klein text encoder) -/
-  k_norm : Option (T #[head_dim]) := none
+  k_norm : Option (Tensor { device := device, shape := #[head_dim], dtype := dtype }) := none
   deriving TensorStruct
 
 namespace QwenAttention
 
+variable {dtype : DType}
+variable [DType.RealFloating dtype]
+
 /-- Initialize attention layers with random weights -/
-def init (hidden_size num_heads num_kv_heads head_dim : UInt64) : IO (QwenAttention hidden_size num_heads num_kv_heads head_dim) := do
+def init (hidden_size num_heads num_kv_heads head_dim : UInt64) (dtype : DType := .Float32) (device : Device := .CPU) : IO (QwenAttention (device := device) hidden_size num_heads num_kv_heads head_dim dtype) := do
+  let floating ← IO.ofExcept (DType.realFloating? dtype)
+  let _ := floating.down
   let std := Float.sqrt (2.0 / hidden_size.toFloat)
 
-  let q ← torch.randn #[num_heads * head_dim, hidden_size]
-  let k ← torch.randn #[num_kv_heads * head_dim, hidden_size]
-  let v ← torch.randn #[num_kv_heads * head_dim, hidden_size]
-  let o ← torch.randn #[hidden_size, num_heads * head_dim]
+  let q ← Tensor.randn (device := device) #[num_heads * head_dim, hidden_size]
+  let q := q.castDType dtype
+  let k ← Tensor.randn (device := device) #[num_kv_heads * head_dim, hidden_size]
+  let k := k.castDType dtype
+  let v ← Tensor.randn (device := device) #[num_kv_heads * head_dim, hidden_size]
+  let v := v.castDType dtype
+  let o ← Tensor.randn (device := device) #[hidden_size, num_heads * head_dim]
+  let o := o.castDType dtype
 
   pure {
-    q_proj := autograd.set_requires_grad (mul_scalar q std) true
-    k_proj := autograd.set_requires_grad (mul_scalar k std) true
-    v_proj := autograd.set_requires_grad (mul_scalar v std) true
-    o_proj := autograd.set_requires_grad (mul_scalar o std) true
+    q_proj := (← Tensor.parameter (Tensor.mulScalar q std))
+    k_proj := (← Tensor.parameter (Tensor.mulScalar k std))
+    v_proj := (← Tensor.parameter (Tensor.mulScalar v std))
+    o_proj := (← Tensor.parameter (Tensor.mulScalar o std))
   }
 
 /-- Incremental KV cache for one attention layer.
-    Stores preallocated K/V buffers with maximum length `maxLen`. -/
-structure KVCache (batch num_kv_heads head_dim : UInt64) where
-  kStoreDyn : T #[]
-  vStoreDyn : T #[]
+    Stores preallocated K/V buffers with capacity `maxLen`.
+
+    `maxLen` is a runtime value (not a type index), so the stores are
+    carried existentially over their shape and re-validated against the
+    cache metadata by `expectStore` at every decode step — the typed
+    adapter for rank changes without erasing the tensor specification. -/
+structure KVCache (batch num_kv_heads head_dim : UInt64) (dtype : DType := .Float32) where
+  kStoreDyn : Σ (s : Shape), Tensor { device := device, shape := s, dtype := dtype }
+  vStoreDyn : Σ (s : Shape), Tensor { device := device, shape := s, dtype := dtype }
   seq : UInt64 := 0
   maxLen : UInt64 := 0
 
 /-- Empty static KV cache with fixed capacity `maxLen`. -/
 def initKVCache {batch num_kv_heads head_dim : UInt64}
     (maxLen : UInt64)
-    (device : Device := Device.CPU) : KVCache batch num_kv_heads head_dim :=
-  let k0 : T #[batch, num_kv_heads, maxLen, head_dim] :=
-    torch.zeros #[batch, num_kv_heads, maxLen, head_dim] false device
-  let v0 : T #[batch, num_kv_heads, maxLen, head_dim] :=
-    torch.zeros #[batch, num_kv_heads, maxLen, head_dim] false device
-  { kStoreDyn := nn.eraseShape k0, vStoreDyn := nn.eraseShape v0, seq := 0, maxLen := maxLen }
+    (device : Device := Device.CPU) (dtype : DType := .Float32)
+    [DType.ConstantSupported dtype device] : KVCache (device := device) batch num_kv_heads head_dim dtype :=
+  let k0 : Tensor { device := device, shape := #[batch, num_kv_heads, maxLen, head_dim], dtype := dtype } :=
+    Tensor.zerosFor ⟨#[batch, num_kv_heads, maxLen, head_dim], dtype, device⟩
+  let v0 : Tensor { device := device, shape := #[batch, num_kv_heads, maxLen, head_dim], dtype := dtype } :=
+    Tensor.zerosFor ⟨#[batch, num_kv_heads, maxLen, head_dim], dtype, device⟩
+  { kStoreDyn := ⟨_, k0⟩, vStoreDyn := ⟨_, v0⟩, seq := 0, maxLen := maxLen }
+
+/-- Recover the statically-shaped store from its existential carrier,
+    validating the runtime handle against the cache metadata. -/
+private def expectStore {batch num_kv_heads head_dim : UInt64}
+    (store : Σ (s : Shape), Tensor { device := device, shape := s, dtype := dtype }) (maxLen : UInt64)
+    : Tensor { device := device, shape := #[batch, num_kv_heads, maxLen, head_dim], dtype := dtype } :=
+  match Tensor.ofRaw store.2.raw with
+  | .ok t => t
+  | .error message => nativeInvariantFailure s!"QwenAttention.KVCache store: {message}"
+
+/-! ## Extern adapters
+
+Typed wrappers over existing attention externs that have no counterpart in
+`Tyr.Typed.Ops` yet. Each re-asserts the output spec the extern is known to
+produce (see `Tyr/Inference/KVCache.lean` for the same pattern). -/
+
+/-- [batch, seq, n_head, head_dim] → [batch, n_head, seq, head_dim] (contiguous). -/
+private def transposeForAttention {batch seq n_head head_dim : UInt64} {d : DType} {dev : Device}
+    (x : Tensor ⟨#[batch, seq, n_head, head_dim], d, dev⟩)
+    : Tensor ⟨#[batch, n_head, seq, head_dim], d, dev⟩ :=
+  Tensor.splitHeads x
+
+/-- [batch, n_head, seq, head_dim] → [batch, seq, n_head, head_dim] (contiguous). -/
+private def transposeFromAttention {batch n_head seq head_dim : UInt64} {d : DType} {dev : Device}
+    (x : Tensor ⟨#[batch, n_head, seq, head_dim], d, dev⟩)
+    : Tensor ⟨#[batch, seq, n_head, head_dim], d, dev⟩ :=
+  Tensor.joinHeads x
+
+/-- Scaled dot-product attention with GQA; output shares the query spec. -/
+private def sdpaGQA {batch n_head n_kv_head seq head_dim : UInt64} {d : DType} {dev : Device}
+    (query : Tensor ⟨#[batch, n_head, seq, head_dim], d, dev⟩)
+    (key : Tensor ⟨#[batch, n_kv_head, seq, head_dim], d, dev⟩)
+    (value : Tensor ⟨#[batch, n_kv_head, seq, head_dim], d, dev⟩)
+    (isCausal : Bool) (enableGqa : Bool)
+    : Tensor ⟨#[batch, n_head, seq, head_dim], d, dev⟩ :=
+  Tensor.attentionGQA query key value isCausal enableGqa
+
+/-- SDPA with GQA where query and KV sequence lengths differ. -/
+private def sdpaGQAQKV {batch n_head n_kv_head q_seq kv_seq head_dim : UInt64} {d : DType} {dev : Device}
+    (query : Tensor ⟨#[batch, n_head, q_seq, head_dim], d, dev⟩)
+    (key : Tensor ⟨#[batch, n_kv_head, kv_seq, head_dim], d, dev⟩)
+    (value : Tensor ⟨#[batch, n_kv_head, kv_seq, head_dim], d, dev⟩)
+    (isCausal : Bool) (enableGqa : Bool)
+    : Tensor ⟨#[batch, n_head, q_seq, head_dim], d, dev⟩ :=
+  Tensor.attentionGQAQKV query key value isCausal enableGqa
+
+/-- SDPA with GQA and a [batch, seq] padding mask. The mask dtype stays
+    generic: the extern accepts any runtime dtype and the legacy callers
+    were dtype-erased here. -/
+private def sdpaGQAMask {batch n_head n_kv_head seq head_dim : UInt64} {d dm : DType} {dev : Device}
+    (query : Tensor ⟨#[batch, n_head, seq, head_dim], d, dev⟩)
+    (key : Tensor ⟨#[batch, n_kv_head, seq, head_dim], d, dev⟩)
+    (value : Tensor ⟨#[batch, n_kv_head, seq, head_dim], d, dev⟩)
+    (mask : Tensor ⟨#[batch, seq], dm, dev⟩)
+    (isCausal : Bool) (enableGqa : Bool)
+    : Tensor ⟨#[batch, n_head, seq, head_dim], d, dev⟩ :=
+  Tensor.attentionGQAMask query key value mask isCausal enableGqa
+
+/-- Experimental Tyr FlashAttention entry point; output shares the query spec. -/
+private def flashAttn4d {batch nHead nKvHead qSeq kvSeq headDim : UInt64} {d : DType} {dev : Device}
+    (query : Tensor ⟨#[batch, nHead, qSeq, headDim], d, dev⟩)
+    (key : Tensor ⟨#[batch, nKvHead, kvSeq, headDim], d, dev⟩)
+    (value : Tensor ⟨#[batch, nKvHead, kvSeq, headDim], d, dev⟩)
+    (enableGqa : Bool) : Tensor ⟨#[batch, nHead, qSeq, headDim], d, dev⟩ :=
+  Tensor.flashAttention query key value enableGqa
+
+/-- `sliceScatter`: replace a slice of `input` along `dim` at `start` with
+    `src`; the result preserves the input spec. -/
+private def sliceScatterAlong {s srcShape : Shape} {d : DType} {dev : Device}
+    (input : Tensor ⟨s, d, dev⟩) (dim : UInt64) (start : UInt64)
+    (src : Tensor ⟨srcShape, d, dev⟩) : Tensor ⟨s, d, dev⟩ :=
+  Tensor.sliceScatter input dim start src
+
+/-- Mean over one axis with the result shape validated at runtime. -/
+private def meanDimTo {s : Shape} {d : DType} {dev : Device}
+    (t : Tensor ⟨s, d, dev⟩) (dim : Nat) (out : Shape) (keepdim : Bool := false)
+    : Tensor ⟨out, d, dev⟩ :=
+  match Tensor.ofRaw (RawTensor.mean s t.raw (some #[dim.toUInt64]) keepdim) with
+  | .ok r => r
+  | .error message => nativeInvariantFailure s!"QwenAttention.meanDim: {message}"
 
 /-- Apply RMS normalization along the last dimension (per-head norm).
     Input: [batch, seq, n_heads, head_dim], norm: [head_dim]
     Broadcasts norm across all heads. -/
 private def applyHeadNorm {batch seq n_heads head_dim : UInt64}
-    (x : T #[batch, seq, n_heads, head_dim])
-    (norm : T #[head_dim])
+    (x : Tensor { device := device, shape := #[batch, seq, n_heads, head_dim], dtype := dtype })
+    (norm : Tensor { device := device, shape := #[head_dim], dtype := dtype })
     (eps : Float := 1e-6)
-    : T #[batch, seq, n_heads, head_dim] :=
-  -- RMSNorm: x / sqrt(mean(x^2) + eps) * scale
-  -- We need to compute this per-head (over head_dim dimension)
-  let x2 := x * x  -- element-wise square
-  -- Flatten to [batch * seq * n_heads, head_dim] for mean computation
-  let x2_flat := reshape x2 #[batch * seq * n_heads, head_dim]
-  let x_flat := reshape x #[batch * seq * n_heads, head_dim]
-  -- Mean over last dim (head_dim)
-  let variance := nn.meanDim x2_flat 1 false  -- [batch*seq*n_heads]
-  -- Add epsilon and compute rsqrt
-  let variance_plus_eps := variance + eps
-  let rsqrt_flat := nn.rsqrt variance_plus_eps  -- [batch*seq*n_heads]
-  -- Expand rsqrt to match x_flat: [batch*seq*n_heads, 1]
-  let rsqrt_expanded := nn.unsqueeze rsqrt_flat 1  -- [batch*seq*n_heads, 1]
-  let rsqrt_broadcast := nn.expand rsqrt_expanded #[batch * seq * n_heads, head_dim]
-  -- Normalize
-  let normalized_flat := x_flat * rsqrt_broadcast
-  let normalized := reshape normalized_flat #[batch, seq, n_heads, head_dim]
-  -- Apply scale (broadcast norm across batch, seq, n_heads)
-  let norm_4d := reshape norm #[1, 1, 1, head_dim]
-  let norm_expanded := nn.expand norm_4d #[batch, seq, n_heads, head_dim]
-  normalized * norm_expanded
+    : Tensor { device := device, shape := #[batch, seq, n_heads, head_dim], dtype := dtype } :=
+  Tensor.rmsNormPreserving x norm eps
 
 /-- Forward pass for attention.
     Input: [batch, seq, hidden_size]
     Output: [batch, seq, hidden_size] -/
 def forward {batch seq hidden_size num_heads num_kv_heads head_dim : UInt64}
-    (attn : QwenAttention hidden_size num_heads num_kv_heads head_dim)
-    (x : T #[batch, seq, hidden_size])
-    (cos : T #[seq, head_dim / 2])
-    (sin : T #[seq, head_dim / 2])
+    (attn : QwenAttention (device := device) hidden_size num_heads num_kv_heads head_dim dtype)
+    (x : Tensor { device := device, shape := #[batch, seq, hidden_size], dtype := dtype })
+    (cos : Tensor { device := device, shape := #[seq, head_dim / 2], dtype := .Float32 })
+    (sin : Tensor { device := device, shape := #[seq, head_dim / 2], dtype := .Float32 })
     (is_causal : Bool := true)
-    : T #[batch, seq, hidden_size] :=
+    : Tensor { device := device, shape := #[batch, seq, hidden_size], dtype := dtype } :=
   -- Project to Q, K, V
-  let q := linear3d x attn.q_proj  -- [batch, seq, num_heads * head_dim]
-  let k := linear3d x attn.k_proj  -- [batch, seq, num_kv_heads * head_dim]
-  let v := linear3d x attn.v_proj  -- [batch, seq, num_kv_heads * head_dim]
+  let q := Tensor.linear3d x attn.q_proj  -- [batch, seq, num_heads * head_dim]
+  let k := Tensor.linear3d x attn.k_proj  -- [batch, seq, num_kv_heads * head_dim]
+  let v := Tensor.linear3d x attn.v_proj  -- [batch, seq, num_kv_heads * head_dim]
 
   -- Reshape to [batch, seq, num_heads, head_dim]
-  let q := reshape q #[batch, seq, num_heads, head_dim]
-  let k := reshape k #[batch, seq, num_kv_heads, head_dim]
-  let v := reshape v #[batch, seq, num_kv_heads, head_dim]
+  let q := q.reshapeChecked #[batch, seq, num_heads, head_dim]
+  let k := k.reshapeChecked #[batch, seq, num_kv_heads, head_dim]
+  let v := v.reshapeChecked #[batch, seq, num_kv_heads, head_dim]
 
   -- Apply Q/K norms if present (Flux Klein text encoder has these)
   let q := match attn.q_norm with
@@ -126,51 +206,51 @@ def forward {batch seq hidden_size num_heads num_kv_heads head_dim : UInt64}
     | none => k
 
   -- Apply RoPE to Q and K
-  let q := rotary.applyRotaryEmb q cos sin
-  let k := rotary.applyRotaryEmb k cos sin
+  let q := applyRotaryEmb q cos sin
+  let k := applyRotaryEmb k cos sin
 
   -- Transpose to [batch, num_heads, seq, head_dim]
-  let q := nn.transpose_for_attention q
-  let k := nn.transpose_for_attention k
-  let v := nn.transpose_for_attention v
+  let q := transposeForAttention q
+  let k := transposeForAttention k
+  let v := transposeForAttention v
 
   -- Scaled dot-product attention with GQA
-  let attn_out := nn.scaledDotProductAttentionGQA q k v 0.0 is_causal true
+  let attn_out := sdpaGQA q k v is_causal true
 
   -- Transpose back to [batch, seq, num_heads, head_dim]
-  let attn_out := nn.transpose_from_attention attn_out
+  let attn_out := transposeFromAttention attn_out
 
   -- Reshape to [batch, seq, hidden_size]
-  let attn_out := reshape attn_out #[batch, seq, num_heads * head_dim]
+  let attn_out := attn_out.reshapeChecked #[batch, seq, num_heads * head_dim]
 
   -- Output projection
-  linear3d attn_out attn.o_proj
+  Tensor.linear3d attn_out attn.o_proj
 
 /-- Incremental attention step with KV cache.
     Input query is one token `[batch,1,hidden]`; cache grows by one KV step.
 
     When `useTyrFlashAttn` is true (default false), routes the cached
-    attention through `nn.tyrFlashAttn4d` instead of `scaledDotProductAttentionGQAQKV`.
+    attention through `Tensor.flashAttention` instead of `scaledDotProductAttentionGQAQKV`.
     The C++ `tyr::flash_attn` dispatcher then routes shape-eligible decode
     problems (BF16 + qSeq=1 + head_dim=128 or 64 + GQA-valid) to the native
     TK kernel `tkMhaH100DecodeFwd[64]`, and falls back to PyTorch SDPA
     otherwise — so this flag is safe to flip on for any shape. -/
 def forwardStep {batch hidden_size num_heads num_kv_heads head_dim : UInt64}
-    (attn : QwenAttention hidden_size num_heads num_kv_heads head_dim)
-    (x : T #[batch, 1, hidden_size])
-    (cos : T #[1, head_dim / 2])
-    (sin : T #[1, head_dim / 2])
-    (cache : KVCache batch num_kv_heads head_dim)
+    (attn : QwenAttention (device := device) hidden_size num_heads num_kv_heads head_dim dtype)
+    (x : Tensor { device := device, shape := #[batch, 1, hidden_size], dtype := dtype })
+    (cos : Tensor { device := device, shape := #[1, head_dim / 2], dtype := .Float32 })
+    (sin : Tensor { device := device, shape := #[1, head_dim / 2], dtype := .Float32 })
+    (cache : KVCache (device := device) batch num_kv_heads head_dim dtype)
     (useTyrFlashAttn : Bool := false)
-    : T #[batch, 1, hidden_size] × KVCache batch num_kv_heads head_dim :=
+    : Tensor { device := device, shape := #[batch, 1, hidden_size], dtype := dtype } × KVCache (device := device) batch num_kv_heads head_dim dtype :=
   -- Project current token to Q/K/V.
-  let q0 := linear3d x attn.q_proj
-  let k0 := linear3d x attn.k_proj
-  let v0 := linear3d x attn.v_proj
+  let q0 := Tensor.linear3d x attn.q_proj
+  let k0 := Tensor.linear3d x attn.k_proj
+  let v0 := Tensor.linear3d x attn.v_proj
 
-  let q := reshape q0 #[batch, 1, num_heads, head_dim]
-  let k := reshape k0 #[batch, 1, num_kv_heads, head_dim]
-  let v := reshape v0 #[batch, 1, num_kv_heads, head_dim]
+  let q := q0.reshapeChecked #[batch, 1, num_heads, head_dim]
+  let k := k0.reshapeChecked #[batch, 1, num_kv_heads, head_dim]
+  let v := v0.reshapeChecked #[batch, 1, num_kv_heads, head_dim]
 
   -- Apply optional per-head Q/K normalization.
   let q := match attn.q_norm with
@@ -181,41 +261,39 @@ def forwardStep {batch hidden_size num_heads num_kv_heads head_dim : UInt64}
     | none => k
 
   -- Apply RoPE to the single-step Q/K.
-  let q := rotary.applyRotaryEmb q cos sin
-  let k := rotary.applyRotaryEmb k cos sin
+  let q := applyRotaryEmb q cos sin
+  let k := applyRotaryEmb k cos sin
 
   -- Convert to attention layout and write new KV into preallocated cache.
-  let qh : T #[batch, num_heads, 1, head_dim] := nn.transpose_for_attention q
-  let kNew : T #[batch, num_kv_heads, 1, head_dim] := nn.transpose_for_attention k
-  let vNew : T #[batch, num_kv_heads, 1, head_dim] := nn.transpose_for_attention v
+  let qh := transposeForAttention q
+  let kNew := transposeForAttention k
+  let vNew := transposeForAttention v
 
-  let kStore : T #[batch, num_kv_heads, cache.maxLen, head_dim] :=
-    castLike kNew (reshape cache.kStoreDyn #[batch, num_kv_heads, cache.maxLen, head_dim])
-  let vStore : T #[batch, num_kv_heads, cache.maxLen, head_dim] :=
-    castLike vNew (reshape cache.vStoreDyn #[batch, num_kv_heads, cache.maxLen, head_dim])
+  let kStore : Tensor { device := device, shape := #[batch, num_kv_heads, cache.maxLen, head_dim], dtype := dtype } :=
+    Tensor.castLike kNew (expectStore cache.kStoreDyn cache.maxLen)
+  let vStore : Tensor { device := device, shape := #[batch, num_kv_heads, cache.maxLen, head_dim], dtype := dtype } :=
+    Tensor.castLike vNew (expectStore cache.vStoreDyn cache.maxLen)
 
   if cache.seq < cache.maxLen then
-    let kStore' : T #[batch, num_kv_heads, cache.maxLen, head_dim] :=
-      data.sliceScatter kStore 2 cache.seq kNew
-    let vStore' : T #[batch, num_kv_heads, cache.maxLen, head_dim] :=
-      data.sliceScatter vStore 2 cache.seq vNew
+    let kStore' := sliceScatterAlong kStore 2 cache.seq kNew
+    let vStore' := sliceScatterAlong vStore 2 cache.seq vNew
     let kvLen : UInt64 := cache.seq + 1
-    let kAll : T #[batch, num_kv_heads, kvLen, head_dim] := data.slice kStore' 2 0 kvLen
-    let vAll : T #[batch, num_kv_heads, kvLen, head_dim] := data.slice vStore' 2 0 kvLen
+    let kAll := kStore'.sliceChecked 2 0 kvLen #[batch, num_kv_heads, kvLen, head_dim]
+    let vAll := vStore'.sliceChecked 2 0 kvLen #[batch, num_kv_heads, kvLen, head_dim]
 
     -- Use q_len=1, kv_len=(seq+1). Causal masking is unnecessary because KV has no future tokens.
-    let attnOut : T #[batch, num_heads, 1, head_dim] :=
+    let attnOut :=
       if useTyrFlashAttn then
-        nn.tyrFlashAttn4d qh kAll vAll none 0.0 false none true
+        flashAttn4d qh kAll vAll true
       else
-        nn.scaledDotProductAttentionGQAQKV qh kAll vAll 0.0 false true
-    let attnOut : T #[batch, 1, num_heads, head_dim] := nn.transpose_from_attention attnOut
-    let attnOut : T #[batch, 1, num_heads * head_dim] := reshape attnOut #[batch, 1, num_heads * head_dim]
-    let out : T #[batch, 1, hidden_size] := linear3d attnOut attn.o_proj
+        sdpaGQAQKV qh kAll vAll false true
+    let attnOut := transposeFromAttention attnOut
+    let attnOut := attnOut.reshapeChecked #[batch, 1, num_heads * head_dim]
+    let out := Tensor.linear3d attnOut attn.o_proj
 
-    let cache' : KVCache batch num_kv_heads head_dim := {
-      kStoreDyn := nn.eraseShape kStore'
-      vStoreDyn := nn.eraseShape vStore'
+    let cache' : KVCache (device := device) batch num_kv_heads head_dim dtype := {
+      kStoreDyn := ⟨_, kStore'⟩
+      vStoreDyn := ⟨_, vStore'⟩
       seq := kvLen
       maxLen := cache.maxLen
     }
@@ -226,46 +304,45 @@ def forwardStep {batch hidden_size num_heads num_kv_heads head_dim : UInt64}
         0
       else
         cache.maxLen - 1
-    let kStore' : T #[batch, num_kv_heads, cache.maxLen, head_dim] :=
-      data.sliceScatter kStore 2 writePos kNew
-    let vStore' : T #[batch, num_kv_heads, cache.maxLen, head_dim] :=
-      data.sliceScatter vStore 2 writePos vNew
+    let kStore' := sliceScatterAlong kStore 2 writePos kNew
+    let vStore' := sliceScatterAlong vStore 2 writePos vNew
     let kvLen : UInt64 := cache.maxLen
-    let kAll : T #[batch, num_kv_heads, kvLen, head_dim] := data.slice kStore' 2 0 kvLen
-    let vAll : T #[batch, num_kv_heads, kvLen, head_dim] := data.slice vStore' 2 0 kvLen
-    let attnOut : T #[batch, num_heads, 1, head_dim] :=
+    let kAll := kStore'.sliceChecked 2 0 kvLen #[batch, num_kv_heads, kvLen, head_dim]
+    let vAll := vStore'.sliceChecked 2 0 kvLen #[batch, num_kv_heads, kvLen, head_dim]
+    let attnOut :=
       if useTyrFlashAttn then
-        nn.tyrFlashAttn4d qh kAll vAll none 0.0 false none true
+        flashAttn4d qh kAll vAll true
       else
-        nn.scaledDotProductAttentionGQAQKV qh kAll vAll 0.0 false true
-    let attnOut : T #[batch, 1, num_heads, head_dim] := nn.transpose_from_attention attnOut
-    let attnOut : T #[batch, 1, num_heads * head_dim] := reshape attnOut #[batch, 1, num_heads * head_dim]
-    let out : T #[batch, 1, hidden_size] := linear3d attnOut attn.o_proj
-    let cache' : KVCache batch num_kv_heads head_dim := {
-      kStoreDyn := nn.eraseShape kStore'
-      vStoreDyn := nn.eraseShape vStore'
+        sdpaGQAQKV qh kAll vAll false true
+    let attnOut := transposeFromAttention attnOut
+    let attnOut := attnOut.reshapeChecked #[batch, 1, num_heads * head_dim]
+    let out := Tensor.linear3d attnOut attn.o_proj
+    let cache' : KVCache (device := device) batch num_kv_heads head_dim dtype := {
+      kStoreDyn := ⟨_, kStore'⟩
+      vStoreDyn := ⟨_, vStore'⟩
       seq := cache.maxLen
       maxLen := cache.maxLen
     }
     (out, cache')
 
 def forwardMasked {batch seq hidden_size num_heads num_kv_heads head_dim : UInt64}
-    (attn : QwenAttention hidden_size num_heads num_kv_heads head_dim)
-    (x : T #[batch, seq, hidden_size])
-    (cos : T #[seq, head_dim / 2])
-    (sin : T #[seq, head_dim / 2])
-    (attn_mask : T #[batch, seq])
+    {maskDtype : DType}
+    (attn : QwenAttention (device := device) hidden_size num_heads num_kv_heads head_dim dtype)
+    (x : Tensor { device := device, shape := #[batch, seq, hidden_size], dtype := dtype })
+    (cos : Tensor { device := device, shape := #[seq, head_dim / 2], dtype := .Float32 })
+    (sin : Tensor { device := device, shape := #[seq, head_dim / 2], dtype := .Float32 })
+    (attn_mask : Tensor ⟨#[batch, seq], maskDtype, device⟩)
     (is_causal : Bool := true)
-    : T #[batch, seq, hidden_size] :=
+    : Tensor { device := device, shape := #[batch, seq, hidden_size], dtype := dtype } :=
   -- Project to Q, K, V
-  let q := linear3d x attn.q_proj  -- [batch, seq, num_heads * head_dim]
-  let k := linear3d x attn.k_proj  -- [batch, seq, num_kv_heads * head_dim]
-  let v := linear3d x attn.v_proj  -- [batch, seq, num_kv_heads * head_dim]
+  let q := Tensor.linear3d x attn.q_proj  -- [batch, seq, num_heads * head_dim]
+  let k := Tensor.linear3d x attn.k_proj  -- [batch, seq, num_kv_heads * head_dim]
+  let v := Tensor.linear3d x attn.v_proj  -- [batch, seq, num_kv_heads * head_dim]
 
   -- Reshape to [batch, seq, num_heads, head_dim]
-  let q := reshape q #[batch, seq, num_heads, head_dim]
-  let k := reshape k #[batch, seq, num_kv_heads, head_dim]
-  let v := reshape v #[batch, seq, num_kv_heads, head_dim]
+  let q := q.reshapeChecked #[batch, seq, num_heads, head_dim]
+  let k := k.reshapeChecked #[batch, seq, num_kv_heads, head_dim]
+  let v := v.reshapeChecked #[batch, seq, num_kv_heads, head_dim]
 
   -- Apply Q/K norms if present (Flux Klein text encoder has these)
   let q := match attn.q_norm with
@@ -276,25 +353,25 @@ def forwardMasked {batch seq hidden_size num_heads num_kv_heads head_dim : UInt6
     | none => k
 
   -- Apply RoPE to Q and K
-  let q := rotary.applyRotaryEmb q cos sin
-  let k := rotary.applyRotaryEmb k cos sin
+  let q := applyRotaryEmb q cos sin
+  let k := applyRotaryEmb k cos sin
 
   -- Transpose to [batch, num_heads, seq, head_dim]
-  let q := nn.transpose_for_attention q
-  let k := nn.transpose_for_attention k
-  let v := nn.transpose_for_attention v
+  let q := transposeForAttention q
+  let k := transposeForAttention k
+  let v := transposeForAttention v
 
   -- Scaled dot-product attention with GQA and padding mask
-  let attn_out := nn.scaledDotProductAttentionGQAMask q k v attn_mask 0.0 is_causal true
+  let attn_out := sdpaGQAMask q k v attn_mask is_causal true
 
   -- Transpose back to [batch, seq, num_heads, head_dim]
-  let attn_out := nn.transpose_from_attention attn_out
+  let attn_out := transposeFromAttention attn_out
 
   -- Reshape to [batch, seq, hidden_size]
-  let attn_out := reshape attn_out #[batch, seq, num_heads * head_dim]
+  let attn_out := attn_out.reshapeChecked #[batch, seq, num_heads * head_dim]
 
   -- Output projection
-  linear3d attn_out attn.o_proj
+  Tensor.linear3d attn_out attn.o_proj
 
 end QwenAttention
 

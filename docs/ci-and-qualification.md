@@ -14,8 +14,8 @@ dependency manifests (including `deps/git.lock` and `deps/wheels.lock`),
 LibTorch configuration, and explicit native/GPU build flags. The exact build
 key also includes the source tree. An older source tree can supply an
 incremental base only inside that compatibility boundary. Restoring a cache
-never bypasses Lake/Make dependency checks, example typechecking, native
-attention tests, or either FFI ABI audit.
+never bypasses Lake/Make dependency checks, example typechecking, or native
+attention tests.
 
 Successful build outputs are saved **before** CPU tests. Re-running a failed
 test job can therefore reuse its completed build while still revalidating

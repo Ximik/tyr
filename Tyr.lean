@@ -5,6 +5,8 @@ import Tyr.Torch
 import Tyr.Typed
 import Tyr.SafeTensors
 import Tyr.TensorStruct
+import Tyr.TensorStruct.Cast
+import Tyr.TensorStruct.DeriveCast
 import Tyr.Mctx
 import Tyr.MctxDag
 
@@ -79,6 +81,8 @@ This root module re-exports the core, general-purpose surface area:
 - `Tyr.Typed`: tensor wrappers with static shape/dtype checks and checked raw boundaries.
 - `Tyr.SafeTensors`: typed SafeTensors schema and loading support.
 - `Tyr.TensorStruct`: generic traversal/mapping over tensor-containing structures.
+- `Tyr.TensorStruct.Cast`: conversion to a destination tree of tensor types,
+  with per-leaf dtype/device specifications and no allocated destination template.
 - `Tyr.Mctx`: Monte Carlo tree search infrastructure.
 - `Tyr.MctxDag`: DAG-oriented counterpart to `Tyr.Mctx` with sharing semantics.
 - `Tyr.AutoGrad`: JAX-style automatic differentiation over Tyr IR.
@@ -99,16 +103,15 @@ import Tyr
 
 open torch
 
-def toyForward : DTensor #[2, 4] .Float32 :=
+def toyForward : Tensor { shape := #[2, 4], dtype := .Float32 } :=
   let x := Tensor.zeros #[2, 8]
   let w := Tensor.zeros #[4, 8]
   x.linear w
 ```
 
-`import Tyr` re-exports both the typed facade and the legacy raw API. Use
-`Tensor` for static shape checks: the raw `T s` alias does not enforce its
-shape annotation. `Tensor.ofTensor` checks runtime shape and dtype when
-crossing from raw handles into the facade.
+`import Tyr` re-exports the indexed tensor API and runtime services.
+`Tensor σ` retains shape, dtype, and device-policy claims. Native adapters use
+`RawTensor`; `Tensor.ofRaw` checks metadata when crossing that boundary.
 
 ## Scope
 

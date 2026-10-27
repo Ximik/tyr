@@ -7,106 +7,102 @@ import Tyr.Optim.DualOptimizer
 namespace Tyr.Modular
 
 open torch
+
+variable {device : Device}
 open Tyr.AD
 
-/-- Lightweight proposition wrapper for carrying shape-constraint witnesses. -/
-class ShapeFact (p : Prop) : Prop where
-  out : p
+/-- Ambient matrix type for manifold carriers: Float32 weights with
+    explicit placement, matching the carrier instances' manifold types. -/
+abbrev AmbientMatrix (m n : UInt64) (device : Device := .CPU) : Type :=
+  Tensor { shape := #[m, n], dtype := .Float32, device }
 
-instance : ShapeFact True := ⟨trivial⟩
+/-- Ambient vector type for manifold carriers. -/
+abbrev AmbientVector (n : UInt64) (device : Device := .CPU) : Type :=
+  Tensor { shape := #[n], dtype := .Float32, device }
 
-/-- Matrix-manifold carrier interface for manifold-native linear layers. -/
-class MatrixManifoldCarrier (M : UInt64 → UInt64 → Type) where
-  /-- Legal shape predicate for this manifold family. -/
-  ShapeOK : UInt64 → UInt64 → Prop := fun _ _ => True
-  /-- Project an ambient matrix to the manifold. -/
-  project : {m n : UInt64} → [ShapeFact (ShapeOK m n)] → T #[m, n] → M m n
+/-- Shape-legality constraint for manifold-carrier matrices: at least as many
+    rows as columns (the square case included). A reducible abbrev so `decide`
+    discharges it at concrete call sites. -/
+abbrev MatrixShapeOK (m n : UInt64) : Prop := n.toNat ≤ m.toNat
+
+/-- Matrix-manifold carrier interface for manifold-native linear layers.
+
+    Shape-legality witnesses travel as plain proof arguments on `project`
+    (discharged by `decide` at concrete call sites) or are reused from an
+    existing manifold value (`reAmbient`/`projectLike`), so no typeclass
+    synthesis of propositions is needed. -/
+class MatrixManifoldCarrier (M : UInt64 → UInt64 → Type)
+    (device : outParam Device) where
+  /-- Project an ambient matrix to the manifold, given a legality witness. -/
+  project : {m n : UInt64} → MatrixShapeOK m n → AmbientMatrix (device := device) m n → M m n
   /-- Convert manifold value to its ambient matrix representation. -/
-  toMatrix : {m n : UInt64} → [ShapeFact (ShapeOK m n)] → M m n → T #[m, n]
-  /-- Wrap an already-valid ambient matrix without re-projecting. -/
-  fromAmbientUnchecked : {m n : UInt64} → [ShapeFact (ShapeOK m n)] → T #[m, n] → M m n
+  toMatrix : {m n : UInt64} → M m n → AmbientMatrix (device := device) m n
+  /-- Replace the ambient contents of an existing manifold value, keeping its
+      shape witnesses. Does not re-project; the caller asserts validity. -/
+  reAmbient : {m n : UInt64} → M m n → AmbientMatrix (device := device) m n → M m n
+  /-- Re-project onto the manifold, reusing an existing value's witnesses. -/
+  projectLike : {m n : UInt64} → M m n → AmbientMatrix (device := device) m n → M m n
   /-- Take one geometry-aware step and retract on-manifold. -/
-  dualMapStep : {m n : UInt64} → [ShapeFact (ShapeOK m n)] → M m n → T #[m, n] → Float → M m n
+  dualMapStep : {m n : UInt64} → M m n → AmbientMatrix (device := device) m n → Float → M m n
 
-instance factEqReflUInt64 (n : UInt64) : ShapeFact (n = n) := ⟨rfl⟩
+instance : MatrixManifoldCarrier (fun m n => Stiefel m n .Float32 device) device where
+  project := fun h x => Stiefel.project _ _ x h
+  toMatrix := fun x => x.matrix
+  reAmbient := fun x mat => ⟨mat, x.tall⟩
+  projectLike := fun x mat => Stiefel.project _ _ mat x.tall
+  dualMapStep := fun x g lr =>
+    DualMapGeometry.dualMapStep x (StiefelTangent.project x g) lr
 
-instance : MatrixManifoldCarrier Stiefel where
-  ShapeOK := fun _ _ => True
-  project := fun {_ _} _ x => Stiefel.project _ _ x
-  toMatrix := fun {_ _} _ x => x.matrix
-  fromAmbientUnchecked := fun {_ _} _ x => ⟨x⟩
-  dualMapStep := by
-    intro m n _ x g lr
-    let tg := StiefelTangent.project x g
-    exact DualMapGeometry.dualMapStep x tg lr
-
-instance stiefelShapeOKFact (m n : UInt64) :
-    ShapeFact (MatrixManifoldCarrier.ShapeOK (M := Stiefel) m n) := ⟨trivial⟩
-
-instance : MatrixManifoldCarrier Grassmann where
-  ShapeOK := fun _ _ => True
-  project := fun {_ _} _ x => Grassmann.project _ _ x
-  toMatrix := fun {_ _} _ x => x.matrix
-  fromAmbientUnchecked := fun {_ _} _ x => ⟨x⟩
-  dualMapStep := by
-    intro m n _ x g lr
-    let tg := GrassmannTangent.project x g
-    exact DualMapGeometry.dualMapStep x tg lr
-
-instance grassmannShapeOKFact (m n : UInt64) :
-    ShapeFact (MatrixManifoldCarrier.ShapeOK (M := Grassmann) m n) := ⟨trivial⟩
+instance : MatrixManifoldCarrier (fun m n => Grassmann m n .Float32 device) device where
+  project := fun h x => Grassmann.project _ _ x h
+  toMatrix := fun x => x.matrix
+  reAmbient := fun x mat => ⟨mat, x.tall⟩
+  projectLike := fun x mat => Grassmann.project _ _ mat x.tall
+  dualMapStep := fun x g lr =>
+    DualMapGeometry.dualMapStep x (GrassmannTangent.project x g) lr
 
 /-- Orthogonal manifold viewed in matrix-family form with square-shape legality. -/
-abbrev OrthogonalMatrix (_m n : UInt64) := Orthogonal n
+abbrev OrthogonalMatrix (_m n : UInt64) (device : Device := .CPU) := Orthogonal n .Float32 device
 
-instance : MatrixManifoldCarrier OrthogonalMatrix where
-  ShapeOK := fun m n => m = n
-  project := by
-    intro m n h mat
-    let hmn : m = n := h.out
-    let square : T #[n, n] := by simpa [hmn] using mat
-    exact Orthogonal.project n square
-  toMatrix := by
-    intro m n h x
-    let hmn : m = n := h.out
-    exact (by simpa [hmn] using x.matrix : T #[m, n])
-  fromAmbientUnchecked := by
-    intro m n h mat
-    let hmn : m = n := h.out
-    let square : T #[n, n] := by simpa [hmn] using mat
-    exact ⟨square⟩
-  dualMapStep := by
-    intro m n h x g lr
-    let hmn : m = n := h.out
-    let gSquare : T #[n, n] := by simpa [hmn] using g
-    let tg := OrthogonalTangent.fromAmbient x gSquare
-    exact DualMapGeometry.dualMapStep x tg lr
+/-- View an ambient matrix as square, validating the runtime shape. Only
+    reachable through `MatrixShapeOK`-witnessed paths; the square requirement
+    of the orthogonal family itself is checked here at runtime. -/
+private def asSquare {m n : UInt64} (mat : AmbientMatrix (device := device) m n) : AmbientMatrix (device := device) n n :=
+  Tensor.reshapeChecked mat #[n, n]
 
-instance orthogonalShapeOKFact (n : UInt64) :
-    ShapeFact (MatrixManifoldCarrier.ShapeOK (M := OrthogonalMatrix) n n) := ⟨rfl⟩
+instance : MatrixManifoldCarrier (fun m n => OrthogonalMatrix m n device) device where
+  project := fun {m n} _h mat =>
+    if h : m = n then
+      Orthogonal.project n (h ▸ mat)
+    else
+      Orthogonal.project n (asSquare mat)  -- runtime-validated square conversion
+  toMatrix := fun x => Tensor.reshapeChecked x.matrix #[_, _]
+  reAmbient := fun _ mat => ⟨asSquare mat⟩
+  projectLike := fun _ mat => Orthogonal.project _ (asSquare mat)
+  dualMapStep := fun x g lr =>
+    DualMapGeometry.dualMapStep x (OrthogonalTangent.fromAmbient x (asSquare g)) lr
 
 /-- Vector-manifold carrier interface where ambient dimension may differ from intrinsic one. -/
-class VectorManifoldCarrier (V : UInt64 → Type) where
+class VectorManifoldCarrier (V : UInt64 → Type)
+    (device : outParam Device) where
   /-- Ambient coordinate dimension for intrinsic manifold dimension `n`. -/
   ambientDim : UInt64 → UInt64
   /-- Project ambient vector coordinates to the manifold. -/
-  project : (n : UInt64) → T #[ambientDim n] → V n
+  project : (n : UInt64) → AmbientVector (device := device) (ambientDim n) → V n
   /-- Convert manifold value to ambient coordinates. -/
-  toVector : {n : UInt64} → V n → T #[ambientDim n]
+  toVector : {n : UInt64} → V n → AmbientVector (device := device) (ambientDim n)
   /-- Wrap already-valid ambient coordinates without re-projecting. -/
-  fromAmbientUnchecked : {n : UInt64} → T #[ambientDim n] → V n
+  fromAmbientUnchecked : {n : UInt64} → AmbientVector (device := device) (ambientDim n) → V n
   /-- Take one geometry-aware step on the manifold. -/
-  dualMapStep : {n : UInt64} → V n → T #[ambientDim n] → Float → V n
+  dualMapStep : {n : UInt64} → V n → AmbientVector (device := device) (ambientDim n) → Float → V n
 
-instance : VectorManifoldCarrier Hyperbolic where
+instance : VectorManifoldCarrier (fun n => Hyperbolic n .Float32 device) device where
   ambientDim n := n + 1
   project := Hyperbolic.project
   toVector := fun x => x.coords
   fromAmbientUnchecked := fun x => ⟨x⟩
-  dualMapStep := by
-    intro n x g lr
-    let tg := HyperbolicTangent.project x g
-    exact DualMapGeometry.dualMapStep x tg lr
+  dualMapStep := fun x g lr =>
+    DualMapGeometry.dualMapStep x (HyperbolicTangent.project x g) lr
 
 /--
 Linear layer whose weight is stored on a matrix manifold.
@@ -114,206 +110,240 @@ Linear layer whose weight is stored on a matrix manifold.
 The weight is natively represented by `M out_dim in_dim`, so retractions are
 part of the layer-level update path rather than an external afterthought.
 -/
-structure ManifoldLinear (M : UInt64 → UInt64 → Type) [MatrixManifoldCarrier M]
+structure ManifoldLinear (M : UInt64 → UInt64 → Type) [MatrixManifoldCarrier M device]
     (in_dim out_dim : UInt64) where
   weight : M out_dim in_dim
-  bias : Option (T #[out_dim]) := none
+  bias : Option (AmbientVector (device := device) out_dim) := none
 
 namespace ManifoldLinear
 
-private def makeLeafWeight [MatrixManifoldCarrier M] {in_dim out_dim : UInt64}
-    [ShapeFact (MatrixManifoldCarrier.ShapeOK (M := M) out_dim in_dim)]
-    (w : M out_dim in_dim) : M out_dim in_dim :=
-  MatrixManifoldCarrier.fromAmbientUnchecked
-    (autograd.set_requires_grad (autograd.detach (MatrixManifoldCarrier.toMatrix w)) true)
+private def makeLeafWeight [MatrixManifoldCarrier M device] {in_dim out_dim : UInt64}
+    (w : M out_dim in_dim) : IO (M out_dim in_dim) := do
+  let leaf ← Tensor.parameter (MatrixManifoldCarrier.toMatrix (device := device) w)
+  pure (MatrixManifoldCarrier.reAmbient (device := device) w leaf)
 
 /-- Initialize manifold-linear weights by projecting a random matrix. -/
-def init [MatrixManifoldCarrier M] (in_dim out_dim : UInt64)
-    [ShapeFact (MatrixManifoldCarrier.ShapeOK (M := M) out_dim in_dim)]
-    (withBias : Bool := true) : IO (ManifoldLinear M in_dim out_dim) := do
-  let w0 ← randn #[out_dim, in_dim] false
-  let w := MatrixManifoldCarrier.project w0
-  let weight := makeLeafWeight w
-  let bias ← if withBias then
-      let b := autograd.set_requires_grad (zeros #[out_dim]) true
-      pure (some b)
+def init [MatrixManifoldCarrier M device] (in_dim out_dim : UInt64)
+    (withBias : Bool := true)
+    (h : MatrixShapeOK out_dim in_dim := by decide)
+    : IO (ManifoldLinear (device := device) M in_dim out_dim) := do
+  let w0 ← Tensor.randn #[out_dim, in_dim] false device
+  let weight ← makeLeafWeight (MatrixManifoldCarrier.project (device := device) h w0)
+  let bias ← if withBias then do
+      pure (some (← Tensor.parameter (Tensor.zeros #[out_dim] (device := device))))
     else
       pure none
   pure { weight, bias }
 
 /-- Forward pass for `[batch, in_dim] -> [batch, out_dim]`. -/
-def forward2d [MatrixManifoldCarrier M] {in_dim out_dim batch : UInt64}
-    [ShapeFact (MatrixManifoldCarrier.ShapeOK (M := M) out_dim in_dim)]
-    (lin : ManifoldLinear M in_dim out_dim)
-    (x : T #[batch, in_dim]) : T #[batch, out_dim] :=
-  let y := linear x (MatrixManifoldCarrier.toMatrix lin.weight)
+def forward2d [MatrixManifoldCarrier M device] {in_dim out_dim batch : UInt64}
+    (lin : ManifoldLinear (device := device) M in_dim out_dim)
+    (x : AmbientMatrix (device := device) batch in_dim) : AmbientMatrix (device := device) batch out_dim :=
+  let y := Tensor.linear x (MatrixManifoldCarrier.toMatrix (device := device) lin.weight)
   match lin.bias with
-  | some b => add y (nn.expand b #[batch, out_dim])
+  | some b => Add.add y (Tensor.expand b #[batch, out_dim])
   | none => y
 
 /-- Apply a manifold-native step to weights and an Euclidean step to bias. -/
-def applyDualMapUpdate [MatrixManifoldCarrier M] {in_dim out_dim : UInt64}
-    [ShapeFact (MatrixManifoldCarrier.ShapeOK (M := M) out_dim in_dim)]
-    (lin : ManifoldLinear M in_dim out_dim)
-    (weightGrad : T #[out_dim, in_dim])
-    (biasGrad? : Option (T #[out_dim]))
-    (lr : Float) : ManifoldLinear M in_dim out_dim :=
-  let weight' := MatrixManifoldCarrier.dualMapStep lin.weight weightGrad lr
-  let weight' := makeLeafWeight weight'
-  let bias' :=
+def applyDualMapUpdate [MatrixManifoldCarrier M device] {in_dim out_dim : UInt64}
+    (lin : ManifoldLinear (device := device) M in_dim out_dim)
+    (weightGrad : AmbientMatrix (device := device) out_dim in_dim)
+    (biasGrad? : Option (AmbientVector (device := device) out_dim))
+    (lr : Float) : IO (ManifoldLinear (device := device) M in_dim out_dim) := do
+  let weight' ← makeLeafWeight (MatrixManifoldCarrier.dualMapStep (device := device) lin.weight weightGrad lr)
+  let bias' ←
     match lin.bias, biasGrad? with
-    | some b, some g =>
-      some (autograd.set_requires_grad (autograd.detach (b - mul_scalar g lr)) true)
-    | some b, none => some b
-    | none, _ => none
-  { lin with weight := weight', bias := bias' }
+    | some b, some g => do
+      pure (some (← Tensor.parameter (Sub.sub b (Tensor.mulScalar g lr))))
+    | some b, none => pure (some b)
+    | none, _ => pure none
+  pure { lin with weight := weight', bias := bias' }
 
 end ManifoldLinear
 
 /-- Single vector parameter living natively on a vector manifold. -/
-structure ManifoldVectorParam (V : UInt64 → Type) [VectorManifoldCarrier V] (n : UInt64) where
+structure ManifoldVectorParam (V : UInt64 → Type) [VectorManifoldCarrier V device] (n : UInt64) where
   value : V n
 
 namespace ManifoldVectorParam
 
 /-- Ensure manifold-vector value is represented by a trainable leaf tensor. -/
-private def makeLeafValue [VectorManifoldCarrier V] {n : UInt64}
-    (v : V n) : V n :=
-  VectorManifoldCarrier.fromAmbientUnchecked
-    (autograd.set_requires_grad (autograd.detach (VectorManifoldCarrier.toVector v)) true)
+private def makeLeafValue [VectorManifoldCarrier V device] {n : UInt64}
+    (v : V n) : IO (V n) := do
+  let leaf ← Tensor.parameter (VectorManifoldCarrier.toVector (device := device) v)
+  pure (VectorManifoldCarrier.fromAmbientUnchecked (device := device) leaf)
 
 /-- Initialize from random ambient coordinates projected to manifold. -/
-def init [VectorManifoldCarrier V] (n : UInt64) : IO (ManifoldVectorParam V n) := do
-  let d := (VectorManifoldCarrier.ambientDim (V := V) n)
-  let vRaw ← randn #[d] false
-  let v := makeLeafValue (VectorManifoldCarrier.project n vRaw)
+def init [VectorManifoldCarrier V device] (n : UInt64) : IO (ManifoldVectorParam (device := device) V n) := do
+  let d := (VectorManifoldCarrier.ambientDim (device := device) (V := V) n)
+  let vRaw ← Tensor.randn #[d] false device
+  let v ← makeLeafValue (VectorManifoldCarrier.project (device := device) n vRaw)
   pure { value := v }
 
 /-- Apply one dual-map manifold update for this vector parameter. -/
-def applyDualMapUpdate [VectorManifoldCarrier V] {n : UInt64}
-    (p : ManifoldVectorParam V n)
-    (grad : T #[(VectorManifoldCarrier.ambientDim (V := V) n)])
-    (lr : Float) : ManifoldVectorParam V n :=
-  let v' := VectorManifoldCarrier.dualMapStep p.value grad lr
-  { value := makeLeafValue v' }
+def applyDualMapUpdate [VectorManifoldCarrier V device] {n : UInt64}
+    (p : ManifoldVectorParam (device := device) V n)
+    (grad : AmbientVector (device := device) (VectorManifoldCarrier.ambientDim (device := device) (V := V) n))
+    (lr : Float) : IO (ManifoldVectorParam (device := device) V n) := do
+  let v' := VectorManifoldCarrier.dualMapStep (device := device) p.value grad lr
+  pure { value := ← makeLeafValue v' }
 
 end ManifoldVectorParam
 
-instance [MatrixManifoldCarrier M] (in_dim out_dim : UInt64)
-    [ShapeFact (MatrixManifoldCarrier.ShapeOK (M := M) out_dim in_dim)] :
-    TensorStruct (ManifoldLinear M in_dim out_dim) where
-  map f lin :=
-    let w := MatrixManifoldCarrier.toMatrix lin.weight
-    let weight := MatrixManifoldCarrier.fromAmbientUnchecked (f w)
-    let bias := lin.bias.map f
-    { weight, bias }
+instance [MatrixManifoldCarrier M device] (in_dim out_dim : UInt64) :
+    TensorStruct (ManifoldLinear (device := device) M in_dim out_dim) where
+  map f lin := {
+    weight := MatrixManifoldCarrier.reAmbient (device := device) lin.weight
+      (TensorStruct.map f (MatrixManifoldCarrier.toMatrix (device := device) lin.weight))
+    bias := TensorStruct.map f lin.bias
+  }
   mapM f lin := do
-    let w' ← f (MatrixManifoldCarrier.toMatrix lin.weight)
-    let weight := MatrixManifoldCarrier.fromAmbientUnchecked w'
-    let bias ← match lin.bias with
-      | some b => some <$> f b
-      | none => pure none
-    pure { weight, bias }
-  zipWith f a b :=
-    let w := f (MatrixManifoldCarrier.toMatrix a.weight) (MatrixManifoldCarrier.toMatrix b.weight)
-    let weight := MatrixManifoldCarrier.fromAmbientUnchecked w
-    let bias := match a.bias, b.bias with
-      | some x, some y => some (f x y)
-      | _, _ => none
-    { weight, bias }
+    let w ← TensorStruct.mapM f (MatrixManifoldCarrier.toMatrix (device := device) lin.weight)
+    let bias ← TensorStruct.mapM f lin.bias
+    pure { weight := MatrixManifoldCarrier.reAmbient (device := device) lin.weight w, bias }
+  zipWith f a b := {
+    weight := MatrixManifoldCarrier.reAmbient (device := device) a.weight
+      (TensorStruct.zipWith f (MatrixManifoldCarrier.toMatrix (device := device) a.weight)
+        (MatrixManifoldCarrier.toMatrix (device := device) b.weight))
+    bias := TensorStruct.zipWith f a.bias b.bias
+  }
   fold f init lin :=
-    let acc := f (MatrixManifoldCarrier.toMatrix lin.weight) init
-    match lin.bias with
-    | some b => f b acc
-    | none => acc
+    TensorStruct.fold f
+      (TensorStruct.fold f init (MatrixManifoldCarrier.toMatrix (device := device) lin.weight)) lin.bias
 
-instance [VectorManifoldCarrier V] (n : UInt64) : TensorStruct (ManifoldVectorParam V n) where
-  map f p :=
-    let v := VectorManifoldCarrier.toVector p.value
-    { value := VectorManifoldCarrier.fromAmbientUnchecked (f v) }
+instance [VectorManifoldCarrier V device] (n : UInt64) : TensorStruct (ManifoldVectorParam (device := device) V n) where
+  map f p := {
+    value := VectorManifoldCarrier.fromAmbientUnchecked (device := device)
+      (TensorStruct.map f (VectorManifoldCarrier.toVector (device := device) p.value))
+  }
   mapM f p := do
-    let v' ← f (VectorManifoldCarrier.toVector p.value)
-    pure { value := VectorManifoldCarrier.fromAmbientUnchecked v' }
-  zipWith f a b :=
-    let av := VectorManifoldCarrier.toVector a.value
-    let bv := VectorManifoldCarrier.toVector b.value
-    { value := VectorManifoldCarrier.fromAmbientUnchecked (f av bv) }
-  fold f init p := f (VectorManifoldCarrier.toVector p.value) init
+    let v ← TensorStruct.mapM f (VectorManifoldCarrier.toVector (device := device) p.value)
+    pure { value := VectorManifoldCarrier.fromAmbientUnchecked (device := device) v }
+  zipWith f a b := {
+    value := VectorManifoldCarrier.fromAmbientUnchecked (device := device)
+      (TensorStruct.zipWith f (VectorManifoldCarrier.toVector (device := device) a.value)
+        (VectorManifoldCarrier.toVector (device := device) b.value))
+  }
+  fold f init p := TensorStruct.fold f init (VectorManifoldCarrier.toVector (device := device) p.value)
 
-instance [MatrixManifoldCarrier M] (in_dim out_dim : UInt64)
-    [ShapeFact (MatrixManifoldCarrier.ShapeOK (M := M) out_dim in_dim)] :
-    NormedModule (ManifoldLinear M in_dim out_dim) where
+instance {P : StaticSpec → Prop} [MatrixManifoldCarrier M device] (in_dim out_dim : UInt64)
+    [TensorStructFor.Fact (P ⟨#[out_dim, in_dim], .Float32, device⟩)]
+    [TensorStructFor.Fact (P ⟨#[out_dim], .Float32, device⟩)] :
+    TensorStructFor P (ManifoldLinear (device := device) M in_dim out_dim) where
+  map f lin := {
+    weight := MatrixManifoldCarrier.reAmbient (device := device) lin.weight
+      (TensorStructFor.map f (MatrixManifoldCarrier.toMatrix (device := device) lin.weight))
+    bias := TensorStructFor.map f lin.bias
+  }
+  mapM f lin := do
+    let w ← TensorStructFor.mapM f (MatrixManifoldCarrier.toMatrix (device := device) lin.weight)
+    let bias ← TensorStructFor.mapM f lin.bias
+    pure { weight := MatrixManifoldCarrier.reAmbient (device := device) lin.weight w, bias }
+  zipWith f a b := {
+    weight := MatrixManifoldCarrier.reAmbient (device := device) a.weight
+      (TensorStructFor.zipWith f (MatrixManifoldCarrier.toMatrix (device := device) a.weight)
+        (MatrixManifoldCarrier.toMatrix (device := device) b.weight))
+    bias := TensorStructFor.zipWith f a.bias b.bias
+  }
+  fold f init lin :=
+    TensorStructFor.fold f
+      (TensorStructFor.fold f init (MatrixManifoldCarrier.toMatrix (device := device) lin.weight)) lin.bias
+
+instance {P : StaticSpec → Prop} [VectorManifoldCarrier V device] (n : UInt64)
+    [TensorStructFor.Fact
+      (P ⟨#[VectorManifoldCarrier.ambientDim (device := device) (V := V) n], .Float32, device⟩)] :
+    TensorStructFor P (ManifoldVectorParam (device := device) V n) where
+  map f p := {
+    value := VectorManifoldCarrier.fromAmbientUnchecked (device := device)
+      (TensorStructFor.map f (VectorManifoldCarrier.toVector (device := device) p.value))
+  }
+  mapM f p := do
+    let v ← TensorStructFor.mapM f (VectorManifoldCarrier.toVector (device := device) p.value)
+    pure { value := VectorManifoldCarrier.fromAmbientUnchecked (device := device) v }
+  zipWith f a b := {
+    value := VectorManifoldCarrier.fromAmbientUnchecked (device := device)
+      (TensorStructFor.zipWith f (VectorManifoldCarrier.toVector (device := device) a.value)
+        (VectorManifoldCarrier.toVector (device := device) b.value))
+  }
+  fold f init p := TensorStructFor.fold f init (VectorManifoldCarrier.toVector (device := device) p.value)
+
+instance [MatrixManifoldCarrier M device] (in_dim out_dim : UInt64) :
+    NormedModule (ManifoldLinear (device := device) M in_dim out_dim) where
   norm lin :=
-    let weightNorm := linalg.spectralNorm (MatrixManifoldCarrier.toMatrix lin.weight)
+    let weightNorm := Tensor.spectralNorm (MatrixManifoldCarrier.toMatrix (device := device) lin.weight)
     match lin.bias with
-    | some b => floatMax weightNorm (linalg.l2Norm b)
+    | some b => floatMax weightNorm (Tensor.l2Norm b)
     | none => weightNorm
   dualNorm lin :=
-    let weightDual := linalg.nuclearNorm (MatrixManifoldCarrier.toMatrix lin.weight)
+    let weightDual := Tensor.nuclearNorm (MatrixManifoldCarrier.toMatrix (device := device) lin.weight)
     match lin.bias with
-    | some b => weightDual + linalg.l2Norm b
+    | some b => weightDual + Tensor.l2Norm b
     | none => weightDual
-  nu lin := linalg.spectralNorm (MatrixManifoldCarrier.toMatrix lin.weight)
+  nu lin := Tensor.spectralNorm (MatrixManifoldCarrier.toMatrix (device := device) lin.weight)
   mu _ := 1.0
   normalize lin :=
-    let w := MatrixManifoldCarrier.toMatrix lin.weight
-    let σ := linalg.spectralNorm w
-    let w' := if σ == 0.0 then w else mul_scalar w (1.0 / σ)
-    let weight := MatrixManifoldCarrier.project w'
+    let w := MatrixManifoldCarrier.toMatrix (device := device) lin.weight
+    let sNorm := Tensor.spectralNorm w
+    let w' := if sNorm == 0.0 then w else Tensor.mulScalar w (1.0 / sNorm)
+    let weight := MatrixManifoldCarrier.projectLike (device := device) lin.weight w'
     let bias :=
       match lin.bias with
       | some b =>
-        let bNorm := linalg.l2Norm b
-        if bNorm == 0.0 then some b else some (mul_scalar b (1.0 / bNorm))
+        let bNorm := Tensor.l2Norm b
+        if bNorm == 0.0 then some b else some (Tensor.mulScalar b (1.0 / bNorm))
       | none => none
     { lin with weight, bias }
   normalizeDual lin :=
-    let w := MatrixManifoldCarrier.toMatrix lin.weight
-    let fnorm := linalg.frobeniusNorm w
-    let w' := if fnorm == 0.0 then w else mul_scalar w (1.0 / fnorm)
-    let weight := MatrixManifoldCarrier.project w'
+    let w := MatrixManifoldCarrier.toMatrix (device := device) lin.weight
+    let fnorm := Tensor.frobeniusNorm w
+    let w' := if fnorm == 0.0 then w else Tensor.mulScalar w (1.0 / fnorm)
+    let weight := MatrixManifoldCarrier.projectLike (device := device) lin.weight w'
     let bias :=
       match lin.bias with
       | some b =>
-        let bNorm := linalg.l2Norm b
-        if bNorm == 0.0 then some b else some (mul_scalar b (1.0 / bNorm))
+        let bNorm := Tensor.l2Norm b
+        if bNorm == 0.0 then some b else some (Tensor.mulScalar b (1.0 / bNorm))
       | none => none
     { lin with weight, bias }
 
-instance [VectorManifoldCarrier V] (n : UInt64) :
-    NormedModule (ManifoldVectorParam V n) where
-  norm p := linalg.l2Norm (VectorManifoldCarrier.toVector p.value)
-  dualNorm p := linalg.l2Norm (VectorManifoldCarrier.toVector p.value)
+instance [VectorManifoldCarrier V device] (n : UInt64) :
+    NormedModule (ManifoldVectorParam (device := device) V n) where
+  norm p := Tensor.l2Norm (VectorManifoldCarrier.toVector (device := device) p.value)
+  dualNorm p := Tensor.l2Norm (VectorManifoldCarrier.toVector (device := device) p.value)
   nu _ := 1.0
   mu _ := 1.0
   normalize p :=
     let n' := n
-    let v := VectorManifoldCarrier.toVector p.value
-    let d := linalg.l2Norm v
-    let v' := if d == 0.0 then v else mul_scalar v (1.0 / d)
-    { value := VectorManifoldCarrier.project n' v' }
+    let v := VectorManifoldCarrier.toVector (device := device) p.value
+    let d := Tensor.l2Norm v
+    let v' := if d == 0.0 then v else Tensor.mulScalar v (1.0 / d)
+    { value := VectorManifoldCarrier.project (device := device) n' v' }
   normalizeDual p :=
     let n' := n
-    let v := VectorManifoldCarrier.toVector p.value
-    let d := linalg.l2Norm v
-    let v' := if d == 0.0 then v else mul_scalar v (1.0 / d)
-    { value := VectorManifoldCarrier.project n' v' }
+    let v := VectorManifoldCarrier.toVector (device := device) p.value
+    let d := Tensor.l2Norm v
+    let v' := if d == 0.0 then v else Tensor.mulScalar v (1.0 / d)
+    { value := VectorManifoldCarrier.project (device := device) n' v' }
 
 /-- Convenience alias: manifold-linear with Stiefel-constrained weights. -/
-abbrev StiefelLinear (in_dim out_dim : UInt64) := ManifoldLinear Stiefel in_dim out_dim
+abbrev StiefelLinear (in_dim out_dim : UInt64) (device : Device := .CPU) :=
+  ManifoldLinear (device := device) (fun m n => Stiefel m n .Float32 device) in_dim out_dim
 
 /-- Convenience alias: manifold-linear with Grassmann-constrained weights. -/
-abbrev GrassmannLinear (in_dim out_dim : UInt64) := ManifoldLinear Grassmann in_dim out_dim
+abbrev GrassmannLinear (in_dim out_dim : UInt64) (device : Device := .CPU) :=
+  ManifoldLinear (device := device) (fun m n => Grassmann m n .Float32 device) in_dim out_dim
 
 /-- Convenience alias: manifold-linear with orthogonal square weights. -/
-abbrev OrthogonalLinear (dim : UInt64) := ManifoldLinear OrthogonalMatrix dim dim
+abbrev OrthogonalLinear (dim : UInt64) (device : Device := .CPU) :=
+  ManifoldLinear (device := device) (fun m n => OrthogonalMatrix m n device) dim dim
 
 /-- Convenience alias: single hyperbolic vector parameter. -/
-abbrev HyperbolicVector (n : UInt64) := ManifoldVectorParam Hyperbolic n
+abbrev HyperbolicVector (n : UInt64) (device : Device := .CPU) :=
+  ManifoldVectorParam (device := device) (fun n => Hyperbolic n .Float32 device) n
 
-/-- Cotangent payload for `ManifoldLinear`: weight cotangent plus optional bias cotangent. -/
+/-- Cotangent payload for `ManifoldLinear (device := device)`: weight cotangent plus optional bias cotangent. -/
 abbrev ManifoldLinearCotangent (in_dim out_dim : UInt64) :=
-  T #[out_dim, in_dim] × Option (T #[out_dim])
+  AmbientMatrix (device := device) out_dim in_dim × Option (AmbientVector (device := device) out_dim)
 
 /--
 Composable manifold-update interface.
@@ -323,37 +353,38 @@ so product/sequential structures can be updated without dedicated manifold types
 -/
 class ManifoldUpdatable (P : Type) where
   Cotangent : P → Type
-  applyUpdate : (params : P) → Cotangent params → Float → P
+  applyUpdate : (params : P) → Cotangent params → Float → IO P
 
 namespace ManifoldUpdatable
 
 /-- Apply one manifold-native update step. -/
-def step [ManifoldUpdatable P] (params : P) (grad : ManifoldUpdatable.Cotangent params) (lr : Float) : P :=
+def step [ManifoldUpdatable P] (params : P) (grad : ManifoldUpdatable.Cotangent params) (lr : Float) : IO P :=
   ManifoldUpdatable.applyUpdate params grad lr
 
-instance [MatrixManifoldCarrier M] (in_dim out_dim : UInt64)
-    [ShapeFact (MatrixManifoldCarrier.ShapeOK (M := M) out_dim in_dim)] :
-    ManifoldUpdatable (ManifoldLinear M in_dim out_dim) where
-  Cotangent _ := ManifoldLinearCotangent in_dim out_dim
+instance [MatrixManifoldCarrier M device] (in_dim out_dim : UInt64) :
+    ManifoldUpdatable (ManifoldLinear (device := device) M in_dim out_dim) where
+  Cotangent _ := ManifoldLinearCotangent (device := device) in_dim out_dim
   applyUpdate lin g lr := ManifoldLinear.applyDualMapUpdate lin g.1 g.2 lr
 
-instance [VectorManifoldCarrier V] (n : UInt64) :
-    ManifoldUpdatable (ManifoldVectorParam V n) where
-  Cotangent _ := T #[(VectorManifoldCarrier.ambientDim (V := V) n)]
+instance [VectorManifoldCarrier V device] (n : UInt64) :
+    ManifoldUpdatable (ManifoldVectorParam (device := device) V n) where
+  Cotangent _ := AmbientVector (device := device) (VectorManifoldCarrier.ambientDim (device := device) (V := V) n)
   applyUpdate p g lr := ManifoldVectorParam.applyDualMapUpdate p g lr
 
 instance [ManifoldUpdatable A] [ManifoldUpdatable B] : ManifoldUpdatable (A × B) where
   Cotangent p := ManifoldUpdatable.Cotangent p.1 × ManifoldUpdatable.Cotangent p.2
-  applyUpdate p g lr :=
-    (ManifoldUpdatable.applyUpdate p.1 g.1 lr, ManifoldUpdatable.applyUpdate p.2 g.2 lr)
+  applyUpdate p g lr := do
+    let first ← ManifoldUpdatable.applyUpdate p.1 g.1 lr
+    let second ← ManifoldUpdatable.applyUpdate p.2 g.2 lr
+    pure (first, second)
 
 instance [ManifoldUpdatable M₁] [ManifoldUpdatable M₂] :
     ManifoldUpdatable (Sequential M₁ M₂) where
   Cotangent net := ManifoldUpdatable.Cotangent net.first × ManifoldUpdatable.Cotangent net.second
-  applyUpdate net g lr := {
-    first := ManifoldUpdatable.applyUpdate net.first g.1 lr
-    second := ManifoldUpdatable.applyUpdate net.second g.2 lr
-  }
+  applyUpdate net g lr := do
+    let first ← ManifoldUpdatable.applyUpdate net.first g.1 lr
+    let second ← ManifoldUpdatable.applyUpdate net.second g.2 lr
+    pure { first, second }
 
 end ManifoldUpdatable
 

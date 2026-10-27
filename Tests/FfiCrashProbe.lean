@@ -1,22 +1,15 @@
 /-
-  Tests/FfiCrashProbe.lean
-
-  Manual probe for the FFI failure mode. Intentionally triggers a libtorch
-  device error (transfer to CUDA on a build/machine without CUDA), so it is
-  NOT part of the test suite. Build and run the `ffi_crash_probe` executable
-  to check that an uncaught C++ exception terminates the process with an
-  intelligible message (the `c10::Error` text) instead of a bare
-  SIGABRT/SIGSEGV. On a machine where CUDA is available the transfer
-  succeeds and the probe reports that nothing crashed.
+Deliberately violate a raw native reshape contract to exercise Tyr's fatal
+exception report. This probe must abort on CPU and does not need an accelerator.
 -/
-import Tyr.Torch
+import Tyr.Typed
 
 open torch
 
 def main : IO Unit := do
-  let m : T #[2, 2] := torch.ones #[2, 2]
-  IO.println "triggering libtorch device error via .to (CUDA 0)..."
+  let m : Tensor { shape := #[2, 2], dtype := .Float32, device := .CPU } := Tensor.ones #[2, 2]
+  IO.println "deliberately reshaping four raw elements into three..."
   (← IO.getStdout).flush
-  let c := m.to (.CUDA 0)
-  let arr ← data.tensorToFloatArray' c
-  IO.println s!"no crash (CUDA available?): {arr}"
+  let invalid := RawTensor.reshape m.shape m.raw #[3]
+  let arr ← RawTensor.toFloatArray invalid
+  IO.println s!"unexpected reshape success: {arr}"

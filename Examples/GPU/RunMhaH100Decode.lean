@@ -1,7 +1,7 @@
 /- End-to-end numerical correctness harness for the TK-style decode kernel.
 
    Generates random Q/K/V plus a PyTorch SDPA reference for several decode
-   shapes, then invokes `tyr::flash_attn` (via `nn.tyrFlashAttn4d`) and asserts
+   shapes, then invokes `tyr::flash_attn` (via `Tensor.flashAttention`) and asserts
    the kernel output matches reference within BF16 tolerance.
 
    Shape coverage:
@@ -15,12 +15,16 @@
    they regenerate independently and live across runs. The runner reuses the
    shared `FixtureRunner` helper used by `RunFlashAttn3.lean` etc. -/
 import Tyr.Torch
+import Tyr.Typed.Neural
+import Examples.GPU.DecodeReference
 import Tyr.Inference.KVCache
 import Examples.GPU.FixtureRunner
 
 namespace Examples.GPU
 
 open torch
+
+variable {device : Device}
 open torch.Generator
 
 /-- One decode test case. -/
@@ -79,30 +83,30 @@ def generateDecodeFixturesFor (shape : DecodeShape) : IO Unit := do
   if !(← torch.cuda_is_available) then
     throw <| IO.userError "CUDA is not available; cannot generate decode fixtures."
   IO.FS.createDirAll (decodeFixtureSpec shape).dir
-  let device := Device.CUDA 0
+  let device ← Device.cuda 0
 
-  let qf ← torch.randn (shapeQ shape) false device
-  let kf ← torch.randn (shapeKV shape) false device
-  let vf ← torch.randn (shapeKV shape) false device
+  let qf ← Tensor.randn (shapeQ shape) false device
+  let kf ← Tensor.randn (shapeKV shape) false device
+  let vf ← Tensor.randn (shapeKV shape) false device
 
-  let q := torch.toBFloat16' qf
-  let k := torch.toBFloat16' kf
-  let v := torch.toBFloat16' vf
+  let q := qf.toBFloat16
+  let k := kf.toBFloat16
+  let v := vf.toBFloat16
 
   -- Reference: PyTorch SDPA in FP32, with GQA enabled (broadcasts kv heads to q heads).
-  let q32 := torch.toFloat' q
-  let k32 := torch.toFloat' k
-  let v32 := torch.toFloat' v
-  let expected32 := nn.scaledDotProductAttentionGQAQKV
-                      q32 k32 v32 0.0 false true
-  let expected := torch.toBFloat16' expected32
+  let q32 := q.toFloat32
+  let k32 := k.toFloat32
+  let v32 := v.toFloat32
+  let expected32 := Tensor.attentionGQAQKV
+                      q32 k32 v32 false true
+  let expected := expected32.toBFloat16
 
-  torch.data.saveTensor q (decodeFixtureFile shape "q").toString
-  torch.data.saveTensor k (decodeFixtureFile shape "k").toString
-  torch.data.saveTensor v (decodeFixtureFile shape "v").toString
-  torch.data.saveTensor expected (decodeFixtureFile shape "expected_o").toString
+  Tensor.saveTensor q (decodeFixtureFile shape "q").toString
+  Tensor.saveTensor k (decodeFixtureFile shape "k").toString
+  Tensor.saveTensor v (decodeFixtureFile shape "v").toString
+  Tensor.saveTensor expected (decodeFixtureFile shape "expected_o").toString
 
-  let mae := torch.nn.item (torch.nn.meanAll (torch.nn.abs expected))
+  let mae := Tensor.item (Tensor.meanAll (Tensor.abs expected))
   IO.println s!"  generated decode fixture {shape.name} kvSeq={shape.kvSeq} d={shape.headDim} ref_mean_abs={mae}"
 
 /-- Run the kernel on one shape's saved fixtures and assert parity. -/
@@ -111,39 +115,40 @@ def runDecodeOnceFor (shape : DecodeShape) : IO Bool := do
     IO.eprintln "CUDA is not available on this host."
     return false
 
+  let device ← Device.cuda 0
   if !(← fixturesPresent (decodeFixtureSpec shape)) then
     generateDecodeFixturesFor shape
 
-  let q ← torch.data.loadTensor (shapeQ shape) (decodeFixtureFile shape "q").toString
-  let k ← torch.data.loadTensor (shapeKV shape) (decodeFixtureFile shape "k").toString
-  let v ← torch.data.loadTensor (shapeKV shape) (decodeFixtureFile shape "v").toString
-  let expected ← torch.data.loadTensor (shapeQ shape) (decodeFixtureFile shape "expected_o").toString
+  let q ← Tensor.loadTensorExact { device := device, shape := shapeQ shape, dtype := .BFloat16 } (decodeFixtureFile shape "q").toString
+  let k ← Tensor.loadTensorExact { device := device, shape := shapeKV shape, dtype := .BFloat16 } (decodeFixtureFile shape "k").toString
+  let v ← Tensor.loadTensorExact { device := device, shape := shapeKV shape, dtype := .BFloat16 } (decodeFixtureFile shape "v").toString
+  let expected ← Tensor.loadTensorExact { device := device, shape := shapeQ shape, dtype := .BFloat16 } (decodeFixtureFile shape "expected_o").toString
 
   -- Route through the production op. select_route picks tkMhaH100Decode[64]
   -- when shape is eligible; else falls back to SDPA.
-  let actual : T (shapeQ shape) :=
-    nn.tyrFlashAttn4d q k v none 0.0 false none true
+  let actual : Tensor { shape := (shapeQ shape), dtype := .BFloat16, device := device } :=
+    Tensor.flashAttention q k v true
   let _ ← torch.cuda_synchronize
 
-  let ok := torch.allclose expected actual shape.atol shape.rtol
-  let diff := torch.nn.abs (actual - expected)
-  let mae := torch.nn.item (torch.nn.meanAll diff)
-  let maxAbs := torch.nn.item (torch.nn.maxAll diff)
-  let actMaxAbs := torch.nn.item (torch.nn.maxAll (torch.nn.abs actual))
-  let actMeanAbs := torch.nn.item (torch.nn.meanAll (torch.nn.abs actual))
+  let ok := Tensor.allclose expected actual shape.atol shape.rtol
+  let diff := Tensor.abs (actual - expected)
+  let mae := Tensor.item (Tensor.meanAll diff)
+  let maxAbs := Tensor.item (Tensor.maxAllChecked diff)
+  let actMaxAbs := Tensor.item (Tensor.maxAllChecked (Tensor.abs actual))
+  let actMeanAbs := Tensor.item (Tensor.meanAll (Tensor.abs actual))
   IO.println s!"  decode {shape.name}: ok={ok} mae={mae} max_abs={maxAbs} act_mean_abs={actMeanAbs} act_max_abs={actMaxAbs}"
   -- Per-(batch, q_head) row diagnostics: which heads have correct vs zero output?
   -- mae over the head_dim axis for each (b, h). Expected is non-trivial; if our
   -- kernel only fills some heads correctly, we'll see a binary distribution.
-  let perHeadAct := torch.nn.maxAll (torch.nn.abs actual)
-  let perHeadExp := torch.nn.maxAll (torch.nn.abs expected)
-  IO.println s!"    per-shape actMax={torch.nn.item perHeadAct} expMax={torch.nn.item perHeadExp}"
+  let perHeadAct := Tensor.maxAllChecked (Tensor.abs actual)
+  let perHeadExp := Tensor.maxAllChecked (Tensor.abs expected)
+  IO.println s!"    per-shape actMax={Tensor.item perHeadAct} expMax={Tensor.item perHeadExp}"
   pure ok
 
 /-- Cache-vs-no-cache parity: generate K, V for a sequence of N tokens, then
     run the same attention two ways and compare:
 
-    1. Single dense forward over the full K, V (`scaledDotProductAttentionGQAQKV`).
+    1. Single dense forward over the full K, V (`Tensor.attentionGQAQKV`).
     2. Token-by-token with `Cache.attendLayer`, accumulating per-step outputs.
 
     Both should produce the same per-token output up to BF16 tolerance.
@@ -153,65 +158,7 @@ def runCacheParityOnce : IO Bool := do
   if !(← torch.cuda_is_available) then
     IO.eprintln "CUDA is not available on this host."
     return false
-  let device := Device.CUDA 0
-  -- Small Llama-3 shape: kvSeq=10 short enough to invoke the tail mask path on
-  -- every step; head_dim=128.
-  let batch : UInt64 := 1
-  let qHeads : UInt64 := 32
-  let kvHeads : UInt64 := 8
-  let totalLen : UInt64 := 10
-  let maxLen : UInt64 := 128
-  let headDim : UInt64 := 128
-
-  -- Random "all-positions" Q, K, V (FP32 → BF16) representing N tokens.
-  let qf ← torch.randn #[batch, qHeads, totalLen, headDim] false device
-  let kf ← torch.randn #[batch, kvHeads, totalLen, headDim] false device
-  let vf ← torch.randn #[batch, kvHeads, totalLen, headDim] false device
-  let qAll := torch.toBFloat16' qf
-  let kAll := torch.toBFloat16' kf
-  let vAll := torch.toBFloat16' vf
-
-  -- Reference: do attention over the full sequence (causal=true, q_seq=kv_seq).
-  let refAll : T #[batch, qHeads, totalLen, headDim] :=
-    nn.scaledDotProductAttentionGQAQKV qAll kAll vAll 0.0 true true
-
-  -- Build a 1-layer cache, append tokens one at a time, run cached attention.
-  let mut cache ← Generator.KVCache.Cache.init 1 batch maxLen kvHeads headDim (device := device)
-  -- Accumulate per-step kernel outputs into a list, then stack.
-  let mut acc : Array (T #[batch, qHeads, 1, headDim]) := #[]
-  for i in [:totalLen.toNat] do
-    let pos : UInt64 := i.toUInt64
-    let qStep : T #[batch, qHeads, 1, headDim] :=
-      torch.data.slice qAll 2 pos 1
-    let kStep : T #[batch, kvHeads, 1, headDim] :=
-      torch.data.slice kAll 2 pos 1
-    let vStep : T #[batch, kvHeads, 1, headDim] :=
-      torch.data.slice vAll 2 pos 1
-    let (cache', out) ← cache.attendLayer (numQHeads := qHeads)
-        0 qStep kStep vStep (enableGqa := true)
-    cache ← cache'.incrementSeqLens
-    acc := acc.push out
-
-  let _ ← torch.cuda_synchronize
-
-  -- Compare each step's cached output to the corresponding slice of refAll.
-  let mut allOk := true
-  let mut maxAbsAll : Float := 0.0
-  for i in [:totalLen.toNat] do
-    let pos : UInt64 := i.toUInt64
-    let refStep : T #[batch, qHeads, 1, headDim] :=
-      torch.data.slice refAll 2 pos 1
-    let cachedStep := acc[i]!
-    let diff := torch.nn.abs (cachedStep - refStep)
-    let maxAbs := torch.nn.item (torch.nn.maxAll diff)
-    if maxAbs > maxAbsAll then maxAbsAll := maxAbs
-    let ok := torch.allclose refStep cachedStep 3e-2 3e-2
-    if !ok then
-      allOk := false
-      IO.println s!"  cache_parity step {i}: max_abs={maxAbs} (FAIL)"
-
-  IO.println s!"cache_parity: ok={allOk} max_abs_overall={maxAbsAll}"
-  pure allOk
+  runDecodeCacheParity (← Device.cuda 0)
 
 /-- Combined runner: every shape in `decodeShapes` must pass, then the cache
     parity test must pass. Returns `0` only when all passed. -/

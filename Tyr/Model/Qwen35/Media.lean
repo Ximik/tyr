@@ -4,7 +4,8 @@
   Apple-only media preprocessing helpers for Qwen3.5-VL:
   - image/video file -> patchified tensor `[nPatches, patchDim]`
 -/
-import Tyr.Torch
+import Tyr.Typed.Neural
+import Tyr.RawTensor.Qwen35
 import Tyr.Model.Qwen35.VLConfig
 
 namespace torch.qwen35.media
@@ -12,8 +13,8 @@ namespace torch.qwen35.media
 open torch
 open torch.qwen35
 
-private def parsePatchified {patchDim : UInt64} (dyn : T #[]) : IO (Sigma (fun n => T #[n, patchDim])) := do
-  let shp := dyn.runtimeShape
+private def parsePatchified {patchDim : UInt64} (dyn : RawTensor) : IO (Sigma (fun n => Tensor { device := .CPU, shape := #[n, patchDim], dtype := .Float32 })) := do
+  let shp := RawTensor.runtimeShape dyn
   if shp.size != 2 then
     throw <| IO.userError s!"Expected patchified tensor rank 2, got shape={shp}"
   let nPatches := shp.getD 0 0
@@ -21,12 +22,14 @@ private def parsePatchified {patchDim : UInt64} (dyn : T #[]) : IO (Sigma (fun n
   if gotPatchDim != patchDim then
     throw <| IO.userError
       s!"Patch dim mismatch: expected {patchDim}, got {gotPatchDim}"
-  pure ⟨nPatches, reshape dyn #[nPatches, patchDim]⟩
+  match Tensor.ofRaw (σ := ⟨#[nPatches, patchDim], .Float32, .CPU⟩) dyn with
+  | .ok tensor => pure ⟨nPatches, tensor⟩
+  | .error message => throw (IO.userError message)
 
 /-- Load and patchify one image file for `cfg` (Apple-only path). -/
 def loadImagePatches (cfg : VLConfig) (path : String)
-    : IO (Sigma (fun n => T #[n, VisionConfig.patchDim cfg.vision_config])) := do
-  let dyn ← data.loadImagePatchified
+    : IO (Sigma (fun n => Tensor { device := .CPU, shape := #[n, VisionConfig.patchDim cfg.vision_config], dtype := .Float32 })) := do
+  let dyn ← RawTensor.loadImagePatchified
     path
     cfg.vision_config.in_channels
     cfg.vision_config.patch_size
@@ -39,8 +42,8 @@ def loadVideoPatches
     (path : String)
     (maxFrames : UInt64 := 64)
     (frameStride : UInt64 := 1)
-    : IO (Sigma (fun n => T #[n, VisionConfig.patchDim cfg.vision_config])) := do
-  let dyn ← data.loadVideoPatchified
+    : IO (Sigma (fun n => Tensor { device := .CPU, shape := #[n, VisionConfig.patchDim cfg.vision_config], dtype := .Float32 })) := do
+  let dyn ← RawTensor.loadVideoPatchified
     path
     cfg.vision_config.in_channels
     cfg.vision_config.patch_size

@@ -3,7 +3,9 @@
 
   Tests for Model Parameter serialization and structure traversal using TensorStruct.
 -/
-import Tyr
+import Tests.Assertions
+import Tyr.Typed.Neural
+import Tyr.Checkpoint
 import Examples.NanoChat.ModdedGPT
 import LeanTest
 
@@ -11,12 +13,12 @@ open torch
 open torch.moddedGpt
 
 /-- Helper to flatten model to a list of tensors -/
-def flattenModel [TensorStruct α] (model : α) : List (Σ s, T s) :=
-  TensorStruct.fold (fun {s} t acc => (⟨s, t⟩ : Σ s, T s) :: acc) [] model |>.reverse
+def flattenModel [TensorStruct α] (model : α) : List (Sigma Tensor) :=
+  TensorStruct.fold (fun {s} t acc => (⟨s, t⟩ : Sigma Tensor) :: acc) [] model |>.reverse
 
 /-- Helper to count elements in flattened model -/
-def countElements (flat : List (Σ s, T s)) : Nat :=
-  flat.foldl (fun acc ⟨s, _⟩ => acc + s.foldl (fun p d => p * d.toNat) 1) 0
+def countElements (flat : List (Sigma Tensor)) : Nat :=
+  flat.foldl (fun acc ⟨s, _⟩ => acc + s.shape.foldl (fun p d => p * d.toNat) 1) 0
 
 @[test]
 def testModdedGPTStructure : IO Unit := do
@@ -74,11 +76,11 @@ def testParameterUpdate : IO Unit := do
   let params ← ModdedGPTParams.init cfg
   
   -- Apply update: p = p + 1
-  let updatedParams := TensorStruct.map (fun t => t + (1.0 : Float)) params
+  let updatedParams := FloatingTensorStruct.map (fun t => Tensor.addScalar t 1.0) params
   
   -- Check one tensor to verify update
-  let embedSumOriginal := nn.item (nn.sumAll params.embed)
-  let embedSumUpdated := nn.item (nn.sumAll updatedParams.embed)
+  let embedSumOriginal := Tensor.item (Tensor.sumAll params.embed)
+  let embedSumUpdated := Tensor.item (Tensor.sumAll updatedParams.embed)
   
   let diff := embedSumUpdated - embedSumOriginal
   let expectedDiff := (cfg.vocabSize * cfg.modelDim).toFloat -- adding 1.0 to each element
@@ -86,7 +88,7 @@ def testParameterUpdate : IO Unit := do
   LeanTest.assertTrue (Float.abs (diff - expectedDiff) < 1e-4) "Parameters should be updated"
 
 @[test]
-unsafe def testStateDictSimulation : IO Unit := do
+def testStateDictSimulation : IO Unit := do
   -- Simulate saving to a state dict (list of tensors) and loading back
   let cfg : moddedGpt.Config := {
     vocabSize := 10
@@ -106,27 +108,27 @@ unsafe def testStateDictSimulation : IO Unit := do
   
   -- "Load" from list (Mock implementation of loading logic)
   -- We use mapM with a stateful iterator to consume the list
-  let loadFromList (list : List (Σ s, T s)) (model : ModdedGPTParams cfg) 
+  let loadFromList (list : List (Sigma Tensor)) (model : ModdedGPTParams cfg)
       : IO (ModdedGPTParams cfg) := do
     let ref ← IO.mkRef list
-    TensorStruct.mapM (fun {s} _oldT => do
+    TensorStruct.mapM (fun {σ} _oldT => do
       let remaining ← ref.get
       match remaining with
       | [] => throw $ IO.userError "Not enough tensors in state list"
       | ⟨_s', t⟩ :: rest => 
-        -- In real loading, we'd check shape match here (s == s')
-        -- But T s and T s' are different types if s != s' statically
-        -- We cast or rely on runtime check
+        let tensor ← match Tensor.ofRaw (σ := σ) t.raw with
+          | .ok tensor => pure tensor
+          | .error message => throw (IO.userError message)
         ref.set rest
-        -- Unsafe cast for this test since we know shapes match
-        -- In real code, we'd load by name or validate shape
-        pure (unsafeCast t : T s)
+        pure tensor
     ) model
 
   let loadedParams ← loadFromList stateList params
+  let malformed : Sigma Tensor := ⟨_, Tensor.zeros #[1]⟩
+  Tests.assertThrows (loadFromList (malformed :: stateList.drop 1) params) (some "shape")
   
   -- Verify loaded matches original
-  let diff := TensorStruct.zipWith (fun a b => a - b) params loadedParams
-  let totalDiff := TensorStruct.fold (fun {_s} t acc => acc + nn.item (nn.sumAll (nn.abs t))) 0.0 diff
+  let diff := FloatingTensorStruct.zipWith Tensor.sub params loadedParams
+  let totalDiff := TensorStruct.fold (fun {_s} t acc => acc + Tensor.item (Tensor.sumAll (Tensor.abs t))) 0.0 diff
   
   LeanTest.assertTrue (totalDiff < 1e-6) "Loaded parameters should match saved ones"

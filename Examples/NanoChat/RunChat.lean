@@ -14,6 +14,8 @@ import Examples.NanoChat.ModdedTrain
 namespace torch.NanoChat.Chat
 
 open torch
+
+variable {device : Device}
 open torch.moddedGpt
 open torch.ModdedTrain
 open tokenizer
@@ -167,28 +169,22 @@ private def resolveTokenizerPath (args : Args) : IO String := do
     else
       pure s!"{p}/tokenizer.bin"
 
-private def deviceToString : Device → String
-  | Device.MPS => "MPS"
-  | Device.CPU => "CPU"
-  | Device.CUDA n => s!"CUDA:{n}"
+private def deviceToString (device : Device) : String :=
+  match device.kind with
+  | DeviceKind.MPS => "MPS"
+  | DeviceKind.CPU => "CPU"
+  | DeviceKind.CUDA n => s!"CUDA:{n}"
 
 private def resolveDevice (env : ChatEnvState) : IO Device := do
   let requested? := env.requestedDevice?
   match requested? with
   | some "cpu" => pure Device.CPU
-  | some "mps" => pure Device.MPS
+  | some "mps" => Device.mps
   | some "cuda" =>
-    if ← cuda_is_available then pure (Device.CUDA 0) else pure Device.CPU
+    if ← cuda_is_available then Device.cuda 0 else pure Device.CPU
   | some "auto" | none => getBestDevice
   | some _ => getBestDevice
 
-private def moveYarnToDevice {headDim maxSeqLen : UInt64}
-    (yarn : YarnRotary headDim maxSeqLen) (device : Device) : YarnRotary headDim maxSeqLen :=
-  { yarn with
-    cos := yarn.cos.to device
-    sin := yarn.sin.to device
-    angularFreq := yarn.angularFreq.to device
-  }
 
 private def findSpecialId? (tok : BPETokenizer) (names : Array String) : Option UInt64 := Id.run do
   for name in names do
@@ -229,9 +225,8 @@ private def buildModelConfig (args : Args) : Config := {
 }
 
 private def sampleNextToken {cfg : Config}
-    (params : ModdedGPTParams cfg)
-    (yarn : YarnRotary cfg.headDim cfg.maxSeqLen)
-    (device : Device)
+    (params : ModdedGPTParams (device := device) cfg)
+    (yarn : YarnRotary (device := device) cfg.headDim cfg.maxSeqLen)
     (temperature : Float)
     (topK : Nat)
     (context : Array UInt64)
@@ -239,27 +234,23 @@ private def sampleNextToken {cfg : Config}
   if context.isEmpty then
     throw <| IO.userError "Cannot decode from an empty prompt."
 
-  let inputTensor := data.fromInt64Array (context.map (·.toInt64))
-  let inputReshaped := (reshape inputTensor #[1, context.size.toUInt64]).to device
+  let inputTensor := Tensor.fromInt64Array (context.map (·.toInt64))
+  let inputReshaped := (inputTensor.reshapeChecked #[1, context.size.toUInt64]).to device
   let logits ← moddedGpt.forward params yarn inputReshaped false
 
-  -- Extract logits for the final time step.
-  let logitsFlat := reshape logits #[context.size.toUInt64 * cfg.vocabSize]
-  let startIdx := ((context.size - 1).toUInt64 * cfg.vocabSize).toInt64
-  let endIdx := (context.size.toUInt64 * cfg.vocabSize).toInt64
-  let lastLogits := data.slice1d' logitsFlat startIdx endIdx
-  let rowLogits := reshape lastLogits #[1, cfg.vocabSize]
-
+  -- Keep the final time step, then view its logits as one sampling row.
+  let lastLogits := Tensor.sliceChecked logits 1 (context.size - 1).toUInt64 1
+    #[1, 1, cfg.vocabSize]
+  let rowLogits := lastLogits.reshapeChecked #[1, cfg.vocabSize]
   let scaled :=
     if temperature == 1.0 then rowLogits
-    else mul_scalar rowLogits (1.0 / temperature)
+    else Tensor.mulScalar rowLogits (1.0 / temperature)
   let filtered :=
     if topK == 0 then scaled
-    else nn.topKFilter scaled topK.toUInt64
-  let probs := nn.softmax filtered (-1)
-  let sampled ← nn.multinomial probs 1
-  let sampled := nn.squeezeDim sampled (-1)
-  pure (nn.itemInt sampled).toUInt64
+    else Tensor.topKFilter scaled topK.toUInt64
+  let probs := Tensor.softmax filtered (-1)
+  let sampled ← Tensor.multinomial probs 1
+  pure (Tensor.itemInt (sampled.reshapeChecked #[])).toUInt64
 
 private def promptWithMarkers (markers : ChatMarkerIds) (base : Array UInt64) (prompt : Array UInt64)
     : Array UInt64 :=
@@ -309,20 +300,18 @@ unsafe def main (rawArgs : List String) : IO UInt32 := do
   IO.println s!"  decoding:   max_new={args.maxNewTokens} temp={args.temperature} top_k={args.topK} eos={eosToken}"
   IO.println ""
 
-  let maybeCkpt ← loadCheckpoint cfg checkpointPath
+  let maybeCkpt ← loadCheckpoint cfg checkpointPath (device := device)
   let ckpt ← match maybeCkpt with
     | some ckpt => pure ckpt
     | none => throw <| IO.userError s!"Checkpoint not found or incompatible with current config: {checkpointPath}"
 
-  let paramsOnDeviceRaw ← TensorStruct.mapM (fun t => pure (t.to device)) ckpt.params
-  let paramsOnDevice := TensorStruct.makeLeafParams paramsOnDeviceRaw
+  let paramsOnDevice ← TensorStruct.makeLeafParams ckpt.params
 
-  let yarn0 ← YarnRotary.init cfg.headDim cfg.maxSeqLen cfg.ropeBase
-  let yarn := moveYarnToDevice yarn0 device
+  let yarn ← YarnRotary.init cfg.headDim cfg.maxSeqLen cfg.ropeBase (device := device)
 
   let encodeFn := fun (text : String) => (tokenizer.encodeWithSpecials tok text).map (·.toUInt64)
   let decodeFn := fun (tokens : Array UInt64) => tokenizer.decode tok (tokens.map (·.toUInt32))
-  let nextTokenFn := sampleNextToken paramsOnDevice yarn device args.temperature args.topK
+  let nextTokenFn := sampleNextToken paramsOnDevice yarn args.temperature args.topK
 
   let runTurn := fun (baseCtx : Array UInt64) (prompt : String) => do
     let promptBody := encodeFn prompt

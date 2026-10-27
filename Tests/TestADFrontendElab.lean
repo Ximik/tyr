@@ -1,5 +1,6 @@
 import Tyr
 import LeanTest
+import Std.Sync.Mutex
 
 namespace Tests.ADFrontendElab
 
@@ -8,13 +9,26 @@ open LeanTest
 open Tyr.AD.Frontend
 open Tyr.AD.JaxprLike
 
+-- Imported compacted regions outlive an Environment value. Retain one immutable
+-- base rather than importing the entire module graph again for every test.
+-- Keep the regions alive because returned frontend expressions may refer to them.
+private initialize importedEnvironment : Std.Mutex (Option Environment) ← Std.Mutex.new none
+
+private def getImportedEnvironment : IO Environment :=
+  importedEnvironment.atomically do
+    if let some env := ← get then
+      return env
+    Lean.initSearchPath (← Lean.findSysroot)
+    let env ← Lean.importModules
+      #[{ module := `Tests.TestADFrontendElab }] {} (loadExts := true)
+    set (some env)
+    return env
+
 def runCoreM (x : CoreM α) : IO α := do
-  Lean.initSearchPath (← Lean.findSysroot)
-  let env ← Lean.importModules
-    #[{ module := `Tests.TestADFrontendElab }]
-    {}
-    (loadExts := true)
-  let ctx : Core.Context := { fileName := "<test>", fileMap := default }
+  let env ← getImportedEnvironment
+  -- CoreM.run uses this baseline; the default zero charges earlier tests too.
+  let initHeartbeats ← IO.getNumHeartbeats
+  let ctx : Core.Context := { fileName := "<test>", fileMap := default, initHeartbeats }
   let state : Core.State := { env := env }
   let eio := x.run ctx state
   let res ← EIO.toBaseIO eio
@@ -23,15 +37,53 @@ def runCoreM (x : CoreM α) : IO α := do
   | .error msg =>
       throw (IO.userError (← msg.toMessageData.toString))
 
-opaque frontendPadPrimitive (base : torch.T #[2]) (padv : torch.T #[1]) : torch.T #[6]
+@[test]
+unsafe def testImportedEnvironmentReusePreservesTestIsolation : IO Unit := do
+  let original ← runCoreM do
+    let env ← getEnv
+    setEnv (env.setMainModule `testOnlyEnvironmentMutation)
+    return env
+  let next ← runCoreM getEnv
+  assertTrue (ptrEq original next) "Repeated tests must share their immutable imported base"
+  assertEqual original.mainModule next.mainModule
+    "A test's environment updates must not enter the shared base"
 
-def ordinaryPadWrapper (base : torch.T #[2]) (padv : torch.T #[1]) : torch.T #[6] :=
+opaque frontendPadPrimitive (_base : torch.Tensor { shape := #[2], dtype := .Float32, device := .CPU }) (_padv : torch.Tensor { shape := #[1], dtype := .Float32, device := .CPU }) : torch.Tensor { shape := #[6], dtype := .Float32, device := .CPU } :=
+  torch.Tensor.zeros #[6]
+
+def ordinaryPadWrapper (base : torch.Tensor { shape := #[2], dtype := .Float32, device := .CPU }) (padv : torch.Tensor { shape := #[1], dtype := .Float32, device := .CPU }) : torch.Tensor { shape := #[6], dtype := .Float32, device := .CPU } :=
   frontendPadPrimitive base padv
 
-opaque frontendReshapePrimitive (x : torch.T #[6]) : torch.T #[6]
+opaque frontendReshapePrimitive (x : torch.Tensor { shape := #[6], dtype := .Float32, device := .CPU }) : torch.Tensor { shape := #[6], dtype := .Float32, device := .CPU } := x
 
-def unsupportedCompositeWrapper (base : torch.T #[2]) (padv : torch.T #[1]) : torch.T #[6] :=
+def unsupportedCompositeWrapper (base : torch.Tensor { shape := #[2], dtype := .Float32, device := .CPU }) (padv : torch.Tensor { shape := #[1], dtype := .Float32, device := .CPU }) : torch.Tensor { shape := #[6], dtype := .Float32, device := .CPU } :=
   frontendReshapePrimitive (frontendPadPrimitive base padv)
+
+opaque frontendFrozenPadPrimitive (_base : torch.Tensor { shape := #[2], dtype := .Float32, device := .CPU })
+    (_padv : torch.Frozen { shape := #[1], dtype := .Float32, device := .CPU }) : torch.Tensor { shape := #[6], dtype := .Float32, device := .CPU } :=
+  torch.Tensor.zeros #[6]
+
+def frozenPadWrapper (base : torch.Tensor { shape := #[2], dtype := .Float32, device := .CPU })
+    (padv : torch.Frozen { shape := #[1], dtype := .Float32, device := .CPU }) : torch.Tensor { shape := #[6], dtype := .Float32, device := .CPU } :=
+  frontendFrozenPadPrimitive base padv
+
+def TensorTypeAlias (spec : torch.StaticSpec) : Type := torch.Tensor spec
+abbrev AliasedParameter := TensorTypeAlias { shape := #[2], dtype := .Float64, device := .CPU }
+def FrozenTypeAlias : Type := torch.Frozen { shape := #[1], dtype := .Int64, device := .CPU }
+
+opaque frontendAliasedPrimitive (_base : AliasedParameter)
+    (_padv : (let type := FrozenTypeAlias; type)) :
+    TensorTypeAlias { shape := #[6], dtype := .Float64, device := .CPU } :=
+  torch.Tensor.zerosFor { shape := #[6], dtype := .Float64, device := .CPU }
+
+def aliasedWrapper (base : AliasedParameter) (padv : FrozenTypeAlias) :
+    TensorTypeAlias { shape := #[6], dtype := .Float64, device := .CPU } :=
+  frontendAliasedPrimitive base padv
+
+opaque frontendRawPrimitive (tensor : torch.RawTensor) : torch.RawTensor := tensor
+
+def rawWrapper (tensor : torch.RawTensor) : torch.RawTensor :=
+  frontendRawPrimitive tensor
 
 private def padPrimitiveSpecs : Array PrimitiveFrontendSpec := #[
   {
@@ -82,6 +134,58 @@ unsafe def testDeriveSinglePrimitiveFrontendRegistration : IO Unit := do
     "Derived frontend equation should preserve fixed primitive params."
   LeanTest.assertEqual (eqn.params.findNats? .padInterior) (some #[1])
     "Derived frontend equation should preserve fixed primitive params."
+
+@[test]
+unsafe def testDeriveFrontendFrozenTensorSpec : IO Unit := do
+  let specs := padPrimitiveSpecs.map fun spec =>
+    if spec.leanConst == ``Tests.ADFrontendElab.frontendPadPrimitive then
+      { spec with leanConst := ``Tests.ADFrontendElab.frontendFrozenPadPrimitive }
+    else spec
+  let registration ← runCoreM <|
+    deriveSinglePrimitiveFrontendRegistration ``Tests.ADFrontendElab.frozenPadWrapper specs
+  LeanTest.assertTrue ((registration.jaxpr.invars.map (·.metaInfo.shape)) == #[some #[2], some #[1]])
+    "Frozen parameter shapes must come from their tensor specification."
+  LeanTest.assertTrue ((registration.jaxpr.invars.map (·.metaInfo.participation)) == #[.diff, .frozen])
+    "Frozen typed parameters must keep their AD participation role."
+  LeanTest.assertTrue ((registration.jaxpr.invars.map (·.metaInfo.dtype)) == #[some "Float32", some "Float32"])
+    "Typed and frozen parameters must retain their dtype in frontend metadata."
+
+@[test]
+unsafe def testDeriveFrontendAliasedTensorSpecs : IO Unit := do
+  let registration ← runCoreM <|
+    deriveSinglePrimitiveFrontendRegistration ``Tests.ADFrontendElab.aliasedWrapper
+      #[{ leanConst := ``Tests.ADFrontendElab.frontendAliasedPrimitive, op := padAliasOpName }]
+  let jaxpr := registration.jaxpr
+  LeanTest.assertTrue ((jaxpr.invars.map (·.metaInfo.shape)) == #[some #[2], some #[1]])
+    "Alias normalization must stop at the public Tensor/Frozen type heads."
+  LeanTest.assertTrue ((jaxpr.invars.map (·.metaInfo.participation)) == #[.diff, .frozen])
+    "Tensor and Frozen aliases must retain distinct AD participation roles."
+  LeanTest.assertTrue ((jaxpr.invars.map (·.metaInfo.dtype)) == #[some "Float64", some "Int64"])
+    "Alias normalization must preserve each parameter's own static specification."
+  LeanTest.assertTrue ((jaxpr.outvars.map (·.metaInfo.shape)) == #[some #[6]])
+  LeanTest.assertTrue ((jaxpr.outvars.map (·.metaInfo.dtype)) == #[some "Float64"])
+
+@[test]
+unsafe def testDeriveFrontendStartsFreshHeartbeatBudget : IO Unit := do
+  let previous ← IO.getNumHeartbeats
+  try
+    IO.addHeartbeats (Core.getMaxHeartbeats {} + 1)
+    testDeriveFrontendAliasedTensorSpecs
+  finally
+    IO.setNumHeartbeats previous
+
+@[test]
+unsafe def testDeriveFrontendRejectsRawHandles : IO Unit := do
+  let result ← try
+    let _ ← runCoreM <|
+      deriveSinglePrimitiveFrontendRegistration ``Tests.ADFrontendElab.rawWrapper
+        #[{ leanConst := ``Tests.ADFrontendElab.frontendRawPrimitive, op := padAliasOpName }]
+    pure (none : Option String)
+  catch error =>
+    pure (some error.toString)
+  match result with
+  | none => LeanTest.fail "A raw handle has no indexed tensor metadata."
+  | some message => LeanTest.assertTrue (message.containsSubstr "only supports tensor-like parameters")
 
 /--
 Registration itself currently trips a Lean IR interpreter assertion under

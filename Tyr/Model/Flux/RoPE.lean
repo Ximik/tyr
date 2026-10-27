@@ -1,98 +1,59 @@
-/-
-  Tyr/Model/Flux/RoPE.lean
-
-  4-axis rotary position embeddings for Flux.
-  Splits head_dim across axes and applies RoPE per axis.
--/
-import Tyr.Torch
+import Tyr.Model.Flux.TypedOps
 
 namespace torch.flux
 
-private def axisIds {batch seq : UInt64} (ids : T #[batch, seq, 4]) (axis : UInt64) : T #[batch, seq] :=
-  reshape (data.slice ids 2 axis 1) #[batch, seq]
+variable {device : Device} {dtype : DType}
+variable [DType.RealFloating dtype]
+private def axisIds {batch seq : UInt64} (ids : Tensor { device := device, shape := #[batch, seq, 4], dtype := .Int64 }) (axis : UInt64) : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 } :=
+  (sliceTyped ids 2 axis 1).reshapeChecked #[batch, seq]
 
 private def ropeAxis {batch seq : UInt64}
-    (ids : T #[batch, seq]) (dim : UInt64) (theta : UInt64)
-    : T #[batch, seq, dim / 2, 2, 2] :=
-  let scale := torch.arange 0 dim 2
-  let scale := _root_.torch.toFloat' scale
-  let scale := div_scalar scale dim.toFloat
-  let logTheta := Float.log theta.toFloat
-  let omega := nn.exp (mul_scalar scale (-logTheta))  -- 1 / (theta ** scale)
+    (ids : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 }) (dim theta : UInt64)
+    : Tensor { device := device, shape := #[batch, seq, dim / 2, 2, 2], dtype := .Float32 } :=
+  let scale := Tensor.mulScalar ((Tensor.arange (dim / 2)).toFloat32.to ids.device) (2.0 / dim.toFloat)
+  let omega := Tensor.exp (Tensor.mulScalar scale (-Float.log theta.toFloat))
+  let pos := Tensor.expand (ids.toFloat32.reshapeChecked #[batch, seq, 1]) #[batch, seq, dim / 2]
+  let omega := Tensor.expand (omega.reshapeChecked #[1, 1, dim / 2]) #[batch, seq, dim / 2]
+  let angle := pos * omega
+  let cos := Tensor.cos angle
+  let sin := Tensor.sin angle
+  let cos := cos.reshapeChecked #[batch, seq, dim / 2, 1]
+  let sin := sin.reshapeChecked #[batch, seq, dim / 2, 1]
+  let row0 : Tensor { device := device, shape := #[batch, seq, dim / 2, 2], dtype := .Float32 } := qwen35.typedCat cos (Tensor.mulScalar sin (-1.0)) 3
+  let row1 : Tensor { device := device, shape := #[batch, seq, dim / 2, 2], dtype := .Float32 } := qwen35.typedCat sin cos 3
+  let both : Tensor { device := device, shape := #[batch, seq, dim / 2, 4], dtype := .Float32 } := qwen35.typedCat row0 row1 3
+  both.reshapeChecked #[batch, seq, dim / 2, 2, 2]
 
-  let pos := _root_.torch.toFloat' ids
-  let pos := nn.unsqueeze pos 2  -- [batch, seq, 1]
-  let pos := nn.expand pos #[batch, seq, dim / 2]
-  let omega := reshape omega #[1, 1, dim / 2]
-  let omega := nn.expand omega #[batch, seq, dim / 2]
-  let out := pos * omega
-
-  let cos := nn.cos out
-  let sin := nn.sin out
-  let neg_sin := mul_scalar sin (-1.0)
-
-  let cos_u := nn.unsqueeze cos 3
-  let neg_sin_u := nn.unsqueeze neg_sin 3
-  let sin_u := nn.unsqueeze sin 3
-  let cos_u2 := nn.unsqueeze cos 3
-
-  let stacked := nn.cat (nn.cat (nn.cat cos_u neg_sin_u 3) sin_u 3) cos_u2 3
-  reshape stacked #[batch, seq, dim / 2, 2, 2]
-
-/-- Build 4-axis RoPE embeddings for Flux.
-    ids: [batch, seq, 4] position IDs (t, h, w, l)
-    axes_dims: per-axis head_dim split (sum = head_dim)
-    theta: RoPE base (Flux uses 2000) -/
+/-- Four-axis rotary matrices. Each axis dimension is even and their sum is the head dimension. -/
 def ropeEmbed {batch seq head_dim : UInt64}
-    (ids : T #[batch, seq, 4])
-    (axes_dims : Array UInt64)
-    (theta : UInt64 := 2000)
-    : T #[batch, 1, seq, head_dim / 2, 2, 2] :=
-  let d0 := axes_dims.getD 0 0
-  let d1 := axes_dims.getD 1 0
-  let d2 := axes_dims.getD 2 0
-  let d3 := axes_dims.getD 3 0
+    (ids : Tensor { device := device, shape := #[batch, seq, 4], dtype := .Int64 }) (axes_dims : Array UInt64) (theta : UInt64 := 2000)
+    : Tensor { device := device, shape := #[batch, 1, seq, head_dim / 2, 2, 2], dtype := .Float32 } :=
+  if axes_dims.size != 4 || axes_dims.any (fun d => d % 2 != 0) ||
+      axes_dims.foldl (fun n d => n + d.toNat) 0 != head_dim.toNat || theta == 0 then
+    nativeInvariantFailure "Flux RoPE requires four even axis dimensions summing to head_dim and a positive theta"
+  else
+    let d0 := axes_dims[0]!
+    let d1 := axes_dims[1]!
+    let d2 := axes_dims[2]!
+    let d3 := axes_dims[3]!
+    let r0 := ropeAxis (axisIds ids 0) d0 theta
+    let r1 := ropeAxis (axisIds ids 1) d1 theta
+    let r2 := ropeAxis (axisIds ids 2) d2 theta
+    let r3 := ropeAxis (axisIds ids 3) d3 theta
+    let joined := Tensor.catManyChecked #[r0.packShape, r1.packShape, r2.packShape, r3.packShape] 2 #[batch, seq, head_dim / 2, 2, 2]
+    joined.reshapeChecked #[batch, 1, seq, head_dim / 2, 2, 2]
 
-  let ids0 := axisIds ids 0
-  let ids1 := axisIds ids 1
-  let ids2 := axisIds ids 2
-  let ids3 := axisIds ids 3
-
-  let rope0 := ropeAxis ids0 d0 theta
-  let rope1 := ropeAxis ids1 d1 theta
-  let rope2 := ropeAxis ids2 d2 theta
-  let rope3 := ropeAxis ids3 d3 theta
-
-  let emb := nn.cat (nn.cat (nn.cat rope0 rope1 2) rope2 2) rope3 2
-  let emb := nn.unsqueeze emb 1
-  reshape emb #[batch, 1, seq, head_dim / 2, 2, 2]
-
-/-- Apply Flux RoPE embeddings (from `ropeEmbed`) to Q/K tensors. -/
-private def applyRopeAttn {batch n_head seq head_dim : UInt64}
-    (x : T #[batch, n_head, seq, head_dim])
-    (pe : T #[batch, 1, seq, head_dim / 2, 2, 2])
-    : T #[batch, n_head, seq, head_dim] :=
-  let x := _root_.torch.toFloat' x
-  let x := reshape x #[batch, n_head, seq, head_dim / 2, 1, 2]
-  let x0 := reshape (data.slice x 5 0 1) #[batch, n_head, seq, head_dim / 2, 1]
-  let x1 := reshape (data.slice x 5 1 1) #[batch, n_head, seq, head_dim / 2, 1]
-  let x0 := nn.expand x0 #[batch, n_head, seq, head_dim / 2, 2]
-  let x1 := nn.expand x1 #[batch, n_head, seq, head_dim / 2, 2]
-
-  let pe0 := reshape (data.slice pe 5 0 1) #[batch, 1, seq, head_dim / 2, 2]
-  let pe1 := reshape (data.slice pe 5 1 1) #[batch, 1, seq, head_dim / 2, 2]
-  let pe0 := nn.expand pe0 #[batch, n_head, seq, head_dim / 2, 2]
-  let pe1 := nn.expand pe1 #[batch, n_head, seq, head_dim / 2, 2]
-
-  let out := pe0 * x0 + pe1 * x1
-  reshape out #[batch, n_head, seq, head_dim]
-
+/-- Apply rotary matrices in Float32 and restore the activation dtype. -/
 def applyRope {batch seq n_head head_dim : UInt64}
-    (x : T #[batch, seq, n_head, head_dim])
-    (pe : T #[batch, 1, seq, head_dim / 2, 2, 2])
-    : T #[batch, seq, n_head, head_dim] :=
-  let x_attn := nn.transpose_for_attention x
-  let out := applyRopeAttn x_attn pe
-  nn.transpose_from_attention out
+    (x : Tensor { dtype := dtype, device := device, shape := #[batch, seq, n_head, head_dim] })
+    (pe : Tensor { device := device, shape := #[batch, 1, seq, head_dim / 2, 2, 2], dtype := .Float32 })
+    : Tensor { dtype := dtype, device := device, shape := #[batch, seq, n_head, head_dim] } :=
+  let xf := (transposeAttention x).toFloat32.reshapeChecked #[batch, n_head, seq, head_dim / 2, 1, 2]
+  let x0 := Tensor.expand ((sliceTyped xf 5 0 1).reshapeChecked #[batch, n_head, seq, head_dim / 2, 1]) #[batch, n_head, seq, head_dim / 2, 2]
+  let x1 := Tensor.expand ((sliceTyped xf 5 1 1).reshapeChecked #[batch, n_head, seq, head_dim / 2, 1]) #[batch, n_head, seq, head_dim / 2, 2]
+  let p0 := Tensor.expand ((sliceTyped pe 5 0 1).reshapeChecked #[batch, 1, seq, head_dim / 2, 2]) #[batch, n_head, seq, head_dim / 2, 2]
+  let p1 := Tensor.expand ((sliceTyped pe 5 1 1).reshapeChecked #[batch, 1, seq, head_dim / 2, 2]) #[batch, n_head, seq, head_dim / 2, 2]
+  let out := (p0 * x0 + p1 * x1).reshapeChecked #[batch, n_head, seq, head_dim]
+  Tensor.castLike x (fromAttention out)
 
 end torch.flux

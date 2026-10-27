@@ -40,19 +40,19 @@
 
       <section class="prose" id="why-types">
         <h2>Why dependent types?</h2>
-        <p>Many assumptions in an ML program are relations between values: the output width of one layer must equal the input width of the next; two operands must have compatible dtypes and devices; a reshaped tensor must contain the same number of elements. An ordinary tensor type says that a value is a tensor. A dependent tensor type can also state its shape, dtype, or device policy, because values such as dimensions occur in the type itself.</p>
+        <p>Many assumptions in an ML program are relations between values: the output width of one layer must equal the input width of the next; two operands must have compatible dtypes and devices; a reshaped tensor must contain the same number of elements. An ordinary tensor type says that a value is a tensor. A dependent tensor type can also state its shape, dtype, or concrete device, because values such as dimensions occur in the type itself.</p>
         <p>This changes when consistency is checked. Instead of rediscovering a wiring error in one particular batch at runtime, Lean checks the relationship while elaborating the program. The relationships then compose: if one function returns <code>Tensor #[batch, hidden]</code> and the next requires that shape, their connection is checked wherever the functions are assembled, including when <code>batch</code> and <code>hidden</code> are still symbolic.</p>
         <p>The point is not to place every property of a learned system in a type. Data-dependent dimensions, imported checkpoints, device availability, allocation, and floating-point behavior still cross runtime boundaries. The useful division is to make stable structural relations static, validate external data when it enters the system, and leave numerical execution to numerical backends.</p>
       </section>
 
       <section class="prose" id="contracts">
         <h2>A shape-dependent operation</h2>
-        <p>The contract for a linear projection makes the relationship visible. The same <code>m</code> occurs in the activation and weight types; <code>b</code> is preserved; and <code>n</code>, taken from the weight, becomes the output width. The dtype and device policy must also agree.</p>
-        <pre class="signature-code"><code>def linear {m n b : UInt64} {d : DType} {dev : DevicePolicy}
+        <p>The contract for a linear projection makes the relationship visible. The same <code>m</code> occurs in the activation and weight types; <code>b</code> is preserved; and <code>n</code>, taken from the weight, becomes the output width. The dtype and concrete device must also agree.</p>
+        <pre class="signature-code"><code>def linear {m n b : UInt64} {d : DType} {dev : Device}
     (x      : Tensor ⟨#[b, m], d, dev⟩)
     (weight : Tensor ⟨#[n, m], d, dev⟩) :
     Tensor ⟨#[b, n], d, dev⟩ :=
-  .assumeSpec (torch.linear x.raw weight.raw)</code></pre>
+  Tensor.linear x weight</code></pre>
         <p>A use site can specialize this contract to ordinary model dimensions. The valid program below elaborates. Changing the weight from <code>#[512, 768]</code> to <code>#[768, 512]</code> makes the shared input dimension inconsistent, so Lean rejects the program before a numerical kernel is called.</p>
       </section>
 
@@ -74,7 +74,7 @@
       <section class="prose" id="compilation">
         <h2>What is compiled, and what runs?</h2>
         <p>For this example, Lean first elaborates <code>project</code> and unifies the dimension variables in <code>linear</code>. In the valid case it resolves <code>b = 32</code>, <code>m = 768</code>, and <code>n = 512</code>. The invalid case cannot assign one value to the two occurrences of <code>m</code>, so compilation stops at this stage.</p>
-        <p>The accepted program does not carry a second, shape-rich tensor representation at runtime. Tyr’s <code>Tensor σ</code> is a typed view whose <code>StaticSpec</code> index is phantom; its only field is the existing raw tensor handle. Lean then compiles the ordinary program and its call to the external symbol <code>lean_torch_linear</code>. The C++ bridge passes the two tensor handles to <code>torch::linear</code>, and LibTorch dispatches the operation according to the tensors’ actual placement.</p>
+        <p>The accepted program does not carry a second, shape-rich tensor representation at runtime. Tyr’s <code>Tensor σ</code> is an opaque indexed carrier backed by a raw tensor handle. Its erased <code>StaticSpec</code> index records shape, dtype, and concrete device; checked construction validates the handle against that index. Lean then compiles the ordinary program and its call to the external symbol <code>lean_torch_linear_checked</code>. The C++ bridge passes the two tensor handles to <code>torch::linear</code>, and LibTorch dispatches the operation according to the tensors’ actual placement.</p>
         <p>Thus the type checker establishes the wiring relation, while LibTorch remains responsible for allocation and numerical execution. The lower-level typed GPU language discussed later is a separate path: it generates CUDA rather than calling this LibTorch operator.</p>
       </section>
 
@@ -84,11 +84,11 @@
           <i>→</i>
           <div><em>2 · typed value</em><b>Tensor σ</b><span>Phantom specification over the existing handle</span></div>
           <i>→</i>
-          <div><em>3 · native boundary</em><b>lean_torch_linear</b><span>Lean extern passes two tensor handles</span></div>
+          <div><em>3 · native boundary</em><b>lean_torch_linear_checked</b><span>Lean extern passes two tensor handles</span></div>
           <i>→</i>
           <div><em>4 · execution</em><b>torch::linear</b><span>LibTorch dispatches on the runtime device</span></div>
         </div>
-        <figcaption><strong>Compilation path for the projection example.</strong> Dimensions, dtype, and device policy constrain the Lean program. The accepted value still wraps the same native tensor handle, and the numerical operation is executed by LibTorch. Source: <a href="https://github.com/ranvier-labs/tyr/blob/main/Tyr/Typed/Ops.lean">typed operation</a> and <a href="https://github.com/ranvier-labs/tyr/blob/main/cc/src/tyr.cpp">native bridge</a>.</figcaption>
+        <figcaption><strong>Compilation path for the projection example.</strong> Dimensions, dtype, and concrete device constrain the Lean program. The accepted value still wraps the same native tensor handle, and the numerical operation is executed by LibTorch. Source: <a href="https://github.com/ranvier-labs/tyr/blob/main/Tyr/Typed/Ops.lean">typed operation</a> and <a href="https://github.com/ranvier-labs/tyr/blob/main/cc/src/tyr.cpp">native bridge</a>.</figcaption>
       </figure>
 
       <section class="prose" id="hybrid">
@@ -129,7 +129,7 @@
       <figure class="wide figure schema-figure">
         <div class="schema-input"><span>input</span><code>safetensors_type_provider<br>  "indexed_dir" as Weights</code></div>
         <div class="schema-arrow">→</div>
-        <div class="schema-output"><span>generated declarations</span><code>Weights.load_embed_weightTyped<br>  : IO (DTensor #[2,2] Float32)<br><br>Weights.loadAll : IO Weights</code></div>
+        <div class="schema-output"><span>generated declarations</span><code>Weights.load_embed_weightTyped<br>  : IO (Tensor { shape := #[2,2], dtype := .Float32, device := .CPU })<br><br>Weights.loadAll<br>  (source : String := defaultSource)<br>  (device : Device := .CPU)<br>  : IO (Weights device)</code></div>
         <figcaption><strong>Schema-generated APIs.</strong> No model schema is handwritten in this example. A change to the checkpoint header changes the declarations generated during elaboration. Verified with <code>./scripts/launch/run_safetensors_schema.sh</code>.</figcaption>
       </figure>
 

@@ -4,95 +4,109 @@
   Residual block for VAE decoder.
   Uses GroupNorm and Swish activation.
 -/
-import Tyr.Torch
+import Tyr.Model.VAE.TypedOps
 import Tyr.TensorStruct
 import Tyr.Module.Core
 import Tyr.Module.Derive
 
 namespace torch.vae
 
+variable {device : Device} {dtype : DType}
+variable [DType.RealFloating dtype]
 /-- GroupNorm parameters for VAE.
     Weight and bias for affine transformation. -/
-structure GroupNormParams (num_groups channels : UInt64) where
-  weight : T #[channels]
-  bias : T #[channels]
+structure GroupNormParams (num_groups channels : UInt64) (dtype : DType := .Float32) where
+  weight : Tensor { dtype := dtype, device := device, shape := #[channels] }
+  bias : Tensor { dtype := dtype, device := device, shape := #[channels] }
   deriving TensorStruct
+
 
 namespace GroupNormParams
 
 /-- Initialize GroupNorm parameters (weight=1, bias=0) -/
-def init (num_groups channels : UInt64) : GroupNormParams num_groups channels :=
-  let weight := autograd.set_requires_grad (torch.ones #[channels]) true
-  let bias := autograd.set_requires_grad (torch.zeros #[channels]) true
-  { weight, bias }
+def init (num_groups channels : UInt64) (device : Device := .CPU) (dtype : DType := .Float32) : IO (GroupNormParams (device := device) (dtype := dtype) num_groups channels) := do
+  let support ← dtype.acquireConstantSupport device
+  let _ := support.down
+  IO.ofExcept (Shape.validateAllocation #[channels])
+  let weight ← Tensor.parameter (Tensor.onesFor { shape := #[channels], dtype, device })
+  let bias ← Tensor.parameter (Tensor.zerosFor { shape := #[channels], dtype, device })
+  pure { weight, bias }
 
 /-- Apply GroupNorm to input tensor [batch, channels, height, width] -/
 def forward {batch channels height width num_groups : UInt64}
-    (gn : GroupNormParams num_groups channels)
-    (x : T #[batch, channels, height, width])
+    (gn : GroupNormParams (device := device) (dtype := dtype) num_groups channels)
+    (x : Tensor { dtype := dtype, device := device, shape := #[batch, channels, height, width] })
     (eps : Float := 1e-6)
-    : T #[batch, channels, height, width] :=
-  nn.group_norm x num_groups (some gn.weight) (some gn.bias) eps
+    : Tensor { dtype := dtype, device := device, shape := #[batch, channels, height, width] } :=
+  groupNorm x num_groups gn.weight gn.bias eps
 
 end GroupNormParams
 
 /-- Conv2d parameters for VAE.
     Weight and bias for standard conv2d. -/
-structure Conv2dParams (in_ch out_ch kernel_size : UInt64) (padding : UInt64 := 0) where
-  weight : T #[out_ch, in_ch, kernel_size, kernel_size]
-  bias : T #[out_ch]
+structure Conv2dParams (in_ch out_ch kernel_size : UInt64) (padding : UInt64 := 0) (dtype : DType := .Float32) where
+  weight : Tensor { dtype := dtype, device := device, shape := #[out_ch, in_ch, kernel_size, kernel_size] }
+  bias : Tensor { dtype := dtype, device := device, shape := #[out_ch] }
   deriving TensorStruct
+
 
 namespace Conv2dParams
 
 /-- Initialize Conv2d with Kaiming init -/
-def init (in_ch out_ch kernel_size : UInt64) (padding : UInt64 := 0) : IO (Conv2dParams in_ch out_ch kernel_size padding) := do
+def init (in_ch out_ch kernel_size : UInt64) (padding : UInt64 := 0) (device : Device := .CPU) (dtype : DType := .Float32) : IO (Conv2dParams (device := device) (dtype := dtype) in_ch out_ch kernel_size padding) := do
+  let floating ← IO.ofExcept (DType.realFloating? dtype)
+  let _ := floating.down
+  let support ← dtype.acquireConstantSupport device
+  let _ := support.down
   let std := Float.sqrt (2.0 / (in_ch * kernel_size * kernel_size).toFloat)
-  let w ← torch.randn #[out_ch, in_ch, kernel_size, kernel_size]
-  let b := torch.zeros #[out_ch]
+  let w ← Tensor.randn (device := device) #[out_ch, in_ch, kernel_size, kernel_size]
+  let w ← IO.ofExcept (w.castDType? dtype)
+  let b := Tensor.zerosFor { shape := #[out_ch], dtype, device }
   pure {
-    weight := autograd.set_requires_grad (mul_scalar w std) true
-    bias := autograd.set_requires_grad b true
+    weight := (← Tensor.parameter (Tensor.mulScalar w std))
+    bias := (← Tensor.parameter b)
   }
 
 /-- Apply convolution -/
 def forward {batch in_ch out_ch kernel_size padding height width : UInt64}
-    (conv : Conv2dParams in_ch out_ch kernel_size padding)
-    (x : T #[batch, in_ch, height, width])
-    : T #[] :=  -- Shape depends on padding, computed at runtime
-  nn.conv2d x conv.weight #[1, 1] #[padding.toNat.toUInt64, padding.toNat.toUInt64]
+    (conv : Conv2dParams (device := device) (dtype := dtype) in_ch out_ch kernel_size padding)
+    (x : Tensor { dtype := dtype, device := device, shape := #[batch, in_ch, height, width] })
+    : Tensor { dtype := dtype, device := device, shape := #[batch, out_ch, Tensor.convExtent height kernel_size 1 padding 1,
+        Tensor.convExtent width kernel_size 1 padding 1] } :=
+  Tensor.conv2dBias x conv.weight (Tensor.castLike conv.weight (Tensor.zeros #[out_ch] false conv.weight.device)) #[1, 1] #[padding, padding]
 
 end Conv2dParams
 
 /-- Swish activation: x * sigmoid(x) -/
-def swish {s : Shape} (x : T s) : T s :=
-  x * nn.sigmoid x
+def swish {s : Shape} (x : Tensor { dtype := dtype, device := device, shape := s }) : Tensor { dtype := dtype, device := device, shape := s } :=
+  Tensor.mul x (Tensor.sigmoid x)
 
 /-- Residual block for VAE decoder.
     norm1 → swish → conv1 → norm2 → swish → conv2 (+ skip connection) -/
-structure ResnetBlock (in_ch out_ch : UInt64) where
+structure ResnetBlock (in_ch out_ch : UInt64) (dtype : DType := .Float32) where
   /-- First normalization -/
-  norm1 : GroupNormParams 32 in_ch
+  norm1 : GroupNormParams (device := device) (dtype := dtype) 32 in_ch
   /-- First convolution 3×3 -/
-  conv1 : Conv2dParams in_ch out_ch 3 1
+  conv1 : Conv2dParams (device := device) (dtype := dtype) in_ch out_ch 3 1
   /-- Second normalization -/
-  norm2 : GroupNormParams 32 out_ch
+  norm2 : GroupNormParams (device := device) (dtype := dtype) 32 out_ch
   /-- Second convolution 3×3 -/
-  conv2 : Conv2dParams out_ch out_ch 3 1
+  conv2 : Conv2dParams (device := device) (dtype := dtype) out_ch out_ch 3 1
   /-- Skip connection (1×1 conv if in_ch ≠ out_ch) -/
-  nin_shortcut : Option (Conv2dParams in_ch out_ch 1 0)
+  nin_shortcut : Option (Conv2dParams (device := device) (dtype := dtype) in_ch out_ch 1 0)
   deriving TensorStruct
+
 
 namespace ResnetBlock
 
 /-- Initialize ResnetBlock -/
-def init (in_ch out_ch : UInt64) : IO (ResnetBlock in_ch out_ch) := do
-  let norm1 := GroupNormParams.init 32 in_ch
-  let conv1 ← Conv2dParams.init in_ch out_ch 3 1
-  let norm2 := GroupNormParams.init 32 out_ch
-  let conv2 ← Conv2dParams.init out_ch out_ch 3 1
+def init (in_ch out_ch : UInt64) (device : Device := .CPU) (dtype : DType := .Float32) : IO (ResnetBlock (device := device) (dtype := dtype) in_ch out_ch) := do
+  let norm1 ← GroupNormParams.init (dtype := dtype) (device := device) 32 in_ch
+  let conv1 ← Conv2dParams.init (dtype := dtype) (device := device) in_ch out_ch 3 1
+  let norm2 ← GroupNormParams.init (dtype := dtype) (device := device) 32 out_ch
+  let conv2 ← Conv2dParams.init (dtype := dtype) (device := device) out_ch out_ch 3 1
   let nin_shortcut ← if in_ch != out_ch then do
-    let c ← Conv2dParams.init in_ch out_ch 1 0
+    let c ← Conv2dParams.init (dtype := dtype) (device := device) in_ch out_ch 1 0
     pure (some c)
   else
     pure none
@@ -102,26 +116,26 @@ def init (in_ch out_ch : UInt64) : IO (ResnetBlock in_ch out_ch) := do
     Input: [batch, in_ch, height, width]
     Output: [batch, out_ch, height, width] -/
 def forward {batch in_ch out_ch height width : UInt64}
-    (block : ResnetBlock in_ch out_ch)
-    (x : T #[batch, in_ch, height, width])
-    : T #[batch, out_ch, height, width] :=
+    (block : ResnetBlock (device := device) (dtype := dtype) in_ch out_ch)
+    (x : Tensor { dtype := dtype, device := device, shape := #[batch, in_ch, height, width] })
+    : Tensor { dtype := dtype, device := device, shape := #[batch, out_ch, height, width] } :=
   -- Main path
   let h := block.norm1.forward x
   let h := swish h
-  let h := nn.conv2d_bias h block.conv1.weight block.conv1.bias #[1, 1] #[1, 1]
-  let h := reshape h #[batch, out_ch, height, width]
+  let h := Tensor.conv2dBias h block.conv1.weight block.conv1.bias #[1, 1] #[1, 1]
+  let h := Tensor.reshapeChecked h #[batch, out_ch, height, width]
 
   let h := block.norm2.forward h
   let h := swish h
-  let h := nn.conv2d_bias h block.conv2.weight block.conv2.bias #[1, 1] #[1, 1]
-  let h := reshape h #[batch, out_ch, height, width]
+  let h := Tensor.conv2dBias h block.conv2.weight block.conv2.bias #[1, 1] #[1, 1]
+  let h := Tensor.reshapeChecked h #[batch, out_ch, height, width]
 
   -- Skip connection
   let skip := match block.nin_shortcut with
-    | some conv => reshape (nn.conv2d_bias x conv.weight conv.bias #[1, 1] #[0, 0]) #[batch, out_ch, height, width]
-    | none => reshape x #[batch, out_ch, height, width]
+    | some conv => Tensor.reshapeChecked (Tensor.conv2dBias x conv.weight conv.bias #[1, 1] #[0, 0]) #[batch, out_ch, height, width]
+    | none => Tensor.reshapeChecked x #[batch, out_ch, height, width]
 
-  h + skip
+  Tensor.add h skip
 
 end ResnetBlock
 

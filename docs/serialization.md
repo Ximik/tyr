@@ -20,28 +20,24 @@ Everything below lives in three namespaces: `torch.safetensors`, `torch.Hub`, an
 
 ## Architecture and main abstractions
 
-### FFI layer
+### Native boundary and indexed loaders
 
-The bottom layer is a handful of `@[extern]` ops in `Tyr/Torch.lean:978-1050`
-(namespace `torch.safetensors`), backed by the `lean_torch_safetensors_*` C++
-functions under `cc/`:
+`Tyr.SafeTensors.File` parses and validates SafeTensors headers in Lean and
+provides the single-file, open-handle, and sharded loaders. Native code
+(`Tyr.RawTensor.SafeTensors`) only reads a tensor's byte range and writes
+tensor bytes. The loaders preserve stored dimensions rather than reshaping to
+the caller's expected layout. `Tyr.SafeTensors.Schema` then checks shape, dtype,
+and placement before returning an indexed tensor.
 
-```lean
-opaque SafeTensorsHandle : Type
-opaque openHandle (path : @& String) : IO SafeTensorsHandle
-opaque loadFromHandle (handle : @& SafeTensorsHandle) (name : @& String) (shape : Shape) : IO (T shape)
-opaque loadTensor (path : @& String) (name : @& String) (s : Shape) : IO (T s)
-opaque loadTensorSharded (dir : @& String) (name : @& String) (s : Shape) : IO (T s)
-opaque saveTensor {s : Shape} (path : @& String) (name : @& String) (t : @& T s) : IO Unit
-def saveTensors (path : String) (entries : Array (String × T #[]))
-    (metadata : Array (String × String) := #[]) : IO Unit
-```
+`torch.safetensors.openHandle` returns a `SafeTensorsHandle`, the parsed header,
+for repeated reads; headers are parsed once per path and directory.
+Use `loadFromHandleWithSpec`, `loadTensorWithSpec`, or
+`loadTensorShardedWithSpec` with a `TensorSpec`; each returns
+`IO (Tensor { shape := spec.shape, dtype := spec.dtype, device := device })`. The result is indexed by the requested device, which defaults to CPU.
+Contract variants also carry a role and optional expected-device metadata.
 
-Each loader has an `...OnDevice` wrapper (`loadTensorOnDevice`,
-`loadTensorShardedOnDevice`, `loadFromHandleOnDevice`) that moves the result to a
-target `Device`, defaulting to CPU. Loading is name-based and shape-checked: you
-pass the expected `Shape` and get back a `T s` whose type carries it. `openHandle`
-parses a file's header once so repeated `loadFromHandle` calls skip re-parsing.
+`Tensor.saveSafeTensor tensor path name` writes one tensor under a named key;
+Lean builds the header. Training snapshots use the separate checkpoint APIs.
 
 ### Runtime schema introspection
 
@@ -82,16 +78,16 @@ Results are sorted by name and duplicate tensor names are rejected.
 time without a multi-GB checkpoint on disk.
 
 The schema layer also provides contract-checked typed loaders that return a
-dtype-indexed `DTensor` (see [Typed tensors](core/typed.md)):
+dtype-indexed `Tensor` (see [Typed tensors](core/typed.md)):
 
 ```lean
 def loadTensorWithContract (path : String) (name : String)
     (contract : TensorContract) (device : Device := Device.CPU)
-    : IO (DTensor contract.spec.shape contract.spec.dtype)
+    : IO (Tensor { shape := contract.spec.shape, dtype := contract.spec.dtype, device := device })
 ```
 
 plus `loadFromHandleWithContract`, `loadTensorShardedWithContract`, `...WithSpec`
-variants (which fix `devicePolicy := .exact device`), and `...WithSchema` variants
+variants (which fix `expectedDevice := some device`), and `...WithSchema` variants
 that take a discovered `TensorSchema`. Checking happens after the load via
 `TensorContract.check` against the runtime shape/dtype/device
 (`Tyr/SafeTensors/Schema.lean:62-82`).
@@ -105,14 +101,22 @@ the per-model `Weights` modules (`Tyr/Model/Qwen35/Weights.lean`,
 - `tryLoadTensor` / `tryLoadTensorSharded` return `none` on **any** failure —
   missing tensor, shape mismatch, unreadable file.
 - `tryLoadOptionalTensor` / `tryLoadOptionalTensorSharded` return `none` only when
-  the tensor is absent (detected by the `isMissingTensorError` message heuristic,
-  `Tyr/SafeTensors/Load.lean:39-41`); other errors are rethrown.
+  the tensor is absent. They use the exact missing-entry diagnostics in
+  `Tyr/SafeTensors/Exact.lean`; malformed metadata, file and device errors are
+  rethrown.
 
-On top of these sit candidate-name fallbacks — `tryLoadTensorCandidates`,
-`tryLoadTensorShardedCandidates`, and the throwing `loadTensorCandidates` /
-`loadTensorShardedCandidates` — which try an array of alternative names (model
-families use `pushUnique` to build prefix-variant lists, e.g. with and without a
-`language_model.` prefix).
+Candidate-name fallbacks try an array of alternative names. The
+`tryLoadTensorCandidates` variants suppress all failures;
+`tryLoadOptionalTensorCandidates` and its sharded counterpart skip only absent
+entries. The throwing `loadTensorCandidates` / `loadTensorShardedCandidates`
+also skip only absent entries: a malformed present tensor stops the search.
+Model families use `pushUnique` to build prefix-variant lists, e.g. with and
+without a `language_model.` prefix.
+
+These helpers return `SomeDTypeTensor shape device`, optionally wrapped in
+`Option`. The package retains the checkpoint's exact dtype as `.1` and the
+indexed tensor as `.2`; loading does not cast to a default dtype. Connected
+weights can use `atDType?` to check agreement with one shared dtype witness.
 
 ### The `safetensors_type_provider` command
 
@@ -130,9 +134,9 @@ shown; the declaration base name is sanitized and lowercased to `linear_weight`)
 
 - `abbrev linear_weightShape : Shape` — the static shape;
 - `def linear_weightSpec : TensorSchema` and `def linear_weightTensorSpec : TensorSpec`;
-- `def load_linear_weight (source : String := defaultSource) : IO (T linear_weightShape)`;
-- checked variants `load_linear_weightTyped` / `...TypedOnDevice` returning
-  `IO (DTensor linear_weightShape ...)`;
+- `def load_linear_weight (source : String := defaultSource) (device : Device := .CPU) : IO (Tensor { shape := linear_weightShape, dtype := linear_weightTensorSpec.dtype, device := device })`;
+- explicitly named checked variants `load_linear_weightTyped` (CPU) and
+  `...TypedOnDevice` (the requested device);
 - for single-file sources additionally `load_linear_weightFromHandle` and
   `load_linear_weightTypedFromHandle[OnDevice]` taking a `SafeTensorsHandle`.
 
@@ -143,11 +147,11 @@ falls back to `i0`, `i1`, ... fields; non-contiguous numeric indices are a
 compile-time error (`validateIndexedContiguous`, `Tyr/SafeTensors/TypeProvider.lean:265`).
 The top level of the generated namespace contains:
 
-- `abbrev Weights` — the full hierarchical record;
-- `def loadAll (source : String := defaultSource) : IO Weights`;
-- `def loadAllFromHandle (handle : SafeTensorsHandle) : IO Weights` (single-file sources);
+- `abbrev Weights (device : Device := .CPU)` — the full hierarchical record;
+- `def loadAll (source : String := defaultSource) (device : Device := .CPU) : IO (Weights device)`;
+- `def loadAllFromHandle (handle : SafeTensorsHandle) (device : Device := .CPU) : IO (Weights device)` (single-file sources);
 - subtree namespaces with their own `load` / `loadFromHandle` — e.g.
-  `MyWeights.model.layers.load`;
+  `MyWeights.model.layers.load`, with the same requested-device parameter;
 - metadata: `defaultSource`, `sourceIsDirectory`, `tensorCount`, `schema`,
   `hasTensor`, `find?`, `fieldToTensorName`.
 
@@ -267,8 +271,8 @@ publisher during distributed resume. Each rank pins its own read directory;
 rank cursor I/O failures are exchanged before publication so peers fail together.
 
 This is a Tyr-native format, not interchangeable with HF weights — note it is
-libtorch `.pt` pickle even though a safetensors writer (`safetensors.saveTensors`)
-exists for interop.
+libtorch `.pt` persistence. `Tensor.saveSafeTensor` is available for single-tensor
+SafeTensors export.
 
 ## Key APIs
 
@@ -280,9 +284,9 @@ exists for interop.
 | `Schema.find?` | `Schema → String → Option TensorSchema` | exact-name lookup |
 | `saveSnapshot` / `loadSnapshot` | `String → Schema → IO Unit` / `String → IO Schema` | persist/restore a schema |
 | `TensorSchema.toSpec` | `TensorSchema → TensorSpec` | shape + dtype |
-| `TensorSchema.contract` | `(role := .parameter) → (devicePolicy := .any) → TensorContract` | boundary contract |
-| `loadTensor[Sharded]WithContract` | `... → IO (DTensor contract.spec.shape contract.spec.dtype)` | checked load from file/dir |
-| `loadFromHandleWithContract` | `SafeTensorsHandle → ... → IO (DTensor ...)` | checked load from open handle |
+| `TensorSchema.contract` | `(role := .parameter) → (expectedDevice := none) → TensorContract` | boundary contract |
+| `loadTensor[Sharded]WithContract` | `... → IO (Tensor { shape := contract.spec.shape, dtype := contract.spec.dtype, device := device })` | checked load from file/dir |
+| `loadFromHandleWithContract` | `SafeTensorsHandle → ... → IO (Tensor { shape := contract.spec.shape, dtype := contract.spec.dtype, device := device })` | checked load from open handle |
 | `...WithSpec`, `...WithSchema` | same shapes | spec/schema conveniences |
 
 ### Try-load helpers (`Tyr/SafeTensors/Load.lean`)
@@ -292,10 +296,13 @@ exists for interop.
 | `tryLoadTensor` / `tryLoadTensorSharded` | any error occurs |
 | `tryLoadOptionalTensor` / `tryLoadOptionalTensorSharded` | tensor is missing (other errors rethrown) |
 | `tryLoadTensorCandidates` / `tryLoadTensorShardedCandidates` | no candidate name loads |
-| `loadTensorCandidates` / `loadTensorShardedCandidates` | throwing variants of the above |
+| `tryLoadOptionalTensorCandidates` / `tryLoadOptionalTensorShardedCandidates` | every candidate is absent; other errors rethrown |
+| `loadTensorCandidates` / `loadTensorShardedCandidates` | never return `none`; throw if all candidates are absent or a present entry is invalid |
 
 All take `(path|dir) (name[s]) (s : Shape) (device : Device := Device.CPU)` and
-return `IO (Option (T s))` resp. `IO (T s)`.
+return `IO (Option (SomeDTypeTensor s device))` or, for the required loaders,
+`IO (SomeDTypeTensor s device)`. The dtype follows the file and remains in the
+dependent result rather than being erased.
 
 ### Hub (`torch.Hub`, `Tyr/Hub.lean`)
 
@@ -340,14 +347,17 @@ safetensors_type_provider "Tests/fixtures/safetensors/sharded" as ShardedSafe
 
 def demo : IO Unit := do
   -- Per-tensor loaders; shape is checked against the generated Shape abbrev.
-  let w ← SingleSafe.load_linear_weight            -- T #[2, 3]
-  -- Dtype-indexed checked loader.
-  let wTyped ← SingleSafe.load_linear_weightTyped  -- DTensor #[2, 3] .Float32
+  let w ← SingleSafe.load_linear_weight            -- Tensor { shape := #[2, 3], dtype := .Float32, device := .CPU }
+  IO.println s!"weight shape: {w.runtimeShape}"
+  -- Explicitly named dtype-indexed checked loader.
+  let wTyped ← SingleSafe.load_linear_weightTyped  -- Tensor { shape := #[2, 3], dtype := .Float32, device := .CPU }
+  IO.println s!"weight dtype: {wTyped.actualSpec.dtype}"
   -- Full hierarchical record: fields follow tensor names split on '.'.
   let weights ← ShardedSafe.loadAll
   IO.println s!"{weights.embed.weight.runtimeShape}"   -- #[2, 2]
   -- Subtree namespace loader.
   let embed ← ShardedSafe.embed.load
+  IO.println s!"embedding shape: {embed.weight.runtimeShape}"
   -- Metadata.
   IO.println s!"{ShardedSafe.tensorCount} tensors"     -- 2
   IO.println s!"{ShardedSafe.proj_biasSpec.sourceFile}" -- "part2.safetensors"
@@ -363,7 +373,7 @@ def Qwen35ForCausalLM.loadFromPretrained
     (revision : String := "main")
     (cacheDir : String := Hub.defaultCacheDir)
     (device : Device := Device.CPU)
-    : IO (Sigma (fun cfg => Qwen35ForCausalLM cfg)) := do
+    : IO (Sigma (fun cfg => Qwen35ForCausalLM (device := device) cfg)) := do
   Hub.loadModelFromPretrained
     source revision cacheDir hub.tokenizerFiles
     (fun modelDir cfg => Config.loadFromPretrainedDir modelDir cfg)
@@ -423,8 +433,8 @@ invalid state; legacy flat directories retain their compatibility loader.
 
 ## Related guides
 
-- [Core tensors](core/tensors.md) — `T s`, `Shape`, `DType`, `Device`
-- [Typed tensors](core/typed.md) — `TensorSpec`, `TensorContract`, `DTensor`
+- [Core tensors](core/tensors.md) — `Tensor σ`, `Shape`, `DType`, `Device`
+- [Typed tensors](core/typed.md) — `TensorSpec`, `TensorContract`, `Tensor`
 - [TensorStruct](core/tensorstruct.md) — the traversal class behind checkpointing
 - [Optimization](optimization.md) — the Adam state trees being persisted
 - [LLM models](models/llms.md), [Audio and speech models](models/audio-speech.md) —

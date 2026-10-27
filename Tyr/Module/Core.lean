@@ -28,16 +28,16 @@ import Tyr.Module.Derive
 open torch
 
 structure MyLinear (inDim outDim : UInt64) where
-  weight : T #[outDim, inDim]
-  bias : Option (T #[outDim]) := none
+  weight : Tensor { shape := #[outDim, inDim], dtype := .Float32 }
+  bias : Option (Tensor { shape := #[outDim], dtype := .Float32 }) := none
   deriving TensorStruct
 
 instance {inDim outDim batch : UInt64} :
-    Module (MyLinear inDim outDim) (T #[batch, inDim]) (T #[batch, outDim]) where
+    Module (MyLinear inDim outDim) (Tensor { shape := #[batch, inDim], dtype := .Float32 }) (Tensor { shape := #[batch, outDim], dtype := .Float32 }) where
   forward m x :=
-    let y := linear x m.weight
+    let y := Tensor.linear x m.weight
     match m.bias with
-    | some b => add y (nn.expand b #[batch, outDim])
+    | some b => Tensor.add y (Tensor.expand b #[batch, outDim])
     | none => y
 ```
 
@@ -50,8 +50,8 @@ structure MyDropout where
   p : Static Float := ⟨0.1⟩
   deriving TensorStruct
 
-instance {s : Shape} : ModuleIO MyDropout (T s) (T s) where
-  forward m x := dropout x m.p.val true
+instance {σ : StaticSpec} : ModuleIO MyDropout (Tensor σ) (Tensor σ) where
+  forward m x := Tensor.dropout x m.p.val true
 ```
 
 ### Example: Contextual Module
@@ -65,10 +65,10 @@ structure MyLinearCtx (inDim outDim : UInt64) where
 
 instance {inDim outDim batch : UInt64} :
     ModuleCtx (MyLinearCtx inDim outDim) TrainingCtx
-      (T #[batch, inDim]) (T #[batch, outDim]) where
+      (Tensor { shape := #[batch, inDim], dtype := .Float32 }) (Tensor { shape := #[batch, outDim], dtype := .Float32 }) where
   forward m ctx x := do
-    let y := m.lin |> x
-    dropout y ctx.dropout_p ctx.training
+    let y := Module.forward m.lin x
+    Tensor.dropout y ctx.dropout_p ctx.training
 ```
 -/
 

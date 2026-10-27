@@ -45,19 +45,19 @@ private def mkPath (seed : UInt64) :
   let bV := 0.3
   let (bmPath, wT) := mkPath 2024
   -- args drive the drift; the diffusion coefficient is baked in
-  let drift : ODETerm (T #[]) (T #[]) :=
-    { vectorField := fun _t y a => mul a y }
-  let diffusion : ControlTerm (T #[]) (T #[]) (SpaceTimeLevyArea Time Float) (T #[]) :=
+  let drift : ODETerm (Tensor { shape := #[], dtype := .Float32, device := .CPU }) (Tensor { shape := #[], dtype := .Float32, device := .CPU }) :=
+    { vectorField := fun _t y a => Tensor.mul a y }
+  let diffusion : ControlTerm (Tensor { shape := #[], dtype := .Float32, device := .CPU }) (Tensor { shape := #[], dtype := .Float32, device := .CPU }) (SpaceTimeLevyArea Time Float) (Tensor { shape := #[], dtype := .Float32, device := .CPU }) :=
     ControlTerm.ofPath
-      (fun _t y _ => mul_scalar y bV)
+      (fun _t y _ => Tensor.mulScalar y bV)
       bmPath
-      (fun vf c => mul_scalar vf c.W)
+      (fun vf c => Tensor.mulScalar vf c.W)
   let yTv := y0v * Float.exp (aV + bV * wT)
   let adj :=
     sdeBacksolveAdjointStratonovich drift diffusion 0.0 1.0
-      (full #[] yTv) (full #[] aV) (ones #[]) (steps := 512)
-  let dy0 := nn.item adj.adjY0
-  let da := nn.item adj.adjArgs
+      (Tensor.full #[] yTv) (Tensor.full #[] aV) (Tensor.ones #[]) (steps := 512)
+  let dy0 := Tensor.item adj.adjY0
+  let da := Tensor.item adj.adjArgs
   LeanTest.assertTrue (approxRel dy0 (Float.exp (aV + bV * wT)) 2.0e-2)
     s!"∂y(T)/∂y₀ expected {Float.exp (aV + bV * wT)}, got {dy0}"
   LeanTest.assertTrue (approxRel da yTv 2.0e-2)
@@ -69,19 +69,19 @@ private def mkPath (seed : UInt64) :
   let bV := 0.3
   let (bmPath, wT) := mkPath 909
   -- args drive the diffusion; the drift coefficient is baked in
-  let drift : ODETerm (T #[]) (T #[]) :=
-    { vectorField := fun _t y _ => mul_scalar y aV }
-  let diffusion : ControlTerm (T #[]) (T #[]) (SpaceTimeLevyArea Time Float) (T #[]) :=
+  let drift : ODETerm (Tensor { shape := #[], dtype := .Float32, device := .CPU }) (Tensor { shape := #[], dtype := .Float32, device := .CPU }) :=
+    { vectorField := fun _t y _ => Tensor.mulScalar y aV }
+  let diffusion : ControlTerm (Tensor { shape := #[], dtype := .Float32, device := .CPU }) (Tensor { shape := #[], dtype := .Float32, device := .CPU }) (SpaceTimeLevyArea Time Float) (Tensor { shape := #[], dtype := .Float32, device := .CPU }) :=
     ControlTerm.ofPath
-      (fun _t y b => mul b y)
+      (fun _t y b => Tensor.mul b y)
       bmPath
-      (fun vf c => mul_scalar vf c.W)
+      (fun vf c => Tensor.mulScalar vf c.W)
   let yTv := y0v * Float.exp (aV + bV * wT)
   let adj :=
     sdeBacksolveAdjointStratonovich drift diffusion 0.0 1.0
-      (full #[] yTv) (full #[] bV) (ones #[]) (steps := 512)
-  let dy0 := nn.item adj.adjY0
-  let db := nn.item adj.adjArgs
+      (Tensor.full #[] yTv) (Tensor.full #[] bV) (Tensor.ones #[]) (steps := 512)
+  let dy0 := Tensor.item adj.adjY0
+  let db := Tensor.item adj.adjArgs
   LeanTest.assertTrue (approxRel dy0 (Float.exp (aV + bV * wT)) 2.0e-2)
     s!"∂y(T)/∂y₀ expected {Float.exp (aV + bV * wT)}, got {dy0}"
   LeanTest.assertTrue (approxRel db (wT * yTv) 5.0e-2)

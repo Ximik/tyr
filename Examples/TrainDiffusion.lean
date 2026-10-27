@@ -46,32 +46,22 @@ def asciiDecode (tokens : Array Int64) : String :=
     else '?'
 
 /-- Convert tensor to array for decoding -/
-def tensorToArray {n : UInt64} (t : T #[n]) : IO (Array Int64) := do
-  let mut arr := #[]
-  for i in [:n.toNat] do
-    -- Use slice1d to get single element (index_select_1d has issues)
-    let elem : T #[1] := data.slice1d t i.toInt64 (i.toInt64 + 1)
-    let val := nn.itemInt elem
-    arr := arr.push val
-  return arr
+def tensorToArray {n : UInt64} (t : Tokens #[n]) : IO (Array Int64) := do
+  return (← t.toUInt64Array).map UInt64.toInt64
 
-/-- Extract tensor values as Float array (for confidence display) -/
-def tensorToFloatArray {n : UInt64} (t : T #[n]) : IO (Array Float) := do
-  let mut arr := #[]
-  for i in [:n.toNat] do
-    let elem : T #[1] := data.slice1d t i.toInt64 (i.toInt64 + 1)
-    arr := arr.push (nn.item elem)
-  return arr
+/-- Extract tensor values as Float array (for confidence display). -/
+def tensorToFloatArray {n : UInt64} (t : Activation #[n]) : IO (Array Float) :=
+  t.toFloatArray
 
 /-- Decode multiple blocks from a batched tensor [numBlocks, seqLen] -/
 def decodeMultipleBlocks {numBlocks seqLen : UInt64}
-    (tensor : T #[numBlocks, seqLen]) : IO (Array String) := do
+    (tensor : Tokens #[numBlocks, seqLen]) : IO (Array String) := do
   let mut results := #[]
   for i in [:numBlocks.toNat] do
     -- Extract row i: slice along batch dimension
     let start := i.toUInt64
-    let row : T #[1, seqLen] := data.slice2d tensor start (start + 1)
-    let rowFlat := reshape row #[seqLen]
+    let row : Tokens #[1, seqLen] := tensor.sliceChecked 0 start 1 #[1, seqLen]
+    let rowFlat := Tensor.reshapeChecked row #[seqLen]
     let arr ← tensorToArray rowFlat
     results := results.push (asciiDecode arr)
   return results
@@ -115,7 +105,7 @@ def sampleAnimated {cfg : Config}
     (frameDelay : Nat := 100)
     (prompt : String := "")
     (displayWidth : Nat := 70)  -- Keep narrow to avoid wrapping
-    : IO (T #[1, cfg.seq_len]) := do
+    : IO (Tokens #[1, cfg.seq_len]) := do
 
   -- Calculate display dimensions
   let textLen := min cfg.seq_len.toNat displayWidth
@@ -130,33 +120,33 @@ def sampleAnimated {cfg : Config}
   (← IO.getStdout).flush
 
   -- Start with all masks
-  let mut x := full_int #[1, cfg.seq_len] cfg.mask_token_id.toInt64
+  let mut x := Tensor.fullInt #[1, cfg.seq_len] cfg.mask_token_id.toInt64
 
   -- Set prompt tokens at the beginning (these won't be masked)
   let promptTokens := asciiEncode prompt
   let promptLen := min promptTokens.size cfg.seq_len.toNat
   for i in [:promptLen] do
-    let promptTensor := full_int #[1, cfg.seq_len] (promptTokens[i]!)
-    let positions := arange 0 cfg.seq_len 1
-    let posMask := eq_scalar positions i.toInt64
-    let posMaskBatch := nn.expand (nn.unsqueeze posMask 0) #[1, cfg.seq_len]
-    x := where_ posMaskBatch promptTensor x
+    let promptTensor := Tensor.fullInt #[1, cfg.seq_len] (promptTokens[i]!)
+    let positions := Tensor.arange cfg.seq_len
+    let posMask := Tensor.eqScalar positions i.toInt64
+    let posMaskBatch := Tensor.expand (Tensor.unsqueeze posMask 0) #[1, cfg.seq_len]
+    x := Tensor.whereSelect posMaskBatch promptTensor x
 
   let mut maskedPositions := getMaskedPositions' x cfg.mask_token_id
 
   for step in [:cfg.diffusion_steps.toNat] do
-    if !(any maskedPositions) then break
+    if !(Tensor.any maskedPositions) then break
 
     let tVal := (cfg.diffusion_steps.toNat - 1 - step).max 0
-    let t := full_int #[1] tVal.toUInt64.toInt64
+    let t := Tensor.fullInt #[1] tVal.toUInt64.toInt64
 
     let logits := forward params x t rotaryCache
-    let probs := nn.softmax (logits / temperature)
-    let (confidences, predictedTokens) := max_dim_3d probs 2
+    let probs := Tensor.softmax (logits / temperature)
+    let (confidences, predictedTokens) ← IO.ofExcept (Tensor.maxLast3d? probs)
 
     -- Extract arrays for display
-    let tokensArr ← tensorToArray (reshape x #[cfg.seq_len])
-    let confArr ← tensorToFloatArray (reshape confidences #[cfg.seq_len])
+    let tokensArr ← tensorToArray (Tensor.reshapeChecked x #[cfg.seq_len])
+    let confArr ← tensorToFloatArray (Tensor.reshapeChecked confidences #[cfg.seq_len])
 
     -- Build display text with colors
     let remaining := tokensArr.foldl (fun acc t =>
@@ -200,13 +190,13 @@ def sampleAnimated {cfg : Config}
     IO.sleep frameDelay.toUInt32
 
     -- Update tokens (top-k decoding)
-    let negInf := full #[1, cfg.seq_len] (-1e10)
-    let maskedConf := where_ maskedPositions confidences negInf
-    let (_, topkIdx) := topk_2d maskedConf k 1
-    let selectMask := scatter_2d (zeros #[1, cfg.seq_len]) 1
-                        (data.toLong topkIdx) (ones #[1, k])
-    let finalMask := logical_and (gt selectMask (zeros #[1, cfg.seq_len])) maskedPositions
-    x := where_ finalMask (data.toLong predictedTokens) x
+    let negInf := Tensor.full #[1, cfg.seq_len] (-1e10)
+    let maskedConf := Tensor.whereSelect maskedPositions confidences negInf
+    let (_, topkIdx) ← IO.ofExcept (Tensor.topKLast2d? maskedConf k)
+    let selectMask := Tensor.scatter2d (Tensor.zeros #[1, cfg.seq_len]) 1
+                        (topkIdx) (Tensor.ones #[1, k])
+    let finalMask := Tensor.logicalAnd (Tensor.lt (Tensor.zeros #[1, cfg.seq_len]) selectMask) maskedPositions
+    x := Tensor.whereSelect finalMask (predictedTokens) x
     maskedPositions := getMaskedPositions' x cfg.mask_token_id
 
   IO.print ansiShowCursor
@@ -255,7 +245,7 @@ def sampleAnimatedMultiple {cfg : Config}
     (← IO.getStdout).flush
 
     -- Start with all masks
-    let mut x := full_int #[1, cfg.seq_len] cfg.mask_token_id.toInt64
+    let mut x := Tensor.fullInt #[1, cfg.seq_len] cfg.mask_token_id.toInt64
 
     -- Determine context tokens for this block
     let contextTokens := if blockIdx == 0 then
@@ -266,27 +256,27 @@ def sampleAnimatedMultiple {cfg : Config}
     -- Set context tokens at the beginning (these provide continuity)
     let contextLen := min contextTokens.size cfg.seq_len.toNat
     for i in [:contextLen] do
-      let tokenTensor := full_int #[1, cfg.seq_len] (contextTokens[i]!)
-      let positions := arange 0 cfg.seq_len 1
-      let posMask := eq_scalar positions i.toInt64
-      let posMaskBatch := nn.expand (nn.unsqueeze posMask 0) #[1, cfg.seq_len]
-      x := where_ posMaskBatch tokenTensor x
+      let tokenTensor := Tensor.fullInt #[1, cfg.seq_len] (contextTokens[i]!)
+      let positions := Tensor.arange cfg.seq_len
+      let posMask := Tensor.eqScalar positions i.toInt64
+      let posMaskBatch := Tensor.expand (Tensor.unsqueeze posMask 0) #[1, cfg.seq_len]
+      x := Tensor.whereSelect posMaskBatch tokenTensor x
 
     let mut maskedPositions := getMaskedPositions' x cfg.mask_token_id
 
     for step in [:cfg.diffusion_steps.toNat] do
-      if !(any maskedPositions) then break
+      if !(Tensor.any maskedPositions) then break
 
       let tVal := (cfg.diffusion_steps.toNat - 1 - step).max 0
-      let t := full_int #[1] tVal.toUInt64.toInt64
+      let t := Tensor.fullInt #[1] tVal.toUInt64.toInt64
 
       let logits := forward params x t rotaryCache
-      let probs := nn.softmax (logits / temperature)
-      let (confidences, predictedTokens) := max_dim_3d probs 2
+      let probs := Tensor.softmax (logits / temperature)
+      let (confidences, predictedTokens) ← IO.ofExcept (Tensor.maxLast3d? probs)
 
       -- Extract arrays for display
-      let tokensArr ← tensorToArray (reshape x #[cfg.seq_len])
-      let confArr ← tensorToFloatArray (reshape confidences #[cfg.seq_len])
+      let tokensArr ← tensorToArray (Tensor.reshapeChecked x #[cfg.seq_len])
+      let confArr ← tensorToFloatArray (Tensor.reshapeChecked confidences #[cfg.seq_len])
 
       let remaining := tokensArr.foldl (fun acc t =>
         if t == cfg.mask_token_id.toInt64 then acc + 1 else acc) 0
@@ -330,20 +320,20 @@ def sampleAnimatedMultiple {cfg : Config}
       IO.sleep frameDelay.toUInt32
 
       -- Update tokens
-      let negInf := full #[1, cfg.seq_len] (-1e10)
-      let maskedConf := where_ maskedPositions confidences negInf
-      let (_, topkIdx) := topk_2d maskedConf k 1
-      let selectMask := scatter_2d (zeros #[1, cfg.seq_len]) 1
-                          (data.toLong topkIdx) (ones #[1, k])
-      let finalMask := logical_and (gt selectMask (zeros #[1, cfg.seq_len])) maskedPositions
-      x := where_ finalMask (data.toLong predictedTokens) x
+      let negInf := Tensor.full #[1, cfg.seq_len] (-1e10)
+      let maskedConf := Tensor.whereSelect maskedPositions confidences negInf
+      let (_, topkIdx) ← IO.ofExcept (Tensor.topKLast2d? maskedConf k)
+      let selectMask := Tensor.scatter2d (Tensor.zeros #[1, cfg.seq_len]) 1
+                          (topkIdx) (Tensor.ones #[1, k])
+      let finalMask := Tensor.logicalAnd (Tensor.lt (Tensor.zeros #[1, cfg.seq_len]) selectMask) maskedPositions
+      x := Tensor.whereSelect finalMask (predictedTokens) x
       maskedPositions := getMaskedPositions' x cfg.mask_token_id
 
     IO.print ansiShowCursor
     (← IO.getStdout).flush
 
     -- Decode result
-    let genFlat := reshape x #[cfg.seq_len]
+    let genFlat := Tensor.reshapeChecked x #[cfg.seq_len]
     let genArr ← tensorToArray genFlat
 
     -- Extract the NEW content (excluding context that came from previous block)
@@ -373,7 +363,7 @@ def joinBlocks (blocks : Array String) : String :=
 /-- Train diffusion model with validation -/
 def runTrainingWithVal {nTrain nVal : UInt64}
     (modelCfg : Config) (trainCfg : TrainConfig)
-    (trainData : T #[nTrain]) (valData : T #[nVal])
+    (trainData : Tokens #[nTrain]) (valData : Tokens #[nVal])
     : IO (DiffusionParams modelCfg) := do
   IO.println ""
   IO.println "Initializing diffusion model..."
@@ -405,8 +395,8 @@ def runTrainingRandom (modelCfg : Config) (trainCfg : TrainConfig) : IO (Diffusi
   IO.println "Using random tokens for testing..."
   let numTokens : UInt64 := 50000
   -- Generate random tokens (1-127, avoiding 0 which is mask)
-  let trainData ← randint 1 127 #[numTokens]
-  let valData ← randint 1 127 #[numTokens / 10]
+  let trainData ← Tensor.randint 1 127 #[numTokens]
+  let valData ← Tensor.randint 1 127 #[numTokens / 10]
 
   runTrainingWithVal modelCfg trainCfg trainData valData
 
@@ -581,8 +571,8 @@ def main (args : List String) : IO Unit := do
     IO.println s!"Validation set: {nVal} tokens"
 
     -- Convert to tensors
-    let trainData : T #[nTrain] := reshape (data.fromInt64Array trainTokens) #[nTrain]
-    let valData : T #[nVal] := reshape (data.fromInt64Array valTokens) #[nVal]
+    let trainData : Tokens #[nTrain] := Tensor.reshapeChecked (Tensor.fromInt64Array trainTokens) #[nTrain]
+    let valData : Tokens #[nVal] := Tensor.reshapeChecked (Tensor.fromInt64Array valTokens) #[nVal]
 
     runTrainingWithVal modelCfg trainCfg trainData valData
   else

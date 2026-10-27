@@ -22,7 +22,7 @@ private def benchmarkOrthogonalDualMapStep (numSteps : Nat := 5) : IO Float := d
   let mut q ← Orthogonal.random 16
   let t0 ← IO.monoNanosNow
   for _ in [:numSteps] do
-    let gRaw ← randn #[16, 16] false
+    let gRaw ← Tensor.randn #[16, 16]
     let g := OrthogonalTangent.fromAmbient q gRaw
     q := DualMapGeometry.dualMapStep q g 0.02
   let t1 ← IO.monoNanosNow
@@ -36,7 +36,7 @@ private def benchmarkGrassmannDualMapStep (numSteps : Nat := 5) : IO Float := do
   let mut x ← Grassmann.random 24 8
   let t0 ← IO.monoNanosNow
   for _ in [:numSteps] do
-    let gRaw ← randn #[24, 8] false
+    let gRaw ← Tensor.randn #[24, 8]
     let g := GrassmannTangent.project x gRaw
     x := DualMapGeometry.dualMapStep x g 0.02
   let t1 ← IO.monoNanosNow
@@ -50,7 +50,7 @@ private def benchmarkHyperbolicDualMapStep (numSteps : Nat := 5) : IO Float := d
   let mut x ← Hyperbolic.random 8
   let t0 ← IO.monoNanosNow
   for _ in [:numSteps] do
-    let gRaw ← randn #[9] false
+    let gRaw ← Tensor.randn #[9]
     let g := HyperbolicTangent.project x gRaw
     x := DualMapGeometry.dualMapStep x g 0.02
   let t1 ← IO.monoNanosNow
@@ -78,20 +78,20 @@ def testFloatDualMapDiffersFromRiemannian : IO Unit := do
 @[test]
 def testTangentProjectionConstraint : IO Unit := do
   let W := (Stiefel.identity 4).matrix
-  let G ← randn #[4, 4] false
+  let G ← Tensor.randn #[4, 4]
   let Z := tangentProject W G
 
-  let lhs := nn.mm (nn.transpose2d W) Z + nn.mm (nn.transpose2d Z) W
-  let zero := zeros_like lhs
+  let lhs := Tensor.mm (Tensor.transpose2d W) Z + Tensor.mm (Tensor.transpose2d Z) W
+  let zero := Tensor.zerosLike lhs
 
-  LeanTest.assertTrue (allclose lhs zero (rtol := 1e-4) (atol := 1e-5))
+  LeanTest.assertTrue (Tensor.allclose lhs zero (rtol := 1e-4) (atol := 1e-5))
     "Projected update should satisfy Stiefel tangent constraint"
 
 @[test]
 def testStiefelConstraintAfterStep : IO Unit := do
-  let W0raw ← randn #[8, 4] false
-  let W0 := autograd.set_requires_grad (autograd.detach (retractStiefel W0raw)) true
-  let G ← randn #[8, 4] false
+  let W0raw ← Tensor.randn #[8, 4]
+  let W0 ← Tensor.setRequiresGrad (Tensor.detach (retractStiefel W0raw)) true
+  let G ← Tensor.randn #[8, 4]
 
   let st := initParamState W0
   let cfg : Config := {
@@ -104,17 +104,17 @@ def testStiefelConstraintAfterStep : IO Unit := do
   }
   let (W1, _st1) ← stepSingle W0 G st cfg
 
-  let wtW := nn.mm (nn.transpose2d W1) W1
-  let I := eye 4
+  let wtW := Tensor.mm (Tensor.transpose2d W1) W1
+  let I := Tensor.eye 4
 
-  LeanTest.assertTrue (allclose wtW I (rtol := 1e-4) (atol := 1e-5))
+  LeanTest.assertTrue (Tensor.allclose wtW I (rtol := 1e-4) (atol := 1e-5))
     "ManifoldMuon step should retract back to Stiefel (W^T W ≈ I)"
 
 @[test]
 def testDualAscentDiagnosticsEarlyStop : IO Unit := do
-  let W0raw ← randn #[8, 4] false
-  let W0 := autograd.set_requires_grad (autograd.detach (retractStiefel W0raw)) true
-  let G ← randn #[8, 4] false
+  let W0raw ← Tensor.randn #[8, 4]
+  let W0 ← Tensor.setRequiresGrad (Tensor.detach (retractStiefel W0raw)) true
+  let G ← Tensor.randn #[8, 4]
   let st := initParamState W0
   let cfg : Config := {
     lr := 0.02
@@ -136,9 +136,9 @@ def testDualAscentDiagnosticsEarlyStop : IO Unit := do
 
 @[test]
 def testFixedPointDiagnosticsPath : IO Unit := do
-  let W0raw ← randn #[8, 4] false
-  let W0 := autograd.set_requires_grad (autograd.detach (retractStiefel W0raw)) true
-  let G ← randn #[8, 4] false
+  let W0raw ← Tensor.randn #[8, 4]
+  let W0 ← Tensor.setRequiresGrad (Tensor.detach (retractStiefel W0raw)) true
+  let G ← Tensor.randn #[8, 4]
   let st := initParamState W0
   let cfg : Config := {
     lr := 0.02
@@ -162,9 +162,9 @@ def testFixedPointDiagnosticsPath : IO Unit := do
 
 @[test]
 def testStrictToleranceRunsFullIterations : IO Unit := do
-  let W0raw ← randn #[8, 4] false
-  let W0 := autograd.set_requires_grad (autograd.detach (retractStiefel W0raw)) true
-  let G ← randn #[8, 4] false
+  let W0raw ← Tensor.randn #[8, 4]
+  let W0 ← Tensor.setRequiresGrad (Tensor.detach (retractStiefel W0raw)) true
+  let G ← Tensor.randn #[8, 4]
   let st := initParamState W0
   let cfg : Config := {
     lr := 0.02
@@ -191,31 +191,31 @@ def testManifoldMuonBenchmarkPositive : IO Unit := do
 @[test]
 def testOrthogonalDualMapStepPreservesConstraint : IO Unit := do
   let q0 ← Orthogonal.random 6
-  let gRaw ← randn #[6, 6] false
+  let gRaw ← Tensor.randn #[6, 6]
   let g := OrthogonalTangent.fromAmbient q0 gRaw
   let q1 := DualMapGeometry.dualMapStep q0 g 0.05
 
-  let qtq := nn.mm (nn.transpose2d q1.matrix) q1.matrix
-  let I := eye 6
-  LeanTest.assertTrue (allclose qtq I (rtol := 1e-4) (atol := 1e-5))
+  let qtq := Tensor.mm (Tensor.transpose2d q1.matrix) q1.matrix
+  let I := Tensor.eye 6
+  LeanTest.assertTrue (Tensor.allclose qtq I (rtol := 1e-4) (atol := 1e-5))
     "Orthogonal dual-map step should preserve Q^T Q ≈ I via retraction"
 
 @[test]
 def testGrassmannDualMapStepPreservesConstraint : IO Unit := do
   let x0 ← Grassmann.random 7 3
-  let gRaw ← randn #[7, 3] false
+  let gRaw ← Tensor.randn #[7, 3]
   let g := GrassmannTangent.project x0 gRaw
   let x1 := DualMapGeometry.dualMapStep x0 g 0.05
 
-  let xtx := nn.mm (nn.transpose2d x1.matrix) x1.matrix
-  let I := eye 3
-  LeanTest.assertTrue (allclose xtx I (rtol := 1e-4) (atol := 1e-5))
+  let xtx := Tensor.mm (Tensor.transpose2d x1.matrix) x1.matrix
+  let I := Tensor.eye 3
+  LeanTest.assertTrue (Tensor.allclose xtx I (rtol := 1e-4) (atol := 1e-5))
     "Grassmann dual-map step should preserve X^T X ≈ I via retraction"
 
 @[test]
 def testHyperbolicDualMapStepPreservesConstraint : IO Unit := do
   let x0 ← Hyperbolic.random 4
-  let gRaw ← randn #[5] false
+  let gRaw ← Tensor.randn #[5]
   let g := HyperbolicTangent.project x0 gRaw
   let x1 := DualMapGeometry.dualMapStep x0 g 0.05
 

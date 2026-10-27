@@ -328,20 +328,21 @@ instance : AnchorMerge Float where
     let total := (w1 + w2).toFloat
     if total == 0.0 then a else (a * w1.toFloat + b * w2.toFloat) / total
 
-instance {s : Shape} : AnchorMerge (T s) where
+instance {σ : StaticSpec} [DType.RealFloating σ.dtype] : AnchorMerge (Tensor σ) where
   merge a b w1 w2 :=
     let total := (w1 + w2).toFloat
     if total == 0.0 then a
     else
-      let wa := torch.mul_scalar a w1.toFloat
-      let wb := torch.mul_scalar b w2.toFloat
-      torch.div_scalar (torch.add wa wb) total
+      let wa := Tensor.mulScalar a w1.toFloat
+      let wb := Tensor.mulScalar b w2.toFloat
+      Tensor.divScalar (Tensor.add wa wb) total
 
 instance [AnchorMerge α] [AnchorMerge β] : AnchorMerge (α × β) where
   merge a b w1 w2 :=
     (AnchorMerge.merge a.1 b.1 w1 w2, AnchorMerge.merge a.2 b.2 w1 w2)
 
-instance [AnchorMerge α] : AnchorMerge (torch.flowfusion.MaskedState α) where
+instance [AnchorMerge α] {cmaskSpec lmaskSpec : StaticSpec} :
+    AnchorMerge (torch.flowfusion.MaskedState α cmaskSpec lmaskSpec) where
   merge a b w1 w2 :=
     torch.flowfusion.maskLike (AnchorMerge.merge a.state b.state w1 w2) a
 

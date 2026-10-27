@@ -1,11 +1,14 @@
 import Tyr.Torch
+import Examples.GPU.LossReference
 import Tyr.GPU.Kernels.Loss
-import Examples.GPU.Parity
+import Examples.GPU.IndexedParity
 import Examples.GPU.Benchmark
 
 namespace Examples.GPU.RunLoss
 
 open torch
+
+variable {device : Device}
 open Tyr.GPU.Kernels.Loss
 
 private def vocab : UInt64 := 3072
@@ -35,32 +38,23 @@ private def lossMatrix : LeanBenchmark.Matrix LossShape := {
 
 private def benchmarkShape (cfg : Benchmark.Config) (stream : UInt64)
     (caseLabel : String) (rows : UInt64) : IO (Array String × Bool) := do
-  let device := Device.CUDA 0
-  let logitsBase : T #[rows, vocab] :=
-    torch.toBFloat16' (← torch.randn #[rows, vocab] false device)
-  let logits : T #[rows, vocab] :=
-    torch.autograd.set_requires_grad logitsBase true
-  let targets : T #[rows] ← torch.randint 0 vocab.toInt64 #[rows] false device
-  let logitsF : T #[rows, vocab] := torch.toFloat' logits
-  let expectedLosses : T #[rows] :=
-    torch.nn.cross_entropy_none logitsF targets
-  let expectedMean : T #[] :=
-    torch.nn.cross_entropy logitsF targets
-  let gradSeed := torch.ones_like expectedMean
-  let expectedGrad : T #[rows, vocab] :=
-    torch.autograd.grad expectedMean logits gradSeed
+  let device ← Device.cuda 0
+  let logitsBase : Tensor { shape := #[rows, vocab], dtype := .BFloat16, device := device } :=
+    (← Tensor.randn #[rows, vocab] false device).toBFloat16
+  let targets ← Tensor.randint 0 vocab.toInt64 #[rows] device
+  let (expectedLosses, expectedMean, expectedGrad) ← referenceTraining logitsBase targets
 
-  let losses : T #[rows] := torch.zeros #[rows] false device
-  let meanLoss : T #[] := torch.zeros #[] false device
-  let gradLogits := torch.zeros_like logitsBase
+  let losses ← Tensor.uniformLike (Tensor.zeros #[rows] false device) 0 0
+  let meanLoss ← Tensor.uniformLike (Tensor.zeros #[] false device) 0 0
+  let gradLogits ← Tensor.uniformLike logitsBase 0 0
   let gradScale : Float32 := 1.0 / rows.toFloat32
 
   let launchRows : IO Unit :=
     crossEntropyRowsVocab3072Bf16Train.launch
-      logitsBase targets losses gradLogits rows gradScale
+      logitsBase.raw targets.raw losses.raw gradLogits.raw rows gradScale
       rows 1 1 256 1 1 0 stream
   let launchMean : IO Unit :=
-    reduceMeanLossRowsF32.launch losses meanLoss rows
+    reduceMeanLossRowsF32.launch losses.raw meanLoss.raw rows
       1 1 1 256 1 1 0 stream
   let launchTraining : IO Unit := do
     launchRows
@@ -68,18 +62,18 @@ private def benchmarkShape (cfg : Benchmark.Config) (stream : UInt64)
 
   launchTraining
   torch.cuda_synchronize
-  let lossesCheck := compareTensors s!"loss.{caseLabel}.per_row" expectedLosses losses 2e-3 2e-3
-  let meanCheck := compareTensors s!"loss.{caseLabel}.mean" expectedMean meanLoss 2e-3 2e-3
-  let gradCheck := compareTensors s!"loss.{caseLabel}.grad_logits" expectedGrad gradLogits 3e-2 3e-2
+  let lossesCheck := IndexedParity.compareTensors s!"loss.{caseLabel}.per_row" expectedLosses losses 2e-3 2e-3
+  let meanCheck := IndexedParity.compareTensors s!"loss.{caseLabel}.mean" expectedMean meanLoss 2e-3 2e-3
+  let gradCheck := IndexedParity.compareTensors s!"loss.{caseLabel}.grad_logits" expectedGrad gradLogits 3e-2 3e-2
   for check in #[lossesCheck, meanCheck, gradCheck] do logTensorCheck check
 
   let rowsSamples ← Benchmark.timeCudaEvents cfg stream launchRows
   let meanSamples ← Benchmark.timeCudaEvents cfg stream launchMean
   let trainingSamples ← Benchmark.timeCudaEvents cfg stream launchTraining
 
-  let postLosses := compareTensors s!"loss.{caseLabel}.per_row.post" expectedLosses losses 2e-3 2e-3
-  let postMean := compareTensors s!"loss.{caseLabel}.mean.post" expectedMean meanLoss 2e-3 2e-3
-  let postGrad := compareTensors s!"loss.{caseLabel}.grad_logits.post" expectedGrad gradLogits 3e-2 3e-2
+  let postLosses := IndexedParity.compareTensors s!"loss.{caseLabel}.per_row.post" expectedLosses losses 2e-3 2e-3
+  let postMean := IndexedParity.compareTensors s!"loss.{caseLabel}.mean.post" expectedMean meanLoss 2e-3 2e-3
+  let postGrad := IndexedParity.compareTensors s!"loss.{caseLabel}.grad_logits.post" expectedGrad gradLogits 3e-2 3e-2
   for check in #[postLosses, postMean, postGrad] do logTensorCheck check
   let correct := lossesCheck.ok && meanCheck.ok && gradCheck.ok &&
     postLosses.ok && postMean.ok && postGrad.ok

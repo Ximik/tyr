@@ -77,7 +77,9 @@ uniform lengths across the batch.
 
 Both cache structures have `TensorStruct` instances
 (`Tyr/Inference/KVCache.lean:162`), so generic traversals (`map`, `mapM`,
-`zipWith`, `fold`) — device moves, dtype casts — work over whole caches. See
+`zipWith`, `fold`) preserve each leaf specification. Device conversion requires
+a destination type and `TensorTreeCast` instance; dtype conversion uses the
+checked cast APIs. See
 [TensorStruct](core/tensorstruct.md).
 
 ## Key APIs
@@ -156,50 +158,33 @@ the async tone has finished (hazard documented at
 
 ### `torch.Generator.KVCache` (`Tyr/Inference/KVCache.lean`)
 
-```lean
-structure LayerCache (batch maxSeqLen numKvHeads headDim : UInt64) where
-  keys : T #[batch, numKvHeads, maxSeqLen, headDim]
-  values : T #[batch, numKvHeads, maxSeqLen, headDim]
+`LayerCache batch maxSeqLen numKvHeads headDim dtype device` stores indexed key
+and value tensors of shape `#[batch, numKvHeads, maxSeqLen, headDim]`.
+`Cache` adds a layer count, an array of layer caches, sequence lengths, and capacity.
+The default dtype is BFloat16. The device parameter is concrete; `Cache.init`
+defaults to CPU and indexes its result by the requested device.
 
-structure Cache (numLayers batch maxSeqLen numKvHeads headDim : UInt64) where
-  layers : Array (LayerCache batch maxSeqLen numKvHeads headDim)
-  seqLens : Array UInt64
-  maxLen : UInt64
-```
+| Operation | Behavior |
+| --- | --- |
+| `Cache.init` | Allocates independent BF16 buffers in `IO`, on the requested device |
+| `Cache.attendLayer` | Appends one token and returns the updated cache and indexed attention output in `IO` |
+| `Cache.appendLayer` | Appends without attending, in `IO` |
+| `Cache.incrementSeqLens` | Validates and advances positions in `IO`; call once per token after all layers |
+| `Cache.currentLen`, `Cache.hasRoom` | Inspect the current position and capacity |
+| `LayerCache.append` | Writes a token through the explicit inference copy boundary |
+| `LayerCache.attentionView` | Returns indexed K/V views with runtime-dependent `validLen`, in `IO` |
 
-| Operation | Signature (eliding indices) | Purpose |
-| --- | --- | --- |
-| `Cache.init` | `(numLayers batch maxSeqLen numKvHeads headDim : UInt64) (device : Device := Device.CPU) : Cache …` | zero-allocate both buffers per layer, cast to BF16 |
-| `Cache.attendLayer` | `(layerIdx : Nat) (newQ : T #[batch, numQHeads, 1, headDim]) (newK newV : T #[batch, numKvHeads, 1, headDim]) (enableGqa : Bool := false) : Cache … × T #[batch, numQHeads, 1, headDim]` | append one token to layer `layerIdx`, then flash-attend over the valid prefix |
-| `Cache.incrementSeqLens` | `Cache … → Cache …` | advance all positions by one; call once per token, after all layers |
-| `Cache.currentLen` | `Cache … → UInt64` | current position (`seqLens[0]`) |
-| `Cache.hasRoom` | `Cache … → Bool` | `currentLen < maxLen` |
-| `Cache.appendLayer` | `(layerIdx : Nat) (newK newV : …) → Cache …` | append without attending |
-| `Cache.getLayer` / `Cache.setLayer` | `…` | per-layer access |
-| `LayerCache.append` | `(newK newV : T #[batch, numKvHeads, 1, headDim]) (pos : UInt64) → LayerCache …` | in-place `sliceScatterInplace` of one token at `pos`; the passed-in layer cache must not be reused |
-| `LayerCache.attentionView` | `(validLen : UInt64) → (T #[…, validLen, …] × T #[…, validLen, …])` | unpadded K/V views over `[0, validLen)` |
+The cache's runtime device must match Q/K/V. Although the structure can represent
+other dtype policies, the convenience initializer creates BF16 buffers. Appends
+use the returned tensors from `copySliceIO`; an earlier cache or attention view
+keeps its original values. Thread the returned cache into the next decode step.
+Uniquely owned eligible CPU buffers can be reused; accelerator updates currently
+copy. `Cache.init` allocates independent K/V storage for every layer.
+Invalid capacity, position, and layer accesses produce IO errors.
 
-Notes:
-
-- Pass `(device := Device.CUDA n)` to `Cache.init` for GPU decode — the cache
-  buffers must live on the same device as the Q/K/V appended into them, and the
-  TK route additionally requires Hopper.
-- The dtype is hardcoded to BF16 (`toBFloat16'` over `zeros`); FP16/FP32
-  pipelines need a cast or their own cache.
-- Appends mutate the cache buffers in place via `sliceScatterInplace`
-  (`cc/src/tyr.cpp` `lean_torch_slice_scatter_along_dim_inplace`: narrow +
-  copy_ on the original tensor, no clone), so a decode token costs O(1) per
-  layer instead of an O(maxSeqLen) buffer copy. The trade-off is an ownership
-  contract: a `Cache`/`LayerCache` value passed to `attendLayer` /
-  `appendLayer` / `LayerCache.append` must not be reused after the call —
-  old and new values share the mutated tensors. `Cache.init` allocates fresh
-  buffers per layer so layers never alias each other's storage.
-- An out-of-range `layerIdx` makes `attendLayer` panic with a message naming
-  the index and the layer count — keep indices valid.
-- The in-tree consumer is the GPU parity harness
-  `Examples/GPU/RunMhaH100Decode.lean`. Model families under `Tyr/Model/`
-  (Qwen, Whisper, …) currently define their own caches instead of reusing this
-  one.
+The CPU/GPU parity harness compares cached decoding with full-sequence attention.
+Model families may use their own cache implementations; this shared cache does
+not automatically replace them.
 
 ## Usage examples
 
@@ -251,28 +236,28 @@ both the success and `catch` branches — see
 
 ### Cached decode step
 
-Reconstructed example (from `Examples/GPU/RunMhaH100Decode.lean:179-193`, the
-cache-vs-no-cache parity harness). One layer, GQA, BF16 on CUDA:
+One indexed BF16 decode step with GQA:
 
 ```lean
 import Tyr.Inference.KVCache
+open torch torch.Generator
 
-open torch
-open torch.Generator
+def decodeStep {batch maxLen kvHeads : UInt64}
+    (cache : KVCache.Cache 1 batch maxLen kvHeads 128)
+    (q : Tensor { shape := #[batch, 32, 1, 128], dtype := .BFloat16, device := .CPU })
+    (k v : Tensor { shape := #[batch, kvHeads, 1, 128], dtype := .BFloat16, device := .CPU }) :
+    IO (KVCache.Cache 1 batch maxLen kvHeads 128 ×
+      Tensor { shape := #[batch, 32, 1, 128], dtype := .BFloat16, device := .CPU }) := do
+  let (cache', out) ← cache.attendLayer (numQHeads := 32) 0 q k v (enableGqa := true)
+  let cache' ← cache'.incrementSeqLens
+  pure (cache', out)
 
-/-- One cached decode step for a single-layer model. -/
-def decodeStep (cache : KVCache.Cache 1 batch maxLen kvHeads 128)
-    (q : T #[batch, 32, 1, 128]) (k v : T #[batch, kvHeads, 1, 128])
-    : KVCache.Cache 1 batch maxLen kvHeads 128 × T #[batch, 32, 1, 128] :=
-  let (cache', out) := cache.attendLayer (numQHeads := 32) 0 q k v (enableGqa := true)
-  (cache'.incrementSeqLens, out)   -- advance position once per token
-
--- Initialization (device must match the Q/K/V tensors):
---   let cache := KVCache.Cache.init 1 batch maxLen kvHeads 128 (device := Device.CUDA 0)
+-- let device ← Device.cuda 0
+-- let cache ← KVCache.Cache.init 1 batch maxLen kvHeads 128 (device := device)
 ```
 
 The harness checks this token-by-token path against a single dense
-`scaledDotProductAttentionGQAQKV` over the full sequence and expects agreement
+`Tensor.attentionGQAQKV` over the full sequence and expects agreement
 within BF16 tolerance — the canonical way to catch off-by-one append positions
 and stale slice bounds when wiring a cache into a new model.
 
@@ -280,7 +265,7 @@ and stale slice bounds when wiring a cache into a new model.
 
 - [Audio and speech models](models/audio-speech.md) — the models these
   utilities feed: Whisper, Qwen3ASR, SileroVAD, KittenTTS, Qwen3TTS.
-- [Tensors](core/tensors.md) — `T s`, `torch.data.slice` / `sliceScatter`, and
+- [Tensors](core/tensors.md) — `Tensor σ`, indexed slices and explicit cache copies, and
   the device model used by the cache.
 - [TensorStruct](core/tensorstruct.md) — the generic traversal class behind the
   cache instances.

@@ -1,11 +1,11 @@
-import Tyr.Torch
+import Tyr.Typed.Neural
 
 /-!
 # Tyr.TensorStruct
 
 `Tyr.TensorStruct` defines Tyr's tensor-tree abstraction: a uniform way to traverse,
 transform, and combine nested parameter/state structures that contain tensors.
-Conceptually, it is similar to JAX PyTrees, specialized for Tyr's shape-indexed `T s`.
+Conceptually, it is similar to JAX PyTrees, specialized for Tyr's indexed `Tensor σ`.
 
 In practice, this is the foundation that lets training, checkpointing, optimizers,
 and model utilities operate generically over arbitrary model parameter types.
@@ -21,12 +21,16 @@ written once and reused across many models.
 
 - `TensorStruct`: typeclass with four core operations over tensor leaves:
   `map`, `mapM`, `zipWith`, and `fold`.
+- `TensorStructFor P`: the same traversals with evidence that every visited
+  leaf satisfies `P`; `FloatingTensorStruct` supplies real floating arithmetic.
 - `Static α`: marks non-tensor metadata that should be skipped during traversal.
-- `Frozen s`: marks tensor fields that should remain in the structure but are typically
+- `Frozen σ`: marks tensor fields that should remain in the structure but are typically
   treated as non-trainable.
 - `Vector n α`: length-indexed container for compile-time-safe `zipWith`.
 - `TensorStruct` utilities: `count`, `grads`, `zeroGrads`, `detach`,
   `requiresGrad`, `makeLeafParams`, `scale`, `add`, `sub`.
+- `TensorStruct.castTo`: explicit conversion to a destination tensor-tree type
+  (provided by `Tyr.TensorStruct.Cast`).
 
 ## Traversal Semantics
 
@@ -40,16 +44,20 @@ At a high level:
 Wrapper behavior:
 
 - `Static α` is ignored by tensor transforms (passed through unchanged).
-- `Frozen s` still traverses as a tensor leaf, but can be treated specially by your logic.
+- `Frozen σ` still traverses as a tensor leaf, but can be treated specially by your logic.
 
 ## Required Import for Deriving and Tensor Leaves
 
 This module defines the `TensorStruct` class and instances for containers
 (`Array`, `List`, `Vector`, `Option`), wrappers (`Static`, `Frozen`), and
-scalars — but **not** the `deriving TensorStruct` handler or the leaf
-instance for a bare tensor `T s`. Both live in `Tyr.Module.Derive`, so
-`import Tyr.Module.Derive` (directly or via `Tyr.Module`) wherever you derive
-instances or traverse raw tensor leaves.
+scalars, including indexed `Tensor σ` leaves. The `deriving TensorStruct`
+handler lives in `Tyr.Module.Derive`, so import that module when deriving
+instances. Deriving also supplies conditional `TensorStructFor` instances and
+`TensorTreeCast` between parameterizations of the same record, recursively using
+the corresponding field capabilities and conversions.
+Traversal callbacks preserve each leaf's complete `StaticSpec` index. A map
+cannot change a leaf's shape, dtype or device. Use `TensorStruct.castTo` with an
+explicit destination type to convert dtype or device; shape changes are rejected.
 
 ## Examples
 
@@ -61,11 +69,11 @@ import Tyr.Module.Derive
 open torch
 
 structure LinearParams (inDim outDim : UInt64) where
-  weight : T #[outDim, inDim]
-  bias : T #[outDim]
+  weight : Tensor { shape := #[outDim, inDim], dtype := .Float32, device := .CPU }
+  bias : Tensor { shape := #[outDim], dtype := .Float32, device := .CPU }
   name : Static String
-  runningMean : Frozen #[outDim]
-  deriving Repr, TensorStruct
+  runningMean : Frozen { shape := #[outDim], dtype := .Float32, device := .CPU }
+  deriving TensorStruct
 ```
 
 ### 2) Generic transformations over nested parameter trees
@@ -73,14 +81,16 @@ structure LinearParams (inDim outDim : UInt64) where
 ```lean
 open torch
 
-def moveTo [TensorStruct α] (device : Device) (x : α) : α :=
-  TensorStruct.map (fun t => t.to device) x
+def detachAll [TensorStruct α] (x : α) : α :=
+  TensorStruct.map Tensor.detach x
 
-def moveToM [TensorStruct α] (device : Device) (x : α) : IO α :=
-  TensorStruct.mapM (fun t => pure (t.to device)) x
+def clearGradsM [TensorStruct α] (x : α) : IO Unit :=
+  TensorStruct.zeroGrads x
 
-def prepareForTraining [TensorStruct α] (x : α) : α :=
-  TensorStruct.zeroGrads (TensorStruct.makeLeafParams x)
+def prepareForTraining [TensorStruct α] (x : α) : IO α := do
+  let params ← TensorStruct.makeLeafParams x
+  TensorStruct.zeroGrads params
+  pure params
 
 def tensorLeafCount [TensorStruct α] (x : α) : Nat :=
   TensorStruct.count x
@@ -93,7 +103,7 @@ open torch
 
 -- Total number of scalar elements across all tensor leaves.
 def numScalars [TensorStruct α] (x : α) : Nat :=
-  TensorStruct.fold (fun {s} _ acc => acc + s.foldl (· * ·) 1) 0 x
+  TensorStruct.fold (fun {σ} _ acc => acc + TensorSpec.numelOfShape σ.shape) 0 x
 ```
 
 ### 4) Combine structures elementwise
@@ -101,7 +111,7 @@ def numScalars [TensorStruct α] (x : α) : Nat :=
 ```lean
 open torch
 
-def averageParams [TensorStruct α] (a b : α) : α :=
+def averageParams [FloatingTensorStruct α] (a b : α) : α :=
   TensorStruct.scale (TensorStruct.add a b) 0.5
 ```
 
@@ -110,8 +120,8 @@ def averageParams [TensorStruct α] (a b : α) : α :=
 ```lean
 open torch
 
-def blendVec {n : Nat} [TensorStruct α] (a b : Vector n α) : Vector n α :=
-  TensorStruct.zipWith (fun x y => x + y) a b
+def blendVec {n : Nat} [FloatingTensorStruct α] (a b : Vector n α) : Vector n α :=
+  FloatingTensorStruct.zipWith (fun a b => Tensor.add a b) a b
 ```
 
 Unlike `Array`/`List`, `Vector n α` encodes length in the type, so mismatched zip sizes
@@ -137,7 +147,7 @@ namespace torch
 
 These wrapper types control how fields are handled during tensor tree traversal:
 - `Static α`: Non-tensor data that should be completely skipped (e.g., config, hyperparameters)
-- `Frozen s`: Tensor that participates in forward pass but not in gradient updates
+- `Frozen σ`: Tensor that participates in forward pass but not in gradient updates
 -/
 
 /-- Non-tensor static data that should be skipped during traversal.
@@ -153,20 +163,20 @@ instance : Coe α (Static α) := ⟨Static.mk⟩
 
 /-- A frozen (non-trainable) tensor parameter.
     Participates in forward pass but gradients are not tracked for optimization. -/
-structure Frozen (s : Shape) where
-  tensor : T s
+structure Frozen (σ : StaticSpec) where
+  tensor : Tensor σ
 
 namespace Frozen
 
-def map {s : Shape} (f : T s → T s) (fr : Frozen s) : Frozen s :=
+def map {σ : StaticSpec} (f : Tensor σ → Tensor σ) (fr : Frozen σ) : Frozen σ :=
   { tensor := f fr.tensor }
 
-def get {s : Shape} (fr : Frozen s) : T s := fr.tensor
+def get {σ : StaticSpec} (fr : Frozen σ) : Tensor σ := fr.tensor
 
 end Frozen
 
-/-- Coercion from T s to Frozen s -/
-instance {s : Shape} : Coe (T s) (Frozen s) := ⟨Frozen.mk⟩
+/-- Mark an indexed tensor as a frozen parameter. -/
+instance {σ : StaticSpec} : Coe (Tensor σ) (Frozen σ) := ⟨Frozen.mk⟩
 
 /-! ## Vector: Length-indexed array
 
@@ -255,13 +265,94 @@ class Model (α : Type)
     Allows generic traversal and transformation of all tensors in the structure. -/
 class TensorStruct (α : Type) where
   -- Map a function over all tensors
-  map : (∀ {s}, T s → T s) → α → α
+  map : (∀ {σ}, Tensor σ → Tensor σ) → α → α
   -- Monadic map (e.g., for initialization with IO)
-  mapM {m : Type → Type} [Monad m] : (∀ {s}, T s → m (T s)) → α → m α
+  mapM {m : Type → Type} [Monad m] : (∀ {σ}, Tensor σ → m (Tensor σ)) → α → m α
   -- Zip two containers with a function
-  zipWith : (∀ {s}, T s → T s → T s) → α → α → α
+  zipWith : (∀ {σ}, Tensor σ → Tensor σ → Tensor σ) → α → α → α
   -- Fold over tensors
-  fold {β : Type} : (∀ {s}, T s → β → β) → β → α → β
+  fold {β : Type} : (∀ {σ}, Tensor σ → β → β) → β → α → β
+
+/-- A tensor-tree traversal whose leaves all satisfy `P`. Every callback receives
+the evidence for its actual leaf index. This is separate from `TensorStruct`:
+structural traversal alone does not justify arithmetic on arbitrary dtypes. -/
+class TensorStructFor (P : StaticSpec → Prop) (α : Type) where
+  map : (∀ {σ}, P σ → Tensor σ → Tensor σ) → α → α
+  mapM {m : Type → Type} [Monad m] :
+    (∀ {σ}, P σ → Tensor σ → m (Tensor σ)) → α → m α
+  zipWith : (∀ {σ}, P σ → Tensor σ → Tensor σ → Tensor σ) → α → α → α
+  fold {β : Type} : (∀ {σ}, P σ → Tensor σ → β → β) → β → α → β
+
+/-- Package arbitrary leaf predicates for instance search, independently of
+whether the predicate itself is declared as a typeclass. -/
+class TensorStructFor.Fact (proposition : Prop) : Prop where
+  out : proposition
+
+/-- Tensor trees whose traversed leaves use standard real floating dtypes.
+Frozen leaves participate, while Static metadata remains outside the constraint. -/
+abbrev FloatingTensorStruct (α : Type) :=
+  TensorStructFor (fun σ => DType.RealFloating σ.dtype) α
+
+instance {dtype : DType} [proof : DType.RealFloating dtype] :
+    TensorStructFor.Fact (DType.RealFloating dtype) := ⟨proof⟩
+
+namespace FloatingTensorStruct
+
+/-- Traverse floating leaves with their dtype capability installed locally. -/
+def map [FloatingTensorStruct α]
+    (f : ∀ {σ}, [DType.RealFloating σ.dtype] → Tensor σ → Tensor σ) : α → α :=
+  TensorStructFor.map (P := fun σ => DType.RealFloating σ.dtype)
+    (fun {σ} proof tensor => @f σ proof tensor)
+
+def mapM {m : Type → Type} [Monad m] [FloatingTensorStruct α]
+    (f : ∀ {σ}, [DType.RealFloating σ.dtype] → Tensor σ → m (Tensor σ)) : α → m α :=
+  TensorStructFor.mapM (P := fun σ => DType.RealFloating σ.dtype)
+    (fun {σ} proof tensor => @f σ proof tensor)
+
+def zipWith [FloatingTensorStruct α]
+    (f : ∀ {σ}, [DType.RealFloating σ.dtype] → Tensor σ → Tensor σ → Tensor σ) :
+    α → α → α :=
+  TensorStructFor.zipWith (P := fun σ => DType.RealFloating σ.dtype)
+    (fun {σ} proof lhs rhs => @f σ proof lhs rhs)
+
+def fold [FloatingTensorStruct α]
+    (f : ∀ {σ}, [DType.RealFloating σ.dtype] → Tensor σ → β → β) : β → α → β :=
+  TensorStructFor.fold (P := fun σ => DType.RealFloating σ.dtype)
+    (fun {σ} proof tensor initial => @f σ proof tensor initial)
+
+end FloatingTensorStruct
+
+instance {σ : StaticSpec} : TensorStruct (Tensor σ) where
+  map f tensor := f tensor
+  mapM f tensor := f tensor
+  zipWith f lhs rhs := f lhs rhs
+  fold f init tensor := f tensor init
+
+/-- A heterogeneous shape carrier whose leaves retain their dtype and concrete device. -/
+abbrev ShapePackedTensor (dtype : DType) (device : Device) :=
+  Sigma fun shape : Shape => Tensor { shape, dtype, device }
+
+instance {dtype : DType} {device : Device} [DType.ConstantSupported dtype device] : Inhabited (ShapePackedTensor dtype device) := ⟨⟨#[], default⟩⟩
+
+instance {dtype : DType} {device : Device} : TensorStruct (ShapePackedTensor dtype device) where
+  map f x := ⟨x.1, f x.2⟩
+  mapM f x := do pure ⟨x.1, ← f x.2⟩
+  zipWith f x y :=
+    letI : Inhabited (ShapePackedTensor dtype device) := ⟨x⟩
+    if h : y.1 = x.1 then ⟨x.1, f x.2 (h ▸ y.2)⟩
+    else panic! s!"TensorStruct shape mismatch: {x.1} vs {y.1}"
+  fold f initial x := f x.2 initial
+
+/-- Existential dtypes remain exact during traversals. Zipping requires actual
+equality of the hidden indices before the two leaves can share an operation. -/
+instance {shape : Shape} {device : Device} : TensorStruct (SomeDTypeTensor shape device) where
+  map f x := ⟨x.1, f x.2⟩
+  mapM f x := do pure ⟨x.1, ← f x.2⟩
+  zipWith f x y :=
+    letI : Inhabited (SomeDTypeTensor shape device) := ⟨x⟩
+    if h : y.1 = x.1 then ⟨x.1, f x.2 (h ▸ y.2)⟩
+    else panic! s!"TensorStruct dtype mismatch: {x.1} vs {y.1}"
+  fold f initial x := f x.2 initial
 
 /-!
 ## Container Instances
@@ -282,6 +373,16 @@ Example migration:
 
 This trades some flexibility for compile-time guarantees.
 -/
+
+/-- Product trees preserve independent leaf positions, including equal values. -/
+instance [TensorStruct α] [TensorStruct β] : TensorStruct (α × β) where
+  map f value := (TensorStruct.map f value.1, TensorStruct.map f value.2)
+  mapM f value := do
+    pure (← TensorStruct.mapM f value.1, ← TensorStruct.mapM f value.2)
+  zipWith f lhs rhs :=
+    (TensorStruct.zipWith f lhs.1 rhs.1, TensorStruct.zipWith f lhs.2 rhs.2)
+  fold f initial value :=
+    TensorStruct.fold f (TensorStruct.fold f initial value.1) value.2
 
 /-- TensorStruct instance for Array.
     **Warning**: `zipWith` panics if arrays have different sizes.
@@ -337,11 +438,11 @@ instance {α : Type} [Inhabited α] : TensorStruct (Static α) where
   fold _ init _ := init
 
 /-- Frozen tensors are traversed (for forward pass) but can be filtered out for gradients -/
-instance {s : Shape} : TensorStruct (Frozen s) where
-  map f fr := { tensor := f fr.tensor }
-  mapM f fr := do pure { tensor := ← f fr.tensor }
-  zipWith f fr1 fr2 := { tensor := f fr1.tensor fr2.tensor }
-  fold f init fr := f fr.tensor init
+instance {σ : StaticSpec} : TensorStruct (Frozen σ) where
+  map f fr := { tensor := TensorStruct.map f fr.tensor }
+  mapM f fr := do pure { tensor := ← TensorStruct.mapM f fr.tensor }
+  zipWith f fr1 fr2 := { tensor := TensorStruct.zipWith f fr1.tensor fr2.tensor }
+  fold f init fr := TensorStruct.fold f init fr.tensor
 
 /-! ## TensorStruct Instances for Basic Types
 
@@ -391,6 +492,110 @@ instance : TensorStruct String where
   zipWith _ s _ := s
   fold _ init _ := init
 
+/-! ## Capability-aware traversals
+
+Container instances preserve the ordinary traversal's order and metadata policy.
+Existential indices require evidence for every index the container can contain;
+discovering a dtype at runtime does not create floating arithmetic evidence.
+-/
+
+instance {P : StaticSpec → Prop} {σ : StaticSpec} [proof : TensorStructFor.Fact (P σ)] :
+    TensorStructFor P (Tensor σ) where
+  map f tensor := f proof.out tensor
+  mapM f tensor := f proof.out tensor
+  zipWith f lhs rhs := f proof.out lhs rhs
+  fold f initial tensor := f proof.out tensor initial
+
+instance {P : StaticSpec → Prop} {dtype : DType} {device : Device}
+    [proof : ∀ shape, TensorStructFor.Fact (P ⟨shape, dtype, device⟩)] :
+    TensorStructFor P (ShapePackedTensor dtype device) where
+  map f tensor := ⟨tensor.1, f (proof tensor.1).out tensor.2⟩
+  mapM f tensor := do pure ⟨tensor.1, ← f (proof tensor.1).out tensor.2⟩
+  zipWith f lhs rhs :=
+    letI : Inhabited (ShapePackedTensor dtype device) := ⟨lhs⟩
+    if h : rhs.1 = lhs.1 then ⟨lhs.1, f (proof lhs.1).out lhs.2 (h ▸ rhs.2)⟩
+    else panic! s!"TensorStructFor shape mismatch: {lhs.1} vs {rhs.1}"
+  fold f initial tensor := f (proof tensor.1).out tensor.2 initial
+
+instance {P : StaticSpec → Prop} {shape : Shape} {device : Device}
+    [proof : ∀ dtype : DType, TensorStructFor.Fact (P ⟨shape, dtype, device⟩)] :
+    TensorStructFor P (SomeDTypeTensor shape device) where
+  map f tensor := ⟨tensor.1, f (proof tensor.1).out tensor.2⟩
+  mapM f tensor := do pure ⟨tensor.1, ← f (proof tensor.1).out tensor.2⟩
+  zipWith f lhs rhs :=
+    letI : Inhabited (SomeDTypeTensor shape device) := ⟨lhs⟩
+    if h : rhs.1 = lhs.1 then ⟨lhs.1, f (proof lhs.1).out lhs.2 (h ▸ rhs.2)⟩
+    else panic! s!"TensorStructFor dtype mismatch: {lhs.1} vs {rhs.1}"
+  fold f initial tensor := f (proof tensor.1).out tensor.2 initial
+
+instance {P : StaticSpec → Prop} [TensorStructFor P α] [TensorStructFor P β] :
+    TensorStructFor P (α × β) where
+  map f value := (TensorStructFor.map f value.1, TensorStructFor.map f value.2)
+  mapM f value := do
+    pure (← TensorStructFor.mapM f value.1, ← TensorStructFor.mapM f value.2)
+  zipWith f lhs rhs :=
+    (TensorStructFor.zipWith f lhs.1 rhs.1, TensorStructFor.zipWith f lhs.2 rhs.2)
+  fold f initial value :=
+    TensorStructFor.fold f (TensorStructFor.fold f initial value.1) value.2
+
+instance {P : StaticSpec → Prop} [TensorStructFor P α] : TensorStructFor P (Array α) where
+  map f values := values.map (TensorStructFor.map f)
+  mapM f values := values.mapM (TensorStructFor.mapM f)
+  zipWith f lhs rhs :=
+    if lhs.size == rhs.size then Array.zipWith (TensorStructFor.zipWith f) lhs rhs
+    else panic! "TensorStructFor.zipWith: Array size mismatch (use Vector for type safety)"
+  fold f initial values := values.foldl (fun acc value => TensorStructFor.fold f acc value) initial
+
+instance {P : StaticSpec → Prop} [TensorStructFor P α] : TensorStructFor P (List α) where
+  map f values := values.map (TensorStructFor.map f)
+  mapM f values := values.mapM (TensorStructFor.mapM f)
+  zipWith f lhs rhs :=
+    if lhs.length == rhs.length then List.zipWith (TensorStructFor.zipWith f) lhs rhs
+    else panic! "TensorStructFor.zipWith: List length mismatch (use Vector for type safety)"
+  fold f initial values := values.foldl (fun acc value => TensorStructFor.fold f acc value) initial
+
+instance {P : StaticSpec → Prop} {n : Nat} [TensorStructFor P α] :
+    TensorStructFor P (Vector n α) where
+  map f values := Vector.map (TensorStructFor.map f) values
+  mapM f values := Vector.mapM (TensorStructFor.mapM f) values
+  zipWith f lhs rhs := Vector.zipWith (TensorStructFor.zipWith f) lhs rhs
+  fold f initial values := values.data.foldl
+    (fun acc value => TensorStructFor.fold f acc value) initial
+
+instance {P : StaticSpec → Prop} [TensorStructFor P α] : TensorStructFor P (Option α) where
+  map f value := value.map (TensorStructFor.map f)
+  mapM f value := match value with
+    | some value => do pure (some (← TensorStructFor.mapM f value))
+    | none => pure none
+  zipWith f lhs rhs := match lhs, rhs with
+    | some lhs, some rhs => some (TensorStructFor.zipWith f lhs rhs)
+    | _, _ => none
+  fold f initial value := match value with
+    | some value => TensorStructFor.fold f initial value
+    | none => initial
+
+instance {P : StaticSpec → Prop} {σ : StaticSpec} [TensorStructFor.Fact (P σ)] :
+    TensorStructFor P (Frozen σ) where
+  map f value := ⟨TensorStructFor.map f value.tensor⟩
+  mapM f value := do pure ⟨← TensorStructFor.mapM f value.tensor⟩
+  zipWith f lhs rhs := ⟨TensorStructFor.zipWith f lhs.tensor rhs.tensor⟩
+  fold f initial value := TensorStructFor.fold f initial value.tensor
+
+@[reducible] private def metadataTraversal (P : StaticSpec → Prop) (α : Type) : TensorStructFor P α where
+  map _ value := value
+  mapM _ value := pure value
+  zipWith _ lhs _ := lhs
+  fold _ initial _ := initial
+
+instance {P : StaticSpec → Prop} : TensorStructFor P (Static α) := metadataTraversal P _
+instance {P : StaticSpec → Prop} : TensorStructFor P Bool := metadataTraversal P _
+instance {P : StaticSpec → Prop} : TensorStructFor P Float := metadataTraversal P _
+instance {P : StaticSpec → Prop} : TensorStructFor P UInt8 := metadataTraversal P _
+instance {P : StaticSpec → Prop} : TensorStructFor P UInt64 := metadataTraversal P _
+instance {P : StaticSpec → Prop} : TensorStructFor P Nat := metadataTraversal P _
+instance {P : StaticSpec → Prop} : TensorStructFor P Int := metadataTraversal P _
+instance {P : StaticSpec → Prop} : TensorStructFor P String := metadataTraversal P _
+
 /-! ## TensorStruct Utility Methods
 
 Convenient operations for common tensor tree manipulations.
@@ -402,48 +607,98 @@ namespace TensorStruct
 def count [TensorStruct α] (model : α) : Nat :=
   fold (fun _ n => n + 1) 0 model
 
-/-- Get gradients for all tensors in the structure -/
-def grads [TensorStruct α] (model : α) : α :=
-  map autograd.grad_of model
+/-- Read independent gradient snapshots for all tensors in the structure. -/
+def grads [TensorStruct α] (model : α) : IO α :=
+  mapM Tensor.gradOf model
 
-/-- Zero all gradients in the structure -/
-def zeroGrads [TensorStruct α] (model : α) : α :=
-  map autograd.zero_grad model
+/-- Clear all accumulated gradients, releasing their buffers by default. -/
+def zeroGrads [TensorStruct α] (model : α) (setToNone : Bool := true) : IO Unit := do
+  let _ ← mapM (fun t => do Tensor.zeroGrad t setToNone; pure t) model
+  pure ()
 
 /-- Detach all tensors from the computation graph -/
 def detach [TensorStruct α] (model : α) : α :=
-  map autograd.detach model
+  map Tensor.detach model
 
-/-- Set requires_grad on all tensors -/
-def requiresGrad [TensorStruct α] (model : α) (b : Bool) : α :=
-  map (fun t => autograd.set_requires_grad t b) model
+/-- Set autograd flags through the effectful parameter boundary. -/
+def requiresGrad [TensorStruct α] (model : α) (b : Bool) : IO α :=
+  mapM (fun t => Tensor.setRequiresGrad t b) model
 
-/-- Make a tensor a trainable leaf parameter (detach and set requires_grad) -/
-private def _makeLeafParam {s : Shape} (t : T s) : T s :=
-  autograd.set_requires_grad (autograd.detach t) true
+/-- Create independent trainable leaf parameters throughout a tensor tree. -/
+def makeLeafParams [TensorStruct α] (model : α) : IO α :=
+  mapM Tensor.parameter model
 
-/-- Make all tensors trainable leaf parameters -/
-def makeLeafParams [TensorStruct α] (model : α) : α :=
-  map _makeLeafParam model
+/-- Rebuild a tree with checked native leaves in traversal order. The stateful
+    traversal avoids relying on `fold` and `mapM` having matching instances. -/
+private def rawLeaves [TensorStruct α] (value : α) : Array RawTensor :=
+  ((mapM (m := StateM (Array RawTensor)) (fun tensor => do
+    modify (·.push tensor.raw)
+    pure tensor) value).run #[]).2
+
+private def withRawLeaves [TensorStruct α] (template : α) (leaves : Array RawTensor) : α :=
+  ((mapM (m := StateM Nat) (fun {σ} _ => do
+    let index ← get
+    set (index + 1)
+    pure (match leaves[index]? with
+      | none => nativeInvariantFailure "functionalGrad: missing leaf"
+      | some raw => match Tensor.ofRaw (σ := σ) raw with
+        | .ok tensor => tensor
+        | .error message => nativeInvariantFailure s!"functionalGrad: {message}"))
+    template).run 0).1
+
+/-- Differentiate an existing output with respect to every tensor leaf in one
+native engine invocation. This does not accumulate parameter gradients. Saved
+intermediates are released unless retained; omitted retention follows `createGraph`.
+Unused leaves receive zero gradients. -/
+def grad {σ : StaticSpec} [TensorStruct α]
+    (output : Tensor σ) (inputs : α) (cotangent : Tensor σ)
+    (retainGraph : Option Bool := none) (createGraph : Bool := false) : IO α := do
+  let gradients ← RawTensor.gradMany output.raw (rawLeaves inputs) cotangent.raw
+    (retainGraph.getD createGraph) createGraph
+  let (result, count) ← ((mapM (m := StateT Nat IO) (fun {τ} _ => do
+    let index ← get
+    set (index + 1)
+    match gradients[index]? with
+    | none => throw (IO.userError "TensorStruct.grad: missing gradient leaf")
+    | some raw =>
+      match Tensor.ofRaw (σ := τ) raw with
+      | .ok tensor => pure tensor
+      | .error message => throw (IO.userError s!"TensorStruct.grad: {message}")) inputs).run 0)
+  if count != gradients.size then
+    throw (IO.userError "TensorStruct.grad: unexpected gradient leaves")
+  pure result
+
+/-- Pure first derivatives of a scalar-valued function over a tensor tree.
+    Fresh differentiation variables live entirely inside the native callback;
+    only detached gradients escape. Identical input values in different leaves
+    remain independent variables. No parameter gradient buffers are mutated. -/
+def functionalGrad {device : Device} [TensorStruct α]
+    (f : α → Tensor { shape := #[], dtype := .Float32, device })
+    (inputs : α) : α :=
+  let gradients := match RawTensor.functionalGrad (rawLeaves inputs)
+      (fun leaves => (f (withRawLeaves inputs leaves)).raw) with
+    | .ok gradients => gradients
+    | .error message => panic! message
+  withRawLeaves inputs gradients
 
 /-- Apply a scalar multiplication to all tensors -/
-def scale [TensorStruct α] (model : α) (s : Float) : α :=
-  map (fun t => mul_scalar t s) model
+def scale [FloatingTensorStruct α] (model : α) (s : Float) : α :=
+  FloatingTensorStruct.map (fun t => Tensor.mulScalar t s) model
 
 /-- Element-wise addition of two structures -/
-def add [TensorStruct α] (a b : α) : α :=
-  zipWith torch.add a b
+def add [FloatingTensorStruct α] (a b : α) : α :=
+  FloatingTensorStruct.zipWith (fun lhs rhs => Tensor.add lhs rhs) a b
 
 /-- Element-wise subtraction of two structures -/
-def sub [TensorStruct α] (a b : α) : α :=
-  zipWith torch.sub a b
+def sub [FloatingTensorStruct α] (a b : α) : α :=
+  FloatingTensorStruct.zipWith (fun lhs rhs => Tensor.sub lhs rhs) a b
 
 /-- Check if all tensors in the structure satisfy a predicate -/
-def all [TensorStruct α] (p : ∀ {s}, T s → Bool) (model : α) : Bool :=
+def all [TensorStruct α] (p : ∀ {σ}, Tensor σ → Bool) (model : α) : Bool :=
   fold (fun t acc => acc && p t) true model
 
 /-- Check if any tensor in the structure satisfies a predicate -/
-def any [TensorStruct α] (p : ∀ {s}, T s → Bool) (model : α) : Bool :=
+def any [TensorStruct α] (p : ∀ {σ}, Tensor σ → Bool) (model : α) : Bool :=
   fold (fun t acc => acc || p t) false model
 
 end TensorStruct

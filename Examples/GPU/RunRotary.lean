@@ -2,13 +2,16 @@
    generate deterministic input/reference tensors, launch the kernel, compare outputs. -/
 import Tyr.Torch
 import Tyr.GPU.Kernels.Rotary
-import Examples.GPU.Parity
+import Examples.GPU.IndexedParity
+import Tyr.Typed.Neural
 import Examples.GPU.FixtureRunner
 import Examples.GPU.Benchmark
 
 namespace Examples.GPU.RunRotary
 
 open torch
+
+variable {device : Device}
 open Tyr.GPU.Kernels.Rotary
 
 def suiteName : String := "rotary"
@@ -27,47 +30,48 @@ def generateFixtures : IO Unit := do
 
   IO.FS.createDirAll fixtureSpec.dir
 
-  let device := Device.CUDA 0
-  let x ← torch.rand #[64, 64] false device
+  let device ← Device.cuda 0
+  let x ← Tensor.uniformLike (Tensor.zeros #[64, 64] false device)
 
-  let (cosCpu, sinCpu) := torch.rotary.computeFreqsPure (64 : UInt64) (64 : UInt64) 10000.0
-  let cos : T #[64, 32] := cosCpu.to device
-  let sin : T #[64, 32] := sinCpu.to device
+  let (cosCpu, sinCpu) := Tensor.rotaryFreqs (64 : UInt64) (64 : UInt64) 10000.0
+  let cos : Tensor { shape := #[64, 32], dtype := .Float32, device := device } := cosCpu.to device
+  let sin : Tensor { shape := #[64, 32], dtype := .Float32, device := device } := sinCpu.to device
 
-  let x4 : T #[1, 64, 1, 64] := torch.reshape x #[1, 64, 1, 64]
-  let expected4 := torch.rotary.applyRotaryEmb x4 cos sin
-  let expected : T #[64, 64] := torch.reshape expected4 #[64, 64]
+  let x4 : Tensor { shape := #[1, 64, 1, 64], dtype := .Float32, device := device } := Tensor.reshapeChecked x #[1, 64, 1, 64]
+  let expected4 := Tensor.applyRotary x4 cos sin
+  let expected : Tensor { shape := #[64, 64], dtype := .Float32, device := device } := Tensor.reshapeChecked expected4 #[64, 64]
 
-  torch.data.saveTensor x (fixtureFile "x").toString
-  torch.data.saveTensor sin (fixtureFile "sin").toString
-  torch.data.saveTensor cos (fixtureFile "cos").toString
-  torch.data.saveTensor expected (fixtureFile "expected").toString
+  Tensor.saveTensor x (fixtureFile "x").toString
+  Tensor.saveTensor sin (fixtureFile "sin").toString
+  Tensor.saveTensor cos (fixtureFile "cos").toString
+  Tensor.saveTensor expected (fixtureFile "expected").toString
 
-  let xMean := torch.nn.item (torch.nn.meanAll x)
-  let eMean := torch.nn.item (torch.nn.meanAll expected)
+  let xMean := Tensor.item (Tensor.meanAll x)
+  let eMean := Tensor.item (Tensor.meanAll expected)
   IO.println s!"Generated rotary fixtures in {fixtureSpec.dir} xMean={xMean} expectedMean={eMean}"
 
 def runOnce : IO Bool := do
   if !(← requireCuda suiteName) then
     return false
 
+  let device ← Device.cuda 0
   if !(← fixturesPresent fixtureSpec) then
     generateFixtures
 
-  let x ← torch.data.loadTensor #[64, 64] (fixtureFile "x").toString
-  let sin ← torch.data.loadTensor #[64, 32] (fixtureFile "sin").toString
-  let cos ← torch.data.loadTensor #[64, 32] (fixtureFile "cos").toString
-  let expected ← torch.data.loadTensor #[64, 64] (fixtureFile "expected").toString
+  let x ← Tensor.loadTensorExact { device := device, shape := #[64, 64], dtype := .Float32 } (fixtureFile "x").toString
+  let sin ← Tensor.loadTensorExact { device := device, shape := #[64, 32], dtype := .Float32 } (fixtureFile "sin").toString
+  let cos ← Tensor.loadTensorExact { device := device, shape := #[64, 32], dtype := .Float32 } (fixtureFile "cos").toString
+  let expected ← Tensor.loadTensorExact { device := device, shape := #[64, 64], dtype := .Float32 } (fixtureFile "expected").toString
 
-  let output := torch.zeros_like x
+  let output := Tensor.zerosLike x
   let stream ← torch.cuda_current_stream
 
-  rotaryFwd64x64Direct.launch x sin cos output 1 1 1 512 1 1 0 stream
+  rotaryFwd64x64Direct.launch x.raw sin.raw cos.raw output.raw 1 1 1 512 1 1 0 stream
   let _ ← torch.cuda_synchronize
 
-  let check := compareTensors "rotary.output" expected output 1e-4 1e-4
-  let outMean := torch.nn.item (torch.nn.meanAll output)
-  let expMean := torch.nn.item (torch.nn.meanAll expected)
+  let check := IndexedParity.compareTensors "rotary.output" expected output 1e-4 1e-4
+  let outMean := Tensor.item (Tensor.meanAll output)
+  let expMean := Tensor.item (Tensor.meanAll expected)
   logTensorCheck check
   IO.println s!"rotary output_mean={outMean} expected_mean={expMean}"
   pure check.ok
@@ -106,28 +110,36 @@ private def trainingMatrix : LeanBenchmark.Matrix TrainingShape := {
   ]
 }
 
+/-- Reference forward and adjoint rotations for separate query and key head counts. -/
+def referenceTraining {device : Device} {batch seqLen qHeads kvHeads : UInt64} {dtype : DType}
+    (q : Tensor { shape := #[batch, seqLen, qHeads, 64], dtype := dtype, device := device })
+    (k : Tensor { shape := #[batch, seqLen, kvHeads, 64], dtype := dtype, device := device })
+    (gradQ : Tensor { shape := #[batch, seqLen, qHeads, 64], dtype := dtype, device := device })
+    (gradK : Tensor { shape := #[batch, seqLen, kvHeads, 64], dtype := dtype, device := device })
+    (cos sin : Tensor { shape := #[seqLen, 32], dtype := .Float32, device := device }) :=
+  let negSin := Tensor.mulScalar sin (-1.0)
+  (Tensor.applyRotary q cos sin, Tensor.applyRotary k cos sin,
+    Tensor.applyRotary gradQ cos negSin, Tensor.applyRotary gradK cos negSin)
+
 private def benchmarkTrainingShape (cfg : Benchmark.Config) (caseLabel : String)
     (shape : TrainingShape) : IO (Array String × Bool) := do
   let { batch, seqLen, qHeads, kvHeads } := shape
-  let device := Device.CUDA 0
-  let qf ← torch.randn #[batch, seqLen, qHeads, 64] false device
-  let kf ← torch.randn #[batch, seqLen, kvHeads, 64] false device
-  let gradQf ← torch.randn #[batch, seqLen, qHeads, 64] false device
-  let gradKf ← torch.randn #[batch, seqLen, kvHeads, 64] false device
-  let q : T #[batch, seqLen, qHeads, 64] := torch.toBFloat16' qf
-  let k : T #[batch, seqLen, kvHeads, 64] := torch.toBFloat16' kf
-  let gradQ : T #[batch, seqLen, qHeads, 64] := torch.toBFloat16' gradQf
-  let gradK : T #[batch, seqLen, kvHeads, 64] := torch.toBFloat16' gradKf
-  let (cos, sin) := torch.rotary.computeFreqsOnDevicePure seqLen 64 10000.0 device
-  let negSin := torch.mul_scalar sin (-1.0)
-  let expectedQ := torch.rotary.applyRotaryEmb q cos sin
-  let expectedK := torch.rotary.applyRotaryEmb k cos sin
-  let expectedGradQ := torch.rotary.applyRotaryEmb gradQ cos negSin
-  let expectedGradK := torch.rotary.applyRotaryEmb gradK cos negSin
-  let qOut := torch.mul_scalar q 0.0
-  let kOut := torch.mul_scalar k 0.0
-  let gradQOut := torch.mul_scalar gradQ 0.0
-  let gradKOut := torch.mul_scalar gradK 0.0
+  let device ← Device.cuda 0
+  let qf ← Tensor.randn #[batch, seqLen, qHeads, 64] false device
+  let kf ← Tensor.randn #[batch, seqLen, kvHeads, 64] false device
+  let gradQf ← Tensor.randn #[batch, seqLen, qHeads, 64] false device
+  let gradKf ← Tensor.randn #[batch, seqLen, kvHeads, 64] false device
+  let q : Tensor { shape := #[batch, seqLen, qHeads, 64], dtype := .BFloat16, device := device } := qf.toBFloat16
+  let k : Tensor { shape := #[batch, seqLen, kvHeads, 64], dtype := .BFloat16, device := device } := kf.toBFloat16
+  let gradQ : Tensor { shape := #[batch, seqLen, qHeads, 64], dtype := .BFloat16, device := device } := gradQf.toBFloat16
+  let gradK : Tensor { shape := #[batch, seqLen, kvHeads, 64], dtype := .BFloat16, device := device } := gradKf.toBFloat16
+  let (cos, sin) := Tensor.rotaryFreqs seqLen 64 10000.0 device
+  let (expectedQ, expectedK, expectedGradQ, expectedGradK) :=
+    referenceTraining q k gradQ gradK cos sin
+  let qOut := Tensor.mulScalar q 0.0
+  let kOut := Tensor.mulScalar k 0.0
+  let gradQOut := Tensor.mulScalar gradQ 0.0
+  let gradKOut := Tensor.mulScalar gradK 0.0
   let qRows := batch * seqLen * qHeads
   let kRows := batch * seqLen * kvHeads
   let totalPairs := (if qRows > kRows then qRows else kRows) * 32
@@ -136,35 +148,35 @@ private def benchmarkTrainingShape (cfg : Benchmark.Config) (caseLabel : String)
   let useTalkerSpecialization := qHeads == 16 && kvHeads == 2 && seqLen == 768
   let launchForward : IO Unit :=
     if useTalkerSpecialization then
-      rotaryFwdQwen3TtsTalkerD64Bf16Direct.launch q k sin cos qOut kOut
+      rotaryFwdQwen3TtsTalkerD64Bf16Direct.launch q.raw k.raw sin.raw cos.raw qOut.raw kOut.raw
         qRows kRows gridX 1 1 256 1 1 0 stream
     else
-      rotaryFwdQKD64Bf16Direct.launch q k sin cos qOut kOut
+      rotaryFwdQKD64Bf16Direct.launch q.raw k.raw sin.raw cos.raw qOut.raw kOut.raw
         qRows kRows qHeads kvHeads seqLen gridX 1 1 256 1 1 0 stream
   let launchBackward : IO Unit :=
     if useTalkerSpecialization then
-      rotaryBwdQwen3TtsTalkerD64Bf16Direct.launch gradQ gradK sin cos
-        gradQOut gradKOut qRows kRows gridX 1 1 256 1 1 0 stream
+      rotaryBwdQwen3TtsTalkerD64Bf16Direct.launch gradQ.raw gradK.raw sin.raw cos.raw
+        gradQOut.raw gradKOut.raw qRows kRows gridX 1 1 256 1 1 0 stream
     else
-      rotaryBwdQKD64Bf16Direct.launch gradQ gradK sin cos gradQOut gradKOut
+      rotaryBwdQKD64Bf16Direct.launch gradQ.raw gradK.raw sin.raw cos.raw gradQOut.raw gradKOut.raw
         qRows kRows qHeads kvHeads seqLen gridX 1 1 256 1 1 0 stream
   launchForward
   launchBackward
   torch.cuda_synchronize
-  let qCheck := compareTensors s!"rotary.{caseLabel}.q" expectedQ qOut 3e-2 3e-2
-  let kCheck := compareTensors s!"rotary.{caseLabel}.k" expectedK kOut 3e-2 3e-2
-  let gradQCheck := compareTensors s!"rotary.{caseLabel}.dq" expectedGradQ gradQOut 3e-2 3e-2
-  let gradKCheck := compareTensors s!"rotary.{caseLabel}.dk" expectedGradK gradKOut 3e-2 3e-2
+  let qCheck := IndexedParity.compareTensors s!"rotary.{caseLabel}.q" expectedQ qOut 3e-2 3e-2
+  let kCheck := IndexedParity.compareTensors s!"rotary.{caseLabel}.k" expectedK kOut 3e-2 3e-2
+  let gradQCheck := IndexedParity.compareTensors s!"rotary.{caseLabel}.dq" expectedGradQ gradQOut 3e-2 3e-2
+  let gradKCheck := IndexedParity.compareTensors s!"rotary.{caseLabel}.dk" expectedGradK gradKOut 3e-2 3e-2
   for check in #[qCheck, kCheck, gradQCheck, gradKCheck] do logTensorCheck check
   let fwdSamples ← Benchmark.timeCudaEvents cfg stream launchForward
   let bwdSamples ← Benchmark.timeCudaEvents cfg stream launchBackward
   let trainingSamples ← Benchmark.timeCudaEvents cfg stream do
     launchForward
     launchBackward
-  let postQ := compareTensors s!"rotary.{caseLabel}.q.post" expectedQ qOut 3e-2 3e-2
-  let postK := compareTensors s!"rotary.{caseLabel}.k.post" expectedK kOut 3e-2 3e-2
-  let postGradQ := compareTensors s!"rotary.{caseLabel}.dq.post" expectedGradQ gradQOut 3e-2 3e-2
-  let postGradK := compareTensors s!"rotary.{caseLabel}.dk.post" expectedGradK gradKOut 3e-2 3e-2
+  let postQ := IndexedParity.compareTensors s!"rotary.{caseLabel}.q.post" expectedQ qOut 3e-2 3e-2
+  let postK := IndexedParity.compareTensors s!"rotary.{caseLabel}.k.post" expectedK kOut 3e-2 3e-2
+  let postGradQ := IndexedParity.compareTensors s!"rotary.{caseLabel}.dq.post" expectedGradQ gradQOut 3e-2 3e-2
+  let postGradK := IndexedParity.compareTensors s!"rotary.{caseLabel}.dk.post" expectedGradK gradKOut 3e-2 3e-2
   for check in #[postQ, postK, postGradQ, postGradK] do logTensorCheck check
   let correct := qCheck.ok && kCheck.ok && gradQCheck.ok && gradKCheck.ok &&
     postQ.ok && postK.ok && postGradQ.ok && postGradK.ok

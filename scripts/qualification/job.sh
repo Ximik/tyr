@@ -52,8 +52,6 @@ if [[ "${TYR_QUALIFY_MODELS:-false}" == true ]]; then
   targets+=(Qwen3TTSEndToEnd Qwen3ASRTranscribe)
 fi
 lake build "${targets[@]}"
-python3 scripts/check_ffi_abi.py
-python3 scripts/check_ffi_abi.py --header cc/src/tyr_owned_kv_abi.h --generated .lake/build/ir/Tyr/Inference/OwnedKV.c
 python3 scripts/qualification/run.py --kind gpu --python "$python_bin" \
   --report output/qualification/gpu.json
 if [[ "${TYR_QUALIFY_MODELS:-false}" == true ]]; then

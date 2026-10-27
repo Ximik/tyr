@@ -3,39 +3,51 @@
 
   SwiGLU MLP for Qwen3.
   SwiGLU: down(silu(gate(x)) * up(x))
+
+  Shape-indexed activations and weights share a dtype parameter. Normalization
+  accumulates in Float32 and restores the input dtype for BF16 checkpoints.
 -/
-import Tyr.Torch
+import Tyr.Typed.Neural
 import Tyr.TensorStruct
 import Tyr.Module.Core
 import Tyr.Module.Derive
 
 namespace torch.qwen
 
+variable {device : Device}
 /-- Qwen MLP with SwiGLU activation.
     SwiGLU is more expressive than standard GELU MLP. -/
-structure QwenMLP (hidden_size intermediate_size : UInt64) where
+structure QwenMLP (hidden_size intermediate_size : UInt64) (dtype : DType := .Float32) where
   /-- Gate projection: [intermediate_size, hidden_size] -/
-  gate_proj : T #[intermediate_size, hidden_size]
+  gate_proj : Tensor { device := device, shape := #[intermediate_size, hidden_size], dtype := dtype }
   /-- Up projection: [intermediate_size, hidden_size] -/
-  up_proj : T #[intermediate_size, hidden_size]
+  up_proj : Tensor { device := device, shape := #[intermediate_size, hidden_size], dtype := dtype }
   /-- Down projection: [hidden_size, intermediate_size] -/
-  down_proj : T #[hidden_size, intermediate_size]
+  down_proj : Tensor { device := device, shape := #[hidden_size, intermediate_size], dtype := dtype }
   deriving TensorStruct
 
 namespace QwenMLP
 
+variable {dtype : DType}
+variable [DType.RealFloating dtype]
+
 /-- Initialize MLP layers with random weights -/
-def init (hidden_size intermediate_size : UInt64) : IO (QwenMLP hidden_size intermediate_size) := do
+def init (hidden_size intermediate_size : UInt64) (dtype : DType := .Float32) (device : Device := .CPU) : IO (QwenMLP (device := device) hidden_size intermediate_size dtype) := do
+  let floating ← IO.ofExcept (DType.realFloating? dtype)
+  let _ := floating.down
   let std := Float.sqrt (2.0 / hidden_size.toFloat)
 
-  let gate ← torch.randn #[intermediate_size, hidden_size]
-  let up ← torch.randn #[intermediate_size, hidden_size]
-  let down ← torch.randn #[hidden_size, intermediate_size]
+  let gate ← Tensor.randn (device := device) #[intermediate_size, hidden_size]
+  let gate := gate.castDType dtype
+  let up ← Tensor.randn (device := device) #[intermediate_size, hidden_size]
+  let up := up.castDType dtype
+  let down ← Tensor.randn (device := device) #[hidden_size, intermediate_size]
+  let down := down.castDType dtype
 
   pure {
-    gate_proj := autograd.set_requires_grad (mul_scalar gate std) true
-    up_proj := autograd.set_requires_grad (mul_scalar up std) true
-    down_proj := autograd.set_requires_grad (mul_scalar down std) true
+    gate_proj := (← Tensor.parameter (Tensor.mulScalar gate std))
+    up_proj := (← Tensor.parameter (Tensor.mulScalar up std))
+    down_proj := (← Tensor.parameter (Tensor.mulScalar down std))
   }
 
 /-- Forward pass for MLP.
@@ -44,19 +56,19 @@ def init (hidden_size intermediate_size : UInt64) : IO (QwenMLP hidden_size inte
 
     SwiGLU: down(silu(gate(x)) * up(x)) -/
 def forward {batch seq hidden_size intermediate_size : UInt64}
-    (mlp : QwenMLP hidden_size intermediate_size)
-    (x : T #[batch, seq, hidden_size])
-    : T #[batch, seq, hidden_size] :=
+    (mlp : QwenMLP (device := device) hidden_size intermediate_size dtype)
+    (x : Tensor { device := device, shape := #[batch, seq, hidden_size], dtype := dtype })
+    : Tensor { device := device, shape := #[batch, seq, hidden_size], dtype := dtype } :=
   -- Compute gate and up projections
-  let gate := linear3d x mlp.gate_proj  -- [batch, seq, intermediate_size]
-  let up := linear3d x mlp.up_proj      -- [batch, seq, intermediate_size]
+  let gate := Tensor.linear3d x mlp.gate_proj  -- [batch, seq, intermediate_size]
+  let up := Tensor.linear3d x mlp.up_proj      -- [batch, seq, intermediate_size]
 
   -- SwiGLU: silu(gate) * up
-  let gate_silu := nn.silu gate
-  let hidden := gate_silu * up
+  let gate_silu := Tensor.silu gate
+  let hidden := Tensor.mul gate_silu up
 
   -- Down projection
-  linear3d hidden mlp.down_proj
+  Tensor.linear3d hidden mlp.down_proj
 
 end QwenMLP
 

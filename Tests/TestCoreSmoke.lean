@@ -78,14 +78,14 @@ def testLogHandlersCombineReachesBothSinks : IO Unit := do
 /-! ## TensorStruct smoke tests -/
 
 structure SmokeParams where
-  weight : T #[2, 3]
-  bias : T #[2]
+  weight : Tensor { shape := #[2, 3], dtype := .Float32, device := .CPU }
+  bias : Tensor { shape := #[2], dtype := .Float32, device := .CPU }
   tag : Static String
   deriving TensorStruct
 
 private def smokeParams : SmokeParams :=
-  { weight := zeros #[2, 3]
-    bias := zeros #[2]
+  { weight := Tensor.zeros #[2, 3]
+    bias := Tensor.zeros #[2]
     tag := "smoke" }
 
 @[test]
@@ -95,8 +95,8 @@ def testTensorStructCount : IO Unit := do
 
 @[test]
 def testTensorStructMapReachesEveryLeaf : IO Unit := do
-  let shifted := TensorStruct.map (fun t => add_scalar t 1.0) smokeParams
-  let total := TensorStruct.fold (fun {_s} t acc => acc + nn.item (nn.sumAll t)) 0.0 shifted
+  let shifted := FloatingTensorStruct.map (fun t => Tensor.addScalar t 1.0) smokeParams
+  let total := TensorStruct.fold (fun {_s} t acc => acc + Tensor.item (Tensor.sumAll t)) 0.0 shifted
   LeanTest.assertEqual total 8.0
     s!"all-ones leaves (2x3 + 2 elements) should sum to 8, got {total}"
   LeanTest.assertEqual shifted.tag.val "smoke"
@@ -104,7 +104,7 @@ def testTensorStructMapReachesEveryLeaf : IO Unit := do
 
 @[test]
 def testTensorStructFoldCountsScalars : IO Unit := do
-  let numScalars := TensorStruct.fold (fun {s} _t acc => acc + s.foldl (· * ·) 1) 0 smokeParams
+  let numScalars := TensorStruct.fold (fun {s} _t acc => acc + s.shape.foldl (· * ·) 1) 0 smokeParams
   LeanTest.assertEqual numScalars 8 "2x3 weight plus 2 bias entries give 8 scalars"
 
 end Tests.CoreSmoke

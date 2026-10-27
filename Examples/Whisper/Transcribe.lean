@@ -131,7 +131,7 @@ private partial def parseArgsLoop (xs : List String) (acc : Args) : IO Args := d
       IO.println "  --chunk-overlap-sec <x>  Overlap between adjacent audio chunks in seconds (default: 2.0)"
       IO.println "  --no-timestamps          Use <|notimestamps|> decoding prompt token (default: true)"
       IO.println "  --timestamps             Enable timestamp-token decoding (experimental)"
-      throw <| IO.userError ""
+      pure acc
   | x :: _ =>
       throw <| IO.userError s!"Unknown argument: {x}"
 
@@ -140,6 +140,7 @@ private def parseArgs (xs : List String) : IO Args :=
 
 def runMain (argv : List String) : IO UInt32 := do
   let args ← parseArgs argv
+  if argv.contains "--help" then return 0
   let bundle ← loadFromPretrainedDir args.modelDir
   let out ←
     transcribeWav

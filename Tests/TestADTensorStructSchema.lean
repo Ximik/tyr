@@ -1,4 +1,5 @@
-import Tyr
+import Tyr.Module.Derive
+import Tyr.Typed.Ops
 import LeanTest
 
 namespace Tests.ADTensorStructSchema
@@ -7,38 +8,38 @@ open torch
 open LeanTest
 
 structure Inner where
-  bias : T #[4]
+  bias : Tensor { shape := #[4], dtype := .Float32, device := .CPU }
   tag : Static String
-  cache : Frozen #[4]
+  cache : Frozen { shape := #[4], dtype := .Float32, device := .CPU }
   deriving TensorStruct, ToTensorStructSchema
 
 structure Outer where
-  weight : T #[2, 4]
+  weight : Tensor { shape := #[2, 4], dtype := .Float32, device := .CPU }
   inner : Inner
-  gates : torch.Vector 2 (Frozen #[1])
-  optScale : Option (T #[3])
+  gates : torch.Vector 2 (Frozen { shape := #[1], dtype := .Float32, device := .CPU })
+  optScale : Option (Tensor { shape := #[3], dtype := .Float32, device := .CPU })
   flag : Bool
   deriving TensorStruct, ToTensorStructSchema
 
 structure IndexedContainer where
-  blocks : Array (T #[2])
+  blocks : Array (Tensor { shape := #[2], dtype := .Float32, device := .CPU })
   labels : List (Static String)
-  maybeFrozen : Option (Frozen #[2])
+  maybeFrozen : Option (Frozen { shape := #[2], dtype := .Float32, device := .CPU })
   deriving TensorStruct, ToTensorStructSchema
 
 private def sampleOuter : Outer :=
-  { weight := zeros #[2, 4]
+  { weight := Tensor.zeros #[2, 4]
     inner := {
-      bias := zeros #[4]
+      bias := Tensor.zeros #[4]
       tag := "inner-tag"
-      cache := (zeros #[4] : Frozen #[4])
+      cache := (Tensor.zeros #[4] : Frozen { shape := #[4], dtype := .Float32, device := .CPU })
     }
-    gates := torch.Vector.replicate 2 ((zeros #[1]) : Frozen #[1])
-    optScale := some (zeros #[3])
+    gates := torch.Vector.replicate 2 ((Tensor.zeros #[1]) : Frozen { shape := #[1], dtype := .Float32, device := .CPU })
+    optScale := some (Tensor.zeros #[3])
     flag := true }
 
 private def sampleIndexed : IndexedContainer :=
-  { blocks := #[zeros #[2], zeros #[2]]
+  { blocks := #[Tensor.zeros #[2], Tensor.zeros #[2]]
     labels := ["a", "b"]
     maybeFrozen := none }
 

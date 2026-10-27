@@ -11,69 +11,15 @@
   - Supports approximate resume via state dict
 -/
 import Tyr.Torch
+import Tyr.Typed
 import Tyr.Distributed
 import Tyr.Log
+import Tyr.RawTensor.Parquet
 
 namespace torch.Data.Pretraining
 
 open torch
 open torch.Log
-
-/-! ## Parquet FFI Declarations
-
-FFI declarations for parquet file operations. These are implemented in
-`cc/src/tyr_parquet.cpp` using Apache Arrow. When Arrow/Parquet development
-headers are unavailable at build time, the C++ side falls back to stubs that
-fail with an IO error ("Parquet support unavailable").
--/
-
-/-- Parquet file metadata -/
-structure ParquetMetadata where
-  /-- Number of row groups in the file -/
-  numRowGroups : Nat
-  /-- Total number of rows -/
-  numRows : Nat
-  /-- Column names -/
-  columns : Array String
-  deriving Repr, Inhabited
-
-/-- Row group data -/
-structure RowGroupData where
-  /-- Documents in this row group (text column) -/
-  documents : Array String
-  /-- Number of documents -/
-  numDocs : Nat
-  deriving Repr
-
-/-- List all parquet files in a directory.
-    Returns sorted list of file paths. -/
-@[extern "lean_parquet_list_files"]
-opaque listParquetFiles (dirPath : @& String) : IO (Array String)
-
-/-- Get metadata for a parquet file -/
-@[extern "lean_parquet_get_metadata"]
-opaque getParquetMetadata (filePath : @& String) : IO ParquetMetadata
-
-/-- Read a specific row group from a parquet file.
-    Returns the text column as an array of strings. -/
-@[extern "lean_parquet_read_row_group"]
-opaque readRowGroup (filePath : @& String) (rowGroupIdx : UInt64) (textColumn : @& String := "text")
-    : IO RowGroupData
-
-/-- Check if a file exists -/
-@[extern "lean_parquet_file_exists"]
-opaque parquetFileExists (filePath : @& String) : IO Bool
-
-/-- Read all rows from a parquet file as JSON strings.
-    Returns an array where each element is a JSON object string for one row.
-    This reads all columns and handles various Arrow types (string, int, float, bool, list, struct). -/
-@[extern "lean_parquet_read_as_json"]
-opaque readParquetAsJson (filePath : @& String) : IO (Array String)
-
-/-- Read a specific row group from a parquet file as JSON strings.
-    More memory-efficient for large files. -/
-@[extern "lean_parquet_read_row_group_as_json"]
-opaque readRowGroupAsJson (filePath : @& String) (rowGroupIdx : UInt64) : IO (Array String)
 
 /-! ## Configuration -/
 
@@ -295,10 +241,17 @@ def createInputTarget (tokens : Array UInt64) : (Array UInt64 × Array UInt64) :
   let target := tokens.extract 1 tokens.size
   (input, target)
 
+/-- Build an Int64 token tensor from host data over the raw FFI boundary.
+    `reshapeChecked` validates the result metadata (shape and Int64 dtype). -/
+private def int64TensorFromArray (arr : Array Int64) : Tensor { shape := #[arr.size.toUInt64], dtype := .Int64, device := .CPU } :=
+  Tensor.fromInt64Array arr
+
 /-- Get next batch of (input, target) pairs.
-    Returns tensors of shape [batchSize, seqLen]. -/
+    Returns Int64 tensors of shape [batchSize, seqLen]. -/
 def PretrainingLoader.nextBatch (loader : PretrainingLoader)
-    : IO (Option (T #[] × T #[]) × PretrainingLoader) := do
+    : IO (Option (Tensor { shape := #[loader.config.batchSize, loader.config.seqLen], dtype := .Int64, device := .CPU } ×
+                  Tensor { shape := #[loader.config.batchSize, loader.config.seqLen], dtype := .Int64, device := .CPU }) ×
+          PretrainingLoader) := do
   let tokensNeeded := (loader.config.batchSize * loader.config.seqLen + 1).toNat
 
   -- Check if we have enough tokens
@@ -307,18 +260,17 @@ def PretrainingLoader.nextBatch (loader : PretrainingLoader)
     let (inputs, targets) := createInputTarget batchTokens
 
     -- Convert to tensors
-    let inputTensor := data.fromInt64Array (inputs.map (·.toInt64))
-    let inputTensor := reshape inputTensor #[loader.config.batchSize, loader.config.seqLen]
-
-    let targetTensor := data.fromInt64Array (targets.map (·.toInt64))
-    let targetTensor := reshape targetTensor #[loader.config.batchSize, loader.config.seqLen]
+    let inputTensor := (int64TensorFromArray (inputs.map (·.toInt64))).reshapeChecked
+      #[loader.config.batchSize, loader.config.seqLen]
+    let targetTensor := (int64TensorFromArray (targets.map (·.toInt64))).reshapeChecked
+      #[loader.config.batchSize, loader.config.seqLen]
 
     let newLoader := { loader with
       buffer := newBuffer.compact
       state := { loader.state with totalTokens := loader.state.totalTokens + tokensNeeded.toUInt64 }
     }
 
-    return (some (reshape inputTensor #[], reshape targetTensor #[]), newLoader)
+    return (some (inputTensor, targetTensor), newLoader)
   else
     -- Need more tokens - in real implementation would load from parquet
     -- For now, return none indicating end of data
@@ -340,19 +292,21 @@ def PretrainingLoader.resume (loader : PretrainingLoader) (state : LoaderState)
 
 /-- Load validation data (typically last shard of training data) -/
 structure ValidationLoader where
-  /-- All validation tokens -/
-  tokens : T #[]
+  /-- All validation tokens (runtime length) -/
+  tokens : Σ n : UInt64, Tensor { shape := #[n], dtype := .Int64, device := .CPU }
   /-- Current position -/
   position : Nat
   /-- Sequence length -/
   seqLen : UInt64
   deriving Repr
 
-def ValidationLoader.init (tokens : T #[]) (seqLen : UInt64) : ValidationLoader :=
+def ValidationLoader.init (tokens : Σ n : UInt64, Tensor { shape := #[n], dtype := .Int64, device := .CPU }) (seqLen : UInt64)
+    : ValidationLoader :=
   { tokens, position := 0, seqLen }
 
-def ValidationLoader.nextBatch (loader : ValidationLoader) (_batchSize : UInt64)
-    : IO (Option (T #[] × T #[]) × ValidationLoader) := do
+def ValidationLoader.nextBatch (loader : ValidationLoader) (batchSize : UInt64)
+    : IO (Option (Tensor { shape := #[batchSize, loader.seqLen], dtype := .Int64, device := .CPU } ×
+                  Tensor { shape := #[batchSize, loader.seqLen], dtype := .Int64, device := .CPU }) × ValidationLoader) := do
   -- Implementation would slice tokens and create batches
   -- Placeholder for now
   return (none, loader)
@@ -490,13 +444,16 @@ def fillBuffer (state : StreamingLoaderState) (config : StreamingLoaderConfig) (
   return st
 
 /-- Get next batch from the streaming loader.
-    Returns (input, target) tensors of shape [batchSize, seqLen].
+    Returns (input, target) Int64 tensors of shape
+    `[batchTokens / seqLen, seqLen]`.
 
     Following nanochat's pattern:
     - input = tokens[:-1]
     - target = tokens[1:] -/
 def StreamingLoaderState.nextBatch (state : StreamingLoaderState) (config : StreamingLoaderConfig)
-    : IO (Option (T #[] × T #[]) × StreamingLoaderState) := do
+    : IO (Option (Tensor { shape := #[config.batchTokens / config.seqLen, config.seqLen], dtype := .Int64, device := .CPU } ×
+                  Tensor { shape := #[config.batchTokens / config.seqLen, config.seqLen], dtype := .Int64, device := .CPU }) ×
+          StreamingLoaderState) := do
   let batchSize := config.batchTokens / config.seqLen
   let tokensNeeded := (batchSize * config.seqLen + 1).toNat
 
@@ -512,11 +469,10 @@ def StreamingLoaderState.nextBatch (state : StreamingLoaderState) (config : Stre
   let (inputs, targets) := createInputTarget batchTokens
 
   -- Convert to tensors
-  let inputTensor := data.fromInt64Array (inputs.map (·.toInt64))
-  let inputTensor := reshape inputTensor #[batchSize, config.seqLen]
-
-  let targetTensor := data.fromInt64Array (targets.map (·.toInt64))
-  let targetTensor := reshape targetTensor #[batchSize, config.seqLen]
+  let inputTensor := (int64TensorFromArray (inputs.map (·.toInt64))).reshapeChecked
+    #[batchSize, config.seqLen]
+  let targetTensor := (int64TensorFromArray (targets.map (·.toInt64))).reshapeChecked
+    #[batchSize, config.seqLen]
 
   let newState := { st with
     tokenBuffer := newBuffer.compact
@@ -530,7 +486,7 @@ def StreamingLoaderState.nextBatch (state : StreamingLoaderState) (config : Stre
     }
   }
 
-  return (some (reshape inputTensor #[], reshape targetTensor #[]), newState)
+  return (some (inputTensor, targetTensor), newState)
 
 /-- Get checkpoint state for saving -/
 def StreamingLoaderState.getCheckpoint (state : StreamingLoaderState) : LoaderState :=

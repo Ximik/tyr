@@ -41,6 +41,8 @@ end torch.gemma4.hub
 
 namespace torch.gemma4
 
+variable {device : Device}
+
 namespace Gemma4ForCausalLM
 
 /-- Load a text Gemma 4 checkpoint from local dir or HF repo id. -/
@@ -49,7 +51,8 @@ def loadFromPretrained
     (defaults : Config := Config.gemma4_E4B)
     (revision : String := "main")
     (cacheDir : String := Hub.defaultCacheDir)
-    : IO (Sigma (fun cfg => Gemma4ForCausalLM cfg)) := do
+    (device : Device := .CPU)
+    : IO (Sigma (fun cfg => Σ dtype : RealFloatingDType, Gemma4ForCausalLM (device := device) cfg dtype.val)) := do
   Hub.loadModelFromPretrained
     source
     revision
@@ -57,8 +60,8 @@ def loadFromPretrained
     hub.tokenizerFiles
     (fun modelDir cfg => Config.loadFromPretrainedDir modelDir cfg)
     defaults
-    (fun modelDir cfg => Gemma4ForCausalLM.loadSharded modelDir cfg)
-    (fun path cfg => Gemma4ForCausalLM.load path cfg)
+    (fun modelDir cfg => Gemma4ForCausalLM.loadSharded (device := device) modelDir cfg)
+    (fun path cfg => Gemma4ForCausalLM.load (device := device) path cfg)
 
 end Gemma4ForCausalLM
 
