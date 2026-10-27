@@ -42,11 +42,11 @@ example : torch.DiffEq.DiffEqSpace (Parameters .Float32 (device := .CPU)) := inf
 -- A structural traversal is insufficient to justify floating arithmetic.
 example : True := by
   fail_if_success
-    have _ := inferInstanceAs (FloatingTensorStruct (Parameters .Int64 (device := .CPU)))
+    have _ : FloatingTensorStruct (Parameters .Int64 (device := .CPU)) := inferInstance
   fail_if_success
-    have _ := inferInstanceAs (FloatingTensorStruct MixedParameters)
+    have _ : FloatingTensorStruct MixedParameters := inferInstance
   fail_if_success
-    have _ := inferInstanceAs (FloatingTensorStruct (SomeDTypeTensor #[2] .CPU))
+    have _ : FloatingTensorStruct (SomeDTypeTensor #[2] .CPU) := inferInstance
   fail_if_success
     have _ := fun (parameters : Parameters .Int64 (device := .CPU)) =>
       TensorStruct.scale parameters 0.5
@@ -55,7 +55,7 @@ example : True := by
   fail_if_success
     have _ := Optim.adamw (α := Parameters .Int64 (device := .CPU))
   fail_if_success
-    have _ := inferInstanceAs (torch.DiffEq.DiffEqSpace (Parameters .Int64 (device := .CPU)))
+    have _ : torch.DiffEq.DiffEqSpace (Parameters .Int64 (device := .CPU)) := inferInstance
   trivial
 
 example {dtype : DType} {device : Device} [DType.RealFloating dtype] :

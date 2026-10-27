@@ -273,6 +273,10 @@ lean_exe RunDistributedValues where
 lean_exe mctx_bench where
   root := `benchmarks.Mctx
 
+/-- Dopri5 per-step cost on a tensor state versus a `Float` state. -/
+lean_exe diffeq_glue_bench where
+  root := `benchmarks.DiffEqGlue
+
 /-- Generate CUDA translation units from registered @[gpu_kernel] declarations.
     Imports only `TyrCodegen`, so it does not link `libTyrC`. -/
 lean_exe GenerateGpuKernels where

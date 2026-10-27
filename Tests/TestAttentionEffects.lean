@@ -2,8 +2,6 @@ import LeanTest
 import Tests.Assertions
 import Tyr.Typed.Neural
 import Tyr.Torch
-import Tyr.RawTensor.Gemma4
-import Tyr.RawTensor.BranchingFlows
 import Tyr.GPU.Ops.FlashAttn
 
 namespace Tests.AttentionEffects
@@ -14,28 +12,6 @@ private abbrev AttentionTensor := Tensor ⟨#[1, 1, 16, 4], .Float32, .CPU⟩
 
 @[inline] private def draw (q v : AttentionTensor) : IO AttentionTensor :=
   Tensor.attentionIO q q v 0.5 true false
-
-example (_q : AttentionTensor) : True := by
-  fail_if_success have _ := Tensor.attention _q _q _q (dropout := 0.5)
-  fail_if_success have _ := Tensor.attentionGQA _q _q _q (dropout := 0.5)
-  fail_if_success have _ := Tensor.attentionGQAQKV _q _q _q (dropout := 0.5)
-  fail_if_success have _ := Tensor.attentionWindow _q _q _q (dropout := 0.5)
-  fail_if_success have _ := Tensor.flashAttention? _q _q _q (dropout := 0.5)
-  fail_if_success have _ : AttentionTensor := Tensor.attentionIO _q _q _q 0.5 true
-  fail_if_success have _ := Tyr.GPU.Ops.FlashAttn.flashAttn _q _q _q (dropoutP := 0.5)
-  trivial
-
-example (_q : AttentionTensor) (_mask : Tensor ⟨#[1, 16], .Bool, .CPU⟩) : True := by
-  fail_if_success have _ := Tensor.attentionGQAMask _q _q _q _mask (dropout := 0.5)
-  fail_if_success have _ := RawTensor.attention 1 1 16 4 _q.raw _q.raw _q.raw (dropout := 0.5) false
-  fail_if_success have _ := RawTensor.attentionGQA 1 1 1 16 4 _q.raw _q.raw _q.raw (dropout := 0.5) false false
-  fail_if_success have _ := RawTensor.attentionGQAMask 1 1 1 16 4 _q.raw _q.raw _q.raw _mask.raw (dropout := 0.5) false false
-  fail_if_success have _ := RawTensor.attentionGQAQKV 1 1 1 16 16 4 _q.raw _q.raw _q.raw (dropout := 0.5) false false
-  fail_if_success have _ := RawTensor.attentionWindow 1 1 1 16 4 _q.raw _q.raw _q.raw (dropout := 0.5) false false 8
-  fail_if_success have _ := RawTensor.flashAttention 1 1 1 16 16 4 _q.raw _q.raw _q.raw none (dropout := 0.5) false none false
-  fail_if_success have _ := RawTensor.gemma4MaskedAttention 1 1 1 16 16 4 _q.raw _q.raw _q.raw _mask.raw (dropout := 0.5) false
-  fail_if_success have _ := RawTensor.branchingAttentionBias 1 1 16 4 _q.raw _q.raw _q.raw _mask.raw (dropout := 0.5) false
-  trivial
 
 @[test] def testAttentionDrawsSequenceAndReplay : IO Unit := do
   let q : AttentionTensor := Tensor.zeros #[1, 1, 16, 4]

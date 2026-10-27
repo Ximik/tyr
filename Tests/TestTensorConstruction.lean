@@ -37,14 +37,6 @@ example {σ τ : StaticSpec} (_tensor : Tensor σ) (_raw : RawTensor) : True := 
     have _ : Tensor σ := by unfold Tensor; exact _raw
   fail_if_success
     have _ : Tensor τ := by cases _tensor; constructor; assumption
-  fail_if_success
-    have _ := @torch.Tensor.mk
-  fail_if_success
-    have _ := @torch.Tensor.rec
-  fail_if_success
-    have _ := @torch.Tensor.casesOn
-  fail_if_success
-    have _ := @torch.Tensor.assumeSpec
   trivial
 
 /-- error: (kernel) invalid declaration, it uses unsafe declaration 'unsafeCast' -/

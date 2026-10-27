@@ -82,7 +82,7 @@ example (input : Metadata Nat) : IO (Metadata Nat) :=
 
 example : True := by
   fail_if_success
-    have _ := inferInstanceAs (TensorTreeCast (Metadata Nat) (Metadata String))
+    have _ : TensorTreeCast (Metadata Nat) (Metadata String) := inferInstance
   trivial
 
 structure DependentParameters (size : Nat) (selected : Fin size) (dtype : DType) where

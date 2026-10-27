@@ -221,13 +221,6 @@ def testMctxAlphaZeroPolicyPersistentSubtree : IO Unit := do
   LeanTest.assertTrue (approx (out2.searchTree.rawValues.getD ROOT_INDEX 0.0) root2.value 1e-6)
     "Continuing search should refresh root raw value from the new root output"
 
-@[test]
-def testMctxStochasticMuZeroPolicyPlaceholder : IO Unit := do
-  -- Upstream mctx has stochastic_muzero_policy tests. The current Lean port
-  -- does not expose stochastic MuZero yet; this placeholder keeps parity
-  -- tracking explicit in the test suite.
-  LeanTest.assertTrue true "stochastic_muzero_policy tests pending implementation"
-
 /-! Exploration integration: seed replay, legal support, and policy wiring. -/
 
 private def explorationRoot : RootFnOutput Unit := {

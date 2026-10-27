@@ -112,16 +112,6 @@ def testLinearize : IO Unit := do
     LeanTest.fail "Expected linearize to produce a function declaration"
 
 @[test]
-def testAutodiffAttributeCompiles : IO Unit := do
-  -- Compilation validates that @[autodiff] ran after IR generation.
-  return
-
-@[test]
-def testAutodiffFloatAttributeCompiles : IO Unit := do
-  -- Compilation validates float autodiff companion generation.
-  return
-
-@[test]
 def testDeriveAndRegisterADRulesCore : IO Unit := do
   let ok ← runCoreM (do
     registerJVPRule `test.foo fun args tans _ => do
@@ -448,22 +438,6 @@ def testMixedStaticVJP : IO Unit := do
   let (dx, dy) := weightedAdd_bwd 2.0 3 4.0 1.0
   LeanTest.assertTrue (dx == 1.0) s!"dx should be 1, got {dx}"
   LeanTest.assertTrue (dy == 3.0) s!"dy should be 3, got {dy}"
-
-@[test]
-def testStaticAttributeCompiles : IO Unit := do
-  -- This test verifies that the static := [...] attribute syntax compiles
-  -- The main check is that the file compiles with the static attribute syntax
-  return
-
-@[test]
-def testAutodiffStaticAttributeCompiles : IO Unit := do
-  -- Compilation validates that @[autodiff, static := [...]] ran successfully.
-  return
-
-@[test]
-def testAutodiffFloatStaticAttributeCompiles : IO Unit := do
-  -- Compilation validates float autodiff with static parameters.
-  return
 
 @[test]
 def testDeriveAndRegisterADRulesCoreStatic : IO Unit := do
