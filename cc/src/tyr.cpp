@@ -4139,11 +4139,11 @@ lean_object* lean_torch_svdvals_checked(b_lean_obj_arg t) {
   return tyr::checkedCall("svdvals", [&] { return lean_torch_svdvals(t); });
 }
 
-lean_object* lean_torch_spectral_norm_checked(uint64_t m, uint64_t n, b_lean_obj_arg t) {
+lean_object* lean_torch_spectral_norm_checked(b_lean_obj_arg t) {
   return tyr::checkedCall("spectralNorm", [&] { return lean_box_float(lean_torch_spectral_norm(t)); });
 }
 
-lean_object* lean_torch_nuclear_norm_checked(uint64_t m, uint64_t n, b_lean_obj_arg t) {
+lean_object* lean_torch_nuclear_norm_checked(b_lean_obj_arg t) {
   return tyr::checkedCall("nuclearNorm", [&] { return lean_box_float(lean_torch_nuclear_norm(t)); });
 }
 
@@ -4163,15 +4163,15 @@ lean_object* lean_torch_div_scalar_checked(b_lean_obj_arg t, double value) {
   return tyr::checkedCall("divScalar", [&] { return lean_torch_div_scalar(t, value); });
 }
 
-lean_object* lean_torch_l2_norm_checked(uint64_t n, b_lean_obj_arg t) {
+lean_object* lean_torch_l2_norm_checked(b_lean_obj_arg t) {
   return tyr::checkedCall("l2Norm", [&] { return lean_box_float(lean_torch_l2_norm(t)); });
 }
 
-lean_object* lean_torch_frobenius_norm_checked(uint64_t m, uint64_t n, b_lean_obj_arg t) {
+lean_object* lean_torch_frobenius_norm_checked(b_lean_obj_arg t) {
   return tyr::checkedCall("frobeniusNorm", [&] { return lean_box_float(lean_torch_frobenius_norm(t)); });
 }
 
-lean_object* lean_torch_max_row_norm_checked(uint64_t m, uint64_t n, b_lean_obj_arg t) {
+lean_object* lean_torch_max_row_norm_checked(b_lean_obj_arg t) {
   return tyr::checkedCall("maxRowNorm", [&] { return lean_box_float(lean_torch_max_row_norm(t)); });
 }
 
@@ -4205,7 +4205,7 @@ lean_object* lean_torch_rms_norm_weighted_checked(
   });
 }
 
-lean_object* lean_torch_matrix_log_checked(uint64_t n, b_lean_obj_arg input) {
+lean_object* lean_torch_matrix_log_checked(b_lean_obj_arg input) {
   return tyr::checkedCall("matrixLog", [&] {
     auto tensor = borrowTensor(input);
     TORCH_CHECK(at::isFloatingType(tensor.scalar_type()), "requires a real floating dtype");

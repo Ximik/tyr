@@ -445,8 +445,8 @@ void checkedSingularValueNorm(bool nuclear, bool invalid) {
   Object result(lean_box_float(nuclear ? lean_torch_nuclear_norm(input.get()) :
     lean_torch_spectral_norm(input.get())), lean_dec);
 #else
-  Object result(nuclear ? lean_torch_nuclear_norm_checked(2, 2, input.get()) :
-    lean_torch_spectral_norm_checked(2, 2, input.get()), lean_dec);
+  Object result(nuclear ? lean_torch_nuclear_norm_checked(input.get()) :
+    lean_torch_spectral_norm_checked(input.get()), lean_dec);
 #endif
   if (invalid) exceptError(result.get(), nuclear ? "nuclearNorm" : "spectralNorm");
   else {
@@ -545,14 +545,14 @@ void checkedLinalgFailures() {
   exceptError(svd.get(), "svd");
   Object svdvals(lean_torch_svdvals_checked(input.get()), lean_dec);
   exceptError(svdvals.get(), "svdvals");
-  Object l2(lean_torch_l2_norm_checked(4, input.get()), lean_dec);
+  Object l2(lean_torch_l2_norm_checked(input.get()), lean_dec);
   exceptError(l2.get(), "l2Norm");
-  Object frob(lean_torch_frobenius_norm_checked(2, 2, input.get()), lean_dec);
+  Object frob(lean_torch_frobenius_norm_checked(input.get()), lean_dec);
   exceptError(frob.get(), "frobeniusNorm");
-  Object max(lean_torch_max_row_norm_checked(2, 2, input.get()), lean_dec);
+  Object max(lean_torch_max_row_norm_checked(input.get()), lean_dec);
   exceptError(max.get(), "maxRowNorm");
   auto singular = full({2, 2}, 0);
-  Object log(lean_torch_matrix_log_checked(2, singular.get()), lean_dec);
+  Object log(lean_torch_matrix_log_checked(singular.get()), lean_dec);
   exceptError(log.get(), "matrixLog");
 }
 #endif

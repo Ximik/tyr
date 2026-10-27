@@ -123,7 +123,7 @@ def item {d : DType} {dev : Device} (t : Tensor ⟨#[], d, dev⟩) : Float :=
 /-- Euclidean norm of an indexed vector. -/
 def l2Norm? {n : UInt64} {d : DType} {dev : Device}
     (t : Tensor ⟨#[n], d, dev⟩) : Except String Float :=
-  RawTensor.l2NormChecked n t.raw
+  RawTensor.l2NormChecked t.raw
 
 def l2Norm {n : UInt64} {d : DType} {dev : Device}
     (t : Tensor ⟨#[n], d, dev⟩) : Float :=
@@ -146,7 +146,7 @@ def diag {n : UInt64} {d : DType} {dev : Device}
 /-- Frobenius norm of an indexed matrix. -/
 def frobeniusNorm? {m n : UInt64} {d : DType} {dev : Device}
     (t : Tensor ⟨#[m, n], d, dev⟩) : Except String Float :=
-  RawTensor.frobeniusNormChecked m n t.raw
+  RawTensor.frobeniusNormChecked t.raw
 
 def frobeniusNorm {m n : UInt64} {d : DType} {dev : Device}
     (t : Tensor ⟨#[m, n], d, dev⟩) : Float :=
@@ -168,7 +168,7 @@ def rowNorms {m n : UInt64} {d : DType} {dev : Device}
 /-- Maximum Euclidean row norm of a matrix. -/
 def maxRowNorm? {m n : UInt64} {d : DType} {dev : Device}
     (t : Tensor ⟨#[m, n], d, dev⟩) : Except String Float :=
-  RawTensor.maxRowNormChecked m n t.raw
+  RawTensor.maxRowNormChecked t.raw
 
 def maxRowNorm {m n : UInt64} {d : DType} {dev : Device}
     (t : Tensor ⟨#[m, n], d, dev⟩) : Float :=
@@ -211,7 +211,7 @@ def matrixLog? {n : UInt64} {d : DType} {dev : Device}
     (t : Tensor ⟨#[n, n], d, dev⟩) : Except String (Tensor ⟨#[n, n], d, dev⟩) := do
   if !t.raw.dtype.isRealFloating then
     throw s!"matrixLog requires a standard real floating dtype, got {t.raw.dtype}"
-  t.checkedReplacement? (← RawTensor.matrixLogChecked n t.raw)
+  t.checkedReplacement? (← RawTensor.matrixLogChecked t.raw)
 
 /-- Real matrix logarithm. Its static domain excludes complex and shell types;
 use `matrixLog?` for runtime-selected dtypes or recoverable numerical errors. -/
@@ -304,7 +304,7 @@ def spectralNorm? {m n : UInt64} {d : DType} {dev : Device}
     throw "spectralNorm requires a floating or complex dtype"
   if m == 0 || n == 0 then
     throw "spectralNorm requires a nonempty matrix"
-  RawTensor.spectralNormChecked m n t.raw
+  RawTensor.spectralNormChecked t.raw
 
 def spectralNorm {m n : UInt64} {d : DType} {dev : Device}
     [DType.FloatingOrComplex d] (t : Tensor ⟨#[m, n], d, dev⟩) : Float :=
@@ -317,7 +317,7 @@ def nuclearNorm? {m n : UInt64} {d : DType} {dev : Device}
     (t : Tensor ⟨#[m, n], d, dev⟩) : Except String Float := do
   if !(t.raw.dtype.isRealFloating || t.raw.dtype.isComplex) then
     throw "nuclearNorm requires a floating or complex dtype"
-  RawTensor.nuclearNormChecked m n t.raw
+  RawTensor.nuclearNormChecked t.raw
 
 def nuclearNorm {m n : UInt64} {d : DType} {dev : Device}
     [DType.FloatingOrComplex d] (t : Tensor ⟨#[m, n], d, dev⟩) : Float :=

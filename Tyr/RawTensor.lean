@@ -204,12 +204,12 @@ namespace torch.RawTensor
 
 /-- Largest singular value. -/
 @[extern "lean_torch_spectral_norm"] opaque spectralNorm (t : @& RawTensor) : Float
-@[extern "lean_torch_spectral_norm_checked"] opaque spectralNormChecked (m n : UInt64)
+@[extern "lean_torch_spectral_norm_checked"] opaque spectralNormChecked
     (t : @& RawTensor) : Except String Float
 
 /-- Sum of the singular values. -/
 @[extern "lean_torch_nuclear_norm"] opaque nuclearNorm (t : @& RawTensor) : Float
-@[extern "lean_torch_nuclear_norm_checked"] opaque nuclearNormChecked (m n : UInt64)
+@[extern "lean_torch_nuclear_norm_checked"] opaque nuclearNormChecked
     (t : @& RawTensor) : Except String Float
 
 @[extern "lean_torch_tensor_atan"] opaque atan (t : @& RawTensor) : RawTensor
@@ -378,16 +378,16 @@ namespace torch.RawTensor
 
 @[extern "lean_torch_div_scalar_checked"] opaque divScalarChecked (t : @& RawTensor) (value : Float) : Except String RawTensor
 
-@[extern "lean_torch_l2_norm_checked"] opaque l2NormChecked (n : UInt64) (t : @& RawTensor) : Except String Float
+@[extern "lean_torch_l2_norm_checked"] opaque l2NormChecked (t : @& RawTensor) : Except String Float
 
-@[extern "lean_torch_frobenius_norm_checked"] opaque frobeniusNormChecked (m n : UInt64) (t : @& RawTensor) : Except String Float
+@[extern "lean_torch_frobenius_norm_checked"] opaque frobeniusNormChecked (t : @& RawTensor) : Except String Float
 
-@[extern "lean_torch_max_row_norm_checked"] opaque maxRowNormChecked (m n : UInt64) (t : @& RawTensor) : Except String Float
+@[extern "lean_torch_max_row_norm_checked"] opaque maxRowNormChecked (t : @& RawTensor) : Except String Float
 
 @[extern "lean_torch_rms_norm_weighted_checked"] opaque rmsNormWeightedChecked
     (x weight : @& RawTensor) (eps : Float := 1e-6) : Except String RawTensor
 
-@[extern "lean_torch_matrix_log_checked"] opaque matrixLogChecked (n : UInt64) (t : @& RawTensor) : Except String RawTensor
+@[extern "lean_torch_matrix_log_checked"] opaque matrixLogChecked (t : @& RawTensor) : Except String RawTensor
 
 def sumAllChecked (t : RawTensor) : Except String RawTensor := sumChecked t none false
 
