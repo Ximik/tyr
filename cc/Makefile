@@ -154,8 +154,6 @@ NVCCFLAGS += -gencode arch=$(GPU_COMPUTE),code=$(GPU_CODE)
 
 # The pinned torch wheels include Gloo's implementation but omit its public
 # headers. deps/git.lock supplies the exact matching upstream header revision.
-# ProcessGroupGloo.hpp declares nothing unless USE_C10D_GLOO is defined.
-EXTRA_CXX_FLAGS += -DUSE_C10D_GLOO
 TORCH_INC_FLAGS += -isystem $(GLOO_DIR)
 
 # Optional distributed backend toggles based on available LibTorch artifacts.

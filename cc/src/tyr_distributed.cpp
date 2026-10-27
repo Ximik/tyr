@@ -23,6 +23,8 @@
 #define TYR_HAS_NCCL 1
 #endif
 
+// ProcessGroupGloo.hpp declares nothing unless USE_C10D_GLOO is defined.
+#define USE_C10D_GLOO
 #include <torch/csrc/distributed/c10d/ProcessGroupGloo.hpp>
 
 #ifndef TYR_HAS_NCCL
