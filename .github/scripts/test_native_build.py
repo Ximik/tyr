@@ -23,7 +23,8 @@ class NativeBuildTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.cc = self.root / "cc"
         for directory in ("cc/src", "cc/include/nested", "cc/tools",
-                          "external/git/soxr", "external/wheels/torch/lib", "external/wheels/pyarrow",
+                          "external/git/soxr", "external/git/gloo/gloo",
+                          "external/wheels/torch/lib", "external/wheels/pyarrow",
                           "external/wheels/torch/include/torch/csrc/api/include/torch",
                           "lean/include"):
             (self.root / directory).mkdir(parents=True, exist_ok=True)
@@ -32,6 +33,7 @@ class NativeBuildTests(unittest.TestCase):
             shutil.copy(REPO / "cc" / name, self.cc / name)
         shutil.copy(REPO / "cc/tools/check_libstdcxx.sh", self.cc / "tools/check_libstdcxx.sh")
         (self.root / "external/git/soxr/CMakeLists.txt").touch()
+        (self.root / "external/git/gloo/gloo/algorithm.h").touch()
         (self.root / "external/wheels/torch/include/torch/csrc/api/include/torch/torch.h").touch()
         arrow_libs = (("libarrow.2500.dylib", "libparquet.2500.dylib") if sys.platform == "darwin"
                       else ("libarrow.so.2500", "libparquet.so.2500"))
