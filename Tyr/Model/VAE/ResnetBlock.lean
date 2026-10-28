@@ -77,6 +77,50 @@ def forward {batch in_ch out_ch kernel_size padding height width : Nat}
 
 end Conv2dParams
 
+/-- The skip path of a ResnetBlock: the input itself when channels match, else a 1×1 conv. -/
+inductive Shortcut (in_ch out_ch : Nat) (dtype : DType := .Float32) where
+  | identity (h : in_ch = out_ch)
+  | conv (c : Conv2dParams (device := device) (dtype := dtype) in_ch out_ch 1 0)
+
+instance {in_ch out_ch : Nat} {dtype : DType} :
+    TensorStruct (Shortcut (device := device) in_ch out_ch dtype) where
+  map f
+    | .identity h => .identity h
+    | .conv c => .conv (TensorStruct.map f c)
+  mapM f
+    | .identity h => pure (.identity h)
+    | .conv c => do pure (.conv (← TensorStruct.mapM f c))
+  zipWith f lhs rhs := match lhs, rhs with
+    | .conv x, .conv y => .conv (TensorStruct.zipWith f x y)
+    | lhs, _ => lhs
+  fold f init
+    | .identity _ => init
+    | .conv c => TensorStruct.fold f init c
+
+instance {P : StaticSpec → Prop} {in_ch out_ch : Nat} {dtype : DType}
+    [TensorStructFor P (Conv2dParams (device := device) (dtype := dtype) in_ch out_ch 1 0)] :
+    TensorStructFor P (Shortcut (device := device) in_ch out_ch dtype) where
+  map f
+    | .identity h => .identity h
+    | .conv c => .conv (TensorStructFor.map f c)
+  mapM f
+    | .identity h => pure (.identity h)
+    | .conv c => do pure (.conv (← TensorStructFor.mapM f c))
+  zipWith f lhs rhs := match lhs, rhs with
+    | .conv x, .conv y => .conv (TensorStructFor.zipWith f x y)
+    | lhs, _ => lhs
+  fold f init
+    | .identity _ => init
+    | .conv c => TensorStructFor.fold f init c
+
+instance {in_ch out_ch : Nat} {d₁ d₂ : DType} {device₁ device₂ : Device}
+    [TensorTreeCast (Conv2dParams (device := device₁) (dtype := d₁) in_ch out_ch 1 0)
+      (Conv2dParams (device := device₂) (dtype := d₂) in_ch out_ch 1 0)] :
+    TensorTreeCast (Shortcut (device := device₁) in_ch out_ch d₁) (Shortcut (device := device₂) in_ch out_ch d₂) where
+  castAt path
+    | .identity h => pure (.identity h)
+    | .conv c => do pure (.conv (← TensorTreeCast.castAt path c))
+
 /-- Swish activation: x * sigmoid(x) -/
 def swish {s : Shape} (x : Tensor { dtype := dtype, device := device, shape := s }) : Tensor { dtype := dtype, device := device, shape := s } :=
   Tensor.mul x (Tensor.sigmoid x)
@@ -93,7 +137,7 @@ structure ResnetBlock (in_ch out_ch : Nat) (dtype : DType := .Float32) where
   /-- Second convolution 3×3 -/
   conv2 : Conv2dParams (device := device) (dtype := dtype) out_ch out_ch 3 1
   /-- Skip connection (1×1 conv if in_ch ≠ out_ch) -/
-  nin_shortcut : Option (Conv2dParams (device := device) (dtype := dtype) in_ch out_ch 1 0)
+  nin_shortcut : Shortcut (device := device) in_ch out_ch dtype
   deriving TensorStruct
 
 
@@ -105,12 +149,11 @@ def init (in_ch out_ch : Nat) (device : Device := .CPU) (dtype : DType := .Float
   let conv1 ← Conv2dParams.init (dtype := dtype) (device := device) in_ch out_ch 3 1
   let norm2 ← GroupNormParams.init (dtype := dtype) (device := device) 32 out_ch
   let conv2 ← Conv2dParams.init (dtype := dtype) (device := device) out_ch out_ch 3 1
-  let nin_shortcut ← if in_ch != out_ch then do
-    let c ← Conv2dParams.init (dtype := dtype) (device := device) in_ch out_ch 1 0
-    pure (some c)
+  if h : in_ch = out_ch then
+    pure { norm1, conv1, norm2, conv2, nin_shortcut := .identity h }
   else
-    pure none
-  pure { norm1, conv1, norm2, conv2, nin_shortcut }
+    let c ← Conv2dParams.init (dtype := dtype) (device := device) in_ch out_ch 1 0
+    pure { norm1, conv1, norm2, conv2, nin_shortcut := .conv c }
 
 /-- Forward pass for ResnetBlock.
     Input: [batch, in_ch, height, width]
@@ -118,22 +161,24 @@ def init (in_ch out_ch : Nat) (device : Device := .CPU) (dtype : DType := .Float
 def forward {batch in_ch out_ch height width : Nat}
     (block : ResnetBlock (device := device) (dtype := dtype) in_ch out_ch)
     (x : Tensor { dtype := dtype, device := device, shape := #[batch, in_ch, height, width] })
+    (hh : 0 < height) (hw : 0 < width)
     : Tensor { dtype := dtype, device := device, shape := #[batch, out_ch, height, width] } :=
   -- Main path
   let h := block.norm1.forward x
   let h := swish h
   let h := Tensor.conv2dBias h block.conv1.weight block.conv1.bias #[1, 1] #[1, 1]
-  let h := Tensor.reshapeChecked h #[batch, out_ch, height, width]
+  let h := Tensor.reshape h #[batch, out_ch, height, width] (by simp [Tensor.convExtent_same hh (by decide : 2 * 1 + 1 = 3), Tensor.convExtent_same hw (by decide : 2 * 1 + 1 = 3)])
 
   let h := block.norm2.forward h
   let h := swish h
   let h := Tensor.conv2dBias h block.conv2.weight block.conv2.bias #[1, 1] #[1, 1]
-  let h := Tensor.reshapeChecked h #[batch, out_ch, height, width]
+  let h := Tensor.reshape h #[batch, out_ch, height, width] (by simp [Tensor.convExtent_same hh (by decide : 2 * 1 + 1 = 3), Tensor.convExtent_same hw (by decide : 2 * 1 + 1 = 3)])
 
   -- Skip connection
   let skip := match block.nin_shortcut with
-    | some conv => Tensor.reshapeChecked (Tensor.conv2dBias x conv.weight conv.bias #[1, 1] #[0, 0]) #[batch, out_ch, height, width]
-    | none => Tensor.reshapeChecked x #[batch, out_ch, height, width]
+    | .conv conv => Tensor.reshape (Tensor.conv2dBias x conv.weight conv.bias #[1, 1] #[0, 0]) #[batch, out_ch, height, width]
+        (by simp [Tensor.convExtent_same hh (by decide : 2 * 0 + 1 = 1), Tensor.convExtent_same hw (by decide : 2 * 0 + 1 = 1)])
+    | .identity h => Tensor.reshape x #[batch, out_ch, height, width] (by simp [h])
 
   Tensor.add h skip
 

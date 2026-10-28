@@ -93,13 +93,13 @@ private def parseVLConfig
     match getObjVal? root "text_config" with
     | some t => t
     | none => root
-  let textCfg :=
+  let textCfg ←
     match getObjVal? root "text_config" with
     | some _ =>
-      Config.normalize (Config.parseJson textJson d.text_config)
+      pure (Config.normalize (← Config.parseJson textJson d.text_config))
     | none =>
       -- Backward compatible: plain text-only config at root.
-      Config.normalize (Config.parseJson root d.text_config)
+      pure (Config.normalize (← Config.parseJson root d.text_config))
 
   let visionCfg ←
     match getObjVal? root "vision_config" with

@@ -284,8 +284,7 @@ private def rowsToTensor?
     for x in row do
       flat := flat.push x
   let n : Nat := rows.size
-  let tDyn := Tensor.fromFloatArray flat
-  let t : Tensor { shape := #[n, cols], dtype := .Float32, device := .CPU } := Tensor.reshapeChecked tDyn #[n, cols]
+  let t : Tensor { shape := #[n, cols], dtype := .Float32, device := .CPU } ← Tensor.fromFloatArrayAs? flat #[n, cols]
   pure ⟨n, t⟩
 
 private def rolloutPPOEpisode
@@ -413,14 +412,14 @@ private def ppoUpdate
         return .error s!"PPO action index out of range: action={a}, actionDim={actionNat}."
       oneHotFlat := oneHotFlat.set! (i * actionNat + a) 1.0
     let oneHot : Tensor { shape := #[n, actionDim], dtype := .Float32, device := .CPU } :=
-      Tensor.reshapeChecked (Tensor.fromFloatArray oneHotFlat) #[n, actionDim]
+      (← IO.ofExcept (Tensor.fromFloatArrayAs? oneHotFlat #[n, actionDim]))
 
     let oldLogT : Tensor { shape := #[n, 1], dtype := .Float32, device := .CPU } :=
-      Tensor.reshapeChecked (Tensor.fromFloatArray oldLogProbs) #[n, 1]
+      (← IO.ofExcept (Tensor.fromFloatArrayAs? oldLogProbs #[n, 1]))
     let advT : Tensor { shape := #[n, 1], dtype := .Float32, device := .CPU } :=
-      Tensor.reshapeChecked (Tensor.fromFloatArray advantages) #[n, 1]
+      (← IO.ofExcept (Tensor.fromFloatArrayAs? advantages #[n, 1]))
     let retT : Tensor { shape := #[n, 1], dtype := .Float32, device := .CPU } :=
-      Tensor.reshapeChecked (Tensor.fromFloatArray returnsRaw) #[n, 1]
+      (← IO.ofExcept (Tensor.fromFloatArrayAs? returnsRaw #[n, 1]))
 
     let mut netCur := net
     let mut stateCur := optState
@@ -714,12 +713,12 @@ private def alphaZeroUpdate
       for x in row do
         flatPolicy := flatPolicy.push x
     let policyT : Tensor { shape := #[n, actionDim], dtype := .Float32, device := .CPU } :=
-      Tensor.reshapeChecked (Tensor.fromFloatArray flatPolicy) #[n, actionDim]
+      (← IO.ofExcept (Tensor.fromFloatArrayAs? flatPolicy #[n, actionDim]))
 
     if valueTargets.size != n then
       return .error s!"AlphaZero value targets mismatch: expected {n}, got {valueTargets.size}."
     let valueT : Tensor { shape := #[n, 1], dtype := .Float32, device := .CPU } :=
-      Tensor.reshapeChecked (Tensor.fromFloatArray valueTargets) #[n, 1]
+      (← IO.ofExcept (Tensor.fromFloatArrayAs? valueTargets #[n, 1]))
 
     let mut netCur := net
     let mut stateCur := optState

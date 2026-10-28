@@ -163,12 +163,12 @@ def packBranchingNat (cfg : BranchingTrainConfig) (result : BranchingBridgeResul
         pure ()
 
   let batchU : Nat := batchNat
-  let state := Tensor.reshapeChecked ((Tensor.fromInt64Array stateArr).to device) #[batchU, cfg.maxLen]
-  let anchor := Tensor.reshapeChecked ((Tensor.fromInt64Array anchorArr).to device) #[batchU, cfg.maxLen]
-  let padmask := floatDynamic (Tensor.reshapeChecked ((Tensor.fromInt64Array padArr).to device) #[batchU, cfg.maxLen])
-  let flowmask := floatDynamic (Tensor.reshapeChecked ((Tensor.fromInt64Array flowArr).to device) #[batchU, cfg.maxLen])
-  let splitsTarget := floatDynamic (Tensor.reshapeChecked ((Tensor.fromInt64Array splitsArr).to device) #[batchU, cfg.maxLen])
-  let delTarget := floatDynamic (Tensor.reshapeChecked ((Tensor.fromInt64Array delArr).to device) #[batchU, cfg.maxLen])
+  let state := (← IO.ofExcept (Tensor.fromInt64ArrayAs? stateArr #[batchU, cfg.maxLen])).to device
+  let anchor := (← IO.ofExcept (Tensor.fromInt64ArrayAs? anchorArr #[batchU, cfg.maxLen])).to device
+  let padmask := floatDynamic ((← IO.ofExcept (Tensor.fromInt64ArrayAs? padArr #[batchU, cfg.maxLen])).to device)
+  let flowmask := floatDynamic ((← IO.ofExcept (Tensor.fromInt64ArrayAs? flowArr #[batchU, cfg.maxLen])).to device)
+  let splitsTarget := floatDynamic ((← IO.ofExcept (Tensor.fromInt64ArrayAs? splitsArr #[batchU, cfg.maxLen])).to device)
+  let delTarget := floatDynamic ((← IO.ofExcept (Tensor.fromInt64ArrayAs? delArr #[batchU, cfg.maxLen])).to device)
 
   let timeScaled := result.t.map (fun t => ((t * cfg.timeScale).toUInt64).toInt64)
   let t := Tensor.reshape ((Tensor.fromInt64Array timeScaled).to device) #[batchU]
@@ -176,21 +176,21 @@ def packBranchingNat (cfg : BranchingTrainConfig) (result : BranchingBridgeResul
 
   return ⟨batchU, { t, state, anchor, padmask, flowmask, splitsTarget, delTarget }⟩
 
-private def stack1dDyn {dim : Nat} (tensors : Array (Tensor { dtype := .Float32, device := device, shape := #[dim] })) (len : Nat)
-    : Tensor { dtype := .Float32, device := device, shape := #[len, dim] } :=
-  if tensors.isEmpty then
-    Tensor.reshapeChecked (zerosDynamic (device := device) #[0, dim]) #[len, dim]
+private def stack1dDyn {dim : Nat} (tensors : Array (Tensor { dtype := .Float32, device := device, shape := #[dim] }))
+    : Tensor { dtype := .Float32, device := device, shape := #[tensors.size, dim] } :=
+  if h : tensors.size = 0 then
+    Tensor.reshape (zerosDynamic (device := device) #[0, dim]) #[tensors.size, dim] (by simp [h])
   else
     let unsq := tensors.map (fun t => Tensor.unsqueeze t 0) -- [1, dim]
-    Tensor.catManyChecked (unsq.map Tensor.packShape) 0 #[len, dim]
+    Tensor.catManyChecked (unsq.map Tensor.packShape) 0 #[tensors.size, dim]
 
-private def stackBatch2d {batch maxLen dim : Nat} (tensors : Array (Tensor { dtype := .Float32, device := device, shape := #[maxLen, dim] })) :
-    Tensor { dtype := .Float32, device := device, shape := #[batch, maxLen, dim] } :=
-  if tensors.isEmpty then
-    Tensor.reshapeChecked (zerosDynamic (device := device) #[0, maxLen, dim]) #[batch, maxLen, dim]
+private def stackBatch2d {maxLen dim : Nat} (tensors : Array (Tensor { dtype := .Float32, device := device, shape := #[maxLen, dim] })) :
+    Tensor { dtype := .Float32, device := device, shape := #[tensors.size, maxLen, dim] } :=
+  if h : tensors.size = 0 then
+    Tensor.reshape (zerosDynamic (device := device) #[0, maxLen, dim]) #[tensors.size, maxLen, dim] (by simp [h])
   else
     let unsq := tensors.map (fun t => Tensor.unsqueeze t 0) -- [1, maxLen, dim]
-    Tensor.catManyChecked (unsq.map Tensor.packShape) 0 #[batch, maxLen, dim]
+    Tensor.catManyChecked (unsq.map Tensor.packShape) 0 #[tensors.size, maxLen, dim]
 
 def packBranchingTensor {dim : Nat} (cfg : BranchingTrainConfig)
     (result : BranchingBridgeResult (Tensor { dtype := .Float32, device := device, shape := #[dim] }))
@@ -218,22 +218,24 @@ def packBranchingTensor {dim : Nat} (cfg : BranchingTrainConfig)
     let anchors := result.X1anchor[bi]!
     let splits := result.splitsTarget[bi]!
     let dels := result.del[bi]!
-    if anchors.size != x.state.size then
+    let ⟨hAnchors⟩ ← if h : anchors.size = x.state.size then pure (PLift.up h) else
       throw (IO.userError "X1anchor length mismatch")
     if splits.size != x.state.size then
       throw (IO.userError "splitsTarget length mismatch")
     if dels.size != x.state.size then
       throw (IO.userError "del length mismatch")
-    if x.state.size > maxLenNat then
+    let ⟨hFits⟩ ← if h : x.state.size ≤ cfg.maxLen then pure (PLift.up h) else
       throw (IO.userError "Branching sample exceeds maxLen; increase maxLen or resample")
 
     let lenU := x.state.size
-    let xs := stack1dDyn (dim := dim) x.state lenU
-    let xa := stack1dDyn (dim := dim) anchors lenU
+    let xs := stack1dDyn (dim := dim) x.state
+    let xa := stack1dDyn (dim := dim) anchors
     let padU := cfg.maxLen - lenU
     let padT : Tensor { dtype := .Float32, device := device, shape := #[padU, dim] } := zerosDynamic (device := device) #[padU, dim]
-    let xsPad := Tensor.reshapeChecked (Tensor.cat xs padT 0) #[cfg.maxLen, dim]
-    let xaPad := Tensor.reshapeChecked (Tensor.cat xa padT 0) #[cfg.maxLen, dim]
+    let xsPad := Tensor.reshape (Tensor.cat xs padT 0) #[cfg.maxLen, dim]
+      (by simp [padU, lenU]; rw [Nat.add_sub_cancel' hFits])
+    let xaPad := Tensor.reshape (Tensor.cat xa padT 0) #[cfg.maxLen, dim]
+      (by simp [padU, lenU, hAnchors]; rw [Nat.add_sub_cancel' hFits])
     paddedStates := paddedStates.push xsPad
     paddedAnchors := paddedAnchors.push xaPad
 
@@ -251,12 +253,14 @@ def packBranchingTensor {dim : Nat} (cfg : BranchingTrainConfig)
         pure ()
 
   let batchU : Nat := batchNat
-  let state := stackBatch2d (batch := batchU) (maxLen := cfg.maxLen) (dim := dim) paddedStates
-  let anchor := stackBatch2d (batch := batchU) (maxLen := cfg.maxLen) (dim := dim) paddedAnchors
-  let padmask := floatDynamic (Tensor.reshapeChecked ((Tensor.fromInt64Array padArr).to device) #[batchU, cfg.maxLen])
-  let flowmask := floatDynamic (Tensor.reshapeChecked ((Tensor.fromInt64Array flowArr).to device) #[batchU, cfg.maxLen])
-  let splitsTarget := floatDynamic (Tensor.reshapeChecked ((Tensor.fromInt64Array splitsArr).to device) #[batchU, cfg.maxLen])
-  let delTarget := floatDynamic (Tensor.reshapeChecked ((Tensor.fromInt64Array delArr).to device) #[batchU, cfg.maxLen])
+  let ⟨hStates⟩ ← if h : paddedStates.size = batchU ∧ paddedAnchors.size = batchU then pure (PLift.up h) else
+    throw (IO.userError "Branching batch packing produced the wrong number of rows")
+  let state := Tensor.reshape (stackBatch2d paddedStates) #[batchU, cfg.maxLen, dim] (by simp [hStates.1])
+  let anchor := Tensor.reshape (stackBatch2d paddedAnchors) #[batchU, cfg.maxLen, dim] (by simp [hStates.2])
+  let padmask := floatDynamic ((← IO.ofExcept (Tensor.fromInt64ArrayAs? padArr #[batchU, cfg.maxLen])).to device)
+  let flowmask := floatDynamic ((← IO.ofExcept (Tensor.fromInt64ArrayAs? flowArr #[batchU, cfg.maxLen])).to device)
+  let splitsTarget := floatDynamic ((← IO.ofExcept (Tensor.fromInt64ArrayAs? splitsArr #[batchU, cfg.maxLen])).to device)
+  let delTarget := floatDynamic ((← IO.ofExcept (Tensor.fromInt64ArrayAs? delArr #[batchU, cfg.maxLen])).to device)
 
   let timeScaled := result.t.map (fun t => ((t * cfg.timeScale).toUInt64).toInt64)
   let t := Tensor.reshape ((Tensor.fromInt64Array timeScaled).to device) #[batchU]

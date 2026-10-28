@@ -252,14 +252,15 @@ def forward {tokens : Nat}
   let mergeUnit := VisionConfig.mergeUnit cfg
   if mergeUnit == 0 then
     throw <| IO.userError "vision spatial_merge_size must be > 0"
-  if tokens % mergeUnit != 0 then
+  let ⟨hDiv⟩ ← if hDiv : mergeUnit ∣ tokens then pure (PLift.up hDiv) else
     throw <| IO.userError
       s!"vision token count ({tokens}) must be divisible by merge unit ({mergeUnit})"
 
   let mergedTokens := VisionConfig.mergedTokenCount cfg tokens
   let xNorm : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype } := m.norm.forward2d x
   let grouped : Tensor { device := device, shape := #[mergedTokens, cfg.hidden_size * mergeUnit], dtype := dtype } :=
-    Tensor.reshapeChecked xNorm #[mergedTokens, cfg.hidden_size * mergeUnit]
+    Tensor.reshape xNorm #[mergedTokens, cfg.hidden_size * mergeUnit]
+      (by simpa using (VisionConfig.mergedTokenCount_mul hDiv cfg.hidden_size).symm)
   let h : Tensor { device := device, shape := #[mergedTokens, cfg.hidden_size * mergeUnit], dtype := dtype } :=
     linear2d grouped m.linear_fc1_weight m.linear_fc1_bias
   pure <|

@@ -154,21 +154,19 @@ def unpackLatents {batch packed_H packed_W : Nat}
 /-- Pack VAE spatial format back to Flux sequence format (inverse of unpackLatents).
     Used when encoding images to latents for img2img or inpainting.
 
-    Input: [batch, 32, H, W] where H and W are divisible by 2
-    Output: [batch, (H/2) × (W/2), 128] -/
-def packLatents {batch H W : Nat}
-    (z : Tensor { dtype := dtype, device := device, shape := #[batch, 32, H, W] })
-    : Tensor { dtype := dtype, device := device, shape := #[batch, (H / 2) * (W / 2), 128] } :=
-  let packed_H := H / 2
-  let packed_W := W / 2
+    Input: [batch, 32, packed_H × 2, packed_W × 2]
+    Output: [batch, packed_H × packed_W, 128] -/
+def packLatents {batch packed_H packed_W : Nat}
+    (z : Tensor { dtype := dtype, device := device, shape := #[batch, 32, packed_H * 2, packed_W * 2] })
+    : Tensor { dtype := dtype, device := device, shape := #[batch, packed_H * packed_W, 128] } :=
   -- Step 1: Reshape to expose 2×2 patches
-  -- [batch, 32, H, W] → [batch, 32, packed_H, 2, packed_W, 2]
-  let z := Tensor.reshapeChecked z #[batch, 32, packed_H, 2, packed_W, 2]
+  -- [batch, 32, packed_H*2, packed_W*2] → [batch, 32, packed_H, 2, packed_W, 2]
+  let z := Tensor.reshape z #[batch, 32, packed_H, 2, packed_W, 2]
   -- Step 2: Permute to group patches with channels
   -- [batch, 32, packed_H, 2, packed_W, 2] → [batch, packed_H, packed_W, 32, 2, 2]
   let z := Tensor.permute z #[0, 2, 4, 1, 3, 5]
   -- Step 3: Flatten to sequence format
   -- [batch, packed_H, packed_W, 32, 2, 2] → [batch, packed_H*packed_W, 128]
-  Tensor.reshapeChecked z #[batch, packed_H * packed_W, 128]
+  Tensor.reshape z #[batch, packed_H * packed_W, 128]
 
 end torch.flux

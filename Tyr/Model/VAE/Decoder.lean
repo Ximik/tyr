@@ -129,47 +129,57 @@ def init (device : Device := .CPU) (dtype : DType := .Float32) : IO (Decoder (de
 def forward {batch height width : Nat}
     (dec : (Decoder (device := device) (dtype := dtype)))
     (z : Tensor { dtype := dtype, device := device, shape := #[batch, 32, height, width] })
+    (hh : 0 < height) (hw : 0 < width)
     : Tensor { dtype := dtype, device := device, shape := #[batch, 3, height * 2 * 2 * 2, width * 2 * 2 * 2] } :=
+  have hh1 : 0 < height * 2 := by omega
+  have hw1 : 0 < width * 2 := by omega
+  have hh2 : 0 < height * 2 * 2 := by omega
+  have hw2 : 0 < width * 2 * 2 := by omega
+  have hh3 : 0 < height * 2 * 2 * 2 := by omega
+  have hw3 : 0 < width * 2 * 2 * 2 := by omega
   -- Post-quant conv: [batch, 32, 32, 32] → [batch, 32, 32, 32]
   let z := Tensor.conv2dBias z dec.post_quant_conv.weight dec.post_quant_conv.bias #[1, 1] #[0, 0]
-  let z := Tensor.reshapeChecked z #[batch, 32, height, width]
+  let z := Tensor.reshape z #[batch, 32, height, width]
+    (by simp [Tensor.convExtent_same hh (by decide : 2 * 0 + 1 = 1), Tensor.convExtent_same hw (by decide : 2 * 0 + 1 = 1)])
   -- Initial conv: [batch, 32, 32, 32] → [batch, 512, 32, 32]
   let h := Tensor.conv2dBias z dec.conv_in.weight dec.conv_in.bias #[1, 1] #[1, 1]
-  let h := Tensor.reshapeChecked h #[batch, 512, height, width]
+  let h := Tensor.reshape h #[batch, 512, height, width]
+    (by simp [Tensor.convExtent_same hh (by decide : 2 * 1 + 1 = 3), Tensor.convExtent_same hw (by decide : 2 * 1 + 1 = 3)])
   -- Middle block
-  let h := dec.mid_block_1.forward h
-  let h := dec.mid_attn.forward h
-  let h := dec.mid_block_2.forward h
+  let h := dec.mid_block_1.forward h hh hw
+  let h := dec.mid_attn.forward h hh hw
+  let h := dec.mid_block_2.forward h hh hw
   -- Up block 3: [batch, 512, 32, 32] → [batch, 512, 64, 64]
-  let h := dec.up_3_block_0.forward h
-  let h := dec.up_3_block_1.forward h
-  let h := dec.up_3_block_2.forward h
-  let h := dec.up_3_upsample.forward h
+  let h := dec.up_3_block_0.forward h hh hw
+  let h := dec.up_3_block_1.forward h hh hw
+  let h := dec.up_3_block_2.forward h hh hw
+  let h := dec.up_3_upsample.forward h hh hw
   -- Up block 2: [batch, 512, 64, 64] → [batch, 512, 128, 128]
-  let h := dec.up_2_block_0.forward h
-  let h := dec.up_2_block_1.forward h
-  let h := dec.up_2_block_2.forward h
-  let h := dec.up_2_upsample.forward h
+  let h := dec.up_2_block_0.forward h hh1 hw1
+  let h := dec.up_2_block_1.forward h hh1 hw1
+  let h := dec.up_2_block_2.forward h hh1 hw1
+  let h := dec.up_2_upsample.forward h hh1 hw1
   -- Up block 1: [batch, 512, 128, 128] → [batch, 256, 256, 256]
-  let h := dec.up_1_block_0.forward h
-  let h := dec.up_1_block_1.forward h
-  let h := dec.up_1_block_2.forward h
-  let h := dec.up_1_upsample.forward h
+  let h := dec.up_1_block_0.forward h hh2 hw2
+  let h := dec.up_1_block_1.forward h hh2 hw2
+  let h := dec.up_1_block_2.forward h hh2 hw2
+  let h := dec.up_1_upsample.forward h hh2 hw2
   -- Up block 0: [batch, 256, 256, 256] → [batch, 128, 256, 256]
-  let h := dec.up_0_block_0.forward h
-  let h := dec.up_0_block_1.forward h
-  let h := dec.up_0_block_2.forward h
+  let h := dec.up_0_block_0.forward h hh3 hw3
+  let h := dec.up_0_block_1.forward h hh3 hw3
+  let h := dec.up_0_block_2.forward h hh3 hw3
   -- Final: norm → swish → conv
   let h := dec.norm_out.forward h
   let h := swish h
   let h := Tensor.conv2dBias h dec.conv_out.weight dec.conv_out.bias #[1, 1] #[1, 1]
-  Tensor.reshapeChecked h #[batch, 3, height * 2 * 2 * 2, width * 2 * 2 * 2]
+  Tensor.reshape h #[batch, 3, height * 2 * 2 * 2, width * 2 * 2 * 2]
+    (by simp [Tensor.convExtent_same hh3 (by decide : 2 * 1 + 1 = 3), Tensor.convExtent_same hw3 (by decide : 2 * 1 + 1 = 3)])
 
 /-- Decode latents to image (batch=1 specialized version).
     Input: [1, 32, 32, 32] latent
     Output: [1, 3, 256, 256] RGB image -/
 def forward1 (dec : (Decoder (device := device) (dtype := dtype))) (z : Tensor { dtype := dtype, device := device, shape := #[1, 32, 32, 32] }) : Tensor { dtype := dtype, device := device, shape := #[1, 3, 256, 256] } :=
-  dec.forward z
+  dec.forward z (by decide) (by decide)
 
 end Decoder
 

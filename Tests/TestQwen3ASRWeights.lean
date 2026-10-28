@@ -75,7 +75,7 @@ private def writeCheckpoint (dir : System.FilePath) (bf16 : Bool)
       LeanTest.assertTrue layer.self_attn.q_norm.isNone "missing optional norm stays absent"
       let features := Tensor.ones #[1, 8, 16]
       let ids := (Tensor.fromInt64Array #[1, 2]).reshape #[1, 2]
-      let logits := model.forwardFromMel features ids
+      let logits := model.forwardFromMel features (by decide) ids
       LeanTest.assertEqual logits.actualSpec.dtype dtype.val
       for value in (← logits.toFloatArray) do
         LeanTest.assertTrue value.isFinite "loaded exact model produces finite logits"

@@ -114,6 +114,7 @@ def decodeOverlapStep
     (m : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (preprocessor : PreprocessorConfig)
+    (hMel : preprocessor.featureSize = cfg.thinkerConfig.audioConfig.numMelBins)
     (audio16kWindow : Array Float)
     (state : RealtimeTranscriptState)
     (context : String := "")
@@ -123,7 +124,7 @@ def decodeOverlapStep
     : IO (RealtimeTranscriptState × TranscriptDelta) := do
   let out ← m.transcribeWaveform
     tok
-    preprocessor
+    preprocessor hMel
     audio16kWindow
     (context := context)
     (language := language)

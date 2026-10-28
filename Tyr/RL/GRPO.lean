@@ -432,24 +432,21 @@ def grpoStepWithModel (b t : Nat)
     targetSeqs := targetSeqs.push targetSeq
     shiftedMasks := shiftedMasks.push shiftedMask
 
-  -- Convert to host arrays. Token IDs are staged through Float because the
-  -- typed surface has no Int64 host-array factory; values below 2^24
-  -- round-trip exactly, which covers every vocab in use.
-  let inputFlat : Array Float := inputSeqs.foldl (fun acc seq => acc ++ seq.map (·.toFloat)) #[]
-  let targetFlat : Array Float := targetSeqs.foldl (fun acc seq => acc ++ seq.map (·.toFloat)) #[]
+  let inputFlat : Array Int64 := inputSeqs.foldl (fun acc seq => acc ++ seq.map (·.toInt64)) #[]
+  let targetFlat : Array Int64 := targetSeqs.foldl (fun acc seq => acc ++ seq.map (·.toInt64)) #[]
   let maskFlat : Array Float := shiftedMasks.foldl (fun acc m => acc ++ m) #[]
 
-  -- Create tensors, validating the runtime shape against the claimed [B, T]
+  -- The rollouts must fill the claimed [B, T] exactly.
   let inputTensor : Tensor { shape := #[b, t], dtype := .Int64, device := device } :=
-    (Tensor.reshapeChecked (Tensor.toInt64 (Tensor.fromFloatArray inputFlat)) #[b, t]).to device
+    (← IO.ofExcept (Tensor.fromInt64ArrayAs? inputFlat #[b, t])).to device
   let targetTensor : Tensor { shape := #[b, t], dtype := .Int64, device := device } :=
-    (Tensor.reshapeChecked (Tensor.toInt64 (Tensor.fromFloatArray targetFlat)) #[b, t]).to device
+    (← IO.ofExcept (Tensor.fromInt64ArrayAs? targetFlat #[b, t])).to device
 
   let maskTensor : Tensor { shape := #[b, t], dtype := .Float32, device := device } :=
-    (Tensor.reshapeChecked (Tensor.fromFloatArray maskFlat) #[b, t]).to device
+    (← IO.ofExcept (Tensor.fromFloatArrayAs? maskFlat #[b, t])).to device
 
   let advTensor : Tensor { shape := #[b], dtype := .Float32, device := device } :=
-    (Tensor.reshapeChecked (Tensor.fromFloatArray advantages) #[b]).to device
+    (← IO.ofExcept (Tensor.fromFloatArrayAs? advantages #[b])).to device
 
   -- Forward pass: get per-token NLL
   let nllPerToken ← forwardFn inputTensor targetTensor  -- [B, T-1]
@@ -775,7 +772,7 @@ def grpoStepWithModelUpdate (b t : Nat) [TensorStruct P] [FloatingTensorStruct P
     (state : GRPOState)
     (padToken : UInt64 := 0)
     : IO (P × Optim.AdamWState P × StepResult × GRPOState) := do
-  if b != 1 then
+  let ⟨hB⟩ ← if hB : b = 1 then pure (PLift.up hB) else
     throw <| IO.userError s!"grpoStepWithModelUpdate currently requires b=1, got b={b}"
 
   -- Flatten samples and rewards for statistics/advantages.
@@ -823,18 +820,16 @@ def grpoStepWithModelUpdate (b t : Nat) [TensorStruct P] [FloatingTensorStruct P
       let targetSeq := fullSeq.extract 1 (tNat + 1)
       let maskSeq := createValidMask validTargets tNat
 
-      -- Token IDs are staged through Float (see grpoStepWithModel); values
-      -- below 2^24 round-trip exactly, which covers every vocab in use.
       let inputTensor : Tensor { shape := #[b, t], dtype := .Int64, device := device } :=
-        (Tensor.reshapeChecked (Tensor.toInt64 (Tensor.fromFloatArray (inputSeq.map (·.toFloat)))) #[b, t]).to device
+        (← IO.ofExcept (Tensor.fromInt64ArrayAs? (inputSeq.map (·.toInt64)) #[b, t])).to device
       let targetTensor : Tensor { shape := #[b, t], dtype := .Int64, device := device } :=
-        (Tensor.reshapeChecked (Tensor.toInt64 (Tensor.fromFloatArray (targetSeq.map (·.toFloat)))) #[b, t]).to device
+        (← IO.ofExcept (Tensor.fromInt64ArrayAs? (targetSeq.map (·.toInt64)) #[b, t])).to device
       let maskTensor : Tensor { shape := #[b, t], dtype := .Float32, device := device } :=
-        (Tensor.reshapeChecked (Tensor.fromFloatArray maskSeq) #[b, t]).to device
+        (← IO.ofExcept (Tensor.fromFloatArrayAs? maskSeq #[b, t])).to device
 
       let adv := advantages[sampleIdx]!
       let advTensor : Tensor { shape := #[b], dtype := .Float32, device := device } :=
-        (Tensor.reshapeChecked (Tensor.fromFloatArray #[adv]) #[b]).to device
+        (Tensor.fromFloatArrayShaped #[adv] #[b] (by simp [hB])).to device
 
       let nllPerToken ← forwardFn workingParams inputTensor targetTensor
       let logProbs := negateToLogProb nllPerToken

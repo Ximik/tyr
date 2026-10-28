@@ -130,7 +130,7 @@ def bidirectionalAttentionForward {batch seq n_embd n_head : Nat}
 
   -- Reshape back: [batch, n, seq, d] -> [batch, seq, n*d]
   let attn := Tensor.joinHeads attn
-  let attn := Tensor.reshapeChecked attn #[batch, seq, n_embd]
+  let attn := Tensor.reshape attn #[batch, seq, n_head * head_dim]
 
   -- Output projection (no bias)
   Tensor.linear3d attn params.c_proj
@@ -204,9 +204,12 @@ private def samplingMask {batch seq : Nat} (x : Tokens #[batch, seq])
     |>.reshape #[1, seq] |>.expand #[batch, seq]
   Tensor.logicalAnd (getMaskedPositions' x maskToken) protectedMask.logicalNot
 
-private def validateSampling (cfg : Config) (batch : Nat) (temperature : Float) : IO Unit := do
+private def validateSampling (cfg : Config) (batch : Nat) (temperature : Float) :
+    IO (PLift (cfg.context_len ≤ cfg.seq_len)) := do
   if batch == 0 || cfg.seq_len == 0 || cfg.diffusion_steps == 0 || cfg.context_len > cfg.seq_len ||
       temperature <= 0 || !temperature.isFinite then
+    throw <| IO.userError "Diffusion sampling requires valid dimensions and finite positive temperature"
+  if h : cfg.context_len ≤ cfg.seq_len then pure ⟨h⟩ else
     throw <| IO.userError "Diffusion sampling requires valid dimensions and finite positive temperature"
 
 /-- Sample using confidence-aware parallel decoding.
@@ -221,7 +224,7 @@ def sampleConfidence {cfg : Config} {batch : Nat}
     (maxSteps : Nat := 256)
     (contextTokens : Option (Tokens #[batch, cfg.context_len]) := none)
     : IO (Tokens #[batch, cfg.seq_len]) := do
-  validateSampling cfg batch temperature
+  let ⟨hCtx⟩ ← validateSampling cfg batch temperature
   -- Start with all mask tokens
   let mut x := Tensor.fullInt #[batch, cfg.seq_len] cfg.mask_token_id.toInt64
 
@@ -233,7 +236,8 @@ def sampleConfidence {cfg : Config} {batch : Nat}
     let contextMaskBatch := Tensor.expand (Tensor.unsqueeze contextMask 0) #[batch, cfg.seq_len]
     -- Pad ctx to full seq_len with mask tokens
     let padding := Tensor.fullInt #[batch, cfg.seq_len - cfg.context_len] cfg.mask_token_id.toInt64
-    let ctxPadded := (Tensor.cat ctx padding 1).reshapeChecked #[batch, cfg.seq_len]
+    let ctxPadded := (Tensor.cat ctx padding 1).reshape #[batch, cfg.seq_len]
+      (by simp [Nat.add_sub_cancel' hCtx])
     -- Blend: context positions get ctx, rest stays masked
     x := Tensor.whereSelect contextMaskBatch ctxPadded x
 
@@ -310,7 +314,7 @@ def sampleTopK {cfg : Config} {batch : Nat}
     (maxSteps : Nat := 256)
     (contextTokens : Option (Tokens #[batch, cfg.context_len]) := none)
     : IO (Tokens #[batch, cfg.seq_len]) := do
-  validateSampling cfg batch temperature
+  let ⟨hCtx⟩ ← validateSampling cfg batch temperature
   if k == 0 || k > cfg.seq_len then
     throw <| IO.userError "Diffusion top-k must lie between 1 and sequence length"
   -- Start with all mask tokens
@@ -322,7 +326,8 @@ def sampleTopK {cfg : Config} {batch : Nat}
     let contextMask := Tensor.ltScalar positions cfg.context_len.toFloat
     let contextMaskBatch := Tensor.expand (Tensor.unsqueeze contextMask 0) #[batch, cfg.seq_len]
     let padding := Tensor.fullInt #[batch, cfg.seq_len - cfg.context_len] cfg.mask_token_id.toInt64
-    let ctxPadded := (Tensor.cat ctx padding 1).reshapeChecked #[batch, cfg.seq_len]
+    let ctxPadded := (Tensor.cat ctx padding 1).reshape #[batch, cfg.seq_len]
+      (by simp [Nat.add_sub_cancel' hCtx])
     x := Tensor.whereSelect contextMaskBatch ctxPadded x
 
   -- Track which positions are still masked

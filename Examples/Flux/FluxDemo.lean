@@ -122,15 +122,15 @@ private def promptTokens (cfg : DemoConfig) (prompt : String) : IO (Tensor { sha
         loadMaskIds cfg.attnMaskPath maxSeqLen
       else
         pure defaultMask
-    let tokens := Tensor.reshapeChecked (Tensor.fromInt64Array padded) #[1, maxSeqLen]
-    let attnMask := Tensor.reshapeChecked (Tensor.fromInt64Array mask) #[1, maxSeqLen]
+    let tokens := (← IO.ofExcept (Tensor.fromInt64ArrayAs? padded #[1, maxSeqLen]))
+    let attnMask := (← IO.ofExcept (Tensor.fromInt64ArrayAs? mask #[1, maxSeqLen]))
     pure (tokens, attnMask, tokenCount)
   else
     let tok ← tokenizer.qwen3.loadTokenizer cfg.qwenDir
     let (tokIds, maskIds) := tokenizer.qwen3.encodePrompt tok prompt maxSeqLen
     let tokenCount := maskIds.foldl (fun acc v => if v != 0 then acc + 1 else acc) (0 : Nat)
-    let tokens := Tensor.reshapeChecked (Tensor.fromInt64Array (tokenizer.qwen3.toInt64Array tokIds)) #[1, maxSeqLen]
-    let attnMask := Tensor.reshapeChecked (Tensor.fromInt64Array (tokenizer.qwen3.toInt64Array maskIds)) #[1, maxSeqLen]
+    let tokens := (← IO.ofExcept (Tensor.fromInt64ArrayAs? (tokenizer.qwen3.toInt64Array tokIds) #[1, maxSeqLen]))
+    let attnMask := (← IO.ofExcept (Tensor.fromInt64ArrayAs? (tokenizer.qwen3.toInt64Array maskIds) #[1, maxSeqLen]))
     pure (tokens, attnMask, tokenCount)
 
 -- The derived cast for the nested VAE tree needs a 278-node instance dictionary.
@@ -138,6 +138,8 @@ set_option synthInstance.maxSize 512 in
 /-- Main demo: generate an image from a text prompt -/
 def runDemo (cfg : DemoConfig) (prompt : String) : IO Unit := do
   IO.println "=== Flux Klein 4B Demo ==="
+  let ⟨hLatent⟩ ← if h : cfg.latentH = 16 ∧ cfg.latentW = 16 then pure (PLift.up h) else
+    throw <| IO.userError s!"the VAE decode path expects 16x16 latents, got {cfg.latentH}x{cfg.latentW}"
 
   IO.println s!"Prompt: {prompt}"
   IO.println ""
@@ -154,6 +156,9 @@ def runDemo (cfg : DemoConfig) (prompt : String) : IO Unit := do
   let fluxCfg := FluxConfig.klein4B
   let ⟨_, flux⟩ ← loadFluxModel cfg.fluxPath fluxCfg
   let flux ← TensorStruct.castTo (FluxModel (device := .CPU) fluxCfg .Float32) flux
+  let ⟨hContext⟩ ← if h : qwen.outputLayers.size * qwenCfg.hidden_size = fluxCfg.context_in_dim then pure (PLift.up h) else
+    throw <| IO.userError
+      s!"text encoder emits {qwen.outputLayers.size * qwenCfg.hidden_size} features, Flux expects {fluxCfg.context_in_dim}"
   IO.println "  ✓ Flux model loaded"
 
   -- Load VAE AutoEncoder (includes BN stats for proper normalization)
@@ -169,7 +174,7 @@ def runDemo (cfg : DemoConfig) (prompt : String) : IO Unit := do
   let (tokens, attnMask, tokenCount) ← promptTokens cfg prompt
   let txtEmb := qwen.encodeMasked (batch := 1) (seq := maxSeqLen) (maskDtype := .Int64) qwenCfg maxSeqLen tokens attnMask
   let txtEmb : Tensor { shape := #[1, maxSeqLen, fluxCfg.context_in_dim], dtype := .Float32, device := .CPU } :=
-    (txtEmb.reshapeChecked #[1, maxSeqLen, fluxCfg.context_in_dim])
+    (txtEmb.reshape #[1, maxSeqLen, fluxCfg.context_in_dim] (by simp [hContext]))
   IO.println s!"    Text token count: {tokenCount}"
   IO.println s!"    Text embedding shape: {txtEmb.runtimeShape}"
   IO.println s!"    Text embedding dtype: {txtEmb.dtype}"
@@ -191,7 +196,8 @@ def runDemo (cfg : DemoConfig) (prompt : String) : IO Unit := do
   IO.println s!"    Denoised with {cfg.numSteps} steps"
   -- Transform latents for VAE (inverse of flattening)
   let latentsHW : Tensor { shape := #[1, cfg.latentH, cfg.latentW, 128], dtype := .Float32, device := .CPU } :=
-    Tensor.reshapeChecked latents #[1, cfg.latentH, cfg.latentW, 128]
+    Tensor.reshape latents #[1, cfg.latentH, cfg.latentW, 128]
+      (by simp [imgSeq, fluxCfg, FluxConfig.klein4B, Nat.mul_assoc])
   let packedLatents : Tensor { shape := #[1, 128, cfg.latentH, cfg.latentW], dtype := .Float32, device := .CPU } :=
     (Tensor.permute latentsHW #[0, 3, 1, 2]).reshape #[1, 128, cfg.latentH, cfg.latentW]
 
@@ -199,7 +205,7 @@ def runDemo (cfg : DemoConfig) (prompt : String) : IO Unit := do
   IO.println "  [4/4] Decoding with VAE..."
 
   -- Run VAE decode pipeline
-  let z := vae.invNormalize (packedLatents.reshapeChecked #[1, 128, 16, 16])
+  let z := vae.invNormalize (packedLatents.reshape #[1, 128, 16, 16] (by simp [hLatent.1, hLatent.2]))
   let z := torch.vae.AutoEncoder.unpackLatents16x16 z
   let image := vae.decoder.forward1 z
   saveImagePPM image cfg.outputPath

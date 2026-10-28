@@ -131,6 +131,7 @@ private def transcribeWavStreamed
     (model : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype.val) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (pre : PreprocessorConfig)
+    (hMel : pre.featureSize = cfg.thinkerConfig.audioConfig.numMelBins)
     (wavPath : String)
     (language : Option String)
     (maxNewTokens : Nat)
@@ -157,6 +158,7 @@ private def transcribeWavStreamed
     model := model
     tok := tok
     preprocessor := pre
+    melBinsMatch := hMel
     modelDir := modelDir
   }
   let mut ss ← newSession sm
@@ -218,6 +220,8 @@ def runMain (argv : List String) : IO UInt32 := do
   let cfg ← Qwen3ASRConfig.loadFromPretrainedDir modelDir
   let tok ← tokenizer.qwen3.loadTokenizer modelDir
   let pre ← PreprocessorConfig.loadFromPretrainedDir modelDir
+  let ⟨hMel⟩ ← if h : pre.featureSize = cfg.thinkerConfig.audioConfig.numMelBins then pure (PLift.up h) else
+    throw (IO.userError s!"preprocessor feature_size {pre.featureSize} does not match num_mel_bins {cfg.thinkerConfig.audioConfig.numMelBins}")
   let ⟨_device, dtype, model⟩ ← Qwen3ASRForConditionalGeneration.loadSharded modelDir cfg
   IO.println s!"Qwen3-ASR target device: {repr model.thinker.lmHead.device}"
   let forcedAligner ←
@@ -234,6 +238,7 @@ def runMain (argv : List String) : IO UInt32 := do
         model
         tok
         pre
+        hMel
         args.wavPath
         args.language
         args.maxNewTokens
@@ -247,6 +252,7 @@ def runMain (argv : List String) : IO UInt32 := do
       let outs ← model.transcribeWavs
         tok
         pre
+        hMel
         #[args.wavPath]
         (forcedAligner := forcedAligner)
         (contexts := #[""])

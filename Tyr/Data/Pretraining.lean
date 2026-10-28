@@ -242,10 +242,6 @@ def createInputTarget (tokens : Array UInt64) : (Array UInt64 × Array UInt64) :
   let target := tokens.extract 1 tokens.size
   (input, target)
 
-/-- Build an Int64 token tensor from host data over the raw FFI boundary. -/
-private def int64TensorFromArray (arr : Array Int64) : Tensor { shape := #[arr.size], dtype := .Int64, device := .CPU } :=
-  Tensor.fromInt64Array arr
-
 /-- Get next batch of (input, target) pairs.
     Returns Int64 tensors of shape [batchSize, seqLen]. -/
 def PretrainingLoader.nextBatch (loader : PretrainingLoader)
@@ -260,9 +256,9 @@ def PretrainingLoader.nextBatch (loader : PretrainingLoader)
     let (inputs, targets) := createInputTarget batchTokens
 
     -- Convert to tensors
-    let inputTensor := (int64TensorFromArray (inputs.map (·.toInt64))).reshapeChecked
+    let inputTensor ← IO.ofExcept <| Tensor.fromInt64ArrayAs? (inputs.map (·.toInt64))
       #[loader.config.batchSize, loader.config.seqLen]
-    let targetTensor := (int64TensorFromArray (targets.map (·.toInt64))).reshapeChecked
+    let targetTensor ← IO.ofExcept <| Tensor.fromInt64ArrayAs? (targets.map (·.toInt64))
       #[loader.config.batchSize, loader.config.seqLen]
 
     let newLoader := { loader with
@@ -469,9 +465,9 @@ def StreamingLoaderState.nextBatch (state : StreamingLoaderState) (config : Stre
   let (inputs, targets) := createInputTarget batchTokens
 
   -- Convert to tensors
-  let inputTensor := (int64TensorFromArray (inputs.map (·.toInt64))).reshapeChecked
+  let inputTensor ← IO.ofExcept <| Tensor.fromInt64ArrayAs? (inputs.map (·.toInt64))
     #[batchSize, config.seqLen]
-  let targetTensor := (int64TensorFromArray (targets.map (·.toInt64))).reshapeChecked
+  let targetTensor ← IO.ofExcept <| Tensor.fromInt64ArrayAs? (targets.map (·.toInt64))
     #[batchSize, config.seqLen]
 
   let newState := { st with

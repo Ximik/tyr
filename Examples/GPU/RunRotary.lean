@@ -37,9 +37,9 @@ def generateFixtures : IO Unit := do
   let cos : Tensor { shape := #[64, 32], dtype := .Float32, device := device } := cosCpu.to device
   let sin : Tensor { shape := #[64, 32], dtype := .Float32, device := device } := sinCpu.to device
 
-  let x4 : Tensor { shape := #[1, 64, 1, 64], dtype := .Float32, device := device } := Tensor.reshapeChecked x #[1, 64, 1, 64]
+  let x4 : Tensor { shape := #[1, 64, 1, 64], dtype := .Float32, device := device } := Tensor.reshape x #[1, 64, 1, 64] (by simp)
   let expected4 := Tensor.applyRotary x4 cos sin
-  let expected : Tensor { shape := #[64, 64], dtype := .Float32, device := device } := Tensor.reshapeChecked expected4 #[64, 64]
+  let expected : Tensor { shape := #[64, 64], dtype := .Float32, device := device } := Tensor.reshape expected4 #[64, 64] (by simp)
 
   Tensor.saveTensor x (fixtureFile "x").toString
   Tensor.saveTensor sin (fixtureFile "sin").toString

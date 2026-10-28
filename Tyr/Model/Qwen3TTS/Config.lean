@@ -22,7 +22,22 @@ structure SpeakerEncoderConfig where
   encRes2NetScale : Nat := 8
   encSeChannels : Nat := 128
   sampleRate : Nat := 24000
-  deriving Repr, Inhabited
+  /-- Each "same"-padded TDNN conv keeps its length only when `dilation * (kernel - 1)` is even;
+      the index defaults match the encoder's own lookups. Checked when the config is built. -/
+  samePaddingEven :
+      2 ∣ encDilations.getD 0 1 * (encKernelSizes.getD 0 5 - 1) ∧
+      2 ∣ encDilations.getD 1 2 * (encKernelSizes.getD 1 3 - 1) ∧
+      2 ∣ encDilations.getD 2 3 * (encKernelSizes.getD 2 3 - 1) ∧
+      2 ∣ encDilations.getD 3 4 * (encKernelSizes.getD 3 3 - 1) ∧
+      2 ∣ encDilations.getD 4 1 * (encKernelSizes.getD 4 1 - 1) := by decide
+  /-- The SE-Res2Net blocks add their input as the residual, so their channels must match. -/
+  residualChannels :
+      encChannels.getD 0 512 = encChannels.getD 1 512 ∧
+      encChannels.getD 1 512 = encChannels.getD 2 512 ∧
+      encChannels.getD 2 512 = encChannels.getD 3 512 := by decide
+  deriving Repr
+
+instance : Inhabited SpeakerEncoderConfig := ⟨{}⟩
 
 /-- Codec sub-talker config (predicts codebooks 1..N from codebook 0 context). -/
 structure TalkerCodePredictorConfig where

@@ -103,7 +103,7 @@ example (_x : Tensor ⟨#[2, 2], .Float8E4M3FN, .CPU⟩) : True := by
     let dtype := selected.val
     for data in #[#[2.0, 1.0, 0.0, 3.0], #[0.0, -1.0, 1.0, 0.0],
         #[1.0, 0.5, 1.0, 2.0]] do
-      let input := ((Tensor.fromFloatArray data).reshapeChecked #[2, 2]).castDType dtype
+      let input := (← IO.ofExcept (Tensor.fromFloatArrayAs? data #[2, 2])).castDType dtype
       match Tensor.matrixLog? input with
       | .error message => LeanTest.fail s!"Supported real matrix logarithm failed: {message}"
       | .ok logarithm =>

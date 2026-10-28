@@ -176,12 +176,12 @@ def maskedCrossEntropy? {batch seq vocab : Nat} {d m result : DType} {dev : Devi
     throw "maskedCrossEntropy requires a real numeric or Bool mask"
   -- Flatten for cross-entropy
   let batchSeq := batch * seq
-  let logitsFlat ← logits.reshapeChecked? #[batchSeq, vocab]
-  let targetsFlat ← targets.reshapeChecked? #[batchSeq]
+  let logitsFlat := logits.reshape #[batchSeq, vocab]
+  let targetsFlat := targets.reshape #[batchSeq]
   -- Compute per-element loss
   let lossesFlat ← Tensor.crossEntropyNone? logitsFlat targetsFlat
   -- Apply mask and compute mean over valid positions
-  let maskFlat ← mask.reshapeChecked? #[batchSeq]
+  let maskFlat := mask.reshape #[batchSeq]
   Tensor.checkPointwise lossesFlat maskFlat
   let maskedLosses : Tensor ⟨#[batchSeq], DType.promote d m, dev⟩ ←
     Tensor.ofRaw (← RawTensor.mulChecked lossesFlat.raw maskFlat.raw)
@@ -210,10 +210,6 @@ def maskedCrossEntropy {batch seq vocab : Nat} {d m result : DType} {dev : Devic
   | .error message => nativeInvariantFailure s!"maskedCrossEntropy: {message}"
 
 /-! ## Data Preparation -/
-
-/-- Build an Int64 token tensor from host data over the raw FFI boundary. -/
-private def int64TensorFromArray (arr : Array Int64) : Tensor { shape := #[arr.size], dtype := .Int64, device := .CPU } :=
-  Tensor.fromInt64Array arr
 
 /-- Prepare SFT batch from tokenized conversations.
     Creates input/target pairs where targets are shifted and masked.
@@ -261,12 +257,9 @@ def prepareSFTBatch (convs : Array TokenizedConversation) (maxLen : Nat) (padTok
         allMasks := allMasks.push 0.0  -- Don't train on padding
 
   -- Convert to tensors
-  let inputsTensor := (int64TensorFromArray allInputs).reshapeChecked
-    #[batchSize, seqLen]
-  let targetsTensor := (int64TensorFromArray allTargets).reshapeChecked
-    #[batchSize, seqLen]
-  let maskTensor := (Tensor.fromFloatArray allMasks).reshapeChecked
-    #[batchSize, seqLen]
+  let inputsTensor ← IO.ofExcept <| Tensor.fromInt64ArrayAs? allInputs #[batchSize, seqLen]
+  let targetsTensor ← IO.ofExcept <| Tensor.fromInt64ArrayAs? allTargets #[batchSize, seqLen]
+  let maskTensor ← IO.ofExcept <| Tensor.fromFloatArrayAs? allMasks #[batchSize, seqLen]
 
   return {
     batchSize := batchSize

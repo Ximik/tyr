@@ -65,9 +65,9 @@ private def close {σ τ : StaticSpec} (x : Tensor σ) (y : Tensor τ) (tol : Fl
     let block ← TensorStruct.castTo (ResnetBlock (device := .CPU) 32 64 dtype) block
     let x ← Tensor.randn #[2, 32, 2, 3]
     let x := Tensor.castLike attn.q.weight x
-    let y := attn.forward x
+    let y := attn.forward x (by decide) (by decide)
     LeanTest.assertEqual y.actualSpec.dtype (if bf16 then .BFloat16 else .Float32)
-    let z := block.forward y
+    let z := block.forward y (by decide) (by decide)
     LeanTest.assertEqual z.runtimeShape #[2, 64, 2, 3]
     LeanTest.assertEqual z.actualSpec.dtype y.actualSpec.dtype
     for v in (← z.toFloatArray) do LeanTest.assertTrue v.isFinite
@@ -75,7 +75,7 @@ private def close {σ τ : StaticSpec} (x : Tensor σ) (y : Tensor τ) (tol : Fl
 @[test] def testVAEFullDecoderIndexedSpatialShape : IO Unit := do
   let dec ← Decoder.init
   let x ← Tensor.randn #[1, 32, 2, 3]
-  let output := dec.forward x
+  let output := dec.forward x (by decide) (by decide)
   LeanTest.assertEqual output.runtimeShape #[1, 3, 16, 24]
   for v in (← output.toFloatArray) do LeanTest.assertTrue v.isFinite
   let ae : AutoEncoder (device := .CPU) mixedStatistics := {
@@ -90,7 +90,7 @@ private def close {σ τ : StaticSpec} (x : Tensor σ) (y : Tensor τ) (tol : Fl
 
 @[test] def testVAELatentUnpack : IO Unit := do
   let xs := Array.ofFn (n := 128 * 16 * 16) fun i => i.val.toFloat
-  let input := (Tensor.fromFloatArray xs).reshapeChecked #[1, 128, 16, 16]
+  let input := (Tensor.fromFloatArray xs).reshape #[1, 128, 16, 16] (by simp [xs])
   let result ← (AutoEncoder.unpackLatents16x16 input).toFloatArray
   for c in [:32] do
     for h in [:32] do
@@ -123,7 +123,7 @@ private def writeConvCheckpoint (path : System.FilePath) (bf16 wrongShape : Bool
     let ⟨_, conv⟩ ← loadConv2d path.toString "conv" 1 1 3 1
     LeanTest.assertEqual conv.weight.actualSpec.dtype (if bf16 then .BFloat16 else .Float32)
     close (conv.forward (Tensor.castLike conv.weight (Tensor.ones #[1, 1, 3, 3])))
-      ((Tensor.fromFloatArray #[4, 6, 4, 6, 9, 6, 4, 6, 4]).reshapeChecked #[1, 1, 3, 3])
+      ((Tensor.fromFloatArray #[4, 6, 4, 6, 9, 6, 4, 6, 4]).reshape #[1, 1, 3, 3])
   let path := dir / "invalid.safetensors"
   writeConvCheckpoint path false true
   let rejected ← try

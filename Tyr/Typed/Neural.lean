@@ -166,11 +166,16 @@ def convExtent (input kernel stride padding dilation : Nat) : Nat :=
   ((input + 2 * padding - (dilation * (kernel - 1) + 1)) /
     stride + 1)
 
+/-- A stride-1 convolution padded by half its odd kernel keeps any nonempty extent. -/
+theorem convExtent_same {n kernel padding : Nat} (hn : 0 < n) (hk : 2 * padding + 1 = kernel) :
+    convExtent n kernel 1 padding 1 = n := by
+  unfold convExtent; omega
+
 /-- Project a spatial parameter, repeating singleton arrays as native conv2d does.
 Only lengths one and two are valid; the native operation still receives the
 original array and rejects invalid lengths. The zero for a missing entry only
 makes the result index total and is never supplied as a native default. -/
-def conv2dParam (values : Array Nat) (axis : Nat) : Nat :=
+@[simp] def conv2dParam (values : Array Nat) (axis : Nat) : Nat :=
   values.getD (if values.size == 1 then 0 else axis) 0
 
 private def checkConvolutionOperands {σ τ υ : StaticSpec}

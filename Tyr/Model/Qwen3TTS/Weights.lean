@@ -142,12 +142,12 @@ private def loadCodePredictorProjectionSharded (modelDir : String) (cfg : Talker
   match weight, bias with
   | some w, some b => pure (reqGradFalse w, reqGradFalse b)
   | none, none =>
-    if cp.hiddenSize == cfg.hiddenSize then
+    if hSame : cp.hiddenSize = cfg.hiddenSize then
       let support ← dtype.val.acquireConstantSupport device
       let _ := support.down
       let w := Tensor.eyeFor (n := cp.hiddenSize) dtype.val device
       let b := Tensor.zerosFor { shape := #[cp.hiddenSize], dtype := dtype.val, device }
-      pure (w.reshapeChecked #[cfg.codePredictorConfig.hiddenSize, cfg.hiddenSize], b)
+      pure (w.reshape #[cfg.codePredictorConfig.hiddenSize, cfg.hiddenSize] (by simp [cp, hSame]), b)
     else
       throw <| IO.userError
         "Missing talker.code_predictor.small_to_mtp_projection.* and hidden sizes differ; cannot build projection."

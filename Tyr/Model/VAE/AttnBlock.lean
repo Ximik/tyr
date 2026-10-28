@@ -49,6 +49,7 @@ def init (channels : Nat) (device : Device := .CPU) (dtype : DType := .Float32) 
 def forward {batch channels height width : Nat}
     (attn : AttnBlock (device := device) (dtype := dtype) channels)
     (x : Tensor { dtype := dtype, device := device, shape := #[batch, channels, height, width] })
+    (hh : 0 < height) (hw : 0 < width)
     : Tensor { dtype := dtype, device := device, shape := #[batch, channels, height, width] } :=
   let h := attn.norm.forward x
 
@@ -59,9 +60,9 @@ def forward {batch channels height width : Nat}
 
   -- Reshape to [batch, channels, height*width]
   let spatial := height * width
-  let q := Tensor.reshapeChecked q #[batch, channels, spatial]
-  let k := Tensor.reshapeChecked k #[batch, channels, spatial]
-  let v := Tensor.reshapeChecked v #[batch, channels, spatial]
+  let q := Tensor.reshape q #[batch, channels, spatial] (by simp +zetaDelta [Tensor.convExtent_same hh (by decide : 2 * 0 + 1 = 1), Tensor.convExtent_same hw (by decide : 2 * 0 + 1 = 1), Nat.mul_assoc])
+  let k := Tensor.reshape k #[batch, channels, spatial] (by simp +zetaDelta [Tensor.convExtent_same hh (by decide : 2 * 0 + 1 = 1), Tensor.convExtent_same hw (by decide : 2 * 0 + 1 = 1), Nat.mul_assoc])
+  let v := Tensor.reshape v #[batch, channels, spatial] (by simp +zetaDelta [Tensor.convExtent_same hh (by decide : 2 * 0 + 1 = 1), Tensor.convExtent_same hw (by decide : 2 * 0 + 1 = 1), Nat.mul_assoc])
 
   -- Compute attention: softmax(Qᵀ K / sqrt(channels)) V
   -- Q: [batch, channels, spatial], K: [batch, channels, spatial]
@@ -79,11 +80,11 @@ def forward {batch channels height width : Nat}
   let out := Tensor.transpose out 1 2  -- [batch, channels, spatial]
 
   -- Reshape back to spatial
-  let out := Tensor.reshapeChecked out #[batch, channels, height, width]
+  let out := Tensor.reshape out #[batch, channels, height, width] (by simp +zetaDelta [Nat.mul_assoc])
 
   -- Output projection + residual
   let out := Tensor.conv2dBias out attn.proj_out.weight attn.proj_out.bias #[1, 1] #[0, 0]
-  let out := Tensor.reshapeChecked out #[batch, channels, height, width]
+  let out := Tensor.reshape out #[batch, channels, height, width] (by simp +zetaDelta [Tensor.convExtent_same hh (by decide : 2 * 0 + 1 = 1), Tensor.convExtent_same hw (by decide : 2 * 0 + 1 = 1), Nat.mul_assoc])
 
   Tensor.add x out
 

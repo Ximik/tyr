@@ -189,17 +189,35 @@ private def parseTalkerConfig (j : Json) (d : TalkerConfig := {}) : TalkerConfig
   }
 
 private def parseSpeakerEncoderConfig (j : Json) (d : SpeakerEncoderConfig := {})
-    : SpeakerEncoderConfig := {
+    : Except String SpeakerEncoderConfig :=
+  let encChannels := getUInt64ArrayFieldD j "enc_channels" d.encChannels
+  let encKernelSizes := getUInt64ArrayFieldD j "enc_kernel_sizes" d.encKernelSizes
+  let encDilations := getUInt64ArrayFieldD j "enc_dilations" d.encDilations
+  if samePaddingEven :
+      2 ∣ encDilations.getD 0 1 * (encKernelSizes.getD 0 5 - 1) ∧
+      2 ∣ encDilations.getD 1 2 * (encKernelSizes.getD 1 3 - 1) ∧
+      2 ∣ encDilations.getD 2 3 * (encKernelSizes.getD 2 3 - 1) ∧
+      2 ∣ encDilations.getD 3 4 * (encKernelSizes.getD 3 3 - 1) ∧
+      2 ∣ encDilations.getD 4 1 * (encKernelSizes.getD 4 1 - 1) then
+  if residualChannels :
+      encChannels.getD 0 512 = encChannels.getD 1 512 ∧
+      encChannels.getD 1 512 = encChannels.getD 2 512 ∧
+      encChannels.getD 2 512 = encChannels.getD 3 512 then .ok {
   melDim := getNatFieldD j "mel_dim" d.melDim
   encDim := getNatFieldD j "enc_dim" d.encDim
-  encChannels := getUInt64ArrayFieldD j "enc_channels" d.encChannels
-  encKernelSizes := getUInt64ArrayFieldD j "enc_kernel_sizes" d.encKernelSizes
-  encDilations := getUInt64ArrayFieldD j "enc_dilations" d.encDilations
+  encChannels
+  encKernelSizes
+  encDilations
   encAttentionChannels := getNatFieldD j "enc_attention_channels" d.encAttentionChannels
   encRes2NetScale := getNatFieldD j "enc_res2net_scale" d.encRes2NetScale
   encSeChannels := getNatFieldD j "enc_se_channels" d.encSeChannels
   sampleRate := getNatFieldD j "sample_rate" d.sampleRate
+  samePaddingEven
+  residualChannels
 }
+  else .error s!"Invalid speaker encoder config: enc_channels {encChannels} must be equal across the SE-Res2Net blocks"
+  else .error
+    s!"Invalid speaker encoder config: dilation * (kernel - 1) must be even for every TDNN block, got kernels {encKernelSizes} and dilations {encDilations}"
 
 namespace Qwen3TTSConfig
 
@@ -210,10 +228,10 @@ def loadFromFile (path : String) (defaults : Qwen3TTSConfig := {}) : IO Qwen3TTS
     match getObjVal? root "talker_config" with
     | some j => parseTalkerConfig j defaults.talkerConfig
     | none => defaults.talkerConfig
-  let speakerEncoderConfig :=
+  let speakerEncoderConfig ←
     match getObjVal? root "speaker_encoder_config" with
-    | some j => parseSpeakerEncoderConfig j defaults.speakerEncoderConfig
-    | none => defaults.speakerEncoderConfig
+    | some j => IO.ofExcept (parseSpeakerEncoderConfig j defaults.speakerEncoderConfig)
+    | none => pure defaults.speakerEncoderConfig
   pure {
     talkerConfig
     speakerEncoderConfig

@@ -87,8 +87,11 @@ private def getStringArrayFieldD (j : Json) (key : String) (d : Array String) : 
       if out.isEmpty then d else out
   | none => d
 
-private def parseAudioConfig (j : Json) (d : AudioEncoderConfig := {}) : AudioEncoderConfig := {
-  numMelBins := getNatFieldD j "num_mel_bins" d.numMelBins
+private def parseAudioConfig (j : Json) (d : AudioEncoderConfig := {}) : Except String AudioEncoderConfig :=
+  let numMelBins := getNatFieldD j "num_mel_bins" d.numMelBins
+  if numMelBinsPos : 0 < numMelBins then .ok {
+  numMelBins
+  numMelBinsPos
   encoderLayers := getNatFieldD j "encoder_layers" d.encoderLayers
   encoderAttentionHeads := getNatFieldD j "encoder_attention_heads" d.encoderAttentionHeads
   encoderFfnDim := getNatFieldD j "encoder_ffn_dim" d.encoderFfnDim
@@ -106,6 +109,7 @@ private def parseAudioConfig (j : Json) (d : AudioEncoderConfig := {}) : AudioEn
   convChunkSize := getNatFieldD j "conv_chunksize" d.convChunkSize
   downsampleHiddenSize := getNatFieldD j "downsample_hidden_size" d.downsampleHiddenSize
 }
+  else .error "Invalid Qwen3-ASR audio config: num_mel_bins must be positive"
 
 private def parseTextConfig (j : Json) (d : TextConfig := {}) : TextConfig := {
   vocabSize := getNatFieldD j "vocab_size" d.vocabSize
@@ -126,16 +130,16 @@ private def parseTextConfig (j : Json) (d : TextConfig := {}) : TextConfig := {
   attentionDropout := getFloatFieldD j "attention_dropout" d.attentionDropout
 }
 
-private def parseThinkerConfig (j : Json) (d : ThinkerConfig := {}) : ThinkerConfig :=
-  let audioConfig :=
+private def parseThinkerConfig (j : Json) (d : ThinkerConfig := {}) : Except String ThinkerConfig := do
+  let audioConfig ←
     match getObjVal? j "audio_config" with
     | some a => parseAudioConfig a d.audioConfig
-    | none => d.audioConfig
+    | none => pure d.audioConfig
   let textConfig :=
     match getObjVal? j "text_config" with
     | some t => parseTextConfig t d.textConfig
     | none => d.textConfig
-  {
+  pure {
     audioConfig
     textConfig
     audioTokenId := getTokenIdFieldD j "audio_token_id" d.audioTokenId
@@ -151,10 +155,10 @@ namespace Qwen3ASRConfig
 /-- Load Qwen3-ASR config from HuggingFace `config.json`. -/
 def loadFromFile (path : String) (defaults : Qwen3ASRConfig := {}) : IO Qwen3ASRConfig := do
   let root ← parseJsonFile path
-  let thinkerConfig :=
+  let thinkerConfig ←
     match getObjVal? root "thinker_config" with
-    | some t => parseThinkerConfig t defaults.thinkerConfig
-    | none => defaults.thinkerConfig
+    | some t => IO.ofExcept (parseThinkerConfig t defaults.thinkerConfig)
+    | none => pure defaults.thinkerConfig
   let supportLanguages := getStringArrayFieldD root "support_languages" defaults.supportLanguages
   let timestampTokenId := getTokenIdFieldD root "timestamp_token_id" defaults.timestampTokenId
   let timestampSegmentTime := getFloatFieldD root "timestamp_segment_time" defaults.timestampSegmentTime

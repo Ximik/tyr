@@ -280,10 +280,11 @@ def forward2d {tokens : Nat}
   let flatIdx : Tensor { device := device, shape := #[tokens * k], dtype := .Int64 } := Tensor.reshape topIdx #[tokens * k]
   let flatW : Tensor { dtype := dtype, device := device, shape := #[tokens * k] } := Tensor.reshape weights #[tokens * k]
   let device := x.device
-  if tokens == 1 then
+  if hOne : tokens = 1 then
     -- Single-token decode: batched path (k distinct experts, no dispatch scan).
-    let x1 : Tensor { dtype := dtype, device := device, shape := #[1, cfg.hidden_size] } := Tensor.reshapeChecked x #[1, cfg.hidden_size]
-    pure (Tensor.reshapeChecked (← forwardDecode1 cfg m x1 (flatIdx.reshapeChecked #[k]) (flatW.reshapeChecked #[k]) useFused) #[tokens, cfg.hidden_size])
+    let x1 : Tensor { dtype := dtype, device := device, shape := #[1, cfg.hidden_size] } := Tensor.reshape x #[1, cfg.hidden_size] (by simp [hOne])
+    let out ← forwardDecode1 cfg m x1 (flatIdx.reshape #[k] (by simp [hOne])) (flatW.reshape #[k] (by simp [hOne])) useFused
+    pure (Tensor.reshape out #[tokens, cfg.hidden_size] (by simp [hOne]))
   else do
     let h := cfg.hidden_size
     let mi := cfg.moe_intermediate_size
@@ -342,7 +343,9 @@ def forward2d {tokens : Nat}
           mulSame (Tensor.silu (Tensor.linear xE gateW)) (Tensor.linear xE upW)
         let outE : Tensor { dtype := dtype, device := device, shape := #[nE, cfg.hidden_size] } := Tensor.linear hid downW
         -- Routing weights multiply the expert OUTPUT (moe_apply_router_weight_on_input=false).
-        let outEW : Tensor { dtype := dtype, device := device, shape := #[nE, cfg.hidden_size] } := mulBroadcast (Tensor.reshapeChecked wE.2 #[nE, 1]) outE
+        -- Both selections use `maskE`, so their counts agree at runtime.
+        let wCol ← IO.ofExcept (wE.2.reshapeChecked? #[nE, 1])
+        let outEW : Tensor { dtype := dtype, device := device, shape := #[nE, cfg.hidden_size] } := mulBroadcast wCol outE
         let idxRows : Tensor { device := device, shape := #[nE, cfg.hidden_size], dtype := .Int64 } :=
           Tensor.reshape (Tensor.expand (Tensor.reshape tokE #[nE, 1]) #[nE, cfg.hidden_size]) #[nE, cfg.hidden_size]
         acc := scatterAdd acc 0 idxRows outEW

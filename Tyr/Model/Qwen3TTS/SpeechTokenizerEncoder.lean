@@ -63,6 +63,35 @@ private def extraPaddingForCausalConv (inputLen kernel stride dilation : Nat) : 
     let baseLen := inputLen + paddingTotal kernel stride dilation
     if neededLen >= baseLen then neededLen - baseLen else 0
 
+private theorem ceilDiv_one (x : Nat) : ceilDiv x 1 = x := by simp [ceilDiv]
+
+private theorem ceilDiv_pos {x d : Nat} (hx : 0 < x) (hd : 0 < d) : 0 < ceilDiv x d := by
+  simp only [ceilDiv, show (d == 0) = false by simp; omega]
+  exact Nat.div_pos (by omega) hd
+
+/-- Causal padding makes a convolution emit exactly `ceilDiv inLen stride` frames. -/
+private theorem causalConvLen {inLen kernel stride dilation : Nat}
+    (hx : 0 < inLen) (hs : 0 < stride) (hk : stride ≤ effectiveKernel kernel dilation) :
+    (inLen + paddingTotal kernel stride dilation + extraPaddingForCausalConv inLen kernel stride dilation
+        + 2 * 0 - (dilation * (kernel - 1) + 1)) / stride + 1 = ceilDiv inLen stride := by
+  have hq1 := ceilDiv_pos hx hs
+  have hceil : ceilDiv inLen stride = (inLen + stride - 1) / stride := by
+    simp [ceilDiv]; omega
+  generalize hq : ceilDiv inLen stride = q at hq1 hceil
+  have hlt : inLen + stride - 1 < q * stride + stride := hceil ▸ Nat.lt_div_mul_add hs
+  have hsub : (q - 1) * stride = q * stride - stride := Nat.sub_one_mul q stride
+  have hcomm : (kernel - 1) * dilation = dilation * (kernel - 1) := Nat.mul_comm _ _
+  unfold extraPaddingForCausalConv paddingTotal
+  simp only [hq, show (q == 0) = false by simp; omega]
+  unfold effectiveKernel at hk ⊢
+  have hL : inLen + ((kernel - 1) * dilation + 1 - stride)
+      + (if (q - 1) * stride + ((kernel - 1) * dilation + 1) ≥ inLen + ((kernel - 1) * dilation + 1 - stride)
+         then (q - 1) * stride + ((kernel - 1) * dilation + 1) - (inLen + ((kernel - 1) * dilation + 1 - stride)) else 0)
+      + 2 * 0 - (dilation * (kernel - 1) + 1) = (q - 1) * stride := by
+    split <;> omega
+  simp only [Bool.false_eq_true, ↓reduceIte]
+  rw [hL, Nat.mul_div_cancel _ hs]; omega
+
 private def addBias3d {batch channels frames : Nat}
     (x : Tensor { shape := #[batch, channels, frames], dtype := dtypes.compute.val, device := device })
     (bias : Tensor { shape := #[channels], dtype := dtypes.compute.val, device := device }) : Tensor { shape := #[batch, channels, frames], dtype := dtypes.compute.val, device := device } :=
@@ -81,14 +110,6 @@ private def clampMin1d {n : Nat} {dtype : DType}
     : Tensor { shape := #[n], dtype, device := device } :=
   let minT := Tensor.castLike x (Tensor.full #[n] minVal false x.device)
   Tensor.maximum x minT
-
-private def stack2dDyn {batch frames k : Nat}
-    (tensors : Array (Tensor { shape := #[batch, frames], dtype := .Int64, device := device })) : Tensor { shape := #[k, batch, frames], dtype := .Int64, device := device } :=
-  if tensors.isEmpty then
-    (Tensor.reshapeChecked (Tensor.fullInt #[0, batch, frames] 0) #[k, batch, frames]).to device
-  else
-    let unsq := tensors.map (fun t => Tensor.unsqueeze t 0)
-    Tensor.catManyChecked (unsq.map Tensor.packShape) 0 #[k, batch, frames]
 
 /-! ## Parameters -/
 
@@ -362,18 +383,21 @@ def numCodeGroups (m : (SpeechTokenizer12HzEncoder (device := device) (dtypes :=
 private def causalConvConstant {batch inC outC inLen outLen kernel : Nat}
     (x : Tensor { shape := #[batch, inC, inLen], dtype := dtypes.compute.val, device := device })
     (weight : Tensor { shape := #[outC, inC, kernel], dtype := dtypes.compute.val, device := device })
-    (bias : Option (Tensor { shape := #[outC], dtype := dtypes.compute.val, device := device }) := none)
-    (stride : Nat := 1)
-    (dilation : Nat := 1)
+    (bias : Option (Tensor { shape := #[outC], dtype := dtypes.compute.val, device := device }))
+    (stride dilation : Nat)
+    (hx : 0 < inLen) (hs : 0 < stride) (hk : stride ≤ effectiveKernel kernel dilation)
+    (hOut : ceilDiv inLen stride = outLen)
     : Tensor { shape := #[batch, outC, outLen], dtype := dtypes.compute.val, device := device } :=
   let leftPad : Nat := paddingTotal kernel stride dilation
   let extraPad : Nat := extraPaddingForCausalConv inLen kernel stride dilation
   let left : Tensor { shape := #[batch, inC, leftPad], dtype := dtypes.compute.val, device := device } := Tensor.castLike x (Tensor.zeros #[batch, inC, leftPad] false x.device)
   let right : Tensor { shape := #[batch, inC, extraPad], dtype := dtypes.compute.val, device := device } := Tensor.castLike x (Tensor.zeros #[batch, inC, extraPad] false x.device)
-  let xPad0 : Tensor { shape := #[batch, inC, inLen + leftPad], dtype := dtypes.compute.val, device := device } := Tensor.reshapeChecked (Tensor.cat left x 2) #[batch, inC, inLen + leftPad]
+  let xPad0 : Tensor { shape := #[batch, inC, inLen + leftPad], dtype := dtypes.compute.val, device := device } :=
+    Tensor.reshape (Tensor.cat left x 2) #[batch, inC, inLen + leftPad] (by simp [Nat.add_comm])
   let xPad : Tensor { shape := #[batch, inC, inLen + leftPad + extraPad], dtype := dtypes.compute.val, device := device } := Tensor.reshape (Tensor.cat xPad0 right 2) #[batch, inC, inLen + leftPad + extraPad]
   let y0 : Tensor { shape := #[batch, outC, outLen], dtype := dtypes.compute.val, device := device } :=
-    Tensor.reshapeChecked (Tensor.conv1d xPad weight stride 0 dilation) #[batch, outC, outLen]
+    Tensor.reshape (Tensor.conv1d xPad weight stride 0 dilation) #[batch, outC, outLen]
+      (by simp only [leftPad, extraPad]; rw [causalConvLen hx hs hk, hOut])
   match bias with
   | some b => addBias3d y0 b
   | none => y0
@@ -381,9 +405,10 @@ private def causalConvConstant {batch inC outC inLen outLen kernel : Nat}
 private def causalConvReplicate {batch inC outC inLen outLen kernel : Nat}
     (x : Tensor { shape := #[batch, inC, inLen], dtype := dtypes.compute.val, device := device })
     (weight : Tensor { shape := #[outC, inC, kernel], dtype := dtypes.compute.val, device := device })
-    (bias : Option (Tensor { shape := #[outC], dtype := dtypes.compute.val, device := device }) := none)
-    (stride : Nat := 1)
-    (dilation : Nat := 1)
+    (bias : Option (Tensor { shape := #[outC], dtype := dtypes.compute.val, device := device }))
+    (stride dilation : Nat)
+    (hx : 0 < inLen) (hs : 0 < stride) (hk : stride ≤ effectiveKernel kernel dilation)
+    (hOut : ceilDiv inLen stride = outLen)
     : Tensor { shape := #[batch, outC, outLen], dtype := dtypes.compute.val, device := device } :=
   let leftPad : Nat := paddingTotal kernel stride dilation
   let extraPad : Nat := extraPaddingForCausalConv inLen kernel stride dilation
@@ -395,24 +420,27 @@ private def causalConvReplicate {batch inC outC inLen outLen kernel : Nat}
       Tensor.castLike x (Tensor.zeros #[batch, inC, extraPad] false x.device)
     else
       Tensor.expand last #[batch, inC, extraPad]
-  let xPad0 : Tensor { shape := #[batch, inC, inLen + leftPad], dtype := dtypes.compute.val, device := device } := Tensor.reshapeChecked (Tensor.cat left x 2) #[batch, inC, inLen + leftPad]
+  let xPad0 : Tensor { shape := #[batch, inC, inLen + leftPad], dtype := dtypes.compute.val, device := device } :=
+    Tensor.reshape (Tensor.cat left x 2) #[batch, inC, inLen + leftPad] (by simp [Nat.add_comm])
   let xPad : Tensor { shape := #[batch, inC, inLen + leftPad + extraPad], dtype := dtypes.compute.val, device := device } := Tensor.reshape (Tensor.cat xPad0 right 2) #[batch, inC, inLen + leftPad + extraPad]
   let y0 : Tensor { shape := #[batch, outC, outLen], dtype := dtypes.compute.val, device := device } :=
-    Tensor.reshapeChecked (Tensor.conv1d xPad weight stride 0 dilation) #[batch, outC, outLen]
+    Tensor.reshape (Tensor.conv1d xPad weight stride 0 dilation) #[batch, outC, outLen]
+      (by simp only [leftPad, extraPad]; rw [causalConvLen hx hs hk, hOut])
   match bias with
   | some b => addBias3d y0 b
   | none => y0
 
 private def forwardResBlock {batch frames inC hiddenC : Nat}
     (blk : EncoderResBlock (device := device) (dtypes := dtypes) inC hiddenC)
-    (x : Tensor { shape := #[batch, inC, frames], dtype := dtypes.compute.val, device := device }) : Tensor { shape := #[batch, inC, frames], dtype := dtypes.compute.val, device := device } :=
+    (x : Tensor { shape := #[batch, inC, frames], dtype := dtypes.compute.val, device := device })
+    (hf : 0 < frames) : Tensor { shape := #[batch, inC, frames], dtype := dtypes.compute.val, device := device } :=
   let residual := x
   let h0 : Tensor { shape := #[batch, inC, frames], dtype := dtypes.compute.val, device := device } := Tensor.elu x
   let h1 : Tensor { shape := #[batch, hiddenC, frames], dtype := dtypes.compute.val, device := device } :=
-    causalConvConstant h0 blk.conv1Weight (some blk.conv1Bias) 1 1
+    causalConvConstant h0 blk.conv1Weight (some blk.conv1Bias) 1 1 hf (by decide) (by decide) (ceilDiv_one _)
   let h2 : Tensor { shape := #[batch, hiddenC, frames], dtype := dtypes.compute.val, device := device } := Tensor.elu h1
   let h3 : Tensor { shape := #[batch, inC, frames], dtype := dtypes.compute.val, device := device } :=
-    causalConvConstant h2 blk.conv2Weight (some blk.conv2Bias) 1 1
+    causalConvConstant h2 blk.conv2Weight (some blk.conv2Bias) 1 1 hf (by decide) (by decide) (ceilDiv_one _)
   Tensor.add residual h3
 
 private def forwardAttention {batch seq : Nat}
@@ -473,42 +501,49 @@ private def quantizeWithCodebook {batch frames : Nat}
     Tensor.reshape (Tensor.transpose x 1 2) #[batch * frames, 256]
 
   let x2 : Tensor { shape := #[batch * frames, 1], dtype := dtypes.compute.val, device := device } := by simpa using (Tensor.reshape (Tensor.sumDim (Tensor.mul xFlat xFlat) 1 true) #[batch * frames, 1])
-  let e2 : Tensor { shape := #[2048, 1], dtype := dtypes.compute.val, device := device } := by simpa using (Tensor.reshapeChecked (Tensor.sumDim (Tensor.mul embed embed) 1 true) #[2048, 1])
+  let e2 : Tensor { shape := #[2048, 1], dtype := dtypes.compute.val, device := device } := by simpa using (Tensor.reshape (Tensor.sumDim (Tensor.mul embed embed) 1 true) #[2048, 1] (by simp))
   let dot : Tensor { shape := #[batch * frames, 2048], dtype := dtypes.compute.val, device := device } := Tensor.mm xFlat (Tensor.transpose2d embed)
   let x2e : Tensor { shape := #[batch * frames, 2048], dtype := dtypes.compute.val, device := device } := Tensor.expand x2 #[batch * frames, 2048]
-  let e2Row : Tensor { shape := #[1, 2048], dtype := dtypes.compute.val, device := device } := Tensor.reshapeChecked (Tensor.transpose2d e2) #[1, 2048]
+  let e2Row : Tensor { shape := #[1, 2048], dtype := dtypes.compute.val, device := device } := Tensor.reshape (Tensor.transpose2d e2) #[1, 2048] (by simp)
   let e2e : Tensor { shape := #[batch * frames, 2048], dtype := dtypes.compute.val, device := device } := Tensor.expand e2Row #[batch * frames, 2048]
   let dist : Tensor { shape := #[batch * frames, 2048], dtype := dtypes.compute.val, device := device } := Tensor.sub (Tensor.add x2e e2e) (Tensor.mulScalar dot 2.0)
 
-  let idxFlat : Tensor { shape := #[batch * frames], dtype := .Int64, device := device } := Tensor.reshapeChecked (Tensor.argmaxChecked (Tensor.mulScalar dist (-1.0)) 1) #[batch * frames]
+  let idxFlat : Tensor { shape := #[batch * frames], dtype := .Int64, device := device } := Tensor.reshape (Tensor.argmaxChecked (Tensor.mulScalar dist (-1.0)) 1) #[batch * frames]
   let quantFlat : Tensor { shape := #[batch * frames, 256], dtype := dtypes.compute.val, device := device } := Tensor.embedding1d idxFlat embed
   let quant : Tensor { shape := #[batch, 256, frames], dtype := dtypes.compute.val, device := device } :=
-    Tensor.reshapeChecked (Tensor.transpose (Tensor.reshapeChecked quantFlat #[batch, frames, 256]) 1 2) #[batch, 256, frames]
+    Tensor.reshape (Tensor.transpose (Tensor.reshape quantFlat #[batch, frames, 256]) 1 2) #[batch, 256, frames]
   let idx : Tensor { shape := #[batch, frames], dtype := .Int64, device := device } := Tensor.reshape idxFlat #[batch, frames]
   (idx, quant)
 
-private def rvqEncode {batch frames k : Nat}
+/-- Quantize residually through `cbs`, stacking one index row per codebook. -/
+private def rvqStack {batch frames : Nat}
+    (residual : Tensor { shape := #[batch, 256, frames], dtype := dtypes.compute.val, device := device }) :
+    (cbs : List (EncoderCodebook (device := device) (dtypes := dtypes))) →
+    Tensor { shape := #[cbs.length, batch, frames], dtype := .Int64, device := device }
+  | [] => (Tensor.fullInt #[0, batch, frames] 0).to residual.device
+  | cb :: rest =>
+    let (idx, quantized) := quantizeWithCodebook cb residual
+    let tail := rvqStack (Tensor.sub residual quantized) rest
+    Tensor.reshape (Tensor.cat (Tensor.unsqueeze idx 0) tail 0) #[rest.length + 1, batch, frames]
+      (by simp [Nat.add_comm])
+
+private def rvqEncode {batch frames : Nat}
     (rvq : (EncodeRVQ (device := device) (dtypes := dtypes)))
     (embeddings : Tensor { shape := #[batch, 512, frames], dtype := dtypes.compute.val, device := device })
-    (numLayers : Nat)
-    : Tensor { shape := #[k, batch, frames], dtype := .Int64, device := device } := Id.run do
-  let mut residual : Tensor { shape := #[batch, 256, frames], dtype := dtypes.compute.val, device := device } :=
-    Tensor.reshapeChecked (Tensor.conv1d embeddings rvq.inputProj 1 0 1) #[batch, 256, frames]
-  let mut allIndices : Array (Tensor { shape := #[batch, frames], dtype := .Int64, device := device }) := #[]
-  for i in [:numLayers] do
-    let cb := match rvq.codebooks[i]? with
-      | some codebook => codebook
-      | none => nativeInvariantFailure s!"Speech tokenizer: missing codebook {i}"
-    let (idx, quantized) := quantizeWithCodebook cb residual
-    residual := Tensor.sub residual quantized
-    allIndices := allIndices.push idx
-  stack2dDyn (batch := batch) (frames := frames) (k := k) allIndices
+    (numLayers : Nat) (hf : 0 < frames)
+    : Tensor { shape := #[(rvq.codebooks.toList.take numLayers).length, batch, frames], dtype := .Int64, device := device } :=
+  let residual : Tensor { shape := #[batch, 256, frames], dtype := dtypes.compute.val, device := device } :=
+    Tensor.reshape (Tensor.conv1d embeddings rvq.inputProj 1 0 1) #[batch, 256, frames]
+      (by simp [Nat.sub_add_cancel hf])
+  rvqStack residual (rvq.codebooks.toList.take numLayers)
 
 /-- Encode waveform `[batch,1,samples]` to codec IDs `[batch,16,encodedFrames(samples)]`.
     `ropeStartPos` is in the pre-downsample transformer timeline (stride 960 samples). -/
 def encodeWithRoPEOffset {batch samples : Nat}
     (m : (SpeechTokenizer12HzEncoder (device := device) (dtypes := dtypes)))
     (audio : Tensor { shape := #[batch, 1, samples], dtype := dtypes.compute.val, device := device })
+    (hs : 0 < samples)
+    (hBooks : 1 ≤ m.semanticRVQ.codebooks.size ∧ 15 ≤ m.acousticRVQ.codebooks.size)
     (ropeStartPos : Nat := 0)
     : Tensor { shape := #[batch, 16, encodedFrames samples], dtype := .Int64, device := device } :=
   let t1 := framesAfterDown1 samples
@@ -516,26 +551,31 @@ def encodeWithRoPEOffset {batch samples : Nat}
   let t3 := framesAfterDown3 samples
   let t4 := framesAfterDown4 samples
   let t5 := encodedFrames samples
+  have ht1 : 0 < t1 := ceilDiv_pos hs (by decide)
+  have ht2 : 0 < t2 := ceilDiv_pos ht1 (by decide)
+  have ht3 : 0 < t3 := ceilDiv_pos ht2 (by decide)
+  have ht4 : 0 < t4 := ceilDiv_pos (d := 8) ht3 (by decide)
+  have ht5 : 0 < t5 := ceilDiv_pos ht4 (by decide)
 
-  let h0 : Tensor { shape := #[batch, 64, samples], dtype := dtypes.compute.val, device := device } := causalConvConstant audio m.conv0Weight (some m.conv0Bias) 1 1
-  let h1 : Tensor { shape := #[batch, 64, samples], dtype := dtypes.compute.val, device := device } := forwardResBlock m.res1 h0
+  let h0 : Tensor { shape := #[batch, 64, samples], dtype := dtypes.compute.val, device := device } := causalConvConstant audio m.conv0Weight (some m.conv0Bias) 1 1 hs (by decide) (by decide) (ceilDiv_one _)
+  let h1 : Tensor { shape := #[batch, 64, samples], dtype := dtypes.compute.val, device := device } := forwardResBlock m.res1 h0 hs
 
   let h2In : Tensor { shape := #[batch, 64, samples], dtype := dtypes.compute.val, device := device } := Tensor.elu h1
-  let h2 : Tensor { shape := #[batch, 128, t1], dtype := dtypes.compute.val, device := device } := causalConvConstant h2In m.down1Weight (some m.down1Bias) 4 1
-  let h3 : Tensor { shape := #[batch, 128, t1], dtype := dtypes.compute.val, device := device } := forwardResBlock m.res2 h2
+  let h2 : Tensor { shape := #[batch, 128, t1], dtype := dtypes.compute.val, device := device } := causalConvConstant h2In m.down1Weight (some m.down1Bias) 4 1 hs (by decide) (by decide) rfl
+  let h3 : Tensor { shape := #[batch, 128, t1], dtype := dtypes.compute.val, device := device } := forwardResBlock m.res2 h2 ht1
 
   let h4In : Tensor { shape := #[batch, 128, t1], dtype := dtypes.compute.val, device := device } := Tensor.elu h3
-  let h4 : Tensor { shape := #[batch, 256, t2], dtype := dtypes.compute.val, device := device } := causalConvConstant h4In m.down2Weight (some m.down2Bias) 5 1
-  let h5 : Tensor { shape := #[batch, 256, t2], dtype := dtypes.compute.val, device := device } := forwardResBlock m.res3 h4
+  let h4 : Tensor { shape := #[batch, 256, t2], dtype := dtypes.compute.val, device := device } := causalConvConstant h4In m.down2Weight (some m.down2Bias) 5 1 ht1 (by decide) (by decide) rfl
+  let h5 : Tensor { shape := #[batch, 256, t2], dtype := dtypes.compute.val, device := device } := forwardResBlock m.res3 h4 ht2
 
   let h6In : Tensor { shape := #[batch, 256, t2], dtype := dtypes.compute.val, device := device } := Tensor.elu h5
-  let h6 : Tensor { shape := #[batch, 512, t3], dtype := dtypes.compute.val, device := device } := causalConvConstant h6In m.down3Weight (some m.down3Bias) 6 1
-  let h7 : Tensor { shape := #[batch, 512, t3], dtype := dtypes.compute.val, device := device } := forwardResBlock m.res4 h6
+  let h6 : Tensor { shape := #[batch, 512, t3], dtype := dtypes.compute.val, device := device } := causalConvConstant h6In m.down3Weight (some m.down3Bias) 6 1 ht2 (by decide) (by decide) rfl
+  let h7 : Tensor { shape := #[batch, 512, t3], dtype := dtypes.compute.val, device := device } := forwardResBlock m.res4 h6 ht3
 
   let h8In : Tensor { shape := #[batch, 512, t3], dtype := dtypes.compute.val, device := device } := Tensor.elu h7
-  let h8 : Tensor { shape := #[batch, 1024, t4], dtype := dtypes.compute.val, device := device } := causalConvConstant h8In m.down4Weight (some m.down4Bias) 8 1
+  let h8 : Tensor { shape := #[batch, 1024, t4], dtype := dtypes.compute.val, device := device } := causalConvConstant h8In m.down4Weight (some m.down4Bias) 8 1 ht3 (by decide) (by decide) rfl
   let h9In : Tensor { shape := #[batch, 1024, t4], dtype := dtypes.compute.val, device := device } := Tensor.elu h8
-  let h9 : Tensor { shape := #[batch, 512, t4], dtype := dtypes.compute.val, device := device } := causalConvConstant h9In m.finalConvWeight (some m.finalConvBias) 1 1
+  let h9 : Tensor { shape := #[batch, 512, t4], dtype := dtypes.compute.val, device := device } := causalConvConstant h9In m.finalConvWeight (some m.finalConvBias) 1 1 ht4 (by decide) (by decide) (ceilDiv_one _)
 
   let x0 : Tensor { shape := #[batch, t4, 512], dtype := dtypes.compute.val, device := device } := Tensor.reshape (Tensor.transpose h9 1 2) #[batch, t4, 512]
   let ropeTotal : Nat := ropeStartPos + t4
@@ -549,10 +589,12 @@ def encodeWithRoPEOffset {batch samples : Nat}
   let x1 := m.transformerLayers.foldl (fun h layer => forwardTransformerLayer layer h cos sin) x0
   let x2 : Tensor { shape := #[batch, 512, t4], dtype := dtypes.compute.val, device := device } := by simpa using (Tensor.reshape (Tensor.transpose x1 1 2) #[batch, 512, t4])
 
-  let x3 : Tensor { shape := #[batch, 512, t5], dtype := dtypes.compute.val, device := device } := causalConvReplicate x2 m.downsampleWeight none 2 1
+  let x3 : Tensor { shape := #[batch, 512, t5], dtype := dtypes.compute.val, device := device } := causalConvReplicate x2 m.downsampleWeight none 2 1 ht4 (by decide) (by decide) rfl
 
-  let semanticCodes : Tensor { shape := #[1, batch, t5], dtype := .Int64, device := device } := rvqEncode (k := 1) m.semanticRVQ x3 1
-  let acousticCodes : Tensor { shape := #[15, batch, t5], dtype := .Int64, device := device } := rvqEncode (k := 15) m.acousticRVQ x3 15
+  let semanticCodes : Tensor { shape := #[1, batch, t5], dtype := .Int64, device := device } :=
+    Tensor.reshape (rvqEncode m.semanticRVQ x3 1 ht5) #[1, batch, t5] (by simp [Nat.min_eq_left hBooks.1])
+  let acousticCodes : Tensor { shape := #[15, batch, t5], dtype := .Int64, device := device } :=
+    Tensor.reshape (rvqEncode m.acousticRVQ x3 15 ht5) #[15, batch, t5] (by simp [Nat.min_eq_left hBooks.2])
   let codes : Tensor { shape := #[16, batch, t5], dtype := .Int64, device := device } := Tensor.reshape (Tensor.cat semanticCodes acousticCodes 0) #[16, batch, t5]
   Tensor.reshape (Tensor.transpose codes 0 1) #[batch, 16, t5]
 
@@ -562,6 +604,7 @@ def encodeWithRoPEOffset {batch samples : Nat}
 def encodeWithRoPEOffsetDynamic {batch samples : Nat}
     (m : (SpeechTokenizer12HzEncoder (device := device) (dtypes := dtypes)))
     (audio : Tensor { shape := #[batch, 1, samples], dtype := dtypes.compute.val, device := device })
+    (hs : 0 < samples)
     (ropeStartPos : Nat := 0)
     : Sigma (fun codeGroups => Tensor { shape := #[batch, codeGroups, encodedFrames samples], dtype := .Int64, device := device }) :=
   let t1 := framesAfterDown1 samples
@@ -569,26 +612,31 @@ def encodeWithRoPEOffsetDynamic {batch samples : Nat}
   let t3 := framesAfterDown3 samples
   let t4 := framesAfterDown4 samples
   let t5 := encodedFrames samples
+  have ht1 : 0 < t1 := ceilDiv_pos hs (by decide)
+  have ht2 : 0 < t2 := ceilDiv_pos ht1 (by decide)
+  have ht3 : 0 < t3 := ceilDiv_pos ht2 (by decide)
+  have ht4 : 0 < t4 := ceilDiv_pos (d := 8) ht3 (by decide)
+  have ht5 : 0 < t5 := ceilDiv_pos ht4 (by decide)
 
-  let h0 : Tensor { shape := #[batch, 64, samples], dtype := dtypes.compute.val, device := device } := causalConvConstant audio m.conv0Weight (some m.conv0Bias) 1 1
-  let h1 : Tensor { shape := #[batch, 64, samples], dtype := dtypes.compute.val, device := device } := forwardResBlock m.res1 h0
+  let h0 : Tensor { shape := #[batch, 64, samples], dtype := dtypes.compute.val, device := device } := causalConvConstant audio m.conv0Weight (some m.conv0Bias) 1 1 hs (by decide) (by decide) (ceilDiv_one _)
+  let h1 : Tensor { shape := #[batch, 64, samples], dtype := dtypes.compute.val, device := device } := forwardResBlock m.res1 h0 hs
 
   let h2In : Tensor { shape := #[batch, 64, samples], dtype := dtypes.compute.val, device := device } := Tensor.elu h1
-  let h2 : Tensor { shape := #[batch, 128, t1], dtype := dtypes.compute.val, device := device } := causalConvConstant h2In m.down1Weight (some m.down1Bias) 4 1
-  let h3 : Tensor { shape := #[batch, 128, t1], dtype := dtypes.compute.val, device := device } := forwardResBlock m.res2 h2
+  let h2 : Tensor { shape := #[batch, 128, t1], dtype := dtypes.compute.val, device := device } := causalConvConstant h2In m.down1Weight (some m.down1Bias) 4 1 hs (by decide) (by decide) rfl
+  let h3 : Tensor { shape := #[batch, 128, t1], dtype := dtypes.compute.val, device := device } := forwardResBlock m.res2 h2 ht1
 
   let h4In : Tensor { shape := #[batch, 128, t1], dtype := dtypes.compute.val, device := device } := Tensor.elu h3
-  let h4 : Tensor { shape := #[batch, 256, t2], dtype := dtypes.compute.val, device := device } := causalConvConstant h4In m.down2Weight (some m.down2Bias) 5 1
-  let h5 : Tensor { shape := #[batch, 256, t2], dtype := dtypes.compute.val, device := device } := forwardResBlock m.res3 h4
+  let h4 : Tensor { shape := #[batch, 256, t2], dtype := dtypes.compute.val, device := device } := causalConvConstant h4In m.down2Weight (some m.down2Bias) 5 1 ht1 (by decide) (by decide) rfl
+  let h5 : Tensor { shape := #[batch, 256, t2], dtype := dtypes.compute.val, device := device } := forwardResBlock m.res3 h4 ht2
 
   let h6In : Tensor { shape := #[batch, 256, t2], dtype := dtypes.compute.val, device := device } := Tensor.elu h5
-  let h6 : Tensor { shape := #[batch, 512, t3], dtype := dtypes.compute.val, device := device } := causalConvConstant h6In m.down3Weight (some m.down3Bias) 6 1
-  let h7 : Tensor { shape := #[batch, 512, t3], dtype := dtypes.compute.val, device := device } := forwardResBlock m.res4 h6
+  let h6 : Tensor { shape := #[batch, 512, t3], dtype := dtypes.compute.val, device := device } := causalConvConstant h6In m.down3Weight (some m.down3Bias) 6 1 ht2 (by decide) (by decide) rfl
+  let h7 : Tensor { shape := #[batch, 512, t3], dtype := dtypes.compute.val, device := device } := forwardResBlock m.res4 h6 ht3
 
   let h8In : Tensor { shape := #[batch, 512, t3], dtype := dtypes.compute.val, device := device } := Tensor.elu h7
-  let h8 : Tensor { shape := #[batch, 1024, t4], dtype := dtypes.compute.val, device := device } := causalConvConstant h8In m.down4Weight (some m.down4Bias) 8 1
+  let h8 : Tensor { shape := #[batch, 1024, t4], dtype := dtypes.compute.val, device := device } := causalConvConstant h8In m.down4Weight (some m.down4Bias) 8 1 ht3 (by decide) (by decide) rfl
   let h9In : Tensor { shape := #[batch, 1024, t4], dtype := dtypes.compute.val, device := device } := Tensor.elu h8
-  let h9 : Tensor { shape := #[batch, 512, t4], dtype := dtypes.compute.val, device := device } := causalConvConstant h9In m.finalConvWeight (some m.finalConvBias) 1 1
+  let h9 : Tensor { shape := #[batch, 512, t4], dtype := dtypes.compute.val, device := device } := causalConvConstant h9In m.finalConvWeight (some m.finalConvBias) 1 1 ht4 (by decide) (by decide) (ceilDiv_one _)
 
   let x0 : Tensor { shape := #[batch, t4, 512], dtype := dtypes.compute.val, device := device } := Tensor.reshape (Tensor.transpose h9 1 2) #[batch, t4, 512]
   let ropeTotal : Nat := ropeStartPos + t4
@@ -602,14 +650,16 @@ def encodeWithRoPEOffsetDynamic {batch samples : Nat}
   let x1 := m.transformerLayers.foldl (fun h layer => forwardTransformerLayer layer h cos sin) x0
   let x2 : Tensor { shape := #[batch, 512, t4], dtype := dtypes.compute.val, device := device } := by simpa using (Tensor.reshape (Tensor.transpose x1 1 2) #[batch, 512, t4])
 
-  let x3 : Tensor { shape := #[batch, 512, t5], dtype := dtypes.compute.val, device := device } := causalConvReplicate x2 m.downsampleWeight none 2 1
+  let x3 : Tensor { shape := #[batch, 512, t5], dtype := dtypes.compute.val, device := device } := causalConvReplicate x2 m.downsampleWeight none 2 1 ht4 (by decide) (by decide) rfl
 
   let semLayers : Nat := m.semanticRVQ.codebooks.size
   let acLayers : Nat := m.acousticRVQ.codebooks.size
   let semK : Nat := semLayers
   let acK : Nat := acLayers
-  let semanticCodes : Tensor { shape := #[semK, batch, t5], dtype := .Int64, device := device } := rvqEncode (k := semK) m.semanticRVQ x3 semLayers
-  let acousticCodes : Tensor { shape := #[acK, batch, t5], dtype := .Int64, device := device } := rvqEncode (k := acK) m.acousticRVQ x3 acLayers
+  let semanticCodes : Tensor { shape := #[semK, batch, t5], dtype := .Int64, device := device } :=
+    Tensor.reshape (rvqEncode m.semanticRVQ x3 semLayers ht5) #[semK, batch, t5] (by simp [semK, semLayers])
+  let acousticCodes : Tensor { shape := #[acK, batch, t5], dtype := .Int64, device := device } :=
+    Tensor.reshape (rvqEncode m.acousticRVQ x3 acLayers ht5) #[acK, batch, t5] (by simp [acK, acLayers])
   let codes : Tensor { shape := #[semK + acK, batch, t5], dtype := .Int64, device := device } := Tensor.reshape (Tensor.cat semanticCodes acousticCodes 0) #[semK + acK, batch, t5]
   let out : Tensor { shape := #[batch, semK + acK, t5], dtype := .Int64, device := device } := Tensor.reshape (Tensor.transpose codes 0 1) #[batch, semK + acK, t5]
   ⟨semK + acK, out⟩
@@ -617,18 +667,23 @@ def encodeWithRoPEOffsetDynamic {batch samples : Nat}
 /-- Encode waveform `[batch,1,samples]` with zero RoPE offset. -/
 def encode {batch samples : Nat}
     (m : (SpeechTokenizer12HzEncoder (device := device) (dtypes := dtypes)))
-    (audio : Tensor { shape := #[batch, 1, samples], dtype := dtypes.compute.val, device := device }) : Tensor { shape := #[batch, 16, encodedFrames samples], dtype := .Int64, device := device } :=
-  encodeWithRoPEOffset m audio 0
+    (audio : Tensor { shape := #[batch, 1, samples], dtype := dtypes.compute.val, device := device })
+    (hs : 0 < samples)
+    (hBooks : 1 ≤ m.semanticRVQ.codebooks.size ∧ 15 ≤ m.acousticRVQ.codebooks.size) :
+    Tensor { shape := #[batch, 16, encodedFrames samples], dtype := .Int64, device := device } :=
+  encodeWithRoPEOffset m audio hs hBooks 0
 
 /-- Convenience encode for mono waveform `[samples]` into frame-major `[frames,16]`.
     RoPE offset is in the pre-downsample transformer timeline. -/
 def encodeMonoFrameMajorWithRoPEOffset {samples : Nat}
     (m : (SpeechTokenizer12HzEncoder (device := device) (dtypes := dtypes)))
     (audio : Tensor { shape := #[samples], dtype := dtypes.compute.val, device := device })
+    (hs : 0 < samples)
+    (hBooks : 1 ≤ m.semanticRVQ.codebooks.size ∧ 15 ≤ m.acousticRVQ.codebooks.size)
     (ropeStartPos : Nat := 0)
     : Tensor { shape := #[encodedFrames samples, 16], dtype := .Int64, device := device } :=
   let x0 : Tensor { shape := #[1, 1, samples], dtype := dtypes.compute.val, device := device } := Tensor.reshape audio #[1, 1, samples]
-  let codes : Tensor { shape := #[1, 16, encodedFrames samples], dtype := .Int64, device := device } := encodeWithRoPEOffset m x0 ropeStartPos
+  let codes : Tensor { shape := #[1, 16, encodedFrames samples], dtype := .Int64, device := device } := encodeWithRoPEOffset m x0 hs hBooks ropeStartPos
   let c0 : Tensor { shape := #[1, encodedFrames samples, 16], dtype := .Int64, device := device } := Tensor.reshape (Tensor.transpose codes 1 2) #[1, encodedFrames samples, 16]
   Tensor.reshape c0 #[encodedFrames samples, 16]
 
@@ -638,10 +693,11 @@ def encodeMonoFrameMajorWithRoPEOffset {samples : Nat}
 def encodeMonoFrameMajorWithRoPEOffsetDynamic {samples : Nat}
     (m : (SpeechTokenizer12HzEncoder (device := device) (dtypes := dtypes)))
     (audio : Tensor { shape := #[samples], dtype := dtypes.compute.val, device := device })
+    (hs : 0 < samples)
     (ropeStartPos : Nat := 0)
     : Sigma (fun codeGroups => Tensor { shape := #[encodedFrames samples, codeGroups], dtype := .Int64, device := device }) :=
   let x0 : Tensor { shape := #[1, 1, samples], dtype := dtypes.compute.val, device := device } := Tensor.reshape audio #[1, 1, samples]
-  let ⟨codeGroups, codes⟩ := encodeWithRoPEOffsetDynamic m x0 ropeStartPos
+  let ⟨codeGroups, codes⟩ := encodeWithRoPEOffsetDynamic m x0 hs ropeStartPos
   let c0 : Tensor { shape := #[1, encodedFrames samples, codeGroups], dtype := .Int64, device := device } :=
     Tensor.reshape (Tensor.transpose codes 1 2) #[1, encodedFrames samples, codeGroups]
   ⟨codeGroups, Tensor.reshape c0 #[encodedFrames samples, codeGroups]⟩
@@ -649,8 +705,11 @@ def encodeMonoFrameMajorWithRoPEOffsetDynamic {samples : Nat}
 /-- Convenience encode for mono waveform `[samples]` into frame-major `[frames,16]`. -/
 def encodeMonoFrameMajor {samples : Nat}
     (m : (SpeechTokenizer12HzEncoder (device := device) (dtypes := dtypes)))
-    (audio : Tensor { shape := #[samples], dtype := dtypes.compute.val, device := device }) : Tensor { shape := #[encodedFrames samples, 16], dtype := .Int64, device := device } :=
-  encodeMonoFrameMajorWithRoPEOffset m audio 0
+    (audio : Tensor { shape := #[samples], dtype := dtypes.compute.val, device := device })
+    (hs : 0 < samples)
+    (hBooks : 1 ≤ m.semanticRVQ.codebooks.size ∧ 15 ≤ m.acousticRVQ.codebooks.size) :
+    Tensor { shape := #[encodedFrames samples, 16], dtype := .Int64, device := device } :=
+  encodeMonoFrameMajorWithRoPEOffset m audio hs hBooks 0
 
 /-- Stateful streaming encode state for incremental waveform -> codec conversion. -/
 structure EncodeStreamState where
@@ -683,7 +742,12 @@ def pushEncodeStream
     Tensor.castLike m.conv0Weight (audioChunk0.to m.conv0Weight.device)
   let framesChunk : Nat := encodedFrames chunkSamplesU64
   let ropeStartPos : Nat := framesBeforeFinalDownsample ctxStart
-  let codesChunk : Tensor { shape := #[framesChunk, 16], dtype := .Int64, device := device } := encodeMonoFrameMajorWithRoPEOffset m audioChunk ropeStartPos
+  let ⟨hChunk⟩ ← if h : 0 < chunkSamplesU64 then pure (PLift.up h) else
+    throw <| IO.userError "speech tokenizer stream chunk is empty"
+  let ⟨hBooks⟩ ← if h : 1 ≤ m.semanticRVQ.codebooks.size ∧ 15 ≤ m.acousticRVQ.codebooks.size then pure (PLift.up h) else
+    throw <| IO.userError
+      s!"speech tokenizer needs 1 semantic and 15 acoustic codebooks, has {m.semanticRVQ.codebooks.size} and {m.acousticRVQ.codebooks.size}"
+  let codesChunk : Tensor { shape := #[framesChunk, 16], dtype := .Int64, device := device } := encodeMonoFrameMajorWithRoPEOffset m audioChunk hChunk hBooks ropeStartPos
   let flatChunk : Tensor { shape := #[framesChunk * 16], dtype := .Int64, device := device } := Tensor.reshape codesChunk #[framesChunk * 16]
   let valsChunk ← Tensor.toUInt64Array flatChunk
 
@@ -724,7 +788,9 @@ def pushEncodeStreamDynamic
     Tensor.castLike m.conv0Weight (audioChunk0.to m.conv0Weight.device)
   let framesChunk : Nat := encodedFrames chunkSamplesU64
   let ropeStartPos : Nat := framesBeforeFinalDownsample ctxStart
-  let ⟨codeGroups, codesChunk⟩ := encodeMonoFrameMajorWithRoPEOffsetDynamic m audioChunk ropeStartPos
+  let ⟨hChunk⟩ ← if h : 0 < chunkSamplesU64 then pure (PLift.up h) else
+    throw <| IO.userError "speech tokenizer stream chunk is empty"
+  let ⟨codeGroups, codesChunk⟩ := encodeMonoFrameMajorWithRoPEOffsetDynamic m audioChunk hChunk ropeStartPos
   let flatChunk : Tensor { shape := #[framesChunk * codeGroups], dtype := .Int64, device := device } := Tensor.reshape codesChunk #[framesChunk * codeGroups]
   let valsChunk ← Tensor.toUInt64Array flatChunk
 

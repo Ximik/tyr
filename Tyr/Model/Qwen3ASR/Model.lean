@@ -54,14 +54,9 @@ private def eosVectorOnDevice {batch : Nat}
     some eosDev
 
 private def buildLengthMask {batch maxLen : Nat} (lengths : Array Nat) : Tensor { device := device, shape := #[batch, maxLen], dtype := .Int64 } :=
-  Id.run do
-    let mut vals : Array Int64 := #[]
-    for i in [:batch] do
-      let len := lengths.getD i 0
-      for j in [:maxLen] do
-        let v : Int64 := if j < len then 1 else 0
-        vals := vals.push v
-    Tensor.reshapeChecked ((Tensor.fromInt64Array vals).to device) #[batch, maxLen]
+  let vals : Array Int64 := Array.ofFn (n := batch * maxLen) fun k =>
+    if k.val % maxLen < lengths.getD (k.val / maxLen) 0 then 1 else 0
+  (Tensor.fromInt64ArrayShaped vals #[batch, maxLen] (by simp [vals])).to device
 
 private def maskRowCounts {batch seq : Nat} (attentionMask : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 }) : IO (Array Nat) := do
   let flat : Tensor { device := device, shape := #[batch * seq], dtype := .Int64 } := Tensor.reshape (Tensor.toInt64 attentionMask) #[batch * seq]
@@ -104,14 +99,8 @@ private def gatherRowsByPositions {seq half : Nat}
     (table : Tensor { device := device, shape := #[seq, half], dtype := .Float32 })
     (positions : Array Nat)
     : Tensor { device := device, shape := #[seq, half], dtype := .Float32 } :=
-  let idxVals : Array Int64 :=
-    Id.run do
-      let mut out : Array Int64 := Array.mkEmpty seq
-      for i in [:seq] do
-        let p := clipTo (positions.getD i 0) seq
-        out := out.push (Int64.ofNat p)
-      out
-  let idxCpu : Tensor { device := .CPU, shape := #[seq], dtype := .Int64 } := Tensor.reshapeChecked (Tensor.fromInt64Array idxVals) #[seq]
+  let idxVals : Array Int64 := Array.ofFn (n := seq) fun i => Int64.ofNat (clipTo (positions.getD i.val 0) seq)
+  let idxCpu : Tensor { device := .CPU, shape := #[seq], dtype := .Int64 } := Tensor.fromInt64ArrayShaped idxVals #[seq] (by simp [idxVals])
   let idx : Tensor { device := device, shape := #[seq], dtype := .Int64 } := idxCpu.to table.device
   let idx2d : Tensor { device := device, shape := #[seq, half], dtype := .Int64 } := Tensor.expand (Tensor.reshape idx #[seq, 1]) #[seq, half]
   Tensor.reshape (Tensor.gather table 0 idx2d) #[seq, half]
@@ -262,9 +251,10 @@ def forwardAudioText {batch audioSeq textSeq : Nat}
 def encodeAudio {batch frames : Nat}
     (m : Qwen3ASRThinkerForConditionalGeneration (device := device) (dtype := dtype) cfg)
     (inputFeatures : Tensor { dtype := featureDType, device := device, shape := #[batch, cfg.audioConfig.numMelBins, frames] })
+    (hf : 0 < frames)
     (attnMask : Option (Tensor { device := device, shape := #[batch, AudioEncoderConfig.framesAfterConv3 cfg.audioConfig frames], dtype := .Int64 }) := none)
     : Tensor { dtype := dtype, device := device, shape := #[batch, AudioEncoderConfig.framesAfterConv3 cfg.audioConfig frames, cfg.audioConfig.outputDim] } :=
-  m.audioTower.forwardInference inputFeatures attnMask
+  m.audioTower.forwardInference inputFeatures hf attnMask
 
 def encodeAudioVarLen {batch frames : Nat}
     (m : Qwen3ASRThinkerForConditionalGeneration (device := device) (dtype := dtype) cfg)
@@ -277,10 +267,11 @@ def encodeAudioVarLen {batch frames : Nat}
 def encodeAudioIO {batch frames : Nat}
     (m : Qwen3ASRThinkerForConditionalGeneration (device := device) (dtype := dtype) cfg)
     (inputFeatures : Tensor { dtype := featureDType, device := device, shape := #[batch, cfg.audioConfig.numMelBins, frames] })
+    (hf : 0 < frames)
     (training : Bool)
     (attnMask : Option (Tensor { device := device, shape := #[batch, AudioEncoderConfig.framesAfterConv3 cfg.audioConfig frames], dtype := .Int64 }) := none)
     : IO (Tensor { dtype := dtype, device := device, shape := #[batch, AudioEncoderConfig.framesAfterConv3 cfg.audioConfig frames, cfg.audioConfig.outputDim] }) :=
-  m.audioTower.forwardIO inputFeatures training attnMask
+  m.audioTower.forwardIO inputFeatures hf training attnMask
 
 /-- Chunked audio features with explicit training/evaluation attention dropout. -/
 def encodeAudioVarLenIO {batch frames : Nat}
@@ -350,7 +341,9 @@ private def buildInputsEmbeds {batch seq frames : Nat}
         let raw ← encodeAudioVarLenIO m feats featureLens training
         pure (some audioLens, some m2d, raw)
       | none =>
-        let raw ← encodeAudioIO m feats training none
+        let ⟨hf⟩ ← if h : 0 < frames then pure (PLift.up h) else
+          throw (IO.userError "Qwen3-ASR audio encoding needs at least one feature frame")
+        let raw ← encodeAudioIO m feats hf training none
         pure (none, none, raw)
 
     let expectedAudioLens :=
@@ -428,8 +421,8 @@ def getRopeIndex {batch seq : Nat}
       for p in row do
         posVals := posVals.push (Int64.ofNat p)
 
-  let positionIds : Tensor { device := device, shape := #[3, batch, seq], dtype := .Int64 } := Tensor.reshapeChecked ((Tensor.fromInt64Array posVals).to device) #[3, batch, seq]
-  let ropeDeltas : Tensor { device := device, shape := #[batch, 1], dtype := .Int64 } := Tensor.reshapeChecked ((Tensor.fromInt64Array deltaVals).to device) #[batch, 1]
+  let positionIds : Tensor { device := device, shape := #[3, batch, seq], dtype := .Int64 } := (← IO.ofExcept (Tensor.fromInt64ArrayAs? posVals #[3, batch, seq])).to device
+  let ropeDeltas : Tensor { device := device, shape := #[batch, 1], dtype := .Int64 } := (← IO.ofExcept (Tensor.fromInt64ArrayAs? deltaVals #[batch, 1])).to device
   pure (positionIds, ropeDeltas)
 
 abbrev LayerKVCache (cfg : ThinkerConfig) (batch : Nat) (dtype : DType := .Float32) :=
@@ -524,7 +517,7 @@ private partial def greedyLoopCached {batch maxLen : Nat}
     return ⟨curSeq, curIds⟩
 
   let indices ← IO.ofExcept (Tensor.argmax? lastLogits 1)
-  let nextTokRaw : Tensor { device := device, shape := #[batch], dtype := .Int64 } ← IO.ofExcept (indices.reshapeChecked? #[batch])
+  let nextTokRaw : Tensor { device := device, shape := #[batch], dtype := .Int64 } ← pure (indices.reshape #[batch])
   let nextTok : Tensor { device := device, shape := #[batch], dtype := .Int64 } :=
     match eosVector, finished with
     | some eosTok, some doneMask =>
@@ -701,7 +694,7 @@ def forwardWithAux {batch seq frames : Nat}
         let pad := seq - valid
         let adj := if raw >= pad then raw - pad else 0
         out := out.push (Int64.ofNat adj)
-      let deltas : Tensor { device := device, shape := #[batch, 1], dtype := .Int64 } := Tensor.reshapeChecked ((Tensor.fromInt64Array out).to device) #[batch, 1]
+      let deltas : Tensor { device := device, shape := #[batch, 1], dtype := .Int64 } := (← IO.ofExcept (Tensor.fromInt64ArrayAs? out #[batch, 1])).to device
       pure (some deltas)
 
   pure { logits, ropeDeltas }
@@ -731,7 +724,7 @@ private partial def greedyLoopUncached {batch : Nat}
     return ⟨curSeq, curIds⟩
   if curSeq == 0 then
     throw <| IO.userError "generateGreedy requires non-empty prompt sequence"
-  if curSeq < promptSeq then
+  let ⟨hPrompt⟩ ← if h : promptSeq ≤ curSeq then pure (PLift.up h) else
     throw <| IO.userError
       s!"generateGreedyUncached prompt boundary mismatch: promptSeq={promptSeq}, curSeq={curSeq}"
 
@@ -742,14 +735,16 @@ private partial def greedyLoopUncached {batch : Nat}
       let suffixSeq := curSeq - promptSeq
       let suffixIds : Tensor { device := device, shape := #[batch, suffixSeq], dtype := .Int64 } := Tensor.sliceChecked curIds 1 promptSeq suffixSeq #[batch, suffixSeq]
       let suffixEmbeds : Tensor { dtype := dtype, device := device, shape := #[batch, suffixSeq, cfg.textConfig.hiddenSize] } := m.embedText suffixIds
-      (Tensor.cat promptEmbeds suffixEmbeds 1).reshapeChecked #[batch, curSeq, cfg.textConfig.hiddenSize]
+      (Tensor.cat promptEmbeds suffixEmbeds 1).reshape #[batch, curSeq, cfg.textConfig.hiddenSize]
+        (by have : promptSeq + suffixSeq = curSeq := by omega
+            simp [this])
   let logits := m.forwardEmbeds inputsEmbeds none
   let lastPos := curSeq - 1
   let last3 : Tensor { dtype := dtype, device := device, shape := #[batch, 1, ThinkerLmVocabSize cfg] } :=
     Tensor.reshape (Tensor.sliceChecked logits 1 lastPos 1 #[batch, 1, ThinkerLmVocabSize cfg]) #[batch, 1, ThinkerLmVocabSize cfg]
   let last2 : Tensor { dtype := dtype, device := device, shape := #[batch, ThinkerLmVocabSize cfg] } := Tensor.reshape last3 #[batch, ThinkerLmVocabSize cfg]
   let indices ← IO.ofExcept (Tensor.argmax? last2 1)
-  let nextTokRaw : Tensor { device := device, shape := #[batch], dtype := .Int64 } ← IO.ofExcept (indices.reshapeChecked? #[batch])
+  let nextTokRaw : Tensor { device := device, shape := #[batch], dtype := .Int64 } ← pure (indices.reshape #[batch])
   let nextTok : Tensor { device := device, shape := #[batch], dtype := .Int64 } :=
     match eosVector, finished with
     | some eosTok, some doneMask =>
@@ -915,10 +910,11 @@ def generateGreedyWithPromptCache {seq frames : Nat}
 def forwardFromMel {batch frames textSeq : Nat}
     (m : Qwen3ASRThinkerForConditionalGeneration (device := device) (dtype := dtype) cfg)
     (inputFeatures : Tensor { dtype := featureDType, device := device, shape := #[batch, cfg.audioConfig.numMelBins, frames] })
+    (hf : 0 < frames)
     (textIds : Tensor { device := device, shape := #[batch, textSeq], dtype := .Int64 })
     (attnMask : Option (Tensor { device := device, shape := #[batch, AudioEncoderConfig.framesAfterConv3 cfg.audioConfig frames + textSeq], dtype := .Int64 }) := none)
     : Tensor { dtype := dtype, device := device, shape := #[batch, AudioEncoderConfig.framesAfterConv3 cfg.audioConfig frames + textSeq, ThinkerLmVocabSize cfg] } :=
-  let audio := m.encodeAudio inputFeatures
+  let audio := m.encodeAudio inputFeatures hf
   m.forwardAudioText audio textIds attnMask
 
 
@@ -926,11 +922,12 @@ def forwardFromMel {batch frames textSeq : Nat}
 def forwardFromMelIO {batch frames textSeq : Nat}
     (m : Qwen3ASRThinkerForConditionalGeneration (device := device) (dtype := dtype) cfg)
     (inputFeatures : Tensor { dtype := featureDType, device := device, shape := #[batch, cfg.audioConfig.numMelBins, frames] })
+    (hf : 0 < frames)
     (textIds : Tensor { device := device, shape := #[batch, textSeq], dtype := .Int64 })
     (training : Bool)
     (attnMask : Option (Tensor { device := device, shape := #[batch, AudioEncoderConfig.framesAfterConv3 cfg.audioConfig frames + textSeq], dtype := .Int64 }) := none)
     : IO (Tensor { dtype := dtype, device := device, shape := #[batch, AudioEncoderConfig.framesAfterConv3 cfg.audioConfig frames + textSeq, ThinkerLmVocabSize cfg] }) := do
-  let audio ← m.encodeAudioIO inputFeatures training
+  let audio ← m.encodeAudioIO inputFeatures hf training
   return m.forwardAudioText audio textIds attnMask
 
 end Qwen3ASRThinkerForConditionalGeneration
@@ -961,21 +958,23 @@ def forwardText {batch textSeq : Nat}
 def forwardFromMel {batch frames textSeq : Nat}
     (m : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
     (inputFeatures : Tensor { dtype := featureDType, device := device, shape := #[batch, cfg.thinkerConfig.audioConfig.numMelBins, frames] })
+    (hf : 0 < frames)
     (textIds : Tensor { device := device, shape := #[batch, textSeq], dtype := .Int64 })
     (attnMask : Option (Tensor { device := device, shape := #[batch, AudioEncoderConfig.framesAfterConv3 cfg.thinkerConfig.audioConfig frames + textSeq], dtype := .Int64 }) := none)
     : Tensor { dtype := dtype, device := device, shape := #[batch, AudioEncoderConfig.framesAfterConv3 cfg.thinkerConfig.audioConfig frames + textSeq, ThinkerLmVocabSize cfg.thinkerConfig] } :=
-  m.thinker.forwardFromMel inputFeatures textIds attnMask
+  m.thinker.forwardFromMel inputFeatures hf textIds attnMask
 
 
 /-- Mel-feature forward with explicit audio attention training/evaluation. -/
 def forwardFromMelIO {batch frames textSeq : Nat}
     (m : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
     (inputFeatures : Tensor { dtype := featureDType, device := device, shape := #[batch, cfg.thinkerConfig.audioConfig.numMelBins, frames] })
+    (hf : 0 < frames)
     (textIds : Tensor { device := device, shape := #[batch, textSeq], dtype := .Int64 })
     (training : Bool)
     (attnMask : Option (Tensor { device := device, shape := #[batch, AudioEncoderConfig.framesAfterConv3 cfg.thinkerConfig.audioConfig frames + textSeq], dtype := .Int64 }) := none)
     : IO (Tensor { dtype := dtype, device := device, shape := #[batch, AudioEncoderConfig.framesAfterConv3 cfg.thinkerConfig.audioConfig frames + textSeq, ThinkerLmVocabSize cfg.thinkerConfig] }) :=
-  m.thinker.forwardFromMelIO inputFeatures textIds training attnMask
+  m.thinker.forwardFromMelIO inputFeatures hf textIds training attnMask
 
 def forwardWithAux {batch seq frames : Nat}
     (m : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)

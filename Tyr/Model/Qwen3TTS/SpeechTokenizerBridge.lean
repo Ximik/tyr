@@ -207,7 +207,7 @@ private def computeSpeakerMelFromWave
   if frames == 0 then
     throw <| IO.userError "Speaker mel extraction produced zero frames."
 
-  let spec : Tensor { shape := #[freqBins, frames, 2], dtype := .Float32, device := .CPU } := Tensor.reshapeChecked stftDyn #[freqBins, frames, 2]
+  let spec : Tensor { shape := #[freqBins, frames, 2], dtype := .Float32, device := .CPU } ← IO.ofExcept (stftDyn.reshapeChecked? #[freqBins, frames, 2])
   let re3 : Tensor { shape := #[freqBins, frames, 1], dtype := .Float32, device := .CPU } := Tensor.sliceChecked spec 2 0 1 #[freqBins, frames, 1]
   let im3 : Tensor { shape := #[freqBins, frames, 1], dtype := .Float32, device := .CPU } := Tensor.sliceChecked spec 2 1 1 #[freqBins, frames, 1]
   let re : Tensor { shape := #[freqBins, frames], dtype := .Float32, device := .CPU } := Tensor.reshape re3 #[freqBins, frames]
@@ -217,7 +217,7 @@ private def computeSpeakerMelFromWave
   let melMaxHz : Float := fmaxHz.getD (sampleRate.toFloat / 2.0)
   let melFlat := buildSlaneyMelFilterBankFlat
     freqBins melDim sampleRate fminHz melMaxHz
-  let melFilter : Tensor { shape := #[freqBins, melDim], dtype := .Float32, device := .CPU } := Tensor.reshapeChecked (Tensor.fromFloatArray melFlat) #[freqBins, melDim]
+  let melFilter : Tensor { shape := #[freqBins, melDim], dtype := .Float32, device := .CPU } ← IO.ofExcept (Tensor.fromFloatArrayAs? melFlat #[freqBins, melDim])
   let melPow : Tensor { shape := #[melDim, frames], dtype := .Float32, device := .CPU } := Tensor.mm (Tensor.transpose2d melFilter) mag
   let melLog : Tensor { shape := #[melDim, frames], dtype := .Float32, device := .CPU } := Tensor.log (Tensor.clampFloat melPow (1e-5 : Float) (1e10 : Float))
   let melFrameMajor : Tensor { shape := #[frames, melDim], dtype := .Float32, device := .CPU } := Tensor.transpose2d melLog
@@ -299,7 +299,7 @@ def encodeAudioToCodes
   else
     let ⟨_dtypes, encoder⟩ ← SpeechTokenizer12HzEncoder.loadFromDirFlexible speechTokenizerDir device
     let wave ← loadResampledMonoWav audioPath encoder.inputSampleRate
-    if wave.isEmpty then
+    let ⟨hWave⟩ ← if hWave : 0 < wave.size then pure (PLift.up hWave) else
       throw <| IO.userError s!"Audio encode input is empty: {audioPath}"
     let samples : Nat := wave.size
     -- Keep long-form encode numerically stable by processing in bounded chunks.
@@ -310,7 +310,7 @@ def encodeAudioToCodes
       let audio : Tensor { shape := #[samples], dtype := .Float32, device := device } :=
         audio0.to encoder.conv0Weight.device
       let frames : Nat := encodedFrames samples
-      let ⟨groups, codes⟩ := encoder.encodeMonoFrameMajorWithRoPEOffsetDynamic (Tensor.castLike encoder.conv0Weight audio)
+      let ⟨groups, codes⟩ := encoder.encodeMonoFrameMajorWithRoPEOffsetDynamic (Tensor.castLike encoder.conv0Weight audio) hWave
       let flat : Tensor { shape := #[frames * groups], dtype := .Int64, device := device } := Tensor.reshape codes #[frames * groups]
       let vals ← Tensor.toUInt64Array flat
       IO.FS.writeFile codesPath (formatCodesRows vals groups)
@@ -370,7 +370,7 @@ def extractSpeakerEmbeddingFromAudio {dtypes : DTypeLayout}
     (_bridge : SpeechTokenizerBridgeConfig)
     (audioPath melOutPath melFramesPath : String)
     : IO (Tensor { shape := #[1, 1, cfg.talkerConfig.hiddenSize], dtype := dtypes.speaker.val, device := device }) := do
-  if cfg.speakerEncoderConfig.encDim != cfg.talkerConfig.hiddenSize then
+  let ⟨hDim⟩ ← if hDim : cfg.speakerEncoderConfig.encDim = cfg.talkerConfig.hiddenSize then pure (PLift.up hDim) else
     throw <| IO.userError
       s!"speaker embedding dim mismatch: speaker enc_dim={cfg.speakerEncoderConfig.encDim}, talker hidden={cfg.talkerConfig.hiddenSize}"
   let audioPath ← expandHome audioPath
@@ -393,6 +393,6 @@ def extractSpeakerEmbeddingFromAudio {dtypes : DTypeLayout}
     IO.FS.writeFile melFramesPath s!"{frames}\n"
 
   let spk : Tensor { shape := #[1, cfg.speakerEncoderConfig.encDim], dtype := dtypes.speaker.val, device := device } ← model.extractSpeakerEmbedding (mel.to device)
-  pure (Tensor.reshapeChecked spk #[1, 1, cfg.talkerConfig.hiddenSize])
+  pure (Tensor.reshape spk #[1, 1, cfg.talkerConfig.hiddenSize] (by simp [hDim]))
 
 end torch.qwen3tts

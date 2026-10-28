@@ -144,7 +144,7 @@ private def tileToShape {s : Shape} {source : Device} (src : SomeDTypeTensor s s
   let srcD := src.2.to device
   let n0 := srcD.shape.foldl (· * ·) 1
   if n0 == 0 then throw <| IO.userError "tileToShape: empty source tensor"
-  let mut cur : ShapePackedTensor src.1 device := (srcD.reshapeChecked #[n0]).packShape
+  let mut cur : ShapePackedTensor src.1 device := (← IO.ofExcept (srcD.reshapeChecked? #[n0])).packShape
   let mut n := n0
   while n < numel do
     cur := (Tensor.catManyChecked #[cur, cur] 0 #[n * 2]).packShape

@@ -428,8 +428,8 @@ def validate {cfg : moddedGpt.Config}
     match maybeBatch with
     | some (inputDyn, targetDyn) =>
       -- Reshape dynamic tensors to expected shape
-      let input := (inputDyn.reshapeChecked #[batchSize, seqLen]).to device
-      let target := (targetDyn.reshapeChecked #[batchSize, seqLen]).to device
+      let input := (← IO.ofExcept (inputDyn.reshapeChecked? #[batchSize, seqLen])).to device
+      let target := (← IO.ofExcept (targetDyn.reshapeChecked? #[batchSize, seqLen])).to device
       let lossT ← moddedGpt.loss params yarn input target false
       totalLoss := totalLoss + Tensor.item lossT
       numValid := numValid + 1
@@ -1263,8 +1263,8 @@ def trainLoop (cfg : moddedGpt.Config) (hp : Hyperparameters)
       match maybeBatch with
       | none => pure ()
       | some (inputDyn, targetDyn) =>
-        let input := (inputDyn.reshapeChecked #[batchSize, seqLen]).to device
-        let target := (targetDyn.reshapeChecked #[batchSize, seqLen]).to device
+        let input := (← IO.ofExcept (inputDyn.reshapeChecked? #[batchSize, seqLen])).to device
+        let target := (← IO.ofExcept (targetDyn.reshapeChecked? #[batchSize, seqLen])).to device
         microBatches := microBatches.push (input, target)
     if microBatches.isEmpty then
       state := { state with dataGen := newDataGen }
@@ -1514,8 +1514,8 @@ def trainLoopDistributed (cfg : moddedGpt.Config) (hp : Hyperparameters)
       match maybeBatch with
       | none => pure ()
       | some (inputDyn, targetDyn) =>
-        let input := (inputDyn.reshapeChecked #[batchSize, seqLen]).to device
-        let target := (targetDyn.reshapeChecked #[batchSize, seqLen]).to device
+        let input := (← IO.ofExcept (inputDyn.reshapeChecked? #[batchSize, seqLen])).to device
+        let target := (← IO.ofExcept (targetDyn.reshapeChecked? #[batchSize, seqLen])).to device
         microBatches := microBatches.push (input, target)
     if microBatches.isEmpty then
       state := { state with dataGen := newDataGen }
@@ -1754,8 +1754,8 @@ private def collectMicroBatches {batch seq : Nat}
     match ← provider with
     | none => pure ()
     | some batchData =>
-      let input := (batchData.input.reshapeChecked #[batch, seq]).to device
-      let target := (batchData.target.reshapeChecked #[batch, seq]).to device
+      let input := (← IO.ofExcept (batchData.input.reshapeChecked? #[batch, seq])).to device
+      let target := (← IO.ofExcept (batchData.target.reshapeChecked? #[batch, seq])).to device
       microBatches := microBatches.push (input, target)
   return microBatches
 
@@ -1775,8 +1775,8 @@ private def validateWithProvider {cfg : moddedGpt.Config} {batch seq : Nat}
     match ← provider with
     | none => pure ()
     | some batchData =>
-      let input := (batchData.input.reshapeChecked #[batch, seq]).to device
-      let target := (batchData.target.reshapeChecked #[batch, seq]).to device
+      let input := (← IO.ofExcept (batchData.input.reshapeChecked? #[batch, seq])).to device
+      let target := (← IO.ofExcept (batchData.target.reshapeChecked? #[batch, seq])).to device
       let lossT ← moddedGpt.loss params yarn input target false
       totalLoss := totalLoss + Tensor.item lossT
       seen := seen + 1

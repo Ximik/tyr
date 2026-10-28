@@ -955,10 +955,8 @@ private def ParquetTokenStream.nextBatch
   | some (window, st') =>
     let inputIds := window.extract 0 (needed - 1)
     let targetIds := window.extract 1 needed
-    let inputTensor := Tensor.fromInt64Array (inputIds.map (·.toInt64))
-    let inputTensor := inputTensor.reshapeChecked #[batchSize, seqLen]
-    let targetTensor := Tensor.fromInt64Array (targetIds.map (·.toInt64))
-    let targetTensor := targetTensor.reshapeChecked #[batchSize, seqLen]
+    let inputTensor ← IO.ofExcept <| Tensor.fromInt64ArrayAs? (inputIds.map (·.toInt64)) #[batchSize, seqLen]
+    let targetTensor ← IO.ofExcept <| Tensor.fromInt64ArrayAs? (targetIds.map (·.toInt64)) #[batchSize, seqLen]
     pure (some { batch := batchSize, seq := seqLen, input := inputTensor, target := targetTensor }, st')
 
 /-- Use model config captured in checkpoint metadata when available. -/

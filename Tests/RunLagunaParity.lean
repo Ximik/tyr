@@ -86,7 +86,7 @@ private def topkIdSets {s : Shape} (logits : Tensor { shape := s, device := devi
   let (n, v) :=
     if sh.size == 1 then (1, sh.getD 0 0)
     else (sh.getD 0 0, sh.getD 1 0)
-  let l2 : Tensor { shape := #[n, v], device := device, dtype := dtype } := Tensor.reshapeChecked logits #[n, v]
+  let l2 : Tensor { shape := #[n, v], device := device, dtype := dtype }  ← IO.ofExcept (logits.reshapeChecked? #[n, v])
   let (_, idx) := qwen35.topK2d l2 k 1
   let flat ← Tensor.toUInt64Array (idx)
   pure (Array.ofFn (n := n) fun r =>
@@ -214,7 +214,7 @@ private def runFixture (device : Device) : IO Unit := do
   --    A ++ gen_ids[0..15)).
   let idsFull := mkIds (promptA ++ (genRef.extract 0 15).map (fun t => Int64.ofNat t.toNat)) device
   let logitsFull ← model.forward cfg idsFull
-  let lastLogits : Tensor { shape := #[1024], device := device, dtype := .Float32 } := Tensor.reshapeChecked (sliceTyped logitsFull 1 21 1) #[1024]
+  let lastLogits : Tensor { shape := #[1024], device := device, dtype := .Float32 }  ← IO.ofExcept ((sliceTyped logitsFull 1 21 1).reshapeChecked? #[1024])
   checkLogits lbl "gen_logits_last" (lastLogits)
     ((genLastRef.to device)) 0.05
 

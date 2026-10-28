@@ -83,7 +83,7 @@ example (inputs : Examples.GPU.RunLayerNorm.LayerNormInputs .Float32) : True := 
 
 @[test] def testGPULayerNormIndexedReference : IO Unit := do
   let x := Tensor.fromFloatArray ((Array.replicate 512 (-1.0)) ++ Array.replicate 512 1.0)
-    |>.reshapeChecked #[1, 1, 1024] |>.expand #[1, 64, 1024]
+    |>.reshape #[1, 1, 1024] (by simp) |>.expand #[1, 64, 1024]
   let inputs : Examples.GPU.RunLayerNorm.LayerNormInputs .Float32 := {
     x, residual := Tensor.zeros #[1, 64, 1024],
     weight := Tensor.full #[1024] 2.0, bias := Tensor.full #[1024] 0.5
@@ -112,7 +112,7 @@ example (inputs : Examples.GPU.RunLayerNorm.LayerNormInputs .Float32) : True := 
     let gradValues := if alternating then
       Array.replicate 512 3.0 ++ Array.replicate 512 (-3.0)
       else Array.replicate 1024 3.0
-    let grad := (Tensor.fromFloatArray gradValues).reshapeChecked #[1, 1024]
+    let grad := (Tensor.fromFloatArray gradValues).reshape #[1, 1024] (by simp [gradValues]; split <;> simp)
       |>.expand #[2, 1024] |>.toBFloat16
     let (output, resid, inv, dx, dw) :=
       Examples.GPU.RunRMSNorm.referenceTraining x residual weight grad gradResidual
@@ -126,12 +126,12 @@ example (inputs : Examples.GPU.RunLayerNorm.LayerNormInputs .Float32) : True := 
     let inverse := 1.0 / Float.sqrt (1.0 + 1e-6)
     LeanTest.assertTrue (Tensor.allclose inv (Tensor.full #[2] inverse) 0 1e-6)
     let expectedDx := if alternating then
-      (Tensor.fromFloatArray (Array.replicate 512 10.0 ++ Array.replicate 512 (-2.0))).reshapeChecked #[1, 1024]
+      (Tensor.fromFloatArray (Array.replicate 512 10.0 ++ Array.replicate 512 (-2.0))).reshape #[1, 1024] (by simp)
         |>.expand #[2, 1024]
       else Tensor.full #[2, 1024] 4.0
     LeanTest.assertTrue (Tensor.allclose dx.toFloat32 expectedDx 0 0)
     let expectedDw := Tensor.fromFloatArray (gradValues.map (fun v => 2.0 * v * inverse))
-      |>.reshapeChecked #[1024]
+      |>.reshape #[1024] (by simp [gradValues]; split <;> simp)
     LeanTest.assertTrue (Tensor.allclose dw expectedDw 0 1e-5)
 
 @[test] def testGPULossIndexedTrainingReference : IO Unit := do
@@ -199,22 +199,22 @@ example (a : Tensor { shape := #[2], dtype := .Float32, device := .CPU }) (b : T
 
 @[test] def testGPUAttentionIndexedReference : IO Unit := do
   let q := (Tensor.fromFloatArray (Array.replicate 64 0.0 ++ Array.replicate 64 1.0))
-    |>.reshapeChecked #[1, 1, 2, 64] |>.toBFloat16
+    |>.reshape #[1, 1, 2, 64] (by simp) |>.toBFloat16
   let k := (Tensor.fromFloatArray
     (Array.replicate 64 0.0 ++ Array.replicate 64 1.0 ++ Array.replicate 64 0.0))
-    |>.reshapeChecked #[1, 1, 3, 64] |>.toBFloat16
+    |>.reshape #[1, 1, 3, 64] (by simp) |>.toBFloat16
   let v := (Tensor.fromFloatArray
     (Array.replicate 64 1.0 ++ Array.replicate 64 2.0 ++ Array.replicate 64 6.0))
-    |>.reshapeChecked #[1, 1, 3, 64] |>.toBFloat16
+    |>.reshape #[1, 1, 3, 64] (by simp) |>.toBFloat16
   let (output, lse) := Examples.GPU.attentionReference q k v
   LeanTest.assertEqual output.actualSpec.dtype DType.BFloat16
   LeanTest.assertEqual lse.actualSpec.dtype DType.Float32
   let expected := (Tensor.fromFloatArray
     (Array.replicate 64 3.0 ++ Array.replicate 64 ((7.0 + 2.0 * Float.exp 8.0) / (2.0 + Float.exp 8.0))))
-    |>.reshapeChecked #[1, 1, 2, 64] |>.toBFloat16
+    |>.reshape #[1, 1, 2, 64] (by simp) |>.toBFloat16
   LeanTest.assertTrue (Tensor.allclose output.toFloat32 expected.toFloat32 0 0)
   let expectedLse := (Tensor.fromFloatArray #[Float.log 3.0, Float.log (2.0 + Float.exp 8.0)])
-    |>.reshapeChecked #[1, 1, 2]
+    |>.reshape #[1, 1, 2]
   LeanTest.assertTrue (Tensor.allclose lse expectedLse 0 1e-6)
 
 set_option linter.unusedVariables false in
@@ -226,9 +226,9 @@ example (a : Tensor { shape := #[2, 3], dtype := .BFloat16, device := .CPU }) (b
 @[test] def testGPUAttentionIndexedTrainingReference : IO Unit := do
   let q := (Tensor.zeros #[1, 1, 2, 64]).toBFloat16
   let k := (Tensor.fromFloatArray (Array.replicate 64 0.0 ++ Array.replicate 64 1.0))
-    |>.reshapeChecked #[1, 1, 2, 64] |>.toBFloat16
+    |>.reshape #[1, 1, 2, 64] (by simp) |>.toBFloat16
   let v := (Tensor.fromFloatArray (Array.replicate 64 1.0 ++ Array.replicate 64 3.0))
-    |>.reshapeChecked #[1, 1, 2, 64] |>.toBFloat16
+    |>.reshape #[1, 1, 2, 64] (by simp) |>.toBFloat16
   let cotangent := (Tensor.ones #[1, 1, 2, 64]).toBFloat16
   for _ in [:2] do
     let (output, dq, dk, dv) ← Examples.GPU.attentionTrainingReference q k v cotangent
@@ -263,9 +263,9 @@ example (a : Tensor { shape := #[2, 3], dtype := .BFloat16, device := .CPU }) (b
 @[test] def testGPUAttentionIndexedBatchedHeads : IO Unit := do
   let q := (Tensor.zeros #[2, 3, 2, 64]).toBFloat16
   let k := (Tensor.fromFloatArray (Array.replicate 64 0.0 ++ Array.replicate 64 1.0))
-    |>.reshapeChecked #[1, 1, 2, 64] |>.expand #[2, 3, 2, 64] |>.toBFloat16
+    |>.reshape #[1, 1, 2, 64] (by simp) |>.expand #[2, 3, 2, 64] |>.toBFloat16
   let v := (Tensor.fromFloatArray (Array.replicate 64 1.0 ++ Array.replicate 64 3.0))
-    |>.reshapeChecked #[1, 1, 2, 64] |>.expand #[2, 3, 2, 64] |>.toBFloat16
+    |>.reshape #[1, 1, 2, 64] (by simp) |>.expand #[2, 3, 2, 64] |>.toBFloat16
   let cotangent := (Tensor.ones #[2, 3, 2, 64]).toBFloat16
   let (out, lse) := Examples.GPU.attentionReference q k v
   LeanTest.assertTrue (Tensor.allclose out.toFloat32 (Tensor.full #[2, 3, 2, 64] 2.0) 0 0)

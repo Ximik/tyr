@@ -371,22 +371,28 @@ def init (cfg : WhisperConfig) (device : Device := .CPU) (dtype : DType := .Floa
 def encode {batch frames : Nat} {featureDType : DType}
     (m : WhisperModel (device := device) (dtype := dtype) cfg)
     (inputFeatures : Tensor { dtype := featureDType, device := device, shape := #[batch, cfg.numMelBins, frames] })
+    (hFrames : 0 < frames)
     : IO (Tensor { dtype := dtype, device := device, shape := #[batch, WhisperConfig.conv2OutputSeq frames, cfg.dModel] }) := do
   if frames == 0 then
     throw <| IO.userError "Whisper encoder requires at least one input frame"
   let inputFeatures := Tensor.castLike m.encoderConv1Weight inputFeatures
   let x1 : Tensor { dtype := dtype, device := device, shape := #[batch, cfg.dModel, frames] } :=
-    Tensor.reshapeChecked
+    Tensor.reshape
       (Tensor.gelu (Tensor.conv1dGroups inputFeatures m.encoderConv1Weight m.encoderConv1Bias 1 1 1 1))
       #[batch, cfg.dModel, frames]
+      (by have : Tensor.convExtent frames 3 1 1 1 = frames := by unfold Tensor.convExtent; omega
+          simp [this])
   let outSeq := WhisperConfig.conv2OutputSeq frames
   if outSeq > cfg.maxSourcePositions then
     throw <| IO.userError
       s!"Whisper encoder sequence {outSeq} exceeds max_source_positions {cfg.maxSourcePositions}"
   let x2 : Tensor { dtype := dtype, device := device, shape := #[batch, cfg.dModel, outSeq] } :=
-    Tensor.reshapeChecked
+    Tensor.reshape
       (Tensor.gelu (Tensor.conv1dGroups x1 m.encoderConv2Weight m.encoderConv2Bias 2 1 1 1))
       #[batch, cfg.dModel, outSeq]
+      (by have : Tensor.convExtent frames 3 2 1 1 = WhisperConfig.conv2OutputSeq frames := by
+            unfold Tensor.convExtent WhisperConfig.conv2OutputSeq; omega
+          simp +zetaDelta [this])
   let x2t : Tensor { dtype := dtype, device := device, shape := #[batch, outSeq, cfg.dModel] } := (Tensor.permute x2 #[0, 2, 1]).reshape #[batch, outSeq, cfg.dModel]
   let pos : Tensor { dtype := dtype, device := device, shape := #[outSeq, cfg.dModel] } := sliceTyped m.encoderPositionalEmbedding 0 0 outSeq
   let posB : Tensor { dtype := dtype, device := device, shape := #[batch, outSeq, cfg.dModel] } :=
@@ -439,8 +445,9 @@ def init (cfg : WhisperConfig) (device : Device := .CPU) (dtype : DType := .Floa
 def encode {batch frames : Nat} {featureDType : DType}
     (m : WhisperForConditionalGeneration (device := device) (dtype := dtype) cfg)
     (inputFeatures : Tensor { dtype := featureDType, device := device, shape := #[batch, cfg.numMelBins, frames] })
+    (hFrames : 0 < frames)
     : IO (Tensor { dtype := dtype, device := device, shape := #[batch, WhisperConfig.conv2OutputSeq frames, cfg.dModel] }) :=
-  m.model.encode inputFeatures
+  m.model.encode inputFeatures hFrames
 
 def decode {batch seq encSeq : Nat}
     (m : WhisperForConditionalGeneration (device := device) (dtype := dtype) cfg)

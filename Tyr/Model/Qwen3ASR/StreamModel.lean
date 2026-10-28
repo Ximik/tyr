@@ -20,6 +20,8 @@ structure StreamModel where
   model : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype.val) cfg
   tok : tokenizer.qwen3.QwenTokenizer
   preprocessor : PreprocessorConfig
+  /-- The preprocessor produces as many mel bins as the audio encoder consumes; checked on load. -/
+  melBinsMatch : preprocessor.featureSize = cfg.thinkerConfig.audioConfig.numMelBins
   modelDir : String
 
 /-- Streaming session mutable state.
@@ -63,8 +65,11 @@ def loadFromPretrained
   let cfg ← Qwen3ASRConfig.loadFromPretrainedDir modelDir
   let tok ← tokenizer.qwen3.loadTokenizer modelDir
   let preprocessor ← PreprocessorConfig.loadFromPretrainedDir modelDir
+  let ⟨melBinsMatch⟩ ← if h : preprocessor.featureSize = cfg.thinkerConfig.audioConfig.numMelBins then
+      pure (PLift.up h)
+    else throw (IO.userError s!"Qwen3-ASR preprocessor feature_size {preprocessor.featureSize} does not match num_mel_bins {cfg.thinkerConfig.audioConfig.numMelBins}")
   let ⟨device, dtype, model⟩ ← Qwen3ASRForConditionalGeneration.loadSharded modelDir cfg
-  pure { cfg, device, dtype, model, tok, preprocessor, modelDir }
+  pure { cfg, device, dtype, model, tok, preprocessor, melBinsMatch, modelDir }
 
 def newSession
     (m : StreamModel)
@@ -139,7 +144,7 @@ def pushAudio
   let (asrNext, decodeCacheNext) ← streamingTranscribeWithModelStateCached
     m.model
     m.tok
-    m.preprocessor
+    m.preprocessor m.melBinsMatch
     pcm16k
     s'.asrState
     (cache := s'.decodeCache)
@@ -177,7 +182,7 @@ def flush
   let (asrNext, decodeCacheNext) ← finishStreamingTranscribeWithModelStateCached
     m.model
     m.tok
-    m.preprocessor
+    m.preprocessor m.melBinsMatch
     s.asrState
     (cache := s.decodeCache)
     (maxNewTokens := maxNewTokens)
