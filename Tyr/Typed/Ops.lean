@@ -825,26 +825,32 @@ def permute {σ : StaticSpec} (t : Tensor σ) (permutation : Array Nat) :
     Tensor (σ.withShape (TensorSpec.permuteShape σ.shape permutation)) :=
   checkedResult "permute" (Tensor.ofRaw (RawTensor.permute t.raw permutation))
 
-/-- Transpose along nonnegative axes, returning native validation errors and
+/-- Transpose along valid axes, returning native validation errors and
 checking the result metadata. -/
-def transpose? {σ : StaticSpec} (t : Tensor σ) (dim0 dim1 : Nat) :
-    Except String (Tensor (σ.withShape (transposeShape σ.shape dim0 dim1))) := do
+def transpose? {σ : StaticSpec} (t : Tensor σ) (dim0 dim1 : Nat)
+    (h0 : dim0 < max 1 σ.shape.size := by first | exact of_decide_eq_true rfl | (simp <;> fail "axis out of range"))
+    (h1 : dim1 < max 1 σ.shape.size := by first | exact of_decide_eq_true rfl | (simp <;> fail "axis out of range")) :
+    Except String (Tensor (σ.withShape (transposeShape σ.shape dim0 dim1 h0 h1))) := do
   Tensor.ofRaw (← RawTensor.transpose t.raw dim0 dim1)
 
-def transpose {σ : StaticSpec} (t : Tensor σ) (dim0 dim1 : Nat) :
-    Tensor (σ.withShape (transposeShape σ.shape dim0 dim1)) :=
-  checkedResult "transpose" (t.transpose? dim0 dim1)
+def transpose {σ : StaticSpec} (t : Tensor σ) (dim0 dim1 : Nat)
+    (h0 : dim0 < max 1 σ.shape.size := by first | exact of_decide_eq_true rfl | (simp <;> fail "axis out of range"))
+    (h1 : dim1 < max 1 σ.shape.size := by first | exact of_decide_eq_true rfl | (simp <;> fail "axis out of range")) :
+    Tensor (σ.withShape (transposeShape σ.shape dim0 dim1 h0 h1)) :=
+  checkedResult "transpose" (t.transpose? dim0 dim1 h0 h1)
 
 def transpose2d {m n : Nat} {d : DType} {dev : Device}
     (t : Tensor ⟨#[m, n], d, dev⟩) : Tensor ⟨#[n, m], d, dev⟩ :=
   checkedResult "transpose2d" (Tensor.ofRaw (RawTensor.transpose2d t.raw))
 
-def unsqueeze {σ : StaticSpec} (t : Tensor σ) (dim : Nat) :
-    Tensor (σ.withShape (unsqueezeShape σ.shape dim)) :=
+def unsqueeze {σ : StaticSpec} (t : Tensor σ) (dim : Nat)
+    (h : dim ≤ σ.shape.size := by first | exact of_decide_eq_true rfl | (simp <;> fail "axis out of range")) :
+    Tensor (σ.withShape (unsqueezeShape σ.shape dim h)) :=
   checkedResult "unsqueeze" (Tensor.ofRaw (RawTensor.unsqueeze t.raw dim))
 
-def squeeze {σ : StaticSpec} (t : Tensor σ) (dim : Nat) :
-    Tensor (σ.withShape (squeezeShape σ.shape dim)) :=
+def squeeze {σ : StaticSpec} (t : Tensor σ) (dim : Nat)
+    (h : dim < max 1 σ.shape.size := by first | exact of_decide_eq_true rfl | (simp <;> fail "axis out of range")) :
+    Tensor (σ.withShape (squeezeShape σ.shape dim h)) :=
   checkedResult "squeeze" (Tensor.ofRaw (RawTensor.squeeze t.raw dim))
 
 def cat? {s1 s2 : Shape} {d : DType} {dev : Device}

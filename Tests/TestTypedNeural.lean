@@ -81,12 +81,17 @@ open torch
       catch _ => pure true
     LeanTest.assertTrue rejected "Invalid randint arguments must return IO.error"
 
+example (_matrix : Tensor ⟨#[2, 3], .Float32, .CPU⟩) : True := by
+  have _ := _matrix.transpose? 1 0
+  fail_if_success
+    have _ := _matrix.transpose? 0 9
+  fail_if_success
+    have _ := _matrix.transpose? 9 0
+  fail_if_success
+    have _ := _matrix.transpose? 0 18446744073709551615
+  trivial
+
 @[test] def testTypedTransposeRecoverableErrors : IO Unit := do
-  let matrix := Tensor.ones #[2, 3]
-  for (dim0, dim1) in #[(0, 9), (9, 0), (0, 18446744073709551615)] do
-    match matrix.transpose? dim0 dim1 with
-    | .ok _ => LeanTest.fail "Invalid transpose axes must return Except.error"
-    | .error message => LeanTest.assertTrue (!message.isEmpty)
   match (Tensor.full #[] 5).transpose? 0 0 with
   | .ok scalar => LeanTest.assertEqual (← scalar.toFloatArray) #[5]
   | .error message => LeanTest.fail message

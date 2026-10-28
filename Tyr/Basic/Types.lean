@@ -275,48 +275,43 @@ deriving Repr, BEq
 /-! ## Shape Manipulation Helpers -/
 
 /-- Compute output shape for unsqueeze: insert a dimension of size 1 at position `dim` -/
-def unsqueezeShape (s : Shape) (dim : Nat) : Shape :=
-  if dim > s.size then s
-  else s[:dim].toArray ++ #[1] ++ s[dim:].toArray
+@[simp] def unsqueezeShape (s : Shape) (dim : Nat) (h : dim ≤ s.size) : Shape :=
+  s.insertIdx dim 1 h
 
 /-- Compute output shape for squeeze: remove dimension at `dim` if it has size 1 -/
-def squeezeShape (s : Shape) (dim : Nat) : Shape :=
-  if h : dim < s.size then
-    if s[dim]'h = 1 then s[:dim].toArray ++ s[dim+1:].toArray else s
-  else s
+@[simp] def squeezeShape (s : Shape) (dim : Nat) (h : dim < max 1 s.size) : Shape :=
+  -- A 0-dim tensor accepts axis 0 and stays a scalar.
+  if hs : s.size = 0 then s
+  else
+    have h : dim < s.size := by omega
+    if s[dim]'h = 1 then s.eraseIdx dim h else s
 
 /-- Compute output shape for transpose: swap dimensions dim0 and dim1 -/
-def transposeShape (s : Shape) (dim0 dim1 : Nat) : Shape :=
-  if h0 : dim0 < s.size then
-    if h1 : dim1 < s.size then
-      let v0 := s[dim0]'h0
-      let v1 := s[dim1]'h1
-      let s' := s.set (Fin.mk dim0 h0) v1
-      have h1' : dim1 < s'.size := by rw [Array.size_set]; exact h1
-      s'.set (Fin.mk dim1 h1') v0
-    else s
-  else s
+@[simp] def transposeShape (s : Shape) (dim0 dim1 : Nat)
+    (h0 : dim0 < max 1 s.size) (h1 : dim1 < max 1 s.size) : Shape :=
+  -- A 0-dim tensor accepts axes 0 and 0 and stays a scalar.
+  if hs : s.size = 0 then s
+  else
+    have h0 : dim0 < s.size := by omega
+    have h1 : dim1 < s.size := by omega
+    let v0 := s[dim0]'h0
+    let v1 := s[dim1]'h1
+    let s' := s.set (Fin.mk dim0 h0) v1
+    have h1' : dim1 < s'.size := by rw [Array.size_set]; exact h1
+    s'.set (Fin.mk dim1 h1') v0
 
 /-- Compute output shape for reduction along a dimension -/
-def reduceShape (s : Shape) (dim : Nat) (keepdim : Bool) : Shape :=
+@[simp] def reduceShape (s : Shape) (dim : Nat) (keepdim : Bool) : Shape :=
   if h : dim < s.size then
-    if keepdim then s.set (Fin.mk dim h) 1
-    else s[:dim].toArray ++ s[dim+1:].toArray
+    if keepdim then s.set (Fin.mk dim h) 1 else s.eraseIdx dim h
   else s
 
-def replaceAtDim (s : Shape) (dim : Nat) (newSize : Nat) : Shape :=
+@[simp] def replaceAtDim (s : Shape) (dim : Nat) (newSize : Nat) : Shape :=
   if h : dim < s.size then s.set (Fin.mk dim h) newSize else s
 
-/-- Compute output shape for stacking: insert a new dimension of size `n` at `dim` -/
-def stackShape (s : Shape) (n : Nat) (dim : Nat) : Shape :=
-  if dim > s.size then s
-  else s[:dim].toArray ++ #[n] ++ s[dim:].toArray
-
 /-- Compute output shape for unbinding: remove dimension at `dim` -/
-def unbindShape (s : Shape) (dim : Nat) : Shape :=
-  if dim < s.size then
-    s[:dim].toArray ++ s[dim+1:].toArray
-  else s
+@[simp] def unbindShape (s : Shape) (dim : Nat) (h : dim < s.size) : Shape :=
+  s.eraseIdx dim h
 
 /-- Broadcast two batch shapes (everything except last 2 dims) following PyTorch rules -/
 private def broadcastBatchShapes (s1 s2 : Shape) : Shape :=
@@ -341,7 +336,7 @@ private def broadcastBatchShapes (s1 s2 : Shape) : Shape :=
     - 1D @ 2D: [k] @ [k,n] -> [n]
     - 2D @ 1D: [m,k] @ [k] -> [m]
     - ND @ ND: broadcast batch dims, matmul last 2 dims -/
-def matmulShape (s1 s2 : Shape) : Shape :=
+@[simp] def matmulShape (s1 s2 : Shape) : Shape :=
   match s1.size, s2.size with
   | 0, _ => #[]  -- scalar, invalid but return empty
   | _, 0 => #[]  -- scalar, invalid but return empty
@@ -351,16 +346,16 @@ def matmulShape (s1 s2 : Shape) : Shape :=
   | 2, 2 => #[s1.getD 0 0, s2.getD 1 0]  -- [m,k] @ [k,n] -> [m,n]
   | 1, n2 =>
     -- [k] @ [..., k, n] -> [..., n]
-    let batch := s2[:n2-2].toArray
+    let batch := s2.extract 0 (n2 - 2)
     batch ++ #[s2.getD (n2 - 1) 0]
   | n1, 1 =>
     -- [..., m, k] @ [k] -> [..., m]
-    let batch := s1[:n1-2].toArray
+    let batch := s1.extract 0 (n1 - 2)
     batch ++ #[s1.getD (n1 - 2) 0]
   | n1, n2 =>
     -- General case: broadcast batch dims, matmul last 2
-    let batch1 := s1[:n1-2].toArray
-    let batch2 := s2[:n2-2].toArray
+    let batch1 := s1.extract 0 (n1 - 2)
+    let batch2 := s2.extract 0 (n2 - 2)
     let batchOut := broadcastBatchShapes batch1 batch2
     let m := s1.getD (n1 - 2) 0
     let n := s2.getD (n2 - 1) 0
