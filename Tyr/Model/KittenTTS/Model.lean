@@ -548,11 +548,11 @@ def forward {seq : Nat}
   let v0 : Tensor { shape := #[1, seq, AlbertConfig.allHeadSize cfg], dtype := .Float32, device := device } := m.value.forward3d x
 
   let q : Tensor { shape := #[1, seq, cfg.numAttentionHeads, AlbertConfig.headDim cfg], dtype := .Float32, device := device } :=
-    Tensor.reshapeChecked q0 #[1, seq, cfg.numAttentionHeads, AlbertConfig.headDim cfg]
+    Tensor.reshape q0 #[1, seq, cfg.numAttentionHeads, AlbertConfig.headDim cfg]
   let k : Tensor { shape := #[1, seq, cfg.numAttentionHeads, AlbertConfig.headDim cfg], dtype := .Float32, device := device } :=
-    Tensor.reshapeChecked k0 #[1, seq, cfg.numAttentionHeads, AlbertConfig.headDim cfg]
+    Tensor.reshape k0 #[1, seq, cfg.numAttentionHeads, AlbertConfig.headDim cfg]
   let v : Tensor { shape := #[1, seq, cfg.numAttentionHeads, AlbertConfig.headDim cfg], dtype := .Float32, device := device } :=
-    Tensor.reshapeChecked v0 #[1, seq, cfg.numAttentionHeads, AlbertConfig.headDim cfg]
+    Tensor.reshape v0 #[1, seq, cfg.numAttentionHeads, AlbertConfig.headDim cfg]
 
   let qh : Tensor { shape := #[1, cfg.numAttentionHeads, seq, AlbertConfig.headDim cfg], dtype := .Float32, device := device } := Tensor.splitHeads q
   let kh : Tensor { shape := #[1, cfg.numAttentionHeads, seq, AlbertConfig.headDim cfg], dtype := .Float32, device := device } := Tensor.splitHeads k
@@ -561,7 +561,7 @@ def forward {seq : Nat}
     Tensor.attentionGQA qh kh vh false true
   let out4 : Tensor { shape := #[1, seq, cfg.numAttentionHeads, AlbertConfig.headDim cfg], dtype := .Float32, device := device } := Tensor.joinHeads attn
   let out3 : Tensor { shape := #[1, seq, AlbertConfig.allHeadSize cfg], dtype := .Float32, device := device } :=
-    Tensor.reshapeChecked out4 #[1, seq, AlbertConfig.allHeadSize cfg]
+    Tensor.reshape out4 #[1, seq, AlbertConfig.allHeadSize cfg]
   let denseOut : Tensor { shape := #[1, seq, cfg.hiddenSize], dtype := .Float32, device := device } := m.dense.forward3d out3
   Tensor.layerNorm (denseOut + x) m.layerNormWeight m.layerNormBias cfg.layerNormEps
 

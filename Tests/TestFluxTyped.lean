@@ -40,9 +40,9 @@ private def close {σ τ : StaticSpec} (x : Tensor σ) (y : Tensor τ) (tol : Fl
   let c := Float.cos 1
   let s := Float.sin 1
   let expected := (Tensor.fromFloatArray #[c - s, s + c, 1, 1, 1, 1, 1, 1]).reshape #[1, 1, 1, 8]
-  close (applyRope ((Tensor.ones #[1, 1, 1, 8])) pe) expected
+  close (applyRope ((Tensor.ones #[1, 1, 1, 8])) (by decide) pe) expected
   let x := (Tensor.ones #[1, 1, 1, 8]).toBFloat16
-  let y := applyRope x pe
+  let y := applyRope x (by decide) pe
   LeanTest.assertEqual y.actualSpec.dtype .BFloat16
   close y expected.toBFloat16 0.0
 

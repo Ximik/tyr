@@ -32,7 +32,7 @@ namespace AlbertConfig
 def headDim (cfg : AlbertConfig) : Nat :=
   if cfg.numAttentionHeads == 0 then 0 else cfg.hiddenSize / cfg.numAttentionHeads
 
-def allHeadSize (cfg : AlbertConfig) : Nat :=
+@[simp] def allHeadSize (cfg : AlbertConfig) : Nat :=
   cfg.numAttentionHeads * cfg.headDim
 
 def layersPerGroup (cfg : AlbertConfig) : Nat :=

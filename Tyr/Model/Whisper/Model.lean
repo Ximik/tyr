@@ -15,6 +15,10 @@ variable {device : Device} {dtype : DType}
 variable [DType.RealFloating dtype]
 open torch.Model
 
+/-- Proves a head split or merge from the `nHeads ∣ dModel` hypothesis in scope. -/
+local macro "head_split" : tactic =>
+  `(tactic| simp +zetaDelta [Nat.mul_assoc, Nat.mul_div_cancel' ‹_ ∣ _›])
+
 private def activate {s : Shape} (name : String) (x : Tensor { dtype := dtype, device := device, shape := s }) : Tensor { dtype := dtype, device := device, shape := s } :=
   if name == "relu" then
     Tensor.relu x
@@ -68,20 +72,20 @@ def initKVCache {batch nHeads headDim : Nat}
 /-- Project external key/value states once into attention layout.
     Output layout is `[batch, nHeads, kvSeq, headDim]`. -/
 def projectKV {batch kvSeq : Nat}
-    (m : WhisperAttention (device := device) (dtype := dtype) dModel nHeads)
+    (m : WhisperAttention (device := device) (dtype := dtype) dModel nHeads) (hdiv : nHeads ∣ dModel)
     (keyValueStates : Tensor { dtype := dtype, device := device, shape := #[batch, kvSeq, dModel] })
     : Tensor { dtype := dtype, device := device, shape := #[batch, nHeads, kvSeq, dModel / nHeads] } × Tensor { dtype := dtype, device := device, shape := #[batch, nHeads, kvSeq, dModel / nHeads] } :=
   let headDim : Nat := dModel / nHeads
   let k : Tensor { dtype := dtype, device := device, shape := #[batch, kvSeq, dModel] } := Tensor.affine3d keyValueStates m.kProjWeight m.kProjBias
   let v : Tensor { dtype := dtype, device := device, shape := #[batch, kvSeq, dModel] } := Tensor.affine3d keyValueStates m.vProjWeight m.vProjBias
-  let k : Tensor { dtype := dtype, device := device, shape := #[batch, kvSeq, nHeads, headDim] } := Tensor.reshapeChecked k #[batch, kvSeq, nHeads, headDim]
-  let v : Tensor { dtype := dtype, device := device, shape := #[batch, kvSeq, nHeads, headDim] } := Tensor.reshapeChecked v #[batch, kvSeq, nHeads, headDim]
+  let k : Tensor { dtype := dtype, device := device, shape := #[batch, kvSeq, nHeads, headDim] } := Tensor.reshape k #[batch, kvSeq, nHeads, headDim] (by head_split)
+  let v : Tensor { dtype := dtype, device := device, shape := #[batch, kvSeq, nHeads, headDim] } := Tensor.reshape v #[batch, kvSeq, nHeads, headDim] (by head_split)
   (transposeAttention k, transposeAttention v)
 
 /-- Run attention where K/V are already projected and transposed.
     `keyStates` / `valueStates` layout: `[batch, nHeads, kvSeq, headDim]`. -/
 def forwardWithProjectedKV {batch qSeq kvSeq : Nat}
-    (m : WhisperAttention (device := device) (dtype := dtype) dModel nHeads)
+    (m : WhisperAttention (device := device) (dtype := dtype) dModel nHeads) (hdiv : nHeads ∣ dModel)
     (queryStates : Tensor { dtype := dtype, device := device, shape := #[batch, qSeq, dModel] })
     (keyStates : Tensor { dtype := dtype, device := device, shape := #[batch, nHeads, kvSeq, dModel / nHeads] })
     (valueStates : Tensor { dtype := dtype, device := device, shape := #[batch, nHeads, kvSeq, dModel / nHeads] })
@@ -89,7 +93,7 @@ def forwardWithProjectedKV {batch qSeq kvSeq : Nat}
     : Tensor { dtype := dtype, device := device, shape := #[batch, qSeq, dModel] } :=
   let headDim : Nat := dModel / nHeads
   let q : Tensor { dtype := dtype, device := device, shape := #[batch, qSeq, dModel] } := Tensor.affine3d queryStates m.qProjWeight m.qProjBias
-  let q : Tensor { dtype := dtype, device := device, shape := #[batch, qSeq, nHeads, headDim] } := Tensor.reshapeChecked q #[batch, qSeq, nHeads, headDim]
+  let q : Tensor { dtype := dtype, device := device, shape := #[batch, qSeq, nHeads, headDim] } := Tensor.reshape q #[batch, qSeq, nHeads, headDim] (by head_split)
   let qh : Tensor { dtype := dtype, device := device, shape := #[batch, nHeads, qSeq, headDim] } := transposeAttention q
   let attn : Tensor { dtype := dtype, device := device, shape := #[batch, nHeads, qSeq, headDim] } :=
     Tensor.attentionGQAQKV
@@ -100,28 +104,28 @@ def forwardWithProjectedKV {batch qSeq kvSeq : Nat}
       isCausal
       true
   let out : Tensor { dtype := dtype, device := device, shape := #[batch, qSeq, nHeads, headDim] } := fromAttention attn
-  let out : Tensor { dtype := dtype, device := device, shape := #[batch, qSeq, dModel] } := Tensor.reshapeChecked out #[batch, qSeq, dModel]
+  let out : Tensor { dtype := dtype, device := device, shape := #[batch, qSeq, dModel] } := Tensor.reshape out #[batch, qSeq, dModel] (by head_split)
   Tensor.affine3d out m.outProjWeight m.outProjBias
 
 def forwardCross {batch qSeq kvSeq : Nat}
-    (m : WhisperAttention (device := device) (dtype := dtype) dModel nHeads)
+    (m : WhisperAttention (device := device) (dtype := dtype) dModel nHeads) (hdiv : nHeads ∣ dModel)
     (queryStates : Tensor { dtype := dtype, device := device, shape := #[batch, qSeq, dModel] })
     (keyValueStates : Tensor { dtype := dtype, device := device, shape := #[batch, kvSeq, dModel] })
     (isCausal : Bool := false)
     : Tensor { dtype := dtype, device := device, shape := #[batch, qSeq, dModel] } :=
-  let (kh, vh) := projectKV m keyValueStates
-  forwardWithProjectedKV m queryStates kh vh isCausal
+  let (kh, vh) := projectKV m hdiv keyValueStates
+  forwardWithProjectedKV m hdiv queryStates kh vh isCausal
 
 def forwardSelf {batch seq : Nat}
-    (m : WhisperAttention (device := device) (dtype := dtype) dModel nHeads)
+    (m : WhisperAttention (device := device) (dtype := dtype) dModel nHeads) (hdiv : nHeads ∣ dModel)
     (x : Tensor { dtype := dtype, device := device, shape := #[batch, seq, dModel] })
     (isCausal : Bool := false)
     : Tensor { dtype := dtype, device := device, shape := #[batch, seq, dModel] } :=
-  forwardCross m x x isCausal
+  forwardCross m hdiv x x isCausal
 
 /-- Incremental one-token self-attention step with KV cache update. -/
 def forwardSelfStep {batch : Nat}
-    (m : WhisperAttention (device := device) (dtype := dtype) dModel nHeads)
+    (m : WhisperAttention (device := device) (dtype := dtype) dModel nHeads) (hdiv : nHeads ∣ dModel)
     (x : Tensor { dtype := dtype, device := device, shape := #[batch, 1, dModel] })
     (cache : KVCache (device := device) (dtype := dtype) batch nHeads (dModel / nHeads))
     : Tensor { dtype := dtype, device := device, shape := #[batch, 1, dModel] } × KVCache (device := device) (dtype := dtype) batch nHeads (dModel / nHeads) :=
@@ -130,9 +134,9 @@ def forwardSelfStep {batch : Nat}
   let k0 : Tensor { dtype := dtype, device := device, shape := #[batch, 1, dModel] } := Tensor.affine3d x m.kProjWeight m.kProjBias
   let v0 : Tensor { dtype := dtype, device := device, shape := #[batch, 1, dModel] } := Tensor.affine3d x m.vProjWeight m.vProjBias
 
-  let q : Tensor { dtype := dtype, device := device, shape := #[batch, 1, nHeads, headDim] } := Tensor.reshapeChecked q0 #[batch, 1, nHeads, headDim]
-  let k : Tensor { dtype := dtype, device := device, shape := #[batch, 1, nHeads, headDim] } := Tensor.reshapeChecked k0 #[batch, 1, nHeads, headDim]
-  let v : Tensor { dtype := dtype, device := device, shape := #[batch, 1, nHeads, headDim] } := Tensor.reshapeChecked v0 #[batch, 1, nHeads, headDim]
+  let q : Tensor { dtype := dtype, device := device, shape := #[batch, 1, nHeads, headDim] } := Tensor.reshape q0 #[batch, 1, nHeads, headDim] (by head_split)
+  let k : Tensor { dtype := dtype, device := device, shape := #[batch, 1, nHeads, headDim] } := Tensor.reshape k0 #[batch, 1, nHeads, headDim] (by head_split)
+  let v : Tensor { dtype := dtype, device := device, shape := #[batch, 1, nHeads, headDim] } := Tensor.reshape v0 #[batch, 1, nHeads, headDim] (by head_split)
 
   let qh : Tensor { dtype := dtype, device := device, shape := #[batch, nHeads, 1, headDim] } := transposeAttention q
   let kNew : Tensor { dtype := dtype, device := device, shape := #[batch, nHeads, 1, headDim] } := transposeAttention k
@@ -160,7 +164,7 @@ def forwardSelfStep {batch : Nat}
         false
         true
     let out : Tensor { dtype := dtype, device := device, shape := #[batch, 1, nHeads, headDim] } := fromAttention attn
-    let out : Tensor { dtype := dtype, device := device, shape := #[batch, 1, dModel] } := Tensor.reshapeChecked out #[batch, 1, dModel]
+    let out : Tensor { dtype := dtype, device := device, shape := #[batch, 1, dModel] } := Tensor.reshape out #[batch, 1, dModel] (by head_split)
     let out : Tensor { dtype := dtype, device := device, shape := #[batch, 1, dModel] } := Tensor.affine3d out m.outProjWeight m.outProjBias
     let cache' : KVCache (device := device) (dtype := dtype) batch nHeads headDim := {
       kStoreDyn := Tensor.packShape kStore'
@@ -187,7 +191,7 @@ def forwardSelfStep {batch : Nat}
         false
         true
     let out : Tensor { dtype := dtype, device := device, shape := #[batch, 1, nHeads, headDim] } := fromAttention attn
-    let out : Tensor { dtype := dtype, device := device, shape := #[batch, 1, dModel] } := Tensor.reshapeChecked out #[batch, 1, dModel]
+    let out : Tensor { dtype := dtype, device := device, shape := #[batch, 1, dModel] } := Tensor.reshape out #[batch, 1, dModel] (by head_split)
     let out : Tensor { dtype := dtype, device := device, shape := #[batch, 1, dModel] } := Tensor.affine3d out m.outProjWeight m.outProjBias
     let cache' : KVCache (device := device) (dtype := dtype) batch nHeads headDim := {
       kStoreDyn := Tensor.packShape kStore'
@@ -226,7 +230,7 @@ def forward {batch seq : Nat}
     (x : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.dModel] })
     : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.dModel] } :=
   let h0 := m.selfAttnLayerNorm.forward3d x
-  let h1 := m.selfAttn.forwardSelf h0 (isCausal := false)
+  let h1 := m.selfAttn.forwardSelf cfg.encoderHeadsDivide h0 (isCausal := false)
   let x1 := Tensor.add x h1
   let h2 := m.finalLayerNorm.forward3d x1
   let h3 : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.encoderFfnDim] } := Tensor.affine3d h2 m.fc1Weight m.fc1Bias
@@ -278,10 +282,10 @@ def forward {batch seq encSeq : Nat}
     (encoderHidden : Tensor { dtype := dtype, device := device, shape := #[batch, encSeq, cfg.dModel] })
     : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.dModel] } :=
   let h0 := m.selfAttnLayerNorm.forward3d x
-  let h1 := m.selfAttn.forwardSelf h0 (isCausal := true)
+  let h1 := m.selfAttn.forwardSelf cfg.decoderHeadsDivide h0 (isCausal := true)
   let x1 := Tensor.add x h1
   let h2 := m.encoderAttnLayerNorm.forward3d x1
-  let h3 := m.encoderAttn.forwardCross h2 encoderHidden (isCausal := false)
+  let h3 := m.encoderAttn.forwardCross cfg.decoderHeadsDivide h2 encoderHidden (isCausal := false)
   let x2 := Tensor.add x1 h3
   let h4 := m.finalLayerNorm.forward3d x2
   let h5 : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.decoderFfnDim] } := Tensor.affine3d h4 m.fc1Weight m.fc1Bias
@@ -298,10 +302,10 @@ def forwardStepCached {batch encSeq : Nat}
     (selfCache : WhisperAttention.KVCache (device := device) (dtype := dtype) batch cfg.decoderAttentionHeads (cfg.dModel / cfg.decoderAttentionHeads))
     : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.dModel] } × WhisperAttention.KVCache (device := device) (dtype := dtype) batch cfg.decoderAttentionHeads (cfg.dModel / cfg.decoderAttentionHeads) :=
   let h0 := m.selfAttnLayerNorm.forward3d x
-  let (h1a, selfCache') := m.selfAttn.forwardSelfStep h0 selfCache
+  let (h1a, selfCache') := m.selfAttn.forwardSelfStep cfg.decoderHeadsDivide h0 selfCache
   let x1 := Tensor.add x h1a
   let h2 := m.encoderAttnLayerNorm.forward3d x1
-  let h3 := m.encoderAttn.forwardWithProjectedKV h2 crossK crossV (isCausal := false)
+  let h3 := m.encoderAttn.forwardWithProjectedKV cfg.decoderHeadsDivide h2 crossK crossV (isCausal := false)
   let x2 := Tensor.add x1 h3
   let h4 := m.finalLayerNorm.forward3d x2
   let h5 : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.decoderFfnDim] } := Tensor.affine3d h4 m.fc1Weight m.fc1Bias
@@ -468,7 +472,7 @@ def precomputeCrossCaches {batch encSeq : Nat}
     : IO (Array (LayerCrossCache (device := device) (dtype := dtype) cfg)) := do
   let mut out : Array (LayerCrossCache (device := device) (dtype := dtype) cfg) := #[]
   for layer in m.model.decoderLayers do
-    let (k, v) := layer.encoderAttn.projectKV encoderHidden
+    let (k, v) := layer.encoderAttn.projectKV cfg.decoderHeadsDivide encoderHidden
     out := out.push { kDyn := Tensor.packShape k, vDyn := Tensor.packShape v }
   pure out
 

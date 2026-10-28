@@ -120,6 +120,7 @@ def init (hidden_size num_heads head_dim mlp_hidden : Nat)
     Returns: (img_out, txt_out) -/
 def forward {batch img_seq txt_seq hidden_size num_heads head_dim mlp_hidden : Nat}
     (block : DoubleStreamBlock (device := device) (dtype := dtype) hidden_size num_heads head_dim mlp_hidden)
+    (heven : 2 ∣ head_dim)
     (img : Tensor { dtype := dtype, device := device, shape := #[batch, img_seq, hidden_size] })
     (txt : Tensor { dtype := dtype, device := device, shape := #[batch, txt_seq, hidden_size] })
     (img_pe : Tensor { device := device, shape := #[batch, 1, img_seq, head_dim / 2, 2, 2], dtype := .Float32 })
@@ -177,10 +178,10 @@ def forward {batch img_seq txt_seq hidden_size num_heads head_dim mlp_hidden : N
   let (txt_q, txt_k) := block.txt_attn.norm.forward txt_q txt_k
 
   -- Apply RoPE
-  let img_q := flux.applyRope img_q img_pe
-  let img_k := flux.applyRope img_k img_pe
-  let txt_q := flux.applyRope txt_q txt_pe
-  let txt_k := flux.applyRope txt_k txt_pe
+  let img_q := flux.applyRope img_q heven img_pe
+  let img_k := flux.applyRope img_k heven img_pe
+  let txt_q := flux.applyRope txt_q heven txt_pe
+  let txt_k := flux.applyRope txt_k heven txt_pe
 
   -- Concatenate for joint attention
   -- q: [batch, img_seq + txt_seq, num_heads, head_dim]

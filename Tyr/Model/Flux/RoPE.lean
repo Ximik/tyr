@@ -22,7 +22,7 @@ private def ropeAxis {batch seq : Nat}
   let row0 : Tensor { device := device, shape := #[batch, seq, dim / 2, 2], dtype := .Float32 } := qwen35.typedCat cos (Tensor.mulScalar sin (-1.0)) 3
   let row1 : Tensor { device := device, shape := #[batch, seq, dim / 2, 2], dtype := .Float32 } := qwen35.typedCat sin cos 3
   let both : Tensor { device := device, shape := #[batch, seq, dim / 2, 4], dtype := .Float32 } := qwen35.typedCat row0 row1 3
-  both.reshapeChecked #[batch, seq, dim / 2, 2, 2]
+  both.reshape #[batch, seq, dim / 2, 2, 2] (by simp [Nat.mul_assoc])
 
 /-- Four-axis rotary matrices. Each axis dimension is even and their sum is the head dimension. -/
 def ropeEmbed {batch seq head_dim : Nat}
@@ -46,14 +46,17 @@ def ropeEmbed {batch seq head_dim : Nat}
 /-- Apply rotary matrices in Float32 and restore the activation dtype. -/
 def applyRope {batch seq n_head head_dim : Nat}
     (x : Tensor { dtype := dtype, device := device, shape := #[batch, seq, n_head, head_dim] })
+    (heven : 2 ∣ head_dim)
     (pe : Tensor { device := device, shape := #[batch, 1, seq, head_dim / 2, 2, 2], dtype := .Float32 })
     : Tensor { dtype := dtype, device := device, shape := #[batch, seq, n_head, head_dim] } :=
-  let xf := (transposeAttention x).toFloat32.reshapeChecked #[batch, n_head, seq, head_dim / 2, 1, 2]
+  let xf := (transposeAttention x).toFloat32.reshape #[batch, n_head, seq, head_dim / 2, 1, 2]
+    (by simp [Nat.mul_assoc, Nat.div_mul_cancel heven])
   let x0 := Tensor.expand ((sliceTyped xf 5 0 1).reshape #[batch, n_head, seq, head_dim / 2, 1]) #[batch, n_head, seq, head_dim / 2, 2]
   let x1 := Tensor.expand ((sliceTyped xf 5 1 1).reshape #[batch, n_head, seq, head_dim / 2, 1]) #[batch, n_head, seq, head_dim / 2, 2]
   let p0 := Tensor.expand ((sliceTyped pe 5 0 1).reshape #[batch, 1, seq, head_dim / 2, 2]) #[batch, n_head, seq, head_dim / 2, 2]
   let p1 := Tensor.expand ((sliceTyped pe 5 1 1).reshape #[batch, 1, seq, head_dim / 2, 2]) #[batch, n_head, seq, head_dim / 2, 2]
-  let out := (p0 * x0 + p1 * x1).reshapeChecked #[batch, n_head, seq, head_dim]
+  let out := (p0 * x0 + p1 * x1).reshape #[batch, n_head, seq, head_dim]
+    (by simp [Nat.mul_assoc, Nat.div_mul_cancel heven])
   Tensor.castLike x (fromAttention out)
 
 end torch.flux

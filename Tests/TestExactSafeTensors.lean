@@ -82,7 +82,7 @@ example (_packed : SomeDTypeTensor #[2] .CPU) : True := by
 @[test] def testExactDTypeFP8DequantizationKeepsIndependentScaleDType : IO Unit := do
   let weight := (Tensor.ones #[128, 128]).castDType .Float8E4M3FN
   let scale := (Tensor.fromFloatArray #[2]).reshape #[1, 1]
-  let result : Tensor ⟨#[128, 128], .Float32, .CPU⟩ := Model.dequantizeFP8 weight scale
+  let result : Tensor ⟨#[128, 128], .Float32, .CPU⟩ := Model.dequantizeFP8 weight scale (by decide)
   LeanTest.assertEqual (Tensor.sumAll result).item 32768
   LeanTest.assertEqual weight.raw.dtype .Float8E4M3FN
   LeanTest.assertEqual scale.raw.dtype .Float32

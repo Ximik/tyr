@@ -68,6 +68,7 @@ def init (hidden_size num_heads head_dim mlp_hidden : Nat)
     Returns: [batch, seq, hidden_size] -/
 def forward {batch seq hidden_size num_heads head_dim mlp_hidden : Nat}
     (block : SingleStreamBlock (device := device) (dtype := dtype) hidden_size num_heads head_dim mlp_hidden)
+    (heven : 2 ∣ head_dim)
     (x : Tensor { dtype := dtype, device := device, shape := #[batch, seq, hidden_size] })
     (pe : Tensor { device := device, shape := #[batch, 1, seq, head_dim / 2, 2, 2], dtype := .Float32 })  -- Shape depends on RoPE implementation
     (mod : Tensor { dtype := dtype, device := device, shape := #[batch, 3, hidden_size] })
@@ -99,8 +100,8 @@ def forward {batch seq hidden_size num_heads head_dim mlp_hidden : Nat}
   let (q, k) := block.norm.forward q k
 
   -- Apply RoPE
-  let q := flux.applyRope q pe
-  let k := flux.applyRope k pe
+  let q := flux.applyRope q heven pe
+  let k := flux.applyRope k heven pe
 
   -- Transpose for attention: [batch, num_heads, seq, head_dim]
   let q := transposeAttention q

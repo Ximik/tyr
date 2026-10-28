@@ -33,7 +33,13 @@ structure FluxConfig where
   theta : Nat := 2000
   /-- RoPE axes dimensions (for 4-axis RoPE) -/
   axes_dims : Array Nat := #[32, 32, 32, 32]
-  deriving Repr, Inhabited
+  /-- Rotary pairs split `head_dim` in halves; checked when the config is built. -/
+  headDimEven : 2 ∣ head_dim := by decide
+  /-- Four even RoPE axis dimensions summing to `head_dim`; checked when the config is built. -/
+  axesValid : axes_dims.size = 4 ∧ axes_dims.toList.all (· % 2 == 0) ∧ axes_dims.toList.sum = head_dim := by decide
+  deriving Repr
+
+instance : Inhabited FluxConfig := ⟨{}⟩
 
 namespace FluxConfig
 

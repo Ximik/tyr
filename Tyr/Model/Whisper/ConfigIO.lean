@@ -75,15 +75,21 @@ namespace WhisperConfig
 
 def loadFromFile (path : String) (defaults : WhisperConfig := {}) : IO WhisperConfig := do
   let root ← parseJsonFile path
+  let dModel := getNatFieldD root "d_model" defaults.dModel
+  let encoderAttentionHeads := getNatFieldD root "encoder_attention_heads" defaults.encoderAttentionHeads
+  let decoderAttentionHeads := getNatFieldD root "decoder_attention_heads" defaults.decoderAttentionHeads
+  let hHeads ← if h : encoderAttentionHeads ∣ dModel ∧ decoderAttentionHeads ∣ dModel then pure (PLift.up h) else
+    throw <| IO.userError
+      s!"Invalid Whisper config: d_model={dModel}, encoder_heads={encoderAttentionHeads}, decoder_heads={decoderAttentionHeads}"
   let cfg : WhisperConfig := {
     numMelBins := getNatFieldD root "num_mel_bins" defaults.numMelBins
     vocabSize := getNatFieldD root "vocab_size" defaults.vocabSize
-    dModel := getNatFieldD root "d_model" defaults.dModel
+    dModel
     encoderLayers := getNatFieldD root "encoder_layers" defaults.encoderLayers
-    encoderAttentionHeads := getNatFieldD root "encoder_attention_heads" defaults.encoderAttentionHeads
+    encoderAttentionHeads
     encoderFfnDim := getNatFieldD root "encoder_ffn_dim" defaults.encoderFfnDim
     decoderLayers := getNatFieldD root "decoder_layers" defaults.decoderLayers
-    decoderAttentionHeads := getNatFieldD root "decoder_attention_heads" defaults.decoderAttentionHeads
+    decoderAttentionHeads
     decoderFfnDim := getNatFieldD root "decoder_ffn_dim" defaults.decoderFfnDim
     maxSourcePositions := getNatFieldD root "max_source_positions" defaults.maxSourcePositions
     maxTargetPositions := getNatFieldD root "max_target_positions" defaults.maxTargetPositions
@@ -95,6 +101,8 @@ def loadFromFile (path : String) (defaults : WhisperConfig := {}) : IO WhisperCo
     decoderStartTokenId := getTokenIdFieldD root "decoder_start_token_id" defaults.decoderStartTokenId
     suppressTokens := getNatArrayFieldD root "suppress_tokens" defaults.suppressTokens
     beginSuppressTokens := getNatArrayFieldD root "begin_suppress_tokens" defaults.beginSuppressTokens
+    encoderHeadsDivide := hHeads.down.1
+    decoderHeadsDivide := hHeads.down.2
   }
   if !cfg.hasValidHeads then
     throw <| IO.userError
