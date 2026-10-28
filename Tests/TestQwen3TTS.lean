@@ -126,8 +126,8 @@ def testQwen3TTSBFloat16IncrementalCache : IO Unit := do
       cache := next
       outputs := outputs.push out.packShape
     let prefixCache := cache
-    let prefixK ← Tensor.toFloatArray prefixCache.kStoreDyn.2
-    let prefixV ← Tensor.toFloatArray prefixCache.vStoreDyn.2
+    let prefixK ← Tensor.toFloatArray prefixCache.kStore
+    let prefixV ← Tensor.toFloatArray prefixCache.vStore
     for pos in [3:5] do
       let (out, next) := layer.forwardStep (Tensor.sliceChecked x 1 pos 1 #[1, 1, 8])
         (Tensor.sliceChecked cos 0 pos 1 #[1, 2]) (Tensor.sliceChecked sin 0 pos 1 #[1, 2]) cache
@@ -135,14 +135,14 @@ def testQwen3TTSBFloat16IncrementalCache : IO Unit := do
       cache := next
       outputs := outputs.push out.packShape
     LeanTest.assertEqual cache.seq 5 "All prompt and decode tokens enter the cache"
-    LeanTest.assertEqual cache.kStoreDyn.2.actualSpec.dtype x.actualSpec.dtype "K cache follows projected key dtype"
-    LeanTest.assertEqual cache.vStoreDyn.2.actualSpec.dtype x.actualSpec.dtype "V cache follows projected value dtype"
-    LeanTest.assertEqual (← Tensor.toFloatArray prefixCache.kStoreDyn.2) prefixK
+    LeanTest.assertEqual cache.kStore.actualSpec.dtype x.actualSpec.dtype "K cache follows projected key dtype"
+    LeanTest.assertEqual cache.vStore.actualSpec.dtype x.actualSpec.dtype "V cache follows projected value dtype"
+    LeanTest.assertEqual (← Tensor.toFloatArray prefixCache.kStore) prefixK
       "Later decode leaves the functional K snapshot unchanged"
-    LeanTest.assertEqual (← Tensor.toFloatArray prefixCache.vStoreDyn.2) prefixV
+    LeanTest.assertEqual (← Tensor.toFloatArray prefixCache.vStore) prefixV
       "Later decode leaves the functional V snapshot unchanged"
-    LeanTest.assertEqual (Tensor.item (Tensor.sumAll fresh.kStoreDyn.2)) 0.0 "Fresh K snapshot remains empty"
-    LeanTest.assertEqual (Tensor.item (Tensor.sumAll fresh.vStoreDyn.2)) 0.0 "Fresh V snapshot remains empty"
+    LeanTest.assertEqual (Tensor.item (Tensor.sumAll fresh.kStore)) 0.0 "Fresh K snapshot remains empty"
+    LeanTest.assertEqual (Tensor.item (Tensor.sumAll fresh.vStore)) 0.0 "Fresh V snapshot remains empty"
     let stepped : Tensor { shape := #[1, 5, 8], dtype, device := .CPU } := Tensor.catManyChecked outputs 1 #[1, 5, 8]
     let error := Tensor.item (Tensor.maxAll (Tensor.abs (Tensor.sub (Tensor.toFloat32 stepped) (Tensor.toFloat32 full))))
     let tolerance := if bf16 then 0.0078125 else 0.00001

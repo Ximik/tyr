@@ -64,17 +64,13 @@ def init (hidden_size num_heads num_kv_heads head_dim : Nat) (dtype : DType := .
   }
 
 /-- Incremental KV cache for one attention layer.
-    Stores preallocated K/V buffers with capacity `maxLen`.
-
-    `maxLen` is a runtime value (not a type index), so the stores are
-    carried existentially over their shape and re-validated against the
-    cache metadata by `expectStore` at every decode step — the typed
-    adapter for rank changes without erasing the tensor specification. -/
+    Stores preallocated K/V buffers with capacity `maxLen`; the store types
+    depend on that field, so `maxLen` stays a runtime value. -/
 structure KVCache (batch num_kv_heads head_dim : Nat) (dtype : DType := .Float32) where
-  kStoreDyn : Σ (s : Shape), Tensor { device := device, shape := s, dtype := dtype }
-  vStoreDyn : Σ (s : Shape), Tensor { device := device, shape := s, dtype := dtype }
-  seq : Nat := 0
   maxLen : Nat := 0
+  kStore : Tensor { device := device, shape := #[batch, num_kv_heads, maxLen, head_dim], dtype := dtype }
+  vStore : Tensor { device := device, shape := #[batch, num_kv_heads, maxLen, head_dim], dtype := dtype }
+  seq : Nat := 0
 
 /-- Empty static KV cache with fixed capacity `maxLen`. -/
 def initKVCache {batch num_kv_heads head_dim : Nat}
@@ -85,16 +81,7 @@ def initKVCache {batch num_kv_heads head_dim : Nat}
     Tensor.zerosFor ⟨#[batch, num_kv_heads, maxLen, head_dim], dtype, device⟩
   let v0 : Tensor { device := device, shape := #[batch, num_kv_heads, maxLen, head_dim], dtype := dtype } :=
     Tensor.zerosFor ⟨#[batch, num_kv_heads, maxLen, head_dim], dtype, device⟩
-  { kStoreDyn := ⟨_, k0⟩, vStoreDyn := ⟨_, v0⟩, seq := 0, maxLen := maxLen }
-
-/-- Recover the statically-shaped store from its existential carrier,
-    validating the runtime handle against the cache metadata. -/
-private def expectStore {batch num_kv_heads head_dim : Nat}
-    (store : Σ (s : Shape), Tensor { device := device, shape := s, dtype := dtype }) (maxLen : Nat)
-    : Tensor { device := device, shape := #[batch, num_kv_heads, maxLen, head_dim], dtype := dtype } :=
-  match Tensor.ofRaw store.2.raw with
-  | .ok t => t
-  | .error message => nativeInvariantFailure s!"QwenAttention.KVCache store: {message}"
+  { maxLen := maxLen, kStore := k0, vStore := v0, seq := 0 }
 
 /-! ## Extern adapters
 
@@ -270,9 +257,9 @@ def forwardStep {batch hidden_size num_heads num_kv_heads head_dim : Nat}
   let vNew := transposeForAttention v
 
   let kStore : Tensor { device := device, shape := #[batch, num_kv_heads, cache.maxLen, head_dim], dtype := dtype } :=
-    Tensor.castLike kNew (expectStore cache.kStoreDyn cache.maxLen)
+    Tensor.castLike kNew cache.kStore
   let vStore : Tensor { device := device, shape := #[batch, num_kv_heads, cache.maxLen, head_dim], dtype := dtype } :=
-    Tensor.castLike vNew (expectStore cache.vStoreDyn cache.maxLen)
+    Tensor.castLike vNew cache.vStore
 
   if cache.seq < cache.maxLen then
     let kStore' := sliceScatterAlong kStore 2 cache.seq kNew
@@ -292,8 +279,8 @@ def forwardStep {batch hidden_size num_heads num_kv_heads head_dim : Nat}
     let out := Tensor.linear3d attnOut attn.o_proj
 
     let cache' : KVCache (device := device) batch num_kv_heads head_dim dtype := {
-      kStoreDyn := ⟨_, kStore'⟩
-      vStoreDyn := ⟨_, vStore'⟩
+      kStore := kStore'
+      vStore := vStore'
       seq := kvLen
       maxLen := cache.maxLen
     }
@@ -318,8 +305,8 @@ def forwardStep {batch hidden_size num_heads num_kv_heads head_dim : Nat}
     let attnOut := attnOut.reshape #[batch, 1, num_heads * head_dim]
     let out := Tensor.linear3d attnOut attn.o_proj
     let cache' : KVCache (device := device) batch num_kv_heads head_dim dtype := {
-      kStoreDyn := ⟨_, kStore'⟩
-      vStoreDyn := ⟨_, vStore'⟩
+      kStore := kStore'
+      vStore := vStore'
       seq := cache.maxLen
       maxLen := cache.maxLen
     }

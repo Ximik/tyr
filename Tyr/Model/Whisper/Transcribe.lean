@@ -644,7 +644,7 @@ private def prefillPromptCaches
     {cfg : WhisperConfig}
     {encSeq : Nat}
     (model : WhisperForConditionalGeneration (device := device) (dtype := dtype) cfg)
-    (crossCaches : Array (WhisperForConditionalGeneration.LayerCrossCache (device := device) (dtype := dtype) cfg))
+    (crossCaches : Array (WhisperForConditionalGeneration.LayerCrossCache (device := device) (dtype := dtype) cfg 1 encSeq))
     (promptIds : Array UInt32)
     : IO (Tensor { dtype := dtype, device := device, shape := #[1, cfg.vocabSize] } × Array (WhisperForConditionalGeneration.LayerKVCache (device := device) (dtype := dtype) cfg 1) × Nat) := do
   let support ← dtype.acquireConstantSupport device
@@ -670,7 +670,7 @@ private partial def decodeLoopCached
     {cfg : WhisperConfig}
     {encSeq : Nat}
     (model : WhisperForConditionalGeneration (device := device) (dtype := dtype) cfg)
-    (crossCaches : Array (WhisperForConditionalGeneration.LayerCrossCache (device := device) (dtype := dtype) cfg))
+    (crossCaches : Array (WhisperForConditionalGeneration.LayerCrossCache (device := device) (dtype := dtype) cfg 1 encSeq))
     (noSpeechTokenId : Option UInt32)
     (rules : DecodeTokenRules)
     (eosTokenId : UInt64)
@@ -763,7 +763,7 @@ private def expandBeamCached
     {cfg : WhisperConfig}
     {encSeq : Nat}
     (model : WhisperForConditionalGeneration (device := device) (dtype := dtype) cfg)
-    (crossCaches : Array (WhisperForConditionalGeneration.LayerCrossCache (device := device) (dtype := dtype) cfg))
+    (crossCaches : Array (WhisperForConditionalGeneration.LayerCrossCache (device := device) (dtype := dtype) cfg 1 encSeq))
     (noSpeechTokenId : Option UInt32)
     (rules : DecodeTokenRules)
     (eosTokenId : UInt64)
@@ -842,7 +842,7 @@ private partial def beamDecodeLoopCached
     {cfg : WhisperConfig}
     {encSeq : Nat}
     (model : WhisperForConditionalGeneration (device := device) (dtype := dtype) cfg)
-    (crossCaches : Array (WhisperForConditionalGeneration.LayerCrossCache (device := device) (dtype := dtype) cfg))
+    (crossCaches : Array (WhisperForConditionalGeneration.LayerCrossCache (device := device) (dtype := dtype) cfg 1 encSeq))
     (noSpeechTokenId : Option UInt32)
     (rules : DecodeTokenRules)
     (eosTokenId : UInt64)
@@ -896,7 +896,7 @@ private def decodeBeamCached
     {encSeq : Nat}
     (model : WhisperForConditionalGeneration (device := device) (dtype := dtype) cfg)
     (_encoderHidden : Tensor { dtype := dtype, device := device, shape := #[1, encSeq, cfg.dModel] })
-    (crossCaches : Array (WhisperForConditionalGeneration.LayerCrossCache (device := device) (dtype := dtype) cfg))
+    (crossCaches : Array (WhisperForConditionalGeneration.LayerCrossCache (device := device) (dtype := dtype) cfg 1 encSeq))
     (promptIds : Array UInt32)
     (noSpeechTokenId : Option UInt32)
     (rules : DecodeTokenRules)
@@ -970,7 +970,7 @@ private def decodeAtTemperature
     (model : WhisperForConditionalGeneration (device := device) (dtype := dtype) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (encoderHidden : Tensor { dtype := dtype, device := device, shape := #[1, encSeq, cfg.dModel] })
-    (crossCaches : Array (WhisperForConditionalGeneration.LayerCrossCache (device := device) (dtype := dtype) cfg))
+    (crossCaches : Array (WhisperForConditionalGeneration.LayerCrossCache (device := device) (dtype := dtype) cfg 1 encSeq))
     (promptIds : Array UInt32)
     (noSpeechTokenId : Option UInt32)
     (rules : DecodeTokenRules)
@@ -1046,7 +1046,7 @@ private partial def decodeWithFallbackLoop
     (model : WhisperForConditionalGeneration (device := device) (dtype := dtype) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (encoderHidden : Tensor { dtype := dtype, device := device, shape := #[1, encSeq, cfg.dModel] })
-    (crossCaches : Array (WhisperForConditionalGeneration.LayerCrossCache (device := device) (dtype := dtype) cfg))
+    (crossCaches : Array (WhisperForConditionalGeneration.LayerCrossCache (device := device) (dtype := dtype) cfg 1 encSeq))
     (promptIds : Array UInt32)
     (promptIdsFallback : Array UInt32)
     (noSpeechTokenId : Option UInt32)

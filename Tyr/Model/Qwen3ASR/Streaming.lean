@@ -118,8 +118,8 @@ private def detachDecodeCache (cache : StreamingDecodeCache (device := device) (
         cosAll := prompt.cosAll.detach
         sinAll := prompt.sinAll.detach
         kvCaches := prompt.kvCaches.map fun kv =>
-          { kv with kStoreDyn := kv.kStoreDyn.2.detach.packShape
-                    vStoreDyn := kv.vStoreDyn.2.detach.packShape }
+          { kv with kStore := kv.kStore.detach
+                    vStore := kv.vStore.detach }
         lastLogits := prompt.lastLogits.detach }
     audioEncoderCache := cache.audioEncoderCache.map fun audio =>
       { audio with audioEmbedsValidDyn := audio.audioEmbedsValidDyn.detach }

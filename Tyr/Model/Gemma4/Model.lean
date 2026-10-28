@@ -308,9 +308,9 @@ private def cacheSliceSliding {batch kvLen : Nat}
     : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, kvLen, cfg.head_dim], dtype := dtype }
       × Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, kvLen, cfg.head_dim], dtype := dtype } :=
   let kStore : Tensor { device := device, shape := #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg], dtype := dtype } :=
-    Tensor.reshapeChecked cache.kStoreDyn.2 #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg]
+    cache.kStore
   let vStore : Tensor { device := device, shape := #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg], dtype := dtype } :=
-    Tensor.reshapeChecked cache.vStoreDyn.2 #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg]
+    cache.vStore
   let k0 : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, kvLen, Config.maxHeadDim cfg], dtype := dtype } :=
     sliceTyped (sliceTyped kStore 1 0 cfg.num_key_value_heads) 2 0 kvLen
   let v0 : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, kvLen, Config.maxHeadDim cfg], dtype := dtype } :=
@@ -325,9 +325,9 @@ private def cacheSliceFull {batch kvLen : Nat}
     : Tensor { device := device, shape := #[batch, Config.fullNumKVHeads cfg, kvLen, Config.fullHeadDim cfg], dtype := dtype }
       × Tensor { device := device, shape := #[batch, Config.fullNumKVHeads cfg, kvLen, Config.fullHeadDim cfg], dtype := dtype } :=
   let kStore : Tensor { device := device, shape := #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg], dtype := dtype } :=
-    Tensor.reshapeChecked cache.kStoreDyn.2 #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg]
+    cache.kStore
   let vStore : Tensor { device := device, shape := #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg], dtype := dtype } :=
-    Tensor.reshapeChecked cache.vStoreDyn.2 #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg]
+    cache.vStore
   let k0 : Tensor { device := device, shape := #[batch, Config.fullNumKVHeads cfg, kvLen, Config.maxHeadDim cfg], dtype := dtype } :=
     sliceTyped (sliceTyped kStore 1 0 (Config.fullNumKVHeads cfg)) 2 0 kvLen
   let v0 : Tensor { device := device, shape := #[batch, Config.fullNumKVHeads cfg, kvLen, Config.maxHeadDim cfg], dtype := dtype } :=
@@ -369,14 +369,14 @@ private def attentionSlidingPrefillWithMask {batch seq : Nat}
   let paddedK : Tensor { device := device, shape := #[batch, Config.maxKVHeads cfg, seq, Config.maxHeadDim cfg], dtype := dtype } := padSlidingKVForCache cfg kh
   let paddedV : Tensor { device := device, shape := #[batch, Config.maxKVHeads cfg, seq, Config.maxHeadDim cfg], dtype := dtype } := padSlidingKVForCache cfg vh
   let kStore : Tensor { device := device, shape := #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg], dtype := dtype } :=
-    Tensor.reshapeChecked cache.kStoreDyn.2 #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg]
+    cache.kStore
   let vStore : Tensor { device := device, shape := #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg], dtype := dtype } :=
-    Tensor.reshapeChecked cache.vStoreDyn.2 #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg]
+    cache.vStore
   let kStore' := Tensor.sliceScatter kStore 2 0 paddedK
   let vStore' := Tensor.sliceScatter vStore 2 0 paddedV
   let cache' : KVCache (dtype := dtype) (device := device) cfg batch := {
-    kStoreDyn := kStore'.packShape
-    vStoreDyn := vStore'.packShape
+    kStore := kStore'
+    vStore := vStore'
     seq := seq
     maxLen := cache.maxLen
   }
@@ -414,14 +414,14 @@ private def attentionFullPrefillWithMask {batch seq : Nat}
   let paddedK : Tensor { device := device, shape := #[batch, Config.maxKVHeads cfg, seq, Config.maxHeadDim cfg], dtype := dtype } := padFullKVForCache cfg kh
   let paddedV : Tensor { device := device, shape := #[batch, Config.maxKVHeads cfg, seq, Config.maxHeadDim cfg], dtype := dtype } := padFullKVForCache cfg vh
   let kStore : Tensor { device := device, shape := #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg], dtype := dtype } :=
-    Tensor.reshapeChecked cache.kStoreDyn.2 #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg]
+    cache.kStore
   let vStore : Tensor { device := device, shape := #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg], dtype := dtype } :=
-    Tensor.reshapeChecked cache.vStoreDyn.2 #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg]
+    cache.vStore
   let kStore' := Tensor.sliceScatter kStore 2 0 paddedK
   let vStore' := Tensor.sliceScatter vStore 2 0 paddedV
   let cache' : KVCache (dtype := dtype) (device := device) cfg batch := {
-    kStoreDyn := kStore'.packShape
-    vStoreDyn := vStore'.packShape
+    kStore := kStore'
+    vStore := vStore'
     seq := seq
     maxLen := cache.maxLen
   }
@@ -514,14 +514,14 @@ private def attentionSlidingWithCache {batch seq : Nat}
     let paddedK := padSlidingKVForCache cfg kh
     let paddedV := padSlidingKVForCache cfg vh
     let kStore : Tensor { device := device, shape := #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg], dtype := dtype } :=
-      Tensor.reshapeChecked cache.kStoreDyn.2 #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg]
+      cache.kStore
     let vStore : Tensor { device := device, shape := #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg], dtype := dtype } :=
-      Tensor.reshapeChecked cache.vStoreDyn.2 #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg]
+      cache.vStore
     let kStore' := Tensor.sliceScatter kStore 2 0 paddedK
     let vStore' := Tensor.sliceScatter vStore 2 0 paddedV
     let cache' : KVCache (dtype := dtype) (device := device) cfg batch := {
-      kStoreDyn := kStore'.packShape
-      vStoreDyn := vStore'.packShape
+      kStore := kStore'
+      vStore := vStore'
       seq := seq
       maxLen := cache.maxLen
     }
@@ -568,14 +568,14 @@ private def attentionFullWithCache {batch seq : Nat}
     let paddedK := padFullKVForCache cfg kh
     let paddedV := padFullKVForCache cfg vh
     let kStore : Tensor { device := device, shape := #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg], dtype := dtype } :=
-      Tensor.reshapeChecked cache.kStoreDyn.2 #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg]
+      cache.kStore
     let vStore : Tensor { device := device, shape := #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg], dtype := dtype } :=
-      Tensor.reshapeChecked cache.vStoreDyn.2 #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg]
+      cache.vStore
     let kStore' := Tensor.sliceScatter kStore 2 0 paddedK
     let vStore' := Tensor.sliceScatter vStore 2 0 paddedV
     let cache' : KVCache (dtype := dtype) (device := device) cfg batch := {
-      kStoreDyn := kStore'.packShape
-      vStoreDyn := vStore'.packShape
+      kStore := kStore'
+      vStore := vStore'
       seq := seq
       maxLen := cache.maxLen
     }
@@ -623,9 +623,9 @@ private def attentionSlidingStep {batch : Nat}
     let paddedK : Tensor { device := device, shape := #[batch, Config.maxKVHeads cfg, 1, Config.maxHeadDim cfg], dtype := dtype } := padSlidingKVForCache cfg kNew
     let paddedV : Tensor { device := device, shape := #[batch, Config.maxKVHeads cfg, 1, Config.maxHeadDim cfg], dtype := dtype } := padSlidingKVForCache cfg vNew
     let kStore : Tensor { device := device, shape := #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg], dtype := dtype } :=
-      Tensor.reshapeChecked cache.kStoreDyn.2 #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg]
+      cache.kStore
     let vStore : Tensor { device := device, shape := #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg], dtype := dtype } :=
-      Tensor.reshapeChecked cache.vStoreDyn.2 #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg]
+      cache.vStore
     let writePos := if cache.seq < cache.maxLen then cache.seq else cache.maxLen - 1
     let kStore' := Tensor.sliceScatter kStore 2 writePos paddedK
     let vStore' := Tensor.sliceScatter vStore 2 writePos paddedV
@@ -633,9 +633,9 @@ private def attentionSlidingStep {batch : Nat}
     let useLen := if kvLen > cfg.sliding_window then cfg.sliding_window else kvLen
     let start := kvLen - useLen
     let kAll0 : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, kvLen, cfg.head_dim], dtype := dtype } :=
-      (cacheSliceSliding (kvLen := kvLen) cfg { cache with kStoreDyn := kStore'.packShape, vStoreDyn := vStore'.packShape, seq := kvLen }) |>.1
+      (cacheSliceSliding (kvLen := kvLen) cfg { cache with kStore := kStore', vStore := vStore', seq := kvLen }) |>.1
     let vAll0 : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, kvLen, cfg.head_dim], dtype := dtype } :=
-      (cacheSliceSliding (kvLen := kvLen) cfg { cache with kStoreDyn := kStore'.packShape, vStoreDyn := vStore'.packShape, seq := kvLen }) |>.2
+      (cacheSliceSliding (kvLen := kvLen) cfg { cache with kStore := kStore', vStore := vStore', seq := kvLen }) |>.2
     let kAll : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, useLen, cfg.head_dim], dtype := dtype } := sliceTyped kAll0 2 start useLen
     let vAll : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, useLen, cfg.head_dim], dtype := dtype } := sliceTyped vAll0 2 start useLen
     let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, 1, cfg.head_dim], dtype := dtype } :=
@@ -643,8 +643,8 @@ private def attentionSlidingStep {batch : Nat}
     let out : Tensor { device := device, shape := #[batch, 1, cfg.num_attention_heads * cfg.head_dim], dtype := dtype } :=
       Tensor.reshape (transposeAttention attn) #[batch, 1, cfg.num_attention_heads * cfg.head_dim]
     let cache' : KVCache (dtype := dtype) (device := device) cfg batch := {
-      kStoreDyn := kStore'.packShape
-      vStoreDyn := vStore'.packShape
+      kStore := kStore'
+      vStore := vStore'
       seq := kvLen
       maxLen := cache.maxLen
     }
@@ -688,24 +688,24 @@ private def attentionFullStep {batch : Nat}
     let paddedK := padFullKVForCache cfg kNew
     let paddedV := padFullKVForCache cfg vNew
     let kStore : Tensor { device := device, shape := #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg], dtype := dtype } :=
-      Tensor.reshapeChecked cache.kStoreDyn.2 #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg]
+      cache.kStore
     let vStore : Tensor { device := device, shape := #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg], dtype := dtype } :=
-      Tensor.reshapeChecked cache.vStoreDyn.2 #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg]
+      cache.vStore
     let writePos := if cache.seq < cache.maxLen then cache.seq else cache.maxLen - 1
     let kStore' := Tensor.sliceScatter kStore 2 writePos paddedK
     let vStore' := Tensor.sliceScatter vStore 2 writePos paddedV
     let kvLen := if cache.seq < cache.maxLen then cache.seq + 1 else cache.maxLen
     let kAll : Tensor { device := device, shape := #[batch, Config.fullNumKVHeads cfg, kvLen, Config.fullHeadDim cfg], dtype := dtype } :=
-      (cacheSliceFull (kvLen := kvLen) cfg { cache with kStoreDyn := kStore'.packShape, vStoreDyn := vStore'.packShape, seq := kvLen }) |>.1
+      (cacheSliceFull (kvLen := kvLen) cfg { cache with kStore := kStore', vStore := vStore', seq := kvLen }) |>.1
     let vAll : Tensor { device := device, shape := #[batch, Config.fullNumKVHeads cfg, kvLen, Config.fullHeadDim cfg], dtype := dtype } :=
-      (cacheSliceFull (kvLen := kvLen) cfg { cache with kStoreDyn := kStore'.packShape, vStoreDyn := vStore'.packShape, seq := kvLen }) |>.2
+      (cacheSliceFull (kvLen := kvLen) cfg { cache with kStore := kStore', vStore := vStore', seq := kvLen }) |>.2
     let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, 1, Config.fullHeadDim cfg], dtype := dtype } :=
       Tensor.attentionGQAQKV qh kAll vAll false true
     let out : Tensor { device := device, shape := #[batch, 1, cfg.num_attention_heads * Config.fullHeadDim cfg], dtype := dtype } :=
       Tensor.reshape (transposeAttention attn) #[batch, 1, cfg.num_attention_heads * Config.fullHeadDim cfg]
     let cache' : KVCache (dtype := dtype) (device := device) cfg batch := {
-      kStoreDyn := kStore'.packShape
-      vStoreDyn := vStore'.packShape
+      kStore := kStore'
+      vStore := vStore'
       seq := kvLen
       maxLen := cache.maxLen
     }
@@ -1106,8 +1106,8 @@ def initCache {batch : Nat}
         (head_dim := Config.maxHeadDim cfg)
         cacheDevice dtype
       let kv := { kv with
-        kStoreDyn := (Tensor.castLike m.embed_tokens kv.kStoreDyn.2).packShape
-        vStoreDyn := (Tensor.castLike m.embed_tokens kv.vStoreDyn.2).packShape }
+        kStore := Tensor.castLike m.embed_tokens kv.kStore
+        vStore := Tensor.castLike m.embed_tokens kv.vStore }
       caches := caches.push kv
     return { attnCaches := caches }
 
