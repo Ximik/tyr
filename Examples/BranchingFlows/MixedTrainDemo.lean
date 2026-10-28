@@ -86,7 +86,7 @@ private def f (x : Float) : Float :=
   x + Float.sin (3.0 * x)
 
 private def mkPoint (x y : Float) : Tensor { dtype := .Float32, shape := #[2], device := .CPU } :=
-  Tensor.reshapeChecked (floatsDynamic #[x, y]) #[2]
+  Tensor.reshape (floatsDynamic #[x, y]) #[2]
 
 private def X1target (rng : Rng) : BranchingState (Tensor { dtype := .Float32, shape := #[2], device := .CPU } × Nat) × Rng := Id.run do
   let (n, rng') := randLen rng
@@ -146,8 +146,8 @@ private def maskedCrossEntropy {batch maxLen vocab : Nat}
     (mask : Tensor { dtype := .Float32, shape := #[batch, maxLen], device := .CPU }) : Tensor { dtype := .Float32, shape := #[], device := .CPU } :=
   let n : Nat := batch * maxLen
   let logits2 := Tensor.reshapeChecked logits #[n, vocab]
-  let targets2 := Tensor.reshapeChecked targets #[n]
-  let mask2 := Tensor.reshapeChecked mask #[n]
+  let targets2 := Tensor.reshape targets #[n]
+  let mask2 := Tensor.reshape mask #[n]
   let per := Tensor.crossEntropyNoneChecked logits2 targets2
   let masked := Tensor.mul per mask2
   let denom := Tensor.sumAll mask2

@@ -13,8 +13,8 @@ private def cfg : WhisperConfig := {
   padTokenId := 0, bosTokenId := 1, eosTokenId := 2, decoderStartTokenId := 1 }
 
 private def features : Tensor { shape := #[1, 4, 5], dtype := .Float32, device := .CPU } :=
-  (Tensor.fromFloatArray (Array.ofFn (n := 20) fun i => Float.sin (i.val.toFloat * 0.3))).reshapeChecked #[1, 4, 5]
-private def tokens : Tensor { shape := #[1, 4], dtype := .Int64, device := .CPU } := (Tensor.fromInt64Array #[1, 3, 5, 7]).reshapeChecked #[1, 4]
+  (Tensor.fromFloatArray (Array.ofFn (n := 20) fun i => Float.sin (i.val.toFloat * 0.3))).reshape #[1, 4, 5]
+private def tokens : Tensor { shape := #[1, 4], dtype := .Int64, device := .CPU } := (Tensor.fromInt64Array #[1, 3, 5, 7]).reshape #[1, 4]
 
 private def close {σ τ : StaticSpec} (x : Tensor σ) (y : Tensor τ) (tol : Float := 1e-4) : IO Unit := do
   LeanTest.assertEqual x.runtimeShape y.runtimeShape
@@ -43,7 +43,7 @@ private def close {σ τ : StaticSpec} (x : Tensor σ) (y : Tensor τ) (tol : Fl
     for pos in [:4] do
       let tok := tokens.sliceChecked 1 pos 1 #[1, 1]
       let (actual, next) ← model.decodeStepWithCache (encSeq := 3) tok pos cross caches
-      close actual ((expected.sliceChecked 1 pos 1 #[1, 1, 16]).reshapeChecked #[1, 16]) (if bf16 then 0.08 else 1e-4)
+      close actual ((expected.sliceChecked 1 pos 1 #[1, 1, 16]).reshape #[1, 16]) (if bf16 then 0.08 else 1e-4)
       LeanTest.assertEqual actual.actualSpec.dtype expected.actualSpec.dtype
       caches := next
     let some untouched := initial[0]? | throw (IO.userError "missing initial cache")
@@ -51,7 +51,7 @@ private def close {σ τ : StaticSpec} (x : Tensor σ) (y : Tensor τ) (tol : Fl
     let stored ← untouched.kStoreDyn.2.toFloatArray
     LeanTest.assertTrue (stored.all (· == 0)) "incremental updates must preserve the input cache snapshot"
     let (again, _) ← model.decodeStepWithCache (encSeq := 3) (tokens.sliceChecked 1 0 1 #[1, 1]) 0 cross initial
-    close again ((expected.sliceChecked 1 0 1 #[1, 1, 16]).reshapeChecked #[1, 16]) (if bf16 then 0.08 else 1e-4)
+    close again ((expected.sliceChecked 1 0 1 #[1, 1, 16]).reshape #[1, 16]) (if bf16 then 0.08 else 1e-4)
 
 @[test] def testWhisperCacheCapacityAndPositionErrors : IO Unit := do
   let model ← WhisperForConditionalGeneration.init cfg

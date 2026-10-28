@@ -315,7 +315,7 @@ private def applySampling {batch vocab : Nat}
     else Tensor.topPFilter filtered topP
   let probs := Tensor.softmax filtered (-1)
   let sampled ← Tensor.multinomial probs 1 false
-  pure (Tensor.reshapeChecked sampled #[batch])
+  pure (Tensor.reshape sampled #[batch])
 
 private def applySuppressTail {batch vocab : Nat}
     (logits : Tensor { shape := #[batch, vocab], dtype := dtype.val, device := device })
@@ -337,7 +337,7 @@ private def applySuppressTail {batch vocab : Nat}
     let tailMask : Tensor { shape := #[vocab], dtype := .Bool, device := device } := Tensor.logicalAnd geMask ltMask
     let notEos : Tensor { shape := #[vocab], dtype := .Bool, device := device } := Tensor.logicalNot (Tensor.eqScalar idx (Int64.ofNat eosTokenId.toNat))
     let suppress1d : Tensor { shape := #[vocab], dtype := .Bool, device := device } := Tensor.logicalAnd tailMask notEos
-    let suppress2d : Tensor { shape := #[batch, vocab], dtype := .Bool, device := device } := Tensor.expand (Tensor.reshapeChecked suppress1d #[1, vocab]) #[batch, vocab]
+    let suppress2d : Tensor { shape := #[batch, vocab], dtype := .Bool, device := device } := Tensor.expand (Tensor.reshape suppress1d #[1, vocab]) #[batch, vocab]
     Tensor.maskedFill logits suppress2d (-1e9)
 
 private def applySuppressEos {batch vocab : Nat}
@@ -347,7 +347,7 @@ private def applySuppressEos {batch vocab : Nat}
   let idx0 : Tensor { shape := #[vocab], dtype := .Int64, device := .CPU } := Tensor.arange vocab
   let idx : Tensor { shape := #[vocab], dtype := .Int64, device := device } := idx0.to logits.device
   let eosMask1d : Tensor { shape := #[vocab], dtype := .Bool, device := device } := Tensor.eqScalar idx (Int64.ofNat eosTokenId.toNat)
-  let eosMask2d : Tensor { shape := #[batch, vocab], dtype := .Bool, device := device } := Tensor.expand (Tensor.reshapeChecked eosMask1d #[1, vocab]) #[batch, vocab]
+  let eosMask2d : Tensor { shape := #[batch, vocab], dtype := .Bool, device := device } := Tensor.expand (Tensor.reshape eosMask1d #[1, vocab]) #[batch, vocab]
   -- Strictly below the tail-suppression fill (-1e9): when `suppressTail`
   -- covers the whole vocab (tiny test configs), every non-EOS logit is
   -- already -1e9 and an equal EOS fill would make the distribution
@@ -395,7 +395,7 @@ private def generateFrameFromLastHidden {batch : Nat} (cfg : TalkerConfig)
     (cpRoPECache : Option (CodePredictorRoPECache (device := device) cfg) := none)
     : IO (FrameGenerationOutput (dtype := dtype) (device := device) batch cfg.numCodeGroups cfg.hiddenSize) := do
   let firstLogits3 := Tensor.linear3d lastHidden m.codecHead
-  let firstLogits0 : Tensor { shape := #[batch, cfg.vocabSize], dtype := dtype.val, device := device } := Tensor.reshapeChecked firstLogits3 #[batch, cfg.vocabSize]
+  let firstLogits0 : Tensor { shape := #[batch, cfg.vocabSize], dtype := dtype.val, device := device } := Tensor.reshape firstLogits3 #[batch, cfg.vocabSize]
   let firstLogits1 := applySuppressTail firstLogits0 suppressTail cfg.codecEosTokenId
   let firstLogits2 :=
     if allowEos then firstLogits1 else applySuppressEos firstLogits1 cfg.codecEosTokenId
@@ -404,7 +404,7 @@ private def generateFrameFromLastHidden {batch : Nat} (cfg : TalkerConfig)
     | some ⟨_, hist⟩ => applyRepetitionPenalty firstLogits2 hist repetitionPenalty
     | none => firstLogits2
   let firstCode ← applySampling firstLogits temperature topK topP
-  let firstCode2d : Tensor { shape := #[batch, 1], dtype := .Int64, device := device } := Tensor.reshapeChecked firstCode #[batch, 1]
+  let firstCode2d : Tensor { shape := #[batch, 1], dtype := .Int64, device := device } := Tensor.reshape firstCode #[batch, 1]
 
   -- Collect per-codebook sampled tokens as `[batch, 1]` columns.
   let mut tokenCols : Array (Tensor { shape := #[batch, 1], dtype := .Int64, device := device }) := #[firstCode2d]
@@ -489,7 +489,7 @@ private def generateFrameFromLastHidden {batch : Nat} (cfg : TalkerConfig)
       let gTopK : Nat := optAtOr subtalkerTopKsByGroup g subtalkerTopK
       let gTopP : Float := optAtOr subtalkerTopPsByGroup g subtalkerTopP
       let nextCode ← applySampling cpLogits gTemp gTopK gTopP
-      let nextCode2d : Tensor { shape := #[batch, 1], dtype := .Int64, device := device } := Tensor.reshapeChecked nextCode #[batch, 1]
+      let nextCode2d : Tensor { shape := #[batch, 1], dtype := .Int64, device := device } := Tensor.reshape nextCode #[batch, 1]
       tokenCols := tokenCols.push nextCode2d
 
       let nextEmb := TalkerCodePredictor.embedGroupTokens m.codePredictor g nextCode2d
@@ -503,7 +503,7 @@ private def generateFrameFromLastHidden {batch : Nat} (cfg : TalkerConfig)
 
   let frameDyn := Tensor.catManyChecked (tokenCols.map Tensor.packShape) 1 #[batch, cfg.numCodeGroups]
   pure {
-    codes := Tensor.reshapeChecked frameDyn #[batch, cfg.numCodeGroups]
+    codes := Tensor.reshape frameDyn #[batch, cfg.numCodeGroups]
     summedEmbedding := summedEmb
   }
 
@@ -578,7 +578,7 @@ def generateCodesWithLengths {batch seq : Nat} (cfg : TalkerConfig)
 
   let frameDynRef ← IO.mkRef (#[] : Array (Tensor { shape := #[batch, 1, cfg.numCodeGroups], dtype := .Int64, device := device }))
   let onFrame : Nat → Tensor { shape := #[batch, cfg.numCodeGroups], dtype := .Int64, device := device } → IO Unit := fun _ frame => do
-    let frame3 : Tensor { shape := #[batch, 1, cfg.numCodeGroups], dtype := .Int64, device := device } := Tensor.reshapeChecked frame #[batch, 1, cfg.numCodeGroups]
+    let frame3 : Tensor { shape := #[batch, 1, cfg.numCodeGroups], dtype := .Int64, device := device } := Tensor.reshape frame #[batch, 1, cfg.numCodeGroups]
     frameDynRef.modify (fun xs => xs.push frame3)
 
   let lengths ← streamCodes cfg m talkerInputs onFrame maxFrames minNewTokens
@@ -592,7 +592,7 @@ def generateCodesWithLengths {batch seq : Nat} (cfg : TalkerConfig)
   for _ in [framesDyn.size:maxFrames] do
     framesDyn := framesDyn.push padFrame
   let outDyn := Tensor.catManyChecked (framesDyn.map Tensor.packShape) 1 #[batch, maxFrames, cfg.numCodeGroups]
-  let codes : Tensor { shape := #[batch, maxFrames, cfg.numCodeGroups], dtype := .Int64, device := device } := Tensor.reshapeChecked outDyn #[batch, maxFrames, cfg.numCodeGroups]
+  let codes : Tensor { shape := #[batch, maxFrames, cfg.numCodeGroups], dtype := .Int64, device := device } := Tensor.reshape outDyn #[batch, maxFrames, cfg.numCodeGroups]
   pure { codes, lengths }
 
 /-- Stream codec frames one step at a time.
@@ -696,7 +696,7 @@ def streamCodes {batch seq : Nat} (cfg : TalkerConfig)
         else
           let histLen : Nat := historyCols.size
           let histDyn := Tensor.catManyChecked (historyCols.map Tensor.packShape) 1 #[batch, histLen]
-          let hist : Tensor { shape := #[batch, histLen], dtype := .Int64, device := device } := Tensor.reshapeChecked histDyn #[batch, histLen]
+          let hist : Tensor { shape := #[batch, histLen], dtype := .Int64, device := device } := Tensor.reshape histDyn #[batch, histLen]
           some ⟨histLen, hist⟩
       let allowEos := step >= minNewTokens
       let frameOut ← generateFrameFromLastHidden cfg m lastHidden historyOpt
@@ -709,7 +709,7 @@ def streamCodes {batch seq : Nat} (cfg : TalkerConfig)
 
       let firstCode : Tensor { shape := #[batch, 1], dtype := .Int64, device := device } := Tensor.sliceChecked frame 1 0 1 #[batch, 1]
       historyCols := historyCols.push firstCode
-      let firstCode1d : Tensor { shape := #[batch], dtype := .Int64, device := device } := Tensor.reshapeChecked firstCode #[batch]
+      let firstCode1d : Tensor { shape := #[batch], dtype := .Int64, device := device } := Tensor.reshape firstCode #[batch]
       let firstCodes ← Tensor.toUInt64Array firstCode1d
       for i in [:batch] do
         let isDone := done.getD i false

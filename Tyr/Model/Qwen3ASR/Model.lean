@@ -64,7 +64,7 @@ private def buildLengthMask {batch maxLen : Nat} (lengths : Array Nat) : Tensor 
     Tensor.reshapeChecked ((Tensor.fromInt64Array vals).to device) #[batch, maxLen]
 
 private def maskRowCounts {batch seq : Nat} (attentionMask : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 }) : IO (Array Nat) := do
-  let flat : Tensor { device := device, shape := #[batch * seq], dtype := .Int64 } := Tensor.reshapeChecked (Tensor.toInt64 attentionMask) #[batch * seq]
+  let flat : Tensor { device := device, shape := #[batch * seq], dtype := .Int64 } := Tensor.reshape (Tensor.toInt64 attentionMask) #[batch * seq]
   let vals ← Tensor.toUInt64Array flat
   let mut counts : Array Nat := Array.mkEmpty batch
   for b in [:batch] do
@@ -83,7 +83,7 @@ private def clipTo (x hi : Nat) : Nat :=
 private def positionRowsFromMask {batch seq : Nat}
     (attentionMask : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     : IO (Array (Array Nat)) := do
-  let flat : Tensor { device := device, shape := #[batch * seq], dtype := .Int64 } := Tensor.reshapeChecked (Tensor.toInt64 attentionMask) #[batch * seq]
+  let flat : Tensor { device := device, shape := #[batch * seq], dtype := .Int64 } := Tensor.reshape (Tensor.toInt64 attentionMask) #[batch * seq]
   let vals ← Tensor.toUInt64Array flat
   let mut rows : Array (Array Nat) := Array.mkEmpty batch
   for b in [:batch] do
@@ -113,8 +113,8 @@ private def gatherRowsByPositions {seq half : Nat}
       out
   let idxCpu : Tensor { device := .CPU, shape := #[seq], dtype := .Int64 } := Tensor.reshapeChecked (Tensor.fromInt64Array idxVals) #[seq]
   let idx : Tensor { device := device, shape := #[seq], dtype := .Int64 } := idxCpu.to table.device
-  let idx2d : Tensor { device := device, shape := #[seq, half], dtype := .Int64 } := Tensor.expand (Tensor.reshapeChecked idx #[seq, 1]) #[seq, half]
-  Tensor.reshapeChecked (Tensor.gather table 0 idx2d) #[seq, half]
+  let idx2d : Tensor { device := device, shape := #[seq, half], dtype := .Int64 } := Tensor.expand (Tensor.reshape idx #[seq, 1]) #[seq, half]
+  Tensor.reshape (Tensor.gather table 0 idx2d) #[seq, half]
 
 /-- Output container mirroring `...CausalLMOutputWithPast` fields that are
     currently represented in the Lean port. -/
@@ -295,7 +295,7 @@ private def featureLengthsFromFeatureMask (cfg : ThinkerConfig) {batch featureSe
     (featureAttentionMask : Tensor { device := device, shape := #[batch, featureSeq], dtype := .Int64 })
     : IO (Array Nat) := do
   let _ := cfg
-  let featureLensTensor : Tensor { device := device, shape := #[batch], dtype := .Int64 } := (Tensor.sumDim (Tensor.toInt64 featureAttentionMask) 1 false).reshapeChecked #[batch]
+  let featureLensTensor : Tensor { device := device, shape := #[batch], dtype := .Int64 } := (Tensor.sumDim (Tensor.toInt64 featureAttentionMask) 1 false).reshape #[batch]
   let featureLensRaw := (← Tensor.toUInt64Array featureLensTensor).map (·.toNat)
   pure <| featureLensRaw.map (fun l => if l <= featureSeq then l else featureSeq)
 
@@ -308,7 +308,7 @@ private def getPlaceholderMask (cfg : ThinkerConfig) {batch seq : Nat}
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     : Tensor { device := device, shape := #[batch, seq, cfg.textConfig.hiddenSize], dtype := .Bool } :=
   let mask2d := getPlaceholderMask2d cfg inputIds
-  Tensor.expand (Tensor.reshapeChecked mask2d #[batch, seq, 1]) #[batch, seq, cfg.textConfig.hiddenSize]
+  Tensor.expand (Tensor.reshape mask2d #[batch, seq, 1]) #[batch, seq, cfg.textConfig.hiddenSize]
 
 private def audioValidMaskFromFeatureMask (cfg : ThinkerConfig) {batch featureSeq audioSeq : Nat}
     (featureAttentionMask : Tensor { device := device, shape := #[batch, featureSeq], dtype := .Int64 })
@@ -317,7 +317,7 @@ private def audioValidMaskFromFeatureMask (cfg : ThinkerConfig) {batch featureSe
   let audioLens := AudioEncoderConfig.featExtractOutputLengths featureLens
   let valid2d : Tensor { device := device, shape := #[batch, audioSeq], dtype := .Int64 } := buildLengthMask audioLens
   let valid2dBool : Tensor { device := device, shape := #[batch, audioSeq], dtype := .Bool } := Tensor.eqScalar valid2d 1
-  pure <| Tensor.expand (Tensor.reshapeChecked valid2dBool #[batch, audioSeq, 1]) #[batch, audioSeq, cfg.textConfig.hiddenSize]
+  pure <| Tensor.expand (Tensor.reshape valid2dBool #[batch, audioSeq, 1]) #[batch, audioSeq, cfg.textConfig.hiddenSize]
 
 private def audioAttentionMaskFromFeatureMask (cfg : ThinkerConfig) {batch featureSeq audioSeq : Nat}
     (featureAttentionMask : Tensor { device := device, shape := #[batch, featureSeq], dtype := .Int64 })
@@ -339,7 +339,7 @@ private def buildInputsEmbeds {batch seq frames : Nat}
   | some feats =>
     let audioSeq := AudioEncoderConfig.framesAfterConv3 cfg.audioConfig frames
     let placeholderMask2d := getPlaceholderMask2d cfg inputIds
-    let placeholderLensTensor : Tensor { device := device, shape := #[batch], dtype := .Int64 } := (Tensor.sumDim (Tensor.toInt64 placeholderMask2d) 1 false).reshapeChecked #[batch]
+    let placeholderLensTensor : Tensor { device := device, shape := #[batch], dtype := .Int64 } := (Tensor.sumDim (Tensor.toInt64 placeholderMask2d) 1 false).reshape #[batch]
     let placeholderLens := (← Tensor.toUInt64Array placeholderLensTensor).map (·.toNat)
     let (audioLensOpt, _audioAttnMask, audioFeaturesRaw) ←
       match featureAttentionMask with
@@ -397,7 +397,7 @@ def getRopeIndex {batch seq : Nat}
     (_m : Qwen3ASRThinkerForConditionalGeneration (device := device) (dtype := dtype) cfg)
     (attentionMask : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     : IO (Tensor { device := device, shape := #[3, batch, seq], dtype := .Int64 } × Tensor { device := device, shape := #[batch, 1], dtype := .Int64 }) := do
-  let flat : Tensor { device := device, shape := #[batch * seq], dtype := .Int64 } := Tensor.reshapeChecked (Tensor.toInt64 attentionMask) #[batch * seq]
+  let flat : Tensor { device := device, shape := #[batch * seq], dtype := .Int64 } := Tensor.reshape (Tensor.toInt64 attentionMask) #[batch * seq]
   let vals ← Tensor.toUInt64Array flat
 
   let mut posVals : Array Int64 := Array.mkEmpty (3 * batch * seq)
@@ -488,7 +488,7 @@ private def decodeStepFromEmbedWithCache {batch maxLen : Nat}
 
   let hiddenNorm := m.textModel.norm.forward3dPreserving hidden
   let logits3 : Tensor { dtype := dtype, device := device, shape := #[batch, 1, ThinkerLmVocabSize cfg] } := Tensor.linear3d hiddenNorm m.lmHead
-  let logits2 : Tensor { dtype := dtype, device := device, shape := #[batch, ThinkerLmVocabSize cfg] } := Tensor.reshapeChecked logits3 #[batch, ThinkerLmVocabSize cfg]
+  let logits2 : Tensor { dtype := dtype, device := device, shape := #[batch, ThinkerLmVocabSize cfg] } := Tensor.reshape logits3 #[batch, ThinkerLmVocabSize cfg]
   pure (logits2, nextCaches)
 
 private partial def prefillCachesFromEmbeds {batch seq maxLen : Nat}
@@ -531,7 +531,7 @@ private partial def greedyLoopCached {batch maxLen : Nat}
       let activeMask : Tensor { device := device, shape := #[batch], dtype := .Bool } := Tensor.logicalNot doneMask
       Tensor.whereSelect activeMask nextTokRaw eosTok
     | _, _ => nextTokRaw
-  let nextCol : Tensor { device := device, shape := #[batch, 1], dtype := .Int64 } := Tensor.reshapeChecked nextTok #[batch, 1]
+  let nextCol : Tensor { device := device, shape := #[batch, 1], dtype := .Int64 } := Tensor.reshape nextTok #[batch, 1]
   let appended : Tensor { device := device, shape := #[batch, curSeq + 1], dtype := .Int64 } := Tensor.cat curIds nextCol 1
 
   match eosVector with
@@ -692,7 +692,7 @@ def forwardWithAux {batch seq frames : Nat}
     | some mask =>
       let (_positionIds, ropeRaw) ← m.getRopeIndex mask
       let rawVals : Array Nat :=
-        (← Tensor.toUInt64Array (Tensor.reshapeChecked (Tensor.toInt64 ropeRaw) #[batch])).map (·.toNat)
+        (← Tensor.toUInt64Array (Tensor.reshape (Tensor.toInt64 ropeRaw) #[batch])).map (·.toNat)
       let validCounts ← maskRowCounts mask
       let mut out : Array Int64 := Array.mkEmpty batch
       for b in [:batch] do
@@ -746,8 +746,8 @@ private partial def greedyLoopUncached {batch : Nat}
   let logits := m.forwardEmbeds inputsEmbeds none
   let lastPos := curSeq - 1
   let last3 : Tensor { dtype := dtype, device := device, shape := #[batch, 1, ThinkerLmVocabSize cfg] } :=
-    Tensor.reshapeChecked (Tensor.sliceChecked logits 1 lastPos 1 #[batch, 1, ThinkerLmVocabSize cfg]) #[batch, 1, ThinkerLmVocabSize cfg]
-  let last2 : Tensor { dtype := dtype, device := device, shape := #[batch, ThinkerLmVocabSize cfg] } := Tensor.reshapeChecked last3 #[batch, ThinkerLmVocabSize cfg]
+    Tensor.reshape (Tensor.sliceChecked logits 1 lastPos 1 #[batch, 1, ThinkerLmVocabSize cfg]) #[batch, 1, ThinkerLmVocabSize cfg]
+  let last2 : Tensor { dtype := dtype, device := device, shape := #[batch, ThinkerLmVocabSize cfg] } := Tensor.reshape last3 #[batch, ThinkerLmVocabSize cfg]
   let indices ← IO.ofExcept (Tensor.argmax? last2 1)
   let nextTokRaw : Tensor { device := device, shape := #[batch], dtype := .Int64 } ← IO.ofExcept (indices.reshapeChecked? #[batch])
   let nextTok : Tensor { device := device, shape := #[batch], dtype := .Int64 } :=
@@ -757,7 +757,7 @@ private partial def greedyLoopUncached {batch : Nat}
       Tensor.whereSelect activeMask nextTokRaw eosTok
     | _, _ => nextTokRaw
 
-  let nextCol : Tensor { device := device, shape := #[batch, 1], dtype := .Int64 } := Tensor.reshapeChecked nextTok #[batch, 1]
+  let nextCol : Tensor { device := device, shape := #[batch, 1], dtype := .Int64 } := Tensor.reshape nextTok #[batch, 1]
   let appended : Tensor { device := device, shape := #[batch, curSeq + 1], dtype := .Int64 } := Tensor.cat curIds nextCol 1
 
   match eosVector with

@@ -21,24 +21,24 @@ private def mapping : TokenBytes :=
     (some "indexSelect")
 
 @[test] def testInvalidMaskedTokenIdsAreRecoverable : IO Unit := do
-  let ids := (Tensor.fromInt64Array #[1, 4]).reshapeChecked #[1, 2]
+  let ids := (Tensor.fromInt64Array #[1, 4]).reshape #[1, 2]
   -- Masking out an invalid token must not make an out-of-bounds lookup legal.
-  let mask := (Tensor.fromFloatArray #[1, 0]).reshapeChecked #[1, 2]
+  let mask := (Tensor.fromFloatArray #[1, 0]).reshape #[1, 2]
   Tests.assertThrows (mapping.totalBytesWithMask ids mask) (some "indexSelect")
   Tests.assertThrows (mapping.totalBytesWithMask' ids mask) (some "indexSelect")
-  let negative := (Tensor.fromInt64Array #[-1, 1]).reshapeChecked #[1, 2]
+  let negative := (Tensor.fromInt64Array #[-1, 1]).reshape #[1, 2]
   Tests.assertThrows (mapping.totalBytesWithMask negative mask) (some "indexSelect")
 
 @[test] def testTokenByteTotalsAndEmptyInputs : IO Unit := do
   LeanTest.assertEqual (← mapping.totalBytes #[0, 1, 3, 2, 1]) 10
   LeanTest.assertEqual (← mapping.totalBytesFromTensor (Tensor.fromInt64Array #[3, 2, 1])) 9
-  let ids := (Tensor.fromInt64Array #[1, 2, 3, 0]).reshapeChecked #[2, 2]
-  let mask := (Tensor.fromFloatArray #[1, 0, 1, 1]).reshapeChecked #[2, 2]
+  let ids := (Tensor.fromInt64Array #[1, 2, 3, 0]).reshape #[2, 2]
+  let mask := (Tensor.fromFloatArray #[1, 0, 1, 1]).reshape #[2, 2]
   LeanTest.assertEqual (← mapping.totalBytesWithMask ids mask) 6
   LeanTest.assertEqual (← mapping.totalBytesWithMask' ids mask) 6
   LeanTest.assertEqual (← mapping.totalBytes #[]) 0
   LeanTest.assertEqual (← mapping.totalBytesFromTensor (Tensor.fromInt64Array #[])) 0
-  let emptyIds := (Tensor.fromInt64Array #[]).reshapeChecked #[2, 0]
+  let emptyIds := (Tensor.fromInt64Array #[]).reshape #[2, 0]
   LeanTest.assertEqual (← mapping.totalBytesWithMask emptyIds (Tensor.zeros #[2, 0])) 0
   let emptyMapping : TokenBytes := { vocabSize := 0, bytes := Tensor.fromInt64Array #[] }
   LeanTest.assertEqual (← emptyMapping.totalBytesFromTensor (Tensor.fromInt64Array #[])) 0
@@ -56,7 +56,7 @@ private def checkDevice (device : Device) : IO Unit := do
   -- Invalid GPU indexing must leave the device usable for the next operation.
   LeanTest.assertEqual (← mapping.totalBytesFromTensor ids) 9
   let matrixIds ← TensorStruct.castTo (Tensor ⟨#[1, 3], .Int64, device⟩)
-    ((Tensor.fromInt64Array #[3, 2, 1]).reshapeChecked #[1, 3])
+    ((Tensor.fromInt64Array #[3, 2, 1]).reshape #[1, 3])
   let mask ← TensorStruct.castTo (Tensor ⟨#[1, 3], .Float32, device⟩)
     (Tensor.ones #[1, 3])
   LeanTest.assertEqual (← mapping.totalBytesWithMask matrixIds mask) 9

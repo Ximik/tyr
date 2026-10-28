@@ -27,7 +27,7 @@ private def addBias2d {n d : Nat}
     (x : Tensor { device := device, shape := #[n, d], dtype := dtype })
     (b : Tensor { device := device, shape := #[d], dtype := dtype })
     : Tensor { device := device, shape := #[n, d], dtype := dtype } :=
-  Tensor.add x (Tensor.expand (Tensor.reshapeChecked b #[1, d]) #[n, d])
+  Tensor.add x (Tensor.expand (Tensor.reshape b #[1, d]) #[n, d])
 
 private def linear2d {tokens in_dim out_dim : Nat}
     (x : Tensor { device := device, shape := #[tokens, in_dim], dtype := dtype })
@@ -35,14 +35,14 @@ private def linear2d {tokens in_dim out_dim : Nat}
     (b : Tensor { device := device, shape := #[out_dim], dtype := dtype })
     : Tensor { device := device, shape := #[tokens, out_dim], dtype := dtype } :=
   let yDyn : Tensor { device := device, shape := #[tokens, out_dim], dtype := dtype } := einsumChecked "oh,th->to" w x
-  let y : Tensor { device := device, shape := #[tokens, out_dim], dtype := dtype } := Tensor.reshapeChecked yDyn #[tokens, out_dim]
+  let y : Tensor { device := device, shape := #[tokens, out_dim], dtype := dtype } := Tensor.reshape yDyn #[tokens, out_dim]
   addBias2d y b
 
 private def allInSet (xs : Array UInt64) (allow : Array UInt64) : Bool :=
   xs.all (fun x => allow.contains x)
 
 private def countMask2d {batch seq : Nat} (mask : Tensor { device := device, shape := #[batch, seq], dtype := .Bool }) : IO Nat := do
-  let row : Tensor { device := device, shape := #[batch], dtype := .Int64 } := Tensor.reshapeChecked (Tensor.sumDim (mask.toInt64) 1 false) #[batch]
+  let row : Tensor { device := device, shape := #[batch], dtype := .Int64 } := Tensor.reshape (Tensor.sumDim (mask.toInt64) 1 false) #[batch]
   let counts ← Tensor.toUInt64Array row
   pure (counts.foldl (· + ·.toNat) 0)
 
@@ -67,9 +67,9 @@ def forward2d {tokens dim : Nat}
     (m : Qwen35VisionLayerNorm (device := device) dim)
     (x : Tensor { device := device, shape := #[tokens, dim], dtype := dtype })
     : Tensor { device := device, shape := #[tokens, dim], dtype := dtype } :=
-  let x3 : Tensor { device := device, shape := #[1, tokens, dim], dtype := dtype } := Tensor.reshapeChecked x #[1, tokens, dim]
+  let x3 : Tensor { device := device, shape := #[1, tokens, dim], dtype := dtype } := Tensor.reshape x #[1, tokens, dim]
   let y3 : Tensor { device := device, shape := #[1, tokens, dim], dtype := dtype } := x3.checkedReplacement (RawTensor.layerNorm x3.raw m.weight.2.raw m.bias.2.raw m.eps)
-  Tensor.reshapeChecked y3 #[tokens, dim]
+  Tensor.reshape y3 #[tokens, dim]
 
 end Qwen35VisionLayerNorm
 
@@ -365,9 +365,9 @@ private def scatterFeaturesIntoToken {batch seq hidden featTokens featDim : Nat}
       s!"placeholder token count mismatch for token={tokenId}: ids={nTokens} features={featTokens}"
 
   let tokenMask : Tensor { device := device, shape := #[batch, seq, hidden], dtype := .Bool } :=
-    Tensor.expand (Tensor.reshapeChecked tokenMask2d #[batch, seq, 1]) #[batch, seq, hidden]
+    Tensor.expand (Tensor.reshape tokenMask2d #[batch, seq, 1]) #[batch, seq, hidden]
   let src ← IO.ofExcept (Tensor.ofRaw (σ := ⟨#[featTokens * featDim], dtype, device⟩)
-    (Tensor.reshapeChecked features #[featTokens * featDim]).raw)
+    (Tensor.reshape features #[featTokens * featDim]).raw)
   pure (Tensor.maskedScatter inputsEmbeds tokenMask src)
 
 def forwardText {batch seq : Nat}
@@ -556,11 +556,11 @@ partial def generateUncached {batch seq : Nat}
     let lastPos := curSeq - 1
     let last3 : Tensor { device := device, shape := #[batch, 1, cfg.text_config.vocab_size], dtype := dtype } :=
       typedSlice logits 1 lastPos 1
-    let last2 : Tensor { device := device, shape := #[batch, cfg.text_config.vocab_size], dtype := dtype } := Tensor.reshapeChecked last3 #[batch, cfg.text_config.vocab_size]
+    let last2 : Tensor { device := device, shape := #[batch, cfg.text_config.vocab_size], dtype := dtype } := Tensor.reshape last3 #[batch, cfg.text_config.vocab_size]
     let nextTok ← sampleFromLogits last2.toFloat32 strategy
 
     let nextVals ← Tensor.toUInt64Array nextTok
-    let nextCol : Tensor { device := device, shape := #[batch, 1], dtype := .Int64 } := Tensor.reshapeChecked nextTok #[batch, 1]
+    let nextCol : Tensor { device := device, shape := #[batch, 1], dtype := .Int64 } := Tensor.reshape nextTok #[batch, 1]
     let appended : Tensor { device := device, shape := #[batch, curSeq + 1], dtype := .Int64 } := typedCat cur nextCol 1
     let stop := eosTokenIds.size > 0 && allInSet nextVals eosTokenIds
     if stop then

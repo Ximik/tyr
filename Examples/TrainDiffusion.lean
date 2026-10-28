@@ -61,7 +61,7 @@ def decodeMultipleBlocks {numBlocks seqLen : Nat}
     -- Extract row i: slice along batch dimension
     let start := i
     let row : Tokens #[1, seqLen] := tensor.sliceChecked 0 start 1 #[1, seqLen]
-    let rowFlat := Tensor.reshapeChecked row #[seqLen]
+    let rowFlat := Tensor.reshape row #[seqLen]
     let arr ← tensorToArray rowFlat
     results := results.push (asciiDecode arr)
   return results
@@ -145,8 +145,8 @@ def sampleAnimated {cfg : Config}
     let (confidences, predictedTokens) ← IO.ofExcept (Tensor.maxLast3d? probs)
 
     -- Extract arrays for display
-    let tokensArr ← tensorToArray (Tensor.reshapeChecked x #[cfg.seq_len])
-    let confArr ← tensorToFloatArray (Tensor.reshapeChecked confidences #[cfg.seq_len])
+    let tokensArr ← tensorToArray (Tensor.reshape x #[cfg.seq_len])
+    let confArr ← tensorToFloatArray (Tensor.reshape confidences #[cfg.seq_len])
 
     -- Build display text with colors
     let remaining := tokensArr.foldl (fun acc t =>
@@ -275,8 +275,8 @@ def sampleAnimatedMultiple {cfg : Config}
       let (confidences, predictedTokens) ← IO.ofExcept (Tensor.maxLast3d? probs)
 
       -- Extract arrays for display
-      let tokensArr ← tensorToArray (Tensor.reshapeChecked x #[cfg.seq_len])
-      let confArr ← tensorToFloatArray (Tensor.reshapeChecked confidences #[cfg.seq_len])
+      let tokensArr ← tensorToArray (Tensor.reshape x #[cfg.seq_len])
+      let confArr ← tensorToFloatArray (Tensor.reshape confidences #[cfg.seq_len])
 
       let remaining := tokensArr.foldl (fun acc t =>
         if t == cfg.mask_token_id.toInt64 then acc + 1 else acc) 0
@@ -333,7 +333,7 @@ def sampleAnimatedMultiple {cfg : Config}
     (← IO.getStdout).flush
 
     -- Decode result
-    let genFlat := Tensor.reshapeChecked x #[cfg.seq_len]
+    let genFlat := Tensor.reshape x #[cfg.seq_len]
     let genArr ← tensorToArray genFlat
 
     -- Extract the NEW content (excluding context that came from previous block)
@@ -571,8 +571,8 @@ def main (args : List String) : IO Unit := do
     IO.println s!"Validation set: {nVal} tokens"
 
     -- Convert to tensors
-    let trainData : Tokens #[nTrain] := Tensor.reshapeChecked (Tensor.fromInt64Array trainTokens) #[nTrain]
-    let valData : Tokens #[nVal] := Tensor.reshapeChecked (Tensor.fromInt64Array valTokens) #[nVal]
+    let trainData : Tokens #[nTrain] := Tensor.reshape (Tensor.fromInt64Array trainTokens) #[nTrain]
+    let valData : Tokens #[nVal] := Tensor.reshape (Tensor.fromInt64Array valTokens) #[nVal]
 
     runTrainingWithVal modelCfg trainCfg trainData valData
   else

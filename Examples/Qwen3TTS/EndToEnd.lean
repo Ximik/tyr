@@ -345,7 +345,7 @@ private def lookupLanguageId? (cfg : Qwen3TTSConfig) (language : String) : Optio
   none
 
 private def idsTensor1 (ids : Array UInt64) : Tensor { shape := #[1, ids.size], dtype := .Int64, device := device } :=
-  (Tensor.reshapeChecked (Tensor.fromInt64Array (ids.map (Int64.ofNat ∘ UInt64.toNat))) #[1, ids.size]).to device
+  (Tensor.reshape (Tensor.fromInt64Array (ids.map (Int64.ofNat ∘ UInt64.toNat))) #[1, ids.size]).to device
 
 private def saveTokenIds (path : String) (ids : Array UInt64) : IO Unit := do
   ensureParentDir path
@@ -394,7 +394,7 @@ private def buildTalkerInputsEquivalent
   let roleTensor : Tensor { shape := #[1, 3], dtype := .Int64, device := device } := Tensor.reshapeChecked (idsTensor1 roleIds) #[1, 3]
   let roleEmbed : Tensor { shape := #[1, 3, hidden], dtype := dtypes.talker.val, device := device } := TalkerModel.embedText model.talker.model roleTensor
 
-  let ttsSpecialIds : Tensor { shape := #[1, 3], dtype := .Int64, device := device } := Tensor.reshapeChecked ((Tensor.fromInt64Array #[
+  let ttsSpecialIds : Tensor { shape := #[1, 3], dtype := .Int64, device := device } := Tensor.reshape ((Tensor.fromInt64Array #[
     Int64.ofNat cfg.ttsBosTokenId.toNat,
     Int64.ofNat cfg.ttsEosTokenId.toNat,
     Int64.ofNat cfg.ttsPadTokenId.toNat
@@ -442,7 +442,7 @@ private def buildTalkerInputsEquivalent
   let codecPrefillTensor : Tensor { shape := #[1, codecPrefillLen], dtype := .Int64, device := device } := idsTensor1 codecPrefillIds
   let codecEmb0 : Tensor { shape := #[1, codecPrefillLen, hidden], dtype := dtypes.talker.val, device := device } := TalkerModel.embedCodec model.talker.model codecPrefillTensor
 
-  let codecPadBosIds : Tensor { shape := #[1, 2], dtype := .Int64, device := device } := Tensor.reshapeChecked ((Tensor.fromInt64Array #[
+  let codecPadBosIds : Tensor { shape := #[1, 2], dtype := .Int64, device := device } := Tensor.reshape ((Tensor.fromInt64Array #[
     Int64.ofNat cfg.talkerConfig.codecPadId.toNat,
     Int64.ofNat cfg.talkerConfig.codecBosId.toNat
   ]).to device) #[1, 2]
@@ -715,10 +715,10 @@ def runEndToEnd (args : Args) : IO Unit := do
 
     let codes3 : Tensor { shape := #[1, maxFrames, cfg.talkerConfig.numCodeGroups], dtype := .Int64, device := targetDevice } := qwen35.typedSlice out.codes 0 0 1
     let codes2 : Tensor { shape := #[maxFrames, cfg.talkerConfig.numCodeGroups], dtype := .Int64, device := targetDevice } :=
-      Tensor.reshapeChecked codes3 #[maxFrames, cfg.talkerConfig.numCodeGroups]
+      Tensor.reshape codes3 #[maxFrames, cfg.talkerConfig.numCodeGroups]
     let trimmed : Tensor { shape := #[codeLen, cfg.talkerConfig.numCodeGroups], dtype := .Int64, device := targetDevice } := qwen35.typedSlice codes2 0 0 codeLen
     let flat : Tensor { shape := #[codeLen * cfg.talkerConfig.numCodeGroups], dtype := .Int64, device := targetDevice } :=
-      Tensor.reshapeChecked trimmed #[codeLen * cfg.talkerConfig.numCodeGroups]
+      Tensor.reshape trimmed #[codeLen * cfg.talkerConfig.numCodeGroups]
     let codeVals ← Tensor.toUInt64Array flat
 
     ensureParentDir codesPath

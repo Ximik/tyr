@@ -143,13 +143,13 @@ def unpackLatents {batch packed_H packed_W : Nat}
     : Tensor { dtype := dtype, device := device, shape := #[batch, 32, packed_H * 2, packed_W * 2] } :=
   -- Step 1: Reshape sequence to spatial grid with packed channels
   -- [batch, seq, 128] → [batch, packed_H, packed_W, 32, 2, 2]
-  let z := Tensor.reshapeChecked z #[batch, packed_H, packed_W, 32, 2, 2]
+  let z := Tensor.reshape z #[batch, packed_H, packed_W, 32, 2, 2]
   -- Step 2: Permute to interleave spatial patches
   -- [batch, packed_H, packed_W, 32, 2, 2] → [batch, 32, packed_H, 2, packed_W, 2]
   let z := Tensor.permute z #[0, 3, 1, 4, 2, 5]
   -- Step 3: Reshape to final VAE format
   -- [batch, 32, packed_H, 2, packed_W, 2] → [batch, 32, packed_H*2, packed_W*2]
-  Tensor.reshapeChecked z #[batch, 32, packed_H * 2, packed_W * 2]
+  Tensor.reshape z #[batch, 32, packed_H * 2, packed_W * 2]
 
 /-- Pack VAE spatial format back to Flux sequence format (inverse of unpackLatents).
     Used when encoding images to latents for img2img or inpainting.

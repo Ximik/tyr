@@ -65,10 +65,10 @@ example (_logits : Tensor ⟨#[1, 2, 2], .Float32, .CPU⟩)
 
 @[test] def testMaskedLossRejectsInvalidMasksAndLabels : IO Unit := do
   let logits := Tensor.zeros #[1, 2, 2]
-  let targets := (Tensor.fromInt64Array #[0, 1]).reshapeChecked #[1, 2]
+  let targets := (Tensor.fromInt64Array #[0, 1]).reshape #[1, 2]
   let mask := Tensor.ones #[1, 2]
   expectError (Train.ChatSFT.maskedCrossEntropy? logits targets (mask.castDType .Complex64))
-  let invalid := (Tensor.fromInt64Array #[0, 2]).reshapeChecked #[1, 2]
+  let invalid := (Tensor.fromInt64Array #[0, 2]).reshape #[1, 2]
   expectError (Train.ChatSFT.maskedCrossEntropy? logits invalid mask)
   let loss ← checked (Train.ChatSFT.maskedCrossEntropy? logits targets mask)
   LeanTest.assertTrue (Float.abs (loss.item - Float.log 2) < 1e-6)
@@ -76,7 +76,7 @@ example (_logits : Tensor ⟨#[1, 2, 2], .Float32, .CPU⟩)
   let boolLoss ← checked (Train.ChatSFT.maskedCrossEntropy? logits targets boolMask)
   LeanTest.assertTrue (Float.abs (boolLoss.item - Float.log 2) < 1e-6)
   let empty := Tensor.zeros #[1, 0, 2]
-  let emptyTargets := (Tensor.fromInt64Array #[]).reshapeChecked #[1, 0]
+  let emptyTargets := (Tensor.fromInt64Array #[]).reshape #[1, 0]
   let emptyLoss ← checked (Train.ChatSFT.maskedCrossEntropy? empty emptyTargets (Tensor.zeros #[1, 0]))
   LeanTest.assertEqual emptyLoss.item 0
 

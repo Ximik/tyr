@@ -261,7 +261,7 @@ def generate {cfg : Config}
     -- Get logits for last position: logits[:, -1, :] -> [1, vocab]
     -- Reshape to [1 * seq * vocab] then slice last vocab elements
     let flat ← TensorOps.reshape logits #[seq * cfg.vocab_size]
-    let lastLogits := (flat.sliceChecked 0 ((seq - 1) * cfg.vocab_size) cfg.vocab_size #[cfg.vocab_size]).reshapeChecked #[1, cfg.vocab_size]
+    let lastLogits := (flat.sliceChecked 0 ((seq - 1) * cfg.vocab_size) cfg.vocab_size #[cfg.vocab_size]).reshape #[1, cfg.vocab_size]
 
     -- Apply temperature and convert to probabilities
     let scaledLogits := lastLogits / temperature
@@ -269,7 +269,7 @@ def generate {cfg : Config}
 
     -- Sample from the distribution using multinomial
     let sampled ← Tensor.multinomial probs 1 false
-    let nextTokenId := (sampled.reshapeChecked #[]).itemInt
+    let nextTokenId := (sampled.reshape #[]).itemInt
 
     tokens := tokens.push nextTokenId
 

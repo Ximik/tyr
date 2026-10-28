@@ -92,7 +92,7 @@ def sampleWithConfig {batch vocabSize : Nat}
   -- Sample from distribution
   let samples ← Tensor.multinomial probs 1
   -- Squeeze to remove the sample dimension and convert to token IDs
-  let squeezed := samples.reshapeChecked #[batch]
+  let squeezed := samples.reshape #[batch]
   squeezed.toUInt64Array
 
 /-- Process a single generated token for a row, handling tool invocation -/

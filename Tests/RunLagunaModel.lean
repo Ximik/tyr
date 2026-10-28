@@ -244,7 +244,7 @@ private def checkComparisonFailures : IO Unit := do
 
 /-- Deterministic int64 token-id tensor `[1, seq]` on `device`. -/
 private def mkIds (vals : Array Int64) (device : Device) : Tensor { shape := #[1, vals.size], dtype := .Int64, device := device } :=
-  Tensor.reshapeChecked ((Tensor.fromInt64Array vals).to device) #[1, vals.size]
+  Tensor.reshape ((Tensor.fromInt64Array vals).to device) #[1, vals.size]
 
 /-- Base 20-token prompt (deterministic). -/
 private def baseIds : Array Int64 :=
@@ -259,7 +259,7 @@ routing weights still participate in every cache comparison. -/
 private def withStableRoutes (cfg : Config) (m : LagunaForCausalLM (device := device) cfg dtype) : LagunaForCausalLM (device := device) cfg dtype :=
   { m with model := { m.model with layers := m.model.layers.map fun layer =>
       { layer with sparseMoe := layer.sparseMoe.map fun moe =>
-          let bias : Tensor { shape := #[cfg.num_experts], device := device, dtype := .Float32 } := Tensor.reshapeChecked
+          let bias : Tensor { shape := #[cfg.num_experts], device := device, dtype := .Float32 } := Tensor.reshape
             (Tensor.mulScalar (floatDynamic ((Tensor.arange cfg.num_experts).to moe.router.weight.2.device)) 2.0)
             #[cfg.num_experts]
           { moe with router := { moe.router with eScoreCorrectionBias := some (bias.packDType) } } } } }

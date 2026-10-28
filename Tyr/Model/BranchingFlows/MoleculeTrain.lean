@@ -242,9 +242,9 @@ private def moleculeMaskedWeightedCrossEntropy {batch maxLen vocab : Nat}
     (weights : Tensor { dtype := dtype, device := device, shape := #[batch, maxLen] }) : Tensor { dtype := .Float32, device := device, shape := #[] } :=
   let n : Nat := batch * maxLen
   let logits2 := Tensor.reshapeChecked logits #[n, vocab]
-  let targets2 := Tensor.reshapeChecked targets #[n]
-  let mask2 := Tensor.reshapeChecked mask #[n]
-  let weights2 := Tensor.reshapeChecked weights #[n]
+  let targets2 := Tensor.reshape targets #[n]
+  let mask2 := Tensor.reshape mask #[n]
+  let weights2 := Tensor.reshape weights #[n]
   let per := Tensor.crossEntropyNoneChecked logits2 targets2
   let masked := Tensor.mul (Tensor.mul per mask2) weights2
   let denom := Tensor.sumAll mask2

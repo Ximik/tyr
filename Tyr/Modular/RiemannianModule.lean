@@ -62,7 +62,7 @@ namespace LocalLinearization
 
 private def rowAt {rows cols : Nat} {d : DType} {dev : Device}
     (matrix : Tensor ⟨#[rows, cols], d, dev⟩) (idx : Nat) : Tensor ⟨#[cols], d, dev⟩ :=
-  Tensor.reshapeChecked (Tensor.sliceChecked matrix 0 idx 1 #[1, cols]) #[cols]
+  Tensor.reshape (Tensor.sliceChecked matrix 0 idx 1 #[1, cols]) #[cols]
 
 private def mapRows {rows inDim outDim : Nat} {d : DType} {dev : Device}
     (matrix : Tensor ⟨#[rows, inDim], d, dev⟩)
@@ -130,10 +130,10 @@ private def linearApplyParamAdjoint {inDim outDim : Nat} {d : DType} {dev : Devi
     (y : Tensor ⟨#[outDim], d, dev⟩) : Tensor ⟨#[outDim * inDim + outDim], d, dev⟩ :=
   let outer : Tensor ⟨#[outDim, inDim], d, dev⟩ :=
     Tensor.mm (vectorToColumn y) (Tensor.reshape x #[1, inDim] (by simp [TensorSpec.numelOfShape]))
-  let weightPart : Tensor ⟨#[outDim * inDim], d, dev⟩ := Tensor.reshapeChecked outer #[outDim * inDim]
+  let weightPart : Tensor ⟨#[outDim * inDim], d, dev⟩ := Tensor.reshape outer #[outDim * inDim]
   let biasPart : Tensor ⟨#[outDim], d, dev⟩ := if useBias then y else Tensor.zerosLike y
   let joined := Tensor.cat weightPart biasPart 0
-  Tensor.reshapeChecked joined #[outDim * inDim + outDim]
+  Tensor.reshape joined #[outDim * inDim + outDim]
 
 private def makeManifoldLeaf [MatrixManifoldCarrier M device] {m n : Nat}
     (w : M m n) : IO (M m n) := do

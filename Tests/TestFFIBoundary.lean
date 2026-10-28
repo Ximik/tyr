@@ -14,7 +14,7 @@ private def values {σ : StaticSpec} (t : Tensor σ) : IO (Array Float) :=
 /-- Exercise boxed Lean Int/Nat arguments through the real native bridge. -/
 @[test]
 def testBoxedIndexAndUnbind : IO Unit := do
-  let x := (Tensor.arangeFrom 0 6).reshapeChecked #[2, 3]
+  let x := (Tensor.arangeFrom 0 6).reshape #[2, 3]
   LeanTest.assertEqual (← values (x.getOp 0)) #[0.0, 1.0, 2.0]
   LeanTest.assertEqual (← values (x.getOp 1)) #[3.0, 4.0, 5.0]
   LeanTest.assertEqual (← values (x.getOp (-1))) #[3.0, 4.0, 5.0]
@@ -37,9 +37,9 @@ def testArangeLengthAndScalarWidths : IO Unit := do
   LeanTest.assertEqual (← values (Tensor.arangeFrom 0 5 2)) #[0.0, 2.0, 4.0]
   -- Host arrays use float32 conversion; item preserves these int64 values.
   let wide := Tensor.arangeFrom 4294967296 4294967299
-  LeanTest.assertEqual (Tensor.item ((wide.getOp 0).reshapeChecked #[])) 4294967296.0
-  LeanTest.assertEqual (Tensor.item ((wide.getOp 1).reshapeChecked #[])) 4294967297.0
-  LeanTest.assertEqual (Tensor.item ((wide.getOp 2).reshapeChecked #[])) 4294967298.0
+  LeanTest.assertEqual (Tensor.item ((wide.getOp 0).reshape #[])) 4294967296.0
+  LeanTest.assertEqual (Tensor.item ((wide.getOp 1).reshape #[])) 4294967297.0
+  LeanTest.assertEqual (Tensor.item ((wide.getOp 2).reshape #[])) 4294967298.0
   LeanTest.assertEqual (Tensor.eye 2).runtimeShape #[2, 2]
   LeanTest.assertEqual (← values (Tensor.linspace 0.0 1.0 3)) #[0.0, 0.5, 1.0]
   LeanTest.assertEqual (← values (Tensor.logspace 0.0 2.0 3)) #[1.0, 10.0, 100.0]

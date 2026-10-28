@@ -66,7 +66,7 @@ def testQwenTypedSingleAndShardedLoading : IO Unit := do
             LeanTest.assertEqual model.lmHead.actualSpec.dtype DType.Float32
             LeanTest.assertEqual model.model.embed_tokens.actualSpec.dtype DType.Float32
             LeanTest.assertEqual (← model.lmHead.toFloatArray) (Array.replicate 64 1.0)
-            let ids := (Tensor.fromInt64Array #[1, 2]).reshapeChecked #[1, 2]
+            let ids := (Tensor.fromInt64Array #[1, 2]).reshape #[1, 2]
             let logits := model.forward ids
             match logits.validate with
             | .error message => LeanTest.fail message

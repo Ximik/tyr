@@ -1794,7 +1794,7 @@ private def checkpointPhase (label : String) (worldSize : UInt64) (device : Devi
   let failed : Bool ← if worldSize > 1 then do
       let flag := (Tensor.full #[1] (if failure?.isSome then 1.0 else 0.0)).to device
       let flag ← dist.allReduce flag .max
-      pure (decide (Tensor.item (flag.reshapeChecked #[]) > 0.0))
+      pure (decide (Tensor.item (flag.reshape #[]) > 0.0))
     else pure failure?.isSome
   match failed with
   | true =>

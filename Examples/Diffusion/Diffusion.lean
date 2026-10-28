@@ -187,8 +187,8 @@ def loss {cfg : Config} {batch seq : Nat}
     (logits : Activation #[batch, seq, cfg.vocab_size])
     (targets : Tokens #[batch, seq])
     : Activation #[] :=
-  let logitsFlat := Tensor.reshapeChecked logits #[batch * seq, cfg.vocab_size]
-  let targetsFlat := Tensor.reshapeChecked targets #[batch * seq]
+  let logitsFlat := Tensor.reshape logits #[batch * seq, cfg.vocab_size]
+  let targetsFlat := Tensor.reshape targets #[batch * seq]
   Tensor.crossEntropy logitsFlat targetsFlat
 
 /-- Helper to get mask of positions that are still masked -/
@@ -201,7 +201,7 @@ def getMaskedPositions' {batch seq : Nat}
 private def samplingMask {batch seq : Nat} (x : Tokens #[batch, seq])
     (maskToken : UInt64) (protectedPrefix : Nat) : Mask #[batch, seq] :=
   let protectedMask := ((Tensor.arange seq).to x.device).ltScalar protectedPrefix.toFloat
-    |>.reshapeChecked #[1, seq] |>.expand #[batch, seq]
+    |>.reshape #[1, seq] |>.expand #[batch, seq]
   Tensor.logicalAnd (getMaskedPositions' x maskToken) protectedMask.logicalNot
 
 private def validateSampling (cfg : Config) (batch : Nat) (temperature : Float) : IO Unit := do
@@ -266,8 +266,8 @@ def sampleConfidence {cfg : Config} {batch : Nat}
 
     if step < 3 then
       -- Debug: show first few predicted tokens and their confidences
-      let conf0 := (confidences.reshapeChecked #[batch * cfg.seq_len]).sliceChecked 0 0 1 #[1] |>.reshapeChecked #[]
-      let tok0 := (predictedTokens.reshapeChecked #[batch * cfg.seq_len]).sliceChecked 0 0 1 #[1] |>.reshapeChecked #[]
+      let conf0 := (confidences.reshape #[batch * cfg.seq_len]).sliceChecked 0 0 1 #[1] |>.reshape #[]
+      let tok0 := (predictedTokens.reshape #[batch * cfg.seq_len]).sliceChecked 0 0 1 #[1] |>.reshape #[]
       IO.println s!"  step {step}: conf[0]={Tensor.item conf0}, tok[0]={Tensor.itemInt tok0}"
 
     -- Select positions above threshold AND still masked

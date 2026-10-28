@@ -207,13 +207,13 @@ def testBranchingLossHelpers : IO Unit := do
 
 @[test]
 def testBranchingTensorTrainingLosses : IO Unit := do
-  let logits : Tensor { dtype := .Float32, shape := #[1, 2], device := .CPU } := Tensor.reshapeChecked (floatsDynamic #[0.0, 0.0]) #[1, 2]
-  let splitTarget : Tensor { dtype := .Float32, shape := #[1, 2], device := .CPU } := Tensor.reshapeChecked (floatsDynamic #[1.0, 0.0]) #[1, 2]
-  let firstOnly : Tensor { dtype := .Float32, shape := #[1, 2], device := .CPU } := Tensor.reshapeChecked (floatsDynamic #[1.0, 0.0]) #[1, 2]
+  let logits : Tensor { dtype := .Float32, shape := #[1, 2], device := .CPU } := Tensor.reshape (floatsDynamic #[0.0, 0.0]) #[1, 2]
+  let splitTarget : Tensor { dtype := .Float32, shape := #[1, 2], device := .CPU } := Tensor.reshape (floatsDynamic #[1.0, 0.0]) #[1, 2]
+  let firstOnly : Tensor { dtype := .Float32, shape := #[1, 2], device := .CPU } := Tensor.reshape (floatsDynamic #[1.0, 0.0]) #[1, 2]
   let splitLoss := Tensor.item (maskedSplitPoissonLoss logits splitTarget firstOnly)
   LeanTest.assertTrue (Float.abs splitLoss < 1.0e-6)
     s!"Unit split intensity should have zero tensor Poisson loss for count one, got {splitLoss}"
-  let delTarget : Tensor { dtype := .Float32, shape := #[1, 2], device := .CPU } := Tensor.reshapeChecked (floatsDynamic #[1.0, 0.0]) #[1, 2]
+  let delTarget : Tensor { dtype := .Float32, shape := #[1, 2], device := .CPU } := Tensor.reshape (floatsDynamic #[1.0, 0.0]) #[1, 2]
   let delLoss := Tensor.item (maskedBCEWithLogits logits delTarget firstOnly)
   LeanTest.assertTrue (Float.abs (delLoss - Float.log 2.0) < 1.0e-6)
     s!"Zero-logit tensor deletion BCE should equal log(2), got {delLoss}"
@@ -864,9 +864,9 @@ def testBranchingMoleculePackingAndLosses : IO Unit := do
     Tensor.reshapeChecked (floatsDynamic (Array.replicate totalLogits 0.0)) #[batch, cfg.maxLen, 10]
   let flat := batch * cfg.maxLen
   let splitLogits : Tensor { dtype := .Float32, shape := #[batch, cfg.maxLen], device := .CPU } :=
-    Tensor.reshapeChecked (floatsDynamic (Array.replicate flat 0.0)) #[batch, cfg.maxLen]
+    Tensor.reshape (floatsDynamic (Array.replicate flat 0.0)) #[batch, cfg.maxLen]
   let delLogits : Tensor { dtype := .Float32, shape := #[batch, cfg.maxLen], device := .CPU } :=
-    Tensor.reshapeChecked (floatsDynamic (Array.replicate flat 0.0)) #[batch, cfg.maxLen]
+    Tensor.reshape (floatsDynamic (Array.replicate flat 0.0)) #[batch, cfg.maxLen]
   let (_loss, report) := moleculeLosses cfg packed packed.coordAnchor labelLogits splitLogits delLogits
   LeanTest.assertTrue (Float.abs report.coord < 1.0e-6)
     s!"Coordinate loss should be zero when prediction equals anchor, got {report.coord}"
@@ -886,9 +886,9 @@ def testBranchingMoleculePackingAndLosses : IO Unit := do
     Tensor.reshapeChecked (floatsDynamic (Array.replicate totalDfmLogits 0.0)) #[batchDfm, cfg.maxLen, 10]
   let flatDfm := batchDfm * cfg.maxLen
   let splitLogitsDfm : Tensor { dtype := .Float32, shape := #[batchDfm, cfg.maxLen], device := .CPU } :=
-    Tensor.reshapeChecked (floatsDynamic (Array.replicate flatDfm 0.0)) #[batchDfm, cfg.maxLen]
+    Tensor.reshape (floatsDynamic (Array.replicate flatDfm 0.0)) #[batchDfm, cfg.maxLen]
   let delLogitsDfm : Tensor { dtype := .Float32, shape := #[batchDfm, cfg.maxLen], device := .CPU } :=
-    Tensor.reshapeChecked (floatsDynamic (Array.replicate flatDfm 0.0)) #[batchDfm, cfg.maxLen]
+    Tensor.reshape (floatsDynamic (Array.replicate flatDfm 0.0)) #[batchDfm, cfg.maxLen]
   let (_dfmLoss, dfmReport) :=
     moleculeLosses cfg packedDfm packedDfm.coordAnchor labelLogitsDfm splitLogitsDfm delLogitsDfm
   LeanTest.assertTrue (dfmReport.label > report.label)
@@ -947,7 +947,7 @@ def testMoleculeLossUsesJuliaTimeScalingAndIndependentWeights : IO Unit := do
 
 @[test]
 def testMoleculeMuonUpdatesMatrixAndVectorLeaves : IO Unit := do
-  let matrix : Tensor { dtype := .Float32, shape := #[2, 2], device := .CPU } := Tensor.reshapeChecked (floatsDynamic #[1.0, 2.0, 3.0, 4.0]) #[2, 2]
+  let matrix : Tensor { dtype := .Float32, shape := #[2, 2], device := .CPU } := Tensor.reshape (floatsDynamic #[1.0, 2.0, 3.0, 4.0]) #[2, 2]
   let vector : Tensor { dtype := .Float32, shape := #[2], device := .CPU } := floatsDynamic #[1.0, -1.0]
   let grads : Tensor { dtype := .Float32, shape := #[2, 2], device := .CPU } × Tensor { dtype := .Float32, shape := #[2], device := .CPU } := (onesDynamic #[2, 2], onesDynamic #[2])
   let params : Tensor { dtype := .Float32, shape := #[2, 2], device := .CPU } × Tensor { dtype := .Float32, shape := #[2], device := .CPU } := (matrix, vector)
@@ -965,7 +965,7 @@ private def moleculeCoordCell {maxLen : Nat}
     (coord : Tensor { dtype := .Float32, shape := #[1, maxLen, 3], device := .CPU }) (j k : Nat) : Float :=
   let row : Tensor { dtype := .Float32, shape := #[1, 1, 3], device := .CPU } := sliceTyped coord 1 j 1
   let cell : Tensor { dtype := .Float32, shape := #[1, 1, 1], device := .CPU } := sliceTyped row 2 k 1
-  Tensor.item (cell.reshapeChecked #[])
+  Tensor.item (cell.reshape #[])
 
 @[test]
 def testMoleculeTransformerCoordTargetCapAppliesInTrainingAndInference : IO Unit := do
@@ -983,7 +983,7 @@ def testMoleculeTransformerCoordTargetCapAppliesInTrainingAndInference : IO Unit
   }
 
   let coord : Tensor { dtype := .Float32, shape := #[1, maxLen, 3], device := .CPU } := zerosDynamic #[1, maxLen, 3]
-  let label : Tensor { shape := #[1, maxLen], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked (Tensor.fromInt64Array #[0]) #[1, maxLen]
+  let label : Tensor { shape := #[1, maxLen], dtype := .Int64, device := .CPU } := Tensor.reshape (Tensor.fromInt64Array #[0]) #[1, maxLen]
   let time : Tensor { dtype := .Float32, shape := #[1], device := .CPU } := zerosDynamic #[1]
   let padmask : Tensor { shape := #[1, maxLen], dtype := .Int64, device := .CPU } := Tensor.fullInt #[1, maxLen] 1
   let trainingModel :=

@@ -466,7 +466,7 @@ private def buildSingleTokenOnDevice
     (device : Device)
     : Tensor { device := device, shape := #[1, 1], dtype := .Int64 } :=
   let idsVals : Array Int64 := #[Int64.ofNat id.toNat]
-  let inputIdsCpu : Tensor { device := .CPU, shape := #[1, 1], dtype := .Int64 } := Tensor.reshapeChecked (Tensor.fromInt64Array idsVals) #[1, 1]
+  let inputIdsCpu : Tensor { device := .CPU, shape := #[1, 1], dtype := .Int64 } := Tensor.reshape (Tensor.fromInt64Array idsVals) #[1, 1]
   inputIdsCpu.to device
 
 private def isForbiddenToken (rules : DecodeTokenRules) (id : UInt32) : Bool :=
@@ -632,7 +632,7 @@ private def sampleTokenFromLogits {vocab : Nat}
   let mut tries : Nat := 0
   while tries < 8 do
     let sampled ← Tensor.multinomial probs 1 false
-    let sampledFlat : Tensor { device := device, shape := #[1], dtype := .Int64 } := Tensor.reshapeChecked sampled #[1]
+    let sampledFlat : Tensor { device := device, shape := #[1], dtype := .Int64 } := Tensor.reshape sampled #[1]
     let sampledVals ← Tensor.toUInt64Array sampledFlat
     let id := (sampledVals.getD 0 0).toUInt32
     if !isForbiddenToken rules id then

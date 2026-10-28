@@ -254,9 +254,9 @@ def computeLosses {batch seq vocab : Nat} (logits : Tensor { shape := #[batch, s
   -- Result: [batch, seq] (loss at each position)
   let batchSeq := batch * seq
   let logitsFlat := Tensor.reshapeChecked logits #[batchSeq, vocab]
-  let targetsFlat := Tensor.reshapeChecked targetIds #[batchSeq]
+  let targetsFlat := Tensor.reshape targetIds #[batchSeq]
   let lossesFlat := Tensor.crossEntropyNone logitsFlat targetsFlat
-  Tensor.reshapeChecked lossesFlat #[batch, seq]
+  Tensor.reshape lossesFlat #[batch, seq]
 
 /-- Evaluate multiple choice example.
     Returns index of choice with lowest average continuation loss.
@@ -293,7 +293,7 @@ def evaluateMC {batch seq vocab : Nat}
       let endLossIdx := if ei > 0 then ei - 1 else 0
 
       -- Compute mean via tensor operations
-      let lossesFlat := Tensor.reshapeChecked losses2d #[batch * seq]
+      let lossesFlat := Tensor.reshape losses2d #[batch * seq]
       let rowOffset := rowIdx * seq
       let startIdx := rowOffset + startLossIdx
       let numTokens := endLossIdx - startLossIdx
@@ -339,8 +339,8 @@ def evaluateLM {seq vocab : Nat}
   let predictions ← IO.ofExcept (Tensor.argmax? logits 2)
 
   -- Flatten to 1D for easier slicing
-  let predsFlat := Tensor.reshapeChecked predictions #[seq]
-  let targetFlat := Tensor.reshapeChecked targetIds #[seq]
+  let predsFlat := Tensor.reshape predictions #[seq]
+  let targetFlat := Tensor.reshape targetIds #[seq]
 
   -- Compare predictions[start-1:end-1] with targets[start:end]
   -- This checks if the model correctly predicts each continuation token
@@ -487,8 +487,8 @@ def evaluateTask {vocab : Nat}
     let totalTensor := Tensor.fromInt64Array #[numTotal.toInt64]
     let correctTensor ← dist.allReduce correctTensor .sum
     let totalTensor ← dist.allReduce totalTensor .sum
-    numCorrect := (Tensor.itemInt (correctTensor.reshapeChecked #[])).toInt.toNat
-    numTotal := (Tensor.itemInt (totalTensor.reshapeChecked #[])).toInt.toNat
+    numCorrect := (Tensor.itemInt (correctTensor.reshape #[])).toInt.toNat
+    numTotal := (Tensor.itemInt (totalTensor.reshape #[])).toInt.toNat
 
   if numTotal == 0 then return 0.0
   return numCorrect.toFloat / numTotal.toFloat

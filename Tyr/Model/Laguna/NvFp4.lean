@@ -70,8 +70,8 @@ private def dequantCore {pd sd : DType}
   let lutLo := (e2m1LutLo.to device).reshapeChecked #[256, 1]
   let lutHi := (e2m1LutHi.to device).reshapeChecked #[256, 1]
   let idx := (packed.reshapeChecked #[numPacked]).toInt64
-  let lo := (Tensor.embedding1d idx lutLo).reshapeChecked #[numPacked, 1]
-  let hi := (Tensor.embedding1d idx lutHi).reshapeChecked #[numPacked, 1]
+  let lo := (Tensor.embedding1d idx lutLo).reshape #[numPacked, 1]
+  let hi := (Tensor.embedding1d idx lutHi).reshape #[numPacked, 1]
   let pairs := Tensor.catManyChecked #[lo.packShape, hi.packShape] 1 #[numPacked, 2]
   let vals4 := pairs.reshapeChecked #[lead, outFeatures, numGroups, 16]
   let scalesF := scales.toFloat32.reshapeChecked #[lead, outFeatures, numGroups, 1]
@@ -102,7 +102,7 @@ def dequantMatrix {ps ss gs : Shape} {pd sd gd : DType}
   let packed3 := packed.reshapeChecked #[1, outFeatures, inFeatures / 2]
   let scales3 := scales.reshapeChecked #[1, outFeatures, inFeatures / 16]
   let out3 ← dequantCore 1 outFeatures inFeatures packed3 scales3 globalB
-  pure (out3.reshapeChecked #[outFeatures, inFeatures])
+  pure (out3.reshape #[outFeatures, inFeatures])
 
 /-- Dequantize an NVFP4 expert bank, preserving expert and matrix dimensions. -/
 def dequantBank {ps ss gs : Shape} {pd sd gd : DType}

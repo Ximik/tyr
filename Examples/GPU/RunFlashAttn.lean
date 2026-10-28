@@ -38,7 +38,7 @@ def generateFixtures : IO Unit := do
   let k := kf.toBFloat16
   let v := vf.toBFloat16
   let (expectedOut, lse) := attentionReference q k v
-  let expectedLse := lse.reshapeChecked #[2, 64]
+  let expectedLse := lse.reshape #[2, 64]
 
   Tensor.saveTensor q (fixtureFile "q").toString
   Tensor.saveTensor k (fixtureFile "k").toString

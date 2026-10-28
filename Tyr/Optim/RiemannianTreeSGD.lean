@@ -110,7 +110,7 @@ def solveWoodbury {Params : Type} [TensorStruct Params] [FloatingTensorStruct Pa
   let base := applyInvMass mass g
   let correctionArg := K.apply base
   let correctionInner : Tensor { shape := #[rank], dtype := .Float32, device := .CPU } :=
-    Tensor.reshapeChecked (Tensor.mm innerInv (Tensor.reshapeChecked correctionArg #[rank, 1])) #[rank]
+    Tensor.reshape (Tensor.mm innerInv (Tensor.reshape correctionArg #[rank, 1])) #[rank]
   let correction := applyInvMass mass (K.applyTranspose g correctionInner)
   TensorStruct.sub base correction
 
@@ -145,7 +145,7 @@ private def buildTreeFactorFromOutputFactor [TensorStruct Params] [FloatingTenso
   let rows :=
     ((List.range rank).toArray.map fun i =>
       let rowFlat : Tensor { shape := #[shapeNumel s], dtype := .Float32, device := device } :=
-        Tensor.reshapeChecked (Tensor.sliceChecked outputFactor.matrix 0 i 1 #[1, shapeNumel s])
+        Tensor.reshape (Tensor.sliceChecked outputFactor.matrix 0 i 1 #[1, shapeNumel s])
           #[shapeNumel s]
       Tensor.reshapeChecked rowFlat s)
   buildTreeFactorFromCotangentRows output params rows (by simp [rows])
@@ -232,9 +232,9 @@ private def prepareCrossEntropyStep
   let paramsReq ← TensorStruct.makeLeafParams params
   let predictionReq ← forward paramsReq
   let logitsFlat : Tensor { shape := #[batch * seq, vocab], dtype := .Float32, device := device } :=
-    Tensor.reshapeChecked predictionReq #[batch * seq, vocab]
+    Tensor.reshape predictionReq #[batch * seq, vocab]
   let targetsFlat : Tensor { shape := #[batch * seq], dtype := .Int64, device := device } :=
-    Tensor.reshapeChecked targets #[batch * seq]
+    Tensor.reshape targets #[batch * seq]
   let lossT ← IO.ofExcept (Tensor.crossEntropy? logitsFlat targetsFlat)
   let outputCotangent ← Tensor.grad lossT predictionReq (Tensor.onesLike lossT)
   pure (paramsReq, predictionReq, lossT, Tensor.detach outputCotangent)

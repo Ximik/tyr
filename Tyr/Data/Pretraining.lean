@@ -242,8 +242,7 @@ def createInputTarget (tokens : Array UInt64) : (Array UInt64 × Array UInt64) :
   let target := tokens.extract 1 tokens.size
   (input, target)
 
-/-- Build an Int64 token tensor from host data over the raw FFI boundary.
-    `reshapeChecked` validates the result metadata (shape and Int64 dtype). -/
+/-- Build an Int64 token tensor from host data over the raw FFI boundary. -/
 private def int64TensorFromArray (arr : Array Int64) : Tensor { shape := #[arr.size], dtype := .Int64, device := .CPU } :=
   Tensor.fromInt64Array arr
 

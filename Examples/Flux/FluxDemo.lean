@@ -193,7 +193,7 @@ def runDemo (cfg : DemoConfig) (prompt : String) : IO Unit := do
   let latentsHW : Tensor { shape := #[1, cfg.latentH, cfg.latentW, 128], dtype := .Float32, device := .CPU } :=
     Tensor.reshapeChecked latents #[1, cfg.latentH, cfg.latentW, 128]
   let packedLatents : Tensor { shape := #[1, 128, cfg.latentH, cfg.latentW], dtype := .Float32, device := .CPU } :=
-    (Tensor.permute latentsHW #[0, 3, 1, 2]).reshapeChecked #[1, 128, cfg.latentH, cfg.latentW]
+    (Tensor.permute latentsHW #[0, 3, 1, 2]).reshape #[1, 128, cfg.latentH, cfg.latentW]
 
   -- Step 4: Decode with VAE and save
   IO.println "  [4/4] Decoding with VAE..."

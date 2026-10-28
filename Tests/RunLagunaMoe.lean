@@ -165,8 +165,8 @@ private def runCase (path : String) (device : Device) : IO Unit := do
 
 private def checkSignedScatterDimension : IO Unit := do
   let input := qwen35.zerosDynamic #[2, 3]
-  let indices := (Tensor.fromInt64Array #[2, 0]).reshapeChecked #[2, 1]
-  let values := (Tensor.fromFloatArray #[5.0, 7.0]).reshapeChecked #[2, 1]
+  let indices := (Tensor.fromInt64Array #[2, 0]).reshape #[2, 1]
+  let values := (Tensor.fromFloatArray #[5.0, 7.0]).reshape #[2, 1]
   let out := scatterAdd input (-1) indices values
   check ((← Tensor.toFloatArray out) == #[0.0, 0.0, 5.0, 7.0, 0.0, 0.0])
     "scatter-add preserves signed negative dimension across the native ABI"

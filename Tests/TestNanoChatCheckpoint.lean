@@ -196,8 +196,8 @@ private def metadata (tokens : Nat) : CheckpointMetadata := {
 @[test] def testNanoChatIndexedTrainingStep : IO Unit := do
   let params ← moddedGpt.ModdedGPTParams.init tinyConfig
   let yarn ← moddedGpt.YarnRotary.init tinyConfig.headDim tinyConfig.maxSeqLen
-  let input := (Tensor.fromInt64Array #[0, 1, 2, 3]).reshapeChecked #[1, 4]
-  let target := (Tensor.fromInt64Array #[1, 2, 3, 4]).reshapeChecked #[1, 4]
+  let input := (Tensor.fromInt64Array #[0, 1, 2, 3]).reshape #[1, 4]
+  let target := (Tensor.fromInt64Array #[1, 2, 3, 4]).reshape #[1, 4]
   let opt := OptimizerState.init tinyConfig params
   let (updated, nextOpt, result) ← trainStep params yarn input target opt
     { numIterations := 10 } 1.0

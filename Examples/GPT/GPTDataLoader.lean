@@ -108,7 +108,7 @@ def SequentialLoader.getBatch {n : Nat} (loader : SequentialLoader n)
     none
   else
     let requiredLen := required
-    let batch := (loader.tokens.sliceChecked 0 loader.currentPos requiredLen #[requiredLen]).reshapeChecked
+    let batch := (loader.tokens.sliceChecked 0 loader.currentPos requiredLen #[requiredLen]).reshape
       #[batchSize, seqLen + 1]
     let newLoader := { loader with currentPos := loader.currentPos + requiredLen }
     some (batch, newLoader)

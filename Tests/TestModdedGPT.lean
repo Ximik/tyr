@@ -317,7 +317,7 @@ def testDataLoader : IO Unit := do
 
 
 @[test] def testMuonBFloat16Boundary : IO Unit := do
-  let grad := (Tensor.fromFloatArray #[0.13, -0.27, 0.41, 0.59, -0.71, 0.83]).reshapeChecked #[2, 3]
+  let grad := (Tensor.fromFloatArray #[0.13, -0.27, 0.41, 0.59, -0.71, 0.83]).reshape #[2, 3]
   let param := Tensor.ones #[2, 3]
   let orth ← dist.muonOrthogonalize grad 5
   LeanTest.assertEqual orth.actualSpec.dtype DType.BFloat16

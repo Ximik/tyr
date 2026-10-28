@@ -21,12 +21,12 @@ open torch
   LeanTest.assertEqual (← causal.toFloatArray) #[2, 4, 4, 6]
 
 @[test] def testTypedNeuralGatherAndMasks : IO Unit := do
-  let x := (Tensor.fromFloatArray #[1, 2, 3, 4, 5, 6]).reshapeChecked #[2, 3]
-  let indices := (Tensor.fromInt64Array #[2, 0, 1, 1]).reshapeChecked #[2, 2]
+  let x := (Tensor.fromFloatArray #[1, 2, 3, 4, 5, 6]).reshape #[2, 3]
+  let indices := (Tensor.fromInt64Array #[2, 0, 1, 1]).reshape #[2, 2]
   let selected := Tensor.gather x (-1) indices
   LeanTest.assertEqual (← selected.toFloatArray) #[3, 1, 5, 5]
     "Signed gather dimension preserves native negative-axis semantics"
-  let mask := (Tensor.fromInt64Array #[1, 0, 1, 0, 0, 1]).reshapeChecked #[2, 3] |>.eqScalar 1
+  let mask := (Tensor.fromInt64Array #[1, 0, 1, 0, 0, 1]).reshape #[2, 3] |>.eqScalar 1
   let packed := Tensor.maskedSelect x mask
   LeanTest.assertEqual packed.1 3
   LeanTest.assertEqual (← packed.2.toFloatArray) #[1, 3, 6]
@@ -37,7 +37,7 @@ open torch
   LeanTest.assertEqual empty.2.runtimeShape #[0]
 
 @[test] def testTypedNeuralConvAndExistentialConcat : IO Unit := do
-  let x := (Tensor.fromFloatArray #[1, 2, 3, 4, 5, 6, 7, 8, 9]).reshapeChecked #[1, 1, 3, 3]
+  let x := (Tensor.fromFloatArray #[1, 2, 3, 4, 5, 6, 7, 8, 9]).reshape #[1, 1, 3, 3]
   let kernel := Tensor.ones #[1, 1, 2, 2]
   let result := Tensor.conv2dBias x kernel (Tensor.full #[1] 0.5)
   LeanTest.assertEqual result.runtimeShape #[1, 1, 2, 2]
@@ -98,7 +98,7 @@ example (_matrix : Tensor ⟨#[2, 3], .Float32, .CPU⟩) : True := by
 
 @[test] def testTypedRMSNormBFloat16Rounding : IO Unit := do
   let values := (Tensor.fromFloatArray
-    #[0.17, -0.41, 0.83, 1.27, 0.9, 0.5, -0.7, 1.1]).reshapeChecked #[1, 2, 4]
+    #[0.17, -0.41, 0.83, 1.27, 0.9, 0.5, -0.7, 1.1]).reshape #[1, 2, 4]
   let weights := Tensor.fromFloatArray #[0.73, 1.19, -0.67, 1.53]
   for selected in #[RealFloatingDType.ofDType .Float32, RealFloatingDType.ofDType .BFloat16] do
     let dtype := selected.val
@@ -108,21 +108,21 @@ example (_matrix : Tensor ⟨#[2, 3], .Float32, .CPU⟩) : True := by
     let normalized := Tensor.rmsNormWeighted x.toFloat32 (Tensor.ones #[4]) 0.01
     let expected := Tensor.mul (Tensor.castLike x normalized) (w.expand #[1, 2, 4])
     let outputs := #[norm.forward3d x,
-      (norm.forward2d (x.reshapeChecked #[2, 4])).reshapeChecked #[1, 2, 4],
-      (norm.forward4d (x.reshapeChecked #[1, 1, 2, 4])).reshapeChecked #[1, 2, 4],
-      (norm.forward5d (x.reshapeChecked #[1, 1, 2, 4])).reshapeChecked #[1, 2, 4]]
+      (norm.forward2d (x.reshape #[2, 4])).reshape #[1, 2, 4],
+      (norm.forward4d (x.reshape #[1, 1, 2, 4])).reshape #[1, 2, 4],
+      (norm.forward5d (x.reshape #[1, 1, 2, 4])).reshape #[1, 2, 4]]
     for actual in outputs do
       LeanTest.assertEqual actual.actualSpec.dtype x.actualSpec.dtype
       LeanTest.assertEqual (← actual.toFloatArray) (← expected.toFloatArray)
         "RMSNorm restores activation dtype before multiplying non-unit weights"
 
 @[test] def testTypedGroupedAndTransposeConvolution : IO Unit := do
-  let x := (Tensor.fromFloatArray #[1, 2, 3, 4, 5, 6]).reshapeChecked #[1, 2, 3]
-  let w := (Tensor.fromFloatArray #[2, 3]).reshapeChecked #[2, 1, 1]
+  let x := (Tensor.fromFloatArray #[1, 2, 3, 4, 5, 6]).reshape #[1, 2, 3]
+  let w := (Tensor.fromFloatArray #[2, 3]).reshape #[2, 1, 1]
   let grouped := Tensor.conv1dGroups x w (Tensor.zeros #[2]) 1 0 1 2
   LeanTest.assertEqual (← grouped.toFloatArray) #[2, 4, 6, 12, 15, 18]
-  let z := (Tensor.fromFloatArray #[1, 2]).reshapeChecked #[1, 1, 2]
-  let kernel := (Tensor.fromFloatArray #[1, 2]).reshapeChecked #[1, 1, 2]
+  let z := (Tensor.fromFloatArray #[1, 2]).reshape #[1, 1, 2]
+  let kernel := (Tensor.fromFloatArray #[1, 2]).reshape #[1, 1, 2]
   let expanded := Tensor.convTranspose1d z kernel (Tensor.zeros #[1]) 2
   LeanTest.assertEqual expanded.runtimeShape #[1, 1, 4]
   LeanTest.assertEqual (← expanded.toFloatArray) #[1, 2, 2, 4]
@@ -132,9 +132,9 @@ example (_matrix : Tensor ⟨#[2, 3], .Float32, .CPU⟩) : True := by
   Tensor.wavBegin path 16000
   let emit (chunk : Sigma fun n => SomeDTypeTensor #[1, 1, n] .CPU) : IO Unit :=
     Tensor.wavAppend chunk.2.2 path
-  emit ⟨3, ((Tensor.fromFloatArray #[-1, 0, 1]).reshapeChecked #[1, 1, 3]).packDType⟩
+  emit ⟨3, ((Tensor.fromFloatArray #[-1, 0, 1]).reshape #[1, 1, 3]).packDType⟩
   emit ⟨0, (Tensor.zeros #[1, 1, 0]).packDType⟩
-  emit ⟨2, ((Tensor.fromFloatArray #[0.5, -0.5]).reshapeChecked #[1, 1, 2]).toBFloat16.packDType⟩
+  emit ⟨2, ((Tensor.fromFloatArray #[0.5, -0.5]).reshape #[1, 1, 2]).toBFloat16.packDType⟩
   Tensor.wavFinalize path
   let bytes ← IO.FS.readBinFile path
   LeanTest.assertEqual bytes.size 54 "Five mono PCM16 samples plus the WAV header"

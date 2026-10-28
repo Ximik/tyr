@@ -51,7 +51,7 @@ private def samePadding (kernelSize dilation : Nat) : Nat :=
 private def addBias3d {batch channels frames : Nat}
     (x : Tensor { shape := #[batch, channels, frames], dtype := dtype.val, device := device })
     (bias : Tensor { shape := #[channels], dtype := dtype.val, device := device }) : Tensor { shape := #[batch, channels, frames], dtype := dtype.val, device := device } :=
-  let b : Tensor { shape := #[1, channels, 1], dtype := dtype.val, device := device } := Tensor.reshapeChecked bias #[1, channels, 1]
+  let b : Tensor { shape := #[1, channels, 1], dtype := dtype.val, device := device } := Tensor.reshape bias #[1, channels, 1]
   let be : Tensor { shape := #[batch, channels, frames], dtype := dtype.val, device := device } := Tensor.expand b #[batch, channels, frames]
   Tensor.add x be
 
@@ -107,12 +107,12 @@ def init (channels seChannels : Nat) (device : Device := .CPU) (dtype : RealFloa
 def forward {batch frames channels seChannels : Nat}
     (m : SqueezeExcitationBlock (dtype := dtype) (device := device) channels seChannels)
     (x : Tensor { shape := #[batch, channels, frames], dtype := dtype.val, device := device }) : Tensor { shape := #[batch, channels, frames], dtype := dtype.val, device := device } :=
-  let mean : Tensor { shape := #[batch, channels, 1], dtype := dtype.val, device := device } := Tensor.reshapeChecked (Tensor.meanDim x 2 true) #[batch, channels, 1]
+  let mean : Tensor { shape := #[batch, channels, 1], dtype := dtype.val, device := device } := Tensor.reshape (Tensor.meanDim x 2 true) #[batch, channels, 1]
   let h1 : Tensor { shape := #[batch, seChannels, 1], dtype := dtype.val, device := device } :=
-    Tensor.reshapeChecked (Tensor.conv1d mean m.conv1Weight 1 0 1) #[batch, seChannels, 1]
+    Tensor.reshape (Tensor.conv1d mean m.conv1Weight 1 0 1) #[batch, seChannels, 1]
   let h1 := Tensor.relu (addBias3d h1 m.conv1Bias)
   let h2 : Tensor { shape := #[batch, channels, 1], dtype := dtype.val, device := device } :=
-    Tensor.reshapeChecked (Tensor.conv1d h1 m.conv2Weight 1 0 1) #[batch, channels, 1]
+    Tensor.reshape (Tensor.conv1d h1 m.conv2Weight 1 0 1) #[batch, channels, 1]
   let gate1 := Tensor.sigmoid (addBias3d h2 m.conv2Bias)
   let gate : Tensor { shape := #[batch, channels, frames], dtype := dtype.val, device := device } := Tensor.expand gate1 #[batch, channels, frames]
   Tensor.mul x gate
@@ -218,17 +218,17 @@ def init (channels attentionChannels : Nat) (device : Device := .CPU) (dtype : R
 def forward {batch frames channels attentionChannels : Nat}
     (m : AttentiveStatisticsPooling (dtype := dtype) (device := device) channels attentionChannels)
     (x : Tensor { shape := #[batch, channels, frames], dtype := dtype.val, device := device }) : Tensor { shape := #[batch, channels * 2, 1], dtype := dtype.val, device := device } :=
-  let mean : Tensor { shape := #[batch, channels], dtype := dtype.val, device := device } := Tensor.reshapeChecked (Tensor.meanDim x 2 false) #[batch, channels]
-  let mean1 : Tensor { shape := #[batch, channels, 1], dtype := dtype.val, device := device } := Tensor.reshapeChecked mean #[batch, channels, 1]
+  let mean : Tensor { shape := #[batch, channels], dtype := dtype.val, device := device } := Tensor.reshape (Tensor.meanDim x 2 false) #[batch, channels]
+  let mean1 : Tensor { shape := #[batch, channels, 1], dtype := dtype.val, device := device } := Tensor.reshape mean #[batch, channels, 1]
   let meanRep : Tensor { shape := #[batch, channels, frames], dtype := dtype.val, device := device } := Tensor.expand mean1 #[batch, channels, frames]
 
   let diff := Tensor.sub x meanRep
-  let var : Tensor { shape := #[batch, channels], dtype := dtype.val, device := device } := Tensor.reshapeChecked (Tensor.meanDim (Tensor.mul diff diff) 2 false) #[batch, channels]
+  let var : Tensor { shape := #[batch, channels], dtype := dtype.val, device := device } := Tensor.reshape (Tensor.meanDim (Tensor.mul diff diff) 2 false) #[batch, channels]
   let std : Tensor { shape := #[batch, channels], dtype := dtype.val, device := device } := Tensor.sqrt (Tensor.addScalar var m.eps)
-  let std1 : Tensor { shape := #[batch, channels, 1], dtype := dtype.val, device := device } := Tensor.reshapeChecked std #[batch, channels, 1]
+  let std1 : Tensor { shape := #[batch, channels, 1], dtype := dtype.val, device := device } := Tensor.reshape std #[batch, channels, 1]
   let stdRep : Tensor { shape := #[batch, channels, frames], dtype := dtype.val, device := device } := Tensor.expand std1 #[batch, channels, frames]
 
-  let attIn12 : Tensor { shape := #[batch, channels + channels, frames], dtype := dtype.val, device := device } := Tensor.reshapeChecked (Tensor.cat x meanRep 1) #[batch, channels + channels, frames]
+  let attIn12 : Tensor { shape := #[batch, channels + channels, frames], dtype := dtype.val, device := device } := Tensor.reshape (Tensor.cat x meanRep 1) #[batch, channels + channels, frames]
   let attIn : Tensor { shape := #[batch, channels * 3, frames], dtype := dtype.val, device := device } := Tensor.reshapeChecked (Tensor.cat attIn12 stdRep 1) #[batch, channels * 3, frames]
   let att0 := TimeDelayNetBlock.forward m.tdnn attIn
   let att1 := Tensor.tanh att0
@@ -237,16 +237,16 @@ def forward {batch frames channels attentionChannels : Nat}
   let att3 := addBias3d att2 m.convBias
   let attention : Tensor { shape := #[batch, channels, frames], dtype := dtype.val, device := device } := Tensor.softmax att3 2
 
-  let weightedMean : Tensor { shape := #[batch, channels], dtype := dtype.val, device := device } := by simpa using (Tensor.reshapeChecked (Tensor.sumDim (Tensor.mul attention x) 2 false) #[batch, channels])
-  let weightedMean1 : Tensor { shape := #[batch, channels, 1], dtype := dtype.val, device := device } := Tensor.reshapeChecked weightedMean #[batch, channels, 1]
+  let weightedMean : Tensor { shape := #[batch, channels], dtype := dtype.val, device := device } := by simpa using (Tensor.reshape (Tensor.sumDim (Tensor.mul attention x) 2 false) #[batch, channels])
+  let weightedMean1 : Tensor { shape := #[batch, channels, 1], dtype := dtype.val, device := device } := Tensor.reshape weightedMean #[batch, channels, 1]
   let weightedMeanRep : Tensor { shape := #[batch, channels, frames], dtype := dtype.val, device := device } := Tensor.expand weightedMean1 #[batch, channels, frames]
 
   let centered := Tensor.sub x weightedMeanRep
-  let weightedVar : Tensor { shape := #[batch, channels], dtype := dtype.val, device := device } := by simpa using (Tensor.reshapeChecked (Tensor.sumDim (Tensor.mul attention (Tensor.mul centered centered)) 2 false) #[batch, channels])
+  let weightedVar : Tensor { shape := #[batch, channels], dtype := dtype.val, device := device } := by simpa using (Tensor.reshape (Tensor.sumDim (Tensor.mul attention (Tensor.mul centered centered)) 2 false) #[batch, channels])
   let weightedStd : Tensor { shape := #[batch, channels], dtype := dtype.val, device := device } := Tensor.sqrt (Tensor.addScalar weightedVar m.eps)
 
   let pooled : Tensor { shape := #[batch, channels * 2], dtype := dtype.val, device := device } := Tensor.reshapeChecked (Tensor.cat weightedMean weightedStd 1) #[batch, channels * 2]
-  Tensor.reshapeChecked pooled #[batch, channels * 2, 1]
+  Tensor.reshape pooled #[batch, channels * 2, 1]
 
 end AttentiveStatisticsPooling
 
@@ -298,21 +298,21 @@ def init (cfg : SpeakerEncoderConfig) (device : Device := .CPU) (dtype : RealFlo
 def forward {batch frames : Nat}
     (m : SpeakerEncoder (dtype := dtype) (device := device) cfg)
     (mel : Tensor { shape := #[batch, frames, cfg.melDim], dtype := dtype.val, device := device }) : Tensor { shape := #[batch, cfg.encDim], dtype := dtype.val, device := device } :=
-  let x0 : Tensor { shape := #[batch, cfg.melDim, frames], dtype := dtype.val, device := device } := Tensor.reshapeChecked (Tensor.transpose mel 1 2) #[batch, cfg.melDim, frames]
+  let x0 : Tensor { shape := #[batch, cfg.melDim, frames], dtype := dtype.val, device := device } := Tensor.reshape (Tensor.transpose mel 1 2) #[batch, cfg.melDim, frames]
   let x1 := TimeDelayNetBlock.forward m.tdnn0 x0
   let x2 := SqueezeExcitationRes2NetBlock.forward m.block1 x1
   let x3 := SqueezeExcitationRes2NetBlock.forward m.block2 x2
   let x4 := SqueezeExcitationRes2NetBlock.forward m.block3 x3
 
-  let agg12 : Tensor { shape := #[batch, c1 cfg + c2 cfg, frames], dtype := dtype.val, device := device } := Tensor.reshapeChecked (Tensor.cat x2 x3 1) #[batch, c1 cfg + c2 cfg, frames]
+  let agg12 : Tensor { shape := #[batch, c1 cfg + c2 cfg, frames], dtype := dtype.val, device := device } := Tensor.reshape (Tensor.cat x2 x3 1) #[batch, c1 cfg + c2 cfg, frames]
   let agg123 : Tensor { shape := #[batch, mfaInChannels cfg, frames], dtype := dtype.val, device := device } := Tensor.reshapeChecked (Tensor.cat agg12 x4 1) #[batch, mfaInChannels cfg, frames]
   let mfaOut := TimeDelayNetBlock.forward m.mfa agg123
   let pooled := AttentiveStatisticsPooling.forward m.asp mfaOut
 
   let y0 : Tensor { shape := #[batch, cfg.encDim, 1], dtype := dtype.val, device := device } :=
-    Tensor.reshapeChecked (Tensor.conv1d pooled m.fcWeight 1 0 1) #[batch, cfg.encDim, 1]
+    Tensor.reshape (Tensor.conv1d pooled m.fcWeight 1 0 1) #[batch, cfg.encDim, 1]
   let y1 := addBias3d y0 m.fcBias
-  Tensor.reshapeChecked y1 #[batch, cfg.encDim]
+  Tensor.reshape y1 #[batch, cfg.encDim]
 
 end SpeakerEncoder
 

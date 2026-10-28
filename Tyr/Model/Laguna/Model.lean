@@ -82,7 +82,7 @@ private def rmsNormWeighted2d {n dim : Nat}
   let var : Tensor { dtype := .Float32, device := device, shape := #[n, 1] } := Tensor.meanDim (Tensor.mul xf xf) 1 true
   let inv : Tensor { dtype := .Float32, device := device, shape := #[n, 1] } := rsqrtDynamic (Tensor.addScalar var eps)
   let inv : Tensor { dtype := .Float32, device := device, shape := #[n, dim] } := Tensor.expand inv #[n, dim]
-  let w : Tensor { dtype := .Float32, device := device, shape := #[n, dim] } := Tensor.expand (Tensor.reshapeChecked (floatDynamic weight.2) #[1, dim]) #[n, dim]
+  let w : Tensor { dtype := .Float32, device := device, shape := #[n, dim] } := Tensor.expand (Tensor.reshape (floatDynamic weight.2) #[1, dim]) #[n, dim]
   Tensor.castLike x (Tensor.mul (Tensor.mul xf inv) w)
 
 /-- FP32 RMSNorm over the last dim of a 3D `[batch, seq, dim]` tensor. -/
@@ -91,8 +91,8 @@ private def rmsNormWeighted3d {batch seq dim : Nat}
     (x : Tensor { dtype := dtype, device := device, shape := #[batch, seq, dim] })
     (eps : Float)
     : Tensor { dtype := dtype, device := device, shape := #[batch, seq, dim] } :=
-  let flat : Tensor { dtype := dtype, device := device, shape := #[batch * seq, dim] } := Tensor.reshapeChecked x #[batch * seq, dim]
-  Tensor.reshapeChecked (rmsNormWeighted2d weight flat eps) #[batch, seq, dim]
+  let flat : Tensor { dtype := dtype, device := device, shape := #[batch * seq, dim] } := Tensor.reshape x #[batch * seq, dim]
+  Tensor.reshape (rmsNormWeighted2d weight flat eps) #[batch, seq, dim]
 
 /-- Per-head RMSNorm (q_norm/k_norm) over the head_dim of a 4D
     `[batch, seq, nHeads, headDim]` tensor. -/
@@ -101,8 +101,8 @@ private def applyHeadNorm {batch seq nHeads headDim : Nat}
     (x : Tensor { dtype := dtype, device := device, shape := #[batch, seq, nHeads, headDim] })
     (eps : Float)
     : Tensor { dtype := dtype, device := device, shape := #[batch, seq, nHeads, headDim] } :=
-  let flat : Tensor { dtype := dtype, device := device, shape := #[batch * seq * nHeads, headDim] } := Tensor.reshapeChecked x #[batch * seq * nHeads, headDim]
-  Tensor.reshapeChecked (rmsNormWeighted2d weight flat eps) #[batch, seq, nHeads, headDim]
+  let flat : Tensor { dtype := dtype, device := device, shape := #[batch * seq * nHeads, headDim] } := Tensor.reshape x #[batch * seq * nHeads, headDim]
+  Tensor.reshape (rmsNormWeighted2d weight flat eps) #[batch, seq, nHeads, headDim]
 
 /-! ## Dense SwiGLU MLP (layer 0 / `mlp_only_layers`) -/
 
@@ -139,9 +139,9 @@ def LagunaSparseMoeBlock.forward3d {batch seq : Nat}
     (m : LagunaSparseMoeBlock (device := device) (dtype := dtype) cfg)
     (x : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] })
     : IO (Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] }) := do
-  let flat : Tensor { dtype := dtype, device := device, shape := #[batch * seq, cfg.hidden_size] } := Tensor.reshapeChecked x #[batch * seq, cfg.hidden_size]
+  let flat : Tensor { dtype := dtype, device := device, shape := #[batch * seq, cfg.hidden_size] } := Tensor.reshape x #[batch * seq, cfg.hidden_size]
   let out ← m.forward2d cfg flat
-  pure (Tensor.reshapeChecked out #[batch, seq, cfg.hidden_size])
+  pure (Tensor.reshape out #[batch, seq, cfg.hidden_size])
 
 /-! ## Attention -/
 
@@ -205,11 +205,11 @@ private def qkvRope {batch seq rotaryDim numHeads : Nat}
   let kFlat : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.num_key_value_heads * cfg.head_dim] } := Tensor.linear3d x m.k_proj
   let vFlat : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.num_key_value_heads * cfg.head_dim] } := Tensor.linear3d x m.v_proj
   let q : Tensor { dtype := dtype, device := device, shape := #[batch, seq, numHeads, cfg.head_dim] } :=
-    Tensor.reshapeChecked qFlat #[batch, seq, numHeads, cfg.head_dim]
+    Tensor.reshape qFlat #[batch, seq, numHeads, cfg.head_dim]
   let k : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.num_key_value_heads, cfg.head_dim] } :=
-    Tensor.reshapeChecked kFlat #[batch, seq, cfg.num_key_value_heads, cfg.head_dim]
+    Tensor.reshape kFlat #[batch, seq, cfg.num_key_value_heads, cfg.head_dim]
   let v : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.num_key_value_heads, cfg.head_dim] } :=
-    Tensor.reshapeChecked vFlat #[batch, seq, cfg.num_key_value_heads, cfg.head_dim]
+    Tensor.reshape vFlat #[batch, seq, cfg.num_key_value_heads, cfg.head_dim]
   -- Per-head Q/K RMSNorm BEFORE RoPE (HF `LagunaAttention`).
   let q := applyHeadNorm m.q_norm q cfg.rms_norm_eps
   let k := applyHeadNorm m.k_norm k cfg.rms_norm_eps
@@ -233,7 +233,7 @@ private def gateAndOut {batch seq numHeads : Nat}
   let gate4 : Tensor { dtype := dtype, device := device, shape := #[batch, seq, numHeads, cfg.head_dim] } :=
     Tensor.expand (Tensor.unsqueeze gate 3) #[batch, seq, numHeads, cfg.head_dim]
   let gated : Tensor { dtype := dtype, device := device, shape := #[batch, seq, numHeads * cfg.head_dim] } :=
-    Tensor.reshapeChecked (Tensor.mul attn gate4) #[batch, seq, numHeads * cfg.head_dim]
+    Tensor.reshape (Tensor.mul attn gate4) #[batch, seq, numHeads * cfg.head_dim]
   Tensor.linear3d gated m.o_proj
 
 /-- Uncached full-sequence forward: implicit causal attention for full layers,
@@ -862,7 +862,7 @@ def prefill {batch seq : Nat}
   let (hidden, cache') ← LagunaModel.forwardWithCache cfg m.model inputsEmbeds tables cache
   let lastHidden : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.hidden_size] } := sliceTyped hidden 1 (seq - 1) 1
   let logits3 : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.vocab_size] } := Tensor.linear3d lastHidden m.lmHead
-  pure (Tensor.reshapeChecked logits3 #[batch, cfg.vocab_size], cache')
+  pure (Tensor.reshape logits3 #[batch, cfg.vocab_size], cache')
 
 /-- Single decode step from one token embedding at absolute `position`. -/
 def decodeStep {batch : Nat}
@@ -875,7 +875,7 @@ def decodeStep {batch : Nat}
     : IO (Tensor { dtype := dtype, device := device, shape := #[batch, cfg.vocab_size] } × LagunaCache (device := device) (dtype := dtype) cfg batch) := do
   let (hidden, cache') ← m.model.forwardStep cfg tokenEmbed tables position cache
   let logits3 : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.vocab_size] } := Tensor.linear3d hidden m.lmHead
-  pure (Tensor.reshapeChecked logits3 #[batch, cfg.vocab_size], cache')
+  pure (Tensor.reshape logits3 #[batch, cfg.vocab_size], cache')
 
 /-- Inference-only prefill into an owned cache session. The session must be fresh. -/
 def prefillSession {batch seq : Nat} (cfg : Config) (m : LagunaForCausalLM (device := device) (dtype := dtype) cfg)
@@ -883,7 +883,7 @@ def prefillSession {batch seq : Nat} (cfg : Config) (m : LagunaForCausalLM (devi
     (session : LagunaCacheSession (device := device) (dtype := dtype) cfg batch) : IO (Tensor { dtype := dtype, device := device, shape := #[batch, cfg.vocab_size] }) := do
   let hidden ← m.model.forwardSession cfg inputsEmbeds tables 0 true session
   let lastHidden : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.hidden_size] } := sliceTyped hidden 1 (seq - 1) 1
-  return Tensor.reshapeChecked (Tensor.linear3d lastHidden m.lmHead.detach) #[batch, cfg.vocab_size]
+  return Tensor.reshape (Tensor.linear3d lastHidden m.lmHead.detach) #[batch, cfg.vocab_size]
 
 /-- Append one token at the next absolute position without copying cache buffers. -/
 def decodeSession {batch : Nat} (cfg : Config) (m : LagunaForCausalLM (device := device) (dtype := dtype) cfg)
@@ -891,7 +891,7 @@ def decodeSession {batch : Nat} (cfg : Config) (m : LagunaForCausalLM (device :=
     (position : Nat) (session : LagunaCacheSession (device := device) (dtype := dtype) cfg batch)
     : IO (Tensor { dtype := dtype, device := device, shape := #[batch, cfg.vocab_size] }) := do
   let hidden ← m.model.forwardSession cfg tokenEmbed tables position false session
-  return Tensor.reshapeChecked (Tensor.linear3d hidden m.lmHead.detach) #[batch, cfg.vocab_size]
+  return Tensor.reshape (Tensor.linear3d hidden m.lmHead.detach) #[batch, cfg.vocab_size]
 
 private partial def decodeLoopCached {batch : Nat}
     (cfg : Config)
@@ -927,7 +927,7 @@ private partial def decodeLoopCached {batch : Nat}
   | some cb => cb generatedSoFar nextTok
   | none => pure ()
 
-  let nextCol : Tensor { device := device, shape := #[batch, 1], dtype := .Int64 } := Tensor.reshapeChecked nextTok #[batch, 1]
+  let nextCol : Tensor { device := device, shape := #[batch, 1], dtype := .Int64 } := Tensor.reshape nextTok #[batch, 1]
   let appended : Tensor { device := device, shape := #[batch, curSeq + 1], dtype := .Int64 } := Tensor.catManyChecked #[curIds.packShape, nextCol.packShape] 1 #[batch, curSeq + 1]
 
   let stop :=

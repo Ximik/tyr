@@ -120,12 +120,12 @@ def init (vocab heads headDim mlp : Nat) (device : Device := .CPU) (dtype : DTyp
 
 private def pairwiseDistanceSq {batch maxLen : Nat}
     (coord : Tensor { dtype, device := device, shape := #[batch, maxLen, 3] }) : Tensor { dtype, device := device, shape := #[batch, maxLen, maxLen] } :=
-  let ci0 : Tensor { dtype, device := device, shape := #[batch, maxLen, 1, 3] } := coord.reshapeChecked #[batch, maxLen, 1, 3]
-  let cj0 : Tensor { dtype, device := device, shape := #[batch, 1, maxLen, 3] } := coord.reshapeChecked #[batch, 1, maxLen, 3]
+  let ci0 : Tensor { dtype, device := device, shape := #[batch, maxLen, 1, 3] } := coord.reshape #[batch, maxLen, 1, 3]
+  let cj0 : Tensor { dtype, device := device, shape := #[batch, 1, maxLen, 3] } := coord.reshape #[batch, 1, maxLen, 3]
   let ci : Tensor { dtype, device := device, shape := #[batch, maxLen, maxLen, 3] } := Tensor.expand ci0 #[batch, maxLen, maxLen, 3]
   let cj : Tensor { dtype, device := device, shape := #[batch, maxLen, maxLen, 3] } := Tensor.expand cj0 #[batch, maxLen, maxLen, 3]
   let diff := Tensor.sub ci cj
-  by simpa using (Tensor.sumDim (Tensor.mul diff diff) 3 false).reshapeChecked #[batch, maxLen, maxLen]
+  by simpa using (Tensor.sumDim (Tensor.mul diff diff) 3 false).reshape #[batch, maxLen, maxLen]
 
 private def spatialAttention {batch maxLen vocab heads headDim mlp : Nat}
     (params : MoleculeTransformerParams (dtype := dtype) (device := device) vocab heads headDim mlp)
@@ -136,18 +136,18 @@ private def spatialAttention {batch maxLen vocab heads headDim mlp : Nat}
   let k0 : Tensor { dtype, device := device, shape := #[batch, maxLen, heads * headDim] } := Tensor.affine3d h params.kW params.kB
   let v0 : Tensor { dtype, device := device, shape := #[batch, maxLen, heads * headDim] } := Tensor.affine3d h params.vW params.vB
   let q : Tensor { dtype, device := device, shape := #[batch, heads, maxLen, headDim] } :=
-    transposeAttention (Tensor.reshapeChecked q0 #[batch, maxLen, heads, headDim])
+    transposeAttention (Tensor.reshape q0 #[batch, maxLen, heads, headDim])
   let k : Tensor { dtype, device := device, shape := #[batch, heads, maxLen, headDim] } :=
-    transposeAttention (Tensor.reshapeChecked k0 #[batch, maxLen, heads, headDim])
+    transposeAttention (Tensor.reshape k0 #[batch, maxLen, heads, headDim])
   let v : Tensor { dtype, device := device, shape := #[batch, heads, maxLen, headDim] } :=
-    transposeAttention (Tensor.reshapeChecked v0 #[batch, maxLen, heads, headDim])
+    transposeAttention (Tensor.reshape v0 #[batch, maxLen, heads, headDim])
   let dist : Tensor { dtype, device := device, shape := #[batch, maxLen, maxLen] } := pairwiseDistanceSq coord
   let slope : Tensor { dtype, device := device, shape := #[heads] } := softplusDynamic params.pairDistSlope
   let distBias : Tensor { dtype, device := device, shape := #[batch, heads, maxLen, maxLen] } :=
     Tensor.mul
-      (Tensor.expand (Tensor.reshapeChecked slope #[1, heads, 1, 1]) #[batch, heads, maxLen, maxLen])
-      (Tensor.expand (Tensor.reshapeChecked dist #[batch, 1, maxLen, maxLen]) #[batch, heads, maxLen, maxLen])
-  let keyMask0 : Tensor { dtype := .Float32, device := device, shape := #[batch, 1, 1, maxLen] } := (floatDynamic padmask).reshapeChecked #[batch, 1, 1, maxLen]
+      (Tensor.expand (Tensor.reshape slope #[1, heads, 1, 1]) #[batch, heads, maxLen, maxLen])
+      (Tensor.expand (Tensor.reshape dist #[batch, 1, maxLen, maxLen]) #[batch, heads, maxLen, maxLen])
+  let keyMask0 : Tensor { dtype := .Float32, device := device, shape := #[batch, 1, 1, maxLen] } := (floatDynamic padmask).reshape #[batch, 1, 1, maxLen]
   -- (1 - keyMask) · -1e9, computed on-device (a `zerosDynamic`-based masked_fill
   -- would be CPU-resident and crash on CUDA inputs).
   let maskTerm : Tensor { dtype := .Float32, device := device, shape := #[batch, 1, 1, maxLen] } :=
@@ -157,7 +157,7 @@ private def spatialAttention {batch maxLen vocab heads headDim mlp : Nat}
   let ctx : Tensor { dtype, device := device, shape := #[batch, heads, maxLen, headDim] } :=
     attentionBias q k v bias
   let out4 : Tensor { dtype, device := device, shape := #[batch, maxLen, heads, headDim] } := transposeAttention ctx
-  let out3 : Tensor { dtype, device := device, shape := #[batch, maxLen, heads * headDim] } := Tensor.reshapeChecked out4 #[batch, maxLen, heads * headDim]
+  let out3 : Tensor { dtype, device := device, shape := #[batch, maxLen, heads * headDim] } := Tensor.reshape out4 #[batch, maxLen, heads * headDim]
   Tensor.affine3d out3 params.oW params.oB
 
 def forward {batch maxLen vocab heads headDim mlp : Nat}
@@ -174,7 +174,7 @@ def forward {batch maxLen vocab heads headDim mlp : Nat}
   let labelEmb : Tensor { dtype, device := device, shape := #[batch, maxLen, heads * headDim] } :=
     Tensor.embedding (batch := batch) (seq := maxLen) (vocab := vocab) (embed := heads * headDim)
       label params.labelEmbed
-  let time0 : Tensor { dtype, device := device, shape := #[batch, 1, 1] } := t.reshapeChecked #[batch, 1, 1]
+  let time0 : Tensor { dtype, device := device, shape := #[batch, 1, 1] } := t.reshape #[batch, 1, 1]
   let timeIn : Tensor { dtype, device := device, shape := #[batch, maxLen, 1] } := Tensor.expand time0 #[batch, maxLen, 1]
   let timeEmb : Tensor { dtype, device := device, shape := #[batch, maxLen, heads * headDim] } := Tensor.affine3d timeIn params.timeW params.timeB
   let h0 := Tensor.add (Tensor.add coordEmb labelEmb) timeEmb
@@ -190,8 +190,8 @@ def forward {batch maxLen vocab heads headDim mlp : Nat}
   let labelLogits : Tensor { dtype, device := device, shape := #[batch, maxLen, vocab] } := Tensor.affine3d h params.labelHeadW params.labelHeadB
   let split3 : Tensor { dtype, device := device, shape := #[batch, maxLen, 1] } := Tensor.affine3d h params.splitHeadW params.splitHeadB
   let del3 : Tensor { dtype, device := device, shape := #[batch, maxLen, 1] } := Tensor.affine3d h params.delHeadW params.delHeadB
-  let splitLogits : Tensor { dtype, device := device, shape := #[batch, maxLen] } := Tensor.reshapeChecked split3 #[batch, maxLen]
-  let delLogits : Tensor { dtype, device := device, shape := #[batch, maxLen] } := Tensor.reshapeChecked del3 #[batch, maxLen]
+  let splitLogits : Tensor { dtype, device := device, shape := #[batch, maxLen] } := Tensor.reshape split3 #[batch, maxLen]
+  let delLogits : Tensor { dtype, device := device, shape := #[batch, maxLen] } := Tensor.reshape del3 #[batch, maxLen]
   pure (coordPred, labelLogits, splitLogits, delLogits)
 
 end MoleculeTransformerParams
@@ -362,27 +362,27 @@ def init (vocab hidden heads headDim mlp rff layers : Nat) (device : Device := .
 
 private def pairwiseDistanceSq {batch maxLen : Nat}
     (coord : Tensor { dtype, device := device, shape := #[batch, maxLen, 3] }) : Tensor { dtype, device := device, shape := #[batch, maxLen, maxLen] } :=
-  let ci0 : Tensor { dtype, device := device, shape := #[batch, maxLen, 1, 3] } := coord.reshapeChecked #[batch, maxLen, 1, 3]
-  let cj0 : Tensor { dtype, device := device, shape := #[batch, 1, maxLen, 3] } := coord.reshapeChecked #[batch, 1, maxLen, 3]
+  let ci0 : Tensor { dtype, device := device, shape := #[batch, maxLen, 1, 3] } := coord.reshape #[batch, maxLen, 1, 3]
+  let cj0 : Tensor { dtype, device := device, shape := #[batch, 1, maxLen, 3] } := coord.reshape #[batch, 1, maxLen, 3]
   let ci : Tensor { dtype, device := device, shape := #[batch, maxLen, maxLen, 3] } := Tensor.expand ci0 #[batch, maxLen, maxLen, 3]
   let cj : Tensor { dtype, device := device, shape := #[batch, maxLen, maxLen, 3] } := Tensor.expand cj0 #[batch, maxLen, maxLen, 3]
   let diff := Tensor.sub ci cj
-  by simpa using (Tensor.sumDim (Tensor.mul diff diff) 3 false).reshapeChecked #[batch, maxLen, maxLen]
+  by simpa using (Tensor.sumDim (Tensor.mul diff diff) 3 false).reshape #[batch, maxLen, maxLen]
 
 private def coordRffEmbedding {batch maxLen vocab hidden heads headDim mlp rff layers : Nat}
     (params : FullMoleculeTransformerParams (dtype := dtype) (device := device) vocab hidden heads headDim mlp rff layers)
     (coord : Tensor { dtype, device := device, shape := #[batch, maxLen, 3] }) : Tensor { dtype, device := device, shape := #[batch, maxLen, hidden] } :=
-  let flat : Tensor { dtype, device := device, shape := #[batch * maxLen, 3] } := Tensor.reshapeChecked coord #[batch * maxLen, 3]
+  let flat : Tensor { dtype, device := device, shape := #[batch * maxLen, 3] } := Tensor.reshape coord #[batch * maxLen, 3]
   let phase : Tensor { dtype, device := device, shape := #[batch * maxLen, rff] } := affine2d flat params.coordRffW params.coordRffB
   let featFlat : Tensor { dtype, device := device, shape := #[batch * maxLen, rff * 2] } := (Tensor.cat (Tensor.sin phase) (cosDynamic phase) 1).reshapeChecked #[batch * maxLen, rff * 2]
-  let features : Tensor { dtype, device := device, shape := #[batch, maxLen, rff * 2] } := Tensor.reshapeChecked featFlat #[batch, maxLen, rff * 2]
+  let features : Tensor { dtype, device := device, shape := #[batch, maxLen, rff * 2] } := Tensor.reshape featFlat #[batch, maxLen, rff * 2]
   Tensor.affine3d features params.coordProjW params.coordProjB
 
 private def pairRffFeatures {batch maxLen vocab hidden heads headDim mlp rff layers : Nat}
     (params : FullMoleculeTransformerParams (dtype := dtype) (device := device) vocab hidden heads headDim mlp rff layers)
     (coord : Tensor { dtype, device := device, shape := #[batch, maxLen, 3] }) : Tensor { dtype, device := device, shape := #[batch * maxLen * maxLen, rff * 2] } :=
   let dist : Tensor { dtype, device := device, shape := #[batch, maxLen, maxLen] } := pairwiseDistanceSq coord
-  let distFlat : Tensor { dtype, device := device, shape := #[batch * maxLen * maxLen, 1] } := Tensor.reshapeChecked dist #[batch * maxLen * maxLen, 1]
+  let distFlat : Tensor { dtype, device := device, shape := #[batch * maxLen * maxLen, 1] } := Tensor.reshape dist #[batch * maxLen * maxLen, 1]
   let phase : Tensor { dtype, device := device, shape := #[batch * maxLen * maxLen, rff] } := affine2d distFlat params.pairRffW params.pairRffB
   (Tensor.cat (Tensor.sin phase) (cosDynamic phase) 1).reshapeChecked #[batch * maxLen * maxLen, rff * 2]
 
@@ -390,7 +390,7 @@ private def pairAttentionBiasFrom {batch maxLen hidden heads headDim mlp rff : N
     (layer : FullMoleculeTransformerLayerParams (dtype := dtype) (device := device) hidden heads headDim mlp rff)
     (features : Tensor { dtype, device := device, shape := #[batch * maxLen * maxLen, rff * 2] }) : Tensor { dtype, device := device, shape := #[batch, heads, maxLen, maxLen] } :=
   let biasFlat : Tensor { dtype, device := device, shape := #[batch * maxLen * maxLen, heads] } := affine2d features layer.pairW layer.pairB
-  let bias0 : Tensor { dtype, device := device, shape := #[batch, maxLen, maxLen, heads] } := Tensor.reshapeChecked biasFlat #[batch, maxLen, maxLen, heads]
+  let bias0 : Tensor { dtype, device := device, shape := #[batch, maxLen, maxLen, heads] } := Tensor.reshape biasFlat #[batch, maxLen, maxLen, heads]
   let bias1 : Tensor { dtype, device := device, shape := #[batch, maxLen, heads, maxLen] } := Tensor.transpose bias0 2 3
   Tensor.transpose bias1 1 2
 
@@ -406,17 +406,17 @@ private def spatialAttention {batch maxLen vocab hidden heads headDim mlp rff la
   let k0 : Tensor { dtype, device := device, shape := #[batch, maxLen, heads * headDim] } := Tensor.affine3d h layer.kW layer.kB
   let v0 : Tensor { dtype, device := device, shape := #[batch, maxLen, heads * headDim] } := Tensor.affine3d h layer.vW layer.vB
   let qR : Tensor { dtype, device := device, shape := #[batch, maxLen, heads, headDim] } :=
-    Tensor.applyRotary (Tensor.reshapeChecked q0 #[batch, maxLen, heads, headDim])
+    Tensor.applyRotary (Tensor.reshape q0 #[batch, maxLen, heads, headDim])
       (Tensor.castLike q0 ropeCos) (Tensor.castLike q0 ropeSin)
   let kR : Tensor { dtype, device := device, shape := #[batch, maxLen, heads, headDim] } :=
-    Tensor.applyRotary (Tensor.reshapeChecked k0 #[batch, maxLen, heads, headDim])
+    Tensor.applyRotary (Tensor.reshape k0 #[batch, maxLen, heads, headDim])
       (Tensor.castLike k0 ropeCos) (Tensor.castLike k0 ropeSin)
   let q : Tensor { dtype, device := device, shape := #[batch, heads, maxLen, headDim] } := transposeAttention qR
   let k : Tensor { dtype, device := device, shape := #[batch, heads, maxLen, headDim] } := transposeAttention kR
   let v : Tensor { dtype, device := device, shape := #[batch, heads, maxLen, headDim] } :=
-    transposeAttention (Tensor.reshapeChecked v0 #[batch, maxLen, heads, headDim])
+    transposeAttention (Tensor.reshape v0 #[batch, maxLen, heads, headDim])
   let pairBias : Tensor { dtype, device := device, shape := #[batch, heads, maxLen, maxLen] } := pairAttentionBiasFrom layer pairFeatures
-  let keyMask0 : Tensor { dtype := .Float32, device := device, shape := #[batch, 1, 1, maxLen] } := (floatDynamic padmask).reshapeChecked #[batch, 1, 1, maxLen]
+  let keyMask0 : Tensor { dtype := .Float32, device := device, shape := #[batch, 1, 1, maxLen] } := (floatDynamic padmask).reshape #[batch, 1, 1, maxLen]
   -- (1 - keyMask) · -1e9, computed on-device (a `zerosDynamic`-based masked_fill
   -- would be CPU-resident and crash on CUDA inputs).
   let maskTerm : Tensor { dtype := .Float32, device := device, shape := #[batch, 1, 1, maxLen] } :=
@@ -426,7 +426,7 @@ private def spatialAttention {batch maxLen vocab hidden heads headDim mlp rff la
   let ctx : Tensor { dtype, device := device, shape := #[batch, heads, maxLen, headDim] } :=
     attentionBias q k v bias
   let out4 : Tensor { dtype, device := device, shape := #[batch, maxLen, heads, headDim] } := transposeAttention ctx
-  let out3 : Tensor { dtype, device := device, shape := #[batch, maxLen, heads * headDim] } := Tensor.reshapeChecked out4 #[batch, maxLen, heads * headDim]
+  let out3 : Tensor { dtype, device := device, shape := #[batch, maxLen, heads * headDim] } := Tensor.reshape out4 #[batch, maxLen, heads * headDim]
   Tensor.affine3d out3 layer.oW layer.oB
 
 private def forwardLayer {batch maxLen vocab hidden heads headDim mlp rff layers : Nat}
@@ -474,7 +474,7 @@ def forwardFreqs {batch maxLen vocab hidden heads headDim mlp rff layers : Nat}
   let labelEmb : Tensor { dtype, device := device, shape := #[batch, maxLen, hidden] } :=
     Tensor.embedding (batch := batch) (seq := maxLen) (vocab := vocab) (embed := hidden)
       label params.labelEmbed
-  let time0 : Tensor { dtype, device := device, shape := #[batch, 1, 1] } := t.reshapeChecked #[batch, 1, 1]
+  let time0 : Tensor { dtype, device := device, shape := #[batch, 1, 1] } := t.reshape #[batch, 1, 1]
   let timeIn : Tensor { dtype, device := device, shape := #[batch, maxLen, 1] } := Tensor.expand time0 #[batch, maxLen, 1]
   let timeEmb : Tensor { dtype, device := device, shape := #[batch, maxLen, hidden] } := Tensor.affine3d timeIn params.timeW params.timeB
   let mut h := Tensor.add (Tensor.add coordEmb labelEmb) timeEmb
@@ -499,8 +499,8 @@ def forwardFreqs {batch maxLen vocab hidden heads headDim mlp rff layers : Nat}
   let labelLogits : Tensor { dtype, device := device, shape := #[batch, maxLen, vocab] } := Tensor.affine3d hFinal params.labelHeadW params.labelHeadB
   let split3 : Tensor { dtype, device := device, shape := #[batch, maxLen, 1] } := Tensor.affine3d hFinal params.splitHeadW params.splitHeadB
   let del3 : Tensor { dtype, device := device, shape := #[batch, maxLen, 1] } := Tensor.affine3d hFinal params.delHeadW params.delHeadB
-  let splitLogits : Tensor { dtype, device := device, shape := #[batch, maxLen] } := Tensor.reshapeChecked split3 #[batch, maxLen]
-  let delLogits : Tensor { dtype, device := device, shape := #[batch, maxLen] } := Tensor.reshapeChecked del3 #[batch, maxLen]
+  let splitLogits : Tensor { dtype, device := device, shape := #[batch, maxLen] } := Tensor.reshape split3 #[batch, maxLen]
+  let delLogits : Tensor { dtype, device := device, shape := #[batch, maxLen] } := Tensor.reshape del3 #[batch, maxLen]
   pure (coordPred, labelLogits, splitLogits, delLogits)
 
 /-- Forward computing rotary frequencies on the fly (one host→device copy per
@@ -540,12 +540,12 @@ private def scalar3d {maxLen channels : Nat}
     (x : Tensor { dtype, device := device, shape := #[1, maxLen, channels] }) (j k : Nat) : Float :=
   let row : Tensor { dtype, device := device, shape := #[1, 1, channels] } := sliceTyped x 1 j 1
   let cell : Tensor { dtype, device := device, shape := #[1, 1, 1] } := sliceTyped row 2 k 1
-  Tensor.item (Tensor.reshapeChecked cell #[])
+  Tensor.item (Tensor.reshape cell #[])
 
 private def scalar2d {maxLen : Nat}
     (x : Tensor { dtype, device := device, shape := #[1, maxLen] }) (j : Nat) : Float :=
   let cell : Tensor { dtype, device := device, shape := #[1, 1] } := sliceTyped x 1 j 1
-  Tensor.item (Tensor.reshapeChecked cell #[])
+  Tensor.item (Tensor.reshape cell #[])
 
 private def packMoleculeStateForTransformer {maxLen vocab : Nat}
     (padToken : Int64)
@@ -571,7 +571,7 @@ private def packMoleculeStateForTransformer {maxLen vocab : Nat}
     padArr := padArr.set! j 1
   let coord := Tensor.reshapeChecked (floatsDynamic coordArr) #[1, maxLen, 3]
   let label := Tensor.reshapeChecked (Tensor.fromInt64Array labelArr) #[1, maxLen]
-  let time := Tensor.reshapeChecked (floatsDynamic #[t]) #[1]
+  let time := Tensor.reshape (floatsDynamic #[t]) #[1]
   let padmask := Tensor.reshapeChecked (Tensor.fromInt64Array padArr) #[1, maxLen]
   pure (coord.to device, label.to device, time.to device, padmask.to device)
 

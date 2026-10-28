@@ -6,7 +6,7 @@ namespace Tests.ComplexResults
 open torch
 
 private def diagonal (dtype : DType) : Tensor ⟨#[2, 2], dtype, .CPU⟩ :=
-  ((Tensor.fromFloatArray #[3, 0, 0, 4]).reshapeChecked #[2, 2]).castDType dtype
+  ((Tensor.fromFloatArray #[3, 0, 0, 4]).reshape #[2, 2]).castDType dtype
 
 private def expectError {α : Type} (result : Except String α) : IO Unit :=
   match result with
@@ -82,9 +82,9 @@ example (_x : Tensor ⟨#[2, 2], .Float8E4M3FN, .CPU⟩) : True := by
   -- I + N has the exact real principal log N because N² = 0. Eigenvector
   -- reconstruction is unreliable for this defective (nondiagonalizable) input.
   -- A checked solver may reject it, but must never report an inaccurate success.
-  let jordan := ((Tensor.fromFloatArray #[1, 1, 0, 1]).reshapeChecked #[2, 2]).castDType .Float64
-  let identity := ((Tensor.fromFloatArray #[1, 0, 0, 1]).reshapeChecked #[2, 2]).castDType .Float64
-  let nilpotent := ((Tensor.fromFloatArray #[0, 1, 0, 0]).reshapeChecked #[2, 2]).castDType .Float64
+  let jordan := ((Tensor.fromFloatArray #[1, 1, 0, 1]).reshape #[2, 2]).castDType .Float64
+  let identity := ((Tensor.fromFloatArray #[1, 0, 0, 1]).reshape #[2, 2]).castDType .Float64
+  let nilpotent := ((Tensor.fromFloatArray #[0, 1, 0, 0]).reshape #[2, 2]).castDType .Float64
   for scale in (#[1.0, 1e-20, 1e20] : Array Float) do
     let input := jordan * scale
     match Tensor.matrixLog? input with
@@ -152,6 +152,6 @@ example (_x : Tensor ⟨#[2, 2], .Float8E4M3FN, .CPU⟩) : True := by
   expectError (Tensor.rowNorms? integers)
   expectError (Tensor.frobeniusNorm? integers)
   expectError (Tensor.maxRowNorm? integers)
-  expectError (Tensor.l2Norm? (integers.reshapeChecked #[4]))
+  expectError (Tensor.l2Norm? (integers.reshape #[4]))
 
 end Tests.ComplexResults

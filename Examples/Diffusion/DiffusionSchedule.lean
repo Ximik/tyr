@@ -93,15 +93,15 @@ def maskedCrossEntropyLoss {batch seq vocab : Nat}
     (mask_token_id : UInt64)
     : Activation #[] :=
   -- Flatten for cross-entropy
-  let logitsFlat := Tensor.reshapeChecked logits #[batch * seq, vocab]
-  let targetsFlat := Tensor.reshapeChecked targets #[batch * seq]
+  let logitsFlat := Tensor.reshape logits #[batch * seq, vocab]
+  let targetsFlat := Tensor.reshape targets #[batch * seq]
 
   -- Compute per-token loss (reduction=none)
   let lossPerToken := Tensor.crossEntropyNone logitsFlat targetsFlat
 
   -- Get mask of which positions were masked
   let mask := Tensor.eqScalar x_t mask_token_id.toInt64  -- [batch, seq]
-  let maskFlat := Tensor.reshapeChecked mask #[batch * seq]
+  let maskFlat := Tensor.reshape mask #[batch * seq]
   let maskFloat := maskFlat.toFloat32  -- Convert bool to float for multiplication
 
   -- Apply mask and compute mean over masked positions

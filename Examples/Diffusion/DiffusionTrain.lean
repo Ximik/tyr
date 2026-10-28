@@ -58,7 +58,7 @@ def getBatch {n : Nat} (trainData : Tokens #[n]) (batchSize seqLen : Nat)
   let totalTokens := required
   let startTensor ← Tensor.randint 0 (n - totalTokens + 1).toInt64 #[]
   let start := startTensor.itemInt.toInt.toNat
-  return (trainData.sliceChecked 0 start totalTokens #[totalTokens]).reshapeChecked #[batchSize, seqLen]
+  return (trainData.sliceChecked 0 start totalTokens #[totalTokens]).reshape #[batchSize, seqLen]
 
 /-- Clip gradients for a diffusion transformer block. -/
 def clipBlockGrads {n_embd n_head n_kv_head : Nat}

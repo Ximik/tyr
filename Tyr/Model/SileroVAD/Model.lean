@@ -29,13 +29,13 @@ private def preparedInputSamples : Nat := combinedInputSamples + rightReflectPad
 private def addBias2d {n d : Nat}
     (x : Tensor { device := device, shape := #[n, d], dtype := .Float32 }) (b : Tensor { device := device, shape := #[d], dtype := .Float32 })
     : Tensor { device := device, shape := #[n, d], dtype := .Float32 } :=
-  x + (b.reshapeChecked #[1, d]).expand #[n, d]
+  x + (b.reshape #[1, d]).expand #[n, d]
 
 private def addBias3d {batch channels frames : Nat}
     (x : Tensor { device := device, shape := #[batch, channels, frames], dtype := .Float32 })
     (b : Tensor { device := device, shape := #[channels], dtype := .Float32 })
     : Tensor { device := device, shape := #[batch, channels, frames], dtype := .Float32 } :=
-  x + (b.reshapeChecked #[1, channels, 1]).expand #[batch, channels, frames]
+  x + (b.reshape #[1, channels, 1]).expand #[batch, channels, frames]
 
 private def linear2d {batch inDim outDim : Nat}
     (x : Tensor { device := device, shape := #[batch, inDim], dtype := .Float32 })
@@ -236,15 +236,15 @@ def forwardPrepared
   let h4 : Tensor { device := device, shape := #[1, 128, 1], dtype := .Float32 } :=
     Tensor.relu (addBias3d (Tensor.reshapeChecked (Tensor.conv1d h3 m.conv4Weight 1 1 1) #[1, 128, 1]) m.conv4Bias)
 
-  let xFlat : Tensor { device := device, shape := #[1, 128], dtype := .Float32 } := Tensor.reshapeChecked h4 #[1, 128]
+  let xFlat : Tensor { device := device, shape := #[1, 128], dtype := .Float32 } := Tensor.reshape h4 #[1, 128]
   let state' := lstmCellStep m xFlat state
-  let hAct : Tensor { device := device, shape := #[1, 128, 1], dtype := .Float32 } := Tensor.reshapeChecked (Tensor.relu state'.h) #[1, 128, 1]
+  let hAct : Tensor { device := device, shape := #[1, 128, 1], dtype := .Float32 } := Tensor.reshape (Tensor.relu state'.h) #[1, 128, 1]
 
   let y0 : Tensor { device := device, shape := #[1, 1, 1], dtype := .Float32 } :=
-    Tensor.reshapeChecked (Tensor.conv1d hAct m.finalConvWeight 1 0 1) #[1, 1, 1]
+    Tensor.reshape (Tensor.conv1d hAct m.finalConvWeight 1 0 1) #[1, 1, 1]
   let y1 : Tensor { device := device, shape := #[1, 1, 1], dtype := .Float32 } := addBias3d y0 m.finalConvBias
   let y2 : Tensor { device := device, shape := #[1, 1, 1], dtype := .Float32 } := Tensor.sigmoid y1
-  let y : Tensor { device := device, shape := #[1, 1], dtype := .Float32 } := Tensor.reshapeChecked y2 #[1, 1]
+  let y : Tensor { device := device, shape := #[1, 1], dtype := .Float32 } := Tensor.reshape y2 #[1, 1]
   (y, state')
 
 end SileroVAD

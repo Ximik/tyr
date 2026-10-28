@@ -51,8 +51,8 @@ def toyModel {maxLen vocab hidden : Nat} : BranchingModel (device := .CPU) maxLe
       let logits := Tensor.affine3d emb params.proj bias
       let split3 := Tensor.linear3d (x := emb) (weight := params.splitW)
       let del3 := Tensor.linear3d (x := emb) (weight := params.delW)
-      let splitLogits := split3.reshapeChecked #[batch, maxLen]
-      let delLogits := del3.reshapeChecked #[batch, maxLen]
+      let splitLogits := split3.reshape #[batch, maxLen]
+      let delLogits := del3.reshape #[batch, maxLen]
       pure (logits, splitLogits, delLogits) }
 
 def runDemo : IO Unit := do

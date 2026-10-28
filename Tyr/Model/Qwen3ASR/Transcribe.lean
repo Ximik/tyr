@@ -219,7 +219,7 @@ private def preparePromptInputIds
   let seq : Nat := idsVals.size
   if seq == 0 then
     throw <| IO.userError "ASR prompt/input sequence is empty"
-  let inputIds : Tensor { device := .CPU, shape := #[1, seq], dtype := .Int64 } := Tensor.reshapeChecked (Tensor.fromInt64Array idsVals) #[1, seq]
+  let inputIds : Tensor { device := .CPU, shape := #[1, seq], dtype := .Int64 } := Tensor.reshape (Tensor.fromInt64Array idsVals) #[1, seq]
   pure ⟨seq, inputIds⟩
 
 private def decodeGeneratedText
@@ -233,7 +233,7 @@ private def decodeGeneratedText
   else
     let newSeq := outSeq - seq
     let newOnly : Tensor { device := device, shape := #[1, newSeq], dtype := .Int64 } := Tensor.sliceChecked outIds 1 seq newSeq #[1, newSeq]
-    let flat : Tensor { device := device, shape := #[newSeq], dtype := .Int64 } := Tensor.reshapeChecked newOnly #[newSeq]
+    let flat : Tensor { device := device, shape := #[newSeq], dtype := .Int64 } := Tensor.reshape newOnly #[newSeq]
     let idsU64 ← Tensor.toUInt64Array flat
     let ids := idsU64.map (fun x => x.toUInt32)
     pure (tokenizer.qwen3.decodeText tok ids)
@@ -251,7 +251,7 @@ private def decodeGeneratedTextsBatch
   else
     let newSeq := outSeq - seq
     let newOnly : Tensor { device := device, shape := #[batch, newSeq], dtype := .Int64 } := Tensor.sliceChecked outIds 1 seq newSeq #[batch, newSeq]
-    let flat : Tensor { device := device, shape := #[batch * newSeq], dtype := .Int64 } := Tensor.reshapeChecked newOnly #[batch * newSeq]
+    let flat : Tensor { device := device, shape := #[batch * newSeq], dtype := .Int64 } := Tensor.reshape newOnly #[batch * newSeq]
     let idsU64 ← Tensor.toUInt64Array flat
     let rowWidth := newSeq
     let mut out : Array String := Array.mkEmpty batch
@@ -585,10 +585,10 @@ private def tryTranscribeWaveformsBatchedChunk
     let audioLen ← extractAudioLenFromFeatureMask (cfg := cfg) (frames := frames) frontendOut.featureAttentionMask
     let promptPack ← preparePromptInputIds (cfg := cfg) tok prompt audioLen
     let seq := promptPack.1
-    let inputIdsRowDyn : Tensor { device := device, shape := #[1, seq], dtype := .Int64 } := Tensor.reshapeChecked (promptPack.2.to device) #[1, seq]
+    let inputIdsRowDyn : Tensor { device := device, shape := #[1, seq], dtype := .Int64 } := Tensor.reshape (promptPack.2.to device) #[1, seq]
     let inputFeaturesRowDyn : Tensor { device := device, shape := #[1, preprocessor.featureSize, frames], dtype := .Float32 } :=
       Tensor.reshapeChecked frontendOut.inputFeatures #[1, preprocessor.featureSize, frames]
-    let featureAttentionMaskRowDyn : Tensor { device := device, shape := #[1, frames], dtype := .Int64 } := Tensor.reshapeChecked frontendOut.featureAttentionMask #[1, frames]
+    let featureAttentionMaskRowDyn : Tensor { device := device, shape := #[1, frames], dtype := .Int64 } := Tensor.reshape frontendOut.featureAttentionMask #[1, frames]
     buckets := addRowToBuckets buckets frames seq {
       seq := seq
       frames := frames

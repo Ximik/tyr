@@ -55,15 +55,15 @@ private def normDim0_3d {d0 d1 d2 : Nat}
   let sq : Tensor { shape := #[d0, d1, d2], dtype := .Float32, device := device } := x * x
   let s2 : Tensor { shape := #[d0, d1, 1], dtype := .Float32, device := device } := Tensor.sumDim sq 2 true
   let s1 : Tensor { shape := #[d0, 1, 1], dtype := .Float32, device := device } := Tensor.sumDim s2 1 true
-  Tensor.reshapeChecked (Tensor.sqrt (s1 + (1e-12 : Float))) #[d0]
+  Tensor.reshape (Tensor.sqrt (s1 + (1e-12 : Float))) #[d0]
 
 private def materializeWeightNormConv1d {outC inC kernel : Nat}
     (weightV : Tensor { shape := #[outC, inC, kernel], dtype := .Float32, device := device })
     (weightG : Tensor { shape := #[outC], dtype := .Float32, device := device })
     : Tensor { shape := #[outC, inC, kernel], dtype := .Float32, device := device } :=
-  let denom : Tensor { shape := #[outC, 1, 1], dtype := .Float32, device := device } := Tensor.reshapeChecked (normDim0_3d weightV) #[outC, 1, 1]
+  let denom : Tensor { shape := #[outC, 1, 1], dtype := .Float32, device := device } := Tensor.reshape (normDim0_3d weightV) #[outC, 1, 1]
   let denomE : Tensor { shape := #[outC, inC, kernel], dtype := .Float32, device := device } := Tensor.expand denom #[outC, inC, kernel]
-  let gain : Tensor { shape := #[outC, 1, 1], dtype := .Float32, device := device } := Tensor.reshapeChecked weightG #[outC, 1, 1]
+  let gain : Tensor { shape := #[outC, 1, 1], dtype := .Float32, device := device } := Tensor.reshape weightG #[outC, 1, 1]
   let gainE : Tensor { shape := #[outC, inC, kernel], dtype := .Float32, device := device } := Tensor.expand gain #[outC, inC, kernel]
   Tensor.div (weightV * gainE) denomE
 
@@ -100,7 +100,7 @@ private def conv1dFromWeightNorm {inC outC kernel stride padding dilation : Nat}
     (weightG3 : Tensor { shape := #[outC, 1, 1], dtype := .Float32, device := device })
     (bias : Tensor { shape := #[outC], dtype := .Float32, device := device })
     : Conv1dParams (device := device) inC outC kernel stride padding dilation := {
-      weight := reqGradFalse <| materializeWeightNormConv1d weightV (Tensor.reshapeChecked weightG3 #[outC])
+      weight := reqGradFalse <| materializeWeightNormConv1d weightV (Tensor.reshape weightG3 #[outC])
       bias := reqGradFalse bias
     }
 
@@ -110,7 +110,7 @@ private def wnConv1dFromWeightNorm {inC outC kernel stride padding dilation : Na
     (bias : Tensor { shape := #[outC], dtype := .Float32, device := device })
     : WNConv1dParams (device := device) inC outC kernel stride padding dilation := {
       weightV := reqGradFalse weightV
-      weightG := reqGradFalse (Tensor.reshapeChecked weightG3 #[outC])
+      weightG := reqGradFalse (Tensor.reshape weightG3 #[outC])
       bias := reqGradFalse bias
     }
 
@@ -121,7 +121,7 @@ private def wnDepthwiseTransConv1dFromWeightNorm
     (bias : Tensor { shape := #[channels], dtype := .Float32, device := device })
     : WNDepthwiseTransConv1dParams (device := device) channels kernel stride padding outputPadding dilation := {
       weightV := reqGradFalse weightV
-      weightG := reqGradFalse (Tensor.reshapeChecked weightG3 #[channels])
+      weightG := reqGradFalse (Tensor.reshape weightG3 #[channels])
       bias := reqGradFalse bias
     }
 
@@ -132,7 +132,7 @@ private def wnConvTranspose1dFromWeightNorm
     (bias : Tensor { shape := #[outC], dtype := .Float32, device := device })
     : WNConvTranspose1dParams (device := device) inC outC kernel stride padding outputPadding dilation := {
       weightV := reqGradFalse weightV
-      weightG := reqGradFalse (Tensor.reshapeChecked weightG3 #[inC])
+      weightG := reqGradFalse (Tensor.reshape weightG3 #[inC])
       bias := reqGradFalse bias
     }
 
@@ -171,7 +171,7 @@ private def wnConv1dDynFromWeightNorm {inC outC kernel : Nat}
     (stride padding dilation : Nat)
     : (WNConv1dDyn (device := device)) := {
       weightV := Tensor.packShape (reqGradFalse weightV)
-      weightG := Tensor.packShape (reqGradFalse (Tensor.reshapeChecked weightG3 #[outC]))
+      weightG := Tensor.packShape (reqGradFalse (Tensor.reshape weightG3 #[outC]))
       bias := Tensor.packShape (reqGradFalse bias)
       kernel := kernel
       stride := stride
@@ -200,7 +200,7 @@ private def wnConvTranspose1dDynFromWeightNorm {inC outC kernel : Nat}
     (stride padding outputPadding dilation : Nat)
     : (WNConvTranspose1dDyn (device := device)) := {
       weightV := Tensor.packShape (reqGradFalse weightV)
-      weightG := Tensor.packShape (reqGradFalse (Tensor.reshapeChecked weightG3 #[inC]))
+      weightG := Tensor.packShape (reqGradFalse (Tensor.reshape weightG3 #[inC]))
       bias := Tensor.packShape (reqGradFalse bias)
       kernel := kernel
       stride := stride

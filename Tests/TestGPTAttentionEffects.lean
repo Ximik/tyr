@@ -22,7 +22,7 @@ private def attentionOnlyBlock : gpt.BlockParams (device := .CPU) 2 := {
 }
 
 @[test] def testGPTEvaluationDisablesConfiguredAttentionDropout : IO Unit := do
-  let input := (Tensor.fromFloatArray #[1, 3, 3, 1]).reshapeChecked #[1, 2, 2]
+  let input := (Tensor.fromFloatArray #[1, 3, 3, 1]).reshape #[1, 2, 2]
   let reference ← gpt.blockForward (n_head := 1) attentionOnlyBlock input 0 false
   let evaluation ← gpt.blockForward (n_head := 1) attentionOnlyBlock input 1 false
   LeanTest.assertTrue (Tensor.allclose evaluation reference)
@@ -35,7 +35,7 @@ private def attentionOnlyBlock : gpt.BlockParams (device := .CPU) 2 := {
 
 @[test] def testGPTAttentionRetainsTrainingDropout : IO Unit := do
   let q := Tensor.zeros #[1, 1, 2, 2]
-  let v := (Tensor.fromFloatArray #[2, 4, 6, 8]).reshapeChecked #[1, 1, 2, 2]
+  let v := (Tensor.fromFloatArray #[2, 4, 6, 8]).reshape #[1, 1, 2, 2]
   let training ← gpt.TensorOps.attention q q v 1 true
   LeanTest.assertEqual (← training.toFloatArray) #[0, 0, 0, 0]
   let evaluation ← gpt.TensorOps.attention q q v 1 false

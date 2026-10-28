@@ -73,9 +73,9 @@ def forward {batch seq hidden_size num_heads head_dim mlp_hidden : Nat}
     (mod : Tensor { dtype := dtype, device := device, shape := #[batch, 3, hidden_size] })
     : Tensor { dtype := dtype, device := device, shape := #[batch, seq, hidden_size] } :=
   -- Extract shift, scale, gate from modulation
-  let mod_shift := Tensor.reshapeChecked (sliceTyped mod 1 0 1) #[batch, hidden_size]
-  let mod_scale := Tensor.reshapeChecked (sliceTyped mod 1 1 1) #[batch, hidden_size]
-  let mod_gate := Tensor.reshapeChecked (sliceTyped mod 1 2 1) #[batch, hidden_size]
+  let mod_shift := Tensor.reshape (sliceTyped mod 1 0 1) #[batch, hidden_size]
+  let mod_scale := Tensor.reshape (sliceTyped mod 1 1 1) #[batch, hidden_size]
+  let mod_gate := Tensor.reshape (sliceTyped mod 1 2 1) #[batch, hidden_size]
 
   -- Pre-norm with modulation
   let x_norm := block.pre_norm.forward3d x
@@ -91,9 +91,9 @@ def forward {batch seq hidden_size num_heads head_dim mlp_hidden : Nat}
 
   -- Reshape QKV
   let qkv := Tensor.reshapeChecked qkv #[batch, seq, 3, num_heads, head_dim]
-  let q := Tensor.reshapeChecked (sliceTyped qkv 2 0 1) #[batch, seq, num_heads, head_dim]
-  let k := Tensor.reshapeChecked (sliceTyped qkv 2 1 1) #[batch, seq, num_heads, head_dim]
-  let v := Tensor.reshapeChecked (sliceTyped qkv 2 2 1) #[batch, seq, num_heads, head_dim]
+  let q := Tensor.reshape (sliceTyped qkv 2 0 1) #[batch, seq, num_heads, head_dim]
+  let k := Tensor.reshape (sliceTyped qkv 2 1 1) #[batch, seq, num_heads, head_dim]
+  let v := Tensor.reshape (sliceTyped qkv 2 2 1) #[batch, seq, num_heads, head_dim]
 
   -- QK normalization
   let (q, k) := block.norm.forward q k
@@ -112,12 +112,12 @@ def forward {batch seq hidden_size num_heads head_dim mlp_hidden : Nat}
 
   -- Transpose back and reshape
   let attn := fromAttention attn
-  let attn := Tensor.reshapeChecked attn #[batch, seq, num_heads * head_dim]
+  let attn := Tensor.reshape attn #[batch, seq, num_heads * head_dim]
 
   -- MLP: SwiGLU
-  let mlp := Tensor.reshapeChecked mlp #[batch, seq, 2, mlp_hidden]
-  let gate := Tensor.reshapeChecked (sliceTyped mlp 2 0 1) #[batch, seq, mlp_hidden]
-  let up := Tensor.reshapeChecked (sliceTyped mlp 2 1 1) #[batch, seq, mlp_hidden]
+  let mlp := Tensor.reshape mlp #[batch, seq, 2, mlp_hidden]
+  let gate := Tensor.reshape (sliceTyped mlp 2 0 1) #[batch, seq, mlp_hidden]
+  let up := Tensor.reshape (sliceTyped mlp 2 1 1) #[batch, seq, mlp_hidden]
   let mlp_out := Tensor.mul (Tensor.silu gate) up
 
   -- Concatenate attention and MLP outputs

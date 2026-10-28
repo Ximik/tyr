@@ -50,22 +50,22 @@ def forward2d {n dim : Nat}
   let var : Tensor { device := device, shape := #[n, 1], dtype := .Float32 } := Tensor.meanDim (Tensor.mul xf xf) 1 true
   let inv : Tensor { device := device, shape := #[n, 1], dtype := .Float32 } := rsqrtDynamic (Tensor.addScalar var m.eps)
   let inv : Tensor { device := device, shape := #[n, dim], dtype := .Float32 } := Tensor.expand inv #[n, dim]
-  let scale : Tensor { device := device, shape := #[n, dim], dtype := .Float32 } := Tensor.expand (Tensor.reshapeChecked (floatDynamic m.weight.2) #[1, dim]) #[n, dim]
+  let scale : Tensor { device := device, shape := #[n, dim], dtype := .Float32 } := Tensor.expand (Tensor.reshape (floatDynamic m.weight.2) #[1, dim]) #[n, dim]
   Tensor.castLike x (Tensor.mul (Tensor.mul xf inv) scale)
 
 def forward3d {batch seq dim : Nat}
     (m : Gemma4RMSNorm (device := device) dim)
     (x : Tensor { device := device, shape := #[batch, seq, dim], dtype := dtype })
     : Tensor { device := device, shape := #[batch, seq, dim], dtype := dtype } :=
-  let flat : Tensor { device := device, shape := #[batch * seq, dim], dtype := dtype } := Tensor.reshapeChecked x #[batch * seq, dim]
-  Tensor.reshapeChecked (forward2d m flat) #[batch, seq, dim]
+  let flat : Tensor { device := device, shape := #[batch * seq, dim], dtype := dtype } := Tensor.reshape x #[batch * seq, dim]
+  Tensor.reshape (forward2d m flat) #[batch, seq, dim]
 
 def forward4d {a b c dim : Nat}
     (m : Gemma4RMSNorm (device := device) dim)
     (x : Tensor { device := device, shape := #[a, b, c, dim], dtype := dtype })
     : Tensor { device := device, shape := #[a, b, c, dim], dtype := dtype } :=
-  let flat : Tensor { device := device, shape := #[a * b * c, dim], dtype := dtype } := Tensor.reshapeChecked x #[a * b * c, dim]
-  Tensor.reshapeChecked (forward2d m flat) #[a, b, c, dim]
+  let flat : Tensor { device := device, shape := #[a * b * c, dim], dtype := dtype } := Tensor.reshape x #[a * b * c, dim]
+  Tensor.reshape (forward2d m flat) #[a, b, c, dim]
 
 end Gemma4RMSNorm
 
@@ -83,8 +83,8 @@ private def rmsNormNoScale4d {a b c dim : Nat}
     (x : Tensor { device := device, shape := #[a, b, c, dim], dtype := dtype })
     (eps : Float := 1e-6)
     : Tensor { device := device, shape := #[a, b, c, dim], dtype := dtype } :=
-  let flat : Tensor { device := device, shape := #[a * b * c, dim], dtype := dtype } := Tensor.reshapeChecked x #[a * b * c, dim]
-  Tensor.reshapeChecked (rmsNormNoScale2d flat eps) #[a, b, c, dim]
+  let flat : Tensor { device := device, shape := #[a * b * c, dim], dtype := dtype } := Tensor.reshape x #[a * b * c, dim]
+  Tensor.reshape (rmsNormNoScale2d flat eps) #[a, b, c, dim]
 
 private def rmsNormWeighted4dSlice {a b c dim maxDim : Nat} {weightDType : DType}
     (weight : Tensor { device := device, shape := #[maxDim], dtype := weightDType })
@@ -92,12 +92,12 @@ private def rmsNormWeighted4dSlice {a b c dim maxDim : Nat} {weightDType : DType
     (eps : Float := 1e-6)
     : Tensor { device := device, shape := #[a, b, c, dim], dtype := dtype } :=
   let w : Tensor { device := device, shape := #[dim], dtype := weightDType } := sliceTyped weight 0 0 dim
-  let xf : Tensor { device := device, shape := #[a * b * c, dim], dtype := dtype } := Tensor.reshapeChecked x #[a * b * c, dim]
+  let xf : Tensor { device := device, shape := #[a * b * c, dim], dtype := dtype } := Tensor.reshape x #[a * b * c, dim]
   let var : Tensor { device := device, shape := #[a * b * c, 1], dtype := dtype } := Tensor.meanDim (Tensor.mul xf xf) 1 true
   let inv : Tensor { device := device, shape := #[a * b * c, 1], dtype := dtype } := rsqrtDynamic (Tensor.addScalar var eps)
   let inv : Tensor { device := device, shape := #[a * b * c, dim], dtype := dtype } := Tensor.expand inv #[a * b * c, dim]
-  let scale : Tensor { device := device, shape := #[a * b * c, dim], dtype := .Float32 } := Tensor.expand (Tensor.reshapeChecked (floatDynamic w) #[1, dim]) #[a * b * c, dim]
-  Tensor.castLike x (Tensor.reshapeChecked ((promotedMul (Tensor.mul xf inv) scale).2) #[a, b, c, dim])
+  let scale : Tensor { device := device, shape := #[a * b * c, dim], dtype := .Float32 } := Tensor.expand (Tensor.reshape (floatDynamic w) #[1, dim]) #[a * b * c, dim]
+  Tensor.castLike x (Tensor.reshape ((promotedMul (Tensor.mul xf inv) scale).2) #[a, b, c, dim])
 
 private def rmsNormNoScale4dSlice {a b c dim : Nat}
     (x : Tensor { device := device, shape := #[a, b, c, dim], dtype := dtype })
@@ -143,23 +143,23 @@ def forward {tokens : Nat}
   let normed : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype } := rmsNormNoScale2d hidden cfg.rms_norm_eps
   let scaleRoot := 1.0 / Float.sqrt cfg.hidden_size.toFloat
   let scale : Tensor ⟨#[tokens, cfg.hidden_size], .Float32, device⟩ :=
-    Tensor.expand (Tensor.reshapeChecked (floatDynamic m.scale.2) #[1, cfg.hidden_size]) #[tokens, cfg.hidden_size]
+    Tensor.expand (Tensor.reshape (floatDynamic m.scale.2) #[1, cfg.hidden_size]) #[tokens, cfg.hidden_size]
   let normed : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := .Float32 } :=
     match Tensor.ofRaw (σ := ⟨#[tokens, cfg.hidden_size], .Float32, device⟩)
         (promotedMul normed scale).2.raw with
     | .ok tensor => Tensor.mulScalar tensor scaleRoot
     | .error message => nativeInvariantFailure s!"Gemma4 router computation: {message}"
   let logitsDyn : Tensor { device := device, shape := #[tokens, cfg.num_experts], dtype := .Float32 } := einsumChecked "eh,th->te" (floatDynamic m.proj.2) normed
-  let logits : Tensor { device := device, shape := #[tokens, cfg.num_experts], dtype := .Float32 } := Tensor.reshapeChecked logitsDyn #[tokens, cfg.num_experts]
+  let logits : Tensor { device := device, shape := #[tokens, cfg.num_experts], dtype := .Float32 } := Tensor.reshape logitsDyn #[tokens, cfg.num_experts]
   let probs : Tensor { device := device, shape := #[tokens, cfg.num_experts], dtype := .Float32 } := Tensor.softmax logits (-1)
   let (topValsRaw, topIdx) := topK2d probs cfg.top_k_experts 1
   let denom : Tensor { device := device, shape := #[tokens, 1], dtype := .Float32 } := Tensor.sumDim topValsRaw 1 true
   let denom : Tensor { device := device, shape := #[tokens, cfg.top_k_experts], dtype := .Float32 } := Tensor.expand denom #[tokens, cfg.top_k_experts]
   let topVals : Tensor { device := device, shape := #[tokens, cfg.top_k_experts], dtype := .Float32 } := Tensor.div topValsRaw denom
-  let flatIdx : Tensor { device := device, shape := #[tokens * cfg.top_k_experts], dtype := .Int64 } := Tensor.reshapeChecked topIdx #[tokens * cfg.top_k_experts]
+  let flatIdx : Tensor { device := device, shape := #[tokens * cfg.top_k_experts], dtype := .Int64 } := Tensor.reshape topIdx #[tokens * cfg.top_k_experts]
   let scalesFlat : Tensor { device := device, shape := #[tokens * cfg.top_k_experts], dtype := m.per_expert_scale.1 } :=
     Tensor.indexSelect m.per_expert_scale.2 flatIdx
-  let scales : Tensor { device := device, shape := #[tokens, cfg.top_k_experts], dtype := m.per_expert_scale.1 } := Tensor.reshapeChecked scalesFlat #[tokens, cfg.top_k_experts]
+  let scales : Tensor { device := device, shape := #[tokens, cfg.top_k_experts], dtype := m.per_expert_scale.1 } := Tensor.reshape scalesFlat #[tokens, cfg.top_k_experts]
   (probs, promotedMul topVals scales, topIdx)
 
 end Gemma4TextRouter
@@ -217,7 +217,7 @@ private def qProjSliding {batch seq : Nat}
     : Tensor { device := device, shape := #[batch, seq, cfg.num_attention_heads, cfg.head_dim], dtype := dtype } :=
   let qW : Tensor { device := device, shape := #[cfg.num_attention_heads * cfg.head_dim, cfg.hidden_size], dtype := dtype } :=
     sliceTyped m.q_proj 0 0 (cfg.num_attention_heads * cfg.head_dim)
-  Tensor.reshapeChecked (Tensor.linear3d x qW) #[batch, seq, cfg.num_attention_heads, cfg.head_dim]
+  Tensor.reshape (Tensor.linear3d x qW) #[batch, seq, cfg.num_attention_heads, cfg.head_dim]
 
 private def qProjFull {batch seq : Nat}
     (cfg : Config)
@@ -365,7 +365,7 @@ private def attentionSlidingPrefillWithMask {batch seq : Nat}
   let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, seq, cfg.head_dim], dtype := dtype } :=
     maskedAttention qh kh vh attnMask true
   let out : Tensor { device := device, shape := #[batch, seq, cfg.num_attention_heads * cfg.head_dim], dtype := dtype } :=
-    Tensor.reshapeChecked (transposeAttention attn) #[batch, seq, cfg.num_attention_heads * cfg.head_dim]
+    Tensor.reshape (transposeAttention attn) #[batch, seq, cfg.num_attention_heads * cfg.head_dim]
   let paddedK : Tensor { device := device, shape := #[batch, Config.maxKVHeads cfg, seq, Config.maxHeadDim cfg], dtype := dtype } := padSlidingKVForCache cfg kh
   let paddedV : Tensor { device := device, shape := #[batch, Config.maxKVHeads cfg, seq, Config.maxHeadDim cfg], dtype := dtype } := padSlidingKVForCache cfg vh
   let kStore : Tensor { device := device, shape := #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg], dtype := dtype } :=
@@ -410,7 +410,7 @@ private def attentionFullPrefillWithMask {batch seq : Nat}
   let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, seq, Config.fullHeadDim cfg], dtype := dtype } :=
     maskedAttention qh kh vh attnMask true
   let out : Tensor { device := device, shape := #[batch, seq, cfg.num_attention_heads * Config.fullHeadDim cfg], dtype := dtype } :=
-    Tensor.reshapeChecked (transposeAttention attn) #[batch, seq, cfg.num_attention_heads * Config.fullHeadDim cfg]
+    Tensor.reshape (transposeAttention attn) #[batch, seq, cfg.num_attention_heads * Config.fullHeadDim cfg]
   let paddedK : Tensor { device := device, shape := #[batch, Config.maxKVHeads cfg, seq, Config.maxHeadDim cfg], dtype := dtype } := padFullKVForCache cfg kh
   let paddedV : Tensor { device := device, shape := #[batch, Config.maxKVHeads cfg, seq, Config.maxHeadDim cfg], dtype := dtype } := padFullKVForCache cfg vh
   let kStore : Tensor { device := device, shape := #[batch, Config.maxKVHeads cfg, cache.maxLen, Config.maxHeadDim cfg], dtype := dtype } :=
@@ -449,7 +449,7 @@ private def attentionSlidingNoCache {batch seq : Nat}
   let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, seq, cfg.head_dim], dtype := dtype } :=
     Tensor.attentionWindow qh kh vh true true cfg.sliding_window
   let out : Tensor { device := device, shape := #[batch, seq, cfg.num_attention_heads * cfg.head_dim], dtype := dtype } :=
-    Tensor.reshapeChecked (transposeAttention attn) #[batch, seq, cfg.num_attention_heads * cfg.head_dim]
+    Tensor.reshape (transposeAttention attn) #[batch, seq, cfg.num_attention_heads * cfg.head_dim]
   oProjSliding cfg m out
 
 private def attentionFullNoCache {batch seq : Nat}
@@ -478,7 +478,7 @@ private def attentionFullNoCache {batch seq : Nat}
   let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, seq, Config.fullHeadDim cfg], dtype := dtype } :=
     Tensor.attentionGQA qh kh vh true true
   let out : Tensor { device := device, shape := #[batch, seq, cfg.num_attention_heads * Config.fullHeadDim cfg], dtype := dtype } :=
-    Tensor.reshapeChecked (transposeAttention attn) #[batch, seq, cfg.num_attention_heads * Config.fullHeadDim cfg]
+    Tensor.reshape (transposeAttention attn) #[batch, seq, cfg.num_attention_heads * Config.fullHeadDim cfg]
   oProjFull cfg m out
 
 private def attentionSlidingWithCache {batch seq : Nat}
@@ -501,7 +501,7 @@ private def attentionSlidingWithCache {batch seq : Nat}
     let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, seq, cfg.head_dim], dtype := dtype } :=
       Tensor.attentionWindow qh kAll0 vAll0 true true cfg.sliding_window
     let out : Tensor { device := device, shape := #[batch, seq, cfg.num_attention_heads * cfg.head_dim], dtype := dtype } :=
-      Tensor.reshapeChecked (transposeAttention attn) #[batch, seq, cfg.num_attention_heads * cfg.head_dim]
+      Tensor.reshape (transposeAttention attn) #[batch, seq, cfg.num_attention_heads * cfg.head_dim]
     (oProjSliding cfg m out, cache)
   | none =>
     let kRaw := kProjSliding cfg m x
@@ -528,7 +528,7 @@ private def attentionSlidingWithCache {batch seq : Nat}
     let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, seq, cfg.head_dim], dtype := dtype } :=
       Tensor.attentionWindow qh kh vh true true cfg.sliding_window
     let out : Tensor { device := device, shape := #[batch, seq, cfg.num_attention_heads * cfg.head_dim], dtype := dtype } :=
-      Tensor.reshapeChecked (transposeAttention attn) #[batch, seq, cfg.num_attention_heads * cfg.head_dim]
+      Tensor.reshape (transposeAttention attn) #[batch, seq, cfg.num_attention_heads * cfg.head_dim]
     (oProjSliding cfg m out, cache')
 
 private def attentionFullWithCache {batch seq : Nat}
@@ -551,7 +551,7 @@ private def attentionFullWithCache {batch seq : Nat}
     let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, seq, Config.fullHeadDim cfg], dtype := dtype } :=
       Tensor.attentionGQA qh kAll vAll true true
     let out : Tensor { device := device, shape := #[batch, seq, cfg.num_attention_heads * Config.fullHeadDim cfg], dtype := dtype } :=
-      Tensor.reshapeChecked (transposeAttention attn) #[batch, seq, cfg.num_attention_heads * Config.fullHeadDim cfg]
+      Tensor.reshape (transposeAttention attn) #[batch, seq, cfg.num_attention_heads * Config.fullHeadDim cfg]
     (oProjFull cfg m out, cache)
   | none =>
     let kRaw := kProjFull cfg m x
@@ -582,7 +582,7 @@ private def attentionFullWithCache {batch seq : Nat}
     let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, seq, Config.fullHeadDim cfg], dtype := dtype } :=
       Tensor.attentionGQA qh kh vh true true
     let out : Tensor { device := device, shape := #[batch, seq, cfg.num_attention_heads * Config.fullHeadDim cfg], dtype := dtype } :=
-      Tensor.reshapeChecked (transposeAttention attn) #[batch, seq, cfg.num_attention_heads * Config.fullHeadDim cfg]
+      Tensor.reshape (transposeAttention attn) #[batch, seq, cfg.num_attention_heads * Config.fullHeadDim cfg]
     (oProjFull cfg m out, cache')
 
 private def attentionSlidingStep {batch : Nat}
@@ -610,7 +610,7 @@ private def attentionSlidingStep {batch : Nat}
     let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, 1, cfg.head_dim], dtype := dtype } :=
       Tensor.attentionGQAQKV qh kAll vAll false true
     let out : Tensor { device := device, shape := #[batch, 1, cfg.num_attention_heads * cfg.head_dim], dtype := dtype } :=
-      Tensor.reshapeChecked (transposeAttention attn) #[batch, 1, cfg.num_attention_heads * cfg.head_dim]
+      Tensor.reshape (transposeAttention attn) #[batch, 1, cfg.num_attention_heads * cfg.head_dim]
     (oProjSliding cfg m out, cache)
   | none =>
     let kRaw := kProjSliding cfg m x
@@ -641,7 +641,7 @@ private def attentionSlidingStep {batch : Nat}
     let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, 1, cfg.head_dim], dtype := dtype } :=
       Tensor.attentionGQAQKV qh kAll vAll false true
     let out : Tensor { device := device, shape := #[batch, 1, cfg.num_attention_heads * cfg.head_dim], dtype := dtype } :=
-      Tensor.reshapeChecked (transposeAttention attn) #[batch, 1, cfg.num_attention_heads * cfg.head_dim]
+      Tensor.reshape (transposeAttention attn) #[batch, 1, cfg.num_attention_heads * cfg.head_dim]
     let cache' : KVCache (dtype := dtype) (device := device) cfg batch := {
       kStoreDyn := kStore'.packShape
       vStoreDyn := vStore'.packShape
@@ -671,7 +671,7 @@ private def attentionFullStep {batch : Nat}
     let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, 1, Config.fullHeadDim cfg], dtype := dtype } :=
       Tensor.attentionGQAQKV qh kAll vAll false true
     let out : Tensor { device := device, shape := #[batch, 1, cfg.num_attention_heads * Config.fullHeadDim cfg], dtype := dtype } :=
-      Tensor.reshapeChecked (transposeAttention attn) #[batch, 1, cfg.num_attention_heads * Config.fullHeadDim cfg]
+      Tensor.reshape (transposeAttention attn) #[batch, 1, cfg.num_attention_heads * Config.fullHeadDim cfg]
     (oProjFull cfg m out, cache)
   | none =>
     let kRaw := kProjFull cfg m x
@@ -702,7 +702,7 @@ private def attentionFullStep {batch : Nat}
     let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, 1, Config.fullHeadDim cfg], dtype := dtype } :=
       Tensor.attentionGQAQKV qh kAll vAll false true
     let out : Tensor { device := device, shape := #[batch, 1, cfg.num_attention_heads * Config.fullHeadDim cfg], dtype := dtype } :=
-      Tensor.reshapeChecked (transposeAttention attn) #[batch, 1, cfg.num_attention_heads * Config.fullHeadDim cfg]
+      Tensor.reshape (transposeAttention attn) #[batch, 1, cfg.num_attention_heads * Config.fullHeadDim cfg]
     let cache' : KVCache (dtype := dtype) (device := device) cfg batch := {
       kStoreDyn := kStore'.packShape
       vStoreDyn := vStore'.packShape
@@ -802,7 +802,7 @@ private def applyLayerScalar {batch seq : Nat}
     (scale : Tensor { device := device, shape := #[1], dtype := dtype })
     (x : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
     : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } :=
-  let s : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } := Tensor.expand (Tensor.reshapeChecked scale #[1, 1, 1]) #[batch, seq, cfg.hidden_size]
+  let s : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } := Tensor.expand (Tensor.reshape scale #[1, 1, 1]) #[batch, seq, cfg.hidden_size]
   Tensor.mul x s
 
 private def applyPerLayerInput {batch seq : Nat}
@@ -943,12 +943,12 @@ def forwardStep {batch : Nat}
     match layer.moe with
     | some moe =>
       let denseBranch := moe.post_feedforward_layernorm_1.forward3d mlpOut
-      let routerInput : Tensor { device := device, shape := #[batch, cfg.hidden_size], dtype := dtype } := Tensor.reshapeChecked residual2 #[batch, cfg.hidden_size]
+      let routerInput : Tensor { device := device, shape := #[batch, cfg.hidden_size], dtype := dtype } := Tensor.reshape residual2 #[batch, cfg.hidden_size]
       let (_routerProbs, topVals, topIdx) := moe.router.forward cfg routerInput
       let expertInput2d : Tensor { device := device, shape := #[batch, cfg.hidden_size], dtype := dtype } :=
         moe.pre_feedforward_layernorm_2.forward2d routerInput
       let expert2d := moe.experts.forward2d cfg expertInput2d topVals.2 topIdx
-      let expert3d : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := dtype } := Tensor.reshapeChecked expert2d #[batch, 1, cfg.hidden_size]
+      let expert3d : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := dtype } := Tensor.reshape expert2d #[batch, 1, cfg.hidden_size]
       Tensor.add denseBranch (moe.post_feedforward_layernorm_2.forward3d expert3d)
     | none =>
       mlpOut
@@ -1035,7 +1035,7 @@ private def extractPerLayerInput? {batch seq : Nat}
   match perLayerInputs with
   | some t =>
     let one : Tensor { device := device, shape := #[batch, seq, 1, cfg.hidden_size_per_layer_input], dtype := dtype } := sliceTyped t 2 layerIdx 1
-    some (Tensor.reshapeChecked one #[batch, seq, cfg.hidden_size_per_layer_input])
+    some (Tensor.reshape one #[batch, seq, cfg.hidden_size_per_layer_input])
   | none => none
 
 def embedTokens {batch seq : Nat}
@@ -1058,12 +1058,12 @@ def computePerLayerInputs {batch seq : Nat}
         (Tensor.embedding inputIds tokEmbTable)
         (Float.sqrt cfg.hidden_size_per_layer_input.toFloat)
     let tokEmb : Tensor { device := device, shape := #[batch, seq, cfg.num_hidden_layers, cfg.hidden_size_per_layer_input], dtype := dtype } :=
-      Tensor.reshapeChecked tokEmbFlat #[batch, seq, cfg.num_hidden_layers, cfg.hidden_size_per_layer_input]
+      Tensor.reshape tokEmbFlat #[batch, seq, cfg.num_hidden_layers, cfg.hidden_size_per_layer_input]
     let projScale := 1.0 / Float.sqrt cfg.hidden_size.toFloat
     let projFlat : Tensor { device := device, shape := #[batch, seq, cfg.num_hidden_layers * cfg.hidden_size_per_layer_input], dtype := dtype } :=
       Tensor.mulScalar (Tensor.linear3d inputsEmbeds projW) projScale
     let proj4d : Tensor { device := device, shape := #[batch, seq, cfg.num_hidden_layers, cfg.hidden_size_per_layer_input], dtype := dtype } :=
-      Tensor.reshapeChecked projFlat #[batch, seq, cfg.num_hidden_layers, cfg.hidden_size_per_layer_input]
+      Tensor.reshape projFlat #[batch, seq, cfg.num_hidden_layers, cfg.hidden_size_per_layer_input]
     let proj4d := projNorm.forward4d proj4d
     some (Tensor.mulScalar (Tensor.add proj4d tokEmb) (Float.sqrt 0.5))
   | _, _, _ =>
@@ -1367,7 +1367,7 @@ def forwardStep {batch : Nat} {maxLen : Nat}
           match perLayerInputs with
           | some p =>
             let one : Tensor { device := device, shape := #[batch, 1, 1, cfg.hidden_size_per_layer_input], dtype := dtype } := sliceTyped p 2 i 1
-            some (Tensor.reshapeChecked one #[batch, 1, cfg.hidden_size_per_layer_input])
+            some (Tensor.reshape one #[batch, 1, cfg.hidden_size_per_layer_input])
           | none => none
         let sharedSource :=
           match Config.sharedSourceLayer? cfg i with
@@ -1497,7 +1497,7 @@ private def prefillCaches {batch seq maxLen : Nat}
       fullSinAll
   let lastHidden : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := dtype } := sliceTyped hidden 1 (seq - 1) 1
   let logits3 : Tensor { device := device, shape := #[batch, 1, cfg.vocab_size], dtype := dtype } := softcap (Tensor.linear3d lastHidden m.lmHead) cfg.final_logit_softcapping
-  pure (Tensor.reshapeChecked logits3 #[batch, cfg.vocab_size], cache')
+  pure (Tensor.reshape logits3 #[batch, cfg.vocab_size], cache')
 
 private def prefillCachesFromEmbeds {batch seq maxLen : Nat}
     (cfg : Config)
@@ -1524,7 +1524,7 @@ private def prefillCachesFromEmbeds {batch seq maxLen : Nat}
       fullSinAll
   let lastHidden : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := dtype } := sliceTyped hidden 1 (seq - 1) 1
   let logits3 : Tensor { device := device, shape := #[batch, 1, cfg.vocab_size], dtype := dtype } := softcap (Tensor.linear3d lastHidden m.lmHead) cfg.final_logit_softcapping
-  pure (Tensor.reshapeChecked logits3 #[batch, cfg.vocab_size], cache')
+  pure (Tensor.reshape logits3 #[batch, cfg.vocab_size], cache')
 
 private def prefillCachesFromEmbedsWithPerLayerInputs {batch seq maxLen : Nat}
     (cfg : Config)
@@ -1553,7 +1553,7 @@ private def prefillCachesFromEmbedsWithPerLayerInputs {batch seq maxLen : Nat}
       fullSinAll
   let lastHidden : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := dtype } := sliceTyped hidden 1 (seq - 1) 1
   let logits3 : Tensor { device := device, shape := #[batch, 1, cfg.vocab_size], dtype := dtype } := softcap (Tensor.linear3d lastHidden m.lmHead) cfg.final_logit_softcapping
-  pure (Tensor.reshapeChecked logits3 #[batch, cfg.vocab_size], cache')
+  pure (Tensor.reshape logits3 #[batch, cfg.vocab_size], cache')
 
 private def prefillCachesFromEmbedsWithPerLayerInputsBidirectionalVision {batch seq maxLen : Nat}
     (cfg : Config)
@@ -1586,7 +1586,7 @@ private def prefillCachesFromEmbedsWithPerLayerInputsBidirectionalVision {batch 
       fullAttnMask
   let lastHidden : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := dtype } := sliceTyped hidden 1 (seq - 1) 1
   let logits3 : Tensor { device := device, shape := #[batch, 1, cfg.vocab_size], dtype := dtype } := softcap (Tensor.linear3d lastHidden m.lmHead) cfg.final_logit_softcapping
-  pure (Tensor.reshapeChecked logits3 #[batch, cfg.vocab_size], cache')
+  pure (Tensor.reshape logits3 #[batch, cfg.vocab_size], cache')
 
 private def decodeStep {batch maxLen : Nat}
     (cfg : Config)
@@ -1612,7 +1612,7 @@ private def decodeStep {batch maxLen : Nat}
       fullCosAll
       fullSinAll
   let logits3 : Tensor { device := device, shape := #[batch, 1, cfg.vocab_size], dtype := dtype } := softcap (Tensor.linear3d hidden m.lmHead) cfg.final_logit_softcapping
-  pure (Tensor.reshapeChecked logits3 #[batch, cfg.vocab_size], cache')
+  pure (Tensor.reshape logits3 #[batch, cfg.vocab_size], cache')
 
 private partial def decodeLoopCached {batch maxLen : Nat}
     (cfg : Config)
@@ -1651,7 +1651,7 @@ private partial def decodeLoopCached {batch maxLen : Nat}
   | some cb => cb generatedSoFar nextTok
   | none => pure ()
 
-  let nextCol : Tensor { device := device, shape := #[batch, 1], dtype := .Int64 } := Tensor.reshapeChecked nextTok #[batch, 1]
+  let nextCol : Tensor { device := device, shape := #[batch, 1], dtype := .Int64 } := Tensor.reshape nextTok #[batch, 1]
   let appended : Tensor { device := device, shape := #[batch, curSeq + 1], dtype := .Int64 } := typedCat curIds nextCol 1
 
   let stop :=

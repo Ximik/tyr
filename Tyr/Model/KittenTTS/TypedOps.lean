@@ -17,12 +17,12 @@ def catTo {s t : Shape} {d : DType} (x : Tensor { shape := s, dtype := d, device
 def affine2d {batch input output : Nat}
     (x : Tensor { shape := #[batch, input], dtype := .Float32, device := device }) (w : Tensor { shape := #[output, input], dtype := .Float32, device := device })
     (bias : Tensor { shape := #[output], dtype := .Float32, device := device }) : Tensor { shape := #[batch, output], dtype := .Float32, device := device } :=
-  Tensor.linear x w + (bias.reshapeChecked #[1, output]).expand #[batch, output]
+  Tensor.linear x w + (bias.reshape #[1, output]).expand #[batch, output]
 
 def bmm {batch rows inner cols : Nat} (a : Tensor { shape := #[batch, rows, inner], dtype := .Float32, device := device })
     (b : Tensor { shape := #[batch, inner, cols], dtype := .Float32, device := device }) : Tensor { shape := #[batch, rows, cols], dtype := .Float32, device := device } :=
-  (Tensor.bmm4d (a.reshapeChecked #[batch, 1, rows, inner])
-    (b.reshapeChecked #[batch, 1, inner, cols])).reshapeChecked #[batch, rows, cols]
+  (Tensor.bmm4d (a.reshape #[batch, 1, rows, inner])
+    (b.reshape #[batch, 1, inner, cols])).reshape #[batch, rows, cols]
 
 def uniformTensor (shape : Shape) (lo hi : Float) : IO (Tensor { shape := shape, dtype := .Float32, device := device }) := do
   IO.ofExcept (Shape.validateAllocation shape)

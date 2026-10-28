@@ -28,31 +28,31 @@ private def close {σ τ : StaticSpec} (x : Tensor σ) (y : Tensor τ) (tol : Fl
       s!"VAE mismatch at {i}: {xs[i]!} vs {ys[i]!}"
 
 @[test] def testVAEGroupNormAndGradient : IO Unit := do
-  let x ← Tensor.setRequiresGrad ((Tensor.fromFloatArray #[1, 2, 3, 4, 5, 6, 7, 8]).reshapeChecked #[1, 2, 2, 2]) true
+  let x ← Tensor.setRequiresGrad ((Tensor.fromFloatArray #[1, 2, 3, 4, 5, 6, 7, 8]).reshape #[1, 2, 2, 2]) true
   let gn ← GroupNormParams.init 2 2
   let y := gn.forward x
   let expected := (Tensor.fromFloatArray #[-1.34164025, -0.44721342, 0.44721342, 1.34164025,
-    -1.34164025, -0.44721342, 0.44721342, 1.34164025]).reshapeChecked #[1, 2, 2, 2]
+    -1.34164025, -0.44721342, 0.44721342, 1.34164025]).reshape #[1, 2, 2, 2]
   close y expected
   let grad ← Tensor.grad y x (Tensor.ones #[1, 2, 2, 2]) (retainGraph := some true)
   close grad (Tensor.zeros #[1, 2, 2, 2])
-  let seed := (Tensor.fromFloatArray #[1, 0, 0, 0, 1, 0, 0, 0]).reshapeChecked #[1, 2, 2, 2]
+  let seed := (Tensor.fromFloatArray #[1, 0, 0, 0, 1, 0, 0, 0]).reshape #[1, 2, 2, 2]
   let gradient ← Tensor.grad y x seed
   close gradient ((Tensor.fromFloatArray #[0.268328, -0.357771, -0.089443, 0.178885,
-    0.268328, -0.357771, -0.089443, 0.178885]).reshapeChecked #[1, 2, 2, 2])
+    0.268328, -0.357771, -0.089443, 0.178885]).reshape #[1, 2, 2, 2])
   Tests.assertThrows (Tensor.grad y x seed) "backward through the graph a second time"
 
 @[test] def testVAEUpsampleAndOddDownsample : IO Unit := do
-  let x := (Tensor.fromFloatArray #[1, 2, 3, 4, 5, 6]).reshapeChecked #[1, 1, 2, 3]
+  let x := (Tensor.fromFloatArray #[1, 2, 3, 4, 5, 6]).reshape #[1, 1, 2, 3]
   let y := upsample2 x
   close y ((Tensor.fromFloatArray #[1, 1, 2, 2, 3, 3, 1, 1, 2, 2, 3, 3,
-    4, 4, 5, 5, 6, 6, 4, 4, 5, 5, 6, 6]).reshapeChecked #[1, 1, 4, 6])
+    4, 4, 5, 5, 6, 6, 4, 4, 5, 5, 6, 6]).reshape #[1, 1, 4, 6])
   let down : Downsample 1 := { conv := {
     weight := (Tensor.ones #[1, 1, 3, 3])
     bias := (Tensor.zeros #[1]) } }
   let odd := down.forward ((Tensor.ones #[1, 1, 3, 5]))
   LeanTest.assertEqual odd.runtimeShape #[1, 1, 2, 3]
-  close odd ((Tensor.fromFloatArray #[4, 6, 4, 4, 6, 4]).reshapeChecked #[1, 1, 2, 3])
+  close odd ((Tensor.fromFloatArray #[4, 6, 4, 4, 6, 4]).reshape #[1, 1, 2, 3])
 
 @[test] def testVAEAttentionAndResidualDTypes : IO Unit := do
   let attn ← AttnBlock.init 32

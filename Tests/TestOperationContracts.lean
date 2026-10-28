@@ -45,7 +45,7 @@ example (x : Tensor ⟨#[2], .Int64, .CPU⟩) (scalar : Tensor ⟨#[], .Float32,
 
 @[test] def testTensorScalarPromotesValues : IO Unit := do
   let x := Tensor.fromInt64Array #[2, 4]
-  let scalar := (Tensor.fromFloatArray #[0.5]).reshapeChecked #[]
+  let scalar := (Tensor.fromFloatArray #[0.5]).reshape #[]
   let result := branching.mulTensorScalar x scalar
   LeanTest.assertEqual result.raw.dtype .Float32
   LeanTest.assertEqual (← result.toFloatArray) #[1, 2]
@@ -119,7 +119,7 @@ example {d : DType} [DType.FloatingOrComplex d]
   Tensor.spectralNorm input + Tensor.nuclearNorm input
 
 @[test] def testSingularValueNormDomains : IO Unit := do
-  let real := (Tensor.fromFloatArray #[3, 0, 0, 4]).reshapeChecked #[2, 2]
+  let real := (Tensor.fromFloatArray #[3, 0, 0, 4]).reshape #[2, 2]
   for dtype in #[DType.Float32, .Float64, .Complex64, .Complex128] do
     let input := real.castDType dtype
     LeanTest.assertEqual (← checked (Tensor.spectralNorm? input)) 4
@@ -141,7 +141,7 @@ example {d : DType} [DType.FloatingOrComplex d]
 
 @[test] def testRuntimeBroadcastPromotion : IO Unit := do
   let x := Tensor.fromInt64Array #[2, 4]
-  let scalar := (Tensor.fromFloatArray #[0.5]).reshapeChecked #[]
+  let scalar := (Tensor.fromFloatArray #[0.5]).reshape #[]
   let result ← checked (Tensor.Promoting.mulB? x scalar #[2])
   LeanTest.assertEqual result.dtype .Float32
   LeanTest.assertEqual (← result.tensor.toFloatArray) #[1, 2]

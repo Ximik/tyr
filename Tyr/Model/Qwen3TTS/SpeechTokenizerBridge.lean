@@ -191,7 +191,7 @@ private def computeSpeakerMelFromWave
   let pad : Nat := if nFft > hopSize then (nFft - hopSize) / 2 else 0
   let padded := reflectPad1d wave pad
   let paddedLen : Nat := padded.size
-  let wav : Tensor { shape := #[paddedLen], dtype := .Float32, device := .CPU } := Tensor.reshapeChecked (Tensor.fromFloatArray padded) #[paddedLen]
+  let wav : Tensor { shape := #[paddedLen], dtype := .Float32, device := .CPU } := Tensor.reshape (Tensor.fromFloatArray padded) #[paddedLen]
 
   let window : Tensor { shape := #[winSize], dtype := .Float32, device := .CPU } := Tensor.hannWindow winSize
   let ⟨_, stftDyn⟩ ← Tensor.stft wav nFft hopSize window false false
@@ -210,8 +210,8 @@ private def computeSpeakerMelFromWave
   let spec : Tensor { shape := #[freqBins, frames, 2], dtype := .Float32, device := .CPU } := Tensor.reshapeChecked stftDyn #[freqBins, frames, 2]
   let re3 : Tensor { shape := #[freqBins, frames, 1], dtype := .Float32, device := .CPU } := Tensor.sliceChecked spec 2 0 1 #[freqBins, frames, 1]
   let im3 : Tensor { shape := #[freqBins, frames, 1], dtype := .Float32, device := .CPU } := Tensor.sliceChecked spec 2 1 1 #[freqBins, frames, 1]
-  let re : Tensor { shape := #[freqBins, frames], dtype := .Float32, device := .CPU } := Tensor.reshapeChecked re3 #[freqBins, frames]
-  let im : Tensor { shape := #[freqBins, frames], dtype := .Float32, device := .CPU } := Tensor.reshapeChecked im3 #[freqBins, frames]
+  let re : Tensor { shape := #[freqBins, frames], dtype := .Float32, device := .CPU } := Tensor.reshape re3 #[freqBins, frames]
+  let im : Tensor { shape := #[freqBins, frames], dtype := .Float32, device := .CPU } := Tensor.reshape im3 #[freqBins, frames]
   let mag : Tensor { shape := #[freqBins, frames], dtype := .Float32, device := .CPU } := Tensor.sqrt ((re * re) + (im * im) + (1e-9 : Float))
 
   let melMaxHz : Float := fmaxHz.getD (sampleRate.toFloat / 2.0)
@@ -221,7 +221,7 @@ private def computeSpeakerMelFromWave
   let melPow : Tensor { shape := #[melDim, frames], dtype := .Float32, device := .CPU } := Tensor.mm (Tensor.transpose2d melFilter) mag
   let melLog : Tensor { shape := #[melDim, frames], dtype := .Float32, device := .CPU } := Tensor.log (Tensor.clampFloat melPow (1e-5 : Float) (1e10 : Float))
   let melFrameMajor : Tensor { shape := #[frames, melDim], dtype := .Float32, device := .CPU } := Tensor.transpose2d melLog
-  let mel3 : Tensor { shape := #[1, frames, melDim], dtype := .Float32, device := .CPU } := Tensor.reshapeChecked melFrameMajor #[1, frames, melDim]
+  let mel3 : Tensor { shape := #[1, frames, melDim], dtype := .Float32, device := .CPU } := Tensor.reshape melFrameMajor #[1, frames, melDim]
   pure ⟨frames, mel3⟩
 
 private def loadResampledMonoWav (path : String) (targetSr : Nat) : IO (Array Float) := do
@@ -306,7 +306,7 @@ def encodeAudioToCodes
     let chunkSamples : Nat := (encoder.inputSampleRate * 10)
     let leftContextSamples : Nat := (encoder.inputSampleRate * 12)
     if wave.size <= chunkSamples then
-      let audio0 : Tensor { shape := #[samples], dtype := .Float32, device := .CPU } := Tensor.reshapeChecked (Tensor.fromFloatArray wave) #[samples]
+      let audio0 : Tensor { shape := #[samples], dtype := .Float32, device := .CPU } := Tensor.reshape (Tensor.fromFloatArray wave) #[samples]
       let audio : Tensor { shape := #[samples], dtype := .Float32, device := device } :=
         audio0.to encoder.conv0Weight.device
       let frames : Nat := encodedFrames samples

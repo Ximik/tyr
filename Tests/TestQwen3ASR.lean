@@ -639,7 +639,7 @@ def testQwen3ASRForwardFromMel : IO Unit := do
   LeanTest.assertTrue (Float.isFinite s) "logit sum should be finite"
 
   let idxs ← IO.ofExcept (Tensor.argmax? logits 2)
-  let flat : Tensor { shape := #[batch * outSeq], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked idxs #[batch * outSeq]
+  let flat : Tensor { shape := #[batch * outSeq], dtype := .Int64, device := .CPU } := Tensor.reshape idxs #[batch * outSeq]
   let toks ← Tensor.toUInt64Array flat
   LeanTest.assertEqual toks.size (batch * outSeq) "flattened argmax token count should match output length"
 
@@ -780,7 +780,7 @@ def testQwen3ASRFrontendWavWhisperFeatures : IO Unit := do
   let s := Tensor.item (Tensor.sumAll mel)
   LeanTest.assertTrue (Float.isFinite s) "Whisper frontend mel sum should be finite"
 
-  let flatMask : Tensor { shape := #[64], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked fmask #[64]
+  let flatMask : Tensor { shape := #[64], dtype := .Int64, device := .CPU } := Tensor.reshape fmask #[64]
   let maskVals ← Tensor.toUInt64Array (Tensor.toInt64 flatMask)
   LeanTest.assertEqual maskVals.size 64 "feature mask length should equal configured frames"
   LeanTest.assertTrue (maskVals.all (fun v => v == 1))
@@ -798,7 +798,7 @@ def testQwen3ASRForwardForcedAlignerHead : IO Unit := do
   LeanTest.assertTrue (Float.isFinite s) "forced-aligner logits should be finite"
 
   let idxs ← IO.ofExcept (Tensor.argmax? logits 2)
-  let flat : Tensor { shape := #[batch * seq], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked idxs #[batch * seq]
+  let flat : Tensor { shape := #[batch * seq], dtype := .Int64, device := .CPU } := Tensor.reshape idxs #[batch * seq]
   let ids ← Tensor.toUInt64Array flat
   LeanTest.assertTrue (ids.all (fun i => i.toNat < cfg.thinkerConfig.classifyNum))
     "argmax ids should be within forced-aligner classify_num range"
@@ -811,7 +811,7 @@ def testQwen3ASRForwardWithAuxRopeDeltas : IO Unit := do
   let seq : Nat := 6
   let ids ← Tensor.randint 0 cfg.thinkerConfig.textConfig.vocabSize.toInt64 #[batch, seq]
   let attnVals : Array Int64 := #[0, 0, 1, 1, 1, 1]
-  let attnMask : Tensor { shape := #[batch, seq], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked (Tensor.fromInt64Array attnVals) #[batch, seq]
+  let attnMask : Tensor { shape := #[batch, seq], dtype := .Int64, device := .CPU } := Tensor.reshape (Tensor.fromInt64Array attnVals) #[batch, seq]
   let out ← model.forwardWithAux
     ids
     (inputFeatures := (none : Option (Tensor { dtype := .Float32, shape := #[batch, cfg.thinkerConfig.audioConfig.numMelBins, 1], device := .CPU })))
@@ -821,7 +821,7 @@ def testQwen3ASRForwardWithAuxRopeDeltas : IO Unit := do
   | none =>
     LeanTest.fail "forwardWithAux should populate ropeDeltas when attention mask is provided"
   | some d =>
-    let flat : Tensor { shape := #[batch], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked d #[batch]
+    let flat : Tensor { shape := #[batch], dtype := .Int64, device := .CPU } := Tensor.reshape d #[batch]
     let arr ← Tensor.toUInt64Array (Tensor.toInt64 flat)
     LeanTest.assertEqual arr.size batch "ropeDeltas batch size should match"
 
@@ -853,7 +853,7 @@ def testQwen3ASRGreedyGenerateFromWav : IO Unit := do
   let outIds := generated.2
   LeanTest.assertEqual outSeq (promptSeq + 3) "greedy generation should append max_new_tokens when eos set is empty"
 
-  let flat : Tensor { shape := #[outSeq], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked outIds #[outSeq]
+  let flat : Tensor { shape := #[outSeq], dtype := .Int64, device := .CPU } := Tensor.reshape outIds #[outSeq]
   let toks ← Tensor.toUInt64Array flat
   LeanTest.assertEqual toks.size outSeq "generated token tensor should match reported output sequence length"
 
@@ -885,8 +885,8 @@ def testQwen3ASRGreedyCachedMatchesUncached : IO Unit := do
   let idsUncached := outUncached.2
 
   LeanTest.assertEqual seqCached seqUncached "cached and uncached generation should produce same output length"
-  let flatCached : Tensor { shape := #[seqCached], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked idsCached #[seqCached]
-  let flatUncached : Tensor { shape := #[seqUncached], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked idsUncached #[seqUncached]
+  let flatCached : Tensor { shape := #[seqCached], dtype := .Int64, device := .CPU } := Tensor.reshape idsCached #[seqCached]
+  let flatUncached : Tensor { shape := #[seqUncached], dtype := .Int64, device := .CPU } := Tensor.reshape idsUncached #[seqUncached]
   let toksCached ← Tensor.toUInt64Array flatCached
   let toksUncached ← Tensor.toUInt64Array flatUncached
   LeanTest.assertEqual toksCached toksUncached "cached and uncached generation should produce identical token ids"
@@ -921,8 +921,8 @@ def testQwen3ASRGreedyCachedMatchesUncachedWhenAudioTokenIsGenerated : IO Unit :
 
   LeanTest.assertEqual seqCached seqUncached
     "cached and uncached generation should stay aligned even when the generated token equals the audio placeholder id"
-  let flatCached : Tensor { shape := #[seqCached], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked idsCached #[seqCached]
-  let flatUncached : Tensor { shape := #[seqUncached], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked idsUncached #[seqUncached]
+  let flatCached : Tensor { shape := #[seqCached], dtype := .Int64, device := .CPU } := Tensor.reshape idsCached #[seqCached]
+  let flatUncached : Tensor { shape := #[seqUncached], dtype := .Int64, device := .CPU } := Tensor.reshape idsUncached #[seqUncached]
   let toksCached ← Tensor.toUInt64Array flatCached
   let toksUncached ← Tensor.toUInt64Array flatUncached
   LeanTest.assertEqual toksCached toksUncached
@@ -939,7 +939,7 @@ def testQwen3ASRMaskedPositionsMatchTrimmedLeftPad : IO Unit := do
   let vocab := cfg.thinkerConfig.textConfig.vocabSize.toInt64
   let ids ← Tensor.randint 0 vocab #[batch, seq]
   let maskVals : Array Int64 := #[0, 0, 1, 1, 1, 1]
-  let attnMask : Tensor { shape := #[batch, seq], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked (Tensor.fromInt64Array maskVals) #[batch, seq]
+  let attnMask : Tensor { shape := #[batch, seq], dtype := .Int64, device := .CPU } := Tensor.reshape (Tensor.fromInt64Array maskVals) #[batch, seq]
 
   let logitsMasked ← model.forward
     ids
@@ -1114,8 +1114,8 @@ def testQwen3ASRForcedAlignFromOutputIds : IO Unit := do
   let timestampTokenId : UInt64 := 99
   let inputVals : Array Int64 := #[1, 99, 99, 7, 99, 99]
   let outputVals : Array Int64 := #[0, 10, 20, 0, 30, 40]
-  let inputIds : Tensor { shape := #[batch, seq], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked (Tensor.fromInt64Array inputVals) #[batch, seq]
-  let outputIds : Tensor { shape := #[batch, seq], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked (Tensor.fromInt64Array outputVals) #[batch, seq]
+  let inputIds : Tensor { shape := #[batch, seq], dtype := .Int64, device := .CPU } := Tensor.reshape (Tensor.fromInt64Array inputVals) #[batch, seq]
+  let outputIds : Tensor { shape := #[batch, seq], dtype := .Int64, device := .CPU } := Tensor.reshape (Tensor.fromInt64Array outputVals) #[batch, seq]
   let wordLists : Array (Array String) := #[#["a", "b"]]
   let results ← alignFromOutputIds inputIds outputIds wordLists timestampTokenId 10.0
   let r := results.getD 0 { items := #[] }

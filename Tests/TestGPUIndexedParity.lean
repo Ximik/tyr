@@ -55,7 +55,7 @@ example (a : Tensor { shape := #[2], dtype := .Float32, device := .CPU }) (b : T
   let cos := Tensor.zeros #[2, 32]
   let sin := Tensor.ones #[2, 32]
   let signs := Tensor.fromFloatArray ((Array.replicate 32 (-1.0)) ++ Array.replicate 32 1.0)
-    |>.reshapeChecked #[1, 1, 1, 64]
+    |>.reshape #[1, 1, 1, 64]
   for dtype in #[DType.Float32, DType.BFloat16] do
     let q := (Tensor.full #[1, 2, 2, 64] 1.0).castDType dtype
     let k := (Tensor.full #[1, 2, 1, 64] 2.0).castDType dtype
@@ -136,7 +136,7 @@ example (inputs : Examples.GPU.RunLayerNorm.LayerNormInputs .Float32) : True := 
 
 @[test] def testGPULossIndexedTrainingReference : IO Unit := do
   let logits := (Tensor.zeros #[2, 3072]).toBFloat16
-  let targets := (Tensor.fromInt64Array #[0, 3071]).reshapeChecked #[2]
+  let targets := (Tensor.fromInt64Array #[0, 3071]).reshape #[2]
   let (losses, mean, gradient) ← Examples.GPU.RunLoss.referenceTraining logits targets
   LeanTest.assertEqual losses.actualSpec.dtype DType.Float32
   LeanTest.assertEqual mean.actualSpec.dtype DType.Float32
@@ -145,7 +145,7 @@ example (inputs : Examples.GPU.RunLayerNorm.LayerNormInputs .Float32) : True := 
   LeanTest.assertTrue ((mean.item - Float.log 3072.0).abs < 1e-5)
   let expected := Tensor.fromFloatArray ((Array.range 6144).map fun i =>
     ((1.0 / 3072.0) - (if i == 0 || i == 6143 then 1.0 else 0.0)) / 2.0)
-    |>.reshapeChecked #[2, 3072] |>.toBFloat16
+    |>.reshape #[2, 3072] |>.toBFloat16
   LeanTest.assertTrue (Tensor.allclose gradient.toFloat32 expected.toFloat32 0 0)
 
 @[test] def testGPUOptimizerIndexedReference : IO Unit := do
@@ -164,7 +164,7 @@ example (inputs : Examples.GPU.RunLayerNorm.LayerNormInputs .Float32) : True := 
     let expectedV := gradients.map (fun g => 0.75 * v0 + 0.25 * g * g)
     let expected := Tensor.fromFloatArray ((Array.range 3).map fun i =>
       masters[i]! - 0.01 * (2.0 * expectedM[i]! / (Float.sqrt (4.0 * expectedV[i]!) + 1e-8)
-        + 0.1 * masters[i]!)) |>.reshapeChecked #[3]
+        + 0.1 * masters[i]!)) |>.reshape #[3]
     LeanTest.assertTrue (Tensor.allclose updated expected 0 1e-6)
     LeanTest.assertTrue (Tensor.allclose model.toFloat32 expected.toBFloat16.toFloat32 0 0)
     LeanTest.assertTrue (Tensor.allclose m1 ((Tensor.fromFloatArray expectedM).reshapeChecked #[3]) 0 1e-6)
@@ -186,13 +186,13 @@ example (a : Tensor { shape := #[2], dtype := .Float32, device := .CPU }) (b : T
   trivial
 
 @[test] def testGPUGemmIndexedReference : IO Unit := do
-  let a := (Tensor.fromFloatArray #[1, 2, -1, 0.5]).reshapeChecked #[2, 2] |>.toBFloat16
-  let b := (Tensor.fromFloatArray #[3, 4, 0, 2, -2, 1]).reshapeChecked #[3, 2] |>.toBFloat16
+  let a := (Tensor.fromFloatArray #[1, 2, -1, 0.5]).reshape #[2, 2] |>.toBFloat16
+  let b := (Tensor.fromFloatArray #[3, 4, 0, 2, -2, 1]).reshape #[3, 2] |>.toBFloat16
   let output := Examples.GPU.gemmReference a b
-  let expected := (Tensor.fromFloatArray #[11, 4, 0, -1, 1, 2.5]).reshapeChecked #[2, 3]
+  let expected := (Tensor.fromFloatArray #[11, 4, 0, -1, 1, 2.5]).reshape #[2, 3]
   LeanTest.assertEqual output.actualSpec.dtype DType.Float32
   LeanTest.assertTrue (Tensor.allclose output expected 0 0)
-  let cancellation := (Tensor.fromFloatArray #[256, 1, -256]).reshapeChecked #[1, 3] |>.toBFloat16
+  let cancellation := (Tensor.fromFloatArray #[256, 1, -256]).reshape #[1, 3] |>.toBFloat16
   let ones := (Tensor.ones #[1, 3]).toBFloat16
   LeanTest.assertTrue (Tensor.allclose (Examples.GPU.gemmReference cancellation ones)
     (Tensor.ones #[1, 1]) 0 0)

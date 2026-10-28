@@ -155,7 +155,7 @@ def testTokenBytesExactPersistence : IO Unit := IO.FS.withTempDir fun dir => do
   mapping.save path
   let loaded ← tokenizer.TokenBytes.load path 4
   LeanTest.assertEqual (← loaded.bytes.toUInt64Array) #[2, 2, 2, 2]
-  Tensor.saveTensor (mapping.bytes.reshapeChecked #[2, 2]) path
+  Tensor.saveTensor (mapping.bytes.reshape #[2, 2]) path
   Tests.assertThrows (tokenizer.TokenBytes.load path 4) (some "shape")
   Tensor.saveTensor (Tensor.ones #[4]) path
   Tests.assertThrows (tokenizer.TokenBytes.load path 4) (some "dtype")

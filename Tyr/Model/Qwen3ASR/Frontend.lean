@@ -663,8 +663,8 @@ def waveformToWhisperFeaturesDynamic
       Tensor.sliceChecked stftTrim 2 0 1 #[freqBins, frames, 1]
     let im3 : Tensor { device := runDevice, shape := #[freqBins, frames, 1], dtype := .Float32 } :=
       Tensor.sliceChecked stftTrim 2 1 1 #[freqBins, frames, 1]
-    let re : Tensor { device := runDevice, shape := #[freqBins, frames], dtype := .Float32 } := Tensor.reshapeChecked re3 #[freqBins, frames]
-    let im : Tensor { device := runDevice, shape := #[freqBins, frames], dtype := .Float32 } := Tensor.reshapeChecked im3 #[freqBins, frames]
+    let re : Tensor { device := runDevice, shape := #[freqBins, frames], dtype := .Float32 } := Tensor.reshape re3 #[freqBins, frames]
+    let im : Tensor { device := runDevice, shape := #[freqBins, frames], dtype := .Float32 } := Tensor.reshape im3 #[freqBins, frames]
     let powerSpec : Tensor { device := runDevice, shape := #[freqBins, frames], dtype := .Float32 } := re * re + im * im
 
     let melFilterFlat := buildSlaneyMelFilterBankFlat freqBins melBins cfg.samplingRate

@@ -92,7 +92,7 @@ def testReplacementChecksExactDType : IO Unit := do
 
 @[test]
 def testExplicitConversionsCheckNativeResults : IO Unit := do
-  let original := (Tensor.fromFloatArray #[1.25, 2.75, 3.5, 4.5]).reshapeChecked #[2, 2]
+  let original := (Tensor.fromFloatArray #[1.25, 2.75, 3.5, 4.5]).reshape #[2, 2]
   match original.castDType? .Int64 with
   | .error message => LeanTest.fail message
   | .ok converted =>
@@ -165,7 +165,7 @@ example (_input : Tensor { shape := #[1, 2, 5], dtype := .Float32, device := .CP
 
 @[test]
 def testTypedConv1dValuesAndMetadata : IO Unit := do
-  let input := (Tensor.fromFloatArray #[1, 2, 3, 4, 5]).reshapeChecked #[1, 1, 5]
+  let input := (Tensor.fromFloatArray #[1, 2, 3, 4, 5]).reshape #[1, 1, 5]
   let weight := Tensor.ones #[1, 1, 3]
   let plain : Tensor { shape := #[1, 1, 3], dtype := .Float32, device := .CPU } := input.conv1d weight
   LeanTest.assertEqual (← plain.toFloatArray) #[6.0, 9.0, 12.0]

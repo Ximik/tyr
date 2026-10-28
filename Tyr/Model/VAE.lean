@@ -43,8 +43,8 @@ def invNormalize (ae : (AutoEncoder (device := device) dtypes)) (z : Tensor { dt
   let var_plus_eps := Tensor.addScalar ae.bn_running_var bn_eps
   let scale := Tensor.sqrt var_plus_eps
   -- Reshape and expand for element-wise ops: [128] → [1, 128, 1, 1] → [1, 128, 16, 16]
-  let scale := Tensor.reshapeChecked scale #[1, 128, 1, 1]
-  let mean := Tensor.reshapeChecked ae.bn_running_mean #[1, 128, 1, 1]
+  let scale := Tensor.reshape scale #[1, 128, 1, 1]
+  let mean := Tensor.reshape ae.bn_running_mean #[1, 128, 1, 1]
   -- Expand channel statistics over the spatial dimensions.
   let scale := Tensor.expand scale #[1, 128, 16, 16]
   let mean := Tensor.expand mean #[1, 128, 16, 16]

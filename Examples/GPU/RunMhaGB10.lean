@@ -47,7 +47,7 @@ def generateFixtures : IO Unit := do
   let expectedOut := Tensor.attentionGQA q k v false
 
   let (_, lse) := attentionReference q k v
-  let expectedL := (Tensor.mulScalar lse (-8.0)).reshapeChecked #[2, 64]
+  let expectedL := (Tensor.mulScalar lse (-8.0)).reshape #[2, 64]
   let (_, expectedDQ, expectedDK, expectedDV) ← attentionTrainingReference q k v dO
 
   Tensor.saveTensor q (fixtureFile "q").toString
@@ -208,13 +208,13 @@ private def benchmarkBackwardS768 (cfg : Benchmark.Config) (stream : UInt64) (ba
   let launchForward := tkMhaGb10FwdS768D64Warp4.launch q.raw k.raw v.raw out.raw lOut32.raw 768 64 16
     6 16 batch 128 1 1 0 stream
   launchForward
-  let lOut : Tensor { shape := #[batch * 768, 16], dtype := .Float32, device := device } := Tensor.reshapeChecked lOut32 #[batch * 768, 16]
+  let lOut : Tensor { shape := #[batch * 768, 16], dtype := .Float32, device := device } := Tensor.reshape lOut32 #[batch * 768, 16]
   torch.cuda_synchronize
   let dVec ← Tensor.uniformLike lOut 0 0
   let dO32 := dO.toFloat32
   let out32 := out.toFloat32
   let expectedD3 : Tensor { shape := #[batch, 16, 768], dtype := .Float32, device := device } := (Tensor.sumDim (dO32 * out32) 3 false).reshapeChecked #[batch, 16, 768]
-  let expectedD : Tensor { shape := #[batch * 768, 16], dtype := .Float32, device := device } := Tensor.reshapeChecked expectedD3 #[batch * 768, 16]
+  let expectedD : Tensor { shape := #[batch * 768, 16], dtype := .Float32, device := device } := Tensor.reshape expectedD3 #[batch * 768, 16]
   let dQ ← Tensor.uniformLike q 0 0
   let dK ← Tensor.uniformLike k 0 0
   let dV ← Tensor.uniformLike v 0 0
@@ -302,8 +302,8 @@ private def runBenchmark (args : List String) : IO UInt32 := do
   let dVec ← Tensor.uniformLike lOut 0 0
   let dO32 := dO.toFloat32
   let out32 := out.toFloat32
-  let expectedD3 : Tensor { shape := #[1, 1, 128], dtype := .Float32, device := device } := (Tensor.sumDim (dO32 * out32) 3 false).reshapeChecked #[1, 1, 128]
-  let expectedD : Tensor { shape := #[2, 64], dtype := .Float32, device := device } := Tensor.reshapeChecked expectedD3 #[2, 64]
+  let expectedD3 : Tensor { shape := #[1, 1, 128], dtype := .Float32, device := device } := (Tensor.sumDim (dO32 * out32) 3 false).reshape #[1, 1, 128]
+  let expectedD : Tensor { shape := #[2, 64], dtype := .Float32, device := device } := Tensor.reshape expectedD3 #[2, 64]
   let dQ ← Tensor.uniformLike (Tensor.zeros #[1, 1, 128, 64] false device) 0 0
   -- Each mutable gradient buffer is independently allocated through IO.
   let dK ← Tensor.uniformLike dQ 0 0

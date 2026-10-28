@@ -127,7 +127,7 @@ def generatedIdsFromBatch
   let mut out : Array (Array UInt64) := #[]
   for i in [:batch] do
     let row2 : Tensor { shape := #[1, outSeq], dtype := .Int64, device := device } := ids.sliceChecked 0 i 1 #[1, outSeq]
-    let row1 : Tensor { shape := #[outSeq], dtype := .Int64, device := device } := Tensor.reshapeChecked row2 #[outSeq]
+    let row1 : Tensor { shape := #[outSeq], dtype := .Int64, device := device } := Tensor.reshape row2 #[outSeq]
     let vals ← Tensor.toUInt64Array row1
     let promptLen := promptLens.getD i 0
     let gen :=
@@ -182,7 +182,7 @@ def makeStreamCallback
     {batch : Nat}
     (chunkStart : Nat)
     : StreamCallback (device := device) batch := fun _step nextTok => do
-  let flat : Tensor { shape := #[batch], dtype := .Int64, device := device } := Tensor.reshapeChecked nextTok #[batch]
+  let flat : Tensor { shape := #[batch], dtype := .Int64, device := device } := Tensor.reshape nextTok #[batch]
   let vals ← Tensor.toUInt64Array flat
   if batch == 1 then
     match vals[0]? with

@@ -236,14 +236,14 @@ private def loadPackedExpertBanks (src : WeightSource) (p : String) (cfg : Confi
     let ds ← requireDType .Float8E4M3FN ds
     let dg ← src.loadGlobal s!"{ep}.down_proj.weight_global_scale"
     let dg ← requireDType .Float32 dg
-    gateP := gateP.push ((Tensor.reshapeChecked gp #[1, mi, h / 2]).packShape)
-    gateS := gateS.push ((Tensor.reshapeChecked gs #[1, mi, h / 16]).packShape)
+    gateP := gateP.push ((Tensor.reshape gp #[1, mi, h / 2]).packShape)
+    gateS := gateS.push ((Tensor.reshape gs #[1, mi, h / 16]).packShape)
     gateG := gateG.push gg.packShape
-    upP := upP.push ((Tensor.reshapeChecked up #[1, mi, h / 2]).packShape)
-    upS := upS.push ((Tensor.reshapeChecked us #[1, mi, h / 16]).packShape)
+    upP := upP.push ((Tensor.reshape up #[1, mi, h / 2]).packShape)
+    upS := upS.push ((Tensor.reshape us #[1, mi, h / 16]).packShape)
     upG := upG.push ug.packShape
-    downP := downP.push ((Tensor.reshapeChecked dp #[1, h, mi / 2]).packShape)
-    downS := downS.push ((Tensor.reshapeChecked ds #[1, h, mi / 16]).packShape)
+    downP := downP.push ((Tensor.reshape dp #[1, h, mi / 2]).packShape)
+    downS := downS.push ((Tensor.reshape ds #[1, h, mi / 16]).packShape)
     downG := downG.push dg.packShape
   pure {
     gatePacked := (← stackBank .UInt8 gateP #[e, mi, h / 2] device)
@@ -290,8 +290,8 @@ private def loadSparseMoe (src : WeightSource) (cfg : Config) (layerIdx : Nat)
       let gu ← requireDType dtype gu
       -- Layout A: fused dense banks; dim-1 first half gate, second half up.
       let down ← src.loadCandidates (nameCandidates s!"{p}.experts.down_proj") #[e, h, mi] device
-      let gate3 : Tensor { device := device, dtype := dtype, shape := #[e, mi, h] } := Tensor.reshapeChecked (sliceTyped gu 1 0 mi) #[e, mi, h]
-      let up3 : Tensor { device := device, dtype := dtype, shape := #[e, mi, h] } := Tensor.reshapeChecked (sliceTyped gu 1 mi mi) #[e, mi, h]
+      let gate3 : Tensor { device := device, dtype := dtype, shape := #[e, mi, h] } := Tensor.reshape (sliceTyped gu 1 0 mi) #[e, mi, h]
+      let up3 : Tensor { device := device, dtype := dtype, shape := #[e, mi, h] } := Tensor.reshape (sliceTyped gu 1 mi mi) #[e, mi, h]
       let dense : LagunaDenseExperts (device := device) cfg dtype := {
         gateProj := reqGradFalse gate3
         upProj := reqGradFalse up3

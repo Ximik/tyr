@@ -61,7 +61,7 @@ private def textModel (c : Config) (dtype : DType := .Float32) : Gemma4ForCausal
     lmHead := weight #[c.vocab_size, c.hidden_size] 1.6 dtype }
 
 private def ids : Tensor { shape := #[1, 7], dtype := .Int64, device := .CPU } :=
-  (Tensor.fromInt64Array #[2, 4, 7, 3, 9, 5, 11]).reshapeChecked #[1, 7]
+  (Tensor.fromInt64Array #[2, 4, 7, 3, 9, 5, 11]).reshape #[1, 7]
 
 private def close {σ τ : StaticSpec} (x : Tensor σ) (y : Tensor τ) (tol : Float := 1e-4) : IO Unit := do
   LeanTest.assertEqual x.runtimeShape y.runtimeShape
@@ -139,8 +139,8 @@ private def roundTrip {α : Type} [TensorStruct α] (params : α) (dir : String)
   let x := weight #[2, 4] 0.4
   let gate := weight #[3, 12, 4] 0.6
   let down := weight #[3, 4, 6] 0.8
-  let indices := (Tensor.fromInt64Array #[2, 0, 1, 2]).reshapeChecked #[2, 2]
-  let weights := (Tensor.fromFloatArray #[0.7, 0.3, 0.2, 0.8]).reshapeChecked #[2, 2]
+  let indices := (Tensor.fromInt64Array #[2, 0, 1, 2]).reshape #[2, 2]
+  let weights := (Tensor.fromFloatArray #[0.7, 0.3, 0.2, 0.8]).reshape #[2, 2]
   let actual := routedTextExpertsForward x gate down weights indices
   let mut expected := qwen35.zerosDynamic #[2, 4]
   let expertIds ← indices.toUInt64Array
@@ -150,10 +150,10 @@ private def roundTrip {α : Type} [TensorStruct α] (params : α) (dir : String)
     let mut sum := qwen35.zerosDynamic #[1, 4]
     for slot in [:2] do
       let e := expertIds[token * 2 + slot]!.toNat
-      let gu := (gate.sliceChecked 0 e 1 #[1, 12, 4]).reshapeChecked #[12, 4]
+      let gu := (gate.sliceChecked 0 e 1 #[1, 12, 4]).reshape #[12, 4]
       let g := Tensor.linear row (gu.sliceChecked 0 0 6 #[6, 4])
       let u := Tensor.linear row (gu.sliceChecked 0 6 6 #[6, 4])
-      let dw := (down.sliceChecked 0 e 1 #[1, 4, 6]).reshapeChecked #[4, 6]
+      let dw := (down.sliceChecked 0 e 1 #[1, 4, 6]).reshape #[4, 6]
       sum := Tensor.add sum (Tensor.mulScalar
         (Tensor.linear (Tensor.mul (Tensor.gelu g) u) dw) scales[token * 2 + slot]!)
     expected := Tensor.sliceScatter expected 0 token sum
@@ -197,7 +197,7 @@ private def multimodalModel (dtype : DType := .Float32) : Gemma4ForConditionalGe
     weight := (Tensor.eye 2)
     input_min := some (-1.0), input_max := some 1.0
     output_min := some (-0.5), output_max := some 0.5 }
-  let input := (Tensor.fromFloatArray #[-2.0, 3.0]).reshapeChecked #[1, 2]
+  let input := (Tensor.fromFloatArray #[-2.0, 3.0]).reshape #[1, 2]
   LeanTest.assertEqual (← (clipped.forward2d input).toFloatArray) #[-0.5, 0.5]
   let a := weight #[4, 4, 12] 0.1
   let b := weight #[2, 4, 12] 0.2
@@ -218,7 +218,7 @@ private def multimodalModel (dtype : DType := .Float32) : Gemma4ForConditionalGe
     let m := multimodalModel dtype
     let features := m.getImageFeatures vlCfg (weight #[4, 4, 12] 0.1)
     LeanTest.assertEqual features.actualSpec.dtype (if bf16 then .BFloat16 else .Float32)
-    let prompt := (Tensor.fromInt64Array #[2, 15, 15, 15, 15, 3, 4]).reshapeChecked #[1, 7]
+    let prompt := (Tensor.fromInt64Array #[2, 15, 15, 15, 15, 3, 4]).reshape #[1, 7]
     let out ← m.forwardWithImageFeatures vlCfg prompt features
     LeanTest.assertEqual out.runtimeShape #[1, 7, 16]
     for value in (← out.toFloatArray) do LeanTest.assertTrue value.isFinite

@@ -63,11 +63,11 @@ def testQwen3TTSInitAndCapabilities : IO Unit := do
 
 @[test]
 def testQwen3TTSRMSNormModelDType : IO Unit := do
-  let input : Tensor { shape := #[2, 3, 4], dtype := .Float32, device := .CPU } := Tensor.reshapeChecked (Tensor.fromFloatArray
+  let input : Tensor { shape := #[2, 3, 4], dtype := .Float32, device := .CPU } := Tensor.reshape (Tensor.fromFloatArray
     #[0.17, -0.41, 0.83, 1.27, 0.9, 0.5, -0.7, 1.1,
       -0.6, 1.3, 0.2, -0.9, 1.2, 0.4, -0.8, 0.6,
       0.3, -1.1, 0.7, 0.2, -0.5, 0.8, 1.4, -0.2]) #[2, 3, 4]
-  let weight : Tensor { shape := #[4], dtype := .Float32, device := .CPU } := Tensor.reshapeChecked (Tensor.fromFloatArray #[0.73, 1.19, -0.67, 1.53]) #[4]
+  let weight : Tensor { shape := #[4], dtype := .Float32, device := .CPU } := Tensor.reshape (Tensor.fromFloatArray #[0.73, 1.19, -0.67, 1.53]) #[4]
   for bf16 in #[false, true] do
     let selected : RealFloatingDType :=
       if bf16 then ⟨.BFloat16, by decide⟩ else ⟨.Float32, by decide⟩
@@ -84,12 +84,12 @@ def testQwen3TTSRMSNormModelDType : IO Unit := do
     LeanTest.assertEqual actual.actualSpec.dtype x.actualSpec.dtype "RMSNorm preserves matching FP32/BF16 model dtype"
     LeanTest.assertEqual (Tensor.item (Tensor.maxAllChecked (Tensor.abs (Tensor.sub actual.toFloat32 expected.toFloat32)))) 0.0
       "RMSNorm restores activation dtype before applying non-unit weights"
-    for output in #[(norm.forward2d (Tensor.reshapeChecked x #[6, 4])).reshapeChecked #[2, 3, 4],
-        (norm.forward4d (Tensor.reshapeChecked x #[1, 2, 3, 4])).reshapeChecked #[2, 3, 4],
-        (norm.forward5d (Tensor.reshapeChecked x #[1, 2, 3, 4])).reshapeChecked #[2, 3, 4]] do
+    for output in #[(norm.forward2d (Tensor.reshape x #[6, 4])).reshape #[2, 3, 4],
+        (norm.forward4d (Tensor.reshape x #[1, 2, 3, 4])).reshape #[2, 3, 4],
+        (norm.forward5d (Tensor.reshape x #[1, 2, 3, 4])).reshape #[2, 3, 4]] do
       LeanTest.assertEqual output.actualSpec.dtype x.actualSpec.dtype "All RMSNorm module layouts preserve model dtype"
       LeanTest.assertEqual (Tensor.item (Tensor.maxAllChecked (Tensor.abs
-        (Tensor.sub (Tensor.reshapeChecked output #[2, 3, 4]).toFloat32 expected.toFloat32)))) 0.0
+        (Tensor.sub (Tensor.reshape output #[2, 3, 4]).toFloat32 expected.toFloat32)))) 0.0
         "RMSNorm layout wrappers agree"
     LeanTest.assertEqual (if bf16 then (Tensor.rmsNormWeighted x.toBFloat16 w.toBFloat16 0.01).actualSpec.dtype
       else (Tensor.rmsNormWeighted x.toFloat32 w.toFloat32 0.01).actualSpec.dtype) DType.Float32
@@ -98,7 +98,7 @@ def testQwen3TTSRMSNormModelDType : IO Unit := do
 @[test]
 def testQwen3TTSBFloat16IncrementalCache : IO Unit := do
   torch.manualSeed 7341
-  let inputs : Tensor { shape := #[1, 5, 8], dtype := .Float32, device := .CPU } := Tensor.reshapeChecked
+  let inputs : Tensor { shape := #[1, 5, 8], dtype := .Float32, device := .CPU } := Tensor.reshape
     (Tensor.mulScalar (Tensor.sin (Tensor.toFloat32 (Tensor.arange 40))) 0.5) #[1, 5, 8]
   let (cos, sin) := Tensor.rotaryFreqs 5 4 10000
   for bf16 in #[false, true] do
@@ -185,8 +185,8 @@ def testQwen3TTSGenerateFromText : IO Unit := do
 
   -- Verify padded output shape by materializing first codebook and flattening.
   let firstBook3 : Tensor { shape := #[batch, maxFrames, 1], dtype := .Int64, device := .CPU } := Tensor.sliceChecked out.codes 2 0 1 #[batch, maxFrames, 1]
-  let firstBook2 : Tensor { shape := #[batch, maxFrames], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked firstBook3 #[batch, maxFrames]
-  let flat : Tensor { shape := #[batch * maxFrames], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked firstBook2 #[batch * maxFrames]
+  let firstBook2 : Tensor { shape := #[batch, maxFrames], dtype := .Int64, device := .CPU } := Tensor.reshape firstBook3 #[batch, maxFrames]
+  let flat : Tensor { shape := #[batch * maxFrames], dtype := .Int64, device := .CPU } := Tensor.reshape firstBook2 #[batch * maxFrames]
   let toks ← Tensor.toUInt64Array flat
   LeanTest.assertEqual toks.size (batch * maxFrames) "flattened token count should match batch*frames"
 
@@ -210,8 +210,8 @@ def testQwen3TTSGenerateFromInstructText : IO Unit := do
   LeanTest.assertEqual out.lengths.size batch "lengths should have one value per batch row"
 
   let firstBook3 : Tensor { shape := #[batch, maxFrames, 1], dtype := .Int64, device := .CPU } := Tensor.sliceChecked out.codes 2 0 1 #[batch, maxFrames, 1]
-  let firstBook2 : Tensor { shape := #[batch, maxFrames], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked firstBook3 #[batch, maxFrames]
-  let flat : Tensor { shape := #[batch * maxFrames], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked firstBook2 #[batch * maxFrames]
+  let firstBook2 : Tensor { shape := #[batch, maxFrames], dtype := .Int64, device := .CPU } := Tensor.reshape firstBook3 #[batch, maxFrames]
+  let flat : Tensor { shape := #[batch * maxFrames], dtype := .Int64, device := .CPU } := Tensor.reshape firstBook2 #[batch * maxFrames]
   let toks ← Tensor.toUInt64Array flat
   LeanTest.assertEqual toks.size (batch * maxFrames) "flattened token count should match batch*frames"
 
