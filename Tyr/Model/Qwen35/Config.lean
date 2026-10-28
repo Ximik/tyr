@@ -87,7 +87,11 @@ structure Qwen35Config where
   pad_token_id : Option UInt64 := none
   bos_token_id : Option UInt64 := none
   eos_token_id : Option UInt64 := none
-  deriving Repr, Inhabited
+  /-- Linear-attention value heads are a whole multiple of key heads; checked when the config is built. -/
+  linearKeyHeadsDivide : linear_num_key_heads ∣ linear_num_value_heads := by decide
+  deriving Repr
+
+instance : Inhabited Qwen35Config := ⟨{}⟩
 
 namespace Qwen35Config
 
@@ -262,6 +266,14 @@ def numHeadsPerKVGroup (cfg : Qwen35Config) : Nat :=
 def linearKVRepeat (cfg : Qwen35Config) : Nat :=
   if cfg.linear_num_key_heads == 0 then 1 else cfg.linear_num_value_heads / cfg.linear_num_key_heads
 
+theorem linear_key_heads_mul_repeat (cfg : Qwen35Config) :
+    cfg.linear_num_key_heads * linearKVRepeat cfg = cfg.linear_num_value_heads := by
+  have h := cfg.linearKeyHeadsDivide
+  unfold linearKVRepeat
+  split
+  · simp_all [Nat.eq_zero_of_zero_dvd]
+  · exact Nat.mul_div_cancel' h
+
 /-- Whether this config uses MoE FFN blocks. -/
 def isMoE (cfg : Qwen35Config) : Bool :=
   cfg.num_experts > 0 && cfg.num_experts_per_tok > 0
@@ -316,6 +328,10 @@ def rotaryHalfDim (cfg : Config) : Nat := Qwen35Config.rotaryHalfDim cfg
 @[simp] def linearConvDim (cfg : Config) : Nat := Qwen35Config.linearConvDim cfg
 
 def linearKVRepeat (cfg : Config) : Nat := Qwen35Config.linearKVRepeat cfg
+
+theorem linear_key_heads_mul_repeat (cfg : Config) :
+    cfg.linear_num_key_heads * linearKVRepeat cfg = cfg.linear_num_value_heads :=
+  Qwen35Config.linear_key_heads_mul_repeat cfg
 
 def numHeadsPerKVGroup (cfg : Config) : Nat := Qwen35Config.numHeadsPerKVGroup cfg
 

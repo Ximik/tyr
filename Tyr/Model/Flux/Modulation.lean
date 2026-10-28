@@ -75,8 +75,8 @@ def forward {batch hidden_size : Nat} (isDouble : Bool)
   -- Project to modulation vectors
   let out := Tensor.linear vec mod.lin  -- [batch, num_mods * hidden_size]
   -- Reshape to [batch, num_mods, hidden_size]
-  let numMods := if isDouble then 6 else 3
-  Tensor.reshapeChecked out #[batch, numMods, hidden_size]
+  Tensor.reshape out #[batch, if isDouble then 6 else 3, hidden_size]
+    (by cases isDouble <;> simp [Nat.mul_assoc])
 
 end Modulation
 

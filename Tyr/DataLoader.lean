@@ -48,13 +48,14 @@ structure Config where
 
 /-- Validate the batch token count before it reaches native code.
     `extra` is used for the additional GPT target token in each row. -/
-def checkedBatchTokens (batchSize seqLen : Nat) (extra : Nat := 0) : IO Nat := do
+def checkedBatchTokens (batchSize seqLen : Nat) (extra : Nat := 0) :
+    IO { count : Nat // count = batchSize * (seqLen + extra) } := do
   if batchSize == 0 || seqLen == 0 then
     throw <| IO.userError "Batch size and sequence length must be positive"
   let count := batchSize * (seqLen + extra)
   if count > 9223372036854775807 then
     throw <| IO.userError "Batch token count exceeds the native signed 64-bit range"
-  return count
+  return ⟨count, rfl⟩
 
 /-! ## Path Resolution -/
 
@@ -189,13 +190,14 @@ def BOSFinder.take (finder : BOSFinder) {n : Nat} (tokens : Tensor { shape := #[
 def BOSFinder.getBatch (finder : BOSFinder) {n : Nat} (tokens : Tensor { shape := #[n], dtype := .Int64, device := device })
     (batchSize seqLen : Nat)
     : IO (Option (Tensor { shape := #[batchSize, seqLen], dtype := .Int64, device := device }) × BOSFinder) := do
-  let requiredLen ← checkedBatchTokens batchSize seqLen
+  let ⟨requiredLen, hRequired⟩ ← checkedBatchTokens batchSize seqLen
   if finder.currentPos > finder.dataLen then
     throw <| IO.userError "Data cursor position exceeds shard length"
-  if requiredLen > finder.dataLen - finder.currentPos then return (none, finder)
-  let (batch, finder) ← finder.take tokens requiredLen
-  -- `take` returned exactly `requiredLen = batchSize * seqLen` tokens here.
-  return (some (batch.reshapeChecked #[batchSize, seqLen]), finder)
+  if hFits : requiredLen ≤ finder.dataLen - finder.currentPos then
+    let (batch, finder) ← finder.take tokens requiredLen
+    return (some (batch.reshape #[batchSize, seqLen] (by rw [Nat.min_eq_left hFits, hRequired]; simp)), finder)
+  else
+    return (none, finder)
 
 def BOSFinder.reset (finder : BOSFinder) : BOSFinder :=
   { finder with currentPos := 0 }
@@ -491,9 +493,9 @@ def DistributedDataGenerator.nextTokens (gen : DistributedDataGenerator) (count 
 def DistributedDataGenerator.nextBatch (gen : DistributedDataGenerator)
     : IO (Option (Tensor { shape := #[gen.iterator.batchSize, gen.iterator.seqLen], dtype := .Int64, device := .CPU }) ×
           DistributedDataGenerator) := do
-  let count ← checkedBatchTokens gen.iterator.batchSize gen.iterator.seqLen
+  let ⟨count, hCount⟩ ← checkedBatchTokens gen.iterator.batchSize gen.iterator.seqLen
   let (tokens, gen') ← gen.nextTokens count
-  return (some (tokens.reshapeChecked #[gen.iterator.batchSize, gen.iterator.seqLen]), gen')
+  return (some (tokens.reshape #[gen.iterator.batchSize, gen.iterator.seqLen] (by simp [hCount])), gen')
 
 def DistributedDataGenerator.batchSize (gen : DistributedDataGenerator) : Nat :=
   gen.iterator.batchSize

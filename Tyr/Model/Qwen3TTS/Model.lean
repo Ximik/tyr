@@ -58,7 +58,9 @@ def extractSpeakerEmbedding {batch frames : Nat} {inputDType : DType}
       -- Mel features are an explicit preprocessing boundary. Conversion changes
       -- their dtype, while all speaker weights and activations share one index.
       let mel ← IO.ofExcept (mel.castDType? dtypes.speaker.val)
-      pure (enc.forward mel)
+      let ⟨hf⟩ ← if h : 0 < frames then pure (PLift.up h) else
+        throw (IO.userError "Speaker embedding needs at least one mel frame")
+      pure (enc.forward hf mel)
   | none => throw (IO.userError "Speaker encoder is unavailable for this Qwen3-TTS model type")
 
 /-- Build talker input embeddings from text token IDs (`[batch, textSeq]`).

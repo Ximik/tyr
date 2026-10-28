@@ -18,6 +18,7 @@ private def tinyCfg : Config := Config.normalize {
   linear_value_head_dim := 4
   linear_num_key_heads := 2
   linear_num_value_heads := 4
+  linearKeyHeadsDivide := by decide
   layer_types := #[.linearAttention, .fullAttention]
   moe_intermediate_size := 8
   shared_expert_intermediate_size := 8

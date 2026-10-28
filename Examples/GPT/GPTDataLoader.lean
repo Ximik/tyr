@@ -51,9 +51,9 @@ def DistributedDataGenerator.nextBatchGPT (gen : DistributedDataGenerator)
     : IO (Option (Tensor { shape := #[gen.iterator.batchSize, gen.iterator.seqLen], dtype := .Int64, device := .CPU } × Tensor { shape := #[gen.iterator.batchSize, gen.iterator.seqLen], dtype := .Int64, device := .CPU }) × DistributedDataGenerator) := do
   let b := gen.iterator.batchSize
   let s := gen.iterator.seqLen
-  let count ← checkedBatchTokens b s 1
+  let ⟨count, hCount⟩ ← checkedBatchTokens b s 1
   let (tokens, gen') ← gen.nextTokens count
-  let batch := tokens.reshapeChecked #[b, s + 1]
+  let batch := tokens.reshape #[b, s + 1] (by simp [hCount])
   let input := batch.sliceChecked 1 0 s #[b, s]
   let target := batch.sliceChecked 1 1 s #[b, s]
   return (some (input, target), gen')
@@ -65,7 +65,7 @@ def DistributedDataGenerator.updateForStepGPT (gen : DistributedDataGenerator)
     if step < 200 then (8, 3)
     else if step < 1000 then (16, 7)
     else (24, 11)
-  let seqLen ← checkedBatchTokens windowBlocks blockSize
+  let ⟨seqLen, _⟩ ← checkedBatchTokens windowBlocks blockSize
   let newIterator ← gen.iterator.updateParams batchSize seqLen
   return { gen with iterator := newIterator }
 
@@ -115,7 +115,7 @@ def SequentialLoader.getBatch {n : Nat} (loader : SequentialLoader n)
 
 def SequentialLoader.sampleRandomBatch {n : Nat} (loader : SequentialLoader n)
     (batchSize blockSize : Nat) : IO (Tensor { shape := #[batchSize, blockSize], dtype := .Int64, device := .CPU } × Tensor { shape := #[batchSize, blockSize], dtype := .Int64, device := .CPU }) := do
-  let requiredLen ← checkedBatchTokens batchSize blockSize 1
+  let ⟨requiredLen, hRequired⟩ ← checkedBatchTokens batchSize blockSize 1
   if requiredLen > n then
     throw <| IO.userError "SequentialLoader: batch exceeds available tokens"
   let choices := n - requiredLen + 1
@@ -124,7 +124,7 @@ def SequentialLoader.sampleRandomBatch {n : Nat} (loader : SequentialLoader n)
   let startIdx ← Tensor.randint 0 (Int64.ofNat choices) #[]
   let startPos := startIdx.itemInt.toInt.toNat
   let sliced := loader.tokens.sliceChecked 0 startPos requiredLen #[requiredLen]
-  let batch := sliced.reshapeChecked #[batchSize, blockSize + 1]
+  let batch := sliced.reshape #[batchSize, blockSize + 1] (by simp [hRequired])
   let input := batch.sliceChecked 1 0 blockSize #[batchSize, blockSize]
   let target := batch.sliceChecked 1 1 blockSize #[batchSize, blockSize]
   return (input, target)

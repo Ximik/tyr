@@ -59,19 +59,17 @@ def streamFromTalkerInputs {seq : Nat}
     (speechDecoder? : Option (Σ codecDTypes : SpeechTokenizerDTypes, SpeechTokenizer12HzDecoder (device := device) codecDTypes) := none)
     (callbacks : (StreamingCallbacks (device := device)) := {})
     : IO StreamingResult := do
-  let canStreamDecode : Bool :=
-    speechDecoder?.isSome && cfg.talkerConfig.numCodeGroups == 16
-
   let codeRowsRef ← IO.mkRef (#[] : Array (Array UInt64))
-  let decodeStateRef? : Option (IO.Ref (SpeechTokenizer12HzDecoder.DecodeStreamState (device := device) 1)) ←
-    if canStreamDecode then
+  let decodeStateRef? : Option (IO.Ref (SpeechTokenizer12HzDecoder.DecodeStreamState (device := device) 1) ×
+      PLift (cfg.talkerConfig.numCodeGroups = 16)) ←
+    if h16 : cfg.talkerConfig.numCodeGroups = 16 then
       match speechDecoder? with
       | some ⟨_, dec⟩ =>
         let st : SpeechTokenizer12HzDecoder.DecodeStreamState (device := device) 1 :=
           SpeechTokenizer12HzDecoder.initDecodeStreamState
             opts.decodeChunkSize opts.decodeLeftContext dec.preConvWeight.device
         let stRef ← IO.mkRef st
-        pure (some stRef)
+        pure (some (stRef, ⟨h16⟩))
       | none =>
         pure none
     else
@@ -86,8 +84,8 @@ def streamFromTalkerInputs {seq : Nat}
       codeRowsRef.modify (fun rows => rows.push rowVals)
       callbacks.onCodeFrame step rowVals
       match speechDecoder?, decodeStateRef? with
-      | some ⟨codecDTypes, dec⟩, some stRef =>
-          let frame16a : Tensor { shape := #[1, 16, 1], dtype := .Int64, device := device } := Tensor.reshapeChecked frame #[1, 16, 1]
+      | some ⟨codecDTypes, dec⟩, some (stRef, PLift.up h16) =>
+          let frame16a : Tensor { shape := #[1, 16, 1], dtype := .Int64, device := device } := Tensor.reshape frame #[1, 16, 1] (by simp [h16])
           let frame16 : Tensor { shape := #[1, 16, 1], dtype := .Int64, device := device } :=
             frame16a.to dec.preConvWeight.device
           let st ← stRef.get
@@ -108,7 +106,7 @@ def streamFromTalkerInputs {seq : Nat}
     opts.subtalkerTemperaturesByGroup opts.subtalkerTopKsByGroup opts.subtalkerTopPsByGroup
 
   match speechDecoder?, decodeStateRef? with
-  | some ⟨codecDTypes, dec⟩, some stRef =>
+  | some ⟨codecDTypes, dec⟩, some (stRef, _) =>
       let st ← stRef.get
       let (_stFinal, chunks) := dec.flushDecodeStream st
       for chunk in chunks do

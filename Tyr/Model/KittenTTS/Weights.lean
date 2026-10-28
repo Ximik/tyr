@@ -153,125 +153,53 @@ private def adaIN1dFromLinear {styleDim channels : Nat}
     normBias := Tensor.zeros #[channels] (device := device)
   }
 
-private def adaIN1dDynFromLinear {styleDim channels : Nat}
-    (weight : Tensor { shape := #[2 * channels, styleDim], dtype := .Float32, device := device })
-    (bias : Tensor { shape := #[2 * channels], dtype := .Float32, device := device })
-    : IO (AdaIN1dDyn (device := device) styleDim) := do
-  return {
-    fcWeight := Tensor.packShape (reqGradFalse weight)
-    fcBias := Tensor.packShape (reqGradFalse bias)
-    normWeight := Tensor.packShape (Tensor.ones #[channels] (device := device))
-    normBias := Tensor.packShape (Tensor.zeros #[channels] (device := device))
-  }
-
-private def wnConv1dDynFromWeightNorm {inC outC kernel : Nat}
-    (weightV : Tensor { shape := #[outC, inC, kernel], dtype := .Float32, device := device })
-    (weightG3 : Tensor { shape := #[outC, 1, 1], dtype := .Float32, device := device })
-    (bias : Tensor { shape := #[outC], dtype := .Float32, device := device })
-    (stride padding dilation : Nat)
-    : (WNConv1dDyn (device := device)) := {
-      weightV := Tensor.packShape (reqGradFalse weightV)
-      weightG := Tensor.packShape (reqGradFalse (Tensor.reshape weightG3 #[outC]))
-      bias := Tensor.packShape (reqGradFalse bias)
-      kernel := kernel
-      stride := stride
-      padding := padding
-      dilation := dilation
-    }
-
-private def wnConv1dDynFromPlain {inC outC kernel : Nat}
+private def wnConv1dFromPlain {inC outC kernel stride padding dilation : Nat}
     (weight : Tensor { shape := #[outC, inC, kernel], dtype := .Float32, device := device })
     (bias : Tensor { shape := #[outC], dtype := .Float32, device := device })
-    (stride padding dilation : Nat)
-    : (WNConv1dDyn (device := device)) := {
-      weightV := Tensor.packShape (reqGradFalse weight)
-      weightG := Tensor.packShape (reqGradFalse (normDim0_3d weight))
-      bias := Tensor.packShape (reqGradFalse bias)
-      kernel := kernel
-      stride := stride
-      padding := padding
-      dilation := dilation
+    : WNConv1dParams (device := device) inC outC kernel stride padding dilation := {
+      weightV := reqGradFalse weight
+      weightG := reqGradFalse (normDim0_3d weight)
+      bias := reqGradFalse bias
     }
 
-private def wnConvTranspose1dDynFromWeightNorm {inC outC kernel : Nat}
-    (weightV : Tensor { shape := #[inC, outC, kernel], dtype := .Float32, device := device })
-    (weightG3 : Tensor { shape := #[inC, 1, 1], dtype := .Float32, device := device })
-    (bias : Tensor { shape := #[outC], dtype := .Float32, device := device })
-    (stride padding outputPadding dilation : Nat)
-    : (WNConvTranspose1dDyn (device := device)) := {
-      weightV := Tensor.packShape (reqGradFalse weightV)
-      weightG := Tensor.packShape (reqGradFalse (Tensor.reshape weightG3 #[inC]))
-      bias := Tensor.packShape (reqGradFalse bias)
-      kernel := kernel
-      stride := stride
-      padding := padding
-      outputPadding := outputPadding
-      dilation := dilation
-    }
+private def loadGenResUnit {α β γ δ ε ζ : Type} {styleDim channels kernel dilation : Nat}
+    (convs1 : Array α) (convs2 : Array β) (adain1 : Array γ) (adain2 : Array δ)
+    (alpha1 : Array ε) (alpha2 : Array ζ)
+    (mkConv1 : α → IO (WNConv1dParams (device := device) channels channels kernel 1 ((kernel * dilation - dilation) / 2) dilation))
+    (mkConv2 : β → IO (WNConv1dParams (device := device) channels channels kernel 1 ((kernel - 1) / 2) 1))
+    (mkAdaIN1 : γ → IO (AdaIN1d (device := device) styleDim channels))
+    (mkAdaIN2 : δ → IO (AdaIN1d (device := device) styleDim channels))
+    (mkAlpha1 : ε → IO (Tensor { shape := #[1, channels, 1], dtype := .Float32, device := device }))
+    (mkAlpha2 : ζ → IO (Tensor { shape := #[1, channels, 1], dtype := .Float32, device := device }))
+    (name : String) (k : Nat)
+    : IO (GenResUnit (device := device) styleDim channels kernel dilation) := do
+  pure {
+    conv1 := ← mkConv1 (← getOrThrow convs1 k s!"Missing {name}.convs1.{k}")
+    conv2 := ← mkConv2 (← getOrThrow convs2 k s!"Missing {name}.convs2.{k}")
+    norm1 := ← mkAdaIN1 (← getOrThrow adain1 k s!"Missing {name}.adain1.{k}")
+    norm2 := ← mkAdaIN2 (← getOrThrow adain2 k s!"Missing {name}.adain2.{k}")
+    alpha1 := ← mkAlpha1 (← getOrThrow alpha1 k s!"Missing {name}.alpha1.{k}")
+    alpha2 := ← mkAlpha2 (← getOrThrow alpha2 k s!"Missing {name}.alpha2.{k}")
+  }
 
-private def alphaDyn {shape : Shape} {sourceDevice : Device}
-    (x : Tensor { shape := shape, dtype := .Float32, device := sourceDevice }) :
-    IO (ShapePackedTensor .Float32 device) := do
-  let tensor : Tensor { shape, dtype := .Float32, device } ← checkedWeight x
-  pure (Tensor.packShape (reqGradFalse tensor))
+/-- Load one unit of a generator residual block from its checkpoint node arrays. -/
+macro "loadGenResUnit!" blk:term "," name:term "," k:term : term => `(
+  loadGenResUnit ($blk).convs1 ($blk).convs2 ($blk).adain1 ($blk).adain2 ($blk).alpha1 ($blk).alpha2
+    (fun node => do pure (wnConv1dFromWeightNorm (← checkedWeight node.weight_v) (← checkedWeight node.weight_g) (← checkedWeight node.bias)))
+    (fun node => do pure (wnConv1dFromWeightNorm (← checkedWeight node.weight_v) (← checkedWeight node.weight_g) (← checkedWeight node.bias)))
+    (fun node => do adaIN1dFromLinear (← checkedWeight node.fc.weight) (← checkedWeight node.fc.bias))
+    (fun node => do adaIN1dFromLinear (← checkedWeight node.fc.weight) (← checkedWeight node.fc.bias))
+    (fun alpha => do pure (reqGradFalse (← checkedWeight alpha)))
+    (fun alpha => do pure (reqGradFalse (← checkedWeight alpha)))
+    $name $k)
 
-private def generatorAdaINResBlockFromParts {styleDim : Nat}
-    (convs1 : Array (WNConv1dDyn (device := device)))
-    (convs2 : Array (WNConv1dDyn (device := device)))
-    (norms1 : Array (AdaIN1dDyn (device := device) styleDim))
-    (norms2 : Array (AdaIN1dDyn (device := device) styleDim))
-    (alpha1 : Array (ShapePackedTensor .Float32 device))
-    (alpha2 : Array (ShapePackedTensor .Float32 device))
-    : GeneratorAdaINResBlock (device := device) styleDim := {
-      convs1, convs2, norms1, norms2, alpha1, alpha2
-    }
-
-private def mapArrayM {α β} (xs : Array α) (f : α → IO β) : IO (Array β) := do
-  let mut ys : Array β := #[]
-  for x in xs do
-    ys := ys.push (← f x)
-  pure ys
-
-private def mapArrayIdxM {α β} (xs : Array α) (f : Nat → α → IO β) : IO (Array β) := do
-  let mut ys : Array β := #[]
-  for i in [:xs.size] do
-    if let some x := xs[i]? then
-      ys := ys.push (← f i x)
-  pure ys
-
-private def loadGeneratorAdaINResBlockFromCheckpointArrays
-    {styleDim : Nat}
-    (convs1 : Array α)
-    (convs2 : Array β)
-    (adain1 : Array γ)
-    (adain2 : Array δ)
-    (alpha1 : Array ε)
-    (alpha2 : Array ζ)
-    (kernel : Nat)
-    (dilations : Array Nat)
-    (mkConv1 : α → Nat → Nat → IO (WNConv1dDyn (device := device)))
-    (mkConv2 : β → IO (WNConv1dDyn (device := device)))
-    (mkAdaIN1 : γ → IO (AdaIN1dDyn (device := device) styleDim))
-    (mkAdaIN2 : δ → IO (AdaIN1dDyn (device := device) styleDim))
-    (mkAlpha1 : ε → IO (ShapePackedTensor .Float32 device))
-    (mkAlpha2 : ζ → IO (ShapePackedTensor .Float32 device))
-    : IO (GeneratorAdaINResBlock (device := device) styleDim) := do
-  let convs1 ←
-    mapArrayIdxM convs1 fun i node => do
-      let dilation := dilations.getD i 1
-      let padding := (kernel * dilation - dilation) / 2
-      mkConv1 node padding dilation
-  let convs2 ← mapArrayM convs2 mkConv2
-  let norms1 ← mapArrayM adain1 mkAdaIN1
-  let norms2 ← mapArrayM adain2 mkAdaIN2
-  pure <|
-    generatorAdaINResBlockFromParts
-      convs1
-      convs2
-      norms1
-      norms2
-      (← mapArrayM alpha1 mkAlpha1)
-      (← mapArrayM alpha2 mkAlpha2)
+/-- Load a three-unit generator residual block from its checkpoint node arrays. -/
+macro "loadGenResBlock!" blk:term "," name:term : term => `(do
+  pure {
+    u0 := ← loadGenResUnit! $blk, $name, 0
+    u1 := ← loadGenResUnit! $blk, $name, 1
+    u2 := ← loadGenResUnit! $blk, $name, 2
+  })
 
 private def loadKittenAlbertFromCheckpoint
     (weights : KokoroCheckpoint.WeightsBert)
@@ -418,7 +346,7 @@ private def loadProsodyPredictorFromCheckpoint
     conv2 := wnConv1dFromWeightNorm (← checkedWeight weights.f0.i0.conv2.weight_v) (← checkedWeight weights.f0.i0.conv2.weight_g) (← checkedWeight weights.f0.i0.conv2.bias)
     norm1 := ← adaIN1dFromLinear (← checkedWeight weights.f0.i0.norm1.fc.weight) (← checkedWeight weights.f0.i0.norm1.fc.bias)
     norm2 := ← adaIN1dFromLinear (← checkedWeight weights.f0.i0.norm2.fc.weight) (← checkedWeight weights.f0.i0.norm2.fc.bias)
-    shortcut := none
+    shortcut := .identity rfl
   }
   let f0Blk1 : AdainResBlk1dUp (device := device) cfg.hiddenDim (cfg.hiddenDim / 2) cfg.styleDim := {
     pool := wnDepthwiseTransConv1dFromWeightNorm (← checkedWeight weights.f0.i1.pool.weight_v) (← checkedWeight weights.f0.i1.pool.weight_g) (← checkedWeight weights.f0.i1.pool.bias)
@@ -426,14 +354,14 @@ private def loadProsodyPredictorFromCheckpoint
     conv2 := wnConv1dFromWeightNorm (← checkedWeight weights.f0.i1.conv2.weight_v) (← checkedWeight weights.f0.i1.conv2.weight_g) (← checkedWeight weights.f0.i1.conv2.bias)
     norm1 := ← adaIN1dFromLinear (← checkedWeight weights.f0.i1.norm1.fc.weight) (← checkedWeight weights.f0.i1.norm1.fc.bias)
     norm2 := ← adaIN1dFromLinear (← checkedWeight weights.f0.i1.norm2.fc.weight) (← checkedWeight weights.f0.i1.norm2.fc.bias)
-    shortcut := some <| wnConv1dFromWeightNorm (← checkedWeight weights.f0.i1.conv1x1.weight_v) (← checkedWeight weights.f0.i1.conv1x1.weight_g) (Tensor.zeros #[cfg.hiddenDim / 2] (device := device))
+    shortcut := .conv <| wnConv1dFromWeightNorm (← checkedWeight weights.f0.i1.conv1x1.weight_v) (← checkedWeight weights.f0.i1.conv1x1.weight_g) (Tensor.zeros #[cfg.hiddenDim / 2] (device := device))
   }
   let f0Blk2 : AdainResBlk1dSame (device := device) (cfg.hiddenDim / 2) (cfg.hiddenDim / 2) cfg.styleDim := {
     conv1 := wnConv1dFromWeightNorm (← checkedWeight weights.f0.i2.conv1.weight_v) (← checkedWeight weights.f0.i2.conv1.weight_g) (← checkedWeight weights.f0.i2.conv1.bias)
     conv2 := wnConv1dFromWeightNorm (← checkedWeight weights.f0.i2.conv2.weight_v) (← checkedWeight weights.f0.i2.conv2.weight_g) (← checkedWeight weights.f0.i2.conv2.bias)
     norm1 := ← adaIN1dFromLinear (← checkedWeight weights.f0.i2.norm1.fc.weight) (← checkedWeight weights.f0.i2.norm1.fc.bias)
     norm2 := ← adaIN1dFromLinear (← checkedWeight weights.f0.i2.norm2.fc.weight) (← checkedWeight weights.f0.i2.norm2.fc.bias)
-    shortcut := none
+    shortcut := .identity rfl
   }
   log.onInfo "  predictor.N blocks..."
   let nBlk0 : AdainResBlk1dSame (device := device) cfg.hiddenDim cfg.hiddenDim cfg.styleDim := {
@@ -441,7 +369,7 @@ private def loadProsodyPredictorFromCheckpoint
     conv2 := wnConv1dFromWeightNorm (← checkedWeight weights.n.i0.conv2.weight_v) (← checkedWeight weights.n.i0.conv2.weight_g) (← checkedWeight weights.n.i0.conv2.bias)
     norm1 := ← adaIN1dFromLinear (← checkedWeight weights.n.i0.norm1.fc.weight) (← checkedWeight weights.n.i0.norm1.fc.bias)
     norm2 := ← adaIN1dFromLinear (← checkedWeight weights.n.i0.norm2.fc.weight) (← checkedWeight weights.n.i0.norm2.fc.bias)
-    shortcut := none
+    shortcut := .identity rfl
   }
   let nBlk1 : AdainResBlk1dUp (device := device) cfg.hiddenDim (cfg.hiddenDim / 2) cfg.styleDim := {
     pool := wnDepthwiseTransConv1dFromWeightNorm (← checkedWeight weights.n.i1.pool.weight_v) (← checkedWeight weights.n.i1.pool.weight_g) (← checkedWeight weights.n.i1.pool.bias)
@@ -449,14 +377,14 @@ private def loadProsodyPredictorFromCheckpoint
     conv2 := wnConv1dFromWeightNorm (← checkedWeight weights.n.i1.conv2.weight_v) (← checkedWeight weights.n.i1.conv2.weight_g) (← checkedWeight weights.n.i1.conv2.bias)
     norm1 := ← adaIN1dFromLinear (← checkedWeight weights.n.i1.norm1.fc.weight) (← checkedWeight weights.n.i1.norm1.fc.bias)
     norm2 := ← adaIN1dFromLinear (← checkedWeight weights.n.i1.norm2.fc.weight) (← checkedWeight weights.n.i1.norm2.fc.bias)
-    shortcut := some <| wnConv1dFromWeightNorm (← checkedWeight weights.n.i1.conv1x1.weight_v) (← checkedWeight weights.n.i1.conv1x1.weight_g) (Tensor.zeros #[cfg.hiddenDim / 2] (device := device))
+    shortcut := .conv <| wnConv1dFromWeightNorm (← checkedWeight weights.n.i1.conv1x1.weight_v) (← checkedWeight weights.n.i1.conv1x1.weight_g) (Tensor.zeros #[cfg.hiddenDim / 2] (device := device))
   }
   let nBlk2 : AdainResBlk1dSame (device := device) (cfg.hiddenDim / 2) (cfg.hiddenDim / 2) cfg.styleDim := {
     conv1 := wnConv1dFromWeightNorm (← checkedWeight weights.n.i2.conv1.weight_v) (← checkedWeight weights.n.i2.conv1.weight_g) (← checkedWeight weights.n.i2.conv1.bias)
     conv2 := wnConv1dFromWeightNorm (← checkedWeight weights.n.i2.conv2.weight_v) (← checkedWeight weights.n.i2.conv2.weight_g) (← checkedWeight weights.n.i2.conv2.bias)
     norm1 := ← adaIN1dFromLinear (← checkedWeight weights.n.i2.norm1.fc.weight) (← checkedWeight weights.n.i2.norm1.fc.bias)
     norm2 := ← adaIN1dFromLinear (← checkedWeight weights.n.i2.norm2.fc.weight) (← checkedWeight weights.n.i2.norm2.fc.bias)
-    shortcut := none
+    shortcut := .identity rfl
   }
   log.onInfo "  predictor output projections..."
   pure {
@@ -487,236 +415,33 @@ private def loadGeneratorFromCheckpoint
   let source : SourceModuleHnNSF (device := device) cfg := {
     linear := linearFromTensors (← checkedWeight weights.m_source.l_linear.weight) (← checkedWeight weights.m_source.l_linear.bias)
   }
-  let noiseRes0Dilations : Array Nat := #[1, 3, 5]
-  let noiseRes1Dilations : Array Nat := #[1, 3, 5]
-  let stage0Out := GeneratorConfig.stageOutChannels cfg.generator 0
-  let stage1Out := GeneratorConfig.stageOutChannels cfg.generator 1
-  let stage0Stride ← getOrThrow cfg.generator.upsampleRates 0 "Missing upsample rate for stage 0"
-  let stage0Kernel ← getOrThrow cfg.generator.upsampleKernelSizes 0 "Missing upsample kernel for stage 0"
-  let stage1Stride ← getOrThrow cfg.generator.upsampleRates 1 "Missing upsample rate for stage 1"
-  let stage1Kernel ← getOrThrow cfg.generator.upsampleKernelSizes 1 "Missing upsample kernel for stage 1"
-  let resblockKernel0 ← getOrThrow cfg.generator.resblockKernelSizes 0 "Missing generator resblock kernel 0"
-  let resblockKernel1 ← getOrThrow cfg.generator.resblockKernelSizes 1 "Missing generator resblock kernel 1"
-  let resblockKernel2 ← getOrThrow cfg.generator.resblockKernelSizes 2 "Missing generator resblock kernel 2"
-  let resblockDilations0 ← getOrThrow cfg.generator.resblockDilationSizes 0 "Missing generator dilation set 0"
-  let resblockDilations1 ← getOrThrow cfg.generator.resblockDilationSizes 1 "Missing generator dilation set 1"
-  let resblockDilations2 ← getOrThrow cfg.generator.resblockDilationSizes 2 "Missing generator dilation set 2"
-  let noiseRes0 ←
-    loadGeneratorAdaINResBlockFromCheckpointArrays
-      weights.noise_res.i0.convs1
-      weights.noise_res.i0.convs2
-      weights.noise_res.i0.adain1
-      weights.noise_res.i0.adain2
-      weights.noise_res.i0.alpha1
-      weights.noise_res.i0.alpha2
-      (if 0 + 1 < cfg.generator.upsampleRates.size then 7 else 11)
-      noiseRes0Dilations
-      (fun node padding dilation => do
-        pure <| wnConv1dDynFromWeightNorm (inC := node.weight_v.shape[1]!) (outC := node.weight_v.shape[0]!) (kernel := node.weight_v.shape[2]!) (← checkedWeight node.weight_v) (← checkedWeight node.weight_g) (← checkedWeight node.bias) 1 padding dilation)
-      (fun node => do
-        pure <| wnConv1dDynFromWeightNorm (inC := node.weight_v.shape[1]!) (outC := node.weight_v.shape[0]!) (kernel := node.weight_v.shape[2]!)
-          (← checkedWeight node.weight_v)
-          (← checkedWeight node.weight_g)
-          (← checkedWeight node.bias)
-          1
-          (((if 0 + 1 < cfg.generator.upsampleRates.size then 7 else 11) - 1) / 2)
-          1)
-      (fun node => do
-        adaIN1dDynFromLinear (channels := stage0Out) (← checkedWeight node.fc.weight) (← checkedWeight node.fc.bias))
-      (fun node => do
-        adaIN1dDynFromLinear (channels := stage0Out) (← checkedWeight node.fc.weight) (← checkedWeight node.fc.bias))
-      alphaDyn
-      alphaDyn
-  let noiseRes1 ←
-    loadGeneratorAdaINResBlockFromCheckpointArrays
-      weights.noise_res.i1.convs1
-      weights.noise_res.i1.convs2
-      weights.noise_res.i1.adain1
-      weights.noise_res.i1.adain2
-      weights.noise_res.i1.alpha1
-      weights.noise_res.i1.alpha2
-      (if 1 + 1 < cfg.generator.upsampleRates.size then 7 else 11)
-      noiseRes1Dilations
-      (fun node padding dilation => do
-        pure <| wnConv1dDynFromWeightNorm (inC := node.weight_v.shape[1]!) (outC := node.weight_v.shape[0]!) (kernel := node.weight_v.shape[2]!) (← checkedWeight node.weight_v) (← checkedWeight node.weight_g) (← checkedWeight node.bias) 1 padding dilation)
-      (fun node => do
-        pure <| wnConv1dDynFromWeightNorm (inC := node.weight_v.shape[1]!) (outC := node.weight_v.shape[0]!) (kernel := node.weight_v.shape[2]!)
-          (← checkedWeight node.weight_v)
-          (← checkedWeight node.weight_g)
-          (← checkedWeight node.bias)
-          1
-          (((if 1 + 1 < cfg.generator.upsampleRates.size then 7 else 11) - 1) / 2)
-          1)
-      (fun node => do
-        adaIN1dDynFromLinear (channels := stage1Out) (← checkedWeight node.fc.weight) (← checkedWeight node.fc.bias))
-      (fun node => do
-        adaIN1dDynFromLinear (channels := stage1Out) (← checkedWeight node.fc.weight) (← checkedWeight node.fc.bias))
-      alphaDyn
-      alphaDyn
-  let res0 ←
-    loadGeneratorAdaINResBlockFromCheckpointArrays
-      weights.resblocks.i0.convs1
-      weights.resblocks.i0.convs2
-      weights.resblocks.i0.adain1
-      weights.resblocks.i0.adain2
-      weights.resblocks.i0.alpha1
-      weights.resblocks.i0.alpha2
-      resblockKernel0
-      resblockDilations0
-      (fun node padding dilation => do
-        pure <| wnConv1dDynFromWeightNorm (inC := node.weight_v.shape[1]!) (outC := node.weight_v.shape[0]!) (kernel := node.weight_v.shape[2]!) (← checkedWeight node.weight_v) (← checkedWeight node.weight_g) (← checkedWeight node.bias) 1 padding dilation)
-      (fun node => do
-        pure <| wnConv1dDynFromWeightNorm (inC := node.weight_v.shape[1]!) (outC := node.weight_v.shape[0]!) (kernel := node.weight_v.shape[2]!) (← checkedWeight node.weight_v) (← checkedWeight node.weight_g) (← checkedWeight node.bias) 1 ((resblockKernel0 - 1) / 2) 1)
-      (fun node => do
-        adaIN1dDynFromLinear (channels := stage0Out) (← checkedWeight node.fc.weight) (← checkedWeight node.fc.bias))
-      (fun node => do
-        adaIN1dDynFromLinear (channels := stage0Out) (← checkedWeight node.fc.weight) (← checkedWeight node.fc.bias))
-      alphaDyn
-      alphaDyn
-  let res1 ←
-    loadGeneratorAdaINResBlockFromCheckpointArrays
-      weights.resblocks.i1.convs1
-      weights.resblocks.i1.convs2
-      weights.resblocks.i1.adain1
-      weights.resblocks.i1.adain2
-      weights.resblocks.i1.alpha1
-      weights.resblocks.i1.alpha2
-      resblockKernel1
-      resblockDilations1
-      (fun node padding dilation => do
-        pure <| wnConv1dDynFromWeightNorm (inC := node.weight_v.shape[1]!) (outC := node.weight_v.shape[0]!) (kernel := node.weight_v.shape[2]!) (← checkedWeight node.weight_v) (← checkedWeight node.weight_g) (← checkedWeight node.bias) 1 padding dilation)
-      (fun node => do
-        pure <| wnConv1dDynFromWeightNorm (inC := node.weight_v.shape[1]!) (outC := node.weight_v.shape[0]!) (kernel := node.weight_v.shape[2]!) (← checkedWeight node.weight_v) (← checkedWeight node.weight_g) (← checkedWeight node.bias) 1 ((resblockKernel1 - 1) / 2) 1)
-      (fun node => do
-        adaIN1dDynFromLinear (channels := stage0Out) (← checkedWeight node.fc.weight) (← checkedWeight node.fc.bias))
-      (fun node => do
-        adaIN1dDynFromLinear (channels := stage0Out) (← checkedWeight node.fc.weight) (← checkedWeight node.fc.bias))
-      alphaDyn
-      alphaDyn
-  let res2 ←
-    loadGeneratorAdaINResBlockFromCheckpointArrays
-      weights.resblocks.i2.convs1
-      weights.resblocks.i2.convs2
-      weights.resblocks.i2.adain1
-      weights.resblocks.i2.adain2
-      weights.resblocks.i2.alpha1
-      weights.resblocks.i2.alpha2
-      resblockKernel2
-      resblockDilations2
-      (fun node padding dilation => do
-        pure <| wnConv1dDynFromWeightNorm (inC := node.weight_v.shape[1]!) (outC := node.weight_v.shape[0]!) (kernel := node.weight_v.shape[2]!) (← checkedWeight node.weight_v) (← checkedWeight node.weight_g) (← checkedWeight node.bias) 1 padding dilation)
-      (fun node => do
-        pure <| wnConv1dDynFromWeightNorm (inC := node.weight_v.shape[1]!) (outC := node.weight_v.shape[0]!) (kernel := node.weight_v.shape[2]!) (← checkedWeight node.weight_v) (← checkedWeight node.weight_g) (← checkedWeight node.bias) 1 ((resblockKernel2 - 1) / 2) 1)
-      (fun node => do
-        adaIN1dDynFromLinear (channels := stage0Out) (← checkedWeight node.fc.weight) (← checkedWeight node.fc.bias))
-      (fun node => do
-        adaIN1dDynFromLinear (channels := stage0Out) (← checkedWeight node.fc.weight) (← checkedWeight node.fc.bias))
-      alphaDyn
-      alphaDyn
-  let res3 ←
-    loadGeneratorAdaINResBlockFromCheckpointArrays
-      weights.resblocks.i3.convs1
-      weights.resblocks.i3.convs2
-      weights.resblocks.i3.adain1
-      weights.resblocks.i3.adain2
-      weights.resblocks.i3.alpha1
-      weights.resblocks.i3.alpha2
-      resblockKernel0
-      resblockDilations0
-      (fun node padding dilation => do
-        pure <| wnConv1dDynFromWeightNorm (inC := node.weight_v.shape[1]!) (outC := node.weight_v.shape[0]!) (kernel := node.weight_v.shape[2]!) (← checkedWeight node.weight_v) (← checkedWeight node.weight_g) (← checkedWeight node.bias) 1 padding dilation)
-      (fun node => do
-        pure <| wnConv1dDynFromWeightNorm (inC := node.weight_v.shape[1]!) (outC := node.weight_v.shape[0]!) (kernel := node.weight_v.shape[2]!) (← checkedWeight node.weight_v) (← checkedWeight node.weight_g) (← checkedWeight node.bias) 1 ((resblockKernel0 - 1) / 2) 1)
-      (fun node => do
-        adaIN1dDynFromLinear (channels := stage1Out) (← checkedWeight node.fc.weight) (← checkedWeight node.fc.bias))
-      (fun node => do
-        adaIN1dDynFromLinear (channels := stage1Out) (← checkedWeight node.fc.weight) (← checkedWeight node.fc.bias))
-      alphaDyn
-      alphaDyn
-  let res4 ←
-    loadGeneratorAdaINResBlockFromCheckpointArrays
-      weights.resblocks.i4.convs1
-      weights.resblocks.i4.convs2
-      weights.resblocks.i4.adain1
-      weights.resblocks.i4.adain2
-      weights.resblocks.i4.alpha1
-      weights.resblocks.i4.alpha2
-      resblockKernel1
-      resblockDilations1
-      (fun node padding dilation => do
-        pure <| wnConv1dDynFromWeightNorm (inC := node.weight_v.shape[1]!) (outC := node.weight_v.shape[0]!) (kernel := node.weight_v.shape[2]!) (← checkedWeight node.weight_v) (← checkedWeight node.weight_g) (← checkedWeight node.bias) 1 padding dilation)
-      (fun node => do
-        pure <| wnConv1dDynFromWeightNorm (inC := node.weight_v.shape[1]!) (outC := node.weight_v.shape[0]!) (kernel := node.weight_v.shape[2]!) (← checkedWeight node.weight_v) (← checkedWeight node.weight_g) (← checkedWeight node.bias) 1 ((resblockKernel1 - 1) / 2) 1)
-      (fun node => do
-        adaIN1dDynFromLinear (channels := stage1Out) (← checkedWeight node.fc.weight) (← checkedWeight node.fc.bias))
-      (fun node => do
-        adaIN1dDynFromLinear (channels := stage1Out) (← checkedWeight node.fc.weight) (← checkedWeight node.fc.bias))
-      alphaDyn
-      alphaDyn
-  let res5 ←
-    loadGeneratorAdaINResBlockFromCheckpointArrays
-      weights.resblocks.i5.convs1
-      weights.resblocks.i5.convs2
-      weights.resblocks.i5.adain1
-      weights.resblocks.i5.adain2
-      weights.resblocks.i5.alpha1
-      weights.resblocks.i5.alpha2
-      resblockKernel2
-      resblockDilations2
-      (fun node padding dilation => do
-        pure <| wnConv1dDynFromWeightNorm (inC := node.weight_v.shape[1]!) (outC := node.weight_v.shape[0]!) (kernel := node.weight_v.shape[2]!) (← checkedWeight node.weight_v) (← checkedWeight node.weight_g) (← checkedWeight node.bias) 1 padding dilation)
-      (fun node => do
-        pure <| wnConv1dDynFromWeightNorm (inC := node.weight_v.shape[1]!) (outC := node.weight_v.shape[0]!) (kernel := node.weight_v.shape[2]!) (← checkedWeight node.weight_v) (← checkedWeight node.weight_g) (← checkedWeight node.bias) 1 ((resblockKernel2 - 1) / 2) 1)
-      (fun node => do
-        adaIN1dDynFromLinear (channels := stage1Out) (← checkedWeight node.fc.weight) (← checkedWeight node.fc.bias))
-      (fun node => do
-        adaIN1dDynFromLinear (channels := stage1Out) (← checkedWeight node.fc.weight) (← checkedWeight node.fc.bias))
-      alphaDyn
-      alphaDyn
-  let stage0 : GeneratorStage (device := device) cfg.styleDim := {
-    up :=
-      wnConvTranspose1dDynFromWeightNorm (inC := weights.ups.i0.weight_v.shape[0]!) (outC := weights.ups.i0.weight_v.shape[1]!) (kernel := weights.ups.i0.weight_v.shape[2]!)
-        (← checkedWeight weights.ups.i0.weight_v)
-        (← checkedWeight weights.ups.i0.weight_g)
-        (← checkedWeight weights.ups.i0.bias)
-        stage0Stride
-        ((stage0Kernel - stage0Stride) / 2)
-        0
-        1
-    noiseConv :=
-      wnConv1dDynFromPlain (inC := weights.noise_convs.i0.weight.shape[1]!) (outC := weights.noise_convs.i0.weight.shape[0]!) (kernel := weights.noise_convs.i0.weight.shape[2]!)
-        (← checkedWeight weights.noise_convs.i0.weight)
-        (← checkedWeight weights.noise_convs.i0.bias)
-        (GeneratorConfig.noiseStride cfg.generator 0)
-        (GeneratorConfig.noisePadding cfg.generator 0)
-        1
-    noiseRes := noiseRes0
-    resBlocks := #[res0, res1, res2]
+  -- The Kokoro checkpoint schema has two upsample stages with three residual blocks each.
+  let ⟨hStages⟩ ← if h : cfg.generator.upsampleRates.size = 2 then pure (PLift.up h) else
+    throw <| IO.userError s!"Kokoro checkpoints have 2 generator upsample stages, config has {cfg.generator.upsampleRates.size}"
+  let ⟨hBlocks⟩ ← if h : cfg.generator.resblockKernelSizes.size = 3 then pure (PLift.up h) else
+    throw <| IO.userError s!"Kokoro checkpoints have 3 generator residual blocks per stage, config has {cfg.generator.resblockKernelSizes.size}"
+  let stage0 : GeneratorStage (device := device) cfg 0 := {
+    up := wnConvTranspose1dFromWeightNorm (← checkedWeight weights.ups.i0.weight_v) (← checkedWeight weights.ups.i0.weight_g) (← checkedWeight weights.ups.i0.bias)
+    noiseConv := wnConv1dFromPlain (← checkedWeight weights.noise_convs.i0.weight) (← checkedWeight weights.noise_convs.i0.bias)
+    noiseRes := ← loadGenResBlock! weights.noise_res.i0, "decoder.generator.noise_res.0"
+    resBlocks :=
+      .cons (by omega) (← loadGenResBlock! weights.resblocks.i0, "decoder.generator.resblocks.0")
+        (.cons (by omega) (← loadGenResBlock! weights.resblocks.i1, "decoder.generator.resblocks.1")
+          (.last (by omega) (← loadGenResBlock! weights.resblocks.i2, "decoder.generator.resblocks.2")))
   }
-  let stage1 : GeneratorStage (device := device) cfg.styleDim := {
-    up :=
-      wnConvTranspose1dDynFromWeightNorm (inC := weights.ups.i1.weight_v.shape[0]!) (outC := weights.ups.i1.weight_v.shape[1]!) (kernel := weights.ups.i1.weight_v.shape[2]!)
-        (← checkedWeight weights.ups.i1.weight_v)
-        (← checkedWeight weights.ups.i1.weight_g)
-        (← checkedWeight weights.ups.i1.bias)
-        stage1Stride
-        ((stage1Kernel - stage1Stride) / 2)
-        0
-        1
-    noiseConv :=
-      wnConv1dDynFromPlain (inC := weights.noise_convs.i1.weight.shape[1]!) (outC := weights.noise_convs.i1.weight.shape[0]!) (kernel := weights.noise_convs.i1.weight.shape[2]!)
-        (← checkedWeight weights.noise_convs.i1.weight)
-        (← checkedWeight weights.noise_convs.i1.bias)
-        (GeneratorConfig.noiseStride cfg.generator 1)
-        (GeneratorConfig.noisePadding cfg.generator 1)
-        1
-    noiseRes := noiseRes1
-    resBlocks := #[res3, res4, res5]
+  let stage1 : GeneratorStage (device := device) cfg 1 := {
+    up := wnConvTranspose1dFromWeightNorm (← checkedWeight weights.ups.i1.weight_v) (← checkedWeight weights.ups.i1.weight_g) (← checkedWeight weights.ups.i1.bias)
+    noiseConv := wnConv1dFromPlain (← checkedWeight weights.noise_convs.i1.weight) (← checkedWeight weights.noise_convs.i1.bias)
+    noiseRes := ← loadGenResBlock! weights.noise_res.i1, "decoder.generator.noise_res.1"
+    resBlocks :=
+      .cons (by omega) (← loadGenResBlock! weights.resblocks.i3, "decoder.generator.resblocks.3")
+        (.cons (by omega) (← loadGenResBlock! weights.resblocks.i4, "decoder.generator.resblocks.4")
+          (.last (by omega) (← loadGenResBlock! weights.resblocks.i5, "decoder.generator.resblocks.5")))
   }
-  let convPost := wnConv1dDynFromWeightNorm (inC := weights.conv_post.weight_v.shape[1]!) (outC := weights.conv_post.weight_v.shape[0]!) (kernel := weights.conv_post.weight_v.shape[2]!) (← checkedWeight weights.conv_post.weight_v) (← checkedWeight weights.conv_post.weight_g) (← checkedWeight weights.conv_post.bias) 1 3 1
+  let convPost := wnConv1dFromWeightNorm (← checkedWeight weights.conv_post.weight_v) (← checkedWeight weights.conv_post.weight_g) (← checkedWeight weights.conv_post.bias)
   pure {
     source
-    stages := #[stage0, stage1]
+    stages := .cons (by omega) stage0 (.last (by omega) stage1)
     convPost
     window := ← checkedWeight (Tensor.hannWindow cfg.generator.genIstftNFft)
   }
@@ -732,28 +457,28 @@ private def loadDecoderFromCheckpoint
     conv2 := wnConv1dFromWeightNorm (← checkedWeight weights.encode.conv2.weight_v) (← checkedWeight weights.encode.conv2.weight_g) (← checkedWeight weights.encode.conv2.bias)
     norm1 := ← adaIN1dFromLinear (← checkedWeight weights.encode.norm1.fc.weight) (← checkedWeight weights.encode.norm1.fc.bias)
     norm2 := ← adaIN1dFromLinear (← checkedWeight weights.encode.norm2.fc.weight) (← checkedWeight weights.encode.norm2.fc.bias)
-    shortcut := some <| wnConv1dFromWeightNorm (← checkedWeight weights.encode.conv1x1.weight_v) (← checkedWeight weights.encode.conv1x1.weight_g) (Tensor.zeros #[cfg.maxConvDim] (device := device))
+    shortcut := .conv <| wnConv1dFromWeightNorm (← checkedWeight weights.encode.conv1x1.weight_v) (← checkedWeight weights.encode.conv1x1.weight_g) (Tensor.zeros #[cfg.maxConvDim] (device := device))
   }
   let decode0 : AdainResBlk1dSame (device := device) (cfg.maxConvDim + cfg.asrResDim + 2) cfg.maxConvDim cfg.styleDim := {
     conv1 := wnConv1dFromWeightNorm (← checkedWeight weights.decode.i0.conv1.weight_v) (← checkedWeight weights.decode.i0.conv1.weight_g) (← checkedWeight weights.decode.i0.conv1.bias)
     conv2 := wnConv1dFromWeightNorm (← checkedWeight weights.decode.i0.conv2.weight_v) (← checkedWeight weights.decode.i0.conv2.weight_g) (← checkedWeight weights.decode.i0.conv2.bias)
     norm1 := ← adaIN1dFromLinear (← checkedWeight weights.decode.i0.norm1.fc.weight) (← checkedWeight weights.decode.i0.norm1.fc.bias)
     norm2 := ← adaIN1dFromLinear (← checkedWeight weights.decode.i0.norm2.fc.weight) (← checkedWeight weights.decode.i0.norm2.fc.bias)
-    shortcut := some <| wnConv1dFromWeightNorm (← checkedWeight weights.decode.i0.conv1x1.weight_v) (← checkedWeight weights.decode.i0.conv1x1.weight_g) (Tensor.zeros #[cfg.maxConvDim] (device := device))
+    shortcut := .conv <| wnConv1dFromWeightNorm (← checkedWeight weights.decode.i0.conv1x1.weight_v) (← checkedWeight weights.decode.i0.conv1x1.weight_g) (Tensor.zeros #[cfg.maxConvDim] (device := device))
   }
   let decode1 : AdainResBlk1dSame (device := device) (cfg.maxConvDim + cfg.asrResDim + 2) cfg.maxConvDim cfg.styleDim := {
     conv1 := wnConv1dFromWeightNorm (← checkedWeight weights.decode.i1.conv1.weight_v) (← checkedWeight weights.decode.i1.conv1.weight_g) (← checkedWeight weights.decode.i1.conv1.bias)
     conv2 := wnConv1dFromWeightNorm (← checkedWeight weights.decode.i1.conv2.weight_v) (← checkedWeight weights.decode.i1.conv2.weight_g) (← checkedWeight weights.decode.i1.conv2.bias)
     norm1 := ← adaIN1dFromLinear (← checkedWeight weights.decode.i1.norm1.fc.weight) (← checkedWeight weights.decode.i1.norm1.fc.bias)
     norm2 := ← adaIN1dFromLinear (← checkedWeight weights.decode.i1.norm2.fc.weight) (← checkedWeight weights.decode.i1.norm2.fc.bias)
-    shortcut := some <| wnConv1dFromWeightNorm (← checkedWeight weights.decode.i1.conv1x1.weight_v) (← checkedWeight weights.decode.i1.conv1x1.weight_g) (Tensor.zeros #[cfg.maxConvDim] (device := device))
+    shortcut := .conv <| wnConv1dFromWeightNorm (← checkedWeight weights.decode.i1.conv1x1.weight_v) (← checkedWeight weights.decode.i1.conv1x1.weight_g) (Tensor.zeros #[cfg.maxConvDim] (device := device))
   }
   let decode2 : AdainResBlk1dSame (device := device) (cfg.maxConvDim + cfg.asrResDim + 2) cfg.maxConvDim cfg.styleDim := {
     conv1 := wnConv1dFromWeightNorm (← checkedWeight weights.decode.i2.conv1.weight_v) (← checkedWeight weights.decode.i2.conv1.weight_g) (← checkedWeight weights.decode.i2.conv1.bias)
     conv2 := wnConv1dFromWeightNorm (← checkedWeight weights.decode.i2.conv2.weight_v) (← checkedWeight weights.decode.i2.conv2.weight_g) (← checkedWeight weights.decode.i2.conv2.bias)
     norm1 := ← adaIN1dFromLinear (← checkedWeight weights.decode.i2.norm1.fc.weight) (← checkedWeight weights.decode.i2.norm1.fc.bias)
     norm2 := ← adaIN1dFromLinear (← checkedWeight weights.decode.i2.norm2.fc.weight) (← checkedWeight weights.decode.i2.norm2.fc.bias)
-    shortcut := some <| wnConv1dFromWeightNorm (← checkedWeight weights.decode.i2.conv1x1.weight_v) (← checkedWeight weights.decode.i2.conv1x1.weight_g) (Tensor.zeros #[cfg.maxConvDim] (device := device))
+    shortcut := .conv <| wnConv1dFromWeightNorm (← checkedWeight weights.decode.i2.conv1x1.weight_v) (← checkedWeight weights.decode.i2.conv1x1.weight_g) (Tensor.zeros #[cfg.maxConvDim] (device := device))
   }
   let decode3 : AdainResBlk1dUp (device := device) (cfg.maxConvDim + cfg.asrResDim + 2) (KittenTTSConfig.decoderChannels cfg) cfg.styleDim := {
     pool := wnDepthwiseTransConv1dFromWeightNorm (← checkedWeight weights.decode.i3.pool.weight_v) (← checkedWeight weights.decode.i3.pool.weight_g) (← checkedWeight weights.decode.i3.pool.bias)
@@ -761,7 +486,7 @@ private def loadDecoderFromCheckpoint
     conv2 := wnConv1dFromWeightNorm (← checkedWeight weights.decode.i3.conv2.weight_v) (← checkedWeight weights.decode.i3.conv2.weight_g) (← checkedWeight weights.decode.i3.conv2.bias)
     norm1 := ← adaIN1dFromLinear (← checkedWeight weights.decode.i3.norm1.fc.weight) (← checkedWeight weights.decode.i3.norm1.fc.bias)
     norm2 := ← adaIN1dFromLinear (← checkedWeight weights.decode.i3.norm2.fc.weight) (← checkedWeight weights.decode.i3.norm2.fc.bias)
-    shortcut := some <| wnConv1dFromWeightNorm (← checkedWeight weights.decode.i3.conv1x1.weight_v) (← checkedWeight weights.decode.i3.conv1x1.weight_g) (Tensor.zeros #[KittenTTSConfig.decoderChannels cfg] (device := device))
+    shortcut := .conv <| wnConv1dFromWeightNorm (← checkedWeight weights.decode.i3.conv1x1.weight_v) (← checkedWeight weights.decode.i3.conv1x1.weight_g) (Tensor.zeros #[KittenTTSConfig.decoderChannels cfg] (device := device))
   }
   pure {
     f0Conv := wnConv1dFromWeightNorm (← checkedWeight weights.f0_conv.weight_v) (← checkedWeight weights.f0_conv.weight_g) (← checkedWeight weights.f0_conv.bias)
@@ -854,6 +579,14 @@ private def reconcileConfigWithCheckpoint
     genIstftNFft := genIstftNFft
     harmonicCount := harmonicCount
   }
+  let ⟨hHidden⟩ ← if h : 2 ∣ hiddenDim then pure (PLift.up h) else
+    throw <| IO.userError s!"Checkpoint hidden dimension {hiddenDim} must be even"
+  let ⟨hKernel⟩ ← if h : textEncoderKernelSize % 2 = 1 then pure (PLift.up h) else
+    throw <| IO.userError s!"Checkpoint text encoder kernel {textEncoderKernelSize} must be odd"
+  let ⟨hDecoder⟩ ← if h : (if decoderOutDim == 0 then generator.upsampleInitialChannel else decoderOutDim) =
+      generator.upsampleInitialChannel then pure (PLift.up h) else
+    throw <| IO.userError
+      s!"Checkpoint decoder output {decoderOutDim} must match generator input {generator.upsampleInitialChannel}"
   pure {
     cfg with
     hiddenDim := hiddenDim
@@ -866,6 +599,9 @@ private def reconcileConfigWithCheckpoint
     asrResDim := asrResDim
     decoderOutDim := decoderOutDim
     generator := generator
+    hiddenDimEven := hHidden
+    textKernelOdd := hKernel
+    decoderMatchesGenerator := hDecoder
   }
 
 private def buildModelFromCheckpointWeights

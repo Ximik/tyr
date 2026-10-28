@@ -266,7 +266,8 @@ def testQwen3TTSSpeakerEmbeddingAlignsFeatureDType : IO Unit := do
     encChannels := #[8, 8, 8, 8, 24]
     encAttentionChannels := 4
     encRes2NetScale := 2
-    encSeChannels := 4 } }
+    encSeChannels := 4
+    residualChannels := by decide } }
   let features : Tensor { shape := #[2, 12, cfg.speakerEncoderConfig.melDim], dtype := .Float32, device := .CPU } ←
     Tensor.randn #[2, 12, cfg.speakerEncoderConfig.melDim]
   for bf16Weights in #[false, true] do
@@ -278,7 +279,7 @@ def testQwen3TTSSpeakerEmbeddingAlignsFeatureDType : IO Unit := do
       let mel := features.castDType (if bf16Features then .BFloat16 else .Float32)
       let originalDType := mel.actualSpec.dtype
       let explicit := mel.castDType speaker.val
-      let expected := enc.forward explicit
+      let expected := enc.forward (by decide) explicit
       let actual ← model.extractSpeakerEmbedding mel
       LeanTest.assertEqual actual.runtimeShape #[2, cfg.speakerEncoderConfig.encDim]
         "Speaker output shape follows the model configuration"

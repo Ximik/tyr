@@ -142,6 +142,20 @@ theorem heads_mul_headDim (cfg : VisionConfig) : cfg.num_heads * headDim cfg = c
 def mergedTokenCount (cfg : VisionConfig) (nPatches : Nat) : Nat :=
   Qwen35VisionConfig.mergedTokenCount cfg nPatches
 
+theorem mergedTokenCount_mul {cfg : VisionConfig} {nPatches : Nat}
+    (h : mergeUnit cfg ∣ nPatches) (d : Nat) :
+    mergedTokenCount cfg nPatches * (d * mergeUnit cfg) = nPatches * d := by
+  unfold mergedTokenCount Qwen35VisionConfig.mergedTokenCount
+  simp only
+  split
+  · rename_i h0
+    have hu : mergeUnit cfg = 0 := by simpa using h0
+    rw [hu] at h ⊢
+    simp [Nat.eq_zero_of_zero_dvd h]
+  · rw [Nat.mul_comm d, ← Nat.mul_assoc]
+    change nPatches / mergeUnit cfg * mergeUnit cfg * d = nPatches * d
+    rw [Nat.div_mul_cancel h]
+
 end VisionConfig
 
 namespace VLConfig

@@ -75,12 +75,12 @@ private def runMatrixCase (path : String) (device : Device) : IO Unit := do
   check (got.actualSpec.dtype == .BFloat16) "dequantMatrix preserves BF16 output dtype"
   if device == .CPU then
     let wrongShapeRejected ← try
-      let _ ← nvfp4.dequantMatrix (packed.reshapeChecked #[32, 128]) scales globalS 64 128
+      let _ ← nvfp4.dequantMatrix (packed.reshape #[32, 128] (by simp)) scales globalS 64 128
       pure false
     catch _ => pure true
     check wrongShapeRejected "dequant rejects equal-numel packed shape mismatch"
     let wrongGlobalRejected ← try
-      let _ ← nvfp4.dequantMatrix packed scales (globalS.reshapeChecked #[1, 1]) 64 128
+      let _ ← nvfp4.dequantMatrix packed scales (globalS.reshape #[1, 1]) 64 128
       pure false
     catch _ => pure true
     check wrongGlobalRejected "dequant rejects non-scalar global-scale layout"

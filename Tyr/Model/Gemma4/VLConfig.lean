@@ -22,7 +22,12 @@ structure Gemma4VisionConfig where
   rope_theta : Float := 100.0
   standardize : Bool := false
   use_clipped_linears : Bool := false
-  deriving Repr, Inhabited
+  /-- The `hidden_size` projections split into query and key/value heads; checked when the config is built. -/
+  queryHeadsSplit : num_attention_heads * head_dim = hidden_size := by decide
+  keyValueHeadsSplit : num_key_value_heads * head_dim = hidden_size := by decide
+  deriving Repr
+
+instance : Inhabited Gemma4VisionConfig := ⟨{}⟩
 
 namespace Gemma4VisionConfig
 

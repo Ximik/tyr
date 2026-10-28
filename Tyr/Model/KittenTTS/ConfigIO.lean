@@ -122,23 +122,33 @@ end AlbertConfig
 
 namespace GeneratorConfig
 
-def loadFromJson (root : Json) (defaults : GeneratorConfig := {}) : GeneratorConfig := {
-  resblockKernelSizes :=
-    getNatArrayFieldD root "resblock_kernel_sizes" defaults.resblockKernelSizes
-  upsampleRates :=
-    getNatArrayFieldD root "upsample_rates" defaults.upsampleRates
-  upsampleInitialChannel :=
-    getNatFieldD root "upsample_initial_channel" defaults.upsampleInitialChannel
-  resblockDilationSizes :=
-    getNatMatrixFieldD root "resblock_dilation_sizes" defaults.resblockDilationSizes
-  upsampleKernelSizes :=
-    getNatArrayFieldD root "upsample_kernel_sizes" defaults.upsampleKernelSizes
-  genIstftNFft :=
-    getNatFieldD root "gen_istft_n_fft" defaults.genIstftNFft
-  genIstftHopSize :=
-    getNatFieldD root "gen_istft_hop_size" defaults.genIstftHopSize
-  harmonicCount := getNatFieldD root "harmonic_num" defaults.harmonicCount
-}
+def loadFromJson (root : Json) (defaults : GeneratorConfig := {}) : Except String GeneratorConfig := do
+  let resblockKernelSizes := getNatArrayFieldD root "resblock_kernel_sizes" defaults.resblockKernelSizes
+  let upsampleRates := getNatArrayFieldD root "upsample_rates" defaults.upsampleRates
+  let upsampleKernelSizes := getNatArrayFieldD root "upsample_kernel_sizes" defaults.upsampleKernelSizes
+  if hStages : 0 < upsampleRates.size ∧ ∀ i, i < upsampleRates.size →
+      1 < upsampleRates.getD i 1 ∧ upsampleRates.getD i 1 ≤ upsampleKernelSizes.getD i 0 ∧
+      2 ∣ upsampleKernelSizes.getD i 0 - upsampleRates.getD i 1 then
+    if hRes : 0 < resblockKernelSizes.size ∧
+        ∀ j, j < resblockKernelSizes.size → resblockKernelSizes.getD j 0 % 2 = 1 then
+      pure {
+        resblockKernelSizes
+        upsampleRates
+        upsampleInitialChannel :=
+          getNatFieldD root "upsample_initial_channel" defaults.upsampleInitialChannel
+        resblockDilationSizes :=
+          getNatMatrixFieldD root "resblock_dilation_sizes" defaults.resblockDilationSizes
+        upsampleKernelSizes
+        genIstftNFft := getNatFieldD root "gen_istft_n_fft" defaults.genIstftNFft
+        genIstftHopSize := getNatFieldD root "gen_istft_hop_size" defaults.genIstftHopSize
+        harmonicCount := getNatFieldD root "harmonic_num" defaults.harmonicCount
+        stagesValid := hStages
+        resblocksValid := hRes
+      }
+    else
+      throw s!"Invalid KittenTTS generator config: resblock_kernel_sizes={resblockKernelSizes} must be nonempty and odd"
+  else
+    throw s!"Invalid KittenTTS generator config: upsample_rates={upsampleRates} must be nonempty, each above 1, with upsample_kernel_sizes={upsampleKernelSizes} at least the rate and differing from it by an even amount"
 
 end GeneratorConfig
 
@@ -150,29 +160,39 @@ def loadFromFile (path : String) (defaults : KittenTTSConfig := {}) : IO KittenT
     match getObjVal? root "plbert" with
     | some j => AlbertConfig.loadFromJson j defaults.plbert
     | none => defaults.plbert
-  let generator :=
+  let generator ←
     match getObjVal? root "istftnet" with
-    | some j => GeneratorConfig.loadFromJson j defaults.generator
-    | none => defaults.generator
+    | some j => IO.ofExcept (GeneratorConfig.loadFromJson j defaults.generator)
+    | none => pure defaults.generator
+  let hiddenDim := getNatFieldD root "hidden_dim" defaults.hiddenDim
+  let textEncoderKernelSize := getNatFieldD root "text_encoder_kernel_size" defaults.textEncoderKernelSize
+  let decoderOutDim := getNatFieldD root "decoder_out_dim" defaults.decoderOutDim
+  let ⟨hHidden⟩ ← if h : 2 ∣ hiddenDim then pure (PLift.up h) else
+    throw <| IO.userError s!"Invalid KittenTTS config: hidden_dim={hiddenDim} must be divisible by 2"
+  let ⟨hKernel⟩ ← if h : textEncoderKernelSize % 2 = 1 then pure (PLift.up h) else
+    throw <| IO.userError s!"Invalid KittenTTS config: text_encoder_kernel_size={textEncoderKernelSize} must be odd"
+  let ⟨hDecoder⟩ ← if h : (if decoderOutDim == 0 then generator.upsampleInitialChannel else decoderOutDim) =
+      generator.upsampleInitialChannel then pure (PLift.up h) else
+    throw <| IO.userError
+      s!"Invalid KittenTTS config: decoder_out_dim={decoderOutDim} must match upsample_initial_channel={generator.upsampleInitialChannel}"
   let cfg : KittenTTSConfig := {
-    hiddenDim := getNatFieldD root "hidden_dim" defaults.hiddenDim
+    hiddenDim
     maxConvDim := getNatFieldD root "max_conv_dim" defaults.maxConvDim
     maxDur := getNatFieldD root "max_dur" defaults.maxDur
     nLayer := getNatFieldD root "n_layer" defaults.nLayer
     nMels := getNatFieldD root "n_mels" defaults.nMels
     nToken := getNatFieldD root "n_token" defaults.nToken
     styleDim := getNatFieldD root "style_dim" defaults.styleDim
-    textEncoderKernelSize :=
-      getNatFieldD root "text_encoder_kernel_size" defaults.textEncoderKernelSize
+    textEncoderKernelSize
     asrResDim := getNatFieldD root "dim_in" defaults.asrResDim
-    decoderOutDim :=
-      getNatFieldD root "decoder_out_dim" defaults.decoderOutDim
+    decoderOutDim
     sampleRate := getNatFieldD root "sample_rate" defaults.sampleRate
     plbert := plbert
     generator := generator
+    hiddenDimEven := hHidden
+    textKernelOdd := hKernel
+    decoderMatchesGenerator := hDecoder
   }
-  if cfg.hiddenDim % 2 != 0 then
-    throw <| IO.userError s!"Invalid KittenTTS config: hidden_dim={cfg.hiddenDim} must be divisible by 2"
   if cfg.plbert.numAttentionHeads == 0 || cfg.plbert.hiddenSize % cfg.plbert.numAttentionHeads != 0 then
     throw <| IO.userError
       s!"Invalid KittenTTS PLBERT config: hidden_size={cfg.plbert.hiddenSize}, heads={cfg.plbert.numAttentionHeads}"

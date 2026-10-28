@@ -90,8 +90,9 @@ a size-one vector cannot. Native metadata is validated at checked boundaries.
 Selection has its own scalar relocation rule; see
 [device compatibility](typed.md#device-compatibility).
 
-`reshape` requires equal element counts. `reshapeChecked` validates a requested
-runtime shape. In both cases `#[]` means a scalar. `sliceChecked` validates the
+`reshape` takes a proof that the element counts are equal; its default tactic
+finds it for most shapes. When a shape is only known at runtime, `reshapeChecked?`
+validates it and returns an error instead. In both cases `#[]` means a scalar. `sliceChecked` validates the
 claimed result of a runtime slice. Other transforms include `transpose`,
 `permute`, `unsqueeze`, `squeeze`, and `unbind`.
 

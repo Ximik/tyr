@@ -1113,51 +1113,33 @@ private def tensorFloatChild {σ : StaticSpec} (path : VirtualBrownianTree (Tens
   let childSeed := (PRNGKey.foldIn root (UInt32.ofNat i)).state
   mkChildPath path childSeed 0.0
 
-private def tensorNumel {σ : StaticSpec} (ref : Tensor σ) : Nat :=
-  (Tensor.runtimeShape ref).foldl (fun acc d => acc * d) 1
-
-/-- Pack per-element values into a tensor with `ref`'s shape. The packed values
-    are Float32 on CPU; the claimed spec is validated against the packed handle
-    (dtype and placement must match or this panics). -/
-private def tensorPackLike {σ : StaticSpec} (_ref : Tensor σ) (vals : Array Float) : Tensor σ :=
-  let flat := Tensor.fromFloatArray vals
-  match Tensor.ofRaw (σ := σ) (Tensor.reshapeChecked flat σ.shape).raw with
+/-- Pack per-element values into a tensor with `σ`'s shape. The packed values
+    are Float32 on CPU; the claimed dtype and placement are validated against
+    the packed handle (a mismatch panics). -/
+private def tensorPackLike {σ : StaticSpec} (vals : Array Float)
+    (h : vals.size = TensorSpec.numelOfShape σ.shape) : Tensor σ :=
+  match Tensor.ofRaw (σ := σ) (Tensor.fromFloatArrayShaped vals σ.shape h).raw with
   | .ok t => t
   | .error message => nativeInvariantFailure s!"tensorPackLike: {message}"
 
 instance {σ : StaticSpec} : VirtualBrownianTreeOps (Tensor σ) where
-  increment path t0 t1 := Id.run do
-    let n := tensorNumel path.shape
-    let mut ws : Array Float := Array.mkEmpty n
-    for i in [:n] do
-      let inc := incrementFloatCore (tensorFloatChild path i) t0 t1
-      ws := ws.push inc.W
-    return { dt := t1 - t0, W := tensorPackLike path.shape ws }
-  incrementSpaceTime path t0 t1 := Id.run do
-    let n := tensorNumel path.shape
-    let mut ws : Array Float := Array.mkEmpty n
-    let mut hs : Array Float := Array.mkEmpty n
-    for i in [:n] do
-      let inc := incrementSpaceTimeFloatCore (tensorFloatChild path i) t0 t1
-      ws := ws.push inc.W
-      hs := hs.push inc.H
-    return { dt := t1 - t0
-             W := tensorPackLike path.shape ws
-             H := tensorPackLike path.shape hs }
-  incrementSpaceTimeTime path t0 t1 := Id.run do
-    let n := tensorNumel path.shape
-    let mut ws : Array Float := Array.mkEmpty n
-    let mut hs : Array Float := Array.mkEmpty n
-    let mut ks : Array Float := Array.mkEmpty n
-    for i in [:n] do
-      let inc := incrementSpaceTimeTimeFloatCore (tensorFloatChild path i) t0 t1
-      ws := ws.push inc.W
-      hs := hs.push inc.H
-      ks := ks.push inc.K
-    return { dt := t1 - t0
-             W := tensorPackLike path.shape ws
-             H := tensorPackLike path.shape hs
-             K := tensorPackLike path.shape ks }
+  increment path t0 t1 :=
+    let incs := Array.ofFn (n := TensorSpec.numelOfShape σ.shape) fun i =>
+      incrementFloatCore (tensorFloatChild path i.val) t0 t1
+    { dt := t1 - t0, W := tensorPackLike (incs.map (·.W)) (by simp [incs]) }
+  incrementSpaceTime path t0 t1 :=
+    let incs := Array.ofFn (n := TensorSpec.numelOfShape σ.shape) fun i =>
+      incrementSpaceTimeFloatCore (tensorFloatChild path i.val) t0 t1
+    { dt := t1 - t0
+      W := tensorPackLike (incs.map (·.W)) (by simp [incs])
+      H := tensorPackLike (incs.map (·.H)) (by simp [incs]) }
+  incrementSpaceTimeTime path t0 t1 :=
+    let incs := Array.ofFn (n := TensorSpec.numelOfShape σ.shape) fun i =>
+      incrementSpaceTimeTimeFloatCore (tensorFloatChild path i.val) t0 t1
+    { dt := t1 - t0
+      W := tensorPackLike (incs.map (·.W)) (by simp [incs])
+      H := tensorPackLike (incs.map (·.H)) (by simp [incs])
+      K := tensorPackLike (incs.map (·.K)) (by simp [incs]) }
 
 @[inline] private def ensureValidRange (path : VirtualBrownianTree BM) (t0 t1 : Time) : Unit :=
   Id.run do

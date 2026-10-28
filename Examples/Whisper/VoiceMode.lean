@@ -249,6 +249,7 @@ private def runOnce
     (model : WhisperForConditionalGeneration (device := device) (dtype := dtype) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (pre : torch.qwen3asr.PreprocessorConfig)
+    (hMel : pre.featureSize = cfg.numMelBins)
     (args : Args)
     (decodeOpts : WhisperDecodeOptions)
     : IO Bool := do
@@ -324,7 +325,7 @@ private def runOnce
         if newSinceLastTranscribe >= transcribeInterval && audioBuf.size >= toSamples 0.5 then
           let wav ← audioBuf.toArray
           lastTranscribeSize := audioBuf.size
-          let result ← transcribeWaveform16k model tok pre wav args.language args.maxNewTokens true decodeOpts
+          let result ← transcribeWaveform16k model tok pre hMel wav args.language args.maxNewTokens true decodeOpts
           let text := result.text.trimAscii.toString
           if !text.isEmpty then
             lastText := text
@@ -339,7 +340,7 @@ private def runOnce
     return false
 
   let wav ← audioBuf.toArray
-  let result ← transcribeWaveform16k model tok pre wav args.language args.maxNewTokens true decodeOpts
+  let result ← transcribeWaveform16k model tok pre hMel wav args.language args.maxNewTokens true decodeOpts
   let text := result.text.trimAscii.toString
 
   if text.isEmpty then
@@ -378,7 +379,7 @@ def runMain (argv : List String) : IO UInt32 := do
       let mut noSpeechCount : Nat := 0
       let mut running := true
       while running do
-        let hadSpeech ← runOnce bundle.model bundle.tok bundle.preprocessor args decodeOpts
+        let hadSpeech ← runOnce bundle.model bundle.tok bundle.preprocessor bundle.melBinsMatch args decodeOpts
         if hadSpeech then
           noSpeechCount := 0
         else
@@ -389,7 +390,7 @@ def runMain (argv : List String) : IO UInt32 := do
     else
       IO.println "Single-shot voice mode. Speak, then wait for silence."
       IO.println ""
-      let _ ← runOnce bundle.model bundle.tok bundle.preprocessor args decodeOpts
+      let _ ← runOnce bundle.model bundle.tok bundle.preprocessor bundle.melBinsMatch args decodeOpts
 
     Tyr.Audio.AppleInput.stop
   catch e =>

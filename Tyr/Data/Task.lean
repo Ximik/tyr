@@ -326,10 +326,6 @@ def renderConversation
 
 /-! ## Batch Collation -/
 
-/-- Build an Int64 token tensor from host data over the raw FFI boundary. -/
-private def int64TensorFromArray (arr : Array Int64) : Tensor { shape := #[arr.size], dtype := .Int64, device := .CPU } :=
-  Tensor.fromInt64Array arr
-
 /-- A batch of tokenized conversations -/
 structure ConversationBatch where
   /-- Batch size (number of conversations) -/
@@ -383,11 +379,10 @@ def collate (convs : Array TokenizedConversation) (maxLen : Nat) (padToken : UIn
     lengths := lengths.push (min conv.tokens.size actualMaxLen)
 
   -- Convert to tensors
-  let tokensFlat := int64TensorFromArray (allTokens.map (·.toInt64))
-  let tokensTensor := tokensFlat.reshapeChecked #[batchSize, actualMaxLen]
-
-  let maskFlat := Tensor.fromFloatArray (allMasks.map fun m => m.toNat.toFloat)
-  let maskTensor := maskFlat.reshapeChecked #[batchSize, actualMaxLen]
+  let tokensTensor ← IO.ofExcept <|
+    Tensor.fromInt64ArrayAs? (allTokens.map (·.toInt64)) #[batchSize, actualMaxLen]
+  let maskTensor ← IO.ofExcept <|
+    Tensor.fromFloatArrayAs? (allMasks.map fun m => m.toNat.toFloat) #[batchSize, actualMaxLen]
 
   return {
     batchSize := batchSize
@@ -561,12 +556,10 @@ def TaskTokenStream.nextGPTBatch (stream : TaskTokenStream)
     let inputIds := window.extract 0 (needed - 1)
     let targetIds := window.extract 1 needed
 
-    let inputFlat := int64TensorFromArray (inputIds.map (·.toInt64))
-    let inputTensor := inputFlat.reshapeChecked
-      #[stream.batchSize, stream.seqLen]
-    let targetFlat := int64TensorFromArray (targetIds.map (·.toInt64))
-    let targetTensor := targetFlat.reshapeChecked
-      #[stream.batchSize, stream.seqLen]
+    let inputTensor ← IO.ofExcept <|
+      Tensor.fromInt64ArrayAs? (inputIds.map (·.toInt64)) #[stream.batchSize, stream.seqLen]
+    let targetTensor ← IO.ofExcept <|
+      Tensor.fromInt64ArrayAs? (targetIds.map (·.toInt64)) #[stream.batchSize, stream.seqLen]
 
     let progress :=
       if sWindow.mixture.size == 0 then

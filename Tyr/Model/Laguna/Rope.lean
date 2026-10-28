@@ -134,20 +134,12 @@ def buildCosSinTables (invFreq : Array Float) (maxLen : Nat) (scale : Float := 1
     Tensor { device := device, shape := #[maxLen, invFreq.size], dtype := .Float32 } ×
     Tensor { device := device, shape := #[maxLen, invFreq.size], dtype := .Float32 } :=
   let half := invFreq.size
-  let n := maxLen
-  let (cosArr, sinArr) := Id.run do
-    let mut cosArr := Array.mkEmpty (n * half)
-    let mut sinArr := Array.mkEmpty (n * half)
-    for p in [:n] do
-      let pf := p.toFloat
-      for j in [:half] do
-        let f := pf * invFreq.getD j 0.0
-        cosArr := cosArr.push (Float.cos f * scale)
-        sinArr := sinArr.push (Float.sin f * scale)
-    pure (cosArr, sinArr)
-  let shape : Shape := #[maxLen, half]
-  ((Tensor.reshapeChecked (Tensor.fromFloatArray cosArr) shape).to device,
-   (Tensor.reshapeChecked (Tensor.fromFloatArray sinArr) shape).to device)
+  let angle (i : Fin (maxLen * half)) : Float :=
+    (i.val / half).toFloat * invFreq.getD (i.val % half) 0.0
+  let cosArr : Array Float := Array.ofFn fun i => Float.cos (angle i) * scale
+  let sinArr : Array Float := Array.ofFn fun i => Float.sin (angle i) * scale
+  ((Tensor.fromFloatArrayShaped cosArr #[maxLen, half] (by simp [cosArr])).to device,
+   (Tensor.fromFloatArrayShaped sinArr #[maxLen, half] (by simp [sinArr])).to device)
 
 /-- Precompute Laguna's dual rotary tables on `device` for positions `[0, maxLen)`.
 

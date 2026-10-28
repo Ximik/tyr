@@ -166,7 +166,7 @@ private def benchmarkForwardSeq (cfg : Benchmark.Config) (stream : UInt64)
   let launchQueryBlocks := if useS768Specialization then seqLen / (4 * rowTileSize) else queryBlocks
   let lBlocks := if useS768Specialization then batch * qHeads * queryBlocks else queryBlocks
   let lOut : Tensor { shape := #[lBlocks, rowTileSize], dtype := .Float32, device := device } ← Tensor.uniformLike (Tensor.zeros #[lBlocks, rowTileSize] false device) 0 0
-  let expectedL : Tensor { shape := #[lBlocks, rowTileSize], dtype := .Float32, device := device } := Tensor.reshapeChecked expectedL3 #[lBlocks, rowTileSize]
+  let expectedL : Tensor { shape := #[lBlocks, rowTileSize], dtype := .Float32, device := device }  ← IO.ofExcept (expectedL3.reshapeChecked? #[lBlocks, rowTileSize])
   let seqLenArg ← Tyr.GPU.Codegen.launchArg seqLen "seqLen"
   let qHeadsArg ← Tyr.GPU.Codegen.launchArg qHeads "qHeads"
   let launch : IO Unit := if useS768Specialization then

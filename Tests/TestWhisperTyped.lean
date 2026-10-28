@@ -33,7 +33,7 @@ private def close {σ τ : StaticSpec} (x : Tensor σ) (y : Tensor τ) (tol : Fl
     let _ := support.down
     let model ← WhisperForConditionalGeneration.init cfg (dtype := dtype)
     let model := TensorStruct.detach model
-    let encoded ← model.encode features
+    let encoded ← model.encode features (by decide)
     LeanTest.assertEqual encoded.runtimeShape #[1, 3, 8]
     LeanTest.assertEqual encoded.actualSpec.dtype (if bf16 then .BFloat16 else .Float32)
     let expected ← model.decode tokens encoded
@@ -55,7 +55,7 @@ private def close {σ τ : StaticSpec} (x : Tensor σ) (y : Tensor τ) (tol : Fl
 
 @[test] def testWhisperCacheCapacityAndPositionErrors : IO Unit := do
   let model ← WhisperForConditionalGeneration.init cfg
-  let encoded ← model.encode features
+  let encoded ← model.encode features (by decide)
   let cross ← model.precomputeCrossCaches encoded
   let caches := model.initLayerKVCaches (batch := 1) 1 .CPU
   let tok := tokens.sliceChecked 1 0 1 #[1, 1]
@@ -80,16 +80,11 @@ private def close {σ τ : StaticSpec} (x : Tensor σ) (y : Tensor τ) (tol : Fl
 @[test] def testWhisperLengthAndHeadValidation : IO Unit := do
   let model ← WhisperForConditionalGeneration.init cfg
   let tooLong ← try
-    let _ ← model.encode ((Tensor.zeros #[1, 4, 10]))
+    let _ ← model.encode ((Tensor.zeros #[1, 4, 10])) (by decide)
     pure false
   catch e => pure ((toString e).contains "max_source_positions")
   LeanTest.assertTrue tooLong
-  let emptyRejected ← try
-    let _ ← model.encode ((Tensor.zeros #[1, 4, 0]))
-    pure false
-  catch e => pure ((toString e).contains "input frame")
-  LeanTest.assertTrue emptyRejected
-  let encoded ← model.encode features
+  let encoded ← model.encode features (by decide)
   let decoderTooLong ← try
     let _ ← model.decode (Tensor.fullInt #[1, 9] 1) encoded
     pure false
@@ -104,8 +99,8 @@ private def roundTrip {α : Type} [TensorStruct α] (value : α) (dir : String) 
 @[test] def testWhisperIndexedCheckpoint : IO Unit := IO.FS.withTempDir fun dir => do
   let model ← WhisperForConditionalGeneration.init cfg
   let restored ← roundTrip model dir.toString
-  let encoded ← model.encode features
-  let other ← restored.encode features
+  let encoded ← model.encode features (by decide)
+  let other ← restored.encode features (by decide)
   close encoded other 0
   close (← model.decode tokens encoded) (← restored.decode tokens other) 0
 
@@ -124,7 +119,7 @@ private def roundTrip {α : Type} [TensorStruct α] (value : α) (dir : String) 
     nSamples := 2048, nbMaxFrames := 32, chunkLength := 0 }
   let waveform := Array.ofFn (n := 1024) fun i => 0.1 * Float.sin (i.val.toFloat * 0.2)
   for (beam, temperature) in #[(1, 0.0), (2, 0.0), (1, 0.7)] do
-    let result ← transcribeWaveform16k model tok pre waveform "english" 2 true {
+    let result ← transcribeWaveform16k model tok pre rfl waveform "english" 2 true {
       beamSize := beam, temperature, noFallback := true, conditionOnPreviousText := false,
       chunkOverlapSeconds := 0, noSpeechThreshold := 1.0 }
     LeanTest.assertEqual result.language "en"
@@ -187,7 +182,7 @@ private def writeWhisperCheckpoint (dir : System.FilePath) (bf16 : Bool) (badBia
       let some layer := model.model.decoderLayers[0]? | throw (IO.userError "missing decoder layer")
       LeanTest.assertEqual layer.selfAttn.kProjBias.actualSpec.dtype dtype
       close layer.selfAttn.kProjBias (Tensor.zeros #[8]) 0
-      let encoded ← model.encode features
+      let encoded ← model.encode features (by decide)
       let logits ← model.decode tokens encoded
       LeanTest.assertEqual logits.actualSpec.dtype dtype
       for v in (← logits.toFloatArray) do LeanTest.assertTrue v.isFinite

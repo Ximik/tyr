@@ -67,12 +67,12 @@ private def assertClose (actual expected : Array Float) : IO Unit := do
     { layer with selfAttn := { layer.selfAttn with
         outProjWeight := Tensor.zerosLike layer.selfAttn.outProjWeight } } }
   let features := (Tensor.ones #[1, 8, 32])
-  assertClose (← (← model.forwardIO features true).toFloatArray)
-    (← (reference.forwardInference features).toFloatArray)
+  assertClose (← (← model.forwardIO features (by simp +zetaDelta) true).toFloatArray)
+    (← (reference.forwardInference features (by simp +zetaDelta)).toFloatArray)
   assertClose (← (← model.forwardVarLenIO features #[24] true).toFloatArray)
     (← (reference.forwardVarLenInference features #[24]).toFloatArray)
-  assertClose (← (← model.forwardIO features false).toFloatArray)
-    (← (model.forwardInference features).toFloatArray)
+  assertClose (← (← model.forwardIO features (by simp +zetaDelta) false).toFloatArray)
+    (← (model.forwardInference features (by simp +zetaDelta)).toFloatArray)
   assertClose (← (← model.forwardVarLenIO features #[24] false).toFloatArray)
     (← (model.forwardVarLenInference features #[24]).toFloatArray)
 
@@ -98,15 +98,15 @@ private def expectDropoutError (action : IO α) : IO Unit := do
   let textIds := (Tensor.fromInt64Array #[1]).reshape #[1, 1]
   let placeholders := (Tensor.fromInt64Array #[7, 7, 7, 7]).reshape #[1, 4]
   let featureMask := (Tensor.fullInt #[1, 32] 1)
-  expectDropoutError (model.thinker.encodeAudioIO features true)
+  expectDropoutError (model.thinker.encodeAudioIO features (by simp +zetaDelta) true)
   expectDropoutError (model.thinker.encodeAudioVarLenIO features #[32] true)
-  expectDropoutError (model.forwardFromMelIO features textIds true)
+  expectDropoutError (model.forwardFromMelIO features (by simp +zetaDelta) textIds true)
   expectDropoutError (model.forward placeholders (some features) (training := true))
   expectDropoutError (model.forwardWithAux placeholders (some features) (some featureMask)
     (training := true))
   -- Effectful evaluation still validates the configured probability before disabling dropout.
-  expectDropoutError (model.thinker.encodeAudioIO features false)
-  LeanTest.assertEqual (← (model.thinker.encodeAudio features).toFloatArray).size 8
+  expectDropoutError (model.thinker.encodeAudioIO features (by simp +zetaDelta) false)
+  LeanTest.assertEqual (← (model.thinker.encodeAudio features (by simp +zetaDelta)).toFloatArray).size 8
 
 @[test] def testASRParentTrainingFlagControlsRNG : IO Unit := do
   let model ← Qwen3ASRForConditionalGeneration.init (parentCfg 0.5)
@@ -119,13 +119,13 @@ private def expectDropoutError (action : IO α) : IO Unit := do
   -- random operation other than attention dropout.
   let entrypoints : Array (String × (Bool → IO Unit)) := #[
     ("encodeAudioIO", fun training =>
-      (model.thinker.encodeAudioIO features training).map (fun _ => ())),
+      (model.thinker.encodeAudioIO features (by simp +zetaDelta) training).map (fun _ => ())),
     ("encodeAudioVarLenIO", fun training =>
       (model.thinker.encodeAudioVarLenIO features #[32] training).map (fun _ => ())),
     ("thinker.forwardFromMelIO", fun training =>
-      (model.thinker.forwardFromMelIO features textIds training).map (fun _ => ())),
+      (model.thinker.forwardFromMelIO features (by simp +zetaDelta) textIds training).map (fun _ => ())),
     ("forwardFromMelIO", fun training =>
-      (model.forwardFromMelIO features textIds training).map (fun _ => ())),
+      (model.forwardFromMelIO features (by simp +zetaDelta) textIds training).map (fun _ => ())),
     ("forward", fun training =>
       (model.forward placeholders (some features) (training := training)).map (fun _ => ())),
     ("forward varlen", fun training =>

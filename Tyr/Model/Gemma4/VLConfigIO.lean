@@ -82,14 +82,19 @@ private def ropeFloatFieldD (j : Json) (field : String) (d : Float) : Float :=
   | some x => x
   | none => d
 
-def VisionConfig.parseJson (j : Json) (d : VisionConfig := {}) : VisionConfig :=
-  {
-    hidden_size := getNatFieldD j "hidden_size" d.hidden_size
+def VisionConfig.parseJson (j : Json) (d : VisionConfig := {}) : Except String VisionConfig :=
+  let hidden_size := getNatFieldD j "hidden_size" d.hidden_size
+  let num_attention_heads := getNatFieldD j "num_attention_heads" d.num_attention_heads
+  let num_key_value_heads := getNatFieldD j "num_key_value_heads" d.num_key_value_heads
+  let head_dim := getNatFieldD j "head_dim" d.head_dim
+  if queryHeadsSplit : num_attention_heads * head_dim = hidden_size then
+  if keyValueHeadsSplit : num_key_value_heads * head_dim = hidden_size then .ok {
+    hidden_size
     intermediate_size := getNatFieldD j "intermediate_size" d.intermediate_size
     num_hidden_layers := getNatFieldD j "num_hidden_layers" d.num_hidden_layers
-    num_attention_heads := getNatFieldD j "num_attention_heads" d.num_attention_heads
-    num_key_value_heads := getNatFieldD j "num_key_value_heads" d.num_key_value_heads
-    head_dim := getNatFieldD j "head_dim" d.head_dim
+    num_attention_heads
+    num_key_value_heads
+    head_dim
     patch_size := getNatFieldD j "patch_size" d.patch_size
     pooling_kernel_size := getNatFieldD j "pooling_kernel_size" d.pooling_kernel_size
     position_embedding_size := getNatFieldD j "position_embedding_size" d.position_embedding_size
@@ -97,7 +102,11 @@ def VisionConfig.parseJson (j : Json) (d : VisionConfig := {}) : VisionConfig :=
     rope_theta := ropeFloatFieldD j "rope_theta" d.rope_theta
     standardize := getBoolFieldD j "standardize" d.standardize
     use_clipped_linears := getBoolFieldD j "use_clipped_linears" d.use_clipped_linears
+    queryHeadsSplit
+    keyValueHeadsSplit
   }
+  else .error s!"Invalid Gemma4 vision config: num_key_value_heads ({num_key_value_heads}) * head_dim ({head_dim}) must equal hidden_size ({hidden_size})"
+  else .error s!"Invalid Gemma4 vision config: num_attention_heads ({num_attention_heads}) * head_dim ({head_dim}) must equal hidden_size ({hidden_size})"
 
 def ImageProcessorConfig.parseJson (j : Json) (d : ImageProcessorConfig := {}) : ImageProcessorConfig :=
   {
@@ -117,7 +126,7 @@ def VLConfig.parseJson
     (root : Json)
     (processorRoot? : Option Json := none)
     (d : VLConfig := {})
-    : VLConfig :=
+    : Except String VLConfig := do
   let visionJson := match getObjVal? root "vision_config" with | some j => j | none => .null
   let imageProcJson :=
     match processorRoot? with
@@ -126,12 +135,13 @@ def VLConfig.parseJson
       | some j => j
       | none => .null
     | none => .null
-  VLConfig.normalize {
+  let vision_config ←
+    match visionJson with
+    | .null => pure d.vision_config
+    | j => VisionConfig.parseJson j d.vision_config
+  pure <| VLConfig.normalize {
     text_config := Config.parseJson root d.text_config
-    vision_config :=
-      match visionJson with
-      | .null => d.vision_config
-      | j => VisionConfig.parseJson j d.vision_config
+    vision_config
     image_processor :=
       match imageProcJson with
       | .null => d.image_processor
@@ -158,7 +168,7 @@ def loadFromFiles
     match processorPath with
     | some path => maybeParseJsonFile path
     | none => pure none
-  pure (VLConfig.parseJson root processorRoot? defaults)
+  IO.ofExcept (VLConfig.parseJson root processorRoot? defaults)
 
 def loadFromPretrainedDir (modelDir : String) (defaults : VLConfig := {}) : IO VLConfig :=
   loadFromFiles
