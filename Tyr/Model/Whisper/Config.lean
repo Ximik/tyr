@@ -27,7 +27,12 @@ structure WhisperConfig where
   decoderStartTokenId : UInt64 := 50258
   suppressTokens : Array Nat := #[]
   beginSuppressTokens : Array Nat := #[]
-  deriving Repr, Inhabited
+  /-- Attention splits `dModel` into equal heads; checked when the config is built. -/
+  encoderHeadsDivide : encoderAttentionHeads ∣ dModel := by decide
+  decoderHeadsDivide : decoderAttentionHeads ∣ dModel := by decide
+  deriving Repr
+
+instance : Inhabited WhisperConfig := ⟨{}⟩
 
 namespace WhisperConfig
 

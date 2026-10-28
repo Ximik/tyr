@@ -163,11 +163,14 @@ def forward {tokens : Nat}
   let v : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype } := typedSlice qkv 1 (cfg.hidden_size * 2) cfg.hidden_size
 
   let q : Tensor { device := device, shape := #[1, tokens, cfg.num_heads, VisionConfig.headDim cfg], dtype := dtype } :=
-    Tensor.reshapeChecked q #[1, tokens, cfg.num_heads, VisionConfig.headDim cfg]
+    Tensor.reshape q #[1, tokens, cfg.num_heads, VisionConfig.headDim cfg]
+      (by simp [Nat.mul_assoc, VisionConfig.heads_mul_headDim cfg])
   let k : Tensor { device := device, shape := #[1, tokens, cfg.num_heads, VisionConfig.headDim cfg], dtype := dtype } :=
-    Tensor.reshapeChecked k #[1, tokens, cfg.num_heads, VisionConfig.headDim cfg]
+    Tensor.reshape k #[1, tokens, cfg.num_heads, VisionConfig.headDim cfg]
+      (by simp [Nat.mul_assoc, VisionConfig.heads_mul_headDim cfg])
   let v : Tensor { device := device, shape := #[1, tokens, cfg.num_heads, VisionConfig.headDim cfg], dtype := dtype } :=
-    Tensor.reshapeChecked v #[1, tokens, cfg.num_heads, VisionConfig.headDim cfg]
+    Tensor.reshape v #[1, tokens, cfg.num_heads, VisionConfig.headDim cfg]
+      (by simp [Nat.mul_assoc, VisionConfig.heads_mul_headDim cfg])
 
   -- Qwen3.5-VL uses 2D rotary; this keeps a deterministic 1D rotary signal for now.
   let (cos, sin) := Tensor.rotaryFreqs tokens (VisionConfig.headDim cfg) 10000.0 x.device
@@ -181,7 +184,7 @@ def forward {tokens : Nat}
   let attn : Tensor { device := device, shape := #[1, cfg.num_heads, tokens, VisionConfig.headDim cfg], dtype := dtype } :=
     Tensor.attentionGQA qh kh vh false true
   let out : Tensor { device := device, shape := #[1, tokens, cfg.num_heads, VisionConfig.headDim cfg], dtype := dtype } := Tensor.joinHeads attn
-  let outFlat : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype } := Tensor.reshapeChecked out #[tokens, cfg.hidden_size]
+  let outFlat : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype } := Tensor.reshape out #[tokens, cfg.hidden_size] (by simp [Nat.mul_assoc, VisionConfig.heads_mul_headDim cfg])
   linear2d outFlat m.proj_weight m.proj_bias
 
 end Qwen35VisionAttention

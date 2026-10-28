@@ -16,7 +16,7 @@ namespace torch.qwen35
 variable {device : Device}
 
 open torch.Log
-open torch.Model (reqGradFalse dequantizeFP8 dequantizeFP8Experts)
+open torch.Model (reqGradFalse dequantizeFP8 dequantizeFP8Experts checkFP8Blocks)
 open torch.safetensors (pushUnique tryLoadOptionalTensor tryLoadOptionalTensorSharded
   loadTensorCandidates loadTensorShardedCandidates
   tryLoadOptionalTensorCandidates tryLoadOptionalTensorShardedCandidates)
@@ -62,9 +62,11 @@ private def loadLinearWeightSharded
     if let some w ← tryLoadOptionalTensorSharded modelDir wName #[outDim, inDim] device then
       let scaleName := s!"{b}.weight_scale_inv"
       let scaleInvOpt ← tryLoadOptionalTensorSharded modelDir scaleName #[outDim / 128, inDim / 128] device
-      return match scaleInvOpt with
-        | some s => finalizeDequantizedForDevice device (dequantizeFP8 w.2 s.2)
-        | none => w
+      match scaleInvOpt with
+      | some s =>
+        let ⟨hBlocks⟩ ← checkFP8Blocks scaleName outDim inDim
+        return finalizeDequantizedForDevice device (dequantizeFP8 w.2 s.2 hBlocks)
+      | none => return w
   throw <| IO.userError s!"Failed to load linear weight (sharded): {baseName}"
 
 private def loadLinearWeight
@@ -79,9 +81,11 @@ private def loadLinearWeight
     if let some w ← tryLoadOptionalTensor path wName #[outDim, inDim] device then
       let scaleName := s!"{b}.weight_scale_inv"
       let scaleInvOpt ← tryLoadOptionalTensor path scaleName #[outDim / 128, inDim / 128] device
-      return match scaleInvOpt with
-        | some s => finalizeDequantizedForDevice device (dequantizeFP8 w.2 s.2)
-        | none => w
+      match scaleInvOpt with
+      | some s =>
+        let ⟨hBlocks⟩ ← checkFP8Blocks scaleName outDim inDim
+        return finalizeDequantizedForDevice device (dequantizeFP8 w.2 s.2 hBlocks)
+      | none => return w
   throw <| IO.userError s!"Failed to load linear weight: {baseName}"
 
 private def loadMoeExpertWeightSharded
@@ -96,17 +100,21 @@ private def loadMoeExpertWeightSharded
     if let some w ← tryLoadOptionalTensorSharded modelDir b #[experts, outDim, inDim] device then
       let scaleName := s!"{b}.weight_scale_inv"
       let scaleInvOpt ← tryLoadOptionalTensorSharded modelDir scaleName #[experts, outDim / 128, inDim / 128] device
-      return match scaleInvOpt with
-        | some s => finalizeDequantizedForDevice device (dequantizeFP8Experts w.2 s.2)
-        | none => w
+      match scaleInvOpt with
+      | some s =>
+        let ⟨hBlocks⟩ ← checkFP8Blocks scaleName outDim inDim
+        return finalizeDequantizedForDevice device (dequantizeFP8Experts w.2 s.2 hBlocks)
+      | none => return w
     -- FP8 checkpoints store them as "<base>.weight" + optional weight_scale_inv.
     let wName := s!"{b}.weight"
     if let some w ← tryLoadOptionalTensorSharded modelDir wName #[experts, outDim, inDim] device then
       let scaleName := s!"{b}.weight_scale_inv"
       let scaleInvOpt ← tryLoadOptionalTensorSharded modelDir scaleName #[experts, outDim / 128, inDim / 128] device
-      return match scaleInvOpt with
-        | some s => finalizeDequantizedForDevice device (dequantizeFP8Experts w.2 s.2)
-        | none => w
+      match scaleInvOpt with
+      | some s =>
+        let ⟨hBlocks⟩ ← checkFP8Blocks scaleName outDim inDim
+        return finalizeDequantizedForDevice device (dequantizeFP8Experts w.2 s.2 hBlocks)
+      | none => return w
   throw <| IO.userError s!"Failed to load MoE expert weight (sharded): {baseName}"
 
 private def loadMoeExpertWeight
@@ -120,16 +128,20 @@ private def loadMoeExpertWeight
     if let some w ← tryLoadOptionalTensor path b #[experts, outDim, inDim] device then
       let scaleName := s!"{b}.weight_scale_inv"
       let scaleInvOpt ← tryLoadOptionalTensor path scaleName #[experts, outDim / 128, inDim / 128] device
-      return match scaleInvOpt with
-        | some s => finalizeDequantizedForDevice device (dequantizeFP8Experts w.2 s.2)
-        | none => w
+      match scaleInvOpt with
+      | some s =>
+        let ⟨hBlocks⟩ ← checkFP8Blocks scaleName outDim inDim
+        return finalizeDequantizedForDevice device (dequantizeFP8Experts w.2 s.2 hBlocks)
+      | none => return w
     let wName := s!"{b}.weight"
     if let some w ← tryLoadOptionalTensor path wName #[experts, outDim, inDim] device then
       let scaleName := s!"{b}.weight_scale_inv"
       let scaleInvOpt ← tryLoadOptionalTensor path scaleName #[experts, outDim / 128, inDim / 128] device
-      return match scaleInvOpt with
-        | some s => finalizeDequantizedForDevice device (dequantizeFP8Experts w.2 s.2)
-        | none => w
+      match scaleInvOpt with
+      | some s =>
+        let ⟨hBlocks⟩ ← checkFP8Blocks scaleName outDim inDim
+        return finalizeDequantizedForDevice device (dequantizeFP8Experts w.2 s.2 hBlocks)
+      | none => return w
   throw <| IO.userError s!"Failed to load MoE expert weight: {baseName}"
 
 private def loadRMSNormSharded (modelDir : String) (baseName : String) (dim : Nat)

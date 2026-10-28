@@ -22,7 +22,7 @@ namespace torch.qwen
 
 variable {device : Device}
 open torch.Log
-open torch.Model (dequantizeFP8)
+open torch.Model (dequantizeFP8 checkFP8Blocks)
 open torch.safetensors (loadTensorExact loadTensorShardedExact
   loadOptionalTensorExact loadOptionalTensorShardedExact)
 
@@ -44,7 +44,9 @@ private def loadLinearWeightSharded (modelDir : String) (name : String) (outDim 
   let w ← loadRequiredSharded (device := device) modelDir s!"{name}.weight" #[outDim, inDim]
   let scaleInvOpt ← loadOptionalTensorShardedExact (device := device) modelDir s!"{name}.weight_scale_inv" #[outDim / 128, inDim / 128]
   match scaleInvOpt with
-  | some s => pure (dequantizeFP8 w.2 s.2)
+  | some s =>
+    let ⟨hBlocks⟩ ← checkFP8Blocks s!"{name}.weight_scale_inv" outDim inDim
+    pure (dequantizeFP8 w.2 s.2 hBlocks)
   | none => pure w.2.toFloat32
 
 /-- Load a (potentially FP8-quantized) linear weight from a single SafeTensors file.
@@ -55,7 +57,9 @@ private def loadLinearWeight (path : String) (name : String) (outDim inDim : Nat
   let w ← loadRequired (device := device) path s!"{name}.weight" #[outDim, inDim]
   let scaleInv ← loadOptionalTensorExact (device := device) path s!"{name}.weight_scale_inv" #[outDim / 128, inDim / 128]
   match scaleInv with
-  | some s => pure (dequantizeFP8 w.2 s.2)
+  | some s =>
+    let ⟨hBlocks⟩ ← checkFP8Blocks s!"{name}.weight_scale_inv" outDim inDim
+    pure (dequantizeFP8 w.2 s.2 hBlocks)
   | none => pure w.2.toFloat32
 
 /-- Load a single attention layer from sharded SafeTensors.

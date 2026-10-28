@@ -16,7 +16,7 @@ namespace torch.qwen25omni
 
 variable {device : Device}
 open torch.Log
-open torch.Model (reqGradFalse dequantizeFP8)
+open torch.Model (reqGradFalse dequantizeFP8 checkFP8Blocks)
 open torch.safetensors (pushUnique tryLoadTensor tryLoadTensorSharded
   loadTensorCandidates loadTensorShardedCandidates
   tryLoadTensorCandidates tryLoadTensorShardedCandidates)
@@ -59,9 +59,11 @@ private def loadLinearWeightSharded (modelDir : String) (baseName : String) (out
     if let some ⟨_, w⟩ ← tryLoadTensorSharded (device := device) modelDir wName #[outDim, inDim] then
       let scaleName := s!"{b}.weight_scale_inv"
       let scaleInvOpt ← tryLoadTensorSharded (device := device) modelDir scaleName #[outDim / 128, inDim / 128]
-      return match scaleInvOpt with
-        | some ⟨_, s⟩ => dequantizeFP8 w s
-        | none => w.toFloat32
+      match scaleInvOpt with
+      | some ⟨_, s⟩ =>
+        let ⟨hBlocks⟩ ← checkFP8Blocks scaleName outDim inDim
+        return dequantizeFP8 w s hBlocks
+      | none => return w.toFloat32
   throw <| IO.userError s!"Failed to load linear weight (sharded): {baseName}"
 
 private def loadLinearWeight (path : String) (baseName : String) (outDim inDim : Nat)
@@ -72,9 +74,11 @@ private def loadLinearWeight (path : String) (baseName : String) (outDim inDim :
     if let some ⟨_, w⟩ ← tryLoadTensor (device := device) path wName #[outDim, inDim] then
       let scaleName := s!"{b}.weight_scale_inv"
       let scaleInvOpt ← tryLoadTensor (device := device) path scaleName #[outDim / 128, inDim / 128]
-      return match scaleInvOpt with
-        | some ⟨_, s⟩ => dequantizeFP8 w s
-        | none => w.toFloat32
+      match scaleInvOpt with
+      | some ⟨_, s⟩ =>
+        let ⟨hBlocks⟩ ← checkFP8Blocks scaleName outDim inDim
+        return dequantizeFP8 w s hBlocks
+      | none => return w.toFloat32
   throw <| IO.userError s!"Failed to load linear weight: {baseName}"
 
 private def loadAttentionSharded (modelDir : String) (layerIdx : Nat)
