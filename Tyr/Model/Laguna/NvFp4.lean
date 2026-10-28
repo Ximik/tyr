@@ -41,11 +41,11 @@ private def e2m1Value (nibble : Nat) : Float :=
 
 /-- F32 lookup table for the LOW nibble (element `2i`) of each byte. -/
 private def e2m1LutLo : Tensor { device := .CPU, shape := #[256], dtype := .Float32 } :=
-  (Tensor.fromFloatArray (Array.ofFn (n := 256) fun b => e2m1Value (b.val % 16))).reshapeChecked #[256]
+  (Tensor.fromFloatArray (Array.ofFn (n := 256) fun b => e2m1Value (b.val % 16))).reshape #[256] (by simp)
 
 /-- F32 lookup table for the HIGH nibble (element `2i+1`) of each byte. -/
 private def e2m1LutHi : Tensor { device := .CPU, shape := #[256], dtype := .Float32 } :=
-  (Tensor.fromFloatArray (Array.ofFn (n := 256) fun b => e2m1Value (b.val / 16))).reshapeChecked #[256]
+  (Tensor.fromFloatArray (Array.ofFn (n := 256) fun b => e2m1Value (b.val / 16))).reshape #[256] (by simp)
 
 /-- Shared dequant kernel.
 
@@ -61,30 +61,34 @@ private def dequantCore {pd sd : DType}
     (scales : Tensor { device := device, shape := #[lead, outFeatures, inFeatures / 16], dtype := sd })
     (globalB : Tensor { device := device, shape := #[lead, 1, 1, 1], dtype := .Float32 })
     : IO (Tensor { device := device, shape := #[lead, outFeatures, inFeatures], dtype := .BFloat16 }) := do
-  if inFeatures % 16 != 0 then
+  let ⟨h16⟩ ← if h : 16 ∣ inFeatures then pure (PLift.up h) else
     throw <| IO.userError
       s!"nvfp4.dequantCore: inFeatures={inFeatures} not divisible by 16"
+  have h2 : 2 ∣ inFeatures := Nat.dvd_trans (by decide) h16
   let numGroups := inFeatures / 16
   let numPacked := lead * outFeatures * (inFeatures / 2)
   let device := packed.device
-  let lutLo := (e2m1LutLo.to device).reshapeChecked #[256, 1]
-  let lutHi := (e2m1LutHi.to device).reshapeChecked #[256, 1]
+  let lutLo := (e2m1LutLo.to device).reshape #[256, 1]
+  let lutHi := (e2m1LutHi.to device).reshape #[256, 1]
   let idx := (packed.reshape #[numPacked]).toInt64
   let lo := (Tensor.embedding1d idx lutLo).reshape #[numPacked, 1]
   let hi := (Tensor.embedding1d idx lutHi).reshape #[numPacked, 1]
   let pairs := Tensor.catManyChecked #[lo.packShape, hi.packShape] 1 #[numPacked, 2]
-  let vals4 := pairs.reshapeChecked #[lead, outFeatures, numGroups, 16]
+  let vals4 := pairs.reshape #[lead, outFeatures, numGroups, 16]
+    (by simp +zetaDelta [Nat.mul_assoc, Nat.div_mul_cancel h2, Nat.div_mul_cancel h16])
   let scalesF := scales.toFloat32.reshape #[lead, outFeatures, numGroups, 1]
   -- Preserve reference rounding: divide in F32, multiply in F32, then cast once.
   let globalExpanded := Tensor.expand globalB #[lead, outFeatures, numGroups, 1]
   let scaleDiv := scalesF / globalExpanded
   let prod4 := (Tensor.expand scaleDiv #[lead, outFeatures, numGroups, 16]) * vals4
-  pure (prod4.reshapeChecked #[lead, outFeatures, inFeatures]).toBFloat16
+  pure (prod4.reshape #[lead, outFeatures, inFeatures]
+    (by simp +zetaDelta [Nat.mul_assoc, Nat.div_mul_cancel h16])).toBFloat16
 
 /-- Validate the caller's indexed input shape before reshaping a packed bank. -/
 private def checkShape {s : Shape} {d : DType}
-    (name : String) (_tensor : Tensor { device := device, shape := s, dtype := d }) (expected : Shape) : IO Unit := do
-  if s != expected then
+    (name : String) (_tensor : Tensor { device := device, shape := s, dtype := d }) (expected : Shape) :
+    IO (PLift (s = expected)) := do
+  if h : s = expected then pure ⟨h⟩ else
     throw <| IO.userError s!"nvfp4: {name} must have shape {expected}, got {s}"
 
 /-- Dequantize an NVFP4 matrix into a shape- and BF16-indexed result.
@@ -94,13 +98,13 @@ def dequantMatrix {ps ss gs : Shape} {pd sd gd : DType}
     (packed : Tensor { device := device, shape := ps, dtype := pd }) (scales : Tensor { device := device, shape := ss, dtype := sd }) (globalScale : Tensor { device := device, shape := gs, dtype := gd })
     (outFeatures inFeatures : Nat)
     : IO (Tensor { device := device, shape := #[outFeatures, inFeatures], dtype := .BFloat16 }) := do
-  checkShape "packed" packed #[outFeatures, inFeatures / 2]
-  checkShape "scales" scales #[outFeatures, inFeatures / 16]
-  if gs != #[] && gs != #[1] then
+  let ⟨hp⟩ ← checkShape "packed" packed #[outFeatures, inFeatures / 2]
+  let ⟨hs⟩ ← checkShape "scales" scales #[outFeatures, inFeatures / 16]
+  let ⟨hg⟩ ← if h : gs = #[] ∨ gs = #[1] then pure (PLift.up h) else
     throw <| IO.userError s!"nvfp4: global scale must be scalar or [1], got {gs}"
-  let globalB := globalScale.toFloat32.reshapeChecked #[1, 1, 1, 1]
-  let packed3 := packed.reshapeChecked #[1, outFeatures, inFeatures / 2]
-  let scales3 := scales.reshapeChecked #[1, outFeatures, inFeatures / 16]
+  let globalB := globalScale.toFloat32.reshape #[1, 1, 1, 1] (by rcases hg with rfl | rfl <;> simp)
+  let packed3 := packed.reshape #[1, outFeatures, inFeatures / 2] (by subst hp; simp)
+  let scales3 := scales.reshape #[1, outFeatures, inFeatures / 16] (by subst hs; simp)
   let out3 ← dequantCore 1 outFeatures inFeatures packed3 scales3 globalB
   pure (out3.reshape #[outFeatures, inFeatures])
 
@@ -109,12 +113,12 @@ def dequantBank {ps ss gs : Shape} {pd sd gd : DType}
     (packed : Tensor { device := device, shape := ps, dtype := pd }) (scales : Tensor { device := device, shape := ss, dtype := sd }) (globalScale : Tensor { device := device, shape := gs, dtype := gd })
     (numExperts outFeatures inFeatures : Nat)
     : IO (Tensor { device := device, shape := #[numExperts, outFeatures, inFeatures], dtype := .BFloat16 }) := do
-  checkShape "packed" packed #[numExperts, outFeatures, inFeatures / 2]
-  checkShape "scales" scales #[numExperts, outFeatures, inFeatures / 16]
-  checkShape "global scale" globalScale #[numExperts]
-  let globalB := globalScale.toFloat32.reshapeChecked #[numExperts, 1, 1, 1]
+  let ⟨hp⟩ ← checkShape "packed" packed #[numExperts, outFeatures, inFeatures / 2]
+  let ⟨hs⟩ ← checkShape "scales" scales #[numExperts, outFeatures, inFeatures / 16]
+  let ⟨hg⟩ ← checkShape "global scale" globalScale #[numExperts]
+  let globalB := globalScale.toFloat32.reshape #[numExperts, 1, 1, 1] (by subst hg; simp)
   dequantCore numExperts outFeatures inFeatures
-    (packed.reshapeChecked #[numExperts, outFeatures, inFeatures / 2])
-    (scales.reshapeChecked #[numExperts, outFeatures, inFeatures / 16]) globalB
+    (packed.reshape #[numExperts, outFeatures, inFeatures / 2] (by subst hp; simp))
+    (scales.reshape #[numExperts, outFeatures, inFeatures / 16] (by subst hs; simp)) globalB
 
 end torch.laguna.nvfp4

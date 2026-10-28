@@ -21,7 +21,11 @@ structure Qwen35VisionConfig where
   out_hidden_size : Nat := 3584
   num_position_embeddings : Nat := 2304
   initializer_range : Float := 0.02
-  deriving Repr, Inhabited
+  /-- Attention splits `hidden_size` into equal heads; checked when the config is built. -/
+  headsDivide : num_heads ∣ hidden_size := by decide
+  deriving Repr
+
+instance : Inhabited Qwen35VisionConfig := ⟨{}⟩
 
 namespace Qwen35VisionConfig
 
@@ -64,6 +68,16 @@ def qwen36_35B_A3B : Qwen35VisionConfig := {
 
 def headDim (cfg : Qwen35VisionConfig) : Nat :=
   if cfg.num_heads == 0 then cfg.hidden_size else cfg.hidden_size / cfg.num_heads
+
+theorem heads_mul_headDim (cfg : Qwen35VisionConfig) : cfg.num_heads * cfg.headDim = cfg.hidden_size := by
+  unfold headDim
+  split
+  · rename_i h
+    have h0 : cfg.num_heads = 0 := by simpa using h
+    have hdvd := cfg.headsDivide
+    rw [h0] at hdvd ⊢
+    simp [Nat.eq_zero_of_zero_dvd hdvd]
+  · exact Nat.mul_div_cancel' cfg.headsDivide
 
 def mergedTokenCount (cfg : Qwen35VisionConfig) (nPatches : Nat) : Nat :=
   let u := mergeUnit cfg
@@ -122,6 +136,9 @@ def qwen36_35B_A3B : VisionConfig := Qwen35VisionConfig.qwen36_35B_A3B
 @[simp] def patchDim (cfg : VisionConfig) : Nat := Qwen35VisionConfig.patchDim cfg
 @[simp] def mergeUnit (cfg : VisionConfig) : Nat := Qwen35VisionConfig.mergeUnit cfg
 def headDim (cfg : VisionConfig) : Nat := Qwen35VisionConfig.headDim cfg
+
+theorem heads_mul_headDim (cfg : VisionConfig) : cfg.num_heads * headDim cfg = cfg.hidden_size :=
+  Qwen35VisionConfig.heads_mul_headDim cfg
 def mergedTokenCount (cfg : VisionConfig) (nPatches : Nat) : Nat :=
   Qwen35VisionConfig.mergedTokenCount cfg nPatches
 

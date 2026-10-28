@@ -78,12 +78,6 @@ private def close {σ τ : StaticSpec} (x : Tensor σ) (y : Tensor τ) (tol : Fl
   LeanTest.assertTrue emptyRejected
 
 @[test] def testWhisperLengthAndHeadValidation : IO Unit := do
-  let bad := { cfg with encoderAttentionHeads := 3 }
-  let badHeads ← try
-    let _ ← WhisperForConditionalGeneration.init bad
-    pure false
-  catch _ => pure true
-  LeanTest.assertTrue badHeads
   let model ← WhisperForConditionalGeneration.init cfg
   let tooLong ← try
     let _ ← model.encode ((Tensor.zeros #[1, 4, 10]))

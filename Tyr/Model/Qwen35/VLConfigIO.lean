@@ -65,13 +65,15 @@ private def getFloatFieldD (j : Json) (key : String) (d : Float) : Float :=
 private def parseVisionConfig
     (j : Json)
     (d : VisionConfig := {})
-    : VisionConfig :=
-  {
+    : Except String VisionConfig :=
+  let hidden_size := getNatFieldD j "hidden_size" d.hidden_size
+  let num_heads := getNatFieldD j "num_heads" d.num_heads
+  if headsDivide : num_heads ∣ hidden_size then .ok {
     depth := getNatFieldD j "depth" d.depth
-    hidden_size := getNatFieldD j "hidden_size" d.hidden_size
+    hidden_size
     hidden_act := getStringFieldD j "hidden_act" d.hidden_act
     intermediate_size := getNatFieldD j "intermediate_size" d.intermediate_size
-    num_heads := getNatFieldD j "num_heads" d.num_heads
+    num_heads
     in_channels := getNatFieldD j "in_channels" d.in_channels
     patch_size := getNatFieldD j "patch_size" d.patch_size
     spatial_merge_size := getNatFieldD j "spatial_merge_size" d.spatial_merge_size
@@ -79,12 +81,14 @@ private def parseVisionConfig
     out_hidden_size := getNatFieldD j "out_hidden_size" d.out_hidden_size
     num_position_embeddings := getNatFieldD j "num_position_embeddings" d.num_position_embeddings
     initializer_range := getFloatFieldD j "initializer_range" d.initializer_range
+    headsDivide
   }
+  else .error s!"Invalid Qwen3.5 vision config: hidden_size ({hidden_size}) must be divisible by num_heads ({num_heads})"
 
 private def parseVLConfig
     (root : Json)
     (d : VLConfig := {})
-    : VLConfig :=
+    : Except String VLConfig := do
   let textJson :=
     match getObjVal? root "text_config" with
     | some t => t
@@ -97,17 +101,17 @@ private def parseVLConfig
       -- Backward compatible: plain text-only config at root.
       Config.normalize (Config.parseJson root d.text_config)
 
-  let visionCfg :=
+  let visionCfg ←
     match getObjVal? root "vision_config" with
     | some v => parseVisionConfig v d.vision_config
-    | none => d.vision_config
+    | none => pure d.vision_config
 
   let tieWordEmbeddings :=
     match getObjVal? root "tie_word_embeddings" >>= getBool? with
     | some x => x
     | none => textCfg.tie_word_embeddings
 
-  VLConfig.normalize {
+  pure <| VLConfig.normalize {
     text_config := textCfg
     vision_config := visionCfg
     image_token_id := getTokenIdFieldD root "image_token_id" d.image_token_id
@@ -122,7 +126,7 @@ namespace VLConfig
 /-- Load Qwen3.5 multimodal config from HuggingFace-style `config.json`. -/
 def loadFromFile (path : String) (defaults : VLConfig := {}) : IO VLConfig := do
   let root ← parseJsonFile path
-  pure (parseVLConfig root defaults)
+  IO.ofExcept (parseVLConfig root defaults)
 
 /-- Load Qwen3.5 multimodal config from a model directory containing `config.json`. -/
 def loadFromPretrainedDir (modelDir : String) (defaults : VLConfig := {}) : IO VLConfig :=
