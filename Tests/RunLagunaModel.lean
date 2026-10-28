@@ -362,7 +362,7 @@ private def runBf16AttentionCacheParity {numHeads rotaryDim : Nat}
     let cosStep : Tensor { shape := #[1, rotaryDim / 2], dtype := .Float32, device := device } := sliceTyped cos 0 pos 1
     let sinStep : Tensor { shape := #[1, rotaryDim / 2], dtype := .Float32, device := device } := sliceTyped sin 0 pos 1
     if pos == 12 then
-      let erased := { cache with vStoreDyn := (Tensor.zerosLike cache.vStoreDyn.2).packShape }
+      let erased := { cache with vStore := Tensor.zerosLike cache.vStore }
       let (bad, _) := attention.forwardStep
         (rotaryDim := rotaryDim) cfg input cosStep sinStep window erased
       let badStats ← mixedErrorStats (bad) (expected)
@@ -543,7 +543,7 @@ private def runOwnedCacheCheck (device : Device) (bf16 : Bool := false) : IO Uni
     let mut maxDiff := 0.0
     -- Keep an actual old cache tensor alive across subsequent functional calls.
     let some oldCache := functional.kvCaches[1]? | throw <| IO.userError "missing sliding cache"
-    let oldK := oldCache.kStoreDyn.2
+    let oldK := oldCache.kStore
     let oldKCopy ← data.cloneInferenceIO oldK
     for pos in [promptLen:20] do
       let tok : Tensor { shape := #[1, 1], dtype := .Int64, device := device } := sliceTyped ids 1 pos 1
