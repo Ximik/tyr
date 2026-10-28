@@ -691,13 +691,14 @@ def arangeFrom (start stop : Nat) (step : Nat := 1) :
   | .error message => nativeInvariantFailure s!"Tensor.arangeFrom: {message}"
 
 def getOp {σ : StaticSpec} (input : Tensor σ) (idx : Int) :
-    Tensor (σ.withShape σ.shape[1:].toArray) :=
+    Tensor (σ.withShape (σ.shape.extract 1 σ.shape.size)) :=
   match Tensor.ofRaw (RawTensor.getOp input.raw idx) with
   | .ok result => result
   | .error message => nativeInvariantFailure s!"Tensor.getOp: {message}"
 
-def unbind {σ : StaticSpec} (input : Tensor σ) (dim : Nat := 0) :
-    Array (Tensor (σ.withShape (unbindShape σ.shape dim))) :=
+def unbind {σ : StaticSpec} (input : Tensor σ) (dim : Nat := 0)
+    (h : dim < σ.shape.size := by first | exact of_decide_eq_true rfl | (simp <;> fail "axis out of range")) :
+    Array (Tensor (σ.withShape (unbindShape σ.shape dim h))) :=
   (RawTensor.unbind input.raw dim).map fun raw =>
     match Tensor.ofRaw raw with
     | .ok result => result

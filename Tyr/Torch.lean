@@ -31,15 +31,6 @@ def getBestDevice : IO Device := do
   if ← cuda_is_available then return ← Device.cuda 0
   return Device.CPU
 
-/-- Compute output shape for slicing along a dimension -/
-def slicedShape (s : Shape) (dim : Nat) (start : Nat) (stop : Nat) (step : Nat := 1) : Shape :=
-  if dim < s.size then
-    let s' := s[:dim].toArray
-    let s'' := s[dim+1:].toArray
-    let d := (stop - start) / step
-    s' ++ #[d] ++ s''
-  else s
-
 def convOutputSize (input_size kernel_size : Nat) (stride : Nat := 1) (padding : Nat := 0) (dilation : Nat := 1) : Nat :=
   (input_size + 2 * padding - dilation * (kernel_size - 1) - 1) / stride + 1
 

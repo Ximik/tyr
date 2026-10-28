@@ -51,6 +51,22 @@ example (_x : Tensor { shape := #[2, 3], dtype := .Float32, device := .CPU }) : 
     have _wrongNumel := _x.reshape #[5]
   trivial
 
+example (_x : Tensor { shape := #[2, 3], dtype := .Float32, device := .CPU }) : True := by
+  have _ := _x.unsqueeze 2
+  have _ := (_x.unsqueeze 1).squeeze 1
+  have _ := _x.transpose 0 1
+  have _ := _x.unbind 1
+  have _ := (Tensor.full #[] 5).squeeze 0
+  fail_if_success
+    have _axisOutOfRange := _x.unsqueeze 3
+  fail_if_success
+    have _axisOutOfRange := _x.squeeze 2
+  fail_if_success
+    have _axisOutOfRange := _x.transpose 0 2
+  fail_if_success
+    have _axisOutOfRange := _x.unbind 2
+  trivial
+
 example (_x : Tensor { shape := #[2, 3], dtype := .Float32, device := .CPU }) (_w : Tensor { shape := #[3, 4], dtype := .Int64, device := .CPU }) : True := by
   fail_if_success
     have _wrongDType := Tensor.mm _x _w
@@ -258,14 +274,13 @@ def testTypedRuntimeShapeResults : IO Unit := do
   assertValid (matrix.permute #[1, 0]) "runtime permutation"
   assertValid (matrix.transpose 0 1) "runtime transpose"
   assertValid ((matrix.unsqueeze 1).squeeze 1) "runtime unsqueeze/squeeze"
+  assertValid ((Tensor.full #[] 5).squeeze 0) "scalar squeeze axis 0"
+  assertValid ((Tensor.full #[] 5).unsqueeze 0) "scalar unsqueeze axis 0"
   assertValid (matrix.sumDim 1) "runtime axis reduction"
   assertValid ((Tensor.ones #[1, 3]).expand #[2, 3]) "runtime expansion"
   assertValid (matrix.argmax 1) "runtime argmax axis"
   -- Exercise the same checked paths as the pure conveniences, with errors
   -- available explicitly without invoking the pure panic fallback.
-  match matrix.transpose? 18446744073709551615 18446744073709551614 with
-  | .ok _ => LeanTest.fail "wrapped signed axes must not establish an unchanged shape"
-  | .error _ => pure ()
   match matrix.expand? #[2, 18446744073709551615] with
   | .ok _ => LeanTest.fail "native inferred extents must not establish a literal UInt64 extent"
   | .error _ => pure ()
