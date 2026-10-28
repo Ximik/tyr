@@ -16,7 +16,7 @@ namespace Examples.BranchingFlows
 open torch
 open torch.branching
 
-structure MoleculeToyParams (vocab : UInt64) where
+structure MoleculeToyParams (vocab : Nat) where
   coordW : Tensor { dtype := .Float32, shape := #[3, 3], device := .CPU }
   coordB : Tensor { dtype := .Float32, shape := #[3], device := .CPU }
   labelTable : Tensor { dtype := .Float32, shape := #[vocab, vocab], device := .CPU }
@@ -24,7 +24,7 @@ structure MoleculeToyParams (vocab : UInt64) where
 
 namespace MoleculeToyParams
 
-def init (vocab : UInt64) : IO (MoleculeToyParams vocab) := do
+def init (vocab : Nat) : IO (MoleculeToyParams vocab) := do
   let coordW := zerosDynamic #[3, 3]
   let coordB := zerosDynamic #[3]
   let labelTable := zerosDynamic #[vocab, vocab]
@@ -32,7 +32,7 @@ def init (vocab : UInt64) : IO (MoleculeToyParams vocab) := do
 
 end MoleculeToyParams
 
-def moleculeToyModel {maxLen vocab : UInt64} :
+def moleculeToyModel {maxLen vocab : Nat} :
     BranchingMoleculeModel (device := .CPU) maxLen vocab (MoleculeToyParams vocab) :=
   { forward := fun {batch} params coord label _t _padmask => do
       let coordPred := Tensor.affine3d coord params.coordW params.coordB
@@ -53,9 +53,9 @@ private def exceptToIO {α : Type} (context : String) (x : Except String α) : I
 
 def runDemo : IO Unit := do
   let vocabSize : Nat := 10
-  let vocab : UInt64 := 10
+  let vocab : Nat := 10
   let maskToken : Nat := 9
-  let maxLen : UInt64 := 8
+  let maxLen : Nat := 8
   let steps : Nat := 100
   let lr : Float := 7.5e-2
   let bridgeCfg := MoleculeBridgeConfig.qm9 vocabSize maskToken
@@ -76,7 +76,7 @@ def runDemo : IO Unit := do
       (sequentialUniformPolicy MoleculeAtom)
       (MoleculeBridgeConfig.anchorMerge bridgeCfg)
       (coalescenceFactor := 0.0)
-      (maxLen := some maxLen.toNat)
+      (maxLen := some maxLen)
       (rng := { state := 20260617 })
 
   let cfg : BranchingTrainConfig := {

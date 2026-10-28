@@ -8,7 +8,7 @@ variable {device : Device}
 open Tyr.Modular
 
 /-- Result of one Riemannian optimizer step. -/
-structure StepResult (M : Type) (rank inDim outDim : UInt64) where
+structure StepResult (M : Type) (rank inDim outDim : Nat) where
   params : M
   prediction : AmbientVector (device := device) outDim
   inputFactor : MetricFactor rank inDim .Float32 device
@@ -17,7 +17,7 @@ structure StepResult (M : Type) (rank inDim outDim : UInt64) where
   loss : Float := 0.0
 
 /-- One step given an explicit output metric factor and output cotangent. -/
-def stepWithFactor {M : Type} {rank inDim outDim : UInt64}
+def stepWithFactor {M : Type} {rank inDim outDim : Nat}
     [RiemannianModule M inDim outDim device]
     (params : M)
     (x : AmbientVector (device := device) inDim)
@@ -38,7 +38,7 @@ def stepWithFactor {M : Type} {rank inDim outDim : UInt64}
   }
 
 /-- One step for half-squared-error loss with identity output metric. -/
-def stepMSE {M : Type} {inDim outDim : UInt64}
+def stepMSE {M : Type} {inDim outDim : Nat}
     [RiemannianModule M inDim outDim device]
     (params : M)
     (x : AmbientVector (device := device) inDim)
@@ -64,7 +64,7 @@ def stepMSE {M : Type} {inDim outDim : UInt64}
 /-- One sequential two-layer step with an explicit output metric factor. -/
 def stepSequentialWithFactor
     {M₁ M₂ : Type}
-    {rank inDim midDim outDim : UInt64}
+    {rank inDim midDim outDim : Nat}
     [RiemannianModule M₁ inDim midDim device]
     [RiemannianModule M₂ midDim outDim device]
     (params : Sequential M₁ M₂)
@@ -93,7 +93,7 @@ def stepSequentialWithFactor
 /-- One sequential two-layer step for half-squared-error loss. -/
 def stepSequentialMSE
     {M₁ M₂ : Type}
-    {inDim midDim outDim : UInt64}
+    {inDim midDim outDim : Nat}
     [RiemannianModule M₁ inDim midDim device]
     [RiemannianModule M₂ midDim outDim device]
     (params : Sequential M₁ M₂)

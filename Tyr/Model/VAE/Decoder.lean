@@ -126,7 +126,7 @@ def init (device : Device := .CPU) (dtype : DType := .Float32) : IO (Decoder (de
 /-- Decode latents to image.
     Input: [batch, 32, H, W] latent
     Output: [batch, 3, 8*H, 8*W] RGB image -/
-def forward {batch height width : UInt64}
+def forward {batch height width : Nat}
     (dec : (Decoder (device := device) (dtype := dtype)))
     (z : Tensor { dtype := dtype, device := device, shape := #[batch, 32, height, width] })
     : Tensor { dtype := dtype, device := device, shape := #[batch, 3, height * 2 * 2 * 2, width * 2 * 2 * 2] } :=

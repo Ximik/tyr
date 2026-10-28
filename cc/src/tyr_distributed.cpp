@@ -7,6 +7,7 @@
  * - Async operation handling with futures
  */
 
+#include "tyr_nat.h"
 #include <lean/lean.h>
 #include "generated/tyr_ffi.h"
 #include "tyr_checked_result.h"
@@ -154,11 +155,13 @@ lean_object* lean_torch_dist_set_cuda_device(uint64_t device) {
 lean_object* lean_torch_dist_init_process_group(
     b_lean_obj_arg backend_obj,
     b_lean_obj_arg master_addr_obj,
-    uint64_t master_port,
-    uint64_t rank,
-    uint64_t world_size
-) {
+    b_lean_obj_arg master_port_obj,
+    b_lean_obj_arg rank_obj,
+    b_lean_obj_arg world_size_obj) {
   return tyr::checkedIoCall("lean_torch_dist_init_process_group", [&] {
+  const uint64_t master_port = tyr::natTo<uint16_t>(master_port_obj, "master_port");
+  const uint64_t rank = tyr::natTo<int>(rank_obj, "rank");
+  const uint64_t world_size = tyr::natTo<int>(world_size_obj, "world_size");
       std::lock_guard<std::mutex> lock(g_dist_mutex);
 
       if (g_initialized) {
@@ -355,8 +358,9 @@ lean_object* lean_torch_dist_all_reduce(
  */
 lean_object* lean_torch_dist_broadcast(
     b_lean_obj_arg tensor,
-    uint64_t src_rank) {
+    b_lean_obj_arg src_rank_obj) {
   return tyr::checkedIoCall("lean_torch_dist_broadcast", [&] {
+  const uint64_t src_rank = tyr::natTo<int>(src_rank_obj, "src_rank");
       std::lock_guard<std::mutex> lock(g_dist_mutex);
 
       if (!g_initialized) {

@@ -27,7 +27,7 @@ def runOnce : IO Bool := do
 
   seedFixtures suiteName 161803
   let device ← Device.cuda 0
-  let n : UInt64 := 16384
+  let n : Nat := 16384
   let treeSeed : UInt64 := 4242
   let tol := 1.0e-4
   let queries : List (Float × Float) := [(0.0, 1.0), (0.13, 0.61), (0.25, 0.5)]
@@ -56,7 +56,7 @@ def runOnce : IO Bool := do
     let gpuVals ← Tensor.toFloatArray out
 
     let mut maxErr := 0.0
-    for i in [:n.toNat] do
+    for i in [:n] do
       let err := Float.abs (gpuVals.getD i 0.0 - cpuVals.getD i 0.0)
       maxErr := max maxErr err
     IO.eprintln s!"[{suiteName}] [{tA}, {tB}] n={n}: cpu {cpuMs}ms, gpu {gpuMs}ms, max|Δ| = {maxErr}"

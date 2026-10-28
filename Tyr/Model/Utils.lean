@@ -19,7 +19,7 @@ open torch
 
 /-- Kaiming-like weight init: randn scaled by sqrt(2 / fanIn).
     The runtime factory produces Float32; the result is cast to `dtype`. -/
-def initWeight (shape : Shape) (fanIn : UInt64) (dtype : DType := .Float32) (device : Device := .CPU) : IO (Tensor { device := device, shape := shape, dtype := dtype }) := do
+def initWeight (shape : Shape) (fanIn : Nat) (dtype : DType := .Float32) (device : Device := .CPU) : IO (Tensor { device := device, shape := shape, dtype := dtype }) := do
   let std := Float.sqrt (2.0 / fanIn.toFloat)
   let w ← Tensor.randn shape (device := device)
   let w ← IO.ofExcept (Tensor.mulScalar? w std)
@@ -40,8 +40,8 @@ def reqGradFalse {σ : StaticSpec} (t : Tensor σ) : Tensor σ :=
 /-- Dequantize FP8 weights with blockwise inverse scales (128x128 blocks).
     weight: [out, in], scale_inv: [out/128, in/128]. Returns float32 weights.
     The block reshapes are runtime-validated (`reshapeChecked`): the block
-    factors are symbolic UInt64 division, so no static numel proof exists. -/
-def dequantizeFP8 {outDim inDim : UInt64} {weightDType scaleDType : DType}
+    factors are symbolic division, so no static numel proof exists. -/
+def dequantizeFP8 {outDim inDim : Nat} {weightDType scaleDType : DType}
     (weight : Tensor { device := device, shape := #[outDim, inDim], dtype := weightDType })
     (scaleInv : Tensor { device := device, shape := #[outDim / 128, inDim / 128], dtype := scaleDType })
     : Tensor { device := device, shape := #[outDim, inDim], dtype := .Float32 } :=
@@ -57,7 +57,7 @@ def dequantizeFP8 {outDim inDim : UInt64} {weightDType scaleDType : DType}
 
 /-- Dequantize FP8 expert weights with blockwise inverse scales per expert.
     weight: [experts, out, in], scale_inv: [experts, out/128, in/128]. -/
-def dequantizeFP8Experts {experts outDim inDim : UInt64} {weightDType scaleDType : DType}
+def dequantizeFP8Experts {experts outDim inDim : Nat} {weightDType scaleDType : DType}
     (weight : Tensor { device := device, shape := #[experts, outDim, inDim], dtype := weightDType })
     (scaleInv : Tensor { device := device, shape := #[experts, outDim / 128, inDim / 128], dtype := scaleDType })
     : Tensor { device := device, shape := #[experts, outDim, inDim], dtype := .Float32 } :=

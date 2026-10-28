@@ -40,22 +40,22 @@ instance : TensorStruct LayerType where
 
 /-- Gemma 4 text model configuration. -/
 structure Gemma4Config where
-  vocab_size : UInt64 := 262144
-  hidden_size : UInt64 := 2560
-  intermediate_size : UInt64 := 10240
-  num_hidden_layers : UInt64 := 42
-  num_attention_heads : UInt64 := 8
-  num_key_value_heads : UInt64 := 2
-  num_global_key_value_heads : UInt64 := 0
-  head_dim : UInt64 := 256
-  global_head_dim : UInt64 := 512
+  vocab_size : Nat := 262144
+  hidden_size : Nat := 2560
+  intermediate_size : Nat := 10240
+  num_hidden_layers : Nat := 42
+  num_attention_heads : Nat := 8
+  num_key_value_heads : Nat := 2
+  num_global_key_value_heads : Nat := 0
+  head_dim : Nat := 256
+  global_head_dim : Nat := 512
 
-  sliding_window : UInt64 := 512
+  sliding_window : Nat := 512
   sliding_rope_theta : Float := 10000.0
   full_rope_theta : Float := 1000000.0
   full_partial_rotary_factor : Float := 0.25
   rms_norm_eps : Float := 1e-6
-  max_position_embeddings : UInt64 := 32768
+  max_position_embeddings : Nat := 32768
 
   attention_bias : Bool := false
   attention_dropout : Float := 0.0
@@ -64,17 +64,17 @@ structure Gemma4Config where
   use_bidirectional_attention : String := ""
 
   layer_types : Array LayerType := #[]
-  full_attention_interval : UInt64 := 6
-  num_kv_shared_layers : UInt64 := 0
+  full_attention_interval : Nat := 6
+  num_kv_shared_layers : Nat := 0
   use_double_wide_mlp : Bool := false
 
-  hidden_size_per_layer_input : UInt64 := 0
-  vocab_size_per_layer_input : UInt64 := 262144
+  hidden_size_per_layer_input : Nat := 0
+  vocab_size_per_layer_input : Nat := 262144
 
   enable_moe_block : Bool := false
-  num_experts : UInt64 := 0
-  top_k_experts : UInt64 := 0
-  moe_intermediate_size : UInt64 := 0
+  num_experts : Nat := 0
+  top_k_experts : Nat := 0
+  moe_intermediate_size : Nat := 0
 
   use_cache : Bool := true
   tie_word_embeddings : Bool := true
@@ -235,9 +235,9 @@ def gemma4_31B : Gemma4Config :=
 
 /-- Default Gemma 4 hybrid schedule: every `interval`th layer is full attention,
     and the final layer is always full attention. -/
-def defaultLayerTypes (numLayers interval : UInt64) : Array LayerType :=
+def defaultLayerTypes (numLayers interval : Nat) : Array LayerType :=
   Id.run do
-    let n := numLayers.toNat
+    let n := numLayers
     let mut out : Array LayerType := Array.mkEmpty n
     if n == 0 then
       return out
@@ -246,14 +246,14 @@ def defaultLayerTypes (numLayers interval : UInt64) : Array LayerType :=
         out := out.push .fullAttention
       return out
     for i in [:n] do
-      let idx1 := (i + 1).toUInt64
+      let idx1 := (i + 1)
       let isFull := (idx1 % interval) == 0 || i + 1 == n
       out := out.push (if isFull then .fullAttention else .slidingAttention)
     return out
 
 def normalizedLayerTypes (cfg : Gemma4Config) : Array LayerType :=
   let base :=
-    if cfg.layer_types.size == cfg.num_hidden_layers.toNat then
+    if cfg.layer_types.size == cfg.num_hidden_layers then
       cfg.layer_types
     else
       defaultLayerTypes cfg.num_hidden_layers cfg.full_attention_interval
@@ -270,26 +270,26 @@ def normalize (cfg : Gemma4Config) : Gemma4Config :=
       else if cfg.vocab_size_per_layer_input == 0 then cfg.vocab_size else cfg.vocab_size_per_layer_input
   }
 
-def fullHeadDim (cfg : Gemma4Config) : UInt64 :=
+def fullHeadDim (cfg : Gemma4Config) : Nat :=
   if cfg.global_head_dim == 0 then cfg.head_dim else cfg.global_head_dim
 
-def maxHeadDim (cfg : Gemma4Config) : UInt64 :=
+def maxHeadDim (cfg : Gemma4Config) : Nat :=
   if cfg.head_dim >= fullHeadDim cfg then cfg.head_dim else fullHeadDim cfg
 
-def fullNumKVHeads (cfg : Gemma4Config) : UInt64 :=
+def fullNumKVHeads (cfg : Gemma4Config) : Nat :=
   if cfg.num_global_key_value_heads == 0 then cfg.num_key_value_heads else cfg.num_global_key_value_heads
 
-def maxKVHeads (cfg : Gemma4Config) : UInt64 :=
+def maxKVHeads (cfg : Gemma4Config) : Nat :=
   if cfg.num_key_value_heads >= fullNumKVHeads cfg then cfg.num_key_value_heads else fullNumKVHeads cfg
 
-def maxAttentionDim (cfg : Gemma4Config) : UInt64 :=
+def maxAttentionDim (cfg : Gemma4Config) : Nat :=
   cfg.num_attention_heads * maxHeadDim cfg
 
-def maxKVProjDim (cfg : Gemma4Config) : UInt64 :=
+def maxKVProjDim (cfg : Gemma4Config) : Nat :=
   maxKVHeads cfg * maxHeadDim cfg
 
-def fullRotaryDim (cfg : Gemma4Config) : UInt64 :=
-  let raw := ((fullHeadDim cfg).toFloat * cfg.full_partial_rotary_factor).toUInt64
+def fullRotaryDim (cfg : Gemma4Config) : Nat :=
+  let raw := ((fullHeadDim cfg).toFloat * cfg.full_partial_rotary_factor).toUInt64.toNat
   let base :=
     if raw == 0 then fullHeadDim cfg
     else if raw > fullHeadDim cfg then fullHeadDim cfg
@@ -301,35 +301,35 @@ def fullRotaryDim (cfg : Gemma4Config) : UInt64 :=
   else
     base - 1
 
-def fullRotaryHalfDim (cfg : Gemma4Config) : UInt64 :=
+def fullRotaryHalfDim (cfg : Gemma4Config) : Nat :=
   (fullRotaryDim cfg) / 2
 
-def maxIntermediateSize (cfg : Gemma4Config) : UInt64 :=
+def maxIntermediateSize (cfg : Gemma4Config) : Nat :=
   if cfg.use_double_wide_mlp then
     2 * cfg.intermediate_size
   else
     cfg.intermediate_size
 
-def layerTypeAt (cfg : Gemma4Config) (layerIdx : UInt64) : LayerType :=
-  (normalizedLayerTypes cfg).getD layerIdx.toNat .fullAttention
+def layerTypeAt (cfg : Gemma4Config) (layerIdx : Nat) : LayerType :=
+  (normalizedLayerTypes cfg).getD layerIdx .fullAttention
 
-def firstKVSharedLayer (cfg : Gemma4Config) : UInt64 :=
+def firstKVSharedLayer (cfg : Gemma4Config) : Nat :=
   if cfg.num_kv_shared_layers == 0 || cfg.num_kv_shared_layers >= cfg.num_hidden_layers then
     0
   else
     cfg.num_hidden_layers - cfg.num_kv_shared_layers
 
-def isKVSharedLayer (cfg : Gemma4Config) (layerIdx : UInt64) : Bool :=
+def isKVSharedLayer (cfg : Gemma4Config) (layerIdx : Nat) : Bool :=
   let first := firstKVSharedLayer cfg
   cfg.num_kv_shared_layers > 0 && first > 0 && layerIdx >= first
 
-def layerIntermediateSize (cfg : Gemma4Config) (layerIdx : UInt64) : UInt64 :=
+def layerIntermediateSize (cfg : Gemma4Config) (layerIdx : Nat) : Nat :=
   if cfg.use_double_wide_mlp && isKVSharedLayer cfg layerIdx then
     2 * cfg.intermediate_size
   else
     cfg.intermediate_size
 
-def sharedSourceLayer? (cfg : Gemma4Config) (layerIdx : UInt64) : Option UInt64 :=
+def sharedSourceLayer? (cfg : Gemma4Config) (layerIdx : Nat) : Option Nat :=
   if !(isKVSharedLayer cfg layerIdx) then
     none
   else
@@ -338,9 +338,9 @@ def sharedSourceLayer? (cfg : Gemma4Config) (layerIdx : UInt64) : Option UInt64 
       let first := firstKVSharedLayer cfg
       if first == 0 then
         return none
-      let mut src : Option UInt64 := none
-      for i in [:first.toNat] do
-        let idx := i.toUInt64
+      let mut src : Option Nat := none
+      for i in [:first] do
+        let idx := i
         if layerTypeAt cfg idx == target then
           src := some idx
       return src
@@ -364,21 +364,21 @@ def gemma4_31B : Config := Gemma4Config.gemma4_31B
 
 def normalize (cfg : Config) : Config := Gemma4Config.normalize cfg
 def normalizedLayerTypes (cfg : Config) : Array LayerType := Gemma4Config.normalizedLayerTypes cfg
-def defaultLayerTypes (numLayers interval : UInt64) : Array LayerType := Gemma4Config.defaultLayerTypes numLayers interval
-def fullHeadDim (cfg : Config) : UInt64 := Gemma4Config.fullHeadDim cfg
-def maxHeadDim (cfg : Config) : UInt64 := Gemma4Config.maxHeadDim cfg
-def fullNumKVHeads (cfg : Config) : UInt64 := Gemma4Config.fullNumKVHeads cfg
-def maxKVHeads (cfg : Config) : UInt64 := Gemma4Config.maxKVHeads cfg
-def maxAttentionDim (cfg : Config) : UInt64 := Gemma4Config.maxAttentionDim cfg
-def maxKVProjDim (cfg : Config) : UInt64 := Gemma4Config.maxKVProjDim cfg
-def fullRotaryDim (cfg : Config) : UInt64 := Gemma4Config.fullRotaryDim cfg
-def fullRotaryHalfDim (cfg : Config) : UInt64 := Gemma4Config.fullRotaryHalfDim cfg
-def maxIntermediateSize (cfg : Config) : UInt64 := Gemma4Config.maxIntermediateSize cfg
-def layerTypeAt (cfg : Config) (layerIdx : UInt64) : LayerType := Gemma4Config.layerTypeAt cfg layerIdx
-def firstKVSharedLayer (cfg : Config) : UInt64 := Gemma4Config.firstKVSharedLayer cfg
-def isKVSharedLayer (cfg : Config) (layerIdx : UInt64) : Bool := Gemma4Config.isKVSharedLayer cfg layerIdx
-def layerIntermediateSize (cfg : Config) (layerIdx : UInt64) : UInt64 := Gemma4Config.layerIntermediateSize cfg layerIdx
-def sharedSourceLayer? (cfg : Config) (layerIdx : UInt64) : Option UInt64 := Gemma4Config.sharedSourceLayer? cfg layerIdx
+def defaultLayerTypes (numLayers interval : Nat) : Array LayerType := Gemma4Config.defaultLayerTypes numLayers interval
+def fullHeadDim (cfg : Config) : Nat := Gemma4Config.fullHeadDim cfg
+def maxHeadDim (cfg : Config) : Nat := Gemma4Config.maxHeadDim cfg
+def fullNumKVHeads (cfg : Config) : Nat := Gemma4Config.fullNumKVHeads cfg
+def maxKVHeads (cfg : Config) : Nat := Gemma4Config.maxKVHeads cfg
+def maxAttentionDim (cfg : Config) : Nat := Gemma4Config.maxAttentionDim cfg
+def maxKVProjDim (cfg : Config) : Nat := Gemma4Config.maxKVProjDim cfg
+def fullRotaryDim (cfg : Config) : Nat := Gemma4Config.fullRotaryDim cfg
+def fullRotaryHalfDim (cfg : Config) : Nat := Gemma4Config.fullRotaryHalfDim cfg
+def maxIntermediateSize (cfg : Config) : Nat := Gemma4Config.maxIntermediateSize cfg
+def layerTypeAt (cfg : Config) (layerIdx : Nat) : LayerType := Gemma4Config.layerTypeAt cfg layerIdx
+def firstKVSharedLayer (cfg : Config) : Nat := Gemma4Config.firstKVSharedLayer cfg
+def isKVSharedLayer (cfg : Config) (layerIdx : Nat) : Bool := Gemma4Config.isKVSharedLayer cfg layerIdx
+def layerIntermediateSize (cfg : Config) (layerIdx : Nat) : Nat := Gemma4Config.layerIntermediateSize cfg layerIdx
+def sharedSourceLayer? (cfg : Config) (layerIdx : Nat) : Option Nat := Gemma4Config.sharedSourceLayer? cfg layerIdx
 def isMoE (cfg : Config) : Bool := Gemma4Config.isMoE cfg
 def hasPerLayerInput (cfg : Config) : Bool := Gemma4Config.hasPerLayerInput cfg
 

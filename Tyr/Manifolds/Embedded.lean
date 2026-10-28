@@ -36,22 +36,22 @@ instance tensorEmbedded {σ : StaticSpec} [DType.RealFloating σ.dtype] [DType.C
   toAmbient := id
   projectAmbientTangent := id
 
-instance stiefelEmbedded (n p : UInt64) : EmbeddedManifold (Stiefel n p d dev) where
+instance stiefelEmbedded (n p : Nat) : EmbeddedManifold (Stiefel n p d dev) where
   Ambient := Tensor ⟨#[n, p], d, dev⟩
   toAmbient := fun x => x.matrix
   projectAmbientTangent := fun {x} Z => StiefelTangent.project x Z
 
-instance orthogonalEmbedded [DType.ConstantSupported d dev] (n : UInt64) : EmbeddedManifold (Orthogonal n d dev) where
+instance orthogonalEmbedded [DType.ConstantSupported d dev] (n : Nat) : EmbeddedManifold (Orthogonal n d dev) where
   Ambient := Tensor ⟨#[n, n], d, dev⟩
   toAmbient := fun x => x.matrix
   projectAmbientTangent := fun {x} Z => OrthogonalTangent.fromAmbient x Z
 
-instance grassmannEmbedded (n p : UInt64) : EmbeddedManifold (Grassmann n p d dev) where
+instance grassmannEmbedded (n p : Nat) : EmbeddedManifold (Grassmann n p d dev) where
   Ambient := Tensor ⟨#[n, p], d, dev⟩
   toAmbient := fun x => x.matrix
   projectAmbientTangent := fun {x} Z => GrassmannTangent.project x Z
 
-instance hyperbolicEmbedded [DType.ConstantSupported d dev] (n : UInt64) : EmbeddedManifold (Hyperbolic n d dev) where
+instance hyperbolicEmbedded [DType.ConstantSupported d dev] (n : Nat) : EmbeddedManifold (Hyperbolic n d dev) where
   Ambient := Tensor ⟨#[n + 1], d, dev⟩
   toAmbient := fun x => x.coords
   projectAmbientTangent := fun {x} Z => HyperbolicTangent.project x Z

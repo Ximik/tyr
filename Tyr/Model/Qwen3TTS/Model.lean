@@ -49,7 +49,7 @@ def getSupportedSpeakers (_m : Qwen3TTSForConditionalGeneration (device := devic
 /-- Extract speaker embedding from mel features `[batch, frames, melDim]`.
     Features are aligned to the speaker encoder's weight dtype and device.
     The caller is responsible for mel preprocessing and sample-rate alignment. -/
-def extractSpeakerEmbedding {batch frames : UInt64} {inputDType : DType}
+def extractSpeakerEmbedding {batch frames : Nat} {inputDType : DType}
     (m : Qwen3TTSForConditionalGeneration (device := device) cfg dtypes)
     (mel : Tensor { shape := #[batch, frames, cfg.speakerEncoderConfig.melDim], dtype := inputDType, device := device })
     : IO (Tensor { shape := #[batch, cfg.speakerEncoderConfig.encDim], dtype := dtypes.speaker.val, device := device }) := do
@@ -63,7 +63,7 @@ def extractSpeakerEmbedding {batch frames : UInt64} {inputDType : DType}
 
 /-- Build talker input embeddings from text token IDs (`[batch, textSeq]`).
     Prepends codec BOS embedding. -/
-def buildTalkerInputsFromText {batch textSeq : UInt64}
+def buildTalkerInputsFromText {batch textSeq : Nat}
     (m : Qwen3TTSForConditionalGeneration (device := device) cfg dtypes)
     (textIds : Tensor { shape := #[batch, textSeq], dtype := .Int64, device := device })
     : Tensor { shape := #[batch, 1 + textSeq, cfg.talkerConfig.hiddenSize], dtype := dtypes.talker.val, device := device } :=
@@ -71,7 +71,7 @@ def buildTalkerInputsFromText {batch textSeq : UInt64}
 
 /-- Build talker input embeddings from instruct + text token IDs.
     Prepends codec BOS embedding. -/
-def buildTalkerInputsFromInstructText {batch instructSeq textSeq : UInt64}
+def buildTalkerInputsFromInstructText {batch instructSeq textSeq : Nat}
     (m : Qwen3TTSForConditionalGeneration (device := device) cfg dtypes)
     (instructIds : Tensor { shape := #[batch, instructSeq], dtype := .Int64, device := device })
     (textIds : Tensor { shape := #[batch, textSeq], dtype := .Int64, device := device })
@@ -80,12 +80,12 @@ def buildTalkerInputsFromInstructText {batch instructSeq textSeq : UInt64}
 
 /-- Generate one codec frame (`numCodeGroups` tokens per sample) from talker inputs.
     Inputs are already-projected talker embeddings. -/
-def generateFrame {batch seq : UInt64}
+def generateFrame {batch seq : Nat}
     (m : Qwen3TTSForConditionalGeneration (device := device) cfg dtypes)
     (talkerInputs : Tensor { shape := #[batch, seq, cfg.talkerConfig.hiddenSize], dtype := dtypes.talker.val, device := device })
     (attnMask : Option (Tensor { shape := #[batch, seq], dtype := .Int64, device := device }) := none)
     (temperature : Float := 0.9)
-    (topK : UInt64 := 50)
+    (topK : Nat := 50)
     (topP : Float := 1.0)
     : IO (Tensor { shape := #[batch, cfg.talkerConfig.numCodeGroups], dtype := .Int64, device := device }) :=
   return (← TalkerForConditionalGeneration.generateFrame
@@ -94,13 +94,13 @@ def generateFrame {batch seq : UInt64}
 
 /-- Generate multiple codec frames autoregressively from talker context.
     Returns `[batch, maxFrames, numCodeGroups]`. -/
-def generateCodes {batch seq : UInt64}
+def generateCodes {batch seq : Nat}
     (m : Qwen3TTSForConditionalGeneration (device := device) cfg dtypes)
     (talkerInputs : Tensor { shape := #[batch, seq, cfg.talkerConfig.hiddenSize], dtype := dtypes.talker.val, device := device })
-    (maxFrames : UInt64 := 256)
-    (minNewTokens : UInt64 := 2)
+    (maxFrames : Nat := 256)
+    (minNewTokens : Nat := 2)
     (temperature : Float := 0.9)
-    (topK : UInt64 := 50)
+    (topK : Nat := 50)
     (topP : Float := 1.0)
     : IO (Tensor { shape := #[batch, maxFrames, cfg.talkerConfig.numCodeGroups], dtype := .Int64, device := device }) :=
   TalkerForConditionalGeneration.generateCodes
@@ -109,13 +109,13 @@ def generateCodes {batch seq : UInt64}
 /-- Generate multiple codec frames with EOS-aware stopping metadata.
     `codes` is padded to `[batch, maxFrames, numCodeGroups]`.
     `lengths` stores the first EOS step per sample (or `maxFrames` if no EOS). -/
-def generateCodesWithLengths {batch seq : UInt64}
+def generateCodesWithLengths {batch seq : Nat}
     (m : Qwen3TTSForConditionalGeneration (device := device) cfg dtypes)
     (talkerInputs : Tensor { shape := #[batch, seq, cfg.talkerConfig.hiddenSize], dtype := dtypes.talker.val, device := device })
-    (maxFrames : UInt64 := 256)
-    (minNewTokens : UInt64 := 2)
+    (maxFrames : Nat := 256)
+    (minNewTokens : Nat := 2)
     (temperature : Float := 0.9)
-    (topK : UInt64 := 50)
+    (topK : Nat := 50)
     (topP : Float := 1.0)
     : IO (TalkerForConditionalGeneration.CodeGenerationOutput (device := device) batch maxFrames cfg.talkerConfig.numCodeGroups) :=
   TalkerForConditionalGeneration.generateCodesWithLengths
@@ -123,13 +123,13 @@ def generateCodesWithLengths {batch seq : UInt64}
 
 /-- End-to-end generation from text token IDs.
     Internally builds talker inputs and runs EOS-aware codec generation. -/
-def generateFromText {batch textSeq : UInt64}
+def generateFromText {batch textSeq : Nat}
     (m : Qwen3TTSForConditionalGeneration (device := device) cfg dtypes)
     (textIds : Tensor { shape := #[batch, textSeq], dtype := .Int64, device := device })
-    (maxFrames : UInt64 := 256)
-    (minNewTokens : UInt64 := 2)
+    (maxFrames : Nat := 256)
+    (minNewTokens : Nat := 2)
     (temperature : Float := 0.9)
-    (topK : UInt64 := 50)
+    (topK : Nat := 50)
     (topP : Float := 1.0)
     : IO (TalkerForConditionalGeneration.CodeGenerationOutput (device := device) batch maxFrames cfg.talkerConfig.numCodeGroups) := do
   let talkerInputs := buildTalkerInputsFromText m textIds
@@ -137,14 +137,14 @@ def generateFromText {batch textSeq : UInt64}
 
 /-- End-to-end generation from instruct+text token IDs.
     Internally builds talker inputs and runs EOS-aware codec generation. -/
-def generateFromInstructText {batch instructSeq textSeq : UInt64}
+def generateFromInstructText {batch instructSeq textSeq : Nat}
     (m : Qwen3TTSForConditionalGeneration (device := device) cfg dtypes)
     (instructIds : Tensor { shape := #[batch, instructSeq], dtype := .Int64, device := device })
     (textIds : Tensor { shape := #[batch, textSeq], dtype := .Int64, device := device })
-    (maxFrames : UInt64 := 256)
-    (minNewTokens : UInt64 := 2)
+    (maxFrames : Nat := 256)
+    (minNewTokens : Nat := 2)
     (temperature : Float := 0.9)
-    (topK : UInt64 := 50)
+    (topK : Nat := 50)
     (topP : Float := 1.0)
     : IO (TalkerForConditionalGeneration.CodeGenerationOutput (device := device) batch maxFrames cfg.talkerConfig.numCodeGroups) := do
   let talkerInputs := buildTalkerInputsFromInstructText m instructIds textIds

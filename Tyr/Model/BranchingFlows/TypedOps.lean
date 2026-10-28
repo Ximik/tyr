@@ -18,7 +18,7 @@ def onesDynamic (shape : Shape) (device : Device := .CPU) (dtype : DType := .Flo
 def randnDynamic (shape : Shape) (device : Device := .CPU) (dtype : DType := .Float32) :
     IO (Tensor { shape, dtype, device }) := do
   IO.ofExcept ((← Tensor.randn shape false device).castDType? dtype)
-def floatsDynamic (values : Array Float) : Tensor { shape := #[values.size.toUInt64], dtype := .Float32, device := .CPU } :=
+def floatsDynamic (values : Array Float) : Tensor { shape := #[values.size], dtype := .Float32, device := .CPU } :=
   Tensor.fromFloatArray values
 def floatDynamic {s : Shape} {d : DType} {dev : Device} (x : Tensor { shape := s, dtype := d, device := dev }) : Tensor { shape := s, dtype := .Float32, device := dev } :=
   x.toFloat32
@@ -28,7 +28,7 @@ def logDynamic {s : Shape} {dev : Device} (x : Tensor { shape := s, dtype, devic
 def softplusDynamic {s : Shape} {dev : Device} (x : Tensor { shape := s, dtype, device := dev }) : Tensor { shape := s, dtype, device := dev } := x.checkedReplacement (RawTensor.branchingSoftplus x.raw)
 def powDynamic {s : Shape} {dev : Device} (x : Tensor { shape := s, dtype, device := dev }) (n : Float) : Tensor { shape := s, dtype, device := dev } := Tensor.pow x n
 
-def sliceTyped {s out : Shape} {d : DType} {dev : Device} (x : Tensor { shape := s, dtype := d, device := dev }) (dim : Nat) (start len : UInt64) : Tensor { shape := out, dtype := d, device := dev } :=
+def sliceTyped {s out : Shape} {d : DType} {dev : Device} (x : Tensor { shape := s, dtype := d, device := dev }) (dim : Nat) (start len : Nat) : Tensor { shape := out, dtype := d, device := dev } :=
   x.sliceChecked dim start len out
 
 /-- Return an updated destination after checking native shapes and dtypes.
@@ -77,25 +77,25 @@ def mulTensorScalar? {σ : StaticSpec} {d : DType} {scalarDevice : Device}
 
 def cosDynamic {s : Shape} {dev : Device} (x : Tensor { dtype := dtype, shape := s, device := dev }) : Tensor { dtype := dtype, shape := s, device := dev } := Tensor.cos x
 
-def affine2d {batch input output : UInt64} {dev : Device} (x : Tensor { dtype := dtype, shape := #[batch, input], device := dev })
+def affine2d {batch input output : Nat} {dev : Device} (x : Tensor { dtype := dtype, shape := #[batch, input], device := dev })
     (w : Tensor { dtype := dtype, shape := #[output, input], device := dev }) (bias : Tensor { dtype := dtype, shape := #[output], device := dev }) : Tensor { dtype := dtype, shape := #[batch, output], device := dev } :=
   Tensor.add (Tensor.linear x w) ((bias.reshapeChecked #[1, output]).expand #[batch, output])
 
-def transposeAttention {b s h d : UInt64} {dev : Device} (x : Tensor { dtype := dtype, shape := #[b, s, h, d], device := dev }) : Tensor { dtype := dtype, shape := #[b, h, s, d], device := dev } :=
+def transposeAttention {b s h d : Nat} {dev : Device} (x : Tensor { dtype := dtype, shape := #[b, s, h, d], device := dev }) : Tensor { dtype := dtype, shape := #[b, h, s, d], device := dev } :=
   x.transpose 1 2
 
-def attentionBias? {biasDType : DType} {b h s d : UInt64} {dev : Device} (q k v : Tensor { dtype := dtype, shape := #[b, h, s, d], device := dev })
+def attentionBias? {biasDType : DType} {b h s d : Nat} {dev : Device} (q k v : Tensor { dtype := dtype, shape := #[b, h, s, d], device := dev })
     (bias : Tensor { dtype := biasDType, shape := #[b, h, s, s], device := dev }) :
     Except String (Tensor { dtype := dtype, shape := #[b, h, s, d], device := dev }) := do
   q.checkedReplacement? (← RawTensor.branchingAttentionBias q.raw k.raw v.raw bias.raw false)
 
-def attentionBias {biasDType : DType} {b h s d : UInt64} {dev : Device} (q k v : Tensor { dtype := dtype, shape := #[b, h, s, d], device := dev })
+def attentionBias {biasDType : DType} {b h s d : Nat} {dev : Device} (q k v : Tensor { dtype := dtype, shape := #[b, h, s, d], device := dev })
     (bias : Tensor { dtype := biasDType, shape := #[b, h, s, s], device := dev }) : Tensor { dtype := dtype, shape := #[b, h, s, d], device := dev } :=
   match attentionBias? q k v bias with
   | .ok result => result
   | .error message => nativeInvariantFailure s!"BranchingFlows.attentionBias: {message}"
 
-def attentionBiasIO {biasDType : DType} {b h s d : UInt64} {dev : Device} (q k v : Tensor { dtype := dtype, shape := #[b, h, s, d], device := dev })
+def attentionBiasIO {biasDType : DType} {b h s d : Nat} {dev : Device} (q k v : Tensor { dtype := dtype, shape := #[b, h, s, d], device := dev })
     (bias : Tensor { dtype := biasDType, shape := #[b, h, s, s], device := dev })
     (dropout : Float) (training : Bool) (causal : Bool := false) :
     IO (Tensor { dtype := dtype, shape := #[b, h, s, d], device := dev }) := do

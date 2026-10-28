@@ -52,7 +52,12 @@ private def getFloat? (j : Json) : Option Float :=
   | some x => some x
   | none => (getNat? j).map (·.toFloat)
 
-private def getNatFieldD (j : Json) (key : String) (d : UInt64) : UInt64 :=
+private def getNatFieldD (j : Json) (key : String) (d : Nat) : Nat :=
+  match getObjVal? j key >>= getNat? with
+  | some n => n
+  | none => d
+
+private def getTokenIdFieldD (j : Json) (key : String) (d : UInt64) : UInt64 :=
   match getObjVal? j key >>= getNat? with
   | some n => n.toUInt64
   | none => d
@@ -72,14 +77,14 @@ private def getStrFieldD (j : Json) (key : String) (d : String) : String :=
   | some x => x
   | none => d
 
-private def getUInt64ArrayFieldD (j : Json) (key : String) (d : Array UInt64) : Array UInt64 :=
+private def getUInt64ArrayFieldD (j : Json) (key : String) (d : Array Nat) : Array Nat :=
   match getObjVal? j key >>= getArr? with
   | some arr =>
     Id.run do
-      let mut out : Array UInt64 := #[]
+      let mut out : Array Nat := #[]
       for item in arr do
         match getNat? item with
-        | some n => out := out.push n.toUInt64
+        | some n => out := out.push n
         | none => pure ()
       if out.isEmpty then d else out
   | none => d
@@ -171,13 +176,13 @@ private def parseTalkerConfig (j : Json) (d : TalkerConfig := {}) : TalkerConfig
     numCodeGroups := getNatFieldD j "num_code_groups" d.numCodeGroups
     textHiddenSize := getNatFieldD j "text_hidden_size" d.textHiddenSize
     textVocabSize := getNatFieldD j "text_vocab_size" d.textVocabSize
-    codecEosTokenId := getNatFieldD j "codec_eos_token_id" d.codecEosTokenId
-    codecThinkId := getNatFieldD j "codec_think_id" d.codecThinkId
-    codecNoThinkId := getNatFieldD j "codec_nothink_id" d.codecNoThinkId
-    codecThinkBosId := getNatFieldD j "codec_think_bos_id" d.codecThinkBosId
-    codecThinkEosId := getNatFieldD j "codec_think_eos_id" d.codecThinkEosId
-    codecPadId := getNatFieldD j "codec_pad_id" d.codecPadId
-    codecBosId := getNatFieldD j "codec_bos_id" d.codecBosId
+    codecEosTokenId := getTokenIdFieldD j "codec_eos_token_id" d.codecEosTokenId
+    codecThinkId := getTokenIdFieldD j "codec_think_id" d.codecThinkId
+    codecNoThinkId := getTokenIdFieldD j "codec_nothink_id" d.codecNoThinkId
+    codecThinkBosId := getTokenIdFieldD j "codec_think_bos_id" d.codecThinkBosId
+    codecThinkEosId := getTokenIdFieldD j "codec_think_eos_id" d.codecThinkEosId
+    codecPadId := getTokenIdFieldD j "codec_pad_id" d.codecPadId
+    codecBosId := getTokenIdFieldD j "codec_bos_id" d.codecBosId
     spkId
     spkIsDialect
     codecLanguageId
@@ -215,11 +220,11 @@ def loadFromFile (path : String) (defaults : Qwen3TTSConfig := {}) : IO Qwen3TTS
     tokenizerType := getStrFieldD root "tokenizer_type" defaults.tokenizerType
     ttsModelSize := getStrFieldD root "tts_model_size" defaults.ttsModelSize
     ttsModelType := getStrFieldD root "tts_model_type" defaults.ttsModelType
-    imStartTokenId := getNatFieldD root "im_start_token_id" defaults.imStartTokenId
-    imEndTokenId := getNatFieldD root "im_end_token_id" defaults.imEndTokenId
-    ttsPadTokenId := getNatFieldD root "tts_pad_token_id" defaults.ttsPadTokenId
-    ttsBosTokenId := getNatFieldD root "tts_bos_token_id" defaults.ttsBosTokenId
-    ttsEosTokenId := getNatFieldD root "tts_eos_token_id" defaults.ttsEosTokenId
+    imStartTokenId := getTokenIdFieldD root "im_start_token_id" defaults.imStartTokenId
+    imEndTokenId := getTokenIdFieldD root "im_end_token_id" defaults.imEndTokenId
+    ttsPadTokenId := getTokenIdFieldD root "tts_pad_token_id" defaults.ttsPadTokenId
+    ttsBosTokenId := getTokenIdFieldD root "tts_bos_token_id" defaults.ttsBosTokenId
+    ttsEosTokenId := getTokenIdFieldD root "tts_eos_token_id" defaults.ttsEosTokenId
   }
 
 /-- Load Qwen3-TTS config from a model directory containing `config.json`. -/

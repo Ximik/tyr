@@ -28,7 +28,7 @@ private def loadOptional (dtype : DType) (modelDir name : String) (shape : Shape
   | none => pure none
   | some packed => pure (some (← IO.ofExcept (packed.atDType? dtype)))
 
-private def loadLayerNormSharded (modelDir : String) (name : String) (dim : UInt64)
+private def loadLayerNormSharded (modelDir : String) (name : String) (dim : Nat)
     (dtype : DType) (device : Device := .CPU) : IO (LayerNorm (device := device) dim dtype) := do
   let w ← loadWeight (dtype := dtype) (device := device) modelDir s!"{name}.weight" #[dim]
   let b ← loadWeight (dtype := dtype) (device := device) modelDir s!"{name}.bias" #[dim]
@@ -58,7 +58,7 @@ private def loadAudioAttentionSharded (modelDir : String) (namePrefix : String) 
     outProjBias := reqGradFalse outProjBias
   }
 
-private def loadAudioLayerSharded (modelDir : String) (layerIdx : UInt64) (cfg : AudioEncoderConfig)
+private def loadAudioLayerSharded (modelDir : String) (layerIdx : Nat) (cfg : AudioEncoderConfig)
     (dtype : DType) (device : Device := .CPU) : IO (AudioEncoderLayer (device := device) (dtype := dtype) cfg) := do
   let p := s!"thinker.audio_tower.layers.{layerIdx}"
   let selfAttn ← loadAudioAttentionSharded (dtype := dtype) (device := device) modelDir s!"{p}.self_attn" cfg
@@ -97,8 +97,8 @@ private def loadAudioEncoderSharded (modelDir : String) (cfg : AudioEncoderConfi
     #[cfg.dModel, AudioEncoderConfig.convOutInDim cfg]
 
   let mut layers : Array (AudioEncoderLayer (device := device) (dtype := dtype) cfg) := #[]
-  for i in [:cfg.encoderLayers.toNat] do
-    let layer ← loadAudioLayerSharded (dtype := dtype) (device := device) modelDir i.toUInt64 cfg
+  for i in [:cfg.encoderLayers] do
+    let layer ← loadAudioLayerSharded (dtype := dtype) (device := device) modelDir i cfg
     layers := layers.push layer
 
   let lnPost ← loadLayerNormSharded (dtype := dtype) (device := device) modelDir "thinker.audio_tower.ln_post" cfg.dModel
@@ -128,13 +128,13 @@ private def loadAudioEncoderSharded (modelDir : String) (cfg : AudioEncoderConfi
     proj2Bias := reqGradFalse proj2Bias
   }
 
-private def loadRMSNormSharded (modelDir : String) (name : String) (dim : UInt64) (eps : Float)
+private def loadRMSNormSharded (modelDir : String) (name : String) (dim : Nat) (eps : Float)
     (dtype : DType) (device : Device := .CPU) : IO (RMSNorm (device := device) dim dtype) := do
   let w ← loadWeight (dtype := dtype) (device := device) modelDir s!"{name}.weight" #[dim]
   pure { weight := reqGradFalse w, eps := ⟨eps⟩ }
 
 private def loadQwenAttentionSharded (modelDir : String) (namePrefix : String)
-    (hiddenSize numHeads numKVHeads headDim : UInt64)
+    (hiddenSize numHeads numKVHeads headDim : Nat)
     (dtype : DType) (device : Device := .CPU) : IO (qwen.QwenAttention (device := device) hiddenSize numHeads numKVHeads headDim dtype) := do
   let qProj ← loadWeight (dtype := dtype) (device := device) modelDir s!"{namePrefix}.q_proj.weight" #[numHeads * headDim, hiddenSize]
   let kProj ← loadWeight (dtype := dtype) (device := device) modelDir s!"{namePrefix}.k_proj.weight" #[numKVHeads * headDim, hiddenSize]
@@ -152,7 +152,7 @@ private def loadQwenAttentionSharded (modelDir : String) (namePrefix : String)
   }
 
 private def loadQwenMLPSharded (modelDir : String) (namePrefix : String)
-    (hiddenSize intermediateSize : UInt64)
+    (hiddenSize intermediateSize : Nat)
     (dtype : DType) (device : Device := .CPU) : IO (qwen.QwenMLP (device := device) hiddenSize intermediateSize dtype) := do
   let gateProj ← loadWeight (dtype := dtype) (device := device) modelDir s!"{namePrefix}.gate_proj.weight"
     #[intermediateSize, hiddenSize]
@@ -166,7 +166,7 @@ private def loadQwenMLPSharded (modelDir : String) (namePrefix : String)
     down_proj := reqGradFalse downProj
   }
 
-private def loadQwenLayerSharded (modelDir : String) (layerIdx : UInt64) (cfg : TextConfig)
+private def loadQwenLayerSharded (modelDir : String) (layerIdx : Nat) (cfg : TextConfig)
     (dtype : DType) (device : Device := .CPU) : IO (qwen.QwenLayer (device := device) cfg.hiddenSize cfg.numAttentionHeads cfg.numKeyValueHeads cfg.headDim cfg.intermediateSize dtype) := do
   let p := s!"thinker.model.layers.{layerIdx}"
   let inputLayernorm ← loadRMSNormSharded (dtype := dtype) (device := device) modelDir s!"{p}.input_layernorm" cfg.hiddenSize cfg.rmsNormEps
@@ -181,8 +181,8 @@ private def loadTextModelSharded (modelDir : String) (cfg : TextConfig)
   let embedTokens ← loadWeight (dtype := dtype) (device := device) modelDir "thinker.model.embed_tokens.weight"
     #[cfg.vocabSize, cfg.hiddenSize]
   let mut layers : Array (qwen.QwenLayer (device := device) cfg.hiddenSize cfg.numAttentionHeads cfg.numKeyValueHeads cfg.headDim cfg.intermediateSize dtype) := #[]
-  for i in [:cfg.numHiddenLayers.toNat] do
-    let layer ← loadQwenLayerSharded (dtype := dtype) (device := device) modelDir i.toUInt64 cfg
+  for i in [:cfg.numHiddenLayers] do
+    let layer ← loadQwenLayerSharded (dtype := dtype) (device := device) modelDir i cfg
     layers := layers.push layer
   let norm ← loadRMSNormSharded (dtype := dtype) (device := device) modelDir "thinker.model.norm" cfg.hiddenSize cfg.rmsNormEps
   pure {

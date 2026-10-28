@@ -80,9 +80,9 @@ private def twoPi : Float := 6.283185307179586
     `j ∈ [0, dim/2)`, computed in double precision.
     Matches HF `compute_default_rope_parameters` and the C++
     `compute_rotary_freqs_impl` formula. -/
-def plainInvFreq (rotaryDim : UInt64) (base : Float) : Array Float :=
+def plainInvFreq (rotaryDim : Nat) (base : Float) : Array Float :=
   let dim := rotaryDim.toFloat
-  Array.ofFn (n := rotaryDim.toNat / 2) fun j =>
+  Array.ofFn (n := rotaryDim / 2) fun j =>
     Float.pow base (-(2.0 * j.val.toFloat / dim))
 
 /-- YaRN correction-dimension helper (HF `find_correction_dim`):
@@ -93,7 +93,7 @@ private def yarnCorrectionDim (numRotations dim base maxPos : Float) : Float :=
 /-- YaRN `(low, high)` correction range (HF `find_correction_range`, truncated):
     `low = floor(corrDim(beta_fast))`, `high = ceil(corrDim(beta_slow))`,
     each clamped to `[0, dim-1]`.  For Laguna-S-2.1 this is `(9, 18)`. -/
-def yarnCorrectionRange (cfg : Config) : UInt64 × UInt64 :=
+def yarnCorrectionRange (cfg : Config) : Nat × Nat :=
   let dim := cfg.rotaryDimFull.toFloat
   let base := cfg.rope_theta_full
   let maxPos := cfg.yarn_original_max_position_embeddings.toFloat
@@ -101,7 +101,7 @@ def yarnCorrectionRange (cfg : Config) : UInt64 × UInt64 :=
   let high := Float.ceil (yarnCorrectionDim cfg.yarn_beta_slow dim base maxPos)
   let low := min (max low 0.0) (dim - 1.0)
   let high := min (max high 0.0) (dim - 1.0)
-  (low.toUInt64, high.toUInt64)
+  (low.toUInt64.toNat, high.toUInt64.toNat)
 
 /-- YaRN inverse frequencies (HF `transformers._compute_yarn_parameters`),
     computed in double precision:
@@ -117,7 +117,7 @@ def yarnInvFreq (cfg : Config) : Array Float :=
   let dim := cfg.rotaryDimFull
   let (low, high) := yarnCorrectionRange cfg
   let denom := max (high.toFloat - low.toFloat) 1.0
-  Array.ofFn (n := dim.toNat / 2) fun j =>
+  Array.ofFn (n := dim / 2) fun j =>
     let posFreq := Float.pow cfg.rope_theta_full (2.0 * j.val.toFloat / dim.toFloat)
     let invInterp := 1.0 / (cfg.yarn_factor * posFreq)
     let invExtrap := 1.0 / posFreq
@@ -129,12 +129,12 @@ def yarnInvFreq (cfg : Config) : Array Float :=
     Computed in double precision on CPU, then uploaded to `device` as fp32
     row-major tensors with `table[p, j] = cos|sin(p * invFreq[j]) * scale` —
     the layout consumed by `Tensor.applyRotary`. -/
-def buildCosSinTables (invFreq : Array Float) (maxLen : UInt64) (scale : Float := 1.0)
+def buildCosSinTables (invFreq : Array Float) (maxLen : Nat) (scale : Float := 1.0)
     (device : Device := Device.CPU) :
-    Tensor { device := device, shape := #[maxLen, invFreq.size.toUInt64], dtype := .Float32 } ×
-    Tensor { device := device, shape := #[maxLen, invFreq.size.toUInt64], dtype := .Float32 } :=
+    Tensor { device := device, shape := #[maxLen, invFreq.size], dtype := .Float32 } ×
+    Tensor { device := device, shape := #[maxLen, invFreq.size], dtype := .Float32 } :=
   let half := invFreq.size
-  let n := maxLen.toNat
+  let n := maxLen
   let (cosArr, sinArr) := Id.run do
     let mut cosArr := Array.mkEmpty (n * half)
     let mut sinArr := Array.mkEmpty (n * half)
@@ -145,7 +145,7 @@ def buildCosSinTables (invFreq : Array Float) (maxLen : UInt64) (scale : Float :
         cosArr := cosArr.push (Float.cos f * scale)
         sinArr := sinArr.push (Float.sin f * scale)
     pure (cosArr, sinArr)
-  let shape : Shape := #[maxLen, half.toUInt64]
+  let shape : Shape := #[maxLen, half]
   ((Tensor.reshapeChecked (Tensor.fromFloatArray cosArr) shape).to device,
    (Tensor.reshapeChecked (Tensor.fromFloatArray sinArr) shape).to device)
 
@@ -161,7 +161,7 @@ def buildCosSinTables (invFreq : Array Float) (maxLen : UInt64) (scale : Float :
     Cost note: tables are built in Lean, so construction is `O(maxLen * rotaryDim/2)`
     scalar sin/cos evaluations — pick `maxLen` accordingly (the decode loop only
     ever slices rows). -/
-def precomputeRotaryTables (cfg : Config) (maxLen : UInt64) (device : Device)
+def precomputeRotaryTables (cfg : Config) (maxLen : Nat) (device : Device)
     : IO (LagunaRotaryTables (device := device)) := do
   let (slidingCos, slidingSin) :=
     buildCosSinTables (plainInvFreq cfg.rotaryDimSliding cfg.rope_theta_sliding)
@@ -180,13 +180,13 @@ def precomputeRotaryTables (cfg : Config) (maxLen : UInt64) (device : Device)
 
     Prefill: `sliceRotaryRows table 0 seq`.  Decode step at `position`:
     `sliceRotaryRows table position 1`. -/
-def sliceRotaryRows {half : UInt64} (table : ShapePackedTensor .Float32 device)
-    (start len : UInt64) : Tensor { device := device, shape := #[len, half], dtype := .Float32 } :=
+def sliceRotaryRows {half : Nat} (table : ShapePackedTensor .Float32 device)
+    (start len : Nat) : Tensor { device := device, shape := #[len, half], dtype := .Float32 } :=
   table.2.sliceChecked 0 start len #[len, half]
 
 /-- Slice rows `[start, start + len)` of a cos/sin table pair. -/
-def sliceRotaryRowsPair {half : UInt64}
-    (cosTable sinTable : ShapePackedTensor .Float32 device) (start len : UInt64)
+def sliceRotaryRowsPair {half : Nat}
+    (cosTable sinTable : ShapePackedTensor .Float32 device) (start len : Nat)
     : Tensor { device := device, shape := #[len, half], dtype := .Float32 } × Tensor { device := device, shape := #[len, half], dtype := .Float32 } :=
   (sliceRotaryRows cosTable start len, sliceRotaryRows sinTable start len)
 
@@ -200,14 +200,14 @@ def sliceRotaryRowsPair {half : UInt64}
     * Sliding-window layers (`rotary_dim = head_dim = 128`) can equally call
       `Tensor.applyRotary` directly on the full head; this helper handles
       that case too (the pass-through slice is then empty). -/
-def applyRotaryPartial {batch seq n_head head_dim rotary_dim : UInt64} {d dc : DType}
+def applyRotaryPartial {batch seq n_head head_dim rotary_dim : Nat} {d dc : DType}
     (x : Tensor { device := device, shape := #[batch, seq, n_head, head_dim], dtype := d })
     (cos : Tensor { device := device, shape := #[seq, rotary_dim / 2], dtype := dc })
     (sin : Tensor { device := device, shape := #[seq, rotary_dim / 2], dtype := dc })
     : Tensor { device := device, shape := #[batch, seq, n_head, head_dim], dtype := d } :=
   let xRot := x.sliceChecked 3 0 rotary_dim #[batch, seq, n_head, rotary_dim]
   let xRot := Tensor.applyRotary xRot cos sin
-  let xPassLen : UInt64 := head_dim - rotary_dim
+  let xPassLen : Nat := head_dim - rotary_dim
   let xPass := x.sliceChecked 3 rotary_dim xPassLen #[batch, seq, n_head, xPassLen]
   Tensor.catManyChecked #[xRot.packShape, xPass.packShape] 3 #[batch, seq, n_head, head_dim]
 

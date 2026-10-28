@@ -26,7 +26,7 @@ structure TrainConfig where
   warmupIters : Nat := 200
   lrDecayIters : Nat := 10000
   gradClip : Float := 1.0
-  batchSize : UInt64 := 32
+  batchSize : Nat := 32
   weightDecay : Float := 0.01
   checkpointInterval : Nat := 1000  -- Save checkpoint every N iterations
   checkpointDir : Option String := none  -- Directory for checkpoints
@@ -50,18 +50,18 @@ def getLr (cfg : TrainConfig) (iterNum : Nat) : Float :=
 /-- Get a random batch of data from token array.
     For diffusion, we just need contiguous sequences (no shifting).
     Returns tokens of shape [batchSize, seqLen] -/
-def getBatch {n : UInt64} (trainData : Tokens #[n]) (batchSize seqLen : UInt64)
+def getBatch {n : Nat} (trainData : Tokens #[n]) (batchSize seqLen : Nat)
     : IO (Tokens #[batchSize, seqLen]) := do
-  let required := batchSize.toNat * seqLen.toNat
-  if batchSize == 0 || seqLen == 0 || required > n.toNat then
+  let required := batchSize * seqLen
+  if batchSize == 0 || seqLen == 0 || required > n then
     throw <| IO.userError "Diffusion batch requires positive dimensions and enough tokens"
-  let totalTokens := required.toUInt64
+  let totalTokens := required
   let startTensor ← Tensor.randint 0 (n - totalTokens + 1).toInt64 #[]
-  let start := startTensor.itemInt.toUInt64
+  let start := startTensor.itemInt.toInt.toNat
   return (trainData.sliceChecked 0 start totalTokens #[totalTokens]).reshapeChecked #[batchSize, seqLen]
 
 /-- Clip gradients for a diffusion transformer block. -/
-def clipBlockGrads {n_embd n_head n_kv_head : UInt64}
+def clipBlockGrads {n_embd n_head n_kv_head : Nat}
     (params : BlockParams n_embd n_head n_kv_head)
     (maxNorm : Float) : IO Unit := do
   let _ ← Tensor.clipGradNorm params.attn.c_q maxNorm
@@ -80,7 +80,7 @@ def clipDiffusionGrads {cfg : Config} (params : DiffusionParams cfg) (maxNorm : 
   let _ ← Tensor.clipGradNorm params.output_head maxNorm
 
 /-- Single diffusion training step -/
-def trainStep {modelCfg : Config} {batch seq num_timesteps : UInt64}
+def trainStep {modelCfg : Config} {batch seq num_timesteps : Nat}
     (trainCfg : TrainConfig)
     (params : DiffusionParams modelCfg)
     (optState : Optim.AdamWState (DiffusionParams modelCfg))
@@ -125,11 +125,11 @@ def trainStep {modelCfg : Config} {batch seq num_timesteps : UInt64}
 
 /-- Evaluate model on validation data.
     Uses detached parameters to avoid building computation graphs. -/
-def evalLoss {modelCfg : Config} {num_timesteps : UInt64}
+def evalLoss {modelCfg : Config} {num_timesteps : Nat}
     (params : DiffusionParams modelCfg)
     (schedule : MaskedDiffusionSchedule num_timesteps)
     (valData : Tokens #[n])
-    (batchSize seqLen : UInt64)
+    (batchSize seqLen : Nat)
     (rotaryCache : RotaryCache rotaryLen modelCfg.headDim)
     (numBatches : Nat)
     : IO Float := do
@@ -147,7 +147,7 @@ def evalLoss {modelCfg : Config} {num_timesteps : UInt64}
   return totalLoss / numBatches.toFloat
 
 /-- Main diffusion training loop with validation -/
-def trainLoop {modelCfg : Config} {num_timesteps : UInt64}
+def trainLoop {modelCfg : Config} {num_timesteps : Nat}
     (trainCfg : TrainConfig)
     (initParams : DiffusionParams modelCfg)
     (initOptState : Optim.AdamWState (DiffusionParams modelCfg))

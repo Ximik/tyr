@@ -23,7 +23,7 @@ structure DiffusionCheckpointMeta where
   deriving Repr, Inhabited
 
 /-- Save NanoProof-style AttentionParams -/
-def saveAttentionParams {n_embd n_head n_kv_head : UInt64}
+def saveAttentionParams {n_embd n_head n_kv_head : Nat}
     (params : AttentionParams n_embd n_head n_kv_head)
     (dir : String) (blockIdx : Nat) : IO Unit := do
   let pfx := s!"{dir}/block_{blockIdx}_attn_"
@@ -33,7 +33,7 @@ def saveAttentionParams {n_embd n_head n_kv_head : UInt64}
   Tensor.saveTensor params.c_proj (pfx ++ "c_proj.pt")
 
 /-- Save NanoProof-style MLPParams -/
-def saveMLPParams {n_embd : UInt64}
+def saveMLPParams {n_embd : Nat}
     (params : MLPParams n_embd)
     (dir : String) (blockIdx : Nat) : IO Unit := do
   let pfx := s!"{dir}/block_{blockIdx}_mlp_"
@@ -41,14 +41,14 @@ def saveMLPParams {n_embd : UInt64}
   Tensor.saveTensor params.c_proj (pfx ++ "c_proj.pt")
 
 /-- Save NanoProof-style BlockParams (attention + MLP) -/
-def saveDiffusionBlockParams {n_embd n_head n_kv_head : UInt64}
+def saveDiffusionBlockParams {n_embd n_head n_kv_head : Nat}
     (params : BlockParams n_embd n_head n_kv_head)
     (dir : String) (blockIdx : Nat) : IO Unit := do
   saveAttentionParams params.attn dir blockIdx
   saveMLPParams params.mlp dir blockIdx
 
 /-- Load AttentionParams from directory -/
-private def loadAttentionParams (n_embd n_head n_kv_head : UInt64)
+private def loadAttentionParams (n_embd n_head n_kv_head : Nat)
     (dir : String) (blockIdx : Nat) : IO (AttentionParams n_embd n_head n_kv_head) := do
   let pfx := s!"{dir}/block_{blockIdx}_attn_"
   let head_dim := n_embd / n_head
@@ -62,7 +62,7 @@ private def loadAttentionParams (n_embd n_head n_kv_head : UInt64)
   }
 
 /-- Load MLPParams from directory -/
-private def loadMLPParams (n_embd : UInt64)
+private def loadMLPParams (n_embd : Nat)
     (dir : String) (blockIdx : Nat) : IO (MLPParams n_embd) := do
   let pfx := s!"{dir}/block_{blockIdx}_mlp_"
   return {
@@ -71,7 +71,7 @@ private def loadMLPParams (n_embd : UInt64)
   }
 
 /-- Load BlockParams from directory -/
-private def loadDiffusionBlockParams (n_embd n_head n_kv_head : UInt64)
+private def loadDiffusionBlockParams (n_embd n_head n_kv_head : Nat)
     (dir : String) (blockIdx : Nat) : IO (BlockParams n_embd n_head n_kv_head) := do
   let attn ← loadAttentionParams n_embd n_head n_kv_head dir blockIdx
   let mlp ← loadMLPParams n_embd dir blockIdx
@@ -98,7 +98,7 @@ def loadDiffusionParams (cfg : Config) (dir : String) : IO (DiffusionParams cfg)
   let output_head ← Tensor.loadTensorExact { device := .CPU, shape := #[cfg.vocab_size, cfg.n_embd], dtype := .Float32 } (dir ++ "/output_head.pt")
   -- Load blocks
   let mut blocks : Array (BlockParams cfg.n_embd cfg.n_head cfg.n_head) := #[]
-  for i in [:cfg.n_layer.toNat] do
+  for i in [:cfg.n_layer] do
     let block ← loadDiffusionBlockParams cfg.n_embd cfg.n_head cfg.n_head dir i
     blocks := blocks.push block
   IO.println s!"Diffusion model loaded from {dir}"
@@ -169,7 +169,7 @@ def checkpointExists (dir : String) : IO Bool := do
 /-! ## Optimizer State Checkpointing -/
 
 /-- Helper: Save Adam state for AttentionParams -/
-private def saveAttentionAdamState {n_embd n_head n_kv_head : UInt64}
+private def saveAttentionAdamState {n_embd n_head n_kv_head : Nat}
     (mu nu : AttentionParams n_embd n_head n_kv_head)
     (dir : String) (blockIdx : Nat) : IO Unit := do
   let pfx := s!"{dir}/optim_block_{blockIdx}_attn_"
@@ -183,7 +183,7 @@ private def saveAttentionAdamState {n_embd n_head n_kv_head : UInt64}
   Tensor.saveTensor nu.c_proj (pfx ++ "nu_c_proj.pt")
 
 /-- Helper: Save Adam state for MLPParams -/
-private def saveMLPAdamState {n_embd : UInt64}
+private def saveMLPAdamState {n_embd : Nat}
     (mu nu : MLPParams n_embd)
     (dir : String) (blockIdx : Nat) : IO Unit := do
   let pfx := s!"{dir}/optim_block_{blockIdx}_mlp_"
@@ -193,14 +193,14 @@ private def saveMLPAdamState {n_embd : UInt64}
   Tensor.saveTensor nu.c_proj (pfx ++ "nu_c_proj.pt")
 
 /-- Helper: Save Adam state for BlockParams -/
-private def saveDiffusionBlockAdamState {n_embd n_head n_kv_head : UInt64}
+private def saveDiffusionBlockAdamState {n_embd n_head n_kv_head : Nat}
     (mu nu : BlockParams n_embd n_head n_kv_head)
     (dir : String) (blockIdx : Nat) : IO Unit := do
   saveAttentionAdamState mu.attn nu.attn dir blockIdx
   saveMLPAdamState mu.mlp nu.mlp dir blockIdx
 
 /-- Helper: Load Adam state for AttentionParams -/
-private def loadAttentionAdamState (n_embd n_head n_kv_head : UInt64)
+private def loadAttentionAdamState (n_embd n_head n_kv_head : Nat)
     (dir : String) (blockIdx : Nat)
     : IO (AttentionParams n_embd n_head n_kv_head × AttentionParams n_embd n_head n_kv_head) := do
   let pfx := s!"{dir}/optim_block_{blockIdx}_attn_"
@@ -222,7 +222,7 @@ private def loadAttentionAdamState (n_embd n_head n_kv_head : UInt64)
   return (mu, nu)
 
 /-- Helper: Load Adam state for MLPParams -/
-private def loadMLPAdamState (n_embd : UInt64) (dir : String) (blockIdx : Nat)
+private def loadMLPAdamState (n_embd : Nat) (dir : String) (blockIdx : Nat)
     : IO (MLPParams n_embd × MLPParams n_embd) := do
   let pfx := s!"{dir}/optim_block_{blockIdx}_mlp_"
   let mu : MLPParams n_embd := {
@@ -236,7 +236,7 @@ private def loadMLPAdamState (n_embd : UInt64) (dir : String) (blockIdx : Nat)
   return (mu, nu)
 
 /-- Helper: Load Adam state for BlockParams -/
-private def loadDiffusionBlockAdamState (n_embd n_head n_kv_head : UInt64)
+private def loadDiffusionBlockAdamState (n_embd n_head n_kv_head : Nat)
     (dir : String) (blockIdx : Nat)
     : IO (BlockParams n_embd n_head n_kv_head × BlockParams n_embd n_head n_kv_head) := do
   let (muAttn, nuAttn) ← loadAttentionAdamState n_embd n_head n_kv_head dir blockIdx
@@ -284,7 +284,7 @@ def loadDiffusionAdamWState (cfg : Config) (dir : String)
   -- Load block states
   let mut muBlocks : Array (BlockParams cfg.n_embd cfg.n_head cfg.n_head) := #[]
   let mut nuBlocks : Array (BlockParams cfg.n_embd cfg.n_head cfg.n_head) := #[]
-  for i in [:cfg.n_layer.toNat] do
+  for i in [:cfg.n_layer] do
     let (muBlock, nuBlock) ← loadDiffusionBlockAdamState cfg.n_embd cfg.n_head cfg.n_head dir i
     muBlocks := muBlocks.push muBlock
     nuBlocks := nuBlocks.push nuBlock

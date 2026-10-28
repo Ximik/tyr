@@ -29,20 +29,20 @@ private def reqGradFalse {s : Shape} (t : Tensor { device := device, shape := s,
   Tensor.detach t
 
 /-- Gemma 4 RMSNorm with standard learned scale. -/
-structure Gemma4RMSNorm (dim : UInt64) where
+structure Gemma4RMSNorm (dim : Nat) where
   weight : SomeDTypeTensor #[dim] device
   eps : Float := 1e-6
   deriving TensorStruct
 
 namespace Gemma4RMSNorm
 
-def fromCheckpointWeight {dim : UInt64}
+def fromCheckpointWeight {dim : Nat}
     (weight : SomeDTypeTensor #[dim] device)
     (eps : Float := 1e-6)
     : Gemma4RMSNorm (device := device) dim :=
   { weight := weight, eps }
 
-def forward2d {n dim : UInt64}
+def forward2d {n dim : Nat}
     (m : Gemma4RMSNorm (device := device) dim)
     (x : Tensor { device := device, shape := #[n, dim], dtype := dtype })
     : Tensor { device := device, shape := #[n, dim], dtype := dtype } :=
@@ -53,14 +53,14 @@ def forward2d {n dim : UInt64}
   let scale : Tensor { device := device, shape := #[n, dim], dtype := .Float32 } := Tensor.expand (Tensor.reshapeChecked (floatDynamic m.weight.2) #[1, dim]) #[n, dim]
   Tensor.castLike x (Tensor.mul (Tensor.mul xf inv) scale)
 
-def forward3d {batch seq dim : UInt64}
+def forward3d {batch seq dim : Nat}
     (m : Gemma4RMSNorm (device := device) dim)
     (x : Tensor { device := device, shape := #[batch, seq, dim], dtype := dtype })
     : Tensor { device := device, shape := #[batch, seq, dim], dtype := dtype } :=
   let flat : Tensor { device := device, shape := #[batch * seq, dim], dtype := dtype } := Tensor.reshapeChecked x #[batch * seq, dim]
   Tensor.reshapeChecked (forward2d m flat) #[batch, seq, dim]
 
-def forward4d {a b c dim : UInt64}
+def forward4d {a b c dim : Nat}
     (m : Gemma4RMSNorm (device := device) dim)
     (x : Tensor { device := device, shape := #[a, b, c, dim], dtype := dtype })
     : Tensor { device := device, shape := #[a, b, c, dim], dtype := dtype } :=
@@ -69,7 +69,7 @@ def forward4d {a b c dim : UInt64}
 
 end Gemma4RMSNorm
 
-private def rmsNormNoScale2d {n dim : UInt64}
+private def rmsNormNoScale2d {n dim : Nat}
     (x : Tensor { device := device, shape := #[n, dim], dtype := dtype })
     (eps : Float := 1e-6)
     : Tensor { device := device, shape := #[n, dim], dtype := dtype } :=
@@ -79,14 +79,14 @@ private def rmsNormNoScale2d {n dim : UInt64}
   let inv : Tensor { device := device, shape := #[n, dim], dtype := .Float32 } := Tensor.expand inv #[n, dim]
   Tensor.castLike x (Tensor.mul xf inv)
 
-private def rmsNormNoScale4d {a b c dim : UInt64}
+private def rmsNormNoScale4d {a b c dim : Nat}
     (x : Tensor { device := device, shape := #[a, b, c, dim], dtype := dtype })
     (eps : Float := 1e-6)
     : Tensor { device := device, shape := #[a, b, c, dim], dtype := dtype } :=
   let flat : Tensor { device := device, shape := #[a * b * c, dim], dtype := dtype } := Tensor.reshapeChecked x #[a * b * c, dim]
   Tensor.reshapeChecked (rmsNormNoScale2d flat eps) #[a, b, c, dim]
 
-private def rmsNormWeighted4dSlice {a b c dim maxDim : UInt64} {weightDType : DType}
+private def rmsNormWeighted4dSlice {a b c dim maxDim : Nat} {weightDType : DType}
     (weight : Tensor { device := device, shape := #[maxDim], dtype := weightDType })
     (x : Tensor { device := device, shape := #[a, b, c, dim], dtype := dtype })
     (eps : Float := 1e-6)
@@ -99,7 +99,7 @@ private def rmsNormWeighted4dSlice {a b c dim maxDim : UInt64} {weightDType : DT
   let scale : Tensor { device := device, shape := #[a * b * c, dim], dtype := .Float32 } := Tensor.expand (Tensor.reshapeChecked (floatDynamic w) #[1, dim]) #[a * b * c, dim]
   Tensor.castLike x (Tensor.reshapeChecked ((promotedMul (Tensor.mul xf inv) scale).2) #[a, b, c, dim])
 
-private def rmsNormNoScale4dSlice {a b c dim : UInt64}
+private def rmsNormNoScale4dSlice {a b c dim : Nat}
     (x : Tensor { device := device, shape := #[a, b, c, dim], dtype := dtype })
     (eps : Float := 1e-6)
     : Tensor { device := device, shape := #[a, b, c, dim], dtype := dtype } :=
@@ -116,7 +116,7 @@ structure Gemma4MLP (cfg : Config) (dtype : DType := .Float32) where
 
 namespace Gemma4MLP
 
-def forward {batch seq : UInt64}
+def forward {batch seq : Nat}
     (cfg : Config)
     (m : Gemma4MLP (dtype := dtype) (device := device) cfg)
     (x : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
@@ -133,7 +133,7 @@ structure Gemma4TextRouter (cfg : Config) where
 
 namespace Gemma4TextRouter
 
-def forward {tokens : UInt64}
+def forward {tokens : Nat}
     (cfg : Config)
     (m : Gemma4TextRouter (device := device) cfg)
     (hidden : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype })
@@ -171,7 +171,7 @@ structure Gemma4TextExperts (cfg : Config) (dtype : DType := .Float32) where
 
 namespace Gemma4TextExperts
 
-def forward2d {tokens : UInt64} {routingDType : DType}
+def forward2d {tokens : Nat} {routingDType : DType}
     (cfg : Config)
     (m : Gemma4TextExperts (dtype := dtype) (device := device) cfg)
     (hidden : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype })
@@ -207,10 +207,10 @@ structure Gemma4Attention (cfg : Config) (dtype : DType := .Float32) where
 
 namespace Gemma4Attention
 
-abbrev KVCache (cfg : Config) (batch : UInt64) (dtype : DType := .Float32) :=
+abbrev KVCache (cfg : Config) (batch : Nat) (dtype : DType := .Float32) :=
   qwen.QwenAttention.KVCache (device := device) batch (Config.maxKVHeads cfg) (Config.maxHeadDim cfg) dtype
 
-private def qProjSliding {batch seq : UInt64}
+private def qProjSliding {batch seq : Nat}
     (cfg : Config)
     (m : Gemma4Attention (dtype := dtype) (device := device) cfg)
     (x : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
@@ -219,7 +219,7 @@ private def qProjSliding {batch seq : UInt64}
     sliceTyped m.q_proj 0 0 (cfg.num_attention_heads * cfg.head_dim)
   Tensor.reshapeChecked (Tensor.linear3d x qW) #[batch, seq, cfg.num_attention_heads, cfg.head_dim]
 
-private def qProjFull {batch seq : UInt64}
+private def qProjFull {batch seq : Nat}
     (cfg : Config)
     (m : Gemma4Attention (dtype := dtype) (device := device) cfg)
     (x : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
@@ -228,7 +228,7 @@ private def qProjFull {batch seq : UInt64}
   let qW : Tensor { device := device, shape := #[dim, cfg.hidden_size], dtype := dtype } := sliceTyped m.q_proj 0 0 dim
   Tensor.reshapeChecked (Tensor.linear3d x qW) #[batch, seq, cfg.num_attention_heads, Config.fullHeadDim cfg]
 
-private def kProjSliding {batch seq : UInt64}
+private def kProjSliding {batch seq : Nat}
     (cfg : Config)
     (m : Gemma4Attention (dtype := dtype) (device := device) cfg)
     (x : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
@@ -237,7 +237,7 @@ private def kProjSliding {batch seq : UInt64}
   let kW : Tensor { device := device, shape := #[rows, cfg.hidden_size], dtype := dtype } := sliceTyped m.k_proj 0 0 rows
   Tensor.reshapeChecked (Tensor.linear3d x kW) #[batch, seq, cfg.num_key_value_heads, cfg.head_dim]
 
-private def kProjFull {batch seq : UInt64}
+private def kProjFull {batch seq : Nat}
     (cfg : Config)
     (m : Gemma4Attention (dtype := dtype) (device := device) cfg)
     (x : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
@@ -246,7 +246,7 @@ private def kProjFull {batch seq : UInt64}
   let kW : Tensor { device := device, shape := #[rows, cfg.hidden_size], dtype := dtype } := sliceTyped m.k_proj 0 0 rows
   Tensor.reshapeChecked (Tensor.linear3d x kW) #[batch, seq, Config.fullNumKVHeads cfg, Config.fullHeadDim cfg]
 
-private def vProjSliding {batch seq : UInt64}
+private def vProjSliding {batch seq : Nat}
     (cfg : Config)
     (m : Gemma4Attention (dtype := dtype) (device := device) cfg)
     (x : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
@@ -255,7 +255,7 @@ private def vProjSliding {batch seq : UInt64}
   let vW : Tensor { device := device, shape := #[rows, cfg.hidden_size], dtype := dtype } := sliceTyped m.v_proj 0 0 rows
   Tensor.reshapeChecked (Tensor.linear3d x vW) #[batch, seq, cfg.num_key_value_heads, cfg.head_dim]
 
-private def vProjFull {batch seq : UInt64}
+private def vProjFull {batch seq : Nat}
     (cfg : Config)
     (m : Gemma4Attention (dtype := dtype) (device := device) cfg)
     (x : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
@@ -264,7 +264,7 @@ private def vProjFull {batch seq : UInt64}
   let vW : Tensor { device := device, shape := #[rows, cfg.hidden_size], dtype := dtype } := sliceTyped m.v_proj 0 0 rows
   Tensor.reshapeChecked (Tensor.linear3d x vW) #[batch, seq, Config.fullNumKVHeads cfg, Config.fullHeadDim cfg]
 
-private def oProjSliding {batch seq : UInt64}
+private def oProjSliding {batch seq : Nat}
     (cfg : Config)
     (m : Gemma4Attention (dtype := dtype) (device := device) cfg)
     (x : Tensor { device := device, shape := #[batch, seq, cfg.num_attention_heads * cfg.head_dim], dtype := dtype })
@@ -273,7 +273,7 @@ private def oProjSliding {batch seq : UInt64}
   let oW : Tensor { device := device, shape := #[cfg.hidden_size, cols], dtype := dtype } := sliceTyped m.o_proj 1 0 cols
   Tensor.linear3d x oW
 
-private def oProjFull {batch seq : UInt64}
+private def oProjFull {batch seq : Nat}
     (cfg : Config)
     (m : Gemma4Attention (dtype := dtype) (device := device) cfg)
     (x : Tensor { device := device, shape := #[batch, seq, cfg.num_attention_heads * Config.fullHeadDim cfg], dtype := dtype })
@@ -282,27 +282,27 @@ private def oProjFull {batch seq : UInt64}
   let oW : Tensor { device := device, shape := #[cfg.hidden_size, cols], dtype := dtype } := sliceTyped m.o_proj 1 0 cols
   Tensor.linear3d x oW
 
-private def padSlidingKVForCache {batch seq : UInt64}
+private def padSlidingKVForCache {batch seq : Nat}
     (cfg : Config)
     (x : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, seq, cfg.head_dim], dtype := dtype })
     : Tensor { device := device, shape := #[batch, Config.maxKVHeads cfg, seq, Config.maxHeadDim cfg], dtype := dtype } :=
-  let padDim : UInt64 := Config.maxHeadDim cfg - cfg.head_dim
+  let padDim : Nat := Config.maxHeadDim cfg - cfg.head_dim
   let xDim : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, seq, Config.maxHeadDim cfg], dtype := dtype } :=
     typedCat x (Tensor.castLike x (zerosDynamicOn x.device dtype : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, seq, padDim], dtype := dtype })) 3
-  let padHeads : UInt64 := Config.maxKVHeads cfg - cfg.num_key_value_heads
+  let padHeads : Nat := Config.maxKVHeads cfg - cfg.num_key_value_heads
   typedCat xDim (Tensor.castLike x (zerosDynamicOn x.device dtype : Tensor { device := device, shape := #[batch, padHeads, seq, Config.maxHeadDim cfg], dtype := dtype })) 1
 
-private def padFullKVForCache {batch seq : UInt64}
+private def padFullKVForCache {batch seq : Nat}
     (cfg : Config)
     (x : Tensor { device := device, shape := #[batch, Config.fullNumKVHeads cfg, seq, Config.fullHeadDim cfg], dtype := dtype })
     : Tensor { device := device, shape := #[batch, Config.maxKVHeads cfg, seq, Config.maxHeadDim cfg], dtype := dtype } :=
-  let padDim : UInt64 := Config.maxHeadDim cfg - Config.fullHeadDim cfg
+  let padDim : Nat := Config.maxHeadDim cfg - Config.fullHeadDim cfg
   let xDim : Tensor { device := device, shape := #[batch, Config.fullNumKVHeads cfg, seq, Config.maxHeadDim cfg], dtype := dtype } :=
     typedCat x (Tensor.castLike x (zerosDynamicOn x.device dtype : Tensor { device := device, shape := #[batch, Config.fullNumKVHeads cfg, seq, padDim], dtype := dtype })) 3
-  let padHeads : UInt64 := Config.maxKVHeads cfg - Config.fullNumKVHeads cfg
+  let padHeads : Nat := Config.maxKVHeads cfg - Config.fullNumKVHeads cfg
   typedCat xDim (Tensor.castLike x (zerosDynamicOn x.device dtype : Tensor { device := device, shape := #[batch, padHeads, seq, Config.maxHeadDim cfg], dtype := dtype })) 1
 
-private def cacheSliceSliding {batch kvLen : UInt64}
+private def cacheSliceSliding {batch kvLen : Nat}
     (cfg : Config)
     (cache : KVCache (dtype := dtype) (device := device) cfg batch)
     : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, kvLen, cfg.head_dim], dtype := dtype }
@@ -319,7 +319,7 @@ private def cacheSliceSliding {batch kvLen : UInt64}
   let v : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, kvLen, cfg.head_dim], dtype := dtype } := sliceTyped v0 3 0 cfg.head_dim
   (k, v)
 
-private def cacheSliceFull {batch kvLen : UInt64}
+private def cacheSliceFull {batch kvLen : Nat}
     (cfg : Config)
     (cache : KVCache (dtype := dtype) (device := device) cfg batch)
     : Tensor { device := device, shape := #[batch, Config.fullNumKVHeads cfg, kvLen, Config.fullHeadDim cfg], dtype := dtype }
@@ -338,10 +338,10 @@ private def cacheSliceFull {batch kvLen : UInt64}
     sliceTyped v0 3 0 (Config.fullHeadDim cfg)
   (k, v)
 
-private def attentionScale (d : UInt64) : Float :=
+private def attentionScale (d : Nat) : Float :=
   Float.sqrt d.toFloat
 
-private def attentionSlidingPrefillWithMask {batch seq : UInt64}
+private def attentionSlidingPrefillWithMask {batch seq : Nat}
     (cfg : Config)
     (m : Gemma4Attention (dtype := dtype) (device := device) cfg)
     (x : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
@@ -382,7 +382,7 @@ private def attentionSlidingPrefillWithMask {batch seq : UInt64}
   }
   (oProjSliding cfg m out, cache')
 
-private def attentionFullPrefillWithMask {batch seq : UInt64}
+private def attentionFullPrefillWithMask {batch seq : Nat}
     (cfg : Config)
     (m : Gemma4Attention (dtype := dtype) (device := device) cfg)
     (x : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
@@ -427,7 +427,7 @@ private def attentionFullPrefillWithMask {batch seq : UInt64}
   }
   (oProjFull cfg m out, cache')
 
-private def attentionSlidingNoCache {batch seq : UInt64}
+private def attentionSlidingNoCache {batch seq : Nat}
     (cfg : Config)
     (m : Gemma4Attention (dtype := dtype) (device := device) cfg)
     (x : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
@@ -452,7 +452,7 @@ private def attentionSlidingNoCache {batch seq : UInt64}
     Tensor.reshapeChecked (transposeAttention attn) #[batch, seq, cfg.num_attention_heads * cfg.head_dim]
   oProjSliding cfg m out
 
-private def attentionFullNoCache {batch seq : UInt64}
+private def attentionFullNoCache {batch seq : Nat}
     (cfg : Config)
     (m : Gemma4Attention (dtype := dtype) (device := device) cfg)
     (x : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
@@ -481,7 +481,7 @@ private def attentionFullNoCache {batch seq : UInt64}
     Tensor.reshapeChecked (transposeAttention attn) #[batch, seq, cfg.num_attention_heads * Config.fullHeadDim cfg]
   oProjFull cfg m out
 
-private def attentionSlidingWithCache {batch seq : UInt64}
+private def attentionSlidingWithCache {batch seq : Nat}
     (cfg : Config)
     (m : Gemma4Attention (dtype := dtype) (device := device) cfg)
     (x : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
@@ -531,7 +531,7 @@ private def attentionSlidingWithCache {batch seq : UInt64}
       Tensor.reshapeChecked (transposeAttention attn) #[batch, seq, cfg.num_attention_heads * cfg.head_dim]
     (oProjSliding cfg m out, cache')
 
-private def attentionFullWithCache {batch seq : UInt64}
+private def attentionFullWithCache {batch seq : Nat}
     (cfg : Config)
     (m : Gemma4Attention (dtype := dtype) (device := device) cfg)
     (x : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
@@ -585,7 +585,7 @@ private def attentionFullWithCache {batch seq : UInt64}
       Tensor.reshapeChecked (transposeAttention attn) #[batch, seq, cfg.num_attention_heads * Config.fullHeadDim cfg]
     (oProjFull cfg m out, cache')
 
-private def attentionSlidingStep {batch : UInt64}
+private def attentionSlidingStep {batch : Nat}
     (cfg : Config)
     (m : Gemma4Attention (dtype := dtype) (device := device) cfg)
     (x : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := dtype })
@@ -650,7 +650,7 @@ private def attentionSlidingStep {batch : UInt64}
     }
     (oProjSliding cfg m out, cache')
 
-private def attentionFullStep {batch : UInt64}
+private def attentionFullStep {batch : Nat}
     (cfg : Config)
     (m : Gemma4Attention (dtype := dtype) (device := device) cfg)
     (x : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := dtype })
@@ -711,7 +711,7 @@ private def attentionFullStep {batch : UInt64}
     }
     (oProjFull cfg m out, cache')
 
-def forward {batch seq : UInt64}
+def forward {batch seq : Nat}
     (cfg : Config)
     (m : Gemma4Attention (dtype := dtype) (device := device) cfg)
     (layerType : LayerType)
@@ -725,7 +725,7 @@ def forward {batch seq : UInt64}
   | .slidingAttention => attentionSlidingNoCache cfg m x slidingCos slidingSin
   | .fullAttention => attentionFullNoCache cfg m x fullCos fullSin
 
-def forwardWithCache {batch seq : UInt64}
+def forwardWithCache {batch seq : Nat}
     (cfg : Config)
     (m : Gemma4Attention (dtype := dtype) (device := device) cfg)
     (layerType : LayerType)
@@ -741,7 +741,7 @@ def forwardWithCache {batch seq : UInt64}
   | .slidingAttention => attentionSlidingWithCache cfg m x slidingCos slidingSin cache sharedSource
   | .fullAttention => attentionFullWithCache cfg m x fullCos fullSin cache sharedSource
 
-def forwardStep {batch : UInt64}
+def forwardStep {batch : Nat}
     (cfg : Config)
     (m : Gemma4Attention (dtype := dtype) (device := device) cfg)
     (layerType : LayerType)
@@ -757,7 +757,7 @@ def forwardStep {batch : UInt64}
   | .slidingAttention => attentionSlidingStep cfg m x slidingCos slidingSin cache sharedSource
   | .fullAttention => attentionFullStep cfg m x fullCos fullSin cache sharedSource
 
-def forwardPrefillWithMask {batch seq : UInt64}
+def forwardPrefillWithMask {batch seq : Nat}
     (cfg : Config)
     (m : Gemma4Attention (dtype := dtype) (device := device) cfg)
     (layerType : LayerType)
@@ -779,7 +779,7 @@ def forwardPrefillWithMask {batch seq : UInt64}
 end Gemma4Attention
 
 structure Gemma4Layer (cfg : Config) (dtype : DType := .Float32) where
-  layerIdx : UInt64
+  layerIdx : Nat
   layerType : LayerType
   self_attn : Gemma4Attention (dtype := dtype) (device := device) cfg
   mlp : Gemma4MLP (dtype := dtype) (device := device) cfg
@@ -792,12 +792,12 @@ structure Gemma4Layer (cfg : Config) (dtype : DType := .Float32) where
   layer_scalar : Tensor { device := device, shape := #[1], dtype := dtype }
   deriving TensorStruct
 
-structure Gemma4Cache (cfg : Config) (batch : UInt64) (dtype : DType := .Float32) where
+structure Gemma4Cache (cfg : Config) (batch : Nat) (dtype : DType := .Float32) where
   attnCaches : Array (Gemma4Attention.KVCache (dtype := dtype) (device := device) cfg batch)
 
 namespace Gemma4Layer
 
-private def applyLayerScalar {batch seq : UInt64}
+private def applyLayerScalar {batch seq : Nat}
     (cfg : Config)
     (scale : Tensor { device := device, shape := #[1], dtype := dtype })
     (x : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
@@ -805,7 +805,7 @@ private def applyLayerScalar {batch seq : UInt64}
   let s : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } := Tensor.expand (Tensor.reshapeChecked scale #[1, 1, 1]) #[batch, seq, cfg.hidden_size]
   Tensor.mul x s
 
-private def applyPerLayerInput {batch seq : UInt64}
+private def applyPerLayerInput {batch seq : Nat}
     (cfg : Config)
     (block : Gemma4PerLayerInputBlock (dtype := dtype) (device := device) cfg)
     (hidden : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
@@ -819,7 +819,7 @@ private def applyPerLayerInput {batch seq : UInt64}
   let projected := block.post_per_layer_input_norm.forward3d projected
   Tensor.add residual projected
 
-def forward {batch seq : UInt64}
+def forward {batch seq : Nat}
     (cfg : Config)
     (layer : Gemma4Layer (dtype := dtype) (device := device) cfg)
     (x : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
@@ -858,7 +858,7 @@ def forward {batch seq : UInt64}
     | _, _ => h4
   applyLayerScalar cfg layer.layer_scalar h5
 
-def forwardWithCache {batch seq : UInt64}
+def forwardWithCache {batch seq : Nat}
     (cfg : Config)
     (layer : Gemma4Layer (dtype := dtype) (device := device) cfg)
     (x : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
@@ -909,7 +909,7 @@ def forwardWithCache {batch seq : UInt64}
     | _, _ => h4
   (applyLayerScalar cfg layer.layer_scalar h5, layerCache')
 
-def forwardStep {batch : UInt64}
+def forwardStep {batch : Nat}
     (cfg : Config)
     (layer : Gemma4Layer (dtype := dtype) (device := device) cfg)
     (x : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := dtype })
@@ -959,7 +959,7 @@ def forwardStep {batch : UInt64}
     | _, _ => h4
   (applyLayerScalar cfg layer.layer_scalar h5, layerCache')
 
-def forwardPrefillWithMask {batch seq : UInt64}
+def forwardPrefillWithMask {batch seq : Nat}
     (cfg : Config)
     (layer : Gemma4Layer (dtype := dtype) (device := device) cfg)
     (x : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
@@ -1027,10 +1027,10 @@ structure Gemma4Model (cfg : Config) (dtype : DType := .Float32) where
 
 namespace Gemma4Model
 
-private def extractPerLayerInput? {batch seq : UInt64}
+private def extractPerLayerInput? {batch seq : Nat}
     (cfg : Config)
     (perLayerInputs : Option (Tensor { device := device, shape := #[batch, seq, cfg.num_hidden_layers, cfg.hidden_size_per_layer_input], dtype := dtype }))
-    (layerIdx : UInt64)
+    (layerIdx : Nat)
     : Option (Tensor { device := device, shape := #[batch, seq, cfg.hidden_size_per_layer_input], dtype := dtype }) :=
   match perLayerInputs with
   | some t =>
@@ -1038,14 +1038,14 @@ private def extractPerLayerInput? {batch seq : UInt64}
     some (Tensor.reshapeChecked one #[batch, seq, cfg.hidden_size_per_layer_input])
   | none => none
 
-def embedTokens {batch seq : UInt64}
+def embedTokens {batch seq : Nat}
     (cfg : Config)
     (m : Gemma4Model (dtype := dtype) (device := device) cfg)
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } :=
   Tensor.mulScalar (Tensor.embedding inputIds m.embed_tokens) (Float.sqrt cfg.hidden_size.toFloat)
 
-def computePerLayerInputs {batch seq : UInt64}
+def computePerLayerInputs {batch seq : Nat}
     (cfg : Config)
     (m : Gemma4Model (dtype := dtype) (device := device) cfg)
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
@@ -1069,13 +1069,13 @@ def computePerLayerInputs {batch seq : UInt64}
   | _, _, _ =>
     none
 
-private def precomputeSlidingRotary {seq : UInt64}
+private def precomputeSlidingRotary {seq : Nat}
     (cfg : Config)
     (device : Device)
     : Tensor { device := device, shape := #[seq, cfg.head_dim / 2], dtype := .Float32 } × Tensor { device := device, shape := #[seq, cfg.head_dim / 2], dtype := .Float32 } :=
   Tensor.rotaryFreqs seq cfg.head_dim cfg.sliding_rope_theta device
 
-private def precomputeFullRotary {seq : UInt64}
+private def precomputeFullRotary {seq : Nat}
     (cfg : Config)
     (device : Device)
     : Tensor { device := device, shape := #[seq, Config.fullHeadDim cfg / 2], dtype := .Float32 } × Tensor { device := device, shape := #[seq, Config.fullHeadDim cfg / 2], dtype := .Float32 } :=
@@ -1084,15 +1084,15 @@ private def precomputeFullRotary {seq : UInt64}
   let (cos0, sin0) := Tensor.rotaryFreqs seq (Config.fullHeadDim cfg) cfg.full_rope_theta device
   let cosRot : Tensor { device := device, shape := #[seq, rotHalf], dtype := .Float32 } := sliceTyped cos0 1 0 rotHalf
   let sinRot : Tensor { device := device, shape := #[seq, rotHalf], dtype := .Float32 } := sliceTyped sin0 1 0 rotHalf
-  let passHalf : UInt64 := fullHalf - rotHalf
+  let passHalf : Nat := fullHalf - rotHalf
   let cosPass : Tensor { device := device, shape := #[seq, passHalf], dtype := .Float32 } := onesFloatOn device
   let sinPass : Tensor { device := device, shape := #[seq, passHalf], dtype := .Float32 } := zerosFloatOn device
   (typedCat cosRot cosPass 1, typedCat sinRot sinPass 1)
 
-def initCache {batch : UInt64}
+def initCache {batch : Nat}
     (cfg : Config)
     (m : Gemma4Model (dtype := dtype) (device := device) cfg)
-    (maxLen : UInt64)
+    (maxLen : Nat)
     (cacheDevice : Device)
     [DType.ConstantSupported dtype cacheDevice]
     : Gemma4Cache (dtype := dtype) (device := cacheDevice) cfg batch :=
@@ -1114,7 +1114,7 @@ def initCache {batch : UInt64}
 /-- Full-sequence evaluation keeps temporary per-layer K/V when the configured
 architecture shares them. This gives uncached evaluation the same layer inputs
 as prefill and decode, while ordinary models avoid allocating cache storage. -/
-private def forwardEmbedsCore {batch seq : UInt64}
+private def forwardEmbedsCore {batch seq : Nat}
     (cfg : Config) (m : Gemma4Model (dtype := dtype) (device := device) cfg)
     (inputsEmbeds : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
     (perLayerInputs : Option (Tensor { device := device, shape := #[batch, seq, cfg.num_hidden_layers, cfg.hidden_size_per_layer_input], dtype := dtype }))
@@ -1127,10 +1127,10 @@ private def forwardEmbedsCore {batch seq : UInt64}
   for i in [:m.layers.size] do
     match m.layers[i]? with
     | some layer =>
-      let perLayer := extractPerLayerInput? cfg perLayerInputs i.toUInt64
+      let perLayer := extractPerLayerInput? cfg perLayerInputs i
       match caches[i]? with
       | some layerCache =>
-        let sharedSource := (Config.sharedSourceLayer? cfg i.toUInt64).bind fun src => caches[src.toNat]?
+        let sharedSource := (Config.sharedSourceLayer? cfg i).bind fun src => caches[src]?
         let (next, nextCache) := Gemma4Layer.forwardWithCache cfg layer hidden
           slidingCos slidingSin fullCos fullSin layerCache sharedSource perLayer
         hidden := next
@@ -1140,19 +1140,19 @@ private def forwardEmbedsCore {batch seq : UInt64}
     | none => pure ()
   return m.norm.forward3d hidden
 
-def forward {batch seq : UInt64}
+def forward {batch seq : Nat}
     (cfg : Config) (m : Gemma4Model (dtype := dtype) (device := device) cfg) (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } :=
   let inputsEmbeds := embedTokens cfg m inputIds
   forwardEmbedsCore cfg m inputsEmbeds (computePerLayerInputs cfg m inputIds inputsEmbeds)
 
-def forwardEmbeds {batch seq : UInt64}
+def forwardEmbeds {batch seq : Nat}
     (cfg : Config) (m : Gemma4Model (dtype := dtype) (device := device) cfg) (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (inputsEmbeds : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
     : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } :=
   forwardEmbedsCore cfg m inputsEmbeds (computePerLayerInputs cfg m inputIds inputsEmbeds)
 
-def forwardEmbedsWithPerLayerInputs {batch seq : UInt64}
+def forwardEmbedsWithPerLayerInputs {batch seq : Nat}
     (cfg : Config) (m : Gemma4Model (dtype := dtype) (device := device) cfg) (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (inputsEmbeds : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
     (perLayerInputs : Option (Tensor { device := device, shape := #[batch, seq, cfg.num_hidden_layers, cfg.hidden_size_per_layer_input], dtype := dtype }))
@@ -1160,7 +1160,7 @@ def forwardEmbedsWithPerLayerInputs {batch seq : UInt64}
   let _ := inputIds
   forwardEmbedsCore cfg m inputsEmbeds perLayerInputs
 
-def forwardWithCache {batch seq maxLen : UInt64}
+def forwardWithCache {batch seq maxLen : Nat}
     (cfg : Config)
     (m : Gemma4Model (dtype := dtype) (device := device) cfg)
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
@@ -1182,10 +1182,10 @@ def forwardWithCache {batch seq maxLen : UInt64}
     for i in [:m.layers.size] do
       match m.layers[i]?, cache'.attnCaches[i]? with
       | some layer, some layerCache =>
-        let perLayer := extractPerLayerInput? cfg perLayerInputs i.toUInt64
+        let perLayer := extractPerLayerInput? cfg perLayerInputs i
         let sharedSource :=
-          match Config.sharedSourceLayer? cfg i.toUInt64 with
-          | some src => cache'.attnCaches[src.toNat]?
+          match Config.sharedSourceLayer? cfg i with
+          | some src => cache'.attnCaches[src]?
           | none => none
         let (hiddenNext, layerCacheNext) :=
           Gemma4Layer.forwardWithCache
@@ -1205,7 +1205,7 @@ def forwardWithCache {batch seq maxLen : UInt64}
       | _, _ => pure ()
     return (m.norm.forward3d hidden, cache')
 
-def forwardWithCacheEmbeds {batch seq maxLen : UInt64}
+def forwardWithCacheEmbeds {batch seq maxLen : Nat}
     (cfg : Config)
     (m : Gemma4Model (dtype := dtype) (device := device) cfg)
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
@@ -1227,10 +1227,10 @@ def forwardWithCacheEmbeds {batch seq maxLen : UInt64}
     for i in [:m.layers.size] do
       match m.layers[i]?, cache'.attnCaches[i]? with
       | some layer, some layerCache =>
-        let perLayer := extractPerLayerInput? cfg perLayerInputs i.toUInt64
+        let perLayer := extractPerLayerInput? cfg perLayerInputs i
         let sharedSource :=
-          match Config.sharedSourceLayer? cfg i.toUInt64 with
-          | some src => cache'.attnCaches[src.toNat]?
+          match Config.sharedSourceLayer? cfg i with
+          | some src => cache'.attnCaches[src]?
           | none => none
         let (hiddenNext, layerCacheNext) :=
           Gemma4Layer.forwardWithCache
@@ -1250,7 +1250,7 @@ def forwardWithCacheEmbeds {batch seq maxLen : UInt64}
       | _, _ => pure ()
     return (m.norm.forward3d hidden, cache')
 
-def forwardWithCacheEmbedsWithPerLayerInputs {batch seq maxLen : UInt64}
+def forwardWithCacheEmbedsWithPerLayerInputs {batch seq maxLen : Nat}
     (cfg : Config)
     (m : Gemma4Model (dtype := dtype) (device := device) cfg)
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
@@ -1273,10 +1273,10 @@ def forwardWithCacheEmbedsWithPerLayerInputs {batch seq maxLen : UInt64}
     for i in [:m.layers.size] do
       match m.layers[i]?, cache'.attnCaches[i]? with
       | some layer, some layerCache =>
-        let perLayer := extractPerLayerInput? cfg perLayerInputs i.toUInt64
+        let perLayer := extractPerLayerInput? cfg perLayerInputs i
         let sharedSource :=
-          match Config.sharedSourceLayer? cfg i.toUInt64 with
-          | some src => cache'.attnCaches[src.toNat]?
+          match Config.sharedSourceLayer? cfg i with
+          | some src => cache'.attnCaches[src]?
           | none => none
         let (hiddenNext, layerCacheNext) :=
           Gemma4Layer.forwardWithCache
@@ -1296,7 +1296,7 @@ def forwardWithCacheEmbedsWithPerLayerInputs {batch seq maxLen : UInt64}
       | _, _ => pure ()
     return (m.norm.forward3d hidden, cache')
 
-def forwardWithCacheEmbedsWithPerLayerInputsBidirectionalVision {batch seq maxLen : UInt64}
+def forwardWithCacheEmbedsWithPerLayerInputsBidirectionalVision {batch seq maxLen : Nat}
     (cfg : Config)
     (m : Gemma4Model (dtype := dtype) (device := device) cfg)
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
@@ -1321,7 +1321,7 @@ def forwardWithCacheEmbedsWithPerLayerInputsBidirectionalVision {batch seq maxLe
     for i in [:m.layers.size] do
       match m.layers[i]?, cache'.attnCaches[i]? with
       | some layer, some layerCache =>
-        let perLayer := extractPerLayerInput? cfg perLayerInputs i.toUInt64
+        let perLayer := extractPerLayerInput? cfg perLayerInputs i
         let (hiddenNext, layerCacheNext) :=
           Gemma4Layer.forwardPrefillWithMask
             cfg
@@ -1340,11 +1340,11 @@ def forwardWithCacheEmbedsWithPerLayerInputsBidirectionalVision {batch seq maxLe
       | _, _ => pure ()
     return (m.norm.forward3d hidden, cache')
 
-def forwardStep {batch : UInt64} {maxLen : UInt64}
+def forwardStep {batch : Nat} {maxLen : Nat}
     (cfg : Config)
     (m : Gemma4Model (dtype := dtype) (device := device) cfg)
     (inputIds : Tensor { device := device, shape := #[batch, 1], dtype := .Int64 })
-    (position : UInt64)
+    (position : Nat)
     (cache : Gemma4Cache (dtype := dtype) (device := device) cfg batch)
     (slidingCosAll : Tensor { device := device, shape := #[maxLen, cfg.head_dim / 2], dtype := .Float32 })
     (slidingSinAll : Tensor { device := device, shape := #[maxLen, cfg.head_dim / 2], dtype := .Float32 })
@@ -1366,12 +1366,12 @@ def forwardStep {batch : UInt64} {maxLen : UInt64}
         let perLayer :=
           match perLayerInputs with
           | some p =>
-            let one : Tensor { device := device, shape := #[batch, 1, 1, cfg.hidden_size_per_layer_input], dtype := dtype } := sliceTyped p 2 i.toUInt64 1
+            let one : Tensor { device := device, shape := #[batch, 1, 1, cfg.hidden_size_per_layer_input], dtype := dtype } := sliceTyped p 2 i 1
             some (Tensor.reshapeChecked one #[batch, 1, cfg.hidden_size_per_layer_input])
           | none => none
         let sharedSource :=
-          match Config.sharedSourceLayer? cfg i.toUInt64 with
-          | some src => cache'.attnCaches[src.toNat]?
+          match Config.sharedSourceLayer? cfg i with
+          | some src => cache'.attnCaches[src]?
           | none => none
         let (hiddenNext, layerCacheNext) :=
           Gemma4Layer.forwardStep
@@ -1401,14 +1401,14 @@ structure Gemma4ForCausalLM (cfg : Config) (dtype : DType := .Float32) where
 
 namespace Gemma4ForCausalLM
 
-def embedTokens {batch seq : UInt64}
+def embedTokens {batch seq : Nat}
     (cfg : Config)
     (m : Gemma4ForCausalLM (dtype := dtype) (device := device) cfg)
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } :=
   m.model.embedTokens cfg inputIds
 
-def forward {batch seq : UInt64}
+def forward {batch seq : Nat}
     (cfg : Config)
     (m : Gemma4ForCausalLM (dtype := dtype) (device := device) cfg)
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
@@ -1416,7 +1416,7 @@ def forward {batch seq : UInt64}
   let hidden := m.model.forward cfg inputIds
   softcap (Tensor.linear3d hidden m.lmHead) cfg.final_logit_softcapping
 
-def forwardEmbeds {batch seq : UInt64}
+def forwardEmbeds {batch seq : Nat}
     (cfg : Config)
     (m : Gemma4ForCausalLM (dtype := dtype) (device := device) cfg)
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
@@ -1425,7 +1425,7 @@ def forwardEmbeds {batch seq : UInt64}
   let hidden := m.model.forwardEmbeds cfg inputIds inputsEmbeds
   softcap (Tensor.linear3d hidden m.lmHead) cfg.final_logit_softcapping
 
-def forwardEmbedsWithPerLayerInputs {batch seq : UInt64}
+def forwardEmbedsWithPerLayerInputs {batch seq : Nat}
     (cfg : Config)
     (m : Gemma4ForCausalLM (dtype := dtype) (device := device) cfg)
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
@@ -1435,7 +1435,7 @@ def forwardEmbedsWithPerLayerInputs {batch seq : UInt64}
   let hidden := m.model.forwardEmbedsWithPerLayerInputs cfg inputIds inputsEmbeds perLayerInputs
   softcap (Tensor.linear3d hidden m.lmHead) cfg.final_logit_softcapping
 
-def forwardEmbedsWithPerLayerInputsBidirectionalVision {batch seq : UInt64}
+def forwardEmbedsWithPerLayerInputsBidirectionalVision {batch seq : Nat}
     (cfg : Config)
     (m : Gemma4ForCausalLM (dtype := dtype) (device := device) cfg)
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
@@ -1463,7 +1463,7 @@ def forwardEmbedsWithPerLayerInputsBidirectionalVision {batch seq : UInt64}
       fullAttnMask
   softcap (Tensor.linear3d hidden m.lmHead) cfg.final_logit_softcapping
 
-private def precomputeDecodeRotary {maxLen : UInt64}
+private def precomputeDecodeRotary {maxLen : Nat}
     (cfg : Config)
     (device : Device)
     : Tensor { device := device, shape := #[maxLen, cfg.head_dim / 2], dtype := .Float32 }
@@ -1474,7 +1474,7 @@ private def precomputeDecodeRotary {maxLen : UInt64}
   let (fullCos, fullSin) := Gemma4Model.precomputeFullRotary cfg device
   (slCos, slSin, fullCos, fullSin)
 
-private def prefillCaches {batch seq maxLen : UInt64}
+private def prefillCaches {batch seq maxLen : Nat}
     (cfg : Config)
     (m : Gemma4ForCausalLM (dtype := dtype) (device := device) cfg)
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
@@ -1499,7 +1499,7 @@ private def prefillCaches {batch seq maxLen : UInt64}
   let logits3 : Tensor { device := device, shape := #[batch, 1, cfg.vocab_size], dtype := dtype } := softcap (Tensor.linear3d lastHidden m.lmHead) cfg.final_logit_softcapping
   pure (Tensor.reshapeChecked logits3 #[batch, cfg.vocab_size], cache')
 
-private def prefillCachesFromEmbeds {batch seq maxLen : UInt64}
+private def prefillCachesFromEmbeds {batch seq maxLen : Nat}
     (cfg : Config)
     (m : Gemma4ForCausalLM (dtype := dtype) (device := device) cfg)
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
@@ -1526,7 +1526,7 @@ private def prefillCachesFromEmbeds {batch seq maxLen : UInt64}
   let logits3 : Tensor { device := device, shape := #[batch, 1, cfg.vocab_size], dtype := dtype } := softcap (Tensor.linear3d lastHidden m.lmHead) cfg.final_logit_softcapping
   pure (Tensor.reshapeChecked logits3 #[batch, cfg.vocab_size], cache')
 
-private def prefillCachesFromEmbedsWithPerLayerInputs {batch seq maxLen : UInt64}
+private def prefillCachesFromEmbedsWithPerLayerInputs {batch seq maxLen : Nat}
     (cfg : Config)
     (m : Gemma4ForCausalLM (dtype := dtype) (device := device) cfg)
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
@@ -1555,7 +1555,7 @@ private def prefillCachesFromEmbedsWithPerLayerInputs {batch seq maxLen : UInt64
   let logits3 : Tensor { device := device, shape := #[batch, 1, cfg.vocab_size], dtype := dtype } := softcap (Tensor.linear3d lastHidden m.lmHead) cfg.final_logit_softcapping
   pure (Tensor.reshapeChecked logits3 #[batch, cfg.vocab_size], cache')
 
-private def prefillCachesFromEmbedsWithPerLayerInputsBidirectionalVision {batch seq maxLen : UInt64}
+private def prefillCachesFromEmbedsWithPerLayerInputsBidirectionalVision {batch seq maxLen : Nat}
     (cfg : Config)
     (m : Gemma4ForCausalLM (dtype := dtype) (device := device) cfg)
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
@@ -1588,11 +1588,11 @@ private def prefillCachesFromEmbedsWithPerLayerInputsBidirectionalVision {batch 
   let logits3 : Tensor { device := device, shape := #[batch, 1, cfg.vocab_size], dtype := dtype } := softcap (Tensor.linear3d lastHidden m.lmHead) cfg.final_logit_softcapping
   pure (Tensor.reshapeChecked logits3 #[batch, cfg.vocab_size], cache')
 
-private def decodeStep {batch maxLen : UInt64}
+private def decodeStep {batch maxLen : Nat}
     (cfg : Config)
     (m : Gemma4ForCausalLM (dtype := dtype) (device := device) cfg)
     (inputIds : Tensor { device := device, shape := #[batch, 1], dtype := .Int64 })
-    (position : UInt64)
+    (position : Nat)
     (cache : Gemma4Cache (dtype := dtype) (device := device) cfg batch)
     (slidingCosAll : Tensor { device := device, shape := #[maxLen, cfg.head_dim / 2], dtype := .Float32 })
     (slidingSinAll : Tensor { device := device, shape := #[maxLen, cfg.head_dim / 2], dtype := .Float32 })
@@ -1614,7 +1614,7 @@ private def decodeStep {batch maxLen : UInt64}
   let logits3 : Tensor { device := device, shape := #[batch, 1, cfg.vocab_size], dtype := dtype } := softcap (Tensor.linear3d hidden m.lmHead) cfg.final_logit_softcapping
   pure (Tensor.reshapeChecked logits3 #[batch, cfg.vocab_size], cache')
 
-private partial def decodeLoopCached {batch maxLen : UInt64}
+private partial def decodeLoopCached {batch maxLen : Nat}
     (cfg : Config)
     (m : Gemma4ForCausalLM (dtype := dtype) (device := device) cfg)
     (strategy : SamplingStrategy)
@@ -1628,8 +1628,8 @@ private partial def decodeLoopCached {batch maxLen : UInt64}
     (fullCosAll : Tensor { device := device, shape := #[maxLen, Config.fullHeadDim cfg / 2], dtype := .Float32 })
     (fullSinAll : Tensor { device := device, shape := #[maxLen, Config.fullHeadDim cfg / 2], dtype := .Float32 })
     (onStep : Option (StreamCallback (device := device) batch))
-    (generatedSoFar : UInt64)
-    {curSeq : UInt64}
+    (generatedSoFar : Nat)
+    {curSeq : Nat}
     (curIds : Tensor { device := device, shape := #[batch, curSeq], dtype := .Int64 })
     : IO (Sigma (fun outSeq => Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })) := do
   if remaining == 0 then
@@ -1690,11 +1690,11 @@ private partial def decodeLoopCached {batch maxLen : UInt64}
       (generatedSoFar + 1)
       appended
 
-private def generateCore {batch seq : UInt64}
+private def generateCore {batch seq : Nat}
     (cfg : Config)
     (m : Gemma4ForCausalLM (dtype := dtype) (device := device) cfg)
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
-    (maxNewTokens : UInt64 := 256)
+    (maxNewTokens : Nat := 256)
     (strategy : SamplingStrategy := .greedy)
     (eosTokenIds : Array UInt64 := #[])
     (onStep : Option (StreamCallback (device := device) batch) := none)
@@ -1723,7 +1723,7 @@ private def generateCore {batch seq : UInt64}
     strategy
     eosTokenIds
     finished0
-    maxNewTokens.toNat
+    maxNewTokens
     cache'
     logits
     slidingCosAll
@@ -1734,12 +1734,12 @@ private def generateCore {batch seq : UInt64}
     0
     inputIds
 
-private def generateFromEmbedsCore {batch seq : UInt64}
+private def generateFromEmbedsCore {batch seq : Nat}
     (cfg : Config)
     (m : Gemma4ForCausalLM (dtype := dtype) (device := device) cfg)
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (inputsEmbeds : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
-    (maxNewTokens : UInt64 := 256)
+    (maxNewTokens : Nat := 256)
     (strategy : SamplingStrategy := .greedy)
     (eosTokenIds : Array UInt64 := #[])
     (onStep : Option (StreamCallback (device := device) batch) := none)
@@ -1775,7 +1775,7 @@ private def generateFromEmbedsCore {batch seq : UInt64}
     strategy
     eosTokenIds
     finished0
-    maxNewTokens.toNat
+    maxNewTokens
     cache'
     logits
     slidingCosAll
@@ -1786,13 +1786,13 @@ private def generateFromEmbedsCore {batch seq : UInt64}
       0
       inputIds
 
-private def generateFromEmbedsCoreWithPerLayerInputs {batch seq : UInt64}
+private def generateFromEmbedsCoreWithPerLayerInputs {batch seq : Nat}
     (cfg : Config)
     (m : Gemma4ForCausalLM (dtype := dtype) (device := device) cfg)
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (inputsEmbeds : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
     (perLayerInputs : Option (Tensor { device := device, shape := #[batch, seq, cfg.num_hidden_layers, cfg.hidden_size_per_layer_input], dtype := dtype }))
-    (maxNewTokens : UInt64 := 256)
+    (maxNewTokens : Nat := 256)
     (strategy : SamplingStrategy := .greedy)
     (eosTokenIds : Array UInt64 := #[])
     (onStep : Option (StreamCallback (device := device) batch) := none)
@@ -1847,7 +1847,7 @@ private def generateFromEmbedsCoreWithPerLayerInputs {batch seq : UInt64}
     strategy
     eosTokenIds
     finished0
-    maxNewTokens.toNat
+    maxNewTokens
     cache'
     logits
     slidingCosAll
@@ -1858,34 +1858,34 @@ private def generateFromEmbedsCoreWithPerLayerInputs {batch seq : UInt64}
     0
     inputIds
 
-def generate {batch seq : UInt64}
+def generate {batch seq : Nat}
     (cfg : Config)
     (m : Gemma4ForCausalLM (dtype := dtype) (device := device) cfg)
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
-    (maxNewTokens : UInt64 := 256)
+    (maxNewTokens : Nat := 256)
     (strategy : SamplingStrategy := .greedy)
     (eosTokenIds : Array UInt64 := #[])
     : IO (Sigma (fun outSeq => Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })) :=
   generateCore cfg m inputIds maxNewTokens strategy eosTokenIds none
 
-def generateFromEmbeds {batch seq : UInt64}
+def generateFromEmbeds {batch seq : Nat}
     (cfg : Config)
     (m : Gemma4ForCausalLM (dtype := dtype) (device := device) cfg)
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (inputsEmbeds : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
-    (maxNewTokens : UInt64 := 256)
+    (maxNewTokens : Nat := 256)
     (strategy : SamplingStrategy := .greedy)
     (eosTokenIds : Array UInt64 := #[])
     : IO (Sigma (fun outSeq => Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })) :=
   generateFromEmbedsCore cfg m inputIds inputsEmbeds maxNewTokens strategy eosTokenIds none
 
-def generateFromEmbedsWithPerLayerInputs {batch seq : UInt64}
+def generateFromEmbedsWithPerLayerInputs {batch seq : Nat}
     (cfg : Config)
     (m : Gemma4ForCausalLM (dtype := dtype) (device := device) cfg)
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (inputsEmbeds : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
     (perLayerInputs : Option (Tensor { device := device, shape := #[batch, seq, cfg.num_hidden_layers, cfg.hidden_size_per_layer_input], dtype := dtype }))
-    (maxNewTokens : UInt64 := 256)
+    (maxNewTokens : Nat := 256)
     (strategy : SamplingStrategy := .greedy)
     (eosTokenIds : Array UInt64 := #[])
     (prefillMasks : Option (Tensor { device := device, shape := #[batch, seq, seq], dtype := .Int64 } × Tensor { device := device, shape := #[batch, seq, seq], dtype := .Int64 }) := none)
@@ -1893,37 +1893,37 @@ def generateFromEmbedsWithPerLayerInputs {batch seq : UInt64}
   generateFromEmbedsCoreWithPerLayerInputs
     cfg m inputIds inputsEmbeds perLayerInputs maxNewTokens strategy eosTokenIds none prefillMasks
 
-def generateStream {batch seq : UInt64}
+def generateStream {batch seq : Nat}
     (cfg : Config)
     (m : Gemma4ForCausalLM (dtype := dtype) (device := device) cfg)
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (onStep : StreamCallback (device := device) batch)
-    (maxNewTokens : UInt64 := 256)
+    (maxNewTokens : Nat := 256)
     (strategy : SamplingStrategy := .greedy)
     (eosTokenIds : Array UInt64 := #[])
     : IO (Sigma (fun outSeq => Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })) :=
   generateCore cfg m inputIds maxNewTokens strategy eosTokenIds (some onStep)
 
-def generateFromEmbedsStream {batch seq : UInt64}
+def generateFromEmbedsStream {batch seq : Nat}
     (cfg : Config)
     (m : Gemma4ForCausalLM (dtype := dtype) (device := device) cfg)
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (inputsEmbeds : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
     (onStep : StreamCallback (device := device) batch)
-    (maxNewTokens : UInt64 := 256)
+    (maxNewTokens : Nat := 256)
     (strategy : SamplingStrategy := .greedy)
     (eosTokenIds : Array UInt64 := #[])
     : IO (Sigma (fun outSeq => Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })) :=
   generateFromEmbedsCore cfg m inputIds inputsEmbeds maxNewTokens strategy eosTokenIds (some onStep)
 
-def generateFromEmbedsStreamWithPerLayerInputs {batch seq : UInt64}
+def generateFromEmbedsStreamWithPerLayerInputs {batch seq : Nat}
     (cfg : Config)
     (m : Gemma4ForCausalLM (dtype := dtype) (device := device) cfg)
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (inputsEmbeds : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
     (perLayerInputs : Option (Tensor { device := device, shape := #[batch, seq, cfg.num_hidden_layers, cfg.hidden_size_per_layer_input], dtype := dtype }))
     (onStep : StreamCallback (device := device) batch)
-    (maxNewTokens : UInt64 := 256)
+    (maxNewTokens : Nat := 256)
     (strategy : SamplingStrategy := .greedy)
     (eosTokenIds : Array UInt64 := #[])
     (prefillMasks : Option (Tensor { device := device, shape := #[batch, seq, seq], dtype := .Int64 } × Tensor { device := device, shape := #[batch, seq, seq], dtype := .Int64 }) := none)

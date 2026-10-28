@@ -3,13 +3,13 @@ import Tyr.Typed.Ops
 namespace torch
 
 structure Conv2d (dtype : DType := .Float32) (device : Device := .CPU) where
-  in_channels : UInt64
-  out_channels : UInt64
-  kernel_size : UInt64 × UInt64
-  stride : UInt64 × UInt64 := (1,1)
-  padding : UInt64 × UInt64 := (0,0)
-  dilation : UInt64 × UInt64 := (1,1)
-  groups : UInt64 := 1
+  in_channels : Nat
+  out_channels : Nat
+  kernel_size : Nat × Nat
+  stride : Nat × Nat := (1,1)
+  padding : Nat × Nat := (0,0)
+  dilation : Nat × Nat := (1,1)
+  groups : Nat := 1
   bias : Bool := true
 
   weight : Tensor ⟨#[out_channels, in_channels/groups, kernel_size.fst, kernel_size.snd], dtype, device⟩
@@ -24,8 +24,8 @@ def Conv2d.init {d : DType} {dev : Device} (c : Conv2d d dev) : IO (Conv2d d dev
     throw (IO.userError "Conv2d groups must divide both input and output channels")
   if c.kernel_size.fst == 0 || c.kernel_size.snd == 0 then
     throw (IO.userError "Conv2d requires positive kernel dimensions")
-  let fanIn := (c.in_channels.toNat / c.groups.toNat) *
-    c.kernel_size.fst.toNat * c.kernel_size.snd.toNat
+  let fanIn := (c.in_channels / c.groups) *
+    c.kernel_size.fst * c.kernel_size.snd
   let k := 1.0 / Float.sqrt (Float.ofNat fanIn)
   let weight ← Tensor.uniformLike c.weight (-k) k
   return { c with weight }

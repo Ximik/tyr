@@ -23,7 +23,7 @@ structure Args where
   cacheDir : String := "~/.cache/huggingface/tyr-models"
   language : Option String := none
   context : String := ""
-  maxNewTokens : UInt64 := 128
+  maxNewTokens : Nat := 128
   chunkSec : Float := 2.0
   hopSec : Float := 0.5
   keepSec : Float := 0.2
@@ -40,9 +40,9 @@ structure Args where
   simpleOutput : Bool := false
   deriving Inhabited
 
-private def parseNatArg (name : String) (v : String) : IO UInt64 :=
+private def parseNatArg (name : String) (v : String) : IO Nat :=
   match v.toNat? with
-  | some n => pure n.toUInt64
+  | some n => pure n
   | none => throw <| IO.userError s!"Invalid {name}: {v}"
 
 private def trimWhitespace (s : String) : String :=
@@ -99,13 +99,13 @@ private partial def parseArgsLoop (xs : List String) (acc : Args) : IO Args := d
   | "--run-sec" :: v :: rest =>
       parseArgsLoop rest { acc with runSec := (← parseFloatArg "--run-sec" v) }
   | "--commit-every" :: v :: rest =>
-      parseArgsLoop rest { acc with commitEvery := (← parseNatArg "--commit-every" v).toNat }
+      parseArgsLoop rest { acc with commitEvery := (← parseNatArg "--commit-every" v) }
   | "--prompt-tokens" :: v :: rest =>
-      parseArgsLoop rest { acc with promptTokens := (← parseNatArg "--prompt-tokens" v).toNat }
+      parseArgsLoop rest { acc with promptTokens := (← parseNatArg "--prompt-tokens" v) }
   | "--use-case" :: v :: rest =>
       parseArgsLoop rest { acc with useCase := (← parseUseCaseArg v) }
   | "--rollback-chars" :: v :: rest =>
-      parseArgsLoop rest { acc with rollbackChars := (← parseNatArg "--rollback-chars" v).toNat }
+      parseArgsLoop rest { acc with rollbackChars := (← parseNatArg "--rollback-chars" v) }
   | "--silence-sec" :: v :: rest =>
       parseArgsLoop rest { acc with silenceSec := (← parseFloatArg "--silence-sec" v) }
   | "--min-speech-sec" :: v :: rest =>
@@ -295,7 +295,7 @@ def runMain (argv : List String) : IO UInt32 := do
   let ratioSteps := Nat.max 1 (((args.chunkSec / args.hopSec) + 0.5).toUInt64.toNat)
   let autoCommitEvery := Nat.max 1 (safeSubNat ratioSteps 1)
   let commitEverySteps := if args.commitEvery == 0 then autoCommitEvery else args.commitEvery
-  let maxNewTokensStream : UInt64 :=
+  let maxNewTokensStream : Nat :=
     if args.useCase == .conversation then
       args.maxNewTokens
     else if args.maxNewTokens == 128 then
@@ -328,7 +328,7 @@ def runMain (argv : List String) : IO UInt32 := do
         let mut seenSpeech := false
         let mut lastTranscribeSize : Nat := 0
         for _ in [:steps] do
-          let pcm ← Tyr.Audio.AppleInput.read hopSamples.toUInt64 1500
+          let pcm ← Tyr.Audio.AppleInput.read hopSamples 1500
           if pcm.isEmpty then continue
 
           let frameRms := rms pcm
@@ -417,7 +417,7 @@ def runMain (argv : List String) : IO UInt32 := do
         let mut lockedLanguage : Option String := args.language
         let mut backpressureDrops : Nat := 0
         for _ in [:steps] do
-          let pcm ← Tyr.Audio.AppleInput.read hopSamples.toUInt64 1500
+          let pcm ← Tyr.Audio.AppleInput.read hopSamples 1500
           if !pcm.isEmpty then
             pcmNew := pcmNew.pushChunk pcm
 

@@ -34,9 +34,9 @@ private def getFloat? (j : Json) : Option Float :=
   | some x => some x
   | none => (getNat? j).map (·.toFloat)
 
-private def getNatFieldD (j : Json) (key : String) (d : UInt64) : UInt64 :=
+private def getNatFieldD (j : Json) (key : String) (d : Nat) : Nat :=
   match getObjVal? j key >>= getNat? with
-  | some n => n.toUInt64
+  | some n => n
   | none => d
 
 private def getFloatFieldD (j : Json) (key : String) (d : Float) : Float :=

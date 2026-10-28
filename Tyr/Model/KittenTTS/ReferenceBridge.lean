@@ -23,11 +23,11 @@ structure ReferenceBridgeConfig where
 
 structure ReferenceSynthesisResult where
   wavPath : String
-  predDurations : Array UInt64
-  audioShape : Array UInt64
-  audioNumSamples : UInt64
-  sampleRate : UInt64
-  voiceIndex : UInt64
+  predDurations : Array Nat
+  audioShape : Array Nat
+  audioNumSamples : Nat
+  sampleRate : Nat
+  voiceIndex : Nat
   deriving Repr, Inhabited
 
 private def expandHome (path : String) : IO String := do
@@ -51,17 +51,17 @@ private def pythonPrefix (pythonExe : String) : Array String :=
   else
     #[]
 
-private def parseNatArrayField (json : Json) (field : String) : IO (Array UInt64) := do
+private def parseNatArrayField (json : Json) (field : String) : IO (Array Nat) := do
   match (json.getObjValAs? (Array Nat) field).toOption with
-  | some xs => pure (xs.map (·.toUInt64))
+  | some xs => pure xs
   | none => throw <| IO.userError s!"Missing or invalid JSON array field '{field}'"
 
-private def parseNatField (json : Json) (field : String) : IO UInt64 := do
+private def parseNatField (json : Json) (field : String) : IO Nat := do
   match (json.getObjValAs? Nat field).toOption with
-  | some n => pure n.toUInt64
+  | some n => pure n
   | none =>
     match (json.getObjValAs? Int field).toOption with
-    | some i => pure i.toNat.toUInt64
+    | some i => pure i.toNat
     | none => throw <| IO.userError s!"Missing or invalid JSON field '{field}'"
 
 private def parseReferenceSummary (stdout : String) (wavPath : String) : IO ReferenceSynthesisResult := do

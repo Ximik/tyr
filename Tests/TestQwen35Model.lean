@@ -142,9 +142,9 @@ private def batchedEosDeterministicModel : IO (Qwen35ForCausalLM (device := .CPU
     lmHead := lmHead
   }
 
-private def rowTokenIds {seq : UInt64}
+private def rowTokenIds {seq : Nat}
     (tokens : Tensor { shape := #[2, seq], dtype := .Int64, device := .CPU })
-    (row : UInt64)
+    (row : Nat)
     : IO (Array UInt64) := do
   let row2d : Tensor { shape := #[1, seq], dtype := .Int64, device := .CPU } := typedSlice tokens 0 row 1
   let flat : Tensor { shape := #[seq], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked (id row2d) #[seq]
@@ -436,7 +436,7 @@ private def qwen35CheckpointEntries (cfg : Config) (optionalWeights : Bool) : Ar
     ("model.norm.weight", #[cfg.hidden_size]) ]
   if optionalWeights then
     entries := entries.push ("lm_head.weight", #[cfg.vocab_size, cfg.hidden_size])
-  for i in [:cfg.num_hidden_layers.toNat] do
+  for i in [:cfg.num_hidden_layers] do
     let p := s!"model.layers.{i}."
     let mut localEntries := #[ ("input_layernorm.weight", #[cfg.hidden_size]),
       ("post_attention_layernorm.weight", #[cfg.hidden_size]) ]
@@ -492,18 +492,18 @@ private def writeQwen35Fixture (dir : System.FilePath) (cfg : Config)
       | some (overrideName, selected) => if name == overrideName then selected else bf16
       | none => bf16
     let start := bytes.size
-    for _ in [:shape.foldl (fun n d => n * d.toNat) 1] do
+    for _ in [:shape.foldl (fun n d => n * d) 1] do
       -- Exactly representable 1/8 in both storage dtypes.
       bytes := bytes ++ (if storedBF16 then ByteArray.mk #[0, 62] else ByteArray.mk #[0, 0, 0, 62])
     header := header ++ [(name, Lean.Json.mkObj [
       ("dtype", Lean.toJson (if storedBF16 then "BF16" else "F32")),
-      ("shape", Lean.toJson (shape.map UInt64.toNat)),
+      ("shape", Lean.toJson shape),
       ("data_offsets", Lean.toJson #[start, bytes.size])])]
     index := index ++ [(name, Lean.toJson "model.safetensors")]
   let json := (Lean.Json.mkObj header).compress.toUTF8
   let mut length := ByteArray.empty
   for i in [:8] do
-    length := length.push ((json.size.toUInt64 >>> (i * 8).toUInt64).toUInt8)
+    length := length.push ((json.size >>> (i * 8)).toUInt8)
   IO.FS.writeBinFile (dir / "model.safetensors") (length ++ json ++ bytes)
   if sharded then
     IO.FS.writeFile (dir / "model.safetensors.index.json")
@@ -551,7 +551,7 @@ private def writeQwen35Fixture (dir : System.FilePath) (cfg : Config)
       LeanTest.assertEqual dtype.val DType.BFloat16
       LeanTest.assertEqual model.model.norm.weight.1 DType.Float32
       LeanTest.assertEqual (← model.model.norm.weight.2.toFloatArray)
-        (Array.replicate tinyDenseCfg.hidden_size.toNat 0.125)
+        (Array.replicate tinyDenseCfg.hidden_size 0.125)
       let ids := (Tensor.fromInt64Array #[1, 2]).reshapeChecked #[1, 2]
       let logits := model.forward tinyDenseCfg ids
       LeanTest.assertEqual logits.actualSpec.dtype DType.BFloat16

@@ -51,7 +51,7 @@ private def tensorNameCandidates (name : String) : Array String :=
   else
     out
 
-private def loadLinearWeightSharded (modelDir : String) (baseName : String) (outDim inDim : UInt64)
+private def loadLinearWeightSharded (modelDir : String) (baseName : String) (outDim inDim : Nat)
     (device : Device := .CPU) : IO (Tensor { device := device, shape := #[outDim, inDim], dtype := .Float32 }) := do
   let bases := baseNameCandidates baseName
   for b in bases do
@@ -64,7 +64,7 @@ private def loadLinearWeightSharded (modelDir : String) (baseName : String) (out
         | none => w.toFloat32
   throw <| IO.userError s!"Failed to load linear weight (sharded): {baseName}"
 
-private def loadLinearWeight (path : String) (baseName : String) (outDim inDim : UInt64)
+private def loadLinearWeight (path : String) (baseName : String) (outDim inDim : Nat)
     (device : Device := .CPU) : IO (Tensor { device := device, shape := #[outDim, inDim], dtype := .Float32 }) := do
   let bases := baseNameCandidates baseName
   for b in bases do
@@ -77,8 +77,8 @@ private def loadLinearWeight (path : String) (baseName : String) (outDim inDim :
         | none => w.toFloat32
   throw <| IO.userError s!"Failed to load linear weight: {baseName}"
 
-private def loadAttentionSharded (modelDir : String) (layerIdx : UInt64)
-    (hidden_size num_heads num_kv_heads head_dim : UInt64)
+private def loadAttentionSharded (modelDir : String) (layerIdx : Nat)
+    (hidden_size num_heads num_kv_heads head_dim : Nat)
     (device : Device := .CPU) : IO (qwen.QwenAttention (device := device) hidden_size num_heads num_kv_heads head_dim) := do
   let p := s!"model.layers.{layerIdx}.self_attn"
   let qProj ← loadLinearWeightSharded (device := device) modelDir s!"{p}.q_proj" (num_heads * head_dim) hidden_size
@@ -96,8 +96,8 @@ private def loadAttentionSharded (modelDir : String) (layerIdx : UInt64)
     k_norm := kNorm.map (fun ⟨_, w⟩ => reqGradFalse w.toFloat32)
   }
 
-private def loadAttention (path : String) (layerIdx : UInt64)
-    (hidden_size num_heads num_kv_heads head_dim : UInt64)
+private def loadAttention (path : String) (layerIdx : Nat)
+    (hidden_size num_heads num_kv_heads head_dim : Nat)
     (device : Device := .CPU) : IO (qwen.QwenAttention (device := device) hidden_size num_heads num_kv_heads head_dim) := do
   let p := s!"model.layers.{layerIdx}.self_attn"
   let qProj ← loadLinearWeight (device := device) path s!"{p}.q_proj" (num_heads * head_dim) hidden_size
@@ -115,8 +115,8 @@ private def loadAttention (path : String) (layerIdx : UInt64)
     k_norm := kNorm.map (fun ⟨_, w⟩ => reqGradFalse w.toFloat32)
   }
 
-private def loadMLPSharded (modelDir : String) (layerIdx : UInt64)
-    (hidden_size intermediate_size : UInt64)
+private def loadMLPSharded (modelDir : String) (layerIdx : Nat)
+    (hidden_size intermediate_size : Nat)
     (device : Device := .CPU) : IO (qwen.QwenMLP (device := device) hidden_size intermediate_size) := do
   let p := s!"model.layers.{layerIdx}.mlp"
   let gate ← loadLinearWeightSharded (device := device) modelDir s!"{p}.gate_proj" intermediate_size hidden_size
@@ -128,8 +128,8 @@ private def loadMLPSharded (modelDir : String) (layerIdx : UInt64)
     down_proj := reqGradFalse down
   }
 
-private def loadMLP (path : String) (layerIdx : UInt64)
-    (hidden_size intermediate_size : UInt64)
+private def loadMLP (path : String) (layerIdx : Nat)
+    (hidden_size intermediate_size : Nat)
     (device : Device := .CPU) : IO (qwen.QwenMLP (device := device) hidden_size intermediate_size) := do
   let p := s!"model.layers.{layerIdx}.mlp"
   let gate ← loadLinearWeight (device := device) path s!"{p}.gate_proj" intermediate_size hidden_size
@@ -141,17 +141,17 @@ private def loadMLP (path : String) (layerIdx : UInt64)
     down_proj := reqGradFalse down
   }
 
-private def loadRMSNormSharded (modelDir : String) (name : String) (dim : UInt64)
+private def loadRMSNormSharded (modelDir : String) (name : String) (dim : Nat)
     (device : Device := .CPU) : IO (RMSNorm (device := device) dim) := do
   let ⟨_, w⟩ ← loadTensorShardedCandidates (device := device) modelDir (tensorNameCandidates s!"{name}.weight") #[dim]
   pure { weight := reqGradFalse w.toFloat32, eps := ⟨1e-6⟩ }
 
-private def loadRMSNorm (path : String) (name : String) (dim : UInt64)
+private def loadRMSNorm (path : String) (name : String) (dim : Nat)
     (device : Device := .CPU) : IO (RMSNorm (device := device) dim) := do
   let ⟨_, w⟩ ← loadTensorCandidates (device := device) path (tensorNameCandidates s!"{name}.weight") #[dim]
   pure { weight := reqGradFalse w.toFloat32, eps := ⟨1e-6⟩ }
 
-private def loadLayerSharded (modelDir : String) (layerIdx : UInt64) (cfg : Config)
+private def loadLayerSharded (modelDir : String) (layerIdx : Nat) (cfg : Config)
     (device : Device := .CPU) : IO (qwen.QwenLayer (device := device) cfg.hidden_size cfg.num_attention_heads cfg.num_key_value_heads cfg.head_dim cfg.intermediate_size) := do
   let p := s!"model.layers.{layerIdx}"
   let inputNorm ← loadRMSNormSharded (device := device) modelDir s!"{p}.input_layernorm" cfg.hidden_size
@@ -165,7 +165,7 @@ private def loadLayerSharded (modelDir : String) (layerIdx : UInt64) (cfg : Conf
     mlp := mlp
   }
 
-private def loadLayer (path : String) (layerIdx : UInt64) (cfg : Config)
+private def loadLayer (path : String) (layerIdx : Nat) (cfg : Config)
     (device : Device := .CPU) : IO (qwen.QwenLayer (device := device) cfg.hidden_size cfg.num_attention_heads cfg.num_key_value_heads cfg.head_dim cfg.intermediate_size) := do
   let p := s!"model.layers.{layerIdx}"
   let inputNorm ← loadRMSNorm (device := device) path s!"{p}.input_layernorm" cfg.hidden_size
@@ -186,10 +186,10 @@ private def loadThinkerModelSharded (modelDir : String) (cfg : Config) (log : Ha
   let embed := reqGradFalse embed.toFloat32
 
   let mut layers : Array (qwen.QwenLayer (device := device) cfg.hidden_size cfg.num_attention_heads cfg.num_key_value_heads cfg.head_dim cfg.intermediate_size) := #[]
-  for i in [:cfg.num_hidden_layers.toNat] do
-    layers := layers.push (← loadLayerSharded (device := device) modelDir i.toUInt64 cfg)
-    if (i + 1) % 8 == 0 || i + 1 == cfg.num_hidden_layers.toNat then
-      log.onInfo s!"  Loaded {i + 1}/{cfg.num_hidden_layers.toNat} layers"
+  for i in [:cfg.num_hidden_layers] do
+    layers := layers.push (← loadLayerSharded (device := device) modelDir i cfg)
+    if (i + 1) % 8 == 0 || i + 1 == cfg.num_hidden_layers then
+      log.onInfo s!"  Loaded {i + 1}/{cfg.num_hidden_layers} layers"
 
   let norm ← loadRMSNormSharded (device := device) modelDir "model.norm" cfg.hidden_size
   log.onInfo "Loaded Qwen2.5-Omni thinker weights."
@@ -202,10 +202,10 @@ private def loadThinkerModel (path : String) (cfg : Config) (log : Handlers := {
   let embed := reqGradFalse embed.toFloat32
 
   let mut layers : Array (qwen.QwenLayer (device := device) cfg.hidden_size cfg.num_attention_heads cfg.num_key_value_heads cfg.head_dim cfg.intermediate_size) := #[]
-  for i in [:cfg.num_hidden_layers.toNat] do
-    layers := layers.push (← loadLayer (device := device) path i.toUInt64 cfg)
-    if (i + 1) % 8 == 0 || i + 1 == cfg.num_hidden_layers.toNat then
-      log.onInfo s!"  Loaded {i + 1}/{cfg.num_hidden_layers.toNat} layers"
+  for i in [:cfg.num_hidden_layers] do
+    layers := layers.push (← loadLayer (device := device) path i cfg)
+    if (i + 1) % 8 == 0 || i + 1 == cfg.num_hidden_layers then
+      log.onInfo s!"  Loaded {i + 1}/{cfg.num_hidden_layers} layers"
 
   let norm ← loadRMSNorm (device := device) path "model.norm" cfg.hidden_size
   log.onInfo "Loaded Qwen2.5-Omni thinker weights."

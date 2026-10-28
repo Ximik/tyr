@@ -78,7 +78,7 @@ private def parseEntry (name : String) (json : Json) (dataSize : Nat) : Except S
     throw s!"SafeTensors entry '{name}' exceeds the file's data section (truncated file)"
   if dataEnd - dataStart != dims.foldl (· * ·) 1 * width then
     throw s!"SafeTensors entry '{name}': data size mismatch (offset range {dataEnd - dataStart} bytes)"
-  pure { dtype, shape := dims.map (·.toUInt64), dataStart, dataEnd }
+  pure { dtype, shape := dims, dataStart, dataEnd }
 
 /-- Parse and validate the header of the SafeTensors file at `path`. -/
 def readHeader (path : String) : IO SafeTensorsHandle := do
@@ -157,8 +157,8 @@ def safeTensorsLoadFromHandle (handle : SafeTensorsHandle) (name : String) (shap
     IO RawTensor := do
   let some entry := handle.entries[name]?
     | throw <| IO.userError s!"Tensor not found: {name}"
-  let raw ← safeTensorsRead handle.path (handle.dataOffset + entry.dataStart).toUInt64
-    (entry.dataEnd - entry.dataStart).toUInt64 entry.dtype entry.shape
+  let raw ← safeTensorsRead handle.path (handle.dataOffset + entry.dataStart)
+    (entry.dataEnd - entry.dataStart) entry.dtype entry.shape
   if shape.isEmpty then
     return raw
   match reshapeChecked raw shape with
@@ -193,7 +193,7 @@ def saveSafeTensor (path name : String) (input : RawTensor) : IO Unit := do
     throw <| IO.userError "SafeTensors save error: tensor name cannot be empty."
   let some (tag, width) := input.dtype.safeTensorFormat?
     | throw <| IO.userError s!"SafeTensors save error: unsupported dtype for tensor '{name}'."
-  let shape := input.runtimeShape.map (·.toNat)
+  let shape := input.runtimeShape
   let length := shape.foldl (· * ·) 1 * width
   let entry := Json.mkObj [("dtype", Json.str tag), ("shape", toJson shape),
     ("data_offsets", toJson #[0, length])]

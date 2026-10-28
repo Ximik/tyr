@@ -35,7 +35,7 @@ structure Config where
   /-- Momentum coefficient for Nesterov-style blending. -/
   momentum : Float := 0.95
   /-- Newton-Schulz iterations used by matrix-sign approximation. -/
-  numIters : UInt64 := 5
+  numIters : Nat := 5
   /-- Number of dual-ascent iterations for tangent-constrained solve. -/
   dualAscentSteps : Nat := 2
   /-- Step size for dual-ascent variable update. -/
@@ -65,7 +65,7 @@ structure SolveDiagnostics where
   deriving Repr, Inhabited
 
 /-- Result of solving for a constrained manifold update direction. -/
-structure SolveResult (m n : UInt64) (dtype : DType := .Float32)
+structure SolveResult (m n : Nat) (dtype : DType := .Float32)
     (device : Device := .CPU) where
   direction : Tensor ⟨#[m, n], dtype, device⟩
   dualVar : Tensor ⟨#[n, n], dtype, device⟩
@@ -73,7 +73,7 @@ structure SolveResult (m n : UInt64) (dtype : DType := .Float32)
   deriving Repr
 
 /-- Per-parameter state for Stiefel Manifold-Muon. -/
-structure ParamState (m n : UInt64) (dtype : DType := .Float32)
+structure ParamState (m n : Nat) (dtype : DType := .Float32)
     (device : Device := .CPU) where
   /-- Momentum buffer in ambient space. -/
   momentumBuffer : Option (Tensor ⟨#[m, n], dtype, device⟩) := none
@@ -84,13 +84,13 @@ structure ParamState (m n : UInt64) (dtype : DType := .Float32)
   deriving Repr
 
 /-- Initialize per-parameter state. -/
-def initParamState {m n : UInt64} (_param : Tensor ⟨#[m, n], d, dev⟩) : ParamState m n d dev := {
+def initParamState {m n : Nat} (_param : Tensor ⟨#[m, n], d, dev⟩) : ParamState m n d dev := {
   momentumBuffer := none
   dualVar := none
   step := 0
 }
 
-instance {m n : UInt64} {d : DType} {dev : Device} :
+instance {m n : Nat} {d : DType} {dev : Device} :
     TensorStruct (ParamState m n d dev) where
   map f s := {
     momentumBuffer := s.momentumBuffer.map (TensorStruct.map f)
@@ -125,18 +125,18 @@ instance {m n : UInt64} {d : DType} {dev : Device} :
 derive_tensor_struct_for ParamState
 
 /-- Symmetric part of a square matrix. -/
-def sym {n : UInt64} (A : Tensor ⟨#[n, n], d, dev⟩) : Tensor ⟨#[n, n], d, dev⟩ :=
+def sym {n : Nat} (A : Tensor ⟨#[n, n], d, dev⟩) : Tensor ⟨#[n, n], d, dev⟩ :=
   Tensor.mulScalar (Tensor.add A (Tensor.transpose2d A)) 0.5
 
 /-- Project an ambient matrix to the Stiefel tangent space at W. -/
-def tangentProject {m n : UInt64} (W : Tensor ⟨#[m, n], d, dev⟩) (G : Tensor ⟨#[m, n], d, dev⟩) :
+def tangentProject {m n : Nat} (W : Tensor ⟨#[m, n], d, dev⟩) (G : Tensor ⟨#[m, n], d, dev⟩) :
     Tensor ⟨#[m, n], d, dev⟩ :=
   let XtG := Tensor.mm (Tensor.transpose2d W) G
   let correction := Tensor.mm W (sym XtG)
   Tensor.sub G correction
 
 /-- Tangent-constraint residual matrix: `WᵀA + AᵀW`. -/
-def tangentResidual {m n : UInt64} (W : Tensor ⟨#[m, n], d, dev⟩) (A : Tensor ⟨#[m, n], d, dev⟩) :
+def tangentResidual {m n : Nat} (W : Tensor ⟨#[m, n], d, dev⟩) (A : Tensor ⟨#[m, n], d, dev⟩) :
     Tensor ⟨#[n, n], d, dev⟩ :=
   Tensor.add (Tensor.mm (Tensor.transpose2d W) A) (Tensor.mm (Tensor.transpose2d A) W)
 
@@ -146,7 +146,7 @@ private def solveConverged (cfg : Config) (iter residual dualDelta : Float) : Bo
     dualDelta <= cfg.solveDualDeltaTol
 
 /-- Dual objective estimate used for diagnostics. -/
-private def dualObjectiveEstimate {m n : UInt64} (W G : Tensor ⟨#[m, n], d, dev⟩)
+private def dualObjectiveEstimate {m n : Nat} (W G : Tensor ⟨#[m, n], d, dev⟩)
     (lambda : Tensor ⟨#[n, n], d, dev⟩) : IO Float := do
   let lambdaPlus := Tensor.add lambda (Tensor.transpose2d lambda)
   let adjusted := Tensor.add G (Tensor.mulScalar (Tensor.mm W lambdaPlus) 2.0)
@@ -157,7 +157,7 @@ private def dualObjectiveEstimate {m n : UInt64} (W G : Tensor ⟨#[m, n], d, de
 /--
 Run lightweight dual ascent and return matrix-sign direction plus updated dual var.
 -/
-def solveDirectionDualAscent {m n : UInt64}
+def solveDirectionDualAscent {m n : Nat}
     (W : Tensor ⟨#[m, n], d, dev⟩) (G : Tensor ⟨#[m, n], d, dev⟩)
     (dual0 : Tensor ⟨#[n, n], d, dev⟩) (cfg : Config)
     : IO (SolveResult m n d dev) := do
@@ -192,7 +192,7 @@ def solveDirectionDualAscent {m n : UInt64}
 /--
 Fixed-point solver variant for `H(Λ)=0` style updates with damping.
 -/
-def solveDirectionFixedPoint {m n : UInt64}
+def solveDirectionFixedPoint {m n : Nat}
     (W : Tensor ⟨#[m, n], d, dev⟩) (G : Tensor ⟨#[m, n], d, dev⟩)
     (dual0 : Tensor ⟨#[n, n], d, dev⟩) (cfg : Config)
     : IO (SolveResult m n d dev) := do
@@ -229,7 +229,7 @@ def solveDirectionFixedPoint {m n : UInt64}
   return { direction := signedDir, dualVar := lambda, diagnostics := diag }
 
 /-- Solve for direction using the configured inner solver backend. -/
-def solveDirection {m n : UInt64}
+def solveDirection {m n : Nat}
     (W : Tensor ⟨#[m, n], d, dev⟩) (G : Tensor ⟨#[m, n], d, dev⟩)
     (dual0 : Tensor ⟨#[n, n], d, dev⟩) (cfg : Config)
     : IO (SolveResult m n d dev) := do
@@ -240,15 +240,15 @@ def solveDirection {m n : UInt64}
 /-- Retraction onto Stiefel using reduced QR. Tall matrices (`n ≤ m`) retract
     column-wise; wide matrices retract row-wise via the transposed projection,
     matching Muon's usual tall/wide handling. -/
-def retractStiefel {m n : UInt64} (W : Tensor ⟨#[m, n], d, dev⟩) : Tensor ⟨#[m, n], d, dev⟩ :=
-  if h : n.toNat ≤ m.toNat then
+def retractStiefel {m n : Nat} (W : Tensor ⟨#[m, n], d, dev⟩) : Tensor ⟨#[m, n], d, dev⟩ :=
+  if h : n ≤ m then
     (Tyr.AD.Stiefel.project m n W h).matrix
   else
-    let h' : m.toNat ≤ n.toNat := Nat.le_of_lt (Nat.lt_of_not_le h)
+    let h' : m ≤ n := Nat.le_of_lt (Nat.lt_of_not_le h)
     Tensor.transpose2d (Tyr.AD.Stiefel.project n m (Tensor.transpose2d W) h').matrix
 
 /-- Single update step with inner-solver diagnostics. -/
-def stepSingleWithDiagnostics {m n : UInt64}
+def stepSingleWithDiagnostics {m n : Nat}
     (param : Tensor ⟨#[m, n], d, dev⟩)
     (grad : Tensor ⟨#[m, n], d, dev⟩)
     (state : ParamState m n d dev)
@@ -309,7 +309,7 @@ def stepSingleWithDiagnostics {m n : UInt64}
   return (newParam, newState, solveDiag)
 
 /-- Single local update step for a Stiefel-constrained matrix parameter. -/
-def stepSingle {m n : UInt64}
+def stepSingle {m n : Nat}
     (param : Tensor ⟨#[m, n], d, dev⟩)
     (grad : Tensor ⟨#[m, n], d, dev⟩)
     (state : ParamState m n d dev)
@@ -320,7 +320,7 @@ def stepSingle {m n : UInt64}
   return (param', state')
 
 /-- Local group update for homogeneous matrix shapes. -/
-def stepGroupLocal {m n : UInt64}
+def stepGroupLocal {m n : Nat}
     (params : Array (Tensor ⟨#[m, n], d, dev⟩))
     (grads : Array (Tensor ⟨#[m, n], d, dev⟩))
     (states : Array (ParamState m n d dev))
@@ -341,7 +341,7 @@ def stepGroupLocal {m n : UInt64}
 /--
 Distributed group update (prototype): all-reduce gradients then local manifold step.
 -/
-def stepDistributedGroup {m n : UInt64}
+def stepDistributedGroup {m n : Nat}
     (params : Array (Tensor ⟨#[m, n], d, dev⟩))
     (grads : Array (Tensor ⟨#[m, n], d, dev⟩))
     (states : Array (ParamState m n d dev))
@@ -369,7 +369,7 @@ def stepDistributedGroup {m n : UInt64}
   stepGroupLocal params reducedGrads states cfg lrMul
 
 /-- Measure average local step latency for one parameter (benchmark helper). -/
-def benchmarkLocalStep {m n : UInt64}
+def benchmarkLocalStep {m n : Nat}
     (numSteps : Nat := 5)
     (cfg : Config := {})
     : IO Float := do

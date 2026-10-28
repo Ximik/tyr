@@ -52,7 +52,7 @@ structure Config where
   /-- Muon weight decay -/
   muonWeightDecay : Float := 0.01
   /-- Newton-Schulz iterations for NorMuon orthogonalization. -/
-  muonNumIters : UInt64 := 5
+  muonNumIters : Nat := 5
   /-- Whether matrix updates run distributed collectives for NorMuon path. -/
   muonDistributed : Bool := false
   /-- AdamW beta1 -/
@@ -62,9 +62,9 @@ structure Config where
   /-- AdamW epsilon -/
   adamEps : Float := 1e-8
   /-- Model dimension (for LR scaling) -/
-  modelDim : UInt64 := 768
+  modelDim : Nat := 768
   /-- Reference dimension for LR scaling (typically 768 for GPT-2 base) -/
-  refDim : UInt64 := 768
+  refDim : Nat := 768
   /-- Total training steps (for scheduling) -/
   totalSteps : Nat := 10000
   /-- Warmup steps for momentum -/
@@ -76,7 +76,7 @@ structure Config where
   /-- Force generic dual-map manifold path even when specialized kernels exist. -/
   preferGenericManifoldPath : Bool := false
   /-- Newton-Schulz iterations for specialized manifold-Muon sign approximation. -/
-  manifoldNumIters : UInt64 := 5
+  manifoldNumIters : Nat := 5
   /-- Dual-ascent steps for specialized manifold-Muon. -/
   manifoldDualAscentSteps : Nat := 2
   /-- Dual-ascent learning rate for specialized manifold-Muon. -/
@@ -267,7 +267,7 @@ def initMuonState (cfg : Config) : IO NorMuon.State :=
   NorMuon.State.init (toMuonConfig cfg)
 
 /-- Generic dual-map manifold state for matrix parameters. -/
-structure GenericManifoldState (m n : UInt64) (dtype : DType := .Float32)
+structure GenericManifoldState (m n : Nat) (dtype : DType := .Float32)
     (device : Device := .CPU) where
   /-- Momentum buffer used to form Nesterov-like blended gradients. -/
   momentumBuffer : Option (Tensor ⟨#[m, n], dtype, device⟩) := none
@@ -275,7 +275,7 @@ structure GenericManifoldState (m n : UInt64) (dtype : DType := .Float32)
   step : Nat := 0
   deriving Repr, Inhabited
 
-instance {m n : UInt64} {d : DType} {dev : Device} :
+instance {m n : Nat} {d : DType} {dev : Device} :
     TensorStruct (GenericManifoldState m n d dev) where
   map f s := { s with momentumBuffer := s.momentumBuffer.map (TensorStruct.map f) }
   mapM f s := do
@@ -294,14 +294,14 @@ instance {m n : UInt64} {d : DType} {dev : Device} :
     | none => init
 
 /-- Matrix-parameter optimizer state tagged by backend family. -/
-inductive MatrixParamState (m n : UInt64) (dtype : DType := .Float32)
+inductive MatrixParamState (m n : Nat) (dtype : DType := .Float32)
     (device : Device := .CPU) where
   | norMuon (state : NorMuon.ParamState ⟨#[m, n], dtype, device⟩)
   | manifoldMuon (state : torch.Optim.ManifoldMuon.ParamState m n dtype device)
   | genericManifold (state : GenericManifoldState m n dtype device)
   deriving Repr
 
-instance {m n : UInt64} {d : DType} {dev : Device} :
+instance {m n : Nat} {d : DType} {dev : Device} :
     TensorStruct (MatrixParamState m n d dev) where
   map f st :=
     match st with
@@ -328,11 +328,11 @@ instance {m n : UInt64} {d : DType} {dev : Device} :
     | .genericManifold s => TensorStruct.fold f init s
 
 /-- Initialize generic manifold state. -/
-def initGenericManifoldState {m n : UInt64} (_param : Tensor ⟨#[m, n], d, dev⟩) :
+def initGenericManifoldState {m n : Nat} (_param : Tensor ⟨#[m, n], d, dev⟩) :
     GenericManifoldState m n d dev := {}
 
 /-- Initialize matrix state according to the configured matrix backend. -/
-def initMatrixParamState {m n : UInt64} (cfg : Config) (param : Tensor ⟨#[m, n], d, dev⟩) :
+def initMatrixParamState {m n : Nat} (cfg : Config) (param : Tensor ⟨#[m, n], d, dev⟩) :
     MatrixParamState m n d dev :=
   if cfg.matrixOptimizer == .norMuon then
     .norMuon (NorMuon.initParamState param)
@@ -342,7 +342,7 @@ def initMatrixParamState {m n : UInt64} (cfg : Config) (param : Tensor ⟨#[m, n
     .genericManifold (initGenericManifoldState param)
 
 /-- Extract per-parameter step count from matrix state. -/
-def MatrixParamState.step {m n : UInt64} {d : DType} {dev : Device}
+def MatrixParamState.step {m n : Nat} {d : DType} {dev : Device}
     (st : MatrixParamState m n d dev) : Nat :=
   match st with
   | .norMuon s => s.step
@@ -350,14 +350,14 @@ def MatrixParamState.step {m n : UInt64} {d : DType} {dev : Device}
   | .genericManifold s => s.step
 
 /-- Backend tag name for a matrix state (used in error messages). -/
-def MatrixParamState.backendName {m n : UInt64} {d : DType} {dev : Device}
+def MatrixParamState.backendName {m n : Nat} {d : DType} {dev : Device}
     (st : MatrixParamState m n d dev) : String :=
   match st with
   | .norMuon _ => "norMuon"
   | .manifoldMuon _ => "manifoldMuon"
   | .genericManifold _ => "genericManifold"
 
-private def stepOnManifoldFamily {m n : UInt64} {d : DType} {dev : Device} [DType.RealFloating d]
+private def stepOnManifoldFamily {m n : Nat} {d : DType} {dev : Device} [DType.RealFloating d]
     (family : MatrixManifoldFamily)
     (param : Tensor ⟨#[m, n], d, dev⟩)
     (ambientGrad : Tensor ⟨#[m, n], d, dev⟩)
@@ -365,7 +365,7 @@ private def stepOnManifoldFamily {m n : UInt64} {d : DType} {dev : Device} [DTyp
     : IO (Tensor ⟨#[m, n], d, dev⟩) := do
   match family with
   | .stiefel =>
-    if h : n.toNat ≤ m.toNat then
+    if h : n ≤ m then
       let x : Tyr.AD.Stiefel m n d dev := ⟨param, h⟩
       let g := Tyr.AD.StiefelTangent.project x ambientGrad
       pure (Tyr.AD.DualMapGeometry.dualMapStep x g lr).matrix
@@ -373,7 +373,7 @@ private def stepOnManifoldFamily {m n : UInt64} {d : DType} {dev : Device} [DTyp
       -- Wide matrices have no column-orthonormal frame; step the transposed
       -- (row-orthonormal) Stiefel representative instead, matching Muon's
       -- usual tall/wide handling.
-      let h' : m.toNat ≤ n.toNat := Nat.le_of_lt (Nat.lt_of_not_le h)
+      let h' : m ≤ n := Nat.le_of_lt (Nat.lt_of_not_le h)
       let x : Tyr.AD.Stiefel n m d dev := ⟨Tensor.transpose2d param, h'⟩
       let g := Tyr.AD.StiefelTangent.project x (Tensor.transpose2d ambientGrad)
       pure (Tensor.transpose2d (Tyr.AD.DualMapGeometry.dualMapStep x g lr).matrix)
@@ -391,12 +391,12 @@ private def stepOnManifoldFamily {m n : UInt64} {d : DType} {dev : Device} [DTyp
     else
       throw <| IO.userError s!"MatrixManifoldFamily.orthogonal requires square matrices, got {m}x{n}"
   | .grassmann =>
-    if h : n.toNat ≤ m.toNat then
+    if h : n ≤ m then
       let x : Tyr.AD.Grassmann m n d dev := ⟨param, h⟩
       let g := Tyr.AD.GrassmannTangent.project x ambientGrad
       pure (Tyr.AD.DualMapGeometry.dualMapStep x g lr).matrix
     else
-      let h' : m.toNat ≤ n.toNat := Nat.le_of_lt (Nat.lt_of_not_le h)
+      let h' : m ≤ n := Nat.le_of_lt (Nat.lt_of_not_le h)
       let x : Tyr.AD.Grassmann n m d dev := ⟨Tensor.transpose2d param, h'⟩
       let g := Tyr.AD.GrassmannTangent.project x (Tensor.transpose2d ambientGrad)
       pure (Tensor.transpose2d (Tyr.AD.DualMapGeometry.dualMapStep x g lr).matrix)
@@ -409,7 +409,7 @@ This path is intentionally simple and composable:
 - manifold-family-specific projection/retraction from `Tyr.Manifolds`,
 - no specialized dual-ascent state.
 -/
-def stepGenericManifoldSingle {m n : UInt64} {d : DType} {dev : Device} [DType.RealFloating d]
+def stepGenericManifoldSingle {m n : Nat} {d : DType} {dev : Device} [DType.RealFloating d]
     (param : Tensor ⟨#[m, n], d, dev⟩)
     (grad : Tensor ⟨#[m, n], d, dev⟩)
     (state : GenericManifoldState m n d dev)
@@ -439,7 +439,7 @@ def stepGenericManifoldSingle {m n : UInt64} {d : DType} {dev : Device} [DType.R
     stepping with it would silently drop the accumulated momentum state, so this
     throws `IO.userError` instead of re-initializing. Fresh state for a first step
     should be built with `initMatrixParamState cfg`. -/
-def stepMatrixSingle {m n : UInt64} {d : DType} {dev : Device} [DType.RealFloating d]
+def stepMatrixSingle {m n : Nat} {d : DType} {dev : Device} [DType.RealFloating d]
     (param : Tensor ⟨#[m, n], d, dev⟩)
     (grad : Tensor ⟨#[m, n], d, dev⟩)
     (state : MatrixParamState m n d dev)
@@ -472,7 +472,7 @@ def stepMatrixSingle {m n : UInt64} {d : DType} {dev : Device} [DType.RealFloati
       return (p', .genericManifold st')
 
 /-- Local matrix-group step that composes `stepMatrixSingle` over each parameter. -/
-def stepMatrixGroupLocal {m n : UInt64} {d : DType} {dev : Device} [DType.RealFloating d]
+def stepMatrixGroupLocal {m n : Nat} {d : DType} {dev : Device} [DType.RealFloating d]
     (params : Array (Tensor ⟨#[m, n], d, dev⟩))
     (grads : Array (Tensor ⟨#[m, n], d, dev⟩))
     (states : Array (MatrixParamState m n d dev))
@@ -494,7 +494,7 @@ def stepMatrixGroupLocal {m n : UInt64} {d : DType} {dev : Device} [DType.RealFl
     outStates := outStates.push st'
   return (outParams, outStates)
 
-private def allNorMuonStates? {m n : UInt64} {d : DType} {dev : Device}
+private def allNorMuonStates? {m n : Nat} {d : DType} {dev : Device}
     (states : Array (MatrixParamState m n d dev)) :
     Option (Array (NorMuon.ParamState ⟨#[m, n], d, dev⟩)) :=
   Id.run do
@@ -505,7 +505,7 @@ private def allNorMuonStates? {m n : UInt64} {d : DType} {dev : Device}
       | _ => return none
     return some out
 
-private def allManifoldMuonStates? {m n : UInt64} {d : DType} {dev : Device}
+private def allManifoldMuonStates? {m n : Nat} {d : DType} {dev : Device}
     (states : Array (MatrixParamState m n d dev)) :
     Option (Array (torch.Optim.ManifoldMuon.ParamState m n d dev)) :=
   Id.run do
@@ -526,7 +526,7 @@ Fast-paths:
 Fallback:
 - generic manifold path does gradient all-reduce then local per-parameter updates.
 -/
-def stepMatrixGroupDistributed {m n : UInt64} {d : DType} {dev : Device} [DType.RealFloating d]
+def stepMatrixGroupDistributed {m n : Nat} {d : DType} {dev : Device} [DType.RealFloating d]
     (params : Array (Tensor ⟨#[m, n], d, dev⟩))
     (grads : Array (Tensor ⟨#[m, n], d, dev⟩))
     (states : Array (MatrixParamState m n d dev))
@@ -574,7 +574,7 @@ def stepMatrixGroupDistributed {m n : UInt64} {d : DType} {dev : Device} [DType.
           stepMatrixGroupLocal params reducedGrads states cfg step lrMul wdMul
 
 /-- Composable matrix backend operations for a fixed shape. -/
-structure MatrixBackendOps (m n : UInt64) (dtype : DType := .Float32)
+structure MatrixBackendOps (m n : Nat) (dtype : DType := .Float32)
     (device : Device := .CPU) where
   initState : Tensor ⟨#[m, n], dtype, device⟩ → MatrixParamState m n dtype device
   stepSingle : Tensor ⟨#[m, n], dtype, device⟩ → Tensor ⟨#[m, n], dtype, device⟩ →
@@ -593,7 +593,7 @@ Build a backend operations bundle for a matrix parameter shape.
 This keeps optimizer composition explicit: call-sites can choose backend ops once,
 then reuse the same `init/step` closures regardless of matrix backend kind.
 -/
-def matrixBackendOps {m n : UInt64} {d : DType} {dev : Device} [DType.RealFloating d]
+def matrixBackendOps {m n : Nat} {d : DType} {dev : Device} [DType.RealFloating d]
     (cfg : Config)
     (step : Nat)
     (lrMul : Float := 1.0)
@@ -606,7 +606,7 @@ def matrixBackendOps {m n : UInt64} {d : DType} {dev : Device} [DType.RealFloati
 }
 
 /-- Build matrix backend ops for a specific parameter label from a backend spec. -/
-def matrixBackendOpsForLabel {m n : UInt64} {d : DType} {dev : Device} [DType.RealFloating d]
+def matrixBackendOpsForLabel {m n : Nat} {d : DType} {dev : Device} [DType.RealFloating d]
     (spec : MatrixBackendSpec)
     (label : ParamLabel)
     (step : Nat)

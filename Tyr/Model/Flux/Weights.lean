@@ -24,20 +24,20 @@ private def loadWeight (path : String) (names : Array String) (shape : Shape)
   | .error message => throw <| IO.userError s!"Flux tensor '{name}': {message}"
 
 /-- Load RMSNorm weights from Flux2 format (uses .scale suffix) -/
-def loadRMSNormFlux2 (path : String) (name : String) (dim : UInt64)
+def loadRMSNormFlux2 (path : String) (name : String) (dim : Nat)
     (device : Device := .CPU) : IO (RMSNorm (device := device) dim dtype) := do
   let weight ← loadWeight (dtype := dtype) (device := device) path #[s!"{name}.scale"] #[dim]
   pure { weight := Tensor.detach weight, eps := ⟨1e-6⟩ }
 
 /-- Load QKNorm weights from Flux2 format -/
-def loadQKNormFlux2 (path : String) (name : String) (head_dim : UInt64)
+def loadQKNormFlux2 (path : String) (name : String) (head_dim : Nat)
     (device : Device := .CPU) : IO (QKNorm (device := device) (dtype := dtype) head_dim) := do
   let query_norm ← loadRMSNormFlux2 (dtype := dtype) (device := device) path s!"{name}.query_norm" head_dim
   let key_norm ← loadRMSNormFlux2 (dtype := dtype) (device := device) path s!"{name}.key_norm" head_dim
   pure { query_norm, key_norm }
 
 /-- Load Modulation weights from Flux2 format -/
-def loadModulationFlux2 (path : String) (name : String) (hidden_size : UInt64) (isDouble : Bool)
+def loadModulationFlux2 (path : String) (name : String) (hidden_size : Nat) (isDouble : Bool)
     (device : Device := .CPU) : IO (Modulation (device := device) (dtype := dtype) hidden_size isDouble) := do
   let outDim := if isDouble then 6 * hidden_size else 3 * hidden_size
   let lin ← loadWeight (dtype := dtype) (device := device) path #[s!"{name}.lin.weight"] #[outDim, hidden_size]
@@ -45,7 +45,7 @@ def loadModulationFlux2 (path : String) (name : String) (hidden_size : UInt64) (
 
 /-- Load SelfAttention weights from Flux2 format -/
 def loadSelfAttentionFlux2 (path : String) (name : String)
-    (hidden_size num_heads head_dim : UInt64)
+    (hidden_size num_heads head_dim : Nat)
     (device : Device := .CPU) : IO (SelfAttention (device := device) (dtype := dtype) hidden_size num_heads head_dim) := do
   let qkv ← loadWeight (dtype := dtype) (device := device) path #[s!"{name}.qkv.weight"] #[num_heads * head_dim * 3, hidden_size]
   let norm ← loadQKNormFlux2 (dtype := dtype) (device := device) path s!"{name}.norm" head_dim
@@ -58,7 +58,7 @@ def loadSelfAttentionFlux2 (path : String) (name : String)
 
 /-- Load SwiGLU MLP weights from Flux2 format (indexed layers: .0, .2) -/
 def loadSwiGLUMLPFlux2 (path : String) (name : String)
-    (hidden_size mlp_hidden : UInt64)
+    (hidden_size mlp_hidden : Nat)
     (device : Device := .CPU) : IO (SwiGLUMLP (device := device) (dtype := dtype) hidden_size mlp_hidden) := do
   -- Flux2 uses .0.weight for first layer (gate+up), .2.weight for down projection
   let w1 ← loadWeight (dtype := dtype) (device := device) path #[s!"{name}.0.weight"] #[mlp_hidden * 2, hidden_size]
@@ -116,7 +116,7 @@ def loadSingleStreamBlockFlux2 (path : String) (name : String) (cfg : FluxConfig
   }
 
 /-- Load MLP embedder weights -/
-def loadMLPEmbedder (path : String) (name : String) (in_dim hidden_dim : UInt64)
+def loadMLPEmbedder (path : String) (name : String) (in_dim hidden_dim : Nat)
     (device : Device := .CPU) : IO (MLPEmbedder (device := device) (dtype := dtype) in_dim hidden_dim) := do
   let in_layer ← loadWeight (dtype := dtype) (device := device) path #[s!"{name}.in_layer.weight"] #[hidden_dim, in_dim]
   let out_layer ← loadWeight (dtype := dtype) (device := device) path #[s!"{name}.out_layer.weight"] #[hidden_dim, hidden_dim]
@@ -151,14 +151,14 @@ def loadFluxModel (path : String) (cfg : FluxConfig := FluxConfig.klein4B)
 
   -- Double blocks (using Flux2 loading)
   let mut double_blocks := #[]
-  for i in [:cfg.num_double_layers.toNat] do
+  for i in [:cfg.num_double_layers] do
     let block ← loadDoubleStreamBlockFlux2 (dtype := dtype) (device := device) path s!"double_blocks.{i}" cfg
     double_blocks := double_blocks.push block
   log.onInfo s!"  Loaded {cfg.num_double_layers} double blocks"
 
   -- Single blocks (using Flux2 loading)
   let mut single_blocks := #[]
-  for i in [:cfg.num_single_layers.toNat] do
+  for i in [:cfg.num_single_layers] do
     let block ← loadSingleStreamBlockFlux2 (dtype := dtype) (device := device) path s!"single_blocks.{i}" cfg
     single_blocks := single_blocks.push block
   log.onInfo s!"  Loaded {cfg.num_single_layers} single blocks"

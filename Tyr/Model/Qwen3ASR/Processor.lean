@@ -16,7 +16,7 @@ namespace torch.qwen3asr
 structure ProcessorKwargs where
   textPadding : Bool := false
   textPaddingSide : String := "left"
-  audioSamplingRate : UInt64 := 16000
+  audioSamplingRate : Nat := 16000
   audioPadding : Bool := true
   audioReturnAttentionMask : Bool := true
   deriving Repr, Inhabited
@@ -42,13 +42,13 @@ private def repeatToken (tok : String) (n : Nat) : String :=
 
 /-- Port of processor-side helper.
     Converts raw feature lengths to audio-token lengths after conv stack. -/
-def featExtractOutputLengths (inputLens : Array UInt64) : Array UInt64 :=
+def featExtractOutputLengths (inputLens : Array Nat) : Array Nat :=
   AudioEncoderConfig.featExtractOutputLengths inputLens
 
 private def replaceInSample
     (audioToken : String)
     (sample : String)
-    (audioLengths : Array UInt64)
+    (audioLengths : Array Nat)
     (startIdx : Nat)
     : Except String (String × Nat) := do
   let parts := (sample.splitOn audioToken).toArray
@@ -60,7 +60,7 @@ private def replaceInSample
   for i in [1:parts.size] do
     if idx < audioLengths.size then
       let aLen := audioLengths[idx]!
-      out := out ++ repeatToken audioToken aLen.toNat ++ parts[i]!
+      out := out ++ repeatToken audioToken aLen ++ parts[i]!
       idx := idx + 1
     else
       throw s!"Not enough audio lengths while replacing `{audioToken}` placeholders"
@@ -72,7 +72,7 @@ private def replaceInSample
 def replaceMultimodalSpecialTokens
     (p : Qwen3ASRProcessor)
     (text : Array String)
-    (audioLengths : Array UInt64)
+    (audioLengths : Array Nat)
     : Except String (Array String) := do
   let mut out : Array String := #[]
   let mut idx : Nat := 0
@@ -90,7 +90,7 @@ def encodeWithExpandedAudioTokenIds
     (p : Qwen3ASRProcessor)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (text : String)
-    (audioLengths : Array UInt64)
+    (audioLengths : Array Nat)
     (audioTokenId : UInt32)
     : Except String (Array UInt32) := do
   let parts := (text.splitOn p.audioToken).toArray
@@ -107,14 +107,14 @@ def encodeWithExpandedAudioTokenIds
     out := out ++ tokenizer.qwen3.encodeText tok parts[i]!
     if i + 1 < parts.size then
       let aLen := audioLengths[idx]!
-      for _ in [:aLen.toNat] do
+      for _ in [:aLen] do
         out := out.push audioTokenId
       idx := idx + 1
   return out
 
 /-- Port of processor chunking helper.
     Splits monotonically increasing token indices into value-range chunks. -/
-def getChunkedIndex (tokenIndices : Array UInt64) (tokensPerChunk : UInt64) : Array (Nat × Nat) :=
+def getChunkedIndex (tokenIndices : Array Nat) (tokensPerChunk : Nat) : Array (Nat × Nat) :=
   if tokensPerChunk == 0 then
     #[(0, tokenIndices.size)]
   else
@@ -122,7 +122,7 @@ def getChunkedIndex (tokenIndices : Array UInt64) (tokensPerChunk : UInt64) : Ar
       let mut out : Array (Nat × Nat) := #[]
       let mut i : Nat := 0
       let mut startIdx : Nat := 0
-      let mut currentChunk : UInt64 := 1
+      let mut currentChunk : Nat := 1
       while i < tokenIndices.size do
         if tokenIndices[i]! >= currentChunk * tokensPerChunk then
           out := out.push (startIdx, i)

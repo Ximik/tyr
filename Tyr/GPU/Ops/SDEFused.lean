@@ -33,10 +33,10 @@ open Tyr.GPU.Ops.BrownianFused
     length (`records` holds six Float32 per node) plus the record count the
     kernel strides over. -/
 structure DeviceSchedule where
-  records : Sigma fun n : UInt64 => Tensor { shape := #[n], dtype := .Float32, device := device }
+  records : Sigma fun n : Nat => Tensor { shape := #[n], dtype := .Float32, device := device }
 
 /-- Number of six-Float32 records in an uploaded schedule. -/
-def DeviceSchedule.len (sched : DeviceSchedule (device := device)) : UInt64 :=
+def DeviceSchedule.len (sched : DeviceSchedule (device := device)) : Nat :=
   sched.records.1 / 6
 
 instance : Inhabited (DeviceSchedule (device := device)) :=
@@ -46,12 +46,12 @@ instance : Inhabited (DeviceSchedule (device := device)) :=
 def DeviceSchedule.make (T0 T1 tol : Float) (maxDepth : Nat) (t : Float)
     (device : Device) : DeviceSchedule (device := device) :=
   let sched := buildValueSchedule T0 T1 tol maxDepth t
-  { records := ⟨sched.size.toUInt64, uploadSchedule sched device⟩ }
+  { records := ⟨sched.size, uploadSchedule sched device⟩ }
 
 /-- One fused Euler–Maruyama step: reads the state from `y0`, writes the
     new state into `y1Out`. `drift`/`diffusion` are the vector fields
     `f(t, y)` and `g(t, y)`; noise is diagonal, `g ∘ ΔW`. -/
-def emStepFused {n : UInt64}
+def emStepFused {n : Nat}
     (drift diffusion : Float → Tensor { shape := #[n], dtype := .Float32, device := device } → Tensor { shape := #[n], dtype := .Float32, device := device })
     (treeSeed : UInt64) (t h : Float)
     (schedA schedB : DeviceSchedule (device := device))
@@ -60,20 +60,23 @@ def emStepFused {n : UInt64}
   let fh := Tensor.mulScalar (drift t y0) h
   let g := diffusion t y0
   let root := tensorRootState treeSeed
+  let n ← Tyr.GPU.Codegen.launchArg n "n"
+  let lenA ← Tyr.GPU.Codegen.launchArg schedA.len "lenA"
+  let lenB ← Tyr.GPU.Codegen.launchArg schedB.len "lenB"
   if blackwell then
     emStepVbtBlackwell.launch y1Out.raw y0.raw fh.raw g.raw
       schedA.records.2.raw schedB.records.2.raw
-      root n schedA.len schedB.len 1 1 1 256 1 1 0 stream
+      root n lenA lenB 1 1 1 256 1 1 0 stream
   else
     emStepVbt.launch y1Out.raw y0.raw fh.raw g.raw
       schedA.records.2.raw schedB.records.2.raw
-      root n schedA.len schedB.len 1 1 1 256 1 1 0 stream
+      root n lenA lenB 1 1 1 256 1 1 0 stream
 
 /-- Fused fixed-step Euler–Maruyama solve from `t0` to `t1` in `steps`
     uniform steps, driven by the VBT over `[T0, T1]` with seed
     `treeSeed` (matching the CPU `VirtualBrownianTree` tensor instance).
     Returns a fresh tensor holding the final state. -/
-def emSolveFused {n : UInt64}
+def emSolveFused {n : Nat}
     (drift diffusion : Float → Tensor { shape := #[n], dtype := .Float32, device := device } → Tensor { shape := #[n], dtype := .Float32, device := device })
     (treeSeed : UInt64) (T0 T1 tol : Float) (maxDepth : Nat)
     (t0 t1 : Float) (steps : Nat)

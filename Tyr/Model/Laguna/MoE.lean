@@ -68,7 +68,7 @@ namespace LagunaTopKRouter
 /-- Route tokens to experts.
     Returns `(selectedExperts, routingWeights)`, both `[tokens, num_experts_per_tok]`;
     `selectedExperts` is int64, `routingWeights` has `x`'s dtype. -/
-def route {tokens : UInt64}
+def route {tokens : Nat}
     (cfg : Config) (r : LagunaTopKRouter (device := device) cfg) (x : Tensor { dtype := dtype, device := device, shape := #[tokens, cfg.hidden_size] })
     : IO (Tensor { device := device, shape := #[tokens, cfg.num_experts_per_tok], dtype := .Int64 } × Tensor { dtype := dtype, device := device, shape := #[tokens, cfg.num_experts_per_tok] }) := do
   let logits0 : Tensor { dtype := .Float32, device := device, shape := #[tokens, cfg.num_experts] } :=
@@ -140,10 +140,10 @@ structure LagunaSparseMoeBlock (cfg : Config) (dtype : DType := .Float32) where
 namespace LagunaSparseMoeBlock
 
 /-- Dequantize one expert row while retaining the bank's three dimensions. -/
-private def dequantExpertSlice {numExperts outFeatures inFeatures : UInt64} {pd sd gd : DType}
+private def dequantExpertSlice {numExperts outFeatures inFeatures : Nat} {pd sd gd : DType}
     (bankPacked : Tensor { dtype := pd, device := device, shape := #[numExperts, outFeatures, inFeatures / 2] })
     (bankScales : Tensor { dtype := sd, device := device, shape := #[numExperts, outFeatures, inFeatures / 16] })
-    (bankGlobal : Tensor { dtype := gd, device := device, shape := #[numExperts] }) (e : UInt64)
+    (bankGlobal : Tensor { dtype := gd, device := device, shape := #[numExperts] }) (e : Nat)
     : IO (Tensor { dtype := .BFloat16, device := device, shape := #[outFeatures, inFeatures] }) := do
   let out ← nvfp4.dequantMatrix
     ((bankPacked.sliceChecked 0 e 1 #[1, outFeatures, inFeatures / 2]).reshapeChecked #[outFeatures, inFeatures / 2])
@@ -157,7 +157,7 @@ private def dequantExpertSlice {numExperts outFeatures inFeatures : UInt64} {pd 
 private def expertWeights
     (cfg : Config)
     (m : LagunaSparseMoeBlock (device := device) (dtype := dtype) cfg)
-    (e : UInt64)
+    (e : Nat)
     : IO (Tensor { dtype := dtype, device := device, shape := #[cfg.moe_intermediate_size, cfg.hidden_size] }
         × Tensor { dtype := dtype, device := device, shape := #[cfg.moe_intermediate_size, cfg.hidden_size] }
         × Tensor { dtype := dtype, device := device, shape := #[cfg.hidden_size, cfg.moe_intermediate_size] }) := do
@@ -268,7 +268,7 @@ private def forwardDecode1
     Returns `moe_routed_scaling_factor · Σ_k w_k · expert_k(x) + sharedExpert(x)`
     in `x`'s dtype. Single-token decode on CUDA uses the fused NVFP4 kernel
     for the packed-bank path unless `useFused` is false. -/
-def forward2d {tokens : UInt64}
+def forward2d {tokens : Nat}
     (cfg : Config)
     (m : LagunaSparseMoeBlock (device := device) (dtype := dtype) cfg)
     (x : Tensor { dtype := dtype, device := device, shape := #[tokens, cfg.hidden_size] })
@@ -323,11 +323,11 @@ def forward2d {tokens : UInt64}
       -- expert (that is ~256 syncs/layer, fatal at decode). Iteration stays in
       -- ascending expert order, matching the HF `expert_hit` accumulation order.
       let flatIdxHost ← Tensor.toUInt64Array (Tensor.reshapeChecked (Tensor.toInt64 flatIdx) #[tokens * k])
-      let hitExperts : Array UInt64 := Id.run do
-        let mut seen : Array UInt64 := #[]
+      let hitExperts : Array Nat := Id.run do
+        let mut seen : Array Nat := #[]
         for id in flatIdxHost do
-          if !(seen.contains id) then
-            seen := seen.push id
+          if !(seen.contains id.toNat) then
+            seen := seen.push id.toNat
         pure (seen.qsort (· < ·))
       for eU in hitExperts do
         let maskE := Tensor.eqScalar flatIdx eU.toInt64

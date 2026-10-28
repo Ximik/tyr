@@ -38,9 +38,7 @@ namespace torch
 namespace Tensor
 
 /-- Only return native results that satisfy their complete output specification.
-A mismatch terminates at the native invariant boundary. This also
-catches wrapped UInt64 dimensions interpreted natively as negative axes or
-inferred extents. -/
+A mismatch terminates at the native invariant boundary. -/
 private def checkedResult {σ : StaticSpec} (operation : String)
     (result : Except String (Tensor σ)) : Tensor σ :=
   match result with
@@ -121,11 +119,11 @@ def item {d : DType} {dev : Device} (t : Tensor ⟨#[], d, dev⟩) : Float :=
   | .error message => panic! s!"Tensor.item: {message}"
 
 /-- Euclidean norm of an indexed vector. -/
-def l2Norm? {n : UInt64} {d : DType} {dev : Device}
+def l2Norm? {n : Nat} {d : DType} {dev : Device}
     (t : Tensor ⟨#[n], d, dev⟩) : Except String Float :=
   RawTensor.l2NormChecked t.raw
 
-def l2Norm {n : UInt64} {d : DType} {dev : Device}
+def l2Norm {n : Nat} {d : DType} {dev : Device}
     (t : Tensor ⟨#[n], d, dev⟩) : Float :=
   match l2Norm? t with
   | .ok result => result
@@ -139,16 +137,16 @@ def maximum {s : Shape} {l r result : DType} {dev : Device}
     Tensor.ofRaw (← RawTensor.maximumChecked a.raw b.raw)
 
 /-- Diagonal of a square matrix, retaining dtype and device. -/
-def diag {n : UInt64} {d : DType} {dev : Device}
+def diag {n : Nat} {d : DType} {dev : Device}
     (t : Tensor ⟨#[n, n], d, dev⟩) : Tensor ⟨#[n], d, dev⟩ :=
   checkedResult "diag" (Tensor.ofRaw (RawTensor.diag t.raw))
 
 /-- Frobenius norm of an indexed matrix. -/
-def frobeniusNorm? {m n : UInt64} {d : DType} {dev : Device}
+def frobeniusNorm? {m n : Nat} {d : DType} {dev : Device}
     (t : Tensor ⟨#[m, n], d, dev⟩) : Except String Float :=
   RawTensor.frobeniusNormChecked t.raw
 
-def frobeniusNorm {m n : UInt64} {d : DType} {dev : Device}
+def frobeniusNorm {m n : Nat} {d : DType} {dev : Device}
     (t : Tensor ⟨#[m, n], d, dev⟩) : Float :=
   match frobeniusNorm? t with
   | .ok result => result
@@ -156,21 +154,21 @@ def frobeniusNorm {m n : UInt64} {d : DType} {dev : Device}
 
 /-- Row norms are real, including for a complex input matrix. Native dtype
 and backend rejections are returned as errors. -/
-def rowNorms? {m n : UInt64} {d : DType} {dev : Device}
+def rowNorms? {m n : Nat} {d : DType} {dev : Device}
     (t : Tensor ⟨#[m, n], d, dev⟩) : Except String (Tensor ⟨#[m], d.realResult, dev⟩) := do
   Tensor.checkedUpdate? t.raw.dtype.realResult t.raw.device
     (← RawTensor.rowNormsChecked t.raw)
 
-def rowNorms {m n : UInt64} {d : DType} {dev : Device}
+def rowNorms {m n : Nat} {d : DType} {dev : Device}
     (t : Tensor ⟨#[m, n], d, dev⟩) : Tensor ⟨#[m], d.realResult, dev⟩ :=
   checkedResult "rowNorms" (rowNorms? t)
 
 /-- Maximum Euclidean row norm of a matrix. -/
-def maxRowNorm? {m n : UInt64} {d : DType} {dev : Device}
+def maxRowNorm? {m n : Nat} {d : DType} {dev : Device}
     (t : Tensor ⟨#[m, n], d, dev⟩) : Except String Float :=
   RawTensor.maxRowNormChecked t.raw
 
-def maxRowNorm {m n : UInt64} {d : DType} {dev : Device}
+def maxRowNorm {m n : Nat} {d : DType} {dev : Device}
     (t : Tensor ⟨#[m, n], d, dev⟩) : Float :=
   match maxRowNorm? t with
   | .ok result => result
@@ -186,19 +184,19 @@ def dropout {σ : StaticSpec} (t : Tensor σ) (p : Float) (training : Bool := tr
 
 /-- Batched embedding lookup. Tokens must be Int64 and share the weight's
 placement; libtorch checks token values against the vocabulary size. -/
-def embedding {batch seq vocab embed : UInt64} {d : DType} {dev : Device}
+def embedding {batch seq vocab embed : Nat} {d : DType} {dev : Device}
     (tokens : Tensor ⟨#[batch, seq], .Int64, dev⟩)
     (weight : Tensor ⟨#[vocab, embed], d, dev⟩) : Tensor ⟨#[batch, seq, embed], d, dev⟩ :=
   checkedResult "embedding" (Tensor.ofRaw (RawTensor.embedding tokens.raw weight.raw))
 
 /-- Vector embedding lookup with statically integral tokens. -/
-def embedding1d {seq vocab embed : UInt64} {d : DType} {dev : Device}
+def embedding1d {seq vocab embed : Nat} {d : DType} {dev : Device}
     (tokens : Tensor ⟨#[seq], .Int64, dev⟩)
     (weight : Tensor ⟨#[vocab, embed], d, dev⟩) : Tensor ⟨#[seq, embed], d, dev⟩ :=
   checkedResult "embedding1d" (Tensor.ofRaw (RawTensor.embedding1d tokens.raw weight.raw))
 
 /-- Matrix exponential with a checked dtype/device-preserving result. -/
-def matrixExp {n : UInt64} {d : DType} {dev : Device}
+def matrixExp {n : Nat} {d : DType} {dev : Device}
     (t : Tensor ⟨#[n, n], d, dev⟩) : Tensor ⟨#[n, n], d, dev⟩ :=
   t.checkedReplacement (RawTensor.matrixExp t.raw)
 
@@ -207,7 +205,7 @@ actual metadata is a standard real floating dtype. Native failures, non-real
 logarithms, and nonfinite results are reported as errors. The eigendecomposition
 solver also rejects results that fail exponential reconstruction, including
 unsupported defective or numerically unstable cases. -/
-def matrixLog? {n : UInt64} {d : DType} {dev : Device}
+def matrixLog? {n : Nat} {d : DType} {dev : Device}
     (t : Tensor ⟨#[n, n], d, dev⟩) : Except String (Tensor ⟨#[n, n], d, dev⟩) := do
   if !t.raw.dtype.isRealFloating then
     throw s!"matrixLog requires a standard real floating dtype, got {t.raw.dtype}"
@@ -215,7 +213,7 @@ def matrixLog? {n : UInt64} {d : DType} {dev : Device}
 
 /-- Real matrix logarithm. Its static domain excludes complex and shell types;
 use `matrixLog?` for runtime-selected dtypes or recoverable numerical errors. -/
-def matrixLog {n : UInt64} {d : DType} {dev : Device}
+def matrixLog {n : Nat} {d : DType} {dev : Device}
     [DType.RealFloating d]
     (t : Tensor ⟨#[n, n], d, dev⟩) : Tensor ⟨#[n, n], d, dev⟩ :=
   match matrixLog? t with
@@ -225,17 +223,17 @@ def matrixLog {n : UInt64} {d : DType} {dev : Device}
       panic! s!"Tensor.matrixLog: {message}"
 
 /-- Inverse of a square matrix. Native code reports singular input errors. -/
-def inv {n : UInt64} {d : DType} {dev : Device}
+def inv {n : Nat} {d : DType} {dev : Device}
     (t : Tensor ⟨#[n, n], d, dev⟩) : Tensor ⟨#[n, n], d, dev⟩ :=
   t.checkedReplacement (RawTensor.inv t.raw)
 
 /-- Float32 identity matrix on CPU. -/
-def eye (n : UInt64) : Tensor ⟨#[n, n], .Float32, .CPU⟩ :=
+def eye (n : Nat) : Tensor ⟨#[n, n], .Float32, .CPU⟩ :=
   checkedResult "eye" (Tensor.ofRaw (RawTensor.eye n))
 
 /-- Identity matrix for a complete specification. The native factory produces
     Float32 on CPU; the value is cast and moved to match the specification. -/
-def eyeFor {n : UInt64} (d : DType) (dev : Device := .CPU)
+def eyeFor {n : Nat} (d : DType) (dev : Device := .CPU)
     [DType.ConstantSupported d dev] : Tensor ⟨#[n, n], d, dev⟩ :=
   let raw := RawTensor.eye n
   let raw := RawTensor.castDType raw d
@@ -244,7 +242,7 @@ def eyeFor {n : UInt64} (d : DType) (dev : Device := .CPU)
 
 /-- Complete QR decomposition: `Q` is m×m orthogonal and `R` is m×n upper
     triangular, retaining dtype and device. -/
-def qrComplete {m n : UInt64} {d : DType} {dev : Device}
+def qrComplete {m n : Nat} {d : DType} {dev : Device}
     (t : Tensor ⟨#[m, n], d, dev⟩) : Tensor ⟨#[m, m], d, dev⟩ × Tensor ⟨#[m, n], d, dev⟩ :=
   let (q, r) := RawTensor.qr t.raw
   (checkedResult "qr.Q" (Tensor.ofRaw q), checkedResult "qr.R" (Tensor.ofRaw r))
@@ -253,8 +251,8 @@ def qrComplete {m n : UInt64} {d : DType} {dev : Device}
     with orthonormal columns and `R` is n×n upper triangular. The shape contract
     is a precondition on the libtorch reduced factorization; wide inputs do not
     typecheck at concrete dimensions. -/
-def qrReduced {m n : UInt64} {d : DType} {dev : Device}
-    (t : Tensor ⟨#[m, n], d, dev⟩) (_tall : n.toNat ≤ m.toNat := by exact of_decide_eq_true rfl) :
+def qrReduced {m n : Nat} {d : DType} {dev : Device}
+    (t : Tensor ⟨#[m, n], d, dev⟩) (_tall : n ≤ m := by exact of_decide_eq_true rfl) :
     Tensor ⟨#[m, n], d, dev⟩ × Tensor ⟨#[n, n], d, dev⟩ :=
   let (q, r) := RawTensor.qrReduced t.raw
   (checkedResult "qr.Q" (Tensor.ofRaw q), checkedResult "qr.R" (Tensor.ofRaw r))
@@ -262,8 +260,8 @@ def qrReduced {m n : UInt64} {d : DType} {dev : Device}
 /-- Reduced SVD of a tall or square matrix (`n ≤ m`). Singular values have
 the real component dtype; `U` and `Vh` retain the input dtype. Native dtype,
 backend, and factorization failures are recoverable. -/
-def svdReduced? {m n : UInt64} {d : DType} {dev : Device}
-    (t : Tensor ⟨#[m, n], d, dev⟩) (_tall : n.toNat ≤ m.toNat := by exact of_decide_eq_true rfl) :
+def svdReduced? {m n : Nat} {d : DType} {dev : Device}
+    (t : Tensor ⟨#[m, n], d, dev⟩) (_tall : n ≤ m := by exact of_decide_eq_true rfl) :
     Except String (Tensor ⟨#[m, n], d, dev⟩ × Tensor ⟨#[n], d.realResult, dev⟩ ×
       Tensor ⟨#[n, n], d, dev⟩) := do
   let (u, s, vh) ← RawTensor.svdChecked t.raw
@@ -273,8 +271,8 @@ def svdReduced? {m n : UInt64} {d : DType} {dev : Device}
     ← Tensor.checkedUpdate? dtype.realResult device s,
     ← Tensor.checkedUpdate? dtype device vh)
 
-def svdReduced {m n : UInt64} {d : DType} {dev : Device}
-    (t : Tensor ⟨#[m, n], d, dev⟩) (_tall : n.toNat ≤ m.toNat := by exact of_decide_eq_true rfl) :
+def svdReduced {m n : Nat} {d : DType} {dev : Device}
+    (t : Tensor ⟨#[m, n], d, dev⟩) (_tall : n ≤ m := by exact of_decide_eq_true rfl) :
     Tensor ⟨#[m, n], d, dev⟩ × Tensor ⟨#[n], d.realResult, dev⟩ × Tensor ⟨#[n, n], d, dev⟩ :=
   match svdReduced? t _tall with
   | .ok result => result
@@ -282,23 +280,23 @@ def svdReduced {m n : UInt64} {d : DType} {dev : Device}
 
 /-- Real singular values of a square matrix in descending order, with
 recoverable native dtype, backend, and factorization failures. -/
-def svdvals? {n : UInt64} {d : DType} {dev : Device}
+def svdvals? {n : Nat} {d : DType} {dev : Device}
     (t : Tensor ⟨#[n, n], d, dev⟩) : Except String (Tensor ⟨#[n], d.realResult, dev⟩) := do
   Tensor.checkedUpdate? t.raw.dtype.realResult t.raw.device
     (← RawTensor.svdvalsChecked t.raw)
 
-def svdvals {n : UInt64} {d : DType} {dev : Device}
+def svdvals {n : Nat} {d : DType} {dev : Device}
     (t : Tensor ⟨#[n, n], d, dev⟩) : Tensor ⟨#[n], d.realResult, dev⟩ :=
   checkedResult "svdvals" (svdvals? t)
 
 /-- Diagonal matrix built from a vector, retaining dtype and device. -/
-def diagflat {n : UInt64} {d : DType} {dev : Device}
+def diagflat {n : Nat} {d : DType} {dev : Device}
     (t : Tensor ⟨#[n], d, dev⟩) : Tensor ⟨#[n, n], d, dev⟩ :=
   checkedResult "diagflat" (Tensor.ofRaw (RawTensor.diagflat t.raw))
 
 /-- Largest singular value of a nonempty floating or complex matrix, with
 recoverable dtype, backend, and factorization failures. -/
-def spectralNorm? {m n : UInt64} {d : DType} {dev : Device}
+def spectralNorm? {m n : Nat} {d : DType} {dev : Device}
     (t : Tensor ⟨#[m, n], d, dev⟩) : Except String Float := do
   if !(t.raw.dtype.isRealFloating || t.raw.dtype.isComplex) then
     throw "spectralNorm requires a floating or complex dtype"
@@ -306,20 +304,20 @@ def spectralNorm? {m n : UInt64} {d : DType} {dev : Device}
     throw "spectralNorm requires a nonempty matrix"
   RawTensor.spectralNormChecked t.raw
 
-def spectralNorm {m n : UInt64} {d : DType} {dev : Device}
+def spectralNorm {m n : Nat} {d : DType} {dev : Device}
     [DType.FloatingOrComplex d] (t : Tensor ⟨#[m, n], d, dev⟩) : Float :=
   match spectralNorm? t with
   | .ok result => result
   | .error message => panic! s!"Tensor.spectralNorm: {message}"
 
 /-- Sum of the singular values of a floating or complex matrix. -/
-def nuclearNorm? {m n : UInt64} {d : DType} {dev : Device}
+def nuclearNorm? {m n : Nat} {d : DType} {dev : Device}
     (t : Tensor ⟨#[m, n], d, dev⟩) : Except String Float := do
   if !(t.raw.dtype.isRealFloating || t.raw.dtype.isComplex) then
     throw "nuclearNorm requires a floating or complex dtype"
   RawTensor.nuclearNormChecked t.raw
 
-def nuclearNorm {m n : UInt64} {d : DType} {dev : Device}
+def nuclearNorm {m n : Nat} {d : DType} {dev : Device}
     [DType.FloatingOrComplex d] (t : Tensor ⟨#[m, n], d, dev⟩) : Float :=
   match nuclearNorm? t with
   | .ok result => result
@@ -610,59 +608,59 @@ def matmul {s1 s2 : Shape} {d : DType} {dev : Device}
     Tensor ⟨matmulShape s1 s2, d, dev⟩ :=
   checkedResult "matmul" (matmul? a b)
 
-def mm? {m k n : UInt64} {d : DType} {dev : Device}
+def mm? {m k n : Nat} {d : DType} {dev : Device}
     (a : Tensor ⟨#[m, k], d, dev⟩) (b : Tensor ⟨#[k, n], d, dev⟩) :
     Except String (Tensor ⟨#[m, n], d, dev⟩) := do
   checkMatrixOperands a b
   Tensor.ofRaw (← RawTensor.mmChecked a.raw b.raw)
 
-def mm {m k n : UInt64} {d : DType} {dev : Device}
+def mm {m k n : Nat} {d : DType} {dev : Device}
     (a : Tensor ⟨#[m, k], d, dev⟩) (b : Tensor ⟨#[k, n], d, dev⟩) :
     Tensor ⟨#[m, n], d, dev⟩ :=
   checkedResult "mm" (mm? a b)
 
-def linear? {m n b : UInt64} {d : DType} {dev : Device}
+def linear? {m n b : Nat} {d : DType} {dev : Device}
     (x : Tensor ⟨#[b, m], d, dev⟩) (weight : Tensor ⟨#[n, m], d, dev⟩) :
     Except String (Tensor ⟨#[b, n], d, dev⟩) := do
   checkMatrixOperands x weight
   Tensor.ofRaw (← RawTensor.linearChecked x.raw weight.raw)
 
-def linear {m n b : UInt64} {d : DType} {dev : Device}
+def linear {m n b : Nat} {d : DType} {dev : Device}
     (x : Tensor ⟨#[b, m], d, dev⟩) (weight : Tensor ⟨#[n, m], d, dev⟩) :
     Tensor ⟨#[b, n], d, dev⟩ :=
   checkedResult "linear" (linear? x weight)
 
-def linear3d? {batch seq inDim outDim : UInt64} {d : DType} {dev : Device}
+def linear3d? {batch seq inDim outDim : Nat} {d : DType} {dev : Device}
     (x : Tensor ⟨#[batch, seq, inDim], d, dev⟩)
     (weight : Tensor ⟨#[outDim, inDim], d, dev⟩) :
     Except String (Tensor ⟨#[batch, seq, outDim], d, dev⟩) := do
   checkMatrixOperands x weight
   Tensor.ofRaw (← RawTensor.linear3dChecked x.raw weight.raw)
 
-def linear3d {batch seq inDim outDim : UInt64} {d : DType} {dev : Device}
+def linear3d {batch seq inDim outDim : Nat} {d : DType} {dev : Device}
     (x : Tensor ⟨#[batch, seq, inDim], d, dev⟩)
     (weight : Tensor ⟨#[outDim, inDim], d, dev⟩) :
     Tensor ⟨#[batch, seq, outDim], d, dev⟩ :=
   checkedResult "linear3d" (linear3d? x weight)
 
-def matmul3d? {batch seq k n : UInt64} {d : DType} {dev : Device}
+def matmul3d? {batch seq k n : Nat} {d : DType} {dev : Device}
     (a : Tensor ⟨#[batch, seq, k], d, dev⟩) (b : Tensor ⟨#[k, n], d, dev⟩) :
     Except String (Tensor ⟨#[batch, seq, n], d, dev⟩) := do
   checkMatrixOperands a b
   Tensor.ofRaw (← RawTensor.matmul3dChecked a.raw b.raw)
 
-def matmul3d {batch seq k n : UInt64} {d : DType} {dev : Device}
+def matmul3d {batch seq k n : Nat} {d : DType} {dev : Device}
     (a : Tensor ⟨#[batch, seq, k], d, dev⟩) (b : Tensor ⟨#[k, n], d, dev⟩) :
     Tensor ⟨#[batch, seq, n], d, dev⟩ :=
   checkedResult "matmul3d" (matmul3d? a b)
 
-def bmm4d? {b h m k n : UInt64} {d : DType} {dev : Device}
+def bmm4d? {b h m k n : Nat} {d : DType} {dev : Device}
     (a : Tensor ⟨#[b, h, m, k], d, dev⟩) (x : Tensor ⟨#[b, h, k, n], d, dev⟩) :
     Except String (Tensor ⟨#[b, h, m, n], d, dev⟩) := do
   checkMatrixOperands a x
   Tensor.ofRaw (← RawTensor.bmm4dChecked a.raw x.raw)
 
-def bmm4d {b h m k n : UInt64} {d : DType} {dev : Device}
+def bmm4d {b h m k n : Nat} {d : DType} {dev : Device}
     (a : Tensor ⟨#[b, h, m, k], d, dev⟩) (x : Tensor ⟨#[b, h, k, n], d, dev⟩) :
     Tensor ⟨#[b, h, m, n], d, dev⟩ :=
   checkedResult "bmm4d" (bmm4d? a x)
@@ -775,7 +773,7 @@ private def checkReductionAxis (shape : Shape) (dim : Nat) : Except String Unit 
 def sumDim? {σ : StaticSpec} (t : Tensor σ) (dim : Nat) (keepdim : Bool := false) :
     Except String (Tensor (σ.sumSpec.withShape (reduceShape σ.shape dim keepdim))) := do
   checkReductionAxis σ.shape dim
-  Tensor.ofRaw (← RawTensor.sumChecked t.raw (some #[dim.toUInt64]) keepdim)
+  Tensor.ofRaw (← RawTensor.sumChecked t.raw (some #[dim]) keepdim)
 
 /-- Reduce one axis using libtorch's accumulation dtype. -/
 def sumDim {σ : StaticSpec} (t : Tensor σ) (dim : Nat) (keepdim : Bool := false)
@@ -817,27 +815,27 @@ def reshape {σ : StaticSpec} (t : Tensor σ) (shape' : Shape)
 
 /-- Slice an exact number of entries along a valid axis. Bounds are checked in
 natural arithmetic so `start + len` cannot wrap or silently truncate. -/
-def slice {σ : StaticSpec} (t : Tensor σ) (dim : Nat) (start len : UInt64)
+def slice {σ : StaticSpec} (t : Tensor σ) (dim : Nat) (start len : Nat)
     (_axis : dim < σ.shape.size := by exact of_decide_eq_true rfl)
-    (_bounds : start.toNat + len.toNat ≤ (σ.shape[dim]'_axis).toNat := by exact of_decide_eq_true rfl) :
+    (_bounds : start + len ≤ σ.shape[dim]'_axis := by exact of_decide_eq_true rfl) :
     Tensor (σ.withShape (σ.shape.set! dim len)) :=
-  checkedResult "slice" (Tensor.ofRaw (RawTensor.slice t.raw dim.toUInt64 start len))
+  checkedResult "slice" (Tensor.ofRaw (RawTensor.slice t.raw dim start len))
 
-def permute {σ : StaticSpec} (t : Tensor σ) (permutation : Array UInt64) :
+def permute {σ : StaticSpec} (t : Tensor σ) (permutation : Array Nat) :
     Tensor (σ.withShape (TensorSpec.permuteShape σ.shape permutation)) :=
   checkedResult "permute" (Tensor.ofRaw (RawTensor.permute t.raw permutation))
 
 /-- Transpose along nonnegative axes, returning native validation errors and
 checking the result metadata. -/
-def transpose? {σ : StaticSpec} (t : Tensor σ) (dim0 dim1 : UInt64) :
-    Except String (Tensor (σ.withShape (transposeShape σ.shape dim0.toNat dim1.toNat))) := do
+def transpose? {σ : StaticSpec} (t : Tensor σ) (dim0 dim1 : Nat) :
+    Except String (Tensor (σ.withShape (transposeShape σ.shape dim0 dim1))) := do
   Tensor.ofRaw (← RawTensor.transpose t.raw dim0 dim1)
 
-def transpose {σ : StaticSpec} (t : Tensor σ) (dim0 dim1 : UInt64) :
-    Tensor (σ.withShape (transposeShape σ.shape dim0.toNat dim1.toNat)) :=
+def transpose {σ : StaticSpec} (t : Tensor σ) (dim0 dim1 : Nat) :
+    Tensor (σ.withShape (transposeShape σ.shape dim0 dim1)) :=
   checkedResult "transpose" (t.transpose? dim0 dim1)
 
-def transpose2d {m n : UInt64} {d : DType} {dev : Device}
+def transpose2d {m n : Nat} {d : DType} {dev : Device}
     (t : Tensor ⟨#[m, n], d, dev⟩) : Tensor ⟨#[n, m], d, dev⟩ :=
   checkedResult "transpose2d" (Tensor.ofRaw (RawTensor.transpose2d t.raw))
 
@@ -862,9 +860,9 @@ def cat {s1 s2 : Shape} {d : DType} {dev : Device}
 
 /-- Stack a runtime list of equal vectors along a new leading axis; the result
     shape records the actual list length. -/
-def stack1d {cols : UInt64} {d : DType} {dev : Device}
+def stack1d {cols : Nat} {d : DType} {dev : Device}
     (tensors : Array (Tensor ⟨#[cols], d, dev⟩)) :
-    Tensor ⟨#[tensors.size.toUInt64, cols], d, dev⟩ :=
+    Tensor ⟨#[tensors.size, cols], d, dev⟩ :=
   checkedResult "stack1d" (Tensor.ofRaw (RawTensor.stack1d (tensors.map Tensor.toTensor) 0))
 
 /-- Reshape to a runtime target, validating result metadata against the claimed
@@ -876,9 +874,9 @@ def reshapeChecked {σ : StaticSpec} (t : Tensor σ) (shape' : Shape) : Tensor (
 
 /-- Slice `len` entries along `dim` at a runtime offset, validating the result
     against the claimed spec and panicking on mismatch. -/
-def sliceChecked {σ : StaticSpec} (t : Tensor σ) (dim : Nat) (start len : UInt64)
+def sliceChecked {σ : StaticSpec} (t : Tensor σ) (dim : Nat) (start len : Nat)
     (shape' : Shape) : Tensor (σ.withShape shape') :=
-  match Tensor.ofRaw (RawTensor.slice t.raw dim.toUInt64 start len) with
+  match Tensor.ofRaw (RawTensor.slice t.raw dim start len) with
   | .ok r => r
   | .error message => nativeInvariantFailure s!"Tensor.sliceChecked: {message}"
 
@@ -895,40 +893,40 @@ def grad {σ τ : StaticSpec} (y : Tensor τ) (x : Tensor σ) (dy : Tensor τ)
 
 /-- 1-D Float32 tensor from a host array; the result shape records the actual
     array length. -/
-def fromFloatArray (arr : Array Float) : Tensor ⟨#[arr.size.toUInt64], .Float32, .CPU⟩ :=
+def fromFloatArray (arr : Array Float) : Tensor ⟨#[arr.size], .Float32, .CPU⟩ :=
   checkedResult "fromFloatArray" (Tensor.ofRaw (RawTensor.fromFloatArray arr))
 
 /-- 1-D Int64 tensor from a host array; the result shape records the actual
     array length. -/
-def fromInt64Array (arr : Array Int64) : Tensor ⟨#[arr.size.toUInt64], .Int64, .CPU⟩ :=
+def fromInt64Array (arr : Array Int64) : Tensor ⟨#[arr.size], .Int64, .CPU⟩ :=
   checkedResult "fromInt64Array" (Tensor.ofRaw (RawTensor.fromInt64Array arr))
 
 /-- Argmax with recoverable domain, axis, empty-axis and native kernel errors. -/
-def argmax? {s : Shape} {d : DType} {dev : Device} (t : Tensor ⟨s, d, dev⟩) (dim : UInt64) :
-    Except String (Tensor ⟨reduceShape s dim.toNat false, .Int64, dev⟩) := do
+def argmax? {s : Shape} {d : DType} {dev : Device} (t : Tensor ⟨s, d, dev⟩) (dim : Nat) :
+    Except String (Tensor ⟨reduceShape s dim false, .Int64, dev⟩) := do
   DType.checkOrdered t.raw.dtype
-  checkReductionAxis s dim.toNat
-  if (s[dim.toNat]?.getD 1) == 0 then
+  checkReductionAxis s dim
+  if (s[dim]?.getD 1) == 0 then
     throw "argmax requires a nonempty reduction axis"
   Tensor.ofRaw (← RawTensor.argmaxChecked t.raw dim)
 
 /-- Argmax along a valid nonempty axis of an ordered tensor. Scalar input
 permits axis zero. Runtime shapes and dtypes use `argmax?`. -/
 def argmax {s : Shape} {d : DType} {dev : Device} [DType.Ordered d]
-    (t : Tensor ⟨s, d, dev⟩) (dim : UInt64)
-    (_axis : dim.toNat < max 1 s.size := by exact of_decide_eq_true rfl)
-    (_nonempty : 0 < (s[dim.toNat]?.getD 1).toNat := by exact of_decide_eq_true rfl) :
-    Tensor ⟨reduceShape s dim.toNat false, .Int64, dev⟩ :=
+    (t : Tensor ⟨s, d, dev⟩) (dim : Nat)
+    (_axis : dim < max 1 s.size := by exact of_decide_eq_true rfl)
+    (_nonempty : 0 < s[dim]?.getD 1 := by exact of_decide_eq_true rfl) :
+    Tensor ⟨reduceShape s dim false, .Int64, dev⟩ :=
   checkedResult "argmax" (argmax? t dim)
 
 /-- Runtime-checked pure convenience; use `argmax?` to retain errors. -/
 def argmaxChecked {s : Shape} {d : DType} {dev : Device}
-    (t : Tensor ⟨s, d, dev⟩) (dim : UInt64) :
-    Tensor ⟨reduceShape s dim.toNat false, .Int64, dev⟩ :=
+    (t : Tensor ⟨s, d, dev⟩) (dim : Nat) :
+    Tensor ⟨reduceShape s dim false, .Int64, dev⟩ :=
   checkedResult "argmax" (argmax? t dim)
 
 /-- Top-k filter over logits (entries outside the top k become -inf), spec-preserving. -/
-def topKFilter {σ : StaticSpec} (logits : Tensor σ) (k : UInt64) : Tensor σ :=
+def topKFilter {σ : StaticSpec} (logits : Tensor σ) (k : Nat) : Tensor σ :=
   logits.checkedReplacement (RawTensor.topKFilter logits.raw k)
 
 /-- Top-p (nucleus) filter over logits, spec-preserving. -/
@@ -943,7 +941,7 @@ def eqScalar {s : Shape} {d : DType} {dev : Device} (t : Tensor ⟨s, d, dev⟩)
 /-- Checked vector indexing, preserving the actual data dtype and placement.
 Native validation checks negative and out-of-range indices before accelerator
 dispatch, synchronizing one validity bit when needed. -/
-def indexSelect? {n k : UInt64} {d : DType} {dev : Device}
+def indexSelect? {n k : Nat} {d : DType} {dev : Device}
     (data : Tensor ⟨#[n], d, dev⟩) (indices : Tensor ⟨#[k], .Int64, dev⟩) :
     Except String (Tensor ⟨#[k], d, dev⟩) := do
   Tensor.checkSameDevice data indices
@@ -952,14 +950,14 @@ def indexSelect? {n k : UInt64} {d : DType} {dev : Device}
 
 /-- Select entries of a 1-D tensor by Int64 indices. Use `indexSelect?` for
 recoverable bounds and native operation errors. -/
-def indexSelect {n k : UInt64} {d : DType} {dev : Device}
+def indexSelect {n k : Nat} {d : DType} {dev : Device}
     (data : Tensor ⟨#[n], d, dev⟩) (indices : Tensor ⟨#[k], .Int64, dev⟩) :
     Tensor ⟨#[k], d, dev⟩ :=
   checkedResult "indexSelect" (indexSelect? data indices)
 
 /-- Per-element cross entropy with recoverable dtype, label, and backend errors.
 The default ignored label is -100, matching the native operation. -/
-def crossEntropyNone? {n c : UInt64} {d : DType} {dev : Device}
+def crossEntropyNone? {n c : Nat} {d : DType} {dev : Device}
     (logits : Tensor ⟨#[n, c], d, dev⟩) (targets : Tensor ⟨#[n], .Int64, dev⟩) :
     Except String (Tensor ⟨#[n], d, dev⟩) := do
   if !logits.raw.dtype.isRealFloating then
@@ -969,12 +967,12 @@ def crossEntropyNone? {n c : UInt64} {d : DType} {dev : Device}
 
 /-- Runtime-checked convenience form for a dtype selected dynamically.
 Use `crossEntropyNone?` when input or backend errors must be recovered. -/
-def crossEntropyNoneChecked {n c : UInt64} {d : DType} {dev : Device}
+def crossEntropyNoneChecked {n c : Nat} {d : DType} {dev : Device}
     (logits : Tensor ⟨#[n, c], d, dev⟩) (targets : Tensor ⟨#[n], .Int64, dev⟩) :
     Tensor ⟨#[n], d, dev⟩ := checkedResult "crossEntropyNone" (crossEntropyNone? logits targets)
 
 /-- Per-element cross entropy over real floating logits and Int64 targets. -/
-def crossEntropyNone {n c : UInt64} {d : DType} {dev : Device} [DType.RealFloating d]
+def crossEntropyNone {n c : Nat} {d : DType} {dev : Device} [DType.RealFloating d]
     (logits : Tensor ⟨#[n, c], d, dev⟩) (targets : Tensor ⟨#[n], .Int64, dev⟩) :
     Tensor ⟨#[n], d, dev⟩ :=
   crossEntropyNoneChecked logits targets
@@ -1011,7 +1009,7 @@ def logicalOr {s : Shape} {dev : Device} (a b : Tensor ⟨s, .Bool, dev⟩) :
   logicalNot (logicalAnd (logicalNot a) (logicalNot b))
 
 /-- Mean cross entropy with recoverable dtype, label, and backend errors. -/
-def crossEntropy? {n c : UInt64} {d : DType} {dev : Device}
+def crossEntropy? {n c : Nat} {d : DType} {dev : Device}
     (logits : Tensor ⟨#[n, c], d, dev⟩) (targets : Tensor ⟨#[n], .Int64, dev⟩) :
     Except String (Tensor ⟨#[], d, dev⟩) := do
   if !logits.raw.dtype.isRealFloating then
@@ -1020,19 +1018,19 @@ def crossEntropy? {n c : UInt64} {d : DType} {dev : Device}
   Tensor.ofRaw (← RawTensor.crossEntropyChecked logits.raw targets.raw)
 
 /-- Runtime-checked mean loss for a dtype selected dynamically. -/
-def crossEntropyChecked {n c : UInt64} {d : DType} {dev : Device}
+def crossEntropyChecked {n c : Nat} {d : DType} {dev : Device}
     (logits : Tensor ⟨#[n, c], d, dev⟩) (targets : Tensor ⟨#[n], .Int64, dev⟩) :
     Tensor ⟨#[], d, dev⟩ := checkedResult "crossEntropy" (crossEntropy? logits targets)
 
 /-- Mean cross entropy over real floating logits and Int64 targets. -/
-def crossEntropy {n c : UInt64} {d : DType} {dev : Device} [DType.RealFloating d]
+def crossEntropy {n c : Nat} {d : DType} {dev : Device} [DType.RealFloating d]
     (logits : Tensor ⟨#[n, c], d, dev⟩) (targets : Tensor ⟨#[n], .Int64, dev⟩) :
     Tensor ⟨#[], d, dev⟩ :=
   crossEntropyChecked logits targets
 
 /-- Draw `numSamples` Int64 indices per row of a probability matrix. -/
-def multinomial {n v : UInt64} {d : DType} {dev : Device}
-    (probs : Tensor ⟨#[n, v], d, dev⟩) (numSamples : UInt64) (replacement : Bool := false) :
+def multinomial {n v : Nat} {d : DType} {dev : Device}
+    (probs : Tensor ⟨#[n, v], d, dev⟩) (numSamples : Nat) (replacement : Bool := false) :
     IO (Tensor ⟨#[n, numSamples], .Int64, dev⟩) := do
   let raw ← RawTensor.multinomial probs.raw numSamples replacement
   match Tensor.ofRaw raw with
@@ -1041,7 +1039,7 @@ def multinomial {n v : UInt64} {d : DType} {dev : Device}
 
 /-- Scatter `src` into a clone of `input` along `dim` at Int64 `indices`;
     result preserves the input spec. -/
-def scatter2d {batch seq k : UInt64} {d : DType} {dev : Device}
+def scatter2d {batch seq k : Nat} {d : DType} {dev : Device}
     (input : Tensor ⟨#[batch, seq], d, dev⟩) (dim : Int64)
     (indices : Tensor ⟨#[batch, k], .Int64, dev⟩) (src : Tensor ⟨#[batch, k], d, dev⟩) :
     Tensor ⟨#[batch, seq], d, dev⟩ :=
@@ -1106,7 +1104,7 @@ def parameter {σ : StaticSpec} (t : Tensor σ) : IO (Tensor σ) :=
 
 /-- Fused affine for 3D input: `x @ Wᵀ + b`. Check actual dtype and placement
 for all three operands, including when their static dtype is erased. -/
-def affine3d? {batch seq inDim outDim : UInt64} {d : DType} {dev : Device}
+def affine3d? {batch seq inDim outDim : Nat} {d : DType} {dev : Device}
     (x : Tensor ⟨#[batch, seq, inDim], d, dev⟩)
     (weight : Tensor ⟨#[outDim, inDim], d, dev⟩)
     (bias : Tensor ⟨#[outDim], d, dev⟩) :
@@ -1115,7 +1113,7 @@ def affine3d? {batch seq inDim outDim : UInt64} {d : DType} {dev : Device}
   checkMatrixOperands x bias
   Tensor.ofRaw (← RawTensor.affine3dChecked x.raw weight.raw bias.raw)
 
-def affine3d {batch seq inDim outDim : UInt64} {d : DType} {dev : Device}
+def affine3d {batch seq inDim outDim : Nat} {d : DType} {dev : Device}
     (x : Tensor ⟨#[batch, seq, inDim], d, dev⟩)
     (weight : Tensor ⟨#[outDim, inDim], d, dev⟩)
     (bias : Tensor ⟨#[outDim], d, dev⟩) :
@@ -1123,7 +1121,7 @@ def affine3d {batch seq inDim outDim : UInt64} {d : DType} {dev : Device}
   checkedResult "affine3d" (affine3d? x weight bias)
 
 /-- Fused layer normalization over the last dimension, preserving the spec. -/
-def layerNorm {batch seq n : UInt64} {d : DType} {dev : Device}
+def layerNorm {batch seq n : Nat} {d : DType} {dev : Device}
     (x : Tensor ⟨#[batch, seq, n], d, dev⟩)
     (weight : Tensor ⟨#[n], d, dev⟩)
     (bias : Tensor ⟨#[n], d, dev⟩) (eps : Float := 1e-5) :
@@ -1178,29 +1176,29 @@ namespace torch.Tensor
 
 /-- One-dimensional convolution with matching input channels, dtype and device.
 The spatial result is computed using natural arithmetic and checked at the ABI
-boundary, so overflowing UInt64 arithmetic cannot claim an incorrect shape. -/
-def conv1d? {batch inChannels outChannels length kernel : UInt64}
+boundary. -/
+def conv1d? {batch inChannels outChannels length kernel : Nat}
     {d : DType} {dev : Device}
     (input : Tensor ⟨#[batch, inChannels, length], d, dev⟩)
     (weight : Tensor ⟨#[outChannels, inChannels, kernel], d, dev⟩)
-    (stride : UInt64 := 1) (padding : UInt64 := 0) (dilation : UInt64 := 1) :
+    (stride : Nat := 1) (padding : Nat := 0) (dilation : Nat := 1) :
     Except String (Tensor ⟨#[batch, outChannels,
-      ((length.toNat + 2 * padding.toNat - (dilation.toNat * (kernel.toNat - 1) + 1)) /
-        stride.toNat + 1).toUInt64], d, dev⟩) := do
+      ((length + 2 * padding - (dilation * (kernel - 1) + 1)) /
+        stride + 1)], d, dev⟩) := do
   checkMatrixOperands input weight
   let raw ← RawTensor.conv1dChecked input.raw weight.raw stride padding dilation
   DType.expectedEq input.raw.dtype raw.dtype
   Tensor.ofRaw raw
 
 /-- One-dimensional convolution; use `conv1d?` for recoverable argument errors. -/
-def conv1d {batch inChannels outChannels length kernel : UInt64}
+def conv1d {batch inChannels outChannels length kernel : Nat}
     {d : DType} {dev : Device}
     (input : Tensor ⟨#[batch, inChannels, length], d, dev⟩)
     (weight : Tensor ⟨#[outChannels, inChannels, kernel], d, dev⟩)
-    (stride : UInt64 := 1) (padding : UInt64 := 0) (dilation : UInt64 := 1) :
+    (stride : Nat := 1) (padding : Nat := 0) (dilation : Nat := 1) :
     Tensor ⟨#[batch, outChannels,
-      ((length.toNat + 2 * padding.toNat - (dilation.toNat * (kernel.toNat - 1) + 1)) /
-        stride.toNat + 1).toUInt64], d, dev⟩ :=
+      ((length + 2 * padding - (dilation * (kernel - 1) + 1)) /
+        stride + 1)], d, dev⟩ :=
   match conv1d? input weight stride padding dilation with
   | .ok result => result
   | .error message => nativeInvariantFailure s!"Tensor.conv1d: {message}"

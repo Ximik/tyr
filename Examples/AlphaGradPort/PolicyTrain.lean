@@ -20,8 +20,8 @@ open torch
 open torch.mctx
 open Tyr.AD.Elim
 
-private abbrev OBS_DIM : UInt64 := 8
-private abbrev HIDDEN_DIM : UInt64 := 64
+private abbrev OBS_DIM : Nat := 8
+private abbrev HIDDEN_DIM : Nat := 64
 
 private def lcgA : UInt64 := 6364136223846793005
 private def lcgC : UInt64 := 1442695040888963407
@@ -110,7 +110,7 @@ private def stateFeatures
     1.0
   ]
 
-structure AlphaGradNet (actionDim : UInt64) where
+structure AlphaGradNet (actionDim : Nat) where
   fc1 : Linear OBS_DIM HIDDEN_DIM
   policyHead : Linear HIDDEN_DIM actionDim
   valueHead : Linear HIDDEN_DIM 1
@@ -118,13 +118,13 @@ structure AlphaGradNet (actionDim : UInt64) where
 
 namespace AlphaGradNet
 
-def init (actionDim : UInt64) : IO (AlphaGradNet actionDim) := do
+def init (actionDim : Nat) : IO (AlphaGradNet actionDim) := do
   let fc1 ← Linear.init OBS_DIM HIDDEN_DIM true
   let policyHead ← Linear.init HIDDEN_DIM actionDim true
   let valueHead ← Linear.init HIDDEN_DIM 1 true
   pure { fc1, policyHead, valueHead }
 
-def forward {batch actionDim : UInt64}
+def forward {batch actionDim : Nat}
     (net : AlphaGradNet actionDim)
     (x : Tensor { shape := #[batch, OBS_DIM], dtype := .Float32, device := .CPU }) :
     Tensor { shape := #[batch, actionDim], dtype := .Float32, device := .CPU } × Tensor { shape := #[batch, 1], dtype := .Float32, device := .CPU } :=
@@ -135,7 +135,7 @@ def forward {batch actionDim : UInt64}
 
 end AlphaGradNet
 
-private structure NetEval (actionDim : UInt64) where
+private structure NetEval (actionDim : Nat) where
   fc1Weight : Array Float
   fc1Bias : Array Float
   policyWeight : Array Float
@@ -145,15 +145,15 @@ private structure NetEval (actionDim : UInt64) where
   deriving Repr
 
 private def extractBiasOrZeros
-    {n : UInt64}
+    {n : Nat}
     (b? : Option (Tensor { shape := #[n], dtype := .Float32, device := .CPU })) :
     IO (Array Float) := do
   match b? with
   | some b => b.toFloatArray
-  | none => pure (Array.replicate n.toNat 0.0)
+  | none => pure (Array.replicate n 0.0)
 
 private def buildEvalNet
-    {actionDim : UInt64}
+    {actionDim : Nat}
     (net : AlphaGradNet actionDim) :
     IO (NetEval actionDim) := do
   let fc1Weight ← net.fc1.weight.toFloatArray
@@ -173,16 +173,16 @@ private def buildEvalNet
   }
 
 private def evalStatePolicyValue
-    {actionDim : UInt64}
+    {actionDim : Nat}
     (net : NetEval actionDim)
     (envCfg : AlphaGradMctxConfig)
     (s : AlphaGradState) :
     Array Float × Float :=
   Id.run do
     let feats := stateFeatures envCfg s
-    let obsNat := OBS_DIM.toNat
-    let hiddenNat := HIDDEN_DIM.toNat
-    let actionNat := actionDim.toNat
+    let obsNat := OBS_DIM
+    let hiddenNat := HIDDEN_DIM
+    let actionNat := actionDim
 
     let mut hidden : Array Float := Array.replicate hiddenNat 0.0
     for j in [:hiddenNat] do
@@ -272,9 +272,9 @@ private def normalizeArray (xs : Array Float) : Array Float :=
 
 private def rowsToTensor?
     (rows : Array (Array Float))
-    (cols : UInt64) :
-    Except String (Σ n : UInt64, Tensor { shape := #[n, cols], dtype := .Float32, device := .CPU }) := do
-  let colsNat := cols.toNat
+    (cols : Nat) :
+    Except String (Σ n : Nat, Tensor { shape := #[n, cols], dtype := .Float32, device := .CPU }) := do
+  let colsNat := cols
   for i in [:rows.size] do
     let row := rows.getD i #[]
     if row.size != colsNat then
@@ -283,18 +283,18 @@ private def rowsToTensor?
   for row in rows do
     for x in row do
       flat := flat.push x
-  let n : UInt64 := rows.size.toUInt64
+  let n : Nat := rows.size
   let tDyn := Tensor.fromFloatArray flat
   let t : Tensor { shape := #[n, cols], dtype := .Float32, device := .CPU } := Tensor.reshapeChecked tDyn #[n, cols]
   pure ⟨n, t⟩
 
 private def rolloutPPOEpisode
-    {actionDim : UInt64}
+    {actionDim : Nat}
     (task : TaskSpec)
     (net : NetEval actionDim)
     (seed : UInt64) :
     Except String (Array PPORolloutStep × Float × UInt64) := do
-  if actionDim.toNat != task.numVertices then
+  if actionDim != task.numVertices then
     throw s!"Network actionDim={actionDim} does not match task vertices={task.numVertices}."
 
   let s0 ← initAlphaGradState? task.graph task.numVertices
@@ -335,11 +335,11 @@ private def rolloutPPOEpisode
   pure (steps, s.cumulativeReward, key)
 
 private def evalGreedyReward?
-    {actionDim : UInt64}
+    {actionDim : Nat}
     (task : TaskSpec)
     (net : NetEval actionDim) :
     Except String Float := do
-  if actionDim.toNat != task.numVertices then
+  if actionDim != task.numVertices then
     throw s!"Network actionDim={actionDim} does not match task vertices={task.numVertices}."
   let s0 ← initAlphaGradState? task.graph task.numVertices
   let mut s := s0
@@ -380,7 +380,7 @@ structure PPOSummary where
   deriving Repr
 
 private def ppoUpdate
-    {actionDim : UInt64}
+    {actionDim : Nat}
     (net : AlphaGradNet actionDim)
     (optState : Optim.AdamWState (AlphaGradNet actionDim))
     (steps : Array PPORolloutStep)
@@ -400,12 +400,12 @@ private def ppoUpdate
   | .error msg =>
     return .error msg
   | .ok ⟨n, obs⟩ =>
-    if n.toNat != steps.size then
+    if n != steps.size then
       return .error s!"Obs batch size mismatch: n={n}, steps={steps.size}."
     if actions.size != steps.size || oldLogProbs.size != steps.size || advantages.size != steps.size || returnsRaw.size != steps.size then
       return .error "PPO target arrays are not aligned with rollout size."
 
-    let actionNat := actionDim.toNat
+    let actionNat := actionDim
     let mut oneHotFlat : Array Float := Array.replicate (steps.size * actionNat) 0.0
     for i in [:steps.size] do
       let a := actions.getD i 0
@@ -476,7 +476,7 @@ def trainPPO
     (task : TaskSpec)
     (cfg : PPOTrainConfig := {}) :
     IO (Except String PPOSummary) := do
-  let actionDim : UInt64 := task.numVertices.toUInt64
+  let actionDim : Nat := task.numVertices
   let net0 ← AlphaGradNet.init actionDim
   let net0 ← TensorStruct.makeLeafParams net0
   let opt := Optim.adamw (lr := cfg.learningRate) (weight_decay := cfg.weightDecay)
@@ -555,12 +555,12 @@ def trainPPO
   IO.println s!"[AlphaGradPPO] summary={reprStr summary}"
   pure (.ok summary)
 
-private structure AZSearchParams (actionDim : UInt64) where
+private structure AZSearchParams (actionDim : Nat) where
   envCfg : AlphaGradMctxConfig
   net : NetEval actionDim
 
 private def recurrentFromNet
-    {actionDim : UInt64} :
+    {actionDim : Nat} :
     RecurrentFn (AZSearchParams actionDim) AlphaGradState :=
   fun p _rng action s =>
     let t := transition p.envCfg s action
@@ -610,13 +610,13 @@ private def discountedReturns (rewards : Array Float) (gamma : Float) : Array Fl
   return out
 
 private def rolloutAlphaZeroEpisode
-    {actionDim : UInt64}
+    {actionDim : Nat}
     (task : TaskSpec)
     (net : NetEval actionDim)
     (cfg : AlphaZeroTrainConfig)
     (seed : UInt64) :
     Except String (Array AZSample × Float × UInt64) := do
-  if actionDim.toNat != task.numVertices then
+  if actionDim != task.numVertices then
     throw s!"Network actionDim={actionDim} does not match task vertices={task.numVertices}."
   let s0 ← initAlphaGradState? task.graph task.numVertices
   let searchParams : AZSearchParams actionDim := {
@@ -685,7 +685,7 @@ private def rolloutAlphaZeroEpisode
   pure (samples, s.cumulativeReward, key)
 
 private def alphaZeroUpdate
-    {actionDim : UInt64}
+    {actionDim : Nat}
     (net : AlphaGradNet actionDim)
     (optState : Optim.AdamWState (AlphaGradNet actionDim))
     (samples : Array AZSample)
@@ -703,9 +703,9 @@ private def alphaZeroUpdate
   | .error msg =>
     return .error msg
   | .ok ⟨n, obs⟩ =>
-    if policyRows.size != n.toNat then
-      return .error s!"AlphaZero policy rows mismatch: expected {n.toNat}, got {policyRows.size}."
-    let actionNat := actionDim.toNat
+    if policyRows.size != n then
+      return .error s!"AlphaZero policy rows mismatch: expected {n}, got {policyRows.size}."
+    let actionNat := actionDim
     let mut flatPolicy : Array Float := #[]
     for i in [:policyRows.size] do
       let row := policyRows.getD i #[]
@@ -716,8 +716,8 @@ private def alphaZeroUpdate
     let policyT : Tensor { shape := #[n, actionDim], dtype := .Float32, device := .CPU } :=
       Tensor.reshapeChecked (Tensor.fromFloatArray flatPolicy) #[n, actionDim]
 
-    if valueTargets.size != n.toNat then
-      return .error s!"AlphaZero value targets mismatch: expected {n.toNat}, got {valueTargets.size}."
+    if valueTargets.size != n then
+      return .error s!"AlphaZero value targets mismatch: expected {n}, got {valueTargets.size}."
     let valueT : Tensor { shape := #[n, 1], dtype := .Float32, device := .CPU } :=
       Tensor.reshapeChecked (Tensor.fromFloatArray valueTargets) #[n, 1]
 
@@ -752,7 +752,7 @@ def trainAlphaZero
     (task : TaskSpec)
     (cfg : AlphaZeroTrainConfig := {}) :
     IO (Except String AlphaZeroSummary) := do
-  let actionDim : UInt64 := task.numVertices.toUInt64
+  let actionDim : Nat := task.numVertices
   let net0 ← AlphaGradNet.init actionDim
   let net0 ← TensorStruct.makeLeafParams net0
   let opt := Optim.adamw (lr := cfg.learningRate) (weight_decay := cfg.weightDecay)

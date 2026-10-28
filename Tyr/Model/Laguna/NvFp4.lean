@@ -56,7 +56,7 @@ private def e2m1LutHi : Tensor { device := .CPU, shape := #[256], dtype := .Floa
 
     Returns BF16 tensor of runtime shape `[lead, out, in]`. -/
 private def dequantCore {pd sd : DType}
-    (lead outFeatures inFeatures : UInt64)
+    (lead outFeatures inFeatures : Nat)
     (packed : Tensor { device := device, shape := #[lead, outFeatures, inFeatures / 2], dtype := pd })
     (scales : Tensor { device := device, shape := #[lead, outFeatures, inFeatures / 16], dtype := sd })
     (globalB : Tensor { device := device, shape := #[lead, 1, 1, 1], dtype := .Float32 })
@@ -92,7 +92,7 @@ Packed bytes and float8 scales retain their actual checkpoint dtype; their
 shapes are validated before any reshape. Global scale must contain one value. -/
 def dequantMatrix {ps ss gs : Shape} {pd sd gd : DType}
     (packed : Tensor { device := device, shape := ps, dtype := pd }) (scales : Tensor { device := device, shape := ss, dtype := sd }) (globalScale : Tensor { device := device, shape := gs, dtype := gd })
-    (outFeatures inFeatures : UInt64)
+    (outFeatures inFeatures : Nat)
     : IO (Tensor { device := device, shape := #[outFeatures, inFeatures], dtype := .BFloat16 }) := do
   checkShape "packed" packed #[outFeatures, inFeatures / 2]
   checkShape "scales" scales #[outFeatures, inFeatures / 16]
@@ -107,7 +107,7 @@ def dequantMatrix {ps ss gs : Shape} {pd sd gd : DType}
 /-- Dequantize an NVFP4 expert bank, preserving expert and matrix dimensions. -/
 def dequantBank {ps ss gs : Shape} {pd sd gd : DType}
     (packed : Tensor { device := device, shape := ps, dtype := pd }) (scales : Tensor { device := device, shape := ss, dtype := sd }) (globalScale : Tensor { device := device, shape := gs, dtype := gd })
-    (numExperts outFeatures inFeatures : UInt64)
+    (numExperts outFeatures inFeatures : Nat)
     : IO (Tensor { device := device, shape := #[numExperts, outFeatures, inFeatures], dtype := .BFloat16 }) := do
   checkShape "packed" packed #[numExperts, outFeatures, inFeatures / 2]
   checkShape "scales" scales #[numExperts, outFeatures, inFeatures / 16]

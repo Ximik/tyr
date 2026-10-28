@@ -32,7 +32,7 @@ def getBestDevice : IO Device := do
   return Device.CPU
 
 /-- Compute output shape for slicing along a dimension -/
-def slicedShape (s : Shape) (dim : Nat) (start : UInt64) (stop : UInt64) (step : UInt64 := 1) : Shape :=
+def slicedShape (s : Shape) (dim : Nat) (start : Nat) (stop : Nat) (step : Nat := 1) : Shape :=
   if dim < s.size then
     let s' := s[:dim].toArray
     let s'' := s[dim+1:].toArray
@@ -40,16 +40,16 @@ def slicedShape (s : Shape) (dim : Nat) (start : UInt64) (stop : UInt64) (step :
     s' ++ #[d] ++ s''
   else s
 
-def convOutputSize (input_size kernel_size : UInt64) (stride : UInt64 := 1) (padding : UInt64 := 0) (dilation : UInt64 := 1) : UInt64 :=
+def convOutputSize (input_size kernel_size : Nat) (stride : Nat := 1) (padding : Nat := 0) (dilation : Nat := 1) : Nat :=
   (input_size + 2 * padding - dilation * (kernel_size - 1) - 1) / stride + 1
 
-def convTransposeOutputSize (input_size kernel_size : UInt64)
-    (stride : UInt64 := 1) (padding : UInt64 := 0) (output_padding : UInt64 := 0)
-    (dilation : UInt64 := 1) : UInt64 :=
+def convTransposeOutputSize (input_size kernel_size : Nat)
+    (stride : Nat := 1) (padding : Nat := 0) (output_padding : Nat := 0)
+    (dilation : Nat := 1) : Nat :=
   (input_size - 1) * stride - (2 * padding) + dilation * (kernel_size - 1) + output_padding + 1
 
 /-- Compute output shape for 1D convolution (safe version) -/
-def conv1dShape (input_shape weight_shape : Shape) (stride padding dilation : UInt64) : Shape :=
+def conv1dShape (input_shape weight_shape : Shape) (stride padding dilation : Nat) : Shape :=
   let batch := input_shape.getD 0 0
   let out_channels := weight_shape.getD 0 0
   let input_length := input_shape.getD 2 0
@@ -59,7 +59,7 @@ def conv1dShape (input_shape weight_shape : Shape) (stride padding dilation : UI
 
 /-- Compute output shape for 1D transposed convolution (safe version). -/
 def convTranspose1dShape (input_shape weight_shape : Shape)
-    (stride padding output_padding dilation : UInt64) : Shape :=
+    (stride padding output_padding dilation : Nat) : Shape :=
   let batch := input_shape.getD 0 0
   let out_channels := weight_shape.getD 1 0
   let input_length := input_shape.getD 2 0
@@ -94,7 +94,7 @@ def conv3dShape (input_shape weight_shape : Shape) (stride padding dilation : Sh
   let output_width := convOutputSize input_width kernel_width (stride.getD 2 1) (padding.getD 2 0) (dilation.getD 2 1)
   #[batch, out_channels, output_depth, output_height, output_width]
 
-def poolOutputSize (input_size kernel_size : UInt64) (stride : UInt64 := 0) (padding : UInt64 := 0) : UInt64 :=
+def poolOutputSize (input_size kernel_size : Nat) (stride : Nat := 0) (padding : Nat := 0) : Nat :=
   let effective_stride := if stride = 0 then kernel_size else stride
   (input_size + 2 * padding - kernel_size) / effective_stride + 1
 

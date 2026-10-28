@@ -51,11 +51,11 @@ end DecodeBackend
 
 structure DecodeBenchCase where
   caseId : String
-  batch : UInt64
-  qHeads : UInt64
-  kvHeads : UInt64
-  kvSeq : UInt64
-  headDim : UInt64
+  batch : Nat
+  qHeads : Nat
+  kvHeads : Nat
+  kvSeq : Nat
+  headDim : Nat
   expectedTyrRoute : String := "tkKernel"
   deriving Repr, Inhabited
 
@@ -211,9 +211,9 @@ private def runOne (runId : String) (warmup iters repeats : Nat)
       let lats ← benchmarkAction runId warmup iters repeats stream action
       pure {
         runId := runId, caseId := c.caseId, backend := "torch_sdpa",
-        batch := c.batch.toNat, qHeads := c.qHeads.toNat,
-        kvHeads := c.kvHeads.toNat, kvSeq := c.kvSeq.toNat,
-        headDim := c.headDim.toNat,
+        batch := c.batch, qHeads := c.qHeads,
+        kvHeads := c.kvHeads, kvSeq := c.kvSeq,
+        headDim := c.headDim,
         latencyMsP50 := percentile lats 50,
         latencyMsP10 := percentile lats 10,
         latencyMsP90 := percentile lats 90,
@@ -242,9 +242,9 @@ private def runOne (runId : String) (warmup iters repeats : Nat)
       pure {
         runId := runId, caseId := c.caseId, backend := "tyr_runtime",
         routeActual := routeActual,
-        batch := c.batch.toNat, qHeads := c.qHeads.toNat,
-        kvHeads := c.kvHeads.toNat, kvSeq := c.kvSeq.toNat,
-        headDim := c.headDim.toNat,
+        batch := c.batch, qHeads := c.qHeads,
+        kvHeads := c.kvHeads, kvSeq := c.kvSeq,
+        headDim := c.headDim,
         latencyMsP50 := percentile lats 50,
         latencyMsP10 := percentile lats 10,
         latencyMsP90 := percentile lats 90,

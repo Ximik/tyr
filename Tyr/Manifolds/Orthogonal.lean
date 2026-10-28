@@ -27,7 +27,7 @@ where exp(S) is the matrix exponential.
 
 /-- Orthogonal group O(n): n×n orthogonal matrices.
     Constraint: QᵀQ = QQᵀ = I -/
-structure Orthogonal (n : UInt64) (dtype : DType := .Float32)
+structure Orthogonal (n : Nat) (dtype : DType := .Float32)
     (device : Device := .CPU) where
   /-- The underlying n×n orthogonal matrix -/
   matrix : Tensor ⟨#[n, n], dtype, device⟩
@@ -35,18 +35,18 @@ structure Orthogonal (n : UInt64) (dtype : DType := .Float32)
 namespace Orthogonal
 
 /-- Identity element -/
-def identity [DType.ConstantSupported d dev] (n : UInt64) : Orthogonal n d dev :=
+def identity [DType.ConstantSupported d dev] (n : Nat) : Orthogonal n d dev :=
   ⟨Tensor.eyeFor d dev⟩
 
 /-- Create a random orthogonal matrix via QR decomposition. -/
-def random (n : UInt64) : IO (Orthogonal n) := do
+def random (n : Nat) : IO (Orthogonal n) := do
   let mat ← Tensor.randn #[n, n]
   let (Q, _R) := Tensor.qrComplete mat
   return ⟨Q⟩
 
 /-- Project a matrix to O(n) using QR decomposition.
     The Q factor is orthogonal. -/
-def project (n : UInt64) (mat : Tensor ⟨#[n, n], d, dev⟩) : Orthogonal n d dev :=
+def project (n : Nat) (mat : Tensor ⟨#[n, n], d, dev⟩) : Orthogonal n d dev :=
   let (Q, _R) := Tensor.qrComplete mat
   ⟨Q⟩
 
@@ -62,7 +62,7 @@ end Orthogonal
 
 /-- Skew-symmetric matrix: Sᵀ = -S
     Used for tangent space representation of O(n) -/
-structure SkewSymmetric (n : UInt64) (dtype : DType := .Float32)
+structure SkewSymmetric (n : Nat) (dtype : DType := .Float32)
     (device : Device := .CPU) where
   /-- The underlying matrix (should satisfy Sᵀ = -S) -/
   matrix : Tensor ⟨#[n, n], dtype, device⟩
@@ -70,7 +70,7 @@ structure SkewSymmetric (n : UInt64) (dtype : DType := .Float32)
 namespace SkewSymmetric
 
 /-- Zero skew-symmetric matrix -/
-def zero [DType.ConstantSupported d dev] (n : UInt64) : SkewSymmetric n d dev :=
+def zero [DType.ConstantSupported d dev] (n : Nat) : SkewSymmetric n d dev :=
   ⟨Tensor.zerosFor ⟨#[n, n], d, dev⟩⟩
 
 /-- Create a skew-symmetric matrix from any matrix: (A - Aᵀ)/2 -/
@@ -94,7 +94,7 @@ end SkewSymmetric
 /-- Tangent vector on the orthogonal group.
     Represented as Q·S where S is skew-symmetric.
     We store S directly since Q is known from the base point. -/
-structure OrthogonalTangent (n : UInt64) (dtype : DType := .Float32)
+structure OrthogonalTangent (n : Nat) (dtype : DType := .Float32)
     (device : Device := .CPU) where
   /-- The skew-symmetric component S such that tangent = Q·S -/
   skew : SkewSymmetric n dtype device
@@ -102,7 +102,7 @@ structure OrthogonalTangent (n : UInt64) (dtype : DType := .Float32)
 namespace OrthogonalTangent
 
 /-- Zero tangent -/
-def zero [DType.ConstantSupported d dev] (n : UInt64) : OrthogonalTangent n d dev :=
+def zero [DType.ConstantSupported d dev] (n : Nat) : OrthogonalTangent n d dev :=
   ⟨SkewSymmetric.zero n⟩
 
 /-- Create tangent from skew-symmetric matrix -/
@@ -128,7 +128,7 @@ end OrthogonalTangent
 
 /-- Orthogonal group as a DifferentiableManifold.
     Uses the matrix exponential for the proper exponential map: exp_Q(Q·S) = Q·exp(S). -/
-instance orthogonalManifold [DType.ConstantSupported d dev] (n : UInt64) : DifferentiableManifold (Orthogonal n d dev) where
+instance orthogonalManifold [DType.ConstantSupported d dev] (n : Nat) : DifferentiableManifold (Orthogonal n d dev) where
   Tangent _ := OrthogonalTangent n d dev
   Cotangent _ := OrthogonalTangent n d dev
   zeroTangent _ := OrthogonalTangent.zero n

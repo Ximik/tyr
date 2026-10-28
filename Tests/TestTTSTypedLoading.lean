@@ -101,7 +101,7 @@ private def writeCheckpoint (dir : System.FilePath) (bf16 projection sharded : B
   let bytes := (Json.mkObj header).compress.toUTF8
   let mut namePrefix := ByteArray.empty
   for i in [:8] do
-    namePrefix := namePrefix.push ((bytes.size.toUInt64 >>> (i * 8).toUInt64).toUInt8)
+    namePrefix := namePrefix.push ((bytes.size >>> (i * 8)).toUInt8)
   IO.FS.writeBinFile (dir / "model.safetensors") (namePrefix ++ bytes ++ data)
   if sharded then
     IO.FS.writeFile (dir / "model.safetensors.index.json")
@@ -135,7 +135,7 @@ private def writeCheckpoint (dir : System.FilePath) (bf16 projection sharded : B
           let generated ← model.generateCodesWithLengths prompt 2 2 1.0 1 1.0
           LeanTest.assertEqual generated.codes.actualSpec.dtype DType.Int64
           LeanTest.assertEqual generated.codes.runtimeShape (#[1, 2, 2] : Shape)
-          LeanTest.assertEqual generated.lengths (#[2] : Array UInt64)
+          LeanTest.assertEqual generated.lengths (#[2] : Array Nat)
 
 @[test] def testTTSLoadingRejectsInconsistentTalkerDType : IO Unit := do
   for name in #["talker.model.text_embedding.weight",

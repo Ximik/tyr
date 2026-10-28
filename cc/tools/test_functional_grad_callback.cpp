@@ -27,7 +27,7 @@ static uint64_t liveTensors() {
 
 static lean_object* shape() {
   auto* result = lean_alloc_array(1, 1);
-  lean_array_set_core(result, 0, lean_box_uint64(2));
+  lean_array_set_core(result, 0, lean_box(2));
   return result;
 }
 

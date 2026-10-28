@@ -18,7 +18,7 @@ native_test_exception_smoke
 native_test_run "$test_dir/test_distributed_recovery"
 if [[ ${TYR_DISTRIBUTED_BASELINE:-0} != 1 ]]; then
   "${CXX:-c++}" "${native_cxx_flags[@]}" -DTYR_DISTRIBUTED_UNIT \
-    -I"$repo_root/cc/src" -I"$lean_dir/include" -I"$torch_dir/include" \
+    -I"$repo_root/cc/include" -I"$repo_root/cc/src" -I"$lean_dir/include" -I"$torch_dir/include" \
     -I"$torch_dir/include/torch/csrc/api/include" -I"${GLOO_DIR:-$repo_root/external/git/gloo}" \
     "$repo_root/cc/tools/test_distributed_recovery.cpp" \
     "${native_link_flags[@]}" -o "$test_dir/test_distributed_state"

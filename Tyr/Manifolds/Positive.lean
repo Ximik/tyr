@@ -8,7 +8,7 @@ open DifferentiableManifold
 variable {d : DType} {dev : Device} [DType.RealFloating d]
 
 /-- Positive manifold of elementwise-positive `m x n` matrices. -/
-structure Positive (m n : UInt64) (dtype : DType := .Float32)
+structure Positive (m n : Nat) (dtype : DType := .Float32)
     (device : Device := .CPU) where
   matrix : Tensor ⟨#[m, n], dtype, device⟩
 
@@ -17,30 +17,30 @@ namespace Positive
 private def eps : Float := 1e-6
 
 /-- Project to positive matrices via clamping. -/
-def project (m n : UInt64) (A : Tensor ⟨#[m, n], d, dev⟩) : Positive m n d dev :=
+def project (m n : Nat) (A : Tensor ⟨#[m, n], d, dev⟩) : Positive m n d dev :=
   ⟨Tensor.clampFloat A eps 1e12⟩
 
 /-- Random positive point. -/
-def random (m n : UInt64) : IO (Positive m n) := do
+def random (m n : Nat) : IO (Positive m n) := do
   let A ← Tensor.randn #[m, n]
   pure (project m n (Tensor.addScalar (Tensor.abs A) eps))
 
 end Positive
 
 /-- Tangent vectors on positive matrices are unconstrained ambient matrices. -/
-structure PositiveTangent (m n : UInt64) (dtype : DType := .Float32)
+structure PositiveTangent (m n : Nat) (dtype : DType := .Float32)
     (device : Device := .CPU) where
   vec : Tensor ⟨#[m, n], dtype, device⟩
 
 namespace PositiveTangent
 
-def zero [DType.ConstantSupported d dev] (m n : UInt64) : PositiveTangent m n d dev := ⟨Tensor.zerosFor ⟨#[m, n], d, dev⟩⟩
+def zero [DType.ConstantSupported d dev] (m n : Nat) : PositiveTangent m n d dev := ⟨Tensor.zerosFor ⟨#[m, n], d, dev⟩⟩
 def add (a b : PositiveTangent m n d dev) : PositiveTangent m n d dev := ⟨Tensor.add a.vec b.vec⟩
 def smul (s : Float) (v : PositiveTangent m n d dev) : PositiveTangent m n d dev := ⟨Tensor.mulScalar v.vec s⟩
 
 end PositiveTangent
 
-instance positiveManifold (m n : UInt64) : DifferentiableManifold (Positive m n d dev) where
+instance positiveManifold (m n : Nat) : DifferentiableManifold (Positive m n d dev) where
   Tangent _ := PositiveTangent m n d dev
   Cotangent _ := PositiveTangent m n d dev
   zeroTangent x := ⟨Tensor.zerosLike x.matrix⟩

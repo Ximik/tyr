@@ -18,7 +18,7 @@ structure PrototypeConfig where
   modelConfig : torch.gpt.Config
   trainConfig : torch.train.TrainConfig
   /-- Number of tokens in the synthetic character stream. -/
-  streamTokens : UInt64 := 512
+  streamTokens : Nat := 512
   /-- Steps used by `runPrototype`. -/
   trainSteps : Nat := 3
   /-- Steps used by `runBenchmark`. -/

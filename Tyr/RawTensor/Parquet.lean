@@ -36,7 +36,7 @@ opaque getParquetMetadata (filePath : @& String) : IO ParquetMetadata
 /-- Read a specific row group from a parquet file.
     Returns the text column as an array of strings. -/
 @[extern "lean_parquet_read_row_group"]
-opaque readRowGroup (filePath : @& String) (rowGroupIdx : UInt64) (textColumn : @& String := "text")
+opaque readRowGroup (filePath : @& String) (rowGroupIdx : @& Nat) (textColumn : @& String := "text")
     : IO RowGroupData
 
 /-- Check if a file exists -/
@@ -52,6 +52,6 @@ opaque readParquetAsJson (filePath : @& String) : IO (Array String)
 /-- Read a specific row group from a parquet file as JSON strings.
     More memory-efficient for large files. -/
 @[extern "lean_parquet_read_row_group_as_json"]
-opaque readRowGroupAsJson (filePath : @& String) (rowGroupIdx : UInt64) : IO (Array String)
+opaque readRowGroupAsJson (filePath : @& String) (rowGroupIdx : @& Nat) : IO (Array String)
 
 end torch.Data.Pretraining

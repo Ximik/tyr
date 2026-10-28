@@ -34,8 +34,8 @@ structure Args where
   prompt : String := "Give a concise definition of a dependent type."
   promptFile : Option String := none
   imagePaths : Array String := #[]
-  batchSize : UInt64 := 1
-  maxNewTokens : UInt64 := 32
+  batchSize : Nat := 1
+  maxNewTokens : Nat := 32
   stream : Bool := false
   multimodal : Bool := false
   enableThinking : Bool := false
@@ -91,15 +91,15 @@ private def encodePromptToIds
     else tokenizer.gemma4.chatTemplate prompt
   (tokenizer.gemma4.encodeText tok text).map (fun t => t.toUInt64)
 
-private def buildImageExpansion (softTokenCount : UInt64) : String :=
+private def buildImageExpansion (softTokenCount : Nat) : String :=
   Id.run do
     let mut out := "<|image>"
-    for _ in [:softTokenCount.toNat] do
+    for _ in [:softTokenCount] do
       out := out ++ "<|image|>"
     out := out ++ "<image|>"
     pure out
 
-private def prefixImageExpansions (softTokenCounts : Array UInt64) : String :=
+private def prefixImageExpansions (softTokenCounts : Array Nat) : String :=
   Id.run do
     let mut out := ""
     for i in [:softTokenCounts.size] do
@@ -107,7 +107,7 @@ private def prefixImageExpansions (softTokenCounts : Array UInt64) : String :=
       out := out ++ buildImageExpansion softTokenCounts[i]!
     pure out
 
-private def injectImageExpansions (prompt : String) (softTokenCounts : Array UInt64) : IO String := do
+private def injectImageExpansions (prompt : String) (softTokenCounts : Array Nat) : IO String := do
   let placeholder := "<|image|>"
   let parts := (prompt.splitOn placeholder).toArray
   if parts.size <= 1 then
@@ -128,7 +128,7 @@ private def injectImageExpansions (prompt : String) (softTokenCounts : Array UIn
 private def encodePromptToIdsMultimodal
     (tok : tokenizer.gemma4.GemmaTokenizer)
     (enableThinking : Bool)
-    (softTokenCounts : Array UInt64)
+    (softTokenCounts : Array Nat)
     (prompt : String)
     : IO (Array UInt64) := do
   let prompt' ← injectImageExpansions prompt softTokenCounts
@@ -164,11 +164,11 @@ private def runTextBatches [DType.RealFloating dtype]
     let ⟨batch, ⟨seq, (inputIds, promptLens)⟩⟩ ←
       buildBatchInputWithEncoder tok.padToken.toUInt64 chunk (fun p => pure (encodePromptToIds tok args.enableThinking p))
     pure ⟨batch, ⟨seq, (inputIds.to device, promptLens)⟩⟩
-  let decodeBatch (promptLens : Array Nat) {b os : UInt64} (ids : Tensor { shape := #[b, os], dtype := .Int64, device := device }) : IO (Array String) :=
+  let decodeBatch (promptLens : Array Nat) {b os : Nat} (ids : Tensor { shape := #[b, os], dtype := .Int64, device := device }) : IO (Array String) :=
     decodeGeneratedBatch promptLens ids (fun xs => tokenizer.gemma4.decodeText tok xs)
-  let runGen (b : UInt64) {s : UInt64} (ids : Tensor { shape := #[b, s], dtype := .Int64, device := device }) :=
+  let runGen (b : Nat) {s : Nat} (ids : Tensor { shape := #[b, s], dtype := .Int64, device := device }) :=
     model.generate cfg ids args.maxNewTokens .greedy generationStopIds
-  let runGenStream (b : UInt64) {s : UInt64} (ids : Tensor { shape := #[b, s], dtype := .Int64, device := device }) (cb : StreamCallback (device := device) b) :=
+  let runGenStream (b : Nat) {s : Nat} (ids : Tensor { shape := #[b, s], dtype := .Int64, device := device }) (cb : StreamCallback (device := device) b) :=
     model.generateStream cfg ids cb args.maxNewTokens .greedy generationStopIds
   runGenerationBatches prompts args.batchSize args.maxNewTokens args.stream args.debugIds
     (prompts.size == 1) buildBatch runGen runGenStream decodeBatch
@@ -180,7 +180,7 @@ private def runMultimodalBatches [DType.RealFloating dtype]
     (model : Gemma4ForConditionalGeneration (device := device) cfg dtype visionDType projectorDType)
     (args : Args)
     (prompts : Array String)
-    (imageSoftTokenCounts : Array UInt64)
+    (imageSoftTokenCounts : Array Nat)
     (imageFeatures : Option (ImageFeatures (device := device) cfg projectorDType))
     : IO Unit := do
   let generationStopIds := eosStopTokenIds tok cfg.text_config
@@ -189,15 +189,15 @@ private def runMultimodalBatches [DType.RealFloating dtype]
       buildBatchInputWithEncoder tok.padToken.toUInt64 chunk
         (encodePromptToIdsMultimodal tok args.enableThinking imageSoftTokenCounts)
     pure ⟨batch, ⟨seq, (inputIds.to device, promptLens)⟩⟩
-  let decodeBatch (promptLens : Array Nat) {b os : UInt64} (ids : Tensor { shape := #[b, os], dtype := .Int64, device := device }) : IO (Array String) :=
+  let decodeBatch (promptLens : Array Nat) {b os : Nat} (ids : Tensor { shape := #[b, os], dtype := .Int64, device := device }) : IO (Array String) :=
     decodeGeneratedBatch promptLens ids (fun xs => tokenizer.gemma4.decodeText tok xs)
-  let runGen (b : UInt64) {s : UInt64} (ids : Tensor { shape := #[b, s], dtype := .Int64, device := device }) :=
+  let runGen (b : Nat) {s : Nat} (ids : Tensor { shape := #[b, s], dtype := .Int64, device := device }) :=
     let imageFeaturesChunk :=
       match imageFeatures with
       | some ⟨_nTok, feats⟩ => some <| Gemma4ForConditionalGeneration.repeatFeaturesForBatch (batch := b) cfg feats
       | none => none
     model.generate cfg ids args.maxNewTokens .greedy generationStopIds imageFeaturesChunk
-  let runGenStream (b : UInt64) {s : UInt64} (ids : Tensor { shape := #[b, s], dtype := .Int64, device := device }) (cb : StreamCallback (device := device) b) :=
+  let runGenStream (b : Nat) {s : Nat} (ids : Tensor { shape := #[b, s], dtype := .Int64, device := device }) (cb : StreamCallback (device := device) b) :=
     let imageFeaturesChunk :=
       match imageFeatures with
       | some ⟨_nTok, feats⟩ => some <| Gemma4ForConditionalGeneration.repeatFeaturesForBatch (batch := b) cfg feats
@@ -241,7 +241,7 @@ def runMain (argv : List String) : IO UInt32 := do
       else Gemma4ForConditionalGeneration.load s!"{modelDir}/model.safetensors" cfg (device := device)
 
     let mut imageGrids : Array (ImagePatchGrid (device := device) cfg) := #[]
-    let mut imageSoftTokenCounts : Array UInt64 := #[]
+    let mut imageSoftTokenCounts : Array Nat := #[]
     for p in args.imagePaths do
       IO.println s!"Loading image patches from {p}..."
       let grid := movePatchGridTo device (← media.loadImagePatchGrid cfg p)

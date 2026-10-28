@@ -19,7 +19,7 @@ private def parseFloatLit? (s : String) : Option Float :=
       | _, _ => none
   | _ => none
 
-private def arraysMatch (a b : Array UInt64) : Bool :=
+private def arraysMatch (a b : Array Nat) : Bool :=
   a.size == b.size && Id.run (do
     for h : i in [:a.size] do
       if a[i] != b[i]! then

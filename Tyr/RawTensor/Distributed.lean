@@ -27,7 +27,7 @@ inductive ReduceOp where
     Initialization publishes process-group state only after construction succeeds.
 -/
 @[extern "lean_torch_dist_init_process_group"]
-opaque initProcessGroup (backend masterAddr : @& String) (masterPort rank worldSize : UInt64) : IO Unit
+opaque initProcessGroup (backend masterAddr : @& String) (masterPort rank worldSize : @& Nat) : IO Unit
 
 /-- Set the current CUDA device for this process (typically LOCAL_RANK).
     Indices outside the native DeviceIndex range fail on every build. -/
@@ -82,7 +82,7 @@ opaque allReduceImpl (tensor : @& RawTensor) (op : ReduceOp) (asyncOp : UInt8) :
     - srcRank: Source rank to broadcast from
 -/
 @[extern "lean_torch_dist_broadcast"]
-opaque broadcastImpl (tensor : @& RawTensor) (srcRank : UInt64) : IO Unit
+opaque broadcastImpl (tensor : @& RawTensor) (srcRank : @& Nat) : IO Unit
 
 /-- Reduce-scatter: reduce tensors and scatter results to all processes.
 
@@ -158,7 +158,7 @@ opaque newtonSchulzStepImpl (X : @& RawTensor) (a b c : Float) : IO RawTensor
     Typically uses 5 iterations with precomputed stable coefficients.
 -/
 @[extern "lean_torch_polar_express"]
-opaque polarExpressImpl (G : @& RawTensor) (numIters : UInt64) : IO RawTensor
+opaque polarExpressImpl (G : @& RawTensor) (numIters : @& Nat) : IO RawTensor
 
 /-- Muon-style orthogonalized gradient (raw boundary).
 
@@ -167,7 +167,7 @@ opaque polarExpressImpl (G : @& RawTensor) (numIters : UInt64) : IO RawTensor
     - If out <= in: orthogonalize directly
 -/
 @[extern "lean_torch_muon_orthogonalize"]
-opaque muonOrthogonalizeImpl (G : @& RawTensor) (numIters : UInt64) : IO RawTensor
+opaque muonOrthogonalizeImpl (G : @& RawTensor) (numIters : @& Nat) : IO RawTensor
 
 /-- Cautious weight decay update (raw boundary).
 

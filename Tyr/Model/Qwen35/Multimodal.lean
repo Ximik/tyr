@@ -23,13 +23,13 @@ variable [DType.ConstantSupported dtype device]
 open torch
 open torch.Model
 
-private def addBias2d {n d : UInt64}
+private def addBias2d {n d : Nat}
     (x : Tensor { device := device, shape := #[n, d], dtype := dtype })
     (b : Tensor { device := device, shape := #[d], dtype := dtype })
     : Tensor { device := device, shape := #[n, d], dtype := dtype } :=
   Tensor.add x (Tensor.expand (Tensor.reshapeChecked b #[1, d]) #[n, d])
 
-private def linear2d {tokens in_dim out_dim : UInt64}
+private def linear2d {tokens in_dim out_dim : Nat}
     (x : Tensor { device := device, shape := #[tokens, in_dim], dtype := dtype })
     (w : Tensor { device := device, shape := #[out_dim, in_dim], dtype := dtype })
     (b : Tensor { device := device, shape := #[out_dim], dtype := dtype })
@@ -41,13 +41,13 @@ private def linear2d {tokens in_dim out_dim : UInt64}
 private def allInSet (xs : Array UInt64) (allow : Array UInt64) : Bool :=
   xs.all (fun x => allow.contains x)
 
-private def countMask2d {batch seq : UInt64} (mask : Tensor { device := device, shape := #[batch, seq], dtype := .Bool }) : IO UInt64 := do
+private def countMask2d {batch seq : Nat} (mask : Tensor { device := device, shape := #[batch, seq], dtype := .Bool }) : IO Nat := do
   let row : Tensor { device := device, shape := #[batch], dtype := .Int64 } := Tensor.reshapeChecked (Tensor.sumDim (mask.toInt64) 1 false) #[batch]
   let counts ← Tensor.toUInt64Array row
-  pure (counts.foldl (· + ·) 0)
+  pure (counts.foldl (· + ·.toNat) 0)
 
 /-- LayerNorm for vision stack. -/
-structure Qwen35VisionLayerNorm (dim : UInt64) where
+structure Qwen35VisionLayerNorm (dim : Nat) where
   weight : SomeDTypeTensor #[dim] device
   bias : SomeDTypeTensor #[dim] device
   eps : Float := 1e-6
@@ -55,7 +55,7 @@ structure Qwen35VisionLayerNorm (dim : UInt64) where
 
 namespace Qwen35VisionLayerNorm
 
-def init (dim : UInt64) (eps : Float := 1e-6) (device : Device := .CPU) : IO (Qwen35VisionLayerNorm (device := device) dim) := do
+def init (dim : Nat) (eps : Float := 1e-6) (device : Device := .CPU) : IO (Qwen35VisionLayerNorm (device := device) dim) := do
   IO.ofExcept (Shape.validateAllocation #[dim])
   pure {
     weight := ⟨.Float32, (← Tensor.parameter (Tensor.ones #[dim] (device := device)))⟩
@@ -63,7 +63,7 @@ def init (dim : UInt64) (eps : Float := 1e-6) (device : Device := .CPU) : IO (Qw
     eps := eps
   }
 
-def forward2d {tokens dim : UInt64}
+def forward2d {tokens dim : Nat}
     (m : Qwen35VisionLayerNorm (device := device) dim)
     (x : Tensor { device := device, shape := #[tokens, dim], dtype := dtype })
     : Tensor { device := device, shape := #[tokens, dim], dtype := dtype } :=
@@ -95,7 +95,7 @@ def init (cfg : VisionConfig) (device : Device := .CPU) (dtype : DType := .Float
     linear_fc2_bias := b2
   }
 
-def forward {tokens : UInt64}
+def forward {tokens : Nat}
     (cfg : VisionConfig)
     (m : Qwen35VisionMLP (dtype := dtype) (device := device) cfg)
     (x : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype })
@@ -121,7 +121,7 @@ def init (cfg : VisionConfig) (device : Device := .CPU) (dtype : DType := .Float
   let b ← initDynamicBias (dtype := dtype) (device := device) #[cfg.hidden_size]
   pure { weight := w, bias := b }
 
-def forward {nPatches : UInt64}
+def forward {nPatches : Nat}
     (cfg : VisionConfig)
     (m : Qwen35VisionPatchEmbed (dtype := dtype) (device := device) cfg)
     (x : Tensor { device := device, shape := #[nPatches, VisionConfig.patchDim cfg], dtype := dtype })
@@ -152,7 +152,7 @@ def init (cfg : VisionConfig) (device : Device := .CPU) (dtype : DType := .Float
     proj_bias := projB
   }
 
-def forward {tokens : UInt64}
+def forward {tokens : Nat}
     (cfg : VisionConfig)
     (m : Qwen35VisionAttention (dtype := dtype) (device := device) cfg)
     (x : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype })
@@ -206,7 +206,7 @@ def init (cfg : VisionConfig) (device : Device := .CPU) (dtype : DType := .Float
     mlp := mlp
   }
 
-def forward {tokens : UInt64}
+def forward {tokens : Nat}
     (cfg : VisionConfig)
     (m : Qwen35VisionBlock (dtype := dtype) (device := device) cfg)
     (x : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype })
@@ -241,7 +241,7 @@ def init (cfg : VisionConfig) (device : Device := .CPU) (dtype : DType := .Float
     linear_fc2_bias := fc2B
   }
 
-def forward {tokens : UInt64}
+def forward {tokens : Nat}
     (cfg : VisionConfig)
     (m : Qwen35VisionPatchMerger (dtype := dtype) (device := device) cfg)
     (x : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype })
@@ -280,7 +280,7 @@ def init (cfg : VisionConfig) (device : Device := .CPU) (dtype : DType := .Float
   let posEmbed ← Tensor.parameter (← IO.ofExcept ((Tensor.mulScalar posRaw 0.02).castDType? dtype))
 
   let mut blocks : Array (Qwen35VisionBlock (dtype := dtype) (device := device) cfg) := #[]
-  for _ in [:cfg.depth.toNat] do
+  for _ in [:cfg.depth] do
     blocks := blocks.push (← Qwen35VisionBlock.init (dtype := dtype) (device := device) cfg)
 
   let merger ← Qwen35VisionPatchMerger.init (dtype := dtype) (device := device) cfg
@@ -291,7 +291,7 @@ def init (cfg : VisionConfig) (device : Device := .CPU) (dtype : DType := .Float
     merger := merger
   }
 
-def forward {nPatches : UInt64}
+def forward {nPatches : Nat}
     (cfg : VisionConfig)
     (m : Qwen35VisionModel (dtype := dtype) (device := device) cfg)
     (patchifiedPixels : Tensor { device := device, shape := #[nPatches, VisionConfig.patchDim cfg], dtype := dtype })
@@ -333,14 +333,14 @@ def init (cfg : VLConfig) (device : Device := .CPU) (dtype : DType := .Float32) 
   let lm ← Qwen35ForCausalLM.init (dtype := dtype) (device := device) cfg.text_config cfg.tie_word_embeddings
   pure { visual := visual, language_model := lm }
 
-def getImageFeatures {nPatches : UInt64}
+def getImageFeatures {nPatches : Nat}
     (cfg : VLConfig)
     (m : Qwen35ForConditionalGeneration (visionDType := visionDType) (dtype := dtype) (device := device) cfg)
     (pixelValues : Tensor { device := device, shape := #[nPatches, VisionConfig.patchDim cfg.vision_config], dtype := visionDType })
     : IO (Tensor { device := device, shape := #[VisionConfig.mergedTokenCount cfg.vision_config nPatches, cfg.vision_config.out_hidden_size], dtype := visionDType }) :=
   m.visual.forward cfg.vision_config pixelValues
 
-def getVideoFeatures {nPatches : UInt64}
+def getVideoFeatures {nPatches : Nat}
     (cfg : VLConfig)
     (m : Qwen35ForConditionalGeneration (visionDType := visionDType) (dtype := dtype) (device := device) cfg)
     (pixelValuesVideos : Tensor { device := device, shape := #[nPatches, VisionConfig.patchDim cfg.vision_config], dtype := visionDType })
@@ -348,7 +348,7 @@ def getVideoFeatures {nPatches : UInt64}
   -- Qwen3.5 reference uses the same path for video/image features.
   getImageFeatures cfg m pixelValuesVideos
 
-private def scatterFeaturesIntoToken {batch seq hidden featTokens featDim : UInt64} {featureDType : DType}
+private def scatterFeaturesIntoToken {batch seq hidden featTokens featDim : Nat} {featureDType : DType}
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (inputsEmbeds : Tensor { device := device, shape := #[batch, seq, hidden], dtype := dtype })
     (tokenId : UInt64)
@@ -370,7 +370,7 @@ private def scatterFeaturesIntoToken {batch seq hidden featTokens featDim : UInt
     (Tensor.reshapeChecked features #[featTokens * featDim]).raw)
   pure (Tensor.maskedScatter inputsEmbeds tokenMask src)
 
-def forwardText {batch seq : UInt64}
+def forwardText {batch seq : Nat}
     (cfg : VLConfig)
     (m : Qwen35ForConditionalGeneration (visionDType := visionDType) (dtype := dtype) (device := device) cfg)
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
@@ -378,7 +378,7 @@ def forwardText {batch seq : UInt64}
     : Tensor { device := device, shape := #[batch, seq, cfg.text_config.vocab_size], dtype := dtype } :=
   m.language_model.forward cfg.text_config inputIds attnMask
 
-def forwardWithImageFeatures {batch seq featTokens : UInt64}
+def forwardWithImageFeatures {batch seq featTokens : Nat}
     (cfg : VLConfig)
     (m : Qwen35ForConditionalGeneration (visionDType := visionDType) (dtype := dtype) (device := device) cfg)
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
@@ -395,7 +395,7 @@ def forwardWithImageFeatures {batch seq featTokens : UInt64}
     imageFeatures
   pure (m.language_model.forwardEmbeds cfg.text_config embeds attnMask)
 
-def forwardWithImageAndVideoFeatures {batch seq imageTokens videoTokens : UInt64}
+def forwardWithImageAndVideoFeatures {batch seq imageTokens videoTokens : Nat}
     (cfg : VLConfig)
     (m : Qwen35ForConditionalGeneration (visionDType := visionDType) (dtype := dtype) (device := device) cfg)
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
@@ -418,7 +418,7 @@ def forwardWithImageAndVideoFeatures {batch seq imageTokens videoTokens : UInt64
     videoFeatures
   pure (m.language_model.forwardEmbeds cfg.text_config embeds2 attnMask)
 
-def forwardWithImagePatches {batch seq nPatches : UInt64}
+def forwardWithImagePatches {batch seq nPatches : Nat}
     (cfg : VLConfig)
     (m : Qwen35ForConditionalGeneration (visionDType := visionDType) (dtype := dtype) (device := device) cfg)
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
@@ -428,7 +428,7 @@ def forwardWithImagePatches {batch seq nPatches : UInt64}
   let imageFeatures ← m.getImageFeatures cfg pixelValues
   m.forwardWithImageFeatures cfg inputIds imageFeatures attnMask
 
-def forwardWithImageAndVideoPatches {batch seq nImagePatches nVideoPatches : UInt64}
+def forwardWithImageAndVideoPatches {batch seq nImagePatches nVideoPatches : Nat}
     (cfg : VLConfig)
     (m : Qwen35ForConditionalGeneration (visionDType := visionDType) (dtype := dtype) (device := device) cfg)
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
@@ -440,7 +440,7 @@ def forwardWithImageAndVideoPatches {batch seq nImagePatches nVideoPatches : UIn
   let videoFeatures ← m.getVideoFeatures cfg pixelValuesVideos
   m.forwardWithImageAndVideoFeatures cfg inputIds imageFeatures videoFeatures attnMask
 
-private def buildInputEmbedsWithFeatures {batch seq : UInt64}
+private def buildInputEmbedsWithFeatures {batch seq : Nat}
     (cfg : VLConfig)
     (m : Qwen35ForConditionalGeneration (visionDType := visionDType) (dtype := dtype) (device := device) cfg)
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
@@ -469,11 +469,11 @@ private def buildInputEmbedsWithFeatures {batch seq : UInt64}
   pure embeds2
 
 /-- Cached multimodal generation by embedding-feature injection at prefill time. -/
-def generate {batch seq : UInt64}
+def generate {batch seq : Nat}
     (cfg : VLConfig)
     (m : Qwen35ForConditionalGeneration (visionDType := visionDType) (dtype := dtype) (device := device) cfg)
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
-    (maxNewTokens : UInt64 := 256)
+    (maxNewTokens : Nat := 256)
     (strategy : SamplingStrategy := .greedy)
     (eosTokenIds : Array UInt64 := #[])
     (imageFeatures : Option (Sigma (fun n => Tensor { device := device, shape := #[n, cfg.vision_config.out_hidden_size], dtype := visionDType })) := none)
@@ -489,12 +489,12 @@ def generate {batch seq : UInt64}
     eosTokenIds
 
 /-- Cached multimodal generation with per-step token callback (streaming). -/
-def generateStream {batch seq : UInt64}
+def generateStream {batch seq : Nat}
     (cfg : VLConfig)
     (m : Qwen35ForConditionalGeneration (visionDType := visionDType) (dtype := dtype) (device := device) cfg)
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (onStep : StreamCallback (device := device) batch)
-    (maxNewTokens : UInt64 := 256)
+    (maxNewTokens : Nat := 256)
     (strategy : SamplingStrategy := .greedy)
     (eosTokenIds : Array UInt64 := #[])
     (imageFeatures : Option (Sigma (fun n => Tensor { device := device, shape := #[n, cfg.vision_config.out_hidden_size], dtype := visionDType })) := none)
@@ -512,11 +512,11 @@ def generateStream {batch seq : UInt64}
 
 /-- Uncached multimodal generation (greedy/multinomial) by repeated full forward.
     This keeps multimodal context support without introducing multimodal KV-cache plumbing. -/
-partial def generateUncached {batch seq : UInt64}
+partial def generateUncached {batch seq : Nat}
     (cfg : VLConfig)
     (m : Qwen35ForConditionalGeneration (visionDType := visionDType) (dtype := dtype) (device := device) cfg)
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
-    (maxNewTokens : UInt64 := 256)
+    (maxNewTokens : Nat := 256)
     (strategy : SamplingStrategy := .greedy)
     (eosTokenIds : Array UInt64 := #[])
     (imageFeatures : Option (Sigma (fun n => Tensor { device := device, shape := #[n, cfg.vision_config.out_hidden_size], dtype := visionDType })) := none)
@@ -526,7 +526,7 @@ partial def generateUncached {batch seq : UInt64}
   let _ := support.down
   let rec loop
       (remaining : Nat)
-      {curSeq : UInt64}
+      {curSeq : Nat}
       (cur : Tensor { device := device, shape := #[batch, curSeq], dtype := .Int64 })
       : IO (Sigma (fun outSeq => Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })) := do
     if remaining == 0 then
@@ -568,7 +568,7 @@ partial def generateUncached {batch seq : UInt64}
     else
       loop (remaining - 1) appended
 
-  loop maxNewTokens.toNat inputIds
+  loop maxNewTokens inputIds
 
 end Qwen35ForConditionalGeneration
 

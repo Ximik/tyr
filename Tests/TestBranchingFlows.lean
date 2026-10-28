@@ -843,7 +843,7 @@ def testBranchingMoleculePackingAndLosses : IO Unit := do
   }
   let cfg : BranchingTrainConfig := { maxLen := 2, padToken := 0 }
   let ⟨batch, packed⟩ ← packBranchingMolecule cfg result
-  LeanTest.assertEqual batch (1 : UInt64) "Packed molecule batch should preserve batch size"
+  LeanTest.assertEqual batch (1 : Nat) "Packed molecule batch should preserve batch size"
   LeanTest.assertTrue (Float.abs (Tensor.item (Tensor.sumAll packed.coord) - 6.0) < 1.0e-6)
     "Packed molecule coordinates should contain the bridge state coordinates"
   LeanTest.assertTrue (Float.abs (Tensor.item (Tensor.sumAll packed.coordAnchor) - 15.0) < 1.0e-6)
@@ -859,10 +859,10 @@ def testBranchingMoleculePackingAndLosses : IO Unit := do
   LeanTest.assertTrue (Float.abs (Tensor.item (Tensor.sumAll packed.delTarget) - 1.0) < 1.0e-6)
     "Packed molecule deletion targets should preserve BranchingBridgeResult targets"
 
-  let totalLogits := batch.toNat * cfg.maxLen.toNat * 10
+  let totalLogits := batch * cfg.maxLen * 10
   let labelLogits : Tensor { dtype := .Float32, shape := #[batch, cfg.maxLen, 10], device := .CPU } :=
     Tensor.reshapeChecked (floatsDynamic (Array.replicate totalLogits 0.0)) #[batch, cfg.maxLen, 10]
-  let flat := batch.toNat * cfg.maxLen.toNat
+  let flat := batch * cfg.maxLen
   let splitLogits : Tensor { dtype := .Float32, shape := #[batch, cfg.maxLen], device := .CPU } :=
     Tensor.reshapeChecked (floatsDynamic (Array.replicate flat 0.0)) #[batch, cfg.maxLen]
   let delLogits : Tensor { dtype := .Float32, shape := #[batch, cfg.maxLen], device := .CPU } :=
@@ -877,14 +877,14 @@ def testBranchingMoleculePackingAndLosses : IO Unit := do
 
   let labelDFM := DistNoisyDiscreteConfig.qm9 10 9
   let ⟨batchDfm, packedDfm⟩ ← packBranchingMoleculeWithDFM cfg labelDFM result
-  LeanTest.assertEqual batchDfm (1 : UInt64) "DFM-packed molecule batch should preserve batch size"
+  LeanTest.assertEqual batchDfm (1 : Nat) "DFM-packed molecule batch should preserve batch size"
   let scaleSum := Tensor.item (Tensor.sumAll packedDfm.labelLossScale)
   LeanTest.assertTrue (Float.abs (scaleSum - (1.0 / 0.95)) < 1.0e-5)
     s!"DFM-packed molecule batch should carry Flowfusion label scale at t=0.25, got {scaleSum}"
-  let totalDfmLogits := batchDfm.toNat * cfg.maxLen.toNat * 10
+  let totalDfmLogits := batchDfm * cfg.maxLen * 10
   let labelLogitsDfm : Tensor { dtype := .Float32, shape := #[batchDfm, cfg.maxLen, 10], device := .CPU } :=
     Tensor.reshapeChecked (floatsDynamic (Array.replicate totalDfmLogits 0.0)) #[batchDfm, cfg.maxLen, 10]
-  let flatDfm := batchDfm.toNat * cfg.maxLen.toNat
+  let flatDfm := batchDfm * cfg.maxLen
   let splitLogitsDfm : Tensor { dtype := .Float32, shape := #[batchDfm, cfg.maxLen], device := .CPU } :=
     Tensor.reshapeChecked (floatsDynamic (Array.replicate flatDfm 0.0)) #[batchDfm, cfg.maxLen]
   let delLogitsDfm : Tensor { dtype := .Float32, shape := #[batchDfm, cfg.maxLen], device := .CPU } :=
@@ -961,19 +961,19 @@ def testMoleculeMuonUpdatesMatrixAndVectorLeaves : IO Unit := do
     s!"Muon should flatten and update vector leaves like the Julia rule, delta={vectorDelta}"
   LeanTest.assertEqual state'.step 1 "Muon optimizer state should advance one step"
 
-private def moleculeCoordCell {maxLen : UInt64}
+private def moleculeCoordCell {maxLen : Nat}
     (coord : Tensor { dtype := .Float32, shape := #[1, maxLen, 3], device := .CPU }) (j k : Nat) : Float :=
-  let row : Tensor { dtype := .Float32, shape := #[1, 1, 3], device := .CPU } := sliceTyped coord 1 j.toUInt64 1
-  let cell : Tensor { dtype := .Float32, shape := #[1, 1, 1], device := .CPU } := sliceTyped row 2 k.toUInt64 1
+  let row : Tensor { dtype := .Float32, shape := #[1, 1, 3], device := .CPU } := sliceTyped coord 1 j 1
+  let cell : Tensor { dtype := .Float32, shape := #[1, 1, 1], device := .CPU } := sliceTyped row 2 k 1
   Tensor.item (cell.reshapeChecked #[])
 
 @[test]
 def testMoleculeTransformerCoordTargetCapAppliesInTrainingAndInference : IO Unit := do
-  let maxLen : UInt64 := 1
-  let vocab : UInt64 := 2
-  let heads : UInt64 := 1
-  let headDim : UInt64 := 2
-  let mlp : UInt64 := 2
+  let maxLen : Nat := 1
+  let vocab : Nat := 2
+  let heads : Nat := 1
+  let headDim : Nat := 2
+  let mlp : Nat := 2
   let cap := 2.0
   torch.manualSeed 20260709
   let initialized ← MoleculeTransformerParams.init vocab heads headDim mlp

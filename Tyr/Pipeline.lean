@@ -812,7 +812,7 @@ def withDistributedWithHandlers (config : PipelineConfig) (logHandlers : LogHand
   if worldSize > 1 then
     if ← cuda_is_available then
       dist.setCudaDevice localRank.toUInt64
-    dist.initProcessGroup "nccl" masterAddr masterPort.toUInt64 rank.toUInt64 worldSize.toUInt64
+    dist.initProcessGroup "nccl" masterAddr masterPort rank worldSize
 
   let result ← runPipelineWithHandlers config logHandlers action
 

@@ -11,10 +11,10 @@ open torch
 variable {device : Device}
 open Tyr.GPU.Kernels.Loss
 
-private def vocab : UInt64 := 3072
+private def vocab : Nat := 3072
 
 private structure LossShape where
-  rows : UInt64
+  rows : Nat
 
 private def lossMatrix : LeanBenchmark.Matrix LossShape := {
   defaultProfile := "training"
@@ -37,7 +37,7 @@ private def lossMatrix : LeanBenchmark.Matrix LossShape := {
 }
 
 private def benchmarkShape (cfg : Benchmark.Config) (stream : UInt64)
-    (caseLabel : String) (rows : UInt64) : IO (Array String × Bool) := do
+    (caseLabel : String) (rows : Nat) : IO (Array String × Bool) := do
   let device ← Device.cuda 0
   let logitsBase : Tensor { shape := #[rows, vocab], dtype := .BFloat16, device := device } :=
     (← Tensor.randn #[rows, vocab] false device).toBFloat16
@@ -49,12 +49,13 @@ private def benchmarkShape (cfg : Benchmark.Config) (stream : UInt64)
   let gradLogits ← Tensor.uniformLike logitsBase 0 0
   let gradScale : Float32 := 1.0 / rows.toFloat32
 
+  let rowsArg ← Tyr.GPU.Codegen.launchArg rows "rows"
   let launchRows : IO Unit :=
     crossEntropyRowsVocab3072Bf16Train.launch
-      logitsBase.raw targets.raw losses.raw gradLogits.raw rows gradScale
+      logitsBase.raw targets.raw losses.raw gradLogits.raw rowsArg gradScale
       rows 1 1 256 1 1 0 stream
   let launchMean : IO Unit :=
-    reduceMeanLossRowsF32.launch losses.raw meanLoss.raw rows
+    reduceMeanLossRowsF32.launch losses.raw meanLoss.raw rowsArg
       1 1 1 256 1 1 0 stream
   let launchTraining : IO Unit := do
     launchRows

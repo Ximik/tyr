@@ -17,8 +17,8 @@ deriving Repr, BEq, DecidableEq
 namespace TensorSpec
 
 /-- Reorder dimensions for a permutation. -/
-def permuteShape (s : Shape) (permutation : Array UInt64) : Shape :=
-  permutation.map fun p => s.getD p.toNat 0
+def permuteShape (s : Shape) (permutation : Array Nat) : Shape :=
+  permutation.map fun p => s.getD p 0
 
 /-- Shape after concatenation along `dim`; libtorch checks compatibility. -/
 def catShape (s1 s2 : Shape) (dim : Nat) : Shape :=
@@ -34,7 +34,7 @@ def rank (spec : TensorSpec) : Nat :=
   spec.shape.size
 
 def numelOfShape (shape : Shape) : Nat :=
-  shape.foldl (fun acc dim => acc * dim.toNat) 1
+  shape.foldl (fun acc dim => acc * dim) 1
 
 def numel (spec : TensorSpec) : Nat :=
   numelOfShape spec.shape
@@ -45,7 +45,7 @@ def withShape (spec : TensorSpec) (shape : Shape) : TensorSpec :=
 def withDType (spec : TensorSpec) (dtype : DType) : TensorSpec :=
   { spec with dtype }
 
-private def dimFromRight (shape : Shape) (offset : Nat) : UInt64 :=
+private def dimFromRight (shape : Shape) (offset : Nat) : Nat :=
   if offset < shape.size then
     shape.getD (shape.size - 1 - offset) 1
   else
@@ -56,7 +56,7 @@ def broadcastShapes? (lhs rhs : Shape) : Option Shape :=
   else if rhs.isEmpty then some lhs
   else
     let maxLen := Nat.max lhs.size rhs.size
-    let rec go : List Nat → List UInt64 → Option Shape
+    let rec go : List Nat → List Nat → Option Shape
       | [], revOut => some revOut.toArray
       | offset :: rest, revOut =>
           let ldim := dimFromRight lhs offset

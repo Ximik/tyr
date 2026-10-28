@@ -243,8 +243,8 @@ private def checkComparisonFailures : IO Unit := do
   check rejected "mixed comparison rejects overflow in a finite tolerance bound"
 
 /-- Deterministic int64 token-id tensor `[1, seq]` on `device`. -/
-private def mkIds (vals : Array Int64) (device : Device) : Tensor { shape := #[1, vals.size.toUInt64], dtype := .Int64, device := device } :=
-  Tensor.reshapeChecked ((Tensor.fromInt64Array vals).to device) #[1, vals.size.toUInt64]
+private def mkIds (vals : Array Int64) (device : Device) : Tensor { shape := #[1, vals.size], dtype := .Int64, device := device } :=
+  Tensor.reshapeChecked ((Tensor.fromInt64Array vals).to device) #[1, vals.size]
 
 /-- Base 20-token prompt (deterministic). -/
 private def baseIds : Array Int64 :=
@@ -287,7 +287,7 @@ private def runCacheParityModel {dtype : DType} [DType.RealFloating dtype]
     (model : LagunaForCausalLM (device := device) cfg dtype) (tol : Float) (bf16Diagnostic := false) : IO Unit := do
   let support ← dtype.acquireConstantSupport device
   let _ := support.down
-  let seq : UInt64 := 20
+  let seq : Nat := 20
   let ids : Tensor { shape := #[1, seq], dtype := .Int64, device := device } := mkIds baseIds device
 
   -- Single full-sequence forward (uncached path).
@@ -302,7 +302,7 @@ private def runCacheParityModel {dtype : DType} [DType.RealFloating dtype]
   let dPrefill ← maxAbsDiff (logitsPre) (logitsAll)
 
   -- Prefill 12 tokens, then decode positions 12..19 one token at a time.
-  let prefillLen : UInt64 := 12
+  let prefillLen : Nat := 12
   let idsPre : Tensor { shape := #[1, prefillLen], dtype := .Int64, device := device } := sliceTyped ids 1 0 prefillLen
   let cacheP0 := LagunaModel.initCache (batch := 1) cfg model.model seq device
   let (hiddenP, cacheP1) ←
@@ -318,13 +318,13 @@ private def runCacheParityModel {dtype : DType} [DType.RealFloating dtype]
 
   let mut cache := cacheP1
   let mut dStep : Float := 0.0
-  for pos in [prefillLen.toNat : seq.toNat] do
-    let tok : Tensor { shape := #[1, 1], dtype := .Int64, device := device } := sliceTyped ids 1 pos.toUInt64 1
+  for pos in [prefillLen : seq] do
+    let tok : Tensor { shape := #[1, 1], dtype := .Int64, device := device } := sliceTyped ids 1 pos 1
     let (hiddenStep, cache') ←
-      model.model.forwardStep cfg (model.embedTokens tok) tables pos.toUInt64 cache
+      model.model.forwardStep cfg (model.embedTokens tok) tables pos cache
     cache := cache'
     let logitsStep : Tensor { shape := #[1, 1, cfg.vocab_size], device := device, dtype := dtype } := Tensor.linear3d hiddenStep model.lmHead
-    let logitsRef : Tensor { shape := #[1, 1, cfg.vocab_size], device := device, dtype := dtype } := sliceTyped logitsAll 1 pos.toUInt64 1
+    let logitsRef : Tensor { shape := #[1, 1, cfg.vocab_size], device := device, dtype := dtype } := sliceTyped logitsAll 1 pos 1
     let d ← maxAbsDiff (logitsStep) (logitsRef)
     if d > dStep then dStep := d
 
@@ -339,10 +339,10 @@ private def runCacheParityModel {dtype : DType} [DType.RealFloating dtype]
 normalization and RoPE rows are shared between all three operation shapes.
 Return numeric violations and undetected erased-history controls separately;
 the caller reports every layer before asserting their aggregate counts. -/
-private def runBf16AttentionCacheParity {numHeads rotaryDim : UInt64}
+private def runBf16AttentionCacheParity {numHeads rotaryDim : Nat}
     (cfg : Config) (lbl : String) (attention : LagunaAttention (device := device) cfg numHeads .BFloat16)
     (inputs : Tensor { shape := #[1, 20, cfg.hidden_size], device := device, dtype := .BFloat16 })
-    (cos sin : Tensor { shape := #[20, rotaryDim / 2], dtype := .Float32, device := device }) (window : Option UInt64)
+    (cos sin : Tensor { shape := #[20, rotaryDim / 2], dtype := .Float32, device := device }) (window : Option Nat)
     (fresh : LagunaAttention.KVCache (device := device) cfg 1 .BFloat16) : IO (Nat × Nat) := do
   let fullOutput : Tensor { shape := #[1, 20, cfg.hidden_size], device := device, dtype := .BFloat16 } := attention.forward (rotaryDim := rotaryDim) cfg inputs cos sin window
   let inputsPre : Tensor { shape := #[1, 12, cfg.hidden_size], device := device, dtype := .BFloat16 } := sliceTyped inputs 1 0 12
@@ -357,10 +357,10 @@ private def runBf16AttentionCacheParity {numHeads rotaryDim : UInt64}
   let mut stepStats : MixedErrorStats := {}
   let mut undetected : Nat := 0
   for pos in [12:20] do
-    let input : Tensor { shape := #[1, 1, cfg.hidden_size], device := device, dtype := .BFloat16 } := sliceTyped inputs 1 pos.toUInt64 1
-    let expected : Tensor { shape := #[1, 1, cfg.hidden_size], device := device, dtype := .BFloat16 } := sliceTyped fullOutput 1 pos.toUInt64 1
-    let cosStep : Tensor { shape := #[1, rotaryDim / 2], dtype := .Float32, device := device } := sliceTyped cos 0 pos.toUInt64 1
-    let sinStep : Tensor { shape := #[1, rotaryDim / 2], dtype := .Float32, device := device } := sliceTyped sin 0 pos.toUInt64 1
+    let input : Tensor { shape := #[1, 1, cfg.hidden_size], device := device, dtype := .BFloat16 } := sliceTyped inputs 1 pos 1
+    let expected : Tensor { shape := #[1, 1, cfg.hidden_size], device := device, dtype := .BFloat16 } := sliceTyped fullOutput 1 pos 1
+    let cosStep : Tensor { shape := #[1, rotaryDim / 2], dtype := .Float32, device := device } := sliceTyped cos 0 pos 1
+    let sinStep : Tensor { shape := #[1, rotaryDim / 2], dtype := .Float32, device := device } := sliceTyped sin 0 pos 1
     if pos == 12 then
       let erased := { cache with vStoreDyn := (Tensor.zerosLike cache.vStoreDyn.2).packShape }
       let (bad, _) := attention.forwardStep
@@ -545,15 +545,15 @@ private def runOwnedCacheCheck (device : Device) (bf16 : Bool := false) : IO Uni
     let some oldCache := functional.kvCaches[1]? | throw <| IO.userError "missing sliding cache"
     let oldK := oldCache.kStoreDyn.2
     let oldKCopy ← data.cloneInferenceIO oldK
-    for pos in [promptLen.toNat:20] do
-      let tok : Tensor { shape := #[1, 1], dtype := .Int64, device := device } := sliceTyped ids 1 pos.toUInt64 1
+    for pos in [promptLen:20] do
+      let tok : Tensor { shape := #[1, 1], dtype := .Int64, device := device } := sliceTyped ids 1 pos 1
       let emb := model.embedTokens tok
-      let (expected, next) ← model.decodeStep cfg tables emb pos.toUInt64 functional
+      let (expected, next) ← model.decodeStep cfg tables emb pos functional
       functional := next
-      let actual ← model.decodeSession cfg tables emb pos.toUInt64 session
+      let actual ← model.decodeSession cfg tables emb pos session
       let diff ← maxAbsDiff (actual) (expected)
       maxDiff := max maxDiff diff
-      if pos == promptLen.toNat then firstLogits := some actual
+      if pos == promptLen then firstLogits := some actual
     IO.println s!"  [{lbl}] owned decode maxAbs={maxDiff} before fork comparison"
     check ((← maxAbsDiff oldK oldKCopy) == 0.0) "functional decode preserves earlier cache snapshots"
     -- Original ring has wrapped repeatedly. A shallow fork would now read
@@ -595,11 +595,11 @@ private def runCacheBenchmark (device : Device) : IO Unit := do
   let ids : Tensor { shape := #[1, 20], dtype := .Int64, device := device } := mkIds baseIds device
   let prompt : Tensor { shape := #[1, 12], dtype := .Int64, device := device } := sliceTyped ids 1 0 12
   let synchronize : IO Unit := if device == .CPU then pure () else torch.cuda_synchronize
-  for capacity in #[(128 : UInt64), 8192] do
+  for capacity in #[(128 : Nat), 8192] do
     let tables ← precomputeRotaryTables cfg capacity device
     let mut functionalMs : Nat := 0
     let mut ownedMs : Nat := 0
-    let mut ownedCapacity : UInt64 := 0
+    let mut ownedCapacity : Nat := 0
     for _ in [:3] do
       let (_, initial) ← model.prefill cfg tables (model.embedTokens prompt)
         (model.model.initCache cfg capacity device)
@@ -607,8 +607,8 @@ private def runCacheBenchmark (device : Device) : IO Unit := do
       synchronize
       let start ← IO.monoMsNow
       for pos in [12:20] do
-        let tok : Tensor { shape := #[1, 1], dtype := .Int64, device := device } := sliceTyped ids 1 pos.toUInt64 1
-        let (_, next) ← model.decodeStep cfg tables (model.embedTokens tok) pos.toUInt64 cache
+        let tok : Tensor { shape := #[1, 1], dtype := .Int64, device := device } := sliceTyped ids 1 pos 1
+        let (_, next) ← model.decodeStep cfg tables (model.embedTokens tok) pos cache
         cache := next
       synchronize
       functionalMs := functionalMs + ((← IO.monoMsNow) - start)
@@ -618,8 +618,8 @@ private def runCacheBenchmark (device : Device) : IO Unit := do
       synchronize
       let start ← IO.monoMsNow
       for pos in [12:20] do
-        let tok : Tensor { shape := #[1, 1], dtype := .Int64, device := device } := sliceTyped ids 1 pos.toUInt64 1
-        let _ ← model.decodeSession cfg tables (model.embedTokens tok) pos.toUInt64 session
+        let tok : Tensor { shape := #[1, 1], dtype := .Int64, device := device } := sliceTyped ids 1 pos 1
+        let _ ← model.decodeSession cfg tables (model.embedTokens tok) pos session
       synchronize
       ownedMs := ownedMs + ((← IO.monoMsNow) - start)
     let bytesPerPosition := 2 * cfg.num_key_value_heads * cfg.head_dim * 4

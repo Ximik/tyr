@@ -175,11 +175,11 @@ private def buildSlaneyMelFilterBankFlat
 
 private def computeSpeakerMelFromWave
     (wave : Array Float)
-    (sampleRate : UInt64)
-    (melDim : UInt64)
-    (nFft : UInt64 := 1024)
-    (hopSize : UInt64 := 256)
-    (winSize : UInt64 := 1024)
+    (sampleRate : Nat)
+    (melDim : Nat)
+    (nFft : Nat := 1024)
+    (hopSize : Nat := 256)
+    (winSize : Nat := 1024)
     (fminHz : Float := 0.0)
     (fmaxHz : Option Float := none)
     : IO (Sigma fun frames => Tensor { shape := #[1, frames, melDim], dtype := .Float32, device := .CPU }) := do
@@ -188,9 +188,9 @@ private def computeSpeakerMelFromWave
   if nFft == 0 || hopSize == 0 || winSize == 0 then
     throw <| IO.userError "Invalid STFT config for speaker mel (n_fft/hop_size/win_size must be > 0)."
 
-  let pad : UInt64 := if nFft > hopSize then (nFft - hopSize) / 2 else 0
-  let padded := reflectPad1d wave pad.toNat
-  let paddedLen : UInt64 := padded.size.toUInt64
+  let pad : Nat := if nFft > hopSize then (nFft - hopSize) / 2 else 0
+  let padded := reflectPad1d wave pad
+  let paddedLen : Nat := padded.size
   let wav : Tensor { shape := #[paddedLen], dtype := .Float32, device := .CPU } := Tensor.reshapeChecked (Tensor.fromFloatArray padded) #[paddedLen]
 
   let window : Tensor { shape := #[winSize], dtype := .Float32, device := .CPU } := Tensor.hannWindow winSize
@@ -199,9 +199,9 @@ private def computeSpeakerMelFromWave
   if stftShape.size < 3 then
     throw <| IO.userError s!"Unexpected STFT rank {stftShape.size}, expected 3"
 
-  let freqBins : UInt64 := stftShape.getD 0 0
-  let frames : UInt64 := stftShape.getD 1 0
-  let packed : UInt64 := stftShape.getD 2 0
+  let freqBins : Nat := stftShape.getD 0 0
+  let frames : Nat := stftShape.getD 1 0
+  let packed : Nat := stftShape.getD 2 0
   if packed != 2 then
     throw <| IO.userError s!"Unexpected STFT packed size {packed}, expected 2"
   if frames == 0 then
@@ -216,7 +216,7 @@ private def computeSpeakerMelFromWave
 
   let melMaxHz : Float := fmaxHz.getD (sampleRate.toFloat / 2.0)
   let melFlat := buildSlaneyMelFilterBankFlat
-    freqBins.toNat melDim.toNat sampleRate.toNat fminHz melMaxHz
+    freqBins melDim sampleRate fminHz melMaxHz
   let melFilter : Tensor { shape := #[freqBins, melDim], dtype := .Float32, device := .CPU } := Tensor.reshapeChecked (Tensor.fromFloatArray melFlat) #[freqBins, melDim]
   let melPow : Tensor { shape := #[melDim, frames], dtype := .Float32, device := .CPU } := Tensor.mm (Tensor.transpose2d melFilter) mag
   let melLog : Tensor { shape := #[melDim, frames], dtype := .Float32, device := .CPU } := Tensor.log (Tensor.clampFloat melPow (1e-5 : Float) (1e10 : Float))
@@ -224,15 +224,15 @@ private def computeSpeakerMelFromWave
   let mel3 : Tensor { shape := #[1, frames, melDim], dtype := .Float32, device := .CPU } := Tensor.reshapeChecked melFrameMajor #[1, frames, melDim]
   pure ⟨frames, mel3⟩
 
-private def loadResampledMonoWav (path : String) (targetSr : UInt64) : IO (Array Float) := do
+private def loadResampledMonoWav (path : String) (targetSr : Nat) : IO (Array Float) := do
   let (sr, wav) ← qwen3asr.loadMonoPcm16Wav path
   if sr == targetSr then
     pure wav
   else
     data.resampleSoxrHQ wav sr targetSr
 
-private def formatCodesRows (flat : Array UInt64) (numCodeGroups : UInt64) : String := Id.run do
-  let g := numCodeGroups.toNat
+private def formatCodesRows (flat : Array UInt64) (numCodeGroups : Nat) : String := Id.run do
+  let g := numCodeGroups
   if g == 0 then
     return ""
   let rows := flat.size / g
@@ -301,27 +301,27 @@ def encodeAudioToCodes
     let wave ← loadResampledMonoWav audioPath encoder.inputSampleRate
     if wave.isEmpty then
       throw <| IO.userError s!"Audio encode input is empty: {audioPath}"
-    let samples : UInt64 := wave.size.toUInt64
+    let samples : Nat := wave.size
     -- Keep long-form encode numerically stable by processing in bounded chunks.
-    let chunkSamples : Nat := (encoder.inputSampleRate * 10).toNat
-    let leftContextSamples : Nat := (encoder.inputSampleRate * 12).toNat
+    let chunkSamples : Nat := (encoder.inputSampleRate * 10)
+    let leftContextSamples : Nat := (encoder.inputSampleRate * 12)
     if wave.size <= chunkSamples then
       let audio0 : Tensor { shape := #[samples], dtype := .Float32, device := .CPU } := Tensor.reshapeChecked (Tensor.fromFloatArray wave) #[samples]
       let audio : Tensor { shape := #[samples], dtype := .Float32, device := device } :=
         audio0.to encoder.conv0Weight.device
-      let frames : UInt64 := encodedFrames samples
+      let frames : Nat := encodedFrames samples
       let ⟨groups, codes⟩ := encoder.encodeMonoFrameMajorWithRoPEOffsetDynamic (Tensor.castLike encoder.conv0Weight audio)
       let flat : Tensor { shape := #[frames * groups], dtype := .Int64, device := device } := Tensor.reshapeChecked codes #[frames * groups]
       let vals ← Tensor.toUInt64Array flat
       IO.FS.writeFile codesPath (formatCodesRows vals groups)
     else
-      let expectedRows : Nat := (encodedFrames samples).toNat
+      let expectedRows : Nat := (encodedFrames samples)
       IO.FS.withFile codesPath .write fun h => do
         let mut st :=
           SpeechTokenizer12HzEncoder.initEncodeStreamState chunkSamples leftContextSamples
         let mut off : Nat := 0
         let mut rowsWritten : Nat := 0
-        let mut groups? : Option UInt64 := none
+        let mut groups? : Option Nat := none
         while _h : off < wave.size && rowsWritten < expectedRows do
           let remaining := wave.size - off
           let takeN := Nat.min chunkSamples remaining
@@ -335,7 +335,7 @@ def encodeAudioToCodes
                   s!"Inconsistent encoder code-group count across chunks ({g0} vs {groups})."
           | none =>
               groups? := some groups
-          let groupsNat : Nat := groups.toNat
+          let groupsNat : Nat := groups
           let availRows := valsKeep.size / groupsNat
           let rowsToWrite := Nat.min availRows (expectedRows - rowsWritten)
           if rowsToWrite > 0 then
@@ -349,8 +349,8 @@ def encodeAudioToCodes
 def prepareSpeakerMel
     (_bridge : SpeechTokenizerBridgeConfig)
     (audioPath melOutPath melFramesPath : String)
-    (sampleRate : UInt64 := 24000)
-    (melDim : UInt64 := 128)
+    (sampleRate : Nat := 24000)
+    (melDim : Nat := 128)
     : IO Unit := do
   let audioPath ← expandHome audioPath
   let melOutPath ← expandHome melOutPath

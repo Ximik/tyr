@@ -27,7 +27,7 @@ open torch
 
 /-- Evaluation models preserve the supplied batch and sequence dimensions and
 expose their actual vocabulary size in the result type. -/
-abbrev ModelRunner (vocab : UInt64) := {batch seq : UInt64} →
+abbrev ModelRunner (vocab : Nat) := {batch seq : Nat} →
   Tensor { shape := #[batch, seq], dtype := .Int64, device := device } → IO (Tensor { shape := #[batch, seq, vocab], dtype := .Float32, device := device })
 
 /-! ## Task Types -/
@@ -178,7 +178,7 @@ def padSequences (sequences : Array (Array UInt64)) (padToken : UInt64) : Array 
   result
 
 /-- Convert padded sequences to input tensor -/
-def sequencesToTensor {batch seq : UInt64} (sequences : Array (Array UInt64))
+def sequencesToTensor {batch seq : Nat} (sequences : Array (Array UInt64))
     : Tensor { shape := #[batch, seq], dtype := .Int64, device := .CPU } :=
   -- Flatten and convert to int64 array
   let flat := sequences.foldl (fun acc seq => acc ++ seq.map (·.toInt64)) #[]
@@ -247,7 +247,7 @@ structure EvalResult where
 
 /-- Compute per-token losses from model output.
     Returns losses tensor where losses[i] is loss for predicting token i+1 from position i. -/
-def computeLosses {batch seq vocab : UInt64} (logits : Tensor { shape := #[batch, seq, vocab], dtype := .Float32, device := device })
+def computeLosses {batch seq vocab : Nat} (logits : Tensor { shape := #[batch, seq, vocab], dtype := .Float32, device := device })
     (targetIds : Tensor { shape := #[batch, seq], dtype := .Int64, device := device }) : Tensor { shape := #[batch, seq], dtype := .Float32, device := device } :=
   -- Compute cross-entropy at each position
   -- logits: [batch, seq, vocab], targets: [batch, seq]
@@ -266,7 +266,7 @@ def computeLosses {batch seq vocab : UInt64} (logits : Tensor { shape := #[batch
     2. Compute cross-entropy loss at each position
     3. Average the losses over the continuation region (startIdx to endIdx)
     4. Pick the option with lowest average loss -/
-def evaluateMC {batch seq vocab : UInt64}
+def evaluateMC {batch seq vocab : Nat}
     (logits : Tensor { shape := #[batch, seq, vocab], dtype := .Float32, device := device })
     (targetIds : Tensor { shape := #[batch, seq], dtype := .Int64, device := device })
     (batchInfo : BatchInfo)
@@ -288,15 +288,15 @@ def evaluateMC {batch seq vocab : UInt64}
     else
       -- Extract losses for this sequence: losses2d[i, si-1:ei-1]
       -- (loss at position j predicts token j+1)
-      let rowIdx := i.toUInt64
+      let rowIdx := i
       let startLossIdx := if si > 0 then si - 1 else 0
       let endLossIdx := if ei > 0 then ei - 1 else 0
 
       -- Compute mean via tensor operations
       let lossesFlat := Tensor.reshapeChecked losses2d #[batch * seq]
       let rowOffset := rowIdx * seq
-      let startIdx := rowOffset + startLossIdx.toUInt64
-      let numTokens := (endLossIdx - startLossIdx).toUInt64
+      let startIdx := rowOffset + startLossIdx
+      let numTokens := endLossIdx - startLossIdx
 
       if numTokens > 0 then
         let segmentLosses := Tensor.sliceChecked lossesFlat 0 startIdx numTokens #[numTokens]
@@ -324,7 +324,7 @@ def evaluateMC {batch seq vocab : UInt64}
     1. Get argmax predictions at each position
     2. Compare predictions[start-1:end-1] with target tokens[start:end]
     3. Return correct=true if all predictions match -/
-def evaluateLM {seq vocab : UInt64}
+def evaluateLM {seq vocab : Nat}
     (logits : Tensor { shape := #[1, seq, vocab], dtype := .Float32, device := device })
     (targetIds : Tensor { shape := #[1, seq], dtype := .Int64, device := device })
     (batchInfo : BatchInfo) : IO EvalResult := do
@@ -344,15 +344,15 @@ def evaluateLM {seq vocab : UInt64}
 
   -- Compare predictions[start-1:end-1] with targets[start:end]
   -- This checks if the model correctly predicts each continuation token
-  let predStartIdx := if startIdx > 0 then (startIdx - 1).toUInt64 else 0
-  let predEndIdx := if endIdx > 0 then (endIdx - 1).toUInt64 else 0
+  let predStartIdx := if startIdx > 0 then startIdx - 1 else 0
+  let predEndIdx := if endIdx > 0 then endIdx - 1 else 0
   let numTokens := predEndIdx - predStartIdx
 
   if numTokens == 0 then
     return { correct := false, losses := #[], prediction := 0 }
 
   let predSlice := Tensor.sliceChecked predsFlat 0 predStartIdx numTokens #[numTokens]
-  let targetSlice := Tensor.sliceChecked targetFlat 0 startIdx.toUInt64 numTokens #[numTokens]
+  let targetSlice := Tensor.sliceChecked targetFlat 0 startIdx numTokens #[numTokens]
   let allCorrect := (← predSlice.toUInt64Array) == (← targetSlice.toUInt64Array)
 
   return { correct := allCorrect
@@ -364,7 +364,7 @@ def evaluateLM {seq vocab : UInt64}
 /-- Evaluation configuration -/
 structure EvalConfig where
   /-- Model's maximum sequence length (for truncation) -/
-  maxSeqLen : Option UInt64 := none
+  maxSeqLen : Option Nat := none
   /-- BOS token ID for padding -/
   bosToken : UInt64 := 0
   /-- Device to run on -/
@@ -384,7 +384,7 @@ def stackAndPad (tokens : Array (Array UInt64)) (padToken : UInt64) : Array UInt
   return result
 
 /-- Evaluate a single example and return whether it's correct -/
-def evaluateSingleExample {vocab : UInt64}
+def evaluateSingleExample {vocab : Nat}
     (item : EvalItem)
     (taskMeta : TaskMeta)
     (tokenize : String → Array UInt64)
@@ -413,10 +413,10 @@ def evaluateSingleExample {vocab : UInt64}
     if batchInfo.tokens.isEmpty then return none
     -- Prepare input tensor
     let paddedTokens := stackAndPad batchInfo.tokens bosToken
-    let batchSize := batchInfo.tokens.size.toUInt64
-    let seqLen := if batchInfo.tokens.isEmpty then (1 : UInt64)
+    let batchSize := batchInfo.tokens.size
+    let seqLen := if batchInfo.tokens.isEmpty then (1 : Nat)
                   else
-                    (batchInfo.tokens.foldl (fun acc (seq : Array UInt64) => max acc seq.size) 0).toUInt64
+                    (batchInfo.tokens.foldl (fun acc (seq : Array UInt64) => max acc seq.size) 0)
 
     -- Convert to tensor
     let inputTensor := Tensor.fromInt64Array (paddedTokens.map (·.toInt64))
@@ -447,7 +447,7 @@ def evaluateSingleExample {vocab : UInt64}
     2. Tokenize and batch
     3. Run model forward
     4. Use evaluateMC/evaluateLM/evaluateSchema to determine correctness -/
-def evaluateTask {vocab : UInt64}
+def evaluateTask {vocab : Nat}
     (examples : Array EvalItem)
     (taskMeta : TaskMeta)
     (tokenize : String → Array UInt64)

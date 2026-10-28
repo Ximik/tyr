@@ -10,14 +10,14 @@ structure Precision where
   compute : DType
   norm : DType
 
-structure Block (size : UInt64) (precision : Precision) {device : Device} where
+structure Block (size : Nat) (precision : Precision) {device : Device} where
   weight : Tensor ⟨#[size], precision.compute, device⟩
   norm : Tensor ⟨#[size], precision.norm, device⟩
   indices : Tensor ⟨#[size], .Int64, device⟩
   label : Static String
   deriving TensorStruct
 
-structure Model (size : UInt64) (precision : Precision) (device : Device) where
+structure Model (size : Nat) (precision : Precision) (device : Device) where
   blocks : Array (Option (Block size precision (device := device)))
   step : Nat
   deriving TensorStruct
@@ -29,7 +29,7 @@ abbrev Target := Model 2 ⟨.BFloat16, .Float32⟩ .CPU
 example (input : Source) : IO Target := TensorStruct.castTo Target input
 
 -- Source and destination parameters can be runtime values.
-example {size : UInt64} {source target : Precision} {sourceDevice targetDevice : Device}
+example {size : Nat} {source target : Precision} {sourceDevice targetDevice : Device}
     (input : Model size source sourceDevice) : IO (Model size target targetDevice) :=
   TensorStruct.castTo (Model size target targetDevice) input
 
@@ -86,7 +86,7 @@ example : True := by
   trivial
 
 structure DependentParameters (size : Nat) (selected : Fin size) (dtype : DType) where
-  weight : Tensor ⟨#[selected.val.toUInt64], dtype, .CPU⟩
+  weight : Tensor ⟨#[selected.val], dtype, .CPU⟩
   deriving TensorStruct
 
 example {n m : Nat} {i : Fin n} {j : Fin m} {source target : DType}
@@ -94,7 +94,7 @@ example {n m : Nat} {i : Fin n} {j : Fin m} {source target : DType}
   TensorStruct.castTo (DependentParameters m j target) input
 
 structure DependentFields where
-  size : UInt64
+  size : Nat
   weight : Tensor ⟨#[size], .Float32, .CPU⟩
 
 /-- error: Automatic TensorTreeCast derivation does not support fields whose types depend on earlier field values; use a manual TensorTreeCast instance. -/

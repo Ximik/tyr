@@ -1,3 +1,4 @@
+#include "tyr_nat.h"
 #include "generated/tyr_ffi.h"
 
 #include <cmath>
@@ -80,9 +81,19 @@ static void stop_queue() {
 extern "C" {
 
 lean_object* lean_tyr_audio_input_start(
-    uint64_t sample_rate,
-    uint64_t channels,
-    uint64_t buffer_ms) {
+    lean_obj_arg sample_rate_obj,
+    lean_obj_arg channels_obj,
+    lean_obj_arg buffer_ms_obj) {
+  tyr::OwnedArg sample_rate_owner(sample_rate_obj), channels_owner(channels_obj),
+      buffer_ms_owner(buffer_ms_obj);
+  uint64_t sample_rate, channels, buffer_ms;
+  try {
+    sample_rate = tyr::natTo<uint32_t>(sample_rate_obj, "sample_rate");
+    channels = tyr::natTo<uint32_t>(channels_obj, "channels");
+    buffer_ms = tyr::natTo<uint32_t>(buffer_ms_obj, "buffer_ms");
+  } catch (const std::exception& e) {
+    return mk_io_error(e.what());
+  }
   if (sample_rate == 0 || channels == 0) {
     return mk_io_error("audio_input_start: sample_rate/channels must be > 0");
   }
@@ -123,7 +134,13 @@ lean_object* lean_tyr_audio_input_start(
   const uint64_t ms = (buffer_ms == 0) ? 100 : buffer_ms;
   uint64_t frames = (sample_rate * ms) / 1000;
   if (frames < 256) frames = 256;
-  UInt32 bytes = static_cast<UInt32>(frames * channels * sizeof(float));
+  uint64_t buffer_bytes = 0;
+  if (__builtin_mul_overflow(frames, channels * sizeof(float), &buffer_bytes) ||
+      buffer_bytes > std::numeric_limits<UInt32>::max()) {
+    AudioQueueDispose(queue, true);
+    return mk_io_error("audio_input_start: buffer size exceeds 4294967295 bytes");
+  }
+  UInt32 bytes = static_cast<UInt32>(buffer_bytes);
 
   for (int i = 0; i < 3; ++i) {
     AudioQueueBufferRef buf = nullptr;
@@ -154,8 +171,16 @@ lean_object* lean_tyr_audio_input_start(
 }
 
 lean_object* lean_tyr_audio_input_read(
-    uint64_t max_samples,
-    uint64_t block_ms) {
+    b_lean_obj_arg max_samples_obj,
+    lean_obj_arg block_ms_obj) {
+  tyr::OwnedArg block_ms_owner(block_ms_obj);
+  uint64_t max_samples, block_ms;
+  try {
+    max_samples = tyr::natTo<uint64_t>(max_samples_obj, "max_samples");
+    block_ms = tyr::natTo<int64_t>(block_ms_obj, "block_ms");
+  } catch (const std::exception& e) {
+    return mk_io_error(e.what());
+  }
   if (max_samples == 0) {
     return lean_io_result_mk_ok(lean_mk_empty_array());
   }
@@ -183,8 +208,16 @@ lean_object* lean_tyr_audio_input_read(
 }
 
 lean_object* lean_tyr_audio_input_read_buffer(
-    uint64_t max_samples,
-    uint64_t block_ms) {
+    b_lean_obj_arg max_samples_obj,
+    lean_obj_arg block_ms_obj) {
+  tyr::OwnedArg block_ms_owner(block_ms_obj);
+  uint64_t max_samples, block_ms;
+  try {
+    max_samples = tyr::natTo<uint64_t>(max_samples_obj, "max_samples");
+    block_ms = tyr::natTo<int64_t>(block_ms_obj, "block_ms");
+  } catch (const std::exception& e) {
+    return mk_io_error(e.what());
+  }
   if (max_samples == 0) {
     return lean_io_result_mk_ok(tyr_float_buffer_from_raw(nullptr, 0));
   }
@@ -247,15 +280,21 @@ static lean_object* mk_io_error(const char* msg) {
 
 extern "C" {
 
-lean_object* lean_tyr_audio_input_start(uint64_t, uint64_t, uint64_t) {
+lean_object* lean_tyr_audio_input_start(
+    lean_obj_arg sample_rate, lean_obj_arg channels, lean_obj_arg buffer_ms) {
+  lean_dec(sample_rate);
+  lean_dec(channels);
+  lean_dec(buffer_ms);
   return mk_io_error("audio input is only supported on macOS");
 }
 
-lean_object* lean_tyr_audio_input_read(uint64_t, uint64_t) {
+lean_object* lean_tyr_audio_input_read(b_lean_obj_arg, lean_obj_arg block_ms) {
+  lean_dec(block_ms);
   return mk_io_error("audio input is only supported on macOS");
 }
 
-lean_object* lean_tyr_audio_input_read_buffer(uint64_t, uint64_t) {
+lean_object* lean_tyr_audio_input_read_buffer(b_lean_obj_arg, lean_obj_arg block_ms) {
+  lean_dec(block_ms);
   return mk_io_error("audio input is only supported on macOS");
 }
 

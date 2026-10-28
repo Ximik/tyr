@@ -5,6 +5,7 @@
  * Implements row-group-by-row-group iteration for memory-efficient processing.
  */
 
+#include "tyr_nat.h"
 #include <lean/lean.h>
 #include <string>
 #include "tyr_checked_result.h"
@@ -165,9 +166,10 @@ lean_object* lean_parquet_get_metadata(b_lean_obj_arg file_path) {
 // Reads a specific row group from a parquet file, returning text column data.
 // ============================================================================
 
-lean_object* lean_parquet_read_row_group(b_lean_obj_arg file_path, uint64_t row_group_idx,
+lean_object* lean_parquet_read_row_group(b_lean_obj_arg file_path, b_lean_obj_arg row_group_idx_obj,
                                           b_lean_obj_arg text_column) {
     return tyr::checkedIoCall("Parquet.readRowGroup", [&] {
+  const uint64_t row_group_idx = tyr::natTo<int>(row_group_idx_obj, "row_group_idx");
     std::string path = lean_string_cstr(file_path);
     std::string column_name = lean_string_cstr(text_column);
 
@@ -478,8 +480,9 @@ lean_object* lean_parquet_read_as_json(b_lean_obj_arg file_path) {
 // More memory-efficient for large files.
 // ============================================================================
 
-lean_object* lean_parquet_read_row_group_as_json(b_lean_obj_arg file_path, uint64_t row_group_idx) {
+lean_object* lean_parquet_read_row_group_as_json(b_lean_obj_arg file_path, b_lean_obj_arg row_group_idx_obj) {
     return tyr::checkedIoCall("Parquet.readRowGroupAsJson", [&] {
+  const uint64_t row_group_idx = tyr::natTo<int>(row_group_idx_obj, "row_group_idx");
     std::string path = lean_string_cstr(file_path);
 
     // Open file

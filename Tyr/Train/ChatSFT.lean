@@ -109,9 +109,9 @@ structure SFTState where
     agree on shape. -/
 structure SFTBatch where
   /-- Batch size -/
-  batchSize : UInt64
+  batchSize : Nat
   /-- Sequence length -/
-  seqLen : UInt64
+  seqLen : Nat
   /-- Input token IDs: [batchSize, seqLen] as Int64 tensor -/
   inputs : Tensor { shape := #[batchSize, seqLen], dtype := .Int64, device := device }
   /-- Target token IDs: [batchSize, seqLen] as Int64 tensor -/
@@ -166,7 +166,7 @@ def SFTBatch.ofConversationBatch (batch : ConversationBatch) : SFTBatch (device 
     promoted sum-accumulation dtype of logits and mask (Float32 when both are
     Float32).
 -/
-def maskedCrossEntropy? {batch seq vocab : UInt64} {d m result : DType} {dev : Device}
+def maskedCrossEntropy? {batch seq vocab : Nat} {d m result : DType} {dev : Device}
     [DType.Promotes d m result]
     (logits : Tensor ⟨#[batch, seq, vocab], d, dev⟩)
     (targets : Tensor ⟨#[batch, seq], .Int64, dev⟩)
@@ -198,7 +198,7 @@ def maskedCrossEntropy? {batch seq vocab : UInt64} {d m result : DType} {dev : D
 
 /-- Pure masked loss over real floating logits. Use `maskedCrossEntropy?` to
 recover invalid target labels or unsupported native kernels. -/
-def maskedCrossEntropy {batch seq vocab : UInt64} {d m result : DType} {dev : Device}
+def maskedCrossEntropy {batch seq vocab : Nat} {d m result : DType} {dev : Device}
     [DType.RealFloating d] [DType.Promotes d m result]
     (logits : Tensor ⟨#[batch, seq, vocab], d, dev⟩)
     (targets : Tensor ⟨#[batch, seq], .Int64, dev⟩)
@@ -213,7 +213,7 @@ def maskedCrossEntropy {batch seq vocab : UInt64} {d m result : DType} {dev : De
 
 /-- Build an Int64 token tensor from host data over the raw FFI boundary.
     `reshapeChecked` validates the result metadata (shape and Int64 dtype). -/
-private def int64TensorFromArray (arr : Array Int64) : Tensor { shape := #[arr.size.toUInt64], dtype := .Int64, device := .CPU } :=
+private def int64TensorFromArray (arr : Array Int64) : Tensor { shape := #[arr.size], dtype := .Int64, device := .CPU } :=
   Tensor.fromInt64Array arr
 
 /-- Prepare SFT batch from tokenized conversations.
@@ -263,15 +263,15 @@ def prepareSFTBatch (convs : Array TokenizedConversation) (maxLen : Nat) (padTok
 
   -- Convert to tensors
   let inputsTensor := (int64TensorFromArray allInputs).reshapeChecked
-    #[batchSize.toUInt64, seqLen.toUInt64]
+    #[batchSize, seqLen]
   let targetsTensor := (int64TensorFromArray allTargets).reshapeChecked
-    #[batchSize.toUInt64, seqLen.toUInt64]
+    #[batchSize, seqLen]
   let maskTensor := (Tensor.fromFloatArray allMasks).reshapeChecked
-    #[batchSize.toUInt64, seqLen.toUInt64]
+    #[batchSize, seqLen]
 
   return {
-    batchSize := batchSize.toUInt64
-    seqLen := seqLen.toUInt64
+    batchSize := batchSize
+    seqLen := seqLen
     inputs := inputsTensor
     targets := targetsTensor
     mask := maskTensor
@@ -285,7 +285,7 @@ def prepareSFTBatch (convs : Array TokenizedConversation) (maxLen : Nat) (padTok
 
     forwardFn should take inputs [batch, seq] and return logits [batch, seq, vocab]
 -/
-def sftForward {batch seq vocab : UInt64} {d m result : DType} {dev : Device}
+def sftForward {batch seq vocab : Nat} {d m result : DType} {dev : Device}
     [DType.Promotes d m result]
     (forwardFn : Tensor ⟨#[batch, seq], .Int64, dev⟩ → IO (Tensor ⟨#[batch, seq, vocab], d, dev⟩))
     (inputs : Tensor ⟨#[batch, seq], .Int64, dev⟩)
@@ -305,8 +305,8 @@ def sftForward {batch seq vocab : UInt64} {d m result : DType} {dev : Device}
 def evalValidationLoss [TensorStruct Params]
     (params : Params)
     (dataFn : IO (SFTBatch (device := .CPU)))
-    (forwardFn : Params → {b s : UInt64} → Tensor { shape := #[b, s], dtype := .Int64, device := device } →
-      IO (Σ v : UInt64, Tensor { shape := #[b, s, v], dtype := .Float32, device := device }))
+    (forwardFn : Params → {b s : Nat} → Tensor { shape := #[b, s], dtype := .Int64, device := device } →
+      IO (Σ v : Nat, Tensor { shape := #[b, s, v], dtype := .Float32, device := device }))
     (numSteps : Nat)
     (targetDevice : Device := device)
     : IO Float := do
@@ -412,9 +412,9 @@ def trainLoop [TensorStruct P] [FloatingTensorStruct P]
     (cfg : SFTConfig)
     (params : P)
     (optState : Optim.AdamWState P)
-    (forwardFn : P → {b s : UInt64} → Tensor { shape := #[b, s], dtype := .Int64, device := device } →
-      IO (Σ v : UInt64, Tensor { shape := #[b, s, v], dtype := .Float32, device := device }))  -- params → inputs → logits
-    (lossFn : {b s v : UInt64} → Tensor { shape := #[b, s, v], dtype := .Float32, device := device } → Tensor { shape := #[b, s], dtype := .Int64, device := device } →
+    (forwardFn : P → {b s : Nat} → Tensor { shape := #[b, s], dtype := .Int64, device := device } →
+      IO (Σ v : Nat, Tensor { shape := #[b, s, v], dtype := .Float32, device := device }))  -- params → inputs → logits
+    (lossFn : {b s v : Nat} → Tensor { shape := #[b, s, v], dtype := .Float32, device := device } → Tensor { shape := #[b, s], dtype := .Int64, device := device } →
       Tensor { shape := #[b, s], dtype := .Float32, device := device } → Tensor { shape := #[], dtype := .Float32, device := device })  -- logits → targets → mask → loss
     (trainDataFn : IO (SFTBatch (device := .CPU)))
     (valDataFn : Option (IO (SFTBatch (device := .CPU))) := none)
@@ -550,9 +550,9 @@ def makeTaskDataGenerator
 def trainSFT [TensorStruct P] [FloatingTensorStruct P]
     (cfg : SFTConfig)
     (params : P)
-    (forwardFn : P → {b s : UInt64} → Tensor { shape := #[b, s], dtype := .Int64, device := device } →
-      IO (Σ v : UInt64, Tensor { shape := #[b, s, v], dtype := .Float32, device := device }))
-    (lossFn : {b s v : UInt64} → Tensor { shape := #[b, s, v], dtype := .Float32, device := device } → Tensor { shape := #[b, s], dtype := .Int64, device := device } →
+    (forwardFn : P → {b s : Nat} → Tensor { shape := #[b, s], dtype := .Int64, device := device } →
+      IO (Σ v : Nat, Tensor { shape := #[b, s, v], dtype := .Float32, device := device }))
+    (lossFn : {b s v : Nat} → Tensor { shape := #[b, s, v], dtype := .Float32, device := device } → Tensor { shape := #[b, s], dtype := .Int64, device := device } →
       Tensor { shape := #[b, s], dtype := .Float32, device := device } → Tensor { shape := #[], dtype := .Float32, device := device })
     (trainDataFn : IO (SFTBatch (device := .CPU)))
     (numTrainExamples : Nat)

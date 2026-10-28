@@ -329,15 +329,15 @@ def renderConversation
 /-- Build an Int64 token tensor from host data over the raw FFI boundary.
     The runtime shape is the array length; `reshapeChecked` validates the
     result metadata (shape and Int64 dtype) against the static spec. -/
-private def int64TensorFromArray (arr : Array Int64) : Tensor { shape := #[arr.size.toUInt64], dtype := .Int64, device := .CPU } :=
+private def int64TensorFromArray (arr : Array Int64) : Tensor { shape := #[arr.size], dtype := .Int64, device := .CPU } :=
   Tensor.fromInt64Array arr
 
 /-- A batch of tokenized conversations -/
 structure ConversationBatch where
   /-- Batch size (number of conversations) -/
-  batchSize : UInt64
+  batchSize : Nat
   /-- Sequence length after padding -/
-  seqLen : UInt64
+  seqLen : Nat
   /-- Token IDs: [batchSize, seqLen] -/
   tokens : Tensor { shape := #[batchSize, seqLen], dtype := .Int64, device := .CPU }
   /-- Training mask: [batchSize, seqLen], 1 = train, 0 = ignore -/
@@ -386,14 +386,14 @@ def collate (convs : Array TokenizedConversation) (maxLen : Nat) (padToken : UIn
 
   -- Convert to tensors
   let tokensFlat := int64TensorFromArray (allTokens.map (·.toInt64))
-  let tokensTensor := tokensFlat.reshapeChecked #[batchSize.toUInt64, actualMaxLen.toUInt64]
+  let tokensTensor := tokensFlat.reshapeChecked #[batchSize, actualMaxLen]
 
   let maskFlat := Tensor.fromFloatArray (allMasks.map fun m => m.toNat.toFloat)
-  let maskTensor := maskFlat.reshapeChecked #[batchSize.toUInt64, actualMaxLen.toUInt64]
+  let maskTensor := maskFlat.reshapeChecked #[batchSize, actualMaxLen]
 
   return {
-    batchSize := batchSize.toUInt64
-    seqLen := actualMaxLen.toUInt64
+    batchSize := batchSize
+    seqLen := actualMaxLen
     tokens := tokensTensor
     mask := maskTensor
     lengths
@@ -533,8 +533,8 @@ private def TaskTokenStream.popWindow? (s : TaskTokenStream) (n : Nat)
 /-- Consume one GPT batch from the stream.
     Returns input/target tensors shaped `[batchSize, seqLen]`. -/
 def TaskTokenStream.nextGPTBatch (stream : TaskTokenStream)
-    : IO (Option (Tensor { shape := #[stream.batchSize.toUInt64, stream.seqLen.toUInt64], dtype := .Int64, device := .CPU } ×
-                  Tensor { shape := #[stream.batchSize.toUInt64, stream.seqLen.toUInt64], dtype := .Int64, device := .CPU }) ×
+    : IO (Option (Tensor { shape := #[stream.batchSize, stream.seqLen], dtype := .Int64, device := .CPU } ×
+                  Tensor { shape := #[stream.batchSize, stream.seqLen], dtype := .Int64, device := .CPU }) ×
           TaskTokenStream) := do
   if stream.batchSize == 0 || stream.seqLen == 0 || stream.mixture.size == 0 then
     return (none, stream)
@@ -565,10 +565,10 @@ def TaskTokenStream.nextGPTBatch (stream : TaskTokenStream)
 
     let inputFlat := int64TensorFromArray (inputIds.map (·.toInt64))
     let inputTensor := inputFlat.reshapeChecked
-      #[stream.batchSize.toUInt64, stream.seqLen.toUInt64]
+      #[stream.batchSize, stream.seqLen]
     let targetFlat := int64TensorFromArray (targetIds.map (·.toInt64))
     let targetTensor := targetFlat.reshapeChecked
-      #[stream.batchSize.toUInt64, stream.seqLen.toUInt64]
+      #[stream.batchSize, stream.seqLen]
 
     let progress :=
       if sWindow.mixture.size == 0 then

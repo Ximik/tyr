@@ -20,22 +20,22 @@ open torch
 
 inductive SamplingStrategy where
   | greedy
-  | multinomial (temperature : Float := 1.0) (topK : UInt64 := 0) (topP : Float := 1.0)
+  | multinomial (temperature : Float := 1.0) (topK : Nat := 0) (topP : Float := 1.0)
   deriving Repr, Inhabited
 
 /-- Callback invoked on every generated token during streaming decode.
     Tokens are Int64 vocabulary indices. -/
-abbrev StreamCallback (batch : UInt64) := UInt64 → Tensor { device := device, shape := #[batch], dtype := .Int64 } → IO Unit
+abbrev StreamCallback (batch : Nat) := Nat → Tensor { device := device, shape := #[batch], dtype := .Int64 } → IO Unit
 
 /-- All-false Bool mask on the same placement as `reference`. -/
-private def falseMaskLike {n : UInt64} {dev : Device}
+private def falseMaskLike {n : Nat} {dev : Device}
     (reference : Tensor ⟨#[n], .Int64, dev⟩) : Tensor ⟨#[n], .Bool, dev⟩ :=
   Tensor.eqScalar (Tensor.zerosLike reference) 1
 
 /-! ## Token Selection -/
 
 /-- Sample a batch of next tokens from logits according to a strategy. -/
-def sampleFromLogits {batch vocab : UInt64}
+def sampleFromLogits {batch vocab : Nat}
     (logits : Tensor { device := device, shape := #[batch, vocab], dtype := .Float32 })
     (strategy : SamplingStrategy)
     : IO (Tensor { device := device, shape := #[batch], dtype := .Int64 }) := do
@@ -65,7 +65,7 @@ def sampleFromLogits {batch vocab : UInt64}
 /-! ## EOS / Finish Helpers -/
 
 /-- Return a Bool mask of tokens that belong to `values`. -/
-def tokenInSet {n : UInt64}
+def tokenInSet {n : Nat}
     (tokens : Tensor { device := device, shape := #[n], dtype := .Int64 })
     (values : Array UInt64)
     : Tensor { device := device, shape := #[n], dtype := .Bool } :=
@@ -77,7 +77,7 @@ def tokenInSet {n : UInt64}
     return mask
 
 /-- Replace tokens with `eosToken` wherever `finished` is true. -/
-def applyFinishedEos {n : UInt64}
+def applyFinishedEos {n : Nat}
     (tokens : Tensor { device := device, shape := #[n], dtype := .Int64 })
     (finished : Tensor { device := device, shape := #[n], dtype := .Bool })
     (eosToken : UInt64)

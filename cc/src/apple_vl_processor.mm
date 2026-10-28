@@ -1,3 +1,4 @@
+#include "tyr_nat.h"
 #include "generated/tyr_ffi.h"
 #include "tyr_checked_result.h"
 /*
@@ -593,10 +594,16 @@ extern "C" {
 
 lean_object* lean_torch_media_load_image_patchified(
     b_lean_obj_arg path_obj,
-    uint64_t in_channels,
-    uint64_t patch_size,
-    uint64_t temporal_patch_size) {
+    b_lean_obj_arg in_channels_obj,
+    b_lean_obj_arg patch_size_obj,
+    b_lean_obj_arg temporal_patch_size_obj) {
   return tyr::checkedIoCall("loadImagePatchified", [&] {
+  const uint64_t in_channels = tyr::natTo<int>(in_channels_obj, "in_channels");
+  const uint64_t patch_size = tyr::natTo<int>(patch_size_obj, "patch_size");
+  const uint64_t temporal_patch_size = tyr::natTo<int>(temporal_patch_size_obj, "temporal_patch_size");
+  tyr::checkedProduct<int64_t>(
+      tyr::checkedProduct<int64_t>(in_channels, temporal_patch_size, "in_channels * temporal_patch_size"),
+      tyr::checkedProduct<int64_t>(patch_size, patch_size, "patch_size * patch_size"), "patch_dim");
   const char* path_c = lean_string_cstr(path_obj);
   std::string path(path_c);
 
@@ -630,12 +637,20 @@ lean_object* lean_torch_media_load_image_patchified(
 
 lean_object* lean_torch_media_load_video_patchified(
     b_lean_obj_arg path_obj,
-    uint64_t in_channels,
-    uint64_t patch_size,
-    uint64_t temporal_patch_size,
-    uint64_t max_frames,
-    uint64_t frame_stride) {
+    b_lean_obj_arg in_channels_obj,
+    b_lean_obj_arg patch_size_obj,
+    b_lean_obj_arg temporal_patch_size_obj,
+    b_lean_obj_arg max_frames_obj,
+    b_lean_obj_arg frame_stride_obj) {
   return tyr::checkedIoCall("loadVideoPatchified", [&] {
+  const uint64_t in_channels = tyr::natTo<int>(in_channels_obj, "in_channels");
+  const uint64_t patch_size = tyr::natTo<int>(patch_size_obj, "patch_size");
+  const uint64_t temporal_patch_size = tyr::natTo<int>(temporal_patch_size_obj, "temporal_patch_size");
+  tyr::checkedProduct<int64_t>(
+      tyr::checkedProduct<int64_t>(in_channels, temporal_patch_size, "in_channels * temporal_patch_size"),
+      tyr::checkedProduct<int64_t>(patch_size, patch_size, "patch_size * patch_size"), "patch_dim");
+  const uint64_t max_frames = tyr::natTo<int>(max_frames_obj, "max_frames");
+  const uint64_t frame_stride = tyr::natTo<int>(frame_stride_obj, "frame_stride");
   const char* path_c = lean_string_cstr(path_obj);
   std::string path(path_c);
 
@@ -659,11 +674,19 @@ lean_object* lean_torch_media_load_video_patchified(
 
 LEAN_EXPORT lean_object* lean_torch_media_load_image_patch_grid_gemma4(
     b_lean_obj_arg path_obj,
-    uint64_t patch_size,
-    uint64_t pooling_kernel_size,
-    uint64_t max_soft_tokens,
+    b_lean_obj_arg patch_size_obj,
+    b_lean_obj_arg pooling_kernel_size_obj,
+    b_lean_obj_arg max_soft_tokens_obj,
     double rescale_factor) {
   return tyr::checkedIoCall("loadGemma4ImagePatchGrid", [&] {
+  const uint64_t patch_size = tyr::natTo<int>(patch_size_obj, "patch_size");
+  const uint64_t pooling_kernel_size = tyr::natTo<int>(pooling_kernel_size_obj, "pooling_kernel_size");
+  const uint64_t max_soft_tokens = tyr::natTo<int>(max_soft_tokens_obj, "max_soft_tokens");
+  tyr::checkedProduct<int>(max_soft_tokens,
+      tyr::checkedProduct<int>(pooling_kernel_size, patch_size, "pooling_kernel_size * patch_size"),
+      "max_soft_tokens * pooling_kernel_size * patch_size");
+  tyr::checkedProduct<int64_t>(3, tyr::checkedProduct<int64_t>(patch_size, patch_size, "patch_size * patch_size"),
+      "patch_dim");
   const char* path_c = lean_string_cstr(path_obj);
   std::string path(path_c);
 
@@ -726,20 +749,20 @@ extern "C" {
 
 lean_object* lean_torch_media_load_image_patchified(
     b_lean_obj_arg /*path_obj*/,
-    uint64_t /*in_channels*/,
-    uint64_t /*patch_size*/,
-    uint64_t /*temporal_patch_size*/) {
+    b_lean_obj_arg /*in_channels*/,
+    b_lean_obj_arg /*patch_size*/,
+    b_lean_obj_arg /*temporal_patch_size*/) {
   return lean_io_result_mk_error(lean_mk_io_user_error(
     lean_mk_string("Apple media path requires macOS build")));
 }
 
 lean_object* lean_torch_media_load_video_patchified(
     b_lean_obj_arg /*path_obj*/,
-    uint64_t /*in_channels*/,
-    uint64_t /*patch_size*/,
-    uint64_t /*temporal_patch_size*/,
-    uint64_t /*max_frames*/,
-    uint64_t /*frame_stride*/) {
+    b_lean_obj_arg /*in_channels*/,
+    b_lean_obj_arg /*patch_size*/,
+    b_lean_obj_arg /*temporal_patch_size*/,
+    b_lean_obj_arg /*max_frames*/,
+    b_lean_obj_arg /*frame_stride*/) {
   return lean_io_result_mk_error(lean_mk_io_user_error(
     lean_mk_string("Apple media path requires macOS build")));
 }

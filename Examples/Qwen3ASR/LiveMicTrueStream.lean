@@ -11,16 +11,16 @@ structure Args where
   cacheDir : String := "~/.cache/huggingface/tyr-models"
   language : Option String := none
   context : String := ""
-  maxNewTokens : UInt64 := 128
+  maxNewTokens : Nat := 128
   chunkSec : Float := 2.0
   hopSec : Float := 0.5
   runSec : Float := 30.0
   sileroVADPath : Option String := none
   deriving Inhabited
 
-private def parseNatArg (name : String) (v : String) : IO UInt64 :=
+private def parseNatArg (name : String) (v : String) : IO Nat :=
   match v.toNat? with
-  | some n => pure n.toUInt64
+  | some n => pure n
   | none => throw <| IO.userError s!"Invalid {name}: {v}"
 
 private def parseFloatLit? (s : String) : Option Float :=
@@ -110,7 +110,7 @@ def runMain (argv : List String) : IO UInt32 := do
   try
     let mut lastUnstable := ""
     for _ in [:steps] do
-      let pcm ← Tyr.Audio.AppleInput.read hopSamples.toUInt64 1500
+      let pcm ← Tyr.Audio.AppleInput.read hopSamples 1500
       let (ssNext, out) ← pushAudio sm ss pcm (maxNewTokens := args.maxNewTokens)
       ss := ssNext
       if out.didDecode then

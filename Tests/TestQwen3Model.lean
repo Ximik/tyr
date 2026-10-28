@@ -18,12 +18,12 @@ private def tinyCfg : Config := {
   max_position_embeddings := 128
 }
 
-private def flattenIds {batch seq : UInt64} (ids : Tensor { shape := #[batch, seq], dtype := .Int64, device := .CPU }) : IO (Array UInt64) := do
+private def flattenIds {batch seq : Nat} (ids : Tensor { shape := #[batch, seq], dtype := .Int64, device := .CPU }) : IO (Array UInt64) := do
   let flat : Tensor { shape := #[batch * seq], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked (Tensor.toInt64 ids) #[batch * seq]
   Tensor.toUInt64Array flat
 
-private def rowToken (vals : Array UInt64) (seq : UInt64) (row col : Nat) : UInt64 :=
-  vals.getD (row * seq.toNat + col) 0
+private def rowToken (vals : Array UInt64) (seq : Nat) (row col : Nat) : UInt64 :=
+  vals.getD (row * seq + col) 0
 
 @[test]
 def testQwen3InitAndForward : IO Unit := do
@@ -160,7 +160,7 @@ def testQwen3BatchedEosIsRowAware : IO Unit := do
     LeanTest.assertTrue (row1First != eosTok)
       "row 1 should still be active when row 0 first reaches EOS"
 
-    for t in [3:seqCached.toNat] do
+    for t in [3:seqCached] do
       let tok := rowToken cachedVals seqCached 0 t
       LeanTest.assertEqual tok eosTok
         "once finished, a row should stay on EOS for subsequent decode steps"

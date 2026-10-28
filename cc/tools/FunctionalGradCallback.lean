@@ -7,9 +7,9 @@ private def Raw : Type := RawSpec.type
 private instance : Nonempty Raw := RawSpec.property
 
 @[extern "lean_torch_reshape_exact"] private opaque reshape
-    (input : @& Raw) (target : @& Array UInt64) : Raw
+    (input : @& Raw) (target : @& Array Nat) : Raw
 @[extern "lean_torch_sum"] private opaque sum
-    (input : @& Raw) (dims : Option (Array UInt64)) (keepdim : Bool) : Raw
+    (input : @& Raw) (dims : Option (Array Nat)) (keepdim : Bool) : Raw
 
 @[export tyr_test_callback_sum] private def sumCallback
     (fallback : Raw) (inputs : Array Raw) : Raw :=

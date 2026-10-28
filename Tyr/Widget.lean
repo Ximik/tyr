@@ -104,12 +104,12 @@ Features:
 
 /-- Props for a single tensor display -/
 structure TensorDisplayProps where
-  shape : Array UInt64
+  shape : Array Nat
   dtype : String
   device : String
   values : Array Float
   requiresGrad : Bool
-  numel : UInt64
+  numel : Nat
   stats : String
   gradValues : Option (Array Float) := none
   gradStats : Option String := none

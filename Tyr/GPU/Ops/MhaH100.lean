@@ -17,38 +17,38 @@ variable {device : Device}
 open Tyr.GPU.Kernels
 
 /-- BF16 tensor shape used by `mha_h100` kernels: `[1, 1, seq, 64]`. -/
-abbrev BF16 (seq : UInt64) : Type := Tensor { shape := #[1, 1, seq, 64], dtype := .BFloat16, device := device }
+abbrev BF16 (seq : Nat) : Type := Tensor { shape := #[1, 1, seq, 64], dtype := .BFloat16, device := device }
 
 /-- FP32 gradient/output tensor shape used by `mha_h100` kernels. -/
-abbrev F32 (seq : UInt64) : Type := Tensor { shape := #[1, 1, seq, 64], dtype := .Float32, device := device }
+abbrev F32 (seq : Nat) : Type := Tensor { shape := #[1, 1, seq, 64], dtype := .Float32, device := device }
 
 /-- Per-query L (device := device)/D vector tensor shape matching TK vector TMA layouts: `[1, 1, 1, seq]`. -/
-abbrev L (kvBlocks : UInt64) : Type := Tensor { shape := #[1, 1, 1, kvBlocks * 64], dtype := .Float32, device := device }
+abbrev L (kvBlocks : Nat) : Type := Tensor { shape := #[1, 1, 1, kvBlocks * 64], dtype := .Float32, device := device }
 
 /-- Launch configuration shared across wrapper entry points. -/
 structure LaunchCfg where
-  gridX : UInt64 := 1
-  gridY : UInt64
-  gridZ : UInt64 := 1
-  blockX : UInt64 := 128
-  blockY : UInt64 := 1
-  blockZ : UInt64 := 1
-  sharedMem : UInt64 := 0
+  gridX : Nat := 1
+  gridY : Nat
+  gridZ : Nat := 1
+  blockX : Nat := 128
+  blockY : Nat := 1
+  blockZ : Nat := 1
+  sharedMem : Nat := 0
   stream : UInt64 := 0
 
-def LaunchCfg.default (kvBlocks stream : UInt64) : LaunchCfg :=
+def LaunchCfg.default (kvBlocks : Nat) (stream : UInt64) : LaunchCfg :=
   { gridY := kvBlocks, stream := stream }
 
-def h100MaxDynamicSharedMem : UInt64 := 227 * 1024 - 1024
+def h100MaxDynamicSharedMem : Nat := 227 * 1024 - 1024
 
-def fwdSharedMem : UInt64 := h100MaxDynamicSharedMem
+def fwdSharedMem : Nat := h100MaxDynamicSharedMem
 
-def bwdPrepSharedMem : UInt64 := h100MaxDynamicSharedMem
+def bwdPrepSharedMem : Nat := h100MaxDynamicSharedMem
 
-def bwdSweepSharedMem : UInt64 := 117760
+def bwdSweepSharedMem : Nat := 117760
 
 /-- Forward outputs reused by backward (`out`, `lOut`). -/
-structure FwdCtx (seq kvBlocks : UInt64) where
+structure FwdCtx (seq kvBlocks : Nat) where
   out : BF16 (device := device) seq
   lOut : L (device := device) kvBlocks
 
@@ -57,14 +57,14 @@ structure FwdCtx (seq kvBlocks : UInt64) where
     - `seq=128` stores `lOut2`
     - `seq=768` stores `lOut12`
     Otherwise both remain `none` and backward uses the portable SDPA path. -/
-structure FwdCtxDispatch (seq : UInt64) where
+structure FwdCtxDispatch (seq : Nat) where
   out : BF16 (device := device) seq
   selection : AttentionSpecialization := .portable
   lOut2 : Option (L (device := device) 2) := none
   lOut12 : Option (L (device := device) 12) := none
 
 /-- Variant (device := device) hooks for supported kernel families. -/
-class Variant (seq kvBlocks : UInt64) where
+class Variant (seq kvBlocks : Nat) where
   launchFwd :
       BF16 (device := device) seq → BF16 (device := device) seq → BF16 (device := device) seq → BF16 (device := device) seq → L (device := device) kvBlocks → LaunchCfg → IO Unit
   launchBwd :
@@ -99,15 +99,15 @@ instance : Variant (device := device) 768 12 where
       cfg.blockX cfg.blockY cfg.blockZ
       cfg.sharedMem cfg.stream
 
-private def launchBwdPrep {seq kvBlocks : UInt64}
+private def launchBwdPrep {seq kvBlocks : Nat}
     (dO out : BF16 (device := device) seq) (dVec : L (device := device) kvBlocks) (cfg : LaunchCfg) : IO Unit := do
-  tkMhaH100BwdPrep2Block.launch dO.raw out.raw dVec.raw seq 64
+  tkMhaH100BwdPrep2Block.launch dO.raw out.raw dVec.raw (← Tyr.GPU.Codegen.launchArg seq "seq") 64
     cfg.gridX cfg.gridY cfg.gridZ
     cfg.blockX cfg.blockY cfg.blockZ
     cfg.sharedMem cfg.stream
 
 /-- High-level forward op for supported `mha_h100` variants. -/
-def mhaFwd {seq kvBlocks : UInt64} [Variant (device := device) seq kvBlocks]
+def mhaFwd {seq kvBlocks : Nat} [Variant (device := device) seq kvBlocks]
     (q k v : BF16 (device := device) seq) (stream : UInt64 := 0) : IO (FwdCtx (device := device) seq kvBlocks) := do
   let cfg := { LaunchCfg.default kvBlocks stream with sharedMem := fwdSharedMem }
   let out := Tensor.zerosLike q
@@ -117,7 +117,7 @@ def mhaFwd {seq kvBlocks : UInt64} [Variant (device := device) seq kvBlocks]
 
 /-- High-level backward op for supported `mha_h100` variants.
     Returns `(dQ, dK, dV)` as FP32 tensors. -/
-def mhaBwd {seq kvBlocks : UInt64} [Variant (device := device) seq kvBlocks]
+def mhaBwd {seq kvBlocks : Nat} [Variant (device := device) seq kvBlocks]
     (q k v dO : BF16 (device := device) seq) (ctx : FwdCtx (device := device) seq kvBlocks) (stream : UInt64 := 0)
     : IO (F32 (device := device) seq × F32 (device := device) seq × F32 (device := device) seq) := do
   let cfg := { LaunchCfg.default kvBlocks stream with sharedMem := bwdPrepSharedMem }
@@ -134,11 +134,11 @@ def mhaBwd {seq kvBlocks : UInt64} [Variant (device := device) seq kvBlocks]
     q k v dO ctx.lOut dVec dQ dK dV bwdCfg
   pure (dQ, dK, dV)
 
-private def sdpaFwdPortable {seq : UInt64}
+private def sdpaFwdPortable {seq : Nat}
     (q k v : BF16 (device := device) seq) (isCausal : Bool) : BF16 (device := device) seq :=
   Tensor.attention q k v isCausal
 
-private def sdpaBwdPortable {seq : UInt64}
+private def sdpaBwdPortable {seq : Nat}
     (q k v dO : BF16 (device := device) seq) (isCausal : Bool) : IO (F32 (device := device) seq × F32 (device := device) seq × F32 (device := device) seq) := do
   let qLeaf ← Tensor.parameter q
   let kLeaf ← Tensor.parameter k
@@ -152,20 +152,20 @@ private def sdpaBwdPortable {seq : UInt64}
   pure (dQ, dK, dV)
 
 /-- Portable forward path (arbitrary `seq`, causal/non-causal) backed by SDPA. -/
-def mhaFwdPortable {seq : UInt64}
+def mhaFwdPortable {seq : Nat}
     (q k v : BF16 (device := device) seq) (isCausal : Bool := false) : IO (BF16 (device := device) seq) :=
   pure (sdpaFwdPortable q k v isCausal)
 
 /-- Portable backward path (arbitrary `seq`, causal/non-causal) backed by autograd+SDPA. -/
-def mhaBwdPortable {seq : UInt64}
+def mhaBwdPortable {seq : Nat}
     (q k v dO : BF16 (device := device) seq) (isCausal : Bool := false) : IO (F32 (device := device) seq × F32 (device := device) seq × F32 (device := device) seq) :=
   sdpaBwdPortable q k v dO isCausal
 
 /-- Recommended sequence lengths for current kernel-first experiments. -/
-def recommendedKernelSeqs : List UInt64 := [128, 768]
+def recommendedKernelSeqs : List Nat := [128, 768]
 
 /-- Current kernel coverage predicate used by dispatch helpers. -/
-def supportsKernelShape (seq : UInt64) (isCausal : Bool := false) : Bool :=
+def supportsKernelShape (seq : Nat) (isCausal : Bool := false) : Bool :=
   match AttentionProblem.currentSpecialization <|
       AttentionProblem.selfAttention seq 64 (.CUDA 0) .BFloat16 isCausal .SM90 with
   | .tkMhaH1002Block | .tkMhaH10012Block => true
@@ -179,7 +179,7 @@ def supportsKernelShape (seq : UInt64) (isCausal : Bool := false) : Bool :=
     tile count: the selector derives its route from the same static shape, so
     the check always succeeds; the legacy erased-shape code passed `seq` to a
     fixed-shape kernel without any evidence. -/
-def mhaFwdDispatch {seq : UInt64}
+def mhaFwdDispatch {seq : Nat}
     (q k v : BF16 (device := device) seq) (stream : UInt64 := 0) (isCausal : Bool := false)
     : IO (FwdCtxDispatch (device := device) seq) := do
   let problem := AttentionProblem.ofQKV q k v none 0.0 isCausal none false none .SM90
@@ -208,7 +208,7 @@ def mhaFwdDispatch {seq : UInt64}
 /-- Backward matching `mhaFwdDispatch`:
     - use kernel backward iff matching saved `L (device := device)` state is present
     - otherwise use portable SDPA autograd gradients. -/
-def mhaBwdDispatch {seq : UInt64}
+def mhaBwdDispatch {seq : Nat}
     (q k v dO : BF16 (device := device) seq) (ctx : FwdCtxDispatch (device := device) seq)
     (stream : UInt64 := 0) (isCausal : Bool := false)
     : IO (F32 (device := device) seq × F32 (device := device) seq × F32 (device := device) seq) := do
@@ -249,13 +249,13 @@ def mhaBwdDispatch {seq : UInt64}
 /-- Main typed forward entrypoint for experimental integration.
     Dispatches to the best available kernel variant for `(seq, isCausal)` and
     otherwise uses the portable SDPA path. -/
-@[inline] def mhaFwdMain {seq : UInt64}
+@[inline] def mhaFwdMain {seq : Nat}
     (q k v : BF16 (device := device) seq) (stream : UInt64 := 0) (isCausal : Bool := false)
     : IO (FwdCtxDispatch (device := device) seq) :=
   mhaFwdDispatch (seq := seq) q k v stream isCausal
 
 /-- Main typed backward entrypoint paired with `mhaFwdMain`. -/
-@[inline] def mhaBwdMain {seq : UInt64}
+@[inline] def mhaBwdMain {seq : Nat}
     (q k v dO : BF16 (device := device) seq) (ctx : FwdCtxDispatch (device := device) seq)
     (stream : UInt64 := 0) (isCausal : Bool := false)
     : IO (F32 (device := device) seq × F32 (device := device) seq × F32 (device := device) seq) :=

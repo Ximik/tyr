@@ -105,14 +105,14 @@ The source shape is checked before conversion and never reshaped. -/
 
 @[extern "lean_torch_tensor_softmax"] opaque softmax (t : @& RawTensor) (dim : Int32 := -1) : RawTensor
 
-@[extern "lean_torch_expand"] opaque expand (t : @& RawTensor) (target : Array UInt64) : RawTensor
+@[extern "lean_torch_expand"] opaque expand (t : @& RawTensor) (target : Array Nat) : RawTensor
 
 @[extern "lean_torch_reshape_exact"] opaque reshape (t : @& RawTensor) (target : @& Shape) : RawTensor
 
-@[extern "lean_torch_permute"] opaque permute (t : @& RawTensor) (permutation : Array UInt64) : RawTensor
+@[extern "lean_torch_permute"] opaque permute (t : @& RawTensor) (permutation : Array Nat) : RawTensor
 
 @[extern "lean_torch_transpose"] opaque transpose (t : @& RawTensor)
-    (dim0 dim1 : UInt64) : Except String RawTensor
+    (dim0 dim1 : @& Nat) : Except String RawTensor
 
 @[extern "lean_torch_unsqueeze"] opaque unsqueeze (t : @& RawTensor) (dim : Nat) : RawTensor
 
@@ -120,9 +120,9 @@ The source shape is checked before conversion and never reshaped. -/
 
 @[extern "lean_torch_cat2"] opaque cat (a b : @& RawTensor) (dim : Int) : RawTensor
 
-@[extern "lean_torch_sum"] opaque sum (t : @& RawTensor) (dims : Option (Array UInt64)) (keepdim : Bool) : RawTensor
+@[extern "lean_torch_sum"] opaque sum (t : @& RawTensor) (dims : Option (Array Nat)) (keepdim : Bool) : RawTensor
 
-@[extern "lean_torch_mean"] opaque mean (t : @& RawTensor) (dims : Option (Array UInt64)) (keepdim : Bool) : RawTensor
+@[extern "lean_torch_mean"] opaque mean (t : @& RawTensor) (dims : Option (Array Nat)) (keepdim : Bool) : RawTensor
 
 /-- Return a tensor with the requested autograd flag, preserving other aliases. -/
 @[extern "lean_torch_set_requires_grad"] opaque setRequiresGrad (t : RawTensor) (requiresGrad : Bool) : IO RawTensor
@@ -138,7 +138,7 @@ def meanAll (t : RawTensor) : RawTensor := mean t none false
 /-- Match the existing FP32 RMS normalization and weight promotion semantics. -/
 def rmsNormWeighted (shape _weightShape : Shape) (x weight : RawTensor) (eps : Float := 1e-6) : RawTensor :=
   let xf := toFloat32 x
-  let variance := mean (mul xf xf) (some #[(shape.size - 1).toUInt64]) true
+  let variance := mean (mul xf xf) (some #[shape.size - 1]) true
   mul (mul xf (rsqrt (addScalar variance eps))) weight
 
 @[extern "lean_torch_dropout"] opaque dropout
@@ -177,14 +177,14 @@ namespace torch.RawTensor
 @[extern "lean_torch_row_norms"] opaque rowNorms (t : @& RawTensor) : RawTensor
 
 @[extern "lean_torch_slice_along_dim"] opaque slice (t : @& RawTensor)
-    (dim start len : UInt64) : RawTensor
+    (dim start len : @& Nat) : RawTensor
 
 @[extern "lean_torch_max_row_norm"] opaque maxRowNorm (t : @& RawTensor) : Float
 
 @[extern "lean_torch_uniform_like"] opaque uniformLike (shape : Shape) (reference : @& RawTensor)
     (lo hi : Float) : IO RawTensor
 
-@[extern "lean_torch_eye"] opaque eye (n : UInt64) (requiresGrad : Bool := false) (noGrad : requiresGrad = false := by decide) : RawTensor
+@[extern "lean_torch_eye"] opaque eye (n : @& Nat) (requiresGrad : Bool := false) (noGrad : requiresGrad = false := by decide) : RawTensor
 
 /-- Complete QR: returns (Q, R) with Q m×m and R m×n. -/
 @[extern "lean_torch_qr"] opaque qr (t : @& RawTensor) : RawTensor × RawTensor
@@ -238,7 +238,7 @@ The effective retention flag is resolved by the typed API from `createGraph`. -/
 
 /-- Draw `numSamples` indices per row of a 2-D probability matrix; Int64 result. -/
 @[extern "lean_torch_multinomial"] opaque multinomial (probs : @& RawTensor)
-    (numSamples : UInt64) (replacement : Bool) : IO RawTensor
+    (numSamples : @& Nat) (replacement : Bool) : IO RawTensor
 
 /-- In-place-style scatter of `src` into `input` along `dim` at `indices`
     (returns a new tensor). Dimension arguments mirror the C ABI. -/
@@ -261,14 +261,14 @@ The effective retention flag is resolved by the typed API from `createGraph`. -/
     (retainGraph createGraph : Bool) : IO Unit
 
 /-- Argmax along a dimension (Int64 indices). The shape argument is unread natively. -/
-@[extern "lean_torch_argmax"] opaque argmax (t : @& RawTensor) (dim : UInt64) : RawTensor
+@[extern "lean_torch_argmax"] opaque argmax (t : @& RawTensor) (dim : @& Nat) : RawTensor
 
 /-- Recoverable argmax, including dtype, empty-axis and kernel failures. -/
 @[extern "lean_torch_argmax_checked"] opaque argmaxChecked
-    (t : @& RawTensor) (dim : UInt64) : Except String RawTensor
+    (t : @& RawTensor) (dim : @& Nat) : Except String RawTensor
 
 /-- Top-k logit filter (entries outside the top k become -inf), shape-preserving. -/
-@[extern "lean_torch_topk_filter"] opaque topKFilter (logits : @& RawTensor) (k : UInt64) : RawTensor
+@[extern "lean_torch_topk_filter"] opaque topKFilter (logits : @& RawTensor) (k : @& Nat) : RawTensor
 
 /-- Top-p (nucleus) logit filter, shape-preserving. -/
 @[extern "lean_torch_topp_filter"] opaque topPFilter (logits : @& RawTensor) (p : Float) : RawTensor
@@ -305,9 +305,9 @@ invalid accelerator indices cannot trigger a device assertion. -/
 @[extern "lean_torch_logical_and"] opaque logicalAnd (a b : @& RawTensor) : RawTensor
 
 @[extern "lean_torch_conv1d"] opaque conv1d
-    (input weight : @& RawTensor) (stride padding dilation : UInt64) : RawTensor
+    (input weight : @& RawTensor) (stride padding dilation : @& Nat) : RawTensor
 @[extern "lean_torch_conv1d_checked"] opaque conv1dChecked
-    (input weight : @& RawTensor) (stride padding dilation : UInt64) : Except String RawTensor
+    (input weight : @& RawTensor) (stride padding dilation : @& Nat) : Except String RawTensor
 @[extern "lean_torch_tensor_to_float_array_dynamic"] opaque toFloatArray
     (t : @& RawTensor) : IO (Array Float)
 @[extern "lean_torch_any"] opaque any (t : @& RawTensor) : Bool
@@ -340,13 +340,13 @@ namespace torch.RawTensor
 
 @[extern "lean_torch_abs_checked"] opaque absChecked (t : @& RawTensor) : Except String RawTensor
 
-@[extern "lean_torch_expand_checked"] opaque expandChecked (t : @& RawTensor) (target : Array UInt64) : Except String RawTensor
+@[extern "lean_torch_expand_checked"] opaque expandChecked (t : @& RawTensor) (target : Array Nat) : Except String RawTensor
 
 @[extern "lean_torch_reshape_exact_checked"] opaque reshapeChecked (t : @& RawTensor) (target : @& Shape) : Except String RawTensor
 
-@[extern "lean_torch_sum_checked"] opaque sumChecked (t : @& RawTensor) (dims : Option (Array UInt64)) (keepdim : Bool) : Except String RawTensor
+@[extern "lean_torch_sum_checked"] opaque sumChecked (t : @& RawTensor) (dims : Option (Array Nat)) (keepdim : Bool) : Except String RawTensor
 
-@[extern "lean_torch_mean_checked"] opaque meanChecked (t : @& RawTensor) (dims : Option (Array UInt64)) (keepdim : Bool) : Except String RawTensor
+@[extern "lean_torch_mean_checked"] opaque meanChecked (t : @& RawTensor) (dims : Option (Array Nat)) (keepdim : Bool) : Except String RawTensor
 
 @[extern "lean_torch_max_all_checked"] opaque maxAllChecked (t : @& RawTensor) : Except String RawTensor
 

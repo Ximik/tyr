@@ -6,7 +6,7 @@ open torch
 variable {device : Device}
 
 /-- Noncausal head-dimension-64 attention with quantized inputs and Float32 reference arithmetic. -/
-def attentionReference {batch heads qSeq kvSeq : UInt64}
+def attentionReference {batch heads qSeq kvSeq : Nat}
     (q : Tensor { shape := #[batch, heads, qSeq, 64], dtype := .BFloat16, device := device })
     (k v : Tensor { shape := #[batch, heads, kvSeq, 64], dtype := .BFloat16, device := device }) := Id.run do
   let kt := (Tensor.transpose k.toFloat32 2 3).reshapeChecked #[batch, heads, 64, kvSeq]
@@ -19,7 +19,7 @@ def attentionReference {batch heads qSeq kvSeq : UInt64}
   return (output, lse)
 
 /-- BF16 SDPA vector-Jacobian product, returned in Float32 for kernel comparison. -/
-def attentionTrainingReference {batch heads seq : UInt64}
+def attentionTrainingReference {batch heads seq : Nat}
     (q k v cotangent : Tensor { shape := #[batch, heads, seq, 64], dtype := .BFloat16, device := device }) :
     IO (Tensor { shape := #[batch, heads, seq, 64], dtype := .BFloat16, device := device } × Tensor { shape := #[batch, heads, seq, 64], dtype := .Float32, device := device } ×
       Tensor { shape := #[batch, heads, seq, 64], dtype := .Float32, device := device } × Tensor { shape := #[batch, heads, seq, 64], dtype := .Float32, device := device }) := do

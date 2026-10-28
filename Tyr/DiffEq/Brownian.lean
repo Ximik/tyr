@@ -1114,7 +1114,7 @@ private def tensorFloatChild {σ : StaticSpec} (path : VirtualBrownianTree (Tens
   mkChildPath path childSeed 0.0
 
 private def tensorNumel {σ : StaticSpec} (ref : Tensor σ) : Nat :=
-  (Tensor.runtimeShape ref).foldl (fun acc d => acc * d.toNat) 1
+  (Tensor.runtimeShape ref).foldl (fun acc d => acc * d) 1
 
 /-- Pack per-element values into a tensor with `ref`'s shape. The packed values
     are Float32 on CPU; the claimed spec is validated against the packed handle

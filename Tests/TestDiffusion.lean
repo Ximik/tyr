@@ -28,9 +28,9 @@ def testMaskSchedule : IO Unit := do
 def testMaskPreservesContext : IO Unit := do
   let schedule := MaskedDiffusionSchedule.init 64 0 16  -- context_len=16
   -- Create random tokens (avoiding 0 which is mask)
-  let x_0 ← Tensor.randint 1 127 #[(2 : UInt64), 128]
+  let x_0 ← Tensor.randint 1 127 #[(2 : Nat), 128]
   -- High timestep = lots of masking
-  let t := Tensor.fullInt #[(2 : UInt64)] 63
+  let t := Tensor.fullInt #[(2 : Nat)] 63
   let x_t ← schedule.addMasks x_0 t
   -- Count total masks and check some were added
   let numMasked := Tensor.item (Tensor.sumAll ((Tensor.eqScalar x_t 0).toFloat32))
@@ -45,15 +45,15 @@ def testMaskPreservesContext : IO Unit := do
 @[test]
 def testMaskedLoss : IO Unit := do
   -- Create dummy logits and targets
-  let logits ← Tensor.randn #[(2 : UInt64), 32, 128] false
-  let targets ← Tensor.randint 0 127 #[(2 : UInt64), 32]
-  let x_t := Tensor.fullInt #[(2 : UInt64), 32] 0  -- All masked
+  let logits ← Tensor.randn #[(2 : Nat), 32, 128] false
+  let targets ← Tensor.randint 0 127 #[(2 : Nat), 32]
+  let x_t := Tensor.fullInt #[(2 : Nat), 32] 0  -- All masked
   let loss := maskedCrossEntropyLoss logits targets x_t 0
   let lossVal := Tensor.item loss
   LeanTest.assertTrue (not lossVal.isNaN) "Loss not NaN"
   LeanTest.assertTrue (lossVal > 0) "Loss positive"
   -- Test with no masked positions
-  let x_t_none ← Tensor.randint 1 127 #[(2 : UInt64), 32]  -- No masks
+  let x_t_none ← Tensor.randint 1 127 #[(2 : Nat), 32]  -- No masks
   let loss_none := maskedCrossEntropyLoss logits targets x_t_none 0
   let lossValNone := Tensor.item loss_none
   -- When no positions are masked, loss should be ~0 (masked loss / small epsilon)
@@ -65,8 +65,8 @@ def testDiffusionForward : IO Unit := do
   let params ← DiffusionParams.init cfg
   let rotaryCache ← RotaryCache.init cfg.seq_len cfg.headDim
   -- Create input tensors
-  let x_t ← Tensor.randint 0 cfg.vocab_size.toInt64 #[(2 : UInt64), cfg.seq_len]
-  let t ← Tensor.randint 0 cfg.diffusion_steps.toInt64 #[(2 : UInt64)]
+  let x_t ← Tensor.randint 0 cfg.vocab_size.toInt64 #[(2 : Nat), cfg.seq_len]
+  let t ← Tensor.randint 0 cfg.diffusion_steps.toInt64 #[(2 : Nat)]
   let logits := forward params x_t t rotaryCache
   -- Verify output is finite
   let sum := Tensor.item (Tensor.sumAll logits)
@@ -125,7 +125,7 @@ def testTrainStep : IO Unit := do
   LeanTest.assertTrue (headDiff > 1e-6) s!"Output head learned (diff={headDiff})"
 
 set_option linter.unusedVariables false in
-example (n : UInt64) (params : MLPParams n) : True := by
+example (n : Nat) (params : MLPParams n) : True := by
   fail_if_success
     have _ : MLPParams n := { params with c_proj := Tensor.zeros #[n, 4*n + 1] }
   trivial

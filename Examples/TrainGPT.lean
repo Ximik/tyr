@@ -37,7 +37,7 @@ def decode (tokens : Array Int64) : String :=
   String.ofList (tokens.toList.map intToChar)
 
 /-- Train with data of known size (legacy, no validation) -/
-def runTraining {n : UInt64} (modelCfg : Config) (trainCfg : TrainConfig)
+def runTraining {n : Nat} (modelCfg : Config) (trainCfg : TrainConfig)
     (trainData : Tokens (device := .CPU) #[n]) : IO (GPTParams (device := trainCfg.device) modelCfg) := do
   IO.println ""
   IO.println "Initializing model..."
@@ -57,7 +57,7 @@ def runTraining {n : UInt64} (modelCfg : Config) (trainCfg : TrainConfig)
   return finalParams
 
 /-- Train with validation data and checkpointing -/
-def runTrainingWithVal {nTrain nVal : UInt64} (modelCfg : Config) (trainCfg : TrainConfig)
+def runTrainingWithVal {nTrain nVal : Nat} (modelCfg : Config) (trainCfg : TrainConfig)
     (trainData : Tokens (device := .CPU) #[nTrain]) (valData : Tokens (device := .CPU) #[nVal])
     (checkpointDir : Option String := none) : IO (GPTParams (device := trainCfg.device) modelCfg) := do
   IO.println ""
@@ -152,13 +152,13 @@ def main : IO Unit := do
     IO.println "Found Shakespeare data..."
 
     -- Load training data
-    let nTrain ← data.binFileTokenCount "data/shakespeare_char/train.bin"
+    let nTrain := (← data.binFileTokenCount "data/shakespeare_char/train.bin").toNat
     IO.println s!"Training set: {nTrain} tokens"
     let trainData ← Tensor.loadU16Bin nTrain "data/shakespeare_char/train.bin"
 
     -- Use validation if available
     if valFileExists then
-      let nVal ← data.binFileTokenCount "data/shakespeare_char/val.bin"
+      let nVal := (← data.binFileTokenCount "data/shakespeare_char/val.bin").toNat
       IO.println s!"Validation set: {nVal} tokens"
       let valData ← Tensor.loadU16Bin nVal "data/shakespeare_char/val.bin"
       IO.println "Training with validation..."
@@ -168,7 +168,7 @@ def main : IO Unit := do
       runTraining modelCfg trainCfg trainData
   else
     IO.println "Shakespeare data not found, using random tokens for testing..."
-    let numTokens : UInt64 := 10000
+    let numTokens : Nat := 10000
     let tokens ← Tensor.randint 0 modelCfg.vocab_size.toInt64 #[numTokens]
     runTraining modelCfg trainCfg tokens
 

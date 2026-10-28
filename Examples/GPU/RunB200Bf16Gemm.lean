@@ -82,13 +82,13 @@ private def parseNatArg (args : List String) (flag : String) (default : Nat) : N
   loop args
 
 private structure GemmShape where
-  m : UInt64
-  n : UInt64
-  k : UInt64
+  m : Nat
+  n : Nat
+  k : Nat
 
 private structure TrainingBatchPoint where
   label : String
-  tokens : UInt64
+  tokens : Nat
   scaleTags : Array String
 
 private def trainingBatchPoints : Array TrainingBatchPoint := #[
@@ -159,7 +159,7 @@ private def gemmMatrix : LeanBenchmark.Matrix GemmShape := {
 private def customShapeRequested (args : List String) : Bool :=
   args.contains "--m" || args.contains "--n" || args.contains "--k"
 
-private def benchmarkShape (cfg : Benchmark.Config) (caseLabel : String) (m n k : UInt64) : IO (String × Bool) := do
+private def benchmarkShape (cfg : Benchmark.Config) (caseLabel : String) (m n k : Nat) : IO (String × Bool) := do
   let device ← Device.cuda 0
   let a : Tensor { shape := #[m, k], dtype := .BFloat16, device := device } := (← Tensor.randn #[m, k] false device).toBFloat16
   let b : Tensor { shape := #[n, k], dtype := .BFloat16, device := device } := (← Tensor.randn #[n, k] false device).toBFloat16
@@ -169,6 +169,9 @@ private def benchmarkShape (cfg : Benchmark.Config) (caseLabel : String) (m n k 
   let output ← Tensor.uniformLike expected 0 0
   let stream ← torch.cuda_current_stream
   let atol := if k >= 3072 then 1.0 else if k >= 1536 then 0.5 else 5e-2
+  let mArg ← Tyr.GPU.Codegen.launchArg m "m"
+  let nArg ← Tyr.GPU.Codegen.launchArg n "n"
+  let kArg ← Tyr.GPU.Codegen.launchArg k "k"
   let gridX := n / 64
   let gridY := m / 64
   let route := if k == 64 then
@@ -179,11 +182,11 @@ private def benchmarkShape (cfg : Benchmark.Config) (caseLabel : String) (m n k 
     s!"generated_gb10_warp4_rows16_64x64_runtime_k{k}_tma2"
   let launch : IO Unit :=
     if k == 64 then
-      tkGB10Bf16GemmFwd.launch a.raw b.raw output.raw m n k gridX gridY 1 32 1 1 0 stream
+      tkGB10Bf16GemmFwd.launch a.raw b.raw output.raw mArg nArg kArg gridX gridY 1 32 1 1 0 stream
     else if k == 1024 then
-      tkGB10Bf16GemmK1024Fwd.launch a.raw b.raw output.raw m n k gridX gridY 1 128 1 1 0 stream
+      tkGB10Bf16GemmK1024Fwd.launch a.raw b.raw output.raw mArg nArg kArg gridX gridY 1 128 1 1 0 stream
     else
-      tkGB10Bf16GemmKRuntimeFwd.launch a.raw b.raw output.raw m n k gridX gridY 1 128 1 1 0 stream
+      tkGB10Bf16GemmKRuntimeFwd.launch a.raw b.raw output.raw mArg nArg kArg gridX gridY 1 128 1 1 0 stream
   launch
   torch.cuda_synchronize
   let check := IndexedParity.compareTensors s!"gb10_bf16_gemm.bench.{m}x{n}x{k}" expected output 5e-2 atol
@@ -208,7 +211,7 @@ private def runBenchmark (args : List String) : IO UInt32 := do
     let m := parseNatArg args "--m" 256
     let n := parseNatArg args "--n" 256
     let k := parseNatArg args "--k" 64
-    pure #[("custom", ⟨UInt64.ofNat m, UInt64.ofNat n, UInt64.ofNat k⟩)]
+    pure #[("custom", ⟨m, n, k⟩)]
   else
     let selection := LeanBenchmark.MatrixSelection.parse args gemmMatrix.defaultProfile
     match gemmMatrix.select selection with

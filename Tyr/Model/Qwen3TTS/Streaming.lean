@@ -16,34 +16,34 @@ namespace Qwen3TTSForConditionalGeneration
 
 /-- Runtime options for streaming generation from prepared talker inputs. -/
 structure StreamingOptions (cfg : Qwen3TTSConfig) (dtype : RealFloatingDType := float32DType) where
-  maxFrames : UInt64 := 256
-  minNewTokens : UInt64 := 2
+  maxFrames : Nat := 256
+  minNewTokens : Nat := 2
   temperature : Float := 0.9
-  topK : UInt64 := 50
+  topK : Nat := 50
   topP : Float := 1.0
   subtalkerTemperature : Float := 0.9
-  subtalkerTopK : UInt64 := 50
+  subtalkerTopK : Nat := 50
   subtalkerTopP : Float := 1.0
   repetitionPenalty : Float := 1.05
-  suppressTail : UInt64 := 1024
+  suppressTail : Nat := 1024
   trailingTextHidden : Option (Sigma fun trailingSeq => Tensor { shape := #[1, trailingSeq, cfg.talkerConfig.hiddenSize], dtype := dtype.val, device := device }) := none
   ttsPadEmbed : Option (Tensor { shape := #[1, 1, cfg.talkerConfig.hiddenSize], dtype := dtype.val, device := device }) := none
   subtalkerTemperaturesByGroup : Option (Array Float) := none
-  subtalkerTopKsByGroup : Option (Array UInt64) := none
+  subtalkerTopKsByGroup : Option (Array Nat) := none
   subtalkerTopPsByGroup : Option (Array Float) := none
-  decodeChunkSize : UInt64 := 1
-  decodeLeftContext : UInt64 := 25
+  decodeChunkSize : Nat := 1
+  decodeLeftContext : Nat := 25
   emitEosFrame : Bool := false
 
 /-- Streaming callbacks for generated codec rows and decoded audio chunks. -/
 structure StreamingCallbacks where
-  onCodeFrame : UInt64 → Array UInt64 → IO Unit := fun _ _ => pure ()
+  onCodeFrame : Nat → Array UInt64 → IO Unit := fun _ _ => pure ()
   onAudioChunk : (Sigma fun samples => SomeDTypeTensor #[1, 1, samples] device) → IO Unit := fun _ => pure ()
 
 /-- Final metadata for one streaming run. -/
 structure StreamingResult where
   codeRows : Array (Array UInt64)
-  lengths : Array UInt64
+  lengths : Array Nat
   deriving Repr, Inhabited
 
 /-- Stream from prepared talker inputs (`[1, seq, hidden]`) with optional
@@ -52,7 +52,7 @@ structure StreamingResult where
     When `speechDecoder?` is provided, code rows are decoded incrementally and
     emitted through `callbacks.onAudioChunk` if the talker uses 16 code groups
     (upstream 12Hz tokenizer). -/
-def streamFromTalkerInputs {seq : UInt64}
+def streamFromTalkerInputs {seq : Nat}
     (m : Qwen3TTSForConditionalGeneration (device := device) cfg dtypes)
     (talkerInputs : Tensor { shape := #[1, seq, cfg.talkerConfig.hiddenSize], dtype := dtypes.talker.val, device := device })
     (opts : StreamingOptions (device := device) cfg dtypes.talker := {})
@@ -77,7 +77,7 @@ def streamFromTalkerInputs {seq : UInt64}
     else
       pure none
 
-  let onFrame : UInt64 → Tensor { shape := #[1, cfg.talkerConfig.numCodeGroups], dtype := .Int64, device := device } → IO Unit := fun step frame => do
+  let onFrame : Nat → Tensor { shape := #[1, cfg.talkerConfig.numCodeGroups], dtype := .Int64, device := device } → IO Unit := fun step frame => do
     let frameRow : Tensor { shape := #[cfg.talkerConfig.numCodeGroups], dtype := .Int64, device := device } := Tensor.reshapeChecked frame #[cfg.talkerConfig.numCodeGroups]
     let rowVals ← Tensor.toUInt64Array frameRow
     let firstTok := rowVals.getD 0 cfg.talkerConfig.codecEosTokenId

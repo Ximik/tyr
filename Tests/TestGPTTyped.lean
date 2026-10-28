@@ -10,14 +10,14 @@ namespace Tests.TestGPTTyped
 set_option linter.unusedVariables false
 
 -- Exact regression: the off-by-one projection must not fit the model field.
-example (n : UInt64) (params : BlockParams (device := .CPU) n) (scale : Float) : True := by
+example (n : Nat) (params : BlockParams (device := .CPU) n) (scale : Float) : True := by
   fail_if_success
     have _bad : IO (BlockParams (device := .CPU) n) := do
       let projection ← Tensor.randn #[n, 4*n + 1]
       return { params with mlp_proj := ← makeLeafParam (projection * scale) }
   trivial
 
-example (n : UInt64) (params : BlockParams (device := .CPU) n) (scale : Float) : IO (BlockParams (device := .CPU) n) := do
+example (n : Nat) (params : BlockParams (device := .CPU) n) (scale : Float) : IO (BlockParams (device := .CPU) n) := do
   let projection ← Tensor.randn #[n, 4*n]
   return { params with mlp_proj := ← makeLeafParam (projection * scale) }
 

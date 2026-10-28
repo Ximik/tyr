@@ -383,8 +383,10 @@ def generatePtrExtractionAttr
     s!"    if (!v{idx}_tensor.is_contiguous()) return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string(\"{p.name} must be contiguous\")));\n" ++
     s!"    if (v{idx}_tensor.dim() > 4) return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string(\"{p.name} must have dim <= 4\")));\n" ++
     s!"    std::array<int, 4> v{idx}_shape = \{1, 1, 1, 1};\n" ++
-    s!"    for (int i = 0; i < static_cast<int>(v{idx}_tensor.dim()); ++i)\n" ++
+    s!"    for (int i = 0; i < static_cast<int>(v{idx}_tensor.dim()); ++i) \{\n" ++
+    s!"      if (v{idx}_tensor.size(i) > std::numeric_limits<int>::max()) return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string(\"{p.name} dimension exceeds the kernel's int range\")));\n" ++
     s!"      v{idx}_shape[4 - v{idx}_tensor.dim() + i] = static_cast<int>(v{idx}_tensor.size(i));\n" ++
+    s!"    }\n" ++
     wrapper
   else ""
 
@@ -412,9 +414,9 @@ def generateCppLauncherCode (kernel : Kernel) : String :=
 
   let externParams := kernel.params.toList.map paramToCppExternAttr
   let allParams := externParams ++ [
-    "uint64_t grid_x", "uint64_t grid_y", "uint64_t grid_z",
-    "uint64_t block_x", "uint64_t block_y", "uint64_t block_z",
-    "uint64_t shared_mem", "uint64_t stream"
+    "b_lean_obj_arg grid_x_obj", "b_lean_obj_arg grid_y_obj", "b_lean_obj_arg grid_z_obj",
+    "b_lean_obj_arg block_x_obj", "b_lean_obj_arg block_y_obj", "b_lean_obj_arg block_z_obj",
+    "b_lean_obj_arg shared_mem_obj", "uint64_t stream"
   ]
   let paramStr := String.intercalate ", " allParams
 
@@ -433,6 +435,20 @@ def generateCppLauncherCode (kernel : Kernel) : String :=
 
   "extern \"C\" lean_object* " ++ externName ++ "(" ++ paramStr ++ ") {\n" ++
   s!"#if defined({archGuard})\n" ++
+  -- `dim3` holds `unsigned int`s and `cudaFuncSetAttribute` takes the shared memory size as `int`.
+  "    unsigned int grid_x, grid_y, grid_z, block_x, block_y, block_z;\n" ++
+  "    uint64_t shared_mem;\n" ++
+  "    try {\n" ++
+  "      grid_x = static_cast<unsigned int>(tyr::natTo<unsigned int>(grid_x_obj, \"grid_x\"));\n" ++
+  "      grid_y = static_cast<unsigned int>(tyr::natTo<unsigned int>(grid_y_obj, \"grid_y\"));\n" ++
+  "      grid_z = static_cast<unsigned int>(tyr::natTo<unsigned int>(grid_z_obj, \"grid_z\"));\n" ++
+  "      block_x = static_cast<unsigned int>(tyr::natTo<unsigned int>(block_x_obj, \"block_x\"));\n" ++
+  "      block_y = static_cast<unsigned int>(tyr::natTo<unsigned int>(block_y_obj, \"block_y\"));\n" ++
+  "      block_z = static_cast<unsigned int>(tyr::natTo<unsigned int>(block_z_obj, \"block_z\"));\n" ++
+  "      shared_mem = tyr::natTo<int>(shared_mem_obj, \"sharedMem\");\n" ++
+  "    } catch (const std::out_of_range& e) {\n" ++
+  "      return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string(e.what())));\n" ++
+  "    }\n" ++
   extractionCode ++
   "    auto cuda_stream = reinterpret_cast<cudaStream_t>(stream);\n" ++
   "    dim3 grid(grid_x, grid_y, grid_z);\n" ++
@@ -469,13 +485,13 @@ def generateLaunchDecl (declName : Name) (params : Array ExtractedParam) : Comma
     paramBinders := paramBinders.push binder
 
   -- Add flattened grid/block dimensions and launch params
-  let gridXBinder ← `(bracketedBinder| (grid_x : UInt64))
-  let gridYBinder ← `(bracketedBinder| (grid_y : UInt64))
-  let gridZBinder ← `(bracketedBinder| (grid_z : UInt64))
-  let blockXBinder ← `(bracketedBinder| (block_x : UInt64))
-  let blockYBinder ← `(bracketedBinder| (block_y : UInt64))
-  let blockZBinder ← `(bracketedBinder| (block_z : UInt64))
-  let smemBinder ← `(bracketedBinder| (sharedMem : UInt64))
+  let gridXBinder ← `(bracketedBinder| (grid_x : @& Nat))
+  let gridYBinder ← `(bracketedBinder| (grid_y : @& Nat))
+  let gridZBinder ← `(bracketedBinder| (grid_z : @& Nat))
+  let blockXBinder ← `(bracketedBinder| (block_x : @& Nat))
+  let blockYBinder ← `(bracketedBinder| (block_y : @& Nat))
+  let blockZBinder ← `(bracketedBinder| (block_z : @& Nat))
+  let smemBinder ← `(bracketedBinder| (sharedMem : @& Nat))
   let streamBinder ← `(bracketedBinder| (stream : CudaStream))
   paramBinders := paramBinders ++ #[
     gridXBinder, gridYBinder, gridZBinder,
@@ -612,13 +628,13 @@ def generatePolyLaunchDecl (declName : Name) (params : Array ExtractedParam) : C
     paramBinders := paramBinders.push binder
 
   -- Add flattened grid/block dimensions and launch params
-  let gridXBinder ← `(bracketedBinder| (grid_x : UInt64))
-  let gridYBinder ← `(bracketedBinder| (grid_y : UInt64))
-  let gridZBinder ← `(bracketedBinder| (grid_z : UInt64))
-  let blockXBinder ← `(bracketedBinder| (block_x : UInt64))
-  let blockYBinder ← `(bracketedBinder| (block_y : UInt64))
-  let blockZBinder ← `(bracketedBinder| (block_z : UInt64))
-  let smemBinder ← `(bracketedBinder| (sharedMem : UInt64))
+  let gridXBinder ← `(bracketedBinder| (grid_x : Nat))
+  let gridYBinder ← `(bracketedBinder| (grid_y : Nat))
+  let gridZBinder ← `(bracketedBinder| (grid_z : Nat))
+  let blockXBinder ← `(bracketedBinder| (block_x : Nat))
+  let blockYBinder ← `(bracketedBinder| (block_y : Nat))
+  let blockZBinder ← `(bracketedBinder| (block_z : Nat))
+  let smemBinder ← `(bracketedBinder| (sharedMem : Nat))
   let streamBinder ← `(bracketedBinder| (stream : CudaStream))
   paramBinders := paramBinders ++ #[
     gridXBinder, gridYBinder, gridZBinder,
@@ -668,13 +684,13 @@ def generateArchLaunchDecl (declName : Name) (suffix : String) (params : Array E
       `(bracketedBinder| ($paramIdent : $scalarTyStx))
     paramBinders := paramBinders.push binder
 
-  let gridXBinder ← `(bracketedBinder| (grid_x : UInt64))
-  let gridYBinder ← `(bracketedBinder| (grid_y : UInt64))
-  let gridZBinder ← `(bracketedBinder| (grid_z : UInt64))
-  let blockXBinder ← `(bracketedBinder| (block_x : UInt64))
-  let blockYBinder ← `(bracketedBinder| (block_y : UInt64))
-  let blockZBinder ← `(bracketedBinder| (block_z : UInt64))
-  let smemBinder ← `(bracketedBinder| (sharedMem : UInt64))
+  let gridXBinder ← `(bracketedBinder| (grid_x : @& Nat))
+  let gridYBinder ← `(bracketedBinder| (grid_y : @& Nat))
+  let gridZBinder ← `(bracketedBinder| (grid_z : @& Nat))
+  let blockXBinder ← `(bracketedBinder| (block_x : @& Nat))
+  let blockYBinder ← `(bracketedBinder| (block_y : @& Nat))
+  let blockZBinder ← `(bracketedBinder| (block_z : @& Nat))
+  let smemBinder ← `(bracketedBinder| (sharedMem : @& Nat))
   let streamBinder ← `(bracketedBinder| (stream : CudaStream))
   paramBinders := paramBinders ++ #[
     gridXBinder, gridYBinder, gridZBinder,

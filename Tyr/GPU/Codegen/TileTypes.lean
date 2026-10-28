@@ -211,6 +211,14 @@ abbrev Tensor : Type := torch.RawTensor
 /-- CUDA stream handle for kernel launches (`cudaStream_t` cast to `UInt64`). -/
 abbrev CudaStream : Type := UInt64
 
+/-- A launch argument computed from `Nat` sizes, rejected instead of wrapped
+    when it does not fit the launcher's `UInt64` parameter. -/
+def launchArg (n : Nat) (name : String) : IO UInt64 :=
+  if n < UInt64.size then
+    pure n.toUInt64
+  else
+    throw <| IO.userError s!"kernel launch argument {name} = {n} exceeds {UInt64.size - 1}"
+
 end Tyr.GPU.Codegen
 
 namespace Tyr.GPU.Codegen

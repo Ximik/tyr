@@ -34,20 +34,20 @@ open torch.dist
 /-- Runtime environment state for standalone training. -/
 structure TrainEnvState where
   localRank? : Option UInt64 := none
-  worldSize? : Option UInt64 := none
-  rank? : Option UInt64 := none
+  worldSize? : Option Nat := none
+  rank? : Option Nat := none
   masterAddr? : Option String := none
-  masterPort? : Option UInt64 := none
+  masterPort? : Option Nat := none
   requestedDevice? : Option String := none
   deriving Repr, Inhabited
 
 /-- Resolve distributed/device env vars once into a typed structure. -/
 def loadTrainEnvState : IO TrainEnvState := do
   let localRank? := ((← IO.getEnv "LOCAL_RANK").bind (·.toNat?)).map (·.toUInt64)
-  let worldSize? := ((← IO.getEnv "WORLD_SIZE").bind (·.toNat?)).map (·.toUInt64)
-  let rank? := ((← IO.getEnv "RANK").bind (·.toNat?)).map (·.toUInt64)
+  let worldSize? := (← IO.getEnv "WORLD_SIZE").bind (·.toNat?)
+  let rank? := (← IO.getEnv "RANK").bind (·.toNat?)
   let masterAddr? := (← IO.getEnv "MASTER_ADDR")
-  let masterPort? := ((← IO.getEnv "MASTER_PORT").bind (·.toNat?)).map (·.toUInt64)
+  let masterPort? := (← IO.getEnv "MASTER_PORT").bind (·.toNat?)
   let requestedDevice? := (← IO.getEnv "TYR_DEVICE").map String.toLower
   pure {
     localRank? := localRank?
@@ -110,12 +110,12 @@ def getLocalRankFromEnv (env : TrainEnvState) : UInt64 :=
   env.localRank?.getD 0
 
 /-- Get world size from typed env state. -/
-def getWorldSizeFromEnv (env : TrainEnvState) : UInt64 :=
+def getWorldSizeFromEnv (env : TrainEnvState) : Nat :=
   env.worldSize?.getD 1
 
 /-- Get global rank from typed env state (for distributed training). -/
-def getRankFromEnv (env : TrainEnvState) : UInt64 :=
-  env.rank?.getD (getLocalRankFromEnv env)
+def getRankFromEnv (env : TrainEnvState) : Nat :=
+  env.rank?.getD (getLocalRankFromEnv env).toNat
 
 /-- Render a device for logging. -/
 def deviceToString (device : Device) : String :=
@@ -248,7 +248,7 @@ def runTraining (args : Args) (env : TrainEnvState) : IO Unit := do
   if isMaster then
     IO.println s!"Training for {hp.numIterations + hp.extensionIterations} iterations"
     IO.println s!"  Cooldown fraction: {hp.cooldownFrac}"
-    IO.println s!"  Gradient accumulation: {effectiveGradAccumSteps hp worldSize}"
+    IO.println s!"  Gradient accumulation: {effectiveGradAccumSteps hp worldSize.toNat}"
     IO.println s!"  Validation interval: {hp.valInterval}"
     IO.println ""
 

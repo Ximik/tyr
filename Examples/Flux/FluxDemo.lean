@@ -39,13 +39,13 @@ structure DemoConfig where
   /-- Number of diffusion steps -/
   numSteps : Nat := 4
   /-- Packed latent height (16 for 256x256 output with 2×2 patchification and 8× VAE upscaling) -/
-  latentH : UInt64 := 16
+  latentH : Nat := 16
   /-- Packed latent width (16 for 256x256 output with 2×2 patchification and 8× VAE upscaling) -/
-  latentW : UInt64 := 16
+  latentW : Nat := 16
   deriving Repr, Inhabited
 
 private def qwenPadId : Int64 := 151643
-private def maxSeqLen : UInt64 := 512
+private def maxSeqLen : Nat := 512
 
 private def parseTokenIds (content : String) : Array Int64 := Id.run do
   let mut out : Array Int64 := #[]
@@ -65,9 +65,9 @@ private def parseTokenIds (content : String) : Array Int64 := Id.run do
     | none => pure ()
   out
 
-private def padTokens (ids : Array Int64) (maxLen : UInt64) (padId : Int64)
+private def padTokens (ids : Array Int64) (maxLen : Nat) (padId : Int64)
     : Array Int64 × Array Int64 := Id.run do
-  let max := maxLen.toNat
+  let max := maxLen
   let mut tokens : Array Int64 := Array.mkEmpty max
   let mut mask : Array Int64 := Array.mkEmpty max
   for i in [:max] do
@@ -79,27 +79,27 @@ private def padTokens (ids : Array Int64) (maxLen : UInt64) (padId : Int64)
       mask := mask.push (0 : Int64)
   (tokens, mask)
 
-private def loadTokenIds (path : String) (maxLen : UInt64) : IO (Array Int64) := do
+private def loadTokenIds (path : String) (maxLen : Nat) : IO (Array Int64) := do
   let contents ← IO.FS.readFile path
   let mut ids := parseTokenIds contents
   if ids.isEmpty then
     throw (IO.userError s!"No tokens found in {path}")
-  if ids.size.toUInt64 > maxLen then
+  if ids.size > maxLen then
     IO.println s!"    Truncating tokens from {ids.size} to {maxLen}"
-    ids := ids.extract 0 maxLen.toNat
+    ids := ids.extract 0 maxLen
   pure ids
 
-private def loadMaskIds (path : String) (maxLen : UInt64) : IO (Array Int64) := do
+private def loadMaskIds (path : String) (maxLen : Nat) : IO (Array Int64) := do
   let contents ← IO.FS.readFile path
   let mut ids := parseTokenIds contents
   if ids.isEmpty then
     throw (IO.userError s!"No mask values found in {path}")
-  if ids.size.toUInt64 > maxLen then
+  if ids.size > maxLen then
     IO.println s!"    Truncating mask from {ids.size} to {maxLen}"
-    ids := ids.extract 0 maxLen.toNat
-  if ids.size.toUInt64 < maxLen then
-    let mut padded : Array Int64 := Array.mkEmpty maxLen.toNat
-    for i in [:maxLen.toNat] do
+    ids := ids.extract 0 maxLen
+  if ids.size < maxLen then
+    let mut padded : Array Int64 := Array.mkEmpty maxLen
+    for i in [:maxLen] do
       if h : i < ids.size then
         padded := padded.push (ids[i]'h)
       else
@@ -108,13 +108,13 @@ private def loadMaskIds (path : String) (maxLen : UInt64) : IO (Array Int64) := 
   pure ids
 
 /-- Construct indexed token IDs and attention masks from a prompt or token files. -/
-private def promptTokens (cfg : DemoConfig) (prompt : String) : IO (Tensor { shape := #[1, maxSeqLen], dtype := .Int64, device := .CPU } × Tensor { shape := #[1, maxSeqLen], dtype := .Int64, device := .CPU } × UInt64) := do
+private def promptTokens (cfg : DemoConfig) (prompt : String) : IO (Tensor { shape := #[1, maxSeqLen], dtype := .Int64, device := .CPU } × Tensor { shape := #[1, maxSeqLen], dtype := .Int64, device := .CPU } × Nat) := do
   if cfg.useTokenFiles then
     if !(← data.fileExists cfg.tokensPath) then
       throw (IO.userError s!"Token file not found: {cfg.tokensPath}")
     IO.println s!"    Loading tokens from {cfg.tokensPath}"
     let ids ← loadTokenIds cfg.tokensPath maxSeqLen
-    let tokenCount := ids.size.toUInt64
+    let tokenCount := ids.size
     let (padded, defaultMask) := padTokens ids maxSeqLen qwenPadId
     let mask ←
       if (← data.fileExists cfg.attnMaskPath) then
@@ -127,8 +127,8 @@ private def promptTokens (cfg : DemoConfig) (prompt : String) : IO (Tensor { sha
     pure (tokens, attnMask, tokenCount)
   else
     let tok ← tokenizer.qwen3.loadTokenizer cfg.qwenDir
-    let (tokIds, maskIds) := tokenizer.qwen3.encodePrompt tok prompt maxSeqLen.toNat
-    let tokenCount := maskIds.foldl (fun acc v => if v != 0 then acc + 1 else acc) (0 : UInt64)
+    let (tokIds, maskIds) := tokenizer.qwen3.encodePrompt tok prompt maxSeqLen
+    let tokenCount := maskIds.foldl (fun acc v => if v != 0 then acc + 1 else acc) (0 : Nat)
     let tokens := Tensor.reshapeChecked (Tensor.fromInt64Array (tokenizer.qwen3.toInt64Array tokIds)) #[1, maxSeqLen]
     let attnMask := Tensor.reshapeChecked (Tensor.fromInt64Array (tokenizer.qwen3.toInt64Array maskIds)) #[1, maxSeqLen]
     pure (tokens, attnMask, tokenCount)

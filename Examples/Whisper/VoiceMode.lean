@@ -139,7 +139,7 @@ private def parseArgs (xs : List String) : IO Args :=
 -- Audio helpers
 -- ============================================================================
 
-private def sampleRate : UInt64 := 16000
+private def sampleRate : Nat := 16000
 
 /-- Convert seconds to sample count at 16kHz. -/
 private def toSamples (sec : Float) : Nat :=
@@ -161,7 +161,7 @@ inductive RecordPhase where
     Returns the recorded waveform as a FloatBuffer (unboxed), or empty if no speech.
     Audio data flows entirely through unboxed FloatBuffers — no per-sample boxing. -/
 private def recordUntilSilence (args : Args) : IO FloatBuffer := do
-  let readChunkSamples : UInt64 := sampleRate / 10  -- 100ms chunks
+  let readChunkSamples : Nat := sampleRate / 10  -- 100ms chunks
   let silenceThresholdSamples := toSamples args.silenceDuration
   let dipToleranceSamples := toSamples args.dipTolerance
   let minSpeechSamples := toSamples args.minSpeechDuration
@@ -171,7 +171,7 @@ private def recordUntilSilence (args : Args) : IO FloatBuffer := do
   -- Pre-roll: keep ~500ms of audio before speech onset so the beginning isn't lost.
   let preRollSamples := toSamples 0.5
 
-  let mut audioBuf ← FloatBuffer.mkEmpty (sampleRate.toNat * 10) -- ~10s initial capacity
+  let mut audioBuf ← FloatBuffer.mkEmpty (sampleRate * 10) -- ~10s initial capacity
   let mut phase := RecordPhase.waitingForSpeech
   let mut speechSamples : Nat := 0
   let mut silenceSamples : Nat := 0
@@ -257,7 +257,7 @@ private def runOnce
   if args.beeps then
     Tyr.Audio.AppleOutput.beepStart
 
-  let readChunkSamples : UInt64 := sampleRate / 10  -- 100ms chunks
+  let readChunkSamples : Nat := sampleRate / 10  -- 100ms chunks
   let silenceThresholdSamples := toSamples args.silenceDuration
   let dipToleranceSamples := toSamples args.dipTolerance
   let minSpeechSamples := toSamples args.minSpeechDuration
@@ -267,7 +267,7 @@ private def runOnce
   -- Transcribe every ~2s of new audio while recording.
   let transcribeInterval := toSamples 2.0
 
-  let mut audioBuf ← FloatBuffer.mkEmpty (sampleRate.toNat * 10)
+  let mut audioBuf ← FloatBuffer.mkEmpty (sampleRate * 10)
   let mut phase := RecordPhase.waitingForSpeech
   let mut speechSamples : Nat := 0
   let mut silenceSamples : Nat := 0

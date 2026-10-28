@@ -8,6 +8,7 @@
  * These operations are used in the Newton-Schulz iteration for orthogonalization.
  */
 
+#include "tyr_nat.h"
 #include <lean/lean.h>
 #include "generated/tyr_ffi.h"
 #include "tyr_checked_result.h"
@@ -191,8 +192,9 @@ lean_object* lean_torch_newton_schulz_step(
  */
 lean_object* lean_torch_polar_express(
     b_lean_obj_arg G_obj,
-    uint64_t num_iters) {
+    b_lean_obj_arg num_iters_obj) {
   return tyr::checkedIoCall("lean_torch_polar_express", [&] {
+  const uint64_t num_iters = tyr::natTo<uint64_t>(num_iters_obj, "num_iters");
       try {
           auto G = borrowTensor(G_obj);
 
@@ -264,8 +266,9 @@ lean_object* lean_torch_polar_express(
  */
 lean_object* lean_torch_muon_orthogonalize(
     b_lean_obj_arg G_obj,
-    uint64_t num_iters) {
+    b_lean_obj_arg num_iters_obj) {
   return tyr::checkedIoCall("lean_torch_muon_orthogonalize", [&] {
+  const uint64_t num_iters = tyr::natTo<uint64_t>(num_iters_obj, "num_iters");
       try {
           auto G = borrowTensor(G_obj);
           if (G.dim() < 2) {

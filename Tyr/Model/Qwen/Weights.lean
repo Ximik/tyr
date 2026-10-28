@@ -39,7 +39,7 @@ private def loadRequired (path : String) (name : String) (s : Shape)
 /-- Load a (potentially FP8-quantized) linear weight from sharded SafeTensors.
     If a matching weight_scale_inv exists, dequantize to float32;
     otherwise cast the loaded weights to float32. -/
-private def loadLinearWeightSharded (modelDir : String) (name : String) (outDim inDim : UInt64)
+private def loadLinearWeightSharded (modelDir : String) (name : String) (outDim inDim : Nat)
     (device : Device := .CPU) : IO (Tensor { device := device, shape := #[outDim, inDim], dtype := .Float32 }) := do
   let w ← loadRequiredSharded (device := device) modelDir s!"{name}.weight" #[outDim, inDim]
   let scaleInvOpt ← loadOptionalTensorShardedExact (device := device) modelDir s!"{name}.weight_scale_inv" #[outDim / 128, inDim / 128]
@@ -50,7 +50,7 @@ private def loadLinearWeightSharded (modelDir : String) (name : String) (outDim 
 /-- Load a (potentially FP8-quantized) linear weight from a single SafeTensors file.
     If a matching weight_scale_inv exists, dequantize to float32;
     otherwise cast the loaded weights to float32. -/
-private def loadLinearWeight (path : String) (name : String) (outDim inDim : UInt64)
+private def loadLinearWeight (path : String) (name : String) (outDim inDim : Nat)
     (device : Device := .CPU) : IO (Tensor { device := device, shape := #[outDim, inDim], dtype := .Float32 }) := do
   let w ← loadRequired (device := device) path s!"{name}.weight" #[outDim, inDim]
   let scaleInv ← loadOptionalTensorExact (device := device) path s!"{name}.weight_scale_inv" #[outDim / 128, inDim / 128]
@@ -60,8 +60,8 @@ private def loadLinearWeight (path : String) (name : String) (outDim inDim : UIn
 
 /-- Load a single attention layer from sharded SafeTensors.
     Optionally loads Q/K norms if present (for Flux Klein text encoder). -/
-def loadAttentionSharded (modelDir : String) (layerIdx : UInt64)
-    (hidden_size num_heads num_kv_heads head_dim : UInt64)
+def loadAttentionSharded (modelDir : String) (layerIdx : Nat)
+    (hidden_size num_heads num_kv_heads head_dim : Nat)
     (loadQKNorms : Bool := false)
     (device : Device := .CPU) : IO (QwenAttention (device := device) hidden_size num_heads num_kv_heads head_dim) := do
   let layerPrefix := s!"model.layers.{layerIdx}.self_attn"
@@ -93,8 +93,8 @@ def loadAttentionSharded (modelDir : String) (layerIdx : UInt64)
   }
 
 /-- Load a single MLP layer from sharded SafeTensors -/
-def loadMLPSharded (modelDir : String) (layerIdx : UInt64)
-    (hidden_size intermediate_size : UInt64)
+def loadMLPSharded (modelDir : String) (layerIdx : Nat)
+    (hidden_size intermediate_size : Nat)
     (device : Device := .CPU) : IO (QwenMLP (device := device) hidden_size intermediate_size) := do
   let layerPrefix := s!"model.layers.{layerIdx}.mlp"
 
@@ -109,13 +109,13 @@ def loadMLPSharded (modelDir : String) (layerIdx : UInt64)
   }
 
 /-- Load RMSNorm weights from sharded SafeTensors -/
-def loadRMSNormSharded (modelDir : String) (name : String) (dim : UInt64)
+def loadRMSNormSharded (modelDir : String) (name : String) (dim : Nat)
     (device : Device := .CPU) : IO (RMSNorm (device := device) dim) := do
   let scale ← loadRequiredSharded (device := device) modelDir s!"{name}.weight" #[dim]
   pure { weight := Tensor.detach scale.2.toFloat32, eps := ⟨1e-6⟩ }
 
 /-- Load a single transformer layer from sharded SafeTensors -/
-def loadLayerSharded (modelDir : String) (layerIdx : UInt64) (cfg : QwenConfig)
+def loadLayerSharded (modelDir : String) (layerIdx : Nat) (cfg : QwenConfig)
     (loadQKNorms : Bool := false)
     (device : Device := .CPU) : IO (QwenLayer (device := device) cfg.hidden_size cfg.num_attention_heads cfg.num_key_value_heads cfg.head_dim cfg.intermediate_size) := do
   let layerPrefix := s!"model.layers.{layerIdx}"
@@ -143,11 +143,11 @@ def loadQwen3ModelSharded (modelDir : String) (cfg : QwenConfig := QwenConfig.qw
 
   -- Layers
   let mut layers := #[]
-  for i in [:cfg.num_hidden_layers.toNat] do
-    let layer ← loadLayerSharded (device := device) modelDir i.toUInt64 cfg loadQKNorms
+  for i in [:cfg.num_hidden_layers] do
+    let layer ← loadLayerSharded (device := device) modelDir i cfg loadQKNorms
     layers := layers.push layer
     if (i + 1) % 7 == 0 then
-      log.onInfo s!"  Loaded {i + 1}/{cfg.num_hidden_layers.toNat} layers"
+      log.onInfo s!"  Loaded {i + 1}/{cfg.num_hidden_layers} layers"
 
   -- Final norm
   let norm ← loadRMSNormSharded (device := device) modelDir "model.norm" cfg.hidden_size
@@ -159,8 +159,8 @@ def loadQwen3ModelSharded (modelDir : String) (cfg : QwenConfig := QwenConfig.qw
 -- Legacy functions for backwards compatibility with single-file models
 
 /-- Load a single attention layer from SafeTensors (single file) -/
-def loadAttention (path : String) (layerIdx : UInt64)
-    (hidden_size num_heads num_kv_heads head_dim : UInt64)
+def loadAttention (path : String) (layerIdx : Nat)
+    (hidden_size num_heads num_kv_heads head_dim : Nat)
     (device : Device := .CPU) : IO (QwenAttention (device := device) hidden_size num_heads num_kv_heads head_dim) := do
   let layerPrefix := s!"model.layers.{layerIdx}.self_attn"
 
@@ -179,8 +179,8 @@ def loadAttention (path : String) (layerIdx : UInt64)
   }
 
 /-- Load a single MLP layer from SafeTensors (single file) -/
-def loadMLP (path : String) (layerIdx : UInt64)
-    (hidden_size intermediate_size : UInt64)
+def loadMLP (path : String) (layerIdx : Nat)
+    (hidden_size intermediate_size : Nat)
     (device : Device := .CPU) : IO (QwenMLP (device := device) hidden_size intermediate_size) := do
   let layerPrefix := s!"model.layers.{layerIdx}.mlp"
 
@@ -195,13 +195,13 @@ def loadMLP (path : String) (layerIdx : UInt64)
   }
 
 /-- Load RMSNorm weights from SafeTensors (single file) -/
-def loadRMSNorm (path : String) (name : String) (dim : UInt64)
+def loadRMSNorm (path : String) (name : String) (dim : Nat)
     (device : Device := .CPU) : IO (RMSNorm (device := device) dim) := do
   let scale ← loadRequired (device := device) path s!"{name}.weight" #[dim]
   pure { weight := Tensor.detach scale.2.toFloat32, eps := ⟨1e-6⟩ }
 
 /-- Load a single transformer layer from SafeTensors (single file) -/
-def loadLayer (path : String) (layerIdx : UInt64) (cfg : QwenConfig)
+def loadLayer (path : String) (layerIdx : Nat) (cfg : QwenConfig)
     (device : Device := .CPU) : IO (QwenLayer (device := device) cfg.hidden_size cfg.num_attention_heads cfg.num_key_value_heads cfg.head_dim cfg.intermediate_size) := do
   let layerPrefix := s!"model.layers.{layerIdx}"
 
@@ -225,11 +225,11 @@ def loadQwen3Model (path : String) (cfg : QwenConfig := QwenConfig.qwen3_4B)
 
   -- Layers
   let mut layers := #[]
-  for i in [:cfg.num_hidden_layers.toNat] do
-    let layer ← loadLayer (device := device) path i.toUInt64 cfg
+  for i in [:cfg.num_hidden_layers] do
+    let layer ← loadLayer (device := device) path i cfg
     layers := layers.push layer
     if (i + 1) % 7 == 0 then
-      log.onInfo s!"  Loaded {i + 1}/{cfg.num_hidden_layers.toNat} layers"
+      log.onInfo s!"  Loaded {i + 1}/{cfg.num_hidden_layers} layers"
 
   -- Final norm
   let norm ← loadRMSNorm (device := device) path "model.norm" cfg.hidden_size
@@ -240,8 +240,8 @@ def loadQwen3Model (path : String) (cfg : QwenConfig := QwenConfig.qwen3_4B)
 
 /-- Load Qwen model as Flux text embedder (single file, legacy) -/
 def loadQwenFluxEmbedder (path : String) (cfg : QwenConfig := QwenConfig.qwen3_4B)
-    (max_seq : UInt64 := 512)
-    (outputLayers : Array UInt64 := #[8, 17, 26])
+    (max_seq : Nat := 512)
+    (outputLayers : Array Nat := #[8, 17, 26])
     (log : Handlers := {})
     (device : Device := .CPU) : IO (QwenFluxEmbedder (device := device) cfg max_seq) := do
   let model ← loadQwen3Model (device := device) path cfg log
@@ -250,8 +250,8 @@ def loadQwenFluxEmbedder (path : String) (cfg : QwenConfig := QwenConfig.qwen3_4
 /-- Load Qwen model as Flux text embedder from sharded directory.
     This is the preferred method for HuggingFace models with sharded weights. -/
 def loadQwenFluxEmbedderSharded (modelDir : String) (cfg : QwenConfig := QwenConfig.fluxKleinTextEncoder)
-    (max_seq : UInt64 := 512)
-    (outputLayers : Array UInt64 := #[8, 17, 26])  -- Flux2 reference uses [9,18,27] with embedding state
+    (max_seq : Nat := 512)
+    (outputLayers : Array Nat := #[8, 17, 26])  -- Flux2 reference uses [9,18,27] with embedding state
     (log : Handlers := {})
     (device : Device := .CPU) : IO (QwenFluxEmbedder (device := device) cfg max_seq) := do
   -- Flux Klein text encoder has Q/K norms

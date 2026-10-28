@@ -57,7 +57,7 @@ structure Config where
   /-- Second moment coefficient for variance reduction -/
   beta2 : Float := 0.95
   /-- Number of Newton-Schulz iterations for Polar Express -/
-  numIters : UInt64 := 5
+  numIters : Nat := 5
   /-- Whether to use distributed training -/
   distributed : Bool := false
   /-- World size for distributed (set automatically if distributed=true) -/
@@ -278,7 +278,7 @@ def stepSingle {σ : StaticSpec} [DType.RealFloating σ.dtype] (param : Tensor �
 -/
 def stepDistributedOwner {σ : StaticSpec} [DType.RealFloating σ.dtype] (param : Tensor σ) (grad : Tensor σ)
     (state : ParamState σ)
-    (cfg : Config) (lrMul wdMul : Float) (ownerRank : UInt64) :
+    (cfg : Config) (lrMul wdMul : Float) (ownerRank : Nat) :
     IO (Tensor σ × ParamState σ) := do
   let isDist ← dist.isInitialized
   if !cfg.distributed || !isDist then
@@ -293,16 +293,16 @@ def stepDistributedOwner {σ : StaticSpec} [DType.RealFloating σ.dtype] (param 
   let gradAvg ← dist.allReduce gradAvg .avg
 
   let (ownerParam, ownerState) ←
-    if rank == ownerRank then
+    if rank.toNat == ownerRank then
       stepSingle param gradAvg state cfg lrMul wdMul
     else
       pure (param, state)
 
-  let paramSynced := if rank == ownerRank then ownerParam else Tensor.detach param
+  let paramSynced := if rank.toNat == ownerRank then ownerParam else Tensor.detach param
   let paramSynced ← dist.broadcast paramSynced ownerRank
 
   let momentumSynced :=
-    if rank == ownerRank then
+    if rank.toNat == ownerRank then
       ownerState.momentumBuffer.getD (Tensor.zerosLike paramSynced)
     else
       Tensor.zerosLike paramSynced

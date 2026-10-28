@@ -22,17 +22,17 @@ private def cfg : Config := {
 
 private def weight (s : Shape) (offset : Float := 0.0) (dtype : DType := .Float32) : Tensor { shape := s, dtype, device := .CPU } :=
   let n := s.foldl (· * ·) 1
-  let vals := Array.ofFn (n := n.toNat) fun i => Float.sin (i.val.toFloat * 0.71 + offset) * 0.2
+  let vals := Array.ofFn (n := n) fun i => Float.sin (i.val.toFloat * 0.71 + offset) * 0.2
   ((Tensor.fromFloatArray vals).reshapeChecked s).castDType dtype
 
-private def norm (n : UInt64) (dtype : DType := .Float32) : Gemma4RMSNorm (device := .CPU) n :=
+private def norm (n : Nat) (dtype : DType := .Float32) : Gemma4RMSNorm (device := .CPU) n :=
   { weight := packExactTensor ((Tensor.ones #[n]).castDType dtype) }
 
 private def textModel (c : Config) (dtype : DType := .Float32) : Gemma4ForCausalLM (device := .CPU) c dtype := Id.run do
   let mut layers := #[]
-  for i in [:c.num_hidden_layers.toNat] do
+  for i in [:c.num_hidden_layers] do
     let layer : Gemma4Layer c dtype := {
-      layerIdx := i.toUInt64, layerType := Config.layerTypeAt c i.toUInt64
+      layerIdx := i, layerType := Config.layerTypeAt c i
       self_attn := {
         q_proj := weight #[Config.maxAttentionDim c, c.hidden_size] 0.1 dtype
         k_proj := weight #[Config.maxKVProjDim c, c.hidden_size] 0.3 dtype
@@ -85,8 +85,8 @@ private def close {σ τ : StaticSpec} (x : Tensor σ) (y : Tensor τ) (tol : Fl
   close prefill (expected.sliceChecked 1 0 3 #[1, 3, cfg.hidden_size])
   let mut cache := initial
   for pos in [3:7] do
-    let (out, next) := m.model.forwardStep cfg (ids.sliceChecked 1 pos.toUInt64 1 #[1, 1]) pos.toUInt64 cache sc ss fc fs
-    close out (expected.sliceChecked 1 pos.toUInt64 1 #[1, 1, cfg.hidden_size])
+    let (out, next) := m.model.forwardStep cfg (ids.sliceChecked 1 pos 1 #[1, 1]) pos cache sc ss fc fs
+    close out (expected.sliceChecked 1 pos 1 #[1, 1, cfg.hidden_size])
     cache := next
 
 @[test] def testGemma4GenerationDTypesAndStreaming : IO Unit := do
@@ -146,17 +146,17 @@ private def roundTrip {α : Type} [TensorStruct α] (params : α) (dir : String)
   let expertIds ← indices.toUInt64Array
   let scales ← weights.toFloatArray
   for token in [:2] do
-    let row := x.sliceChecked 0 token.toUInt64 1 #[1, 4]
+    let row := x.sliceChecked 0 token 1 #[1, 4]
     let mut sum := qwen35.zerosDynamic #[1, 4]
     for slot in [:2] do
-      let e := expertIds[token * 2 + slot]!
+      let e := expertIds[token * 2 + slot]!.toNat
       let gu := (gate.sliceChecked 0 e 1 #[1, 12, 4]).reshapeChecked #[12, 4]
       let g := Tensor.linear row (gu.sliceChecked 0 0 6 #[6, 4])
       let u := Tensor.linear row (gu.sliceChecked 0 6 6 #[6, 4])
       let dw := (down.sliceChecked 0 e 1 #[1, 4, 6]).reshapeChecked #[4, 6]
       sum := Tensor.add sum (Tensor.mulScalar
         (Tensor.linear (Tensor.mul (Tensor.gelu g) u) dw) scales[token * 2 + slot]!)
-    expected := Tensor.sliceScatter expected 0 token.toUInt64 sum
+    expected := Tensor.sliceScatter expected 0 token sum
   close actual expected 1e-6
 
 private def vlCfg : VLConfig := {
@@ -168,7 +168,7 @@ private def vlCfg : VLConfig := {
   image_processor := { patch_size := 2, pooling_kernel_size := 2, max_soft_tokens := 4 }
   image_token_id := 15 }
 
-private def visionLinear (outDim inDim : UInt64) (phase : Float) (dtype : DType := .Float32) :
+private def visionLinear (outDim inDim : Nat) (phase : Float) (dtype : DType := .Float32) :
     Gemma4VisionLinear (device := .CPU) outDim inDim dtype :=
   { weight := weight #[outDim, inDim] phase dtype }
 
@@ -272,17 +272,17 @@ private def writeTensorEntries (directory : System.FilePath)
   let mut bytes := ByteArray.empty
   for (name, shape, bf16) in entries do
     let start := bytes.size
-    for _ in [:shape.foldl (fun n d => n * d.toNat) 1] do
+    for _ in [:shape.foldl (fun n d => n * d) 1] do
       bytes := bytes ++ (if bf16 then ByteArray.mk #[0, 62] else ByteArray.mk #[0, 0, 0, 62])
     header := header ++ [(name, Lean.Json.mkObj [
       ("dtype", Lean.toJson (if bf16 then "BF16" else "F32")),
-      ("shape", Lean.toJson (shape.map UInt64.toNat)),
+      ("shape", Lean.toJson shape),
       ("data_offsets", Lean.toJson #[start, bytes.size])])]
     index := index ++ [(name, Lean.toJson "model.safetensors")]
   let json := (Lean.Json.mkObj header).compress.toUTF8
   let mut length := ByteArray.empty
   for i in [:8] do
-    length := length.push ((json.size.toUInt64 >>> (i * 8).toUInt64).toUInt8)
+    length := length.push ((json.size >>> (i * 8)).toUInt8)
   IO.FS.writeBinFile (directory / "model.safetensors") (length ++ json ++ bytes)
   if sharded then
     IO.FS.writeFile (directory / "model.safetensors.index.json")
@@ -308,7 +308,7 @@ private def writeDTypeFixture (directory : System.FilePath) (c : Config)
       LeanTest.assertEqual selected.val .BFloat16
       LeanTest.assertEqual model.model.norm.weight.1 .Float32
       LeanTest.assertEqual (← model.model.norm.weight.2.toFloatArray)
-        (Array.replicate c.hidden_size.toNat 0.125)
+        (Array.replicate c.hidden_size 0.125)
       let prediction := model.forward c ids
       LeanTest.assertEqual prediction.actualSpec.dtype .BFloat16
       LeanTest.assertTrue ((← prediction.toFloatArray).all Float.isFinite)

@@ -53,7 +53,7 @@ def testInvalidDistributedInitMetadataReturnsErrors : IO Unit := do
   LeanTest.assertFalse (← dist.isInitialized)
   -- Every case is rejected before opening a rendezvous socket, including when
   -- the selected backend is unavailable in the native build.
-  let cases : Array (String × UInt64 × UInt64 × UInt64 × String) := #[
+  let cases : Array (String × Nat × Nat × Nat × String) := #[
     ("gloo", 65536, 0, 1, "master_port"),
     ("gloo", 0, 0, 0, "world_size"),
     ("gloo", 0, 0, 2147483648, "world_size"),
@@ -69,8 +69,8 @@ def testInvalidDistributedInitMetadataReturnsErrors : IO Unit := do
 
 /-- Run on each of exactly two ranks in an initialized CPU process group.
     Retained inputs and earlier results detect writes into shared storage. -/
-def checkTwoRankValues (rank : UInt64) : IO Unit := do
-  let rankValue := rank.toNat.toFloat + 1.0
+def checkTwoRankValues (rank : Nat) : IO Unit := do
+  let rankValue := rank.toFloat + 1.0
   let input ← (Tensor.fromFloatArray #[rankValue]).setRequiresGrad true
   let reduced ← dist.allReduce input .sum
   LeanTest.assertEqual (← input.toFloatArray) #[rankValue]
@@ -102,12 +102,12 @@ def checkTwoRankValues (rank : UInt64) : IO Unit := do
   LeanTest.assertTrue scattered.requiresGrad
 
   -- A dynamic static dtype must not turn native integer collectives into FP32.
-  let integerInput := (Tensor.fromInt64Array #[(rank.toNat + 1).toInt64])
+  let integerInput := (Tensor.fromInt64Array #[(rank + 1).toInt64])
   let integerGathered ← dist.allGather 2 integerInput
   LeanTest.assertEqual integerGathered.raw.dtype .Int64
   LeanTest.assertEqual (← integerGathered.toFloatArray) #[1.0, 2.0]
   let integerChunks := (Tensor.fromInt64Array
-    #[(rank.toNat + 1).toInt64, (rank.toNat + 11).toInt64])
+    #[(rank + 1).toInt64, (rank + 11).toInt64])
   let integerScattered ← dist.reduceScatter 2 integerChunks .sum
   LeanTest.assertEqual integerScattered.raw.dtype .Int64
   LeanTest.assertEqual (← integerScattered.toFloatArray) #[if rank == 0 then 3.0 else 23.0]
@@ -126,7 +126,7 @@ def checkTwoRankValues (rank : UInt64) : IO Unit := do
 
 /-- Exercise normal cleanup, reinitialization, and cleanup after an action error
     on a real two-rank Gloo group. This is run by the bounded separate launcher. -/
-def checkTwoRankSession (rank port restartPort : UInt64) : IO Unit := do
+def checkTwoRankSession (rank port restartPort : Nat) : IO Unit := do
   let result ← dist.withDistributed "gloo" "127.0.0.1" port rank 2 do
     checkTwoRankValues rank
     dist.barrier

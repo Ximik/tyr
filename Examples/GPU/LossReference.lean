@@ -7,7 +7,7 @@ open torch
 variable {device : Device}
 
 /-- Float32 loss accumulation and a BF16 cotangent for BF16 training logits. -/
-def referenceTraining {rows : UInt64}
+def referenceTraining {rows : Nat}
     (logitsBase : Tensor { shape := #[rows, 3072], dtype := .BFloat16, device := device })
     (targets : Tensor { shape := #[rows], dtype := .Int64, device := device }) :
     IO (Tensor { shape := #[rows], dtype := .Float32, device := device } ×

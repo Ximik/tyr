@@ -6,7 +6,7 @@ open torch
 variable {device : Device}
 
 /-- AdamW update with Float32 master weights/moments and BF16 model weights/gradients. -/
-def referenceUpdate {elements : UInt64}
+def referenceUpdate {elements : Nat}
     (master : Tensor { shape := #[elements], dtype := .Float32, device := device }) (grad : Tensor { shape := #[elements], dtype := .BFloat16, device := device })
     (moment1 moment2 : Tensor { shape := #[elements], dtype := .Float32, device := device })
     (learningRate beta1 beta2 epsilon weightDecay invBias1 invBias2 : Float) := Id.run do

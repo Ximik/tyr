@@ -62,12 +62,12 @@ structure BenchCase where
   caseId : String
   caseGroup : String
   mode : String
-  batch : UInt64
-  qHeads : UInt64
-  kvHeads : UInt64
-  qSeq : UInt64
-  kvSeq : UInt64
-  headDim : UInt64
+  batch : Nat
+  qHeads : Nat
+  kvHeads : Nat
+  qSeq : Nat
+  kvSeq : Nat
+  headDim : Nat
   dtype : String := "bf16"
   isCausal : Bool := false
   enableGqa : Bool := false
@@ -373,8 +373,8 @@ private structure RunMeta where
   seed : UInt64
   deriving Inhabited
 
-private def computeGqaRatio (qHeads kvHeads : UInt64) : Nat :=
-  if kvHeads == 0 then 0 else (qHeads / kvHeads).toNat
+private def computeGqaRatio (qHeads kvHeads : Nat) : Nat :=
+  if kvHeads == 0 then 0 else (qHeads / kvHeads)
 
 private def emitJsonl?
     (jsonlOut? : Option System.FilePath)
@@ -421,13 +421,13 @@ private def mkUnsupportedSummary
     caseId := c.caseId
     caseGroup := c.caseGroup
     mode := c.mode
-    batch := c.batch.toNat
-    qHeads := c.qHeads.toNat
-    kvHeads := c.kvHeads.toNat
+    batch := c.batch
+    qHeads := c.qHeads
+    kvHeads := c.kvHeads
     gqaRatio := computeGqaRatio c.qHeads c.kvHeads
-    qSeq := c.qSeq.toNat
-    kvSeq := c.kvSeq.toNat
-    headDim := c.headDim.toNat
+    qSeq := c.qSeq
+    kvSeq := c.kvSeq
+    headDim := c.headDim
     dtype := c.dtype
     isCausal := c.isCausal
     enableGqa := c.enableGqa
@@ -457,13 +457,13 @@ private def mkErrorSummary
     caseId := c.caseId
     caseGroup := c.caseGroup
     mode := c.mode
-    batch := c.batch.toNat
-    qHeads := c.qHeads.toNat
-    kvHeads := c.kvHeads.toNat
+    batch := c.batch
+    qHeads := c.qHeads
+    kvHeads := c.kvHeads
     gqaRatio := computeGqaRatio c.qHeads c.kvHeads
-    qSeq := c.qSeq.toNat
-    kvSeq := c.kvSeq.toNat
-    headDim := c.headDim.toNat
+    qSeq := c.qSeq
+    kvSeq := c.kvSeq
+    headDim := c.headDim
     dtype := c.dtype
     isCausal := c.isCausal
     enableGqa := c.enableGqa
@@ -495,13 +495,13 @@ private def makeSummary
     caseId := c.caseId
     caseGroup := c.caseGroup
     mode := c.mode
-    batch := c.batch.toNat
-    qHeads := c.qHeads.toNat
-    kvHeads := c.kvHeads.toNat
+    batch := c.batch
+    qHeads := c.qHeads
+    kvHeads := c.kvHeads
     gqaRatio := computeGqaRatio c.qHeads c.kvHeads
-    qSeq := c.qSeq.toNat
-    kvSeq := c.kvSeq.toNat
-    headDim := c.headDim.toNat
+    qSeq := c.qSeq
+    kvSeq := c.kvSeq
+    headDim := c.headDim
     dtype := c.dtype
     isCausal := c.isCausal
     enableGqa := c.enableGqa
@@ -580,7 +580,7 @@ private def benchmarkAction (warmup iters repeats : Nat) (action : IO Unit) : IO
   pure latencies
 
 private def sdpaEqualRef
-    {batch heads seq headDim : UInt64}
+    {batch heads seq headDim : Nat}
     (qBase kBase vBase dOBase : Tensor { shape := #[batch, heads, seq, headDim], dtype := .BFloat16, device := device })
     (isCausal : Bool)
     : IO (Tensor { shape := #[batch, heads, seq, headDim], dtype := .BFloat16, device := device } × Tensor { shape := #[batch, heads, seq, headDim], dtype := .Float32, device := device } × Tensor { shape := #[batch, heads, seq, headDim], dtype := .Float32, device := device } × Tensor { shape := #[batch, heads, seq, headDim], dtype := .Float32, device := device }) := do
@@ -593,7 +593,7 @@ private def sdpaEqualRef
   pure (out, (← Tensor.gradOf q).toFloat32, (← Tensor.gradOf k).toFloat32, (← Tensor.gradOf v).toFloat32)
 
 private def sdpaGqaRef
-    {batch qHeads kvHeads seq headDim : UInt64}
+    {batch qHeads kvHeads seq headDim : Nat}
     (qBase : Tensor { shape := #[batch, qHeads, seq, headDim], dtype := .BFloat16, device := device })
     (kBase vBase : Tensor { shape := #[batch, kvHeads, seq, headDim], dtype := .BFloat16, device := device })
     (dOBase : Tensor { shape := #[batch, qHeads, seq, headDim], dtype := .BFloat16, device := device })
@@ -608,7 +608,7 @@ private def sdpaGqaRef
   pure (out, (← Tensor.gradOf q).toFloat32, (← Tensor.gradOf k).toFloat32, (← Tensor.gradOf v).toFloat32)
 
 private def tyrEqualOnce
-    {batch heads seq headDim : UInt64}
+    {batch heads seq headDim : Nat}
     (qBase kBase vBase dOBase : Tensor { shape := #[batch, heads, seq, headDim], dtype := .BFloat16, device := device })
     (isCausal : Bool)
     : IO (DispatchRoute × Tensor { shape := #[batch, heads, seq, headDim], dtype := .BFloat16, device := device } × Tensor { shape := #[batch, heads, seq, headDim], dtype := .Float32, device := device } × Tensor { shape := #[batch, heads, seq, headDim], dtype := .Float32, device := device } × Tensor { shape := #[batch, heads, seq, headDim], dtype := .Float32, device := device }) := do
@@ -621,7 +621,7 @@ private def tyrEqualOnce
   pure (route, out, (← Tensor.gradOf q).toFloat32, (← Tensor.gradOf k).toFloat32, (← Tensor.gradOf v).toFloat32)
 
 private def tyrGqaOnce
-    {batch qHeads kvHeads seq headDim : UInt64}
+    {batch qHeads kvHeads seq headDim : Nat}
     (qBase : Tensor { shape := #[batch, qHeads, seq, headDim], dtype := .BFloat16, device := device })
     (kBase vBase : Tensor { shape := #[batch, kvHeads, seq, headDim], dtype := .BFloat16, device := device })
     (dOBase : Tensor { shape := #[batch, qHeads, seq, headDim], dtype := .BFloat16, device := device })
@@ -635,20 +635,20 @@ private def tyrGqaOnce
   let _ ← torch.cuda_synchronize
   pure (route, out, (← Tensor.gradOf q).toFloat32, (← Tensor.gradOf k).toFloat32, (← Tensor.gradOf v).toFloat32)
 
-private def sdpaEqualForward {batch heads seq headDim : UInt64}
+private def sdpaEqualForward {batch heads seq headDim : Nat}
     (qBase kBase vBase : Tensor { shape := #[batch, heads, seq, headDim], dtype := .BFloat16, device := device })
     (isCausal : Bool)
     : Tensor { shape := #[batch, heads, seq, headDim], dtype := .BFloat16, device := device } :=
   Tensor.attentionGQA qBase kBase vBase isCausal
 
-private def tyrEqualForward {batch heads seq headDim : UInt64}
+private def tyrEqualForward {batch heads seq headDim : Nat}
     (qBase kBase vBase : Tensor { shape := #[batch, heads, seq, headDim], dtype := .BFloat16, device := device })
     (isCausal : Bool)
     : DispatchRoute × Tensor { shape := #[batch, heads, seq, headDim], dtype := .BFloat16, device := device } :=
   flashAttnWithRoute qBase kBase vBase none isCausal none false
 
 private def runEqualHeadsFwdBwd
-    {batch heads seq headDim : UInt64}
+    {batch heads seq headDim : Nat}
     (runMeta : RunMeta)
     (c : BenchCase)
     (backend : Backend)
@@ -762,7 +762,7 @@ private def runEqualHeadsFwdBwd
           latencies corr
 
 private def runGqaFwdBwd
-    {batch qHeads kvHeads seq headDim : UInt64}
+    {batch qHeads kvHeads seq headDim : Nat}
     (runMeta : RunMeta)
     (c : BenchCase)
     (backend : Backend)
@@ -876,7 +876,7 @@ private def runGqaFwdBwd
           latencies corr
 
 private def runEqualHeadsForwardOnly
-    {batch heads seq headDim : UInt64}
+    {batch heads seq headDim : Nat}
     (runMeta : RunMeta)
     (c : BenchCase)
     (backend : Backend)

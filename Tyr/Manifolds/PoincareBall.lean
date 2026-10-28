@@ -8,7 +8,7 @@ open DifferentiableManifold
 variable {d : DType} {dev : Device} [DType.RealFloating d]
 
 /-- Poincare ball model with ambient coordinates in `R^n`, `||x|| < 1`. -/
-structure PoincareBall (n : UInt64) (dtype : DType := .Float32)
+structure PoincareBall (n : Nat) (dtype : DType := .Float32)
     (device : Device := .CPU) where
   coords : Tensor ⟨#[n], dtype, device⟩
 
@@ -17,7 +17,7 @@ namespace PoincareBall
 private def eps : Float := 1e-6
 
 /-- Project ambient vector into the open unit ball (with epsilon margin). -/
-def project (n : UInt64) (v : Tensor ⟨#[n], d, dev⟩) : PoincareBall n d dev :=
+def project (n : Nat) (v : Tensor ⟨#[n], d, dev⟩) : PoincareBall n d dev :=
   let norm := Tensor.l2Norm v
   let maxNorm := 1.0 - eps
   if norm < maxNorm then
@@ -26,7 +26,7 @@ def project (n : UInt64) (v : Tensor ⟨#[n], d, dev⟩) : PoincareBall n d dev 
     ⟨Tensor.mulScalar v (maxNorm / (norm + 1e-12))⟩
 
 /-- Random point in the unit ball. -/
-def random (n : UInt64) : IO (PoincareBall n) := do
+def random (n : Nat) : IO (PoincareBall n) := do
   let v ← Tensor.randn #[n]
   pure (project n (Tensor.mulScalar v 0.5))
 
@@ -37,19 +37,19 @@ def conformalFactor (x : PoincareBall n d dev) : Float :=
 
 end PoincareBall
 
-structure PoincareBallTangent (n : UInt64) (dtype : DType := .Float32)
+structure PoincareBallTangent (n : Nat) (dtype : DType := .Float32)
     (device : Device := .CPU) where
   vec : Tensor ⟨#[n], dtype, device⟩
 
 namespace PoincareBallTangent
 
-def zero [DType.ConstantSupported d dev] (n : UInt64) : PoincareBallTangent n d dev := ⟨Tensor.zerosFor ⟨#[n], d, dev⟩⟩
+def zero [DType.ConstantSupported d dev] (n : Nat) : PoincareBallTangent n d dev := ⟨Tensor.zerosFor ⟨#[n], d, dev⟩⟩
 def add (a b : PoincareBallTangent n d dev) : PoincareBallTangent n d dev := ⟨Tensor.add a.vec b.vec⟩
 def smul (s : Float) (v : PoincareBallTangent n d dev) : PoincareBallTangent n d dev := ⟨Tensor.mulScalar v.vec s⟩
 
 end PoincareBallTangent
 
-instance poincareBallManifold (n : UInt64) : DifferentiableManifold (PoincareBall n d dev) where
+instance poincareBallManifold (n : Nat) : DifferentiableManifold (PoincareBall n d dev) where
   Tangent _ := PoincareBallTangent n d dev
   Cotangent _ := PoincareBallTangent n d dev
   zeroTangent x := ⟨Tensor.zerosLike x.coords⟩

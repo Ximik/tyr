@@ -13,38 +13,38 @@ namespace torch.qwen3tts
 
 /-- Speaker encoder config (ECAPA-TDNN style). -/
 structure SpeakerEncoderConfig where
-  melDim : UInt64 := 128
-  encDim : UInt64 := 1024
-  encChannels : Array UInt64 := #[512, 512, 512, 512, 1536]
-  encKernelSizes : Array UInt64 := #[5, 3, 3, 3, 1]
-  encDilations : Array UInt64 := #[1, 2, 3, 4, 1]
-  encAttentionChannels : UInt64 := 128
-  encRes2NetScale : UInt64 := 8
-  encSeChannels : UInt64 := 128
-  sampleRate : UInt64 := 24000
+  melDim : Nat := 128
+  encDim : Nat := 1024
+  encChannels : Array Nat := #[512, 512, 512, 512, 1536]
+  encKernelSizes : Array Nat := #[5, 3, 3, 3, 1]
+  encDilations : Array Nat := #[1, 2, 3, 4, 1]
+  encAttentionChannels : Nat := 128
+  encRes2NetScale : Nat := 8
+  encSeChannels : Nat := 128
+  sampleRate : Nat := 24000
   deriving Repr, Inhabited
 
 /-- Codec sub-talker config (predicts codebooks 1..N from codebook 0 context). -/
 structure TalkerCodePredictorConfig where
-  vocabSize : UInt64 := 2048
-  hiddenSize : UInt64 := 1024
-  intermediateSize : UInt64 := 3072
-  numHiddenLayers : UInt64 := 5
-  numAttentionHeads : UInt64 := 16
-  numKeyValueHeads : UInt64 := 8
-  headDim : UInt64 := 128
+  vocabSize : Nat := 2048
+  hiddenSize : Nat := 1024
+  intermediateSize : Nat := 3072
+  numHiddenLayers : Nat := 5
+  numAttentionHeads : Nat := 16
+  numKeyValueHeads : Nat := 8
+  headDim : Nat := 128
   hiddenAct : String := "silu"
-  maxPositionEmbeddings : UInt64 := 32768
+  maxPositionEmbeddings : Nat := 32768
   initializerRange : Float := 0.02
   rmsNormEps : Float := 1e-6
   useCache : Bool := true
   ropeTheta : Float := 10000.0
   attentionBias : Bool := false
   useSlidingWindow : Bool := false
-  slidingWindow : UInt64 := 4096
-  maxWindowLayers : UInt64 := 28
+  slidingWindow : Nat := 4096
+  maxWindowLayers : Nat := 28
   attentionDropout : Float := 0.0
-  numCodeGroups : UInt64 := 32
+  numCodeGroups : Nat := 32
   deriving Repr, Inhabited
 
 namespace TalkerCodePredictorConfig
@@ -54,8 +54,8 @@ namespace TalkerCodePredictorConfig
 def defaultLayerTypes (cfg : TalkerCodePredictorConfig) : Array String :=
   Id.run do
     let mut out : Array String := #[]
-    for i in [:cfg.numHiddenLayers.toNat] do
-      if cfg.useSlidingWindow && i.toUInt64 >= cfg.maxWindowLayers then
+    for i in [:cfg.numHiddenLayers] do
+      if cfg.useSlidingWindow && i >= cfg.maxWindowLayers then
         out := out.push "sliding_attention"
       else
         out := out.push "full_attention"
@@ -66,26 +66,26 @@ end TalkerCodePredictorConfig
 /-- Main talker config (text-conditioned codec generator). -/
 structure TalkerConfig where
   codePredictorConfig : TalkerCodePredictorConfig := {}
-  vocabSize : UInt64 := 3072
-  hiddenSize : UInt64 := 1024
-  intermediateSize : UInt64 := 2048
-  numHiddenLayers : UInt64 := 20
-  numAttentionHeads : UInt64 := 16
-  numKeyValueHeads : UInt64 := 2
-  headDim : UInt64 := 64
+  vocabSize : Nat := 3072
+  hiddenSize : Nat := 1024
+  intermediateSize : Nat := 2048
+  numHiddenLayers : Nat := 20
+  numAttentionHeads : Nat := 16
+  numKeyValueHeads : Nat := 2
+  headDim : Nat := 64
   hiddenAct : String := "silu"
-  maxPositionEmbeddings : UInt64 := 32768
+  maxPositionEmbeddings : Nat := 32768
   initializerRange : Float := 0.02
   rmsNormEps : Float := 1e-6
   useCache : Bool := true
   ropeTheta : Float := 10000.0
   attentionBias : Bool := false
   useSlidingWindow : Bool := false
-  slidingWindow : UInt64 := 4096
+  slidingWindow : Nat := 4096
   attentionDropout : Float := 0.0
-  numCodeGroups : UInt64 := 32
-  textHiddenSize : UInt64 := 2048
-  textVocabSize : UInt64 := 151936
+  numCodeGroups : Nat := 32
+  textHiddenSize : Nat := 2048
+  textVocabSize : Nat := 151936
   codecEosTokenId : UInt64 := 4198
   codecThinkId : UInt64 := 4202
   codecNoThinkId : UInt64 := 4203

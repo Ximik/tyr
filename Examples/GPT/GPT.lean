@@ -18,11 +18,11 @@ variable {device : Device}
 
 /-- GPT model configuration -/
 structure Config where
-  vocab_size : UInt64
-  block_size : UInt64  -- max sequence length
-  n_embd : UInt64      -- embedding dimension
-  n_head : UInt64      -- number of attention heads
-  n_layer : UInt64     -- number of transformer blocks
+  vocab_size : Nat
+  block_size : Nat  -- max sequence length
+  n_embd : Nat      -- embedding dimension
+  n_head : Nat      -- number of attention heads
+  n_layer : Nat     -- number of transformer blocks
   dropout : Float := 0.0
   deriving Repr, Inhabited
 
@@ -51,7 +51,7 @@ def Config.nanogpt_gpu_shakespeare : Config :=
   { vocab_size := 65, block_size := 256, n_embd := 384, n_head := 6, n_layer := 6, dropout := 0.2 }
 
 /-- Parameters for a single transformer block -/
-structure BlockParams (n_embd : UInt64) where
+structure BlockParams (n_embd : Nat) where
   -- Layer norm 1 (pre-attention)
   ln1_weight : Activation (device := device) #[n_embd]
   ln1_bias : Activation (device := device) #[n_embd]
@@ -93,7 +93,7 @@ def makeLeafParam {s : Shape} (t : Activation (device := device) s) : IO (Activa
   TensorOps.leaf t
 
 /-- Initialize block parameters with scaled random weights -/
-def BlockParams.init (n_embd : UInt64) (scale : Float := 0.02) (device : Device := Device.CPU) : IO (BlockParams (device := device) n_embd) := do
+def BlockParams.init (n_embd : Nat) (scale : Float := 0.02) (device : Device := Device.CPU) : IO (BlockParams (device := device) n_embd) := do
   -- Create scaled random tensors as leaf tensors on target device
   -- randn * scale creates a non-leaf, so we detach and set requires_grad
   let q_proj ← Tensor.randn #[n_embd, n_embd] false device
@@ -123,7 +123,7 @@ def GPTParams.init (cfg : Config) (device : Device := Device.CPU) : IO (GPTParam
   let wte ← Tensor.randn #[cfg.vocab_size, cfg.n_embd] false device
   let wpe ← Tensor.randn #[cfg.block_size, cfg.n_embd] false device
   let mut blocks := #[]
-  for _ in [:cfg.n_layer.toNat] do
+  for _ in [:cfg.n_layer] do
     let block ← BlockParams.init cfg.n_embd 0.02 device
     blocks := blocks.push block
   return {
@@ -135,7 +135,7 @@ def GPTParams.init (cfg : Config) (device : Device := Device.CPU) : IO (GPTParam
   }
 
 /-- Forward pass through a single transformer block with multi-head attention and dropout -/
-def blockForward {n_embd n_head batch seq : UInt64}
+def blockForward {n_embd n_head batch seq : Nat}
     (params : BlockParams (device := device) n_embd)
     (x : Activation (device := device) #[batch, seq, n_embd])
     (dropout_p : Float := 0.0)
@@ -178,7 +178,7 @@ def blockForward {n_embd n_head batch seq : UInt64}
   return x + h
 
 /-- Full GPT forward pass with dropout -/
-def forward {cfg : Config} {batch seq : UInt64}
+def forward {cfg : Config} {batch seq : Nat}
     (params : GPTParams (device := device) cfg)
     (idx : Tokens (device := device) #[batch, seq])
     (training : Bool := true) : IO (Activation (device := device) #[batch, seq, cfg.vocab_size]) := do
@@ -204,7 +204,7 @@ def forward {cfg : Config} {batch seq : UInt64}
   return Tensor.matmul3d xNorm wte_t
 
 /-- Compute cross-entropy loss (training=true enables dropout) -/
-def loss {cfg : Config} {batch seq : UInt64}
+def loss {cfg : Config} {batch seq : Nat}
     (params : GPTParams (device := device) cfg)
     (idx : Tokens (device := device) #[batch, seq])
     (targets : Tokens (device := device) #[batch, seq])
@@ -247,12 +247,12 @@ def generate {cfg : Config}
 
   for _ in [:maxNewTokens] do
     -- Crop context to block_size if needed
-    let ctxLen := min tokens.size cfg.block_size.toNat
+    let ctxLen := min tokens.size cfg.block_size
     let startIdx := tokens.size - ctxLen
     let ctx := tokens[startIdx:].toArray
 
     -- Create input tensor [1, seq] from token array and move to model's device
-    let seq : UInt64 := ctxLen.toUInt64
+    let seq : Nat := ctxLen
     let inputTensor := ((Tensor.fromInt64Array ctx).reshapeChecked #[1, seq]).to params.wte.device
 
     -- Forward pass to get logits [1, seq, vocab] (training=false disables dropout)
@@ -276,7 +276,7 @@ def generate {cfg : Config}
   return tokens
 
 
-derive_tensor_tree_cast {source target : Device} {n_embd : UInt64} :
+derive_tensor_tree_cast {source target : Device} {n_embd : Nat} :
   BlockParams (device := source) n_embd => BlockParams (device := target) n_embd
 
 derive_tensor_tree_cast {source target : Device} {cfg : Config} :

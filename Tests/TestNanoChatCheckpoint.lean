@@ -56,7 +56,7 @@ private def trainedCheckpoint : IO (Checkpoint (device := .CPU) tinyConfig) := d
   let optState := { initialOpt with adamState := adamState, dualState := dualState, step := 13 }
   pure { params := params, optState := optState, step := 14, bestValLoss := 1.0e-8 }
 
-private def metadata (tokens : UInt64) : CheckpointMetadata := {
+private def metadata (tokens : Nat) : CheckpointMetadata := {
   modelConfigRepr := s!"{repr tinyConfig}"
   modelConfig? := some tinyConfig
   hyperparameters := { numIterations := 20 }

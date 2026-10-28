@@ -15,7 +15,7 @@ variable {device : Device} {dtype : DType}
 variable [DType.RealFloating dtype]
 /-- GroupNorm parameters for VAE.
     Weight and bias for affine transformation. -/
-structure GroupNormParams (num_groups channels : UInt64) (dtype : DType := .Float32) where
+structure GroupNormParams (num_groups channels : Nat) (dtype : DType := .Float32) where
   weight : Tensor { dtype := dtype, device := device, shape := #[channels] }
   bias : Tensor { dtype := dtype, device := device, shape := #[channels] }
   deriving TensorStruct
@@ -24,7 +24,7 @@ structure GroupNormParams (num_groups channels : UInt64) (dtype : DType := .Floa
 namespace GroupNormParams
 
 /-- Initialize GroupNorm parameters (weight=1, bias=0) -/
-def init (num_groups channels : UInt64) (device : Device := .CPU) (dtype : DType := .Float32) : IO (GroupNormParams (device := device) (dtype := dtype) num_groups channels) := do
+def init (num_groups channels : Nat) (device : Device := .CPU) (dtype : DType := .Float32) : IO (GroupNormParams (device := device) (dtype := dtype) num_groups channels) := do
   let support ← dtype.acquireConstantSupport device
   let _ := support.down
   IO.ofExcept (Shape.validateAllocation #[channels])
@@ -33,7 +33,7 @@ def init (num_groups channels : UInt64) (device : Device := .CPU) (dtype : DType
   pure { weight, bias }
 
 /-- Apply GroupNorm to input tensor [batch, channels, height, width] -/
-def forward {batch channels height width num_groups : UInt64}
+def forward {batch channels height width num_groups : Nat}
     (gn : GroupNormParams (device := device) (dtype := dtype) num_groups channels)
     (x : Tensor { dtype := dtype, device := device, shape := #[batch, channels, height, width] })
     (eps : Float := 1e-6)
@@ -44,7 +44,7 @@ end GroupNormParams
 
 /-- Conv2d parameters for VAE.
     Weight and bias for standard conv2d. -/
-structure Conv2dParams (in_ch out_ch kernel_size : UInt64) (padding : UInt64 := 0) (dtype : DType := .Float32) where
+structure Conv2dParams (in_ch out_ch kernel_size : Nat) (padding : Nat := 0) (dtype : DType := .Float32) where
   weight : Tensor { dtype := dtype, device := device, shape := #[out_ch, in_ch, kernel_size, kernel_size] }
   bias : Tensor { dtype := dtype, device := device, shape := #[out_ch] }
   deriving TensorStruct
@@ -53,7 +53,7 @@ structure Conv2dParams (in_ch out_ch kernel_size : UInt64) (padding : UInt64 := 
 namespace Conv2dParams
 
 /-- Initialize Conv2d with Kaiming init -/
-def init (in_ch out_ch kernel_size : UInt64) (padding : UInt64 := 0) (device : Device := .CPU) (dtype : DType := .Float32) : IO (Conv2dParams (device := device) (dtype := dtype) in_ch out_ch kernel_size padding) := do
+def init (in_ch out_ch kernel_size : Nat) (padding : Nat := 0) (device : Device := .CPU) (dtype : DType := .Float32) : IO (Conv2dParams (device := device) (dtype := dtype) in_ch out_ch kernel_size padding) := do
   let floating ← IO.ofExcept (DType.realFloating? dtype)
   let _ := floating.down
   let support ← dtype.acquireConstantSupport device
@@ -68,7 +68,7 @@ def init (in_ch out_ch kernel_size : UInt64) (padding : UInt64 := 0) (device : D
   }
 
 /-- Apply convolution -/
-def forward {batch in_ch out_ch kernel_size padding height width : UInt64}
+def forward {batch in_ch out_ch kernel_size padding height width : Nat}
     (conv : Conv2dParams (device := device) (dtype := dtype) in_ch out_ch kernel_size padding)
     (x : Tensor { dtype := dtype, device := device, shape := #[batch, in_ch, height, width] })
     : Tensor { dtype := dtype, device := device, shape := #[batch, out_ch, Tensor.convExtent height kernel_size 1 padding 1,
@@ -83,7 +83,7 @@ def swish {s : Shape} (x : Tensor { dtype := dtype, device := device, shape := s
 
 /-- Residual block for VAE decoder.
     norm1 → swish → conv1 → norm2 → swish → conv2 (+ skip connection) -/
-structure ResnetBlock (in_ch out_ch : UInt64) (dtype : DType := .Float32) where
+structure ResnetBlock (in_ch out_ch : Nat) (dtype : DType := .Float32) where
   /-- First normalization -/
   norm1 : GroupNormParams (device := device) (dtype := dtype) 32 in_ch
   /-- First convolution 3×3 -/
@@ -100,7 +100,7 @@ structure ResnetBlock (in_ch out_ch : UInt64) (dtype : DType := .Float32) where
 namespace ResnetBlock
 
 /-- Initialize ResnetBlock -/
-def init (in_ch out_ch : UInt64) (device : Device := .CPU) (dtype : DType := .Float32) : IO (ResnetBlock (device := device) (dtype := dtype) in_ch out_ch) := do
+def init (in_ch out_ch : Nat) (device : Device := .CPU) (dtype : DType := .Float32) : IO (ResnetBlock (device := device) (dtype := dtype) in_ch out_ch) := do
   let norm1 ← GroupNormParams.init (dtype := dtype) (device := device) 32 in_ch
   let conv1 ← Conv2dParams.init (dtype := dtype) (device := device) in_ch out_ch 3 1
   let norm2 ← GroupNormParams.init (dtype := dtype) (device := device) 32 out_ch
@@ -115,7 +115,7 @@ def init (in_ch out_ch : UInt64) (device : Device := .CPU) (dtype : DType := .Fl
 /-- Forward pass for ResnetBlock.
     Input: [batch, in_ch, height, width]
     Output: [batch, out_ch, height, width] -/
-def forward {batch in_ch out_ch height width : UInt64}
+def forward {batch in_ch out_ch height width : Nat}
     (block : ResnetBlock (device := device) (dtype := dtype) in_ch out_ch)
     (x : Tensor { dtype := dtype, device := device, shape := #[batch, in_ch, height, width] })
     : Tensor { dtype := dtype, device := device, shape := #[batch, out_ch, height, width] } :=

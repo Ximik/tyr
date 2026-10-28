@@ -13,14 +13,14 @@ namespace torch.diffusion
 open torch
 
 /-- Masked diffusion schedule for training -/
-structure MaskedDiffusionSchedule (num_timesteps : UInt64) where
+structure MaskedDiffusionSchedule (num_timesteps : Nat) where
   mask_token_id : UInt64
-  context_len : UInt64
+  context_len : Nat
   /-- mask_probs[t] = probability of masking at timestep t -/
   mask_probs : Activation #[num_timesteps]
 
 /-- Initialize a linear mask schedule -/
-def MaskedDiffusionSchedule.init (num_timesteps mask_token_id context_len : UInt64)
+def MaskedDiffusionSchedule.init (num_timesteps : Nat) (mask_token_id : UInt64) (context_len : Nat)
     : MaskedDiffusionSchedule num_timesteps :=
   let start := 1.0 / num_timesteps.toFloat
   let stop := 1.0
@@ -37,7 +37,7 @@ def MaskedDiffusionSchedule.init (num_timesteps mask_token_id context_len : UInt
     NOTE: Context tokens (first context_len positions) are never masked.
     The mask probability is timestep-dependent: higher timesteps = more masking.
 -/
-def MaskedDiffusionSchedule.addMasks {num_timesteps batch seq : UInt64}
+def MaskedDiffusionSchedule.addMasks {num_timesteps batch seq : Nat}
     (schedule : MaskedDiffusionSchedule num_timesteps)
     (x_0 : Tokens #[batch, seq])     -- Clean tokens
     (t : Tokens #[batch])            -- Timestep per sample (int64)
@@ -76,7 +76,7 @@ def MaskedDiffusionSchedule.addMasks {num_timesteps batch seq : UInt64}
   return x_t
 
 /-- Get a mask indicating which positions are masked in x_t -/
-def getMaskedPositions {batch seq : UInt64}
+def getMaskedPositions {batch seq : Nat}
     (x_t : Tokens #[batch, seq])
     (mask_token_id : UInt64)
     : Mask #[batch, seq] :=
@@ -86,7 +86,7 @@ def getMaskedPositions {batch seq : UInt64}
     Only computes loss on positions that were masked (x_t == mask_token_id).
     Returns the mean loss over masked positions.
 -/
-def maskedCrossEntropyLoss {batch seq vocab : UInt64}
+def maskedCrossEntropyLoss {batch seq vocab : Nat}
     (logits : Activation #[batch, seq, vocab])   -- Model output logits
     (targets : Tokens #[batch, seq])          -- Original clean tokens (x_0)
     (x_t : Tokens #[batch, seq])              -- Masked input tokens

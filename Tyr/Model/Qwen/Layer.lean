@@ -21,7 +21,7 @@ namespace torch.qwen
 variable {device : Device}
 /-- Qwen transformer layer.
     Uses pre-norm architecture with RMSNorm. -/
-structure QwenLayer (hidden_size num_heads num_kv_heads head_dim intermediate_size : UInt64) (dtype : DType := .Float32) where
+structure QwenLayer (hidden_size num_heads num_kv_heads head_dim intermediate_size : Nat) (dtype : DType := .Float32) where
   /-- Input layer norm (before attention) -/
   input_layernorm : RMSNorm (device := device) hidden_size dtype
   /-- Self-attention module -/
@@ -38,7 +38,7 @@ variable {dtype : DType}
 variable [DType.RealFloating dtype]
 
 /-- Initialize a transformer layer -/
-def init (hidden_size num_heads num_kv_heads head_dim intermediate_size : UInt64)
+def init (hidden_size num_heads num_kv_heads head_dim intermediate_size : Nat)
     (eps : Float := 1e-6) (dtype : DType := .Float32)
     (device : Device := .CPU) : IO (QwenLayer (device := device) hidden_size num_heads num_kv_heads head_dim intermediate_size dtype) := do
   let input_layernorm ← RMSNorm.init (device := device) hidden_size eps dtype
@@ -52,7 +52,7 @@ def init (hidden_size num_heads num_kv_heads head_dim intermediate_size : UInt64
     Output: [batch, seq, hidden_size]
 
     Pre-norm: x + attn(norm1(x)) + mlp(norm2(x + attn(...))) -/
-def forward {batch seq hidden_size num_heads num_kv_heads head_dim intermediate_size : UInt64}
+def forward {batch seq hidden_size num_heads num_kv_heads head_dim intermediate_size : Nat}
     (layer : QwenLayer (device := device) hidden_size num_heads num_kv_heads head_dim intermediate_size dtype)
     (x : Tensor { device := device, shape := #[batch, seq, hidden_size], dtype := dtype })
     (cos : Tensor { device := device, shape := #[seq, head_dim / 2], dtype := .Float32 })
@@ -73,7 +73,7 @@ def forward {batch seq hidden_size num_heads num_kv_heads head_dim intermediate_
 
 /-- Incremental one-token transformer layer step with attention KV cache.
     Input/output: `[batch, 1, hidden_size]`. -/
-def forwardStep {batch hidden_size num_heads num_kv_heads head_dim intermediate_size : UInt64}
+def forwardStep {batch hidden_size num_heads num_kv_heads head_dim intermediate_size : Nat}
     (layer : QwenLayer (device := device) hidden_size num_heads num_kv_heads head_dim intermediate_size dtype)
     (x : Tensor { device := device, shape := #[batch, 1, hidden_size], dtype := dtype })
     (cos : Tensor { device := device, shape := #[1, head_dim / 2], dtype := .Float32 })
@@ -92,7 +92,7 @@ def forwardStep {batch hidden_size num_heads num_kv_heads head_dim intermediate_
   let h3 := layer.mlp.forward h2
   (Tensor.add residual2 h3, cache')
 
-def forwardMasked {batch seq hidden_size num_heads num_kv_heads head_dim intermediate_size : UInt64}
+def forwardMasked {batch seq hidden_size num_heads num_kv_heads head_dim intermediate_size : Nat}
     {maskDtype : DType}
     (layer : QwenLayer (device := device) hidden_size num_heads num_kv_heads head_dim intermediate_size dtype)
     (x : Tensor { device := device, shape := #[batch, seq, hidden_size], dtype := dtype })

@@ -41,9 +41,9 @@ private def close {σ τ : StaticSpec} (x : Tensor σ) (y : Tensor τ) (tol : Fl
     let initial := model.initLayerKVCaches (batch := 1) 4 .CPU
     let mut caches := initial
     for pos in [:4] do
-      let tok := tokens.sliceChecked 1 pos.toUInt64 1 #[1, 1]
-      let (actual, next) ← model.decodeStepWithCache (encSeq := 3) tok pos.toUInt64 cross caches
-      close actual ((expected.sliceChecked 1 pos.toUInt64 1 #[1, 1, 16]).reshapeChecked #[1, 16]) (if bf16 then 0.08 else 1e-4)
+      let tok := tokens.sliceChecked 1 pos 1 #[1, 1]
+      let (actual, next) ← model.decodeStepWithCache (encSeq := 3) tok pos cross caches
+      close actual ((expected.sliceChecked 1 pos 1 #[1, 1, 16]).reshapeChecked #[1, 16]) (if bf16 then 0.08 else 1e-4)
       LeanTest.assertEqual actual.actualSpec.dtype expected.actualSpec.dtype
       caches := next
     let some untouched := initial[0]? | throw (IO.userError "missing initial cache")
@@ -177,7 +177,7 @@ private def writeWhisperCheckpoint (dir : System.FilePath) (bf16 : Bool) (badBia
     index := index ++ [(name, Lean.toJson "model.safetensors")]
   let header := (Lean.Json.mkObj fields).compress.toUTF8
   let mut headerSize := ByteArray.empty
-  for i in [:8] do headerSize := headerSize.push ((header.size.toUInt64 >>> (i * 8).toUInt64).toUInt8)
+  for i in [:8] do headerSize := headerSize.push ((header.size >>> (i * 8)).toUInt8)
   IO.FS.writeBinFile (dir / "model.safetensors") (headerSize ++ header ++ data)
   IO.FS.writeFile (dir / "model.safetensors.index.json") (Lean.Json.mkObj [("weight_map", Lean.Json.mkObj index)]).compress
 

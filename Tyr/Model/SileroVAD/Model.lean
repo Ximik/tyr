@@ -19,25 +19,25 @@ namespace torch.silerovad
 variable {device : Device}
 open torch.Model
 
-private def sampleRate16k : UInt64 := 16000
+private def sampleRate16k : Nat := 16000
 private def chunkSizeSamples : Nat := 512
 private def contextSizeSamples : Nat := 64
 private def combinedInputSamples : Nat := chunkSizeSamples + contextSizeSamples
 private def rightReflectPad : Nat := 64
 private def preparedInputSamples : Nat := combinedInputSamples + rightReflectPad
 
-private def addBias2d {n d : UInt64}
+private def addBias2d {n d : Nat}
     (x : Tensor { device := device, shape := #[n, d], dtype := .Float32 }) (b : Tensor { device := device, shape := #[d], dtype := .Float32 })
     : Tensor { device := device, shape := #[n, d], dtype := .Float32 } :=
   x + (b.reshapeChecked #[1, d]).expand #[n, d]
 
-private def addBias3d {batch channels frames : UInt64}
+private def addBias3d {batch channels frames : Nat}
     (x : Tensor { device := device, shape := #[batch, channels, frames], dtype := .Float32 })
     (b : Tensor { device := device, shape := #[channels], dtype := .Float32 })
     : Tensor { device := device, shape := #[batch, channels, frames], dtype := .Float32 } :=
   x + (b.reshapeChecked #[1, channels, 1]).expand #[batch, channels, frames]
 
-private def linear2d {batch inDim outDim : UInt64}
+private def linear2d {batch inDim outDim : Nat}
     (x : Tensor { device := device, shape := #[batch, inDim], dtype := .Float32 })
     (w : Tensor { device := device, shape := #[outDim, inDim], dtype := .Float32 })
     (b : Tensor { device := device, shape := #[outDim], dtype := .Float32 }) : Tensor { device := device, shape := #[batch, outDim], dtype := .Float32 } :=
@@ -215,11 +215,11 @@ private def lstmCellStep
     (`64` context + `512` chunk) with additional right reflect padding `64`. -/
 def forwardPrepared
     (m : (SileroVAD (device := device)))
-    (xPrepared : Tensor { device := device, shape := #[1, preparedInputSamples.toUInt64], dtype := .Float32 })
+    (xPrepared : Tensor { device := device, shape := #[1, preparedInputSamples], dtype := .Float32 })
     (state : (VADLstmState (device := device)))
     : Tensor { device := device, shape := #[1, 1], dtype := .Float32 } × (VADLstmState (device := device)) := Id.run do
-  let x0 : Tensor { device := device, shape := #[1, 1, preparedInputSamples.toUInt64], dtype := .Float32 } :=
-    Tensor.reshapeChecked xPrepared #[1, 1, preparedInputSamples.toUInt64]
+  let x0 : Tensor { device := device, shape := #[1, 1, preparedInputSamples], dtype := .Float32 } :=
+    Tensor.reshapeChecked xPrepared #[1, 1, preparedInputSamples]
 
   let stft : Tensor { device := device, shape := #[1, 258, 4], dtype := .Float32 } :=
     Tensor.reshapeChecked (Tensor.conv1d x0 m.stftConvWeight 128 0 1) #[1, 258, 4]
@@ -254,7 +254,7 @@ structure SileroVADRuntime where
   model : SileroVAD (device := device)
   state : VADLstmState (device := device)
   context : Array Float := Array.replicate contextSizeSamples 0.0
-  lastSamplingRate : UInt64 := sampleRate16k
+  lastSamplingRate : Nat := sampleRate16k
 
 namespace SileroVADRuntime
 
@@ -291,7 +291,7 @@ private def splitEvery (xs : Array Float) (n : Nat) : Array (Array Float) :=
         i := i + n
       out
 
-private def prepareChunkTensor (context chunk : Array Float) : IO (Tensor { device := device, shape := #[1, preparedInputSamples.toUInt64], dtype := .Float32 } × Array Float) := do
+private def prepareChunkTensor (context chunk : Array Float) : IO (Tensor { device := device, shape := #[1, preparedInputSamples], dtype := .Float32 } × Array Float) := do
   if context.size != contextSizeSamples then
     throw <| IO.userError
       s!"SileroVAD context size mismatch: expected {contextSizeSamples}, got {context.size}"
@@ -308,13 +308,13 @@ private def prepareChunkTensor (context chunk : Array Float) : IO (Tensor { devi
     throw <| IO.userError
       s!"SileroVAD prepared input size mismatch: expected {preparedInputSamples}, got {prepared.size}"
 
-  let x : Tensor { device := device, shape := #[1, preparedInputSamples.toUInt64], dtype := .Float32 } :=
-    Tensor.reshapeChecked ((Tensor.fromFloatArray prepared).to device) #[1, preparedInputSamples.toUInt64]
+  let x : Tensor { device := device, shape := #[1, preparedInputSamples], dtype := .Float32 } :=
+    Tensor.reshapeChecked ((Tensor.fromFloatArray prepared).to device) #[1, preparedInputSamples]
   let nextContext := combined.extract (combined.size - contextSizeSamples) combined.size
   pure (x, nextContext)
 
 /-- One `512`-sample chunk inference step (`16kHz` only). -/
-def step (rt : (SileroVADRuntime (device := device))) (chunk : Array Float) (samplingRate : UInt64 := sampleRate16k)
+def step (rt : (SileroVADRuntime (device := device))) (chunk : Array Float) (samplingRate : Nat := sampleRate16k)
     : IO (Float × (SileroVADRuntime (device := device))) := do
   if samplingRate != sampleRate16k then
     throw <| IO.userError
@@ -337,7 +337,7 @@ def step (rt : (SileroVADRuntime (device := device))) (chunk : Array Float) (sam
   })
 
 /-- Full-audio probability forward (one probability per 512-sample chunk). -/
-def audioForward (rt : (SileroVADRuntime (device := device))) (audio : Array Float) (samplingRate : UInt64 := sampleRate16k)
+def audioForward (rt : (SileroVADRuntime (device := device))) (audio : Array Float) (samplingRate : Nat := sampleRate16k)
     : IO (Array Float × (SileroVADRuntime (device := device))) := do
   if samplingRate != sampleRate16k then
     throw <| IO.userError

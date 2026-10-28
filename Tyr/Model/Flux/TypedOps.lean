@@ -13,7 +13,7 @@ def zerosWeight (s : Shape) (device : Device := .CPU) (dtype : DType := .Float32
     [DType.ConstantSupported dtype device] : Tensor { dtype := dtype, device := device, shape := s } :=
   Tensor.zerosFor { shape := s, dtype, device }
 
-def initLayerNorm (dim : UInt64) (eps : Float := 1e-5) (train : Bool := true) (device : Device := .CPU) (dtype : DType := .Float32) :
+def initLayerNorm (dim : Nat) (eps : Float := 1e-5) (train : Bool := true) (device : Device := .CPU) (dtype : DType := .Float32) :
     IO (LayerNorm (device := device) dim dtype) := do
   IO.ofExcept (Shape.validateAllocation #[dim])
   let support ← dtype.acquireConstantSupport device
@@ -25,14 +25,14 @@ def initLayerNorm (dim : UInt64) (eps : Float := 1e-5) (train : Bool := true) (d
   else
     pure { weight, bias, eps := ⟨eps⟩ }
 
-def sliceTyped {s : Shape} {d : DType} (x : Tensor { device := device, shape := s, dtype := d }) (dim : Nat) (start len : UInt64) : Tensor { device := device, shape := (s.set! dim len), dtype := d } :=
+def sliceTyped {s : Shape} {d : DType} (x : Tensor { device := device, shape := s, dtype := d }) (dim : Nat) (start len : Nat) : Tensor { device := device, shape := (s.set! dim len), dtype := d } :=
   x.sliceChecked dim start len (s.set! dim len)
 
-def transposeAttention {b s h d : UInt64} {dt : DType} (x : Tensor { device := device, shape := #[b, s, h, d], dtype := dt }) : Tensor { device := device, shape := #[b, h, s, d], dtype := dt } := x.transpose 1 2
+def transposeAttention {b s h d : Nat} {dt : DType} (x : Tensor { device := device, shape := #[b, s, h, d], dtype := dt }) : Tensor { device := device, shape := #[b, h, s, d], dtype := dt } := x.transpose 1 2
 
-def fromAttention {b h s d : UInt64} {dt : DType} (x : Tensor { device := device, shape := #[b, h, s, d], dtype := dt }) : Tensor { device := device, shape := #[b, s, h, d], dtype := dt } := x.transpose 1 2
+def fromAttention {b h s d : Nat} {dt : DType} (x : Tensor { device := device, shape := #[b, h, s, d], dtype := dt }) : Tensor { device := device, shape := #[b, s, h, d], dtype := dt } := x.transpose 1 2
 
-def saveImagePPM {b h w : UInt64} (image : Tensor { dtype := dtype, device := device, shape := #[b, 3, h, w] }) (path : String) : IO Unit :=
+def saveImagePPM {b h w : Nat} (image : Tensor { dtype := dtype, device := device, shape := #[b, 3, h, w] }) (path : String) : IO Unit :=
   RawTensor.savePPM (image.to .CPU).raw path
 
 end torch.flux

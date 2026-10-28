@@ -50,7 +50,12 @@ private def getFloat? (j : Json) : Option Float :=
   | some x => some x
   | none => (getNat? j).map (·.toFloat)
 
-private def getNatFieldD (j : Json) (key : String) (d : UInt64) : UInt64 :=
+private def getNatFieldD (j : Json) (key : String) (d : Nat) : Nat :=
+  match getObjVal? j key >>= getNat? with
+  | some n => n
+  | none => d
+
+private def getTokenIdFieldD (j : Json) (key : String) (d : UInt64) : UInt64 :=
   match getObjVal? j key >>= getNat? with
   | some n => n.toUInt64
   | none => d
@@ -133,9 +138,9 @@ private def parseThinkerConfig (j : Json) (d : ThinkerConfig := {}) : ThinkerCon
   {
     audioConfig
     textConfig
-    audioTokenId := getNatFieldD j "audio_token_id" d.audioTokenId
-    audioStartTokenId := getNatFieldD j "audio_start_token_id" d.audioStartTokenId
-    userTokenId := getNatFieldD j "user_token_id" d.userTokenId
+    audioTokenId := getTokenIdFieldD j "audio_token_id" d.audioTokenId
+    audioStartTokenId := getTokenIdFieldD j "audio_start_token_id" d.audioStartTokenId
+    userTokenId := getTokenIdFieldD j "user_token_id" d.userTokenId
     modelType := getStrFieldD j "model_type" d.modelType
     classifyNum := getNatFieldD j "classify_num" d.classifyNum
     initializerRange := getFloatFieldD j "initializer_range" d.initializerRange
@@ -151,7 +156,7 @@ def loadFromFile (path : String) (defaults : Qwen3ASRConfig := {}) : IO Qwen3ASR
     | some t => parseThinkerConfig t defaults.thinkerConfig
     | none => defaults.thinkerConfig
   let supportLanguages := getStringArrayFieldD root "support_languages" defaults.supportLanguages
-  let timestampTokenId := getNatFieldD root "timestamp_token_id" defaults.timestampTokenId
+  let timestampTokenId := getTokenIdFieldD root "timestamp_token_id" defaults.timestampTokenId
   let timestampSegmentTime := getFloatFieldD root "timestamp_segment_time" defaults.timestampSegmentTime
   pure { thinkerConfig, supportLanguages, timestampTokenId, timestampSegmentTime }
 

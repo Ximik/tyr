@@ -32,9 +32,9 @@ structure PretrainingConfig where
   /-- Data directory containing parquet files -/
   dataPath : String := "data/fineweb"
   /-- Batch size per device -/
-  deviceBatchSize : UInt64 := 8
+  deviceBatchSize : Nat := 8
   /-- Sequence length -/
-  seqLen : UInt64 := 2048
+  seqLen : Nat := 2048
   /-- Total training steps -/
   totalSteps : Nat := 10000
   /-- Warmup steps -/
@@ -90,7 +90,7 @@ structure TrainState where
   /-- Best validation loss -/
   bestLoss : Float := 100.0
   /-- Total tokens processed -/
-  totalTokens : UInt64 := 0
+  totalTokens : Nat := 0
   /-- Running loss (exponential moving average) -/
   runningLoss : Float := 0.0
   deriving Repr, Inhabited
@@ -144,7 +144,7 @@ def trainStep (cfg : torch.gpt.Config)
 
 /-- Run the main pretraining loop using simple in-memory data -/
 def runPretraining (cfg : PretrainingConfig)
-    (numTokens : UInt64)
+    (numTokens : Nat)
     (trainData : Tokens (device := .CPU) #[numTokens])
     (valData : Option (Tokens (device := .CPU) #[numTokens]))
     (device : Device := .CPU)
@@ -171,7 +171,7 @@ def runPretraining (cfg : PretrainingConfig)
       throw <| IO.userError "GPT pretraining requires positive dimensions and enough tokens"
     let maxStart := numTokens - batchTokens
     let startTensor ← Tensor.randint 0 (maxStart + 1).toInt64 #[]
-    let startIdx := startTensor.itemInt.toUInt64
+    let startIdx := startTensor.itemInt.toInt.toNat
 
     -- Get batch: x = tokens[start:start+seq], y = tokens[start+1:start+seq+1]
     let batchLen := cfg.deviceBatchSize * cfg.seqLen
@@ -229,7 +229,7 @@ def main : IO Unit := do
 
   -- Generate random training data for testing
   IO.println "Generating random training data..."
-  let numTokens : UInt64 := 50000
+  let numTokens : Nat := 50000
   let trainData ← Tensor.randint 0 cfg.modelConfig.vocab_size.toInt64 #[numTokens]
 
   -- No validation data for simple test

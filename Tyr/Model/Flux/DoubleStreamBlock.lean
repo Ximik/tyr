@@ -19,7 +19,7 @@ namespace torch.flux
 variable {device : Device} {dtype : DType}
 variable [DType.RealFloating dtype]
 /-- Self-attention layer for double-stream block -/
-structure SelfAttention (hidden_size num_heads head_dim : UInt64) (dtype : DType := .Float32) where
+structure SelfAttention (hidden_size num_heads head_dim : Nat) (dtype : DType := .Float32) where
   /-- QKV projection: [hidden * 3, hidden] -/
   qkv : Tensor { dtype := dtype, device := device, shape := #[num_heads * head_dim * 3, hidden_size] }
   /-- QK normalization -/
@@ -30,7 +30,7 @@ structure SelfAttention (hidden_size num_heads head_dim : UInt64) (dtype : DType
 
 
 /-- SwiGLU MLP for double-stream block -/
-structure SwiGLUMLP (hidden_size mlp_hidden : UInt64) (dtype : DType := .Float32) where
+structure SwiGLUMLP (hidden_size mlp_hidden : Nat) (dtype : DType := .Float32) where
   /-- Linear in: gate and up projection fused -/
   w1 : Tensor { dtype := dtype, device := device, shape := #[mlp_hidden * 2, hidden_size] }
   /-- Linear out: down projection -/
@@ -40,7 +40,7 @@ structure SwiGLUMLP (hidden_size mlp_hidden : UInt64) (dtype : DType := .Float32
 
 /-- Double-stream transformer block.
     Processes image and text tokens with separate paths but joint attention. -/
-structure DoubleStreamBlock (hidden_size num_heads head_dim mlp_hidden : UInt64) (dtype : DType := .Float32) where
+structure DoubleStreamBlock (hidden_size num_heads head_dim mlp_hidden : Nat) (dtype : DType := .Float32) where
   /-- Image path normalization -/
   img_norm1 : LayerNorm (device := device) hidden_size dtype
   /-- Image self-attention -/
@@ -65,7 +65,7 @@ structure DoubleStreamBlock (hidden_size num_heads head_dim mlp_hidden : UInt64)
 namespace DoubleStreamBlock
 
 /-- Initialize self-attention -/
-def initSelfAttention (hidden_size num_heads head_dim : UInt64)
+def initSelfAttention (hidden_size num_heads head_dim : Nat)
     (device : Device := .CPU) (dtype : DType := .Float32) : IO (SelfAttention (device := device) (dtype := dtype) hidden_size num_heads head_dim) := do
   let floating ← IO.ofExcept (DType.realFloating? dtype)
   let _ := floating.down
@@ -80,7 +80,7 @@ def initSelfAttention (hidden_size num_heads head_dim : UInt64)
   }
 
 /-- Initialize SwiGLU MLP -/
-def initMLP (hidden_size mlp_hidden : UInt64)
+def initMLP (hidden_size mlp_hidden : Nat)
     (device : Device := .CPU) (dtype : DType := .Float32) : IO (SwiGLUMLP (device := device) (dtype := dtype) hidden_size mlp_hidden) := do
   let floating ← IO.ofExcept (DType.realFloating? dtype)
   let _ := floating.down
@@ -93,7 +93,7 @@ def initMLP (hidden_size mlp_hidden : UInt64)
   }
 
 /-- Initialize double-stream block -/
-def init (hidden_size num_heads head_dim mlp_hidden : UInt64)
+def init (hidden_size num_heads head_dim mlp_hidden : Nat)
     (device : Device := .CPU) (dtype : DType := .Float32) : IO (DoubleStreamBlock (device := device) (dtype := dtype) hidden_size num_heads head_dim mlp_hidden) := do
   let floating ← IO.ofExcept (DType.realFloating? dtype)
   let _ := floating.down
@@ -118,7 +118,7 @@ def init (hidden_size num_heads head_dim mlp_hidden : UInt64)
     vec: [batch, hidden_size] - timestep embedding
     pe: RoPE embeddings
     Returns: (img_out, txt_out) -/
-def forward {batch img_seq txt_seq hidden_size num_heads head_dim mlp_hidden : UInt64}
+def forward {batch img_seq txt_seq hidden_size num_heads head_dim mlp_hidden : Nat}
     (block : DoubleStreamBlock (device := device) (dtype := dtype) hidden_size num_heads head_dim mlp_hidden)
     (img : Tensor { dtype := dtype, device := device, shape := #[batch, img_seq, hidden_size] })
     (txt : Tensor { dtype := dtype, device := device, shape := #[batch, txt_seq, hidden_size] })

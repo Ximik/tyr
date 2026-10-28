@@ -49,7 +49,7 @@ private def shapeToString (s : Shape) : String :=
   "[" ++ String.intercalate ", " (s.toList.map toString) ++ "]"
 
 private def shapeToNatArray (s : Shape) : Array Nat :=
-  s.map UInt64.toNat
+  s
 
 /-- AD participation role for one structural leaf. -/
 inductive TensorLeafRole where

@@ -22,7 +22,7 @@ namespace Tests.TestFactoryRecovery
 /-- Invalid runtime dimensions are rejected before pure factory evaluation. -/
 @[test]
 def testInitializerShapeValidation : IO Unit := do
-  let invalid : UInt64 := 18446744073709551615
+  let invalid : Nat := 18446744073709551615
   Tests.assertThrows (Typed.RMSNorm.init invalid)
   Tests.assertThrows (RMSNorm.init invalid)
   Tests.assertThrows (Model.initBias #[invalid])
@@ -33,7 +33,7 @@ def testInitializerShapeValidation : IO Unit := do
 /-- Model initializers must reject dimensions before evaluating pure constants. -/
 @[test]
 def testModelConstantInitializerShapeValidation : IO Unit := do
-  let invalid : UInt64 := 9223372036854775808
+  let invalid : Nat := 9223372036854775808
   Tests.assertThrows (flux.initLayerNorm invalid)
   Tests.assertThrows (whisper.initLayerNorm invalid)
   Tests.assertThrows (qwen35.Qwen35RMSNorm.initZeroCentered invalid)

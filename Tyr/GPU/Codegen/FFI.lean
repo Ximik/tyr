@@ -119,6 +119,7 @@ def generateCppHeader : String :=
   "#include <cuda_runtime.h>\n" ++
   "#include <cuda_fp16.h>\n" ++
   "#include <cuda_bf16.h>\n" ++
+  "#include \"tyr_nat.h\"\n" ++
   "#if defined(KITTENS_HOPPER) || defined(KITTENS_BLACKWELL)\n" ++
   "#include <cuda_fp8.h>\n" ++
   "#endif\n" ++

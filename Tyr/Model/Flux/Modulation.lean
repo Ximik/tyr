@@ -18,8 +18,8 @@ variable [DType.RealFloating dtype]
     t: [batch] timestep tensor (values typically in [0, 1])
     dim: output dimension
     Returns: [batch, dim] positional embedding -/
-def timestepEmbedding {batch : UInt64}
-    (t : Tensor { device := device, shape := #[batch], dtype := .Float32 }) (dim : UInt64)
+def timestepEmbedding {batch : Nat}
+    (t : Tensor { device := device, shape := #[batch], dtype := .Float32 }) (dim : Nat)
     (max_period : Float := 10000.0) (time_factor : Float := 1000.0)
     : Tensor { device := device, shape := #[batch, dim], dtype := .Float32 } :=
   match Tensor.ofRaw (RawTensor.timestepEmbedding t.raw dim max_period time_factor) with
@@ -29,13 +29,13 @@ def timestepEmbedding {batch : UInt64}
 /-- Modulation output: shift, scale, gate triplets.
     For double blocks: 6 values (2 triplets for img and txt)
     For single blocks: 3 values (1 triplet) -/
-structure ModulationOutput (batch num_mods hidden_size : UInt64) (dtype : DType := .Float32) where
+structure ModulationOutput (batch num_mods hidden_size : Nat) (dtype : DType := .Float32) where
   values : Tensor { dtype := dtype, device := device, shape := #[batch, num_mods, hidden_size] }
 
 /-- Modulation layer: projects timestep embedding to shift/scale/gate.
     For double blocks: outputs 6 modulation vectors
     For single blocks: outputs 3 modulation vectors -/
-structure Modulation (hidden_size : UInt64) (isDouble : Bool) (dtype : DType := .Float32) where
+structure Modulation (hidden_size : Nat) (isDouble : Bool) (dtype : DType := .Float32) where
   /-- Linear projection from hidden_size to num_mods * hidden_size -/
   lin : Tensor { dtype := dtype, device := device, shape := #[if isDouble then 6 * hidden_size else 3 * hidden_size, hidden_size] }
   deriving TensorStruct
@@ -44,11 +44,11 @@ structure Modulation (hidden_size : UInt64) (isDouble : Bool) (dtype : DType := 
 namespace Modulation
 
 /-- Number of modulation outputs -/
-def numMods (isDouble : Bool) : UInt64 :=
+def numMods (isDouble : Bool) : Nat :=
   if isDouble then 6 else 3
 
 /-- Initialize modulation layer -/
-def init (hidden_size : UInt64) (isDouble : Bool := false) (device : Device := .CPU) (dtype : DType := .Float32) : IO (Modulation (device := device) (dtype := dtype) hidden_size isDouble) := do
+def init (hidden_size : Nat) (isDouble : Bool := false) (device : Device := .CPU) (dtype : DType := .Float32) : IO (Modulation (device := device) (dtype := dtype) hidden_size isDouble) := do
   let floating ← IO.ofExcept (DType.realFloating? dtype)
   let _ := floating.down
   let outDim := if isDouble then 6 * hidden_size else 3 * hidden_size
@@ -58,7 +58,7 @@ def init (hidden_size : UInt64) (isDouble : Bool := false) (device : Device := .
 
 /-- Initialize modulation with zero weights (for dummy/placeholder modulation).
     Used when modulation is at model level instead of per-block. -/
-def initZero (hidden_size : UInt64) (isDouble : Bool := false) (device : Device := .CPU) (dtype : DType := .Float32)
+def initZero (hidden_size : Nat) (isDouble : Bool := false) (device : Device := .CPU) (dtype : DType := .Float32)
     [DType.ConstantSupported dtype device] : Modulation (device := device) (dtype := dtype) hidden_size isDouble :=
   let outDim := if isDouble then 6 * hidden_size else 3 * hidden_size
   { lin := Tensor.detach (zerosWeight (dtype := dtype) (device := device) #[outDim, hidden_size]) }
@@ -66,7 +66,7 @@ def initZero (hidden_size : UInt64) (isDouble : Bool := false) (device : Device 
 /-- Forward pass: compute modulation from timestep embedding.
     Input vec: [batch, hidden_size] (timestep embedding)
     Output: [batch, num_mods, hidden_size] -/
-def forward {batch hidden_size : UInt64} (isDouble : Bool)
+def forward {batch hidden_size : Nat} (isDouble : Bool)
     (mod : Modulation (device := device) (dtype := dtype) hidden_size isDouble)
     (vec : Tensor { dtype := dtype, device := device, shape := #[batch, hidden_size] })
     : Tensor { dtype := dtype, device := device, shape := #[batch, if isDouble then 6 else 3, hidden_size] } :=
@@ -84,7 +84,7 @@ end Modulation
     x: [batch, seq, hidden_size]
     scale, shift: [batch, hidden_size]
     Returns: scale * x + shift -/
-def applyModulation {batch seq hidden_size : UInt64}
+def applyModulation {batch seq hidden_size : Nat}
     (x : Tensor { dtype := dtype, device := device, shape := #[batch, seq, hidden_size] })
     (scale : Tensor { dtype := dtype, device := device, shape := #[batch, hidden_size] })
     (shift : Tensor { dtype := dtype, device := device, shape := #[batch, hidden_size] })

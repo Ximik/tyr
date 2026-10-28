@@ -47,7 +47,7 @@ def readParquetToJsonStreaming (filePath : String) : IO (Array Lean.Json) := do
   let mut allJsons : Array Lean.Json := #[]
 
   for rgIdx in [:metadata.numRowGroups] do
-    let jsonStrings ← readRowGroupAsJson filePath rgIdx.toUInt64
+    let jsonStrings ← readRowGroupAsJson filePath rgIdx
     for jsonStr in jsonStrings do
       match Lean.Json.parse jsonStr with
       | .ok json => allJsons := allJsons.push json

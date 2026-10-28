@@ -232,7 +232,7 @@ void testCombinedConversion(const std::filesystem::path& directory) {
                    "Checked Complex64 to Complex128");
 
   auto* wrong_shape = lean_alloc_array(1, 1);
-  lean_array_set_core(wrong_shape, 0, lean_box_uint64(2));
+  lean_array_set_core(wrong_shape, 0, lean_box(2));
   LeanObject shape_error(lean_torch_cast_dtype_checked(wrong_shape, complex_input.get(),
                           complex_tag), lean_dec);
   require(lean_obj_tag(shape_error.get()) == 0 &&

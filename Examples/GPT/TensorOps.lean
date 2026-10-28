@@ -28,29 +28,29 @@ def reshape {s : Shape} {d : DType} (t : Tensor { shape := s, dtype := d, device
 def dropout {s : Shape} (t : Activation (device := device) s) (p : Float) (training : Bool) : IO (Activation (device := device) s) := do
   Tensor.dropout t p training
 
-def layerNorm {b t n : UInt64} (x : Activation (device := device) #[b,t,n])
+def layerNorm {b t n : Nat} (x : Activation (device := device) #[b,t,n])
     (weight bias : Activation (device := device) #[n]) : Activation (device := device) #[b,t,n] :=
   Tensor.layerNorm x weight bias
 
-def splitHeads {b t h d : UInt64} (x : Activation (device := device) #[b,t,h,d]) : Activation (device := device) #[b,h,t,d] :=
+def splitHeads {b t h d : Nat} (x : Activation (device := device) #[b,t,h,d]) : Activation (device := device) #[b,h,t,d] :=
   Tensor.splitHeads x
 
-def joinHeads {b h t d : UInt64} (x : Activation (device := device) #[b,h,t,d]) : Activation (device := device) #[b,t,h,d] :=
+def joinHeads {b h t d : Nat} (x : Activation (device := device) #[b,h,t,d]) : Activation (device := device) #[b,t,h,d] :=
   Tensor.joinHeads x
 
-def attention {b h t d : UInt64} (q k v : Activation (device := device) #[b,h,t,d])
+def attention {b h t d : Nat} (q k v : Activation (device := device) #[b,h,t,d])
     (dropout : Float) (training : Bool) : IO (Activation (device := device) #[b,h,t,d]) :=
   Tensor.attentionIO q k v dropout training true
 
-def embedding {b t v e : UInt64} (idx : Tokens (device := device) #[b,t])
+def embedding {b t v e : Nat} (idx : Tokens (device := device) #[b,t])
     (weight : Activation (device := device) #[v,e]) : Activation (device := device) #[b,t,e] :=
   Tensor.embedding idx weight
 
-def embedding1d {t v e : UInt64} (idx : Tokens (device := device) #[t])
+def embedding1d {t v e : Nat} (idx : Tokens (device := device) #[t])
     (weight : Activation (device := device) #[v,e]) : Activation (device := device) #[t,e] :=
   Tensor.embedding1d idx weight
 
-def crossEntropy {n c : UInt64} (logits : Activation (device := device) #[n,c])
+def crossEntropy {n c : Nat} (logits : Activation (device := device) #[n,c])
     (targets : Tokens (device := device) #[n]) : Activation (device := device) #[] :=
   Tensor.crossEntropy logits targets
 

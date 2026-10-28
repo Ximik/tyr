@@ -46,7 +46,7 @@ open torch
 open torch.data
 
 /-- KV cache for a single attention layer -/
-structure LayerCache (batch maxSeqLen numKvHeads headDim : UInt64)
+structure LayerCache (batch maxSeqLen numKvHeads headDim : Nat)
     (dtype : DType := .BFloat16) (device : Device := .CPU) where
   /-- Cached keys: [batch, num_kv_heads, max_seq_len, head_dim] -/
   keys : Tensor ⟨#[batch, numKvHeads, maxSeqLen, headDim], dtype, device⟩
@@ -55,21 +55,21 @@ structure LayerCache (batch maxSeqLen numKvHeads headDim : UInt64)
   deriving Repr
 
 /-- Full KV cache for all layers -/
-structure Cache (numLayers batch maxSeqLen numKvHeads headDim : UInt64)
+structure Cache (numLayers batch maxSeqLen numKvHeads headDim : Nat)
     (dtype : DType := .BFloat16) (device : Device := .CPU) where
   /-- Per-layer KV caches -/
   layers : Array (LayerCache batch maxSeqLen numKvHeads headDim dtype device)
   /-- Current sequence length for each batch element -/
-  seqLens : Array UInt64
+  seqLens : Array Nat
   /-- Maximum sequence length this cache can hold -/
-  maxLen : UInt64
+  maxLen : Nat
   deriving Repr, Inhabited
 
 /-- Initialize empty KV cache for given dimensions.
     `device` defaults to CPU; pass a device acquired with `Device.cuda n` so
     the cache buffers live on the same device as the Q/K/V tensors that will be
     appended into them — `tyrFlashAttn4d` rejects cross-device inputs. -/
-def Cache.init (numLayers batch maxSeqLen numKvHeads headDim : UInt64)
+def Cache.init (numLayers batch maxSeqLen numKvHeads headDim : Nat)
     (device : Device := Device.CPU)
     : IO (Cache numLayers batch maxSeqLen numKvHeads headDim .BFloat16 device) := do
   if numLayers == 0 || batch == 0 || maxSeqLen == 0 || numKvHeads == 0 || headDim == 0 then
@@ -82,16 +82,16 @@ def Cache.init (numLayers batch maxSeqLen numKvHeads headDim : UInt64)
   let template := Tensor.zerosFor
     ⟨#[batch, numKvHeads, maxSeqLen, headDim], .BFloat16, device⟩
   let mut layers : Array (LayerCache batch maxSeqLen numKvHeads headDim .BFloat16 device) := #[]
-  for _ in [:numLayers.toNat] do
+  for _ in [:numLayers] do
     let keys ← cloneInferenceIO template
     let values ← cloneInferenceIO template
     layers := layers.push { keys, values }
-  let seqLens := Array.mk (List.replicate batch.toNat (0 : UInt64))
+  let seqLens := Array.mk (List.replicate batch (0 : Nat))
   return { layers, seqLens, maxLen := maxSeqLen }
 
 private def Cache.validate
     (cache : Cache numLayers batch maxSeqLen numKvHeads headDim dtype device) : IO Unit := do
-  if batch == 0 || cache.layers.size.toUInt64 != numLayers || cache.seqLens.size.toUInt64 != batch ||
+  if batch == 0 || cache.layers.size != numLayers || cache.seqLens.size != batch ||
       cache.maxLen != maxSeqLen then
     throw <| IO.userError "KV cache metadata shape mismatch"
   let pos := cache.seqLens[0]!
@@ -108,7 +108,7 @@ def Cache.incrementSeqLens (cache : Cache numLayers batch maxSeqLen numKvHeads h
 
 /-- Get current sequence length (assumes all batch elements have same length) -/
 def Cache.currentLen (cache : Cache numLayers batch maxSeqLen numKvHeads headDim dtype device)
-    : UInt64 :=
+    : Nat :=
   cache.seqLens[0]?.getD 0
 
 /-- Check if cache has room for more tokens -/
@@ -139,7 +139,7 @@ def Cache.setLayer (cache : Cache numLayers batch maxSeqLen numKvHeads headDim d
     touched here — call `Cache.incrementSeqLens` after appending to all
     layers of a step to advance position. -/
 def LayerCache.append (lc : LayerCache batch maxSeqLen numKvHeads headDim dtype device)
-    (newK newV : Tensor ⟨#[batch, numKvHeads, 1, headDim], dtype, device⟩) (pos : UInt64)
+    (newK newV : Tensor ⟨#[batch, numKvHeads, 1, headDim], dtype, device⟩) (pos : Nat)
     : IO (LayerCache batch maxSeqLen numKvHeads headDim dtype device) := do
   let keys := lc.keys
   let values := lc.values
@@ -168,7 +168,7 @@ def LayerCache.append (lc : LayerCache batch maxSeqLen numKvHeads headDim dtype 
     `[batch, numKvHeads, kv_seq, headDim]` and handles the tail mask when
     `validLen` is not a multiple of 64). -/
 def LayerCache.attentionView (lc : LayerCache batch maxSeqLen numKvHeads headDim dtype device)
-    (validLen : UInt64)
+    (validLen : Nat)
     : IO (Tensor ⟨#[batch, numKvHeads, validLen, headDim], dtype, device⟩
       × Tensor ⟨#[batch, numKvHeads, validLen, headDim], dtype, device⟩) := do
   if validLen > maxSeqLen then throw <| IO.userError "KV cache view exceeds capacity"
@@ -228,7 +228,7 @@ def Cache.appendLayer (cache : Cache numLayers batch maxSeqLen numKvHeads headDi
     Does NOT advance `seqLens` — call `cache.incrementSeqLens` once per
     generated token after all layers have been processed for the step. -/
 def Cache.attendLayer
-    {numQHeads : UInt64}
+    {numQHeads : Nat}
     (cache : Cache numLayers batch maxSeqLen numKvHeads headDim dtype device)
     (layerIdx : Nat)
     (newQ : Tensor ⟨#[batch, numQHeads, 1, headDim], dtype, device⟩)
@@ -254,7 +254,7 @@ def Cache.attendLayer
   return (cache', output)
 
 /-- TensorStruct instance for LayerCache -/
-instance {batch maxSeqLen numKvHeads headDim : UInt64} {dtype : DType} {device : Device}
+instance {batch maxSeqLen numKvHeads headDim : Nat} {dtype : DType} {device : Device}
     : TensorStruct (LayerCache batch maxSeqLen numKvHeads headDim dtype device) where
   map f c := { keys := TensorStruct.map f c.keys, values := TensorStruct.map f c.values }
   mapM f c := do pure { keys := ← TensorStruct.mapM f c.keys, values := ← TensorStruct.mapM f c.values }
@@ -262,7 +262,7 @@ instance {batch maxSeqLen numKvHeads headDim : UInt64} {dtype : DType} {device :
   fold f init c := TensorStruct.fold f (TensorStruct.fold f init c.keys) c.values
 
 /-- TensorStruct instance for Cache -/
-instance {numLayers batch maxSeqLen numKvHeads headDim : UInt64} {dtype : DType}
+instance {numLayers batch maxSeqLen numKvHeads headDim : Nat} {dtype : DType}
     {device : Device}
     : TensorStruct (Cache numLayers batch maxSeqLen numKvHeads headDim dtype device) where
   map f c := { c with layers := c.layers.map (TensorStruct.map f) }

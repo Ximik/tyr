@@ -37,21 +37,21 @@ private def visionNameCandidates (name : String) : Array String :=
       out
   out
 
-private def loadVisionLayerNormSharded (modelDir : String) (base : String) (dim : UInt64)
+private def loadVisionLayerNormSharded (modelDir : String) (base : String) (dim : Nat)
     (device : Device := Device.CPU)
     : IO (Qwen35VisionLayerNorm (device := device) dim) := do
   let w ← loadTensorShardedCandidates modelDir (visionNameCandidates s!"{base}.weight") #[dim] device
   let b ← loadTensorShardedCandidates modelDir (visionNameCandidates s!"{base}.bias") #[dim] device
   pure { weight := freezeStored w, bias := freezeStored b, eps := 1e-6 }
 
-private def loadVisionLayerNorm (path : String) (base : String) (dim : UInt64)
+private def loadVisionLayerNorm (path : String) (base : String) (dim : Nat)
     (device : Device := Device.CPU)
     : IO (Qwen35VisionLayerNorm (device := device) dim) := do
   let w ← loadTensorCandidates path (visionNameCandidates s!"{base}.weight") #[dim] device
   let b ← loadTensorCandidates path (visionNameCandidates s!"{base}.bias") #[dim] device
   pure { weight := freezeStored w, bias := freezeStored b, eps := 1e-6 }
 
-private def loadVisionMLPSharded (modelDir : String) (cfg : VisionConfig) (layerIdx : UInt64)
+private def loadVisionMLPSharded (modelDir : String) (cfg : VisionConfig) (layerIdx : Nat)
     (device : Device := Device.CPU) (dtype : DType)
     : IO (Qwen35VisionMLP (dtype := dtype) (device := device) cfg) := do
   let p := s!"model.visual.blocks.{layerIdx}.mlp"
@@ -66,7 +66,7 @@ private def loadVisionMLPSharded (modelDir : String) (cfg : VisionConfig) (layer
     linear_fc2_bias := reqGradFalse (← requireDType dtype b2)
   }
 
-private def loadVisionMLP (path : String) (cfg : VisionConfig) (layerIdx : UInt64)
+private def loadVisionMLP (path : String) (cfg : VisionConfig) (layerIdx : Nat)
     (device : Device := Device.CPU) (dtype : DType)
     : IO (Qwen35VisionMLP (dtype := dtype) (device := device) cfg) := do
   let p := s!"model.visual.blocks.{layerIdx}.mlp"
@@ -81,7 +81,7 @@ private def loadVisionMLP (path : String) (cfg : VisionConfig) (layerIdx : UInt6
     linear_fc2_bias := reqGradFalse (← requireDType dtype b2)
   }
 
-private def loadVisionAttentionSharded (modelDir : String) (cfg : VisionConfig) (layerIdx : UInt64)
+private def loadVisionAttentionSharded (modelDir : String) (cfg : VisionConfig) (layerIdx : Nat)
     (device : Device := Device.CPU) (dtype : DType)
     : IO (Qwen35VisionAttention (dtype := dtype) (device := device) cfg) := do
   let p := s!"model.visual.blocks.{layerIdx}.attn"
@@ -96,7 +96,7 @@ private def loadVisionAttentionSharded (modelDir : String) (cfg : VisionConfig) 
     proj_bias := reqGradFalse (← requireDType dtype projB)
   }
 
-private def loadVisionAttention (path : String) (cfg : VisionConfig) (layerIdx : UInt64)
+private def loadVisionAttention (path : String) (cfg : VisionConfig) (layerIdx : Nat)
     (device : Device := Device.CPU) (dtype : DType)
     : IO (Qwen35VisionAttention (dtype := dtype) (device := device) cfg) := do
   let p := s!"model.visual.blocks.{layerIdx}.attn"
@@ -111,7 +111,7 @@ private def loadVisionAttention (path : String) (cfg : VisionConfig) (layerIdx :
     proj_bias := reqGradFalse (← requireDType dtype projB)
   }
 
-private def loadVisionBlockSharded (modelDir : String) (cfg : VisionConfig) (layerIdx : UInt64)
+private def loadVisionBlockSharded (modelDir : String) (cfg : VisionConfig) (layerIdx : Nat)
     (device : Device := Device.CPU) (dtype : DType)
     : IO (Qwen35VisionBlock (dtype := dtype) (device := device) cfg) := do
   let norm1 ← loadVisionLayerNormSharded modelDir s!"model.visual.blocks.{layerIdx}.norm1" cfg.hidden_size device
@@ -120,7 +120,7 @@ private def loadVisionBlockSharded (modelDir : String) (cfg : VisionConfig) (lay
   let mlp ← loadVisionMLPSharded modelDir cfg layerIdx device dtype
   pure { norm1 := norm1, norm2 := norm2, attn := attn, mlp := mlp }
 
-private def loadVisionBlock (path : String) (cfg : VisionConfig) (layerIdx : UInt64)
+private def loadVisionBlock (path : String) (cfg : VisionConfig) (layerIdx : Nat)
     (device : Device := Device.CPU) (dtype : DType)
     : IO (Qwen35VisionBlock (dtype := dtype) (device := device) cfg) := do
   let norm1 ← loadVisionLayerNorm path s!"model.visual.blocks.{layerIdx}.norm1" cfg.hidden_size device
@@ -159,8 +159,8 @@ private def loadVisionModelSharded (modelDir : String) (cfg : VisionConfig)
     device
 
   let mut blocks : Array (Qwen35VisionBlock (dtype := dtype) (device := device) cfg) := #[]
-  for i in [:cfg.depth.toNat] do
-    blocks := blocks.push (← loadVisionBlockSharded modelDir cfg i.toUInt64 device dtype)
+  for i in [:cfg.depth] do
+    blocks := blocks.push (← loadVisionBlockSharded modelDir cfg i device dtype)
 
   let mergeUnit := VisionConfig.mergeUnit cfg
   let mergedHidden := cfg.hidden_size * mergeUnit
@@ -231,8 +231,8 @@ private def loadVisionModel (path : String) (cfg : VisionConfig)
     device
 
   let mut blocks : Array (Qwen35VisionBlock (dtype := dtype) (device := device) cfg) := #[]
-  for i in [:cfg.depth.toNat] do
-    blocks := blocks.push (← loadVisionBlock path cfg i.toUInt64 device dtype)
+  for i in [:cfg.depth] do
+    blocks := blocks.push (← loadVisionBlock path cfg i device dtype)
 
   let mergeUnit := VisionConfig.mergeUnit cfg
   let mergedHidden := cfg.hidden_size * mergeUnit

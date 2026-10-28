@@ -30,8 +30,8 @@ private def toChunks (audio : Array Float) : Array (Array Float) :=
 def initSileroProvider
     (weightsPath : String)
     (threshold : Float := 0.5)
-    (minSilenceDurationMs : UInt64 := 100)
-    (speechPadMs : UInt64 := 30)
+    (minSilenceDurationMs : Nat := 100)
+    (speechPadMs : Nat := 30)
     (device : torch.Device := .CPU)
     : IO SileroProvider := do
   let model ← torch.silerovad.SileroVAD.load weightsPath (device := device)
