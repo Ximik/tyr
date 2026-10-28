@@ -27,7 +27,11 @@ structure AudioEncoderConfig where
   nWindowInfer : Nat := 400
   convChunkSize : Nat := 500
   downsampleHiddenSize : Nat := 480
-  deriving Repr, Inhabited
+  /-- The strided convolutions downsample the mel axis; checked when the config is built. -/
+  numMelBinsPos : 0 < numMelBins := by decide
+  deriving Repr
+
+instance : Inhabited AudioEncoderConfig := ⟨{}⟩
 
 namespace AudioEncoderConfig
 

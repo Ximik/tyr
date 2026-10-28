@@ -360,7 +360,7 @@ private def loadSpeakerEmbedding? (cfg : Qwen3TTSConfig) (dtype : RealFloatingDT
   match path? with
   | none => pure none
   | some p =>
-      if cfg.speakerEncoderConfig.encDim != cfg.talkerConfig.hiddenSize then
+      let ⟨hDim⟩ ← if h : cfg.speakerEncoderConfig.encDim = cfg.talkerConfig.hiddenSize then pure (PLift.up h) else
         throw <| IO.userError
           s!"speaker embedding dim mismatch: speaker enc_dim={cfg.speakerEncoderConfig.encDim}, talker hidden={cfg.talkerConfig.hiddenSize}"
       let path ← expandHome p
@@ -371,7 +371,7 @@ private def loadSpeakerEmbedding? (cfg : Qwen3TTSConfig) (dtype : RealFloatingDT
         device (some dtype.val)
       let emb ← IO.ofExcept <| Tensor.ofRaw
         (σ := ⟨#[cfg.speakerEncoderConfig.encDim], dtype.val, device⟩) converted
-      pure (some (Tensor.reshapeChecked emb #[1, 1, cfg.talkerConfig.hiddenSize]))
+      pure (some (Tensor.reshape emb #[1, 1, cfg.talkerConfig.hiddenSize] (by simp [hDim])))
 
 private def buildTalkerInputsEquivalent
     (cfg : Qwen3TTSConfig)
@@ -385,13 +385,13 @@ private def buildTalkerInputsEquivalent
     throw <| IO.userError s!"Tokenized assistant input is too short ({inputIds.size}); expected at least 8 tokens."
 
   let roleIds := inputIds.extract 0 3
-  if roleIds.size != 3 then
+  let ⟨hRole⟩ ← if h : roleIds.size = 3 then pure (PLift.up h) else
     throw <| IO.userError s!"Unexpected role-token size: {roleIds.size} (expected 3)."
   let textMainIds := inputIds.extract 3 (inputIds.size - 5)
   let textMainLen : Nat := textMainIds.size
   let hidden : Nat := cfg.talkerConfig.hiddenSize
 
-  let roleTensor : Tensor { shape := #[1, 3], dtype := .Int64, device := device } := Tensor.reshapeChecked (idsTensor1 roleIds) #[1, 3]
+  let roleTensor : Tensor { shape := #[1, 3], dtype := .Int64, device := device } := Tensor.reshape (idsTensor1 roleIds) #[1, 3] (by simp [hRole])
   let roleEmbed : Tensor { shape := #[1, 3, hidden], dtype := dtypes.talker.val, device := device } := TalkerModel.embedText model.talker.model roleTensor
 
   let ttsSpecialIds : Tensor { shape := #[1, 3], dtype := .Int64, device := device } := Tensor.reshape ((Tensor.fromInt64Array #[
@@ -731,7 +731,7 @@ def runEndToEnd (args : Args) : IO Unit := do
       IO.println "Skipping waveform decode (--skip-decode enabled)."
     else
       ensureParentDir wavPath
-      if args.decodeViaPython || cfg.talkerConfig.numCodeGroups != 16 then
+      if hPython : args.decodeViaPython ∨ cfg.talkerConfig.numCodeGroups ≠ 16 then
         if !args.decodeViaPython && cfg.talkerConfig.numCodeGroups != 16 then
           IO.println
             s!"Lean speech-tokenizer decoder supports 16 code groups; got {cfg.talkerConfig.numCodeGroups}. Falling back to Python decode bridge."
@@ -745,7 +745,8 @@ def runEndToEnd (args : Args) : IO Unit := do
             | none => pure s!"{modelDir}/speech_tokenizer"
           IO.println s!"Loading Lean speech-tokenizer decoder from {speechTokenizerDir}..."
           let ⟨_codecDTypes, speechDecoder⟩ ← SpeechTokenizer12HzDecoder.loadFromDir speechTokenizerDir targetDevice
-          let trimmed16 : Tensor { shape := #[codeLen, 16], dtype := .Int64, device := targetDevice } := Tensor.reshapeChecked trimmed #[codeLen, 16]
+          let trimmed16 : Tensor { shape := #[codeLen, 16], dtype := .Int64, device := targetDevice } := Tensor.reshape trimmed #[codeLen, 16]
+            (by simp at hPython; simp [hPython.2])
           if args.streamingDecode then
             speechDecoder.decodeFrameMajorChunkedToWav
               trimmed16 wavPath args.decodeChunkSize args.decodeLeftContext

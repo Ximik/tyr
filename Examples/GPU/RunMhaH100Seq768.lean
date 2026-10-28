@@ -38,8 +38,8 @@ private def partialDumpFile (name : String) : System.FilePath :=
   fixtureSpec.dir / name
 
 private def dumpAccumulatedGrads (dK dV : MhaTensor (device := device)) : IO Unit := do
-  let dKTiles : GradTiles (device := device) := Tensor.reshapeChecked dK #[12, 64, 64]
-  let dVTiles : GradTiles (device := device) := Tensor.reshapeChecked dV #[12, 64, 64]
+  let dKTiles : GradTiles (device := device) := Tensor.reshape dK #[12, 64, 64] (by simp)
+  let dVTiles : GradTiles (device := device) := Tensor.reshape dV #[12, 64, 64] (by simp)
   let dKPath := partialDumpFile "diag_dK_accum_tiles.pt"
   let dVPath := partialDumpFile "diag_dV_accum_tiles.pt"
   Tensor.saveTensor dKTiles dKPath.toString
@@ -66,7 +66,7 @@ def generateFixtures : IO Unit := do
   let expectedOut := Tensor.attentionGQA q k v false
 
   let (_, lse) := attentionReference q k v
-  let expectedL := (Tensor.mulScalar lse (-8.0)).reshapeChecked #[12, 64]
+  let expectedL := (Tensor.mulScalar lse (-8.0)).reshape #[12, 64] (by simp)
   let (_, expectedDQ, expectedDK, expectedDV) ← attentionTrainingReference q k v dO
 
   Tensor.saveTensor q (fixtureFile "q").toString

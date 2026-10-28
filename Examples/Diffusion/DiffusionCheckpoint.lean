@@ -58,7 +58,7 @@ private def loadAttentionParams (n_embd n_head n_kv_head : Nat)
     c_q := ← Tensor.loadTensorExact { device := .CPU, shape := #[q_dim, n_embd], dtype := .Float32 } (pfx ++ "c_q.pt")
     c_k := ← Tensor.loadTensorExact { device := .CPU, shape := #[kv_dim, n_embd], dtype := .Float32 } (pfx ++ "c_k.pt")
     c_v := ← Tensor.loadTensorExact { device := .CPU, shape := #[kv_dim, n_embd], dtype := .Float32 } (pfx ++ "c_v.pt")
-    c_proj := ← Tensor.loadTensorExact { device := .CPU, shape := #[n_embd, n_embd], dtype := .Float32 } (pfx ++ "c_proj.pt")
+    c_proj := ← Tensor.loadTensorExact { device := .CPU, shape := #[n_embd, q_dim], dtype := .Float32 } (pfx ++ "c_proj.pt")
   }
 
 /-- Load MLPParams from directory -/
@@ -211,13 +211,13 @@ private def loadAttentionAdamState (n_embd n_head n_kv_head : Nat)
     c_q := ← Tensor.loadTensorExact { device := .CPU, shape := #[q_dim, n_embd], dtype := .Float32 } (pfx ++ "mu_c_q.pt")
     c_k := ← Tensor.loadTensorExact { device := .CPU, shape := #[kv_dim, n_embd], dtype := .Float32 } (pfx ++ "mu_c_k.pt")
     c_v := ← Tensor.loadTensorExact { device := .CPU, shape := #[kv_dim, n_embd], dtype := .Float32 } (pfx ++ "mu_c_v.pt")
-    c_proj := ← Tensor.loadTensorExact { device := .CPU, shape := #[n_embd, n_embd], dtype := .Float32 } (pfx ++ "mu_c_proj.pt")
+    c_proj := ← Tensor.loadTensorExact { device := .CPU, shape := #[n_embd, q_dim], dtype := .Float32 } (pfx ++ "mu_c_proj.pt")
   }
   let nu : AttentionParams n_embd n_head n_kv_head := {
     c_q := ← Tensor.loadTensorExact { device := .CPU, shape := #[q_dim, n_embd], dtype := .Float32 } (pfx ++ "nu_c_q.pt")
     c_k := ← Tensor.loadTensorExact { device := .CPU, shape := #[kv_dim, n_embd], dtype := .Float32 } (pfx ++ "nu_c_k.pt")
     c_v := ← Tensor.loadTensorExact { device := .CPU, shape := #[kv_dim, n_embd], dtype := .Float32 } (pfx ++ "nu_c_v.pt")
-    c_proj := ← Tensor.loadTensorExact { device := .CPU, shape := #[n_embd, n_embd], dtype := .Float32 } (pfx ++ "nu_c_proj.pt")
+    c_proj := ← Tensor.loadTensorExact { device := .CPU, shape := #[n_embd, q_dim], dtype := .Float32 } (pfx ++ "nu_c_proj.pt")
   }
   return (mu, nu)
 

@@ -58,11 +58,11 @@ def invNormalize (ae : (AutoEncoder (device := device) dtypes)) (z : Tensor { dt
     The reshape and permutation preserve the indexed spatial layout. -/
 def unpackLatents16x16 {dtype : DType} (z : Tensor { dtype := dtype, device := device, shape := #[1, 128, 16, 16] }) : Tensor { dtype := dtype, device := device, shape := #[1, 32, 32, 32] } :=
   -- Reshape: [1, 128, 16, 16] → [1, 32, 2, 2, 16, 16]
-  let z := Tensor.reshapeChecked z #[1, 32, 2, 2, 16, 16]
+  let z := Tensor.reshape z #[1, 32, 2, 2, 16, 16] (by simp)
   -- Permute: [1, 32, 2, 2, 16, 16] → [1, 32, 16, 2, 16, 2]
   let z := Tensor.permute z #[0, 1, 4, 2, 5, 3]
   -- Reshape to final: [1, 32, 32, 32]
-  Tensor.reshapeChecked z #[1, 32, 32, 32]
+  Tensor.reshape z #[1, 32, 32, 32] (by simp)
 
 /-- Full decode pipeline: inv_normalize → unpack → decoder.
     Input: packed latents [1, 128, 16, 16]

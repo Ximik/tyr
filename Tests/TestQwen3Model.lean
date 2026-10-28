@@ -129,7 +129,7 @@ def testQwen3BatchedEosIsRowAware : IO Unit := do
         if selected.isNone then
           let row0 := promptRows.getD i #[1, 2, 3]
           let row1 := promptRows.getD j #[3, 2, 1]
-          let ids : Tensor { shape := #[2, 3], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked (Tensor.fromInt64Array (row0 ++ row1)) #[2, 3]
+          let ids : Tensor { shape := #[2, 3], dtype := .Int64, device := .CPU } := (← IO.ofExcept (Tensor.fromInt64ArrayAs? (row0 ++ row1) #[2, 3]))
           let ⟨seqBase, outBase⟩ ← model.generateGreedy ids 2 #[]
           let baseVals ← flattenIds outBase
           let row0Step1 := rowToken baseVals seqBase 0 3

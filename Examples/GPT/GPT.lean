@@ -253,7 +253,7 @@ def generate {cfg : Config}
 
     -- Create input tensor [1, seq] from token array and move to model's device
     let seq : Nat := ctxLen
-    let inputTensor := ((Tensor.fromInt64Array ctx).reshapeChecked #[1, seq]).to params.wte.device
+    let inputTensor := (← IO.ofExcept (Tensor.fromInt64ArrayAs? ctx #[1, seq])).to params.wte.device
 
     -- Forward pass to get logits [1, seq, vocab] (training=false disables dropout)
     let logits ← forward params inputTensor false

@@ -31,13 +31,16 @@ def getBestDevice : IO Device := do
   if ← cuda_is_available then return ← Device.cuda 0
   return Device.CPU
 
-def convOutputSize (input_size kernel_size : Nat) (stride : Nat := 1) (padding : Nat := 0) (dilation : Nat := 1) : Nat :=
-  (input_size + 2 * padding - dilation * (kernel_size - 1) - 1) / stride + 1
+/-- Output length of a 1D convolution, in the form the typed `conv1d` result uses. -/
+@[simp] def convOutputSize (input_size kernel_size : Nat) (stride : Nat := 1) (padding : Nat := 0) (dilation : Nat := 1) : Nat :=
+  (input_size + 2 * padding - (dilation * (kernel_size - 1) + 1)) / stride + 1
 
-def convTransposeOutputSize (input_size kernel_size : Nat)
+/-- Output length of a 1D transposed convolution, in the form the typed `convTranspose1d` result
+    uses; the padding is subtracted last so a short input is not truncated early. -/
+@[simp] def convTransposeOutputSize (input_size kernel_size : Nat)
     (stride : Nat := 1) (padding : Nat := 0) (output_padding : Nat := 0)
     (dilation : Nat := 1) : Nat :=
-  (input_size - 1) * stride - (2 * padding) + dilation * (kernel_size - 1) + output_padding + 1
+  (input_size - 1) * stride + dilation * (kernel_size - 1) + output_padding + 1 - 2 * padding
 
 /-- Compute output shape for 1D convolution (safe version) -/
 def conv1dShape (input_shape weight_shape : Shape) (stride padding dilation : Nat) : Shape :=

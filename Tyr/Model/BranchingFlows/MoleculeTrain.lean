@@ -195,15 +195,15 @@ def packBranchingMolecule (cfg : BranchingTrainConfig)
         pure ()
 
   let batchU : Nat := batchNat
-  let coord := Tensor.reshapeChecked (floatsDynamic coordArr) #[batchU, cfg.maxLen, 3]
-  let coordAnchor := Tensor.reshapeChecked (floatsDynamic coordAnchorArr) #[batchU, cfg.maxLen, 3]
-  let label := Tensor.reshapeChecked (Tensor.fromInt64Array labelArr) #[batchU, cfg.maxLen]
-  let labelAnchor := Tensor.reshapeChecked (Tensor.fromInt64Array labelAnchorArr) #[batchU, cfg.maxLen]
-  let labelLossScale := Tensor.reshapeChecked (floatsDynamic labelScaleArr) #[batchU, cfg.maxLen]
-  let padmask := Tensor.reshapeChecked (Tensor.fromInt64Array padArr) #[batchU, cfg.maxLen]
-  let flowmask := Tensor.reshapeChecked (Tensor.fromInt64Array flowArr) #[batchU, cfg.maxLen]
-  let splitsTarget := floatDynamic (Tensor.reshapeChecked (Tensor.fromInt64Array splitsArr) #[batchU, cfg.maxLen])
-  let delTarget := floatDynamic (Tensor.reshapeChecked (Tensor.fromInt64Array delArr) #[batchU, cfg.maxLen])
+  let coord := (← IO.ofExcept (Tensor.fromFloatArrayAs? coordArr #[batchU, cfg.maxLen, 3]))
+  let coordAnchor := (← IO.ofExcept (Tensor.fromFloatArrayAs? coordAnchorArr #[batchU, cfg.maxLen, 3]))
+  let label := (← IO.ofExcept (Tensor.fromInt64ArrayAs? labelArr #[batchU, cfg.maxLen]))
+  let labelAnchor := (← IO.ofExcept (Tensor.fromInt64ArrayAs? labelAnchorArr #[batchU, cfg.maxLen]))
+  let labelLossScale := (← IO.ofExcept (Tensor.fromFloatArrayAs? labelScaleArr #[batchU, cfg.maxLen]))
+  let padmask := (← IO.ofExcept (Tensor.fromInt64ArrayAs? padArr #[batchU, cfg.maxLen]))
+  let flowmask := (← IO.ofExcept (Tensor.fromInt64ArrayAs? flowArr #[batchU, cfg.maxLen]))
+  let splitsTarget := floatDynamic ((← IO.ofExcept (Tensor.fromInt64ArrayAs? splitsArr #[batchU, cfg.maxLen])))
+  let delTarget := floatDynamic ((← IO.ofExcept (Tensor.fromInt64ArrayAs? delArr #[batchU, cfg.maxLen])))
 
   let timeScaled := result.t.map (fun t => ((t * cfg.timeScale).toUInt64).toInt64)
   let t := Tensor.reshape (Tensor.fromInt64Array timeScaled) #[batchU]
@@ -397,6 +397,19 @@ private def flattenedMatrixShape (s : Shape) : Nat × Nat :=
     let cols := (s.extract 1 s.size).foldl (fun acc d => acc * d) 1
     (rows, cols)
 
+private theorem foldl_mul_acc (l : List Nat) (acc : Nat) :
+    l.foldl (fun a d => a * d) acc = acc * l.foldl (fun a d => a * d) 1 := by
+  induction l generalizing acc with
+  | nil => simp
+  | cons x xs ih => simp only [List.foldl]; rw [ih, ih (1 * x)]; simp [Nat.mul_assoc]
+
+private theorem flattenedMatrixShape_numel (s : Shape) :
+    (flattenedMatrixShape s).1 * (flattenedMatrixShape s).2 = TensorSpec.numelOfShape s := by
+  rcases s with ⟨_ | ⟨a, rest⟩⟩
+  · simp [flattenedMatrixShape]
+  · simp [flattenedMatrixShape, TensorSpec.numelOfShape]
+    rw [foldl_mul_acc rest a]
+
 /--
 Apply the same first-dimension-versus-rest flattening used by the Julia Muon
 rule before Newton–Schulz orthogonalization.  This also makes vector leaves a
@@ -404,13 +417,15 @@ valid `n × 1` matrix for the IO-backed Tyr kernel.
 -/
 private def moleculeMuonOrthogonalize {σ : StaticSpec}
     (grad : Tensor σ) (numIters : Nat) : IO (Tensor (σ.withDType .BFloat16)) := do
-  let (rows, cols) := flattenedMatrixShape σ.shape
-  let flat := Tensor.reshapeChecked grad #[rows, cols]
+  let dims := flattenedMatrixShape σ.shape
+  have hDims : TensorSpec.numelOfShape #[dims.1, dims.2] = TensorSpec.numelOfShape σ.shape := by
+    rw [← flattenedMatrixShape_numel σ.shape]; simp [dims]
+  let flat := grad.reshape #[dims.1, dims.2] hDims.symm
   -- The C++ Newton–Schulz normalizes with an epsilon guard (`X / (norm + 1e-7)`,
   -- `cc/src/tyr_polar.cpp`), so a zero gradient orthogonalizes safely to zero.
   -- A host-side zero check here would force a GPU→CPU sync per leaf per step.
   let orth ← Optim.PolarExpress.muonOrthogonalize flat numIters
-  pure (Tensor.reshapeChecked orth σ.shape)
+  pure (orth.reshape σ.shape hDims)
 
 /--
 One Muon update over an arbitrary tensor tree.

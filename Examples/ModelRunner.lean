@@ -107,7 +107,7 @@ def buildBatchInputWithEncoder
       row := row.push padToken.toInt64
     flat := flat ++ row
 
-  let inputIds : Tensor { shape := #[batch, seq], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked (Tensor.fromInt64Array flat) #[batch, seq]
+  let inputIds : Tensor { shape := #[batch, seq], dtype := .Int64, device := .CPU } := (← IO.ofExcept (Tensor.fromInt64ArrayAs? flat #[batch, seq]))
   pure ⟨batch, ⟨seq, (inputIds, promptLens)⟩⟩
 
 def buildBatchInput

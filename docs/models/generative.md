@@ -413,18 +413,22 @@ def fluxExample (qwenDir : String) (tokens : Tensor { shape := #[1, 512], dtype 
   let vae ← TensorStruct.castTo (AutoEncoder (device := .CPU) float32AutoEncoderDTypes) storedVAE
 
   -- encode prompt, prepare noise and RoPE position ids
+  let ⟨hContext⟩ ← if h : qwen.outputLayers.size * QwenConfig.fluxKleinTextEncoder.hidden_size =
+      FluxConfig.klein4B.context_in_dim then pure (PLift.up h) else
+    throw <| IO.userError "text encoder width does not match Flux context_in_dim"
   let txtEmb := qwen.encodeMasked QwenConfig.fluxKleinTextEncoder 512 tokens attnMask
   let txtEmb : Tensor { dtype := .Float32, shape := #[1, 512, FluxConfig.klein4B.context_in_dim], device := .CPU } :=
-    (txtEmb.reshapeChecked #[1, 512, FluxConfig.klein4B.context_in_dim])
+    txtEmb.reshape #[1, 512, FluxConfig.klein4B.context_in_dim] (by simp [hContext])
   let noiseSeq := Tensor.permute (← randomWeight #[1, 128, 16, 16]) #[0, 2, 3, 1]
-  let noise : Tensor { dtype := .Float32, shape := #[1, 256, 128], device := .CPU } := Tensor.reshapeChecked noiseSeq #[1, 256, 128]
+  let noise : Tensor { dtype := .Float32, shape := #[1, 256, 128], device := .CPU } := Tensor.reshape noiseSeq #[1, 256, 128] (by simp)
   let imgIds ← computeImagePositionIds 16 16
   let txtIds ← computeTextPositionIds 512
 
   -- denoise and decode
   let latents := denoise FluxConfig.klein4B flux noise txtEmb imgIds txtIds 4
   let packed : Tensor { dtype := .Float32, shape := #[1, 128, 16, 16], device := .CPU } :=
-    (Tensor.permute (Tensor.reshapeChecked latents #[1, 16, 16, 128]) #[0, 3, 1, 2]).reshapeChecked #[1, 128, 16, 16]
+    (Tensor.permute (Tensor.reshape latents #[1, 16, 16, 128] (by simp [FluxConfig.klein4B]))
+      #[0, 3, 1, 2]).reshape #[1, 128, 16, 16] (by simp)
   let image := vae.decoder.forward1 (AutoEncoder.unpackLatents16x16 (vae.invNormalize packed))
   saveImagePPM image "output.ppm"
 ```

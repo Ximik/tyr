@@ -24,8 +24,8 @@ structure StepResult (Params : Type) (s : Shape) where
   diagnostics : StepDiagnostics := {}
   loss : Float := 0.0
 
-private def shapeNumel (s : Shape) : Nat :=
-  s.foldl (fun acc d => acc * d) 1
+private abbrev shapeNumel (s : Shape) : Nat :=
+  TensorSpec.numelOfShape s
 
 private def treeDot [TensorStruct α] [FloatingTensorStruct α] (x y : α) : Float :=
   let prod := FloatingTensorStruct.zipWith Tensor.mul x y
@@ -84,16 +84,13 @@ def applyTranspose {Params : Type} [TensorStruct Params] [FloatingTensorStruct P
 def woodburyInner {Params : Type} [TensorStruct Params] [FloatingTensorStruct Params] {rank : Nat}
     (mass : Params)
     (K : TreeMetricFactor Params rank) : Tensor { shape := #[rank, rank], dtype := .Float32, device := .CPU } :=
-  let entries : Array Float := Id.run do
-    let mut acc : Array Float := #[]
-    for i in List.finRange rank do
-      for j in List.finRange rank do
-        let rowI := K.rowAt i
-        let rowJ := K.rowAt j
-        let entry := weightedInvDot mass rowJ rowI
-        acc := acc.push (if i.val == j.val then entry + 1.0 else entry)
-    pure acc
-  Tensor.reshapeChecked (Tensor.fromFloatArray entries) #[rank, rank]
+  let entries : Array Float := Array.ofFn (n := rank * rank) fun k =>
+    have hRank : 0 < rank := Nat.pos_of_ne_zero (by rintro rfl; exact absurd k.isLt (by simp))
+    let i : Fin rank := ⟨k.val / rank, Nat.div_lt_of_lt_mul k.isLt⟩
+    let j : Fin rank := ⟨k.val % rank, Nat.mod_lt _ hRank⟩
+    let entry := weightedInvDot mass (K.rowAt j) (K.rowAt i)
+    if i.val == j.val then entry + 1.0 else entry
+  Tensor.fromFloatArrayShaped entries #[rank, rank] (by simp [entries])
 
 def applyRegularized {Params : Type} [TensorStruct Params] [FloatingTensorStruct Params] {rank : Nat}
     (mass : Params)
@@ -147,7 +144,7 @@ private def buildTreeFactorFromOutputFactor [TensorStruct Params] [FloatingTenso
       let rowFlat : Tensor { shape := #[shapeNumel s], dtype := .Float32, device := device } :=
         Tensor.reshape (Tensor.sliceChecked outputFactor.matrix 0 i 1 #[1, shapeNumel s])
           #[shapeNumel s]
-      Tensor.reshapeChecked rowFlat s)
+      Tensor.reshape rowFlat s (by simp))
   buildTreeFactorFromCotangentRows output params rows (by simp [rows])
 
 private def finalizePreparedStepWithTreeFactor

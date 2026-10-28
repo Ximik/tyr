@@ -874,13 +874,6 @@ def stack1d {cols : Nat} {d : DType} {dev : Device}
     Tensor ⟨#[tensors.size, cols], d, dev⟩ :=
   checkedResult "stack1d" (Tensor.ofRaw (RawTensor.stack1d (tensors.map Tensor.toTensor) 0))
 
-/-- Reshape to a runtime target, validating result metadata against the claimed
-    spec and panicking on mismatch. For dynamically computed shapes where the
-    static `reshape` numel proof cannot reduce; the runtime check keeps the
-    conversion honest. -/
-def reshapeChecked {σ : StaticSpec} (t : Tensor σ) (shape' : Shape) : Tensor (σ.withShape shape') :=
-  checkedResult "reshapeChecked" (t.reshapeChecked? shape')
-
 /-- Slice `len` entries along `dim` at a runtime offset, validating the result
     against the claimed spec and panicking on mismatch. -/
 def sliceChecked {σ : StaticSpec} (t : Tensor σ) (dim : Nat) (start len : Nat)
@@ -909,6 +902,26 @@ def fromFloatArray (arr : Array Float) : Tensor ⟨#[arr.size], .Float32, .CPU�
     array length. -/
 def fromInt64Array (arr : Array Int64) : Tensor ⟨#[arr.size], .Int64, .CPU⟩ :=
   checkedResult "fromInt64Array" (Tensor.ofRaw (RawTensor.fromInt64Array arr))
+
+/-- Float32 tensor of `shape` from a host array whose length is known to match. -/
+def fromFloatArrayShaped (arr : Array Float) (shape : Shape)
+    (h : arr.size = TensorSpec.numelOfShape shape) : Tensor ⟨shape, .Float32, .CPU⟩ :=
+  (fromFloatArray arr).reshape shape (by rw [← h]; simp)
+
+/-- Int64 tensor of `shape` from a host array whose length is known to match. -/
+def fromInt64ArrayShaped (arr : Array Int64) (shape : Shape)
+    (h : arr.size = TensorSpec.numelOfShape shape) : Tensor ⟨shape, .Int64, .CPU⟩ :=
+  (fromInt64Array arr).reshape shape (by rw [← h]; simp)
+
+/-- Float32 tensor of `shape` from host data, rejecting a length mismatch where the data enters. -/
+def fromFloatArrayAs? (arr : Array Float) (shape : Shape) : Except String (Tensor ⟨shape, .Float32, .CPU⟩) :=
+  if h : arr.size = TensorSpec.numelOfShape shape then .ok (fromFloatArrayShaped arr shape h)
+  else .error s!"expected {TensorSpec.numelOfShape shape} values for shape {shape}, got {arr.size}"
+
+/-- Int64 tensor of `shape` from host data, rejecting a length mismatch where the data enters. -/
+def fromInt64ArrayAs? (arr : Array Int64) (shape : Shape) : Except String (Tensor ⟨shape, .Int64, .CPU⟩) :=
+  if h : arr.size = TensorSpec.numelOfShape shape then .ok (fromInt64ArrayShaped arr shape h)
+  else .error s!"expected {TensorSpec.numelOfShape shape} values for shape {shape}, got {arr.size}"
 
 /-- Argmax with recoverable domain, axis, empty-axis and native kernel errors. -/
 def argmax? {s : Shape} {d : DType} {dev : Device} (t : Tensor ⟨s, d, dev⟩) (dim : Nat) :

@@ -374,7 +374,7 @@ private def coordRffEmbedding {batch maxLen vocab hidden heads headDim mlp rff l
     (coord : Tensor { dtype, device := device, shape := #[batch, maxLen, 3] }) : Tensor { dtype, device := device, shape := #[batch, maxLen, hidden] } :=
   let flat : Tensor { dtype, device := device, shape := #[batch * maxLen, 3] } := Tensor.reshape coord #[batch * maxLen, 3]
   let phase : Tensor { dtype, device := device, shape := #[batch * maxLen, rff] } := affine2d flat params.coordRffW params.coordRffB
-  let featFlat : Tensor { dtype, device := device, shape := #[batch * maxLen, rff * 2] } := (Tensor.cat (Tensor.sin phase) (cosDynamic phase) 1).reshapeChecked #[batch * maxLen, rff * 2]
+  let featFlat : Tensor { dtype, device := device, shape := #[batch * maxLen, rff * 2] } := (Tensor.cat (Tensor.sin phase) (cosDynamic phase) 1).reshape #[batch * maxLen, rff * 2] (by simp [Nat.mul_two])
   let features : Tensor { dtype, device := device, shape := #[batch, maxLen, rff * 2] } := Tensor.reshape featFlat #[batch, maxLen, rff * 2]
   Tensor.affine3d features params.coordProjW params.coordProjB
 
@@ -384,7 +384,7 @@ private def pairRffFeatures {batch maxLen vocab hidden heads headDim mlp rff lay
   let dist : Tensor { dtype, device := device, shape := #[batch, maxLen, maxLen] } := pairwiseDistanceSq coord
   let distFlat : Tensor { dtype, device := device, shape := #[batch * maxLen * maxLen, 1] } := Tensor.reshape dist #[batch * maxLen * maxLen, 1]
   let phase : Tensor { dtype, device := device, shape := #[batch * maxLen * maxLen, rff] } := affine2d distFlat params.pairRffW params.pairRffB
-  (Tensor.cat (Tensor.sin phase) (cosDynamic phase) 1).reshapeChecked #[batch * maxLen * maxLen, rff * 2]
+  (Tensor.cat (Tensor.sin phase) (cosDynamic phase) 1).reshape #[batch * maxLen * maxLen, rff * 2] (by simp [Nat.mul_two])
 
 private def pairAttentionBiasFrom {batch maxLen hidden heads headDim mlp rff : Nat}
     (layer : FullMoleculeTransformerLayerParams (dtype := dtype) (device := device) hidden heads headDim mlp rff)
@@ -569,10 +569,10 @@ private def packMoleculeStateForTransformer {maxLen vocab : Nat}
     coordArr := coordArr.set! (offset + 2) atom.coord.z
     labelArr := labelArr.set! j (Int64.ofNat atom.label)
     padArr := padArr.set! j 1
-  let coord := Tensor.reshapeChecked (floatsDynamic coordArr) #[1, maxLen, 3]
-  let label := Tensor.reshapeChecked (Tensor.fromInt64Array labelArr) #[1, maxLen]
+  let coord := (← IO.ofExcept (Tensor.fromFloatArrayAs? coordArr #[1, maxLen, 3]))
+  let label := (← IO.ofExcept (Tensor.fromInt64ArrayAs? labelArr #[1, maxLen]))
   let time := Tensor.reshape (floatsDynamic #[t]) #[1]
-  let padmask := Tensor.reshapeChecked (Tensor.fromInt64Array padArr) #[1, maxLen]
+  let padmask := (← IO.ofExcept (Tensor.fromInt64ArrayAs? padArr #[1, maxLen]))
   pure (coord.to device, label.to device, time.to device, padmask.to device)
 
 private def tensorVec3 {maxLen : Nat}

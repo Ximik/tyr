@@ -27,14 +27,17 @@ abbrev MatrixShapeOK (m n : Nat) : Prop := n ≤ m
 
 /-- Matrix-manifold carrier interface for manifold-native linear layers.
 
-    Shape-legality witnesses travel as plain proof arguments on `project`
-    (discharged by `decide` at concrete call sites) or are reused from an
-    existing manifold value (`reAmbient`/`projectLike`), so no typeclass
-    synthesis of propositions is needed. -/
+    Each carrier states which `m × n` shapes it admits. Shape-legality
+    witnesses travel as plain proof arguments on `project` (discharged by
+    `decide` at concrete call sites) or are reused from an existing manifold
+    value (`reAmbient`/`projectLike`). -/
 class MatrixManifoldCarrier (M : Nat → Nat → Type)
     (device : outParam Device) where
+  /-- Shapes this manifold family admits. -/
+  ShapeOK : Nat → Nat → Prop
+  decShapeOK : (m n : Nat) → Decidable (ShapeOK m n)
   /-- Project an ambient matrix to the manifold, given a legality witness. -/
-  project : {m n : Nat} → MatrixShapeOK m n → AmbientMatrix (device := device) m n → M m n
+  project : {m n : Nat} → ShapeOK m n → AmbientMatrix (device := device) m n → M m n
   /-- Convert manifold value to its ambient matrix representation. -/
   toMatrix : {m n : Nat} → M m n → AmbientMatrix (device := device) m n
   /-- Replace the ambient contents of an existing manifold value, keeping its
@@ -45,7 +48,13 @@ class MatrixManifoldCarrier (M : Nat → Nat → Type)
   /-- Take one geometry-aware step and retract on-manifold. -/
   dualMapStep : {m n : Nat} → M m n → AmbientMatrix (device := device) m n → Float → M m n
 
+instance {M : Nat → Nat → Type} [MatrixManifoldCarrier M device] (m n : Nat) :
+    Decidable (MatrixManifoldCarrier.ShapeOK M m n) :=
+  MatrixManifoldCarrier.decShapeOK m n
+
 instance : MatrixManifoldCarrier (fun m n => Stiefel m n .Float32 device) device where
+  ShapeOK := MatrixShapeOK
+  decShapeOK _ _ := inferInstance
   project := fun h x => Stiefel.project _ _ x h
   toMatrix := fun x => x.matrix
   reAmbient := fun x mat => ⟨mat, x.tall⟩
@@ -54,6 +63,8 @@ instance : MatrixManifoldCarrier (fun m n => Stiefel m n .Float32 device) device
     DualMapGeometry.dualMapStep x (StiefelTangent.project x g) lr
 
 instance : MatrixManifoldCarrier (fun m n => Grassmann m n .Float32 device) device where
+  ShapeOK := MatrixShapeOK
+  decShapeOK _ _ := inferInstance
   project := fun h x => Grassmann.project _ _ x h
   toMatrix := fun x => x.matrix
   reAmbient := fun x mat => ⟨mat, x.tall⟩
@@ -61,26 +72,28 @@ instance : MatrixManifoldCarrier (fun m n => Grassmann m n .Float32 device) devi
   dualMapStep := fun x g lr =>
     DualMapGeometry.dualMapStep x (GrassmannTangent.project x g) lr
 
-/-- Orthogonal manifold viewed in matrix-family form with square-shape legality. -/
-abbrev OrthogonalMatrix (_m n : Nat) (device : Device := .CPU) := Orthogonal n .Float32 device
+/-- Orthogonal manifold viewed in matrix-family form; only square shapes exist. -/
+structure OrthogonalMatrix (m n : Nat) (device : Device := .CPU) where
+  square : m = n
+  val : Orthogonal n .Float32 device
 
-/-- View an ambient matrix as square, validating the runtime shape. Only
-    reachable through `MatrixShapeOK`-witnessed paths; the square requirement
-    of the orthogonal family itself is checked here at runtime. -/
-private def asSquare {m n : Nat} (mat : AmbientMatrix (device := device) m n) : AmbientMatrix (device := device) n n :=
-  Tensor.reshapeChecked mat #[n, n]
+/-- The underlying square orthogonal matrix. -/
+def OrthogonalMatrix.matrix {m n : Nat} (x : OrthogonalMatrix m n device) : AmbientMatrix (device := device) n n :=
+  x.val.matrix
+
+private def asSquare {m n : Nat} (h : m = n) (mat : AmbientMatrix (device := device) m n) :
+    AmbientMatrix (device := device) n n :=
+  cast (congrArg (fun k => AmbientMatrix (device := device) k n) h) mat
 
 instance : MatrixManifoldCarrier (fun m n => OrthogonalMatrix m n device) device where
-  project := fun {m n} _h mat =>
-    if h : m = n then
-      Orthogonal.project n (h ▸ mat)
-    else
-      Orthogonal.project n (asSquare mat)  -- runtime-validated square conversion
-  toMatrix := fun x => Tensor.reshapeChecked x.matrix #[_, _]
-  reAmbient := fun _ mat => ⟨asSquare mat⟩
-  projectLike := fun _ mat => Orthogonal.project _ (asSquare mat)
+  ShapeOK m n := m = n
+  decShapeOK _ _ := inferInstance
+  project := fun h mat => ⟨h, Orthogonal.project _ (asSquare h mat)⟩
+  toMatrix := fun x => cast (congrArg (fun k => AmbientMatrix (device := device) k _) x.square.symm) x.matrix
+  reAmbient := fun x mat => ⟨x.square, ⟨asSquare x.square mat⟩⟩
+  projectLike := fun x mat => ⟨x.square, Orthogonal.project _ (asSquare x.square mat)⟩
   dualMapStep := fun x g lr =>
-    DualMapGeometry.dualMapStep x (OrthogonalTangent.fromAmbient x (asSquare g)) lr
+    ⟨x.square, DualMapGeometry.dualMapStep x.val (OrthogonalTangent.fromAmbient x.val (asSquare x.square g)) lr⟩
 
 /-- Vector-manifold carrier interface where ambient dimension may differ from intrinsic one. -/
 class VectorManifoldCarrier (V : Nat → Type)
@@ -125,7 +138,7 @@ private def makeLeafWeight [MatrixManifoldCarrier M device] {in_dim out_dim : Na
 /-- Initialize manifold-linear weights by projecting a random matrix. -/
 def init [MatrixManifoldCarrier M device] (in_dim out_dim : Nat)
     (withBias : Bool := true)
-    (h : MatrixShapeOK out_dim in_dim := by decide)
+    (h : MatrixManifoldCarrier.ShapeOK M out_dim in_dim := by decide)
     : IO (ManifoldLinear (device := device) M in_dim out_dim) := do
   let w0 ← Tensor.randn #[out_dim, in_dim] false device
   let weight ← makeLeafWeight (MatrixManifoldCarrier.project (device := device) h w0)

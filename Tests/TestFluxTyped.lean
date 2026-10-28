@@ -82,15 +82,15 @@ private def close {σ τ : StaticSpec} (x : Tensor σ) (y : Tensor τ) (tol : Fl
 
 @[test] def testFluxLatentPackRoundTrip : IO Unit := do
   let values := Array.ofFn (n := 2 * 32 * 4 * 6) fun i => i.val.toFloat
-  let spatial := (Tensor.fromFloatArray values).reshapeChecked #[2, 32, 4, 6]
-  let packed := packLatents spatial
+  let spatial := Tensor.fromFloatArrayShaped values #[2, 32, 4, 6] (by simp [values])
+  let packed := packLatents (packed_H := 2) (packed_W := 3) spatial
   LeanTest.assertEqual packed.runtimeShape #[2, 6, 128]
   close (unpackLatents (packed_H := 2) (packed_W := 3) packed) spatial 0.0
   let actual ← packed.toFloatArray
   LeanTest.assertEqual (actual.extract 0 8) #[0, 1, 6, 7, 24, 25, 30, 31]
 
 @[test] def testFluxPPMNativeBoundary : IO Unit := IO.FS.withTempDir fun dir => do
-  let image := (Tensor.fromFloatArray #[1, -1, -1, 1, -1, -1]).reshapeChecked #[1, 3, 1, 2]
+  let image := Tensor.fromFloatArrayShaped #[1, -1, -1, 1, -1, -1] #[1, 3, 1, 2] (by decide)
   let path := dir / "tiny.ppm"
   saveImagePPM image path.toString
   let bytes ← IO.FS.readBinFile path

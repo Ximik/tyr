@@ -168,13 +168,13 @@ private def addBias3d {batch channels frames : Nat}
   let b : Tensor { shape := #[1, channels, 1], dtype := dtype.val, device := device } := Tensor.reshape bias #[1, channels, 1]
   Tensor.add x (Tensor.expand b #[batch, channels, frames])
 
-private def conv1dWithBias {batch inC outC inFrames outFrames kernel : Nat}
+private def conv1dWithBias {batch inC outC inFrames kernel : Nat}
     (x : Tensor { shape := #[batch, inC, inFrames], dtype := dtype.val, device := device })
     (w : Tensor { shape := #[outC, inC, kernel], dtype := dtype.val, device := device })
     (b : Tensor { shape := #[outC], dtype := dtype.val, device := device })
-    (stride pad dilation : Nat) : Tensor { shape := #[batch, outC, outFrames], dtype := dtype.val, device := device } :=
-  let y0 : Tensor { shape := #[batch, outC, outFrames], dtype := dtype.val, device := device } := Tensor.reshapeChecked (Tensor.conv1d x w stride pad dilation) #[batch, outC, outFrames]
-  addBias3d y0 b
+    (stride pad dilation : Nat) :
+    Tensor { shape := #[batch, outC, (inFrames + 2 * pad - (dilation * (kernel - 1) + 1)) / stride + 1], dtype := dtype.val, device := device } :=
+  addBias3d (Tensor.conv1d x w stride pad dilation) b
 
 private def affine3d {batch seq inDim outDim : Nat}
     (x : Tensor { shape := #[batch, seq, inDim], dtype := dtype.val, device := device })
@@ -296,7 +296,7 @@ def loadFromDir (speechTokenizerDir : String) (device : Device := Device.CPU) : 
   let vqDownBias ← loadFrozen weightsPath "encoder.tokenizer.audio_vq_downsample.bias" #[1280]
   let vqEmbedRaw ← loadFrozen (dtype := dtype) (device := device) weightsPath "encoder.tokenizer.audio_quantizer.rvqs.0.embed" #[1, 32768, 1280]
   let vqEmbed3 : Tensor { shape := #[1, 32768, 1280], dtype := dtype.val, device := device } := Tensor.sliceChecked vqEmbedRaw 0 0 1 #[1, 32768, 1280]
-  let vqCodebook : Tensor { shape := #[32768, 1280], dtype := dtype.val, device := device } := Tensor.reshapeChecked vqEmbed3 #[32768, 1280]
+  let vqCodebook : Tensor { shape := #[32768, 1280], dtype := dtype.val, device := device } := Tensor.reshape vqEmbed3 #[32768, 1280] (by simp)
 
   let enc : (SpeechTokenizer25HzEncoder (device := device) (dtype := dtype)) := {
     conv1Weight
@@ -320,7 +320,7 @@ private def forwardAttention {seq : Nat}
   let k0 : Tensor { shape := #[1, seq, 1280], dtype := dtype.val, device := device } := affine3d x blk.kWeight blk.kBias
   let v0 : Tensor { shape := #[1, seq, 1280], dtype := dtype.val, device := device } := affine3d x blk.vWeight blk.vBias
 
-  let q : Tensor { shape := #[1, seq, 20, 64], dtype := dtype.val, device := device } := Tensor.reshapeChecked q0 #[1, seq, 20, 64]
+  let q : Tensor { shape := #[1, seq, 20, 64], dtype := dtype.val, device := device } := Tensor.reshape q0 #[1, seq, 20, 64] (by simp [Nat.mul_assoc])
   let k : Tensor { shape := #[1, seq, 20, 64], dtype := dtype.val, device := device } := Tensor.reshape k0 #[1, seq, 20, 64]
   let v : Tensor { shape := #[1, seq, 20, 64], dtype := dtype.val, device := device } := Tensor.reshape v0 #[1, seq, 20, 64]
 
@@ -351,15 +351,26 @@ private def encodeMelChunk {melFrames : Nat}
     (mel : Tensor { shape := #[128, melFrames], dtype := dtype.val, device := device }) : Tensor { shape := #[vqFrames melFrames], dtype := .Int64, device := device } :=
   let c2Frames : Nat := conv2Frames melFrames
   let qFrames : Nat := vqFrames melFrames
-  if melFrames < 2 || qFrames == 0 then
-    (Tensor.reshapeChecked (Tensor.fullInt #[0] 0) #[qFrames]).to device
+  if hShort : melFrames < 2 ∨ qFrames = 0 then
+    have hq : qFrames = 0 := by
+      rcases hShort with h | h
+      · simp only [qFrames, vqFrames, conv2Frames]; omega
+      · exact h
+    (Tensor.reshape (Tensor.fullInt #[0] 0) #[qFrames] (by simp [hq])).to device
   else
+    have hm : 2 ≤ melFrames := by omega
+    have hq : 1 ≤ qFrames := by omega
     Id.run do
       let x0 : Tensor { shape := #[1, 128, melFrames], dtype := dtype.val, device := device } := Tensor.reshape mel #[1, 128, melFrames]
       let h1 : Tensor { shape := #[1, 1280, melFrames], dtype := dtype.val, device := device } :=
-        Tensor.gelu (conv1dWithBias x0 m.conv1Weight m.conv1Bias 1 1 1)
+        Tensor.gelu (Tensor.reshape (conv1dWithBias x0 m.conv1Weight m.conv1Bias 1 1 1) #[1, 1280, melFrames]
+          (by have : (melFrames + 2 * 1 - (1 * (3 - 1) + 1)) / 1 + 1 = melFrames := by omega
+              rw [this]))
       let h2 : Tensor { shape := #[1, 1280, c2Frames], dtype := dtype.val, device := device } :=
-        Tensor.gelu (conv1dWithBias h1 m.conv2Weight m.conv2Bias 2 1 1)
+        Tensor.gelu (Tensor.reshape (conv1dWithBias h1 m.conv2Weight m.conv2Bias 2 1 1) #[1, 1280, c2Frames]
+          (by have : (melFrames + 2 * 1 - (1 * (3 - 1) + 1)) / 2 + 1 = c2Frames := by
+                simp only [c2Frames, conv2Frames]; omega
+              rw [this]))
 
       let xSeq0 : Tensor { shape := #[1, c2Frames, 1280], dtype := dtype.val, device := device } := Tensor.reshape (Tensor.transpose h2 1 2) #[1, c2Frames, 1280]
       let pos : Tensor { shape := #[c2Frames, 1280], dtype := dtype.val, device := device } := Tensor.sliceChecked m.positionalEmbedding 0 0 c2Frames #[c2Frames, 1280]
@@ -371,18 +382,21 @@ private def encodeMelChunk {melFrames : Nat}
 
       let vqIn : Tensor { shape := #[1, 1280, c2Frames], dtype := dtype.val, device := device } := Tensor.reshape (Tensor.transpose xSeq 1 2) #[1, 1280, c2Frames]
       let vqDown : Tensor { shape := #[1, 1280, qFrames], dtype := dtype.val, device := device } :=
-        conv1dWithBias vqIn m.vqDownWeight m.vqDownBias 2 0 1
+        Tensor.reshape (conv1dWithBias vqIn m.vqDownWeight m.vqDownBias 2 0 1) #[1, 1280, qFrames]
+          (by have : (c2Frames + 2 * 0 - (1 * (2 - 1) + 1)) / 2 + 1 = qFrames := by
+                simp only [qFrames, c2Frames, vqFrames, conv2Frames] at hq ⊢; omega
+              rw [this])
       let vqSeq : Tensor { shape := #[qFrames, 1280], dtype := dtype.val, device := device } :=
         Tensor.reshape (Tensor.transpose (Tensor.reshape vqDown #[1, 1280, qFrames]) 1 2) #[qFrames, 1280]
 
       let x2 : Tensor { shape := #[qFrames, 1], dtype := dtype.val, device := device } := by simpa using (Tensor.reshape (Tensor.sumDim (Tensor.mul vqSeq vqSeq) 1 true) #[qFrames, 1])
-      let e2 : Tensor { shape := #[32768, 1], dtype := dtype.val, device := device } := by simpa using (Tensor.reshapeChecked (Tensor.sumDim (Tensor.mul m.vqCodebook m.vqCodebook) 1 true) #[32768, 1])
+      let e2 : Tensor { shape := #[32768, 1], dtype := dtype.val, device := device } := by simpa using (Tensor.reshape (Tensor.sumDim (Tensor.mul m.vqCodebook m.vqCodebook) 1 true) #[32768, 1] (by simp))
       let dot : Tensor { shape := #[qFrames, 32768], dtype := dtype.val, device := device } := Tensor.mm vqSeq (Tensor.transpose2d m.vqCodebook)
       let x2e : Tensor { shape := #[qFrames, 32768], dtype := dtype.val, device := device } := Tensor.expand x2 #[qFrames, 32768]
-      let e2Row : Tensor { shape := #[1, 32768], dtype := dtype.val, device := device } := Tensor.reshapeChecked (Tensor.transpose2d e2) #[1, 32768]
+      let e2Row : Tensor { shape := #[1, 32768], dtype := dtype.val, device := device } := Tensor.reshape (Tensor.transpose2d e2) #[1, 32768] (by simp)
       let e2e : Tensor { shape := #[qFrames, 32768], dtype := dtype.val, device := device } := Tensor.expand e2Row #[qFrames, 32768]
       let dist : Tensor { shape := #[qFrames, 32768], dtype := dtype.val, device := device } := Tensor.sub (Tensor.add x2e e2e) (Tensor.mulScalar dot 2.0)
-      Tensor.reshapeChecked (Tensor.argmaxChecked (Tensor.mulScalar dist (-1.0)) 1) #[vqFrames melFrames]
+      Tensor.reshape (Tensor.argmaxChecked (Tensor.mulScalar dist (-1.0)) 1) #[vqFrames melFrames] (by simp +zetaDelta)
 
 private def appendAll (dst src : Array UInt64) : Array UInt64 :=
   Id.run do
@@ -422,7 +436,7 @@ def encodeWaveToCodes
     let cur := if remaining < chunkMel then remaining else chunkMel
     if cur >= 2 then
       let melChunk3 : Tensor { shape := #[1, 128, cur], dtype := dtype.val, device := device } := Tensor.sliceChecked feats 2 start cur #[1, 128, cur]
-      let melChunk : Tensor { shape := #[128, cur], dtype := dtype.val, device := device } := Tensor.reshapeChecked melChunk3 #[128, cur]
+      let melChunk : Tensor { shape := #[128, cur], dtype := dtype.val, device := device } := Tensor.reshape melChunk3 #[128, cur] (by simp)
       let idx : Tensor { shape := #[vqFrames cur], dtype := .Int64, device := device } := encodeMelChunk m melChunk
       let vals ← Tensor.toUInt64Array idx
       outVals := appendAll outVals vals

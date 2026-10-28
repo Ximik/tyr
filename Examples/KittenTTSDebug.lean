@@ -109,6 +109,8 @@ def main (args : List String) : IO UInt32 := do
   let decoderStyle : Tensor { shape := #[1, bundle.cfg.styleDim], dtype := .Float32, device := modelDevice } := sliceTensor refStyle 1 0 bundle.cfg.styleDim
   let ids := bundle.inputIdsFromPhonemes phonemes
   let seq := ids.size
+  let ⟨hSeq⟩ ← if h : 0 < seq then pure (PLift.up h) else
+    throw <| IO.userError "phoneme input produced no token ids"
   let inputIds0 : Tensor { shape := #[1, seq], dtype := .Int64, device := .CPU } := Tensor.reshape (Tensor.fromInt64Array (ids.map (·.toInt64))) #[1, seq]
   let inputIds := inputIds0.to modelDevice
   let emb : Tensor { shape := #[1, seq, bundle.cfg.hiddenDim], dtype := .Float32, device := modelDevice } := Tensor.embedding inputIds bundle.model.textEncoder.embedding
@@ -144,11 +146,11 @@ def main (args : List String) : IO UInt32 := do
     printStats s!"text_conv_{convIdx}.weight" weightStats
     printStats s!"text_conv_{convIdx}.ln_weight" lnWeightStats
     printStats s!"text_conv_{convIdx}.ln_bias" lnBiasStats
-    convH := conv.forward convH
+    convH := conv.forward convH hSeq
     let convStatsI ← tensorStats convH
     printStats s!"text_conv_{convIdx}" convStatsI
     convIdx := convIdx + 1
-  let textEnc : Tensor { shape := #[1, bundle.cfg.hiddenDim, seq], dtype := .Float32, device := modelDevice } := bundle.model.textEncoder.forward inputIds
+  let textEnc : Tensor { shape := #[1, bundle.cfg.hiddenDim, seq], dtype := .Float32, device := modelDevice } := bundle.model.textEncoder.forward inputIds hSeq
   IO.println s!"seed={seed}"
   IO.println s!"pred_durations={out.predDurations}"
   IO.println s!"alignment_frames={out.alignmentFrames}"
@@ -161,12 +163,12 @@ def main (args : List String) : IO UInt32 := do
   printStats "asr" asrStats
   printStats "f0" f0Stats
   printStats "n" nStats
-  if out.alignmentFrames > 0 then
+  if hFrames : out.alignmentFrames > 0 then
     let frames := out.alignmentFrames
-    let asr : Tensor { shape := #[1, bundle.cfg.hiddenDim, frames], dtype := .Float32, device := modelDevice } := Tensor.reshapeChecked out.asr.2 #[1, bundle.cfg.hiddenDim, frames]
-    let f0Curve : Tensor { shape := #[1, 1, 2 * frames], dtype := .Float32, device := modelDevice } := Tensor.reshapeChecked out.f0Curve.2 #[1, 1, 2 * frames]
-    let nCurve : Tensor { shape := #[1, 1, 2 * frames], dtype := .Float32, device := modelDevice } := Tensor.reshapeChecked out.nCurve.2 #[1, 1, 2 * frames]
-    let decoderDebug ← bundle.model.decoder.debugForward asr f0Curve nCurve decoderStyle
+    let asr : Tensor { shape := #[1, bundle.cfg.hiddenDim, frames], dtype := .Float32, device := modelDevice } ← IO.ofExcept (out.asr.2.reshapeChecked? #[1, bundle.cfg.hiddenDim, frames])
+    let f0Curve : Tensor { shape := #[1, 1, 2 * frames], dtype := .Float32, device := modelDevice } ← IO.ofExcept (out.f0Curve.2.reshapeChecked? #[1, 1, 2 * frames])
+    let nCurve : Tensor { shape := #[1, 1, 2 * frames], dtype := .Float32, device := modelDevice } ← IO.ofExcept (out.nCurve.2.reshapeChecked? #[1, 1, 2 * frames])
+    let decoderDebug ← bundle.model.decoder.debugForward asr f0Curve nCurve decoderStyle hFrames
     let decoderF0Stats ← tensorStats decoderDebug.f0.2
     let decoderNStats ← tensorStats decoderDebug.n.2
     let decoderEncodeStats ← tensorStats decoderDebug.encode.2

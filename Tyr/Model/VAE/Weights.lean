@@ -72,7 +72,7 @@ def loadResnetBlockSame [DType.RealFloating dtype] (path : String) (name : Strin
   let conv1 ← loadConv2dAtDType (dtype := dtype) (device := device) path s!"{name}.conv1" ch ch 3 1
   let norm2 ← loadGroupNorm (dtype := dtype) (device := device) path s!"{name}.norm2" 32 ch
   let conv2 ← loadConv2dAtDType (dtype := dtype) (device := device) path s!"{name}.conv2" ch ch 3 1
-  pure { norm1, conv1, norm2, conv2, nin_shortcut := none }
+  pure { norm1, conv1, norm2, conv2, nin_shortcut := .identity rfl }
 
 /-- Load ResnetBlock with channel change (has conv_shortcut) from Diffusers format -/
 def loadResnetBlockChange [DType.RealFloating dtype] (path : String) (name : String) (in_ch out_ch : Nat)
@@ -83,7 +83,7 @@ def loadResnetBlockChange [DType.RealFloating dtype] (path : String) (name : Str
   let conv2 ← loadConv2dAtDType (dtype := dtype) (device := device) path s!"{name}.conv2" out_ch out_ch 3 1
   -- Diffusers uses conv_shortcut instead of nin_shortcut
   let shortcut ← loadConv2dAtDType (dtype := dtype) (device := device) path s!"{name}.conv_shortcut" in_ch out_ch 1 0
-  pure { norm1, conv1, norm2, conv2, nin_shortcut := some shortcut }
+  pure { norm1, conv1, norm2, conv2, nin_shortcut := .conv shortcut }
 
 /-- Load AttnBlock from Diffusers format
     Diffusers uses: to_q, to_k, to_v, to_out.0, group_norm -/

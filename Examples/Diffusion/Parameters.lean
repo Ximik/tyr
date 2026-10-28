@@ -27,7 +27,7 @@ structure AttentionParams (n_embd n_head n_kv_head : Nat) where
   c_q : Activation #[n_head * (n_embd / n_head), n_embd]
   c_k : Activation #[n_kv_head * (n_embd / n_head), n_embd]
   c_v : Activation #[n_kv_head * (n_embd / n_head), n_embd]
-  c_proj : Activation #[n_embd, n_embd]
+  c_proj : Activation #[n_embd, n_head * (n_embd / n_head)]
   deriving TensorStruct
 
 structure MLPParams (n_embd : Nat) where
@@ -53,7 +53,7 @@ def AttentionParams.init (n_embd n_head n_kv_head : Nat)
     c_q := ← makeLeafParam ((c_q * scale))
     c_k := ← makeLeafParam ((c_k * scale))
     c_v := ← makeLeafParam ((c_v * scale))
-    c_proj := ← makeLeafParam (Tensor.zeros #[n_embd, n_embd])
+    c_proj := ← makeLeafParam (Tensor.zeros #[n_embd, n_head * (n_embd / n_head)])
   }
 
 def MLPParams.init (n_embd : Nat) : IO (MLPParams n_embd) := do

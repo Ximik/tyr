@@ -35,6 +35,8 @@ structure Qwen3ForcedAligner where
   model : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype.val) cfg
   tok : tokenizer.qwen3.QwenTokenizer
   preprocessor : PreprocessorConfig
+  /-- The preprocessor produces as many mel bins as the audio encoder consumes; checked on load. -/
+  melBinsMatch : preprocessor.featureSize = cfg.thinkerConfig.audioConfig.numMelBins
 
 private def sampleRate16k : Nat := 16000
 private def minAsrInputSeconds : Float := 0.5
@@ -279,6 +281,7 @@ private def alignSingleWithModel
     (language : String)
     {melBins frames : Nat} {frontendDevice : Device}
     (frontendOut : WhisperFrontendOutput (device := frontendDevice) melBins frames)
+    (hMel : melBins = alignCfg.thinkerConfig.audioConfig.numMelBins)
     (audioLen : Nat)
     : IO (Option ForcedAlignResult) := do
   let alignModel := TensorStruct.detach alignModel
@@ -307,7 +310,7 @@ private def alignSingleWithModel
         alignModel.alignPrepared
           inputIdsAlign
           #[wordList]
-          (inputFeatures := some (Tensor.reshapeChecked inputFeaturesDev #[1, alignCfg.thinkerConfig.audioConfig.numMelBins, frames]))
+          (inputFeatures := some (Tensor.reshape inputFeaturesDev #[1, alignCfg.thinkerConfig.audioConfig.numMelBins, frames] (by simp [hMel])))
           (featureAttentionMask := some featureAttentionMaskDev)
           (attentionMask := (none : Option (Tensor { device := device, shape := #[1, seqAlign], dtype := .Int64 })))
           (timestampTokenId := alignCfg.timestampTokenId)
@@ -329,18 +332,19 @@ private def alignSingleWithForcedAligner
     (maxSeconds := some maxForceAlignInputSeconds)
     (device := dev)
   let audioLen ← extractAudioLenFromFeatureMask (cfg := aligner.cfg) (frames := frames) frontendOut.featureAttentionMask
-  alignSingleWithModel aligner.model aligner.tok text language frontendOut audioLen
+  alignSingleWithModel aligner.model aligner.tok text language frontendOut aligner.melBinsMatch audioLen
 
 private def maybeAlignTimestamps
     {cfg : Qwen3ASRConfig}
     (model : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
+    {melBins frames : Nat}
     (preprocessor : PreprocessorConfig)
+    (hMel : melBins = cfg.thinkerConfig.audioConfig.numMelBins)
     (forcedAligner : Option Qwen3ForcedAligner := none)
     (text : String)
     (language : String)
     (audio16k : Array Float)
-    {melBins frames : Nat}
     (frontendOut : WhisperFrontendOutput (device := device) melBins frames)
     (audioLen : Nat)
     (returnTimeStamps : Bool)
@@ -352,8 +356,9 @@ private def maybeAlignTimestamps
   else
     match forcedAligner with
     | some aligner =>
-        if isFrontendReuseCompatible preprocessor aligner.preprocessor then
-          alignSingleWithModel aligner.model aligner.tok text language frontendOut audioLen
+        if hReuse : isFrontendReuseCompatible preprocessor aligner.preprocessor ∧
+            melBins = aligner.cfg.thinkerConfig.audioConfig.numMelBins then
+          alignSingleWithModel aligner.model aligner.tok text language frontendOut hReuse.2 audioLen
         else
           alignSingleWithForcedAligner aligner audio16k text language
     | none =>
@@ -361,16 +366,17 @@ private def maybeAlignTimestamps
         throw <| IO.userError
           "returnTimeStamps=true requires either a forced-aligner handle or a forced-aligner thinker checkpoint (model_type contains \"forced_aligner\")"
       else
-        alignSingleWithModel model tok text language frontendOut audioLen
+        alignSingleWithModel model tok text language frontendOut hMel audioLen
 
 private def transcribeWithFrontend
     {cfg : Qwen3ASRConfig}
     (model : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
+    {melBins frames : Nat}
     (preprocessor : PreprocessorConfig)
+    (hMel : melBins = cfg.thinkerConfig.audioConfig.numMelBins)
     (forcedAligner : Option Qwen3ForcedAligner := none)
     (audio16k : Array Float)
-    {melBins frames : Nat}
     (frontendOut : WhisperFrontendOutput (device := device) melBins frames)
     (context : String := "")
     (language : Option String := none)
@@ -393,7 +399,7 @@ private def transcribeWithFrontend
     do
       model.generateGreedy
         inputIds
-        (inputFeatures := some (Tensor.reshapeChecked inputFeaturesDev #[1, cfg.thinkerConfig.audioConfig.numMelBins, frames]))
+        (inputFeatures := some (Tensor.reshape inputFeaturesDev #[1, cfg.thinkerConfig.audioConfig.numMelBins, frames] (by simp [hMel])))
         (featureAttentionMask := some featureAttentionMaskDev)
         (maxNewTokens := maxNewTokens)
         (eosTokenIds := eosTokenIds)
@@ -403,7 +409,7 @@ private def transcribeWithFrontend
   let rawDecoded ← decodeGeneratedText tok (seq := seq) outSeq outIds
   let (lang, txt) := parseAsrOutput rawDecoded forceLanguage
   let timeStamps ← maybeAlignTimestamps
-    model tok preprocessor forcedAligner txt lang audio16k frontendOut audioLen returnTimeStamps
+    model tok preprocessor hMel forcedAligner txt lang audio16k frontendOut audioLen returnTimeStamps
   pure { language := lang, text := txt, timeStamps := timeStamps }
 
 /-- Offline ASR for one in-memory 16k mono waveform. -/
@@ -412,6 +418,7 @@ def transcribeWaveform
     (model : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (preprocessor : PreprocessorConfig)
+    (hMel : preprocessor.featureSize = cfg.thinkerConfig.audioConfig.numMelBins)
     (audio16k : Array Float)
     (forcedAligner : Option Qwen3ForcedAligner := none)
     (context : String := "")
@@ -441,7 +448,7 @@ def transcribeWaveform
     let _frames := frontendPack.1
     let frontendOut := frontendPack.2
     let r ← transcribeWithFrontend
-      model tok preprocessor forcedAligner chunkWav frontendOut context language returnTimeStamps maxNewTokens eosTokenIds
+      model tok preprocessor hMel forcedAligner chunkWav frontendOut context language returnTimeStamps maxNewTokens eosTokenIds
     langs := langs.push r.language
     texts := texts.push r.text
     if returnTimeStamps then
@@ -543,6 +550,7 @@ private def tryTranscribeWaveformsBatchedChunk
     (model : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (preprocessor : PreprocessorConfig)
+    (hMel : preprocessor.featureSize = cfg.thinkerConfig.audioConfig.numMelBins)
     (audios16k : Array (Array Float))
     (contexts : Array String)
     (languages : Array (Option String))
@@ -620,7 +628,7 @@ private def tryTranscribeWaveformsBatchedChunk
         do
           model.generateGreedy
             (inputIdsCpu.to dev)
-            (inputFeatures := some (Tensor.reshapeChecked (inputFeaturesCpu.to dev) #[batch, cfg.thinkerConfig.audioConfig.numMelBins, frames]))
+            (inputFeatures := some (Tensor.reshape (inputFeaturesCpu.to dev) #[batch, cfg.thinkerConfig.audioConfig.numMelBins, frames] (by simp [hMel])))
             (featureAttentionMask := some (featureAttentionMaskCpu.to dev))
             (maxNewTokens := maxNewTokens)
             (eosTokenIds := eosTokenIds)
@@ -654,6 +662,7 @@ def transcribeWaveforms
     (model : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (preprocessor : PreprocessorConfig)
+    (hMel : preprocessor.featureSize = cfg.thinkerConfig.audioConfig.numMelBins)
     (audios16k : Array (Array Float))
     (forcedAligner : Option Qwen3ForcedAligner := none)
     (contexts : Array String := #[])
@@ -681,7 +690,7 @@ def transcribeWaveforms
         match (← tryTranscribeWaveformsBatchedChunk
           model
           tok
-          preprocessor
+          preprocessor hMel
           audChunk
           ctxChunk
           langChunk
@@ -695,7 +704,7 @@ def transcribeWaveforms
     if !usedBatch then
       for i in [off:hi] do
         let r ← transcribeWaveform
-          model tok preprocessor (audios16k[i]!)
+          model tok preprocessor hMel (audios16k[i]!)
           (forcedAligner := forcedAligner)
           (context := ctxs[i]!)
           (language := langs[i]!)
@@ -712,6 +721,7 @@ def transcribeWav
     (model : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (preprocessor : PreprocessorConfig)
+    (hMel : preprocessor.featureSize = cfg.thinkerConfig.audioConfig.numMelBins)
     (wavPath : String)
     (forcedAligner : Option Qwen3ForcedAligner := none)
     (context : String := "")
@@ -722,7 +732,7 @@ def transcribeWav
     : IO ASRTranscription := do
   let wav16k ← normalizeAudioTo16kFromWav wavPath
   transcribeWaveform
-    model tok preprocessor wav16k forcedAligner context language returnTimeStamps maxNewTokens eosTokenIds
+    model tok preprocessor hMel wav16k forcedAligner context language returnTimeStamps maxNewTokens eosTokenIds
 
 /-- Offline ASR from one unified audio input.
     Supports path/URL/base64/in-memory waveform+sample-rate forms. -/
@@ -731,6 +741,7 @@ def transcribeAudioInput
     (model : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (preprocessor : PreprocessorConfig)
+    (hMel : preprocessor.featureSize = cfg.thinkerConfig.audioConfig.numMelBins)
     (audio : ASRAudioInput)
     (forcedAligner : Option Qwen3ForcedAligner := none)
     (context : String := "")
@@ -741,7 +752,7 @@ def transcribeAudioInput
     : IO ASRTranscription := do
   let wav16k ← normalizeAudioInputTo16k audio
   transcribeWaveform
-    model tok preprocessor wav16k forcedAligner context language returnTimeStamps maxNewTokens eosTokenIds
+    model tok preprocessor hMel wav16k forcedAligner context language returnTimeStamps maxNewTokens eosTokenIds
 
 /-- Offline ASR from string source with auto-detection:
     local path / URL / base64 payload. -/
@@ -750,6 +761,7 @@ def transcribeAudioSource
     (model : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (preprocessor : PreprocessorConfig)
+    (hMel : preprocessor.featureSize = cfg.thinkerConfig.audioConfig.numMelBins)
     (source : String)
     (forcedAligner : Option Qwen3ForcedAligner := none)
     (context : String := "")
@@ -761,7 +773,7 @@ def transcribeAudioSource
   transcribeAudioInput
     model
     tok
-    preprocessor
+    preprocessor hMel
     (ASRAudioInput.ofStringAuto source)
     forcedAligner
     context
@@ -776,6 +788,7 @@ def transcribeWavs
     (model : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (preprocessor : PreprocessorConfig)
+    (hMel : preprocessor.featureSize = cfg.thinkerConfig.audioConfig.numMelBins)
     (wavPaths : Array String)
     (forcedAligner : Option Qwen3ForcedAligner := none)
     (contexts : Array String := #[])
@@ -791,7 +804,7 @@ def transcribeWavs
   transcribeWaveforms
     model
     tok
-    preprocessor
+    preprocessor hMel
     audios16k
     forcedAligner
     contexts
@@ -808,6 +821,7 @@ def transcribeAudioInputs
     (model : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (preprocessor : PreprocessorConfig)
+    (hMel : preprocessor.featureSize = cfg.thinkerConfig.audioConfig.numMelBins)
     (audios : Array ASRAudioInput)
     (forcedAligner : Option Qwen3ForcedAligner := none)
     (contexts : Array String := #[])
@@ -823,7 +837,7 @@ def transcribeAudioInputs
   transcribeWaveforms
     model
     tok
-    preprocessor
+    preprocessor hMel
     audios16k
     forcedAligner
     contexts
@@ -839,6 +853,7 @@ def transcribeAudioSources
     (model : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (preprocessor : PreprocessorConfig)
+    (hMel : preprocessor.featureSize = cfg.thinkerConfig.audioConfig.numMelBins)
     (sources : Array String)
     (forcedAligner : Option Qwen3ForcedAligner := none)
     (contexts : Array String := #[])
@@ -851,7 +866,7 @@ def transcribeAudioSources
   transcribeAudioInputs
     model
     tok
-    preprocessor
+    preprocessor hMel
     (sources.map ASRAudioInput.ofStringAuto)
     forcedAligner
     contexts
@@ -879,8 +894,11 @@ def loadFromPretrained
       s!"Requested aligner source is not a forced-aligner checkpoint (model_type={cfg.thinkerConfig.modelType})"
   let tok ← tokenizer.qwen3.loadTokenizer modelDir
   let preprocessor ← PreprocessorConfig.loadFromPretrainedDir modelDir
+  let ⟨melBinsMatch⟩ ← if h : preprocessor.featureSize = cfg.thinkerConfig.audioConfig.numMelBins then
+      pure (PLift.up h)
+    else throw (IO.userError s!"Qwen3 forced-aligner preprocessor feature_size {preprocessor.featureSize} does not match num_mel_bins {cfg.thinkerConfig.audioConfig.numMelBins}")
   let ⟨device, dtype, model⟩ ← Qwen3ASRForConditionalGeneration.loadSharded modelDir cfg
-  pure { cfg, device, dtype, model, tok, preprocessor }
+  pure { cfg, device, dtype, model, tok, preprocessor, melBinsMatch }
 
 private def validateAlignLanguage (aligner : Qwen3ForcedAligner) (language : String) : IO String := do
   let ln ←
@@ -936,7 +954,7 @@ def alignWaveform
       (maxSeconds := some maxForceAlignInputSeconds)
       (device := dev)
     let audioLen ← extractAudioLenFromFeatureMask (cfg := aligner.cfg) (frames := frames) frontendOut.featureAttentionMask
-    match (← alignSingleWithModel aligner.model aligner.tok trimmed ln frontendOut audioLen) with
+    match (← alignSingleWithModel aligner.model aligner.tok trimmed ln frontendOut aligner.melBinsMatch audioLen) with
     | some r => pure r
     | none => pure { items := #[] }
 
@@ -1020,6 +1038,7 @@ def transcribeWaveform
     (m : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (preprocessor : PreprocessorConfig)
+    (hMel : preprocessor.featureSize = cfg.thinkerConfig.audioConfig.numMelBins)
     (audio16k : Array Float)
     (forcedAligner : Option Qwen3ForcedAligner := none)
     (context : String := "")
@@ -1029,13 +1048,14 @@ def transcribeWaveform
     (eosTokenIds : Array UInt64 := defaultEosTokenIds)
     : IO ASRTranscription :=
   torch.qwen3asr.transcribeWaveform
-    m tok preprocessor audio16k forcedAligner context language returnTimeStamps maxNewTokens eosTokenIds
+    m tok preprocessor hMel audio16k forcedAligner context language returnTimeStamps maxNewTokens eosTokenIds
 
 /-- Method-style offline ASR for multiple waveforms. -/
 def transcribeWaveforms
     (m : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (preprocessor : PreprocessorConfig)
+    (hMel : preprocessor.featureSize = cfg.thinkerConfig.audioConfig.numMelBins)
     (audios16k : Array (Array Float))
     (forcedAligner : Option Qwen3ForcedAligner := none)
     (contexts : Array String := #[])
@@ -1046,13 +1066,14 @@ def transcribeWaveforms
     (eosTokenIds : Array UInt64 := defaultEosTokenIds)
     : IO (Array ASRTranscription) :=
   torch.qwen3asr.transcribeWaveforms
-    m tok preprocessor audios16k forcedAligner contexts languages maxInferenceBatchSize returnTimeStamps maxNewTokens eosTokenIds
+    m tok preprocessor hMel audios16k forcedAligner contexts languages maxInferenceBatchSize returnTimeStamps maxNewTokens eosTokenIds
 
 /-- Method-style offline ASR from one WAV path. -/
 def transcribeWav
     (m : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (preprocessor : PreprocessorConfig)
+    (hMel : preprocessor.featureSize = cfg.thinkerConfig.audioConfig.numMelBins)
     (wavPath : String)
     (forcedAligner : Option Qwen3ForcedAligner := none)
     (context : String := "")
@@ -1062,13 +1083,14 @@ def transcribeWav
     (eosTokenIds : Array UInt64 := defaultEosTokenIds)
     : IO ASRTranscription :=
   torch.qwen3asr.transcribeWav
-    m tok preprocessor wavPath forcedAligner context language returnTimeStamps maxNewTokens eosTokenIds
+    m tok preprocessor hMel wavPath forcedAligner context language returnTimeStamps maxNewTokens eosTokenIds
 
 /-- Method-style offline ASR from one unified audio input. -/
 def transcribeAudioInput
     (m : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (preprocessor : PreprocessorConfig)
+    (hMel : preprocessor.featureSize = cfg.thinkerConfig.audioConfig.numMelBins)
     (audio : ASRAudioInput)
     (forcedAligner : Option Qwen3ForcedAligner := none)
     (context : String := "")
@@ -1078,13 +1100,14 @@ def transcribeAudioInput
     (eosTokenIds : Array UInt64 := defaultEosTokenIds)
     : IO ASRTranscription :=
   torch.qwen3asr.transcribeAudioInput
-    m tok preprocessor audio forcedAligner context language returnTimeStamps maxNewTokens eosTokenIds
+    m tok preprocessor hMel audio forcedAligner context language returnTimeStamps maxNewTokens eosTokenIds
 
 /-- Method-style offline ASR from string source with auto-detection. -/
 def transcribeAudioSource
     (m : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (preprocessor : PreprocessorConfig)
+    (hMel : preprocessor.featureSize = cfg.thinkerConfig.audioConfig.numMelBins)
     (source : String)
     (forcedAligner : Option Qwen3ForcedAligner := none)
     (context : String := "")
@@ -1094,13 +1117,14 @@ def transcribeAudioSource
     (eosTokenIds : Array UInt64 := defaultEosTokenIds)
     : IO ASRTranscription :=
   torch.qwen3asr.transcribeAudioSource
-    m tok preprocessor source forcedAligner context language returnTimeStamps maxNewTokens eosTokenIds
+    m tok preprocessor hMel source forcedAligner context language returnTimeStamps maxNewTokens eosTokenIds
 
 /-- Method-style offline ASR from WAV paths. -/
 def transcribeWavs
     (m : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (preprocessor : PreprocessorConfig)
+    (hMel : preprocessor.featureSize = cfg.thinkerConfig.audioConfig.numMelBins)
     (wavPaths : Array String)
     (forcedAligner : Option Qwen3ForcedAligner := none)
     (contexts : Array String := #[])
@@ -1111,13 +1135,14 @@ def transcribeWavs
     (eosTokenIds : Array UInt64 := defaultEosTokenIds)
     : IO (Array ASRTranscription) :=
   torch.qwen3asr.transcribeWavs
-    m tok preprocessor wavPaths forcedAligner contexts languages maxInferenceBatchSize returnTimeStamps maxNewTokens eosTokenIds
+    m tok preprocessor hMel wavPaths forcedAligner contexts languages maxInferenceBatchSize returnTimeStamps maxNewTokens eosTokenIds
 
 /-- Method-style offline ASR from unified audio inputs. -/
 def transcribeAudioInputs
     (m : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (preprocessor : PreprocessorConfig)
+    (hMel : preprocessor.featureSize = cfg.thinkerConfig.audioConfig.numMelBins)
     (audios : Array ASRAudioInput)
     (forcedAligner : Option Qwen3ForcedAligner := none)
     (contexts : Array String := #[])
@@ -1128,13 +1153,14 @@ def transcribeAudioInputs
     (eosTokenIds : Array UInt64 := defaultEosTokenIds)
     : IO (Array ASRTranscription) :=
   torch.qwen3asr.transcribeAudioInputs
-    m tok preprocessor audios forcedAligner contexts languages maxInferenceBatchSize returnTimeStamps maxNewTokens eosTokenIds
+    m tok preprocessor hMel audios forcedAligner contexts languages maxInferenceBatchSize returnTimeStamps maxNewTokens eosTokenIds
 
 /-- Method-style offline ASR from string sources with auto-detection. -/
 def transcribeAudioSources
     (m : Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype) cfg)
     (tok : tokenizer.qwen3.QwenTokenizer)
     (preprocessor : PreprocessorConfig)
+    (hMel : preprocessor.featureSize = cfg.thinkerConfig.audioConfig.numMelBins)
     (sources : Array String)
     (forcedAligner : Option Qwen3ForcedAligner := none)
     (contexts : Array String := #[])
@@ -1145,7 +1171,7 @@ def transcribeAudioSources
     (eosTokenIds : Array UInt64 := defaultEosTokenIds)
     : IO (Array ASRTranscription) :=
   torch.qwen3asr.transcribeAudioSources
-    m tok preprocessor sources forcedAligner contexts languages maxInferenceBatchSize returnTimeStamps maxNewTokens eosTokenIds
+    m tok preprocessor hMel sources forcedAligner contexts languages maxInferenceBatchSize returnTimeStamps maxNewTokens eosTokenIds
 
 end Qwen3ASRForConditionalGeneration
 

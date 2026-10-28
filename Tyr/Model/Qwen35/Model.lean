@@ -627,8 +627,8 @@ def init (cfg : Config) (device : Device := .CPU) (dtype : DType := .Float32) : 
 private def repeatHeads {batch seq n_head head_dim rep : Nat}
     (x : Tensor { device := device, shape := #[batch, seq, n_head, head_dim], dtype := dtype })
     : Tensor { device := device, shape := #[batch, seq, n_head * rep, head_dim], dtype := dtype } :=
-  if rep == 1 then
-    Tensor.reshapeChecked x #[batch, seq, n_head * rep, head_dim]
+  if h : rep = 1 then
+    Tensor.reshape x #[batch, seq, n_head * rep, head_dim] (by simp [h])
   else
     let x5 : Tensor { device := device, shape := #[batch, seq, n_head, 1, head_dim], dtype := dtype } := x.reshape #[batch, seq, n_head, 1, head_dim]
     let x5 : Tensor { device := device, shape := #[batch, seq, n_head, rep, head_dim], dtype := dtype } := Tensor.expand x5 #[batch, seq, n_head, rep, head_dim]
@@ -663,7 +663,7 @@ def forward {batch seq : Nat}
   let (convOut, nextConvState) :
       Tensor { device := device, shape := #[batch, Config.linearConvDim cfg, seq], dtype := dtype }
         × Option (Tensor { device := device, shape := #[batch, Config.linearConvDim cfg, cfg.linear_conv_kernel_dim], dtype := dtype }) :=
-    if usePrecomputedState && seq == 1 then
+    if hStep : usePrecomputedState ∧ seq = 1 then
       match cacheConv with
       | some st =>
         let catIn : Tensor { device := device, shape := #[batch, Config.linearConvDim cfg, cfg.linear_conv_kernel_dim + 1], dtype := dtype } := typedCat st mixedQKVc 2
@@ -674,7 +674,7 @@ def forward {batch seq : Nat}
         let raw : Tensor { device := device, shape := #[batch, Config.linearConvDim cfg, 2], dtype := dtype } :=
           convGroups convIn m.conv1d_weight m.conv1d_bias 1 0 1 (Config.linearConvDim cfg)
         let y : Tensor { device := device, shape := #[batch, Config.linearConvDim cfg, 1], dtype := dtype } := typedSlice raw 2 1 1
-        ((Tensor.silu y).reshapeChecked #[batch, Config.linearConvDim cfg, seq], some stNext)
+        ((Tensor.silu y).reshape #[batch, Config.linearConvDim cfg, seq] (by simp [hStep.2]), some stNext)
       | none =>
         let convIn : Tensor { device := device, shape := #[batch, Config.linearConvDim cfg, seq], dtype := dtype } :=
           Tensor.castLike m.conv1d_weight mixedQKVc
@@ -731,9 +731,11 @@ def forward {batch seq : Nat}
 
   let rep := Config.linearKVRepeat cfg
   let q : Tensor { device := device, shape := #[batch, seq, cfg.linear_num_value_heads, cfg.linear_key_head_dim], dtype := dtype } :=
-    (repeatHeads (rep := rep) q0).reshapeChecked #[batch, seq, cfg.linear_num_value_heads, cfg.linear_key_head_dim]
+    (repeatHeads (rep := rep) q0).reshape #[batch, seq, cfg.linear_num_value_heads, cfg.linear_key_head_dim]
+      (by simp [rep, Config.linear_key_heads_mul_repeat])
   let k : Tensor { device := device, shape := #[batch, seq, cfg.linear_num_value_heads, cfg.linear_key_head_dim], dtype := dtype } :=
-    (repeatHeads (rep := rep) k0).reshapeChecked #[batch, seq, cfg.linear_num_value_heads, cfg.linear_key_head_dim]
+    (repeatHeads (rep := rep) k0).reshape #[batch, seq, cfg.linear_num_value_heads, cfg.linear_key_head_dim]
+      (by simp [rep, Config.linear_key_heads_mul_repeat])
 
   let (core, finalState) :=
     if usePrecomputedState then

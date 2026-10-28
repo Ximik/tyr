@@ -20,6 +20,26 @@ variable {device : Device}
 
 open torch.Model
 
+/-- A stride-1 convolution padded by half its dilated receptive field keeps the frame count. -/
+private theorem convOutputSize_same {f k p d : Nat} (hf : 0 < f) (hp : 2 * p = d * (k - 1)) :
+    convOutputSize f k 1 p d = f := by
+  simp only [convOutputSize]; simp; omega
+
+private theorem convOutputSize_pointwise {f : Nat} (hf : 0 < f) : convOutputSize f 1 1 0 1 = f := by
+  simp only [convOutputSize]; simp; omega
+
+private theorem convOutputSize_halve {f : Nat} (hf : 0 < f) : convOutputSize (2 * f) 3 2 1 1 = f := by
+  simp only [convOutputSize]; omega
+
+private theorem convTransposeOutputSize_double {f : Nat} (hf : 0 < f) :
+    convTransposeOutputSize f 3 2 1 1 1 = 2 * f := by
+  simp only [convTransposeOutputSize]; omega
+
+/-- Padding `(k*d - d)/2` centres a dilated odd kernel. -/
+private theorem dilated_same_pad {k d : Nat} (hk : k % 2 = 1) : 2 * ((k * d - d) / 2) = d * (k - 1) := by
+  rw [show k * d - d = d * (k - 1) by rw [Nat.mul_sub_one, Nat.mul_comm]]
+  exact Nat.mul_div_cancel' (Nat.dvd_trans (by omega : 2 ∣ k - 1) (Nat.dvd_mul_left (k - 1) d))
+
 private def initUniform (shape : Shape) (scale : Float) : IO (Tensor { shape := shape, dtype := .Float32, device := device }) := do
   let w ← uniformTensor shape (-scale) scale
   Tensor.parameter w
@@ -120,16 +140,15 @@ private def buildAlignment {seq frames : Nat}
   if frames == 0 then
     Tensor.reshape (Tensor.zeros #[1, seq, frames] false device) #[1, seq, frames]
   else
-    let mut flat : Array Float := Array.replicate (seq * frames) 0.0
-    let mut cursor : Nat := 0
-    for i in [:seq] do
-      let dur := durations.getD i 1
-      for _ in [:dur] do
-        if cursor < frames then
-          let idx := i * frames + cursor
-          flat := flat.set! idx 1.0
-          cursor := cursor + 1
-    (Tensor.reshapeChecked (Tensor.fromFloatArray flat) #[1, seq, frames]).to device
+    -- Token `i` covers frames `[starts[i], starts[i] + dur_i)`, clipped to `frames`.
+    let starts : Array Nat := (List.range seq).toArray.map fun i =>
+      (List.range i).foldl (fun acc j => acc + durations.getD j 1) 0
+    let flat : Array Float := Array.ofFn (n := seq * frames) fun idx =>
+      let i := idx.val / frames
+      let t := idx.val % frames
+      let start := starts.getD i 0
+      if start ≤ t && t < start + durations.getD i 1 then 1.0 else 0.0
+    (Tensor.fromFloatArrayShaped flat #[1, seq, frames] (by simp [flat])).to device
 
 /-- Linear layer with explicit weight / bias tensors. -/
 structure LinearNorm (inDim outDim : Nat) where
@@ -184,7 +203,8 @@ def forward {batch frames inC outC kernel stride padding dilation : Nat}
     (x : Tensor { shape := #[batch, inC, frames], dtype := .Float32, device := device })
     : Tensor { shape := #[batch, outC, convOutputSize frames kernel stride padding dilation], dtype := .Float32, device := device } :=
   let y0 : Tensor { shape := #[batch, outC, convOutputSize frames kernel stride padding dilation], dtype := .Float32, device := device } :=
-    Tensor.reshapeChecked (Tensor.conv1d x m.weight stride padding dilation) #[batch, outC, convOutputSize frames kernel stride padding dilation]
+    Tensor.reshape (Tensor.conv1d x m.weight stride padding dilation) #[batch, outC, convOutputSize frames kernel stride padding dilation]
+      (by simp)
   addBias3d y0 m.bias
 
 end Conv1dParams
@@ -213,9 +233,10 @@ def forward {batch frames channels kernel stride padding dilation : Nat}
     (m : DepthwiseConv1dParams (device := device) channels kernel stride padding dilation)
     (x : Tensor { shape := #[batch, channels, frames], dtype := .Float32, device := device })
     : Tensor { shape := #[batch, channels, convOutputSize frames kernel stride padding dilation], dtype := .Float32, device := device } :=
-  Tensor.reshapeChecked
+  Tensor.reshape
     (Tensor.conv1dGroups x m.weight m.bias stride padding dilation channels)
     #[batch, channels, convOutputSize frames kernel stride padding dilation]
+    (by simp [Tensor.convExtent])
 
 end DepthwiseConv1dParams
 
@@ -252,7 +273,8 @@ def forward {batch frames channels kernel stride padding outputPadding dilation 
     let wc : Tensor { shape := #[1, 1, kernel], dtype := .Float32, device := device } := sliceTensor m.weight 0 ci 1
     let bc : Tensor { shape := #[1], dtype := .Float32, device := device } := sliceTensor m.bias 0 ci 1
     let yc : Tensor { shape := #[batch, 1, outFrames], dtype := .Float32, device := device } :=
-      Tensor.reshapeChecked (Tensor.convTranspose1d xc wc bc stride padding outputPadding dilation) #[batch, 1, outFrames]
+      Tensor.reshape (Tensor.convTranspose1d xc wc bc stride padding outputPadding dilation) #[batch, 1, outFrames]
+        (by simp [outFrames])
     parts := parts.push (Tensor.packShape yc)
   Tensor.catManyChecked parts 1 #[batch, channels, outFrames]
 
@@ -314,7 +336,8 @@ def forward {batch frames inC outC kernel stride padding dilation : Nat}
     : Tensor { shape := #[batch, outC, convOutputSize frames kernel stride padding dilation], dtype := .Float32, device := device } :=
   let weight := applyWeightNormConv1d m.weightV m.weightG
   let y0 : Tensor { shape := #[batch, outC, convOutputSize frames kernel stride padding dilation], dtype := .Float32, device := device } :=
-    Tensor.reshapeChecked (Tensor.conv1d x weight stride padding dilation) #[batch, outC, convOutputSize frames kernel stride padding dilation]
+    Tensor.reshape (Tensor.conv1d x weight stride padding dilation) #[batch, outC, convOutputSize frames kernel stride padding dilation]
+      (by simp)
   addBias3d y0 m.bias
 
 end WNConv1dParams
@@ -348,9 +371,10 @@ def forward {batch frames inC outC kernel stride padding outputPadding dilation 
     (x : Tensor { shape := #[batch, inC, frames], dtype := .Float32, device := device })
     : Tensor { shape := #[batch, outC, convTransposeOutputSize frames kernel stride padding outputPadding dilation], dtype := .Float32, device := device } :=
   let weight := applyWeightNormTransConv1d m.weightV m.weightG
-  Tensor.reshapeChecked
+  Tensor.reshape
     (Tensor.convTranspose1d x weight m.bias stride padding outputPadding dilation)
     #[batch, outC, convTransposeOutputSize frames kernel stride padding outputPadding dilation]
+    (by simp)
 
 end WNConvTranspose1dParams
 
@@ -390,7 +414,8 @@ def forward {batch frames channels kernel stride padding outputPadding dilation 
     let wc : Tensor { shape := #[1, 1, kernel], dtype := .Float32, device := device } := sliceTensor weight 0 ci 1
     let bc : Tensor { shape := #[1], dtype := .Float32, device := device } := sliceTensor m.bias 0 ci 1
     let yc : Tensor { shape := #[batch, 1, outFrames], dtype := .Float32, device := device } :=
-      Tensor.reshapeChecked (Tensor.convTranspose1d xc wc bc stride padding outputPadding dilation) #[batch, 1, outFrames]
+      Tensor.reshape (Tensor.convTranspose1d xc wc bc stride padding outputPadding dilation) #[batch, 1, outFrames]
+        (by simp [outFrames])
     parts := parts.push (Tensor.packShape yc)
   Tensor.catManyChecked parts 1 #[batch, channels, outFrames]
 
@@ -482,7 +507,7 @@ def forward {seq input hidden : Nat}
     : Tensor { shape := #[1, seq, 2 * hidden], dtype := .Float32, device := device } :=
   let fw := runDirection x m.wxForward m.whForward m.biasIHForward m.biasHHForward false
   let bw := runDirection x m.wxBackward m.whBackward m.biasIHBackward m.biasHHBackward true
-  (catTo fw bw 2).reshapeChecked #[1, seq, 2 * hidden]
+  (catTo fw bw 2).reshape #[1, seq, 2 * hidden] (by simp [Nat.two_mul])
 
 end BiLSTM
 
@@ -691,8 +716,11 @@ def init (cfg : KittenTTSConfig) (device : Device := .CPU) : IO (TextConvLayer (
 def forward {seq : Nat}
     (m : TextConvLayer (device := device) cfg)
     (x : Tensor { shape := #[1, cfg.hiddenDim, seq], dtype := .Float32, device := device })
+    (hs : 0 < seq)
     : Tensor { shape := #[1, cfg.hiddenDim, seq], dtype := .Float32, device := device } :=
-  let y : Tensor { shape := #[1, cfg.hiddenDim, seq], dtype := .Float32, device := device } := (m.conv.forward x).reshapeChecked #[1, cfg.hiddenDim, seq]
+  let y : Tensor { shape := #[1, cfg.hiddenDim, seq], dtype := .Float32, device := device } :=
+    (m.conv.forward x).reshape #[1, cfg.hiddenDim, seq]
+      (by rw [convOutputSize_same hs (by have := cfg.textKernelOdd; omega)])
   let y := layerNormCF y m.lnWeight m.lnBias
   leakyRelu y 0.2
 
@@ -718,13 +746,14 @@ def init (cfg : KittenTTSConfig) (device : Device := .CPU) : IO (TextEncoder (de
 def forward {seq : Nat}
     (m : TextEncoder (device := device) cfg)
     (inputIds : Tensor { shape := #[1, seq], dtype := .Int64, device := device })
+    (hs : 0 < seq)
     : Tensor { shape := #[1, cfg.hiddenDim, seq], dtype := .Float32, device := device } := Id.run do
   let emb : Tensor { shape := #[1, seq, cfg.hiddenDim], dtype := .Float32, device := device } := Tensor.embedding inputIds m.embedding
   let mut h : Tensor { shape := #[1, cfg.hiddenDim, seq], dtype := .Float32, device := device } := seqToCF emb
   for conv in m.convs do
-    h := conv.forward h
+    h := conv.forward h hs
   let hSeq : Tensor { shape := #[1, seq, cfg.hiddenDim], dtype := .Float32, device := device } := cfToSeq h
-  let outSeq : Tensor { shape := #[1, seq, cfg.hiddenDim], dtype := .Float32, device := device } := (m.lstm.forward hSeq).reshapeChecked #[1, seq, cfg.hiddenDim]
+  let outSeq : Tensor { shape := #[1, seq, cfg.hiddenDim], dtype := .Float32, device := device } := (m.lstm.forward hSeq).reshape #[1, seq, cfg.hiddenDim] (by rw [Nat.mul_div_cancel' cfg.hiddenDimEven])
   seqToCF outSeq
 
 end TextEncoder
@@ -812,7 +841,7 @@ def forward {seq : Nat}
   for i in [:m.lstms.size] do
     let lstm := safeIndex m.lstms i
     let norm := safeIndex m.norms i
-    let ySeq : Tensor { shape := #[1, seq, cfg.hiddenDim], dtype := .Float32, device := device } := (BiLSTM.forward lstm (cfToSeq h)).reshapeChecked #[1, seq, cfg.hiddenDim]
+    let ySeq : Tensor { shape := #[1, seq, cfg.hiddenDim], dtype := .Float32, device := device } := (BiLSTM.forward lstm (cfToSeq h)).reshape #[1, seq, cfg.hiddenDim] (by rw [Nat.mul_div_cancel' cfg.hiddenDimEven])
     let yCF : Tensor { shape := #[1, cfg.hiddenDim, seq], dtype := .Float32, device := device } := seqToCF ySeq
     let yNorm : Tensor { shape := #[1, cfg.hiddenDim, seq], dtype := .Float32, device := device } := AdaLayerNorm.forward norm yCF style
     h := catTo yNorm s 1
@@ -820,12 +849,51 @@ def forward {seq : Nat}
 
 end DurationEncoder
 
+/-- Residual path of an AdaIN block: identity when the channel counts agree, else a 1x1 conv. -/
+inductive Shortcut (inC outC : Nat) where
+  | identity (h : inC = outC)
+  | conv (c : WNConv1dParams (device := device) inC outC 1 1 0 1)
+
+instance {inC outC : Nat} : TensorStruct (Shortcut (device := device) inC outC) where
+  map f
+    | .identity h => .identity h
+    | .conv c => .conv (TensorStruct.map f c)
+  mapM f
+    | .identity h => pure (.identity h)
+    | .conv c => do pure (.conv (← TensorStruct.mapM f c))
+  zipWith f lhs rhs := match lhs, rhs with
+    | .conv x, .conv y => .conv (TensorStruct.zipWith f x y)
+    | lhs, _ => lhs
+  fold f init
+    | .identity _ => init
+    | .conv c => TensorStruct.fold f init c
+
+namespace Shortcut
+
+def init (inC outC : Nat) (device : Device := .CPU) : IO (Shortcut (device := device) inC outC) :=
+  if h : inC = outC then pure (.identity h)
+  else return .conv (← WNConv1dParams.init (device := device) inC outC 1 1 0 1)
+
+def forward {frames inC outC : Nat}
+    (m : Shortcut (device := device) inC outC)
+    (x : Tensor { shape := #[1, inC, frames], dtype := .Float32, device := device })
+    (hf : 0 < frames)
+    : Tensor { shape := #[1, outC, frames], dtype := .Float32, device := device } :=
+  match m with
+  | .identity h => Tensor.reshape x #[1, outC, frames] (by simp [h])
+  | .conv c => (c.forward x).reshape #[1, outC, frames] (by rw [convOutputSize_pointwise hf])
+
+end Shortcut
+
+instance {inC outC : Nat} : Inhabited (Shortcut (device := device) inC outC) :=
+  ⟨.conv default⟩
+
 structure AdainResBlk1dSame (inC outC styleDim : Nat) where
   conv1 : WNConv1dParams (device := device) inC outC 3 1 1 1
   conv2 : WNConv1dParams (device := device) outC outC 3 1 1 1
   norm1 : AdaIN1d (device := device) styleDim inC
   norm2 : AdaIN1d (device := device) styleDim outC
-  shortcut : Option (WNConv1dParams (device := device) inC outC 1 1 0 1) := none
+  shortcut : Shortcut (device := device) inC outC
   deriving TensorStruct, Inhabited
 
 namespace AdainResBlk1dSame
@@ -835,28 +903,24 @@ def init (inC outC styleDim : Nat) (device : Device := .CPU) : IO (AdainResBlk1d
   let conv2 ← WNConv1dParams.init (device := device) outC outC 3 1 1 1
   let norm1 ← AdaIN1d.init (device := device) styleDim inC
   let norm2 ← AdaIN1d.init (device := device) styleDim outC
-  let shortcut ←
-    if inC == outC then
-      pure none
-    else
-      pure (some (← WNConv1dParams.init (device := device) inC outC 1 1 0 1))
+  let shortcut ← Shortcut.init (device := device) inC outC
   pure { conv1, conv2, norm1, norm2, shortcut }
 
 def forward {frames inC outC styleDim : Nat}
     (m : AdainResBlk1dSame (device := device) inC outC styleDim)
     (x : Tensor { shape := #[1, inC, frames], dtype := .Float32, device := device })
     (style : Tensor { shape := #[1, styleDim], dtype := .Float32, device := device })
+    (hf : 0 < frames)
     : Tensor { shape := #[1, outC, frames], dtype := .Float32, device := device } :=
-  let shortcut : Tensor { shape := #[1, outC, frames], dtype := .Float32, device := device } :=
-    match m.shortcut with
-    | some sc => (sc.forward x).reshapeChecked #[1, outC, frames]
-    | none => Tensor.reshapeChecked x #[1, outC, frames]
+  let shortcut : Tensor { shape := #[1, outC, frames], dtype := .Float32, device := device } := m.shortcut.forward x hf
   let h0 : Tensor { shape := #[1, inC, frames], dtype := .Float32, device := device } := m.norm1.forward x style
   let h1 : Tensor { shape := #[1, inC, frames], dtype := .Float32, device := device } := leakyRelu h0 0.2
-  let h2 : Tensor { shape := #[1, outC, frames], dtype := .Float32, device := device } := (m.conv1.forward h1).reshapeChecked #[1, outC, frames]
+  let h2 : Tensor { shape := #[1, outC, frames], dtype := .Float32, device := device } := (m.conv1.forward h1).reshape #[1, outC, frames]
+    (by rw [convOutputSize_same hf (by decide)])
   let h3 : Tensor { shape := #[1, outC, frames], dtype := .Float32, device := device } := m.norm2.forward h2 style
   let h4 : Tensor { shape := #[1, outC, frames], dtype := .Float32, device := device } := leakyRelu h3 0.2
-  let h5 : Tensor { shape := #[1, outC, frames], dtype := .Float32, device := device } := (m.conv2.forward h4).reshapeChecked #[1, outC, frames]
+  let h5 : Tensor { shape := #[1, outC, frames], dtype := .Float32, device := device } := (m.conv2.forward h4).reshape #[1, outC, frames]
+    (by rw [convOutputSize_same hf (by decide)])
   (h5 + shortcut) / Float.sqrt 2.0
 
 end AdainResBlk1dSame
@@ -867,7 +931,7 @@ structure AdainResBlk1dUp (inC outC styleDim : Nat) where
   conv2 : WNConv1dParams (device := device) outC outC 3 1 1 1
   norm1 : AdaIN1d (device := device) styleDim inC
   norm2 : AdaIN1d (device := device) styleDim outC
-  shortcut : Option (WNConv1dParams (device := device) inC outC 1 1 0 1) := none
+  shortcut : Shortcut (device := device) inC outC
   deriving TensorStruct, Inhabited
 
 namespace AdainResBlk1dUp
@@ -878,30 +942,28 @@ def init (inC outC styleDim : Nat) (device : Device := .CPU) : IO (AdainResBlk1d
   let conv2 ← WNConv1dParams.init (device := device) outC outC 3 1 1 1
   let norm1 ← AdaIN1d.init (device := device) styleDim inC
   let norm2 ← AdaIN1d.init (device := device) styleDim outC
-  let shortcut ←
-    if inC == outC then
-      pure none
-    else
-      pure (some (← WNConv1dParams.init (device := device) inC outC 1 1 0 1))
+  let shortcut ← Shortcut.init (device := device) inC outC
   pure { pool, conv1, conv2, norm1, norm2, shortcut }
 
 def forward {frames inC outC styleDim : Nat}
     (m : AdainResBlk1dUp (device := device) inC outC styleDim)
     (x : Tensor { shape := #[1, inC, frames], dtype := .Float32, device := device })
     (style : Tensor { shape := #[1, styleDim], dtype := .Float32, device := device })
+    (hf : 0 < frames)
     : Tensor { shape := #[1, outC, 2 * frames], dtype := .Float32, device := device } :=
+  have h2f : 0 < 2 * frames := by omega
   let shortcut0 : Tensor { shape := #[1, inC, 2 * frames], dtype := .Float32, device := device } := (repeatNearest1d (scale := 2) x).reshape #[1, inC, 2 * frames]
-  let shortcut : Tensor { shape := #[1, outC, 2 * frames], dtype := .Float32, device := device } :=
-    match m.shortcut with
-    | some sc => (sc.forward shortcut0).reshapeChecked #[1, outC, 2 * frames]
-    | none => Tensor.reshapeChecked shortcut0 #[1, outC, 2 * frames]
+  let shortcut : Tensor { shape := #[1, outC, 2 * frames], dtype := .Float32, device := device } := m.shortcut.forward shortcut0 h2f
   let h0 : Tensor { shape := #[1, inC, frames], dtype := .Float32, device := device } := m.norm1.forward x style
   let h1 : Tensor { shape := #[1, inC, frames], dtype := .Float32, device := device } := leakyRelu h0 0.2
-  let h2 : Tensor { shape := #[1, inC, 2 * frames], dtype := .Float32, device := device } := (m.pool.forward h1).reshapeChecked #[1, inC, 2 * frames]
-  let h3 : Tensor { shape := #[1, outC, 2 * frames], dtype := .Float32, device := device } := (m.conv1.forward h2).reshapeChecked #[1, outC, 2 * frames]
+  let h2 : Tensor { shape := #[1, inC, 2 * frames], dtype := .Float32, device := device } := (m.pool.forward h1).reshape #[1, inC, 2 * frames]
+    (by rw [convTransposeOutputSize_double hf])
+  let h3 : Tensor { shape := #[1, outC, 2 * frames], dtype := .Float32, device := device } := (m.conv1.forward h2).reshape #[1, outC, 2 * frames]
+    (by rw [convOutputSize_same h2f (by decide)])
   let h4 : Tensor { shape := #[1, outC, 2 * frames], dtype := .Float32, device := device } := m.norm2.forward h3 style
   let h5 : Tensor { shape := #[1, outC, 2 * frames], dtype := .Float32, device := device } := leakyRelu h4 0.2
-  let h6 : Tensor { shape := #[1, outC, 2 * frames], dtype := .Float32, device := device } := (m.conv2.forward h5).reshapeChecked #[1, outC, 2 * frames]
+  let h6 : Tensor { shape := #[1, outC, 2 * frames], dtype := .Float32, device := device } := (m.conv2.forward h5).reshape #[1, outC, 2 * frames]
+    (by rw [convOutputSize_same h2f (by decide)])
   (h6 + shortcut) / Float.sqrt 2.0
 
 end AdainResBlk1dUp
@@ -937,6 +999,7 @@ def forward {frames channels kernel styleDim : Nat}
     (m : AdaINResBlock1 (device := device) channels kernel styleDim)
     (x : Tensor { shape := #[1, channels, frames], dtype := .Float32, device := device })
     (style : Tensor { shape := #[1, styleDim], dtype := .Float32, device := device })
+    (hf : 0 < frames) (hk : kernel % 2 = 1)
     : Tensor { shape := #[1, channels, frames], dtype := .Float32, device := device } := Id.run do
   let mut h := x
   for i in [:3] do
@@ -944,10 +1007,12 @@ def forward {frames channels kernel styleDim : Nat}
     let a2 := safeIndex m.alpha2 i
     let h1 := AdaIN1d.forward (safeIndex m.norms1 i) h style
     let h2 := snake1d h1 a1
-    let h3 : Tensor { shape := #[1, channels, frames], dtype := .Float32, device := device } := Tensor.reshapeChecked (Conv1dParams.forward (safeIndex m.convs1 i) h2) #[1, channels, frames]
+    let h3 : Tensor { shape := #[1, channels, frames], dtype := .Float32, device := device } := Tensor.reshape (Conv1dParams.forward (safeIndex m.convs1 i) h2) #[1, channels, frames]
+      (by rw [convOutputSize_same hf (by omega)])
     let h4 := AdaIN1d.forward (safeIndex m.norms2 i) h3 style
     let h5 := snake1d h4 a2
-    let h6 : Tensor { shape := #[1, channels, frames], dtype := .Float32, device := device } := Tensor.reshapeChecked (Conv1dParams.forward (safeIndex m.convs2 i) h5) #[1, channels, frames]
+    let h6 : Tensor { shape := #[1, channels, frames], dtype := .Float32, device := device } := Tensor.reshape (Conv1dParams.forward (safeIndex m.convs2 i) h5) #[1, channels, frames]
+      (by rw [convOutputSize_same hf (by omega)])
     h := h + h6
   h
 
@@ -999,26 +1064,30 @@ def durationLogits {seq : Nat}
     (m : ProsodyPredictor (device := device) cfg)
     (enc : Tensor { shape := #[1, cfg.hiddenDim + cfg.styleDim, seq], dtype := .Float32, device := device })
     : Tensor { shape := #[1, seq, cfg.maxDur], dtype := .Float32, device := device } :=
-  let hSeq : Tensor { shape := #[1, seq, cfg.hiddenDim], dtype := .Float32, device := device } := (m.lstm.forward (cfToSeq enc)).reshapeChecked #[1, seq, cfg.hiddenDim]
+  let hSeq : Tensor { shape := #[1, seq, cfg.hiddenDim], dtype := .Float32, device := device } := (m.lstm.forward (cfToSeq enc)).reshape #[1, seq, cfg.hiddenDim] (by rw [Nat.mul_div_cancel' cfg.hiddenDimEven])
   m.durationProj.forward3d hSeq
 
 def forwardF0N {frames : Nat}
     (m : ProsodyPredictor (device := device) cfg)
     (enc : Tensor { shape := #[1, cfg.hiddenDim + cfg.styleDim, frames], dtype := .Float32, device := device })
     (style : Tensor { shape := #[1, cfg.styleDim], dtype := .Float32, device := device })
+    (hf : 0 < frames)
     : Tensor { shape := #[1, 1, 2 * frames], dtype := .Float32, device := device } × Tensor { shape := #[1, 1, 2 * frames], dtype := .Float32, device := device } :=
-  let sharedSeq : Tensor { shape := #[1, frames, cfg.hiddenDim], dtype := .Float32, device := device } := (m.shared.forward (cfToSeq enc)).reshapeChecked #[1, frames, cfg.hiddenDim]
+  have h2f : 0 < 2 * frames := by omega
+  let sharedSeq : Tensor { shape := #[1, frames, cfg.hiddenDim], dtype := .Float32, device := device } := (m.shared.forward (cfToSeq enc)).reshape #[1, frames, cfg.hiddenDim] (by rw [Nat.mul_div_cancel' cfg.hiddenDimEven])
   let sharedCF : Tensor { shape := #[1, cfg.hiddenDim, frames], dtype := .Float32, device := device } := seqToCF sharedSeq
 
-  let f0a : Tensor { shape := #[1, cfg.hiddenDim, frames], dtype := .Float32, device := device } := m.f0Blk0.forward sharedCF style
-  let f0b : Tensor { shape := #[1, cfg.hiddenDim / 2, 2 * frames], dtype := .Float32, device := device } := m.f0Blk1.forward f0a style
-  let f0c : Tensor { shape := #[1, cfg.hiddenDim / 2, 2 * frames], dtype := .Float32, device := device } := m.f0Blk2.forward f0b style
-  let f0 : Tensor { shape := #[1, 1, 2 * frames], dtype := .Float32, device := device } := (m.f0Proj.forward f0c).reshapeChecked #[1, 1, 2 * frames]
+  let f0a : Tensor { shape := #[1, cfg.hiddenDim, frames], dtype := .Float32, device := device } := m.f0Blk0.forward sharedCF style hf
+  let f0b : Tensor { shape := #[1, cfg.hiddenDim / 2, 2 * frames], dtype := .Float32, device := device } := m.f0Blk1.forward f0a style hf
+  let f0c : Tensor { shape := #[1, cfg.hiddenDim / 2, 2 * frames], dtype := .Float32, device := device } := m.f0Blk2.forward f0b style h2f
+  let f0 : Tensor { shape := #[1, 1, 2 * frames], dtype := .Float32, device := device } := (m.f0Proj.forward f0c).reshape #[1, 1, 2 * frames]
+    (by rw [convOutputSize_pointwise h2f])
 
-  let na : Tensor { shape := #[1, cfg.hiddenDim, frames], dtype := .Float32, device := device } := m.nBlk0.forward sharedCF style
-  let nb : Tensor { shape := #[1, cfg.hiddenDim / 2, 2 * frames], dtype := .Float32, device := device } := m.nBlk1.forward na style
-  let nc : Tensor { shape := #[1, cfg.hiddenDim / 2, 2 * frames], dtype := .Float32, device := device } := m.nBlk2.forward nb style
-  let n : Tensor { shape := #[1, 1, 2 * frames], dtype := .Float32, device := device } := (m.nProj.forward nc).reshapeChecked #[1, 1, 2 * frames]
+  let na : Tensor { shape := #[1, cfg.hiddenDim, frames], dtype := .Float32, device := device } := m.nBlk0.forward sharedCF style hf
+  let nb : Tensor { shape := #[1, cfg.hiddenDim / 2, 2 * frames], dtype := .Float32, device := device } := m.nBlk1.forward na style hf
+  let nc : Tensor { shape := #[1, cfg.hiddenDim / 2, 2 * frames], dtype := .Float32, device := device } := m.nBlk2.forward nb style h2f
+  let n : Tensor { shape := #[1, 1, 2 * frames], dtype := .Float32, device := device } := (m.nProj.forward nc).reshape #[1, 1, 2 * frames]
+    (by rw [convOutputSize_pointwise h2f])
 
   (f0, n)
 
@@ -1034,189 +1103,231 @@ private def reflectPadLeft1 {channels frames : Nat}
       sliceTensor x 2 1 1
   Tensor.catManyChecked #[Tensor.packShape pad, Tensor.packShape x] 2 #[1, channels, frames + 1]
 
-private def harmonicMultipliers (harmonicCount : Nat) : Tensor { shape := #[harmonicCount + 1], dtype := .Float32, device := device } := Id.run do
-  let mut vals : Array Float := #[]
-  for i in [: (harmonicCount + 1)] do
-    vals := vals.push (i.toFloat + 1.0)
-  (Tensor.reshapeChecked (Tensor.fromFloatArray vals) #[harmonicCount + 1]).to device
+private def harmonicMultipliers (harmonicCount : Nat) : Tensor { shape := #[harmonicCount + 1], dtype := .Float32, device := device } :=
+  let vals : Array Float := Array.ofFn (n := harmonicCount + 1) fun i => i.val.toFloat + 1.0
+  (Tensor.fromFloatArrayShaped vals #[harmonicCount + 1] (by simp [vals])).to device
 
-structure AdaIN1dDyn (styleDim : Nat) where
-  fcWeight : ShapePackedTensor .Float32 device
-  fcBias : ShapePackedTensor .Float32 device
-  normWeight : ShapePackedTensor .Float32 device
-  normBias : ShapePackedTensor .Float32 device
+private theorem convOutputSize_noise {m S : Nat} (hm : 0 < m) (hS : 2 ≤ S) :
+    convOutputSize (m * S + 1) (2 * S) S ((S + 1) / 2) 1 = m := by
+  simp only [convOutputSize]
+  obtain ⟨q, rfl⟩ : ∃ q, m = q + 1 := ⟨m - 1, by omega⟩
+  have hr : 1 + (2 * ((S + 1) / 2) - S) < S := by omega
+  have hN : (q + 1) * S + 1 + 2 * ((S + 1) / 2) - (1 * (2 * S - 1) + 1)
+      = q * S + (1 + (2 * ((S + 1) / 2) - S)) := by
+    rw [Nat.succ_mul]; omega
+  rw [hN, Nat.mul_comm q S, Nat.mul_add_div (by omega), Nat.div_eq_of_lt hr]
+
+private theorem convTransposeOutputSize_upsample {L k r : Nat} (hL : 0 < L) (hr : 0 < r) (hrk : r ≤ k)
+    (hpar : 2 ∣ k - r) : convTransposeOutputSize L k r ((k - r) / 2) 0 1 = L * r := by
+  simp only [convTransposeOutputSize]
+  obtain ⟨g, rfl⟩ : ∃ g, L = g + 1 := ⟨L - 1, by omega⟩
+  obtain ⟨c, hc⟩ := hpar
+  have h1 : (g + 1) * r = g * r + r := by rw [Nat.add_mul, Nat.one_mul]
+  simp only [Nat.add_sub_cancel]
+  rw [h1]; omega
+
+namespace GeneratorConfig
+
+theorem prefix_zero (g : GeneratorConfig) : g.prefixUpsample 0 = 1 := by
+  simp [prefixUpsample]
+
+theorem stageInFrames_pos (g : GeneratorConfig) {b : Nat} (hb : 0 < b) (i : Nat) :
+    0 < g.stageInFrames b i :=
+  Nat.mul_pos hb (g.prefix_pos i)
+
+theorem stageOutFrames_pos (g : GeneratorConfig) {b : Nat} (hb : 0 < b) (i : Nat) :
+    0 < g.stageOutFrames b i := by
+  unfold stageOutFrames stageUpsampledFrames harFrames
+  split
+  · exact Nat.mul_pos hb (g.prefix_pos _)
+  · omega
+
+/-- The noise branch lands on the stage's output frame count. -/
+theorem noise_frames (g : GeneratorConfig) {b : Nat} (hb : 0 < b) (i : Nat) :
+    convOutputSize (g.harFrames b) (g.noiseKernel i) (g.noiseStride i) (g.noisePadding i) 1 =
+      g.stageOutFrames b i := by
+  by_cases h : i + 1 < g.upsampleRates.size
+  · simp only [noiseKernel, noiseStride, noisePadding, stageOutFrames, stageUpsampledFrames,
+      harFrames, if_pos h]
+    rw [← g.prefix_mul_suffix (i + 1),
+      show g.prefixUpsample (i + 1) * g.suffixUpsample (i + 1) * b + 1 =
+        b * g.prefixUpsample (i + 1) * g.suffixUpsample (i + 1) + 1 by
+          rw [Nat.mul_comm _ b, Nat.mul_assoc]]
+    exact convOutputSize_noise (Nat.mul_pos hb (g.prefix_pos _)) (g.suffix_ge_two h)
+  · simp only [noiseKernel, noiseStride, noisePadding, stageOutFrames, harFrames, if_neg h]
+    simp only [convOutputSize]; omega
+
+/-- The upsampling transposed convolution multiplies the frame count by the stage rate. -/
+theorem up_frames (g : GeneratorConfig) {b : Nat} (hb : 0 < b) {i : Nat}
+    (hi : i < g.upsampleRates.size) :
+    convTransposeOutputSize (g.stageInFrames b i) (g.upKernel i) (g.rate i)
+      ((g.upKernel i - g.rate i) / 2) 0 1 = g.stageUpsampledFrames b i := by
+  have hv := g.stagesValid.2 i hi
+  unfold upKernel rate
+  rw [convTransposeOutputSize_upsample (g.stageInFrames_pos hb i) (Nat.zero_lt_of_lt hv.1) hv.2.1 hv.2.2]
+  simp only [stageInFrames, stageUpsampledFrames, g.prefix_succ hi, rate, Nat.mul_assoc]
+
+theorem mid_frames (g : GeneratorConfig) (b : Nat) {i : Nat} (h : i + 1 < g.upsampleRates.size) :
+    g.stageOutFrames b i = g.stageInFrames b (i + 1) := by
+  simp only [stageOutFrames, stageUpsampledFrames, stageInFrames, if_pos h]
+
+theorem last_frames (g : GeneratorConfig) (b : Nat) {i : Nat} (h : i + 1 = g.upsampleRates.size) :
+    g.stageUpsampledFrames b i + 1 = g.stageOutFrames b i := by
+  simp only [stageOutFrames, if_neg (show ¬ i + 1 < g.upsampleRates.size by omega),
+    stageUpsampledFrames, harFrames]
+  rw [h, g.prefix_size, Nat.mul_comm]
+
+end GeneratorConfig
+
+/-- One dilated residual unit of a generator AdaIN block. -/
+structure GenResUnit (styleDim channels kernel dilation : Nat) where
+  conv1 : WNConv1dParams (device := device) channels channels kernel 1 ((kernel * dilation - dilation) / 2) dilation
+  conv2 : WNConv1dParams (device := device) channels channels kernel 1 ((kernel - 1) / 2) 1
+  norm1 : AdaIN1d (device := device) styleDim channels
+  norm2 : AdaIN1d (device := device) styleDim channels
+  alpha1 : Tensor { shape := #[1, channels, 1], dtype := .Float32, device := device }
+  alpha2 : Tensor { shape := #[1, channels, 1], dtype := .Float32, device := device }
   deriving TensorStruct, Inhabited
 
-namespace AdaIN1dDyn
+namespace GenResUnit
 
-def init (styleDim channels : Nat) (device : Device := .CPU) : IO (AdaIN1dDyn (device := device) styleDim) := do
-  let fc ← LinearNorm.init (device := device) styleDim (2 * channels)
-  let normWeight : Tensor { shape := #[channels], dtype := .Float32, device := device } ← Tensor.parameter (Tensor.ones #[channels] (device := device))
-  let normBias ← initBias (device := device) #[channels]
+def init (styleDim channels kernel dilation : Nat) (device : Device := .CPU) :
+    IO (GenResUnit (device := device) styleDim channels kernel dilation) := do
+  let conv1 ← WNConv1dParams.init (device := device) channels channels kernel 1 ((kernel * dilation - dilation) / 2) dilation
+  let conv2 ← WNConv1dParams.init (device := device) channels channels kernel 1 ((kernel - 1) / 2) 1
+  let norm1 ← AdaIN1d.init (device := device) styleDim channels
+  let norm2 ← AdaIN1d.init (device := device) styleDim channels
   pure {
-    fcWeight := Tensor.packShape fc.weight
-    fcBias := Tensor.packShape fc.bias
-    normWeight := Tensor.packShape normWeight
-    normBias := Tensor.packShape normBias
+    conv1, conv2, norm1, norm2
+    alpha1 := Tensor.ones #[1, channels, 1] (device := device)
+    alpha2 := Tensor.ones #[1, channels, 1] (device := device)
   }
 
-def forward {frames styleDim channels : Nat}
-    (m : AdaIN1dDyn (device := device) styleDim)
+def forward {frames styleDim channels kernel dilation : Nat}
+    (m : GenResUnit (device := device) styleDim channels kernel dilation)
     (x : Tensor { shape := #[1, channels, frames], dtype := .Float32, device := device })
     (style : Tensor { shape := #[1, styleDim], dtype := .Float32, device := device })
+    (hf : 0 < frames) (hk : kernel % 2 = 1)
     : Tensor { shape := #[1, channels, frames], dtype := .Float32, device := device } :=
-  let weight : Tensor { shape := #[2 * channels, styleDim], dtype := .Float32, device := device } := Tensor.reshapeChecked m.fcWeight.2 #[2 * channels, styleDim]
-  let bias : Tensor { shape := #[2 * channels], dtype := .Float32, device := device } := Tensor.reshapeChecked m.fcBias.2 #[2 * channels]
-  let h : Tensor { shape := #[1, 2 * channels], dtype := .Float32, device := device } := affine2d style weight bias
-  let gamma : Tensor { shape := #[1, channels, 1], dtype := .Float32, device := device } := Tensor.reshape (sliceTensor h 1 0 channels) #[1, channels, 1]
-  let beta : Tensor { shape := #[1, channels, 1], dtype := .Float32, device := device } := Tensor.reshape (sliceTensor h 1 channels channels) #[1, channels, 1]
-  let normWeight : Tensor { shape := #[channels], dtype := .Float32, device := device } := Tensor.reshapeChecked m.normWeight.2 #[channels]
-  let normBias : Tensor { shape := #[channels], dtype := .Float32, device := device } := Tensor.reshapeChecked m.normBias.2 #[channels]
-  let baseNorm := instanceNormCF x
-  let normW : Tensor { shape := #[1, channels, frames], dtype := .Float32, device := device } := Tensor.expand (Tensor.reshape normWeight #[1, channels, 1]) #[1, channels, frames]
-  let normB : Tensor { shape := #[1, channels, frames], dtype := .Float32, device := device } := Tensor.expand (Tensor.reshape normBias #[1, channels, 1]) #[1, channels, frames]
-  let normed : Tensor { shape := #[1, channels, frames], dtype := .Float32, device := device } := baseNorm * normW + normB
-  let g : Tensor { shape := #[1, channels, frames], dtype := .Float32, device := device } := Tensor.expand gamma #[1, channels, frames]
-  let b : Tensor { shape := #[1, channels, frames], dtype := .Float32, device := device } := Tensor.expand beta #[1, channels, frames]
-  affineShift normed g b
+  let h2 := snake1d (m.norm1.forward x style) m.alpha1
+  let h3 : Tensor { shape := #[1, channels, frames], dtype := .Float32, device := device } :=
+    (m.conv1.forward h2).reshape #[1, channels, frames]
+      (by rw [convOutputSize_same hf (dilated_same_pad hk)])
+  let h5 := snake1d (m.norm2.forward h3 style) m.alpha2
+  let h6 : Tensor { shape := #[1, channels, frames], dtype := .Float32, device := device } :=
+    (m.conv2.forward h5).reshape #[1, channels, frames]
+      (by rw [convOutputSize_same hf (by omega)])
+  x + h6
 
-end AdaIN1dDyn
+end GenResUnit
 
-structure WNConv1dDyn where
-  weightV : ShapePackedTensor .Float32 device
-  weightG : ShapePackedTensor .Float32 device
-  bias : ShapePackedTensor .Float32 device
-  kernel : Nat
-  stride : Nat := 1
-  padding : Nat := 0
-  dilation : Nat := 1
-  deriving TensorStruct, Inhabited
-
-namespace WNConv1dDyn
-
-def init (inC outC kernel : Nat)
-    (stride : Nat := 1)
-    (padding : Nat := 0)
-    (dilation : Nat := 1) (device : Device := .CPU)
-    : IO (WNConv1dDyn (device := device)) := do
-  let weightV ← initWeight (device := device) #[outC, inC, kernel] (inC * kernel)
-  let weightG : Tensor { shape := #[outC], dtype := .Float32, device := device } ← Tensor.parameter (normDim0_3d weightV)
-  let bias ← initBias (device := device) #[outC]
-  pure {
-    weightV := Tensor.packShape weightV
-    weightG := Tensor.packShape weightG
-    bias := Tensor.packShape bias
-    kernel, stride, padding, dilation
-  }
-
-def forward {batch frames inC outC : Nat}
-    (m : (WNConv1dDyn (device := device)))
-    (x : Tensor { shape := #[batch, inC, frames], dtype := .Float32, device := device })
-    : Tensor { shape := #[batch, outC, convOutputSize frames m.kernel m.stride m.padding m.dilation], dtype := .Float32, device := device } :=
-  let weightV : Tensor { shape := #[outC, inC, m.kernel], dtype := .Float32, device := device } := Tensor.reshapeChecked m.weightV.2 #[outC, inC, m.kernel]
-  let weightG : Tensor { shape := #[outC], dtype := .Float32, device := device } := Tensor.reshapeChecked m.weightG.2 #[outC]
-  let bias : Tensor { shape := #[outC], dtype := .Float32, device := device } := Tensor.reshapeChecked m.bias.2 #[outC]
-  let weight := applyWeightNormConv1d weightV weightG
-  let y0 : Tensor { shape := #[batch, outC, convOutputSize frames m.kernel m.stride m.padding m.dilation], dtype := .Float32, device := device } :=
-    Tensor.reshapeChecked (Tensor.conv1d x weight m.stride m.padding m.dilation) #[batch, outC, convOutputSize frames m.kernel m.stride m.padding m.dilation]
-  addBias3d y0 bias
-
-end WNConv1dDyn
-
-structure WNConvTranspose1dDyn where
-  weightV : ShapePackedTensor .Float32 device
-  weightG : ShapePackedTensor .Float32 device
-  bias : ShapePackedTensor .Float32 device
-  kernel : Nat
-  stride : Nat := 1
-  padding : Nat := 0
-  outputPadding : Nat := 0
-  dilation : Nat := 1
-  deriving TensorStruct, Inhabited
-
-namespace WNConvTranspose1dDyn
-
-def init (inC outC kernel : Nat)
-    (stride : Nat := 1)
-    (padding : Nat := 0)
-    (outputPadding : Nat := 0)
-    (dilation : Nat := 1) (device : Device := .CPU)
-    : IO (WNConvTranspose1dDyn (device := device)) := do
-  let fanIn := if outC * kernel == 0 then 1 else outC * kernel
-  let weightV ← initWeight (device := device) #[inC, outC, kernel] fanIn
-  let weightG : Tensor { shape := #[inC], dtype := .Float32, device := device } ← Tensor.parameter (normDim0_3d weightV)
-  let bias ← initBias (device := device) #[outC]
-  pure {
-    weightV := Tensor.packShape weightV
-    weightG := Tensor.packShape weightG
-    bias := Tensor.packShape bias
-    kernel, stride, padding, outputPadding, dilation
-  }
-
-def forward {batch frames inC outC : Nat}
-    (m : (WNConvTranspose1dDyn (device := device)))
-    (x : Tensor { shape := #[batch, inC, frames], dtype := .Float32, device := device })
-    : Tensor { shape := #[batch, outC, convTransposeOutputSize frames m.kernel m.stride m.padding m.outputPadding m.dilation], dtype := .Float32, device := device } :=
-  let weightV : Tensor { shape := #[inC, outC, m.kernel], dtype := .Float32, device := device } := Tensor.reshapeChecked m.weightV.2 #[inC, outC, m.kernel]
-  let weightG : Tensor { shape := #[inC], dtype := .Float32, device := device } := Tensor.reshapeChecked m.weightG.2 #[inC]
-  let bias : Tensor { shape := #[outC], dtype := .Float32, device := device } := Tensor.reshapeChecked m.bias.2 #[outC]
-  let weight := applyWeightNormTransConv1d weightV weightG
-  Tensor.reshapeChecked
-    (Tensor.convTranspose1d x weight bias m.stride m.padding m.outputPadding m.dilation)
-    #[batch, outC, convTransposeOutputSize frames m.kernel m.stride m.padding m.outputPadding m.dilation]
-
-end WNConvTranspose1dDyn
-
-structure GeneratorAdaINResBlock (styleDim : Nat) where
-  convs1 : Array (WNConv1dDyn (device := device))
-  convs2 : Array (WNConv1dDyn (device := device))
-  norms1 : Array (AdaIN1dDyn (device := device) styleDim)
-  norms2 : Array (AdaIN1dDyn (device := device) styleDim)
-  alpha1 : Array (ShapePackedTensor .Float32 device)
-  alpha2 : Array (ShapePackedTensor .Float32 device)
+/-- Generator AdaIN residual block: three dilated units sharing one odd kernel. -/
+structure GeneratorAdaINResBlock (styleDim channels kernel d0 d1 d2 : Nat) where
+  u0 : GenResUnit (device := device) styleDim channels kernel d0
+  u1 : GenResUnit (device := device) styleDim channels kernel d1
+  u2 : GenResUnit (device := device) styleDim channels kernel d2
   deriving TensorStruct, Inhabited
 
 namespace GeneratorAdaINResBlock
 
-def init (styleDim channels kernel : Nat) (dilations : Array Nat) (device : Device := .CPU) : IO (GeneratorAdaINResBlock (device := device) styleDim) := do
-  let mut convs1 : Array (WNConv1dDyn (device := device)) := #[]
-  let mut convs2 : Array (WNConv1dDyn (device := device)) := #[]
-  let mut norms1 : Array (AdaIN1dDyn (device := device) styleDim) := #[]
-  let mut norms2 : Array (AdaIN1dDyn (device := device) styleDim) := #[]
-  let mut alpha1 : Array (ShapePackedTensor .Float32 device) := #[]
-  let mut alpha2 : Array (ShapePackedTensor .Float32 device) := #[]
-  for i in [:3] do
-    let dilation := safeIndex dilations i
-    let padding := (kernel * dilation - dilation) / 2
-    convs1 := convs1.push (← WNConv1dDyn.init (device := device) channels channels kernel 1 padding dilation)
-    convs2 := convs2.push (← WNConv1dDyn.init (device := device) channels channels kernel 1 ((kernel - 1) / 2) 1)
-    norms1 := norms1.push (← AdaIN1dDyn.init (device := device) styleDim channels)
-    norms2 := norms2.push (← AdaIN1dDyn.init (device := device) styleDim channels)
-    alpha1 := alpha1.push (Tensor.packShape ((Tensor.ones #[1, channels, 1] (device := device))))
-    alpha2 := alpha2.push (Tensor.packShape ((Tensor.ones #[1, channels, 1] (device := device))))
-  pure { convs1, convs2, norms1, norms2, alpha1, alpha2 }
+def init (styleDim channels kernel d0 d1 d2 : Nat) (device : Device := .CPU) :
+    IO (GeneratorAdaINResBlock (device := device) styleDim channels kernel d0 d1 d2) := do
+  pure {
+    u0 := ← GenResUnit.init (device := device) styleDim channels kernel d0
+    u1 := ← GenResUnit.init (device := device) styleDim channels kernel d1
+    u2 := ← GenResUnit.init (device := device) styleDim channels kernel d2
+  }
 
-def forward {frames channels styleDim : Nat}
-    (m : GeneratorAdaINResBlock (device := device) styleDim)
+def forward {frames styleDim channels kernel d0 d1 d2 : Nat}
+    (m : GeneratorAdaINResBlock (device := device) styleDim channels kernel d0 d1 d2)
     (x : Tensor { shape := #[1, channels, frames], dtype := .Float32, device := device })
     (style : Tensor { shape := #[1, styleDim], dtype := .Float32, device := device })
-    : Tensor { shape := #[1, channels, frames], dtype := .Float32, device := device } := Id.run do
-  let mut h := x
-  for i in [:3] do
-    let a1 : Tensor { shape := #[1, channels, 1], dtype := .Float32, device := device } := Tensor.reshapeChecked (safeIndex m.alpha1 i).2 #[1, channels, 1]
-    let a2 : Tensor { shape := #[1, channels, 1], dtype := .Float32, device := device } := Tensor.reshapeChecked (safeIndex m.alpha2 i).2 #[1, channels, 1]
-    let h1 := AdaIN1dDyn.forward (safeIndex m.norms1 i) h style
-    let h2 := snake1d h1 a1
-    let h3 : Tensor { shape := #[1, channels, frames], dtype := .Float32, device := device } :=
-      Tensor.reshapeChecked (WNConv1dDyn.forward (inC := channels) (outC := channels) (safeIndex m.convs1 i) h2) #[1, channels, frames]
-    let h4 := AdaIN1dDyn.forward (safeIndex m.norms2 i) h3 style
-    let h5 := snake1d h4 a2
-    let h6 : Tensor { shape := #[1, channels, frames], dtype := .Float32, device := device } :=
-      Tensor.reshapeChecked (WNConv1dDyn.forward (inC := channels) (outC := channels) (safeIndex m.convs2 i) h5) #[1, channels, frames]
-    h := h + h6
-  h
+    (hf : 0 < frames) (hk : kernel % 2 = 1)
+    : Tensor { shape := #[1, channels, frames], dtype := .Float32, device := device } :=
+  m.u2.forward (m.u1.forward (m.u0.forward x style hf hk) style hf hk) style hf hk
 
 end GeneratorAdaINResBlock
+
+/-- Residual block of a generator stage, as configured by `resblock_kernel_sizes[j]`. -/
+abbrev GeneratorResBlock (g : GeneratorConfig) (styleDim channels j : Nat) :=
+  GeneratorAdaINResBlock (device := device) styleDim channels (g.resKernel j)
+    (g.resDilation j 0) (g.resDilation j 1) (g.resDilation j 2)
+
+/-- The residual blocks `j, j+1, …` of a generator stage; never empty. -/
+inductive StageResBlocks (g : GeneratorConfig) (styleDim channels : Nat) : Nat → Type where
+  | last {j : Nat} (hj : j < g.resblockKernelSizes.size)
+      (blk : GeneratorResBlock (device := device) g styleDim channels j) : StageResBlocks g styleDim channels j
+  | cons {j : Nat} (hj : j < g.resblockKernelSizes.size)
+      (blk : GeneratorResBlock (device := device) g styleDim channels j)
+      (rest : StageResBlocks g styleDim channels (j + 1)) : StageResBlocks g styleDim channels j
+
+namespace StageResBlocks
+
+variable {g : GeneratorConfig} {styleDim channels : Nat}
+
+def map (f : ∀ {σ}, Tensor σ → Tensor σ) :
+    {j : Nat} → StageResBlocks (device := device) g styleDim channels j → StageResBlocks (device := device) g styleDim channels j
+  | _, .last hj b => .last hj (TensorStruct.map f b)
+  | _, .cons hj b r => .cons hj (TensorStruct.map f b) (map f r)
+
+def mapM {m : Type → Type} [Monad m] (f : ∀ {σ}, Tensor σ → m (Tensor σ)) :
+    {j : Nat} → StageResBlocks (device := device) g styleDim channels j → m (StageResBlocks (device := device) g styleDim channels j)
+  | _, .last hj b => do pure (.last hj (← TensorStruct.mapM f b))
+  | _, .cons hj b r => do pure (.cons hj (← TensorStruct.mapM f b) (← mapM f r))
+
+def zipWith (f : ∀ {σ}, Tensor σ → Tensor σ → Tensor σ) :
+    {j : Nat} → StageResBlocks (device := device) g styleDim channels j →
+      StageResBlocks (device := device) g styleDim channels j → StageResBlocks (device := device) g styleDim channels j
+  | _, .last hj a, .last _ b => .last hj (TensorStruct.zipWith f a b)
+  | _, .cons hj a ra, .cons _ b rb => .cons hj (TensorStruct.zipWith f a b) (zipWith f ra rb)
+  | _, lhs, _ => lhs
+
+def fold {β : Type} (f : ∀ {σ}, Tensor σ → β → β) (init : β) :
+    {j : Nat} → StageResBlocks (device := device) g styleDim channels j → β
+  | _, .last _ b => TensorStruct.fold f init b
+  | _, .cons _ b r => fold f (TensorStruct.fold f init b) r
+
+instance {j : Nat} : TensorStruct (StageResBlocks (device := device) g styleDim channels j) where
+  map f x := map f x
+  mapM f x := mapM f x
+  zipWith f x y := zipWith f x y
+  fold f init x := fold f init x
+
+def init (g : GeneratorConfig) (styleDim channels : Nat) (device : Device := .CPU) :
+    (j : Nat) → j < g.resblockKernelSizes.size → IO (StageResBlocks (device := device) g styleDim channels j)
+  | j, hj => do
+    let blk ← GeneratorAdaINResBlock.init (device := device) styleDim channels (g.resKernel j)
+      (g.resDilation j 0) (g.resDilation j 1) (g.resDilation j 2)
+    if hNext : j + 1 < g.resblockKernelSizes.size then
+      pure (.cons hj blk (← init g styleDim channels device (j + 1) hNext))
+    else
+      pure (.last hj blk)
+termination_by j => g.resblockKernelSizes.size - j
+
+private def accumulate {frames : Nat}
+    (x : Tensor { shape := #[1, channels, frames], dtype := .Float32, device := device })
+    (style : Tensor { shape := #[1, styleDim], dtype := .Float32, device := device })
+    (hf : 0 < frames)
+    (acc : Tensor { shape := #[1, channels, frames], dtype := .Float32, device := device }) (count : Nat) :
+    {j : Nat} → StageResBlocks (device := device) g styleDim channels j →
+      Tensor { shape := #[1, channels, frames], dtype := .Float32, device := device } × Nat
+  | _, .last hj b => (acc + b.forward x style hf (g.resblocksValid.2 _ hj), count + 1)
+  | _, .cons hj b r => accumulate x style hf (acc + b.forward x style hf (g.resblocksValid.2 _ hj)) (count + 1) r
+
+/-- Mean of the block outputs, summed left to right. -/
+def forwardMean {frames j : Nat}
+    (blocks : StageResBlocks (device := device) g styleDim channels j)
+    (x : Tensor { shape := #[1, channels, frames], dtype := .Float32, device := device })
+    (style : Tensor { shape := #[1, styleDim], dtype := .Float32, device := device })
+    (hf : 0 < frames)
+    : Tensor { shape := #[1, channels, frames], dtype := .Float32, device := device } :=
+  let (sum, count) :=
+    match blocks with
+    | .last hj b => (b.forward x style hf (g.resblocksValid.2 _ hj), 1)
+    | .cons hj b r => accumulate x style hf (b.forward x style hf (g.resblocksValid.2 _ hj)) 1 r
+  sum / count.toFloat
+
+end StageResBlocks
 
 structure SourceModuleHnNSF (cfg : KittenTTSConfig) where
   linear : LinearNorm (device := device) (cfg.generator.harmonicCount + 1) 1
@@ -1279,12 +1390,31 @@ def forward {baseFrames : Nat}
 
 end SourceModuleHnNSF
 
-structure GeneratorStage (styleDim : Nat) where
-  up : (WNConvTranspose1dDyn (device := device))
-  noiseConv : (WNConv1dDyn (device := device))
-  noiseRes : GeneratorAdaINResBlock (device := device) styleDim
-  resBlocks : Array (GeneratorAdaINResBlock (device := device) styleDim)
-  deriving TensorStruct, Inhabited
+namespace GeneratorConfig
+
+/-- Kernel of a stage's noise residual block. -/
+def noiseResKernel (g : GeneratorConfig) (i : Nat) : Nat :=
+  if i + 1 < g.upsampleRates.size then 7 else 11
+
+theorem noiseResKernel_odd (g : GeneratorConfig) (i : Nat) : g.noiseResKernel i % 2 = 1 := by
+  unfold noiseResKernel; split <;> decide
+
+end GeneratorConfig
+
+/-- Upsample stage `i` of the generator, typed by the channel counts and kernels the config gives it. -/
+structure GeneratorStage (cfg : KittenTTSConfig) (i : Nat) where
+  up : WNConvTranspose1dParams (device := device)
+    (GeneratorConfig.stageInChannels cfg.generator i) (GeneratorConfig.stageOutChannels cfg.generator i)
+    (GeneratorConfig.upKernel cfg.generator i) (GeneratorConfig.rate cfg.generator i)
+    ((GeneratorConfig.upKernel cfg.generator i - GeneratorConfig.rate cfg.generator i) / 2) 0 1
+  noiseConv : WNConv1dParams (device := device)
+    (GeneratorConfig.stftFeatureChannels cfg.generator) (GeneratorConfig.stageOutChannels cfg.generator i)
+    (GeneratorConfig.noiseKernel cfg.generator i) (GeneratorConfig.noiseStride cfg.generator i)
+    (GeneratorConfig.noisePadding cfg.generator i) 1
+  noiseRes : GeneratorAdaINResBlock (device := device) cfg.styleDim
+    (GeneratorConfig.stageOutChannels cfg.generator i) (GeneratorConfig.noiseResKernel cfg.generator i) 1 3 5
+  resBlocks : StageResBlocks (device := device) cfg.generator cfg.styleDim (GeneratorConfig.stageOutChannels cfg.generator i) 0
+  deriving TensorStruct
 
 structure GeneratorStageDebugOutput where
   xSource : ShapePackedTensor .Float32 device
@@ -1304,10 +1434,128 @@ structure GeneratorDebugOutput where
   audio : ShapePackedTensor .Float32 device
   deriving TensorStruct, Inhabited
 
+namespace GeneratorStage
+
+def init (cfg : KittenTTSConfig) (i : Nat) (device : Device := .CPU) : IO (GeneratorStage (device := device) cfg i) := do
+  let g := cfg.generator
+  let inC := GeneratorConfig.stageInChannels g i
+  let outC := GeneratorConfig.stageOutChannels g i
+  let kernel := GeneratorConfig.upKernel g i
+  let stride := GeneratorConfig.rate g i
+  pure {
+    up := ← WNConvTranspose1dParams.init (device := device) inC outC kernel stride ((kernel - stride) / 2) 0 1
+    noiseConv := ← WNConv1dParams.init (device := device) (GeneratorConfig.stftFeatureChannels g) outC
+      (GeneratorConfig.noiseKernel g i) (GeneratorConfig.noiseStride g i) (GeneratorConfig.noisePadding g i) 1
+    noiseRes := ← GeneratorAdaINResBlock.init (device := device) cfg.styleDim outC (GeneratorConfig.noiseResKernel g i) 1 3 5
+    resBlocks := ← StageResBlocks.init (device := device) g cfg.styleDim outC 0 g.resblocksValid.1
+  }
+
+def forward {i baseFrames : Nat}
+    (st : GeneratorStage (device := device) cfg i)
+    (hi : i < cfg.generator.upsampleRates.size) (hb : 0 < baseFrames)
+    (x : Tensor { shape := #[1, GeneratorConfig.stageInChannels cfg.generator i, GeneratorConfig.stageInFrames cfg.generator baseFrames i], dtype := .Float32, device := device })
+    (har : Tensor { shape := #[1, GeneratorConfig.stftFeatureChannels cfg.generator, GeneratorConfig.harFrames cfg.generator baseFrames], dtype := .Float32, device := device })
+    (style : Tensor { shape := #[1, cfg.styleDim], dtype := .Float32, device := device })
+    : Tensor { shape := #[1, GeneratorConfig.stageOutChannels cfg.generator i, GeneratorConfig.stageOutFrames cfg.generator baseFrames i], dtype := .Float32, device := device } ×
+      GeneratorStageDebugOutput (device := device) :=
+  let outC := GeneratorConfig.stageOutChannels cfg.generator i
+  let outFrames := GeneratorConfig.stageOutFrames cfg.generator baseFrames i
+  have hOut : 0 < outFrames := cfg.generator.stageOutFrames_pos hb i
+  let xAct := leakyRelu x 0.1
+  let xSource1 : Tensor { shape := #[1, outC, outFrames], dtype := .Float32, device := device } :=
+    (st.noiseConv.forward har).reshape #[1, outC, outFrames] (by rw [cfg.generator.noise_frames hb i])
+  let xSource := st.noiseRes.forward xSource1 style hOut (cfg.generator.noiseResKernel_odd i)
+  let xUp0 := st.up.forward xAct
+  let xUp : Tensor { shape := #[1, outC, outFrames], dtype := .Float32, device := device } :=
+    if hMid : i + 1 < cfg.generator.upsampleRates.size then
+      xUp0.reshape #[1, outC, outFrames]
+        (by rw [cfg.generator.up_frames hb hi]; simp only [outC, outFrames, GeneratorConfig.stageOutFrames, if_pos hMid])
+    else
+      (reflectPadLeft1 xUp0).reshape #[1, outC, outFrames]
+        (by rw [cfg.generator.up_frames hb hi, cfg.generator.last_frames baseFrames (by omega)])
+  let xMix := xUp + xSource
+  let xOut := st.resBlocks.forwardMean xMix style hOut
+  (xOut, {
+    xSource := Tensor.packShape xSource
+    xUp := Tensor.packShape xUp
+    xMix := Tensor.packShape xMix
+    xOut := Tensor.packShape xOut
+  })
+
+end GeneratorStage
+
+/-- Generator stages `i, i+1, …` through the last configured stage. -/
+inductive GeneratorStages (cfg : KittenTTSConfig) : Nat → Type where
+  | last {i : Nat} (h : i + 1 = cfg.generator.upsampleRates.size)
+      (stage : GeneratorStage (device := device) cfg i) : GeneratorStages cfg i
+  | cons {i : Nat} (h : i + 1 < cfg.generator.upsampleRates.size)
+      (stage : GeneratorStage (device := device) cfg i) (rest : GeneratorStages cfg (i + 1)) : GeneratorStages cfg i
+
+namespace GeneratorStages
+
+def map (f : ∀ {σ}, Tensor σ → Tensor σ) :
+    {i : Nat} → GeneratorStages (device := device) cfg i → GeneratorStages (device := device) cfg i
+  | _, .last h s => .last h (TensorStruct.map f s)
+  | _, .cons h s r => .cons h (TensorStruct.map f s) (map f r)
+
+def mapM {m : Type → Type} [Monad m] (f : ∀ {σ}, Tensor σ → m (Tensor σ)) :
+    {i : Nat} → GeneratorStages (device := device) cfg i → m (GeneratorStages (device := device) cfg i)
+  | _, .last h s => do pure (.last h (← TensorStruct.mapM f s))
+  | _, .cons h s r => do pure (.cons h (← TensorStruct.mapM f s) (← mapM f r))
+
+def zipWith (f : ∀ {σ}, Tensor σ → Tensor σ → Tensor σ) :
+    {i : Nat} → GeneratorStages (device := device) cfg i → GeneratorStages (device := device) cfg i →
+      GeneratorStages (device := device) cfg i
+  | _, .last h a, .last _ b => .last h (TensorStruct.zipWith f a b)
+  | _, .cons h a ra, .cons _ b rb => .cons h (TensorStruct.zipWith f a b) (zipWith f ra rb)
+  | _, lhs, _ => lhs
+
+def fold {β : Type} (f : ∀ {σ}, Tensor σ → β → β) (init : β) :
+    {i : Nat} → GeneratorStages (device := device) cfg i → β
+  | _, .last _ s => TensorStruct.fold f init s
+  | _, .cons _ s r => fold f (TensorStruct.fold f init s) r
+
+instance {i : Nat} : TensorStruct (GeneratorStages (device := device) cfg i) where
+  map f x := map f x
+  mapM f x := mapM f x
+  zipWith f x y := zipWith f x y
+  fold f init x := fold f init x
+
+def init (cfg : KittenTTSConfig) (device : Device := .CPU) :
+    (i : Nat) → i < cfg.generator.upsampleRates.size → IO (GeneratorStages (device := device) cfg i)
+  | i, hi => do
+    let stage ← GeneratorStage.init (device := device) cfg i
+    if hNext : i + 1 < cfg.generator.upsampleRates.size then
+      pure (.cons hNext stage (← init cfg device (i + 1) hNext))
+    else
+      pure (.last (by omega) stage)
+termination_by i => cfg.generator.upsampleRates.size - i
+
+/-- Run stages `i, …`, returning the last stage's output and every stage's debug capture. -/
+def run {baseFrames : Nat} (hb : 0 < baseFrames)
+    (har : Tensor { shape := #[1, GeneratorConfig.stftFeatureChannels cfg.generator, GeneratorConfig.harFrames cfg.generator baseFrames], dtype := .Float32, device := device })
+    (style : Tensor { shape := #[1, cfg.styleDim], dtype := .Float32, device := device }) :
+    {i : Nat} → GeneratorStages (device := device) cfg i →
+      Tensor { shape := #[1, GeneratorConfig.stageInChannels cfg.generator i, GeneratorConfig.stageInFrames cfg.generator baseFrames i], dtype := .Float32, device := device } →
+      Tensor { shape := #[1, GeneratorConfig.finalChannels cfg.generator, GeneratorConfig.harFrames cfg.generator baseFrames], dtype := .Float32, device := device } ×
+        Array (GeneratorStageDebugOutput (device := device))
+  | i, .last h st, x =>
+    let (y, d) := st.forward (by omega) hb x har style
+    (y.reshape #[1, GeneratorConfig.finalChannels cfg.generator, GeneratorConfig.harFrames cfg.generator baseFrames]
+      (by rw [cfg.generator.finalChannels_last h]
+          simp only [GeneratorConfig.stageOutFrames, if_neg (show ¬ (i + 1 < cfg.generator.upsampleRates.size) by omega)]), #[d])
+  | _, .cons h st rest, x =>
+    let (y, d) := st.forward (by omega) hb x har style
+    let (out, ds) := run hb har style rest
+      (y.reshape _ (by rw [cfg.generator.mid_frames baseFrames h]; rfl))
+    (out, #[d] ++ ds)
+
+end GeneratorStages
+
 structure Generator (cfg : KittenTTSConfig) where
   source : SourceModuleHnNSF (device := device) cfg
-  stages : Array (GeneratorStage (device := device) cfg.styleDim)
-  convPost : (WNConv1dDyn (device := device))
+  stages : GeneratorStages (device := device) cfg 0
+  convPost : WNConv1dParams (device := device) (GeneratorConfig.finalChannels cfg.generator) (cfg.generator.genIstftNFft + 2) 7 1 3 1
   window : Tensor { shape := #[cfg.generator.genIstftNFft], dtype := .Float32, device := device }
   deriving TensorStruct
 
@@ -1345,41 +1593,13 @@ private def buildHarFeatures {baseFrames : Nat}
     Tensor.reshape mag #[1, GeneratorConfig.freqBins cfg.generator, GeneratorConfig.harFrames cfg.generator baseFrames]
   let phase3 : Tensor { shape := #[1, GeneratorConfig.freqBins cfg.generator, GeneratorConfig.harFrames cfg.generator baseFrames], dtype := .Float32, device := device } :=
     Tensor.reshape phase #[1, GeneratorConfig.freqBins cfg.generator, GeneratorConfig.harFrames cfg.generator baseFrames]
-  (catTo mag3 phase3 1).reshapeChecked #[1, GeneratorConfig.stftFeatureChannels cfg.generator, GeneratorConfig.harFrames cfg.generator baseFrames]
+  (catTo mag3 phase3 1).reshape #[1, GeneratorConfig.stftFeatureChannels cfg.generator, GeneratorConfig.harFrames cfg.generator baseFrames]
+    (by simp [Nat.two_mul])
 
 def init (cfg : KittenTTSConfig) (device : Device := .CPU) : IO (Generator (device := device) cfg) := do
   let source ← SourceModuleHnNSF.init (device := device) cfg
-  let mut stages : Array (GeneratorStage (device := device) cfg.styleDim) := #[]
-  for i in [:cfg.generator.upsampleRates.size] do
-    let inC := GeneratorConfig.stageInChannels cfg.generator i
-    let outC := GeneratorConfig.stageOutChannels cfg.generator i
-    let stride := safeIndex cfg.generator.upsampleRates i
-    let kernel := safeIndex cfg.generator.upsampleKernelSizes i
-    let up ← WNConvTranspose1dDyn.init (device := device) inC outC kernel stride ((kernel - stride) / 2) 0 1
-    let noiseConv ←
-      WNConv1dDyn.init (device := device)
-        (GeneratorConfig.stftFeatureChannels cfg.generator)
-        outC
-        (GeneratorConfig.noiseKernel cfg.generator i)
-        (GeneratorConfig.noiseStride cfg.generator i)
-        (GeneratorConfig.noisePadding cfg.generator i)
-        1
-    let noiseKernel := if i + 1 < cfg.generator.upsampleRates.size then 7 else 11
-    let noiseRes ← GeneratorAdaINResBlock.init (device := device) cfg.styleDim outC noiseKernel #[1, 3, 5]
-    let mut resBlocks : Array (GeneratorAdaINResBlock (device := device) cfg.styleDim) := #[]
-    for j in [:cfg.generator.resblockKernelSizes.size] do
-      let blockKernel := safeIndex cfg.generator.resblockKernelSizes j
-      let blockDilations := safeIndex cfg.generator.resblockDilationSizes j
-      resBlocks := resBlocks.push (← GeneratorAdaINResBlock.init (device := device) cfg.styleDim outC blockKernel blockDilations)
-    stages := stages.push { up, noiseConv, noiseRes, resBlocks }
-  let convPost ←
-    WNConv1dDyn.init (device := device)
-      (GeneratorConfig.finalChannels cfg.generator)
-      (cfg.generator.genIstftNFft + 2)
-      7
-      1
-      3
-      1
+  let stages ← GeneratorStages.init (device := device) cfg 0 cfg.generator.stagesValid.1
+  let convPost ← WNConv1dParams.init (device := device) (GeneratorConfig.finalChannels cfg.generator) (cfg.generator.genIstftNFft + 2) 7 1 3 1
   let window := (Tensor.hannWindow cfg.generator.genIstftNFft).to device
   pure { source, stages, convPost, window }
 
@@ -1388,6 +1608,7 @@ def debugForward {baseFrames : Nat}
     (x : Tensor { shape := #[1, KittenTTSConfig.decoderChannels cfg, baseFrames], dtype := .Float32, device := device })
     (style : Tensor { shape := #[1, cfg.styleDim], dtype := .Float32, device := device })
     (f0Curve : Tensor { shape := #[1, 1, baseFrames], dtype := .Float32, device := device })
+    (hb : 0 < baseFrames)
     : IO (GeneratorDebugOutput (device := device)) := do
   let f0Up : Tensor { shape := #[1, 1, GeneratorConfig.waveSamples cfg.generator baseFrames], dtype := .Float32, device := device } :=
     repeatNearest1d (scale := GeneratorConfig.sourceUpsample cfg.generator) f0Curve
@@ -1398,52 +1619,15 @@ def debugForward {baseFrames : Nat}
   let har : Tensor { shape := #[1, GeneratorConfig.stftFeatureChannels cfg.generator, GeneratorConfig.harFrames cfg.generator baseFrames], dtype := .Float32, device := device } :=
     buildHarFeatures m har1d
 
-  let mut xDyn : ShapePackedTensor .Float32 device := Tensor.packShape x
-  let mut stageOutputs : Array (GeneratorStageDebugOutput (device := device)) := #[]
-  for i in [:m.stages.size] do
-    let stage := safeIndex m.stages i
-    let inC := GeneratorConfig.stageInChannels cfg.generator i
-    let outC := GeneratorConfig.stageOutChannels cfg.generator i
-    let inFrames := GeneratorConfig.stageInFrames cfg.generator baseFrames i
-    let outFrames := GeneratorConfig.stageOutFrames cfg.generator baseFrames i
-    let xIn : Tensor { shape := #[1, inC, inFrames], dtype := .Float32, device := device } := Tensor.reshapeChecked xDyn.2 #[1, inC, inFrames]
-    let xAct : Tensor { shape := #[1, inC, inFrames], dtype := .Float32, device := device } := leakyRelu xIn 0.1
-    let xSource0 : Tensor { shape := #[1, outC, convOutputSize (GeneratorConfig.harFrames cfg.generator baseFrames) stage.noiseConv.kernel stage.noiseConv.stride stage.noiseConv.padding stage.noiseConv.dilation], dtype := .Float32, device := device } :=
-      stage.noiseConv.forward har
-    let xSource1 : Tensor { shape := #[1, outC, outFrames], dtype := .Float32, device := device } := Tensor.reshapeChecked xSource0 #[1, outC, outFrames]
-    let xSource : Tensor { shape := #[1, outC, outFrames], dtype := .Float32, device := device } := stage.noiseRes.forward xSource1 style
-    let xUp0 : Tensor { shape := #[1, outC, convTransposeOutputSize inFrames stage.up.kernel stage.up.stride stage.up.padding stage.up.outputPadding stage.up.dilation], dtype := .Float32, device := device } :=
-      stage.up.forward xAct
-    let xUp : Tensor { shape := #[1, outC, outFrames], dtype := .Float32, device := device } :=
-      if i + 1 < m.stages.size then
-        Tensor.reshapeChecked xUp0 #[1, outC, outFrames]
-      else
-        (reflectPadLeft1 xUp0).reshapeChecked #[1, outC, outFrames]
-    let xMix : Tensor { shape := #[1, outC, outFrames], dtype := .Float32, device := device } := xUp + xSource
-    let first : Tensor { shape := #[1, outC, outFrames], dtype := .Float32, device := device } := (safeIndex stage.resBlocks 0).forward xMix style
-    let mut acc := first
-    for j in [1:stage.resBlocks.size] do
-      acc := acc + (safeIndex stage.resBlocks j).forward xMix style
-    let xOut : Tensor { shape := #[1, outC, outFrames], dtype := .Float32, device := device } := acc / stage.resBlocks.size.toFloat
-    stageOutputs := stageOutputs.push {
-      xSource := Tensor.packShape xSource
-      xUp := Tensor.packShape xUp
-      xMix := Tensor.packShape xMix
-      xOut := Tensor.packShape xOut
-    }
-    xDyn := Tensor.packShape xOut
-
-  let xFinal : Tensor { shape := #[1, GeneratorConfig.finalChannels cfg.generator, GeneratorConfig.harFrames cfg.generator baseFrames], dtype := .Float32, device := device } :=
-    Tensor.reshapeChecked xDyn.2 #[1, GeneratorConfig.finalChannels cfg.generator, GeneratorConfig.harFrames cfg.generator baseFrames]
+  let x0 : Tensor { shape := #[1, GeneratorConfig.stageInChannels cfg.generator 0, GeneratorConfig.stageInFrames cfg.generator baseFrames 0], dtype := .Float32, device := device } :=
+    x.reshape _ (by
+      simp only [KittenTTSConfig.decoderChannels, cfg.decoderMatchesGenerator, cfg.generator.stageInChannels_zero,
+        GeneratorConfig.stageInFrames, cfg.generator.prefix_zero, Nat.mul_one])
+  let (xFinal, stageOutputs) := m.stages.run hb har style x0
   let postIn : Tensor { shape := #[1, GeneratorConfig.finalChannels cfg.generator, GeneratorConfig.harFrames cfg.generator baseFrames], dtype := .Float32, device := device } := leakyRelu xFinal 0.01
   let post : Tensor { shape := #[1, cfg.generator.genIstftNFft + 2, GeneratorConfig.harFrames cfg.generator baseFrames], dtype := .Float32, device := device } :=
-    Tensor.reshapeChecked
-      (WNConv1dDyn.forward
-        (inC := GeneratorConfig.finalChannels cfg.generator)
-        (outC := cfg.generator.genIstftNFft + 2)
-        m.convPost
-        postIn)
-      #[1, cfg.generator.genIstftNFft + 2, GeneratorConfig.harFrames cfg.generator baseFrames]
+    (m.convPost.forward postIn).reshape _
+      (by rw [convOutputSize_same (by simp [GeneratorConfig.harFrames]) (by decide)])
 
   let freqBins := GeneratorConfig.freqBins cfg.generator
   let specLog : Tensor { shape := #[1, GeneratorConfig.freqBins cfg.generator, GeneratorConfig.harFrames cfg.generator baseFrames], dtype := .Float32, device := device } :=
@@ -1490,86 +1674,9 @@ def forward {baseFrames : Nat}
     (x : Tensor { shape := #[1, KittenTTSConfig.decoderChannels cfg, baseFrames], dtype := .Float32, device := device })
     (style : Tensor { shape := #[1, cfg.styleDim], dtype := .Float32, device := device })
     (f0Curve : Tensor { shape := #[1, 1, baseFrames], dtype := .Float32, device := device })
+    (hb : 0 < baseFrames)
     : IO (ShapePackedTensor .Float32 device) := do
-  let f0Up : Tensor { shape := #[1, 1, GeneratorConfig.waveSamples cfg.generator baseFrames], dtype := .Float32, device := device } :=
-    repeatNearest1d (scale := GeneratorConfig.sourceUpsample cfg.generator) f0Curve
-  let f0Seq : Tensor { shape := #[1, GeneratorConfig.waveSamples cfg.generator baseFrames, 1], dtype := .Float32, device := device } := cfToSeq f0Up
-  let (harSource, _noiseSource, _uv) ← m.source.forward f0Seq
-  let har1d : Tensor { shape := #[GeneratorConfig.waveSamples cfg.generator baseFrames], dtype := .Float32, device := device } :=
-    Tensor.reshape harSource #[GeneratorConfig.waveSamples cfg.generator baseFrames]
-  let har : Tensor { shape := #[1, GeneratorConfig.stftFeatureChannels cfg.generator, GeneratorConfig.harFrames cfg.generator baseFrames], dtype := .Float32, device := device } :=
-    buildHarFeatures m har1d
-
-  let mut xDyn : ShapePackedTensor .Float32 device := Tensor.packShape x
-  for i in [:m.stages.size] do
-    let stage := safeIndex m.stages i
-    let inC := GeneratorConfig.stageInChannels cfg.generator i
-    let outC := GeneratorConfig.stageOutChannels cfg.generator i
-    let inFrames := GeneratorConfig.stageInFrames cfg.generator baseFrames i
-    let outFrames := GeneratorConfig.stageOutFrames cfg.generator baseFrames i
-    let xIn : Tensor { shape := #[1, inC, inFrames], dtype := .Float32, device := device } := Tensor.reshapeChecked xDyn.2 #[1, inC, inFrames]
-    let xAct : Tensor { shape := #[1, inC, inFrames], dtype := .Float32, device := device } := leakyRelu xIn 0.1
-    let xSource0 : Tensor { shape := #[1, outC, convOutputSize (GeneratorConfig.harFrames cfg.generator baseFrames) stage.noiseConv.kernel stage.noiseConv.stride stage.noiseConv.padding stage.noiseConv.dilation], dtype := .Float32, device := device } :=
-      stage.noiseConv.forward har
-    let xSource1 : Tensor { shape := #[1, outC, outFrames], dtype := .Float32, device := device } := Tensor.reshapeChecked xSource0 #[1, outC, outFrames]
-    let xSource : Tensor { shape := #[1, outC, outFrames], dtype := .Float32, device := device } := stage.noiseRes.forward xSource1 style
-    let xUp0 : Tensor { shape := #[1, outC, convTransposeOutputSize inFrames stage.up.kernel stage.up.stride stage.up.padding stage.up.outputPadding stage.up.dilation], dtype := .Float32, device := device } :=
-      stage.up.forward xAct
-    let xUp : Tensor { shape := #[1, outC, outFrames], dtype := .Float32, device := device } :=
-      if i + 1 < m.stages.size then
-        Tensor.reshapeChecked xUp0 #[1, outC, outFrames]
-      else
-        (reflectPadLeft1 xUp0).reshapeChecked #[1, outC, outFrames]
-    let xMix : Tensor { shape := #[1, outC, outFrames], dtype := .Float32, device := device } := xUp + xSource
-    let first : Tensor { shape := #[1, outC, outFrames], dtype := .Float32, device := device } := (safeIndex stage.resBlocks 0).forward xMix style
-    let mut acc := first
-    for j in [1:stage.resBlocks.size] do
-      acc := acc + (safeIndex stage.resBlocks j).forward xMix style
-    let xOut : Tensor { shape := #[1, outC, outFrames], dtype := .Float32, device := device } := acc / stage.resBlocks.size.toFloat
-    xDyn := Tensor.packShape xOut
-
-  let xFinal : Tensor { shape := #[1, GeneratorConfig.finalChannels cfg.generator, GeneratorConfig.harFrames cfg.generator baseFrames], dtype := .Float32, device := device } :=
-    Tensor.reshapeChecked xDyn.2 #[1, GeneratorConfig.finalChannels cfg.generator, GeneratorConfig.harFrames cfg.generator baseFrames]
-  let postIn : Tensor { shape := #[1, GeneratorConfig.finalChannels cfg.generator, GeneratorConfig.harFrames cfg.generator baseFrames], dtype := .Float32, device := device } := leakyRelu xFinal 0.01
-  let post : Tensor { shape := #[1, cfg.generator.genIstftNFft + 2, GeneratorConfig.harFrames cfg.generator baseFrames], dtype := .Float32, device := device } :=
-    Tensor.reshapeChecked
-      (WNConv1dDyn.forward
-        (inC := GeneratorConfig.finalChannels cfg.generator)
-        (outC := cfg.generator.genIstftNFft + 2)
-        m.convPost
-        postIn)
-      #[1, cfg.generator.genIstftNFft + 2, GeneratorConfig.harFrames cfg.generator baseFrames]
-
-  let freqBins := GeneratorConfig.freqBins cfg.generator
-  let specLog : Tensor { shape := #[1, GeneratorConfig.freqBins cfg.generator, GeneratorConfig.harFrames cfg.generator baseFrames], dtype := .Float32, device := device } :=
-    sliceTensor post 1 0 freqBins
-  let phaseRaw : Tensor { shape := #[1, GeneratorConfig.freqBins cfg.generator, GeneratorConfig.harFrames cfg.generator baseFrames], dtype := .Float32, device := device } :=
-    sliceTensor post 1 freqBins freqBins
-  let spec : Tensor { shape := #[1, GeneratorConfig.freqBins cfg.generator, GeneratorConfig.harFrames cfg.generator baseFrames], dtype := .Float32, device := device } := Tensor.exp specLog
-  let phase : Tensor { shape := #[1, GeneratorConfig.freqBins cfg.generator, GeneratorConfig.harFrames cfg.generator baseFrames], dtype := .Float32, device := device } := Tensor.sin phaseRaw
-  let re : Tensor { shape := #[1, GeneratorConfig.freqBins cfg.generator, GeneratorConfig.harFrames cfg.generator baseFrames], dtype := .Float32, device := device } := spec * Tensor.cos phase
-  let im : Tensor { shape := #[1, GeneratorConfig.freqBins cfg.generator, GeneratorConfig.harFrames cfg.generator baseFrames], dtype := .Float32, device := device } := spec * Tensor.sin phase
-  let re3 : Tensor { shape := #[GeneratorConfig.freqBins cfg.generator, GeneratorConfig.harFrames cfg.generator baseFrames, 1], dtype := .Float32, device := device } :=
-    Tensor.reshape re #[GeneratorConfig.freqBins cfg.generator, GeneratorConfig.harFrames cfg.generator baseFrames, 1]
-  let im3 : Tensor { shape := #[GeneratorConfig.freqBins cfg.generator, GeneratorConfig.harFrames cfg.generator baseFrames, 1], dtype := .Float32, device := device } :=
-    Tensor.reshape im #[GeneratorConfig.freqBins cfg.generator, GeneratorConfig.harFrames cfg.generator baseFrames, 1]
-  let packed : Tensor { shape := #[GeneratorConfig.freqBins cfg.generator, GeneratorConfig.harFrames cfg.generator baseFrames, 2], dtype := .Float32, device := device } :=
-    Tensor.catManyChecked #[Tensor.packShape re3, Tensor.packShape im3] 2
-      #[GeneratorConfig.freqBins cfg.generator, GeneratorConfig.harFrames cfg.generator baseFrames, 2]
-  let window : Tensor { shape := #[cfg.generator.genIstftNFft], dtype := .Float32, device := device } := m.window.to post.device
-  let audio1d : Tensor { shape := #[GeneratorConfig.waveSamples cfg.generator baseFrames], dtype := .Float32, device := device } :=
-    Tensor.reshape
-      (istftTensor
-        packed
-        cfg.generator.genIstftNFft
-        cfg.generator.genIstftHopSize
-        cfg.generator.genIstftNFft
-        window
-        true
-        false
-        (GeneratorConfig.waveSamples cfg.generator baseFrames))
-      #[GeneratorConfig.waveSamples cfg.generator baseFrames]
-  pure (Tensor.packShape (Tensor.reshape audio1d #[1, 1, GeneratorConfig.waveSamples cfg.generator baseFrames]))
+  pure (← m.debugForward x style f0Curve hb).audio
 
 end Generator
 
@@ -1617,22 +1724,23 @@ def debugForward {frames : Nat}
     (f0Curve : Tensor { shape := #[1, 1, 2 * frames], dtype := .Float32, device := device })
     (nCurve : Tensor { shape := #[1, 1, 2 * frames], dtype := .Float32, device := device })
     (style : Tensor { shape := #[1, cfg.styleDim], dtype := .Float32, device := device })
+    (hf : 0 < frames)
     : IO (DecoderDebugOutput (device := device)) := do
-  let f0 : Tensor { shape := #[1, 1, frames], dtype := .Float32, device := device } := (m.f0Conv.forward f0Curve).reshapeChecked #[1, 1, frames]
-  let n : Tensor { shape := #[1, 1, frames], dtype := .Float32, device := device } := (m.nConv.forward nCurve).reshapeChecked #[1, 1, frames]
-  let x0 : Tensor { shape := #[1, cfg.hiddenDim + 2, frames], dtype := .Float32, device := device } := (catTo asr (catTo f0 n 1) 1).reshape #[1, cfg.hiddenDim + 2, frames]
-  let x1 : Tensor { shape := #[1, cfg.maxConvDim, frames], dtype := .Float32, device := device } := m.encode.forward x0 style
-  let asrRes : Tensor { shape := #[1, cfg.asrResDim, frames], dtype := .Float32, device := device } := (m.asrRes.forward asr).reshapeChecked #[1, cfg.asrResDim, frames]
+  let f0 : Tensor { shape := #[1, 1, frames], dtype := .Float32, device := device } := (m.f0Conv.forward f0Curve).reshape #[1, 1, frames] (by rw [convOutputSize_halve hf])
+  let n : Tensor { shape := #[1, 1, frames], dtype := .Float32, device := device } := (m.nConv.forward nCurve).reshape #[1, 1, frames] (by rw [convOutputSize_halve hf])
+  let x0 : Tensor { shape := #[1, cfg.hiddenDim + 2, frames], dtype := .Float32, device := device } := (catTo asr (catTo f0 n 1) 1).reshape #[1, cfg.hiddenDim + 2, frames] (by simp)
+  let x1 : Tensor { shape := #[1, cfg.maxConvDim, frames], dtype := .Float32, device := device } := m.encode.forward x0 style hf
+  let asrRes : Tensor { shape := #[1, cfg.asrResDim, frames], dtype := .Float32, device := device } := (m.asrRes.forward asr).reshape #[1, cfg.asrResDim, frames] (by rw [convOutputSize_pointwise hf])
 
-  let d0In : Tensor { shape := #[1, cfg.maxConvDim + cfg.asrResDim + 2, frames], dtype := .Float32, device := device } := (catTo x1 (catTo asrRes (catTo f0 n 1) 1) 1).reshapeChecked #[1, cfg.maxConvDim + cfg.asrResDim + 2, frames]
-  let d0 : Tensor { shape := #[1, cfg.maxConvDim, frames], dtype := .Float32, device := device } := m.decode0.forward d0In style
-  let d1In : Tensor { shape := #[1, cfg.maxConvDim + cfg.asrResDim + 2, frames], dtype := .Float32, device := device } := (catTo d0 (catTo asrRes (catTo f0 n 1) 1) 1).reshapeChecked #[1, cfg.maxConvDim + cfg.asrResDim + 2, frames]
-  let d1 : Tensor { shape := #[1, cfg.maxConvDim, frames], dtype := .Float32, device := device } := m.decode1.forward d1In style
-  let d2In : Tensor { shape := #[1, cfg.maxConvDim + cfg.asrResDim + 2, frames], dtype := .Float32, device := device } := (catTo d1 (catTo asrRes (catTo f0 n 1) 1) 1).reshapeChecked #[1, cfg.maxConvDim + cfg.asrResDim + 2, frames]
-  let d2 : Tensor { shape := #[1, cfg.maxConvDim, frames], dtype := .Float32, device := device } := m.decode2.forward d2In style
-  let d3In : Tensor { shape := #[1, cfg.maxConvDim + cfg.asrResDim + 2, frames], dtype := .Float32, device := device } := (catTo d2 (catTo asrRes (catTo f0 n 1) 1) 1).reshapeChecked #[1, cfg.maxConvDim + cfg.asrResDim + 2, frames]
-  let d3 : Tensor { shape := #[1, KittenTTSConfig.decoderChannels cfg, 2 * frames], dtype := .Float32, device := device } := m.decode3.forward d3In style
-  let generator ← m.generator.debugForward d3 style f0Curve
+  let d0In : Tensor { shape := #[1, cfg.maxConvDim + cfg.asrResDim + 2, frames], dtype := .Float32, device := device } := (catTo x1 (catTo asrRes (catTo f0 n 1) 1) 1).reshape #[1, cfg.maxConvDim + cfg.asrResDim + 2, frames] (by simp [Nat.add_assoc])
+  let d0 : Tensor { shape := #[1, cfg.maxConvDim, frames], dtype := .Float32, device := device } := m.decode0.forward d0In style hf
+  let d1In : Tensor { shape := #[1, cfg.maxConvDim + cfg.asrResDim + 2, frames], dtype := .Float32, device := device } := (catTo d0 (catTo asrRes (catTo f0 n 1) 1) 1).reshape #[1, cfg.maxConvDim + cfg.asrResDim + 2, frames] (by simp [Nat.add_assoc])
+  let d1 : Tensor { shape := #[1, cfg.maxConvDim, frames], dtype := .Float32, device := device } := m.decode1.forward d1In style hf
+  let d2In : Tensor { shape := #[1, cfg.maxConvDim + cfg.asrResDim + 2, frames], dtype := .Float32, device := device } := (catTo d1 (catTo asrRes (catTo f0 n 1) 1) 1).reshape #[1, cfg.maxConvDim + cfg.asrResDim + 2, frames] (by simp [Nat.add_assoc])
+  let d2 : Tensor { shape := #[1, cfg.maxConvDim, frames], dtype := .Float32, device := device } := m.decode2.forward d2In style hf
+  let d3In : Tensor { shape := #[1, cfg.maxConvDim + cfg.asrResDim + 2, frames], dtype := .Float32, device := device } := (catTo d2 (catTo asrRes (catTo f0 n 1) 1) 1).reshape #[1, cfg.maxConvDim + cfg.asrResDim + 2, frames] (by simp [Nat.add_assoc])
+  let d3 : Tensor { shape := #[1, KittenTTSConfig.decoderChannels cfg, 2 * frames], dtype := .Float32, device := device } := m.decode3.forward d3In style hf
+  let generator ← m.generator.debugForward d3 style f0Curve (by omega)
   pure {
     f0 := Tensor.packShape f0
     n := Tensor.packShape n
@@ -1651,21 +1759,22 @@ def forward {frames : Nat}
     (f0Curve : Tensor { shape := #[1, 1, 2 * frames], dtype := .Float32, device := device })
     (nCurve : Tensor { shape := #[1, 1, 2 * frames], dtype := .Float32, device := device })
     (style : Tensor { shape := #[1, cfg.styleDim], dtype := .Float32, device := device })
+    (hf : 0 < frames)
     : IO (ShapePackedTensor .Float32 device) := do
-  let f0 : Tensor { shape := #[1, 1, frames], dtype := .Float32, device := device } := (m.f0Conv.forward f0Curve).reshapeChecked #[1, 1, frames]
-  let n : Tensor { shape := #[1, 1, frames], dtype := .Float32, device := device } := (m.nConv.forward nCurve).reshapeChecked #[1, 1, frames]
-  let x0 : Tensor { shape := #[1, cfg.hiddenDim + 2, frames], dtype := .Float32, device := device } := (catTo asr (catTo f0 n 1) 1).reshapeChecked #[1, cfg.hiddenDim + 2, frames]
-  let x1 : Tensor { shape := #[1, cfg.maxConvDim, frames], dtype := .Float32, device := device } := m.encode.forward x0 style
-  let asrRes : Tensor { shape := #[1, cfg.asrResDim, frames], dtype := .Float32, device := device } := (m.asrRes.forward asr).reshapeChecked #[1, cfg.asrResDim, frames]
-  let d0In : Tensor { shape := #[1, cfg.maxConvDim + cfg.asrResDim + 2, frames], dtype := .Float32, device := device } := (catTo x1 (catTo asrRes (catTo f0 n 1) 1) 1).reshapeChecked #[1, cfg.maxConvDim + cfg.asrResDim + 2, frames]
-  let d0 : Tensor { shape := #[1, cfg.maxConvDim, frames], dtype := .Float32, device := device } := m.decode0.forward d0In style
-  let d1In : Tensor { shape := #[1, cfg.maxConvDim + cfg.asrResDim + 2, frames], dtype := .Float32, device := device } := (catTo d0 (catTo asrRes (catTo f0 n 1) 1) 1).reshapeChecked #[1, cfg.maxConvDim + cfg.asrResDim + 2, frames]
-  let d1 : Tensor { shape := #[1, cfg.maxConvDim, frames], dtype := .Float32, device := device } := m.decode1.forward d1In style
-  let d2In : Tensor { shape := #[1, cfg.maxConvDim + cfg.asrResDim + 2, frames], dtype := .Float32, device := device } := (catTo d1 (catTo asrRes (catTo f0 n 1) 1) 1).reshapeChecked #[1, cfg.maxConvDim + cfg.asrResDim + 2, frames]
-  let d2 : Tensor { shape := #[1, cfg.maxConvDim, frames], dtype := .Float32, device := device } := m.decode2.forward d2In style
-  let d3In : Tensor { shape := #[1, cfg.maxConvDim + cfg.asrResDim + 2, frames], dtype := .Float32, device := device } := (catTo d2 (catTo asrRes (catTo f0 n 1) 1) 1).reshapeChecked #[1, cfg.maxConvDim + cfg.asrResDim + 2, frames]
-  let d3 : Tensor { shape := #[1, KittenTTSConfig.decoderChannels cfg, 2 * frames], dtype := .Float32, device := device } := m.decode3.forward d3In style
-  m.generator.forward d3 style f0Curve
+  let f0 : Tensor { shape := #[1, 1, frames], dtype := .Float32, device := device } := (m.f0Conv.forward f0Curve).reshape #[1, 1, frames] (by rw [convOutputSize_halve hf])
+  let n : Tensor { shape := #[1, 1, frames], dtype := .Float32, device := device } := (m.nConv.forward nCurve).reshape #[1, 1, frames] (by rw [convOutputSize_halve hf])
+  let x0 : Tensor { shape := #[1, cfg.hiddenDim + 2, frames], dtype := .Float32, device := device } := (catTo asr (catTo f0 n 1) 1).reshape #[1, cfg.hiddenDim + 2, frames] (by simp)
+  let x1 : Tensor { shape := #[1, cfg.maxConvDim, frames], dtype := .Float32, device := device } := m.encode.forward x0 style hf
+  let asrRes : Tensor { shape := #[1, cfg.asrResDim, frames], dtype := .Float32, device := device } := (m.asrRes.forward asr).reshape #[1, cfg.asrResDim, frames] (by rw [convOutputSize_pointwise hf])
+  let d0In : Tensor { shape := #[1, cfg.maxConvDim + cfg.asrResDim + 2, frames], dtype := .Float32, device := device } := (catTo x1 (catTo asrRes (catTo f0 n 1) 1) 1).reshape #[1, cfg.maxConvDim + cfg.asrResDim + 2, frames] (by simp [Nat.add_assoc])
+  let d0 : Tensor { shape := #[1, cfg.maxConvDim, frames], dtype := .Float32, device := device } := m.decode0.forward d0In style hf
+  let d1In : Tensor { shape := #[1, cfg.maxConvDim + cfg.asrResDim + 2, frames], dtype := .Float32, device := device } := (catTo d0 (catTo asrRes (catTo f0 n 1) 1) 1).reshape #[1, cfg.maxConvDim + cfg.asrResDim + 2, frames] (by simp [Nat.add_assoc])
+  let d1 : Tensor { shape := #[1, cfg.maxConvDim, frames], dtype := .Float32, device := device } := m.decode1.forward d1In style hf
+  let d2In : Tensor { shape := #[1, cfg.maxConvDim + cfg.asrResDim + 2, frames], dtype := .Float32, device := device } := (catTo d1 (catTo asrRes (catTo f0 n 1) 1) 1).reshape #[1, cfg.maxConvDim + cfg.asrResDim + 2, frames] (by simp [Nat.add_assoc])
+  let d2 : Tensor { shape := #[1, cfg.maxConvDim, frames], dtype := .Float32, device := device } := m.decode2.forward d2In style hf
+  let d3In : Tensor { shape := #[1, cfg.maxConvDim + cfg.asrResDim + 2, frames], dtype := .Float32, device := device } := (catTo d2 (catTo asrRes (catTo f0 n 1) 1) 1).reshape #[1, cfg.maxConvDim + cfg.asrResDim + 2, frames] (by simp [Nat.add_assoc])
+  let d3 : Tensor { shape := #[1, KittenTTSConfig.decoderChannels cfg, 2 * frames], dtype := .Float32, device := device } := m.decode3.forward d3In style hf
+  m.generator.forward d3 style f0Curve (by omega)
 
 end Decoder
 
@@ -1702,13 +1811,14 @@ namespace Model
 private def modelDevice (m : Model (device := device) cfg) : Device :=
   m.bert.embeddings.wordEmbeddings.device
 
-private structure PreparedSynthesis where
-  decoderStyle : ShapePackedTensor .Float32 device
-  asr : ShapePackedTensor .Float32 device
-  f0Curve : ShapePackedTensor .Float32 device
-  nCurve : ShapePackedTensor .Float32 device
-  predDurations : Array Nat
+private structure PreparedSynthesis (cfg : KittenTTSConfig) where
   alignmentFrames : Nat
+  framesPos : 0 < alignmentFrames
+  decoderStyle : Tensor { shape := #[1, cfg.styleDim], dtype := .Float32, device := device }
+  asr : Tensor { shape := #[1, cfg.hiddenDim, alignmentFrames], dtype := .Float32, device := device }
+  f0Curve : Tensor { shape := #[1, 1, 2 * alignmentFrames], dtype := .Float32, device := device }
+  nCurve : Tensor { shape := #[1, 1, 2 * alignmentFrames], dtype := .Float32, device := device }
+  predDurations : Array Nat
 
 private def prepareInputs {seq : Nat}
     (m : Model (device := device) cfg)
@@ -1776,7 +1886,7 @@ def predictDurations {seq : Nat}
     let durLogits : Tensor { shape := #[1, seq, cfg.maxDur], dtype := .Float32, device := device } :=
       m.predictor.durationLogits durEnc
     let durSig : Tensor { shape := #[1, seq, cfg.maxDur], dtype := .Float32, device := device } := Tensor.sigmoid durLogits
-    let durSum : Tensor { shape := #[1, seq], dtype := .Float32, device := device } := Tensor.reshapeChecked (Tensor.sumDim durSig 2 false) #[1, seq]
+    let durSum : Tensor { shape := #[1, seq], dtype := .Float32, device := device } := Tensor.reshape (Tensor.sumDim durSig 2 false) #[1, seq]
     let durVals ← Tensor.toFloatArray durSum
     let predDurations := durationToFrames durVals speed
     let frames := predDurations.foldl (fun acc x => acc + x) 0
@@ -1791,13 +1901,15 @@ private def prepareSynthesis {seq : Nat}
     (inputIds : Tensor { shape := #[1, seq], dtype := .Int64, device := device })
     (refStyle : Tensor { shape := #[1, KittenTTSConfig.fullStyleDim cfg], dtype := .Float32, device := device })
     (speed : Float := 1.0)
-    : IO (Option (PreparedSynthesis (device := device))) := do
+    : IO (Option (PreparedSynthesis (device := device) cfg)) := do
   let (inputIds, refStyle) := prepareInputs m inputIds refStyle
   let durPred ← predictDurations m inputIds refStyle speed
-  if durPred.alignmentFrames == 0 then
+  let frames := durPred.alignmentFrames
+  if hEmpty : seq = 0 ∨ frames = 0 then
     pure none
   else
-    let frames := durPred.alignmentFrames
+    have hSeq : 0 < seq := by omega
+    have hFrames : 0 < frames := by omega
     let decoderStyle : Tensor { shape := #[1, cfg.styleDim], dtype := .Float32, device := device } := sliceTensor refStyle 1 0 cfg.styleDim
     let predictorStyle : Tensor { shape := #[1, cfg.styleDim], dtype := .Float32, device := device } := sliceTensor refStyle 1 cfg.styleDim cfg.styleDim
     let (bertOut, _pooled) := m.bert.forward inputIds
@@ -1807,16 +1919,14 @@ private def prepareSynthesis {seq : Nat}
       m.predictor.durationEncoding dEn predictorStyle
     let align : Tensor { shape := #[1, seq, frames], dtype := .Float32, device := device } := buildAlignment durPred.predDurations inputIds.device
     let prosodyFrames : Tensor { shape := #[1, cfg.hiddenDim + cfg.styleDim, frames], dtype := .Float32, device := device } := bmm durEnc align
-    let (f0Curve, nCurve) := m.predictor.forwardF0N prosodyFrames predictorStyle
-    let textEnc : Tensor { shape := #[1, cfg.hiddenDim, seq], dtype := .Float32, device := device } := m.textEncoder.forward inputIds
+    let (f0Curve, nCurve) := m.predictor.forwardF0N prosodyFrames predictorStyle hFrames
+    let textEnc : Tensor { shape := #[1, cfg.hiddenDim, seq], dtype := .Float32, device := device } := m.textEncoder.forward inputIds hSeq
     let asr : Tensor { shape := #[1, cfg.hiddenDim, frames], dtype := .Float32, device := device } := bmm textEnc align
     pure <| some {
-      decoderStyle := Tensor.packShape decoderStyle
-      asr := Tensor.packShape asr
-      f0Curve := Tensor.packShape f0Curve
-      nCurve := Tensor.packShape nCurve
-      predDurations := durPred.predDurations
       alignmentFrames := frames
+      framesPos := hFrames
+      decoderStyle, asr, f0Curve, nCurve
+      predDurations := durPred.predDurations
     }
 
 def synthesizeIds {seq : Nat}
@@ -1833,16 +1943,11 @@ def synthesizeIds {seq : Nat}
       alignmentFrames := 0
     }
   | some prepared =>
-    let frames := prepared.alignmentFrames
-    let decoderStyle : Tensor { shape := #[1, cfg.styleDim], dtype := .Float32, device := device } := Tensor.reshapeChecked prepared.decoderStyle.2 #[1, cfg.styleDim]
-    let asr : Tensor { shape := #[1, cfg.hiddenDim, frames], dtype := .Float32, device := device } := Tensor.reshapeChecked prepared.asr.2 #[1, cfg.hiddenDim, frames]
-    let f0Curve : Tensor { shape := #[1, 1, 2 * frames], dtype := .Float32, device := device } := Tensor.reshapeChecked prepared.f0Curve.2 #[1, 1, 2 * frames]
-    let nCurve : Tensor { shape := #[1, 1, 2 * frames], dtype := .Float32, device := device } := Tensor.reshapeChecked prepared.nCurve.2 #[1, 1, 2 * frames]
-    let audio ← m.decoder.forward asr f0Curve nCurve decoderStyle
+    let audio ← m.decoder.forward prepared.asr prepared.f0Curve prepared.nCurve prepared.decoderStyle prepared.framesPos
     pure {
       audio
       predDurations := prepared.predDurations
-      alignmentFrames := frames
+      alignmentFrames := prepared.alignmentFrames
     }
 
 def debugSynthesizeIds {seq : Nat}
@@ -1863,19 +1968,14 @@ def debugSynthesizeIds {seq : Nat}
       alignmentFrames := 0
     }
   | some prepared =>
-    let frames := prepared.alignmentFrames
-    let decoderStyle : Tensor { shape := #[1, cfg.styleDim], dtype := .Float32, device := device } := Tensor.reshapeChecked prepared.decoderStyle.2 #[1, cfg.styleDim]
-    let asr : Tensor { shape := #[1, cfg.hiddenDim, frames], dtype := .Float32, device := device } := Tensor.reshapeChecked prepared.asr.2 #[1, cfg.hiddenDim, frames]
-    let f0Curve : Tensor { shape := #[1, 1, 2 * frames], dtype := .Float32, device := device } := Tensor.reshapeChecked prepared.f0Curve.2 #[1, 1, 2 * frames]
-    let nCurve : Tensor { shape := #[1, 1, 2 * frames], dtype := .Float32, device := device } := Tensor.reshapeChecked prepared.nCurve.2 #[1, 1, 2 * frames]
-    let audio ← m.decoder.forward asr f0Curve nCurve decoderStyle
+    let audio ← m.decoder.forward prepared.asr prepared.f0Curve prepared.nCurve prepared.decoderStyle prepared.framesPos
     pure {
-      asr := prepared.asr
-      f0Curve := prepared.f0Curve
-      nCurve := prepared.nCurve
+      asr := Tensor.packShape prepared.asr
+      f0Curve := Tensor.packShape prepared.f0Curve
+      nCurve := Tensor.packShape prepared.nCurve
       audio := audio
       predDurations := prepared.predDurations
-      alignmentFrames := frames
+      alignmentFrames := prepared.alignmentFrames
     }
 
 end Model

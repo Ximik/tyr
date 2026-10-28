@@ -26,6 +26,11 @@ private def combinedInputSamples : Nat := chunkSizeSamples + contextSizeSamples
 private def rightReflectPad : Nat := 64
 private def preparedInputSamples : Nat := combinedInputSamples + rightReflectPad
 
+/-- Proves a reshape whose sizes are the fixed SileroVAD chunk constants. -/
+local macro "vad_sizes" : tactic =>
+  `(tactic| simp [preparedInputSamples, combinedInputSamples, chunkSizeSamples, contextSizeSamples,
+    rightReflectPad])
+
 private def addBias2d {n d : Nat}
     (x : Tensor { device := device, shape := #[n, d], dtype := .Float32 }) (b : Tensor { device := device, shape := #[d], dtype := .Float32 })
     : Tensor { device := device, shape := #[n, d], dtype := .Float32 } :=
@@ -219,22 +224,22 @@ def forwardPrepared
     (state : (VADLstmState (device := device)))
     : Tensor { device := device, shape := #[1, 1], dtype := .Float32 } × (VADLstmState (device := device)) := Id.run do
   let x0 : Tensor { device := device, shape := #[1, 1, preparedInputSamples], dtype := .Float32 } :=
-    Tensor.reshapeChecked xPrepared #[1, 1, preparedInputSamples]
+    Tensor.reshape xPrepared #[1, 1, preparedInputSamples] (by vad_sizes)
 
   let stft : Tensor { device := device, shape := #[1, 258, 4], dtype := .Float32 } :=
-    Tensor.reshapeChecked (Tensor.conv1d x0 m.stftConvWeight 128 0 1) #[1, 258, 4]
+    Tensor.reshape (Tensor.conv1d x0 m.stftConvWeight 128 0 1) #[1, 258, 4] (by vad_sizes)
   let re : Tensor { device := device, shape := #[1, 129, 4], dtype := .Float32 } := Tensor.slice stft 1 0 129
   let im : Tensor { device := device, shape := #[1, 129, 4], dtype := .Float32 } := Tensor.slice stft 1 129 129
   let mag : Tensor { device := device, shape := #[1, 129, 4], dtype := .Float32 } := Tensor.sqrt (re * re + im * im)
 
   let h1 : Tensor { device := device, shape := #[1, 128, 4], dtype := .Float32 } :=
-    Tensor.relu (addBias3d (Tensor.reshapeChecked (Tensor.conv1d mag m.conv1Weight 1 1 1) #[1, 128, 4]) m.conv1Bias)
+    Tensor.relu (addBias3d (Tensor.reshape (Tensor.conv1d mag m.conv1Weight 1 1 1) #[1, 128, 4] (by vad_sizes)) m.conv1Bias)
   let h2 : Tensor { device := device, shape := #[1, 64, 2], dtype := .Float32 } :=
-    Tensor.relu (addBias3d (Tensor.reshapeChecked (Tensor.conv1d h1 m.conv2Weight 2 1 1) #[1, 64, 2]) m.conv2Bias)
+    Tensor.relu (addBias3d (Tensor.reshape (Tensor.conv1d h1 m.conv2Weight 2 1 1) #[1, 64, 2] (by vad_sizes)) m.conv2Bias)
   let h3 : Tensor { device := device, shape := #[1, 64, 1], dtype := .Float32 } :=
-    Tensor.relu (addBias3d (Tensor.reshapeChecked (Tensor.conv1d h2 m.conv3Weight 2 1 1) #[1, 64, 1]) m.conv3Bias)
+    Tensor.relu (addBias3d (Tensor.reshape (Tensor.conv1d h2 m.conv3Weight 2 1 1) #[1, 64, 1] (by vad_sizes)) m.conv3Bias)
   let h4 : Tensor { device := device, shape := #[1, 128, 1], dtype := .Float32 } :=
-    Tensor.relu (addBias3d (Tensor.reshapeChecked (Tensor.conv1d h3 m.conv4Weight 1 1 1) #[1, 128, 1]) m.conv4Bias)
+    Tensor.relu (addBias3d (Tensor.reshape (Tensor.conv1d h3 m.conv4Weight 1 1 1) #[1, 128, 1] (by vad_sizes)) m.conv4Bias)
 
   let xFlat : Tensor { device := device, shape := #[1, 128], dtype := .Float32 } := Tensor.reshape h4 #[1, 128]
   let state' := lstmCellStep m xFlat state
@@ -304,12 +309,12 @@ private def prepareChunkTensor (context chunk : Array Float) : IO (Tensor { devi
       s!"SileroVAD combined chunk size mismatch: expected {combinedInputSamples}, got {combined.size}"
 
   let prepared := reflectPadRight combined rightReflectPad
-  if prepared.size != preparedInputSamples then
+  let ⟨hPrepared⟩ ← if h : prepared.size = preparedInputSamples then pure (PLift.up h) else
     throw <| IO.userError
       s!"SileroVAD prepared input size mismatch: expected {preparedInputSamples}, got {prepared.size}"
 
   let x : Tensor { device := device, shape := #[1, preparedInputSamples], dtype := .Float32 } :=
-    Tensor.reshapeChecked ((Tensor.fromFloatArray prepared).to device) #[1, preparedInputSamples]
+    Tensor.reshape ((Tensor.fromFloatArray prepared).to device) #[1, preparedInputSamples] (by simp [hPrepared])
   let nextContext := combined.extract (combined.size - contextSizeSamples) combined.size
   pure (x, nextContext)
 

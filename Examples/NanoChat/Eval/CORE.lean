@@ -179,11 +179,10 @@ def padSequences (sequences : Array (Array UInt64)) (padToken : UInt64) : Array 
 
 /-- Convert padded sequences to input tensor -/
 def sequencesToTensor {batch seq : Nat} (sequences : Array (Array UInt64))
-    : Tensor { shape := #[batch, seq], dtype := .Int64, device := .CPU } :=
+    : Except String (Tensor { shape := #[batch, seq], dtype := .Int64, device := .CPU }) :=
   -- Flatten and convert to int64 array
   let flat := sequences.foldl (fun acc seq => acc ++ seq.map (·.toInt64)) #[]
-  let tensor := Tensor.fromInt64Array flat
-  Tensor.reshapeChecked tensor #[batch, seq]
+  Tensor.fromInt64ArrayAs? flat #[batch, seq]
 
 /-! ## Batching -/
 
@@ -419,15 +418,15 @@ def evaluateSingleExample {vocab : Nat}
                     (batchInfo.tokens.foldl (fun acc (seq : Array UInt64) => max acc seq.size) 0)
 
     -- Convert to tensor
-    let inputTensor := Tensor.fromInt64Array (paddedTokens.map (·.toInt64))
-    let inputReshaped := Tensor.reshapeChecked inputTensor #[batchSize, seqLen]
+    let inputReshaped ← IO.ofExcept <|
+      Tensor.fromInt64ArrayAs? (paddedTokens.map (·.toInt64)) #[batchSize, seqLen]
 
     -- Run model forward
     let logits ← runModel (inputReshaped.to device)
 
     -- Create target IDs tensor (same as input for loss computation)
-    let targetTensor := Tensor.fromInt64Array (paddedTokens.map (·.toInt64))
-    let targetReshaped := (Tensor.reshapeChecked targetTensor #[batchSize, seqLen]).to logits.device
+    let targetReshaped := (← IO.ofExcept <|
+      Tensor.fromInt64ArrayAs? (paddedTokens.map (·.toInt64)) #[batchSize, seqLen]).to logits.device
 
     let result ← match taskMeta.taskType with
     | .multipleChoice | .schema => evaluateMC logits targetReshaped batchInfo goldIdx

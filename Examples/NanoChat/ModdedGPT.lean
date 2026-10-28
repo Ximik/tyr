@@ -518,6 +518,8 @@ def forward {cfg : Config} {batch seq : Nat}
     : IO (Tensor { shape := #[batch, seq, cfg.vocabSize], dtype := .Float32, device := device }) := do
   if cfg.modelDim < 12 then
     throw (IO.userError "ModdedGPT requires modelDim >= 12 for the smear gate")
+  let ⟨hHeads⟩ ← if h : cfg.modelDim = cfg.nHead * cfg.headDim then pure (PLift.up h) else
+    throw (IO.userError s!"ModdedGPT requires modelDim = nHead * headDim, got {cfg.modelDim} vs {cfg.nHead} * {cfg.headDim}")
   -- 1) Token embedding + lightweight smear-style modulation.
   let tokEmb := Tensor.embedding inputSeq params.embed
   let smearIn : Tensor { shape := #[batch, seq, 12], dtype := .Float32, device := device } := Tensor.sliceChecked tokEmb 2 0 12 #[batch, seq, 12]
@@ -559,7 +561,7 @@ def forward {cfg : Config} {batch seq : Nat}
       -- Pre-norm (RMSNorm before attention)
       let xNormed := Tensor.rmsNorm xIn
       let layerVE := (layerValueEmbed (cfg := cfg) valueEmbeds i).map
-        (fun t => t.reshapeChecked #[batch, seq, cfg.nHead * cfg.headDim])
+        (fun t => t.reshape #[batch, seq, cfg.nHead * cfg.headDim] (by simp [hHeads]))
       -- Apply attention with rotary embeddings/window and optional value embedding.
       let attnOut := attn.forward xNormed yarn windowSize layerVE valueMix
       -- Residual connection
