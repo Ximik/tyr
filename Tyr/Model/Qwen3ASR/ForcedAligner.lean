@@ -278,8 +278,8 @@ private def extractTimestampRows {batch seq : Nat}
     (timestampTokenId : UInt64)
     (timestampSegmentTime : Float)
     : IO (Array (Array UInt64)) := do
-  let inFlat : Tensor { device := device, shape := #[batch * seq], dtype := .Int64 } := Tensor.reshapeChecked (Tensor.toInt64 inputIds) #[batch * seq]
-  let outFlat : Tensor { device := device, shape := #[batch * seq], dtype := .Int64 } := Tensor.reshapeChecked (Tensor.toInt64 outputIds) #[batch * seq]
+  let inFlat : Tensor { device := device, shape := #[batch * seq], dtype := .Int64 } := Tensor.reshape (Tensor.toInt64 inputIds) #[batch * seq]
+  let outFlat : Tensor { device := device, shape := #[batch * seq], dtype := .Int64 } := Tensor.reshape (Tensor.toInt64 outputIds) #[batch * seq]
   let inVals ← Tensor.toUInt64Array inFlat
   let outVals ← Tensor.toUInt64Array outFlat
   let mut rows : Array (Array UInt64) := Array.mkEmpty batch

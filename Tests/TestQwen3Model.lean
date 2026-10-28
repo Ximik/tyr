@@ -19,7 +19,7 @@ private def tinyCfg : Config := {
 }
 
 private def flattenIds {batch seq : Nat} (ids : Tensor { shape := #[batch, seq], dtype := .Int64, device := .CPU }) : IO (Array UInt64) := do
-  let flat : Tensor { shape := #[batch * seq], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked (Tensor.toInt64 ids) #[batch * seq]
+  let flat : Tensor { shape := #[batch * seq], dtype := .Int64, device := .CPU } := Tensor.reshape (Tensor.toInt64 ids) #[batch * seq]
   Tensor.toUInt64Array flat
 
 private def rowToken (vals : Array UInt64) (seq : Nat) (row col : Nat) : UInt64 :=
@@ -28,7 +28,7 @@ private def rowToken (vals : Array UInt64) (seq : Nat) (row col : Nat) : UInt64 
 @[test]
 def testQwen3InitAndForward : IO Unit := do
   let model ← Qwen3ForCausalLM.init tinyCfg
-  let ids : Tensor { shape := #[1, 4], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked (Tensor.fromInt64Array #[1, 2, 3, 4]) #[1, 4]
+  let ids : Tensor { shape := #[1, 4], dtype := .Int64, device := .CPU } := Tensor.reshape (Tensor.fromInt64Array #[1, 2, 3, 4]) #[1, 4]
   let logits := model.forward ids
   LeanTest.assertEqual logits.runtimeShape #[1, 4, tinyCfg.vocab_size]
     "forward should return [batch, seq, vocab]"
@@ -36,7 +36,7 @@ def testQwen3InitAndForward : IO Unit := do
 @[test]
 def testQwen3GreedyCachedUncachedParity : IO Unit := do
   let model ← Qwen3ForCausalLM.init tinyCfg
-  let ids : Tensor { shape := #[1, 3], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked (Tensor.fromInt64Array #[3, 2, 1]) #[1, 3]
+  let ids : Tensor { shape := #[1, 3], dtype := .Int64, device := .CPU } := Tensor.reshape (Tensor.fromInt64Array #[3, 2, 1]) #[1, 3]
 
   let ⟨outSeqCached, outCached⟩ ← model.generateGreedy ids 4 #[]
   let ⟨outSeqUncached, outUncached⟩ ← model.generateGreedyUncached ids 4 #[]
@@ -46,8 +46,8 @@ def testQwen3GreedyCachedUncachedParity : IO Unit := do
   LeanTest.assertEqual outSeqUncached (3 + 4)
     "uncached generation should append maxNewTokens"
 
-  let cachedFlat : Tensor { shape := #[outSeqCached], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked (Tensor.toInt64 outCached) #[outSeqCached]
-  let uncachedFlat : Tensor { shape := #[outSeqUncached], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked (Tensor.toInt64 outUncached) #[outSeqUncached]
+  let cachedFlat : Tensor { shape := #[outSeqCached], dtype := .Int64, device := .CPU } := Tensor.reshape (Tensor.toInt64 outCached) #[outSeqCached]
+  let uncachedFlat : Tensor { shape := #[outSeqUncached], dtype := .Int64, device := .CPU } := Tensor.reshape (Tensor.toInt64 outUncached) #[outSeqUncached]
   let cachedIds ← Tensor.toUInt64Array cachedFlat
   let uncachedIds ← Tensor.toUInt64Array uncachedFlat
 
@@ -86,7 +86,7 @@ def testQwen3ConfigLoadRejectsInvalidInvariants : IO Unit := do
 @[test]
 def testQwen3GreedyUncachedEmptyPromptThrows : IO Unit := do
   let model ← Qwen3ForCausalLM.init tinyCfg
-  let ids : Tensor { shape := #[1, 0], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked (Tensor.fromInt64Array #[]) #[1, 0]
+  let ids : Tensor { shape := #[1, 0], dtype := .Int64, device := .CPU } := Tensor.reshape (Tensor.fromInt64Array #[]) #[1, 0]
   let threw ←
     try
       let _ ← model.generateGreedyUncached ids 1 #[]
@@ -98,13 +98,13 @@ def testQwen3GreedyUncachedEmptyPromptThrows : IO Unit := do
 @[test]
 def testQwen3GreedyZeroNewTokensIdentity : IO Unit := do
   let model ← Qwen3ForCausalLM.init tinyCfg
-  let ids : Tensor { shape := #[1, 3], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked (Tensor.fromInt64Array #[4, 5, 6]) #[1, 3]
+  let ids : Tensor { shape := #[1, 3], dtype := .Int64, device := .CPU } := Tensor.reshape (Tensor.fromInt64Array #[4, 5, 6]) #[1, 3]
   let ⟨seqCached, outCached⟩ ← model.generateGreedy ids 0 #[]
   let ⟨seqUncached, outUncached⟩ ← model.generateGreedyUncached ids 0 #[]
   LeanTest.assertEqual seqCached 3 "cached generation with maxNewTokens=0 should preserve prompt length"
   LeanTest.assertEqual seqUncached 3 "uncached generation with maxNewTokens=0 should preserve prompt length"
-  let flatCached : Tensor { shape := #[seqCached], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked outCached #[seqCached]
-  let flatUncached : Tensor { shape := #[seqUncached], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked outUncached #[seqUncached]
+  let flatCached : Tensor { shape := #[seqCached], dtype := .Int64, device := .CPU } := Tensor.reshape outCached #[seqCached]
+  let flatUncached : Tensor { shape := #[seqUncached], dtype := .Int64, device := .CPU } := Tensor.reshape outUncached #[seqUncached]
   let gotCached ← Tensor.toUInt64Array flatCached
   let gotUncached ← Tensor.toUInt64Array flatUncached
   LeanTest.assertEqual gotCached #[4, 5, 6] "cached generation should return identity sequence when no new tokens requested"

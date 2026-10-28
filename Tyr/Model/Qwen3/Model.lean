@@ -175,7 +175,7 @@ private def decodeStepFromEmbedWithCache {batch maxLen : Nat}
 
   let hiddenNorm := m.model.norm.forward3d hidden
   let logits3 : Tensor { device := device, shape := #[batch, 1, cfg.vocab_size], dtype := .Float32 } := Tensor.linear3d hiddenNorm m.lmHead
-  let logits2 : Tensor { device := device, shape := #[batch, cfg.vocab_size], dtype := .Float32 } := Tensor.reshapeChecked logits3 #[batch, cfg.vocab_size]
+  let logits2 : Tensor { device := device, shape := #[batch, cfg.vocab_size], dtype := .Float32 } := Tensor.reshape logits3 #[batch, cfg.vocab_size]
   pure (logits2, nextCaches)
 
 private partial def prefillCachesFromEmbeds {batch seq maxLen : Nat}
@@ -218,7 +218,7 @@ private partial def greedyLoopCached {batch maxLen : Nat}
       let activeMask : Tensor { device := device, shape := #[batch], dtype := .Bool } := Tensor.logicalNot doneMask
       Tensor.whereSelect activeMask nextTokRaw eosTok
     | _, _ => nextTokRaw
-  let nextCol : Tensor { device := device, shape := #[batch, 1], dtype := .Int64 } := Tensor.reshapeChecked nextTok #[batch, 1]
+  let nextCol : Tensor { device := device, shape := #[batch, 1], dtype := .Int64 } := Tensor.reshape nextTok #[batch, 1]
   let appended : Tensor { device := device, shape := #[batch, curSeq + 1], dtype := .Int64 } := Tensor.cat curIds nextCol 1
 
   match eosVector with
@@ -257,8 +257,8 @@ private partial def greedyLoopUncached {batch : Nat}
   let logits := m.forward curIds none
   let lastPos := curSeq - 1
   let last3 : Tensor { device := device, shape := #[batch, 1, cfg.vocab_size], dtype := .Float32 } :=
-    Tensor.reshapeChecked (Tensor.sliceChecked logits 1 lastPos 1 #[batch, 1, cfg.vocab_size]) #[batch, 1, cfg.vocab_size]
-  let last2 : Tensor { device := device, shape := #[batch, cfg.vocab_size], dtype := .Float32 } := Tensor.reshapeChecked last3 #[batch, cfg.vocab_size]
+    Tensor.reshape (Tensor.sliceChecked logits 1 lastPos 1 #[batch, 1, cfg.vocab_size]) #[batch, 1, cfg.vocab_size]
+  let last2 : Tensor { device := device, shape := #[batch, cfg.vocab_size], dtype := .Float32 } := Tensor.reshape last3 #[batch, cfg.vocab_size]
   let indices ← IO.ofExcept (Tensor.argmax? last2 1)
   let nextTokRaw : Tensor { device := device, shape := #[batch], dtype := .Int64 } ← IO.ofExcept (indices.reshapeChecked? #[batch])
   let nextTok : Tensor { device := device, shape := #[batch], dtype := .Int64 } :=
@@ -267,7 +267,7 @@ private partial def greedyLoopUncached {batch : Nat}
       let activeMask : Tensor { device := device, shape := #[batch], dtype := .Bool } := Tensor.logicalNot doneMask
       Tensor.whereSelect activeMask nextTokRaw eosTok
     | _, _ => nextTokRaw
-  let nextCol : Tensor { device := device, shape := #[batch, 1], dtype := .Int64 } := Tensor.reshapeChecked nextTok #[batch, 1]
+  let nextCol : Tensor { device := device, shape := #[batch, 1], dtype := .Int64 } := Tensor.reshape nextTok #[batch, 1]
   let appended : Tensor { device := device, shape := #[batch, curSeq + 1], dtype := .Int64 } := Tensor.cat curIds nextCol 1
 
   match eosVector with

@@ -51,7 +51,7 @@ def toyModel {maxLen dim : Nat} : BranchingModelContinuous (device := .CPU) maxL
       pure (anchorPred, splitLogits, delLogits) }
 
 private def mkVec2 (x y : Float) : Tensor { dtype := .Float32, shape := #[2], device := .CPU } :=
-  Tensor.reshapeChecked (floatsDynamic #[x, y]) #[2]
+  Tensor.reshape (floatsDynamic #[x, y]) #[2]
 
 private def fixedState : BranchingState (Tensor { dtype := .Float32, shape := #[2], device := .CPU }) :=
   BranchingState.mkDefault

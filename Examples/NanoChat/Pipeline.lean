@@ -1788,20 +1788,20 @@ def reinforcementLearning (cfg : NanoChatConfig) : PipelineM Unit := do
     -- Create generation function (single token sampling)
     let generateOneFn := fun (params : ModdedGPTParams (device := trainDevice) modelCfg) (context : Array UInt64) => do
       let inputTensor := Tensor.fromInt64Array (context.map (·.toInt64))
-      let inputReshaped := (inputTensor.reshapeChecked #[1, context.size]).to trainDevice
+      let inputReshaped := (inputTensor.reshape #[1, context.size]).to trainDevice
       let logits ← moddedGpt.forward params yarn inputReshaped
       -- Flatten logits and extract last position's vocab slice
-      let logitsFlat := logits.reshapeChecked #[context.size * modelCfg.vocabSize]
+      let logitsFlat := logits.reshape #[context.size * modelCfg.vocabSize]
       let startIdx := (context.size - 1) * modelCfg.vocabSize
       let lastLogits := logitsFlat.sliceChecked 0 startIdx modelCfg.vocabSize #[modelCfg.vocabSize]
-      let rowLogits := lastLogits.reshapeChecked #[1, modelCfg.vocabSize]
+      let rowLogits := lastLogits.reshape #[1, modelCfg.vocabSize]
       let scaled := if grpoCfg.temperature == 1.0 then rowLogits
                     else Tensor.mulScalar rowLogits (1.0 / grpoCfg.temperature)
       let filtered := if grpoCfg.topK == 0 then scaled
                       else Tensor.topKFilter scaled grpoCfg.topK
       let probs := Tensor.softmax filtered (-1)
       let sampled ← Tensor.multinomial probs 1
-      let sampled := sampled.reshapeChecked #[]
+      let sampled := sampled.reshape #[]
       return (Tensor.itemInt sampled).toUInt64
 
     -- Create forward function for policy gradient
@@ -1809,10 +1809,10 @@ def reinforcementLearning (cfg : NanoChatConfig) : PipelineM Unit := do
     let forwardFn := fun (params : ModdedGPTParams (device := trainDevice) modelCfg) (input : Tensor { shape := #[1, 256], dtype := .Int64, device := trainDevice }) (target : Tensor { shape := #[1, 256], dtype := .Int64, device := trainDevice }) => do
       let logits ← moddedGpt.forward params yarn (input.to trainDevice)
       -- Compute per-token cross-entropy (NLL)
-      let logitsFlat := logits.reshapeChecked #[256, modelCfg.vocabSize]
-      let targetFlat := (target.to trainDevice).reshapeChecked #[256]
+      let logitsFlat := logits.reshape #[256, modelCfg.vocabSize]
+      let targetFlat := (target.to trainDevice).reshape #[256]
       let nllFlat ← IO.ofExcept (Tensor.crossEntropyNone? logitsFlat targetFlat)
-      return nllFlat.reshapeChecked #[1, 256]
+      return nllFlat.reshape #[1, 256]
 
     -- Load GSM8K prompts from HuggingFace
     let cacheDir := cfg.baseDir.replace "~" (← IO.getEnv "HOME" |>.map (·.getD ""))

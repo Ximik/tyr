@@ -63,7 +63,7 @@ private def deviceLabel (device : Device) : String :=
 
 /-- Deterministic int64 token-id tensor `[1, seq]` on `device`. -/
 private def mkIds (vals : Array Int64) (device : Device) : Tensor { shape := #[1, vals.size], dtype := .Int64, device := device } :=
-  Tensor.reshapeChecked ((Tensor.fromInt64Array vals).to device) #[1, vals.size]
+  Tensor.reshape ((Tensor.fromInt64Array vals).to device) #[1, vals.size]
 
 /-- Max abs / max rel (denominator clamped by 1e-3) error in FP32. -/
 private def maxErrors {σ τ : StaticSpec} (got : Tensor σ) (expected : Tensor τ) : IO (Float × Float) := do
@@ -196,10 +196,10 @@ private def runFixture (device : Device) : IO Unit := do
 
   -- 3. Full-forward logits vs fp32 references.
   let logitsA ← model.forward cfg idsA
-  checkLogits lbl "logits_a" ((Tensor.reshapeChecked logitsA #[7, cfg.vocab_size]))
+  checkLogits lbl "logits_a" ((Tensor.reshape logitsA #[7, cfg.vocab_size]))
     ((logitsARef.to device)) 0.05
   let logitsB ← model.forward cfg idsB
-  checkLogits lbl "logits_b" ((Tensor.reshapeChecked logitsB #[20, cfg.vocab_size]))
+  checkLogits lbl "logits_b" ((Tensor.reshape logitsB #[20, cfg.vocab_size]))
     ((logitsBRef.to device)) 0.05
 
   -- 4. Greedy generation: 16 tokens from A, exact id match (EOS disabled,
@@ -224,11 +224,11 @@ private def runFixture (device : Device) : IO Unit := do
   IO.println (s!"  [{lbl}] -- informational BF16 pass (no gates; HF bf16 self-noise: " ++
     "logits_a 0.0137, logits_b 0.1021, gen diverges at step 4)")
   let logitsAb ← modelB16.forward cfg idsA
-  let (abAbs, abRel) ← maxErrors ((Tensor.reshapeChecked logitsAb #[7, cfg.vocab_size]))
+  let (abAbs, abRel) ← maxErrors ((Tensor.reshape logitsAb #[7, cfg.vocab_size]))
     ((logitsARef.to device))
   IO.println s!"  [{lbl}] bf16 logits_a: maxAbs={abAbs} maxRel={abRel}"
   let logitsBb ← modelB16.forward cfg idsB
-  let (bbAbs, bbRel) ← maxErrors ((Tensor.reshapeChecked logitsBb #[20, cfg.vocab_size]))
+  let (bbAbs, bbRel) ← maxErrors ((Tensor.reshape logitsBb #[20, cfg.vocab_size]))
     ((logitsBRef.to device))
   IO.println s!"  [{lbl}] bf16 logits_b: maxAbs={bbAbs} maxRel={bbRel}"
   let rb ← modelB16.generate cfg idsA 16 .greedy #[]

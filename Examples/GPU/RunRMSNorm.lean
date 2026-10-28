@@ -245,9 +245,9 @@ def referenceTraining {rows : Nat}
   let gradOutResidF : Tensor { shape := #[rows, hiddenDim], dtype := .Float32, device := device } := gradOutResid.toFloat32
   let inv2d : Tensor { shape := #[rows, 1], dtype := .Float32, device := device } :=
     Tensor.rsqrt (Tensor.meanDim (residF * residF) 1 true + rmsNormEps)
-  let expectedInv : Tensor { shape := #[rows], dtype := .Float32, device := device } := Tensor.reshapeChecked inv2d #[rows]
+  let expectedInv : Tensor { shape := #[rows], dtype := .Float32, device := device } := Tensor.reshape inv2d #[rows]
   let invFull : Tensor { shape := #[rows, hiddenDim], dtype := .Float32, device := device } := Tensor.expand inv2d #[rows, hiddenDim]
-  let weight2d : Tensor { shape := #[1, hiddenDim], dtype := .Float32, device := device } := Tensor.reshapeChecked weightF #[1, hiddenDim]
+  let weight2d : Tensor { shape := #[1, hiddenDim], dtype := .Float32, device := device } := Tensor.reshape weightF #[1, hiddenDim]
   let weightFull : Tensor { shape := #[rows, hiddenDim], dtype := .Float32, device := device } :=
     Tensor.expand weight2d #[rows, hiddenDim]
   let normalized : Tensor { shape := #[rows, hiddenDim], dtype := .Float32, device := device } := residF * invFull
@@ -263,7 +263,7 @@ def referenceTraining {rows : Nat}
   let expectedGradInput : Tensor { shape := #[rows, hiddenDim], dtype := .BFloat16, device := device } :=
     (weightedGrad * invFull - residF * correctionFull + gradOutResidF).toBFloat16
   let expectedGradWeight : Tensor { shape := #[hiddenDim], dtype := .Float32, device := device } :=
-    (Tensor.sumDim (gradOutF * normalized) 0 false).reshapeChecked #[hiddenDim]
+    (Tensor.sumDim (gradOutF * normalized) 0 false).reshape #[hiddenDim]
 
   return (expectedOut, expectedResid, expectedInv, expectedGradInput, expectedGradWeight)
 

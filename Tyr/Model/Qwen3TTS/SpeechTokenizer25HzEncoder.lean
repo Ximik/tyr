@@ -159,13 +159,13 @@ private def loadFrozenOrZeros (path : String) (name : String) (s : Shape)
 private def addBias2d {n d : Nat}
     (x : Tensor { shape := #[n, d], dtype := dtype.val, device := device })
     (bias : Tensor { shape := #[d], dtype := dtype.val, device := device }) : Tensor { shape := #[n, d], dtype := dtype.val, device := device } :=
-  let b : Tensor { shape := #[1, d], dtype := dtype.val, device := device } := Tensor.reshapeChecked bias #[1, d]
+  let b : Tensor { shape := #[1, d], dtype := dtype.val, device := device } := Tensor.reshape bias #[1, d]
   Tensor.add x (Tensor.expand b #[n, d])
 
 private def addBias3d {batch channels frames : Nat}
     (x : Tensor { shape := #[batch, channels, frames], dtype := dtype.val, device := device })
     (bias : Tensor { shape := #[channels], dtype := dtype.val, device := device }) : Tensor { shape := #[batch, channels, frames], dtype := dtype.val, device := device } :=
-  let b : Tensor { shape := #[1, channels, 1], dtype := dtype.val, device := device } := Tensor.reshapeChecked bias #[1, channels, 1]
+  let b : Tensor { shape := #[1, channels, 1], dtype := dtype.val, device := device } := Tensor.reshape bias #[1, channels, 1]
   Tensor.add x (Tensor.expand b #[batch, channels, frames])
 
 private def conv1dWithBias {batch inC outC inFrames outFrames kernel : Nat}
@@ -180,15 +180,15 @@ private def affine3d {batch seq inDim outDim : Nat}
     (x : Tensor { shape := #[batch, seq, inDim], dtype := dtype.val, device := device })
     (w : Tensor { shape := #[outDim, inDim], dtype := dtype.val, device := device })
     (b : Tensor { shape := #[outDim], dtype := dtype.val, device := device }) : Tensor { shape := #[batch, seq, outDim], dtype := dtype.val, device := device } :=
-  let x2 : Tensor { shape := #[batch * seq, inDim], dtype := dtype.val, device := device } := by simpa using (Tensor.reshapeChecked x #[batch * seq, inDim])
+  let x2 : Tensor { shape := #[batch * seq, inDim], dtype := dtype.val, device := device } := by simpa using (Tensor.reshape x #[batch * seq, inDim])
   let y0 : Tensor { shape := #[batch * seq, outDim], dtype := dtype.val, device := device } := Tensor.mm x2 (Tensor.transpose2d w)
   let y1 : Tensor { shape := #[batch * seq, outDim], dtype := dtype.val, device := device } := addBias2d y0 b
-  Tensor.reshapeChecked y1 #[batch, seq, outDim]
+  Tensor.reshape y1 #[batch, seq, outDim]
 
 private def scale3d {batch seq dim : Nat}
     (x : Tensor { shape := #[batch, seq, dim], dtype := dtype.val, device := device })
     (scale : Tensor { shape := #[dim], dtype := dtype.val, device := device }) : Tensor { shape := #[batch, seq, dim], dtype := dtype.val, device := device } :=
-  let s : Tensor { shape := #[1, 1, dim], dtype := dtype.val, device := device } := Tensor.reshapeChecked scale #[1, 1, dim]
+  let s : Tensor { shape := #[1, 1, dim], dtype := dtype.val, device := device } := Tensor.reshape scale #[1, 1, dim]
   Tensor.mul x (Tensor.expand s #[batch, seq, dim])
 
 private def conv2Frames (melFrames : Nat) : Nat :=
@@ -321,8 +321,8 @@ private def forwardAttention {seq : Nat}
   let v0 : Tensor { shape := #[1, seq, 1280], dtype := dtype.val, device := device } := affine3d x blk.vWeight blk.vBias
 
   let q : Tensor { shape := #[1, seq, 20, 64], dtype := dtype.val, device := device } := Tensor.reshapeChecked q0 #[1, seq, 20, 64]
-  let k : Tensor { shape := #[1, seq, 20, 64], dtype := dtype.val, device := device } := Tensor.reshapeChecked k0 #[1, seq, 20, 64]
-  let v : Tensor { shape := #[1, seq, 20, 64], dtype := dtype.val, device := device } := Tensor.reshapeChecked v0 #[1, seq, 20, 64]
+  let k : Tensor { shape := #[1, seq, 20, 64], dtype := dtype.val, device := device } := Tensor.reshape k0 #[1, seq, 20, 64]
+  let v : Tensor { shape := #[1, seq, 20, 64], dtype := dtype.val, device := device } := Tensor.reshape v0 #[1, seq, 20, 64]
 
   let qh : Tensor { shape := #[1, 20, seq, 64], dtype := dtype.val, device := device } := Tensor.splitHeads q
   let kh : Tensor { shape := #[1, 20, seq, 64], dtype := dtype.val, device := device } := Tensor.splitHeads k
@@ -330,7 +330,7 @@ private def forwardAttention {seq : Nat}
 
   let attn : Tensor { shape := #[1, 20, seq, 64], dtype := dtype.val, device := device } := Tensor.attentionGQA qh kh vh false
   let attn2 : Tensor { shape := #[1, seq, 20, 64], dtype := dtype.val, device := device } := Tensor.joinHeads attn
-  let attn3 : Tensor { shape := #[1, seq, 1280], dtype := dtype.val, device := device } := Tensor.reshapeChecked attn2 #[1, seq, 1280]
+  let attn3 : Tensor { shape := #[1, seq, 1280], dtype := dtype.val, device := device } := Tensor.reshape attn2 #[1, seq, 1280]
   affine3d attn3 blk.oWeight blk.oBias
 
 private def forwardBlock {seq : Nat}
@@ -355,27 +355,27 @@ private def encodeMelChunk {melFrames : Nat}
     (Tensor.reshapeChecked (Tensor.fullInt #[0] 0) #[qFrames]).to device
   else
     Id.run do
-      let x0 : Tensor { shape := #[1, 128, melFrames], dtype := dtype.val, device := device } := Tensor.reshapeChecked mel #[1, 128, melFrames]
+      let x0 : Tensor { shape := #[1, 128, melFrames], dtype := dtype.val, device := device } := Tensor.reshape mel #[1, 128, melFrames]
       let h1 : Tensor { shape := #[1, 1280, melFrames], dtype := dtype.val, device := device } :=
         Tensor.gelu (conv1dWithBias x0 m.conv1Weight m.conv1Bias 1 1 1)
       let h2 : Tensor { shape := #[1, 1280, c2Frames], dtype := dtype.val, device := device } :=
         Tensor.gelu (conv1dWithBias h1 m.conv2Weight m.conv2Bias 2 1 1)
 
-      let xSeq0 : Tensor { shape := #[1, c2Frames, 1280], dtype := dtype.val, device := device } := Tensor.reshapeChecked (Tensor.transpose h2 1 2) #[1, c2Frames, 1280]
+      let xSeq0 : Tensor { shape := #[1, c2Frames, 1280], dtype := dtype.val, device := device } := Tensor.reshape (Tensor.transpose h2 1 2) #[1, c2Frames, 1280]
       let pos : Tensor { shape := #[c2Frames, 1280], dtype := dtype.val, device := device } := Tensor.sliceChecked m.positionalEmbedding 0 0 c2Frames #[c2Frames, 1280]
-      let pos3 : Tensor { shape := #[1, c2Frames, 1280], dtype := dtype.val, device := device } := Tensor.reshapeChecked pos #[1, c2Frames, 1280]
+      let pos3 : Tensor { shape := #[1, c2Frames, 1280], dtype := dtype.val, device := device } := Tensor.reshape pos #[1, c2Frames, 1280]
       let mut xSeq : Tensor { shape := #[1, c2Frames, 1280], dtype := dtype.val, device := device } := Tensor.add xSeq0 pos3
 
       for blk in m.blocks do
         xSeq := forwardBlock blk xSeq
 
-      let vqIn : Tensor { shape := #[1, 1280, c2Frames], dtype := dtype.val, device := device } := Tensor.reshapeChecked (Tensor.transpose xSeq 1 2) #[1, 1280, c2Frames]
+      let vqIn : Tensor { shape := #[1, 1280, c2Frames], dtype := dtype.val, device := device } := Tensor.reshape (Tensor.transpose xSeq 1 2) #[1, 1280, c2Frames]
       let vqDown : Tensor { shape := #[1, 1280, qFrames], dtype := dtype.val, device := device } :=
         conv1dWithBias vqIn m.vqDownWeight m.vqDownBias 2 0 1
       let vqSeq : Tensor { shape := #[qFrames, 1280], dtype := dtype.val, device := device } :=
-        Tensor.reshapeChecked (Tensor.transpose (Tensor.reshapeChecked vqDown #[1, 1280, qFrames]) 1 2) #[qFrames, 1280]
+        Tensor.reshape (Tensor.transpose (Tensor.reshape vqDown #[1, 1280, qFrames]) 1 2) #[qFrames, 1280]
 
-      let x2 : Tensor { shape := #[qFrames, 1], dtype := dtype.val, device := device } := by simpa using (Tensor.reshapeChecked (Tensor.sumDim (Tensor.mul vqSeq vqSeq) 1 true) #[qFrames, 1])
+      let x2 : Tensor { shape := #[qFrames, 1], dtype := dtype.val, device := device } := by simpa using (Tensor.reshape (Tensor.sumDim (Tensor.mul vqSeq vqSeq) 1 true) #[qFrames, 1])
       let e2 : Tensor { shape := #[32768, 1], dtype := dtype.val, device := device } := by simpa using (Tensor.reshapeChecked (Tensor.sumDim (Tensor.mul m.vqCodebook m.vqCodebook) 1 true) #[32768, 1])
       let dot : Tensor { shape := #[qFrames, 32768], dtype := dtype.val, device := device } := Tensor.mm vqSeq (Tensor.transpose2d m.vqCodebook)
       let x2e : Tensor { shape := #[qFrames, 32768], dtype := dtype.val, device := device } := Tensor.expand x2 #[qFrames, 32768]

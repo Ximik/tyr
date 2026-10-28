@@ -135,17 +135,17 @@ def forward {batch img_seq txt_seq hidden_size num_heads head_dim mlp_hidden : N
 
   -- Modulation order is (shift, scale, gate)
   let img_mod1_shift := Tensor.reshapeChecked (sliceTyped img_mod1 1 0 1) #[batch, hidden_size]
-  let img_mod1_scale := Tensor.reshapeChecked (sliceTyped img_mod1 1 1 1) #[batch, hidden_size]
-  let img_mod1_gate := Tensor.reshapeChecked (sliceTyped img_mod1 1 2 1) #[batch, hidden_size]
-  let img_mod2_shift := Tensor.reshapeChecked (sliceTyped img_mod2 1 0 1) #[batch, hidden_size]
-  let img_mod2_scale := Tensor.reshapeChecked (sliceTyped img_mod2 1 1 1) #[batch, hidden_size]
-  let img_mod2_gate := Tensor.reshapeChecked (sliceTyped img_mod2 1 2 1) #[batch, hidden_size]
+  let img_mod1_scale := Tensor.reshape (sliceTyped img_mod1 1 1 1) #[batch, hidden_size]
+  let img_mod1_gate := Tensor.reshape (sliceTyped img_mod1 1 2 1) #[batch, hidden_size]
+  let img_mod2_shift := Tensor.reshape (sliceTyped img_mod2 1 0 1) #[batch, hidden_size]
+  let img_mod2_scale := Tensor.reshape (sliceTyped img_mod2 1 1 1) #[batch, hidden_size]
+  let img_mod2_gate := Tensor.reshape (sliceTyped img_mod2 1 2 1) #[batch, hidden_size]
 
-  let txt_mod1_shift := Tensor.reshapeChecked (sliceTyped txt_mod1 1 0 1) #[batch, hidden_size]
-  let txt_mod1_scale := Tensor.reshapeChecked (sliceTyped txt_mod1 1 1 1) #[batch, hidden_size]
-  let txt_mod1_gate := Tensor.reshapeChecked (sliceTyped txt_mod1 1 2 1) #[batch, hidden_size]
-  let txt_mod2_shift := Tensor.reshapeChecked (sliceTyped txt_mod2 1 0 1) #[batch, hidden_size]
-  let txt_mod2_scale := Tensor.reshapeChecked (sliceTyped txt_mod2 1 1 1) #[batch, hidden_size]
+  let txt_mod1_shift := Tensor.reshape (sliceTyped txt_mod1 1 0 1) #[batch, hidden_size]
+  let txt_mod1_scale := Tensor.reshape (sliceTyped txt_mod1 1 1 1) #[batch, hidden_size]
+  let txt_mod1_gate := Tensor.reshape (sliceTyped txt_mod1 1 2 1) #[batch, hidden_size]
+  let txt_mod2_shift := Tensor.reshape (sliceTyped txt_mod2 1 0 1) #[batch, hidden_size]
+  let txt_mod2_scale := Tensor.reshape (sliceTyped txt_mod2 1 1 1) #[batch, hidden_size]
   let txt_mod2_gate := Tensor.reshapeChecked (sliceTyped txt_mod2 1 2 1) #[batch, hidden_size]
 
   -- Image path: norm1 + modulation

@@ -117,13 +117,13 @@ def computeImagePositionIds (height width : Nat) (device : Device := .CPU) : IO 
       | 2 => index % width
       | _ => 0
     value.toInt64
-  return ((Tensor.fromInt64Array values).to device).reshapeChecked #[1, height * width, 4]
+  return ((Tensor.fromInt64Array values).to device).reshape #[1, height * width, 4]
 
 /-- Text position IDs use the fourth axis for token position. -/
 def computeTextPositionIds (seq_len : Nat) (device : Device := .CPU) : IO (Tensor { device := device, shape := #[1, seq_len, 4], dtype := .Int64 }) := do
   let values := Array.ofFn (n := (seq_len * 4)) fun i =>
     (if i.val % 4 == 3 then i.val / 4 else 0).toInt64
-  return ((Tensor.fromInt64Array values).to device).reshapeChecked #[1, seq_len, 4]
+  return ((Tensor.fromInt64Array values).to device).reshape #[1, seq_len, 4]
 
 /-- Unpack Flux latents from sequence format to VAE spatial format.
     Flux uses 2×2 spatial patchification, packing 32 channels into 128-dim patches.
@@ -143,13 +143,13 @@ def unpackLatents {batch packed_H packed_W : Nat}
     : Tensor { dtype := dtype, device := device, shape := #[batch, 32, packed_H * 2, packed_W * 2] } :=
   -- Step 1: Reshape sequence to spatial grid with packed channels
   -- [batch, seq, 128] → [batch, packed_H, packed_W, 32, 2, 2]
-  let z := Tensor.reshapeChecked z #[batch, packed_H, packed_W, 32, 2, 2]
+  let z := Tensor.reshape z #[batch, packed_H, packed_W, 32, 2, 2]
   -- Step 2: Permute to interleave spatial patches
   -- [batch, packed_H, packed_W, 32, 2, 2] → [batch, 32, packed_H, 2, packed_W, 2]
   let z := Tensor.permute z #[0, 3, 1, 4, 2, 5]
   -- Step 3: Reshape to final VAE format
   -- [batch, 32, packed_H, 2, packed_W, 2] → [batch, 32, packed_H*2, packed_W*2]
-  Tensor.reshapeChecked z #[batch, 32, packed_H * 2, packed_W * 2]
+  Tensor.reshape z #[batch, 32, packed_H * 2, packed_W * 2]
 
 /-- Pack VAE spatial format back to Flux sequence format (inverse of unpackLatents).
     Used when encoding images to latents for img2img or inpainting.

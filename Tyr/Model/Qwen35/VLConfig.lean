@@ -56,10 +56,10 @@ def qwen36_35B_A3B : Qwen35VisionConfig := {
   initializer_range := 0.02
 }
 
-def patchDim (cfg : Qwen35VisionConfig) : Nat :=
+@[simp] def patchDim (cfg : Qwen35VisionConfig) : Nat :=
   cfg.in_channels * cfg.temporal_patch_size * cfg.patch_size * cfg.patch_size
 
-def mergeUnit (cfg : Qwen35VisionConfig) : Nat :=
+@[simp] def mergeUnit (cfg : Qwen35VisionConfig) : Nat :=
   cfg.spatial_merge_size * cfg.spatial_merge_size
 
 def headDim (cfg : Qwen35VisionConfig) : Nat :=
@@ -119,8 +119,8 @@ def qwen35_0_8B : VisionConfig := Qwen35VisionConfig.qwen35_0_8B
 
 def qwen36_35B_A3B : VisionConfig := Qwen35VisionConfig.qwen36_35B_A3B
 
-def patchDim (cfg : VisionConfig) : Nat := Qwen35VisionConfig.patchDim cfg
-def mergeUnit (cfg : VisionConfig) : Nat := Qwen35VisionConfig.mergeUnit cfg
+@[simp] def patchDim (cfg : VisionConfig) : Nat := Qwen35VisionConfig.patchDim cfg
+@[simp] def mergeUnit (cfg : VisionConfig) : Nat := Qwen35VisionConfig.mergeUnit cfg
 def headDim (cfg : VisionConfig) : Nat := Qwen35VisionConfig.headDim cfg
 def mergedTokenCount (cfg : VisionConfig) (nPatches : Nat) : Nat :=
   Qwen35VisionConfig.mergedTokenCount cfg nPatches

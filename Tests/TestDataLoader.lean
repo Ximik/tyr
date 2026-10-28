@@ -62,13 +62,13 @@ private def documentTokens : Array UInt64 :=
   #[91, 92, 0, 101, 102, 0, 201, 202, 203, 0, 301, 302, 0, 401, 402, 0, 501, 502]
 
 @[test] def testBosFinderInit : IO Unit := do
-  let tokens : Tensor { shape := #[documentTokens.size], dtype := .Int64, device := .CPU } := (Tensor.fromInt64Array (documentTokens.map UInt64.toInt64)).reshapeChecked #[documentTokens.size]
+  let tokens : Tensor { shape := #[documentTokens.size], dtype := .Int64, device := .CPU } := (Tensor.fromInt64Array (documentTokens.map UInt64.toInt64)).reshape #[documentTokens.size]
   let finder ← BOSFinder.init tokens 0
   LeanTest.assertEqual finder.bosPositions #[0, 2, 5, 9, 12, 15]
     "BOS boundaries include the initial partition fragment"
 
 @[test] def testDocumentAwareLoader : IO Unit := do
-  let tokens : Tensor { shape := #[documentTokens.size], dtype := .Int64, device := .CPU } := (Tensor.fromInt64Array (documentTokens.map UInt64.toInt64)).reshapeChecked #[documentTokens.size]
+  let tokens : Tensor { shape := #[documentTokens.size], dtype := .Int64, device := .CPU } := (Tensor.fromInt64Array (documentTokens.map UInt64.toInt64)).reshape #[documentTokens.size]
   let finder := (← BOSFinder.init tokens 0).shuffle 42
   let (batch, next) ← finder.getBatch tokens 1 documentTokens.size
   let some batch := batch | throw <| IO.userError "Missing document batch"
@@ -81,7 +81,7 @@ private def documentTokens : Array UInt64 :=
   LeanTest.assertEqual next.currentPos documentTokens.size
 
 @[test] def testShuffleDeterminism : IO Unit := do
-  let tokens : Tensor { shape := #[documentTokens.size], dtype := .Int64, device := .CPU } := (Tensor.fromInt64Array (documentTokens.map UInt64.toInt64)).reshapeChecked #[documentTokens.size]
+  let tokens : Tensor { shape := #[documentTokens.size], dtype := .Int64, device := .CPU } := (Tensor.fromInt64Array (documentTokens.map UInt64.toInt64)).reshape #[documentTokens.size]
   let finder ← BOSFinder.init tokens 0
   let (a, _) ← (finder.shuffle 42).take tokens finder.dataLen
   let (b, _) ← (finder.shuffle 42).take tokens finder.dataLen

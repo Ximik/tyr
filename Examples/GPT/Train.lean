@@ -58,7 +58,7 @@ def getBatch (trainData : Tokens (device := .CPU) #[n]) (batchSize blockSize : N
   let startTensor ← Tensor.randint 0 (maxStart + 1).toInt64 #[]
   let start := startTensor.itemInt.toInt.toNat
   let block := trainData.sliceChecked 0 start totalTokens #[totalTokens]
-  let reshaped := block.reshapeChecked #[batchSize, blockSize + 1]
+  let reshaped := block.reshape #[batchSize, blockSize + 1]
   let x := reshaped.sliceChecked 1 0 blockSize #[batchSize, blockSize]
   let y := reshaped.sliceChecked 1 1 blockSize #[batchSize, blockSize]
   return (x.to device, y.to device)

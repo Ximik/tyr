@@ -130,7 +130,7 @@ def forwardLogProbsPure {seq vocab batch : Nat} {Params : Type}
 /-- Per-token cross entropy against a dense one-hot/probability target. -/
 def denseTargetNll {batch seq vocab : Nat}
     (logProbs target : Tensor { device := device, shape := #[batch, seq, vocab], dtype := .Float32 }) : Tensor { device := device, shape := #[batch, seq], dtype := .Float32 } :=
-  (Tensor.mulScalar (Tensor.sumDim (target * logProbs) 2) (-1.0)).reshapeChecked #[batch, seq]
+  (Tensor.mulScalar (Tensor.sumDim (target * logProbs) 2) (-1.0)).reshape #[batch, seq]
 
 private def maybeApplyLossWeight {batch seq : Nat} {Params : Type}
     (model : FlowDenoiser (device := device) seq vocab Params)

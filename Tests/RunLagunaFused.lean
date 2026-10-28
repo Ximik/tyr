@@ -150,7 +150,7 @@ private def tileToShape {s : Shape} {source : Device} (src : SomeDTypeTensor s s
     cur := (Tensor.catManyChecked #[cur, cur] 0 #[n * 2]).packShape
     n := n * 2
   let clipped := cur.2.sliceChecked 0 0 numel #[numel]
-  pure ⟨src.1, clipped.reshapeChecked shape⟩
+  pure ⟨src.1, clipped.reshape shape⟩
 
 private def bfloatDynamic {σ : StaticSpec} (t : Tensor σ) : Tensor {σ with dtype := .BFloat16} :=
   t.toBFloat16
@@ -293,11 +293,11 @@ private def runCorrectness (path : String) (device : Device) : IO Unit := do
   let yExpD : Tensor { shape := #[5, 64], device := device, dtype := .BFloat16 } := (← requireBF16 yExp).to device
   let mut worst := 0.0
   for i in [:5] do
-    let x1 : Tensor { shape := #[1, 64], device := device, dtype := .BFloat16 } := Tensor.reshapeChecked (sliceTyped xD 0 i 1) #[1, 64]
+    let x1 : Tensor { shape := #[1, 64], device := device, dtype := .BFloat16 } := Tensor.reshape (sliceTyped xD 0 i 1) #[1, 64]
     let yFused ← block.forward2d testCfg x1
     let yEager ← block.forward2d testCfg x1 false
     let (maxAbs, maxRel) ← maxErrors yFused yEager
-    let yExpRow : Tensor { shape := #[1, 64], device := device, dtype := .BFloat16 } := Tensor.reshapeChecked (sliceTyped yExpD 0 i 1) #[1, 64]
+    let yExpRow : Tensor { shape := #[1, 64], device := device, dtype := .BFloat16 } := Tensor.reshape (sliceTyped yExpD 0 i 1) #[1, 64]
     let (refAbs, _) ← maxErrors yFused yExpRow
     -- The fused kernel evaluates the exact FP4 math in FP32, while the eager
     -- path rounds dequantized weights to BF16 and accumulates in BF16, so

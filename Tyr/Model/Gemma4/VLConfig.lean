@@ -26,9 +26,9 @@ structure Gemma4VisionConfig where
 
 namespace Gemma4VisionConfig
 
-def in_channels (_cfg : Gemma4VisionConfig) : Nat := 3
+@[simp] def in_channels (_cfg : Gemma4VisionConfig) : Nat := 3
 
-def patchDim (cfg : Gemma4VisionConfig) : Nat :=
+@[simp] def patchDim (cfg : Gemma4VisionConfig) : Nat :=
   in_channels cfg * cfg.patch_size * cfg.patch_size
 
 def pooledTokenCount (cfg : Gemma4VisionConfig) (patchRows patchCols : Nat) : Nat :=
@@ -110,8 +110,8 @@ abbrev VLConfig := Gemma4VLConfig
 
 namespace VisionConfig
 
-def in_channels (cfg : VisionConfig) : Nat := Gemma4VisionConfig.in_channels cfg
-def patchDim (cfg : VisionConfig) : Nat := Gemma4VisionConfig.patchDim cfg
+@[simp] def in_channels (cfg : VisionConfig) : Nat := Gemma4VisionConfig.in_channels cfg
+@[simp] def patchDim (cfg : VisionConfig) : Nat := Gemma4VisionConfig.patchDim cfg
 def pooledTokenCount (cfg : VisionConfig) (patchRows patchCols : Nat) : Nat :=
   Gemma4VisionConfig.pooledTokenCount cfg patchRows patchCols
 

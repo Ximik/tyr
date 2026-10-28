@@ -178,8 +178,8 @@ def runPretraining (cfg : PretrainingConfig)
     let xFlat : Tokens (device := .CPU) #[batchLen] := trainData.sliceChecked 0 startIdx batchLen #[batchLen]
     let yFlat : Tokens (device := .CPU) #[batchLen] := trainData.sliceChecked 0 (startIdx + 1) batchLen #[batchLen]
 
-    let x := (Tensor.reshapeChecked xFlat #[cfg.deviceBatchSize, cfg.seqLen]).to device
-    let y := (Tensor.reshapeChecked yFlat #[cfg.deviceBatchSize, cfg.seqLen]).to device
+    let x := (Tensor.reshape xFlat #[cfg.deviceBatchSize, cfg.seqLen]).to device
+    let y := (Tensor.reshape yFlat #[cfg.deviceBatchSize, cfg.seqLen]).to device
 
     -- Training step
     let (newParams, newOptState, loss) ←

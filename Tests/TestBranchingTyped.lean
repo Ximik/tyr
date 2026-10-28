@@ -57,8 +57,8 @@ private def fixture : BranchingBridgeResult MoleculeAtom := {
   LeanTest.assertEqual (← copied.toUInt64Array) #[1, 2]
 
 @[test] def testBranchingMuonPreservesBF16Rounding : IO Unit := do
-  let param := (Tensor.fromFloatArray #[1, 2, 3, 4, 5, 6]).reshapeChecked #[3, 2]
-  let grad := (Tensor.fromFloatArray #[0.3, -0.2, 0.7, 0.4, -0.5, 0.9]).reshapeChecked #[3, 2]
+  let param := (Tensor.fromFloatArray #[1, 2, 3, 4, 5, 6]).reshape #[3, 2]
+  let grad := (Tensor.fromFloatArray #[0.3, -0.2, 0.7, 0.4, -0.5, 0.9]).reshape #[3, 2]
   let state := initMoleculeMuonState param
   let momentum := grad * (0.05 : Float)
   let nesterov := grad * (0.05 : Float) + momentum * (0.95 : Float)
@@ -68,7 +68,7 @@ private def fixture : BranchingBridgeResult MoleculeAtom := {
   let scalarDirection := (Tensor.mulScalar native (lr * aspect)).toFloat32
   let (scalarResult, _) ← moleculeMuonStep param grad state lr 0.0 0.95 5
   LeanTest.assertEqual (← scalarResult.toFloatArray) (← (param - scalarDirection).toFloatArray)
-  let lrTensor := (Tensor.fromFloatArray #[lr]).reshapeChecked #[]
+  let lrTensor := (Tensor.fromFloatArray #[lr]).reshape #[]
   let tensorDirection := (mulTensorScalar (Tensor.mulScalar native aspect) lrTensor).toFloat32
   let (tensorResult, _) ← moleculeMuonStepT param grad state lrTensor 0.0 0.95 5
   LeanTest.assertEqual (← tensorResult.toFloatArray) (← (param - tensorDirection).toFloatArray)

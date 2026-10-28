@@ -21,7 +21,7 @@ def testFLMSamplingAllocationFailuresAreRecoverable : IO Unit := do
     pure ())
 
 private def tinyTokens : Tensor { shape := #[(2 : Nat), 3], dtype := .Int64, device := .CPU } :=
-  Tensor.reshapeChecked (Tensor.fromInt64Array #[0, 1, 2, 3, 4, 0]) #[(2 : Nat), 3]
+  Tensor.reshape (Tensor.fromInt64Array #[0, 1, 2, 3, 4, 0]) #[(2 : Nat), 3]
 
 private def identityDenoiser : FlowDenoiser (device := .CPU) 3 5 Unit :=
   { forward := fun {_batch} _ x _ _ => pure x

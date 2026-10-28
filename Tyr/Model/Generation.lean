@@ -41,11 +41,8 @@ def sampleFromLogits {batch vocab : Nat}
     : IO (Tensor { device := device, shape := #[batch], dtype := .Int64 }) := do
   match strategy with
   | .greedy =>
-    -- `argmax` removes dim 1 via `reduceShape`, which does not reduce at
-    -- symbolic dims; `reshapeChecked` re-establishes `#[batch]` with a
-    -- runtime check.
     let indices ← IO.ofExcept (Tensor.argmax? logits 1)
-    IO.ofExcept (Tensor.reshapeChecked? indices #[batch])
+    pure (indices.reshape #[batch])
   | .multinomial temperature topK topP =>
     if temperature <= 0.0 then
       throw <| IO.userError s!"multinomial sampling requires temperature > 0, got {temperature}"
@@ -60,7 +57,7 @@ def sampleFromLogits {batch vocab : Nat}
       else Tensor.topPFilter filtered topP
     let probs := Tensor.softmax filtered (-1) rfl
     let sampled ← Tensor.multinomial probs 1 false
-    pure (Tensor.reshapeChecked sampled #[batch])
+    pure (Tensor.reshape sampled #[batch])
 
 /-! ## EOS / Finish Helpers -/
 

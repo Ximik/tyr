@@ -18,8 +18,8 @@ open torch.diffusion
 def testMaskSchedule : IO Unit := do
   let schedule := MaskedDiffusionSchedule.init 64 0 16
   -- Verify mask_probs goes from 1/64 to ~1.0
-  let firstProb := (schedule.mask_probs.sliceChecked 0 0 1 #[1] |>.reshapeChecked #[]).item
-  let lastProb := (schedule.mask_probs.sliceChecked 0 63 1 #[1] |>.reshapeChecked #[]).item
+  let firstProb := (schedule.mask_probs.sliceChecked 0 0 1 #[1] |>.reshape #[]).item
+  let lastProb := (schedule.mask_probs.sliceChecked 0 63 1 #[1] |>.reshape #[]).item
   LeanTest.assertTrue (firstProb > 0.01) "First prob > 0.01"
   LeanTest.assertTrue (firstProb < 0.05) "First prob < 0.05"
   LeanTest.assertTrue (lastProb > 0.95) "Last prob > 0.95"
@@ -147,7 +147,7 @@ private def checkpointConfig : Config := {
   let params ← DiffusionParams.init cfg
   let rotary ← RotaryCache.init cfg.seq_len cfg.headDim
   let schedule := MaskedDiffusionSchedule.init 1 0 2
-  let x := (Tensor.fromInt64Array #[1, 2, 3, 4]).reshapeChecked #[1, 4]
+  let x := (Tensor.fromInt64Array #[1, 2, 3, 4]).reshape #[1, 4]
   let opt := Optim.adamw (α := DiffusionParams cfg) (lr := 0.001)
   let trainCfg : diffusion.train.TrainConfig := { gradClip := 0 }
   let (trained, state, loss) ← diffusion.train.trainStep trainCfg params (opt.init params) schedule x rotary 0.001
@@ -172,10 +172,10 @@ private def checkpointConfig : Config := {
   let cfg := { checkpointConfig with n_layer := 0 }
   let params ← DiffusionParams.init cfg
   let head := Tensor.fromFloatArray #[0,0,0,0, 1,1,1,1, 0,0,0,0, 0,0,0,0,
-    0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0] |>.reshapeChecked #[8,4]
+    0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0] |>.reshape #[8,4]
   let params := { params with token_emb := Tensor.ones #[8,4], time_emb := Tensor.ones #[2,4], output_head := head }
   let rotary ← RotaryCache.init cfg.seq_len cfg.headDim
-  let contextIds := Tensor.fromInt64Array #[0,3] |>.reshapeChecked #[1,2]
+  let contextIds := Tensor.fromInt64Array #[0,3] |>.reshape #[1,2]
   let topk ← sampleTopK params rotary 2 1.0 4 (some contextIds)
   let confidence ← sampleConfidence params rotary 0.99 1.0 4 (some contextIds)
   LeanTest.assertEqual (← topk.toUInt64Array) #[0,3,1,1]

@@ -54,7 +54,7 @@ private def writeFixture (directory : System.FilePath) (mode : Nat)
         LeanTest.assertEqual model.model.norm.1 .Float32
         LeanTest.assertEqual (← model.model.norm.2.toFloatArray) #[0.125, 0.125, 0.125, 0.125]
         LeanTest.assertEqual model.tieWordEmbeddings (mode == 3)
-        let ids := (Tensor.fromInt64Array #[0, 1]).reshapeChecked #[1, 2]
+        let ids := (Tensor.fromInt64Array #[0, 1]).reshape #[1, 2]
         let logits ← model.forward cfg ids
         LeanTest.assertEqual logits.actualSpec.dtype .BFloat16
         LeanTest.assertTrue ((← logits.toFloatArray).all Float.isFinite)

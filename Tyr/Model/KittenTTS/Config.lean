@@ -66,7 +66,7 @@ def sourceUpsample (cfg : GeneratorConfig) : Nat :=
 def freqBins (cfg : GeneratorConfig) : Nat :=
   cfg.genIstftNFft / 2 + 1
 
-def stftFeatureChannels (cfg : GeneratorConfig) : Nat :=
+@[simp] def stftFeatureChannels (cfg : GeneratorConfig) : Nat :=
   2 * freqBins cfg
 
 def finalChannels (cfg : GeneratorConfig) : Nat :=
@@ -104,7 +104,7 @@ def stageInFrames (cfg : GeneratorConfig) (baseFrames : Nat) (idx : Nat) : Nat :
 def stageUpsampledFrames (cfg : GeneratorConfig) (baseFrames : Nat) (idx : Nat) : Nat :=
   baseFrames * prefixUpsample cfg (idx + 1)
 
-def harFrames (cfg : GeneratorConfig) (baseFrames : Nat) : Nat :=
+@[simp] def harFrames (cfg : GeneratorConfig) (baseFrames : Nat) : Nat :=
   totalUpsample cfg * baseFrames + 1
 
 def stageOutFrames (cfg : GeneratorConfig) (baseFrames : Nat) (idx : Nat) : Nat :=

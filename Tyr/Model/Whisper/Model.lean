@@ -383,10 +383,10 @@ def encode {batch frames : Nat} {featureDType : DType}
     Tensor.reshapeChecked
       (Tensor.gelu (Tensor.conv1dGroups x1 m.encoderConv2Weight m.encoderConv2Bias 2 1 1 1))
       #[batch, cfg.dModel, outSeq]
-  let x2t : Tensor { dtype := dtype, device := device, shape := #[batch, outSeq, cfg.dModel] } := (Tensor.permute x2 #[0, 2, 1]).reshapeChecked #[batch, outSeq, cfg.dModel]
+  let x2t : Tensor { dtype := dtype, device := device, shape := #[batch, outSeq, cfg.dModel] } := (Tensor.permute x2 #[0, 2, 1]).reshape #[batch, outSeq, cfg.dModel]
   let pos : Tensor { dtype := dtype, device := device, shape := #[outSeq, cfg.dModel] } := sliceTyped m.encoderPositionalEmbedding 0 0 outSeq
   let posB : Tensor { dtype := dtype, device := device, shape := #[batch, outSeq, cfg.dModel] } :=
-    Tensor.expand (Tensor.reshapeChecked pos #[1, outSeq, cfg.dModel]) #[batch, outSeq, cfg.dModel]
+    Tensor.expand (Tensor.reshape pos #[1, outSeq, cfg.dModel]) #[batch, outSeq, cfg.dModel]
   let mut h : Tensor { dtype := dtype, device := device, shape := #[batch, outSeq, cfg.dModel] } := Tensor.add x2t posB
   for layer in m.encoderLayers do
     h := layer.forward h
@@ -403,7 +403,7 @@ def decode {batch seq encSeq : Nat}
   let tokEmb : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.dModel] } := Tensor.embedding inputIds m.decoderTokenEmbedding
   let pos : Tensor { dtype := dtype, device := device, shape := #[seq, cfg.dModel] } := sliceTyped m.decoderPositionalEmbedding 0 0 seq
   let posB : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.dModel] } :=
-    Tensor.expand (Tensor.reshapeChecked pos #[1, seq, cfg.dModel]) #[batch, seq, cfg.dModel]
+    Tensor.expand (Tensor.reshape pos #[1, seq, cfg.dModel]) #[batch, seq, cfg.dModel]
   let mut h : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.dModel] } := Tensor.add tokEmb posB
   for layer in m.decoderLayers do
     h := layer.forward h encoderHidden
@@ -486,7 +486,7 @@ def decodeStepWithCache {batch encSeq : Nat}
   let tokEmb : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.dModel] } := Tensor.embedding tokenIds m.model.decoderTokenEmbedding
   let pos : Tensor { dtype := dtype, device := device, shape := #[1, cfg.dModel] } := sliceTyped m.model.decoderPositionalEmbedding 0 position 1
   let posB : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.dModel] } :=
-    Tensor.expand (Tensor.reshapeChecked pos #[1, 1, cfg.dModel]) #[batch, 1, cfg.dModel]
+    Tensor.expand (Tensor.reshape pos #[1, 1, cfg.dModel]) #[batch, 1, cfg.dModel]
   let mut h : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.dModel] } := Tensor.add tokEmb posB
   let mut nextCaches := selfCaches
   for i in [:m.model.decoderLayers.size] do
@@ -515,7 +515,7 @@ def decodeStepWithCache {batch encSeq : Nat}
     nextCaches := nextCaches.set! i cacheNext
   let hiddenNorm : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.dModel] } := m.model.decoderLayerNorm.forward3d h
   let logits3 : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.vocabSize] } := Tensor.linear3d hiddenNorm m.projOut
-  let logits2 : Tensor { dtype := dtype, device := device, shape := #[batch, cfg.vocabSize] } := Tensor.reshapeChecked logits3 #[batch, cfg.vocabSize]
+  let logits2 : Tensor { dtype := dtype, device := device, shape := #[batch, cfg.vocabSize] } := Tensor.reshape logits3 #[batch, cfg.vocabSize]
   pure (logits2, nextCaches)
 
 end WhisperForConditionalGeneration
