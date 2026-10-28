@@ -135,7 +135,7 @@ private def stackBank (dtype : DType) (tensors : Array (ShapePackedTensor dtype 
 
 /-- Load one attention block (`numHeads` is the per-layer query head count).
     `self_attn.{k,v}_scale` scalars are intentionally not loaded. -/
-private def loadAttention (src : WeightSource) (cfg : Config) (layerIdx numHeads : UInt64)
+private def loadAttention (src : WeightSource) (cfg : Config) (layerIdx numHeads : Nat)
     (device : Device) (dtype : DType) : IO (LagunaAttention (device := device) cfg numHeads dtype) := do
   let p := s!"model.layers.{layerIdx}.self_attn"
   let q ← src.loadCandidates (nameCandidates s!"{p}.q_proj.weight")
@@ -161,7 +161,7 @@ private def loadAttention (src : WeightSource) (cfg : Config) (layerIdx numHeads
   }
 
 /-- Load the dense SwiGLU MLP of a `mlp_only_layers` layer. -/
-private def loadDenseMLP (src : WeightSource) (cfg : Config) (layerIdx : UInt64)
+private def loadDenseMLP (src : WeightSource) (cfg : Config) (layerIdx : Nat)
     (device : Device) (dtype : DType) : IO (LagunaMLP (device := device) cfg dtype) := do
   let p := s!"model.layers.{layerIdx}.mlp"
   let gate ← src.loadCandidates (nameCandidates s!"{p}.gate_proj.weight")
@@ -205,16 +205,16 @@ private def loadPackedExpertBanks (src : WeightSource) (p : String) (cfg : Confi
   let e := cfg.num_experts
   let mi := cfg.moe_intermediate_size
   let h := cfg.hidden_size
-  let mut gateP : Array (ShapePackedTensor .UInt8 .CPU) := Array.mkEmpty e.toNat
-  let mut gateS : Array (ShapePackedTensor .Float8E4M3FN .CPU) := Array.mkEmpty e.toNat
-  let mut gateG : Array (ShapePackedTensor .Float32 .CPU) := Array.mkEmpty e.toNat
-  let mut upP : Array (ShapePackedTensor .UInt8 .CPU) := Array.mkEmpty e.toNat
-  let mut upS : Array (ShapePackedTensor .Float8E4M3FN .CPU) := Array.mkEmpty e.toNat
-  let mut upG : Array (ShapePackedTensor .Float32 .CPU) := Array.mkEmpty e.toNat
-  let mut downP : Array (ShapePackedTensor .UInt8 .CPU) := Array.mkEmpty e.toNat
-  let mut downS : Array (ShapePackedTensor .Float8E4M3FN .CPU) := Array.mkEmpty e.toNat
-  let mut downG : Array (ShapePackedTensor .Float32 .CPU) := Array.mkEmpty e.toNat
-  for i in [:e.toNat] do
+  let mut gateP : Array (ShapePackedTensor .UInt8 .CPU) := Array.mkEmpty e
+  let mut gateS : Array (ShapePackedTensor .Float8E4M3FN .CPU) := Array.mkEmpty e
+  let mut gateG : Array (ShapePackedTensor .Float32 .CPU) := Array.mkEmpty e
+  let mut upP : Array (ShapePackedTensor .UInt8 .CPU) := Array.mkEmpty e
+  let mut upS : Array (ShapePackedTensor .Float8E4M3FN .CPU) := Array.mkEmpty e
+  let mut upG : Array (ShapePackedTensor .Float32 .CPU) := Array.mkEmpty e
+  let mut downP : Array (ShapePackedTensor .UInt8 .CPU) := Array.mkEmpty e
+  let mut downS : Array (ShapePackedTensor .Float8E4M3FN .CPU) := Array.mkEmpty e
+  let mut downG : Array (ShapePackedTensor .Float32 .CPU) := Array.mkEmpty e
+  for i in [:e] do
     let ep := s!"{p}.experts.{i}"
     -- gate_proj / up_proj: packed [mi, h/2], scales [mi, h/16], global scalar.
     let gp ← src.load s!"{ep}.gate_proj.weight_packed" #[mi, h / 2] Device.CPU
@@ -260,7 +260,7 @@ private def loadPackedExpertBanks (src : WeightSource) (p : String) (cfg : Confi
 /-- Load one sparse MoE block, auto-detecting the expert serialization:
     fused dense BF16 banks (layout A) when `mlp.experts.gate_up_proj`
     resolves, otherwise per-expert NVFP4-packed tensors (layout B). -/
-private def loadSparseMoe (src : WeightSource) (cfg : Config) (layerIdx : UInt64)
+private def loadSparseMoe (src : WeightSource) (cfg : Config) (layerIdx : Nat)
     (device : Device) (dtype : DType) : IO (LagunaSparseMoeBlock (device := device) cfg dtype) := do
   let p := s!"model.layers.{layerIdx}.mlp"
   let e := cfg.num_experts
@@ -314,7 +314,7 @@ private def loadSparseMoe (src : WeightSource) (cfg : Config) (layerIdx : UInt64
 
 /-- Load one decoder layer: exactly one attention variant (by
     `Config.layerType`) and one FFN variant (by `Config.isDenseMlpLayer`). -/
-private def loadLayer (src : WeightSource) (cfg : Config) (layerIdx : UInt64)
+private def loadLayer (src : WeightSource) (cfg : Config) (layerIdx : Nat)
     (device : Device) (dtype : DType) : IO (LagunaLayer (device := device) cfg dtype) := do
   let p := s!"model.layers.{layerIdx}"
   let inputNorm ← src.loadCandidates (nameCandidates s!"{p}.input_layernorm.weight")
@@ -367,12 +367,12 @@ private def loadCore (src : WeightSource) (desc : String) (cfg : Config)
 
   let dtype := embedTokens.1
   let floating ← IO.ofExcept (DType.realFloating? dtype)
-  let mut layers : Array (LagunaLayer (device := device) cfg dtype) := Array.mkEmpty cfg.num_hidden_layers.toNat
-  for i in [:cfg.num_hidden_layers.toNat] do
-    let layer ← loadLayer src cfg i.toUInt64 device dtype
+  let mut layers : Array (LagunaLayer (device := device) cfg dtype) := Array.mkEmpty cfg.num_hidden_layers
+  for i in [:cfg.num_hidden_layers] do
+    let layer ← loadLayer src cfg i device dtype
     layers := layers.push layer
-    if (i + 1) % 4 == 0 || i + 1 == cfg.num_hidden_layers.toNat then
-      log.onInfo s!"  loaded layers {i + 1}/{cfg.num_hidden_layers.toNat}"
+    if (i + 1) % 4 == 0 || i + 1 == cfg.num_hidden_layers then
+      log.onInfo s!"  loaded layers {i + 1}/{cfg.num_hidden_layers}"
 
   let normW ← src.loadCandidates (nameCandidates "model.norm.weight") #[cfg.hidden_size] device
 

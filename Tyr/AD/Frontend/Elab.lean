@@ -35,7 +35,7 @@ structure PrimitiveFrontendSpec where
   deriving Inhabited, Repr
 
 private def shapeToNatArray (shape : Shape) : Array Nat :=
-  Array.map UInt64.toNat shape
+  shape
 
 private unsafe def evalClosedShapeExpr? (shapeExpr : Expr) : MetaM (Option (Array Nat)) := do
   let shapeExpr ← whnf (← instantiateMVars shapeExpr)

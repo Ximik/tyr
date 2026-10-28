@@ -9,15 +9,15 @@ namespace torch.gemma4
 
 /-- Vision backbone config published in Gemma 4 `config.json`. -/
 structure Gemma4VisionConfig where
-  hidden_size : UInt64 := 768
-  intermediate_size : UInt64 := 3072
-  num_hidden_layers : UInt64 := 16
-  num_attention_heads : UInt64 := 12
-  num_key_value_heads : UInt64 := 12
-  head_dim : UInt64 := 64
-  patch_size : UInt64 := 16
-  pooling_kernel_size : UInt64 := 3
-  position_embedding_size : UInt64 := 10240
+  hidden_size : Nat := 768
+  intermediate_size : Nat := 3072
+  num_hidden_layers : Nat := 16
+  num_attention_heads : Nat := 12
+  num_key_value_heads : Nat := 12
+  head_dim : Nat := 64
+  patch_size : Nat := 16
+  pooling_kernel_size : Nat := 3
+  position_embedding_size : Nat := 10240
   rms_norm_eps : Float := 1e-6
   rope_theta : Float := 100.0
   standardize : Bool := false
@@ -26,12 +26,12 @@ structure Gemma4VisionConfig where
 
 namespace Gemma4VisionConfig
 
-def in_channels (_cfg : Gemma4VisionConfig) : UInt64 := 3
+def in_channels (_cfg : Gemma4VisionConfig) : Nat := 3
 
-def patchDim (cfg : Gemma4VisionConfig) : UInt64 :=
+def patchDim (cfg : Gemma4VisionConfig) : Nat :=
   in_channels cfg * cfg.patch_size * cfg.patch_size
 
-def pooledTokenCount (cfg : Gemma4VisionConfig) (patchRows patchCols : UInt64) : UInt64 :=
+def pooledTokenCount (cfg : Gemma4VisionConfig) (patchRows patchCols : Nat) : Nat :=
   let pool := if cfg.pooling_kernel_size == 0 then 1 else cfg.pooling_kernel_size
   (patchRows / pool) * (patchCols / pool)
 
@@ -44,16 +44,16 @@ structure Gemma4ImageProcessorConfig where
   do_normalize : Bool := false
   image_mean : Array Float := #[0.0, 0.0, 0.0]
   image_std : Array Float := #[1.0, 1.0, 1.0]
-  image_seq_length : UInt64 := 280
-  max_soft_tokens : UInt64 := 280
-  patch_size : UInt64 := 16
-  pooling_kernel_size : UInt64 := 3
+  image_seq_length : Nat := 280
+  max_soft_tokens : Nat := 280
+  patch_size : Nat := 16
+  pooling_kernel_size : Nat := 3
   rescale_factor : Float := 1.0 / 255.0
   deriving Repr, Inhabited
 
 namespace Gemma4ImageProcessorConfig
 
-def softTokenCount (cfg : Gemma4ImageProcessorConfig) : UInt64 :=
+def softTokenCount (cfg : Gemma4ImageProcessorConfig) : Nat :=
   if cfg.max_soft_tokens > 0 then cfg.max_soft_tokens else cfg.image_seq_length
 
 end Gemma4ImageProcessorConfig
@@ -68,7 +68,7 @@ structure Gemma4VLConfig where
   eoi_token_id : UInt64 := 258882
   video_token_id : UInt64 := 258884
   audio_token_id : UInt64 := 258881
-  vision_soft_tokens_per_image : UInt64 := 280
+  vision_soft_tokens_per_image : Nat := 280
   tie_word_embeddings : Bool := true
   deriving Repr, Inhabited
 
@@ -98,7 +98,7 @@ def normalize (cfg : Gemma4VLConfig) : Gemma4VLConfig :=
       if cfg.vision_soft_tokens_per_image == 0 then imageProc.softTokenCount else cfg.vision_soft_tokens_per_image
   }
 
-def imageSoftTokenCount (cfg : Gemma4VLConfig) : UInt64 :=
+def imageSoftTokenCount (cfg : Gemma4VLConfig) : Nat :=
   let procBudget := cfg.image_processor.softTokenCount
   if procBudget > 0 then procBudget else cfg.vision_soft_tokens_per_image
 
@@ -110,23 +110,23 @@ abbrev VLConfig := Gemma4VLConfig
 
 namespace VisionConfig
 
-def in_channels (cfg : VisionConfig) : UInt64 := Gemma4VisionConfig.in_channels cfg
-def patchDim (cfg : VisionConfig) : UInt64 := Gemma4VisionConfig.patchDim cfg
-def pooledTokenCount (cfg : VisionConfig) (patchRows patchCols : UInt64) : UInt64 :=
+def in_channels (cfg : VisionConfig) : Nat := Gemma4VisionConfig.in_channels cfg
+def patchDim (cfg : VisionConfig) : Nat := Gemma4VisionConfig.patchDim cfg
+def pooledTokenCount (cfg : VisionConfig) (patchRows patchCols : Nat) : Nat :=
   Gemma4VisionConfig.pooledTokenCount cfg patchRows patchCols
 
 end VisionConfig
 
 namespace ImageProcessorConfig
 
-def softTokenCount (cfg : ImageProcessorConfig) : UInt64 := Gemma4ImageProcessorConfig.softTokenCount cfg
+def softTokenCount (cfg : ImageProcessorConfig) : Nat := Gemma4ImageProcessorConfig.softTokenCount cfg
 
 end ImageProcessorConfig
 
 namespace VLConfig
 
 def normalize (cfg : VLConfig) : VLConfig := Gemma4VLConfig.normalize cfg
-def imageSoftTokenCount (cfg : VLConfig) : UInt64 := Gemma4VLConfig.imageSoftTokenCount cfg
+def imageSoftTokenCount (cfg : VLConfig) : Nat := Gemma4VLConfig.imageSoftTokenCount cfg
 
 end VLConfig
 

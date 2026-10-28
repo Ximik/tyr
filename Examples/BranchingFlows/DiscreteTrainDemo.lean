@@ -26,7 +26,7 @@ private def uniformTimeDist : TimeDist :=
 private def discreteBridge (_ : Unit) (_x0 x1 : Nat) (_t0 _t1 : Float) : Nat :=
   x1
 
-structure ToyParams (vocab hidden : UInt64) where
+structure ToyParams (vocab hidden : Nat) where
   embed : Tensor { dtype := .Float32, shape := #[vocab, hidden], device := .CPU }
   proj : Tensor { dtype := .Float32, shape := #[vocab, hidden], device := .CPU }
   splitW : Tensor { dtype := .Float32, shape := #[1, hidden], device := .CPU }
@@ -35,7 +35,7 @@ structure ToyParams (vocab hidden : UInt64) where
 
 namespace ToyParams
 
-def init (vocab hidden : UInt64) : IO (ToyParams vocab hidden) := do
+def init (vocab hidden : Nat) : IO (ToyParams vocab hidden) := do
   let embed ← randnDynamic #[vocab, hidden]
   let proj ← randnDynamic #[vocab, hidden]
   let splitW ← randnDynamic #[1, hidden]
@@ -44,7 +44,7 @@ def init (vocab hidden : UInt64) : IO (ToyParams vocab hidden) := do
 
 end ToyParams
 
-def toyModel {maxLen vocab hidden : UInt64} : BranchingModel (device := .CPU) maxLen vocab (ToyParams vocab hidden) :=
+def toyModel {maxLen vocab hidden : Nat} : BranchingModel (device := .CPU) maxLen vocab (ToyParams vocab hidden) :=
   { forward := fun {batch} params state _t => do
       let emb := Tensor.embedding (batch := batch) (seq := maxLen) (vocab := vocab) (embed := hidden) state params.embed
       let bias : Tensor { dtype := .Float32, shape := #[vocab], device := .CPU } := zerosDynamic #[vocab]
@@ -56,9 +56,9 @@ def toyModel {maxLen vocab hidden : UInt64} : BranchingModel (device := .CPU) ma
       pure (logits, splitLogits, delLogits) }
 
 def runDemo : IO Unit := do
-  let vocab : UInt64 := 6
-  let hidden : UInt64 := 8
-  let maxLen : UInt64 := 16
+  let vocab : Nat := 6
+  let hidden : Nat := 8
+  let maxLen : Nat := 16
 
   let tokens : Array Nat := #[1, 2, 3, 4, 2, 1]
   let groups : Array Int := Array.replicate tokens.size 0
@@ -71,7 +71,7 @@ def runDemo : IO Unit := do
   let (bridgeResult, _rng) :=
     branchingBridge discreteBridge () x0Sampler x1s times
       uniformTimeDist uniformTimeDist (sequentialUniformPolicy Nat) merger
-      (maxLen := some maxLen.toNat)
+      (maxLen := some maxLen)
       (rng := { state := 7 })
 
   let cfg : BranchingTrainConfig := {

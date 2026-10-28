@@ -9,10 +9,10 @@ open torch
 open Tyr.Modular
 open Tyr.AD
 
-private def vectorToColumn {n : UInt64} (v : Tensor { shape := #[n], dtype := .Float32, device := .CPU }) : Tensor { shape := #[n, 1], dtype := .Float32, device := .CPU } :=
+private def vectorToColumn {n : Nat} (v : Tensor { shape := #[n], dtype := .Float32, device := .CPU }) : Tensor { shape := #[n, 1], dtype := .Float32, device := .CPU } :=
   Tensor.reshape v #[n, 1] (by simp [TensorSpec.numelOfShape])
 
-private def columnToVector {n : UInt64} (v : Tensor { shape := #[n, 1], dtype := .Float32, device := .CPU }) : Tensor { shape := #[n], dtype := .Float32, device := .CPU } :=
+private def columnToVector {n : Nat} (v : Tensor { shape := #[n, 1], dtype := .Float32, device := .CPU }) : Tensor { shape := #[n], dtype := .Float32, device := .CPU } :=
   Tensor.reshape v #[n] (by simp [TensorSpec.numelOfShape])
 
 @[test]

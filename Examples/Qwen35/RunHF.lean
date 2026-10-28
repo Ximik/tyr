@@ -36,10 +36,10 @@ structure Args where
   promptFile : Option String := none
   imagePath : Option String := none
   videoPath : Option String := none
-  videoMaxFrames : UInt64 := 64
-  videoFrameStride : UInt64 := 1
-  batchSize : UInt64 := 1
-  maxNewTokens : UInt64 := 32
+  videoMaxFrames : Nat := 64
+  videoFrameStride : Nat := 1
+  batchSize : Nat := 1
+  maxNewTokens : Nat := 32
   stream : Bool := false
   multimodal : Bool := false
   enableThinking : Bool := false
@@ -106,16 +106,16 @@ private def encodePromptToIds
     else tokenizer.qwen35.chatTemplate prompt
   (tokenizer.qwen35.encodeText tok text).map (fun t => t.toUInt64)
 
-private def visionPrefixIds (cfg : VLConfig) (imageTokenCount videoTokenCount : UInt64) : Array UInt64 :=
+private def visionPrefixIds (cfg : VLConfig) (imageTokenCount videoTokenCount : Nat) : Array UInt64 :=
   Id.run do
     let mut out : Array UInt64 := #[]
     if imageTokenCount > 0 then
       out := out.push cfg.vision_start_token_id
-      for _ in [:imageTokenCount.toNat] do out := out.push cfg.image_token_id
+      for _ in [:imageTokenCount] do out := out.push cfg.image_token_id
       out := out.push cfg.vision_end_token_id
     if videoTokenCount > 0 then
       out := out.push cfg.vision_start_token_id
-      for _ in [:videoTokenCount.toNat] do out := out.push cfg.video_token_id
+      for _ in [:videoTokenCount] do out := out.push cfg.video_token_id
       out := out.push cfg.vision_end_token_id
     out
 
@@ -123,7 +123,7 @@ private def encodePromptToIdsMultimodal
     (tok : tokenizer.qwen35.QwenTokenizer)
     (enableThinking : Bool)
     (cfg : VLConfig)
-    (imageTokenCount videoTokenCount : UInt64)
+    (imageTokenCount videoTokenCount : Nat)
     (prompt : String)
     : Array UInt64 := Id.run do
   let userPrefixIds := (tokenizer.qwen35.encodeText tok tokenizer.qwen35.userPrefix).map (fun t => t.toUInt64)
@@ -151,11 +151,11 @@ private def runTextBatches [DType.RealFloating dtype]
     let ⟨batch, ⟨seq, (inputIds, promptLens)⟩⟩ ←
       buildBatchInputWithEncoder tok.padToken.toUInt64 chunk (fun p => pure (encodePromptToIds tok args.enableThinking p))
     pure ⟨batch, ⟨seq, (inputIds.to device, promptLens)⟩⟩
-  let decodeBatch (promptLens : Array Nat) {b os : UInt64} (ids : Tensor { shape := #[b, os], dtype := .Int64, device := device }) : IO (Array String) :=
+  let decodeBatch (promptLens : Array Nat) {b os : Nat} (ids : Tensor { shape := #[b, os], dtype := .Int64, device := device }) : IO (Array String) :=
     decodeGeneratedBatch promptLens ids (fun xs => tokenizer.qwen35.decodeText tok xs)
-  let runGen (b : UInt64) {s : UInt64} (ids : Tensor { shape := #[b, s], dtype := .Int64, device := device }) :=
+  let runGen (b : Nat) {s : Nat} (ids : Tensor { shape := #[b, s], dtype := .Int64, device := device }) :=
     model.generate cfg ids args.maxNewTokens .greedy eos
-  let runGenStream (b : UInt64) {s : UInt64} (ids : Tensor { shape := #[b, s], dtype := .Int64, device := device }) (cb : StreamCallback (device := device) b) :=
+  let runGenStream (b : Nat) {s : Nat} (ids : Tensor { shape := #[b, s], dtype := .Int64, device := device }) (cb : StreamCallback (device := device) b) :=
     model.generateStream cfg ids cb args.maxNewTokens .greedy eos
   runGenerationBatches prompts args.batchSize args.maxNewTokens args.stream args.debugIds
     (prompts.size == 1) buildBatch runGen runGenStream decodeBatch
@@ -167,8 +167,8 @@ private def runMultimodalBatches [DType.RealFloating dtype]
     (model : Qwen35ForConditionalGeneration (device := device) cfg dtype visionDType)
     (args : Args)
     (prompts : Array String)
-    (imageTokenCount : UInt64)
-    (videoTokenCount : UInt64)
+    (imageTokenCount : Nat)
+    (videoTokenCount : Nat)
     (imageFeatures : Option (Sigma (fun n => Tensor { shape := #[n, cfg.vision_config.out_hidden_size], dtype := visionDType, device := device })))
     (videoFeatures : Option (Sigma (fun n => Tensor { shape := #[n, cfg.vision_config.out_hidden_size], dtype := visionDType, device := device })))
     : IO Unit := do
@@ -178,11 +178,11 @@ private def runMultimodalBatches [DType.RealFloating dtype]
     let ⟨batch, ⟨seq, (inputIds, promptLens)⟩⟩ ←
       buildBatchInputWithEncoder tok.padToken.toUInt64 chunk (fun p => pure (enc p))
     pure ⟨batch, ⟨seq, (inputIds.to device, promptLens)⟩⟩
-  let decodeBatch (promptLens : Array Nat) {b os : UInt64} (ids : Tensor { shape := #[b, os], dtype := .Int64, device := device }) : IO (Array String) :=
+  let decodeBatch (promptLens : Array Nat) {b os : Nat} (ids : Tensor { shape := #[b, os], dtype := .Int64, device := device }) : IO (Array String) :=
     decodeGeneratedBatch promptLens ids (fun xs => tokenizer.qwen35.decodeText tok xs)
-  let runGen (b : UInt64) {s : UInt64} (ids : Tensor { shape := #[b, s], dtype := .Int64, device := device }) :=
+  let runGen (b : Nat) {s : Nat} (ids : Tensor { shape := #[b, s], dtype := .Int64, device := device }) :=
     model.generate cfg ids args.maxNewTokens .greedy eos imageFeatures videoFeatures
-  let runGenStream (b : UInt64) {s : UInt64} (ids : Tensor { shape := #[b, s], dtype := .Int64, device := device }) (cb : StreamCallback (device := device) b) :=
+  let runGenStream (b : Nat) {s : Nat} (ids : Tensor { shape := #[b, s], dtype := .Int64, device := device }) (cb : StreamCallback (device := device) b) :=
     model.generateStream cfg ids cb args.maxNewTokens .greedy eos imageFeatures videoFeatures
   runGenerationBatches prompts args.batchSize args.maxNewTokens args.stream args.debugIds
     (prompts.size == 1) buildBatch runGen runGenStream decodeBatch

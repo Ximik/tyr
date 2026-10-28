@@ -38,23 +38,23 @@ private def loadFrozen {dtype : DType} (path : String) (name : String) (s : Shap
   | .ok t => pure (Tensor.detach t)
   | .error message => throw <| IO.userError s!"Speech tokenizer tensor '{name}': {message}"
 
-private def ceilDiv (x d : UInt64) : UInt64 :=
+private def ceilDiv (x d : Nat) : Nat :=
   if d == 0 then 0 else (x + d - 1) / d
 
-private def framesAfterDown1 (samples : UInt64) : UInt64 := ceilDiv samples 4
-private def framesAfterDown2 (samples : UInt64) : UInt64 := ceilDiv (framesAfterDown1 samples) 5
-private def framesAfterDown3 (samples : UInt64) : UInt64 := ceilDiv (framesAfterDown2 samples) 6
-def framesBeforeFinalDownsample (samples : UInt64) : UInt64 := ceilDiv (framesAfterDown3 samples) 8
-private def framesAfterDown4 (samples : UInt64) : UInt64 := framesBeforeFinalDownsample samples
-def encodedFrames (samples : UInt64) : UInt64 := ceilDiv (framesAfterDown4 samples) 2
+private def framesAfterDown1 (samples : Nat) : Nat := ceilDiv samples 4
+private def framesAfterDown2 (samples : Nat) : Nat := ceilDiv (framesAfterDown1 samples) 5
+private def framesAfterDown3 (samples : Nat) : Nat := ceilDiv (framesAfterDown2 samples) 6
+def framesBeforeFinalDownsample (samples : Nat) : Nat := ceilDiv (framesAfterDown3 samples) 8
+private def framesAfterDown4 (samples : Nat) : Nat := framesBeforeFinalDownsample samples
+def encodedFrames (samples : Nat) : Nat := ceilDiv (framesAfterDown4 samples) 2
 
-private def effectiveKernel (kernel dilation : UInt64) : UInt64 :=
+private def effectiveKernel (kernel dilation : Nat) : Nat :=
   (kernel - 1) * dilation + 1
 
-private def paddingTotal (kernel stride dilation : UInt64) : UInt64 :=
+private def paddingTotal (kernel stride dilation : Nat) : Nat :=
   effectiveKernel kernel dilation - stride
 
-private def extraPaddingForCausalConv (inputLen kernel stride dilation : UInt64) : UInt64 :=
+private def extraPaddingForCausalConv (inputLen kernel stride dilation : Nat) : Nat :=
   let outLen := ceilDiv inputLen stride
   if outLen == 0 then
     0
@@ -63,26 +63,26 @@ private def extraPaddingForCausalConv (inputLen kernel stride dilation : UInt64)
     let baseLen := inputLen + paddingTotal kernel stride dilation
     if neededLen >= baseLen then neededLen - baseLen else 0
 
-private def addBias3d {batch channels frames : UInt64}
+private def addBias3d {batch channels frames : Nat}
     (x : Tensor { shape := #[batch, channels, frames], dtype := dtypes.compute.val, device := device })
     (bias : Tensor { shape := #[channels], dtype := dtypes.compute.val, device := device }) : Tensor { shape := #[batch, channels, frames], dtype := dtypes.compute.val, device := device } :=
   let b : Tensor { shape := #[1, channels, 1], dtype := dtypes.compute.val, device := device } := Tensor.reshapeChecked bias #[1, channels, 1]
   Tensor.add x (Tensor.expand b #[batch, channels, frames])
 
-private def scale3d {batch seq dim : UInt64}
+private def scale3d {batch seq dim : Nat}
     (x : Tensor { shape := #[batch, seq, dim], dtype := dtypes.compute.val, device := device })
     (scale : Tensor { shape := #[dim], dtype := dtypes.compute.val, device := device }) : Tensor { shape := #[batch, seq, dim], dtype := dtypes.compute.val, device := device } :=
   let s : Tensor { shape := #[1, 1, dim], dtype := dtypes.compute.val, device := device } := Tensor.reshapeChecked scale #[1, 1, dim]
   Tensor.mul x (Tensor.expand s #[batch, seq, dim])
 
-private def clampMin1d {n : UInt64} {dtype : DType}
+private def clampMin1d {n : Nat} {dtype : DType}
     [DType.Ordered dtype] [DType.Promotes dtype dtype dtype]
     (x : Tensor { shape := #[n], dtype, device := device }) (minVal : Float)
     : Tensor { shape := #[n], dtype, device := device } :=
   let minT := Tensor.castLike x (Tensor.full #[n] minVal false x.device)
   Tensor.maximum x minT
 
-private def stack2dDyn {batch frames k : UInt64}
+private def stack2dDyn {batch frames k : Nat}
     (tensors : Array (Tensor { shape := #[batch, frames], dtype := .Int64, device := device })) : Tensor { shape := #[k, batch, frames], dtype := .Int64, device := device } :=
   if tensors.isEmpty then
     (Tensor.reshapeChecked (Tensor.fullInt #[0, batch, frames] 0) #[k, batch, frames]).to device
@@ -92,7 +92,7 @@ private def stack2dDyn {batch frames k : UInt64}
 
 /-! ## Parameters -/
 
-structure EncoderResBlock (inC hiddenC : UInt64) (dtypes : SpeechTokenizerDTypes := float32SpeechTokenizerDTypes) where
+structure EncoderResBlock (inC hiddenC : Nat) (dtypes : SpeechTokenizerDTypes := float32SpeechTokenizerDTypes) where
   conv1Weight : Tensor { shape := #[hiddenC, inC, 3], dtype := dtypes.compute.val, device := device }
   conv1Bias : Tensor { shape := #[hiddenC], dtype := dtypes.compute.val, device := device }
   conv2Weight : Tensor { shape := #[inC, hiddenC, 1], dtype := dtypes.compute.val, device := device }
@@ -153,8 +153,8 @@ structure SpeechTokenizer12HzEncoder (dtypes : SpeechTokenizerDTypes := float32S
   semanticRVQ : (EncodeRVQ (device := device) (dtypes := dtypes))
   acousticRVQ : (EncodeRVQ (device := device) (dtypes := dtypes))
 
-  inputSampleRate : UInt64 := 24000
-  encodeDownsampleRate : UInt64 := 1920
+  inputSampleRate : Nat := 24000
+  encodeDownsampleRate : Nat := 1920
   deriving TensorStruct
 
 namespace SpeechTokenizer12HzEncoder
@@ -162,7 +162,7 @@ namespace SpeechTokenizer12HzEncoder
 private def loadResBlock
     (weightsPath : String)
     (namePrefix : String)
-    (inC hiddenC : UInt64)
+    (inC hiddenC : Nat)
     : IO (EncoderResBlock (device := device) (dtypes := dtypes) inC hiddenC) := do
   let conv1Weight ← loadFrozen (dtype := dtypes.compute.val) weightsPath s!"{namePrefix}.1.conv.weight" #[hiddenC, inC, 3]
   let conv1Bias ← loadFrozen (dtype := dtypes.compute.val) weightsPath s!"{namePrefix}.1.conv.bias" #[hiddenC]
@@ -350,24 +350,24 @@ def loadFromDirFlexible (speechTokenizerDir : String) (device : Device := Device
   }
   pure ⟨dtypes, enc⟩
 
-def numSemanticCodeGroups (m : (SpeechTokenizer12HzEncoder (device := device) (dtypes := dtypes))) : UInt64 :=
-  m.semanticRVQ.codebooks.size.toUInt64
+def numSemanticCodeGroups (m : (SpeechTokenizer12HzEncoder (device := device) (dtypes := dtypes))) : Nat :=
+  m.semanticRVQ.codebooks.size
 
-def numAcousticCodeGroups (m : (SpeechTokenizer12HzEncoder (device := device) (dtypes := dtypes))) : UInt64 :=
-  m.acousticRVQ.codebooks.size.toUInt64
+def numAcousticCodeGroups (m : (SpeechTokenizer12HzEncoder (device := device) (dtypes := dtypes))) : Nat :=
+  m.acousticRVQ.codebooks.size
 
-def numCodeGroups (m : (SpeechTokenizer12HzEncoder (device := device) (dtypes := dtypes))) : UInt64 :=
+def numCodeGroups (m : (SpeechTokenizer12HzEncoder (device := device) (dtypes := dtypes))) : Nat :=
   numSemanticCodeGroups m + numAcousticCodeGroups m
 
-private def causalConvConstant {batch inC outC inLen outLen kernel : UInt64}
+private def causalConvConstant {batch inC outC inLen outLen kernel : Nat}
     (x : Tensor { shape := #[batch, inC, inLen], dtype := dtypes.compute.val, device := device })
     (weight : Tensor { shape := #[outC, inC, kernel], dtype := dtypes.compute.val, device := device })
     (bias : Option (Tensor { shape := #[outC], dtype := dtypes.compute.val, device := device }) := none)
-    (stride : UInt64 := 1)
-    (dilation : UInt64 := 1)
+    (stride : Nat := 1)
+    (dilation : Nat := 1)
     : Tensor { shape := #[batch, outC, outLen], dtype := dtypes.compute.val, device := device } :=
-  let leftPad : UInt64 := paddingTotal kernel stride dilation
-  let extraPad : UInt64 := extraPaddingForCausalConv inLen kernel stride dilation
+  let leftPad : Nat := paddingTotal kernel stride dilation
+  let extraPad : Nat := extraPaddingForCausalConv inLen kernel stride dilation
   let left : Tensor { shape := #[batch, inC, leftPad], dtype := dtypes.compute.val, device := device } := Tensor.castLike x (Tensor.zeros #[batch, inC, leftPad] false x.device)
   let right : Tensor { shape := #[batch, inC, extraPad], dtype := dtypes.compute.val, device := device } := Tensor.castLike x (Tensor.zeros #[batch, inC, extraPad] false x.device)
   let xPad0 : Tensor { shape := #[batch, inC, inLen + leftPad], dtype := dtypes.compute.val, device := device } := Tensor.reshapeChecked (Tensor.cat left x 2) #[batch, inC, inLen + leftPad]
@@ -378,15 +378,15 @@ private def causalConvConstant {batch inC outC inLen outLen kernel : UInt64}
   | some b => addBias3d y0 b
   | none => y0
 
-private def causalConvReplicate {batch inC outC inLen outLen kernel : UInt64}
+private def causalConvReplicate {batch inC outC inLen outLen kernel : Nat}
     (x : Tensor { shape := #[batch, inC, inLen], dtype := dtypes.compute.val, device := device })
     (weight : Tensor { shape := #[outC, inC, kernel], dtype := dtypes.compute.val, device := device })
     (bias : Option (Tensor { shape := #[outC], dtype := dtypes.compute.val, device := device }) := none)
-    (stride : UInt64 := 1)
-    (dilation : UInt64 := 1)
+    (stride : Nat := 1)
+    (dilation : Nat := 1)
     : Tensor { shape := #[batch, outC, outLen], dtype := dtypes.compute.val, device := device } :=
-  let leftPad : UInt64 := paddingTotal kernel stride dilation
-  let extraPad : UInt64 := extraPaddingForCausalConv inLen kernel stride dilation
+  let leftPad : Nat := paddingTotal kernel stride dilation
+  let extraPad : Nat := extraPaddingForCausalConv inLen kernel stride dilation
   let first : Tensor { shape := #[batch, inC, 1], dtype := dtypes.compute.val, device := device } := Tensor.sliceChecked x 2 0 1 #[batch, inC, 1]
   let last : Tensor { shape := #[batch, inC, 1], dtype := dtypes.compute.val, device := device } := Tensor.sliceChecked x 2 (inLen - 1) 1 #[batch, inC, 1]
   let left : Tensor { shape := #[batch, inC, leftPad], dtype := dtypes.compute.val, device := device } := Tensor.expand first #[batch, inC, leftPad]
@@ -403,7 +403,7 @@ private def causalConvReplicate {batch inC outC inLen outLen kernel : UInt64}
   | some b => addBias3d y0 b
   | none => y0
 
-private def forwardResBlock {batch frames inC hiddenC : UInt64}
+private def forwardResBlock {batch frames inC hiddenC : Nat}
     (blk : EncoderResBlock (device := device) (dtypes := dtypes) inC hiddenC)
     (x : Tensor { shape := #[batch, inC, frames], dtype := dtypes.compute.val, device := device }) : Tensor { shape := #[batch, inC, frames], dtype := dtypes.compute.val, device := device } :=
   let residual := x
@@ -415,7 +415,7 @@ private def forwardResBlock {batch frames inC hiddenC : UInt64}
     causalConvConstant h2 blk.conv2Weight (some blk.conv2Bias) 1 1
   Tensor.add residual h3
 
-private def forwardAttention {batch seq : UInt64}
+private def forwardAttention {batch seq : Nat}
     (layer : (EncoderTransformerLayer (device := device) (dtypes := dtypes)))
     (x : Tensor { shape := #[batch, seq, 512], dtype := dtypes.compute.val, device := device })
     (cos sin : Tensor { shape := #[seq, 32], dtype := .Float32, device := device }) : Tensor { shape := #[batch, seq, 512], dtype := dtypes.compute.val, device := device } :=
@@ -440,7 +440,7 @@ private def forwardAttention {batch seq : UInt64}
   let attn : Tensor { shape := #[batch, seq, 512], dtype := dtypes.compute.val, device := device } := Tensor.reshapeChecked attn #[batch, seq, 512]
   Tensor.linear3d attn layer.oProj
 
-private def forwardTransformerLayer {batch seq : UInt64}
+private def forwardTransformerLayer {batch seq : Nat}
     (layer : (EncoderTransformerLayer (device := device) (dtypes := dtypes)))
     (x : Tensor { shape := #[batch, seq, 512], dtype := dtypes.compute.val, device := device })
     (cos sin : Tensor { shape := #[seq, 32], dtype := .Float32, device := device })
@@ -464,7 +464,7 @@ private def codebookEmbedding (cb : (EncoderCodebook (device := device) (dtypes 
   let usage2d : Tensor { shape := #[2048, 256], dtype := dtypes.usage, device := device } := Tensor.expand (Tensor.reshapeChecked usage #[2048, 1]) #[2048, 256]
   dtypes.divideCodebook cb.embedSum usage2d
 
-private def quantizeWithCodebook {batch frames : UInt64}
+private def quantizeWithCodebook {batch frames : Nat}
     (cb : (EncoderCodebook (device := device) (dtypes := dtypes)))
     (x : Tensor { shape := #[batch, 256, frames], dtype := dtypes.compute.val, device := device })
     : Tensor { shape := #[batch, frames], dtype := .Int64, device := device } × Tensor { shape := #[batch, 256, frames], dtype := dtypes.compute.val, device := device } :=
@@ -487,7 +487,7 @@ private def quantizeWithCodebook {batch frames : UInt64}
   let idx : Tensor { shape := #[batch, frames], dtype := .Int64, device := device } := Tensor.reshapeChecked idxFlat #[batch, frames]
   (idx, quant)
 
-private def rvqEncode {batch frames k : UInt64}
+private def rvqEncode {batch frames k : Nat}
     (rvq : (EncodeRVQ (device := device) (dtypes := dtypes)))
     (embeddings : Tensor { shape := #[batch, 512, frames], dtype := dtypes.compute.val, device := device })
     (numLayers : Nat)
@@ -506,10 +506,10 @@ private def rvqEncode {batch frames k : UInt64}
 
 /-- Encode waveform `[batch,1,samples]` to codec IDs `[batch,16,encodedFrames(samples)]`.
     `ropeStartPos` is in the pre-downsample transformer timeline (stride 960 samples). -/
-def encodeWithRoPEOffset {batch samples : UInt64}
+def encodeWithRoPEOffset {batch samples : Nat}
     (m : (SpeechTokenizer12HzEncoder (device := device) (dtypes := dtypes)))
     (audio : Tensor { shape := #[batch, 1, samples], dtype := dtypes.compute.val, device := device })
-    (ropeStartPos : UInt64 := 0)
+    (ropeStartPos : Nat := 0)
     : Tensor { shape := #[batch, 16, encodedFrames samples], dtype := .Int64, device := device } :=
   let t1 := framesAfterDown1 samples
   let t2 := framesAfterDown2 samples
@@ -538,7 +538,7 @@ def encodeWithRoPEOffset {batch samples : UInt64}
   let h9 : Tensor { shape := #[batch, 512, t4], dtype := dtypes.compute.val, device := device } := causalConvConstant h9In m.finalConvWeight (some m.finalConvBias) 1 1
 
   let x0 : Tensor { shape := #[batch, t4, 512], dtype := dtypes.compute.val, device := device } := Tensor.reshapeChecked (Tensor.transpose h9 1 2) #[batch, t4, 512]
-  let ropeTotal : UInt64 := ropeStartPos + t4
+  let ropeTotal : Nat := ropeStartPos + t4
   let (cosAll, sinAll) := Tensor.rotaryFreqs ropeTotal 64 10000.0
   let cosAll : Tensor { shape := #[ropeTotal, 32], dtype := .Float32, device := device } :=
     cosAll.to x0.device
@@ -559,10 +559,10 @@ def encodeWithRoPEOffset {batch samples : UInt64}
 /-- Encode waveform `[batch,1,samples]` to tokenizer-configured codec IDs
     `[batch,codeGroups,encodedFrames(samples)]`.
     `ropeStartPos` is in the pre-downsample transformer timeline (stride 960 samples). -/
-def encodeWithRoPEOffsetDynamic {batch samples : UInt64}
+def encodeWithRoPEOffsetDynamic {batch samples : Nat}
     (m : (SpeechTokenizer12HzEncoder (device := device) (dtypes := dtypes)))
     (audio : Tensor { shape := #[batch, 1, samples], dtype := dtypes.compute.val, device := device })
-    (ropeStartPos : UInt64 := 0)
+    (ropeStartPos : Nat := 0)
     : Sigma (fun codeGroups => Tensor { shape := #[batch, codeGroups, encodedFrames samples], dtype := .Int64, device := device }) :=
   let t1 := framesAfterDown1 samples
   let t2 := framesAfterDown2 samples
@@ -591,7 +591,7 @@ def encodeWithRoPEOffsetDynamic {batch samples : UInt64}
   let h9 : Tensor { shape := #[batch, 512, t4], dtype := dtypes.compute.val, device := device } := causalConvConstant h9In m.finalConvWeight (some m.finalConvBias) 1 1
 
   let x0 : Tensor { shape := #[batch, t4, 512], dtype := dtypes.compute.val, device := device } := Tensor.reshapeChecked (Tensor.transpose h9 1 2) #[batch, t4, 512]
-  let ropeTotal : UInt64 := ropeStartPos + t4
+  let ropeTotal : Nat := ropeStartPos + t4
   let (cosAll, sinAll) := Tensor.rotaryFreqs ropeTotal 64 10000.0
   let cosAll : Tensor { shape := #[ropeTotal, 32], dtype := .Float32, device := device } :=
     cosAll.to x0.device
@@ -606,8 +606,8 @@ def encodeWithRoPEOffsetDynamic {batch samples : UInt64}
 
   let semLayers : Nat := m.semanticRVQ.codebooks.size
   let acLayers : Nat := m.acousticRVQ.codebooks.size
-  let semK : UInt64 := semLayers.toUInt64
-  let acK : UInt64 := acLayers.toUInt64
+  let semK : Nat := semLayers
+  let acK : Nat := acLayers
   let semanticCodes : Tensor { shape := #[semK, batch, t5], dtype := .Int64, device := device } := rvqEncode (k := semK) m.semanticRVQ x3 semLayers
   let acousticCodes : Tensor { shape := #[acK, batch, t5], dtype := .Int64, device := device } := rvqEncode (k := acK) m.acousticRVQ x3 acLayers
   let codes : Tensor { shape := #[semK + acK, batch, t5], dtype := .Int64, device := device } := Tensor.reshapeChecked (Tensor.cat semanticCodes acousticCodes 0) #[semK + acK, batch, t5]
@@ -615,17 +615,17 @@ def encodeWithRoPEOffsetDynamic {batch samples : UInt64}
   ⟨semK + acK, out⟩
 
 /-- Encode waveform `[batch,1,samples]` with zero RoPE offset. -/
-def encode {batch samples : UInt64}
+def encode {batch samples : Nat}
     (m : (SpeechTokenizer12HzEncoder (device := device) (dtypes := dtypes)))
     (audio : Tensor { shape := #[batch, 1, samples], dtype := dtypes.compute.val, device := device }) : Tensor { shape := #[batch, 16, encodedFrames samples], dtype := .Int64, device := device } :=
   encodeWithRoPEOffset m audio 0
 
 /-- Convenience encode for mono waveform `[samples]` into frame-major `[frames,16]`.
     RoPE offset is in the pre-downsample transformer timeline. -/
-def encodeMonoFrameMajorWithRoPEOffset {samples : UInt64}
+def encodeMonoFrameMajorWithRoPEOffset {samples : Nat}
     (m : (SpeechTokenizer12HzEncoder (device := device) (dtypes := dtypes)))
     (audio : Tensor { shape := #[samples], dtype := dtypes.compute.val, device := device })
-    (ropeStartPos : UInt64 := 0)
+    (ropeStartPos : Nat := 0)
     : Tensor { shape := #[encodedFrames samples, 16], dtype := .Int64, device := device } :=
   let x0 : Tensor { shape := #[1, 1, samples], dtype := dtypes.compute.val, device := device } := Tensor.reshapeChecked audio #[1, 1, samples]
   let codes : Tensor { shape := #[1, 16, encodedFrames samples], dtype := .Int64, device := device } := encodeWithRoPEOffset m x0 ropeStartPos
@@ -635,10 +635,10 @@ def encodeMonoFrameMajorWithRoPEOffset {samples : UInt64}
 /-- Convenience encode for mono waveform `[samples]` into frame-major
     `[frames,codeGroups]` with tokenizer-configured code-group count.
     RoPE offset is in the pre-downsample transformer timeline. -/
-def encodeMonoFrameMajorWithRoPEOffsetDynamic {samples : UInt64}
+def encodeMonoFrameMajorWithRoPEOffsetDynamic {samples : Nat}
     (m : (SpeechTokenizer12HzEncoder (device := device) (dtypes := dtypes)))
     (audio : Tensor { shape := #[samples], dtype := dtypes.compute.val, device := device })
-    (ropeStartPos : UInt64 := 0)
+    (ropeStartPos : Nat := 0)
     : Sigma (fun codeGroups => Tensor { shape := #[encodedFrames samples, codeGroups], dtype := .Int64, device := device }) :=
   let x0 : Tensor { shape := #[1, 1, samples], dtype := dtypes.compute.val, device := device } := Tensor.reshapeChecked audio #[1, 1, samples]
   let ⟨codeGroups, codes⟩ := encodeWithRoPEOffsetDynamic m x0 ropeStartPos
@@ -647,7 +647,7 @@ def encodeMonoFrameMajorWithRoPEOffsetDynamic {samples : UInt64}
   ⟨codeGroups, Tensor.reshapeChecked c0 #[encodedFrames samples, codeGroups]⟩
 
 /-- Convenience encode for mono waveform `[samples]` into frame-major `[frames,16]`. -/
-def encodeMonoFrameMajor {samples : UInt64}
+def encodeMonoFrameMajor {samples : Nat}
     (m : (SpeechTokenizer12HzEncoder (device := device) (dtypes := dtypes)))
     (audio : Tensor { shape := #[samples], dtype := dtypes.compute.val, device := device }) : Tensor { shape := #[encodedFrames samples, 16], dtype := .Int64, device := device } :=
   encodeMonoFrameMajorWithRoPEOffset m audio 0
@@ -677,18 +677,18 @@ def pushEncodeStream
 
   let ctxStart : Nat := st.offsetSamples - st.history.size
   let chunk := st.history ++ newSamples
-  let chunkSamplesU64 : UInt64 := chunk.size.toUInt64
+  let chunkSamplesU64 : Nat := chunk.size
   let audioChunk0 : Tensor { shape := #[chunkSamplesU64], dtype := .Float32, device := .CPU } := Tensor.reshapeChecked (Tensor.fromFloatArray chunk) #[chunkSamplesU64]
   let audioChunk : Tensor { shape := #[chunkSamplesU64], dtype := dtypes.compute.val, device := device } :=
     Tensor.castLike m.conv0Weight (audioChunk0.to m.conv0Weight.device)
-  let framesChunk : UInt64 := encodedFrames chunkSamplesU64
-  let ropeStartPos : UInt64 := framesBeforeFinalDownsample ctxStart.toUInt64
+  let framesChunk : Nat := encodedFrames chunkSamplesU64
+  let ropeStartPos : Nat := framesBeforeFinalDownsample ctxStart
   let codesChunk : Tensor { shape := #[framesChunk, 16], dtype := .Int64, device := device } := encodeMonoFrameMajorWithRoPEOffset m audioChunk ropeStartPos
   let flatChunk : Tensor { shape := #[framesChunk * 16], dtype := .Int64, device := device } := Tensor.reshapeChecked codesChunk #[framesChunk * 16]
   let valsChunk ← Tensor.toUInt64Array flatChunk
 
-  let dropRows : Nat := (encodedFrames st.history.size.toUInt64).toNat
-  let keepRows : Nat := (encodedFrames newSamples.size.toUInt64).toNat
+  let dropRows : Nat := (encodedFrames st.history.size)
+  let keepRows : Nat := (encodedFrames newSamples.size)
   let startIdx : Nat := dropRows * 16
   let endIdx : Nat := Nat.min valsChunk.size ((dropRows + keepRows) * 16)
   let valsKeep := valsChunk.extract startIdx endIdx
@@ -712,25 +712,25 @@ def pushEncodeStreamDynamic
     (m : (SpeechTokenizer12HzEncoder (device := device) (dtypes := dtypes)))
     (st : EncodeStreamState)
     (newSamples : Array Float)
-    : IO (EncodeStreamState × UInt64 × Array UInt64) := do
+    : IO (EncodeStreamState × Nat × Array UInt64) := do
   if newSamples.isEmpty then
     return (st, numCodeGroups m, #[])
 
   let ctxStart : Nat := st.offsetSamples - st.history.size
   let chunk := st.history ++ newSamples
-  let chunkSamplesU64 : UInt64 := chunk.size.toUInt64
+  let chunkSamplesU64 : Nat := chunk.size
   let audioChunk0 : Tensor { shape := #[chunkSamplesU64], dtype := .Float32, device := .CPU } := Tensor.reshapeChecked (Tensor.fromFloatArray chunk) #[chunkSamplesU64]
   let audioChunk : Tensor { shape := #[chunkSamplesU64], dtype := dtypes.compute.val, device := device } :=
     Tensor.castLike m.conv0Weight (audioChunk0.to m.conv0Weight.device)
-  let framesChunk : UInt64 := encodedFrames chunkSamplesU64
-  let ropeStartPos : UInt64 := framesBeforeFinalDownsample ctxStart.toUInt64
+  let framesChunk : Nat := encodedFrames chunkSamplesU64
+  let ropeStartPos : Nat := framesBeforeFinalDownsample ctxStart
   let ⟨codeGroups, codesChunk⟩ := encodeMonoFrameMajorWithRoPEOffsetDynamic m audioChunk ropeStartPos
   let flatChunk : Tensor { shape := #[framesChunk * codeGroups], dtype := .Int64, device := device } := Tensor.reshapeChecked codesChunk #[framesChunk * codeGroups]
   let valsChunk ← Tensor.toUInt64Array flatChunk
 
-  let groupsNat : Nat := codeGroups.toNat
-  let dropRows : Nat := (encodedFrames st.history.size.toUInt64).toNat
-  let keepRows : Nat := (encodedFrames newSamples.size.toUInt64).toNat
+  let groupsNat : Nat := codeGroups
+  let dropRows : Nat := (encodedFrames st.history.size)
+  let keepRows : Nat := (encodedFrames newSamples.size)
   let startIdx : Nat := dropRows * groupsNat
   let endIdx : Nat := Nat.min valsChunk.size ((dropRows + keepRows) * groupsNat)
   let valsKeep := valsChunk.extract startIdx endIdx

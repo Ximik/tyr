@@ -8,16 +8,16 @@ open DifferentiableManifold
 variable {d : DType} {dev : Device} [DType.RealFloating d]
 
 /-- Embedded manifold of `m x n` matrices with rank constrained to `k`. -/
-structure FixedRankEmbedded (m n k : UInt64) (dtype : DType := .Float32)
+structure FixedRankEmbedded (m n k : Nat) (dtype : DType := .Float32)
     (device : Device := .CPU) where
   matrix : Tensor ⟨#[m, n], dtype, device⟩
-  rankBound : k.toNat ≤ m.toNat ∧ k.toNat ≤ n.toNat
+  rankBound : k ≤ m ∧ k ≤ n
 
 namespace FixedRankEmbedded
 
 /-- Low-rank factor-product approximation with rank at most `k`. -/
-def project (m n k : UInt64) (A : Tensor ⟨#[m, n], d, dev⟩)
-    (h : k.toNat ≤ m.toNat ∧ k.toNat ≤ n.toNat := by decide) : FixedRankEmbedded m n k d dev :=
+def project (m n k : Nat) (A : Tensor ⟨#[m, n], d, dev⟩)
+    (h : k ≤ m ∧ k ≤ n := by decide) : FixedRankEmbedded m n k d dev :=
   -- Practical low-rank projection without relying on backend SVD stability.
   -- This yields rank at most k by construction: (m×k) @ (k×n).
   let left : Tensor ⟨#[m, k], d, dev⟩ := Tensor.slice A 1 0 k (by simp) (by simpa using h.2)
@@ -26,20 +26,20 @@ def project (m n k : UInt64) (A : Tensor ⟨#[m, n], d, dev⟩)
   ⟨Tensor.mulScalar (Tensor.mm left right) scale, h⟩
 
 /-- Random rank-constrained point. -/
-def random (m n k : UInt64)
-    (h : k.toNat ≤ m.toNat ∧ k.toNat ≤ n.toNat := by decide) : IO (FixedRankEmbedded m n k) := do
+def random (m n k : Nat)
+    (h : k ≤ m ∧ k ≤ n := by decide) : IO (FixedRankEmbedded m n k) := do
   let A ← Tensor.randn #[m, n]
   pure (project m n k A h)
 
 end FixedRankEmbedded
 
-structure FixedRankTangent (m n k : UInt64) (dtype : DType := .Float32)
+structure FixedRankTangent (m n k : Nat) (dtype : DType := .Float32)
     (device : Device := .CPU) where
   vec : Tensor ⟨#[m, n], dtype, device⟩
 
 namespace FixedRankTangent
 
-def zero [DType.ConstantSupported d dev] (m n k : UInt64) : FixedRankTangent m n k d dev := ⟨Tensor.zerosFor ⟨#[m, n], d, dev⟩⟩
+def zero [DType.ConstantSupported d dev] (m n k : Nat) : FixedRankTangent m n k d dev := ⟨Tensor.zerosFor ⟨#[m, n], d, dev⟩⟩
 def add (a b : FixedRankTangent m n k d dev) : FixedRankTangent m n k d dev := ⟨Tensor.add a.vec b.vec⟩
 def smul (s : Float) (v : FixedRankTangent m n k d dev) : FixedRankTangent m n k d dev := ⟨Tensor.mulScalar v.vec s⟩
 
@@ -49,7 +49,7 @@ def project (x : FixedRankEmbedded m n k d dev) (V : Tensor ⟨#[m, n], d, dev�
 
 end FixedRankTangent
 
-instance fixedRankEmbeddedManifold (m n k : UInt64) : DifferentiableManifold (FixedRankEmbedded m n k d dev) where
+instance fixedRankEmbeddedManifold (m n k : Nat) : DifferentiableManifold (FixedRankEmbedded m n k d dev) where
   Tangent _ := FixedRankTangent m n k d dev
   Cotangent _ := FixedRankTangent m n k d dev
   zeroTangent x := ⟨Tensor.zerosLike x.matrix⟩

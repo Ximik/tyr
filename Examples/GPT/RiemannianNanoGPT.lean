@@ -26,7 +26,7 @@ inductive PullbackMetricMode where
 
 structure PullbackMetricConfig where
   mode : PullbackMetricMode := .exact
-  fisherProbeCount : UInt64 := 8
+  fisherProbeCount : Nat := 8
   deriving Repr, Inhabited
 
 /-- Experimental config for the Riemannian GPT prototype. -/
@@ -52,7 +52,7 @@ structure PrototypeConfig where
     blockSize := 4
     device := Device.CPU
   }
-  streamTokens : UInt64 := 256
+  streamTokens : Nat := 256
   trainSteps : Nat := 1
   benchmarkSteps : Nat := 2
   pullbackMetric : PullbackMetricConfig := {}
@@ -200,7 +200,7 @@ private def resolveDeviceFromEnv : IO Device := do
   | some _ => pure Device.CPU
   | none => pure Device.CPU
 
-private def defaultTrainConfig (device : Device) (blockSize : UInt64) : TrainConfig := {
+private def defaultTrainConfig (device : Device) (blockSize : Nat) : TrainConfig := {
   maxIters := 5000
   evalInterval := 500
   logInterval := 50
@@ -219,11 +219,11 @@ private def envFlagEnabled (name : String) : IO Bool := do
   | some "1" | some "true" | some "yes" | some "on" => pure true
   | _ => pure false
 
-private def envUInt64Or (name : String) (fallback : UInt64) : IO UInt64 := do
+private def envUInt64Or (name : String) (fallback : Nat) : IO Nat := do
   match (← IO.getEnv name) with
   | some raw =>
     match raw.toNat? with
-    | some n => pure (UInt64.ofNat n)
+    | some n => pure n
     | none => pure fallback
   | none => pure fallback
 
@@ -291,12 +291,12 @@ private def mainConfig (device : Device) : IO (Config × TrainConfig × Pullback
     let checkpointDir ← envStringOr "TYR_RIEMANNIAN_CHECKPOINT_DIR" "checkpoints/riemannian_gpt"
     pure (modelCfg, trainCfg, pullbackMetric, some checkpointDir)
 
-private def outputFactorRank (cfg : Config) (trainCfg : TrainConfig) (pullbackMetric : PullbackMetricConfig) : UInt64 :=
+private def outputFactorRank (cfg : Config) (trainCfg : TrainConfig) (pullbackMetric : PullbackMetricConfig) : Nat :=
   match pullbackMetric.mode with
   | .exact => trainCfg.batchSize * trainCfg.blockSize * cfg.vocab_size
   | .sampledFisher => pullbackMetric.fisherProbeCount
 
-private def riemannianTrainStep {modelCfg : Config} {batch seq : UInt64}
+private def riemannianTrainStep {modelCfg : Config} {batch seq : Nat}
     (trainCfg : TrainConfig)
     (pullbackMetric : PullbackMetricConfig)
     (params : GPTParams (device := device) modelCfg)
@@ -324,7 +324,7 @@ private def riemannianTrainStep {modelCfg : Config} {batch seq : UInt64}
   pure (step.params, step.diagnostics, step.loss)
 
 /-- Train with data of known size (legacy, no validation). -/
-def runTraining {n : UInt64} (modelCfg : Config) (trainCfg : TrainConfig)
+def runTraining {n : Nat} (modelCfg : Config) (trainCfg : TrainConfig)
     (pullbackMetric : PullbackMetricConfig := { mode := .sampledFisher, fisherProbeCount := 32 })
     (trainData : Tokens (device := .CPU) #[n]) : IO (GPTParams (device := trainCfg.device) modelCfg) := do
   IO.println ""
@@ -364,7 +364,7 @@ def runTraining {n : UInt64} (modelCfg : Config) (trainCfg : TrainConfig)
   return params
 
 /-- Train with validation data and checkpointing. -/
-def runTrainingWithVal {nTrain nVal : UInt64} (modelCfg : Config) (trainCfg : TrainConfig)
+def runTrainingWithVal {nTrain nVal : Nat} (modelCfg : Config) (trainCfg : TrainConfig)
     (pullbackMetric : PullbackMetricConfig := { mode := .sampledFisher, fisherProbeCount := 32 })
     (trainData : Tokens (device := .CPU) #[nTrain]) (valData : Tokens (device := .CPU) #[nVal])
     (checkpointDir : Option String := none) : IO (GPTParams (device := trainCfg.device) modelCfg) := do
@@ -463,11 +463,11 @@ def main : IO Unit := do
 
   let trainedParams ← if trainFileExists then
     IO.println "Found Shakespeare data..."
-    let nTrain ← data.binFileTokenCount "data/shakespeare_char/train.bin"
+    let nTrain := (← data.binFileTokenCount "data/shakespeare_char/train.bin").toNat
     IO.println s!"Training set: {nTrain} tokens"
     let trainData ← Tensor.loadU16Bin nTrain "data/shakespeare_char/train.bin"
     if valFileExists then
-      let nVal ← data.binFileTokenCount "data/shakespeare_char/val.bin"
+      let nVal := (← data.binFileTokenCount "data/shakespeare_char/val.bin").toNat
       IO.println s!"Validation set: {nVal} tokens"
       let valData ← Tensor.loadU16Bin nVal "data/shakespeare_char/val.bin"
       IO.println "Training with validation..."
@@ -477,7 +477,7 @@ def main : IO Unit := do
       runTraining modelCfg trainCfg pullbackMetric trainData
   else
     IO.println "Shakespeare data not found, using random tokens for testing..."
-    let numTokens : UInt64 := 10000
+    let numTokens : Nat := 10000
     let tokens ← Tensor.randint 0 modelCfg.vocab_size.toInt64 #[numTokens]
     runTraining modelCfg trainCfg pullbackMetric tokens
 

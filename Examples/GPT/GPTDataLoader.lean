@@ -60,7 +60,7 @@ def DistributedDataGenerator.nextBatchGPT (gen : DistributedDataGenerator)
 
 /-- Update batch and sequence parameters based on training step for modded-nanogpt. -/
 def DistributedDataGenerator.updateForStepGPT (gen : DistributedDataGenerator)
-    (step : UInt64) (blockSize : UInt64 := 128) : IO DistributedDataGenerator := do
+    (step : Nat) (blockSize : Nat := 128) : IO DistributedDataGenerator := do
   let (batchSize, windowBlocks) :=
     if step < 200 then (8, 3)
     else if step < 1000 then (16, 7)
@@ -72,8 +72,8 @@ def DistributedDataGenerator.updateForStepGPT (gen : DistributedDataGenerator)
 /-! ## Utility Functions -/
 
 /-- Get batch and window sizes for a given step based on modded-nanogpt. -/
-def getHyperparamsForStep (step : UInt64) (_blockSize : UInt64 := 128)
-    : (UInt64 × UInt64 × UInt64) :=  -- (batchSize, wsShort, wsLong)
+def getHyperparamsForStep (step : Nat) (_blockSize : Nat := 128)
+    : (Nat × Nat × Nat) :=  -- (batchSize, wsShort, wsLong)
   if step < 200 then
     (8, 3, 3)  -- All short windows initially
   else if step < 1000 then
@@ -82,67 +82,67 @@ def getHyperparamsForStep (step : UInt64) (_blockSize : UInt64 := 128)
     (24, 3, 11)  -- Full windows
 
 /-- Compute effective tokens per step -/
-def tokensPerStep (batchSize seqLen worldSize : UInt64) : UInt64 :=
+def tokensPerStep (batchSize seqLen worldSize : Nat) : Nat :=
   batchSize * seqLen * worldSize
 
 /-! ## Sequential DataLoader (Shakespeare style) -/
 
 /-- Sequential data loader for simple datasets like Shakespeare. -/
-structure SequentialLoader (n : UInt64) where
+structure SequentialLoader (n : Nat) where
   tokens : Tensor { shape := #[n], dtype := .Int64, device := .CPU }
-  currentPos : UInt64
+  currentPos : Nat
   deriving Repr
 
 def SequentialLoader.fromFile (path : String) : IO (Σ n, SequentialLoader n) := do
-  let n ← data.binFileTokenCount path
+  let n := (← data.binFileTokenCount path).toNat
   let tokens ← Tensor.loadU16Bin n path
   return ⟨n, { tokens := tokens, currentPos := 0 }⟩
 
-def SequentialLoader.reset {n : UInt64} (loader : SequentialLoader n) : SequentialLoader n :=
+def SequentialLoader.reset {n : Nat} (loader : SequentialLoader n) : SequentialLoader n :=
   { loader with currentPos := 0 }
 
-def SequentialLoader.getBatch {n : UInt64} (loader : SequentialLoader n)
-    (batchSize seqLen : UInt64) : Option (Tensor { shape := #[batchSize, seqLen + 1], dtype := .Int64, device := .CPU } × SequentialLoader n) :=
-  let required := batchSize.toNat * (seqLen.toNat + 1)
-  if batchSize == 0 || seqLen == 0 || loader.currentPos.toNat + required > n.toNat then
+def SequentialLoader.getBatch {n : Nat} (loader : SequentialLoader n)
+    (batchSize seqLen : Nat) : Option (Tensor { shape := #[batchSize, seqLen + 1], dtype := .Int64, device := .CPU } × SequentialLoader n) :=
+  let required := batchSize * (seqLen + 1)
+  if batchSize == 0 || seqLen == 0 || loader.currentPos + required > n then
     none
   else
-    let requiredLen := required.toUInt64
+    let requiredLen := required
     let batch := (loader.tokens.sliceChecked 0 loader.currentPos requiredLen #[requiredLen]).reshapeChecked
       #[batchSize, seqLen + 1]
     let newLoader := { loader with currentPos := loader.currentPos + requiredLen }
     some (batch, newLoader)
 
-def SequentialLoader.sampleRandomBatch {n : UInt64} (loader : SequentialLoader n)
-    (batchSize blockSize : UInt64) : IO (Tensor { shape := #[batchSize, blockSize], dtype := .Int64, device := .CPU } × Tensor { shape := #[batchSize, blockSize], dtype := .Int64, device := .CPU }) := do
+def SequentialLoader.sampleRandomBatch {n : Nat} (loader : SequentialLoader n)
+    (batchSize blockSize : Nat) : IO (Tensor { shape := #[batchSize, blockSize], dtype := .Int64, device := .CPU } × Tensor { shape := #[batchSize, blockSize], dtype := .Int64, device := .CPU }) := do
   let requiredLen ← checkedBatchTokens batchSize blockSize 1
   if requiredLen > n then
     throw <| IO.userError "SequentialLoader: batch exceeds available tokens"
-  let choices := n.toNat - requiredLen.toNat + 1
+  let choices := n - requiredLen + 1
   if choices > 9223372036854775807 then
     throw <| IO.userError "SequentialLoader: random range exceeds Int64 capacity"
   let startIdx ← Tensor.randint 0 (Int64.ofNat choices) #[]
-  let startPos := startIdx.itemInt.toInt.toNat.toUInt64
+  let startPos := startIdx.itemInt.toInt.toNat
   let sliced := loader.tokens.sliceChecked 0 startPos requiredLen #[requiredLen]
   let batch := sliced.reshapeChecked #[batchSize, blockSize + 1]
   let input := batch.sliceChecked 1 0 blockSize #[batchSize, blockSize]
   let target := batch.sliceChecked 1 1 blockSize #[batchSize, blockSize]
   return (input, target)
 
-structure SequentialBatchIterator (n b s : UInt64) where
+structure SequentialBatchIterator (n b s : Nat) where
   loader : SequentialLoader n
-  epoch : UInt64
-  batchCount : UInt64
+  epoch : Nat
+  batchCount : Nat
   deriving Repr
 
-def SequentialBatchIterator.new {n : UInt64} (loader : SequentialLoader n)
-    (batchSize seqLen : UInt64) : SequentialBatchIterator n batchSize seqLen := {
+def SequentialBatchIterator.new {n : Nat} (loader : SequentialLoader n)
+    (batchSize seqLen : Nat) : SequentialBatchIterator n batchSize seqLen := {
   loader := loader
   epoch := 0
   batchCount := 0
 }
 
-def SequentialBatchIterator.next {n b s : UInt64} (iter : SequentialBatchIterator n b s)
+def SequentialBatchIterator.next {n b s : Nat} (iter : SequentialBatchIterator n b s)
     : Option (Tensor { shape := #[b, s], dtype := .Int64, device := .CPU } × Tensor { shape := #[b, s], dtype := .Int64, device := .CPU }) × SequentialBatchIterator n b s :=
   match iter.loader.getBatch b s with
   | none =>
@@ -162,7 +162,7 @@ def SequentialBatchIterator.next {n b s : UInt64} (iter : SequentialBatchIterato
     }
     (some (input, target), newIter)
 
-def loadShakespeareData (trainPath valPath : String) (batchSize seqLen : UInt64)
+def loadShakespeareData (trainPath valPath : String) (batchSize seqLen : Nat)
     : IO (Σ n, SequentialBatchIterator n batchSize seqLen × Option (Σ m, SequentialLoader m)) := do
   let ⟨nTrain, trainLoader⟩ ← SequentialLoader.fromFile trainPath
   let trainIter := SequentialBatchIterator.new trainLoader batchSize seqLen

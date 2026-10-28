@@ -18,7 +18,7 @@ def flattenModel [TensorStruct α] (model : α) : List (Sigma Tensor) :=
 
 /-- Helper to count elements in flattened model -/
 def countElements (flat : List (Sigma Tensor)) : Nat :=
-  flat.foldl (fun acc ⟨s, _⟩ => acc + s.shape.foldl (fun p d => p * d.toNat) 1) 0
+  flat.foldl (fun acc ⟨s, _⟩ => acc + s.shape.foldl (fun p d => p * d) 1) 0
 
 @[test]
 def testModdedGPTStructure : IO Unit := do

@@ -24,26 +24,26 @@ private def uniformTimeDist : TimeDist :=
     pdf := fun t => if t < 0.0 || t > 1.0 then 0.0 else 1.0,
     quantile := fun p => clamp01 p }
 
-private def linBridge {dim : UInt64} (_ : Unit)
+private def linBridge {dim : Nat} (_ : Unit)
     (x0 x1 : Tensor { dtype := .Float32, shape := #[dim], device := .CPU }) (t0 t1 : Float) : Tensor { dtype := .Float32, shape := #[dim], device := .CPU } :=
   let dt := t1 - t0
   Tensor.add x0 (Tensor.mulScalar (Tensor.sub x1 x0) dt)
 
-structure ToyParams (dim : UInt64) where
+structure ToyParams (dim : Nat) where
   W : Tensor { dtype := .Float32, shape := #[dim, dim], device := .CPU }
   b : Tensor { dtype := .Float32, shape := #[dim], device := .CPU }
   deriving TensorStruct
 
 namespace ToyParams
 
-def init (dim : UInt64) : IO (ToyParams dim) := do
+def init (dim : Nat) : IO (ToyParams dim) := do
   let W := zerosDynamic #[dim, dim]
   let b := zerosDynamic #[dim]
   pure { W, b }
 
 end ToyParams
 
-def toyModel {maxLen dim : UInt64} : BranchingModelContinuous (device := .CPU) maxLen dim (ToyParams dim) :=
+def toyModel {maxLen dim : Nat} : BranchingModelContinuous (device := .CPU) maxLen dim (ToyParams dim) :=
   { forward := fun {batch} params state _t => do
       let anchorPred := Tensor.affine3d state params.W params.b
       let splitLogits := zerosDynamic #[batch, maxLen]
@@ -59,8 +59,8 @@ private def fixedState : BranchingState (Tensor { dtype := .Float32, shape := #[
     #[0, 0, 0, 0]
 
 def runDemo : IO Unit := do
-  let dim : UInt64 := 2
-  let maxLen : UInt64 := 8
+  let dim : Nat := 2
+  let maxLen : Nat := 8
   let steps : Nat := 80
   let lr : Float := 5.0e-2
   let x1 := fixedState
@@ -73,7 +73,7 @@ def runDemo : IO Unit := do
       uniformTimeDist uniformTimeDist (sequentialUniformPolicy (Tensor { dtype := .Float32, shape := #[dim], device := .CPU }))
       canonicalAnchorMerge
       (coalescenceFactor := 0.0)
-      (maxLen := some maxLen.toNat)
+      (maxLen := some maxLen)
       (rng := { state := 123 })
 
   let cfg : BranchingTrainConfig := {

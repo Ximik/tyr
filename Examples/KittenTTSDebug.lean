@@ -6,7 +6,7 @@ open torch
 open torch.kittentts
 
 private structure TensorStats where
-  shape : Array UInt64
+  shape : Array Nat
   min : Float
   max : Float
   mean : Float
@@ -89,7 +89,7 @@ def main (args : List String) : IO UInt32 := do
   if source.isEmpty then
     return 1
 
-  let seqToCF {modelDevice : Device} {batch seq channels : UInt64}
+  let seqToCF {modelDevice : Device} {batch seq channels : Nat}
       (x : Tensor { shape := #[batch, seq, channels], dtype := .Float32, device := modelDevice })
       : Tensor { shape := #[batch, channels, seq], dtype := .Float32, device := modelDevice } :=
     Tensor.reshapeChecked (Tensor.transpose x 1 2) #[batch, channels, seq]
@@ -105,10 +105,10 @@ def main (args : List String) : IO UInt32 := do
   let checkpointTextEncoder ← KokoroCheckpoint.text_encoder.load checkpointPath (device := modelDevice)
   torch.manualSeed seed
   let out ← bundle.debugPhonemes phonemes voice speed
-  let refStyle ← bundle.loadVoiceStyle voice phonemes.toList.length.toUInt64
+  let refStyle ← bundle.loadVoiceStyle voice phonemes.toList.length
   let decoderStyle : Tensor { shape := #[1, bundle.cfg.styleDim], dtype := .Float32, device := modelDevice } := sliceTensor refStyle 1 0 bundle.cfg.styleDim
   let ids := bundle.inputIdsFromPhonemes phonemes
-  let seq := ids.size.toUInt64
+  let seq := ids.size
   let inputIds0 : Tensor { shape := #[1, seq], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked (Tensor.fromInt64Array (ids.map (·.toInt64))) #[1, seq]
   let inputIds := inputIds0.to modelDevice
   let emb : Tensor { shape := #[1, seq, bundle.cfg.hiddenDim], dtype := .Float32, device := modelDevice } := Tensor.embedding inputIds bundle.model.textEncoder.embedding

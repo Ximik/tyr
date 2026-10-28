@@ -45,11 +45,11 @@ def main (args : List String) : IO UInt32 := do
   try
     let bundle ← Model.loadFromPretrained source (log := log)
     let ids := bundle.inputIdsFromPhonemes phonemes
-    let seq := ids.size.toUInt64
+    let seq := ids.size
     let modelDevice := bundle.model.bert.embeddings.wordEmbeddings.device
     let inputIdsCpu : Tensor { shape := #[1, seq], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked (Tensor.fromInt64Array (ids.map (·.toInt64))) #[1, seq]
     let inputIds : Tensor { shape := #[1, seq], dtype := .Int64, device := modelDevice } := inputIdsCpu.to modelDevice
-    let refStyleCpu ← bundle.loadVoiceStyle voice phonemes.toList.length.toUInt64
+    let refStyleCpu ← bundle.loadVoiceStyle voice phonemes.toList.length
     let refStyle := refStyleCpu.to modelDevice
     IO.println s!"loaded_bundle=true"
     IO.println s!"input_ids={ids}"

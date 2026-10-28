@@ -13,13 +13,13 @@ open Tyr.GPU.Ops
 
 /-- Query (device := device) layout for the typed FlashAttention surface: `[batch, nHead, qSeq, headDim]`
     with the dtype tracked statically. -/
-abbrev Query (batch nHead qSeq headDim : UInt64) (d : DType) : Type :=
+abbrev Query (batch nHead qSeq headDim : Nat) (d : DType) : Type :=
   Tensor { shape := #[batch, nHead, qSeq, headDim], dtype := d, device := device }
 /-- Key/value layout: `[batch, nKvHead, kvSeq, headDim]`, sharing the query dtype. -/
-abbrev KeyValue (batch nKvHead kvSeq headDim : UInt64) (d : DType) : Type :=
+abbrev KeyValue (batch nKvHead kvSeq headDim : Nat) (d : DType) : Type :=
   Tensor { shape := #[batch, nKvHead, kvSeq, headDim], dtype := d, device := device }
 /-- Padding-mask layout with an existential exact dtype. -/
-abbrev PaddingMask (batch kvSeq : UInt64) : Type := SomeDTypeTensor #[batch, kvSeq] device
+abbrev PaddingMask (batch kvSeq : Nat) : Type := SomeDTypeTensor #[batch, kvSeq] device
 
 inductive DispatchRoute where
   | tkKernel
@@ -28,7 +28,7 @@ inductive DispatchRoute where
 
 /-- Reusable runtime problem descriptor for the typed FlashAttention surface. -/
 def attentionProblem
-    {batch nHead nKvHead qSeq kvSeq headDim : UInt64} {d : DType}
+    {batch nHead nKvHead qSeq kvSeq headDim : Nat} {d : DType}
     (q : Query (device := device) batch nHead qSeq headDim d)
     (k : KeyValue (device := device) batch nKvHead kvSeq headDim d)
     (v : KeyValue (device := device) batch nKvHead kvSeq headDim d)
@@ -42,7 +42,7 @@ def attentionProblem
 
 /-- Current native specialization eligibility for the typed FlashAttention surface. -/
 def currentSpecialization
-    {batch nHead nKvHead qSeq kvSeq headDim : UInt64} {d : DType}
+    {batch nHead nKvHead qSeq kvSeq headDim : Nat} {d : DType}
     (q : Query (device := device) batch nHead qSeq headDim d)
     (k : KeyValue (device := device) batch nKvHead kvSeq headDim d)
     (v : KeyValue (device := device) batch nKvHead kvSeq headDim d)
@@ -57,7 +57,7 @@ def currentSpecialization
 
 /-- Typed route classifier for current TK-backed coverage. -/
 def supportsTkMhaKernel
-    {batch nHead nKvHead qSeq kvSeq headDim : UInt64} {d : DType}
+    {batch nHead nKvHead qSeq kvSeq headDim : Nat} {d : DType}
     (q : Query (device := device) batch nHead qSeq headDim d)
     (k : KeyValue (device := device) batch nKvHead kvSeq headDim d)
     (v : KeyValue (device := device) batch nKvHead kvSeq headDim d)
@@ -71,7 +71,7 @@ def supportsTkMhaKernel
 
 /-- Typed dispatch route (kernel vs portable) for observability/debugging. -/
 def dispatchRoute
-    {batch nHead nKvHead qSeq kvSeq headDim : UInt64} {d : DType}
+    {batch nHead nKvHead qSeq kvSeq headDim : Nat} {d : DType}
     (q : Query (device := device) batch nHead qSeq headDim d)
     (k : KeyValue (device := device) batch nKvHead kvSeq headDim d)
     (v : KeyValue (device := device) batch nKvHead kvSeq headDim d)
@@ -89,7 +89,7 @@ def dispatchRoute
     This routes through a torch-registered op (`tyr::flash_attn`) so autograd remains native.
     The indexed adapter checks that native output metadata matches the query. -/
 @[inline] def flashAttn
-    {batch nHead nKvHead qSeq kvSeq headDim : UInt64} {d : DType}
+    {batch nHead nKvHead qSeq kvSeq headDim : Nat} {d : DType}
     (query : Query (device := device) batch nHead qSeq headDim d)
     (key : KeyValue (device := device) batch nKvHead kvSeq headDim d)
     (value : KeyValue (device := device) batch nKvHead kvSeq headDim d)
@@ -103,7 +103,7 @@ def dispatchRoute
 /-- Effectful FlashAttention/SDPA. Training uses the configured dropout;
 evaluation passes zero dropout to the native IO operation. -/
 @[inline] def flashAttnIO
-    {batch nHead nKvHead qSeq kvSeq headDim : UInt64} {d : DType}
+    {batch nHead nKvHead qSeq kvSeq headDim : Nat} {d : DType}
     (query : Query (device := device) batch nHead qSeq headDim d)
     (key : KeyValue (device := device) batch nKvHead kvSeq headDim d)
     (value : KeyValue (device := device) batch nKvHead kvSeq headDim d)
@@ -117,7 +117,7 @@ evaluation passes zero dropout to the native IO operation. -/
 
 /-- Alias matching PyTorch naming. -/
 @[inline] def scaledDotProductAttention
-    {batch nHead nKvHead qSeq kvSeq headDim : UInt64} {d : DType}
+    {batch nHead nKvHead qSeq kvSeq headDim : Nat} {d : DType}
     (query : Query (device := device) batch nHead qSeq headDim d)
     (key : KeyValue (device := device) batch nKvHead kvSeq headDim d)
     (value : KeyValue (device := device) batch nKvHead kvSeq headDim d)
@@ -130,7 +130,7 @@ evaluation passes zero dropout to the native IO operation. -/
 
 /-- Effectful alias matching PyTorch naming, with explicit training mode. -/
 @[inline] def scaledDotProductAttentionIO
-    {batch nHead nKvHead qSeq kvSeq headDim : UInt64} {d : DType}
+    {batch nHead nKvHead qSeq kvSeq headDim : Nat} {d : DType}
     (query : Query (device := device) batch nHead qSeq headDim d)
     (key : KeyValue (device := device) batch nKvHead kvSeq headDim d)
     (value : KeyValue (device := device) batch nKvHead kvSeq headDim d)
@@ -144,7 +144,7 @@ evaluation passes zero dropout to the native IO operation. -/
 
 /-- Typed API returning both the dispatch route and the output. -/
 def flashAttnWithRoute
-    {batch nHead nKvHead qSeq kvSeq headDim : UInt64} {d : DType}
+    {batch nHead nKvHead qSeq kvSeq headDim : Nat} {d : DType}
     (query : Query (device := device) batch nHead qSeq headDim d)
     (key : KeyValue (device := device) batch nKvHead kvSeq headDim d)
     (value : KeyValue (device := device) batch nKvHead kvSeq headDim d)
@@ -160,7 +160,7 @@ def flashAttnWithRoute
 /-- Effectful attention and its route. The descriptor uses the same effective
 dropout as execution, including zero dropout during evaluation. -/
 def flashAttnWithRouteIO
-    {batch nHead nKvHead qSeq kvSeq headDim : UInt64} {d : DType}
+    {batch nHead nKvHead qSeq kvSeq headDim : Nat} {d : DType}
     (query : Query (device := device) batch nHead qSeq headDim d)
     (key : KeyValue (device := device) batch nKvHead kvSeq headDim d)
     (value : KeyValue (device := device) batch nKvHead kvSeq headDim d)
@@ -176,12 +176,12 @@ def flashAttnWithRouteIO
   pure (route, out)
 
 structure PackedQKV where
-  batch : UInt64
-  nHead : UInt64
-  nKvHead : UInt64
-  qSeq : UInt64
-  kvSeq : UInt64
-  headDim : UInt64
+  batch : Nat
+  nHead : Nat
+  nKvHead : Nat
+  qSeq : Nat
+  kvSeq : Nat
+  headDim : Nat
   dtype : DType
   q : Tensor { shape := #[batch, nHead, qSeq, headDim], dtype := dtype, device := device }
   k : Tensor { shape := #[batch, nKvHead, kvSeq, headDim], dtype := dtype, device := device }
@@ -251,7 +251,7 @@ private def parseQKVDyn (qDyn kDyn vDyn : RawTensor) : IO (PackedQKV (device := 
   }
 
 private def parseMaskDyn
-    (batch kvSeq : UInt64)
+    (batch kvSeq : Nat)
     (attnMask : Option RawTensor)
     : IO (Option (PaddingMask (device := device) batch kvSeq)) := do
   match attnMask with

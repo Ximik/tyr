@@ -46,7 +46,7 @@ def init (cfg : QwenConfig) (dtype : DType := .Float32) (device : Device := .CPU
 
   -- Initialize layers
   let mut layers := #[]
-  for _ in [:cfg.num_hidden_layers.toNat] do
+  for _ in [:cfg.num_hidden_layers] do
     let layer ← QwenLayer.init (device := device) cfg.hidden_size cfg.num_attention_heads
         cfg.num_key_value_heads cfg.head_dim cfg.intermediate_size cfg.rms_norm_eps dtype
     layers := layers.push layer
@@ -60,7 +60,7 @@ def init (cfg : QwenConfig) (dtype : DType := .Float32) (device : Device := .CPU
     Input: [batch, seq] token IDs
     Output: Array of [batch, seq, hidden_size] hidden states (one per layer + final)
     Rewritten in functional style to avoid Id.run issues with FFI shape tracking. -/
-def forwardWithHiddenStates {batch seq : UInt64} (cfg : QwenConfig)
+def forwardWithHiddenStates {batch seq : Nat} (cfg : QwenConfig)
     (model : Qwen3Model (device := device) cfg dtype)
     (input_ids : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (cos : Tensor { device := device, shape := #[seq, cfg.head_dim / 2], dtype := .Float32 })
@@ -79,7 +79,7 @@ def forwardWithHiddenStates {batch seq : UInt64} (cfg : QwenConfig)
   let finalHidden : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } := model.norm.forward3dPreserving finalH
   hiddenStates.push finalHidden
 
-def forwardWithHiddenStatesMasked {batch seq : UInt64} (cfg : QwenConfig)
+def forwardWithHiddenStatesMasked {batch seq : Nat} (cfg : QwenConfig)
     {maskDtype : DType}
     (model : Qwen3Model (device := device) cfg dtype)
     (input_ids : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
@@ -104,7 +104,7 @@ def forwardWithHiddenStatesMasked {batch seq : UInt64} (cfg : QwenConfig)
     Input: [batch, seq] token IDs
     Output: [batch, seq, hidden_size]
     Rewritten in functional style to avoid Id.run issues with FFI shape tracking. -/
-def forward {batch seq : UInt64} (cfg : QwenConfig)
+def forward {batch seq : Nat} (cfg : QwenConfig)
     (model : Qwen3Model (device := device) cfg dtype)
     (input_ids : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (cos : Tensor { device := device, shape := #[seq, cfg.head_dim / 2], dtype := .Float32 })
@@ -119,7 +119,7 @@ def forward {batch seq : UInt64} (cfg : QwenConfig)
   -- Final normalization
   model.norm.forward3dPreserving finalH
 
-def forwardMasked {batch seq : UInt64} (cfg : QwenConfig)
+def forwardMasked {batch seq : Nat} (cfg : QwenConfig)
     {maskDtype : DType}
     (model : Qwen3Model (device := device) cfg dtype)
     (input_ids : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })

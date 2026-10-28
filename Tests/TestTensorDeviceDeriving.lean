@@ -24,46 +24,46 @@ example (device : Device) (weights : DeviceCheckpoint.Weights device) :
 variable {device : Device}
 
 -- Each handler must apply both the implicit device and explicit size correctly.
-structure MappedRecord (size : UInt64) where
+structure MappedRecord (size : Nat) where
   value : Tensor { shape := #[size], dtype := .Float32, device := device }
   deriving TensorStruct
 
-structure SchemaRecord (size : UInt64) where
+structure SchemaRecord (size : Nat) where
   value : Tensor { shape := #[size], dtype := .Float32, device := device }
   deriving ToTensorStructSchema
 
-structure FlattenRecord (size : UInt64) where
+structure FlattenRecord (size : Nat) where
   value : Tensor { shape := #[size], dtype := .Float32, device := device }
   deriving TensorStructFlatten
 
-structure DeviceBlock (size : UInt64) (dtype : DType) where
+structure DeviceBlock (size : Nat) (dtype : DType) where
   weight : Tensor { shape := #[size], dtype, device := device }
   label : Static String
   deriving Model
 
-structure DeviceModel (size : UInt64) (dtype : DType) where
+structure DeviceModel (size : Nat) (dtype : DType) where
   blocks : Array (DeviceBlock (device := device) size dtype)
   deriving Model
 
-derive_tensor_tree_cast {source target : Device} {size : UInt64} :
+derive_tensor_tree_cast {source target : Device} {size : Nat} :
   DeviceBlock (device := source) size .Float32 =>
   DeviceBlock (device := target) size .Float64
 
-derive_tensor_tree_cast {source target : Device} {size : UInt64} :
+derive_tensor_tree_cast {source target : Device} {size : Nat} :
   DeviceModel (device := source) size .Float32 =>
   DeviceModel (device := target) size .Float64
 
-example {size : UInt64} : TensorStruct (MappedRecord (device := device) size) :=
+example {size : Nat} : TensorStruct (MappedRecord (device := device) size) :=
   inferInstance
 
-example {size : UInt64} : ToTensorStructSchema (SchemaRecord (device := device) size) :=
+example {size : Nat} : ToTensorStructSchema (SchemaRecord (device := device) size) :=
   inferInstance
 
-example {size : UInt64} : TensorStructFlatten (FlattenRecord (device := device) size) :=
+example {size : Nat} : TensorStructFlatten (FlattenRecord (device := device) size) :=
   inferInstance
 
 -- Both source and destination placement remain in the generated instance type.
-example {source target : Device} {size : UInt64}
+example {source target : Device} {size : Nat}
     (input : DeviceModel (device := source) size .Float32) :
     IO (DeviceModel (device := target) size .Float64) :=
   TensorStruct.castTo (DeviceModel (device := target) size .Float64) input

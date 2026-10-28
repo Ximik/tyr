@@ -185,8 +185,8 @@ def computePGLoss
     (logProbs : Tensor { shape := #[b, t], dtype := .Float32, device := device })
     (advantages : Tensor { shape := #[b], dtype := .Float32, device := device })
     (mask : Tensor { shape := #[b, t], dtype := .Float32, device := device })
-    (numPasses : UInt64 := 1)
-    (examplesPerRank : UInt64 := 1)
+    (numPasses : Nat := 1)
+    (examplesPerRank : Nat := 1)
     : Tensor { shape := #[], dtype := .Float32, device := device } :=
 
   -- Expand advantages to [B, T] for broadcasting
@@ -393,7 +393,7 @@ def grpoStep
     - config: GRPO configuration
     - state: Current training state
     - padToken: Padding token ID (default 0) -/
-def grpoStepWithModel (b t : UInt64)
+def grpoStepWithModel (b t : Nat)
     (rollouts : Array RolloutBatch)
     (forwardFn : Tensor { shape := #[b, t], dtype := .Int64, device := device } → Tensor { shape := #[b, t], dtype := .Int64, device := device } → IO (Tensor { shape := #[b, t], dtype := .Float32, device := device }))  -- (input, target) → nll_per_token
     (config : GRPOConfig)
@@ -458,7 +458,7 @@ def grpoStepWithModel (b t : UInt64)
   let logProbs := negateToLogProb nllPerToken
 
   -- Compute policy gradient loss
-  let pgLoss := computePGLoss logProbs advTensor maskTensor config.examplesPerStep.toUInt64 1
+  let pgLoss := computePGLoss logProbs advTensor maskTensor config.examplesPerStep 1
 
   -- Backward pass
   Tensor.backwardLoss pgLoss
@@ -700,7 +700,7 @@ structure TrainResult where
     - evalFn: Optional evaluation function
     - config: GRPO configuration
     - numSteps: Number of training steps -/
-def trainLoop (b t : UInt64)
+def trainLoop (b t : Nat)
     (getPromptFn : Nat → IO (Array UInt64 × String × String))  -- step → (tokens, text, answer)
     (generateOneFn : Array UInt64 → IO UInt64)
     (forwardFn : Tensor { shape := #[b, t], dtype := .Int64, device := device } → Tensor { shape := #[b, t], dtype := .Int64, device := device } → IO (Tensor { shape := #[b, t], dtype := .Float32, device := device }))
@@ -766,7 +766,7 @@ def trainLoop (b t : UInt64)
 
     This variant accumulates gradients across all generated samples and applies
     a single AdamW update to the model parameters. -/
-def grpoStepWithModelUpdate (b t : UInt64) [TensorStruct P] [FloatingTensorStruct P]
+def grpoStepWithModelUpdate (b t : Nat) [TensorStruct P] [FloatingTensorStruct P]
     (params : P)
     (optState : Optim.AdamWState P)
     (rollouts : Array RolloutBatch)
@@ -796,7 +796,7 @@ def grpoStepWithModelUpdate (b t : UInt64) [TensorStruct P] [FloatingTensorStruc
     return (params, optState, result, state)
 
   let advantages := computeAdvantages rewards
-  let tNat := t.toNat
+  let tNat := t
   let mut sampleIdx := 0
   let mut totalLoss? : Option (Tensor { shape := #[], dtype := .Float32, device := device }) := none
 
@@ -879,7 +879,7 @@ def grpoStepWithModelUpdate (b t : UInt64) [TensorStruct P] [FloatingTensorStruc
   return (newParams, newOptState, result, newState)
 
 /-- GRPO training loop that updates model parameters each step. -/
-def trainLoopWithUpdates (b t : UInt64) [TensorStruct P] [FloatingTensorStruct P]
+def trainLoopWithUpdates (b t : Nat) [TensorStruct P] [FloatingTensorStruct P]
     (getPromptFn : Nat → IO (Array UInt64 × String × String))  -- step → (tokens, text, answer)
     (generateOneFn : P → Array UInt64 → IO UInt64)
     (forwardFn : P → Tensor { shape := #[b, t], dtype := .Int64, device := device } → Tensor { shape := #[b, t], dtype := .Int64, device := device } → IO (Tensor { shape := #[b, t], dtype := .Float32, device := device }))
@@ -948,7 +948,7 @@ def trainLoopWithUpdates (b t : UInt64) [TensorStruct P] [FloatingTensorStruct P
   return (currentParams, currentOptState, trainResult)
 
 /-- Simplified training interface for when you have pre-generated prompts. -/
-def trainOnPrompts (b t : UInt64)
+def trainOnPrompts (b t : Nat)
     (prompts : Array (Array UInt64 × String × String))  -- (tokens, text, answer)
     (generateOneFn : Array UInt64 → IO UInt64)
     (forwardFn : Tensor { shape := #[b, t], dtype := .Int64, device := device } → Tensor { shape := #[b, t], dtype := .Int64, device := device } → IO (Tensor { shape := #[b, t], dtype := .Float32, device := device }))
@@ -969,7 +969,7 @@ def trainOnPrompts (b t : UInt64)
   trainLoop b t getPromptFn generateOneFn forwardFn decodeFn rewardFn config numSteps callbacks
 
 /-- Prompt-array convenience wrapper for the update-enabled GRPO loop. -/
-def trainOnPromptsWithUpdates (b t : UInt64) [TensorStruct P] [FloatingTensorStruct P]
+def trainOnPromptsWithUpdates (b t : Nat) [TensorStruct P] [FloatingTensorStruct P]
     (prompts : Array (Array UInt64 × String × String))  -- (tokens, text, answer)
     (generateOneFn : P → Array UInt64 → IO UInt64)
     (forwardFn : P → Tensor { shape := #[b, t], dtype := .Int64, device := device } → Tensor { shape := #[b, t], dtype := .Int64, device := device } → IO (Tensor { shape := #[b, t], dtype := .Float32, device := device }))

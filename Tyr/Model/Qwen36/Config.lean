@@ -23,28 +23,28 @@ def normalize (cfg : Config) : Config := qwen35.Config.normalize cfg
 def normalizedLayerTypes (cfg : Config) : Array LayerType :=
   qwen35.Config.normalizedLayerTypes cfg
 
-def numHeadsPerKVGroup (cfg : Config) : UInt64 :=
+def numHeadsPerKVGroup (cfg : Config) : Nat :=
   qwen35.Config.numHeadsPerKVGroup cfg
 
-def linearKeyDim (cfg : Config) : UInt64 :=
+def linearKeyDim (cfg : Config) : Nat :=
   qwen35.Config.linearKeyDim cfg
 
-def linearValueDim (cfg : Config) : UInt64 :=
+def linearValueDim (cfg : Config) : Nat :=
   qwen35.Config.linearValueDim cfg
 
-def linearConvDim (cfg : Config) : UInt64 :=
+def linearConvDim (cfg : Config) : Nat :=
   qwen35.Config.linearConvDim cfg
 
-def linearKVRepeat (cfg : Config) : UInt64 :=
+def linearKVRepeat (cfg : Config) : Nat :=
   qwen35.Config.linearKVRepeat cfg
 
 def isMoE (cfg : Config) : Bool :=
   qwen35.Config.isMoE cfg
 
-def rotaryDim (cfg : Config) : UInt64 :=
+def rotaryDim (cfg : Config) : Nat :=
   qwen35.Config.rotaryDim cfg
 
-def rotaryHalfDim (cfg : Config) : UInt64 :=
+def rotaryHalfDim (cfg : Config) : Nat :=
   qwen35.Config.rotaryHalfDim cfg
 
 end Config
@@ -54,13 +54,13 @@ namespace VisionConfig
 /-- Default Qwen3.6-35B-A3B vision config from the public HF checkpoint. -/
 def qwen36_35B_A3B : VisionConfig := qwen35.VisionConfig.qwen36_35B_A3B
 
-def patchDim (cfg : VisionConfig) : UInt64 := qwen35.VisionConfig.patchDim cfg
+def patchDim (cfg : VisionConfig) : Nat := qwen35.VisionConfig.patchDim cfg
 
-def mergeUnit (cfg : VisionConfig) : UInt64 := qwen35.VisionConfig.mergeUnit cfg
+def mergeUnit (cfg : VisionConfig) : Nat := qwen35.VisionConfig.mergeUnit cfg
 
-def headDim (cfg : VisionConfig) : UInt64 := qwen35.VisionConfig.headDim cfg
+def headDim (cfg : VisionConfig) : Nat := qwen35.VisionConfig.headDim cfg
 
-def mergedTokenCount (cfg : VisionConfig) (nPatches : UInt64) : UInt64 :=
+def mergedTokenCount (cfg : VisionConfig) (nPatches : Nat) : Nat :=
   qwen35.VisionConfig.mergedTokenCount cfg nPatches
 
 end VisionConfig

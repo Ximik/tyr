@@ -62,8 +62,8 @@ private def deviceLabel (device : Device) : String :=
   | .MPS => "mps"
 
 /-- Deterministic int64 token-id tensor `[1, seq]` on `device`. -/
-private def mkIds (vals : Array Int64) (device : Device) : Tensor { shape := #[1, vals.size.toUInt64], dtype := .Int64, device := device } :=
-  Tensor.reshapeChecked ((Tensor.fromInt64Array vals).to device) #[1, vals.size.toUInt64]
+private def mkIds (vals : Array Int64) (device : Device) : Tensor { shape := #[1, vals.size], dtype := .Int64, device := device } :=
+  Tensor.reshapeChecked ((Tensor.fromInt64Array vals).to device) #[1, vals.size]
 
 /-- Max abs / max rel (denominator clamped by 1e-3) error in FP32. -/
 private def maxErrors {σ τ : StaticSpec} (got : Tensor σ) (expected : Tensor τ) : IO (Float × Float) := do
@@ -81,7 +81,7 @@ private def maxErrors {σ τ : StaticSpec} (got : Tensor σ) (expected : Tensor 
 
 /-- Sorted top-k id set per row of a shape-indexed logits tensor (`[n, vocab]`, or
     `[vocab]` which is treated as one row). -/
-private def topkIdSets {s : Shape} (logits : Tensor { shape := s, device := device, dtype := dtype }) (k : UInt64) : IO (Array (Array UInt64)) := do
+private def topkIdSets {s : Shape} (logits : Tensor { shape := s, device := device, dtype := dtype }) (k : Nat) : IO (Array (Array UInt64)) := do
   let sh := Tensor.runtimeShape logits
   let (n, v) :=
     if sh.size == 1 then (1, sh.getD 0 0)
@@ -89,8 +89,8 @@ private def topkIdSets {s : Shape} (logits : Tensor { shape := s, device := devi
   let l2 : Tensor { shape := #[n, v], device := device, dtype := dtype } := Tensor.reshapeChecked logits #[n, v]
   let (_, idx) := qwen35.topK2d l2 k 1
   let flat ← Tensor.toUInt64Array (idx)
-  pure (Array.ofFn (n := n.toNat) fun r =>
-    (flat.extract (r.val * k.toNat) (r.val * k.toNat + k.toNat)).qsort (fun a b => a < b))
+  pure (Array.ofFn (n := n) fun r =>
+    (flat.extract (r.val * k) (r.val * k + k)).qsort (fun a b => a < b))
 
 /-- Abs-diff gate + top-5-set gate for one logits tensor. -/
 private def checkLogits {s t : Shape} {refDType : DType} (lbl name : String) (got : Tensor { shape := s, device := device, dtype := dtype }) (ref : Tensor { shape := t, device := device, dtype := refDType }) (tol : Float) : IO Unit := do
@@ -237,7 +237,7 @@ private def runFixture (device : Device) : IO Unit := do
 
 /-- Real NVFP4-checkpoint smoke load: config + first `numLayers` layers via
     the sharded packed-expert path, bank-shape checks, one forward. -/
-private def runRealSmoke (modelDir : String) (numLayers : UInt64) (device : Device) : IO Unit := do
+private def runRealSmoke (modelDir : String) (numLayers : Nat) (device : Device) : IO Unit := do
   let lbl := deviceLabel device
   IO.println s!"-- real-checkpoint smoke [{lbl}] dir={modelDir} layers={numLayers}"
   let cfg0 ← Config.loadFromPretrainedDir modelDir
@@ -248,7 +248,7 @@ private def runRealSmoke (modelDir : String) (numLayers : UInt64) (device : Devi
   -- Truncate the layer schedule so only the first `numLayers` layers load.
   let cfg : Config := { cfg0 with
     num_hidden_layers := numLayers
-    layer_types := (Config.normalizedLayerTypes cfg0).extract 0 numLayers.toNat }
+    layer_types := (Config.normalizedLayerTypes cfg0).extract 0 numLayers }
   let log : torch.Log.Handlers := { onInfo := fun m => IO.println s!"  {m}" }
   let t0 ← IO.monoMsNow
   let model ← LagunaForCausalLM.loadSharded modelDir cfg device log
@@ -302,6 +302,6 @@ def main (args : List String) : IO Unit := do
       IO.println "CUDA not available; skipped CUDA parity."
     IO.println "All Laguna parity tests passed."
   | dir :: rest =>
-    let numLayers := ((rest.getD 0 "2").toNat?.getD 2).toUInt64
+    let numLayers := (rest.getD 0 "2").toNat?.getD 2
     let device ← if rest.getD 1 "cpu" == "cuda" then Device.cuda 0 else pure Device.CPU
     runRealSmoke dir numLayers device

@@ -6,7 +6,7 @@ open torch torch.laguna
 
 namespace Tests.LagunaDTypes
 
-example {device : Device} {cfg : Config} {batch seq : UInt64}
+example {device : Device} {cfg : Config} {batch seq : Nat}
     (model : LagunaForCausalLM (device := device) cfg .BFloat16)
     (ids : Tensor ⟨#[batch, seq], .Int64, device⟩) :
     IO (Tensor ⟨#[batch, seq, cfg.vocab_size], .BFloat16, device⟩) :=
@@ -30,17 +30,17 @@ private def writeFixture (directory : System.FilePath) (mode : Nat)
   let mut bytes := ByteArray.empty
   for (name, shape, bf16) in entries do
     let start := bytes.size
-    for _ in [:shape.foldl (fun n d => n * d.toNat) 1] do
+    for _ in [:shape.foldl (fun n d => n * d) 1] do
       bytes := bytes ++ (if bf16 && computeDType == "BF16" then ByteArray.mk #[0, 62]
         else ByteArray.mk #[0, 0, 0, 62])
     header := header ++ [(name, Lean.Json.mkObj [
       ("dtype", Lean.toJson (if bf16 then computeDType else "F32")),
-      ("shape", Lean.toJson (shape.map UInt64.toNat)),
+      ("shape", Lean.toJson shape),
       ("data_offsets", Lean.toJson #[start, bytes.size])])]
   let json := (Lean.Json.mkObj header).compress.toUTF8
   let mut length := ByteArray.empty
   for i in [:8] do
-    length := length.push ((json.size.toUInt64 >>> (i * 8).toUInt64).toUInt8)
+    length := length.push ((json.size >>> (i * 8)).toUInt8)
   IO.FS.writeBinFile (directory / "model.safetensors") (length ++ json ++ bytes)
 
 @[test] def testLagunaLoaderPreservesDTypeRoles : IO Unit := do

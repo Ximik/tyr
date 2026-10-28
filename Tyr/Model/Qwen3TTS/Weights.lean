@@ -40,12 +40,12 @@ private def loadOptionalTensorShardedTarget (modelDir : String) (name : String) 
     | .ok tensor => pure (some tensor)
     | .error message => throw <| IO.userError s!"Qwen3TTS tensor '{name}': {message}"
 
-private def loadRMSNormSharded (modelDir : String) (name : String) (dim : UInt64) (eps : Float)
+private def loadRMSNormSharded (modelDir : String) (name : String) (dim : Nat) (eps : Float)
     : IO (RMSNorm (device := device) dim dtype.val) := do
   let w ← loadTensorShardedTarget modelDir s!"{name}.weight" #[dim]
   pure { weight := reqGradFalse w, eps := ⟨eps⟩ }
 
-private def loadTalkerLayerSharded (modelDir : String) (layerIdx : UInt64) (cfg : TalkerConfig)
+private def loadTalkerLayerSharded (modelDir : String) (layerIdx : Nat) (cfg : TalkerConfig)
     : IO (TalkerLayer (device := device) (dtype := dtype) cfg) := do
   let p := s!"talker.model.layers.{layerIdx}"
   let sp := s!"{p}.self_attn"
@@ -88,7 +88,7 @@ private def loadTalkerLayerSharded (modelDir : String) (layerIdx : UInt64) (cfg 
   }
   pure { input_layernorm, self_attn, post_attention_layernorm, mlp }
 
-private def loadCodePredictorLayerSharded (modelDir : String) (layerIdx : UInt64) (cfg : TalkerConfig)
+private def loadCodePredictorLayerSharded (modelDir : String) (layerIdx : Nat) (cfg : TalkerConfig)
     : IO (CodePredictorLayer (device := device) (dtype := dtype) cfg.codePredictorConfig) := do
   let cp := cfg.codePredictorConfig
   let p := s!"talker.code_predictor.model.layers.{layerIdx}"
@@ -171,8 +171,8 @@ private def loadTalkerModelSharded (modelDir : String) (cfg : TalkerConfig)
     #[cfg.hiddenSize]
 
   let mut layers : Array (TalkerLayer (device := device) (dtype := dtype) cfg) := #[]
-  for i in [:cfg.numHiddenLayers.toNat] do
-    let layer ← loadTalkerLayerSharded modelDir i.toUInt64 cfg
+  for i in [:cfg.numHiddenLayers] do
+    let layer ← loadTalkerLayerSharded modelDir i cfg
     layers := layers.push layer
 
   let norm ← loadRMSNormSharded modelDir "talker.model.norm" cfg.hiddenSize cfg.rmsNormEps
@@ -190,7 +190,7 @@ private def loadTalkerModelSharded (modelDir : String) (cfg : TalkerConfig)
 private def loadCodePredictorSharded (modelDir : String) (cfg : TalkerConfig)
     : IO (TalkerCodePredictor (device := device) (dtype := dtype) cfg) := do
   let cp := cfg.codePredictorConfig
-  let nCodebooks := if cfg.numCodeGroups.toNat == 0 then 0 else cfg.numCodeGroups.toNat - 1
+  let nCodebooks := if cfg.numCodeGroups == 0 then 0 else cfg.numCodeGroups - 1
 
   let mut inputEmbeddings : Array (Tensor { shape := #[cp.vocabSize, cfg.hiddenSize], dtype := dtype.val, device := device }) := #[]
   for i in [:nCodebooks] do
@@ -202,8 +202,8 @@ private def loadCodePredictorSharded (modelDir : String) (cfg : TalkerConfig)
   let (inputProjection, inputProjectionBias) ← loadCodePredictorProjectionSharded modelDir cfg
 
   let mut layers : Array (CodePredictorLayer (device := device) (dtype := dtype) cp) := #[]
-  for i in [:cp.numHiddenLayers.toNat] do
-    let layer ← loadCodePredictorLayerSharded modelDir i.toUInt64 cfg
+  for i in [:cp.numHiddenLayers] do
+    let layer ← loadCodePredictorLayerSharded modelDir i cfg
     layers := layers.push layer
 
   let norm ← loadRMSNormSharded modelDir "talker.code_predictor.model.norm" cp.hiddenSize cp.rmsNormEps
@@ -227,7 +227,7 @@ private def loadTalkerForConditionalGenerationSharded (modelDir : String) (cfg :
   pure { model, codePredictor, codecHead := reqGradFalse codecHead }
 
 private def loadTimeDelayNetBlockSharded (modelDir : String) (namePrefix : String)
-    (inChannels outChannels kernelSize dilation : UInt64)
+    (inChannels outChannels kernelSize dilation : Nat)
     : IO (TimeDelayNetBlock (device := device) (dtype := dtype) inChannels outChannels kernelSize dilation) := do
   let weight ← loadTensorShardedTarget modelDir s!"{namePrefix}.conv.weight"
     #[outChannels, inChannels, kernelSize]
@@ -239,7 +239,7 @@ private def loadTimeDelayNetBlockSharded (modelDir : String) (namePrefix : Strin
   }
 
 private def loadSqueezeExcitationBlockSharded (modelDir : String) (namePrefix : String)
-    (channels seChannels : UInt64)
+    (channels seChannels : Nat)
     : IO (SqueezeExcitationBlock (device := device) (dtype := dtype) channels seChannels) := do
   let conv1Weight ← loadTensorShardedTarget modelDir s!"{namePrefix}.conv1.weight"
     #[seChannels, channels, 1]
@@ -257,9 +257,9 @@ private def loadSqueezeExcitationBlockSharded (modelDir : String) (namePrefix : 
   }
 
 private def loadRes2NetBlockSharded (modelDir : String) (namePrefix : String)
-    (channels scale kernelSize dilation : UInt64)
+    (channels scale kernelSize dilation : Nat)
     : IO (Res2NetBlock (device := device) (dtype := dtype) channels scale kernelSize dilation) := do
-  let nBlocks := if scale.toNat <= 1 then 0 else scale.toNat - 1
+  let nBlocks := if scale <= 1 then 0 else scale - 1
   let mut blocks : Array (TimeDelayNetBlock (device := device) (dtype := dtype) (channels / scale) (channels / scale) kernelSize dilation) := #[]
   for i in [:nBlocks] do
     let block ← loadTimeDelayNetBlockSharded modelDir
@@ -269,7 +269,7 @@ private def loadRes2NetBlockSharded (modelDir : String) (namePrefix : String)
   pure { blocks }
 
 private def loadSqueezeExcitationRes2NetBlockSharded (modelDir : String) (namePrefix : String)
-    (inChannels outChannels res2netScale seChannels kernelSize dilation : UInt64)
+    (inChannels outChannels res2netScale seChannels kernelSize dilation : Nat)
     : IO (SqueezeExcitationRes2NetBlock (device := device) (dtype := dtype) inChannels outChannels res2netScale seChannels kernelSize dilation) := do
   let tdnn1 ← loadTimeDelayNetBlockSharded modelDir
     s!"{namePrefix}.tdnn1" inChannels outChannels 1 1
@@ -282,7 +282,7 @@ private def loadSqueezeExcitationRes2NetBlockSharded (modelDir : String) (namePr
   pure { tdnn1, res2net, tdnn2, seBlock }
 
 private def loadAttentiveStatisticsPoolingSharded (modelDir : String) (namePrefix : String)
-    (channels attentionChannels : UInt64)
+    (channels attentionChannels : Nat)
     : IO (AttentiveStatisticsPooling (device := device) (dtype := dtype) channels attentionChannels) := do
   let tdnn ← loadTimeDelayNetBlockSharded modelDir
     s!"{namePrefix}.tdnn" (channels * 3) attentionChannels 1 1

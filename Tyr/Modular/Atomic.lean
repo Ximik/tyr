@@ -29,7 +29,7 @@ The dual norm (for gradients) is the nuclear norm:
 Input sensitivity ν = ||W||_σ since ||Wx||₂ ≤ ||W||_σ ||x||₂.
 -/
 
-instance (in_dim out_dim : UInt64) {d : DType} {dev : Device} [DType.FloatingOrComplex d] :
+instance (in_dim out_dim : Nat) {d : DType} {dev : Device} [DType.FloatingOrComplex d] :
     NormedModule (torch.Linear in_dim out_dim d dev) where
   norm m :=
     let weightNorm := Tensor.spectralNorm m.weight
@@ -80,7 +80,7 @@ The modular norm combines them via ℓ₂:
 Input sensitivity ν depends on the activation range, typically O(1).
 -/
 
-instance (dim : UInt64) {d : DType} {dev : Device} [DType.FloatingOrComplex d] :
+instance (dim : Nat) {d : DType} {dev : Device} [DType.FloatingOrComplex d] :
     NormedModule (torch.LayerNorm dim d dev) where
   norm m :=
     let wNorm := Tensor.l2Norm m.weight
@@ -127,7 +127,7 @@ The dual norm is the sum of row norms (ℓ₁ of row ℓ₂ norms).
 -/
 
 /-- Embedding table: maps discrete tokens to continuous vectors -/
-structure Embedding (vocabSize dim : UInt64) (dtype : torch.DType := .Float32)
+structure Embedding (vocabSize dim : Nat) (dtype : torch.DType := .Float32)
     (device : torch.Device := .CPU) where
   weight : torch.Tensor ⟨#[vocabSize, dim], dtype, device⟩
 
@@ -146,7 +146,7 @@ instance : torch.TensorStruct (Embedding vocabSize dim dtype device) where
   fold f init e := torch.TensorStruct.fold f init e.weight
 
 /-- Initialize with small random values -/
-def init (vocabSize dim : UInt64) : IO (Embedding vocabSize dim) := do
+def init (vocabSize dim : Nat) : IO (Embedding vocabSize dim) := do
   let std := 1.0 / Float.sqrt dim.toFloat
   let w ← torch.Tensor.randn #[vocabSize, dim]
   let weight := torch.Tensor.mulScalar w std
@@ -154,14 +154,14 @@ def init (vocabSize dim : UInt64) : IO (Embedding vocabSize dim) := do
   pure { weight }
 
 /-- Lookup embeddings for a batch of token indices -/
-def forward {vocabSize dim batch seq : UInt64}
+def forward {vocabSize dim batch seq : Nat}
     (emb : Embedding vocabSize dim dtype device)
     (indices : torch.Tensor ⟨#[batch, seq], .Int64, device⟩) : torch.Tensor ⟨#[batch, seq, dim], dtype, device⟩ :=
   torch.Tensor.embedding indices emb.weight
 
 end Embedding
 
-instance (vocabSize dim : UInt64) [DType.FloatingOrComplex dtype] : NormedModule (Embedding vocabSize dim dtype device) where
+instance (vocabSize dim : Nat) [DType.FloatingOrComplex dtype] : NormedModule (Embedding vocabSize dim dtype device) where
   norm m := torch.Tensor.maxRowNorm m.weight
 
   dualNorm m :=

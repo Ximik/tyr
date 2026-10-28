@@ -43,7 +43,12 @@ private def getFloat? (j : Json) : Option Float :=
   | some x => some x
   | none => (getNat? j).map (·.toFloat)
 
-private def getNatFieldD (j : Json) (key : String) (d : UInt64) : UInt64 :=
+private def getNatFieldD (j : Json) (key : String) (d : Nat) : Nat :=
+  match getObjVal? j key >>= getNat? with
+  | some n => n
+  | none => d
+
+private def getTokenIdFieldD (j : Json) (key : String) (d : UInt64) : UInt64 :=
   match getObjVal? j key >>= getNat? with
   | some n => n.toUInt64
   | none => d
@@ -131,11 +136,11 @@ def VLConfig.parseJson
       match imageProcJson with
       | .null => d.image_processor
       | j => ImageProcessorConfig.parseJson j d.image_processor
-    boi_token_id := getNatFieldD root "boi_token_id" d.boi_token_id
-    image_token_id := getNatFieldD root "image_token_id" d.image_token_id
-    eoi_token_id := getNatFieldD root "eoi_token_id" d.eoi_token_id
-    video_token_id := getNatFieldD root "video_token_id" d.video_token_id
-    audio_token_id := getNatFieldD root "audio_token_id" d.audio_token_id
+    boi_token_id := getTokenIdFieldD root "boi_token_id" d.boi_token_id
+    image_token_id := getTokenIdFieldD root "image_token_id" d.image_token_id
+    eoi_token_id := getTokenIdFieldD root "eoi_token_id" d.eoi_token_id
+    video_token_id := getTokenIdFieldD root "video_token_id" d.video_token_id
+    audio_token_id := getTokenIdFieldD root "audio_token_id" d.audio_token_id
     vision_soft_tokens_per_image :=
       getNatFieldD root "vision_soft_tokens_per_image" d.vision_soft_tokens_per_image
     tie_word_embeddings := getBoolFieldD root "tie_word_embeddings" d.tie_word_embeddings

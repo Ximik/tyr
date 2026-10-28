@@ -62,15 +62,15 @@ private def documentTokens : Array UInt64 :=
   #[91, 92, 0, 101, 102, 0, 201, 202, 203, 0, 301, 302, 0, 401, 402, 0, 501, 502]
 
 @[test] def testBosFinderInit : IO Unit := do
-  let tokens : Tensor { shape := #[documentTokens.size.toUInt64], dtype := .Int64, device := .CPU } := (Tensor.fromInt64Array (documentTokens.map UInt64.toInt64)).reshapeChecked #[documentTokens.size.toUInt64]
+  let tokens : Tensor { shape := #[documentTokens.size], dtype := .Int64, device := .CPU } := (Tensor.fromInt64Array (documentTokens.map UInt64.toInt64)).reshapeChecked #[documentTokens.size]
   let finder ← BOSFinder.init tokens 0
   LeanTest.assertEqual finder.bosPositions #[0, 2, 5, 9, 12, 15]
     "BOS boundaries include the initial partition fragment"
 
 @[test] def testDocumentAwareLoader : IO Unit := do
-  let tokens : Tensor { shape := #[documentTokens.size.toUInt64], dtype := .Int64, device := .CPU } := (Tensor.fromInt64Array (documentTokens.map UInt64.toInt64)).reshapeChecked #[documentTokens.size.toUInt64]
+  let tokens : Tensor { shape := #[documentTokens.size], dtype := .Int64, device := .CPU } := (Tensor.fromInt64Array (documentTokens.map UInt64.toInt64)).reshapeChecked #[documentTokens.size]
   let finder := (← BOSFinder.init tokens 0).shuffle 42
-  let (batch, next) ← finder.getBatch tokens 1 documentTokens.size.toUInt64
+  let (batch, next) ← finder.getBatch tokens 1 documentTokens.size
   let some batch := batch | throw <| IO.userError "Missing document batch"
   let values ← readTokens batch
   LeanTest.assertEqual (values.qsort (· < ·)) (documentTokens.qsort (· < ·))
@@ -78,10 +78,10 @@ private def documentTokens : Array UInt64 :=
   for pair in #[(91, 92), (101, 102), (201, 202), (202, 203), (301, 302), (401, 402), (501, 502)] do
     let i := values.toList.idxOf pair.1
     LeanTest.assertEqual (values[i + 1]?) (some pair.2) "Document-internal order is preserved"
-  LeanTest.assertEqual next.currentPos documentTokens.size.toUInt64
+  LeanTest.assertEqual next.currentPos documentTokens.size
 
 @[test] def testShuffleDeterminism : IO Unit := do
-  let tokens : Tensor { shape := #[documentTokens.size.toUInt64], dtype := .Int64, device := .CPU } := (Tensor.fromInt64Array (documentTokens.map UInt64.toInt64)).reshapeChecked #[documentTokens.size.toUInt64]
+  let tokens : Tensor { shape := #[documentTokens.size], dtype := .Int64, device := .CPU } := (Tensor.fromInt64Array (documentTokens.map UInt64.toInt64)).reshapeChecked #[documentTokens.size]
   let finder ← BOSFinder.init tokens 0
   let (a, _) ← (finder.shuffle 42).take tokens finder.dataLen
   let (b, _) ← (finder.shuffle 42).take tokens finder.dataLen
@@ -124,12 +124,12 @@ private def documentTokens : Array UInt64 :=
   let cfg : Config := { dataPath := path.toString, bosToken := 65535, shuffle := false }
   for rank in #[0, 1] do
     let gen ← DistributedDataGenerator.initForRank cfg 1 1 rank 2
-    LeanTest.assertEqual gen.iterator.numTokens partition.toUInt64 "Full rank partition survives loading"
+    LeanTest.assertEqual gen.iterator.numTokens partition "Full rank partition survives loading"
     let (_, gen) ← gen.nextTokens 1000000
     let (tail, gen) ← gen.nextTokens 6
     LeanTest.assertEqual (← readTokens tail) (Array.replicate 6 (if rank == 0 then 101 else 201))
       "Tokens beyond the former one-million limit are consumed"
-    LeanTest.assertEqual gen.iterator.shard.bosFinder.currentPos partition.toUInt64
+    LeanTest.assertEqual gen.iterator.shard.bosFinder.currentPos partition
 
 @[test] def testDataLoaderRankPartitionsCoverUnequalFiles : IO Unit := IO.FS.withTempDir fun dir => do
   let path := dir / "tokens.bin"
@@ -184,7 +184,7 @@ private def documentTokens : Array UInt64 :=
   writeTokens path #[1, 2, 3, 4]
   let cfg : Config := { dataPath := path.toString, shuffle := false }
   let gen ← DistributedDataGenerator.initForRank cfg 1 1 0 1
-  let huge : UInt64 := 18446744073709551615
+  let huge : Nat := 18446744073709551615
   for dims in #[(0, 1), (1, 0), (huge, 2)] do
     assertRejected (do let _ ← gen.iterator.updateParams dims.1 dims.2; pure ())
       "Parameter updates reject zero sizes and overflowing products"

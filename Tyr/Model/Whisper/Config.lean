@@ -8,36 +8,36 @@ import Tyr.Basic
 namespace torch.whisper
 
 structure WhisperConfig where
-  numMelBins : UInt64 := 80
-  vocabSize : UInt64 := 51865
-  dModel : UInt64 := 384
-  encoderLayers : UInt64 := 4
-  encoderAttentionHeads : UInt64 := 6
-  encoderFfnDim : UInt64 := 1536
-  decoderLayers : UInt64 := 4
-  decoderAttentionHeads : UInt64 := 6
-  decoderFfnDim : UInt64 := 1536
-  maxSourcePositions : UInt64 := 1500
-  maxTargetPositions : UInt64 := 448
+  numMelBins : Nat := 80
+  vocabSize : Nat := 51865
+  dModel : Nat := 384
+  encoderLayers : Nat := 4
+  encoderAttentionHeads : Nat := 6
+  encoderFfnDim : Nat := 1536
+  decoderLayers : Nat := 4
+  decoderAttentionHeads : Nat := 6
+  decoderFfnDim : Nat := 1536
+  maxSourcePositions : Nat := 1500
+  maxTargetPositions : Nat := 448
   activationFunction : String := "gelu"
   layerNormEps : Float := 1e-5
   padTokenId : UInt64 := 50257
   bosTokenId : UInt64 := 50257
   eosTokenId : UInt64 := 50257
   decoderStartTokenId : UInt64 := 50258
-  suppressTokens : Array UInt64 := #[]
-  beginSuppressTokens : Array UInt64 := #[]
+  suppressTokens : Array Nat := #[]
+  beginSuppressTokens : Array Nat := #[]
   deriving Repr, Inhabited
 
 namespace WhisperConfig
 
-def encoderHeadDim (cfg : WhisperConfig) : UInt64 :=
+def encoderHeadDim (cfg : WhisperConfig) : Nat :=
   cfg.dModel / cfg.encoderAttentionHeads
 
-def decoderHeadDim (cfg : WhisperConfig) : UInt64 :=
+def decoderHeadDim (cfg : WhisperConfig) : Nat :=
   cfg.dModel / cfg.decoderAttentionHeads
 
-def conv2OutputSeq (frames : UInt64) : UInt64 :=
+def conv2OutputSeq (frames : Nat) : Nat :=
   (frames + 2 - (3 - 1) - 1) / 2 + 1
 
 def hasValidHeads (cfg : WhisperConfig) : Bool :=

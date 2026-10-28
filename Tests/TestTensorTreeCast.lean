@@ -19,7 +19,7 @@ structure TargetModel where
 
 derive_tensor_tree_cast SourceModel => TargetModel
 
-structure GenericCastModel (size : UInt64) (dtype : DType) where
+structure GenericCastModel (size : Nat) (dtype : DType) where
   weight : Tensor { shape := #[size], dtype, device := .CPU }
   label : Static String
 

@@ -45,13 +45,13 @@ inductive HeadDimClass where
   | d128
   | d256
   | d512
-  | other (dim : UInt64)
+  | other (dim : Nat)
   deriving Repr, Inhabited, BEq
 
 /-- Grouped-query structure class. `grouped r` means `numQHeads / numKVHeads = r`. -/
 inductive GqaClass where
   | equal
-  | grouped (ratio : UInt64)
+  | grouped (ratio : Nat)
   | invalid
   deriving Repr, Inhabited, BEq
 
@@ -69,12 +69,12 @@ inductive ScaleClass where
     a stable classification surface. -/
 structure AttentionRoutingMetadata where
   headDimClass : HeadDimClass
-  gqaRatio : Option UInt64
+  gqaRatio : Option Nat
   execMode : AttentionMode
   scaleClass : ScaleClass
-  qTiles : UInt64
-  kvTiles : UInt64
-  windowTiles : Option UInt64
+  qTiles : Nat
+  kvTiles : Nat
+  windowTiles : Option Nat
   deriving Repr, Inhabited, BEq
 
 /-- Current native specialization set known to the runtime operator layer. -/
@@ -93,7 +93,7 @@ def isNative : AttentionSpecialization → Bool
   | _ => true
 
 /-- Tile-block count for the current H100 MHA specializations, when applicable. -/
-def kvBlocks? : AttentionSpecialization → Option UInt64
+def kvBlocks? : AttentionSpecialization → Option Nat
   | .portable => none
   | .tkMhaH100Decode => none
   | .tkMhaH1002Block => some 2
@@ -106,12 +106,12 @@ end AttentionSpecialization
     Fields are intentionally broader than the current native kernel set so this
     type can survive future backend growth without changing the public surface. -/
 structure AttentionProblem where
-  batch : UInt64
-  numQHeads : UInt64
-  numKVHeads : UInt64
-  qSeq : UInt64
-  kvSeq : UInt64
-  headDim : UInt64
+  batch : Nat
+  numQHeads : Nat
+  numKVHeads : Nat
+  qSeq : Nat
+  kvSeq : Nat
+  headDim : Nat
   dtype : DType
   device : DeviceKind
   arch : GpuArch := .SM90
@@ -121,20 +121,20 @@ structure AttentionProblem where
   isCausal : Bool := false
   scale : Option Float := none
   enableGqa : Bool := false
-  windowSize : Option UInt64 := none
+  windowSize : Option Nat := none
   deriving Repr, Inhabited
 
 namespace AttentionProblem
 
 /-- Ceiling division for positive tile sizes. Returns `0` when `d = 0`. -/
-private def ceilDiv (n d : UInt64) : UInt64 :=
+private def ceilDiv (n d : Nat) : Nat :=
   if d == 0 then
     0
   else
     (n + d - 1) / d
 
 /-- Infer the broad attention mode from sequence lengths and optional windowing. -/
-def inferMode (qSeq kvSeq : UInt64) (windowSize : Option UInt64 := none) : AttentionMode :=
+def inferMode (qSeq kvSeq : Nat) (windowSize : Option Nat := none) : AttentionMode :=
   match windowSize with
   | some _ => .slidingWindow
   | none =>
@@ -147,7 +147,7 @@ def inferMode (qSeq kvSeq : UInt64) (windowSize : Option UInt64 := none) : Atten
     The Q/K/V dtype is shared statically; the descriptor still records the
     runtime dtype/device of the query handle, as before. -/
 def ofQKV
-    {batch nHead nKvHead qSeq kvSeq headDim : UInt64} {d : DType}
+    {batch nHead nKvHead qSeq kvSeq headDim : Nat} {d : DType}
     (q : Tensor { shape := #[batch, nHead, qSeq, headDim], dtype := d, device := device })
     (k : Tensor { shape := #[batch, nKvHead, kvSeq, headDim], dtype := d, device := device })
     (v : Tensor { shape := #[batch, nKvHead, kvSeq, headDim], dtype := d, device := device })
@@ -156,7 +156,7 @@ def ofQKV
     (isCausal : Bool := false)
     (scale : Option Float := none)
     (enableGqa : Bool := false)
-    (windowSize : Option UInt64 := none)
+    (windowSize : Option Nat := none)
     (arch : GpuArch := .SM90)
     : AttentionProblem :=
     -- K/V carry the shared layout indices; only Q supplies runtime metadata.
@@ -183,8 +183,8 @@ def ofQKV
 
 /-- Shape-only helper for fixed-layout self-attention surfaces. -/
 def selfAttention
-    (seq : UInt64)
-    (headDim : UInt64 := 64)
+    (seq : Nat)
+    (headDim : Nat := 64)
     (device : DeviceKind := .CUDA 0)
     (dtype : DType := .BFloat16)
     (isCausal : Bool := false)
@@ -214,7 +214,7 @@ def isSelfAttention (problem : AttentionProblem) : Bool :=
   problem.qSeq == problem.kvSeq
 
 /-- Whether `qSeq` and `kvSeq` are aligned to the current tile size. -/
-def tileAligned (problem : AttentionProblem) (tile : UInt64 := 64) : Bool :=
+def tileAligned (problem : AttentionProblem) (tile : Nat := 64) : Bool :=
   problem.qSeq % tile == 0 && problem.kvSeq % tile == 0
 
 /-- Whether the provided scale matches the standard `1 / sqrt(headDim)` default. -/
@@ -246,7 +246,7 @@ def gqaClass (problem : AttentionProblem) : GqaClass :=
     .invalid
 
 /-- Exact grouped-query ratio when the runtime head counts are well-formed. -/
-def gqaRatio (problem : AttentionProblem) : Option UInt64 :=
+def gqaRatio (problem : AttentionProblem) : Option Nat :=
   match problem.gqaClass with
   | .equal => some 1
   | .grouped ratio => some ratio
@@ -268,19 +268,19 @@ def scaleClass (problem : AttentionProblem) : ScaleClass :=
         .custom
 
 /-- Query tile count at the current planning granularity. -/
-def qTiles (problem : AttentionProblem) (tile : UInt64 := 64) : UInt64 :=
+def qTiles (problem : AttentionProblem) (tile : Nat := 64) : Nat :=
   ceilDiv problem.qSeq tile
 
 /-- KV tile count at the current planning granularity. -/
-def kvTiles (problem : AttentionProblem) (tile : UInt64 := 64) : UInt64 :=
+def kvTiles (problem : AttentionProblem) (tile : Nat := 64) : Nat :=
   ceilDiv problem.kvSeq tile
 
 /-- Optional windowed-attention tile count at the current planning granularity. -/
-def windowTiles (problem : AttentionProblem) (tile : UInt64 := 64) : Option UInt64 :=
+def windowTiles (problem : AttentionProblem) (tile : Nat := 64) : Option Nat :=
   problem.windowSize.map (fun window => ceilDiv window tile)
 
 /-- Stable family-routing metadata view derived from the full runtime problem. -/
-def routingMetadata (problem : AttentionProblem) (tile : UInt64 := 64) : AttentionRoutingMetadata := {
+def routingMetadata (problem : AttentionProblem) (tile : Nat := 64) : AttentionRoutingMetadata := {
   headDimClass := problem.headDimClass
   gqaRatio := problem.gqaRatio
   execMode := problem.execMode

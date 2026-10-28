@@ -120,8 +120,8 @@ def testQwen3TTSBFloat16IncrementalCache : IO Unit := do
     -- Three prompt tokens followed by two decode tokens exercise the Talker cache path.
     let mut outputs : Array (Sigma (fun shape => Tensor { shape := shape, dtype, device := .CPU })) := #[]
     for pos in [:3] do
-      let (out, next) := layer.forwardStep (Tensor.sliceChecked x 1 pos.toUInt64 1 #[1, 1, 8])
-        (Tensor.sliceChecked cos 0 pos.toUInt64 1 #[1, 2]) (Tensor.sliceChecked sin 0 pos.toUInt64 1 #[1, 2]) cache
+      let (out, next) := layer.forwardStep (Tensor.sliceChecked x 1 pos 1 #[1, 1, 8])
+        (Tensor.sliceChecked cos 0 pos 1 #[1, 2]) (Tensor.sliceChecked sin 0 pos 1 #[1, 2]) cache
       LeanTest.assertEqual out.actualSpec.dtype x.actualSpec.dtype "Prefill step retains model dtype"
       cache := next
       outputs := outputs.push out.packShape
@@ -129,8 +129,8 @@ def testQwen3TTSBFloat16IncrementalCache : IO Unit := do
     let prefixK ← Tensor.toFloatArray prefixCache.kStoreDyn.2
     let prefixV ← Tensor.toFloatArray prefixCache.vStoreDyn.2
     for pos in [3:5] do
-      let (out, next) := layer.forwardStep (Tensor.sliceChecked x 1 pos.toUInt64 1 #[1, 1, 8])
-        (Tensor.sliceChecked cos 0 pos.toUInt64 1 #[1, 2]) (Tensor.sliceChecked sin 0 pos.toUInt64 1 #[1, 2]) cache
+      let (out, next) := layer.forwardStep (Tensor.sliceChecked x 1 pos 1 #[1, 1, 8])
+        (Tensor.sliceChecked cos 0 pos 1 #[1, 2]) (Tensor.sliceChecked sin 0 pos 1 #[1, 2]) cache
       LeanTest.assertEqual out.actualSpec.dtype x.actualSpec.dtype "Decode step retains model dtype"
       cache := next
       outputs := outputs.push out.packShape
@@ -164,31 +164,31 @@ def testQwen3TTSBFloat16Generation : IO Unit := do
     "BF16 generation completes the requested frames and code groups"
   LeanTest.assertEqual out.lengths #[3] "EOS is suppressed for all requested frames"
   let codes ← Tensor.toUInt64Array out.codes
-  LeanTest.assertEqual codes.size (3 * cfg.numCodeGroups.toNat) "Every generated code materializes"
+  LeanTest.assertEqual codes.size (3 * cfg.numCodeGroups) "Every generated code materializes"
   for i in [:codes.size] do
-    let upper := if i % cfg.numCodeGroups.toNat == 0 then cfg.vocabSize else cfg.codePredictorConfig.vocabSize
-    LeanTest.assertTrue (codes[i]! < upper) "Generated codes stay within their vocabulary"
+    let upper := if i % cfg.numCodeGroups == 0 then cfg.vocabSize else cfg.codePredictorConfig.vocabSize
+    LeanTest.assertTrue (codes[i]!.toNat < upper) "Generated codes stay within their vocabulary"
 
 @[test]
 def testQwen3TTSGenerateFromText : IO Unit := do
   let cfg := tinyCfg
   let model ← Qwen3TTSForConditionalGeneration.init cfg
 
-  let batch : UInt64 := 2
-  let textSeq : UInt64 := 6
-  let maxFrames : UInt64 := 5
+  let batch : Nat := 2
+  let textSeq : Nat := 6
+  let maxFrames : Nat := 5
 
   let textIds ← Tensor.randint 0 cfg.talkerConfig.textVocabSize.toInt64 #[batch, textSeq]
   let out ← model.generateFromText textIds maxFrames
 
-  LeanTest.assertEqual out.lengths.size batch.toNat "lengths should have one value per batch row"
+  LeanTest.assertEqual out.lengths.size batch "lengths should have one value per batch row"
 
   -- Verify padded output shape by materializing first codebook and flattening.
   let firstBook3 : Tensor { shape := #[batch, maxFrames, 1], dtype := .Int64, device := .CPU } := Tensor.sliceChecked out.codes 2 0 1 #[batch, maxFrames, 1]
   let firstBook2 : Tensor { shape := #[batch, maxFrames], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked firstBook3 #[batch, maxFrames]
   let flat : Tensor { shape := #[batch * maxFrames], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked firstBook2 #[batch * maxFrames]
   let toks ← Tensor.toUInt64Array flat
-  LeanTest.assertEqual toks.size (batch * maxFrames).toNat "flattened token count should match batch*frames"
+  LeanTest.assertEqual toks.size (batch * maxFrames) "flattened token count should match batch*frames"
 
   for len in out.lengths do
     LeanTest.assertTrue (len >= 1 && len <= maxFrames) "each generated length must be within [1, maxFrames]"
@@ -198,22 +198,22 @@ def testQwen3TTSGenerateFromInstructText : IO Unit := do
   let cfg := tinyCfg
   let model ← Qwen3TTSForConditionalGeneration.init cfg
 
-  let batch : UInt64 := 1
-  let instructSeq : UInt64 := 3
-  let textSeq : UInt64 := 4
-  let maxFrames : UInt64 := 4
+  let batch : Nat := 1
+  let instructSeq : Nat := 3
+  let textSeq : Nat := 4
+  let maxFrames : Nat := 4
 
   let instructIds ← Tensor.randint 0 cfg.talkerConfig.textVocabSize.toInt64 #[batch, instructSeq]
   let textIds ← Tensor.randint 0 cfg.talkerConfig.textVocabSize.toInt64 #[batch, textSeq]
   let out ← model.generateFromInstructText instructIds textIds maxFrames
 
-  LeanTest.assertEqual out.lengths.size batch.toNat "lengths should have one value per batch row"
+  LeanTest.assertEqual out.lengths.size batch "lengths should have one value per batch row"
 
   let firstBook3 : Tensor { shape := #[batch, maxFrames, 1], dtype := .Int64, device := .CPU } := Tensor.sliceChecked out.codes 2 0 1 #[batch, maxFrames, 1]
   let firstBook2 : Tensor { shape := #[batch, maxFrames], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked firstBook3 #[batch, maxFrames]
   let flat : Tensor { shape := #[batch * maxFrames], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked firstBook2 #[batch * maxFrames]
   let toks ← Tensor.toUInt64Array flat
-  LeanTest.assertEqual toks.size (batch * maxFrames).toNat "flattened token count should match batch*frames"
+  LeanTest.assertEqual toks.size (batch * maxFrames) "flattened token count should match batch*frames"
 
   for len in out.lengths do
     LeanTest.assertTrue (len >= 1 && len <= maxFrames) "each generated length must be within [1, maxFrames]"
@@ -223,12 +223,12 @@ def testQwen3TTSGenerateFromTextZeroFrames : IO Unit := do
   let cfg := tinyCfg
   let model ← Qwen3TTSForConditionalGeneration.init cfg
 
-  let batch : UInt64 := 2
-  let textSeq : UInt64 := 5
+  let batch : Nat := 2
+  let textSeq : Nat := 5
   let textIds ← Tensor.randint 0 cfg.talkerConfig.textVocabSize.toInt64 #[batch, textSeq]
   let out ← model.generateFromText textIds 0
 
-  LeanTest.assertEqual out.lengths.size batch.toNat "lengths should have one value per batch row"
+  LeanTest.assertEqual out.lengths.size batch "lengths should have one value per batch row"
   for len in out.lengths do
     LeanTest.assertEqual len 0 "maxFrames=0 should produce zero generated length"
 
@@ -251,8 +251,8 @@ def testQwen3TTSRejectsNonPositiveTemperature : IO Unit := do
 def testQwen3TTSSpeakerEmbedding : IO Unit := do
   let cfg := tinyCfg
   let model ← Qwen3TTSForConditionalGeneration.init cfg
-  let batch : UInt64 := 2
-  let frames : UInt64 := 12
+  let batch : Nat := 2
+  let frames : Nat := 12
   let mel ← Tensor.randn #[batch, frames, cfg.speakerEncoderConfig.melDim]
   let emb ← model.extractSpeakerEmbedding mel
   let s := Tensor.item (Tensor.sumAll emb)
@@ -316,7 +316,7 @@ def testQwen3TTSStreamingApi : IO Unit := do
   let callbacksSeenRef ← IO.mkRef (0 : Nat)
   let callbacks : Qwen3TTSForConditionalGeneration.StreamingCallbacks := {
     onCodeFrame := fun _ row => do
-      LeanTest.assertEqual row.size cfg.talkerConfig.numCodeGroups.toNat "stream row width should equal numCodeGroups"
+      LeanTest.assertEqual row.size cfg.talkerConfig.numCodeGroups "stream row width should equal numCodeGroups"
       callbacksSeenRef.modify (fun n => n + 1)
   }
   let opts : Qwen3TTSForConditionalGeneration.StreamingOptions cfg := {
@@ -326,7 +326,7 @@ def testQwen3TTSStreamingApi : IO Unit := do
   }
   let out ← model.streamFromTalkerInputs talkerInputs opts none callbacks
   LeanTest.assertEqual out.lengths.size 1 "stream lengths should have one value for batch=1"
-  LeanTest.assertTrue (out.codeRows.size <= opts.maxFrames.toNat) "streamed rows should not exceed maxFrames"
+  LeanTest.assertTrue (out.codeRows.size <= opts.maxFrames) "streamed rows should not exceed maxFrames"
   let callbacksSeen ← callbacksSeenRef.get
   LeanTest.assertEqual callbacksSeen out.codeRows.size "callback should fire once per emitted stream row"
 

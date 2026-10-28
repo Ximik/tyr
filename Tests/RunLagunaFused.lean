@@ -293,11 +293,11 @@ private def runCorrectness (path : String) (device : Device) : IO Unit := do
   let yExpD : Tensor { shape := #[5, 64], device := device, dtype := .BFloat16 } := (← requireBF16 yExp).to device
   let mut worst := 0.0
   for i in [:5] do
-    let x1 : Tensor { shape := #[1, 64], device := device, dtype := .BFloat16 } := Tensor.reshapeChecked (sliceTyped xD 0 i.toUInt64 1) #[1, 64]
+    let x1 : Tensor { shape := #[1, 64], device := device, dtype := .BFloat16 } := Tensor.reshapeChecked (sliceTyped xD 0 i 1) #[1, 64]
     let yFused ← block.forward2d testCfg x1
     let yEager ← block.forward2d testCfg x1 false
     let (maxAbs, maxRel) ← maxErrors yFused yEager
-    let yExpRow : Tensor { shape := #[1, 64], device := device, dtype := .BFloat16 } := Tensor.reshapeChecked (sliceTyped yExpD 0 i.toUInt64 1) #[1, 64]
+    let yExpRow : Tensor { shape := #[1, 64], device := device, dtype := .BFloat16 } := Tensor.reshapeChecked (sliceTyped yExpD 0 i 1) #[1, 64]
     let (refAbs, _) ← maxErrors yFused yExpRow
     -- The fused kernel evaluates the exact FP4 math in FP32, while the eager
     -- path rounds dequantized weights to BF16 and accumulates in BF16, so
@@ -365,7 +365,7 @@ private def runBenchmark (path : String) (device : Device) : IO Unit := do
   let mi := bigCfg.moe_intermediate_size
   -- FP4 bytes read per token by the fused op: every selected expert's packed
   -- weights + group scales, each exactly once.
-  let bytesPerTok : UInt64 :=
+  let bytesPerTok : Nat :=
     k * (2 * (mi * h / 2 + mi * h / 16) + (h * mi / 2 + h * mi / 16))
   IO.println s!"  FP4 bytes read per token: {bytesPerTok} ({bytesPerTok.toFloat / 1.0e6} MB)"
 

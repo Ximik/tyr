@@ -121,9 +121,9 @@ private def approx (a b tol : Float) : Bool :=
   -- CPU rewrite was measured 5x SLOWER (allocation-bound), so the scalable
   -- path for large noise dims is device-side counter-based sampling.
   for n in ([64, 1024] : List Nat) do
-    let tree : VirtualBrownianTree (Tensor { shape := #[n.toUInt64], dtype := .Float32, device := .CPU }) := {
+    let tree : VirtualBrownianTree (Tensor { shape := #[n], dtype := .Float32, device := .CPU }) := {
       t0 := 0.0, t1 := 1.0, tol := 1.0e-4, seed := 11
-      shape := Tensor.zeros #[n.toUInt64]
+      shape := Tensor.zeros #[n]
     }
     let start ← IO.monoMsNow
     let mut acc := 0.0

@@ -14,7 +14,7 @@ namespace torch.vae
 
 variable {device : Device} {dtype : DType}
 /-- Upsampling block: 2× nearest-neighbor upsample + 3×3 conv -/
-structure Upsample (channels : UInt64) (dtype : DType := .Float32) where
+structure Upsample (channels : Nat) (dtype : DType := .Float32) where
   conv : Conv2dParams (device := device) (dtype := dtype) channels channels 3 1
   deriving TensorStruct
 
@@ -22,14 +22,14 @@ structure Upsample (channels : UInt64) (dtype : DType := .Float32) where
 namespace Upsample
 
 /-- Initialize upsample block -/
-def init (channels : UInt64) (device : Device := .CPU) (dtype : DType := .Float32) : IO (Upsample (device := device) (dtype := dtype) channels) := do
+def init (channels : Nat) (device : Device := .CPU) (dtype : DType := .Float32) : IO (Upsample (device := device) (dtype := dtype) channels) := do
   let conv ← Conv2dParams.init (dtype := dtype) (device := device) channels channels 3 1
   pure { conv }
 
 /-- Forward pass: 2× upsample + conv.
     Input: [batch, channels, height, width]
     Output: [batch, channels, height*2, width*2] -/
-def forward {batch channels height width : UInt64}
+def forward {batch channels height width : Nat}
     (up : Upsample (device := device) (dtype := dtype) channels)
     (x : Tensor { dtype := dtype, device := device, shape := #[batch, channels, height, width] })
     : Tensor { dtype := dtype, device := device, shape := #[batch, channels, height * 2, width * 2] } :=
@@ -44,7 +44,7 @@ def forward {batch channels height width : UInt64}
 end Upsample
 
 /-- Downsample block: 3×3 conv with stride 2 -/
-structure Downsample (channels : UInt64) (dtype : DType := .Float32) where
+structure Downsample (channels : Nat) (dtype : DType := .Float32) where
   conv : Conv2dParams (device := device) (dtype := dtype) channels channels 3 1
   deriving TensorStruct
 
@@ -52,14 +52,14 @@ structure Downsample (channels : UInt64) (dtype : DType := .Float32) where
 namespace Downsample
 
 /-- Initialize downsample block -/
-def init (channels : UInt64) (device : Device := .CPU) (dtype : DType := .Float32) : IO (Downsample (device := device) (dtype := dtype) channels) := do
+def init (channels : Nat) (device : Device := .CPU) (dtype : DType := .Float32) : IO (Downsample (device := device) (dtype := dtype) channels) := do
   let conv ← Conv2dParams.init (dtype := dtype) (device := device) channels channels 3 1
   pure { conv }
 
 /-- Forward pass: strided conv for 2× downsample.
     Input: [batch, channels, height, width]
     Output: [batch, channels, ceil(height/2), ceil(width/2)] -/
-def forward {batch channels height width : UInt64}
+def forward {batch channels height width : Nat}
     (down : Downsample (device := device) (dtype := dtype) channels)
     (x : Tensor { dtype := dtype, device := device, shape := #[batch, channels, height, width] })
     : Tensor { dtype := dtype, device := device, shape := #[batch, channels, Tensor.convExtent height 3 2 1 1, Tensor.convExtent width 3 2 1 1] } :=

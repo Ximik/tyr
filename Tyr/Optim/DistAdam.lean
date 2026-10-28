@@ -167,10 +167,10 @@ def stepSingle {σ : StaticSpec} [DType.RealFloating σ.dtype] (param : Tensor �
     This is more efficient than all-reduce as each rank only
     updates a portion of the parameters.
 -/
-private def canShardFirstDim (s : Shape) (worldSize : UInt64) : Bool :=
+private def canShardFirstDim (s : Shape) (worldSize : Nat) : Bool :=
   worldSize > 0 && s.size > 0 && s[0]! % worldSize == 0
 
-private def firstDimShardShape (s : Shape) (worldSize : UInt64) : Shape :=
+private def firstDimShardShape (s : Shape) (worldSize : Nat) : Shape :=
   if s.size == 0 then
     s
   else
@@ -178,7 +178,7 @@ private def firstDimShardShape (s : Shape) (worldSize : UInt64) : Shape :=
 
 /-- Slice the leading axis of a tensor to `[start, start + len)`, re-validating
     the runtime handle against the computed target shape. -/
-private def sliceFirstDim {σ : StaticSpec} (t : Tensor σ) (start len : UInt64)
+private def sliceFirstDim {σ : StaticSpec} (t : Tensor σ) (start len : Nat)
     (shape' : Shape) : IO (Tensor (σ.withShape shape')) := do
   match Tensor.ofRaw (RawTensor.slice t.raw 0 start len) with
   | .ok r => pure r
@@ -193,8 +193,8 @@ def stepDistributed {σ : StaticSpec} [DType.RealFloating σ.dtype] (param : Ten
   if !isDist then
     return (← stepSingle param grad state cfg lrMul wdMul)
 
-  let worldSize ← dist.getWorldSize
-  let rank ← dist.getRank
+  let worldSize := (← dist.getWorldSize).toNat
+  let rank := (← dist.getRank).toNat
   if worldSize <= 1 then
     return (← stepSingle param grad state cfg lrMul wdMul)
 
@@ -297,7 +297,7 @@ def initParamStates [TensorStruct α] (_model : α) : Array (Sigma ParamState) :
     The optimizer state (moments) is sharded in the same way as the parameter,
     so each rank only stores and updates its portion.
 -/
-structure ShardedParamState (σ : StaticSpec) (rank worldSize : UInt64) where
+structure ShardedParamState (σ : StaticSpec) (rank worldSize : Nat) where
   /-- First moment (sharded) -/
   expAvg : ShardedTensor σ rank worldSize
   /-- Second moment (sharded) -/
@@ -307,7 +307,7 @@ structure ShardedParamState (σ : StaticSpec) (rank worldSize : UInt64) where
   deriving Repr
 
 /-- Initialize sharded parameter state with zeros -/
-def initShardedParamState {σ : StaticSpec} {rank worldSize : UInt64}
+def initShardedParamState {σ : StaticSpec} {rank worldSize : Nat}
     [DType.ConstantSupported σ.dtype σ.device]
     (_param : ShardedTensor σ rank worldSize) : ShardedParamState σ rank worldSize :=
   let shardSpec := σ.withShape (shardedShape σ.shape ⟨.first, worldSize, rank⟩)
@@ -331,7 +331,7 @@ def initShardedParamState {σ : StaticSpec} {rank worldSize : UInt64}
     - Gradient communication is reduce-scatter (same bandwidth as all-reduce)
     - Parameter gather only happens once per forward pass
 -/
-def stepSharded {σ : StaticSpec} [DType.RealFloating σ.dtype] {rank worldSize : UInt64}
+def stepSharded {σ : StaticSpec} [DType.RealFloating σ.dtype] {rank worldSize : Nat}
     (param : ShardedTensor σ rank worldSize)
     (fullGrad : Tensor σ)
     (state : ShardedParamState σ rank worldSize)
@@ -409,7 +409,7 @@ def stepSharded {σ : StaticSpec} [DType.RealFloating σ.dtype] {rank worldSize 
     let newEmbed ← embed.step fullGrad cfg
     ```
 -/
-structure ShardedEmbeddingAdam (vocabSize dim : UInt64) (rank worldSize : UInt64)
+structure ShardedEmbeddingAdam (vocabSize dim : Nat) (rank worldSize : Nat)
     (dtype : DType := .Float32) (device : Device := .CPU) where
   /-- Sharded embedding weights -/
   weight : ShardedTensor ⟨#[vocabSize, dim], dtype, device⟩ rank worldSize
@@ -422,7 +422,7 @@ structure ShardedEmbeddingAdam (vocabSize dim : UInt64) (rank worldSize : UInt64
   deriving Repr
 
 /-- Initialize sharded embedding with Adam state -/
-def ShardedEmbeddingAdam.init {vocabSize dim rank worldSize : UInt64} {d : DType} {dev : Device}
+def ShardedEmbeddingAdam.init {vocabSize dim rank worldSize : Nat} {d : DType} {dev : Device}
     [DType.ConstantSupported d dev]
     (fullWeight : Tensor ⟨#[vocabSize, dim], d, dev⟩) (h : ValidShard rank worldSize)
     : ShardedEmbeddingAdam vocabSize dim rank worldSize d dev :=
@@ -436,7 +436,7 @@ def ShardedEmbeddingAdam.init {vocabSize dim rank worldSize : UInt64} {d : DType
   }
 
 /-- Forward pass: gather weights and apply embedding lookup -/
-def ShardedEmbeddingAdam.forward {vocabSize dim rank worldSize batch seq : UInt64}
+def ShardedEmbeddingAdam.forward {vocabSize dim rank worldSize batch seq : Nat}
     {d : DType} {dev : Device}
     (embed : ShardedEmbeddingAdam vocabSize dim rank worldSize d dev)
     (tokens : Tensor ⟨#[batch, seq], .Int64, dev⟩)
@@ -446,7 +446,7 @@ def ShardedEmbeddingAdam.forward {vocabSize dim rank worldSize batch seq : UInt6
   return (output, { embed with weight := newSharded })
 
 /-- Backward/update step: reduce-scatter grad and update local shard -/
-def ShardedEmbeddingAdam.step {vocabSize dim rank worldSize : UInt64} {d : DType} {dev : Device} [DType.RealFloating d]
+def ShardedEmbeddingAdam.step {vocabSize dim rank worldSize : Nat} {d : DType} {dev : Device} [DType.RealFloating d]
     (embed : ShardedEmbeddingAdam vocabSize dim rank worldSize d dev)
     (fullGrad : Tensor ⟨#[vocabSize, dim], d, dev⟩)
     (cfg : Config)

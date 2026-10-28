@@ -43,9 +43,9 @@ private def getFloat? (j : Json) : Option Float :=
 
 private def getBool? (j : Json) : Option Bool := fromJson? j
 
-private def getNatFieldD (j : Json) (key : String) (d : UInt64) : UInt64 :=
+private def getNatFieldD (j : Json) (key : String) (d : Nat) : Nat :=
   match getObjVal? j key >>= getNat? with
-  | some n => n.toUInt64
+  | some n => n
   | none => d
 
 private def getFloatFieldD (j : Json) (key : String) (d : Float) : Float :=
@@ -58,14 +58,14 @@ private def getBoolFieldD (j : Json) (key : String) (d : Bool) : Bool :=
   | some x => x
   | none => d
 
-private def getNatArrayFieldD (j : Json) (key : String) (d : Array UInt64) : Array UInt64 :=
+private def getNatArrayFieldD (j : Json) (key : String) (d : Array Nat) : Array Nat :=
   match getObjVal? j key >>= getArr? with
   | some arr =>
     Id.run do
-      let mut out : Array UInt64 := #[]
+      let mut out : Array Nat := #[]
       for it in arr do
         match getNat? it with
-        | some n => out := out.push n.toUInt64
+        | some n => out := out.push n
         | none => pure ()
       if out.isEmpty then d else out
   | none => d
@@ -73,19 +73,19 @@ private def getNatArrayFieldD (j : Json) (key : String) (d : Array UInt64) : Arr
 private def getNatMatrixFieldD
     (j : Json)
     (key : String)
-    (d : Array (Array UInt64))
-    : Array (Array UInt64) :=
+    (d : Array (Array Nat))
+    : Array (Array Nat) :=
   match getObjVal? j key >>= getArr? with
   | some rows =>
     Id.run do
-      let mut out : Array (Array UInt64) := #[]
+      let mut out : Array (Array Nat) := #[]
       for row in rows do
         match getArr? row with
         | some items =>
-          let mut inner : Array UInt64 := #[]
+          let mut inner : Array Nat := #[]
           for item in items do
             match getNat? item with
-            | some n => inner := inner.push n.toUInt64
+            | some n => inner := inner.push n
             | none => pure ()
           out := out.push inner
         | none => pure ()

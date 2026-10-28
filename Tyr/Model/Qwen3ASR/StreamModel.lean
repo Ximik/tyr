@@ -36,8 +36,8 @@ structure StreamSession (cfg : Qwen3ASRConfig) (dtype : DType := .Float32) where
   sileroVAD : Option Tyr.Text.SileroProvider := none
   decodeCache : Option (StreamingDecodeCache (device := device) (dtype := dtype) cfg) := none
   promptCache : Option (StreamingPromptCache (device := device) (dtype := dtype) cfg) := none
-  encoderCachedFrames : UInt64 := 0
-  decoderCachedTokens : UInt64 := 0
+  encoderCachedFrames : Nat := 0
+  decoderCachedTokens : Nat := 0
 
 structure StreamStepOutput where
   didDecode : Bool := false
@@ -123,7 +123,7 @@ def pushAudio
     (m : StreamModel)
     (s : StreamSession (device := m.device) (dtype := m.dtype.val) m.cfg)
     (pcm16k : Array Float)
-    (maxNewTokens : UInt64 := 128)
+    (maxNewTokens : Nat := 128)
     : IO ((StreamSession (device := m.device) (dtype := m.dtype.val) m.cfg) × StreamStepOutput) := do
   let mut s' := s
   let vadSignal : Tyr.Text.VADSignal ←
@@ -157,8 +157,8 @@ def pushAudio
     let s'' := {
       s' with
       textConsensus := cs'
-      encoderCachedFrames := s'.encoderCachedFrames + decodedSamples.toUInt64
-      decoderCachedTokens := ids.size.toUInt64
+      encoderCachedFrames := s'.encoderCachedFrames + decodedSamples
+      decoderCachedTokens := ids.size
     }
     pure (s'', {
       didDecode := true
@@ -171,7 +171,7 @@ def pushAudio
 def flush
     (m : StreamModel)
     (s : StreamSession (device := m.device) (dtype := m.dtype.val) m.cfg)
-    (maxNewTokens : UInt64 := 128)
+    (maxNewTokens : Nat := 128)
     : IO ((StreamSession (device := m.device) (dtype := m.dtype.val) m.cfg) × StreamStepOutput) := do
   let beforeChunkId := s.asrState.chunkId
   let (asrNext, decodeCacheNext) ← finishStreamingTranscribeWithModelStateCached
@@ -192,7 +192,7 @@ def flush
     let s' := {
       s1 with
       textConsensus := cs'
-      decoderCachedTokens := ids.size.toUInt64
+      decoderCachedTokens := ids.size
     }
     pure (s', {
       didDecode := true

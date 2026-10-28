@@ -8,17 +8,17 @@ open DifferentiableManifold
 variable {d : DType} {dev : Device} [DType.RealFloating d]
 
 /-- Real sphere S^{n-1} represented as unit-norm vectors in `R^n`. -/
-structure Sphere (n : UInt64) (dtype : DType := .Float32)
+structure Sphere (n : Nat) (dtype : DType := .Float32)
     (device : Device := .CPU) where
   coords : Tensor ⟨#[n], dtype, device⟩
 
 namespace Sphere
 
-private def dot {n : UInt64} (a b : Tensor ⟨#[n], d, dev⟩) : Float :=
+private def dot {n : Nat} (a b : Tensor ⟨#[n], d, dev⟩) : Float :=
   Tensor.item (Tensor.sumAll (Tensor.mul a b))
 
 /-- Project ambient vector to the unit sphere. -/
-def project (n : UInt64) (v : Tensor ⟨#[n], d, dev⟩) : Sphere n d dev :=
+def project (n : Nat) (v : Tensor ⟨#[n], d, dev⟩) : Sphere n d dev :=
   let norm := Tensor.l2Norm v
   let eps := 1e-12
   if norm <= eps then
@@ -27,14 +27,14 @@ def project (n : UInt64) (v : Tensor ⟨#[n], d, dev⟩) : Sphere n d dev :=
     ⟨Tensor.mulScalar v (1.0 / norm)⟩
 
 /-- Random point on the sphere. -/
-def random (n : UInt64) : IO (Sphere n) := do
+def random (n : Nat) : IO (Sphere n) := do
   let v ← Tensor.randn #[n]
   pure (project n v)
 
 end Sphere
 
 /-- Tangent vector at a sphere point. -/
-structure SphereTangent (n : UInt64) (dtype : DType := .Float32)
+structure SphereTangent (n : Nat) (dtype : DType := .Float32)
     (device : Device := .CPU) where
   vec : Tensor ⟨#[n], dtype, device⟩
 
@@ -47,7 +47,7 @@ def project (x : Sphere n d dev) (v : Tensor ⟨#[n], d, dev⟩) : SphereTangent
   ⟨Tensor.sub v correction⟩
 
 /-- Zero tangent vector. -/
-def zero [DType.ConstantSupported d dev] (n : UInt64) : SphereTangent n d dev := ⟨Tensor.zerosFor ⟨#[n], d, dev⟩⟩
+def zero [DType.ConstantSupported d dev] (n : Nat) : SphereTangent n d dev := ⟨Tensor.zerosFor ⟨#[n], d, dev⟩⟩
 
 /-- Add tangent vectors. -/
 def add (a b : SphereTangent n d dev) : SphereTangent n d dev :=
@@ -59,7 +59,7 @@ def smul (s : Float) (v : SphereTangent n d dev) : SphereTangent n d dev :=
 
 end SphereTangent
 
-instance sphereManifold (n : UInt64) : DifferentiableManifold (Sphere n d dev) where
+instance sphereManifold (n : Nat) : DifferentiableManifold (Sphere n d dev) where
   Tangent _ := SphereTangent n d dev
   Cotangent _ := SphereTangent n d dev
   zeroTangent x := ⟨Tensor.zerosLike x.coords⟩

@@ -13,17 +13,17 @@ open Tyr.AD
 
 /-- Ambient matrix type for manifold carriers: Float32 weights with
     explicit placement, matching the carrier instances' manifold types. -/
-abbrev AmbientMatrix (m n : UInt64) (device : Device := .CPU) : Type :=
+abbrev AmbientMatrix (m n : Nat) (device : Device := .CPU) : Type :=
   Tensor { shape := #[m, n], dtype := .Float32, device }
 
 /-- Ambient vector type for manifold carriers. -/
-abbrev AmbientVector (n : UInt64) (device : Device := .CPU) : Type :=
+abbrev AmbientVector (n : Nat) (device : Device := .CPU) : Type :=
   Tensor { shape := #[n], dtype := .Float32, device }
 
 /-- Shape-legality constraint for manifold-carrier matrices: at least as many
     rows as columns (the square case included). A reducible abbrev so `decide`
     discharges it at concrete call sites. -/
-abbrev MatrixShapeOK (m n : UInt64) : Prop := n.toNat ≤ m.toNat
+abbrev MatrixShapeOK (m n : Nat) : Prop := n ≤ m
 
 /-- Matrix-manifold carrier interface for manifold-native linear layers.
 
@@ -31,19 +31,19 @@ abbrev MatrixShapeOK (m n : UInt64) : Prop := n.toNat ≤ m.toNat
     (discharged by `decide` at concrete call sites) or are reused from an
     existing manifold value (`reAmbient`/`projectLike`), so no typeclass
     synthesis of propositions is needed. -/
-class MatrixManifoldCarrier (M : UInt64 → UInt64 → Type)
+class MatrixManifoldCarrier (M : Nat → Nat → Type)
     (device : outParam Device) where
   /-- Project an ambient matrix to the manifold, given a legality witness. -/
-  project : {m n : UInt64} → MatrixShapeOK m n → AmbientMatrix (device := device) m n → M m n
+  project : {m n : Nat} → MatrixShapeOK m n → AmbientMatrix (device := device) m n → M m n
   /-- Convert manifold value to its ambient matrix representation. -/
-  toMatrix : {m n : UInt64} → M m n → AmbientMatrix (device := device) m n
+  toMatrix : {m n : Nat} → M m n → AmbientMatrix (device := device) m n
   /-- Replace the ambient contents of an existing manifold value, keeping its
       shape witnesses. Does not re-project; the caller asserts validity. -/
-  reAmbient : {m n : UInt64} → M m n → AmbientMatrix (device := device) m n → M m n
+  reAmbient : {m n : Nat} → M m n → AmbientMatrix (device := device) m n → M m n
   /-- Re-project onto the manifold, reusing an existing value's witnesses. -/
-  projectLike : {m n : UInt64} → M m n → AmbientMatrix (device := device) m n → M m n
+  projectLike : {m n : Nat} → M m n → AmbientMatrix (device := device) m n → M m n
   /-- Take one geometry-aware step and retract on-manifold. -/
-  dualMapStep : {m n : UInt64} → M m n → AmbientMatrix (device := device) m n → Float → M m n
+  dualMapStep : {m n : Nat} → M m n → AmbientMatrix (device := device) m n → Float → M m n
 
 instance : MatrixManifoldCarrier (fun m n => Stiefel m n .Float32 device) device where
   project := fun h x => Stiefel.project _ _ x h
@@ -62,12 +62,12 @@ instance : MatrixManifoldCarrier (fun m n => Grassmann m n .Float32 device) devi
     DualMapGeometry.dualMapStep x (GrassmannTangent.project x g) lr
 
 /-- Orthogonal manifold viewed in matrix-family form with square-shape legality. -/
-abbrev OrthogonalMatrix (_m n : UInt64) (device : Device := .CPU) := Orthogonal n .Float32 device
+abbrev OrthogonalMatrix (_m n : Nat) (device : Device := .CPU) := Orthogonal n .Float32 device
 
 /-- View an ambient matrix as square, validating the runtime shape. Only
     reachable through `MatrixShapeOK`-witnessed paths; the square requirement
     of the orthogonal family itself is checked here at runtime. -/
-private def asSquare {m n : UInt64} (mat : AmbientMatrix (device := device) m n) : AmbientMatrix (device := device) n n :=
+private def asSquare {m n : Nat} (mat : AmbientMatrix (device := device) m n) : AmbientMatrix (device := device) n n :=
   Tensor.reshapeChecked mat #[n, n]
 
 instance : MatrixManifoldCarrier (fun m n => OrthogonalMatrix m n device) device where
@@ -83,18 +83,18 @@ instance : MatrixManifoldCarrier (fun m n => OrthogonalMatrix m n device) device
     DualMapGeometry.dualMapStep x (OrthogonalTangent.fromAmbient x (asSquare g)) lr
 
 /-- Vector-manifold carrier interface where ambient dimension may differ from intrinsic one. -/
-class VectorManifoldCarrier (V : UInt64 → Type)
+class VectorManifoldCarrier (V : Nat → Type)
     (device : outParam Device) where
   /-- Ambient coordinate dimension for intrinsic manifold dimension `n`. -/
-  ambientDim : UInt64 → UInt64
+  ambientDim : Nat → Nat
   /-- Project ambient vector coordinates to the manifold. -/
-  project : (n : UInt64) → AmbientVector (device := device) (ambientDim n) → V n
+  project : (n : Nat) → AmbientVector (device := device) (ambientDim n) → V n
   /-- Convert manifold value to ambient coordinates. -/
-  toVector : {n : UInt64} → V n → AmbientVector (device := device) (ambientDim n)
+  toVector : {n : Nat} → V n → AmbientVector (device := device) (ambientDim n)
   /-- Wrap already-valid ambient coordinates without re-projecting. -/
-  fromAmbientUnchecked : {n : UInt64} → AmbientVector (device := device) (ambientDim n) → V n
+  fromAmbientUnchecked : {n : Nat} → AmbientVector (device := device) (ambientDim n) → V n
   /-- Take one geometry-aware step on the manifold. -/
-  dualMapStep : {n : UInt64} → V n → AmbientVector (device := device) (ambientDim n) → Float → V n
+  dualMapStep : {n : Nat} → V n → AmbientVector (device := device) (ambientDim n) → Float → V n
 
 instance : VectorManifoldCarrier (fun n => Hyperbolic n .Float32 device) device where
   ambientDim n := n + 1
@@ -110,20 +110,20 @@ Linear layer whose weight is stored on a matrix manifold.
 The weight is natively represented by `M out_dim in_dim`, so retractions are
 part of the layer-level update path rather than an external afterthought.
 -/
-structure ManifoldLinear (M : UInt64 → UInt64 → Type) [MatrixManifoldCarrier M device]
-    (in_dim out_dim : UInt64) where
+structure ManifoldLinear (M : Nat → Nat → Type) [MatrixManifoldCarrier M device]
+    (in_dim out_dim : Nat) where
   weight : M out_dim in_dim
   bias : Option (AmbientVector (device := device) out_dim) := none
 
 namespace ManifoldLinear
 
-private def makeLeafWeight [MatrixManifoldCarrier M device] {in_dim out_dim : UInt64}
+private def makeLeafWeight [MatrixManifoldCarrier M device] {in_dim out_dim : Nat}
     (w : M out_dim in_dim) : IO (M out_dim in_dim) := do
   let leaf ← Tensor.parameter (MatrixManifoldCarrier.toMatrix (device := device) w)
   pure (MatrixManifoldCarrier.reAmbient (device := device) w leaf)
 
 /-- Initialize manifold-linear weights by projecting a random matrix. -/
-def init [MatrixManifoldCarrier M device] (in_dim out_dim : UInt64)
+def init [MatrixManifoldCarrier M device] (in_dim out_dim : Nat)
     (withBias : Bool := true)
     (h : MatrixShapeOK out_dim in_dim := by decide)
     : IO (ManifoldLinear (device := device) M in_dim out_dim) := do
@@ -136,7 +136,7 @@ def init [MatrixManifoldCarrier M device] (in_dim out_dim : UInt64)
   pure { weight, bias }
 
 /-- Forward pass for `[batch, in_dim] -> [batch, out_dim]`. -/
-def forward2d [MatrixManifoldCarrier M device] {in_dim out_dim batch : UInt64}
+def forward2d [MatrixManifoldCarrier M device] {in_dim out_dim batch : Nat}
     (lin : ManifoldLinear (device := device) M in_dim out_dim)
     (x : AmbientMatrix (device := device) batch in_dim) : AmbientMatrix (device := device) batch out_dim :=
   let y := Tensor.linear x (MatrixManifoldCarrier.toMatrix (device := device) lin.weight)
@@ -145,7 +145,7 @@ def forward2d [MatrixManifoldCarrier M device] {in_dim out_dim batch : UInt64}
   | none => y
 
 /-- Apply a manifold-native step to weights and an Euclidean step to bias. -/
-def applyDualMapUpdate [MatrixManifoldCarrier M device] {in_dim out_dim : UInt64}
+def applyDualMapUpdate [MatrixManifoldCarrier M device] {in_dim out_dim : Nat}
     (lin : ManifoldLinear (device := device) M in_dim out_dim)
     (weightGrad : AmbientMatrix (device := device) out_dim in_dim)
     (biasGrad? : Option (AmbientVector (device := device) out_dim))
@@ -162,26 +162,26 @@ def applyDualMapUpdate [MatrixManifoldCarrier M device] {in_dim out_dim : UInt64
 end ManifoldLinear
 
 /-- Single vector parameter living natively on a vector manifold. -/
-structure ManifoldVectorParam (V : UInt64 → Type) [VectorManifoldCarrier V device] (n : UInt64) where
+structure ManifoldVectorParam (V : Nat → Type) [VectorManifoldCarrier V device] (n : Nat) where
   value : V n
 
 namespace ManifoldVectorParam
 
 /-- Ensure manifold-vector value is represented by a trainable leaf tensor. -/
-private def makeLeafValue [VectorManifoldCarrier V device] {n : UInt64}
+private def makeLeafValue [VectorManifoldCarrier V device] {n : Nat}
     (v : V n) : IO (V n) := do
   let leaf ← Tensor.parameter (VectorManifoldCarrier.toVector (device := device) v)
   pure (VectorManifoldCarrier.fromAmbientUnchecked (device := device) leaf)
 
 /-- Initialize from random ambient coordinates projected to manifold. -/
-def init [VectorManifoldCarrier V device] (n : UInt64) : IO (ManifoldVectorParam (device := device) V n) := do
+def init [VectorManifoldCarrier V device] (n : Nat) : IO (ManifoldVectorParam (device := device) V n) := do
   let d := (VectorManifoldCarrier.ambientDim (device := device) (V := V) n)
   let vRaw ← Tensor.randn #[d] false device
   let v ← makeLeafValue (VectorManifoldCarrier.project (device := device) n vRaw)
   pure { value := v }
 
 /-- Apply one dual-map manifold update for this vector parameter. -/
-def applyDualMapUpdate [VectorManifoldCarrier V device] {n : UInt64}
+def applyDualMapUpdate [VectorManifoldCarrier V device] {n : Nat}
     (p : ManifoldVectorParam (device := device) V n)
     (grad : AmbientVector (device := device) (VectorManifoldCarrier.ambientDim (device := device) (V := V) n))
     (lr : Float) : IO (ManifoldVectorParam (device := device) V n) := do
@@ -190,7 +190,7 @@ def applyDualMapUpdate [VectorManifoldCarrier V device] {n : UInt64}
 
 end ManifoldVectorParam
 
-instance [MatrixManifoldCarrier M device] (in_dim out_dim : UInt64) :
+instance [MatrixManifoldCarrier M device] (in_dim out_dim : Nat) :
     TensorStruct (ManifoldLinear (device := device) M in_dim out_dim) where
   map f lin := {
     weight := MatrixManifoldCarrier.reAmbient (device := device) lin.weight
@@ -211,7 +211,7 @@ instance [MatrixManifoldCarrier M device] (in_dim out_dim : UInt64) :
     TensorStruct.fold f
       (TensorStruct.fold f init (MatrixManifoldCarrier.toMatrix (device := device) lin.weight)) lin.bias
 
-instance [VectorManifoldCarrier V device] (n : UInt64) : TensorStruct (ManifoldVectorParam (device := device) V n) where
+instance [VectorManifoldCarrier V device] (n : Nat) : TensorStruct (ManifoldVectorParam (device := device) V n) where
   map f p := {
     value := VectorManifoldCarrier.fromAmbientUnchecked (device := device)
       (TensorStruct.map f (VectorManifoldCarrier.toVector (device := device) p.value))
@@ -226,7 +226,7 @@ instance [VectorManifoldCarrier V device] (n : UInt64) : TensorStruct (ManifoldV
   }
   fold f init p := TensorStruct.fold f init (VectorManifoldCarrier.toVector (device := device) p.value)
 
-instance {P : StaticSpec → Prop} [MatrixManifoldCarrier M device] (in_dim out_dim : UInt64)
+instance {P : StaticSpec → Prop} [MatrixManifoldCarrier M device] (in_dim out_dim : Nat)
     [TensorStructFor.Fact (P ⟨#[out_dim, in_dim], .Float32, device⟩)]
     [TensorStructFor.Fact (P ⟨#[out_dim], .Float32, device⟩)] :
     TensorStructFor P (ManifoldLinear (device := device) M in_dim out_dim) where
@@ -249,7 +249,7 @@ instance {P : StaticSpec → Prop} [MatrixManifoldCarrier M device] (in_dim out_
     TensorStructFor.fold f
       (TensorStructFor.fold f init (MatrixManifoldCarrier.toMatrix (device := device) lin.weight)) lin.bias
 
-instance {P : StaticSpec → Prop} [VectorManifoldCarrier V device] (n : UInt64)
+instance {P : StaticSpec → Prop} [VectorManifoldCarrier V device] (n : Nat)
     [TensorStructFor.Fact
       (P ⟨#[VectorManifoldCarrier.ambientDim (device := device) (V := V) n], .Float32, device⟩)] :
     TensorStructFor P (ManifoldVectorParam (device := device) V n) where
@@ -267,7 +267,7 @@ instance {P : StaticSpec → Prop} [VectorManifoldCarrier V device] (n : UInt64)
   }
   fold f init p := TensorStructFor.fold f init (VectorManifoldCarrier.toVector (device := device) p.value)
 
-instance [MatrixManifoldCarrier M device] (in_dim out_dim : UInt64) :
+instance [MatrixManifoldCarrier M device] (in_dim out_dim : Nat) :
     NormedModule (ManifoldLinear (device := device) M in_dim out_dim) where
   norm lin :=
     let weightNorm := Tensor.spectralNorm (MatrixManifoldCarrier.toMatrix (device := device) lin.weight)
@@ -306,7 +306,7 @@ instance [MatrixManifoldCarrier M device] (in_dim out_dim : UInt64) :
       | none => none
     { lin with weight, bias }
 
-instance [VectorManifoldCarrier V device] (n : UInt64) :
+instance [VectorManifoldCarrier V device] (n : Nat) :
     NormedModule (ManifoldVectorParam (device := device) V n) where
   norm p := Tensor.l2Norm (VectorManifoldCarrier.toVector (device := device) p.value)
   dualNorm p := Tensor.l2Norm (VectorManifoldCarrier.toVector (device := device) p.value)
@@ -326,23 +326,23 @@ instance [VectorManifoldCarrier V device] (n : UInt64) :
     { value := VectorManifoldCarrier.project (device := device) n' v' }
 
 /-- Convenience alias: manifold-linear with Stiefel-constrained weights. -/
-abbrev StiefelLinear (in_dim out_dim : UInt64) (device : Device := .CPU) :=
+abbrev StiefelLinear (in_dim out_dim : Nat) (device : Device := .CPU) :=
   ManifoldLinear (device := device) (fun m n => Stiefel m n .Float32 device) in_dim out_dim
 
 /-- Convenience alias: manifold-linear with Grassmann-constrained weights. -/
-abbrev GrassmannLinear (in_dim out_dim : UInt64) (device : Device := .CPU) :=
+abbrev GrassmannLinear (in_dim out_dim : Nat) (device : Device := .CPU) :=
   ManifoldLinear (device := device) (fun m n => Grassmann m n .Float32 device) in_dim out_dim
 
 /-- Convenience alias: manifold-linear with orthogonal square weights. -/
-abbrev OrthogonalLinear (dim : UInt64) (device : Device := .CPU) :=
+abbrev OrthogonalLinear (dim : Nat) (device : Device := .CPU) :=
   ManifoldLinear (device := device) (fun m n => OrthogonalMatrix m n device) dim dim
 
 /-- Convenience alias: single hyperbolic vector parameter. -/
-abbrev HyperbolicVector (n : UInt64) (device : Device := .CPU) :=
+abbrev HyperbolicVector (n : Nat) (device : Device := .CPU) :=
   ManifoldVectorParam (device := device) (fun n => Hyperbolic n .Float32 device) n
 
 /-- Cotangent payload for `ManifoldLinear (device := device)`: weight cotangent plus optional bias cotangent. -/
-abbrev ManifoldLinearCotangent (in_dim out_dim : UInt64) :=
+abbrev ManifoldLinearCotangent (in_dim out_dim : Nat) :=
   AmbientMatrix (device := device) out_dim in_dim × Option (AmbientVector (device := device) out_dim)
 
 /--
@@ -361,12 +361,12 @@ namespace ManifoldUpdatable
 def step [ManifoldUpdatable P] (params : P) (grad : ManifoldUpdatable.Cotangent params) (lr : Float) : IO P :=
   ManifoldUpdatable.applyUpdate params grad lr
 
-instance [MatrixManifoldCarrier M device] (in_dim out_dim : UInt64) :
+instance [MatrixManifoldCarrier M device] (in_dim out_dim : Nat) :
     ManifoldUpdatable (ManifoldLinear (device := device) M in_dim out_dim) where
   Cotangent _ := ManifoldLinearCotangent (device := device) in_dim out_dim
   applyUpdate lin g lr := ManifoldLinear.applyDualMapUpdate lin g.1 g.2 lr
 
-instance [VectorManifoldCarrier V device] (n : UInt64) :
+instance [VectorManifoldCarrier V device] (n : Nat) :
     ManifoldUpdatable (ManifoldVectorParam (device := device) V n) where
   Cotangent _ := AmbientVector (device := device) (VectorManifoldCarrier.ambientDim (device := device) (V := V) n)
   applyUpdate p g lr := ManifoldVectorParam.applyDualMapUpdate p g lr

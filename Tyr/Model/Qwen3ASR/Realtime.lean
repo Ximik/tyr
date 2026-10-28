@@ -118,7 +118,7 @@ def decodeOverlapStep
     (state : RealtimeTranscriptState)
     (context : String := "")
     (language : Option String := none)
-    (maxNewTokens : UInt64 := 128)
+    (maxNewTokens : Nat := 128)
     (eosTokenIds : Array UInt64 := defaultEosTokenIds)
     : IO (RealtimeTranscriptState × TranscriptDelta) := do
   let out ← m.transcribeWaveform

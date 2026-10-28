@@ -32,7 +32,18 @@ structure TensorSchema where
   shape : Shape
   /-- For directory sources this is the shard filename; for single-file sources it is empty. -/
   sourceFile : String := ""
-  deriving Inhabited, Repr, BEq, ToJson, FromJson
+  deriving Inhabited, Repr, BEq
+
+-- Dimensions stay string-encoded, the format schema files were written in when shapes were `UInt64`.
+instance : ToJson TensorSchema where
+  toJson t := Json.mkObj [("name", toJson t.name), ("dtype", toJson t.dtype),
+    ("shape", Json.arr (t.shape.map bignumToJson)), ("sourceFile", toJson t.sourceFile)]
+
+instance : FromJson TensorSchema where
+  fromJson? j := do
+    let shape ← (← j.getObjValAs? (Array Json) "shape").mapM bignumFromJson?
+    pure { name := ← j.getObjValAs? String "name", dtype := ← j.getObjValAs? DType "dtype", shape,
+           sourceFile := ← j.getObjValAs? String "sourceFile" }
 
 namespace TensorSchema
 

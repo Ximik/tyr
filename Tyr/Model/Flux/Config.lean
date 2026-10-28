@@ -12,27 +12,27 @@ namespace torch.flux
     Default values are for Klein 4B. -/
 structure FluxConfig where
   /-- Hidden dimension -/
-  hidden_size : UInt64 := 3072
+  hidden_size : Nat := 3072
   /-- Number of attention heads -/
-  num_heads : UInt64 := 24
+  num_heads : Nat := 24
   /-- Head dimension -/
-  head_dim : UInt64 := 128
+  head_dim : Nat := 128
   /-- Number of double-stream transformer blocks -/
-  num_double_layers : UInt64 := 5
+  num_double_layers : Nat := 5
   /-- Number of single-stream transformer blocks -/
-  num_single_layers : UInt64 := 20
+  num_single_layers : Nat := 20
   /-- Context (text) input dimension -/
-  context_in_dim : UInt64 := 7680
+  context_in_dim : Nat := 7680
   /-- Image input dimension (latent patch dim) -/
-  in_channels : UInt64 := 128
+  in_channels : Nat := 128
   /-- Timestep embedding dimension -/
-  time_dim : UInt64 := 256
+  time_dim : Nat := 256
   /-- MLP hidden dimension multiplier -/
   mlp_ratio : Float := 3.0
   /-- RoPE theta base -/
-  theta : UInt64 := 2000
+  theta : Nat := 2000
   /-- RoPE axes dimensions (for 4-axis RoPE) -/
-  axes_dims : Array UInt64 := #[32, 32, 32, 32]
+  axes_dims : Array Nat := #[32, 32, 32, 32]
   deriving Repr, Inhabited
 
 namespace FluxConfig
@@ -43,11 +43,11 @@ def klein4B : FluxConfig := {
 }
 
 /-- Compute MLP hidden dimension -/
-def mlpHiddenDim (cfg : FluxConfig) : UInt64 :=
-  (cfg.hidden_size.toFloat * cfg.mlp_ratio).toUInt64
+def mlpHiddenDim (cfg : FluxConfig) : Nat :=
+  (cfg.hidden_size.toFloat * cfg.mlp_ratio).toUInt64.toNat
 
 /-- Total RoPE dimension (sum of axes) -/
-def ropeDim (cfg : FluxConfig) : UInt64 :=
+def ropeDim (cfg : FluxConfig) : Nat :=
   cfg.axes_dims.foldl (· + ·) 0
 
 end FluxConfig

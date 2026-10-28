@@ -17,15 +17,15 @@ namespace Config
 def qwen3_4B : Config := qwen.QwenConfig.qwen3_4B
 
 /-- Compute head dimension from hidden size and attention heads. -/
-def computeHeadDim (cfg : Config) : UInt64 :=
+def computeHeadDim (cfg : Config) : Nat :=
   qwen.QwenConfig.computeHeadDim cfg
 
 /-- Compute key/value projection dimension. -/
-def kvDim (cfg : Config) : UInt64 :=
+def kvDim (cfg : Config) : Nat :=
   qwen.QwenConfig.kvDim cfg
 
 /-- Number of query heads per KV group. -/
-def numHeadsPerKVGroup (cfg : Config) : UInt64 :=
+def numHeadsPerKVGroup (cfg : Config) : Nat :=
   qwen.QwenConfig.numHeadsPerKVGroup cfg
 
 end Config

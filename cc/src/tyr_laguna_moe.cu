@@ -66,7 +66,7 @@ extern "C" lean_object* lean_torch_laguna_moe_fp4_forward(
     lean_object* /*gatePacked*/, lean_object* /*gateScale*/, lean_object* /*gateGlobal*/,
     lean_object* /*upPacked*/, lean_object* /*upScale*/, lean_object* /*upGlobal*/,
     lean_object* /*downPacked*/, lean_object* /*downScale*/, lean_object* /*downGlobal*/,
-    uint64_t /*numExperts*/, uint64_t /*moeInt*/, uint64_t /*hidden*/) {
+    b_lean_obj_arg /*numExperts*/, b_lean_obj_arg /*moeInt*/, b_lean_obj_arg /*hidden*/) {
   return lean_io_result_mk_error(lean_mk_io_user_error(lean_mk_string(
       "laguna_moe_fp4_forward: libTyrC was built without CUDA support")));
 }
@@ -76,6 +76,7 @@ extern "C" lean_object* lean_torch_laguna_moe_fp4_forward(
 /* ------------------------------ CUDA build ------------------------------ */
 #include <ATen/ATen.h>
 #include "tyr_checked_result.h"
+#include "tyr_nat.h"
 #include <c10/cuda/CUDAStream.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <cuda_runtime.h>
@@ -1234,8 +1235,11 @@ extern "C" lean_object* lean_torch_laguna_moe_fp4_forward(
     b_lean_obj_arg gatePacked, b_lean_obj_arg gateScale, b_lean_obj_arg gateGlobal,
     b_lean_obj_arg upPacked, b_lean_obj_arg upScale, b_lean_obj_arg upGlobal,
     b_lean_obj_arg downPacked, b_lean_obj_arg downScale, b_lean_obj_arg downGlobal,
-    uint64_t numExperts, uint64_t moeInt, uint64_t hidden) {
+    b_lean_obj_arg numExperts_obj, b_lean_obj_arg moeInt_obj, b_lean_obj_arg hidden_obj) {
   return tyr::checkedIoCall("lagunaMoeFp4Forward", [&] {
+  const uint64_t numExperts = tyr::natTo<int>(numExperts_obj, "numExperts");
+  const uint64_t moeInt = tyr::natTo<int>(moeInt_obj, "moeInt");
+  const uint64_t hidden = tyr::natTo<int>(hidden_obj, "hidden");
   try {
     auto x_ = borrowTensor(x);
     auto topIdx_ = borrowTensor(topIdx);

@@ -10,12 +10,12 @@ variable {device : Device}
 def runDecodeCacheParity (device : Device) : IO Bool := do
   -- Small Llama-3 shape: kvSeq=10 short enough to invoke the tail mask path on
   -- every step; head_dim=128.
-  let batch : UInt64 := 1
-  let qHeads : UInt64 := 32
-  let kvHeads : UInt64 := 8
-  let totalLen : UInt64 := 10
-  let maxLen : UInt64 := 128
-  let headDim : UInt64 := 128
+  let batch : Nat := 1
+  let qHeads : Nat := 32
+  let kvHeads : Nat := 8
+  let totalLen : Nat := 10
+  let maxLen : Nat := 128
+  let headDim : Nat := 128
 
   -- Random "all-positions" Q, K, V (FP32 → BF16) representing N tokens.
   let qf ← Tensor.randn #[batch, qHeads, totalLen, headDim] false device
@@ -33,8 +33,8 @@ def runDecodeCacheParity (device : Device) : IO Bool := do
   let mut cache ← Generator.KVCache.Cache.init 1 batch maxLen kvHeads headDim (device := device)
   -- Accumulate per-step kernel outputs into a list, then stack.
   let mut acc : Array (Tensor { shape := #[batch, qHeads, 1, headDim], dtype := .BFloat16, device := device }) := #[]
-  for i in [:totalLen.toNat] do
-    let pos : UInt64 := i.toUInt64
+  for i in [:totalLen] do
+    let pos : Nat := i
     let qStep : Tensor { shape := #[batch, qHeads, 1, headDim], dtype := .BFloat16, device := device } :=
       Tensor.sliceChecked qAll 2 pos 1 #[batch, qHeads, 1, headDim]
     let kStep : Tensor { shape := #[batch, kvHeads, 1, headDim], dtype := .BFloat16, device := device } :=
@@ -53,8 +53,8 @@ def runDecodeCacheParity (device : Device) : IO Bool := do
   -- Compare each step's cached output to the corresponding slice of refAll.
   let mut allOk := true
   let mut maxAbsAll : Float := 0.0
-  for i in [:totalLen.toNat] do
-    let pos : UInt64 := i.toUInt64
+  for i in [:totalLen] do
+    let pos : Nat := i
     let refStep : Tensor { shape := #[batch, qHeads, 1, headDim], dtype := .BFloat16, device := device } :=
       Tensor.sliceChecked refAll 2 pos 1 #[batch, qHeads, 1, headDim]
     let some cachedStep := acc[i]? |

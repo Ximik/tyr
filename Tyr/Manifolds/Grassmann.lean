@@ -32,30 +32,30 @@ This differs from Stiefel where XᵀZ is skew-symmetric. For Grassmann, XᵀZ = 
     Represented by n×p matrices with orthonormal columns.
     Constraint: XᵀX = Iₚ, and tangent vectors satisfy XᵀZ = 0.
     The `tall` witness records that orthonormal p-column frames need n ≥ p. -/
-structure Grassmann (n p : UInt64) (dtype : DType := .Float32)
+structure Grassmann (n p : Nat) (dtype : DType := .Float32)
     (device : Device := .CPU) where
   /-- Representative matrix with orthonormal columns -/
   matrix : Tensor ⟨#[n, p], dtype, device⟩
   /-- Orthonormal p-column frames in ℝⁿ require p ≤ n. -/
-  tall : p.toNat ≤ n.toNat
+  tall : p ≤ n
 
 namespace Grassmann
 
 /-- Create a random point on Gr(n, p) via QR decomposition -/
-def random (n p : UInt64) (h : p.toNat ≤ n.toNat := by decide) : IO (Grassmann n p) := do
+def random (n p : Nat) (h : p ≤ n := by decide) : IO (Grassmann n p) := do
   let mat ← Tensor.randn #[n, p]
   let (Q, _R) := Tensor.qrReduced mat h
   return ⟨Q, h⟩
 
 /-- Project a general n×p matrix to Gr(n, p) using QR decomposition -/
-def project (n p : UInt64) (mat : Tensor ⟨#[n, p], d, dev⟩)
-    (h : p.toNat ≤ n.toNat := by decide) : Grassmann n p d dev :=
+def project (n p : Nat) (mat : Tensor ⟨#[n, p], d, dev⟩)
+    (h : p ≤ n := by decide) : Grassmann n p d dev :=
   let (Q, _R) := Tensor.qrReduced mat h
   ⟨Q, h⟩
 
 /-- Standard basis subspace: span{e₁, ..., eₚ}
     Created by projecting a simple matrix to get orthonormal columns. -/
-def standard (n p : UInt64) (h : p.toNat ≤ n.toNat := by decide) : Grassmann n p :=
+def standard (n p : Nat) (h : p ≤ n := by decide) : Grassmann n p :=
   -- QR of ones matrix gives a valid orthonormal basis
   project n p (Tensor.ones #[n, p]) h
 
@@ -86,7 +86,7 @@ end Grassmann
 
 /-- Tangent vector on the Grassmann manifold.
     Z ∈ T_X Gr(n,p) satisfies: XᵀZ = 0 (Z is orthogonal to columns of X) -/
-structure GrassmannTangent (n p : UInt64) (dtype : DType := .Float32)
+structure GrassmannTangent (n p : Nat) (dtype : DType := .Float32)
     (device : Device := .CPU) where
   /-- The tangent vector as an n×p matrix orthogonal to base point -/
   vec : Tensor ⟨#[n, p], dtype, device⟩
@@ -94,7 +94,7 @@ structure GrassmannTangent (n p : UInt64) (dtype : DType := .Float32)
 namespace GrassmannTangent
 
 /-- Zero tangent vector -/
-def zero [DType.ConstantSupported d dev] (n p : UInt64) : GrassmannTangent n p d dev :=
+def zero [DType.ConstantSupported d dev] (n p : Nat) : GrassmannTangent n p d dev :=
   ⟨Tensor.zerosFor ⟨#[n, p], d, dev⟩⟩
 
 /-- Add two tangent vectors -/
@@ -142,7 +142,7 @@ end Grassmann
 
 /-- Grassmann manifold as a DifferentiableManifold.
     Uses QR-based retraction: R(X, Z) = qr(X + Z).Q -/
-instance grassmannManifold (n p : UInt64) : DifferentiableManifold (Grassmann n p d dev) where
+instance grassmannManifold (n p : Nat) : DifferentiableManifold (Grassmann n p d dev) where
   Tangent _ := GrassmannTangent n p d dev
   Cotangent _ := GrassmannTangent n p d dev
   zeroTangent x := ⟨Tensor.zerosLike x.matrix⟩

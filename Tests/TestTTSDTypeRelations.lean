@@ -98,6 +98,6 @@ private def tinyConfig : Qwen3TTSConfig := {
   LeanTest.assertEqual updated.vStoreDyn.2.raw.dtype .BFloat16
   LeanTest.assertEqual updated.seq 1
   LeanTest.assertEqual cache.seq 0 "The original cache value remains unchanged"
-  LeanTest.assertEqual (← cache.kStoreDyn.2.toFloatArray) (Array.replicate (3 * cfg.numKeyValueHeads * cfg.headDim).toNat 0.0)
+  LeanTest.assertEqual (← cache.kStoreDyn.2.toFloatArray) (Array.replicate (3 * cfg.numKeyValueHeads * cfg.headDim) 0.0)
 
 end Tests.TTSDTypeRelations

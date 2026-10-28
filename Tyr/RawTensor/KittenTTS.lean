@@ -6,8 +6,8 @@ namespace torch.RawTensor
 @[extern "lean_torch_atan2"] opaque atan2 (y x : @& RawTensor) : RawTensor
 @[extern "lean_torch_cumsum"] opaque cumsum (input : @& RawTensor) (dim : Int64) : RawTensor
 @[extern "lean_torch_interpolate"] opaque interpolate (input : @& RawTensor)
-    (size : Array UInt64) (mode : String) (alignCorners : Bool) : RawTensor
+    (size : Array Nat) (mode : String) (alignCorners : Bool) : RawTensor
 @[extern "lean_torch_istft_1d"] opaque istft (input : @& RawTensor)
-    (nFft hopLength winLength : UInt64) (window : @& RawTensor)
-    (center normalized : Bool) (length : UInt64) : RawTensor
+    (nFft hopLength winLength : @& Nat) (window : @& RawTensor)
+    (center normalized : Bool) (length : @& Nat) : RawTensor
 end torch.RawTensor

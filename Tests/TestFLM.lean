@@ -8,7 +8,7 @@ open torch.flm
 
 @[test]
 def testFLMSamplingAllocationFailuresAreRecoverable : IO Unit := do
-  let invalid : UInt64 := 18446744073709551615
+  let invalid : Nat := 18446744073709551615
   Tests.assertThrows (sampleTau (device := .CPU) {} invalid)
   Tests.assertThrows (samplePsdTimes (device := .CPU) invalid)
   Tests.assertThrows (do
@@ -20,8 +20,8 @@ def testFLMSamplingAllocationFailuresAreRecoverable : IO Unit := do
     let _ ← samplePsdTimes (device := device) 2
     pure ())
 
-private def tinyTokens : Tensor { shape := #[(2 : UInt64), 3], dtype := .Int64, device := .CPU } :=
-  Tensor.reshapeChecked (Tensor.fromInt64Array #[0, 1, 2, 3, 4, 0]) #[(2 : UInt64), 3]
+private def tinyTokens : Tensor { shape := #[(2 : Nat), 3], dtype := .Int64, device := .CPU } :=
+  Tensor.reshapeChecked (Tensor.fromInt64Array #[0, 1, 2, 3, 4, 0]) #[(2 : Nat), 3]
 
 private def identityDenoiser : FlowDenoiser (device := .CPU) 3 5 Unit :=
   { forward := fun {_batch} _ x _ _ => pure x
@@ -35,7 +35,7 @@ def testFLMOneHotAndCorruptAtDataTime : IO Unit := do
   LeanTest.assertTrue (Float.abs (targetSum - 6.0) < 1.0e-5)
     "oneHot should put one unit of mass on each token"
 
-  let tau := Tensor.full #[(2 : UInt64)] 1.0
+  let tau := Tensor.full #[(2 : Nat)] 1.0
   let (xT, target') ← corruptContinuous (vocab := 5) tokens tau
   LeanTest.assertTrue (Tensor.allclose target target' 1.0e-6 1.0e-6)
     "corruptContinuous should return the same dense target"
@@ -45,7 +45,7 @@ def testFLMOneHotAndCorruptAtDataTime : IO Unit := do
 @[test]
 def testFLMLossFinite : IO Unit := do
   let cfg : FlowConfig := {}
-  let tau := Tensor.full #[(2 : UInt64)] 0.5
+  let tau := Tensor.full #[(2 : Nat)] 0.5
   let loss ← flowLossGivenTau cfg TimeMap.identity identityDenoiser () tinyTokens tau
   let meanLoss := Tensor.item (Tensor.meanAll loss)
   LeanTest.assertTrue (meanLoss.isFinite) "FLM loss should be finite"
@@ -54,9 +54,9 @@ def testFLMLossFinite : IO Unit := do
 @[test]
 def testFMLMPsdLossFinite : IO Unit := do
   let cfg : FlowConfig := {}
-  let tauS := Tensor.full #[(2 : UInt64)] 0.1
-  let tauU := Tensor.full #[(2 : UInt64)] 0.5
-  let tauT := Tensor.full #[(2 : UInt64)] 0.9
+  let tauS := Tensor.full #[(2 : Nat)] 0.1
+  let tauU := Tensor.full #[(2 : Nat)] 0.5
+  let tauT := Tensor.full #[(2 : Nat)] 0.9
   let loss ← psdLossGivenTau cfg TimeMap.identity identityDenoiser () tinyTokens tauS tauU tauT
   let meanLoss := Tensor.item (Tensor.meanAll loss)
   LeanTest.assertTrue (meanLoss.isFinite) "PSD loss should be finite"

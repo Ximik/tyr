@@ -36,24 +36,27 @@ private def getBool? (j : Json) : Option Bool :=
 private def getString? (j : Json) : Option String :=
   fromJson? j
 
-private def getNatArray? (j : Json) : Option (Array UInt64) :=
+private def getNatArray? (j : Json) : Option (Array Nat) :=
   match j with
   | .arr xs =>
-    let mapped := xs.map (fun x => (getNat? x).map (·.toUInt64))
+    let mapped := xs.map getNat?
     if mapped.all Option.isSome then
       some <| mapped.map (fun x => x.getD 0)
     else
       none
   | _ => none
 
+private def getTokenIdArray? (j : Json) : Option (Array UInt64) :=
+  (getNatArray? j).map (·.map (·.toUInt64))
+
 private def getFloat? (j : Json) : Option Float :=
   match (fromJson? (α := Float) j) with
   | some x => some x
   | none => (getNat? j).map (·.toFloat)
 
-private def getNatFieldD (j : Json) (key : String) (d : UInt64) : UInt64 :=
+private def getNatFieldD (j : Json) (key : String) (d : Nat) : Nat :=
   match getObjVal? j key >>= getNat? with
-  | some n => n.toUInt64
+  | some n => n
   | none => d
 
 private def getBoolFieldD (j : Json) (key : String) (d : Bool) : Bool :=
@@ -71,7 +74,7 @@ private def getFloatFieldD (j : Json) (key : String) (d : Float) : Float :=
   | some x => x
   | none => d
 
-private def getOptNatField (j : Json) (key : String) : Option UInt64 :=
+private def getOptTokenIdField (j : Json) (key : String) : Option UInt64 :=
   (getObjVal? j key >>= getNat?).map (·.toUInt64)
 
 private def parseLayerTypes (j : Json) (key : String) : Option (Array LayerType) :=
@@ -91,11 +94,10 @@ private def ropeFloatField? (j : Json) (sec fieldKey : String) : Option Float :=
     >>= fun nested => getObjVal? nested fieldKey >>= getFloat?
 
 /-- `rope_parameters.<sec>.<field>` nested nat lookup. -/
-private def ropeNatField? (j : Json) (sec fieldKey : String) : Option UInt64 :=
+private def ropeNatField? (j : Json) (sec fieldKey : String) : Option Nat :=
   getObjVal? j "rope_parameters"
     >>= fun rp => getObjVal? rp sec
     >>= fun nested => getObjVal? nested fieldKey >>= getNat?
-    >>= fun n => some n.toUInt64
 
 def Config.parseJson (j : Json) (d : Config := Config.laguna_s_2_1) : Config :=
   let layerTypes :=
@@ -106,10 +108,10 @@ def Config.parseJson (j : Json) (d : Config := Config.laguna_s_2_1) : Config :=
   -- Per-layer head counts: take the count of the first full-attention layer and
   -- the first sliding-attention layer from `num_attention_heads_per_layer`.
   let perLayerHeads := getObjVal? j "num_attention_heads_per_layer" >>= getNatArray?
-  let headsFor (pred : LayerType → Bool) (fallback : UInt64) : UInt64 :=
+  let headsFor (pred : LayerType → Bool) (fallback : Nat) : Nat :=
     match perLayerHeads with
     | some hs =>
-      let lts := if layerTypes.isEmpty then LagunaConfig.defaultLayerTypes (hs.size.toUInt64) else layerTypes
+      let lts := if layerTypes.isEmpty then LagunaConfig.defaultLayerTypes hs.size else layerTypes
       let hits := (lts.zip hs).filter (fun (lt, _) => pred lt)
       hits[0]?.map (·.2) |>.getD fallback
     | none => fallback
@@ -135,8 +137,8 @@ def Config.parseJson (j : Json) (d : Config := Config.laguna_s_2_1) : Config :=
 
   let eosIds :=
     match getObjVal? j "eos_token_id" with
-    | some (.arr _) => (getNatArray? (j.getObjValD "eos_token_id")).getD d.eos_token_ids
-    | some _ => (getOptNatField j "eos_token_id").map (fun e => #[e]) |>.getD d.eos_token_ids
+    | some (.arr _) => (getTokenIdArray? (j.getObjValD "eos_token_id")).getD d.eos_token_ids
+    | some _ => (getOptTokenIdField j "eos_token_id").map (fun e => #[e]) |>.getD d.eos_token_ids
     | none => d.eos_token_ids
 
   {
@@ -188,8 +190,8 @@ def Config.parseJson (j : Json) (d : Config := Config.laguna_s_2_1) : Config :=
     use_cache := getBoolFieldD j "use_cache" d.use_cache
     tie_word_embeddings := getBoolFieldD j "tie_word_embeddings" d.tie_word_embeddings
 
-    pad_token_id := getOptNatField j "pad_token_id" <|> d.pad_token_id
-    bos_token_id := getOptNatField j "bos_token_id" <|> d.bos_token_id
+    pad_token_id := getOptTokenIdField j "pad_token_id" <|> d.pad_token_id
+    bos_token_id := getOptTokenIdField j "bos_token_id" <|> d.bos_token_id
     eos_token_ids := eosIds
   }
 

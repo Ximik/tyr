@@ -11,7 +11,7 @@ construction boundary.
 
 namespace torch
 
-abbrev Shape := Array UInt64
+abbrev Shape := Array Nat
 
 inductive DType where
 | UInt8
@@ -304,13 +304,13 @@ def reduceShape (s : Shape) (dim : Nat) (keepdim : Bool) : Shape :=
     else s[:dim].toArray ++ s[dim+1:].toArray
   else s
 
-def replaceAtDim (s : Shape) (dim : Nat) (newSize : UInt64) : Shape :=
+def replaceAtDim (s : Shape) (dim : Nat) (newSize : Nat) : Shape :=
   if h : dim < s.size then s.set (Fin.mk dim h) newSize else s
 
 /-- Compute output shape for stacking: insert a new dimension of size `n` at `dim` -/
 def stackShape (s : Shape) (n : Nat) (dim : Nat) : Shape :=
   if dim > s.size then s
-  else s[:dim].toArray ++ #[n.toUInt64] ++ s[dim:].toArray
+  else s[:dim].toArray ++ #[n] ++ s[dim:].toArray
 
 /-- Compute output shape for unbinding: remove dimension at `dim` -/
 def unbindShape (s : Shape) (dim : Nat) : Shape :=

@@ -14,13 +14,23 @@ extern "C" void lean_initialize();
 
 namespace {
 using Object = std::unique_ptr<lean_object, decltype(&lean_dec)>;
+// Temporary Lean Nat for a borrowed argument; values above the small-Nat range
+// become bignums, as Lean would pass them.
+struct Nat {
+  lean_object* object;
+  Nat(uint64_t value) : object(lean_uint64_to_nat(value)) {}
+  Nat(const Nat&) = delete;
+  Nat& operator=(const Nat&) = delete;
+  ~Nat() { lean_dec(object); }
+  operator lean_object*() const { return object; }
+};
 void require(bool valid, const char* message) {
   if (!valid) throw std::runtime_error(message);
 }
 lean_object* shape(std::initializer_list<uint64_t> dims) {
   auto* result = lean_alloc_array(dims.size(), dims.size());
   size_t i = 0;
-  for (auto dim : dims) lean_array_set_core(result, i++, lean_box_uint64(dim));
+  for (auto dim : dims) lean_array_set_core(result, i++, lean_box(dim));
   return result;
 }
 Object full(std::initializer_list<uint64_t> dims, double value) {
@@ -98,7 +108,7 @@ Object pureCall(Family family, const Inputs& x) {
     case Family::GQA: result = lean_torch_sdpa_gqa(q, q, v, 0, 0); break;
     case Family::Padding: result = lean_torch_sdpa_gqa_mask(q, q, v, x.padding.get(), 0, 0); break;
     case Family::QKV: result = lean_torch_sdpa_gqa_qkv(q, q, v, 0, 0); break;
-    case Family::Window: result = lean_torch_sdpa_gqa_window(q, q, v, 1, 0, 8); break;
+    case Family::Window: result = lean_torch_sdpa_gqa_window(q, q, v, 1, 0, Nat(8)); break;
     case Family::Flash: result = lean_torch_tyr_flash_attn_4d(q, q, v, someBorrowed(x.padding.get()), 0, lean_box(0), 0); break;
     case Family::Gemma: result = lean_torch_sdpa_gqa_mask_qkv(q, q, v, x.edges.get(), 0); break;
     case Family::Bias: result = lean_torch_sdpa_4d_bias(q, q, v, x.bias.get(), 0); break;
@@ -113,7 +123,7 @@ Object ioCall(Family family, const Inputs& x, double p) {
     case Family::GQA: result = lean_torch_sdpa_gqa_io(q, q, v, p, 0, 0); break;
     case Family::Padding: result = lean_torch_sdpa_gqa_mask_io(q, q, v, x.padding.get(), p, 0, 0); break;
     case Family::QKV: result = lean_torch_sdpa_gqa_qkv_io(q, q, v, p, 0, 0); break;
-    case Family::Window: result = lean_torch_sdpa_gqa_window_io(q, q, v, p, 1, 0, 8); break;
+    case Family::Window: result = lean_torch_sdpa_gqa_window_io(q, q, v, p, 1, 0, Nat(8)); break;
     case Family::Flash: result = lean_torch_tyr_flash_attn_4d_io(q, q, v, someBorrowed(x.padding.get()), p, 0, lean_box(0), 0); break;
     case Family::Gemma: result = lean_torch_sdpa_gqa_mask_qkv_io(q, q, v, x.edges.get(), p, 0); break;
     case Family::Bias: result = lean_torch_sdpa_4d_bias_io(q, q, v, x.bias.get(), p, 0); break;

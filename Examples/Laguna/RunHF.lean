@@ -31,8 +31,8 @@ structure Args where
   device : String := "auto"
   prompt : String := "Give a concise definition of a dependent type."
   promptFile : Option String := none
-  batchSize : UInt64 := 1
-  maxNewTokens : UInt64 := 32
+  batchSize : Nat := 1
+  maxNewTokens : Nat := 32
   stream : Bool := false
   enableThinking : Bool := true
   debugIds : Bool := false
@@ -92,10 +92,10 @@ private def encodePromptToIds
 private def runBench
     (cfg : Config)
     (model : LagunaForCausalLM (device := device) cfg dtype)
-    {b seq : UInt64}
+    {b seq : Nat}
     (inputIds : Tensor { shape := #[b, seq], dtype := .Int64, device := device })
-    (promptLen : UInt64)
-    (maxNewTokens : UInt64)
+    (promptLen : Nat)
+    (maxNewTokens : Nat)
     (eos : Array UInt64)
     : IO Unit := do
   let firstMsRef ← IO.mkRef 0
@@ -134,7 +134,7 @@ private def runTextBatches
     let ⟨batch, ⟨seq, (inputIds0, promptLens)⟩⟩ ←
       buildBatchInputWithEncoder tokenizer.laguna.padTokenId.toUInt64 #[prompt] (fun p => pure (encodePromptToIds tok args.enableThinking p))
     let inputIds : Tensor { shape := #[batch, seq], dtype := .Int64, device := device } := inputIds0.to device
-    let promptLen := (promptLens[0]?.getD 0).toUInt64
+    let promptLen := (promptLens[0]?.getD 0)
     -- warmup (also builds rope tables / caches), then measured run
     IO.println "Warming up..."
     let _ ← model.generate cfg inputIds 4 .greedy eos
@@ -145,11 +145,11 @@ private def runTextBatches
       let ⟨batch, ⟨seq, (inputIds, promptLens)⟩⟩ ←
         buildBatchInputWithEncoder tokenizer.laguna.padTokenId.toUInt64 chunk (fun p => pure (encodePromptToIds tok args.enableThinking p))
       pure ⟨batch, ⟨seq, (inputIds.to device, promptLens)⟩⟩
-    let decodeBatch (promptLens : Array Nat) {b os : UInt64} (ids : Tensor { shape := #[b, os], dtype := .Int64, device := device }) : IO (Array String) :=
+    let decodeBatch (promptLens : Array Nat) {b os : Nat} (ids : Tensor { shape := #[b, os], dtype := .Int64, device := device }) : IO (Array String) :=
       decodeGeneratedBatch promptLens ids (fun xs => tokenizer.laguna.decodeTokens tok xs)
-    let runGen (b : UInt64) {s : UInt64} (ids : Tensor { shape := #[b, s], dtype := .Int64, device := device }) :=
+    let runGen (b : Nat) {s : Nat} (ids : Tensor { shape := #[b, s], dtype := .Int64, device := device }) :=
       model.generate cfg ids args.maxNewTokens .greedy eos
-    let runGenStream (b : UInt64) {s : UInt64} (ids : Tensor { shape := #[b, s], dtype := .Int64, device := device }) (cb : StreamCallback (device := device) b) :=
+    let runGenStream (b : Nat) {s : Nat} (ids : Tensor { shape := #[b, s], dtype := .Int64, device := device }) (cb : StreamCallback (device := device) b) :=
       model.generateStream cfg ids cb args.maxNewTokens .greedy eos
     runGenerationBatches prompts args.batchSize args.maxNewTokens args.stream args.debugIds
       (prompts.size == 1) buildBatch runGen runGenStream decodeBatch

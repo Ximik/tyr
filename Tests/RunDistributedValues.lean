@@ -16,5 +16,5 @@ def main (args : List String) : IO Unit := do
   unless port != restartPort do
     throw (IO.userError "Sessions require distinct rendezvous ports")
   unless rank < 2 do throw (IO.userError "Expected rank 0 or 1")
-  Tests.DistributedValues.checkTwoRankSession rank.toUInt64 port.toUInt64 restartPort.toUInt64
+  Tests.DistributedValues.checkTwoRankSession rank port restartPort
   IO.println s!"Distributed value and lifecycle regressions passed on rank {rank}"

@@ -17,7 +17,7 @@ namespace torch.qwen
 variable {device : Device}
 /-- Qwen MLP with SwiGLU activation.
     SwiGLU is more expressive than standard GELU MLP. -/
-structure QwenMLP (hidden_size intermediate_size : UInt64) (dtype : DType := .Float32) where
+structure QwenMLP (hidden_size intermediate_size : Nat) (dtype : DType := .Float32) where
   /-- Gate projection: [intermediate_size, hidden_size] -/
   gate_proj : Tensor { device := device, shape := #[intermediate_size, hidden_size], dtype := dtype }
   /-- Up projection: [intermediate_size, hidden_size] -/
@@ -32,7 +32,7 @@ variable {dtype : DType}
 variable [DType.RealFloating dtype]
 
 /-- Initialize MLP layers with random weights -/
-def init (hidden_size intermediate_size : UInt64) (dtype : DType := .Float32) (device : Device := .CPU) : IO (QwenMLP (device := device) hidden_size intermediate_size dtype) := do
+def init (hidden_size intermediate_size : Nat) (dtype : DType := .Float32) (device : Device := .CPU) : IO (QwenMLP (device := device) hidden_size intermediate_size dtype) := do
   let floating ← IO.ofExcept (DType.realFloating? dtype)
   let _ := floating.down
   let std := Float.sqrt (2.0 / hidden_size.toFloat)
@@ -55,7 +55,7 @@ def init (hidden_size intermediate_size : UInt64) (dtype : DType := .Float32) (d
     Output: [batch, seq, hidden_size]
 
     SwiGLU: down(silu(gate(x)) * up(x)) -/
-def forward {batch seq hidden_size intermediate_size : UInt64}
+def forward {batch seq hidden_size intermediate_size : Nat}
     (mlp : QwenMLP (device := device) hidden_size intermediate_size dtype)
     (x : Tensor { device := device, shape := #[batch, seq, hidden_size], dtype := dtype })
     : Tensor { device := device, shape := #[batch, seq, hidden_size], dtype := dtype } :=

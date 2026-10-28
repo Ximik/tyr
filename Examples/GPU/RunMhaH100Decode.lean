@@ -30,11 +30,11 @@ open torch.Generator
 /-- One decode test case. -/
 structure DecodeShape where
   name : String
-  batch : UInt64
-  qHeads : UInt64
-  kvHeads : UInt64
-  kvSeq : UInt64
-  headDim : UInt64
+  batch : Nat
+  qHeads : Nat
+  kvHeads : Nat
+  kvSeq : Nat
+  headDim : Nat
   /-- Max-abs tolerance for the BF16 output comparison. -/
   atol : Float := 2.5e-2
   /-- Relative tolerance. -/

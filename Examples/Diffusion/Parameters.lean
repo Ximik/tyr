@@ -14,28 +14,28 @@ abbrev Activation (s : Shape) := Tensor { shape := s, dtype := .Float32, device 
 abbrev Tokens (s : Shape) := Tensor { shape := s, dtype := .Int64, device := .CPU }
 abbrev Mask (s : Shape) := Tensor { shape := s, dtype := .Bool, device := .CPU }
 
-structure RotaryCache (seq_len head_dim : UInt64) where
+structure RotaryCache (seq_len head_dim : Nat) where
   cos : Activation #[seq_len, head_dim / 2]
   sin : Activation #[seq_len, head_dim / 2]
 
-def RotaryCache.init (seq_len head_dim : UInt64) (base : Float := 10000.0)
+def RotaryCache.init (seq_len head_dim : Nat) (base : Float := 10000.0)
     : IO (RotaryCache seq_len head_dim) := do
   let (cos, sin) := Tensor.rotaryFreqs seq_len head_dim base
   return { cos, sin }
 
-structure AttentionParams (n_embd n_head n_kv_head : UInt64) where
+structure AttentionParams (n_embd n_head n_kv_head : Nat) where
   c_q : Activation #[n_head * (n_embd / n_head), n_embd]
   c_k : Activation #[n_kv_head * (n_embd / n_head), n_embd]
   c_v : Activation #[n_kv_head * (n_embd / n_head), n_embd]
   c_proj : Activation #[n_embd, n_embd]
   deriving TensorStruct
 
-structure MLPParams (n_embd : UInt64) where
+structure MLPParams (n_embd : Nat) where
   c_fc : Activation #[4 * n_embd, n_embd]
   c_proj : Activation #[n_embd, 4 * n_embd]
   deriving TensorStruct
 
-structure BlockParams (n_embd n_head n_kv_head : UInt64) where
+structure BlockParams (n_embd n_head n_kv_head : Nat) where
   attn : AttentionParams n_embd n_head n_kv_head
   mlp : MLPParams n_embd
   deriving TensorStruct
@@ -43,7 +43,7 @@ structure BlockParams (n_embd n_head n_kv_head : UInt64) where
 def makeLeafParam {s : Shape} (t : Activation s) : IO (Activation s) :=
   Tensor.parameter t
 
-def AttentionParams.init (n_embd n_head n_kv_head : UInt64)
+def AttentionParams.init (n_embd n_head n_kv_head : Nat)
     : IO (AttentionParams n_embd n_head n_kv_head) := do
   let scale := 1.0 / Float.sqrt n_embd.toFloat
   let c_q ← Tensor.randn #[n_head * (n_embd / n_head), n_embd] false
@@ -56,7 +56,7 @@ def AttentionParams.init (n_embd n_head n_kv_head : UInt64)
     c_proj := ← makeLeafParam (Tensor.zeros #[n_embd, n_embd])
   }
 
-def MLPParams.init (n_embd : UInt64) : IO (MLPParams n_embd) := do
+def MLPParams.init (n_embd : Nat) : IO (MLPParams n_embd) := do
   let scale := 1.0 / Float.sqrt n_embd.toFloat
   let c_fc ← Tensor.randn #[4 * n_embd, n_embd] false
   return {
@@ -64,7 +64,7 @@ def MLPParams.init (n_embd : UInt64) : IO (MLPParams n_embd) := do
     c_proj := ← makeLeafParam (Tensor.zeros #[n_embd, 4 * n_embd])
   }
 
-def BlockParams.init (n_embd n_head n_kv_head : UInt64)
+def BlockParams.init (n_embd n_head n_kv_head : Nat)
     : IO (BlockParams n_embd n_head n_kv_head) := do
   return { attn := ← AttentionParams.init n_embd n_head n_kv_head,
            mlp := ← MLPParams.init n_embd }

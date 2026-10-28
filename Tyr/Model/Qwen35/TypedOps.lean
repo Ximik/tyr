@@ -28,19 +28,19 @@ def promotedMul {shape : Shape} {leftDType rightDType : DType}
   | .ok result => result
   | .error message => nativeInvariantFailure s!"Qwen35 mixed multiplication: {message}"
 
-def typedSlice {s out : Shape} {d : DType} (x : Tensor { device := device, shape := s, dtype := d }) (dim : Nat) (start len : UInt64) : Tensor { device := device, shape := out, dtype := d } :=
+def typedSlice {s out : Shape} {d : DType} (x : Tensor { device := device, shape := s, dtype := d }) (dim : Nat) (start len : Nat) : Tensor { device := device, shape := out, dtype := d } :=
   x.sliceChecked dim start len out
 
 def typedCat {s t out : Shape} {d : DType} (x : Tensor { device := device, shape := s, dtype := d }) (y : Tensor { device := device, shape := t, dtype := d }) (dim : Nat) : Tensor { device := device, shape := out, dtype := d } :=
   Tensor.catManyChecked #[x.packShape, y.packShape] (Int.ofNat dim) out
 
-def transposeSeq {batch seq dim : UInt64} {d : DType} (x : Tensor { device := device, shape := #[batch, seq, dim], dtype := d }) :
+def transposeSeq {batch seq dim : Nat} {d : DType} (x : Tensor { device := device, shape := #[batch, seq, dim], dtype := d }) :
     Tensor { device := device, shape := #[batch, dim, seq], dtype := d } := x.transpose 1 2
 
 def einsumChecked {s t out : Shape} (equation : String) (x : Tensor { device := device, shape := s, dtype := dtype }) (y : Tensor { device := device, shape := t, dtype := dtype }) : Tensor { device := device, shape := out, dtype := dtype } :=
   checked (RawTensor.einsum2 equation x.raw y.raw)
 
-def topK2d {rows cols : UInt64} (x : Tensor { device := device, shape := #[rows, cols], dtype := dtype }) (k dim : UInt64) :
+def topK2d {rows cols : Nat} (x : Tensor { device := device, shape := #[rows, cols], dtype := dtype }) (k dim : Nat) :
     Tensor { device := device, shape := #[rows, k], dtype := dtype } × Tensor { device := device, shape := #[rows, k], dtype := .Int64 } :=
   let (values, indices) := RawTensor.topK2d x.raw k dim
   (checked values, checked indices)
@@ -74,22 +74,22 @@ def randDynamic (shape : Shape) (device : Device := .CPU) (dtype : DType := .Flo
   let _ := support.down
   Tensor.uniformLike (Tensor.zerosFor { shape, dtype, device })
 
-def initDynamicWeight (shape : Shape) (fanIn : UInt64) (device : Device := .CPU)
+def initDynamicWeight (shape : Shape) (fanIn : Nat) (device : Device := .CPU)
     (dtype : DType := .Float32) : IO (Tensor { device, shape, dtype }) :=
   Model.initWeight shape fanIn dtype device
 def initDynamicBias (shape : Shape) (device : Device := .CPU) (dtype : DType := .Float32) :
     IO (Tensor { device, shape, dtype }) := Model.initBias shape dtype device
 
-def convGroups {batch cin cout cinGroup length kernel : UInt64} {out : Shape}
+def convGroups {batch cin cout cinGroup length kernel : Nat} {out : Shape}
     (input : Tensor { device := device, shape := #[batch, cin, length], dtype := dtype }) (weight : Tensor { device := device, shape := #[cout, cinGroup, kernel], dtype := dtype })
-    (bias : Tensor { device := device, shape := #[cout], dtype := dtype }) (stride padding dilation groups : UInt64) : Tensor { device := device, shape := out, dtype := dtype } :=
+    (bias : Tensor { device := device, shape := #[cout], dtype := dtype }) (stride padding dilation groups : Nat) : Tensor { device := device, shape := out, dtype := dtype } :=
   checked (RawTensor.conv1dGroups input.raw weight.raw bias.raw
     stride padding dilation groups)
 
-def falseMaskTyped {n : UInt64} (device : Device) : Tensor { device := device, shape := #[n], dtype := .Bool } :=
+def falseMaskTyped {n : Nat} (device : Device) : Tensor { device := device, shape := #[n], dtype := .Bool } :=
   Tensor.eqScalar ((Tensor.fullInt #[n] 0).to device) 1
 
-def chunkGatedDeltaRule {batch seq n_head kdim vdim : UInt64}
+def chunkGatedDeltaRule {batch seq n_head kdim vdim : Nat}
     (query key : Tensor { device := device, shape := #[batch, seq, n_head, kdim], dtype := dtype })
     (value : Tensor { device := device, shape := #[batch, seq, n_head, vdim], dtype := dtype })
     (g : Tensor { device := device, shape := #[batch, seq, n_head], dtype := .Float32 })
@@ -98,7 +98,7 @@ def chunkGatedDeltaRule {batch seq n_head kdim vdim : UInt64}
   let (out, state) := RawTensor.qwen35Chunk query.raw key.raw value.raw g.raw beta.raw
   (checked out, checked state)
 
-def recurrentGatedDeltaRule {batch seq n_head kdim vdim : UInt64}
+def recurrentGatedDeltaRule {batch seq n_head kdim vdim : Nat}
     (query key : Tensor { device := device, shape := #[batch, seq, n_head, kdim], dtype := dtype })
     (value : Tensor { device := device, shape := #[batch, seq, n_head, vdim], dtype := dtype })
     (g : Tensor { device := device, shape := #[batch, seq, n_head], dtype := .Float32 })

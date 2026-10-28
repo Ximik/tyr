@@ -84,10 +84,10 @@ opaque binFileTokenCount (path : @& String) : IO UInt64
 /-- High-quality mono resampling. Zero rates, unrepresentable output sizes, and
 native failures return IO errors. Equal-rate and empty inputs retain the input array. -/
 @[extern "lean_torch_resample_soxr_hq"]
-opaque resampleSoxrHQ (samples : @& Array Float) (origSr targetSr : UInt64) : IO (Array Float)
+opaque resampleSoxrHQ (samples : @& Array Float) (origSr targetSr : @& Nat) : IO (Array Float)
 
 @[extern "lean_torch_wav_begin"]
-opaque wavBegin (path : @& String) (sampleRate : UInt64 := 24000) : IO Unit
+opaque wavBegin (path : @& String) (sampleRate : Nat := 24000) : IO Unit
 
 @[extern "lean_torch_wav_finalize"]
 opaque wavFinalize (path : @& String) : IO Unit

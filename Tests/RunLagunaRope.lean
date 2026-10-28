@@ -73,7 +73,7 @@ private def checkTablesAgainstReference {device : Device} (path : String) (table
 
 def main : IO Unit := do
   let cfg := Config.laguna_s_2_1
-  let maxLen : UInt64 := 1024
+  let maxLen : Nat := 1024
   let path ← findFixture
 
   -- 1. YaRN diagnostics.

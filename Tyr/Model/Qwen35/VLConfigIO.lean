@@ -37,7 +37,12 @@ private def getFloat? (j : Json) : Option Float :=
   | some x => some x
   | none => (getNat? j).map (·.toFloat)
 
-private def getNatFieldD (j : Json) (key : String) (d : UInt64) : UInt64 :=
+private def getNatFieldD (j : Json) (key : String) (d : Nat) : Nat :=
+  match getObjVal? j key >>= getNat? with
+  | some n => n
+  | none => d
+
+private def getTokenIdFieldD (j : Json) (key : String) (d : UInt64) : UInt64 :=
   match getObjVal? j key >>= getNat? with
   | some n => n.toUInt64
   | none => d
@@ -105,10 +110,10 @@ private def parseVLConfig
   VLConfig.normalize {
     text_config := textCfg
     vision_config := visionCfg
-    image_token_id := getNatFieldD root "image_token_id" d.image_token_id
-    video_token_id := getNatFieldD root "video_token_id" d.video_token_id
-    vision_start_token_id := getNatFieldD root "vision_start_token_id" d.vision_start_token_id
-    vision_end_token_id := getNatFieldD root "vision_end_token_id" d.vision_end_token_id
+    image_token_id := getTokenIdFieldD root "image_token_id" d.image_token_id
+    video_token_id := getTokenIdFieldD root "video_token_id" d.video_token_id
+    vision_start_token_id := getTokenIdFieldD root "vision_start_token_id" d.vision_start_token_id
+    vision_end_token_id := getTokenIdFieldD root "vision_end_token_id" d.vision_end_token_id
     tie_word_embeddings := tieWordEmbeddings
   }
 

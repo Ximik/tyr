@@ -13,7 +13,7 @@ namespace torch.qwen35.media
 open torch
 open torch.qwen35
 
-private def parsePatchified {patchDim : UInt64} (dyn : RawTensor) : IO (Sigma (fun n => Tensor { device := .CPU, shape := #[n, patchDim], dtype := .Float32 })) := do
+private def parsePatchified {patchDim : Nat} (dyn : RawTensor) : IO (Sigma (fun n => Tensor { device := .CPU, shape := #[n, patchDim], dtype := .Float32 })) := do
   let shp := RawTensor.runtimeShape dyn
   if shp.size != 2 then
     throw <| IO.userError s!"Expected patchified tensor rank 2, got shape={shp}"
@@ -40,8 +40,8 @@ def loadImagePatches (cfg : VLConfig) (path : String)
 def loadVideoPatches
     (cfg : VLConfig)
     (path : String)
-    (maxFrames : UInt64 := 64)
-    (frameStride : UInt64 := 1)
+    (maxFrames : Nat := 64)
+    (frameStride : Nat := 1)
     : IO (Sigma (fun n => Tensor { device := .CPU, shape := #[n, VisionConfig.patchDim cfg.vision_config], dtype := .Float32 })) := do
   let dyn ← RawTensor.loadVideoPatchified
     path

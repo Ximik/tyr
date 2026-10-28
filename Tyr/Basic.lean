@@ -60,7 +60,7 @@ instance : Repr RawTensor where
 @[extern "lean_torch_get_device"] private opaque deviceStrImpl
     (t : @& RawTensor) : String
 @[extern "lean_torch_get_values"] private opaque getValuesImpl
-    (t : @& RawTensor) (maxElements : UInt64) : FloatArray
+    (t : @& RawTensor) (maxElements : @& Nat) : FloatArray
 @[extern "lean_torch_get_stats"] private opaque statsImpl
     (t : @& RawTensor) : String
 
@@ -70,7 +70,7 @@ def dtype (t : RawTensor) : DType := dtypeImpl t
 def dtypeStr (t : RawTensor) : String := t.dtype.canonicalName
 def device (t : RawTensor) : Device := deviceImpl t
 def deviceStr (t : RawTensor) : String := deviceStrImpl t
-def getValues (t : RawTensor) (maxElements : UInt64 := 1000) : FloatArray :=
+def getValues (t : RawTensor) (maxElements : Nat := 1000) : FloatArray :=
   getValuesImpl t maxElements
 def stats (t : RawTensor) : String := statsImpl t
 

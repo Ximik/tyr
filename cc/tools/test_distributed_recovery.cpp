@@ -69,6 +69,16 @@ extern "C" lean_object* baselineInitialized(lean_object*)
 
 namespace {
 using Object = std::unique_ptr<lean_object, decltype(&lean_dec)>;
+// Temporary Lean Nat for a borrowed argument; values above the small-Nat range
+// become bignums, as Lean would pass them.
+struct Nat {
+  lean_object* object;
+  Nat(uint64_t value) : object(lean_uint64_to_nat(value)) {}
+  Nat(const Nat&) = delete;
+  Nat& operator=(const Nat&) = delete;
+  ~Nat() { lean_dec(object); }
+  operator lean_object*() const { return object; }
+};
 void require(bool condition, const char* message) {
   if (!condition) throw std::runtime_error(message);
 }
@@ -101,7 +111,7 @@ lean_object* setDevice(uint64_t index) {
 lean_object* shape(std::initializer_list<uint64_t> dims) {
   auto* result = lean_alloc_array(dims.size(), dims.size());
   size_t i = 0;
-  for (auto dim : dims) lean_array_set_core(result, i++, lean_box_uint64(dim));
+  for (auto dim : dims) lean_array_set_core(result, i++, lean_box(dim));
   return result;
 }
 Object tensor(std::initializer_list<uint64_t> dims) {
@@ -218,10 +228,10 @@ int main() {
     auto backend = c10::make_intrusive<FakeBackend>(counts);
     g_process_group = backend; g_initialized = true;
     Object raw(unitFromTorchTensor(torch::ones({2})), lean_dec);
-    expectError(lean_torch_dist_broadcast(raw.get(), UINT64_MAX));
-    expectError(lean_torch_dist_broadcast(raw.get(), 1));
+    expectError(lean_torch_dist_broadcast(raw.get(), Nat(UINT64_MAX)));
+    expectError(lean_torch_dist_broadcast(raw.get(), Nat(1)));
     require(backend->broadcasts == 0, "invalid rank reached backend");
-    expectSuccess(lean_torch_dist_broadcast(raw.get(), 0));
+    expectSuccess(lean_torch_dist_broadcast(raw.get(), Nat(0)));
     require(backend->broadcasts == 1, "valid broadcast was rejected");
     clearFakeState();
   });
@@ -372,7 +382,7 @@ int main() {
   auto invalidInit = [&](const char* backend, uint64_t rank, uint64_t size, uint64_t port) {
     Object name(lean_mk_string(backend), lean_dec);
     Object host(lean_mk_string("127.0.0.1"), lean_dec);
-    expectError(lean_torch_dist_init_process_group(name.get(), host.get(), port, rank, size));
+    expectError(lean_torch_dist_init_process_group(name.get(), host.get(), Nat(port), Nat(rank), Nat(size)));
     require(lean_is_exclusive(name.get()) && lean_is_exclusive(host.get()), "borrowed strings leaked");
     require(!initialized(), "failed init committed state");
   };
@@ -396,7 +406,7 @@ int main() {
     lean_inc(raw.get()); lean_array_set_core(array.get(), 0, raw.get());
     expectError(lean_torch_dist_all_reduce(raw.get(), 0, 0));
     expectError(lean_torch_dist_all_reduce(raw.get(), 0, 1));
-    expectError(lean_torch_dist_broadcast(raw.get(), 0));
+    expectError(lean_torch_dist_broadcast(raw.get(), Nat(0)));
     expectError(lean_torch_dist_reduce_scatter_tensor(raw.get(), raw.get(), 0, 0));
     expectError(lean_torch_dist_reduce_scatter_list(raw.get(), array.get(), 0));
     expectError(lean_torch_dist_all_gather_into_tensor(raw.get(), raw.get(), 0));
@@ -410,8 +420,8 @@ int main() {
     expectError(lean_torch_xxt(raw.get()));
     expectError(lean_torch_ba_plus_cAA(raw.get(), 1, 1));
     expectError(lean_torch_newton_schulz_step(raw.get(), 1, 1, 1));
-    expectError(lean_torch_polar_express(raw.get(), 1));
-    expectError(lean_torch_muon_orthogonalize(raw.get(), 1));
+    expectError(lean_torch_polar_express(raw.get(), Nat(1)));
+    expectError(lean_torch_muon_orthogonalize(raw.get(), Nat(1)));
     require(lean_is_exclusive(raw.get()), "borrowed polar input leaked");
   });
   test("all six polar success carriers preserve input", [] {
@@ -419,11 +429,11 @@ int main() {
     expectSuccess(lean_torch_xxt(raw.get()));
     expectSuccess(lean_torch_ba_plus_cAA(raw.get(), 1, 1));
     expectSuccess(lean_torch_newton_schulz_step(raw.get(), 1, 1, 1));
-    expectSuccess(lean_torch_polar_express(raw.get(), 1));
-    expectSuccess(lean_torch_muon_orthogonalize(raw.get(), 1));
+    expectSuccess(lean_torch_polar_express(raw.get(), Nat(1)));
+    expectSuccess(lean_torch_muon_orthogonalize(raw.get(), Nat(1)));
     expectSuccess(lean_torch_cautious_update(raw.get(), raw.get(), 0.1, 0.1));
     require(lean_is_exclusive(raw.get()), "borrowed polar input leaked");
-    Object values(lean_torch_get_values(raw.get(), 4), lean_dec);
+    Object values(lean_torch_get_values(raw.get(), Nat(4)), lean_dec);
     require(lean_sarray_size(values.get()) == 4, "input shape changed");
     auto* data = reinterpret_cast<double*>(lean_sarray_cptr(values.get()));
     for (size_t i = 0; i < 4; ++i) require(data[i] == 1, "borrowed polar input mutated");

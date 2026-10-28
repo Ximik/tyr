@@ -13,13 +13,23 @@ extern "C" void lean_initialize();
 
 namespace {
 using Object = std::unique_ptr<lean_object, decltype(&lean_dec)>;
+// Temporary Lean Nat for a borrowed argument; values above the small-Nat range
+// become bignums, as Lean would pass them.
+struct Nat {
+  lean_object* object;
+  Nat(uint64_t value) : object(lean_uint64_to_nat(value)) {}
+  Nat(const Nat&) = delete;
+  Nat& operator=(const Nat&) = delete;
+  ~Nat() { lean_dec(object); }
+  operator lean_object*() const { return object; }
+};
 void require(bool condition, const char* message) {
   if (!condition) throw std::runtime_error(message);
 }
 lean_object* shape(std::initializer_list<uint64_t> dims) {
   auto* result = lean_alloc_array(dims.size(), dims.size());
   size_t i = 0;
-  for (auto dim : dims) lean_array_set_core(result, i++, lean_box_uint64(dim));
+  for (auto dim : dims) lean_array_set_core(result, i++, lean_box(dim));
   return result;
 }
 lean_object* retain(lean_object* value) { lean_inc(value); return value; }
@@ -67,8 +77,8 @@ Object apply(Update update, lean_object* destination, lean_object* source) {
   lean_object* result;
   if (update == Update::Copy) result = lean_torch_copy_(destination, source);
   else if (update == Update::Branching) result = lean_torch_copy_inplace(destination, source);
-  else if (update == Update::CacheSlice) result = lean_torch_copy_slice_io(destination, 0, 0, source);
-  else result = lean_torch_slice_scatter_along_dim(destination, 0, 0, source);
+  else if (update == Update::CacheSlice) result = lean_torch_copy_slice_io(destination, Nat(0), Nat(0), source);
+  else result = lean_torch_slice_scatter_along_dim(destination, Nat(0), Nat(0), source);
 #ifdef TYR_LEGACY_VALUE_UPDATES
   // Baseline-only adapter for the previous borrowed destination / Unit ABI.
   if (update == Update::Copy || update == Update::CacheSlice) {

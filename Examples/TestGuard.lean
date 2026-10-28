@@ -53,7 +53,7 @@ def mlpModule : IO ModuleDisplayProps := do
 
 
  /-- Example: Custom structure with deriving -/
-structure MLP (in_dim hidden out_dim : UInt64) where
+structure MLP (in_dim hidden out_dim : Nat) where
   fc1 : Linear in_dim hidden
   fc2 : Linear hidden out_dim
   deriving ToModuleDisplay

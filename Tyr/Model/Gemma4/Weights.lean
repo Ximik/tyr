@@ -77,14 +77,14 @@ private def requireDType {shape : Shape} (dtype : DType)
     (tensor : SomeDTypeTensor shape device) : IO (Tensor ⟨shape, dtype, device⟩) :=
   IO.ofExcept (tensor.atDType? dtype)
 
-private def pad1dTo {srcDim dstDim : UInt64} {dt : DType}
+private def pad1dTo {srcDim dstDim : Nat} {dt : DType}
     (x : Tensor ⟨#[srcDim], dt, device⟩) : IO (Tensor ⟨#[dstDim], dt, device⟩) := do
   let support ← dt.acquireConstantSupport device
   let _ := support.down
   let base := Tensor.zerosFor ⟨#[dstDim], dt, device⟩
   pure (Tensor.sliceScatter base 0 0 x)
 
-private def pad2dTo {srcRows srcCols dstRows dstCols : UInt64} {dt : DType}
+private def pad2dTo {srcRows srcCols dstRows dstCols : Nat} {dt : DType}
     (x : Tensor ⟨#[srcRows, srcCols], dt, device⟩) :
     IO (Tensor ⟨#[dstRows, dstCols], dt, device⟩) := do
   let support ← dt.acquireConstantSupport device
@@ -97,7 +97,7 @@ private def pad2dTo {srcRows srcCols dstRows dstCols : UInt64} {dt : DType}
 private def loadPadded1DSharded
     (modelDir : String)
     (name : String)
-    (srcDim dstDim : UInt64)
+    (srcDim dstDim : Nat)
     : IO (SomeDTypeTensor (#[dstDim]) device) := do
   let t ← loadParameterSharded modelDir name #[srcDim]
   pure ⟨t.1, ← pad1dTo t.2⟩
@@ -105,7 +105,7 @@ private def loadPadded1DSharded
 private def loadPadded1D
     (path : String)
     (name : String)
-    (srcDim dstDim : UInt64)
+    (srcDim dstDim : Nat)
     : IO (SomeDTypeTensor (#[dstDim]) device) := do
   let t ← loadParameter path name #[srcDim]
   pure ⟨t.1, ← pad1dTo t.2⟩
@@ -113,7 +113,7 @@ private def loadPadded1D
 private def loadPadded2DSharded
     (modelDir : String)
     (name : String)
-    (srcRows srcCols dstRows dstCols : UInt64)
+    (srcRows srcCols dstRows dstCols : Nat)
     : IO (SomeDTypeTensor (#[dstRows, dstCols]) device) := do
   let t ← loadParameterSharded modelDir name #[srcRows, srcCols]
   pure ⟨t.1, ← pad2dTo t.2⟩
@@ -121,7 +121,7 @@ private def loadPadded2DSharded
 private def loadPadded2D
     (path : String)
     (name : String)
-    (srcRows srcCols dstRows dstCols : UInt64)
+    (srcRows srcCols dstRows dstCols : Nat)
     : IO (SomeDTypeTensor (#[dstRows, dstCols]) device) := do
   let t ← loadParameter path name #[srcRows, srcCols]
   pure ⟨t.1, ← pad2dTo t.2⟩
@@ -129,7 +129,7 @@ private def loadPadded2D
 private def loadRMSNormSharded
     (modelDir : String)
     (name : String)
-    (srcDim dstDim : UInt64)
+    (srcDim dstDim : Nat)
     (eps : Float)
     : IO (Gemma4RMSNorm (device := device) dstDim) := do
   let w ← loadPadded1DSharded modelDir name srcDim dstDim
@@ -138,29 +138,29 @@ private def loadRMSNormSharded
 private def loadRMSNorm
     (path : String)
     (name : String)
-    (srcDim dstDim : UInt64)
+    (srcDim dstDim : Nat)
     (eps : Float)
     : IO (Gemma4RMSNorm (device := device) dstDim) := do
   let w ← loadPadded1D path name srcDim dstDim
   pure (Gemma4RMSNorm.fromCheckpointWeight (freezeStored w) eps)
 
-private def layerHeadDim (cfg : Config) (layerType : LayerType) : UInt64 :=
+private def layerHeadDim (cfg : Config) (layerType : LayerType) : Nat :=
   match layerType with
   | .slidingAttention => cfg.head_dim
   | .fullAttention => Config.fullHeadDim cfg
 
-private def layerNumKVHeads (cfg : Config) (layerType : LayerType) : UInt64 :=
+private def layerNumKVHeads (cfg : Config) (layerType : LayerType) : Nat :=
   match layerType with
   | .slidingAttention => cfg.num_key_value_heads
   | .fullAttention => Config.fullNumKVHeads cfg
 
-private def layerAttentionDim (cfg : Config) (layerType : LayerType) : UInt64 :=
+private def layerAttentionDim (cfg : Config) (layerType : LayerType) : Nat :=
   cfg.num_attention_heads * layerHeadDim cfg layerType
 
-private def layerKVProjDim (cfg : Config) (layerType : LayerType) : UInt64 :=
+private def layerKVProjDim (cfg : Config) (layerType : LayerType) : Nat :=
   layerNumKVHeads cfg layerType * layerHeadDim cfg layerType
 
-private def loadAttentionSharded (modelDir : String) (cfg : Config) (layerIdx : UInt64)
+private def loadAttentionSharded (modelDir : String) (cfg : Config) (layerIdx : Nat)
     : IO (Gemma4Attention (dtype := dtype) (device := device) cfg) := do
   let p := s!"model.language_model.layers.{layerIdx}.self_attn"
   let layerType := Config.layerTypeAt cfg layerIdx
@@ -210,7 +210,7 @@ private def loadAttentionSharded (modelDir : String) (cfg : Config) (layerIdx : 
     k_norm := kNorm
   }
 
-private def loadAttention (path : String) (cfg : Config) (layerIdx : UInt64)
+private def loadAttention (path : String) (cfg : Config) (layerIdx : Nat)
     : IO (Gemma4Attention (dtype := dtype) (device := device) cfg) := do
   let p := s!"model.language_model.layers.{layerIdx}.self_attn"
   let layerType := Config.layerTypeAt cfg layerIdx
@@ -260,7 +260,7 @@ private def loadAttention (path : String) (cfg : Config) (layerIdx : UInt64)
     k_norm := kNorm
   }
 
-private def loadDenseMLPSharded (modelDir : String) (cfg : Config) (layerIdx : UInt64)
+private def loadDenseMLPSharded (modelDir : String) (cfg : Config) (layerIdx : Nat)
     : IO (Gemma4MLP (dtype := dtype) (device := device) cfg) := do
   let p := s!"model.language_model.layers.{layerIdx}.mlp"
   let inter := Config.layerIntermediateSize cfg layerIdx
@@ -289,7 +289,7 @@ private def loadDenseMLPSharded (modelDir : String) (cfg : Config) (layerIdx : U
     down_proj := reqGradFalse (← requireDType dtype down)
   }
 
-private def loadDenseMLP (path : String) (cfg : Config) (layerIdx : UInt64)
+private def loadDenseMLP (path : String) (cfg : Config) (layerIdx : Nat)
     : IO (Gemma4MLP (dtype := dtype) (device := device) cfg) := do
   let p := s!"model.language_model.layers.{layerIdx}.mlp"
   let inter := Config.layerIntermediateSize cfg layerIdx
@@ -318,7 +318,7 @@ private def loadDenseMLP (path : String) (cfg : Config) (layerIdx : UInt64)
     down_proj := reqGradFalse (← requireDType dtype down)
   }
 
-private def loadPerLayerInputBlockSharded (modelDir : String) (cfg : Config) (layerIdx : UInt64)
+private def loadPerLayerInputBlockSharded (modelDir : String) (cfg : Config) (layerIdx : Nat)
     : IO (Gemma4PerLayerInputBlock (dtype := dtype) (device := device) cfg) := do
   let p := s!"model.language_model.layers.{layerIdx}"
   let gate ← loadParameterSharded modelDir s!"{p}.per_layer_input_gate" #[cfg.hidden_size_per_layer_input, cfg.hidden_size]
@@ -330,7 +330,7 @@ private def loadPerLayerInputBlockSharded (modelDir : String) (cfg : Config) (la
     post_per_layer_input_norm := norm
   }
 
-private def loadPerLayerInputBlock (path : String) (cfg : Config) (layerIdx : UInt64)
+private def loadPerLayerInputBlock (path : String) (cfg : Config) (layerIdx : Nat)
     : IO (Gemma4PerLayerInputBlock (dtype := dtype) (device := device) cfg) := do
   let p := s!"model.language_model.layers.{layerIdx}"
   let gate ← loadParameter path s!"{p}.per_layer_input_gate" #[cfg.hidden_size_per_layer_input, cfg.hidden_size]
@@ -342,7 +342,7 @@ private def loadPerLayerInputBlock (path : String) (cfg : Config) (layerIdx : UI
     post_per_layer_input_norm := norm
   }
 
-private def loadMoeBranchSharded (modelDir : String) (cfg : Config) (layerIdx : UInt64)
+private def loadMoeBranchSharded (modelDir : String) (cfg : Config) (layerIdx : Nat)
     : IO (Gemma4MoeBranch (dtype := dtype) (device := device) cfg) := do
   let p := s!"model.language_model.layers.{layerIdx}"
   let routerProj ← loadParameterSharded modelDir s!"{p}.router.proj" #[cfg.num_experts, cfg.hidden_size]
@@ -376,7 +376,7 @@ private def loadMoeBranchSharded (modelDir : String) (cfg : Config) (layerIdx : 
     pre_feedforward_layernorm_2 := pre2
   }
 
-private def loadMoeBranch (path : String) (cfg : Config) (layerIdx : UInt64)
+private def loadMoeBranch (path : String) (cfg : Config) (layerIdx : Nat)
     : IO (Gemma4MoeBranch (dtype := dtype) (device := device) cfg) := do
   let p := s!"model.language_model.layers.{layerIdx}"
   let routerProj ← loadParameter path s!"{p}.router.proj" #[cfg.num_experts, cfg.hidden_size]
@@ -410,7 +410,7 @@ private def loadMoeBranch (path : String) (cfg : Config) (layerIdx : UInt64)
     pre_feedforward_layernorm_2 := pre2
   }
 
-private def loadLayerSharded (modelDir : String) (cfg : Config) (layerIdx : UInt64)
+private def loadLayerSharded (modelDir : String) (cfg : Config) (layerIdx : Nat)
     : IO (Gemma4Layer (dtype := dtype) (device := device) cfg) := do
   let p := s!"model.language_model.layers.{layerIdx}"
   let layerType := Config.layerTypeAt cfg layerIdx
@@ -445,7 +445,7 @@ private def loadLayerSharded (modelDir : String) (cfg : Config) (layerIdx : UInt
     layer_scalar := reqGradFalse (← requireDType dtype layerScalar)
   }
 
-private def loadLayer (path : String) (cfg : Config) (layerIdx : UInt64)
+private def loadLayer (path : String) (cfg : Config) (layerIdx : Nat)
     : IO (Gemma4Layer (dtype := dtype) (device := device) cfg) := do
   let p := s!"model.language_model.layers.{layerIdx}"
   let layerType := Config.layerTypeAt cfg layerIdx
@@ -527,11 +527,11 @@ def loadSharded (modelDir : String) (cfg : Config := Config.gemma4_E4B)
       pure none
 
   let mut layers : Array (Gemma4Layer (dtype := dtype) (device := device) cfg) := #[]
-  for i in [:cfg.num_hidden_layers.toNat] do
-    let layer ← loadLayerSharded modelDir cfg i.toUInt64
+  for i in [:cfg.num_hidden_layers] do
+    let layer ← loadLayerSharded modelDir cfg i
     layers := layers.push layer
-    if (i + 1) % 8 == 0 || i + 1 == cfg.num_hidden_layers.toNat then
-      log.onInfo s!"  loaded layers {i + 1}/{cfg.num_hidden_layers.toNat}"
+    if (i + 1) % 8 == 0 || i + 1 == cfg.num_hidden_layers then
+      log.onInfo s!"  loaded layers {i + 1}/{cfg.num_hidden_layers}"
 
   let norm ← loadRMSNormSharded modelDir "model.language_model.norm" cfg.hidden_size cfg.hidden_size cfg.rms_norm_eps
 
@@ -606,11 +606,11 @@ def load (path : String) (cfg : Config := Config.gemma4_E4B)
       pure none
 
   let mut layers : Array (Gemma4Layer (dtype := dtype) (device := device) cfg) := #[]
-  for i in [:cfg.num_hidden_layers.toNat] do
-    let layer ← loadLayer path cfg i.toUInt64
+  for i in [:cfg.num_hidden_layers] do
+    let layer ← loadLayer path cfg i
     layers := layers.push layer
-    if (i + 1) % 8 == 0 || i + 1 == cfg.num_hidden_layers.toNat then
-      log.onInfo s!"  loaded layers {i + 1}/{cfg.num_hidden_layers.toNat}"
+    if (i + 1) % 8 == 0 || i + 1 == cfg.num_hidden_layers then
+      log.onInfo s!"  loaded layers {i + 1}/{cfg.num_hidden_layers}"
 
   let norm ← loadRMSNorm path "model.language_model.norm" cfg.hidden_size cfg.hidden_size cfg.rms_norm_eps
 

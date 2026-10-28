@@ -11,7 +11,7 @@ open torch.Generator.KVCache
 private def values {σ : StaticSpec} (t : Tensor σ) : IO (Array UInt64) :=
   Tensor.toUInt64Array t.toInt64
 
-private def layer {n b len h d : UInt64} (cache : Cache n b len h d) (i : Nat)
+private def layer {n b len h d : Nat} (cache : Cache n b len h d) (i : Nat)
     : IO (LayerCache b len h d) :=
   match cache.layers[i]? with
   | some value => pure value

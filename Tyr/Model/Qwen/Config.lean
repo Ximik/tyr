@@ -12,25 +12,25 @@ namespace torch.qwen
     Default values are for Qwen3-4B. -/
 structure QwenConfig where
   /-- Vocabulary size -/
-  vocab_size : UInt64 := 151936
+  vocab_size : Nat := 151936
   /-- Hidden dimension -/
-  hidden_size : UInt64 := 2560
+  hidden_size : Nat := 2560
   /-- Intermediate (FFN) dimension -/
-  intermediate_size : UInt64 := 6912
+  intermediate_size : Nat := 6912
   /-- Number of transformer layers -/
-  num_hidden_layers : UInt64 := 28
+  num_hidden_layers : Nat := 28
   /-- Number of attention heads -/
-  num_attention_heads : UInt64 := 20
+  num_attention_heads : Nat := 20
   /-- Number of key-value heads (for GQA) -/
-  num_key_value_heads : UInt64 := 4
+  num_key_value_heads : Nat := 4
   /-- Head dimension (hidden_size / num_attention_heads) -/
-  head_dim : UInt64 := 128
+  head_dim : Nat := 128
   /-- RoPE theta base -/
   rope_theta : Float := 10000.0
   /-- RMSNorm epsilon -/
   rms_norm_eps : Float := 1e-6
   /-- Maximum sequence length -/
-  max_position_embeddings : UInt64 := 32768
+  max_position_embeddings : Nat := 32768
   deriving Repr, Inhabited
 
 namespace QwenConfig
@@ -56,15 +56,15 @@ def fluxKleinTextEncoder : QwenConfig := {
 }
 
 /-- Compute the head dimension from hidden size and num heads -/
-def computeHeadDim (cfg : QwenConfig) : UInt64 :=
+def computeHeadDim (cfg : QwenConfig) : Nat :=
   cfg.hidden_size / cfg.num_attention_heads
 
 /-- Compute the KV dimension (num_kv_heads * head_dim) -/
-def kvDim (cfg : QwenConfig) : UInt64 :=
+def kvDim (cfg : QwenConfig) : Nat :=
   cfg.num_key_value_heads * cfg.head_dim
 
 /-- Number of heads per KV group (for GQA) -/
-def numHeadsPerKVGroup (cfg : QwenConfig) : UInt64 :=
+def numHeadsPerKVGroup (cfg : QwenConfig) : Nat :=
   cfg.num_attention_heads / cfg.num_key_value_heads
 
 end QwenConfig

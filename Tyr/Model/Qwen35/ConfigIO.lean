@@ -36,10 +36,10 @@ private def getBool? (j : Json) : Option Bool :=
 private def getString? (j : Json) : Option String :=
   fromJson? j
 
-private def getNatArray? (j : Json) : Option (Array UInt64) :=
+private def getNatArray? (j : Json) : Option (Array Nat) :=
   match j with
   | .arr xs =>
-    let mapped := xs.map (fun x => (getNat? x).map (·.toUInt64))
+    let mapped := xs.map getNat?
     if mapped.all Option.isSome then
       some <| mapped.map (fun x => x.getD 0)
     else
@@ -51,9 +51,9 @@ private def getFloat? (j : Json) : Option Float :=
   | some x => some x
   | none => (getNat? j).map (·.toFloat)
 
-private def getNatFieldD (j : Json) (key : String) (d : UInt64) : UInt64 :=
+private def getNatFieldD (j : Json) (key : String) (d : Nat) : Nat :=
   match getObjVal? j key >>= getNat? with
-  | some n => n.toUInt64
+  | some n => n
   | none => d
 
 private def getBoolFieldD (j : Json) (key : String) (d : Bool) : Bool :=
@@ -71,8 +71,8 @@ private def getFloatFieldD (j : Json) (key : String) (d : Float) : Float :=
   | some x => x
   | none => d
 
-private def getOptNatField (j : Json) (key : String) : Option UInt64 :=
-  (getObjVal? j key >>= getNat?).map (·.toUInt64)
+private def getOptNatField (j : Json) (key : String) : Option Nat :=
+  getObjVal? j key >>= getNat?
 
 private def parseLayerTypes (j : Json) (key : String) : Option (Array LayerType) :=
   match getObjVal? j key with
@@ -178,15 +178,15 @@ def Config.parseJson (j : Json) (d : Config := Config.qwen35_9B) : Config :=
 
     pad_token_id :=
       match getOptNatField textCfg "pad_token_id" with
-      | some x => some x
+      | some x => some x.toUInt64
       | none => d.pad_token_id
     bos_token_id :=
       match getOptNatField textCfg "bos_token_id" with
-      | some x => some x
+      | some x => some x.toUInt64
       | none => d.bos_token_id
     eos_token_id :=
       match getOptNatField textCfg "eos_token_id" with
-      | some x => some x
+      | some x => some x.toUInt64
       | none => d.eos_token_id
   }
 

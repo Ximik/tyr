@@ -272,7 +272,7 @@ def parseTimestamp (wordList : Array String) (timestampMs : Array UInt64) : Forc
 
 end Qwen3ForceAlignProcessor
 
-private def extractTimestampRows {batch seq : UInt64}
+private def extractTimestampRows {batch seq : Nat}
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (outputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (timestampTokenId : UInt64)
@@ -282,11 +282,11 @@ private def extractTimestampRows {batch seq : UInt64}
   let outFlat : Tensor { device := device, shape := #[batch * seq], dtype := .Int64 } := Tensor.reshapeChecked (Tensor.toInt64 outputIds) #[batch * seq]
   let inVals ← Tensor.toUInt64Array inFlat
   let outVals ← Tensor.toUInt64Array outFlat
-  let mut rows : Array (Array UInt64) := Array.mkEmpty batch.toNat
-  for b in [:batch.toNat] do
+  let mut rows : Array (Array UInt64) := Array.mkEmpty batch
+  for b in [:batch] do
     let mut ts : Array UInt64 := #[]
-    for t in [:seq.toNat] do
-      let k := b * seq.toNat + t
+    for t in [:seq] do
+      let k := b * seq + t
       if inVals.getD k 0 == timestampTokenId then
         let bin := outVals.getD k 0
         let ms := (bin.toFloat * timestampSegmentTime).toUInt64
@@ -294,7 +294,7 @@ private def extractTimestampRows {batch seq : UInt64}
     rows := rows.push ts
   pure rows
 
-def alignFromOutputIds {batch seq : UInt64}
+def alignFromOutputIds {batch seq : Nat}
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (outputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (wordLists : Array (Array String))
@@ -302,14 +302,14 @@ def alignFromOutputIds {batch seq : UInt64}
     (timestampSegmentTime : Float := 1.0)
     : IO (Array ForcedAlignResult) := do
   let rows ← extractTimestampRows inputIds outputIds timestampTokenId timestampSegmentTime
-  let mut out : Array ForcedAlignResult := Array.mkEmpty batch.toNat
-  for b in [:batch.toNat] do
+  let mut out : Array ForcedAlignResult := Array.mkEmpty batch
+  for b in [:batch] do
     let words := wordLists.getD b #[]
     let ts := rows.getD b #[]
     out := out.push (Qwen3ForceAlignProcessor.parseTimestamp words ts)
   pure out
 
-def alignFromLogits {batch seq vocab : UInt64} {dtype : DType}
+def alignFromLogits {batch seq vocab : Nat} {dtype : DType}
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (logits : Tensor { device := device, shape := #[batch, seq, vocab], dtype := dtype })
     (wordLists : Array (Array String))

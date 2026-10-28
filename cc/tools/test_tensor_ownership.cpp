@@ -11,6 +11,16 @@ extern "C" void lean_initialize();
 
 namespace {
 using LeanObject = std::unique_ptr<lean_object, decltype(&lean_dec)>;
+// Temporary Lean Nat for a borrowed argument; values above the small-Nat range
+// become bignums, as Lean would pass them.
+struct Nat {
+  lean_object* object;
+  Nat(uint64_t value) : object(lean_uint64_to_nat(value)) {}
+  Nat(const Nat&) = delete;
+  Nat& operator=(const Nat&) = delete;
+  ~Nat() { lean_dec(object); }
+  operator lean_object*() const { return object; }
+};
 
 void require(bool condition, const std::string& message) {
   if (!condition) throw std::runtime_error(message);
@@ -20,7 +30,7 @@ lean_object* shape(std::initializer_list<uint64_t> dimensions) {
   auto* result = lean_alloc_array(dimensions.size(), dimensions.size());
   size_t index = 0;
   for (auto dimension : dimensions) {
-    lean_array_set_core(result, index++, lean_box_uint64(dimension));
+    lean_array_set_core(result, index++, lean_box(dimension));
   }
   return result;
 }
@@ -66,7 +76,7 @@ void checkBorrowedTensor(lean_object* tensor) {
   require(tensor->m_rc == 1, "Borrowed tensor reference count changed");
   require(lean_torch_get_dtype_enum(tensor) == static_cast<uint8_t>(tyr::lean::DType::Float32),
           "Borrowed tensor is invalid");
-  LeanObject values(lean_torch_get_values(tensor, 4), lean_dec);
+  LeanObject values(lean_torch_get_values(tensor, Nat(4)), lean_dec);
   require(lean_sarray_size(values.get()) == 4, "Borrowed tensor shape changed");
   auto* data = reinterpret_cast<const double*>(lean_sarray_cptr(values.get()));
   for (size_t i = 0; i < 4; ++i) require(data[i] == 1.0, "Borrowed tensor contents changed");
@@ -88,7 +98,7 @@ void testShapesAndMetadata(lean_object* tensor) {
     LeanObject result(entry.second(tensor), lean_dec);
   }
   (void)lean_torch_get_dtype_enum(tensor);
-  lean_dec(lean_torch_get_values(tensor, 4));
+  lean_dec(lean_torch_get_values(tensor, Nat(4)));
   lean_dec(lean_torch_add_scalar(tensor, 2));
   lean_dec(lean_torch_sub_scalar(tensor, 2));
   lean_dec(lean_torch_mul_scalar(tensor, 2));
@@ -97,7 +107,7 @@ void testShapesAndMetadata(lean_object* tensor) {
   lean_dec(lean_torch_tensor_softmax(tensor, 1));
   lean_dec(lean_torch_copy_(retain(tensor), tensor));
   lean_dec(lean_torch_copy_inplace(retain(tensor), tensor));
-  lean_dec(lean_torch_transpose(tensor, 0, 1));
+  lean_dec(lean_torch_transpose(tensor, Nat(0), Nat(1)));
   checkBorrowedTensor(tensor);
 }
 
@@ -155,7 +165,7 @@ void testNativeFailureCleanup(lean_object* tensor) {
   // cleanup must still be correct if validation fails at the native boundary.
   LeanObject invalid(lean_mk_string("not an external tensor"), lean_dec);
   ObservedArg weight(some(retain(tensor))), bias(some(retain(tensor)));
-  expectThrow([&] { return lean_torch_group_norm(invalid.get(), 1,
+  expectThrow([&] { return lean_torch_group_norm(invalid.get(), Nat(1),
                                                 weight.transfer(), bias.transfer(), 1e-5); });
   weight.consumed("groupNorm early failure weight");
   bias.consumed("groupNorm early failure bias");

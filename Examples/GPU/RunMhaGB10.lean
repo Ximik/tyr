@@ -124,9 +124,9 @@ def runOnce : IO Bool := do
   pure (outCheck.ok && lCheck.ok && dqCheck.ok && dkCheck.ok && dvCheck.ok)
 
 private structure ForwardShape where
-  batch : UInt64
-  qHeads : UInt64
-  seqLen : UInt64
+  batch : Nat
+  qHeads : Nat
+  seqLen : Nat
 
 private def forwardMatrix : LeanBenchmark.Matrix ForwardShape := {
   defaultProfile := "gb10-realistic"
@@ -161,19 +161,21 @@ private def benchmarkForwardSeq (cfg : Benchmark.Config) (stream : UInt64)
   let out ← Tensor.uniformLike q 0 0
   let useS768Specialization := seqLen == 768
   let useLongSchedule := seqLen >= 2048
-  let rowTileSize : UInt64 := if useS768Specialization then 32 else if useLongSchedule then 32 else 16
+  let rowTileSize : Nat := if useS768Specialization then 32 else if useLongSchedule then 32 else 16
   let queryBlocks := (seqLen + rowTileSize - 1) / rowTileSize
   let launchQueryBlocks := if useS768Specialization then seqLen / (4 * rowTileSize) else queryBlocks
   let lBlocks := if useS768Specialization then batch * qHeads * queryBlocks else queryBlocks
   let lOut : Tensor { shape := #[lBlocks, rowTileSize], dtype := .Float32, device := device } ← Tensor.uniformLike (Tensor.zeros #[lBlocks, rowTileSize] false device) 0 0
   let expectedL : Tensor { shape := #[lBlocks, rowTileSize], dtype := .Float32, device := device } := Tensor.reshapeChecked expectedL3 #[lBlocks, rowTileSize]
+  let seqLenArg ← Tyr.GPU.Codegen.launchArg seqLen "seqLen"
+  let qHeadsArg ← Tyr.GPU.Codegen.launchArg qHeads "qHeads"
   let launch : IO Unit := if useS768Specialization then
-    tkMhaGb10FwdS768D64Warp4.launch q.raw k.raw v.raw out.raw lOut.raw seqLen 64 qHeads
+    tkMhaGb10FwdS768D64Warp4.launch q.raw k.raw v.raw out.raw lOut.raw seqLenArg 64 qHeadsArg
       launchQueryBlocks qHeads batch 128 1 1 0 stream
   else if useLongSchedule then
-    tkMhaGb10FwdLong.launch q.raw k.raw v.raw out.raw lOut.raw seqLen 64 1 queryBlocks 1 128 1 1 0 stream
+    tkMhaGb10FwdLong.launch q.raw k.raw v.raw out.raw lOut.raw seqLenArg 64 1 queryBlocks 1 128 1 1 0 stream
   else
-    tkMhaGb10Fwd2Block.launch q.raw k.raw v.raw out.raw lOut.raw seqLen 64 1 queryBlocks 1 128 1 1 0 stream
+    tkMhaGb10Fwd2Block.launch q.raw k.raw v.raw out.raw lOut.raw seqLenArg 64 1 queryBlocks 1 128 1 1 0 stream
   launch
   torch.cuda_synchronize
   let check := IndexedParity.compareTensors s!"mha_gb10.bench.forward.s{seqLen}" expected out 3e-2 3e-2
@@ -188,7 +190,7 @@ private def benchmarkForwardSeq (cfg : Benchmark.Config) (stream : UInt64)
     "kernel_only" true (some (batch * seqLen).toFloat) (some "tokens")
   pure (line, check.ok && lCheck.ok)
 
-private def benchmarkBackwardS768 (cfg : Benchmark.Config) (stream : UInt64) (batch : UInt64)
+private def benchmarkBackwardS768 (cfg : Benchmark.Config) (stream : UInt64) (batch : Nat)
     : IO (Array String × Bool) := do
   let device ← Device.cuda 0
   let shape := #[batch, 16, 768, 64]

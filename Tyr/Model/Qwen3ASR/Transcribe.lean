@@ -36,7 +36,7 @@ structure Qwen3ForcedAligner where
   tok : tokenizer.qwen3.QwenTokenizer
   preprocessor : PreprocessorConfig
 
-private def sampleRate16k : UInt64 := 16000
+private def sampleRate16k : Nat := 16000
 private def minAsrInputSeconds : Float := 0.5
 private def maxAsrInputSeconds : Float := 1200.0
 private def maxForceAlignInputSeconds : Float := 180.0
@@ -88,13 +88,13 @@ private def slidingWindowArgminAbs (xs : Array Float) (win : Nat) : Nat :=
 
 private def splitAudioIntoChunks
     (wav : Array Float)
-    (sr : UInt64)
+    (sr : Nat)
     (maxChunkSec : Float)
     (searchExpandSec : Float := 5.0)
     (minWindowMs : Float := 100.0)
     : Array (Array Float × Float) :=
   let wav := wav
-  let srNat := if sr == 0 then sampleRate16k.toNat else sr.toNat
+  let srNat := if sr == 0 then sampleRate16k else sr
   if srNat == 0 then
     #[(wav, 0.0)]
   else
@@ -203,7 +203,7 @@ private def preparePromptInputIds
     {cfg : Qwen3ASRConfig}
     (tok : tokenizer.qwen3.QwenTokenizer)
     (prompt : String)
-    (audioLen : UInt64)
+    (audioLen : Nat)
     : IO (Sigma (fun seq => Tensor { device := .CPU, shape := #[1, seq], dtype := .Int64 })) := do
   let processor : Qwen3ASRProcessor := {}
   let promptIds ←
@@ -216,7 +216,7 @@ private def preparePromptInputIds
     | .error e => throw <| IO.userError e
   let idsVals : Array Int64 := promptIds.map (fun id => Int64.ofNat id.toNat)
 
-  let seq : UInt64 := idsVals.size.toUInt64
+  let seq : Nat := idsVals.size
   if seq == 0 then
     throw <| IO.userError "ASR prompt/input sequence is empty"
   let inputIds : Tensor { device := .CPU, shape := #[1, seq], dtype := .Int64 } := Tensor.reshapeChecked (Tensor.fromInt64Array idsVals) #[1, seq]
@@ -224,8 +224,8 @@ private def preparePromptInputIds
 
 private def decodeGeneratedText
     (tok : tokenizer.qwen3.QwenTokenizer)
-    {seq : UInt64}
-    (outSeq : UInt64)
+    {seq : Nat}
+    (outSeq : Nat)
     (outIds : Tensor { device := device, shape := #[1, outSeq], dtype := .Int64 })
     : IO String := do
   if outSeq <= seq then
@@ -240,33 +240,33 @@ private def decodeGeneratedText
 
 private def decodeGeneratedTextsBatch
     (tok : tokenizer.qwen3.QwenTokenizer)
-    {batch seq : UInt64}
-    (outSeq : UInt64)
+    {batch seq : Nat}
+    (outSeq : Nat)
     (outIds : Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })
     : IO (Array String) := do
   if batch == 0 then
     pure #[]
   else if outSeq <= seq then
-    pure (Array.replicate batch.toNat "")
+    pure (Array.replicate batch "")
   else
     let newSeq := outSeq - seq
     let newOnly : Tensor { device := device, shape := #[batch, newSeq], dtype := .Int64 } := Tensor.sliceChecked outIds 1 seq newSeq #[batch, newSeq]
     let flat : Tensor { device := device, shape := #[batch * newSeq], dtype := .Int64 } := Tensor.reshapeChecked newOnly #[batch * newSeq]
     let idsU64 ← Tensor.toUInt64Array flat
-    let rowWidth := newSeq.toNat
-    let mut out : Array String := Array.mkEmpty batch.toNat
-    for b in [:batch.toNat] do
+    let rowWidth := newSeq
+    let mut out : Array String := Array.mkEmpty batch
+    for b in [:batch] do
       let start := b * rowWidth
       let stop := start + rowWidth
       let rowIds := (idsU64.extract start stop).map (fun x => x.toUInt32)
       out := out.push (tokenizer.qwen3.decodeText tok rowIds)
     pure out
 
-private def extractAudioLenFromFeatureMask {cfg : Qwen3ASRConfig} {frames : UInt64}
+private def extractAudioLenFromFeatureMask {cfg : Qwen3ASRConfig} {frames : Nat}
     (featureAttentionMask : Tensor { device := device, shape := #[1, frames], dtype := .Int64 })
-    : IO UInt64 := do
+    : IO Nat := do
   let validFramesTensor := Tensor.sumAll featureAttentionMask
-  let validFrames := validFramesTensor.itemInt.toInt.toNat.toUInt64
+  let validFrames := validFramesTensor.itemInt.toInt.toNat
   let audioLenRaw := AudioEncoderConfig.featExtractOutputLength validFrames
   let audioLenCap := AudioEncoderConfig.framesAfterConv3 cfg.thinkerConfig.audioConfig frames
   pure (if audioLenRaw <= audioLenCap then audioLenRaw else audioLenCap)
@@ -277,9 +277,9 @@ private def alignSingleWithModel
     (alignTok : tokenizer.qwen3.QwenTokenizer)
     (text : String)
     (language : String)
-    {melBins frames : UInt64} {frontendDevice : Device}
+    {melBins frames : Nat} {frontendDevice : Device}
     (frontendOut : WhisperFrontendOutput (device := frontendDevice) melBins frames)
-    (audioLen : UInt64)
+    (audioLen : Nat)
     : IO (Option ForcedAlignResult) := do
   let alignModel := TensorStruct.detach alignModel
   let (wordList, alignRaw) := Qwen3ForceAlignProcessor.encodeTimestampText text language
@@ -292,7 +292,7 @@ private def alignSingleWithModel
       alignCfg.thinkerConfig.audioTokenId.toUInt32 with
     | .ok ids => pure ids
     | .error e => throw <| IO.userError e
-  let seqAlign : UInt64 := alignIdsArr.size.toUInt64
+  let seqAlign : Nat := alignIdsArr.size
   if seqAlign == 0 then
     pure none
   else
@@ -340,9 +340,9 @@ private def maybeAlignTimestamps
     (text : String)
     (language : String)
     (audio16k : Array Float)
-    {melBins frames : UInt64}
+    {melBins frames : Nat}
     (frontendOut : WhisperFrontendOutput (device := device) melBins frames)
-    (audioLen : UInt64)
+    (audioLen : Nat)
     (returnTimeStamps : Bool)
     : IO (Option ForcedAlignResult) := do
   if !returnTimeStamps then
@@ -370,12 +370,12 @@ private def transcribeWithFrontend
     (preprocessor : PreprocessorConfig)
     (forcedAligner : Option Qwen3ForcedAligner := none)
     (audio16k : Array Float)
-    {melBins frames : UInt64}
+    {melBins frames : Nat}
     (frontendOut : WhisperFrontendOutput (device := device) melBins frames)
     (context : String := "")
     (language : Option String := none)
     (returnTimeStamps : Bool := false)
-    (maxNewTokens : UInt64 := 512)
+    (maxNewTokens : Nat := 512)
     (eosTokenIds : Array UInt64 := defaultEosTokenIds)
     : IO ASRTranscription := do
   let model := TensorStruct.detach model
@@ -417,7 +417,7 @@ def transcribeWaveform
     (context : String := "")
     (language : Option String := none)
     (returnTimeStamps : Bool := false)
-    (maxNewTokens : UInt64 := 512)
+    (maxNewTokens : Nat := 512)
     (eosTokenIds : Array UInt64 := defaultEosTokenIds)
     : IO ASRTranscription := do
   let dev := modelDevice model
@@ -497,23 +497,23 @@ private def effectiveBatchStep (n : Nat) (maxInferenceBatchSize : Int) : Nat :=
 private structure BatchedDecodeRow where
   idx : Nat
   forceLanguage : Option String
-  seq : UInt64
-  frames : UInt64
-  melBins : UInt64
+  seq : Nat
+  frames : Nat
+  melBins : Nat
   inputIdsRow : Tensor { device := device, shape := #[1, seq], dtype := .Int64 }
   inputFeaturesRow : Tensor { device := device, shape := #[1, melBins, frames], dtype := .Float32 }
   featureAttentionMaskRow : Tensor { device := device, shape := #[1, frames], dtype := .Int64 }
   deriving Inhabited
 
 private structure BatchedDecodeBucket where
-  frames : UInt64
-  seq : UInt64
+  frames : Nat
+  seq : Nat
   rows : Array (BatchedDecodeRow (device := device)) := #[]
   deriving Inhabited
 
 private def findBucketIdx
     (buckets : Array (BatchedDecodeBucket (device := device)))
-    (frames seq : UInt64)
+    (frames seq : Nat)
     : Option Nat :=
   Id.run do
     let mut found : Option Nat := none
@@ -526,7 +526,7 @@ private def findBucketIdx
 
 private def addRowToBuckets
     (buckets : Array (BatchedDecodeBucket (device := device)))
-    (frames seq : UInt64)
+    (frames seq : Nat)
     (row : BatchedDecodeRow (device := device))
     : Array (BatchedDecodeBucket (device := device)) :=
   match findBucketIdx buckets frames seq with
@@ -546,7 +546,7 @@ private def tryTranscribeWaveformsBatchedChunk
     (audios16k : Array (Array Float))
     (contexts : Array String)
     (languages : Array (Option String))
-    (maxNewTokens : UInt64)
+    (maxNewTokens : Nat)
     (eosTokenIds : Array UInt64)
     : IO (Option (Array ASRTranscription)) := do
   let model := TensorStruct.detach model
@@ -605,7 +605,7 @@ private def tryTranscribeWaveformsBatchedChunk
     if bucket.rows.isEmpty then
       pure ()
     else
-      let batch := bucket.rows.size.toUInt64
+      let batch := bucket.rows.size
       let seq := bucket.seq
       let frames := bucket.frames
       let inputRows := bucket.rows.map (fun r => r.inputIdsRow.packShape)
@@ -660,7 +660,7 @@ def transcribeWaveforms
     (languages : Array (Option String) := #[])
     (maxInferenceBatchSize : Int := -1)
     (returnTimeStamps : Bool := false)
-    (maxNewTokens : UInt64 := 512)
+    (maxNewTokens : Nat := 512)
     (eosTokenIds : Array UInt64 := defaultEosTokenIds)
     : IO (Array ASRTranscription) := do
   let n := audios16k.size
@@ -717,7 +717,7 @@ def transcribeWav
     (context : String := "")
     (language : Option String := none)
     (returnTimeStamps : Bool := false)
-    (maxNewTokens : UInt64 := 512)
+    (maxNewTokens : Nat := 512)
     (eosTokenIds : Array UInt64 := defaultEosTokenIds)
     : IO ASRTranscription := do
   let wav16k ← normalizeAudioTo16kFromWav wavPath
@@ -736,7 +736,7 @@ def transcribeAudioInput
     (context : String := "")
     (language : Option String := none)
     (returnTimeStamps : Bool := false)
-    (maxNewTokens : UInt64 := 512)
+    (maxNewTokens : Nat := 512)
     (eosTokenIds : Array UInt64 := defaultEosTokenIds)
     : IO ASRTranscription := do
   let wav16k ← normalizeAudioInputTo16k audio
@@ -755,7 +755,7 @@ def transcribeAudioSource
     (context : String := "")
     (language : Option String := none)
     (returnTimeStamps : Bool := false)
-    (maxNewTokens : UInt64 := 512)
+    (maxNewTokens : Nat := 512)
     (eosTokenIds : Array UInt64 := defaultEosTokenIds)
     : IO ASRTranscription :=
   transcribeAudioInput
@@ -782,7 +782,7 @@ def transcribeWavs
     (languages : Array (Option String) := #[])
     (maxInferenceBatchSize : Int := -1)
     (returnTimeStamps : Bool := false)
-    (maxNewTokens : UInt64 := 512)
+    (maxNewTokens : Nat := 512)
     (eosTokenIds : Array UInt64 := defaultEosTokenIds)
     : IO (Array ASRTranscription) := do
   let mut audios16k : Array (Array Float) := Array.mkEmpty wavPaths.size
@@ -814,7 +814,7 @@ def transcribeAudioInputs
     (languages : Array (Option String) := #[])
     (maxInferenceBatchSize : Int := -1)
     (returnTimeStamps : Bool := false)
-    (maxNewTokens : UInt64 := 512)
+    (maxNewTokens : Nat := 512)
     (eosTokenIds : Array UInt64 := defaultEosTokenIds)
     : IO (Array ASRTranscription) := do
   let mut audios16k : Array (Array Float) := Array.mkEmpty audios.size
@@ -845,7 +845,7 @@ def transcribeAudioSources
     (languages : Array (Option String) := #[])
     (maxInferenceBatchSize : Int := -1)
     (returnTimeStamps : Bool := false)
-    (maxNewTokens : UInt64 := 512)
+    (maxNewTokens : Nat := 512)
     (eosTokenIds : Array UInt64 := defaultEosTokenIds)
     : IO (Array ASRTranscription) :=
   transcribeAudioInputs
@@ -1025,7 +1025,7 @@ def transcribeWaveform
     (context : String := "")
     (language : Option String := none)
     (returnTimeStamps : Bool := false)
-    (maxNewTokens : UInt64 := 512)
+    (maxNewTokens : Nat := 512)
     (eosTokenIds : Array UInt64 := defaultEosTokenIds)
     : IO ASRTranscription :=
   torch.qwen3asr.transcribeWaveform
@@ -1042,7 +1042,7 @@ def transcribeWaveforms
     (languages : Array (Option String) := #[])
     (maxInferenceBatchSize : Int := -1)
     (returnTimeStamps : Bool := false)
-    (maxNewTokens : UInt64 := 512)
+    (maxNewTokens : Nat := 512)
     (eosTokenIds : Array UInt64 := defaultEosTokenIds)
     : IO (Array ASRTranscription) :=
   torch.qwen3asr.transcribeWaveforms
@@ -1058,7 +1058,7 @@ def transcribeWav
     (context : String := "")
     (language : Option String := none)
     (returnTimeStamps : Bool := false)
-    (maxNewTokens : UInt64 := 512)
+    (maxNewTokens : Nat := 512)
     (eosTokenIds : Array UInt64 := defaultEosTokenIds)
     : IO ASRTranscription :=
   torch.qwen3asr.transcribeWav
@@ -1074,7 +1074,7 @@ def transcribeAudioInput
     (context : String := "")
     (language : Option String := none)
     (returnTimeStamps : Bool := false)
-    (maxNewTokens : UInt64 := 512)
+    (maxNewTokens : Nat := 512)
     (eosTokenIds : Array UInt64 := defaultEosTokenIds)
     : IO ASRTranscription :=
   torch.qwen3asr.transcribeAudioInput
@@ -1090,7 +1090,7 @@ def transcribeAudioSource
     (context : String := "")
     (language : Option String := none)
     (returnTimeStamps : Bool := false)
-    (maxNewTokens : UInt64 := 512)
+    (maxNewTokens : Nat := 512)
     (eosTokenIds : Array UInt64 := defaultEosTokenIds)
     : IO ASRTranscription :=
   torch.qwen3asr.transcribeAudioSource
@@ -1107,7 +1107,7 @@ def transcribeWavs
     (languages : Array (Option String) := #[])
     (maxInferenceBatchSize : Int := -1)
     (returnTimeStamps : Bool := false)
-    (maxNewTokens : UInt64 := 512)
+    (maxNewTokens : Nat := 512)
     (eosTokenIds : Array UInt64 := defaultEosTokenIds)
     : IO (Array ASRTranscription) :=
   torch.qwen3asr.transcribeWavs
@@ -1124,7 +1124,7 @@ def transcribeAudioInputs
     (languages : Array (Option String) := #[])
     (maxInferenceBatchSize : Int := -1)
     (returnTimeStamps : Bool := false)
-    (maxNewTokens : UInt64 := 512)
+    (maxNewTokens : Nat := 512)
     (eosTokenIds : Array UInt64 := defaultEosTokenIds)
     : IO (Array ASRTranscription) :=
   torch.qwen3asr.transcribeAudioInputs
@@ -1141,7 +1141,7 @@ def transcribeAudioSources
     (languages : Array (Option String) := #[])
     (maxInferenceBatchSize : Int := -1)
     (returnTimeStamps : Bool := false)
-    (maxNewTokens : UInt64 := 512)
+    (maxNewTokens : Nat := 512)
     (eosTokenIds : Array UInt64 := defaultEosTokenIds)
     : IO (Array ASRTranscription) :=
   torch.qwen3asr.transcribeAudioSources

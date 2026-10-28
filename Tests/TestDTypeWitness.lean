@@ -121,15 +121,15 @@ private def addComplexMagnitudes (x : Tensor ⟨#[2], .Complex64, .CPU⟩) :=
 
 -- Scalar broadcasting keeps the vector's symbolic shape visible to the next
 -- operation; both operand orders must compose without an intermediate cast.
-private def addWeakScalarThenVector {n : UInt64}
+private def addWeakScalarThenVector {n : Nat}
     (vector : Tensor ⟨#[n], .Float32, .CPU⟩) (scalar : Tensor ⟨#[], .Float64, .CPU⟩) :=
   vector.addB scalar + vector
 
-private def addReversedWeakScalarThenVector {n : UInt64}
+private def addReversedWeakScalarThenVector {n : Nat}
     (vector : Tensor ⟨#[n], .Float32, .CPU⟩) (scalar : Tensor ⟨#[], .Float64, .CPU⟩) :=
   scalar.addB vector + vector
 
-private def addCPUSignalAfterScalar {n : UInt64}
+private def addCPUSignalAfterScalar {n : Nat}
     (vector : Tensor ⟨#[n], .Float32, .CPU⟩)
     (scalar : Tensor ⟨#[], .Float64, .CPU⟩) :=
   scalar.addB vector + vector
@@ -152,13 +152,13 @@ example (x : Tensor ⟨#[2], .Int32, .CPU⟩) : Tensor ⟨#[2], .Float32, .CPU�
   addScalarToIntegerQuotient x
 example (x : Tensor ⟨#[2], .Complex64, .CPU⟩) : Tensor ⟨#[2], .Float32, .CPU⟩ :=
   addComplexMagnitudes x
-example {n : UInt64} (vector : Tensor ⟨#[n], .Float32, .CPU⟩)
+example {n : Nat} (vector : Tensor ⟨#[n], .Float32, .CPU⟩)
     (scalar : Tensor ⟨#[], .Float64, .CPU⟩) : Tensor ⟨#[n], .Float32, .CPU⟩ :=
   addWeakScalarThenVector vector scalar
-example {n : UInt64} (vector : Tensor ⟨#[n], .Float32, .CPU⟩)
+example {n : Nat} (vector : Tensor ⟨#[n], .Float32, .CPU⟩)
     (scalar : Tensor ⟨#[], .Float64, .CPU⟩) : Tensor ⟨#[n], .Float32, .CPU⟩ :=
   addReversedWeakScalarThenVector vector scalar
-example {n : UInt64} (vector : Tensor ⟨#[n], .Float32, .CPU⟩)
+example {n : Nat} (vector : Tensor ⟨#[n], .Float32, .CPU⟩)
     (scalar : Tensor ⟨#[], .Float64, .CPU⟩) : Tensor ⟨#[n], .Float32, .CPU⟩ :=
   addCPUSignalAfterScalar vector scalar
 

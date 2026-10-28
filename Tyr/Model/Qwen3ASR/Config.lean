@@ -10,82 +10,82 @@ namespace torch.qwen3asr
 
 /-- Qwen3-ASR audio encoder config. Mirrors `Qwen3ASRAudioEncoderConfig`. -/
 structure AudioEncoderConfig where
-  numMelBins : UInt64 := 128
-  encoderLayers : UInt64 := 32
-  encoderAttentionHeads : UInt64 := 20
-  encoderFfnDim : UInt64 := 5120
-  dModel : UInt64 := 1280
+  numMelBins : Nat := 128
+  encoderLayers : Nat := 32
+  encoderAttentionHeads : Nat := 20
+  encoderFfnDim : Nat := 5120
+  dModel : Nat := 1280
   dropout : Float := 0.0
   attentionDropout : Float := 0.0
   activationFunction : String := "gelu"
   activationDropout : Float := 0.0
   scaleEmbedding : Bool := false
   initializerRange : Float := 0.02
-  maxSourcePositions : UInt64 := 1500
-  nWindow : UInt64 := 100
-  outputDim : UInt64 := 3584
-  nWindowInfer : UInt64 := 400
-  convChunkSize : UInt64 := 500
-  downsampleHiddenSize : UInt64 := 480
+  maxSourcePositions : Nat := 1500
+  nWindow : Nat := 100
+  outputDim : Nat := 3584
+  nWindowInfer : Nat := 400
+  convChunkSize : Nat := 500
+  downsampleHiddenSize : Nat := 480
   deriving Repr, Inhabited
 
 namespace AudioEncoderConfig
 
-def downsampleOnce (n : UInt64) : UInt64 :=
+def downsampleOnce (n : Nat) : Nat :=
   if n == 0 then 0 else ((n - 1) / 2) + 1
 
-def downsampleTwice (n : UInt64) : UInt64 :=
+def downsampleTwice (n : Nat) : Nat :=
   downsampleOnce (downsampleOnce n)
 
-def downsampleThrice (n : UInt64) : UInt64 :=
+def downsampleThrice (n : Nat) : Nat :=
   downsampleOnce (downsampleTwice n)
 
-def melAfterConv1 (cfg : AudioEncoderConfig) : UInt64 :=
+def melAfterConv1 (cfg : AudioEncoderConfig) : Nat :=
   downsampleOnce cfg.numMelBins
 
-def melAfterConv2 (cfg : AudioEncoderConfig) : UInt64 :=
+def melAfterConv2 (cfg : AudioEncoderConfig) : Nat :=
   downsampleTwice cfg.numMelBins
 
-def melAfterConv3 (cfg : AudioEncoderConfig) : UInt64 :=
+def melAfterConv3 (cfg : AudioEncoderConfig) : Nat :=
   downsampleThrice cfg.numMelBins
 
-def framesAfterConv3 (_cfg : AudioEncoderConfig) (frames : UInt64) : UInt64 :=
+def framesAfterConv3 (_cfg : AudioEncoderConfig) (frames : Nat) : Nat :=
   downsampleThrice frames
 
-def convOutInDim (cfg : AudioEncoderConfig) : UInt64 :=
+def convOutInDim (cfg : AudioEncoderConfig) : Nat :=
   cfg.downsampleHiddenSize * melAfterConv3 cfg
 
-def headDim (cfg : AudioEncoderConfig) : UInt64 :=
+def headDim (cfg : AudioEncoderConfig) : Nat :=
   cfg.dModel / cfg.encoderAttentionHeads
 
 /-- Reference `_get_feat_extract_output_lengths` port from Qwen3-ASR processor/modeling. -/
-def featExtractOutputLength (inputLen : UInt64) : UInt64 :=
-  let leave := inputLen.toNat % 100
+def featExtractOutputLength (inputLen : Nat) : Nat :=
+  let leave := inputLen % 100
   let feat :=
     if leave == 0 then 0
     else ((leave - 1) / 2) + 1
   let outLeave :=
     if feat == 0 then 0
     else ((((feat - 1) / 2) + 1 - 1) / 2) + 1
-  let out := outLeave + (inputLen.toNat / 100) * 13
-  out.toUInt64
+  let out := outLeave + (inputLen / 100) * 13
+  out
 
-def featExtractOutputLengths (inputLens : Array UInt64) : Array UInt64 :=
+def featExtractOutputLengths (inputLens : Array Nat) : Array Nat :=
   inputLens.map featExtractOutputLength
 
 end AudioEncoderConfig
 
 /-- Qwen3-ASR text decoder config. Mirrors `Qwen3ASRTextConfig`. -/
 structure TextConfig where
-  vocabSize : UInt64 := 151936
-  hiddenSize : UInt64 := 4096
-  intermediateSize : UInt64 := 22016
-  numHiddenLayers : UInt64 := 32
-  numAttentionHeads : UInt64 := 32
-  numKeyValueHeads : UInt64 := 32
-  headDim : UInt64 := 128
+  vocabSize : Nat := 151936
+  hiddenSize : Nat := 4096
+  intermediateSize : Nat := 22016
+  numHiddenLayers : Nat := 32
+  numAttentionHeads : Nat := 32
+  numKeyValueHeads : Nat := 32
+  headDim : Nat := 128
   hiddenAct : String := "silu"
-  maxPositionEmbeddings : UInt64 := 128000
+  maxPositionEmbeddings : Nat := 128000
   initializerRange : Float := 0.02
   rmsNormEps : Float := 1e-6
   useCache : Bool := true
@@ -120,7 +120,7 @@ structure ThinkerConfig where
   audioStartTokenId : UInt64 := 151647
   userTokenId : UInt64 := 872
   modelType : String := "qwen3_asr_thinker"
-  classifyNum : UInt64 := 0
+  classifyNum : Nat := 0
   initializerRange : Float := 0.02
   deriving Repr, Inhabited
 
@@ -139,7 +139,7 @@ def isForcedAligner (cfg : ThinkerConfig) : Bool :=
 /-- LM head output dim:
     - normal ASR thinker: text vocab size
     - forced aligner thinker: `classify_num` from config -/
-def lmHeadOutDim (cfg : ThinkerConfig) : UInt64 :=
+def lmHeadOutDim (cfg : ThinkerConfig) : Nat :=
   if isForcedAligner cfg && cfg.classifyNum > 0 then
     cfg.classifyNum
   else

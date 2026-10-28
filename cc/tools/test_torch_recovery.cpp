@@ -13,6 +13,16 @@ extern "C" void lean_initialize_runtime_module();
 
 namespace {
 using Object = std::unique_ptr<lean_object, decltype(&lean_dec)>;
+// Temporary Lean Nat for a borrowed argument; values above the small-Nat range
+// become bignums, as Lean would pass them.
+struct Nat {
+  lean_object* object;
+  Nat(uint64_t value) : object(lean_uint64_to_nat(value)) {}
+  Nat(const Nat&) = delete;
+  Nat& operator=(const Nat&) = delete;
+  ~Nat() { lean_dec(object); }
+  operator lean_object*() const { return object; }
+};
 
 void require(bool condition, const char* message) {
   if (!condition) throw std::runtime_error(message);
@@ -49,7 +59,7 @@ void resampleSuccess(uint64_t from, uint64_t to, size_t count, size_t expected) 
   auto input = samples(count);
   require(lean_is_exclusive(input.get()), "input should initially have one owner");
   {
-    Object result(lean_torch_resample_soxr_hq(input.get(), from, to), lean_dec);
+    Object result(lean_torch_resample_soxr_hq(input.get(), Nat(from), Nat(to)), lean_dec);
     require(lean_io_result_is_ok(result.get()), "resampling returned IO.error");
     auto* output = lean_io_result_get_value(result.get());
     require(lean_array_size(output) == expected, "unexpected resampled length");
@@ -89,7 +99,7 @@ int main() {
   // This baseline fails with std::length_error without attempting a huge allocation.
   test("oversized resampler output is IO.error", [] {
     auto input = samples(1);
-    expectError(lean_torch_resample_soxr_hq(input.get(), 1, uint64_t{1} << 63));
+    expectError(lean_torch_resample_soxr_hq(input.get(), Nat(1), Nat(uint64_t{1} << 63)));
     require(lean_is_exclusive(input.get()), "error path retained borrowed input");
   });
 #ifndef TYR_TORCH_BASELINE
@@ -97,17 +107,17 @@ int main() {
   // Exercise them only after the bounds guard is installed, not in the baseline.
   test("resampler UInt64 rate rounding overflow is IO.error", [] {
     auto input = samples(1);
-    expectError(lean_torch_resample_soxr_hq(input.get(), 1, std::numeric_limits<uint64_t>::max()));
+    expectError(lean_torch_resample_soxr_hq(input.get(), Nat(1), Nat(std::numeric_limits<uint64_t>::max())));
   });
   test("resampler length-times-ratio overflow is IO.error", [] {
     auto input = samples(2);
-    expectError(lean_torch_resample_soxr_hq(input.get(), 1, uint64_t{1} << 63));
+    expectError(lean_torch_resample_soxr_hq(input.get(), Nat(1), Nat(uint64_t{1} << 63)));
   });
   test("resampler rejects unrepresentable Lean array capacity", [] {
     auto input = samples(1);
     const auto tooMany = (std::numeric_limits<size_t>::max() -
       sizeof(lean_array_object)) / sizeof(void*) + 1;
-    Object result(lean_torch_resample_soxr_hq(input.get(), 1, tooMany), lean_dec);
+    Object result(lean_torch_resample_soxr_hq(input.get(), Nat(1), Nat(tooMany)), lean_dec);
     require(userErrorContains(result.get(), "output length exceeds the native array limit"),
       "unrepresentable Lean array capacity must be rejected before allocation");
   });
@@ -118,11 +128,11 @@ int main() {
   test("non-integral resample length rounds upward", [] { resampleSuccess(2, 3, 3, 5); });
   test("zero source rate is IO.error", [] {
     auto input = samples(1);
-    expectError(lean_torch_resample_soxr_hq(input.get(), 0, 24000));
+    expectError(lean_torch_resample_soxr_hq(input.get(), Nat(0), Nat(24000)));
   });
   test("zero target rate is IO.error", [] {
     auto input = samples(1);
-    expectError(lean_torch_resample_soxr_hq(input.get(), 24000, 0));
+    expectError(lean_torch_resample_soxr_hq(input.get(), Nat(24000), Nat(0)));
   });
   test("missing token file is IO.error", [] {
     Object path(lean_mk_string("/tyr-nonexistent-runtime-test-directory/tokens.bin"), lean_dec);
@@ -137,7 +147,7 @@ int main() {
   });
   test("missing WAV directory is IO.error", [] {
     Object path(lean_mk_string("/tyr-nonexistent-runtime-test-directory/audio.wav"), lean_dec);
-    expectError(lean_torch_wav_begin(path.get(), 24000));
+    expectError(lean_torch_wav_begin(path.get(), lean_box(24000)));
     expectError(lean_torch_wav_finalize(path.get()));
   });
   test("CPU RNG seed and live tensor count carriers", [] {

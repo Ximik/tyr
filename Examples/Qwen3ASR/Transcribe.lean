@@ -20,12 +20,12 @@ structure Args where
   streamHopSec : Float := 0.5
   streamDecodeMode : StreamingDecodeMode := .rollingWindow
   maxInferenceBatchSize : Int := -1
-  maxNewTokens : UInt64 := 1024
+  maxNewTokens : Nat := 1024
   deriving Inhabited
 
-private def parseNatArg (name : String) (v : String) : IO UInt64 := do
+private def parseNatArg (name : String) (v : String) : IO Nat := do
   match v.toNat? with
-  | some n => pure n.toUInt64
+  | some n => pure n
   | none => throw <| IO.userError s!"Invalid {name}: {v}"
 
 private def parseIntArg (name : String) (v : String) : IO Int := do
@@ -133,7 +133,7 @@ private def transcribeWavStreamed
     (pre : PreprocessorConfig)
     (wavPath : String)
     (language : Option String)
-    (maxNewTokens : UInt64)
+    (maxNewTokens : Nat)
     (chunkSec : Float)
     (hopSec : Float)
     (decodeMode : StreamingDecodeMode)
@@ -143,7 +143,7 @@ private def transcribeWavStreamed
   let wav16k ← normalizeAudioTo16kFromWav wavPath
   let maxSamples := PreprocessorConfig.expectedSampleCount pre
   let effectiveDecodeMode ←
-    if decodeMode == .fullAccumulation && wav16k.size.toUInt64 > maxSamples then do
+    if decodeMode == .fullAccumulation && wav16k.size > maxSamples then do
       let maxSec := maxSamples.toFloat / 16000.0
       IO.eprintln
         s!"stream-decode-mode=full exceeds model maxSeconds={maxSec} for this file; switching to rolling mode."

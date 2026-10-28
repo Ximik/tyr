@@ -54,19 +54,19 @@ structure ShardSpec where
   /-- Which dimension to shard along -/
   shardDim : ShardDim := .first
   /-- Total number of shards (world size) -/
-  numShards : UInt64
+  numShards : Nat
   /-- This shard's index (rank) -/
-  shardIdx : UInt64
+  shardIdx : Nat
   deriving Repr, BEq
 
 /-- Compute the shard size for a given full size -/
-def shardSize (fullSize numShards shardIdx : UInt64) : UInt64 :=
+def shardSize (fullSize numShards shardIdx : Nat) : Nat :=
   let baseSize := fullSize / numShards
   let remainder := fullSize % numShards
   if shardIdx < remainder then baseSize + 1 else baseSize
 
 /-- Compute shard offset (starting index) -/
-def shardOffset (fullSize numShards shardIdx : UInt64) : UInt64 :=
+def shardOffset (fullSize numShards shardIdx : Nat) : Nat :=
   let baseSize := fullSize / numShards
   let remainder := fullSize % numShards
   -- First `remainder` shards get one extra element
@@ -101,7 +101,7 @@ def shardedShape (s : Shape) (spec : ShardSpec) : Shape :=
     The actual local data is stored as a tensor with shape
     `shardedShape σ.shape spec`, retaining the full tensor's dtype and device policy.
 -/
-structure ShardedTensor (σ : StaticSpec) (rank worldSize : UInt64)
+structure ShardedTensor (σ : StaticSpec) (rank worldSize : Nat)
     (shardDim : ShardDim := .first) where
   /-- The local shard (this rank's portion) -/
   shard : Tensor (σ.withShape (shardedShape σ.shape ⟨shardDim, worldSize, rank⟩))
@@ -112,7 +112,7 @@ structure ShardedTensor (σ : StaticSpec) (rank worldSize : UInt64)
   deriving Repr
 
 /-- Proof obligation for valid sharding -/
-abbrev ValidShard (rank worldSize : UInt64) := rank < worldSize
+abbrev ValidShard (rank worldSize : Nat) := rank < worldSize
 
 /-! ## Sharded Tensor Operations -/
 
@@ -123,7 +123,7 @@ abbrev ValidShard (rank worldSize : UInt64) := rank < worldSize
     axis of `σ.shape`, the full tensor is kept as the (replicated) shard.
     The slice's runtime shape is validated against the computed shard spec.
 -/
-def ShardedTensor.fromFull {σ : StaticSpec} {rank worldSize : UInt64}
+def ShardedTensor.fromFull {σ : StaticSpec} {rank worldSize : Nat}
     (full : Tensor σ) (_h : ValidShard rank worldSize)
     (shardDim : ShardDim := .first) : ShardedTensor σ rank worldSize shardDim :=
   -- Compute this rank's slice
@@ -136,7 +136,7 @@ def ShardedTensor.fromFull {σ : StaticSpec} {rank worldSize : UInt64}
       let fullDim := σ.shape.getD d 0
       let offset := shardOffset fullDim worldSize rank
       let size := shardSize fullDim worldSize rank
-      RawTensor.slice full.raw d.toUInt64 offset size
+      RawTensor.slice full.raw d offset size
     | none => full.raw
 
   let shard : Tensor (σ.withShape shardShape) :=
@@ -150,18 +150,18 @@ def ShardedTensor.fromFull {σ : StaticSpec} {rank worldSize : UInt64}
   }
 
 /-- Permutation that moves axis `d` of a `rank`-D tensor to the front. -/
-private def moveAxisToFrontPerm (rank d : Nat) : Array UInt64 :=
+private def moveAxisToFrontPerm (rank d : Nat) : Array Nat :=
   (List.range rank).toArray.map fun i =>
-    if i = 0 then d.toUInt64
-    else if i ≤ d then (i - 1).toUInt64
-    else i.toUInt64
+    if i = 0 then d
+    else if i ≤ d then (i - 1)
+    else i
 
 /-- Inverse of `moveAxisToFrontPerm`: moves the front axis back to position `d`. -/
-private def moveFrontToAxisPerm (rank d : Nat) : Array UInt64 :=
+private def moveFrontToAxisPerm (rank d : Nat) : Array Nat :=
   (List.range rank).toArray.map fun i =>
-    if i < d then (i + 1).toUInt64
+    if i < d then (i + 1)
     else if i = d then 0
-    else i.toUInt64
+    else i
 
 /-- Gather all shards to reconstruct the full tensor.
 
@@ -171,7 +171,7 @@ private def moveFrontToAxisPerm (rank d : Nat) : Array UInt64 :=
     thrown. The gathered handle is re-validated against the full spec before
     re-entering the typed structure. The result is cached for repeated access.
 -/
-def ShardedTensor.gather {σ : StaticSpec} {rank worldSize : UInt64} {sd : ShardDim}
+def ShardedTensor.gather {σ : StaticSpec} {rank worldSize : Nat} {sd : ShardDim}
     (sharded : ShardedTensor σ rank worldSize sd) : IO (Tensor σ × ShardedTensor σ rank worldSize sd) := do
   -- Check cache first
   if !sharded.cacheIsStale then
@@ -221,7 +221,7 @@ def ShardedTensor.gather {σ : StaticSpec} {rank worldSize : UInt64} {sd : Shard
     divisible by `worldSize`; the result is re-validated against the computed
     shard spec and an error is thrown otherwise.
 -/
-def ShardedTensor.scatterGrad {σ : StaticSpec} {rank worldSize : UInt64} {sd : ShardDim}
+def ShardedTensor.scatterGrad {σ : StaticSpec} {rank worldSize : Nat} {sd : ShardDim}
     (_sharded : ShardedTensor σ rank worldSize sd)
     (fullGrad : Tensor σ) : IO (Tensor (σ.withShape (shardedShape σ.shape ⟨sd, worldSize, rank⟩))) := do
   let localRaw := (← dist.reduceScatter worldSize fullGrad .sum).raw
@@ -234,7 +234,7 @@ def ShardedTensor.scatterGrad {σ : StaticSpec} {rank worldSize : UInt64} {sd : 
 
     This is called after the optimizer updates the local parameters.
 -/
-def ShardedTensor.updateShard {σ : StaticSpec} {rank worldSize : UInt64} {sd : ShardDim}
+def ShardedTensor.updateShard {σ : StaticSpec} {rank worldSize : Nat} {sd : ShardDim}
     (sharded : ShardedTensor σ rank worldSize sd)
     (newShard : Tensor (σ.withShape (shardedShape σ.shape ⟨sd, worldSize, rank⟩)))
     : ShardedTensor σ rank worldSize sd :=
@@ -250,13 +250,13 @@ def ShardedTensor.updateShard {σ : StaticSpec} {rank worldSize : UInt64} {sd : 
     Some parameters (like embeddings) are sharded for memory efficiency.
     Others (like small scalars) are replicated.
 -/
-inductive MaybeSharded (σ : StaticSpec) (rank worldSize : UInt64) where
+inductive MaybeSharded (σ : StaticSpec) (rank worldSize : Nat) where
   | sharded : ShardedTensor σ rank worldSize → MaybeSharded σ rank worldSize
   | replicated : Tensor σ → MaybeSharded σ rank worldSize
   deriving Repr
 
 /-- Get the tensor for forward pass (gathers if sharded) -/
-def MaybeSharded.get {σ : StaticSpec} {rank worldSize : UInt64}
+def MaybeSharded.get {σ : StaticSpec} {rank worldSize : Nat}
     (p : MaybeSharded σ rank worldSize) : IO (Tensor σ × MaybeSharded σ rank worldSize) := do
   match p with
   | .replicated t => return (t, p)
@@ -265,7 +265,7 @@ def MaybeSharded.get {σ : StaticSpec} {rank worldSize : UInt64}
     return (full, .sharded newSt)
 
 /-- Update parameter with gradient -/
-def MaybeSharded.updateWithGrad {σ : StaticSpec} {rank worldSize : UInt64}
+def MaybeSharded.updateWithGrad {σ : StaticSpec} {rank worldSize : Nat}
     (p : MaybeSharded σ rank worldSize)
     (fullGrad : Tensor σ)
     (updateFn : ∀ {σLocal : StaticSpec}, Tensor σLocal → Tensor σLocal → IO (Tensor σLocal))
@@ -289,7 +289,7 @@ def MaybeSharded.updateWithGrad {σ : StaticSpec} {rank worldSize : UInt64}
     Embeddings are sharded along the vocabulary dimension.
     Each rank owns vocab_size/world_size tokens.
 -/
-structure ShardedEmbedding (vocabSize dim : UInt64) (rank worldSize : UInt64)
+structure ShardedEmbedding (vocabSize dim : Nat) (rank worldSize : Nat)
     (dtype : DType := .Float32) (device : Device := .CPU) where
   /-- Local portion of embedding table -/
   weight : ShardedTensor ⟨#[vocabSize, dim], dtype, device⟩ rank worldSize .first
@@ -304,7 +304,7 @@ structure ShardedEmbedding (vocabSize dim : UInt64) (rank worldSize : UInt64)
     1. Gather full embedding
     2. Apply embedding lookup
 -/
-def ShardedEmbedding.forward {vocabSize dim rank worldSize batch seq : UInt64}
+def ShardedEmbedding.forward {vocabSize dim rank worldSize batch seq : Nat}
     {d : DType} {dev : Device}
     (emb : ShardedEmbedding vocabSize dim rank worldSize d dev)
     (tokens : Tensor ⟨#[batch, seq], .Int64, dev⟩)
@@ -319,7 +319,7 @@ def ShardedEmbedding.forward {vocabSize dim rank worldSize batch seq : UInt64}
 
     If a parameter is sharded, its optimizer state (momentum, variance) is too.
 -/
-structure ShardedAdamState (σ : StaticSpec) (rank worldSize : UInt64) where
+structure ShardedAdamState (σ : StaticSpec) (rank worldSize : Nat) where
   /-- First moment (sharded if param is sharded) -/
   expAvg : MaybeSharded σ rank worldSize
   /-- Second moment (sharded if param is sharded) -/
@@ -329,7 +329,7 @@ structure ShardedAdamState (σ : StaticSpec) (rank worldSize : UInt64) where
   deriving Repr
 
 /-- Initialize sharded Adam state with zeros -/
-def ShardedAdamState.init {σ : StaticSpec} {rank worldSize : UInt64}
+def ShardedAdamState.init {σ : StaticSpec} {rank worldSize : Nat}
     [DType.ConstantSupported σ.dtype σ.device]
     (param : MaybeSharded σ rank worldSize) : ShardedAdamState σ rank worldSize :=
   match param with
@@ -352,10 +352,11 @@ def ShardedAdamState.init {σ : StaticSpec} {rank worldSize : UInt64}
 def isShardingActive : IO Bool := dist.isInitialized
 
 /-- Get sharding info for current process -/
-def getShardingInfo : IO (UInt64 × UInt64) := do
+def getShardingInfo : IO (Nat × Nat) := do
   let isActive ← isShardingActive
   if isActive then
-    dist.getRankAndWorldSize
+    let (rank, worldSize) ← dist.getRankAndWorldSize
+    pure (rank.toNat, worldSize.toNat)
   else
     pure (0, 1)
 

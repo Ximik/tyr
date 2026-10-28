@@ -23,22 +23,23 @@ def runOnce : IO Bool := do
 
   seedFixtures suiteName 271828
   let device ← Device.cuda 0
-  let n : UInt64 := 4096
+  let n : Nat := 4096
   let rootKey := PRNGKey.foldIn (PRNGKey.fromUInt64 99) 0x56544152
   let out ← Tensor.uniformLike (Tensor.zeros #[n] false device) 0 0
   let stream ← torch.cuda_current_stream
+  let nArg ← Tyr.GPU.Codegen.launchArg n "n"
 
   let blackwell ← isBlackwellFamily
   if blackwell then
-    keyedNormalBlackwell.launch out.raw rootKey.state n 32 1 1 128 1 1 0 stream
+    keyedNormalBlackwell.launch out.raw rootKey.state nArg 32 1 1 128 1 1 0 stream
   else
-    keyedNormal.launch out.raw rootKey.state n 32 1 1 128 1 1 0 stream
+    keyedNormal.launch out.raw rootKey.state nArg 32 1 1 128 1 1 0 stream
   let _ ← torch.cuda_synchronize
 
   let got ← out.toFloatArray
   let mut ok := true
   let mut maxErr := 0.0
-  for i in [:n.toNat] do
+  for i in [:n] do
     let want := PRNGKey.normal01 (PRNGKey.foldIn rootKey (UInt32.ofNat i)) 0
     let err := Float.abs (got.getD i 0.0 - want)
     maxErr := max maxErr err

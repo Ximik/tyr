@@ -23,15 +23,15 @@ open tokenizer
 /-- Runtime environment state for chat inference defaults. -/
 private structure ChatEnvState where
   baseDir : String := "~/.cache/nanochat"
-  modelDepth : UInt64 := 20
-  vocabSize : UInt64 := 65536
+  modelDepth : Nat := 20
+  vocabSize : Nat := 65536
   requestedDevice? : Option String := none
   deriving Repr, Inhabited
 
 private def loadChatEnvState : IO ChatEnvState := do
   let baseDir := (← IO.getEnv "NANOCHAT_DIR").getD "~/.cache/nanochat"
-  let modelDepth := ((← IO.getEnv "MODEL_DEPTH").bind String.toNat?).map (·.toUInt64) |>.getD 20
-  let vocabSize := ((← IO.getEnv "VOCAB_SIZE").bind String.toNat?).map (·.toUInt64) |>.getD 65536
+  let modelDepth := ((← IO.getEnv "MODEL_DEPTH").bind String.toNat?) |>.getD 20
+  let vocabSize := ((← IO.getEnv "VOCAB_SIZE").bind String.toNat?) |>.getD 65536
   let requestedDevice? := (← IO.getEnv "TYR_DEVICE").map String.toLower
   pure {
     baseDir := baseDir
@@ -53,8 +53,8 @@ structure Args where
   topK : Nat := 50
   eosToken : Option UInt64 := none
   seed : UInt64 := 42
-  modelDepth : UInt64 := 20
-  vocabSize : UInt64 := 65536
+  modelDepth : Nat := 20
+  vocabSize : Nat := 65536
   showTokens : Bool := false
   help : Bool := false
   deriving Repr, Inhabited
@@ -99,10 +99,10 @@ private partial def parseArgsLoop : List String → Args → Args
       let seed := (v.toNat?).map (·.toUInt64) |>.getD acc.seed
       parseArgsLoop rest { acc with seed := seed }
   | "--model-depth" :: v :: rest, acc =>
-      let d := (v.toNat?).map (·.toUInt64) |>.getD acc.modelDepth
+      let d := (v.toNat?) |>.getD acc.modelDepth
       parseArgsLoop rest { acc with modelDepth := d }
   | "--vocab-size" :: v :: rest, acc =>
-      let vSize := (v.toNat?).map (·.toUInt64) |>.getD acc.vocabSize
+      let vSize := (v.toNat?) |>.getD acc.vocabSize
       parseArgsLoop rest { acc with vocabSize := vSize }
   | "--interactive" :: rest, acc => parseArgsLoop rest { acc with interactive := true }
   | "--chat-markers" :: rest, acc => parseArgsLoop rest { acc with useChatMarkers := true }
@@ -235,11 +235,11 @@ private def sampleNextToken {cfg : Config}
     throw <| IO.userError "Cannot decode from an empty prompt."
 
   let inputTensor := Tensor.fromInt64Array (context.map (·.toInt64))
-  let inputReshaped := (inputTensor.reshapeChecked #[1, context.size.toUInt64]).to device
+  let inputReshaped := (inputTensor.reshapeChecked #[1, context.size]).to device
   let logits ← moddedGpt.forward params yarn inputReshaped false
 
   -- Keep the final time step, then view its logits as one sampling row.
-  let lastLogits := Tensor.sliceChecked logits 1 (context.size - 1).toUInt64 1
+  let lastLogits := Tensor.sliceChecked logits 1 (context.size - 1) 1
     #[1, 1, cfg.vocabSize]
   let rowLogits := lastLogits.reshapeChecked #[1, cfg.vocabSize]
   let scaled :=
@@ -247,7 +247,7 @@ private def sampleNextToken {cfg : Config}
     else Tensor.mulScalar rowLogits (1.0 / temperature)
   let filtered :=
     if topK == 0 then scaled
-    else Tensor.topKFilter scaled topK.toUInt64
+    else Tensor.topKFilter scaled topK
   let probs := Tensor.softmax filtered (-1)
   let sampled ← Tensor.multinomial probs 1
   pure (Tensor.itemInt (sampled.reshapeChecked #[])).toUInt64

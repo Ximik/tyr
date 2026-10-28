@@ -14,12 +14,12 @@ private def checked {s : Shape} (raw : RawTensor) : Tensor { shape := s, dtype :
 def catTo {s t : Shape} {d : DType} (x : Tensor { shape := s, dtype := d, device := device }) (y : Tensor { shape := t, dtype := d, device := device }) (dim : Nat) :
     Tensor { shape := (TensorSpec.catShape s t dim), dtype := d, device := device } := Tensor.cat x y dim
 
-def affine2d {batch input output : UInt64}
+def affine2d {batch input output : Nat}
     (x : Tensor { shape := #[batch, input], dtype := .Float32, device := device }) (w : Tensor { shape := #[output, input], dtype := .Float32, device := device })
     (bias : Tensor { shape := #[output], dtype := .Float32, device := device }) : Tensor { shape := #[batch, output], dtype := .Float32, device := device } :=
   Tensor.linear x w + (bias.reshapeChecked #[1, output]).expand #[batch, output]
 
-def bmm {batch rows inner cols : UInt64} (a : Tensor { shape := #[batch, rows, inner], dtype := .Float32, device := device })
+def bmm {batch rows inner cols : Nat} (a : Tensor { shape := #[batch, rows, inner], dtype := .Float32, device := device })
     (b : Tensor { shape := #[batch, inner, cols], dtype := .Float32, device := device }) : Tensor { shape := #[batch, rows, cols], dtype := .Float32, device := device } :=
   (Tensor.bmm4d (a.reshapeChecked #[batch, 1, rows, inner])
     (b.reshapeChecked #[batch, 1, inner, cols])).reshapeChecked #[batch, rows, cols]
@@ -40,20 +40,20 @@ def floorTensor {s : Shape} (x : Tensor { shape := s, dtype := .Float32, device 
 def atan2Tensor {s : Shape} (y x : Tensor { shape := s, dtype := .Float32, device := device }) : Tensor { shape := s, dtype := .Float32, device := device } := checked (RawTensor.atan2 y.raw x.raw)
 def cumsumTensor {s : Shape} (x : Tensor { shape := s, dtype := .Float32, device := device }) (dim : Int64) : Tensor { shape := s, dtype := .Float32, device := device } := checked (RawTensor.cumsum x.raw dim)
 
-def resizeTensor {batch channels frames : UInt64} (x : Tensor { shape := #[batch, channels, frames], dtype := .Float32, device := device })
-    (outFrames : UInt64) (mode : String) : Tensor { shape := #[batch, channels, outFrames], dtype := .Float32, device := device } :=
+def resizeTensor {batch channels frames : Nat} (x : Tensor { shape := #[batch, channels, frames], dtype := .Float32, device := device })
+    (outFrames : Nat) (mode : String) : Tensor { shape := #[batch, channels, outFrames], dtype := .Float32, device := device } :=
   checked (RawTensor.interpolate x.raw #[outFrames] mode false)
 
-def istftTensor {s : Shape} (input : Tensor { shape := s, dtype := .Float32, device := device }) (nFft hopLength winLength : UInt64)
-    (window : Tensor { shape := #[winLength], dtype := .Float32, device := device }) (center normalized : Bool) (length : UInt64) :
+def istftTensor {s : Shape} (input : Tensor { shape := s, dtype := .Float32, device := device }) (nFft hopLength winLength : Nat)
+    (window : Tensor { shape := #[winLength], dtype := .Float32, device := device }) (center normalized : Bool) (length : Nat) :
     Tensor { shape := #[length], dtype := .Float32, device := device } :=
   checked (RawTensor.istft input.raw nFft hopLength winLength window.raw center normalized length)
 
-def sliceTensor {s : Shape} {d : DType} (x : Tensor { shape := s, dtype := d, device := device }) (dim : Nat) (start len : UInt64) :
+def sliceTensor {s : Shape} {d : DType} (x : Tensor { shape := s, dtype := d, device := device }) (dim : Nat) (start len : Nat) :
     Tensor { shape := (s.set! dim len), dtype := d, device := device } := x.sliceChecked dim start len (s.set! dim len)
 
-def stftTensor {n winLength : UInt64} {out : Shape} (input : Tensor { shape := #[n], dtype := .Float32, device := device })
-    (nFft hopLength : UInt64) (window : Tensor { shape := #[winLength], dtype := .Float32, device := device })
+def stftTensor {n winLength : Nat} {out : Shape} (input : Tensor { shape := #[n], dtype := .Float32, device := device })
+    (nFft hopLength : Nat) (window : Tensor { shape := #[winLength], dtype := .Float32, device := device })
     (center normalized : Bool) : Tensor { shape := out, dtype := .Float32, device := device } :=
   checked (RawTensor.stft input.raw nFft hopLength winLength window.raw center normalized)
 

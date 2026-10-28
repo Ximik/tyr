@@ -14,7 +14,7 @@ open torch.data.Native
 
 /-- Return the destination with the requested slice replaced. Retained aliases
 keep their original values. The native operation disables autograd for the copy. -/
-def copySliceIO {σ σsrc : StaticSpec} (dst : Tensor σ) (dim start : UInt64)
+def copySliceIO {σ σsrc : StaticSpec} (dst : Tensor σ) (dim start : Nat)
     (src : @& Tensor σsrc) : IO (Tensor σ) := do
   let dtype := dst.raw.dtype
   let device := dst.raw.device

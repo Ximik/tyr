@@ -29,7 +29,7 @@ def testBoxedIndexAndUnbind : IO Unit := do
 
 @[test]
 def testArangeLengthAndScalarWidths : IO Unit := do
-  let cases : Array (UInt64 × UInt64 × UInt64) :=
+  let cases : Array (Nat × Nat × Nat) :=
     #[(0, 5, 2), (0, 6, 2), (2, 2, 1), (0, 1, 4), (4294967296, 4294967299, 1)]
   for (start, stop, step) in cases do
     let x := Tensor.arangeFrom start stop step
@@ -69,7 +69,7 @@ def testExactLoadRejectsSameNumelWrongShape : IO Unit :=
 def testStftNativeFailuresAreRecoverable : IO Unit := do
   let input := Tensor.ones #[8]
   let window := Tensor.hannWindow 4
-  let invalid : Array (UInt64 × UInt64) := #[(0, 1), (4, 0), (2, 1), (16, 1)]
+  let invalid : Array (Nat × Nat) := #[(0, 1), (4, 0), (2, 1), (16, 1)]
   for (nFft, hopLength) in invalid do
     let caught ← try
       let _ ← Tensor.stft input nFft hopLength window (center := false)

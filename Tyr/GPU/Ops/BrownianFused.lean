@@ -74,7 +74,7 @@ partial def buildValueSchedule (T0 T1 tol : Float) (maxDepth : Nat)
 /-- Upload a schedule to the device as a flat Float32 tensor; the result
     shape records the schedule length. -/
 def uploadSchedule (sched : Array Float) (device : Device) :
-    Tensor { shape := #[sched.size.toUInt64], dtype := .Float32, device := device } :=
+    Tensor { shape := #[sched.size], dtype := .Float32, device := device } :=
   (Tensor.fromFloatArray sched).to device
 
 /-- Per-element key-root for a tensor-valued tree: the same derivation as
@@ -88,16 +88,19 @@ def tensorRootState (treeSeed : UInt64) : UInt64 :=
 def vbtIncrementDevice {s : Shape}
     (treeSeed : UInt64) (T0 T1 tol : Float) (maxDepth : Nat)
     (tA tB : Float)
-    (out : Tensor { shape := s, dtype := .Float32, device := device }) (n : UInt64)
+    (out : Tensor { shape := s, dtype := .Float32, device := device }) (n : Nat)
     (blackwell : Bool) (stream : UInt64)
     (device : Device) : IO Unit := do
   let schedA := buildValueSchedule T0 T1 tol maxDepth tA
   let schedB := buildValueSchedule T0 T1 tol maxDepth tB
-  let lenA := (schedA.size / 6).toUInt64
-  let lenB := (schedB.size / 6).toUInt64
+  let lenA := (schedA.size / 6)
+  let lenB := (schedB.size / 6)
   let devA := uploadSchedule schedA device
   let devB := uploadSchedule schedB device
   let root := tensorRootState treeSeed
+  let n ← Tyr.GPU.Codegen.launchArg n "n"
+  let lenA ← Tyr.GPU.Codegen.launchArg lenA "lenA"
+  let lenB ← Tyr.GPU.Codegen.launchArg lenB "lenB"
   -- the kernel's per-thread range strides by blockDim only: one block,
   -- threads stride the elements
   if blackwell then

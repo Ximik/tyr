@@ -8,13 +8,13 @@ open DifferentiableManifold
 variable {d : DType} {dev : Device} [DType.RealFloating d]
 
 /-- Oblique manifold OB(m,n): matrices with unit-norm columns. -/
-structure Oblique (m n : UInt64) (dtype : DType := .Float32)
+structure Oblique (m n : Nat) (dtype : DType := .Float32)
     (device : Device := .CPU) where
   matrix : Tensor ⟨#[m, n], dtype, device⟩
 
 namespace Oblique
 
-private def normalizeColumns {m n : UInt64} (A : Tensor ⟨#[m, n], d, dev⟩) : Tensor ⟨#[m, n], d, dev⟩ :=
+private def normalizeColumns {m n : Nat} (A : Tensor ⟨#[m, n], d, dev⟩) : Tensor ⟨#[m, n], d, dev⟩ :=
   let AtA := Tensor.mm (Tensor.transpose2d A) A
   let colNorms := Tensor.sqrt (Tensor.diag AtA)
   let safeNorms := Tensor.addScalar colNorms 1e-12
@@ -23,18 +23,18 @@ private def normalizeColumns {m n : UInt64} (A : Tensor ⟨#[m, n], d, dev⟩) :
   by simpa using Tensor.div A expanded
 
 /-- Project ambient matrix to the oblique manifold by column normalization. -/
-def project (m n : UInt64) (A : Tensor ⟨#[m, n], d, dev⟩) : Oblique m n d dev :=
+def project (m n : Nat) (A : Tensor ⟨#[m, n], d, dev⟩) : Oblique m n d dev :=
   ⟨normalizeColumns A⟩
 
 /-- Random point on the oblique manifold. -/
-def random (m n : UInt64) : IO (Oblique m n) := do
+def random (m n : Nat) : IO (Oblique m n) := do
   let A ← Tensor.randn #[m, n]
   pure (project m n A)
 
 end Oblique
 
 /-- Tangent vector on OB(m,n). -/
-structure ObliqueTangent (m n : UInt64) (dtype : DType := .Float32)
+structure ObliqueTangent (m n : Nat) (dtype : DType := .Float32)
     (device : Device := .CPU) where
   vec : Tensor ⟨#[m, n], dtype, device⟩
 
@@ -48,7 +48,7 @@ def project (X : Oblique m n d dev) (V : Tensor ⟨#[m, n], d, dev⟩) : Oblique
   ⟨Tensor.sub V (Tensor.mul X.matrix colDots)⟩
 
 /-- Zero tangent vector. -/
-def zero [DType.ConstantSupported d dev] (m n : UInt64) : ObliqueTangent m n d dev := ⟨Tensor.zerosFor ⟨#[m, n], d, dev⟩⟩
+def zero [DType.ConstantSupported d dev] (m n : Nat) : ObliqueTangent m n d dev := ⟨Tensor.zerosFor ⟨#[m, n], d, dev⟩⟩
 
 /-- Add tangent vectors. -/
 def add (a b : ObliqueTangent m n d dev) : ObliqueTangent m n d dev :=
@@ -60,7 +60,7 @@ def smul (s : Float) (v : ObliqueTangent m n d dev) : ObliqueTangent m n d dev :
 
 end ObliqueTangent
 
-instance obliqueManifold (m n : UInt64) : DifferentiableManifold (Oblique m n d dev) where
+instance obliqueManifold (m n : Nat) : DifferentiableManifold (Oblique m n d dev) where
   Tangent _ := ObliqueTangent m n d dev
   Cotangent _ := ObliqueTangent m n d dev
   zeroTangent x := ⟨Tensor.zerosLike x.matrix⟩

@@ -42,9 +42,9 @@ structure Hyperparameters where
   /-- Extension iterations beyond `numIterations` (usually 0). -/
   extensionIterations : UInt64 := 0
   /-- Per-rank micro-batch size. -/
-  deviceBatchSize : UInt64 := 32
+  deviceBatchSize : Nat := 32
   /-- Target global batch size in tokens across all ranks/accumulation. -/
-  totalBatchSizeTokens : UInt64 := 524288
+  totalBatchSizeTokens : Nat := 524288
   /-- Embedding learning rate (Adam). -/
   embeddingLr : Float := 0.3
   /-- Unembedding / lm-head learning rate (Adam). -/
@@ -64,9 +64,9 @@ structure Hyperparameters where
   /-- Final learning-rate multiplier at end of warmdown. -/
   finalLrFrac : Float := 0.0
   /-- Block size for windowed attention -/
-  blockSize : UInt64 := 128
+  blockSize : Nat := 128
   /-- Maximum sequence length -/
-  maxSeqLen : UInt64 := 2048
+  maxSeqLen : Nat := 2048
   /-- Validation interval (in iterations) -/
   valInterval : UInt64 := 50
   /-- Logging interval -/
@@ -92,13 +92,13 @@ def Hyperparameters.default : Hyperparameters := {}
     - 16 * 2048 * 8 = 262144
     - 24 * 2048 * 8 = 393216
 -/
-def getBatchSize (step : UInt64) : UInt64 :=
+def getBatchSize (step : UInt64) : Nat :=
   if step < 200 then 8
   else if step < 1000 then 16
   else 24
 
 /-- Get tokens per batch for a given iteration -/
-def getTokensPerBatch (step : UInt64) (seqLen gradAccum worldSize : UInt64) : UInt64 :=
+def getTokensPerBatch (step : UInt64) (seqLen gradAccum worldSize : Nat) : Nat :=
   getBatchSize step * seqLen * gradAccum * worldSize
 
 /-! ## Window Size Schedule -/
@@ -113,13 +113,13 @@ def getTokensPerBatch (step : UInt64) (seqLen gradAccum worldSize : UInt64) : UI
     Short window is used for most attention heads,
     long window for a few "global" heads.
 -/
-def getWindowSizes (step : UInt64) (_blockSize : UInt64 := 128) : (UInt64 × UInt64) :=
+def getWindowSizes (step : UInt64) (_blockSize : Nat := 128) : (Nat × Nat) :=
   if step < 200 then (3, 3)
   else if step < 1000 then (3, 7)
   else (3, 11)
 
 /-- Get sequence length for a given iteration -/
-def getSeqLen (step : UInt64) (blockSize : UInt64 := 128) : UInt64 :=
+def getSeqLen (step : UInt64) (blockSize : Nat := 128) : Nat :=
   let (_, wsLong) := getWindowSizes step blockSize
   wsLong * blockSize
 
@@ -154,7 +154,7 @@ def dModelLrScale (cfg : moddedGpt.Config) : Float :=
 
 /-- Compute grad-accum steps from global token budget and world size.
     Expects divisibility to be validated up-front (nanochat parity). -/
-def effectiveGradAccumSteps (hp : Hyperparameters) (worldSize : UInt64) : UInt64 :=
+def effectiveGradAccumSteps (hp : Hyperparameters) (worldSize : Nat) : Nat :=
   let world := max 1 worldSize
   let perMicro := hp.deviceBatchSize * hp.maxSeqLen * world
   if perMicro == 0 then
@@ -165,7 +165,7 @@ def effectiveGradAccumSteps (hp : Hyperparameters) (worldSize : UInt64) : UInt64
 
 /-- Enforce nanochat batch semantics:
     total_batch_size must be divisible by per-rank micro-batch tokens. -/
-def validateGradAccumConfig (hp : Hyperparameters) (worldSize : UInt64) : IO Unit := do
+def validateGradAccumConfig (hp : Hyperparameters) (worldSize : Nat) : IO Unit := do
   let world := max 1 worldSize
   let perMicro := hp.deviceBatchSize * hp.maxSeqLen * world
   if perMicro == 0 then
@@ -283,7 +283,7 @@ structure StepResult where
   /-- Gradient norm (for monitoring) -/
   gradNorm : Float
   /-- Tokens processed -/
-  tokensProcessed : UInt64
+  tokensProcessed : Nat
   /-- Time taken (ms) -/
   timeMs : Float
   deriving Repr
@@ -298,7 +298,7 @@ structure StepResult where
     5. Apply optimizer (AdamW)
     6. Return updated params and optimizer state
 -/
-def trainStep {cfg : moddedGpt.Config} {batch seq : UInt64}
+def trainStep {cfg : moddedGpt.Config} {batch seq : Nat}
     (params : ModdedGPTParams (device := device) cfg)
     (yarn : YarnRotary (device := device) cfg.headDim cfg.maxSeqLen)
     (input : Tensor { shape := #[batch, seq], dtype := .Int64, device := device })
@@ -378,7 +378,7 @@ def trainStep {cfg : moddedGpt.Config} {batch seq : UInt64}
 /-! ## Gradient Accumulation -/
 
 /-- Accumulate gradients over multiple micro-batches -/
-def accumulateGradients {cfg : moddedGpt.Config} {batch seq : UInt64}
+def accumulateGradients {cfg : moddedGpt.Config} {batch seq : Nat}
     (params : ModdedGPTParams (device := device) cfg)
     (yarn : YarnRotary (device := device) cfg.headDim cfg.maxSeqLen)
     (batches : Array (Tensor { shape := #[batch, seq], dtype := .Int64, device := device } × Tensor { shape := #[batch, seq], dtype := .Int64, device := device }))
@@ -412,7 +412,7 @@ def validate {cfg : moddedGpt.Config}
     (params : ModdedGPTParams (device := device) cfg)
     (yarn : YarnRotary (device := device) cfg.headDim cfg.maxSeqLen)
     (valData : Σ n, DataShard n)
-    (batchSize seqLen : UInt64)
+    (batchSize seqLen : Nat)
     (numBatches : UInt64 := 10)
     : IO ValidationResult := do
   let startTime ← IO.monoMsNow
@@ -464,13 +464,13 @@ structure DataCursor where
   /-- Index into resolved training shard paths. -/
   trainPathIdx : Nat
   /-- Number of batches consumed by the distributed generator. -/
-  globalStep : UInt64
+  globalStep : Nat
   /-- Iterator epoch counter. -/
-  epoch : UInt64
+  epoch : Nat
   /-- Iterator batch counter within epoch. -/
-  batchCount : UInt64
+  batchCount : Nat
   /-- Current BOS-finder token offset inside the current shard. -/
-  bosCurrentPos : UInt64
+  bosCurrentPos : Nat
   /-- Versioned full-partition document-stream cursor. Legacy offsets cannot
       identify the new shuffled stream and are rejected on exact resume. -/
   streamCursor? : Option StreamCursor := none
@@ -487,7 +487,7 @@ structure CheckpointMetadata where
   /-- Saved training hyperparameters for resume parity. -/
   hyperparameters : Hyperparameters
   /-- Total tokens processed when this checkpoint was written. -/
-  totalTokens : UInt64 := 0
+  totalTokens : Nat := 0
   /-- Optional parquet-loader cursor state. -/
   dataCursor? : Option DataCursor := none
   deriving Repr, Inhabited, Lean.ToJson, Lean.FromJson
@@ -705,7 +705,7 @@ private def mergedResumeHyperparameters (requested saved : Hyperparameters) : Hy
   }
 
 private def mkCheckpointMetadata (cfg : moddedGpt.Config) (hp : Hyperparameters)
-    (totalTokens : UInt64) (dataCursor? : Option DataCursor) : CheckpointMetadata := {
+    (totalTokens : Nat) (dataCursor? : Option DataCursor) : CheckpointMetadata := {
   version := 1
   modelConfigRepr := s!"{repr cfg}"
   modelConfig? := some cfg
@@ -880,7 +880,7 @@ structure TrainState (cfg : moddedGpt.Config) where
   /-- Best validation loss -/
   bestValLoss : Float
   /-- Accumulated tokens -/
-  totalTokens : UInt64
+  totalTokens : Nat
   /-- Training start time -/
   startTime : UInt64
 
@@ -960,7 +960,7 @@ def runValidation (state : TrainState (device := device) cfg) (hp : Hyperparamet
     }
 
 /-- Distributed training step with gradient accumulation over micro-batches. -/
-def trainStepDistributedAccum {cfg : moddedGpt.Config} {batch seq : UInt64}
+def trainStepDistributedAccum {cfg : moddedGpt.Config} {batch seq : Nat}
     (params : ModdedGPTParams (device := device) cfg)
     (yarn : YarnRotary (device := device) cfg.headDim cfg.maxSeqLen)
     (microBatches : Array (Tensor { shape := #[batch, seq], dtype := .Int64, device := device } × Tensor { shape := #[batch, seq], dtype := .Int64, device := device }))
@@ -975,7 +975,7 @@ def trainStepDistributedAccum {cfg : moddedGpt.Config} {batch seq : UInt64}
   let worldSize ← if isDistributed then dist.getWorldSize else pure 1
   let params ← TensorStruct.makeLeafParams params
   TensorStruct.zeroGrads params
-  let microCount := microBatches.size.toUInt64
+  let microCount := microBatches.size
   let mut totalLoss := 0.0
   for (input, target) in microBatches do
     let lossT ← moddedGpt.loss params yarn input target true
@@ -1221,7 +1221,7 @@ def trainStepDistributedAccum {cfg : moddedGpt.Config} {batch seq : UInt64}
   let result : StepResult := {
     loss := totalLoss / microCount.toFloat
     gradNorm := 0.0
-    tokensProcessed := batch * seq * worldSize * microCount
+    tokensProcessed := batch * seq * worldSize.toNat * microCount
     timeMs := timeMs
   }
   let newOptState : OptimizerState (device := device) cfg := {
@@ -1257,7 +1257,7 @@ def trainLoop (cfg : moddedGpt.Config) (hp : Hyperparameters)
     let mut microBatches : Array (Tensor { shape := #[batchSize, seqLen], dtype := .Int64, device := device } × Tensor { shape := #[batchSize, seqLen], dtype := .Int64, device := device }) := #[]
     let mut newDataGen := dataGen
     let device := state.params.embed.device
-    for _ in [:gradAccum.toNat] do
+    for _ in [:gradAccum] do
       let (maybeBatch, newerDataGen) ← newDataGen.nextBatchGPT
       newDataGen := newerDataGen
       match maybeBatch with
@@ -1345,7 +1345,7 @@ private def clipGradientValue {σ : StaticSpec} [DType.RealFloating σ.dtype] (g
 
     This pattern is called Data Parallel (DP) training.
 -/
-def trainStepDistributed {cfg : moddedGpt.Config} {batch seq : UInt64}
+def trainStepDistributed {cfg : moddedGpt.Config} {batch seq : Nat}
     (params : ModdedGPTParams (device := device) cfg)
     (yarn : YarnRotary (device := device) cfg.headDim cfg.maxSeqLen)
     (input : Tensor { shape := #[batch, seq], dtype := .Int64, device := device })
@@ -1395,7 +1395,7 @@ def trainStepDistributed {cfg : moddedGpt.Config} {batch seq : UInt64}
   let result : StepResult := {
     loss := lossVal
     gradNorm := 0.0  -- Could compute from grads if needed
-    tokensProcessed := batch * seq * worldSize
+    tokensProcessed := batch * seq * worldSize.toNat
     timeMs := timeMs
   }
 
@@ -1502,13 +1502,13 @@ def trainLoopDistributed (cfg : moddedGpt.Config) (hp : Hyperparameters)
     let stepU := step.toUInt64
     let batchSize := hp.deviceBatchSize
     let seqLen := hp.maxSeqLen
-    let gradAccum := effectiveGradAccumSteps hp state.worldSize
+    let gradAccum := effectiveGradAccumSteps hp state.worldSize.toNat
     let iterator ← state.dataGen.iterator.updateParams batchSize seqLen
     let dataGen := { state.dataGen with iterator }
     let mut microBatches : Array (Tensor { shape := #[batchSize, seqLen], dtype := .Int64, device := device } × Tensor { shape := #[batchSize, seqLen], dtype := .Int64, device := device }) := #[]
     let mut newDataGen := dataGen
     let device := state.params.embed.device
-    for _ in [:gradAccum.toNat] do
+    for _ in [:gradAccum] do
       let (maybeBatch, newerDataGen) ← newDataGen.nextBatchGPT
       newDataGen := newerDataGen
       match maybeBatch with
@@ -1673,7 +1673,7 @@ def trainDistributed (cfg : moddedGpt.Config) (hp : Hyperparameters)
   }
 
   -- Match nanochat's strict grad-accum divisibility contract.
-  validateGradAccumConfig effectiveHp worldSize
+  validateGradAccumConfig effectiveHp worldSize.toNat
 
   -- Barrier to ensure all ranks are ready
   if isDistributed then
@@ -1690,8 +1690,8 @@ def trainDistributed (cfg : moddedGpt.Config) (hp : Hyperparameters)
 
 /-- Dynamically-shaped GPT micro-batch `(inputs, targets)`. -/
 structure DynamicGPTBatch where
-  batch : UInt64
-  seq : UInt64
+  batch : Nat
+  seq : Nat
   input : Tensor { shape := #[batch, seq], dtype := .Int64, device := .CPU }
   target : Tensor { shape := #[batch, seq], dtype := .Int64, device := .CPU }
 
@@ -1705,7 +1705,7 @@ structure StreamTrainState (cfg : moddedGpt.Config) where
   optState : OptimizerState (device := device) cfg
   step : UInt64 := 0
   bestValLoss : Float := 1e30
-  totalTokens : UInt64 := 0
+  totalTokens : Nat := 0
   startTime : UInt64 := 0
   rank : UInt64 := 0
   worldSize : UInt64 := 1
@@ -1744,7 +1744,7 @@ private def initStreamTrainState (cfg : moddedGpt.Config) (device : Device)
     worldSize := worldSize
   }
 
-private def collectMicroBatches {batch seq : UInt64}
+private def collectMicroBatches {batch seq : Nat}
     (provider : DynamicGPTBatchProvider)
     (gradAccum : Nat)
     (device : Device)
@@ -1759,7 +1759,7 @@ private def collectMicroBatches {batch seq : UInt64}
       microBatches := microBatches.push (input, target)
   return microBatches
 
-private def validateWithProvider {cfg : moddedGpt.Config} {batch seq : UInt64}
+private def validateWithProvider {cfg : moddedGpt.Config} {batch seq : Nat}
     (params : ModdedGPTParams (device := device) cfg)
     (yarn : YarnRotary (device := device) cfg.headDim cfg.maxSeqLen)
     (provider : DynamicGPTBatchProvider)
@@ -1854,12 +1854,12 @@ private def trainLoopDistributedStream (cfg : moddedGpt.Config) (hp : Hyperparam
     let stepU := step.toUInt64
     let batchSize := hp.deviceBatchSize
     let seqLen := hp.maxSeqLen
-    let gradAccum := effectiveGradAccumSteps hp state.worldSize
+    let gradAccum := effectiveGradAccumSteps hp state.worldSize.toNat
     let device := state.params.embed.device
 
     let microBatches ← collectMicroBatches
       (batch := batchSize) (seq := seqLen)
-      trainProvider gradAccum.toNat device
+      trainProvider gradAccum device
 
     if microBatches.isEmpty then
       if isMaster then
@@ -2036,7 +2036,7 @@ def trainDistributedWithBatchProvider (cfg : moddedGpt.Config) (hp : Hyperparame
   }
 
   -- Match nanochat's strict grad-accum divisibility contract.
-  validateGradAccumConfig effectiveHp worldSize
+  validateGradAccumConfig effectiveHp worldSize.toNat
 
   if isDistributed then
     dist.barrier

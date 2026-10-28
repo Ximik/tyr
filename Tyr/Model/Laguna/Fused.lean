@@ -48,7 +48,7 @@ private def lagunaMoeFp4Fail {α : Type} (msg : String) : IO α :=
   throw (IO.userError s!"lagunaMoeFp4Forward: {msg}")
 
 private def lagunaMoeFp4CheckShape
-    {σ : StaticSpec} (name : String) (t : Tensor σ) (expected : Array UInt64) : IO Unit := do
+    {σ : StaticSpec} (name : String) (t : Tensor σ) (expected : Array Nat) : IO Unit := do
   if t.runtimeShape != expected then
     lagunaMoeFp4Fail s!"{name} must have shape {expected}, got {t.runtimeShape}"
 
@@ -65,7 +65,7 @@ def lagunaMoeFp4Forward
     (gatePacked : Tensor { device := device, shape := gp, dtype := gpd }) (gateScale : Tensor { device := device, shape := gs, dtype := gsd }) (gateGlobal : Tensor { device := device, shape := gg, dtype := ggd })
     (upPacked : Tensor { device := device, shape := up, dtype := upd }) (upScale : Tensor { device := device, shape := us, dtype := usd }) (upGlobal : Tensor { device := device, shape := ug, dtype := ugd })
     (downPacked : Tensor { device := device, shape := dp, dtype := dpd }) (downScale : Tensor { device := device, shape := ds, dtype := dsd }) (downGlobal : Tensor { device := device, shape := dg, dtype := dgd })
-    (numExperts moeInt hidden : UInt64) : IO (Tensor { device := device, shape := xs, dtype := .BFloat16 }) := do
+    (numExperts moeInt hidden : Nat) : IO (Tensor { device := device, shape := xs, dtype := .BFloat16 }) := do
   if hidden == 0 || hidden % 32 != 0 then
     lagunaMoeFp4Fail s!"hidden={hidden} must be a positive multiple of 32"
   if moeInt == 0 || moeInt % 32 != 0 then

@@ -27,12 +27,12 @@ private def exceptToIO {α : Type} (context : String) (x : Except String α) : I
 
 def runDemo : IO Unit := do
   let vocabSize : Nat := 10
-  let vocab : UInt64 := 10
+  let vocab : Nat := 10
   let maskToken : Nat := 9
-  let maxLen : UInt64 := 12
-  let heads : UInt64 := 2
-  let headDim : UInt64 := 8
-  let mlp : UInt64 := 32
+  let maxLen : Nat := 12
+  let heads : Nat := 2
+  let headDim : Nat := 8
+  let mlp : Nat := 32
   let steps : Nat := 160
   let lr : Float := 2.5e-2
   let bridgeCfg := MoleculeBridgeConfig.qm9 vocabSize maskToken
@@ -53,7 +53,7 @@ def runDemo : IO Unit := do
       (sequentialUniformPolicy MoleculeAtom)
       (MoleculeBridgeConfig.anchorMerge bridgeCfg)
       (coalescenceFactor := 1.0)
-      (maxLen := some maxLen.toNat)
+      (maxLen := some maxLen)
       (deletionPad := 1.5)
       (rng := { state := 20260618 })
 

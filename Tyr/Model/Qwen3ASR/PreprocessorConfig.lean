@@ -15,13 +15,13 @@ open Lean
 /-- Whisper feature-extractor config used by Qwen3-ASR processor. -/
 structure PreprocessorConfig where
   featureExtractorType : String := "WhisperFeatureExtractor"
-  featureSize : UInt64 := 128
-  samplingRate : UInt64 := 16000
-  hopLength : UInt64 := 160
-  chunkLength : UInt64 := 30
-  nFft : UInt64 := 400
-  nSamples : UInt64 := 0
-  nbMaxFrames : UInt64 := 0
+  featureSize : Nat := 128
+  samplingRate : Nat := 16000
+  hopLength : Nat := 160
+  chunkLength : Nat := 30
+  nFft : Nat := 400
+  nSamples : Nat := 0
+  nbMaxFrames : Nat := 0
   paddingSide : String := "right"
   paddingValue : Float := 0.0
   returnAttentionMask : Bool := true
@@ -31,13 +31,13 @@ structure PreprocessorConfig where
 
 namespace PreprocessorConfig
 
-def expectedSampleCount (cfg : PreprocessorConfig) : UInt64 :=
+def expectedSampleCount (cfg : PreprocessorConfig) : Nat :=
   if cfg.nSamples > 0 then
     cfg.nSamples
   else
     cfg.chunkLength * cfg.samplingRate
 
-def expectedFrames (cfg : PreprocessorConfig) : UInt64 :=
+def expectedFrames (cfg : PreprocessorConfig) : Nat :=
   let hop := if cfg.hopLength == 0 then 1 else cfg.hopLength
   if cfg.nbMaxFrames > 0 then
     cfg.nbMaxFrames
@@ -86,9 +86,9 @@ private def getFloat? (j : Json) : Option Float :=
   | some x => some x
   | none => (getNat? j).map (·.toFloat)
 
-private def getUInt64FieldD (j : Json) (key : String) (d : UInt64) : UInt64 :=
+private def getNatFieldD (j : Json) (key : String) (d : Nat) : Nat :=
   match getObjVal? j key >>= getNat? with
-  | some n => n.toUInt64
+  | some n => n
   | none => d
 
 private def getUInt64FieldFromFloatD (j : Json) (key : String) (d : UInt64) : UInt64 :=
@@ -116,20 +116,20 @@ def loadFromFile (path : String) (defaults : PreprocessorConfig := {}) : IO Prep
   let root ← parseJsonFile path
   let chunkLength :=
     match getObjVal? root "chunk_length" >>= getFloat? with
-    | some x => x.toUInt64
+    | some x => x.toUInt64.toNat
     | none =>
       match getObjVal? root "chunk_length_s" >>= getFloat? with
-      | some x => x.toUInt64
+      | some x => x.toUInt64.toNat
       | none => defaults.chunkLength
   let cfg : PreprocessorConfig := {
     featureExtractorType := getStrFieldD root "feature_extractor_type" defaults.featureExtractorType
-    featureSize := getUInt64FieldD root "feature_size" defaults.featureSize
-    samplingRate := getUInt64FieldD root "sampling_rate" defaults.samplingRate
-    hopLength := getUInt64FieldD root "hop_length" defaults.hopLength
+    featureSize := getNatFieldD root "feature_size" defaults.featureSize
+    samplingRate := getNatFieldD root "sampling_rate" defaults.samplingRate
+    hopLength := getNatFieldD root "hop_length" defaults.hopLength
     chunkLength := chunkLength
-    nFft := getUInt64FieldD root "n_fft" defaults.nFft
-    nSamples := getUInt64FieldD root "n_samples" defaults.nSamples
-    nbMaxFrames := getUInt64FieldD root "nb_max_frames" defaults.nbMaxFrames
+    nFft := getNatFieldD root "n_fft" defaults.nFft
+    nSamples := getNatFieldD root "n_samples" defaults.nSamples
+    nbMaxFrames := getNatFieldD root "nb_max_frames" defaults.nbMaxFrames
     paddingSide := getStrFieldD root "padding_side" defaults.paddingSide
     paddingValue := getFloatFieldD root "padding_value" defaults.paddingValue
     returnAttentionMask := getBoolFieldD root "return_attention_mask" defaults.returnAttentionMask

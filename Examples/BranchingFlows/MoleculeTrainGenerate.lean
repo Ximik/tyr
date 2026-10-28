@@ -42,14 +42,14 @@ structure RunOptions where
   vocabSize : Nat := 10
   maskToken : Nat := 0
   fixedLabels : Bool := false
-  maxLen : UInt64 := 16
+  maxLen : Nat := 16
   fullArchitecture : Bool := false
-  hiddenDim : UInt64 := 16
-  heads : UInt64 := 2
-  headDim : UInt64 := 8
-  mlp : UInt64 := 48
-  rffDim : UInt64 := 8
-  layers : UInt64 := 2
+  hiddenDim : Nat := 16
+  heads : Nat := 2
+  headDim : Nat := 8
+  mlp : Nat := 48
+  rffDim : Nat := 8
+  layers : Nat := 2
   coordUpdateLayers : Nat := 1
   lr : Float := 8.0e-3
   lrEnd : Float := 0.0
@@ -90,9 +90,6 @@ private def parseNatArg (name value : String) : IO Nat := do
   match value.toNat? with
   | some n => pure n
   | none => throw (IO.userError s!"{name} expects a natural number, got '{value}'")
-
-private def parseUInt64Arg (name value : String) : IO UInt64 := do
-  pure (← parseNatArg name value).toUInt64
 
 private def parseSeedArg (value : String) : IO UInt64 := do
   let n ← parseNatArg "--seed" value
@@ -220,7 +217,7 @@ partial def parseArgsLoop (args : List String) (opts : RunOptions) : IO RunOptio
   | "--fixed-labels" :: rest =>
       parseArgsLoop rest { opts with fixedLabels := true }
   | "--max-len" :: value :: rest =>
-      parseArgsLoop rest { opts with maxLen := (← parseUInt64Arg "--max-len" value) }
+      parseArgsLoop rest { opts with maxLen := (← parseNatArg "--max-len" value) }
   | "--architecture" :: value :: rest =>
       match value with
       | "compact" => parseArgsLoop rest { opts with fullArchitecture := false }
@@ -231,17 +228,17 @@ partial def parseArgsLoop (args : List String) (opts : RunOptions) : IO RunOptio
   | "--compact-architecture" :: rest =>
       parseArgsLoop rest { opts with fullArchitecture := false }
   | "--hidden-dim" :: value :: rest =>
-      parseArgsLoop rest { opts with hiddenDim := (← parseUInt64Arg "--hidden-dim" value) }
+      parseArgsLoop rest { opts with hiddenDim := (← parseNatArg "--hidden-dim" value) }
   | "--heads" :: value :: rest =>
-      parseArgsLoop rest { opts with heads := (← parseUInt64Arg "--heads" value) }
+      parseArgsLoop rest { opts with heads := (← parseNatArg "--heads" value) }
   | "--head-dim" :: value :: rest =>
-      parseArgsLoop rest { opts with headDim := (← parseUInt64Arg "--head-dim" value) }
+      parseArgsLoop rest { opts with headDim := (← parseNatArg "--head-dim" value) }
   | "--mlp" :: value :: rest =>
-      parseArgsLoop rest { opts with mlp := (← parseUInt64Arg "--mlp" value) }
+      parseArgsLoop rest { opts with mlp := (← parseNatArg "--mlp" value) }
   | "--rff-dim" :: value :: rest =>
-      parseArgsLoop rest { opts with rffDim := (← parseUInt64Arg "--rff-dim" value) }
+      parseArgsLoop rest { opts with rffDim := (← parseNatArg "--rff-dim" value) }
   | "--layers" :: value :: rest =>
-      parseArgsLoop rest { opts with layers := (← parseUInt64Arg "--layers" value) }
+      parseArgsLoop rest { opts with layers := (← parseNatArg "--layers" value) }
   | "--coord-update-layers" :: value :: rest =>
       parseArgsLoop rest { opts with coordUpdateLayers := (← parseNatArg "--coord-update-layers" value) }
   | "--lr" :: value :: rest =>
@@ -445,7 +442,7 @@ private def loadMuonOptimState [TensorStruct Params]
 
 private def runWithModel {dtype : DType} [DType.RealFloating dtype]
     [DType.Promotes dtype .Float32 .Float32] [DType.Promotes .Float32 dtype .Float32]
-    {Params : Type} [TensorStruct Params] [FloatingTensorStruct Params] {maxLen vocab : UInt64}
+    {Params : Type} [TensorStruct Params] [FloatingTensorStruct Params] {maxLen vocab : Nat}
     (opts : RunOptions)
     (recordsCount usableCount : Nat)
     (trainStates evalStates : Array (BranchingState MoleculeAtom))
@@ -476,7 +473,7 @@ private def runWithModel {dtype : DType} [DType.RealFloating dtype]
   let (fixedTrainBridge, rng') ←
     sampleMoleculeBridgeBatch bridgeCfg trainStates opts.batchSize rng
       (useBranchingTimeProb := opts.useBranchingTimeProb)
-      (maxLen := some opts.maxLen.toNat) (deletionPad := opts.deletionPad) (parallelism := opts.parallelSampling)
+      (maxLen := some opts.maxLen) (deletionPad := opts.deletionPad) (parallelism := opts.parallelSampling)
   rng := rng'
   let initTrain ←
     evalMoleculeLoss (maxLen := maxLen) (vocab := vocab) trainCfg model params fixedTrainBridge
@@ -517,7 +514,7 @@ private def runWithModel {dtype : DType} [DType.RealFloating dtype]
     let sampleNext := fun (rng : Rng) =>
       sampleMoleculeBridgeBatchPure bridgeCfg trainStates opts.batchSize rng
         (useBranchingTimeProb := opts.useBranchingTimeProb)
-        (maxLen := some opts.maxLen.toNat) (deletionPad := opts.deletionPad)
+        (maxLen := some opts.maxLen) (deletionPad := opts.deletionPad)
         (parallelism := opts.parallelSampling)
     let mut pendingSample := Task.spawn (fun () => sampleNext rng)
 
@@ -577,7 +574,7 @@ private def runWithModel {dtype : DType} [DType.RealFloating dtype]
   let (evalBridge, rng') ←
     sampleMoleculeBridgeBatch bridgeCfg evalStates opts.batchSize rng
       (useBranchingTimeProb := opts.useBranchingTimeProb)
-      (maxLen := some opts.maxLen.toNat) (deletionPad := opts.deletionPad) (parallelism := opts.parallelSampling)
+      (maxLen := some opts.maxLen) (deletionPad := opts.deletionPad) (parallelism := opts.parallelSampling)
   rng := rng'
   let evalReport ←
     evalMoleculeLoss (maxLen := maxLen) (vocab := vocab) trainCfg model params evalBridge
@@ -605,7 +602,7 @@ private def runWithModel {dtype : DType} [DType.RealFloating dtype]
           "masked source molecule for learned generation" (labelSymbol opts.maskToken)
       let (generated, rng') ←
         moleculeBranchingGenerateIO flow x0 learnedModel schedule
-          (maxStateLen? := some opts.maxLen.toNat) (rng := rng)
+          (maxStateLen? := some opts.maxLen) (rng := rng)
       rng := rng'
       if generated.finalState.state.isEmpty then
         throw (IO.userError s!"learned molecule generation produced an empty state for sample {i}")
@@ -703,7 +700,7 @@ private def runAt (dtype : DType) [DType.RealFloating dtype]
     | none =>
         throw (IO.userError "--require-data requires --data")
 
-  let vocab : UInt64 := opts.vocabSize.toUInt64
+  let vocab : Nat := opts.vocabSize
   let bridgeCfgBase := MoleculeBridgeConfig.qm9 opts.vocabSize opts.maskToken
   let labelDFM :=
     if opts.fixedLabels then none
@@ -712,7 +709,7 @@ private def runAt (dtype : DType) [DType.RealFloating dtype]
   let records ← loadRecords opts
   let allStates ← exceptToIO "convert molecule records"
     (qm9RecordsToBranchingStates records { vocabSize? := some opts.vocabSize, maskToken? := some opts.maskToken })
-  let states := allStates.filter (fun state => state.state.size <= opts.maxLen.toNat)
+  let states := allStates.filter (fun state => state.state.size <= opts.maxLen)
   if states.isEmpty then
     throw (IO.userError s!"no molecules fit maxLen={opts.maxLen}")
   let (trainStates, evalStates) := splitTrainEval states opts.seed

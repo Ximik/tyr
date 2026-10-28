@@ -14,7 +14,7 @@ import Tyr.Model.Qwen3ASR.PreprocessorConfig
 namespace torch.qwen3asr
 
 variable {device : Device}
-structure WhisperFrontendOutput (melBins frames : UInt64) where
+structure WhisperFrontendOutput (melBins frames : Nat) where
   inputFeatures : Tensor { device := device, shape := #[1, melBins, frames], dtype := .Float32 }
   featureAttentionMask : Tensor { device := device, shape := #[1, frames], dtype := .Int64 }
 
@@ -27,7 +27,7 @@ inductive ASRAudioInput where
   /-- Base64-encoded audio payload (raw base64 or data URL), decoded as WAV PCM16. -/
   | base64 (value : String)
   /-- In-memory mono waveform with explicit source sampling rate. -/
-  | waveform (samples : Array Float) (sampleRate : UInt64)
+  | waveform (samples : Array Float) (sampleRate : Nat)
   deriving Repr, Inhabited
 
 private def readU16LE (bytes : ByteArray) (offset : Nat) : Option UInt16 :=
@@ -63,7 +63,7 @@ private def i16ToFloat (u : UInt16) : Float :=
 private def loadMonoPcm16WavFromBytes
     (bytes : ByteArray)
     (sourceLabel : String := "<bytes>")
-    : IO (UInt64 × Array Float) := do
+    : IO (Nat × Array Float) := do
   if bytes.size < 12 then
     throw <| IO.userError s!"Invalid WAV (too small): {sourceLabel}"
   if !(hasTag4 bytes 0 "RIFF" && hasTag4 bytes 8 "WAVE") then
@@ -150,10 +150,10 @@ private def loadMonoPcm16WavFromBytes
       acc := acc + i16ToFloat u
     mono := mono.push (acc / channels.toFloat)
 
-  pure (sampleRate.toUInt64, mono)
+  pure (sampleRate.toNat, mono)
 
 /-- Parse PCM16 WAV data chunk(s) and return `(sampleRate, monoWaveform)` in `[-1, 1]`. -/
-def loadMonoPcm16Wav (path : String) : IO (UInt64 × Array Float) := do
+def loadMonoPcm16Wav (path : String) : IO (Nat × Array Float) := do
   let bytes ← IO.FS.readBinFile path
   loadMonoPcm16WavFromBytes bytes path
 
@@ -320,19 +320,19 @@ private def normalizeFloatRange (audio : Array Float) : Array Float :=
         out := out.push (clamp01 (x / scale))
       out
 
-def resampleLinear (audio : Array Float) (srcRate targetRate : UInt64) : Array Float :=
+def resampleLinear (audio : Array Float) (srcRate targetRate : Nat) : Array Float :=
   if audio.isEmpty || srcRate == targetRate || srcRate == 0 || targetRate == 0 then
     audio
   else
     let inSize := audio.size
-    let outSize := (((inSize.toUInt64) * targetRate) / srcRate).toNat
+    let outSize := (inSize * targetRate) / srcRate
     if outSize == 0 then
       #[]
     else
       Id.run do
         let mut out : Array Float := Array.mkEmpty outSize
-        let srcNat := srcRate.toNat
-        let dstNat := targetRate.toNat
+        let srcNat := srcRate
+        let dstNat := targetRate
         for i in [:outSize] do
           let srcNum := i * srcNat
           let idx0 := srcNum / dstNat
@@ -505,7 +505,7 @@ def waveformToWhisperFeatures
   if targetSamples == 0 then
     throw <| IO.userError "Preprocessor config has n_samples=0"
 
-  let (prepared0, validLenNat) := takePadRight wave targetSamples.toNat cfg.paddingValue
+  let (prepared0, validLenNat) := takePadRight wave targetSamples cfg.paddingValue
   let prepared :=
     if cfg.doNormalize then
       zeroMeanUnitVar prepared0 validLenNat cfg.paddingValue
@@ -539,10 +539,10 @@ def waveformToWhisperFeatures
       s!"STFT frames mismatch: got={droppedFrames}, expected={expectedFrames} (stft_frames={stftFrames})"
 
   let stftVals ← stftDyn.toFloatArray
-  let freqNat := freqBins.toNat
-  let stftFramesNat := stftFrames.toNat
-  let framesNat := expectedFrames.toNat
-  let packedNat := packed.toNat
+  let freqNat := freqBins
+  let stftFramesNat := stftFrames
+  let framesNat := expectedFrames
+  let packedNat := packed
 
   let mut powerFlat : Array Float := Array.mkEmpty (freqNat * framesNat)
   for f in [:freqNat] do
@@ -552,7 +552,7 @@ def waveformToWhisperFeatures
       let im := stftVals.getD (base + 1) 0.0
       powerFlat := powerFlat.push (re * re + im * im)
 
-  let melFilterFlat := buildSlaneyMelFilterBankFlat freqNat melBins.toNat cfg.samplingRate.toNat
+  let melFilterFlat := buildSlaneyMelFilterBankFlat freqNat melBins cfg.samplingRate
   let powerSpec : Tensor { device := .CPU, shape := #[freqBins, expectedFrames], dtype := .Float32 } :=
     Tensor.reshapeChecked (Tensor.fromFloatArray powerFlat) #[freqBins, expectedFrames]
   let melFilter : Tensor { device := .CPU, shape := #[freqBins, melBins], dtype := .Float32 } :=
@@ -568,7 +568,7 @@ def waveformToWhisperFeatures
   let inputFeatures : Tensor { device := .CPU, shape := #[1, melBins, expectedFrames], dtype := .Float32 } :=
     Tensor.reshape normalized #[1, melBins, expectedFrames] (by simp [TensorSpec.numelOfShape])
 
-  let maskVals := buildFeatureAttentionMask validLenNat targetSamples.toNat hop.toNat cfg.returnAttentionMask
+  let maskVals := buildFeatureAttentionMask validLenNat targetSamples hop cfg.returnAttentionMask
   let featureAttentionMask : Tensor { device := .CPU, shape := #[1, expectedFrames], dtype := .Int64 } :=
     Tensor.reshapeChecked (Tensor.fromInt64Array maskVals) #[1, expectedFrames]
 
@@ -593,12 +593,12 @@ def waveformToWhisperFeaturesDynamic
   if cfg.samplingRate == 0 then
     throw <| IO.userError "Preprocessor config has sampling_rate=0"
 
-  let minSamplesRaw := ((minSeconds * cfg.samplingRate.toFloat) + 0.5).toUInt64
+  let minSamplesRaw := ((minSeconds * cfg.samplingRate.toFloat) + 0.5).toUInt64.toNat
   let minSamples := if minSamplesRaw == 0 then 1 else minSamplesRaw
   -- `stft(center := true)` reflection-pads by `nFft/2`, so very short inputs must
   -- still exceed that padding width to avoid a hard runtime exception in libtorch.
   let minStftSamples := (nFft / 2) + 1
-  let waveSamples := wave.size.toUInt64
+  let waveSamples := wave.size
   let targetSamplesRaw := if waveSamples >= minSamples then waveSamples else minSamples
   let targetSamples :=
     if targetSamplesRaw >= minStftSamples then
@@ -610,14 +610,14 @@ def waveformToWhisperFeaturesDynamic
   | none => pure ()
   | some sec =>
       if sec > 0.0 then
-        let maxSamples := ((sec * cfg.samplingRate.toFloat) + 0.5).toUInt64
+        let maxSamples := ((sec * cfg.samplingRate.toFloat) + 0.5).toUInt64.toNat
         if maxSamples > 0 && targetSamples > maxSamples then
           throw <| IO.userError
             s!"Audio duration exceeds maxSeconds={sec}: samples={targetSamples}, limit={maxSamples}"
       else
         pure ()
 
-  let (prepared0, validLenNat) := takePadRight wave targetSamples.toNat cfg.paddingValue
+  let (prepared0, validLenNat) := takePadRight wave targetSamples cfg.paddingValue
   let prepared :=
     if cfg.doNormalize then
       zeroMeanUnitVar prepared0 validLenNat cfg.paddingValue
@@ -667,7 +667,7 @@ def waveformToWhisperFeaturesDynamic
     let im : Tensor { device := runDevice, shape := #[freqBins, frames], dtype := .Float32 } := Tensor.reshapeChecked im3 #[freqBins, frames]
     let powerSpec : Tensor { device := runDevice, shape := #[freqBins, frames], dtype := .Float32 } := re * re + im * im
 
-    let melFilterFlat := buildSlaneyMelFilterBankFlat freqBins.toNat melBins.toNat cfg.samplingRate.toNat
+    let melFilterFlat := buildSlaneyMelFilterBankFlat freqBins melBins cfg.samplingRate
     let melFilterCpu : Tensor { device := .CPU, shape := #[freqBins, melBins], dtype := .Float32 } :=
       Tensor.reshapeChecked (Tensor.fromFloatArray melFilterFlat) #[freqBins, melBins]
     let melFilter : Tensor { device := runDevice, shape := #[freqBins, melBins], dtype := .Float32 } :=
@@ -683,8 +683,8 @@ def waveformToWhisperFeaturesDynamic
     let inputFeatures : Tensor { device := runDevice, shape := #[1, melBins, frames], dtype := .Float32 } :=
       Tensor.reshape normalized #[1, melBins, frames] (by simp [TensorSpec.numelOfShape])
 
-    let maskVals0 := buildFeatureAttentionMask validLenNat targetSamples.toNat hop.toNat cfg.returnAttentionMask
-    let maskVals := adjustMaskLength maskVals0 frames.toNat
+    let maskVals0 := buildFeatureAttentionMask validLenNat targetSamples hop cfg.returnAttentionMask
+    let maskVals := adjustMaskLength maskVals0 frames
     let featureAttentionMaskCpu : Tensor { device := .CPU, shape := #[1, frames], dtype := .Int64 } :=
       Tensor.reshapeChecked (Tensor.fromInt64Array maskVals) #[1, frames]
     let featureAttentionMask : Tensor { device := runDevice, shape := #[1, frames], dtype := .Int64 } :=
@@ -735,7 +735,7 @@ def wavToWhisperFeaturesDynamic
 
 /-- Backward-compatible convenience wrapper.
     This now runs the faithful Whisper-style frontend instead of pseudo-mel. -/
-def wavToPseudoMel {melBins frames : UInt64} (path : String) :
+def wavToPseudoMel {melBins frames : Nat} (path : String) :
     IO (Tensor { device := .CPU, shape := #[1, melBins, frames], dtype := .Float32 }) := do
   let cfg : PreprocessorConfig := {
     featureSize := melBins
@@ -751,7 +751,7 @@ def wavToPseudoMel {melBins frames : UInt64} (path : String) :
   let out ← wavToWhisperFeatures cfg path
   pure (Tensor.reshapeChecked out.inputFeatures #[1, melBins, frames])
 
-def fullFeatureAttentionMask {frames : UInt64} : Tensor { device := device, shape := #[1, frames], dtype := .Int64 } :=
+def fullFeatureAttentionMask {frames : Nat} : Tensor { device := device, shape := #[1, frames], dtype := .Int64 } :=
   (Tensor.fullInt #[1, frames] 1).to device
 
 def normalizeAudioTo16kFromWav (path : String) : IO (Array Float) := do

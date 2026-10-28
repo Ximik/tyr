@@ -33,7 +33,7 @@ def generateFixtures : IO Unit := do
   let device ← Device.cuda 0
   let x ← Tensor.uniformLike (Tensor.zeros #[64, 64] false device)
 
-  let (cosCpu, sinCpu) := Tensor.rotaryFreqs (64 : UInt64) (64 : UInt64) 10000.0
+  let (cosCpu, sinCpu) := Tensor.rotaryFreqs (64 : Nat) (64 : Nat) 10000.0
   let cos : Tensor { shape := #[64, 32], dtype := .Float32, device := device } := cosCpu.to device
   let sin : Tensor { shape := #[64, 32], dtype := .Float32, device := device } := sinCpu.to device
 
@@ -77,10 +77,10 @@ def runOnce : IO Bool := do
   pure check.ok
 
 private structure TrainingShape where
-  batch : UInt64
-  seqLen : UInt64
-  qHeads : UInt64
-  kvHeads : UInt64
+  batch : Nat
+  seqLen : Nat
+  qHeads : Nat
+  kvHeads : Nat
 
 private def trainingMatrix : LeanBenchmark.Matrix TrainingShape := {
   defaultProfile := "training"
@@ -111,7 +111,7 @@ private def trainingMatrix : LeanBenchmark.Matrix TrainingShape := {
 }
 
 /-- Reference forward and adjoint rotations for separate query and key head counts. -/
-def referenceTraining {device : Device} {batch seqLen qHeads kvHeads : UInt64} {dtype : DType}
+def referenceTraining {device : Device} {batch seqLen qHeads kvHeads : Nat} {dtype : DType}
     (q : Tensor { shape := #[batch, seqLen, qHeads, 64], dtype := dtype, device := device })
     (k : Tensor { shape := #[batch, seqLen, kvHeads, 64], dtype := dtype, device := device })
     (gradQ : Tensor { shape := #[batch, seqLen, qHeads, 64], dtype := dtype, device := device })
@@ -146,20 +146,25 @@ private def benchmarkTrainingShape (cfg : Benchmark.Config) (caseLabel : String)
   let gridX := (totalPairs + 1023) / 1024
   let stream ← torch.cuda_current_stream
   let useTalkerSpecialization := qHeads == 16 && kvHeads == 2 && seqLen == 768
+  let qRowsArg ← Tyr.GPU.Codegen.launchArg qRows "qRows"
+  let kRowsArg ← Tyr.GPU.Codegen.launchArg kRows "kRows"
+  let qHeadsArg ← Tyr.GPU.Codegen.launchArg qHeads "qHeads"
+  let kvHeadsArg ← Tyr.GPU.Codegen.launchArg kvHeads "kvHeads"
+  let seqLenArg ← Tyr.GPU.Codegen.launchArg seqLen "seqLen"
   let launchForward : IO Unit :=
     if useTalkerSpecialization then
       rotaryFwdQwen3TtsTalkerD64Bf16Direct.launch q.raw k.raw sin.raw cos.raw qOut.raw kOut.raw
-        qRows kRows gridX 1 1 256 1 1 0 stream
+        qRowsArg kRowsArg gridX 1 1 256 1 1 0 stream
     else
       rotaryFwdQKD64Bf16Direct.launch q.raw k.raw sin.raw cos.raw qOut.raw kOut.raw
-        qRows kRows qHeads kvHeads seqLen gridX 1 1 256 1 1 0 stream
+        qRowsArg kRowsArg qHeadsArg kvHeadsArg seqLenArg gridX 1 1 256 1 1 0 stream
   let launchBackward : IO Unit :=
     if useTalkerSpecialization then
       rotaryBwdQwen3TtsTalkerD64Bf16Direct.launch gradQ.raw gradK.raw sin.raw cos.raw
-        gradQOut.raw gradKOut.raw qRows kRows gridX 1 1 256 1 1 0 stream
+        gradQOut.raw gradKOut.raw qRowsArg kRowsArg gridX 1 1 256 1 1 0 stream
     else
       rotaryBwdQKD64Bf16Direct.launch gradQ.raw gradK.raw sin.raw cos.raw gradQOut.raw gradKOut.raw
-        qRows kRows qHeads kvHeads seqLen gridX 1 1 256 1 1 0 stream
+        qRowsArg kRowsArg qHeadsArg kvHeadsArg seqLenArg gridX 1 1 256 1 1 0 stream
   launchForward
   launchBackward
   torch.cuda_synchronize

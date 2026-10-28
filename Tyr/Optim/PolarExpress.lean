@@ -29,7 +29,7 @@ def newtonSchulzCoeffs : Array (Float × Float × Float) := #[
 /-- Configuration for Polar Express -/
 structure Config where
   /-- Number of Newton-Schulz iterations (typically 5) -/
-  numIters : UInt64 := 5
+  numIters : Nat := 5
   /-- Whether to use split baddbmm for memory efficiency (advanced) -/
   splitBaddbmm : Bool := false
   deriving Repr, Inhabited
@@ -61,7 +61,7 @@ def apply {σ : StaticSpec} (G : Tensor σ) (cfg : Config := {}) : IO (Tensor σ
 
     This ensures the orthogonalization is always applied to the "short" dimension.
 -/
-def muonOrthogonalize {σ : StaticSpec} (G : Tensor σ) (numIters : UInt64 := 5) :
+def muonOrthogonalize {σ : StaticSpec} (G : Tensor σ) (numIters : Nat := 5) :
     IO (Tensor (σ.withDType .BFloat16)) := do
   dist.muonOrthogonalize G numIters
 
@@ -93,7 +93,7 @@ def applyInPlace {σ : StaticSpec} (G : Tensor σ) (cfg : Config := {}) : IO (Te
     This is used in Newton-Schulz iterations: C = A @ A.T
     Optimized for symmetric output.
 -/
-def computeXXT {m n : UInt64} {d : DType} {dev : Device}
+def computeXXT {m n : Nat} {d : DType} {dev : Device}
     (A : Tensor ⟨#[m, n], d, dev⟩) : IO (Tensor ⟨#[m, m], d, dev⟩) := do
   dist.xxt A
 

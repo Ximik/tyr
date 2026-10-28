@@ -29,31 +29,31 @@ The tangent space at X is the horizontal space:
 /-- Stiefel manifold St(n, p): n×p matrices with orthonormal columns.
     Constraint: XᵀX = Iₚ (p×p identity).
     The `tall` witness records that orthonormal p-column frames need n ≥ p. -/
-structure Stiefel (n p : UInt64) (dtype : DType := .Float32)
+structure Stiefel (n p : Nat) (dtype : DType := .Float32)
     (device : Device := .CPU) where
   /-- The underlying n×p matrix -/
   matrix : Tensor ⟨#[n, p], dtype, device⟩
   /-- Orthonormal p-column frames in ℝⁿ require p ≤ n. -/
-  tall : p.toNat ≤ n.toNat
+  tall : p ≤ n
 
 namespace Stiefel
 
 /-- Create a Stiefel element from the first p columns of a random matrix via QR.
     Uses QR decomposition of a random n×p matrix. -/
-def random (n p : UInt64) (h : p.toNat ≤ n.toNat := by decide) : IO (Stiefel n p) := do
+def random (n p : Nat) (h : p ≤ n := by decide) : IO (Stiefel n p) := do
   let mat ← Tensor.randn #[n, p]
   -- QR decomposition gives Q with orthonormal columns
   let (Q, _R) := Tensor.qrReduced mat h
   return ⟨Q, h⟩
 
 /-- Identity element for St(n, n) = O(n) -/
-def identity [DType.ConstantSupported d dev] (n : UInt64) : Stiefel n n d dev :=
+def identity [DType.ConstantSupported d dev] (n : Nat) : Stiefel n n d dev :=
   ⟨Tensor.eyeFor d dev, Nat.le_refl _⟩
 
 /-- Project a general matrix to the Stiefel manifold using QR decomposition.
     The Q factor of QR has orthonormal columns. -/
-def project (n p : UInt64) (mat : Tensor ⟨#[n, p], d, dev⟩)
-    (h : p.toNat ≤ n.toNat := by decide) : Stiefel n p d dev :=
+def project (n p : Nat) (mat : Tensor ⟨#[n, p], d, dev⟩)
+    (h : p ≤ n := by decide) : Stiefel n p d dev :=
   let (Q, _R) := Tensor.qrReduced mat h
   ⟨Q, h⟩
 
@@ -61,7 +61,7 @@ end Stiefel
 
 /-- Tangent vector on the Stiefel manifold.
     Z ∈ TₓSt(n,p) satisfies: XᵀZ + ZᵀX = 0 (XᵀZ is skew-symmetric) -/
-structure StiefelTangent (n p : UInt64) (dtype : DType := .Float32)
+structure StiefelTangent (n p : Nat) (dtype : DType := .Float32)
     (device : Device := .CPU) where
   /-- The tangent vector as an n×p matrix -/
   vec : Tensor ⟨#[n, p], dtype, device⟩
@@ -69,7 +69,7 @@ structure StiefelTangent (n p : UInt64) (dtype : DType := .Float32)
 namespace StiefelTangent
 
 /-- Zero tangent vector -/
-def zero [DType.ConstantSupported d dev] (n p : UInt64) : StiefelTangent n p d dev :=
+def zero [DType.ConstantSupported d dev] (n p : Nat) : StiefelTangent n p d dev :=
   ⟨Tensor.zerosFor ⟨#[n, p], d, dev⟩⟩
 
 /-- Add two tangent vectors -/
@@ -95,7 +95,7 @@ end StiefelTangent
 
 /-- Stiefel manifold as a DifferentiableManifold.
     Uses QR retraction: R(X, Z) = qr(X + Z).Q -/
-instance stiefelManifold (n p : UInt64) : DifferentiableManifold (Stiefel n p d dev) where
+instance stiefelManifold (n p : Nat) : DifferentiableManifold (Stiefel n p d dev) where
   Tangent _ := StiefelTangent n p d dev
   Cotangent _ := StiefelTangent n p d dev
   zeroTangent x := ⟨Tensor.zerosLike x.matrix⟩

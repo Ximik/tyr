@@ -22,7 +22,7 @@ open torch.safetensors (pushUnique
 private def freezeStored {shape : Shape} (tensor : SomeDTypeTensor shape device) :
     SomeDTypeTensor shape device := ⟨tensor.1, tensor.2.detach⟩
 
-private def requireLinear {outDim inDim : UInt64} (dtype : DType)
+private def requireLinear {outDim inDim : Nat} (dtype : DType)
     (layer : Σ stored : DType, Gemma4VisionLinear (device := device) outDim inDim stored) :
     IO (Gemma4VisionLinear (device := device) outDim inDim dtype) :=
   if h : layer.1 = dtype then pure (h ▸ layer.2)
@@ -89,7 +89,7 @@ private def tryLoadVisionParameter {s : Shape}
     : IO (Option (SomeDTypeTensor (s) device)) :=
   tryLoadOptionalTensorCandidates (device := device) path (visionParameterNameCandidates name) s
 
-private def loadVisionLinearSharded (modelDir : String) (name : String) (outDim inDim : UInt64)
+private def loadVisionLinearSharded (modelDir : String) (name : String) (outDim inDim : Nat)
     : IO (Σ dtype : DType, Gemma4VisionLinear (device := device) outDim inDim dtype) := do
   let w ← loadVisionParameterSharded (s := #[outDim, inDim]) modelDir name
   let inputMin ← tryLoadVisionScalarSharded modelDir s!"{name}.input_min"
@@ -104,7 +104,7 @@ private def loadVisionLinearSharded (modelDir : String) (name : String) (outDim 
     output_max := outputMax
   }⟩
 
-private def loadVisionLinear (path : String) (name : String) (outDim inDim : UInt64)
+private def loadVisionLinear (path : String) (name : String) (outDim inDim : Nat)
     : IO (Σ dtype : DType, Gemma4VisionLinear (device := device) outDim inDim dtype) := do
   let w ← loadVisionParameter (s := #[outDim, inDim]) path name
   let inputMin ← tryLoadVisionScalar path s!"{name}.input_min"
@@ -119,17 +119,17 @@ private def loadVisionLinear (path : String) (name : String) (outDim inDim : UIn
     output_max := outputMax
   }⟩
 
-private def loadVisionRMSNormSharded (modelDir : String) (name : String) (dim : UInt64) (eps : Float)
+private def loadVisionRMSNormSharded (modelDir : String) (name : String) (dim : Nat) (eps : Float)
     : IO (Gemma4RMSNorm (device := device) dim) := do
   let w ← loadVisionParameterSharded (s := #[dim]) modelDir name
   pure (Gemma4RMSNorm.fromCheckpointWeight (freezeStored w) eps)
 
-private def loadVisionRMSNorm (path : String) (name : String) (dim : UInt64) (eps : Float)
+private def loadVisionRMSNorm (path : String) (name : String) (dim : Nat) (eps : Float)
     : IO (Gemma4RMSNorm (device := device) dim) := do
   let w ← loadVisionParameter (s := #[dim]) path name
   pure (Gemma4RMSNorm.fromCheckpointWeight (freezeStored w) eps)
 
-private def loadVisionAttentionSharded (modelDir : String) (cfg : VisionConfig) (layerIdx : UInt64)
+private def loadVisionAttentionSharded (modelDir : String) (cfg : VisionConfig) (layerIdx : Nat)
     : IO (Gemma4VisionAttention (dtype := dtype) (device := device) cfg) := do
   let p := s!"model.vision_tower.encoder.layers.{layerIdx}.self_attn"
   pure {
@@ -141,7 +141,7 @@ private def loadVisionAttentionSharded (modelDir : String) (cfg : VisionConfig) 
     k_norm := (← loadVisionRMSNormSharded modelDir s!"{p}.k_norm" cfg.head_dim cfg.rms_norm_eps)
   }
 
-private def loadVisionAttention (path : String) (cfg : VisionConfig) (layerIdx : UInt64)
+private def loadVisionAttention (path : String) (cfg : VisionConfig) (layerIdx : Nat)
     : IO (Gemma4VisionAttention (dtype := dtype) (device := device) cfg) := do
   let p := s!"model.vision_tower.encoder.layers.{layerIdx}.self_attn"
   pure {
@@ -153,7 +153,7 @@ private def loadVisionAttention (path : String) (cfg : VisionConfig) (layerIdx :
     k_norm := (← loadVisionRMSNorm path s!"{p}.k_norm" cfg.head_dim cfg.rms_norm_eps)
   }
 
-private def loadVisionMLPSharded (modelDir : String) (cfg : VisionConfig) (layerIdx : UInt64)
+private def loadVisionMLPSharded (modelDir : String) (cfg : VisionConfig) (layerIdx : Nat)
     : IO (Gemma4VisionMLP (dtype := dtype) (device := device) cfg) := do
   let p := s!"model.vision_tower.encoder.layers.{layerIdx}.mlp"
   pure {
@@ -162,7 +162,7 @@ private def loadVisionMLPSharded (modelDir : String) (cfg : VisionConfig) (layer
     down_proj := (← requireLinear dtype (← loadVisionLinearSharded modelDir s!"{p}.down_proj" cfg.hidden_size cfg.intermediate_size))
   }
 
-private def loadVisionMLP (path : String) (cfg : VisionConfig) (layerIdx : UInt64)
+private def loadVisionMLP (path : String) (cfg : VisionConfig) (layerIdx : Nat)
     : IO (Gemma4VisionMLP (dtype := dtype) (device := device) cfg) := do
   let p := s!"model.vision_tower.encoder.layers.{layerIdx}.mlp"
   pure {
@@ -171,7 +171,7 @@ private def loadVisionMLP (path : String) (cfg : VisionConfig) (layerIdx : UInt6
     down_proj := (← requireLinear dtype (← loadVisionLinear path s!"{p}.down_proj" cfg.hidden_size cfg.intermediate_size))
   }
 
-private def loadVisionBlockSharded (modelDir : String) (cfg : VisionConfig) (layerIdx : UInt64)
+private def loadVisionBlockSharded (modelDir : String) (cfg : VisionConfig) (layerIdx : Nat)
     : IO (Gemma4VisionBlock (dtype := dtype) (device := device) cfg) := do
   let p := s!"model.vision_tower.encoder.layers.{layerIdx}"
   pure {
@@ -183,7 +183,7 @@ private def loadVisionBlockSharded (modelDir : String) (cfg : VisionConfig) (lay
     mlp := (← loadVisionMLPSharded modelDir cfg layerIdx)
   }
 
-private def loadVisionBlock (path : String) (cfg : VisionConfig) (layerIdx : UInt64)
+private def loadVisionBlock (path : String) (cfg : VisionConfig) (layerIdx : Nat)
     : IO (Gemma4VisionBlock (dtype := dtype) (device := device) cfg) := do
   let p := s!"model.vision_tower.encoder.layers.{layerIdx}"
   pure {
@@ -235,8 +235,8 @@ private def loadVisionModelSharded (modelDir : String) (cfg : VLConfig) : IO (Σ
   let floating ← IO.ofExcept dtype.realFloating?
   let _ := floating.down
   let mut blocks : Array (Gemma4VisionBlock (dtype := dtype) (device := device) cfg.vision_config) := #[]
-  for i in [:cfg.vision_config.num_hidden_layers.toNat] do
-    blocks := blocks.push (← loadVisionBlockSharded modelDir cfg.vision_config i.toUInt64)
+  for i in [:cfg.vision_config.num_hidden_layers] do
+    blocks := blocks.push (← loadVisionBlockSharded modelDir cfg.vision_config i)
   let stdBias ← tryLoadVisionParameterSharded (s := #[cfg.vision_config.hidden_size]) modelDir "model.vision_tower.std_bias"
   let stdScale ← tryLoadVisionParameterSharded (s := #[cfg.vision_config.hidden_size]) modelDir "model.vision_tower.std_scale"
   pure ⟨RealFloatingDType.ofDType dtype, {
@@ -252,8 +252,8 @@ private def loadVisionModel (path : String) (cfg : VLConfig) : IO (Σ dtype : Re
   let floating ← IO.ofExcept dtype.realFloating?
   let _ := floating.down
   let mut blocks : Array (Gemma4VisionBlock (dtype := dtype) (device := device) cfg.vision_config) := #[]
-  for i in [:cfg.vision_config.num_hidden_layers.toNat] do
-    blocks := blocks.push (← loadVisionBlock path cfg.vision_config i.toUInt64)
+  for i in [:cfg.vision_config.num_hidden_layers] do
+    blocks := blocks.push (← loadVisionBlock path cfg.vision_config i)
   let stdBias ← tryLoadVisionParameter (s := #[cfg.vision_config.hidden_size]) path "model.vision_tower.std_bias"
   let stdScale ← tryLoadVisionParameter (s := #[cfg.vision_config.hidden_size]) path "model.vision_tower.std_scale"
   pure ⟨RealFloatingDType.ofDType dtype, {

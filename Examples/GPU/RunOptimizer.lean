@@ -13,7 +13,7 @@ variable {device : Device}
 open Tyr.GPU.Kernels.Optimizer
 
 private structure OptimizerShape where
-  elements : UInt64
+  elements : Nat
 
 private def optimizerMatrix : LeanBenchmark.Matrix OptimizerShape := {
   defaultProfile := "qwen3tts-talker-primary"
@@ -36,7 +36,7 @@ private def optimizerMatrix : LeanBenchmark.Matrix OptimizerShape := {
 }
 
 private def benchmarkShape (cfg : Benchmark.Config) (stream : UInt64)
-    (caseLabel : String) (elements : UInt64) : IO (String × Bool) := do
+    (caseLabel : String) (elements : Nat) : IO (String × Bool) := do
   let device ← Device.cuda 0
   let master : Tensor { shape := #[elements], dtype := .Float32, device := device } ← Tensor.randn #[elements] false device
   let masterOriginal : Tensor { shape := #[elements], dtype := .Float32, device := device } ← Tensor.randn #[elements] false device
@@ -63,10 +63,11 @@ private def benchmarkShape (cfg : Benchmark.Config) (stream : UInt64)
     referenceUpdate masterOriginal grad moment1 moment2 learningRate beta1 beta2 epsilon
       weightDecay invBias1 invBias2
   let blocks := (elements + 255) / 256
+  let elementsArg ← Tyr.GPU.Codegen.launchArg elements "elements"
   let launch (master : Tensor { shape := #[elements], dtype := .Float32, device := device })
       (model grad : Tensor { shape := #[elements], dtype := .BFloat16, device := device })
       (moment1 moment2 : Tensor { shape := #[elements], dtype := .Float32, device := device }) : IO Unit :=
-    adamWMasterBf16.launch master.raw model.raw grad.raw moment1.raw moment2.raw elements
+    adamWMasterBf16.launch master.raw model.raw grad.raw moment1.raw moment2.raw elementsArg
       learningRate.toFloat32 beta1.toFloat32 beta2.toFloat32 epsilon.toFloat32
       weightDecay.toFloat32 invBias1.toFloat32 invBias2.toFloat32
       blocks 1 1 256 1 1 0 stream

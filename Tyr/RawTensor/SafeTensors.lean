@@ -8,7 +8,7 @@ namespace torch.RawTensor
 /-- Read `length` bytes at byte `offset` of `path` into a new CPU tensor of
 `dtype` and `shape`. Fails unless `length` is that tensor's byte size. -/
 @[extern "lean_torch_safetensors_read"]
-opaque safeTensorsRead (path : @& String) (offset length : UInt64) (dtype : DType)
+opaque safeTensorsRead (path : @& String) (offset length : @& Nat) (dtype : DType)
     (shape : @& Shape) : IO RawTensor
 
 /-- Write a SafeTensors file: the header's byte size, the header, then each

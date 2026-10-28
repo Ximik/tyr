@@ -26,18 +26,18 @@ def norm {s : Shape} (x : Activation s) : Activation s :=
 
 /-- Diffusion model configuration -/
 structure Config where
-  seq_len : UInt64 := 256         -- sequence length for generation
-  vocab_size : UInt64 := 128      -- ASCII vocab (0-127), where 0 = [MASK]
+  seq_len : Nat := 256         -- sequence length for generation
+  vocab_size : Nat := 128      -- ASCII vocab (0-127), where 0 = [MASK]
   mask_token_id : UInt64 := 0     -- NUL character as mask token
-  n_layer : UInt64 := 4           -- transformer blocks (smaller for testing)
-  n_head : UInt64 := 4            -- attention heads
-  n_embd : UInt64 := 256          -- embedding dimension (smaller for testing)
-  diffusion_steps : UInt64 := 64  -- timesteps for diffusion (smaller for testing)
-  context_len : UInt64 := 16      -- prefix tokens never masked
+  n_layer : Nat := 4           -- transformer blocks (smaller for testing)
+  n_head : Nat := 4            -- attention heads
+  n_embd : Nat := 256          -- embedding dimension (smaller for testing)
+  diffusion_steps : Nat := 64  -- timesteps for diffusion (smaller for testing)
+  context_len : Nat := 16      -- prefix tokens never masked
   deriving Repr, Inhabited
 
 /-- Compute head dimension from config -/
-def Config.headDim (cfg : Config) : UInt64 := cfg.n_embd / cfg.n_head
+def Config.headDim (cfg : Config) : Nat := cfg.n_embd / cfg.n_head
 
 /-- Tiny config for unit tests -/
 def Config.tiny : Config :=
@@ -68,7 +68,7 @@ structure DiffusionParams (cfg : Config) where
 def DiffusionParams.init (cfg : Config) : IO (DiffusionParams cfg) := do
   if cfg.n_head == 0 || cfg.n_embd == 0 || cfg.n_embd % cfg.n_head != 0 ||
       cfg.headDim % 2 != 0 || cfg.seq_len == 0 || cfg.diffusion_steps == 0 ||
-      cfg.context_len > cfg.seq_len || cfg.mask_token_id >= cfg.vocab_size then
+      cfg.context_len > cfg.seq_len || cfg.mask_token_id.toNat >= cfg.vocab_size then
     throw <| IO.userError "Invalid diffusion dimensions, rotary head width, context, or mask token"
   let scale := 1.0 / Float.sqrt cfg.n_embd.toFloat
 
@@ -78,7 +78,7 @@ def DiffusionParams.init (cfg : Config) : IO (DiffusionParams cfg) := do
 
   -- Transformer blocks
   let mut blocks := #[]
-  for _ in [:cfg.n_layer.toNat] do
+  for _ in [:cfg.n_layer] do
     let block ← BlockParams.init cfg.n_embd cfg.n_head cfg.n_head
     blocks := blocks.push block
 
@@ -93,7 +93,7 @@ def DiffusionParams.init (cfg : Config) : IO (DiffusionParams cfg) := do
   }
 
 /-- Bidirectional attention forward pass (is_causal=false) -/
-def bidirectionalAttentionForward {batch seq n_embd n_head : UInt64}
+def bidirectionalAttentionForward {batch seq n_embd n_head : Nat}
     (params : AttentionParams n_embd n_head n_head)
     (x : Activation #[batch, seq, n_embd])
     (rotaryCache : RotaryCache rotaryLen (n_embd / n_head))
@@ -136,7 +136,7 @@ def bidirectionalAttentionForward {batch seq n_embd n_head : UInt64}
   Tensor.linear3d attn params.c_proj
 
 /-- MLP forward pass with ReLU². -/
-def mlpForward {batch seq n_embd : UInt64}
+def mlpForward {batch seq n_embd : Nat}
     (params : MLPParams n_embd)
     (x : Activation #[batch, seq, n_embd])
     : Activation #[batch, seq, n_embd] :=
@@ -145,7 +145,7 @@ def mlpForward {batch seq n_embd : UInt64}
   Tensor.linear3d h params.c_proj             -- Project back
 
 /-- Block forward pass (pre-norm with bidirectional attention) -/
-def blockForward {batch seq n_embd n_head : UInt64}
+def blockForward {batch seq n_embd n_head : Nat}
     (params : BlockParams n_embd n_head n_head)
     (x : Activation #[batch, seq, n_embd])
     (rotaryCache : RotaryCache rotaryLen (n_embd / n_head))
@@ -156,7 +156,7 @@ def blockForward {batch seq n_embd n_head : UInt64}
   x + mlpForward params.mlp (norm x)
 
 /-- Full diffusion model forward pass -/
-def forward {cfg : Config} {batch seq : UInt64}
+def forward {cfg : Config} {batch seq : Nat}
     (params : DiffusionParams cfg)
     (x_t : Tokens #[batch, seq])              -- Noisy tokens (with masks)
     (t : Tokens #[batch])                     -- Timestep indices
@@ -183,7 +183,7 @@ def forward {cfg : Config} {batch seq : UInt64}
   Tensor.linear3d x params.output_head
 
 /-- Compute diffusion loss (cross-entropy on all positions, masking done separately) -/
-def loss {cfg : Config} {batch seq : UInt64}
+def loss {cfg : Config} {batch seq : Nat}
     (logits : Activation #[batch, seq, cfg.vocab_size])
     (targets : Tokens #[batch, seq])
     : Activation #[] :=
@@ -192,19 +192,19 @@ def loss {cfg : Config} {batch seq : UInt64}
   Tensor.crossEntropy logitsFlat targetsFlat
 
 /-- Helper to get mask of positions that are still masked -/
-def getMaskedPositions' {batch seq : UInt64}
+def getMaskedPositions' {batch seq : Nat}
     (x : Tokens #[batch, seq])
     (mask_token_id : UInt64)
     : Mask #[batch, seq] :=
   Tensor.eqScalar x mask_token_id.toInt64
 
-private def samplingMask {batch seq : UInt64} (x : Tokens #[batch, seq])
-    (maskToken protectedPrefix : UInt64) : Mask #[batch, seq] :=
+private def samplingMask {batch seq : Nat} (x : Tokens #[batch, seq])
+    (maskToken : UInt64) (protectedPrefix : Nat) : Mask #[batch, seq] :=
   let protectedMask := ((Tensor.arange seq).to x.device).ltScalar protectedPrefix.toFloat
     |>.reshapeChecked #[1, seq] |>.expand #[batch, seq]
   Tensor.logicalAnd (getMaskedPositions' x maskToken) protectedMask.logicalNot
 
-private def validateSampling (cfg : Config) (batch : UInt64) (temperature : Float) : IO Unit := do
+private def validateSampling (cfg : Config) (batch : Nat) (temperature : Float) : IO Unit := do
   if batch == 0 || cfg.seq_len == 0 || cfg.diffusion_steps == 0 || cfg.context_len > cfg.seq_len ||
       temperature <= 0 || !temperature.isFinite then
     throw <| IO.userError "Diffusion sampling requires valid dimensions and finite positive temperature"
@@ -213,7 +213,7 @@ private def validateSampling (cfg : Config) (batch : UInt64) (temperature : Floa
     At each step, decode all tokens whose confidence exceeds a threshold.
     Ensures at least one token is decoded per step if any remain masked.
 -/
-def sampleConfidence {cfg : Config} {batch : UInt64}
+def sampleConfidence {cfg : Config} {batch : Nat}
     (params : DiffusionParams cfg)
     (rotaryCache : RotaryCache rotaryLen cfg.headDim)
     (confidenceThreshold : Float := 0.5)
@@ -251,8 +251,8 @@ def sampleConfidence {cfg : Config} {batch : UInt64}
     -- Create timestep tensor: start at T-1 (fully masked) and decrease toward 0
     -- During training: t=T-1 means high masking, t=0 means low masking
     -- During sampling: we start fully masked, so use t=T-1 and decrease
-    let tVal := (cfg.diffusion_steps.toNat - 1 - step).max 0
-    let t := Tensor.fullInt #[batch] tVal.toUInt64.toInt64
+    let tVal := (cfg.diffusion_steps - 1 - step).max 0
+    let t := Tensor.fullInt #[batch] tVal.toInt64
 
     -- Predict tokens
     let logits := forward params x t rotaryCache
@@ -302,10 +302,10 @@ def sampleConfidence {cfg : Config} {batch : UInt64}
 /-- Sample using top-K parallel decoding.
     At each step, decode exactly K tokens with highest confidence.
 -/
-def sampleTopK {cfg : Config} {batch : UInt64}
+def sampleTopK {cfg : Config} {batch : Nat}
     (params : DiffusionParams cfg)
     (rotaryCache : RotaryCache rotaryLen cfg.headDim)
-    (k : UInt64)
+    (k : Nat)
     (temperature : Float := 1.0)
     (maxSteps : Nat := 256)
     (contextTokens : Option (Tokens #[batch, cfg.context_len]) := none)
@@ -334,8 +334,8 @@ def sampleTopK {cfg : Config} {batch : UInt64}
       break
 
     -- Create timestep tensor: start at T-1 (fully masked) and decrease toward 0
-    let tVal := (cfg.diffusion_steps.toNat - 1 - step).max 0
-    let t := Tensor.fullInt #[batch] tVal.toUInt64.toInt64
+    let tVal := (cfg.diffusion_steps - 1 - step).max 0
+    let t := Tensor.fullInt #[batch] tVal.toInt64
 
     -- Predict tokens
     let logits := forward params x t rotaryCache
@@ -377,10 +377,10 @@ def sampleTopK {cfg : Config} {batch : UInt64}
     Each block is an independent sample from the diffusion model.
     Returns tensor of shape [numBlocks, seq_len].
 -/
-def sampleMultiple {cfg : Config} (numBlocks : UInt64)
+def sampleMultiple {cfg : Config} (numBlocks : Nat)
     (params : DiffusionParams cfg)
     (rotaryCache : RotaryCache rotaryLen cfg.headDim)
-    (k : UInt64)
+    (k : Nat)
     (temperature : Float := 1.0)
     (maxSteps : Nat := 256)
     : IO (Tokens #[numBlocks, cfg.seq_len]) := do
@@ -391,11 +391,11 @@ def sampleMultiple {cfg : Config} (numBlocks : UInt64)
     contextTokens: [numBlocks, context_len] - can be same or different per block
     Returns tensor of shape [numBlocks, seq_len].
 -/
-def sampleMultipleWithContext {cfg : Config} (numBlocks : UInt64)
+def sampleMultipleWithContext {cfg : Config} (numBlocks : Nat)
     (params : DiffusionParams cfg)
     (rotaryCache : RotaryCache rotaryLen cfg.headDim)
     (contextTokens : Tokens #[numBlocks, cfg.context_len])
-    (k : UInt64)
+    (k : Nat)
     (temperature : Float := 1.0)
     (maxSteps : Nat := 256)
     : IO (Tokens #[numBlocks, cfg.seq_len]) := do
@@ -405,11 +405,11 @@ def sampleMultipleWithContext {cfg : Config} (numBlocks : UInt64)
     prompt: [context_len] - single prompt tensor replicated to all blocks
     Returns tensor of shape [numBlocks, seq_len].
 -/
-def sampleMultipleWithPrompt {cfg : Config} (numBlocks : UInt64)
+def sampleMultipleWithPrompt {cfg : Config} (numBlocks : Nat)
     (params : DiffusionParams cfg)
     (rotaryCache : RotaryCache rotaryLen cfg.headDim)
     (prompt : Tokens #[cfg.context_len])
-    (k : UInt64)
+    (k : Nat)
     (temperature : Float := 1.0)
     (maxSteps : Nat := 256)
     : IO (Tokens #[numBlocks, cfg.seq_len]) := do

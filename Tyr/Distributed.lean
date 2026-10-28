@@ -61,7 +61,7 @@ def allReduceAsync {σ : StaticSpec} (tensor : Tensor σ) (op : ReduceOp := .sum
 
 /-- Return the tensor broadcast from `srcRank`, preserving the input value and
     its `requiresGrad` flag. A trainable result is a new leaf. -/
-def broadcast {σ : StaticSpec} (tensor : Tensor σ) (srcRank : UInt64) : IO (Tensor σ) := do
+def broadcast {σ : StaticSpec} (tensor : Tensor σ) (srcRank : Nat) : IO (Tensor σ) := do
   let requiresGrad := tensor.requiresGrad
   let result ← data.cloneInferenceIO tensor
   broadcastImpl result.raw srcRank
@@ -82,7 +82,7 @@ private def collectiveOutput {σ : StaticSpec} (shape : Shape) (_input : Tensor 
 /-- Reduce-scatter (synchronous), return-allocated: the input's leading axis is
     chunked across `worldSize` ranks, so the result spec is computed from the
     input spec — no independent output shape can be claimed. -/
-def reduceScatter {σ : StaticSpec} (worldSize : UInt64) (input : Tensor σ)
+def reduceScatter {σ : StaticSpec} (worldSize : Nat) (input : Tensor σ)
     (op : ReduceOp := .sum)
     : IO (Tensor (σ.withShape (σ.shape.set! 0 (σ.shape.getD 0 0 / worldSize)))) := do
   let output ← collectiveOutput (σ.shape.set! 0 (σ.shape.getD 0 0 / worldSize)) input
@@ -101,7 +101,7 @@ def reduceScatterList {σ : StaticSpec} (output : Tensor σ) (inputs : Array (Te
 /-- All-gather (synchronous), return-allocated: the result concatenates the
     `worldSize` per-rank contributions along the leading axis, so its spec is
     computed from the input spec — no independent output shape can be claimed. -/
-def allGather {σ : StaticSpec} (worldSize : UInt64) (input : Tensor σ)
+def allGather {σ : StaticSpec} (worldSize : Nat) (input : Tensor σ)
     : IO (Tensor (σ.withShape (σ.shape.set! 0 (σ.shape.getD 0 0 * worldSize)))) := do
   let output ← collectiveOutput (σ.shape.set! 0 (σ.shape.getD 0 0 * worldSize)) input
   let _ ← allGatherImpl output.raw input.raw 0
@@ -152,7 +152,7 @@ private def checkedResult {σ : StaticSpec} (operation : String) (dtype : DType)
 
 /-- `A @ Aᵀ` for an indexed matrix: the result shape is computed from the
     input, not claimed independently. -/
-def xxt {m n : UInt64} {d : DType} {dev : Device}
+def xxt {m n : Nat} {d : DType} {dev : Device}
     (A : Tensor ⟨#[m, n], d, dev⟩) : IO (Tensor ⟨#[m, m], d, dev⟩) := do
   checkedResult "xxt" A.raw.dtype A.device (← xxtImpl A.raw)
 
@@ -166,12 +166,12 @@ def newtonSchulzStep {σ : StaticSpec} (X : Tensor σ) (a b c : Float) : IO (Ten
 
 /-- Polar Express orthogonalization via Newton-Schulz iterations,
     spec-preserving. -/
-def polarExpress {σ : StaticSpec} (G : Tensor σ) (numIters : UInt64 := 5) : IO (Tensor σ) := do
+def polarExpress {σ : StaticSpec} (G : Tensor σ) (numIters : Nat := 5) : IO (Tensor σ) := do
   checkedResult "polarExpress" G.raw.dtype G.device (← polarExpressImpl G.raw numIters)
 
 /-- Muon orthogonalization runs and returns BF16, including for Float32 inputs.
     Shape and placement are preserved; the output dtype is explicit. -/
-def muonOrthogonalize {σ : StaticSpec} (G : Tensor σ) (numIters : UInt64 := 5) :
+def muonOrthogonalize {σ : StaticSpec} (G : Tensor σ) (numIters : Nat := 5) :
     IO (Tensor (σ.withDType .BFloat16)) := do
   checkedResult "muonOrthogonalize" .BFloat16 G.device (← muonOrthogonalizeImpl G.raw numIters)
 
@@ -184,7 +184,7 @@ def cautiousUpdate {σ : StaticSpec} (param update : Tensor σ) (lr wd : Float) 
 /-- Run a distributed computation and always clean up after a successful init.
     If both the action and cleanup fail, preserve the action error; after a
     successful action, report any cleanup error instead of returning its result. -/
-def withDistributed (backend masterAddr : String) (masterPort rank worldSize : UInt64)
+def withDistributed (backend masterAddr : String) (masterPort rank worldSize : Nat)
     (action : IO α) : IO α := do
   initProcessGroup backend masterAddr masterPort rank worldSize
   let result ← action.toBaseIO

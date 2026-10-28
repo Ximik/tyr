@@ -20,8 +20,8 @@ def loadImagePatches (cfg : VLConfig) (path : String)
 def loadVideoPatches
     (cfg : VLConfig)
     (path : String)
-    (maxFrames : UInt64 := 64)
-    (frameStride : UInt64 := 1)
+    (maxFrames : Nat := 64)
+    (frameStride : Nat := 1)
     : IO (Sigma (fun n => Tensor { device := .CPU, shape := #[n, VisionConfig.patchDim cfg.vision_config], dtype := .Float32 })) :=
   qwen35.media.loadVideoPatches cfg path maxFrames frameStride
 

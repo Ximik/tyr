@@ -23,8 +23,8 @@ structure TrainConfig where
   warmupIters : Nat := 100
   lrDecayIters : Nat := 1000
   gradClip : Float := 1.0
-  batchSize : UInt64 := 4
-  blockSize : UInt64 := 64
+  batchSize : Nat := 4
+  blockSize : Nat := 64
   /-- Number of gradient accumulation steps (effective batch = batchSize * gradAccumSteps) -/
   gradAccumSteps : Nat := 1
   /-- Device to train on (CPU, CUDA, or MPS) -/
@@ -49,14 +49,14 @@ def getLr (cfg : TrainConfig) (iterNum : Nat) : Float :=
 /-- Get a random batch of data from token array
     Returns (x, y) where y = x shifted by 1 position
     Uses a random starting position with batchSize consecutive sequences -/
-def getBatch (trainData : Tokens (device := .CPU) #[n]) (batchSize blockSize : UInt64) (device : Device := Device.CPU) : IO (Tokens (device := device) #[batchSize, blockSize] × Tokens (device := device) #[batchSize, blockSize]) := do
-  let required := batchSize.toNat * (blockSize.toNat + 1)
-  if batchSize == 0 || blockSize == 0 || required > n.toNat then
+def getBatch (trainData : Tokens (device := .CPU) #[n]) (batchSize blockSize : Nat) (device : Device := Device.CPU) : IO (Tokens (device := device) #[batchSize, blockSize] × Tokens (device := device) #[batchSize, blockSize]) := do
+  let required := batchSize * (blockSize + 1)
+  if batchSize == 0 || blockSize == 0 || required > n then
     throw <| IO.userError "GPT batch requires positive dimensions and enough tokens"
-  let totalTokens := required.toUInt64
+  let totalTokens := required
   let maxStart := n - totalTokens
   let startTensor ← Tensor.randint 0 (maxStart + 1).toInt64 #[]
-  let start := startTensor.itemInt.toUInt64
+  let start := startTensor.itemInt.toInt.toNat
   let block := trainData.sliceChecked 0 start totalTokens #[totalTokens]
   let reshaped := block.reshapeChecked #[batchSize, blockSize + 1]
   let x := reshaped.sliceChecked 1 0 blockSize #[batchSize, blockSize]
@@ -64,7 +64,7 @@ def getBatch (trainData : Tokens (device := .CPU) #[n]) (batchSize blockSize : U
   return (x.to device, y.to device)
 
 /-- Clip gradients for a single block's parameters -/
-def clipBlockGrads {n_embd : UInt64} (params : BlockParams (device := device) n_embd) (maxNorm : Float) : IO Unit := do
+def clipBlockGrads {n_embd : Nat} (params : BlockParams (device := device) n_embd) (maxNorm : Float) : IO Unit := do
   let _ ← Tensor.clipGradNorm params.ln1_weight maxNorm
   let _ ← Tensor.clipGradNorm params.ln1_bias maxNorm
   let _ ← Tensor.clipGradNorm params.q_proj maxNorm
@@ -89,7 +89,7 @@ def clipGPTGrads {cfg : Config} (params : GPTParams (device := device) cfg) (max
   let _ ← Tensor.clipGradNorm params.ln_f_bias maxNorm
 
 /-- Single training step using Optax-style optimizer -/
-def trainStep {modelCfg : Config} {batch seq : UInt64}
+def trainStep {modelCfg : Config} {batch seq : Nat}
     (trainCfg : TrainConfig)
     (params : GPTParams (device := device) modelCfg)
     (optState : Optim.AdamWState (GPTParams (device := device) modelCfg))
@@ -129,7 +129,7 @@ def trainStep {modelCfg : Config} {batch seq : UInt64}
 /-- Training step with gradient accumulation support.
     Accumulates gradients over multiple micro-batches before updating parameters.
     This enables training with larger effective batch sizes on limited memory. -/
-def trainStepWithAccum {modelCfg : Config} {batch seq : UInt64}
+def trainStepWithAccum {modelCfg : Config} {batch seq : Nat}
     (trainCfg : TrainConfig)
     (params : GPTParams (device := device) modelCfg)
     (optState : Optim.AdamWState (GPTParams (device := device) modelCfg))
@@ -182,7 +182,7 @@ def perplexity (loss : Float) : Float := Float.exp loss
 def evalLoss {modelCfg : Config}
     (params : GPTParams (device := device) modelCfg)
     (valData : Tokens (device := .CPU) #[n])
-    (batchSize blockSize : UInt64)
+    (batchSize blockSize : Nat)
     (numBatches : Nat)
     : IO Float := do
   let params := TensorStruct.detach params

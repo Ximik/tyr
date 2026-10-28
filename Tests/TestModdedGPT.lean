@@ -179,8 +179,8 @@ def testDistAdam : IO Unit := do
 @[test]
 def testShardingShapes : IO Unit := do
   -- Test shard size computation
-  let fullSize : UInt64 := 100
-  let worldSize : UInt64 := 4
+  let fullSize : Nat := 100
+  let worldSize : Nat := 4
 
   let size0 := shardSize fullSize worldSize 0
   let size1 := shardSize fullSize worldSize 1
@@ -218,13 +218,13 @@ def testModdedGPTInit : IO Unit := do
   let params ← ModdedGPTParams.init cfg
 
   -- Check that arrays have correct sizes
-  LeanTest.assertEqual params.blocks.size cfg.nLayer.toNat
+  LeanTest.assertEqual params.blocks.size cfg.nLayer
   LeanTest.assertEqual params.valueEmbeds.size cfg.numValueEmbeds
 
 @[test]
 def testYarnRotary : IO Unit := do
-  let headDim : UInt64 := 64
-  let maxSeqLen : UInt64 := 128
+  let headDim : Nat := 64
+  let maxSeqLen : Nat := 128
 
   let yarn ← YarnRotary.init headDim maxSeqLen
 
@@ -252,8 +252,8 @@ def testModdedGPTForward : IO Unit := do
   let yarn ← YarnRotary.init cfg.headDim cfg.maxSeqLen
 
   -- Create input
-  let batchSize : UInt64 := 2
-  let seqLen : UInt64 := 32
+  let batchSize : Nat := 2
+  let seqLen : Nat := 32
   let input ← Tensor.randint 0 cfg.vocabSize.toInt64 #[batchSize, seqLen]
 
   -- Forward pass (window pattern is in cfg)
@@ -287,8 +287,8 @@ def testLoss : IO Unit := do
   let yarn ← YarnRotary.init cfg.headDim cfg.maxSeqLen
 
   -- Create input and targets
-  let batchSize : UInt64 := 2
-  let seqLen : UInt64 := 32
+  let batchSize : Nat := 2
+  let seqLen : Nat := 32
   let input ← Tensor.randint 0 cfg.vocabSize.toInt64 #[batchSize, seqLen]
   let targets ← Tensor.randint 0 cfg.vocabSize.toInt64 #[batchSize, seqLen]
 

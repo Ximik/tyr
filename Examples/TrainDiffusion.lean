@@ -46,20 +46,20 @@ def asciiDecode (tokens : Array Int64) : String :=
     else '?'
 
 /-- Convert tensor to array for decoding -/
-def tensorToArray {n : UInt64} (t : Tokens #[n]) : IO (Array Int64) := do
+def tensorToArray {n : Nat} (t : Tokens #[n]) : IO (Array Int64) := do
   return (← t.toUInt64Array).map UInt64.toInt64
 
 /-- Extract tensor values as Float array (for confidence display). -/
-def tensorToFloatArray {n : UInt64} (t : Activation #[n]) : IO (Array Float) :=
+def tensorToFloatArray {n : Nat} (t : Activation #[n]) : IO (Array Float) :=
   t.toFloatArray
 
 /-- Decode multiple blocks from a batched tensor [numBlocks, seqLen] -/
-def decodeMultipleBlocks {numBlocks seqLen : UInt64}
+def decodeMultipleBlocks {numBlocks seqLen : Nat}
     (tensor : Tokens #[numBlocks, seqLen]) : IO (Array String) := do
   let mut results := #[]
-  for i in [:numBlocks.toNat] do
+  for i in [:numBlocks] do
     -- Extract row i: slice along batch dimension
-    let start := i.toUInt64
+    let start := i
     let row : Tokens #[1, seqLen] := tensor.sliceChecked 0 start 1 #[1, seqLen]
     let rowFlat := Tensor.reshapeChecked row #[seqLen]
     let arr ← tensorToArray rowFlat
@@ -100,7 +100,7 @@ def ansiRestoreCursor : String := "\x1b[u"
 def sampleAnimated {cfg : Config}
     (params : DiffusionParams cfg)
     (rotaryCache : RotaryCache cfg.seq_len cfg.headDim)
-    (k : UInt64)
+    (k : Nat)
     (temperature : Float := 0.8)
     (frameDelay : Nat := 100)
     (prompt : String := "")
@@ -108,7 +108,7 @@ def sampleAnimated {cfg : Config}
     : IO (Tokens #[1, cfg.seq_len]) := do
 
   -- Calculate display dimensions
-  let textLen := min cfg.seq_len.toNat displayWidth
+  let textLen := min cfg.seq_len displayWidth
   let numTextLines := (textLen + displayWidth - 1) / displayWidth  -- ceiling division
   let totalLines := 1 + numTextLines  -- header + text lines
 
@@ -124,7 +124,7 @@ def sampleAnimated {cfg : Config}
 
   -- Set prompt tokens at the beginning (these won't be masked)
   let promptTokens := asciiEncode prompt
-  let promptLen := min promptTokens.size cfg.seq_len.toNat
+  let promptLen := min promptTokens.size cfg.seq_len
   for i in [:promptLen] do
     let promptTensor := Tensor.fullInt #[1, cfg.seq_len] (promptTokens[i]!)
     let positions := Tensor.arange cfg.seq_len
@@ -134,10 +134,10 @@ def sampleAnimated {cfg : Config}
 
   let mut maskedPositions := getMaskedPositions' x cfg.mask_token_id
 
-  for step in [:cfg.diffusion_steps.toNat] do
+  for step in [:cfg.diffusion_steps] do
     if !(Tensor.any maskedPositions) then break
 
-    let tVal := (cfg.diffusion_steps.toNat - 1 - step).max 0
+    let tVal := (cfg.diffusion_steps - 1 - step).max 0
     let t := Tensor.fullInt #[1] tVal.toUInt64.toInt64
 
     let logits := forward params x t rotaryCache
@@ -173,7 +173,7 @@ def sampleAnimated {cfg : Config}
 
     -- Header line
     let header := s!"{ansiClearLine}Step {step}/{cfg.diffusion_steps}  " ++
-                  progressBar step cfg.diffusion_steps.toNat 20 ++
+                  progressBar step cfg.diffusion_steps 20 ++
                   s!"  {remaining} remaining"
     IO.println header
 
@@ -211,7 +211,7 @@ def sampleAnimatedMultiple {cfg : Config}
     (params : DiffusionParams cfg)
     (rotaryCache : RotaryCache cfg.seq_len cfg.headDim)
     (numBlocks : Nat)
-    (k : UInt64)
+    (k : Nat)
     (temperature : Float := 0.8)
     (frameDelay : Nat := 100)
     (prompt : String := "")
@@ -233,7 +233,7 @@ def sampleAnimatedMultiple {cfg : Config}
     IO.println ""
 
     -- Calculate display dimensions
-    let textLen := min cfg.seq_len.toNat displayWidth
+    let textLen := min cfg.seq_len displayWidth
     let numTextLines := (textLen + displayWidth - 1) / displayWidth
     let totalLines := 1 + numTextLines
 
@@ -254,7 +254,7 @@ def sampleAnimatedMultiple {cfg : Config}
       carryoverTokens  -- Subsequent blocks use carryover from previous
 
     -- Set context tokens at the beginning (these provide continuity)
-    let contextLen := min contextTokens.size cfg.seq_len.toNat
+    let contextLen := min contextTokens.size cfg.seq_len
     for i in [:contextLen] do
       let tokenTensor := Tensor.fullInt #[1, cfg.seq_len] (contextTokens[i]!)
       let positions := Tensor.arange cfg.seq_len
@@ -264,10 +264,10 @@ def sampleAnimatedMultiple {cfg : Config}
 
     let mut maskedPositions := getMaskedPositions' x cfg.mask_token_id
 
-    for step in [:cfg.diffusion_steps.toNat] do
+    for step in [:cfg.diffusion_steps] do
       if !(Tensor.any maskedPositions) then break
 
-      let tVal := (cfg.diffusion_steps.toNat - 1 - step).max 0
+      let tVal := (cfg.diffusion_steps - 1 - step).max 0
       let t := Tensor.fullInt #[1] tVal.toUInt64.toInt64
 
       let logits := forward params x t rotaryCache
@@ -305,7 +305,7 @@ def sampleAnimatedMultiple {cfg : Config}
       IO.print (ansiMoveUp totalLines)
 
       let header := s!"{ansiClearLine}Block {blockIdx + 1}/{numBlocks} | Step {step}/{cfg.diffusion_steps}  " ++
-                    progressBar step cfg.diffusion_steps.toNat 20 ++
+                    progressBar step cfg.diffusion_steps 20 ++
                     s!"  {remaining} remaining"
       IO.println header
 
@@ -361,7 +361,7 @@ def joinBlocks (blocks : Array String) : String :=
   blocks.foldl (· ++ ·) ""
 
 /-- Train diffusion model with validation -/
-def runTrainingWithVal {nTrain nVal : UInt64}
+def runTrainingWithVal {nTrain nVal : Nat}
     (modelCfg : Config) (trainCfg : TrainConfig)
     (trainData : Tokens #[nTrain]) (valData : Tokens #[nVal])
     : IO (DiffusionParams modelCfg) := do
@@ -393,7 +393,7 @@ def runTrainingWithVal {nTrain nVal : UInt64}
 def runTrainingRandom (modelCfg : Config) (trainCfg : TrainConfig) : IO (DiffusionParams modelCfg) := do
   IO.println ""
   IO.println "Using random tokens for testing..."
-  let numTokens : UInt64 := 50000
+  let numTokens : Nat := 50000
   -- Generate random tokens (1-127, avoiding 0 which is mask)
   let trainData ← Tensor.randint 1 127 #[numTokens]
   let valData ← Tensor.randint 1 127 #[numTokens / 10]
@@ -564,8 +564,8 @@ def main (args : List String) : IO Unit := do
     let trainTokens := tokens.extract 0 splitIdx
     let valTokens := tokens.extract splitIdx tokens.size
 
-    let nTrain : UInt64 := trainTokens.size.toUInt64
-    let nVal : UInt64 := valTokens.size.toUInt64
+    let nTrain : Nat := trainTokens.size
+    let nVal : Nat := valTokens.size
 
     IO.println s!"Training set: {nTrain} tokens"
     IO.println s!"Validation set: {nVal} tokens"

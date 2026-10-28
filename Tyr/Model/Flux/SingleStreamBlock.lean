@@ -21,7 +21,7 @@ variable [DType.RealFloating dtype]
 /-- Single-stream transformer block.
     Processes concatenated image + text tokens with shared attention.
     Uses fused QKV + MLP projection for efficiency. -/
-structure SingleStreamBlock (hidden_size num_heads head_dim mlp_hidden : UInt64) (dtype : DType := .Float32) where
+structure SingleStreamBlock (hidden_size num_heads head_dim mlp_hidden : Nat) (dtype : DType := .Float32) where
   /-- Pre-norm (LayerNorm) -/
   pre_norm : LayerNorm (device := device) hidden_size dtype
   /-- Fused projection for Q, K, V and MLP gate/up
@@ -41,7 +41,7 @@ structure SingleStreamBlock (hidden_size num_heads head_dim mlp_hidden : UInt64)
 namespace SingleStreamBlock
 
 /-- Initialize single-stream block -/
-def init (hidden_size num_heads head_dim mlp_hidden : UInt64)
+def init (hidden_size num_heads head_dim mlp_hidden : Nat)
     (device : Device := .CPU) (dtype : DType := .Float32) : IO (SingleStreamBlock (device := device) (dtype := dtype) hidden_size num_heads head_dim mlp_hidden) := do
   let floating ← IO.ofExcept (DType.realFloating? dtype)
   let _ := floating.down
@@ -66,7 +66,7 @@ def init (hidden_size num_heads head_dim mlp_hidden : UInt64)
     pe: RoPE embeddings
     mod: [batch, 3, hidden_size] - shift/scale/gate modulation
     Returns: [batch, seq, hidden_size] -/
-def forward {batch seq hidden_size num_heads head_dim mlp_hidden : UInt64}
+def forward {batch seq hidden_size num_heads head_dim mlp_hidden : Nat}
     (block : SingleStreamBlock (device := device) (dtype := dtype) hidden_size num_heads head_dim mlp_hidden)
     (x : Tensor { dtype := dtype, device := device, shape := #[batch, seq, hidden_size] })
     (pe : Tensor { device := device, shape := #[batch, 1, seq, head_dim / 2, 2, 2], dtype := .Float32 })  -- Shape depends on RoPE implementation

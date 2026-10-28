@@ -57,10 +57,10 @@ def applyTemperature {s : Shape} (logits : Tensor { shape := s, dtype := .Float3
 
 /-- Sample from logits using argmax (greedy).
     Returns array of token IDs, one per batch element. -/
-def sampleGreedy {batch vocabSize : UInt64} (logits : Tensor { shape := #[batch, vocabSize], dtype := .Float32, device := device })
+def sampleGreedy {batch vocabSize : Nat} (logits : Tensor { shape := #[batch, vocabSize], dtype := .Float32, device := device })
     : IO (Array TokenId) := do
   -- Get argmax along vocab dimension - returns [batch] tensor of indices
-  let indices ← IO.ofExcept (Tensor.argmax? logits (1 : UInt64))
+  let indices ← IO.ofExcept (Tensor.argmax? logits (1 : Nat))
   -- Convert tensor to array of token IDs (use dynamic version since shape is computed)
   indices.toUInt64Array
 
@@ -68,7 +68,7 @@ def sampleGreedy {batch vocabSize : UInt64} (logits : Tensor { shape := #[batch,
     Sets all logits outside the top k to -infinity. -/
 def applyTopK {s : Shape} (logits : Tensor { shape := s, dtype := .Float32, device := device }) (k : Nat) : Tensor { shape := s, dtype := .Float32, device := device } :=
   if k == 0 then logits
-  else Tensor.topKFilter logits k.toUInt64
+  else Tensor.topKFilter logits k
 
 /-- Apply top-p (nucleus) filtering to logits.
     Sets logits outside the nucleus (cumulative prob > p) to -infinity. -/
@@ -78,7 +78,7 @@ def applyTopP {s : Shape} (logits : Tensor { shape := s, dtype := .Float32, devi
 
 /-- Sample from logits with temperature, top-k, and top-p.
     Returns array of token IDs, one per batch element. -/
-def sampleWithConfig {batch vocabSize : UInt64}
+def sampleWithConfig {batch vocabSize : Nat}
     (logits : Tensor { shape := #[batch, vocabSize], dtype := .Float32, device := device }) (cfg : SamplingConfig)
     : IO (Array TokenId) := do
   -- Apply temperature
@@ -203,7 +203,7 @@ def processTokenTyped (engine : Engine) (state : BoxedRowState) (token : TokenId
     Same as `generate` but uses `TypedBatchState` with compile-time
     phase checking. This version demonstrates how the typed state machine
     integrates with the generation loop. -/
-unsafe def generateTyped (engine : Engine) (batch vocabSize : UInt64)
+unsafe def generateTyped (engine : Engine) (batch vocabSize : Nat)
     (promptTokens : Array (Array TokenId))
     (runModel : Array TokenId → IO (Tensor { shape := #[batch, vocabSize], dtype := .Float32, device := device }))
     (decode : Array TokenId → String)
@@ -265,7 +265,7 @@ unsafe def generateTyped (engine : Engine) (batch vocabSize : UInt64)
     - runModel: Model callback that takes input token IDs and returns logits tensor [batch, vocabSize]
     - decode: Decoder function for tool execution
     - encode: Encoder function for tool output injection -/
-def generate (engine : Engine) (batch vocabSize : UInt64)
+def generate (engine : Engine) (batch vocabSize : Nat)
     (promptTokens : Array (Array TokenId))
     (runModel : Array TokenId → IO (Tensor { shape := #[batch, vocabSize], dtype := .Float32, device := device }))
     (decode : Array TokenId → String)
@@ -306,7 +306,7 @@ def generate (engine : Engine) (batch vocabSize : UInt64)
   return batchState.rows.map (·.tokens)
 
 /-- Generate a single completion from a prompt -/
-def generateOne (engine : Engine) (vocabSize : UInt64)
+def generateOne (engine : Engine) (vocabSize : Nat)
     (promptTokens : Array TokenId)
     (runModel : Array TokenId → IO (Tensor { shape := #[1, vocabSize], dtype := .Float32, device := device }))
     (decode : Array TokenId → String)
@@ -318,15 +318,15 @@ def generateOne (engine : Engine) (vocabSize : UInt64)
 /-- Configuration for the generation engine -/
 structure EngineConfig where
   /-- Number of transformer layers -/
-  numLayers : UInt64
+  numLayers : Nat
   /-- Batch size -/
-  batchSize : UInt64
+  batchSize : Nat
   /-- Maximum sequence length -/
-  maxSeqLen : UInt64
+  maxSeqLen : Nat
   /-- Number of KV heads -/
-  numKvHeads : UInt64
+  numKvHeads : Nat
   /-- Head dimension -/
-  headDim : UInt64
+  headDim : Nat
   /-- Sampling configuration -/
   sampling : SamplingConfig := {}
   deriving Repr, Inhabited
@@ -339,7 +339,7 @@ def Engine.create (cfg : EngineConfig) (specialTokens : SpecialTokens) : Engine 
 }
 
 /-- Simple interface: generate text from string prompt -/
-def generateText (engine : Engine) (vocabSize : UInt64)
+def generateText (engine : Engine) (vocabSize : Nat)
     (prompt : String)
     (encode : String → Array TokenId)
     (decode : Array TokenId → String)

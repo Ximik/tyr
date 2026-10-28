@@ -21,13 +21,23 @@ extern "C" void lean_initialize();
 
 namespace {
 using Object = std::unique_ptr<lean_object, decltype(&lean_dec)>;
+// Temporary Lean Nat for a borrowed argument; values above the small-Nat range
+// become bignums, as Lean would pass them.
+struct Nat {
+  lean_object* object;
+  Nat(uint64_t value) : object(lean_uint64_to_nat(value)) {}
+  Nat(const Nat&) = delete;
+  Nat& operator=(const Nat&) = delete;
+  ~Nat() { lean_dec(object); }
+  operator lean_object*() const { return object; }
+};
 void require(bool condition, const char* message) {
   if (!condition) throw std::runtime_error(message);
 }
 lean_object* shape(std::initializer_list<uint64_t> dims) {
   auto* result = lean_alloc_array(dims.size(), dims.size());
   size_t i = 0;
-  for (auto dim : dims) lean_array_set_core(result, i++, lean_box_uint64(dim));
+  for (auto dim : dims) lean_array_set_core(result, i++, lean_box(dim));
   return result;
 }
 lean_object* retain(lean_object* value) { lean_inc(value); return value; }
@@ -201,8 +211,8 @@ void randomFactorySuccess() {
     require(!lean_is_scalar(tensor) && lean_is_external(tensor), "Random factory did not return RawTensor");
     Object actual(lean_torch_get_shape(tensor), lean_dec);
     require(lean_array_size(actual.get()) == 2 &&
-      lean_unbox_uint64(lean_array_get_core(actual.get(), 0)) == 2 &&
-      lean_unbox_uint64(lean_array_get_core(actual.get(), 1)) == 3,
+      lean_unbox(lean_array_get_core(actual.get(), 0)) == 2 &&
+      lean_unbox(lean_array_get_core(actual.get(), 1)) == 3,
       "Random factory changed requested shape");
     require(lean_torch_requires_grad(tensor) == requiresGrad,
       "Random factory changed requested trainability");
@@ -232,22 +242,22 @@ void dropoutSuccess() {
 }
 void transpose(bool invalid, bool huge = false) {
   auto input = full({2, 3}, 4);
-    Object result(lean_torch_transpose(input.get(), 0,
-    huge ? std::numeric_limits<uint64_t>::max() : invalid ? 9 : 1), lean_dec);
+    Object result(lean_torch_transpose(input.get(), Nat(0),
+    Nat(huge ? std::numeric_limits<uint64_t>::max() : invalid ? 9 : 1)), lean_dec);
   if (invalid || huge) exceptError(result.get(), "transpose");
   else {
     auto* tensor = exceptValue(result.get());
     values(tensor, 6, 4);
     Object actual(lean_torch_get_shape(tensor), lean_dec);
     require(lean_array_size(actual.get()) == 2 &&
-      lean_unbox_uint64(lean_array_get_core(actual.get(), 0)) == 3 &&
-      lean_unbox_uint64(lean_array_get_core(actual.get(), 1)) == 2, "Transpose shape changed");
+      lean_unbox(lean_array_get_core(actual.get(), 0)) == 3 &&
+      lean_unbox(lean_array_get_core(actual.get(), 1)) == 2, "Transpose shape changed");
   }
   require(input->m_rc == 1, "Transpose ownership imbalance");
 }
 void transposeScalar() {
   auto input = full({}, 5);
-  Object result(lean_torch_transpose(input.get(), 0, 0), lean_dec);
+  Object result(lean_torch_transpose(input.get(), Nat(0), Nat(0)), lean_dec);
   values(exceptValue(result.get()), 1, 5);
 }
 
@@ -564,7 +574,7 @@ void checkedArgmax(int mode) {
   Object invalid(lean_mk_string("not a tensor"), lean_dec);
   const uint64_t dim = mode == 3 ? std::numeric_limits<uint64_t>::max() : 1;
   Object result(CHECKED(lean_torch_argmax)(
-    mode == 4 ? invalid.get() : input.get(), dim), lean_dec);
+    mode == 4 ? invalid.get() : input.get(), Nat(dim)), lean_dec);
   if (mode == 0) values(exceptValue(result.get()), 2, 0);
   else exceptError(result.get(), "argmax");
   require(input->m_rc == refs && invalid->m_rc == 1,
@@ -577,8 +587,8 @@ void checkedSelectionPair(bool topK, int mode) {
     Object(retain(original.get()), lean_dec);
   const auto refs = input->m_rc;
   const uint64_t k = mode == 2 ? 4 : mode == 3 ? std::numeric_limits<uint64_t>::max() : 2;
-  Object result(topK ? CHECKED(lean_torch_topk_2d)(input.get(), k, 1) :
-    CHECKED(lean_torch_max_dim_3d)(input.get(), 2), lean_dec);
+  Object result(topK ? CHECKED(lean_torch_topk_2d)(input.get(), Nat(k), Nat(1)) :
+    CHECKED(lean_torch_max_dim_3d)(input.get(), Nat(2)), lean_dec);
   if (mode != 0) exceptError(result.get(), topK ? "topKLast2d" : "maxLast3d");
   else {
     require(!lean_is_scalar(result.get()) && !lean_is_external(result.get()) &&

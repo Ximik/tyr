@@ -12,7 +12,7 @@ variable {device : Device}
 open Tyr.AD
 
 /-- Local linearization data for one module at one forward point. -/
-structure LocalLinearization (inDim paramDim outDim : UInt64) where
+structure LocalLinearization (inDim paramDim outDim : Nat) where
   applyA : AmbientVector (device := device) inDim → AmbientVector (device := device) outDim
   applyAT : AmbientVector (device := device) outDim → AmbientVector (device := device) inDim
   applyB : AmbientVector (device := device) paramDim → AmbientVector (device := device) outDim
@@ -21,7 +21,7 @@ structure LocalLinearization (inDim paramDim outDim : UInt64) where
 /-- Basic diagnostics for one layerwise Riemannian update. -/
 structure LayerStepDiagnostics where
   gradientNorm : Float := 0.0
-  factorRank : UInt64 := 0
+  factorRank : Nat := 0
   innerConditionEstimate : Float := 0.0
   residualNorm : Float := 0.0
   updateNorm : Float := 0.0
@@ -31,9 +31,9 @@ structure LayerStepDiagnostics where
 Leaf module that can expose the local Jacobians needed for recursive
 metric-factor propagation.
 -/
-class RiemannianModule (M : Type) (inDim outDim : UInt64)
+class RiemannianModule (M : Type) (inDim outDim : Nat)
     (device : outParam Device) where
-  paramDim : UInt64
+  paramDim : Nat
   Tape : Type
   forwardWithTape : M → AmbientVector (device := device) inDim → AmbientVector (device := device) outDim × Tape
   localLinearization : M → Tape → LocalLinearization (device := device) inDim paramDim outDim
@@ -42,15 +42,15 @@ class RiemannianModule (M : Type) (inDim outDim : UInt64)
 
 namespace RiemannianModule
 
-private def vectorToColumn {n : UInt64} {d : DType} {dev : Device}
+private def vectorToColumn {n : Nat} {d : DType} {dev : Device}
     (v : Tensor ⟨#[n], d, dev⟩) : Tensor ⟨#[n, 1], d, dev⟩ :=
   Tensor.reshape v #[n, 1] (by simp [TensorSpec.numelOfShape])
 
-private def columnToVector {n : UInt64} {d : DType} {dev : Device}
+private def columnToVector {n : Nat} {d : DType} {dev : Device}
     (v : Tensor ⟨#[n, 1], d, dev⟩) : Tensor ⟨#[n], d, dev⟩ :=
   Tensor.reshape v #[n] (by simp [TensorSpec.numelOfShape])
 
-private def splitLinearUpdate {inDim outDim : UInt64} {d : DType} {dev : Device}
+private def splitLinearUpdate {inDim outDim : Nat} {d : DType} {dev : Device}
     (update : Tensor ⟨#[outDim * inDim + outDim], d, dev⟩) :
     Tensor ⟨#[outDim, inDim], d, dev⟩ × Tensor ⟨#[outDim], d, dev⟩ :=
   let weightSize := outDim * inDim
@@ -60,59 +60,59 @@ private def splitLinearUpdate {inDim outDim : UInt64} {d : DType} {dev : Device}
 
 namespace LocalLinearization
 
-private def rowAt {rows cols : UInt64} {d : DType} {dev : Device}
-    (matrix : Tensor ⟨#[rows, cols], d, dev⟩) (idx : UInt64) : Tensor ⟨#[cols], d, dev⟩ :=
+private def rowAt {rows cols : Nat} {d : DType} {dev : Device}
+    (matrix : Tensor ⟨#[rows, cols], d, dev⟩) (idx : Nat) : Tensor ⟨#[cols], d, dev⟩ :=
   Tensor.reshapeChecked (Tensor.sliceChecked matrix 0 idx 1 #[1, cols]) #[cols]
 
-private def mapRows {rows inDim outDim : UInt64} {d : DType} {dev : Device}
+private def mapRows {rows inDim outDim : Nat} {d : DType} {dev : Device}
     (matrix : Tensor ⟨#[rows, inDim], d, dev⟩)
     (f : Tensor ⟨#[inDim], d, dev⟩ → Tensor ⟨#[outDim], d, dev⟩) :
     Tensor ⟨#[rows, outDim], d, dev⟩ :=
   let mapped : Array (Tensor ⟨#[outDim], d, dev⟩) := Id.run do
     let mut acc : Array (Tensor ⟨#[outDim], d, dev⟩) := #[]
-    for i in [:rows.toNat] do
-      acc := acc.push (f (rowAt matrix (UInt64.ofNat i)))
+    for i in [:rows] do
+      acc := acc.push (f (rowAt matrix i))
     pure acc
   let stacked := Tensor.stack1d mapped
   Tensor.reshapeChecked stacked #[rows, outDim]
 
 /-- Materialize the dense input Jacobian for debugging/tests. -/
-def materializeA {inDim paramDim outDim : UInt64}
+def materializeA {inDim paramDim outDim : Nat}
     (lin : LocalLinearization (device := device) inDim paramDim outDim) : AmbientMatrix (device := device) outDim inDim :=
   let basis : AmbientMatrix (device := device) inDim inDim := Tensor.eyeFor (n := inDim) .Float32 device
   Tensor.transpose2d (mapRows basis lin.applyA)
 
 /-- Materialize the dense parameter Jacobian for debugging/tests. -/
-def materializeB {inDim paramDim outDim : UInt64}
+def materializeB {inDim paramDim outDim : Nat}
     (lin : LocalLinearization (device := device) inDim paramDim outDim) : AmbientMatrix (device := device) outDim paramDim :=
   let basis : AmbientMatrix (device := device) paramDim paramDim := Tensor.eyeFor (n := paramDim) .Float32 device
   Tensor.transpose2d (mapRows basis lin.applyB)
 
 /-- Pull a metric factor back through the input Jacobian using rowwise adjoints. -/
-def pullbackInputFactor {rank inDim paramDim outDim : UInt64}
+def pullbackInputFactor {rank inDim paramDim outDim : Nat}
     (lin : LocalLinearization (device := device) inDim paramDim outDim)
     (L : MetricFactor rank outDim .Float32 device) : MetricFactor rank inDim .Float32 device :=
   { matrix := mapRows L.matrix lin.applyAT }
 
 /-- Pull a metric factor back through the parameter Jacobian using rowwise adjoints. -/
-def pullbackParamFactor {rank inDim paramDim outDim : UInt64}
+def pullbackParamFactor {rank inDim paramDim outDim : Nat}
     (lin : LocalLinearization (device := device) inDim paramDim outDim)
     (L : MetricFactor rank outDim .Float32 device) : MetricFactor rank paramDim .Float32 device :=
   { matrix := mapRows L.matrix lin.applyBT }
 
 end LocalLinearization
 
-private def linearApplyInput {inDim outDim : UInt64} {d : DType} {dev : Device}
+private def linearApplyInput {inDim outDim : Nat} {d : DType} {dev : Device}
     (weight : Tensor ⟨#[outDim, inDim], d, dev⟩) (x : Tensor ⟨#[inDim], d, dev⟩) :
     Tensor ⟨#[outDim], d, dev⟩ :=
   columnToVector (Tensor.mm weight (vectorToColumn x))
 
-private def linearApplyInputAdjoint {inDim outDim : UInt64} {d : DType} {dev : Device}
+private def linearApplyInputAdjoint {inDim outDim : Nat} {d : DType} {dev : Device}
     (weight : Tensor ⟨#[outDim, inDim], d, dev⟩) (y : Tensor ⟨#[outDim], d, dev⟩) :
     Tensor ⟨#[inDim], d, dev⟩ :=
   columnToVector (Tensor.mm (Tensor.transpose2d weight) (vectorToColumn y))
 
-private def linearApplyParam {inDim outDim : UInt64} {d : DType} {dev : Device}
+private def linearApplyParam {inDim outDim : Nat} {d : DType} {dev : Device}
     [DType.Promotes d d d]
     (x : Tensor ⟨#[inDim], d, dev⟩)
     (useBias : Bool)
@@ -124,7 +124,7 @@ private def linearApplyParam {inDim outDim : UInt64} {d : DType} {dev : Device}
   else
     weightPart
 
-private def linearApplyParamAdjoint {inDim outDim : UInt64} {d : DType} {dev : Device}
+private def linearApplyParamAdjoint {inDim outDim : Nat} {d : DType} {dev : Device}
     (x : Tensor ⟨#[inDim], d, dev⟩)
     (useBias : Bool)
     (y : Tensor ⟨#[outDim], d, dev⟩) : Tensor ⟨#[outDim * inDim + outDim], d, dev⟩ :=
@@ -135,14 +135,14 @@ private def linearApplyParamAdjoint {inDim outDim : UInt64} {d : DType} {dev : D
   let joined := Tensor.cat weightPart biasPart 0
   Tensor.reshapeChecked joined #[outDim * inDim + outDim]
 
-private def makeManifoldLeaf [MatrixManifoldCarrier M device] {m n : UInt64}
+private def makeManifoldLeaf [MatrixManifoldCarrier M device] {m n : Nat}
     (w : M m n) : IO (M m n) := do
   let leaf ← Tensor.parameter (MatrixManifoldCarrier.toMatrix (device := device) w)
   pure (MatrixManifoldCarrier.reAmbient (device := device) w leaf)
 
 /-- Single leaf backward step: metric solve, parameter update, and propagation. -/
-def backwardLeafStep {M : Type} {inDim outDim : UInt64} [RiemannianModule M inDim outDim device]
-    {rank : UInt64}
+def backwardLeafStep {M : Type} {inDim outDim : Nat} [RiemannianModule M inDim outDim device]
+    {rank : Nat}
     (m : M)
     (tape : RiemannianModule.Tape (device := device) (M := M) (inDim := inDim) (outDim := outDim))
     (L : MetricFactor rank outDim .Float32 device)
@@ -169,7 +169,7 @@ def backwardLeafStep {M : Type} {inDim outDim : UInt64} [RiemannianModule M inDi
   }
   pure (m', LPrev, lambdaPrev, stats)
 
-instance linearRiemannianModule (inDim outDim : UInt64) :
+instance linearRiemannianModule (inDim outDim : Nat) :
     RiemannianModule (torch.Linear inDim outDim .Float32 device) inDim outDim device where
   paramDim := outDim * inDim + outDim
   Tape := AmbientVector (device := device) inDim
@@ -199,9 +199,9 @@ instance linearRiemannianModule (inDim outDim : UInt64) :
     pure { lin with weight := weight', bias := bias' }
 
 instance manifoldLinearRiemannianModule
-    (M : UInt64 → UInt64 → Type)
+    (M : Nat → Nat → Type)
     [MatrixManifoldCarrier M device]
-    {inDim outDim : UInt64}
+    {inDim outDim : Nat}
     :
     RiemannianModule (ManifoldLinear (device := device) M inDim outDim) inDim outDim device where
   paramDim := outDim * inDim + outDim
@@ -240,23 +240,23 @@ end RiemannianModule
 namespace LocalLinearization
 
 /-- Materialize the dense input Jacobian for debugging/tests. -/
-def materializeA {inDim paramDim outDim : UInt64}
+def materializeA {inDim paramDim outDim : Nat}
     (lin : LocalLinearization (device := device) inDim paramDim outDim) : AmbientMatrix (device := device) outDim inDim :=
   RiemannianModule.LocalLinearization.materializeA lin
 
 /-- Materialize the dense parameter Jacobian for debugging/tests. -/
-def materializeB {inDim paramDim outDim : UInt64}
+def materializeB {inDim paramDim outDim : Nat}
     (lin : LocalLinearization (device := device) inDim paramDim outDim) : AmbientMatrix (device := device) outDim paramDim :=
   RiemannianModule.LocalLinearization.materializeB lin
 
 /-- Pull a metric factor back through the input Jacobian using rowwise adjoints. -/
-def pullbackInputFactor {rank inDim paramDim outDim : UInt64}
+def pullbackInputFactor {rank inDim paramDim outDim : Nat}
     (lin : LocalLinearization (device := device) inDim paramDim outDim)
     (L : MetricFactor rank outDim .Float32 device) : MetricFactor rank inDim .Float32 device :=
   RiemannianModule.LocalLinearization.pullbackInputFactor lin L
 
 /-- Pull a metric factor back through the parameter Jacobian using rowwise adjoints. -/
-def pullbackParamFactor {rank inDim paramDim outDim : UInt64}
+def pullbackParamFactor {rank inDim paramDim outDim : Nat}
     (lin : LocalLinearization (device := device) inDim paramDim outDim)
     (L : MetricFactor rank outDim .Float32 device) : MetricFactor rank paramDim .Float32 device :=
   RiemannianModule.LocalLinearization.pullbackParamFactor lin L
@@ -265,8 +265,8 @@ end LocalLinearization
 
 /-- Forward tape for a two-layer sequential composition. -/
 abbrev SequentialTape
-    (M₁ : Type) (inDim midDim : UInt64)
-    (M₂ : Type) (outDim : UInt64)
+    (M₁ : Type) (inDim midDim : Nat)
+    (M₂ : Type) (outDim : Nat)
     [RiemannianModule M₁ inDim midDim device]
     [RiemannianModule M₂ midDim outDim device]
     :=
@@ -276,7 +276,7 @@ abbrev SequentialTape
 /-- Forward pass with tapes for a two-layer sequential composition. -/
 def sequentialForwardWithTape
     {M₁ M₂ : Type}
-    {inDim midDim outDim : UInt64}
+    {inDim midDim outDim : Nat}
     [RiemannianModule M₁ inDim midDim device]
     [RiemannianModule M₂ midDim outDim device]
     (net : Sequential M₁ M₂)
@@ -291,7 +291,7 @@ def sequentialForwardWithTape
 /-- Backward recursion for a two-layer sequential composition. -/
 def sequentialBackwardMetricStep
     {M₁ M₂ : Type}
-    {rank inDim midDim outDim : UInt64}
+    {rank inDim midDim outDim : Nat}
     [RiemannianModule M₁ inDim midDim device]
     [RiemannianModule M₂ midDim outDim device]
     (net : Sequential M₁ M₂)

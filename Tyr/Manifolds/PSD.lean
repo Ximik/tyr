@@ -8,7 +8,7 @@ open DifferentiableManifold
 variable {d : DType} {dev : Device} [DType.RealFloating d]
 
 /-- Quotient-factor representation for fixed-rank PSD matrices via `Y in R^{n x k}`. -/
-structure PSDFixedRank (n k : UInt64) (dtype : DType := .Float32)
+structure PSDFixedRank (n k : Nat) (dtype : DType := .Float32)
     (device : Device := .CPU) where
   factor : Tensor ⟨#[n, k], dtype, device⟩
 
@@ -19,19 +19,19 @@ def toPSD (x : PSDFixedRank n k d dev) : Tensor ⟨#[n, n], d, dev⟩ :=
   Tensor.mm x.factor (Tensor.transpose2d x.factor)
 
 /-- Random point (factor matrix). -/
-def random (n k : UInt64) : IO (PSDFixedRank n k) := do
+def random (n k : Nat) : IO (PSDFixedRank n k) := do
   let y ← Tensor.randn #[n, k]
   pure ⟨y⟩
 
 end PSDFixedRank
 
-structure PSDFixedRankTangent (n k : UInt64) (dtype : DType := .Float32)
+structure PSDFixedRankTangent (n k : Nat) (dtype : DType := .Float32)
     (device : Device := .CPU) where
   vec : Tensor ⟨#[n, k], dtype, device⟩
 
 namespace PSDFixedRankTangent
 
-def zero [DType.ConstantSupported d dev] (n k : UInt64) : PSDFixedRankTangent n k d dev := ⟨Tensor.zerosFor ⟨#[n, k], d, dev⟩⟩
+def zero [DType.ConstantSupported d dev] (n k : Nat) : PSDFixedRankTangent n k d dev := ⟨Tensor.zerosFor ⟨#[n, k], d, dev⟩⟩
 def add (a b : PSDFixedRankTangent n k d dev) : PSDFixedRankTangent n k d dev := ⟨Tensor.add a.vec b.vec⟩
 def smul (s : Float) (v : PSDFixedRankTangent n k d dev) : PSDFixedRankTangent n k d dev := ⟨Tensor.mulScalar v.vec s⟩
 
@@ -43,7 +43,7 @@ def project (x : PSDFixedRank n k d dev) (V : Tensor ⟨#[n, k], d, dev⟩) : PS
 
 end PSDFixedRankTangent
 
-instance psdFixedRankManifold (n k : UInt64) : DifferentiableManifold (PSDFixedRank n k d dev) where
+instance psdFixedRankManifold (n k : Nat) : DifferentiableManifold (PSDFixedRank n k d dev) where
   Tangent _ := PSDFixedRankTangent n k d dev
   Cotangent _ := PSDFixedRankTangent n k d dev
   zeroTangent x := ⟨Tensor.zerosLike x.factor⟩
@@ -57,13 +57,13 @@ instance psdFixedRankManifold (n k : UInt64) : DifferentiableManifold (PSDFixedR
   retract x v := ⟨Tensor.add x.factor v.vec⟩
 
 /-- Elliptope factor manifold: row-wise unit norms in `R^{n x k}`. -/
-structure Elliptope (n k : UInt64) (dtype : DType := .Float32)
+structure Elliptope (n k : Nat) (dtype : DType := .Float32)
     (device : Device := .CPU) where
   factor : Tensor ⟨#[n, k], dtype, device⟩
 
 namespace Elliptope
 
-private def normalizeRows {n k : UInt64} (Y : Tensor ⟨#[n, k], d, dev⟩) : Tensor ⟨#[n, k], d, dev⟩ :=
+private def normalizeRows {n k : Nat} (Y : Tensor ⟨#[n, k], d, dev⟩) : Tensor ⟨#[n, k], d, dev⟩ :=
   let norms := Tensor.rowNorms Y
   let safeNorms := Tensor.addScalar norms 1e-12
   let normsCol : Tensor ⟨#[n, 1], d.realResult, dev⟩ := Tensor.reshape safeNorms #[n, 1] (by simp [TensorSpec.numelOfShape])
@@ -71,23 +71,23 @@ private def normalizeRows {n k : UInt64} (Y : Tensor ⟨#[n, k], d, dev⟩) : Te
   by simpa using Tensor.div Y expanded
 
 /-- Project ambient matrix to row-normalized elliptope factor. -/
-def project (n k : UInt64) (Y : Tensor ⟨#[n, k], d, dev⟩) : Elliptope n k d dev :=
+def project (n k : Nat) (Y : Tensor ⟨#[n, k], d, dev⟩) : Elliptope n k d dev :=
   ⟨normalizeRows Y⟩
 
 /-- Random row-normalized factor. -/
-def random (n k : UInt64) : IO (Elliptope n k) := do
+def random (n k : Nat) : IO (Elliptope n k) := do
   let y ← Tensor.randn #[n, k]
   pure (project n k y)
 
 end Elliptope
 
-structure ElliptopeTangent (n k : UInt64) (dtype : DType := .Float32)
+structure ElliptopeTangent (n k : Nat) (dtype : DType := .Float32)
     (device : Device := .CPU) where
   vec : Tensor ⟨#[n, k], dtype, device⟩
 
 namespace ElliptopeTangent
 
-def zero [DType.ConstantSupported d dev] (n k : UInt64) : ElliptopeTangent n k d dev := ⟨Tensor.zerosFor ⟨#[n, k], d, dev⟩⟩
+def zero [DType.ConstantSupported d dev] (n k : Nat) : ElliptopeTangent n k d dev := ⟨Tensor.zerosFor ⟨#[n, k], d, dev⟩⟩
 def add (a b : ElliptopeTangent n k d dev) : ElliptopeTangent n k d dev := ⟨Tensor.add a.vec b.vec⟩
 def smul (s : Float) (v : ElliptopeTangent n k d dev) : ElliptopeTangent n k d dev := ⟨Tensor.mulScalar v.vec s⟩
 
@@ -100,7 +100,7 @@ def project (x : Elliptope n k d dev) (V : Tensor ⟨#[n, k], d, dev⟩) : Ellip
 
 end ElliptopeTangent
 
-instance elliptopeManifold (n k : UInt64) : DifferentiableManifold (Elliptope n k d dev) where
+instance elliptopeManifold (n k : Nat) : DifferentiableManifold (Elliptope n k d dev) where
   Tangent _ := ElliptopeTangent n k d dev
   Cotangent _ := ElliptopeTangent n k d dev
   zeroTangent x := ⟨Tensor.zerosLike x.factor⟩

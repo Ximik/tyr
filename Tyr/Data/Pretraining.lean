@@ -28,9 +28,9 @@ structure PretrainingConfig where
   /-- Path to data directory containing parquet files -/
   dataPath : String := "data"
   /-- Batch size (number of sequences) -/
-  batchSize : UInt64 := 4
+  batchSize : Nat := 4
   /-- Sequence length -/
-  seqLen : UInt64 := 2048
+  seqLen : Nat := 2048
   /-- BOS token ID (prepended to each document) -/
   bosToken : UInt64 := 50256
   /-- Number of tokenizer threads -/
@@ -104,9 +104,9 @@ structure PretrainingLoader where
   /-- Token buffer -/
   buffer : TokenBuffer
   /-- DDP rank -/
-  rank : UInt64
+  rank : Nat
   /-- DDP world size -/
-  worldSize : UInt64
+  worldSize : Nat
   /-- List of parquet file paths -/
   parquetFiles : Array String
   deriving Repr
@@ -126,15 +126,15 @@ structure RowGroupIterator where
   /-- Current row group index within file -/
   currentRowGroup : Nat
   /-- DDP rank (0 for single-GPU) -/
-  rank : UInt64
+  rank : Nat
   /-- DDP world size (1 for single-GPU) -/
-  worldSize : UInt64
+  worldSize : Nat
   /-- Total row groups processed -/
   totalRowGroupsProcessed : Nat := 0
   deriving Repr
 
 /-- Initialize row group iterator from a data directory -/
-def RowGroupIterator.init (dataPath : String) (rank worldSize : UInt64) (log : Handlers := {}) : IO RowGroupIterator := do
+def RowGroupIterator.init (dataPath : String) (rank worldSize : Nat) (log : Handlers := {}) : IO RowGroupIterator := do
   -- List and sort parquet files
   let parquetFiles ← listParquetFiles dataPath
 
@@ -144,7 +144,7 @@ def RowGroupIterator.init (dataPath : String) (rank worldSize : UInt64) (log : H
       parquetFiles := #[]
       fileMetadata := #[]
       currentFile := 0
-      currentRowGroup := rank.toNat
+      currentRowGroup := rank
       rank
       worldSize
     }
@@ -159,7 +159,7 @@ def RowGroupIterator.init (dataPath : String) (rank worldSize : UInt64) (log : H
     parquetFiles
     fileMetadata := metadata
     currentFile := 0
-    currentRowGroup := rank.toNat  -- Start at rank offset for DDP
+    currentRowGroup := rank  -- Start at rank offset for DDP
     rank
     worldSize
   }
@@ -196,10 +196,10 @@ def RowGroupIterator.next (iter : RowGroupIterator) : IO (Option RowGroupData ×
 
   -- Read the row group
   let filePath := iter.parquetFiles[fileIdx]!
-  let rowGroupData ← readRowGroup filePath rgIdx.toUInt64
+  let rowGroupData ← readRowGroup filePath rgIdx
 
   -- Advance to next row group for this rank (stride by worldSize)
-  let nextRg := iter.currentRowGroup + iter.worldSize.toNat
+  let nextRg := iter.currentRowGroup + iter.worldSize
   let newIter := { iter with
     currentRowGroup := nextRg
     totalRowGroupsProcessed := iter.totalRowGroupsProcessed + 1
@@ -211,7 +211,7 @@ def RowGroupIterator.next (iter : RowGroupIterator) : IO (Option RowGroupData ×
 def RowGroupIterator.reset (iter : RowGroupIterator) : RowGroupIterator :=
   { iter with
     currentFile := 0
-    currentRowGroup := iter.rank.toNat
+    currentRowGroup := iter.rank
     totalRowGroupsProcessed := 0
   }
 
@@ -221,6 +221,7 @@ def RowGroupIterator.reset (iter : RowGroupIterator) : RowGroupIterator :=
 def PretrainingLoader.init (config : PretrainingConfig) : IO PretrainingLoader := do
   let isDistributed ← dist.isInitialized
   let (rank, worldSize) ← if isDistributed then dist.getRankAndWorldSize else pure ((0 : UInt64), (1 : UInt64))
+  let (rank, worldSize) := (rank.toNat, worldSize.toNat)
 
   -- List parquet files in data directory
   let parquetFiles ← listParquetFiles config.dataPath
@@ -243,7 +244,7 @@ def createInputTarget (tokens : Array UInt64) : (Array UInt64 × Array UInt64) :
 
 /-- Build an Int64 token tensor from host data over the raw FFI boundary.
     `reshapeChecked` validates the result metadata (shape and Int64 dtype). -/
-private def int64TensorFromArray (arr : Array Int64) : Tensor { shape := #[arr.size.toUInt64], dtype := .Int64, device := .CPU } :=
+private def int64TensorFromArray (arr : Array Int64) : Tensor { shape := #[arr.size], dtype := .Int64, device := .CPU } :=
   Tensor.fromInt64Array arr
 
 /-- Get next batch of (input, target) pairs.
@@ -252,7 +253,7 @@ def PretrainingLoader.nextBatch (loader : PretrainingLoader)
     : IO (Option (Tensor { shape := #[loader.config.batchSize, loader.config.seqLen], dtype := .Int64, device := .CPU } ×
                   Tensor { shape := #[loader.config.batchSize, loader.config.seqLen], dtype := .Int64, device := .CPU }) ×
           PretrainingLoader) := do
-  let tokensNeeded := (loader.config.batchSize * loader.config.seqLen + 1).toNat
+  let tokensNeeded := loader.config.batchSize * loader.config.seqLen + 1
 
   -- Check if we have enough tokens
   if loader.buffer.available >= tokensNeeded then
@@ -293,18 +294,18 @@ def PretrainingLoader.resume (loader : PretrainingLoader) (state : LoaderState)
 /-- Load validation data (typically last shard of training data) -/
 structure ValidationLoader where
   /-- All validation tokens (runtime length) -/
-  tokens : Σ n : UInt64, Tensor { shape := #[n], dtype := .Int64, device := .CPU }
+  tokens : Σ n : Nat, Tensor { shape := #[n], dtype := .Int64, device := .CPU }
   /-- Current position -/
   position : Nat
   /-- Sequence length -/
-  seqLen : UInt64
+  seqLen : Nat
   deriving Repr
 
-def ValidationLoader.init (tokens : Σ n : UInt64, Tensor { shape := #[n], dtype := .Int64, device := .CPU }) (seqLen : UInt64)
+def ValidationLoader.init (tokens : Σ n : Nat, Tensor { shape := #[n], dtype := .Int64, device := .CPU }) (seqLen : Nat)
     : ValidationLoader :=
   { tokens, position := 0, seqLen }
 
-def ValidationLoader.nextBatch (loader : ValidationLoader) (batchSize : UInt64)
+def ValidationLoader.nextBatch (loader : ValidationLoader) (batchSize : Nat)
     : IO (Option (Tensor { shape := #[batchSize, loader.seqLen], dtype := .Int64, device := .CPU } ×
                   Tensor { shape := #[batchSize, loader.seqLen], dtype := .Int64, device := .CPU }) × ValidationLoader) := do
   -- Implementation would slice tokens and create batches
@@ -344,9 +345,9 @@ structure StreamingLoaderConfig where
   /-- Path to data directory -/
   dataPath : String := "data"
   /-- Batch size in tokens (total across sequences) -/
-  batchTokens : UInt64 := 524288  -- 2^19
+  batchTokens : Nat := 524288  -- 2^19
   /-- Sequence length -/
-  seqLen : UInt64 := 2048
+  seqLen : Nat := 2048
   /-- BOS token ID -/
   bosToken : UInt64 := 0
   /-- EOS token ID -/
@@ -372,7 +373,7 @@ structure StreamingLoaderState where
   deriving Repr
 
 /-- Initialize the streaming loader -/
-def StreamingLoaderState.init (config : StreamingLoaderConfig) (rank worldSize : UInt64)
+def StreamingLoaderState.init (config : StreamingLoaderConfig) (rank worldSize : Nat)
     : IO StreamingLoaderState := do
   let rowGroupIter ← RowGroupIterator.init config.dataPath rank worldSize
 
@@ -383,7 +384,7 @@ def StreamingLoaderState.init (config : StreamingLoaderConfig) (rank worldSize :
     totalTokensYielded := 0
     checkpointState := {
       parquetIdx := 0
-      rowGroupIdx := rank.toNat
+      rowGroupIdx := rank
       docOffset := 0
       tokenBuffer := #[]
       totalTokens := 0
@@ -455,7 +456,7 @@ def StreamingLoaderState.nextBatch (state : StreamingLoaderState) (config : Stre
                   Tensor { shape := #[config.batchTokens / config.seqLen, config.seqLen], dtype := .Int64, device := .CPU }) ×
           StreamingLoaderState) := do
   let batchSize := config.batchTokens / config.seqLen
-  let tokensNeeded := (batchSize * config.seqLen + 1).toNat
+  let tokensNeeded := batchSize * config.seqLen + 1
 
   -- Fill buffer if needed
   let st ← fillBuffer state config tokensNeeded

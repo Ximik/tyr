@@ -29,19 +29,19 @@ variable {device : Device}
 /-- Model configuration matching modded-nanogpt -/
 structure Config where
   /-- Vocabulary size (padded to multiple of 128) -/
-  vocabSize : UInt64 := 50304
+  vocabSize : Nat := 50304
   /-- Number of transformer layers -/
-  nLayer : UInt64 := 11
+  nLayer : Nat := 11
   /-- Number of attention heads -/
-  nHead : UInt64 := 6
+  nHead : Nat := 6
   /-- Head dimension -/
-  headDim : UInt64 := 128
+  headDim : Nat := 128
   /-- Model dimension (nHead * headDim) -/
-  modelDim : UInt64 := 768
+  modelDim : Nat := 768
   /-- Maximum sequence length -/
-  maxSeqLen : UInt64 := 2048
+  maxSeqLen : Nat := 2048
   /-- Block size for attention windowing -/
-  blockSize : UInt64 := 128
+  blockSize : Nat := 128
   /-- Base frequency for rotary embeddings -/
   ropeBase : Float := 500000.0
   /-- Number of value embedding layers -/
@@ -69,8 +69,8 @@ def Config.default : Config := {}
 
     The pattern is tiled across layers. Final layer always gets full context.
 -/
-def getWindowSizeForLayer (pattern : String) (layerIdx : Nat) (nLayers : Nat) (seqLen : UInt64)
-    : Option UInt64 :=
+def getWindowSizeForLayer (pattern : String) (layerIdx : Nat) (nLayers : Nat) (seqLen : Nat)
+    : Option Nat :=
   -- Final layer always gets full context
   if layerIdx == nLayers - 1 then
     none
@@ -88,11 +88,11 @@ def getWindowSizeForLayer (pattern : String) (layerIdx : Nat) (nLayers : Nat) (s
       none  -- Unknown character = full context (safe default)
 
 /-- Compute window sizes for all layers in advance.
-    Returns array of Option UInt64 where none = full context. -/
-def computeWindowSizes (cfg : Config) : Array (Option UInt64) := Id.run do
-  let mut sizes : Array (Option UInt64) := #[]
-  for i in [:cfg.nLayer.toNat] do
-    sizes := sizes.push (getWindowSizeForLayer cfg.windowPattern i cfg.nLayer.toNat cfg.maxSeqLen)
+    Returns array of Option Nat where none = full context. -/
+def computeWindowSizes (cfg : Config) : Array (Option Nat) := Id.run do
+  let mut sizes : Array (Option Nat) := #[]
+  for i in [:cfg.nLayer] do
+    sizes := sizes.push (getWindowSizeForLayer cfg.windowPattern i cfg.nLayer cfg.maxSeqLen)
   return sizes
 
 /-! ## Rotary Embeddings with YaRN -/
@@ -103,7 +103,7 @@ def computeWindowSizes (cfg : Config) : Array (Option UInt64) := Id.run do
     by interpolating rotary frequencies. We use half-truncated RoPE
     where only the first half of head dimensions get rotation.
 -/
-structure YarnRotary (headDim maxSeqLen : UInt64) where
+structure YarnRotary (headDim maxSeqLen : Nat) where
   /-- Cosine frequencies [maxSeqLen, headDim/2] for half-truncated RoPE -/
   cos : Tensor { shape := #[maxSeqLen, headDim / 2], dtype := .Float32, device := device }
   /-- Sine frequencies [maxSeqLen, headDim/2] for half-truncated RoPE -/
@@ -115,7 +115,7 @@ structure YarnRotary (headDim maxSeqLen : UInt64) where
   deriving Repr
 
 /-- Initialize YaRN rotary embeddings -/
-def YarnRotary.init (headDim maxSeqLen : UInt64) (base : Float := 500000.0) (device : Device := .CPU)
+def YarnRotary.init (headDim maxSeqLen : Nat) (base : Float := 500000.0) (device : Device := .CPU)
     : IO (YarnRotary (device := device) headDim maxSeqLen) := do
   -- computeFreqs returns [maxSeqLen, headDim/2]
   let (cosHalf, sinHalf) := Tensor.rotaryFreqs maxSeqLen headDim base
@@ -133,7 +133,7 @@ def YarnRotary.init (headDim maxSeqLen : UInt64) (base : Float := 500000.0) (dev
     rotary frequencies to maintain position information.
 -/
 def YarnRotary.applyExtension (yarn : YarnRotary (device := device) headDim maxSeqLen)
-    (_oldWindow _newWindow : UInt64) : YarnRotary (device := device) headDim maxSeqLen :=
+    (_oldWindow _newWindow : Nat) : YarnRotary (device := device) headDim maxSeqLen :=
   -- YaRN frequency interpolation would go here
   -- For now, return unchanged
   yarn
@@ -141,7 +141,7 @@ def YarnRotary.applyExtension (yarn : YarnRotary (device := device) headDim maxS
 /-! ## Attention Arguments -/
 
 /-- Arguments passed to attention layers during forward pass -/
-structure AttnArgs (batch maxSeq nHead headDim : UInt64) where
+structure AttnArgs (batch maxSeq nHead headDim : Nat) where
   /-- Value embeddings for current layer (optional) -/
   valueEmbed : Option (Tensor { shape := #[batch, maxSeq, nHead * headDim], dtype := .Float32, device := device })
   /-- SA (scaled attention) lambda for this layer -/
@@ -149,9 +149,9 @@ structure AttnArgs (batch maxSeq nHead headDim : UInt64) where
   /-- Cumulative sequence lengths for variable-length attention -/
   seqlens : Option (Tensor { shape := #[batch + 1], dtype := .Int64, device := device })
   /-- Short window size (in blocks) -/
-  wsShort : UInt64
+  wsShort : Nat
   /-- Long window size (in blocks) -/
-  wsLong : UInt64
+  wsLong : Nat
   /-- Cosine frequencies for RoPE -/
   cos : Tensor { shape := #[maxSeq, headDim], dtype := .Float32, device := device }
   /-- Sine frequencies for RoPE -/
@@ -165,7 +165,7 @@ structure AttnArgs (batch maxSeq nHead headDim : UInt64) where
 /-! ## Linear Layers -/
 
 /-- Linear layer that can optionally use FP8 quantization -/
-structure CastedLinear (inDim outDim : UInt64) where
+structure CastedLinear (inDim outDim : Nat) where
   /-- Weight matrix [outDim, inDim] -/
   weight : Tensor { shape := #[outDim, inDim], dtype := .Float32, device := device }
   /-- Whether to use FP8 training (requires H100+) -/
@@ -177,7 +177,7 @@ structure CastedLinear (inDim outDim : UInt64) where
   deriving Repr, TensorStruct
 
 /-- Initialize CastedLinear with scaled random weights -/
-def CastedLinear.init (inDim outDim : UInt64) (scale : Float := 0.02)
+def CastedLinear.init (inDim outDim : Nat) (scale : Float := 0.02)
     (lrMul wdMul : Float := 1.0) (device : Device := .CPU) : IO (CastedLinear (device := device) inDim outDim) := do
   let weight ← Tensor.randn (device := device) #[outDim, inDim] false
   let scaledWeight := Tensor.mulScalar weight scale
@@ -189,7 +189,7 @@ def CastedLinear.init (inDim outDim : UInt64) (scale : Float := 0.02)
   }
 
 /-- Forward pass for CastedLinear (3D input) -/
-def CastedLinear.forward {batch seq inDim outDim : UInt64}
+def CastedLinear.forward {batch seq inDim outDim : Nat}
     (layer : CastedLinear (device := device) inDim outDim) (x : Tensor { shape := #[batch, seq, inDim], dtype := .Float32, device := device })
     : Tensor { shape := #[batch, seq, outDim], dtype := .Float32, device := device } :=
   Tensor.linear3d x layer.weight
@@ -206,7 +206,7 @@ def CastedLinear.forward {batch seq inDim outDim : UInt64}
 
     Weight shapes for Tensor.linear3d: [out_dim, in_dim] since it computes x @ W.T
 -/
-structure CausalSelfAttention (dim headDim numHeads : UInt64) where
+structure CausalSelfAttention (dim headDim numHeads : Nat) where
   /-- Query projection [numHeads * headDim, dim] -/
   wQ : Tensor { shape := #[numHeads * headDim, dim], dtype := .Float32, device := device }
   /-- Key projection [numHeads * headDim, dim] -/
@@ -218,7 +218,7 @@ structure CausalSelfAttention (dim headDim numHeads : UInt64) where
   deriving Repr, TensorStruct
 
 /-- Initialize CausalSelfAttention with proper initialization -/
-def CausalSelfAttention.init (dim headDim numHeads : UInt64) (device : Device := .CPU)
+def CausalSelfAttention.init (dim headDim numHeads : Nat) (device : Device := .CPU)
     : IO (CausalSelfAttention (device := device) dim headDim numHeads) := do
   -- Uniform init with bound = sqrt(3) * (1/sqrt(dim)) for same std as normal
   let s := Float.sqrt 3.0 / Float.sqrt dim.toFloat
@@ -239,17 +239,17 @@ def CausalSelfAttention.init (dim headDim numHeads : UInt64) (device : Device :=
   }
 
 /-- Functional RMSNorm (no learnable parameters) -/
-def rmsNorm3d {batch seq dim : UInt64} (x : Tensor { shape := #[batch, seq, dim], dtype := .Float32, device := device }) : Tensor { shape := #[batch, seq, dim], dtype := .Float32, device := device } :=
+def rmsNorm3d {batch seq dim : Nat} (x : Tensor { shape := #[batch, seq, dim], dtype := .Float32, device := device }) : Tensor { shape := #[batch, seq, dim], dtype := .Float32, device := device } :=
   Tensor.rmsNorm x
 
 /-- Forward pass for attention with rotary embeddings and QK norm.
     x: [batch, seq, dim]
     Returns: [batch, seq, dim] -/
-def CausalSelfAttention.forward {batch seq dim headDim numHeads rotaryLen : UInt64}
+def CausalSelfAttention.forward {batch seq dim headDim numHeads rotaryLen : Nat}
     (attn : CausalSelfAttention (device := device) dim headDim numHeads)
     (x : Tensor { shape := #[batch, seq, dim], dtype := .Float32, device := device })
     (yarn : YarnRotary (device := device) headDim rotaryLen)
-    (windowSize : Option UInt64 := none)
+    (windowSize : Option Nat := none)
     (valueEmbed : Option (Tensor { shape := #[batch, seq, numHeads * headDim], dtype := .Float32, device := device }) := none)
     (valueMix : Tensor { shape := #[], dtype := .Float32, device := device } := Tensor.zeros (device := device) #[])
     : Tensor { shape := #[batch, seq, dim], dtype := .Float32, device := device } :=
@@ -319,7 +319,7 @@ def CausalSelfAttention.forward {batch seq dim headDim numHeads rotaryLen : UInt
     Note: modded-nanogpt uses transposed layout for weights
     and zero-initialized c_proj.
 -/
-structure MLP (dim : UInt64) where
+structure MLP (dim : Nat) where
   /-- Expansion weights [4*dim, dim] -/
   cFc : Tensor { shape := #[4 * dim, dim], dtype := .Float32, device := device }
   /-- Projection weights [4*dim, dim] (transposed layout) -/
@@ -327,7 +327,7 @@ structure MLP (dim : UInt64) where
   deriving Repr, TensorStruct
 
 /-- Initialize MLP with scaled weights -/
-def MLP.init (dim : UInt64) (device : Device := .CPU) : IO (MLP (device := device) dim) := do
+def MLP.init (dim : Nat) (device : Device := .CPU) : IO (MLP (device := device) dim) := do
   let cFc ← Tensor.randn (device := device) #[4 * dim, dim] false
   -- c_proj initialized to zero (modded-nanogpt style)
   let cProj := Tensor.zeros (device := device) #[4 * dim, dim]
@@ -337,7 +337,7 @@ def MLP.init (dim : UInt64) (device : Device := .CPU) : IO (MLP (device := devic
   }
 
 /-- Forward pass for MLP with ReLU^2 activation -/
-def MLP.forward {batch seq dim : UInt64} (mlp : MLP (device := device) dim) (x : Tensor { shape := #[batch, seq, dim], dtype := .Float32, device := device })
+def MLP.forward {batch seq dim : Nat} (mlp : MLP (device := device) dim) (x : Tensor { shape := #[batch, seq, dim], dtype := .Float32, device := device })
     : IO (Tensor { shape := #[batch, seq, dim], dtype := .Float32, device := device }) := do
   -- x @ c_fc.T -> [batch, seq, 4*dim]
   let h := Tensor.linear3d x mlp.cFc
@@ -357,27 +357,27 @@ def MLP.forward {batch seq dim : UInt64} (mlp : MLP (device := device) dim) (x :
     Some layers have attention skipped (layer 6 in modded-nanogpt).
     First MLP layer is also skipped.
 -/
-structure Block (dim headDim numHeads : UInt64) where
+structure Block (dim headDim numHeads : Nat) where
   /-- Attention layer (None for layer 6) -/
   attn : Option (CausalSelfAttention (device := device) dim headDim numHeads)
   /-- MLP layer -/
   mlp : MLP (device := device) dim
   deriving Repr, TensorStruct
 
-instance {inDim outDim : UInt64} : Inhabited (CastedLinear (device := device) inDim outDim) where
+instance {inDim outDim : Nat} : Inhabited (CastedLinear (device := device) inDim outDim) where
   default := { weight := Tensor.zeros (device := device) _ }
 
-instance {dim : UInt64} : Inhabited (MLP (device := device) dim) where
+instance {dim : Nat} : Inhabited (MLP (device := device) dim) where
   default := { cFc := Tensor.zeros (device := device) _, cProj := Tensor.zeros (device := device) _ }
 
-instance {dim headDim numHeads : UInt64} : Inhabited (CausalSelfAttention (device := device) dim headDim numHeads) where
+instance {dim headDim numHeads : Nat} : Inhabited (CausalSelfAttention (device := device) dim headDim numHeads) where
   default := { wQ := Tensor.zeros (device := device) _, wK := Tensor.zeros (device := device) _, wV := Tensor.zeros (device := device) _, wO := Tensor.zeros (device := device) _ }
 
-instance {dim headDim numHeads : UInt64} : Inhabited (Block (device := device) dim headDim numHeads) where
+instance {dim headDim numHeads : Nat} : Inhabited (Block (device := device) dim headDim numHeads) where
   default := { attn := none, mlp := default }
 
 /-- Initialize Block -/
-def Block.init (dim headDim numHeads : UInt64) (skipAttn : Bool := false) (device : Device := .CPU)
+def Block.init (dim headDim numHeads : Nat) (skipAttn : Bool := false) (device : Device := .CPU)
     : IO (Block (device := device) dim headDim numHeads) := do
   let attn ← if skipAttn then pure none else Option.some <$> CausalSelfAttention.init (device := device) dim headDim numHeads
   let mlp ← MLP.init (device := device) dim
@@ -394,13 +394,13 @@ def Block.init (dim headDim numHeads : UInt64) (skipAttn : Bool := false) (devic
     - Smear gate
     - Backout lambda
 -/
-structure Scalars (nLayer : UInt64) where
+structure Scalars (nLayer : Nat) where
   /-- All scalars packed into one tensor for efficiency -/
   values : Tensor { shape := #[nLayer * 4 + 8], dtype := .Float32, device := device }  -- 4 per layer + 8 global
   deriving Repr, TensorStruct
 
 /-- Initialize scalars with modded-nanogpt defaults -/
-def Scalars.init (nLayer : UInt64) (device : Device := .CPU) : IO (Scalars (device := device) nLayer) := do
+def Scalars.init (nLayer : Nat) (device : Device := .CPU) : IO (Scalars (device := device) nLayer) := do
   pure {
     values := ← Tensor.parameter (Tensor.mulScalar (Tensor.ones (device := device) #[nLayer * 4 + 8]) 1.1)
   }
@@ -408,12 +408,12 @@ def Scalars.init (nLayer : UInt64) (device : Device := .CPU) : IO (Scalars (devi
 /-! ## Scalar/Value Helper Utilities -/
 
 /-- Extract scalar tensor at `idx` from a 1D tensor. -/
-private def scalarAt {n : UInt64} (values : Tensor { shape := #[n], dtype := .Float32, device := device }) (idx : UInt64) : Tensor { shape := #[], dtype := .Float32, device := device } :=
+private def scalarAt {n : Nat} (values : Tensor { shape := #[n], dtype := .Float32, device := device }) (idx : Nat) : Tensor { shape := #[], dtype := .Float32, device := device } :=
   let oneElem : Tensor { shape := #[1], dtype := .Float32, device := device } := Tensor.sliceChecked values 0 idx 1 #[1]
   Tensor.reshapeChecked oneElem #[]
 
 /-- Extract scalar at `idx` and squash to (0, 1). -/
-private def scalarSigmoidAt {n : UInt64} (values : Tensor { shape := #[n], dtype := .Float32, device := device }) (idx : UInt64) : Tensor { shape := #[], dtype := .Float32, device := device } :=
+private def scalarSigmoidAt {n : Nat} (values : Tensor { shape := #[n], dtype := .Float32, device := device }) (idx : Nat) : Tensor { shape := #[], dtype := .Float32, device := device } :=
   Tensor.sigmoid (scalarAt values idx)
 
 /-- Scale a tensor by a scalar tensor, keeping gradient flow through the scalar. -/
@@ -427,11 +427,11 @@ private def blendByScalars {s : Shape} (x y : Tensor { shape := s, dtype := .Flo
 
 /-- Value-embedding routing pattern used by modded-nanogpt:
     assign value embeddings to early and late layers, skip middle layers. -/
-private def layerValueEmbed {cfg : Config} {batch seq : UInt64}
+private def layerValueEmbed {cfg : Config} {batch seq : Nat}
     (valueEmbeds : Array (Tensor { shape := #[batch, seq, cfg.modelDim], dtype := .Float32, device := device }))
     (layerIdx : Nat)
     : Option (Tensor { shape := #[batch, seq, cfg.modelDim], dtype := .Float32, device := device }) := Id.run do
-  let nLayers := cfg.nLayer.toNat
+  let nLayers := cfg.nLayer
   let nValue := valueEmbeds.size
   if nLayers == 0 || nValue == 0 then
     return none
@@ -477,7 +477,7 @@ def ModdedGPTParams.init (cfg : Config) (device : Device := .CPU) : IO (ModdedGP
 
   -- Transformer blocks
   let mut blocks := #[]
-  for i in [:cfg.nLayer.toNat] do
+  for i in [:cfg.nLayer] do
     -- Layer 6 (0-indexed: 5) has attention skipped
     let skipAttn := i == 5
     let block ← Block.init (device := device) cfg.modelDim cfg.headDim cfg.nHead skipAttn
@@ -510,7 +510,7 @@ def ModdedGPTParams.init (cfg : Config) (device : Device := .CPU) : IO (ModdedGP
     5. Backout lambda
     6. Softcapped logits
 -/
-def forward {cfg : Config} {batch seq : UInt64}
+def forward {cfg : Config} {batch seq : Nat}
     (params : ModdedGPTParams (device := device) cfg)
     (yarn : YarnRotary (device := device) cfg.headDim cfg.maxSeqLen)
     (inputSeq : Tensor { shape := #[batch, seq], dtype := .Int64, device := device })
@@ -536,9 +536,9 @@ def forward {cfg : Config} {batch seq : UInt64}
   let mut x := x0
   let mut skipConnection : Option (Tensor { shape := #[batch, seq, cfg.modelDim], dtype := .Float32, device := device }) := none
 
-  for i in [:cfg.nLayer.toNat] do
+  for i in [:cfg.nLayer] do
     let block : Block (device := device) cfg.modelDim cfg.headDim cfg.nHead := params.blocks[i]!
-    let scalarBase := (i.toUInt64) * 4
+    let scalarBase := (i) * 4
     let lamX := scalarSigmoidAt params.scalars.values scalarBase
     let lamX0 := scalarSigmoidAt params.scalars.values (scalarBase + 1)
     let lamAttn := scalarSigmoidAt params.scalars.values (scalarBase + 2)
@@ -551,7 +551,7 @@ def forward {cfg : Config} {batch seq : UInt64}
 
     -- Determine window size from config's windowPattern
     -- Pattern is tiled across layers, final layer always gets full context
-    let windowSize : Option UInt64 := getWindowSizeForLayer cfg.windowPattern i cfg.nLayer.toNat seq
+    let windowSize : Option Nat := getWindowSizeForLayer cfg.windowPattern i cfg.nLayer seq
 
     -- Apply block with attention and MLP
     match block.attn with
@@ -595,7 +595,7 @@ def forward {cfg : Config} {batch seq : UInt64}
   return logitsCapped
 
 /-- Compute cross-entropy loss -/
-def loss {cfg : Config} {batch seq : UInt64}
+def loss {cfg : Config} {batch seq : Nat}
     (params : ModdedGPTParams (device := device) cfg)
     (yarn : YarnRotary (device := device) cfg.headDim cfg.maxSeqLen)
     (inputSeq : Tensor { shape := #[batch, seq], dtype := .Int64, device := device })
@@ -611,25 +611,25 @@ def loss {cfg : Config} {batch seq : UInt64}
 
 /-! Device transfers are type-directed across every model leaf. -/
 
-derive_tensor_tree_cast {source target : Device} {headDim maxSeqLen : UInt64} :
+derive_tensor_tree_cast {source target : Device} {headDim maxSeqLen : Nat} :
   YarnRotary (device := source) headDim maxSeqLen => YarnRotary (device := target) headDim maxSeqLen
 
-derive_tensor_tree_cast {source target : Device} {batch maxSeq nHead headDim : UInt64} :
+derive_tensor_tree_cast {source target : Device} {batch maxSeq nHead headDim : Nat} :
   AttnArgs (device := source) batch maxSeq nHead headDim => AttnArgs (device := target) batch maxSeq nHead headDim
 
-derive_tensor_tree_cast {source target : Device} {inDim outDim : UInt64} :
+derive_tensor_tree_cast {source target : Device} {inDim outDim : Nat} :
   CastedLinear (device := source) inDim outDim => CastedLinear (device := target) inDim outDim
 
-derive_tensor_tree_cast {source target : Device} {dim headDim numHeads : UInt64} :
+derive_tensor_tree_cast {source target : Device} {dim headDim numHeads : Nat} :
   CausalSelfAttention (device := source) dim headDim numHeads => CausalSelfAttention (device := target) dim headDim numHeads
 
-derive_tensor_tree_cast {source target : Device} {dim : UInt64} :
+derive_tensor_tree_cast {source target : Device} {dim : Nat} :
   MLP (device := source) dim => MLP (device := target) dim
 
-derive_tensor_tree_cast {source target : Device} {dim headDim numHeads : UInt64} :
+derive_tensor_tree_cast {source target : Device} {dim headDim numHeads : Nat} :
   Block (device := source) dim headDim numHeads => Block (device := target) dim headDim numHeads
 
-derive_tensor_tree_cast {source target : Device} {nLayer : UInt64} :
+derive_tensor_tree_cast {source target : Device} {nLayer : Nat} :
   Scalars (device := source) nLayer => Scalars (device := target) nLayer
 
 derive_tensor_tree_cast {source target : Device} {cfg : Config} :

@@ -16,7 +16,7 @@ variable {device : Device} {dtype : DType}
 variable [DType.RealFloating dtype]
 /-- Self-attention block for VAE.
     Applies spatial attention using 1×1 convolutions. -/
-structure AttnBlock (channels : UInt64) (dtype : DType := .Float32) where
+structure AttnBlock (channels : Nat) (dtype : DType := .Float32) where
   /-- GroupNorm before attention -/
   norm : GroupNormParams (device := device) (dtype := dtype) 32 channels
   /-- Query projection (1×1 conv) -/
@@ -33,7 +33,7 @@ structure AttnBlock (channels : UInt64) (dtype : DType := .Float32) where
 namespace AttnBlock
 
 /-- Initialize attention block -/
-def init (channels : UInt64) (device : Device := .CPU) (dtype : DType := .Float32) : IO (AttnBlock (device := device) (dtype := dtype) channels) := do
+def init (channels : Nat) (device : Device := .CPU) (dtype : DType := .Float32) : IO (AttnBlock (device := device) (dtype := dtype) channels) := do
   let norm ← GroupNormParams.init (dtype := dtype) (device := device) 32 channels
   let q ← Conv2dParams.init (dtype := dtype) (device := device) channels channels 1 0
   let k ← Conv2dParams.init (dtype := dtype) (device := device) channels channels 1 0
@@ -46,7 +46,7 @@ def init (channels : UInt64) (device : Device := .CPU) (dtype : DType := .Float3
     Output: [batch, channels, height, width]
 
     Applies single-head spatial self-attention. -/
-def forward {batch channels height width : UInt64}
+def forward {batch channels height width : Nat}
     (attn : AttnBlock (device := device) (dtype := dtype) channels)
     (x : Tensor { dtype := dtype, device := device, shape := #[batch, channels, height, width] })
     : Tensor { dtype := dtype, device := device, shape := #[batch, channels, height, width] } :=

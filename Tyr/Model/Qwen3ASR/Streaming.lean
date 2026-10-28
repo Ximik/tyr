@@ -78,14 +78,14 @@ structure StreamingPromptTokenCache where
 
 /-- Cached projected-audio embedding prefix for full-accumulation streaming mode. -/
 structure StreamingAudioEncoderCache (cfg : Qwen3ASRConfig) (dtype : DType := .Float32) where
-  validFeatureLen : UInt64
-  validAudioLen : UInt64
+  validFeatureLen : Nat
+  validAudioLen : Nat
   audioEmbedsValidDyn : Tensor { dtype := dtype, device := device, shape := #[1, validAudioLen, cfg.thinkerConfig.textConfig.hiddenSize] }
 
 /-- Cached frontend tensors for append-only full-accumulation streaming audio. -/
 structure StreamingFrontendCache (cfg : Qwen3ASRConfig) where
   audioSamples : Nat
-  frames : UInt64
+  frames : Nat
   inputFeaturesDyn : Tensor { device := device, shape := #[1, cfg.thinkerConfig.audioConfig.numMelBins, frames], dtype := .Float32 }
   featureAttentionMaskDyn : Tensor { device := device, shape := #[1, frames], dtype := .Int64 }
   inputFeaturesDevDyn : Option (Tensor { device := device, shape := #[1, cfg.thinkerConfig.audioConfig.numMelBins, frames], dtype := .Float32 }) := none
@@ -93,12 +93,12 @@ structure StreamingFrontendCache (cfg : Qwen3ASRConfig) where
 
 /-- Cached device-side prompt token segments for streaming input-id assembly. -/
 structure StreamingPromptDeviceCache where
-  beforeLen : UInt64
+  beforeLen : Nat
   beforeIdsDevDyn : Tensor { device := device, shape := #[beforeLen], dtype := .Int64 }
-  afterLen : UInt64
+  afterLen : Nat
   afterIdsDevDyn : Tensor { device := device, shape := #[afterLen], dtype := .Int64 }
   lastSuffix : String := ""
-  suffixLen : UInt64 := 0
+  suffixLen : Nat := 0
   suffixIdsDevDyn : Option (Tensor { device := device, shape := #[suffixLen], dtype := .Int64 }) := none
 
 /-- Full decode cache state carried across streaming decode hops. -/
@@ -138,13 +138,13 @@ private def startsWithStr (s pref : String) : Bool :=
 private def dropChars (s : String) (n : Nat) : String :=
   String.ofList (s.toList.drop n)
 
-private def minU64 (a b : UInt64) : UInt64 :=
+private def minU64 (a b : Nat) : Nat :=
   if a <= b then a else b
 
-private def appendRepeatedTokenId (ids : Array UInt32) (tokId : UInt32) (n : UInt64) : Array UInt32 :=
+private def appendRepeatedTokenId (ids : Array UInt32) (tokId : UInt32) (n : Nat) : Array UInt32 :=
   Id.run do
     let mut out := ids
-    for _ in [:n.toNat] do
+    for _ in [:n] do
       out := out.push tokId
     out
 
@@ -172,7 +172,7 @@ private def encodePromptIdsWithCache
     (processor : Qwen3ASRProcessor)
     (basePrompt : String)
     (prompt : String)
-    (audioLen : UInt64)
+    (audioLen : Nat)
     (audioTokenId : UInt32)
     (cache : Option StreamingPromptTokenCache)
     : IO (Array UInt32 × Option StreamingPromptTokenCache) := do
@@ -205,13 +205,13 @@ private def encodePromptIdsWithCache
     | .error e => throw <| IO.userError e
 
 private def idsToDyn1dOnDevice (ids : Array UInt32) (device : Device) : IO (Sigma (fun n => Tensor { device := device, shape := #[n], dtype := .Int64 })) := do
-  let n : UInt64 := ids.size.toUInt64
+  let n : Nat := ids.size
   let vals : Array Int64 := ids.map (fun id => Int64.ofNat id.toNat)
   let tCpu : Tensor { device := .CPU, shape := #[n], dtype := .Int64 } := Tensor.reshapeChecked (Tensor.fromInt64Array vals) #[n]
   let tDev : Tensor { device := device, shape := #[n], dtype := .Int64 } := tCpu.to device
   pure ⟨n, tDev⟩
 
-private def repeatedTokenDynOnDevice (tokId : UInt32) (n : UInt64) (device : Device) : Tensor { device := device, shape := #[n], dtype := .Int64 } :=
+private def repeatedTokenDynOnDevice (tokId : UInt32) (n : Nat) (device : Device) : Tensor { device := device, shape := #[n], dtype := .Int64 } :=
   (Tensor.fullInt #[n] (Int64.ofNat tokId.toNat)).to device
 
 private def mkPromptDeviceCache
@@ -257,7 +257,7 @@ private def buildInputIdsWithPromptDeviceCache
     (promptIds : Array UInt32)
     (promptTokenCache : Option StreamingPromptTokenCache)
     (promptDeviceCache : Option (StreamingPromptDeviceCache (device := device)))
-    (audioLen : UInt64)
+    (audioLen : Nat)
     (audioTokenId : UInt32)
     : IO ((Sigma (fun seq => Tensor { device := device, shape := #[1, seq], dtype := .Int64 })) × Option (StreamingPromptDeviceCache (device := device))) := do
   match promptTokenCache with
@@ -265,8 +265,8 @@ private def buildInputIdsWithPromptDeviceCache
     let devCache ←
       match promptDeviceCache with
       | some dc =>
-        if dc.beforeLen == ptc.beforeAudioIds.size.toUInt64 &&
-           dc.afterLen == ptc.afterAudioIds.size.toUInt64 then
+        if dc.beforeLen == ptc.beforeAudioIds.size &&
+           dc.afterLen == ptc.afterAudioIds.size then
           updatePromptDeviceCacheSuffix dc ptc
         else
           mkPromptDeviceCache ptc device
@@ -285,7 +285,7 @@ private def buildInputIdsWithPromptDeviceCache
       | some dyn => parts := parts.push ⟨devCache.suffixLen, dyn⟩
       | none => pure ()
     let seqFromParts := parts.foldl (fun acc p => acc + p.1) 0
-    let seqFromPrompt := promptIds.size.toUInt64
+    let seqFromPrompt := promptIds.size
     if seqFromParts != seqFromPrompt then
       throw <| IO.userError
         s!"prompt device cache length mismatch: from_parts={seqFromParts}, from_prompt={seqFromPrompt}"
@@ -297,7 +297,7 @@ private def buildInputIdsWithPromptDeviceCache
     pure (⟨seqFromPrompt, inputIds⟩, some devCache)
   | none =>
     let idsVals : Array Int64 := promptIds.map (fun id => Int64.ofNat id.toNat)
-    let seq : UInt64 := idsVals.size.toUInt64
+    let seq : Nat := idsVals.size
     if seq == 0 then
       throw <| IO.userError "decodeStreamingChunkWithModel produced empty prompt/input sequence"
     let inputIdsCpu : Tensor { device := .CPU, shape := #[1, seq], dtype := .Int64 } := Tensor.reshapeChecked (Tensor.fromInt64Array idsVals) #[1, seq]
@@ -307,12 +307,12 @@ private def buildInputIdsWithPromptDeviceCache
 private def findSingleContiguousAudioSpanStart
     (promptIds : Array UInt32)
     (audioTokenId : UInt32)
-    (audioLen : UInt64)
-    : Option UInt64 :=
+    (audioLen : Nat)
+    : Option Nat :=
   if audioLen == 0 then
     if promptIds.contains audioTokenId then none else some 0
   else
-    let targetLen := audioLen.toNat
+    let targetLen := audioLen
     Id.run do
       let mut spans : Array (Nat × Nat) := #[]
       let mut i : Nat := 0
@@ -329,7 +329,7 @@ private def findSingleContiguousAudioSpanStart
       match spans[0]? with
       | some (start, spanLen) =>
         if spans.size == 1 && spanLen == targetLen then
-          some start.toUInt64
+          some start
         else
           none
       | none => none
@@ -344,16 +344,16 @@ private def buildStreamingFrontendPackWithCache
     (decodeMode : StreamingDecodeMode)
     (cache : Option (StreamingFrontendCache (device := device) cfg))
     : IO ((Sigma (fun frames => WhisperFrontendOutput (device := device) preprocessor.featureSize frames)) ×
-      Option (StreamingFrontendCache (device := device) cfg) × Option UInt64) := do
+      Option (StreamingFrontendCache (device := device) cfg) × Option Nat) := do
   let maxSec :=
     (PreprocessorConfig.expectedSampleCount preprocessor).toFloat / sampleRate16k
   let maxSamples := PreprocessorConfig.expectedSampleCount preprocessor
-  if audio16k.size.toUInt64 > maxSamples then
+  if audio16k.size > maxSamples then
     throw <| IO.userError
-      s!"Audio duration exceeds maxSeconds={maxSec}: samples={audio16k.size.toUInt64}, limit={maxSamples}"
+      s!"Audio duration exceeds maxSeconds={maxSec}: samples={audio16k.size}, limit={maxSamples}"
 
   let fullFallback : IO ((Sigma (fun frames => WhisperFrontendOutput (device := device) preprocessor.featureSize frames)) ×
-      Option (StreamingFrontendCache (device := device) cfg) × Option UInt64) := do
+      Option (StreamingFrontendCache (device := device) cfg) × Option Nat) := do
     let fullPack ←
       waveformToWhisperFeaturesDynamic
         preprocessor
@@ -377,7 +377,7 @@ private def buildStreamingFrontendPackWithCache
     decodeMode == .fullAccumulation &&
     preprocessor.doNormalize == false &&
     preprocessor.dither == 0.0 &&
-    (if preprocessor.hopLength == 0 then (160 : UInt64) else preprocessor.hopLength) > 0 &&
+    (if preprocessor.hopLength == 0 then (160 : Nat) else preprocessor.hopLength) > 0 &&
     audio16k.size > 0
 
   if !canTryIncremental then
@@ -389,11 +389,11 @@ private def buildStreamingFrontendPackWithCache
       if audio16k.size <= fc.audioSamples then
         fullFallback
       else
-        let hopNat := (if preprocessor.hopLength == 0 then (160 : UInt64) else preprocessor.hopLength).toNat
-        let nFftNat := (if preprocessor.nFft == 0 then (400 : UInt64) else preprocessor.nFft).toNat
+        let hopNat := (if preprocessor.hopLength == 0 then (160 : Nat) else preprocessor.hopLength)
+        let nFftNat := (if preprocessor.nFft == 0 then (400 : Nat) else preprocessor.nFft)
         let halfWindow := nFftNat / 2
         let contextFrames := ceilDivNat halfWindow hopNat + 1
-        let prevFramesNat := fc.frames.toNat
+        let prevFramesNat := fc.frames
         let replaceStartFrameNat :=
           if prevFramesNat > contextFrames then
             prevFramesNat - contextFrames
@@ -418,7 +418,7 @@ private def buildStreamingFrontendPackWithCache
               (maxSeconds := none)
               (device := device)
           let suffixFrames := suffixPack.1
-          let dropFrames := dropFramesNat.toUInt64
+          let dropFrames := dropFramesNat
           if dropFrames > suffixFrames then
             fullFallback
           else
@@ -426,7 +426,7 @@ private def buildStreamingFrontendPackWithCache
               Tensor.reshapeChecked fc.inputFeaturesDyn #[1, preprocessor.featureSize, fc.frames]
             let prevMask : Tensor { device := device, shape := #[1, fc.frames], dtype := .Int64 } :=
               Tensor.reshapeChecked fc.featureAttentionMaskDyn #[1, fc.frames]
-            let prefixFrames := replaceStartFrameNat.toUInt64
+            let prefixFrames := replaceStartFrameNat
             let prefixFeatures : Tensor { device := device, shape := #[1, preprocessor.featureSize, prefixFrames], dtype := .Float32 } :=
               Tensor.sliceChecked prevFeatures 2 0 prefixFrames #[1, preprocessor.featureSize, prefixFrames]
             let prefixMask : Tensor { device := device, shape := #[1, prefixFrames], dtype := .Int64 } :=
@@ -844,7 +844,7 @@ def decodeStreamingChunkWithModelStateCached
     (prompt : String)
     (audio16k : Array Float)
     (cache : Option (StreamingDecodeCache (device := device) (dtype := dtype) cfg) := none)
-    (maxNewTokens : UInt64 := 512)
+    (maxNewTokens : Nat := 512)
     (eosTokenIds : Array UInt64 := defaultEosTokenIds)
     : IO (String × Option (StreamingDecodeCache (device := device) (dtype := dtype) cfg)) := do
   if audio16k.isEmpty then
@@ -865,7 +865,7 @@ def decodeStreamingChunkWithModelStateCached
       let frames := frontendPack.1
       let frontendOut := frontendPack.2
       let validFramesTensor := Tensor.sumAll frontendOut.featureAttentionMask
-      let validFrames := (Tensor.itemInt validFramesTensor).toUInt64
+      let validFrames := (Tensor.itemInt validFramesTensor).toInt.toNat
       let audioLenRaw := AudioEncoderConfig.featExtractOutputLength validFrames
       let audioLenCap :=
         AudioEncoderConfig.framesAfterConv3
@@ -945,7 +945,7 @@ def decodeStreamingChunkWithModelStateCached
             mkFrontendFullDev
         else
           mkFrontendFullDev
-      let fullStepFeature : UInt64 := cfg.thinkerConfig.audioConfig.nWindow * 2
+      let fullStepFeature : Nat := cfg.thinkerConfig.audioConfig.nWindow * 2
       let (audioEmbedsValid, audioCache') ←
         match cache0.audioEncoderCache with
         | some ac =>
@@ -1126,7 +1126,7 @@ def decodeStreamingChunkWithModelCached
     (prompt : String)
     (audio16k : Array Float)
     (prefixCache : Option (StreamingPromptCache (device := device) (dtype := dtype) cfg) := none)
-    (maxNewTokens : UInt64 := 512)
+    (maxNewTokens : Nat := 512)
     (eosTokenIds : Array UInt64 := defaultEosTokenIds)
     : IO (String × Option (StreamingPromptCache (device := device) (dtype := dtype) cfg)) := do
   let stateCache : StreamingDecodeCache (device := device) (dtype := dtype) cfg := { promptCache := prefixCache }
@@ -1152,7 +1152,7 @@ def decodeStreamingChunkWithModel
     (preprocessor : PreprocessorConfig)
     (prompt : String)
     (audio16k : Array Float)
-    (maxNewTokens : UInt64 := 512)
+    (maxNewTokens : Nat := 512)
     (eosTokenIds : Array UInt64 := defaultEosTokenIds)
     : IO String := do
   let out ← decodeStreamingChunkWithModelCached
@@ -1175,7 +1175,7 @@ def streamingTranscribeWithModelStateCached
     (pcm16k : Array Float)
     (state : ASRStreamingState)
     (cache : Option (StreamingDecodeCache (device := device) (dtype := dtype) cfg) := none)
-    (maxNewTokens : UInt64 := 512)
+    (maxNewTokens : Nat := 512)
     (eosTokenIds : Array UInt64 := defaultEosTokenIds)
     : IO (ASRStreamingState × Option (StreamingDecodeCache (device := device) (dtype := dtype) cfg)) := do
   let cacheRef ← IO.mkRef cache
@@ -1210,7 +1210,7 @@ def streamingTranscribeWithModelCached
     (pcm16k : Array Float)
     (state : ASRStreamingState)
     (prefixCache : Option (StreamingPromptCache (device := device) (dtype := dtype) cfg) := none)
-    (maxNewTokens : UInt64 := 512)
+    (maxNewTokens : Nat := 512)
     (eosTokenIds : Array UInt64 := defaultEosTokenIds)
     : IO (ASRStreamingState × Option (StreamingPromptCache (device := device) (dtype := dtype) cfg)) := do
   let stateCache : StreamingDecodeCache (device := device) (dtype := dtype) cfg := { promptCache := prefixCache }
@@ -1234,7 +1234,7 @@ def streamingTranscribeWithModel
     (preprocessor : PreprocessorConfig)
     (pcm16k : Array Float)
     (state : ASRStreamingState)
-    (maxNewTokens : UInt64 := 512)
+    (maxNewTokens : Nat := 512)
     (eosTokenIds : Array UInt64 := defaultEosTokenIds)
     : IO ASRStreamingState := do
   let (next, _cache) ←
@@ -1257,7 +1257,7 @@ def finishStreamingTranscribeWithModelStateCached
     (preprocessor : PreprocessorConfig)
     (state : ASRStreamingState)
     (cache : Option (StreamingDecodeCache (device := device) (dtype := dtype) cfg) := none)
-    (maxNewTokens : UInt64 := 512)
+    (maxNewTokens : Nat := 512)
     (eosTokenIds : Array UInt64 := defaultEosTokenIds)
     : IO (ASRStreamingState × Option (StreamingDecodeCache (device := device) (dtype := dtype) cfg)) := do
   let cacheRef ← IO.mkRef cache
@@ -1291,7 +1291,7 @@ def finishStreamingTranscribeWithModelCached
     (preprocessor : PreprocessorConfig)
     (state : ASRStreamingState)
     (prefixCache : Option (StreamingPromptCache (device := device) (dtype := dtype) cfg) := none)
-    (maxNewTokens : UInt64 := 512)
+    (maxNewTokens : Nat := 512)
     (eosTokenIds : Array UInt64 := defaultEosTokenIds)
     : IO (ASRStreamingState × Option (StreamingPromptCache (device := device) (dtype := dtype) cfg)) := do
   let stateCache : StreamingDecodeCache (device := device) (dtype := dtype) cfg := { promptCache := prefixCache }
@@ -1313,7 +1313,7 @@ def finishStreamingTranscribeWithModel
     (tok : tokenizer.qwen3.QwenTokenizer)
     (preprocessor : PreprocessorConfig)
     (state : ASRStreamingState)
-    (maxNewTokens : UInt64 := 512)
+    (maxNewTokens : Nat := 512)
     (eosTokenIds : Array UInt64 := defaultEosTokenIds)
     : IO ASRStreamingState := do
   let (next, _cache) ←
@@ -1352,7 +1352,7 @@ def streamingTranscribeStateCached
     (pcm16k : Array Float)
     (state : ASRStreamingState)
     (cache : Option (StreamingDecodeCache (device := device) (dtype := dtype) cfg) := none)
-    (maxNewTokens : UInt64 := 512)
+    (maxNewTokens : Nat := 512)
     (eosTokenIds : Array UInt64 := defaultEosTokenIds)
     : IO (ASRStreamingState × Option (StreamingDecodeCache (device := device) (dtype := dtype) cfg)) :=
   streamingTranscribeWithModelStateCached
@@ -1373,7 +1373,7 @@ def streamingTranscribeCached
     (pcm16k : Array Float)
     (state : ASRStreamingState)
     (prefixCache : Option (StreamingPromptCache (device := device) (dtype := dtype) cfg) := none)
-    (maxNewTokens : UInt64 := 512)
+    (maxNewTokens : Nat := 512)
     (eosTokenIds : Array UInt64 := defaultEosTokenIds)
     : IO (ASRStreamingState × Option (StreamingPromptCache (device := device) (dtype := dtype) cfg)) :=
   streamingTranscribeWithModelCached
@@ -1393,7 +1393,7 @@ def streamingTranscribe
     (preprocessor : PreprocessorConfig)
     (pcm16k : Array Float)
     (state : ASRStreamingState)
-    (maxNewTokens : UInt64 := 512)
+    (maxNewTokens : Nat := 512)
     (eosTokenIds : Array UInt64 := defaultEosTokenIds)
     : IO ASRStreamingState :=
   streamingTranscribeWithModel m tok preprocessor pcm16k state maxNewTokens eosTokenIds
@@ -1405,7 +1405,7 @@ def finishStreamingTranscribeStateCached
     (preprocessor : PreprocessorConfig)
     (state : ASRStreamingState)
     (cache : Option (StreamingDecodeCache (device := device) (dtype := dtype) cfg) := none)
-    (maxNewTokens : UInt64 := 512)
+    (maxNewTokens : Nat := 512)
     (eosTokenIds : Array UInt64 := defaultEosTokenIds)
     : IO (ASRStreamingState × Option (StreamingDecodeCache (device := device) (dtype := dtype) cfg)) :=
   finishStreamingTranscribeWithModelStateCached
@@ -1424,7 +1424,7 @@ def finishStreamingTranscribeCached
     (preprocessor : PreprocessorConfig)
     (state : ASRStreamingState)
     (prefixCache : Option (StreamingPromptCache (device := device) (dtype := dtype) cfg) := none)
-    (maxNewTokens : UInt64 := 512)
+    (maxNewTokens : Nat := 512)
     (eosTokenIds : Array UInt64 := defaultEosTokenIds)
     : IO (ASRStreamingState × Option (StreamingPromptCache (device := device) (dtype := dtype) cfg)) :=
   finishStreamingTranscribeWithModelCached
@@ -1442,7 +1442,7 @@ def finishStreamingTranscribe
     (tok : tokenizer.qwen3.QwenTokenizer)
     (preprocessor : PreprocessorConfig)
     (state : ASRStreamingState)
-    (maxNewTokens : UInt64 := 512)
+    (maxNewTokens : Nat := 512)
     (eosTokenIds : Array UInt64 := defaultEosTokenIds)
     : IO ASRStreamingState :=
   finishStreamingTranscribeWithModel m tok preprocessor state maxNewTokens eosTokenIds

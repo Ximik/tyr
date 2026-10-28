@@ -24,18 +24,18 @@ structure SpeechTimestampSeconds where
 
 structure TimestampConfig where
   threshold : Float := 0.5
-  samplingRate : UInt64 := 16000
-  minSpeechDurationMs : UInt64 := 250
+  samplingRate : Nat := 16000
+  minSpeechDurationMs : Nat := 250
   maxSpeechDurationS : Float := 1.0e9
-  minSilenceDurationMs : UInt64 := 100
-  speechPadMs : UInt64 := 30
+  minSilenceDurationMs : Nat := 100
+  speechPadMs : Nat := 30
   negThreshold : Option Float := none
-  minSilenceAtMaxSpeechMs : UInt64 := 98
+  minSilenceAtMaxSpeechMs : Nat := 98
   useMaxPossibleSilenceAtMaxSpeech : Bool := true
   deriving Repr, Inhabited
 
-private def msToSamples (samplingRate ms : UInt64) : Nat :=
-  (samplingRate.toNat * ms.toNat) / 1000
+private def msToSamples (samplingRate ms : Nat) : Nat :=
+  (samplingRate * ms) / 1000
 
 private def safeSub (a b : Nat) : Nat :=
   if a >= b then a - b else 0
@@ -190,7 +190,7 @@ def timestampsFromProbabilities
 
 def timestampsToSeconds
     (tss : Array SpeechTimestamp)
-    (samplingRate : UInt64 := 16000)
+    (samplingRate : Nat := 16000)
     (timeResolution : Nat := 1)
     : Array SpeechTimestampSeconds :=
   let sr := if samplingRate == 0 then 1.0 else samplingRate.toFloat
@@ -230,7 +230,7 @@ inductive VADBoundary where
 structure VADIterator where
   runtime : SileroVADRuntime (device := device)
   threshold : Float := 0.5
-  samplingRate : UInt64 := 16000
+  samplingRate : Nat := 16000
   minSilenceSamples : Nat := 1600
   speechPadSamples : Nat := 480
   triggered : Bool := false
@@ -242,9 +242,9 @@ namespace VADIterator
 def init
     (runtime : (SileroVADRuntime (device := device)))
     (threshold : Float := 0.5)
-    (samplingRate : UInt64 := 16000)
-    (minSilenceDurationMs : UInt64 := 100)
-    (speechPadMs : UInt64 := 30) : IO (VADIterator (device := device)) := do
+    (samplingRate : Nat := 16000)
+    (minSilenceDurationMs : Nat := 100)
+    (speechPadMs : Nat := 30) : IO (VADIterator (device := device)) := do
   if samplingRate != 16000 then
     throw <| IO.userError
       s!"SileroVAD iterator currently supports only 16000Hz, got {samplingRate}"
@@ -317,7 +317,7 @@ def dropChunks (tss : Array SpeechTimestamp) (wav : Array Float) : Array Float :
   out
 
 /-- WAV-only audio loader (PCM16 WAV through existing Qwen3-ASR frontend parser). -/
-def readAudio (path : String) (samplingRate : UInt64 := 16000) : IO (Array Float) := do
+def readAudio (path : String) (samplingRate : Nat := 16000) : IO (Array Float) := do
   let (srcRate, wav) ← qwen3asr.loadMonoPcm16Wav path
   if srcRate == samplingRate then
     pure wav

@@ -10,7 +10,7 @@ opaque lagunaMoeFp4Forward
     (gatePacked : @& RawTensor) (gateScale : @& RawTensor) (gateGlobal : @& RawTensor)
     (upPacked : @& RawTensor) (upScale : @& RawTensor) (upGlobal : @& RawTensor)
     (downPacked : @& RawTensor) (downScale : @& RawTensor) (downGlobal : @& RawTensor)
-    (numExperts : UInt64) (moeInt : UInt64) (hidden : UInt64) : IO RawTensor
+    (numExperts : @& Nat) (moeInt : @& Nat) (hidden : @& Nat) : IO RawTensor
 
 @[extern "lean_torch_bmm"] opaque lagunaBmm
     (input mat2 : @& RawTensor) : RawTensor

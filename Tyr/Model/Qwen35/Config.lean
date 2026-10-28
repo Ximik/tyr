@@ -43,43 +43,43 @@ instance : TensorStruct LayerType where
     Dense checkpoints use `num_experts = 0`.
     MoE checkpoints set `num_experts > 0`. -/
 structure Qwen35Config where
-  vocab_size : UInt64 := 248320
-  hidden_size : UInt64 := 4096
-  intermediate_size : UInt64 := 12288
-  num_hidden_layers : UInt64 := 32
-  num_attention_heads : UInt64 := 16
-  num_key_value_heads : UInt64 := 4
-  head_dim : UInt64 := 256
+  vocab_size : Nat := 248320
+  hidden_size : Nat := 4096
+  intermediate_size : Nat := 12288
+  num_hidden_layers : Nat := 32
+  num_attention_heads : Nat := 16
+  num_key_value_heads : Nat := 4
+  head_dim : Nat := 256
 
   rope_theta : Float := 1000000.0
   partial_rotary_factor : Float := 0.25
   rms_norm_eps : Float := 1e-6
-  max_position_embeddings : UInt64 := 32768
+  max_position_embeddings : Nat := 32768
 
   attention_bias : Bool := false
   attention_dropout : Float := 0.0
   attn_output_gate : Bool := true
   hidden_act : String := "silu"
 
-  linear_conv_kernel_dim : UInt64 := 4
-  linear_key_head_dim : UInt64 := 128
-  linear_value_head_dim : UInt64 := 128
-  linear_num_key_heads : UInt64 := 16
-  linear_num_value_heads : UInt64 := 32
+  linear_conv_kernel_dim : Nat := 4
+  linear_key_head_dim : Nat := 128
+  linear_value_head_dim : Nat := 128
+  linear_num_key_heads : Nat := 16
+  linear_num_value_heads : Nat := 32
   mamba_ssm_dtype : String := "float32"
 
   layer_types : Array LayerType := #[]
-  full_attention_interval : UInt64 := 4
-  mlp_only_layers : Array UInt64 := #[]
+  full_attention_interval : Nat := 4
+  mlp_only_layers : Array Nat := #[]
   mrope_interleaved : Bool := false
-  mrope_section : Array UInt64 := #[]
-  mtp_num_hidden_layers : UInt64 := 0
+  mrope_section : Array Nat := #[]
+  mtp_num_hidden_layers : Nat := 0
   mtp_use_dedicated_embeddings : Bool := false
 
-  moe_intermediate_size : UInt64 := 512
-  shared_expert_intermediate_size : UInt64 := 512
-  num_experts_per_tok : UInt64 := 8
-  num_experts : UInt64 := 0
+  moe_intermediate_size : Nat := 512
+  shared_expert_intermediate_size : Nat := 512
+  num_experts_per_tok : Nat := 8
+  num_experts : Nat := 0
 
   use_cache : Bool := true
   tie_word_embeddings : Bool := false
@@ -137,15 +137,15 @@ def qwen35_35B_A3B : Qwen35Config := {
 }
 
 /-- Build default hybrid schedule: every `interval`th layer is full attention, rest linear attention. -/
-def defaultLayerTypes (numLayers interval : UInt64) : Array LayerType :=
+def defaultLayerTypes (numLayers interval : Nat) : Array LayerType :=
   Id.run do
-    let mut out : Array LayerType := Array.mkEmpty numLayers.toNat
+    let mut out : Array LayerType := Array.mkEmpty numLayers
     if interval == 0 then
-      for _ in [:numLayers.toNat] do
+      for _ in [:numLayers] do
         out := out.push .fullAttention
       return out
-    for i in [:numLayers.toNat] do
-      let isFull := ((i + 1).toUInt64 % interval) == 0
+    for i in [:numLayers] do
+      let isFull := ((i + 1) % interval) == 0
       out := out.push (if isFull then .fullAttention else .linearAttention)
     return out
 
@@ -192,7 +192,7 @@ def qwen36_35B_A3B : Qwen35Config := {
 
 /-- Return `layer_types` if valid, otherwise synthesize the default interval schedule. -/
 def normalizedLayerTypes (cfg : Qwen35Config) : Array LayerType :=
-  if cfg.layer_types.size == cfg.num_hidden_layers.toNat then
+  if cfg.layer_types.size == cfg.num_hidden_layers then
     cfg.layer_types
   else
     defaultLayerTypes cfg.num_hidden_layers cfg.full_attention_interval
@@ -243,23 +243,23 @@ def normalize (cfg : Qwen35Config) : Qwen35Config :=
   { cfg with layer_types := normalizedLayerTypes cfg }
 
 /-- Query heads per KV head (full-attention GQA). -/
-def numHeadsPerKVGroup (cfg : Qwen35Config) : UInt64 :=
+def numHeadsPerKVGroup (cfg : Qwen35Config) : Nat :=
   if cfg.num_key_value_heads == 0 then 1 else cfg.num_attention_heads / cfg.num_key_value_heads
 
 /-- Linear-attention key projection dimension. -/
-def linearKeyDim (cfg : Qwen35Config) : UInt64 :=
+def linearKeyDim (cfg : Qwen35Config) : Nat :=
   cfg.linear_num_key_heads * cfg.linear_key_head_dim
 
 /-- Linear-attention value projection dimension. -/
-def linearValueDim (cfg : Qwen35Config) : UInt64 :=
+def linearValueDim (cfg : Qwen35Config) : Nat :=
   cfg.linear_num_value_heads * cfg.linear_value_head_dim
 
 /-- Depthwise-conv channel count for linear-attention fused QKV path. -/
-def linearConvDim (cfg : Qwen35Config) : UInt64 :=
+def linearConvDim (cfg : Qwen35Config) : Nat :=
   (linearKeyDim cfg) * 2 + (linearValueDim cfg)
 
 /-- Repeat factor to broadcast linear K/Q heads to V heads. -/
-def linearKVRepeat (cfg : Qwen35Config) : UInt64 :=
+def linearKVRepeat (cfg : Qwen35Config) : Nat :=
   if cfg.linear_num_key_heads == 0 then 1 else cfg.linear_num_value_heads / cfg.linear_num_key_heads
 
 /-- Whether this config uses MoE FFN blocks. -/
@@ -267,8 +267,8 @@ def isMoE (cfg : Qwen35Config) : Bool :=
   cfg.num_experts > 0 && cfg.num_experts_per_tok > 0
 
 /-- Rotary dimension for partial RoPE. Clamped to an even value in `[2, head_dim]`. -/
-def rotaryDim (cfg : Qwen35Config) : UInt64 :=
-  let raw := (cfg.head_dim.toFloat * cfg.partial_rotary_factor).toUInt64
+def rotaryDim (cfg : Qwen35Config) : Nat :=
+  let raw := (cfg.head_dim.toFloat * cfg.partial_rotary_factor).toUInt64.toNat
   let base :=
     if raw == 0 then cfg.head_dim
     else if raw > cfg.head_dim then cfg.head_dim
@@ -281,7 +281,7 @@ def rotaryDim (cfg : Qwen35Config) : UInt64 :=
     base - 1
 
 /-- Number of rotary frequencies (`rotary_dim / 2`). -/
-def rotaryHalfDim (cfg : Qwen35Config) : UInt64 :=
+def rotaryHalfDim (cfg : Qwen35Config) : Nat :=
   (rotaryDim cfg) / 2
 
 end Qwen35Config
@@ -305,19 +305,19 @@ def normalizedLayerTypes (cfg : Config) : Array LayerType :=
 
 def isMoE (cfg : Config) : Bool := Qwen35Config.isMoE cfg
 
-def rotaryDim (cfg : Config) : UInt64 := Qwen35Config.rotaryDim cfg
+def rotaryDim (cfg : Config) : Nat := Qwen35Config.rotaryDim cfg
 
-def rotaryHalfDim (cfg : Config) : UInt64 := Qwen35Config.rotaryHalfDim cfg
+def rotaryHalfDim (cfg : Config) : Nat := Qwen35Config.rotaryHalfDim cfg
 
-def linearKeyDim (cfg : Config) : UInt64 := Qwen35Config.linearKeyDim cfg
+def linearKeyDim (cfg : Config) : Nat := Qwen35Config.linearKeyDim cfg
 
-def linearValueDim (cfg : Config) : UInt64 := Qwen35Config.linearValueDim cfg
+def linearValueDim (cfg : Config) : Nat := Qwen35Config.linearValueDim cfg
 
-def linearConvDim (cfg : Config) : UInt64 := Qwen35Config.linearConvDim cfg
+def linearConvDim (cfg : Config) : Nat := Qwen35Config.linearConvDim cfg
 
-def linearKVRepeat (cfg : Config) : UInt64 := Qwen35Config.linearKVRepeat cfg
+def linearKVRepeat (cfg : Config) : Nat := Qwen35Config.linearKVRepeat cfg
 
-def numHeadsPerKVGroup (cfg : Config) : UInt64 := Qwen35Config.numHeadsPerKVGroup cfg
+def numHeadsPerKVGroup (cfg : Config) : Nat := Qwen35Config.numHeadsPerKVGroup cfg
 
 end Config
 

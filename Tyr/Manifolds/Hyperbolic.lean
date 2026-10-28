@@ -22,7 +22,7 @@ where <x,y>_L = sum_{i=1..n} x_i y_i - x_{n+1} y_{n+1}.
 -/
 
 /-- Hyperbolic space H^n represented as an (n+1)-vector on the hyperboloid. -/
-structure Hyperbolic (n : UInt64) (dtype : DType := .Float32)
+structure Hyperbolic (n : Nat) (dtype : DType := .Float32)
     (device : Device := .CPU) where
   /-- Ambient coordinates in R^{n+1} -/
   coords : Tensor ⟨#[n + 1], dtype, device⟩
@@ -30,11 +30,11 @@ structure Hyperbolic (n : UInt64) (dtype : DType := .Float32)
 namespace Hyperbolic
 
 /-- Spatial mask [1, …, 1, 0] selecting the spatial coordinates. -/
-def spatialMask (n : UInt64) : Tensor ⟨#[n + 1], d, dev⟩ :=
+def spatialMask (n : Nat) : Tensor ⟨#[n + 1], d, dev⟩ :=
   Tensor.cat (Tensor.onesFor ⟨#[n], d, dev⟩) (Tensor.zerosFor ⟨#[1], d, dev⟩) 0
 
 /-- Minkowski signature vector [1, …, 1, -1] of the ambient space. -/
-def signatureVec (n : UInt64) : Tensor ⟨#[n + 1], d, dev⟩ :=
+def signatureVec (n : Nat) : Tensor ⟨#[n + 1], d, dev⟩ :=
   Tensor.cat (Tensor.onesFor ⟨#[n], d, dev⟩)
     (Tensor.mulScalar (Tensor.onesFor ⟨#[1], d, dev⟩) (-1.0)) 0
 
@@ -44,7 +44,7 @@ def minkowskiInner (x y : Tensor ⟨#[n + 1], d, dev⟩) : Float :=
 
 /-- Project an ambient vector to the hyperboloid (future sheet).
     Keeps the spatial part and recomputes the time coordinate. -/
-def project (n : UInt64) (v : Tensor ⟨#[n + 1], d, dev⟩) : Hyperbolic n d dev :=
+def project (n : Nat) (v : Tensor ⟨#[n + 1], d, dev⟩) : Hyperbolic n d dev :=
   let spatial := Tensor.mul v (spatialMask (d := d) n)
   let spatialSq := Tensor.item (Tensor.sumAll (Tensor.mul spatial spatial))
   let t := Float.sqrt (spatialSq + 1.0)
@@ -53,13 +53,13 @@ def project (n : UInt64) (v : Tensor ⟨#[n + 1], d, dev⟩) : Hyperbolic n d de
   ⟨Tensor.add spatial timeVec⟩
 
 /-- Normalize a time-like vector to the hyperboloid using Minkowski norm. -/
-def normalize (n : UInt64) (v : Tensor ⟨#[n + 1], d, dev⟩) : Hyperbolic n d dev :=
+def normalize (n : Nat) (v : Tensor ⟨#[n + 1], d, dev⟩) : Hyperbolic n d dev :=
   let inner := minkowskiInner v v
   let scale := 1.0 / Float.sqrt (-inner)
   ⟨Tensor.mulScalar v scale⟩
 
 /-- Random point on H^n via random spatial coordinates and derived time coord. -/
-def random (n : UInt64) : IO (Hyperbolic n) := do
+def random (n : Nat) : IO (Hyperbolic n) := do
   let spatial ← Tensor.randn #[n]
   let spatialSq := Tensor.item (Tensor.sumAll (Mul.mul spatial spatial))
   let t := Float.sqrt (spatialSq + 1.0)
@@ -67,13 +67,13 @@ def random (n : UInt64) : IO (Hyperbolic n) := do
   return ⟨Tensor.cat spatial tVec 0⟩
 
 /-- Origin point (0, ..., 0, 1). -/
-def origin (n : UInt64) : Hyperbolic n d dev :=
+def origin (n : Nat) : Hyperbolic n d dev :=
   ⟨Tensor.cat (Tensor.zerosFor ⟨#[n], d, dev⟩) (Tensor.onesFor ⟨#[1], d, dev⟩) 0⟩
 
 end Hyperbolic
 
 /-- Tangent vector on H^n, represented in ambient coordinates. -/
-structure HyperbolicTangent (n : UInt64) (dtype : DType := .Float32)
+structure HyperbolicTangent (n : Nat) (dtype : DType := .Float32)
     (device : Device := .CPU) where
   /-- Tangent vector in R^{n+1} -/
   vec : Tensor ⟨#[n + 1], dtype, device⟩
@@ -81,7 +81,7 @@ structure HyperbolicTangent (n : UInt64) (dtype : DType := .Float32)
 namespace HyperbolicTangent
 
 /-- Zero tangent vector. -/
-def zero (n : UInt64) : HyperbolicTangent n d dev :=
+def zero (n : Nat) : HyperbolicTangent n d dev :=
   ⟨Tensor.zerosFor ⟨#[n + 1], d, dev⟩⟩
 
 /-- Add two tangent vectors. -/
@@ -105,7 +105,7 @@ end HyperbolicTangent
 
 /-- Hyperbolic manifold as a DifferentiableManifold.
     Uses a simple projection retraction onto the hyperboloid. -/
-instance hyperbolicManifold (n : UInt64) : DifferentiableManifold (Hyperbolic n d dev) where
+instance hyperbolicManifold (n : Nat) : DifferentiableManifold (Hyperbolic n d dev) where
   Tangent _ := HyperbolicTangent n d dev
   Cotangent _ := HyperbolicTangent n d dev
   zeroTangent x := ⟨Tensor.zerosLike x.coords⟩

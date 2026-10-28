@@ -4,7 +4,7 @@ open torch torch.gemma4
 
 /-- The activation and cache index is selected explicitly, even with independent
 checkpoint dtypes for normalization and routing parameters. -/
-example {device : Device} {cfg : Config} {batch seq : UInt64}
+example {device : Device} {cfg : Config} {batch seq : Nat}
     [DType.ConstantSupported .BFloat16 device]
     (model : Gemma4ForCausalLM (device := device) cfg .BFloat16)
     (ids : Tensor ⟨#[batch, seq], .Int64, device⟩) :

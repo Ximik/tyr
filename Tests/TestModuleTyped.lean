@@ -29,12 +29,12 @@ example (_w : Tensor { shape := #[2, 3], dtype := .Float32, device := .CPU }) (_
     have _ : Affine (n := 2) (m := 3) := ⟨_w, _b⟩
   trivial
 
-private structure MyLinear (inDim outDim : UInt64) where
+private structure MyLinear (inDim outDim : Nat) where
   weight : Tensor { shape := #[outDim, inDim], dtype := .Float32, device := .CPU }
   bias : Option (Tensor { shape := #[outDim], dtype := .Float32, device := .CPU }) := none
   deriving TensorStruct
 
-private instance {inDim outDim batch : UInt64} :
+private instance {inDim outDim batch : Nat} :
     Module (MyLinear inDim outDim) (Tensor { shape := #[batch, inDim], dtype := .Float32, device := .CPU })
       (Tensor { shape := #[batch, outDim], dtype := .Float32, device := .CPU }) where
   forward m x :=
@@ -50,11 +50,11 @@ private structure MyDropout where
 private instance {σ : StaticSpec} : ModuleIO MyDropout (Tensor σ) (Tensor σ) where
   forward m x := Tensor.dropout x m.p.val true
 
-private structure MyLinearCtx (inDim outDim : UInt64) where
+private structure MyLinearCtx (inDim outDim : Nat) where
   lin : MyLinear inDim outDim
   deriving TensorStruct
 
-private instance {inDim outDim batch : UInt64} :
+private instance {inDim outDim batch : Nat} :
     ModuleCtx (MyLinearCtx inDim outDim) TrainingCtx
       (Tensor { shape := #[batch, inDim], dtype := .Float32, device := .CPU }) (Tensor { shape := #[batch, outDim], dtype := .Float32, device := .CPU }) where
   forward m ctx x := do

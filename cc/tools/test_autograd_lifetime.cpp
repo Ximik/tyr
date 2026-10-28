@@ -17,7 +17,7 @@ lean_object* shape(std::initializer_list<uint64_t> dimensions) {
   auto* result = lean_alloc_array(dimensions.size(), dimensions.size());
   size_t i = 0;
   for (auto dimension : dimensions)
-    lean_array_set_core(result, i++, lean_box_uint64(dimension));
+    lean_array_set_core(result, i++, lean_box(dimension));
   return result;
 }
 torch::Tensor native(lean_object* value) {

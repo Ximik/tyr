@@ -4,13 +4,13 @@ namespace Tyr.Audio.AppleOutput
     Uses AudioQueue on macOS; raises an IO error on other platforms.
     Blocks until done. -/
 @[extern "lean_tyr_audio_output_beep"]
-opaque beep (freqHz : Float) (durationMs : UInt64 := 120) (sampleRate : UInt64 := 44100) : IO Unit
+opaque beep (freqHz : Float) (durationMs : Nat := 120) (sampleRate : Nat := 44100) : IO Unit
 
 /-- Fire-and-forget beep on a background thread. Returns immediately.
     WARNING: holds g_output_mu while playing — do not mix with sync beep
     in the same run without ensuring the async beep has finished. -/
 @[extern "lean_tyr_audio_output_beep_async"]
-opaque beepAsync (freqHz : Float) (durationMs : UInt64 := 120) (sampleRate : UInt64 := 44100) : IO Unit
+opaque beepAsync (freqHz : Float) (durationMs : Nat := 120) (sampleRate : Nat := 44100) : IO Unit
 
 /-- Short high-pitched beep (880 Hz, 120ms) — signals recording start. -/
 def beepStart : IO Unit := beep 880.0 120

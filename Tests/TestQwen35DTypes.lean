@@ -6,7 +6,7 @@ open torch torch.qwen35
 namespace Tests.Qwen35DTypes
 
 /-- Model outputs and caches keep the selected activation dtype. -/
-example {device : Device} {cfg : Config} {batch seq : UInt64}
+example {device : Device} {cfg : Config} {batch seq : Nat}
     [DType.ConstantSupported .BFloat16 device]
     (model : Qwen35ForCausalLM (device := device) cfg .BFloat16)
     (ids : Tensor ⟨#[batch, seq], .Int64, device⟩) :
@@ -14,7 +14,7 @@ example {device : Device} {cfg : Config} {batch seq : UInt64}
   model.forward cfg ids
 
 /-- Norm parameters may retain a separate checkpoint dtype. -/
-example {device : Device} {n dim : UInt64}
+example {device : Device} {n dim : Nat}
     (norm : Qwen35RMSNorm (device := device) dim)
     (input : Tensor ⟨#[n, dim], .BFloat16, device⟩) :
     Tensor ⟨#[n, dim], .BFloat16, device⟩ := norm.forward2d input
