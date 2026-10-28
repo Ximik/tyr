@@ -106,9 +106,9 @@ def bidirectionalAttentionForward {batch seq n_embd n_head : Nat}
   let v := Tensor.linear3d x params.c_v
 
   -- Reshape: [batch, seq, n*d] -> [batch, seq, n, d]
-  let q := Tensor.reshapeChecked q #[batch, seq, n_head, head_dim]
-  let k := Tensor.reshapeChecked k #[batch, seq, n_head, head_dim]
-  let v := Tensor.reshapeChecked v #[batch, seq, n_head, head_dim]
+  let q := Tensor.reshape q #[batch, seq, n_head, head_dim]
+  let k := Tensor.reshape k #[batch, seq, n_head, head_dim]
+  let v := Tensor.reshape v #[batch, seq, n_head, head_dim]
 
   -- Apply rotary embeddings (use full cache - no slicing needed when rotaryLen == seq)
   let cos := rotaryCache.cos.sliceChecked 0 0 seq #[seq, head_dim / 2]

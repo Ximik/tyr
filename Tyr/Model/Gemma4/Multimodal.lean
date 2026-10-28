@@ -165,7 +165,7 @@ def forward {patchRows patchCols : Nat}
     : SomeDTypeTensor #[patchRows * patchCols, cfg.vision_config.hidden_size] device :=
   let tokens := patchRows * patchCols
   let flat : Tensor { device := device, shape := #[tokens, VisionConfig.patchDim cfg.vision_config], dtype := inputDType } :=
-    Tensor.reshapeChecked patchGrid #[tokens, VisionConfig.patchDim cfg.vision_config]
+    Tensor.reshape patchGrid #[tokens, VisionConfig.patchDim cfg.vision_config]
   let flat := Tensor.mulScalar (Tensor.addScalar flat (-0.5)) 2.0
   let hidden : Tensor { device := device, shape := #[tokens, cfg.vision_config.hidden_size], dtype := dtype } := m.input_proj.forward2d flat
   let xTable : Tensor { device := device, shape := #[cfg.vision_config.position_embedding_size, cfg.vision_config.hidden_size], dtype := m.position_embedding_table.1 } :=

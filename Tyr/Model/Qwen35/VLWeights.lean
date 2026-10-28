@@ -146,7 +146,7 @@ private def loadVisionModelSharded (modelDir : String) (cfg : VisionConfig)
   let floating ← IO.ofExcept dtype.realFloating?
   let _ := floating.down
   let patchW : Tensor { device := device, shape := #[cfg.hidden_size, VisionConfig.patchDim cfg], dtype := dtype } :=
-    Tensor.reshapeChecked convW.2 #[cfg.hidden_size, VisionConfig.patchDim cfg]
+    Tensor.reshape convW.2 #[cfg.hidden_size, VisionConfig.patchDim cfg]
   let patchEmbed : Qwen35VisionPatchEmbed (dtype := dtype) (device := device) cfg := {
     weight := reqGradFalse patchW
     bias := reqGradFalse (← requireDType dtype convB)
@@ -218,7 +218,7 @@ private def loadVisionModel (path : String) (cfg : VisionConfig)
   let floating ← IO.ofExcept dtype.realFloating?
   let _ := floating.down
   let patchW : Tensor { device := device, shape := #[cfg.hidden_size, VisionConfig.patchDim cfg], dtype := dtype } :=
-    Tensor.reshapeChecked convW.2 #[cfg.hidden_size, VisionConfig.patchDim cfg]
+    Tensor.reshape convW.2 #[cfg.hidden_size, VisionConfig.patchDim cfg]
   let patchEmbed : Qwen35VisionPatchEmbed (dtype := dtype) (device := device) cfg := {
     weight := reqGradFalse patchW
     bias := reqGradFalse (← requireDType dtype convB)

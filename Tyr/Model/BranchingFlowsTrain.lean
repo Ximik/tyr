@@ -68,7 +68,7 @@ private def maskedCrossEntropy {batch maxLen vocab : Nat}
     (targets : Tensor { device := device, shape := #[batch, maxLen], dtype := .Int64 })
     (mask : Tensor { dtype := .Float32, device := device, shape := #[batch, maxLen] }) : Tensor { dtype := .Float32, device := device, shape := #[] } :=
   let n : Nat := batch * maxLen
-  let logits2 := Tensor.reshapeChecked logits #[n, vocab]
+  let logits2 := Tensor.reshape logits #[n, vocab]
   let targets2 := Tensor.reshape targets #[n]
   let mask2 := Tensor.reshape mask #[n]
   let per := Tensor.crossEntropyNoneChecked logits2 targets2
@@ -171,7 +171,7 @@ def packBranchingNat (cfg : BranchingTrainConfig) (result : BranchingBridgeResul
   let delTarget := floatDynamic (Tensor.reshapeChecked ((Tensor.fromInt64Array delArr).to device) #[batchU, cfg.maxLen])
 
   let timeScaled := result.t.map (fun t => ((t * cfg.timeScale).toUInt64).toInt64)
-  let t := Tensor.reshapeChecked ((Tensor.fromInt64Array timeScaled).to device) #[batchU]
+  let t := Tensor.reshape ((Tensor.fromInt64Array timeScaled).to device) #[batchU]
   let t := Tensor.divScalar (floatDynamic t) cfg.timeScale
 
   return ⟨batchU, { t, state, anchor, padmask, flowmask, splitsTarget, delTarget }⟩
@@ -259,7 +259,7 @@ def packBranchingTensor {dim : Nat} (cfg : BranchingTrainConfig)
   let delTarget := floatDynamic (Tensor.reshapeChecked ((Tensor.fromInt64Array delArr).to device) #[batchU, cfg.maxLen])
 
   let timeScaled := result.t.map (fun t => ((t * cfg.timeScale).toUInt64).toInt64)
-  let t := Tensor.reshapeChecked ((Tensor.fromInt64Array timeScaled).to device) #[batchU]
+  let t := Tensor.reshape ((Tensor.fromInt64Array timeScaled).to device) #[batchU]
   let t := Tensor.divScalar (floatDynamic t) cfg.timeScale
 
   return ⟨batchU, { t, state, anchor, padmask, flowmask, splitsTarget, delTarget }⟩

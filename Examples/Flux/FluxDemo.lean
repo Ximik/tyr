@@ -179,7 +179,7 @@ def runDemo (cfg : DemoConfig) (prompt : String) : IO Unit := do
   let imgSeq := cfg.latentH * cfg.latentW
   let noiseSpatial ← randomWeight #[1, 128, cfg.latentH, cfg.latentW]
   let noiseSeq := Tensor.permute noiseSpatial #[0, 2, 3, 1]
-  let noise : Tensor { shape := #[1, imgSeq, 128], dtype := .Float32, device := .CPU } := Tensor.reshapeChecked noiseSeq #[1, imgSeq, 128]
+  let noise : Tensor { shape := #[1, imgSeq, 128], dtype := .Float32, device := .CPU } := Tensor.reshape noiseSeq #[1, imgSeq, 128]
 
   -- Compute position IDs for RoPE
   let imgIds ← computeImagePositionIds cfg.latentH cfg.latentW

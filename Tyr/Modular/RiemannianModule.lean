@@ -56,7 +56,7 @@ private def splitLinearUpdate {inDim outDim : Nat} {d : DType} {dev : Device}
   let weightSize := outDim * inDim
   let dwVec : Tensor ⟨#[weightSize], d, dev⟩ := Tensor.sliceChecked update 0 0 weightSize #[weightSize]
   let dbVec : Tensor ⟨#[outDim], d, dev⟩ := Tensor.sliceChecked update 0 weightSize outDim #[outDim]
-  (Tensor.reshapeChecked dwVec #[outDim, inDim], dbVec)
+  (Tensor.reshape dwVec #[outDim, inDim], dbVec)
 
 namespace LocalLinearization
 
@@ -74,7 +74,7 @@ private def mapRows {rows inDim outDim : Nat} {d : DType} {dev : Device}
       acc := acc.push (f (rowAt matrix i))
     pure acc
   let stacked := Tensor.stack1d mapped
-  Tensor.reshapeChecked stacked #[rows, outDim]
+  Tensor.reshape stacked #[rows, outDim]
 
 /-- Materialize the dense input Jacobian for debugging/tests. -/
 def materializeA {inDim paramDim outDim : Nat}

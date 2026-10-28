@@ -66,7 +66,7 @@ def apply {Params : Type} [TensorStruct Params] [FloatingTensorStruct Params] {r
     ((List.finRange rank).toArray.map fun i =>
       let row := K.rowAt i
       treeDot row x)
-  Tensor.reshapeChecked (Tensor.fromFloatArray coeffs) #[rank]
+  Tensor.reshape (Tensor.fromFloatArray coeffs) #[rank]
 
 def applyTranspose {Params : Type} [TensorStruct Params] [FloatingTensorStruct Params] {rank : Nat}
     (K : TreeMetricFactor Params rank)
@@ -248,7 +248,7 @@ private def sampledFisherCotangentRows
     throw <| IO.userError "RiemannianTreeSGD.stepCrossEntropySampledFisher requires probeCount > 0"
   let tokenCount := batch * seq
   let probs3d := Tensor.detach (Tensor.softmax predictionReq (-1) rfl)
-  let probs : Tensor { shape := #[tokenCount, vocab], dtype := .Float32, device := device } := Tensor.reshapeChecked probs3d #[tokenCount, vocab]
+  let probs : Tensor { shape := #[tokenCount, vocab], dtype := .Float32, device := device } := Tensor.reshape probs3d #[tokenCount, vocab]
   let scale := 1.0 / Float.sqrt probeCount.toFloat
   let srcOnes0 : Tensor { shape := #[tokenCount, 1], dtype := .Float32, device := device } := Tensor.ones #[tokenCount, 1] false device
   let srcOnes := srcOnes0
@@ -260,7 +260,7 @@ private def sampledFisherCotangentRows
       let base : Tensor { shape := #[tokenCount, vocab], dtype := .Float32, device := device } := Tensor.zerosLike probs
       let sampledOneHot := Tensor.scatter2d base 1 sampledIdx srcOnes
       let rowFlat := Tensor.mulScalar (Tensor.sub sampledOneHot probs) scale
-      let row : Tensor { shape := #[batch, seq, vocab], dtype := .Float32, device := device } := Tensor.reshapeChecked rowFlat #[batch, seq, vocab]
+      let row : Tensor { shape := #[batch, seq, vocab], dtype := .Float32, device := device } := Tensor.reshape rowFlat #[batch, seq, vocab]
       let ⟨rest, hRest⟩ ← sampleRows n
       pure ⟨row :: rest, by simp [hRest]⟩
   let ⟨rowsList, hRowsList⟩ ← sampleRows probeCount

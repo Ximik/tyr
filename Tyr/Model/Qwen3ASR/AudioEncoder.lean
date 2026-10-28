@@ -386,7 +386,7 @@ private def encodePaddedChunk {maxFrames : Nat}
   let x3t : Tensor { dtype := dtype, device := device, shape := #[1, t3, cfg.downsampleHiddenSize, AudioEncoderConfig.melAfterConv3 cfg] } :=
     Tensor.reshape (Tensor.permute x3 #[0, 3, 1, 2]) #[1, t3, cfg.downsampleHiddenSize, AudioEncoderConfig.melAfterConv3 cfg]
   let xFlat : Tensor { dtype := dtype, device := device, shape := #[1, t3, AudioEncoderConfig.convOutInDim cfg] } :=
-    Tensor.reshapeChecked x3t #[1, t3, AudioEncoderConfig.convOutInDim cfg]
+    Tensor.reshape x3t #[1, t3, AudioEncoderConfig.convOutInDim cfg]
   Tensor.linear3d xFlat m.convOutWeight
 
 private abbrev LayerForward (M : Type → Type) (cfg : AudioEncoderConfig) (device : Device) (dtype : DType) :=
@@ -559,7 +559,7 @@ private def forwardWith {M : Type → Type} [Monad M] {batch frames : Nat}
     Tensor.reshape (Tensor.permute x3 #[0, 3, 1, 2]) #[batch, t3, cfg.downsampleHiddenSize, AudioEncoderConfig.melAfterConv3 cfg]
 
   let xFlat : Tensor { dtype := dtype, device := device, shape := #[batch, t3, AudioEncoderConfig.convOutInDim cfg] } :=
-    Tensor.reshapeChecked x3t #[batch, t3, AudioEncoderConfig.convOutInDim cfg]
+    Tensor.reshape x3t #[batch, t3, AudioEncoderConfig.convOutInDim cfg]
   let xEmb : Tensor { dtype := dtype, device := device, shape := #[batch, t3, cfg.dModel] } := Tensor.linear3d xFlat m.convOutWeight
 
   let pos : Tensor { dtype := .Float32, device := device, shape := #[t3, cfg.dModel] } := sinusoidPosition (seq := t3) (dim := cfg.dModel) (device := xEmb.device)

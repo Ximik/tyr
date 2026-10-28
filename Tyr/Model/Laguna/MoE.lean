@@ -231,19 +231,19 @@ private def forwardDecode1
       let (gateW, upW, downW) ← do
         match m.denseExperts with
         | some de =>
-          let g : Tensor { dtype := dtype, device := device, shape := #[k, mi, h] } := Tensor.reshapeChecked (Tensor.embedding1d hitT (Tensor.reshapeChecked de.gateProj #[E, mi * h])) #[k, mi, h]
-          let u : Tensor { dtype := dtype, device := device, shape := #[k, mi, h] } := Tensor.reshapeChecked (Tensor.embedding1d hitT (Tensor.reshapeChecked de.upProj #[E, mi * h])) #[k, mi, h]
-          let d : Tensor { dtype := dtype, device := device, shape := #[k, h, mi] } := Tensor.reshapeChecked (Tensor.embedding1d hitT (Tensor.reshapeChecked de.downProj #[E, h * mi])) #[k, h, mi]
+          let g : Tensor { dtype := dtype, device := device, shape := #[k, mi, h] } := Tensor.reshape (Tensor.embedding1d hitT (Tensor.reshape de.gateProj #[E, mi * h])) #[k, mi, h]
+          let u : Tensor { dtype := dtype, device := device, shape := #[k, mi, h] } := Tensor.reshape (Tensor.embedding1d hitT (Tensor.reshape de.upProj #[E, mi * h])) #[k, mi, h]
+          let d : Tensor { dtype := dtype, device := device, shape := #[k, h, mi] } := Tensor.reshape (Tensor.embedding1d hitT (Tensor.reshape de.downProj #[E, h * mi])) #[k, h, mi]
           pure (g, u, d)
         | none => do
-          let gp := Tensor.reshapeChecked (Tensor.embedding1d hitT (Tensor.reshapeChecked m.experts.gatePacked.2 #[E, mi * (h / 2)])) #[k, mi, h / 2]
-          let gs := Tensor.reshapeChecked (Tensor.embedding1d hitT (Tensor.reshapeChecked m.experts.gateScale.2 #[E, mi * (h / 16)])) #[k, mi, h / 16]
+          let gp := Tensor.reshape (Tensor.embedding1d hitT (Tensor.reshape m.experts.gatePacked.2 #[E, mi * (h / 2)])) #[k, mi, h / 2]
+          let gs := Tensor.reshape (Tensor.embedding1d hitT (Tensor.reshape m.experts.gateScale.2 #[E, mi * (h / 16)])) #[k, mi, h / 16]
           let gg := Tensor.reshape (Tensor.embedding1d hitT (Tensor.reshape m.experts.gateGlobal.2 #[E, 1])) #[k]
-          let up := Tensor.reshapeChecked (Tensor.embedding1d hitT (Tensor.reshapeChecked m.experts.upPacked.2 #[E, mi * (h / 2)])) #[k, mi, h / 2]
-          let us := Tensor.reshapeChecked (Tensor.embedding1d hitT (Tensor.reshapeChecked m.experts.upScale.2 #[E, mi * (h / 16)])) #[k, mi, h / 16]
+          let up := Tensor.reshape (Tensor.embedding1d hitT (Tensor.reshape m.experts.upPacked.2 #[E, mi * (h / 2)])) #[k, mi, h / 2]
+          let us := Tensor.reshape (Tensor.embedding1d hitT (Tensor.reshape m.experts.upScale.2 #[E, mi * (h / 16)])) #[k, mi, h / 16]
           let ug := Tensor.reshape (Tensor.embedding1d hitT (Tensor.reshape m.experts.upGlobal.2 #[E, 1])) #[k]
-          let dp := Tensor.reshapeChecked (Tensor.embedding1d hitT (Tensor.reshapeChecked m.experts.downPacked.2 #[E, h * (mi / 2)])) #[k, h, mi / 2]
-          let ds := Tensor.reshapeChecked (Tensor.embedding1d hitT (Tensor.reshapeChecked m.experts.downScale.2 #[E, h * (mi / 16)])) #[k, h, mi / 16]
+          let dp := Tensor.reshape (Tensor.embedding1d hitT (Tensor.reshape m.experts.downPacked.2 #[E, h * (mi / 2)])) #[k, h, mi / 2]
+          let ds := Tensor.reshape (Tensor.embedding1d hitT (Tensor.reshape m.experts.downScale.2 #[E, h * (mi / 16)])) #[k, h, mi / 16]
           let dg := Tensor.reshape (Tensor.embedding1d hitT (Tensor.reshape m.experts.downGlobal.2 #[E, 1])) #[k]
           let g ← nvfp4.dequantBank gp gs gg k mi h
           let u ← nvfp4.dequantBank up us ug k mi h
@@ -277,8 +277,8 @@ def forward2d {tokens : Nat}
   let k := cfg.num_experts_per_tok
   let (topIdx, weights) ← m.router.route cfg x
   -- Flattened dispatch views: pair p = token * k + slot.
-  let flatIdx : Tensor { device := device, shape := #[tokens * k], dtype := .Int64 } := Tensor.reshapeChecked topIdx #[tokens * k]
-  let flatW : Tensor { dtype := dtype, device := device, shape := #[tokens * k] } := Tensor.reshapeChecked weights #[tokens * k]
+  let flatIdx : Tensor { device := device, shape := #[tokens * k], dtype := .Int64 } := Tensor.reshape topIdx #[tokens * k]
+  let flatW : Tensor { dtype := dtype, device := device, shape := #[tokens * k] } := Tensor.reshape weights #[tokens * k]
   let device := x.device
   if tokens == 1 then
     -- Single-token decode: batched path (k distinct experts, no dispatch scan).
@@ -344,7 +344,7 @@ def forward2d {tokens : Nat}
         -- Routing weights multiply the expert OUTPUT (moe_apply_router_weight_on_input=false).
         let outEW : Tensor { dtype := dtype, device := device, shape := #[nE, cfg.hidden_size] } := mulBroadcast (Tensor.reshapeChecked wE.2 #[nE, 1]) outE
         let idxRows : Tensor { device := device, shape := #[nE, cfg.hidden_size], dtype := .Int64 } :=
-          Tensor.reshapeChecked (Tensor.expand (Tensor.reshapeChecked tokE #[nE, 1]) #[nE, cfg.hidden_size]) #[nE, cfg.hidden_size]
+          Tensor.reshape (Tensor.expand (Tensor.reshape tokE #[nE, 1]) #[nE, cfg.hidden_size]) #[nE, cfg.hidden_size]
         acc := scatterAdd acc 0 idxRows outEW
       -- Dense shared expert (SwiGLU MLP, no gating score).
       let sharedH : Tensor { dtype := dtype, device := device, shape := #[tokens, cfg.shared_expert_intermediate_size] } :=
@@ -352,7 +352,7 @@ def forward2d {tokens : Nat}
       let sharedOut : Tensor { dtype := dtype, device := device, shape := #[tokens, cfg.hidden_size] } := Tensor.linear sharedH m.sharedDownProj
       -- HF multiplies the routed output by the scaling factor, then adds the shared expert.
       let routed : Tensor { dtype := dtype, device := device, shape := #[tokens, cfg.hidden_size] } := Tensor.mulScalar acc cfg.moe_routed_scaling_factor
-      pure (Tensor.reshapeChecked (addSame routed sharedOut) #[tokens, cfg.hidden_size])
+      pure (Tensor.reshape (addSame routed sharedOut) #[tokens, cfg.hidden_size])
 
 end LagunaSparseMoeBlock
 

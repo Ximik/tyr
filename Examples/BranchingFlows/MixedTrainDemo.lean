@@ -145,7 +145,7 @@ private def maskedCrossEntropy {batch maxLen vocab : Nat}
     (targets : Tensor { shape := #[batch, maxLen], dtype := .Int64, device := .CPU })
     (mask : Tensor { dtype := .Float32, shape := #[batch, maxLen], device := .CPU }) : Tensor { dtype := .Float32, shape := #[], device := .CPU } :=
   let n : Nat := batch * maxLen
-  let logits2 := Tensor.reshapeChecked logits #[n, vocab]
+  let logits2 := Tensor.reshape logits #[n, vocab]
   let targets2 := Tensor.reshape targets #[n]
   let mask2 := Tensor.reshape mask #[n]
   let per := Tensor.crossEntropyNoneChecked logits2 targets2
@@ -250,8 +250,8 @@ def runDemo : IO Unit := do
     let predTok := Tensor.affine3d hiddenState paramsTrain.proj paramsTrain.tokB
     let split3 := Tensor.affine3d hiddenState paramsTrain.splitW paramsTrain.splitB
     let del3 := Tensor.affine3d hiddenState paramsTrain.delW paramsTrain.delB
-    let splitLogits := split3.reshapeChecked #[batchU, maxLen]
-    let delLogits := del3.reshapeChecked #[batchU, maxLen]
+    let splitLogits := split3.reshape #[batchU, maxLen]
+    let delLogits := del3.reshape #[batchU, maxLen]
 
     let mask := Tensor.mul packedDisc.padmask packedDisc.flowmask
     let contLoss := maskedMSE3d predLoc packedCont.anchor mask

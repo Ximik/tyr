@@ -44,7 +44,7 @@ structure Modulation (hidden_size : Nat) (isDouble : Bool) (dtype : DType := .Fl
 namespace Modulation
 
 /-- Number of modulation outputs -/
-def numMods (isDouble : Bool) : Nat :=
+@[simp] def numMods (isDouble : Bool) : Nat :=
   if isDouble then 6 else 3
 
 /-- Initialize modulation layer -/

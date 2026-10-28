@@ -725,7 +725,7 @@ def pushEncodeStreamDynamic
   let framesChunk : Nat := encodedFrames chunkSamplesU64
   let ropeStartPos : Nat := framesBeforeFinalDownsample ctxStart
   let ⟨codeGroups, codesChunk⟩ := encodeMonoFrameMajorWithRoPEOffsetDynamic m audioChunk ropeStartPos
-  let flatChunk : Tensor { shape := #[framesChunk * codeGroups], dtype := .Int64, device := device } := Tensor.reshapeChecked codesChunk #[framesChunk * codeGroups]
+  let flatChunk : Tensor { shape := #[framesChunk * codeGroups], dtype := .Int64, device := device } := Tensor.reshape codesChunk #[framesChunk * codeGroups]
   let valsChunk ← Tensor.toUInt64Array flatChunk
 
   let groupsNat : Nat := codeGroups

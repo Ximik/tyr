@@ -483,7 +483,7 @@ private def generateFrameFromLastHidden {batch : Nat} (cfg : TalkerConfig)
 
     for g in [:residualGroups] do
       let cpLogits3 := TalkerCodePredictor.logitsForGroup m.codePredictor g cpHiddenCur
-      let cpLogits : Tensor { shape := #[batch, cpCfg.vocabSize], dtype := dtype.val, device := device } := Tensor.reshapeChecked cpLogits3 #[batch, cpCfg.vocabSize]
+      let cpLogits : Tensor { shape := #[batch, cpCfg.vocabSize], dtype := dtype.val, device := device } := Tensor.reshape cpLogits3 #[batch, cpCfg.vocabSize]
 
       let gTemp : Float := optAtOr subtalkerTemperaturesByGroup g subtalkerTemperature
       let gTopK : Nat := optAtOr subtalkerTopKsByGroup g subtalkerTopK

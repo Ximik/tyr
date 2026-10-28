@@ -298,7 +298,7 @@ private def alignSingleWithModel
   else
     let dev := modelDevice alignModel
     let alignVals := alignIdsArr.map (fun id => Int64.ofNat id.toNat)
-    let inputIdsAlignCpu : Tensor { device := .CPU, shape := #[1, seqAlign], dtype := .Int64 } := Tensor.reshapeChecked (Tensor.fromInt64Array alignVals) #[1, seqAlign]
+    let inputIdsAlignCpu : Tensor { device := .CPU, shape := #[1, seqAlign], dtype := .Int64 } := Tensor.reshape (Tensor.fromInt64Array alignVals) #[1, seqAlign]
     let inputIdsAlign : Tensor { device := device, shape := #[1, seqAlign], dtype := .Int64 } := inputIdsAlignCpu.to dev
     let inputFeaturesDev : Tensor { device := device, shape := #[1, melBins, frames], dtype := .Float32 } := frontendOut.inputFeatures.detach.to dev
     let featureAttentionMaskDev : Tensor { device := device, shape := #[1, frames], dtype := .Int64 } := frontendOut.featureAttentionMask.to dev
@@ -587,7 +587,7 @@ private def tryTranscribeWaveformsBatchedChunk
     let seq := promptPack.1
     let inputIdsRowDyn : Tensor { device := device, shape := #[1, seq], dtype := .Int64 } := Tensor.reshape (promptPack.2.to device) #[1, seq]
     let inputFeaturesRowDyn : Tensor { device := device, shape := #[1, preprocessor.featureSize, frames], dtype := .Float32 } :=
-      Tensor.reshapeChecked frontendOut.inputFeatures #[1, preprocessor.featureSize, frames]
+      Tensor.reshape frontendOut.inputFeatures #[1, preprocessor.featureSize, frames]
     let featureAttentionMaskRowDyn : Tensor { device := device, shape := #[1, frames], dtype := .Int64 } := Tensor.reshape frontendOut.featureAttentionMask #[1, frames]
     buckets := addRowToBuckets buckets frames seq {
       seq := seq

@@ -90,7 +90,7 @@ def forward {batch seq hidden_size num_heads head_dim mlp_hidden : Nat}
   let mlp := sliceTyped qkv_mlp 2 qkv_dim (mlp_hidden * 2)
 
   -- Reshape QKV
-  let qkv := Tensor.reshapeChecked qkv #[batch, seq, 3, num_heads, head_dim]
+  let qkv := Tensor.reshape qkv #[batch, seq, 3, num_heads, head_dim]
   let q := Tensor.reshape (sliceTyped qkv 2 0 1) #[batch, seq, num_heads, head_dim]
   let k := Tensor.reshape (sliceTyped qkv 2 1 1) #[batch, seq, num_heads, head_dim]
   let v := Tensor.reshape (sliceTyped qkv 2 2 1) #[batch, seq, num_heads, head_dim]

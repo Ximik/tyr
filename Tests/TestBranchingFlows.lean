@@ -861,7 +861,7 @@ def testBranchingMoleculePackingAndLosses : IO Unit := do
 
   let totalLogits := batch * cfg.maxLen * 10
   let labelLogits : Tensor { dtype := .Float32, shape := #[batch, cfg.maxLen, 10], device := .CPU } :=
-    Tensor.reshapeChecked (floatsDynamic (Array.replicate totalLogits 0.0)) #[batch, cfg.maxLen, 10]
+    Tensor.reshape (floatsDynamic (Array.replicate totalLogits 0.0)) #[batch, cfg.maxLen, 10]
   let flat := batch * cfg.maxLen
   let splitLogits : Tensor { dtype := .Float32, shape := #[batch, cfg.maxLen], device := .CPU } :=
     Tensor.reshape (floatsDynamic (Array.replicate flat 0.0)) #[batch, cfg.maxLen]
@@ -883,7 +883,7 @@ def testBranchingMoleculePackingAndLosses : IO Unit := do
     s!"DFM-packed molecule batch should carry Flowfusion label scale at t=0.25, got {scaleSum}"
   let totalDfmLogits := batchDfm * cfg.maxLen * 10
   let labelLogitsDfm : Tensor { dtype := .Float32, shape := #[batchDfm, cfg.maxLen, 10], device := .CPU } :=
-    Tensor.reshapeChecked (floatsDynamic (Array.replicate totalDfmLogits 0.0)) #[batchDfm, cfg.maxLen, 10]
+    Tensor.reshape (floatsDynamic (Array.replicate totalDfmLogits 0.0)) #[batchDfm, cfg.maxLen, 10]
   let flatDfm := batchDfm * cfg.maxLen
   let splitLogitsDfm : Tensor { dtype := .Float32, shape := #[batchDfm, cfg.maxLen], device := .CPU } :=
     Tensor.reshape (floatsDynamic (Array.replicate flatDfm 0.0)) #[batchDfm, cfg.maxLen]

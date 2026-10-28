@@ -32,7 +32,7 @@ def linearKeyDim (cfg : Config) : Nat :=
 def linearValueDim (cfg : Config) : Nat :=
   qwen35.Config.linearValueDim cfg
 
-def linearConvDim (cfg : Config) : Nat :=
+@[simp] def linearConvDim (cfg : Config) : Nat :=
   qwen35.Config.linearConvDim cfg
 
 def linearKVRepeat (cfg : Config) : Nat :=
@@ -56,7 +56,7 @@ def qwen36_35B_A3B : VisionConfig := qwen35.VisionConfig.qwen36_35B_A3B
 
 def patchDim (cfg : VisionConfig) : Nat := qwen35.VisionConfig.patchDim cfg
 
-def mergeUnit (cfg : VisionConfig) : Nat := qwen35.VisionConfig.mergeUnit cfg
+@[simp] def mergeUnit (cfg : VisionConfig) : Nat := qwen35.VisionConfig.mergeUnit cfg
 
 def headDim (cfg : VisionConfig) : Nat := qwen35.VisionConfig.headDim cfg
 

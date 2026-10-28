@@ -388,7 +388,7 @@ private def buildInputsEmbeds {batch seq frames : Nat}
           validMask.to audioFeatures.device
         pure (Tensor.maskedSelect audioFeatures validMask)
       | none =>
-        pure ⟨batch * audioSeq * cfg.textConfig.hiddenSize, Tensor.reshapeChecked audioFeatures #[batch * audioSeq * cfg.textConfig.hiddenSize]⟩
+        pure ⟨batch * audioSeq * cfg.textConfig.hiddenSize, Tensor.reshape audioFeatures #[batch * audioSeq * cfg.textConfig.hiddenSize]⟩
     let placeholderMask := getPlaceholderMask cfg inputIds
     pure (Tensor.maskedScatter inputsEmbeds0 placeholderMask source.2)
 

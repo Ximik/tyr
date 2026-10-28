@@ -247,15 +247,15 @@ def numHeadsPerKVGroup (cfg : Qwen35Config) : Nat :=
   if cfg.num_key_value_heads == 0 then 1 else cfg.num_attention_heads / cfg.num_key_value_heads
 
 /-- Linear-attention key projection dimension. -/
-def linearKeyDim (cfg : Qwen35Config) : Nat :=
+@[simp] def linearKeyDim (cfg : Qwen35Config) : Nat :=
   cfg.linear_num_key_heads * cfg.linear_key_head_dim
 
 /-- Linear-attention value projection dimension. -/
-def linearValueDim (cfg : Qwen35Config) : Nat :=
+@[simp] def linearValueDim (cfg : Qwen35Config) : Nat :=
   cfg.linear_num_value_heads * cfg.linear_value_head_dim
 
 /-- Depthwise-conv channel count for linear-attention fused QKV path. -/
-def linearConvDim (cfg : Qwen35Config) : Nat :=
+@[simp] def linearConvDim (cfg : Qwen35Config) : Nat :=
   (linearKeyDim cfg) * 2 + (linearValueDim cfg)
 
 /-- Repeat factor to broadcast linear K/Q heads to V heads. -/
@@ -309,11 +309,11 @@ def rotaryDim (cfg : Config) : Nat := Qwen35Config.rotaryDim cfg
 
 def rotaryHalfDim (cfg : Config) : Nat := Qwen35Config.rotaryHalfDim cfg
 
-def linearKeyDim (cfg : Config) : Nat := Qwen35Config.linearKeyDim cfg
+@[simp] def linearKeyDim (cfg : Config) : Nat := Qwen35Config.linearKeyDim cfg
 
-def linearValueDim (cfg : Config) : Nat := Qwen35Config.linearValueDim cfg
+@[simp] def linearValueDim (cfg : Config) : Nat := Qwen35Config.linearValueDim cfg
 
-def linearConvDim (cfg : Config) : Nat := Qwen35Config.linearConvDim cfg
+@[simp] def linearConvDim (cfg : Config) : Nat := Qwen35Config.linearConvDim cfg
 
 def linearKVRepeat (cfg : Config) : Nat := Qwen35Config.linearKVRepeat cfg
 

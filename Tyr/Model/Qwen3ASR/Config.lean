@@ -52,7 +52,7 @@ def melAfterConv3 (cfg : AudioEncoderConfig) : Nat :=
 def framesAfterConv3 (_cfg : AudioEncoderConfig) (frames : Nat) : Nat :=
   downsampleThrice frames
 
-def convOutInDim (cfg : AudioEncoderConfig) : Nat :=
+@[simp] def convOutInDim (cfg : AudioEncoderConfig) : Nat :=
   cfg.downsampleHiddenSize * melAfterConv3 cfg
 
 def headDim (cfg : AudioEncoderConfig) : Nat :=

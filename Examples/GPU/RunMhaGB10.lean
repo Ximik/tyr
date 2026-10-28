@@ -213,7 +213,7 @@ private def benchmarkBackwardS768 (cfg : Benchmark.Config) (stream : UInt64) (ba
   let dVec ← Tensor.uniformLike lOut 0 0
   let dO32 := dO.toFloat32
   let out32 := out.toFloat32
-  let expectedD3 : Tensor { shape := #[batch, 16, 768], dtype := .Float32, device := device } := (Tensor.sumDim (dO32 * out32) 3 false).reshapeChecked #[batch, 16, 768]
+  let expectedD3 : Tensor { shape := #[batch, 16, 768], dtype := .Float32, device := device } := (Tensor.sumDim (dO32 * out32) 3 false).reshape #[batch, 16, 768]
   let expectedD : Tensor { shape := #[batch * 768, 16], dtype := .Float32, device := device } := Tensor.reshape expectedD3 #[batch * 768, 16]
   let dQ ← Tensor.uniformLike q 0 0
   let dK ← Tensor.uniformLike k 0 0

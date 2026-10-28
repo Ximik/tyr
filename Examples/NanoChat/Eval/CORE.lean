@@ -253,7 +253,7 @@ def computeLosses {batch seq vocab : Nat} (logits : Tensor { shape := #[batch, s
   -- logits: [batch, seq, vocab], targets: [batch, seq]
   -- Result: [batch, seq] (loss at each position)
   let batchSeq := batch * seq
-  let logitsFlat := Tensor.reshapeChecked logits #[batchSeq, vocab]
+  let logitsFlat := Tensor.reshape logits #[batchSeq, vocab]
   let targetsFlat := Tensor.reshape targetIds #[batchSeq]
   let lossesFlat := Tensor.crossEntropyNone logitsFlat targetsFlat
   Tensor.reshape lossesFlat #[batch, seq]

@@ -812,7 +812,7 @@ def reshape {σ : StaticSpec} (t : Tensor σ) (shape' : Shape)
     (_h : TensorSpec.numelOfShape σ.shape = TensorSpec.numelOfShape shape' := by
       first
       | exact of_decide_eq_true rfl
-      | (simp [Nat.mul_assoc, Nat.mul_comm, Nat.mul_left_comm] <;> omega)) :
+      | (simp +zetaDelta [Nat.mul_assoc, Nat.mul_comm, Nat.mul_left_comm] <;> omega)) :
     Tensor (σ.withShape shape') :=
   checkedResult "reshape" (t.reshapeChecked? shape')
 

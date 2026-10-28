@@ -167,8 +167,8 @@ example (inputs : Examples.GPU.RunLayerNorm.LayerNormInputs .Float32) : True := 
         + 0.1 * masters[i]!)) |>.reshape #[3]
     LeanTest.assertTrue (Tensor.allclose updated expected 0 1e-6)
     LeanTest.assertTrue (Tensor.allclose model.toFloat32 expected.toBFloat16.toFloat32 0 0)
-    LeanTest.assertTrue (Tensor.allclose m1 ((Tensor.fromFloatArray expectedM).reshapeChecked #[3]) 0 1e-6)
-    LeanTest.assertTrue (Tensor.allclose v1 ((Tensor.fromFloatArray expectedV).reshapeChecked #[3]) 0 1e-6)
+    LeanTest.assertTrue (Tensor.allclose m1 ((Tensor.fromFloatArray expectedM).reshape #[3]) 0 1e-6)
+    LeanTest.assertTrue (Tensor.allclose v1 ((Tensor.fromFloatArray expectedV).reshape #[3]) 0 1e-6)
   let dst ← Tensor.uniformLike master 0 0
   let dst ← Tensor.copyInto dst master
   LeanTest.assertTrue (Tensor.allclose dst master 0 0)

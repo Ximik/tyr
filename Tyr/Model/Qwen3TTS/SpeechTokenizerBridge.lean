@@ -311,7 +311,7 @@ def encodeAudioToCodes
         audio0.to encoder.conv0Weight.device
       let frames : Nat := encodedFrames samples
       let ⟨groups, codes⟩ := encoder.encodeMonoFrameMajorWithRoPEOffsetDynamic (Tensor.castLike encoder.conv0Weight audio)
-      let flat : Tensor { shape := #[frames * groups], dtype := .Int64, device := device } := Tensor.reshapeChecked codes #[frames * groups]
+      let flat : Tensor { shape := #[frames * groups], dtype := .Int64, device := device } := Tensor.reshape codes #[frames * groups]
       let vals ← Tensor.toUInt64Array flat
       IO.FS.writeFile codesPath (formatCodesRows vals groups)
     else

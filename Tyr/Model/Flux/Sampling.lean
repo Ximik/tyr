@@ -117,13 +117,13 @@ def computeImagePositionIds (height width : Nat) (device : Device := .CPU) : IO 
       | 2 => index % width
       | _ => 0
     value.toInt64
-  return ((Tensor.fromInt64Array values).to device).reshapeChecked #[1, height * width, 4]
+  return ((Tensor.fromInt64Array values).to device).reshape #[1, height * width, 4]
 
 /-- Text position IDs use the fourth axis for token position. -/
 def computeTextPositionIds (seq_len : Nat) (device : Device := .CPU) : IO (Tensor { device := device, shape := #[1, seq_len, 4], dtype := .Int64 }) := do
   let values := Array.ofFn (n := (seq_len * 4)) fun i =>
     (if i.val % 4 == 3 then i.val / 4 else 0).toInt64
-  return ((Tensor.fromInt64Array values).to device).reshapeChecked #[1, seq_len, 4]
+  return ((Tensor.fromInt64Array values).to device).reshape #[1, seq_len, 4]
 
 /-- Unpack Flux latents from sequence format to VAE spatial format.
     Flux uses 2×2 spatial patchification, packing 32 channels into 128-dim patches.

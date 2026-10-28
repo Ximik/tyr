@@ -283,7 +283,7 @@ def forward {batch seq : Nat}
     (hidden : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
     : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } :=
   let tokens := batch * seq
-  let hidden2d : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype } := Tensor.reshapeChecked hidden #[tokens, cfg.hidden_size]
+  let hidden2d : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype } := Tensor.reshape hidden #[tokens, cfg.hidden_size]
 
   let (_routerProbs, topVals, topIdx) := m.router.forward cfg hidden2d
   let expertOut : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype } :=
@@ -297,7 +297,7 @@ def forward {batch seq : Nat}
   let gate : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype } :=
     Tensor.expand (Tensor.sigmoid gate1) #[tokens, cfg.hidden_size]
 
-  Tensor.reshapeChecked (Tensor.add expertOut (Tensor.mul sharedOut gate)) #[batch, seq, cfg.hidden_size]
+  Tensor.reshape (Tensor.add expertOut (Tensor.mul sharedOut gate)) #[batch, seq, cfg.hidden_size]
 
 end Qwen35SparseMoeBlock
 
@@ -397,7 +397,7 @@ def forward {batch seq : Nat}
     Tensor.attentionGQA qh kh vh is_causal true
 
   let attn : Tensor { device := device, shape := #[batch, seq, cfg.num_attention_heads, cfg.head_dim], dtype := dtype } := Tensor.joinHeads attn
-  let attnFlat : Tensor { device := device, shape := #[batch, seq, qLen], dtype := dtype } := Tensor.reshapeChecked attn #[batch, seq, qLen]
+  let attnFlat : Tensor { device := device, shape := #[batch, seq, qLen], dtype := dtype } := Tensor.reshape attn #[batch, seq, qLen]
   let gated : Tensor { device := device, shape := #[batch, seq, qLen], dtype := dtype } := Tensor.mul attnFlat (Tensor.sigmoid gateFlat)
   Tensor.linear3d gated m.o_proj
 
@@ -452,7 +452,7 @@ def forwardWithCache {batch seq : Nat}
     Tensor.attentionGQA qh kh vh true true
 
   let attn : Tensor { device := device, shape := #[batch, seq, cfg.num_attention_heads, cfg.head_dim], dtype := dtype } := Tensor.joinHeads attn
-  let attnFlat : Tensor { device := device, shape := #[batch, seq, qLen], dtype := dtype } := Tensor.reshapeChecked attn #[batch, seq, qLen]
+  let attnFlat : Tensor { device := device, shape := #[batch, seq, qLen], dtype := dtype } := Tensor.reshape attn #[batch, seq, qLen]
   let gated : Tensor { device := device, shape := #[batch, seq, qLen], dtype := dtype } := Tensor.mul attnFlat (Tensor.sigmoid gateFlat)
   (Tensor.linear3d gated m.o_proj, cache')
 
@@ -491,7 +491,7 @@ def forwardMasked {batch seq : Nat}
     Tensor.attentionGQAMask qh kh vh attn_mask is_causal true
 
   let attn : Tensor { device := device, shape := #[batch, seq, cfg.num_attention_heads, cfg.head_dim], dtype := dtype } := Tensor.joinHeads attn
-  let attnFlat : Tensor { device := device, shape := #[batch, seq, qLen], dtype := dtype } := Tensor.reshapeChecked attn #[batch, seq, qLen]
+  let attnFlat : Tensor { device := device, shape := #[batch, seq, qLen], dtype := dtype } := Tensor.reshape attn #[batch, seq, qLen]
   let gated : Tensor { device := device, shape := #[batch, seq, qLen], dtype := dtype } := Tensor.mul attnFlat (Tensor.sigmoid gateFlat)
   Tensor.linear3d gated m.o_proj
 
@@ -541,7 +541,7 @@ def forwardStep {batch : Nat}
     let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, 1, cfg.head_dim], dtype := dtype } :=
       Tensor.attentionGQAQKV qh kAll vAll false true
     let attn : Tensor { device := device, shape := #[batch, 1, cfg.num_attention_heads, cfg.head_dim], dtype := dtype } := Tensor.joinHeads attn
-    let attnFlat : Tensor { device := device, shape := #[batch, 1, qLen], dtype := dtype } := Tensor.reshapeChecked attn #[batch, 1, qLen]
+    let attnFlat : Tensor { device := device, shape := #[batch, 1, qLen], dtype := dtype } := Tensor.reshape attn #[batch, 1, qLen]
     let gated : Tensor { device := device, shape := #[batch, 1, qLen], dtype := dtype } := Tensor.mul attnFlat (Tensor.sigmoid gateFlat)
     let out : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := dtype } := Tensor.linear3d gated m.o_proj
     let cache' : KVCache (dtype := dtype) (device := device) cfg batch := {
@@ -563,7 +563,7 @@ def forwardStep {batch : Nat}
     let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, 1, cfg.head_dim], dtype := dtype } :=
       Tensor.attentionGQAQKV qh kAll vAll false true
     let attn : Tensor { device := device, shape := #[batch, 1, cfg.num_attention_heads, cfg.head_dim], dtype := dtype } := Tensor.joinHeads attn
-    let attnFlat : Tensor { device := device, shape := #[batch, 1, qLen], dtype := dtype } := Tensor.reshapeChecked attn #[batch, 1, qLen]
+    let attnFlat : Tensor { device := device, shape := #[batch, 1, qLen], dtype := dtype } := Tensor.reshape attn #[batch, 1, qLen]
     let gated : Tensor { device := device, shape := #[batch, 1, qLen], dtype := dtype } := Tensor.mul attnFlat (Tensor.sigmoid gateFlat)
     let out : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := dtype } := Tensor.linear3d gated m.o_proj
     let cache' : KVCache (dtype := dtype) (device := device) cfg batch := {
@@ -655,7 +655,7 @@ def forward {batch seq : Nat}
 
   let zFlat : Tensor { device := device, shape := #[batch, seq, Config.linearValueDim cfg], dtype := dtype } := Tensor.linear3d hidden m.in_proj_z
   let z : Tensor { device := device, shape := #[batch, seq, cfg.linear_num_value_heads, cfg.linear_value_head_dim], dtype := dtype } :=
-    Tensor.reshapeChecked zFlat #[batch, seq, cfg.linear_num_value_heads, cfg.linear_value_head_dim]
+    Tensor.reshape zFlat #[batch, seq, cfg.linear_num_value_heads, cfg.linear_value_head_dim]
 
   let b : Tensor { device := device, shape := #[batch, seq, cfg.linear_num_value_heads], dtype := dtype } := Tensor.linear3d hidden m.in_proj_b
   let a : Tensor { device := device, shape := #[batch, seq, cfg.linear_num_value_heads], dtype := dtype } := Tensor.linear3d hidden m.in_proj_a
@@ -714,11 +714,11 @@ def forward {batch seq : Nat}
   let vRaw : Tensor { device := device, shape := #[batch, seq, valDim], dtype := dtype } := typedSlice mixed 2 (keyDim * 2) valDim
 
   let q0 : Tensor { device := device, shape := #[batch, seq, cfg.linear_num_key_heads, cfg.linear_key_head_dim], dtype := dtype } :=
-    Tensor.reshapeChecked qRaw #[batch, seq, cfg.linear_num_key_heads, cfg.linear_key_head_dim]
+    Tensor.reshape qRaw #[batch, seq, cfg.linear_num_key_heads, cfg.linear_key_head_dim]
   let k0 : Tensor { device := device, shape := #[batch, seq, cfg.linear_num_key_heads, cfg.linear_key_head_dim], dtype := dtype } :=
-    Tensor.reshapeChecked kRaw #[batch, seq, cfg.linear_num_key_heads, cfg.linear_key_head_dim]
+    Tensor.reshape kRaw #[batch, seq, cfg.linear_num_key_heads, cfg.linear_key_head_dim]
   let v : Tensor { device := device, shape := #[batch, seq, cfg.linear_num_value_heads, cfg.linear_value_head_dim], dtype := dtype } :=
-    Tensor.reshapeChecked vRaw #[batch, seq, cfg.linear_num_value_heads, cfg.linear_value_head_dim]
+    Tensor.reshape vRaw #[batch, seq, cfg.linear_num_value_heads, cfg.linear_value_head_dim]
 
   let beta : Tensor { device := device, shape := #[batch, seq, cfg.linear_num_value_heads], dtype := dtype } := Tensor.sigmoid b
 
@@ -750,7 +750,7 @@ def forward {batch seq : Nat}
   let z2d : Tensor { device := device, shape := #[batch * seq * cfg.linear_num_value_heads, cfg.linear_value_head_dim], dtype := dtype } :=
     Tensor.reshape z #[batch * seq * cfg.linear_num_value_heads, cfg.linear_value_head_dim]
   let core2d := m.norm.forward2d core2d z2d
-  let core3d : Tensor { device := device, shape := #[batch, seq, valDim], dtype := dtype } := Tensor.reshapeChecked core2d #[batch, seq, valDim]
+  let core3d : Tensor { device := device, shape := #[batch, seq, valDim], dtype := dtype } := Tensor.reshape core2d #[batch, seq, valDim]
 
   let out : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } := Tensor.linear3d core3d m.out_proj
   (out, nextConvState, some finalState)

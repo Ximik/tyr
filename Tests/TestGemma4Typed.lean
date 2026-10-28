@@ -23,7 +23,7 @@ private def cfg : Config := {
 private def weight (s : Shape) (offset : Float := 0.0) (dtype : DType := .Float32) : Tensor { shape := s, dtype, device := .CPU } :=
   let n := s.foldl (· * ·) 1
   let vals := Array.ofFn (n := n) fun i => Float.sin (i.val.toFloat * 0.71 + offset) * 0.2
-  ((Tensor.fromFloatArray vals).reshapeChecked s).castDType dtype
+  ((Tensor.fromFloatArray vals).reshape s).castDType dtype
 
 private def norm (n : Nat) (dtype : DType := .Float32) : Gemma4RMSNorm (device := .CPU) n :=
   { weight := packExactTensor ((Tensor.ones #[n]).castDType dtype) }

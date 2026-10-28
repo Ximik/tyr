@@ -206,7 +206,7 @@ def packBranchingMolecule (cfg : BranchingTrainConfig)
   let delTarget := floatDynamic (Tensor.reshapeChecked (Tensor.fromInt64Array delArr) #[batchU, cfg.maxLen])
 
   let timeScaled := result.t.map (fun t => ((t * cfg.timeScale).toUInt64).toInt64)
-  let t := Tensor.reshapeChecked (Tensor.fromInt64Array timeScaled) #[batchU]
+  let t := Tensor.reshape (Tensor.fromInt64Array timeScaled) #[batchU]
   let t := Tensor.divScalar (floatDynamic t) cfg.timeScale
 
   return ⟨batchU, {
@@ -241,7 +241,7 @@ private def moleculeMaskedWeightedCrossEntropy {batch maxLen vocab : Nat}
     (mask : Tensor { dtype := .Float32, device := device, shape := #[batch, maxLen] })
     (weights : Tensor { dtype := dtype, device := device, shape := #[batch, maxLen] }) : Tensor { dtype := .Float32, device := device, shape := #[] } :=
   let n : Nat := batch * maxLen
-  let logits2 := Tensor.reshapeChecked logits #[n, vocab]
+  let logits2 := Tensor.reshape logits #[n, vocab]
   let targets2 := Tensor.reshape targets #[n]
   let mask2 := Tensor.reshape mask #[n]
   let weights2 := Tensor.reshape weights #[n]

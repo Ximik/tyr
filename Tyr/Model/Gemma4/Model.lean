@@ -226,7 +226,7 @@ private def qProjFull {batch seq : Nat}
     : Tensor { device := device, shape := #[batch, seq, cfg.num_attention_heads, Config.fullHeadDim cfg], dtype := dtype } :=
   let dim := cfg.num_attention_heads * Config.fullHeadDim cfg
   let qW : Tensor { device := device, shape := #[dim, cfg.hidden_size], dtype := dtype } := sliceTyped m.q_proj 0 0 dim
-  Tensor.reshapeChecked (Tensor.linear3d x qW) #[batch, seq, cfg.num_attention_heads, Config.fullHeadDim cfg]
+  Tensor.reshape (Tensor.linear3d x qW) #[batch, seq, cfg.num_attention_heads, Config.fullHeadDim cfg]
 
 private def kProjSliding {batch seq : Nat}
     (cfg : Config)
@@ -235,7 +235,7 @@ private def kProjSliding {batch seq : Nat}
     : Tensor { device := device, shape := #[batch, seq, cfg.num_key_value_heads, cfg.head_dim], dtype := dtype } :=
   let rows := cfg.num_key_value_heads * cfg.head_dim
   let kW : Tensor { device := device, shape := #[rows, cfg.hidden_size], dtype := dtype } := sliceTyped m.k_proj 0 0 rows
-  Tensor.reshapeChecked (Tensor.linear3d x kW) #[batch, seq, cfg.num_key_value_heads, cfg.head_dim]
+  Tensor.reshape (Tensor.linear3d x kW) #[batch, seq, cfg.num_key_value_heads, cfg.head_dim]
 
 private def kProjFull {batch seq : Nat}
     (cfg : Config)
@@ -244,7 +244,7 @@ private def kProjFull {batch seq : Nat}
     : Tensor { device := device, shape := #[batch, seq, Config.fullNumKVHeads cfg, Config.fullHeadDim cfg], dtype := dtype } :=
   let rows := Config.fullNumKVHeads cfg * Config.fullHeadDim cfg
   let kW : Tensor { device := device, shape := #[rows, cfg.hidden_size], dtype := dtype } := sliceTyped m.k_proj 0 0 rows
-  Tensor.reshapeChecked (Tensor.linear3d x kW) #[batch, seq, Config.fullNumKVHeads cfg, Config.fullHeadDim cfg]
+  Tensor.reshape (Tensor.linear3d x kW) #[batch, seq, Config.fullNumKVHeads cfg, Config.fullHeadDim cfg]
 
 private def vProjSliding {batch seq : Nat}
     (cfg : Config)
@@ -253,7 +253,7 @@ private def vProjSliding {batch seq : Nat}
     : Tensor { device := device, shape := #[batch, seq, cfg.num_key_value_heads, cfg.head_dim], dtype := dtype } :=
   let rows := cfg.num_key_value_heads * cfg.head_dim
   let vW : Tensor { device := device, shape := #[rows, cfg.hidden_size], dtype := dtype } := sliceTyped m.v_proj 0 0 rows
-  Tensor.reshapeChecked (Tensor.linear3d x vW) #[batch, seq, cfg.num_key_value_heads, cfg.head_dim]
+  Tensor.reshape (Tensor.linear3d x vW) #[batch, seq, cfg.num_key_value_heads, cfg.head_dim]
 
 private def vProjFull {batch seq : Nat}
     (cfg : Config)
@@ -262,7 +262,7 @@ private def vProjFull {batch seq : Nat}
     : Tensor { device := device, shape := #[batch, seq, Config.fullNumKVHeads cfg, Config.fullHeadDim cfg], dtype := dtype } :=
   let rows := Config.fullNumKVHeads cfg * Config.fullHeadDim cfg
   let vW : Tensor { device := device, shape := #[rows, cfg.hidden_size], dtype := dtype } := sliceTyped m.v_proj 0 0 rows
-  Tensor.reshapeChecked (Tensor.linear3d x vW) #[batch, seq, Config.fullNumKVHeads cfg, Config.fullHeadDim cfg]
+  Tensor.reshape (Tensor.linear3d x vW) #[batch, seq, Config.fullNumKVHeads cfg, Config.fullHeadDim cfg]
 
 private def oProjSliding {batch seq : Nat}
     (cfg : Config)
@@ -842,12 +842,12 @@ def forward {batch seq : Nat}
     | some moe =>
       let denseBranch := moe.post_feedforward_layernorm_1.forward3d mlpOut
       let tokens := batch * seq
-      let routerInput : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype } := Tensor.reshapeChecked residual2 #[tokens, cfg.hidden_size]
+      let routerInput : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype } := Tensor.reshape residual2 #[tokens, cfg.hidden_size]
       let (_routerProbs, topVals, topIdx) := moe.router.forward cfg routerInput
       let expertInput2d : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype } :=
         moe.pre_feedforward_layernorm_2.forward2d routerInput
       let expert2d := moe.experts.forward2d cfg expertInput2d topVals.2 topIdx
-      let expert3d : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } := Tensor.reshapeChecked expert2d #[batch, seq, cfg.hidden_size]
+      let expert3d : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } := Tensor.reshape expert2d #[batch, seq, cfg.hidden_size]
       Tensor.add denseBranch (moe.post_feedforward_layernorm_2.forward3d expert3d)
     | none =>
       mlpOut
@@ -893,12 +893,12 @@ def forwardWithCache {batch seq : Nat}
     | some moe =>
       let denseBranch := moe.post_feedforward_layernorm_1.forward3d mlpOut
       let tokens := batch * seq
-      let routerInput : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype } := Tensor.reshapeChecked residual2 #[tokens, cfg.hidden_size]
+      let routerInput : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype } := Tensor.reshape residual2 #[tokens, cfg.hidden_size]
       let (_routerProbs, topVals, topIdx) := moe.router.forward cfg routerInput
       let expertInput2d : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype } :=
         moe.pre_feedforward_layernorm_2.forward2d routerInput
       let expert2d := moe.experts.forward2d cfg expertInput2d topVals.2 topIdx
-      let expert3d : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } := Tensor.reshapeChecked expert2d #[batch, seq, cfg.hidden_size]
+      let expert3d : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } := Tensor.reshape expert2d #[batch, seq, cfg.hidden_size]
       Tensor.add denseBranch (moe.post_feedforward_layernorm_2.forward3d expert3d)
     | none =>
       mlpOut
@@ -996,12 +996,12 @@ def forwardPrefillWithMask {batch seq : Nat}
     | some moe =>
       let denseBranch := moe.post_feedforward_layernorm_1.forward3d mlpOut
       let tokens := batch * seq
-      let routerInput : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype } := Tensor.reshapeChecked residual2 #[tokens, cfg.hidden_size]
+      let routerInput : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype } := Tensor.reshape residual2 #[tokens, cfg.hidden_size]
       let (_routerProbs, topVals, topIdx) := moe.router.forward cfg routerInput
       let expertInput2d : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype } :=
         moe.pre_feedforward_layernorm_2.forward2d routerInput
       let expert2d := moe.experts.forward2d cfg expertInput2d topVals.2 topIdx
-      let expert3d : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } := Tensor.reshapeChecked expert2d #[batch, seq, cfg.hidden_size]
+      let expert3d : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } := Tensor.reshape expert2d #[batch, seq, cfg.hidden_size]
       Tensor.add denseBranch (moe.post_feedforward_layernorm_2.forward3d expert3d)
     | none =>
       mlpOut

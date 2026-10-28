@@ -69,12 +69,12 @@ private def dequantCore {pd sd : DType}
   let device := packed.device
   let lutLo := (e2m1LutLo.to device).reshapeChecked #[256, 1]
   let lutHi := (e2m1LutHi.to device).reshapeChecked #[256, 1]
-  let idx := (packed.reshapeChecked #[numPacked]).toInt64
+  let idx := (packed.reshape #[numPacked]).toInt64
   let lo := (Tensor.embedding1d idx lutLo).reshape #[numPacked, 1]
   let hi := (Tensor.embedding1d idx lutHi).reshape #[numPacked, 1]
   let pairs := Tensor.catManyChecked #[lo.packShape, hi.packShape] 1 #[numPacked, 2]
   let vals4 := pairs.reshapeChecked #[lead, outFeatures, numGroups, 16]
-  let scalesF := scales.toFloat32.reshapeChecked #[lead, outFeatures, numGroups, 1]
+  let scalesF := scales.toFloat32.reshape #[lead, outFeatures, numGroups, 1]
   -- Preserve reference rounding: divide in F32, multiply in F32, then cast once.
   let globalExpanded := Tensor.expand globalB #[lead, outFeatures, numGroups, 1]
   let scaleDiv := scalesF / globalExpanded
