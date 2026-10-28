@@ -432,16 +432,16 @@ def forwardWithCache {batch seq : Nat}
   let kh_new := Tensor.splitHeads k
   let vh_new := Tensor.splitHeads v
   let kStore : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, cache.maxLen, cfg.head_dim], dtype := dtype } :=
-    Tensor.castLike kh_new (Tensor.reshapeChecked cache.kStoreDyn.2 #[batch, cfg.num_key_value_heads, cache.maxLen, cfg.head_dim])
+    Tensor.castLike kh_new (cache.kStore)
   let vStore : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, cache.maxLen, cfg.head_dim], dtype := dtype } :=
-    Tensor.castLike vh_new (Tensor.reshapeChecked cache.vStoreDyn.2 #[batch, cfg.num_key_value_heads, cache.maxLen, cfg.head_dim])
+    Tensor.castLike vh_new (cache.vStore)
 
   let kStore' := Tensor.sliceScatter kStore 2 0 kh_new
   let vStore' := Tensor.sliceScatter vStore 2 0 vh_new
 
   let cache' : KVCache (dtype := dtype) (device := device) cfg batch := { cache with
-    kStoreDyn := Tensor.packShape kStore'
-    vStoreDyn := Tensor.packShape vStore'
+    kStore := kStore'
+    vStore := vStore'
     seq := seq
   }
 
@@ -526,9 +526,9 @@ def forwardStep {batch : Nat}
   let vNew : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, 1, cfg.head_dim], dtype := dtype } := Tensor.splitHeads v
 
   let kStore : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, cache.maxLen, cfg.head_dim], dtype := dtype } :=
-    Tensor.castLike kNew (Tensor.reshapeChecked cache.kStoreDyn.2 #[batch, cfg.num_key_value_heads, cache.maxLen, cfg.head_dim])
+    Tensor.castLike kNew (cache.kStore)
   let vStore : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, cache.maxLen, cfg.head_dim], dtype := dtype } :=
-    Tensor.castLike vNew (Tensor.reshapeChecked cache.vStoreDyn.2 #[batch, cfg.num_key_value_heads, cache.maxLen, cfg.head_dim])
+    Tensor.castLike vNew (cache.vStore)
 
   if cache.seq < cache.maxLen then
     let kStore' : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, cache.maxLen, cfg.head_dim], dtype := dtype } :=
@@ -545,8 +545,8 @@ def forwardStep {batch : Nat}
     let gated : Tensor { device := device, shape := #[batch, 1, qLen], dtype := dtype } := Tensor.mul attnFlat (Tensor.sigmoid gateFlat)
     let out : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := dtype } := Tensor.linear3d gated m.o_proj
     let cache' : KVCache (dtype := dtype) (device := device) cfg batch := {
-      kStoreDyn := Tensor.packShape kStore'
-      vStoreDyn := Tensor.packShape vStore'
+      kStore := kStore'
+      vStore := vStore'
       seq := kvLen
       maxLen := cache.maxLen
     }
@@ -567,8 +567,8 @@ def forwardStep {batch : Nat}
     let gated : Tensor { device := device, shape := #[batch, 1, qLen], dtype := dtype } := Tensor.mul attnFlat (Tensor.sigmoid gateFlat)
     let out : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := dtype } := Tensor.linear3d gated m.o_proj
     let cache' : KVCache (dtype := dtype) (device := device) cfg batch := {
-      kStoreDyn := Tensor.packShape kStore'
-      vStoreDyn := Tensor.packShape vStore'
+      kStore := kStore'
+      vStore := vStore'
       seq := cache.maxLen
       maxLen := cache.maxLen
     }

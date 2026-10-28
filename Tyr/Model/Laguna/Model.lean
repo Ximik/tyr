@@ -274,14 +274,14 @@ def forwardWithCache {batch seq rotaryDim numHeads : Nat}
   let kh : Tensor { dtype := dtype, device := device, shape := #[batch, cfg.num_key_value_heads, seq, cfg.head_dim] } := transposeAttention k
   let vh : Tensor { dtype := dtype, device := device, shape := #[batch, cfg.num_key_value_heads, seq, cfg.head_dim] } := transposeAttention v
   let kStore : Tensor { dtype := dtype, device := device, shape := #[batch, cfg.num_key_value_heads, cache.maxLen, cfg.head_dim] } :=
-    Tensor.castLike kh (Tensor.reshapeChecked cache.kStoreDyn.2 #[batch, cfg.num_key_value_heads, cache.maxLen, cfg.head_dim])
+    Tensor.castLike kh (cache.kStore)
   let vStore : Tensor { dtype := dtype, device := device, shape := #[batch, cfg.num_key_value_heads, cache.maxLen, cfg.head_dim] } :=
-    Tensor.castLike vh (Tensor.reshapeChecked cache.vStoreDyn.2 #[batch, cfg.num_key_value_heads, cache.maxLen, cfg.head_dim])
+    Tensor.castLike vh (cache.vStore)
   let kStore' := Tensor.sliceScatter kStore 2 0 kh
   let vStore' := Tensor.sliceScatter vStore 2 0 vh
   let cache' : KVCache (device := device) (dtype := dtype) cfg batch := {
-    kStoreDyn := kStore'.packShape
-    vStoreDyn := vStore'.packShape
+    kStore := kStore'
+    vStore := vStore'
     seq := seq
     maxLen := cache.maxLen
   }
@@ -310,9 +310,9 @@ def forwardStep {batch rotaryDim numHeads : Nat}
   let kNew : Tensor { dtype := dtype, device := device, shape := #[batch, cfg.num_key_value_heads, 1, cfg.head_dim] } := transposeAttention k
   let vNew : Tensor { dtype := dtype, device := device, shape := #[batch, cfg.num_key_value_heads, 1, cfg.head_dim] } := transposeAttention v
   let kStore : Tensor { dtype := dtype, device := device, shape := #[batch, cfg.num_key_value_heads, cache.maxLen, cfg.head_dim] } :=
-    Tensor.castLike kNew (Tensor.reshapeChecked cache.kStoreDyn.2 #[batch, cfg.num_key_value_heads, cache.maxLen, cfg.head_dim])
+    Tensor.castLike kNew (cache.kStore)
   let vStore : Tensor { dtype := dtype, device := device, shape := #[batch, cfg.num_key_value_heads, cache.maxLen, cfg.head_dim] } :=
-    Tensor.castLike vNew (Tensor.reshapeChecked cache.vStoreDyn.2 #[batch, cfg.num_key_value_heads, cache.maxLen, cfg.head_dim])
+    Tensor.castLike vNew (cache.vStore)
   let writePos : Nat :=
     if cache.seq < cache.maxLen then cache.seq
     else if cache.maxLen == 0 then 0 else cache.maxLen - 1
@@ -335,8 +335,8 @@ def forwardStep {batch rotaryDim numHeads : Nat}
     Tensor.attentionGQAQKV qh kAll vAll false true
   let attn : Tensor { dtype := dtype, device := device, shape := #[batch, 1, numHeads, cfg.head_dim] } := transposeAttention attn
   let cache' : KVCache (device := device) (dtype := dtype) cfg batch := {
-    kStoreDyn := kStore'.packShape
-    vStoreDyn := vStore'.packShape
+    kStore := kStore'
+    vStore := vStore'
     seq := kvLen
     maxLen := cache.maxLen
   }
@@ -356,9 +356,9 @@ private def forwardOwned {batch seq rotaryDim numHeads : Nat}
   let kh : Tensor { dtype := dtype, device := device, shape := #[batch, cfg.num_key_value_heads, seq, cfg.head_dim] } := transposeAttention k
   let vh : Tensor { dtype := dtype, device := device, shape := #[batch, cfg.num_key_value_heads, seq, cfg.head_dim] } := transposeAttention v
   let mut kStore : Tensor { dtype := dtype, device := device, shape := #[batch, cfg.num_key_value_heads, cache.maxLen, cfg.head_dim] } :=
-    Tensor.castLike kh (Tensor.reshapeChecked cache.kStoreDyn.2 #[batch, cfg.num_key_value_heads, cache.maxLen, cfg.head_dim])
+    Tensor.castLike kh (cache.kStore)
   let mut vStore : Tensor { dtype := dtype, device := device, shape := #[batch, cfg.num_key_value_heads, cache.maxLen, cfg.head_dim] } :=
-    Tensor.castLike vh (Tensor.reshapeChecked cache.vStoreDyn.2 #[batch, cfg.num_key_value_heads, cache.maxLen, cfg.head_dim])
+    Tensor.castLike vh (cache.vStore)
   if prefill then
     -- Retain only the prompt tail, placing each entry at its absolute ring slot.
     let retained := min seq cache.maxLen
@@ -387,8 +387,8 @@ private def forwardOwned {batch seq rotaryDim numHeads : Nat}
       Tensor.attentionGQAQKV qh kAll vAll false true
   let out := gateAndOut cfg m x (transposeAttention attn)
   return (out, {
-    kStoreDyn := kStore.packShape
-    vStoreDyn := vStore.packShape
+    kStore := kStore
+    vStore := vStore
     seq := total
     maxLen := cache.maxLen })
 
@@ -417,9 +417,9 @@ def fork (session : LagunaCacheSession (device := device) (dtype := dtype) cfg b
   session.state.atomically do
     let some cache ← get | throw <| IO.userError "Laguna cache session is invalid"
     let copied ← cache.kvCaches.mapM fun kv => do
-      let k ← data.cloneInferenceIO kv.kStoreDyn.2
-      let v ← data.cloneInferenceIO kv.vStoreDyn.2
-      return { kv with kStoreDyn := k.packShape, vStoreDyn := v.packShape }
+      let k ← data.cloneInferenceIO kv.kStore
+      let v ← data.cloneInferenceIO kv.vStore
+      return { kv with kStore := k, vStore := v }
     return ⟨← Std.Mutex.new (some { kvCaches := copied }), session.maxLen⟩
 
 /-- Layer capacities, for memory accounting without exposing mutable tensors. -/
@@ -765,9 +765,9 @@ def initCacheSession {batch : Nat} (cfg : Config) (m : LagunaModel (device := de
     -- buffers through IO, even when they have identical shape and contents.
     let template := qwen.QwenAttention.initKVCache capacity
       (batch := batch) (num_kv_heads := cfg.num_key_value_heads) (head_dim := cfg.head_dim) device dtype
-    let k ← data.cloneInferenceIO template.kStoreDyn.2
-    let v ← data.cloneInferenceIO template.vStoreDyn.2
-    caches := caches.push { template with kStoreDyn := k.packShape, vStoreDyn := v.packShape }
+    let k ← data.cloneInferenceIO template.kStore
+    let v ← data.cloneInferenceIO template.vStore
+    caches := caches.push { template with kStore := k, vStore := v }
   return ⟨← Std.Mutex.new (some { kvCaches := caches }), maxLen⟩
 
 /-- Execute one serialized inference transition, invalidating on partial failure.
