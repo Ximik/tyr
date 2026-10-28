@@ -471,7 +471,7 @@ def testTypedStackArrayOwnership : IO Unit := do
     let stacked := Tensor.stack1d vectors
     LeanTest.assertEqual (← stacked.toFloatArray) #[i.toFloat, 2, 3, 4, 5, 6]
     -- Allocate additional shape arrays and reuse the original tensor handles.
-    let reshaped := stacked.reshapeChecked #[3, 2]
+    let reshaped := stacked.reshape #[3, 2]
     LeanTest.assertEqual reshaped.runtimeShape #[3, 2]
     LeanTest.assertEqual (← vectors[0]!.toFloatArray) #[i.toFloat, 2, 3]
     LeanTest.assertEqual (← (Tensor.stack1d vectors).toFloatArray)

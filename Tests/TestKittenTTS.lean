@@ -99,7 +99,7 @@ def testKittenTTSIndexedCheckpointRoundTrip : IO Unit := IO.FS.withTempDir fun d
   let model ← Model.init tinyCfg
   let template ← Model.init tinyCfg
   let loaded ← roundTripParams model template dir.toString
-  let inputIds := (Tensor.fromInt64Array #[1, 2, 3]).reshapeChecked #[1, 3]
+  let inputIds := (Tensor.fromInt64Array #[1, 2, 3]).reshape #[1, 3]
   let style : Tensor { shape := #[1, KittenTTSConfig.fullStyleDim tinyCfg], dtype := .Float32, device := .CPU } := Tensor.zeros _
   torch.manualSeed 42
   let expected ← model.synthesizeIds inputIds style

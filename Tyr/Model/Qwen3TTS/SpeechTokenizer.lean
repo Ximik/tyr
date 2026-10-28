@@ -261,13 +261,13 @@ private def loadFrozen {dtype : DType} (path : String) (name : String) (s : Shap
 private def addBias3d {batch channels frames : Nat}
     (x : Tensor { shape := #[batch, channels, frames], dtype := dtypes.compute.val, device := device })
     (bias : Tensor { shape := #[channels], dtype := dtypes.compute.val, device := device }) : Tensor { shape := #[batch, channels, frames], dtype := dtypes.compute.val, device := device } :=
-  let b : Tensor { shape := #[1, channels, 1], dtype := dtypes.compute.val, device := device } := Tensor.reshapeChecked bias #[1, channels, 1]
+  let b : Tensor { shape := #[1, channels, 1], dtype := dtypes.compute.val, device := device } := Tensor.reshape bias #[1, channels, 1]
   Tensor.add x (Tensor.expand b #[batch, channels, frames])
 
 private def scale3d {batch seq dim : Nat}
     (x : Tensor { shape := #[batch, seq, dim], dtype := dtypes.compute.val, device := device })
     (scale : Tensor { shape := #[dim], dtype := dtypes.compute.val, device := device }) : Tensor { shape := #[batch, seq, dim], dtype := dtypes.compute.val, device := device } :=
-  let s : Tensor { shape := #[1, 1, dim], dtype := dtypes.compute.val, device := device } := Tensor.reshapeChecked scale #[1, 1, dim]
+  let s : Tensor { shape := #[1, 1, dim], dtype := dtypes.compute.val, device := device } := Tensor.reshape scale #[1, 1, dim]
   Tensor.mul x (Tensor.expand s #[batch, seq, dim])
 
 private def clampWave {s : Shape} (x : Tensor { shape := s, dtype := dtypes.compute.val, device := device }) : Tensor { shape := s, dtype := dtypes.compute.val, device := device } :=
@@ -561,10 +561,10 @@ private def decodeCodebook {batch frames : Nat}
     (cb : (QuantizerCodebook (device := device) (dtypes := dtypes)))
     (codes : Tensor { shape := #[batch, frames], dtype := .Int64, device := device }) : Tensor { shape := #[batch, 256, frames], dtype := dtypes.compute.val, device := device } :=
   let usage : Tensor { shape := #[2048], dtype := dtypes.usage, device := device } := clampMin1d cb.clusterUsage 1e-5
-  let usage2d : Tensor { shape := #[2048, 256], dtype := dtypes.usage, device := device } := Tensor.expand (Tensor.reshapeChecked usage #[2048, 1]) #[2048, 256]
+  let usage2d : Tensor { shape := #[2048, 256], dtype := dtypes.usage, device := device } := Tensor.expand (Tensor.reshape usage #[2048, 1]) #[2048, 256]
   let embedding : Tensor { shape := #[2048, 256], dtype := dtypes.compute.val, device := device } := dtypes.divideCodebook cb.embeddingSum usage2d
   let q : Tensor { shape := #[batch, frames, 256], dtype := dtypes.compute.val, device := device } := Tensor.embedding codes embedding
-  Tensor.reshapeChecked (Tensor.transpose q 1 2) #[batch, 256, frames]
+  Tensor.reshape (Tensor.transpose q 1 2) #[batch, 256, frames]
 
 private def decodeRVQSlice {batch groups frames : Nat}
     (rvq : (RVQDecode (device := device) (dtypes := dtypes)))
@@ -577,7 +577,7 @@ private def decodeRVQSlice {batch groups frames : Nat}
     for cb in rvq.codebooks do
       let idx := start + off
       let code3 : Tensor { shape := #[batch, 1, frames], dtype := .Int64, device := device } := Tensor.sliceChecked codes 1 idx 1 #[batch, 1, frames]
-      let code2 : Tensor { shape := #[batch, frames], dtype := .Int64, device := device } := Tensor.reshapeChecked code3 #[batch, frames]
+      let code2 : Tensor { shape := #[batch, frames], dtype := .Int64, device := device } := Tensor.reshape code3 #[batch, frames]
       let q := decodeCodebook cb code2
       quantized := Tensor.add quantized q
       off := off + 1
@@ -630,9 +630,9 @@ private def snakeBeta {batch channels frames : Nat}
     (alpha : Tensor { shape := #[channels], dtype := dtypes.compute.val, device := device })
     (beta : Tensor { shape := #[channels], dtype := dtypes.compute.val, device := device }) : Tensor { shape := #[batch, channels, frames], dtype := dtypes.compute.val, device := device } :=
   let alphaE : Tensor { shape := #[batch, channels, frames], dtype := dtypes.compute.val, device := device } :=
-    Tensor.expand (Tensor.reshapeChecked (Tensor.exp alpha) #[1, channels, 1]) #[batch, channels, frames]
+    Tensor.expand (Tensor.reshape (Tensor.exp alpha) #[1, channels, 1]) #[batch, channels, frames]
   let betaE : Tensor { shape := #[batch, channels, frames], dtype := dtypes.compute.val, device := device } :=
-    Tensor.expand (Tensor.reshapeChecked (Tensor.exp beta) #[1, channels, 1]) #[batch, channels, frames]
+    Tensor.expand (Tensor.reshape (Tensor.exp beta) #[1, channels, 1]) #[batch, channels, frames]
   let sin2 : Tensor { shape := #[batch, channels, frames], dtype := dtypes.compute.val, device := device } :=
     let z := Tensor.sin (Tensor.mul x alphaE)
     Tensor.mul z z
@@ -646,13 +646,13 @@ private def forwardConvNeXt {batch frames : Nat}
     (x : Tensor { shape := #[batch, 1024, frames], dtype := dtypes.compute.val, device := device }) : Tensor { shape := #[batch, 1024, frames], dtype := dtypes.compute.val, device := device } :=
   let residual := x
   let h0 := causalDepthwiseConv1d x blk.dwconvWeight blk.dwconvBias
-  let h1 : Tensor { shape := #[batch, frames, 1024], dtype := dtypes.compute.val, device := device } := Tensor.reshapeChecked (Tensor.transpose h0 1 2) #[batch, frames, 1024]
+  let h1 : Tensor { shape := #[batch, frames, 1024], dtype := dtypes.compute.val, device := device } := Tensor.reshape (Tensor.transpose h0 1 2) #[batch, frames, 1024]
   let h2 : Tensor { shape := #[batch, frames, 1024], dtype := dtypes.compute.val, device := device } := Tensor.layerNorm h1 blk.normWeight blk.normBias 1e-6
   let h3 : Tensor { shape := #[batch, frames, 4096], dtype := dtypes.compute.val, device := device } := Tensor.affine3d h2 blk.pwconv1Weight blk.pwconv1Bias
   let h4 : Tensor { shape := #[batch, frames, 4096], dtype := dtypes.compute.val, device := device } := Tensor.gelu h3
   let h5 : Tensor { shape := #[batch, frames, 1024], dtype := dtypes.compute.val, device := device } := Tensor.affine3d h4 blk.pwconv2Weight blk.pwconv2Bias
   let h6 : Tensor { shape := #[batch, frames, 1024], dtype := dtypes.compute.val, device := device } := scale3d h5 blk.gamma
-  let h7 : Tensor { shape := #[batch, 1024, frames], dtype := dtypes.compute.val, device := device } := Tensor.reshapeChecked (Tensor.transpose h6 1 2) #[batch, 1024, frames]
+  let h7 : Tensor { shape := #[batch, 1024, frames], dtype := dtypes.compute.val, device := device } := Tensor.reshape (Tensor.transpose h6 1 2) #[batch, 1024, frames]
   Tensor.add residual h7
 
 private def forwardAttention {batch seq : Nat}
@@ -663,9 +663,9 @@ private def forwardAttention {batch seq : Nat}
   let k0 : Tensor { shape := #[batch, seq, 1024], dtype := dtypes.compute.val, device := device } := Tensor.linear3d x layer.kProj
   let v0 : Tensor { shape := #[batch, seq, 1024], dtype := dtypes.compute.val, device := device } := Tensor.linear3d x layer.vProj
 
-  let q : Tensor { shape := #[batch, seq, 16, 64], dtype := dtypes.compute.val, device := device } := Tensor.reshapeChecked q0 #[batch, seq, 16, 64]
-  let k : Tensor { shape := #[batch, seq, 16, 64], dtype := dtypes.compute.val, device := device } := Tensor.reshapeChecked k0 #[batch, seq, 16, 64]
-  let v : Tensor { shape := #[batch, seq, 16, 64], dtype := dtypes.compute.val, device := device } := Tensor.reshapeChecked v0 #[batch, seq, 16, 64]
+  let q : Tensor { shape := #[batch, seq, 16, 64], dtype := dtypes.compute.val, device := device } := Tensor.reshape q0 #[batch, seq, 16, 64]
+  let k : Tensor { shape := #[batch, seq, 16, 64], dtype := dtypes.compute.val, device := device } := Tensor.reshape k0 #[batch, seq, 16, 64]
+  let v : Tensor { shape := #[batch, seq, 16, 64], dtype := dtypes.compute.val, device := device } := Tensor.reshape v0 #[batch, seq, 16, 64]
 
   let q := Tensor.applyRotary q cos sin
   let k := Tensor.applyRotary k cos sin
@@ -677,7 +677,7 @@ private def forwardAttention {batch seq : Nat}
   let attn : Tensor { shape := #[batch, 16, seq, 64], dtype := dtypes.compute.val, device := device } :=
     Tensor.attentionWindow qh kh vh true true 72
   let attn : Tensor { shape := #[batch, seq, 16, 64], dtype := dtypes.compute.val, device := device } := Tensor.joinHeads attn
-  let attn : Tensor { shape := #[batch, seq, 1024], dtype := dtypes.compute.val, device := device } := Tensor.reshapeChecked attn #[batch, seq, 1024]
+  let attn : Tensor { shape := #[batch, seq, 1024], dtype := dtypes.compute.val, device := device } := Tensor.reshape attn #[batch, seq, 1024]
   Tensor.linear3d attn layer.oProj
 
 private def forwardTransformerLayer {batch seq : Nat}
@@ -704,7 +704,7 @@ private def forwardPreTransformer {batch frames : Nat}
     (m : (SpeechTokenizer12HzDecoder (device := device) (dtypes := dtypes)))
     (x : Tensor { shape := #[batch, 1024, frames], dtype := dtypes.compute.val, device := device }) : Tensor { shape := #[batch, 1024, frames], dtype := dtypes.compute.val, device := device } :=
   Id.run do
-    let x0 : Tensor { shape := #[batch, frames, 1024], dtype := dtypes.compute.val, device := device } := Tensor.reshapeChecked (Tensor.transpose x 1 2) #[batch, frames, 1024]
+    let x0 : Tensor { shape := #[batch, frames, 1024], dtype := dtypes.compute.val, device := device } := Tensor.reshape (Tensor.transpose x 1 2) #[batch, frames, 1024]
     let mut h : Tensor { shape := #[batch, frames, 512], dtype := dtypes.compute.val, device := device } := Tensor.affine3d x0 m.preTransformerInputProj m.preTransformerInputBias
     let (cos0, sin0) := Tensor.rotaryFreqs frames 64 10000.0
     let cos : Tensor { shape := #[frames, 32], dtype := .Float32, device := device } := cos0.to h.device
@@ -714,7 +714,7 @@ private def forwardPreTransformer {batch frames : Nat}
     let norm : RMSNorm (device := device) 512 dtypes.compute.val := { weight := m.preTransformerNormWeight, eps := ⟨1e-5⟩ }
     let hNorm : Tensor { shape := #[batch, frames, 512], dtype := dtypes.compute.val, device := device } := norm.forward3d h
     let hOut : Tensor { shape := #[batch, frames, 1024], dtype := dtypes.compute.val, device := device } := Tensor.affine3d hNorm m.preTransformerOutputProj m.preTransformerOutputBias
-    Tensor.reshapeChecked (Tensor.transpose hOut 1 2) #[batch, 1024, frames]
+    Tensor.reshape (Tensor.transpose hOut 1 2) #[batch, 1024, frames]
 
 private def forwardResidualUnit {batch frames dim : Nat}
     (u : DecoderResidualUnit (device := device) (dtypes := dtypes) dim)
@@ -804,7 +804,7 @@ def decodeChunked {batch frames : Nat}
         chunks := chunks.push wavKeep.packShape
         start := start + curChunk
       let wavDyn := Tensor.catManyChecked chunks 2 #[batch, 1, frames * 1920]
-      Tensor.reshapeChecked wavDyn #[batch, 1, frames * 1920]
+      Tensor.reshape wavDyn #[batch, 1, frames * 1920]
 
 /-- Streaming decoder state for incremental 12Hz codec-frame ingestion. -/
 structure DecodeStreamState (batch : Nat) where
@@ -846,7 +846,7 @@ private def decodeOneStreamingChunk {batch : Nat}
     let context := if start < st.leftContextSize then start else st.leftContextSize
     let chunkStart := start - context
     let chunkFrames := context + curChunk
-    let allCodes : Tensor { shape := #[batch, 16, st.totalFrames], dtype := .Int64, device := device } := Tensor.reshapeChecked st.codesDyn #[batch, 16, st.totalFrames]
+    let allCodes : Tensor { shape := #[batch, 16, st.totalFrames], dtype := .Int64, device := device } := Tensor.reshape st.codesDyn #[batch, 16, st.totalFrames]
     let codesChunk : Tensor { shape := #[batch, 16, chunkFrames], dtype := .Int64, device := device } := Tensor.sliceChecked allCodes 2 chunkStart chunkFrames #[batch, 16, chunkFrames]
     let wavChunk : Tensor { shape := #[batch, 1, chunkFrames * 1920], dtype := dtypes.compute.val, device := device } := decode m codesChunk
     let keepStart : Nat := context * 1920
@@ -863,7 +863,7 @@ def pushDecodeStream {batch newFrames : Nat}
     (newCodes : Tensor { shape := #[batch, 16, newFrames], dtype := .Int64, device := device })
     : DecodeStreamState (device := device) batch × Array (Sigma fun samples => Tensor { shape := #[batch, 1, samples], dtype := dtypes.compute.val, device := device }) :=
   Id.run do
-    let curCodes : Tensor { shape := #[batch, 16, st.totalFrames], dtype := .Int64, device := device } := Tensor.reshapeChecked st.codesDyn #[batch, 16, st.totalFrames]
+    let curCodes : Tensor { shape := #[batch, 16, st.totalFrames], dtype := .Int64, device := device } := Tensor.reshape st.codesDyn #[batch, 16, st.totalFrames]
     let allCodes : Tensor { shape := #[batch, 16, st.totalFrames + newFrames], dtype := .Int64, device := device } := Tensor.cat curCodes newCodes 2
     let mut st : DecodeStreamState (device := device) batch := {
       st with
@@ -901,8 +901,8 @@ def flushDecodeStream {batch : Nat}
 def decodeFrameMajor {frames : Nat}
     (m : (SpeechTokenizer12HzDecoder (device := device) (dtypes := dtypes)))
     (codes : Tensor { shape := #[frames, 16], dtype := .Int64, device := device }) : Tensor { shape := #[1, 1, frames * 1920], dtype := dtypes.compute.val, device := device } :=
-  let c0 : Tensor { shape := #[1, frames, 16], dtype := .Int64, device := device } := Tensor.reshapeChecked codes #[1, frames, 16]
-  let c1 : Tensor { shape := #[1, 16, frames], dtype := .Int64, device := device } := Tensor.reshapeChecked (Tensor.transpose c0 1 2) #[1, 16, frames]
+  let c0 : Tensor { shape := #[1, frames, 16], dtype := .Int64, device := device } := Tensor.reshape codes #[1, frames, 16]
+  let c1 : Tensor { shape := #[1, 16, frames], dtype := .Int64, device := device } := Tensor.reshape (Tensor.transpose c0 1 2) #[1, 16, frames]
   decode m c1
 
 /-- Chunked convenience decode for frame-major codec tensor `[frames, 16]`. -/
@@ -912,8 +912,8 @@ def decodeFrameMajorChunked {frames : Nat}
     (chunkSize : Nat := 300)
     (leftContextSize : Nat := 25)
     : Tensor { shape := #[1, 1, frames * 1920], dtype := dtypes.compute.val, device := device } :=
-  let c0 : Tensor { shape := #[1, frames, 16], dtype := .Int64, device := device } := Tensor.reshapeChecked codes #[1, frames, 16]
-  let c1 : Tensor { shape := #[1, 16, frames], dtype := .Int64, device := device } := Tensor.reshapeChecked (Tensor.transpose c0 1 2) #[1, 16, frames]
+  let c0 : Tensor { shape := #[1, frames, 16], dtype := .Int64, device := device } := Tensor.reshape codes #[1, frames, 16]
+  let c1 : Tensor { shape := #[1, 16, frames], dtype := .Int64, device := device } := Tensor.reshape (Tensor.transpose c0 1 2) #[1, 16, frames]
   decodeChunked m c1 chunkSize leftContextSize
 
 /-- Decode `[frames,16]` codec tensor and write mono WAV. -/

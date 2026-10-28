@@ -210,15 +210,15 @@ def forward {batch img_seq txt_seq : Nat} (cfg : FluxConfig)
 
   -- Extract image tokens
   let img_slice := sliceTyped x 1 txt_seq img_seq
-  let img_out := Tensor.reshapeChecked img_slice #[batch, img_seq, cfg.hidden_size]
+  let img_out := Tensor.reshape img_slice #[batch, img_seq, cfg.hidden_size]
 
   -- Final layer with modulation
   let mod := Tensor.silu vec
   let mod2 := Tensor.linear mod model.final_layer.modulation  -- [batch, hidden_size * 2]
   let shift_slice := sliceTyped mod2 1 0 cfg.hidden_size
   let scale_slice := sliceTyped mod2 1 cfg.hidden_size cfg.hidden_size
-  let scale := Tensor.reshapeChecked scale_slice #[batch, cfg.hidden_size]
-  let shift := Tensor.reshapeChecked shift_slice #[batch, cfg.hidden_size]
+  let scale := Tensor.reshape scale_slice #[batch, cfg.hidden_size]
+  let shift := Tensor.reshape shift_slice #[batch, cfg.hidden_size]
 
   let img_normed := model.final_layer.norm.forward3d img_out
   let img_modulated := applyModulation img_normed scale shift

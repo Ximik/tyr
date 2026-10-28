@@ -92,7 +92,7 @@ def main (args : List String) : IO UInt32 := do
   let seqToCF {modelDevice : Device} {batch seq channels : Nat}
       (x : Tensor { shape := #[batch, seq, channels], dtype := .Float32, device := modelDevice })
       : Tensor { shape := #[batch, channels, seq], dtype := .Float32, device := modelDevice } :=
-    Tensor.reshapeChecked (Tensor.transpose x 1 2) #[batch, channels, seq]
+    Tensor.reshape (Tensor.transpose x 1 2) #[batch, channels, seq]
 
   let log : torch.Log.Handlers := {
     onInfo := IO.println
@@ -109,7 +109,7 @@ def main (args : List String) : IO UInt32 := do
   let decoderStyle : Tensor { shape := #[1, bundle.cfg.styleDim], dtype := .Float32, device := modelDevice } := sliceTensor refStyle 1 0 bundle.cfg.styleDim
   let ids := bundle.inputIdsFromPhonemes phonemes
   let seq := ids.size
-  let inputIds0 : Tensor { shape := #[1, seq], dtype := .Int64, device := .CPU } := Tensor.reshapeChecked (Tensor.fromInt64Array (ids.map (·.toInt64))) #[1, seq]
+  let inputIds0 : Tensor { shape := #[1, seq], dtype := .Int64, device := .CPU } := Tensor.reshape (Tensor.fromInt64Array (ids.map (·.toInt64))) #[1, seq]
   let inputIds := inputIds0.to modelDevice
   let emb : Tensor { shape := #[1, seq, bundle.cfg.hiddenDim], dtype := .Float32, device := modelDevice } := Tensor.embedding inputIds bundle.model.textEncoder.embedding
   let mut convH : Tensor { shape := #[1, bundle.cfg.hiddenDim, seq], dtype := .Float32, device := modelDevice } := seqToCF emb

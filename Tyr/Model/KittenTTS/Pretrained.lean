@@ -205,13 +205,13 @@ def loadVoiceStyle (bundle : PretrainedBundle) (voice : String) (phonemeCount : 
     safetensors.loadTensorWithSpec voicePath "voice" ⟨#[510, 1, KittenTTSConfig.fullStyleDim bundle.cfg], .Float32⟩ bundle.device
   let idx := voiceIndexOfPhonemeCount phonemeCount
   let style : Tensor { shape := #[1, 1, KittenTTSConfig.fullStyleDim bundle.cfg], dtype := .Float32, device := bundle.device } := sliceTensor table 0 idx 1
-  pure (Tensor.reshapeChecked style #[1, KittenTTSConfig.fullStyleDim bundle.cfg])
+  pure (Tensor.reshape style #[1, KittenTTSConfig.fullStyleDim bundle.cfg])
 
 def synthesizePhonemes (bundle : PretrainedBundle) (phonemes : String) (voice : String) (speed : Float := 1.0)
     : IO (KittenTTSOutput (device := bundle.device)) := do
   let ids := bundle.inputIdsFromPhonemes phonemes
   let seq := ids.size
-  let inputIds : Tensor { shape := #[1, seq], dtype := .Int64, device := bundle.device } := (Tensor.reshapeChecked (Tensor.fromInt64Array (ids.map (·.toInt64))) #[1, seq]).to bundle.device
+  let inputIds : Tensor { shape := #[1, seq], dtype := .Int64, device := bundle.device } := (Tensor.reshape (Tensor.fromInt64Array (ids.map (·.toInt64))) #[1, seq]).to bundle.device
   let refStyle ← bundle.loadVoiceStyle voice phonemes.toList.length
   bundle.model.synthesizeIds inputIds refStyle speed
 
@@ -244,7 +244,7 @@ def predictPhonemeDurations (bundle : PretrainedBundle) (phonemes : String) (voi
     : IO KittenTTSDurationPrediction := do
   let ids := bundle.inputIdsFromPhonemes phonemes
   let seq := ids.size
-  let inputIds : Tensor { shape := #[1, seq], dtype := .Int64, device := bundle.device } := (Tensor.reshapeChecked (Tensor.fromInt64Array (ids.map (·.toInt64))) #[1, seq]).to bundle.device
+  let inputIds : Tensor { shape := #[1, seq], dtype := .Int64, device := bundle.device } := (Tensor.reshape (Tensor.fromInt64Array (ids.map (·.toInt64))) #[1, seq]).to bundle.device
   let refStyle ← bundle.loadVoiceStyle voice phonemes.toList.length
   bundle.model.predictDurations inputIds refStyle speed
 
@@ -252,7 +252,7 @@ def debugPhonemes (bundle : PretrainedBundle) (phonemes : String) (voice : Strin
     : IO (KittenTTSDebugOutput (device := bundle.device)) := do
   let ids := bundle.inputIdsFromPhonemes phonemes
   let seq := ids.size
-  let inputIds : Tensor { shape := #[1, seq], dtype := .Int64, device := bundle.device } := (Tensor.reshapeChecked (Tensor.fromInt64Array (ids.map (·.toInt64))) #[1, seq]).to bundle.device
+  let inputIds : Tensor { shape := #[1, seq], dtype := .Int64, device := bundle.device } := (Tensor.reshape (Tensor.fromInt64Array (ids.map (·.toInt64))) #[1, seq]).to bundle.device
   let refStyle ← bundle.loadVoiceStyle voice phonemes.toList.length
   bundle.model.debugSynthesizeIds inputIds refStyle speed
 

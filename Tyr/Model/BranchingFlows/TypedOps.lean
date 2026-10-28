@@ -79,7 +79,7 @@ def cosDynamic {s : Shape} {dev : Device} (x : Tensor { dtype := dtype, shape :=
 
 def affine2d {batch input output : Nat} {dev : Device} (x : Tensor { dtype := dtype, shape := #[batch, input], device := dev })
     (w : Tensor { dtype := dtype, shape := #[output, input], device := dev }) (bias : Tensor { dtype := dtype, shape := #[output], device := dev }) : Tensor { dtype := dtype, shape := #[batch, output], device := dev } :=
-  Tensor.add (Tensor.linear x w) ((bias.reshapeChecked #[1, output]).expand #[batch, output])
+  Tensor.add (Tensor.linear x w) ((bias.reshape #[1, output]).expand #[batch, output])
 
 def transposeAttention {b s h d : Nat} {dev : Device} (x : Tensor { dtype := dtype, shape := #[b, s, h, d], device := dev }) : Tensor { dtype := dtype, shape := #[b, h, s, d], device := dev } :=
   x.transpose 1 2

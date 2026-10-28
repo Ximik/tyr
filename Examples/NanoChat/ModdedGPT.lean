@@ -271,9 +271,9 @@ def CausalSelfAttention.forward {batch seq dim headDim numHeads rotaryLen : Nat}
       vBase
 
   -- Reshape to [batch, seq, numHeads, headDim] for rotary/attention
-  let q := Tensor.reshapeChecked q #[batch, seq, numHeads, headDim]
-  let k := Tensor.reshapeChecked k #[batch, seq, numHeads, headDim]
-  let v := Tensor.reshapeChecked v #[batch, seq, numHeads, headDim]
+  let q := Tensor.reshape q #[batch, seq, numHeads, headDim]
+  let k := Tensor.reshape k #[batch, seq, numHeads, headDim]
+  let v := Tensor.reshape v #[batch, seq, numHeads, headDim]
 
   -- Slice rotary embeddings to seq length (cos/sin are [rotaryLen, headDim])
   let cos := Tensor.sliceChecked yarn.cos 0 0 seq #[seq, headDim / 2]
@@ -302,7 +302,7 @@ def CausalSelfAttention.forward {batch seq dim headDim numHeads rotaryLen : Nat}
   let attnOut := Tensor.joinHeads attnOut
 
   -- Reshape to [batch, seq, numHeads * headDim] and project
-  let attnOut := Tensor.reshapeChecked attnOut #[batch, seq, numHeads * headDim]
+  let attnOut := Tensor.reshape attnOut #[batch, seq, numHeads * headDim]
   let output := Tensor.linear3d attnOut attn.wO
 
   output
@@ -410,7 +410,7 @@ def Scalars.init (nLayer : Nat) (device : Device := .CPU) : IO (Scalars (device 
 /-- Extract scalar tensor at `idx` from a 1D tensor. -/
 private def scalarAt {n : Nat} (values : Tensor { shape := #[n], dtype := .Float32, device := device }) (idx : Nat) : Tensor { shape := #[], dtype := .Float32, device := device } :=
   let oneElem : Tensor { shape := #[1], dtype := .Float32, device := device } := Tensor.sliceChecked values 0 idx 1 #[1]
-  Tensor.reshapeChecked oneElem #[]
+  Tensor.reshape oneElem #[]
 
 /-- Extract scalar at `idx` and squash to (0, 1). -/
 private def scalarSigmoidAt {n : Nat} (values : Tensor { shape := #[n], dtype := .Float32, device := device }) (idx : Nat) : Tensor { shape := #[], dtype := .Float32, device := device } :=
@@ -604,8 +604,8 @@ def loss {cfg : Config} {batch seq : Nat}
     : IO (Tensor { shape := #[], dtype := .Float32, device := device }) := do
   let logits ← forward params yarn inputSeq training
   -- Reshape for cross-entropy: (batch*seq, vocab) vs (batch*seq,)
-  let logitsFlat := Tensor.reshapeChecked logits #[batch * seq, cfg.vocabSize]
-  let targetsFlat := Tensor.reshapeChecked targets #[batch * seq]
+  let logitsFlat := Tensor.reshape logits #[batch * seq, cfg.vocabSize]
+  let targetsFlat := Tensor.reshape targets #[batch * seq]
   IO.ofExcept (Tensor.crossEntropy? logitsFlat targetsFlat)
 
 

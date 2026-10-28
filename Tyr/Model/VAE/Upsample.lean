@@ -35,7 +35,7 @@ def forward {batch channels height width : Nat}
     : Tensor { dtype := dtype, device := device, shape := #[batch, channels, height * 2, width * 2] } :=
   -- 2× nearest-neighbor upsample
   let x_up := upsample2 x
-  let x_up := Tensor.reshapeChecked x_up #[batch, channels, height * 2, width * 2]
+  let x_up := Tensor.reshape x_up #[batch, channels, height * 2, width * 2]
 
   -- 3×3 conv with padding=1 to maintain size
   let out := Tensor.conv2dBias x_up up.conv.weight up.conv.bias #[1, 1] #[1, 1]

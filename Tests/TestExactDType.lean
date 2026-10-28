@@ -56,7 +56,7 @@ private def alignDType {shape : Shape} {device : Device}
   pure (same.symm ▸ right.2)
 
 @[test] def testExactDTypeEqualityBeforeSharedDTypeUse : IO Unit := do
-  let source := (Tensor.fromFloatArray #[1, 2, 3, 4]).reshapeChecked #[2, 2]
+  let source := (Tensor.fromFloatArray #[1, 2, 3, 4]).reshape #[2, 2]
   let left ← IO.ofExcept source.reifyDType
   let right ← IO.ofExcept source.reifyDType
   let aligned ← IO.ofExcept (alignDType left right)

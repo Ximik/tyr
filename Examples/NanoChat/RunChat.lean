@@ -235,13 +235,13 @@ private def sampleNextToken {cfg : Config}
     throw <| IO.userError "Cannot decode from an empty prompt."
 
   let inputTensor := Tensor.fromInt64Array (context.map (·.toInt64))
-  let inputReshaped := (inputTensor.reshapeChecked #[1, context.size]).to device
+  let inputReshaped := (inputTensor.reshape #[1, context.size]).to device
   let logits ← moddedGpt.forward params yarn inputReshaped false
 
   -- Keep the final time step, then view its logits as one sampling row.
   let lastLogits := Tensor.sliceChecked logits 1 (context.size - 1) 1
     #[1, 1, cfg.vocabSize]
-  let rowLogits := lastLogits.reshapeChecked #[1, cfg.vocabSize]
+  let rowLogits := lastLogits.reshape #[1, cfg.vocabSize]
   let scaled :=
     if temperature == 1.0 then rowLogits
     else Tensor.mulScalar rowLogits (1.0 / temperature)
@@ -250,7 +250,7 @@ private def sampleNextToken {cfg : Config}
     else Tensor.topKFilter scaled topK
   let probs := Tensor.softmax filtered (-1)
   let sampled ← Tensor.multinomial probs 1
-  pure (Tensor.itemInt (sampled.reshapeChecked #[])).toUInt64
+  pure (Tensor.itemInt (sampled.reshape #[])).toUInt64
 
 private def promptWithMarkers (markers : ChatMarkerIds) (base : Array UInt64) (prompt : Array UInt64)
     : Array UInt64 :=

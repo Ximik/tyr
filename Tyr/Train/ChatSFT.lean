@@ -211,8 +211,7 @@ def maskedCrossEntropy {batch seq vocab : Nat} {d m result : DType} {dev : Devic
 
 /-! ## Data Preparation -/
 
-/-- Build an Int64 token tensor from host data over the raw FFI boundary.
-    `reshapeChecked` validates the result metadata (shape and Int64 dtype). -/
+/-- Build an Int64 token tensor from host data over the raw FFI boundary. -/
 private def int64TensorFromArray (arr : Array Int64) : Tensor { shape := #[arr.size], dtype := .Int64, device := .CPU } :=
   Tensor.fromInt64Array arr
 

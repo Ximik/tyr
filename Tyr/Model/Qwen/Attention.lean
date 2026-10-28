@@ -193,9 +193,9 @@ def forward {batch seq hidden_size num_heads num_kv_heads head_dim : Nat}
   let v := Tensor.linear3d x attn.v_proj  -- [batch, seq, num_kv_heads * head_dim]
 
   -- Reshape to [batch, seq, num_heads, head_dim]
-  let q := q.reshapeChecked #[batch, seq, num_heads, head_dim]
-  let k := k.reshapeChecked #[batch, seq, num_kv_heads, head_dim]
-  let v := v.reshapeChecked #[batch, seq, num_kv_heads, head_dim]
+  let q := q.reshape #[batch, seq, num_heads, head_dim]
+  let k := k.reshape #[batch, seq, num_kv_heads, head_dim]
+  let v := v.reshape #[batch, seq, num_kv_heads, head_dim]
 
   -- Apply Q/K norms if present (Flux Klein text encoder has these)
   let q := match attn.q_norm with
@@ -221,7 +221,7 @@ def forward {batch seq hidden_size num_heads num_kv_heads head_dim : Nat}
   let attn_out := transposeFromAttention attn_out
 
   -- Reshape to [batch, seq, hidden_size]
-  let attn_out := attn_out.reshapeChecked #[batch, seq, num_heads * head_dim]
+  let attn_out := attn_out.reshape #[batch, seq, num_heads * head_dim]
 
   -- Output projection
   Tensor.linear3d attn_out attn.o_proj
@@ -248,9 +248,9 @@ def forwardStep {batch hidden_size num_heads num_kv_heads head_dim : Nat}
   let k0 := Tensor.linear3d x attn.k_proj
   let v0 := Tensor.linear3d x attn.v_proj
 
-  let q := q0.reshapeChecked #[batch, 1, num_heads, head_dim]
-  let k := k0.reshapeChecked #[batch, 1, num_kv_heads, head_dim]
-  let v := v0.reshapeChecked #[batch, 1, num_kv_heads, head_dim]
+  let q := q0.reshape #[batch, 1, num_heads, head_dim]
+  let k := k0.reshape #[batch, 1, num_kv_heads, head_dim]
+  let v := v0.reshape #[batch, 1, num_kv_heads, head_dim]
 
   -- Apply optional per-head Q/K normalization.
   let q := match attn.q_norm with
@@ -288,7 +288,7 @@ def forwardStep {batch hidden_size num_heads num_kv_heads head_dim : Nat}
       else
         sdpaGQAQKV qh kAll vAll false true
     let attnOut := transposeFromAttention attnOut
-    let attnOut := attnOut.reshapeChecked #[batch, 1, num_heads * head_dim]
+    let attnOut := attnOut.reshape #[batch, 1, num_heads * head_dim]
     let out := Tensor.linear3d attnOut attn.o_proj
 
     let cache' : KVCache (device := device) batch num_kv_heads head_dim dtype := {
@@ -315,7 +315,7 @@ def forwardStep {batch hidden_size num_heads num_kv_heads head_dim : Nat}
       else
         sdpaGQAQKV qh kAll vAll false true
     let attnOut := transposeFromAttention attnOut
-    let attnOut := attnOut.reshapeChecked #[batch, 1, num_heads * head_dim]
+    let attnOut := attnOut.reshape #[batch, 1, num_heads * head_dim]
     let out := Tensor.linear3d attnOut attn.o_proj
     let cache' : KVCache (device := device) batch num_kv_heads head_dim dtype := {
       kStoreDyn := ⟨_, kStore'⟩
@@ -340,9 +340,9 @@ def forwardMasked {batch seq hidden_size num_heads num_kv_heads head_dim : Nat}
   let v := Tensor.linear3d x attn.v_proj  -- [batch, seq, num_kv_heads * head_dim]
 
   -- Reshape to [batch, seq, num_heads, head_dim]
-  let q := q.reshapeChecked #[batch, seq, num_heads, head_dim]
-  let k := k.reshapeChecked #[batch, seq, num_kv_heads, head_dim]
-  let v := v.reshapeChecked #[batch, seq, num_kv_heads, head_dim]
+  let q := q.reshape #[batch, seq, num_heads, head_dim]
+  let k := k.reshape #[batch, seq, num_kv_heads, head_dim]
+  let v := v.reshape #[batch, seq, num_kv_heads, head_dim]
 
   -- Apply Q/K norms if present (Flux Klein text encoder has these)
   let q := match attn.q_norm with
@@ -368,7 +368,7 @@ def forwardMasked {batch seq hidden_size num_heads num_kv_heads head_dim : Nat}
   let attn_out := transposeFromAttention attn_out
 
   -- Reshape to [batch, seq, hidden_size]
-  let attn_out := attn_out.reshapeChecked #[batch, seq, num_heads * head_dim]
+  let attn_out := attn_out.reshape #[batch, seq, num_heads * head_dim]
 
   -- Output projection
   Tensor.linear3d attn_out attn.o_proj

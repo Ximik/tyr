@@ -35,11 +35,11 @@ private def close {σ τ : StaticSpec} (x : Tensor σ) (y : Tensor τ) (tol : Fl
   LeanTest.assertEqual (← text.toUInt64Array) #[0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 2]
 
 @[test] def testFluxRotaryReferenceAndDType : IO Unit := do
-  let ids := (Tensor.fromInt64Array #[1, 0, 0, 0]).reshapeChecked #[1, 1, 4]
+  let ids := (Tensor.fromInt64Array #[1, 0, 0, 0]).reshape #[1, 1, 4]
   let pe := ropeEmbed (head_dim := 8) ids #[2, 2, 2, 2]
   let c := Float.cos 1
   let s := Float.sin 1
-  let expected := (Tensor.fromFloatArray #[c - s, s + c, 1, 1, 1, 1, 1, 1]).reshapeChecked #[1, 1, 1, 8]
+  let expected := (Tensor.fromFloatArray #[c - s, s + c, 1, 1, 1, 1, 1, 1]).reshape #[1, 1, 1, 8]
   close (applyRope ((Tensor.ones #[1, 1, 1, 8])) pe) expected
   let x := (Tensor.ones #[1, 1, 1, 8]).toBFloat16
   let y := applyRope x pe
@@ -51,7 +51,7 @@ private def close {σ τ : StaticSpec} (x : Tensor σ) (y : Tensor τ) (tol : Fl
   let y := timestepEmbedding t 5
   let expected := Tensor.fromFloatArray #[1, 1, 0, 0, 0,
     Float.cos 1, Float.cos 0.01, Float.sin 1, Float.sin 0.01, 0]
-  close y (expected.reshapeChecked #[2, 5])
+  close y (expected.reshape #[2, 5])
 
 @[test] def testFluxForwardAndDenoiseDTypes : IO Unit := do
   let initial ← FluxModel.init cfg

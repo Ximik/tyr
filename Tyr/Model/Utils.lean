@@ -50,7 +50,7 @@ def dequantizeFP8 {outDim inDim : Nat} {weightDType scaleDType : DType}
   let w := weight.toFloat32
   let s := scaleInv.toFloat32
   let w := w.reshapeChecked #[outBlocks, 128, inBlocks, 128]
-  let s := s.reshapeChecked #[outBlocks, 1, inBlocks, 1]
+  let s := s.reshape #[outBlocks, 1, inBlocks, 1]
   let s := s.expand #[outBlocks, 128, inBlocks, 128]
   let w := w * s
   w.reshapeChecked #[outDim, inDim]
@@ -66,7 +66,7 @@ def dequantizeFP8Experts {experts outDim inDim : Nat} {weightDType scaleDType : 
   let w := weight.toFloat32
   let s := scaleInv.toFloat32
   let w := w.reshapeChecked #[experts, outBlocks, 128, inBlocks, 128]
-  let s := s.reshapeChecked #[experts, outBlocks, 1, inBlocks, 1]
+  let s := s.reshape #[experts, outBlocks, 1, inBlocks, 1]
   let s := s.expand #[experts, outBlocks, 128, inBlocks, 128]
   let w := w * s
   w.reshapeChecked #[experts, outDim, inDim]

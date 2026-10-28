@@ -326,9 +326,7 @@ def renderConversation
 
 /-! ## Batch Collation -/
 
-/-- Build an Int64 token tensor from host data over the raw FFI boundary.
-    The runtime shape is the array length; `reshapeChecked` validates the
-    result metadata (shape and Int64 dtype) against the static spec. -/
+/-- Build an Int64 token tensor from host data over the raw FFI boundary. -/
 private def int64TensorFromArray (arr : Array Int64) : Tensor { shape := #[arr.size], dtype := .Int64, device := .CPU } :=
   Tensor.fromInt64Array arr
 

@@ -39,7 +39,7 @@ example (_packed : SomeDTypeTensor #[2] .CPU) : True := by
 @[test] def testExactSafeTensorsRejectsStoredLayoutMismatch : IO Unit :=
     IO.FS.withTempDir fun dir => do
   let path := (dir / "layout.safetensors").toString
-  let source := (Tensor.fromFloatArray #[1, 2, 3, 4, 5, 6]).reshapeChecked #[2, 3]
+  let source := (Tensor.fromFloatArray #[1, 2, 3, 4, 5, 6]).reshape #[2, 3]
   source.saveSafeTensor path "weight"
   Tests.assertThrows (safetensors.loadTensorExact path "weight" #[3, 2])
     (some "Expected shape")
@@ -81,7 +81,7 @@ example (_packed : SomeDTypeTensor #[2] .CPU) : True := by
 
 @[test] def testExactDTypeFP8DequantizationKeepsIndependentScaleDType : IO Unit := do
   let weight := (Tensor.ones #[128, 128]).castDType .Float8E4M3FN
-  let scale := (Tensor.fromFloatArray #[2]).reshapeChecked #[1, 1]
+  let scale := (Tensor.fromFloatArray #[2]).reshape #[1, 1]
   let result : Tensor ⟨#[128, 128], .Float32, .CPU⟩ := Model.dequantizeFP8 weight scale
   LeanTest.assertEqual (Tensor.sumAll result).item 32768
   LeanTest.assertEqual weight.raw.dtype .Float8E4M3FN

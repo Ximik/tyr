@@ -9,7 +9,7 @@ open torch
 @[test] def testShapePackedTensorTraversalAndCheckpoint : IO Unit := IO.FS.withTempDir fun dir => do
   let values : Array (ShapePackedTensor .Float32 .CPU) := #[
     (Tensor.fromFloatArray #[1, 2]).packShape,
-    ((Tensor.fromFloatArray #[3, 4, 5, 6]).reshapeChecked #[2, 2]).packShape ]
+    ((Tensor.fromFloatArray #[3, 4, 5, 6]).reshape #[2, 2]).packShape ]
   let mapped := FloatingTensorStruct.map (fun t => Tensor.addScalar t 1) values
   let moved ← TensorStruct.mapM (fun t => pure (t.to t.device)) mapped
   let shapes := TensorStruct.fold (fun t acc => acc.push t.runtimeShape) #[] moved
@@ -24,7 +24,7 @@ open torch
     LeanTest.assertEqual (← loaded[i]!.2.toFloatArray) (← summed[i]!.2.toFloatArray)
 
 @[test] def testKittenSignedCumsumBoundary : IO Unit := do
-  let input := (Tensor.fromFloatArray #[1, 2, 3, 4, 5, 6]).reshapeChecked #[2, 3]
+  let input := (Tensor.fromFloatArray #[1, 2, 3, 4, 5, 6]).reshape #[2, 3]
   let output := kittentts.cumsumTensor input (-1)
   LeanTest.assertEqual (← output.toFloatArray) #[1, 3, 6, 4, 9, 15]
 

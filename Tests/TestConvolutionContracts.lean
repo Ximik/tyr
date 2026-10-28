@@ -72,7 +72,7 @@ def testConvolutionMetadataFailureIsRecoverable : IO Unit := do
 
 @[test]
 def testConvolutionArgumentsAreRecoverable : IO Unit := do
-  let line := (Tensor.fromFloatArray #[1, 2, 3]).reshapeChecked #[1, 1, 3]
+  let line := (Tensor.fromFloatArray #[1, 2, 3]).reshape #[1, 1, 3]
   let kernel := Tensor.ones #[1, 1, 2]
   let bias := Tensor.zeros #[1]
   expectError (Tensor.conv1d? line kernel (stride := 0))
@@ -82,7 +82,7 @@ def testConvolutionArgumentsAreRecoverable : IO Unit := do
   expectError (Tensor.conv1dGroups? line kernel bias (groups := 2))
   expectError (Tensor.convTranspose1d? line kernel bias (stride := 0))
   expectError (Tensor.convTranspose1d? line kernel bias (stride := 2) (outputPadding := 2))
-  let image := (Tensor.fromFloatArray #[1, 2, 3, 4, 5, 6, 7, 8, 9]).reshapeChecked #[1, 1, 3, 3]
+  let image := (Tensor.fromFloatArray #[1, 2, 3, 4, 5, 6, 7, 8, 9]).reshape #[1, 1, 3, 3]
   let square := Tensor.ones #[1, 1, 2, 2]
   expectError (Tensor.conv2dBias? image square bias (stride := #[0, 1]))
   expectError (Tensor.conv2dBias? image square bias (stride := #[1, 1, 1]))
@@ -94,12 +94,12 @@ def testConvolutionArgumentsAreRecoverable : IO Unit := do
   let imageResult ← checked (Tensor.conv2dBias? image square (Tensor.full #[1] 0.5))
   LeanTest.assertEqual imageResult.runtimeShape #[1, 1, 2, 2]
   LeanTest.assertEqual (← imageResult.toFloatArray) #[12.5, 16.5, 24.5, 28.5]
-  let groupedInput := (Tensor.fromFloatArray #[1, 2, 3, 4, 5, 6]).reshapeChecked #[1, 2, 3]
-  let groupedWeight := (Tensor.fromFloatArray #[2, 3]).reshapeChecked #[2, 1, 1]
+  let groupedInput := (Tensor.fromFloatArray #[1, 2, 3, 4, 5, 6]).reshape #[1, 2, 3]
+  let groupedWeight := (Tensor.fromFloatArray #[2, 3]).reshape #[2, 1, 1]
   let grouped ← checked (Tensor.conv1dGroups? groupedInput groupedWeight (Tensor.zeros #[2]) (groups := 2))
   LeanTest.assertEqual grouped.runtimeShape #[1, 2, 3]
   LeanTest.assertEqual (← grouped.toFloatArray) #[2, 4, 6, 12, 15, 18]
-  let short := (Tensor.fromFloatArray #[1, 2]).reshapeChecked #[1, 1, 2]
+  let short := (Tensor.fromFloatArray #[1, 2]).reshape #[1, 1, 2]
   let expanded ← checked (Tensor.convTranspose1d? short short bias (stride := 2))
   LeanTest.assertEqual expanded.runtimeShape #[1, 1, 4]
   LeanTest.assertEqual (← expanded.toFloatArray) #[1, 2, 2, 4]
@@ -126,7 +126,7 @@ def testConvolutionSingletonSpatialParameters : IO Unit := do
 
 @[test]
 def testCheckedConvolutionRetainsComplexDType : IO Unit := do
-  let input := ((Tensor.fromFloatArray #[1, 2, 3]).reshapeChecked #[1, 1, 3]).castDType .Complex64
+  let input := ((Tensor.fromFloatArray #[1, 2, 3]).reshape #[1, 1, 3]).castDType .Complex64
   let weight := (Tensor.ones #[1, 1, 2]).castDType .Complex64
   let output ← checked (Tensor.conv1d? input weight)
   LeanTest.assertEqual output.raw.dtype .Complex64
