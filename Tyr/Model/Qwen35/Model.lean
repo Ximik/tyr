@@ -443,7 +443,6 @@ def forwardWithCache {batch seq cap : Nat}
   let cache' : KVCache (dtype := dtype) (device := device) cfg batch cap := { cache with
     kStore := kStore'
     vStore := vStore'
-    seq := seq
   }
 
   let qh : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, seq, cfg.head_dim], dtype := dtype } := Tensor.splitHeads q
@@ -549,7 +548,6 @@ def forwardStep {batch cap : Nat}
     cap_pos := cache.cap_pos
     kStore := kStore'
     vStore := vStore'
-    seq := kvLen
   }
   (out, cache')
 
