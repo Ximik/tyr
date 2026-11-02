@@ -274,6 +274,14 @@ def testTypedRuntimeShapeResults : IO Unit := do
   assertValid (matrix.sumDim 1) "runtime axis reduction"
   assertValid ((Tensor.ones #[1, 3]).expand #[2, 3]) "runtime expansion"
   assertValid (matrix.argmax 1) "runtime argmax axis"
+  LeanTest.assertTrue (Tensor.allclose matrix.softmax (matrix.softmax 1))
+    "softmax defaults to the last axis"
+  LeanTest.assertTrue (!Tensor.allclose matrix.softmax (matrix.softmax 0))
+    "softmax axes 0 and 1 differ on a 2x3 matrix"
+  LeanTest.assertTrue (Tensor.allclose matrix.logSoftmax (matrix.logSoftmax 1))
+    "logSoftmax defaults to the last axis"
+  LeanTest.assertEqual (← (matrix.cat matrix 1).toFloatArray) #[1, 2, 3, 1, 2, 3, 4, 5, 6, 4, 5, 6]
+  LeanTest.assertEqual (← (matrix.permute #[1, 0]).toFloatArray) #[1, 4, 2, 5, 3, 6]
   -- Exercise the same checked paths as the pure conveniences, with errors
   -- available explicitly without invoking the pure panic fallback.
   match matrix.expand? #[2, 18446744073709551615] with
