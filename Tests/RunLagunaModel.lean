@@ -348,8 +348,10 @@ private def runBf16AttentionCacheParity {numHeads rotaryDim cap : Nat}
   let inputsPre : Tensor { shape := #[1, 12, cfg.hidden_size], device := device, dtype := .BFloat16 } := sliceTyped inputs 1 0 12
   let cosPre : Tensor { shape := #[12, rotaryDim / 2], dtype := .Float32, device := device } := sliceTyped cos 0 0 12
   let sinPre : Tensor { shape := #[12, rotaryDim / 2], dtype := .Float32, device := device } := sliceTyped sin 0 0 12
+  let ⟨hfit⟩ ← if h : 12 ≤ cap then pure (PLift.up h) else
+    throw <| IO.userError s!"attention cache capacity {cap} cannot hold the 12-token prefix"
   let (prefill, initialCache) := attention.forwardWithCache
-    (rotaryDim := rotaryDim) cfg inputsPre cosPre sinPre window fresh
+    (rotaryDim := rotaryDim) cfg inputsPre cosPre sinPre window fresh hfit
   let expectedPre : Tensor { shape := #[1, 12, cfg.hidden_size], device := device, dtype := .BFloat16 } := sliceTyped fullOutput 1 0 12
   let preStats ← mixedErrorStats (prefill) (expectedPre)
   reportMixedErrors preStats s!"(a) [{lbl}] attention prefill"

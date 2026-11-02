@@ -268,6 +268,7 @@ def forwardWithCache {batch seq rotaryDim numHeads cap : Nat}
     (sin : Tensor { device := device, shape := #[seq, rotaryDim / 2], dtype := .Float32 })
     (window : Option Nat)
     (cache : KVCache (device := device) (dtype := dtype) cfg batch cap)
+    (hfit : seq ≤ cap)
     : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] } × KVCache (device := device) (dtype := dtype) cfg batch cap :=
   let (q, k, v) := qkvRope cfg m x cos sin
   let qh : Tensor { dtype := dtype, device := device, shape := #[batch, numHeads, seq, cfg.head_dim] } := transposeAttention q
@@ -304,7 +305,7 @@ def forwardStep {batch rotaryDim numHeads cap : Nat}
     (sin : Tensor { device := device, shape := #[1, rotaryDim / 2], dtype := .Float32 })
     (window : Option Nat)
     (cache : KVCache (device := device) (dtype := dtype) cfg batch cap)
-    (pos : Nat) (_hpos : pos < cap)
+    (pos : Nat) (hpos : pos < cap)
     : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.hidden_size] } × KVCache (device := device) (dtype := dtype) cfg batch cap :=
   let (q, k, v) := qkvRope cfg m x cos sin
   let qh : Tensor { dtype := dtype, device := device, shape := #[batch, numHeads, 1, cfg.head_dim] } := transposeAttention q
@@ -325,8 +326,9 @@ def forwardStep {batch rotaryDim numHeads cap : Nat}
     | some w => if kvLen > w then w else kvLen
     | none => kvLen
   let start : Nat := kvLen - useLen
-  let kAll : Tensor { dtype := dtype, device := device, shape := #[batch, cfg.num_key_value_heads, useLen, cfg.head_dim] } := sliceTyped kStore' 2 start useLen
-  let vAll : Tensor { dtype := dtype, device := device, shape := #[batch, cfg.num_key_value_heads, useLen, cfg.head_dim] } := sliceTyped vStore' 2 start useLen
+  have _hUse : useLen ≤ kvLen := by simp only [useLen]; split <;> (try split) <;> omega
+  let kAll : Tensor { dtype := dtype, device := device, shape := #[batch, cfg.num_key_value_heads, useLen, cfg.head_dim] } := kStore'.slice 2 start useLen
+  let vAll : Tensor { dtype := dtype, device := device, shape := #[batch, cfg.num_key_value_heads, useLen, cfg.head_dim] } := vStore'.slice 2 start useLen
   -- Every retained key is attendable. Rectangular SDPA must be non-causal:
   -- its causal mode is upper-left aligned and would expose only key zero.
   let attn : Tensor { dtype := dtype, device := device, shape := #[batch, numHeads, 1, cfg.head_dim] } :=
@@ -380,8 +382,8 @@ private def forwardOwned {batch seq rotaryDim numHeads cap : Nat}
       | none => Tensor.attentionGQA qh kh vh true true
     else
       let useLen := min total cap
-      let kAll := sliceTyped kStore 2 0 useLen
-      let vAll := sliceTyped vStore 2 0 useLen
+      let kAll := kStore.slice 2 0 useLen
+      let vAll := vStore.slice 2 0 useLen
       Tensor.attentionGQAQKV qh kAll vAll false true
   let out := gateAndOut cfg m x (transposeAttention attn)
   return (out, {
@@ -577,16 +579,20 @@ def forwardWithCache {batch seq : Nat}
   let h1 := rmsNormWeighted3d layer.input_layernorm x cfg.rms_norm_eps
   let (mixed, cache') ←
     match layer.attnFull, layer.attnSliding, cache.kvCaches[layerIdx]? with
-    | some a, _, some ⟨n, kv⟩ =>
+    | some a, _, some ⟨n, kv⟩ => do
+      let ⟨hfit⟩ ← if h : seq ≤ n then pure (PLift.up h) else
+        throw <| IO.userError s!"Laguna layer {layerIdx} cache capacity {n} cannot hold {seq} prompt tokens"
       let cos : Tensor { device := device, shape := #[seq, cfg.rotaryDimFull / 2], dtype := .Float32 } := sliceRotaryRows tables.fullCos 0 seq
       let sin : Tensor { device := device, shape := #[seq, cfg.rotaryDimFull / 2], dtype := .Float32 } := sliceRotaryRows tables.fullSin 0 seq
-      let (out, kv') := a.forwardWithCache (rotaryDim := cfg.rotaryDimFull) cfg h1 cos sin none kv
+      let (out, kv') := a.forwardWithCache (rotaryDim := cfg.rotaryDimFull) cfg h1 cos sin none kv hfit
       pure (out, { cache with kvCaches := cache.kvCaches.set! layerIdx ⟨n, kv'⟩ })
-    | _, some a, some ⟨n, kv⟩ =>
+    | _, some a, some ⟨n, kv⟩ => do
+      let ⟨hfit⟩ ← if h : seq ≤ n then pure (PLift.up h) else
+        throw <| IO.userError s!"Laguna layer {layerIdx} cache capacity {n} cannot hold {seq} prompt tokens"
       let cos : Tensor { device := device, shape := #[seq, cfg.rotaryDimSliding / 2], dtype := .Float32 } := sliceRotaryRows tables.slidingCos 0 seq
       let sin : Tensor { device := device, shape := #[seq, cfg.rotaryDimSliding / 2], dtype := .Float32 } := sliceRotaryRows tables.slidingSin 0 seq
       let (out, kv') :=
-        a.forwardWithCache (rotaryDim := cfg.rotaryDimSliding) cfg h1 cos sin (some cfg.sliding_window) kv
+        a.forwardWithCache (rotaryDim := cfg.rotaryDimSliding) cfg h1 cos sin (some cfg.sliding_window) kv hfit
       pure (out, { cache with kvCaches := cache.kvCaches.set! layerIdx ⟨n, kv'⟩ })
     | _, _, _ => pure (h1, cache)
   let h2 := Tensor.add x mixed

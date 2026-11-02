@@ -231,7 +231,7 @@ def getLeading {n : Nat} (x : DTensor #[n + 1, 3] .Float32) :=
   x.getOp 0
 
 def sliceScatterGeneric {b h c d : Nat} (store : DTensor #[b, h, c, d] .Float32)
-    (row : DTensor #[b, h, 1, d] .Float32) (pos : Nat) : DTensor #[b, h, c, d] .Float32 :=
+    (row : DTensor #[b, h, 1, d] .Float32) (pos : Nat) (_hpos : pos < c) : DTensor #[b, h, c, d] .Float32 :=
   Tensor.sliceScatter store 2 pos row
 
 set_option linter.unusedVariables false in

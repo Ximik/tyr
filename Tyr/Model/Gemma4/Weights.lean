@@ -81,6 +81,8 @@ private def pad1dTo {srcDim dstDim : Nat} {dt : DType}
     (x : Tensor ⟨#[srcDim], dt, device⟩) : IO (Tensor ⟨#[dstDim], dt, device⟩) := do
   let support ← dt.acquireConstantSupport device
   let _ := support.down
+  let ⟨_hFit⟩ ← if h : srcDim ≤ dstDim then pure (PLift.up h) else
+    throw <| IO.userError s!"Gemma4 weight of size {srcDim} does not fit its padded size {dstDim}"
   let base := Tensor.zerosFor ⟨#[dstDim], dt, device⟩
   pure (Tensor.sliceScatter base 0 0 x)
 
@@ -89,6 +91,8 @@ private def pad2dTo {srcRows srcCols dstRows dstCols : Nat} {dt : DType}
     IO (Tensor ⟨#[dstRows, dstCols], dt, device⟩) := do
   let support ← dt.acquireConstantSupport device
   let _ := support.down
+  let ⟨_hFit⟩ ← if h : srcRows ≤ dstRows ∧ srcCols ≤ dstCols then pure (PLift.up h) else
+    throw <| IO.userError s!"Gemma4 weight of shape {srcRows}x{srcCols} does not fit its padded shape {dstRows}x{dstCols}"
   let columns := Tensor.zerosFor ⟨#[srcRows, dstCols], dt, device⟩
   let rows := Tensor.zerosFor ⟨#[dstRows, dstCols], dt, device⟩
   let colsPadded := Tensor.sliceScatter columns 1 0 x

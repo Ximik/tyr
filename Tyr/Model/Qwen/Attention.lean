@@ -144,9 +144,11 @@ private def sliceScatterAlong {s srcShape : Shape} {d : DType} {dev : Device}
     (input : Tensor ⟨s, d, dev⟩) (dim : Nat) (start : Nat)
     (src : Tensor ⟨srcShape, d, dev⟩)
     (h : TensorSpec.sliceScatterCompatible s srcShape dim = true := by
-      first | exact of_decide_eq_true rfl | (simp <;> fail "incompatible slice scatter shapes")) :
+      first | exact of_decide_eq_true rfl | (simp <;> fail "incompatible slice scatter shapes"))
+    (bound : start + srcShape.getD dim 0 ≤ s.getD dim 0 := by
+      first | exact of_decide_eq_true rfl | omega | (simp <;> omega)) :
     Tensor ⟨s, d, dev⟩ :=
-  Tensor.sliceScatter input dim start src h
+  Tensor.sliceScatter input dim start src h bound
 
 /-- Mean over one axis with the result shape validated at runtime. -/
 private def meanDimTo {s : Shape} {d : DType} {dev : Device}
@@ -230,7 +232,7 @@ def forwardStep {batch hidden_size num_heads num_kv_heads head_dim cap : Nat}
     (cos : Tensor { device := device, shape := #[1, head_dim / 2], dtype := .Float32 })
     (sin : Tensor { device := device, shape := #[1, head_dim / 2], dtype := .Float32 })
     (cache : KVCache (device := device) batch num_kv_heads head_dim cap dtype)
-    (pos : Nat) (_hpos : pos < cap)
+    (pos : Nat) (hpos : pos < cap)
     (useTyrFlashAttn : Bool := false)
     : Tensor { device := device, shape := #[batch, 1, hidden_size], dtype := dtype } × KVCache (device := device) batch num_kv_heads head_dim cap dtype :=
   -- Project current token to Q/K/V.
@@ -267,8 +269,10 @@ def forwardStep {batch hidden_size num_heads num_kv_heads head_dim cap : Nat}
   let kStore' := sliceScatterAlong kStore 2 pos kNew
   let vStore' := sliceScatterAlong vStore 2 pos vNew
   let kvLen : Nat := pos + 1
-  let kAll := kStore'.sliceChecked 2 0 kvLen #[batch, num_kv_heads, kvLen, head_dim]
-  let vAll := vStore'.sliceChecked 2 0 kvLen #[batch, num_kv_heads, kvLen, head_dim]
+  let kAll : Tensor { device := device, shape := #[batch, num_kv_heads, kvLen, head_dim], dtype := dtype } :=
+    kStore'.slice 2 0 kvLen
+  let vAll : Tensor { device := device, shape := #[batch, num_kv_heads, kvLen, head_dim], dtype := dtype } :=
+    vStore'.slice 2 0 kvLen
 
   -- Use q_len=1, kv_len=(pos+1). Causal masking is unnecessary because KV has no future tokens.
   let attnOut :=

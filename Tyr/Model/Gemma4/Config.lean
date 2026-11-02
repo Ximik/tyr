@@ -369,6 +369,20 @@ def fullHeadDim (cfg : Config) : Nat := Gemma4Config.fullHeadDim cfg
 def maxHeadDim (cfg : Config) : Nat := Gemma4Config.maxHeadDim cfg
 def fullNumKVHeads (cfg : Config) : Nat := Gemma4Config.fullNumKVHeads cfg
 def maxKVHeads (cfg : Config) : Nat := Gemma4Config.maxKVHeads cfg
+
+theorem kvHeads_le_max (cfg : Config) : cfg.num_key_value_heads ≤ maxKVHeads cfg := by
+  show _ ≤ Gemma4Config.maxKVHeads cfg; unfold Gemma4Config.maxKVHeads; split <;> omega
+
+theorem fullKVHeads_le_max (cfg : Config) : fullNumKVHeads cfg ≤ maxKVHeads cfg := by
+  show Gemma4Config.fullNumKVHeads cfg ≤ Gemma4Config.maxKVHeads cfg
+  unfold Gemma4Config.maxKVHeads; split <;> omega
+
+theorem headDim_le_max (cfg : Config) : cfg.head_dim ≤ maxHeadDim cfg := by
+  show _ ≤ Gemma4Config.maxHeadDim cfg; unfold Gemma4Config.maxHeadDim; split <;> omega
+
+theorem fullHeadDim_le_max (cfg : Config) : fullHeadDim cfg ≤ maxHeadDim cfg := by
+  show Gemma4Config.fullHeadDim cfg ≤ Gemma4Config.maxHeadDim cfg
+  unfold Gemma4Config.maxHeadDim; split <;> omega
 def maxAttentionDim (cfg : Config) : Nat := Gemma4Config.maxAttentionDim cfg
 def maxKVProjDim (cfg : Config) : Nat := Gemma4Config.maxKVProjDim cfg
 def fullRotaryDim (cfg : Config) : Nat := Gemma4Config.fullRotaryDim cfg

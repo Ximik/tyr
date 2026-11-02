@@ -432,7 +432,7 @@ def testQwen35ConfigLoadNestedTextConfig : IO Unit := do
   let embeds := model.embedTokens ids
   let (cos, sin) := Tensor.rotaryFreqs 4 (Config.rotaryDim tinyDenseCfg) tinyDenseCfg.rope_theta
   let cache := Qwen35Model.initCache tinyDenseCfg model.model 8 .CPU
-  let (hidden, cache) ← Qwen35Model.forwardWithCache tinyDenseCfg model.model embeds cos sin cache
+  let (hidden, cache) ← Qwen35Model.forwardWithCache tinyDenseCfg model.model embeds cos sin cache (by decide)
   LeanTest.assertEqual hidden.actualSpec.dtype DType.BFloat16
   LeanTest.assertTrue ((← hidden.toFloatArray).all Float.isFinite)
   for state in cache.recurrentStates do
