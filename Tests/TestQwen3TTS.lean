@@ -170,6 +170,20 @@ def testQwen3TTSBFloat16Generation : IO Unit := do
     LeanTest.assertTrue (codes[i]!.toNat < upper) "Generated codes stay within their vocabulary"
 
 @[test]
+def testQwen3TTSGreedyCodesRegression : IO Unit := do
+  -- Greedy codes for a fixed seed. Both the talker and its code predictor decode
+  -- through KV caches, so a change here means cached generation changed.
+  torch.manualSeed 4242
+  let cfg := tinyCfg.talkerConfig
+  let talker ← TalkerForConditionalGeneration.init cfg
+  let ids : Tensor { shape := #[1, 3], dtype := .Int64, device := .CPU } := (Tensor.fromInt64Array #[3, 1, 2]).reshape #[1, 3]
+  let prompt := TalkerModel.buildInputsFromText cfg talker.model ids
+  let out ← TalkerForConditionalGeneration.generateCodesWithLengths cfg talker prompt
+    5 5 1.0 1 1.0 1.0 1 1.0 1.2 0
+  LeanTest.assertEqual (← Tensor.toUInt64Array out.codes)
+    #[85, 63, 9, 39, 99, 24, 27, 21, 115, 55, 9, 21, 18, 10, 9, 21, 77, 4, 9, 39]
+
+@[test]
 def testQwen3TTSGenerateFromText : IO Unit := do
   let cfg := tinyCfg
   let model ← Qwen3TTSForConditionalGeneration.init cfg
