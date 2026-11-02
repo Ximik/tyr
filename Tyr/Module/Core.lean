@@ -23,17 +23,17 @@ These typeclasses define the interface for neural network modules:
 ### Example: Pure Module
 
 ```lean
-import Tyr.Module.Derive
+import Tyr.Module
 
 open torch
 
-structure MyLinear (inDim outDim : UInt64) where
-  weight : Tensor { shape := #[outDim, inDim], dtype := .Float32 }
-  bias : Option (Tensor { shape := #[outDim], dtype := .Float32 }) := none
+structure MyLinear (inDim outDim : Nat) where
+  weight : Tensor { shape := #[outDim, inDim], dtype := .Float32, device := .CPU }
+  bias : Option (Tensor { shape := #[outDim], dtype := .Float32, device := .CPU }) := none
   deriving TensorStruct
 
-instance {inDim outDim batch : UInt64} :
-    Module (MyLinear inDim outDim) (Tensor { shape := #[batch, inDim], dtype := .Float32 }) (Tensor { shape := #[batch, outDim], dtype := .Float32 }) where
+instance {inDim outDim batch : Nat} :
+    Module (MyLinear inDim outDim) (Tensor { shape := #[batch, inDim], dtype := .Float32, device := .CPU }) (Tensor { shape := #[batch, outDim], dtype := .Float32, device := .CPU }) where
   forward m x :=
     let y := Tensor.linear x m.weight
     match m.bias with
@@ -59,13 +59,13 @@ instance {σ : StaticSpec} : ModuleIO MyDropout (Tensor σ) (Tensor σ) where
 ```lean
 open torch
 
-structure MyLinearCtx (inDim outDim : UInt64) where
+structure MyLinearCtx (inDim outDim : Nat) where
   lin : MyLinear inDim outDim
   deriving TensorStruct
 
-instance {inDim outDim batch : UInt64} :
+instance {inDim outDim batch : Nat} :
     ModuleCtx (MyLinearCtx inDim outDim) TrainingCtx
-      (Tensor { shape := #[batch, inDim], dtype := .Float32 }) (Tensor { shape := #[batch, outDim], dtype := .Float32 }) where
+      (Tensor { shape := #[batch, inDim], dtype := .Float32, device := .CPU }) (Tensor { shape := #[batch, outDim], dtype := .Float32, device := .CPU }) where
   forward m ctx x := do
     let y := Module.forward m.lin x
     Tensor.dropout y ctx.dropout_p ctx.training

@@ -15,7 +15,7 @@ parameterizations of the same record. This explicit command is for conversions
 between different record types.
 
 For parameterized records, declare the shared parameters before a colon:
-`derive_tensor_tree_cast {source target : Device} {size : UInt64} :
+`derive_tensor_tree_cast {source target : Device} {size : Nat} :
   Source (device := source) size => Target (device := target) size`.
 These binders scope over both record types and the generated instance.
 -/

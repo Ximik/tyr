@@ -68,7 +68,7 @@ import Tyr.Module.Derive
 
 open torch
 
-structure LinearParams (inDim outDim : UInt64) where
+structure LinearParams (inDim outDim : Nat) where
   weight : Tensor { shape := #[outDim, inDim], dtype := .Float32, device := .CPU }
   bias : Tensor { shape := #[outDim], dtype := .Float32, device := .CPU }
   name : Static String
