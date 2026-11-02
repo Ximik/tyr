@@ -30,6 +30,8 @@ structure WhisperConfig where
   /-- Attention splits `dModel` into equal heads; checked when the config is built. -/
   encoderHeadsDivide : encoderAttentionHeads ∣ dModel := by decide
   decoderHeadsDivide : decoderAttentionHeads ∣ dModel := by decide
+  /-- The decoder KV cache holds `maxTargetPositions` tokens; checked when the config is built. -/
+  maxTargetPositionsPos : 0 < maxTargetPositions := by decide
   deriving Repr
 
 instance : Inhabited WhisperConfig := ⟨{}⟩

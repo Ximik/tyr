@@ -441,20 +441,20 @@ private def generateFrameFromLastHidden {batch : Nat} (cfg : TalkerConfig)
 
     let support ← dtype.val.acquireConstantSupport cpDevice
     let _ := support.down
-    let mut cpCachesInit : Array (qwen.QwenAttention.KVCache batch cpCfg.numKeyValueHeads cpCfg.headDim dtype.val) := #[]
+    let mut cpCachesInit : Array (qwen.QwenAttention.KVCache batch cpCfg.numKeyValueHeads cpCfg.headDim cpMaxSeq dtype.val) := #[]
     for _ in [:cpCfg.numHiddenLayers] do
       cpCachesInit := cpCachesInit.push
         (qwen.QwenAttention.initKVCache
           cpMaxSeq
           (batch := batch) (num_kv_heads := cpCfg.numKeyValueHeads) (head_dim := cpCfg.headDim)
-          cpDevice dtype.val)
+          cpDevice dtype.val (h := Nat.succ_pos _))
 
     let cpStep :
         Tensor { shape := #[batch, 1, cfg.hiddenSize], dtype := dtype.val, device := device } →
         Nat →
-        Array (qwen.QwenAttention.KVCache batch cpCfg.numKeyValueHeads cpCfg.headDim dtype.val) →
+        Array (qwen.QwenAttention.KVCache batch cpCfg.numKeyValueHeads cpCfg.headDim cpMaxSeq dtype.val) →
         IO (Tensor { shape := #[batch, 1, cpCfg.hiddenSize], dtype := dtype.val, device := device } ×
-          Array (qwen.QwenAttention.KVCache batch cpCfg.numKeyValueHeads cpCfg.headDim dtype.val)) :=
+          Array (qwen.QwenAttention.KVCache batch cpCfg.numKeyValueHeads cpCfg.headDim cpMaxSeq dtype.val)) :=
       fun tokenEmbed pos caches => do
         let xProj : Tensor { shape := #[batch, 1, cpCfg.hiddenSize], dtype := dtype.val, device := device } := TalkerCodePredictor.projectInputs m.codePredictor tokenEmbed
         let cos : Tensor { shape := #[1, cpCfg.headDim / 2], dtype := .Float32, device := device } := Tensor.sliceChecked cpCosAll 0 pos 1 #[1, cpCfg.headDim / 2]
@@ -466,7 +466,7 @@ private def generateFrameFromLastHidden {batch : Nat} (cfg : TalkerConfig)
             match m.codePredictor.layers[i]? with
             | some layer => pure layer
             | none => throw <| IO.userError s!"missing code predictor layer at index {i}"
-          let cache : qwen.QwenAttention.KVCache batch cpCfg.numKeyValueHeads cpCfg.headDim dtype.val ←
+          let cache : qwen.QwenAttention.KVCache batch cpCfg.numKeyValueHeads cpCfg.headDim cpMaxSeq dtype.val ←
             match caches[i]? with
             | some cache => pure cache
             | none => throw <| IO.userError s!"missing code predictor cache at index {i}"
@@ -635,13 +635,13 @@ def streamCodes {batch seq : Nat} (cfg : TalkerConfig)
     let support ← dtype.val.acquireConstantSupport cacheDevice
     let _ := support.down
     let cacheMaxLen : Nat := seq + maxFrames + 1
-    let mut caches : Array (qwen.QwenAttention.KVCache batch cfg.numKeyValueHeads cfg.headDim dtype.val) := #[]
+    let mut caches : Array (qwen.QwenAttention.KVCache batch cfg.numKeyValueHeads cfg.headDim cacheMaxLen dtype.val) := #[]
     for _ in [:cfg.numHiddenLayers] do
       caches := caches.push
         (qwen.QwenAttention.initKVCache
           cacheMaxLen
           (batch := batch) (num_kv_heads := cfg.numKeyValueHeads) (head_dim := cfg.headDim)
-          cacheDevice dtype.val)
+          cacheDevice dtype.val (h := Nat.succ_pos _))
 
     -- Prefill KV cache from prompt/context so per-frame generation only runs one token step.
     let (cosRaw, sinRaw) := Tensor.rotaryFreqs (seq + maxFrames + 1) cfg.headDim cfg.ropeTheta
@@ -662,7 +662,7 @@ def streamCodes {batch seq : Nat} (cfg : TalkerConfig)
           match m.model.layers[i]? with
           | some layer => pure layer
           | none => throw <| IO.userError s!"missing talker layer at index {i}"
-        let cache : qwen.QwenAttention.KVCache batch cfg.numKeyValueHeads cfg.headDim dtype.val ←
+        let cache : qwen.QwenAttention.KVCache batch cfg.numKeyValueHeads cfg.headDim cacheMaxLen dtype.val ←
           match caches[i]? with
           | some cache => pure cache
           | none => throw <| IO.userError s!"missing talker cache at index {i}"
@@ -736,7 +736,7 @@ def streamCodes {batch seq : Nat} (cfg : TalkerConfig)
           match m.model.layers[i]? with
           | some layer => pure layer
           | none => throw <| IO.userError s!"missing talker layer at index {i}"
-        let cache : qwen.QwenAttention.KVCache batch cfg.numKeyValueHeads cfg.headDim dtype.val ←
+        let cache : qwen.QwenAttention.KVCache batch cfg.numKeyValueHeads cfg.headDim cacheMaxLen dtype.val ←
           match caches[i]? with
           | some cache => pure cache
           | none => throw <| IO.userError s!"missing talker cache at index {i}"

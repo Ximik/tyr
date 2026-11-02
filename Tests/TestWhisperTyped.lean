@@ -70,12 +70,22 @@ private def close {σ τ : StaticSpec} (x : Tensor σ) (y : Tensor τ) (tol : Fl
     pure false
   catch e => pure ((toString e).contains "position")
   LeanTest.assertTrue positionRejected
-  let empty := model.initLayerKVCaches (batch := 1) 0 .CPU
-  let emptyRejected ← try
-    let _ ← model.decodeStepWithCache (encSeq := 3) tok 0 cross empty
-    pure false
-  catch e => pure ((toString e).contains "capacity")
-  LeanTest.assertTrue emptyRejected
+
+@[test] def testWhisperConfigRejectsZeroTargetPositions : IO Unit := IO.FS.withTempDir fun dir => do
+  let path := (dir / "config.json").toString
+  IO.FS.writeFile path "{\"max_target_positions\": 0}"
+  let rejected ←
+    try
+      let _ ← WhisperConfig.loadFromFile path
+      pure false
+    catch e => pure ((toString e).contains "max_target_positions")
+  LeanTest.assertTrue rejected "a zero decoder cache capacity is rejected where the config is loaded"
+
+set_option linter.unusedVariables false in
+example : True := by
+  fail_if_success
+    have := WhisperAttention.initKVCache (batch := 1) (nHeads := 1) (headDim := 4) 0
+  trivial
 
 @[test] def testWhisperLengthAndHeadValidation : IO Unit := do
   let model ← WhisperForConditionalGeneration.init cfg
@@ -105,7 +115,7 @@ private def roundTrip {α : Type} [TensorStruct α] (value : α) (dir : String) 
   close (← model.decode tokens encoded) (← restored.decode tokens other) 0
 
 @[test] def testWhisperWaveformGreedyBeamAndSampling : IO Unit := do
-  let audioCfg := { cfg with maxSourcePositions := 16, maxTargetPositions := 16, eosTokenId := 15 }
+  let audioCfg := { cfg with maxSourcePositions := 16, maxTargetPositions := 16, eosTokenId := 15, maxTargetPositionsPos := by decide }
   let model ← WhisperForConditionalGeneration.init audioCfg
   let model := TensorStruct.detach model
   let norm : LayerNorm 8 .Float32 := {

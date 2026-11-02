@@ -73,13 +73,13 @@ def forward {batch seq hidden_size num_heads num_kv_heads head_dim intermediate_
 
 /-- Incremental one-token transformer layer step with attention KV cache.
     Input/output: `[batch, 1, hidden_size]`. -/
-def forwardStep {batch hidden_size num_heads num_kv_heads head_dim intermediate_size : Nat}
+def forwardStep {batch hidden_size num_heads num_kv_heads head_dim intermediate_size cap : Nat}
     (layer : QwenLayer (device := device) hidden_size num_heads num_kv_heads head_dim intermediate_size dtype)
     (x : Tensor { device := device, shape := #[batch, 1, hidden_size], dtype := dtype })
     (cos : Tensor { device := device, shape := #[1, head_dim / 2], dtype := .Float32 })
     (sin : Tensor { device := device, shape := #[1, head_dim / 2], dtype := .Float32 })
-    (cache : QwenAttention.KVCache (device := device) batch num_kv_heads head_dim dtype)
-    : Tensor { device := device, shape := #[batch, 1, hidden_size], dtype := dtype } × QwenAttention.KVCache (device := device) batch num_kv_heads head_dim dtype :=
+    (cache : QwenAttention.KVCache (device := device) batch num_kv_heads head_dim cap dtype)
+    : Tensor { device := device, shape := #[batch, 1, hidden_size], dtype := dtype } × QwenAttention.KVCache (device := device) batch num_kv_heads head_dim cap dtype :=
   -- Pre-norm attention.
   let residual1 := x
   let x1 : Tensor { device := device, shape := #[batch, 1, hidden_size], dtype := dtype } := layer.input_layernorm.forward3dPreserving x

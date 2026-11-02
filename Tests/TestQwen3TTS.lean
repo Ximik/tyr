@@ -115,7 +115,7 @@ def testQwen3TTSBFloat16IncrementalCache : IO Unit := do
     let x := inputs.castDType dtype
     let full := layer.forward x cos sin
     LeanTest.assertEqual full.actualSpec.dtype x.actualSpec.dtype "Full Qwen layer retains model dtype"
-    let fresh : qwen.QwenAttention.KVCache 1 1 4 dtype := qwen.QwenAttention.initKVCache 5 (dtype := dtype)
+    let fresh : qwen.QwenAttention.KVCache 1 1 4 5 dtype := qwen.QwenAttention.initKVCache 5 (dtype := dtype)
     let mut cache := fresh
     -- Three prompt tokens followed by two decode tokens exercise the Talker cache path.
     let mut outputs : Array (Sigma (fun shape => Tensor { shape := shape, dtype, device := .CPU })) := #[]

@@ -108,6 +108,24 @@ private def close {σ τ : StaticSpec} (x : Tensor σ) (y : Tensor τ) (tol : Fl
     LeanTest.assertEqual (← plain.2.toUInt64Array) (← streamed.2.toUInt64Array)
     LeanTest.assertEqual (← steps.get).size 3
 
+@[test] def testGemma4EmptyPromptAndEmptyForward : IO Unit := do
+  let m := textModel cfg
+  let empty : Tensor { shape := #[1, 0], dtype := .Int64, device := .CPU } := Tensor.reshape (Tensor.fromInt64Array #[]) #[1, 0]
+  let rejected ←
+    try
+      let _ ← m.generate cfg empty 1 .greedy #[]
+      pure false
+    catch e => pure ((toString e).contains "non-empty prompt")
+  LeanTest.assertTrue rejected "cached generate should reject an empty prompt before sizing its cache"
+  -- Shared-KV layers have no source K/V to share in an empty sequence.
+  LeanTest.assertEqual (m.forward cfg empty).runtimeShape #[1, 0, cfg.vocab_size]
+  let embeds := m.embedTokens cfg empty
+  let perLayer := m.model.computePerLayerInputs cfg empty embeds
+  let noMask : Tensor { shape := #[1, 0, 0], dtype := .Int64, device := .CPU } := Tensor.fullInt #[1, 0, 0] 0
+  LeanTest.assertEqual
+    (m.forwardEmbedsWithPerLayerInputsBidirectionalVision cfg empty embeds perLayer noMask noMask).runtimeShape
+    #[1, 0, cfg.vocab_size]
+
 @[noinline, nospecialize]
 private def roundTrip {α : Type} [TensorStruct α] (params : α) (dir : String) : IO α := do
   checkpoint.saveParams params dir

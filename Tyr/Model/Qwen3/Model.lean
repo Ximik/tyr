@@ -120,21 +120,22 @@ def forwardWithHiddenStates {batch seq : Nat}
   { logits, hiddenStates := some hiddenStates }
 
 /-- One-layer KV cache type for cached decoding. -/
-abbrev LayerKVCache (cfg : Config) (batch : Nat) :=
-  qwen.QwenAttention.KVCache (device := device) batch cfg.num_key_value_heads cfg.head_dim
+abbrev LayerKVCache (cfg : Config) (batch cap : Nat) :=
+  qwen.QwenAttention.KVCache (device := device) batch cfg.num_key_value_heads cfg.head_dim cap
 
 private def initLayerKVCaches {batch : Nat}
     (m : Qwen3ForCausalLM (device := device) cfg)
     (maxLen : Nat)
     (device : Device)
-    : Array (LayerKVCache (device := device) cfg batch) :=
+    (h : 0 < maxLen := by omega)
+    : Array (LayerKVCache (device := device) cfg batch maxLen) :=
   m.model.layers.map (fun _ =>
     qwen.QwenAttention.initKVCache
       maxLen
       (batch := batch)
       (num_kv_heads := cfg.num_key_value_heads)
       (head_dim := cfg.head_dim)
-      device)
+      device (h := h))
 
 private def precomputeDecodeRotary {maxLen : Nat}
     (_m : Qwen3ForCausalLM (device := device) cfg)
@@ -152,8 +153,8 @@ private def decodeStepFromEmbedWithCache {batch maxLen : Nat}
     (sinAll : Tensor { device := device, shape := #[maxLen, cfg.head_dim / 2], dtype := .Float32 })
     (tokenEmbed : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := .Float32 })
     (position : Nat)
-    (caches : Array (LayerKVCache (device := device) cfg batch))
-    : IO (Tensor { device := device, shape := #[batch, cfg.vocab_size], dtype := .Float32 } × Array (LayerKVCache (device := device) cfg batch)) := do
+    (caches : Array (LayerKVCache (device := device) cfg batch maxLen))
+    : IO (Tensor { device := device, shape := #[batch, cfg.vocab_size], dtype := .Float32 } × Array (LayerKVCache (device := device) cfg batch maxLen)) := do
   let cos : Tensor { device := device, shape := #[1, cfg.head_dim / 2], dtype := .Float32 } := Tensor.sliceChecked cosAll 0 position 1 #[1, cfg.head_dim / 2]
   let sin : Tensor { device := device, shape := #[1, cfg.head_dim / 2], dtype := .Float32 } := Tensor.sliceChecked sinAll 0 position 1 #[1, cfg.head_dim / 2]
 
@@ -183,10 +184,10 @@ private partial def prefillCachesFromEmbeds {batch seq maxLen : Nat}
     (cosAll : Tensor { device := device, shape := #[maxLen, cfg.head_dim / 2], dtype := .Float32 })
     (sinAll : Tensor { device := device, shape := #[maxLen, cfg.head_dim / 2], dtype := .Float32 })
     (inputsEmbeds : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := .Float32 })
-    (caches : Array (LayerKVCache (device := device) cfg batch))
+    (caches : Array (LayerKVCache (device := device) cfg batch maxLen))
     (position : Nat)
     (lastLogits : Tensor { device := device, shape := #[batch, cfg.vocab_size], dtype := .Float32 })
-    : IO (Tensor { device := device, shape := #[batch, cfg.vocab_size], dtype := .Float32 } × Array (LayerKVCache (device := device) cfg batch)) := do
+    : IO (Tensor { device := device, shape := #[batch, cfg.vocab_size], dtype := .Float32 } × Array (LayerKVCache (device := device) cfg batch maxLen)) := do
   if position >= seq then
     pure (lastLogits, caches)
   else
@@ -201,7 +202,7 @@ private partial def greedyLoopCached {batch maxLen : Nat}
     (eosTokenIds : Array UInt64)
     (eosVector : Option (Tensor { device := device, shape := #[batch], dtype := .Int64 }))
     (remaining : Nat)
-    (caches : Array (LayerKVCache (device := device) cfg batch))
+    (caches : Array (LayerKVCache (device := device) cfg batch maxLen))
     (lastLogits : Tensor { device := device, shape := #[batch, cfg.vocab_size], dtype := .Float32 })
     (finished : Option (Tensor { device := device, shape := #[batch], dtype := .Bool }))
     {curSeq : Nat}
@@ -292,7 +293,7 @@ def generateGreedy {batch seq : Nat}
     (maxNewTokens : Nat := 512)
     (eosTokenIds : Array UInt64 := #[])
     : IO (Sigma (fun outSeq => Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })) := do
-  if seq == 0 then
+  let ⟨hSeq⟩ ← if h : 0 < seq then pure (PLift.up h) else
     throw <| IO.userError "generateGreedy requires non-empty prompt sequence"
   if maxNewTokens == 0 then
     return ⟨seq, inputIds⟩
@@ -302,7 +303,7 @@ def generateGreedy {batch seq : Nat}
   let cacheMaxLen : Nat := seq + maxNewTokens
   let eosVector := eosVectorOnDevice (batch := batch) eosTokenIds cacheDevice
   let (cosAll, sinAll) := precomputeDecodeRotary (maxLen := cacheMaxLen) m cacheDevice
-  let caches0 := initLayerKVCaches m cacheMaxLen cacheDevice
+  let caches0 := initLayerKVCaches m cacheMaxLen cacheDevice (h := Nat.lt_of_lt_of_le hSeq (Nat.le_add_right _ _))
   let tok0 : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := .Float32 } := Tensor.sliceChecked inputsEmbeds 1 0 1 #[batch, 1, cfg.hidden_size]
   let (logits0, caches1) ← decodeStepFromEmbedWithCache m cosAll sinAll tok0 0 caches0
   let (lastLogits, cachesPrefill) ←

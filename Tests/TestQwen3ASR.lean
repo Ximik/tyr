@@ -870,6 +870,18 @@ def testQwen3ASRGreedyGenerateFromWav : IO Unit := do
   LeanTest.assertEqual toks.size outSeq "generated token tensor should match reported output sequence length"
 
 @[test]
+def testQwen3ASRGreedyCachedEmptyPromptThrows : IO Unit := do
+  let model ← Qwen3ASRForConditionalGeneration.init tinyCfg
+  let ids : Tensor { shape := #[1, 0], dtype := .Int64, device := .CPU } := Tensor.reshape (Tensor.fromInt64Array #[]) #[1, 0]
+  let noFeatures : Option (Tensor { shape := #[1, tinyCfg.thinkerConfig.audioConfig.numMelBins, 0], dtype := .Float32, device := .CPU }) := none
+  let rejected ←
+    try
+      let _ ← model.generateGreedy ids noFeatures none 1 #[]
+      pure false
+    catch e => pure ((toString e).contains "non-empty prompt")
+  LeanTest.assertTrue rejected "cached generateGreedy should reject an empty prompt before sizing its cache"
+
+@[test]
 def testQwen3ASRGreedyCachedMatchesUncached : IO Unit := do
   let cfg := tinyCfg
   let model ← Qwen3ASRForConditionalGeneration.init cfg

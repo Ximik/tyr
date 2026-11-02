@@ -81,6 +81,9 @@ def loadFromFile (path : String) (defaults : WhisperConfig := {}) : IO WhisperCo
   let hHeads ← if h : encoderAttentionHeads ∣ dModel ∧ decoderAttentionHeads ∣ dModel then pure (PLift.up h) else
     throw <| IO.userError
       s!"Invalid Whisper config: d_model={dModel}, encoder_heads={encoderAttentionHeads}, decoder_heads={decoderAttentionHeads}"
+  let maxTargetPositions := getNatFieldD root "max_target_positions" defaults.maxTargetPositions
+  let hTarget ← if h : 0 < maxTargetPositions then pure (PLift.up h) else
+    throw <| IO.userError "Invalid Whisper config: max_target_positions must be positive"
   let cfg : WhisperConfig := {
     numMelBins := getNatFieldD root "num_mel_bins" defaults.numMelBins
     vocabSize := getNatFieldD root "vocab_size" defaults.vocabSize
@@ -92,7 +95,7 @@ def loadFromFile (path : String) (defaults : WhisperConfig := {}) : IO WhisperCo
     decoderAttentionHeads
     decoderFfnDim := getNatFieldD root "decoder_ffn_dim" defaults.decoderFfnDim
     maxSourcePositions := getNatFieldD root "max_source_positions" defaults.maxSourcePositions
-    maxTargetPositions := getNatFieldD root "max_target_positions" defaults.maxTargetPositions
+    maxTargetPositions
     activationFunction := getStringFieldD root "activation_function" defaults.activationFunction
     layerNormEps := getFloatFieldD root "layer_norm_eps" defaults.layerNormEps
     padTokenId := getTokenIdFieldD root "pad_token_id" defaults.padTokenId
@@ -103,6 +106,7 @@ def loadFromFile (path : String) (defaults : WhisperConfig := {}) : IO WhisperCo
     beginSuppressTokens := getNatArrayFieldD root "begin_suppress_tokens" defaults.beginSuppressTokens
     encoderHeadsDivide := hHeads.down.1
     decoderHeadsDivide := hHeads.down.2
+    maxTargetPositionsPos := hTarget.down
   }
   if !cfg.hasValidHeads then
     throw <| IO.userError

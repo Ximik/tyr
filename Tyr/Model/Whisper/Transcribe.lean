@@ -74,7 +74,7 @@ private structure BeamState (cfg : WhisperConfig) (dtype : DType := .Float32) wh
   noSpeechProb : Float := 0.0
   measuredNoSpeech : Bool := false
   finished : Bool := false
-  caches : Array (WhisperForConditionalGeneration.LayerKVCache (device := device) (dtype := dtype) cfg 1) := #[]
+  caches : Array (WhisperForConditionalGeneration.LayerKVCache (device := device) (dtype := dtype) cfg 1 cfg.maxTargetPositions) := #[]
   lastLogits? : Option (Tensor { dtype := dtype, device := device, shape := #[1, cfg.vocabSize] }) := none
   nextPos : Nat := 0
   deriving Inhabited
@@ -648,13 +648,13 @@ private def prefillPromptCaches
     (model : WhisperForConditionalGeneration (device := device) (dtype := dtype) cfg)
     (crossCaches : Array (WhisperForConditionalGeneration.LayerCrossCache (device := device) (dtype := dtype) cfg 1 encSeq))
     (promptIds : Array UInt32)
-    : IO (Tensor { dtype := dtype, device := device, shape := #[1, cfg.vocabSize] } × Array (WhisperForConditionalGeneration.LayerKVCache (device := device) (dtype := dtype) cfg 1) × Nat) := do
+    : IO (Tensor { dtype := dtype, device := device, shape := #[1, cfg.vocabSize] } × Array (WhisperForConditionalGeneration.LayerKVCache (device := device) (dtype := dtype) cfg 1 cfg.maxTargetPositions) × Nat) := do
   let support ← dtype.acquireConstantSupport device
   let _ := support.down
   if promptIds.isEmpty then
     throw <| IO.userError "Whisper cached decode prompt is empty"
-  let mut caches : Array (WhisperForConditionalGeneration.LayerKVCache (device := device) (dtype := dtype) cfg 1) :=
-    model.initLayerKVCaches cfg.maxTargetPositions device
+  let mut caches : Array (WhisperForConditionalGeneration.LayerKVCache (device := device) (dtype := dtype) cfg 1 cfg.maxTargetPositions) :=
+    model.initLayerKVCaches cfg.maxTargetPositions device (h := cfg.maxTargetPositionsPos)
   let mut last? : Option (Tensor { dtype := dtype, device := device, shape := #[1, cfg.vocabSize] }) := none
   let mut pos : Nat := 0
   for i in [:promptIds.size] do
@@ -682,7 +682,7 @@ private partial def decodeLoopCached
     (sample : Bool)
     (remaining : Nat)
     (state : DecodeState)
-    (caches : Array (WhisperForConditionalGeneration.LayerKVCache (device := device) (dtype := dtype) cfg 1))
+    (caches : Array (WhisperForConditionalGeneration.LayerKVCache (device := device) (dtype := dtype) cfg 1 cfg.maxTargetPositions))
     (lastLogits : Tensor { dtype := dtype, device := device, shape := #[1, cfg.vocabSize] })
     (nextPos : Nat)
     : IO DecodeState := do
