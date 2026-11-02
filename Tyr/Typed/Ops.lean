@@ -252,7 +252,7 @@ def qrComplete {m n : Nat} {d : DType} {dev : Device}
     is a precondition on the libtorch reduced factorization; wide inputs do not
     typecheck at concrete dimensions. -/
 def qrReduced {m n : Nat} {d : DType} {dev : Device}
-    (t : Tensor ⟨#[m, n], d, dev⟩) (_tall : n ≤ m := by exact of_decide_eq_true rfl) :
+    (t : Tensor ⟨#[m, n], d, dev⟩) (_tall : n ≤ m := by first | exact of_decide_eq_true rfl | omega | (simp <;> omega)) :
     Tensor ⟨#[m, n], d, dev⟩ × Tensor ⟨#[n, n], d, dev⟩ :=
   let (q, r) := RawTensor.qrReduced t.raw
   (checkedResult "qr.Q" (Tensor.ofRaw q), checkedResult "qr.R" (Tensor.ofRaw r))
@@ -261,7 +261,7 @@ def qrReduced {m n : Nat} {d : DType} {dev : Device}
 the real component dtype; `U` and `Vh` retain the input dtype. Native dtype,
 backend, and factorization failures are recoverable. -/
 def svdReduced? {m n : Nat} {d : DType} {dev : Device}
-    (t : Tensor ⟨#[m, n], d, dev⟩) (_tall : n ≤ m := by exact of_decide_eq_true rfl) :
+    (t : Tensor ⟨#[m, n], d, dev⟩) (_tall : n ≤ m := by first | exact of_decide_eq_true rfl | omega | (simp <;> omega)) :
     Except String (Tensor ⟨#[m, n], d, dev⟩ × Tensor ⟨#[n], d.realResult, dev⟩ ×
       Tensor ⟨#[n, n], d, dev⟩) := do
   let (u, s, vh) ← RawTensor.svdChecked t.raw
@@ -272,7 +272,7 @@ def svdReduced? {m n : Nat} {d : DType} {dev : Device}
     ← Tensor.checkedUpdate? dtype device vh)
 
 def svdReduced {m n : Nat} {d : DType} {dev : Device}
-    (t : Tensor ⟨#[m, n], d, dev⟩) (_tall : n ≤ m := by exact of_decide_eq_true rfl) :
+    (t : Tensor ⟨#[m, n], d, dev⟩) (_tall : n ≤ m := by first | exact of_decide_eq_true rfl | omega | (simp <;> omega)) :
     Tensor ⟨#[m, n], d, dev⟩ × Tensor ⟨#[n], d.realResult, dev⟩ × Tensor ⟨#[n, n], d, dev⟩ :=
   match svdReduced? t _tall with
   | .ok result => result
@@ -764,7 +764,7 @@ def maxAll? {σ : StaticSpec} (t : Tensor σ) : Except String (Tensor (σ.withSh
 
 /-- Maximum over a nonempty ordered tensor. Runtime shapes/dtypes use `maxAll?`. -/
 def maxAll {σ : StaticSpec} [DType.Ordered σ.dtype] (t : Tensor σ)
-    (_nonempty : 0 < TensorSpec.numelOfShape σ.shape := by exact of_decide_eq_true rfl) :
+    (_nonempty : 0 < TensorSpec.numelOfShape σ.shape := by first | exact of_decide_eq_true rfl | omega | (simp <;> omega)) :
     Tensor (σ.withShape #[]) :=
   checkedResult "maxAll" (maxAll? t)
 
@@ -783,7 +783,7 @@ def sumDim? {σ : StaticSpec} (t : Tensor σ) (dim : Nat) (keepdim : Bool := fal
 
 /-- Reduce one axis using libtorch's accumulation dtype. -/
 def sumDim {σ : StaticSpec} (t : Tensor σ) (dim : Nat) (keepdim : Bool := false)
-    (_axis : dim < max 1 σ.shape.size := by exact of_decide_eq_true rfl) :
+    (_axis : dim < max 1 σ.shape.size := by first | exact of_decide_eq_true rfl | (simp <;> fail "axis out of range")) :
     Tensor (σ.sumSpec.withShape (reduceShape σ.shape dim keepdim)) :=
   checkedResult "sumDim" (sumDim? t dim keepdim)
 
@@ -825,8 +825,8 @@ def reshape {σ : StaticSpec} (t : Tensor σ) (shape' : Shape)
 /-- Slice an exact number of entries along a valid axis. Bounds are checked in
 natural arithmetic so `start + len` cannot wrap or silently truncate. -/
 def slice {σ : StaticSpec} (t : Tensor σ) (dim : Nat) (start len : Nat)
-    (_axis : dim < σ.shape.size := by exact of_decide_eq_true rfl)
-    (_bounds : start + len ≤ σ.shape[dim]'_axis := by exact of_decide_eq_true rfl) :
+    (_axis : dim < σ.shape.size := by first | exact of_decide_eq_true rfl | (simp <;> fail "axis out of range"))
+    (_bounds : start + len ≤ σ.shape[dim]'_axis := by first | exact of_decide_eq_true rfl | omega | (simp <;> omega)) :
     Tensor (σ.withShape (σ.shape.set! dim len)) :=
   checkedResult "slice" (Tensor.ofRaw (RawTensor.slice t.raw dim start len))
 
@@ -939,8 +939,8 @@ def argmax? {s : Shape} {d : DType} {dev : Device} (t : Tensor ⟨s, d, dev⟩) 
 permits axis zero. Runtime shapes and dtypes use `argmax?`. -/
 def argmax {s : Shape} {d : DType} {dev : Device} [DType.Ordered d]
     (t : Tensor ⟨s, d, dev⟩) (dim : Nat)
-    (_axis : dim < max 1 s.size := by exact of_decide_eq_true rfl)
-    (_nonempty : 0 < s[dim]?.getD 1 := by exact of_decide_eq_true rfl) :
+    (_axis : dim < max 1 s.size := by first | exact of_decide_eq_true rfl | (simp <;> fail "axis out of range"))
+    (_nonempty : 0 < s[dim]?.getD 1 := by first | exact of_decide_eq_true rfl | omega | (simp <;> omega)) :
     Tensor ⟨reduceShape s dim false, .Int64, dev⟩ :=
   checkedResult "argmax" (argmax? t dim)
 

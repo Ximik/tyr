@@ -155,7 +155,7 @@ def meanDim? {σ : StaticSpec} (t : Tensor σ) (dim : Nat) (keepdim : Bool := fa
   Tensor.ofRaw raw
 
 def meanDim {σ : StaticSpec} [DType.Mean σ.dtype] (t : Tensor σ) (dim : Nat) (keepdim : Bool := false)
-    (_axis : dim < max 1 σ.shape.size := by exact of_decide_eq_true rfl) :
+    (_axis : dim < max 1 σ.shape.size := by first | exact of_decide_eq_true rfl | (simp <;> fail "axis out of range")) :
     Tensor (σ.withShape (reduceShape σ.shape dim keepdim)) :=
   match meanDim? t dim keepdim with
   | .ok result => result
@@ -661,7 +661,7 @@ def maxLast3dChecked {batch seq vocab : Nat} {d : DType} {dev : Device}
 /-- Reduce a nonempty last axis of an ordered tensor. -/
 def maxLast3d {batch seq vocab : Nat} {d : DType} {dev : Device} [DType.Ordered d]
     (input : Tensor ⟨#[batch, seq, vocab], d, dev⟩)
-    (_nonempty : 0 < vocab := by exact of_decide_eq_true rfl) :
+    (_nonempty : 0 < vocab := by first | exact of_decide_eq_true rfl | omega | (simp <;> omega)) :
     Tensor ⟨#[batch, seq], d, dev⟩ × Tensor ⟨#[batch, seq], .Int64, dev⟩ :=
   maxLast3dChecked input
 
@@ -686,7 +686,7 @@ def topKLast2dChecked {rows cols : Nat} {d : DType} {dev : Device}
 /-- Select the largest `k` entries of ordered rows with sufficient width. -/
 def topKLast2d {rows cols : Nat} {d : DType} {dev : Device} [DType.Ordered d]
     (input : Tensor ⟨#[rows, cols], d, dev⟩) (k : Nat)
-    (_range : k ≤ cols := by exact of_decide_eq_true rfl) :
+    (_range : k ≤ cols := by first | exact of_decide_eq_true rfl | omega | (simp <;> omega)) :
     Tensor ⟨#[rows, k], d, dev⟩ × Tensor ⟨#[rows, k], .Int64, dev⟩ :=
   topKLast2dChecked input k
 
