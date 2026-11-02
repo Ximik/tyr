@@ -104,7 +104,7 @@ namespace torch.RawTensor
     (input : @& RawTensor) (k dim : @& Nat) : Except String (RawTensor × RawTensor)
 
 @[extern "lean_torch_get"] opaque getOp (input : @& RawTensor) (idx : @& Nat) : RawTensor
-@[extern "lean_torch_unbind"] opaque unbind (input : @& RawTensor) (dim : Nat) : Array RawTensor
+@[extern "lean_torch_unbind"] opaque unbind (input : @& RawTensor) (dim : @& Nat) : Array RawTensor
 @[extern "lean_torch_logspace"] opaque logspace (start stop : Float) (steps : @& Nat)
     (base : Float) (requiresGrad : Bool) (noGrad : requiresGrad = false := by decide) : RawTensor
 

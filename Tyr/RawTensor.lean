@@ -114,9 +114,9 @@ The source shape is checked before conversion and never reshaped. -/
 @[extern "lean_torch_transpose"] opaque transpose (t : @& RawTensor)
     (dim0 dim1 : @& Nat) : Except String RawTensor
 
-@[extern "lean_torch_unsqueeze"] opaque unsqueeze (t : @& RawTensor) (dim : Nat) : RawTensor
+@[extern "lean_torch_unsqueeze"] opaque unsqueeze (t : @& RawTensor) (dim : @& Nat) : RawTensor
 
-@[extern "lean_torch_squeeze"] opaque squeeze (t : @& RawTensor) (dim : Nat) : RawTensor
+@[extern "lean_torch_squeeze"] opaque squeeze (t : @& RawTensor) (dim : @& Nat) : RawTensor
 
 @[extern "lean_torch_cat2"] opaque cat (a b : @& RawTensor) (dim : @& Nat) : RawTensor
 

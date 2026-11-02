@@ -1432,19 +1432,17 @@ lean_object* lean_torch_cumsum(b_lean_obj_arg input, b_lean_obj_arg dim_obj) {
   return fromTorchTensor(result_);
 }
 
-lean_object* lean_torch_unsqueeze(b_lean_obj_arg input, lean_obj_arg dim) {
-  OwnedLeanObject dim_owner(dim, lean_dec);
+lean_object* lean_torch_unsqueeze(b_lean_obj_arg input, b_lean_obj_arg dim) {
+  const auto dim_ = static_cast<int64_t>(tyr::natTo<int64_t>(dim, "dim"));
   auto input_ = borrowTensor(input);
-  auto dim_ = lean_uint64_of_nat(dim);
-  auto result_ = torch::unsqueeze(input_, static_cast<int64_t>(dim_));
+  auto result_ = torch::unsqueeze(input_, dim_);
   return fromTorchTensor(result_);
 }
 
-lean_object* lean_torch_squeeze(b_lean_obj_arg input, lean_obj_arg dim) {
-  OwnedLeanObject dim_owner(dim, lean_dec);
+lean_object* lean_torch_squeeze(b_lean_obj_arg input, b_lean_obj_arg dim) {
+  const auto dim_ = static_cast<int64_t>(tyr::natTo<int64_t>(dim, "dim"));
   auto input_ = borrowTensor(input);
-  auto dim_ = lean_uint64_of_nat(dim);
-  auto result_ = torch::squeeze(input_, static_cast<int64_t>(dim_));
+  auto result_ = torch::squeeze(input_, dim_);
   return fromTorchTensor(result_);
 }
 
@@ -2055,15 +2053,11 @@ extern "C" LEAN_EXPORT lean_object* lean_torch_stack_1d(
 // Unbind a tensor along a dimension
 lean_object* lean_torch_unbind(
   b_lean_obj_arg t,
-  lean_obj_arg dim
+  b_lean_obj_arg dim
 ) {
-  OwnedLeanObject dim_owner(dim, lean_dec);
-  // Nat is boxed in Lean, unlike UInt64/Int64. Check the axis before
-  // conversion so an arbitrary-precision Nat cannot wrap into a valid axis.
+  const auto axis = tyr::natTo<int64_t>(dim, "dim");
   auto t_ = borrowTensor(t);
-  const bool in_range = lean_nat_dec_lt(dim, lean_box(t_.dim()));
-  const auto axis = lean_uint64_of_nat(dim);
-  TORCH_CHECK(in_range, "unbind: dimension out of range");
+  TORCH_CHECK(axis < static_cast<uint64_t>(t_.dim()), "unbind: dimension out of range");
   auto unbinded = torch::unbind(t_, static_cast<int64_t>(axis));
   size_t n = unbinded.size();
   lean_object* result = lean_alloc_array(n, n);
