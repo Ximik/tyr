@@ -45,7 +45,7 @@ def withShape (spec : TensorSpec) (shape : Shape) : TensorSpec :=
 def withDType (spec : TensorSpec) (dtype : DType) : TensorSpec :=
   { spec with dtype }
 
-private def dimFromRight (shape : Shape) (offset : Nat) : Nat :=
+@[simp] def dimFromRight (shape : Shape) (offset : Nat) : Nat :=
   if offset < shape.size then
     shape.getD (shape.size - 1 - offset) 1
   else

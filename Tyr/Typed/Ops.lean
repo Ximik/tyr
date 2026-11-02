@@ -602,9 +602,16 @@ def matmul? {s1 s2 : Shape} {d : DType} {dev : Device}
     throw s!"Incompatible matrix shapes {s1} and {s2}"
   Tensor.ofRaw (← RawTensor.matmulChecked a.raw b.raw)
 
+/-- Discharges `matmulShape?` compatibility for shapes with symbolic dimensions, including
+    broadcast batch axes; fails hard on incompatible shapes. -/
+macro "matmul_shape" : tactic => `(tactic| first
+  | rfl
+  | (simp [TensorSpec.broadcastShapes?, TensorSpec.broadcastShapes?.go, List.range_succ] <;>
+      (repeat' split) <;> (repeat' split at *) <;> simp_all <;> fail "incompatible matmul shapes"))
+
 def matmul {s1 s2 : Shape} {d : DType} {dev : Device}
     (a : Tensor ⟨s1, d, dev⟩) (b : Tensor ⟨s2, d, dev⟩)
-    (_h : (TensorSpec.matmulShape? s1 s2).isSome = true := by rfl) :
+    (_h : (TensorSpec.matmulShape? s1 s2).isSome = true := by matmul_shape) :
     Tensor ⟨matmulShape s1 s2, d, dev⟩ :=
   checkedResult "matmul" (matmul? a b)
 

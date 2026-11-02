@@ -23,6 +23,7 @@ import Tests.TestLossContracts
 import Tests.TestConvolutionContracts
 import Tests.TestWidgetTyped
 import Tests.TestTypedStandalone
+import Tests.TestShapeProofs
 import Tests.TestExactDType
 import Tests.TestExactDTypeContracts
 import Tests.TestExactSafeTensors
