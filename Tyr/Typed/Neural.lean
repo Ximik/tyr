@@ -430,7 +430,9 @@ def sliceScatter {s sourceShape : Shape} {d : DType} {dev : Device}
     (input : Tensor ⟨s, d, dev⟩) (dim start : Nat)
     (source : Tensor ⟨sourceShape, d, dev⟩)
     (_h : TensorSpec.sliceScatterCompatible s sourceShape dim = true := by
-      first | exact of_decide_eq_true rfl | (simp <;> fail "incompatible slice scatter shapes")) :
+      first | exact of_decide_eq_true rfl | (simp <;> fail "incompatible slice scatter shapes"))
+    (_bound : start + sourceShape.getD dim 0 ≤ s.getD dim 0 := by
+      first | exact of_decide_eq_true rfl | omega | (simp <;> omega)) :
     Tensor ⟨s, d, dev⟩ :=
   let dtype := input.raw.dtype
   let device := input.raw.device

@@ -1351,6 +1351,8 @@ def forward {baseFrames : Nat}
        Tensor { shape := #[1, GeneratorConfig.waveSamples cfg.generator baseFrames, 1], dtype := .Float32, device := device } ×
        Tensor { shape := #[1, GeneratorConfig.waveSamples cfg.generator baseFrames, 1], dtype := .Float32, device := device }) := do
   let waveFrames := GeneratorConfig.waveSamples cfg.generator baseFrames
+  let ⟨_hWave⟩ ← if h : 1 ≤ waveFrames then pure (PLift.up h) else
+    throw <| IO.userError "KittenTTS source module needs at least one waveform sample"
   let harmonics := cfg.generator.harmonicCount + 1
   let mult : Tensor { shape := #[1, 1, harmonics], dtype := .Float32, device := device } := Tensor.reshape (harmonicMultipliers cfg.generator.harmonicCount) #[1, 1, harmonics]
   let multE : Tensor { shape := #[1, waveFrames, harmonics], dtype := .Float32, device := device } := Tensor.expand mult #[1, waveFrames, harmonics]
