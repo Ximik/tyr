@@ -211,8 +211,8 @@ leaves, to preserve full device policies, and removes the unused `torch.TT` and
 arrays remain: their witnesses represent genuine runtime-varying shapes.
 
 Pure checked operations follow the existing `panic!` convention and can return
-an inhabited fallback after reporting a mismatch. `Tensor.ofRaw`, `transpose?`,
-`expand?`, and `rmsNormWeighted?` expose recoverable metadata errors; IO adapters
+an inhabited fallback after reporting a mismatch. `Tensor.ofRaw`, `expand?`,
+and `rmsNormWeighted?` expose recoverable metadata errors; IO adapters
 should propagate errors.
 The new checks read native metadata and add overhead; no performance comparison
 or GPU hardware qualification is implied by this review.

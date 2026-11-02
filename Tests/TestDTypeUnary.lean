@@ -76,8 +76,7 @@ example (_x : Tensor ⟨#[2], .Int64, .CPU⟩) : True := by
       Tensor.cos? input, Tensor.atan? input,
       Tensor.sigmoid? input, Tensor.tanh? input,
       Tensor.pow? input 0.5, Tensor.gelu? input,
-      Tensor.silu? input, Tensor.elu? input,
-      Tensor.softmax? input, Tensor.logSoftmax? input] do
+      Tensor.silu? input, Tensor.elu? input] do
     expectError result
   LeanTest.assertEqual input.raw.dtype .Int64
   LeanTest.assertEqual (← input.toFloatArray) #[1, 4]
@@ -87,10 +86,6 @@ example (_x : Tensor ⟨#[2], .Int64, .CPU⟩) : True := by
   expectError (Tensor.gelu? complex)
   expectError (Tensor.silu? complex)
   expectError (Tensor.elu? complex)
-  expectError (Tensor.softmax? complex)
-  expectError (Tensor.logSoftmax? complex)
-  expectError (Tensor.softmax? (Tensor.ones #[2]) 9)
-  expectError (Tensor.logSoftmax? (Tensor.ones #[2]) 9)
   let shell := (Tensor.ones #[2]).castDType .Float8E4M3FN
   expectError (Tensor.sqrt? shell)
 

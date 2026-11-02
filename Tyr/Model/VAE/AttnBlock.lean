@@ -71,7 +71,7 @@ def forward {batch channels height width : Nat}
   let scale := Float.sqrt channels.toFloat
   let attn_weights := bmm q_t k  -- [batch, spatial, spatial]
   let attn_weights := Tensor.divScalar attn_weights scale
-  let attn_weights := Tensor.softmax attn_weights (-1)
+  let attn_weights := Tensor.softmax attn_weights
 
   -- V: [batch, channels, spatial]
   -- attn_weights @ Vᵀ = [batch, spatial, spatial] @ [batch, spatial, channels]

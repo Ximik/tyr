@@ -431,7 +431,7 @@ private def ppoUpdate
       let working ← TensorStruct.makeLeafParams netCur
       TensorStruct.zeroGrads working
       let (logits, values) := AlphaGradNet.forward working obs
-      let logProbsAll := Tensor.logSoftmax logits (-1) rfl
+      let logProbsAll := Tensor.logSoftmax logits
       let selectedLogProbs : Tensor { shape := #[n, 1], dtype := .Float32, device := .CPU } :=
         Tensor.sumDim (oneHot * logProbsAll) 1 true
 
@@ -448,7 +448,7 @@ private def ppoUpdate
       let valueErr := values - retT
       let valueLoss := Tensor.meanAll (valueErr * valueErr)
 
-      let probs := Tensor.softmax logits (-1) rfl
+      let probs := Tensor.softmax logits
       let entropyTerms := probs * logProbsAll
       let entropyPer := Tensor.sumDim entropyTerms 1 false
       let entropy := Tensor.mulScalar (Tensor.meanAll entropyPer) (-1.0)
@@ -729,7 +729,7 @@ private def alphaZeroUpdate
       let working ← TensorStruct.makeLeafParams netCur
       TensorStruct.zeroGrads working
       let (logits, values) := AlphaGradNet.forward working obs
-      let logProbs := Tensor.logSoftmax logits (-1) rfl
+      let logProbs := Tensor.logSoftmax logits
       let policyPer := Tensor.sumDim (policyT * logProbs) 1 false
       let policyLoss := Tensor.mulScalar (Tensor.meanAll policyPer) (-1.0)
       let valueErr := values - valueT

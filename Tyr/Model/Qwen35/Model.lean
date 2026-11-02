@@ -181,7 +181,7 @@ def forward {tokens : Nat}
     : Tensor { device := device, shape := #[tokens, cfg.num_experts], dtype := dtype } × Tensor { device := device, shape := #[tokens, cfg.num_experts_per_tok], dtype := dtype } × Tensor { device := device, shape := #[tokens, cfg.num_experts_per_tok], dtype := .Int64 } :=
   let logitsDyn : Tensor { device := device, shape := #[tokens, cfg.num_experts], dtype := dtype } := einsumChecked "eh,th->te" m.weight hidden
   let logits : Tensor { device := device, shape := #[tokens, cfg.num_experts], dtype := dtype } := Tensor.reshape logitsDyn #[tokens, cfg.num_experts]
-  let probs : Tensor { device := device, shape := #[tokens, cfg.num_experts], dtype := dtype } := Tensor.softmax logits (-1)
+  let probs : Tensor { device := device, shape := #[tokens, cfg.num_experts], dtype := dtype } := Tensor.softmax logits
   let (topValsRaw, topIdx) := topK2d probs cfg.num_experts_per_tok 1
   let denom : Tensor { device := device, shape := #[tokens, 1], dtype := dtype } := by simpa using Tensor.sumDim topValsRaw 1 true
   let denom : Tensor { device := device, shape := #[tokens, cfg.num_experts_per_tok], dtype := dtype } := Tensor.expand denom #[tokens, cfg.num_experts_per_tok]

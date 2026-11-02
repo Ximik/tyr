@@ -244,7 +244,7 @@ private def sampledFisherCotangentRows
   if probeCount == 0 then
     throw <| IO.userError "RiemannianTreeSGD.stepCrossEntropySampledFisher requires probeCount > 0"
   let tokenCount := batch * seq
-  let probs3d := Tensor.detach (Tensor.softmax predictionReq (-1) rfl)
+  let probs3d := Tensor.detach (Tensor.softmax predictionReq)
   let probs : Tensor { shape := #[tokenCount, vocab], dtype := .Float32, device := device } := Tensor.reshape probs3d #[tokenCount, vocab]
   let scale := 1.0 / Float.sqrt probeCount.toFloat
   let srcOnes0 : Tensor { shape := #[tokenCount, 1], dtype := .Float32, device := device } := Tensor.ones #[tokenCount, 1] false device

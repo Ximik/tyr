@@ -15,7 +15,7 @@ opaque lagunaMoeFp4Forward
 @[extern "lean_torch_bmm"] opaque lagunaBmm
     (input mat2 : @& RawTensor) : RawTensor
 @[extern "lean_torch_scatter_add"] opaque lagunaScatterAdd
-    (input : @& RawTensor) (dim : Int64) (indices src : @& RawTensor) : RawTensor
+    (input : @& RawTensor) (dim : @& Nat) (indices src : @& RawTensor) : RawTensor
 
 @[extern "lean_torch_has_grad_fn"] opaque lagunaHasGradFn
     (input : @& RawTensor) : Bool

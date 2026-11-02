@@ -266,11 +266,6 @@ def testTypedComplexScalarPromotion : IO Unit := do
 @[test]
 def testTypedRuntimeShapeResults : IO Unit := do
   let matrix := (Tensor.fromFloatArray #[1, 2, 3, 4, 5, 6]).reshape #[2, 3]
-  let empty := Tensor.ones #[0]
-  assertValid (empty.cat matrix 0) "cat accepts empty 1D left operand"
-  assertValid (empty.cat matrix 1) "cat empty 1D left operand on second axis"
-  assertValid (matrix.cat empty 1) "cat accepts empty 1D right operand"
-  LeanTest.assertEqual (← (empty.cat matrix 1).toFloatArray) #[1, 2, 3, 4, 5, 6]
   assertValid (matrix.permute #[1, 0]) "runtime permutation"
   assertValid (matrix.transpose 0 1) "runtime transpose"
   assertValid ((matrix.unsqueeze 1).squeeze 1) "runtime unsqueeze/squeeze"

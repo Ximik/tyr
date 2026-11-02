@@ -125,7 +125,7 @@ void checkedIndexSelect(int scenario) {
   const uint64_t id = scenario == 1 ? UINT64_MAX : scenario == 2 ? 2 : 0;
   Object input(lean_torch_full(shape({size}), 3.25, 0, lean_box(1)), lean_dec);
   Object indices(lean_torch_full_int(shape({count}), id), lean_dec);
-  Object result(lean_torch_index_select_checked(input.get(), 0, indices.get()), lean_dec);
+  Object result(lean_torch_index_select_checked(input.get(), Nat(0), indices.get()), lean_dec);
   if (scenario == 1 || scenario == 2) exceptError(result.get(), "indexSelect");
   else values(exceptValue(result.get()), count, 3.25);
   require(input->m_rc == 1 && indices->m_rc == 1,
@@ -505,9 +505,9 @@ void checkedMaximum(bool nanLeft, bool nanRight) {
 
 void checkedUnaryParameterErrors() {
   auto input = full({2}, 1);
-    Object softmax(CHECKED(lean_torch_tensor_softmax)(input.get(), 9), lean_dec);
+    Object softmax(CHECKED(lean_torch_tensor_softmax)(input.get(), Nat(9)), lean_dec);
   exceptError(softmax.get(), "softmax");
-  Object logSoftmax(CHECKED(lean_torch_log_softmax)(input.get(), 9), lean_dec);
+  Object logSoftmax(CHECKED(lean_torch_log_softmax)(input.get(), Nat(9)), lean_dec);
   exceptError(logSoftmax.get(), "logSoftmax");
   auto complex = cast(input.get(), tyr::lean::DType::Complex64);
   Object gelu(CHECKED(lean_torch_tensor_gelu)(complex.get()), lean_dec);
@@ -528,8 +528,7 @@ void checkedComparison(Binary operation, const char* context, bool invalid) {
 
 void checkedCatPair(bool invalid) {
   auto a = full({2, 2}, 3), b = full({invalid ? 3u : 2u, 2}, 3);
-  Object result(CHECKED(lean_torch_cat2)(a.get(), b.get(),
-    lean_int64_to_int(1)), lean_dec);
+  Object result(CHECKED(lean_torch_cat2)(a.get(), b.get(), Nat(1)), lean_dec);
   if (invalid) exceptError(result.get(), "cat");
   else values(exceptValue(result.get()), 8, 3);
   require(a->m_rc == 1 && b->m_rc == 1,

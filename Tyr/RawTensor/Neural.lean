@@ -10,7 +10,7 @@ namespace torch.RawTensor
     (input weight bias : @& RawTensor) (stride padding dilation : Array Nat) : RawTensor
 @[extern "lean_torch_conv2d_bias_checked"] opaque conv2dBiasChecked
     (input weight bias : @& RawTensor) (stride padding dilation : Array Nat) : Except String RawTensor
-@[extern "lean_torch_cat_dyn"] opaque catMany (tensors : @& Array RawTensor) (dim : Int) : RawTensor
+@[extern "lean_torch_cat_dyn"] opaque catMany (tensors : @& Array RawTensor) (dim : @& Nat) : RawTensor
 @[extern "lean_torch_arange"] opaque arange (start stop step : @& Nat) : RawTensor
 @[extern "lean_torch_tensor_sin"] opaque sin (t : @& RawTensor) : RawTensor
 @[extern "lean_torch_tensor_cos"] opaque cos (t : @& RawTensor) : RawTensor
@@ -24,7 +24,7 @@ namespace torch.RawTensor
     (q k v mask : @& RawTensor) (dropout : Float) (causal gqa : Bool) : IO RawTensor
 
 @[extern "lean_torch_gather"] opaque gather
-    (input : @& RawTensor) (dim : Int64) (indices : @& RawTensor) : RawTensor
+    (input : @& RawTensor) (dim : @& Nat) (indices : @& RawTensor) : RawTensor
 @[extern "lean_torch_masked_select"] opaque maskedSelect
     (input mask : @& RawTensor) : RawTensor
 @[extern "lean_torch_masked_scatter"] opaque maskedScatter
@@ -103,7 +103,7 @@ namespace torch.RawTensor
 @[extern "lean_torch_topk_2d_checked"] opaque topKLast2dChecked
     (input : @& RawTensor) (k dim : @& Nat) : Except String (RawTensor × RawTensor)
 
-@[extern "lean_torch_get"] opaque getOp (input : @& RawTensor) (idx : Int) : RawTensor
+@[extern "lean_torch_get"] opaque getOp (input : @& RawTensor) (idx : @& Nat) : RawTensor
 @[extern "lean_torch_unbind"] opaque unbind (input : @& RawTensor) (dim : Nat) : Array RawTensor
 @[extern "lean_torch_logspace"] opaque logspace (start stop : Float) (steps : @& Nat)
     (base : Float) (requiresGrad : Bool) (noGrad : requiresGrad = false := by decide) : RawTensor
@@ -119,7 +119,7 @@ namespace torch.RawTensor
 end torch.RawTensor
 
 namespace torch.RawTensor
-@[extern "lean_torch_cat_dyn_checked"] opaque catManyChecked (tensors : @& Array RawTensor) (dim : Int) : Except String RawTensor
+@[extern "lean_torch_cat_dyn_checked"] opaque catManyChecked (tensors : @& Array RawTensor) (dim : @& Nat) : Except String RawTensor
 end torch.RawTensor
 
 namespace torch.RawTensor

@@ -23,9 +23,9 @@ open torch
 @[test] def testTypedNeuralGatherAndMasks : IO Unit := do
   let x := (Tensor.fromFloatArray #[1, 2, 3, 4, 5, 6]).reshape #[2, 3]
   let indices := (Tensor.fromInt64Array #[2, 0, 1, 1]).reshape #[2, 2]
-  let selected := Tensor.gather x (-1) indices
+  let selected := Tensor.gather x 1 indices
   LeanTest.assertEqual (← selected.toFloatArray) #[3, 1, 5, 5]
-    "Signed gather dimension preserves native negative-axis semantics"
+    "gather along the last axis"
   let mask := (Tensor.fromInt64Array #[1, 0, 1, 0, 0, 1]).reshape #[2, 3] |>.eqScalar 1
   let packed := Tensor.maskedSelect x mask
   LeanTest.assertEqual packed.1 3
@@ -82,19 +82,17 @@ open torch
     LeanTest.assertTrue rejected "Invalid randint arguments must return IO.error"
 
 example (_matrix : Tensor ⟨#[2, 3], .Float32, .CPU⟩) : True := by
-  have _ := _matrix.transpose? 1 0
+  have _ := _matrix.transpose 1 0
   fail_if_success
-    have _ := _matrix.transpose? 0 9
+    have _ := _matrix.transpose 0 9
   fail_if_success
-    have _ := _matrix.transpose? 9 0
+    have _ := _matrix.transpose 9 0
   fail_if_success
-    have _ := _matrix.transpose? 0 18446744073709551615
+    have _ := _matrix.transpose 0 18446744073709551615
   trivial
 
-@[test] def testTypedTransposeRecoverableErrors : IO Unit := do
-  match (Tensor.full #[] 5).transpose? 0 0 with
-  | .ok scalar => LeanTest.assertEqual (← scalar.toFloatArray) #[5]
-  | .error message => LeanTest.fail message
+@[test] def testTypedScalarTranspose : IO Unit := do
+  LeanTest.assertEqual (← ((Tensor.full #[] 5).transpose 0 0).toFloatArray) #[5]
 
 @[test] def testTypedRMSNormBFloat16Rounding : IO Unit := do
   let values := (Tensor.fromFloatArray

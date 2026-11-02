@@ -163,16 +163,16 @@ private def runCase (path : String) (device : Device) : IO Unit := do
     IO.println s!"  forward2d(fused) [{lbl}]: maxAbs={fAbs} violations={violF}"
     check (violF == 0.0) s!"forward2d(fused) [{lbl}] within rtol=2% atol=0.5 (violations={violF})"
 
-private def checkSignedScatterDimension : IO Unit := do
+private def checkScatterDimension : IO Unit := do
   let input := qwen35.zerosDynamic #[2, 3]
   let indices := (Tensor.fromInt64Array #[2, 0]).reshape #[2, 1]
   let values := (Tensor.fromFloatArray #[5.0, 7.0]).reshape #[2, 1]
-  let out := scatterAdd input (-1) indices values
+  let out := scatterAdd input 1 indices values
   check ((← Tensor.toFloatArray out) == #[0.0, 0.0, 5.0, 7.0, 0.0, 0.0])
-    "scatter-add preserves signed negative dimension across the native ABI"
+    "scatter-add passes its dimension across the native ABI"
 
 def main : IO Unit := do
-  checkSignedScatterDimension
+  checkScatterDimension
   let path ← findFixture
   IO.println s!"Using fixture: {path}"
   IO.println "-- router + MoE block on CPU"

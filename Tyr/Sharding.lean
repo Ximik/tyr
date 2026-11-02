@@ -163,6 +163,14 @@ private def moveFrontToAxisPerm (rank d : Nat) : Array Nat :=
     else if i = d then 0
     else i
 
+/-- Permute by an axis order computed at runtime, rejecting one that is not a
+permutation of the tensor's axes. -/
+private def permuteRuntime {τ : StaticSpec} (t : Tensor τ) (permutation : Array Nat) :
+    IO (Tensor (τ.withShape (TensorSpec.permuteShape τ.shape permutation))) :=
+  if h : TensorSpec.isPermutation permutation τ.shape.size = true then pure (t.permute permutation h)
+  else throw (IO.userError
+    s!"ShardedTensor.gather: {permutation} is not a permutation of {τ.shape.size} axes")
+
 /-- Gather all shards to reconstruct the full tensor.
 
     Uses the all-gather collective operation, concatenating the per-rank shards
@@ -201,8 +209,8 @@ def ShardedTensor.gather {σ : StaticSpec} {rank worldSize : Nat} {sd : ShardDim
         -- Move the sharded axis to the front, gather, then move it back
         let toFront := moveAxisToFrontPerm σ.shape.size d
         let fromFront := moveFrontToAxisPerm σ.shape.size d
-        let gathered ← dist.allGather worldSize (Tensor.permute sharded.shard toFront)
-        let unpermuted := Tensor.permute gathered fromFront
+        let gathered ← dist.allGather worldSize (← permuteRuntime sharded.shard toFront)
+        let unpermuted ← permuteRuntime gathered fromFront
         match Tensor.ofRaw (σ := σ) unpermuted.raw with
         | .ok t => pure t
         | .error message => throw (IO.userError s!"ShardedTensor.gather: {message}")

@@ -103,7 +103,7 @@ private def softcap {s : Shape} (x : Tensor { device := device, shape := s, dtyp
   Tensor.tanh (x / cap) * cap
 
 def cappedLogSoftmax {s : Shape} (cfg : FlowConfig) (logits : Tensor { device := device, shape := s, dtype := .Float32 }) : Tensor { device := device, shape := s, dtype := .Float32 } :=
-  Tensor.logSoftmax (softcap logits cfg.softcap) (-1)
+  Tensor.logSoftmax (softcap logits cfg.softcap)
 
 def forwardLogProbs {seq vocab batch : Nat} {Params : Type}
     (cfg : FlowConfig)

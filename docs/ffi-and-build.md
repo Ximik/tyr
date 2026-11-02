@@ -243,9 +243,9 @@ Both Arrow-enabled and Arrow-disabled Parquet implementations use the guard,
 including error-message construction. Other native subsystems remain outside
 this source gate's reviewed scope.
 `RawTensor.flashAttention` and `RawTensor.transpose` return
-`Except String RawTensor`; their typed `Tensor.flashAttention?` and
-`Tensor.transpose?` adapters preserve recoverable failures and check successful
-results. The convenience variants call `nativeInvariantFailure` on errors;
+`Except String RawTensor`. The typed `Tensor.flashAttention?` adapter preserves
+recoverable failures and checks successful results; `Tensor.transpose` takes
+axis proofs instead. The convenience variants call `nativeInvariantFailure` on errors;
 it prints a diagnostic and aborts without allocating or returning a default tensor.
 `Tensor.randint` reports invalid bounds and device failures through `IO.Error`.
 The native `randn`/`rand` factories and dropout also catch failures at their IO boundary;
