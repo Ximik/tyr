@@ -12,7 +12,7 @@ def attentionReference {batch heads qSeq kvSeq : Nat}
   let kt := (Tensor.transpose k.toFloat32 2 3).reshape #[batch, heads, 64, kvSeq]
   let scores := Tensor.bmm4d q.toFloat32 kt
   let scaled := Tensor.mulScalar scores 0.125
-  let probs := Tensor.softmax scaled (-1)
+  let probs := Tensor.softmax scaled
   let output := (Tensor.bmm4d probs v.toFloat32).toBFloat16
   let sumExp := (Tensor.sumDim (Tensor.exp scaled) 3 false).reshape #[batch, heads, qSeq]
   let lse := Tensor.log sumExp

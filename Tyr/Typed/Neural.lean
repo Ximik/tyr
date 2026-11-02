@@ -89,7 +89,7 @@ def packShape {s : Shape} {d : DType} {dev : Device} (t : Tensor ⟨s, d, dev⟩
 Inputs retain their individual shape indices rather than pretending to be scalars. -/
 def catMany? {d : DType} {dev : Device}
     (tensors : Array (Sigma (fun shape => Tensor ⟨shape, d, dev⟩)))
-    (dim : Int) (shape : Shape) : Except String (Tensor ⟨shape, d, dev⟩) := do
+    (dim : Nat) (shape : Shape) : Except String (Tensor ⟨shape, d, dev⟩) := do
   let some first := tensors[0]? | throw "catMany requires at least one tensor"
   for t in tensors do
     Tensor.checkSameDevice first.2 t.2
@@ -97,7 +97,7 @@ def catMany? {d : DType} {dev : Device}
 
 def catManyChecked {d : DType} {dev : Device}
     (tensors : Array (Sigma (fun shape => Tensor ⟨shape, d, dev⟩)))
-    (dim : Int) (shape : Shape) : Tensor ⟨shape, d, dev⟩ :=
+    (dim : Nat) (shape : Shape) : Tensor ⟨shape, d, dev⟩ :=
   match catMany? tensors dim shape with
   | .ok result => result
   | .error message => nativeInvariantFailure s!"Tensor.catManyChecked: {message}"
@@ -338,8 +338,11 @@ def attentionGQAMaskIO {batch heads kvHeads seq dim : Nat} {d dm : DType} {dev :
 
 /-- Gather has the index tensor's shape, and the source tensor's dtype. -/
 def gather {s indicesShape : Shape} {d : DType} {dev : Device}
-    (input : Tensor ⟨s, d, dev⟩) (dim : Int64)
-    (indices : Tensor ⟨indicesShape, .Int64, dev⟩) : Tensor ⟨indicesShape, d, dev⟩ :=
+    (input : Tensor ⟨s, d, dev⟩) (dim : Nat)
+    (indices : Tensor ⟨indicesShape, .Int64, dev⟩)
+    (_h : TensorSpec.gatherCompatible s indicesShape dim = true := by
+      first | exact of_decide_eq_true rfl | (simp <;> fail "incompatible gather shapes")) :
+    Tensor ⟨indicesShape, d, dev⟩ :=
   match Tensor.ofRaw (RawTensor.gather input.raw dim indices.raw) with
   | .ok result => result
   | .error message => nativeInvariantFailure s!"Tensor.gather: {message}"
@@ -425,7 +428,10 @@ def flashAttentionIO {batch heads kvHeads qSeq kvSeq dim : Nat} {d : DType} {dev
 
 def sliceScatter {s sourceShape : Shape} {d : DType} {dev : Device}
     (input : Tensor ⟨s, d, dev⟩) (dim start : Nat)
-    (source : Tensor ⟨sourceShape, d, dev⟩) : Tensor ⟨s, d, dev⟩ :=
+    (source : Tensor ⟨sourceShape, d, dev⟩)
+    (_h : TensorSpec.sliceScatterCompatible s sourceShape dim = true := by
+      first | exact of_decide_eq_true rfl | (simp <;> fail "incompatible slice scatter shapes")) :
+    Tensor ⟨s, d, dev⟩ :=
   let dtype := input.raw.dtype
   let device := input.raw.device
   Tensor.checkedUpdate dtype device
@@ -695,7 +701,10 @@ def arangeFrom (start stop : Nat) (step : Nat := 1) :
   | .ok result => result
   | .error message => nativeInvariantFailure s!"Tensor.arangeFrom: {message}"
 
-def getOp {σ : StaticSpec} (input : Tensor σ) (idx : Int) :
+/-- Select entry `idx` of the leading axis; a scalar has no leading axis. -/
+def getOp {σ : StaticSpec} (input : Tensor σ) (idx : Nat)
+    (_bound : idx < σ.shape[0]?.getD 0 := by
+      first | exact of_decide_eq_true rfl | (simp <;> fail "index out of range")) :
     Tensor (σ.withShape (σ.shape.extract 1 σ.shape.size)) :=
   match Tensor.ofRaw (RawTensor.getOp input.raw idx) with
   | .ok result => result

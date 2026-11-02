@@ -248,7 +248,7 @@ private def sampleNextToken {cfg : Config}
   let filtered :=
     if topK == 0 then scaled
     else Tensor.topKFilter scaled topK
-  let probs := Tensor.softmax filtered (-1)
+  let probs := Tensor.softmax filtered
   let sampled ← Tensor.multinomial probs 1
   pure (Tensor.itemInt (sampled.reshape #[])).toUInt64
 

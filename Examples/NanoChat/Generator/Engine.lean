@@ -88,7 +88,7 @@ def sampleWithConfig {batch vocabSize : Nat}
   -- Apply top-p filtering
   let filtered := applyTopP filtered cfg.topP
   -- Convert to probabilities
-  let probs := Tensor.softmax filtered (-1)
+  let probs := Tensor.softmax filtered
   -- Sample from distribution
   let samples ← Tensor.multinomial probs 1
   -- Squeeze to remove the sample dimension and convert to token IDs

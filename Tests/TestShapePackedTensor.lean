@@ -23,9 +23,9 @@ open torch
     LeanTest.assertEqual loaded[i]!.1 values[i]!.1
     LeanTest.assertEqual (← loaded[i]!.2.toFloatArray) (← summed[i]!.2.toFloatArray)
 
-@[test] def testKittenSignedCumsumBoundary : IO Unit := do
+@[test] def testKittenCumsumBoundary : IO Unit := do
   let input := (Tensor.fromFloatArray #[1, 2, 3, 4, 5, 6]).reshape #[2, 3]
-  let output := kittentts.cumsumTensor input (-1)
+  let output := kittentts.cumsumTensor input 1
   LeanTest.assertEqual (← output.toFloatArray) #[1, 3, 6, 4, 9, 15]
 
 @[test] def testShapePackedTensorADRebuild : IO Unit := do

@@ -143,8 +143,11 @@ private def flashAttn4d {batch nHead nKvHead qSeq kvSeq headDim : Nat} {d : DTyp
     `src`; the result preserves the input spec. -/
 private def sliceScatterAlong {s srcShape : Shape} {d : DType} {dev : Device}
     (input : Tensor ⟨s, d, dev⟩) (dim : Nat) (start : Nat)
-    (src : Tensor ⟨srcShape, d, dev⟩) : Tensor ⟨s, d, dev⟩ :=
-  Tensor.sliceScatter input dim start src
+    (src : Tensor ⟨srcShape, d, dev⟩)
+    (h : TensorSpec.sliceScatterCompatible s srcShape dim = true := by
+      first | exact of_decide_eq_true rfl | (simp <;> fail "incompatible slice scatter shapes")) :
+    Tensor ⟨s, d, dev⟩ :=
+  Tensor.sliceScatter input dim start src h
 
 /-- Mean over one axis with the result shape validated at runtime. -/
 private def meanDimTo {s : Shape} {d : DType} {dev : Device}

@@ -52,7 +52,7 @@ def fromModel (cfg : QwenConfig) (max_seq : Nat) (model : Qwen3Model (device := 
     result against the claimed output shape (the legacy code reshaped the
     shape-erased cat result, which libtorch validated with a throw). -/
 private def catAlong {s : Shape} {d : DType} {dev : Device}
-    (tensors : Array (Tensor ⟨s, d, dev⟩)) (dim : Int) (out : Shape)
+    (tensors : Array (Tensor ⟨s, d, dev⟩)) (dim : Nat) (out : Shape)
     : Tensor ⟨out, d, dev⟩ :=
   match Tensor.catMany? (tensors.map Tensor.packShape) dim out with
   | .ok t => t

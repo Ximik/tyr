@@ -4,7 +4,7 @@ namespace torch.RawTensor
 @[extern "lean_torch_leaky_relu"] opaque leakyRelu (input : @& RawTensor) (slope : Float) : RawTensor
 @[extern "lean_torch_tensor_floor"] opaque floor (input : @& RawTensor) : RawTensor
 @[extern "lean_torch_atan2"] opaque atan2 (y x : @& RawTensor) : RawTensor
-@[extern "lean_torch_cumsum"] opaque cumsum (input : @& RawTensor) (dim : Int64) : RawTensor
+@[extern "lean_torch_cumsum"] opaque cumsum (input : @& RawTensor) (dim : @& Nat) : RawTensor
 @[extern "lean_torch_interpolate"] opaque interpolate (input : @& RawTensor)
     (size : Array Nat) (mode : String) (alignCorners : Bool) : RawTensor
 @[extern "lean_torch_istft_1d"] opaque istft (input : @& RawTensor)

@@ -104,7 +104,7 @@ void testShapesAndMetadata(lean_object* tensor) {
   lean_dec(lean_torch_mul_scalar(tensor, 2));
   lean_dec(lean_torch_div_scalar(tensor, 2));
   lean_dec(lean_torch_tensor_add(tensor, tensor));
-  lean_dec(lean_torch_tensor_softmax(tensor, 1));
+  lean_dec(lean_torch_tensor_softmax(tensor, Nat(1)));
   lean_dec(lean_torch_copy_(retain(tensor), tensor));
   lean_dec(lean_torch_copy_inplace(retain(tensor), tensor));
   lean_dec(lean_torch_transpose(tensor, Nat(0), Nat(1)));
@@ -137,7 +137,7 @@ void testOwnedArraysAndOptions(lean_object* tensor) {
   lean_array_set_core(elements, 1, retain(tensor));
   {
     ObservedArg array(elements);
-    lean_dec(lean_torch_stack_1d(array.transfer(), 0));
+    lean_dec(lean_torch_stack_1d(array.transfer(), Nat(0)));
     array.consumed("stack array");
   }
   checkBorrowedTensor(tensor);

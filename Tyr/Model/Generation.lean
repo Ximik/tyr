@@ -55,7 +55,7 @@ def sampleFromLogits {batch vocab : Nat}
     let filtered :=
       if topP >= 1.0 then filtered
       else Tensor.topPFilter filtered topP
-    let probs := Tensor.softmax filtered (-1) rfl
+    let probs := Tensor.softmax filtered
     let sampled ← Tensor.multinomial probs 1 false
     pure (Tensor.reshape sampled #[batch])
 

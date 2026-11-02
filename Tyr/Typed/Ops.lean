@@ -577,12 +577,11 @@ def pow {σ : StaticSpec} (t : Tensor σ) (exponent : Float)
     (_domain : σ.dtype.isInexact = true := by first | rfl | exact DType.isInexact_of_realFloating | decide) : Tensor σ :=
   unaryResult "pow" t (pow? t exponent)
 
-def softmax? {σ : StaticSpec} (t : Tensor σ) (dim : Int32 := -1) : Except String (Tensor σ) :=
-  checkedUnary? "softmax" "a standard real floating dtype" DType.isRealFloating (fun raw => RawTensor.softmaxChecked raw dim) t
-
-def softmax {σ : StaticSpec} (t : Tensor σ) (dim : Int32 := -1)
-    (_domain : σ.dtype.isRealFloating = true := by first | rfl | exact DType.isRealFloating_of_realFloating | decide) : Tensor σ :=
-  unaryResult "softmax" t (softmax? t dim)
+def softmax {σ : StaticSpec} (t : Tensor σ) (dim : Nat := σ.shape.size - 1)
+    (_domain : σ.dtype.isRealFloating = true := by first | rfl | exact DType.isRealFloating_of_realFloating | decide)
+    (_axis : dim < max 1 σ.shape.size := by first | exact of_decide_eq_true rfl | omega | (simp <;> fail "axis out of range")) : Tensor σ :=
+  unaryResult "softmax" t (checkedUnary? "softmax" "a standard real floating dtype"
+    DType.isRealFloating (fun raw => RawTensor.softmaxChecked raw dim) t)
 
 /-! ## Matmul family (operands must share dtype and device) -/
 
@@ -831,23 +830,17 @@ def slice {σ : StaticSpec} (t : Tensor σ) (dim : Nat) (start len : Nat)
     Tensor (σ.withShape (σ.shape.set! dim len)) :=
   checkedResult "slice" (Tensor.ofRaw (RawTensor.slice t.raw dim start len))
 
-def permute {σ : StaticSpec} (t : Tensor σ) (permutation : Array Nat) :
+def permute {σ : StaticSpec} (t : Tensor σ) (permutation : Array Nat)
+    (_h : TensorSpec.isPermutation permutation σ.shape.size = true := by
+      first | exact of_decide_eq_true rfl | (simp <;> fail "not a permutation of the axes")) :
     Tensor (σ.withShape (TensorSpec.permuteShape σ.shape permutation)) :=
   checkedResult "permute" (Tensor.ofRaw (RawTensor.permute t.raw permutation))
-
-/-- Transpose along valid axes, returning native validation errors and
-checking the result metadata. -/
-def transpose? {σ : StaticSpec} (t : Tensor σ) (dim0 dim1 : Nat)
-    (h0 : dim0 < max 1 σ.shape.size := by first | exact of_decide_eq_true rfl | (simp <;> fail "axis out of range"))
-    (h1 : dim1 < max 1 σ.shape.size := by first | exact of_decide_eq_true rfl | (simp <;> fail "axis out of range")) :
-    Except String (Tensor (σ.withShape (transposeShape σ.shape dim0 dim1 h0 h1))) := do
-  Tensor.ofRaw (← RawTensor.transpose t.raw dim0 dim1)
 
 def transpose {σ : StaticSpec} (t : Tensor σ) (dim0 dim1 : Nat)
     (h0 : dim0 < max 1 σ.shape.size := by first | exact of_decide_eq_true rfl | (simp <;> fail "axis out of range"))
     (h1 : dim1 < max 1 σ.shape.size := by first | exact of_decide_eq_true rfl | (simp <;> fail "axis out of range")) :
     Tensor (σ.withShape (transposeShape σ.shape dim0 dim1 h0 h1)) :=
-  checkedResult "transpose" (t.transpose? dim0 dim1 h0 h1)
+  checkedResult "transpose" do Tensor.ofRaw (← RawTensor.transpose t.raw dim0 dim1)
 
 def transpose2d {m n : Nat} {d : DType} {dev : Device}
     (t : Tensor ⟨#[m, n], d, dev⟩) : Tensor ⟨#[n, m], d, dev⟩ :=
@@ -863,16 +856,19 @@ def squeeze {σ : StaticSpec} (t : Tensor σ) (dim : Nat)
     Tensor (σ.withShape (squeezeShape σ.shape dim h)) :=
   checkedResult "squeeze" (Tensor.ofRaw (RawTensor.squeeze t.raw dim))
 
-def cat? {s1 s2 : Shape} {d : DType} {dev : Device}
-    (t1 : Tensor ⟨s1, d, dev⟩) (t2 : Tensor ⟨s2, d, dev⟩) (dim : Nat) :
-    Except String (Tensor ⟨TensorSpec.catShape s1 s2 dim, d, dev⟩) := do
-  Tensor.checkSameDevice t1 t2
-  Tensor.ofRaw (← RawTensor.catChecked t1.raw t2.raw dim)
+/-- Discharges `catCompatible` for shapes with symbolic dimensions; fails hard on
+    a rank mismatch, an out-of-range axis or disagreeing extents. -/
+macro "cat_shape" : tactic => `(tactic| first
+  | exact of_decide_eq_true rfl
+  | (simp <;> fail "incompatible cat shapes"))
 
 def cat {s1 s2 : Shape} {d : DType} {dev : Device}
-    (t1 : Tensor ⟨s1, d, dev⟩) (t2 : Tensor ⟨s2, d, dev⟩) (dim : Nat) :
+    (t1 : Tensor ⟨s1, d, dev⟩) (t2 : Tensor ⟨s2, d, dev⟩) (dim : Nat)
+    (_h : TensorSpec.catCompatible s1 s2 dim = true := by cat_shape) :
     Tensor ⟨TensorSpec.catShape s1 s2 dim, d, dev⟩ :=
-  checkedResult "cat" (cat? t1 t2 dim)
+  checkedResult "cat" do
+    Tensor.checkSameDevice t1 t2
+    Tensor.ofRaw (← RawTensor.catChecked t1.raw t2.raw dim)
 
 /-- Stack a runtime list of equal vectors along a new leading axis; the result
     shape records the actual list length. -/
@@ -1069,8 +1065,10 @@ def multinomial {n v : Nat} {d : DType} {dev : Device}
 /-- Scatter `src` into a clone of `input` along `dim` at Int64 `indices`;
     result preserves the input spec. -/
 def scatter2d {batch seq k : Nat} {d : DType} {dev : Device}
-    (input : Tensor ⟨#[batch, seq], d, dev⟩) (dim : Int64)
-    (indices : Tensor ⟨#[batch, k], .Int64, dev⟩) (src : Tensor ⟨#[batch, k], d, dev⟩) :
+    (input : Tensor ⟨#[batch, seq], d, dev⟩) (dim : Nat)
+    (indices : Tensor ⟨#[batch, k], .Int64, dev⟩) (src : Tensor ⟨#[batch, k], d, dev⟩)
+    (_axis : dim = 1 ∨ (dim = 0 ∧ k ≤ seq) := by
+      first | exact of_decide_eq_true rfl | (simp <;> fail "scatter axis out of range")) :
     Tensor ⟨#[batch, seq], d, dev⟩ :=
   input.checkedReplacement (RawTensor.scatter2d input.raw dim indices.raw src.raw)
 
@@ -1083,14 +1081,12 @@ def allclose {σ : StaticSpec} (a b : Tensor σ) (rtol : Float := 1e-05) (atol :
 def isLeaf {σ : StaticSpec} (t : Tensor σ) : Bool :=
   RawTensor.isLeaf t.raw
 
-/-- Log-softmax for standard real floating tensors, with recoverable native errors. -/
-def logSoftmax? {σ : StaticSpec} (t : Tensor σ) (dim : Int32 := -1) : Except String (Tensor σ) :=
-  checkedUnary? "logSoftmax" "a standard real floating dtype" DType.isRealFloating
-    (fun raw => RawTensor.logSoftmaxChecked raw dim) t
-
-def logSoftmax {σ : StaticSpec} (t : Tensor σ) (dim : Int32 := -1)
-    (_real : σ.dtype.isRealFloating = true := by first | rfl | exact DType.isRealFloating_of_realFloating | decide) : Tensor σ :=
-  unaryResult "logSoftmax" t (logSoftmax? t dim)
+/-- Log-softmax for standard real floating tensors. -/
+def logSoftmax {σ : StaticSpec} (t : Tensor σ) (dim : Nat := σ.shape.size - 1)
+    (_real : σ.dtype.isRealFloating = true := by first | rfl | exact DType.isRealFloating_of_realFloating | decide)
+    (_axis : dim < max 1 σ.shape.size := by first | exact of_decide_eq_true rfl | omega | (simp <;> fail "axis out of range")) : Tensor σ :=
+  unaryResult "logSoftmax" t (checkedUnary? "logSoftmax" "a standard real floating dtype"
+    DType.isRealFloating (fun raw => RawTensor.logSoftmaxChecked raw dim) t)
 
 /-- Backward from a scalar loss (gradient = 1.0). Saved intermediates are released
 by default; omitted retention follows `createGraph`, as in PyTorch. -/

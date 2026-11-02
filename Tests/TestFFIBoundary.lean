@@ -17,7 +17,6 @@ def testBoxedIndexAndUnbind : IO Unit := do
   let x := (Tensor.arangeFrom 0 6).reshape #[2, 3]
   LeanTest.assertEqual (← values (x.getOp 0)) #[0.0, 1.0, 2.0]
   LeanTest.assertEqual (← values (x.getOp 1)) #[3.0, 4.0, 5.0]
-  LeanTest.assertEqual (← values (x.getOp (-1))) #[3.0, 4.0, 5.0]
   let rows := Tensor.unbind x 0
   LeanTest.assertEqual rows.size 2
   LeanTest.assertEqual rows[0]!.runtimeShape #[3]

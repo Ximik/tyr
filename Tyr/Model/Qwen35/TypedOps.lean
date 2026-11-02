@@ -32,7 +32,7 @@ def typedSlice {s out : Shape} {d : DType} (x : Tensor { device := device, shape
   x.sliceChecked dim start len out
 
 def typedCat {s t out : Shape} {d : DType} (x : Tensor { device := device, shape := s, dtype := d }) (y : Tensor { device := device, shape := t, dtype := d }) (dim : Nat) : Tensor { device := device, shape := out, dtype := d } :=
-  Tensor.catManyChecked #[x.packShape, y.packShape] (Int.ofNat dim) out
+  Tensor.catManyChecked #[x.packShape, y.packShape] dim out
 
 def transposeSeq {batch seq dim : Nat} {d : DType} (x : Tensor { device := device, shape := #[batch, seq, dim], dtype := d }) :
     Tensor { device := device, shape := #[batch, dim, seq], dtype := d } := x.transpose 1 2

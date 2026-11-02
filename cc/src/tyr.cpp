@@ -725,14 +725,8 @@ lean_object* lean_torch_permute(b_lean_obj_arg self, lean_obj_arg permutation) {
   return fromTorchTensor(res);
 }
 
-lean_object* lean_torch_get(b_lean_obj_arg self, lean_obj_arg idx) {
-  OwnedLeanObject idx_owner(idx, lean_dec);
-  const auto index = static_cast<int64_t>(lean_int64_of_int(idx));
-  auto* roundtrip = lean_int64_to_int(index);
-  const bool fits = lean_int_dec_eq(idx, roundtrip);
-  lean_dec(roundtrip);
-  idx_owner.reset();
-  TORCH_CHECK(fits, "getOp: index must fit in signed 64 bits");
+lean_object* lean_torch_get(b_lean_obj_arg self, b_lean_obj_arg idx) {
+  const auto index = static_cast<int64_t>(tyr::natTo<int64_t>(idx, "getOp index"));
   auto self_ = borrowTensor(self);
   auto res = self_.index({index});
   return fromTorchTensor(res);
@@ -974,10 +968,16 @@ uint8_t lean_torch_has_grad_fn(b_lean_obj_arg x) {
     return result;
 }
 
-lean_object* lean_torch_tensor_softmax(b_lean_obj_arg a, uint32_t dim_bits) {
-  const int32_t dim = static_cast<int32_t>(dim_bits);
+// Matches the typed `dim < max 1 rank` contract: a scalar accepts axis zero.
+static int64_t checkedSoftmaxAxis(const torch::Tensor& input, b_lean_obj_arg dim_obj) {
+  const uint64_t dim = tyr::natTo<int64_t>(dim_obj, "dim");
+  TORCH_CHECK(dim < static_cast<uint64_t>(std::max<int64_t>(1, input.dim())), "dimension out of range");
+  return static_cast<int64_t>(dim);
+}
+
+lean_object* lean_torch_tensor_softmax(b_lean_obj_arg a, b_lean_obj_arg dim_obj) {
   auto a_ = borrowTensor(a);
-  auto c_ = torch::softmax(a_, dim);
+  auto c_ = torch::softmax(a_, checkedSoftmaxAxis(a_, dim_obj));
   return fromTorchTensor(c_);
 }
 
@@ -1195,9 +1195,9 @@ lean_object* lean_torch_dropout(b_lean_obj_arg input, double p, uint8_t training
   });
 }
 
-lean_object* lean_torch_log_softmax(b_lean_obj_arg input, uint32_t dim) {
+lean_object* lean_torch_log_softmax(b_lean_obj_arg input, b_lean_obj_arg dim_obj) {
   auto input_ = borrowTensor(input);
-  auto output_ = torch::nn::functional::log_softmax(input_, torch::nn::functional::LogSoftmaxFuncOptions(static_cast<int>(dim)));
+  auto output_ = torch::nn::functional::log_softmax(input_, torch::nn::functional::LogSoftmaxFuncOptions(checkedSoftmaxAxis(input_, dim_obj)));
   return fromTorchTensor(output_);
 }
 
@@ -1299,7 +1299,7 @@ lean_object* lean_torch_embedding(
   int64_t padding_idx_val = -1;
   if (!lean_is_scalar(padding_idx)) {
     lean_object* idx = lean_ctor_get(padding_idx, 0);
-    padding_idx_val = static_cast<int64_t>(lean_int64_of_int(idx));
+    padding_idx_val = static_cast<int64_t>(tyr::natTo<int64_t>(idx, "paddingIdx"));
   }
 
   padding_idx_owner.reset();
@@ -1330,7 +1330,7 @@ lean_object* lean_torch_embedding_1d(
   int64_t padding_idx_val = -1;
   if (!lean_is_scalar(padding_idx)) {
     lean_object* idx = lean_ctor_get(padding_idx, 0);
-    padding_idx_val = static_cast<int64_t>(lean_int64_of_int(idx));
+    padding_idx_val = static_cast<int64_t>(tyr::natTo<int64_t>(idx, "paddingIdx"));
   }
 
   padding_idx_owner.reset();
@@ -1400,21 +1400,17 @@ lean_object* lean_torch_transpose(b_lean_obj_arg input, b_lean_obj_arg dim0_obj,
 lean_object* lean_torch_cat2(
     b_lean_obj_arg t1,
     b_lean_obj_arg t2,
-    lean_obj_arg dim_obj
+    b_lean_obj_arg dim_obj
 ) {
-  OwnedLeanObject dim_obj_owner(dim_obj, lean_dec);
-  int64_t dim = static_cast<int64_t>(lean_int64_of_int(dim_obj));
-  dim_obj_owner.reset();
+  const auto dim = static_cast<int64_t>(tyr::natTo<int64_t>(dim_obj, "dim"));
   auto t1_ = borrowTensor(t1);
   auto t2_ = borrowTensor(t2);
   auto result_ = torch::cat({t1_, t2_}, dim);
   return fromTorchTensor(result_);
 }
 
-lean_object* lean_torch_cat_dyn(b_lean_obj_arg tensors, lean_obj_arg dim_obj) {
-  OwnedLeanObject dim_obj_owner(dim_obj, lean_dec);
-  int64_t dim = static_cast<int64_t>(lean_int64_of_int(dim_obj));
-  dim_obj_owner.reset();
+lean_object* lean_torch_cat_dyn(b_lean_obj_arg tensors, b_lean_obj_arg dim_obj) {
+  const auto dim = static_cast<int64_t>(tyr::natTo<int64_t>(dim_obj, "dim"));
   if (!lean_is_array(tensors)) {
     lean_internal_panic("lean_torch_cat_dyn: expected array");
   }
@@ -1429,8 +1425,8 @@ lean_object* lean_torch_cat_dyn(b_lean_obj_arg tensors, lean_obj_arg dim_obj) {
 }
 
 // Cumulative sum along a dimension.
-lean_object* lean_torch_cumsum(b_lean_obj_arg input, uint64_t dimBits) {
-  const auto dim = std::bit_cast<int64_t>(dimBits);
+lean_object* lean_torch_cumsum(b_lean_obj_arg input, b_lean_obj_arg dim_obj) {
+  const auto dim = static_cast<int64_t>(tyr::natTo<int64_t>(dim_obj, "dim"));
   auto input_ = borrowTensor(input);
   auto result_ = torch::cumsum(input_, dim);
   return fromTorchTensor(result_);
@@ -1928,28 +1924,29 @@ lean_object* lean_torch_load_u16_bin(b_lean_obj_arg n_obj, b_lean_obj_arg path_o
 // Index select: gather elements along a dimension
 lean_object* lean_torch_index_select(
   b_lean_obj_arg input,
-  uint64_t dim,
+  b_lean_obj_arg dim_obj,
   b_lean_obj_arg indices
 ) {
+  const auto dim = static_cast<int64_t>(tyr::natTo<int64_t>(dim_obj, "dim"));
   auto input_ = borrowTensor(input);
   auto indices_ = borrowTensor(indices);
   // Ensure indices are int64 (index_select requires int32 or int64)
   if (indices_.dtype() != torch::kInt64 && indices_.dtype() != torch::kInt32) {
     indices_ = indices_.to(torch::kInt64);
   }
-  auto result_ = torch::index_select(input_, static_cast<int64_t>(dim), indices_);
+  auto result_ = torch::index_select(input_, dim, indices_);
   return fromTorchTensor(result_);
 }
 
 lean_object* lean_torch_index_select_checked(b_lean_obj_arg input,
-    uint64_t dim_bits, b_lean_obj_arg indices) {
+    b_lean_obj_arg dim_obj, b_lean_obj_arg indices) {
   return tyr::checkedCall("indexSelect", [&] {
     auto data = borrowTensor(input);
     auto index = borrowTensor(indices);
-    auto dim = std::bit_cast<int64_t>(dim_bits);
+    const auto dim = tyr::natTo<int64_t>(dim_obj, "dim");
     TORCH_CHECK(data.dim() == 1 && index.dim() == 1,
       "indexSelect requires vector data and indices");
-    TORCH_CHECK(dim == 0 || dim == -1, "indexSelect vector axis must be zero");
+    TORCH_CHECK(dim == 0, "indexSelect vector axis must be zero");
     TORCH_CHECK(index.scalar_type() == torch::kInt64 || index.scalar_type() == torch::kInt32,
       "indexSelect requires Int64 or Int32 indices");
     TORCH_CHECK(data.device() == index.device(), "indexSelect requires matching devices");
@@ -2041,16 +2038,17 @@ lean_object* lean_torch_copy_slice_io(lean_obj_arg input,
 // Stack multiple 1D tensors into 2D
 extern "C" LEAN_EXPORT lean_object* lean_torch_stack_1d(
   lean_obj_arg tensors,
-  uint64_t dim
+  b_lean_obj_arg dim_obj
 ) {
   OwnedLeanObject tensors_owner(tensors, lean_dec);
+  const auto dim = static_cast<int64_t>(tyr::natTo<int64_t>(dim_obj, "dim"));
   std::vector<torch::Tensor> tensor_list;
   for (size_t i = 0; i < lean_array_size(tensors); i++) {
     auto tensor_obj = lean_array_get_core(tensors, i);
     tensor_list.push_back(borrowTensor(tensor_obj));
   }
   tensors_owner.reset();
-  auto result_ = torch::stack(tensor_list, static_cast<int64_t>(dim));
+  auto result_ = torch::stack(tensor_list, dim);
   return fromTorchTensor(result_);
 }
 
@@ -3770,8 +3768,8 @@ lean_object* lean_torch_conv_transpose1d_bias_checked(
 
 // Gather along dimension
 lean_object* lean_torch_gather(
-    b_lean_obj_arg input, uint64_t dimBits, b_lean_obj_arg indices) {
-  const auto dim = std::bit_cast<int64_t>(dimBits);
+    b_lean_obj_arg input, b_lean_obj_arg dim_obj, b_lean_obj_arg indices) {
+  const auto dim = static_cast<int64_t>(tyr::natTo<int64_t>(dim_obj, "dim"));
   auto input_ = borrowTensor(input);
   auto indices_ = borrowTensor(indices);
   auto result_ = torch::gather(input_, dim, indices_);
@@ -3780,11 +3778,12 @@ lean_object* lean_torch_gather(
 
 // Scatter with add reduction
 lean_object* lean_torch_scatter_add(
-    b_lean_obj_arg input, uint64_t dim, b_lean_obj_arg indices, b_lean_obj_arg src) {
+    b_lean_obj_arg input, b_lean_obj_arg dim_obj, b_lean_obj_arg indices, b_lean_obj_arg src) {
+  const auto dim = static_cast<int64_t>(tyr::natTo<int64_t>(dim_obj, "dim"));
   auto input_ = borrowTensor(input);
   auto indices_ = borrowTensor(indices);
   auto src_ = borrowTensor(src);
-  auto result_ = input_.clone().scatter_add_(static_cast<int64_t>(dim), indices_, src_);
+  auto result_ = input_.clone().scatter_add_(dim, indices_, src_);
   return fromTorchTensor(result_);
 }
 
@@ -3792,11 +3791,12 @@ lean_object* lean_torch_scatter_add(
 // input: [batch, seq], indices: [batch, k], src: [batch, k] -> [batch, seq]
 // batch, seq, k are the implicit shape parameters
 lean_object* lean_torch_scatter_2d(
-    b_lean_obj_arg input, uint64_t dim, b_lean_obj_arg indices, b_lean_obj_arg src) {
+    b_lean_obj_arg input, b_lean_obj_arg dim_obj, b_lean_obj_arg indices, b_lean_obj_arg src) {
+  const auto dim = static_cast<int64_t>(tyr::natTo<int64_t>(dim_obj, "dim"));
   auto input_ = borrowTensor(input);
   auto indices_ = borrowTensor(indices);
   auto src_ = borrowTensor(src);
-  auto result_ = input_.clone().scatter_(static_cast<int64_t>(dim), indices_, src_);
+  auto result_ = input_.clone().scatter_(dim, indices_, src_);
   return fromTorchTensor(result_);
 }
 
@@ -4252,13 +4252,10 @@ lean_object* lean_torch_mul_tensor_scalar_checked(b_lean_obj_arg input, b_lean_o
   });
 }
 
-lean_object* lean_torch_cat_dyn_checked(b_lean_obj_arg tensors, lean_obj_arg dim) {
+lean_object* lean_torch_cat_dyn_checked(b_lean_obj_arg tensors, b_lean_obj_arg dim) {
   return tyr::checkedCall("catMany", [&] {
-    OwnedLeanObject dim_owner(dim, lean_dec);
     TORCH_CHECK(lean_is_array(tensors), "expected array");
-    const auto axis = lean_int64_of_int(dim);
-    OwnedLeanObject roundtrip(lean_int64_to_int(axis), lean_dec);
-    TORCH_CHECK(lean_int_dec_eq(dim, roundtrip.get()), "axis must fit in signed 64 bits");
+    const auto axis = static_cast<int64_t>(tyr::natTo<int64_t>(dim, "dim"));
     std::vector<torch::Tensor> inputs;
     for (size_t i = 0; i < lean_array_size(tensors); ++i)
       inputs.push_back(borrowTensor(lean_array_get_core(tensors, i)));
@@ -4348,11 +4345,11 @@ lean_object* lean_torch_tensor_atan_checked(b_lean_obj_arg t) {
   return tyr::checkedCall("atan", [&] { return lean_torch_tensor_atan(t); });
 }
 
-lean_object* lean_torch_tensor_softmax_checked(b_lean_obj_arg t, uint32_t dim) {
+lean_object* lean_torch_tensor_softmax_checked(b_lean_obj_arg t, b_lean_obj_arg dim) {
   return tyr::checkedCall("softmax", [&] { return lean_torch_tensor_softmax(t, dim); });
 }
 
-lean_object* lean_torch_log_softmax_checked(b_lean_obj_arg t, uint32_t dim) {
+lean_object* lean_torch_log_softmax_checked(b_lean_obj_arg t, b_lean_obj_arg dim) {
   return tyr::checkedCall("logSoftmax", [&] { return lean_torch_log_softmax(t, dim); });
 }
 
@@ -4391,14 +4388,8 @@ lean_object* lean_torch_logical_and_checked(b_lean_obj_arg a, b_lean_obj_arg b) 
 }
 
 lean_object* lean_torch_cat2_checked(
-    b_lean_obj_arg a, b_lean_obj_arg b, lean_obj_arg dim) {
-  return tyr::checkedCall("cat", [&] {
-    OwnedLeanObject dim_owner(dim, lean_dec);
-    const auto axis = lean_int64_of_int(dim);
-    OwnedLeanObject roundtrip(lean_int64_to_int(axis), lean_dec);
-    TORCH_CHECK(lean_int_dec_eq(dim, roundtrip.get()), "axis must fit in signed 64 bits");
-    return fromTorchTensor(torch::cat({borrowTensor(a), borrowTensor(b)}, axis));
-  });
+    b_lean_obj_arg a, b_lean_obj_arg b, b_lean_obj_arg dim) {
+  return tyr::checkedCall("cat", [&] { return lean_torch_cat2(a, b, dim); });
 }
 
 lean_object* lean_torch_lt_checked(b_lean_obj_arg a, b_lean_obj_arg b) {

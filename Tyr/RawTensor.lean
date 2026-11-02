@@ -103,7 +103,7 @@ The source shape is checked before conversion and never reshaped. -/
 
 @[extern "lean_torch_pow"] opaque pow (t : @& RawTensor) (exponent : Float) : RawTensor
 
-@[extern "lean_torch_tensor_softmax"] opaque softmax (t : @& RawTensor) (dim : Int32 := -1) : RawTensor
+@[extern "lean_torch_tensor_softmax"] opaque softmax (t : @& RawTensor) (dim : @& Nat) : RawTensor
 
 @[extern "lean_torch_expand"] opaque expand (t : @& RawTensor) (target : Array Nat) : RawTensor
 
@@ -118,7 +118,7 @@ The source shape is checked before conversion and never reshaped. -/
 
 @[extern "lean_torch_squeeze"] opaque squeeze (t : @& RawTensor) (dim : Nat) : RawTensor
 
-@[extern "lean_torch_cat2"] opaque cat (a b : @& RawTensor) (dim : Int) : RawTensor
+@[extern "lean_torch_cat2"] opaque cat (a b : @& RawTensor) (dim : @& Nat) : RawTensor
 
 @[extern "lean_torch_sum"] opaque sum (t : @& RawTensor) (dims : Option (Array Nat)) (keepdim : Bool) : RawTensor
 
@@ -154,10 +154,10 @@ def rmsNormWeighted (shape _weightShape : Shape) (x weight : RawTensor) (eps : F
 @[extern "lean_torch_sdpa_4d_io"] opaque attentionIO
     (q k v : @& RawTensor) (dropout : Float) (causal : Bool := true) : IO RawTensor
 @[extern "lean_torch_embedding"] opaque embedding
-    (idx weight : @& RawTensor) (paddingIdx : Option Int := none)
+    (idx weight : @& RawTensor) (paddingIdx : Option Nat := none)
     (scaleGradByFreq : Bool := false) (sparse : Bool := false) : RawTensor
 @[extern "lean_torch_embedding_1d"] opaque embedding1d
-    (idx weight : @& RawTensor) (paddingIdx : Option Int := none)
+    (idx weight : @& RawTensor) (paddingIdx : Option Nat := none)
     (scaleGradByFreq : Bool := false) (sparse : Bool := false) : RawTensor
 @[extern "lean_torch_cross_entropy_2d"] opaque crossEntropy
     (logits targets : @& RawTensor) : RawTensor
@@ -221,7 +221,7 @@ namespace torch.RawTensor
 /-- Stack a runtime list of equal vectors along a new leading axis.
     The native bridge consumes the array (but retains shared tensor handles). -/
 @[extern "lean_torch_stack_1d"] opaque stack1d (tensors : Array RawTensor)
-    (dim : Int64 := 0) : RawTensor
+    (dim : @& Nat) : RawTensor
 
 /-- A vector-Jacobian product consumes saved graph intermediates unless retained.
 The effective retention flag is resolved by the typed API from `createGraph`. -/
@@ -241,9 +241,9 @@ The effective retention flag is resolved by the typed API from `createGraph`. -/
     (numSamples : @& Nat) (replacement : Bool) : IO RawTensor
 
 /-- In-place-style scatter of `src` into `input` along `dim` at `indices`
-    (returns a new tensor). Dimension arguments mirror the C ABI. -/
+    (returns a new tensor). -/
 @[extern "lean_torch_scatter_2d"] opaque scatter2d (input : @& RawTensor)
-    (dim : Int64) (indices src : @& RawTensor) : RawTensor
+    (dim : @& Nat) (indices src : @& RawTensor) : RawTensor
 
 /-- All-close predicate: no shape argument is read natively, so none is passed. -/
 @[extern "lean_torch_allclose"] opaque allclose (a b : @& RawTensor) (rtol : Float := 1e-05)
@@ -254,7 +254,7 @@ The effective retention flag is resolved by the typed API from `createGraph`. -/
 
 /-- Log-softmax along a dimension, spec-preserving. The native side reads no
     shape argument, so none is passed. -/
-@[extern "lean_torch_log_softmax"] opaque logSoftmax (t : @& RawTensor) (dim : Int32 := -1) : RawTensor
+@[extern "lean_torch_log_softmax"] opaque logSoftmax (t : @& RawTensor) (dim : @& Nat) : RawTensor
 
 /-- Backward pass from a scalar loss (gradient = 1.0). -/
 @[extern "lean_torch_backward_loss"] opaque backwardLoss (loss : @& RawTensor)
@@ -279,15 +279,14 @@ The effective retention flag is resolved by the typed API from `createGraph`. -/
 /-- 1-D Int64 tensor from a host array. -/
 @[extern "lean_torch_from_int64_array"] opaque fromInt64Array (arr : @& Array Int64) : RawTensor
 
-/-- Select entries of a 1-D tensor by Int64 indices along `dim` (0). The
-    dimension arguments mirror the C ABI and are unread natively. -/
+/-- Select entries along `dim` at `indices`. -/
 @[extern "lean_torch_index_select"] opaque indexSelect (data : @& RawTensor)
-    (dim : Int64) (indices : @& RawTensor) : RawTensor
+    (dim : @& Nat) (indices : @& RawTensor) : RawTensor
 
 /-- Checked vector indexing. Bounds are validated before device indexing so
 invalid accelerator indices cannot trigger a device assertion. -/
 @[extern "lean_torch_index_select_checked"] opaque indexSelectChecked
-    (data : @& RawTensor) (dim : Int64) (indices : @& RawTensor) : Except String RawTensor
+    (data : @& RawTensor) (dim : @& Nat) (indices : @& RawTensor) : Except String RawTensor
 
 /-- Per-element cross entropy (no reduction): logits [n, c], Int64 targets [n]. -/
 @[extern "lean_torch_cross_entropy_none"] opaque crossEntropyNone
@@ -413,9 +412,9 @@ namespace torch.RawTensor
 
 @[extern "lean_torch_tensor_atan_checked"] opaque atanChecked (t : @& RawTensor) : Except String RawTensor
 
-@[extern "lean_torch_tensor_softmax_checked"] opaque softmaxChecked (t : @& RawTensor) (dim : Int32 := -1) : Except String RawTensor
+@[extern "lean_torch_tensor_softmax_checked"] opaque softmaxChecked (t : @& RawTensor) (dim : @& Nat) : Except String RawTensor
 
-@[extern "lean_torch_log_softmax_checked"] opaque logSoftmaxChecked (t : @& RawTensor) (dim : Int32 := -1) : Except String RawTensor
+@[extern "lean_torch_log_softmax_checked"] opaque logSoftmaxChecked (t : @& RawTensor) (dim : @& Nat) : Except String RawTensor
 end torch.RawTensor
 
 namespace torch.RawTensor
@@ -428,5 +427,5 @@ namespace torch.RawTensor
 
 @[extern "lean_torch_logical_and_checked"] opaque logicalAndChecked (a b : @& RawTensor) : Except String RawTensor
 
-@[extern "lean_torch_cat2_checked"] opaque catChecked (a b : @& RawTensor) (dim : Int) : Except String RawTensor
+@[extern "lean_torch_cat2_checked"] opaque catChecked (a b : @& RawTensor) (dim : @& Nat) : Except String RawTensor
 end torch.RawTensor

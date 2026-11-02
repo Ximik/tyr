@@ -11,8 +11,9 @@ private def checked {s : Shape} (raw : RawTensor) : Tensor { shape := s, dtype :
   | .ok result => result
   | .error message => nativeInvariantFailure s!"KittenTTS tensor boundary: {message}"
 
-def catTo {s t : Shape} {d : DType} (x : Tensor { shape := s, dtype := d, device := device }) (y : Tensor { shape := t, dtype := d, device := device }) (dim : Nat) :
-    Tensor { shape := (TensorSpec.catShape s t dim), dtype := d, device := device } := Tensor.cat x y dim
+def catTo {s t : Shape} {d : DType} (x : Tensor { shape := s, dtype := d, device := device }) (y : Tensor { shape := t, dtype := d, device := device }) (dim : Nat)
+    (h : TensorSpec.catCompatible s t dim = true := by cat_shape) :
+    Tensor { shape := (TensorSpec.catShape s t dim), dtype := d, device := device } := Tensor.cat x y dim h
 
 def affine2d {batch input output : Nat}
     (x : Tensor { shape := #[batch, input], dtype := .Float32, device := device }) (w : Tensor { shape := #[output, input], dtype := .Float32, device := device })
@@ -38,7 +39,7 @@ def leakyRelu {s : Shape} (x : Tensor { shape := s, dtype := .Float32, device :=
   checked (RawTensor.leakyRelu x.raw slope)
 def floorTensor {s : Shape} (x : Tensor { shape := s, dtype := .Float32, device := device }) : Tensor { shape := s, dtype := .Float32, device := device } := checked (RawTensor.floor x.raw)
 def atan2Tensor {s : Shape} (y x : Tensor { shape := s, dtype := .Float32, device := device }) : Tensor { shape := s, dtype := .Float32, device := device } := checked (RawTensor.atan2 y.raw x.raw)
-def cumsumTensor {s : Shape} (x : Tensor { shape := s, dtype := .Float32, device := device }) (dim : Int64) : Tensor { shape := s, dtype := .Float32, device := device } := checked (RawTensor.cumsum x.raw dim)
+def cumsumTensor {s : Shape} (x : Tensor { shape := s, dtype := .Float32, device := device }) (dim : Nat) : Tensor { shape := s, dtype := .Float32, device := device } := checked (RawTensor.cumsum x.raw dim)
 
 def resizeTensor {batch channels frames : Nat} (x : Tensor { shape := #[batch, channels, frames], dtype := .Float32, device := device })
     (outFrames : Nat) (mode : String) : Tensor { shape := #[batch, channels, outFrames], dtype := .Float32, device := device } :=

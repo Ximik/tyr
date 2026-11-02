@@ -19,7 +19,7 @@ def bmm {b m n k : Nat} (x : Tensor { dtype := dtype, device := device, shape :=
     Tensor { dtype := dtype, device := device, shape := #[b, m, n] } :=
   checked (RawTensor.lagunaBmm x.raw y.raw)
 
-def scatterAdd {s t : Shape} (input : Tensor { dtype := dtype, device := device, shape := s }) (dim : Int64)
+def scatterAdd {s t : Shape} (input : Tensor { dtype := dtype, device := device, shape := s }) (dim : Nat)
     (indices : Tensor { device := device, shape := t, dtype := .Int64 }) (src : Tensor { dtype := dtype, device := device, shape := t }) : Tensor { dtype := dtype, device := device, shape := s } :=
   input.checkedReplacement (RawTensor.lagunaScatterAdd input.raw dim indices.raw src.raw)
 

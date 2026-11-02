@@ -313,7 +313,7 @@ private def applySampling {batch vocab : Nat}
   let filtered :=
     if topP >= 1.0 then filtered
     else Tensor.topPFilter filtered topP
-  let probs := Tensor.softmax filtered (-1)
+  let probs := Tensor.softmax filtered
   let sampled ← Tensor.multinomial probs 1 false
   pure (Tensor.reshape sampled #[batch])
 
@@ -362,7 +362,7 @@ private def applyRepetitionPenalty {batch vocab histLen : Nat}
   if histLen == 0 || penalty == 1.0 || penalty <= 0.0 then
     logits
   else
-    let gathered : Tensor { shape := #[batch, histLen], dtype := dtype.val, device := device } := Tensor.gather logits (-1) history
+    let gathered : Tensor { shape := #[batch, histLen], dtype := dtype.val, device := device } := Tensor.gather logits 1 history
     let negMask : Tensor { shape := #[batch, histLen], dtype := .Bool, device := device } := Tensor.ltScalar gathered 0.0
     let penalizedNeg := Tensor.mulScalar gathered penalty
     let penalizedPos := Tensor.divScalar gathered penalty
@@ -373,7 +373,7 @@ private def applyRepetitionPenalty {batch vocab histLen : Nat}
         match Tensor.ofRaw promoted.tensor.raw with
         | .ok result => result
         | .error message => nativeInvariantFailure s!"Qwen3TTS repetition penalty: {message}"
-    Tensor.scatter2d logits (-1) history penalized
+    Tensor.scatter2d logits 1 history penalized
 
 /-- Sample a full codec frame from the current talker hidden state `[batch,1,hidden]`. -/
 private def generateFrameFromLastHidden {batch : Nat} (cfg : TalkerConfig)
