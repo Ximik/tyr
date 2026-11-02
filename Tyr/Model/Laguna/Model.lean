@@ -346,7 +346,8 @@ private def forwardOwned {batch seq rotaryDim numHeads cap : Nat}
     (cfg : Config) (m : LagunaAttention (device := device) (dtype := dtype) cfg numHeads)
     (x : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] })
     (cos : Tensor { device := device, shape := #[seq, rotaryDim / 2], dtype := .Float32 }) (sin : Tensor { device := device, shape := #[seq, rotaryDim / 2], dtype := .Float32 })
-    (window : Option Nat) (prefill : Bool) (position : Nat) (cache : KVCache (device := device) (dtype := dtype) cfg batch cap)
+    (window : Option Nat) (prefill : Bool) (position : Nat) (hDecode : prefill = false → seq = 1)
+    (cache : KVCache (device := device) (dtype := dtype) cfg batch cap)
     : IO (Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] } × KVCache (device := device) (dtype := dtype) cfg batch cap) := do
   let (q, k, v) := qkvRope cfg m x cos sin
   let qh : Tensor { dtype := dtype, device := device, shape := #[batch, numHeads, seq, cfg.head_dim] } := transposeAttention q
@@ -356,11 +357,12 @@ private def forwardOwned {batch seq rotaryDim numHeads cap : Nat}
     Tensor.castLike kh (cache.kStore)
   let mut vStore : Tensor { dtype := dtype, device := device, shape := #[batch, cfg.num_key_value_heads, cap, cfg.head_dim] } :=
     Tensor.castLike vh (cache.vStore)
-  if prefill then
+  if hp : prefill then
     -- Retain only the prompt tail, placing each entry at its absolute ring slot.
     let retained := min seq cap
     let sourceStart := seq - retained
     let slot := sourceStart % cap
+    have _hSlot : slot < cap := Nat.mod_lt _ cache.cap_pos
     let first := min retained (cap - slot)
     kStore ← data.copySliceIO kStore 2 slot (sliceTyped kh 2 sourceStart first)
     vStore ← data.copySliceIO vStore 2 slot (sliceTyped vh 2 sourceStart first)
@@ -369,6 +371,8 @@ private def forwardOwned {batch seq rotaryDim numHeads cap : Nat}
       vStore ← data.copySliceIO vStore 2 0 (sliceTyped vh 2 (sourceStart + first) (retained - first))
   else
     let slot := position % cap
+    have _hSlot : slot < cap := Nat.mod_lt _ cache.cap_pos
+    have _hOne : seq = 1 := hDecode (by simpa using hp)
     kStore ← data.copySliceIO kStore 2 slot kh
     vStore ← data.copySliceIO vStore 2 slot vh
   let total := if prefill then seq else position + seq
@@ -635,19 +639,19 @@ def forwardStep {batch : Nat}
 private def forwardOwned {batch seq cap : Nat}
     (cfg : Config) (layer : LagunaLayer (device := device) (dtype := dtype) cfg)
     (x : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] }) (tables : (LagunaRotaryTables (device := device)))
-    (position : Nat) (prefill : Bool) (kv : LagunaAttention.KVCache (device := device) (dtype := dtype) cfg batch cap)
+    (position : Nat) (prefill : Bool) (hDecode : prefill = false → seq = 1) (kv : LagunaAttention.KVCache (device := device) (dtype := dtype) cfg batch cap)
     : IO (Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] } × LagunaAttention.KVCache (device := device) (dtype := dtype) cfg batch cap) := do
   let h1 := rmsNormWeighted3d layer.input_layernorm x cfg.rms_norm_eps
   let (mixed, kv') ← match layer.attnFull, layer.attnSliding with
     | some a, _ =>
       let cos : Tensor { device := device, shape := #[seq, cfg.rotaryDimFull / 2], dtype := .Float32 } := sliceRotaryRows tables.fullCos position seq
       let sin : Tensor { device := device, shape := #[seq, cfg.rotaryDimFull / 2], dtype := .Float32 } := sliceRotaryRows tables.fullSin position seq
-      a.forwardOwned (rotaryDim := cfg.rotaryDimFull) cfg h1 cos sin none prefill position kv
+      a.forwardOwned (rotaryDim := cfg.rotaryDimFull) cfg h1 cos sin none prefill position hDecode kv
     | _, some a =>
       let cos : Tensor { device := device, shape := #[seq, cfg.rotaryDimSliding / 2], dtype := .Float32 } := sliceRotaryRows tables.slidingCos position seq
       let sin : Tensor { device := device, shape := #[seq, cfg.rotaryDimSliding / 2], dtype := .Float32 } := sliceRotaryRows tables.slidingSin position seq
       a.forwardOwned (rotaryDim := cfg.rotaryDimSliding) cfg h1 cos sin
-        (some cfg.sliding_window) prefill position kv
+        (some cfg.sliding_window) prefill position hDecode kv
     | _, _ => throw <| IO.userError "Laguna cache session requires attention in every layer"
   let h2 := Tensor.add x mixed
   let h3 := rmsNormWeighted3d layer.post_attention_layernorm h2 cfg.rms_norm_eps
@@ -800,7 +804,7 @@ private def forwardSession {batch seq : Nat} (cfg : Config) (m : LagunaModel (de
       throw <| IO.userError "Laguna cache rotary table shape, coverage or device mismatch"
   if cache.kvCaches.size != m.layers.size then
     throw <| IO.userError "Laguna cache layer count mismatch"
-  if prefill && position != 0 || !prefill && seq != 1 then
+  let ⟨hDecode⟩ ← if h : (prefill = true → position = 0) ∧ (prefill = false → seq = 1) then pure (PLift.up h.2) else
     throw <| IO.userError "Laguna cache expects fresh prefill or single-token decode"
   if cache.position != position || (!prefill && position == 0) then
     throw <| IO.userError "Laguna cache position mismatch; prefill once before decode"
@@ -815,7 +819,7 @@ private def forwardSession {batch seq : Nat} (cfg : Config) (m : LagunaModel (de
     for i in [:m.layers.size] do
       let some layer := m.layers[i]? | throw <| IO.userError "missing Laguna layer"
       let some ⟨n, cached⟩ := caches[i]? | throw <| IO.userError "missing Laguna cache"
-      let (next, kv) ← layer.forwardOwned cfg h tables position prefill cached
+      let (next, kv) ← layer.forwardOwned cfg h tables position prefill hDecode cached
       h := next
       caches := caches.set! i ⟨n, kv⟩
     pure (rmsNormWeighted3d m.norm h cfg.rms_norm_eps, { kvCaches := caches, position := position + seq : LagunaCache (device := device) (dtype := dtype) cfg batch })

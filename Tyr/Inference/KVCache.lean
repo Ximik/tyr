@@ -143,7 +143,8 @@ def LayerCache.append (lc : LayerCache batch maxSeqLen numKvHeads headDim dtype 
     : IO (LayerCache batch maxSeqLen numKvHeads headDim dtype device) := do
   let keys := lc.keys
   let values := lc.values
-  if pos >= maxSeqLen then throw <| IO.userError "KV cache append exceeds capacity"
+  let ⟨_hpos⟩ ← if h : pos < maxSeqLen then pure (PLift.up h) else
+    throw <| IO.userError "KV cache append exceeds capacity"
   -- Validate both sources and destinations before either update.
   -- Interoperability can introduce handles whose metadata violates an index.
   for result in [keys.validate, values.validate, newK.validate, newV.validate] do

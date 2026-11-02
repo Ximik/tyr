@@ -15,7 +15,11 @@ open torch.data.Native
 /-- Return the destination with the requested slice replaced. Retained aliases
 keep their original values. The native operation disables autograd for the copy. -/
 def copySliceIO {σ σsrc : StaticSpec} (dst : Tensor σ) (dim start : Nat)
-    (src : @& Tensor σsrc) : IO (Tensor σ) := do
+    (src : @& Tensor σsrc)
+    (_h : TensorSpec.sliceScatterCompatible σ.shape σsrc.shape dim = true := by
+      first | exact of_decide_eq_true rfl | (simp <;> fail "incompatible slice copy shapes"))
+    (_bound : start + σsrc.shape.getD dim 0 ≤ σ.shape.getD dim 0 := by
+      first | exact of_decide_eq_true rfl | omega | (simp <;> omega)) : IO (Tensor σ) := do
   let dtype := dst.raw.dtype
   let device := dst.raw.device
   let raw ← copySliceIORaw dst.raw dim start src.raw
