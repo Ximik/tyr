@@ -137,7 +137,7 @@ private def parseCodePredictorConfig (j : Json) (d : TalkerCodePredictorConfig :
   numCodeGroups := getNatFieldD j "num_code_groups" d.numCodeGroups
 }
 
-private def parseTalkerConfig (j : Json) (d : TalkerConfig := {}) : TalkerConfig :=
+private def parseTalkerConfig (j : Json) (d : TalkerConfig := {}) : Except String TalkerConfig :=
   let codePredictorConfig :=
     match getObjVal? j "code_predictor_config" with
     | some cp => parseCodePredictorConfig cp d.codePredictorConfig
@@ -154,7 +154,9 @@ private def parseTalkerConfig (j : Json) (d : TalkerConfig := {}) : TalkerConfig
     match getObjVal? j "codec_language_id" with
     | some o => parseStringUInt64Map o
     | none => d.codecLanguageId
-  {
+  let numCodeGroups := getNatFieldD j "num_code_groups" d.numCodeGroups
+  if numCodeGroupsPos : 0 < numCodeGroups then
+  .ok {
     codePredictorConfig
     vocabSize := getNatFieldD j "vocab_size" d.vocabSize
     hiddenSize := getNatFieldD j "hidden_size" d.hiddenSize
@@ -173,7 +175,8 @@ private def parseTalkerConfig (j : Json) (d : TalkerConfig := {}) : TalkerConfig
     useSlidingWindow := getBoolFieldD j "use_sliding_window" d.useSlidingWindow
     slidingWindow := getNatFieldD j "sliding_window" d.slidingWindow
     attentionDropout := getFloatFieldD j "attention_dropout" d.attentionDropout
-    numCodeGroups := getNatFieldD j "num_code_groups" d.numCodeGroups
+    numCodeGroups
+    numCodeGroupsPos
     textHiddenSize := getNatFieldD j "text_hidden_size" d.textHiddenSize
     textVocabSize := getNatFieldD j "text_vocab_size" d.textVocabSize
     codecEosTokenId := getTokenIdFieldD j "codec_eos_token_id" d.codecEosTokenId
@@ -187,6 +190,7 @@ private def parseTalkerConfig (j : Json) (d : TalkerConfig := {}) : TalkerConfig
     spkIsDialect
     codecLanguageId
   }
+  else .error "Qwen3-TTS talker config: num_code_groups must be positive"
 
 private def parseSpeakerEncoderConfig (j : Json) (d : SpeakerEncoderConfig := {})
     : Except String SpeakerEncoderConfig :=
@@ -224,10 +228,10 @@ namespace Qwen3TTSConfig
 /-- Load Qwen3-TTS config from a HuggingFace `config.json` file. -/
 def loadFromFile (path : String) (defaults : Qwen3TTSConfig := {}) : IO Qwen3TTSConfig := do
   let root ← parseJsonFile path
-  let talkerConfig :=
+  let talkerConfig ←
     match getObjVal? root "talker_config" with
-    | some j => parseTalkerConfig j defaults.talkerConfig
-    | none => defaults.talkerConfig
+    | some j => IO.ofExcept (parseTalkerConfig j defaults.talkerConfig)
+    | none => pure defaults.talkerConfig
   let speakerEncoderConfig ←
     match getObjVal? root "speaker_encoder_config" with
     | some j => IO.ofExcept (parseSpeakerEncoderConfig j defaults.speakerEncoderConfig)

@@ -99,6 +99,8 @@ structure TalkerConfig where
   slidingWindow : Nat := 4096
   attentionDropout : Float := 0.0
   numCodeGroups : Nat := 32
+  /-- Every codec frame has at least one code group; checked when the config is loaded. -/
+  numCodeGroupsPos : 0 < numCodeGroups := by decide
   textHiddenSize : Nat := 2048
   textVocabSize : Nat := 151936
   codecEosTokenId : UInt64 := 4198
@@ -111,7 +113,9 @@ structure TalkerConfig where
   spkId : Array (String × UInt64) := #[]
   spkIsDialect : Array (String × String) := #[]
   codecLanguageId : Array (String × UInt64) := #[]
-  deriving Repr, Inhabited
+  deriving Repr
+
+instance : Inhabited TalkerConfig := ⟨{}⟩
 
 /-- Top-level Qwen3-TTS config. -/
 structure Qwen3TTSConfig where
