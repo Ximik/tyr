@@ -198,7 +198,7 @@ Notes:
 `Tensor σ` tracks shape, dtype, and a concrete device in one static specification:
 
 ```lean
-def project {m k n : UInt64}
+def project {m k n : Nat}
     (x : Tensor { shape := #[m, k], dtype := .Float32, device := .CPU }) (w : Tensor { shape := #[k, n], dtype := .Float32, device := .CPU }) :
     Tensor { shape := #[m, n], dtype := .Float32, device := .CPU } :=
   x.mm w
