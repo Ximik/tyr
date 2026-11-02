@@ -155,9 +155,8 @@ void testNativeFailureCleanup(lean_object* tensor) {
   device.consumed("factory device rejection");
 
   for (auto operation : {lean_torch_squeeze, lean_torch_unsqueeze, lean_torch_unbind}) {
-    ObservedArg axis(lean_uint64_to_nat(std::numeric_limits<uint64_t>::max() - 100));
-    expectThrow([&] { return operation(tensor, axis.transfer()); });
-    axis.consumed("boxed Nat dimension");
+    Nat axis(std::numeric_limits<uint64_t>::max() - 100);
+    expectThrow([&] { return operation(tensor, axis); });
   }
 
   // These deliberately invalid handles exercise failure before any option or
