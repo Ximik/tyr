@@ -458,7 +458,7 @@ private def decodeStepFromEmbedWithCache {batch maxLen : Nat}
     (cosAll : Tensor { device := device, shape := #[maxLen, cfg.textConfig.headDim / 2], dtype := .Float32 })
     (sinAll : Tensor { device := device, shape := #[maxLen, cfg.textConfig.headDim / 2], dtype := .Float32 })
     (tokenEmbed : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.textConfig.hiddenSize] })
-    (position : Nat)
+    (position : Nat) (hpos : position < maxLen)
     (caches : Array (LayerKVCache (device := device) (dtype := dtype) cfg batch maxLen))
     : IO (Tensor { dtype := dtype, device := device, shape := #[batch, ThinkerLmVocabSize cfg] } × Array (LayerKVCache (device := device) (dtype := dtype) cfg batch maxLen)) := do
   let cos : Tensor { device := device, shape := #[1, cfg.textConfig.headDim / 2], dtype := .Float32 } := Tensor.sliceChecked cosAll 0 position 1 #[1, cfg.textConfig.headDim / 2]
@@ -476,7 +476,7 @@ private def decodeStepFromEmbedWithCache {batch maxLen : Nat}
       match nextCaches[i]? with
       | some c => pure c
       | none => throw <| IO.userError s!"missing thinker KV cache at index {i}"
-    let (hNext, cNext) := layer.forwardStep hidden cos sin cache
+    let (hNext, cNext) := layer.forwardStep hidden cos sin cache position hpos
     hidden := hNext
     nextCaches := nextCaches.set! i cNext
 
@@ -493,13 +493,14 @@ private partial def prefillCachesFromEmbeds {batch seq maxLen : Nat}
     (caches : Array (LayerKVCache (device := device) (dtype := dtype) cfg batch maxLen))
     (position : Nat)
     (lastLogits : Tensor { dtype := dtype, device := device, shape := #[batch, ThinkerLmVocabSize cfg] })
+    (hfit : seq ≤ maxLen)
     : IO (Tensor { dtype := dtype, device := device, shape := #[batch, ThinkerLmVocabSize cfg] } × Array (LayerKVCache (device := device) (dtype := dtype) cfg batch maxLen)) := do
-  if position >= seq then
+  if hp : seq ≤ position then
     pure (lastLogits, caches)
   else
     let tok : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.textConfig.hiddenSize] } := Tensor.sliceChecked inputsEmbeds 1 position 1 #[batch, 1, cfg.textConfig.hiddenSize]
-    let (logits, caches') ← decodeStepFromEmbedWithCache m cosAll sinAll tok position caches
-    prefillCachesFromEmbeds m cosAll sinAll inputsEmbeds caches' (position + 1) logits
+    let (logits, caches') ← decodeStepFromEmbedWithCache m cosAll sinAll tok position (by omega) caches
+    prefillCachesFromEmbeds m cosAll sinAll inputsEmbeds caches' (position + 1) logits hfit
 
 private partial def greedyLoopCached {batch maxLen : Nat}
     (m : Qwen3ASRThinkerForConditionalGeneration (device := device) (dtype := dtype) cfg)
@@ -513,8 +514,9 @@ private partial def greedyLoopCached {batch maxLen : Nat}
     (finished : Option (Tensor { device := device, shape := #[batch], dtype := .Bool }))
     {curSeq : Nat}
     (curIds : Tensor { device := device, shape := #[batch, curSeq], dtype := .Int64 })
+    (hfit : curSeq + remaining ≤ maxLen)
     : IO (Sigma (fun outSeq => Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })) := do
-  if remaining == 0 then
+  let ⟨hr⟩ ← if h : remaining ≠ 0 then pure (PLift.up h) else
     return ⟨curSeq, curIds⟩
 
   let indices ← IO.ofExcept (Tensor.argmax? lastLogits 1)
@@ -532,8 +534,8 @@ private partial def greedyLoopCached {batch maxLen : Nat}
   | none =>
     let nextEmb : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.textConfig.hiddenSize] } := m.embedText nextCol
     let (nextLogits, caches') ←
-      decodeStepFromEmbedWithCache m cosAll sinAll nextEmb curSeq caches
-    greedyLoopCached m cosAll sinAll eosTokenIds none (remaining - 1) caches' nextLogits none appended
+      decodeStepFromEmbedWithCache m cosAll sinAll nextEmb curSeq (by omega) caches
+    greedyLoopCached m cosAll sinAll eosTokenIds none (remaining - 1) caches' nextLogits none appended (by omega)
   | some _ =>
     let reachedEos : Tensor { device := device, shape := #[batch], dtype := .Bool } := tokenInSetMask nextTok eosTokenIds
     let finished' : Tensor { device := device, shape := #[batch], dtype := .Bool } :=
@@ -546,8 +548,8 @@ private partial def greedyLoopCached {batch maxLen : Nat}
     else
       let nextEmb : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.textConfig.hiddenSize] } := m.embedText nextCol
       let (nextLogits, caches') ←
-        decodeStepFromEmbedWithCache m cosAll sinAll nextEmb curSeq caches
-      greedyLoopCached m cosAll sinAll eosTokenIds eosVector (remaining - 1) caches' nextLogits (some finished') appended
+        decodeStepFromEmbedWithCache m cosAll sinAll nextEmb curSeq (by omega) caches
+      greedyLoopCached m cosAll sinAll eosTokenIds eosVector (remaining - 1) caches' nextLogits (some finished') appended (by omega)
 
 private def isUInt32Prefix (pref xs : Array UInt32) : Bool :=
   if pref.size > xs.size then
@@ -588,9 +590,9 @@ private def buildStreamingPromptCacheFromEmbeds {seq : Nat}
   let _ := support.down
   let caches0 := initLayerKVCaches m maxLen cacheDevice (h := Nat.lt_of_lt_of_le hSeq (Nat.le_add_right _ _))
   let tok0 : Tensor { dtype := dtype, device := device, shape := #[1, 1, cfg.textConfig.hiddenSize] } := Tensor.sliceChecked inputsEmbeds 1 0 1 #[1, 1, cfg.textConfig.hiddenSize]
-  let (logits0, caches1) ← decodeStepFromEmbedWithCache m cosAll sinAll tok0 0 caches0
+  let (logits0, caches1) ← decodeStepFromEmbedWithCache m cosAll sinAll tok0 0 (Nat.lt_of_lt_of_le hSeq (Nat.le_add_right _ _)) caches0
   let (lastLogits, cachesPrefill) ←
-    prefillCachesFromEmbeds m cosAll sinAll inputsEmbeds caches1 1 logits0
+    prefillCachesFromEmbeds m cosAll sinAll inputsEmbeds caches1 1 logits0 (Nat.le_add_right _ _)
   pure {
     seq := seq
     maxLen := maxLen
@@ -633,6 +635,8 @@ private def extendStreamingPromptCacheFromEmbeds {seq : Nat}
       promptEmbeds := by simpa [h] using inputsEmbeds
     }
   else
+    let ⟨hfit⟩ ← if h : seq ≤ cache.maxLen then pure (PLift.up h) else
+      throw <| IO.userError s!"streaming prompt cache capacity {cache.maxLen} cannot hold {seq} prompt tokens"
     let (lastLogits, kvCaches) ←
       prefillCachesFromEmbeds
         m
@@ -642,6 +646,7 @@ private def extendStreamingPromptCacheFromEmbeds {seq : Nat}
         cache.kvCaches
         cache.seq
         cache.lastLogits
+        hfit
     pure {
       cache with
       seq := seq
@@ -828,10 +833,10 @@ def generateGreedy {batch seq frames : Nat}
   let _ := support.down
   let caches0 := initLayerKVCaches m cacheMaxLen cacheDevice (h := Nat.lt_of_lt_of_le hSeq (Nat.le_add_right _ _))
   let tok0 : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.textConfig.hiddenSize] } := Tensor.sliceChecked inputsEmbeds 1 0 1 #[batch, 1, cfg.textConfig.hiddenSize]
-  let (logits0, caches1) ← decodeStepFromEmbedWithCache m cosAll sinAll tok0 0 caches0
+  let (logits0, caches1) ← decodeStepFromEmbedWithCache m cosAll sinAll tok0 0 (Nat.lt_of_lt_of_le hSeq (Nat.le_add_right _ _)) caches0
   let (lastLogits, cachesPrefill) ←
-    prefillCachesFromEmbeds m cosAll sinAll inputsEmbeds caches1 1 logits0
-  greedyLoopCached m cosAll sinAll eosTokenIds eosVector maxNewTokens cachesPrefill lastLogits none inputIds
+    prefillCachesFromEmbeds m cosAll sinAll inputsEmbeds caches1 1 logits0 (Nat.le_add_right _ _)
+  greedyLoopCached m cosAll sinAll eosTokenIds eosVector maxNewTokens cachesPrefill lastLogits none inputIds (Nat.le_refl _)
 
 /-- Greedy generation with reusable batch=1 prompt-prefix cache.
     Intended for streaming decode where successive prompts typically extend
@@ -871,6 +876,8 @@ def generateGreedyFromInputsEmbedsWithPromptCache {seq : Nat}
           buildStreamingPromptCacheFromEmbeds m inputsEmbeds promptTokenIds maxNewTokens
       | none =>
         buildStreamingPromptCacheFromEmbeds m inputsEmbeds promptTokenIds maxNewTokens
+    let ⟨hfit⟩ ← if h : seq + maxNewTokens ≤ cache.maxLen then pure (PLift.up h) else
+      throw <| IO.userError s!"streaming prompt cache capacity {cache.maxLen} cannot hold {seq} prompt and {maxNewTokens} new tokens"
     let generated ←
       greedyLoopCached
         m
@@ -883,6 +890,7 @@ def generateGreedyFromInputsEmbedsWithPromptCache {seq : Nat}
         cache.lastLogits
         none
         inputIds
+        hfit
     pure (generated, cache)
 
 /-- Greedy generation with reusable batch=1 prompt-prefix cache.

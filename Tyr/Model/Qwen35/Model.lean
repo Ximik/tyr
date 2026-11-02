@@ -502,6 +502,7 @@ def forwardStep {batch cap : Nat}
     (cos : Tensor { device := device, shape := #[1, Config.rotaryHalfDim cfg], dtype := .Float32 })
     (sin : Tensor { device := device, shape := #[1, Config.rotaryHalfDim cfg], dtype := .Float32 })
     (cache : KVCache (dtype := dtype) (device := device) cfg batch cap)
+    (pos : Nat) (_hpos : pos < cap)
     : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := dtype } × KVCache (dtype := dtype) (device := device) cfg batch cap :=
   let qg : Tensor { device := device, shape := #[batch, 1, cfg.num_attention_heads * cfg.head_dim * 2], dtype := dtype } := Tensor.linear3d x m.q_proj
   let qLen : Nat := cfg.num_attention_heads * cfg.head_dim
@@ -530,49 +531,26 @@ def forwardStep {batch cap : Nat}
   let vStore : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, cap, cfg.head_dim], dtype := dtype } :=
     Tensor.castLike vNew (cache.vStore)
 
-  if cache.seq < cap then
-    let kStore' : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, cap, cfg.head_dim], dtype := dtype } :=
-      Tensor.sliceScatter kStore 2 cache.seq kNew
-    let vStore' : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, cap, cfg.head_dim], dtype := dtype } :=
-      Tensor.sliceScatter vStore 2 cache.seq vNew
-    let kvLen : Nat := cache.seq + 1
-    let kAll : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, kvLen, cfg.head_dim], dtype := dtype } := typedSlice kStore' 2 0 kvLen
-    let vAll : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, kvLen, cfg.head_dim], dtype := dtype } := typedSlice vStore' 2 0 kvLen
-    let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, 1, cfg.head_dim], dtype := dtype } :=
-      Tensor.attentionGQAQKV qh kAll vAll false true
-    let attn : Tensor { device := device, shape := #[batch, 1, cfg.num_attention_heads, cfg.head_dim], dtype := dtype } := Tensor.joinHeads attn
-    let attnFlat : Tensor { device := device, shape := #[batch, 1, qLen], dtype := dtype } := Tensor.reshape attn #[batch, 1, qLen]
-    let gated : Tensor { device := device, shape := #[batch, 1, qLen], dtype := dtype } := Tensor.mul attnFlat (Tensor.sigmoid gateFlat)
-    let out : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := dtype } := Tensor.linear3d gated m.o_proj
-    let cache' : KVCache (dtype := dtype) (device := device) cfg batch cap := {
-      cap_pos := cache.cap_pos
-      kStore := kStore'
-      vStore := vStore'
-      seq := kvLen
-    }
-    (out, cache')
-  else
-    let writePos : Nat := if cap == 0 then 0 else cap - 1
-    let kStore' : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, cap, cfg.head_dim], dtype := dtype } :=
-      Tensor.sliceScatter kStore 2 writePos kNew
-    let vStore' : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, cap, cfg.head_dim], dtype := dtype } :=
-      Tensor.sliceScatter vStore 2 writePos vNew
-    let kvLen : Nat := cap
-    let kAll : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, kvLen, cfg.head_dim], dtype := dtype } := typedSlice kStore' 2 0 kvLen
-    let vAll : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, kvLen, cfg.head_dim], dtype := dtype } := typedSlice vStore' 2 0 kvLen
-    let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, 1, cfg.head_dim], dtype := dtype } :=
-      Tensor.attentionGQAQKV qh kAll vAll false true
-    let attn : Tensor { device := device, shape := #[batch, 1, cfg.num_attention_heads, cfg.head_dim], dtype := dtype } := Tensor.joinHeads attn
-    let attnFlat : Tensor { device := device, shape := #[batch, 1, qLen], dtype := dtype } := Tensor.reshape attn #[batch, 1, qLen]
-    let gated : Tensor { device := device, shape := #[batch, 1, qLen], dtype := dtype } := Tensor.mul attnFlat (Tensor.sigmoid gateFlat)
-    let out : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := dtype } := Tensor.linear3d gated m.o_proj
-    let cache' : KVCache (dtype := dtype) (device := device) cfg batch cap := {
-      cap_pos := cache.cap_pos
-      kStore := kStore'
-      vStore := vStore'
-      seq := cap
-    }
-    (out, cache')
+  let kStore' : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, cap, cfg.head_dim], dtype := dtype } :=
+    Tensor.sliceScatter kStore 2 pos kNew
+  let vStore' : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, cap, cfg.head_dim], dtype := dtype } :=
+    Tensor.sliceScatter vStore 2 pos vNew
+  let kvLen : Nat := pos + 1
+  let kAll : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, kvLen, cfg.head_dim], dtype := dtype } := typedSlice kStore' 2 0 kvLen
+  let vAll : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, kvLen, cfg.head_dim], dtype := dtype } := typedSlice vStore' 2 0 kvLen
+  let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, 1, cfg.head_dim], dtype := dtype } :=
+    Tensor.attentionGQAQKV qh kAll vAll false true
+  let attn : Tensor { device := device, shape := #[batch, 1, cfg.num_attention_heads, cfg.head_dim], dtype := dtype } := Tensor.joinHeads attn
+  let attnFlat : Tensor { device := device, shape := #[batch, 1, qLen], dtype := dtype } := Tensor.reshape attn #[batch, 1, qLen]
+  let gated : Tensor { device := device, shape := #[batch, 1, qLen], dtype := dtype } := Tensor.mul attnFlat (Tensor.sigmoid gateFlat)
+  let out : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := dtype } := Tensor.linear3d gated m.o_proj
+  let cache' : KVCache (dtype := dtype) (device := device) cfg batch cap := {
+    cap_pos := cache.cap_pos
+    kStore := kStore'
+    vStore := vStore'
+    seq := kvLen
+  }
+  (out, cache')
 
 end Qwen35Attention
 
@@ -916,6 +894,7 @@ def forwardStep {batch cap : Nat}
     (sin : Tensor { device := device, shape := #[1, Config.rotaryHalfDim cfg], dtype := .Float32 })
     (cache : HybridCache (dtype := dtype) (device := device) cfg batch cap)
     (layerIdx : Nat)
+    (pos : Nat) (hpos : pos < cap)
     : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := dtype } × HybridCache (dtype := dtype) (device := device) cfg batch cap :=
   let residual1 := x
   let h1 := layer.input_layernorm.forward3d x
@@ -925,7 +904,7 @@ def forwardStep {batch cap : Nat}
     | .fullAttention =>
       match layer.full_attn, cache.attnCaches[layerIdx]? with
       | some a, some (some kv) =>
-        let (out, kv') := a.forwardStep cfg h1 cos sin kv
+        let (out, kv') := a.forwardStep cfg h1 cos sin kv pos hpos
         let c' := { cache with attnCaches := cache.attnCaches.set! layerIdx (some kv') }
         (out, c')
       | _, _ =>
@@ -1140,7 +1119,7 @@ private def decodeStepFromEmbedWithCache {batch maxLen : Nat}
     (cosAll : Tensor { device := device, shape := #[maxLen, Config.rotaryHalfDim cfg], dtype := .Float32 })
     (sinAll : Tensor { device := device, shape := #[maxLen, Config.rotaryHalfDim cfg], dtype := .Float32 })
     (tokenEmbed : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := dtype })
-    (position : Nat)
+    (position : Nat) (hpos : position < maxLen)
     (cache : HybridCache (dtype := dtype) (device := device) cfg batch maxLen)
     : IO (Tensor { device := device, shape := #[batch, cfg.vocab_size], dtype := dtype } × HybridCache (dtype := dtype) (device := device) cfg batch maxLen) := do
   let cos : Tensor { device := device, shape := #[1, Config.rotaryHalfDim cfg], dtype := .Float32 } := typedSlice cosAll 0 position 1
@@ -1154,7 +1133,7 @@ private def decodeStepFromEmbedWithCache {batch maxLen : Nat}
       match m.model.layers[i]? with
       | some l => pure l
       | none => throw <| IO.userError s!"missing Qwen35 layer at index {i}"
-    let (hNext, cNext) := layer.forwardStep cfg hidden cos sin cache' i
+    let (hNext, cNext) := layer.forwardStep cfg hidden cos sin cache' i position hpos
     hidden := hNext
     cache' := cNext
 
@@ -1178,8 +1157,9 @@ private partial def decodeLoopCached {batch maxLen : Nat}
     (generatedSoFar : Nat)
     {curSeq : Nat}
     (curIds : Tensor { device := device, shape := #[batch, curSeq], dtype := .Int64 })
+    (hfit : curSeq + remaining ≤ maxLen)
     : IO (Sigma (fun outSeq => Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })) := do
-  if remaining == 0 then
+  let ⟨hr⟩ ← if h : remaining ≠ 0 then pure (PLift.up h) else
     return ⟨curSeq, curIds⟩
 
   let nextTokRaw ← sampleFromLogits lastLogits.toFloat32 strategy
@@ -1210,8 +1190,8 @@ private partial def decodeLoopCached {batch maxLen : Nat}
     return ⟨curSeq + 1, appended⟩
   else
     let nextEmb : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := dtype } := m.embedTokens nextCol
-    let (nextLogits, cache') ← decodeStepFromEmbedWithCache cfg m cosAll sinAll nextEmb curSeq cache
-    decodeLoopCached cfg m cosAll sinAll strategy eosTokenIds finished' (remaining - 1) cache' nextLogits onStep (generatedSoFar + 1) appended
+    let (nextLogits, cache') ← decodeStepFromEmbedWithCache cfg m cosAll sinAll nextEmb curSeq (by omega) cache
+    decodeLoopCached cfg m cosAll sinAll strategy eosTokenIds finished' (remaining - 1) cache' nextLogits onStep (generatedSoFar + 1) appended (by omega)
 
 private partial def decodeLoopUncached {batch : Nat}
     (cfg : Config)
@@ -1353,7 +1333,7 @@ private def generateFromEmbedsCore {batch seq : Nat}
   let finalIds ← decodeLoopCached
     (maxLen := maxLen)
     cfg m cosAll sinAll strategy eosTokenIds finished0 maxNewTokens
-    caches logits onStep 0 inputIds
+    caches logits onStep 0 inputIds (Nat.le_refl _)
 
   pure finalIds
 

@@ -230,6 +230,7 @@ def forwardStep {batch hidden_size num_heads num_kv_heads head_dim cap : Nat}
     (cos : Tensor { device := device, shape := #[1, head_dim / 2], dtype := .Float32 })
     (sin : Tensor { device := device, shape := #[1, head_dim / 2], dtype := .Float32 })
     (cache : KVCache (device := device) batch num_kv_heads head_dim cap dtype)
+    (pos : Nat) (_hpos : pos < cap)
     (useTyrFlashAttn : Bool := false)
     : Tensor { device := device, shape := #[batch, 1, hidden_size], dtype := dtype } × KVCache (device := device) batch num_kv_heads head_dim cap dtype :=
   -- Project current token to Q/K/V.
@@ -263,56 +264,29 @@ def forwardStep {batch hidden_size num_heads num_kv_heads head_dim cap : Nat}
   let vStore : Tensor { device := device, shape := #[batch, num_kv_heads, cap, head_dim], dtype := dtype } :=
     Tensor.castLike vNew cache.vStore
 
-  if cache.seq < cap then
-    let kStore' := sliceScatterAlong kStore 2 cache.seq kNew
-    let vStore' := sliceScatterAlong vStore 2 cache.seq vNew
-    let kvLen : Nat := cache.seq + 1
-    let kAll := kStore'.sliceChecked 2 0 kvLen #[batch, num_kv_heads, kvLen, head_dim]
-    let vAll := vStore'.sliceChecked 2 0 kvLen #[batch, num_kv_heads, kvLen, head_dim]
+  let kStore' := sliceScatterAlong kStore 2 pos kNew
+  let vStore' := sliceScatterAlong vStore 2 pos vNew
+  let kvLen : Nat := pos + 1
+  let kAll := kStore'.sliceChecked 2 0 kvLen #[batch, num_kv_heads, kvLen, head_dim]
+  let vAll := vStore'.sliceChecked 2 0 kvLen #[batch, num_kv_heads, kvLen, head_dim]
 
-    -- Use q_len=1, kv_len=(seq+1). Causal masking is unnecessary because KV has no future tokens.
-    let attnOut :=
-      if useTyrFlashAttn then
-        flashAttn4d qh kAll vAll true
-      else
-        sdpaGQAQKV qh kAll vAll false true
-    let attnOut := transposeFromAttention attnOut
-    let attnOut := attnOut.reshape #[batch, 1, num_heads * head_dim]
-    let out := Tensor.linear3d attnOut attn.o_proj
+  -- Use q_len=1, kv_len=(pos+1). Causal masking is unnecessary because KV has no future tokens.
+  let attnOut :=
+    if useTyrFlashAttn then
+      flashAttn4d qh kAll vAll true
+    else
+      sdpaGQAQKV qh kAll vAll false true
+  let attnOut := transposeFromAttention attnOut
+  let attnOut := attnOut.reshape #[batch, 1, num_heads * head_dim]
+  let out := Tensor.linear3d attnOut attn.o_proj
 
-    let cache' : KVCache (device := device) batch num_kv_heads head_dim cap dtype := {
-      cap_pos := cache.cap_pos
-      kStore := kStore'
-      vStore := vStore'
-      seq := kvLen
-    }
-    (out, cache')
-  else
-    let writePos : Nat :=
-      if cap == 0 then
-        0
-      else
-        cap - 1
-    let kStore' := sliceScatterAlong kStore 2 writePos kNew
-    let vStore' := sliceScatterAlong vStore 2 writePos vNew
-    let kvLen : Nat := cap
-    let kAll := kStore'.sliceChecked 2 0 kvLen #[batch, num_kv_heads, kvLen, head_dim]
-    let vAll := vStore'.sliceChecked 2 0 kvLen #[batch, num_kv_heads, kvLen, head_dim]
-    let attnOut :=
-      if useTyrFlashAttn then
-        flashAttn4d qh kAll vAll true
-      else
-        sdpaGQAQKV qh kAll vAll false true
-    let attnOut := transposeFromAttention attnOut
-    let attnOut := attnOut.reshape #[batch, 1, num_heads * head_dim]
-    let out := Tensor.linear3d attnOut attn.o_proj
-    let cache' : KVCache (device := device) batch num_kv_heads head_dim cap dtype := {
-      cap_pos := cache.cap_pos
-      kStore := kStore'
-      vStore := vStore'
-      seq := cap
-    }
-    (out, cache')
+  let cache' : KVCache (device := device) batch num_kv_heads head_dim cap dtype := {
+    cap_pos := cache.cap_pos
+    kStore := kStore'
+    vStore := vStore'
+    seq := kvLen
+  }
+  (out, cache')
 
 def forwardMasked {batch seq hidden_size num_heads num_kv_heads head_dim : Nat}
     {maskDtype : DType}

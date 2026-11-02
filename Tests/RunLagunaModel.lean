@@ -361,15 +361,17 @@ private def runBf16AttentionCacheParity {numHeads rotaryDim cap : Nat}
     let expected : Tensor { shape := #[1, 1, cfg.hidden_size], device := device, dtype := .BFloat16 } := sliceTyped fullOutput 1 pos 1
     let cosStep : Tensor { shape := #[1, rotaryDim / 2], dtype := .Float32, device := device } := sliceTyped cos 0 pos 1
     let sinStep : Tensor { shape := #[1, rotaryDim / 2], dtype := .Float32, device := device } := sliceTyped sin 0 pos 1
+    let ⟨hpos⟩ ← if h : pos < cap then pure (PLift.up h) else
+      throw <| IO.userError s!"attention cache capacity {cap} cannot hold position {pos}"
     if pos == 12 then
       let erased := { cache with vStore := Tensor.zerosLike cache.vStore }
       let (bad, _) := attention.forwardStep
-        (rotaryDim := rotaryDim) cfg input cosStep sinStep window erased
+        (rotaryDim := rotaryDim) cfg input cosStep sinStep window erased pos hpos
       let badStats ← mixedErrorStats (bad) (expected)
       IO.println s!"  (a) [{lbl}] erased cached history: violations={badStats.violations} (must be positive)"
       if badStats.violations == 0 then undetected := undetected + 1
     let (out, next) := attention.forwardStep
-      (rotaryDim := rotaryDim) cfg input cosStep sinStep window cache
+      (rotaryDim := rotaryDim) cfg input cosStep sinStep window cache pos hpos
     cache := next
     stepStats := stepStats.merge (← mixedErrorStats (out) (expected))
   reportMixedErrors stepStats s!"(a) [{lbl}] attention decode positions 12..19"
