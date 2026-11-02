@@ -55,7 +55,6 @@ def init (dModel nHeads : Nat) (device : Device := .CPU) (dtype : DType := .Floa
 structure KVCache (batch nHeads headDim cap : Nat) (dtype : DType := .Float32) where
   kStore : Tensor { dtype := dtype, device := device, shape := #[batch, nHeads, cap, headDim] }
   vStore : Tensor { dtype := dtype, device := device, shape := #[batch, nHeads, cap, headDim] }
-  seq : Nat := 0
   cap_pos : 0 < cap
 
 /-- Initialize an empty static-capacity KV cache on `device`. -/
@@ -67,7 +66,7 @@ def initKVCache {batch nHeads headDim : Nat}
     zerosFor (dtype := dtype) #[batch, nHeads, maxLen, headDim] false device
   let v0 : Tensor { dtype := dtype, device := device, shape := #[batch, nHeads, maxLen, headDim] } :=
     zerosFor (dtype := dtype) #[batch, nHeads, maxLen, headDim] false device
-  { kStore := k0, vStore := v0, seq := 0, cap_pos := h }
+  { kStore := k0, vStore := v0, cap_pos := h }
 
 /-- Project external key/value states once into attention layout.
     Output layout is `[batch, nHeads, kvSeq, headDim]`. -/
@@ -170,7 +169,6 @@ def forwardSelfStep {batch cap : Nat}
     cap_pos := cache.cap_pos
     kStore := kStore'
     vStore := vStore'
-    seq := kvLen
   }
   (out, cache')
 
@@ -431,6 +429,13 @@ def decode {batch seq encSeq : Nat}
   let hidden ← m.model.decode inputIds encoderHidden
   pure (Tensor.linear3d hidden m.projOut)
 
+/-- Self-attention KV caches of every decoder layer; `position` counts the
+    tokens written so far. -/
+structure SelfKVCaches (cfg : WhisperConfig) (batch cap : Nat) (dtype : DType := .Float32) where
+  layers : Array (LayerKVCache (device := device) (dtype := dtype) cfg batch cap)
+  position : Nat := 0
+  deriving Inhabited
+
 /-- Initialize one self-attention KV cache per decoder layer. -/
 def initLayerKVCaches {batch : Nat}
     (m : WhisperForConditionalGeneration (device := device) (dtype := dtype) cfg)
@@ -438,14 +443,14 @@ def initLayerKVCaches {batch : Nat}
     (device : Device)
     [DType.ConstantSupported dtype device]
     (h : 0 < maxLen := by omega)
-    : Array (LayerKVCache (device := device) (dtype := dtype) cfg batch maxLen) :=
-  m.model.decoderLayers.map (fun _ =>
-    WhisperAttention.initKVCache
-      (dtype := dtype) maxLen
-      (batch := batch)
-      (nHeads := cfg.decoderAttentionHeads)
-      (headDim := cfg.dModel / cfg.decoderAttentionHeads)
-      device (h := h))
+    : SelfKVCaches (device := device) (dtype := dtype) cfg batch maxLen :=
+  { layers := m.model.decoderLayers.map (fun _ =>
+      WhisperAttention.initKVCache
+        (dtype := dtype) maxLen
+        (batch := batch)
+        (nHeads := cfg.decoderAttentionHeads)
+        (headDim := cfg.dModel / cfg.decoderAttentionHeads)
+        device (h := h)) }
 
 /-- Precompute cross-attention K/V once per decoder layer for an encoded chunk. -/
 def precomputeCrossCaches {batch encSeq : Nat}
@@ -464,8 +469,8 @@ def decodeStepWithCache {batch encSeq cap : Nat}
     (tokenIds : Tensor { device := device, shape := #[batch, 1], dtype := .Int64 })
     (position : Nat)
     (crossCaches : Array (LayerCrossCache (device := device) (dtype := dtype) cfg batch encSeq))
-    (selfCaches : Array (LayerKVCache (device := device) (dtype := dtype) cfg batch cap))
-    : IO (Tensor { dtype := dtype, device := device, shape := #[batch, cfg.vocabSize] } × Array (LayerKVCache (device := device) (dtype := dtype) cfg batch cap)) := do
+    (selfCaches : SelfKVCaches (device := device) (dtype := dtype) cfg batch cap)
+    : IO (Tensor { dtype := dtype, device := device, shape := #[batch, cfg.vocabSize] } × SelfKVCaches (device := device) (dtype := dtype) cfg batch cap) := do
   if position >= cfg.maxTargetPositions then
     throw <| IO.userError
       s!"Whisper decoder position {position} exceeds max_target_positions {cfg.maxTargetPositions}"
@@ -474,7 +479,9 @@ def decodeStepWithCache {batch encSeq cap : Nat}
   let posB : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.dModel] } :=
     Tensor.expand (Tensor.reshape pos #[1, 1, cfg.dModel]) #[batch, 1, cfg.dModel]
   let mut h : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.dModel] } := Tensor.add tokEmb posB
-  let mut nextCaches := selfCaches
+  if selfCaches.position != position then
+    throw <| IO.userError s!"Whisper cache position {selfCaches.position} does not match decode position {position}"
+  let mut nextCaches := selfCaches.layers
   for i in [:m.model.decoderLayers.size] do
     let layer ←
       match m.model.decoderLayers[i]? with
@@ -484,8 +491,6 @@ def decodeStepWithCache {batch encSeq cap : Nat}
       match nextCaches[i]? with
       | some c => pure c
       | none => throw <| IO.userError s!"missing Whisper self KV cache at index {i}"
-    if selfCache.seq != position then
-      throw <| IO.userError s!"Whisper cache position {selfCache.seq} does not match decode position {position}"
     let ⟨hpos⟩ ← if hp : position < cap then pure (PLift.up hp) else
       throw <| IO.userError s!"Whisper self KV cache capacity {cap} exhausted"
     let crossCache ←
@@ -498,7 +503,7 @@ def decodeStepWithCache {batch encSeq cap : Nat}
   let hiddenNorm : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.dModel] } := m.model.decoderLayerNorm.forward3d h
   let logits3 : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.vocabSize] } := Tensor.linear3d hiddenNorm m.projOut
   let logits2 : Tensor { dtype := dtype, device := device, shape := #[batch, cfg.vocabSize] } := Tensor.reshape logits3 #[batch, cfg.vocabSize]
-  pure (logits2, nextCaches)
+  pure (logits2, { layers := nextCaches, position := position + 1 })
 
 end WhisperForConditionalGeneration
 

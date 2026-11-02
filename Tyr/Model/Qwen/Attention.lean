@@ -68,7 +68,6 @@ def init (hidden_size num_heads num_kv_heads head_dim : Nat) (dtype : DType := .
 structure KVCache (batch num_kv_heads head_dim cap : Nat) (dtype : DType := .Float32) where
   kStore : Tensor { device := device, shape := #[batch, num_kv_heads, cap, head_dim], dtype := dtype }
   vStore : Tensor { device := device, shape := #[batch, num_kv_heads, cap, head_dim], dtype := dtype }
-  seq : Nat := 0
   cap_pos : 0 < cap
 
 /-- Empty static KV cache with fixed capacity `maxLen`. -/
@@ -80,7 +79,7 @@ def initKVCache {batch num_kv_heads head_dim : Nat}
     Tensor.zerosFor ⟨#[batch, num_kv_heads, maxLen, head_dim], dtype, device⟩
   let v0 : Tensor { device := device, shape := #[batch, num_kv_heads, maxLen, head_dim], dtype := dtype } :=
     Tensor.zerosFor ⟨#[batch, num_kv_heads, maxLen, head_dim], dtype, device⟩
-  { kStore := k0, vStore := v0, seq := 0, cap_pos := h }
+  { kStore := k0, vStore := v0, cap_pos := h }
 
 /-! ## Extern adapters
 
@@ -288,7 +287,6 @@ def forwardStep {batch hidden_size num_heads num_kv_heads head_dim cap : Nat}
     cap_pos := cache.cap_pos
     kStore := kStore'
     vStore := vStore'
-    seq := kvLen
   }
   (out, cache')
 

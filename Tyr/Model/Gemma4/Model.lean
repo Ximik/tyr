@@ -381,7 +381,6 @@ private def attentionSlidingPrefillWithMask {batch seq cap : Nat}
     cap_pos := cache.cap_pos
     kStore := kStore'
     vStore := vStore'
-    seq := seq
   }
   (oProjSliding cfg m out, cache')
 
@@ -427,7 +426,6 @@ private def attentionFullPrefillWithMask {batch seq cap : Nat}
     cap_pos := cache.cap_pos
     kStore := kStore'
     vStore := vStore'
-    seq := seq
   }
   (oProjFull cfg m out, cache')
 
@@ -528,7 +526,6 @@ private def attentionSlidingWithCache {batch seq cap : Nat}
       cap_pos := cache.cap_pos
       kStore := kStore'
       vStore := vStore'
-      seq := seq
     }
     let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, seq, cfg.head_dim], dtype := dtype } :=
       Tensor.attentionWindow qh kh vh true true cfg.sliding_window
@@ -583,7 +580,6 @@ private def attentionFullWithCache {batch seq cap : Nat}
       cap_pos := cache.cap_pos
       kStore := kStore'
       vStore := vStore'
-      seq := seq
     }
     let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, seq, Config.fullHeadDim cfg], dtype := dtype } :=
       Tensor.attentionGQA qh kh vh true true
@@ -642,9 +638,9 @@ private def attentionSlidingStep {batch cap : Nat}
     let start := kvLen - useLen
     have _hUse : useLen ≤ kvLen := by simp only [useLen]; split <;> omega
     let kAll0 : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, kvLen, cfg.head_dim], dtype := dtype } :=
-      (cacheSliceSliding (kvLen := kvLen) cfg { cache with kStore := kStore', vStore := vStore', seq := kvLen } hpos) |>.1
+      (cacheSliceSliding (kvLen := kvLen) cfg { cache with kStore := kStore', vStore := vStore' } hpos) |>.1
     let vAll0 : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, kvLen, cfg.head_dim], dtype := dtype } :=
-      (cacheSliceSliding (kvLen := kvLen) cfg { cache with kStore := kStore', vStore := vStore', seq := kvLen } hpos) |>.2
+      (cacheSliceSliding (kvLen := kvLen) cfg { cache with kStore := kStore', vStore := vStore' } hpos) |>.2
     let kAll : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, useLen, cfg.head_dim], dtype := dtype } := kAll0.slice 2 start useLen
     let vAll : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, useLen, cfg.head_dim], dtype := dtype } := vAll0.slice 2 start useLen
     let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, 1, cfg.head_dim], dtype := dtype } :=
@@ -655,7 +651,6 @@ private def attentionSlidingStep {batch cap : Nat}
       cap_pos := cache.cap_pos
       kStore := kStore'
       vStore := vStore'
-      seq := kvLen
     }
     (oProjSliding cfg m out, cache')
 
@@ -706,9 +701,9 @@ private def attentionFullStep {batch cap : Nat}
     let vStore' := Tensor.sliceScatter vStore 2 pos paddedV
     let kvLen := pos + 1
     let kAll : Tensor { device := device, shape := #[batch, Config.fullNumKVHeads cfg, kvLen, Config.fullHeadDim cfg], dtype := dtype } :=
-      (cacheSliceFull (kvLen := kvLen) cfg { cache with kStore := kStore', vStore := vStore', seq := kvLen } hpos) |>.1
+      (cacheSliceFull (kvLen := kvLen) cfg { cache with kStore := kStore', vStore := vStore' } hpos) |>.1
     let vAll : Tensor { device := device, shape := #[batch, Config.fullNumKVHeads cfg, kvLen, Config.fullHeadDim cfg], dtype := dtype } :=
-      (cacheSliceFull (kvLen := kvLen) cfg { cache with kStore := kStore', vStore := vStore', seq := kvLen } hpos) |>.2
+      (cacheSliceFull (kvLen := kvLen) cfg { cache with kStore := kStore', vStore := vStore' } hpos) |>.2
     let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, 1, Config.fullHeadDim cfg], dtype := dtype } :=
       Tensor.attentionGQAQKV qh kAll vAll false true
     let out : Tensor { device := device, shape := #[batch, 1, cfg.num_attention_heads * Config.fullHeadDim cfg], dtype := dtype } :=
@@ -717,7 +712,6 @@ private def attentionFullStep {batch cap : Nat}
       cap_pos := cache.cap_pos
       kStore := kStore'
       vStore := vStore'
-      seq := kvLen
     }
     (oProjFull cfg m out, cache')
 

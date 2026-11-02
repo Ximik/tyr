@@ -46,8 +46,9 @@ private def close {σ τ : StaticSpec} (x : Tensor σ) (y : Tensor τ) (tol : Fl
       close actual ((expected.sliceChecked 1 pos 1 #[1, 1, 16]).reshape #[1, 16]) (if bf16 then 0.08 else 1e-4)
       LeanTest.assertEqual actual.actualSpec.dtype expected.actualSpec.dtype
       caches := next
-    let some untouched := initial[0]? | throw (IO.userError "missing initial cache")
-    LeanTest.assertEqual untouched.seq 0
+    LeanTest.assertEqual caches.position 4 "every decoded token advances the cache position"
+    LeanTest.assertEqual initial.position 0
+    let some untouched := initial.layers[0]? | throw (IO.userError "missing initial cache")
     let stored ← untouched.kStore.toFloatArray
     LeanTest.assertTrue (stored.all (· == 0)) "incremental updates must preserve the input cache snapshot"
     let (again, _) ← model.decodeStepWithCache (encSeq := 3) (tokens.sliceChecked 1 0 1 #[1, 1]) 0 cross initial

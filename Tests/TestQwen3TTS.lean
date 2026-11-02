@@ -136,7 +136,6 @@ def testQwen3TTSBFloat16IncrementalCache : IO Unit := do
       LeanTest.assertEqual out.actualSpec.dtype x.actualSpec.dtype "Decode step retains model dtype"
       cache := next
       outputs := outputs.push out.packShape
-    LeanTest.assertEqual cache.seq 5 "All prompt and decode tokens enter the cache"
     LeanTest.assertEqual cache.kStore.actualSpec.dtype x.actualSpec.dtype "K cache follows projected key dtype"
     LeanTest.assertEqual cache.vStore.actualSpec.dtype x.actualSpec.dtype "V cache follows projected value dtype"
     LeanTest.assertEqual (← Tensor.toFloatArray prefixCache.kStore) prefixK
