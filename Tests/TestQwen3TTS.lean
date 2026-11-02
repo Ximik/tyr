@@ -354,9 +354,13 @@ def testQwen3TTSStreamingApi : IO Unit := do
   LeanTest.assertEqual empty.codes.runtimeShape #[1, 0, cfg.numCodeGroups]
   LeanTest.assertEqual empty.codes.actualSpec.dtype DType.Int64
   LeanTest.assertEqual empty.lengths #[0]
-  let noGroups := { cfg with numCodeGroups := 0 }
-  let model ← TalkerForConditionalGeneration.init noGroups
-  let prompt := TalkerModel.buildInputsFromText noGroups model.model (Tensor.fullInt #[1, 2] 1)
-  let frame ← TalkerForConditionalGeneration.generateFrame noGroups model prompt
-  LeanTest.assertEqual frame.codes.runtimeShape #[1, 0]
-  LeanTest.assertEqual frame.codes.actualSpec.dtype DType.Int64
+
+@[test] def testQwen3TTSConfigRejectsZeroCodeGroups : IO Unit := IO.FS.withTempDir fun dir => do
+  let path := (dir / "config.json").toString
+  IO.FS.writeFile path "{\"talker_config\": {\"num_code_groups\": 0}}"
+  let rejected ←
+    try
+      let _ ← Qwen3TTSConfig.loadFromFile path
+      pure false
+    catch e => pure ((toString e).contains "num_code_groups")
+  LeanTest.assertTrue rejected "a talker without code groups is rejected where the config is loaded"

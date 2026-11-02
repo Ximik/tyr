@@ -190,7 +190,7 @@ private def loadTalkerModelSharded (modelDir : String) (cfg : TalkerConfig)
 private def loadCodePredictorSharded (modelDir : String) (cfg : TalkerConfig)
     : IO (TalkerCodePredictor (device := device) (dtype := dtype) cfg) := do
   let cp := cfg.codePredictorConfig
-  let nCodebooks := if cfg.numCodeGroups == 0 then 0 else cfg.numCodeGroups - 1
+  let nCodebooks := cfg.numCodeGroups - 1
 
   let mut inputEmbeddings : Array (Tensor { shape := #[cp.vocabSize, cfg.hiddenSize], dtype := dtype.val, device := device }) := #[]
   for i in [:nCodebooks] do
