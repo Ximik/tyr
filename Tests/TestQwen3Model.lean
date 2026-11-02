@@ -96,6 +96,23 @@ def testQwen3GreedyUncachedEmptyPromptThrows : IO Unit := do
   LeanTest.assertTrue threw "generateGreedyUncached should reject empty prompt"
 
 @[test]
+def testQwen3GreedyCachedEmptyPromptThrows : IO Unit := do
+  let model ← Qwen3ForCausalLM.init tinyCfg
+  let ids : Tensor { shape := #[1, 0], dtype := .Int64, device := .CPU } := Tensor.reshape (Tensor.fromInt64Array #[]) #[1, 0]
+  let rejected ←
+    try
+      let _ ← model.generateGreedy ids 1 #[]
+      pure false
+    catch e => pure ((toString e).contains "non-empty prompt")
+  LeanTest.assertTrue rejected "cached generateGreedy should reject an empty prompt before sizing its cache"
+
+set_option linter.unusedVariables false in
+example : True := by
+  fail_if_success
+    have := qwen.QwenAttention.initKVCache (batch := 1) (num_kv_heads := 1) (head_dim := 4) 0
+  trivial
+
+@[test]
 def testQwen3GreedyZeroNewTokensIdentity : IO Unit := do
   let model ← Qwen3ForCausalLM.init tinyCfg
   let ids : Tensor { shape := #[1, 3], dtype := .Int64, device := .CPU } := Tensor.reshape (Tensor.fromInt64Array #[4, 5, 6]) #[1, 3]

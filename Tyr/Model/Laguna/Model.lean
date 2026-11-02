@@ -167,8 +167,8 @@ namespace LagunaAttention
 
 /-- Per-layer static KV cache (existentially indexed K/V stores of shape
     `[batch, cfg.num_key_value_heads, maxLen, cfg.head_dim]`). -/
-abbrev KVCache (cfg : Config) (batch : Nat) (dtype : DType := .Float32) :=
-  qwen.QwenAttention.KVCache (device := device) batch cfg.num_key_value_heads cfg.head_dim dtype
+abbrev KVCache (cfg : Config) (batch cap : Nat) (dtype : DType := .Float32) :=
+  qwen.QwenAttention.KVCache (device := device) batch cfg.num_key_value_heads cfg.head_dim cap dtype
 
 def init (cfg : Config) (numHeads : Nat) (device : Device := .CPU) (dtype : DType := .Float32) : IO (LagunaAttention (device := device) (dtype := dtype) cfg numHeads) := do
   let q ← initDynamicWeight (device := device) (dtype := dtype) #[numHeads * cfg.head_dim, cfg.hidden_size] cfg.hidden_size
@@ -260,30 +260,30 @@ def forward {batch seq rotaryDim numHeads : Nat}
 /-- Batch prefill with KV-cache update. Writes K/V at cache offset 0 and sets
     `cache.seq := seq` — call this on a FRESH cache (chunked prefill is not
     supported). Sliding layers attend with the window SDPA over the fresh K/V. -/
-def forwardWithCache {batch seq rotaryDim numHeads : Nat}
+def forwardWithCache {batch seq rotaryDim numHeads cap : Nat}
     (cfg : Config)
     (m : LagunaAttention (device := device) (dtype := dtype) cfg numHeads)
     (x : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] })
     (cos : Tensor { device := device, shape := #[seq, rotaryDim / 2], dtype := .Float32 })
     (sin : Tensor { device := device, shape := #[seq, rotaryDim / 2], dtype := .Float32 })
     (window : Option Nat)
-    (cache : KVCache (device := device) (dtype := dtype) cfg batch)
-    : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] } × KVCache (device := device) (dtype := dtype) cfg batch :=
+    (cache : KVCache (device := device) (dtype := dtype) cfg batch cap)
+    : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] } × KVCache (device := device) (dtype := dtype) cfg batch cap :=
   let (q, k, v) := qkvRope cfg m x cos sin
   let qh : Tensor { dtype := dtype, device := device, shape := #[batch, numHeads, seq, cfg.head_dim] } := transposeAttention q
   let kh : Tensor { dtype := dtype, device := device, shape := #[batch, cfg.num_key_value_heads, seq, cfg.head_dim] } := transposeAttention k
   let vh : Tensor { dtype := dtype, device := device, shape := #[batch, cfg.num_key_value_heads, seq, cfg.head_dim] } := transposeAttention v
-  let kStore : Tensor { dtype := dtype, device := device, shape := #[batch, cfg.num_key_value_heads, cache.maxLen, cfg.head_dim] } :=
+  let kStore : Tensor { dtype := dtype, device := device, shape := #[batch, cfg.num_key_value_heads, cap, cfg.head_dim] } :=
     Tensor.castLike kh (cache.kStore)
-  let vStore : Tensor { dtype := dtype, device := device, shape := #[batch, cfg.num_key_value_heads, cache.maxLen, cfg.head_dim] } :=
+  let vStore : Tensor { dtype := dtype, device := device, shape := #[batch, cfg.num_key_value_heads, cap, cfg.head_dim] } :=
     Tensor.castLike vh (cache.vStore)
   let kStore' := Tensor.sliceScatter kStore 2 0 kh
   let vStore' := Tensor.sliceScatter vStore 2 0 vh
-  let cache' : KVCache (device := device) (dtype := dtype) cfg batch := {
+  let cache' : KVCache (device := device) (dtype := dtype) cfg batch cap := {
+    cap_pos := cache.cap_pos
     kStore := kStore'
     vStore := vStore'
     seq := seq
-    maxLen := cache.maxLen
   }
   let attn : Tensor { dtype := dtype, device := device, shape := #[batch, numHeads, seq, cfg.head_dim] } :=
     match window with
@@ -296,31 +296,31 @@ def forwardWithCache {batch seq rotaryDim numHeads : Nat}
     truncate the cache READ to the last `min(kvLen, window)` entries
     (Gemma4 pattern) — every entry in the truncated span is attendable, so a
     plain non-causal GQA decode is exact. -/
-def forwardStep {batch rotaryDim numHeads : Nat}
+def forwardStep {batch rotaryDim numHeads cap : Nat}
     (cfg : Config)
     (m : LagunaAttention (device := device) (dtype := dtype) cfg numHeads)
     (x : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.hidden_size] })
     (cos : Tensor { device := device, shape := #[1, rotaryDim / 2], dtype := .Float32 })
     (sin : Tensor { device := device, shape := #[1, rotaryDim / 2], dtype := .Float32 })
     (window : Option Nat)
-    (cache : KVCache (device := device) (dtype := dtype) cfg batch)
-    : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.hidden_size] } × KVCache (device := device) (dtype := dtype) cfg batch :=
+    (cache : KVCache (device := device) (dtype := dtype) cfg batch cap)
+    : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.hidden_size] } × KVCache (device := device) (dtype := dtype) cfg batch cap :=
   let (q, k, v) := qkvRope cfg m x cos sin
   let qh : Tensor { dtype := dtype, device := device, shape := #[batch, numHeads, 1, cfg.head_dim] } := transposeAttention q
   let kNew : Tensor { dtype := dtype, device := device, shape := #[batch, cfg.num_key_value_heads, 1, cfg.head_dim] } := transposeAttention k
   let vNew : Tensor { dtype := dtype, device := device, shape := #[batch, cfg.num_key_value_heads, 1, cfg.head_dim] } := transposeAttention v
-  let kStore : Tensor { dtype := dtype, device := device, shape := #[batch, cfg.num_key_value_heads, cache.maxLen, cfg.head_dim] } :=
+  let kStore : Tensor { dtype := dtype, device := device, shape := #[batch, cfg.num_key_value_heads, cap, cfg.head_dim] } :=
     Tensor.castLike kNew (cache.kStore)
-  let vStore : Tensor { dtype := dtype, device := device, shape := #[batch, cfg.num_key_value_heads, cache.maxLen, cfg.head_dim] } :=
+  let vStore : Tensor { dtype := dtype, device := device, shape := #[batch, cfg.num_key_value_heads, cap, cfg.head_dim] } :=
     Tensor.castLike vNew (cache.vStore)
   let writePos : Nat :=
-    if cache.seq < cache.maxLen then cache.seq
-    else if cache.maxLen == 0 then 0 else cache.maxLen - 1
-  let kStore' : Tensor { dtype := dtype, device := device, shape := #[batch, cfg.num_key_value_heads, cache.maxLen, cfg.head_dim] } :=
+    if cache.seq < cap then cache.seq
+    else if cap == 0 then 0 else cap - 1
+  let kStore' : Tensor { dtype := dtype, device := device, shape := #[batch, cfg.num_key_value_heads, cap, cfg.head_dim] } :=
     Tensor.sliceScatter kStore 2 writePos kNew
-  let vStore' : Tensor { dtype := dtype, device := device, shape := #[batch, cfg.num_key_value_heads, cache.maxLen, cfg.head_dim] } :=
+  let vStore' : Tensor { dtype := dtype, device := device, shape := #[batch, cfg.num_key_value_heads, cap, cfg.head_dim] } :=
     Tensor.sliceScatter vStore 2 writePos vNew
-  let kvLen : Nat := if cache.seq < cache.maxLen then cache.seq + 1 else cache.maxLen
+  let kvLen : Nat := if cache.seq < cap then cache.seq + 1 else cap
   -- Sliding-window read truncation: keep only the last `useLen` entries.
   let useLen : Nat :=
     match window with
@@ -334,44 +334,44 @@ def forwardStep {batch rotaryDim numHeads : Nat}
   let attn : Tensor { dtype := dtype, device := device, shape := #[batch, numHeads, 1, cfg.head_dim] } :=
     Tensor.attentionGQAQKV qh kAll vAll false true
   let attn : Tensor { dtype := dtype, device := device, shape := #[batch, 1, numHeads, cfg.head_dim] } := transposeAttention attn
-  let cache' : KVCache (device := device) (dtype := dtype) cfg batch := {
+  let cache' : KVCache (device := device) (dtype := dtype) cfg batch cap := {
+    cap_pos := cache.cap_pos
     kStore := kStore'
     vStore := vStore'
     seq := kvLen
-    maxLen := cache.maxLen
   }
   (gateAndOut cfg m x attn, cache')
 
 /-- Internal effectful path. Cache tensors never escape the owning session.
 Sliding stores use absolute-position modulo capacity; paired K/V order is
 irrelevant to single-query attention after RoPE has been applied. -/
-private def forwardOwned {batch seq rotaryDim numHeads : Nat}
+private def forwardOwned {batch seq rotaryDim numHeads cap : Nat}
     (cfg : Config) (m : LagunaAttention (device := device) (dtype := dtype) cfg numHeads)
     (x : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] })
     (cos : Tensor { device := device, shape := #[seq, rotaryDim / 2], dtype := .Float32 }) (sin : Tensor { device := device, shape := #[seq, rotaryDim / 2], dtype := .Float32 })
-    (window : Option Nat) (prefill : Bool) (cache : KVCache (device := device) (dtype := dtype) cfg batch)
-    : IO (Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] } × KVCache (device := device) (dtype := dtype) cfg batch) := do
+    (window : Option Nat) (prefill : Bool) (cache : KVCache (device := device) (dtype := dtype) cfg batch cap)
+    : IO (Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] } × KVCache (device := device) (dtype := dtype) cfg batch cap) := do
   let (q, k, v) := qkvRope cfg m x cos sin
   let qh : Tensor { dtype := dtype, device := device, shape := #[batch, numHeads, seq, cfg.head_dim] } := transposeAttention q
   let kh : Tensor { dtype := dtype, device := device, shape := #[batch, cfg.num_key_value_heads, seq, cfg.head_dim] } := transposeAttention k
   let vh : Tensor { dtype := dtype, device := device, shape := #[batch, cfg.num_key_value_heads, seq, cfg.head_dim] } := transposeAttention v
-  let mut kStore : Tensor { dtype := dtype, device := device, shape := #[batch, cfg.num_key_value_heads, cache.maxLen, cfg.head_dim] } :=
+  let mut kStore : Tensor { dtype := dtype, device := device, shape := #[batch, cfg.num_key_value_heads, cap, cfg.head_dim] } :=
     Tensor.castLike kh (cache.kStore)
-  let mut vStore : Tensor { dtype := dtype, device := device, shape := #[batch, cfg.num_key_value_heads, cache.maxLen, cfg.head_dim] } :=
+  let mut vStore : Tensor { dtype := dtype, device := device, shape := #[batch, cfg.num_key_value_heads, cap, cfg.head_dim] } :=
     Tensor.castLike vh (cache.vStore)
   if prefill then
     -- Retain only the prompt tail, placing each entry at its absolute ring slot.
-    let retained := min seq cache.maxLen
+    let retained := min seq cap
     let sourceStart := seq - retained
-    let slot := sourceStart % cache.maxLen
-    let first := min retained (cache.maxLen - slot)
+    let slot := sourceStart % cap
+    let first := min retained (cap - slot)
     kStore ← data.copySliceIO kStore 2 slot (sliceTyped kh 2 sourceStart first)
     vStore ← data.copySliceIO vStore 2 slot (sliceTyped vh 2 sourceStart first)
     if first < retained then
       kStore ← data.copySliceIO kStore 2 0 (sliceTyped kh 2 (sourceStart + first) (retained - first))
       vStore ← data.copySliceIO vStore 2 0 (sliceTyped vh 2 (sourceStart + first) (retained - first))
   else
-    let slot := cache.seq % cache.maxLen
+    let slot := cache.seq % cap
     kStore ← data.copySliceIO kStore 2 slot kh
     vStore ← data.copySliceIO vStore 2 slot vh
   let total := if prefill then seq else cache.seq + seq
@@ -381,7 +381,7 @@ private def forwardOwned {batch seq rotaryDim numHeads : Nat}
       | some w => Tensor.attentionWindow qh kh vh true true w
       | none => Tensor.attentionGQA qh kh vh true true
     else
-      let useLen := min total cache.maxLen
+      let useLen := min total cap
       let kAll := sliceTyped kStore 2 0 useLen
       let vAll := sliceTyped vStore 2 0 useLen
       Tensor.attentionGQAQKV qh kAll vAll false true
@@ -389,17 +389,18 @@ private def forwardOwned {batch seq rotaryDim numHeads : Nat}
   return (out, {
     kStore := kStore
     vStore := vStore
+    cap_pos := cache.cap_pos
     seq := total
-    maxLen := cache.maxLen })
+ })
 
 end LagunaAttention
 
 /-! ## KV cache -/
 
-/-- Full-model KV cache: one static KV cache per decoder layer (sliding
-    layers keep a full-length store and truncate reads at decode time). -/
+/-- Full-model KV cache: one static KV cache per decoder layer, each paired with
+    its capacity (sliding layers of a session reserve less than full layers). -/
 structure LagunaCache (cfg : Config) (batch : Nat) (dtype : DType := .Float32) where
-  kvCaches : Array (LagunaAttention.KVCache (device := device) (dtype := dtype) cfg batch)
+  kvCaches : Array (Σ cap, LagunaAttention.KVCache (device := device) (dtype := dtype) cfg batch cap)
 
 /-- An inference cache with private, mutable storage. Aliases refer to the same
 serialized session; `fork` creates independent storage. Failed transitions
@@ -416,17 +417,17 @@ namespace LagunaCacheSession
 def fork (session : LagunaCacheSession (device := device) (dtype := dtype) cfg batch) : IO (LagunaCacheSession (device := device) (dtype := dtype) cfg batch) :=
   session.state.atomically do
     let some cache ← get | throw <| IO.userError "Laguna cache session is invalid"
-    let copied ← cache.kvCaches.mapM fun kv => do
+    let copied ← cache.kvCaches.mapM fun ⟨n, kv⟩ => do
       let k ← data.cloneInferenceIO kv.kStore
       let v ← data.cloneInferenceIO kv.vStore
-      return { kv with kStore := k, vStore := v }
+      return ⟨n, { kv with kStore := k, vStore := v }⟩
     return ⟨← Std.Mutex.new (some { kvCaches := copied }), session.maxLen⟩
 
 /-- Layer capacities, for memory accounting without exposing mutable tensors. -/
 def capacities (session : LagunaCacheSession (device := device) (dtype := dtype) cfg batch) : IO (Array Nat) :=
   session.state.atomically do
     let some cache ← get | throw <| IO.userError "Laguna cache session is invalid"
-    return cache.kvCaches.map (·.maxLen)
+    return cache.kvCaches.map (·.1)
 
 end LagunaCacheSession
 
@@ -578,17 +579,17 @@ def forwardWithCache {batch seq : Nat}
   let h1 := rmsNormWeighted3d layer.input_layernorm x cfg.rms_norm_eps
   let (mixed, cache') ←
     match layer.attnFull, layer.attnSliding, cache.kvCaches[layerIdx]? with
-    | some a, _, some kv =>
+    | some a, _, some ⟨n, kv⟩ =>
       let cos : Tensor { device := device, shape := #[seq, cfg.rotaryDimFull / 2], dtype := .Float32 } := sliceRotaryRows tables.fullCos 0 seq
       let sin : Tensor { device := device, shape := #[seq, cfg.rotaryDimFull / 2], dtype := .Float32 } := sliceRotaryRows tables.fullSin 0 seq
       let (out, kv') := a.forwardWithCache (rotaryDim := cfg.rotaryDimFull) cfg h1 cos sin none kv
-      pure (out, { cache with kvCaches := cache.kvCaches.set! layerIdx kv' })
-    | _, some a, some kv =>
+      pure (out, { cache with kvCaches := cache.kvCaches.set! layerIdx ⟨n, kv'⟩ })
+    | _, some a, some ⟨n, kv⟩ =>
       let cos : Tensor { device := device, shape := #[seq, cfg.rotaryDimSliding / 2], dtype := .Float32 } := sliceRotaryRows tables.slidingCos 0 seq
       let sin : Tensor { device := device, shape := #[seq, cfg.rotaryDimSliding / 2], dtype := .Float32 } := sliceRotaryRows tables.slidingSin 0 seq
       let (out, kv') :=
         a.forwardWithCache (rotaryDim := cfg.rotaryDimSliding) cfg h1 cos sin (some cfg.sliding_window) kv
-      pure (out, { cache with kvCaches := cache.kvCaches.set! layerIdx kv' })
+      pure (out, { cache with kvCaches := cache.kvCaches.set! layerIdx ⟨n, kv'⟩ })
     | _, _, _ => pure (h1, cache)
   let h2 := Tensor.add x mixed
   let h3 := rmsNormWeighted3d layer.post_attention_layernorm h2 cfg.rms_norm_eps
@@ -608,28 +609,28 @@ def forwardStep {batch : Nat}
   let h1 := rmsNormWeighted3d layer.input_layernorm x cfg.rms_norm_eps
   let (mixed, cache') ←
     match layer.attnFull, layer.attnSliding, cache.kvCaches[layerIdx]? with
-    | some a, _, some kv =>
+    | some a, _, some ⟨n, kv⟩ =>
       let cos : Tensor { device := device, shape := #[1, cfg.rotaryDimFull / 2], dtype := .Float32 } := sliceRotaryRows tables.fullCos position 1
       let sin : Tensor { device := device, shape := #[1, cfg.rotaryDimFull / 2], dtype := .Float32 } := sliceRotaryRows tables.fullSin position 1
       let (out, kv') := a.forwardStep (rotaryDim := cfg.rotaryDimFull) cfg h1 cos sin none kv
-      pure (out, { cache with kvCaches := cache.kvCaches.set! layerIdx kv' })
-    | _, some a, some kv =>
+      pure (out, { cache with kvCaches := cache.kvCaches.set! layerIdx ⟨n, kv'⟩ })
+    | _, some a, some ⟨n, kv⟩ =>
       let cos : Tensor { device := device, shape := #[1, cfg.rotaryDimSliding / 2], dtype := .Float32 } := sliceRotaryRows tables.slidingCos position 1
       let sin : Tensor { device := device, shape := #[1, cfg.rotaryDimSliding / 2], dtype := .Float32 } := sliceRotaryRows tables.slidingSin position 1
       let (out, kv') :=
         a.forwardStep (rotaryDim := cfg.rotaryDimSliding) cfg h1 cos sin (some cfg.sliding_window) kv
-      pure (out, { cache with kvCaches := cache.kvCaches.set! layerIdx kv' })
+      pure (out, { cache with kvCaches := cache.kvCaches.set! layerIdx ⟨n, kv'⟩ })
     | _, _, _ => pure (h1, cache)
   let h2 := Tensor.add x mixed
   let h3 := rmsNormWeighted3d layer.post_attention_layernorm h2 cfg.rms_norm_eps
   let ffn ← ffnForward cfg layer h3
   pure (Tensor.add h2 ffn, cache')
 
-private def forwardOwned {batch seq : Nat}
+private def forwardOwned {batch seq cap : Nat}
     (cfg : Config) (layer : LagunaLayer (device := device) (dtype := dtype) cfg)
     (x : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] }) (tables : (LagunaRotaryTables (device := device)))
-    (position : Nat) (prefill : Bool) (kv : LagunaAttention.KVCache (device := device) (dtype := dtype) cfg batch)
-    : IO (Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] } × LagunaAttention.KVCache (device := device) (dtype := dtype) cfg batch) := do
+    (position : Nat) (prefill : Bool) (kv : LagunaAttention.KVCache (device := device) (dtype := dtype) cfg batch cap)
+    : IO (Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] } × LagunaAttention.KVCache (device := device) (dtype := dtype) cfg batch cap) := do
   let h1 := rmsNormWeighted3d layer.input_layernorm x cfg.rms_norm_eps
   let (mixed, kv') ← match layer.attnFull, layer.attnSliding with
     | some a, _ =>
@@ -680,16 +681,17 @@ def initCache {batch : Nat}
     (maxLen : Nat)
     (device : Device)
     [DType.ConstantSupported dtype device]
+    (h : 0 < maxLen := by omega)
     : LagunaCache (device := device) (dtype := dtype) cfg batch :=
   Id.run do
-    let mut caches : Array (LagunaAttention.KVCache (device := device) (dtype := dtype) cfg batch) := Array.mkEmpty m.layers.size
+    let mut caches : Array (Σ cap, LagunaAttention.KVCache (device := device) (dtype := dtype) cfg batch cap) := Array.mkEmpty m.layers.size
     for _ in [:m.layers.size] do
-      caches := caches.push (qwen.QwenAttention.initKVCache
+      caches := caches.push ⟨maxLen, qwen.QwenAttention.initKVCache
         maxLen
         (batch := batch)
         (num_kv_heads := cfg.num_key_value_heads)
         (head_dim := cfg.head_dim)
-        device dtype)
+        device dtype (h := h)⟩
     return { kvCaches := caches }
 
 /-- Uncached full-sequence forward (token ids → final hidden states).
@@ -754,7 +756,7 @@ def initCacheSession {batch : Nat} (cfg : Config) (m : LagunaModel (device := de
     (maxLen : Nat) (device : Device) : IO (LagunaCacheSession (device := device) (dtype := dtype) cfg batch) := do
   let support ← dtype.acquireConstantSupport device
   let _ := support.down
-  if maxLen == 0 || cfg.sliding_window == 0 then
+  let ⟨hPos⟩ ← if h : 0 < maxLen ∧ 0 < cfg.sliding_window then pure (PLift.up h) else
     throw <| IO.userError "Laguna cache capacity and sliding window must be positive"
   if m.layers.isEmpty then
     throw <| IO.userError "Laguna cache session requires at least one layer"
@@ -763,11 +765,13 @@ def initCacheSession {batch : Nat} (cfg : Config) (m : LagunaModel (device := de
     let capacity := if layer.attnFull.isSome then maxLen else min maxLen cfg.sliding_window
     -- Pure zero/clone calls can be commoned by Lean. Allocate both mutable
     -- buffers through IO, even when they have identical shape and contents.
+    have hCapacity : 0 < capacity := by
+      simp only [capacity]; split <;> omega
     let template := qwen.QwenAttention.initKVCache capacity
-      (batch := batch) (num_kv_heads := cfg.num_key_value_heads) (head_dim := cfg.head_dim) device dtype
+      (batch := batch) (num_kv_heads := cfg.num_key_value_heads) (head_dim := cfg.head_dim) device dtype hCapacity
     let k ← data.cloneInferenceIO template.kStore
     let v ← data.cloneInferenceIO template.vStore
-    caches := caches.push { template with kStore := k, vStore := v }
+    caches := caches.push ⟨capacity, { template with kStore := k, vStore := v }⟩
   return ⟨← Std.Mutex.new (some { kvCaches := caches }), maxLen⟩
 
 /-- Execute one serialized inference transition, invalidating on partial failure.
@@ -792,7 +796,7 @@ private def forwardSession {batch seq : Nat} (cfg : Config) (m : LagunaModel (de
     throw <| IO.userError "Laguna cache layer count mismatch"
   if prefill && position != 0 || !prefill && seq != 1 then
     throw <| IO.userError "Laguna cache expects fresh prefill or single-token decode"
-  for kv in cache.kvCaches do
+  for ⟨_, kv⟩ in cache.kvCaches do
     if kv.seq != position || (!prefill && position == 0) then
       throw <| IO.userError "Laguna cache position mismatch; prefill once before decode"
   -- Validation failures above leave the session usable. Any failure below may
@@ -805,10 +809,10 @@ private def forwardSession {batch seq : Nat} (cfg : Config) (m : LagunaModel (de
     let mut caches := cache.kvCaches
     for i in [:m.layers.size] do
       let some layer := m.layers[i]? | throw <| IO.userError "missing Laguna layer"
-      let some cached := caches[i]? | throw <| IO.userError "missing Laguna cache"
+      let some ⟨n, cached⟩ := caches[i]? | throw <| IO.userError "missing Laguna cache"
       let (next, kv) ← layer.forwardOwned cfg h tables position prefill cached
       h := next
-      caches := caches.set! i kv
+      caches := caches.set! i ⟨n, kv⟩
     pure (rmsNormWeighted3d m.norm h cfg.rms_norm_eps, { kvCaches := caches : LagunaCache (device := device) (dtype := dtype) cfg batch })
   set (some updated)
   return hidden

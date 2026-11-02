@@ -339,11 +339,11 @@ private def runCacheParityModel {dtype : DType} [DType.RealFloating dtype]
 normalization and RoPE rows are shared between all three operation shapes.
 Return numeric violations and undetected erased-history controls separately;
 the caller reports every layer before asserting their aggregate counts. -/
-private def runBf16AttentionCacheParity {numHeads rotaryDim : Nat}
+private def runBf16AttentionCacheParity {numHeads rotaryDim cap : Nat}
     (cfg : Config) (lbl : String) (attention : LagunaAttention (device := device) cfg numHeads .BFloat16)
     (inputs : Tensor { shape := #[1, 20, cfg.hidden_size], device := device, dtype := .BFloat16 })
     (cos sin : Tensor { shape := #[20, rotaryDim / 2], dtype := .Float32, device := device }) (window : Option Nat)
-    (fresh : LagunaAttention.KVCache (device := device) cfg 1 .BFloat16) : IO (Nat × Nat) := do
+    (fresh : LagunaAttention.KVCache (device := device) cfg 1 cap .BFloat16) : IO (Nat × Nat) := do
   let fullOutput : Tensor { shape := #[1, 20, cfg.hidden_size], device := device, dtype := .BFloat16 } := attention.forward (rotaryDim := rotaryDim) cfg inputs cos sin window
   let inputsPre : Tensor { shape := #[1, 12, cfg.hidden_size], device := device, dtype := .BFloat16 } := sliceTyped inputs 1 0 12
   let cosPre : Tensor { shape := #[12, rotaryDim / 2], dtype := .Float32, device := device } := sliceTyped cos 0 0 12
@@ -395,7 +395,7 @@ private def runBf16LayerCacheParity (cfg : Config) (device : Device) (lbl : Stri
     let normalized : Tensor { shape := #[1, 20, cfg.hidden_size], device := device, dtype := .BFloat16 } :=
       ((Tensor.rmsNorm inputs cfg.rms_norm_eps *
         Tensor.expand layer.input_layernorm.2.toFloat32 #[1, 20, cfg.hidden_size]).toBFloat16)
-    let some kv := fresh.kvCaches[layerIdx]? |
+    let some ⟨_, kv⟩ := fresh.kvCaches[layerIdx]? |
       throw <| IO.userError "Missing layer cache in BF16 attention reference"
     let (count, missed) ← match layer.attnFull, layer.attnSliding with
       | some attention, _ =>
@@ -542,7 +542,8 @@ private def runOwnedCacheCheck (device : Device) (bf16 : Bool := false) : IO Uni
     let mut firstLogits : Option (Tensor { shape := #[1, cfg.vocab_size], device := device, dtype := if bf16 then .BFloat16 else .Float32 }) := none
     let mut maxDiff := 0.0
     -- Keep an actual old cache tensor alive across subsequent functional calls.
-    let some oldCache := functional.kvCaches[1]? | throw <| IO.userError "missing sliding cache"
+    let some oldEntry := functional.kvCaches[1]? | throw <| IO.userError "missing sliding cache"
+    let oldCache := oldEntry.2
     let oldK := oldCache.kStore
     let oldKCopy ← data.cloneInferenceIO oldK
     for pos in [promptLen:20] do
@@ -595,14 +596,14 @@ private def runCacheBenchmark (device : Device) : IO Unit := do
   let ids : Tensor { shape := #[1, 20], dtype := .Int64, device := device } := mkIds baseIds device
   let prompt : Tensor { shape := #[1, 12], dtype := .Int64, device := device } := sliceTyped ids 1 0 12
   let synchronize : IO Unit := if device == .CPU then pure () else torch.cuda_synchronize
-  for capacity in #[(128 : Nat), 8192] do
+  for hc : capacity in #[(128 : Nat), 8192] do
     let tables ← precomputeRotaryTables cfg capacity device
     let mut functionalMs : Nat := 0
     let mut ownedMs : Nat := 0
     let mut ownedCapacity : Nat := 0
     for _ in [:3] do
       let (_, initial) ← model.prefill cfg tables (model.embedTokens prompt)
-        (model.model.initCache cfg capacity device)
+        (model.model.initCache cfg capacity device (by simp at hc; omega))
       let mut cache := initial
       synchronize
       let start ← IO.monoMsNow
