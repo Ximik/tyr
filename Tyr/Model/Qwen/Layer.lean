@@ -79,11 +79,12 @@ def forwardStep {batch hidden_size num_heads num_kv_heads head_dim intermediate_
     (cos : Tensor { device := device, shape := #[1, head_dim / 2], dtype := .Float32 })
     (sin : Tensor { device := device, shape := #[1, head_dim / 2], dtype := .Float32 })
     (cache : QwenAttention.KVCache (device := device) batch num_kv_heads head_dim cap dtype)
+    (pos : Nat) (hpos : pos < cap)
     : Tensor { device := device, shape := #[batch, 1, hidden_size], dtype := dtype } × QwenAttention.KVCache (device := device) batch num_kv_heads head_dim cap dtype :=
   -- Pre-norm attention.
   let residual1 := x
   let x1 : Tensor { device := device, shape := #[batch, 1, hidden_size], dtype := dtype } := layer.input_layernorm.forward3dPreserving x
-  let (attnOut, cache') := layer.self_attn.forwardStep x1 cos sin cache
+  let (attnOut, cache') := layer.self_attn.forwardStep x1 cos sin cache pos hpos
   let h1 : Tensor { device := device, shape := #[batch, 1, hidden_size], dtype := dtype } := Tensor.add residual1 attnOut
 
   -- Pre-norm MLP.

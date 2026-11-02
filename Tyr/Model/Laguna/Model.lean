@@ -304,6 +304,7 @@ def forwardStep {batch rotaryDim numHeads cap : Nat}
     (sin : Tensor { device := device, shape := #[1, rotaryDim / 2], dtype := .Float32 })
     (window : Option Nat)
     (cache : KVCache (device := device) (dtype := dtype) cfg batch cap)
+    (pos : Nat) (_hpos : pos < cap)
     : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.hidden_size] } × KVCache (device := device) (dtype := dtype) cfg batch cap :=
   let (q, k, v) := qkvRope cfg m x cos sin
   let qh : Tensor { dtype := dtype, device := device, shape := #[batch, numHeads, 1, cfg.head_dim] } := transposeAttention q
@@ -313,14 +314,11 @@ def forwardStep {batch rotaryDim numHeads cap : Nat}
     Tensor.castLike kNew (cache.kStore)
   let vStore : Tensor { dtype := dtype, device := device, shape := #[batch, cfg.num_key_value_heads, cap, cfg.head_dim] } :=
     Tensor.castLike vNew (cache.vStore)
-  let writePos : Nat :=
-    if cache.seq < cap then cache.seq
-    else if cap == 0 then 0 else cap - 1
   let kStore' : Tensor { dtype := dtype, device := device, shape := #[batch, cfg.num_key_value_heads, cap, cfg.head_dim] } :=
-    Tensor.sliceScatter kStore 2 writePos kNew
+    Tensor.sliceScatter kStore 2 pos kNew
   let vStore' : Tensor { dtype := dtype, device := device, shape := #[batch, cfg.num_key_value_heads, cap, cfg.head_dim] } :=
-    Tensor.sliceScatter vStore 2 writePos vNew
-  let kvLen : Nat := if cache.seq < cap then cache.seq + 1 else cap
+    Tensor.sliceScatter vStore 2 pos vNew
+  let kvLen : Nat := pos + 1
   -- Sliding-window read truncation: keep only the last `useLen` entries.
   let useLen : Nat :=
     match window with
@@ -609,16 +607,20 @@ def forwardStep {batch : Nat}
   let h1 := rmsNormWeighted3d layer.input_layernorm x cfg.rms_norm_eps
   let (mixed, cache') ←
     match layer.attnFull, layer.attnSliding, cache.kvCaches[layerIdx]? with
-    | some a, _, some ⟨n, kv⟩ =>
+    | some a, _, some ⟨n, kv⟩ => do
+      let ⟨hpos⟩ ← if h : position < n then pure (PLift.up h) else
+        throw <| IO.userError s!"Laguna layer {layerIdx} cache capacity {n} cannot hold position {position}"
       let cos : Tensor { device := device, shape := #[1, cfg.rotaryDimFull / 2], dtype := .Float32 } := sliceRotaryRows tables.fullCos position 1
       let sin : Tensor { device := device, shape := #[1, cfg.rotaryDimFull / 2], dtype := .Float32 } := sliceRotaryRows tables.fullSin position 1
-      let (out, kv') := a.forwardStep (rotaryDim := cfg.rotaryDimFull) cfg h1 cos sin none kv
+      let (out, kv') := a.forwardStep (rotaryDim := cfg.rotaryDimFull) cfg h1 cos sin none kv position hpos
       pure (out, { cache with kvCaches := cache.kvCaches.set! layerIdx ⟨n, kv'⟩ })
-    | _, some a, some ⟨n, kv⟩ =>
+    | _, some a, some ⟨n, kv⟩ => do
+      let ⟨hpos⟩ ← if h : position < n then pure (PLift.up h) else
+        throw <| IO.userError s!"Laguna layer {layerIdx} cache capacity {n} cannot hold position {position}"
       let cos : Tensor { device := device, shape := #[1, cfg.rotaryDimSliding / 2], dtype := .Float32 } := sliceRotaryRows tables.slidingCos position 1
       let sin : Tensor { device := device, shape := #[1, cfg.rotaryDimSliding / 2], dtype := .Float32 } := sliceRotaryRows tables.slidingSin position 1
       let (out, kv') :=
-        a.forwardStep (rotaryDim := cfg.rotaryDimSliding) cfg h1 cos sin (some cfg.sliding_window) kv
+        a.forwardStep (rotaryDim := cfg.rotaryDimSliding) cfg h1 cos sin (some cfg.sliding_window) kv position hpos
       pure (out, { cache with kvCaches := cache.kvCaches.set! layerIdx ⟨n, kv'⟩ })
     | _, _, _ => pure (h1, cache)
   let h2 := Tensor.add x mixed

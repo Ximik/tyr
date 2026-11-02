@@ -84,8 +84,9 @@ private def close {σ τ : StaticSpec} (x : Tensor σ) (y : Tensor τ) (tol : Fl
   let (prefill, initial) := m.model.forwardWithCache cfg (ids.sliceChecked 1 0 3 #[1, 3]) cache sc ss fc fs
   close prefill (expected.sliceChecked 1 0 3 #[1, 3, cfg.hidden_size])
   let mut cache := initial
-  for pos in [3:7] do
-    let (out, next) := m.model.forwardStep cfg (ids.sliceChecked 1 pos 1 #[1, 1]) pos cache sc ss fc fs
+  for hp : pos in [3:7] do
+    let (out, next) := m.model.forwardStep cfg (ids.sliceChecked 1 pos 1 #[1, 1]) pos
+      (by have := hp.upper; simp at this; omega) cache sc ss fc fs
     close out (expected.sliceChecked 1 pos 1 #[1, 1, cfg.hidden_size])
     cache := next
 

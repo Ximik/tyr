@@ -456,6 +456,8 @@ private def generateFrameFromLastHidden {batch : Nat} (cfg : TalkerConfig)
         IO (Tensor { shape := #[batch, 1, cpCfg.hiddenSize], dtype := dtype.val, device := device } ×
           Array (qwen.QwenAttention.KVCache batch cpCfg.numKeyValueHeads cpCfg.headDim cpMaxSeq dtype.val)) :=
       fun tokenEmbed pos caches => do
+        let ⟨hpos⟩ ← if h : pos < cpMaxSeq then pure (PLift.up h) else
+          throw <| IO.userError s!"code predictor position {pos} exceeds its cache capacity {cpMaxSeq}"
         let xProj : Tensor { shape := #[batch, 1, cpCfg.hiddenSize], dtype := dtype.val, device := device } := TalkerCodePredictor.projectInputs m.codePredictor tokenEmbed
         let cos : Tensor { shape := #[1, cpCfg.headDim / 2], dtype := .Float32, device := device } := Tensor.sliceChecked cpCosAll 0 pos 1 #[1, cpCfg.headDim / 2]
         let sin : Tensor { shape := #[1, cpCfg.headDim / 2], dtype := .Float32, device := device } := Tensor.sliceChecked cpSinAll 0 pos 1 #[1, cpCfg.headDim / 2]
@@ -470,7 +472,7 @@ private def generateFrameFromLastHidden {batch : Nat} (cfg : TalkerConfig)
             match caches[i]? with
             | some cache => pure cache
             | none => throw <| IO.userError s!"missing code predictor cache at index {i}"
-          let (h', cache') := qwen.QwenLayer.forwardStep layer h cos sin cache
+          let (h', cache') := qwen.QwenLayer.forwardStep layer h cos sin cache pos hpos
           h := h'
           caches := caches.set! i cache'
         pure (m.codePredictor.norm.forward3d h, caches)
@@ -651,8 +653,7 @@ def streamCodes {batch seq : Nat} (cfg : TalkerConfig)
       sinRaw.to cacheDevice
     let mut lastHidden : Tensor { shape := #[batch, 1, cfg.hiddenSize], dtype := dtype.val, device := device } :=
       (Tensor.zerosFor { shape := #[batch, 1, cfg.hiddenSize], dtype := dtype.val, device := cacheDevice })
-    let mut pos : Nat := 0
-    while pos < seq do
+    for hpos : pos in [:seq] do
       let xIn : Tensor { shape := #[batch, 1, cfg.hiddenSize], dtype := dtype.val, device := device } := Tensor.sliceChecked talkerInputs 1 pos 1 #[batch, 1, cfg.hiddenSize]
       let cos : Tensor { shape := #[1, cfg.headDim / 2], dtype := .Float32, device := device } := Tensor.sliceChecked cosAll 0 pos 1 #[1, cfg.headDim / 2]
       let sin : Tensor { shape := #[1, cfg.headDim / 2], dtype := .Float32, device := device } := Tensor.sliceChecked sinAll 0 pos 1 #[1, cfg.headDim / 2]
@@ -666,11 +667,11 @@ def streamCodes {batch seq : Nat} (cfg : TalkerConfig)
           match caches[i]? with
           | some cache => pure cache
           | none => throw <| IO.userError s!"missing talker cache at index {i}"
-        let (h', cache') := qwen.QwenLayer.forwardStep layer h cos sin cache
+        let (h', cache') := qwen.QwenLayer.forwardStep layer h cos sin cache pos
+          (by have := hpos.upper; simp at this; show pos < seq + maxFrames + 1; omega)
         h := h'
         caches := caches.set! i cache'
       lastHidden := m.model.norm.forward3d h
-      pos := pos + 1
 
     let mut done : Array Bool := Array.replicate batch false
     let mut lengths : Array Nat := Array.replicate batch maxFrames
@@ -685,7 +686,7 @@ def streamCodes {batch seq : Nat} (cfg : TalkerConfig)
       sin := cpSinRaw.to cacheDevice
     }
 
-    for step in [:maxFrames] do
+    for hstep : step in [:maxFrames] do
       let allDone := done.foldl (fun acc d => acc && d) true
       if allDone then
         break
@@ -740,7 +741,8 @@ def streamCodes {batch seq : Nat} (cfg : TalkerConfig)
           match caches[i]? with
           | some cache => pure cache
           | none => throw <| IO.userError s!"missing talker cache at index {i}"
-        let (h', cache') := qwen.QwenLayer.forwardStep layer h cos sin cache
+        let (h', cache') := qwen.QwenLayer.forwardStep layer h cos sin cache nextPos
+          (by have := hstep.upper; simp at this; show seq + step < seq + maxFrames + 1; omega)
         h := h'
         caches := caches.set! i cache'
       lastHidden := m.model.norm.forward3d h
