@@ -314,4 +314,44 @@ example (x : DTensor #[4, 8] .Float32) (y : DTensor #[8] .Float32) : True := by
   fail_if_success have := Tensor.sliceScatter x 0 0 y
   trivial
 
+/-! ## Generic reductions and bounds -/
+
+def sumDimGeneric {b s d : Nat} (x : DTensor #[b, s, d] .Float32) :=
+  x.sumDim 1
+
+def meanDimGeneric {b s d : Nat} (x : DTensor #[b, s, d] .Float32) :=
+  x.meanDim 2
+
+def argmaxGeneric {b s : Nat} (x : DTensor #[b, s + 1] .Float32) :=
+  x.argmax 1
+
+def sliceInScope {b s : Nat} (x : DTensor #[b, s] .Float32) (start : Nat) : Option Nat :=
+  if h : start + 2 ≤ s then some (x.slice 1 start 2).raw.runtimeShape.size else none
+
+def topKGeneric {r c : Nat} (x : DTensor #[r, c + 3] .Float32) :=
+  Tensor.topKLast2d x 3
+
+def qrTall {m n : Nat} (x : DTensor #[m + n, n] .Float32) :=
+  Tensor.qrReduced x
+
+set_option linter.unusedVariables false in
+example {b s d : Nat} (x : DTensor #[b, s, d] .Float32) : True := by
+  fail_if_success have := x.sumDim 3
+  trivial
+
+set_option linter.unusedVariables false in
+example {b s : Nat} (x : DTensor #[b, s] .Float32) : True := by
+  fail_if_success have := x.argmax 1
+  trivial
+
+set_option linter.unusedVariables false in
+example {b s : Nat} (x : DTensor #[b, s] .Float32) (start : Nat) : True := by
+  fail_if_success have := x.slice 1 start 2
+  trivial
+
+set_option linter.unusedVariables false in
+example {r c : Nat} (x : DTensor #[r, c] .Float32) : True := by
+  fail_if_success have := Tensor.topKLast2d x 3
+  trivial
+
 end Tests.ShapeProofs
