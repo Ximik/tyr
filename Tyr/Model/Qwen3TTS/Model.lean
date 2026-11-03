@@ -87,7 +87,7 @@ def generateFrame {batch seq : Nat}
     (talkerInputs : Tensor { shape := #[batch, seq, cfg.talkerConfig.hiddenSize], dtype := dtypes.talker.val, device := device })
     (attnMask : Option (Tensor { shape := #[batch, seq], dtype := .Int64, device := device }) := none)
     (temperature : Float := 0.9)
-    (topK : Nat := 50)
+    (topK : TopK := none)
     (topP : Float := 1.0)
     : IO (Tensor { shape := #[batch, cfg.talkerConfig.numCodeGroups], dtype := .Int64, device := device }) :=
   return (← TalkerForConditionalGeneration.generateFrame
@@ -102,7 +102,7 @@ def generateCodes {batch seq : Nat}
     (maxFrames : Nat := 256)
     (minNewTokens : Nat := 2)
     (temperature : Float := 0.9)
-    (topK : Nat := 50)
+    (topK : TopK := none)
     (topP : Float := 1.0)
     : IO (Tensor { shape := #[batch, maxFrames, cfg.talkerConfig.numCodeGroups], dtype := .Int64, device := device }) :=
   TalkerForConditionalGeneration.generateCodes
@@ -117,7 +117,7 @@ def generateCodesWithLengths {batch seq : Nat}
     (maxFrames : Nat := 256)
     (minNewTokens : Nat := 2)
     (temperature : Float := 0.9)
-    (topK : Nat := 50)
+    (topK : TopK := none)
     (topP : Float := 1.0)
     : IO (TalkerForConditionalGeneration.CodeGenerationOutput (device := device) batch maxFrames cfg.talkerConfig.numCodeGroups) :=
   TalkerForConditionalGeneration.generateCodesWithLengths
@@ -131,7 +131,7 @@ def generateFromText {batch textSeq : Nat}
     (maxFrames : Nat := 256)
     (minNewTokens : Nat := 2)
     (temperature : Float := 0.9)
-    (topK : Nat := 50)
+    (topK : TopK := none)
     (topP : Float := 1.0)
     : IO (TalkerForConditionalGeneration.CodeGenerationOutput (device := device) batch maxFrames cfg.talkerConfig.numCodeGroups) := do
   let talkerInputs := buildTalkerInputsFromText m textIds
@@ -146,7 +146,7 @@ def generateFromInstructText {batch instructSeq textSeq : Nat}
     (maxFrames : Nat := 256)
     (minNewTokens : Nat := 2)
     (temperature : Float := 0.9)
-    (topK : Nat := 50)
+    (topK : TopK := none)
     (topP : Float := 1.0)
     : IO (TalkerForConditionalGeneration.CodeGenerationOutput (device := device) batch maxFrames cfg.talkerConfig.numCodeGroups) := do
   let talkerInputs := buildTalkerInputsFromInstructText m instructIds textIds

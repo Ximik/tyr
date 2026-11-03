@@ -90,6 +90,8 @@ TYR_DEVICE="$TYR_DEVICE" "${RUN_ENV[@]}" lake env ./.lake/build/bin/Qwen3TTSEndT
   --seed "${TYR_QUALIFICATION_SEED:-0}" \
   --text "Regression audio validation" \
   --max-frames 40 \
+  --top-k 50 \
+  --subtalker-top-k 50 \
   --ref-audio-path "$REF_AUDIO_PATH" \
   --python "$BRIDGE_PYTHON" \
   --qwen-repo "$QWEN_REPO" \

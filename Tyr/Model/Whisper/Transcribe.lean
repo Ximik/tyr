@@ -45,9 +45,7 @@ structure WhisperDecodeOptions where
   temperature : Float := 0.0
   temperatureInc : Float := 0.2
   maxTemperature : Float := 1.0
-  /-- `none`: no top-k filter. -/
-  topK : Option Nat := none
-  topKPos : ∀ k ∈ topK, 0 < k := by decide
+  topK : TopK := none
   topP : Float := 1.0
   logprobThreshold : Float := -1.0
   noSpeechThreshold : Float := 0.6
@@ -602,7 +600,7 @@ private def tokenProbFromLogits {vocab : Nat}
 private def filteredSamplingLogits {vocab : Nat}
     (logits : Tensor { dtype := dtype, device := device, shape := #[1, vocab] })
     (temperature : Float)
-    (topK : Option Nat)
+    (topK : TopK)
     (topP : Float)
     : Tensor { dtype := dtype, device := device, shape := #[1, vocab] } :=
   let scaled :=
@@ -613,7 +611,7 @@ private def filteredSamplingLogits {vocab : Nat}
   let filtered :=
     match topK with
     | none => scaled
-    | some k => Tensor.topKFilter scaled (Nat.min k vocab)
+    | some k => Tensor.topKFilter scaled (Nat.min k.val vocab)
   let topP' :=
     if topP <= 0.0 then
       (1e-6 : Float)
@@ -696,7 +694,7 @@ private partial def decodeLoopCached
     (rules : DecodeTokenRules)
     (eosTokenId : UInt64)
     (temperature : Float)
-    (topK : Option Nat)
+    (topK : TopK)
     (topP : Float)
     (sample : Bool)
     (remaining : Nat)

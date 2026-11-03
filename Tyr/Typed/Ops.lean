@@ -1181,6 +1181,19 @@ def rmsNormWeighted {σ : StaticSpec} {w : Shape} {result : DType}
 
 end Tensor
 
+/-- Top-k sampling filter size; `none` keeps every token. -/
+abbrev TopK := Option PosNat
+
+namespace TopK
+
+/-- The `k` largest logits, or all of them for `none`. -/
+def filter {σ : StaticSpec} (topK : TopK) (logits : Tensor σ) : Tensor σ :=
+  match topK with
+  | none => logits
+  | some k => logits.topKFilter k.val
+
+end TopK
+
 /-! ## Checked broadcasting operators
 
 `+`/`-`/`*`/`/` stay same-shape (resolved by unification). Broadcasting

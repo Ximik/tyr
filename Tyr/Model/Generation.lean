@@ -20,7 +20,7 @@ open torch
 
 inductive SamplingStrategy where
   | greedy
-  | multinomial (temperature : Float := 1.0) (topK : Nat := 0) (topP : Float := 1.0)
+  | multinomial (temperature : Float := 1.0) (topK : TopK := none) (topP : Float := 1.0)
   deriving Repr, Inhabited
 
 /-- Callback invoked on every generated token during streaming decode.
@@ -49,9 +49,7 @@ def sampleFromLogits {batch vocab : Nat}
     let scaled :=
       if temperature == 1.0 then logits
       else Tensor.mulScalar logits (1.0 / temperature)
-    let filtered :=
-      if topK == 0 then scaled
-      else Tensor.topKFilter scaled topK
+    let filtered := topK.filter scaled
     let filtered :=
       if topP >= 1.0 then filtered
       else Tensor.topPFilter filtered topP
