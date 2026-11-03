@@ -467,15 +467,13 @@ def precomputeCrossCaches {batch encSeq : Nat}
 def decodeStepWithCache {batch encSeq cap : Nat}
     (m : WhisperForConditionalGeneration (device := device) (dtype := dtype) cfg)
     (tokenIds : Tensor { device := device, shape := #[batch, 1], dtype := .Int64 })
-    (position : Nat)
+    (position : Nat) (hpos : position < cap) (hcap : cap ≤ cfg.maxTargetPositions)
     (crossCaches : Array (LayerCrossCache (device := device) (dtype := dtype) cfg batch encSeq))
     (selfCaches : SelfKVCaches (device := device) (dtype := dtype) cfg batch cap)
     : IO (Tensor { dtype := dtype, device := device, shape := #[batch, cfg.vocabSize] } × SelfKVCaches (device := device) (dtype := dtype) cfg batch cap) := do
-  if position >= cfg.maxTargetPositions then
-    throw <| IO.userError
-      s!"Whisper decoder position {position} exceeds max_target_positions {cfg.maxTargetPositions}"
   let tokEmb : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.dModel] } := Tensor.embedding tokenIds m.model.decoderTokenEmbedding
-  let pos : Tensor { dtype := dtype, device := device, shape := #[1, cfg.dModel] } := sliceTyped m.model.decoderPositionalEmbedding 0 position 1
+  let pos : Tensor { dtype := dtype, device := device, shape := #[1, cfg.dModel] } :=
+    m.model.decoderPositionalEmbedding.slice 0 position 1 (by simp) (by simp; omega)
   let posB : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.dModel] } :=
     Tensor.expand (Tensor.reshape pos #[1, 1, cfg.dModel]) #[batch, 1, cfg.dModel]
   let mut h : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.dModel] } := Tensor.add tokEmb posB
@@ -491,8 +489,6 @@ def decodeStepWithCache {batch encSeq cap : Nat}
       match nextCaches[i]? with
       | some c => pure c
       | none => throw <| IO.userError s!"missing Whisper self KV cache at index {i}"
-    let ⟨hpos⟩ ← if hp : position < cap then pure (PLift.up hp) else
-      throw <| IO.userError s!"Whisper self KV cache capacity {cap} exhausted"
     let crossCache ←
       match crossCaches[i]? with
       | some c => pure c
