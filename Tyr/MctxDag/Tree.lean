@@ -16,13 +16,14 @@ structure DagTree (S K E : Type) [BEq K] [Hashable K] where
   nodeVisits : Array Nat
   rawValues : Array Float
   nodeValues : Array Float
-  childrenIndex : Array (Array Int)
+  /-- `none` for an edge whose child is not allocated. -/
+  childrenIndex : Array (Array (Option Nat))
   childrenPriorLogits : Array (Array Float)
-  childrenVisits : Array (Array UInt64)
+  childrenVisits : Array (Array Nat)
   childrenRewards : Array (Array Float)
   childrenDiscounts : Array (Array Float)
   /-- Allocated edges store the child's value estimate. Evaluated edges that
-      remain `UNVISITED` at capacity store their mean complete rollout return. -/
+      remain unallocated at capacity store their mean complete rollout return. -/
   childrenValues : Array (Array Float)
   embeddings : Array S
   keys : Array K
@@ -52,8 +53,6 @@ instance [BEq K] [Hashable K] [Inhabited S] [Inhabited K] [Inhabited E] : Inhabi
   }
 
 def ROOT_INDEX : Nat := 0
-def UNVISITED : Int := -1
-
 def DagTree.capacity [BEq K] [Hashable K] (tree : DagTree S K E) : Nat :=
   tree.nodeVisits.size
 
@@ -70,15 +69,15 @@ def DagTree.qvalues [BEq K] [Hashable K] (tree : DagTree S K E) (nodeIndex : Nat
   let children := tree.childrenIndex.getD nodeIndex #[]
   let visits := tree.childrenVisits.getD nodeIndex #[]
   (List.range rewards.size).toArray.map fun a =>
-    if children.getD a UNVISITED == UNVISITED && visits.getD a 0 > 0 then
+    if (children.getD a none).isNone && visits.getD a 0 > 0 then
       values.getD a 0.0
     else
       rewards.getD a 0.0 + discounts.getD a 0.0 * values.getD a 0.0
 
-private def visitProbsFromCounts (counts : Array UInt64) (numActions : UInt64) : Array Float :=
-  let total : UInt64 := counts.foldl (init := 0) (· + ·)
+private def visitProbsFromCounts (counts : Array Nat) (numActions : Nat) : Array Float :=
+  let total := counts.foldl (init := 0) (· + ·)
   if total = 0 then
-    if numActions = 0 then #[] else Array.replicate numActions.toNat (1.0 / numActions.toFloat)
+    if numActions = 0 then #[] else Array.replicate numActions (1.0 / numActions.toFloat)
   else
     counts.map (fun c => c.toFloat / total.toFloat)
 
@@ -86,7 +85,7 @@ def DagTree.summary [BEq K] [Hashable K] (tree : DagTree S K E) : SearchSummary 
   let value := tree.nodeValues.getD ROOT_INDEX 0.0
   let visitCounts := tree.childrenVisits.getD ROOT_INDEX #[]
   let qvalues := tree.qvalues ROOT_INDEX
-  let visitProbs := visitProbsFromCounts visitCounts tree.numActions.toUInt64
+  let visitProbs := visitProbsFromCounts visitCounts tree.numActions
   {
     visitCounts := visitCounts
     visitProbs := visitProbs
@@ -107,22 +106,19 @@ private def updateAt2D (xs : Array (Array α)) (i j : Nat) (v : α) : Array (Arr
   else
     xs
 
-private def intToNatNonneg (x : Int) : Nat :=
-  if x < 0 then 0 else Int.toNat x
-
 /-- Resets a DAG tree to the empty state, keeping capacity and `extraData`. -/
 def resetSearchTree [Inhabited S] [Inhabited K] [BEq K] [Hashable K]
     (tree : DagTree S K E) : DagTree S K E :=
   let numNodes := tree.capacity
   let numActions := tree.numActions
-  let intRow : Array Int := Array.replicate numActions UNVISITED
-  let visitRow : Array UInt64 := Array.replicate numActions 0
+  let edgeRow : Array (Option Nat) := Array.replicate numActions none
+  let visitRow : Array Nat := Array.replicate numActions 0
   let floatRow : Array Float := Array.replicate numActions 0.0
   { tree with
     nodeVisits := Array.replicate numNodes 0
     rawValues := Array.replicate numNodes 0.0
     nodeValues := Array.replicate numNodes 0.0
-    childrenIndex := Array.replicate numNodes intRow
+    childrenIndex := Array.replicate numNodes edgeRow
     childrenPriorLogits := Array.replicate numNodes floatRow
     childrenVisits := Array.replicate numNodes visitRow
     childrenRewards := Array.replicate numNodes floatRow
@@ -141,11 +137,8 @@ def getSubtree [Inhabited S] [Inhabited K] [BEq K] [Hashable K]
     (tree : DagTree S K E)
     (childAction : Nat)
     : DagTree S K E := Id.run do
-  let rootChildInt := (tree.childrenIndex.getD ROOT_INDEX #[]).getD childAction UNVISITED
-  if rootChildInt = UNVISITED then
-    return resetSearchTree tree
-
-  let rootChild := intToNatNonneg rootChildInt
+  let some rootChild := (tree.childrenIndex.getD ROOT_INDEX #[]).getD childAction none
+    | return resetSearchTree tree
   let numNodes := tree.capacity
   let numActions := tree.numActions
   if rootChild >= numNodes then
@@ -160,9 +153,8 @@ def getSubtree [Inhabited S] [Inhabited K] [BEq K] [Hashable K]
     if node < numNodes && !(keep.getD node false) then
       keep := keep.set! node true
       for a in [:numActions] do
-        let child := (tree.childrenIndex.getD node #[]).getD a UNVISITED
-        if child != UNVISITED then
-          stack := stack.push (intToNatNonneg child)
+        if let some child := (tree.childrenIndex.getD node #[]).getD a none then
+          stack := stack.push child
 
   -- A transposition can point to an earlier allocated node; a cycle can even
   -- reach the old root. The selected child must nevertheless become index 0.
@@ -171,19 +163,19 @@ def getSubtree [Inhabited S] [Inhabited K] [BEq K] [Hashable K]
     if i != rootChild && keep.getD i false then
       retained := retained.push i
 
-  let mut oldToNew : Array Int := Array.replicate numNodes UNVISITED
+  let mut oldToNew : Array (Option Nat) := Array.replicate numNodes none
   for newIdx in [:retained.size] do
     let oldIdx := retained.getD newIdx 0
-    oldToNew := oldToNew.set! oldIdx (Int.ofNat newIdx)
+    oldToNew := oldToNew.set! oldIdx (some newIdx)
 
-  let intRow : Array Int := Array.replicate numActions UNVISITED
-  let visitRow : Array UInt64 := Array.replicate numActions 0
+  let edgeRow : Array (Option Nat) := Array.replicate numActions none
+  let visitRow : Array Nat := Array.replicate numActions 0
   let floatRow : Array Float := Array.replicate numActions 0.0
   let mut out : DagTree S K E := {
     nodeVisits := Array.replicate numNodes 0
     rawValues := Array.replicate numNodes 0.0
     nodeValues := Array.replicate numNodes 0.0
-    childrenIndex := Array.replicate numNodes intRow
+    childrenIndex := Array.replicate numNodes edgeRow
     childrenPriorLogits := Array.replicate numNodes floatRow
     childrenVisits := Array.replicate numNodes visitRow
     childrenRewards := Array.replicate numNodes floatRow
@@ -211,10 +203,7 @@ def getSubtree [Inhabited S] [Inhabited K] [BEq K] [Hashable K]
     keyMap := keyMap.insert k newIdx
 
     for a in [:numActions] do
-      let childOld := (tree.childrenIndex.getD oldIdx #[]).getD a UNVISITED
-      let childNew :=
-        if childOld = UNVISITED then UNVISITED
-        else oldToNew.getD (intToNatNonneg childOld) UNVISITED
+      let childNew := ((tree.childrenIndex.getD oldIdx #[]).getD a none).bind (oldToNew.getD · none)
       out := { out with
         childrenIndex := updateAt2D out.childrenIndex newIdx a childNew
         childrenPriorLogits := updateAt2D out.childrenPriorLogits newIdx a

@@ -21,11 +21,13 @@ structure Tree (S E : Type) where
   numAllocated : Nat := (nodeVisits.toList.takeWhile (· != 0)).length
   rawValues : Array Float
   nodeValues : Array Float
-  parents : Array Int
-  actionFromParent : Array Int
-  childrenIndex : Array (Array Int)
+  /-- `none` for the root and for unallocated nodes. -/
+  parents : Array (Option Nat)
+  actionFromParent : Array (Option Nat)
+  /-- `none` for an edge whose child is not allocated. -/
+  childrenIndex : Array (Array (Option Nat))
   childrenPriorLogits : Array (Array Float)
-  childrenVisits : Array (Array UInt64)
+  childrenVisits : Array (Array Nat)
   childrenRewards : Array (Array Float)
   childrenDiscounts : Array (Array Float)
   /-- For allocated children, their continuation value. For an unallocated
@@ -58,12 +60,6 @@ instance [Inhabited S] [Inhabited E] : Inhabited (Tree S E) where
 /-- Root node index. -/
 def ROOT_INDEX : Nat := 0
 
-/-- Sentinel for missing parent. -/
-def NO_PARENT : Int := -1
-
-/-- Sentinel for unexpanded edge. -/
-def UNVISITED : Int := -1
-
 /-- Number of action branches per node. -/
 def Tree.numActions (tree : Tree S E) : Nat :=
   (tree.childrenIndex.getD ROOT_INDEX #[]).size
@@ -78,16 +74,16 @@ def Tree.qvalues (tree : Tree S E) (nodeIndex : Nat) : Array Float :=
   let discounts := tree.childrenDiscounts.getD nodeIndex #[]
   let values := tree.childrenValues.getD nodeIndex #[]
   (List.range rewards.size).toArray.map fun a =>
-    if (tree.childrenIndex.getD nodeIndex #[]).getD a UNVISITED == UNVISITED &&
+    if ((tree.childrenIndex.getD nodeIndex #[]).getD a none).isNone &&
         (tree.childrenVisits.getD nodeIndex #[]).getD a 0 > 0 then
       values.getD a 0.0
     else
       rewards.getD a 0.0 + discounts.getD a 0.0 * values.getD a 0.0
 
-private def visitProbsFromCounts (counts : Array UInt64) (numActions : UInt64) : Array Float :=
-  let total : UInt64 := counts.foldl (init := 0) (· + ·)
+private def visitProbsFromCounts (counts : Array Nat) (numActions : Nat) : Array Float :=
+  let total := counts.foldl (init := 0) (· + ·)
   if total = 0 then
-    if numActions = 0 then #[] else Array.replicate numActions.toNat (1.0 / numActions.toFloat)
+    if numActions = 0 then #[] else Array.replicate numActions (1.0 / numActions.toFloat)
   else
     counts.map (fun c => c.toFloat / total.toFloat)
 
@@ -96,7 +92,7 @@ def Tree.summary (tree : Tree S E) : SearchSummary :=
   let value := tree.nodeValues.getD ROOT_INDEX 0.0
   let visitCounts := tree.childrenVisits.getD ROOT_INDEX #[]
   let qvalues := tree.qvalues ROOT_INDEX
-  let visitProbs := visitProbsFromCounts visitCounts tree.numActions.toUInt64
+  let visitProbs := visitProbsFromCounts visitCounts tree.numActions
   { visitCounts := visitCounts
   , visitProbs := visitProbs
   , value := value
@@ -120,24 +116,21 @@ private def updateAt2D (xs : Array (Array α)) (i j : Nat) (v : α) : Array (Arr
   else
     xs
 
-private def intToNatNonneg (x : Int) : Nat :=
-  if x < 0 then 0 else Int.toNat x
-
 /-- Resets a search tree in-place shape to empty/unvisited state. -/
 def resetSearchTree [Inhabited S] (tree : Tree S E) : Tree S E :=
   let numNodes := tree.nodeVisits.size
   let numActions := tree.numActions
-  let intRow : Array Int := Array.replicate numActions UNVISITED
-  let natRow : Array UInt64 := Array.replicate numActions 0
+  let edgeRow : Array (Option Nat) := Array.replicate numActions none
+  let natRow : Array Nat := Array.replicate numActions 0
   let floatRow : Array Float := Array.replicate numActions 0.0
   { tree with
     nodeVisits := Array.replicate numNodes 0
     numAllocated := 0
     rawValues := Array.replicate numNodes 0.0
     nodeValues := Array.replicate numNodes 0.0
-    parents := Array.replicate numNodes NO_PARENT
-    actionFromParent := Array.replicate numNodes NO_PARENT
-    childrenIndex := Array.replicate numNodes intRow
+    parents := Array.replicate numNodes none
+    actionFromParent := Array.replicate numNodes none
+    childrenIndex := Array.replicate numNodes edgeRow
     childrenPriorLogits := Array.replicate numNodes floatRow
     childrenVisits := Array.replicate numNodes natRow
     childrenRewards := Array.replicate numNodes floatRow
@@ -149,11 +142,8 @@ def resetSearchTree [Inhabited S] (tree : Tree S E) : Tree S E :=
 
 /-- Extracts the subtree rooted at a root child action and remaps node indices. -/
 def getSubtree [Inhabited S] (tree : Tree S E) (childAction : Nat) : Tree S E := Id.run do
-  let rootChildInt := (tree.childrenIndex.getD ROOT_INDEX #[]).getD childAction UNVISITED
-  if rootChildInt = UNVISITED then
-    return resetSearchTree tree
-
-  let rootChild := intToNatNonneg rootChildInt
+  let some rootChild := (tree.childrenIndex.getD ROOT_INDEX #[]).getD childAction none
+    | return resetSearchTree tree
   let numNodes := tree.nodeVisits.size
   let numActions := tree.numActions
 
@@ -166,31 +156,30 @@ def getSubtree [Inhabited S] (tree : Tree S E) (childAction : Nat) : Tree S E :=
     if node < numNodes && !(keep.getD node false) then
       keep := keep.set! node true
       for a in [:numActions] do
-        let child := (tree.childrenIndex.getD node #[]).getD a UNVISITED
-        if child != UNVISITED then
-          stack := stack.push (intToNatNonneg child)
+        if let some child := (tree.childrenIndex.getD node #[]).getD a none then
+          stack := stack.push child
 
   let mut retained : Array Nat := #[]
   for i in [:numNodes] do
     if keep.getD i false then
       retained := retained.push i
 
-  let mut oldToNew : Array Int := Array.replicate numNodes UNVISITED
+  let mut oldToNew : Array (Option Nat) := Array.replicate numNodes none
   for newIdx in [:retained.size] do
     let oldIdx := retained.getD newIdx 0
-    oldToNew := oldToNew.set! oldIdx (Int.ofNat newIdx)
+    oldToNew := oldToNew.set! oldIdx (some newIdx)
 
-  let intRow : Array Int := Array.replicate numActions UNVISITED
-  let natRow : Array UInt64 := Array.replicate numActions 0
+  let edgeRow : Array (Option Nat) := Array.replicate numActions none
+  let natRow : Array Nat := Array.replicate numActions 0
   let floatRow : Array Float := Array.replicate numActions 0.0
   let mut out : Tree S E := {
     nodeVisits := Array.replicate numNodes 0
     numAllocated := retained.size
     rawValues := Array.replicate numNodes 0.0
     nodeValues := Array.replicate numNodes 0.0
-    parents := Array.replicate numNodes NO_PARENT
-    actionFromParent := Array.replicate numNodes NO_PARENT
-    childrenIndex := Array.replicate numNodes intRow
+    parents := Array.replicate numNodes none
+    actionFromParent := Array.replicate numNodes none
+    childrenIndex := Array.replicate numNodes edgeRow
     childrenPriorLogits := Array.replicate numNodes floatRow
     childrenVisits := Array.replicate numNodes natRow
     childrenRewards := Array.replicate numNodes floatRow
@@ -210,23 +199,18 @@ def getSubtree [Inhabited S] (tree : Tree S E) (childAction : Nat) : Tree S E :=
       embeddings := updateAt out.embeddings newIdx (tree.embeddings.getD oldIdx default)
     }
 
-    let parentNew : Int :=
-      if newIdx = ROOT_INDEX then NO_PARENT
-      else
-        let pOld := tree.parents.getD oldIdx NO_PARENT
-        if pOld = NO_PARENT then NO_PARENT else oldToNew.getD (intToNatNonneg pOld) UNVISITED
+    let parentNew : Option Nat :=
+      if newIdx = ROOT_INDEX then none
+      else (tree.parents.getD oldIdx none).bind (oldToNew.getD · none)
     out := { out with
       parents := updateAt out.parents newIdx parentNew
       actionFromParent := updateAt out.actionFromParent newIdx (
-        if newIdx = ROOT_INDEX then NO_PARENT else tree.actionFromParent.getD oldIdx NO_PARENT
+        if newIdx = ROOT_INDEX then none else tree.actionFromParent.getD oldIdx none
       )
     }
 
     for a in [:numActions] do
-      let childOld := (tree.childrenIndex.getD oldIdx #[]).getD a UNVISITED
-      let childNew :=
-        if childOld = UNVISITED then UNVISITED
-        else oldToNew.getD (intToNatNonneg childOld) UNVISITED
+      let childNew := ((tree.childrenIndex.getD oldIdx #[]).getD a none).bind (oldToNew.getD · none)
       out := { out with
         childrenIndex := updateAt2D out.childrenIndex newIdx a childNew
         childrenPriorLogits := updateAt2D out.childrenPriorLogits newIdx a

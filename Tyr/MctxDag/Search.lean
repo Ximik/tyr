@@ -23,9 +23,6 @@ private def updateAt2D (xs : Array (Array α)) (i j : Nat) (v : α) : Array (Arr
   else
     xs
 
-private def intToNatNonneg (x : Int) : Nat :=
-  if x < 0 then 0 else Int.toNat x
-
 /-- Updates a node's value/prior/embedding and increments node visit count. -/
 def updateDagNode
     [BEq K]
@@ -59,14 +56,14 @@ def instantiateDagTreeFromRootWithCapacity
     : DagTree S K E :=
   let numNodes := max 1 numNodes
   let numActions := root.priorLogits.size
-  let intRow : Array Int := Array.replicate numActions UNVISITED
-  let visitRow : Array UInt64 := Array.replicate numActions 0
+  let edgeRow : Array (Option Nat) := Array.replicate numActions none
+  let visitRow : Array Nat := Array.replicate numActions 0
   let floatRow : Array Float := Array.replicate numActions 0.0
   let tree : DagTree S K E := {
     nodeVisits := Array.replicate numNodes 0
     rawValues := Array.replicate numNodes 0.0
     nodeValues := Array.replicate numNodes 0.0
-    childrenIndex := Array.replicate numNodes intRow
+    childrenIndex := Array.replicate numNodes edgeRow
     childrenPriorLogits := Array.replicate numNodes floatRow
     childrenVisits := Array.replicate numNodes visitRow
     childrenRewards := Array.replicate numNodes floatRow
@@ -145,17 +142,17 @@ def simulatePath
 
   while true do
     let action := actionSelectionFn rngKey tree nodeIndex depth
-    let nextNode := (tree.childrenIndex.getD nodeIndex #[]).getD action UNVISITED
     let nextDepth := depth + 1
-    let isVisited := nextNode != UNVISITED
-    let beforeCutoff := nextDepth < maxDepth
-    if isVisited && beforeCutoff then
-      parents := parents.push nodeIndex
-      actions := actions.push action
-      nodeIndex := intToNatNonneg nextNode
-      depth := nextDepth
-    else
-      return (parents, actions, nodeIndex, action)
+    match (tree.childrenIndex.getD nodeIndex #[]).getD action none with
+    | some nextNode =>
+      if nextDepth < maxDepth then
+        parents := parents.push nodeIndex
+        actions := actions.push action
+        nodeIndex := nextNode
+        depth := nextDepth
+      else
+        return (parents, actions, nodeIndex, action)
+    | none => return (parents, actions, nodeIndex, action)
   unreachable!
 
 /-- Expands one edge and returns the information needed for its backup.
@@ -177,14 +174,13 @@ def expandEdgeForBackup
     (parentIndex : NodeIndex)
     (action : Action)
     : DagTree S K E × NodeIndex × Option Float :=
-  let existingEdge := (tree.childrenIndex.getD parentIndex #[]).getD action UNVISITED
-  if existingEdge != UNVISITED then
-    (tree, intToNatNonneg existingEdge, none)
-  else
+  match (tree.childrenIndex.getD parentIndex #[]).getD action none with
+  | some existingEdge => (tree, existingEdge, none)
+  | none =>
     let embedding := tree.embeddings.getD parentIndex default
     let (step, nextEmbedding) := recurrentFn params rngKey action embedding
 
-    let setEdge := fun (t : DagTree S K E) (child : Int) =>
+    let setEdge := fun (t : DagTree S K E) (child : Option Nat) =>
       { t with
         childrenIndex := updateAt2D t.childrenIndex parentIndex action child
         childrenRewards := updateAt2D t.childrenRewards parentIndex action step.reward
@@ -194,7 +190,7 @@ def expandEdgeForBackup
     let nextKey := keyFn nextEmbedding
     match tree.keyToNode[nextKey]? with
     | some existingNode =>
-      (setEdge tree (Int.ofNat existingNode), existingNode, none)
+      (setEdge tree (some existingNode), existingNode, none)
     | none =>
       if tree.numAllocated < tree.capacity then
         let nodeIndex := tree.numAllocated
@@ -204,9 +200,9 @@ def expandEdgeForBackup
           keyToNode := tree.keyToNode.insert nextKey nodeIndex
           numAllocated := nodeIndex + 1
         }
-        (setEdge tree (Int.ofNat nodeIndex), nodeIndex, none)
+        (setEdge tree (some nodeIndex), nodeIndex, none)
       else
-        (setEdge tree UNVISITED, parentIndex, some step.value)
+        (setEdge tree none, parentIndex, some step.value)
 
 /-- Compatibility expansion API. At capacity the returned index is the parent;
     callers that perform value backup should use `expandEdgeForBackup` to retain

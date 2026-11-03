@@ -60,8 +60,9 @@ array per node attribute (`nodeVisits`, `rawValues`, `nodeValues`, `parents`,
 `numSimulations + 1` nodes. The arena stays fixed during search, and
 `numAllocated` tracks its contiguous occupied prefix for constant-time node
 allocation. Persistent arrays and model evaluation can still allocate memory.
-Sentinels:
-`ROOT_INDEX = 0`, `NO_PARENT = -1`, `UNVISITED = -1`. The `E` parameter is
+The root is `ROOT_INDEX = 0`. `parents`, `actionFromParent` and `childrenIndex`
+hold `Option Nat`: `none` marks the root's parent and an edge without an
+allocated child. Visit counts are `Nat`. The `E` parameter is
 policy-specific extra data — Gumbel MuZero uses it to stash the root Gumbel
 sample and cached sequential-halving schedule (`GumbelMuZeroExtraData`); the
 other policies use `Unit`.
@@ -100,7 +101,7 @@ behind AlphaZero subtree reuse.
 `maxNodes` is a hard arena bound; constructors reserve at least the root slot,
 including when passed zero. When no child slot remains, the model is still
 evaluated and its complete return `reward + discount * value` is backed up.
-The edge remains `UNVISITED` because it has no stored child, but its visits and
+The edge's `childrenIndex` stays `none` because it has no stored child, but its visits and
 mean return contribute to the policy and Q-values. Each ancestor receives the
 current rollout return, keeping its running average distinct from that return.
 This applies to tree, batched, and DAG searches.

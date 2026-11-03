@@ -11,7 +11,7 @@ def testMctxQTransformMixValue : IO Unit := do
   let rawValue : Float := -0.8
   let priorLogits : Array Float := #[-1e30, -1.0, 2.0, -1e30]
   let probs := softmax priorLogits
-  let visitCounts : Array UInt64 := #[0, 4, 4, 0]
+  let visitCounts : Array Nat := #[0, 4, 4, 0]
   let scale := 10.0 / 54.0
   let qvalues : Array Float := #[20.0 * scale, 3.0 * scale, -1.0 * scale, 10.0 * scale]
 
@@ -31,7 +31,7 @@ def testMctxQTransformMixValueWithZeroVisits : IO Unit := do
   let rawValue : Float := -0.8
   let priorLogits : Array Float := #[-1e30, -1.0, 2.0, -1e30]
   let probs := softmax priorLogits
-  let visitCounts : Array UInt64 := #[0, 0, 0, 0]
+  let visitCounts : Array Nat := #[0, 0, 0, 0]
   let qvalues : Array Float := #[0.0, 0.0, 0.0, 0.0]
 
   let mixed := computeMixedValue rawValue qvalues visitCounts probs

@@ -24,9 +24,6 @@ private def updateAt2D (xs : Array (Array α)) (i j : Nat) (v : α) : Array (Arr
   else
     xs
 
-private def intToNatNonneg (x : Int) : Nat :=
-  if x < 0 then 0 else Int.toNat x
-
 /-- Updates one node's value/prior/embedding and increments visit count.
     `nodeIndex` must name an allocated node or the next free prefix slot. -/
 def updateTreeNode
@@ -58,17 +55,17 @@ def instantiateTreeFromRootWithCapacity
     : Tree S E :=
   let numNodes := max 1 numNodes
   let numActions := root.priorLogits.size
-  let intRow : Array Int := Array.replicate numActions UNVISITED
-  let visitRow : Array UInt64 := Array.replicate numActions 0
+  let edgeRow : Array (Option Nat) := Array.replicate numActions none
+  let visitRow : Array Nat := Array.replicate numActions 0
   let floatRow : Array Float := Array.replicate numActions 0.0
   let tree : Tree S E := {
     nodeVisits := Array.replicate numNodes 0
     numAllocated := 0
     rawValues := Array.replicate numNodes 0.0
     nodeValues := Array.replicate numNodes 0.0
-    parents := Array.replicate numNodes NO_PARENT
-    actionFromParent := Array.replicate numNodes NO_PARENT
-    childrenIndex := Array.replicate numNodes intRow
+    parents := Array.replicate numNodes none
+    actionFromParent := Array.replicate numNodes none
+    childrenIndex := Array.replicate numNodes edgeRow
     childrenPriorLogits := Array.replicate numNodes floatRow
     childrenVisits := Array.replicate numNodes visitRow
     childrenRewards := Array.replicate numNodes floatRow
@@ -136,15 +133,15 @@ def simulate
   while continuing do
     parentIndex := nodeIndex
     action := actionSelectionFn rngKey tree nodeIndex depth
-    let nextNode := (tree.childrenIndex.getD nodeIndex #[]).getD action UNVISITED
     let nextDepth := depth + 1
-    let isVisited := nextNode != UNVISITED
-    let beforeCutoff := nextDepth < maxDepth
-    if isVisited && beforeCutoff then
-      nodeIndex := intToNatNonneg nextNode
-      depth := nextDepth
-    else
-      continuing := false
+    match (tree.childrenIndex.getD nodeIndex #[]).getD action none with
+    | some nextNode =>
+      if nextDepth < maxDepth then
+        nodeIndex := nextNode
+        depth := nextDepth
+      else
+        continuing := false
+    | none => continuing := false
 
   return (parentIndex, action)
 
@@ -165,13 +162,13 @@ def expandWithStep
       updateTreeNode tree nextNodeIndex step.priorLogits step.value nextEmbedding
     else
       tree
-  let childIdx : Int := if inBounds then Int.ofNat nextNodeIndex else UNVISITED
+  let childIdx : Option Nat := if inBounds then some nextNodeIndex else none
   { tree with
     childrenIndex := updateAt2D tree.childrenIndex parentIndex action childIdx
     childrenRewards := updateAt2D tree.childrenRewards parentIndex action step.reward
     childrenDiscounts := updateAt2D tree.childrenDiscounts parentIndex action step.discount
-    parents := updateAt tree.parents nextNodeIndex (Int.ofNat parentIndex)
-    actionFromParent := updateAt tree.actionFromParent nextNodeIndex (Int.ofNat action)
+    parents := updateAt tree.parents nextNodeIndex (some parentIndex)
+    actionFromParent := updateAt tree.actionFromParent nextNodeIndex (some action)
   }
 
 /-- Expands one `(parent, action)` edge and evaluates recurrent dynamics. -/
@@ -198,13 +195,9 @@ private def backwardFrom (tree : Tree S E) (leafIndex : NodeIndex)
   let mut leafValue := rolloutValue
 
   while index != ROOT_INDEX do
-    let parentInt := t.parents.getD index NO_PARENT
-    if parentInt < 0 then
-      index := ROOT_INDEX
-    else
-      let parent := intToNatNonneg parentInt
+    match t.parents.getD index none, t.actionFromParent.getD index none with
+    | some parent, some action =>
       let count := t.nodeVisits.getD parent 0
-      let action := intToNatNonneg (t.actionFromParent.getD index NO_PARENT)
       let reward := (t.childrenRewards.getD parent #[]).getD action 0.0
       let discount := (t.childrenDiscounts.getD parent #[]).getD action 0.0
       leafValue := reward + discount * leafValue
@@ -221,6 +214,7 @@ private def backwardFrom (tree : Tree S E) (leafIndex : NodeIndex)
         childrenVisits := updateAt2D t.childrenVisits parent action childCount
       }
       index := parent
+    | _, _ => index := ROOT_INDEX
 
   return t
 
@@ -283,8 +277,8 @@ def searchWithTree
   while sim < numSimulations do
     let key := rngKey + UInt64.ofNat (sim + 1)
     let (parentIndex, action) := simulate key tree actionSelectionFn depthCutoff
-    let existing := (tree.childrenIndex.getD parentIndex #[]).getD action UNVISITED
-    let nextNodeIndex := if existing = UNVISITED then tree.nextNodeIndex else intToNatNonneg existing
+    let nextNodeIndex :=
+      ((tree.childrenIndex.getD parentIndex #[]).getD action none).getD tree.nextNodeIndex
     let embedding := tree.embeddings.getD parentIndex default
     let (step, nextEmbedding) := recurrentFn params key action embedding
     tree := expandWithStepAndBackup tree parentIndex action nextNodeIndex step nextEmbedding

@@ -20,8 +20,8 @@ private def chooseLeastVisitedAction [BEq K] [Hashable K]
   if visits.isEmpty then
     0
   else
-    let init : Nat × UInt64 := (0, visits.getD 0 0)
-    let (best, _) := (List.range visits.size).foldl (init := init) fun (acc : Nat × UInt64) a =>
+    let init : Nat × Nat := (0, visits.getD 0 0)
+    let (best, _) := (List.range visits.size).foldl (init := init) fun (acc : Nat × Nat) a =>
       let c := visits.getD a acc.2
       if c < acc.2 then (a, c) else acc
     best
@@ -35,8 +35,8 @@ private def chooseLeastVisitedFeasible [BEq K] [Hashable K]
     chooseLeastVisitedAction tree nodeIndex
   else
     let initA := feasible.getD 0 0
-    let init : Nat × UInt64 := (initA, visits.getD initA 0)
-    let (best, _) := feasible.foldl (init := init) fun (acc : Nat × UInt64) a =>
+    let init : Nat × Nat := (initA, visits.getD initA 0)
+    let (best, _) := feasible.foldl (init := init) fun (acc : Nat × Nat) a =>
       let c := visits.getD a acc.2
       if c < acc.2 then (a, c) else acc
     best
