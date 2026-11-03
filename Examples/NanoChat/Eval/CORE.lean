@@ -468,7 +468,7 @@ def evaluateTask {vocab : Nat}
   -- Evaluate examples strided by rank
   for idx in [:examples.size] do
     -- Skip if not assigned to this rank
-    if idx % worldSize.toNat == rank.toNat then
+    if idx % worldSize == rank then
       let item := examples[idx]!
       let maybeCorrect ← evaluateSingleExample item taskMeta tokenize runModel config
       match maybeCorrect with

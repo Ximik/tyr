@@ -181,6 +181,13 @@ struct FakeBackend final : c10d::Backend {
     return work();
   }
 };
+uint64_t natResult(lean_object* result) {
+  Object owned(result, lean_dec);
+  require(lean_io_result_is_ok(result), "expected IO.ok Nat");
+  auto* payload = lean_io_result_get_value(result);
+  require(lean_is_scalar(payload), "expected a scalar Nat payload");
+  return lean_unbox(payload);
+}
 uint64_t uintResult(lean_object* result) {
   Object owned(result, lean_dec);
   require(lean_io_result_is_ok(result), "expected IO.ok UInt64");
@@ -219,8 +226,8 @@ int main() {
       "all-gather ID");
     require(counts.waits == 3 && counts.destroyed == 3, "synchronous work lifetime");
     require(lean_is_exclusive(raw.get()), "borrowed tensor reference changed");
-    require(uintResult(lean_torch_dist_get_rank()) == 0, "rank carrier");
-    require(uintResult(lean_torch_dist_get_world_size()) == 1, "world size carrier");
+    require(natResult(lean_torch_dist_get_rank()) == 0, "rank carrier");
+    require(natResult(lean_torch_dist_get_world_size()) == 1, "world size carrier");
     clearFakeState();
   });
   test("broadcast rejects narrowing before backend dispatch", [] {

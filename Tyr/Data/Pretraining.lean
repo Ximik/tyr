@@ -220,8 +220,7 @@ def RowGroupIterator.reset (iter : RowGroupIterator) : RowGroupIterator :=
 /-- Initialize pretraining loader -/
 def PretrainingLoader.init (config : PretrainingConfig) : IO PretrainingLoader := do
   let isDistributed ← dist.isInitialized
-  let (rank, worldSize) ← if isDistributed then dist.getRankAndWorldSize else pure ((0 : UInt64), (1 : UInt64))
-  let (rank, worldSize) := (rank.toNat, worldSize.toNat)
+  let (rank, worldSize) ← if isDistributed then dist.getRankAndWorldSize else pure (0, 1)
 
   -- List parquet files in data directory
   let parquetFiles ← listParquetFiles config.dataPath

@@ -197,7 +197,7 @@ def withDistributed (backend masterAddr : String) (masterPort rank worldSize : N
     | .ok _ => pure value
 
 /-- Get rank and world size as a pair -/
-def getRankAndWorldSize : IO (UInt64 × UInt64) := do
+def getRankAndWorldSize : IO (Nat × Nat) := do
   let rank ← getRank
   let worldSize ← getWorldSize
   return (rank, worldSize)
@@ -261,9 +261,9 @@ structure DistributedSamplerConfig where
   /-- Total size of the dataset -/
   datasetSize : Nat
   /-- Rank of this process -/
-  rank : UInt64
+  rank : Nat
   /-- Total number of processes -/
-  worldSize : UInt64
+  worldSize : Nat
   /-- Random seed for shuffling -/
   seed : UInt64 := 42
   /-- Whether to shuffle indices -/
@@ -319,8 +319,8 @@ private def shuffleArray (arr : Array Nat) (seed : UInt64) : Array Nat := Id.run
 -/
 def DistributedSampler.create (cfg : DistributedSamplerConfig) : DistributedSampler := Id.run do
   let totalSize := cfg.datasetSize
-  let worldSize := cfg.worldSize.toNat
-  let rank := cfg.rank.toNat
+  let worldSize := cfg.worldSize
+  let rank := cfg.rank
 
   -- Compute shard boundaries
   let samplesPerRank := totalSize / worldSize
