@@ -1736,7 +1736,6 @@ def reinforcementLearning (cfg : NanoChatConfig) : PipelineM Unit := do
     else
       grpoExamplesPerStepGlobal
   let grpoEvalEvery := max 1 rlEnv.evalEvery.toNat
-  let grpoLogEvery := max 1 rlEnv.logEvery.toNat
   let grpoEpochs := max 1 rlEnv.epochs.toNat
   let grpoMaxPrompts := rlEnv.maxPrompts.map UInt64.toNat
 
@@ -1748,7 +1747,8 @@ def reinforcementLearning (cfg : NanoChatConfig) : PipelineM Unit := do
     topK := 50
     examplesPerStep := grpoExamplesPerStep
     evalEvery := grpoEvalEvery
-    logEvery := grpoLogEvery
+    logEvery := max 1 rlEnv.logEvery.toNat
+    logEveryPos := by omega
   }
 
   -- Load tokenizer
