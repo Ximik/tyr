@@ -19,17 +19,17 @@ structure StreamingOptions (cfg : Qwen3TTSConfig) (dtype : RealFloatingDType := 
   maxFrames : Nat := 256
   minNewTokens : Nat := 2
   temperature : Float := 0.9
-  topK : Nat := 50
+  topK : TopK := none
   topP : Float := 1.0
   subtalkerTemperature : Float := 0.9
-  subtalkerTopK : Nat := 50
+  subtalkerTopK : TopK := none
   subtalkerTopP : Float := 1.0
   repetitionPenalty : Float := 1.05
   suppressTail : Nat := 1024
   trailingTextHidden : Option (Sigma fun trailingSeq => Tensor { shape := #[1, trailingSeq, cfg.talkerConfig.hiddenSize], dtype := dtype.val, device := device }) := none
   ttsPadEmbed : Option (Tensor { shape := #[1, 1, cfg.talkerConfig.hiddenSize], dtype := dtype.val, device := device }) := none
   subtalkerTemperaturesByGroup : Option (Array Float) := none
-  subtalkerTopKsByGroup : Option (Array Nat) := none
+  subtalkerTopKsByGroup : Option (Array TopK) := none
   subtalkerTopPsByGroup : Option (Array Float) := none
   decodeChunkSize : Nat := 1
   decodeLeftContext : Nat := 25

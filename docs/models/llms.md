@@ -58,7 +58,7 @@ variable {device : Device}
 
 inductive SamplingStrategy where
   | greedy
-  | multinomial (temperature : Float := 1.0) (topK : UInt64 := 0) (topP : Float := 1.0)
+  | multinomial (temperature : Float := 1.0) (topK : TopK := none) (topP : Float := 1.0)
 
 /-- Callback invoked on every generated token during streaming decode. -/
 abbrev StreamCallback (batch : UInt64) := UInt64 → Tensor { shape := #[batch], dtype := .Int64, device := device } → IO Unit
@@ -71,7 +71,7 @@ def applyFinishedEos (tokens : Tensor { shape := #[n], dtype := .Int64, device :
     (eosToken : UInt64) : Tensor { shape := #[n], dtype := .Int64, device := device }
 ```
 
-`sampleFromLogits` semantics (`Generation.lean:26-47`): greedy is `Tensor.argmax`; multinomial throws unless `temperature > 0`, scales logits by `1/temperature` (skipped at exactly 1.0), applies a top-K filter unless `topK == 0`, then a top-P filter unless `topP >= 1.0`, then softmax + `Tensor.multinomial`. Qwen3.5 and Gemma 4 decode through this; Qwen3 (and therefore Qwen2.5-Omni) has its own private greedy loops and supports **greedy decoding only** — no temperature/top-k/top-p.
+`sampleFromLogits` semantics (`Generation.lean:26-47`): greedy is `Tensor.argmax`; multinomial throws unless `temperature > 0`, scales logits by `1/temperature` (skipped at exactly 1.0), applies a top-K filter when `topK` is `some k` (`TopK := Option PosNat`), then a top-P filter unless `topP >= 1.0`, then softmax + `Tensor.multinomial`. Qwen3.5 and Gemma 4 decode through this; Qwen3 (and therefore Qwen2.5-Omni) has its own private greedy loops and supports **greedy decoding only** — no temperature/top-k/top-p.
 
 ### KV caches
 
@@ -187,7 +187,7 @@ structure FlowDenoiser (seq vocab : UInt64) (Params : Type) where
 
 | Symbol | Signature / meaning |
 |---|---|
-| `SamplingStrategy` | `.greedy` or `.multinomial (temperature := 1.0) (topK := 0) (topP := 1.0)`; `topK = 0` / `topP >= 1` disable those filters |
+| `SamplingStrategy` | `.greedy` or `.multinomial (temperature := 1.0) (topK := none) (topP := 1.0)`; `topK = none` / `topP >= 1` disable those filters |
 | `StreamCallback batch` | `UInt64 → Tensor { shape := #[batch], dtype := .Int64, device := device } → IO Unit`, invoked per decode step |
 | `sampleFromLogits` | `Tensor { shape := #[batch, vocab], dtype := .Float32, device := device } → SamplingStrategy → IO (Tensor { shape := #[batch], dtype := .Int64, device := device })` |
 | `tokenInSet` | `Tensor { shape := #[n], dtype := .Int64, device := device } → Array UInt64 → Tensor { shape := #[n], dtype := .Bool, device := device }` boolean membership mask |
