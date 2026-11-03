@@ -69,7 +69,7 @@ structure Args where
   /-- Resume from checkpoint -/
   resume : Option String := none
   /-- Override number of iterations -/
-  numIterations : Option UInt64 := none
+  numIterations : Option Nat := none
   /-- Local rank for distributed training (from env) -/
   localRank : Nat := 0
   /-- Run in debug mode with small model -/
@@ -85,7 +85,7 @@ def parseArgs (args : List String) : Args :=
     | "--checkpoint-dir" :: dir :: rest, acc => go rest { acc with checkpointDir := dir }
     | "--resume" :: path :: rest, acc => go rest { acc with resume := some path }
     | "--iterations" :: n :: rest, acc =>
-        go rest { acc with numIterations := n.toNat?.map (·.toUInt64) }
+        go rest { acc with numIterations := n.toNat? }
     | "--local-rank" :: n :: rest, acc =>
         go rest { acc with localRank := (n.toNat?).getD acc.localRank }
     | "--local_rank" :: n :: rest, acc =>

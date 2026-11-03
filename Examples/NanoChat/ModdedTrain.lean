@@ -35,12 +35,20 @@ open torch.Optim
 
 /-! ## Hyperparameters -/
 
+/-- Steps between events; `none` never fires. -/
+abbrev StepInterval := Option PosNat
+
+def StepInterval.fires (interval : StepInterval) (step : Nat) : Bool :=
+  match interval with
+  | none => false
+  | some n => step % n.val == 0
+
 /-- Training hyperparameters for nanochat-style loops. -/
 structure Hyperparameters where
   /-- Total scheduled training iterations -/
-  numIterations : UInt64 := 2050
+  numIterations : Nat := 2050
   /-- Extension iterations beyond `numIterations` (usually 0). -/
-  extensionIterations : UInt64 := 0
+  extensionIterations : Nat := 0
   /-- Per-rank micro-batch size. -/
   deviceBatchSize : Nat := 32
   /-- Target global batch size in tokens across all ranks/accumulation. -/
@@ -68,11 +76,11 @@ structure Hyperparameters where
   /-- Maximum sequence length -/
   maxSeqLen : Nat := 2048
   /-- Validation interval (in iterations) -/
-  valInterval : UInt64 := 50
+  valInterval : StepInterval := 50
   /-- Logging interval -/
-  logInterval : UInt64 := 10
+  logInterval : StepInterval := 10
   /-- Checkpoint interval -/
-  checkpointInterval : UInt64 := 100
+  checkpointInterval : StepInterval := 100
   deriving Repr, Inhabited, Lean.ToJson, Lean.FromJson
 
 /-- Default hyperparameters -/
@@ -92,13 +100,13 @@ def Hyperparameters.default : Hyperparameters := {}
     - 16 * 2048 * 8 = 262144
     - 24 * 2048 * 8 = 393216
 -/
-def getBatchSize (step : UInt64) : Nat :=
+def getBatchSize (step : Nat) : Nat :=
   if step < 200 then 8
   else if step < 1000 then 16
   else 24
 
 /-- Get tokens per batch for a given iteration -/
-def getTokensPerBatch (step : UInt64) (seqLen gradAccum worldSize : Nat) : Nat :=
+def getTokensPerBatch (step : Nat) (seqLen gradAccum worldSize : Nat) : Nat :=
   getBatchSize step * seqLen * gradAccum * worldSize
 
 /-! ## Window Size Schedule -/
@@ -113,13 +121,13 @@ def getTokensPerBatch (step : UInt64) (seqLen gradAccum worldSize : Nat) : Nat :
     Short window is used for most attention heads,
     long window for a few "global" heads.
 -/
-def getWindowSizes (step : UInt64) (_blockSize : Nat := 128) : (Nat × Nat) :=
+def getWindowSizes (step : Nat) (_blockSize : Nat := 128) : (Nat × Nat) :=
   if step < 200 then (3, 3)
   else if step < 1000 then (3, 7)
   else (3, 11)
 
 /-- Get sequence length for a given iteration -/
-def getSeqLen (step : UInt64) (blockSize : Nat := 128) : Nat :=
+def getSeqLen (step : Nat) (blockSize : Nat := 128) : Nat :=
   let (_, wsLong) := getWindowSizes step blockSize
   wsLong * blockSize
 
@@ -127,11 +135,11 @@ def getSeqLen (step : UInt64) (blockSize : Nat := 128) : Nat :=
 
 /-- Get learning rate for a given iteration.
     Matches nanochat base_train's warmup/plateau/linear-warmdown semantics. -/
-def getLearningRate (step : UInt64) (hp : Hyperparameters)
+def getLearningRate (step : Nat) (hp : Hyperparameters)
     (baseLr : Float := 0.023) : Float :=
   let totalSteps := max 1 (hp.numIterations + hp.extensionIterations)
-  let warmupSteps := (hp.warmupFrac * totalSteps.toFloat).toUInt64
-  let warmdownSteps := (hp.cooldownFrac * totalSteps.toFloat).toUInt64
+  let warmupSteps := (hp.warmupFrac * totalSteps.toFloat).toUInt64.toNat
+  let warmdownSteps := (hp.cooldownFrac * totalSteps.toFloat).toUInt64.toNat
   let warmdownStart := totalSteps - warmdownSteps
   if warmupSteps > 0 && step < warmupSteps then
     baseLr * (step.toFloat + 1.0) / warmupSteps.toFloat
@@ -181,14 +189,14 @@ def validateGradAccumConfig (hp : Hyperparameters) (worldSize : Nat) : IO Unit :
     - Warmup: 0.85 -> baseMomentum over 300 steps
     - Then constant at baseMomentum
 -/
-def getMuonMomentum (step : UInt64) (hp : Hyperparameters)
-    (baseMomentum : Float := 0.95) (warmupSteps : UInt64 := 300)
-    (cooldownSteps : UInt64 := 50) : Float :=
+def getMuonMomentum (step : Nat) (hp : Hyperparameters)
+    (baseMomentum : Float := 0.95) (warmupSteps : Nat := 300)
+    (cooldownSteps : Nat := 50) : Float :=
   let _ := hp
   let _ := cooldownSteps
-  NorMuon.getMomentum step.toNat
+  NorMuon.getMomentum step
     0
-    baseMomentum warmupSteps.toNat 0
+    baseMomentum warmupSteps 0
 
 /-! ## Optimizer State -/
 
@@ -252,7 +260,7 @@ structure OptimizerState (cfg : moddedGpt.Config) where
   /-- DistAdam + Muon parameter states used by the training step. -/
   dualState : DualParamState (device := device) cfg
   /-- Current step -/
-  step : UInt64
+  step : Nat
   /-- Base learning rate -/
   baseLr : Float := 0.023
   /-- Weight decay -/
@@ -413,7 +421,7 @@ def validate {cfg : moddedGpt.Config}
     (yarn : YarnRotary (device := device) cfg.headDim cfg.maxSeqLen)
     (valData : Σ n, DataShard n)
     (batchSize seqLen : Nat)
-    (numBatches : UInt64 := 10)
+    (numBatches : Nat := 10)
     : IO ValidationResult := do
   let startTime ← IO.monoMsNow
   let mut totalLoss := 0.0
@@ -422,7 +430,7 @@ def validate {cfg : moddedGpt.Config}
   -- Create iterator
   let mut iter := BatchIterator.new valData.2 batchSize seqLen
 
-  for _ in [:numBatches.toNat] do
+  for _ in [:numBatches] do
     let (maybeBatch, newIter) ← iter.nextGPT
     iter := newIter
     match maybeBatch with
@@ -455,7 +463,7 @@ structure Checkpoint (cfg : moddedGpt.Config) where
   /-- Optimizer state -/
   optState : OptimizerState (device := device) cfg
   /-- Current step -/
-  step : UInt64
+  step : Nat
   /-- Best validation loss -/
   bestValLoss : Float
 
@@ -511,15 +519,21 @@ def checkpointExists (path : String) : IO Bool := do
   -- than being mistaken for a fresh training directory.
   if strict then pure true else checkpointExistsAt snapshot
 
-private def saveScalarUInt64 (value : UInt64) (path : String) : IO Unit := do
-  let t := Tensor.fromInt64Array #[value.toInt64]
-  Tensor.saveTensor t path
+private def int64Limit : Nat := 2 ^ 63
 
-private def loadScalarUInt64 (path : String) : IO UInt64 := do
+private def saveScalarNat (value : Nat) (path : String) : IO Unit := do
+  if value ≥ int64Limit then
+    throw <| IO.userError s!"Scalar {value} for {path} exceeds the Int64 checkpoint field"
+  Tensor.saveTensor (Tensor.fromInt64Array #[Int64.ofNat value]) path
+
+private def loadScalarNat (path : String) : IO Nat := do
   let t ← Tensor.loadTensorExact ⟨#[1], .Int64, .CPU⟩ path
   let vals ← Tensor.toUInt64Array t
   match vals[0]? with
-  | some v => pure v
+  | some v =>
+      if v.toNat ≥ int64Limit then
+        throw <| IO.userError s!"Negative scalar in {path}"
+      pure v.toNat
   | none => throw <| IO.userError s!"Missing scalar value in {path}"
 
 private def saveScalarFloat (value : Float) (path : String) : IO Unit := do
@@ -541,8 +555,8 @@ them separately so loading can reconstruct the exact optimizer traversal. -/
 private structure CheckpointStateMetadata where
   version : Nat := 1
   trainingMetadata : Bool
-  step : UInt64
-  optimStep : UInt64
+  step : Nat
+  optimStep : Nat
   adamCount : Nat
   bestValLossBits : UInt64
   baseLrBits : UInt64
@@ -726,9 +740,9 @@ def saveCheckpoint {cfg : moddedGpt.Config} (ckpt : Checkpoint (device := device
     checkpoint.saveParams ckpt.optState.dualState snapshot "optim_dual"
     -- Keep the legacy scalar files for checkpoint inspection tools. The state
     -- sidecar restores exact Float bits and all optimizer-local counters.
-    saveScalarUInt64 ckpt.step s!"{snapshot}/step.pt"
-    saveScalarUInt64 ckpt.optState.step s!"{snapshot}/opt_step.pt"
-    saveScalarUInt64 ckpt.optState.adamState.fst.count.toUInt64 s!"{snapshot}/adam_count.pt"
+    saveScalarNat ckpt.step s!"{snapshot}/step.pt"
+    saveScalarNat ckpt.optState.step s!"{snapshot}/opt_step.pt"
+    saveScalarNat ckpt.optState.adamState.fst.count s!"{snapshot}/adam_count.pt"
     saveScalarFloat ckpt.bestValLoss s!"{snapshot}/best_val_loss.pt"
     saveScalarFloat ckpt.optState.baseLr s!"{snapshot}/base_lr.pt"
     saveScalarFloat ckpt.optState.weightDecay s!"{snapshot}/weight_decay.pt"
@@ -779,9 +793,9 @@ private def loadCheckpointAt (cfg : moddedGpt.Config) (path : String) (quiet : B
           Float.ofBits metadata.bestValLossBits, Float.ofBits metadata.baseLrBits,
           Float.ofBits metadata.weightDecayBits)
       | none => do
-          let step ← loadScalarUInt64 s!"{path}/step.pt"
-          let optStep ← loadScalarUInt64 s!"{path}/opt_step.pt"
-          let adamCount := (← loadScalarUInt64 s!"{path}/adam_count.pt").toNat
+          let step ← loadScalarNat s!"{path}/step.pt"
+          let optStep ← loadScalarNat s!"{path}/opt_step.pt"
+          let adamCount ← loadScalarNat s!"{path}/adam_count.pt"
           let bestValLoss ← loadScalarFloat s!"{path}/best_val_loss.pt"
           let baseLr ← loadScalarFloat s!"{path}/base_lr.pt"
           let weightDecay ← loadScalarFloat s!"{path}/weight_decay.pt"
@@ -876,7 +890,7 @@ structure TrainState (cfg : moddedGpt.Config) where
   /-- Validation data -/
   valData : Option (Σ n, DataShard n)
   /-- Current step -/
-  step : UInt64
+  step : Nat
   /-- Best validation loss -/
   bestValLoss : Float
   /-- Accumulated tokens -/
@@ -928,7 +942,7 @@ def TrainState.init (cfg : moddedGpt.Config) (dataConfig : DataLoader.Config)
 /-- Log training progress -/
 def logProgress (state : TrainState (device := device) cfg) (result : StepResult)
     (hp : Hyperparameters) : IO Unit := do
-  if state.step % hp.logInterval == 0 then
+  if hp.logInterval.fires state.step then
     let nowMs ← IO.monoMsNow
     let elapsed := nowMs - state.startTime.toNat
     let elapsedSec := elapsed.toFloat / 1000.0
@@ -1247,8 +1261,7 @@ def trainLoop (cfg : moddedGpt.Config) (hp : Hyperparameters)
     IO.println s!"Training already complete at step {state.step} (target {totalSteps})"
     return state
 
-  for step in [startStep.toNat:totalSteps.toNat] do
-    let stepU := step.toUInt64
+  for step in [startStep:totalSteps] do
     let batchSize := hp.deviceBatchSize
     let seqLen := hp.maxSeqLen
     let gradAccum := effectiveGradAccumSteps hp 1
@@ -1275,21 +1288,21 @@ def trainLoop (cfg : moddedGpt.Config) (hp : Hyperparameters)
       params := newParams
       optState := newOptState
       dataGen := newDataGen
-      step := stepU
+      step := step
       totalTokens := state.totalTokens + result.tokensProcessed
     }
     logProgress state result hp
-    if stepU % hp.valInterval == 0 && stepU > 0 then
+    if hp.valInterval.fires step && step > 0 then
       state ← runValidation state hp
-    if stepU % hp.checkpointInterval == 0 && stepU > 0 then
+    if hp.checkpointInterval.fires step && step > 0 then
       let ckpt : Checkpoint (device := device) cfg := {
         params := state.params
         optState := state.optState
-        step := stepU
+        step := step
         bestValLoss := state.bestValLoss
       }
       let metadata := mkCheckpointMetadata cfg hp state.totalTokens (some (captureDataCursor state.dataGen))
-      let stepPath := s!"{checkpointDir}/step_{stepU}.ckpt"
+      let stepPath := s!"{checkpointDir}/step_{step}.ckpt"
       let latestPath := s!"{checkpointDir}/latest.ckpt"
       saveCheckpoint ckpt stepPath (some metadata)
       saveCheckpoint ckpt latestPath (some metadata)
@@ -1498,8 +1511,7 @@ def trainLoopDistributed (cfg : moddedGpt.Config) (hp : Hyperparameters)
       IO.println s!"Training already complete at step {state.step} (target {totalSteps})"
     return state
 
-  for step in [startStep.toNat:totalSteps.toNat] do
-    let stepU := step.toUInt64
+  for step in [startStep:totalSteps] do
     let batchSize := hp.deviceBatchSize
     let seqLen := hp.maxSeqLen
     let gradAccum := effectiveGradAccumSteps hp state.worldSize
@@ -1526,26 +1538,26 @@ def trainLoopDistributed (cfg : moddedGpt.Config) (hp : Hyperparameters)
       params := newParams
       optState := newOptState
       dataGen := newDataGen
-      step := stepU
+      step := step
       totalTokens := state.totalTokens + result.tokensProcessed
     }
     if isMaster then
       logProgress state.toTrainState result hp
-    if stepU % hp.valInterval == 0 && stepU > 0 && isMaster then
+    if hp.valInterval.fires step && step > 0 && isMaster then
       let baseState ← runValidation state.toTrainState hp
       state := { state with
         bestValLoss := baseState.bestValLoss
         valData := baseState.valData
       }
-    if stepU % hp.checkpointInterval == 0 && stepU > 0 && isMaster then
+    if hp.checkpointInterval.fires step && step > 0 && isMaster then
       let ckpt : Checkpoint (device := device) cfg := {
         params := state.params
         optState := state.optState
-        step := stepU
+        step := step
         bestValLoss := state.bestValLoss
       }
       let metadata := mkCheckpointMetadata cfg hp state.totalTokens (some (captureDataCursor state.dataGen))
-      let stepPath := s!"{checkpointDir}/step_{stepU}.ckpt"
+      let stepPath := s!"{checkpointDir}/step_{step}.ckpt"
       let latestPath := s!"{checkpointDir}/latest.ckpt"
       saveCheckpoint ckpt stepPath (some metadata)
       saveCheckpoint ckpt latestPath (some metadata)
@@ -1703,7 +1715,7 @@ structure StreamTrainState (cfg : moddedGpt.Config) where
   params : ModdedGPTParams (device := device) cfg
   yarn : YarnRotary (device := device) cfg.headDim cfg.maxSeqLen
   optState : OptimizerState (device := device) cfg
-  step : UInt64 := 0
+  step : Nat := 0
   bestValLoss : Float := 1e30
   totalTokens : Nat := 0
   startTime : UInt64 := 0
@@ -1712,7 +1724,7 @@ structure StreamTrainState (cfg : moddedGpt.Config) where
 
 private def logStreamProgress (state : StreamTrainState (device := device) cfg) (result : StepResult)
     (hp : Hyperparameters) : IO Unit := do
-  if state.step % hp.logInterval == 0 then
+  if hp.logInterval.fires state.step then
     let nowMs ← IO.monoMsNow
     let elapsed := nowMs - state.startTime.toNat
     let elapsedSec := elapsed.toFloat / 1000.0
@@ -1801,7 +1813,7 @@ private def checkpointPhase (label : String) (worldSize : Nat) (device : Device)
       throw <| IO.userError s!"Checkpoint {label} failed: {failure?.getD "another rank reported an error"}"
   | false => pure ()
 
-private def stageStreamCursors (checkpointDir : String) (step : UInt64) (rank worldSize : Nat)
+private def stageStreamCursors (checkpointDir : String) (step rank worldSize : Nat)
     (device : Device)
     (saveCursor? : Option (String → IO Unit)) : IO (Option String) := do
   match saveCursor? with
@@ -1850,8 +1862,7 @@ private def trainLoopDistributedStream (cfg : moddedGpt.Config) (hp : Hyperparam
       IO.println s!"Training already complete at step {state.step} (target {totalSteps})"
     return state
 
-  for step in [startStep.toNat:totalSteps.toNat] do
-    let stepU := step.toUInt64
+  for step in [startStep:totalSteps] do
     let batchSize := hp.deviceBatchSize
     let seqLen := hp.maxSeqLen
     let gradAccum := effectiveGradAccumSteps hp state.worldSize
@@ -1872,14 +1883,14 @@ private def trainLoopDistributedStream (cfg : moddedGpt.Config) (hp : Hyperparam
     state := { state with
       params := newParams
       optState := newOptState
-      step := stepU
+      step := step
       totalTokens := state.totalTokens + result.tokensProcessed
     }
 
     if isMaster then
       logStreamProgress state result hp
 
-    if stepU % hp.valInterval == 0 && stepU > 0 && isMaster then
+    if hp.valInterval.fires step && step > 0 && isMaster then
       match valProvider? with
       | none => pure ()
       | some valProvider =>
@@ -1893,7 +1904,7 @@ private def trainLoopDistributedStream (cfg : moddedGpt.Config) (hp : Hyperparam
             IO.println "  New best validation loss!"
             state := { state with bestValLoss := valLoss }
 
-    if stepU % hp.checkpointInterval == 0 && stepU > 0 then
+    if hp.checkpointInterval.fires step && step > 0 then
       let staging? ← stageStreamCursors checkpointDir state.optState.step state.rank state.worldSize
         state.params.embed.device saveStreamCursor?
       checkpointPhase "snapshot publication" state.worldSize state.params.embed.device do
@@ -1901,11 +1912,11 @@ private def trainLoopDistributedStream (cfg : moddedGpt.Config) (hp : Hyperparam
           let ckpt : Checkpoint (device := device) cfg := {
             params := state.params
             optState := state.optState
-            step := stepU
+            step := step
             bestValLoss := state.bestValLoss
           }
           let metadata := mkCheckpointMetadata cfg hp state.totalTokens none
-          let stepPath := s!"{checkpointDir}/step_{stepU}.ckpt"
+          let stepPath := s!"{checkpointDir}/step_{step}.ckpt"
           saveCheckpoint ckpt stepPath (some metadata) (streamCursorWriter staging? state.worldSize)
           saveCheckpoint ckpt latestPath (some metadata) (streamCursorWriter staging? state.worldSize)
       removeStreamCursorStaging staging? state.rank

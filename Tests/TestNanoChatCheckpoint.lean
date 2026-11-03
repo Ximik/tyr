@@ -213,4 +213,20 @@ def run : IO Unit := do
   testNanoChatSnapshotReplacementAndCorruption
   testNanoChatLegacyFlatCheckpoint
 
+@[test] def testNanoChatIntervalsRoundTripAndRejectZero : IO Unit := do
+  let hp : Hyperparameters := { valInterval := none, logInterval := 7 }
+  let json := Lean.toJson hp
+  match Lean.fromJson? (α := Hyperparameters) json with
+  | .ok decoded =>
+      assertTrue (decoded.valInterval.isNone) "a never-firing interval stores as null"
+      assertEqual (decoded.logInterval.map (·.val)) (some 7)
+  | .error e => throw <| IO.userError s!"Hyperparameters JSON should round-trip: {e}"
+  let zero := json.setObjVal! "checkpointInterval" (Lean.toJson (0 : Nat))
+  match Lean.fromJson? (α := Hyperparameters) zero with
+  | .ok _ => throw <| IO.userError "A zero interval should be rejected on load"
+  | .error e => assertTrue (e.contains "positive") e
+  assertFalse (StepInterval.fires none 0) "none never fires"
+  assertTrue (StepInterval.fires 5 10) "an interval fires on its multiples"
+  assertFalse (StepInterval.fires 5 11) "and not between them"
+
 end Tests.NanoChatCheckpoint
