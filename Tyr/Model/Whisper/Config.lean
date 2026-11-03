@@ -32,6 +32,8 @@ structure WhisperConfig where
   decoderHeadsDivide : decoderAttentionHeads ∣ dModel := by decide
   /-- The decoder KV cache holds `maxTargetPositions` tokens; checked when the config is built. -/
   maxTargetPositionsPos : 0 < maxTargetPositions := by decide
+  /-- Beam and top-k candidate counts are clamped to the vocabulary; checked when the config is built. -/
+  vocabSizePos : 0 < vocabSize := by decide
   deriving Repr
 
 instance : Inhabited WhisperConfig := ⟨{}⟩

@@ -86,6 +86,28 @@ example (model : WhisperForConditionalGeneration (device := .CPU) cfg)
     catch e => pure ((toString e).contains "max_target_positions")
   LeanTest.assertTrue rejected "a zero decoder cache capacity is rejected where the config is loaded"
 
+@[test] def testWhisperConfigRejectsZeroVocab : IO Unit := IO.FS.withTempDir fun dir => do
+  let path := (dir / "config.json").toString
+  IO.FS.writeFile path "{\"vocab_size\": 0}"
+  let rejected ←
+    try
+      let _ ← WhisperConfig.loadFromFile path
+      pure false
+    catch e => pure ((toString e).contains "vocab_size")
+  LeanTest.assertTrue rejected "an empty vocabulary is rejected where the config is loaded"
+
+example : True := by
+  have : WhisperDecodeOptions := { beamSize := 1, bestOf := 1, topK := some 1, maxNewTokens := some 1 }
+  fail_if_success
+    have : WhisperDecodeOptions := { beamSize := 0 }
+  fail_if_success
+    have : WhisperDecodeOptions := { bestOf := 0 }
+  fail_if_success
+    have : WhisperDecodeOptions := { topK := some 0 }
+  fail_if_success
+    have : WhisperDecodeOptions := { maxNewTokens := some 0 }
+  trivial
+
 set_option linter.unusedVariables false in
 example : True := by
   fail_if_success
@@ -133,14 +155,16 @@ private def roundTrip {α : Type} [TensorStruct α] (value : α) (dir : String) 
     featureSize := 4, samplingRate := 16000, hopLength := 64, nFft := 64,
     nSamples := 2048, nbMaxFrames := 32, chunkLength := 0 }
   let waveform := Array.ofFn (n := 1024) fun i => 0.1 * Float.sin (i.val.toFloat * 0.2)
-  for (beam, temperature) in #[(1, 0.0), (2, 0.0), (1, 0.7)] do
-    let result ← transcribeWaveform16k model tok pre rfl waveform "english" 2 true {
-      beamSize := beam, temperature, noFallback := true, conditionOnPreviousText := false,
-      chunkOverlapSeconds := 0, noSpeechThreshold := 1.0 }
+  let greedy : WhisperDecodeOptions := {
+    maxNewTokens := some 2, noFallback := true, conditionOnPreviousText := false,
+    chunkOverlapSeconds := 0, noSpeechThreshold := 1.0 }
+  for opts in #[greedy, { greedy with beamSize := 2, beamSizePos := by decide },
+      { greedy with temperature := 0.7 }] do
+    let result ← transcribeWaveform16k model tok pre rfl waveform "english" true opts
     LeanTest.assertEqual result.language "en"
     LeanTest.assertTrue (result.tokenIds.size <= 2)
     LeanTest.assertTrue (result.tokenIds.all (· < 16))
-    if beam == 1 && temperature == 0 then
+    if opts.beamSize == 1 && opts.temperature == 0 then
       LeanTest.assertEqual result.tokenIds #[0, 0]
       LeanTest.assertEqual result.text "aa"
 

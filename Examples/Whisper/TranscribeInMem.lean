@@ -21,7 +21,7 @@ def main (argv : List String) : IO UInt32 := do
   IO.println "Transcribing via transcribeWaveform16k..."
   let out ← transcribeWaveform16k
     bundle.model bundle.tok bundle.preprocessor bundle.melBinsMatch
-    wav16k "en" 128 true {}
+    wav16k "en" true {}
 
   IO.println s!"LANG={out.language}"
   IO.println "TEXT_BEGIN"
