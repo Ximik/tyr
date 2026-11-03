@@ -119,6 +119,6 @@ def addSpecialTokens (tok : BPETokenizer) (tokens : Array String) (startId : Tok
       idToSpecial := result.idToSpecial.insert id token
     }
     id := id + 1
-  return { result with vocabSize := result.idToBytes.size.toUInt32 }
+  return { result with vocabSize := result.idToBytes.size }
 
 end tokenizer

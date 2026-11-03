@@ -74,7 +74,7 @@ private def expectSome {α : Type} (v : Option α) (msg : String) : Except Strin
 
 /-- Serialize a tokenizer to bytes -/
 def serialize (tok : BPETokenizer) : Except String ByteArray := do
-  let vocabEntries := max tok.vocabSize.toNat tok.idToBytes.size
+  let vocabEntries := max tok.vocabSize tok.idToBytes.size
   let vocabSize ← expectSome (natToU32? vocabEntries)
     s!"vocab size {vocabEntries} exceeds UInt32 range"
   let numMerges ← expectSome (natToU32? tok.merges.size)
@@ -176,7 +176,7 @@ def deserialize (bytes : ByteArray) : Option BPETokenizer := do
   if offset != bytes.size then failure
 
   return {
-    vocabSize := vocabSize
+    vocabSize := vocabSize.toNat
     idToBytes := idToBytes
     bytesToId := bytesToId
     merges := merges
@@ -224,6 +224,6 @@ def createBase : BPETokenizer := Id.run do
 
   -- Add special tokens
   let withSpecials := addSpecialTokens tok allSpecialTokens 256
-  { withSpecials with vocabSize := withSpecials.idToBytes.size.toUInt32 }
+  { withSpecials with vocabSize := withSpecials.idToBytes.size }
 
 end tokenizer
