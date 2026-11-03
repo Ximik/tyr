@@ -38,22 +38,30 @@ structure WhisperBundle where
   melBinsMatch : preprocessor.featureSize = cfg.numMelBins
 
 structure WhisperDecodeOptions where
-  beamSize : UInt64 := 1
-  bestOf : UInt64 := 1
+  beamSize : Nat := 1
+  beamSizePos : 0 < beamSize := by decide
+  bestOf : Nat := 1
+  bestOfPos : 0 < bestOf := by decide
   temperature : Float := 0.0
   temperatureInc : Float := 0.2
   maxTemperature : Float := 1.0
-  topK : Nat := 0
+  /-- `none`: no top-k filter. -/
+  topK : Option Nat := none
+  topKPos : ∀ k ∈ topK, 0 < k := by decide
   topP : Float := 1.0
   logprobThreshold : Float := -1.0
   noSpeechThreshold : Float := 0.6
   compressionRatioThreshold : Float := 2.4
   conditionOnPreviousText : Bool := true
-  maxContextTokens : UInt64 := 0
+  /-- Carried context limit; `none` uses half the model's target positions. -/
+  maxContextTokens : Option Nat := none
+  /-- Generated tokens per chunk; `none`: up to the model's target positions. -/
+  maxNewTokens : Option Nat := some 128
+  maxNewTokensPos : ∀ n ∈ maxNewTokens, 0 < n := by decide
   chunkOverlapSeconds : Float := 2.0
   resetContextOnFallback : Bool := true
   noFallback : Bool := true
-  deriving Repr, Inhabited
+  deriving Repr
 
 private def sampleRate16k : Nat := 16000
 
@@ -591,18 +599,10 @@ private def tokenProbFromLogits {vocab : Nat}
   let logProbs := logProbsFromLogitsArray vals
   pure (Float.exp (logProbs.getD tokenId.toNat (-100.0)))
 
-private def clampTopK (topK vocab : Nat) : Nat :=
-  if topK == 0 then
-    0
-  else if topK > vocab then
-    vocab
-  else
-    topK
-
 private def filteredSamplingLogits {vocab : Nat}
     (logits : Tensor { dtype := dtype, device := device, shape := #[1, vocab] })
     (temperature : Float)
-    (topK : Nat)
+    (topK : Option Nat)
     (topP : Float)
     : Tensor { dtype := dtype, device := device, shape := #[1, vocab] } :=
   let scaled :=
@@ -610,12 +610,10 @@ private def filteredSamplingLogits {vocab : Nat}
       logits
     else
       Tensor.mulScalar logits (1.0 / temperature)
-  let topK' := clampTopK topK vocab
   let filtered :=
-    if topK' == 0 then
-      scaled
-    else
-      Tensor.topKFilter scaled topK'
+    match topK with
+    | none => scaled
+    | some k => Tensor.topKFilter scaled (Nat.min k vocab)
   let topP' :=
     if topP <= 0.0 then
       (1e-6 : Float)
@@ -698,7 +696,7 @@ private partial def decodeLoopCached
     (rules : DecodeTokenRules)
     (eosTokenId : UInt64)
     (temperature : Float)
-    (topK : Nat)
+    (topK : Option Nat)
     (topP : Float)
     (sample : Bool)
     (remaining : Nat)
@@ -793,7 +791,7 @@ private def expandBeamCached
     (noSpeechTokenId : Option UInt32)
     (rules : DecodeTokenRules)
     (eosTokenId : UInt64)
-    (beamWidth : UInt64)
+    (beamWidth : Nat)
     (beam : BeamState (device := device) (dtype := dtype) cfg)
     : IO (Array (BeamState (device := device) (dtype := dtype) cfg)) := do
   if beam.finished then
@@ -811,7 +809,7 @@ private def expandBeamCached
           match noSpeechTokenId with
           | none => pure 0.0
           | some tid => tokenProbFromLogits last tid
-      let kNat := Nat.max 1 (Nat.min beamWidth.toNat cfg.vocabSize)
+      let kNat := Nat.min beamWidth cfg.vocabSize
       let logitsArr ← Tensor.toFloatArray last
       let logProbs := logProbsFromLogitsArray logitsArr
       let topPairs := topKLogProbPairs logProbs kNat
@@ -879,7 +877,7 @@ private partial def beamDecodeLoopCached
     (noSpeechTokenId : Option UInt32)
     (rules : DecodeTokenRules)
     (eosTokenId : UInt64)
-    (beamWidth : UInt64)
+    (beamWidth : Nat)
     (remaining : Nat)
     (beams : Array (BeamState (device := device) (dtype := dtype) cfg))
     : IO (Array (BeamState (device := device) (dtype := dtype) cfg)) := do
@@ -912,7 +910,7 @@ private partial def beamDecodeLoopCached
         pure beams
       else
         let sorted := expanded.qsort (fun a b => beamRankScore a > beamRankScore b)
-        let keep := Nat.max 1 (Nat.min sorted.size beamWidth.toNat)
+        let keep := Nat.min sorted.size beamWidth
         beamDecodeLoopCached
           (encSeq := encSeq)
           model
@@ -934,7 +932,7 @@ private def decodeBeamCached
     (noSpeechTokenId : Option UInt32)
     (rules : DecodeTokenRules)
     (eosTokenId : UInt64)
-    (beamWidth : UInt64)
+    (beamWidth : Nat)
     (remaining : Nat)
     (hfit : promptIds.size + remaining ≤ cfg.maxTargetPositions)
     : IO DecodeState := do
@@ -1054,7 +1052,7 @@ private def decodeAtTemperature
           hfit
     pure (toDecodeCandidate tok st temperature)
   else
-    let runs := Nat.max 1 opts.bestOf.toNat
+    let runs := opts.bestOf
     let mut best? : Option WhisperDecodeCandidate := none
     for _ in [:runs] do
       let st ←
@@ -1210,14 +1208,16 @@ private def maybeAppendTailRescue
           1
         else
           maxTarget - basePrompt.size - 1
-      let maxNewNat := Nat.max 1 (Nat.min requestedMaxNew maxNewCapPrompt)
+      let maxNewNat := Nat.min requestedMaxNew maxNewCapPrompt
       let rescueOpts : WhisperDecodeOptions := {
         decodeOpts with
-          beamSize := if decodeOpts.beamSize < 5 then 5 else decodeOpts.beamSize
-          bestOf := if decodeOpts.bestOf < 5 then 5 else decodeOpts.bestOf
+          beamSize := max 5 decodeOpts.beamSize
+          beamSizePos := by omega
+          bestOf := max 5 decodeOpts.bestOf
+          bestOfPos := by omega
           noFallback := false
           conditionOnPreviousText := false
-          maxContextTokens := 0
+          maxContextTokens := none
       }
       let (cand, _) ←
         decodeWithFallback
@@ -1273,7 +1273,6 @@ private def transcribeWavCore
     (hMel : pre.featureSize = cfg.numMelBins)
     (wav16k : Array Float)
     (language : String)
-    (maxNewTokens : UInt64)
     (noTimestamps : Bool)
     (decodeOpts : WhisperDecodeOptions)
     : IO WhisperTranscription := do
@@ -1285,14 +1284,12 @@ private def transcribeWavCore
     throw <| IO.userError
       s!"Whisper max_target_positions={cfg.maxTargetPositions} is too small for base prompt size={basePrompt.size}"
   have hBase : basePrompt.size ≤ cfg.maxTargetPositions := by omega
-  let requestedMaxNew := if maxNewTokens == 0 then maxTarget else maxNewTokens.toNat
+  let requestedMaxNew := decodeOpts.maxNewTokens.getD maxTarget
   let modelContextLimit := maxTarget / 2
-  let userContextLimit :=
-    if decodeOpts.maxContextTokens == 0 then
-      modelContextLimit
-    else
-      Nat.min decodeOpts.maxContextTokens.toNat modelContextLimit
-  let contextLimit := userContextLimit
+  let contextLimit :=
+    match decodeOpts.maxContextTokens with
+    | none => modelContextLimit
+    | some limit => Nat.min limit modelContextLimit
   let promptExtraBudget := if decodeOpts.conditionOnPreviousText then contextLimit + 1 else 0
   let promptMaxLen := Nat.min maxTarget (basePrompt.size + promptExtraBudget)
   let noSpeechTokenId := tokenIdByText? tok "<|nospeech|>"
@@ -1392,7 +1389,7 @@ private def transcribeWavCore
             1
           else
             maxTarget - promptIds.size - 1
-        let maxNewNatChunk := Nat.max 1 (Nat.min requestedMaxNew maxNewCapPrompt)
+        let maxNewNatChunk := Nat.min requestedMaxNew maxNewCapPrompt
         let (cand, usedFallback) ←
           decodeWithFallback
             model
@@ -1478,11 +1475,10 @@ def transcribeWaveform16k
     (hMel : pre.featureSize = cfg.numMelBins)
     (wav16k : Array Float)
     (language : String := "en")
-    (maxNewTokens : UInt64 := 128)
     (noTimestamps : Bool := true)
     (decodeOpts : WhisperDecodeOptions := {})
     : IO WhisperTranscription :=
-  transcribeWavCore model tok pre hMel wav16k language maxNewTokens noTimestamps decodeOpts
+  transcribeWavCore model tok pre hMel wav16k language noTimestamps decodeOpts
 
 def transcribeWav
     {cfg : WhisperConfig}
@@ -1492,11 +1488,10 @@ def transcribeWav
     (hMel : pre.featureSize = cfg.numMelBins)
     (wavPath : String)
     (language : String := "en")
-    (maxNewTokens : UInt64 := 128)
     (noTimestamps : Bool := true)
     (decodeOpts : WhisperDecodeOptions := {})
     : IO WhisperTranscription := do
   let wav16k ← normalizeAudioTo16kFromWav wavPath
-  transcribeWavCore model tok pre hMel wav16k language maxNewTokens noTimestamps decodeOpts
+  transcribeWavCore model tok pre hMel wav16k language noTimestamps decodeOpts
 
 end torch.whisper

@@ -27,7 +27,7 @@ namespace Examples.Whisper.VoiceMode
 structure Args where
   modelDir : String := "weights/whisper-base.en"
   language : String := "en"
-  maxNewTokens : UInt64 := 128
+  maxNewTokens : Option Nat := some 128
   /-- RMS threshold for speech detection (float amplitude, not int16). -/
   speechRmsThreshold : Float := 0.008
   /-- Seconds of sustained silence to end recording. -/
@@ -47,7 +47,7 @@ structure Args where
   /-- Play audio beep feedback. -/
   beeps : Bool := true
   /-- Whisper decode options. -/
-  beamSize : UInt64 := 1
+  beamSize : Nat := 1
   noTimestamps : Bool := true
   noFallback : Bool := true
   deriving Inhabited
@@ -73,9 +73,9 @@ private def parseFloatArg (name : String) (v : String) : IO Float :=
   | some x => pure x
   | none => throw <| IO.userError s!"Invalid {name}: {v}"
 
-private def parseNatArg (name : String) (v : String) : IO UInt64 :=
+private def parseNatArg (name : String) (v : String) : IO Nat :=
   match v.toNat? with
-  | some n => pure n.toUInt64
+  | some n => pure n
   | none => throw <| IO.userError s!"Invalid {name}: {v}"
 
 private partial def parseArgsLoop (xs : List String) (acc : Args) : IO Args := do
@@ -88,7 +88,7 @@ private partial def parseArgsLoop (xs : List String) (acc : Args) : IO Args := d
   | "--language" :: v :: rest =>
       parseArgsLoop rest { acc with language := v }
   | "--max-new-tokens" :: v :: rest =>
-      parseArgsLoop rest { acc with maxNewTokens := (← parseNatArg "--max-new-tokens" v) }
+      parseArgsLoop rest { acc with maxNewTokens := some (← parseNatArg "--max-new-tokens" v) }
   | "--rms-threshold" :: v :: rest =>
       parseArgsLoop rest { acc with speechRmsThreshold := (← parseFloatArg "--rms-threshold" v) }
   | "--silence-duration" :: v :: rest =>
@@ -108,7 +108,7 @@ private partial def parseArgsLoop (xs : List String) (acc : Args) : IO Args := d
   | "--beam-size" :: v :: rest =>
       parseArgsLoop rest { acc with beamSize := (← parseNatArg "--beam-size" v) }
   | "--max-no-speech-exits" :: v :: rest =>
-      parseArgsLoop rest { acc with maxNoSpeechExits := (← parseNatArg "--max-no-speech-exits" v).toNat }
+      parseArgsLoop rest { acc with maxNoSpeechExits := (← parseNatArg "--max-no-speech-exits" v) }
   | "--help" :: _ => do
       IO.println "Usage: lake exe WhisperVoiceMode [options]"
       IO.println ""
@@ -325,7 +325,7 @@ private def runOnce
         if newSinceLastTranscribe >= transcribeInterval && audioBuf.size >= toSamples 0.5 then
           let wav ← audioBuf.toArray
           lastTranscribeSize := audioBuf.size
-          let result ← transcribeWaveform16k model tok pre hMel wav args.language args.maxNewTokens true decodeOpts
+          let result ← transcribeWaveform16k model tok pre hMel wav args.language true decodeOpts
           let text := result.text.trimAscii.toString
           if !text.isEmpty then
             lastText := text
@@ -340,7 +340,7 @@ private def runOnce
     return false
 
   let wav ← audioBuf.toArray
-  let result ← transcribeWaveform16k model tok pre hMel wav args.language args.maxNewTokens true decodeOpts
+  let result ← transcribeWaveform16k model tok pre hMel wav args.language true decodeOpts
   let text := result.text.trimAscii.toString
 
   if text.isEmpty then
@@ -358,16 +358,23 @@ def runMain (argv : List String) : IO UInt32 := do
   let args ← parseArgs argv
   if argv.contains "--help" then return 0
 
+  let ⟨hBeam⟩ ← if h : 0 < args.beamSize then pure (PLift.up h) else
+    throw <| IO.userError "--beam-size must be positive"
+  let ⟨hMaxNew⟩ ← if h : ∀ n ∈ args.maxNewTokens, 0 < n then pure (PLift.up h) else
+    throw <| IO.userError "--max-new-tokens must be positive"
+  let decodeOpts : WhisperDecodeOptions := {
+    beamSize := args.beamSize
+    beamSizePos := hBeam
+    maxNewTokens := args.maxNewTokens
+    maxNewTokensPos := hMaxNew
+    noFallback := args.noFallback
+  }
+
   IO.println "Loading Whisper model..."
   let bundle ← loadFromPretrainedDir args.modelDir
   IO.println s!"Model loaded ({args.modelDir})"
   IO.println s!"Language: {args.language}, continuous: {args.continuous}"
   IO.println ""
-
-  let decodeOpts : WhisperDecodeOptions := {
-    beamSize := args.beamSize
-    noFallback := args.noFallback
-  }
 
   Tyr.Audio.AppleInput.start sampleRate 1 100
 
