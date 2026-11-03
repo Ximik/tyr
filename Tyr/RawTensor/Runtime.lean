@@ -79,7 +79,7 @@ opaque mps_is_available : IO Bool
 namespace data
 
 @[extern "lean_torch_bin_file_token_count"]
-opaque binFileTokenCount (path : @& String) : IO UInt64
+opaque binFileTokenCount (path : @& String) : IO Nat
 
 /-- High-quality mono resampling. Zero rates, unrepresentable output sizes, and
 native failures return IO errors. Equal-rate and empty inputs retain the input array. -/

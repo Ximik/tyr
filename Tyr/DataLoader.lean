@@ -262,7 +262,7 @@ private def decodeLEU32FromU16Words (lo hi : UInt64) : UInt64 :=
 structure FinewebHeader where
   magic : UInt64
   version : UInt64
-  tokenCount : UInt64
+  tokenCount : Nat
   deriving Repr
 
 /-- Parse the leading modded-nanogpt header values (magic, version, tokenCount). -/
@@ -278,7 +278,7 @@ def parseFinewebHeader? {n : Nat} (tokens : Tensor { shape := #[n], dtype := .In
 
   let magic := decodeLEU32FromU16Words vals[0]! vals[1]!
   let version := decodeLEU32FromU16Words vals[2]! vals[3]!
-  let tokenCount := decodeLEU32FromU16Words vals[4]! vals[5]!
+  let tokenCount := (decodeLEU32FromU16Words vals[4]! vals[5]!).toNat
   return some { magic, version, tokenCount }
 
 /-- Split a tensor loaded from .bin into payload tokens, parsing fineweb header when present. -/
@@ -304,7 +304,7 @@ def splitFinewebPayload {n : Nat} (tokens : Tensor { shape := #[n], dtype := .In
     if header.tokenCount == 0 then
       payloadWords
     else
-      min header.tokenCount.toNat payloadWords
+      min header.tokenCount payloadWords
 
   let payload := tokens.sliceChecked 0 finewebHeaderU16Words payloadCount #[payloadCount]
   return ⟨payloadCount, payload⟩
@@ -313,7 +313,7 @@ def DataShard.loadFromFile (path : String) (shardIdx numShards : Nat)
     (bosToken : UInt64) : IO (Σ n, DataShard n) := do
   if numShards == 0 || shardIdx >= numShards then
     throw <| IO.userError "Invalid data-loader rank/world size"
-  let rawTokensCount := (← data.binFileTokenCount path).toNat
+  let rawTokensCount ← data.binFileTokenCount path
   let allTokens ← Tensor.loadU16Bin rawTokensCount path
   let ⟨totalTokens, allTokens⟩ ← splitFinewebPayload allTokens
   let tokensPerShard := totalTokens / numShards

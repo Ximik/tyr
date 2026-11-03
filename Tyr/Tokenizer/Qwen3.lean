@@ -48,7 +48,7 @@ private def stringCharLength (s : String) : Nat :=
 
 /-- Tokenizer for Qwen3 (ByteLevel BPE). -/
 structure QwenTokenizer where
-  vocabSize : UInt32
+  vocabSize : Nat
   idToToken : Array String
   tokenToId : Std.HashMap String TokenId
   charToId : Std.HashMap Char TokenId
@@ -126,13 +126,15 @@ def loadTokenizer (dir : String) : IO QwenTokenizer := do
     for (tok, idJson) in kvs do
       match getNat? idJson with
       | some id =>
+        if id ≥ UInt32.size then
+          throw (IO.userError s!"Vocab id {id} for token {tok} exceeds the UInt32 token id range")
         if id > maxId then maxId := id
         tokenToId := tokenToId.insert tok id.toUInt32
       | none =>
         throw (IO.userError s!"Invalid vocab id for token {tok}")
   | _ => throw (IO.userError "model.vocab is not an object")
 
-  let vocabSize : UInt32 := (maxId + 1).toUInt32
+  let vocabSize := maxId + 1
   let mut idToToken : Array String := Array.replicate (maxId + 1) ""
   for (tok, id) in tokenToId.toList do
     let idx := id.toNat
