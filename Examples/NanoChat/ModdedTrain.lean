@@ -887,7 +887,7 @@ structure TrainState (cfg : moddedGpt.Config) where
 /-- Initialize training state -/
 def TrainState.init (cfg : moddedGpt.Config) (dataConfig : DataLoader.Config)
     (hp : Hyperparameters)
-    (_distributed : Bool) (_worldSize : UInt64)
+    (_distributed : Bool) (_worldSize : Nat)
     (device : Device := Device.CPU)
     (lr : Float := 0.023) (weightDecay : Float := 0.0)
     : IO (TrainState (device := device) cfg) := do
@@ -1221,7 +1221,7 @@ def trainStepDistributedAccum {cfg : moddedGpt.Config} {batch seq : Nat}
   let result : StepResult := {
     loss := totalLoss / microCount.toFloat
     gradNorm := 0.0
-    tokensProcessed := batch * seq * worldSize.toNat * microCount
+    tokensProcessed := batch * seq * worldSize * microCount
     timeMs := timeMs
   }
   let newOptState : OptimizerState (device := device) cfg := {
@@ -1395,7 +1395,7 @@ def trainStepDistributed {cfg : moddedGpt.Config} {batch seq : Nat}
   let result : StepResult := {
     loss := lossVal
     gradNorm := 0.0  -- Could compute from grads if needed
-    tokensProcessed := batch * seq * worldSize.toNat
+    tokensProcessed := batch * seq * worldSize
     timeMs := timeMs
   }
 
@@ -1414,9 +1414,9 @@ structure DistributedTrainState (cfg : moddedGpt.Config) extends TrainState (dev
   /-- Distributed sampler for data sharding -/
   sampler : Option dist.DistributedSampler := none
   /-- World size -/
-  worldSize : UInt64 := 1
+  worldSize : Nat := 1
   /-- This rank -/
-  rank : UInt64 := 0
+  rank : Nat := 0
 
 /-- Initialize distributed training state -/
 def DistributedTrainState.init (cfg : moddedGpt.Config) (dataConfig : DataLoader.Config)
@@ -1502,7 +1502,7 @@ def trainLoopDistributed (cfg : moddedGpt.Config) (hp : Hyperparameters)
     let stepU := step.toUInt64
     let batchSize := hp.deviceBatchSize
     let seqLen := hp.maxSeqLen
-    let gradAccum := effectiveGradAccumSteps hp state.worldSize.toNat
+    let gradAccum := effectiveGradAccumSteps hp state.worldSize
     let iterator ← state.dataGen.iterator.updateParams batchSize seqLen
     let dataGen := { state.dataGen with iterator }
     let mut microBatches : Array (Tensor { shape := #[batchSize, seqLen], dtype := .Int64, device := device } × Tensor { shape := #[batchSize, seqLen], dtype := .Int64, device := device }) := #[]
@@ -1673,7 +1673,7 @@ def trainDistributed (cfg : moddedGpt.Config) (hp : Hyperparameters)
   }
 
   -- Match nanochat's strict grad-accum divisibility contract.
-  validateGradAccumConfig effectiveHp worldSize.toNat
+  validateGradAccumConfig effectiveHp worldSize
 
   -- Barrier to ensure all ranks are ready
   if isDistributed then
@@ -1707,8 +1707,8 @@ structure StreamTrainState (cfg : moddedGpt.Config) where
   bestValLoss : Float := 1e30
   totalTokens : Nat := 0
   startTime : UInt64 := 0
-  rank : UInt64 := 0
-  worldSize : UInt64 := 1
+  rank : Nat := 0
+  worldSize : Nat := 1
 
 private def logStreamProgress (state : StreamTrainState (device := device) cfg) (result : StepResult)
     (hp : Hyperparameters) : IO Unit := do
@@ -1788,7 +1788,7 @@ private def validateWithProvider {cfg : moddedGpt.Config} {batch seq : Nat}
 
 /-- All ranks finish their cursor files before the master can publish a model
 snapshot. The staging directory is never used by checkpoint readers. -/
-private def checkpointPhase (label : String) (worldSize : UInt64) (device : Device)
+private def checkpointPhase (label : String) (worldSize : Nat) (device : Device)
     (action : IO Unit) : IO Unit := do
   let failure? ← try action; pure none catch e => pure (some s!"{e}")
   let failed : Bool ← if worldSize > 1 then do
@@ -1801,7 +1801,7 @@ private def checkpointPhase (label : String) (worldSize : UInt64) (device : Devi
       throw <| IO.userError s!"Checkpoint {label} failed: {failure?.getD "another rank reported an error"}"
   | false => pure ()
 
-private def stageStreamCursors (checkpointDir : String) (step rank worldSize : UInt64)
+private def stageStreamCursors (checkpointDir : String) (step : UInt64) (rank worldSize : Nat)
     (device : Device)
     (saveCursor? : Option (String → IO Unit)) : IO (Option String) := do
   match saveCursor? with
@@ -1815,16 +1815,16 @@ private def stageStreamCursors (checkpointDir : String) (step rank worldSize : U
       checkpointPhase "rank cursor write" worldSize device (saveCursor staging.toString)
       return some staging.toString
 
-private def streamCursorWriter (staging? : Option String) (worldSize : UInt64) :
+private def streamCursorWriter (staging? : Option String) (worldSize : Nat) :
     Option (String → IO Unit) :=
   staging?.map fun staging snapshot => do
-    for rank in [:worldSize.toNat] do
+    for rank in [:worldSize] do
       let name := s!"stream_cursor_rank{rank}.json"
       let contents ← IO.FS.readFile (s!"{staging}/{name}" : System.FilePath)
       IO.FS.writeFile (s!"{snapshot}/{name}" : System.FilePath) contents
     IO.FS.writeFile (s!"{snapshot}/stream_cursor_world_size.txt" : System.FilePath) (toString worldSize)
 
-private def removeStreamCursorStaging (staging? : Option String) (rank : UInt64) : IO Unit := do
+private def removeStreamCursorStaging (staging? : Option String) (rank : Nat) : IO Unit := do
   if rank == 0 then
     if let some staging := staging? then
       try IO.FS.removeDirAll staging catch _ => pure ()
@@ -1854,7 +1854,7 @@ private def trainLoopDistributedStream (cfg : moddedGpt.Config) (hp : Hyperparam
     let stepU := step.toUInt64
     let batchSize := hp.deviceBatchSize
     let seqLen := hp.maxSeqLen
-    let gradAccum := effectiveGradAccumSteps hp state.worldSize.toNat
+    let gradAccum := effectiveGradAccumSteps hp state.worldSize
     let device := state.params.embed.device
 
     let microBatches ← collectMicroBatches
@@ -2002,7 +2002,7 @@ def trainDistributedWithBatchProvider (cfg : moddedGpt.Config) (hp : Hyperparame
         if let some restoreStreamCursor := restoreStreamCursor? then
           if strict then
             let cursorWorldSize ← IO.FS.readFile (s!"{snapshot}/stream_cursor_world_size.txt" : System.FilePath)
-            if cursorWorldSize.trimAscii.toString.toNat? != some worldSize.toNat then
+            if cursorWorldSize.trimAscii.toString.toNat? != some worldSize then
               throw <| IO.userError "Checkpoint stream cursor world size does not match this training run"
           restoreStreamCursor snapshot
           if isMaster then
@@ -2036,7 +2036,7 @@ def trainDistributedWithBatchProvider (cfg : moddedGpt.Config) (hp : Hyperparame
   }
 
   -- Match nanochat's strict grad-accum divisibility contract.
-  validateGradAccumConfig effectiveHp worldSize.toNat
+  validateGradAccumConfig effectiveHp worldSize
 
   if isDistributed then
     dist.barrier
