@@ -175,8 +175,8 @@ void flashOptionCleanup(bool invalidCarrier, bool effectful = false) {
 }
 void randintError(bool invalidDevice) {
   Object dims(shape({4}), lean_dec);
-  auto* cuda = lean_alloc_ctor(0, 0, sizeof(uint64_t));
-  lean_ctor_set_uint64(cuda, 0, std::numeric_limits<uint64_t>::max());
+  auto* cuda = lean_alloc_ctor(0, 1, 0);
+  lean_ctor_set(cuda, 0, lean_uint64_to_nat(std::numeric_limits<uint64_t>::max()));
   Object device(invalidDevice ? cuda : lean_box(1), lean_dec);
   if (!invalidDevice) lean_dec(cuda);
   Object result(lean_torch_randint(3, invalidDevice ? 4 : 3, retain(dims.get()),
@@ -193,8 +193,8 @@ void randintSigned() {
 }
 void randomFactoryError(bool invalidDevice) {
   Object dims(invalidDevice ? shape({4}) : shape({std::numeric_limits<uint64_t>::max()}), lean_dec);
-  auto* cuda = lean_alloc_ctor(0, 0, sizeof(uint64_t));
-  lean_ctor_set_uint64(cuda, 0, std::numeric_limits<uint64_t>::max());
+  auto* cuda = lean_alloc_ctor(0, 1, 0);
+  lean_ctor_set(cuda, 0, lean_uint64_to_nat(std::numeric_limits<uint64_t>::max()));
   Object device(invalidDevice ? cuda : lean_box(1), lean_dec);
   if (!invalidDevice) lean_dec(cuda);
   Object result(lean_torch_randn(retain(dims.get()), 0, retain(device.get())), lean_dec);

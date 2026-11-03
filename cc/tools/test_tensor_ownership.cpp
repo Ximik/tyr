@@ -147,8 +147,8 @@ void testNativeFailureCleanup(lean_object* tensor) {
   LeanObject incompatible(lean_torch_ones(shape({3, 3}), 0, lean_box(1)), lean_dec);
   expectThrow([&] { return lean_torch_tensor_add(tensor, incompatible.get()); });
 
-  auto* cuda = lean_alloc_ctor(0, 0, sizeof(uint64_t));
-  lean_ctor_set_uint64(cuda, 0, std::numeric_limits<uint64_t>::max());
+  auto* cuda = lean_alloc_ctor(0, 1, 0);
+  lean_ctor_set(cuda, 0, lean_uint64_to_nat(std::numeric_limits<uint64_t>::max()));
   ObservedArg device(cuda), factoryShape(shape({2, 2}));
   expectThrow([&] { return lean_torch_ones(factoryShape.transfer(), 0, device.transfer()); });
   factoryShape.consumed("factory shape before device rejection");

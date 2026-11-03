@@ -32,7 +32,7 @@ opaque initProcessGroup (backend masterAddr : @& String) (masterPort rank worldS
 /-- Set the current CUDA device for this process (typically LOCAL_RANK).
     Indices outside the native DeviceIndex range fail on every build. -/
 @[extern "lean_torch_dist_set_cuda_device"]
-opaque setCudaDevice (device : UInt64) : IO Unit
+opaque setCudaDevice (device : @& Nat) : IO Unit
 
 /-- Get the rank of this process -/
 @[extern "lean_torch_dist_get_rank"]
