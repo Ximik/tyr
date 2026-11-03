@@ -39,8 +39,8 @@ open torch.dist
 structure SFTConfig where
   /-- Number of training epochs -/
   numEpochs : Nat := 1
-  /-- Override number of iterations (-1 = use numEpochs) -/
-  numIterations : Int := -1
+  /-- Optimizer steps; `none` derives them from `numEpochs`. -/
+  numIterations : Option Nat := none
   /-- Per-device batch size -/
   deviceBatchSize : Nat := 4
   /-- Target examples per optimization step (for gradient accumulation) -/
@@ -419,11 +419,8 @@ def trainLoop [TensorStruct P] [FloatingTensorStruct P]
   let worldSize ← if isDistributed then dist.getWorldSize else pure 1
 
   -- Compute number of iterations
-  let numIterations : Nat :=
-    if cfg.numIterations >= 0 then
-      cfg.numIterations.toNat
-    else
-      (numTrainExamples / cfg.targetExamplesPerStep) * cfg.numEpochs
+  let numIterations :=
+    cfg.numIterations.getD ((numTrainExamples / cfg.targetExamplesPerStep) * cfg.numEpochs)
 
   let gradAccumSteps := max 1 (cfg.gradAccumSteps worldSize)
 
