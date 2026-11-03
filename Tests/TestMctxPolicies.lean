@@ -6,9 +6,6 @@ open torch.mctx
 private def approx (a b : Float) (tol : Float := 1e-6) : Bool :=
   Float.abs (a - b) < tol
 
-private def intToNatNonneg (x : Int) : Nat :=
-  if x < 0 then 0 else Int.toNat x
-
 private def deepestLeaf (tree : Tree Unit GumbelMuZeroExtraData) : Nat × Nat := Id.run do
   let mut stack : Array (Nat × Nat) := #[(ROOT_INDEX, 0)]
   let mut bestNode := ROOT_INDEX
@@ -21,10 +18,9 @@ private def deepestLeaf (tree : Tree Unit GumbelMuZeroExtraData) : Nat × Nat :=
 
     let mut hasChild := false
     for a in [:tree.numActions] do
-      let child := (tree.childrenIndex.getD node #[]).getD a UNVISITED
-      if child != UNVISITED then
+      if let some child := (tree.childrenIndex.getD node #[]).getD a none then
         hasChild := true
-        stack := stack.push (intToNatNonneg child, depth + 1)
+        stack := stack.push (child, depth + 1)
 
     if !hasChild then
       let visits := tree.nodeVisits.getD node 0
@@ -172,7 +168,7 @@ def testMctxGumbelMuZeroPolicyWithoutInvalidActions : IO Unit := do
 
   let summary := out.searchTree.summary
   let totalVisits := summary.visitCounts.foldl (init := 0) (· + ·)
-  LeanTest.assertEqual totalVisits (UInt64.ofNat numSimulations)
+  LeanTest.assertEqual totalVisits numSimulations
     s!"Root child visits should sum to num_simulations={numSimulations}"
 
 @[test]

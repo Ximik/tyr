@@ -29,8 +29,6 @@ def BatchedTree.summary (tree : BatchedTree S E) : BatchedSearchSummary :=
     qvalues := summaries.map (·.qvalues)
   }
 
-private def intToNatNonneg (x : Int) : Nat :=
-  if x < 0 then 0 else Int.toNat x
 
 private def treeAt! [Inhabited S] [Inhabited E] (trees : Array (Tree S E)) (i : Nat) : Tree S E :=
   match trees[i]? with
@@ -89,9 +87,8 @@ def searchBatchedWithTrees
       let depthCutoff := maxDepth.getD tree.numSimulations
       let simKey := rngKey + UInt64.ofNat ((sim + 1) * 1315423911 + bi)
       let (parentIndex, action) := simulate simKey tree actionSelectionFn depthCutoff
-      let existing := (tree.childrenIndex.getD parentIndex #[]).getD action UNVISITED
       let nextNodeIndex :=
-        if existing = UNVISITED then tree.nextNodeIndex else intToNatNonneg existing
+        ((tree.childrenIndex.getD parentIndex #[]).getD action none).getD tree.nextNodeIndex
       parentIndices := parentIndices.push parentIndex
       actions := actions.push action
       nextNodeIndices := nextNodeIndices.push nextNodeIndex
