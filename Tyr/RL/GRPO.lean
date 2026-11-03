@@ -70,11 +70,12 @@ structure GRPOConfig where
   evalEvery : Nat := 100
   /-- Logging frequency (steps) -/
   logEvery : Nat := 10
+  logEveryPos : 0 < logEvery := by decide
   /-- Padding token ID -/
   padToken : Nat := 0
   /-- EOS token ID -/
   eosToken : Nat := 2
-  deriving Repr, Inhabited
+  deriving Repr
 
 /-! ## Learning Rate Schedule -/
 
@@ -720,7 +721,7 @@ def trainLoop (b t : Nat)
 
   let mut state := initialState
   let mut bestPass1 : Float := 0.0
-  let logEvery := max 1 config.logEvery
+  let logEvery := config.logEvery
 
   for step in [:numSteps] do
     -- Generate rollouts for this step
@@ -901,7 +902,7 @@ def trainLoopWithUpdates (b t : Nat) [TensorStruct P] [FloatingTensorStruct P]
   let mut bestPass1 : Float := 0.0
   let mut currentParams := params
   let mut currentOptState := optState
-  let logEvery := max 1 config.logEvery
+  let logEvery := config.logEvery
 
   for step in [:numSteps] do
     let mut rollouts : Array RolloutBatch := #[]
