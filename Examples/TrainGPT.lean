@@ -152,13 +152,13 @@ def main : IO Unit := do
     IO.println "Found Shakespeare data..."
 
     -- Load training data
-    let nTrain := (← data.binFileTokenCount "data/shakespeare_char/train.bin").toNat
+    let nTrain ← data.binFileTokenCount "data/shakespeare_char/train.bin"
     IO.println s!"Training set: {nTrain} tokens"
     let trainData ← Tensor.loadU16Bin nTrain "data/shakespeare_char/train.bin"
 
     -- Use validation if available
     if valFileExists then
-      let nVal := (← data.binFileTokenCount "data/shakespeare_char/val.bin").toNat
+      let nVal ← data.binFileTokenCount "data/shakespeare_char/val.bin"
       IO.println s!"Validation set: {nVal} tokens"
       let valData ← Tensor.loadU16Bin nVal "data/shakespeare_char/val.bin"
       IO.println "Training with validation..."

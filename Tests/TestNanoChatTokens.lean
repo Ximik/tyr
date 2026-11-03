@@ -44,8 +44,8 @@ def testFindBestMergeUsesPriorityMap : IO Unit := do
   let a : TokenId := 97
   let b : TokenId := 98
   let c : TokenId := 99
-  let bcId : TokenId := base.vocabSize
-  let abId : TokenId := base.vocabSize + 1
+  let bcId : TokenId := base.vocabSize.toUInt32
+  let abId : TokenId := (base.vocabSize + 1).toUInt32
   let ruleBC : MergeRule := { left := b, right := c, result := bcId }
   let ruleAB : MergeRule := { left := a, right := b, result := abId }
 
@@ -225,3 +225,24 @@ def testTaskTokenStreamRankStrideCursor : IO Unit := do
   LeanTest.assertEqual gotThird expectedThird
   LeanTest.assertEqual stream'.cursor ((1 + 2) % mix.size)
   LeanTest.assertEqual stream'.lastWrapped true
+
+@[test]
+def testTrainBPERejectsVocabBeyondTokenIds : IO Unit := do
+  let rejected ←
+    try
+      let _ ← trainBPE #[] { vocabSize := UInt32.size + 1 }
+      pure false
+    catch e => pure ((toString e).contains "UInt32")
+  LeanTest.assertTrue rejected "a target vocab beyond UInt32 token ids is rejected before training"
+
+@[test]
+def testQwen3VocabIdBeyondTokenIdsRejected : IO Unit := IO.FS.withTempDir fun dir => do
+  IO.FS.writeFile (dir / "tokenizer_config.json") "{}"
+  IO.FS.writeFile (dir / "tokenizer.json")
+    "{\"model\": {\"vocab\": {\"a\": 4294967296}, \"merges\": []}}"
+  let rejected ←
+    try
+      let _ ← tokenizer.qwen3.loadTokenizer dir.toString
+      pure false
+    catch e => pure ((toString e).contains "UInt32")
+  LeanTest.assertTrue rejected "a vocab id beyond UInt32 is rejected instead of wrapping"

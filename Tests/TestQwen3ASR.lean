@@ -155,7 +155,7 @@ private def mkAsciiStreamingTokenizer : tokenizer.qwen3.QwenTokenizer := Id.run 
   let idToSpecial : Std.HashMap tokenizer.TokenId String :=
     ({} : Std.HashMap tokenizer.TokenId String).insert asrId asrTag
   {
-    vocabSize := idToToken.size.toUInt32
+    vocabSize := idToToken.size
     idToToken
     tokenToId
     charToId

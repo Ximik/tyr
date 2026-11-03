@@ -94,7 +94,7 @@ structure SequentialLoader (n : Nat) where
   deriving Repr
 
 def SequentialLoader.fromFile (path : String) : IO (Σ n, SequentialLoader n) := do
-  let n := (← data.binFileTokenCount path).toNat
+  let n ← data.binFileTokenCount path
   let tokens ← Tensor.loadU16Bin n path
   return ⟨n, { tokens := tokens, currentPos := 0 }⟩
 

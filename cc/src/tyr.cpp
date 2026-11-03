@@ -1876,9 +1876,13 @@ lean_object* lean_torch_bin_file_token_count(b_lean_obj_arg path_obj) {
   }
 
   std::streamsize size = file.tellg();
-  uint64_t num_tokens = size / sizeof(uint16_t);
+  if (size < 0) {
+    return lean_io_result_mk_error(lean_mk_io_user_error(
+      lean_mk_string(("Failed to read the size of file: " + std::string(path)).c_str())));
+  }
+  const uint64_t num_tokens = static_cast<uint64_t>(size) / sizeof(uint16_t);
 
-  return lean_io_result_mk_ok(lean_box_uint64(num_tokens));
+  return lean_io_result_mk_ok(lean_uint64_to_nat(num_tokens));
   });
 }
 
