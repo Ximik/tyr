@@ -122,11 +122,10 @@ extern "C" {
  * This should be called with LOCAL_RANK before NCCL collectives to avoid
  * duplicate-device communicator initialization.
  */
-lean_object* lean_torch_dist_set_cuda_device(uint64_t device) {
+lean_object* lean_torch_dist_set_cuda_device(b_lean_obj_arg device_obj) {
   return tyr::checkedIoCall("lean_torch_dist_set_cuda_device", [&] {
       try {
-          if (device > static_cast<uint64_t>(std::numeric_limits<c10::DeviceIndex>::max()))
-              throw std::invalid_argument("CUDA device index exceeds the native DeviceIndex range");
+          const uint64_t device = tyr::natTo<c10::DeviceIndex>(device_obj, "CUDA device index");
   #if TYR_HAS_NCCL
           if (!torch::cuda::is_available()) {
               return lean_io_result_mk_ok(lean_box(0));
