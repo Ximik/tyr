@@ -1,4 +1,5 @@
 import Tyr.Model.KittenTTS.Model
+import Tyr.Model.KittenTTS.ConfigIO
 import Tyr.Checkpoint
 import LeanTest
 
@@ -108,3 +109,14 @@ def testKittenTTSIndexedCheckpointRoundTrip : IO Unit := IO.FS.withTempDir fun d
   LeanTest.assertEqual actual.predDurations expected.predDurations
   LeanTest.assertEqual actual.audio.1 expected.audio.1
   LeanTest.assertEqual (← actual.audio.2.toFloatArray) (← expected.audio.2.toFloatArray)
+
+@[test] def testKittenTTSAlbertConfigRejectsUnevenGroups : IO Unit := do
+  let config (layers groups : Nat) : Lean.Json :=
+    Lean.Json.mkObj [("num_hidden_layers", Lean.toJson layers), ("num_hidden_groups", Lean.toJson groups)]
+  match AlbertConfig.loadFromJson (config 4 2) with
+  | .ok cfg => LeanTest.assertEqual cfg.layersPerGroup 2
+  | .error e => throw <| IO.userError s!"Two groups over four layers should load: {e}"
+  for (layers, groups) in [(4, 0), (4, 3)] do
+    match AlbertConfig.loadFromJson (config layers groups) with
+    | .ok _ => throw <| IO.userError s!"groups={groups} over layers={layers} should be rejected"
+    | .error e => LeanTest.assertTrue (e.contains "num_hidden_groups") e

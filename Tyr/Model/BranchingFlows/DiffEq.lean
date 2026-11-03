@@ -201,6 +201,7 @@ structure OUBridgeConfig where
   diffusionVariance : Float → Float
   terminalTime : Float := 1.0
   integrationSteps : Nat := 128
+  integrationStepsPos : 0 < integrationSteps := by decide
   minVariance : Float := 1.0e-12
 
 namespace OUBridgeConfig
@@ -212,7 +213,8 @@ def constantVariance (theta variance : Float) : OUBridgeConfig :=
 def logLinearVariance
     (theta startVariance endVariance : Float)
     (terminalTime : Float := 1.0)
-    (integrationSteps : Nat := 128) :
+    (integrationSteps : Nat := 128)
+    (integrationStepsPos : 0 < integrationSteps := by decide) :
     OUBridgeConfig :=
   let startVariance := max startVariance 1.0e-12
   let endVariance := max endVariance 1.0e-12
@@ -224,7 +226,8 @@ def logLinearVariance
       let u := clampTime 0.0 1.0 (t / horizon)
       Float.exp (logStart + (logEnd - logStart) * u),
     terminalTime := terminalTime,
-    integrationSteps := integrationSteps }
+    integrationSteps := integrationSteps,
+    integrationStepsPos := integrationStepsPos }
 
 def transitionCoeff (cfg : OUBridgeConfig) (t0 t1 : Float) : Float :=
   if t1 <= t0 then 1.0 else Float.exp (-(cfg.theta) * (t1 - t0))
@@ -232,7 +235,7 @@ def transitionCoeff (cfg : OUBridgeConfig) (t0 t1 : Float) : Float :=
 def transitionVariance (cfg : OUBridgeConfig) (t0 t1 : Float) : Float := Id.run do
   if t1 <= t0 then
     return 0.0
-  let steps := Nat.max 1 cfg.integrationSteps
+  let steps := cfg.integrationSteps
   let dt := (t1 - t0) / steps.toFloat
   let mut acc := 0.0
   for i in [:steps] do

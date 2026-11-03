@@ -25,7 +25,9 @@ structure AlbertConfig where
   layerNormEps : Float := 1e-12
   hiddenDropoutProb : Float := 0.0
   attentionDropoutProb : Float := 0.0
-  deriving Repr, Inhabited
+  /-- Layers split evenly across a nonzero number of groups; checked when the config is built. -/
+  hiddenGroupsValid : 0 < numHiddenGroups ∧ numHiddenGroups ∣ numHiddenLayers := by decide
+  deriving Repr
 
 namespace AlbertConfig
 
@@ -36,7 +38,7 @@ def headDim (cfg : AlbertConfig) : Nat :=
   cfg.numAttentionHeads * cfg.headDim
 
 def layersPerGroup (cfg : AlbertConfig) : Nat :=
-  if cfg.numHiddenGroups == 0 then 0 else cfg.numHiddenLayers / cfg.numHiddenGroups
+  cfg.numHiddenLayers / cfg.numHiddenGroups
 
 end AlbertConfig
 
