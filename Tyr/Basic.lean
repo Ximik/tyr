@@ -1,4 +1,5 @@
 import Tyr.Basic.Types
+import Tyr.Basic.PosNat
 import Tyr.ConstantSupport.Types
 
 /-!

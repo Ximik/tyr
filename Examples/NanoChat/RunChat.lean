@@ -50,7 +50,7 @@ structure Args where
   useChatMarkers : Bool := false
   maxNewTokens : Nat := 128
   temperature : Float := 1.0
-  topK : Nat := 50
+  topK : TopK := none
   eosToken : Option UInt64 := none
   seed : UInt64 := 42
   modelDepth : Nat := 20
@@ -90,8 +90,7 @@ private partial def parseArgsLoop : List String → Args → Args
       let t := (parseFloatLit? v).getD acc.temperature
       parseArgsLoop rest { acc with temperature := t }
   | "--top-k" :: v :: rest, acc =>
-      let k := v.toNat?.getD acc.topK
-      parseArgsLoop rest { acc with topK := k }
+      parseArgsLoop rest { acc with topK := (PosNat.parseOrNone? v).getD acc.topK }
   | "--eos-token" :: v :: rest, acc =>
       let eos? := (v.toNat?).map (·.toUInt64)
       parseArgsLoop rest { acc with eosToken := eos? }
@@ -136,7 +135,7 @@ private def printUsage : IO Unit := do
   IO.println "  --chat-markers          Wrap prompts using tokenizer chat markers"
   IO.println "  --max-new-tokens <n>    Decode length cap (default: 128)"
   IO.println "  --temperature <f>       Sampling temperature (default: 1.0)"
-  IO.println "  --top-k <n>             Top-k filter (default: 50, 0 disables)"
+  IO.println "  --top-k <n|none>        Top-k filter (default: none)"
   IO.println "  --eos-token <id>        End token ID (default: bos, or assistant_end with --chat-markers)"
   IO.println "  --model-depth <n>       Model depth used to load checkpoint (default: $MODEL_DEPTH or 20)"
   IO.println "  --vocab-size <n>        Vocab size used to load checkpoint (default: $VOCAB_SIZE or 65536)"
@@ -228,7 +227,7 @@ private def sampleNextToken {cfg : Config}
     (params : ModdedGPTParams (device := device) cfg)
     (yarn : YarnRotary (device := device) cfg.headDim cfg.maxSeqLen)
     (temperature : Float)
-    (topK : Nat)
+    (topK : TopK)
     (context : Array UInt64)
     : IO UInt64 := do
   if context.isEmpty then
@@ -245,9 +244,7 @@ private def sampleNextToken {cfg : Config}
   let scaled :=
     if temperature == 1.0 then rowLogits
     else Tensor.mulScalar rowLogits (1.0 / temperature)
-  let filtered :=
-    if topK == 0 then scaled
-    else Tensor.topKFilter scaled topK
+  let filtered := topK.filter scaled
   let probs := Tensor.softmax filtered
   let sampled ← Tensor.multinomial probs 1
   pure (Tensor.itemInt (sampled.reshape #[])).toUInt64

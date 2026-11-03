@@ -1,6 +1,7 @@
 import Tyr.Model.Whisper
 
 open torch.whisper
+open torch (TopK PosNat)
 
 namespace Examples.Whisper
 
@@ -15,7 +16,7 @@ structure Args where
   temperature : Float := 0.0
   temperatureInc : Float := 0.2
   noFallback : Bool := true
-  topK : Option Nat := none
+  topK : TopK := none
   topP : Float := 1.0
   logprobThreshold : Float := -1.0
   noSpeechThreshold : Float := 0.6
@@ -56,7 +57,6 @@ private def requirePositive? (flag : String) (o : Option Nat) : IO (PLift (∀ n
 private def toDecodeOptions (args : Args) : IO WhisperDecodeOptions := do
   let ⟨hBeam⟩ ← requirePositive "--beam-size" args.beamSize
   let ⟨hBestOf⟩ ← requirePositive "--best-of" args.bestOf
-  let ⟨hTopK⟩ ← requirePositive? "--top-k" args.topK
   let ⟨hMaxNew⟩ ← requirePositive? "--max-new-tokens" args.maxNewTokens
   pure {
     beamSize := args.beamSize
@@ -66,7 +66,6 @@ private def toDecodeOptions (args : Args) : IO WhisperDecodeOptions := do
     temperature := args.temperature
     temperatureInc := args.temperatureInc
     topK := args.topK
-    topKPos := hTopK
     topP := args.topP
     logprobThreshold := args.logprobThreshold
     noSpeechThreshold := args.noSpeechThreshold
@@ -105,7 +104,9 @@ private partial def parseArgsLoop (xs : List String) (acc : Args) : IO Args := d
   | "--fallback" :: rest =>
       parseArgsLoop rest { acc with noFallback := false }
   | "--top-k" :: v :: rest =>
-      parseArgsLoop rest { acc with topK := some (← parseNatArg "--top-k" v) }
+      match PosNat.parseOrNone? v with
+      | some topK => parseArgsLoop rest { acc with topK }
+      | none => throw <| IO.userError s!"Invalid --top-k: {v} (expected a positive count or none)"
   | "--top-p" :: v :: rest =>
       parseArgsLoop rest { acc with topP := (← parseFloatArg "--top-p" v) }
   | "--logprob-thold" :: v :: rest =>

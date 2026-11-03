@@ -97,13 +97,13 @@ example (model : WhisperForConditionalGeneration (device := .CPU) cfg)
   LeanTest.assertTrue rejected "an empty vocabulary is rejected where the config is loaded"
 
 example : True := by
-  have : WhisperDecodeOptions := { beamSize := 1, bestOf := 1, topK := some 1, maxNewTokens := some 1 }
+  have : WhisperDecodeOptions := { beamSize := 1, bestOf := 1, topK := 1, maxNewTokens := some 1 }
   fail_if_success
     have : WhisperDecodeOptions := { beamSize := 0 }
   fail_if_success
     have : WhisperDecodeOptions := { bestOf := 0 }
   fail_if_success
-    have : WhisperDecodeOptions := { topK := some 0 }
+    have : WhisperDecodeOptions := { topK := 0 }
   fail_if_success
     have : WhisperDecodeOptions := { maxNewTokens := some 0 }
   trivial
