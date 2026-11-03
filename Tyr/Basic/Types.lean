@@ -206,7 +206,7 @@ instance : ToString DType where
 
 /-! A placement description does not grant access to a runtime device. -/
 inductive DeviceKind where
-| CUDA : UInt64 → DeviceKind
+| CUDA : Nat → DeviceKind
 | CPU
 | MPS
 deriving Repr, Inhabited, BEq, DecidableEq

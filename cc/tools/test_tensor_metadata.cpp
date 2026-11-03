@@ -249,8 +249,8 @@ void testCombinedConversion(const std::filesystem::path& directory) {
   }
   for (const uint64_t index : {uint64_t{128}, uint64_t{255}, uint64_t{256},
                                std::numeric_limits<uint64_t>::max()}) {
-    LeanObject device(lean_alloc_ctor(0, 0, 8), lean_dec);
-    lean_ctor_set_uint64(device.get(), 0, index);
+    LeanObject device(lean_alloc_ctor(0, 1, 0), lean_dec);
+    lean_ctor_set(device.get(), 0, lean_uint64_to_nat(index));
     LeanObject result(lean_torch_convert_tensor(lean_alloc_array(0, 0), input.get(),
                                               device.get(), lean_box(0)), lean_dec);
     require(lean_io_result_is_error(result.get()),
