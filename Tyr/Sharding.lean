@@ -363,8 +363,7 @@ def isShardingActive : IO Bool := dist.isInitialized
 def getShardingInfo : IO (Nat × Nat) := do
   let isActive ← isShardingActive
   if isActive then
-    let (rank, worldSize) ← dist.getRankAndWorldSize
-    pure (rank.toNat, worldSize.toNat)
+    dist.getRankAndWorldSize
   else
     pure (0, 1)
 

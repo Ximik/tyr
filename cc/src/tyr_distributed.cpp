@@ -226,7 +226,7 @@ lean_object* lean_torch_dist_get_rank() {
           return lean_io_result_mk_error(lean_mk_io_user_error(
               lean_mk_string("Process group not initialized")));
       }
-      return lean_io_result_mk_ok(lean_box_uint64(static_cast<uint64_t>(g_rank)));
+      return lean_io_result_mk_ok(lean_uint64_to_nat(static_cast<uint64_t>(g_rank)));
   });
 }
 
@@ -240,7 +240,7 @@ lean_object* lean_torch_dist_get_world_size() {
           return lean_io_result_mk_error(lean_mk_io_user_error(
               lean_mk_string("Process group not initialized")));
       }
-      return lean_io_result_mk_ok(lean_box_uint64(static_cast<uint64_t>(g_world_size)));
+      return lean_io_result_mk_ok(lean_uint64_to_nat(static_cast<uint64_t>(g_world_size)));
   });
 }
 

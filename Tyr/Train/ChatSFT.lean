@@ -416,8 +416,7 @@ def trainLoop [TensorStruct P] [FloatingTensorStruct P]
   if cfg.device != device then
     throw (IO.userError "Training device differs from the model forward device")
   let isDistributed ← dist.isInitialized
-  let worldSizeU64 ← if isDistributed then dist.getWorldSize else pure 1
-  let worldSize := worldSizeU64.toNat
+  let worldSize ← if isDistributed then dist.getWorldSize else pure 1
 
   -- Compute number of iterations
   let numIterations : Nat :=

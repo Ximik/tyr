@@ -418,7 +418,6 @@ def DistributedDataGenerator.init (config : Config) (batchSize seqLen : Nat)
     : IO DistributedDataGenerator := do
   let isDistributed ← dist.isInitialized
   let (rank, worldSize) ← if isDistributed then dist.getRankAndWorldSize else pure (0, 1)
-  let (rank, worldSize) := (rank.toNat, worldSize.toNat)
   initForRank config batchSize seqLen rank worldSize
 
 def DistributedDataGenerator.cursor (gen : DistributedDataGenerator) : StreamCursor := {

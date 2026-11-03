@@ -265,7 +265,7 @@ def checkpointPath (baseDir : String) : String :=
   s!"{baseDir}/.pipeline_checkpoint.json"
 
 /-- Current distributed rank, or 0 when not initialized. -/
-def currentDistributedRank : IO UInt64 := do
+def currentDistributedRank : IO Nat := do
   let isDistributed ← dist.isInitialized
   if isDistributed then
     let (rank, _) ← dist.getRankAndWorldSize
@@ -274,7 +274,7 @@ def currentDistributedRank : IO UInt64 := do
     pure 0
 
 /-- Rank-scoped artifact filename under a checkpoint or run directory. -/
-def rankArtifactFile (basePath stem ext : String) (rank : UInt64) : System.FilePath :=
+def rankArtifactFile (basePath stem ext : String) (rank : Nat) : System.FilePath :=
   ⟨s!"{basePath}/{stem}_rank{rank}.{ext}"⟩
 
 /-- Write a JSON payload to disk. -/
@@ -295,15 +295,15 @@ def readJsonPayload [Lean.FromJson α] (path : System.FilePath) : IO α := do
       pure payload
 
 /-- Get `LOCAL_RANK` from the environment, defaulting to 0. -/
-def getLocalRankFromEnv : IO UInt64 := do
+def getLocalRankFromEnv : IO Nat := do
   let envVar ← IO.getEnv "LOCAL_RANK"
   match envVar with
-  | some r => pure r.toNat!.toUInt64
+  | some r => pure r.toNat!
   | none => pure 0
 
 /-- Resolve the training device from `TYR_DEVICE` and distributed rank state. -/
-def resolveTrainingDevice (_rank localRank : UInt64) (isDistributed : Bool) : IO Device := do
-  let cudaOrdinal := if isDistributed then localRank.toNat else 0
+def resolveTrainingDevice (_rank localRank : Nat) (isDistributed : Bool) : IO Device := do
+  let cudaOrdinal := if isDistributed then localRank else 0
   let requested? := (← IO.getEnv "TYR_DEVICE").map String.toLower
   match requested? with
   | some "cpu" => pure Device.CPU
@@ -395,9 +395,9 @@ structure PipelineState where
   /-- Report accumulator -/
   report : Report
   /-- Distributed rank -/
-  rank : UInt64 := 0
+  rank : Nat := 0
   /-- World size -/
-  worldSize : UInt64 := 1
+  worldSize : Nat := 1
   /-- Logging handlers -/
   logHandlers : LogHandlers := {}
   /-- Background tasks -/
