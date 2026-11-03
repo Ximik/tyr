@@ -32,9 +32,9 @@ private def legacyRoot (budget : Nat) (tree : Tree UInt64 GumbelMuZeroExtraData)
   let q := qtransformCompletedByMixValue tree node
   let table := getTableOfConsideredVisits 16 budget
   let considered := countConsideredActions 16 priors.size tree.rootInvalidActions
-  let iteration := (visits.foldl (· + ·) 0).toNat
+  let iteration := visits.foldl (· + ·) 0
   let round := (table.getD considered #[]).getD iteration 0
-  maskedArgmax (scoreConsidered round.toUInt64 tree.extraData.rootGumbel priors q visits)
+  maskedArgmax (scoreConsidered round tree.extraData.rootGumbel priors q visits)
     (some tree.rootInvalidActions)
 
 private def model : RecurrentFn Unit UInt64 := fun _ _ action state =>

@@ -49,7 +49,7 @@ private def varyingBatched : BatchedRecurrentFn Unit Nat := fun _ key _ states =
     let tree := searchWithTree () 0 initial varying first firstInterior 3 (some 8)
     LeanTest.assertEqual tree.nodeVisits #[4] "Every simulation increments root visits"
     LeanTest.assertEqual tree.childrenVisits #[#[3]] "Every transient edge evaluation counts"
-    LeanTest.assertEqual tree.childrenIndex #[#[UNVISITED]] "Capacity exhaustion does not allocate a child"
+    LeanTest.assertEqual tree.childrenIndex #[#[none]] "Capacity exhaustion does not allocate a child"
     assertApprox tree.summary.value 5.5 "Root includes initial value and returns 6,8,5"
     assertApprox (tree.qvalues 0)[0]! (19.0 / 3.0) "Transient Q averages complete returns"
     assertAllocationInvariant tree
@@ -76,7 +76,7 @@ private def varyingBatched : BatchedRecurrentFn Unit Nat := fun _ key _ states =
   let tree := searchWithTree () 0 initial recurrent select firstInterior 4 (some 1)
   LeanTest.assertEqual tree.nodeVisits #[5, 1] "Full capacity must not discard requested simulations"
   LeanTest.assertEqual tree.childrenVisits[0]! #[1, 3] "Both root actions retain their evaluations"
-  LeanTest.assertEqual tree.childrenIndex[0]! #[1, UNVISITED] "Hard capacity is preserved"
+  LeanTest.assertEqual tree.childrenIndex[0]! #[some 1, none] "Hard capacity is preserved"
   assertApprox (tree.qvalues 0)[0]! 6.0 "Allocated action Q"
   assertApprox (tree.qvalues 0)[1]! 105.0 "Unallocated action includes its continuation value"
   assertApprox tree.summary.value 64.2 "All four returns enter the root mean"
@@ -100,7 +100,7 @@ private def initialFullTree : Tree Nat Unit :=
 private def assertNestedBackup (tree : Tree Nat Unit) : IO Unit := do
   LeanTest.assertEqual tree.nodeVisits #[5, 4] "Every ancestor receives each transient rollout"
   LeanTest.assertEqual tree.childrenVisits #[#[4], #[3]] "Ancestor and transient edge counts"
-  LeanTest.assertEqual tree.childrenIndex #[#[1], #[UNVISITED]] "No allocation beyond capacity"
+  LeanTest.assertEqual tree.childrenIndex #[#[some 1], #[none]] "No allocation beyond capacity"
   assertApprox tree.nodeValues[1]! 7.25 "Child mean includes its initial 10 and returns 6,8,5"
   -- Root rollout returns are 7 initially, followed by 5,6,4.5. Passing the
   -- child's running mean upstream instead of each raw return gives a different answer.
@@ -144,7 +144,7 @@ private def assertNestedBackup (tree : Tree Nat Unit) : IO Unit := do
   LeanTest.assertEqual rerooted.embeddings[0]! 1 "Selected child becomes the new root"
   assertApprox (rerooted.qvalues 0)[0]! (19.0 / 3.0) "Reroot preserves transient return statistics"
   let tree := searchWithTree () 0 rerooted nestedRecurrent first firstInterior 1 (some 3)
-  LeanTest.assertEqual tree.childrenIndex[0]! #[1] "Transient edge now receives a real node"
+  LeanTest.assertEqual tree.childrenIndex[0]! #[some 1] "Transient edge now receives a real node"
   LeanTest.assertEqual tree.nodeVisits #[5, 1] "New child starts with one model evaluation"
   LeanTest.assertEqual tree.childrenVisits[0]! #[4] "Historical edge visits remain counted"
   assertApprox tree.rawValues[1]! 10.0 "New child raw continuation value"
@@ -205,7 +205,7 @@ private def assertSameTree (actual expected : Tree Nat Unit) : IO Unit := do
   assertAllocationInvariant tree
   let subtree := getSubtree tree 0
   LeanTest.assertEqual subtree.numAllocated 3 "Subtree allocation equals retained node count"
-  LeanTest.assertEqual subtree.parents[0]! NO_PARENT "Extracted root has no parent"
+  LeanTest.assertEqual subtree.parents[0]! none "Extracted root has no parent"
   assertAllocationInvariant subtree
   let reset := resetSearchTree tree
   LeanTest.assertEqual reset.numAllocated 0 "Reset clears the allocation counter"

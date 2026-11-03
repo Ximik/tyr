@@ -136,16 +136,21 @@ private def referenceQTransform (config : Lean.Json) : Except String (QTransform
       valueScale maxvisitInit rescaleValues useMixedValue epsilon)
   | _ => throw s!"Unsupported reference qtransform '{name}'"
 
+/-- Upstream mctx stores a missing parent or child as -1. -/
+private def toUpstreamIndex : Option Nat → Int
+  | none => -1
+  | some n => Int.ofNat n
+
 private def compareReference (expected : ReferenceExpected)
     (output : PolicyOutput (Tree Nat E)) (qtransform : QTransform Nat E) : Except String Unit := do
   let tree := output.searchTree
   checkEqual "action" output.action expected.action
   checkFloats "action_weights" output.actionWeights expected.action_weights
   checkEqual "node_visits" tree.nodeVisits expected.node_visits
-  checkEqual "parents" tree.parents expected.parents
-  checkEqual "action_from_parent" tree.actionFromParent expected.action_from_parent
-  checkEqual "children_index" tree.childrenIndex expected.children_index
-  checkEqual "children_visits" (tree.childrenVisits.map (·.map UInt64.toNat)) expected.children_visits
+  checkEqual "parents" (tree.parents.map toUpstreamIndex) expected.parents
+  checkEqual "action_from_parent" (tree.actionFromParent.map toUpstreamIndex) expected.action_from_parent
+  checkEqual "children_index" (tree.childrenIndex.map (·.map toUpstreamIndex)) expected.children_index
+  checkEqual "children_visits" tree.childrenVisits expected.children_visits
   checkEqual "embeddings" tree.embeddings expected.embeddings
   checkFloats "raw_values" tree.rawValues expected.raw_values
   checkFloats "node_values" tree.nodeValues expected.node_values
@@ -287,15 +292,14 @@ def testMctxGetSubtreeCarriesChildAsRoot : IO Unit := do
     (dirichletFraction := 0.0)
 
   let chosen := out.action
-  let oldChild := (out.searchTree.childrenIndex.getD ROOT_INDEX #[]).getD chosen UNVISITED
-  LeanTest.assertTrue (oldChild != UNVISITED) "Chosen action should be expanded"
-  let childIdx := if oldChild < 0 then 0 else Int.toNat oldChild
+  let some childIdx := (out.searchTree.childrenIndex.getD ROOT_INDEX #[]).getD chosen none
+    | LeanTest.fail "Chosen action should be expanded"
 
   let subtree := getSubtree out.searchTree chosen
 
-  LeanTest.assertEqual (subtree.parents.getD ROOT_INDEX 123) NO_PARENT
+  LeanTest.assertEqual (subtree.parents.getD ROOT_INDEX (some 123)) none
     "Subtree root should have no parent"
-  LeanTest.assertEqual (subtree.actionFromParent.getD ROOT_INDEX 123) NO_PARENT
+  LeanTest.assertEqual (subtree.actionFromParent.getD ROOT_INDEX (some 123)) none
     "Subtree root should not have incoming action"
   LeanTest.assertTrue ((List.range subtree.rootInvalidActions.size).all fun i =>
       subtree.rootInvalidActions.getD i true = false)
@@ -334,8 +338,8 @@ def testMctxGetSubtreeOnUnvisitedActionResets : IO Unit := do
 
   let mut unvisited : Option Nat := none
   for a in [:4] do
-    let idx := (out.searchTree.childrenIndex.getD ROOT_INDEX #[]).getD a UNVISITED
-    if idx = UNVISITED && unvisited.isNone then
+    let idx := (out.searchTree.childrenIndex.getD ROOT_INDEX #[]).getD a (some 0)
+    if idx.isNone && unvisited.isNone then
       unvisited := some a
   LeanTest.assertTrue unvisited.isSome "Expected at least one unvisited root action after one simulation"
   let action := unvisited.getD 0

@@ -60,7 +60,7 @@ structure GumbelMuZeroExtraData where
   consideredVisitSchedule : Option ConsideredVisitSchedule := none
   deriving Repr, Inhabited
 
-private def prepareArgmaxInput (probs : Array Float) (visitCounts : Array UInt64) : Array Float :=
+private def prepareArgmaxInput (probs : Array Float) (visitCounts : Array Nat) : Array Float :=
   let total := (visitCounts.foldl (init := 0) (· + ·)).toFloat
   (List.range probs.size).toArray.map fun i =>
     probs.getD i 0.0 - (visitCounts.getD i 0).toFloat / (1.0 + total)
@@ -78,10 +78,10 @@ def gumbelMuZeroRootActionSelection
   let completedQvalues := qtransform tree nodeIndex
   let numConsidered := countConsideredActions
     maxNumConsideredActions priorLogits.size tree.rootInvalidActions
-  let simulationIndex := (visitCounts.foldl (init := 0) (· + ·)).toNat
+  let simulationIndex := visitCounts.foldl (init := 0) (· + ·)
   let consideredVisit := consideredVisitAt tree.extraData.consideredVisitSchedule
     numConsidered numSimulations simulationIndex
-  let toArgmax := scoreConsidered (UInt64.ofNat consideredVisit) tree.extraData.rootGumbel priorLogits completedQvalues visitCounts
+  let toArgmax := scoreConsidered consideredVisit tree.extraData.rootGumbel priorLogits completedQvalues visitCounts
   maskedArgmax toArgmax (some tree.rootInvalidActions)
 
 /-- Deterministic interior action selection for Gumbel MuZero. -/

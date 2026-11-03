@@ -84,9 +84,9 @@ def consideredVisitAt (cached : Option ConsideredVisitSchedule)
 
 /-- Score used by Gumbel MuZero root action selection. -/
 def scoreConsidered
-    (consideredVisit : UInt64)
+    (consideredVisit : Nat)
     (gumbel logits normalizedQvalues : Array Float)
-    (visitCounts : Array UInt64)
+    (visitCounts : Array Nat)
     : Array Float :=
   let lowLogit : Float := -1e9
   let logits' :=
