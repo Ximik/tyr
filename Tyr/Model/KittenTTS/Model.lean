@@ -661,12 +661,9 @@ def forward {seq : Nat}
     (x : Tensor { shape := #[1, seq, cfg.embeddingSize], dtype := .Float32, device := device })
     : Tensor { shape := #[1, seq, cfg.hiddenSize], dtype := .Float32, device := device } := Id.run do
   let mapped : Tensor { shape := #[1, seq, cfg.hiddenSize], dtype := .Float32, device := device } := m.embeddingHiddenMappingIn.forward3d x
-  let layersPerGroup :=
-    if cfg.numHiddenGroups == 0 then 1 else max 1 (cfg.numHiddenLayers / cfg.numHiddenGroups)
   let mut h := mapped
   for i in [:cfg.numHiddenLayers] do
-    let groupIdx := if cfg.numHiddenGroups == 0 then 0 else i / layersPerGroup
-    let group := safeIndex m.groups groupIdx
+    let group := safeIndex m.groups (i / cfg.layersPerGroup)
     h := group.forward h
   h
 

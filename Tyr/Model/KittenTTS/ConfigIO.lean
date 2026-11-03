@@ -99,24 +99,32 @@ private def stringToSingleChar? (s : String) : Option Char :=
 
 namespace AlbertConfig
 
-def loadFromJson (root : Json) (defaults : AlbertConfig := {}) : AlbertConfig := {
-  numHiddenLayers := getNatFieldD root "num_hidden_layers" defaults.numHiddenLayers
-  numAttentionHeads := getNatFieldD root "num_attention_heads" defaults.numAttentionHeads
-  hiddenSize := getNatFieldD root "hidden_size" defaults.hiddenSize
-  intermediateSize := getNatFieldD root "intermediate_size" defaults.intermediateSize
-  maxPositionEmbeddings := getNatFieldD root "max_position_embeddings" defaults.maxPositionEmbeddings
-  embeddingSize := getNatFieldD root "embedding_size" defaults.embeddingSize
-  innerGroupNum := getNatFieldD root "inner_group_num" defaults.innerGroupNum
-  numHiddenGroups := getNatFieldD root "num_hidden_groups" defaults.numHiddenGroups
-  typeVocabSize := getNatFieldD root "type_vocab_size" defaults.typeVocabSize
-  layerNormEps := getFloatFieldD root "layer_norm_eps" defaults.layerNormEps
-  hiddenDropoutProb :=
-    getFloatFieldD root "hidden_dropout_prob" <|
-      getFloatFieldD root "dropout" defaults.hiddenDropoutProb
-  attentionDropoutProb :=
-    getFloatFieldD root "attention_probs_dropout_prob" <|
-      getFloatFieldD root "dropout" defaults.attentionDropoutProb
-}
+def loadFromJson (root : Json) (defaults : AlbertConfig := {}) : Except String AlbertConfig := do
+  let numHiddenLayers := getNatFieldD root "num_hidden_layers" defaults.numHiddenLayers
+  let numHiddenGroups := getNatFieldD root "num_hidden_groups" defaults.numHiddenGroups
+  let ⟨hGroups⟩ ← if h : 0 < numHiddenGroups ∧ numHiddenGroups ∣ numHiddenLayers then
+      pure (PLift.up h)
+    else
+      throw s!"Invalid KittenTTS plbert config: num_hidden_groups={numHiddenGroups} must be positive and divide num_hidden_layers={numHiddenLayers}"
+  pure {
+    numHiddenLayers
+    numAttentionHeads := getNatFieldD root "num_attention_heads" defaults.numAttentionHeads
+    hiddenSize := getNatFieldD root "hidden_size" defaults.hiddenSize
+    intermediateSize := getNatFieldD root "intermediate_size" defaults.intermediateSize
+    maxPositionEmbeddings := getNatFieldD root "max_position_embeddings" defaults.maxPositionEmbeddings
+    embeddingSize := getNatFieldD root "embedding_size" defaults.embeddingSize
+    innerGroupNum := getNatFieldD root "inner_group_num" defaults.innerGroupNum
+    numHiddenGroups
+    typeVocabSize := getNatFieldD root "type_vocab_size" defaults.typeVocabSize
+    layerNormEps := getFloatFieldD root "layer_norm_eps" defaults.layerNormEps
+    hiddenDropoutProb :=
+      getFloatFieldD root "hidden_dropout_prob" <|
+        getFloatFieldD root "dropout" defaults.hiddenDropoutProb
+    attentionDropoutProb :=
+      getFloatFieldD root "attention_probs_dropout_prob" <|
+        getFloatFieldD root "dropout" defaults.attentionDropoutProb
+    hiddenGroupsValid := hGroups
+  }
 
 end AlbertConfig
 
@@ -156,10 +164,10 @@ namespace KittenTTSConfig
 
 def loadFromFile (path : String) (defaults : KittenTTSConfig := {}) : IO KittenTTSConfig := do
   let root ← parseJsonFile path
-  let plbert :=
+  let plbert ←
     match getObjVal? root "plbert" with
-    | some j => AlbertConfig.loadFromJson j defaults.plbert
-    | none => defaults.plbert
+    | some j => IO.ofExcept (AlbertConfig.loadFromJson j defaults.plbert)
+    | none => pure defaults.plbert
   let generator ←
     match getObjVal? root "istftnet" with
     | some j => IO.ofExcept (GeneratorConfig.loadFromJson j defaults.generator)
