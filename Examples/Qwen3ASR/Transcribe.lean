@@ -19,17 +19,12 @@ structure Args where
   streamChunkSec : Float := 2.0
   streamHopSec : Float := 0.5
   streamDecodeMode : StreamingDecodeMode := .rollingWindow
-  maxInferenceBatchSize : Int := -1
+  maxInferenceBatchSize : Option Nat := none
   maxNewTokens : Nat := 1024
   deriving Inhabited
 
 private def parseNatArg (name : String) (v : String) : IO Nat := do
   match v.toNat? with
-  | some n => pure n
-  | none => throw <| IO.userError s!"Invalid {name}: {v}"
-
-private def parseIntArg (name : String) (v : String) : IO Int := do
-  match v.toInt? with
   | some n => pure n
   | none => throw <| IO.userError s!"Invalid {name}: {v}"
 
@@ -87,7 +82,7 @@ private partial def parseArgsLoop (xs : List String) (acc : Args) : IO Args := d
   | "--stream-decode-mode" :: v :: rest =>
       parseArgsLoop rest { acc with streamDecodeMode := (← parseStreamDecodeModeArg "--stream-decode-mode" v) }
   | "--max-inference-batch-size" :: v :: rest =>
-      parseArgsLoop rest { acc with maxInferenceBatchSize := (← parseIntArg "--max-inference-batch-size" v) }
+      parseArgsLoop rest { acc with maxInferenceBatchSize := some (← parseNatArg "--max-inference-batch-size" v) }
   | "--max-new-tokens" :: v :: rest =>
       parseArgsLoop rest { acc with maxNewTokens := (← parseNatArg "--max-new-tokens" v) }
   | "--help" :: _ =>
@@ -104,7 +99,7 @@ private partial def parseArgsLoop (xs : List String) (acc : Args) : IO Args := d
       IO.println "  --stream-chunk-sec <f>   Streaming decode window seconds (default: 2.0)"
       IO.println "  --stream-hop-sec <f>     Streaming hop size seconds (default: 0.5)"
       IO.println "  --stream-decode-mode <m> Streaming decode mode: rolling|full (default: rolling)"
-      IO.println "  --max-inference-batch-size <n>  Batch chunking control (-1 = unbounded)"
+      IO.println "  --max-inference-batch-size <n>  Inputs decoded per batch (default: unbounded)"
       IO.println "  --max-new-tokens <n>     Greedy decode max new tokens"
       IO.println "Example: lake exe Qwen3ASRTranscribe --source Qwen/Qwen3-ASR-1.7B --wav-path MLKDream.wav"
       throw <| IO.userError ""
@@ -210,6 +205,8 @@ private def transcribeWavStreamed
 
 def runMain (argv : List String) : IO UInt32 := do
   let args ← parseArgs argv
+  let ⟨hBatch⟩ ← if h : ∀ k ∈ args.maxInferenceBatchSize, 0 < k then pure (PLift.up h) else
+    throw <| IO.userError "--max-inference-batch-size must be positive"
   let modelDir ← hub.resolvePretrainedDir args.source {
     revision := args.revision
     cacheDir := args.cacheDir
@@ -258,6 +255,7 @@ def runMain (argv : List String) : IO UInt32 := do
         (contexts := #[""])
         (languages := #[args.language])
         (maxInferenceBatchSize := args.maxInferenceBatchSize)
+        (hBatch := hBatch)
         (returnTimeStamps := args.returnTimeStamps)
         (maxNewTokens := args.maxNewTokens)
       pure (outs.getD 0 default)

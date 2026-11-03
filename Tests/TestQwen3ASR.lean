@@ -394,7 +394,7 @@ def testQwen3ASRTranscribeAudioInputAndBatchStepParity : IO Unit := do
     audios
     (contexts := #["ctx"])
     (languages := #[some "English"])
-    (maxInferenceBatchSize := -1)
+    (maxInferenceBatchSize := none)
     (returnTimeStamps := false)
     (maxNewTokens := 2)
     (eosTokenIds := #[])
@@ -405,12 +405,18 @@ def testQwen3ASRTranscribeAudioInputAndBatchStepParity : IO Unit := do
     audios
     (contexts := #["ctx"])
     (languages := #[some "English"])
-    (maxInferenceBatchSize := 1)
+    (maxInferenceBatchSize := some 1)
     (returnTimeStamps := false)
     (maxNewTokens := 2)
     (eosTokenIds := #[])
   LeanTest.assertEqual (outsUnbounded.map (fun r => r.text)) (outsChunked.map (fun r => r.text))
     "maxInferenceBatchSize chunking should preserve transcription outputs"
+
+example (aligner : Qwen3ForcedAligner) (audios : Array ASRAudioInput) : True := by
+  have := aligner.alignBatch audios #[] #[] (maxInferenceBatchSize := some 1)
+  fail_if_success
+    have := aligner.alignBatch audios #[] #[] (maxInferenceBatchSize := some 0)
+  trivial
 
 @[test]
 def testQwen3ASRMergeLanguages : IO Unit := do
