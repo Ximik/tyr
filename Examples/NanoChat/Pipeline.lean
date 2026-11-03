@@ -76,15 +76,15 @@ private def consoleGRPOCallbacks : torch.RL.GRPO.Callbacks := {
 
 /-- Model-related environment state. -/
 structure ModelEnvState where
-  depth : UInt64 := 20
-  aspectRatio : UInt64 := 64
-  targetHeadDim : UInt64 := 128
+  depth : Nat := 20
+  aspectRatio : Nat := 64
+  targetHeadDim : Nat := 128
   maxSeqLen : Nat := 2048
   ropeBase : Float := 500000.0
-  paramDataRatio : UInt64 := 20
-  vocabSize : UInt64 := 65536
-  tokenizerMaxChars : UInt64 := 2000000000
-  tokenizerDocCap : UInt64 := 10000
+  paramDataRatio : Nat := 20
+  vocabSize : Nat := 65536
+  tokenizerMaxChars : Nat := 2000000000
+  tokenizerDocCap : Nat := 10000
   deriving Repr, Inhabited
 
 /-- Pipeline-wide environment state. -/
@@ -92,8 +92,8 @@ structure PipelineEnvState where
   baseDir : String := "~/.cache/nanochat"
   numGpus : Nat := 1
   dataPath : String := "base_data"
-  numDataShards : UInt64 := 240
-  initialDataShards : UInt64 := 8
+  numDataShards : Nat := 240
+  initialDataShards : Nat := 8
   quickMode : Bool := false
   enableRL : Bool := false
   wandbRun : String := "dummy"
@@ -103,13 +103,13 @@ structure PipelineEnvState where
 /-- Pretraining environment state. -/
 structure PretrainEnvState where
   dataPathOverride : Option String := none
-  numIterations : UInt64 := 21400
-  extensionIterations : UInt64 := 0
-  valInterval : UInt64 := 250
-  logInterval : UInt64 := 10
+  numIterations : Nat := 21400
+  extensionIterations : Nat := 0
+  valInterval : StepInterval := 250
+  logInterval : StepInterval := 10
   deviceBatchSize : Nat := 32
   totalBatchSizeTokens : Nat := 524288
-  checkpointInterval : UInt64 := 21400
+  checkpointInterval : StepInterval := 21400
   textColumn : String := "text"
   tokenizerBatchSize : Nat := 128
   evalTokens : Nat := 10485760
@@ -117,38 +117,38 @@ structure PretrainEnvState where
 
 /-- Midtraining environment state. -/
 structure MidtrainEnvState where
-  numIterations : UInt64 := 811
-  extensionIterations : UInt64 := 0
-  valInterval : UInt64 := 150
-  logInterval : UInt64 := 10
+  numIterations : Nat := 811
+  extensionIterations : Nat := 0
+  valInterval : StepInterval := 150
+  logInterval : StepInterval := 10
   deviceBatchSize : Nat := 32
   totalBatchSizeTokens : Nat := 524288
-  checkpointInterval : UInt64 := 811
+  checkpointInterval : StepInterval := 811
   evalTokens : Nat := 10485760
   deriving Repr, Inhabited
 
 /-- SFT environment state. -/
 structure SFTEnvState where
-  numEpochs : UInt64 := 1
-  deviceBatchSize : Nat := 4
-  targetExamplesPerStep : UInt64 := 32
-  maxExamples : Option UInt64 := none
-  deriving Repr, Inhabited
+  numEpochs : PosNat := 1
+  deviceBatchSize : PosNat := 4
+  targetExamplesPerStep : PosNat := 32
+  maxExamples : Option Nat := none
+  deriving Repr
 
 /-- RL/GRPO environment state. -/
 structure RLEnvState where
-  numSamples : UInt64 := 16
-  maxNewTokens : Nat := 256
-  examplesPerStepGlobal : UInt64 := 16
-  evalEvery : UInt64 := 60
-  logEvery : UInt64 := 10
-  epochs : UInt64 := 1
-  maxPrompts : Option UInt64 := none
-  deriving Repr, Inhabited
+  numSamples : PosNat := 16
+  maxNewTokens : PosNat := 256
+  examplesPerStepGlobal : PosNat := 16
+  evalEvery : PosNat := 60
+  logEvery : PosNat := 10
+  epochs : PosNat := 1
+  maxPrompts : Option Nat := none
+  deriving Repr
 
 /-- Evaluation/task-data environment state. -/
 structure EvalEnvState where
-  coreMaxExamples : Option UInt64 := none
+  coreMaxExamples : Option Nat := none
   identityConversationsPath : Option String := none
   deriving Repr, Inhabited
 
@@ -161,7 +161,7 @@ structure NanoChatEnvState where
   sft : SFTEnvState := {}
   rl : RLEnvState := {}
   eval : EvalEnvState := {}
-  deriving Repr, Inhabited
+  deriving Repr
 
 /-- NanoChat-specific pipeline configuration -/
 structure NanoChatConfig extends PipelineConfig where
@@ -207,7 +207,7 @@ structure NanoChatConfig extends PipelineConfig where
   enableRL : Bool := false
   /-- Fully resolved model/training/pipeline environment state for this run. -/
   envState : NanoChatEnvState := {}
-  deriving Repr, Inhabited
+  deriving Repr
 
 /-- Pick a head count that divides `modelDim`, closest to `targetHeadDim`. -/
 private def findNumHeads (modelDim targetHeadDim : Nat) : Nat := Id.run do
@@ -270,12 +270,19 @@ private def resolveDataDirWithOverride (cfg : NanoChatConfig) (overridePath? : O
 private def envNat (name : String) : IO (Option Nat) := do
   pure <| (← IO.getEnv name).bind String.toNat?
 
-private def envUInt64 (name : String) : IO (Option UInt64) := do
+private def envPos (name : String) (default : PosNat) : IO PosNat := do
   match ← envNat name with
-  | none => pure none
-  | some n =>
-    if n < UInt64.size then pure (some n.toUInt64)
-    else throw <| IO.userError s!"{name}={n} exceeds {UInt64.size - 1}"
+  | none => pure default
+  | some n => if h : 0 < n then pure ⟨n, h⟩ else throw <| IO.userError s!"{name} must be positive"
+
+/-- A positive count, or `none` to never fire. -/
+private def envInterval (name : String) (default : StepInterval) : IO StepInterval := do
+  match ← IO.getEnv name with
+  | none => pure default
+  | some raw =>
+    match PosNat.parseOrNone? raw with
+    | some interval => pure interval
+    | none => throw <| IO.userError s!"{name}={raw} must be a positive count or none"
 
 private def parseBoolString? (raw : String) : Option Bool :=
   let s := raw.trimAscii.toString.toLower
@@ -293,58 +300,60 @@ private def envBool (name : String) : IO (Option Bool) := do
 private def loadNanoChatEnvState : IO NanoChatEnvState := do
   let baseDir := (← IO.getEnv "NANOCHAT_DIR").getD "~/.cache/nanochat"
   let numGpus := (← envNat "WORLD_SIZE").getD 1
-  let modelDepth := (← envUInt64 "MODEL_DEPTH").getD 20
-  let modelAspectRatio := (← envUInt64 "MODEL_ASPECT_RATIO").getD 64
-  let targetHeadDim := (← envUInt64 "MODEL_HEAD_DIM").getD 128
+  let modelDepth := (← envNat "MODEL_DEPTH").getD 20
+  let modelAspectRatio := (← envNat "MODEL_ASPECT_RATIO").getD 64
+  let targetHeadDim := (← envNat "MODEL_HEAD_DIM").getD 128
   let maxSeqLen := (← envNat "MAX_SEQ_LEN").getD 2048
   let ropeBase := (← IO.getEnv "ROPE_BASE").bind (·.toNat?) |>.map Float.ofNat |>.getD 500000.0
-  let paramDataRatio := (← envUInt64 "PARAM_DATA_RATIO").getD 20
-  let vocabSize := (← envUInt64 "VOCAB_SIZE").getD 65536
-  let tokenizerMaxChars := (← envUInt64 "TOKENIZER_MAX_CHARS").getD 2000000000
-  let tokenizerDocCap := (← envUInt64 "TOKENIZER_DOC_CAP").getD 10000
+  let paramDataRatio := (← envNat "PARAM_DATA_RATIO").getD 20
+  let vocabSize := (← envNat "VOCAB_SIZE").getD 65536
+  let tokenizerMaxChars := (← envNat "TOKENIZER_MAX_CHARS").getD 2000000000
+  let tokenizerDocCap := (← envNat "TOKENIZER_DOC_CAP").getD 10000
   let dataPath := (← IO.getEnv "DATA_PATH").getD "base_data"
-  let numShards := (← envUInt64 "NUM_SHARDS").getD 240
-  let initialDataShards := (← envUInt64 "INITIAL_DATA_SHARDS").getD 8
+  let numShards := (← envNat "NUM_SHARDS").getD 240
+  let initialDataShards := (← envNat "INITIAL_DATA_SHARDS").getD 8
   let quickMode := (← envBool "QUICK_MODE").getD ((← IO.getEnv "QUICK_MODE").isSome)
   let enableRL := (← envBool "ENABLE_RL").getD ((← IO.getEnv "ENABLE_RL").isSome)
   let wandbRun := (← IO.getEnv "WANDB_RUN").getD "dummy"
   let wandbEnabled := (← envBool "WANDB_ENABLED").getD (wandbRun != "dummy")
 
-  let pretrainIters := (← envUInt64 "PRETRAIN_ITERS").getD 21400
-  let pretrainExtIters := (← envUInt64 "PRETRAIN_EXTENSION_ITERS").getD 0
-  let pretrainValInterval := (← envUInt64 "PRETRAIN_VAL_INTERVAL").getD 250
-  let pretrainLogInterval := (← envUInt64 "PRETRAIN_LOG_INTERVAL").getD 10
+  let pretrainIters := (← envNat "PRETRAIN_ITERS").getD 21400
+  let pretrainExtIters := (← envNat "PRETRAIN_EXTENSION_ITERS").getD 0
+  let pretrainValInterval := (← envInterval "PRETRAIN_VAL_INTERVAL" 250)
+  let pretrainLogInterval := (← envInterval "PRETRAIN_LOG_INTERVAL" 10)
   let pretrainDeviceBatchSize := (← envNat "PRETRAIN_DEVICE_BATCH_SIZE").getD 32
   let pretrainTotalBatchSize := (← envNat "PRETRAIN_TOTAL_BATCH_SIZE").getD 524288
-  let pretrainCheckpointInterval := (← envUInt64 "PRETRAIN_CHECKPOINT_INTERVAL").getD pretrainIters
+  let pretrainCheckpointInterval := (← envInterval "PRETRAIN_CHECKPOINT_INTERVAL"
+    (if h : 0 < pretrainIters then some ⟨pretrainIters, h⟩ else none))
   let pretrainTextColumn := (← IO.getEnv "PRETRAIN_TEXT_COLUMN").getD "text"
   let pretrainTokenizerBatchSize := (← envNat "PRETRAIN_TOKENIZER_BATCH_SIZE").getD 128
   let pretrainEvalTokens := (← envNat "PRETRAIN_EVAL_TOKENS").getD 10485760
   let pretrainDataPathOverride := (← IO.getEnv "PRETRAIN_DATA_PATH")
 
-  let midIters := (← envUInt64 "MIDTRAIN_ITERS").getD 811
-  let midExtIters := (← envUInt64 "MIDTRAIN_EXTENSION_ITERS").getD 0
-  let midValInterval := (← envUInt64 "MIDTRAIN_VAL_INTERVAL").getD 150
-  let midLogInterval := (← envUInt64 "MIDTRAIN_LOG_INTERVAL").getD 10
+  let midIters := (← envNat "MIDTRAIN_ITERS").getD 811
+  let midExtIters := (← envNat "MIDTRAIN_EXTENSION_ITERS").getD 0
+  let midValInterval := (← envInterval "MIDTRAIN_VAL_INTERVAL" 150)
+  let midLogInterval := (← envInterval "MIDTRAIN_LOG_INTERVAL" 10)
   let midDeviceBatchSize := (← envNat "MIDTRAIN_DEVICE_BATCH_SIZE").getD 32
   let midTotalBatchSize := (← envNat "MIDTRAIN_TOTAL_BATCH_SIZE").getD 524288
-  let midCheckpointInterval := (← envUInt64 "MIDTRAIN_CHECKPOINT_INTERVAL").getD midIters
+  let midCheckpointInterval := (← envInterval "MIDTRAIN_CHECKPOINT_INTERVAL"
+    (if h : 0 < midIters then some ⟨midIters, h⟩ else none))
   let midEvalTokens := (← envNat "MIDTRAIN_EVAL_TOKENS").getD 10485760
 
-  let sftEpochs := (← envUInt64 "SFT_EPOCHS").getD 1
-  let sftDeviceBatchSize := max 1 <| (← envNat "SFT_DEVICE_BATCH_SIZE").getD 4
-  let sftTargetExamplesPerStep := max 1 <| (← envUInt64 "SFT_TARGET_EXAMPLES_PER_STEP").getD 32
-  let sftMaxExamples := (← envUInt64 "SFT_MAX_EXAMPLES")
+  let sftEpochs ← envPos "SFT_EPOCHS" 1
+  let sftDeviceBatchSize ← envPos "SFT_DEVICE_BATCH_SIZE" 4
+  let sftTargetExamplesPerStep ← envPos "SFT_TARGET_EXAMPLES_PER_STEP" 32
+  let sftMaxExamples := (← envNat "SFT_MAX_EXAMPLES")
 
-  let grpoNumSamples := (← envUInt64 "GRPO_NUM_SAMPLES").getD 16
-  let grpoMaxNewTokens := (← envNat "GRPO_MAX_NEW_TOKENS").getD 256
-  let grpoExamplesPerStepGlobal := max 1 <| (← envUInt64 "GRPO_EXAMPLES_PER_STEP").getD 16
-  let grpoEvalEvery := max 1 <| (← envUInt64 "GRPO_EVAL_EVERY").getD 60
-  let grpoLogEvery := max 1 <| (← envUInt64 "GRPO_LOG_EVERY").getD 10
-  let grpoEpochs := max 1 <| (← envUInt64 "GRPO_EPOCHS").getD 1
-  let grpoMaxPrompts := (← envUInt64 "GRPO_MAX_PROMPTS")
+  let grpoNumSamples ← envPos "GRPO_NUM_SAMPLES" 16
+  let grpoMaxNewTokens ← envPos "GRPO_MAX_NEW_TOKENS" 256
+  let grpoExamplesPerStepGlobal ← envPos "GRPO_EXAMPLES_PER_STEP" 16
+  let grpoEvalEvery ← envPos "GRPO_EVAL_EVERY" 60
+  let grpoLogEvery ← envPos "GRPO_LOG_EVERY" 10
+  let grpoEpochs ← envPos "GRPO_EPOCHS" 1
+  let grpoMaxPrompts := (← envNat "GRPO_MAX_PROMPTS")
 
-  let coreMaxExamples := (← envUInt64 "CORE_MAX_EXAMPLES")
+  let coreMaxExamples := (← envNat "CORE_MAX_EXAMPLES")
   let identityConversationsPath := (← IO.getEnv "IDENTITY_CONVERSATIONS_PATH")
 
   pure {
@@ -1167,7 +1176,7 @@ def evalBaseModel (cfg : NanoChatConfig) : PipelineM Unit := runOnMaster do
     let cacheDir := cfg.baseDir.replace "~" (← IO.getEnv "HOME" |>.map (·.getD ""))
     let evalBundleDir ← ensureCOREData cacheDir
     let coreConfigs ← loadCOREConfig evalBundleDir
-    let evalCap := cfg.envState.eval.coreMaxExamples.map UInt64.toNat
+    let evalCap := cfg.envState.eval.coreMaxExamples
 
     for taskMeta in coreTasks do
       log s!"  Evaluating {taskMeta.taskName}..."
@@ -1545,7 +1554,7 @@ def evalChat (cfg : NanoChatConfig) (checkpoint : String) : PipelineM Unit := ru
     let cacheDir := cfg.baseDir.replace "~" (← IO.getEnv "HOME" |>.map (·.getD ""))
     let evalBundleDir ← ensureCOREData cacheDir
     let coreConfigs ← loadCOREConfig evalBundleDir
-    let evalCap := cfg.envState.eval.coreMaxExamples.map UInt64.toNat
+    let evalCap := cfg.envState.eval.coreMaxExamples
 
     for taskMeta in chatTasks do
       log s!"  Evaluating {taskMeta.taskName}..."
@@ -1580,12 +1589,12 @@ def supervisedFineTune (cfg : NanoChatConfig) : PipelineM Unit := do
   let trainDevice ← resolveTrainingDevice rank localRank isDistributed
   let runBaseDir := (← get).config.baseDir.replace "~" (← IO.getEnv "HOME" |>.map (·.getD ""))
   let runArtifacts := RunArtifacts.ofBaseDir runBaseDir
-  let sftDeviceBatchSize := max 1 sftEnv.deviceBatchSize
-  let sftTargetExamplesPerStep := max 1 sftEnv.targetExamplesPerStep.toNat
+  let sftDeviceBatchSize := sftEnv.deviceBatchSize.val
+  let sftTargetExamplesPerStep := sftEnv.targetExamplesPerStep.val
 
   -- SFT configuration
   let sftCfg : SFTConfig := {
-    numEpochs := max 1 sftEnv.numEpochs.toNat
+    numEpochs := sftEnv.numEpochs.val
     deviceBatchSize := sftDeviceBatchSize
     targetExamplesPerStep := sftTargetExamplesPerStep
     embeddingLr := cfg.sftEmbeddingLr
@@ -1655,7 +1664,7 @@ def supervisedFineTune (cfg : NanoChatConfig) : PipelineM Unit := do
 
     -- Get number of training examples from mixture (optionally capped for fast validation runs)
     let totalTrainExamples := taskMixture.size
-    let sftMaxExamples := sftEnv.maxExamples.map UInt64.toNat
+    let sftMaxExamples := sftEnv.maxExamples
     let numTrainExamples :=
       match sftMaxExamples with
       | some n => max 1 (min n totalTrainExamples)
@@ -1675,12 +1684,12 @@ def supervisedFineTune (cfg : NanoChatConfig) : PipelineM Unit := do
       let sftOptState : OptimizerState (device := trainDevice) modelCfg := {
         midCkpt.optState with
         adamState := finalOptState
-        step := finalState.step.toUInt64
+        step := finalState.step
       }
       let sftCkpt : Checkpoint (device := trainDevice) modelCfg := {
         params := finalParams
         optState := sftOptState
-        step := finalState.step.toUInt64
+        step := finalState.step
         bestValLoss := finalState.bestValLoss
       }
       saveCheckpoint sftCkpt s!"{sftCheckpointDir}/latest.ckpt"
@@ -1729,26 +1738,26 @@ def reinforcementLearning (cfg : NanoChatConfig) : PipelineM Unit := do
   let localRank ← getLocalRankFromEnv
   let trainDevice ← resolveTrainingDevice rank localRank isDistributed
 
-  let grpoExamplesPerStepGlobal := max 1 rlEnv.examplesPerStepGlobal.toNat
+  let grpoExamplesPerStepGlobal := rlEnv.examplesPerStepGlobal.val
   let grpoExamplesPerStep :=
     if isDistributed && worldSize > 1 then
       max 1 (grpoExamplesPerStepGlobal / worldSize)
     else
       grpoExamplesPerStepGlobal
-  let grpoEvalEvery := max 1 rlEnv.evalEvery.toNat
-  let grpoEpochs := max 1 rlEnv.epochs.toNat
-  let grpoMaxPrompts := rlEnv.maxPrompts.map UInt64.toNat
+  let grpoEvalEvery := rlEnv.evalEvery.val
+  let grpoEpochs := rlEnv.epochs.val
+  let grpoMaxPrompts := rlEnv.maxPrompts
 
   -- GRPO configuration
   let grpoCfg : GRPOConfig := {
-    numSamples := max 1 rlEnv.numSamples.toNat
-    maxNewTokens := max 1 rlEnv.maxNewTokens
+    numSamples := rlEnv.numSamples.val
+    maxNewTokens := rlEnv.maxNewTokens.val
     temperature := 1.0
     topK := 50
     examplesPerStep := grpoExamplesPerStep
     evalEvery := grpoEvalEvery
-    logEvery := max 1 rlEnv.logEvery.toNat
-    logEveryPos := by omega
+    logEvery := rlEnv.logEvery.val
+    logEveryPos := rlEnv.logEvery.property
   }
 
   -- Load tokenizer
@@ -1875,12 +1884,12 @@ def reinforcementLearning (cfg : NanoChatConfig) : PipelineM Unit := do
       let rlOptState : OptimizerState (device := trainDevice) modelCfg := {
         sftCkpt.optState with
         adamState := finalAdamState
-        step := result.totalSteps.toUInt64
+        step := result.totalSteps
       }
       let rlCkpt : Checkpoint (device := trainDevice) modelCfg := {
         params := finalParams
         optState := rlOptState
-        step := result.totalSteps.toUInt64
+        step := result.totalSteps
         bestValLoss := sftCkpt.bestValLoss
       }
       saveCheckpoint rlCkpt s!"{rlCheckpointDir}/latest.ckpt"
@@ -2041,21 +2050,21 @@ def main : IO Unit := do
     wandbEnabled := pipelineEnv.wandbEnabled
     wandbRun := pipelineEnv.wandbRun
     numGpus := pipelineEnv.numGpus
-    modelDepth := modelEnv.depth.toNat
-    modelAspectRatio := modelEnv.aspectRatio.toNat
-    targetHeadDim := modelEnv.targetHeadDim.toNat
+    modelDepth := modelEnv.depth
+    modelAspectRatio := modelEnv.aspectRatio
+    targetHeadDim := modelEnv.targetHeadDim
     maxSeqLen := modelEnv.maxSeqLen
     ropeBase := modelEnv.ropeBase
-    paramDataRatio := modelEnv.paramDataRatio.toNat
-    vocabSize := modelEnv.vocabSize.toNat
-    tokenizerMaxChars := modelEnv.tokenizerMaxChars.toNat
-    tokenizerDocCap := modelEnv.tokenizerDocCap.toNat
+    paramDataRatio := modelEnv.paramDataRatio
+    vocabSize := modelEnv.vocabSize
+    tokenizerMaxChars := modelEnv.tokenizerMaxChars
+    tokenizerDocCap := modelEnv.tokenizerDocCap
     dataPath := pipelineEnv.dataPath
-    numDataShards := pipelineEnv.numDataShards.toNat
-    initialDataShards := pipelineEnv.initialDataShards.toNat
-    sftEpochs := envState.sft.numEpochs.toNat
-    grpoNumSamples := envState.rl.numSamples.toNat
-    grpoMaxNewTokens := envState.rl.maxNewTokens
+    numDataShards := pipelineEnv.numDataShards
+    initialDataShards := pipelineEnv.initialDataShards
+    sftEpochs := envState.sft.numEpochs.val
+    grpoNumSamples := envState.rl.numSamples.val
+    grpoMaxNewTokens := envState.rl.maxNewTokens.val
     resumeFromCheckpoint := true
     checkpointAfterStage := true
     enableRL := pipelineEnv.enableRL
