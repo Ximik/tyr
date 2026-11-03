@@ -123,7 +123,7 @@ def initBaseTokenizer (specialTokens : Array String) : BPETokenizer := Id.run do
   tok := addSpecialTokens tok specialTokens 256
 
   -- Update vocab size to include special tokens
-  tok := { tok with vocabSize := 256 + specialTokens.size.toUInt32 }
+  tok := { tok with vocabSize := 256 + specialTokens.size }
 
   return tok
 
@@ -178,7 +178,7 @@ def bpeMergeStep (tok : BPETokenizer) (docs : Array (Array TokenId))
     (pair : TokenId × TokenId)
     : BPETokenizer × Array (Array TokenId) := Id.run do
   let (left, right) := pair
-  let newId := tok.vocabSize
+  let newId := tok.vocabSize.toUInt32
 
   -- Create new token bytes by concatenating the pair's bytes
   let leftBytes := tok.idToBytes[left.toNat]?.getD ByteArray.empty
@@ -209,6 +209,9 @@ def bpeMergeStep (tok : BPETokenizer) (docs : Array (Array TokenId))
     This is a simple implementation for testing.
     For production use, prefer rustbpe or similar. -/
 def trainBPE (docs : Array String) (config : TrainConfig) (log : Handlers := {}) : IO TrainResult := do
+  -- Each merge's id is the vocab size before it, so every id stays below this bound.
+  if config.vocabSize > UInt32.size then
+    throw <| IO.userError s!"Target vocab size {config.vocabSize} exceeds the UInt32 token id range"
   log.onInfo s!"Starting BPE training with target vocab size: {config.vocabSize}"
 
   -- Initialize tokenizer with base vocabulary
@@ -228,10 +231,10 @@ def trainBPE (docs : Array String) (config : TrainConfig) (log : Handlers := {})
   log.onInfo s!"Processed {docs.size} documents, {totalChars} characters"
 
   -- Perform merges until target vocab size reached
-  let targetMerges := config.vocabSize - tok.vocabSize.toNat
+  let targetMerges := config.vocabSize - tok.vocabSize
   let mut numMerges := 0
 
-  while tok.vocabSize.toNat < config.vocabSize do
+  while tok.vocabSize < config.vocabSize do
     -- Count pairs
     let counts := countPairs tokenizedDocs
 
@@ -272,7 +275,7 @@ def trainBPE (docs : Array String) (config : TrainConfig) (log : Handlers := {})
       totalChars := totalChars
       totalDocs := docs.size
       numMerges := numMerges
-      finalVocabSize := tok.vocabSize.toNat
+      finalVocabSize := tok.vocabSize
       compressionRatio := compressionRatio
     }
   }

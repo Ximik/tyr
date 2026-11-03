@@ -20,7 +20,7 @@ structure MergeRule where
 /-- BPE Tokenizer state -/
 structure BPETokenizer where
   /-- Total vocabulary size -/
-  vocabSize : UInt32
+  vocabSize : Nat
   /-- Token ID → byte sequence for decoding -/
   idToBytes : Array ByteArray
   /-- Byte sequence → token ID for base vocab lookup -/
@@ -56,7 +56,7 @@ def BPETokenizer.empty : BPETokenizer :=
   }
 
 /-- Get vocabulary size -/
-def BPETokenizer.getVocabSize (tok : BPETokenizer) : UInt32 := tok.vocabSize
+def BPETokenizer.getVocabSize (tok : BPETokenizer) : Nat := tok.vocabSize
 
 /-- Check if a token ID is valid -/
 def BPETokenizer.isValidToken (tok : BPETokenizer) (id : TokenId) : Bool :=
