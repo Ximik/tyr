@@ -10,7 +10,7 @@ the Gumbel MuZero mixed value.
 
 namespace torch.mctxdag
 
-private def completeQvalues (qvalues : Array Float) (visitCounts : Array UInt64) (value : Float) : Array Float :=
+private def completeQvalues (qvalues : Array Float) (visitCounts : Array Nat) (value : Float) : Array Float :=
   (List.range qvalues.size).toArray.map fun i =>
     if visitCounts.getD i 0 > 0 then qvalues.getD i 0.0 else value
 
@@ -27,7 +27,7 @@ private def rescaleQvalues (qvalues : Array Float) (epsilon : Float := 1e-8) : A
 def computeMixedValue
     (rawValue : Float)
     (qvalues : Array Float)
-    (visitCounts : Array UInt64)
+    (visitCounts : Array Nat)
     (priorProbs : Array Float)
     : Float :=
   let sumVisitCounts : Float := (visitCounts.foldl (init := 0) (· + ·)).toFloat

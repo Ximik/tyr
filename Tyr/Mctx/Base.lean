@@ -60,7 +60,7 @@ structure BatchedPolicyOutput (TreeType : Type) where
 
 /-- Root summary statistics after search. -/
 structure SearchSummary where
-  visitCounts : Array UInt64
+  visitCounts : Array Nat
   visitProbs : Array Float
   value : Float
   qvalues : Array Float
@@ -68,7 +68,7 @@ structure SearchSummary where
 
 /-- Batched root summary statistics after search. -/
 structure BatchedSearchSummary where
-  visitCounts : Array (Array UInt64)
+  visitCounts : Array (Array Nat)
   visitProbs : Array (Array Float)
   value : Array Float
   qvalues : Array (Array Float)
