@@ -193,8 +193,8 @@ def stepDistributed {σ : StaticSpec} [DType.RealFloating σ.dtype] (param : Ten
   if !isDist then
     return (← stepSingle param grad state cfg lrMul wdMul)
 
-  let worldSize := (← dist.getWorldSize).toNat
-  let rank := (← dist.getRank).toNat
+  let worldSize ← dist.getWorldSize
+  let rank ← dist.getRank
   if worldSize <= 1 then
     return (← stepSingle param grad state cfg lrMul wdMul)
 

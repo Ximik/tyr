@@ -36,11 +36,11 @@ opaque setCudaDevice (device : @& Nat) : IO Unit
 
 /-- Get the rank of this process -/
 @[extern "lean_torch_dist_get_rank"]
-opaque getRank : IO UInt64
+opaque getRank : IO Nat
 
 /-- Get the world size (total number of processes) -/
 @[extern "lean_torch_dist_get_world_size"]
-opaque getWorldSize : IO UInt64
+opaque getWorldSize : IO Nat
 
 /-- Check if distributed is initialized -/
 @[extern "lean_torch_dist_is_initialized"]

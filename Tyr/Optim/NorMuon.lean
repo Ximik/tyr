@@ -61,7 +61,7 @@ structure Config where
   /-- Whether to use distributed training -/
   distributed : Bool := false
   /-- World size for distributed (set automatically if distributed=true) -/
-  worldSize : UInt64 := 1
+  worldSize : Nat := 1
   deriving Repr
 
 instance : Inhabited Config where
@@ -293,16 +293,16 @@ def stepDistributedOwner {σ : StaticSpec} [DType.RealFloating σ.dtype] (param 
   let gradAvg ← dist.allReduce gradAvg .avg
 
   let (ownerParam, ownerState) ←
-    if rank.toNat == ownerRank then
+    if rank == ownerRank then
       stepSingle param gradAvg state cfg lrMul wdMul
     else
       pure (param, state)
 
-  let paramSynced := if rank.toNat == ownerRank then ownerParam else Tensor.detach param
+  let paramSynced := if rank == ownerRank then ownerParam else Tensor.detach param
   let paramSynced ← dist.broadcast paramSynced ownerRank
 
   let momentumSynced :=
-    if rank.toNat == ownerRank then
+    if rank == ownerRank then
       ownerState.momentumBuffer.getD (Tensor.zerosLike paramSynced)
     else
       Tensor.zerosLike paramSynced
@@ -359,8 +359,6 @@ def stepDistributedGroup {σ : StaticSpec} [DType.RealFloating σ.dtype]
     return (← stepGroupLocal params grads states cfg lrMul wdMul)
 
   let rank ← dist.getRank
-  let ws := worldSize.toNat
-  let rankNat := rank.toNat
   let zeroBuf := Tensor.zerosLike template
   let mut outParams := params
   let mut outStates := states
@@ -369,12 +367,12 @@ def stepDistributedGroup {σ : StaticSpec} [DType.RealFloating σ.dtype]
   while base < params.size do
     -- Build per-rank inputs for reduce-scatter (pad with zeros for short tails).
     let mut rsInputs : Array (Tensor σ) := #[]
-    for j in [:ws] do
+    for j in [:worldSize] do
       let idx := base + j
       let g := grads[idx]?.getD zeroBuf
       rsInputs := rsInputs.push g
 
-    let ownerIdx := base + rankNat
+    let ownerIdx := base + rank
     let gradOwner := if h : ownerIdx < params.size then Tensor.zerosLike params[ownerIdx]
       else Tensor.zerosLike zeroBuf
     let gradOwner ← dist.reduceScatterList gradOwner rsInputs .avg
@@ -388,7 +386,7 @@ def stepDistributedGroup {σ : StaticSpec} [DType.RealFloating σ.dtype]
 
     -- Gather updated owner parameters back to all ranks for this block.
     let mut gatherParams : Array (Tensor σ) := #[]
-    for j in [:ws] do
+    for j in [:worldSize] do
       let idx := base + j
       let t := if h : idx < params.size then params[idx] else zeroBuf
       gatherParams := gatherParams.push (Tensor.detach t)
@@ -397,14 +395,14 @@ def stepDistributedGroup {σ : StaticSpec} [DType.RealFloating σ.dtype]
 
     -- Gather owner momentum buffers to keep replicated checkpoint-compatible state.
     let mut gatherMomentum : Array (Tensor σ) := #[]
-    for j in [:ws] do
+    for j in [:worldSize] do
       let idx := base + j
       let t := if h : idx < params.size then params[idx] else zeroBuf
       gatherMomentum := gatherMomentum.push (Tensor.zerosLike t)
     let agMomentum := ownerState.momentumBuffer.getD (Tensor.zerosLike agInput)
     gatherMomentum ← dist.allGatherList gatherMomentum agMomentum
 
-    for j in [:ws] do
+    for j in [:worldSize] do
       let idx := base + j
       if idx < params.size then
         let some gatheredParam := gatherParams[j]? |
@@ -421,7 +419,7 @@ def stepDistributedGroup {σ : StaticSpec} [DType.RealFloating σ.dtype]
         }
         outStates := outStates.set! idx stSynced
 
-    base := base + ws
+    base := base + worldSize
 
   return (outParams, outStates)
 

@@ -90,7 +90,7 @@ structure ModelEnvState where
 /-- Pipeline-wide environment state. -/
 structure PipelineEnvState where
   baseDir : String := "~/.cache/nanochat"
-  numGpus : UInt64 := 1
+  numGpus : Nat := 1
   dataPath : String := "base_data"
   numDataShards : UInt64 := 240
   initialDataShards : UInt64 := 8
@@ -292,7 +292,7 @@ private def envBool (name : String) : IO (Option Bool) := do
 /-- Resolve all model/training/pipeline env vars once into a typed structure. -/
 private def loadNanoChatEnvState : IO NanoChatEnvState := do
   let baseDir := (← IO.getEnv "NANOCHAT_DIR").getD "~/.cache/nanochat"
-  let numGpus := (← envUInt64 "WORLD_SIZE").getD 1
+  let numGpus := (← envNat "WORLD_SIZE").getD 1
   let modelDepth := (← envUInt64 "MODEL_DEPTH").getD 20
   let modelAspectRatio := (← envUInt64 "MODEL_ASPECT_RATIO").getD 64
   let targetHeadDim := (← envUInt64 "MODEL_HEAD_DIM").getD 128
@@ -836,7 +836,7 @@ private def selectParquetFilesForSplit (files : Array String) (split : PretrainP
 private def ParquetTokenStream.init
     (dataDir : String) (split : PretrainParquetSplit)
     (tok : BPETokenizer) (bosToken : UInt64)
-    (rank worldSize : UInt64)
+    (rank worldSize : Nat)
     (textColumn : String := "text")
     (tokenizerBatchSize : Nat := 128)
     : IO ParquetTokenStream := do
@@ -848,10 +848,10 @@ private def ParquetTokenStream.init
     bosToken := bosToken
     textColumn := textColumn
     tokenizerBatchSize := tokenizerBatchSize
-    rank := rank.toNat
-    worldSize := max 1 worldSize.toNat
+    rank := rank
+    worldSize := max 1 worldSize
     fileIdx := 0
-    rowGroupIdx := rank.toNat
+    rowGroupIdx := rank
   }
 
 private def ParquetTokenStream.available (s : ParquetTokenStream) : Nat :=
@@ -1081,7 +1081,7 @@ def pretrainBaseModel (cfg : NanoChatConfig) : PipelineM Unit := do
         pure batch?
 
   let evalTokens := pretrainEnv.evalTokens
-  let tokensPerValBatch := max 1 (hp.deviceBatchSize * hp.maxSeqLen * worldSize.toNat)
+  let tokensPerValBatch := max 1 (hp.deviceBatchSize * hp.maxSeqLen * worldSize)
   let valBatches : Nat :=
     if valProvider?.isSome then
       max 1 ((evalTokens / tokensPerValBatch))
@@ -1090,7 +1090,7 @@ def pretrainBaseModel (cfg : NanoChatConfig) : PipelineM Unit := do
 
   -- Run distributed training
   if isMaster then
-    let gradAccum := effectiveGradAccumSteps hp worldSize.toNat
+    let gradAccum := effectiveGradAccumSteps hp worldSize
     log s!"Starting training with {worldSize} GPUs"
     log s!"Data path: {dataDir}"
     log s!"Pretrain schedule: iters={hp.numIterations}, ext={hp.extensionIterations}, batch={hp.deviceBatchSize}, seq={hp.maxSeqLen}, accum={gradAccum}, val_int={hp.valInterval}, ckpt_int={hp.checkpointInterval}"
@@ -1407,10 +1407,10 @@ def midtrain (cfg : NanoChatConfig) : PipelineM Unit := do
 
   let trainStream0 := TaskTokenStream.new
     trainTaskMixture hp.deviceBatchSize hp.maxSeqLen
-    chatTokens encode rank.toNat worldSize.toNat
+    chatTokens encode rank worldSize
   let valStream0 := TaskTokenStream.new
     valTaskMixture hp.deviceBatchSize hp.maxSeqLen
-    chatTokens encode rank.toNat worldSize.toNat
+    chatTokens encode rank worldSize
   let trainStreamRef ← IO.mkRef trainStream0
   let valStreamRef ← IO.mkRef valStream0
 
@@ -1448,11 +1448,11 @@ def midtrain (cfg : NanoChatConfig) : PipelineM Unit := do
       { batch := stream.batchSize, seq := stream.seqLen, input, target })
 
   let evalTokens := midEnv.evalTokens
-  let tokensPerValBatch := max 1 (hp.deviceBatchSize * hp.maxSeqLen * worldSize.toNat)
+  let tokensPerValBatch := max 1 (hp.deviceBatchSize * hp.maxSeqLen * worldSize)
   let valBatches : Nat := max 1 ((evalTokens / tokensPerValBatch))
 
   if isMaster then
-    let gradAccum := effectiveGradAccumSteps hp worldSize.toNat
+    let gradAccum := effectiveGradAccumSteps hp worldSize
     log s!"Starting midtraining with {worldSize} GPUs"
     log s!"Midtrain schedule: iters={hp.numIterations}, ext={hp.extensionIterations}, batch={hp.deviceBatchSize}, seq={hp.maxSeqLen}, accum={gradAccum}, val_int={hp.valInterval}, ckpt_int={hp.checkpointInterval}"
     log s!"Midtrain token-stream batches: train_rows={trainTaskMixture.size}, val_rows={valTaskMixture.size}, val_batches={valBatches}"
@@ -1641,7 +1641,7 @@ def supervisedFineTune (cfg : NanoChatConfig) : PipelineM Unit := do
 
     -- Create task mixture from HuggingFace data
     let sftMixture ← createSFTTaskMixture cfg
-    let taskMixture := sftMixture.toConversationMixtureSharded rank.toNat worldSize.toNat
+    let taskMixture := sftMixture.toConversationMixtureSharded rank worldSize
 
     -- Create chat tokens from tokenizer special tokens
     let chatTokens ← buildChatTokensFromTokenizer tok
@@ -1732,7 +1732,7 @@ def reinforcementLearning (cfg : NanoChatConfig) : PipelineM Unit := do
   let grpoExamplesPerStepGlobal := max 1 rlEnv.examplesPerStepGlobal.toNat
   let grpoExamplesPerStep :=
     if isDistributed && worldSize > 1 then
-      max 1 (grpoExamplesPerStepGlobal / worldSize.toNat)
+      max 1 (grpoExamplesPerStepGlobal / worldSize)
     else
       grpoExamplesPerStepGlobal
   let grpoEvalEvery := max 1 rlEnv.evalEvery.toNat
@@ -1836,7 +1836,7 @@ def reinforcementLearning (cfg : NanoChatConfig) : PipelineM Unit := do
         Id.run do
           let mut localPrompts : Array (Array UInt64 × String × String) := #[]
           for idx in [:gsm8kPromptsPreShard.size] do
-            if idx % worldSize.toNat == rank.toNat then
+            if idx % worldSize == rank then
               localPrompts := localPrompts.push gsm8kPromptsPreShard[idx]!
           localPrompts
       else
@@ -2041,7 +2041,7 @@ def main : IO Unit := do
     baseDir := pipelineEnv.baseDir
     wandbEnabled := pipelineEnv.wandbEnabled
     wandbRun := pipelineEnv.wandbRun
-    numGpus := pipelineEnv.numGpus.toNat
+    numGpus := pipelineEnv.numGpus
     modelDepth := modelEnv.depth.toNat
     modelAspectRatio := modelEnv.aspectRatio.toNat
     targetHeadDim := modelEnv.targetHeadDim.toNat
