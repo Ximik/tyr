@@ -53,8 +53,7 @@ structure GRPOConfig where
   maxNewTokens : Nat := 256
   /-- Temperature for sampling (1.0 = no scaling) -/
   temperature : Float := 1.0
-  /-- Top-k sampling (0 = disabled) -/
-  topK : Nat := 50
+  topK : TopK := none
   /-- Examples per training step (across all ranks) -/
   examplesPerStep : Nat := 16
   /-- Max batch size per forward pass -/
@@ -589,8 +588,7 @@ structure GenerationConfig where
   maxNewTokens : Nat := 256
   /-- Temperature for sampling -/
   temperature : Float := 1.0
-  /-- Top-k sampling (0 = disabled) -/
-  topK : Nat := 50
+  topK : TopK := none
   /-- Top-p (nucleus) sampling (1.0 = disabled) -/
   topP : Float := 1.0
   /-- End-of-sequence token -/

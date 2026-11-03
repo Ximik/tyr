@@ -299,7 +299,7 @@ def forward {batch seq : Nat} (cfg : TalkerConfig)
 private def applySampling {batch vocab : Nat}
     (logits : Tensor { shape := #[batch, vocab], dtype := dtype.val, device := device })
     (temperature : Float)
-    (topK : Nat)
+    (topK : TopK)
     (topP : Float)
     : IO (Tensor { shape := #[batch], dtype := .Int64, device := device }) := do
   if temperature <= 0.0 then
@@ -307,9 +307,7 @@ private def applySampling {batch vocab : Nat}
   let scaled :=
     if temperature == 1.0 then logits
     else Tensor.mulScalar logits (1.0 / temperature)
-  let filtered :=
-    if topK == 0 then scaled
-    else Tensor.topKFilter scaled topK
+  let filtered := topK.filter scaled
   let filtered :=
     if topP >= 1.0 then filtered
     else Tensor.topPFilter filtered topP
@@ -382,15 +380,15 @@ private def generateFrameFromLastHidden {batch : Nat} (cfg : TalkerConfig)
     (historyFirstCodes : Option (Sigma fun histLen => Tensor { shape := #[batch, histLen], dtype := .Int64, device := device }) := none)
     (allowEos : Bool := true)
     (temperature : Float := 0.9)
-    (topK : Nat := 50)
+    (topK : TopK := none)
     (topP : Float := 1.0)
     (repetitionPenalty : Float := 1.05)
     (suppressTail : Nat := 1024)
     (subtalkerTemperature : Float := 0.9)
-    (subtalkerTopK : Nat := 50)
+    (subtalkerTopK : TopK := none)
     (subtalkerTopP : Float := 1.0)
     (subtalkerTemperaturesByGroup : Option (Array Float) := none)
-    (subtalkerTopKsByGroup : Option (Array Nat) := none)
+    (subtalkerTopKsByGroup : Option (Array TopK) := none)
     (subtalkerTopPsByGroup : Option (Array Float) := none)
     (cpRoPECache : Option (CodePredictorRoPECache (device := device) cfg) := none)
     : IO (FrameGenerationOutput (dtype := dtype) (device := device) batch cfg.numCodeGroups cfg.hiddenSize) := do
@@ -485,7 +483,7 @@ private def generateFrameFromLastHidden {batch : Nat} (cfg : TalkerConfig)
       let cpLogits : Tensor { shape := #[batch, cpCfg.vocabSize], dtype := dtype.val, device := device } := Tensor.reshape cpLogits3 #[batch, cpCfg.vocabSize]
 
       let gTemp : Float := optAtOr subtalkerTemperaturesByGroup g subtalkerTemperature
-      let gTopK : Nat := optAtOr subtalkerTopKsByGroup g subtalkerTopK
+      let gTopK : TopK := optAtOr subtalkerTopKsByGroup g subtalkerTopK
       let gTopP : Float := optAtOr subtalkerTopPsByGroup g subtalkerTopP
       let nextCode ← applySampling cpLogits gTemp gTopK gTopP
       let nextCode2d : Tensor { shape := #[batch, 1], dtype := .Int64, device := device } := Tensor.reshape nextCode #[batch, 1]
@@ -516,15 +514,15 @@ def generateFrame {batch seq : Nat} (cfg : TalkerConfig)
     (historyFirstCodes : Option (Sigma fun histLen => Tensor { shape := #[batch, histLen], dtype := .Int64, device := device }) := none)
     (allowEos : Bool := true)
     (temperature : Float := 0.9)
-    (topK : Nat := 50)
+    (topK : TopK := none)
     (topP : Float := 1.0)
     (repetitionPenalty : Float := 1.05)
     (suppressTail : Nat := 1024)
     (subtalkerTemperature : Float := 0.9)
-    (subtalkerTopK : Nat := 50)
+    (subtalkerTopK : TopK := none)
     (subtalkerTopP : Float := 1.0)
     (subtalkerTemperaturesByGroup : Option (Array Float) := none)
-    (subtalkerTopKsByGroup : Option (Array Nat) := none)
+    (subtalkerTopKsByGroup : Option (Array TopK) := none)
     (subtalkerTopPsByGroup : Option (Array Float) := none)
     : IO (FrameGenerationOutput (dtype := dtype) (device := device) batch cfg.numCodeGroups cfg.hiddenSize) := do
   let hidden := TalkerModel.forwardEmbeds cfg m.model talkerInputs attnMask
@@ -544,17 +542,17 @@ def generateCodesWithLengths {batch seq : Nat} (cfg : TalkerConfig)
     (maxFrames : Nat := 256)
     (minNewTokens : Nat := 2)
     (temperature : Float := 0.9)
-    (topK : Nat := 50)
+    (topK : TopK := none)
     (topP : Float := 1.0)
     (subtalkerTemperature : Float := 0.9)
-    (subtalkerTopK : Nat := 50)
+    (subtalkerTopK : TopK := none)
     (subtalkerTopP : Float := 1.0)
     (repetitionPenalty : Float := 1.05)
     (suppressTail : Nat := 1024)
     (trailingTextHidden : Option (Sigma fun trailingSeq => Tensor { shape := #[batch, trailingSeq, cfg.hiddenSize], dtype := dtype.val, device := device }) := none)
     (ttsPadEmbed : Option (Tensor { shape := #[batch, 1, cfg.hiddenSize], dtype := dtype.val, device := device }) := none)
     (subtalkerTemperaturesByGroup : Option (Array Float) := none)
-    (subtalkerTopKsByGroup : Option (Array Nat) := none)
+    (subtalkerTopKsByGroup : Option (Array TopK) := none)
     (subtalkerTopPsByGroup : Option (Array Float) := none)
     : IO (CodeGenerationOutput (device := device) batch maxFrames cfg.numCodeGroups) := do
   if maxFrames == 0 then
@@ -597,17 +595,17 @@ def streamCodes {batch seq : Nat} (cfg : TalkerConfig)
     (maxFrames : Nat := 256)
     (minNewTokens : Nat := 2)
     (temperature : Float := 0.9)
-    (topK : Nat := 50)
+    (topK : TopK := none)
     (topP : Float := 1.0)
     (subtalkerTemperature : Float := 0.9)
-    (subtalkerTopK : Nat := 50)
+    (subtalkerTopK : TopK := none)
     (subtalkerTopP : Float := 1.0)
     (repetitionPenalty : Float := 1.05)
     (suppressTail : Nat := 1024)
     (trailingTextHidden : Option (Sigma fun trailingSeq => Tensor { shape := #[batch, trailingSeq, cfg.hiddenSize], dtype := dtype.val, device := device }) := none)
     (ttsPadEmbed : Option (Tensor { shape := #[batch, 1, cfg.hiddenSize], dtype := dtype.val, device := device }) := none)
     (subtalkerTemperaturesByGroup : Option (Array Float) := none)
-    (subtalkerTopKsByGroup : Option (Array Nat) := none)
+    (subtalkerTopKsByGroup : Option (Array TopK) := none)
     (subtalkerTopPsByGroup : Option (Array Float) := none)
     : IO (Array Nat) :=
   do
@@ -749,17 +747,17 @@ def generateCodes {batch seq : Nat} (cfg : TalkerConfig)
     (maxFrames : Nat := 256)
     (minNewTokens : Nat := 2)
     (temperature : Float := 0.9)
-    (topK : Nat := 50)
+    (topK : TopK := none)
     (topP : Float := 1.0)
     (subtalkerTemperature : Float := 0.9)
-    (subtalkerTopK : Nat := 50)
+    (subtalkerTopK : TopK := none)
     (subtalkerTopP : Float := 1.0)
     (repetitionPenalty : Float := 1.05)
     (suppressTail : Nat := 1024)
     (trailingTextHidden : Option (Sigma fun trailingSeq => Tensor { shape := #[batch, trailingSeq, cfg.hiddenSize], dtype := dtype.val, device := device }) := none)
     (ttsPadEmbed : Option (Tensor { shape := #[batch, 1, cfg.hiddenSize], dtype := dtype.val, device := device }) := none)
     (subtalkerTemperaturesByGroup : Option (Array Float) := none)
-    (subtalkerTopKsByGroup : Option (Array Nat) := none)
+    (subtalkerTopKsByGroup : Option (Array TopK) := none)
     (subtalkerTopPsByGroup : Option (Array Float) := none)
     : IO (Tensor { shape := #[batch, maxFrames, cfg.numCodeGroups], dtype := .Int64, device := device }) := do
   let out ← generateCodesWithLengths cfg m talkerInputs maxFrames minNewTokens

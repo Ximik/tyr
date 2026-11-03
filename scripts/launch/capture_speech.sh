@@ -28,6 +28,8 @@ set +e
 lake exe Qwen3TTSEndToEnd \
   --model-dir "$model_dir" \
   --text "$text" \
+  --top-k 50 \
+  --subtalker-top-k 50 \
   --codes-path "$run_dir/codes.txt" \
   --wav-path "$run_dir/tyr-launch.wav" 2>&1 | tee "$run_dir/transcript.txt"
 status="${PIPESTATUS[0]}"

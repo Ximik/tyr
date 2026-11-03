@@ -32,15 +32,15 @@ structure Args where
   thinkMode : String := "auto"
   seed : Option UInt64 := none
   temperature : Float := 0.9
-  topK : Nat := 50
+  topK : TopK := none
   topP : Float := 1.0
   repetitionPenalty : Float := 1.05
   suppressTail : Nat := 1024
   subtalkerTemperature : Float := 0.9
-  subtalkerTopK : Nat := 50
+  subtalkerTopK : TopK := none
   subtalkerTopP : Float := 1.0
   subtalkerTemperaturesByGroup : Option (Array Float) := none
-  subtalkerTopKsByGroup : Option (Array Nat) := none
+  subtalkerTopKsByGroup : Option (Array TopK) := none
   subtalkerTopPsByGroup : Option (Array Float) := none
   encodeAudioPath : Option String := none
   encodeOutCodesPath : String := "output/qwen3tts_encoded_codes.txt"
@@ -92,13 +92,13 @@ private def parseFloatCsv? (s : String) : Option (Array Float) := Id.run do
     | none => return none
   if out.isEmpty then none else some out
 
-private def parseNatCsv? (s : String) : Option (Array Nat) := Id.run do
-  let mut out : Array Nat := #[]
+private def parseTopKCsv? (s : String) : Option (Array TopK) := Id.run do
+  let mut out : Array TopK := #[]
   for part in s.splitOn "," do
     let tok := part.trimAscii.toString
     if tok.isEmpty then
       return none
-    match tok.toNat? with
+    match PosNat.parseOrNone? tok with
     | some v => out := out.push v
     | none => return none
   if out.isEmpty then none else some out
@@ -125,7 +125,7 @@ private partial def parseArgsLoop : List String → Args → Args
   | "--temperature" :: v :: rest, acc =>
       parseArgsLoop rest { acc with temperature := (parseFloatLit? v).getD acc.temperature }
   | "--top-k" :: v :: rest, acc =>
-      parseArgsLoop rest { acc with topK := v.toNat?.getD acc.topK }
+      parseArgsLoop rest { acc with topK := (PosNat.parseOrNone? v).getD acc.topK }
   | "--top-p" :: v :: rest, acc =>
       parseArgsLoop rest { acc with topP := (parseFloatLit? v).getD acc.topP }
   | "--repetition-penalty" :: v :: rest, acc =>
@@ -135,13 +135,13 @@ private partial def parseArgsLoop : List String → Args → Args
   | "--subtalker-temperature" :: v :: rest, acc =>
       parseArgsLoop rest { acc with subtalkerTemperature := (parseFloatLit? v).getD acc.subtalkerTemperature }
   | "--subtalker-top-k" :: v :: rest, acc =>
-      parseArgsLoop rest { acc with subtalkerTopK := v.toNat?.getD acc.subtalkerTopK }
+      parseArgsLoop rest { acc with subtalkerTopK := (PosNat.parseOrNone? v).getD acc.subtalkerTopK }
   | "--subtalker-top-p" :: v :: rest, acc =>
       parseArgsLoop rest { acc with subtalkerTopP := (parseFloatLit? v).getD acc.subtalkerTopP }
   | "--subtalker-temp-by-group" :: v :: rest, acc =>
       parseArgsLoop rest { acc with subtalkerTemperaturesByGroup := parseFloatCsv? v }
   | "--subtalker-top-k-by-group" :: v :: rest, acc =>
-      parseArgsLoop rest { acc with subtalkerTopKsByGroup := parseNatCsv? v }
+      parseArgsLoop rest { acc with subtalkerTopKsByGroup := parseTopKCsv? v }
   | "--subtalker-top-p-by-group" :: v :: rest, acc =>
       parseArgsLoop rest { acc with subtalkerTopPsByGroup := parseFloatCsv? v }
   | "--encode-audio-path" :: v :: rest, acc => parseArgsLoop rest { acc with encodeAudioPath := some v }
@@ -206,7 +206,7 @@ private def switchFlag (flag : String) : Bool :=
   ].contains flag
 
 private def validateFlagValue (flag : String) (value : String) : Except String Unit := do
-  if #["--max-text-len", "--max-frames", "--top-k", "--suppress-tail", "--subtalker-top-k",
+  if #["--max-text-len", "--max-frames", "--suppress-tail",
         "--stream-chunk-frames", "--decode-chunk-size", "--decode-left-context"].contains flag then
     if value.toNat?.isNone then
       throw s!"Invalid numeric value for {flag}: {value}"
@@ -220,9 +220,12 @@ private def validateFlagValue (flag : String) (value : String) : Except String U
   if #["--subtalker-temp-by-group", "--subtalker-top-p-by-group"].contains flag then
     if (parseFloatCsv? value).isNone then
       throw s!"Invalid CSV float value for {flag}: {value}"
+  if #["--top-k", "--subtalker-top-k"].contains flag then
+    if (PosNat.parseOrNone? value).isNone then
+      throw s!"Invalid top-k value for {flag}: {value} (expected a positive count or none)"
   if flag == "--subtalker-top-k-by-group" then
-    if (parseNatCsv? value).isNone then
-      throw s!"Invalid CSV integer value for {flag}: {value}"
+    if (parseTopKCsv? value).isNone then
+      throw s!"Invalid CSV top-k value for {flag}: {value} (expected positive counts or none)"
 
 private partial def validateRawArgs : List String → Except String Unit
   | [] => .ok ()
@@ -254,15 +257,15 @@ private def printUsage : IO Unit := do
   IO.println "  --think-mode <auto|think|no-think>  Reasoning-mode codec prefill control (default: auto)"
   IO.println "  --seed <u64>                  Deterministic RNG seed for sampling"
   IO.println "  --temperature <f>             Sampling temperature (default: 0.9)"
-  IO.println "  --top-k <n>                   Top-k sampling (default: 50)"
+  IO.println "  --top-k <n|none>              Top-k sampling (default: none)"
   IO.println "  --top-p <f>                   Top-p sampling (default: 1.0)"
   IO.println "  --repetition-penalty <f>      Repetition penalty for first-codebook sampling (default: 1.05)"
   IO.println "  --suppress-tail <n>           Suppress top tail vocab IDs except EOS (default: 1024)"
   IO.println "  --subtalker-temperature <f>   Subtalker sampling temperature (default: 0.9)"
-  IO.println "  --subtalker-top-k <n>         Subtalker top-k sampling (default: 50)"
+  IO.println "  --subtalker-top-k <n|none>    Subtalker top-k sampling (default: none)"
   IO.println "  --subtalker-top-p <f>         Subtalker top-p sampling (default: 1.0)"
   IO.println "  --subtalker-temp-by-group <csv>  Residual-group temperatures, e.g. 0.9,0.85,0.8"
-  IO.println "  --subtalker-top-k-by-group <csv> Residual-group top-k values, e.g. 50,40,30"
+  IO.println "  --subtalker-top-k-by-group <csv> Residual-group top-k values, e.g. 50,40,none"
   IO.println "  --subtalker-top-p-by-group <csv> Residual-group top-p values, e.g. 1.0,0.95,0.9"
   IO.println "  --encode-audio-path <path>    Encode audio to speech-tokenizer codec IDs"
   IO.println "  --encode-out-codes-path <p>   Output codec-ID file for --encode-audio-path"
@@ -529,7 +532,7 @@ def runEndToEnd (args : Args) : IO Unit := do
   IO.println s!"Language: {args.language}"
   IO.println s!"Target device: {repr targetDevice}"
   let thinkMode := parseThinkMode args.thinkMode
-  let subtalkerTopKsByGroup : Option (Array Nat) :=
+  let subtalkerTopKsByGroup : Option (Array TopK) :=
     args.subtalkerTopKsByGroup
   match args.seed with
   | some seed =>
@@ -542,21 +545,20 @@ def runEndToEnd (args : Args) : IO Unit := do
   let cfg ← Qwen3TTSConfig.loadFromPretrainedDir modelDir
   IO.println s!"Model type: {cfg.ttsModelType}, talker hidden={cfg.talkerConfig.hiddenSize}, code groups={cfg.talkerConfig.numCodeGroups}"
   let vocabTopKMax := cfg.talkerConfig.codePredictorConfig.vocabSize
-  if args.topK > vocabTopKMax then
-    throw <| IO.userError
-      s!"--top-k ({args.topK}) exceeds talker vocab size ({vocabTopKMax})"
-  if args.subtalkerTopK > vocabTopKMax then
-    throw <| IO.userError
-      s!"--subtalker-top-k ({args.subtalkerTopK}) exceeds talker vocab size ({vocabTopKMax})"
-  match args.subtalkerTopKsByGroup with
-  | some ks =>
-      for i in [:ks.size] do
-        let k := ks.getD i 0
-        if k > vocabTopKMax then
+  if let some k := args.topK then
+    if k.val > vocabTopKMax then
+      throw <| IO.userError
+        s!"--top-k ({k.val}) exceeds talker vocab size ({vocabTopKMax})"
+  if let some k := args.subtalkerTopK then
+    if k.val > vocabTopKMax then
+      throw <| IO.userError
+        s!"--subtalker-top-k ({k.val}) exceeds talker vocab size ({vocabTopKMax})"
+  if let some ks := args.subtalkerTopKsByGroup then
+    for h : i in [:ks.size] do
+      if let some k := ks[i] then
+        if k.val > vocabTopKMax then
           throw <| IO.userError
-            s!"--subtalker-top-k-by-group[{i}] ({k}) exceeds talker vocab size ({vocabTopKMax})"
-  | none =>
-      pure ()
+            s!"--subtalker-top-k-by-group[{i}] ({k.val}) exceeds talker vocab size ({vocabTopKMax})"
 
   match args.encodeAudioPath with
   | some audioPath =>

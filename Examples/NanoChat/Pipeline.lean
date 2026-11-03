@@ -1795,8 +1795,7 @@ def reinforcementLearning (cfg : NanoChatConfig) : PipelineM Unit := do
       let rowLogits := lastLogits.reshape #[1, modelCfg.vocabSize]
       let scaled := if grpoCfg.temperature == 1.0 then rowLogits
                     else Tensor.mulScalar rowLogits (1.0 / grpoCfg.temperature)
-      let filtered := if grpoCfg.topK == 0 then scaled
-                      else Tensor.topKFilter scaled grpoCfg.topK
+      let filtered := grpoCfg.topK.filter scaled
       let probs := Tensor.softmax filtered
       let sampled ← Tensor.multinomial probs 1
       let sampled := sampled.reshape #[]
