@@ -105,7 +105,7 @@ lean_object* setDevice(uint64_t index) {
 #ifdef TYR_DISTRIBUTED_BASELINE
   return baselineSetDevice(index, lean_box(0));
 #else
-  return lean_torch_dist_set_cuda_device(index);
+  return lean_torch_dist_set_cuda_device(Nat(index));
 #endif
 }
 lean_object* shape(std::initializer_list<uint64_t> dims) {

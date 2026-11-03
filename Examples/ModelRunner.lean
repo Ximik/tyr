@@ -47,7 +47,7 @@ def resolveDevice (arg : String) : IO (Device × Option String) := do
         match (requested.drop 5).toNat? with
         | some idx =>
             if ← cuda_is_available then
-              pure (← Device.cuda idx.toUInt64, none)
+              pure (← Device.cuda idx, none)
             else
               pure (.CPU, some s!"Warning: --device cuda:{idx} requested but CUDA is unavailable; falling back to CPU.")
         | none => pure (.CPU, some s!"Warning: invalid device selector '{arg}'; falling back to CPU.")

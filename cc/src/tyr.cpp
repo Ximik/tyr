@@ -294,7 +294,8 @@ torch::Device getDevice(b_lean_obj_arg device) {
   const auto tag = lean_obj_tag(device);
   const bool cuda = tag == static_cast<unsigned>(tyr::lean::DeviceKind::CUDA);
   TORCH_CHECK(!cuda || !lean_is_scalar(device), "Malformed Lean CUDA device constructor");
-  const auto cuda_index = cuda ? lean_ctor_get_uint64(device, 0) : 0;
+  const auto cuda_index =
+    cuda ? tyr::natTo<c10::DeviceIndex>(lean_ctor_get(device, 0), "CUDA device index") : 0;
   const auto result = tyr::metadata::deviceFromLeanTag(tag, cuda_index);
 #ifdef __APPLE__
   if (result.is_mps()) {
@@ -480,8 +481,8 @@ lean_object* lean_torch_get_device_enum(b_lean_obj_arg t) {
     const auto tag = tyr::metadata::leanDeviceTag(device);
     if (tag == static_cast<unsigned>(tyr::lean::DeviceKind::CUDA)) {
         // The only constructor with a field: the device index.
-        lean_object* obj = lean_alloc_ctor(tag, 0, 8);
-        lean_ctor_set_uint64(obj, 0, device.index());
+        lean_object* obj = lean_alloc_ctor(tag, 1, 0);
+        lean_ctor_set(obj, 0, lean_box(static_cast<size_t>(device.index())));
         return obj;
     }
     return lean_box(tag);
@@ -3538,10 +3539,10 @@ lean_object* lean_torch_acquire_constant_support(
 }
 
 // Check if CUDA is available
-lean_object* lean_torch_device_cuda(uint64_t index) {
+lean_object* lean_torch_device_cuda(lean_obj_arg index_obj) {
   return tyr::checkedIoCall("Device.cuda", [&] {
-    TORCH_CHECK(index <= static_cast<uint64_t>(std::numeric_limits<c10::DeviceIndex>::max()),
-      "CUDA device index is outside the native DeviceIndex range: ", index);
+    tyr::OwnedArg index_owner(index_obj);
+    const uint64_t index = tyr::natTo<c10::DeviceIndex>(index_obj, "CUDA device index");
     TORCH_CHECK(torch::cuda::is_available(), "CUDA is not available");
     const auto count = torch::cuda::device_count();
     TORCH_CHECK(index < count, "CUDA device index ", index,
@@ -3550,8 +3551,8 @@ lean_object* lean_torch_device_cuda(uint64_t index) {
     // placement into pure tensor code. No tensor storage is retained.
     (void)torch::empty({0}, torch::TensorOptions().dtype(torch::kFloat32)
       .device(torch::Device(torch::kCUDA, static_cast<c10::DeviceIndex>(index))));
-    lean_object* device = lean_alloc_ctor(0, 0, 8);
-    lean_ctor_set_uint64(device, 0, index);
+    lean_object* device = lean_alloc_ctor(0, 1, 0);
+    lean_ctor_set(device, 0, lean_box(index));
     return lean_io_result_mk_ok(device);
   });
 }

@@ -127,7 +127,7 @@ def deviceToString (device : Device) : String :=
 /-- Resolve training device from TYR_DEVICE.
     In distributed mode, CUDA ordinal follows LOCAL_RANK (per-node index). -/
 def resolveTrainingDevice (_rank localRank : UInt64) (isDistributed : Bool) (env : TrainEnvState) : IO Device := do
-  let cudaOrdinal := if isDistributed then localRank else 0
+  let cudaOrdinal := if isDistributed then localRank.toNat else 0
   let requested? := env.requestedDevice?
   match requested? with
   | some "cpu" => pure Device.CPU
@@ -154,7 +154,7 @@ def initDistributedIfNeeded (env : TrainEnvState) : IO Bool := do
     let masterPort := env.masterPort?.getD 29500
     IO.println s!"Initializing distributed: rank {rank} (local {localRank})/{worldSize} master={masterAddr}:{masterPort}"
     if ← cuda_is_available then
-      dist.setCudaDevice localRank
+      dist.setCudaDevice localRank.toNat
     dist.initProcessGroup "nccl" masterAddr masterPort rank worldSize
     return true
   else

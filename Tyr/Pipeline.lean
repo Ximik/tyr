@@ -303,7 +303,7 @@ def getLocalRankFromEnv : IO UInt64 := do
 
 /-- Resolve the training device from `TYR_DEVICE` and distributed rank state. -/
 def resolveTrainingDevice (_rank localRank : UInt64) (isDistributed : Bool) : IO Device := do
-  let cudaOrdinal := if isDistributed then localRank else 0
+  let cudaOrdinal := if isDistributed then localRank.toNat else 0
   let requested? := (← IO.getEnv "TYR_DEVICE").map String.toLower
   match requested? with
   | some "cpu" => pure Device.CPU
@@ -811,7 +811,7 @@ def withDistributedWithHandlers (config : PipelineConfig) (logHandlers : LogHand
 
   if worldSize > 1 then
     if ← cuda_is_available then
-      dist.setCudaDevice localRank.toUInt64
+      dist.setCudaDevice localRank
     dist.initProcessGroup "nccl" masterAddr masterPort rank worldSize
 
   let result ← runPipelineWithHandlers config logHandlers action
