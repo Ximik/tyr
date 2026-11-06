@@ -33,7 +33,7 @@ def tokenizerFiles : Array String := #[
   "merges.txt"
 ]
 
-export torch.Hub (resolvePretrainedDir detectWeightLayout findCachedSnapshot? shardFilesFromIndexFile)
+export torch.Hub (resolvePretrainedDir findCachedSnapshot? shardFilesFromIndexFile)
 
 end torch.qwen25omni.hub
 
@@ -55,7 +55,6 @@ def loadFromPretrained
     hub.tokenizerFiles
     (fun modelDir cfg => Config.loadFromPretrainedDir modelDir cfg)
     defaults
-    (fun modelDir cfg => Qwen25OmniForCausalLM.loadSharded (device := device) modelDir cfg)
     (fun path cfg => Qwen25OmniForCausalLM.load (device := device) path cfg)
 
 end Qwen25OmniForCausalLM

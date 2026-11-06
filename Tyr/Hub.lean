@@ -5,6 +5,7 @@
   pretrained model directories. Used by all `Tyr.Model.*.Pretrained` modules.
 -/
 import Lean.Data.Json
+import Tyr.SafeTensors.File
 
 namespace torch.Hub
 
@@ -19,24 +20,6 @@ structure DownloadOptions where
   cacheDir : String := defaultCacheDir
   includeTokenizer : Bool := true
   deriving Repr, Inhabited
-
-/-! ## JSON helpers -/
-
-private def getObjVal? (j : Json) (key : String) : Option Json :=
-  match j with
-  | .obj kvs => Std.TreeMap.Raw.get? kvs key
-  | _ => none
-
-private def getString? (j : Json) : Option String :=
-  match j with
-  | .str s => some s
-  | _ => none
-
-def parseJsonFile (path : String) : IO Json := do
-  let contents ← IO.FS.readFile path
-  match Json.parse contents with
-  | .ok j => pure j
-  | .error err => throw <| IO.userError s!"Failed to parse JSON at {path}: {err}"
 
 /-! ## File system helpers -/
 
@@ -65,23 +48,14 @@ def dirExists (path : String) : IO Bool := do
   else
     p.isDir
 
-private def pushUnique (xs : Array String) (x : String) : Array String :=
-  if xs.contains x then xs else xs.push x
-
 /-! ## Shard parsing -/
 
-/-- Parse a sharded `model.safetensors.index.json` and return unique shard file names. -/
+/-- The unique shard files named by a `model.safetensors.index.json`. -/
 def shardFilesFromIndexFile (indexPath : String) : IO (Array String) := do
-  let root ← parseJsonFile indexPath
   let mut out : Array String := #[]
-  match getObjVal? root "weight_map" with
-  | some (.obj kvs) =>
-    for (_, shardJson) in kvs do
-      match getString? shardJson with
-      | some shard => out := pushUnique out shard
-      | none => pure ()
-  | _ =>
-    throw <| IO.userError s!"Missing or invalid weight_map in {indexPath}"
+  for (_, shard) in ← safetensors.readWeightMap indexPath do
+    unless out.contains shard do
+      out := out.push shard
   pure out
 
 /-! ## Download -/
@@ -243,21 +217,10 @@ def resolvePretrainedDir (source : String) (opts : DownloadOptions := {}) (token
     ensureTokenizerFiles source opts.revision modelDir tokenizerFiles
   pure modelDir
 
-/-- Detect whether local model files are sharded or single-file. -/
-def detectWeightLayout (modelDir : String) : IO Bool := do
-  let sharded := s!"{modelDir}/model.safetensors.index.json"
-  if ← fileExists sharded then
-    pure true
-  else if ← fileExists s!"{modelDir}/model.safetensors" then
-    pure false
-  else
-    throw <| IO.userError s!"No model.safetensors(.index.json) found in {modelDir}"
-
 /-- Generic helper to load a model from a local directory or HF Hub repo.
     - Resolves/downloads the model directory
     - Loads config
-    - Detects sharded vs single-file weights
-    - Loads via the provided model-specific functions
+    - Loads the directory via the provided model-specific function
     Returns the resolved config and model as a dependent pair. -/
 def loadModelFromPretrained
     {Cfg : Type}
@@ -268,8 +231,7 @@ def loadModelFromPretrained
     (tokenizerFiles : Array String)
     (loadConfig : String → Cfg → IO Cfg)
     (defaults : Cfg)
-    (loadSharded : String → (cfg : Cfg) → IO (Model cfg))
-    (loadSingle : String → (cfg : Cfg) → IO (Model cfg))
+    (load : String → (cfg : Cfg) → IO (Model cfg))
     : IO (Sigma (fun cfg => Model cfg)) := do
   let modelDir ← resolvePretrainedDir source {
     revision := revision
@@ -277,12 +239,6 @@ def loadModelFromPretrained
     includeTokenizer := true
   } tokenizerFiles
   let cfg ← loadConfig modelDir defaults
-  let isSharded ← detectWeightLayout modelDir
-  let model ←
-    if isSharded then
-      loadSharded modelDir cfg
-    else
-      loadSingle (s!"{modelDir}/model.safetensors") cfg
-  pure ⟨cfg, model⟩
+  pure ⟨cfg, ← load modelDir cfg⟩
 
 end torch.Hub

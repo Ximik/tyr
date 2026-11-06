@@ -10,7 +10,7 @@
 
   Ground truth generator: Tests/fixtures/laguna/gen_moe_fixtures.py
 -/
-import Tyr.SafeTensors.Load
+import Tyr.SafeTensors.Source
 import Tyr.Model.Laguna.Config
 import Tyr.Model.Laguna.MoE
 
@@ -58,20 +58,21 @@ private def findFixture : IO String := do
 
 /-- Build the MoE block from the fixture, moving all tensors to `device`. -/
 private def loadBlock (path : String) (device : Device) : IO (LagunaSparseMoeBlock (device := device) testCfg .BFloat16) := do
-  let routerW ← torch.safetensors.loadTensorCandidates path #["router_weight"] #[8, 64]
-  let routerB ← torch.safetensors.loadTensorCandidates path #["router_bias"] #[8]
+  let src ← torch.safetensors.Source.open path
+  let routerW ← src.load "router_weight" #[8, 64]
+  let routerB ← src.load "router_bias" #[8]
   let router : LagunaTopKRouter (device := device) testCfg := {
     weight := moveStored routerW device
     eScoreCorrectionBias := some (moveStored routerB device) }
-  let gatePacked ← torch.safetensors.loadTensorCandidates path #["gate_packed"] #[8, 32, 32]
-  let gateScale ← torch.safetensors.loadTensorCandidates path #["gate_scales"] #[8, 32, 4]
-  let gateGlobal ← torch.safetensors.loadTensorCandidates path #["gate_global"] #[8]
-  let upPacked ← torch.safetensors.loadTensorCandidates path #["up_packed"] #[8, 32, 32]
-  let upScale ← torch.safetensors.loadTensorCandidates path #["up_scales"] #[8, 32, 4]
-  let upGlobal ← torch.safetensors.loadTensorCandidates path #["up_global"] #[8]
-  let downPacked ← torch.safetensors.loadTensorCandidates path #["down_packed"] #[8, 64, 16]
-  let downScale ← torch.safetensors.loadTensorCandidates path #["down_scales"] #[8, 64, 2]
-  let downGlobal ← torch.safetensors.loadTensorCandidates path #["down_global"] #[8]
+  let gatePacked ← src.load "gate_packed" #[8, 32, 32]
+  let gateScale ← src.load "gate_scales" #[8, 32, 4]
+  let gateGlobal ← src.load "gate_global" #[8]
+  let upPacked ← src.load "up_packed" #[8, 32, 32]
+  let upScale ← src.load "up_scales" #[8, 32, 4]
+  let upGlobal ← src.load "up_global" #[8]
+  let downPacked ← src.load "down_packed" #[8, 64, 16]
+  let downScale ← src.load "down_scales" #[8, 64, 2]
+  let downGlobal ← src.load "down_global" #[8]
   let experts : LagunaPackedExperts (device := device) testCfg := {
     gatePacked := moveStored gatePacked device
     gateScale := moveStored gateScale device
@@ -82,9 +83,9 @@ private def loadBlock (path : String) (device : Device) : IO (LagunaSparseMoeBlo
     downPacked := moveStored downPacked device
     downScale := moveStored downScale device
     downGlobal := moveStored downGlobal device }
-  let sharedGate ← torch.safetensors.loadTensorCandidates path #["shared_gate"] #[32, 64]
-  let sharedUp ← torch.safetensors.loadTensorCandidates path #["shared_up"] #[32, 64]
-  let sharedDown ← torch.safetensors.loadTensorCandidates path #["shared_down"] #[64, 32]
+  let sharedGate ← src.load "shared_gate" #[32, 64]
+  let sharedUp ← src.load "shared_up" #[32, 64]
+  let sharedDown ← src.load "shared_down" #[64, 32]
   pure {
     router := router
     experts := experts
@@ -124,13 +125,14 @@ private def deviceLabel (device : Device) : String :=
   | .MPS => "mps"
 
 private def runCase (path : String) (device : Device) : IO Unit := do
+  let src ← torch.safetensors.Source.open path
   let lbl := deviceLabel device
   let block ← loadBlock path device
-  let x ← torch.safetensors.loadTensorCandidates path #["x"] #[5, 64]
+  let x ← src.load "x" #[5, 64]
   let xD : Tensor { shape := #[5, 64], dtype := .BFloat16, device := device } := (← requireBF16 x).to device
-  let yExp ← torch.safetensors.loadTensorCandidates path #["y_expected"] #[5, 64]
-  let idxExp ← torch.safetensors.loadTensorCandidates path #["top_idx_expected"] #[5, 2]
-  let wExp ← torch.safetensors.loadTensorCandidates path #["weights_expected"] #[5, 2]
+  let yExp ← src.load "y_expected" #[5, 64]
+  let idxExp ← src.load "top_idx_expected" #[5, 2]
+  let wExp ← src.load "weights_expected" #[5, 2]
 
   -- Router unit check: selected expert SETS match (order-insensitive via
   -- descending sort), routing-weight multisets match within tolerance.

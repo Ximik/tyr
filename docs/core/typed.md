@@ -412,11 +412,8 @@ def checkRaw (raw : RawTensor) : Except String (Tensor { shape := #[2, 3], dtype
 
 `Tensor.ofRaw` checks all claims in the destination index. `Tensor.ofTensor` and
 `ofTensor?` check a requested shape and dtype and index the result by
-`raw.device`; `ofTensorWithContract` also checks an optional expected placement. `Tensor.validate` audits an existing indexed
+`raw.device`. `Tensor.validate` audits an existing indexed
 value against its current native metadata.
-
-`TensorContract` contains a `TensorSpec`, an optional `expectedDevice`, and a descriptive
-`TensorRole`. The role does not itself enforce a runtime invariant.
 
 There is no public unchecked raw constructor or implicit coercion to
 `RawTensor`. The opaque carrier prevents anonymous construction, structural

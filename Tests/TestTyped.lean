@@ -4,6 +4,7 @@ import Tyr.Typed
 import Tyr.Typed.Neural
 import Tyr.Torch
 import Tyr.SafeTensors.Schema
+import Tyr.SafeTensors.Source
 
 open torch
 
@@ -165,19 +166,19 @@ def testTypedDtypePromotionMatrix : IO Unit := do
   let dtypes : Array DType := #[.Bool, .UInt8, .Int8, .Int16, .Int32, .Int64,
     .Float16, .BFloat16, .Float32, .Float64]
   for lhs in dtypes do
-    let a ← safetensors.loadTensorWithSpec path lhs.canonicalName ⟨#[1], lhs⟩
+    let a ← (← safetensors.Source.open path).loadAs lhs.canonicalName ⟨#[1], lhs⟩
     for rhs in dtypes do
-      let b ← safetensors.loadTensorWithSpec path rhs.canonicalName ⟨#[1], rhs⟩
+      let b ← (← safetensors.Source.open path).loadAs rhs.canonicalName ⟨#[1], rhs⟩
       match h : DType.promote? lhs rhs with
       | none => LeanTest.fail s!"Expected ordinary dtype promotion for {lhs}/{rhs}"
       | some result => do
           letI : DType.Promotes lhs rhs result := ⟨h⟩
           assertValid (Tensor.add a b) s!"{lhs} + {rhs}"
-  let u8 ← safetensors.loadTensorWithSpec path "UInt8" ⟨#[1], .UInt8⟩
-  let i8 ← safetensors.loadTensorWithSpec path "Int8" ⟨#[1], .Int8⟩
+  let u8 ← (← safetensors.Source.open path).loadAs "UInt8" ⟨#[1], .UInt8⟩
+  let i8 ← (← safetensors.Source.open path).loadAs "Int8" ⟨#[1], .Int8⟩
   LeanTest.assertEqual (← (Tensor.add u8 i8).toFloatArray) #[254.0]
   for dtype in #[DType.Float8E4M3FN, DType.Float8E5M2] do
-    let raw ← safetensors.loadTensorWithSpec path dtype.canonicalName ⟨#[1], dtype⟩
+    let raw ← (← safetensors.Source.open path).loadAs dtype.canonicalName ⟨#[1], dtype⟩
     LeanTest.assertEqual raw.actualSpec.dtype dtype
     LeanTest.assertEqual dtype.bitWidth? (some 8)
 

@@ -16,7 +16,7 @@
   - up_blocks numbered 0→3 (low index = low res), opposite of BFL's 3→0
 -/
 import Tyr.Model.VAE.TypedOps
-import Tyr.SafeTensors.Exact
+import Tyr.SafeTensors.Source
 import Tyr.Log
 import Tyr.Model.VAE.Decoder
 
@@ -28,7 +28,7 @@ open torch.Log
 private def loadWeight (path : String) (names : Array String) (shape : Shape)
     (device : Device := .CPU) : IO (Tensor ⟨shape, dtype, device⟩) := do
   let some name := names[0]? | throw (IO.userError "Empty weight name")
-  let packed ← safetensors.loadTensorExact path name shape device
+  let packed ← (← safetensors.Source.open path).load name shape device
   match Tensor.ofRaw (σ := ⟨shape, dtype, device⟩) packed.2.raw with
   | .ok tensor => pure tensor
   | .error message => throw <| IO.userError s!"VAE tensor '{name}': {message}"
@@ -58,7 +58,7 @@ def loadConv2dAtDType [DType.RealFloating dtype] (path : String) (name : String)
 def loadConv2d (path : String) (name : String)
     (in_ch out_ch kernel_size padding : Nat) (device : Device := .CPU) :
     IO (Σ dtype : RealFloatingDType, Conv2dParams (device := device) in_ch out_ch kernel_size padding dtype.val) := do
-  let anchor ← safetensors.loadTensorExact path s!"{name}.weight"
+  let anchor ← (← safetensors.Source.open path).load s!"{name}.weight"
     #[out_ch, in_ch, kernel_size, kernel_size] device
   let floating ← IO.ofExcept (DType.realFloating? anchor.1)
   let _ := floating.down
@@ -174,7 +174,7 @@ def loadDecoderAtDType [DType.RealFloating dtype] (path : String) (log : Handler
 /-- Load the decoder without converting the checkpoint precision. -/
 def loadDecoder (path : String) (log : Handlers := {}) (device : Device := .CPU) :
     IO (Σ dtype : RealFloatingDType, Decoder (device := device) dtype.val) := do
-  let anchor ← safetensors.loadTensorExact path "post_quant_conv.weight" #[32, 32, 1, 1] device
+  let anchor ← (← safetensors.Source.open path).load "post_quant_conv.weight" #[32, 32, 1, 1] device
   let floating ← IO.ofExcept (DType.realFloating? anchor.1)
   let _ := floating.down
   let decoder ← loadDecoderAtDType (dtype := anchor.1) path log device

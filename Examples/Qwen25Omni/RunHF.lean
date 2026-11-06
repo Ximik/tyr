@@ -115,10 +115,7 @@ def runMain (argv : List String) : IO UInt32 := do
 
   let cfgDefaults := defaultConfigForSource args.source
   let cfg ← Config.loadFromPretrainedDir modelDir cfgDefaults
-  let isSharded ← Hub.detectWeightLayout modelDir
-  let model ←
-    if isSharded then Qwen25OmniForCausalLM.loadSharded modelDir cfg (device := device)
-    else Qwen25OmniForCausalLM.load s!"{modelDir}/model.safetensors" cfg (device := device)
+  let model ← Qwen25OmniForCausalLM.load modelDir cfg (device := device)
 
   runBatches tok model args prompts
   pure 0

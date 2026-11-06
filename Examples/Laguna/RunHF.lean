@@ -176,10 +176,7 @@ def runMain (argv : List String) : IO UInt32 := do
   let tok ← tokenizer.laguna.loadTokenizer modelDir
   let prompts ← loadPrompts args.promptFile args.prompt
   let cfg ← Config.loadFromPretrainedDir modelDir Config.laguna_s_2_1
-  let isSharded ← Hub.detectWeightLayout modelDir
-  let model ←
-    if isSharded then LagunaForCausalLM.loadSharded modelDir cfg device
-    else LagunaForCausalLM.load s!"{modelDir}/model.safetensors" cfg device
+  let model ← LagunaForCausalLM.load modelDir cfg device
   runTextBatches tok cfg model.2 args prompts
   pure 0
 

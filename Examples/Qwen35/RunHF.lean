@@ -215,10 +215,8 @@ def runMain (argv : List String) : IO UInt32 := do
 
   if useMultimodal then
     let cfg ← VLConfig.loadFromPretrainedDir modelDir {}
-    let isSharded ← Hub.detectWeightLayout modelDir
     let ⟨_textDType, visionDType, model⟩ ←
-      if isSharded then Qwen35ForConditionalGeneration.loadSharded modelDir cfg device
-      else Qwen35ForConditionalGeneration.load s!"{modelDir}/model.safetensors" cfg device
+      Qwen35ForConditionalGeneration.load modelDir cfg device
     let imagePatches? ←
       match args.imagePath with
       | some p =>
@@ -259,10 +257,7 @@ def runMain (argv : List String) : IO UInt32 := do
       imageFeatures? videoFeatures?
   else
     let cfg ← Config.loadFromPretrainedDir modelDir Config.qwen35_9B
-    let isSharded ← Hub.detectWeightLayout modelDir
-    let ⟨_dtype, model⟩ ←
-      if isSharded then Qwen35ForCausalLM.loadSharded modelDir cfg device
-      else Qwen35ForCausalLM.load s!"{modelDir}/model.safetensors" cfg device
+    let ⟨_dtype, model⟩ ← Qwen35ForCausalLM.load modelDir cfg device
     runTextBatches tok cfg model args prompts
 
   pure 0

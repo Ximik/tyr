@@ -14,7 +14,7 @@
   - Decoder-side 25Hz architecture (DiT + BigVGAN) is handled separately.
 -/
 import Tyr.Typed.Neural
-import Tyr.SafeTensors.Exact
+import Tyr.SafeTensors.Source
 import Tyr.Model.Qwen3TTS.DTypes
 import Tyr.TensorStruct
 import Tyr.Module.Derive
@@ -139,14 +139,14 @@ end SpeechTokenizer25HzEncoderConfig
 
 private def loadFrozen (path : String) (name : String) (s : Shape)
     : IO (Tensor { shape := s, dtype := dtype.val, device := device }) := do
-  let packed ← safetensors.loadTensorExact path name s device
+  let packed ← (← safetensors.Source.open path).load name s device
   match packed.atDType? dtype.val with
   | .ok t => pure (Tensor.detach t)
   | .error message => throw <| IO.userError s!"Speech tokenizer tensor '{name}': {message}"
 
 private def loadFrozenOrZeros (path : String) (name : String) (s : Shape)
     : IO (Tensor { shape := s, dtype := dtype.val, device := device }) := do
-  match ← safetensors.loadOptionalTensorExact path name s device with
+  match ← (← safetensors.Source.open path).load? name s device with
   | none =>
     let support ← dtype.val.acquireConstantSupport device
     let _ := support.down
@@ -277,7 +277,7 @@ def loadFromDir (speechTokenizerDir : String) (device : Device := Device.CPU) : 
   SpeechTokenizer25HzEncoderConfig.validateSupported cfg
 
   let weightsPath := s!"{speechTokenizerDir}/model.safetensors"
-  let anchor ← safetensors.loadTensorExact weightsPath "encoder.tokenizer.conv1.weight" #[1280, 128, 3] device
+  let anchor ← (← safetensors.Source.open weightsPath).load "encoder.tokenizer.conv1.weight" #[1280, 128, 3] device
   let floating ← IO.ofExcept (DType.realFloating? anchor.1)
   let _ := floating.down
   let dtype := RealFloatingDType.ofDType anchor.1

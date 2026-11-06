@@ -527,8 +527,7 @@ private def writeQwen35Fixture (dir : System.FilePath) (cfg : Config)
         for optionalWeights in #[false, true] do
           IO.FS.withTempDir fun dir => do
             writeQwen35Fixture dir cfg bf16 sharded optionalWeights
-            let model ← if sharded then Qwen35ForCausalLM.loadSharded dir.toString cfg
-              else Qwen35ForCausalLM.load (dir / "model.safetensors").toString cfg
+            let model ← Qwen35ForCausalLM.load (if sharded then dir.toString else (dir / "model.safetensors").toString) cfg
             let selectedDType := model.1
             let model := TensorStruct.detach model.2
             let support ← selectedDType.val.acquireConstantSupport .CPU
@@ -555,8 +554,7 @@ private def writeQwen35Fixture (dir : System.FilePath) (cfg : Config)
     IO.FS.withTempDir fun dir => do
       writeQwen35Fixture dir tinyDenseCfg true sharded true
         (some ("model.norm.weight", false))
-      let ⟨dtype, model⟩ ← if sharded then Qwen35ForCausalLM.loadSharded dir.toString tinyDenseCfg
-        else Qwen35ForCausalLM.load (dir / "model.safetensors").toString tinyDenseCfg
+      let ⟨dtype, model⟩ ← Qwen35ForCausalLM.load (if sharded then dir.toString else (dir / "model.safetensors").toString) tinyDenseCfg
       let support ← dtype.val.acquireConstantSupport .CPU
       let _ := support.down
       LeanTest.assertEqual dtype.val DType.BFloat16
@@ -574,8 +572,7 @@ private def writeQwen35Fixture (dir : System.FilePath) (cfg : Config)
       writeQwen35Fixture dir tinyDenseCfg true sharded true
         (some ("model.layers.1.self_attn.q_proj.weight", false))
       Tests.assertThrows (do
-        if sharded then discard <| Qwen35ForCausalLM.loadSharded dir.toString tinyDenseCfg
-        else discard <| Qwen35ForCausalLM.load (dir / "model.safetensors").toString tinyDenseCfg)
+        discard <| Qwen35ForCausalLM.load (if sharded then dir.toString else (dir / "model.safetensors").toString) tinyDenseCfg)
         (some "Expected dtype")
 
 @[test] def testQwen35LoaderRejectsMalformedOptionalWeights : IO Unit := do
@@ -588,6 +585,5 @@ private def writeQwen35Fixture (dir : System.FilePath) (cfg : Config)
           (if isScale then none else some name)
           (if isScale then #[(name, #[1])] else #[])
         Tests.assertThrows (do
-          if sharded then discard <| Qwen35ForCausalLM.loadSharded dir.toString tinyDenseCfg
-          else discard <| Qwen35ForCausalLM.load (dir / "model.safetensors").toString tinyDenseCfg)
+          discard <| Qwen35ForCausalLM.load (if sharded then dir.toString else (dir / "model.safetensors").toString) tinyDenseCfg)
           (some "shape")

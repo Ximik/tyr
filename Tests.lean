@@ -26,7 +26,7 @@ import Tests.TestTypedStandalone
 import Tests.TestShapeProofs
 import Tests.TestExactDType
 import Tests.TestExactDTypeContracts
-import Tests.TestExactSafeTensors
+import Tests.TestSafeTensorsSource
 import Tests.TestTensorTreeCast
 import Tests.TestTensorStructDeriveCast
 import Tests.TestLagunaDTypes

@@ -82,9 +82,9 @@ end AutoEncoder
 def loadAutoEncoder (path : String) (log : Handlers := {}) (device : Device := .CPU) :
     IO (Σ dtypes : AutoEncoderDTypes, AutoEncoder (device := device) dtypes) := do
   log.onInfo "Loading AutoEncoder..."
-  let compute ← safetensors.loadTensorExact path "post_quant_conv.weight" #[32, 32, 1, 1] device
-  let mean ← safetensors.loadTensorExact path "bn.running_mean" #[128] device
-  let variance ← safetensors.loadTensorExact path "bn.running_var" #[128] device
+  let compute ← (← safetensors.Source.open path).load "post_quant_conv.weight" #[32, 32, 1, 1] device
+  let mean ← (← safetensors.Source.open path).load "bn.running_mean" #[128] device
+  let variance ← (← safetensors.Source.open path).load "bn.running_var" #[128] device
   let dtypes ← IO.ofExcept (AutoEncoderDTypes.ofDTypes? compute.1 mean.1 variance.1)
   let decoder ← loadDecoderAtDType (dtype := dtypes.compute.val) path log device
   let bn_running_mean ← IO.ofExcept (mean.atDType? dtypes.mean)

@@ -1,4 +1,5 @@
 import Tyr.SafeTensors.Schema
+import Tyr.SafeTensors.Source
 /-
   Tyr/Model/KittenTTS/Pretrained.lean
 
@@ -202,7 +203,7 @@ def loadVoiceStyle (bundle : PretrainedBundle) (voice : String) (phonemeCount : 
     : IO (Tensor { shape := #[1, KittenTTSConfig.fullStyleDim bundle.cfg], dtype := .Float32, device := bundle.device }) := do
   let voicePath ← hub.ensureVoiceSafetensors bundle.source bundle.revision bundle.modelDir voice
   let table : Tensor { shape := #[510, 1, KittenTTSConfig.fullStyleDim bundle.cfg], dtype := .Float32, device := bundle.device } ←
-    safetensors.loadTensorWithSpec voicePath "voice" ⟨#[510, 1, KittenTTSConfig.fullStyleDim bundle.cfg], .Float32⟩ bundle.device
+    (← safetensors.Source.open voicePath).loadAs "voice" ⟨#[510, 1, KittenTTSConfig.fullStyleDim bundle.cfg], .Float32⟩ bundle.device
   let idx := voiceIndexOfPhonemeCount phonemeCount
   let style : Tensor { shape := #[1, 1, KittenTTSConfig.fullStyleDim bundle.cfg], dtype := .Float32, device := bundle.device } := sliceTensor table 0 idx 1
   pure (Tensor.reshape style #[1, KittenTTSConfig.fullStyleDim bundle.cfg])

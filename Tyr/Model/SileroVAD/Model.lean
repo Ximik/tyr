@@ -8,7 +8,7 @@
   - Final speech-probability head
 -/
 import Tyr.Typed
-import Tyr.SafeTensors.Exact
+import Tyr.SafeTensors.Source
 import Tyr.TensorStruct
 import Tyr.Module.Core
 import Tyr.Module.Derive
@@ -50,7 +50,7 @@ private def linear2d {batch inDim outDim : Nat}
 
 private def loadWeight (path name : String) (shape : Shape) (device : Device := .CPU) : IO (Tensor { device := device, shape := shape, dtype := .Float32 }) := do
   try
-    let stored ← safetensors.loadTensorExact path name shape device
+    let stored ← (← safetensors.Source.open path).load name shape device
     -- The checkpoint retains its exact dtype until this model's explicit
     -- Float32 inference policy is applied through the checked conversion.
     IO.ofExcept (stored.2.castDType? .Float32)

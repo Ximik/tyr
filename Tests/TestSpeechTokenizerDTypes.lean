@@ -84,7 +84,7 @@ private def writeAnchors (path : System.FilePath) (computeShape : Array Nat)
   LeanTest.assertEqual layout.compute.val .Float32
   LeanTest.assertEqual layout.usage .Float32
   LeanTest.assertEqual layout.sum .BFloat16
-  let sums ← safetensors.loadTensorExact path.toString "sum" #[2048, 256]
+  let sums ← (← safetensors.Source.open path.toString).load "sum" #[2048, 256]
   let checked ← IO.ofExcept (sums.atDType? layout.sum)
   LeanTest.assertEqual checked.raw.dtype .BFloat16
   LeanTest.assertEqual checked.runtimeShape #[2048, 256]

@@ -74,8 +74,6 @@ def resolvePretrainedDir (source : String) (opts : DownloadOptions := {}) : IO S
     pure ()
   pure modelDir
 
-export torch.Hub (detectWeightLayout)
-
 end torch.qwen3asr.hub
 
 namespace torch.qwen3asr
