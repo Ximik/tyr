@@ -1077,10 +1077,10 @@ def testQwen3ASRAudioEncoderFeatureDType : IO Unit := do
       LeanTest.assertTrue (Float.isFinite (Tensor.item (Tensor.sumAll (Tensor.toFloat32 audio))))
         "Varlen audio features are finite"
       let empty : Tensor { dtype := modelDType, shape := #[1, 4, cfg.outputDim], device := .CPU } := Tensor.sliceChecked audio 0 2 1 #[1, 4, cfg.outputDim]
-      LeanTest.assertEqual (Tensor.item (Tensor.maxAllChecked (Tensor.abs empty))) 0.0 "Zero-length sample stays zero"
+      LeanTest.assertEqual (Tensor.item (Tensor.maxAll (Tensor.abs empty))) 0.0 "Zero-length sample stays zero"
       let short : Tensor { dtype := modelDType, shape := #[1, 4, cfg.outputDim], device := .CPU } := Tensor.sliceChecked audio 0 1 1 #[1, 4, cfg.outputDim]
       let padding : Tensor { dtype := modelDType, shape := #[1, 2, cfg.outputDim], device := .CPU } := Tensor.sliceChecked short 1 2 2 #[1, 2, cfg.outputDim]
-      LeanTest.assertEqual (Tensor.item (Tensor.maxAllChecked (Tensor.abs padding))) 0.0 "Short-sample output padding stays zero"
+      LeanTest.assertEqual (Tensor.item (Tensor.maxAll (Tensor.abs padding))) 0.0 "Short-sample output padding stays zero"
       let dense := encoder.forward mel (by decide)
       let denseExpected := encoder.forward expectedInput (by decide)
       LeanTest.assertEqual dense.actualSpec.dtype encoder.conv2d1Weight.actualSpec.dtype "Dense encoder output uses model dtype"

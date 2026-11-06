@@ -756,6 +756,13 @@ def sumAll? {σ : StaticSpec} (t : Tensor σ) : Except String (Tensor σ.sumSpec
 def sumAll {σ : StaticSpec} (t : Tensor σ) : Tensor σ.sumSpec :=
   checkedResult "sumAll" (sumAll? t)
 
+/-- Proves a shape has elements: literal shapes by evaluation, symbolic ones
+    from a positivity hypothesis for every dimension. -/
+macro "numel_pos" : tactic => `(tactic| first
+  | exact of_decide_eq_true rfl
+  | omega
+  | (simp [Nat.pos_iff_ne_zero, Nat.mul_eq_zero] <;> omega))
+
 def maxAll? {σ : StaticSpec} (t : Tensor σ) : Except String (Tensor (σ.withShape #[])) := do
   DType.checkOrdered t.raw.dtype
   if TensorSpec.numelOfShape σ.shape == 0 then
@@ -764,12 +771,8 @@ def maxAll? {σ : StaticSpec} (t : Tensor σ) : Except String (Tensor (σ.withSh
 
 /-- Maximum over a nonempty ordered tensor. Runtime shapes/dtypes use `maxAll?`. -/
 def maxAll {σ : StaticSpec} [DType.Ordered σ.dtype] (t : Tensor σ)
-    (_nonempty : 0 < TensorSpec.numelOfShape σ.shape := by first | exact of_decide_eq_true rfl | omega | (simp <;> omega)) :
+    (_nonempty : 0 < TensorSpec.numelOfShape σ.shape := by numel_pos) :
     Tensor (σ.withShape #[]) :=
-  checkedResult "maxAll" (maxAll? t)
-
-/-- Runtime-checked convenience for generic shapes; `maxAll?` retains errors. -/
-def maxAllChecked {σ : StaticSpec} (t : Tensor σ) : Tensor (σ.withShape #[]) :=
   checkedResult "maxAll" (maxAll? t)
 
 private def checkReductionAxis (shape : Shape) (dim : Nat) : Except String Unit :=
@@ -940,12 +943,6 @@ def argmax {s : Shape} {d : DType} {dev : Device} [DType.Ordered d]
     Tensor ⟨reduceShape s dim false, .Int64, dev⟩ :=
   checkedResult "argmax" (argmax? t dim)
 
-/-- Runtime-checked pure convenience; use `argmax?` to retain errors. -/
-def argmaxChecked {s : Shape} {d : DType} {dev : Device}
-    (t : Tensor ⟨s, d, dev⟩) (dim : Nat) :
-    Tensor ⟨reduceShape s dim false, .Int64, dev⟩ :=
-  checkedResult "argmax" (argmax? t dim)
-
 /-- Top-k filter over logits (entries outside the top k become -inf), spec-preserving. -/
 def topKFilter {σ : StaticSpec} (logits : Tensor σ) (k : Nat) : Tensor σ :=
   logits.checkedReplacement (RawTensor.topKFilter logits.raw k)
@@ -986,17 +983,11 @@ def crossEntropyNone? {n c : Nat} {d : DType} {dev : Device}
   Tensor.checkSameDevice logits targets
   Tensor.ofRaw (← RawTensor.crossEntropyNoneChecked logits.raw targets.raw)
 
-/-- Runtime-checked convenience form for a dtype selected dynamically.
-Use `crossEntropyNone?` when input or backend errors must be recovered. -/
-def crossEntropyNoneChecked {n c : Nat} {d : DType} {dev : Device}
-    (logits : Tensor ⟨#[n, c], d, dev⟩) (targets : Tensor ⟨#[n], .Int64, dev⟩) :
-    Tensor ⟨#[n], d, dev⟩ := checkedResult "crossEntropyNone" (crossEntropyNone? logits targets)
-
 /-- Per-element cross entropy over real floating logits and Int64 targets. -/
 def crossEntropyNone {n c : Nat} {d : DType} {dev : Device} [DType.RealFloating d]
     (logits : Tensor ⟨#[n, c], d, dev⟩) (targets : Tensor ⟨#[n], .Int64, dev⟩) :
     Tensor ⟨#[n], d, dev⟩ :=
-  crossEntropyNoneChecked logits targets
+  checkedResult "crossEntropyNone" (crossEntropyNone? logits targets)
 
 /-- Extract an Int64 scalar. -/
 def itemInt {d : DType} {dev : Device} (t : Tensor ⟨#[], d, dev⟩) : Int64 :=
@@ -1038,16 +1029,11 @@ def crossEntropy? {n c : Nat} {d : DType} {dev : Device}
   Tensor.checkSameDevice logits targets
   Tensor.ofRaw (← RawTensor.crossEntropyChecked logits.raw targets.raw)
 
-/-- Runtime-checked mean loss for a dtype selected dynamically. -/
-def crossEntropyChecked {n c : Nat} {d : DType} {dev : Device}
-    (logits : Tensor ⟨#[n, c], d, dev⟩) (targets : Tensor ⟨#[n], .Int64, dev⟩) :
-    Tensor ⟨#[], d, dev⟩ := checkedResult "crossEntropy" (crossEntropy? logits targets)
-
 /-- Mean cross entropy over real floating logits and Int64 targets. -/
 def crossEntropy {n c : Nat} {d : DType} {dev : Device} [DType.RealFloating d]
     (logits : Tensor ⟨#[n, c], d, dev⟩) (targets : Tensor ⟨#[n], .Int64, dev⟩) :
     Tensor ⟨#[], d, dev⟩ :=
-  crossEntropyChecked logits targets
+  checkedResult "crossEntropy" (crossEntropy? logits targets)
 
 /-- Draw `numSamples` Int64 indices per row of a probability matrix. -/
 def multinomial {n v : Nat} {d : DType} {dev : Device}

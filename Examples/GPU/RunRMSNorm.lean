@@ -268,7 +268,8 @@ def referenceTraining {rows : Nat}
   return (expectedOut, expectedResid, expectedInv, expectedGradInput, expectedGradWeight)
 
 private def benchmarkTrainingShape (cfg : Benchmark.Config) (stream : UInt64)
-    (caseLabel : String) (rows : Nat) : IO (Array String × Bool) := do
+    (caseLabel : String) (rows : Nat) (_hRows : 0 < rows) : IO (Array String × Bool) := do
+  have : 0 < hiddenDim := by decide
   let device ← Device.cuda 0
   let x : Tensor { shape := #[rows, hiddenDim], dtype := .BFloat16, device := device } :=
     (← Tensor.randn #[rows, hiddenDim] false device).toBFloat16
@@ -373,7 +374,9 @@ private def runBenchmark (args : List String) : IO UInt32 := do
       lines := lines.push f32Line |>.push bf16Line
       allOk := allOk && f32Ok && bf16Ok
     | .training rows => do
-      let (caseLines, ok) ← benchmarkTrainingShape cfg stream matrixCase.id rows
+      let ⟨hRows⟩ ← if h : 0 < rows then pure (PLift.up h) else
+        throw <| IO.userError s!"rmsnorm case {matrixCase.id} needs a positive row count"
+      let (caseLines, ok) ← benchmarkTrainingShape cfg stream matrixCase.id rows hRows
       for line in caseLines do lines := lines.push line
       allOk := allOk && ok
   for line in lines do IO.println line

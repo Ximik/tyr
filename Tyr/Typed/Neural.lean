@@ -655,20 +655,14 @@ def maxLast3d? {batch seq vocab : Nat} {d : DType} {dev : Device}
   let (values, indices) ← RawTensor.maxLast3dChecked input.raw 2
   return (← Tensor.checkedUpdate? input.raw.dtype input.raw.device values, ← Tensor.ofRaw indices)
 
-/-- Runtime-checked pure convenience; use `maxLast3d?` to retain errors. -/
-def maxLast3dChecked {batch seq vocab : Nat} {d : DType} {dev : Device}
-    (input : Tensor ⟨#[batch, seq, vocab], d, dev⟩) :
-    Tensor ⟨#[batch, seq], d, dev⟩ × Tensor ⟨#[batch, seq], .Int64, dev⟩ :=
-  match maxLast3d? input with
-  | .ok result => result
-  | .error message => nativeInvariantFailure s!"Tensor.maxLast3d: {message}"
-
 /-- Reduce a nonempty last axis of an ordered tensor. -/
 def maxLast3d {batch seq vocab : Nat} {d : DType} {dev : Device} [DType.Ordered d]
     (input : Tensor ⟨#[batch, seq, vocab], d, dev⟩)
     (_nonempty : 0 < vocab := by first | exact of_decide_eq_true rfl | omega | (simp <;> omega)) :
     Tensor ⟨#[batch, seq], d, dev⟩ × Tensor ⟨#[batch, seq], .Int64, dev⟩ :=
-  maxLast3dChecked input
+  match maxLast3d? input with
+  | .ok result => result
+  | .error message => nativeInvariantFailure s!"Tensor.maxLast3d: {message}"
 
 /-- Select the largest `k` entries per row, preserving the actual input dtype.
 Runtime dtype/range and native kernel failures are recoverable. -/
@@ -680,20 +674,14 @@ def topKLast2d? {rows cols : Nat} {d : DType} {dev : Device}
   let (values, indices) ← RawTensor.topKLast2dChecked input.raw k 1
   return (← Tensor.checkedUpdate? input.raw.dtype input.raw.device values, ← Tensor.ofRaw indices)
 
-/-- Runtime-checked pure convenience; use `topKLast2d?` to retain errors. -/
-def topKLast2dChecked {rows cols : Nat} {d : DType} {dev : Device}
-    (input : Tensor ⟨#[rows, cols], d, dev⟩) (k : Nat) :
-    Tensor ⟨#[rows, k], d, dev⟩ × Tensor ⟨#[rows, k], .Int64, dev⟩ :=
-  match topKLast2d? input k with
-  | .ok result => result
-  | .error message => nativeInvariantFailure s!"Tensor.topKLast2d: {message}"
-
 /-- Select the largest `k` entries of ordered rows with sufficient width. -/
 def topKLast2d {rows cols : Nat} {d : DType} {dev : Device} [DType.Ordered d]
     (input : Tensor ⟨#[rows, cols], d, dev⟩) (k : Nat)
     (_range : k ≤ cols := by first | exact of_decide_eq_true rfl | omega | (simp <;> omega)) :
     Tensor ⟨#[rows, k], d, dev⟩ × Tensor ⟨#[rows, k], .Int64, dev⟩ :=
-  topKLast2dChecked input k
+  match topKLast2d? input k with
+  | .ok result => result
+  | .error message => nativeInvariantFailure s!"Tensor.topKLast2d: {message}"
 
 /-- End-exclusive integer range, with overflow-safe length computation. -/
 def rangeLength (start stop step : Nat) : Nat :=

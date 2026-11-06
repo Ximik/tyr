@@ -82,13 +82,13 @@ def testQwen3TTSRMSNormModelDType : IO Unit := do
         (w.expand #[2, 3, 4])
     let actual := norm.forward3d x
     LeanTest.assertEqual actual.actualSpec.dtype x.actualSpec.dtype "RMSNorm preserves matching FP32/BF16 model dtype"
-    LeanTest.assertEqual (Tensor.item (Tensor.maxAllChecked (Tensor.abs (Tensor.sub actual.toFloat32 expected.toFloat32)))) 0.0
+    LeanTest.assertEqual (Tensor.item (Tensor.maxAll (Tensor.abs (Tensor.sub actual.toFloat32 expected.toFloat32)))) 0.0
       "RMSNorm restores activation dtype before applying non-unit weights"
     for output in #[(norm.forward2d (Tensor.reshape x #[6, 4])).reshape #[2, 3, 4],
         (norm.forward4d (Tensor.reshape x #[1, 2, 3, 4])).reshape #[2, 3, 4],
         (norm.forward5d (Tensor.reshape x #[1, 2, 3, 4])).reshape #[2, 3, 4]] do
       LeanTest.assertEqual output.actualSpec.dtype x.actualSpec.dtype "All RMSNorm module layouts preserve model dtype"
-      LeanTest.assertEqual (Tensor.item (Tensor.maxAllChecked (Tensor.abs
+      LeanTest.assertEqual (Tensor.item (Tensor.maxAll (Tensor.abs
         (Tensor.sub (Tensor.reshape output #[2, 3, 4]).toFloat32 expected.toFloat32)))) 0.0
         "RMSNorm layout wrappers agree"
     LeanTest.assertEqual (if bf16 then (Tensor.rmsNormWeighted x.toBFloat16 w.toBFloat16 0.01).actualSpec.dtype
