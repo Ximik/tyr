@@ -37,7 +37,8 @@ private def lossMatrix : LeanBenchmark.Matrix LossShape := {
 }
 
 private def benchmarkShape (cfg : Benchmark.Config) (stream : UInt64)
-    (caseLabel : String) (rows : Nat) : IO (Array String × Bool) := do
+    (caseLabel : String) (rows : Nat) (_hRows : 0 < rows) : IO (Array String × Bool) := do
+  have : 0 < vocab := by decide
   let device ← Device.cuda 0
   let logitsBase : Tensor { shape := #[rows, vocab], dtype := .BFloat16, device := device } :=
     (← Tensor.randn #[rows, vocab] false device).toBFloat16
@@ -106,7 +107,9 @@ private def runBenchmark (args : List String) : IO UInt32 := do
   let mut lines : Array String := #[]
   let mut allOk := true
   for matrixCase in selected do
-    let (caseLines, ok) ← benchmarkShape cfg stream matrixCase.id matrixCase.payload.rows
+    let ⟨hRows⟩ ← if h : 0 < matrixCase.payload.rows then pure (PLift.up h) else
+      throw <| IO.userError s!"loss case {matrixCase.id} needs a positive row count"
+    let (caseLines, ok) ← benchmarkShape cfg stream matrixCase.id matrixCase.payload.rows hRows
     for line in caseLines do lines := lines.push line
     allOk := allOk && ok
   for line in lines do IO.println line

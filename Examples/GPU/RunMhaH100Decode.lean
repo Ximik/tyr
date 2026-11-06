@@ -39,6 +39,7 @@ structure DecodeShape where
   atol : Float := 2.5e-2
   /-- Relative tolerance. -/
   rtol : Float := 2.5e-2
+  dimsPos : 0 < batch ∧ 0 < qHeads ∧ 0 < kvHeads ∧ 0 < kvSeq ∧ 0 < headDim := by decide
 
 /-- Decode-shape coverage exercised by this harness. -/
 def decodeShapes : Array DecodeShape := #[
@@ -71,7 +72,7 @@ def decodeFixtureSpec (shape : DecodeShape) : FixtureSpec := {
 def decodeFixtureFile (shape : DecodeShape) (name : String) : System.FilePath :=
   fixturePath (decodeFixtureSpec shape) name
 
-private def shapeQ (s : DecodeShape) : Shape :=
+@[simp] private def shapeQ (s : DecodeShape) : Shape :=
   #[s.batch, s.qHeads, 1, s.headDim]
 
 private def shapeKV (s : DecodeShape) : Shape :=
@@ -111,6 +112,7 @@ def generateDecodeFixturesFor (shape : DecodeShape) : IO Unit := do
 
 /-- Run the kernel on one shape's saved fixtures and assert parity. -/
 def runDecodeOnceFor (shape : DecodeShape) : IO Bool := do
+  have := shape.dimsPos
   if !(← torch.cuda_is_available) then
     IO.eprintln "CUDA is not available on this host."
     return false
@@ -133,15 +135,15 @@ def runDecodeOnceFor (shape : DecodeShape) : IO Bool := do
   let ok := Tensor.allclose expected actual shape.atol shape.rtol
   let diff := Tensor.abs (actual - expected)
   let mae := Tensor.item (Tensor.meanAll diff)
-  let maxAbs := Tensor.item (Tensor.maxAllChecked diff)
-  let actMaxAbs := Tensor.item (Tensor.maxAllChecked (Tensor.abs actual))
+  let maxAbs := Tensor.item (Tensor.maxAll diff)
+  let actMaxAbs := Tensor.item (Tensor.maxAll (Tensor.abs actual))
   let actMeanAbs := Tensor.item (Tensor.meanAll (Tensor.abs actual))
   IO.println s!"  decode {shape.name}: ok={ok} mae={mae} max_abs={maxAbs} act_mean_abs={actMeanAbs} act_max_abs={actMaxAbs}"
   -- Per-(batch, q_head) row diagnostics: which heads have correct vs zero output?
   -- mae over the head_dim axis for each (b, h). Expected is non-trivial; if our
   -- kernel only fills some heads correctly, we'll see a binary distribution.
-  let perHeadAct := Tensor.maxAllChecked (Tensor.abs actual)
-  let perHeadExp := Tensor.maxAllChecked (Tensor.abs expected)
+  let perHeadAct := Tensor.maxAll (Tensor.abs actual)
+  let perHeadExp := Tensor.maxAll (Tensor.abs expected)
   IO.println s!"    per-shape actMax={Tensor.item perHeadAct} expMax={Tensor.item perHeadExp}"
   pure ok
 

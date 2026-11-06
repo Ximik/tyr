@@ -129,11 +129,12 @@ private def loadBlock (path : String) (device : Device) : IO (LagunaSparseMoeBlo
 
 /-- Max abs / max rel (denominator clamped by 1e-3) error in FP32. -/
 private def maxErrors {s : Shape} {d e : DType}
-    (got : Tensor { shape := s, dtype := d, device := device }) (expected : Tensor { shape := s, dtype := e, device := device }) : IO (Float × Float) := do
+    (got : Tensor { shape := s, dtype := d, device := device }) (expected : Tensor { shape := s, dtype := e, device := device })
+    (nonempty : 0 < TensorSpec.numelOfShape s := by numel_pos) : IO (Float × Float) := do
   let ad := Tensor.abs (got.toFloat32 - expected.toFloat32)
-  let maxAbs := (Tensor.maxAllChecked ad).item
+  let maxAbs := (Tensor.maxAll ad nonempty).item
   let denom := Tensor.addScalar (Tensor.abs expected.toFloat32) 1e-3
-  let maxRel := (Tensor.maxAllChecked (ad / denom)).item
+  let maxRel := (Tensor.maxAll (ad / denom) nonempty).item
   pure (maxAbs, maxRel)
 
 /-- Tile `src` (flattened, then moved to `device`) out to exactly `shape`'s
