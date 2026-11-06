@@ -42,7 +42,7 @@ def tokenizerFiles : Array String := #[
   "merges.txt"
 ]
 
-export torch.Hub (resolvePretrainedDir detectWeightLayout findCachedSnapshot? shardFilesFromIndexFile)
+export torch.Hub (resolvePretrainedDir findCachedSnapshot? shardFilesFromIndexFile)
 
 end torch.qwen35.hub
 
@@ -67,7 +67,6 @@ def loadFromPretrained
     hub.tokenizerFiles
     (fun modelDir cfg => Config.loadFromPretrainedDir modelDir cfg)
     defaults
-    (fun modelDir cfg => Qwen35ForCausalLM.loadSharded modelDir cfg device)
     (fun path cfg => Qwen35ForCausalLM.load path cfg device)
 
 end Qwen35ForCausalLM
@@ -89,7 +88,6 @@ def loadFromPretrained
     hub.tokenizerFiles
     (fun modelDir cfg => VLConfig.loadFromPretrainedDir modelDir cfg)
     defaults
-    (fun modelDir cfg => Qwen35ForConditionalGeneration.loadSharded modelDir cfg device)
     (fun path cfg => Qwen35ForConditionalGeneration.load path cfg device)
 
 end Qwen35ForConditionalGeneration

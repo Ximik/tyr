@@ -8,7 +8,7 @@
 import Tyr.Typed.Neural
 import Tyr.TensorStruct
 import Tyr.Log
-import Tyr.SafeTensors.Exact
+import Tyr.SafeTensors.Source
 import Tyr.Module.RMSNorm
 import Tyr.Model.Utils
 import Tyr.Model.Qwen3TTS.Model
@@ -25,7 +25,7 @@ open torch.Model (reqGradFalse)
 /-- Load a stored exact dtype and check the shared component index without casting. -/
 private def loadTensorShardedTarget (modelDir : String) (name : String) (s : Shape) :
     IO (Tensor { shape := s, dtype := dtype.val, device }) := do
-  let packed ← safetensors.loadTensorShardedExact modelDir name s device
+  let packed ← (← safetensors.Source.open modelDir).load name s device
   match packed.atDType? dtype.val with
   | .ok tensor => pure tensor
   | .error message => throw <| IO.userError s!"Qwen3TTS tensor '{name}': {message}"
@@ -33,7 +33,7 @@ private def loadTensorShardedTarget (modelDir : String) (name : String) (s : Sha
 /-- Only absent optional entries are suppressed; every present tensor must match. -/
 private def loadOptionalTensorShardedTarget (modelDir : String) (name : String) (s : Shape) :
     IO (Option (Tensor { shape := s, dtype := dtype.val, device })) := do
-  match ← safetensors.loadOptionalTensorShardedExact modelDir name s device with
+  match ← (← safetensors.Source.open modelDir).load? name s device with
   | none => pure none
   | some packed =>
     match packed.atDType? dtype.val with
@@ -371,7 +371,7 @@ def loadSharded
     : IO (Σ dtypes : DTypeLayout, Qwen3TTSForConditionalGeneration (device := targetDevice) cfg dtypes) := do
   log.onInfo s!"Loading Qwen3TTS weights from {modelDir}..."
   log.onInfo s!"Qwen3-TTS target device: {repr targetDevice}"
-  let codecEmbedding ← safetensors.loadTensorShardedExact modelDir
+  let codecEmbedding ← (← safetensors.Source.open modelDir).load
     "talker.model.codec_embedding.weight"
     #[cfg.talkerConfig.vocabSize, cfg.talkerConfig.hiddenSize] targetDevice
   let talkerFloating ← IO.ofExcept (DType.realFloating? codecEmbedding.1)
@@ -382,7 +382,7 @@ def loadSharded
 
   if cfg.ttsModelType == "base" then
     let scfg := cfg.speakerEncoderConfig
-    let firstWeight ← safetensors.loadTensorShardedExact modelDir
+    let firstWeight ← (← safetensors.Source.open modelDir).load
       "speaker_encoder.blocks.0.conv.weight"
       #[scfg.encChannels.getD 0 512, scfg.melDim, scfg.encKernelSizes.getD 0 5] targetDevice
     let speakerFloating ← IO.ofExcept (DType.realFloating? firstWeight.1)

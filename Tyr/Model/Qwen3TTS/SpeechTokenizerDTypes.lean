@@ -1,6 +1,6 @@
 import Tyr.Model.Qwen3TTS.DTypes
 import Tyr.Typed.Ops
-import Tyr.SafeTensors.Exact
+import Tyr.SafeTensors.Source
 
 namespace torch.qwen3tts
 
@@ -49,9 +49,9 @@ def ofDTypes? (compute usage sum : DType) : Except String SpeechTokenizerDTypes 
 against these roles by the model loader. No checkpoint tensor is converted. -/
 def load (path computeName : String) (computeShape : Shape)
     (usageName sumName : String) (device : Device) : IO SpeechTokenizerDTypes := do
-  let compute ← safetensors.loadTensorExact path computeName computeShape device
-  let usage ← safetensors.loadTensorExact path usageName #[2048] device
-  let sum ← safetensors.loadTensorExact path sumName #[2048, 256] device
+  let compute ← (← safetensors.Source.open path).load computeName computeShape device
+  let usage ← (← safetensors.Source.open path).load usageName #[2048] device
+  let sum ← (← safetensors.Source.open path).load sumName #[2048, 256] device
   match ofDTypes? compute.1 usage.1 sum.1 with
   | .ok dtypes => pure dtypes
   | .error message => throw <| IO.userError s!"Speech tokenizer codebook '{sumName}': {message}"

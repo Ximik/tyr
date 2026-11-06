@@ -10,7 +10,7 @@
   Ground truth generator: Tests/fixtures/laguna/gen_nvfp4_fixtures.py
 -/
 import Tyr.Torch
-import Tyr.SafeTensors.Load
+import Tyr.SafeTensors.Source
 import Tyr.Model.Laguna.NvFp4
 
 open torch
@@ -58,13 +58,14 @@ private def findFixture : IO String := do
 
 /-- Load the four tensors of one case, run dequant on `device`, and report. -/
 private def runMatrixCase (path : String) (device : Device) : IO Unit := do
-  let packed ← torch.safetensors.loadTensorCandidates path #["m_packed"] #[64, 64]
+  let src ← torch.safetensors.Source.open path
+  let packed ← src.load "m_packed" #[64, 64]
   let packed := packed.2
-  let scales ← torch.safetensors.loadTensorCandidates path #["m_scales"] #[64, 8]
+  let scales ← src.load "m_scales" #[64, 8]
   let scales := scales.2
-  let globalS ← torch.safetensors.loadTensorCandidates path #["m_global"] #[1]
+  let globalS ← src.load "m_global" #[1]
   let globalS := globalS.2
-  let expected ← torch.safetensors.loadTensorCandidates path #["m_expected"] #[64, 128]
+  let expected ← src.load "m_expected" #[64, 128]
   let expected := expected.2
   if device == Device.CPU then
     check (packed.actualSpec.dtype == .UInt8) s!"m_packed loads as UInt8 (got {packed.actualSpec.dtype})"
@@ -89,13 +90,14 @@ private def runMatrixCase (path : String) (device : Device) : IO Unit := do
   check (maxAbs <= 1e-3) s!"dequantMatrix [{deviceLabel device}] maxAbs={maxAbs} <= 1e-3"
 
 private def runBankCase (path : String) (device : Device) : IO Unit := do
-  let packed ← torch.safetensors.loadTensorCandidates path #["b_packed"] #[4, 32, 32]
+  let src ← torch.safetensors.Source.open path
+  let packed ← src.load "b_packed" #[4, 32, 32]
   let packed := packed.2
-  let scales ← torch.safetensors.loadTensorCandidates path #["b_scales"] #[4, 32, 4]
+  let scales ← src.load "b_scales" #[4, 32, 4]
   let scales := scales.2
-  let globalS ← torch.safetensors.loadTensorCandidates path #["b_global"] #[4]
+  let globalS ← src.load "b_global" #[4]
   let globalS := globalS.2
-  let expected ← torch.safetensors.loadTensorCandidates path #["b_expected"] #[4, 32, 64]
+  let expected ← src.load "b_expected" #[4, 32, 64]
   let expected := expected.2
   let got ← nvfp4.dequantBank (packed.to device) (scales.to device) (globalS.to device) 4 32 64
   let (maxAbs, maxRel) ← maxErrors got (expected.to device)

@@ -26,20 +26,6 @@ def testQwen25OmniHubShardFilesFromIndex : IO Unit := do
     "second shard should be present"
 
 @[test]
-def testQwen25OmniHubDetectWeightLayout : IO Unit := do
-  let shardedDir := "/tmp/qwen25omni_hub_layout_sharded"
-  ensureDir shardedDir
-  IO.FS.writeFile s!"{shardedDir}/model.safetensors.index.json" "{\"metadata\":{},\"weight_map\":{}}"
-  let isSharded ← hub.detectWeightLayout shardedDir
-  LeanTest.assertEqual isSharded true "index file should detect sharded layout"
-
-  let singleDir := "/tmp/qwen25omni_hub_layout_single"
-  ensureDir singleDir
-  IO.FS.writeFile s!"{singleDir}/model.safetensors" ""
-  let isShardedSingle ← hub.detectWeightLayout singleDir
-  LeanTest.assertEqual isShardedSingle false "single safetensors file should detect single layout"
-
-@[test]
 def testQwen25OmniHubResolveLocalPretrainedDir : IO Unit := do
   let localDir := "/tmp/qwen25omni_hub_local_dir"
   ensureDir localDir

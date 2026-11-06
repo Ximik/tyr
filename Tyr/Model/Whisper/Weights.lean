@@ -6,7 +6,7 @@
 import Tyr.Model.Whisper.TypedOps
 import Tyr.TensorStruct
 import Tyr.Log
-import Tyr.SafeTensors.Exact
+import Tyr.SafeTensors.Source
 import Tyr.Model.Utils
 import Tyr.Model.Whisper.Model
 
@@ -17,12 +17,12 @@ open torch.Log
 open torch.Model (reqGradFalse)
 private def loadWeight (dtype : DType) (modelDir name : String) (shape : Shape)
     (device : Device) : IO (Tensor { shape, dtype := dtype, device }) := do
-  let packed ← safetensors.loadTensorShardedExact modelDir name shape device
+  let packed ← (← safetensors.Source.open modelDir).load name shape device
   IO.ofExcept (packed.atDType? dtype)
 
 private def loadOptional (dtype : DType) (modelDir name : String) (shape : Shape)
     (device : Device) : IO (Option (Tensor { shape, dtype := dtype, device })) := do
-  match ← safetensors.loadOptionalTensorShardedExact modelDir name shape device with
+  match ← (← safetensors.Source.open modelDir).load? name shape device with
   | none => pure none
   | some packed => pure (some (← IO.ofExcept (packed.atDType? dtype)))
 
@@ -172,7 +172,7 @@ private def resolveWhisperDevice (log : Handlers := {}) : IO Device := do
 def loadShardedAt (modelDir : String) (cfg : WhisperConfig := {}) (log : Handlers := {})
     (device : Device) : IO (Σ dtype : RealFloatingDType, WhisperForConditionalGeneration (device := device) (dtype := dtype.val) cfg) := do
   log.onInfo s!"Loading Whisper weights from {modelDir}..."
-  let ⟨dtype, encoderConv1Weight⟩ ← safetensors.loadTensorShardedExact modelDir
+  let ⟨dtype, encoderConv1Weight⟩ ← (← safetensors.Source.open modelDir).load
     "model.encoder.conv1.weight" #[cfg.dModel, cfg.numMelBins, 3] device
   let floating ← IO.ofExcept (DType.realFloating? dtype)
   let _ := floating.down

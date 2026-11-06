@@ -35,7 +35,7 @@ def tokenizerFiles : Array String := #[
   "processor_config.json"
 ]
 
-export torch.Hub (resolvePretrainedDir detectWeightLayout findCachedSnapshot?)
+export torch.Hub (resolvePretrainedDir findCachedSnapshot?)
 
 end torch.gemma4.hub
 
@@ -60,7 +60,6 @@ def loadFromPretrained
     hub.tokenizerFiles
     (fun modelDir cfg => Config.loadFromPretrainedDir modelDir cfg)
     defaults
-    (fun modelDir cfg => Gemma4ForCausalLM.loadSharded (device := device) modelDir cfg)
     (fun path cfg => Gemma4ForCausalLM.load (device := device) path cfg)
 
 end Gemma4ForCausalLM

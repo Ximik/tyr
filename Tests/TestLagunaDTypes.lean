@@ -48,8 +48,7 @@ private def writeFixture (directory : System.FilePath) (mode : Nat)
     for mode in #[0, 3] do
       IO.FS.withTempDir fun directory => do
         writeFixture directory mode
-        let ⟨selected, model⟩ ← if sharded then LagunaForCausalLM.loadSharded directory.toString cfg
-          else LagunaForCausalLM.load (directory / "model.safetensors").toString cfg
+        let ⟨selected, model⟩ ← LagunaForCausalLM.load (if sharded then directory.toString else (directory / "model.safetensors").toString) cfg
         LeanTest.assertEqual selected.val .BFloat16
         LeanTest.assertEqual model.model.norm.1 .Float32
         LeanTest.assertEqual (← model.model.norm.2.toFloatArray) #[0.125, 0.125, 0.125, 0.125]
@@ -64,8 +63,7 @@ private def writeFixture (directory : System.FilePath) (mode : Nat)
     IO.FS.withTempDir fun directory => do
       writeFixture directory 0 "I32"
       Tests.assertThrows (do
-        if sharded then discard <| LagunaForCausalLM.loadSharded directory.toString cfg
-        else discard <| LagunaForCausalLM.load (directory / "model.safetensors").toString cfg)
+        discard <| LagunaForCausalLM.load (if sharded then directory.toString else (directory / "model.safetensors").toString) cfg)
         (some "Expected a standard real floating dtype")
 
 @[test] def testLagunaLoaderRejectsIncompatibleHead : IO Unit := do
@@ -74,8 +72,7 @@ private def writeFixture (directory : System.FilePath) (mode : Nat)
       IO.FS.withTempDir fun directory => do
         writeFixture directory mode
         Tests.assertThrows (do
-          if sharded then discard <| LagunaForCausalLM.loadSharded directory.toString cfg
-          else discard <| LagunaForCausalLM.load (directory / "model.safetensors").toString cfg)
+          discard <| LagunaForCausalLM.load (if sharded then directory.toString else (directory / "model.safetensors").toString) cfg)
           (if mode == 1 then some "Expected dtype" else some "shape")
 
 end Tests.LagunaDTypes
