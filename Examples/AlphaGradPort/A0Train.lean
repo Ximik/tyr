@@ -9,6 +9,7 @@ import Examples.AlphaGradPort.Tasks
 namespace Examples.AlphaGradPort
 
 open Tyr.AD.Elim
+open torch (StepInterval)
 
 inductive SearchBackend where
   | gumbel
@@ -26,7 +27,7 @@ structure RunConfig where
   episodes : Nat := 16
   seed : UInt64 := 250197
   backend : SearchBackend := .dagGumbel
-  logEvery : Nat := 4
+  logEvery : StepInterval := 4
   deriving Repr
 
 structure RunSummary where
@@ -123,8 +124,8 @@ def runTask (task : TaskSpec) (cfg : RunConfig := {}) : IO (Except String RunSum
         bestActions0 := out.actions0
         bestOrder1 := out.order1
       let shouldLog :=
-        cfg.logEvery > 0 &&
-          (((ep + 1) % cfg.logEvery = 0) || (ep + 1 = cfg.episodes))
+        cfg.logEvery.isSome &&
+          (cfg.logEvery.fires (ep + 1) || ep + 1 = cfg.episodes)
       if shouldLog then
         IO.println s!"[AlphaGradPort] ep={ep + 1}/{cfg.episodes} reward={out.totalReward} best={bestReward}"
 

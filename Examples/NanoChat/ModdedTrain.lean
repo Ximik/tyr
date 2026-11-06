@@ -35,14 +35,6 @@ open torch.Optim
 
 /-! ## Hyperparameters -/
 
-/-- Steps between events; `none` never fires. -/
-abbrev StepInterval := Option PosNat
-
-def StepInterval.fires (interval : StepInterval) (step : Nat) : Bool :=
-  match interval with
-  | none => false
-  | some n => step % n.val == 0
-
 /-- Training hyperparameters for nanochat-style loops. -/
 structure Hyperparameters where
   /-- Total scheduled training iterations -/

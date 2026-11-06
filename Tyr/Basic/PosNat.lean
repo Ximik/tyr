@@ -5,7 +5,8 @@ import Lean.Data.Json
 
 `PosNat`, a positive count. Literals, JSON decoding and string parsing all
 reject zero, so a `PosNat` never needs a clamp where it is used. `Option PosNat`
-is the optional form; an alias such as `TopK` documents what its `none` means.
+is the optional form; aliases such as `TopK` and `StepInterval` document what
+its `none` means.
 -/
 
 namespace torch
@@ -43,5 +44,13 @@ def parseOrNone? (s : String) : Option (Option PosNat) :=
     | _ => none
 
 end PosNat
+
+/-- Steps between events; `none` never fires. -/
+abbrev StepInterval := Option PosNat
+
+def StepInterval.fires (interval : StepInterval) (step : Nat) : Bool :=
+  match interval with
+  | none => false
+  | some n => step % n.val == 0
 
 end torch

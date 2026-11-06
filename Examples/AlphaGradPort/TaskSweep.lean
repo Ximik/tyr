@@ -31,7 +31,7 @@ private def runOne (taskName : TaskName) (episodes : Nat) : IO Bool := do
     let cfg : RunConfig := {
       episodes := episodes
       backend := .dagGumbel
-      logEvery := max 1 (episodes / 4)
+      logEvery := some ⟨max 1 (episodes / 4), by omega⟩
     }
     match (← runTask task cfg) with
     | .error msg =>
