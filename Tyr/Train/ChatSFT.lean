@@ -42,9 +42,9 @@ structure SFTConfig where
   /-- Optimizer steps; `none` derives them from `numEpochs`. -/
   numIterations : Option Nat := none
   /-- Per-device batch size -/
-  deviceBatchSize : Nat := 4
+  deviceBatchSize : PosNat := 4
   /-- Target examples per optimization step (for gradient accumulation) -/
-  targetExamplesPerStep : Nat := 32
+  targetExamplesPerStep : PosNat := 32
   /-- Learning rate for embedding parameters (Adam) -/
   embeddingLr : Float := 0.2
   /-- Learning rate for unembedding/LM head parameters (Adam) -/
@@ -69,12 +69,17 @@ structure SFTConfig where
   gradClip : Float := 1.0
   /-- Logging interval (steps) -/
   logInterval : Nat := 10
-  deriving Repr, Inhabited
+  deriving Repr
 
-/-- Compute gradient accumulation steps from config -/
-def SFTConfig.gradAccumSteps (cfg : SFTConfig) (worldSize : Nat := 1) : Nat :=
-  let examplesPerStep := cfg.deviceBatchSize * worldSize
-  cfg.targetExamplesPerStep / examplesPerStep
+/-- Forward passes per optimizer step; an error when one step holds fewer
+    examples than a single pass across all ranks. -/
+def SFTConfig.gradAccumSteps (cfg : SFTConfig) (worldSize : Nat := 1) : Except String PosNat :=
+  let examplesPerStep := cfg.deviceBatchSize.val * worldSize
+  let steps := cfg.targetExamplesPerStep.val / examplesPerStep
+  if h : 0 < steps then
+    .ok ⟨steps, h⟩
+  else
+    .error s!"SFT targetExamplesPerStep={cfg.targetExamplesPerStep} is smaller than deviceBatchSize*worldSize={examplesPerStep}"
 
 /-! ## Learning Rate Schedule -/
 
@@ -420,9 +425,9 @@ def trainLoop [TensorStruct P] [FloatingTensorStruct P]
 
   -- Compute number of iterations
   let numIterations :=
-    cfg.numIterations.getD ((numTrainExamples / cfg.targetExamplesPerStep) * cfg.numEpochs)
+    cfg.numIterations.getD ((numTrainExamples / cfg.targetExamplesPerStep.val) * cfg.numEpochs)
 
-  let gradAccumSteps := max 1 (cfg.gradAccumSteps worldSize)
+  let gradAccumSteps := (← IO.ofExcept (cfg.gradAccumSteps worldSize)).val
 
   let mut currentParams ← TensorStruct.makeLeafParams params
   let mut currentOptState := optState

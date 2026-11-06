@@ -644,16 +644,15 @@ end KittenAlbertLayerGroup
 
 structure KittenAlbertEncoder (cfg : AlbertConfig) where
   embeddingHiddenMappingIn : LinearNorm (device := device) cfg.embeddingSize cfg.hiddenSize
-  groups : Array (KittenAlbertLayerGroup (device := device) cfg)
-  deriving TensorStruct, Inhabited
+  groups : torch.Vector cfg.numHiddenGroups (KittenAlbertLayerGroup (device := device) cfg)
+  deriving TensorStruct
 
 namespace KittenAlbertEncoder
 
 def init (cfg : AlbertConfig) (device : Device := .CPU) : IO (KittenAlbertEncoder (device := device) cfg) := do
   let embeddingHiddenMappingIn ← LinearNorm.init (device := device) cfg.embeddingSize cfg.hiddenSize
-  let mut groups : Array (KittenAlbertLayerGroup (device := device) cfg) := #[]
-  for _ in [:cfg.numHiddenGroups] do
-    groups := groups.push (← KittenAlbertLayerGroup.init (device := device) cfg)
+  let slots : torch.Vector cfg.numHiddenGroups Nat := ⟨Array.range cfg.numHiddenGroups, Array.size_range⟩
+  let groups ← slots.mapM fun _ => KittenAlbertLayerGroup.init (device := device) cfg
   pure { embeddingHiddenMappingIn, groups }
 
 def forward {seq : Nat}
@@ -662,8 +661,11 @@ def forward {seq : Nat}
     : Tensor { shape := #[1, seq, cfg.hiddenSize], dtype := .Float32, device := device } := Id.run do
   let mapped : Tensor { shape := #[1, seq, cfg.hiddenSize], dtype := .Float32, device := device } := m.embeddingHiddenMappingIn.forward3d x
   let mut h := mapped
-  for i in [:cfg.numHiddenLayers] do
-    let group := safeIndex m.groups (i / cfg.layersPerGroup)
+  for hi : i in [:cfg.numHiddenLayers] do
+    have hLayers : i < cfg.layersPerGroup * cfg.numHiddenGroups := by
+      rw [AlbertConfig.layersPerGroup, Nat.div_mul_cancel cfg.hiddenGroupsValid.2]
+      exact hi.upper
+    let group := m.groups.get ⟨i / cfg.layersPerGroup, Nat.div_lt_of_lt_mul hLayers⟩
     h := group.forward h
   h
 
@@ -673,7 +675,7 @@ structure KittenAlbert (nToken : Nat) (cfg : AlbertConfig) where
   embeddings : AlbertEmbeddings (device := device) nToken cfg
   encoder : KittenAlbertEncoder (device := device) cfg
   pooler : LinearNorm (device := device) cfg.hiddenSize cfg.hiddenSize
-  deriving TensorStruct, Inhabited
+  deriving TensorStruct
 
 namespace KittenAlbert
 

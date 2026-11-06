@@ -80,4 +80,13 @@ example (_logits : Tensor ⟨#[1, 2, 2], .Float32, .CPU⟩)
   let emptyLoss ← checked (Train.ChatSFT.maskedCrossEntropy? empty emptyTargets (Tensor.zeros #[1, 0]))
   LeanTest.assertEqual emptyLoss.item 0
 
+@[test] def testSftGradAccumStepsRequireAFullPass : IO Unit := do
+  let cfg : torch.Train.ChatSFT.SFTConfig := { deviceBatchSize := 4, targetExamplesPerStep := 32 }
+  match cfg.gradAccumSteps 2 with
+  | .ok steps => LeanTest.assertEqual steps.val 4 "32 examples over 4 per device on 2 ranks"
+  | .error e => throw <| IO.userError s!"A full step should be accepted: {e}"
+  match cfg.gradAccumSteps 16 with
+  | .ok steps => throw <| IO.userError s!"64 examples per pass exceed a 32-example step, got {steps.val}"
+  | .error e => LeanTest.assertTrue (e.contains "targetExamplesPerStep") e
+
 end Tests.LossContracts

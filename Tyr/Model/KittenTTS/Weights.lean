@@ -229,12 +229,15 @@ private def loadKittenAlbertFromCheckpoint
         ffnOutput := linearFromTensors (← checkedWeight layer.ffn_output.weight) (← checkedWeight layer.ffn_output.bias)
       }
       pure { layers }
+  let ⟨hGroups⟩ ← if h : groups.size = cfg.plbert.numHiddenGroups then pure (PLift.up h) else
+    throw <| IO.userError
+      s!"KittenTTS checkpoint has {groups.size} ALBERT layer groups, config num_hidden_groups={cfg.plbert.numHiddenGroups}"
   let encoder : KittenAlbertEncoder (device := device) cfg.plbert := {
     embeddingHiddenMappingIn :=
       linearFromTensors
         (← checkedWeight weights.encoder.embedding_hidden_mapping_in.weight)
         (← checkedWeight weights.encoder.embedding_hidden_mapping_in.bias)
-    groups := groups
+    groups := ⟨groups, hGroups⟩
   }
   let pooler : LinearNorm (device := device) cfg.plbert.hiddenSize cfg.plbert.hiddenSize :=
     linearFromTensors (← checkedWeight weights.pooler.weight) (← checkedWeight weights.pooler.bias)
