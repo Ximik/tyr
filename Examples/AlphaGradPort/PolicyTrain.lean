@@ -364,7 +364,7 @@ structure PPOTrainConfig where
   learningRate : Float := 3.0e-4
   weightDecay : Float := 1.0e-4
   seed : UInt64 := 250197
-  logEvery : Nat := 4
+  logEvery : StepInterval := 4
   deriving Repr
 
 structure PPOSummary where
@@ -536,8 +536,8 @@ def trainPPO
           bestGreedy := greedyReward
           bestGreedyEpoch := epoch + 1
         let shouldLog :=
-          cfg.logEvery > 0 &&
-          (((epoch + 1) % cfg.logEvery = 0) || (epoch + 1 = cfg.epochs))
+          cfg.logEvery.isSome &&
+          (cfg.logEvery.fires (epoch + 1) || epoch + 1 = cfg.epochs)
         if shouldLog then
           IO.println s!"[AlphaGradPPO] epoch={epoch + 1}/{cfg.epochs} avg_rollout={avgRollout} greedy={greedyReward} best_greedy={bestGreedy} policy_loss={policyLoss} value_loss={valueLoss} entropy={entropy}"
 
@@ -587,7 +587,7 @@ structure AlphaZeroTrainConfig where
   dirichletFraction : Float := 0.25
   temperature : Float := 1.0
   seed : UInt64 := 991337
-  logEvery : Nat := 4
+  logEvery : StepInterval := 4
   deriving Repr
 
 structure AlphaZeroSummary where
@@ -792,8 +792,8 @@ def trainAlphaZero
       net := net'
       optState := optState'
       let shouldLog :=
-        cfg.logEvery > 0 &&
-          (((epoch + 1) % cfg.logEvery = 0) || (epoch + 1 = cfg.epochs))
+        cfg.logEvery.isSome &&
+          (cfg.logEvery.fires (epoch + 1) || epoch + 1 = cfg.epochs)
       if shouldLog then
         IO.println s!"[AlphaGradAZ] epoch={epoch + 1}/{cfg.epochs} avg_reward={avgReward} best_avg={bestAvgReward} policy_loss={policyLoss} value_loss={valueLoss}"
 
