@@ -122,11 +122,6 @@ private def geluApprox {s : Shape} (x : Tensor { shape := s, dtype := .Float32, 
   let t := Tensor.tanh (Tensor.mulScalar inner 0.7978846)
   Tensor.mulScalar x 0.5 * Tensor.addScalar t 1.0
 
-private def safeIndex {α} [Inhabited α] (xs : Array α) (idx : Nat) : α :=
-  match xs[idx]? with
-  | some x => x
-  | none => default
-
 private def durationToFrames (vals : Array Float) (speed : Float) : Array Nat :=
   vals.map fun v =>
     let denom := if speed <= 0.0 then 1.0 else speed
@@ -816,18 +811,17 @@ def forward {frames styleDim channels : Nat}
 end AdaIN1d
 
 structure DurationEncoder (cfg : KittenTTSConfig) where
-  lstms : Array (BiLSTM (device := device) (cfg.hiddenDim + cfg.styleDim) (cfg.hiddenDim / 2))
-  norms : Array (AdaLayerNorm (device := device) cfg.styleDim cfg.hiddenDim)
-  deriving TensorStruct, Inhabited
+  lstms : torch.Vector cfg.nLayer (BiLSTM (device := device) (cfg.hiddenDim + cfg.styleDim) (cfg.hiddenDim / 2))
+  norms : torch.Vector cfg.nLayer (AdaLayerNorm (device := device) cfg.styleDim cfg.hiddenDim)
+  deriving TensorStruct
 
 namespace DurationEncoder
 
 def init (cfg : KittenTTSConfig) (device : Device := .CPU) : IO (DurationEncoder (device := device) cfg) := do
-  let mut lstms : Array (BiLSTM (device := device) (cfg.hiddenDim + cfg.styleDim) (cfg.hiddenDim / 2)) := #[]
-  let mut norms : Array (AdaLayerNorm (device := device) cfg.styleDim cfg.hiddenDim) := #[]
-  for _ in [:cfg.nLayer] do
-    lstms := lstms.push (← BiLSTM.init (device := device) (cfg.hiddenDim + cfg.styleDim) (cfg.hiddenDim / 2))
-    norms := norms.push (← AdaLayerNorm.init (device := device) cfg.styleDim cfg.hiddenDim)
+  let layers : torch.Vector cfg.nLayer Nat := ⟨Array.range cfg.nLayer, Array.size_range⟩
+  let lstms ← layers.mapM fun _ =>
+    BiLSTM.init (device := device) (cfg.hiddenDim + cfg.styleDim) (cfg.hiddenDim / 2)
+  let norms ← layers.mapM fun _ => AdaLayerNorm.init (device := device) cfg.styleDim cfg.hiddenDim
   pure { lstms, norms }
 
 def forward {seq : Nat}
@@ -837,9 +831,9 @@ def forward {seq : Nat}
     : Tensor { shape := #[1, cfg.hiddenDim + cfg.styleDim, seq], dtype := .Float32, device := device } := Id.run do
   let s : Tensor { shape := #[1, cfg.styleDim, seq], dtype := .Float32, device := device } := styleExpand style
   let mut h : Tensor { shape := #[1, cfg.hiddenDim + cfg.styleDim, seq], dtype := .Float32, device := device } := (catTo x s 1).reshape #[1, cfg.hiddenDim + cfg.styleDim, seq]
-  for i in [:m.lstms.size] do
-    let lstm := safeIndex m.lstms i
-    let norm := safeIndex m.norms i
+  for hi : i in [:cfg.nLayer] do
+    let lstm := m.lstms.get ⟨i, hi.upper⟩
+    let norm := m.norms.get ⟨i, hi.upper⟩
     let ySeq : Tensor { shape := #[1, seq, cfg.hiddenDim], dtype := .Float32, device := device } := (BiLSTM.forward lstm (cfToSeq h)).reshape #[1, seq, cfg.hiddenDim] (by rw [Nat.mul_div_cancel' cfg.hiddenDimEven])
     let yCF : Tensor { shape := #[1, cfg.hiddenDim, seq], dtype := .Float32, device := device } := seqToCF ySeq
     let yNorm : Tensor { shape := #[1, cfg.hiddenDim, seq], dtype := .Float32, device := device } := AdaLayerNorm.forward norm yCF style
@@ -966,56 +960,6 @@ def forward {frames inC outC styleDim : Nat}
   (h6 + shortcut) / Float.sqrt 2.0
 
 end AdainResBlk1dUp
-
-structure AdaINResBlock1 (channels kernel : Nat) (styleDim : Nat) where
-  convs1 : Array (Conv1dParams (device := device) channels channels kernel 1 ((kernel - 1) / 2) 1)
-  convs2 : Array (Conv1dParams (device := device) channels channels kernel 1 ((kernel - 1) / 2) 1)
-  norms1 : Array (AdaIN1d (device := device) styleDim channels)
-  norms2 : Array (AdaIN1d (device := device) styleDim channels)
-  alpha1 : Array (Tensor { shape := #[1, channels, 1], dtype := .Float32, device := device })
-  alpha2 : Array (Tensor { shape := #[1, channels, 1], dtype := .Float32, device := device })
-  deriving TensorStruct, Inhabited
-
-namespace AdaINResBlock1
-
-def init (channels kernel styleDim : Nat) (device : Device := .CPU) : IO (AdaINResBlock1 (device := device) channels kernel styleDim) := do
-  let mut convs1 : Array (Conv1dParams (device := device) channels channels kernel 1 ((kernel - 1) / 2) 1) := #[]
-  let mut convs2 : Array (Conv1dParams (device := device) channels channels kernel 1 ((kernel - 1) / 2) 1) := #[]
-  let mut norms1 : Array (AdaIN1d (device := device) styleDim channels) := #[]
-  let mut norms2 : Array (AdaIN1d (device := device) styleDim channels) := #[]
-  let mut alpha1 : Array (Tensor { shape := #[1, channels, 1], dtype := .Float32, device := device }) := #[]
-  let mut alpha2 : Array (Tensor { shape := #[1, channels, 1], dtype := .Float32, device := device }) := #[]
-  for _ in [:3] do
-    convs1 := convs1.push (← Conv1dParams.init (device := device) channels channels kernel 1 ((kernel - 1) / 2) 1)
-    convs2 := convs2.push (← Conv1dParams.init (device := device) channels channels kernel 1 ((kernel - 1) / 2) 1)
-    norms1 := norms1.push (← AdaIN1d.init (device := device) styleDim channels)
-    norms2 := norms2.push (← AdaIN1d.init (device := device) styleDim channels)
-    alpha1 := alpha1.push ((Tensor.ones #[1, channels, 1] (device := device)))
-    alpha2 := alpha2.push ((Tensor.ones #[1, channels, 1] (device := device)))
-  pure { convs1, convs2, norms1, norms2, alpha1, alpha2 }
-
-def forward {frames channels kernel styleDim : Nat}
-    (m : AdaINResBlock1 (device := device) channels kernel styleDim)
-    (x : Tensor { shape := #[1, channels, frames], dtype := .Float32, device := device })
-    (style : Tensor { shape := #[1, styleDim], dtype := .Float32, device := device })
-    (hf : 0 < frames) (hk : kernel % 2 = 1)
-    : Tensor { shape := #[1, channels, frames], dtype := .Float32, device := device } := Id.run do
-  let mut h := x
-  for i in [:3] do
-    let a1 := safeIndex m.alpha1 i
-    let a2 := safeIndex m.alpha2 i
-    let h1 := AdaIN1d.forward (safeIndex m.norms1 i) h style
-    let h2 := snake1d h1 a1
-    let h3 : Tensor { shape := #[1, channels, frames], dtype := .Float32, device := device } := Tensor.reshape (Conv1dParams.forward (safeIndex m.convs1 i) h2) #[1, channels, frames]
-      (by rw [convOutputSize_same hf (by omega)])
-    let h4 := AdaIN1d.forward (safeIndex m.norms2 i) h3 style
-    let h5 := snake1d h4 a2
-    let h6 : Tensor { shape := #[1, channels, frames], dtype := .Float32, device := device } := Tensor.reshape (Conv1dParams.forward (safeIndex m.convs2 i) h5) #[1, channels, frames]
-      (by rw [convOutputSize_same hf (by omega)])
-    h := h + h6
-  h
-
-end AdaINResBlock1
 
 structure ProsodyPredictor (cfg : KittenTTSConfig) where
   durationEncoder : DurationEncoder (device := device) cfg
