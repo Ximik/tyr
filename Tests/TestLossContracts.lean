@@ -89,4 +89,20 @@ example (_logits : Tensor ⟨#[1, 2, 2], .Float32, .CPU⟩)
   | .ok steps => throw <| IO.userError s!"64 examples per pass exceed a 32-example step, got {steps.val}"
   | .error e => LeanTest.assertTrue (e.contains "targetExamplesPerStep") e
 
+@[test] def testSftValidationLossIsNoneWithoutValidTokens : IO Unit := do
+  let batch (mask : Tensor ⟨#[1, 2], .Float32, .CPU⟩) (valid : Nat) :
+      torch.Train.ChatSFT.SFTBatch (device := .CPU) :=
+    { batchSize := 1, seqLen := 2, inputs := Tensor.fullInt #[1, 2] 0,
+      targets := Tensor.fullInt #[1, 2] 0, mask, numValidTokens := valid }
+  let params : Tensor ⟨#[1], .Float32, .CPU⟩ := Tensor.zeros #[1]
+  let uniform := fun (_ : Tensor ⟨#[1], .Float32, .CPU⟩) {b s : Nat} (_ : Tensor ⟨#[b, s], .Int64, .CPU⟩) =>
+    (pure ⟨3, Tensor.zeros #[b, s, 3]⟩ : IO (Σ v, Tensor ⟨#[b, s, v], .Float32, .CPU⟩))
+  let empty ← torch.Train.ChatSFT.evalValidationLoss (device := .CPU) params
+    (pure (batch (Tensor.zeros #[1, 2]) 0)) uniform 2
+  LeanTest.assertTrue empty.isNone "a pass without valid tokens has no loss"
+  let some loss ← torch.Train.ChatSFT.evalValidationLoss (device := .CPU) params
+      (pure (batch (Tensor.ones #[1, 2]) 2)) uniform 2
+    | LeanTest.fail "a pass with valid tokens has a loss"
+  LeanTest.assertTrue ((loss - Float.log 3.0).abs < 1e-5) s!"uniform logits over 3 classes give log 3, got {loss}"
+
 end Tests.LossContracts
