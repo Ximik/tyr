@@ -1589,14 +1589,12 @@ def supervisedFineTune (cfg : NanoChatConfig) : PipelineM Unit := do
   let trainDevice ← resolveTrainingDevice rank localRank isDistributed
   let runBaseDir := (← get).config.baseDir.replace "~" (← IO.getEnv "HOME" |>.map (·.getD ""))
   let runArtifacts := RunArtifacts.ofBaseDir runBaseDir
-  let sftDeviceBatchSize := sftEnv.deviceBatchSize.val
-  let sftTargetExamplesPerStep := sftEnv.targetExamplesPerStep.val
 
   -- SFT configuration
   let sftCfg : SFTConfig := {
     numEpochs := sftEnv.numEpochs.val
-    deviceBatchSize := sftDeviceBatchSize
-    targetExamplesPerStep := sftTargetExamplesPerStep
+    deviceBatchSize := sftEnv.deviceBatchSize
+    targetExamplesPerStep := sftEnv.targetExamplesPerStep
     embeddingLr := cfg.sftEmbeddingLr
     matrixLr := cfg.sftMatrixLr
     maxSeqLen := modelCfg.maxSeqLen
@@ -1659,7 +1657,7 @@ def supervisedFineTune (cfg : NanoChatConfig) : PipelineM Unit := do
     let encode := fun (text : String) => (tokenizer.encodeWithSpecials tok text).map (·.toUInt64)
 
     -- Create task iterator
-    let taskIterator := TaskIterator.new taskMixture sftCfg.deviceBatchSize sftCfg.maxSeqLen chatTokens encode
+    let taskIterator := TaskIterator.new taskMixture sftCfg.deviceBatchSize.val sftCfg.maxSeqLen chatTokens encode
     let trainDataFn ← makeTaskDataGenerator taskIterator sftCfg.maxSeqLen chatTokens.assistantEnd
 
     -- Get number of training examples from mixture (optionally capped for fast validation runs)
