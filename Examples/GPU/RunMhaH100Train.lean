@@ -137,7 +137,7 @@ private def parseArgFloat (args : List String) (flag : String) (default : Float)
     | _ => acc
   loop default args
 
-def runTrainKernel (steps : Nat) (lr : Float) (noiseScale : Float) (logEvery : Nat) : IO Bool := do
+def runTrainKernel (steps : Nat) (lr : Float) (noiseScale : Float) (logEvery : StepInterval) : IO Bool := do
   if steps == 0 then
     IO.eprintln "--steps must be > 0"
     return false
@@ -156,7 +156,7 @@ def runTrainKernel (steps : Nat) (lr : Float) (noiseScale : Float) (logEvery : N
     let (qN, kN, vN, lossT) ← oneKernelTrainStep qM kM vM setup.targetOut setup.stream lr
     qM := qN; kM := kN; vM := vN
 
-    let mustLog := step == 0 || step + 1 == steps || (logEvery > 0 && step % logEvery == 0)
+    let mustLog := step == 0 || step + 1 == steps || logEvery.fires step
     if mustLog then
       let _ ← torch.cuda_synchronize
       let loss := Tensor.item lossT
@@ -253,7 +253,12 @@ def main (args : List String) : IO UInt32 := do
   let steps := parseArgNat args "--steps" 30
   let lr := parseArgFloat args "--lr" 200.0
   let noiseScale := parseArgFloat args "--noise" 0.5
-  let logEvery := parseArgNat args "--log-every" 5
+  let logEvery ← match args.dropWhile (· != "--log-every") with
+    | _ :: raw :: _ =>
+      match PosNat.parseOrNone? raw with
+      | some interval => pure interval
+      | none => throw <| IO.userError s!"Invalid --log-every: {raw} (expected a positive count or none)"
+    | _ => pure (5 : StepInterval)
   let warmup := parseArgNat args "--warmup" 10
   let benchIters := parseArgNat args "--bench-iters" 200
   let benchmark := args.contains "--benchmark"

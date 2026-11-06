@@ -40,7 +40,7 @@ def main (args : List String) : IO UInt32 := do
     let cfg : RunConfig := {
       episodes := episodes
       backend := .dagGumbel
-      logEvery := max 1 (episodes / 4)
+      logEvery := some ⟨max 1 (episodes / 4), by omega⟩
     }
 
     match (← runTask task cfg) with
