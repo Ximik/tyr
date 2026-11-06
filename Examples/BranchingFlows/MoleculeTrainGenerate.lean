@@ -61,7 +61,7 @@ structure RunOptions where
   delWeight : Float := 1.0
   useBranchingTimeProb : Float := 0.5
   deletionPad : Float := 1.2
-  logEvery : Nat := 50
+  logEvery : StepInterval := 50
   sampleSteps : Nat := 7
   sampleCount : Nat := 1
   generate : Bool := true
@@ -262,7 +262,9 @@ partial def parseArgsLoop (args : List String) (opts : RunOptions) : IO RunOptio
   | "--deletion-pad" :: value :: rest =>
       parseArgsLoop rest { opts with deletionPad := (← parseFloatArg "--deletion-pad" value) }
   | "--log-every" :: value :: rest =>
-      parseArgsLoop rest { opts with logEvery := (← parseNatArg "--log-every" value) }
+      match PosNat.parseOrNone? value with
+      | some logEvery => parseArgsLoop rest { opts with logEvery }
+      | none => throw <| IO.userError s!"Invalid --log-every: {value} (expected a positive count or none)"
   | "--sample-steps" :: value :: rest =>
       parseArgsLoop rest { opts with sampleSteps := (← parseNatArg "--sample-steps" value) }
   | "--sample-count" :: value :: rest =>
@@ -540,7 +542,7 @@ private def runWithModel {dtype : DType} [DType.RealFloating dtype]
       let t2 ← IO.monoMsNow
       sampleMs := sampleMs + (t1 - t0)
       trainMs := trainMs + (t2 - t1)
-      if opts.logEvery > 0 && step % opts.logEvery == 0 then
+      if opts.logEvery.fires step then
         IO.println s!"molecule_train step={globalStep} lr={lr} total={lastReport.total} coord={lastReport.coord} label={lastReport.label} splits={lastReport.splits} del={lastReport.del}"
         if opts.timePhases && step > 0 then
           IO.println s!"molecule_phases step={globalStep} sample_ms_avg={(sampleMs / (step + 1))} train_ms_avg={(trainMs / (step + 1))}"
