@@ -54,22 +54,10 @@ private def config : Config :=
   unless next.raw.runtimeShape == #[1, 2, 8] do
     throw (IO.userError "updated GPT cannot run")
 
-@[test] def typedGPTGenerationAndInputValidation : IO Unit := do
+@[test] def typedGPTGeneration : IO Unit := do
   let params ← GPTParams.init config
   let generated ← generate params #[1] 1
   unless generated.size == 2 do throw (IO.userError "GPT generation failed")
-  let wrong := Tensor.fullInt #[1, 3] 1
-  let rejected ← try
-    let _ ← TensorOps.checked (device := .CPU) (s := #[1, 2]) .Int64 wrong.raw
-    pure false
-  catch _ => pure true
-  unless rejected do throw (IO.userError "raw shape mismatch was accepted")
-  let wrongDtype := Tensor.zeros #[1, 2]
-  let rejected ← try
-    let _ ← TensorOps.checked (device := .CPU) (s := #[1, 2]) .Int64 wrongDtype.raw
-    pure false
-  catch _ => pure true
-  unless rejected do throw (IO.userError "raw dtype mismatch was accepted")
 
 @[test] def typedGPTBatchAndAccumulatedTraining : IO Unit := do
   let stream := Tensor.fromInt64Array #[0, 1, 2, 3, 4, 5]

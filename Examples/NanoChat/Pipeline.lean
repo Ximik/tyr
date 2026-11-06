@@ -952,7 +952,8 @@ private def ParquetTokenStream.popWindow?
 /-- Emit one `(input,target)` batch for GPT next-token training from parquet text. -/
 private def ParquetTokenStream.nextBatch
     (stream : ParquetTokenStream) (batchSize seqLen : Nat)
-    : IO (Option DynamicGPTBatch × ParquetTokenStream) := do
+    : IO (Option (Tensor { shape := #[batchSize, seqLen], dtype := .Int64, device := .CPU } ×
+        Tensor { shape := #[batchSize, seqLen], dtype := .Int64, device := .CPU }) × ParquetTokenStream) := do
   if batchSize == 0 || seqLen == 0 then
     return (none, stream)
 
@@ -966,7 +967,7 @@ private def ParquetTokenStream.nextBatch
     let targetIds := window.extract 1 needed
     let inputTensor ← IO.ofExcept <| Tensor.fromInt64ArrayAs? (inputIds.map (·.toInt64)) #[batchSize, seqLen]
     let targetTensor ← IO.ofExcept <| Tensor.fromInt64ArrayAs? (targetIds.map (·.toInt64)) #[batchSize, seqLen]
-    pure (some { batch := batchSize, seq := seqLen, input := inputTensor, target := targetTensor }, st')
+    pure (some (inputTensor, targetTensor), st')
 
 /-- Use model config captured in checkpoint metadata when available. -/
 private def resolveModelConfigFromCheckpoint
@@ -1073,13 +1074,13 @@ def pretrainBaseModel (cfg : NanoChatConfig) : PipelineM Unit := do
     let valStream ← valStreamRef.get
     valStreamRef.set (valStream.restoreCursor payload.val)
 
-  let trainProvider : DynamicGPTBatchProvider := do
+  let trainProvider : GPTBatchProvider hp.deviceBatchSize hp.maxSeqLen := do
     let stream ← trainStreamRef.get
     let (batch?, stream') ← stream.nextBatch hp.deviceBatchSize hp.maxSeqLen
     trainStreamRef.set stream'
     pure batch?
 
-  let valProvider? : Option DynamicGPTBatchProvider :=
+  let valProvider? : Option (GPTBatchProvider hp.deviceBatchSize hp.maxSeqLen) :=
     if valStream0.files.isEmpty then
       none
     else
@@ -1271,7 +1272,7 @@ private structure MidtrainStreamCursors where
   val : TaskTokenStreamCursor
   deriving Repr, Inhabited, Lean.ToJson, Lean.FromJson
 
-private def captureTaskTokenStreamCursor (s : TaskTokenStream) : TaskTokenStreamCursor := {
+private def captureTaskTokenStreamCursor (s : TaskTokenStream b n) : TaskTokenStreamCursor := {
   cursor := s.cursor
   buffer := s.buffer
   consumed := s.consumed
@@ -1280,8 +1281,8 @@ private def captureTaskTokenStreamCursor (s : TaskTokenStream) : TaskTokenStream
   lastProgress := s.lastProgress
 }
 
-private def restoreTaskTokenStreamCursor (s : TaskTokenStream) (c : TaskTokenStreamCursor)
-    : TaskTokenStream :=
+private def restoreTaskTokenStreamCursor (s : TaskTokenStream b n) (c : TaskTokenStreamCursor)
+    : TaskTokenStream b n :=
   let cursor :=
     if s.mixture.size == 0 then
       0
@@ -1442,19 +1443,17 @@ def midtrain (cfg : NanoChatConfig) : PipelineM Unit := do
     let valStream ← valStreamRef.get
     valStreamRef.set (restoreTaskTokenStreamCursor valStream payload.val)
 
-  let trainProvider : DynamicGPTBatchProvider := do
+  let trainProvider : GPTBatchProvider hp.deviceBatchSize hp.maxSeqLen := do
     let stream ← trainStreamRef.get
     let (batch?, stream') ← stream.nextGPTBatch
     trainStreamRef.set stream'
-    pure (batch?.map fun (input, target) =>
-      { batch := stream.batchSize, seq := stream.seqLen, input, target })
+    pure batch?
 
-  let valProvider : DynamicGPTBatchProvider := do
+  let valProvider : GPTBatchProvider hp.deviceBatchSize hp.maxSeqLen := do
     let stream ← valStreamRef.get
     let (batch?, stream') ← stream.nextGPTBatch
     valStreamRef.set stream'
-    pure (batch?.map fun (input, target) =>
-      { batch := stream.batchSize, seq := stream.seqLen, input, target })
+    pure batch?
 
   let evalTokens := midEnv.evalTokens
   let tokensPerValBatch := max 1 (hp.deviceBatchSize * hp.maxSeqLen * worldSize)

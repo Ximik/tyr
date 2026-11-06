@@ -1,8 +1,7 @@
 import Tyr.Typed.Neural
 import Tyr.TensorStruct
 
-/-! Typed GPT primitives built from the shared tensor operations.
-Dynamic reshapes and native tensor inputs validate their claims. -/
+/-! Typed GPT primitives built from the shared tensor operations. -/
 namespace torch.gpt
 
 variable {device : Device}
@@ -12,18 +11,8 @@ abbrev Tokens (s : Shape) := Tensor { shape := s, dtype := .Int64, device := dev
 
 namespace TensorOps
 
-def checked {s : Shape} (d : DType) (raw : RawTensor) : IO (Tensor { shape := s, dtype := d, device := device }) :=
-  match Tensor.ofRaw (σ := { shape := s, dtype := d, device := device }) raw with
-  | .ok t => pure t
-  | .error message => throw (IO.userError message)
-
 def leaf {s : Shape} (t : Activation (device := device) s) : IO (Activation (device := device) s) :=
   Tensor.parameter t
-
-def reshape {s : Shape} {d : DType} (t : Tensor { shape := s, dtype := d, device := device }) (target : Shape) : IO (Tensor { shape := target, dtype := d, device := device }) := do
-  unless TensorSpec.numelOfShape s == TensorSpec.numelOfShape target do
-    throw (IO.userError "GPT reshape changes the element count")
-  checked d (RawTensor.reshape t.raw target)
 
 def dropout {s : Shape} (t : Activation (device := device) s) (p : Float) (training : Bool) : IO (Activation (device := device) s) := do
   Tensor.dropout t p training

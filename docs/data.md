@@ -117,9 +117,9 @@ It loads one complete file before selecting the rank partition; it is not yet a
 bounded-memory reader for arbitrarily large files. `BatchIterator` used directly
 is a finite single-shard iterator and returns `none` for an incomplete final
 batch; use the distributed generator to preserve tails across files.
-Batch dimensions and GPT's additional target token are checked before fixed-width
-arithmetic. `BatchIterator.updateParams` and `updateForStepGPT` now return `IO`
-so invalid parameter updates report errors before consumption.
+Batch dimensions are arguments of each `next…` call, not iterator state, so a
+batch's shape follows from the call. They and GPT's additional target token are
+checked before fixed-width arithmetic, and invalid sizes report errors through `IO`.
 
 `DistributedDataGenerator.cursor` records the file index, logical token
 position, epoch, seed, BOS policy, rank/world size, paths and partition length.
@@ -266,11 +266,11 @@ assembles a pretraining → midtraining → SFT sequence.
 | `DataShard.loadFromFile` | `(path) (shardIdx numShards bosToken : UInt64) : IO (Σ n, DataShard n)` | `Tyr/DataLoader.lean:239` |
 | `DataShard.load` / `loadValidationData` | Return `IO (Σ n, DataShard n)` with the real partition length | `Tyr/DataLoader.lean` |
 | `DistributedDataGenerator.cursor` / `.restoreCursor` | Versioned `StreamCursor` capture and validated restore | `Tyr/DataLoader.lean` |
-| `BatchIterator.new` / `.next` | `(shard) (batchSize seqLen : UInt64) : BatchIterator` / `IO (Option (Tensor { shape := #[iter.batchSize, iter.seqLen], dtype := .Int64, device := .CPU }) × BatchIterator)` | `Tyr/DataLoader.lean:288,291` |
-| `DistributedDataGenerator.init` | `(config : Config) (batchSize seqLen : UInt64) : IO DistributedDataGenerator` | `Tyr/DataLoader.lean:323` |
-| `DistributedDataGenerator.nextBatch` | `IO (Option (Tensor { shape := #[gen.iterator.batchSize, gen.iterator.seqLen], dtype := .Int64, device := .CPU }) × DistributedDataGenerator)` | `Tyr/DataLoader.lean:333` |
-| `BatchIterator.nextGPT` | `IO (Option (Tensor { shape := #[iter.batchSize, iter.seqLen], dtype := .Int64, device := .CPU } × Tensor { shape := #[iter.batchSize, iter.seqLen], dtype := .Int64, device := .CPU }) × BatchIterator)` (input/target shift) | `Examples/GPT/GPTDataLoader.lean:23` |
-| `DistributedDataGenerator.nextBatchGPT` / `updateForStepGPT` | GPT batch + modded-nanogpt schedule | `Examples/GPT/GPTDataLoader.lean:60,84` |
+| `BatchIterator.new` / `.next` | `(shard) : BatchIterator` / `(iter) (batchSize seqLen : Nat) : IO (Option (Tensor { shape := #[batchSize, seqLen], dtype := .Int64, device := .CPU }) × BatchIterator)` | `Tyr/DataLoader.lean` |
+| `DistributedDataGenerator.init` | `(config : Config) : IO DistributedDataGenerator` | `Tyr/DataLoader.lean` |
+| `DistributedDataGenerator.nextBatch` | `(gen) (batchSize seqLen : Nat) : IO (Option (Tensor { shape := #[batchSize, seqLen], dtype := .Int64, device := .CPU }) × DistributedDataGenerator)` | `Tyr/DataLoader.lean` |
+| `BatchIterator.nextGPT` | `(iter) (batchSize seqLen : Nat) : IO (Option (Tensor { shape := #[batchSize, seqLen], dtype := .Int64, device := .CPU } × Tensor { shape := #[batchSize, seqLen], dtype := .Int64, device := .CPU }) × BatchIterator)` (input/target shift) | `Examples/GPT/GPTDataLoader.lean` |
+| `DistributedDataGenerator.nextBatchGPT` | `(gen) (batchSize seqLen : Nat)`; GPT input/target batch | `Examples/GPT/GPTDataLoader.lean` |
 | `SequentialLoader.fromFile` / `SequentialBatchIterator.new` / `.next` | fixed-dim Shakespeare-style loading, `Tensor { shape := #[b, s], dtype := .Int64, device := .CPU }` batches | `Examples/GPT/GPTDataLoader.lean:118,159,166` |
 | `loadShakespeareData` | `(trainPath valPath) (batchSize seqLen) : IO (Σ n, SequentialBatchIterator n .. × Option (Σ m, SequentialLoader m))` — one-shot Shakespeare setup | `Examples/GPT/GPTDataLoader.lean:188` |
 
@@ -342,17 +342,17 @@ import Tyr.DataLoader
 open torch torch.DataLoader
 
 def nextTokenCount (gen : DistributedDataGenerator) : IO Nat := do
-  let (batch?, _) ← gen.nextBatch
+  let (batch?, _) ← gen.nextBatch 8 1024
   match batch? with
   | none => pure 0
   | some batch =>
-    let indexed : Tensor { shape := #[gen.iterator.batchSize, gen.iterator.seqLen], dtype := .Int64, device := .CPU } := batch
+    let indexed : Tensor { shape := #[8, 1024], dtype := .Int64, device := .CPU } := batch
     pure (← indexed.toUInt64Array).size
 ```
 
-Create a generator with `DistributedDataGenerator.init cfg batchSize seqLen`.
-With `import Examples.GPT.GPTDataLoader`, `gen.nextBatchGPT` returns indexed
-input/target pairs separated by one token.
+Create a generator with `DistributedDataGenerator.init cfg`.
+With `import Examples.GPT.GPTDataLoader`, `gen.nextBatchGPT batchSize seqLen`
+returns indexed input/target pairs separated by one token.
 
 
 Fixed-dim Shakespeare batches — reconstructed example (from

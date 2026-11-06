@@ -6,8 +6,7 @@ private opaque RawSpec : NonemptyType := ⟨Unit, inferInstance⟩
 private def Raw : Type := RawSpec.type
 private instance : Nonempty Raw := RawSpec.property
 
-@[extern "lean_torch_reshape_exact"] private opaque reshape
-    (input : @& Raw) (target : @& Array Nat) : Raw
+@[extern "tyr_test_failing_op"] private opaque failingOp (input : @& Raw) : Raw
 @[extern "lean_torch_sum"] private opaque sum
     (input : @& Raw) (dims : Option (Array Nat)) (keepdim : Bool) : Raw
 
@@ -24,5 +23,5 @@ private instance : Nonempty Raw := RawSpec.property
 @[export tyr_test_callback_throw] private def throwingCallback
     (fallback : Raw) (inputs : Array Raw) : Raw :=
   match inputs[0]? with
-  | some input => reshape input #[3]
+  | some input => failingOp input
   | none => fallback

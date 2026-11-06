@@ -420,16 +420,15 @@ def validate {cfg : moddedGpt.Config}
   let mut numValid := 0
 
   -- Create iterator
-  let mut iter := BatchIterator.new valData.2 batchSize seqLen
+  let mut iter := BatchIterator.new valData.2
 
   for _ in [:numBatches] do
-    let (maybeBatch, newIter) ← iter.nextGPT
+    let (maybeBatch, newIter) ← iter.nextGPT batchSize seqLen
     iter := newIter
     match maybeBatch with
-    | some (inputDyn, targetDyn) =>
-      -- Reshape dynamic tensors to expected shape
-      let input := (← IO.ofExcept (inputDyn.reshapeChecked? #[batchSize, seqLen])).to device
-      let target := (← IO.ofExcept (targetDyn.reshapeChecked? #[batchSize, seqLen])).to device
+    | some (input, target) =>
+      let input := input.to device
+      let target := target.to device
       let lossT ← moddedGpt.loss params yarn input target false
       totalLoss := totalLoss + Tensor.item lossT
       numValid := numValid + 1
@@ -892,7 +891,6 @@ structure TrainState (cfg : moddedGpt.Config) where
 
 /-- Initialize training state -/
 def TrainState.init (cfg : moddedGpt.Config) (dataConfig : DataLoader.Config)
-    (hp : Hyperparameters)
     (_distributed : Bool) (_worldSize : Nat)
     (device : Device := Device.CPU)
     (lr : Float := 0.023) (weightDecay : Float := 0.0)
@@ -903,9 +901,7 @@ def TrainState.init (cfg : moddedGpt.Config) (dataConfig : DataLoader.Config)
   -- Initialize optimizer state from moved parameters so moment buffers match device
   let optState := OptimizerState.init cfg params lr weightDecay
 
-  let initialBatchSize := hp.deviceBatchSize
-  let initialSeqLen := hp.maxSeqLen
-  let dataGen ← DistributedDataGenerator.init dataConfig initialBatchSize initialSeqLen
+  let dataGen ← DistributedDataGenerator.init dataConfig
   let valData ←
     match dataConfig.valPath with
     | none => pure none
@@ -1257,19 +1253,17 @@ def trainLoop (cfg : moddedGpt.Config) (hp : Hyperparameters)
     let batchSize := hp.deviceBatchSize
     let seqLen := hp.maxSeqLen
     let gradAccum := effectiveGradAccumSteps hp 1
-    let iterator ← state.dataGen.iterator.updateParams batchSize seqLen
-    let dataGen := { state.dataGen with iterator }
     let mut microBatches : Array (Tensor { shape := #[batchSize, seqLen], dtype := .Int64, device := device } × Tensor { shape := #[batchSize, seqLen], dtype := .Int64, device := device }) := #[]
-    let mut newDataGen := dataGen
+    let mut newDataGen := state.dataGen
     let device := state.params.embed.device
     for _ in [:gradAccum] do
-      let (maybeBatch, newerDataGen) ← newDataGen.nextBatchGPT
+      let (maybeBatch, newerDataGen) ← newDataGen.nextBatchGPT batchSize seqLen
       newDataGen := newerDataGen
       match maybeBatch with
       | none => pure ()
-      | some (inputDyn, targetDyn) =>
-        let input := (← IO.ofExcept (inputDyn.reshapeChecked? #[batchSize, seqLen])).to device
-        let target := (← IO.ofExcept (targetDyn.reshapeChecked? #[batchSize, seqLen])).to device
+      | some (input, target) =>
+        let input := input.to device
+        let target := target.to device
         microBatches := microBatches.push (input, target)
     if microBatches.isEmpty then
       state := { state with dataGen := newDataGen }
@@ -1425,7 +1419,6 @@ structure DistributedTrainState (cfg : moddedGpt.Config) extends TrainState (dev
 
 /-- Initialize distributed training state -/
 def DistributedTrainState.init (cfg : moddedGpt.Config) (dataConfig : DataLoader.Config)
-    (hp : Hyperparameters)
     (device : Device := Device.CPU)
     (lr : Float := 0.023) (weightDecay : Float := 0.0)
     : IO (DistributedTrainState (device := device) cfg) := do
@@ -1443,9 +1436,7 @@ def DistributedTrainState.init (cfg : moddedGpt.Config) (dataConfig : DataLoader
   -- Initialize optimizer state from moved parameters so moment buffers match device
   let optState := OptimizerState.init cfg params lr weightDecay
 
-  let initialBatchSize := hp.deviceBatchSize
-  let initialSeqLen := hp.maxSeqLen
-  let dataGen ← DistributedDataGenerator.init dataConfig initialBatchSize initialSeqLen
+  let dataGen ← DistributedDataGenerator.init dataConfig
   let valData ←
     match dataConfig.valPath with
     | none => pure none
@@ -1507,19 +1498,17 @@ def trainLoopDistributed (cfg : moddedGpt.Config) (hp : Hyperparameters)
     let batchSize := hp.deviceBatchSize
     let seqLen := hp.maxSeqLen
     let gradAccum := effectiveGradAccumSteps hp state.worldSize
-    let iterator ← state.dataGen.iterator.updateParams batchSize seqLen
-    let dataGen := { state.dataGen with iterator }
     let mut microBatches : Array (Tensor { shape := #[batchSize, seqLen], dtype := .Int64, device := device } × Tensor { shape := #[batchSize, seqLen], dtype := .Int64, device := device }) := #[]
-    let mut newDataGen := dataGen
+    let mut newDataGen := state.dataGen
     let device := state.params.embed.device
     for _ in [:gradAccum] do
-      let (maybeBatch, newerDataGen) ← newDataGen.nextBatchGPT
+      let (maybeBatch, newerDataGen) ← newDataGen.nextBatchGPT batchSize seqLen
       newDataGen := newerDataGen
       match maybeBatch with
       | none => pure ()
-      | some (inputDyn, targetDyn) =>
-        let input := (← IO.ofExcept (inputDyn.reshapeChecked? #[batchSize, seqLen])).to device
-        let target := (← IO.ofExcept (targetDyn.reshapeChecked? #[batchSize, seqLen])).to device
+      | some (input, target) =>
+        let input := input.to device
+        let target := target.to device
         microBatches := microBatches.push (input, target)
     if microBatches.isEmpty then
       state := { state with dataGen := newDataGen }
@@ -1587,7 +1576,7 @@ def trainDistributed (cfg : moddedGpt.Config) (hp : Hyperparameters)
     IO.println s!"Hyperparameters: {repr hp}"
 
   -- Initialize distributed training state
-  let initState ← DistributedTrainState.init cfg dataConfig hp device
+  let initState ← DistributedTrainState.init cfg dataConfig device
 
   -- Resolve resume path (explicit --resume takes precedence over latest in checkpointDir).
   let latestPath := s!"{checkpointDir}/latest.ckpt"
@@ -1692,15 +1681,10 @@ def trainDistributed (cfg : moddedGpt.Config) (hp : Hyperparameters)
 
   return finalState
 
-/-- Dynamically-shaped GPT micro-batch `(inputs, targets)`. -/
-structure DynamicGPTBatch where
-  batch : Nat
-  seq : Nat
-  input : Tensor { shape := #[batch, seq], dtype := .Int64, device := .CPU }
-  target : Tensor { shape := #[batch, seq], dtype := .Int64, device := .CPU }
-
-/-- Provider callback for GPT micro-batches. -/
-abbrev DynamicGPTBatchProvider := IO (Option DynamicGPTBatch)
+/-- Provider callback for GPT micro-batches `(inputs, targets)`. -/
+abbrev GPTBatchProvider (batch seq : Nat) :=
+  IO (Option (Tensor { shape := #[batch, seq], dtype := .Int64, device := .CPU } ×
+    Tensor { shape := #[batch, seq], dtype := .Int64, device := .CPU }))
 
 /-- Distributed streaming training state (no shard-backed data generator). -/
 structure StreamTrainState (cfg : moddedGpt.Config) where
@@ -1749,7 +1733,7 @@ private def initStreamTrainState (cfg : moddedGpt.Config) (device : Device)
   }
 
 private def collectMicroBatches {batch seq : Nat}
-    (provider : DynamicGPTBatchProvider)
+    (provider : GPTBatchProvider batch seq)
     (gradAccum : Nat)
     (device : Device)
     : IO (Array (Tensor { shape := #[batch, seq], dtype := .Int64, device := device } × Tensor { shape := #[batch, seq], dtype := .Int64, device := device })) := do
@@ -1757,16 +1741,16 @@ private def collectMicroBatches {batch seq : Nat}
   for _ in [:gradAccum] do
     match ← provider with
     | none => pure ()
-    | some batchData =>
-      let input := (← IO.ofExcept (batchData.input.reshapeChecked? #[batch, seq])).to device
-      let target := (← IO.ofExcept (batchData.target.reshapeChecked? #[batch, seq])).to device
+    | some (input, target) =>
+      let input := input.to device
+      let target := target.to device
       microBatches := microBatches.push (input, target)
   return microBatches
 
 private def validateWithProvider {cfg : moddedGpt.Config} {batch seq : Nat}
     (params : ModdedGPTParams (device := device) cfg)
     (yarn : YarnRotary (device := device) cfg.headDim cfg.maxSeqLen)
-    (provider : DynamicGPTBatchProvider)
+    (provider : GPTBatchProvider batch seq)
     (numBatches : Nat)
     : IO (Option Float) := do
   if numBatches == 0 then
@@ -1778,9 +1762,9 @@ private def validateWithProvider {cfg : moddedGpt.Config} {batch seq : Nat}
   for _ in [:numBatches] do
     match ← provider with
     | none => pure ()
-    | some batchData =>
-      let input := (← IO.ofExcept (batchData.input.reshapeChecked? #[batch, seq])).to device
-      let target := (← IO.ofExcept (batchData.target.reshapeChecked? #[batch, seq])).to device
+    | some (input, target) =>
+      let input := input.to device
+      let target := target.to device
       let lossT ← moddedGpt.loss params yarn input target false
       totalLoss := totalLoss + Tensor.item lossT
       seen := seen + 1
@@ -1835,8 +1819,8 @@ private def removeStreamCursorStaging (staging? : Option String) (rank : Nat) : 
 
 private def trainLoopDistributedStream (cfg : moddedGpt.Config) (hp : Hyperparameters)
     (state : StreamTrainState (device := device) cfg)
-    (trainProvider : DynamicGPTBatchProvider)
-    (valProvider? : Option DynamicGPTBatchProvider)
+    (trainProvider : GPTBatchProvider hp.deviceBatchSize hp.maxSeqLen)
+    (valProvider? : Option (GPTBatchProvider hp.deviceBatchSize hp.maxSeqLen))
     (valBatches : Nat)
     (checkpointDir : String)
     (saveStreamCursor? : Option (String → IO Unit) := none)
@@ -1936,8 +1920,8 @@ private def trainLoopDistributedStream (cfg : moddedGpt.Config) (hp : Hyperparam
     allowing task-mixture token-buffer data feeding. -/
 def trainDistributedWithBatchProvider (cfg : moddedGpt.Config) (hp : Hyperparameters)
     (device : Device)
-    (trainProvider : DynamicGPTBatchProvider)
-    (valProvider? : Option DynamicGPTBatchProvider := none)
+    (trainProvider : GPTBatchProvider hp.deviceBatchSize hp.maxSeqLen)
+    (valProvider? : Option (GPTBatchProvider hp.deviceBatchSize hp.maxSeqLen) := none)
     (valBatches : Nat := 0)
     (checkpointDir : String := "checkpoints/modded")
     (resume : Option String := none)
@@ -2044,6 +2028,11 @@ def trainDistributedWithBatchProvider (cfg : moddedGpt.Config) (hp : Hyperparame
   if isDistributed then
     dist.barrier
 
+  -- The providers emit batches of the requested shape.
+  if effectiveHp.deviceBatchSize != hp.deviceBatchSize || effectiveHp.maxSeqLen != hp.maxSeqLen then
+    throw <| IO.userError
+      s!"Checkpoint batch shape {effectiveHp.deviceBatchSize}x{effectiveHp.maxSeqLen} differs from the stream's {hp.deviceBatchSize}x{hp.maxSeqLen}"
+  let effectiveHp := { effectiveHp with deviceBatchSize := hp.deviceBatchSize, maxSeqLen := hp.maxSeqLen }
   let finalState ← trainLoopDistributedStream
     cfg effectiveHp state trainProvider valProvider? valBatches checkpointDir saveStreamCursor?
 

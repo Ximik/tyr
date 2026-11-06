@@ -79,21 +79,15 @@ private def maxErrors {σ τ : StaticSpec} (got : Tensor σ) (expected : Tensor 
     maxRel := max maxRel (diff / (b[i]!.abs + 1e-3))
   pure (maxAbs, maxRel)
 
-/-- Sorted top-k id set per row of a shape-indexed logits tensor (`[n, vocab]`, or
-    `[vocab]` which is treated as one row). -/
-private def topkIdSets {s : Shape} (logits : Tensor { shape := s, device := device, dtype := dtype }) (k : Nat) : IO (Array (Array UInt64)) := do
-  let sh := Tensor.runtimeShape logits
-  let (n, v) :=
-    if sh.size == 1 then (1, sh.getD 0 0)
-    else (sh.getD 0 0, sh.getD 1 0)
-  let l2 : Tensor { shape := #[n, v], device := device, dtype := dtype }  ← IO.ofExcept (logits.reshapeChecked? #[n, v])
-  let (_, idx) := qwen35.topK2d l2 k 1
+/-- Sorted top-k id set per row of `[n, vocab]` logits. -/
+private def topkIdSets {n v : Nat} (logits : Tensor { shape := #[n, v], device := device, dtype := dtype }) (k : Nat) : IO (Array (Array UInt64)) := do
+  let (_, idx) := qwen35.topK2d logits k 1
   let flat ← Tensor.toUInt64Array (idx)
   pure (Array.ofFn (n := n) fun r =>
     (flat.extract (r.val * k) (r.val * k + k)).qsort (fun a b => a < b))
 
 /-- Abs-diff gate + top-5-set gate for one logits tensor. -/
-private def checkLogits {s t : Shape} {refDType : DType} (lbl name : String) (got : Tensor { shape := s, device := device, dtype := dtype }) (ref : Tensor { shape := t, device := device, dtype := refDType }) (tol : Float) : IO Unit := do
+private def checkLogits {n v m w : Nat} {refDType : DType} (lbl name : String) (got : Tensor { shape := #[n, v], device := device, dtype := dtype }) (ref : Tensor { shape := #[m, w], device := device, dtype := refDType }) (tol : Float) : IO Unit := do
   let (maxAbs, maxRel) ← maxErrors got ref
   IO.println s!"  [{lbl}] {name}: maxAbs={maxAbs} maxRel={maxRel} (tol={tol})"
   check (maxAbs ≤ tol) s!"[{lbl}] {name} maxAbs={maxAbs} ≤ {tol}"
@@ -215,9 +209,10 @@ private def runFixture (device : Device) : IO Unit := do
   --    A ++ gen_ids[0..15)).
   let idsFull := mkIds (promptA ++ (genRef.extract 0 15).map (fun t => Int64.ofNat t.toNat)) device
   let logitsFull ← model.forward cfg idsFull
-  let lastLogits : Tensor { shape := #[1024], device := device, dtype := .Float32 }  ← IO.ofExcept ((sliceTyped logitsFull 1 21 1).reshapeChecked? #[1024])
+  let lastLogits : Tensor { shape := #[1, cfg.vocab_size], device := device, dtype := .Float32 } :=
+    (sliceTyped logitsFull 1 21 1).reshape #[1, cfg.vocab_size]
   checkLogits lbl "gen_logits_last" (lastLogits)
-    ((genLastRef.to device)) 0.05
+    ((genLastRef.reshape #[1, 1024]).to device) 0.05
 
   -- Informational BF16 pass (the checkpoint's storage dtype): report diffs
   -- only. Bf16 rounding alone (HF bf16 vs HF fp32: logits_b maxAbs ≈ 0.102)

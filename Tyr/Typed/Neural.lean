@@ -456,16 +456,19 @@ def hannWindow (n : Nat) : Tensor { shape := #[n], dtype := .Float32, device := 
   | .ok t => t
   | .error message => nativeInvariantFailure s!"Tensor.hannWindow: {message}"
 
-/-- The native STFT frame count is returned as a checked existential shape. -/
+/-- Frames of `stft` over `n` samples; `center` reflect-pads `nFft / 2` on each side. -/
+def stftFrames (n nFft hopLength : Nat) (center : Bool) : Nat :=
+  ((if center then n + 2 * (nFft / 2) else n) - nFft) / hopLength + 1
+
+/-- One-sided STFT with real and imaginary parts packed in the last axis. -/
 def stft {n winLength : Nat} {dev : Device} (input : Tensor { shape := #[n], dtype := .Float32, device := dev }) (nFft hopLength : Nat)
     (window : Tensor { shape := #[winLength], dtype := .Float32, device := dev }) (center : Bool := true) (normalized : Bool := false) :
-    IO (Sigma fun shape : Shape => Tensor { shape := shape, dtype := .Float32, device := dev }) := do
+    IO (Tensor { shape := #[nFft / 2 + 1, stftFrames n nFft hopLength center, 2], dtype := .Float32, device := dev }) := do
   let raw ← match RawTensor.stftChecked input.raw nFft hopLength winLength window.raw center normalized with
     | .ok raw => pure raw
     | .error message => throw <| IO.userError s!"Tensor.stft: {message}"
-  let shape := raw.runtimeShape
-  match Tensor.ofRaw (σ := ⟨shape, .Float32, dev⟩) raw with
-  | .ok t => pure ⟨shape, t⟩
+  match Tensor.ofRaw raw with
+  | .ok t => pure t
   | .error message => throw <| IO.userError s!"Tensor.stft: {message}"
 
 def log10? {σ : StaticSpec} (input : Tensor σ) : Except String (Tensor σ) :=

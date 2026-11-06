@@ -316,6 +316,7 @@ def forward2d {tokens : Nat}
       -- `masked_select`/`embedding1d` see input and mask/index on one device.
       let tokIdsFlat :=
         Tensor.reshape (Tensor.expand (Tensor.reshape ((Tensor.arange tokens).to device) #[tokens, 1]) #[tokens, k]) #[tokens * k]
+      let pairIds := (Tensor.arange (tokens * k)).to device
       -- Accumulator in the model dtype (HF: torch.zeros_like(hidden_states)).
       let mut acc : Tensor { dtype := dtype, device := device, shape := #[tokens, cfg.hidden_size] } := Tensor.castLike x (zerosDynamic #[tokens, cfg.hidden_size] false device)
       -- Per-unique-expert dispatch: materialize each hit expert once per forward.
@@ -331,11 +332,9 @@ def forward2d {tokens : Nat}
             seen := seen.push id.toNat
         pure (seen.qsort (· < ·))
       for eU in hitExperts do
-        let maskE := Tensor.eqScalar flatIdx eU.toInt64
-        let tokEr := Tensor.maskedSelect tokIdsFlat maskE
-        let wE := Tensor.maskedSelect flatW maskE
-        let nE := tokEr.1
-        let tokE := tokEr.2
+        let ⟨nE, pairsE⟩ := Tensor.maskedSelect pairIds (Tensor.eqScalar flatIdx eU.toInt64)
+        let tokE := Tensor.indexSelect tokIdsFlat pairsE
+        let wE := Tensor.indexSelect flatW pairsE
         let (gateW, upW, downW) ← expertWeights cfg m eU
         -- SwiGLU expert MLP in BF16.
         let xE : Tensor { dtype := dtype, device := device, shape := #[nE, cfg.hidden_size] } := Tensor.embedding1d tokE x
@@ -343,8 +342,7 @@ def forward2d {tokens : Nat}
           mulSame (Tensor.silu (Tensor.linear xE gateW)) (Tensor.linear xE upW)
         let outE : Tensor { dtype := dtype, device := device, shape := #[nE, cfg.hidden_size] } := Tensor.linear hid downW
         -- Routing weights multiply the expert OUTPUT (moe_apply_router_weight_on_input=false).
-        -- Both selections use `maskE`, so their counts agree at runtime.
-        let wCol ← IO.ofExcept (wE.2.reshapeChecked? #[nE, 1])
+        let wCol := wE.reshape #[nE, 1]
         let outEW : Tensor { dtype := dtype, device := device, shape := #[nE, cfg.hidden_size] } := mulBroadcast wCol outE
         let idxRows : Tensor { device := device, shape := #[nE, cfg.hidden_size], dtype := .Int64 } :=
           Tensor.reshape (Tensor.expand (Tensor.reshape tokE #[nE, 1]) #[nE, cfg.hidden_size]) #[nE, cfg.hidden_size]

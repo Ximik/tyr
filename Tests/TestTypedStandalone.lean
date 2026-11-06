@@ -31,6 +31,16 @@ example (_x : Tensor { shape := #[2, 3], dtype := .Float32, device := .CPU }) (_
     have _ : Tensor { shape := #[6], dtype := .Float32, device := .CPU } := { raw := _x.raw }
   trivial
 
+-- Reshape requires equal element counts by proof; a wrapped negative extent
+-- cannot match one either, so it never reaches native shape inference.
+example (t : Tensor ⟨#[2, 2], .Float32, .CPU⟩) : True := by
+  have _ := t.reshape #[4]
+  fail_if_success
+    have _ := t.reshape #[3]
+  fail_if_success
+    have _ := t.reshape #[18446744073709551615]
+  trivial
+
 @[test]
 def testRawAdmissionRejectsFalseClaims : IO Unit := do
   let raw := (Tensor.full #[2, 3] 7).raw
@@ -101,13 +111,7 @@ def testExplicitConversionsCheckNativeResults : IO Unit := do
       LeanTest.assertEqual converted.raw.dtype .Int64
   LeanTest.assertTrue ((original.castDType? .QInt8).toOption.isNone)
     "A dtype without a native conversion must return an error"
-  match original.reshapeChecked? #[4] with
-  | .error message => LeanTest.fail message
-  | .ok reshaped => LeanTest.assertEqual reshaped.runtimeShape #[4]
-  LeanTest.assertTrue ((original.reshapeChecked? #[3]).toOption.isNone)
-    "Runtime reshape must reject a different element count"
-  LeanTest.assertTrue ((original.reshapeChecked? #[18446744073709551615]).toOption.isNone)
-    "Wrapped negative extents must not act as native shape inference"
+  LeanTest.assertEqual (original.reshape #[4]).runtimeShape #[4]
   let pinned := Tensor.onesFor { shape := #[2], dtype := .Float32, device := .CPU }
   let converted ← TensorStruct.castTo (Tensor ⟨#[2], .BFloat16, .CPU⟩) pinned
   LeanTest.assertEqual converted.raw.dtype .BFloat16

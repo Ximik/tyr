@@ -20,25 +20,22 @@ open torch
 /-- Get the next batch of (input, target) pairs with indexed shapes and integral dtype.
     For causal language modeling, target is input shifted by 1.
 -/
-def BatchIterator.nextGPT (iter : BatchIterator)
-    : IO (Option (Tensor { shape := #[iter.batchSize, iter.seqLen], dtype := .Int64, device := .CPU } × Tensor { shape := #[iter.batchSize, iter.seqLen], dtype := .Int64, device := .CPU }) × BatchIterator) := do
-  let _ ← checkedBatchTokens iter.batchSize iter.seqLen 1
-  -- Get batch from BOS finder
+def BatchIterator.nextGPT (iter : BatchIterator) (batchSize seqLen : Nat)
+    : IO (Option (Tensor { shape := #[batchSize, seqLen], dtype := .Int64, device := .CPU } × Tensor { shape := #[batchSize, seqLen], dtype := .Int64, device := .CPU }) × BatchIterator) := do
+  let _ ← checkedBatchTokens batchSize seqLen 1
   -- We need seqLen + 1 to split into input and target
   let (maybeBatch, newBosFinder) ← iter.shard.bosFinder.getBatch
-    iter.shard.tokens iter.batchSize (iter.seqLen + 1)
+    iter.shard.tokens batchSize (seqLen + 1)
 
   match maybeBatch with
   | none =>
     -- Epoch complete, reset and increment epoch
     let newIter := BatchIterator.new { iter.shard with bosFinder := newBosFinder }
-      iter.batchSize iter.seqLen iter.shuffleSeed (iter.epoch + 1)
+      iter.shuffleSeed (iter.epoch + 1)
     return (none, newIter)
   | some batch =>
-    -- Split into input and target (target is shifted by 1)
-    -- batch is [batchSize, seqLen+1]
-    let input := batch.sliceChecked 1 0 iter.seqLen #[iter.batchSize, iter.seqLen]
-    let target := batch.sliceChecked 1 1 iter.seqLen #[iter.batchSize, iter.seqLen]
+    let input := batch.sliceChecked 1 0 seqLen #[batchSize, seqLen]
+    let target := batch.sliceChecked 1 1 seqLen #[batchSize, seqLen]
     let newShard := { iter.shard with bosFinder := newBosFinder }
     let newIter := { iter with
       shard := newShard
@@ -47,27 +44,14 @@ def BatchIterator.nextGPT (iter : BatchIterator)
     return (some (input, target), newIter)
 
 /-- Get the next batch for GPT training. -/
-def DistributedDataGenerator.nextBatchGPT (gen : DistributedDataGenerator)
-    : IO (Option (Tensor { shape := #[gen.iterator.batchSize, gen.iterator.seqLen], dtype := .Int64, device := .CPU } × Tensor { shape := #[gen.iterator.batchSize, gen.iterator.seqLen], dtype := .Int64, device := .CPU }) × DistributedDataGenerator) := do
-  let b := gen.iterator.batchSize
-  let s := gen.iterator.seqLen
+def DistributedDataGenerator.nextBatchGPT (gen : DistributedDataGenerator) (b s : Nat)
+    : IO (Option (Tensor { shape := #[b, s], dtype := .Int64, device := .CPU } × Tensor { shape := #[b, s], dtype := .Int64, device := .CPU }) × DistributedDataGenerator) := do
   let ⟨count, hCount⟩ ← checkedBatchTokens b s 1
   let (tokens, gen') ← gen.nextTokens count
   let batch := tokens.reshape #[b, s + 1] (by simp [hCount])
   let input := batch.sliceChecked 1 0 s #[b, s]
   let target := batch.sliceChecked 1 1 s #[b, s]
   return (some (input, target), gen')
-
-/-- Update batch and sequence parameters based on training step for modded-nanogpt. -/
-def DistributedDataGenerator.updateForStepGPT (gen : DistributedDataGenerator)
-    (step : Nat) (blockSize : Nat := 128) : IO DistributedDataGenerator := do
-  let (batchSize, windowBlocks) :=
-    if step < 200 then (8, 3)
-    else if step < 1000 then (16, 7)
-    else (24, 11)
-  let ⟨seqLen, _⟩ ← checkedBatchTokens windowBlocks blockSize
-  let newIterator ← gen.iterator.updateParams batchSize seqLen
-  return { gen with iterator := newIterator }
 
 /-! ## Utility Functions -/
 

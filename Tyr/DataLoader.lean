@@ -337,39 +337,32 @@ def DataShard.load (path : String) (shardIdx numShards : Nat)
 structure BatchIterator where
   numTokens : Nat
   shard : DataShard numTokens
-  batchSize : Nat
-  seqLen : Nat
   batchCount : Nat
   epoch : Nat
   shuffleSeed : Option UInt64 := none
   deriving Repr
 
-def BatchIterator.new {n : Nat} (shard : DataShard n) (batchSize seqLen : Nat)
+def BatchIterator.new {n : Nat} (shard : DataShard n)
     (shuffleSeed : Option UInt64 := none) (epoch : Nat := 0) : BatchIterator :=
   let finder := match shuffleSeed with
     | none => shard.bosFinder.reset
     | some seed => shard.bosFinder.shuffle (lcgNext (seed + epoch.toUInt64))
-  { numTokens := n, shard := { shard with bosFinder := finder }, batchSize, seqLen,
+  { numTokens := n, shard := { shard with bosFinder := finder },
     batchCount := 0, epoch, shuffleSeed }
 
-def BatchIterator.next (iter : BatchIterator)
-    : IO (Option (Tensor { shape := #[iter.batchSize, iter.seqLen], dtype := .Int64, device := .CPU }) × BatchIterator) := do
+def BatchIterator.next (iter : BatchIterator) (batchSize seqLen : Nat)
+    : IO (Option (Tensor { shape := #[batchSize, seqLen], dtype := .Int64, device := .CPU }) × BatchIterator) := do
   let (maybeBatch, newBosFinder) ← iter.shard.bosFinder.getBatch
-    iter.shard.tokens iter.batchSize iter.seqLen
+    iter.shard.tokens batchSize seqLen
   match maybeBatch with
   | none =>
     let newIter := BatchIterator.new { iter.shard with bosFinder := newBosFinder }
-      iter.batchSize iter.seqLen iter.shuffleSeed (iter.epoch + 1)
+      iter.shuffleSeed (iter.epoch + 1)
     return (none, newIter)
   | some batch =>
     let newShard := { iter.shard with bosFinder := newBosFinder }
     let newIter := { iter with shard := newShard, batchCount := iter.batchCount + 1 }
     return (some batch, newIter)
-
-def BatchIterator.updateParams (iter : BatchIterator)
-    (batchSize seqLen : Nat) : IO BatchIterator := do
-  let _ ← checkedBatchTokens batchSize seqLen
-  return { iter with batchSize, seqLen }
 
 /-! ## Distributed Data Generator -/
 
@@ -404,21 +397,19 @@ private def streamSeed (config : Config) (rank : Nat) (pathIdx : Nat) : Option U
   if config.shuffle then some (lcgNext (config.seed + rank.toUInt64) + pathIdx.toUInt64) else none
 
 /-- Explicit rank entry point, also usable without initializing a process group. -/
-def DistributedDataGenerator.initForRank (config : Config) (batchSize seqLen rank worldSize : Nat)
+def DistributedDataGenerator.initForRank (config : Config) (rank worldSize : Nat)
     : IO DistributedDataGenerator := do
-  let _ ← checkedBatchTokens batchSize seqLen
   let trainPaths ← resolveShardPaths config.dataPath .train
   let trainPathIdx := 0
   let ⟨_, shard⟩ ← DataShard.load trainPaths[trainPathIdx]! rank worldSize config.bosToken
-  let iterator := BatchIterator.new shard batchSize seqLen (streamSeed config rank trainPathIdx)
+  let iterator := BatchIterator.new shard (streamSeed config rank trainPathIdx)
   return { iterator, config, globalStep := 0, rank, worldSize, trainPaths, trainPathIdx }
 
 /-- Initialize a synchronous loader using the active distributed rank. -/
-def DistributedDataGenerator.init (config : Config) (batchSize seqLen : Nat)
-    : IO DistributedDataGenerator := do
+def DistributedDataGenerator.init (config : Config) : IO DistributedDataGenerator := do
   let isDistributed ← dist.isInitialized
   let (rank, worldSize) ← if isDistributed then dist.getRankAndWorldSize else pure (0, 1)
-  initForRank config batchSize seqLen rank worldSize
+  initForRank config rank worldSize
 
 def DistributedDataGenerator.cursor (gen : DistributedDataGenerator) : StreamCursor := {
   seed := gen.config.seed, shuffle := gen.config.shuffle, bosToken := gen.config.bosToken
@@ -440,7 +431,7 @@ def DistributedDataGenerator.restoreCursor (gen : DistributedDataGenerator) (cur
   let ⟨n, shard⟩ ← DataShard.load gen.trainPaths[cursor.trainPathIdx]! gen.rank gen.worldSize gen.config.bosToken
   if n != cursor.shardLength || cursor.position > n then
     throw <| IO.userError "Data cursor shard length or position mismatch"
-  let iterator := BatchIterator.new shard gen.iterator.batchSize gen.iterator.seqLen
+  let iterator := BatchIterator.new shard
     (streamSeed gen.config gen.rank cursor.trainPathIdx) cursor.epoch
   let finder := { iterator.shard.bosFinder with currentPos := cursor.position }
   let iterator := { iterator with
@@ -477,7 +468,7 @@ def DistributedDataGenerator.nextTokens (gen : DistributedDataGenerator) (count 
     let nextPath := gen.trainPaths[nextIdx]!
     let epoch := gen.iterator.epoch + (if nextIdx == 0 then 1 else 0)
     let ⟨_, shard⟩ ← DataShard.load nextPath gen.rank gen.worldSize gen.config.bosToken
-    let iterator := BatchIterator.new shard iter.batchSize iter.seqLen
+    let iterator := BatchIterator.new shard
       (streamSeed gen.config gen.rank nextIdx) epoch
     gen := { gen with iterator, trainPathIdx := nextIdx }
   gen := { gen with
@@ -489,18 +480,12 @@ def DistributedDataGenerator.nextTokens (gen : DistributedDataGenerator) (count 
     | .error message => throw <| IO.userError s!"Training stream batch: {message}"
   return (tokens, gen)
 
-def DistributedDataGenerator.nextBatch (gen : DistributedDataGenerator)
-    : IO (Option (Tensor { shape := #[gen.iterator.batchSize, gen.iterator.seqLen], dtype := .Int64, device := .CPU }) ×
+def DistributedDataGenerator.nextBatch (gen : DistributedDataGenerator) (batchSize seqLen : Nat)
+    : IO (Option (Tensor { shape := #[batchSize, seqLen], dtype := .Int64, device := .CPU }) ×
           DistributedDataGenerator) := do
-  let ⟨count, hCount⟩ ← checkedBatchTokens gen.iterator.batchSize gen.iterator.seqLen
+  let ⟨count, hCount⟩ ← checkedBatchTokens batchSize seqLen
   let (tokens, gen') ← gen.nextTokens count
-  return (some (tokens.reshape #[gen.iterator.batchSize, gen.iterator.seqLen] (by simp [hCount])), gen')
-
-def DistributedDataGenerator.batchSize (gen : DistributedDataGenerator) : Nat :=
-  gen.iterator.batchSize
-
-def DistributedDataGenerator.seqLen (gen : DistributedDataGenerator) : Nat :=
-  gen.iterator.seqLen
+  return (some (tokens.reshape #[batchSize, seqLen] (by simp [hCount])), gen')
 
 /-! ## Validation and Utilities -/
 

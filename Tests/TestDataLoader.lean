@@ -103,10 +103,10 @@ private def documentTokens : Array UInt64 :=
   writeTokens (dir / "fineweb_train_0.bin") #[1, 2, 3]
   writeTokens (dir / "fineweb_train_1.bin") #[4, 5, 6, 7, 8, 9, 10]
   let cfg : Config := { dataPath := dir.toString, bosToken := 65535, shuffle := false }
-  let mut gen ← DistributedDataGenerator.initForRank cfg 1 4 0 1
+  let mut gen ← DistributedDataGenerator.initForRank cfg 0 1
   LeanTest.assertEqual gen.iterator.numTokens 3 "Small files keep their real length"
   for expected in #[#[1, 2, 3, 4], #[5, 6, 7, 8], #[9, 10, 1, 2]] do
-    let (batch, next) ← gen.nextBatch
+    let (batch, next) ← gen.nextBatch 1 4
     let some batch := batch | throw <| IO.userError "Missing stream batch"
     LeanTest.assertEqual (← readTokens batch) expected "File tails are packed before epoch rollover"
     gen := next
@@ -123,7 +123,7 @@ private def documentTokens : Array UInt64 :=
   IO.FS.writeBinFile path bytes
   let cfg : Config := { dataPath := path.toString, bosToken := 65535, shuffle := false }
   for rank in #[0, 1] do
-    let gen ← DistributedDataGenerator.initForRank cfg 1 1 rank 2
+    let gen ← DistributedDataGenerator.initForRank cfg rank 2
     LeanTest.assertEqual gen.iterator.numTokens partition "Full rank partition survives loading"
     let (_, gen) ← gen.nextTokens 1000000
     let (tail, gen) ← gen.nextTokens 6
@@ -146,7 +146,7 @@ private def documentTokens : Array UInt64 :=
   writeTokens (dir / "fineweb_train_0.bin") documentTokens
   writeTokens (dir / "fineweb_train_1.bin") #[0, 601, 602, 0, 701, 702, 703]
   let cfg : Config := { dataPath := dir.toString, bosToken := 0, seed := 42 }
-  let initial ← DistributedDataGenerator.initForRank cfg 1 4 0 1
+  let initial ← DistributedDataGenerator.initForRank cfg 0 1
   let (_, advanced) ← initial.nextTokens 7
   let saved := advanced.cursor
   let json := Lean.toJson saved
@@ -156,8 +156,8 @@ private def documentTokens : Array UInt64 :=
   let mut continued := advanced
   let mut restored ← initial.restoreCursor decoded
   for _ in [:8] do
-    let (a, nextA) ← continued.nextBatchGPT
-    let (b, nextB) ← restored.nextBatchGPT
+    let (a, nextA) ← continued.nextBatchGPT 1 4
+    let (b, nextB) ← restored.nextBatchGPT 1 4
     let some (ai, targetA) := a | throw <| IO.userError "Missing continued GPT batch"
     let some (bi, bt) := b | throw <| IO.userError "Missing restored GPT batch"
     LeanTest.assertEqual (← readTokens ai) (← readTokens bi) "Resume reproduces GPT inputs through file/epoch changes"
@@ -176,24 +176,23 @@ private def documentTokens : Array UInt64 :=
   let path := dir / "tokens.bin"
   writeTokens path #[1]
   let cfg : Config := { dataPath := path.toString }
-  let gen ← DistributedDataGenerator.initForRank cfg 1 1 0 2
-  assertRejected (do let _ ← gen.nextBatch; pure ()) "An empty rank reports no tokens instead of looping"
+  let gen ← DistributedDataGenerator.initForRank cfg 0 2
+  assertRejected (do let _ ← gen.nextBatch 1 1; pure ()) "An empty rank reports no tokens instead of looping"
 
 @[test] def testDataLoaderRejectsInvalidBatchSizes : IO Unit := IO.FS.withTempDir fun dir => do
   let path := dir / "tokens.bin"
   writeTokens path #[1, 2, 3, 4]
   let cfg : Config := { dataPath := path.toString, shuffle := false }
-  let gen ← DistributedDataGenerator.initForRank cfg 1 1 0 1
+  let gen ← DistributedDataGenerator.initForRank cfg 0 1
   let huge : Nat := 18446744073709551615
   for dims in #[(0, 1), (1, 0), (huge, 2)] do
-    assertRejected (do let _ ← gen.iterator.updateParams dims.1 dims.2; pure ())
-      "Parameter updates reject zero sizes and overflowing products"
-    let invalid := { gen with iterator := { gen.iterator with batchSize := dims.1, seqLen := dims.2 } }
-    assertRejected (do let _ ← invalid.nextBatch; pure ()) "Direct record updates cannot bypass size validation"
-    assertRejected (do let _ ← invalid.nextBatchGPT; pure ()) "GPT batches validate dimensions before allocating"
-  let extraOverflow := { gen with iterator := { gen.iterator with seqLen := huge } }
-  assertRejected (do let _ ← extraOverflow.nextBatchGPT; pure ()) "GPT extra target token cannot wrap sequence length"
-  assertRejected (do let _ ← extraOverflow.iterator.nextGPT; pure ()) "Finite GPT iterators reject target-token overflow"
+    assertRejected (do let _ ← gen.nextBatch dims.1 dims.2; pure ())
+      "Batches reject zero sizes and overflowing products"
+    assertRejected (do let _ ← gen.iterator.next dims.1 dims.2; pure ())
+      "Finite iterators reject zero sizes and overflowing products"
+    assertRejected (do let _ ← gen.nextBatchGPT dims.1 dims.2; pure ()) "GPT batches validate dimensions before allocating"
+  assertRejected (do let _ ← gen.nextBatchGPT 1 huge; pure ()) "GPT extra target token cannot wrap sequence length"
+  assertRejected (do let _ ← gen.iterator.nextGPT 1 huge; pure ()) "Finite GPT iterators reject target-token overflow"
 
 @[test] def testRandomBatchExactFitAndOversized : IO Unit := IO.FS.withTempDir fun dir => do
   let path := dir / "tokens.bin"

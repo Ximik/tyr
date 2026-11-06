@@ -456,8 +456,8 @@ packages and validates a requested result shape. `Tensor.toSome` instead returns
 `Sigma Tensor`, retaining the complete specification as an existential witness.
 A scalar is `#[]`; it is never a substitute for an unknown shape.
 
-`reshape` requires equal element counts. `reshapeChecked?` checks runtime
-element counts and rejects wrapped negative extents before invoking the native
+`reshape` requires a proof of equal element counts, and also checks the runtime
+element count and rejects wrapped negative extents before invoking the native
 reshape. `castDType?` and `castLike?` perform real dtype conversions and validate
 the result, returning native conversion failures through `Except`. Their pure
 convenience wrappers, along with `sliceChecked`, abort with a diagnostic on

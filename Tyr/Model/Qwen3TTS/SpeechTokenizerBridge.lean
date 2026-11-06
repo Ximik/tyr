@@ -194,20 +194,14 @@ private def computeSpeakerMelFromWave
   let wav : Tensor { shape := #[paddedLen], dtype := .Float32, device := .CPU } := Tensor.reshape (Tensor.fromFloatArray padded) #[paddedLen]
 
   let window : Tensor { shape := #[winSize], dtype := .Float32, device := .CPU } := Tensor.hannWindow winSize
-  let ⟨_, stftDyn⟩ ← Tensor.stft wav nFft hopSize window false false
-  let stftShape := stftDyn.runtimeShape
-  if stftShape.size < 3 then
-    throw <| IO.userError s!"Unexpected STFT rank {stftShape.size}, expected 3"
-
-  let freqBins : Nat := stftShape.getD 0 0
-  let frames : Nat := stftShape.getD 1 0
-  let packed : Nat := stftShape.getD 2 0
-  if packed != 2 then
-    throw <| IO.userError s!"Unexpected STFT packed size {packed}, expected 2"
+  let spec ← Tensor.stft wav nFft hopSize window false false
+  let freqBins : Nat := nFft / 2 + 1
+  let frames : Nat := Tensor.stftFrames paddedLen nFft hopSize false
+  if spec.runtimeShape != #[freqBins, frames, 2] then
+    throw <| IO.userError s!"Unexpected STFT shape {spec.runtimeShape}, expected {#[freqBins, frames, 2]}"
   if frames == 0 then
     throw <| IO.userError "Speaker mel extraction produced zero frames."
 
-  let spec : Tensor { shape := #[freqBins, frames, 2], dtype := .Float32, device := .CPU } ← IO.ofExcept (stftDyn.reshapeChecked? #[freqBins, frames, 2])
   let re3 : Tensor { shape := #[freqBins, frames, 1], dtype := .Float32, device := .CPU } := Tensor.sliceChecked spec 2 0 1 #[freqBins, frames, 1]
   let im3 : Tensor { shape := #[freqBins, frames, 1], dtype := .Float32, device := .CPU } := Tensor.sliceChecked spec 2 1 1 #[freqBins, frames, 1]
   let re : Tensor { shape := #[freqBins, frames], dtype := .Float32, device := .CPU } := Tensor.reshape re3 #[freqBins, frames]

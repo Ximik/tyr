@@ -1729,13 +1729,13 @@ structure KittenTTSOutput where
   alignmentFrames : Nat
   deriving TensorStruct
 
-structure KittenTTSDebugOutput where
-  asr : ShapePackedTensor .Float32 device
-  f0Curve : ShapePackedTensor .Float32 device
-  nCurve : ShapePackedTensor .Float32 device
+structure KittenTTSDebugOutput (cfg : KittenTTSConfig) where
+  alignmentFrames : Nat
+  asr : Tensor { shape := #[1, cfg.hiddenDim, alignmentFrames], dtype := .Float32, device := device }
+  f0Curve : Tensor { shape := #[1, 1, 2 * alignmentFrames], dtype := .Float32, device := device }
+  nCurve : Tensor { shape := #[1, 1, 2 * alignmentFrames], dtype := .Float32, device := device }
   audio : ShapePackedTensor .Float32 device
   predDurations : Array Nat
-  alignmentFrames : Nat
 
 structure KittenTTSDurationPrediction where
   durVals : Array Float
@@ -1900,27 +1900,27 @@ def debugSynthesizeIds {seq : Nat}
     (inputIds : Tensor { shape := #[1, seq], dtype := .Int64, device := device })
     (refStyle : Tensor { shape := #[1, KittenTTSConfig.fullStyleDim cfg], dtype := .Float32, device := device })
     (speed : Float := 1.0)
-    : IO (KittenTTSDebugOutput (device := device)) := do
+    : IO (KittenTTSDebugOutput (device := device) cfg) := do
   match (← prepareSynthesis m inputIds refStyle speed) with
   | none =>
     let device := modelDevice m
     pure {
-      asr := Tensor.packShape (Tensor.zeros #[1, cfg.hiddenDim, 0] (device := device))
-      f0Curve := Tensor.packShape (Tensor.zeros #[1, 1, 0] (device := device))
-      nCurve := Tensor.packShape (Tensor.zeros #[1, 1, 0] (device := device))
+      alignmentFrames := 0
+      asr := Tensor.zeros #[1, cfg.hiddenDim, 0] (device := device)
+      f0Curve := Tensor.zeros #[1, 1, 2 * 0] (device := device)
+      nCurve := Tensor.zeros #[1, 1, 2 * 0] (device := device)
       audio := Tensor.packShape (Tensor.zeros #[1, 1, 0] (device := device))
       predDurations := #[]
-      alignmentFrames := 0
     }
   | some prepared =>
     let audio ← m.decoder.forward prepared.asr prepared.f0Curve prepared.nCurve prepared.decoderStyle prepared.framesPos
     pure {
-      asr := Tensor.packShape prepared.asr
-      f0Curve := Tensor.packShape prepared.f0Curve
-      nCurve := Tensor.packShape prepared.nCurve
+      alignmentFrames := prepared.alignmentFrames
+      asr := prepared.asr
+      f0Curve := prepared.f0Curve
+      nCurve := prepared.nCurve
       audio := audio
       predDurations := prepared.predDurations
-      alignmentFrames := prepared.alignmentFrames
     }
 
 end Model
