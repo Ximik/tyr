@@ -91,8 +91,8 @@ Selection has its own scalar relocation rule; see
 [device compatibility](typed.md#device-compatibility).
 
 `reshape` takes a proof that the element counts are equal; its default tactic
-finds it for most shapes. When a shape is only known at runtime, `reshapeChecked?`
-validates it and returns an error instead. In both cases `#[]` means a scalar. `sliceChecked` validates the
+finds it for most shapes. When the counts only agree under a runtime condition,
+check it with `if h : … then t.reshape s h else throw …`. `#[]` means a scalar. `sliceChecked` validates the
 claimed result of a runtime slice. Other transforms include `transpose`,
 `permute`, `unsqueeze`, `squeeze`, and `unbind`.
 

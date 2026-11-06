@@ -719,9 +719,9 @@ def testQwen3ASRForwardFromOutputWav : IO Unit := do
   let batch : Nat := 1
   let frames : Nat := 64
   let textSeq : Nat := 5
-  let outSeq : Nat := AudioEncoderConfig.framesAfterConv3 cfg.thinkerConfig.audioConfig frames + textSeq
-
   let frontendCfg := tinyPreprocessorCfg cfg.thinkerConfig.audioConfig.numMelBins frames
+  let outSeq : Nat :=
+    AudioEncoderConfig.framesAfterConv3 cfg.thinkerConfig.audioConfig frontendCfg.expectedFrames + textSeq
   let frontendOut ← wavToWhisperFeatures frontendCfg wavPath
   let mel := frontendOut.inputFeatures
   let textIds ← Tensor.randint 0 cfg.thinkerConfig.textConfig.vocabSize.toInt64 #[batch, textSeq]
@@ -731,7 +731,7 @@ def testQwen3ASRForwardFromOutputWav : IO Unit := do
   LeanTest.assertTrue (Float.isFinite s) "logit sum from WAV-derived mel should be finite"
 
   let idxs ← IO.ofExcept (Tensor.argmax? logits 2)
-  let flat : Tensor { shape := #[batch * outSeq], dtype := .Int64, device := .CPU } ← IO.ofExcept (idxs.reshapeChecked? #[batch * outSeq])
+  let flat : Tensor { shape := #[batch * outSeq], dtype := .Int64, device := .CPU } := idxs.reshape #[batch * outSeq]
   let toks ← Tensor.toUInt64Array flat
   LeanTest.assertEqual toks.size (batch * outSeq) "flattened argmax token count should match output length"
 

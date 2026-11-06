@@ -107,8 +107,6 @@ The source shape is checked before conversion and never reshaped. -/
 
 @[extern "lean_torch_expand"] opaque expand (t : @& RawTensor) (target : Array Nat) : RawTensor
 
-@[extern "lean_torch_reshape_exact"] opaque reshape (t : @& RawTensor) (target : @& Shape) : RawTensor
-
 @[extern "lean_torch_permute"] opaque permute (t : @& RawTensor) (permutation : Array Nat) : RawTensor
 
 @[extern "lean_torch_transpose"] opaque transpose (t : @& RawTensor)
@@ -341,7 +339,8 @@ namespace torch.RawTensor
 
 @[extern "lean_torch_expand_checked"] opaque expandChecked (t : @& RawTensor) (target : Array Nat) : Except String RawTensor
 
-@[extern "lean_torch_reshape_exact_checked"] opaque reshapeChecked (t : @& RawTensor) (target : @& Shape) : Except String RawTensor
+/-- Native reshape behind `Tensor.reshape`, which validates the target first; use that instead. -/
+@[extern "lean_torch_reshape_exact_checked"] opaque reshape? (t : @& RawTensor) (target : @& Shape) : Except String RawTensor
 
 @[extern "lean_torch_sum_checked"] opaque sumChecked (t : @& RawTensor) (dims : Option (Array Nat)) (keepdim : Bool) : Except String RawTensor
 

@@ -458,12 +458,10 @@ def TaskIterator.progress (iter : TaskIterator) : Float :=
     - emit contiguous windows of length `batchSize * seqLen + 1`
     - form `(inputs, targets)` by one-token shift
 -/
-structure TaskTokenStream where
+structure TaskTokenStream (batchSize seqLen : Nat) where
   mixture : ConversationMixture
   chatTokens : ChatTokens
   encode : String → Array UInt64
-  batchSize : Nat
-  seqLen : Nat
   rank : Nat := 0
   worldSize : Nat := 1
   cursor : Nat := 0
@@ -480,7 +478,7 @@ def TaskTokenStream.new
     (chatTokens : ChatTokens)
     (encode : String → Array UInt64)
     (rank worldSize : Nat := 0)
-    : TaskTokenStream :=
+    : TaskTokenStream batchSize seqLen :=
   let size := mixture.size
   let startCursor :=
     if size == 0 then 0 else rank % size
@@ -488,17 +486,17 @@ def TaskTokenStream.new
     mixture := mixture
     chatTokens := chatTokens
     encode := encode
-    batchSize := batchSize
-    seqLen := seqLen
     rank := rank
     worldSize := max 1 worldSize
     cursor := startCursor
   }
 
-private def TaskTokenStream.available (s : TaskTokenStream) : Nat :=
+variable {batchSize seqLen : Nat}
+
+private def TaskTokenStream.available (s : TaskTokenStream batchSize seqLen) : Nat :=
   s.buffer.size - s.consumed
 
-private def TaskTokenStream.compact (s : TaskTokenStream) : TaskTokenStream :=
+private def TaskTokenStream.compact (s : TaskTokenStream batchSize seqLen) : TaskTokenStream batchSize seqLen :=
   if s.consumed == 0 then
     s
   else if s.consumed * 2 < s.buffer.size then
@@ -509,11 +507,11 @@ private def TaskTokenStream.compact (s : TaskTokenStream) : TaskTokenStream :=
       consumed := 0
     }
 
-private def TaskTokenStream.pushTokens (s : TaskTokenStream) (tokens : Array UInt64) : TaskTokenStream :=
+private def TaskTokenStream.pushTokens (s : TaskTokenStream batchSize seqLen) (tokens : Array UInt64) : TaskTokenStream batchSize seqLen :=
   { s with buffer := s.buffer ++ tokens }
 
-private def TaskTokenStream.popWindow? (s : TaskTokenStream) (n : Nat)
-    : Option (Array UInt64 × TaskTokenStream) := do
+private def TaskTokenStream.popWindow? (s : TaskTokenStream batchSize seqLen) (n : Nat)
+    : Option (Array UInt64 × TaskTokenStream batchSize seqLen) := do
   if s.available < n then
     none
   else
@@ -525,14 +523,14 @@ private def TaskTokenStream.popWindow? (s : TaskTokenStream) (n : Nat)
 
 /-- Consume one GPT batch from the stream.
     Returns input/target tensors shaped `[batchSize, seqLen]`. -/
-def TaskTokenStream.nextGPTBatch (stream : TaskTokenStream)
-    : IO (Option (Tensor { shape := #[stream.batchSize, stream.seqLen], dtype := .Int64, device := .CPU } ×
-                  Tensor { shape := #[stream.batchSize, stream.seqLen], dtype := .Int64, device := .CPU }) ×
-          TaskTokenStream) := do
-  if stream.batchSize == 0 || stream.seqLen == 0 || stream.mixture.size == 0 then
+def TaskTokenStream.nextGPTBatch (stream : TaskTokenStream batchSize seqLen)
+    : IO (Option (Tensor { shape := #[batchSize, seqLen], dtype := .Int64, device := .CPU } ×
+                  Tensor { shape := #[batchSize, seqLen], dtype := .Int64, device := .CPU }) ×
+          TaskTokenStream batchSize seqLen) := do
+  if batchSize == 0 || seqLen == 0 || stream.mixture.size == 0 then
     return (none, stream)
 
-  let needed := stream.batchSize * stream.seqLen + 1
+  let needed := batchSize * seqLen + 1
   let mut s := { stream with lastWrapped := false }
 
   while s.available < needed do
@@ -557,9 +555,9 @@ def TaskTokenStream.nextGPTBatch (stream : TaskTokenStream)
     let targetIds := window.extract 1 needed
 
     let inputTensor ← IO.ofExcept <|
-      Tensor.fromInt64ArrayAs? (inputIds.map (·.toInt64)) #[stream.batchSize, stream.seqLen]
+      Tensor.fromInt64ArrayAs? (inputIds.map (·.toInt64)) #[batchSize, seqLen]
     let targetTensor ← IO.ofExcept <|
-      Tensor.fromInt64ArrayAs? (targetIds.map (·.toInt64)) #[stream.batchSize, stream.seqLen]
+      Tensor.fromInt64ArrayAs? (targetIds.map (·.toInt64)) #[batchSize, seqLen]
 
     let progress :=
       if sWindow.mixture.size == 0 then
@@ -574,7 +572,7 @@ def TaskTokenStream.nextGPTBatch (stream : TaskTokenStream)
     return (some (inputTensor, targetTensor), sOut)
 
 /-- Stream progress over current mixed dataset epoch. -/
-def TaskTokenStream.progress (s : TaskTokenStream) : Float :=
+def TaskTokenStream.progress (s : TaskTokenStream batchSize seqLen) : Float :=
   s.lastProgress
 
 end torch.Data.Task

@@ -797,30 +797,26 @@ def meanAll {σ : StaticSpec} [DType.Mean σ.dtype] (t : Tensor σ) :
 
 /-! ## Shape ops (dtype/device-preserving) -/
 
-/-- Reshape to literal, nonnegative extents. Invalid element counts and
-wrapped signed extents are rejected before calling the native operation. -/
-def reshapeChecked? {σ : StaticSpec} (t : Tensor σ) (shape' : Shape) :
-    Except String (Tensor (σ.withShape shape')) := do
-  if shape'.any (fun dim => dim > 9223372036854775807) then
-    throw "reshape requires nonnegative extents representable as signed 64-bit integers"
-  let actualNumel := TensorSpec.numelOfShape t.runtimeShape
-  let targetNumel := TensorSpec.numelOfShape shape'
-  if actualNumel != targetNumel then
-    throw s!"reshape requires {actualNumel} elements, requested {targetNumel}"
-  let raw ← RawTensor.reshapeChecked t.raw shape'
-  TensorSpec.checkDType t.raw.dtype raw.dtype
-  Device.check t.raw.device raw.device
-  Tensor.ofRaw raw
-
 /-- Reshape without changing the element count. Unlike the legacy raw
-    `torch.reshape`, an empty target creates a scalar. -/
+    `torch.reshape`, an empty target creates a scalar. Extents must be
+    representable as signed 64-bit integers, so none acts as native inference. -/
 def reshape {σ : StaticSpec} (t : Tensor σ) (shape' : Shape)
     (_h : TensorSpec.numelOfShape σ.shape = TensorSpec.numelOfShape shape' := by
       first
       | exact of_decide_eq_true rfl
       | (simp +zetaDelta [Nat.mul_assoc, Nat.mul_comm, Nat.mul_left_comm] <;> omega)) :
     Tensor (σ.withShape shape') :=
-  checkedResult "reshape" (t.reshapeChecked? shape')
+  checkedResult "reshape" do
+    if shape'.any (fun dim => dim > 9223372036854775807) then
+      throw "reshape requires nonnegative extents representable as signed 64-bit integers"
+    let actualNumel := TensorSpec.numelOfShape t.runtimeShape
+    let targetNumel := TensorSpec.numelOfShape shape'
+    if actualNumel != targetNumel then
+      throw s!"reshape requires {actualNumel} elements, requested {targetNumel}"
+    let raw ← RawTensor.reshape? t.raw shape'
+    TensorSpec.checkDType t.raw.dtype raw.dtype
+    Device.check t.raw.device raw.device
+    Tensor.ofRaw raw
 
 /-- Slice an exact number of entries along a valid axis. Bounds are checked in
 natural arithmetic so `start + len` cannot wrap or silently truncate. -/

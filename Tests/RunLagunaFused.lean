@@ -143,9 +143,9 @@ private def maxErrors {s : Shape} {d e : DType}
 private def tileToShape {s : Shape} {source : Device} (src : SomeDTypeTensor s source) (shape : Shape) (device : Device) : IO (SomeDTypeTensor shape device) := do
   let numel := shape.foldl (· * ·) 1
   let srcD := src.2.to device
-  let n0 := srcD.shape.foldl (· * ·) 1
+  let n0 := TensorSpec.numelOfShape s
   if n0 == 0 then throw <| IO.userError "tileToShape: empty source tensor"
-  let mut cur : ShapePackedTensor src.1 device := (← IO.ofExcept (srcD.reshapeChecked? #[n0])).packShape
+  let mut cur : ShapePackedTensor src.1 device := (srcD.reshape #[n0] (by simp [n0])).packShape
   let mut n := n0
   while n < numel do
     cur := (Tensor.catManyChecked #[cur, cur] 0 #[n * 2]).packShape

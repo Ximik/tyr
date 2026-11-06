@@ -524,16 +524,12 @@ def waveformToWhisperFeatures
       pure (wav0 + noise * cfg.dither)
 
   let window : Tensor { device := .CPU, shape := #[nFft], dtype := .Float32 } := Tensor.hannWindow nFft
-  let ⟨_, stftDyn⟩ ← Tensor.stft wav nFft hop window true false
-  let stftShape := stftDyn.runtimeShape
-  if stftShape.size < 3 then
-    throw <| IO.userError s!"Unexpected STFT rank {stftShape.size}, expected 3"
-
-  let freqBins := stftShape.getD 0 0
-  let stftFrames := stftShape.getD 1 0
-  let packed := stftShape.getD 2 0
-  if packed != 2 then
-    throw <| IO.userError s!"Unexpected STFT packed size {packed}, expected 2"
+  let stftDyn ← Tensor.stft wav nFft hop window true false
+  let freqBins := nFft / 2 + 1
+  let stftFrames := Tensor.stftFrames targetSamples nFft hop true
+  let packed := 2
+  if stftDyn.runtimeShape != #[freqBins, stftFrames, packed] then
+    throw <| IO.userError s!"Unexpected STFT shape {stftDyn.runtimeShape}, expected {#[freqBins, stftFrames, packed]}"
 
   let droppedFrames := if stftFrames > 0 then stftFrames - 1 else 0
   if droppedFrames != expectedFrames then
@@ -647,24 +643,15 @@ def waveformToWhisperFeaturesDynamic
     let windowCpu : Tensor { device := .CPU, shape := #[nFft], dtype := .Float32 } := Tensor.hannWindow nFft
     let window : Tensor { device := runDevice, shape := #[nFft], dtype := .Float32 } :=
       windowCpu.to runDevice
-    let ⟨stftSpecShape, stftDyn⟩ ← Tensor.stft wav nFft hop window true false
-    let stftShape := stftDyn.runtimeShape
-    if stftShape.size < 3 then
-      throw <| IO.userError s!"Unexpected STFT rank {stftShape.size}, expected 3"
-
-    let freqBins := stftShape.getD 0 0
-    let stftFrames := stftShape.getD 1 0
-    let packed := stftShape.getD 2 0
-    if packed != 2 then
-      throw <| IO.userError s!"Unexpected STFT packed size {packed}, expected 2"
+    let stft ← Tensor.stft wav nFft hop window true false
+    let freqBins := nFft / 2 + 1
+    let stftFrames := Tensor.stftFrames targetSamples nFft hop true
+    if stft.runtimeShape != #[freqBins, stftFrames, 2] then
+      throw <| IO.userError s!"Unexpected STFT shape {stft.runtimeShape}, expected {#[freqBins, stftFrames, 2]}"
 
     let frames := if stftFrames > 0 then stftFrames - 1 else 0
     let ⟨framesPos⟩ ← if h : 0 < frames then pure (PLift.up h) else
       throw <| IO.userError s!"Audio too short for Whisper features: {targetSamples} samples yield no frames"
-    let ⟨hStft⟩ ← if h : stftSpecShape = #[freqBins, stftFrames, 2] then pure (PLift.up h) else
-      throw <| IO.userError s!"Unexpected STFT shape {stftSpecShape}, expected {#[freqBins, stftFrames, 2]}"
-    let stft : Tensor { device := runDevice, shape := #[freqBins, stftFrames, 2], dtype := .Float32 } :=
-      Tensor.reshape stftDyn #[freqBins, stftFrames, 2] (by simp [hStft])
     let stftTrim : Tensor { device := runDevice, shape := #[freqBins, frames, 2], dtype := .Float32 } :=
       Tensor.sliceChecked stft 1 0 frames #[freqBins, frames, 2]
     let re3 : Tensor { device := runDevice, shape := #[freqBins, frames, 1], dtype := .Float32 } :=
