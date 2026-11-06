@@ -122,8 +122,8 @@ def referenceTraining {device : Device} {batch seqLen qHeads kvHeads : Nat} {dty
     Tensor.applyRotary gradQ cos negSin, Tensor.applyRotary gradK cos negSin)
 
 private def benchmarkTrainingShape (cfg : Benchmark.Config) (caseLabel : String)
-    (shape : TrainingShape) : IO (Array String × Bool) := do
-  let { batch, seqLen, qHeads, kvHeads } := shape
+    (batch seqLen qHeads kvHeads : Nat)
+    (_hDims : 0 < batch ∧ 0 < seqLen ∧ 0 < qHeads ∧ 0 < kvHeads) : IO (Array String × Bool) := do
   let device ← Device.cuda 0
   let qf ← Tensor.randn #[batch, seqLen, qHeads, 64] false device
   let kf ← Tensor.randn #[batch, seqLen, kvHeads, 64] false device
@@ -211,7 +211,10 @@ private def runBenchmark (args : List String) : IO UInt32 := do
   let mut lines : Array String := #[]
   let mut allOk := true
   for matrixCase in selected do
-    let (caseLines, ok) ← benchmarkTrainingShape cfg matrixCase.id matrixCase.payload
+    let { batch, seqLen, qHeads, kvHeads } := matrixCase.payload
+    let ⟨hDims⟩ ← if h : 0 < batch ∧ 0 < seqLen ∧ 0 < qHeads ∧ 0 < kvHeads then pure (PLift.up h) else
+      throw <| IO.userError s!"rotary case {matrixCase.id} needs positive dimensions"
+    let (caseLines, ok) ← benchmarkTrainingShape cfg matrixCase.id batch seqLen qHeads kvHeads hDims
     for line in caseLines do
       IO.println line
       lines := lines.push line

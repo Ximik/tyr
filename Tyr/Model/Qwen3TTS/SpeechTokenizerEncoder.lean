@@ -508,7 +508,7 @@ private def quantizeWithCodebook {batch frames : Nat}
   let e2e : Tensor { shape := #[batch * frames, 2048], dtype := dtypes.compute.val, device := device } := Tensor.expand e2Row #[batch * frames, 2048]
   let dist : Tensor { shape := #[batch * frames, 2048], dtype := dtypes.compute.val, device := device } := Tensor.sub (Tensor.add x2e e2e) (Tensor.mulScalar dot 2.0)
 
-  let idxFlat : Tensor { shape := #[batch * frames], dtype := .Int64, device := device } := Tensor.reshape (Tensor.argmaxChecked (Tensor.mulScalar dist (-1.0)) 1) #[batch * frames]
+  let idxFlat : Tensor { shape := #[batch * frames], dtype := .Int64, device := device } := Tensor.reshape (Tensor.argmax (Tensor.mulScalar dist (-1.0)) 1) #[batch * frames]
   let quantFlat : Tensor { shape := #[batch * frames, 256], dtype := dtypes.compute.val, device := device } := Tensor.embedding1d idxFlat embed
   let quant : Tensor { shape := #[batch, 256, frames], dtype := dtypes.compute.val, device := device } :=
     Tensor.reshape (Tensor.transpose (Tensor.reshape quantFlat #[batch, frames, 256]) 1 2) #[batch, 256, frames]

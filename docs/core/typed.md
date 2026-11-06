@@ -343,8 +343,6 @@ axis zero. `maxLast3d` requires a nonempty last axis, while `topKLast2d` require
 `k ≤ cols` and permits `k = 0`. Concrete dimensions usually discharge these
 proofs automatically. For runtime dimensions or dynamic dtypes, the matching
 `?` variants return domain, range, and native errors through `Except String`.
-The `argmaxChecked`, `maxLast3dChecked`, and `topKLast2dChecked` conveniences
-perform the same runtime checks and abort with a diagnostic on failure.
 Selected values retain the actual input dtype; indices have dtype Int64.
 
 `crossEntropy` and `crossEntropyNone` require `DType.RealFloating` for logits
@@ -353,9 +351,6 @@ The first returns a scalar mean loss; the second returns one loss per row.
 Their checked native boundary validates labels before loss dispatch: each label
 must be in `[0, C)` or equal the default ignored label `-100`.
 `crossEntropy?` and `crossEntropyNone?` recover dtype, label, and native failures.
-For dynamic dtype indices, `crossEntropyChecked` and `crossEntropyNoneChecked`
-provide pure runtime-checked conveniences that abort with a diagnostic on
-failure.
 `ChatSFT.maskedCrossEntropy?` retains errors through reshaping, mask arithmetic,
 reduction, and scalar extraction. Its mask must have a real numeric or Bool
 dtype; the pure wrapper requires that domain as type-level evidence.

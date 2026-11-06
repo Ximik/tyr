@@ -57,7 +57,8 @@ structure DecodeBenchCase where
   kvSeq : Nat
   headDim : Nat
   expectedTyrRoute : String := "tkKernel"
-  deriving Repr, Inhabited
+  dimsPos : 0 < batch ∧ 0 < qHeads ∧ 0 < kvHeads ∧ 0 < kvSeq ∧ 0 < headDim := by decide
+  deriving Repr
 
 /-- Mirrors `Examples/GPU/RunMhaH100Decode.lean :: decodeShapes` plus a couple
     of long-context rows for the bench-only cases. -/
@@ -181,6 +182,7 @@ private structure DecodeRow where
 
 private def runOne (runId : String) (warmup iters repeats : Nat)
     (c : DecodeBenchCase) (backend : DecodeBackend) : IO DecodeRow := do
+  have := c.dimsPos
   let device ← Device.cuda 0
   let stream ← torch.cuda_current_stream
   let qShape : Shape := #[c.batch, c.qHeads, 1, c.headDim]
@@ -227,7 +229,7 @@ private def runOne (runId : String) (warmup iters repeats : Nat)
         Tensor.flashAttention q k v true
       let _ ← torch.cuda_synchronize
       let outMae := Tensor.item (Tensor.meanAll (Tensor.abs (outActual - outRef)))
-      let outMax := Tensor.item (Tensor.maxAllChecked (Tensor.abs (outActual - outRef)))
+      let outMax := Tensor.item (Tensor.maxAll (Tensor.abs (outActual - outRef)))
       let okRoute := routeActual == c.expectedTyrRoute
       let okOut := Tensor.allclose outRef outActual 5.0e-2 5.0e-2
       let sink : Tensor { shape := #[c.batch, c.qHeads, 1, c.headDim], dtype := .BFloat16, device := device } ← Tensor.uniformLike q 0 0

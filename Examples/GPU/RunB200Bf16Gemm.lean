@@ -159,7 +159,8 @@ private def gemmMatrix : LeanBenchmark.Matrix GemmShape := {
 private def customShapeRequested (args : List String) : Bool :=
   args.contains "--m" || args.contains "--n" || args.contains "--k"
 
-private def benchmarkShape (cfg : Benchmark.Config) (caseLabel : String) (m n k : Nat) : IO (String × Bool) := do
+private def benchmarkShape (cfg : Benchmark.Config) (caseLabel : String) (m n k : Nat)
+    (_hDims : 0 < m ∧ 0 < n ∧ 0 < k) : IO (String × Bool) := do
   let device ← Device.cuda 0
   let a : Tensor { shape := #[m, k], dtype := .BFloat16, device := device } := (← Tensor.randn #[m, k] false device).toBFloat16
   let b : Tensor { shape := #[n, k], dtype := .BFloat16, device := device } := (← Tensor.randn #[n, k] false device).toBFloat16
@@ -228,7 +229,9 @@ private def runBenchmark (args : List String) : IO UInt32 := do
   for matrixCase in selected do
     let caseLabel := matrixCase.1
     let shape := matrixCase.2
-    let (line, ok) ← benchmarkShape cfg caseLabel shape.m shape.n shape.k
+    let ⟨hDims⟩ ← if h : 0 < shape.m ∧ 0 < shape.n ∧ 0 < shape.k then pure (PLift.up h) else
+      throw <| IO.userError s!"[gb10_bf16_gemm] {caseLabel}: m, n and k must be positive"
+    let (line, ok) ← benchmarkShape cfg caseLabel shape.m shape.n shape.k hDims
     IO.println line
     lines := lines.push line
     allOk := allOk && ok

@@ -146,8 +146,8 @@ private def forwardMatrix : LeanBenchmark.Matrix ForwardShape := {
 }
 
 private def benchmarkForwardSeq (cfg : Benchmark.Config) (stream : UInt64)
-    (shape : ForwardShape) : IO (String × Bool) := do
-  let { batch, qHeads, seqLen } := shape
+    (batch qHeads seqLen : Nat) (hDims : 0 < batch ∧ 0 < qHeads ∧ 0 < seqLen) :
+    IO (String × Bool) := do
   let device ← Device.cuda 0
   let qf ← Tensor.randn #[batch, qHeads, seqLen, 64] false device
   let kf ← Tensor.randn #[batch, qHeads, seqLen, 64] false device
@@ -166,11 +166,12 @@ private def benchmarkForwardSeq (cfg : Benchmark.Config) (stream : UInt64)
   let launchQueryBlocks := if useS768Specialization then seqLen / (4 * rowTileSize) else queryBlocks
   let lBlocks := if useS768Specialization then batch * qHeads * queryBlocks else queryBlocks
   let lOut : Tensor { shape := #[lBlocks, rowTileSize], dtype := .Float32, device := device } ← Tensor.uniformLike (Tensor.zeros #[lBlocks, rowTileSize] false device) 0 0
-  let expectedL : Tensor { shape := #[lBlocks, rowTileSize], dtype := .Float32, device := device } ←
-    if h : TensorSpec.numelOfShape expectedL3.shape = TensorSpec.numelOfShape #[lBlocks, rowTileSize] then
-      pure (expectedL3.reshape #[lBlocks, rowTileSize] h)
+  let ⟨hTile⟩ ← if h : TensorSpec.numelOfShape expectedL3.shape = TensorSpec.numelOfShape #[lBlocks, rowTileSize] then
+      pure (PLift.up h)
     else
       throw <| IO.userError s!"logsumexp {expectedL3.shape} does not tile into {lBlocks}x{rowTileSize}"
+  let expectedL : Tensor { shape := #[lBlocks, rowTileSize], dtype := .Float32, device := device } :=
+    expectedL3.reshape #[lBlocks, rowTileSize] hTile
   let seqLenArg ← Tyr.GPU.Codegen.launchArg seqLen "seqLen"
   let qHeadsArg ← Tyr.GPU.Codegen.launchArg qHeads "qHeads"
   let launch : IO Unit := if useS768Specialization then
@@ -183,7 +184,11 @@ private def benchmarkForwardSeq (cfg : Benchmark.Config) (stream : UInt64)
   launch
   torch.cuda_synchronize
   let check := IndexedParity.compareTensors s!"mha_gb10.bench.forward.s{seqLen}" expected out 3e-2 3e-2
+  have hL3 : 0 < TensorSpec.numelOfShape expectedL3.shape := by
+    simp only [Tensor.shape]
+    numel_pos
   let lCheck := IndexedParity.compareTensors s!"mha_gb10.bench.l.s{seqLen}" expectedL lOut 3e-2 3e-2
+    (hTile ▸ hL3)
   logTensorCheck check
   logTensorCheck lCheck
   let samples ← Benchmark.timeCudaEvents cfg stream launch
@@ -195,7 +200,7 @@ private def benchmarkForwardSeq (cfg : Benchmark.Config) (stream : UInt64)
   pure (line, check.ok && lCheck.ok)
 
 private def benchmarkBackwardS768 (cfg : Benchmark.Config) (stream : UInt64) (batch : Nat)
-    : IO (Array String × Bool) := do
+    (_hBatch : 0 < batch) : IO (Array String × Bool) := do
   let device ← Device.cuda 0
   let shape := #[batch, 16, 768, 64]
   let qf ← Tensor.randn shape false device
@@ -277,14 +282,21 @@ private def runBenchmark (args : List String) : IO UInt32 := do
   let mut forwardLines : Array String := #[]
   let mut forwardOk := true
   for matrixCase in selected do
-    let (line, ok) ← benchmarkForwardSeq cfg stream matrixCase.payload
+    let ⟨hDims⟩ ← if h : 0 < matrixCase.payload.batch ∧ 0 < matrixCase.payload.qHeads ∧ 0 < matrixCase.payload.seqLen then
+        pure (PLift.up h)
+      else
+        throw <| IO.userError s!"forward case {matrixCase.id} needs positive batch, heads and sequence length"
+    let (line, ok) ← benchmarkForwardSeq cfg stream
+      matrixCase.payload.batch matrixCase.payload.qHeads matrixCase.payload.seqLen hDims
     forwardLines := forwardLines.push line
     forwardOk := forwardOk && ok
   let mut s768BackwardLines : Array String := #[]
   let mut s768BackwardOk := true
   for matrixCase in selected do
     if matrixCase.payload.seqLen == 768 && matrixCase.payload.qHeads == 16 then
-      let (lines, ok) ← benchmarkBackwardS768 cfg stream matrixCase.payload.batch
+      let ⟨hBatch⟩ ← if h : 0 < matrixCase.payload.batch then pure (PLift.up h) else
+        throw <| IO.userError s!"backward case {matrixCase.id} needs a positive batch"
+      let (lines, ok) ← benchmarkBackwardS768 cfg stream matrixCase.payload.batch hBatch
       s768BackwardLines := s768BackwardLines ++ lines
       s768BackwardOk := s768BackwardOk && ok
   let q ← Tensor.loadTensorExact { device := device, shape := #[1, 1, 128, 64], dtype := .BFloat16 } (fixtureFile "q").toString

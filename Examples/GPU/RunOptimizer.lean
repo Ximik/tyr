@@ -36,7 +36,7 @@ private def optimizerMatrix : LeanBenchmark.Matrix OptimizerShape := {
 }
 
 private def benchmarkShape (cfg : Benchmark.Config) (stream : UInt64)
-    (caseLabel : String) (elements : Nat) : IO (String × Bool) := do
+    (caseLabel : String) (elements : Nat) (_hElements : 0 < elements) : IO (String × Bool) := do
   let device ← Device.cuda 0
   let master : Tensor { shape := #[elements], dtype := .Float32, device := device } ← Tensor.randn #[elements] false device
   let masterOriginal : Tensor { shape := #[elements], dtype := .Float32, device := device } ← Tensor.randn #[elements] false device
@@ -131,7 +131,9 @@ private def runBenchmark (args : List String) : IO UInt32 := do
   let mut lines : Array String := #[]
   let mut allOk := true
   for matrixCase in selected do
-    let (line, ok) ← benchmarkShape cfg stream matrixCase.id matrixCase.payload.elements
+    let ⟨hElements⟩ ← if h : 0 < matrixCase.payload.elements then pure (PLift.up h) else
+      throw <| IO.userError s!"optimizer case {matrixCase.id} needs a positive element count"
+    let (line, ok) ← benchmarkShape cfg stream matrixCase.id matrixCase.payload.elements hElements
     lines := lines.push line
     allOk := allOk && ok
   for line in lines do IO.println line

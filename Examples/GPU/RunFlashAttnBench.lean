@@ -654,6 +654,7 @@ private def runEqualHeadsFwdBwd
     (backend : Backend)
     (jsonlOut? : Option System.FilePath)
     (emitJsonlStdout : Bool)
+    (_hDims : 0 < batch ∧ 0 < heads ∧ 0 < seq ∧ 0 < headDim := by decide)
     : IO SummaryRow := do
   let device ← Device.cuda 0
   let qBase := (← Tensor.randn #[batch, heads, seq, headDim] false device).toBFloat16
@@ -727,10 +728,10 @@ private def runEqualHeadsFwdBwd
         dqMae := some <| Tensor.item (Tensor.meanAll (Tensor.abs (dq - dqRef)))
         dkMae := some <| Tensor.item (Tensor.meanAll (Tensor.abs (dk - dkRef)))
         dvMae := some <| Tensor.item (Tensor.meanAll (Tensor.abs (dv - dvRef)))
-        outMax := some <| Tensor.item (Tensor.maxAllChecked (Tensor.abs (out - outRef)))
-        dqMax := some <| Tensor.item (Tensor.maxAllChecked (Tensor.abs (dq - dqRef)))
-        dkMax := some <| Tensor.item (Tensor.maxAllChecked (Tensor.abs (dk - dkRef)))
-        dvMax := some <| Tensor.item (Tensor.maxAllChecked (Tensor.abs (dv - dvRef)))
+        outMax := some <| Tensor.item (Tensor.maxAll (Tensor.abs (out - outRef)))
+        dqMax := some <| Tensor.item (Tensor.maxAll (Tensor.abs (dq - dqRef)))
+        dkMax := some <| Tensor.item (Tensor.maxAll (Tensor.abs (dk - dkRef)))
+        dvMax := some <| Tensor.item (Tensor.maxAll (Tensor.abs (dv - dvRef)))
         outRelL2 := some <| relL2 out outRef
         dqRelL2 := some <| relL2 dq dqRef
         dkRelL2 := some <| relL2 dk dkRef
@@ -768,6 +769,7 @@ private def runGqaFwdBwd
     (backend : Backend)
     (jsonlOut? : Option System.FilePath)
     (emitJsonlStdout : Bool)
+    (_hDims : 0 < batch ∧ 0 < qHeads ∧ 0 < kvHeads ∧ 0 < seq ∧ 0 < headDim := by decide)
     : IO SummaryRow := do
   let device ← Device.cuda 0
   let qBase := (← Tensor.randn #[batch, qHeads, seq, headDim] false device).toBFloat16
@@ -841,10 +843,10 @@ private def runGqaFwdBwd
         dqMae := some <| Tensor.item (Tensor.meanAll (Tensor.abs (dq - dqRef)))
         dkMae := some <| Tensor.item (Tensor.meanAll (Tensor.abs (dk - dkRef)))
         dvMae := some <| Tensor.item (Tensor.meanAll (Tensor.abs (dv - dvRef)))
-        outMax := some <| Tensor.item (Tensor.maxAllChecked (Tensor.abs (out - outRef)))
-        dqMax := some <| Tensor.item (Tensor.maxAllChecked (Tensor.abs (dq - dqRef)))
-        dkMax := some <| Tensor.item (Tensor.maxAllChecked (Tensor.abs (dk - dkRef)))
-        dvMax := some <| Tensor.item (Tensor.maxAllChecked (Tensor.abs (dv - dvRef)))
+        outMax := some <| Tensor.item (Tensor.maxAll (Tensor.abs (out - outRef)))
+        dqMax := some <| Tensor.item (Tensor.maxAll (Tensor.abs (dq - dqRef)))
+        dkMax := some <| Tensor.item (Tensor.maxAll (Tensor.abs (dk - dkRef)))
+        dvMax := some <| Tensor.item (Tensor.maxAll (Tensor.abs (dv - dvRef)))
         outRelL2 := some <| relL2 out outRef
         dqRelL2 := some <| relL2 dq dqRef
         dkRelL2 := some <| relL2 dk dkRef
@@ -882,6 +884,7 @@ private def runEqualHeadsForwardOnly
     (backend : Backend)
     (jsonlOut? : Option System.FilePath)
     (emitJsonlStdout : Bool)
+    (_hDims : 0 < batch ∧ 0 < heads ∧ 0 < seq ∧ 0 < headDim := by decide)
     : IO SummaryRow := do
   let device ← Device.cuda 0
   let qBase := (← Tensor.randn #[batch, heads, seq, headDim] false device).toBFloat16
@@ -928,7 +931,7 @@ private def runEqualHeadsForwardOnly
         outOk := some outOk
         correctnessOk := some (routeOk && outOk)
         outMae := some <| Tensor.item (Tensor.meanAll (Tensor.abs (out - outRef)))
-        outMax := some <| Tensor.item (Tensor.maxAllChecked (Tensor.abs (out - outRef)))
+        outMax := some <| Tensor.item (Tensor.maxAll (Tensor.abs (out - outRef)))
         outRelL2 := some <| relL2 out outRef
       }
       let action : IO Unit := do

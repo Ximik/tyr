@@ -396,7 +396,7 @@ private def encodeMelChunk {melFrames : Nat}
       let e2Row : Tensor { shape := #[1, 32768], dtype := dtype.val, device := device } := Tensor.reshape (Tensor.transpose2d e2) #[1, 32768] (by simp)
       let e2e : Tensor { shape := #[qFrames, 32768], dtype := dtype.val, device := device } := Tensor.expand e2Row #[qFrames, 32768]
       let dist : Tensor { shape := #[qFrames, 32768], dtype := dtype.val, device := device } := Tensor.sub (Tensor.add x2e e2e) (Tensor.mulScalar dot 2.0)
-      Tensor.reshape (Tensor.argmaxChecked (Tensor.mulScalar dist (-1.0)) 1) #[vqFrames melFrames] (by simp +zetaDelta)
+      Tensor.reshape (Tensor.argmax (Tensor.mulScalar dist (-1.0)) 1) #[vqFrames melFrames] (by simp +zetaDelta)
 
 private def appendAll (dst src : Array UInt64) : Array UInt64 :=
   Id.run do

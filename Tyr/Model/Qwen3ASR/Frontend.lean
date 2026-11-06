@@ -502,7 +502,7 @@ def waveformToWhisperFeatures
   let hop := if cfg.hopLength == 0 then 160 else cfg.hopLength
   let melBins := cfg.featureSize
 
-  if melBins == 0 then
+  let ⟨melPos⟩ ← if h : 0 < melBins then pure (PLift.up h) else
     throw <| IO.userError "Preprocessor config has feature_size=0"
   if targetSamples == 0 then
     throw <| IO.userError "Preprocessor config has n_samples=0"
@@ -561,7 +561,7 @@ def waveformToWhisperFeatures
     Tensor.mm (Tensor.transpose2d melFilter) powerSpec
   let logSpec : Tensor { device := .CPU, shape := #[melBins, expectedFrames], dtype := .Float32 } :=
     Tensor.log10 (Tensor.clampFloat melPower (1e-10 : Float) (1e10 : Float))
-  let maxVal := Tensor.item (Tensor.maxAllChecked logSpec)
+  let maxVal := Tensor.item (Tensor.maxAll logSpec)
   let floored : Tensor { device := .CPU, shape := #[melBins, expectedFrames], dtype := .Float32 } :=
     Tensor.clampFloat logSpec (maxVal - (8.0 : Float)) (1e10 : Float)
   let normalized : Tensor { device := .CPU, shape := #[melBins, expectedFrames], dtype := .Float32 } := (floored + (4.0 : Float)) / (4.0 : Float)
@@ -588,7 +588,7 @@ def waveformToWhisperFeaturesDynamic
   let hop := if cfg.hopLength == 0 then 160 else cfg.hopLength
   let melBins := cfg.featureSize
 
-  if melBins == 0 then
+  let ⟨melPos⟩ ← if h : 0 < melBins then pure (PLift.up h) else
     throw <| IO.userError "Preprocessor config has feature_size=0"
   if cfg.samplingRate == 0 then
     throw <| IO.userError "Preprocessor config has sampling_rate=0"
@@ -671,7 +671,7 @@ def waveformToWhisperFeaturesDynamic
       Tensor.mm (Tensor.transpose2d melFilter) powerSpec
     let logSpec : Tensor { device := runDevice, shape := #[melBins, frames], dtype := .Float32 } :=
       Tensor.log10 (Tensor.clampFloat melPower (1e-10 : Float) (1e10 : Float))
-    let maxVal := Tensor.item (Tensor.maxAllChecked logSpec)
+    let maxVal := Tensor.item (Tensor.maxAll logSpec)
     let floored : Tensor { device := runDevice, shape := #[melBins, frames], dtype := .Float32 } :=
       Tensor.clampFloat logSpec (maxVal - (8.0 : Float)) (1e10 : Float)
     let normalized : Tensor { device := runDevice, shape := #[melBins, frames], dtype := .Float32 } := (floored + (4.0 : Float)) / (4.0 : Float)

@@ -62,13 +62,13 @@ def requireCuda (suite : String) : IO Bool := do
 /-- Compare equal shapes across storage dtypes, computing GPU parity metrics in Float32. -/
 def compareTensors {s : Shape} {expectedDtype actualDtype : DType}
     (label : String) (expected : Tensor { shape := s, dtype := expectedDtype, device := device }) (actual : Tensor { shape := s, dtype := actualDtype, device := device })
-    (rtol atol : Float) : TensorCheck :=
+    (rtol atol : Float) (nonempty : 0 < TensorSpec.numelOfShape s := by numel_pos) : TensorCheck :=
   let expected := expected.toFloat32
   let actual := actual.toFloat32
   let ok := Tensor.allclose expected actual rtol atol
   let diff := (actual - expected).abs
   let mae := diff.meanAll.item
-  let maxErr := diff.maxAllChecked.item
+  let maxErr := (diff.maxAll nonempty).item
   { label, ok, mae, maxErr, rtol, atol }
 
 /-- Print one tensor comparison in a stable machine-readable format. -/
@@ -78,8 +78,9 @@ def logTensorCheck (check : TensorCheck) : IO Unit := do
 
 /-- Report allclose plus mean/max absolute error for one tensor comparison. -/
 def reportTensorComparison {s : Shape} {expectedDtype actualDtype : DType}
-    (label : String) (expected : Tensor { shape := s, dtype := expectedDtype, device := device }) (actual : Tensor { shape := s, dtype := actualDtype, device := device }) (rtol atol : Float) : IO Bool := do
-  let check := compareTensors label expected actual rtol atol
+    (label : String) (expected : Tensor { shape := s, dtype := expectedDtype, device := device }) (actual : Tensor { shape := s, dtype := actualDtype, device := device }) (rtol atol : Float)
+    (nonempty : 0 < TensorSpec.numelOfShape s := by numel_pos) : IO Bool := do
+  let check := compareTensors label expected actual rtol atol nonempty
   logTensorCheck check
   pure check.ok
 

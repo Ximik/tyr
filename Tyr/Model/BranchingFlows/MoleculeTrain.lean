@@ -245,7 +245,7 @@ private def moleculeMaskedWeightedCrossEntropy {batch maxLen vocab : Nat}
   let targets2 := Tensor.reshape targets #[n]
   let mask2 := Tensor.reshape mask #[n]
   let weights2 := Tensor.reshape weights #[n]
-  let per := Tensor.crossEntropyNoneChecked logits2 targets2
+  let per := Tensor.crossEntropyNone logits2 targets2
   let masked := Tensor.mul (Tensor.mul per mask2) weights2
   let denom := Tensor.sumAll mask2
   Tensor.div (Tensor.sumAll masked) (Tensor.addScalar denom 1.0e-8)
