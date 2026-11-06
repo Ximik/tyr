@@ -79,10 +79,10 @@ def testStftNativeFailuresAreRecoverable : IO Unit := do
     LeanTest.assertTrue caught
   -- A failed call must leave borrowed inputs valid for a subsequent transform.
   let result ← Tensor.stft input 4 2 window
-  LeanTest.assertEqual result.1 #[3, 5, 2]
-  LeanTest.assertEqual result.2.runtimeShape #[3, 5, 2]
-  LeanTest.assertTrue (result.2.actualSpec.dtype == .Float32)
-  LeanTest.assertTrue (result.2.raw.device == .CPU)
+  LeanTest.assertEqual result.shape #[3, 5, 2]
+  LeanTest.assertEqual result.runtimeShape #[3, 5, 2]
+  LeanTest.assertTrue (result.actualSpec.dtype == .Float32)
+  LeanTest.assertTrue (result.raw.device == .CPU)
 
 /-- Media IO catches native size errors without allocating an enormous buffer. -/
 @[test]

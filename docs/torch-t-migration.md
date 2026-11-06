@@ -76,9 +76,9 @@ the destination type specifies dtype and placement separately for each leaf.
 `castTo` returns the explicitly selected destination type.
 
 Every specification now requires an exact dtype and device. The wildcard default
-and `forgetDType` have been removed. `castDType?`, `castLike?`, and
-`reshapeChecked?` return metadata validation errors through `Except`. Reshape
-checks native element counts and rejects unsigned extents that would become
+and `forgetDType` have been removed. `castDType?` and `castLike?`
+return metadata validation errors through `Except`. Reshape requires equal element
+counts by proof, checks native element counts and rejects unsigned extents that would become
 negative native dimensions. `reifyDType` packages an exact runtime dtype while
 retaining shape and placement; hidden dtypes must be checked for equality before
 an operation requiring the same dtype.

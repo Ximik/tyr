@@ -1,4 +1,5 @@
 #include "generated/tyr_ffi.h"
+#include <c10/util/Exception.h>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
@@ -10,6 +11,12 @@ lean_object* initialize_FunctionalGradCallback(uint8_t);
 lean_object* tyr_test_callback_sum(lean_object*, lean_object*);
 lean_object* tyr_test_callback_identity(lean_object*, lean_object*);
 lean_object* tyr_test_callback_throw(lean_object*, lean_object*);
+
+// Fails the way a native tensor op does, from inside the Lean callback.
+lean_object* tyr_test_failing_op(b_lean_obj_arg) {
+  TORCH_CHECK(false, "deliberate libtorch error from the callback test");
+  return nullptr;
+}
 }
 
 using Object = std::unique_ptr<lean_object, decltype(&lean_dec)>;

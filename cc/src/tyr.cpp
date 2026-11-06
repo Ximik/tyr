@@ -382,6 +382,13 @@ const bool g_tyr_terminate_handler_installed = [] {
 
 extern "C" {
 
+// Test-only: raises a libtorch error with no FFI guard, so it reaches
+// `tyrTerminateHandler`. Used only by `Tests/FfiCrashProbe.lean`.
+lean_object* lean_tyr_test_uncaught_libtorch_error() {
+  TORCH_CHECK(false, "deliberate uncaught libtorch error from ffi_crash_probe");
+  return lean_io_result_mk_ok(lean_box(0));
+}
+
 lean_object* lean_torch_get_live_tensors() {
   return tyr::checkedIoCall("get_live_tensors", [&] {
     return lean_io_result_mk_ok(lean_box_uint64(static_cast<uint64_t>(g_live_lean_tensors.load())));
@@ -713,8 +720,7 @@ uint8_t lean_torch_requires_grad(b_lean_obj_arg x) {
 
 //
 
-lean_object* lean_torch_reshape_exact(b_lean_obj_arg self,
-                                      b_lean_obj_arg shape) {
+static lean_object* reshapeExact(b_lean_obj_arg self, b_lean_obj_arg shape) {
   return fromTorchTensor(borrowTensor(self).reshape(getShape(shape)));
 }
 
@@ -4147,7 +4153,7 @@ lean_object* lean_torch_expand_checked(b_lean_obj_arg t, lean_obj_arg target) {
 }
 
 lean_object* lean_torch_reshape_exact_checked(b_lean_obj_arg t, b_lean_obj_arg target) {
-  return tyr::checkedCall("reshape", [&] { return lean_torch_reshape_exact(t, target); });
+  return tyr::checkedCall("reshape", [&] { return reshapeExact(t, target); });
 }
 
 lean_object* lean_torch_sum_checked(b_lean_obj_arg t, lean_obj_arg dims, uint8_t keepdim) {
