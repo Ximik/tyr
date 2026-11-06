@@ -1,4 +1,5 @@
 import Tyr.SafeTensors.Schema
+import Tyr.SafeTensors.Source
 import Tyr.Model.Qwen35
 import LeanTest
 
@@ -26,20 +27,6 @@ def testQwen35HubShardFilesFromIndex : IO Unit := do
     "first shard should be present"
   LeanTest.assertTrue (shards.contains "model-00002-of-00002.safetensors")
     "second shard should be present"
-
-@[test]
-def testQwen35HubDetectWeightLayout : IO Unit := do
-  let shardedDir := "/tmp/qwen35_hub_layout_sharded"
-  ensureDir shardedDir
-  IO.FS.writeFile s!"{shardedDir}/model.safetensors.index.json" "{\"metadata\":{},\"weight_map\":{}}"
-  let isSharded ← hub.detectWeightLayout shardedDir
-  LeanTest.assertEqual isSharded true "index file should detect sharded layout"
-
-  let singleDir := "/tmp/qwen35_hub_layout_single"
-  ensureDir singleDir
-  IO.FS.writeFile s!"{singleDir}/model.safetensors" ""
-  let isShardedSingle ← hub.detectWeightLayout singleDir
-  LeanTest.assertEqual isShardedSingle false "single safetensors file should detect single layout"
 
 @[test]
 def testQwen35HubResolveLocalPretrainedDir : IO Unit := do
@@ -73,8 +60,10 @@ def testSafeTensorsLoadShardedHfSingleShardPattern : IO Unit := do
   let shardPath := s!"{dir}/model.safetensors-00001-of-00001.safetensors"
   let input : Tensor { shape := #[2, 2], dtype := .Int64, device := .CPU } := (Tensor.fromInt64Array #[1, 2, 3, 4]).reshape #[2, 2]
   Tensor.saveSafeTensor input shardPath "model.language_model.embed_tokens.weight"
+  IO.FS.writeFile s!"{dir}/model.safetensors.index.json"
+    "{\"weight_map\":{\"model.language_model.embed_tokens.weight\":\"model.safetensors-00001-of-00001.safetensors\"}}"
   let loaded : Tensor { shape := #[2, 2], dtype := .Int64, device := .CPU } ←
-    safetensors.loadTensorShardedWithSpec dir "model.language_model.embed_tokens.weight" ⟨#[2, 2], .Int64⟩
+    (← safetensors.Source.open dir).loadAs "model.language_model.embed_tokens.weight" ⟨#[2, 2], .Int64⟩
   let vals ← loaded.toUInt64Array
   LeanTest.assertEqual vals #[1, 2, 3, 4]
-    "sharded loader should discover HuggingFace-style single-shard filenames"
+    "sharded loader should follow the index to HuggingFace-style single-shard filenames"

@@ -1,6 +1,6 @@
 import Tyr.Typed
 import Tyr.Model.SileroVAD
-import Tyr.SafeTensors.Exact
+import Tyr.SafeTensors.Source
 import LeanTest
 
 open torch
@@ -74,7 +74,7 @@ def testSileroVADLoadingPreservesFileErrors : IO Unit :=
   expectSileroLoadError (dir / "missing.safetensors").toString "no such file or directory"
   let path := (dir / "missing-weight.safetensors").toString
   (Tensor.zeros #[1]).saveSafeTensor path "other.weight"
-  expectSileroLoadError path "Tensor not found"
+  expectSileroLoadError path "not found"
 
 @[test]
 def testSileroVADLoadingPreservesLayoutErrors : IO Unit :=
@@ -120,7 +120,7 @@ def testSileroVADExactLoadingRetainsFloat32InferencePolicy : IO Unit := do
     IO.FS.withTempDir fun dir => do
       let path := dir / "model.safetensors"
       writeSileroCheckpoint path bf16
-      let stored ← safetensors.loadTensorExact path.toString "conv1.bias" #[128]
+      let stored ← (← safetensors.Source.open path.toString).load "conv1.bias" #[128]
       LeanTest.assertEqual stored.1 (if bf16 then .BFloat16 else .Float32)
       LeanTest.assertEqual (← stored.2.toFloatArray) (Array.replicate 128 0.25)
       let model ← SileroVAD.load path.toString

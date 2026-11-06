@@ -213,25 +213,10 @@ def testSafeTensorsTypeProviderSingle : IO Unit := do
 
   let wrongDTypeSpec : TensorSpec := { SingleSafe.linear_weightTensorSpec with dtype := DType.BFloat16 }
   Tests.assertThrows
-    (safetensors.loadTensorWithSpec
-      "Tests/fixtures/safetensors/single.safetensors"
-      "linear.weight"
-      wrongDTypeSpec)
+    (do
+      let src ← safetensors.Source.open "Tests/fixtures/safetensors/single.safetensors"
+      discard <| src.loadAs "linear.weight" wrongDTypeSpec)
     (some "Expected dtype")
-  for device in ← Tests.acceleratorDevices do
-    let wrongDeviceContract : TensorContract := {
-      spec := SingleSafe.linear_weightTensorSpec
-      role := .parameter
-      expectedDevice := some device
-    }
-    Tests.assertThrows
-      (safetensors.loadTensorWithContract
-        "Tests/fixtures/safetensors/single.safetensors"
-        "linear.weight"
-        wrongDeviceContract
-        Device.CPU)
-      (some "Expected device")
-
   let weights ← SingleSafe.loadAll
   LeanTest.assertTrue (weights.linear.weight.runtimeShape == #[2, 3])
     "hierarchical aggregate typed record should expose nested typed tensor fields"
@@ -366,13 +351,12 @@ def testSafeTensorsDefaultLoaderRejectsDtype : IO Unit := IO.FS.withTempDir fun 
 def testSafeTensorsContractRejectsReshapedLayout : IO Unit := do
   let path := "Tests/fixtures/safetensors/single.safetensors"
   Tests.assertThrows
-    (safetensors.loadTensorWithSpec path "linear.weight" ⟨#[3, 2], .Float32⟩)
-    (some "shape")
-  let handle ← safetensors.openHandle path
-  Tests.assertThrows
-    (safetensors.loadFromHandleWithSpec handle "linear.weight" ⟨#[3, 2], .Float32⟩)
+    (do
+      let src ← safetensors.Source.open path
+      discard <| src.loadAs "linear.weight" ⟨#[3, 2], .Float32⟩)
     (some "shape")
   Tests.assertThrows
-    (safetensors.loadTensorShardedWithSpec "Tests/fixtures/safetensors/sharded"
-      "embed.weight" ⟨#[1, 4], .Float32⟩)
+    (do
+      let src ← safetensors.Source.open "Tests/fixtures/safetensors/sharded"
+      discard <| src.loadAs "embed.weight" ⟨#[1, 4], .Float32⟩)
     (some "shape")

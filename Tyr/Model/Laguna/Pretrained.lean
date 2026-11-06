@@ -30,7 +30,7 @@ def tokenizerFiles : Array String := #[
   "chat_template.jinja"
 ]
 
-export torch.Hub (resolvePretrainedDir detectWeightLayout findCachedSnapshot? shardFilesFromIndexFile)
+export torch.Hub (resolvePretrainedDir findCachedSnapshot? shardFilesFromIndexFile)
 
 end torch.laguna.hub
 
@@ -54,7 +54,6 @@ def loadFromPretrained
     hub.tokenizerFiles
     (fun modelDir cfg => Config.loadFromPretrainedDir modelDir cfg)
     defaults
-    (fun modelDir cfg => LagunaForCausalLM.loadSharded modelDir cfg device)
     (fun path cfg => LagunaForCausalLM.load path cfg device)
 
 end LagunaForCausalLM

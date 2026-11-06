@@ -16,7 +16,7 @@
 import Tyr.Model.Laguna.Config
 import Tyr.Model.Laguna.Rope
 import Tyr.Torch
-import Tyr.SafeTensors.Load
+import Tyr.SafeTensors.Source
 
 open torch torch.laguna
 
@@ -54,13 +54,14 @@ private def findFixture : IO String := do
 /-- Run the table-comparison suite against the python reference for one set of tables. -/
 private def checkTablesAgainstReference {device : Device} (path : String) (tables : LagunaRotaryTables (device := device))
     (tag : String) (tol : Float) : IO Unit := do
-  let refSlidingCos ← safetensors.loadTensorCandidates path #["sliding_cos"] #[1024, 64]
+  let src ← torch.safetensors.Source.open path
+  let refSlidingCos ← src.load "sliding_cos" #[1024, 64]
   let refSlidingCos := refSlidingCos.2
-  let refSlidingSin ← safetensors.loadTensorCandidates path #["sliding_sin"] #[1024, 64]
+  let refSlidingSin ← src.load "sliding_sin" #[1024, 64]
   let refSlidingSin := refSlidingSin.2
-  let refFullCos ← safetensors.loadTensorCandidates path #["full_cos"] #[1024, 32]
+  let refFullCos ← src.load "full_cos" #[1024, 32]
   let refFullCos := refFullCos.2
-  let refFullSin ← safetensors.loadTensorCandidates path #["full_sin"] #[1024, 32]
+  let refFullSin ← src.load "full_sin" #[1024, 32]
   let refFullSin := refFullSin.2
   let d1 ← tensorMaxAbsDiff tables.slidingCos.2 refSlidingCos
   let d2 ← tensorMaxAbsDiff tables.slidingSin.2 refSlidingSin
@@ -75,6 +76,7 @@ def main : IO Unit := do
   let cfg := Config.laguna_s_2_1
   let maxLen : Nat := 1024
   let path ← findFixture
+  let src ← torch.safetensors.Source.open path
 
   -- 1. YaRN diagnostics.
   check (cfg.rotaryDimSliding == 128) s!"rotaryDimSliding = {cfg.rotaryDimSliding}"
@@ -85,7 +87,7 @@ def main : IO Unit := do
   let invFreq := yarnInvFreq cfg
   IO.println s!"YaRN inv_freq[0..4] (lean): {invFreq[0]!} {invFreq[1]!} {invFreq[2]!} {invFreq[3]!} {invFreq[4]!}"
   check (invFreq.size == 32) s!"YaRN inv_freq has 32 entries (got {invFreq.size})"
-  let refInv ← safetensors.loadTensorCandidates path #["yarn_inv_freq"] #[32]
+  let refInv ← src.load "yarn_inv_freq" #[32]
   let refInv := refInv.2
   let dInv ← maxAbsDiff invFreq (← floatsOf refInv)
   check (dInv < 1e-6) s!"YaRN inv_freq matches python reference (max|Δ| = {dInv})"
@@ -117,13 +119,13 @@ def main : IO Unit := do
     s!"sliding table layout == computeFreqsOnDevicePure (max|Δcos| = {dFastCos}, max|Δsin| = {dFastSin})"
 
   -- 4. End-to-end apply tests vs HF apply_rotary_pos_emb (CPU).
-  let q ← safetensors.loadTensorCandidates path #["q_in"] #[1, 16, 4, 128]
+  let q ← src.load "q_in" #[1, 16, 4, 128]
   let q := q.2
   -- Full-attention layer: partial rotary (rotary_dim = 64) with the YaRN table.
   let fullCos16 : Tensor { shape := #[16, 32], dtype := .Float32, device := .CPU } := sliceRotaryRows cpuTables.fullCos 0 16
   let fullSin16 : Tensor { shape := #[16, 32], dtype := .Float32, device := .CPU } := sliceRotaryRows cpuTables.fullSin 0 16
   let qFull := applyRotaryPartial (rotary_dim := 64) q fullCos16 fullSin16
-  let refQFull ← safetensors.loadTensorCandidates path #["q_out_full_yarn"] #[1, 16, 4, 128]
+  let refQFull ← src.load "q_out_full_yarn" #[1, 16, 4, 128]
   let refQFull := refQFull.2
   let dQFull ← tensorMaxAbsDiff qFull refQFull
   check (dQFull < 1e-4) s!"applyRotaryPartial (YaRN, prefill) vs HF: max|Δ| = {dQFull}"
@@ -131,7 +133,7 @@ def main : IO Unit := do
   let slCos16 : Tensor { shape := #[16, 64], dtype := .Float32, device := .CPU } := sliceRotaryRows cpuTables.slidingCos 0 16
   let slSin16 : Tensor { shape := #[16, 64], dtype := .Float32, device := .CPU } := sliceRotaryRows cpuTables.slidingSin 0 16
   let qSlide := Tensor.applyRotary q slCos16 slSin16
-  let refQSlide ← safetensors.loadTensorCandidates path #["q_out_sliding"] #[1, 16, 4, 128]
+  let refQSlide ← src.load "q_out_sliding" #[1, 16, 4, 128]
   let refQSlide := refQSlide.2
   let dQSlide ← tensorMaxAbsDiff qSlide refQSlide
   check (dQSlide < 1e-4) s!"applyRotaryEmb (sliding, prefill) vs HF: max|Δ| = {dQSlide}"
@@ -145,7 +147,7 @@ def main : IO Unit := do
   let sin1 : Tensor { shape := #[1, 32], dtype := .Float32, device := .CPU } := sliceRotaryRows cpuTables.fullSin 5 1
   let q5 := q.sliceChecked 1 5 1 #[1, 1, 4, 128]
   let qPos5 := applyRotaryPartial (rotary_dim := 64) q5 cos1 sin1
-  let refQPos5 ← safetensors.loadTensorCandidates path #["q_out_full_yarn_pos5"] #[1, 1, 4, 128]
+  let refQPos5 ← src.load "q_out_full_yarn_pos5" #[1, 1, 4, 128]
   let refQPos5 := refQPos5.2
   let dQPos5 ← tensorMaxAbsDiff qPos5 refQPos5
   check (dQPos5 < 1e-4) s!"applyRotaryPartial (YaRN, decode pos 5) vs HF: max|Δ| = {dQPos5}"

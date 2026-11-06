@@ -235,10 +235,8 @@ def runMain (argv : List String) : IO UInt32 := do
 
   if useMultimodal && hasImages then
     let cfg ← VLConfig.loadFromPretrainedDir modelDir {}
-    let isSharded ← Hub.detectWeightLayout modelDir
     let ⟨_textDType, _visionDType, _projectorDType, model⟩ ←
-      if isSharded then Gemma4ForConditionalGeneration.loadSharded modelDir cfg (device := device)
-      else Gemma4ForConditionalGeneration.load s!"{modelDir}/model.safetensors" cfg (device := device)
+      Gemma4ForConditionalGeneration.load modelDir cfg (device := device)
 
     let mut imageGrids : Array (ImagePatchGrid (device := device) cfg) := #[]
     let mut imageSoftTokenCounts : Array Nat := #[]
@@ -257,10 +255,8 @@ def runMain (argv : List String) : IO UInt32 := do
     if useMultimodal && !hasImages then
       IO.println "Warning: --multimodal requested without --image; running text-only path."
     let cfg ← Config.loadFromPretrainedDir modelDir Config.gemma4_E4B
-    let isSharded ← Hub.detectWeightLayout modelDir
     let ⟨_dtype, model⟩ ←
-      if isSharded then Gemma4ForCausalLM.loadSharded modelDir cfg (device := device)
-      else Gemma4ForCausalLM.load s!"{modelDir}/model.safetensors" cfg (device := device)
+      Gemma4ForCausalLM.load modelDir cfg (device := device)
     runTextBatches tok cfg model args prompts
 
   pure 0

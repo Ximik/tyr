@@ -321,8 +321,7 @@ private def writeDTypeFixture (directory : System.FilePath) (c : Config)
   for sharded in #[false, true] do
     IO.FS.withTempDir fun directory => do
       writeDTypeFixture directory c false sharded
-      let ⟨selected, model⟩ ← if sharded then Gemma4ForCausalLM.loadSharded directory.toString c
-        else Gemma4ForCausalLM.load (directory / "model.safetensors").toString c
+      let ⟨selected, model⟩ ← Gemma4ForCausalLM.load (if sharded then directory.toString else (directory / "model.safetensors").toString) c
       let support ← selected.val.acquireConstantSupport .CPU
       let _ := support.down
       LeanTest.assertEqual selected.val .BFloat16
@@ -335,8 +334,7 @@ private def writeDTypeFixture (directory : System.FilePath) (c : Config)
     IO.FS.withTempDir fun directory => do
       writeDTypeFixture directory c true sharded
       Tests.assertThrows (do
-        if sharded then discard <| Gemma4ForCausalLM.loadSharded directory.toString c
-        else discard <| Gemma4ForCausalLM.load (directory / "model.safetensors").toString c)
+        discard <| Gemma4ForCausalLM.load (if sharded then directory.toString else (directory / "model.safetensors").toString) c)
         (some "Expected dtype")
 
 @[test] def testGemma4LoaderRejectsMalformedOptionalHead : IO Unit := do
@@ -348,8 +346,7 @@ private def writeDTypeFixture (directory : System.FilePath) (c : Config)
     IO.FS.withTempDir fun directory => do
       writeDTypeFixture directory c false sharded true
       Tests.assertThrows (do
-        if sharded then discard <| Gemma4ForCausalLM.loadSharded directory.toString c
-        else discard <| Gemma4ForCausalLM.load (directory / "model.safetensors").toString c)
+        discard <| Gemma4ForCausalLM.load (if sharded then directory.toString else (directory / "model.safetensors").toString) c)
         (some "shape")
 
 @[test] def testGemma4VisionRejectsMalformedOptionalParameters : IO Unit := do
@@ -376,14 +373,12 @@ private def writeDTypeFixture (directory : System.FilePath) (c : Config)
     -- Truly absent optional entries still load successfully.
     IO.FS.withTempDir fun directory => do
       writeTensorEntries directory required sharded
-      if sharded then discard <| Gemma4ForConditionalGeneration.loadSharded directory.toString c
-      else discard <| Gemma4ForConditionalGeneration.load (directory / "model.safetensors").toString c
+      discard <| Gemma4ForConditionalGeneration.load (if sharded then directory.toString else (directory / "model.safetensors").toString) c
     for name in optionalNames do
       IO.FS.withTempDir fun directory => do
         writeTensorEntries directory (required.push (name, #[1], false)) sharded
         Tests.assertThrows (do
-          if sharded then discard <| Gemma4ForConditionalGeneration.loadSharded directory.toString c
-          else discard <| Gemma4ForConditionalGeneration.load (directory / "model.safetensors").toString c)
+          discard <| Gemma4ForConditionalGeneration.load (if sharded then directory.toString else (directory / "model.safetensors").toString) c)
           (some "shape")
 
 end Tests.Gemma4Typed

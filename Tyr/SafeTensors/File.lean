@@ -122,70 +122,92 @@ def openHandle (path : String) : IO SafeTensorsHandle := do
   handleCache.modify (·.insert path handle)
   pure handle
 
-initialize shardCache : IO.Ref (Std.HashMap String (Std.HashMap String SafeTensorsHandle)) ←
+private def hasWindowsDrivePrefix (path : String) : Bool :=
+  match path.toList with
+  | c :: ':' :: _ => c.isAlpha
+  | _ => false
+
+private def hasPathSegment (path segment : String) : Bool :=
+  (path.splitOn "/").contains segment || (path.splitOn "\\").contains segment
+
+/-- The `weight_map` of a `model.safetensors.index.json`: each tensor's shard file.
+Shard files must be relative `.safetensors` paths that stay inside the index's directory. -/
+def readWeightMap (indexPath : System.FilePath) : IO (Array (String × String)) := do
+  let invalid (message : String) : IO.Error :=
+    IO.userError s!"Invalid SafeTensors index '{indexPath}': {message}"
+  let json ← match Json.parse (← IO.FS.readFile indexPath) with
+    | .ok json => pure json
+    | .error err => throw (invalid s!"failed to parse JSON: {err}")
+  let some weightMapJson := getObjVal? json "weight_map"
+    | throw (invalid "missing 'weight_map'")
+  let .obj weightMap := weightMapJson
+    | throw (invalid "'weight_map' must be a JSON object")
+  if weightMap.isEmpty then
+    throw (invalid "'weight_map' is empty")
+  let mut out : Array (String × String) := #[]
+  for (name, fileJson) in weightMap.toList do
+    let .str file := fileJson
+      | throw (invalid s!"tensor '{name}' has non-string shard filename")
+    if file.isEmpty then
+      throw (invalid s!"tensor '{name}' maps to an empty shard filename")
+    if file.startsWith "/" || file.startsWith "\\" || hasWindowsDrivePrefix file ||
+        hasPathSegment file ".." || hasPathSegment file "." then
+      throw (invalid s!"unsafe shard path '{file}' (must be relative and stay within the directory)")
+    if (System.FilePath.mk file).extension != some "safetensors" then
+      throw (invalid s!"shard '{file}' must use '.safetensors' extension")
+    out := out.push (name, file)
+  pure out
+
+/-- Where a checkpoint tensor is stored. -/
+structure Stored where
+  /-- The file relative to the checkpoint directory; empty for a single-file checkpoint. -/
+  file : String
+  handle : SafeTensorsHandle
+  entry : Entry
+
+/-- Every tensor of one parsed file. -/
+def storedIn (handle : SafeTensorsHandle) (file : String := "") : Std.HashMap String Stored :=
+  handle.entries.fold (fun m name entry => m.insert name { file, handle, entry }) {}
+
+initialize modelDirCache : IO.Ref (Std.HashMap String (Std.HashMap String Stored)) ←
   IO.mkRef {}
 
-/-- The file holding each tensor among the `.safetensors` files directly in `dir`. -/
-private def openShards (dir : String) : IO (Std.HashMap String SafeTensorsHandle) := do
-  if let some shards := (← shardCache.get)[dir]? then
-    return shards
-  let mut paths : Array String := #[]
-  for entry in ← System.FilePath.readDir dir do
-    if entry.path.extension == some "safetensors" && !(← entry.path.isDir) then
-      paths := paths.push entry.path.toString
-  if paths.isEmpty then
-    throw <| IO.userError s!"No .safetensors files found in directory: {dir}"
-  let mut byName : Std.HashMap String SafeTensorsHandle := {}
-  for path in paths.qsort (· < ·) do
-    let handle ← openHandle path
-    for (name, _) in handle.entries do
-      if byName.contains name then
-        throw <| IO.userError s!"Duplicate tensor found across safetensors shards: {name}"
-      byName := byName.insert name handle
-  shardCache.modify (·.insert dir byName)
-  pure byName
+/-- The tensors of a Hugging Face model directory: the shards listed by its
+`model.safetensors.index.json`, each tensor in its listed shard, or else its
+`model.safetensors`. No other file in the directory is read. -/
+def openModelDir (dir : String) : IO (Std.HashMap String Stored) := do
+  if let some tensors := (← modelDirCache.get)[dir]? then
+    return tensors
+  let root := System.FilePath.mk dir
+  let indexPath := root / "model.safetensors.index.json"
+  let tensors ←
+    if ← indexPath.pathExists then
+      let invalid (message : String) : IO.Error :=
+        IO.userError s!"Invalid SafeTensors index '{indexPath}': {message}"
+      let mut tensors : Std.HashMap String Stored := {}
+      for (name, file) in ← readWeightMap indexPath do
+        let path := root / file
+        unless ← path.pathExists do
+          throw (invalid s!"referenced shard does not exist: '{file}'")
+        if ← path.isDir then
+          throw (invalid s!"referenced shard is a directory: '{file}'")
+        let handle ← openHandle path.toString
+        let some entry := handle.entries[name]?
+          | throw (invalid s!"tensor '{name}' not found in shard '{file}'")
+        tensors := tensors.insert name { file, handle, entry }
+      pure tensors
+    else if ← (root / "model.safetensors").pathExists then
+      pure (storedIn (← openHandle (root / "model.safetensors").toString) "model.safetensors")
+    else
+      throw <| IO.userError s!"No model.safetensors.index.json or model.safetensors in {dir}"
+  modelDirCache.modify (·.insert dir tensors)
+  pure tensors
 
 end torch.safetensors
 
 namespace torch.RawTensor
 
 open Lean torch.safetensors
-
-/-- Load `name` with its stored dtype and shape on CPU. A nonempty `shape`
-reshapes it, which must preserve the element count. -/
-def safeTensorsLoadFromHandle (handle : SafeTensorsHandle) (name : String) (shape : Shape) :
-    IO RawTensor := do
-  let some entry := handle.entries[name]?
-    | throw <| IO.userError s!"Tensor not found: {name}"
-  let raw ← safeTensorsRead handle.path (handle.dataOffset + entry.dataStart)
-    (entry.dataEnd - entry.dataStart) entry.dtype entry.shape
-  if shape.isEmpty then
-    return raw
-  match reshapeChecked raw shape with
-  | .ok reshaped => pure reshaped
-  | .error _ =>
-    throw <| IO.userError "SafeTensors load error: loaded tensor size does not match requested shape."
-
-def safeTensorsLoad (path name : String) (shape : Shape) : IO RawTensor := do
-  safeTensorsLoadFromHandle (← openHandle path) name shape
-
-def safeTensorsLoadSharded (dir name : String) (shape : Shape) : IO RawTensor := do
-  let some handle := (← openShards dir)[name]?
-    | throw <| IO.userError s!"Tensor not found in any shard: {name}"
-  safeTensorsLoadFromHandle handle name shape
-
-def safeTensorsLoadOnDevice (path name : String) (device : Device) : IO RawTensor := do
-  let raw ← safeTensorsLoad path name #[]
-  pure (toDevice raw device)
-
-def safeTensorsLoadShardedOnDevice (dir name : String) (device : Device) : IO RawTensor := do
-  let raw ← safeTensorsLoadSharded dir name #[]
-  pure (toDevice raw device)
-
-def safeTensorsLoadFromHandleOnDevice (handle : SafeTensorsHandle) (name : String)
-    (device : Device) : IO RawTensor := do
-  let raw ← safeTensorsLoadFromHandle handle name #[]
-  pure (toDevice raw device)
 
 /-- Write `input` as the only tensor of a new SafeTensors file at `path`. -/
 def saveSafeTensor (path name : String) (input : RawTensor) : IO Unit := do

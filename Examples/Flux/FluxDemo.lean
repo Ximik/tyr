@@ -149,7 +149,7 @@ def runDemo (cfg : DemoConfig) (prompt : String) : IO Unit := do
 
   -- Load Qwen text encoder (sharded, with Flux Klein config)
   let qwenCfg := QwenConfig.fluxKleinTextEncoder
-  let qwen ← loadQwenFluxEmbedderSharded cfg.qwenDir qwenCfg maxSeqLen #[8, 17, 26]
+  let qwen ← loadQwenFluxEmbedder cfg.qwenDir qwenCfg maxSeqLen #[8, 17, 26]
   IO.println "  ✓ Qwen text encoder loaded (Flux Klein variant)"
 
   -- Load Flux model

@@ -1,0 +1,7 @@
+{
+  "metadata": {},
+  "weight_map": {
+    "embed.weight": "part1.safetensors",
+    "proj.bias": "part2.safetensors"
+  }
+}

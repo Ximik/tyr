@@ -34,7 +34,6 @@ export torch.Hub (
   shardFilesFromIndexFile
   findCachedSnapshot?
   resolvePretrainedDir
-  detectWeightLayout
 )
 
 end hub

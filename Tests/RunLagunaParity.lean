@@ -35,7 +35,7 @@
   Build: lake build Tests.RunLagunaParity
   Run:   lake exe LagunaParityTest
 -/
-import Tyr.SafeTensors.Load
+import Tyr.SafeTensors.Source
 import Tyr.Model.Laguna.Config
 import Tyr.Model.Laguna.ConfigIO
 import Tyr.Model.Laguna.Rope
@@ -170,15 +170,16 @@ private def runFixture (device : Device) : IO Unit := do
 
   -- References (fp32, CPU) moved to the comparison device.
   let refPath := s!"{fixtureDir}/reference.safetensors"
-  let logitsARef ← torch.safetensors.loadTensorCandidates refPath #["logits_a"] #[7, 1024]
+  let src ← torch.safetensors.Source.open refPath
+  let logitsARef ← src.load "logits_a" #[7, 1024]
   let logitsARef := logitsARef.2
-  let logitsBRef ← torch.safetensors.loadTensorCandidates refPath #["logits_b"] #[20, 1024]
+  let logitsBRef ← src.load "logits_b" #[20, 1024]
   let logitsBRef := logitsBRef.2
-  let genLastRef ← torch.safetensors.loadTensorCandidates refPath #["gen_logits_last"] #[1024]
+  let genLastRef ← src.load "gen_logits_last" #[1024]
   let genLastRef := genLastRef.2
-  let hiddenL0Ref ← torch.safetensors.loadTensorCandidates refPath #["hidden_a_l0"] #[7, 256]
+  let hiddenL0Ref ← src.load "hidden_a_l0" #[7, 256]
   let hiddenL0Ref := hiddenL0Ref.2
-  let hiddenFinRef ← torch.safetensors.loadTensorCandidates refPath #["hidden_a_final"] #[7, 256]
+  let hiddenFinRef ← src.load "hidden_a_final" #[7, 256]
   let hiddenFinRef := hiddenFinRef.2
 
   let idsA : Tensor { shape := #[1, 7], dtype := .Int64, device := device } := mkIds promptA device
@@ -251,7 +252,7 @@ private def runRealSmoke (modelDir : String) (numLayers : Nat) (device : Device)
     layer_types := (Config.normalizedLayerTypes cfg0).extract 0 numLayers }
   let log : torch.Log.Handlers := { onInfo := fun m => IO.println s!"  {m}" }
   let t0 ← IO.monoMsNow
-  let model ← LagunaForCausalLM.loadSharded modelDir cfg device log
+  let model ← LagunaForCausalLM.load modelDir cfg device log
   let model := model.2
   let t1 ← IO.monoMsNow
   IO.println s!"  loaded {numLayers}/{cfg0.num_hidden_layers} layers in {t1 - t0} ms"

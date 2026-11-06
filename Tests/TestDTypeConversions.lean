@@ -2,6 +2,7 @@ import LeanTest
 import Tyr.TensorStruct.Cast
 import Tyr.Typed.Neural
 import Tyr.SafeTensors.Schema
+import Tyr.SafeTensors.Source
 
 namespace Tests.DTypeConversions
 
@@ -69,7 +70,7 @@ private def expectError {α : Type} (result : Except String α)
   let path := "Tests/fixtures/typed/dtype_scalars.safetensors"
   let floating := (Tensor.ones #[1])
   for dtype in #[DType.Float8E4M3FN, DType.Float8E5M2] do
-    let stored ← safetensors.loadTensorWithSpec path dtype.canonicalName ⟨#[1], dtype⟩
+    let stored ← (← safetensors.Source.open path).loadAs dtype.canonicalName ⟨#[1], dtype⟩
     let exact := stored
     LeanTest.assertEqual exact.raw.dtype dtype
     -- These pairs have no native promotion. Reaching a raw arithmetic call
@@ -213,7 +214,7 @@ example {σ : StaticSpec} (input : Tensor σ)
   let path := "Tests/fixtures/typed/dtype_scalars.safetensors"
   let floating := (Tensor.ones #[1])
   for dtype in #[DType.Float8E4M3FN, DType.Float8E5M2] do
-    let stored ← safetensors.loadTensorWithSpec path dtype.canonicalName ⟨#[1], dtype⟩
+    let stored ← (← safetensors.Source.open path).loadAs dtype.canonicalName ⟨#[1], dtype⟩
     let exact := stored
     expectError (Tensor.Promoting.add? exact floating) "Unsupported dtype promotion"
     expectError (Tensor.Promoting.sub? exact floating) "Unsupported dtype promotion"

@@ -232,15 +232,6 @@ def ofTensor {shape : Shape} (dtype : DType) (raw : RawTensor) :
   TensorSpec.checkDType dtype raw.dtype
   ofRaw raw
 
-def ofTensorWithContract {shape : Shape} (contract : TensorContract) (raw : RawTensor) :
-    Except String (Tensor { shape, dtype := contract.spec.dtype, device := raw.device }) := do
-  let actual : TensorSpec := { shape := raw.runtimeShape, dtype := raw.dtype }
-  contract.check actual raw.device
-  if contract.spec.shape = shape then
-    ofRaw raw
-  else
-    .error s!"Expected static shape {reprStr contract.spec.shape}, got {reprStr shape}"
-
 /-- Package a tensor with its full static specification, preserving actual placement. -/
 def toSome {σ : StaticSpec} (tensor : Tensor σ) : Sigma Tensor :=
   ⟨σ, tensor⟩

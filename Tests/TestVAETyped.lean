@@ -143,7 +143,7 @@ private def writeConvCheckpoint (path : System.FilePath) (bf16 wrongShape : Bool
   IO.FS.writeFile (shardedDir / "model.safetensors.index.json")
     "{\"weight_map\":{\"conv.weight\":\"invalid.safetensors\"}}"
   Tests.assertThrows
-    (safetensors.loadTensorShardedExact shardedDir.toString "conv.weight" #[1, 1, 3, 3])
+    (do discard <| (← safetensors.Source.open shardedDir.toString).load "conv.weight" #[1, 1, 3, 3])
     (some "Expected shape")
 
 @[test] def testVAEGroupNormInitializationFailuresAreRecoverable : IO Unit := do

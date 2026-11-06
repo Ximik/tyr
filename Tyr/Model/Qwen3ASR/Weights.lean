@@ -6,7 +6,7 @@
 import Tyr.Typed.Neural
 import Tyr.TensorStruct
 import Tyr.Log
-import Tyr.SafeTensors.Exact
+import Tyr.SafeTensors.Source
 import Tyr.Module.RMSNorm
 import Tyr.Model.Utils
 import Tyr.Model.Qwen3ASR.Model
@@ -19,12 +19,12 @@ open torch.Model (reqGradFalse)
 
 private def loadWeight (dtype : DType) (modelDir name : String) (shape : Shape)
     (device : Device) : IO (Tensor { shape, dtype := dtype, device }) := do
-  let packed ← safetensors.loadTensorShardedExact modelDir name shape device
+  let packed ← (← safetensors.Source.open modelDir).load name shape device
   IO.ofExcept (packed.atDType? dtype)
 
 private def loadOptional (dtype : DType) (modelDir name : String) (shape : Shape)
     (device : Device) : IO (Option (Tensor { shape, dtype := dtype, device })) := do
-  match ← safetensors.loadOptionalTensorShardedExact modelDir name shape device with
+  match ← (← safetensors.Source.open modelDir).load? name shape device with
   | none => pure none
   | some packed => pure (some (← IO.ofExcept (packed.atDType? dtype)))
 
@@ -247,7 +247,7 @@ private def resolveAsrDevice (log : Handlers := {}) : IO Device := do
 def loadShardedAt (modelDir : String) (cfg : Qwen3ASRConfig := {}) (log : Handlers := {})
     (device : Device) : IO (Σ dtype : RealFloatingDType, Qwen3ASRForConditionalGeneration (device := device) (dtype := dtype.val) cfg) := do
   log.onInfo s!"Loading Qwen3-ASR weights from {modelDir}..."
-  let ⟨dtype, conv2d1Weight⟩ ← safetensors.loadTensorShardedExact modelDir
+  let ⟨dtype, conv2d1Weight⟩ ← (← safetensors.Source.open modelDir).load
     "thinker.audio_tower.conv2d1.weight" #[cfg.thinkerConfig.audioConfig.downsampleHiddenSize, 1, 3, 3] device
   let floating ← IO.ofExcept (DType.realFloating? dtype)
   let _ := floating.down

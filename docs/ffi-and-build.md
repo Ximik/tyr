@@ -597,8 +597,8 @@ def nativeExample : IO Unit := do
   IO.println s!"live tensors: {← torch.get_live_tensors}"
 
 def loadCheckedWeight (path : String) : IO (Tensor { shape := #[768, 768], dtype := .Float32, device := .CPU }) := do
-  let handle ← safetensors.openHandle path
-  safetensors.loadFromHandleWithSpec handle "layer.weight" ⟨#[768, 768], .Float32⟩
+  let src ← safetensors.Source.open path
+  src.loadAs "layer.weight" ⟨#[768, 768], .Float32⟩
 ```
 
 `Tests.FfiCrashProbe` is a separate intentional device-error probe. It is not a

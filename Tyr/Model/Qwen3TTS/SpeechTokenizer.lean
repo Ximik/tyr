@@ -14,7 +14,7 @@
   (16 quantizers, 1024 latent dim, 2x convnext upsample, 4 decoder blocks).
 -/
 import Tyr.Typed.Neural
-import Tyr.SafeTensors.Exact
+import Tyr.SafeTensors.Source
 import Tyr.Model.Qwen3TTS.SpeechTokenizerDTypes
 import Tyr.TensorStruct
 import Tyr.Module.RMSNorm
@@ -253,7 +253,7 @@ end SpeechTokenizer12HzConfig
 
 private def loadFrozen {dtype : DType} (path : String) (name : String) (s : Shape)
     : IO (Tensor { shape := s, dtype := dtype, device := device }) := do
-  let packed ← safetensors.loadTensorExact path name s device
+  let packed ← (← safetensors.Source.open path).load name s device
   match packed.atDType? dtype with
   | .ok t => pure (Tensor.detach t)
   | .error message => throw <| IO.userError s!"Speech tokenizer tensor '{name}': {message}"

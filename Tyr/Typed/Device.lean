@@ -1,11 +1,9 @@
 import Tyr.Typed.Spec
 
 /-!
-# Runtime placement contracts
+# Runtime placement
 
 `StaticSpec.device` is an actual placement, possibly selected at runtime.
-`TensorContract` adds runtime placement checks to shape/dtype metadata for
-boundaries such as file loading and external native handles.
 -/
 
 namespace torch
@@ -116,32 +114,5 @@ def check (expected actual : Device) : Except String Unit :=
   else .error s!"Expected device {expected.render}, got {actual.render}"
 
 end Device
-
-inductive TensorRole where
-  | activation
-  | parameter
-  | index
-  | mask
-  | logits
-  | loss
-  | cache
-  | quantScale
-deriving Repr, BEq, DecidableEq
-
-structure TensorContract where
-  spec : TensorSpec
-  role : TensorRole := .activation
-  expectedDevice : Option Device := none
-deriving Repr, BEq
-
-namespace TensorContract
-
-def check (contract : TensorContract) (actualSpec : TensorSpec) (actualDevice : Device) :
-    Except String Unit := do
-  TensorSpec.checkCompatible contract.spec actualSpec
-  if let some expected := contract.expectedDevice then
-    expected.check actualDevice
-
-end TensorContract
 
 end torch

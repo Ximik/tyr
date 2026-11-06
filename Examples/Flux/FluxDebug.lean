@@ -129,7 +129,7 @@ def runDebug (cfg : DebugConfig) (prompt : String) : IO Unit := do
 
   -- Load models
   let qwenCfg := QwenConfig.fluxKleinTextEncoder
-  let qwen ← loadQwenFluxEmbedderSharded cfg.qwenDir qwenCfg maxSeqLen #[8, 17, 26]
+  let qwen ← loadQwenFluxEmbedder cfg.qwenDir qwenCfg maxSeqLen #[8, 17, 26]
 
   let fluxCfg := FluxConfig.klein4B
   let ⟨_, flux⟩ ← loadFluxModel cfg.fluxPath fluxCfg

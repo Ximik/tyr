@@ -15,6 +15,7 @@
 -/
 import Lean
 import Tyr.SafeTensors.Schema
+import Tyr.SafeTensors.Source
 import Tyr.Module.Derive
 
 open Lean Elab Command
@@ -143,14 +144,14 @@ private def renderTensorDecls (sourceIsDirectory : Bool) (tensor : TensorSchema)
   let loadFromHandleDecl :=
     s!"/-- Load `{tensor.name}` from an open SafeTensors handle with checked shape and dtype. -/\n" ++
     s!"def load_{declName}FromHandle (handle : _root_.torch.safetensors.SafeTensorsHandle) (device : _root_.torch.Device := _root_.torch.Device.CPU) : IO {typedReturnType} :=\n" ++
-    s!"  _root_.torch.safetensors.loadFromHandleWithSpec handle {declName}Spec.name {declName}TensorSpec device\n"
+    s!"  (_root_.torch.safetensors.Source.ofHandle handle).loadAs {declName}Spec.name {declName}TensorSpec device\n"
   let loadDecl :=
     if sourceIsDirectory then
       s!"/-- Load `{tensor.name}` with checked shape and dtype. -/\n" ++
       s!"def load_{declName} (source : String := defaultSource) (device : _root_.torch.Device := _root_.torch.Device.CPU) : IO {typedReturnType} := do\n" ++
       "  let filePath : String :=\n" ++
       "    if " ++ declName ++ "Spec.sourceFile.isEmpty then source else source ++ \"/\" ++ " ++ declName ++ "Spec.sourceFile\n" ++
-      s!"  _root_.torch.safetensors.loadTensorWithSpec filePath {declName}Spec.name {declName}TensorSpec device\n"
+      s!"  (← _root_.torch.safetensors.Source.open filePath).loadAs {declName}Spec.name {declName}TensorSpec device\n"
     else
       s!"/-- Load `{tensor.name}` with checked shape and dtype. -/\n" ++
       s!"def load_{declName} (source : String := defaultSource) (device : _root_.torch.Device := _root_.torch.Device.CPU) : IO {typedReturnType} := do\n" ++
@@ -159,7 +160,7 @@ private def renderTensorDecls (sourceIsDirectory : Bool) (tensor : TensorSchema)
   let typedLoadFromHandleOnDeviceDecl :=
     s!"/-- Load `{tensor.name}` from an open handle, checking shape, dtype, and target device. -/\n" ++
     s!"def load_{declName}TypedFromHandleOnDevice (handle : _root_.torch.safetensors.SafeTensorsHandle) (device : _root_.torch.Device := _root_.torch.Device.CPU) : IO {typedReturnType} :=\n" ++
-    s!"  _root_.torch.safetensors.loadFromHandleWithSpec handle {declName}Spec.name {declName}TensorSpec device\n"
+    s!"  (_root_.torch.safetensors.Source.ofHandle handle).loadAs {declName}Spec.name {declName}TensorSpec device\n"
   let typedLoadFromHandleDecl :=
     s!"/-- Load `{tensor.name}` from an open handle, checking shape and dtype on CPU. -/\n" ++
     s!"def load_{declName}TypedFromHandle (handle : _root_.torch.safetensors.SafeTensorsHandle) : IO {cpuReturnType} :=\n" ++
@@ -170,7 +171,7 @@ private def renderTensorDecls (sourceIsDirectory : Bool) (tensor : TensorSchema)
       s!"def load_{declName}TypedOnDevice (source : String := defaultSource) (device : _root_.torch.Device := _root_.torch.Device.CPU) : IO {typedReturnType} := do\n" ++
       "  let filePath : String :=\n" ++
       "    if " ++ declName ++ "Spec.sourceFile.isEmpty then source else source ++ \"/\" ++ " ++ declName ++ "Spec.sourceFile\n" ++
-      s!"  _root_.torch.safetensors.loadTensorWithSpec filePath {declName}Spec.name {declName}TensorSpec device\n"
+      s!"  (← _root_.torch.safetensors.Source.open filePath).loadAs {declName}Spec.name {declName}TensorSpec device\n"
     else
       s!"/-- Load `{tensor.name}`, checking shape, dtype, and target device. -/\n" ++
       s!"def load_{declName}TypedOnDevice (source : String := defaultSource) (device : _root_.torch.Device := _root_.torch.Device.CPU) : IO {typedReturnType} := do\n" ++

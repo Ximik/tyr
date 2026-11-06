@@ -17,7 +17,7 @@
   - mono waveform tensor `[batch, 1, samples]` at 24kHz.
 -/
 import Tyr.Typed.Neural
-import Tyr.SafeTensors.Exact
+import Tyr.SafeTensors.Source
 import Tyr.Model.Qwen3TTS.SpeechTokenizerDTypes
 import Tyr.TensorStruct
 import Tyr.Model.Qwen.RoPE
@@ -33,7 +33,7 @@ private def requireTrue (ok : Bool) (msg : String) : IO Unit := do
 
 private def loadFrozen {dtype : DType} (path : String) (name : String) (s : Shape)
     : IO (Tensor { shape := s, dtype := dtype, device := device }) := do
-  let packed ← safetensors.loadTensorExact path name s device
+  let packed ← (← safetensors.Source.open path).load name s device
   match packed.atDType? dtype with
   | .ok t => pure (Tensor.detach t)
   | .error message => throw <| IO.userError s!"Speech tokenizer tensor '{name}': {message}"

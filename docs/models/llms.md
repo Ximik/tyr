@@ -32,7 +32,7 @@ Each pretrained-capable family splits into the same files:
 - `Config.lean` — a config structure whose fields mirror HF `config.json` names (`hidden_size`, `num_key_value_heads`, …), plus presets (`Config.qwen35_9B`, `Config.gemma4_E4B`, …).
 - `ConfigIO.lean` — hand-rolled JSON parsing on `Lean.Data.Json`: `Config.loadFromFile`, `Config.loadFromPretrainedDir`. Qwen3 additionally validates invariants (head divisibility, nonzero dims) and throws `IO.userError` on violation (`Tyr/Model/Qwen3/ConfigIO.lean:66-88`).
 - `Model.lean` — the model structure, forwards, and generation loops.
-- `Weights.lean` — SafeTensors loaders: `loadSharded` (sharded HF directory, the de-facto path) and `load` (single `model.safetensors` file). Loaded tensors are frozen via `reqGradFalse`; FP8 checkpoints are dequantized on load.
+- `Weights.lean` — SafeTensors loading: `load path`, where `path` is a model directory (sharded via its index, or its `model.safetensors`) or a single `.safetensors` file. Loaded tensors are frozen via `reqGradFalse`; FP8 checkpoints are dequantized on load.
 - `Pretrained.lean` — `loadFromPretrained` built on `Tyr.Hub.loadModelFromPretrained`, plus the explicit list of covered HF repo ids.
 
 The model itself is a structure over a config value (Qwen3 shown, `Tyr/Model/Qwen3/Model.lean:52`):
@@ -217,7 +217,7 @@ dequantization; they need not share their stored dtype.
 | `forward` | `(m) (inputIds : Tensor { shape := #[batch, seq], dtype := .Int64, device := device }) (attnMask := none) : Tensor { shape := #[batch, seq, cfg.vocab_size], dtype := .Float32, device := device }` |
 | `generateGreedy` | `(m) (inputIds) (maxNewTokens := 512) (eosTokenIds := #[]) : IO (Sigma (fun outSeq => Tensor { shape := #[batch, outSeq], dtype := .Int64, device := device }))`, KV-cached |
 | `generateGreedyUncached` | same signature; full re-forward per step, used as the parity reference |
-| `Qwen3ForCausalLM.loadSharded` / `load` | `(dirOrPath : String) (cfg := Config.qwen3_4B) (log := {}) (device : Device := .CPU) : IO (Qwen3ForCausalLM (device := device) cfg)`; ties embeddings when `lm_head.weight` is absent |
+| `Qwen3ForCausalLM.load` | `(path : String) (cfg := Config.qwen3_4B) (log := {}) (device : Device := .CPU) : IO (Qwen3ForCausalLM (device := device) cfg)`; ties embeddings when `lm_head.weight` is absent |
 
 `forwardEmbeds` instead accepts Float32 embeddings shaped
 `#[batch, seq, cfg.hidden_size]`; both forwards accept an optional Bool mask.
@@ -236,7 +236,7 @@ def generateFromEmbeds  -- same as `generate`, plus precomputed `inputsEmbeds`
 def generateUncached    -- same as `generate`; full re-forward reference
 def generateGreedy      -- same as `generate` minus the strategy argument
 
-def Qwen35ForCausalLM.loadSharded (modelDir : String) (cfg : Config := Config.qwen35_9B)
+def Qwen35ForCausalLM.load (path : String) (cfg : Config := Config.qwen35_9B)
     (device : Device := Device.CPU) (log : Handlers := {}) : IO (Qwen35ForCausalLM (device := device) cfg)
 def Qwen35ForCausalLM.loadFromPretrained
     (source : String) (defaults : Config := Config.qwen35_9B)
@@ -244,11 +244,11 @@ def Qwen35ForCausalLM.loadFromPretrained
     (device : Device := Device.CPU) : IO (Sigma (fun cfg => Qwen35ForCausalLM (device := device) cfg))
 ```
 
-`loadFromPretrained` accepts a local directory or an HF repo id, downloads via `Tyr.Hub`, parses `config.json` over the defaults, picks sharded vs single-file layout, and returns the config alongside the model as a `Sigma` (the config is only known at runtime). The covered repo ids are listed in `qwen35.hub.qwen35CollectionRepoIds` (`Qwen35/Pretrained.lean:19`). Qwen3.6 exposes the identical surface as `qwen36.Qwen36ForCausalLM` with `Config.qwen36_35B_A3B` defaults. The multimodal twins `Qwen35ForConditionalGeneration` / `Qwen36ForConditionalGeneration` have the same shape plus `getImageFeatures` / `getVideoFeatures`.
+`loadFromPretrained` accepts a local directory or an HF repo id, downloads via `Tyr.Hub`, parses `config.json` over the defaults, loads the weights from the model directory, and returns the config alongside the model as a `Sigma` (the config is only known at runtime). The covered repo ids are listed in `qwen35.hub.qwen35CollectionRepoIds` (`Qwen35/Pretrained.lean:19`). Qwen3.6 exposes the identical surface as `qwen36.Qwen36ForCausalLM` with `Config.qwen36_35B_A3B` defaults. The multimodal twins `Qwen35ForConditionalGeneration` / `Qwen36ForConditionalGeneration` have the same shape plus `getImageFeatures` / `getVideoFeatures`.
 
 ### Gemma 4 (`torch.gemma4`)
 
-Same pattern: `Gemma4ForCausalLM.generate` / `generateStream` / `generateFromEmbeds` with `(maxNewTokens := 256) (strategy := .greedy) (eosTokenIds := #[])`; `loadSharded (modelDir) (cfg := Config.gemma4_E4B) (log := {}) (device := .CPU)`; `loadFromPretrained (source) (defaults := Config.gemma4_E4B) (revision) (cacheDir) (device := .CPU)`. Both loaders return models indexed by the requested device; `loadFromPretrained` also packages the runtime configuration existentially. Covered repos: `gemma4.hub.gemma4CollectionRepoIds`.
+Same pattern: `Gemma4ForCausalLM.generate` / `generateStream` / `generateFromEmbeds` with `(maxNewTokens := 256) (strategy := .greedy) (eosTokenIds := #[])`; `load (path) (cfg := Config.gemma4_E4B) (log := {}) (device := .CPU)`; `loadFromPretrained (source) (defaults := Config.gemma4_E4B) (revision) (cacheDir) (device := .CPU)`. Both loaders return models indexed by the requested device; `loadFromPretrained` also packages the runtime configuration existentially. Covered repos: `gemma4.hub.gemma4CollectionRepoIds`.
 
 ### FLM (`torch.flm`)
 
@@ -282,11 +282,7 @@ def main : IO Unit := do
   let modelDir ← Hub.resolvePretrainedDir "Qwen/Qwen3.5-0.8B"
     { revision := "main", cacheDir := Hub.defaultCacheDir, includeTokenizer := true }
   let cfg ← Config.loadFromPretrainedDir modelDir Config.qwen35_9B
-  let model ←
-    if ← Hub.detectWeightLayout modelDir then
-      Qwen35ForCausalLM.loadSharded modelDir cfg Device.CPU
-    else
-      Qwen35ForCausalLM.load s!"{modelDir}/model.safetensors" cfg Device.CPU
+  let model ← Qwen35ForCausalLM.load modelDir cfg Device.CPU
 
   let tok ← tokenizer.qwen35.loadTokenizer modelDir
   let encode (prompt : String) : IO (Array UInt64) :=
@@ -365,7 +361,6 @@ def main : IO Unit := do
 
 - Some parsed config fields are accepted but never read by the models — e.g. `Qwen35Config.attention_dropout`, `hidden_act`, `mamba_ssm_dtype`, `mrope_*`, `mtp_*`, `use_cache`, and `Gemma4Config.attention_dropout`, `use_bidirectional_attention`. Setting them is a silent no-op.
 - Qwen3 / Qwen2.5-Omni generation is greedy-only; `SamplingStrategy.multinomial` is honored by Qwen3.5/Qwen3.6 and Gemma 4 only.
-- `load` (single-file) exists next to `loadSharded` on every family for backwards compatibility; sharded directories are the tested, de-facto path.
 - `torch.qwen35.media` / `torch.gemma4` media loaders are Apple-only; there is no runtime capability check.
 
 ## Related guides
