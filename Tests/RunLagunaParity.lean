@@ -239,12 +239,17 @@ private def runRealSmoke (modelDir : String) (numLayers : Nat) (device : Device)
   let cfg0 ← Config.loadFromPretrainedDir modelDir
   IO.println (s!"  full config: {cfg0.num_hidden_layers} layers, hidden {cfg0.hidden_size}, " ++
     s!"{cfg0.num_experts} experts top-{cfg0.num_experts_per_tok}")
-  if numLayers > cfg0.num_hidden_layers then
+  let ⟨hLayers⟩ ← if h : numLayers ≤ cfg0.num_hidden_layers then pure (PLift.up h) else
     throw (IO.userError s!"numLayers={numLayers} > num_hidden_layers={cfg0.num_hidden_layers}")
   -- Truncate the layer schedule so only the first `numLayers` layers load.
   let cfg : Config := { cfg0 with
     num_hidden_layers := numLayers
-    layer_types := (Config.normalizedLayerTypes cfg0).extract 0 numLayers }
+    layer_types := cfg0.layer_types.extract 0 numLayers
+    mlp_only_layers := cfg0.mlp_only_layers.filter (· < numLayers)
+    layerTypesSize := by simp [cfg0.layerTypesSize]; omega
+    mlpOnlyLayersValid := by
+      intro i hi
+      simpa using (Array.mem_filter.mp hi).2 }
   let log : torch.Log.Handlers := { onInfo := fun m => IO.println s!"  {m}" }
   let t0 ← IO.monoMsNow
   let model ← LagunaForCausalLM.load modelDir cfg device log

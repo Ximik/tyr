@@ -16,18 +16,6 @@ namespace Config
 /-- Default Qwen3-4B config. -/
 def qwen3_4B : Config := qwen.QwenConfig.qwen3_4B
 
-/-- Compute head dimension from hidden size and attention heads. -/
-def computeHeadDim (cfg : Config) : Nat :=
-  qwen.QwenConfig.computeHeadDim cfg
-
-/-- Compute key/value projection dimension. -/
-def kvDim (cfg : Config) : Nat :=
-  qwen.QwenConfig.kvDim cfg
-
-/-- Number of query heads per KV group. -/
-def numHeadsPerKVGroup (cfg : Config) : Nat :=
-  qwen.QwenConfig.numHeadsPerKVGroup cfg
-
 end Config
 
 end torch.qwen3

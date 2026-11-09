@@ -1,163 +1,178 @@
 /-
   Tyr/Model/Gemma4/ConfigIO.lean
 
-  HuggingFace `config.json` loader for standalone Gemma 4 text causal-LM.
+  HuggingFace `config.json` loader for Gemma 4 text checkpoints.
 -/
 import Tyr.Model.Gemma4.Config
-import Lean.Data.Json
-import Lean.Data.Json.FromToJson.Basic
+import Tyr.Model.ConfigJson
 
 namespace torch.gemma4
 
-open Lean
+open Lean ConfigJson
 
-private def parseJsonFile (path : String) : IO Json := do
-  let contents ← IO.FS.readFile path
-  match Json.parse contents with
-  | .ok json => pure json
-  | .error err => throw (IO.userError s!"Failed to parse JSON at {path}: {err}")
+private def layerType? (name : String) : Except String LayerType :=
+  match LayerType.ofString? name with
+  | some t => pure t
+  | none => throw s!"unknown layer type \"{name}\"; expected sliding_attention or full_attention"
 
-private def getObjVal? (j : Json) (key : String) : Option Json :=
-  match j with
-  | .obj kvs => Std.TreeMap.Raw.get? kvs key
-  | _ => none
+/-- `rope_parameters.<layerType>.<field>`, `default` when absent. -/
+private def ropeFieldD? (j : Json) (layerType field : String) (default : Float) : Except String Float := do
+  let some rope ← objectField? j "rope_parameters" | pure default
+  let some params ← objectField? rope layerType | pure default
+  fieldD? params field default
 
-private def fromJson? {α} [FromJson α] (j : Json) : Option α :=
-  match (FromJson.fromJson? j : Except String α) with
-  | .ok v => some v
-  | .error _ => none
+/-- A token id or a list of them at `key`; `default` when absent. -/
+private def tokenIdsD? (j : Json) (key : String) (default : Array tokenizer.TokenId) :
+    Except String (Array tokenizer.TokenId) := do
+  match ← member? j key with
+  | none | some .null => pure default
+  | some (.arr _) => tokenIdArrayFieldD? j key default
+  | some _ => return #[← tokenIdFieldD? j key 0]
 
-private def getNat? (j : Json) : Option Nat := fromJson? j
-private def getBool? (j : Json) : Option Bool := fromJson? j
-private def getString? (j : Json) : Option String := fromJson? j
-
-private def getFloat? (j : Json) : Option Float :=
-  match (fromJson? (α := Float) j) with
-  | some x => some x
-  | none => (getNat? j).map (·.toFloat)
-
-private def getNatFieldD (j : Json) (key : String) (d : Nat) : Nat :=
-  match getObjVal? j key >>= getNat? with
-  | some n => n
-  | none => d
-
-private def getBoolFieldD (j : Json) (key : String) (d : Bool) : Bool :=
-  match getObjVal? j key >>= getBool? with
-  | some b => b
-  | none => d
-
-private def getStringFieldD (j : Json) (key : String) (d : String) : String :=
-  match getObjVal? j key >>= getString? with
-  | some s => s
-  | none => d
-
-private def getFloatFieldD (j : Json) (key : String) (d : Float) : Float :=
-  match getObjVal? j key >>= getFloat? with
-  | some x => x
-  | none => d
-
-private def getOptTokenIdField (j : Json) (key : String) : Option UInt64 :=
-  (getObjVal? j key >>= getNat?).map (·.toUInt64)
-
-private def parseLayerTypes (j : Json) (key : String) : Option (Array LayerType) :=
-  match getObjVal? j key with
-  | some (.arr xs) =>
-    let mapped := xs.map (fun x => getString? x >>= LayerType.ofString?)
-    if mapped.all Option.isSome then
-      some (mapped.map (fun x => x.getD .slidingAttention))
+/-- Parse the text decoder from a `config.json` node (`text_config`, or the root of a
+text-only checkpoint). Behavior the decoder hard-codes is required of the file. -/
+def Config.parseJson (j : Json) (d : Config := Config.gemma4_E4B) : Except String Config := do
+  let textCfg := (← objectField? j "text_config").getD j
+  requireEq textCfg "attention_bias" false
+  let vocab ← fieldD? textCfg "vocab_size" d.vocab_size
+  let hidden ← fieldD? textCfg "hidden_size" d.hidden_size
+  let heads ← fieldD? textCfg "num_attention_heads" d.num_attention_heads
+  let kvHeads ← fieldD? textCfg "num_key_value_heads" d.num_key_value_heads
+  let globalKVHeads ← fieldD? textCfg "num_global_key_value_heads" d.num_global_key_value_heads
+  let ⟨hHeads⟩ ← if h : 0 < heads ∧ 0 < kvHeads then pure (PLift.up h) else
+    throw s!"Invalid Gemma4 config: num_attention_heads={heads} and num_key_value_heads={kvHeads} must be positive"
+  let ⟨hSliding⟩ ← if h : kvHeads ∣ heads then pure (PLift.up h) else
+    throw s!"Invalid Gemma4 config: num_attention_heads ({heads}) must be divisible by num_key_value_heads ({kvHeads})"
+  let ⟨hFull⟩ ← if h : (if globalKVHeads == 0 then kvHeads else globalKVHeads) ∣ heads then pure (PLift.up h) else
+    throw s!"Invalid Gemma4 config: num_attention_heads ({heads}) must be divisible by num_global_key_value_heads ({globalKVHeads})"
+  let headDim ← match ← field? textCfg "head_dim" with
+    | some headDim => pure headDim
+    | none =>
+      if heads ∣ hidden then pure (hidden / heads)
+      else throw s!"Invalid Gemma4 config: without head_dim, num_attention_heads={heads} must divide hidden_size={hidden}"
+  let globalHeadDim ← fieldD? textCfg "global_head_dim" d.global_head_dim
+  let fullHeadDim := if globalHeadDim == 0 then headDim else globalHeadDim
+  let ⟨hHeadDims⟩ ← if h : 0 < headDim ∧ 2 ∣ headDim ∧ 2 ∣ (if globalHeadDim == 0 then headDim else globalHeadDim) then
+      pure (PLift.up h)
     else
-      none
-  | _ => none
-
-private def ropeParam? (j : Json) (layerType field : String) : Option Json := do
-  let rope ← getObjVal? j "rope_parameters"
-  let layerObj ← getObjVal? rope layerType
-  getObjVal? layerObj field
-
-private def ropeFloatFieldD (j : Json) (layerType field : String) (d : Float) : Float :=
-  match ropeParam? j layerType field >>= getFloat? with
-  | some x => x
-  | none => d
-
-def Config.parseJson (j : Json) (d : Config := Config.gemma4_E4B) : Config :=
-  let textCfg := match getObjVal? j "text_config" with | some t => t | none => j
-  let hidden := getNatFieldD textCfg "hidden_size" d.hidden_size
-  let heads := getNatFieldD textCfg "num_attention_heads" d.num_attention_heads
-  let headDimDefault :=
-    if heads == 0 then d.head_dim else hidden / heads
-  let layerTypes :=
-    match parseLayerTypes textCfg "layer_types" with
-    | some xs => xs
-    | none => d.layer_types
-  let tieWordEmbeddings :=
-    match getObjVal? j "tie_word_embeddings" >>= getBool? with
-    | some x => x
-    | none => getBoolFieldD textCfg "tie_word_embeddings" d.tie_word_embeddings
-  Config.normalize {
-    vocab_size := getNatFieldD textCfg "vocab_size" d.vocab_size
+      throw s!"Invalid Gemma4 config: head_dim={headDim} must be positive and even, and global_head_dim={globalHeadDim} even"
+  let factor ← ropeFieldD? textCfg "full_attention" "partial_rotary_factor"
+    (d.full_rotary_dim.toFloat / (Config.fullHeadDim d).toFloat)
+  let fullRotaryDim := (fullHeadDim.toFloat * factor).round.toUInt64.toNat
+  unless fullRotaryDim.toFloat == fullHeadDim.toFloat * factor do
+    throw s!"Invalid Gemma4 config: partial_rotary_factor={factor} does not select a whole number of the {fullHeadDim} full-layer head channels"
+  let ⟨hRotary⟩ ← if h : 0 < fullRotaryDim ∧ 2 ∣ fullRotaryDim ∧
+      fullRotaryDim ≤ (if globalHeadDim == 0 then headDim else globalHeadDim) then pure (PLift.up h) else
+    throw s!"Invalid Gemma4 config: full-layer rotary dim {fullRotaryDim} must be positive, even and at most {fullHeadDim}"
+  let slidingWindow ← fieldD? textCfg "sliding_window" d.sliding_window
+  let ⟨hWindow⟩ ← if h : 0 < slidingWindow then pure (PLift.up h) else
+    throw "Invalid Gemma4 config: sliding_window must be positive"
+  let numLayers ← fieldD? textCfg "num_hidden_layers" d.num_hidden_layers
+  let layerTypes ← match ← field? textCfg "layer_types" with
+    | some (names : Array String) => names.mapM layerType?
+    | none =>
+      let interval : Nat ← fieldD? textCfg "sliding_window_pattern" 6
+      unless 0 < interval do
+        throw "Invalid Gemma4 config: sliding_window_pattern must be positive"
+      pure (defaultLayerTypes numLayers interval)
+  let ⟨hLayers⟩ ← if h : layerTypes.size = numLayers ∧ (numLayers = 0 ∨ layerTypes.back? = some .fullAttention) then
+      pure (PLift.up h)
+    else
+      throw s!"Invalid Gemma4 config: layer_types needs one entry per layer ({numLayers}), ending in full_attention"
+  let shared ← fieldD? textCfg "num_kv_shared_layers" d.num_kv_shared_layers
+  let ⟨hSharing⟩ ← if h : kvSharingValid layerTypes numLayers shared = true then pure (PLift.up h) else
+    throw s!"Invalid Gemma4 config: num_kv_shared_layers={shared} needs fewer shared than total layers ({numLayers}) and an earlier source layer of each shared kind"
+  let enableMoe ← fieldD? textCfg "enable_moe_block" d.enable_moe_block
+  let numExperts ← fieldD? textCfg "num_experts" d.num_experts
+  let topK ← fieldD? textCfg "top_k_experts" d.top_k_experts
+  let moeInter ← fieldD? textCfg "moe_intermediate_size" d.moe_intermediate_size
+  let ⟨hTopK⟩ ← if h : topK ≤ numExperts then pure (PLift.up h) else
+    throw s!"Invalid Gemma4 config: top_k_experts={topK} exceeds num_experts={numExperts}"
+  let ⟨hMoe⟩ ← if h : enableMoe = true → 0 < topK ∧ 0 < moeInter then pure (PLift.up h) else
+    throw "Invalid Gemma4 config: an enabled MoE block needs positive top_k_experts and moe_intermediate_size"
+  let perLayerHidden ← fieldD? textCfg "hidden_size_per_layer_input" d.hidden_size_per_layer_input
+  let perLayerVocab0 ← fieldD? textCfg "vocab_size_per_layer_input" d.vocab_size_per_layer_input
+  let perLayerVocab := if 0 < perLayerHidden ∧ perLayerVocab0 = 0 then vocab else perLayerVocab0
+  let ⟨hPerLayer⟩ ← if h : 0 < perLayerHidden → vocab ≤ perLayerVocab then pure (PLift.up h) else
+    throw s!"Invalid Gemma4 config: vocab_size_per_layer_input={perLayerVocab} must cover vocab_size={vocab}"
+  let bidirectional ← match ← member? textCfg "use_bidirectional_attention" with
+    | none | some .null => pure d.use_bidirectional_attention
+    | some _ => fieldD? textCfg "use_bidirectional_attention" d.use_bidirectional_attention
+  let ⟨hBidirectional⟩ ← if h : bidirectional = "" ∨ bidirectional = "vision" then pure (PLift.up h) else
+    throw s!"Invalid Gemma4 config: unsupported use_bidirectional_attention=\"{bidirectional}\"; this model implements vision"
+  let slidingTheta ← ropeFieldD? textCfg "sliding_attention" "rope_theta" d.sliding_rope_theta
+  let fullTheta ← ropeFieldD? textCfg "full_attention" "rope_theta" d.full_rope_theta
+  let eps ← fieldD? textCfg "rms_norm_eps" d.rms_norm_eps
+  let ⟨hFloats⟩ ← if h : 0 < slidingTheta ∧ 0 < fullTheta ∧ 0 < eps then pure (PLift.up h) else
+    throw s!"Invalid Gemma4 config: rope thetas ({slidingTheta}, {fullTheta}) and rms_norm_eps={eps} must be positive"
+  let softcap ← match ← member? textCfg "final_logit_softcapping" with
+    | none => pure d.final_logit_softcapping
+    | some .null => pure none
+    | some _ => pure (some (← fieldD? textCfg "final_logit_softcapping" 0.0))
+  let ⟨hSoftcap⟩ ← if h : softcap.all (0 < ·) = true then pure (PLift.up h) else
+    throw "Invalid Gemma4 config: final_logit_softcapping must be positive or null"
+  let pad ← match ← member? textCfg "pad_token_id" with
+    | none => pure d.pad_token_id
+    | some .null => pure none
+    | some _ => pure (some (← tokenIdFieldD? textCfg "pad_token_id" 0))
+  let eos ← tokenIdsD? textCfg "eos_token_id" d.eos_token_id
+  let ⟨hIds⟩ ← if h : pad.all (·.toNat < vocab) = true ∧ eos.all (·.toNat < vocab) = true then pure (PLift.up h) else
+    throw s!"Invalid Gemma4 config: pad and eos token ids must be below vocab_size={vocab}"
+  let tie ← match ← field? j "tie_word_embeddings" with
+    | some tie => pure tie
+    | none => fieldD? textCfg "tie_word_embeddings" d.tie_word_embeddings
+  pure {
+    vocab_size := vocab
     hidden_size := hidden
-    intermediate_size := getNatFieldD textCfg "intermediate_size" d.intermediate_size
-    num_hidden_layers := getNatFieldD textCfg "num_hidden_layers" d.num_hidden_layers
+    intermediate_size := ← fieldD? textCfg "intermediate_size" d.intermediate_size
+    num_hidden_layers := numLayers
     num_attention_heads := heads
-    num_key_value_heads := getNatFieldD textCfg "num_key_value_heads" d.num_key_value_heads
-    num_global_key_value_heads := getNatFieldD textCfg "num_global_key_value_heads" d.num_global_key_value_heads
-    head_dim := getNatFieldD textCfg "head_dim" headDimDefault
-    global_head_dim := getNatFieldD textCfg "global_head_dim" d.global_head_dim
-
-    sliding_window := getNatFieldD textCfg "sliding_window" d.sliding_window
-    sliding_rope_theta := ropeFloatFieldD textCfg "sliding_attention" "rope_theta" d.sliding_rope_theta
-    full_rope_theta := ropeFloatFieldD textCfg "full_attention" "rope_theta" d.full_rope_theta
-    full_partial_rotary_factor :=
-      ropeFloatFieldD textCfg "full_attention" "partial_rotary_factor" d.full_partial_rotary_factor
-    rms_norm_eps := getFloatFieldD textCfg "rms_norm_eps" d.rms_norm_eps
-    max_position_embeddings := getNatFieldD textCfg "max_position_embeddings" d.max_position_embeddings
-
-    attention_bias := getBoolFieldD textCfg "attention_bias" d.attention_bias
-    attention_dropout := getFloatFieldD textCfg "attention_dropout" d.attention_dropout
-    hidden_activation := getStringFieldD textCfg "hidden_activation" d.hidden_activation
-    attention_k_eq_v := getBoolFieldD textCfg "attention_k_eq_v" d.attention_k_eq_v
-    use_bidirectional_attention :=
-      getStringFieldD textCfg "use_bidirectional_attention" d.use_bidirectional_attention
-
+    num_key_value_heads := kvHeads
+    num_global_key_value_heads := globalKVHeads
+    head_dim := headDim
+    global_head_dim := globalHeadDim
+    sliding_window := slidingWindow
+    sliding_rope_theta := slidingTheta
+    full_rope_theta := fullTheta
+    full_rotary_dim := fullRotaryDim
+    rms_norm_eps := eps
+    hidden_activation := ← fieldD? textCfg "hidden_activation" d.hidden_activation
+    attention_k_eq_v := ← fieldD? textCfg "attention_k_eq_v" d.attention_k_eq_v
+    use_bidirectional_attention := bidirectional
     layer_types := layerTypes
-    full_attention_interval := getNatFieldD textCfg "sliding_window_pattern" d.full_attention_interval
-    num_kv_shared_layers := getNatFieldD textCfg "num_kv_shared_layers" d.num_kv_shared_layers
-    use_double_wide_mlp := getBoolFieldD textCfg "use_double_wide_mlp" d.use_double_wide_mlp
-
-    hidden_size_per_layer_input :=
-      getNatFieldD textCfg "hidden_size_per_layer_input" d.hidden_size_per_layer_input
-    vocab_size_per_layer_input :=
-      getNatFieldD textCfg "vocab_size_per_layer_input" d.vocab_size_per_layer_input
-
-    enable_moe_block := getBoolFieldD textCfg "enable_moe_block" d.enable_moe_block
-    num_experts := getNatFieldD textCfg "num_experts" d.num_experts
-    top_k_experts := getNatFieldD textCfg "top_k_experts" d.top_k_experts
-    moe_intermediate_size := getNatFieldD textCfg "moe_intermediate_size" d.moe_intermediate_size
-
-    use_cache := getBoolFieldD textCfg "use_cache" d.use_cache
-    tie_word_embeddings := tieWordEmbeddings
-    final_logit_softcapping :=
-      getFloatFieldD textCfg "final_logit_softcapping" d.final_logit_softcapping
-
-    pad_token_id :=
-      match getOptTokenIdField textCfg "pad_token_id" with
-      | some x => some x
-      | none => d.pad_token_id
-    bos_token_id :=
-      match getOptTokenIdField textCfg "bos_token_id" with
-      | some x => some x
-      | none => d.bos_token_id
-    eos_token_id :=
-      match getOptTokenIdField textCfg "eos_token_id" with
-      | some x => some x
-      | none => d.eos_token_id
+    num_kv_shared_layers := shared
+    use_double_wide_mlp := ← fieldD? textCfg "use_double_wide_mlp" d.use_double_wide_mlp
+    hidden_size_per_layer_input := perLayerHidden
+    vocab_size_per_layer_input := perLayerVocab
+    enable_moe_block := enableMoe
+    num_experts := numExperts
+    top_k_experts := topK
+    moe_intermediate_size := moeInter
+    tie_word_embeddings := tie
+    final_logit_softcapping := softcap
+    pad_token_id := pad
+    eos_token_id := eos
+    slidingKVHeadsDivide := hSliding
+    fullKVHeadsDivide := hFull
+    headsPos := hHeads
+    headDimsEven := hHeadDims
+    fullRotaryValid := hRotary
+    slidingWindowPos := hWindow
+    layerTypesValid := hLayers
+    kvSharing := hSharing
+    topKValid := hTopK
+    moeValid := hMoe
+    perLayerVocab := hPerLayer
+    bidirectionalSupported := hBidirectional
+    floatsPos := hFloats
+    softcapPos := hSoftcap
+    tokenIdsInVocab := hIds
   }
 
 namespace Config
 
 def loadFromFile (path : String) (defaults : Config := Config.gemma4_E4B) : IO Config := do
-  let root ← parseJsonFile path
-  pure (Config.parseJson root defaults)
+  IO.ofExcept (Config.parseJson (← parseFile path) defaults)
 
 def loadFromPretrainedDir (modelDir : String) (defaults : Config := Config.gemma4_E4B) : IO Config :=
   loadFromFile s!"{modelDir}/config.json" defaults

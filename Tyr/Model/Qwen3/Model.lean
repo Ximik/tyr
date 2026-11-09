@@ -24,7 +24,7 @@ open torch.Model
 
 private def tokenInSetMask {batch : Nat}
     (tokens : Tensor { device := device, shape := #[batch], dtype := .Int64 })
-    (allow : Array UInt64)
+    (allow : Array tokenizer.TokenId)
     : Tensor { device := device, shape := #[batch], dtype := .Bool } :=
   Id.run do
     let mut out : Tensor { device := device, shape := #[batch], dtype := .Bool } := Tensor.eqScalar tokens (-1)
@@ -34,7 +34,7 @@ private def tokenInSetMask {batch : Nat}
     out
 
 private def eosVectorOnDevice {batch : Nat}
-    (eosTokenIds : Array UInt64)
+    (eosTokenIds : Array tokenizer.TokenId)
     (device : Device)
     : Option (Tensor { device := device, shape := #[batch], dtype := .Int64 }) :=
   match eosTokenIds[0]? with
@@ -200,7 +200,7 @@ private partial def greedyLoopCached {batch maxLen : Nat}
     (m : Qwen3ForCausalLM (device := device) cfg)
     (cosAll : Tensor { device := device, shape := #[maxLen, cfg.head_dim / 2], dtype := .Float32 })
     (sinAll : Tensor { device := device, shape := #[maxLen, cfg.head_dim / 2], dtype := .Float32 })
-    (eosTokenIds : Array UInt64)
+    (eosTokenIds : Array tokenizer.TokenId)
     (eosVector : Option (Tensor { device := device, shape := #[batch], dtype := .Int64 }))
     (remaining : Nat)
     (caches : Array (LayerKVCache (device := device) cfg batch maxLen))
@@ -245,7 +245,7 @@ private partial def greedyLoopCached {batch maxLen : Nat}
 
 private partial def greedyLoopUncached {batch : Nat}
     (m : Qwen3ForCausalLM (device := device) cfg)
-    (eosTokenIds : Array UInt64)
+    (eosTokenIds : Array tokenizer.TokenId)
     (eosVector : Option (Tensor { device := device, shape := #[batch], dtype := .Int64 }))
     (remaining : Nat)
     (finished : Option (Tensor { device := device, shape := #[batch], dtype := .Bool }))
@@ -293,7 +293,7 @@ def generateGreedy {batch seq : Nat}
     (m : Qwen3ForCausalLM (device := device) cfg)
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (maxNewTokens : Nat := 512)
-    (eosTokenIds : Array UInt64 := #[])
+    (eosTokenIds : Array tokenizer.TokenId := #[])
     : IO (Sigma (fun outSeq => Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })) := do
   let ⟨hSeq⟩ ← if h : 0 < seq then pure (PLift.up h) else
     throw <| IO.userError "generateGreedy requires non-empty prompt sequence"
@@ -317,7 +317,7 @@ def generateGreedyUncached {batch seq : Nat}
     (m : Qwen3ForCausalLM (device := device) cfg)
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (maxNewTokens : Nat := 512)
-    (eosTokenIds : Array UInt64 := #[])
+    (eosTokenIds : Array tokenizer.TokenId := #[])
     : IO (Sigma (fun outSeq => Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })) := do
   if seq == 0 then
     throw <| IO.userError "generateGreedy requires non-empty prompt sequence"

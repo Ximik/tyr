@@ -48,19 +48,17 @@ def main : IO Unit := do
   check (cfg.sliding_window == 512) s!"sliding_window={cfg.sliding_window}"
   check (cfg.mlp_only_layers == #[0]) s!"mlp_only_layers={cfg.mlp_only_layers}"
   check (cfg.eos_token_ids == #[2, 24]) s!"eos_token_ids={cfg.eos_token_ids}"
-  check (cfg.pad_token_id == some 9) s!"pad_token_id={cfg.pad_token_id}"
-  check (cfg.max_position_embeddings == 262144) s!"max_position_embeddings={cfg.max_position_embeddings}"
 
   -- YaRN (full-attention) rope parameters from the NVFP4 checkpoint.
   check (cfg.rope_theta_full == 500000.0) s!"rope_theta_full={cfg.rope_theta_full}"
-  check (cfg.partial_rotary_full == 0.5) s!"partial_rotary_full={cfg.partial_rotary_full}"
+  check (cfg.rotary_dim_full == 64) s!"rotary_dim_full={cfg.rotary_dim_full}"
   check (cfg.yarn_factor == 32.0) s!"yarn_factor={cfg.yarn_factor}"
   check (cfg.yarn_original_max_position_embeddings == 8192) s!"yarn_orig={cfg.yarn_original_max_position_embeddings}"
   check (cfg.yarn_beta_fast == 32.0) s!"yarn_beta_fast={cfg.yarn_beta_fast}"
   check (cfg.yarn_beta_slow == 1.0) s!"yarn_beta_slow={cfg.yarn_beta_slow}"
   check ((cfg.yarn_attention_factor - 1.3465735902799727).abs < 1e-9) s!"yarn_attention_factor={cfg.yarn_attention_factor}"
   check (cfg.rope_theta_sliding == 10000.0) s!"rope_theta_sliding={cfg.rope_theta_sliding}"
-  check (cfg.partial_rotary_sliding == 1.0) s!"partial_rotary_sliding={cfg.partial_rotary_sliding}"
+  check (cfg.rotary_dim_sliding == 128) s!"rotary_dim_sliding={cfg.rotary_dim_sliding}"
 
   -- Layer schedule: full at i%4==0 (12 layers), sliding elsewhere (36).
   let lts := cfg.layer_types

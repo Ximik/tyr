@@ -240,7 +240,7 @@ private def loadEncodeRVQ
 /-- Load 12Hz speech-tokenizer encoder weights from `speech_tokenizer` directory. -/
 def loadFromDir (speechTokenizerDir : String) (device : Device := Device.CPU) : IO (Σ dtypes : SpeechTokenizerDTypes, SpeechTokenizer12HzEncoder (device := device) dtypes) := do
   let cfg ← SpeechTokenizer12HzConfig.loadFromFile s!"{speechTokenizerDir}/config.json"
-  let counts ← cfg.encoderCodebookCounts
+  let counts := cfg.encoderCodebookCounts
   requireTrue (counts == (1, 15))
     "Fixed 16-group encoder requires encoder_valid_num_quantizers=16 and one semantic quantizer"
 
@@ -309,7 +309,7 @@ def loadFromDir (speechTokenizerDir : String) (device : Device := Device.CPU) : 
     tokenizer variants with different quantizer counts. -/
 def loadFromDirFlexible (speechTokenizerDir : String) (device : Device := Device.CPU) : IO (Σ dtypes : SpeechTokenizerDTypes, SpeechTokenizer12HzEncoder (device := device) dtypes) := do
   let cfg ← SpeechTokenizer12HzConfig.loadFromFile s!"{speechTokenizerDir}/config.json"
-  let (semanticLayers, acousticLayers) ← cfg.encoderCodebookCounts
+  let (semanticLayers, acousticLayers) := cfg.encoderCodebookCounts
 
   let weightsPath := s!"{speechTokenizerDir}/model.safetensors"
   let dtypes ← SpeechTokenizerDTypes.load weightsPath "encoder.encoder.layers.0.conv.weight" #[64, 1, 7]

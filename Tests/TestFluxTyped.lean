@@ -10,7 +10,7 @@ private def cfg : FluxConfig := {
   hidden_size := 16, num_heads := 2, head_dim := 8,
   num_double_layers := 1, num_single_layers := 1,
   context_in_dim := 6, in_channels := 4, time_dim := 5,
-  mlp_ratio := 2, axes_dims := #[2, 2, 2, 2] }
+  mlp_hidden_dim := 32, axes_dims := #[2, 2, 2, 2] }
 
 example (_model : FluxModel (device := .CPU) cfg .BFloat16)
     (_weight : Tensor ⟨#[cfg.hidden_size, cfg.in_channels], .Float32, .CPU⟩) : True := by
@@ -36,7 +36,7 @@ private def close {σ τ : StaticSpec} (x : Tensor σ) (y : Tensor τ) (tol : Fl
 
 @[test] def testFluxRotaryReferenceAndDType : IO Unit := do
   let ids := (Tensor.fromInt64Array #[1, 0, 0, 0]).reshape #[1, 1, 4]
-  let pe := ropeEmbed (head_dim := 8) ids #[2, 2, 2, 2]
+  let pe := ropeEmbed (head_dim := 8) ids #[2, 2, 2, 2] (by decide)
   let c := Float.cos 1
   let s := Float.sin 1
   let expected := (Tensor.fromFloatArray #[c - s, s + c, 1, 1, 1, 1, 1, 1]).reshape #[1, 1, 1, 8]

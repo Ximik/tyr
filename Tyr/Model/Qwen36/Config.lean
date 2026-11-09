@@ -18,14 +18,6 @@ namespace Config
 /-- Default Qwen3.6-35B-A3B text config from the public HF checkpoint. -/
 def qwen36_35B_A3B : Config := qwen35.Config.qwen36_35B_A3B
 
-def normalize (cfg : Config) : Config := qwen35.Config.normalize cfg
-
-def normalizedLayerTypes (cfg : Config) : Array LayerType :=
-  qwen35.Config.normalizedLayerTypes cfg
-
-def numHeadsPerKVGroup (cfg : Config) : Nat :=
-  qwen35.Config.numHeadsPerKVGroup cfg
-
 def linearKeyDim (cfg : Config) : Nat :=
   qwen35.Config.linearKeyDim cfg
 
@@ -69,8 +61,6 @@ namespace VLConfig
 
 /-- Default Qwen3.6-35B-A3B multimodal config from the public HF checkpoint. -/
 def qwen36_35B_A3B : VLConfig := qwen35.VLConfig.qwen36_35B_A3B
-
-def normalize (cfg : VLConfig) : VLConfig := qwen35.VLConfig.normalize cfg
 
 end VLConfig
 

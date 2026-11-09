@@ -15,7 +15,6 @@ private def tinyCfg : Config := {
   head_dim := 8
   rope_theta := 10000.0
   rms_norm_eps := 1e-6
-  max_position_embeddings := 128
 }
 
 private def flattenIds {batch seq : Nat} (ids : Tensor { shape := #[batch, seq], dtype := .Int64, device := .CPU }) : IO (Array UInt64) := do
@@ -160,8 +159,8 @@ def testQwen3BatchedEosIsRowAware : IO Unit := do
     LeanTest.assertTrue false
       "failed to find a deterministic prompt pair for batched row-aware EOS validation"
   | some (ids, eosTok) =>
-    let ⟨seqCached, outCached⟩ ← model.generateGreedy ids 4 #[eosTok]
-    let ⟨seqUncached, outUncached⟩ ← model.generateGreedyUncached ids 4 #[eosTok]
+    let ⟨seqCached, outCached⟩ ← model.generateGreedy ids 4 #[eosTok.toUInt32]
+    let ⟨seqUncached, outUncached⟩ ← model.generateGreedyUncached ids 4 #[eosTok.toUInt32]
     LeanTest.assertEqual seqCached seqUncached
       "cached and uncached EOS-aware decode should stop at same sequence length"
 

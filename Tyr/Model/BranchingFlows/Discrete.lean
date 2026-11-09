@@ -17,15 +17,24 @@ structure DistNoisyDiscreteConfig where
   omegaUniform : Float := 0.2
   maskToken? : Option Nat := none
   eps : Float := 1.0e-10
+  /-- Labels are drawn from a nonempty vocabulary that holds the mask token; checked when the
+      config is built. -/
+  vocabPos : 0 < vocabSize := by decide
+  maskInVocab : maskToken?.all (· < vocabSize) = true := by decide
+  /-- Normalizers divide by `eps`-floored totals; checked when the config is built. -/
+  epsPos : 0 < eps := by native_decide
 
 namespace DistNoisyDiscreteConfig
 
-def qm9 (vocabSize maskToken : Nat) : DistNoisyDiscreteConfig :=
+def qm9 (vocabSize maskToken : Nat) (hVocab : 0 < vocabSize := by decide)
+    (hMask : maskToken < vocabSize := by decide) : DistNoisyDiscreteConfig :=
   { vocabSize,
     targetTime := TimeDist.betaTwoTwo,
     noiseTime := TimeDist.betaTwoTwo,
     omegaUniform := 0.2,
-    maskToken? := some maskToken }
+    maskToken? := some maskToken
+    vocabPos := hVocab
+    maskInVocab := by simpa using hMask }
 
 private def clampNonnegative (x : Float) : Float :=
   max x 0.0
@@ -88,7 +97,7 @@ def oneHot (cfg : DistNoisyDiscreteConfig) (label : Nat) : Array Float :=
   (Array.range cfg.vocabSize).map (fun i => if i == label then 1.0 else 0.0)
 
 def uniformDistribution (cfg : DistNoisyDiscreteConfig) : Array Float :=
-  let p := if cfg.vocabSize = 0 then 0.0 else 1.0 / cfg.vocabSize.toFloat
+  let p := 1.0 / cfg.vocabSize.toFloat
   Array.replicate cfg.vocabSize p
 
 def mixtureDistribution
@@ -151,14 +160,11 @@ def modeBridgeFrom (cfg : DistNoisyDiscreteConfig) (source target : Nat) (t0 t :
 
 private def softmaxLogits (cfg : DistNoisyDiscreteConfig) (logits : Array Float) :
     Array Float :=
-  if cfg.vocabSize = 0 then
-    #[]
-  else
-    let vals := (Array.range cfg.vocabSize).map (fun i => logits.getD i 0.0)
-    let m := vals.foldl max vals[0]!
-    let exps := vals.map (fun x => Float.exp (x - m))
-    let total := max (exps.foldl (fun acc x => acc + x) 0.0) cfg.eps
-    exps.map (fun x => x / total)
+  let vals := (Array.range cfg.vocabSize).map (fun i => logits.getD i 0.0)
+  let m := vals.foldl max (vals[0]'(by simp [vals, cfg.vocabPos]))
+  let exps := vals.map (fun x => Float.exp (x - m))
+  let total := max (exps.foldl (fun acc x => acc + x) 0.0) cfg.eps
+  exps.map (fun x => x / total)
 
 private def normalizeDistribution (cfg : DistNoisyDiscreteConfig) (xs : Array Float) :
     Array Float :=

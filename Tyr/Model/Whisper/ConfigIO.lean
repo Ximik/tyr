@@ -4,118 +4,84 @@
   HuggingFace `config.json` loader for Whisper.
 -/
 import Tyr.Model.Whisper.Config
-import Lean.Data.Json
-import Lean.Data.Json.FromToJson.Basic
+import Tyr.Model.ConfigJson
 
 namespace torch.whisper
 
-open Lean
-
-private def parseJsonFile (path : String) : IO Json := do
-  let contents ← IO.FS.readFile path
-  match Json.parse contents with
-  | .ok json => pure json
-  | .error err => throw (IO.userError s!"Failed to parse JSON at {path}: {err}")
-
-private def getObjVal? (j : Json) (key : String) : Option Json :=
-  match j with
-  | .obj kvs => Std.TreeMap.Raw.get? kvs key
-  | _ => none
-
-private def getArr? (j : Json) : Option (Array Json) :=
-  match j with
-  | .arr a => some a
-  | _ => none
-
-private def fromJson? {α} [FromJson α] (j : Json) : Option α :=
-  match (FromJson.fromJson? j : Except String α) with
-  | .ok v => some v
-  | .error _ => none
-
-private def getNat? (j : Json) : Option Nat := fromJson? j
-
-private def getFloat? (j : Json) : Option Float :=
-  match (fromJson? (α := Float) j) with
-  | some x => some x
-  | none => (getNat? j).map (·.toFloat)
-
-private def getNatFieldD (j : Json) (key : String) (d : Nat) : Nat :=
-  match getObjVal? j key >>= getNat? with
-  | some n => n
-  | none => d
-
-private def getTokenIdFieldD (j : Json) (key : String) (d : UInt64) : UInt64 :=
-  match getObjVal? j key >>= getNat? with
-  | some n => n.toUInt64
-  | none => d
-
-private def getFloatFieldD (j : Json) (key : String) (d : Float) : Float :=
-  match getObjVal? j key >>= getFloat? with
-  | some x => x
-  | none => d
-
-private def getStringFieldD (j : Json) (key : String) (d : String) : String :=
-  match getObjVal? j key with
-  | some (.str s) => s
-  | _ => d
-
-private def getNatArrayFieldD (j : Json) (key : String) (d : Array Nat) : Array Nat :=
-  match getObjVal? j key >>= getArr? with
-  | some arr =>
-    Id.run do
-      let mut out : Array Nat := #[]
-      for it in arr do
-        match getNat? it with
-        | some n => out := out.push n
-        | none => pure ()
-      if out.isEmpty then d else out
-  | none => d
+open Lean ConfigJson
 
 namespace WhisperConfig
 
-def loadFromFile (path : String) (defaults : WhisperConfig := {}) : IO WhisperConfig := do
-  let root ← parseJsonFile path
-  let dModel := getNatFieldD root "d_model" defaults.dModel
-  let encoderAttentionHeads := getNatFieldD root "encoder_attention_heads" defaults.encoderAttentionHeads
-  let decoderAttentionHeads := getNatFieldD root "decoder_attention_heads" defaults.decoderAttentionHeads
-  let hHeads ← if h : encoderAttentionHeads ∣ dModel ∧ decoderAttentionHeads ∣ dModel then pure (PLift.up h) else
-    throw <| IO.userError
-      s!"Invalid Whisper config: d_model={dModel}, encoder_heads={encoderAttentionHeads}, decoder_heads={decoderAttentionHeads}"
-  let maxTargetPositions := getNatFieldD root "max_target_positions" defaults.maxTargetPositions
-  let hTarget ← if h : 0 < maxTargetPositions then pure (PLift.up h) else
-    throw <| IO.userError "Invalid Whisper config: max_target_positions must be positive"
-  let vocabSize := getNatFieldD root "vocab_size" defaults.vocabSize
-  let hVocab ← if h : 0 < vocabSize then pure (PLift.up h) else
-    throw <| IO.userError "Invalid Whisper config: vocab_size must be positive"
-  let cfg : WhisperConfig := {
-    numMelBins := getNatFieldD root "num_mel_bins" defaults.numMelBins
+def loadFromJson (root : Json) (defaults : WhisperConfig := {}) : Except String WhisperConfig := do
+  let numMelBins ← fieldD? root "num_mel_bins" defaults.numMelBins
+  let ⟨hMel⟩ ← if h : 0 < numMelBins then pure (PLift.up h) else
+    throw "Invalid Whisper config: num_mel_bins must be positive"
+  let dModel ← fieldD? root "d_model" defaults.dModel
+  let encoderAttentionHeads ← fieldD? root "encoder_attention_heads" defaults.encoderAttentionHeads
+  let decoderAttentionHeads ← fieldD? root "decoder_attention_heads" defaults.decoderAttentionHeads
+  let ⟨hEnc⟩ ← if h : 0 < encoderAttentionHeads ∧ encoderAttentionHeads ∣ dModel then pure (PLift.up h) else
+    throw s!"Invalid Whisper config: encoder_attention_heads={encoderAttentionHeads} must be positive and divide d_model={dModel}"
+  let ⟨hDec⟩ ← if h : 0 < decoderAttentionHeads ∧ decoderAttentionHeads ∣ dModel then pure (PLift.up h) else
+    throw s!"Invalid Whisper config: decoder_attention_heads={decoderAttentionHeads} must be positive and divide d_model={dModel}"
+  let maxTargetPositions ← fieldD? root "max_target_positions" defaults.maxTargetPositions
+  let ⟨hTarget⟩ ← if h : 0 < maxTargetPositions then pure (PLift.up h) else
+    throw "Invalid Whisper config: max_target_positions must be positive"
+  let vocabSize ← fieldD? root "vocab_size" defaults.vocabSize
+  let ⟨hVocab⟩ ← if h : 0 < vocabSize then pure (PLift.up h) else
+    throw "Invalid Whisper config: vocab_size must be positive"
+  let layerNormEps ← fieldD? root "layer_norm_eps" defaults.layerNormEps
+  let ⟨hEps⟩ ← if h : 0 < layerNormEps then pure (PLift.up h) else
+    throw s!"Invalid Whisper config: layer_norm_eps={layerNormEps} must be positive"
+  let eosTokenId ← tokenIdFieldD? root "eos_token_id" defaults.eosTokenId
+  let ⟨hEos⟩ ← if h : eosTokenId.toNat < vocabSize then pure (PLift.up h) else
+    throw s!"Invalid Whisper config: eos_token_id={eosTokenId} must be below vocab_size={vocabSize}"
+  let decoderStartTokenId ← tokenIdFieldD? root "decoder_start_token_id" defaults.decoderStartTokenId
+  let ⟨hStart⟩ ← if h : decoderStartTokenId.toNat < vocabSize then pure (PLift.up h) else
+    throw s!"Invalid Whisper config: decoder_start_token_id={decoderStartTokenId} must be below vocab_size={vocabSize}"
+  let suppressTokens ← tokenIdArrayFieldD? root "suppress_tokens" defaults.suppressTokens
+  let ⟨hSuppress⟩ ← if h : ∀ t ∈ suppressTokens, t.toNat < vocabSize then pure (PLift.up h) else
+    throw s!"Invalid Whisper config: suppress_tokens must be below vocab_size={vocabSize}"
+  let beginSuppressTokens ← tokenIdArrayFieldD? root "begin_suppress_tokens" defaults.beginSuppressTokens
+  let ⟨hBegin⟩ ← if h : ∀ t ∈ beginSuppressTokens, t.toNat < vocabSize then pure (PLift.up h) else
+    throw s!"Invalid Whisper config: begin_suppress_tokens must be below vocab_size={vocabSize}"
+  let activationFunction ← fieldD? root "activation_function" defaults.activationFunction
+  let ⟨hActivation⟩ ← if h : activationFunction = "gelu" ∨ activationFunction = "relu" then pure (PLift.up h) else
+    throw s!"Invalid Whisper config: unsupported activation_function=\"{activationFunction}\"; this model implements gelu and relu"
+  pure {
+    numMelBins
     vocabSize
     dModel
-    encoderLayers := getNatFieldD root "encoder_layers" defaults.encoderLayers
+    encoderLayers := ← fieldD? root "encoder_layers" defaults.encoderLayers
     encoderAttentionHeads
-    encoderFfnDim := getNatFieldD root "encoder_ffn_dim" defaults.encoderFfnDim
-    decoderLayers := getNatFieldD root "decoder_layers" defaults.decoderLayers
+    encoderFfnDim := ← fieldD? root "encoder_ffn_dim" defaults.encoderFfnDim
+    decoderLayers := ← fieldD? root "decoder_layers" defaults.decoderLayers
     decoderAttentionHeads
-    decoderFfnDim := getNatFieldD root "decoder_ffn_dim" defaults.decoderFfnDim
-    maxSourcePositions := getNatFieldD root "max_source_positions" defaults.maxSourcePositions
+    decoderFfnDim := ← fieldD? root "decoder_ffn_dim" defaults.decoderFfnDim
+    maxSourcePositions := ← fieldD? root "max_source_positions" defaults.maxSourcePositions
     maxTargetPositions
-    activationFunction := getStringFieldD root "activation_function" defaults.activationFunction
-    layerNormEps := getFloatFieldD root "layer_norm_eps" defaults.layerNormEps
-    padTokenId := getTokenIdFieldD root "pad_token_id" defaults.padTokenId
-    bosTokenId := getTokenIdFieldD root "bos_token_id" defaults.bosTokenId
-    eosTokenId := getTokenIdFieldD root "eos_token_id" defaults.eosTokenId
-    decoderStartTokenId := getTokenIdFieldD root "decoder_start_token_id" defaults.decoderStartTokenId
-    suppressTokens := getNatArrayFieldD root "suppress_tokens" defaults.suppressTokens
-    beginSuppressTokens := getNatArrayFieldD root "begin_suppress_tokens" defaults.beginSuppressTokens
-    encoderHeadsDivide := hHeads.down.1
-    decoderHeadsDivide := hHeads.down.2
-    maxTargetPositionsPos := hTarget.down
-    vocabSizePos := hVocab.down
+    activationFunction
+    layerNormEps
+    eosTokenId
+    decoderStartTokenId
+    suppressTokens
+    beginSuppressTokens
+    numMelBinsPos := hMel
+    encoderHeadsDivide := hEnc.2
+    decoderHeadsDivide := hDec.2
+    encoderHeadsPos := hEnc.1
+    decoderHeadsPos := hDec.1
+    maxTargetPositionsPos := hTarget
+    vocabSizePos := hVocab
+    layerNormEpsPos := hEps
+    eosInVocab := hEos
+    startInVocab := hStart
+    suppressInVocab := hSuppress
+    beginSuppressInVocab := hBegin
+    activationSupported := hActivation
   }
-  if !cfg.hasValidHeads then
-    throw <| IO.userError
-      s!"Invalid Whisper config: d_model={cfg.dModel}, encoder_heads={cfg.encoderAttentionHeads}, decoder_heads={cfg.decoderAttentionHeads}"
-  pure cfg
+
+def loadFromFile (path : String) (defaults : WhisperConfig := {}) : IO WhisperConfig := do
+  IO.ofExcept (loadFromJson (← parseFile path) defaults)
 
 def loadFromPretrainedDir (modelDir : String) (defaults : WhisperConfig := {}) : IO WhisperConfig :=
   loadFromFile s!"{modelDir}/config.json" defaults

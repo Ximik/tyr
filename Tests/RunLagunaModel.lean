@@ -74,7 +74,6 @@ private def lagunaTiny : Config := { LagunaConfig.laguna_s_2_1 with
   num_attention_heads_sliding := 6
   num_key_value_heads := 2
   head_dim := 128
-  max_position_embeddings := 256
   sliding_window := 8
   num_experts := 8
   num_experts_per_tok := 2
@@ -82,24 +81,36 @@ private def lagunaTiny : Config := { LagunaConfig.laguna_s_2_1 with
   shared_expert_intermediate_size := 64
   mlp_only_layers := #[0]
   layer_types := #[.fullAttention, .slidingAttention, .slidingAttention, .slidingAttention]
-  slidingWindowPos := by decide }
+  slidingWindowPos := by decide
+  kvHeadsDivideFull := by decide
+  kvHeadsDivideSliding := by decide
+  headsPos := by decide
+  layerTypesSize := by decide
+  mlpOnlyLayersValid := by decide
+  expertsValid := by decide
+  eosInVocab := by native_decide }
 
 /-- Same shape as `lagunaTiny` but all-dense FFN (num_experts = 0) — the
     fp32-friendly variant for tight-tolerance parity checks. -/
 private def denseTiny : Config := { lagunaTiny with
-  num_experts := 0 }
+  num_experts := 0
+  expertsValid := by decide }
 
 /-- Single sliding-window layer, dense MLP (no MoE → fully deterministic). -/
 private def cfgSlidingOnly : Config := { lagunaTiny with
   num_hidden_layers := 1
   layer_types := #[.slidingAttention]
-  mlp_only_layers := #[0] }
+  mlp_only_layers := #[0]
+  layerTypesSize := by decide
+  mlpOnlyLayersValid := by decide }
 
 /-- Single full-attention layer, dense MLP. -/
 private def cfgFullOnly : Config := { lagunaTiny with
   num_hidden_layers := 1
   layer_types := #[.fullAttention]
-  mlp_only_layers := #[0] }
+  mlp_only_layers := #[0]
+  layerTypesSize := by decide
+  mlpOnlyLayersValid := by decide }
 
 private def deviceLabel (device : Device) : String :=
   match device.kind with
@@ -488,7 +499,7 @@ private def runGenerateCheck (device : Device) : IO Unit := do
   let firstCol : Tensor { shape := #[1, 1], dtype := .Int64, device := device } := sliceTyped r1.2 1 5 1
   let toks ← Tensor.toUInt64Array (firstCol)
   let t0 := toks.getD 0 0
-  let r2 ← model.generate lagunaTiny ids 6 .greedy #[t0]
+  let r2 ← model.generate lagunaTiny ids 6 .greedy #[t0.toUInt32]
   check (r2.1 == 6) s!"(c) [{lbl}] EOS termination (eos={t0}): outSeq={r2.1} == 6"
 
   -- 3) Streaming callback fires once per generated token.

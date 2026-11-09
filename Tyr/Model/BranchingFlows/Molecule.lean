@@ -69,10 +69,11 @@ structure MoleculeBridgeConfig where
 namespace MoleculeBridgeConfig
 
 /-- QM9 continuous/discrete base-process defaults from the BranchingFlows appendix. -/
-def qm9 (vocabSize maskToken : Nat) : MoleculeBridgeConfig :=
+def qm9 (vocabSize maskToken : Nat) (hVocab : 0 < vocabSize := by decide)
+    (hMask : maskToken < vocabSize := by decide) : MoleculeBridgeConfig :=
   { coordOU := OUBridgeConfig.logLinearVariance 5.0 10.0 0.001,
     maskToken,
-    labelDFM := some (DistNoisyDiscreteConfig.qm9 vocabSize maskToken) }
+    labelDFM := some (DistNoisyDiscreteConfig.qm9 vocabSize maskToken hVocab hMask) }
 
 def maskedAtom (cfg : MoleculeBridgeConfig) (coord : Vec3 := Vec3.zero) : MoleculeAtom :=
   { coord, label := cfg.maskToken }

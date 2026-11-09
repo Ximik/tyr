@@ -275,7 +275,7 @@ end Qwen3ForceAlignProcessor
 private def extractTimestampRows {batch seq : Nat}
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (outputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
-    (timestampTokenId : UInt64)
+    (timestampTokenId : tokenizer.TokenId)
     (timestampSegmentTime : Float)
     : IO (Array (Array UInt64)) := do
   let inFlat : Tensor { device := device, shape := #[batch * seq], dtype := .Int64 } := Tensor.reshape (Tensor.toInt64 inputIds) #[batch * seq]
@@ -287,7 +287,7 @@ private def extractTimestampRows {batch seq : Nat}
     let mut ts : Array UInt64 := #[]
     for t in [:seq] do
       let k := b * seq + t
-      if inVals.getD k 0 == timestampTokenId then
+      if inVals.getD k 0 == timestampTokenId.toUInt64 then
         let bin := outVals.getD k 0
         let ms := (bin.toFloat * timestampSegmentTime).toUInt64
         ts := ts.push ms
@@ -298,7 +298,7 @@ def alignFromOutputIds {batch seq : Nat}
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (outputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (wordLists : Array (Array String))
-    (timestampTokenId : UInt64)
+    (timestampTokenId : tokenizer.TokenId)
     (timestampSegmentTime : Float := 1.0)
     : IO (Array ForcedAlignResult) := do
   let rows ← extractTimestampRows inputIds outputIds timestampTokenId timestampSegmentTime
@@ -313,7 +313,7 @@ def alignFromLogits {batch seq vocab : Nat} {dtype : DType}
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (logits : Tensor { device := device, shape := #[batch, seq, vocab], dtype := dtype })
     (wordLists : Array (Array String))
-    (timestampTokenId : UInt64)
+    (timestampTokenId : tokenizer.TokenId)
     (timestampSegmentTime : Float := 1.0)
     : IO (Array ForcedAlignResult) := do
   let indices := Tensor.argmax! logits 2

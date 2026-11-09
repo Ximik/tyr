@@ -194,8 +194,8 @@ def forward {batch img_seq txt_seq : Nat} (cfg : FluxConfig)
   let txt := Tensor.linear3d txt model.txt_in  -- [batch, txt_seq, hidden_size]
 
   -- Compute RoPE embeddings
-  let img_pe := flux.ropeEmbed (head_dim := cfg.head_dim) img_ids cfg.axes_dims cfg.theta
-  let txt_pe := flux.ropeEmbed (head_dim := cfg.head_dim) txt_ids cfg.axes_dims cfg.theta
+  let img_pe := flux.ropeEmbed (head_dim := cfg.head_dim) img_ids cfg.axes_dims cfg.axesValid cfg.theta cfg.thetaPos
+  let txt_pe := flux.ropeEmbed (head_dim := cfg.head_dim) txt_ids cfg.axes_dims cfg.axesValid cfg.theta cfg.thetaPos
 
   -- Double-stream blocks (using fold to avoid Id.run bug)
   let (img, txt) := processDoubleBlocks model.double_blocks cfg.headDimEven img txt img_pe txt_pe mod_img mod_txt
@@ -205,7 +205,7 @@ def forward {batch img_seq txt_seq : Nat} (cfg : FluxConfig)
 
   -- Compute combined RoPE for concatenated img+txt sequence
   let combined_ids : Tensor { device := device, shape := #[batch, txt_seq + img_seq, 4], dtype := .Int64 } := qwen35.typedCat txt_ids img_ids 1
-  let combined_pe := flux.ropeEmbed (head_dim := cfg.head_dim) combined_ids cfg.axes_dims cfg.theta
+  let combined_pe := flux.ropeEmbed (head_dim := cfg.head_dim) combined_ids cfg.axes_dims cfg.axesValid cfg.theta cfg.thetaPos
 
   -- Single-stream blocks (using fold to avoid Id.run bug)
   let x := processSingleBlocks model.single_blocks cfg.headDimEven x combined_pe mod_single

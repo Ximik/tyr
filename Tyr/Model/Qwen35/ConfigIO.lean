@@ -1,205 +1,142 @@
 /-
   Tyr/Model/Qwen35/ConfigIO.lean
 
-  HuggingFace `config.json` loader for standalone Qwen3.5 text causal-LM.
+  HuggingFace `config.json` loader for standalone Qwen3.5 causal-LM.
 -/
 import Tyr.Model.Qwen35.Config
-import Lean.Data.Json
-import Lean.Data.Json.FromToJson.Basic
+import Tyr.Model.ConfigJson
 
 namespace torch.qwen35
 
-open Lean
+open Lean ConfigJson
 
-private def parseJsonFile (path : String) : IO Json := do
-  let contents ← IO.FS.readFile path
-  match Json.parse contents with
-  | .ok json => pure json
-  | .error err => throw (IO.userError s!"Failed to parse JSON at {path}: {err}")
+private def layerType? (name : String) : Except String LayerType :=
+  match LayerType.ofString? name with
+  | some t => pure t
+  | none => throw s!"unknown layer type \"{name}\"; expected linear_attention or full_attention"
 
-private def getObjVal? (j : Json) (key : String) : Option Json :=
-  match j with
-  | .obj kvs => Std.TreeMap.Raw.get? kvs key
-  | _ => none
+/-- RoPE settings live in `rope_parameters` on newer checkpoints, else at the top level. -/
+private def ropeField? {α : Type} [FromJson α] (j : Json) (key : String) : Except String (Option α) := do
+  if let some params ← objectField? j "rope_parameters" then
+    if let some x ← field? params key then return some x
+  field? j key
 
-private def fromJson? {α} [FromJson α] (j : Json) : Option α :=
-  match (FromJson.fromJson? j : Except String α) with
-  | .ok v => some v
-  | .error _ => none
+/-- Parse the text decoder from a `config.json` node (`text_config`, or the root of a
+text-only checkpoint). Behavior the decoder hard-codes is required of the file:
+SiLU MLP, gated attention without bias, no MLP-only layers, float32 linear-attention
+state, and plain or multimodal RoPE (identical for text positions). -/
+def Config.parseJson (j : Json) (d : Config := Config.qwen35_9B) : Except String Config := do
+  let textCfg := (← objectField? j "text_config").getD j
+  requireOneOf textCfg "hidden_act" ["silu"]
+  requireEq textCfg "attention_bias" false
+  requireEq textCfg "attn_output_gate" true
+  requireOneOf textCfg "mamba_ssm_dtype" ["float32"]
+  requireEq textCfg "mlp_only_layers" (#[] : Array Nat)
 
-private def getNat? (j : Json) : Option Nat :=
-  fromJson? j
-
-private def getBool? (j : Json) : Option Bool :=
-  fromJson? j
-
-private def getString? (j : Json) : Option String :=
-  fromJson? j
-
-private def getNatArray? (j : Json) : Option (Array Nat) :=
-  match j with
-  | .arr xs =>
-    let mapped := xs.map getNat?
-    if mapped.all Option.isSome then
-      some <| mapped.map (fun x => x.getD 0)
-    else
-      none
-  | _ => none
-
-private def getFloat? (j : Json) : Option Float :=
-  match (fromJson? (α := Float) j) with
-  | some x => some x
-  | none => (getNat? j).map (·.toFloat)
-
-private def getNatFieldD (j : Json) (key : String) (d : Nat) : Nat :=
-  match getObjVal? j key >>= getNat? with
-  | some n => n
-  | none => d
-
-private def getBoolFieldD (j : Json) (key : String) (d : Bool) : Bool :=
-  match getObjVal? j key >>= getBool? with
-  | some b => b
-  | none => d
-
-private def getStringFieldD (j : Json) (key : String) (d : String) : String :=
-  match getObjVal? j key >>= getString? with
-  | some s => s
-  | none => d
-
-private def getFloatFieldD (j : Json) (key : String) (d : Float) : Float :=
-  match getObjVal? j key >>= getFloat? with
-  | some x => x
-  | none => d
-
-private def getOptNatField (j : Json) (key : String) : Option Nat :=
-  getObjVal? j key >>= getNat?
-
-private def parseLayerTypes (j : Json) (key : String) : Option (Array LayerType) :=
-  match getObjVal? j key with
-  | some (.arr xs) =>
-    let mapped := xs.map (fun x => (getString? x >>= LayerType.ofString?))
-    if mapped.all Option.isSome then
-      some <| mapped.map (fun x => x.getD .linearAttention)
-    else
-      none
-  | _ => none
-
-private def nestedFloatField? (j : Json) (objKey fieldKey : String) : Option Float :=
-  getObjVal? j objKey >>= fun nested => getObjVal? nested fieldKey >>= getFloat?
-
-def Config.parseJson (j : Json) (d : Config := Config.qwen35_9B) : Except String Config :=
-  let textCfg := match getObjVal? j "text_config" with | some t => t | none => j
-
-  let hidden := getNatFieldD textCfg "hidden_size" d.hidden_size
-  let heads := getNatFieldD textCfg "num_attention_heads" d.num_attention_heads
-  let headDimDefault :=
-    if heads == 0 then d.head_dim else hidden / heads
-  let layerTypes :=
-    match parseLayerTypes textCfg "layer_types" with
-    | some xs => xs
-    | none => d.layer_types
-
-  let ropeTheta :=
-    match nestedFloatField? textCfg "rope_parameters" "rope_theta" with
-    | some x => x
-    | none => getFloatFieldD textCfg "rope_theta" d.rope_theta
-
-  let partialRotary :=
-    match nestedFloatField? textCfg "rope_parameters" "partial_rotary_factor" with
-    | some x => x
-    | none => getFloatFieldD textCfg "partial_rotary_factor" d.partial_rotary_factor
-
-  let tieWordEmbeddings :=
-    match getObjVal? j "tie_word_embeddings" >>= getBool? with
-    | some x => x
-    | none => getBoolFieldD textCfg "tie_word_embeddings" d.tie_word_embeddings
-
-  let mropeInterleaved :=
-    match getObjVal? textCfg "rope_parameters" >>= (fun nested => getObjVal? nested "mrope_interleaved") >>= getBool? with
-    | some x => x
-    | none => getBoolFieldD textCfg "mrope_interleaved" d.mrope_interleaved
-
-  let mropeSection :=
-    match getObjVal? textCfg "rope_parameters" >>= (fun nested => getObjVal? nested "mrope_section") >>= getNatArray? with
-    | some xs => xs
+  let vocab ← fieldD? textCfg "vocab_size" d.vocab_size
+  let hidden ← fieldD? textCfg "hidden_size" d.hidden_size
+  let heads ← fieldD? textCfg "num_attention_heads" d.num_attention_heads
+  let kvHeads ← fieldD? textCfg "num_key_value_heads" d.num_key_value_heads
+  let linearKeyHeads ← fieldD? textCfg "linear_num_key_heads" d.linear_num_key_heads
+  let linearValueHeads ← fieldD? textCfg "linear_num_value_heads" d.linear_num_value_heads
+  let ⟨hHeads⟩ ← if h : 0 < heads ∧ 0 < kvHeads ∧ 0 < linearKeyHeads then pure (PLift.up h) else
+    throw s!"Invalid Qwen3.5 config: num_attention_heads={heads}, num_key_value_heads={kvHeads} and linear_num_key_heads={linearKeyHeads} must be positive"
+  let ⟨hKV⟩ ← if h : kvHeads ∣ heads then pure (PLift.up h) else
+    throw s!"Invalid Qwen3.5 config: num_attention_heads ({heads}) must be divisible by num_key_value_heads ({kvHeads})"
+  let ⟨hLinear⟩ ← if h : linearKeyHeads ∣ linearValueHeads then pure (PLift.up h) else
+    throw s!"Invalid Qwen3.5 config: linear_num_value_heads ({linearValueHeads}) must be divisible by linear_num_key_heads ({linearKeyHeads})"
+  let headDim ← match ← field? textCfg "head_dim" with
+    | some headDim => pure headDim
     | none =>
-      match getObjVal? textCfg "mrope_section" >>= getNatArray? with
-      | some xs => xs
-      | none => d.mrope_section
+      if heads ∣ hidden then pure (hidden / heads)
+      else throw s!"Invalid Qwen3.5 config: without head_dim, num_attention_heads={heads} must divide hidden_size={hidden}"
 
-  let mlpOnlyLayers :=
-    match getObjVal? textCfg "mlp_only_layers" >>= getNatArray? with
-    | some xs => xs
-    | none => d.mlp_only_layers
+  let factor : Float := (← ropeField? textCfg "partial_rotary_factor").getD
+    (d.rotary_dim.toFloat / d.head_dim.toFloat)
+  let rotaryDim := (headDim.toFloat * factor).round.toUInt64.toNat
+  unless rotaryDim.toFloat == headDim.toFloat * factor do
+    throw s!"Invalid Qwen3.5 config: partial_rotary_factor={factor} does not select a whole number of the {headDim} head channels"
+  let ⟨hRotary⟩ ← if h : 0 < rotaryDim ∧ 2 ∣ rotaryDim ∧ rotaryDim ≤ headDim then pure (PLift.up h) else
+    throw s!"Invalid Qwen3.5 config: rotary dim {rotaryDim} (head_dim * partial_rotary_factor) must be positive, even and at most head_dim={headDim}"
+  for key in ["rope_scaling", "rope_parameters"] do
+    if let some (scaling : Json) ← field? textCfg key then
+      if scaling != .null then
+        let kind : Option String ← firstFieldD? scaling ["rope_type", "type"] none
+        unless kind.all (fun k => k == "default" || k == "mrope") do
+          throw s!"unsupported '{key}' = {scaling.compress}; this model implements plain RoPE"
+  let ropeTheta := (← ropeField? textCfg "rope_theta").getD d.rope_theta
+  let ⟨hTheta⟩ ← if h : 0 < ropeTheta then pure (PLift.up h) else
+    throw s!"Invalid Qwen3.5 config: rope_theta={ropeTheta} must be positive"
+  let eps ← fieldD? textCfg "rms_norm_eps" d.rms_norm_eps
+  let ⟨hEps⟩ ← if h : 0 < eps then pure (PLift.up h) else
+    throw s!"Invalid Qwen3.5 config: rms_norm_eps={eps} must be positive"
 
-  let linearKeyHeads := getNatFieldD textCfg "linear_num_key_heads" d.linear_num_key_heads
-  let linearValueHeads := getNatFieldD textCfg "linear_num_value_heads" d.linear_num_value_heads
-  if hDiv : linearKeyHeads ∣ linearValueHeads then pure {
-    vocab_size := getNatFieldD textCfg "vocab_size" d.vocab_size
+  let numLayers ← fieldD? textCfg "num_hidden_layers" d.num_hidden_layers
+  let layerTypes ← match ← field? textCfg "layer_types" with
+    | some (names : Array String) => names.mapM layerType?
+    | none =>
+      let interval : Nat ← fieldD? textCfg "full_attention_interval" 4
+      unless 0 < interval do
+        throw "Invalid Qwen3.5 config: full_attention_interval must be positive"
+      pure (defaultLayerTypes numLayers interval)
+  let ⟨hLayers⟩ ← if h : layerTypes.size = numLayers then pure (PLift.up h) else
+    throw s!"Invalid Qwen3.5 config: layer_types has {layerTypes.size} entries for num_hidden_layers={numLayers}"
+  let convKernel ← fieldD? textCfg "linear_conv_kernel_dim" d.linear_conv_kernel_dim
+  let ⟨hConv⟩ ← if h : 0 < convKernel then pure (PLift.up h) else
+    throw "Invalid Qwen3.5 config: linear_conv_kernel_dim must be positive"
+  let numExperts ← fieldD? textCfg "num_experts" d.num_experts
+  let perTok ← fieldD? textCfg "num_experts_per_tok" d.num_experts_per_tok
+  let ⟨hExperts⟩ ← if h : 0 < numExperts → 0 < perTok ∧ perTok ≤ numExperts then pure (PLift.up h) else
+    throw s!"Invalid Qwen3.5 config: num_experts_per_tok={perTok} must be between 1 and num_experts={numExperts}"
+  let eos ← match ← tokenIdField? textCfg "eos_token_id" with
+    | some id => pure (some id)
+    | none => pure d.eos_token_id
+  let ⟨hEos⟩ ← if h : eos.all (·.toNat < vocab) = true then pure (PLift.up h) else
+    throw s!"Invalid Qwen3.5 config: eos_token_id must be below vocab_size={vocab}"
+  let tie ← match ← field? j "tie_word_embeddings" with
+    | some tie => pure tie
+    | none => fieldD? textCfg "tie_word_embeddings" d.tie_word_embeddings
+  pure {
+    vocab_size := vocab
     hidden_size := hidden
-    intermediate_size := getNatFieldD textCfg "intermediate_size" d.intermediate_size
-    num_hidden_layers := getNatFieldD textCfg "num_hidden_layers" d.num_hidden_layers
+    intermediate_size := ← fieldD? textCfg "intermediate_size" d.intermediate_size
+    num_hidden_layers := numLayers
     num_attention_heads := heads
-    num_key_value_heads := getNatFieldD textCfg "num_key_value_heads" d.num_key_value_heads
-    head_dim := getNatFieldD textCfg "head_dim" headDimDefault
-
+    num_key_value_heads := kvHeads
+    head_dim := headDim
     rope_theta := ropeTheta
-    partial_rotary_factor := partialRotary
-    rms_norm_eps := getFloatFieldD textCfg "rms_norm_eps" d.rms_norm_eps
-    max_position_embeddings := getNatFieldD textCfg "max_position_embeddings" d.max_position_embeddings
-
-    attention_bias := getBoolFieldD textCfg "attention_bias" d.attention_bias
-    attention_dropout := getFloatFieldD textCfg "attention_dropout" d.attention_dropout
-    attn_output_gate := getBoolFieldD textCfg "attn_output_gate" d.attn_output_gate
-    hidden_act := getStringFieldD textCfg "hidden_act" d.hidden_act
-
-    linear_conv_kernel_dim := getNatFieldD textCfg "linear_conv_kernel_dim" d.linear_conv_kernel_dim
-    linear_key_head_dim := getNatFieldD textCfg "linear_key_head_dim" d.linear_key_head_dim
-    linear_value_head_dim := getNatFieldD textCfg "linear_value_head_dim" d.linear_value_head_dim
+    rotary_dim := rotaryDim
+    rms_norm_eps := eps
+    linear_conv_kernel_dim := convKernel
+    linear_key_head_dim := ← fieldD? textCfg "linear_key_head_dim" d.linear_key_head_dim
+    linear_value_head_dim := ← fieldD? textCfg "linear_value_head_dim" d.linear_value_head_dim
     linear_num_key_heads := linearKeyHeads
     linear_num_value_heads := linearValueHeads
-    mamba_ssm_dtype := getStringFieldD textCfg "mamba_ssm_dtype" d.mamba_ssm_dtype
-
     layer_types := layerTypes
-    full_attention_interval := getNatFieldD textCfg "full_attention_interval" d.full_attention_interval
-    mlp_only_layers := mlpOnlyLayers
-    mrope_interleaved := mropeInterleaved
-    mrope_section := mropeSection
-    mtp_num_hidden_layers := getNatFieldD textCfg "mtp_num_hidden_layers" d.mtp_num_hidden_layers
-    mtp_use_dedicated_embeddings :=
-      getBoolFieldD textCfg "mtp_use_dedicated_embeddings" d.mtp_use_dedicated_embeddings
-
-    moe_intermediate_size := getNatFieldD textCfg "moe_intermediate_size" d.moe_intermediate_size
+    moe_intermediate_size := ← fieldD? textCfg "moe_intermediate_size" d.moe_intermediate_size
     shared_expert_intermediate_size :=
-      getNatFieldD textCfg "shared_expert_intermediate_size" d.shared_expert_intermediate_size
-    num_experts_per_tok := getNatFieldD textCfg "num_experts_per_tok" d.num_experts_per_tok
-    num_experts := getNatFieldD textCfg "num_experts" d.num_experts
-
-    use_cache := getBoolFieldD textCfg "use_cache" d.use_cache
-    tie_word_embeddings := tieWordEmbeddings
-
-    pad_token_id :=
-      match getOptNatField textCfg "pad_token_id" with
-      | some x => some x.toUInt64
-      | none => d.pad_token_id
-    bos_token_id :=
-      match getOptNatField textCfg "bos_token_id" with
-      | some x => some x.toUInt64
-      | none => d.bos_token_id
-    eos_token_id :=
-      match getOptNatField textCfg "eos_token_id" with
-      | some x => some x.toUInt64
-      | none => d.eos_token_id
-    linearKeyHeadsDivide := hDiv
+      ← fieldD? textCfg "shared_expert_intermediate_size" d.shared_expert_intermediate_size
+    num_experts_per_tok := perTok
+    num_experts := numExperts
+    tie_word_embeddings := tie
+    eos_token_id := eos
+    linearKeyHeadsDivide := hLinear
+    kvHeadsDivide := hKV
+    headsPos := hHeads
+    rotaryValid := hRotary
+    layerTypesSize := hLayers
+    convKernelPos := hConv
+    expertsValid := hExperts
+    ropeThetaPos := hTheta
+    rmsNormEpsPos := hEps
+    eosInVocab := hEos
   }
-  else .error s!"Invalid Qwen3.5 config: linear_num_value_heads ({linearValueHeads}) must be divisible by linear_num_key_heads ({linearKeyHeads})"
 
 namespace Config
 
 /-- Load Qwen3.5 config from a HuggingFace-style `config.json` file. -/
 def loadFromFile (path : String) (defaults : Config := Config.qwen35_9B) : IO Config := do
-  let root ← parseJsonFile path
-  pure (Config.normalize (← IO.ofExcept (Config.parseJson root defaults)))
+  IO.ofExcept (Config.parseJson (← parseFile path) defaults)
 
 /-- Load Qwen3.5 config from a model directory containing `config.json`. -/
 def loadFromPretrainedDir (modelDir : String) (defaults : Config := Config.qwen35_9B) : IO Config :=

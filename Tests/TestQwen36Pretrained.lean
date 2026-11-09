@@ -23,7 +23,6 @@ def testQwen36MultimodalConfigLoad : IO Unit := do
     "\"attention_bias\":false,\"attention_dropout\":0.0,\"attn_output_gate\":true," ++
     "\"bos_token_id\":248044,\"eos_token_id\":248044,\"full_attention_interval\":4," ++
     "\"head_dim\":256,\"hidden_act\":\"silu\",\"hidden_size\":2048," ++
-    "\"layer_types\":[\"linear_attention\",\"linear_attention\",\"linear_attention\",\"full_attention\"]," ++
     "\"linear_conv_kernel_dim\":4,\"linear_key_head_dim\":128," ++
     "\"linear_num_key_heads\":16,\"linear_num_value_heads\":32,\"linear_value_head_dim\":128," ++
     "\"mamba_ssm_dtype\":\"float32\",\"max_position_embeddings\":262144," ++
@@ -44,12 +43,6 @@ def testQwen36MultimodalConfigLoad : IO Unit := do
   let cfg ← VLConfig.loadFromFile path
   LeanTest.assertEqual cfg.text_config.hidden_size 2048
     "Qwen3.6 text hidden size should load from nested text_config"
-  LeanTest.assertEqual cfg.text_config.max_position_embeddings 262144
-    "Qwen3.6 native context length should load from nested text_config"
-  LeanTest.assertEqual cfg.text_config.mrope_interleaved true
-    "Qwen3.6 mRoPE flag should load from rope_parameters"
-  LeanTest.assertEqual cfg.text_config.mrope_section #[11, 11, 10]
-    "Qwen3.6 mRoPE section should load from rope_parameters"
   LeanTest.assertEqual cfg.text_config.num_experts 256
     "Qwen3.6 MoE expert count should load from nested text_config"
   LeanTest.assertEqual cfg.vision_config.out_hidden_size 2048
@@ -66,7 +59,6 @@ def testQwen36TextConfigLoadFromMultimodalRoot : IO Unit := do
     "\"attention_bias\":false,\"attention_dropout\":0.0,\"attn_output_gate\":true," ++
     "\"bos_token_id\":248044,\"eos_token_id\":248044,\"full_attention_interval\":4," ++
     "\"head_dim\":256,\"hidden_act\":\"silu\",\"hidden_size\":2048," ++
-    "\"layer_types\":[\"linear_attention\",\"linear_attention\",\"linear_attention\",\"full_attention\"]," ++
     "\"linear_conv_kernel_dim\":4,\"linear_key_head_dim\":128," ++
     "\"linear_num_key_heads\":16,\"linear_num_value_heads\":32,\"linear_value_head_dim\":128," ++
     "\"mamba_ssm_dtype\":\"float32\",\"max_position_embeddings\":262144," ++
@@ -82,9 +74,3 @@ def testQwen36TextConfigLoadFromMultimodalRoot : IO Unit := do
   let cfg ← Config.loadFromFile path
   LeanTest.assertEqual cfg.hidden_size 2048
     "Qwen3.6 text loader should read nested text_config from multimodal root config"
-  LeanTest.assertEqual cfg.max_position_embeddings 262144
-    "Qwen3.6 text loader should preserve the published native context length"
-  LeanTest.assertEqual cfg.mrope_interleaved true
-    "Qwen3.6 text loader should read mRoPE flags from rope_parameters"
-  LeanTest.assertEqual cfg.bos_token_id (some 248044)
-    "Qwen3.6 text loader should preserve BOS from nested text_config"

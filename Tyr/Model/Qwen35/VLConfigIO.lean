@@ -5,128 +5,68 @@
 -/
 import Tyr.Model.Qwen35.ConfigIO
 import Tyr.Model.Qwen35.VLConfig
-import Lean.Data.Json
-import Lean.Data.Json.FromToJson.Basic
 
 namespace torch.qwen35
 
-open Lean
+open Lean ConfigJson
 
-private def parseJsonFile (path : String) : IO Json := do
-  let contents ← IO.FS.readFile path
-  match Json.parse contents with
-  | .ok json => pure json
-  | .error err => throw (IO.userError s!"Failed to parse JSON at {path}: {err}")
-
-private def getObjVal? (j : Json) (key : String) : Option Json :=
-  match j with
-  | .obj kvs => Std.TreeMap.Raw.get? kvs key
-  | _ => none
-
-private def fromJson? {α} [FromJson α] (j : Json) : Option α :=
-  match (FromJson.fromJson? j : Except String α) with
-  | .ok v => some v
-  | .error _ => none
-
-private def getNat? (j : Json) : Option Nat := fromJson? j
-private def getBool? (j : Json) : Option Bool := fromJson? j
-private def getString? (j : Json) : Option String := fromJson? j
-
-private def getFloat? (j : Json) : Option Float :=
-  match (fromJson? (α := Float) j) with
-  | some x => some x
-  | none => (getNat? j).map (·.toFloat)
-
-private def getNatFieldD (j : Json) (key : String) (d : Nat) : Nat :=
-  match getObjVal? j key >>= getNat? with
-  | some n => n
-  | none => d
-
-private def getTokenIdFieldD (j : Json) (key : String) (d : UInt64) : UInt64 :=
-  match getObjVal? j key >>= getNat? with
-  | some n => n.toUInt64
-  | none => d
-
-private def getBoolFieldD (j : Json) (key : String) (d : Bool) : Bool :=
-  match getObjVal? j key >>= getBool? with
-  | some b => b
-  | none => d
-
-private def getStringFieldD (j : Json) (key : String) (d : String) : String :=
-  match getObjVal? j key >>= getString? with
-  | some s => s
-  | none => d
-
-private def getFloatFieldD (j : Json) (key : String) (d : Float) : Float :=
-  match getObjVal? j key >>= getFloat? with
-  | some x => x
-  | none => d
-
-private def parseVisionConfig
-    (j : Json)
-    (d : VisionConfig := {})
-    : Except String VisionConfig :=
-  let hidden_size := getNatFieldD j "hidden_size" d.hidden_size
-  let num_heads := getNatFieldD j "num_heads" d.num_heads
-  if headsDivide : num_heads ∣ hidden_size then .ok {
-    depth := getNatFieldD j "depth" d.depth
+private def parseVisionConfig (j : Json) (d : VisionConfig := {}) : Except String VisionConfig := do
+  let hidden_size ← fieldD? j "hidden_size" d.hidden_size
+  let num_heads ← fieldD? j "num_heads" d.num_heads
+  let ⟨hHeads⟩ ← if h : 0 < num_heads ∧ num_heads ∣ hidden_size then pure (PLift.up h) else
+    throw s!"Invalid Qwen3.5 vision config: num_heads ({num_heads}) must be positive and divide hidden_size ({hidden_size})"
+  let ⟨hEven⟩ ← if h : 2 ∣ hidden_size / num_heads then pure (PLift.up h) else
+    throw s!"Invalid Qwen3.5 vision config: head dim {hidden_size / num_heads} must be even for rotary embeddings"
+  let spatial_merge_size ← fieldD? j "spatial_merge_size" d.spatial_merge_size
+  let ⟨hMerge⟩ ← if h : 0 < spatial_merge_size then pure (PLift.up h) else
+    throw "Invalid Qwen3.5 vision config: spatial_merge_size must be positive"
+  pure {
+    depth := ← fieldD? j "depth" d.depth
     hidden_size
-    hidden_act := getStringFieldD j "hidden_act" d.hidden_act
-    intermediate_size := getNatFieldD j "intermediate_size" d.intermediate_size
+    hidden_act := ← fieldD? j "hidden_act" d.hidden_act
+    intermediate_size := ← fieldD? j "intermediate_size" d.intermediate_size
     num_heads
-    in_channels := getNatFieldD j "in_channels" d.in_channels
-    patch_size := getNatFieldD j "patch_size" d.patch_size
-    spatial_merge_size := getNatFieldD j "spatial_merge_size" d.spatial_merge_size
-    temporal_patch_size := getNatFieldD j "temporal_patch_size" d.temporal_patch_size
-    out_hidden_size := getNatFieldD j "out_hidden_size" d.out_hidden_size
-    num_position_embeddings := getNatFieldD j "num_position_embeddings" d.num_position_embeddings
-    initializer_range := getFloatFieldD j "initializer_range" d.initializer_range
-    headsDivide
+    in_channels := ← fieldD? j "in_channels" d.in_channels
+    patch_size := ← fieldD? j "patch_size" d.patch_size
+    spatial_merge_size
+    temporal_patch_size := ← fieldD? j "temporal_patch_size" d.temporal_patch_size
+    out_hidden_size := ← fieldD? j "out_hidden_size" d.out_hidden_size
+    num_position_embeddings := ← fieldD? j "num_position_embeddings" d.num_position_embeddings
+    headsDivide := hHeads.2
+    headsPos := hHeads.1
+    headDimEven := hEven
+    mergePos := hMerge
   }
-  else .error s!"Invalid Qwen3.5 vision config: hidden_size ({hidden_size}) must be divisible by num_heads ({num_heads})"
 
-private def parseVLConfig
-    (root : Json)
-    (d : VLConfig := {})
-    : Except String VLConfig := do
-  let textJson :=
-    match getObjVal? root "text_config" with
-    | some t => t
-    | none => root
-  let textCfg ←
-    match getObjVal? root "text_config" with
-    | some _ =>
-      pure (Config.normalize (← Config.parseJson textJson d.text_config))
-    | none =>
-      -- Backward compatible: plain text-only config at root.
-      pure (Config.normalize (← Config.parseJson root d.text_config))
-
-  let visionCfg ←
-    match getObjVal? root "vision_config" with
+private def parseVLConfig (root : Json) (d : VLConfig := {}) : Except String VLConfig := do
+  let textCfg ← Config.parseJson root d.text_config
+  let visionCfg ← match ← objectField? root "vision_config" with
     | some v => parseVisionConfig v d.vision_config
     | none => pure d.vision_config
-
-  let tieWordEmbeddings :=
-    match getObjVal? root "tie_word_embeddings" >>= getBool? with
-    | some x => x
-    | none => textCfg.tie_word_embeddings
-
-  pure <| VLConfig.normalize {
+  let ⟨hMatch⟩ ← if h : visionCfg.out_hidden_size = textCfg.hidden_size then pure (PLift.up h) else
+    throw s!"Invalid Qwen3.5 config: vision out_hidden_size ({visionCfg.out_hidden_size}) must match text hidden_size ({textCfg.hidden_size})"
+  let image_token_id ← tokenIdFieldD? root "image_token_id" d.image_token_id
+  let video_token_id ← tokenIdFieldD? root "video_token_id" d.video_token_id
+  let vision_start_token_id ← tokenIdFieldD? root "vision_start_token_id" d.vision_start_token_id
+  let vision_end_token_id ← tokenIdFieldD? root "vision_end_token_id" d.vision_end_token_id
+  let vocab := textCfg.vocab_size
+  let ⟨hIds⟩ ← if h : image_token_id.toNat < vocab ∧ video_token_id.toNat < vocab ∧
+      vision_start_token_id.toNat < vocab ∧ vision_end_token_id.toNat < vocab then pure (PLift.up h) else
+    throw s!"Invalid Qwen3.5 config: image, video and vision boundary token ids must be below vocab_size={vocab}"
+  pure {
     text_config := textCfg
     vision_config := visionCfg
-    image_token_id := getTokenIdFieldD root "image_token_id" d.image_token_id
-    video_token_id := getTokenIdFieldD root "video_token_id" d.video_token_id
-    vision_start_token_id := getTokenIdFieldD root "vision_start_token_id" d.vision_start_token_id
-    vision_end_token_id := getTokenIdFieldD root "vision_end_token_id" d.vision_end_token_id
-    tie_word_embeddings := tieWordEmbeddings
+    image_token_id, video_token_id, vision_start_token_id, vision_end_token_id
+    tie_word_embeddings := textCfg.tie_word_embeddings
+    visionMatchesText := hMatch
+    tokenIdsInVocab := hIds
   }
 
 namespace VLConfig
 
 /-- Load Qwen3.5 multimodal config from HuggingFace-style `config.json`. -/
 def loadFromFile (path : String) (defaults : VLConfig := {}) : IO VLConfig := do
-  let root ← parseJsonFile path
-  IO.ofExcept (parseVLConfig root defaults)
+  IO.ofExcept (parseVLConfig (← parseFile path) defaults)
 
 /-- Load Qwen3.5 multimodal config from a model directory containing `config.json`. -/
 def loadFromPretrainedDir (modelDir : String) (defaults : VLConfig := {}) : IO VLConfig :=

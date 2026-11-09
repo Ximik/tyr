@@ -39,8 +39,6 @@ structure WhisperAttention (dModel nHeads : Nat) (dtype : DType := .Float32) whe
 namespace WhisperAttention
 
 def init (dModel nHeads : Nat) (device : Device := .CPU) (dtype : DType := .Float32) : IO (WhisperAttention (device := device) (dtype := dtype) dModel nHeads) := do
-  if nHeads == 0 || dModel % nHeads != 0 then
-    throw <| IO.userError s!"WhisperAttention requires d_model divisible by n_heads, got {dModel} and {nHeads}"
   let qProjWeight ← initWeightFor (device := device) (dtype := dtype) #[dModel, dModel] dModel
   let qProjBias ← initBiasFor (device := device) (dtype := dtype) #[dModel]
   let kProjWeight ← initWeightFor (device := device) (dtype := dtype) #[dModel, dModel] dModel
@@ -305,9 +303,6 @@ structure WhisperModel (cfg : WhisperConfig) (dtype : DType := .Float32) where
 namespace WhisperModel
 
 def init (cfg : WhisperConfig) (device : Device := .CPU) (dtype : DType := .Float32) : IO (WhisperModel (device := device) (dtype := dtype) cfg) := do
-  if !cfg.hasValidHeads then
-    throw <| IO.userError
-      s!"Invalid Whisper config: d_model={cfg.dModel}, encoder_heads={cfg.encoderAttentionHeads}, decoder_heads={cfg.decoderAttentionHeads}"
   let encoderConv1Weight ← initWeightFor (device := device) (dtype := dtype) #[cfg.dModel, cfg.numMelBins, 3] cfg.numMelBins
   let encoderConv1Bias ← initBiasFor (device := device) (dtype := dtype) #[cfg.dModel]
   let encoderConv2Weight ← initWeightFor (device := device) (dtype := dtype) #[cfg.dModel, cfg.dModel, 3] cfg.dModel

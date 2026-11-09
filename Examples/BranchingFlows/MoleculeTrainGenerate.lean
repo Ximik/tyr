@@ -662,10 +662,6 @@ private def runAt (dtype : DType) [DType.RealFloating dtype]
     throw (IO.userError "total steps must be positive")
   if opts.sampleCount == 0 then
     throw (IO.userError "sample count must be positive")
-  if opts.vocabSize == 0 then
-    throw (IO.userError "vocab size must be positive")
-  if opts.maskToken >= opts.vocabSize then
-    throw (IO.userError s!"mask token {opts.maskToken} is outside vocab size {opts.vocabSize}")
   if opts.maxLen == 0 then
     throw (IO.userError "max length must be positive")
   match opts.coordTargetCap? with
@@ -703,10 +699,14 @@ private def runAt (dtype : DType) [DType.RealFloating dtype]
         throw (IO.userError "--require-data requires --data")
 
   let vocab : Nat := opts.vocabSize
-  let bridgeCfgBase := MoleculeBridgeConfig.qm9 opts.vocabSize opts.maskToken
+  let ⟨hVocab⟩ ← if h : 0 < opts.vocabSize then pure (PLift.up h) else
+    throw (IO.userError "vocab size must be positive")
+  let ⟨hMask⟩ ← if h : opts.maskToken < opts.vocabSize then pure (PLift.up h) else
+    throw (IO.userError s!"mask token {opts.maskToken} is outside vocab size {opts.vocabSize}")
+  let bridgeCfgBase := MoleculeBridgeConfig.qm9 opts.vocabSize opts.maskToken hVocab hMask
   let labelDFM :=
     if opts.fixedLabels then none
-    else some (DistNoisyDiscreteConfig.qm9 opts.vocabSize opts.maskToken)
+    else some (DistNoisyDiscreteConfig.qm9 opts.vocabSize opts.maskToken hVocab hMask)
   let bridgeCfg := { bridgeCfgBase with labelDFM }
   let records ← loadRecords opts
   let allStates ← exceptToIO "convert molecule records"

@@ -230,7 +230,7 @@ private def loadLayer (src : Source) (cfg : Config) (layerIdx : Nat)
     (device : Device := Device.CPU) (dtype : DType)
     : IO (Qwen35Layer (dtype := dtype) (device := device) cfg) := do
   let p := s!"model.layers.{layerIdx}"
-  let layerTypes := Config.normalizedLayerTypes cfg
+  let layerTypes := cfg.layer_types
   let lt := layerTypes.getD layerIdx .linearAttention
 
   let inputNorm ← loadRMSNorm src s!"{p}.input_layernorm" cfg.hidden_size device

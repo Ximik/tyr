@@ -64,7 +64,7 @@ def loadFromPretrained
   }
   let cfg ← Qwen3ASRConfig.loadFromPretrainedDir modelDir
   let tok ← tokenizer.qwen3.loadTokenizer modelDir
-  let preprocessor ← PreprocessorConfig.loadFromPretrainedDir modelDir
+  let preprocessor ← PreprocessorConfig.loadFromPretrainedDir modelDir (requiredSamplingRate := some 16000)
   let ⟨melBinsMatch⟩ ← if h : preprocessor.featureSize = cfg.thinkerConfig.audioConfig.numMelBins then
       pure (PLift.up h)
     else throw (IO.userError s!"Qwen3-ASR preprocessor feature_size {preprocessor.featureSize} does not match num_mel_bins {cfg.thinkerConfig.audioConfig.numMelBins}")

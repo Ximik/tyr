@@ -64,7 +64,8 @@ private def testCfg : Config := { LagunaConfig.laguna_s_2_1 with
   shared_expert_intermediate_size := 32
   norm_topk_prob := true
   moe_routed_scaling_factor := 2.5
-  moe_router_logit_softcapping := 0.0 }
+  moe_router_logit_softcapping := 0.0
+  expertsValid := by decide }
 
 /-- Small tensor-core-compatible config for the native SM12x prefill path. -/
 private def nativeCfg : Config := { LagunaConfig.laguna_s_2_1 with
@@ -75,7 +76,8 @@ private def nativeCfg : Config := { LagunaConfig.laguna_s_2_1 with
   shared_expert_intermediate_size := 128
   norm_topk_prob := true
   moe_routed_scaling_factor := 1.0
-  moe_router_logit_softcapping := 0.0 }
+  moe_router_logit_softcapping := 0.0
+  expertsValid := by decide }
 
 /-- Production-sized config (Laguna-S-2.1 defaults). -/
 private def bigCfg : Config := LagunaConfig.laguna_s_2_1

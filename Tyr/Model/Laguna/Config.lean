@@ -6,6 +6,7 @@
   per-head softplus attention output gating, sigmoid token-choice router).
 -/
 import Tyr.Basic
+import Tyr.Tokenizer.Types
 import Tyr.TensorStruct
 
 namespace torch.laguna
@@ -40,6 +41,14 @@ instance : TensorStruct LayerType where
   zipWith _ x _ := x
   fold _ init _ := init
 
+/-- Default layer schedule: full attention at layers 0, 4, 8, ... (i % 4 == 0),
+    sliding-window attention elsewhere. -/
+def defaultLayerTypes (numLayers : Nat) : Array LayerType :=
+  Array.ofFn (n := numLayers) fun i => if i.val % 4 == 0 then .fullAttention else .slidingAttention
+
+@[simp] theorem defaultLayerTypes_size (numLayers : Nat) : (defaultLayerTypes numLayers).size = numLayers := by
+  simp [defaultLayerTypes]
+
 /-- Laguna model configuration.
     Defaults match `poolside/Laguna-S-2.1-NVFP4` (118B-A8B). -/
 structure LagunaConfig where
@@ -55,15 +64,16 @@ structure LagunaConfig where
   head_dim : Nat := 128
 
   rms_norm_eps : Float := 1e-6
-  max_position_embeddings : Nat := 262144
   sliding_window : Nat := 512
 
-  /-- RoPE base for sliding-window layers (plain rope, full rotary). -/
+  /-- RoPE base for sliding-window layers (plain rope). -/
   rope_theta_sliding : Float := 10000.0
-  partial_rotary_sliding : Float := 1.0
+  /-- Leading head channels RoPE rotates on sliding-window layers (`head_dim * partial_rotary_factor`). -/
+  rotary_dim_sliding : Nat := 128
   /-- RoPE base for full-attention layers (YaRN, partial rotary). -/
   rope_theta_full : Float := 500000.0
-  partial_rotary_full : Float := 0.5
+  /-- Leading head channels RoPE rotates on full-attention layers. -/
+  rotary_dim_full : Nat := 64
   yarn_factor : Float := 32.0
   yarn_original_max_position_embeddings : Nat := 8192
   yarn_beta_fast : Float := 32.0
@@ -80,19 +90,32 @@ structure LagunaConfig where
 
   /-- Layers that use a dense MLP instead of the MoE block. -/
   mlp_only_layers : Array Nat := #[0]
-  layer_types : Array LayerType := #[]
+  layer_types : Array LayerType := defaultLayerTypes num_hidden_layers
 
-  attention_bias : Bool := false
-  hidden_act : String := "silu"
-  use_cache : Bool := true
-  tie_word_embeddings : Bool := false
-
-  pad_token_id : Option UInt64 := some 9
-  bos_token_id : Option UInt64 := some 2
-  eos_token_ids : Array UInt64 := #[2, 24]
+  eos_token_ids : Array tokenizer.TokenId := #[2, 24]
 
   /-- Sliding layers keep a ring cache of `sliding_window` tokens; checked when the config is built. -/
   slidingWindowPos : 0 < sliding_window := by decide
+  /-- Query heads are whole multiples of K/V heads on both layer kinds; checked when the config is built. -/
+  kvHeadsDivideFull : num_key_value_heads ∣ num_attention_heads := by decide
+  kvHeadsDivideSliding : num_key_value_heads ∣ num_attention_heads_sliding := by decide
+  headsPos : 0 < num_attention_heads ∧ 0 < num_attention_heads_sliding ∧ 0 < num_key_value_heads := by decide
+  /-- Both layer kinds rotate a nonzero even prefix of each head; checked when the config is built. -/
+  rotaryValid : 0 < rotary_dim_full ∧ 2 ∣ rotary_dim_full ∧ rotary_dim_full ≤ head_dim ∧
+    0 < rotary_dim_sliding ∧ 2 ∣ rotary_dim_sliding ∧ rotary_dim_sliding ≤ head_dim := by decide
+  /-- One attention kind per layer; checked when the config is built. -/
+  layerTypesSize : layer_types.size = num_hidden_layers := by simp
+  /-- Dense-MLP layer indices name decoder layers; checked when the config is built. -/
+  mlpOnlyLayersValid : ∀ i ∈ mlp_only_layers, i < num_hidden_layers := by decide
+  /-- MoE routes each token to between one and `num_experts` experts; checked when the config is built. -/
+  expertsValid : 0 < num_experts → 0 < num_experts_per_tok ∧ num_experts_per_tok ≤ num_experts := by decide
+  /-- YaRN rescales from a nonzero original context; checked when the config is built. -/
+  yarnContextPos : 0 < yarn_original_max_position_embeddings := by decide
+  /-- RoPE frequencies, YaRN and RMSNorm divide by or take logs of these; checked when the
+      config is built. -/
+  floatsPos : 0 < rms_norm_eps ∧ 0 < rope_theta_sliding ∧ 0 < rope_theta_full ∧ 0 < yarn_factor := by native_decide
+  /-- Generation pads finished rows with, and embeds, eos ids; checked when the config is built. -/
+  eosInVocab : eos_token_ids.all (·.toNat < vocab_size) = true := by native_decide
   deriving Repr
 
 namespace LagunaConfig
@@ -100,30 +123,9 @@ namespace LagunaConfig
 /-- Laguna-S-2.1 default config (NVFP4 checkpoint values). -/
 def laguna_s_2_1 : LagunaConfig := {}
 
-/-- Default layer schedule: full attention at layers 0, 4, 8, ... (i % 4 == 0),
-    sliding-window attention elsewhere. -/
-def defaultLayerTypes (numLayers : Nat) : Array LayerType :=
-  Id.run do
-    let mut out : Array LayerType := Array.mkEmpty numLayers
-    for i in [:numLayers] do
-      out := out.push (if i % 4 == 0 then .fullAttention else .slidingAttention)
-    return out
-
-/-- Return `layer_types` if valid, otherwise synthesize the default schedule. -/
-def normalizedLayerTypes (cfg : LagunaConfig) : Array LayerType :=
-  if cfg.layer_types.size == cfg.num_hidden_layers then
-    cfg.layer_types
-  else
-    defaultLayerTypes cfg.num_hidden_layers
-
-/-- Config with `layer_types` normalized for runtime use. -/
-def normalize (cfg : LagunaConfig) : LagunaConfig :=
-  { cfg with layer_types := normalizedLayerTypes cfg }
-
 /-- Attention kind of layer `i`. -/
 def layerType (cfg : LagunaConfig) (i : Nat) : LayerType :=
-  let lts := normalizedLayerTypes cfg
-  lts.getD i .slidingAttention
+  cfg.layer_types.getD i .slidingAttention
 
 /-- Query head count of layer `i` (48 full / 72 sliding for S-2.1). -/
 def numHeadsForLayer (cfg : LagunaConfig) (i : Nat) : Nat :=
@@ -137,31 +139,23 @@ def isDenseMlpLayer (cfg : LagunaConfig) (i : Nat) : Bool :=
 
 /-- Whether this config uses MoE FFN blocks at all. -/
 def isMoE (cfg : LagunaConfig) : Bool :=
-  cfg.num_experts > 0 && cfg.num_experts_per_tok > 0
+  cfg.num_experts > 0
 
 /-- Queries per KV head on full-attention layers. -/
 def numHeadsPerKVGroupFull (cfg : LagunaConfig) : Nat :=
-  if cfg.num_key_value_heads == 0 then 1 else cfg.num_attention_heads / cfg.num_key_value_heads
+  cfg.num_attention_heads / cfg.num_key_value_heads
 
 /-- Queries per KV head on sliding-window layers. -/
 def numHeadsPerKVGroupSliding (cfg : LagunaConfig) : Nat :=
-  if cfg.num_key_value_heads == 0 then 1 else cfg.num_attention_heads_sliding / cfg.num_key_value_heads
-
-private def rotaryDimFor (headDim : Nat) (factor : Float) : Nat :=
-  let raw := (headDim.toFloat * factor).toUInt64.toNat
-  let base :=
-    if raw == 0 then headDim
-    else if raw > headDim then headDim
-    else raw
-  if base <= 2 then 2 else if base % 2 == 0 then base else base - 1
+  cfg.num_attention_heads_sliding / cfg.num_key_value_heads
 
 /-- Rotary dims on full-attention layers (64 for partial_rotary 0.5, head_dim 128). -/
 def rotaryDimFull (cfg : LagunaConfig) : Nat :=
-  rotaryDimFor cfg.head_dim cfg.partial_rotary_full
+  cfg.rotary_dim_full
 
 /-- Rotary dims on sliding-window layers (128 for partial_rotary 1.0). -/
 def rotaryDimSliding (cfg : LagunaConfig) : Nat :=
-  rotaryDimFor cfg.head_dim cfg.partial_rotary_sliding
+  cfg.rotary_dim_sliding
 
 end LagunaConfig
 
@@ -170,11 +164,6 @@ abbrev Config := LagunaConfig
 namespace Config
 
 def laguna_s_2_1 : Config := LagunaConfig.laguna_s_2_1
-
-def normalize (cfg : Config) : Config := LagunaConfig.normalize cfg
-
-def normalizedLayerTypes (cfg : Config) : Array LayerType :=
-  LagunaConfig.normalizedLayerTypes cfg
 
 def layerType (cfg : Config) (i : Nat) : LayerType := LagunaConfig.layerType cfg i
 

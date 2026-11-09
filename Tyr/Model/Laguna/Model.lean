@@ -921,7 +921,7 @@ private partial def decodeLoopCached {batch : Nat}
     (m : LagunaForCausalLM (device := device) (dtype := dtype) cfg)
     (tables : (LagunaRotaryTables (device := device)))
     (strategy : SamplingStrategy)
-    (eosTokenIds : Array UInt64)
+    (eosTokenIds : Array tokenizer.TokenId)
     (finished : Tensor { device := device, shape := #[batch], dtype := .Bool })
     (remaining : Nat)
     {maxLen : Nat}
@@ -978,7 +978,7 @@ private def generateCore {batch seq : Nat}
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (maxNewTokens : Nat)
     (strategy : SamplingStrategy)
-    (eosTokenIds : Array UInt64)
+    (eosTokenIds : Array tokenizer.TokenId)
     (onStep : Option (StreamCallback (device := device) batch))
     : IO (Sigma (fun outSeq => Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })) := do
   let m := TensorStruct.detach m
@@ -1006,7 +1006,7 @@ def generate {batch seq : Nat}
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (maxNewTokens : Nat := 256)
     (strategy : SamplingStrategy := .greedy)
-    (eosTokenIds : Array UInt64 := cfg.eos_token_ids)
+    (eosTokenIds : Array tokenizer.TokenId := cfg.eos_token_ids)
     : IO (Sigma (fun outSeq => Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })) :=
   generateCore cfg m inputIds maxNewTokens strategy eosTokenIds none
 
@@ -1018,7 +1018,7 @@ def generateStream {batch seq : Nat}
     (onStep : StreamCallback (device := device) batch)
     (maxNewTokens : Nat := 256)
     (strategy : SamplingStrategy := .greedy)
-    (eosTokenIds : Array UInt64 := cfg.eos_token_ids)
+    (eosTokenIds : Array tokenizer.TokenId := cfg.eos_token_ids)
     : IO (Sigma (fun outSeq => Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })) :=
   generateCore cfg m inputIds maxNewTokens strategy eosTokenIds (some onStep)
 
@@ -1028,7 +1028,7 @@ def generateGreedy {batch seq : Nat}
     (m : LagunaForCausalLM (device := device) (dtype := dtype) cfg)
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (maxNewTokens : Nat := 256)
-    (eosTokenIds : Array UInt64 := cfg.eos_token_ids)
+    (eosTokenIds : Array tokenizer.TokenId := cfg.eos_token_ids)
     : IO (Sigma (fun outSeq => Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })) :=
   generate cfg m inputIds maxNewTokens .greedy eosTokenIds
 

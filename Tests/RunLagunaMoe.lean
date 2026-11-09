@@ -44,7 +44,8 @@ private def testCfg : Config := { LagunaConfig.laguna_s_2_1 with
   shared_expert_intermediate_size := 32
   norm_topk_prob := true
   moe_routed_scaling_factor := 2.5
-  moe_router_logit_softcapping := 0.0 }
+  moe_router_logit_softcapping := 0.0
+  expertsValid := by decide }
 
 private def findFixture : IO String := do
   let candidates := #[
