@@ -127,6 +127,14 @@ std::vector<AbortCase> cases() {
   add("indexSelect-bounds", "indexSelect index is out of range",
       [] { indexSelect(Object(lean_torch_full_int(shape({1}), 2), lean_dec)); });
   add("indexSelect-float-indices", "requires Int64 or Int32 indices", [] { indexSelect(full({1}, 0)); });
+  add("logicalAnd-shape", "must match the size", [] {
+    auto a = full({2}, 6), b = full({3}, 2);
+    Object r(lean_torch_logical_and(a.get(), b.get()), lean_dec);
+  });
+  add("cat-shape", "Sizes of tensors must match", [] {
+    auto a = full({2, 2}, 3), b = full({3, 2}, 3);
+    Object r(lean_torch_cat2(a.get(), b.get(), Nat(1)), lean_dec);
+  });
   add("flashAttention-rank", "rank-4", [] { flash(full({2, 2}, 1)); });
   add("flashAttention-dtype", "expected scalar type Float but found Long", [] { flash(Object(lean_torch_full_int(shape({1, 1, 2, 2}), 1), lean_dec)); });
   add("affine-weight-dtype", "must have the same dtype", [] { affineDType(true); });

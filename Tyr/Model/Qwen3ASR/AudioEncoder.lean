@@ -359,6 +359,10 @@ theorem convExtent_downsampleOnce {n : Nat} (h : 0 < n) :
 theorem downsampleOnce_pos {n : Nat} (h : 0 < n) : 0 < AudioEncoderConfig.downsampleOnce n := by
   unfold AudioEncoderConfig.downsampleOnce; split <;> simp_all
 
+/-- The 3×3, stride-2, padding-1 downsampling convolution fits any nonempty extent. -/
+theorem convValid_downsample {n : Nat} (h : 0 < n) : Tensor.ConvValid n 3 2 1 1 :=
+  ⟨by decide, by decide, by decide, by omega⟩
+
 private def padRightFrames {cfg : AudioEncoderConfig} {frames maxFrames : Nat}
     (x : Tensor { dtype := dtype, device := device, shape := #[1, cfg.numMelBins, frames] })
     : Tensor { dtype := dtype, device := device, shape := #[1, cfg.numMelBins, maxFrames] } :=
@@ -380,15 +384,15 @@ private def encodePaddedChunk {maxFrames : Nat}
   let t3 := AudioEncoderConfig.framesAfterConv3 cfg maxFrames
   let x0 : Tensor { dtype := dtype, device := device, shape := #[1, 1, cfg.numMelBins, maxFrames] } := Tensor.reshape chunk #[1, 1, cfg.numMelBins, maxFrames]
   let x1 : Tensor { dtype := dtype, device := device, shape := #[1, cfg.downsampleHiddenSize, AudioEncoderConfig.melAfterConv1 cfg, t1] } :=
-    Tensor.reshape (Tensor.gelu (Tensor.conv2dBias x0 m.conv2d1Weight m.conv2d1Bias #[2, 2] #[1, 1]))
+    Tensor.reshape (Tensor.gelu (Tensor.conv2dBias x0 m.conv2d1Weight m.conv2d1Bias (2, 2) (1, 1) (_height := convValid_downsample cfg.numMelBinsPos) (_width := convValid_downsample (by assumption))))
       #[1, cfg.downsampleHiddenSize, AudioEncoderConfig.melAfterConv1 cfg, t1]
       (by simp +zetaDelta [AudioEncoderConfig.melAfterConv1, convExtent_downsampleOnce cfg.numMelBinsPos, convExtent_downsampleOnce hT])
   let x2 : Tensor { dtype := dtype, device := device, shape := #[1, cfg.downsampleHiddenSize, AudioEncoderConfig.melAfterConv2 cfg, t2] } :=
-    Tensor.reshape (Tensor.gelu (Tensor.conv2dBias x1 m.conv2d2Weight m.conv2d2Bias #[2, 2] #[1, 1]))
+    Tensor.reshape (Tensor.gelu (Tensor.conv2dBias x1 m.conv2d2Weight m.conv2d2Bias (2, 2) (1, 1) (_height := convValid_downsample (downsampleOnce_pos cfg.numMelBinsPos)) (_width := convValid_downsample (downsampleOnce_pos (by assumption)))))
       #[1, cfg.downsampleHiddenSize, AudioEncoderConfig.melAfterConv2 cfg, t2]
       (by simp +zetaDelta [AudioEncoderConfig.melAfterConv1, AudioEncoderConfig.melAfterConv2, AudioEncoderConfig.downsampleTwice, convExtent_downsampleOnce (downsampleOnce_pos cfg.numMelBinsPos), convExtent_downsampleOnce (downsampleOnce_pos hT)])
   let x3 : Tensor { dtype := dtype, device := device, shape := #[1, cfg.downsampleHiddenSize, AudioEncoderConfig.melAfterConv3 cfg, t3] } :=
-    Tensor.reshape (Tensor.gelu (Tensor.conv2dBias x2 m.conv2d3Weight m.conv2d3Bias #[2, 2] #[1, 1]))
+    Tensor.reshape (Tensor.gelu (Tensor.conv2dBias x2 m.conv2d3Weight m.conv2d3Bias (2, 2) (1, 1) (_height := convValid_downsample (downsampleOnce_pos (downsampleOnce_pos cfg.numMelBinsPos))) (_width := convValid_downsample (downsampleOnce_pos (downsampleOnce_pos (by assumption))))))
       #[1, cfg.downsampleHiddenSize, AudioEncoderConfig.melAfterConv3 cfg, t3]
       (by simp +zetaDelta [AudioEncoderConfig.melAfterConv2, AudioEncoderConfig.melAfterConv3, AudioEncoderConfig.framesAfterConv3, AudioEncoderConfig.downsampleTwice, AudioEncoderConfig.downsampleThrice, convExtent_downsampleOnce (downsampleOnce_pos (downsampleOnce_pos cfg.numMelBinsPos)), convExtent_downsampleOnce (downsampleOnce_pos (downsampleOnce_pos hT))])
   let x3t : Tensor { dtype := dtype, device := device, shape := #[1, t3, cfg.downsampleHiddenSize, AudioEncoderConfig.melAfterConv3 cfg] } :=
@@ -558,15 +562,15 @@ private def forwardWith {M : Type → Type} [Monad M] {batch frames : Nat}
   let x0 : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.numMelBins, frames] } := Tensor.reshape inputFeatures #[batch, 1, cfg.numMelBins, frames]
 
   let x1 : Tensor { dtype := dtype, device := device, shape := #[batch, cfg.downsampleHiddenSize, AudioEncoderConfig.melAfterConv1 cfg, t1] } :=
-    Tensor.reshape (Tensor.gelu (Tensor.conv2dBias x0 m.conv2d1Weight m.conv2d1Bias #[2, 2] #[1, 1]))
+    Tensor.reshape (Tensor.gelu (Tensor.conv2dBias x0 m.conv2d1Weight m.conv2d1Bias (2, 2) (1, 1) (_height := convValid_downsample cfg.numMelBinsPos) (_width := convValid_downsample (by assumption))))
       #[batch, cfg.downsampleHiddenSize, AudioEncoderConfig.melAfterConv1 cfg, t1]
       (by simp +zetaDelta [AudioEncoderConfig.melAfterConv1, convExtent_downsampleOnce cfg.numMelBinsPos, convExtent_downsampleOnce hf])
   let x2 : Tensor { dtype := dtype, device := device, shape := #[batch, cfg.downsampleHiddenSize, AudioEncoderConfig.melAfterConv2 cfg, t2] } :=
-    Tensor.reshape (Tensor.gelu (Tensor.conv2dBias x1 m.conv2d2Weight m.conv2d2Bias #[2, 2] #[1, 1]))
+    Tensor.reshape (Tensor.gelu (Tensor.conv2dBias x1 m.conv2d2Weight m.conv2d2Bias (2, 2) (1, 1) (_height := convValid_downsample (downsampleOnce_pos cfg.numMelBinsPos)) (_width := convValid_downsample (downsampleOnce_pos (by assumption)))))
       #[batch, cfg.downsampleHiddenSize, AudioEncoderConfig.melAfterConv2 cfg, t2]
       (by simp +zetaDelta [AudioEncoderConfig.melAfterConv1, AudioEncoderConfig.melAfterConv2, AudioEncoderConfig.downsampleTwice, convExtent_downsampleOnce (downsampleOnce_pos cfg.numMelBinsPos), convExtent_downsampleOnce (downsampleOnce_pos hf)])
   let x3 : Tensor { dtype := dtype, device := device, shape := #[batch, cfg.downsampleHiddenSize, AudioEncoderConfig.melAfterConv3 cfg, t3] } :=
-    Tensor.reshape (Tensor.gelu (Tensor.conv2dBias x2 m.conv2d3Weight m.conv2d3Bias #[2, 2] #[1, 1]))
+    Tensor.reshape (Tensor.gelu (Tensor.conv2dBias x2 m.conv2d3Weight m.conv2d3Bias (2, 2) (1, 1) (_height := convValid_downsample (downsampleOnce_pos (downsampleOnce_pos cfg.numMelBinsPos))) (_width := convValid_downsample (downsampleOnce_pos (downsampleOnce_pos (by assumption))))))
       #[batch, cfg.downsampleHiddenSize, AudioEncoderConfig.melAfterConv3 cfg, t3]
       (by simp +zetaDelta [AudioEncoderConfig.melAfterConv2, AudioEncoderConfig.melAfterConv3, AudioEncoderConfig.framesAfterConv3, AudioEncoderConfig.downsampleTwice, AudioEncoderConfig.downsampleThrice, convExtent_downsampleOnce (downsampleOnce_pos (downsampleOnce_pos cfg.numMelBinsPos)), convExtent_downsampleOnce (downsampleOnce_pos (downsampleOnce_pos hf))])
 

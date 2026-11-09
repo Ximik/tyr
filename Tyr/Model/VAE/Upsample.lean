@@ -13,6 +13,7 @@ import Tyr.Model.VAE.ResnetBlock
 namespace torch.vae
 
 variable {device : Device} {dtype : DType}
+variable [DType.RealFloating dtype]
 /-- Upsampling block: 2× nearest-neighbor upsample + 3×3 conv -/
 structure Upsample (channels : Nat) (dtype : DType := .Float32) where
   conv : Conv2dParams (device := device) (dtype := dtype) channels channels 3 1
@@ -39,7 +40,7 @@ def forward {batch channels height width : Nat}
   let x_up := Tensor.reshape x_up #[batch, channels, height * 2, width * 2]
 
   -- 3×3 conv with padding=1 to maintain size
-  let out := Tensor.conv2dBias x_up up.conv.weight up.conv.bias #[1, 1] #[1, 1]
+  let out := Tensor.conv2dBias x_up up.conv.weight up.conv.bias (1, 1) (1, 1)
   Tensor.reshape out #[batch, channels, height * 2, width * 2]
     (by simp [Tensor.convExtent_same (by omega : 0 < height * 2) (by decide : 2 * 1 + 1 = 3),
       Tensor.convExtent_same (by omega : 0 < width * 2) (by decide : 2 * 1 + 1 = 3)])
@@ -65,10 +66,11 @@ def init (channels : Nat) (device : Device := .CPU) (dtype : DType := .Float32) 
 def forward {batch channels height width : Nat}
     (down : Downsample (device := device) (dtype := dtype) channels)
     (x : Tensor { dtype := dtype, device := device, shape := #[batch, channels, height, width] })
+    (hh : 0 < height) (hw : 0 < width)
     : Tensor { dtype := dtype, device := device, shape := #[batch, channels, Tensor.convExtent height 3 2 1 1, Tensor.convExtent width 3 2 1 1] } :=
   -- Pad input for proper strided conv
   -- Note: In VAE encoder, asymmetric padding may be needed
-  let out := Tensor.conv2dBias x down.conv.weight (Tensor.castLike down.conv.weight (Tensor.zeros #[channels] false down.conv.weight.device)) #[2, 2] #[1, 1]
+  let out := Tensor.conv2dBias x down.conv.weight (Tensor.castLike down.conv.weight (Tensor.zeros #[channels] false down.conv.weight.device)) (2, 2) (1, 1)
   Tensor.reshape out #[batch, channels, Tensor.convExtent height 3 2 1 1, Tensor.convExtent width 3 2 1 1] (by simp)
 
 end Downsample

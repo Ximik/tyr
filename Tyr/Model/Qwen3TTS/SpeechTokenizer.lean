@@ -458,7 +458,7 @@ private def causalConv1d {batch inC outC frames kernel : Nat}
   let xPad : Tensor { shape := #[batch, inC, frames + leftPad], dtype := dtypes.compute.val, device := device } :=
     Tensor.reshape (Tensor.cat left x 2) #[batch, inC, frames + leftPad] (by simp [Nat.add_comm])
   let y0 : Tensor { shape := #[batch, outC, frames], dtype := dtypes.compute.val, device := device } :=
-    Tensor.reshape (Tensor.conv1d xPad weight 1 0 dilation) #[batch, outC, frames]
+    Tensor.reshape (Tensor.conv1d! xPad weight 1 0 dilation) #[batch, outC, frames]
       (by simp only [leftPad]; congr 2; simp; omega)
   addBias3d y0 bias
 
@@ -472,7 +472,7 @@ private def causalDepthwiseConv1d {batch channels frames : Nat}
   let xPad : Tensor { shape := #[batch, channels, frames + 6], dtype := dtypes.compute.val, device := device } :=
     Tensor.reshape (Tensor.cat left x 2) #[batch, channels, frames + 6] (by simp [Nat.add_comm])
   let y : Tensor { shape := #[batch, channels, frames], dtype := dtypes.compute.val, device := device } :=
-    Tensor.reshape (Tensor.conv1dGroups xPad weight bias 1 0 1 channels) #[batch, channels, frames]
+    Tensor.reshape (Tensor.conv1dGroups! xPad weight bias 1 0 1 channels) #[batch, channels, frames]
       (by simp [Tensor.convExtent, Nat.sub_add_cancel hf])
   y
 
@@ -484,7 +484,7 @@ private def causalTransConv1d {batch inC outC frames kernel stride rightPad : Na
     : Tensor { shape := #[batch, outC, ((frames - 1) * stride + kernel) - rightPad], dtype := dtypes.compute.val, device := device } :=
   let outLen : Nat := (frames - 1) * stride + kernel
   let y0 : Tensor { shape := #[batch, outC, outLen], dtype := dtypes.compute.val, device := device } :=
-    Tensor.reshape (Tensor.convTranspose1d x weight bias stride 0 0 1) #[batch, outC, outLen]
+    Tensor.reshape (Tensor.convTranspose1d! x weight bias stride 0 0 1) #[batch, outC, outLen]
       (by simp only [outLen]; simp [Nat.add_assoc, Nat.sub_add_cancel hk])
   Tensor.sliceChecked y0 2 0 (outLen - rightPad) #[batch, outC, outLen - rightPad]
 

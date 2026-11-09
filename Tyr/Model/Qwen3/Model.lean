@@ -86,11 +86,11 @@ def forwardEmbeds {batch seq : Nat}
     match attnMask with
     | some mask =>
       m.model.layers.foldl
-        (fun h layer => layer.forwardMasked h cos sin mask true)
+        (fun h layer => layer.forwardMasked cfg.headsValid.2.2 h cos sin mask true)
         inputsEmbeds
     | none =>
       m.model.layers.foldl
-        (fun h layer => layer.forward h cos sin true)
+        (fun h layer => layer.forward cfg.headsValid.2.2 h cos sin true)
         inputsEmbeds
   let hidden := m.model.norm.forward3d hidden
   Tensor.linear3d hidden m.lmHead
@@ -170,7 +170,7 @@ private def decodeStepFromEmbedWithCache {batch maxLen : Nat}
       match nextCaches[i]? with
       | some c => pure c
       | none => throw <| IO.userError s!"missing Qwen3 KV cache at index {i}"
-    let (hNext, cNext) := layer.forwardStep hidden cos sin cache position hpos
+    let (hNext, cNext) := layer.forwardStep cfg.headsValid.2.2 hidden cos sin cache position hpos
     hidden := hNext
     nextCaches := nextCaches.set! i cNext
 

@@ -52,6 +52,11 @@ open torch
   LeanTest.assertEqual (← sampled.toFloatArray) (Array.replicate 16 (-7.0))
     "Lean Int64 bounds cross the C ABI with their signed bit pattern intact"
 
+example (_q : Tensor ⟨#[1, 1, 2, 2], .Float32, .CPU⟩) (_ints : Tensor ⟨#[1, 1, 2, 2], .Int64, .CPU⟩) : True := by
+  have _ := Tensor.flashAttention _q _q _q
+  fail_if_success have _ := Tensor.flashAttention _ints _ints _ints
+  trivial
+
 @[test] def testTypedFlashAttentionValuesAndDropoutErrors : IO Unit := do
   let q := Tensor.zeros #[1, 1, 2, 2]
   let v := (Tensor.fromFloatArray #[2, 4, 6, 8]).reshape #[1, 1, 2, 2]

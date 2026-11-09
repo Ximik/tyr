@@ -239,7 +239,7 @@ def forward {patchRows patchCols : Nat}
   let kh : Tensor { device := device, shape := #[1, cfg.num_key_value_heads, tokens, cfg.head_dim], dtype := dtype } := transposeAttention k3
   let vh : Tensor { device := device, shape := #[1, cfg.num_key_value_heads, tokens, cfg.head_dim], dtype := dtype } := transposeAttention v2
   let attn : Tensor { device := device, shape := #[1, cfg.num_attention_heads, tokens, cfg.head_dim], dtype := dtype } :=
-    Tensor.attentionGQA qh kh vh false true
+    Tensor.attentionGQA qh kh vh false true (_heads := .ofDvd cfg.kvHeadsDivide)
   let out : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype } :=
     Tensor.reshape (transposeAttention attn) #[tokens, cfg.hidden_size] (by simp [Nat.mul_assoc, cfg.queryHeadsSplit])
   m.o_proj.forward2d out

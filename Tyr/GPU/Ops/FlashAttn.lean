@@ -89,7 +89,7 @@ def dispatchRoute
     This routes through a torch-registered op (`tyr::flash_attn`) so autograd remains native.
     The indexed adapter checks that native output metadata matches the query. -/
 @[inline] def flashAttn
-    {batch nHead nKvHead qSeq kvSeq headDim : Nat} {d : DType}
+    {batch nHead nKvHead qSeq kvSeq headDim : Nat} {d : DType} [DType.RealFloating d]
     (query : Query (device := device) batch nHead qSeq headDim d)
     (key : KeyValue (device := device) batch nKvHead kvSeq headDim d)
     (value : KeyValue (device := device) batch nKvHead kvSeq headDim d)
@@ -97,8 +97,9 @@ def dispatchRoute
     (isCausal : Bool := false)
     (scale : Option Float := none)
     (enableGqa : Bool := false)
+    (_heads : Tensor.AttentionHeads nHead nKvHead enableGqa := by attention_heads)
     : Query (device := device) batch nHead qSeq headDim d :=
-  Tensor.flashAttention query key value enableGqa attnMask isCausal scale
+  Tensor.flashAttention query key value enableGqa attnMask isCausal scale (_heads := _heads)
 
 /-- Effectful FlashAttention/SDPA. Training uses the configured dropout;
 evaluation passes zero dropout to the native IO operation. -/
@@ -117,7 +118,7 @@ evaluation passes zero dropout to the native IO operation. -/
 
 /-- Alias matching PyTorch naming. -/
 @[inline] def scaledDotProductAttention
-    {batch nHead nKvHead qSeq kvSeq headDim : Nat} {d : DType}
+    {batch nHead nKvHead qSeq kvSeq headDim : Nat} {d : DType} [DType.RealFloating d]
     (query : Query (device := device) batch nHead qSeq headDim d)
     (key : KeyValue (device := device) batch nKvHead kvSeq headDim d)
     (value : KeyValue (device := device) batch nKvHead kvSeq headDim d)
@@ -125,8 +126,9 @@ evaluation passes zero dropout to the native IO operation. -/
     (isCausal : Bool := false)
     (scale : Option Float := none)
     (enableGqa : Bool := false)
+    (_heads : Tensor.AttentionHeads nHead nKvHead enableGqa := by attention_heads)
     : Query (device := device) batch nHead qSeq headDim d :=
-  flashAttn query key value attnMask isCausal scale enableGqa
+  flashAttn query key value attnMask isCausal scale enableGqa (_heads := _heads)
 
 /-- Effectful alias matching PyTorch naming, with explicit training mode. -/
 @[inline] def scaledDotProductAttentionIO
@@ -144,7 +146,7 @@ evaluation passes zero dropout to the native IO operation. -/
 
 /-- Typed API returning both the dispatch route and the output. -/
 def flashAttnWithRoute
-    {batch nHead nKvHead qSeq kvSeq headDim : Nat} {d : DType}
+    {batch nHead nKvHead qSeq kvSeq headDim : Nat} {d : DType} [DType.RealFloating d]
     (query : Query (device := device) batch nHead qSeq headDim d)
     (key : KeyValue (device := device) batch nKvHead kvSeq headDim d)
     (value : KeyValue (device := device) batch nKvHead kvSeq headDim d)
@@ -152,9 +154,10 @@ def flashAttnWithRoute
     (isCausal : Bool := false)
     (scale : Option Float := none)
     (enableGqa : Bool := false)
+    (_heads : Tensor.AttentionHeads nHead nKvHead enableGqa := by attention_heads)
     : DispatchRoute × Query (device := device) batch nHead qSeq headDim d :=
   let route := dispatchRoute query key value attnMask 0.0 isCausal scale enableGqa
-  let out := flashAttn query key value attnMask isCausal scale enableGqa
+  let out := flashAttn query key value attnMask isCausal scale enableGqa (_heads := _heads)
   (route, out)
 
 /-- Effectful attention and its route. The descriptor uses the same effective

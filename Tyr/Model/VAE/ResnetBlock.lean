@@ -71,9 +71,11 @@ def init (in_ch out_ch kernel_size : Nat) (padding : Nat := 0) (device : Device 
 def forward {batch in_ch out_ch kernel_size padding height width : Nat}
     (conv : Conv2dParams (device := device) (dtype := dtype) in_ch out_ch kernel_size padding)
     (x : Tensor { dtype := dtype, device := device, shape := #[batch, in_ch, height, width] })
+    (_height : Tensor.ConvValid height kernel_size 1 padding 1 := by conv_valid)
+    (_width : Tensor.ConvValid width kernel_size 1 padding 1 := by conv_valid)
     : Tensor { dtype := dtype, device := device, shape := #[batch, out_ch, Tensor.convExtent height kernel_size 1 padding 1,
         Tensor.convExtent width kernel_size 1 padding 1] } :=
-  Tensor.conv2dBias x conv.weight (Tensor.castLike conv.weight (Tensor.zeros #[out_ch] false conv.weight.device)) #[1, 1] #[padding, padding]
+  Tensor.conv2dBias x conv.weight (Tensor.castLike conv.weight (Tensor.zeros #[out_ch] false conv.weight.device)) (1, 1) (padding, padding)
 
 end Conv2dParams
 
@@ -166,17 +168,17 @@ def forward {batch in_ch out_ch height width : Nat}
   -- Main path
   let h := block.norm1.forward x
   let h := swish h
-  let h := Tensor.conv2dBias h block.conv1.weight block.conv1.bias #[1, 1] #[1, 1]
+  let h := Tensor.conv2dBias h block.conv1.weight block.conv1.bias (1, 1) (1, 1)
   let h := Tensor.reshape h #[batch, out_ch, height, width] (by simp [Tensor.convExtent_same hh (by decide : 2 * 1 + 1 = 3), Tensor.convExtent_same hw (by decide : 2 * 1 + 1 = 3)])
 
   let h := block.norm2.forward h
   let h := swish h
-  let h := Tensor.conv2dBias h block.conv2.weight block.conv2.bias #[1, 1] #[1, 1]
+  let h := Tensor.conv2dBias h block.conv2.weight block.conv2.bias (1, 1) (1, 1)
   let h := Tensor.reshape h #[batch, out_ch, height, width] (by simp [Tensor.convExtent_same hh (by decide : 2 * 1 + 1 = 3), Tensor.convExtent_same hw (by decide : 2 * 1 + 1 = 3)])
 
   -- Skip connection
   let skip := match block.nin_shortcut with
-    | .conv conv => Tensor.reshape (Tensor.conv2dBias x conv.weight conv.bias #[1, 1] #[0, 0]) #[batch, out_ch, height, width]
+    | .conv conv => Tensor.reshape (Tensor.conv2dBias x conv.weight conv.bias (1, 1) (0, 0)) #[batch, out_ch, height, width]
         (by simp [Tensor.convExtent_same hh (by decide : 2 * 0 + 1 = 1), Tensor.convExtent_same hw (by decide : 2 * 0 + 1 = 1)])
     | .identity h => Tensor.reshape x #[batch, out_ch, height, width] (by simp [h])
 

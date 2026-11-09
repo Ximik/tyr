@@ -54,6 +54,7 @@ def init (hidden_size num_heads num_kv_heads head_dim intermediate_size : Nat)
     Pre-norm: x + attn(norm1(x)) + mlp(norm2(x + attn(...))) -/
 def forward {batch seq hidden_size num_heads num_kv_heads head_dim intermediate_size : Nat}
     (layer : QwenLayer (device := device) hidden_size num_heads num_kv_heads head_dim intermediate_size dtype)
+    (hkv : num_kv_heads ∣ num_heads)
     (x : Tensor { device := device, shape := #[batch, seq, hidden_size], dtype := dtype })
     (cos : Tensor { device := device, shape := #[seq, head_dim / 2], dtype := .Float32 })
     (sin : Tensor { device := device, shape := #[seq, head_dim / 2], dtype := .Float32 })
@@ -62,7 +63,7 @@ def forward {batch seq hidden_size num_heads num_kv_heads head_dim intermediate_
   -- Pre-norm attention
   let residual := x
   let x : Tensor { device := device, shape := #[batch, seq, hidden_size], dtype := dtype } := layer.input_layernorm.forward3dPreserving x
-  let x := layer.self_attn.forward x cos sin is_causal
+  let x := layer.self_attn.forward hkv x cos sin is_causal
   let x : Tensor { device := device, shape := #[batch, seq, hidden_size], dtype := dtype } := Tensor.add residual x
 
   -- Pre-norm MLP
@@ -75,6 +76,7 @@ def forward {batch seq hidden_size num_heads num_kv_heads head_dim intermediate_
     Input/output: `[batch, 1, hidden_size]`. -/
 def forwardStep {batch hidden_size num_heads num_kv_heads head_dim intermediate_size cap : Nat}
     (layer : QwenLayer (device := device) hidden_size num_heads num_kv_heads head_dim intermediate_size dtype)
+    (hkv : num_kv_heads ∣ num_heads)
     (x : Tensor { device := device, shape := #[batch, 1, hidden_size], dtype := dtype })
     (cos : Tensor { device := device, shape := #[1, head_dim / 2], dtype := .Float32 })
     (sin : Tensor { device := device, shape := #[1, head_dim / 2], dtype := .Float32 })
@@ -84,7 +86,7 @@ def forwardStep {batch hidden_size num_heads num_kv_heads head_dim intermediate_
   -- Pre-norm attention.
   let residual1 := x
   let x1 : Tensor { device := device, shape := #[batch, 1, hidden_size], dtype := dtype } := layer.input_layernorm.forward3dPreserving x
-  let (attnOut, cache') := layer.self_attn.forwardStep x1 cos sin cache pos hpos
+  let (attnOut, cache') := layer.self_attn.forwardStep hkv x1 cos sin cache pos hpos
   let h1 : Tensor { device := device, shape := #[batch, 1, hidden_size], dtype := dtype } := Tensor.add residual1 attnOut
 
   -- Pre-norm MLP.
@@ -96,6 +98,7 @@ def forwardStep {batch hidden_size num_heads num_kv_heads head_dim intermediate_
 def forwardMasked {batch seq hidden_size num_heads num_kv_heads head_dim intermediate_size : Nat}
     {maskDtype : DType}
     (layer : QwenLayer (device := device) hidden_size num_heads num_kv_heads head_dim intermediate_size dtype)
+    (hkv : num_kv_heads ∣ num_heads)
     (x : Tensor { device := device, shape := #[batch, seq, hidden_size], dtype := dtype })
     (cos : Tensor { device := device, shape := #[seq, head_dim / 2], dtype := .Float32 })
     (sin : Tensor { device := device, shape := #[seq, head_dim / 2], dtype := .Float32 })
@@ -105,7 +108,7 @@ def forwardMasked {batch seq hidden_size num_heads num_kv_heads head_dim interme
   -- Pre-norm attention
   let residual := x
   let x : Tensor { device := device, shape := #[batch, seq, hidden_size], dtype := dtype } := layer.input_layernorm.forward3dPreserving x
-  let x := layer.self_attn.forwardMasked x cos sin attn_mask is_causal
+  let x := layer.self_attn.forwardMasked hkv x cos sin attn_mask is_causal
   let x : Tensor { device := device, shape := #[batch, seq, hidden_size], dtype := dtype } := Tensor.add residual x
 
   -- Pre-norm MLP

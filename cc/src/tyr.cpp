@@ -1075,15 +1075,6 @@ lean_object* lean_torch_conv2d_bias(
   return fromTorchTensor(output_);
 }
 
-lean_object* lean_torch_conv2d_bias_checked(
-    b_lean_obj_arg input, b_lean_obj_arg weight, b_lean_obj_arg bias,
-    lean_obj_arg stride, lean_obj_arg padding, lean_obj_arg dilation) {
-  return tyr::checkedCall("conv2dBias", [&] {
-    return lean_torch_conv2d_bias(
-      input, weight, bias, stride, padding, dilation);
-  });
-}
-
 lean_object* lean_torch_conv1d(
   b_lean_obj_arg input,
   b_lean_obj_arg weight,
@@ -1101,14 +1092,6 @@ lean_object* lean_torch_conv1d(
     .dilation(dilation);
   auto output_ = torch::nn::functional::conv1d(input_, weight_, options);
   return fromTorchTensor(output_);
-}
-
-lean_object* lean_torch_conv1d_checked(
-    b_lean_obj_arg input, b_lean_obj_arg weight,
-    b_lean_obj_arg stride_obj, b_lean_obj_arg padding_obj, b_lean_obj_arg dilation_obj) {
-  return tyr::checkedCall("conv1d", [&] {
-    return lean_torch_conv1d(input, weight, stride_obj, padding_obj, dilation_obj);
-  });
 }
 
 lean_object* lean_torch_conv1d_group_bias(
@@ -1136,15 +1119,6 @@ lean_object* lean_torch_conv1d_group_bias(
     static_cast<int64_t>(groups)
   );
   return fromTorchTensor(output_);
-}
-
-lean_object* lean_torch_conv1d_group_bias_checked(
-    b_lean_obj_arg input, b_lean_obj_arg weight, b_lean_obj_arg bias,
-    b_lean_obj_arg stride_obj, b_lean_obj_arg padding_obj, b_lean_obj_arg dilation_obj, b_lean_obj_arg groups_obj) {
-  return tyr::checkedCall("conv1dGroups", [&] {
-    return lean_torch_conv1d_group_bias(
-      input, weight, bias, stride_obj, padding_obj, dilation_obj, groups_obj);
-  });
 }
 
 lean_object* lean_torch_avg_pool2d(
@@ -3672,15 +3646,6 @@ lean_object* lean_torch_conv_transpose1d_bias(
   return fromTorchTensor(result_);
 }
 
-lean_object* lean_torch_conv_transpose1d_bias_checked(
-    b_lean_obj_arg input, b_lean_obj_arg weight, b_lean_obj_arg bias,
-    b_lean_obj_arg stride_obj, b_lean_obj_arg padding_obj, b_lean_obj_arg output_padding_obj, b_lean_obj_arg dilation_obj) {
-  return tyr::checkedCall("convTranspose1d", [&] {
-    return lean_torch_conv_transpose1d_bias(
-      input, weight, bias, stride_obj, padding_obj, output_padding_obj, dilation_obj);
-  });
-}
-
 // Gather along dimension
 lean_object* lean_torch_gather(
     b_lean_obj_arg input, b_lean_obj_arg dim_obj, b_lean_obj_arg indices) {
@@ -4100,15 +4065,6 @@ lean_object* lean_torch_matrix_log_checked(b_lean_obj_arg input) {
 
 lean_object* lean_torch_maximum(b_lean_obj_arg a, b_lean_obj_arg b) {
   return fromTorchTensor(torch::maximum(borrowTensor(a), borrowTensor(b)));
-}
-
-lean_object* lean_torch_logical_and_checked(b_lean_obj_arg a, b_lean_obj_arg b) {
-  return tyr::checkedCall("logicalAnd", [&] { return lean_torch_logical_and(a, b); });
-}
-
-lean_object* lean_torch_cat2_checked(
-    b_lean_obj_arg a, b_lean_obj_arg b, b_lean_obj_arg dim) {
-  return tyr::checkedCall("cat", [&] { return lean_torch_cat2(a, b, dim); });
 }
 
 }

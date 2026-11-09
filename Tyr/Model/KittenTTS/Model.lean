@@ -198,7 +198,7 @@ def forward {batch frames inC outC kernel stride padding dilation : Nat}
     (x : Tensor { shape := #[batch, inC, frames], dtype := .Float32, device := device })
     : Tensor { shape := #[batch, outC, convOutputSize frames kernel stride padding dilation], dtype := .Float32, device := device } :=
   let y0 : Tensor { shape := #[batch, outC, convOutputSize frames kernel stride padding dilation], dtype := .Float32, device := device } :=
-    Tensor.reshape (Tensor.conv1d x m.weight stride padding dilation) #[batch, outC, convOutputSize frames kernel stride padding dilation]
+    Tensor.reshape (Tensor.conv1d! x m.weight stride padding dilation) #[batch, outC, convOutputSize frames kernel stride padding dilation]
       (by simp)
   addBias3d y0 m.bias
 
@@ -229,7 +229,7 @@ def forward {batch frames channels kernel stride padding dilation : Nat}
     (x : Tensor { shape := #[batch, channels, frames], dtype := .Float32, device := device })
     : Tensor { shape := #[batch, channels, convOutputSize frames kernel stride padding dilation], dtype := .Float32, device := device } :=
   Tensor.reshape
-    (Tensor.conv1dGroups x m.weight m.bias stride padding dilation channels)
+    (Tensor.conv1dGroups! x m.weight m.bias stride padding dilation channels)
     #[batch, channels, convOutputSize frames kernel stride padding dilation]
     (by simp [Tensor.convExtent])
 
@@ -268,7 +268,7 @@ def forward {batch frames channels kernel stride padding outputPadding dilation 
     let wc : Tensor { shape := #[1, 1, kernel], dtype := .Float32, device := device } := sliceTensor m.weight 0 ci 1
     let bc : Tensor { shape := #[1], dtype := .Float32, device := device } := sliceTensor m.bias 0 ci 1
     let yc : Tensor { shape := #[batch, 1, outFrames], dtype := .Float32, device := device } :=
-      Tensor.reshape (Tensor.convTranspose1d xc wc bc stride padding outputPadding dilation) #[batch, 1, outFrames]
+      Tensor.reshape (Tensor.convTranspose1d! xc wc bc stride padding outputPadding dilation) #[batch, 1, outFrames]
         (by simp [outFrames])
     parts := parts.push (Tensor.packShape yc)
   Tensor.catManyChecked parts 1 #[batch, channels, outFrames]
@@ -331,7 +331,7 @@ def forward {batch frames inC outC kernel stride padding dilation : Nat}
     : Tensor { shape := #[batch, outC, convOutputSize frames kernel stride padding dilation], dtype := .Float32, device := device } :=
   let weight := applyWeightNormConv1d m.weightV m.weightG
   let y0 : Tensor { shape := #[batch, outC, convOutputSize frames kernel stride padding dilation], dtype := .Float32, device := device } :=
-    Tensor.reshape (Tensor.conv1d x weight stride padding dilation) #[batch, outC, convOutputSize frames kernel stride padding dilation]
+    Tensor.reshape (Tensor.conv1d! x weight stride padding dilation) #[batch, outC, convOutputSize frames kernel stride padding dilation]
       (by simp)
   addBias3d y0 m.bias
 
@@ -367,7 +367,7 @@ def forward {batch frames inC outC kernel stride padding outputPadding dilation 
     : Tensor { shape := #[batch, outC, convTransposeOutputSize frames kernel stride padding outputPadding dilation], dtype := .Float32, device := device } :=
   let weight := applyWeightNormTransConv1d m.weightV m.weightG
   Tensor.reshape
-    (Tensor.convTranspose1d x weight m.bias stride padding outputPadding dilation)
+    (Tensor.convTranspose1d! x weight m.bias stride padding outputPadding dilation)
     #[batch, outC, convTransposeOutputSize frames kernel stride padding outputPadding dilation]
     (by simp)
 
@@ -409,7 +409,7 @@ def forward {batch frames channels kernel stride padding outputPadding dilation 
     let wc : Tensor { shape := #[1, 1, kernel], dtype := .Float32, device := device } := sliceTensor weight 0 ci 1
     let bc : Tensor { shape := #[1], dtype := .Float32, device := device } := sliceTensor m.bias 0 ci 1
     let yc : Tensor { shape := #[batch, 1, outFrames], dtype := .Float32, device := device } :=
-      Tensor.reshape (Tensor.convTranspose1d xc wc bc stride padding outputPadding dilation) #[batch, 1, outFrames]
+      Tensor.reshape (Tensor.convTranspose1d! xc wc bc stride padding outputPadding dilation) #[batch, 1, outFrames]
         (by simp [outFrames])
     parts := parts.push (Tensor.packShape yc)
   Tensor.catManyChecked parts 1 #[batch, channels, outFrames]

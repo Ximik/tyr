@@ -6,10 +6,8 @@ namespace torch.RawTensor
 @[extern "lean_torch_copy_"] opaque copyInto
     (dst : RawTensor) (src : @& RawTensor) : IO RawTensor
 
-@[extern "lean_torch_conv2d_bias"] opaque conv2dBias
+@[extern "lean_torch_conv2d_bias"] opaque conv2dBias!
     (input weight bias : @& RawTensor) (stride padding dilation : Array Nat) : RawTensor
-@[extern "lean_torch_conv2d_bias_checked"] opaque conv2dBiasChecked
-    (input weight bias : @& RawTensor) (stride padding dilation : Array Nat) : Except String RawTensor
 @[extern "lean_torch_cat_dyn"] opaque catMany (tensors : @& Array RawTensor) (dim : @& Nat) : RawTensor
 @[extern "lean_torch_arange"] opaque arange (start stop step : @& Nat) : RawTensor
 @[extern "lean_torch_tensor_sin"] opaque sin! (t : @& RawTensor) : RawTensor
@@ -62,14 +60,10 @@ namespace torch.RawTensor
 @[extern "lean_torch_lt_scalar"] opaque ltScalar (input : @& RawTensor) (value : Float) : RawTensor
 @[extern "lean_torch_masked_fill"] opaque maskedFill (input mask : @& RawTensor) (value : Float) : RawTensor
 
-@[extern "lean_torch_conv1d_group_bias"] opaque conv1dGroups
+@[extern "lean_torch_conv1d_group_bias"] opaque conv1dGroups!
     (input weight bias : @& RawTensor) (stride padding dilation groups : @& Nat) : RawTensor
-@[extern "lean_torch_conv1d_group_bias_checked"] opaque conv1dGroupsChecked
-    (input weight bias : @& RawTensor) (stride padding dilation groups : @& Nat) : Except String RawTensor
-@[extern "lean_torch_conv_transpose1d_bias"] opaque convTranspose1d
+@[extern "lean_torch_conv_transpose1d_bias"] opaque convTranspose1d!
     (input weight bias : @& RawTensor) (stride padding outputPadding dilation : @& Nat) : RawTensor
-@[extern "lean_torch_conv_transpose1d_bias_checked"] opaque convTranspose1dChecked
-    (input weight bias : @& RawTensor) (stride padding outputPadding dilation : @& Nat) : Except String RawTensor
 @[extern "lean_torch_sdpa_gqa_window"] opaque attentionWindow!
     (q k v : @& RawTensor) (causal gqa : Bool) (window : @& Nat) : RawTensor
 @[extern "lean_torch_sdpa_gqa_window_io"] opaque attentionWindowIO

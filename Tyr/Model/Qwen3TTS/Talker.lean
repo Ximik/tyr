@@ -139,11 +139,11 @@ def forwardEmbeds {batch seq : Nat} (cfg : TalkerConfig)
   let hidden := match attnMask with
     | some mask =>
       m.layers.foldl
-        (fun h layer => layer.forwardMasked h cos sin mask true)
+        (fun h layer => layer.forwardMasked cfg.headsValid.2.2 h cos sin mask true)
         inputsEmbeds
     | none =>
       m.layers.foldl
-        (fun h layer => layer.forward h cos sin true)
+        (fun h layer => layer.forward cfg.headsValid.2.2 h cos sin true)
         inputsEmbeds
   m.norm.forward3d hidden
 
@@ -239,11 +239,11 @@ def forwardHidden {batch seq : Nat} (cfg : TalkerConfig)
   let hidden := match attnMask with
     | some mask =>
       m.layers.foldl
-        (fun h layer => layer.forwardMasked h cos sin mask true)
+        (fun h layer => layer.forwardMasked cfg.codePredictorConfig.headsValid.2.2 h cos sin mask true)
         hidden0
     | none =>
       m.layers.foldl
-        (fun h layer => layer.forward h cos sin true)
+        (fun h layer => layer.forward cfg.codePredictorConfig.headsValid.2.2 h cos sin true)
         hidden0
   m.norm.forward3d hidden
 
@@ -460,7 +460,7 @@ private def generateFrameFromLastHidden {batch : Nat} (cfg : TalkerConfig)
             match caches[i]? with
             | some cache => pure cache
             | none => throw <| IO.userError s!"missing code predictor cache at index {i}"
-          let (h', cache') := qwen.QwenLayer.forwardStep layer h cos sin cache pos hpos
+          let (h', cache') := qwen.QwenLayer.forwardStep layer cpCfg.headsValid.2.2 h cos sin cache pos hpos
           h := h'
           caches := caches.set! i cache'
         pure (m.codePredictor.norm.forward3d h, caches)
@@ -647,7 +647,7 @@ def streamCodes {batch seq : Nat} (cfg : TalkerConfig)
           match caches[i]? with
           | some cache => pure cache
           | none => throw <| IO.userError s!"missing talker cache at index {i}"
-        let (h', cache') := qwen.QwenLayer.forwardStep layer h cos sin cache pos
+        let (h', cache') := qwen.QwenLayer.forwardStep layer cfg.headsValid.2.2 h cos sin cache pos
           (by have := hpos.upper; simp at this; show pos < seq + maxFrames + 1; omega)
         h := h'
         caches := caches.set! i cache'
@@ -721,7 +721,7 @@ def streamCodes {batch seq : Nat} (cfg : TalkerConfig)
           match caches[i]? with
           | some cache => pure cache
           | none => throw <| IO.userError s!"missing talker cache at index {i}"
-        let (h', cache') := qwen.QwenLayer.forwardStep layer h cos sin cache nextPos
+        let (h', cache') := qwen.QwenLayer.forwardStep layer cfg.headsValid.2.2 h cos sin cache nextPos
           (by have := hstep.upper; simp at this; show seq + step < seq + maxFrames + 1; omega)
         h := h'
         caches := caches.set! i cache'

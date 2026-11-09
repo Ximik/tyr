@@ -50,7 +50,7 @@ private def close {σ τ : StaticSpec} (x : Tensor σ) (y : Tensor τ) (tol : Fl
   let down : Downsample 1 := { conv := {
     weight := (Tensor.ones #[1, 1, 3, 3])
     bias := (Tensor.zeros #[1]) } }
-  let odd := down.forward ((Tensor.ones #[1, 1, 3, 5]))
+  let odd := down.forward ((Tensor.ones #[1, 1, 3, 5])) (by decide) (by decide)
   LeanTest.assertEqual odd.runtimeShape #[1, 1, 2, 3]
   close odd ((Tensor.fromFloatArray #[4, 6, 4, 4, 6, 4]).reshape #[1, 1, 2, 3])
 

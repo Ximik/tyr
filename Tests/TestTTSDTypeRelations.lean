@@ -94,7 +94,7 @@ private def tinyConfig : Qwen3TTSConfig := {
   let cache : qwen.QwenAttention.KVCache (device := .CPU) 1 cfg.numKeyValueHeads cfg.headDim 3 .BFloat16 :=
     qwen.QwenAttention.initKVCache 3 (dtype := .BFloat16)
   let some layer := model.layers[0]? | throw (IO.userError "Expected one test layer")
-  let (output, updated) := layer.forwardStep input cos sin cache 0 (by decide)
+  let (output, updated) := layer.forwardStep (by decide) input cos sin cache 0 (by decide)
   LeanTest.assertEqual output.raw.dtype .BFloat16
   LeanTest.assertEqual updated.kStore.raw.dtype .BFloat16
   LeanTest.assertEqual updated.vStore.raw.dtype .BFloat16

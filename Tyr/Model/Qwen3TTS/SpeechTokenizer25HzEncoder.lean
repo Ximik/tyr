@@ -107,7 +107,7 @@ private def conv1dWithBias {batch inC outC inFrames kernel : Nat}
     (b : Tensor { shape := #[outC], dtype := dtype.val, device := device })
     (stride pad dilation : Nat) :
     Tensor { shape := #[batch, outC, (inFrames + 2 * pad - (dilation * (kernel - 1) + 1)) / stride + 1], dtype := dtype.val, device := device } :=
-  addBias3d (Tensor.conv1d x w stride pad dilation) b
+  addBias3d (Tensor.conv1d! x w stride pad dilation) b
 
 private def affine3d {batch seq inDim outDim : Nat}
     (x : Tensor { shape := #[batch, seq, inDim], dtype := dtype.val, device := device })
