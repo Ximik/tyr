@@ -239,8 +239,6 @@ def testTypedModelTraversalAndRebuildPreserveFullSpec : IO Unit := do
   LeanTest.assertTrue (first.payload.1.device == .CPU)
     "Flattening must retain the pinned device policy."
   let rebuilt ← unwrapOrFail (TensorStructFlatten.rebuildFrom original leaves)
-  let _ ← unwrapOrFail rebuilt.weight.validate
-  let _ ← unwrapOrFail rebuilt.indices.validate
   LeanTest.assertTrue (leavesAllclose leaves (TensorStructFlatten.flatten rebuilt))
     "Typed heterogeneous parameters must round-trip through flatten/rebuild."
 

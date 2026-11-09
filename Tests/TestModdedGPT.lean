@@ -83,7 +83,6 @@ where
       LeanTest.assertEqual result.runtimeShape #[2, 2] operation
       LeanTest.assertEqual result.actualSpec.dtype dtype operation
       LeanTest.assertTrue (result.device == .CPU) s!"{operation}: result must stay on CPU"
-      LeanTest.assertTrue result.validate.isOk s!"{operation}: static spec must match native metadata"
 
 /-! ## 2. Pure Function Tests (Schedules) -/
 

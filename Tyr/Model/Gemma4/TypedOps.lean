@@ -5,9 +5,6 @@ namespace torch.gemma4
 
 variable {device : Device} {dtype : DType}
 
-private def checked {σ : StaticSpec} (raw : RawTensor) : Tensor σ :=
-  (Tensor.ofRaw! "checked" raw)
-
 def sliceTyped {s : Shape} {d : DType} (x : Tensor { device := device, shape := s, dtype := d })
     (dim : Nat) (start len : Nat) : Tensor { device := device, shape := (s.set! dim len), dtype := d } :=
   x.sliceChecked dim start len (s.set! dim len)
@@ -61,6 +58,6 @@ def zerosFloatOn {s : Shape} (device : Device) : Tensor { device := device, shap
 
 def avgPool2d {b c h w : Nat} (x : Tensor { device := device, shape := #[b, c, h, w], dtype := dtype }) (pool : Nat) :
     Tensor { device := device, shape := #[b, c, h / pool, w / pool], dtype := dtype } :=
-  checked (RawTensor.gemma4AvgPool2d x.raw #[pool, pool] #[pool, pool] #[0, 0])
+  Tensor.ofRaw! "avgPool2d" (RawTensor.gemma4AvgPool2d x.raw #[pool, pool] #[pool, pool] #[0, 0])
 
 end torch.gemma4

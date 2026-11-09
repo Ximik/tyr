@@ -161,14 +161,6 @@ def joinHeads {batch heads seq dim : Nat} {d : DType} {dev : Device}
     (t : Tensor ⟨#[batch, heads, seq, dim], d, dev⟩) : Tensor ⟨#[batch, seq, heads, dim], d, dev⟩ :=
   Tensor.ofRaw! "joinHeads" (RawTensor.joinHeads t.raw)
 
-/-- Dynamic dtype indices still require the actual Q/K/V dtypes to agree. -/
-private def checkAttentionOperands {sq sk sv : StaticSpec}
-    (q : Tensor sq) (k : Tensor sk) (v : Tensor sv) : Except String Unit := do
-  DType.expectedEq q.raw.dtype k.raw.dtype
-  DType.expectedEq q.raw.dtype v.raw.dtype
-  Device.check q.raw.device k.raw.device
-  Device.check q.raw.device v.raw.device
-
 private def attentionCheckIO {α : Type} (operation : String)
     (result : Except String α) : IO α :=
   match result with
@@ -215,7 +207,6 @@ def attentionIO {batch heads seq dim : Nat} {d : DType} {dev : Device}
     (q k v : Tensor ⟨#[batch, heads, seq, dim], d, dev⟩)
     (dropout : Float) (training : Bool) (causal : Bool := true) : IO (Tensor ⟨#[batch, heads, seq, dim], d, dev⟩) := do
   let effective ← attentionCheckIO "attentionIO" (attentionDropout? dropout training)
-  attentionCheckIO "attentionIO" (checkAttentionOperands q k v)
   let raw ← RawTensor.attentionIO
     q.raw k.raw v.raw effective causal
   pure (Tensor.ofRaw! "attentionIO" raw)
@@ -241,7 +232,6 @@ def attentionGQAIO {batch heads kvHeads seq dim : Nat} {d : DType} {dev : Device
     (k v : Tensor ⟨#[batch, kvHeads, seq, dim], d, dev⟩)
     (dropout : Float) (training : Bool) (causal : Bool := true) (gqa : Bool := false) : IO (Tensor ⟨#[batch, heads, seq, dim], d, dev⟩) := do
   let effective ← attentionCheckIO "attentionGQAIO" (attentionDropout? dropout training)
-  attentionCheckIO "attentionGQAIO" (checkAttentionOperands q k v)
   let raw ← RawTensor.attentionGQAIO
     q.raw k.raw v.raw effective causal gqa
   pure (Tensor.ofRaw! "attentionGQAIO" raw)
@@ -270,7 +260,6 @@ def attentionGQAMaskIO {batch heads kvHeads seq dim : Nat} {d dm : DType} {dev :
     (mask : Tensor ⟨#[batch, seq], dm, dev⟩)
     (dropout : Float) (training : Bool) (causal : Bool := true) (gqa : Bool := false) : IO (Tensor ⟨#[batch, heads, seq, dim], d, dev⟩) := do
   let effective ← attentionCheckIO "attentionGQAMaskIO" (attentionDropout? dropout training)
-  attentionCheckIO "attentionGQAMaskIO" (checkAttentionOperands q k v)
   let raw ← RawTensor.attentionGQAMaskIO
     q.raw k.raw v.raw mask.raw effective causal gqa
   pure (Tensor.ofRaw! "attentionGQAMaskIO" raw)
@@ -319,7 +308,6 @@ def attentionGQAQKVIO {batch heads kvHeads qSeq kvSeq dim : Nat} {d : DType} {de
     (k v : Tensor ⟨#[batch, kvHeads, kvSeq, dim], d, dev⟩)
     (dropout : Float) (training : Bool) (causal : Bool := false) (gqa : Bool := false) : IO (Tensor ⟨#[batch, heads, qSeq, dim], d, dev⟩) := do
   let effective ← attentionCheckIO "attentionGQAQKVIO" (attentionDropout? dropout training)
-  attentionCheckIO "attentionGQAQKVIO" (checkAttentionOperands q k v)
   let raw ← RawTensor.attentionGQAQKVIO
     q.raw k.raw v.raw effective causal gqa
   pure (Tensor.ofRaw! "attentionGQAQKVIO" raw)
@@ -353,7 +341,6 @@ def flashAttentionIO {batch heads kvHeads qSeq kvSeq dim : Nat} {d : DType} {dev
     (causal : Bool := false) (scale : Option Float := none) :
     IO (Tensor ⟨#[batch, heads, qSeq, dim], d, dev⟩) := do
   let effective ← attentionCheckIO "flashAttentionIO" (attentionDropout? dropout training)
-  attentionCheckIO "flashAttentionIO" (checkAttentionOperands q k v)
   let raw ← RawTensor.flashAttentionIO
     q.raw k.raw v.raw (mask.map (fun packed => packed.2.raw)) effective causal scale gqa
   pure (Tensor.ofRaw! "flashAttentionIO" raw)
@@ -510,7 +497,6 @@ def attentionWindowIO {batch heads kvHeads seq dim : Nat} {d : DType} {dev : Dev
     (k v : Tensor ⟨#[batch, kvHeads, seq, dim], d, dev⟩)
     (dropout : Float) (training : Bool) (causal : Bool := true) (gqa : Bool := false) (window : Nat := 0) : IO (Tensor ⟨#[batch, heads, seq, dim], d, dev⟩) := do
   let effective ← attentionCheckIO "attentionWindowIO" (attentionDropout? dropout training)
-  attentionCheckIO "attentionWindowIO" (checkAttentionOperands q k v)
   let raw ← RawTensor.attentionWindowIO
     q.raw k.raw v.raw effective causal gqa window
   pure (Tensor.ofRaw! "attentionWindowIO" raw)

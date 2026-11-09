@@ -65,9 +65,6 @@ def testQwenTypedSingleAndShardedLoading : IO Unit := do
             LeanTest.assertEqual (← model.lmHead.toFloatArray) (Array.replicate 64 1.0)
             let ids := (Tensor.fromInt64Array #[1, 2]).reshape #[1, 2]
             let logits := model.forward ids
-            match logits.validate with
-            | .error message => LeanTest.fail message
-            | .ok () => pure ()
             LeanTest.assertTrue ((← logits.toFloatArray).all Float.isFinite)
               "Loaded checkpoint must execute with finite logits"
 

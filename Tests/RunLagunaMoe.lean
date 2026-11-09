@@ -18,9 +18,6 @@ open torch
 
 variable {device : Device}
 
-private def pack {σ : StaticSpec} (x : Tensor σ) : IO (SomeDTypeTensor σ.shape σ.device) :=
-  IO.ofExcept x.reifyDType
-
 private def requireBF16 {shape : Shape} (x : SomeDTypeTensor shape device) :
     IO (Tensor ⟨shape, .BFloat16, device⟩) :=
   IO.ofExcept (x.atDType? .BFloat16)

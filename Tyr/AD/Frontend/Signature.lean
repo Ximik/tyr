@@ -122,9 +122,6 @@ def validateFlattenedLeaves
           throw <| s!"Flattened leaf shape mismatch for `{boundary.typeName}` at " ++
             s!"{renderPath spec.path}: expected {shapeToString expectedShape}, got {shapeToString leaf.shape}."
     | none => pure ()
-    match leaf.payload.2.validate with
-    | .ok () => pure ()
-    | .error message => throw s!"Invalid flattened tensor at {renderPath spec.path}: {message}"
     if let some expectedDType := spec.dtype then
       let actualDType := leaf.payload.2.raw.dtype.canonicalName
       if actualDType != expectedDType then

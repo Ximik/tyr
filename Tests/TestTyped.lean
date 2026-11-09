@@ -18,13 +18,7 @@ def testTypedDefaultsAndPlacement : IO Unit := do
     let _ := support.down
     let spec : StaticSpec := { shape := #[2, 3], dtype, device := .CPU }
     let tensor : Tensor spec := default
-    match tensor.validate with
-    | .ok () => pure ()
-    | .error message => LeanTest.fail s!"Invalid default for {dtype}: {message}"
     let moved := tensor.to .CPU
-    match moved.validate with
-    | .ok () => pure ()
-    | .error message => LeanTest.fail s!"CPU move lost {dtype} contract: {message}"
     LeanTest.assertTrue (!moved.requiresGrad) "Defaults should not track gradients."
   let scalar ← (Tensor.full #[] 2.5).setRequiresGrad true
   LeanTest.assertTrue scalar.requiresGrad "Typed autograd metadata should reflect requires_grad."
@@ -133,13 +127,12 @@ def testDeviceChecks : IO Unit := do
     | .ok () => LeanTest.fail "device mismatch should fail"
     | .error err => LeanTest.assertTrue (err.containsSubstr "Expected device")
 
-/-- Assert that a typed tensor's runtime metadata matches its phantom spec
-    (shape, dtype, and device policy). -/
+/-- Run the operation producing `t` and compare its native metadata with the
+static spec. A mismatch aborts inside the operation's `ofRaw!`; this assertion
+keeps the result in use so the operation is evaluated. -/
 private def assertValid {σ : StaticSpec}
     (t : Tensor σ) (label : String) : IO Unit := do
-  match t.validate with
-  | .ok () => pure ()
-  | .error err => LeanTest.fail s!"{label}: {err}"
+  LeanTest.assertTrue (t.actualSpec == σ.toTensorSpec && t.runtimeDevice == σ.device) label
 
 @[test]
 def testTypedCheckedShapeBoundary : IO Unit := do
@@ -417,7 +410,7 @@ def testBroadcastOpsParity : IO Unit := do
     LeanTest.assertTrue (v == 3.0) s!"operator broadcast value, got {v}"
   assertValid (x *ᵇ bias) "operator *ᵇ broadcasts"
   -- Runtime dtype packaging retains the native dtype.
-  let packed ← IO.ofExcept ((Tensor.ones #[2, 3]).reifyDType)
+  let packed := (Tensor.ones #[2, 3]).packDType
   LeanTest.assertEqual packed.1 .Float32
   assertValid packed.2 "existential dtype keeps exact metadata"
 

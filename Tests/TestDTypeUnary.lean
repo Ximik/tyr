@@ -56,7 +56,6 @@ example (_x : Tensor ⟨#[2], .Int64, .CPU⟩) : True := by
   LeanTest.assertTrue (magnitude (Tensor.exp logarithm - negative) < 1e-5)
   LeanTest.assertTrue
     ((magnitude (Tensor.log10 negative) - 3.141592653589793 / Float.log 10).abs < 1e-5)
-  LeanTest.assertTrue root.validate.toOption.isSome
   LeanTest.assertTrue (root.raw.device == negative.raw.device)
 
 @[test] def testComplexTrigonometricAndActivationValues : IO Unit := do
