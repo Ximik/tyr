@@ -185,9 +185,9 @@ tree traversal does not require a retaining backward for each leaf.
 cover default release, explicit retention, higher derivatives, and tree gradients.
 
 Pure attention exports always pass literal zero dropout to native SDPA and do
-not accept a dropout probability. Their `?` adapters return validation and
-kernel errors through `Except String`; convenience wrappers print a diagnostic
-and abort on failure. Configurable attention dropout uses separate native IO exports
+not accept a dropout probability. The typed adapters carry dtype and head
+requirements as types and proofs; a native error aborts through Tyr's fatal
+error report. Configurable attention dropout uses separate native IO exports
 and typed `attentionIO`, `attentionGQAIO`, `attentionGQAMaskIO`,
 `attentionGQAQKVIO`, `attentionWindowIO`, and `flashAttentionIO` adapters.
 These take required dropout and training arguments after the tensor operands.
@@ -242,11 +242,10 @@ regressions; reviewed fixed platform-unavailable stubs are checked separately.
 Both Arrow-enabled and Arrow-disabled Parquet implementations use the guard,
 including error-message construction. Other native subsystems remain outside
 this source gate's reviewed scope.
-`RawTensor.flashAttention` and `RawTensor.transpose` return
-`Except String RawTensor`. The typed `Tensor.flashAttention?` adapter preserves
-recoverable failures and checks successful results; `Tensor.transpose` takes
-axis proofs instead. The convenience variants call `nativeInvariantFailure` on errors;
-it prints a diagnostic and aborts without allocating or returning a default tensor.
+`RawTensor.transpose` returns `Except String RawTensor`; `Tensor.transpose`
+takes axis proofs instead. `RawTensor.flashAttention!` is unguarded; the typed
+`Tensor.flashAttention` requires a real floating dtype and an `AttentionHeads`
+proof and checks the result against the query specification.
 `Tensor.randint` reports invalid bounds and device failures through `IO.Error`.
 The native `randn`/`rand` factories and dropout also catch failures at their IO boundary;
 those random factories enable requested gradients after device transfer so their
@@ -260,14 +259,16 @@ error report. Each typed result is still admitted against its full
 specification. `svdReduced?` returns dtype, backend, and factorization failures as
 errors. `crossEntropy` and `crossEntropyNone` validate
 target labels in the native call against the class range, allowing the default
-ignored label `-100`, before dispatching the loss kernel. The four convolution
-adapters `conv1d?`, `conv2dBias?`, `conv1dGroups?`, and `convTranspose1d?`
-retain native argument and kernel errors.
+ignored label `-100`, before dispatching the loss kernel. The convolution
+adapters `conv1d`, `conv2dBias`, `conv1dGroups`, and `convTranspose1d` take their
+parameter requirements as `ConvValid`, `ConvGroups`, and `ConvTransposeValid`
+proofs; their `!` variants abort on a native error.
 
-Checked vector indexing validates index bounds before accelerator dispatch,
-so invalid token IDs do not reach a device-side indexing assertion. Token-byte
-totals use this boundary together with checked transfer, arithmetic, reduction,
-and scalar extraction. Equal-rate audio resampling retains the borrowed input
+Vector indexing validates index bounds natively before accelerator dispatch, so
+an invalid index never reaches a device-side indexing assertion; the plain
+export aborts and the checked export returns the error. Token-byte totals use
+the checked export together with checked transfer, reduction, and scalar
+extraction. Equal-rate audio resampling retains the borrowed input
 array before returning it, preserving ownership of its boxed Float values.
 The resampler computes its output length with checked integer arithmetic before
 narrowing it or allocating output storage, and its native body returns C++ failures through
