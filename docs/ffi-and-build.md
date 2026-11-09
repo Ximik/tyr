@@ -328,8 +328,9 @@ cleanup does not run during C++ stack unwinding. Two sites carry workarounds
 for a libc++abi/libstdc++ exception-ABI mismatch (Lean's toolchain vs.
 libtorch's): `lean_torch_manual_seed` seeds only the CPU generator, and CUDA
 synchronization calls `cudaDeviceSynchronize` via cudart directly
-(`cc/src/tyr.cpp:311-352`). `Tests/FfiCrashProbe.lean` is a manual probe for
-this failure mode (own `ffi_crash_probe` exe, not part of the test suite).
+(`cc/src/tyr.cpp:311-352`). `Tests/FfiCrashProbe.lean` probes this failure mode and the abort of
+`Tensor.ofRaw!` on a handle that contradicts its spec (own `ffi_crash_probe`
+exe, not part of the test suite).
 
 `TensorStruct.functionalGrad` invokes a pure Lean callback with fresh detached
 autograd leaves and returns detached first derivatives. It releases saved
@@ -597,8 +598,8 @@ lake build                                  # target libtyr → codegen → make
 lake exe TrainGPT                           # build if needed, then run
 # GPU build for a specific kernel module and target:
 lake -R -Kcuda=/usr/local/cuda -Kgpu=H100 -Kkernels=Tyr.GPU.Kernels.MhaH100 build RunMhaH100
-# Manual probe of the FFI failure mode:
-lake exe ffi_crash_probe
+# Probes of the fatal failure paths (libtorch | admission | admission-ok):
+lake exe ffi_crash_probe admission
 ```
 
 ## Related guides
