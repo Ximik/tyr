@@ -135,10 +135,6 @@ def load (path : String) (cfg : VLConfig := {})
     : IO (Σ dtype : RealFloatingDType, Σ visionDType : RealFloatingDType,
       Qwen35ForConditionalGeneration (device := device) cfg dtype.val visionDType.val) := do
   log.onInfo s!"Loading Qwen35ForConditionalGeneration (device := device) from {path}..."
-  if cfg.vision_config.out_hidden_size != cfg.text_config.hidden_size then
-    throw <| IO.userError
-      s!"vision out_hidden_size ({cfg.vision_config.out_hidden_size}) must match text hidden_size ({cfg.text_config.hidden_size})"
-
   let visual ← loadVisionModel (← Source.open path) cfg.vision_config device
   let languageModel ← Qwen35ForCausalLM.load path cfg.text_config device log
   log.onInfo "Loaded Qwen35ForConditionalGeneration (device := device) weights."

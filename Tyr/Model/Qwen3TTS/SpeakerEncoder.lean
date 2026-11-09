@@ -284,19 +284,6 @@ structure SpeakerEncoder (cfg : SpeakerEncoderConfig) (dtype : RealFloatingDType
 namespace SpeakerEncoder
 
 def init (cfg : SpeakerEncoderConfig) (device : Device := .CPU) (dtype : RealFloatingDType := float32DType) : IO (SpeakerEncoder (dtype := dtype) (device := device) cfg) := do
-  if cfg.encChannels.size < 5 then
-    throw <| IO.userError "speaker encoder requires at least 5 enc_channels entries"
-  if cfg.encKernelSizes.size < 5 then
-    throw <| IO.userError "speaker encoder requires at least 5 enc_kernel_sizes entries"
-  if cfg.encDilations.size < 5 then
-    throw <| IO.userError "speaker encoder requires at least 5 enc_dilations entries"
-  if cfg.encRes2NetScale < 2 then
-    throw <| IO.userError "speaker encoder requires enc_res2net_scale >= 2"
-  if c0 cfg != c1 cfg || c1 cfg != c2 cfg || c2 cfg != c3 cfg then
-    throw <| IO.userError "speaker encoder expects enc_channels[0..3] to match for residual SE-Res2Net blocks"
-  if c4 cfg != mfaInChannels cfg then
-    throw <| IO.userError "speaker encoder expects enc_channels[4] = enc_channels[1] + enc_channels[2] + enc_channels[3]"
-
   let tdnn0 ← TimeDelayNetBlock.init (dtype := dtype) (device := device) cfg.melDim (c0 cfg) (k0 cfg) (d0 cfg)
   let block1 ← SqueezeExcitationRes2NetBlock.init (dtype := dtype) (device := device)
     (c0 cfg) (c1 cfg) cfg.encRes2NetScale cfg.encSeChannels (k1 cfg) (d1 cfg)

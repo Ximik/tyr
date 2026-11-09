@@ -44,11 +44,11 @@ private def activate {s : Shape} (name : String) (x : Tensor { dtype := dtype, d
   else
     Tensor.gelu x
 
-private def sinusoidPosition {seq dim : Nat}
+private def sinusoidPosition {seq dim : Nat} (hEven : 2 ∣ dim)
     (maxTimescale : Float := 10000.0)
     (device : Device := Device.CPU)
     : Tensor { dtype := .Float32, device := device, shape := #[seq, dim] } :=
-  if h : dim % 2 = 0 then
+    have h : dim % 2 = 0 := Nat.mod_eq_zero_of_dvd hEven
     let half := dim / 2
     let pos := (Tensor.arange seq).toFloat32
     let idx := (Tensor.arange half).toFloat32
@@ -59,8 +59,6 @@ private def sinusoidPosition {seq dim : Nat}
     let out := (Tensor.cat scaled.sin scaled.cos 1).reshape #[seq, dim]
       (by simp [half, show dim / 2 + dim / 2 = dim by omega])
     (out.to device)
-  else
-    (Tensor.zeros #[seq, dim] false device)
 
 /-- Multi-head self-attention used by the audio encoder. -/
 structure AudioAttention (cfg : AudioEncoderConfig) (dtype : DType := .Float32) where
@@ -257,10 +255,6 @@ private def alignFeatures {batch frames : Nat} (m : AudioEncoder (device := devi
   features.to m.conv2d1Weight.device
 
 def init (cfg : AudioEncoderConfig) (device : Device := .CPU) (dtype : DType := .Float32) : IO (AudioEncoder (device := device) (dtype := dtype) cfg) := do
-  if cfg.dModel % cfg.encoderAttentionHeads != 0 then
-    throw <| IO.userError
-      s!"Audio encoder requires dModel divisible by encoderAttentionHeads, got {cfg.dModel} and {cfg.encoderAttentionHeads}"
-
   let conv2d1Weight ← initWeight (dtype := dtype) (device := device) #[cfg.downsampleHiddenSize, 1, 3, 3] 1
   let conv2d1Bias ← initBias (dtype := dtype) (device := device) #[cfg.downsampleHiddenSize]
   let conv2d2Weight ← initWeight (dtype := dtype) (device := device) #[cfg.downsampleHiddenSize, cfg.downsampleHiddenSize, 3, 3] cfg.downsampleHiddenSize
@@ -291,23 +285,20 @@ def init (cfg : AudioEncoderConfig) (device : Device := .CPU) (dtype : DType := 
     all chunks are `2*n_window` except the last chunk (`L % (2*n_window)` or full). -/
 def buildChunkLengths (cfg : AudioEncoderConfig) (featureLens : Array Nat) : Array Nat :=
   let step := cfg.nWindow * 2
-  if step == 0 then
-    featureLens
-  else
-    Id.run do
-      let mut out : Array Nat := #[]
-      for len in featureLens do
-        if len == 0 then
-          pure ()
-        else
-          let chunkNum := (len + step - 1) / step
-          for j in [:chunkNum] do
-            if j + 1 == chunkNum then
-              let tail := len % step
-              out := out.push (if tail == 0 then step else tail)
-            else
-              out := out.push step
-      out
+  Id.run do
+    let mut out : Array Nat := #[]
+    for len in featureLens do
+      if len == 0 then
+        pure ()
+      else
+        let chunkNum := (len + step - 1) / step
+        for j in [:chunkNum] do
+          if j + 1 == chunkNum then
+            let tail := len % step
+            out := out.push (if tail == 0 then step else tail)
+          else
+            out := out.push step
+    out
 
 /-- Per-chunk length transform through `_get_feat_extract_output_lengths`. -/
 def chunkLengthsAfterCnn (_cfg : AudioEncoderConfig) (chunkLens : Array Nat) : Array Nat :=
@@ -320,9 +311,7 @@ def buildCuChunkLensCumsum
     (afterCnnLens : Array Nat)
     (paddedAfterCnnWidth : Nat)
     : Array Nat :=
-  let denom := cfg.nWindow * 2
-  let ratio := if denom == 0 then 1 else cfg.nWindowInfer / denom
-  let windowAfterCnn0 := paddedAfterCnnWidth * (if ratio == 0 then 1 else ratio)
+  let windowAfterCnn0 := paddedAfterCnnWidth * (cfg.nWindowInfer / (cfg.nWindow * 2))
   let windowAfterCnn := if windowAfterCnn0 == 0 then 1 else windowAfterCnn0
   Id.run do
     let mut segs : Array Nat := #[0]
@@ -454,7 +443,7 @@ private def encodeOneSampleVarLenWith {M : Type → Type} [Monad M] {frames : Na
     let chunkLensAfterCnn := chunkLengthsAfterCnn cfg chunkLens
     let maxChunkAfterCnn := maxOr chunkLensAfterCnn tChunk
     let pos : Tensor { dtype := .Float32, device := device, shape := #[tChunk, cfg.dModel] } :=
-      sinusoidPosition (seq := tChunk) (dim := cfg.dModel) (device := sample.device)
+      sinusoidPosition (seq := tChunk) (dim := cfg.dModel) cfg.dModelEven (device := sample.device)
     let posBatch : Tensor { dtype := .Float32, device := device, shape := #[1, tChunk, cfg.dModel] } := Tensor.reshape pos #[1, tChunk, cfg.dModel]
 
     let hiddenParts : Array (Sigma (fun shape => Tensor { dtype := dtype, device := device, shape := shape })) := Id.run do
@@ -588,7 +577,7 @@ private def forwardWith {M : Type → Type} [Monad M] {batch frames : Nat}
     Tensor.reshape x3t #[batch, t3, AudioEncoderConfig.convOutInDim cfg]
   let xEmb : Tensor { dtype := dtype, device := device, shape := #[batch, t3, cfg.dModel] } := Tensor.linear3d xFlat m.convOutWeight
 
-  let pos : Tensor { dtype := .Float32, device := device, shape := #[t3, cfg.dModel] } := sinusoidPosition (seq := t3) (dim := cfg.dModel) (device := xEmb.device)
+  let pos : Tensor { dtype := .Float32, device := device, shape := #[t3, cfg.dModel] } := sinusoidPosition (seq := t3) (dim := cfg.dModel) cfg.dModelEven (device := xEmb.device)
   let posBatch : Tensor { dtype := .Float32, device := device, shape := #[batch, t3, cfg.dModel] } := Tensor.expand (Tensor.reshape pos #[1, t3, cfg.dModel]) #[batch, t3, cfg.dModel]
   let hidden0 := Tensor.add xEmb (Tensor.castLike xEmb posBatch)
 

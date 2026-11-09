@@ -7,11 +7,13 @@ open torch torch.qwen3tts Lean
 
 private def cfg : Qwen3TTSConfig := {
   ttsModelType := "custom_voice"
+  imStartTokenId := 2, imEndTokenId := 3, ttsPadTokenId := 4, ttsBosTokenId := 5, ttsEosTokenId := 6
   talkerConfig := {
     vocabSize := 8, textVocabSize := 8, textHiddenSize := 8,
     hiddenSize := 8, intermediateSize := 16, numHiddenLayers := 1,
     numAttentionHeads := 2, numKeyValueHeads := 1, headDim := 4,
     numCodeGroups := 2, codecBosId := 1, codecPadId := 0, codecEosTokenId := 7,
+    codecThinkId := 2, codecNoThinkId := 3, codecThinkBosId := 4, codecThinkEosId := 5,
     codePredictorConfig := {
       vocabSize := 8, hiddenSize := 8, intermediateSize := 16,
       numHiddenLayers := 1, numAttentionHeads := 2, numKeyValueHeads := 1, headDim := 4
@@ -62,6 +64,7 @@ private def baseCfg : Qwen3TTSConfig := { cfg with
     melDim := 4, encDim := 8, encChannels := #[4, 4, 4, 4, 12],
     encKernelSizes := #[1, 1, 1, 1, 1], encDilations := #[1, 1, 1, 1, 1],
     encRes2NetScale := 2, encSeChannels := 2, encAttentionChannels := 2 }
+  speakerMatchesTalker := by decide
 }
 
 private def writeCheckpoint (dir : System.FilePath) (bf16 projection sharded : Bool)

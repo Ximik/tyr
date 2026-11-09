@@ -4,7 +4,7 @@ import LeanTest
 open torch
 open torch.qwen36
 
-private def tinyCfg : Config := Config.normalize {
+private def tinyCfg : Config := {
   Config.qwen36_35B_A3B with
   vocab_size := 64
   hidden_size := 32
@@ -13,17 +13,24 @@ private def tinyCfg : Config := Config.normalize {
   num_attention_heads := 4
   num_key_value_heads := 2
   head_dim := 8
-  max_position_embeddings := 128
   linear_key_head_dim := 4
   linear_value_head_dim := 4
   linear_num_key_heads := 2
   linear_num_value_heads := 4
   linearKeyHeadsDivide := by decide
+  kvHeadsDivide := by decide
   layer_types := #[.linearAttention, .fullAttention]
   moe_intermediate_size := 8
   shared_expert_intermediate_size := 8
   num_experts_per_tok := 2
   num_experts := 4
+  rotary_dim := 2
+  eos_token_id := none
+  headsPos := by decide
+  rotaryValid := by decide
+  layerTypesSize := by decide
+  expertsValid := by decide
+  eosInVocab := by decide
 }
 
 @[test]
@@ -39,11 +46,5 @@ def testQwen36ConfigDefaultsMatchPublishedCheckpoint : IO Unit := do
   let cfg := Config.qwen36_35B_A3B
   LeanTest.assertEqual cfg.hidden_size 2048
     "Qwen3.6-35B-A3B should expose the published hidden size"
-  LeanTest.assertEqual cfg.max_position_embeddings 262144
-    "Qwen3.6-35B-A3B should expose the published native context length"
-  LeanTest.assertEqual cfg.mrope_interleaved true
-    "Qwen3.6-35B-A3B should default to mRoPE interleaving"
-  LeanTest.assertEqual cfg.mtp_num_hidden_layers 1
-    "Qwen3.6-35B-A3B should preserve the published MTP depth"
   LeanTest.assertEqual cfg.layer_types.size 40
     "Qwen3.6-35B-A3B should synthesize the published 40-layer hybrid schedule"

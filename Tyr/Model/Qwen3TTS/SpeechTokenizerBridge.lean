@@ -285,7 +285,7 @@ def encodeAudioToCodes
   ensureParentDir codesPath
   if (← isTokenizer25Hz speechTokenizerDir) then
     let ⟨_dtype, encoder25⟩ ← SpeechTokenizer25HzEncoder.loadFromDir speechTokenizerDir device
-    let wave ← loadResampledMonoWav audioPath encoder25.inputSampleRate
+    let wave ← loadResampledMonoWav audioPath encoder25.inputSampleRate.val.val
     if wave.isEmpty then
       throw <| IO.userError s!"Audio encode input is empty: {audioPath}"
     let (groups, vals) ← encoder25.encodeWaveToCodes wave

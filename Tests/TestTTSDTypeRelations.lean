@@ -41,11 +41,13 @@ private def tinyConfig : Qwen3TTSConfig := {
     vocabSize := 32, hiddenSize := 8, intermediateSize := 16,
     numHiddenLayers := 1, numAttentionHeads := 2, numKeyValueHeads := 1, headDim := 4,
     numCodeGroups := 3, textHiddenSize := 8, textVocabSize := 32,
-    codecPadId := 0, codecBosId := 3, codecEosTokenId := 7 }
+    codecPadId := 0, codecBosId := 3, codecEosTokenId := 7,
+    codecThinkId := 8, codecNoThinkId := 9, codecThinkBosId := 10, codecThinkEosId := 11 }
   speakerEncoderConfig := {
     melDim := 4, encDim := 8, encChannels := #[4, 4, 4, 4, 12],
     encAttentionChannels := 2, encRes2NetScale := 2, encSeChannels := 2 }
-  ttsModelType := "base" }
+  ttsModelType := "base"
+  imStartTokenId := 20, imEndTokenId := 21, ttsPadTokenId := 22, ttsBosTokenId := 23, ttsEosTokenId := 24 }
 
 @[test] def testMixedSpeakerAndTalkerDTypeRelationships : IO Unit := do
   let cfg := tinyConfig

@@ -460,9 +460,6 @@ private def buildFeatureAttentionMask
     (validSamples targetSamples hopLength : Nat)
     (returnAttentionMask : Bool)
     : Array Int64 :=
-  if hopLength == 0 then
-    #[]
-  else
     let frames := targetSamples / hopLength
     let validFrames := validSamples / hopLength
     Id.run do
@@ -498,12 +495,10 @@ def waveformToWhisperFeatures
     : IO (WhisperFrontendOutput (device := .CPU) cfg.featureSize (PreprocessorConfig.expectedFrames cfg)) := do
   let targetSamples := PreprocessorConfig.expectedSampleCount cfg
   let expectedFrames := PreprocessorConfig.expectedFrames cfg
-  let nFft := if cfg.nFft == 0 then 400 else cfg.nFft
-  let hop := if cfg.hopLength == 0 then 160 else cfg.hopLength
+  let nFft := cfg.nFft
+  let hop := cfg.hopLength
   let melBins := cfg.featureSize
-
-  let ⟨melPos⟩ ← if h : 0 < melBins then pure (PLift.up h) else
-    throw <| IO.userError "Preprocessor config has feature_size=0"
+  have melPos : 0 < melBins := cfg.featureSizePos
   if targetSamples == 0 then
     throw <| IO.userError "Preprocessor config has n_samples=0"
 
@@ -584,14 +579,10 @@ def waveformToWhisperFeaturesDynamic
     (maxSeconds : Option Float := none)
     (device : Device := Device.CPU)
     : IO (Sigma (fun frames => WhisperFrontendOutput (device := device) cfg.featureSize frames)) := do
-  let nFft := if cfg.nFft == 0 then 400 else cfg.nFft
-  let hop := if cfg.hopLength == 0 then 160 else cfg.hopLength
+  let nFft := cfg.nFft
+  let hop := cfg.hopLength
   let melBins := cfg.featureSize
-
-  let ⟨melPos⟩ ← if h : 0 < melBins then pure (PLift.up h) else
-    throw <| IO.userError "Preprocessor config has feature_size=0"
-  if cfg.samplingRate == 0 then
-    throw <| IO.userError "Preprocessor config has sampling_rate=0"
+  have melPos : 0 < melBins := cfg.featureSizePos
 
   let minSamplesRaw := ((minSeconds * cfg.samplingRate.toFloat) + 0.5).toUInt64.toNat
   let minSamples := if minSamplesRaw == 0 then 1 else minSamplesRaw
@@ -706,7 +697,7 @@ def wavToWhisperFeatures
     : IO (WhisperFrontendOutput (device := .CPU) cfg.featureSize (PreprocessorConfig.expectedFrames cfg)) := do
   let (sr, wav) ← loadMonoPcm16Wav path
   let wavTarget ←
-    if sr == cfg.samplingRate || sr == 0 || cfg.samplingRate == 0 then
+    if sr == cfg.samplingRate || sr == 0 then
       pure wav
     else
       data.resampleSoxrHQ wav sr cfg.samplingRate
@@ -723,7 +714,7 @@ def wavToWhisperFeaturesDynamic
     : IO (Sigma (fun frames => WhisperFrontendOutput (device := device) cfg.featureSize frames)) := do
   let (sr, wav) ← loadMonoPcm16Wav path
   let wavTarget ←
-    if sr == cfg.samplingRate || sr == 0 || cfg.samplingRate == 0 then
+    if sr == cfg.samplingRate || sr == 0 then
       pure wav
     else
       data.resampleSoxrHQ wav sr cfg.samplingRate
@@ -733,9 +724,11 @@ def wavToWhisperFeaturesDynamic
     This now runs the faithful Whisper-style frontend instead of pseudo-mel. -/
 def wavToPseudoMel {melBins frames : Nat} (path : String) :
     IO (Tensor { device := .CPU, shape := #[1, melBins, frames], dtype := .Float32 }) := do
+  let ⟨hMel⟩ ← if h : 0 < melBins then pure (PLift.up h) else
+    throw <| IO.userError "Pseudo-mel framing needs at least one mel bin"
   let cfg : PreprocessorConfig := {
     featureSize := melBins
-    samplingRate := 16000
+    featureSizePos := hMel
     hopLength := 160
     nFft := 400
     nSamples := frames * 160

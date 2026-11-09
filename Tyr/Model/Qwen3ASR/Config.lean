@@ -5,6 +5,7 @@
 -/
 import Tyr.Basic
 import Tyr.Model.Qwen.Config
+import Tyr.Tokenizer.Types
 
 namespace torch.qwen3asr
 
@@ -15,23 +16,26 @@ structure AudioEncoderConfig where
   encoderAttentionHeads : Nat := 20
   encoderFfnDim : Nat := 5120
   dModel : Nat := 1280
-  dropout : Float := 0.0
   attentionDropout : Float := 0.0
+  /-- `"gelu"`, `"relu"` or `"silu"`; checked when the config is built. -/
   activationFunction : String := "gelu"
-  activationDropout : Float := 0.0
-  scaleEmbedding : Bool := false
-  initializerRange : Float := 0.02
-  maxSourcePositions : Nat := 1500
   nWindow : Nat := 100
-  outputDim : Nat := 3584
+  outputDim : Nat := 4096
   nWindowInfer : Nat := 400
-  convChunkSize : Nat := 500
   downsampleHiddenSize : Nat := 480
   /-- The strided convolutions downsample the mel axis; checked when the config is built. -/
   numMelBinsPos : 0 < numMelBins := by decide
+  /-- Attention splits `dModel` into a nonzero number of equal heads; checked when the config is built. -/
+  headsDivide : 0 < encoderAttentionHeads ∧ encoderAttentionHeads ∣ dModel := by decide
+  /-- Sinusoidal positions pair `dModel / 2` sines with cosines; checked when the config is built. -/
+  dModelEven : 2 ∣ dModel := by decide
+  /-- Features are chunked by `2 * nWindow`, and inference attends over a whole number of
+      chunks; checked when the config is built. -/
+  windowValid : 0 < nWindow ∧ 0 < nWindowInfer ∧ 2 * nWindow ∣ nWindowInfer := by decide
+  activationSupported :
+    activationFunction = "gelu" ∨ activationFunction = "relu" ∨ activationFunction = "silu" := by decide
   deriving Repr
 
-instance : Inhabited AudioEncoderConfig := ⟨{}⟩
 
 namespace AudioEncoderConfig
 
@@ -88,16 +92,18 @@ structure TextConfig where
   numAttentionHeads : Nat := 32
   numKeyValueHeads : Nat := 32
   headDim : Nat := 128
-  hiddenAct : String := "silu"
-  maxPositionEmbeddings : Nat := 128000
-  initializerRange : Float := 0.02
   rmsNormEps : Float := 1e-6
-  useCache : Bool := true
-  tieWordEmbeddings : Bool := false
   ropeTheta : Float := 5000000.0
-  attentionBias : Bool := false
-  attentionDropout : Float := 0.0
-  deriving Repr, Inhabited
+  /-- Query heads form whole groups over a nonzero number of K/V heads; checked when the config is built. -/
+  headsValid : 0 < numAttentionHeads ∧ 0 < numKeyValueHeads ∧ numKeyValueHeads ∣ numAttentionHeads := by decide
+  /-- Rotary embeddings rotate `headDim / 2` pairs; checked when the config is built. -/
+  headDimEven : 0 < headDim ∧ 2 ∣ headDim := by decide
+  /-- Greedy decoding picks among `vocabSize` logits; checked when the config is built. -/
+  vocabPos : 0 < vocabSize := by decide
+  /-- RoPE frequencies and RMSNorm divide by these; checked when the config is built. -/
+  ropeThetaPos : 0 < ropeTheta := by native_decide
+  rmsNormEpsPos : 0 < rmsNormEps := by native_decide
+  deriving Repr
 
 namespace TextConfig
 
@@ -111,25 +117,16 @@ def toQwenConfig (cfg : TextConfig) : qwen.QwenConfig := {
   head_dim := cfg.headDim
   rope_theta := cfg.ropeTheta
   rms_norm_eps := cfg.rmsNormEps
-  max_position_embeddings := cfg.maxPositionEmbeddings
+  headsValid := cfg.headsValid
+  headDimEven := cfg.headDimEven
+  vocabPos := cfg.vocabPos
+  ropeThetaPos := cfg.ropeThetaPos
+  rmsNormEpsPos := cfg.rmsNormEpsPos
 }
 
 end TextConfig
 
 /-- Composite thinker config: audio encoder + text decoder. -/
-structure ThinkerConfig where
-  audioConfig : AudioEncoderConfig := {}
-  textConfig : TextConfig := {}
-  audioTokenId : UInt64 := 151646
-  audioStartTokenId : UInt64 := 151647
-  userTokenId : UInt64 := 872
-  modelType : String := "qwen3_asr_thinker"
-  classifyNum : Nat := 0
-  initializerRange : Float := 0.02
-  deriving Repr, Inhabited
-
-namespace ThinkerConfig
-
 private def containsSubstr (s pat : String) : Bool :=
   if pat.isEmpty then
     false
@@ -137,17 +134,33 @@ private def containsSubstr (s pat : String) : Bool :=
     (s.splitOn pat).length > 1
 
 /-- Forced-aligner checkpoints expose `model_type` containing `"forced_aligner"`. -/
+def isForcedAlignerType (modelType : String) : Bool :=
+  containsSubstr modelType "forced_aligner"
+
+structure ThinkerConfig where
+  audioConfig : AudioEncoderConfig := {}
+  textConfig : TextConfig := {}
+  audioTokenId : tokenizer.TokenId := 151646
+  modelType : String := "qwen3_asr_thinker"
+  classifyNum : Nat := 0
+  /-- Audio features replace text embeddings one-for-one; checked when the config is built. -/
+  audioMatchesText : audioConfig.outputDim = textConfig.hiddenSize := by decide
+  /-- The audio placeholder is embedded as a text token; checked when the config is built. -/
+  audioTokenInVocab : audioTokenId.toNat < textConfig.vocabSize := by decide
+  /-- A forced aligner classifies into `classifyNum` timestamp bins; checked when the config is built. -/
+  alignerClasses : isForcedAlignerType modelType = true → 0 < classifyNum := by native_decide
+  deriving Repr
+
+namespace ThinkerConfig
+
 def isForcedAligner (cfg : ThinkerConfig) : Bool :=
-  containsSubstr cfg.modelType "forced_aligner"
+  isForcedAlignerType cfg.modelType
 
 /-- LM head output dim:
     - normal ASR thinker: text vocab size
     - forced aligner thinker: `classify_num` from config -/
 def lmHeadOutDim (cfg : ThinkerConfig) : Nat :=
-  if isForcedAligner cfg && cfg.classifyNum > 0 then
-    cfg.classifyNum
-  else
-    cfg.textConfig.vocabSize
+  if isForcedAligner cfg then cfg.classifyNum else cfg.textConfig.vocabSize
 
 end ThinkerConfig
 
@@ -164,12 +177,16 @@ structure Qwen3ASRConfig where
   thinkerConfig : ThinkerConfig := {}
   supportLanguages : Array String := defaultSupportedLanguages
   /-- Token ID used by forced-aligner prompt to mark timestamp slots. -/
-  timestampTokenId : UInt64 := 0
+  timestampTokenId : tokenizer.TokenId := 0
   /-- Milliseconds represented by one forced-aligner timestamp bin. -/
   timestampSegmentTime : Float := 1.0
-  deriving Repr, Inhabited
+  /-- Timestamp slots are text tokens; checked when the config is built. -/
+  timestampTokenInVocab : timestampTokenId.toNat < thinkerConfig.textConfig.vocabSize := by decide
+  /-- Timestamp bins span positive time; checked when the config is built. -/
+  timestampSegmentPos : 0 < timestampSegmentTime := by native_decide
+  deriving Repr
 
-def defaultEosTokenIds : Array UInt64 := #[151645, 151643]
+def defaultEosTokenIds : Array tokenizer.TokenId := #[151645, 151643]
 
 namespace Qwen3ASRConfig
 

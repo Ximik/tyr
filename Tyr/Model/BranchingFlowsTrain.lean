@@ -30,6 +30,8 @@ structure BranchingTrainConfig where
   delWeight : Float := 1.0
   weightDecay : Float := 0.0
   gradClip : Float := 0.0
+  /-- Times are quantized by and divided by `timeScale`; checked when the config is built. -/
+  timeScalePos : 0 < timeScale := by native_decide
   deriving Repr
 
 structure BranchingBatch (batch maxLen : Nat) where

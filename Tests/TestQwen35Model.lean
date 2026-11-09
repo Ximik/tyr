@@ -18,27 +18,19 @@ private def tinyDenseCfg : Config := {
   num_key_value_heads := 2
   head_dim := 8
   rope_theta := 10000.0
-  partial_rotary_factor := 1.0
+  rotary_dim := 8
   rms_norm_eps := 1e-6
-  max_position_embeddings := 128
-  attention_bias := false
-  attention_dropout := 0.0
-  hidden_act := "silu"
   linear_conv_kernel_dim := 4
   linear_key_head_dim := 4
   linear_value_head_dim := 4
   linear_num_key_heads := 2
   linear_num_value_heads := 4
   layer_types := #[.linearAttention, .fullAttention, .linearAttention]
-  full_attention_interval := 2
   moe_intermediate_size := 16
   shared_expert_intermediate_size := 16
   num_experts_per_tok := 2
   num_experts := 0
-  use_cache := true
   tie_word_embeddings := false
-  pad_token_id := some 0
-  bos_token_id := some 1
   eos_token_id := some 2
 }
 
@@ -49,6 +41,7 @@ private def tinyMoeCfg : Config := {
   shared_expert_intermediate_size := 16
   num_experts_per_tok := 2
   num_experts := 4
+  expertsValid := by decide
 }
 
 private def tinyBatchedEosCfg : Config := {
@@ -60,27 +53,19 @@ private def tinyBatchedEosCfg : Config := {
   num_key_value_heads := 1
   head_dim := 4
   rope_theta := 10000.0
-  partial_rotary_factor := 1.0
+  rotary_dim := 4
   rms_norm_eps := 1e-6
-  max_position_embeddings := 16
-  attention_bias := false
-  attention_dropout := 0.0
-  hidden_act := "silu"
   linear_conv_kernel_dim := 1
   linear_key_head_dim := 1
   linear_value_head_dim := 1
   linear_num_key_heads := 1
   linear_num_value_heads := 1
   layer_types := #[]
-  full_attention_interval := 1
   moe_intermediate_size := 4
   shared_expert_intermediate_size := 4
   num_experts_per_tok := 1
   num_experts := 0
-  use_cache := true
   tie_word_embeddings := false
-  pad_token_id := some 0
-  bos_token_id := some 1
   eos_token_id := some 2
 }
 
@@ -93,27 +78,19 @@ private def tinyAttentionCfg : Config := {
   num_key_value_heads := 2
   head_dim := 2
   rope_theta := 10000.0
-  partial_rotary_factor := 1.0
+  rotary_dim := 2
   rms_norm_eps := 1e-6
-  max_position_embeddings := 16
-  attention_bias := false
-  attention_dropout := 0.0
-  hidden_act := "silu"
   linear_conv_kernel_dim := 1
   linear_key_head_dim := 1
   linear_value_head_dim := 1
   linear_num_key_heads := 1
   linear_num_value_heads := 1
   layer_types := #[.fullAttention]
-  full_attention_interval := 1
   moe_intermediate_size := 4
   shared_expert_intermediate_size := 4
   num_experts_per_tok := 1
   num_experts := 0
-  use_cache := true
   tie_word_embeddings := false
-  pad_token_id := some 0
-  bos_token_id := some 1
   eos_token_id := some 2
 }
 
@@ -331,6 +308,7 @@ def testQwen35BFloat16ExpertsFloat32Routing : IO Unit := do
     num_experts := 2
     num_experts_per_tok := 2
     moe_intermediate_size := 1
+    expertsValid := by decide
   }
   -- Both experts compute SiLU(1). Float32 routing weights sum to one,
   -- so weighting must preserve that value rather than sum unweighted experts.
@@ -373,8 +351,7 @@ def testQwen35ConfigLoad : IO Unit := do
     "\"head_dim\":8,\"linear_num_key_heads\":3,\"linear_num_value_heads\":6," ++
     "\"linear_key_head_dim\":4,\"linear_value_head_dim\":4," ++
     "\"attn_output_gate\":true,\"mamba_ssm_dtype\":\"float32\"," ++
-    "\"mlp_only_layers\":[1,3]," ++
-    "\"moe_intermediate_size\":12,\"shared_expert_intermediate_size\":24," ++
+        "\"moe_intermediate_size\":12,\"shared_expert_intermediate_size\":24," ++
     "\"num_experts\":8,\"num_experts_per_tok\":2," ++
     "\"layer_types\":[\"linear_attention\",\"full_attention\",\"linear_attention\",\"full_attention\"]," ++
     "\"rope_parameters\":{\"rope_theta\":500000.0,\"partial_rotary_factor\":0.5," ++
@@ -388,20 +365,13 @@ def testQwen35ConfigLoad : IO Unit := do
   LeanTest.assertEqual cfg.num_experts 8 "num_experts should load"
   LeanTest.assertEqual cfg.layer_types.size 4 "layer_types should parse"
   LeanTest.assertEqual cfg.rope_theta 500000.0 "rope theta should load from rope_parameters"
-  LeanTest.assertEqual cfg.attn_output_gate true "attention output gate flag should load"
-  LeanTest.assertEqual cfg.mamba_ssm_dtype "float32" "mamba ssm dtype should load"
-  LeanTest.assertEqual cfg.mlp_only_layers #[1, 3] "mlp-only layers should load"
-  LeanTest.assertEqual cfg.mrope_interleaved true "mrope interleaving flag should load"
-  LeanTest.assertEqual cfg.mrope_section #[2, 2, 2] "mrope section should load"
-  LeanTest.assertEqual cfg.mtp_num_hidden_layers 1 "mtp hidden layer count should load"
-  LeanTest.assertEqual cfg.mtp_use_dedicated_embeddings false "mtp embedding flag should load"
 
 @[test]
 def testQwen35ConfigLoadNestedTextConfig : IO Unit := do
   let path := "/tmp/qwen35_config_test_nested.json"
   let json :=
     "{\"tie_word_embeddings\":true,\"text_config\":{" ++
-    "\"vocab_size\":32000,\"hidden_size\":64,\"intermediate_size\":128," ++
+    "\"vocab_size\":152000,\"hidden_size\":64,\"intermediate_size\":128," ++
     "\"num_hidden_layers\":6,\"num_attention_heads\":8,\"num_key_value_heads\":2," ++
     "\"head_dim\":8,\"linear_num_key_heads\":4,\"linear_num_value_heads\":8," ++
     "\"linear_key_head_dim\":4,\"linear_value_head_dim\":4," ++
@@ -415,16 +385,11 @@ def testQwen35ConfigLoadNestedTextConfig : IO Unit := do
   IO.FS.writeFile path json
 
   let cfg ← Config.loadFromFile path
-  LeanTest.assertEqual cfg.vocab_size 32000 "nested text_config vocab_size should load"
+  LeanTest.assertEqual cfg.vocab_size 152000 "nested text_config vocab_size should load"
   LeanTest.assertEqual cfg.hidden_size 64 "nested text_config hidden_size should load"
   LeanTest.assertEqual cfg.tie_word_embeddings true "tie_word_embeddings should load from top level"
   LeanTest.assertEqual cfg.num_experts 16 "nested text_config num_experts should load"
   LeanTest.assertEqual cfg.eos_token_id (some 151645) "nested text_config eos token should load"
-  LeanTest.assertEqual cfg.attn_output_gate true "nested text_config attention gate should load"
-  LeanTest.assertEqual cfg.mrope_interleaved true "nested mrope interleaving flag should load"
-  LeanTest.assertEqual cfg.mrope_section #[11, 11, 10] "nested mrope section should load"
-  LeanTest.assertEqual cfg.mtp_num_hidden_layers 1 "nested mtp hidden layer count should load"
-  LeanTest.assertEqual cfg.mtp_use_dedicated_embeddings false "nested mtp embedding flag should load"
 
 @[test] def testQwen35BFloat16HybridCache : IO Unit := do
   let model ← Qwen35ForCausalLM.init tinyDenseCfg false (dtype := .BFloat16)
@@ -451,7 +416,7 @@ private def qwen35CheckpointEntries (cfg : Config) (optionalWeights : Bool) : Ar
     let p := s!"model.layers.{i}."
     let mut localEntries := #[ ("input_layernorm.weight", #[cfg.hidden_size]),
       ("post_attention_layernorm.weight", #[cfg.hidden_size]) ]
-    match (Config.normalizedLayerTypes cfg).getD i .linearAttention with
+    match cfg.layer_types.getD i .linearAttention with
     | .fullAttention =>
       localEntries := localEntries ++ #[
         ("self_attn.q_proj.weight", #[cfg.num_attention_heads * cfg.head_dim * 2, cfg.hidden_size]),

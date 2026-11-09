@@ -27,8 +27,8 @@ structure FluxConfig where
   in_channels : Nat := 128
   /-- Timestep embedding dimension -/
   time_dim : Nat := 256
-  /-- MLP hidden dimension multiplier -/
-  mlp_ratio : Float := 3.0
+  /-- MLP hidden dimension (`hidden_size * mlp_ratio`; Klein uses ratio 3) -/
+  mlp_hidden_dim : Nat := 9216
   /-- RoPE theta base -/
   theta : Nat := 2000
   /-- RoPE axes dimensions (for 4-axis RoPE) -/
@@ -37,20 +37,19 @@ structure FluxConfig where
   headDimEven : 2 ∣ head_dim := by decide
   /-- Four even RoPE axis dimensions summing to `head_dim`; checked when the config is built. -/
   axesValid : axes_dims.size = 4 ∧ axes_dims.toList.all (· % 2 == 0) ∧ axes_dims.toList.sum = head_dim := by decide
+  /-- RoPE frequencies take `log theta`; checked when the config is built. -/
+  thetaPos : 0 < theta := by decide
   deriving Repr
 
-instance : Inhabited FluxConfig := ⟨{}⟩
 
 namespace FluxConfig
 
 /-- Klein 4B configuration (Flux2 Klein uses mlp_ratio=3.0) -/
-def klein4B : FluxConfig := {
-  mlp_ratio := 3.0
-}
+def klein4B : FluxConfig := {}
 
-/-- Compute MLP hidden dimension -/
+/-- MLP hidden dimension -/
 def mlpHiddenDim (cfg : FluxConfig) : Nat :=
-  (cfg.hidden_size.toFloat * cfg.mlp_ratio).toUInt64.toNat
+  cfg.mlp_hidden_dim
 
 /-- Total RoPE dimension (sum of axes) -/
 def ropeDim (cfg : FluxConfig) : Nat :=

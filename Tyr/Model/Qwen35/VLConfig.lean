@@ -20,12 +20,15 @@ structure Qwen35VisionConfig where
   temporal_patch_size : Nat := 2
   out_hidden_size : Nat := 3584
   num_position_embeddings : Nat := 2304
-  initializer_range : Float := 0.02
-  /-- Attention splits `hidden_size` into equal heads; checked when the config is built. -/
+  /-- Attention splits `hidden_size` into a nonzero number of equal heads; checked when the config is built. -/
   headsDivide : num_heads ∣ hidden_size := by decide
+  headsPos : 0 < num_heads := by decide
+  /-- Vision RoPE rotates head-channel pairs; checked when the config is built. -/
+  headDimEven : 2 ∣ hidden_size / num_heads := by decide
+  /-- Patches merge in nonempty `spatial_merge_size²` groups; checked when the config is built. -/
+  mergePos : 0 < spatial_merge_size := by decide
   deriving Repr
 
-instance : Inhabited Qwen35VisionConfig := ⟨{}⟩
 
 namespace Qwen35VisionConfig
 
@@ -41,7 +44,6 @@ def qwen35_0_8B : Qwen35VisionConfig := {
   temporal_patch_size := 2
   out_hidden_size := 1024
   num_position_embeddings := 2304
-  initializer_range := 0.02
 }
 
 /-- Default multimodal Qwen3.6-35B-A3B vision config from Hugging Face `config.json`. -/
@@ -57,7 +59,6 @@ def qwen36_35B_A3B : Qwen35VisionConfig := {
   temporal_patch_size := 2
   out_hidden_size := 2048
   num_position_embeddings := 2304
-  initializer_range := 0.02
 }
 
 @[simp] def patchDim (cfg : Qwen35VisionConfig) : Nat :=
@@ -67,34 +68,33 @@ def qwen36_35B_A3B : Qwen35VisionConfig := {
   cfg.spatial_merge_size * cfg.spatial_merge_size
 
 def headDim (cfg : Qwen35VisionConfig) : Nat :=
-  if cfg.num_heads == 0 then cfg.hidden_size else cfg.hidden_size / cfg.num_heads
+  cfg.hidden_size / cfg.num_heads
 
-theorem heads_mul_headDim (cfg : Qwen35VisionConfig) : cfg.num_heads * cfg.headDim = cfg.hidden_size := by
-  unfold headDim
-  split
-  · rename_i h
-    have h0 : cfg.num_heads = 0 := by simpa using h
-    have hdvd := cfg.headsDivide
-    rw [h0] at hdvd ⊢
-    simp [Nat.eq_zero_of_zero_dvd hdvd]
-  · exact Nat.mul_div_cancel' cfg.headsDivide
+theorem heads_mul_headDim (cfg : Qwen35VisionConfig) : cfg.num_heads * cfg.headDim = cfg.hidden_size :=
+  Nat.mul_div_cancel' cfg.headsDivide
 
 def mergedTokenCount (cfg : Qwen35VisionConfig) (nPatches : Nat) : Nat :=
-  let u := mergeUnit cfg
-  if u == 0 then nPatches else nPatches / u
+  nPatches / mergeUnit cfg
 
 end Qwen35VisionConfig
 
 /-- Composite Qwen3.5 multimodal config (`text_config` + `vision_config`). -/
 structure Qwen35VLConfig where
-  text_config : Config := Config.qwen35_9B
-  vision_config : Qwen35VisionConfig := {}
-  image_token_id : UInt64 := 248056
-  video_token_id : UInt64 := 248057
-  vision_start_token_id : UInt64 := 248053
-  vision_end_token_id : UInt64 := 248054
+  text_config : Config := Config.qwen35_0_8B
+  vision_config : Qwen35VisionConfig := Qwen35VisionConfig.qwen35_0_8B
+  image_token_id : tokenizer.TokenId := 248056
+  video_token_id : tokenizer.TokenId := 248057
+  vision_start_token_id : tokenizer.TokenId := 248053
+  vision_end_token_id : tokenizer.TokenId := 248054
   tie_word_embeddings : Bool := false
-  deriving Repr, Inhabited
+  /-- Vision features replace placeholder embeddings one-for-one; checked when the config is built. -/
+  visionMatchesText : vision_config.out_hidden_size = text_config.hidden_size := by decide
+  /-- Placeholder and boundary ids are text tokens; checked when the config is built. -/
+  tokenIdsInVocab :
+    image_token_id.toNat < text_config.vocab_size ∧ video_token_id.toNat < text_config.vocab_size ∧
+    vision_start_token_id.toNat < text_config.vocab_size ∧
+    vision_end_token_id.toNat < text_config.vocab_size := by decide
+  deriving Repr
 
 namespace Qwen35VLConfig
 
@@ -118,9 +118,6 @@ def qwen36_35B_A3B : Qwen35VLConfig := {
   vision_end_token_id := 248054
   tie_word_embeddings := false
 }
-
-def normalize (cfg : Qwen35VLConfig) : Qwen35VLConfig :=
-  { cfg with text_config := Config.normalize cfg.text_config }
 
 end Qwen35VLConfig
 
@@ -146,15 +143,9 @@ theorem mergedTokenCount_mul {cfg : VisionConfig} {nPatches : Nat}
     (h : mergeUnit cfg ∣ nPatches) (d : Nat) :
     mergedTokenCount cfg nPatches * (d * mergeUnit cfg) = nPatches * d := by
   unfold mergedTokenCount Qwen35VisionConfig.mergedTokenCount
-  simp only
-  split
-  · rename_i h0
-    have hu : mergeUnit cfg = 0 := by simpa using h0
-    rw [hu] at h ⊢
-    simp [Nat.eq_zero_of_zero_dvd h]
-  · rw [Nat.mul_comm d, ← Nat.mul_assoc]
-    change nPatches / mergeUnit cfg * mergeUnit cfg * d = nPatches * d
-    rw [Nat.div_mul_cancel h]
+  rw [Nat.mul_comm d, ← Nat.mul_assoc]
+  change nPatches / mergeUnit cfg * mergeUnit cfg * d = nPatches * d
+  rw [Nat.div_mul_cancel h]
 
 end VisionConfig
 
@@ -163,8 +154,6 @@ namespace VLConfig
 def qwen35_0_8B : VLConfig := Qwen35VLConfig.qwen35_0_8B
 
 def qwen36_35B_A3B : VLConfig := Qwen35VLConfig.qwen36_35B_A3B
-
-def normalize (cfg : VLConfig) : VLConfig := Qwen35VLConfig.normalize cfg
 
 end VLConfig
 

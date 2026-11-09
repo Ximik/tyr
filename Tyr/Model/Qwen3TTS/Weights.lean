@@ -299,15 +299,6 @@ private def loadAttentiveStatisticsPoolingSharded (modelDir : String) (namePrefi
 
 private def loadSpeakerEncoderSharded (modelDir : String) (cfg : SpeakerEncoderConfig)
     : IO (SpeakerEncoder (device := device) (dtype := dtype) cfg) := do
-  if cfg.encChannels.size < 5 then
-    throw <| IO.userError "speaker encoder requires at least 5 enc_channels entries"
-  if cfg.encKernelSizes.size < 5 then
-    throw <| IO.userError "speaker encoder requires at least 5 enc_kernel_sizes entries"
-  if cfg.encDilations.size < 5 then
-    throw <| IO.userError "speaker encoder requires at least 5 enc_dilations entries"
-  if cfg.encRes2NetScale < 2 then
-    throw <| IO.userError "speaker encoder requires enc_res2net_scale >= 2"
-
   let c0 := cfg.encChannels.getD 0 512
   let c1 := cfg.encChannels.getD 1 512
   let c2 := cfg.encChannels.getD 2 512
@@ -325,10 +316,6 @@ private def loadSpeakerEncoderSharded (modelDir : String) (cfg : SpeakerEncoderC
   let d4 := cfg.encDilations.getD 4 1
   let mfaIn := c1 + c2 + c3
 
-  if c0 != c1 || c1 != c2 || c2 != c3 then
-    throw <| IO.userError "speaker encoder expects enc_channels[0..3] to match for residual SE-Res2Net blocks"
-  if c4 != mfaIn then
-    throw <| IO.userError "speaker encoder expects enc_channels[4] = enc_channels[1] + enc_channels[2] + enc_channels[3]"
 
   let tdnn0 ← loadTimeDelayNetBlockSharded modelDir
     "speaker_encoder.blocks.0" cfg.melDim c0 k0 d0

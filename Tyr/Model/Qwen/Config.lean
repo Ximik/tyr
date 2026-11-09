@@ -29,9 +29,17 @@ structure QwenConfig where
   rope_theta : Float := 10000.0
   /-- RMSNorm epsilon -/
   rms_norm_eps : Float := 1e-6
-  /-- Maximum sequence length -/
-  max_position_embeddings : Nat := 32768
-  deriving Repr, Inhabited
+  /-- Query heads form whole groups over a nonzero number of K/V heads; checked when the config is built. -/
+  headsValid : 0 < num_attention_heads ∧ 0 < num_key_value_heads ∧
+      num_key_value_heads ∣ num_attention_heads := by decide
+  /-- Rotary embeddings rotate `head_dim / 2` pairs; checked when the config is built. -/
+  headDimEven : 0 < head_dim ∧ 2 ∣ head_dim := by decide
+  /-- Greedy decoding picks among `vocab_size` logits; checked when the config is built. -/
+  vocabPos : 0 < vocab_size := by decide
+  /-- RoPE frequencies and RMSNorm divide by these; checked when the config is built. -/
+  ropeThetaPos : 0 < rope_theta := by native_decide
+  rmsNormEpsPos : 0 < rms_norm_eps := by native_decide
+  deriving Repr
 
 namespace QwenConfig
 
@@ -52,20 +60,7 @@ def fluxKleinTextEncoder : QwenConfig := {
   head_dim := 128            -- same
   rope_theta := 1000000.0    -- different base (10000 for standard)
   rms_norm_eps := 1e-6
-  max_position_embeddings := 40960
 }
-
-/-- Compute the head dimension from hidden size and num heads -/
-def computeHeadDim (cfg : QwenConfig) : Nat :=
-  cfg.hidden_size / cfg.num_attention_heads
-
-/-- Compute the KV dimension (num_kv_heads * head_dim) -/
-def kvDim (cfg : QwenConfig) : Nat :=
-  cfg.num_key_value_heads * cfg.head_dim
-
-/-- Number of heads per KV group (for GQA) -/
-def numHeadsPerKVGroup (cfg : QwenConfig) : Nat :=
-  cfg.num_attention_heads / cfg.num_key_value_heads
 
 end QwenConfig
 

@@ -41,9 +41,6 @@ private def getOrFirst! [Nonempty α] (xs : Array α) (i : Nat) : α :=
     | some x => x
     | none => nativeInvariantFailure "Qwen3TTS talker: empty array"
 
-private def ensureAtLeastOne (n : Nat) : Nat :=
-  if n == 0 then 1 else n
-
 private def optAtOr (vals : Option (Array α)) (idx : Nat) (fallback : α) : α :=
   (vals >>= fun xs => xs[idx]?).getD fallback
 
@@ -173,7 +170,7 @@ structure TalkerCodePredictor (cfg : TalkerConfig) (dtype : RealFloatingDType :=
 namespace TalkerCodePredictor
 
 def init (cfg : TalkerConfig) (device : Device := .CPU) (dtype : RealFloatingDType := float32DType) : IO (TalkerCodePredictor (dtype := dtype) (device := device) cfg) := do
-  let numCodebooks := ensureAtLeastOne (cfg.numCodeGroups - 1)
+  let numCodebooks := cfg.numCodeGroups - 1
 
   let mut inputEmbeddings : Array (Tensor { shape := #[cfg.codePredictorConfig.vocabSize, cfg.hiddenSize], dtype := dtype.val, device := device }) := #[]
   for _ in [:numCodebooks] do
@@ -318,7 +315,7 @@ private def applySampling {batch vocab : Nat}
 private def applySuppressTail {batch vocab : Nat}
     (logits : Tensor { shape := #[batch, vocab], dtype := dtype.val, device := device })
     (suppressTail : Nat)
-    (eosTokenId : UInt64)
+    (eosTokenId : tokenizer.TokenId)
     : Tensor { shape := #[batch, vocab], dtype := dtype.val, device := device } :=
   if suppressTail == 0 then
     logits
@@ -340,7 +337,7 @@ private def applySuppressTail {batch vocab : Nat}
 
 private def applySuppressEos {batch vocab : Nat}
     (logits : Tensor { shape := #[batch, vocab], dtype := dtype.val, device := device })
-    (eosTokenId : UInt64)
+    (eosTokenId : tokenizer.TokenId)
     : Tensor { shape := #[batch, vocab], dtype := dtype.val, device := device } :=
   let idx0 : Tensor { shape := #[vocab], dtype := .Int64, device := .CPU } := Tensor.arange vocab
   let idx : Tensor { shape := #[vocab], dtype := .Int64, device := device } := idx0.to logits.device
@@ -697,8 +694,8 @@ def streamCodes {batch seq : Nat} (cfg : TalkerConfig)
       let firstCodes ← Tensor.toUInt64Array firstCode1d
       for i in [:batch] do
         let isDone := done.getD i false
-        let tok := firstCodes.getD i cfg.codecEosTokenId
-        if !isDone && allowEos && tok == cfg.codecEosTokenId then
+        let tok := firstCodes.getD i cfg.codecEosTokenId.toUInt64
+        if !isDone && allowEos && tok == cfg.codecEosTokenId.toUInt64 then
           done := done.set! i true
           lengths := lengths.set! i step
 

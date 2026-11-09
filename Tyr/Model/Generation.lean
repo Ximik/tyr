@@ -8,6 +8,7 @@
   EOS/finished masks are honest `Bool` tensors (`Tensor.eqScalar` returns
   `.Bool`, matching what the runtime always produced).
 -/
+import Tyr.Tokenizer.Types
 import Tyr.Torch
 import Tyr.Typed
 
@@ -63,7 +64,7 @@ def sampleFromLogits {batch vocab : Nat}
 /-- Return a Bool mask of tokens that belong to `values`. -/
 def tokenInSet {n : Nat}
     (tokens : Tensor { device := device, shape := #[n], dtype := .Int64 })
-    (values : Array UInt64)
+    (values : Array tokenizer.TokenId)
     : Tensor { device := device, shape := #[n], dtype := .Bool } :=
   Id.run do
     let mut mask := falseMaskLike tokens
@@ -76,7 +77,7 @@ def tokenInSet {n : Nat}
 def applyFinishedEos {n : Nat}
     (tokens : Tensor { device := device, shape := #[n], dtype := .Int64 })
     (finished : Tensor { device := device, shape := #[n], dtype := .Bool })
-    (eosToken : UInt64)
+    (eosToken : tokenizer.TokenId)
     : Tensor { device := device, shape := #[n], dtype := .Int64 } :=
   let eos : Tensor { device := device, shape := #[n], dtype := .Int64 } :=
     (Tensor.fullInt #[n] (Int64.ofNat eosToken.toNat)).to tokens.device

@@ -286,7 +286,7 @@ def runMain (argv : List String) : IO UInt32 := do
   IO.println s!"Resolved model dir: {modelDir}"
   let cfg ← Qwen3ASRConfig.loadFromPretrainedDir modelDir
   let tok ← tokenizer.qwen3.loadTokenizer modelDir
-  let pre ← PreprocessorConfig.loadFromPretrainedDir modelDir
+  let pre ← PreprocessorConfig.loadFromPretrainedDir modelDir (requiredSamplingRate := some 16000)
   let ⟨hMel⟩ ← if h : pre.featureSize = cfg.thinkerConfig.audioConfig.numMelBins then pure (PLift.up h) else
     throw (IO.userError s!"preprocessor feature_size {pre.featureSize} does not match num_mel_bins {cfg.thinkerConfig.audioConfig.numMelBins}")
   let ⟨_device, _dtype, model⟩ ← Qwen3ASRForConditionalGeneration.loadSharded modelDir cfg

@@ -8,6 +8,7 @@
   - top-level TTS model
 -/
 import Tyr.Basic
+import Tyr.Tokenizer.Types
 
 namespace torch.qwen3tts
 
@@ -35,9 +36,18 @@ structure SpeakerEncoderConfig where
       encChannels.getD 0 512 = encChannels.getD 1 512 ∧
       encChannels.getD 1 512 = encChannels.getD 2 512 ∧
       encChannels.getD 2 512 = encChannels.getD 3 512 := by decide
+  /-- Five TDNN blocks each read their channels, kernel and dilation; checked when the config is built. -/
+  blockArrays : encChannels.size = 5 ∧ encKernelSizes.size = 5 ∧ encDilations.size = 5 := by decide
+  /-- Res2Net splits the block channels into `encRes2NetScale ≥ 2` equal parts; checked when the
+      config is built. -/
+  res2NetScale : 2 ≤ encRes2NetScale ∧ encRes2NetScale ∣ encChannels.getD 0 512 := by decide
+  /-- Multi-layer feature aggregation concatenates the three SE-Res2Net outputs; checked when the
+      config is built. -/
+  mfaChannels : encChannels.getD 4 1536 =
+      encChannels.getD 1 512 + encChannels.getD 2 512 + encChannels.getD 3 512 := by decide
+  sampleRatePos : 0 < sampleRate := by decide
   deriving Repr
 
-instance : Inhabited SpeakerEncoderConfig := ⟨{}⟩
 
 /-- Codec sub-talker config (predicts codebooks 1..N from codebook 0 context). -/
 structure TalkerCodePredictorConfig where
@@ -48,35 +58,16 @@ structure TalkerCodePredictorConfig where
   numAttentionHeads : Nat := 16
   numKeyValueHeads : Nat := 8
   headDim : Nat := 128
-  hiddenAct : String := "silu"
-  maxPositionEmbeddings : Nat := 32768
-  initializerRange : Float := 0.02
   rmsNormEps : Float := 1e-6
-  useCache : Bool := true
   ropeTheta : Float := 10000.0
-  attentionBias : Bool := false
-  useSlidingWindow : Bool := false
-  slidingWindow : Nat := 4096
-  maxWindowLayers : Nat := 28
-  attentionDropout : Float := 0.0
-  numCodeGroups : Nat := 32
-  deriving Repr, Inhabited
-
-namespace TalkerCodePredictorConfig
-
-/-- Build default per-layer attention pattern:
-    first `maxWindowLayers` full attention, then sliding attention. -/
-def defaultLayerTypes (cfg : TalkerCodePredictorConfig) : Array String :=
-  Id.run do
-    let mut out : Array String := #[]
-    for i in [:cfg.numHiddenLayers] do
-      if cfg.useSlidingWindow && i >= cfg.maxWindowLayers then
-        out := out.push "sliding_attention"
-      else
-        out := out.push "full_attention"
-    out
-
-end TalkerCodePredictorConfig
+  /-- Query heads form whole groups over a nonzero number of K/V heads; checked when the config is built. -/
+  headsValid : 0 < numAttentionHeads ∧ 0 < numKeyValueHeads ∧ numKeyValueHeads ∣ numAttentionHeads := by decide
+  /-- Rotary embeddings rotate `headDim / 2` pairs; checked when the config is built. -/
+  headDimEven : 0 < headDim ∧ 2 ∣ headDim := by decide
+  /-- RoPE frequencies and RMSNorm divide by these; checked when the config is built. -/
+  ropeThetaPos : 0 < ropeTheta := by native_decide
+  rmsNormEpsPos : 0 < rmsNormEps := by native_decide
+  deriving Repr
 
 /-- Main talker config (text-conditioned codec generator). -/
 structure TalkerConfig where
@@ -88,48 +79,61 @@ structure TalkerConfig where
   numAttentionHeads : Nat := 16
   numKeyValueHeads : Nat := 2
   headDim : Nat := 64
-  hiddenAct : String := "silu"
-  maxPositionEmbeddings : Nat := 32768
-  initializerRange : Float := 0.02
   rmsNormEps : Float := 1e-6
-  useCache : Bool := true
   ropeTheta : Float := 10000.0
-  attentionBias : Bool := false
-  useSlidingWindow : Bool := false
-  slidingWindow : Nat := 4096
-  attentionDropout : Float := 0.0
   numCodeGroups : Nat := 32
-  /-- Every codec frame has at least one code group; checked when the config is loaded. -/
-  numCodeGroupsPos : 0 < numCodeGroups := by decide
   textHiddenSize : Nat := 2048
   textVocabSize : Nat := 151936
-  codecEosTokenId : UInt64 := 4198
-  codecThinkId : UInt64 := 4202
-  codecNoThinkId : UInt64 := 4203
-  codecThinkBosId : UInt64 := 4204
-  codecThinkEosId : UInt64 := 4205
-  codecPadId : UInt64 := 4196
-  codecBosId : UInt64 := 4197
-  spkId : Array (String × UInt64) := #[]
+  codecEosTokenId : tokenizer.TokenId := 2150
+  codecThinkId : tokenizer.TokenId := 2154
+  codecNoThinkId : tokenizer.TokenId := 2155
+  codecThinkBosId : tokenizer.TokenId := 2156
+  codecThinkEosId : tokenizer.TokenId := 2157
+  codecPadId : tokenizer.TokenId := 2148
+  codecBosId : tokenizer.TokenId := 2149
+  spkId : Array (String × tokenizer.TokenId) := #[]
   spkIsDialect : Array (String × String) := #[]
-  codecLanguageId : Array (String × UInt64) := #[]
+  codecLanguageId : Array (String × tokenizer.TokenId) := #[]
+  /-- Every codec frame has codebook 0 plus at least one residual codebook the code predictor
+      generates; checked when the config is loaded. -/
+  residualCodeGroups : 1 < numCodeGroups := by decide
+  /-- Query heads form whole groups over a nonzero number of K/V heads; checked when the config is built. -/
+  headsValid : 0 < numAttentionHeads ∧ 0 < numKeyValueHeads ∧ numKeyValueHeads ∣ numAttentionHeads := by decide
+  /-- Rotary embeddings rotate `headDim / 2` pairs; checked when the config is built. -/
+  headDimEven : 0 < headDim ∧ 2 ∣ headDim := by decide
+  /-- RoPE frequencies and RMSNorm divide by these; checked when the config is built. -/
+  ropeThetaPos : 0 < ropeTheta := by native_decide
+  rmsNormEpsPos : 0 < rmsNormEps := by native_decide
+  /-- Codec special, speaker and language ids index the codec embedding; checked when the config is built. -/
+  codecIdsInVocab :
+    codecEosTokenId.toNat < vocabSize ∧ codecThinkId.toNat < vocabSize ∧ codecNoThinkId.toNat < vocabSize ∧
+    codecThinkBosId.toNat < vocabSize ∧ codecThinkEosId.toNat < vocabSize ∧ codecPadId.toNat < vocabSize ∧
+    codecBosId.toNat < vocabSize := by decide
+  speakerIdsInVocab : ∀ e ∈ spkId, e.2.toNat < vocabSize := by decide
+  languageIdsInVocab : ∀ e ∈ codecLanguageId, e.2.toNat < vocabSize := by decide
   deriving Repr
 
-instance : Inhabited TalkerConfig := ⟨{}⟩
 
 /-- Top-level Qwen3-TTS config. -/
 structure Qwen3TTSConfig where
   talkerConfig : TalkerConfig := {}
   speakerEncoderConfig : SpeakerEncoderConfig := {}
-  tokenizerType : String := "qwen3_tts_tokenizer_12hz"
-  ttsModelSize : String := "4b"
   ttsModelType : String := "base"  -- base / custom_voice / voice_design
-  imStartTokenId : UInt64 := 151644
-  imEndTokenId : UInt64 := 151645
-  ttsPadTokenId : UInt64 := 151671
-  ttsBosTokenId : UInt64 := 151672
-  ttsEosTokenId : UInt64 := 151673
-  deriving Repr, Inhabited
+  imStartTokenId : tokenizer.TokenId := 151644
+  imEndTokenId : tokenizer.TokenId := 151645
+  ttsPadTokenId : tokenizer.TokenId := 151671
+  ttsBosTokenId : tokenizer.TokenId := 151672
+  ttsEosTokenId : tokenizer.TokenId := 151673
+  /-- Prompt text ids index the talker text embedding; checked when the config is built. -/
+  textIdsInVocab :
+    imStartTokenId.toNat < talkerConfig.textVocabSize ∧ imEndTokenId.toNat < talkerConfig.textVocabSize ∧
+    ttsPadTokenId.toNat < talkerConfig.textVocabSize ∧ ttsBosTokenId.toNat < talkerConfig.textVocabSize ∧
+    ttsEosTokenId.toNat < talkerConfig.textVocabSize := by decide
+  /-- Base models condition on a speaker embedding in the talker's hidden space; checked when
+      the config is built. -/
+  speakerMatchesTalker :
+    ttsModelType = "base" → speakerEncoderConfig.encDim = talkerConfig.hiddenSize := by decide
+  deriving Repr
 
 namespace Qwen3TTSConfig
 

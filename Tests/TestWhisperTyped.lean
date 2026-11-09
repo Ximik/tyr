@@ -10,7 +10,7 @@ private def cfg : WhisperConfig := {
   encoderLayers := 1, encoderAttentionHeads := 2, encoderFfnDim := 12,
   decoderLayers := 2, decoderAttentionHeads := 2, decoderFfnDim := 12,
   maxSourcePositions := 4, maxTargetPositions := 8,
-  padTokenId := 0, bosTokenId := 1, eosTokenId := 2, decoderStartTokenId := 1 }
+  eosTokenId := 2, decoderStartTokenId := 1 }
 
 private def features : Tensor { shape := #[1, 4, 5], dtype := .Float32, device := .CPU } :=
   (Tensor.fromFloatArray (Array.ofFn (n := 20) fun i => Float.sin (i.val.toFloat * 0.3))).reshape #[1, 4, 5]
@@ -142,7 +142,7 @@ private def roundTrip {α : Type} [TensorStruct α] (value : α) (dir : String) 
   close (← model.decode tokens encoded) (← restored.decode tokens other) 0
 
 @[test] def testWhisperWaveformGreedyBeamAndSampling : IO Unit := do
-  let audioCfg := { cfg with maxSourcePositions := 16, maxTargetPositions := 16, eosTokenId := 15, maxTargetPositionsPos := by decide }
+  let audioCfg := { cfg with maxSourcePositions := 16, maxTargetPositions := 16, eosTokenId := 15, maxTargetPositionsPos := by decide, eosInVocab := by decide }
   let model ← WhisperForConditionalGeneration.init audioCfg
   let model := TensorStruct.detach model
   let norm : LayerNorm 8 .Float32 := {
@@ -152,7 +152,7 @@ private def roundTrip {α : Type} [TensorStruct α] (value : α) (dir : String) 
   let tok : tokenizer.qwen3.QwenTokenizer := { (default : tokenizer.qwen3.QwenTokenizer) with
     vocabSize := 16, idToToken := Array.replicate 16 "a" }
   let pre : qwen3asr.PreprocessorConfig := {
-    featureSize := 4, samplingRate := 16000, hopLength := 64, nFft := 64,
+    featureSize := 4, hopLength := 64, nFft := 64,
     nSamples := 2048, nbMaxFrames := 32, chunkLength := 0 }
   let waveform := Array.ofFn (n := 1024) fun i => 0.1 * Float.sin (i.val.toFloat * 0.2)
   let greedy : WhisperDecodeOptions := {

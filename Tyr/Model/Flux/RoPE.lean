@@ -26,22 +26,20 @@ private def ropeAxis {batch seq : Nat}
 
 /-- Four-axis rotary matrices. Each axis dimension is even and their sum is the head dimension. -/
 def ropeEmbed {batch seq head_dim : Nat}
-    (ids : Tensor { device := device, shape := #[batch, seq, 4], dtype := .Int64 }) (axes_dims : Array Nat) (theta : Nat := 2000)
+    (ids : Tensor { device := device, shape := #[batch, seq, 4], dtype := .Int64 }) (axes_dims : Array Nat)
+    (hAxes : axes_dims.size = 4 ∧ axes_dims.toList.all (· % 2 == 0) ∧ axes_dims.toList.sum = head_dim)
+    (theta : Nat := 2000) (_hTheta : 0 < theta := by decide)
     : Tensor { device := device, shape := #[batch, 1, seq, head_dim / 2, 2, 2], dtype := .Float32 } :=
-  if axes_dims.size != 4 || axes_dims.any (fun d => d % 2 != 0) ||
-      axes_dims.foldl (fun n d => n + d) 0 != head_dim || theta == 0 then
-    nativeInvariantFailure "Flux RoPE requires four even axis dimensions summing to head_dim and a positive theta"
-  else
-    let d0 := axes_dims[0]!
-    let d1 := axes_dims[1]!
-    let d2 := axes_dims[2]!
-    let d3 := axes_dims[3]!
-    let r0 := ropeAxis (axisIds ids 0) d0 theta
-    let r1 := ropeAxis (axisIds ids 1) d1 theta
-    let r2 := ropeAxis (axisIds ids 2) d2 theta
-    let r3 := ropeAxis (axisIds ids 3) d3 theta
-    let joined := Tensor.catManyChecked #[r0.packShape, r1.packShape, r2.packShape, r3.packShape] 2 #[batch, seq, head_dim / 2, 2, 2]
-    joined.reshape #[batch, 1, seq, head_dim / 2, 2, 2]
+  let d0 := axes_dims[0]'(by omega)
+  let d1 := axes_dims[1]'(by omega)
+  let d2 := axes_dims[2]'(by omega)
+  let d3 := axes_dims[3]'(by omega)
+  let r0 := ropeAxis (axisIds ids 0) d0 theta
+  let r1 := ropeAxis (axisIds ids 1) d1 theta
+  let r2 := ropeAxis (axisIds ids 2) d2 theta
+  let r3 := ropeAxis (axisIds ids 3) d3 theta
+  let joined := Tensor.catManyChecked #[r0.packShape, r1.packShape, r2.packShape, r3.packShape] 2 #[batch, seq, head_dim / 2, 2, 2]
+  joined.reshape #[batch, 1, seq, head_dim / 2, 2, 2]
 
 /-- Apply rotary matrices in Float32 and restore the activation dtype. -/
 def applyRope {batch seq n_head head_dim : Nat}

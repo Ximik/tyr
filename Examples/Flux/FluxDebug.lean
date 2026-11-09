@@ -187,8 +187,8 @@ def runDebug (cfg : DebugConfig) (prompt : String) : IO Unit := do
   saveDebug cfg.debugDir "txt_proj" txt_proj
 
   -- RoPE embeddings
-  let img_pe := ropeEmbed (head_dim := fluxCfg.head_dim) imgIds fluxCfg.axes_dims fluxCfg.theta
-  let txt_pe := ropeEmbed (head_dim := fluxCfg.head_dim) txtIds fluxCfg.axes_dims fluxCfg.theta
+  let img_pe := ropeEmbed (head_dim := fluxCfg.head_dim) imgIds fluxCfg.axes_dims fluxCfg.axesValid fluxCfg.theta fluxCfg.thetaPos
+  let txt_pe := ropeEmbed (head_dim := fluxCfg.head_dim) txtIds fluxCfg.axes_dims fluxCfg.axesValid fluxCfg.theta fluxCfg.thetaPos
   saveDebug cfg.debugDir "img_pe" img_pe
   saveDebug cfg.debugDir "txt_pe" txt_pe
 

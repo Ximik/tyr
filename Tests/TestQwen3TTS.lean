@@ -43,6 +43,11 @@ private def tinyCfg : Qwen3TTSConfig :=
       sampleRate := 24000
     }
     ttsModelType := "base"
+    imStartTokenId := 100
+    imEndTokenId := 101
+    ttsPadTokenId := 102
+    ttsBosTokenId := 103
+    ttsEosTokenId := 104
   }
 
 @[test]
@@ -282,7 +287,9 @@ def testQwen3TTSSpeakerEmbeddingAlignsFeatureDType : IO Unit := do
     encAttentionChannels := 4
     encRes2NetScale := 2
     encSeChannels := 4
-    residualChannels := by decide } }
+    residualChannels := by decide
+    res2NetScale := by decide
+    mfaChannels := by decide } }
   let features : Tensor { shape := #[2, 12, cfg.speakerEncoderConfig.melDim], dtype := .Float32, device := .CPU } ←
     Tensor.randn #[2, 12, cfg.speakerEncoderConfig.melDim]
   for bf16Weights in #[false, true] do
@@ -312,6 +319,7 @@ def testQwen3TTSSpeakerEmbeddingUnavailableForNonBaseModel : IO Unit := do
   let cfg : Qwen3TTSConfig := {
     tinyCfg with
     ttsModelType := "custom_voice"
+    speakerMatchesTalker := by decide
   }
   let model ← Qwen3TTSForConditionalGeneration.init cfg
   let mel : Tensor { shape := #[1, 8, cfg.speakerEncoderConfig.melDim], dtype := .Float32, device := .CPU } ← Tensor.randn #[1, 8, cfg.speakerEncoderConfig.melDim]

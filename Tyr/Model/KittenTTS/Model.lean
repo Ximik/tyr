@@ -1289,13 +1289,13 @@ def init (cfg : KittenTTSConfig) (device : Device := .CPU) : IO (SourceModuleHnN
 def forward {baseFrames : Nat}
     (m : SourceModuleHnNSF (device := device) cfg)
     (f0 : Tensor { shape := #[1, GeneratorConfig.waveSamples cfg.generator baseFrames, 1], dtype := .Float32, device := device })
+    (hb : 0 < baseFrames)
     : IO
       (Tensor { shape := #[1, GeneratorConfig.waveSamples cfg.generator baseFrames, 1], dtype := .Float32, device := device } ×
        Tensor { shape := #[1, GeneratorConfig.waveSamples cfg.generator baseFrames, 1], dtype := .Float32, device := device } ×
        Tensor { shape := #[1, GeneratorConfig.waveSamples cfg.generator baseFrames, 1], dtype := .Float32, device := device }) := do
   let waveFrames := GeneratorConfig.waveSamples cfg.generator baseFrames
-  let ⟨_hWave⟩ ← if h : 1 ≤ waveFrames then pure (PLift.up h) else
-    throw <| IO.userError "KittenTTS source module needs at least one waveform sample"
+  have _hWave : 1 ≤ waveFrames := cfg.generator.waveSamples_pos hb
   let harmonics := cfg.generator.harmonicCount + 1
   let mult : Tensor { shape := #[1, 1, harmonics], dtype := .Float32, device := device } := Tensor.reshape (harmonicMultipliers cfg.generator.harmonicCount) #[1, 1, harmonics]
   let multE : Tensor { shape := #[1, waveFrames, harmonics], dtype := .Float32, device := device } := Tensor.expand mult #[1, waveFrames, harmonics]
@@ -1558,7 +1558,7 @@ def debugForward {baseFrames : Nat}
   let f0Up : Tensor { shape := #[1, 1, GeneratorConfig.waveSamples cfg.generator baseFrames], dtype := .Float32, device := device } :=
     repeatNearest1d (scale := GeneratorConfig.sourceUpsample cfg.generator) f0Curve
   let f0Seq : Tensor { shape := #[1, GeneratorConfig.waveSamples cfg.generator baseFrames, 1], dtype := .Float32, device := device } := cfToSeq f0Up
-  let (harSource, _noiseSource, _uv) ← m.source.forward f0Seq
+  let (harSource, _noiseSource, _uv) ← m.source.forward f0Seq hb
   let har1d : Tensor { shape := #[GeneratorConfig.waveSamples cfg.generator baseFrames], dtype := .Float32, device := device } :=
     Tensor.reshape harSource #[GeneratorConfig.waveSamples cfg.generator baseFrames]
   let har : Tensor { shape := #[1, GeneratorConfig.stftFeatureChannels cfg.generator, GeneratorConfig.harFrames cfg.generator baseFrames], dtype := .Float32, device := device } :=
@@ -1778,27 +1778,6 @@ private def prepareInputs {seq : Nat}
   (inputIds, refStyle)
 
 def init (cfg : KittenTTSConfig) (device : Device := .CPU) : IO (Model (device := device) cfg) := do
-  if cfg.hiddenDim % 2 != 0 then
-    throw <| IO.userError s!"KittenTTS requires hiddenDim divisible by 2, got {cfg.hiddenDim}"
-  if cfg.plbert.hiddenSize % cfg.plbert.numAttentionHeads != 0 then
-    throw <| IO.userError
-      s!"KittenTTS ALBERT hidden size must be divisible by numAttentionHeads, got {cfg.plbert.hiddenSize} and {cfg.plbert.numAttentionHeads}"
-  if cfg.generator.upsampleRates.isEmpty then
-    throw <| IO.userError "KittenTTS generator requires at least one upsample stage"
-  if cfg.generator.upsampleKernelSizes.size != cfg.generator.upsampleRates.size then
-    throw <| IO.userError
-      s!"KittenTTS generator upsampleKernelSizes/upsampleRates mismatch: {cfg.generator.upsampleKernelSizes.size} vs {cfg.generator.upsampleRates.size}"
-  if cfg.generator.resblockKernelSizes.isEmpty then
-    throw <| IO.userError "KittenTTS generator requires at least one resblock kernel size"
-  if cfg.generator.resblockDilationSizes.size != cfg.generator.resblockKernelSizes.size then
-    throw <| IO.userError
-      s!"KittenTTS generator resblockDilationSizes/resblockKernelSizes mismatch: {cfg.generator.resblockDilationSizes.size} vs {cfg.generator.resblockKernelSizes.size}"
-  if GeneratorConfig.finalChannels cfg.generator == 0 then
-    throw <| IO.userError
-      s!"KittenTTS generator final channel count collapsed to zero; upsampleInitialChannel={cfg.generator.upsampleInitialChannel}, stages={cfg.generator.upsampleRates.size}"
-  if KittenTTSConfig.decoderChannels cfg != cfg.generator.upsampleInitialChannel then
-    throw <| IO.userError
-      s!"KittenTTS decoder/generator channel mismatch: decoderChannels={KittenTTSConfig.decoderChannels cfg}, upsampleInitialChannel={cfg.generator.upsampleInitialChannel}"
   let bert ← KittenAlbert.init (device := device) cfg.nToken cfg.plbert
   let bertEncoder ← LinearNorm.init (device := device) cfg.plbert.hiddenSize cfg.hiddenDim
   let predictor ← ProsodyPredictor.init (device := device) cfg

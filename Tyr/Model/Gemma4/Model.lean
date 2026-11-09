@@ -69,6 +69,12 @@ def forward4d {a b c dim : Nat}
 
 end Gemma4RMSNorm
 
+/-- Final logits, softcapped as `cap * tanh (logits / cap)` when the config sets a cap. -/
+private def capLogits {σ : StaticSpec} (cfg : Config) (logits : Tensor σ) : Tensor σ :=
+  match cfg.final_logit_softcapping with
+  | some cap => softcap logits cap
+  | none => logits
+
 private def rmsNormNoScale2d {n dim : Nat}
     (x : Tensor { device := device, shape := #[n, dim], dtype := dtype })
     (eps : Float := 1e-6)
@@ -149,7 +155,7 @@ def forward {tokens : Nat}
   let logitsDyn : Tensor { device := device, shape := #[tokens, cfg.num_experts], dtype := .Float32 } := einsumChecked "eh,th->te" m.proj normed
   let logits : Tensor { device := device, shape := #[tokens, cfg.num_experts], dtype := .Float32 } := Tensor.reshape logitsDyn #[tokens, cfg.num_experts]
   let probs : Tensor { device := device, shape := #[tokens, cfg.num_experts], dtype := .Float32 } := Tensor.softmax logits
-  let (topValsRaw, topIdx) := Tensor.topKLast2d! probs cfg.top_k_experts
+  let (topValsRaw, topIdx) := Tensor.topKLast2d probs cfg.top_k_experts cfg.topKValid
   let denom : Tensor { device := device, shape := #[tokens, 1], dtype := .Float32 } := Tensor.sumDim topValsRaw 1 true
   let denom : Tensor { device := device, shape := #[tokens, cfg.top_k_experts], dtype := .Float32 } := Tensor.expand denom #[tokens, cfg.top_k_experts]
   let topVals : Tensor { device := device, shape := #[tokens, cfg.top_k_experts], dtype := .Float32 } := Tensor.div topValsRaw denom
@@ -1437,7 +1443,7 @@ def forward {batch seq : Nat}
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     : Tensor { device := device, shape := #[batch, seq, cfg.vocab_size], dtype := dtype } :=
   let hidden := m.model.forward cfg inputIds
-  softcap (Tensor.linear3d hidden m.lmHead) cfg.final_logit_softcapping
+  capLogits cfg (Tensor.linear3d hidden m.lmHead)
 
 def forwardEmbeds {batch seq : Nat}
     (cfg : Config)
@@ -1446,7 +1452,7 @@ def forwardEmbeds {batch seq : Nat}
     (inputsEmbeds : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
     : Tensor { device := device, shape := #[batch, seq, cfg.vocab_size], dtype := dtype } :=
   let hidden := m.model.forwardEmbeds cfg inputIds inputsEmbeds
-  softcap (Tensor.linear3d hidden m.lmHead) cfg.final_logit_softcapping
+  capLogits cfg (Tensor.linear3d hidden m.lmHead)
 
 def forwardEmbedsWithPerLayerInputs {batch seq : Nat}
     (cfg : Config)
@@ -1456,7 +1462,7 @@ def forwardEmbedsWithPerLayerInputs {batch seq : Nat}
     (perLayerInputs : Option (Tensor { device := device, shape := #[batch, seq, cfg.num_hidden_layers, cfg.hidden_size_per_layer_input], dtype := dtype }))
     : Tensor { device := device, shape := #[batch, seq, cfg.vocab_size], dtype := dtype } :=
   let hidden := m.model.forwardEmbedsWithPerLayerInputs cfg inputIds inputsEmbeds perLayerInputs
-  softcap (Tensor.linear3d hidden m.lmHead) cfg.final_logit_softcapping
+  capLogits cfg (Tensor.linear3d hidden m.lmHead)
 
 def forwardEmbedsWithPerLayerInputsBidirectionalVision {batch seq : Nat}
     (cfg : Config)
@@ -1487,7 +1493,7 @@ def forwardEmbedsWithPerLayerInputsBidirectionalVision {batch seq : Nat}
       fullSinAll
       slidingAttnMask
       fullAttnMask
-  softcap (Tensor.linear3d hidden m.lmHead) cfg.final_logit_softcapping
+  capLogits cfg (Tensor.linear3d hidden m.lmHead)
 
 private def precomputeDecodeRotary {maxLen : Nat}
     (cfg : Config)
@@ -1524,7 +1530,7 @@ private def prefillCaches {batch seq maxLen : Nat}
       fullCosAll
       fullSinAll
   let lastHidden : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := dtype } := sliceTyped hidden 1 (seq - 1) 1
-  let logits3 : Tensor { device := device, shape := #[batch, 1, cfg.vocab_size], dtype := dtype } := softcap (Tensor.linear3d lastHidden m.lmHead) cfg.final_logit_softcapping
+  let logits3 : Tensor { device := device, shape := #[batch, 1, cfg.vocab_size], dtype := dtype } := capLogits cfg (Tensor.linear3d lastHidden m.lmHead)
   pure (Tensor.reshape logits3 #[batch, cfg.vocab_size], cache')
 
 private def prefillCachesFromEmbeds {batch seq maxLen : Nat}
@@ -1553,7 +1559,7 @@ private def prefillCachesFromEmbeds {batch seq maxLen : Nat}
       fullCosAll
       fullSinAll
   let lastHidden : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := dtype } := sliceTyped hidden 1 (seq - 1) 1
-  let logits3 : Tensor { device := device, shape := #[batch, 1, cfg.vocab_size], dtype := dtype } := softcap (Tensor.linear3d lastHidden m.lmHead) cfg.final_logit_softcapping
+  let logits3 : Tensor { device := device, shape := #[batch, 1, cfg.vocab_size], dtype := dtype } := capLogits cfg (Tensor.linear3d lastHidden m.lmHead)
   pure (Tensor.reshape logits3 #[batch, cfg.vocab_size], cache')
 
 private def prefillCachesFromEmbedsWithPerLayerInputs {batch seq maxLen : Nat}
@@ -1584,7 +1590,7 @@ private def prefillCachesFromEmbedsWithPerLayerInputs {batch seq maxLen : Nat}
       fullCosAll
       fullSinAll
   let lastHidden : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := dtype } := sliceTyped hidden 1 (seq - 1) 1
-  let logits3 : Tensor { device := device, shape := #[batch, 1, cfg.vocab_size], dtype := dtype } := softcap (Tensor.linear3d lastHidden m.lmHead) cfg.final_logit_softcapping
+  let logits3 : Tensor { device := device, shape := #[batch, 1, cfg.vocab_size], dtype := dtype } := capLogits cfg (Tensor.linear3d lastHidden m.lmHead)
   pure (Tensor.reshape logits3 #[batch, cfg.vocab_size], cache')
 
 private def prefillCachesFromEmbedsWithPerLayerInputsBidirectionalVision {batch seq maxLen : Nat}
@@ -1619,7 +1625,7 @@ private def prefillCachesFromEmbedsWithPerLayerInputsBidirectionalVision {batch 
       slidingAttnMask
       fullAttnMask
   let lastHidden : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := dtype } := sliceTyped hidden 1 (seq - 1) 1
-  let logits3 : Tensor { device := device, shape := #[batch, 1, cfg.vocab_size], dtype := dtype } := softcap (Tensor.linear3d lastHidden m.lmHead) cfg.final_logit_softcapping
+  let logits3 : Tensor { device := device, shape := #[batch, 1, cfg.vocab_size], dtype := dtype } := capLogits cfg (Tensor.linear3d lastHidden m.lmHead)
   pure (Tensor.reshape logits3 #[batch, cfg.vocab_size], cache')
 
 private def decodeStep {batch maxLen : Nat}
@@ -1646,14 +1652,14 @@ private def decodeStep {batch maxLen : Nat}
       slidingSinAll
       fullCosAll
       fullSinAll
-  let logits3 : Tensor { device := device, shape := #[batch, 1, cfg.vocab_size], dtype := dtype } := softcap (Tensor.linear3d hidden m.lmHead) cfg.final_logit_softcapping
+  let logits3 : Tensor { device := device, shape := #[batch, 1, cfg.vocab_size], dtype := dtype } := capLogits cfg (Tensor.linear3d hidden m.lmHead)
   pure (Tensor.reshape logits3 #[batch, cfg.vocab_size], cache')
 
 private partial def decodeLoopCached {batch maxLen : Nat}
     (cfg : Config)
     (m : Gemma4ForCausalLM (dtype := dtype) (device := device) cfg)
     (strategy : SamplingStrategy)
-    (eosTokenIds : Array UInt64)
+    (eosTokenIds : Array tokenizer.TokenId)
     (finished : Tensor { device := device, shape := #[batch], dtype := .Bool })
     (remaining : Nat)
     (cache : Gemma4Cache (dtype := dtype) (device := device) cfg batch maxLen)
@@ -1734,7 +1740,7 @@ private def generateCore {batch seq : Nat}
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (maxNewTokens : Nat := 256)
     (strategy : SamplingStrategy := .greedy)
-    (eosTokenIds : Array UInt64 := #[])
+    (eosTokenIds : Array tokenizer.TokenId := #[])
     (onStep : Option (StreamCallback (device := device) batch) := none)
     : IO (Sigma (fun outSeq => Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })) := do
   let support ← dtype.acquireConstantSupport device
@@ -1780,7 +1786,7 @@ private def generateFromEmbedsCore {batch seq : Nat}
     (inputsEmbeds : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
     (maxNewTokens : Nat := 256)
     (strategy : SamplingStrategy := .greedy)
-    (eosTokenIds : Array UInt64 := #[])
+    (eosTokenIds : Array tokenizer.TokenId := #[])
     (onStep : Option (StreamCallback (device := device) batch) := none)
     : IO (Sigma (fun outSeq => Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })) := do
   let support ← dtype.acquireConstantSupport device
@@ -1835,7 +1841,7 @@ private def generateFromEmbedsCoreWithPerLayerInputs {batch seq : Nat}
     (perLayerInputs : Option (Tensor { device := device, shape := #[batch, seq, cfg.num_hidden_layers, cfg.hidden_size_per_layer_input], dtype := dtype }))
     (maxNewTokens : Nat := 256)
     (strategy : SamplingStrategy := .greedy)
-    (eosTokenIds : Array UInt64 := #[])
+    (eosTokenIds : Array tokenizer.TokenId := #[])
     (onStep : Option (StreamCallback (device := device) batch) := none)
     (prefillMasks : Option (Tensor { device := device, shape := #[batch, seq, seq], dtype := .Int64 } × Tensor { device := device, shape := #[batch, seq, seq], dtype := .Int64 }) := none)
     : IO (Sigma (fun outSeq => Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })) := do
@@ -1908,7 +1914,7 @@ def generate {batch seq : Nat}
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (maxNewTokens : Nat := 256)
     (strategy : SamplingStrategy := .greedy)
-    (eosTokenIds : Array UInt64 := #[])
+    (eosTokenIds : Array tokenizer.TokenId := #[])
     : IO (Sigma (fun outSeq => Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })) :=
   generateCore cfg m inputIds maxNewTokens strategy eosTokenIds none
 
@@ -1919,7 +1925,7 @@ def generateFromEmbeds {batch seq : Nat}
     (inputsEmbeds : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
     (maxNewTokens : Nat := 256)
     (strategy : SamplingStrategy := .greedy)
-    (eosTokenIds : Array UInt64 := #[])
+    (eosTokenIds : Array tokenizer.TokenId := #[])
     : IO (Sigma (fun outSeq => Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })) :=
   generateFromEmbedsCore cfg m inputIds inputsEmbeds maxNewTokens strategy eosTokenIds none
 
@@ -1931,7 +1937,7 @@ def generateFromEmbedsWithPerLayerInputs {batch seq : Nat}
     (perLayerInputs : Option (Tensor { device := device, shape := #[batch, seq, cfg.num_hidden_layers, cfg.hidden_size_per_layer_input], dtype := dtype }))
     (maxNewTokens : Nat := 256)
     (strategy : SamplingStrategy := .greedy)
-    (eosTokenIds : Array UInt64 := #[])
+    (eosTokenIds : Array tokenizer.TokenId := #[])
     (prefillMasks : Option (Tensor { device := device, shape := #[batch, seq, seq], dtype := .Int64 } × Tensor { device := device, shape := #[batch, seq, seq], dtype := .Int64 }) := none)
     : IO (Sigma (fun outSeq => Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })) :=
   generateFromEmbedsCoreWithPerLayerInputs
@@ -1944,7 +1950,7 @@ def generateStream {batch seq : Nat}
     (onStep : StreamCallback (device := device) batch)
     (maxNewTokens : Nat := 256)
     (strategy : SamplingStrategy := .greedy)
-    (eosTokenIds : Array UInt64 := #[])
+    (eosTokenIds : Array tokenizer.TokenId := #[])
     : IO (Sigma (fun outSeq => Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })) :=
   generateCore cfg m inputIds maxNewTokens strategy eosTokenIds (some onStep)
 
@@ -1956,7 +1962,7 @@ def generateFromEmbedsStream {batch seq : Nat}
     (onStep : StreamCallback (device := device) batch)
     (maxNewTokens : Nat := 256)
     (strategy : SamplingStrategy := .greedy)
-    (eosTokenIds : Array UInt64 := #[])
+    (eosTokenIds : Array tokenizer.TokenId := #[])
     : IO (Sigma (fun outSeq => Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })) :=
   generateFromEmbedsCore cfg m inputIds inputsEmbeds maxNewTokens strategy eosTokenIds (some onStep)
 
@@ -1969,7 +1975,7 @@ def generateFromEmbedsStreamWithPerLayerInputs {batch seq : Nat}
     (onStep : StreamCallback (device := device) batch)
     (maxNewTokens : Nat := 256)
     (strategy : SamplingStrategy := .greedy)
-    (eosTokenIds : Array UInt64 := #[])
+    (eosTokenIds : Array tokenizer.TokenId := #[])
     (prefillMasks : Option (Tensor { device := device, shape := #[batch, seq, seq], dtype := .Int64 } × Tensor { device := device, shape := #[batch, seq, seq], dtype := .Int64 }) := none)
     : IO (Sigma (fun outSeq => Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })) :=
   generateFromEmbedsCoreWithPerLayerInputs
