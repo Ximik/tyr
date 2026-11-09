@@ -146,11 +146,6 @@ def LayerCache.append (lc : LayerCache batch maxSeqLen numKvHeads headDim dtype 
   let ⟨_hpos⟩ ← if h : pos < maxSeqLen then pure (PLift.up h) else
     throw <| IO.userError "KV cache append exceeds capacity"
   -- Validate both sources and destinations before either update.
-  -- Interoperability can introduce handles whose metadata violates an index.
-  for result in [keys.validate, values.validate, newK.validate, newV.validate] do
-    match result with
-    | .ok () => pure ()
-    | .error message => throw <| IO.userError s!"KV cache append: {message}"
   -- Dynamic dtype/device policies also require physical equality.
   if keys.raw.device != values.raw.device || keys.raw.dtype != values.raw.dtype ||
       newK.raw.device != keys.raw.device || newV.raw.device != values.raw.device ||
@@ -243,9 +238,6 @@ def Cache.attendLayer
   if numQHeads == 0 || numKvHeads == 0 ||
       newQ.raw.device != lc.keys.raw.device || newQ.raw.dtype != lc.keys.raw.dtype then
     throw <| IO.userError "KV cache query heads, device or dtype mismatch"
-  match newQ.validate with
-  | .ok () => pure ()
-  | .error message => throw <| IO.userError s!"KV cache query: {message}"
   let validLen := cache.currentLen + 1
   let cache' ← cache.appendLayer layerIdx newK newV
   let some updatedLayer := cache'.layers[layerIdx]?

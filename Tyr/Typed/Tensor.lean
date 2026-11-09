@@ -181,13 +181,6 @@ def atDevice? {σ : StaticSpec} (tensor : Tensor σ) (device : Device) :
 def actualSpec {σ : StaticSpec} (t : Tensor σ) : TensorSpec :=
   { shape := t.raw.runtimeShape, dtype := t.raw.dtype }
 
-/-- Only return native results that satisfy their complete output specification.
-A mismatch terminates at the native invariant boundary. -/
-def checkedResult {α : Type} [Nonempty α] (operation : String) (result : Except String α) : α :=
-  match result with
-  | .ok result => result
-  | .error message => nativeInvariantFailure s!"Tensor.{operation}: {message}"
-
 def ofTensor? {shape : Shape} (dtype : DType) (raw : RawTensor) :
     Option (Tensor { shape, dtype, device := raw.device }) :=
   if raw.runtimeShape == shape && raw.dtype == dtype then
@@ -209,11 +202,6 @@ def toSome {σ : StaticSpec} (tensor : Tensor σ) : Sigma Tensor :=
 def packDType {σ : StaticSpec} (tensor : Tensor σ) : SomeDTypeTensor σ.shape σ.device :=
   ⟨σ.dtype, tensor⟩
 
-/-- Recover the native dtype as an existential index without casting
-values, detaching the graph, or forgetting shape/placement. -/
-def reifyDType {σ : StaticSpec} (tensor : Tensor σ) :
-    Except String (SomeDTypeTensor σ.shape σ.device) :=
-  pure (SomeDTypeTensor.ofRaw! "reifyDType" tensor.raw)
 
 end Tensor
 

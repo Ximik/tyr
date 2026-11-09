@@ -23,7 +23,6 @@ private def checked {α : Type} (result : Except String α) : IO α :=
   LeanTest.assertEqual (← restored.toFloatArray) (← original.toFloatArray)
   LeanTest.assertEqual original.raw.dtype .Float32
   LeanTest.assertTrue (complex128.raw.device == original.raw.device)
-  LeanTest.assertTrue complex128.validate.toOption.isSome
   -- The ordinary convenience uses the same checked native conversion.
   LeanTest.assertEqual (original.castDType .Complex64).raw.dtype .Complex64
 
@@ -41,7 +40,6 @@ private def checked {α : Type} (result : Except String α) : IO α :=
     Tensor.eyeFor (n := 2) .Complex64 (.CPU)
   LeanTest.assertEqual identity.raw.dtype .Complex64
   LeanTest.assertTrue (identity.raw.device == .CPU)
-  LeanTest.assertTrue identity.validate.toOption.isSome
   let restored ← checked (identity.castDType? .Float32)
   LeanTest.assertEqual (← restored.toFloatArray) #[1, 0, 0, 1]
 
@@ -93,7 +91,6 @@ example (_float8 : Tensor ⟨#[1], .Float8E4M3FN, .CPU⟩) (_floats : Tensor ⟨
     (#[3, 6], Tensor.divScalar lhs 2)]
   for (expected, output) in cases do
     LeanTest.assertEqual output.raw.dtype .Float32
-    LeanTest.assertTrue output.validate.toOption.isSome
     LeanTest.assertEqual (← output.toFloatArray) expected
   LeanTest.assertEqual (← lhs.toFloatArray) #[6, 12]
   LeanTest.assertEqual (← rhs.toFloatArray) #[2, 3]

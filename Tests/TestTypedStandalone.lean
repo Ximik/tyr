@@ -103,9 +103,6 @@ def testFoundationTypedOperationsAndRawMetadata : IO Unit := do
   let a := Tensor.full #[2, 3] 2.0
   let b := Tensor.full #[3, 4] 3.0
   let product : Tensor { shape := #[2, 4], dtype := .Float32, device := .CPU } := Tensor.mm a b
-  match product.validate with
-  | .ok () => pure ()
-  | .error message => LeanTest.fail message
   LeanTest.assertEqual (Tensor.item (Tensor.sumAll product)) 144.0
     "Standalone typed imports must execute native matrix operations"
   LeanTest.assertTrue (!(toString product.raw).isEmpty)
@@ -118,17 +115,12 @@ def testExistentialTensorPreservesFullSpec : IO Unit := do
   let packed : Sigma Tensor := (Tensor.onesFor spec).toSome
   LeanTest.assertTrue (packed.fst == spec)
     "Existential tensors must retain shape, dtype, and concrete device"
-  match packed.snd.validate with
-  | .ok () => pure ()
-  | .error message => LeanTest.fail message
   LeanTest.assertEqual (← packed.snd.toFloatArray) #[1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
-  match (Tensor.onesFor spec).reifyDType with
-  | .error message => LeanTest.fail message
-  | .ok ⟨dtype, tensor⟩ =>
-      LeanTest.assertEqual dtype .Float64
-      LeanTest.assertEqual tensor.runtimeShape #[2, 3]
-      LeanTest.assertTrue (tensor.staticSpec.device == .CPU)
-        "Recovering the native dtype must retain the concrete device"
+  let ⟨dtype, tensor⟩ := (Tensor.onesFor spec).packDType
+  LeanTest.assertEqual dtype .Float64
+  LeanTest.assertEqual tensor.runtimeShape #[2, 3]
+  LeanTest.assertTrue (tensor.staticSpec.device == .CPU)
+    "Packing the dtype must retain the concrete device"
 
 end Tests.TypedStandalone
 

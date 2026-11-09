@@ -96,9 +96,6 @@ def testIndexedSphereTangentAndRetraction : IO Unit := do
   -- The zero-input fallback must retain both dtype and placement.
   let zero : Tensor ⟨#[4], .Float64, .CPU⟩ := Tensor.zerosFor _
   let x := Sphere.project 4 zero
-  match x.coords.validate with
-  | .error message => LeanTest.fail message
-  | .ok () => pure ()
   LeanTest.assertTrue (Float.abs (Tensor.l2Norm x.coords - 1.0) < 1e-12)
     "Zero-vector projection should produce a unit Float64 sphere point"
   let half : Tensor ⟨#[2], .Float64, .CPU⟩ := Tensor.zerosFor _
@@ -128,18 +125,13 @@ def testIndexedPoincareRetraction : IO Unit := do
     ⟨Tensor.mulScalar x.coords 10.0⟩
   let y : PoincareBall 3 .Float64 (.CPU) :=
     DifferentiableManifold.retract x tangent
-  match y.coords.validate with
-  | .error message => LeanTest.fail message
-  | .ok () => pure ()
   LeanTest.assertTrue (Tensor.l2Norm y.coords < 1.0)
     "Poincare retraction must stay inside the ball"
   LeanTest.assertTrue (PoincareBall.conformalFactor y > 0.0)
     "Conformal factor must be positive inside the ball"
 
 private def assertValid {σ : StaticSpec} (t : Tensor σ) : IO Unit := do
-  match t.validate with
-  | .ok () => pure ()
-  | .error message => LeanTest.fail message
+  LeanTest.assertTrue (t.actualSpec == σ.toTensorSpec && t.runtimeDevice == σ.device)
 
 example (_x : Oblique 2 3) (_v : Tensor { shape := #[3, 2], dtype := .Float32, device := .CPU }) : True := by
   fail_if_success

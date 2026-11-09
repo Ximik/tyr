@@ -135,6 +135,14 @@ std::vector<AbortCase> cases() {
     auto a = full({2, 2}, 3), b = full({3, 2}, 3);
     Object r(lean_torch_cat2(a.get(), b.get(), Nat(1)), lean_dec);
   });
+  add("transpose-axis", "dimension out of range", [] {
+    auto input = full({2, 3}, 4);
+    Object r(lean_torch_transpose(input.get(), Nat(0), Nat(9)), lean_dec);
+  });
+  add("transpose-wrapped-axis", "dim1 exceeds", [] {
+    auto input = full({2, 3}, 4);
+    Object r(lean_torch_transpose(input.get(), Nat(0), Nat(std::numeric_limits<uint64_t>::max())), lean_dec);
+  });
   add("flashAttention-rank", "rank-4", [] { flash(full({2, 2}, 1)); });
   add("flashAttention-dtype", "expected scalar type Float but found Long", [] { flash(Object(lean_torch_full_int(shape({1, 1, 2, 2}), 1), lean_dec)); });
   add("affine-weight-dtype", "must have the same dtype", [] { affineDType(true); });

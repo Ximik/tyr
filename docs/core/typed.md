@@ -64,8 +64,7 @@ def packageWeights (tensor : FloatWeights) : SomeDTypeTensor #[2, 3] .CPU :=
   tensor.packDType
 ```
 
-`packDType` packages a statically known index.
-`tensor.reifyDType` reads the native dtype and returns an exact package;
+`packDType` packages a tensor with its dtype index.
 `SomeDTypeTensor.ofRaw!` admits a native result whose dtype is chosen at
 runtime, checking the requested shape and device. These operations retain values
 and autograd identity without casting or cloning the tensor. The existential
@@ -402,8 +401,6 @@ outside the program is validated on its own metadata where it enters, with
 recoverable errors: SafeTensors header shapes and dtypes, configuration JSON,
 loaded files' dtype and device. `Tensor.ofTensor` and `ofTensor?` check a
 requested shape and dtype and index the result by `raw.device`.
-`Tensor.validate` audits an existing indexed value against its current native
-metadata.
 
 There is no public unchecked raw constructor or implicit coercion to
 `RawTensor`. The opaque carrier prevents anonymous construction, structural

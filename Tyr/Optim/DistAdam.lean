@@ -176,11 +176,11 @@ private def firstDimShardShape (s : Shape) (worldSize : Nat) : Shape :=
   else
     #[s[0]! / worldSize] ++ s[1:].toArray
 
-/-- Slice the leading axis of a tensor to `[start, start + len)`, re-validating
-    the runtime handle against the computed target shape. -/
+/-- Slice the leading axis of a tensor to `[start, start + len)`; the result is
+    admitted at the caller's target shape. -/
 private def sliceFirstDim {σ : StaticSpec} (t : Tensor σ) (start len : Nat)
-    (shape' : Shape) : IO (Tensor (σ.withShape shape')) := do
-  pure (Tensor.ofRaw! "sliceFirstDim" (RawTensor.slice t.raw 0 start len))
+    (shape' : Shape) : Tensor (σ.withShape shape') :=
+  Tensor.ofRaw! "sliceFirstDim" (RawTensor.slice t.raw 0 start len)
 
 def stepDistributed {σ : StaticSpec} [DType.RealFloating σ.dtype] (param : Tensor σ) (grad : Tensor σ) (state : ParamState σ)
     (cfg : Config) (lrMul : Float := 1.0) (wdMul : Float := 1.0) : IO (Tensor σ × ParamState σ) := do
@@ -216,11 +216,11 @@ def stepDistributed {σ : StaticSpec} [DType.RealFloating σ.dtype] (param : Ten
   let localShape := firstDimShardShape σ.shape worldSize
 
   -- 1) materialize local parameter/state slices on the parameter device
-  let paramLocal ← sliceFirstDim param start localRows localShape
+  let paramLocal := sliceFirstDim param start localRows localShape
   let expAvgBase := state.expAvg
   let expAvgSqBase := state.expAvgSq
-  let expAvgLocal ← sliceFirstDim expAvgBase start localRows localShape
-  let expAvgSqLocal ← sliceFirstDim expAvgSqBase start localRows localShape
+  let expAvgLocal := sliceFirstDim expAvgBase start localRows localShape
+  let expAvgSqLocal := sliceFirstDim expAvgSqBase start localRows localShape
 
   -- 2) reduce-scatter averaged gradient shard
   let gradLocal := (← dist.reduceScatter worldSize grad .avg)

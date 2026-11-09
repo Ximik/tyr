@@ -38,9 +38,6 @@ open torch
 
 variable {device : Device}
 
-private def pack {σ : StaticSpec} (x : Tensor σ) : IO (SomeDTypeTensor σ.shape σ.device) :=
-  IO.ofExcept x.reifyDType
-
 private def requireBF16 {shape : Shape} (x : SomeDTypeTensor shape device) :
     IO (Tensor ⟨shape, .BFloat16, device⟩) :=
   IO.ofExcept (x.atDType? .BFloat16)
@@ -170,7 +167,7 @@ private def synthNativeBlock
   let mi := nativeCfg.moe_intermediate_size
   let routerW ← Tensor.randn #[E, h] false device
   let router : LagunaTopKRouter (device := device) nativeCfg := {
-    weight := (← pack (bfloatDynamic routerW))
+    weight := (bfloatDynamic routerW).packDType
     eScoreCorrectionBias := none }
   let gatePacked ← src.load "gate_packed" #[8, 32, 32]
   let gateScale ← src.load "gate_scales" #[8, 32, 4]
@@ -214,7 +211,7 @@ private def synthBigBlock (path : String) (device : Device) : IO (LagunaSparseMo
   let mi := bigCfg.moe_intermediate_size
   let routerW ← Tensor.randn #[E, h] false device
   let router : LagunaTopKRouter (device := device) bigCfg := {
-    weight := (← pack (bfloatDynamic routerW))
+    weight := (bfloatDynamic routerW).packDType
     eScoreCorrectionBias := none }
   let gatePacked ← src.load "gate_packed" #[8, 32, 32]
   let gateScale ← src.load "gate_scales" #[8, 32, 4]
@@ -349,7 +346,7 @@ private def runNativeCorrectness (path : String) (device : Device) : IO Unit := 
     bfloatDynamic (Tensor.zeros #[8, 128] false device)
   let skewed : LagunaSparseMoeBlock (device := device) nativeCfg .BFloat16 := {
     block with router := {
-      weight := (← pack zeroRouterW)
+      weight := zeroRouterW.packDType
       eScoreCorrectionBias := none } }
   let xSkew : Tensor { shape := #[17, 128], device := device, dtype := .BFloat16 } :=
     bfloatDynamic (← Tensor.randn #[17, 128] false device)

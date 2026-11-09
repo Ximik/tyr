@@ -36,10 +36,6 @@ Retained aliases keep their values. Invalid metadata raises an IO error; this
 operation never broadcasts or implicitly casts the source. -/
 def copyIntoChecked? {σ τ : StaticSpec} (dst : Tensor σ) (src : Tensor τ) :
     IO (Tensor σ) := do
-  match dst.validate, src.validate with
-  | .error message, _ => throw (IO.userError s!"BranchingFlows static buffer destination: {message}")
-  | _, .error message => throw (IO.userError s!"BranchingFlows static buffer source: {message}")
-  | .ok (), .ok () => pure ()
   if dst.runtimeShape != src.runtimeShape then
     throw (IO.userError s!"BranchingFlows static buffer shape mismatch: {dst.runtimeShape} vs {src.runtimeShape}")
   if dst.actualSpec.dtype != src.actualSpec.dtype then

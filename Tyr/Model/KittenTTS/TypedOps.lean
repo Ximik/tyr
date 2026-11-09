@@ -6,9 +6,6 @@ namespace torch.kittentts
 
 variable {device : Device}
 
-private def checked {s : Shape} (raw : RawTensor) : Tensor { shape := s, dtype := .Float32, device := device } :=
-  (Tensor.ofRaw! "checked" raw)
-
 def catTo {s t : Shape} {d : DType} (x : Tensor { shape := s, dtype := d, device := device }) (y : Tensor { shape := t, dtype := d, device := device }) (dim : Nat)
     (h : TensorSpec.catCompatible s t dim = true := by cat_shape) :
     Tensor { shape := (TensorSpec.catShape s t dim), dtype := d, device := device } := Tensor.cat x y dim h
@@ -34,19 +31,19 @@ def randTensor (shape : Shape) (requiresGrad : Bool := false) (device : Device :
   if requiresGrad then sample.parameter else pure sample
 
 def leakyRelu {s : Shape} (x : Tensor { shape := s, dtype := .Float32, device := device }) (slope : Float := 0.01) : Tensor { shape := s, dtype := .Float32, device := device } :=
-  checked (RawTensor.leakyRelu x.raw slope)
-def floorTensor {s : Shape} (x : Tensor { shape := s, dtype := .Float32, device := device }) : Tensor { shape := s, dtype := .Float32, device := device } := checked (RawTensor.floor x.raw)
-def atan2Tensor {s : Shape} (y x : Tensor { shape := s, dtype := .Float32, device := device }) : Tensor { shape := s, dtype := .Float32, device := device } := checked (RawTensor.atan2 y.raw x.raw)
-def cumsumTensor {s : Shape} (x : Tensor { shape := s, dtype := .Float32, device := device }) (dim : Nat) : Tensor { shape := s, dtype := .Float32, device := device } := checked (RawTensor.cumsum x.raw dim)
+  Tensor.ofRaw! "leakyRelu" (RawTensor.leakyRelu x.raw slope)
+def floorTensor {s : Shape} (x : Tensor { shape := s, dtype := .Float32, device := device }) : Tensor { shape := s, dtype := .Float32, device := device } := Tensor.ofRaw! "floorTensor" (RawTensor.floor x.raw)
+def atan2Tensor {s : Shape} (y x : Tensor { shape := s, dtype := .Float32, device := device }) : Tensor { shape := s, dtype := .Float32, device := device } := Tensor.ofRaw! "atan2Tensor" (RawTensor.atan2 y.raw x.raw)
+def cumsumTensor {s : Shape} (x : Tensor { shape := s, dtype := .Float32, device := device }) (dim : Nat) : Tensor { shape := s, dtype := .Float32, device := device } := Tensor.ofRaw! "cumsumTensor" (RawTensor.cumsum x.raw dim)
 
 def resizeTensor {batch channels frames : Nat} (x : Tensor { shape := #[batch, channels, frames], dtype := .Float32, device := device })
     (outFrames : Nat) (mode : String) : Tensor { shape := #[batch, channels, outFrames], dtype := .Float32, device := device } :=
-  checked (RawTensor.interpolate x.raw #[outFrames] mode false)
+  Tensor.ofRaw! "resizeTensor" (RawTensor.interpolate x.raw #[outFrames] mode false)
 
 def istftTensor {s : Shape} (input : Tensor { shape := s, dtype := .Float32, device := device }) (nFft hopLength winLength : Nat)
     (window : Tensor { shape := #[winLength], dtype := .Float32, device := device }) (center normalized : Bool) (length : Nat) :
     Tensor { shape := #[length], dtype := .Float32, device := device } :=
-  checked (RawTensor.istft input.raw nFft hopLength winLength window.raw center normalized length)
+  Tensor.ofRaw! "istftTensor" (RawTensor.istft input.raw nFft hopLength winLength window.raw center normalized length)
 
 def sliceTensor {s : Shape} {d : DType} (x : Tensor { shape := s, dtype := d, device := device }) (dim : Nat) (start len : Nat) :
     Tensor { shape := (s.set! dim len), dtype := d, device := device } := x.sliceChecked dim start len (s.set! dim len)
@@ -54,6 +51,6 @@ def sliceTensor {s : Shape} {d : DType} (x : Tensor { shape := s, dtype := d, de
 def stftTensor {n winLength : Nat} {out : Shape} (input : Tensor { shape := #[n], dtype := .Float32, device := device })
     (nFft hopLength : Nat) (window : Tensor { shape := #[winLength], dtype := .Float32, device := device })
     (center normalized : Bool) : Tensor { shape := out, dtype := .Float32, device := device } :=
-  checked (RawTensor.stft input.raw nFft hopLength winLength window.raw center normalized)
+  Tensor.ofRaw! "stftTensor" (RawTensor.stft input.raw nFft hopLength winLength window.raw center normalized)
 
 end torch.kittentts

@@ -36,7 +36,6 @@ private def writeIndex (dir : System.FilePath) (weightMap : List (String × Stri
     LeanTest.assertEqual packed.1 dtype
     LeanTest.assertEqual packed.2.dtype dtype
     LeanTest.assertEqual packed.2.raw.dtype dtype
-    LeanTest.assertTrue packed.2.validate.toOption.isSome
     let converted : Tensor ⟨#[2], .Float32, .CPU⟩ ←
       IO.ofExcept (packed.2.castDType? .Float32)
     LeanTest.assertEqual (← converted.toFloatArray) #[1.5, -2.0]

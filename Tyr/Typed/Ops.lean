@@ -704,11 +704,11 @@ def expand? {σ : StaticSpec} (t : Tensor σ) (target : Shape) :
     throw s!"Cannot expand shape {σ.shape} to {target}"
   pure (Tensor.ofRaw! "expand" (← RawTensor.expandChecked t.raw target))
 
-/-- Expand to literal, nonnegative extents. Use `expand?` to handle a native
-result-spec mismatch without invoking the panic fallback allocation. -/
+/-- Expand to `target` without a broadcast proof; an invalid expansion aborts.
+Use `broadcastTo` when the proof reduces, or `expand?` to handle the error. -/
 def expand {σ : StaticSpec} (t : Tensor σ) (target : Shape) :
     Tensor (σ.withShape target) :=
-  checkedResult "expand" (t.expand? target)
+  Tensor.ofRaw! "expand" (RawTensor.expand! t.raw target)
 
 /-! ## Reductions -/
 
@@ -748,23 +748,18 @@ def meanAll {σ : StaticSpec} [DType.Mean σ.dtype] (t : Tensor σ) :
 
 /-! ## Shape ops (dtype/device-preserving) -/
 
-/-- Reshape without changing the element count. Unlike the legacy raw
-    `torch.reshape`, an empty target creates a scalar. Extents must be
-    representable as signed 64-bit integers, so none acts as native inference. -/
+def reshape! {σ : StaticSpec} (t : Tensor σ) (shape' : Shape) : Tensor (σ.withShape shape') :=
+  Tensor.ofRaw! "reshape" (RawTensor.reshape! t.raw shape')
+
+/-- Reshape without changing the element count; an empty target creates a scalar.
+Native code rejects extents not representable as signed 64-bit integers. -/
 def reshape {σ : StaticSpec} (t : Tensor σ) (shape' : Shape)
     (_h : TensorSpec.numelOfShape σ.shape = TensorSpec.numelOfShape shape' := by
       first
       | exact of_decide_eq_true rfl
       | (simp +zetaDelta [Nat.mul_assoc, Nat.mul_comm, Nat.mul_left_comm] <;> omega)) :
     Tensor (σ.withShape shape') :=
-  checkedResult "reshape" do
-    if shape'.any (fun dim => dim > 9223372036854775807) then
-      throw "reshape requires nonnegative extents representable as signed 64-bit integers"
-    let actualNumel := TensorSpec.numelOfShape t.runtimeShape
-    let targetNumel := TensorSpec.numelOfShape shape'
-    if actualNumel != targetNumel then
-      throw s!"reshape requires {actualNumel} elements, requested {targetNumel}"
-    pure (Tensor.ofRaw! "reshape" (RawTensor.reshape! t.raw shape'))
+  reshape! t shape'
 
 /-- Slice an exact number of entries along a valid axis. Bounds are checked in
 natural arithmetic so `start + len` cannot wrap or silently truncate. -/
@@ -780,11 +775,16 @@ def permute {σ : StaticSpec} (t : Tensor σ) (permutation : Array Nat)
     Tensor (σ.withShape (TensorSpec.permuteShape σ.shape permutation)) :=
   Tensor.ofRaw! "permute" (RawTensor.permute t.raw permutation)
 
+def transpose! {σ : StaticSpec} (t : Tensor σ) (dim0 dim1 : Nat)
+    (h0 : dim0 < max 1 σ.shape.size) (h1 : dim1 < max 1 σ.shape.size) :
+    Tensor (σ.withShape (transposeShape σ.shape dim0 dim1 h0 h1)) :=
+  Tensor.ofRaw! "transpose" (RawTensor.transpose! t.raw dim0 dim1)
+
 def transpose {σ : StaticSpec} (t : Tensor σ) (dim0 dim1 : Nat)
     (h0 : dim0 < max 1 σ.shape.size := by first | exact of_decide_eq_true rfl | (simp <;> fail "axis out of range"))
     (h1 : dim1 < max 1 σ.shape.size := by first | exact of_decide_eq_true rfl | (simp <;> fail "axis out of range")) :
     Tensor (σ.withShape (transposeShape σ.shape dim0 dim1 h0 h1)) :=
-  checkedResult "transpose" do pure (Tensor.ofRaw! "transpose" (← RawTensor.transpose t.raw dim0 dim1))
+  transpose! t dim0 dim1 h0 h1
 
 def transpose2d {m n : Nat} {d : DType} {dev : Device}
     (t : Tensor ⟨#[m, n], d, dev⟩) : Tensor ⟨#[n, m], d, dev⟩ :=

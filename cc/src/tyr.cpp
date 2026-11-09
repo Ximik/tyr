@@ -1352,15 +1352,13 @@ lean_object* lean_torch_mm(b_lean_obj_arg input, b_lean_obj_arg mat2) {
 
 // Tensor operations (essential for attention mechanisms)
 lean_object* lean_torch_transpose(b_lean_obj_arg input, b_lean_obj_arg dim0_obj, b_lean_obj_arg dim1_obj) {
-  return tyr::checkedCall("transpose", [&] {
   const uint64_t dim0 = tyr::natTo<int64_t>(dim0_obj, "dim0");
   const uint64_t dim1 = tyr::natTo<int64_t>(dim1_obj, "dim1");
-    auto input_ = borrowTensor(input);
-    // libtorch accepts axis zero on a scalar; reject wrapped UInt64 axes.
-    const auto axes = static_cast<uint64_t>(std::max<int64_t>(1, input_.dim()));
-    TORCH_CHECK(dim0 < axes && dim1 < axes, "dimension out of range");
-    return fromTorchTensor(torch::transpose(input_, static_cast<int64_t>(dim0), static_cast<int64_t>(dim1)));
-  });
+  auto input_ = borrowTensor(input);
+  // libtorch accepts axis zero on a scalar; reject wrapped UInt64 axes.
+  const auto axes = static_cast<uint64_t>(std::max<int64_t>(1, input_.dim()));
+  TORCH_CHECK(dim0 < axes && dim1 < axes, "dimension out of range");
+  return fromTorchTensor(torch::transpose(input_, static_cast<int64_t>(dim0), static_cast<int64_t>(dim1)));
 }
 
 // Direct 2-tensor concatenation without intermediate reshapes

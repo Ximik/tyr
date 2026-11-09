@@ -72,9 +72,6 @@ def testAffineNonSquareForwardAndGradient : IO Unit := do
   let input : Tensor ⟨#[4, 3], .Float64, .CPU⟩ :=
     Tensor.mulScalar (Tensor.onesFor ⟨#[4, 3], .Float64, .CPU⟩) 2.0
   let output : Tensor ⟨#[4, 2], .Float64, .CPU⟩ := Module.forward a input
-  match output.validate with
-  | .ok () => pure ()
-  | .error message => LeanTest.fail message
   LeanTest.assertTrue
     (Tensor.frobeniusNorm (Sub.sub output (Tensor.mulScalar (Tensor.onesLike output) 23.0)) < 1e-10)
     "Affine must compute input @ weight + bias with distinct input/output dimensions"
@@ -109,9 +106,6 @@ def testDocumentedModuleInterfaces : IO Unit := do
   let dropped : Tensor { shape := #[4, 3], dtype := .Float32, device := .CPU } ← ModuleIO.forward (MyDropout.mk ⟨1.0⟩) input
   LeanTest.assertEqual (Tensor.frobeniusNorm dropped) 0.0
     "Training dropout with p=1 should zero every activation"
-  match dropped.validate with
-  | .ok () => pure ()
-  | .error message => LeanTest.fail message
 
 example : True := by
   fail_if_success
@@ -128,9 +122,6 @@ def testConv2dIndexedInitialization : IO Unit := do
     weight := Tensor.zerosFor _
     outputBias := Tensor.onesLike (Tensor.zerosFor _) }
   let initialized ← config.init
-  match initialized.weight.validate, initialized.outputBias.validate with
-  | .ok (), .ok () => pure ()
-  | .error message, _ | _, .error message => LeanTest.fail message
   LeanTest.assertEqual initialized.weight.runtimeShape #[6, 2, 2, 3]
     "Grouped convolution must allocate one input-channel block per group"
   LeanTest.assertEqual (Tensor.item (Tensor.sumAll initialized.outputBias)) 6.0
@@ -156,9 +147,6 @@ def testUniformLikeDTypeAndErrors : IO Unit := do
     let _ := support.down
     let reference : Tensor ⟨#[2, 3], dtype, .CPU⟩ := Tensor.zerosFor _
     let sample ← Tensor.uniformLike reference (-0.25) 0.5
-    match sample.validate with
-    | .ok () => pure ()
-    | .error message => LeanTest.fail message
     let values := sample.raw.getValues
     for i in [:values.size] do
       LeanTest.assertTrue (values[i]!.isFinite && values[i]! >= -0.25 && values[i]! <= 0.5)
