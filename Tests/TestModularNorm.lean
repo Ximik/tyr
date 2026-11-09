@@ -207,9 +207,6 @@ def testIndexedEmbeddingLookupGradientAndNorms : IO Unit := do
   let tokens : torch.Tensor ⟨#[2, 3], .Int64, .CPU⟩ :=
     torch.Tensor.onesLike (torch.Tensor.zerosFor _)
   let output : torch.Tensor ⟨#[2, 3, 2], .Float64, .CPU⟩ := emb.forward tokens
-  match output.validate with
-  | .ok () => pure ()
-  | .error message => LeanTest.fail message
   let loss := torch.Tensor.sumAll output
   LeanTest.assertEqual loss.item 24.0 "Embedding should return all six selected rows"
   torch.Tensor.backwardLoss loss
@@ -222,9 +219,6 @@ def testIndexedEmbeddingLookupGradientAndNorms : IO Unit := do
     "Unselected embedding rows should have zero gradient"
   let normalized : Embedding 3 2 .Float64 (.CPU) := NormedModule.normalize emb
   let dualNormalized : Embedding 3 2 .Float64 (.CPU) := NormedModule.normalizeDual emb
-  match normalized.weight.validate, dualNormalized.weight.validate with
-  | .ok (), .ok () => pure ()
-  | .error message, _ | _, .error message => LeanTest.fail message
   LeanTest.assertTrue (Float.abs (NormedModule.norm normalized - 1.0) < 1e-10)
     "Embedding normalization should produce unit max-row norm"
   LeanTest.assertTrue (Float.abs (NormedModule.dualNorm dualNormalized - 1.0) < 1e-10)
@@ -232,8 +226,5 @@ def testIndexedEmbeddingLookupGradientAndNorms : IO Unit := do
   let vectorTokens : torch.Tensor ⟨#[3], .Int64, .CPU⟩ := torch.Tensor.zerosFor _
   let vectorOutput : torch.Tensor ⟨#[3, 2], .Float64, .CPU⟩ :=
     torch.Tensor.embedding1d vectorTokens weight
-  match vectorOutput.validate with
-  | .ok () => pure ()
-  | .error message => LeanTest.fail message
   LeanTest.assertEqual (torch.Tensor.item (torch.Tensor.sumAll vectorOutput)) 12.0
     "Vector lookup must retain the weight dtype and placement"

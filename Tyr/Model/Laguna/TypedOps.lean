@@ -5,12 +5,9 @@ namespace torch.laguna
 
 variable {device : Device} {dtype : DType}
 variable [DType.RealFloating dtype]
-private def checked {σ : StaticSpec} (raw : RawTensor) : Tensor σ :=
-  (Tensor.ofRaw! "checked" raw)
-
 def bmm {b m n k : Nat} (x : Tensor { dtype := dtype, device := device, shape := #[b, m, k] }) (y : Tensor { dtype := dtype, device := device, shape := #[b, k, n] }) :
     Tensor { dtype := dtype, device := device, shape := #[b, m, n] } :=
-  checked (RawTensor.lagunaBmm x.raw y.raw)
+  Tensor.ofRaw! "bmm" (RawTensor.lagunaBmm x.raw y.raw)
 
 def scatterAdd {s t : Shape} (input : Tensor { dtype := dtype, device := device, shape := s }) (dim : Nat)
     (indices : Tensor { device := device, shape := t, dtype := .Int64 }) (src : Tensor { dtype := dtype, device := device, shape := t }) : Tensor { dtype := dtype, device := device, shape := s } :=

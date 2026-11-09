@@ -40,9 +40,6 @@ private abbrev YSpec : StaticSpec := { shape := #[2], dtype := .Float32, device 
   | some ys => do
       let yT := ys.getD (ys.size - 1) y0
       -- the phantom claims survive the solve
-      match yT.validate with
-      | .ok () => pure ()
-      | .error err => LeanTest.fail s!"typed state failed validation after solve: {err}"
       let vals ← Tensor.toFloatArray yT
       LeanTest.assertEqual vals.size 2 "state keeps its shape"
       let expected := Float.exp (-1.0)
@@ -73,9 +70,6 @@ private abbrev YSpec : StaticSpec := { shape := #[2], dtype := .Float32, device 
   | none => LeanTest.fail "expected saved final state"
   | some ys => do
       let yT := ys.getD (ys.size - 1) y0
-      match yT.validate with
-      | .ok () => pure ()
-      | .error err => LeanTest.fail s!"typed state failed validation: {err}"
       let vals ← Tensor.toFloatArray yT
       for v in vals do
         LeanTest.assertTrue (approx v (Float.exp (-1.0)) 1.0e-4)

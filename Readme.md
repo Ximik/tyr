@@ -207,7 +207,7 @@ def project {m k n : Nat}
 The native carrier is `RawTensor`; model code uses indexed `Tensor σ` values.
 Native results enter through `Tensor.ofRaw!`, which aborts if a result
 contradicts its type; external data is checked on its own metadata where it
-enters. Use `Tensor.validate` when auditing an indexed value. `Tensor.reshape` requires equal element counts and treats `#[]`
+enters. `Tensor.reshape` requires equal element counts and treats `#[]`
 as a scalar. Runtime-dependent shapes can be packaged existentially without
 losing the tensor's shape index.
 

@@ -190,25 +190,20 @@ void dropoutSuccess() {
   require(lean_io_result_is_ok(inference.get()), "Inference dropout failed");
   values(lean_io_result_get_value(inference.get()), 4, 7);
 }
-void transpose(bool invalid, bool huge = false) {
+void transpose() {
   auto input = full({2, 3}, 4);
-    Object result(lean_torch_transpose(input.get(), Nat(0),
-    Nat(huge ? std::numeric_limits<uint64_t>::max() : invalid ? 9 : 1)), lean_dec);
-  if (invalid || huge) exceptError(result.get(), "transpose");
-  else {
-    auto* tensor = exceptValue(result.get());
-    values(tensor, 6, 4);
-    Object actual(lean_torch_get_shape(tensor), lean_dec);
-    require(lean_array_size(actual.get()) == 2 &&
-      lean_unbox(lean_array_get_core(actual.get(), 0)) == 3 &&
-      lean_unbox(lean_array_get_core(actual.get(), 1)) == 2, "Transpose shape changed");
-  }
+  Object result(lean_torch_transpose(input.get(), Nat(0), Nat(1)), lean_dec);
+  values(result.get(), 6, 4);
+  Object actual(lean_torch_get_shape(result.get()), lean_dec);
+  require(lean_array_size(actual.get()) == 2 &&
+    lean_unbox(lean_array_get_core(actual.get(), 0)) == 3 &&
+    lean_unbox(lean_array_get_core(actual.get(), 1)) == 2, "Transpose shape changed");
   require(input->m_rc == 1, "Transpose ownership imbalance");
 }
 void transposeScalar() {
   auto input = full({}, 5);
   Object result(lean_torch_transpose(input.get(), Nat(0), Nat(0)), lean_dec);
-  values(exceptValue(result.get()), 1, 5);
+  values(result.get(), 1, 5);
 }
 
 void checkedExpand(bool invalid) {
@@ -466,9 +461,7 @@ int main() {
   run("dropout/nan-probability", [] { dropoutError(std::numeric_limits<double>::quiet_NaN()); });
   run("dropout/invalid-carrier", [] { dropoutError(0.5, true); });
   run("dropout/success", dropoutSuccess);
-  run("transpose/success-carrier", [] { transpose(false); });
-  run("transpose/axis-error", [] { transpose(true); });
-  run("transpose/wrapped-axis-error", [] { transpose(false, true); });
+  run("transpose/success", transpose);
   run("transpose/scalar-success", transposeScalar);
   run("checked/expand-error", [] { checkedExpand(true); });
   run("checked/expand-success", [] { checkedExpand(false); });

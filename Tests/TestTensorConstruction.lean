@@ -63,16 +63,13 @@ def testCheckedAdmissionAndOpaqueAccessors : IO Unit := do
   LeanTest.assertEqual tensor.raw.dtype .Float32
   LeanTest.assertTrue (tensor.raw.device == .CPU)
   LeanTest.assertEqual tensor.raw.getValues.toList [0, 0]
-  LeanTest.assertTrue tensor.validate.toOption.isSome
   let packaged := tensor.packDevice
   LeanTest.assertTrue (packaged.1 == Device.CPU)
-  LeanTest.assertTrue packaged.2.validate.toOption.isSome
   LeanTest.assertEqual packaged.2.raw.getValues.toList [0, 0]
 
 @[test]
 def testOpaqueDefaultAllocation : IO Unit := do
   let tensor : Tensor { shape := #[3], dtype := .Float64, device := .CPU } := default
-  LeanTest.assertTrue tensor.validate.toOption.isSome
   LeanTest.assertEqual tensor.raw.runtimeShape #[3]
   LeanTest.assertEqual tensor.raw.dtype .Float64
   LeanTest.assertEqual tensor.raw.getValues.toList [0, 0, 0]

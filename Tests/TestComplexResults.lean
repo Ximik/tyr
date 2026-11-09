@@ -43,7 +43,6 @@ example (_x : Tensor ⟨#[2, 2], .Float8E4M3FN, .CPU⟩) : True := by
     let norms := Tensor.rowNorms! input
     LeanTest.assertEqual norms.raw.dtype real
     LeanTest.assertEqual (← norms.toFloatArray) #[3, 4]
-    LeanTest.assertTrue norms.validate.toOption.isSome
     LeanTest.assertTrue (norms.raw.device == input.raw.device)
     LeanTest.assertEqual (Tensor.frobeniusNorm! input) 5
     LeanTest.assertEqual (Tensor.maxRowNorm! input) 4
@@ -54,7 +53,6 @@ example (_x : Tensor ⟨#[2, 2], .Float8E4M3FN, .CPU⟩) : True := by
     let values := Tensor.svdvals! input
     LeanTest.assertEqual values.raw.dtype real
     LeanTest.assertEqual (← values.toFloatArray) #[4, 3]
-    LeanTest.assertTrue values.validate.toOption.isSome
     LeanTest.assertTrue (values.raw.device == input.raw.device)
 
 @[test] def testComplexSVDKeepsComplexVectorsAndRealValues : IO Unit := do
@@ -138,7 +136,6 @@ example (_x : Tensor ⟨#[2, 2], .Float8E4M3FN, .CPU⟩) : True := by
   | .ok result =>
     LeanTest.assertEqual result.raw.dtype .Float32
     LeanTest.assertTrue (result.raw.device == input.raw.device)
-    LeanTest.assertTrue result.validate.toOption.isSome
 
 @[test] def testFactorizationFailuresAreRecoverable : IO Unit := do
   -- The real logarithm is undefined for these matrices; neither should

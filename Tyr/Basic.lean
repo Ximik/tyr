@@ -124,10 +124,6 @@ private def checkSpec (σ : StaticSpec) (raw : RawTensor) : Except String Unit :
   if raw.device != σ.device then
     throw s!"Expected device {renderDevice σ.device}, got {renderDevice raw.device}"
 
-/-- Check exact shape, dtype and actual placement against the native handle. -/
-def validate {σ : StaticSpec} (tensor : Tensor σ) : Except String Unit :=
-  checkSpec σ tensor.raw
-
 private unsafe def ofRawImpl {σ : StaticSpec} (operation : @& String) (raw : RawTensor) :
     Tensor σ :=
   match checkSpec σ raw with
