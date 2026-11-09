@@ -61,9 +61,6 @@ private def addPacked (x y : Sigma fun device => Tensor ⟨#[2], .Float32, devic
     match x.atDevice? device with
     | .ok _ => LeanTest.fail "CPU tensor acquired accelerator identity without transfer"
     | .error _ => pure ()
-    match Tensor.ofRaw (σ := ⟨#[2], .Float32, device⟩) x.raw with
-    | .ok _ => LeanTest.fail "raw CPU handle passed accelerator admission"
-    | .error _ => pure ()
   let moved : Tensor ⟨#[2], .Float32, .CPU⟩ := x.to .CPU
   LeanTest.assertEqual (← moved.toFloatArray) #[2, 3]
   LeanTest.assertTrue (moved.runtimeDevice == moved.device)

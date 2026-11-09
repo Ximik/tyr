@@ -367,13 +367,11 @@ private def loadSpeakerEmbedding? (cfg : Qwen3TTSConfig) (dtype : RealFloatingDT
         throw <| IO.userError
           s!"speaker embedding dim mismatch: speaker enc_dim={cfg.speakerEncoderConfig.encDim}, talker hidden={cfg.talkerConfig.hiddenSize}"
       let path ← expandHome p
-      let raw ← RawTensor.loadTensorExact #[cfg.speakerEncoderConfig.encDim] path
-      let stored ← IO.ofExcept <| SomeDTypeTensor.ofRaw
-        (shape := #[cfg.speakerEncoderConfig.encDim]) (device := .CPU) raw
+      let stored ← SomeDTypeTensor.loadTensorExact #[cfg.speakerEncoderConfig.encDim] .CPU path
       let converted ← RawTensor.convertIO #[cfg.speakerEncoderConfig.encDim] stored.2.raw
         device (some dtype.val)
-      let emb ← IO.ofExcept <| Tensor.ofRaw
-        (σ := ⟨#[cfg.speakerEncoderConfig.encDim], dtype.val, device⟩) converted
+      let emb : Tensor ⟨#[cfg.speakerEncoderConfig.encDim], dtype.val, device⟩ :=
+        Tensor.ofRaw! "loadSpeakerEmbedding" converted
       pure (some (Tensor.reshape emb #[1, 1, cfg.talkerConfig.hiddenSize] (by simp [hDim])))
 
 private def buildTalkerInputsEquivalent

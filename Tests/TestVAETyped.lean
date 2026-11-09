@@ -134,7 +134,7 @@ private def writeConvCheckpoint (path : System.FilePath) (bf16 wrongShape : Bool
   let mixedPath := dir / "mixed.safetensors"
   writeConvCheckpoint mixedPath false false true
   Tests.assertThrows (loadConv2d mixedPath.toString "conv" 1 1 3 1)
-    (some "VAE tensor 'conv.bias'")
+    (some "Expected dtype")
   -- The sharded reader enumerates every safetensors file in its directory.
   -- Keep this checkpoint separate from the independent single-file fixtures.
   let shardedDir := dir / "wrong-shape-sharded"

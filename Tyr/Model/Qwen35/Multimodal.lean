@@ -68,7 +68,7 @@ def forward2d {tokens dim : Nat}
     (x : Tensor { device := device, shape := #[tokens, dim], dtype := dtype })
     : Tensor { device := device, shape := #[tokens, dim], dtype := dtype } :=
   let x3 : Tensor { device := device, shape := #[1, tokens, dim], dtype := dtype } := Tensor.reshape x #[1, tokens, dim]
-  let y3 : Tensor { device := device, shape := #[1, tokens, dim], dtype := dtype } := Tensor.checkedResult "forward2d" (Tensor.ofRaw (RawTensor.layerNorm x3.raw m.weight.2.raw m.bias.2.raw m.eps))
+  let y3 : Tensor { device := device, shape := #[1, tokens, dim], dtype := dtype } := Tensor.ofRaw! "forward2d" (RawTensor.layerNorm x3.raw m.weight.2.raw m.bias.2.raw m.eps)
   Tensor.reshape y3 #[tokens, dim]
 
 end Qwen35VisionLayerNorm
@@ -363,9 +363,11 @@ private def scatterFeaturesIntoToken {batch seq hidden featTokens featDim : Nat}
 
   let tokenMask : Tensor { device := device, shape := #[batch, seq, hidden], dtype := .Bool } :=
     Tensor.expand (Tensor.reshape tokenMask2d #[batch, seq, 1]) #[batch, seq, hidden]
-  let src ← IO.ofExcept (Tensor.ofRaw (σ := ⟨#[featTokens * featDim], dtype, device⟩)
-    (Tensor.reshape features #[featTokens * featDim]).raw)
-  pure (Tensor.maskedScatter inputsEmbeds tokenMask src)
+  let flat := Tensor.reshape features #[featTokens * featDim]
+  if h : featureDType = dtype then
+    pure (Tensor.maskedScatter inputsEmbeds tokenMask (h ▸ flat))
+  else
+    throw <| IO.userError s!"Qwen35 feature dtype {featureDType} differs from text dtype {dtype}"
 
 def forwardText {batch seq : Nat}
     (cfg : VLConfig)

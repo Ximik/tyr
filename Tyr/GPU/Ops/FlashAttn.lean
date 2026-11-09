@@ -197,11 +197,6 @@ abbrev DynOut :=
         Sigma (fun headDim =>
           SomeDTypeTensor #[batch, nHead, qSeq, headDim] device))))
 
-private def checkedRaw {σ : StaticSpec} (label : String) (raw : RawTensor) : IO (Tensor σ) :=
-  match Tensor.ofRaw raw with
-  | .ok tensor => pure tensor
-  | .error message => throw <| IO.userError s!"flashAttnDyn: {label}: {message}"
-
 private def parseQKVDyn (qDyn kDyn vDyn : RawTensor) : IO (PackedQKV (device := qDyn.device)) := do
   let device := qDyn.device
   let qShape := qDyn.runtimeShape
@@ -237,9 +232,16 @@ private def parseQKVDyn (qDyn kDyn vDyn : RawTensor) : IO (PackedQKV (device := 
     throw <| IO.userError s!"flashAttnDyn: head_dim mismatch q={headDim} k={kHeadDim} v={vHeadDim}"
 
   let dtype := qDyn.dtype
-  let q : Tensor { shape := #[batch, nHead, qSeq, headDim], dtype := dtype, device := device } ← checkedRaw "query" qDyn
-  let k : Tensor { shape := #[batch, nKvHead, kvSeq, headDim], dtype := dtype, device := device } ← checkedRaw "key" kDyn
-  let v : Tensor { shape := #[batch, nKvHead, kvSeq, headDim], dtype := dtype, device := device } ← checkedRaw "value" vDyn
+  if !(kDyn.dtype == dtype && vDyn.dtype == dtype) then
+    throw <| IO.userError s!"flashAttnDyn: dtype mismatch q={dtype} k={kDyn.dtype} v={vDyn.dtype}"
+  if !(kDyn.device == device && vDyn.device == device) then
+    throw <| IO.userError "flashAttnDyn: query, key and value must share a device"
+  let q : Tensor { shape := #[batch, nHead, qSeq, headDim], dtype := dtype, device := device } :=
+    Tensor.ofRaw! "flashAttnDyn" qDyn
+  let k : Tensor { shape := #[batch, nKvHead, kvSeq, headDim], dtype := dtype, device := device } :=
+    Tensor.ofRaw! "flashAttnDyn" kDyn
+  let v : Tensor { shape := #[batch, nKvHead, kvSeq, headDim], dtype := dtype, device := device } :=
+    Tensor.ofRaw! "flashAttnDyn" vDyn
   pure {
     batch := batch
     nHead := nHead
@@ -268,8 +270,9 @@ private def parseMaskDyn
       if !(gotBatch == batch && gotKvSeq == kvSeq) then
         throw <| IO.userError
           s!"flashAttnDyn: attn_mask shape mismatch expected=[{batch},{kvSeq}] got=[{gotBatch},{gotKvSeq}]"
-      let mask : PaddingMask (device := device) batch kvSeq ← IO.ofExcept (SomeDTypeTensor.ofRaw maskDyn)
-      pure (some mask)
+      if maskDyn.device != device then
+        throw <| IO.userError "flashAttnDyn: attn_mask must share the query's device"
+      pure (some (SomeDTypeTensor.ofRaw! "flashAttnDyn" maskDyn))
 
 /-- Fully general existential adapter:
     accepts shape-erased 4D raw tensors, validates runtime shapes, dispatches through the

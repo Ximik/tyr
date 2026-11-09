@@ -230,11 +230,11 @@ private def expectLeaf
   if leafSpec.shape != σ.shape then
     throw <| s!"Tensor leaf shape mismatch at {renderPath path}: " ++
       s!"expected {shapeToString σ.shape}, got {shapeToString leafSpec.shape}."
-  -- Validate both the incoming claim and the destination contract. This also
-  -- catches malformed handles constructed through unsafe native adapters.
-  match leafTensor.validate *> Tensor.ofRaw (σ := σ) leafTensor.raw with
-  | .ok tensor => pure tensor
-  | .error message => throw s!"Tensor leaf mismatch at {renderPath path}: {message}"
+  if leafSpec.dtype != σ.dtype then
+    throw s!"Tensor leaf dtype mismatch at {renderPath path}: expected {σ.dtype}, got {leafSpec.dtype}."
+  if leafSpec.device != σ.device then
+    throw s!"Tensor leaf device mismatch at {renderPath path}."
+  pure (Tensor.ofRaw! "TensorStructSchema leaf" leafTensor.raw)
 
 instance {σ : StaticSpec} : ToTensorStructSchema (Tensor σ) where
   describeLeaves _ path := #[{

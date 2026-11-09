@@ -110,8 +110,6 @@ def lagunaMoeFp4Forward
     upPacked.raw upScale.raw upGlobal.raw
     downPacked.raw downScale.raw downGlobal.raw
     numExperts moeInt hidden
-  match Tensor.ofRaw raw with
-  | .ok result => pure result
-  | .error message => lagunaMoeFp4Fail message
+  pure (Tensor.ofRaw! "lagunaMoeFp4Forward" raw)
 
 end torch.laguna

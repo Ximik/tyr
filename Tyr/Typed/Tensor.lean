@@ -88,13 +88,11 @@ instance {shape : Shape} {device : Device} : Nonempty (SomeDTypeTensor shape dev
 
 namespace SomeDTypeTensor
 
-/-- Recover native dtype metadata and validate the full requested shape/device
-contract without converting values or changing autograd identity. -/
-def ofRaw {shape : Shape} {device : Device} (raw : RawTensor) :
-    Except String (SomeDTypeTensor shape device) := do
-  let dtype := raw.dtype
-  let tensor ← Tensor.ofRaw (σ := ⟨shape, dtype, device⟩) raw
-  pure ⟨dtype, tensor⟩
+/-- Admit a native result whose dtype is chosen at runtime: the index takes the
+result's own dtype, and shape and placement must match. -/
+def ofRaw! {shape : Shape} {device : Device} (operation : String) (raw : RawTensor) :
+    SomeDTypeTensor shape device :=
+  ⟨raw.dtype, Tensor.ofRaw! (σ := ⟨shape, raw.dtype, device⟩) operation raw⟩
 
 /-- Compare exact existential indices before using an operation that requires
 one shared dtype. This returns equality evidence, never a dtype conversion. -/
@@ -183,16 +181,6 @@ def atDevice? {σ : StaticSpec} (tensor : Tensor σ) (device : Device) :
 def actualSpec {σ : StaticSpec} (t : Tensor σ) : TensorSpec :=
   { shape := t.raw.runtimeShape, dtype := t.raw.dtype }
 
-/-- Validate a value update using metadata captured before consuming its input.
-The original tensor is deliberately absent: retaining it through result
-validation would prevent native ownership transfer and storage reuse.
-Runtime-selected indices still preserve the actual dtype and placement. -/
-def checkedUpdate? {σ : StaticSpec} (expectedDType : DType) (expectedDevice : Device)
-    (raw : RawTensor) : Except String (Tensor σ) := do
-  TensorSpec.checkDType expectedDType raw.dtype
-  expectedDevice.check raw.device
-  ofRaw raw
-
 /-- Only return native results that satisfy their complete output specification.
 A mismatch terminates at the native invariant boundary. -/
 def checkedResult {α : Type} [Nonempty α] (operation : String) (result : Except String α) : α :=
@@ -200,18 +188,10 @@ def checkedResult {α : Type} [Nonempty α] (operation : String) (result : Excep
   | .ok result => result
   | .error message => nativeInvariantFailure s!"Tensor.{operation}: {message}"
 
-/-- Pure value-update adapter. A violated native result contract stops execution
-without constructing a default tensor or retaining the consumed input. -/
-def checkedUpdate {σ : StaticSpec} (expectedDType : DType) (expectedDevice : Device)
-    (raw : RawTensor) : Tensor σ :=
-  match checkedUpdate? expectedDType expectedDevice raw with
-  | .ok tensor => tensor
-  | .error message => nativeInvariantFailure s!"Tensor update: {message}"
-
 def ofTensor? {shape : Shape} (dtype : DType) (raw : RawTensor) :
     Option (Tensor { shape, dtype, device := raw.device }) :=
   if raw.runtimeShape == shape && raw.dtype == dtype then
-    (ofRaw raw).toOption
+    some (ofRaw! "ofTensor" raw)
   else
     none
 
@@ -219,7 +199,7 @@ def ofTensor {shape : Shape} (dtype : DType) (raw : RawTensor) :
     Except String (Tensor { shape, dtype, device := raw.device }) := do
   TensorSpec.checkShape shape raw.runtimeShape
   TensorSpec.checkDType dtype raw.dtype
-  ofRaw raw
+  pure (ofRaw! "ofTensor" raw)
 
 /-- Package a tensor with its full static specification, preserving actual placement. -/
 def toSome {σ : StaticSpec} (tensor : Tensor σ) : Sigma Tensor :=
@@ -233,7 +213,7 @@ def packDType {σ : StaticSpec} (tensor : Tensor σ) : SomeDTypeTensor σ.shape 
 values, detaching the graph, or forgetting shape/placement. -/
 def reifyDType {σ : StaticSpec} (tensor : Tensor σ) :
     Except String (SomeDTypeTensor σ.shape σ.device) :=
-  SomeDTypeTensor.ofRaw tensor.raw
+  pure (SomeDTypeTensor.ofRaw! "reifyDType" tensor.raw)
 
 end Tensor
 
