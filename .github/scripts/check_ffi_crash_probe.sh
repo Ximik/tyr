@@ -1,28 +1,33 @@
 #!/usr/bin/env bash
-# Check that an uncaught libtorch error at the Lean FFI boundary aborts with a
-# readable message instead of a bare crash.
-#
-# `ffi_crash_probe` triggers such an error on purpose. It must:
-#   - abort with SIGABRT (exit code 134), and
-#   - print the libtorch error through Tyr's terminate handler (cc/src/tyr.cpp).
+# Check Tyr's fatal failure paths with `ffi_crash_probe`:
+#   - libtorch: an uncaught libtorch error at the Lean FFI boundary aborts
+#     (SIGABRT, exit code 134) with Tyr's libtorch error report;
+#   - admission: `Tensor.ofRaw!` given a handle that contradicts its spec
+#     aborts with the native tensor contract report;
+#   - admission-ok: a matching claim is admitted and the probe exits 0.
 #
 # Usage: .github/scripts/check_ffi_crash_probe.sh   (from the repo root)
 set -uo pipefail
 
-log=output/ci/ffi-crash-probe.log
-mkdir -p "$(dirname "${log}")"
+mkdir -p output/ci
+status=0
 
-./.lake/build/bin/ffi_crash_probe > "${log}" 2>&1
-code=$?
+expect() {
+  local mode=$1 code=$2 message=$3
+  local log="output/ci/ffi-crash-probe-${mode}.log"
+  ./.lake/build/bin/ffi_crash_probe "${mode}" > "${log}" 2>&1
+  local actual=$?
+  head -n 3 "${log}"
+  if [[ "${actual}" -ne "${code}" ]]; then
+    echo "::error::${mode}: expected exit code ${code}, got ${actual}"
+    status=1
+  elif ! grep -qF "${message}" "${log}"; then
+    echo "::error::${mode}: output lacks '${message}'"
+    status=1
+  fi
+}
 
-head -n 3 "${log}"
-
-if [[ "${code}" -ne 134 ]]; then
-  echo "::error::expected SIGABRT (134), got exit code ${code}"
-  exit 1
-fi
-
-if ! grep -qF "[tyr] fatal: uncaught libtorch error" "${log}"; then
-  echo "::error::probe aborted without Tyr's libtorch error report"
-  exit 1
-fi
+expect libtorch 134 "[tyr] fatal: uncaught libtorch error"
+expect admission 134 "[tyr] native tensor contract violation: Tensor.probe: Expected shape #[3], got #[2, 2]"
+expect admission-ok 0 "admitted: #[1.000000, 1.000000, 1.000000, 1.000000]"
+exit "${status}"
