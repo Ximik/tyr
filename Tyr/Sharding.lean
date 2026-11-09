@@ -140,9 +140,7 @@ def ShardedTensor.fromFull {σ : StaticSpec} {rank worldSize : Nat}
     | none => full.raw
 
   let shard : Tensor (σ.withShape shardShape) :=
-    match Tensor.ofRaw shardedRaw with
-    | .ok t => t
-    | .error message => nativeInvariantFailure s!"ShardedTensor.fromFull: {message}"
+    (Tensor.ofRaw! "fromFull" shardedRaw)
 
   { shard := shard
     cachedFull := some full
@@ -191,9 +189,7 @@ def ShardedTensor.gather {σ : StaticSpec} {rank worldSize : Nat} {sd : ShardDim
   let full ← match sd.resolve? σ.shape.size with
     | none =>
       -- Not actually sharded: the shard is a full replica
-      match Tensor.ofRaw (σ := σ) sharded.shard.raw with
-      | .ok t => pure t
-      | .error message => throw (IO.userError s!"ShardedTensor.gather: {message}")
+      pure (Tensor.ofRaw! (σ := σ) "gather" sharded.shard.raw)
     | some d =>
       let fullDim := σ.shape.getD d 0
       if fullDim % worldSize != 0 then
@@ -202,18 +198,14 @@ def ShardedTensor.gather {σ : StaticSpec} {rank worldSize : Nat} {sd : ShardDim
       if d = 0 then
         -- allGather concatenates along dimension 0
         let gathered ← dist.allGather worldSize sharded.shard
-        match Tensor.ofRaw (σ := σ) gathered.raw with
-        | .ok t => pure t
-        | .error message => throw (IO.userError s!"ShardedTensor.gather: {message}")
+        pure (Tensor.ofRaw! (σ := σ) "gather" gathered.raw)
       else
         -- Move the sharded axis to the front, gather, then move it back
         let toFront := moveAxisToFrontPerm σ.shape.size d
         let fromFront := moveFrontToAxisPerm σ.shape.size d
         let gathered ← dist.allGather worldSize (← permuteRuntime sharded.shard toFront)
         let unpermuted ← permuteRuntime gathered fromFront
-        match Tensor.ofRaw (σ := σ) unpermuted.raw with
-        | .ok t => pure t
-        | .error message => throw (IO.userError s!"ShardedTensor.gather: {message}")
+        pure (Tensor.ofRaw! (σ := σ) "gather" unpermuted.raw)
 
   let newSharded := { sharded with
     cachedFull := some full
@@ -233,10 +225,7 @@ def ShardedTensor.scatterGrad {σ : StaticSpec} {rank worldSize : Nat} {sd : Sha
     (_sharded : ShardedTensor σ rank worldSize sd)
     (fullGrad : Tensor σ) : IO (Tensor (σ.withShape (shardedShape σ.shape ⟨sd, worldSize, rank⟩))) := do
   let localRaw := (← dist.reduceScatter worldSize fullGrad .sum).raw
-  match Tensor.ofRaw localRaw with
-  | .ok t => pure t
-  | .error message => throw (IO.userError
-      s!"ShardedTensor.scatterGrad: reduce-scatter result does not match the shard spec: {message}")
+  pure (Tensor.ofRaw! "scatterGrad" localRaw)
 
 /-- Update the local shard and mark cache as stale.
 

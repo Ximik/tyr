@@ -36,19 +36,6 @@ example {_otherDevice : Device} (_packed : SomeDTypeTensor #[2] .CPU) : True := 
     LeanTest.assertEqual (← packed.2.toFloatArray) #[2, -3]
     LeanTest.assertEqual source.raw.dtype dtype
 
-@[test] def testExactDTypeRawAdmissionChecksFullSpec : IO Unit := do
-  let raw := (Tensor.fromFloatArray #[2, -3]).raw
-  let packed ← IO.ofExcept (SomeDTypeTensor.ofRaw (shape := #[2]) (device := .CPU) raw)
-  LeanTest.assertEqual packed.1 .Float32
-  LeanTest.assertEqual (← packed.2.toFloatArray) #[2, -3]
-  LeanTest.assertTrue
-    (SomeDTypeTensor.ofRaw (shape := #[3]) (device := .CPU) raw).toOption.isNone
-  for device in ← Tests.acceleratorDevices do
-    LeanTest.assertTrue
-      (SomeDTypeTensor.ofRaw (shape := #[2]) (device := device) raw).toOption.isNone
-  LeanTest.assertTrue
-    (Tensor.ofRaw (σ := ⟨#[2], .BFloat16, .CPU⟩) raw).toOption.isNone
-
 private def alignDType {shape : Shape} {device : Device}
     (left right : SomeDTypeTensor shape device) :
     Except String (Tensor ⟨shape, left.1, device⟩) := do

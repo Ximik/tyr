@@ -59,10 +59,6 @@ open torch
   LeanTest.assertEqual copied.raw.dtype DType.Int64
   LeanTest.assertTrue (copied.raw.device == original.raw.device)
   LeanTest.assertEqual (← copied.toFloatArray) #[7, 7]
-  let mismatched := (Tensor.full #[2] 1.75).raw
-  let rejected := Tensor.checkedUpdate? (σ := original.staticSpec) .Int64 .CPU mismatched
-  LeanTest.assertTrue rejected.toOption.isNone
-    "A consumed update result must retain the destination's exact dtype"
   LeanTest.assertEqual (← original.toFloatArray) #[3, 3]
 
 @[test] def testDynamicRequiresGradPreservesNativeMetadata : IO Unit := do

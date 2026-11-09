@@ -53,31 +53,23 @@ def testPolarExpressFFI : IO Unit := do
   let norm := Tensor.item (Tensor.meanAll (Tensor.abs orthG))
   LeanTest.assertTrue (norm > 0.0) "Orthogonalized gradient should be non-zero"
 
-/-- The native scalar arithmetic promotes Int64 to Float32. The indexed
-boundary must reject this instead of returning a tensor with a false dtype. -/
-@[test]
-def testDistributedRejectsPromotedIntegerResults : IO Unit := do
-  let input := Tensor.fullInt #[2, 2] 1
-  Tests.assertThrows (dist.baPlusCaa input 0.5 0.5)
-    (some "baPlusCaa: Expected dtype Int64, got Float32")
-  Tests.assertThrows (dist.newtonSchulzStep input 0.5 0.5 0.5)
-    (some "newtonSchulzStep: Expected dtype Int64, got Float32")
-  Tests.assertThrows (dist.cautiousUpdate input input 0.1 0.1)
-    (some "cautiousUpdate: Expected dtype Int64, got Float32")
-  let packed ← IO.ofExcept input.reifyDType
-  let input := packed.2
-  Tests.assertThrows (dist.baPlusCaa input 0.5 0.5)
-    (some "baPlusCaa: Expected dtype Int64, got Float32")
-  Tests.assertThrows (dist.newtonSchulzStep input 0.5 0.5 0.5)
-    (some "newtonSchulzStep: Expected dtype Int64, got Float32")
-  Tests.assertThrows (dist.cautiousUpdate input input 0.1 0.1)
-    (some "cautiousUpdate: Expected dtype Int64, got Float32")
+example (_ints : Tensor ⟨#[2, 2], .Int64, .CPU⟩) (_floats : Tensor ⟨#[2, 2], .Float32, .CPU⟩) : True := by
+  have _ := dist.baPlusCaa _floats 0.5 0.5
+  fail_if_success have _ := dist.baPlusCaa _ints 0.5 0.5
+  have _ := dist.newtonSchulzStep _floats 0.5 0.5 0.5
+  fail_if_success have _ := dist.newtonSchulzStep _ints 0.5 0.5 0.5
+  have _ := dist.cautiousUpdate _floats _floats 0.1 0.1
+  fail_if_success have _ := dist.cautiousUpdate _ints _ints 0.1 0.1
+  trivial
 
 /-- Successful native results retain the full claimed metadata, including an
 exact CPU placement and the rectangular XXT result shape. -/
 @[test]
 def testDistributedFloatingResultMetadata : IO Unit := do
-  for dtype in #[DType.Float32, DType.Float64] do
+  checkDistributedResultMetadata .Float32
+  checkDistributedResultMetadata .Float64
+where
+  checkDistributedResultMetadata (dtype : DType) [DType.RealFloating dtype] : IO Unit := do
     let support ← dtype.acquireConstantSupport .CPU
     let _ := support.down
     let input := Tensor.onesFor ⟨#[2, 2], dtype, .CPU⟩

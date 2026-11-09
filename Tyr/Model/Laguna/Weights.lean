@@ -74,7 +74,7 @@ private def stackBank (dtype : DType) (tensors : Array (ShapePackedTensor dtype 
     (shape : Shape) (device : Device) : IO (SomeDTypeTensor shape device) := do
   let tensor ← IO.ofExcept (Tensor.catMany? tensors 0 shape)
   let raw ← RawTensor.convertIO shape tensor.raw device none
-  let moved ← IO.ofExcept (Tensor.ofRaw (σ := ⟨shape, dtype, device⟩) raw)
+  let moved ← pure (Tensor.ofRaw! (σ := ⟨shape, dtype, device⟩) "stackBank" raw)
   pure ⟨dtype, moved.detach⟩
 
 /-- Load one attention block (`numHeads` is the per-layer query head count).

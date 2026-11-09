@@ -115,12 +115,11 @@ def testStateDictSimulation : IO Unit := do
       let remaining ← ref.get
       match remaining with
       | [] => throw $ IO.userError "Not enough tensors in state list"
-      | ⟨_s', t⟩ :: rest => 
-        let tensor ← match Tensor.ofRaw (σ := σ) t.raw with
-          | .ok tensor => pure tensor
-          | .error message => throw (IO.userError message)
+      | ⟨s', t⟩ :: rest =>
+        if s' != σ then
+          throw $ IO.userError s!"State tensor spec {reprStr s'} does not match the model's {reprStr σ}"
         ref.set rest
-        pure tensor
+        pure (Tensor.ofRaw! "restore" t.raw)
     ) model
 
   let loadedParams ← loadFromList stateList params

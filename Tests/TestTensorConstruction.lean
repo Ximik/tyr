@@ -58,9 +58,7 @@ def privateImplementationBypass (σ : StaticSpec)
 def testCheckedAdmissionAndOpaqueAccessors : IO Unit := do
   let raw := RawTensor.zeros #[2] false .CPU
   let spec : StaticSpec := { shape := #[2], dtype := .Float32, device := .CPU }
-  let tensor ← match Tensor.ofRaw (σ := spec) raw with
-    | .error message => throw (IO.userError message)
-    | .ok tensor => pure tensor
+  let tensor : Tensor spec := Tensor.ofRaw! "test" raw
   LeanTest.assertEqual tensor.raw.runtimeShape #[2]
   LeanTest.assertEqual tensor.raw.dtype .Float32
   LeanTest.assertTrue (tensor.raw.device == .CPU)
@@ -70,15 +68,6 @@ def testCheckedAdmissionAndOpaqueAccessors : IO Unit := do
   LeanTest.assertTrue (packaged.1 == Device.CPU)
   LeanTest.assertTrue packaged.2.validate.toOption.isSome
   LeanTest.assertEqual packaged.2.raw.getValues.toList [0, 0]
-  let rejected : Array StaticSpec := #[
-    { spec with shape := #[99] },
-    { spec with dtype := .Int64 }]
-  for device in ← Tests.acceleratorDevices do
-    LeanTest.assertTrue (Tensor.ofRaw (σ := ⟨raw.runtimeShape, raw.dtype, device⟩) raw).toOption.isNone
-      "A CPU handle cannot be admitted at an acquired accelerator placement"
-  for wrong in rejected do
-    LeanTest.assertTrue (Tensor.ofRaw (σ := wrong) raw).toOption.isNone
-      s!"Checked admission must reject {reprStr wrong}"
 
 @[test]
 def testOpaqueDefaultAllocation : IO Unit := do

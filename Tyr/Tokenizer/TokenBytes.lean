@@ -38,7 +38,7 @@ private def indexSelect1d {n k : Nat} (t : Tensor { shape := #[n], dtype := .Int
 private def bytesAt (tb : TokenBytes) (device : Device) :
     IO (Tensor { shape := #[tb.vocabSize], dtype := .Int64, device }) := do
   let raw ← RawTensor.convertIO tb.bytes.shape tb.bytes.raw device none
-  IO.ofExcept (Tensor.ofRaw raw)
+  pure (Tensor.ofRaw! "bytesAt" raw)
 
 /-- Build token bytes mapping from a BPE tokenizer.
     For each token:

@@ -641,9 +641,7 @@ private def withRawLeaves [TensorStruct α] (template : α) (leaves : Array RawT
     set (index + 1)
     pure (match leaves[index]? with
       | none => nativeInvariantFailure "functionalGrad: missing leaf"
-      | some raw => match Tensor.ofRaw (σ := σ) raw with
-        | .ok tensor => tensor
-        | .error message => nativeInvariantFailure s!"functionalGrad: {message}"))
+      | some raw => Tensor.ofRaw! (σ := σ) "functionalGrad" raw))
     template).run 0).1
 
 /-- Differentiate an existing output with respect to every tensor leaf in one
@@ -661,9 +659,7 @@ def grad {σ : StaticSpec} [TensorStruct α]
     match gradients[index]? with
     | none => throw (IO.userError "TensorStruct.grad: missing gradient leaf")
     | some raw =>
-      match Tensor.ofRaw (σ := τ) raw with
-      | .ok tensor => pure tensor
-      | .error message => throw (IO.userError s!"TensorStruct.grad: {message}")) inputs).run 0)
+      pure (Tensor.ofRaw! (σ := τ) "grad" raw)) inputs).run 0)
   if count != gradients.size then
     throw (IO.userError "TensorStruct.grad: unexpected gradient leaves")
   pure result

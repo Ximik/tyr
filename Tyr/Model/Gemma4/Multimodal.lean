@@ -404,9 +404,11 @@ private def scatterFeaturesIntoToken {batch seq hidden featTokens : Nat}
       s!"Gemma4 placeholder token count mismatch for token={tokenId}: ids={nTokens} features={featTokens}"
   let tokenMask : Tensor { device := device, shape := #[batch, seq, hidden], dtype := .Bool } :=
     Tensor.expand (Tensor.reshape tokenMask2d #[batch, seq, 1]) #[batch, seq, hidden]
-  let src ← IO.ofExcept (Tensor.ofRaw (σ := ⟨#[featTokens * hidden], dtype, device⟩)
-    (Tensor.reshape features #[featTokens * hidden]).raw)
-  pure (Tensor.maskedScatter inputsEmbeds tokenMask src)
+  let flat := Tensor.reshape features #[featTokens * hidden]
+  if h : projectorDType = dtype then
+    pure (Tensor.maskedScatter inputsEmbeds tokenMask (h ▸ flat))
+  else
+    throw <| IO.userError s!"Gemma4 feature dtype {projectorDType} differs from text dtype {dtype}"
 
 private def buildInputEmbedsWithFeatures {batch seq : Nat}
     (cfg : VLConfig)

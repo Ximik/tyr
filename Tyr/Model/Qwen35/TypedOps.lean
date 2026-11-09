@@ -8,9 +8,7 @@ variable {device : Device} {dtype : DType}
 variable [DType.RealFloating dtype]
 
 private def checked {σ : StaticSpec} (raw : RawTensor) : Tensor σ :=
-  match Tensor.ofRaw raw with
-  | .ok result => result
-  | .error message => nativeInvariantFailure s!"Qwen35 tensor boundary: {message}"
+  (Tensor.ofRaw! "checked" raw)
 
 def typedSlice {s out : Shape} {d : DType} (x : Tensor { device := device, shape := s, dtype := d }) (dim : Nat) (start len : Nat) : Tensor { device := device, shape := out, dtype := d } :=
   x.sliceChecked dim start len out

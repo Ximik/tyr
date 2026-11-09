@@ -19,7 +19,7 @@ def forward : Tensor { shape := #[32, 512], dtype := .Float32, device := .CPU } 
 
 -- Replacing w with Tensor.ones #[768, 512] is a type error.
 -- Raw handles cross into this facade through Tensor.ofTensor, which checks
--- their actual shape and dtype. Raw handles enter through Tensor.ofRaw.
+-- their actual shape and dtype. Native results enter through Tensor.ofRaw!.
 ```
 
 ## Dependencies
@@ -205,8 +205,9 @@ def project {m k n : Nat}
 ```
 
 The native carrier is `RawTensor`; model code uses indexed `Tensor σ` values.
-Use `Tensor.ofRaw` at native boundaries and `Tensor.validate` when auditing an
-indexed value. `Tensor.reshape` requires equal element counts and treats `#[]`
+Native results enter through `Tensor.ofRaw!`, which aborts if a result
+contradicts its type; external data is checked on its own metadata where it
+enters. Use `Tensor.validate` when auditing an indexed value. `Tensor.reshape` requires equal element counts and treats `#[]`
 as a scalar. Runtime-dependent shapes can be packaged existentially without
 losing the tensor's shape index.
 
