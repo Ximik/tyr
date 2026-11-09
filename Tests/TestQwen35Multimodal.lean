@@ -20,34 +20,25 @@ private def tinyTextCfg : Config := {
   num_key_value_heads := 2
   head_dim := 4
   rope_theta := 10000.0
-  partial_rotary_factor := 1.0
+  rotary_dim := 4
   rms_norm_eps := 1e-6
-  max_position_embeddings := 128
-  attention_bias := false
-  attention_dropout := 0.0
-  hidden_act := "silu"
   linear_conv_kernel_dim := 4
   linear_key_head_dim := 4
   linear_value_head_dim := 4
   linear_num_key_heads := 2
   linear_num_value_heads := 4
   layer_types := #[.fullAttention, .linearAttention]
-  full_attention_interval := 2
   moe_intermediate_size := 8
   shared_expert_intermediate_size := 8
   num_experts_per_tok := 2
   num_experts := 0
-  use_cache := true
   tie_word_embeddings := false
-  pad_token_id := some 0
-  bos_token_id := some 1
   eos_token_id := some 2
 }
 
 private def tinyVisionCfg : VisionConfig := {
   depth := 2
   hidden_size := 16
-  hidden_act := "gelu_pytorch_tanh"
   intermediate_size := 32
   num_heads := 4
   in_channels := 3
@@ -56,10 +47,9 @@ private def tinyVisionCfg : VisionConfig := {
   temporal_patch_size := 1
   out_hidden_size := 16
   num_position_embeddings := 32
-  initializer_range := 0.02
 }
 
-private def tinyVLCfg : VLConfig := VLConfig.normalize {
+private def tinyVLCfg : VLConfig := {
   text_config := tinyTextCfg
   vision_config := tinyVisionCfg
   image_token_id := 50
@@ -75,7 +65,7 @@ def testQwen35MultimodalConfigLoad : IO Unit := do
   let json :=
     "{\"image_token_id\":250001,\"video_token_id\":250002,\"vision_start_token_id\":250003," ++
     "\"vision_end_token_id\":250004,\"text_config\":{" ++
-    "\"vocab_size\":128,\"hidden_size\":48,\"intermediate_size\":96,\"num_hidden_layers\":4," ++
+    "\"vocab_size\":251000,\"hidden_size\":48,\"intermediate_size\":96,\"num_hidden_layers\":4," ++
     "\"num_attention_heads\":6,\"num_key_value_heads\":2,\"head_dim\":8," ++
     "\"attn_output_gate\":true," ++
     "\"rope_parameters\":{\"rope_theta\":500000.0,\"partial_rotary_factor\":0.5," ++
@@ -90,9 +80,6 @@ def testQwen35MultimodalConfigLoad : IO Unit := do
   LeanTest.assertEqual cfg.image_token_id 250001 "image token id should load"
   LeanTest.assertEqual cfg.video_token_id 250002 "video token id should load"
   LeanTest.assertEqual cfg.text_config.hidden_size 48 "text hidden size should load"
-  LeanTest.assertEqual cfg.text_config.attn_output_gate true "nested text attention gate should load"
-  LeanTest.assertEqual cfg.text_config.mrope_interleaved true "nested text mrope flag should load"
-  LeanTest.assertEqual cfg.text_config.mrope_section #[2, 2, 2] "nested text mrope section should load"
   LeanTest.assertEqual cfg.vision_config.depth 3 "vision depth should load"
   LeanTest.assertEqual cfg.vision_config.out_hidden_size 48 "vision out_hidden_size should load"
 

@@ -9,7 +9,7 @@ open torch torch.qwen3asr
 private def cfg : AudioEncoderConfig :=
   { numMelBins := 8, encoderLayers := 1, encoderAttentionHeads := 1,
     encoderFfnDim := 4, dModel := 2, attentionDropout := 1.0,
-    outputDim := 2, downsampleHiddenSize := 2, nWindow := 8, nWindowInfer := 8 }
+    outputDim := 2, downsampleHiddenSize := 2, nWindow := 8, nWindowInfer := 16 }
 
 private def attention : AudioAttention (device := .CPU) cfg :=
   { qProjWeight := (Tensor.zeros #[2, 2])
@@ -76,11 +76,18 @@ private def assertClose (actual expected : Array Float) : IO Unit := do
   assertClose (← (← model.forwardVarLenIO features #[24] false).toFloatArray)
     (← (model.forwardVarLenInference features #[24]).toFloatArray)
 
-private def parentCfg (dropout : Float) : Qwen3ASRConfig :=
+private def baseParentCfg : Qwen3ASRConfig :=
   { thinkerConfig := {
-      audioConfig := { cfg with attentionDropout := dropout }
+      audioConfig := cfg
       textConfig := { vocabSize := 8, hiddenSize := 2, intermediateSize := 4, numHiddenLayers := 0, numAttentionHeads := 1, numKeyValueHeads := 1, headDim := 2 }
       audioTokenId := 7 } }
+
+private def parentCfg (dropout : Float) : Qwen3ASRConfig :=
+  { baseParentCfg with
+    thinkerConfig := { baseParentCfg.thinkerConfig with
+      audioConfig := { cfg with attentionDropout := dropout }
+      audioMatchesText := baseParentCfg.thinkerConfig.audioMatchesText }
+    timestampTokenInVocab := baseParentCfg.timestampTokenInVocab }
 
 private def expectDropoutError (action : IO α) : IO Unit := do
   let message ← try

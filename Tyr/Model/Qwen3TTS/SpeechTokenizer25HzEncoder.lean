@@ -20,8 +20,7 @@ import Tyr.TensorStruct
 import Tyr.Module.Derive
 import Tyr.Model.Qwen3ASR.Frontend
 import Tyr.Model.Qwen3ASR.PreprocessorConfig
-import Lean.Data.Json
-import Lean.Data.Json.FromToJson.Basic
+import Tyr.Model.ConfigJson
 
 namespace torch.qwen3tts
 
@@ -32,106 +31,40 @@ open torch.qwen3asr
 
 /-! ## Config parsing -/
 
+/-- Qwen3-TTS 25 Hz tokenizer encoder metadata. The encoder architecture is
+fixed and `loadFromFile` rejects any other value; only the waveform rates vary. -/
 structure SpeechTokenizer25HzEncoderConfig where
-  modelType : String := "qwen3_tts_tokenizer_25hz"
   inputSampleRate : Nat := 24000
   encodeDownsampleRate : Nat := 1920
-  nMels : Nat := 128
-  nCtx : Nat := 1500
-  nState : Nat := 1280
-  nHead : Nat := 20
-  nLayer : Nat := 32
-  nWindow : Nat := 100
-  audioVqType : String := "GRVQ"
-  audioVqLayers : Nat := 6
-  audioVqCodebookSize : Nat := 32768
-  audioVqCodebookDim : Nat := 1280
-  audioVqDsRate : Nat := 2
-  deriving Repr, Inhabited
-
-private def parseJsonFile (path : String) : IO Json := do
-  let contents ← IO.FS.readFile path
-  match Json.parse contents with
-  | .ok json => pure json
-  | .error err => throw (IO.userError s!"Failed to parse JSON at {path}: {err}")
-
-private def getObjVal? (j : Json) (key : String) : Option Json :=
-  match j with
-  | .obj kvs => Std.TreeMap.Raw.get? kvs key
-  | _ => none
-
-private def getStr? (j : Json) : Option String :=
-  match j with
-  | .str s => some s
-  | _ => none
-
-private def getNat? (j : Json) : Option Nat :=
-  match (FromJson.fromJson? j : Except String Nat) with
-  | .ok n => some n
-  | .error _ => none
-
-private def getNatFieldD (j : Json) (key : String) (d : Nat) : Nat :=
-  match getObjVal? j key >>= getNat? with
-  | some n => n
-  | none => d
-
-private def getStrFieldD (j : Json) (key : String) (d : String) : String :=
-  match getObjVal? j key >>= getStr? with
-  | some s => s
-  | none => d
-
-private def requireTrue (ok : Bool) (msg : String) : IO Unit := do
-  unless ok do
-    throw (IO.userError msg)
+  /-- Audio is framed at a positive rate; checked when the config is built. -/
+  ratesPos : 0 < inputSampleRate ∧ 0 < encodeDownsampleRate := by decide
+  deriving Repr
 
 namespace SpeechTokenizer25HzEncoderConfig
 
-def loadFromFile (path : String) (defaults : SpeechTokenizer25HzEncoderConfig := {})
-    : IO SpeechTokenizer25HzEncoderConfig := do
-  let root ← parseJsonFile path
-  let encCfg := (getObjVal? root "encoder_config").getD (Json.obj ∅)
-  pure {
-    modelType := getStrFieldD root "model_type" defaults.modelType
-    inputSampleRate := getNatFieldD root "input_sample_rate" defaults.inputSampleRate
-    encodeDownsampleRate := getNatFieldD root "encode_downsample_rate" defaults.encodeDownsampleRate
-    nMels := getNatFieldD encCfg "n_mels" defaults.nMels
-    nCtx := getNatFieldD encCfg "n_ctx" defaults.nCtx
-    nState := getNatFieldD encCfg "n_state" defaults.nState
-    nHead := getNatFieldD encCfg "n_head" defaults.nHead
-    nLayer := getNatFieldD encCfg "n_layer" defaults.nLayer
-    nWindow := getNatFieldD encCfg "n_window" defaults.nWindow
-    audioVqType := getStrFieldD encCfg "audio_vq_type" defaults.audioVqType
-    audioVqLayers := getNatFieldD encCfg "audio_vq_layers" defaults.audioVqLayers
-    audioVqCodebookSize := getNatFieldD encCfg "audio_vq_codebook_size" defaults.audioVqCodebookSize
-    audioVqCodebookDim := getNatFieldD encCfg "audio_vq_codebook_dim" defaults.audioVqCodebookDim
-    audioVqDsRate := getNatFieldD encCfg "audio_vq_ds_rate" defaults.audioVqDsRate
-  }
+open ConfigJson
 
-def validateSupported (cfg : SpeechTokenizer25HzEncoderConfig) : IO Unit := do
-  requireTrue (cfg.modelType == "qwen3_tts_tokenizer_25hz")
-    s!"Unsupported speech tokenizer model_type={cfg.modelType} (expected qwen3_tts_tokenizer_25hz)"
-  requireTrue (cfg.nMels == 128)
-    s!"Unsupported n_mels={cfg.nMels} (expected 128)"
-  requireTrue (cfg.nCtx == 1500)
-    s!"Unsupported n_ctx={cfg.nCtx} (expected 1500)"
-  requireTrue (cfg.nState == 1280)
-    s!"Unsupported n_state={cfg.nState} (expected 1280)"
-  requireTrue (cfg.nHead == 20)
-    s!"Unsupported n_head={cfg.nHead} (expected 20)"
-  requireTrue (cfg.nLayer >= cfg.audioVqLayers)
-    s!"Invalid n_layer={cfg.nLayer}, audio_vq_layers={cfg.audioVqLayers}"
-  requireTrue (cfg.nWindow == 100)
-    s!"Unsupported n_window={cfg.nWindow} (expected 100)"
-  requireTrue (cfg.audioVqType == "GRVQ")
-    s!"Unsupported audio_vq_type={cfg.audioVqType} (expected GRVQ)"
-  requireTrue (cfg.audioVqLayers == 6)
-    s!"Unsupported audio_vq_layers={cfg.audioVqLayers} (expected 6)"
-  requireTrue (cfg.audioVqCodebookSize == 32768)
-    s!"Unsupported audio_vq_codebook_size={cfg.audioVqCodebookSize} (expected 32768)"
-  requireTrue (cfg.audioVqCodebookDim == 1280)
-    s!"Unsupported audio_vq_codebook_dim={cfg.audioVqCodebookDim} (expected 1280)"
-  requireTrue (cfg.audioVqDsRate == 2)
-    s!"Unsupported audio_vq_ds_rate={cfg.audioVqDsRate} (expected 2)"
+def loadFromJson (root : Json) (defaults : SpeechTokenizer25HzEncoderConfig := {}) :
+    Except String SpeechTokenizer25HzEncoderConfig := do
+  requireOneOf root "model_type" ["qwen3_tts_tokenizer_25hz"]
+  if let some e ← objectField? root "encoder_config" then
+    for (key, value) in [("n_mels", 128), ("n_ctx", 1500), ("n_state", 1280), ("n_head", 20),
+        ("n_window", 100), ("audio_vq_layers", 6), ("audio_vq_codebook_size", 32768),
+        ("audio_vq_codebook_dim", 1280), ("audio_vq_ds_rate", 2)] do
+      requireEq e key (value : Nat)
+    requireOneOf e "audio_vq_type" ["GRVQ"]
+    let nLayer : Nat ← fieldD? e "n_layer" 32
+    unless 6 ≤ nLayer do
+      throw s!"Invalid n_layer={nLayer}: the six quantized encoder blocks come first"
+  let inputSampleRate ← fieldD? root "input_sample_rate" defaults.inputSampleRate
+  let encodeDownsampleRate ← fieldD? root "encode_downsample_rate" defaults.encodeDownsampleRate
+  let ⟨hRates⟩ ← if h : 0 < inputSampleRate ∧ 0 < encodeDownsampleRate then pure (PLift.up h) else
+    throw s!"Invalid input_sample_rate={inputSampleRate}/encode_downsample_rate={encodeDownsampleRate}: both must be positive"
+  pure { inputSampleRate, encodeDownsampleRate, ratesPos := hRates }
+
+def loadFromFile (path : String) (defaults : SpeechTokenizer25HzEncoderConfig := {}) :
+    IO SpeechTokenizer25HzEncoderConfig := do
+  IO.ofExcept (loadFromJson (← parseFile path) defaults)
 
 end SpeechTokenizer25HzEncoderConfig
 
@@ -226,7 +159,7 @@ structure SpeechTokenizer25HzEncoder (dtype : RealFloatingDType := float32DType)
   vqDownWeight : Tensor { shape := #[1280, 1280, 2], dtype := dtype.val, device := device }
   vqDownBias : Tensor { shape := #[1280], dtype := dtype.val, device := device }
   vqCodebook : Tensor { shape := #[32768, 1280], dtype := dtype.val, device := device }
-  inputSampleRate : Nat := 24000
+  inputSampleRate : Static {rate : Nat // 0 < rate} := ⟨⟨24000, by decide⟩⟩
   encodeDownsampleRate : Nat := 1920
   deriving TensorStruct
 
@@ -274,7 +207,6 @@ private def loadBlock (weightsPath : String) (i : Nat) : IO (EncoderBlock25Hz (d
 /-- Load 25Hz encoder-side tokenizer weights from `speech_tokenizer` directory. -/
 def loadFromDir (speechTokenizerDir : String) (device : Device := Device.CPU) : IO (Σ dtype : RealFloatingDType, SpeechTokenizer25HzEncoder (device := device) dtype) := do
   let cfg ← SpeechTokenizer25HzEncoderConfig.loadFromFile s!"{speechTokenizerDir}/config.json"
-  SpeechTokenizer25HzEncoderConfig.validateSupported cfg
 
   let weightsPath := s!"{speechTokenizerDir}/model.safetensors"
   let anchor ← (← safetensors.Source.open weightsPath).load "encoder.tokenizer.conv1.weight" #[1280, 128, 3] device
@@ -308,7 +240,7 @@ def loadFromDir (speechTokenizerDir : String) (device : Device := Device.CPU) : 
     vqDownWeight
     vqDownBias
     vqCodebook
-    inputSampleRate := cfg.inputSampleRate
+    inputSampleRate := ⟨⟨cfg.inputSampleRate, cfg.ratesPos.1⟩⟩
     encodeDownsampleRate := cfg.encodeDownsampleRate
   }
   pure ⟨dtype, enc⟩
@@ -416,7 +348,8 @@ def encodeWaveToCodes
 
   let preCfg : PreprocessorConfig := {
     featureSize := 128
-    samplingRate := m.inputSampleRate
+    samplingRate := m.inputSampleRate.val.val
+    samplingRatePos := m.inputSampleRate.val.property
     hopLength := 160
     nFft := 400
     paddingValue := 0.0

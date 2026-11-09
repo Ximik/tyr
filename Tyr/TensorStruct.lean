@@ -431,7 +431,7 @@ instance {α : Type} [TensorStruct α] : TensorStruct (Option α) where
     | none => init
 
 /-- Static values are completely skipped during TensorStruct traversal -/
-instance {α : Type} [Inhabited α] : TensorStruct (Static α) where
+instance {α : Type} : TensorStruct (Static α) where
   map _ s := s
   mapM _ s := pure s
   zipWith _ s _ := s

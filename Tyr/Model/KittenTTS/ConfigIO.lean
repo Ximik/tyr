@@ -4,126 +4,51 @@
   Kokoro / KittenTTS `config.json` loader.
 -/
 import Tyr.Model.KittenTTS.Config
-import Lean.Data.Json
-import Lean.Data.Json.FromToJson.Basic
+import Tyr.Model.ConfigJson
 
 namespace torch.kittentts
 
-open Lean
+open Lean ConfigJson
 
 abbrev VocabMap := Std.HashMap Char UInt64
-
-private def parseJsonFile (path : String) : IO Json := do
-  let contents ← IO.FS.readFile path
-  match Json.parse contents with
-  | .ok json => pure json
-  | .error err => throw <| IO.userError s!"Failed to parse JSON at {path}: {err}"
-
-private def getObjVal? (j : Json) (key : String) : Option Json :=
-  match j with
-  | .obj kvs => Std.TreeMap.Raw.get? kvs key
-  | _ => none
-
-private def getArr? (j : Json) : Option (Array Json) :=
-  match j with
-  | .arr a => some a
-  | _ => none
-
-private def fromJson? {α} [FromJson α] (j : Json) : Option α :=
-  match (FromJson.fromJson? j : Except String α) with
-  | .ok v => some v
-  | .error _ => none
-
-private def getNat? (j : Json) : Option Nat := fromJson? j
-
-private def getFloat? (j : Json) : Option Float :=
-  match (fromJson? (α := Float) j) with
-  | some x => some x
-  | none => (getNat? j).map (·.toFloat)
-
-private def getBool? (j : Json) : Option Bool := fromJson? j
-
-private def getNatFieldD (j : Json) (key : String) (d : Nat) : Nat :=
-  match getObjVal? j key >>= getNat? with
-  | some n => n
-  | none => d
-
-private def getFloatFieldD (j : Json) (key : String) (d : Float) : Float :=
-  match getObjVal? j key >>= getFloat? with
-  | some x => x
-  | none => d
-
-private def getBoolFieldD (j : Json) (key : String) (d : Bool) : Bool :=
-  match getObjVal? j key >>= getBool? with
-  | some x => x
-  | none => d
-
-private def getNatArrayFieldD (j : Json) (key : String) (d : Array Nat) : Array Nat :=
-  match getObjVal? j key >>= getArr? with
-  | some arr =>
-    Id.run do
-      let mut out : Array Nat := #[]
-      for it in arr do
-        match getNat? it with
-        | some n => out := out.push n
-        | none => pure ()
-      if out.isEmpty then d else out
-  | none => d
-
-private def getNatMatrixFieldD
-    (j : Json)
-    (key : String)
-    (d : Array (Array Nat))
-    : Array (Array Nat) :=
-  match getObjVal? j key >>= getArr? with
-  | some rows =>
-    Id.run do
-      let mut out : Array (Array Nat) := #[]
-      for row in rows do
-        match getArr? row with
-        | some items =>
-          let mut inner : Array Nat := #[]
-          for item in items do
-            match getNat? item with
-            | some n => inner := inner.push n
-            | none => pure ()
-          out := out.push inner
-        | none => pure ()
-      if out.isEmpty then d else out
-  | none => d
-
-private def stringToSingleChar? (s : String) : Option Char :=
-  match s.toList with
-  | [c] => some c
-  | _ => none
 
 namespace AlbertConfig
 
 def loadFromJson (root : Json) (defaults : AlbertConfig := {}) : Except String AlbertConfig := do
-  let numHiddenLayers := getNatFieldD root "num_hidden_layers" defaults.numHiddenLayers
-  let numHiddenGroups := getNatFieldD root "num_hidden_groups" defaults.numHiddenGroups
+  let numHiddenLayers ← fieldD? root "num_hidden_layers" defaults.numHiddenLayers
+  let numHiddenGroups ← fieldD? root "num_hidden_groups" defaults.numHiddenGroups
   let ⟨hGroups⟩ ← if h : 0 < numHiddenGroups ∧ numHiddenGroups ∣ numHiddenLayers then
       pure (PLift.up h)
     else
       throw s!"Invalid KittenTTS plbert config: num_hidden_groups={numHiddenGroups} must be positive and divide num_hidden_layers={numHiddenLayers}"
+  let numAttentionHeads ← fieldD? root "num_attention_heads" defaults.numAttentionHeads
+  let hiddenSize ← fieldD? root "hidden_size" defaults.hiddenSize
+  let ⟨hHeads⟩ ← if h : 0 < numAttentionHeads ∧ numAttentionHeads ∣ hiddenSize then
+      pure (PLift.up h)
+    else
+      throw s!"Invalid KittenTTS plbert config: num_attention_heads={numAttentionHeads} must be positive and divide hidden_size={hiddenSize}"
+  let layerNormEps ← fieldD? root "layer_norm_eps" defaults.layerNormEps
+  let ⟨hEps⟩ ← if h : 0 < layerNormEps then pure (PLift.up h) else
+    throw s!"Invalid KittenTTS plbert config: layer_norm_eps={layerNormEps} must be positive"
+  let typeVocabSize ← fieldD? root "type_vocab_size" defaults.typeVocabSize
+  let ⟨hTypes⟩ ← if h : 0 < typeVocabSize then pure (PLift.up h) else
+    throw s!"Invalid KittenTTS plbert config: type_vocab_size={typeVocabSize} must hold token type 0"
+  requireOneOf root "hidden_act" ["gelu_new", "gelu_pytorch_tanh"]
   pure {
     numHiddenLayers
-    numAttentionHeads := getNatFieldD root "num_attention_heads" defaults.numAttentionHeads
-    hiddenSize := getNatFieldD root "hidden_size" defaults.hiddenSize
-    intermediateSize := getNatFieldD root "intermediate_size" defaults.intermediateSize
-    maxPositionEmbeddings := getNatFieldD root "max_position_embeddings" defaults.maxPositionEmbeddings
-    embeddingSize := getNatFieldD root "embedding_size" defaults.embeddingSize
-    innerGroupNum := getNatFieldD root "inner_group_num" defaults.innerGroupNum
+    numAttentionHeads
+    hiddenSize
+    intermediateSize := ← fieldD? root "intermediate_size" defaults.intermediateSize
+    maxPositionEmbeddings := ← fieldD? root "max_position_embeddings" defaults.maxPositionEmbeddings
+    embeddingSize := ← fieldD? root "embedding_size" defaults.embeddingSize
+    innerGroupNum := ← fieldD? root "inner_group_num" defaults.innerGroupNum
     numHiddenGroups
-    typeVocabSize := getNatFieldD root "type_vocab_size" defaults.typeVocabSize
-    layerNormEps := getFloatFieldD root "layer_norm_eps" defaults.layerNormEps
-    hiddenDropoutProb :=
-      getFloatFieldD root "hidden_dropout_prob" <|
-        getFloatFieldD root "dropout" defaults.hiddenDropoutProb
-    attentionDropoutProb :=
-      getFloatFieldD root "attention_probs_dropout_prob" <|
-        getFloatFieldD root "dropout" defaults.attentionDropoutProb
+    typeVocabSize
+    layerNormEps
     hiddenGroupsValid := hGroups
+    headsDivide := hHeads
+    typeVocabPos := hTypes
+    layerNormEpsPos := hEps
   }
 
 end AlbertConfig
@@ -131,101 +56,120 @@ end AlbertConfig
 namespace GeneratorConfig
 
 def loadFromJson (root : Json) (defaults : GeneratorConfig := {}) : Except String GeneratorConfig := do
-  let resblockKernelSizes := getNatArrayFieldD root "resblock_kernel_sizes" defaults.resblockKernelSizes
-  let upsampleRates := getNatArrayFieldD root "upsample_rates" defaults.upsampleRates
-  let upsampleKernelSizes := getNatArrayFieldD root "upsample_kernel_sizes" defaults.upsampleKernelSizes
-  if hStages : 0 < upsampleRates.size ∧ ∀ i, i < upsampleRates.size →
+  let resblockKernelSizes ← fieldD? root "resblock_kernel_sizes" defaults.resblockKernelSizes
+  let upsampleRates ← fieldD? root "upsample_rates" defaults.upsampleRates
+  let upsampleKernelSizes ← fieldD? root "upsample_kernel_sizes" defaults.upsampleKernelSizes
+  let upsampleInitialChannel ← fieldD? root "upsample_initial_channel" defaults.upsampleInitialChannel
+  let resblockDilationSizes ← fieldD? root "resblock_dilation_sizes" defaults.resblockDilationSizes
+  let genIstftNFft ← fieldD? root "gen_istft_n_fft" defaults.genIstftNFft
+  let genIstftHopSize ← fieldD? root "gen_istft_hop_size" defaults.genIstftHopSize
+  let ⟨hStages⟩ ← if h : 0 < upsampleRates.size ∧ ∀ i, i < upsampleRates.size →
       1 < upsampleRates.getD i 1 ∧ upsampleRates.getD i 1 ≤ upsampleKernelSizes.getD i 0 ∧
-      2 ∣ upsampleKernelSizes.getD i 0 - upsampleRates.getD i 1 then
-    if hRes : 0 < resblockKernelSizes.size ∧
-        ∀ j, j < resblockKernelSizes.size → resblockKernelSizes.getD j 0 % 2 = 1 then
-      pure {
-        resblockKernelSizes
-        upsampleRates
-        upsampleInitialChannel :=
-          getNatFieldD root "upsample_initial_channel" defaults.upsampleInitialChannel
-        resblockDilationSizes :=
-          getNatMatrixFieldD root "resblock_dilation_sizes" defaults.resblockDilationSizes
-        upsampleKernelSizes
-        genIstftNFft := getNatFieldD root "gen_istft_n_fft" defaults.genIstftNFft
-        genIstftHopSize := getNatFieldD root "gen_istft_hop_size" defaults.genIstftHopSize
-        harmonicCount := getNatFieldD root "harmonic_num" defaults.harmonicCount
-        stagesValid := hStages
-        resblocksValid := hRes
-      }
-    else
-      throw s!"Invalid KittenTTS generator config: resblock_kernel_sizes={resblockKernelSizes} must be nonempty and odd"
-  else
+      2 ∣ upsampleKernelSizes.getD i 0 - upsampleRates.getD i 1 then pure (PLift.up h) else
     throw s!"Invalid KittenTTS generator config: upsample_rates={upsampleRates} must be nonempty, each above 1, with upsample_kernel_sizes={upsampleKernelSizes} at least the rate and differing from it by an even amount"
+  let ⟨hKernels⟩ ← if h : upsampleKernelSizes.size = upsampleRates.size then pure (PLift.up h) else
+    throw s!"Invalid KittenTTS generator config: upsample_kernel_sizes={upsampleKernelSizes} must have one entry per upsample rate {upsampleRates}"
+  let ⟨hRes⟩ ← if h : 0 < resblockKernelSizes.size ∧
+      ∀ j, j < resblockKernelSizes.size → resblockKernelSizes.getD j 0 % 2 = 1 then pure (PLift.up h) else
+    throw s!"Invalid KittenTTS generator config: resblock_kernel_sizes={resblockKernelSizes} must be nonempty and odd"
+  let ⟨hDilations⟩ ← if h : resblockDilationSizes.size = resblockKernelSizes.size ∧
+      ∀ j, j < resblockDilationSizes.size → (resblockDilationSizes.getD j #[]).size = 3 ∧
+        ∀ m, m < 3 → 0 < (resblockDilationSizes.getD j #[]).getD m 0 then pure (PLift.up h) else
+    throw s!"Invalid KittenTTS generator config: resblock_dilation_sizes={resblockDilationSizes} must hold three positive dilations per resblock kernel {resblockKernelSizes}"
+  let ⟨hChannels⟩ ← if h : 2 ^ upsampleRates.size ≤ upsampleInitialChannel then pure (PLift.up h) else
+    throw s!"Invalid KittenTTS generator config: upsample_initial_channel={upsampleInitialChannel} must keep a channel after halving once per upsample stage ({upsampleRates.size})"
+  let ⟨hIstft⟩ ← if h : 0 < genIstftHopSize ∧ 0 < genIstftNFft ∧ 2 ∣ genIstftNFft then pure (PLift.up h) else
+    throw s!"Invalid KittenTTS generator config: gen_istft_hop_size={genIstftHopSize} must be positive and gen_istft_n_fft={genIstftNFft} positive and even"
+  pure {
+    resblockKernelSizes
+    upsampleRates
+    upsampleInitialChannel
+    resblockDilationSizes
+    upsampleKernelSizes
+    genIstftNFft
+    genIstftHopSize
+    harmonicCount := ← fieldD? root "harmonic_num" defaults.harmonicCount
+    stagesValid := hStages
+    resblocksValid := hRes
+    kernelsMatchRates := hKernels
+    dilationsValid := hDilations
+    channelsValid := hChannels
+    istftValid := hIstft
+  }
 
 end GeneratorConfig
 
 namespace KittenTTSConfig
 
-def loadFromFile (path : String) (defaults : KittenTTSConfig := {}) : IO KittenTTSConfig := do
-  let root ← parseJsonFile path
-  let plbert ←
-    match getObjVal? root "plbert" with
-    | some j => IO.ofExcept (AlbertConfig.loadFromJson j defaults.plbert)
+def loadFromJson (root : Json) (defaults : KittenTTSConfig := {}) : Except String KittenTTSConfig := do
+  let plbert ← match ← objectField? root "plbert" with
+    | some j => AlbertConfig.loadFromJson j defaults.plbert
     | none => pure defaults.plbert
-  let generator ←
-    match getObjVal? root "istftnet" with
-    | some j => IO.ofExcept (GeneratorConfig.loadFromJson j defaults.generator)
+  let generator ← match ← objectField? root "istftnet" with
+    | some j => GeneratorConfig.loadFromJson j defaults.generator
     | none => pure defaults.generator
-  let hiddenDim := getNatFieldD root "hidden_dim" defaults.hiddenDim
-  let textEncoderKernelSize := getNatFieldD root "text_encoder_kernel_size" defaults.textEncoderKernelSize
-  let decoderOutDim := getNatFieldD root "decoder_out_dim" defaults.decoderOutDim
+  let hiddenDim ← fieldD? root "hidden_dim" defaults.hiddenDim
+  let maxDur ← fieldD? root "max_dur" defaults.maxDur
+  let ⟨hDur⟩ ← if h : 0 < maxDur then pure (PLift.up h) else
+    throw s!"Invalid KittenTTS config: max_dur={maxDur} must be positive"
+  let textEncoderKernelSize ← fieldD? root "text_encoder_kernel_size" defaults.textEncoderKernelSize
+  let decoderOutDim ← fieldD? root "decoder_out_dim" defaults.decoderOutDim
+  let sampleRate ← fieldD? root "sample_rate" defaults.sampleRate
+  let ⟨hRate⟩ ← if h : 0 < sampleRate then pure (PLift.up h) else
+    throw s!"Invalid KittenTTS config: sample_rate={sampleRate} must be positive"
   let ⟨hHidden⟩ ← if h : 2 ∣ hiddenDim then pure (PLift.up h) else
-    throw <| IO.userError s!"Invalid KittenTTS config: hidden_dim={hiddenDim} must be divisible by 2"
+    throw s!"Invalid KittenTTS config: hidden_dim={hiddenDim} must be divisible by 2"
   let ⟨hKernel⟩ ← if h : textEncoderKernelSize % 2 = 1 then pure (PLift.up h) else
-    throw <| IO.userError s!"Invalid KittenTTS config: text_encoder_kernel_size={textEncoderKernelSize} must be odd"
+    throw s!"Invalid KittenTTS config: text_encoder_kernel_size={textEncoderKernelSize} must be odd"
   let ⟨hDecoder⟩ ← if h : (if decoderOutDim == 0 then generator.upsampleInitialChannel else decoderOutDim) =
       generator.upsampleInitialChannel then pure (PLift.up h) else
-    throw <| IO.userError
-      s!"Invalid KittenTTS config: decoder_out_dim={decoderOutDim} must match upsample_initial_channel={generator.upsampleInitialChannel}"
-  let cfg : KittenTTSConfig := {
+    throw s!"Invalid KittenTTS config: decoder_out_dim={decoderOutDim} must match upsample_initial_channel={generator.upsampleInitialChannel}"
+  pure {
     hiddenDim
-    maxConvDim := getNatFieldD root "max_conv_dim" defaults.maxConvDim
-    maxDur := getNatFieldD root "max_dur" defaults.maxDur
-    nLayer := getNatFieldD root "n_layer" defaults.nLayer
-    nMels := getNatFieldD root "n_mels" defaults.nMels
-    nToken := getNatFieldD root "n_token" defaults.nToken
-    styleDim := getNatFieldD root "style_dim" defaults.styleDim
+    maxConvDim := ← fieldD? root "max_conv_dim" defaults.maxConvDim
+    maxDur
+    nLayer := ← fieldD? root "n_layer" defaults.nLayer
+    nToken := ← fieldD? root "n_token" defaults.nToken
+    styleDim := ← fieldD? root "style_dim" defaults.styleDim
     textEncoderKernelSize
-    asrResDim := getNatFieldD root "dim_in" defaults.asrResDim
+    asrResDim := ← fieldD? root "dim_in" defaults.asrResDim
     decoderOutDim
-    sampleRate := getNatFieldD root "sample_rate" defaults.sampleRate
-    plbert := plbert
-    generator := generator
+    sampleRate
+    plbert
+    generator
     hiddenDimEven := hHidden
     textKernelOdd := hKernel
+    sampleRatePos := hRate
+    maxDurPos := hDur
     decoderMatchesGenerator := hDecoder
   }
-  if cfg.plbert.numAttentionHeads == 0 || cfg.plbert.hiddenSize % cfg.plbert.numAttentionHeads != 0 then
-    throw <| IO.userError
-      s!"Invalid KittenTTS PLBERT config: hidden_size={cfg.plbert.hiddenSize}, heads={cfg.plbert.numAttentionHeads}"
-  pure cfg
+
+def loadFromFile (path : String) (defaults : KittenTTSConfig := {}) : IO KittenTTSConfig := do
+  IO.ofExcept (loadFromJson (← parseFile path) defaults)
 
 def loadFromPretrainedDir (modelDir : String) (defaults : KittenTTSConfig := {}) : IO KittenTTSConfig :=
   loadFromFile s!"{modelDir}/config.json" defaults
 
 end KittenTTSConfig
 
-def loadVocabFromFile (path : String) : IO VocabMap := do
-  let root ← parseJsonFile path
-  match getObjVal? root "vocab" with
-  | some (.obj kvs) =>
-    pure <| Id.run do
-      let mut vocab : VocabMap := {}
-      for (key, value) in kvs do
-        match stringToSingleChar? key, getNat? value with
-        | some c, some n => vocab := vocab.insert c n.toUInt64
-        | _, _ => pure ()
-      vocab
-  | _ =>
-    throw <| IO.userError s!"Missing or invalid vocab object in {path}"
+/-- Phoneme vocabulary from `config.json`: single-character keys mapped to ids below `nToken`. -/
+def loadVocabFromFile (path : String) (nToken : Nat) : IO VocabMap := do
+  let root ← parseFile path
+  let entries ← IO.ofExcept do
+    let some (.obj kvs) ← member? root "vocab"
+      | throw s!"Missing or invalid vocab object in {path}"
+    kvs.foldlM (init := ({} : VocabMap)) fun vocab key value => do
+      let [c] := key.toList
+        | throw s!"Invalid vocab key \"{key}\" in {path}: expected one character"
+      let id ← match (fromJson? value : Except String Nat) with
+        | .ok id => pure id
+        | .error err => throw s!"Invalid vocab id for \"{key}\" in {path}: {err}"
+      unless id < nToken do
+        throw s!"Vocab id {id} for \"{key}\" in {path} is outside the embedding table (n_token={nToken})"
+      pure (vocab.insert c id.toUInt64)
+  pure entries
 
-def loadVocabFromPretrainedDir (modelDir : String) : IO VocabMap :=
-  loadVocabFromFile s!"{modelDir}/config.json"
+def loadVocabFromPretrainedDir (modelDir : String) (nToken : Nat) : IO VocabMap :=
+  loadVocabFromFile s!"{modelDir}/config.json" nToken
 
 end torch.kittentts

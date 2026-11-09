@@ -24,7 +24,6 @@ private def tinyCfg : Qwen3ASRConfig :=
         numAttentionHeads := 4
         numKeyValueHeads := 2
         headDim := 4
-        maxPositionEmbeddings := 1024
         ropeTheta := 10000.0
       }
       audioTokenId := 42
@@ -51,7 +50,6 @@ private def tinyForcedAlignerCfg : Qwen3ASRConfig :=
         numAttentionHeads := 4
         numKeyValueHeads := 2
         headDim := 4
-        maxPositionEmbeddings := 1024
         ropeTheta := 10000.0
       }
       audioTokenId := 42
@@ -73,7 +71,6 @@ private def tinyChunkedCfg : Qwen3ASRConfig :=
         downsampleHiddenSize := 4
         nWindow := 4
         nWindowInfer := 8
-        convChunkSize := 2
       }
       textConfig := {
         vocabSize := 96
@@ -83,7 +80,6 @@ private def tinyChunkedCfg : Qwen3ASRConfig :=
         numAttentionHeads := 4
         numKeyValueHeads := 2
         headDim := 4
-        maxPositionEmbeddings := 1024
         ropeTheta := 10000.0
       }
       audioTokenId := 42
@@ -91,16 +87,15 @@ private def tinyChunkedCfg : Qwen3ASRConfig :=
     supportLanguages := #["English"]
   }
 
-private def tinyPreprocessorCfg (melBins frames : Nat) : PreprocessorConfig := {
-  featureExtractorType := "WhisperFeatureExtractor"
+private def tinyPreprocessorCfg (melBins frames : Nat)
+    (hMel : 0 < melBins := by first | decide | exact AudioEncoderConfig.numMelBinsPos _) : PreprocessorConfig := {
   featureSize := melBins
-  samplingRate := 16000
+  featureSizePos := hMel
   hopLength := 160
   chunkLength := 1
   nFft := 400
   nSamples := frames * 160
   nbMaxFrames := frames
-  paddingSide := "right"
   paddingValue := 0.0
   returnAttentionMask := true
   doNormalize := false
@@ -953,7 +948,7 @@ def testQwen3ASRGreedyCachedMatchesUncachedWithTrainedHead : IO Unit := do
 @[test]
 def testQwen3ASRGreedyCachedMatchesUncachedWhenAudioTokenIsGenerated : IO Unit := do
   let cfg : Qwen3ASRConfig :=
-    { tinyCfg with thinkerConfig := { tinyCfg.thinkerConfig with audioTokenId := 0 } }
+    { tinyCfg with thinkerConfig := { tinyCfg.thinkerConfig with audioTokenId := 0, audioTokenInVocab := by decide } }
   let model0 ← Qwen3ASRForConditionalGeneration.init cfg
   let model : Qwen3ASRForConditionalGeneration cfg := withZeroLmHead model0
   let batch : Nat := 1
@@ -1053,7 +1048,7 @@ def testQwen3ASRForwardVariableFeatureMask : IO Unit := do
 @[test]
 def testQwen3ASRAudioEncoderFeatureDType : IO Unit := do
   let cfg : AudioEncoderConfig :=
-    { tinyChunkedCfg.thinkerConfig.audioConfig with nWindow := 8, nWindowInfer := 32 }
+    { tinyChunkedCfg.thinkerConfig.audioConfig with nWindow := 8, nWindowInfer := 32, windowValid := by decide }
   let features : Tensor { shape := #[3, cfg.numMelBins, 32], dtype := .Float32, device := .CPU } := Tensor.reshape
     (Tensor.sin (Tensor.toFloat32 (Tensor.arange (3 * cfg.numMelBins * 32)))) #[3, cfg.numMelBins, 32] (by simp [Nat.mul_assoc])
   for bf16Weights in #[false, true] do
@@ -1095,7 +1090,7 @@ def testQwen3ASRAudioEncoderFeatureDType : IO Unit := do
 def testQwen3ASRBFloat16VariableLengthGeneration : IO Unit := do
   let cfg : Qwen3ASRConfig := { tinyChunkedCfg with thinkerConfig := {
     tinyChunkedCfg.thinkerConfig with audioConfig := {
-      tinyChunkedCfg.thinkerConfig.audioConfig with nWindow := 8, nWindowInfer := 32 } } }
+      tinyChunkedCfg.thinkerConfig.audioConfig with nWindow := 8, nWindowInfer := 32, windowValid := by decide } } }
   let model ← Qwen3ASRForConditionalGeneration.init cfg (dtype := .BFloat16)
   let model := TensorStruct.detach model
   let aTok := Int64.ofNat cfg.thinkerConfig.audioTokenId.toNat
@@ -1170,7 +1165,7 @@ def testQwen3ASRForwardVariableFeatureMaskChunkedBatch : IO Unit := do
 def testQwen3ASRForcedAlignFromOutputIds : IO Unit := do
   let batch : Nat := 1
   let seq : Nat := 6
-  let timestampTokenId : UInt64 := 99
+  let timestampTokenId : tokenizer.TokenId := 99
   let inputVals : Array Int64 := #[1, 99, 99, 7, 99, 99]
   let outputVals : Array Int64 := #[0, 10, 20, 0, 30, 40]
   let inputIds : Tensor { shape := #[batch, seq], dtype := .Int64, device := .CPU } := Tensor.reshape (Tensor.fromInt64Array inputVals) #[batch, seq]

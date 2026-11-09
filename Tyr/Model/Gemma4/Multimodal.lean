@@ -119,7 +119,7 @@ private def apply2dRotaryEmb {nHead headDim : Nat}
 
 private def replaceTokenId {batch seq : Nat}
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
-    (fromId toId : UInt64)
+    (fromId toId : tokenizer.TokenId)
     : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 } :=
   let mask : Tensor { device := device, shape := #[batch, seq], dtype := .Bool } := Tensor.eqScalar inputIds (Int64.ofNat fromId.toNat)
   let repl : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 } := (Tensor.fullInt #[batch, seq] (Int64.ofNat toId.toNat)).to inputIds.device
@@ -391,15 +391,12 @@ def repeatFeaturesForBatch {batch tokens : Nat}
       #[batch, tokens, cfg.text_config.hidden_size]
     return ⟨batch * tokens, repeated.reshape #[batch * tokens, cfg.text_config.hidden_size]⟩
 
-private def scatterFeaturesIntoToken {batch seq hidden featTokens featDim : Nat}
+private def scatterFeaturesIntoToken {batch seq hidden featTokens : Nat}
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (inputsEmbeds : Tensor { device := device, shape := #[batch, seq, hidden], dtype := dtype })
-    (tokenId : UInt64)
-    (features : Tensor { device := device, shape := #[featTokens, featDim], dtype := projectorDType })
+    (tokenId : tokenizer.TokenId)
+    (features : Tensor { device := device, shape := #[featTokens, hidden], dtype := projectorDType })
     : IO (Tensor { device := device, shape := #[batch, seq, hidden], dtype := dtype }) := do
-  if featDim != hidden then
-    throw <| IO.userError
-      s!"Gemma4 feature hidden size ({featDim}) does not match text hidden size ({hidden})"
   let tokenMask2d : Tensor { device := device, shape := #[batch, seq], dtype := .Bool } := Tensor.eqScalar inputIds (Int64.ofNat tokenId.toNat)
   let nTokens ← countMask2d tokenMask2d
   if nTokens != featTokens then
@@ -407,8 +404,8 @@ private def scatterFeaturesIntoToken {batch seq hidden featTokens featDim : Nat}
       s!"Gemma4 placeholder token count mismatch for token={tokenId}: ids={nTokens} features={featTokens}"
   let tokenMask : Tensor { device := device, shape := #[batch, seq, hidden], dtype := .Bool } :=
     Tensor.expand (Tensor.reshape tokenMask2d #[batch, seq, 1]) #[batch, seq, hidden]
-  let src ← IO.ofExcept (Tensor.ofRaw (σ := ⟨#[featTokens * featDim], dtype, device⟩)
-    (Tensor.reshape features #[featTokens * featDim]).raw)
+  let src ← IO.ofExcept (Tensor.ofRaw (σ := ⟨#[featTokens * hidden], dtype, device⟩)
+    (Tensor.reshape features #[featTokens * hidden]).raw)
   pure (Tensor.maskedScatter inputsEmbeds tokenMask src)
 
 private def buildInputEmbedsWithFeatures {batch seq : Nat}
@@ -417,7 +414,7 @@ private def buildInputEmbedsWithFeatures {batch seq : Nat}
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (imageFeatures : Option (ImageFeatures (dtype := projectorDType) (device := device) cfg) := none)
     : IO (Tensor { device := device, shape := #[batch, seq, cfg.text_config.hidden_size], dtype := dtype } × PerLayerInputs (dtype := dtype) (device := device) cfg batch seq) := do
-  let padId := cfg.text_config.pad_token_id.getD 0
+  let padId := cfg.text_config.pad_token_id.get cfg.padPresent
   let llmInputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 } := replaceTokenId inputIds cfg.image_token_id padId
   let llmInputsEmbeds : Tensor { device := device, shape := #[batch, seq, cfg.text_config.hidden_size], dtype := dtype } :=
     m.language_model.embedTokens cfg.text_config llmInputIds
@@ -439,7 +436,7 @@ private def buildVisionBidirectionalPrefillMasks {batch seq : Nat}
     (cfg : VLConfig)
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     : IO (Tensor { device := device, shape := #[batch, seq, seq], dtype := .Int64 } × Tensor { device := device, shape := #[batch, seq, seq], dtype := .Int64 }) := do
-  let padId := cfg.text_config.pad_token_id.getD 0
+  let padId := cfg.text_config.pad_token_id.get cfg.padPresent
   let slidingWindow := cfg.text_config.sliding_window
   let mut slidingFlat : Array Int64 := #[]
   let mut fullFlat : Array Int64 := #[]
@@ -453,9 +450,9 @@ private def buildVisionBidirectionalPrefillMasks {batch seq : Nat}
 
     for i in [:ids.size] do
       let tok := ids[i]!
-      if tok == cfg.image_token_id then
+      if tok == cfg.image_token_id.toUInt64 then
         let prevIsImage :=
-          i > 0 && ids[i - 1]! == cfg.image_token_id
+          i > 0 && ids[i - 1]! == cfg.image_token_id.toUInt64
         if prevIsImage then
           groupIds := groupIds.set! i (nextGroup - 1)
         else
@@ -464,15 +461,15 @@ private def buildVisionBidirectionalPrefillMasks {batch seq : Nat}
 
     for q in [:ids.size] do
       let qTok := ids[q]!
-      let qValid := qTok != padId
+      let qValid := qTok != padId.toUInt64
       let qGroup := groupIds[q]!
       for k in [:ids.size] do
         let kTok := ids[k]!
-        let kValid := kTok != padId
+        let kValid := kTok != padId.toUInt64
         let baseFull := qValid && kValid && k <= q
         let baseSliding :=
           baseFull &&
-          (slidingWindow == 0 || (q - k) < slidingWindow)
+          (q - k) < slidingWindow
         let sameVisionGroup := qGroup >= 0 && qGroup == groupIds[k]!
         fullFlat := fullFlat.push (if baseFull || sameVisionGroup then 1 else 0)
         slidingFlat := slidingFlat.push (if baseSliding || sameVisionGroup then 1 else 0)
@@ -531,7 +528,7 @@ def generate {batch seq : Nat}
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (maxNewTokens : Nat := 256)
     (strategy : SamplingStrategy := .greedy)
-    (eosTokenIds : Array UInt64 := #[])
+    (eosTokenIds : Array tokenizer.TokenId := #[])
     (imageFeatures : Option (ImageFeatures (dtype := projectorDType) (device := device) cfg) := none)
     : IO (Sigma (fun outSeq => Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })) := do
   let (inputsEmbeds, perLayerInputs) ← buildInputEmbedsWithFeatures cfg m inputIds imageFeatures
@@ -553,7 +550,7 @@ def generateStream {batch seq : Nat}
     (onStep : StreamCallback (device := device) batch)
     (maxNewTokens : Nat := 256)
     (strategy : SamplingStrategy := .greedy)
-    (eosTokenIds : Array UInt64 := #[])
+    (eosTokenIds : Array tokenizer.TokenId := #[])
     (imageFeatures : Option (ImageFeatures (dtype := projectorDType) (device := device) cfg) := none)
     : IO (Sigma (fun outSeq => Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })) := do
   let (inputsEmbeds, perLayerInputs) ← buildInputEmbedsWithFeatures cfg m inputIds imageFeatures

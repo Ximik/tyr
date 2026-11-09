@@ -38,8 +38,8 @@ private def linear2d {tokens in_dim out_dim : Nat}
   let y : Tensor { device := device, shape := #[tokens, out_dim], dtype := dtype } := Tensor.reshape yDyn #[tokens, out_dim]
   addBias2d y b
 
-private def allInSet (xs : Array UInt64) (allow : Array UInt64) : Bool :=
-  xs.all (fun x => allow.contains x)
+private def allInSet (xs : Array UInt64) (allow : Array tokenizer.TokenId) : Bool :=
+  xs.all (fun x => allow.any (·.toUInt64 == x))
 
 private def countMask2d {batch seq : Nat} (mask : Tensor { device := device, shape := #[batch, seq], dtype := .Bool }) : IO Nat := do
   let row : Tensor { device := device, shape := #[batch], dtype := .Int64 } := Tensor.reshape (Tensor.sumDim (mask.toInt64) 1 false) #[batch]
@@ -250,8 +250,6 @@ def forward {tokens : Nat}
     (x : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype })
     : IO (Tensor { device := device, shape := #[VisionConfig.mergedTokenCount cfg tokens, cfg.out_hidden_size], dtype := dtype }) := do
   let mergeUnit := VisionConfig.mergeUnit cfg
-  if mergeUnit == 0 then
-    throw <| IO.userError "vision spatial_merge_size must be > 0"
   let ⟨hDiv⟩ ← if hDiv : mergeUnit ∣ tokens then pure (PLift.up hDiv) else
     throw <| IO.userError
       s!"vision token count ({tokens}) must be divisible by merge unit ({mergeUnit})"
@@ -330,9 +328,6 @@ structure Qwen35ForConditionalGeneration (cfg : VLConfig) (dtype : DType := .Flo
 namespace Qwen35ForConditionalGeneration
 
 def init (cfg : VLConfig) (device : Device := .CPU) (dtype : DType := .Float32) (visionDType : DType := .Float32) : IO (Qwen35ForConditionalGeneration (visionDType := visionDType) (dtype := dtype) (device := device) cfg) := do
-  if cfg.vision_config.out_hidden_size != cfg.text_config.hidden_size then
-    throw <| IO.userError
-      s!"vision out_hidden_size ({cfg.vision_config.out_hidden_size}) must match text hidden_size ({cfg.text_config.hidden_size})"
   let visual ← Qwen35VisionModel.init (dtype := visionDType) (device := device) cfg.vision_config
   let lm ← Qwen35ForCausalLM.init (dtype := dtype) (device := device) cfg.text_config cfg.tie_word_embeddings
   pure { visual := visual, language_model := lm }
@@ -355,12 +350,10 @@ def getVideoFeatures {nPatches : Nat}
 private def scatterFeaturesIntoToken {batch seq hidden featTokens featDim : Nat} {featureDType : DType}
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (inputsEmbeds : Tensor { device := device, shape := #[batch, seq, hidden], dtype := dtype })
-    (tokenId : UInt64)
+    (tokenId : tokenizer.TokenId)
     (features : Tensor { device := device, shape := #[featTokens, featDim], dtype := featureDType })
+    (_hDim : featDim = hidden)
     : IO (Tensor { device := device, shape := #[batch, seq, hidden], dtype := dtype }) := do
-  if featDim != hidden then
-    throw <| IO.userError
-      s!"feature hidden size ({featDim}) does not match text hidden size ({hidden})"
 
   let tokenMask2d : Tensor { device := device, shape := #[batch, seq], dtype := .Bool } := Tensor.eqScalar inputIds (Int64.ofNat tokenId.toNat)
   let nTokens ← countMask2d tokenMask2d
@@ -397,6 +390,7 @@ def forwardWithImageFeatures {batch seq featTokens : Nat}
     (inputsEmbeds := embeds0)
     cfg.image_token_id
     imageFeatures
+    cfg.visionMatchesText
   pure (m.language_model.forwardEmbeds cfg.text_config embeds attnMask)
 
 def forwardWithImageAndVideoFeatures {batch seq imageTokens videoTokens : Nat}
@@ -415,11 +409,13 @@ def forwardWithImageAndVideoFeatures {batch seq imageTokens videoTokens : Nat}
     (inputsEmbeds := embeds0)
     cfg.image_token_id
     imageFeatures
+    cfg.visionMatchesText
   let embeds2 ← scatterFeaturesIntoToken
     (inputIds := inputIds)
     (inputsEmbeds := embeds1)
     cfg.video_token_id
     videoFeatures
+    cfg.visionMatchesText
   pure (m.language_model.forwardEmbeds cfg.text_config embeds2 attnMask)
 
 def forwardWithImagePatches {batch seq nPatches : Nat}
@@ -460,6 +456,7 @@ private def buildInputEmbedsWithFeatures {batch seq : Nat}
         (inputsEmbeds := embeds0)
         cfg.image_token_id
         ifeat
+        cfg.visionMatchesText
     | none => pure embeds0
   let embeds2 ←
     match videoFeatures with
@@ -469,6 +466,7 @@ private def buildInputEmbedsWithFeatures {batch seq : Nat}
         (inputsEmbeds := embeds1)
         cfg.video_token_id
         vfeat
+        cfg.visionMatchesText
     | none => pure embeds1
   pure embeds2
 
@@ -479,7 +477,7 @@ def generate {batch seq : Nat}
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (maxNewTokens : Nat := 256)
     (strategy : SamplingStrategy := .greedy)
-    (eosTokenIds : Array UInt64 := #[])
+    (eosTokenIds : Array tokenizer.TokenId := #[])
     (imageFeatures : Option (Sigma (fun n => Tensor { device := device, shape := #[n, cfg.vision_config.out_hidden_size], dtype := visionDType })) := none)
     (videoFeatures : Option (Sigma (fun n => Tensor { device := device, shape := #[n, cfg.vision_config.out_hidden_size], dtype := visionDType })) := none)
     : IO (Sigma (fun outSeq => Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })) := do
@@ -500,7 +498,7 @@ def generateStream {batch seq : Nat}
     (onStep : StreamCallback (device := device) batch)
     (maxNewTokens : Nat := 256)
     (strategy : SamplingStrategy := .greedy)
-    (eosTokenIds : Array UInt64 := #[])
+    (eosTokenIds : Array tokenizer.TokenId := #[])
     (imageFeatures : Option (Sigma (fun n => Tensor { device := device, shape := #[n, cfg.vision_config.out_hidden_size], dtype := visionDType })) := none)
     (videoFeatures : Option (Sigma (fun n => Tensor { device := device, shape := #[n, cfg.vision_config.out_hidden_size], dtype := visionDType })) := none)
     : IO (Sigma (fun outSeq => Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })) := do
@@ -522,7 +520,7 @@ partial def generateUncached {batch seq : Nat}
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (maxNewTokens : Nat := 256)
     (strategy : SamplingStrategy := .greedy)
-    (eosTokenIds : Array UInt64 := #[])
+    (eosTokenIds : Array tokenizer.TokenId := #[])
     (imageFeatures : Option (Sigma (fun n => Tensor { device := device, shape := #[n, cfg.vision_config.out_hidden_size], dtype := visionDType })) := none)
     (videoFeatures : Option (Sigma (fun n => Tensor { device := device, shape := #[n, cfg.vision_config.out_hidden_size], dtype := visionDType })) := none)
     : IO (Sigma (fun outSeq => Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })) := do
@@ -550,6 +548,7 @@ partial def generateUncached {batch seq : Nat}
           (inputsEmbeds := embeds0)
           cfg.video_token_id
           vfeat
+          cfg.visionMatchesText
         pure (m.language_model.forwardEmbeds cfg.text_config embeds none)
       | none, none =>
         pure (m.language_model.forward cfg.text_config cur none)

@@ -14,7 +14,7 @@ private def cfg : Config := {
   vocab_size := 16, hidden_size := 8, intermediate_size := 12
   num_hidden_layers := 4, num_attention_heads := 2, num_key_value_heads := 1
   head_dim := 4, global_head_dim := 8, num_global_key_value_heads := 1
-  sliding_window := 3, full_partial_rotary_factor := 1.0
+  sliding_window := 3, full_rotary_dim := 8
   num_kv_shared_layers := 2
   layer_types := #[.fullAttention, .slidingAttention, .slidingAttention, .fullAttention]
   hidden_size_per_layer_input := 2, vocab_size_per_layer_input := 16
@@ -138,7 +138,7 @@ private def roundTrip {α : Type} [TensorStruct α] (params : α) (dir : String)
   close (m.forward cfg ids) (restored.forward cfg ids) 0.0
 
 @[test] def testGemma4BFloat16Router : IO Unit := do
-  let c := { cfg with num_experts := 3, top_k_experts := 2 }
+  let c : Config := { cfg with num_experts := 3, top_k_experts := 2, topKValid := (by decide), moeValid := (by decide) }
   let router : Gemma4TextRouter c := {
     proj := weight #[3, 8] 0.3
     scale := weight #[8] 0.5
@@ -180,13 +180,13 @@ private def roundTrip {α : Type} [TensorStruct α] (params : α) (dir : String)
   close actual expected 1e-6
 
 private def vlCfg : VLConfig := {
-  text_config := { cfg with use_bidirectional_attention := "vision" }
+  text_config := { cfg with use_bidirectional_attention := "vision", bidirectionalSupported := (by decide) }
   vision_config := {
     hidden_size := 8, intermediate_size := 12, num_hidden_layers := 1
     num_attention_heads := 2, num_key_value_heads := 2, head_dim := 4
     patch_size := 2, pooling_kernel_size := 2, position_embedding_size := 8 }
   image_processor := { patch_size := 2, pooling_kernel_size := 2, max_soft_tokens := 4 }
-  image_token_id := 15 }
+  boi_token_id := 12, image_token_id := 15, eoi_token_id := 13, video_token_id := 14, audio_token_id := 11 }
 
 private def visionLinear (outDim inDim : Nat) (phase : Float) (dtype : DType := .Float32) :
     Gemma4VisionLinear (device := .CPU) outDim inDim dtype :=
@@ -301,7 +301,14 @@ private def writeDTypeFixture (directory : System.FilePath) (c : Config)
     ("lm_head.weight", headShape, !mixedHead)] sharded
 
 @[test] def testGemma4LoaderChecksRoleDTypes : IO Unit := do
-  let c := { cfg with num_hidden_layers := 0, hidden_size_per_layer_input := 0 }
+  let c : Config := { cfg with
+    num_hidden_layers := 0
+    hidden_size_per_layer_input := 0
+    layer_types := #[]
+    num_kv_shared_layers := 0
+    layerTypesValid := by decide
+    kvSharing := by decide
+    perLayerVocab := by decide }
   for sharded in #[false, true] do
     IO.FS.withTempDir fun directory => do
       writeDTypeFixture directory c false sharded
@@ -325,7 +332,12 @@ private def writeDTypeFixture (directory : System.FilePath) (c : Config)
   let c := { cfg with
     num_hidden_layers := 0
     hidden_size_per_layer_input := 0
-    tie_word_embeddings := true }
+    tie_word_embeddings := true
+    layer_types := #[]
+    num_kv_shared_layers := 0
+    layerTypesValid := by decide
+    kvSharing := by decide
+    perLayerVocab := by decide }
   for sharded in #[false, true] do
     IO.FS.withTempDir fun directory => do
       writeDTypeFixture directory c false sharded true
@@ -338,7 +350,12 @@ private def writeDTypeFixture (directory : System.FilePath) (c : Config)
     text_config := { vlCfg.text_config with
       num_hidden_layers := 0
       hidden_size_per_layer_input := 0
-      tie_word_embeddings := true }
+      tie_word_embeddings := true
+      layer_types := #[]
+      num_kv_shared_layers := 0
+      layerTypesValid := by decide
+      kvSharing := by decide
+      perLayerVocab := by decide }
     vision_config := { vlCfg.vision_config with num_hidden_layers := 0 } }
   let required := #[
     ("model.vision_tower.patch_embedder.input_proj.weight",

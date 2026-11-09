@@ -228,6 +228,9 @@ private def loadKittenAlbertFromCheckpoint
         ffn := linearFromTensors (← checkedWeight layer.ffn.weight) (← checkedWeight layer.ffn.bias)
         ffnOutput := linearFromTensors (← checkedWeight layer.ffn_output.weight) (← checkedWeight layer.ffn_output.bias)
       }
+      unless layers.size = cfg.plbert.innerGroupNum do
+        throw <| IO.userError
+          s!"KittenTTS checkpoint ALBERT group has {layers.size} layers, config inner_group_num={cfg.plbert.innerGroupNum}"
       pure { layers }
   let ⟨hGroups⟩ ← if h : groups.size = cfg.plbert.numHiddenGroups then pure (PLift.up h) else
     throw <| IO.userError
@@ -580,11 +583,18 @@ private def reconcileConfigWithCheckpoint
   warnShapeOverride log "generator.genIstftNFft" cfg.generator.genIstftNFft genIstftNFft
   warnShapeOverride log "generator.harmonicCount" cfg.generator.harmonicCount harmonicCount
 
+  let ⟨hChannels⟩ ← if h : 2 ^ cfg.generator.upsampleRates.size ≤ upsampleInitialChannel then pure (PLift.up h) else
+    throw <| IO.userError
+      s!"Checkpoint generator input {upsampleInitialChannel} must keep a channel after {cfg.generator.upsampleRates.size} halving stages"
+  let ⟨hIstft⟩ ← if h : 0 < cfg.generator.genIstftHopSize ∧ 0 < genIstftNFft ∧ 2 ∣ genIstftNFft then pure (PLift.up h) else
+    throw <| IO.userError s!"Checkpoint iSTFT size {genIstftNFft} must be positive and even"
   let generator : GeneratorConfig := {
     cfg.generator with
     upsampleInitialChannel := upsampleInitialChannel
     genIstftNFft := genIstftNFft
     harmonicCount := harmonicCount
+    channelsValid := hChannels
+    istftValid := hIstft
   }
   let ⟨hHidden⟩ ← if h : 2 ∣ hiddenDim then pure (PLift.up h) else
     throw <| IO.userError s!"Checkpoint hidden dimension {hiddenDim} must be even"
@@ -594,6 +604,8 @@ private def reconcileConfigWithCheckpoint
       generator.upsampleInitialChannel then pure (PLift.up h) else
     throw <| IO.userError
       s!"Checkpoint decoder output {decoderOutDim} must match generator input {generator.upsampleInitialChannel}"
+  let ⟨hDur⟩ ← if h : 0 < maxDur then pure (PLift.up h) else
+    throw <| IO.userError "Checkpoint duration projection has no duration bins"
   pure {
     cfg with
     hiddenDim := hiddenDim
@@ -608,6 +620,7 @@ private def reconcileConfigWithCheckpoint
     generator := generator
     hiddenDimEven := hHidden
     textKernelOdd := hKernel
+    maxDurPos := hDur
     decoderMatchesGenerator := hDecoder
   }
 

@@ -152,19 +152,17 @@ private def buildDecodeTokenRules
   Id.run do
     let mut forbidden : Array UInt32 := #[]
     for (id, text) in tok.idToSpecial.toList do
-      let isEos := id.toUInt64 == cfg.eosTokenId
+      let isEos := id == cfg.eosTokenId
       let isTimestamp := isTimestampSpecialToken text
       let allowSpecial :=
         isEos || (!noTimestamps && isTimestamp)
       if !allowSpecial then
         forbidden := pushUniqueId forbidden id
-    for id64 in cfg.suppressTokens do
-      if id64 < cfg.vocabSize then
-        forbidden := pushUniqueId forbidden id64.toUInt32
+    for id in cfg.suppressTokens do
+      forbidden := pushUniqueId forbidden id
     let mut beginSuppress : Array UInt32 := #[]
-    for id64 in cfg.beginSuppressTokens do
-      if id64 < cfg.vocabSize then
-        beginSuppress := pushUniqueId beginSuppress id64.toUInt32
+    for id in cfg.beginSuppressTokens do
+      beginSuppress := pushUniqueId beginSuppress id
     let timestampBeginId :=
       if noTimestamps then none else tokenIdByText? tok "<|0.00|>"
     let maxInitialTimestampTokens :=
@@ -185,7 +183,7 @@ private def buildPromptIds
     : Array UInt32 :=
   Id.run do
     let startId :=
-      (tokenIdByText? tok "<|startoftranscript|>").getD cfg.decoderStartTokenId.toUInt32
+      (tokenIdByText? tok "<|startoftranscript|>").getD cfg.decoderStartTokenId
     let mut out : Array UInt32 := #[startId]
     let langTok := languageTokenString language
     if let some langId := tokenIdByText? tok langTok then
@@ -325,8 +323,8 @@ private def whisperMaxChunkSeconds
     (cfg : WhisperConfig)
     (pre : PreprocessorConfig)
     : Float :=
-  let sr := if pre.samplingRate == 0 then sampleRate16k else pre.samplingRate
-  let hop := if pre.hopLength == 0 then 160 else pre.hopLength
+  let sr := pre.samplingRate
+  let hop := pre.hopLength
   let maxFrames := cfg.maxSourcePositions * 2
   (maxFrames * hop).toFloat / sr.toFloat
 
@@ -526,7 +524,7 @@ private def applyTimestampPairMask
     {cfg : WhisperConfig}
     (rules : DecodeTokenRules)
     (generated : Array UInt32)
-    (eosTokenId : UInt64)
+    (eosTokenId : tokenizer.TokenId)
     : DecodeTokenRules :=
   match rules.timestampBeginId with
   | none => rules
@@ -553,7 +551,7 @@ private def applyTimestampPairMask
               -- After text->timestamp, next must be timestamp (or EOT).
               for i in [:tsBegin.toNat] do
                 let tok := i.toUInt32
-                if tok.toUInt64 != eosTokenId then
+                if tok != eosTokenId then
                   forb := pushUniqueId forb tok
             { rules with forbidden := forb }
 
@@ -626,7 +624,7 @@ private def filteredSamplingLogits {vocab : Nat}
 
 private def argmaxTokenFromLogits {vocab : Nat}
     (logits : Tensor { dtype := dtype, device := device, shape := #[1, vocab] })
-    (fallback : UInt64)
+    (fallback : tokenizer.TokenId)
     (rules : DecodeTokenRules := {})
     : IO UInt32 := do
   let kNat := Nat.max 1 (Nat.min 64 vocab)
@@ -639,12 +637,12 @@ private def argmaxTokenFromLogits {vocab : Nat}
   let indices := Tensor.argmax! logits 1
   let nextTokRaw : Tensor { device := device, shape := #[1], dtype := .Int64 } := indices.reshape #[1]
   let nextVals ← Tensor.toUInt64Array nextTokRaw
-  pure (nextVals.getD 0 fallback).toUInt32
+  pure (nextVals[0]?.map (·.toUInt32) |>.getD fallback)
 
 private def sampleTokenFromLogits {vocab : Nat}
     (logits : Tensor { dtype := dtype, device := device, shape := #[1, vocab] })
     (rules : DecodeTokenRules := {})
-    (fallback : UInt64 := 0)
+    (fallback : tokenizer.TokenId := 0)
     : IO UInt32 := do
   let vals ← Tensor.toFloatArray logits
   let probsVals := (logProbsFromLogitsArray vals).map Float.exp
@@ -692,7 +690,7 @@ private partial def decodeLoopCached
     (crossCaches : Array (WhisperForConditionalGeneration.LayerCrossCache (device := device) (dtype := dtype) cfg 1 encSeq))
     (noSpeechTokenId : Option UInt32)
     (rules : DecodeTokenRules)
-    (eosTokenId : UInt64)
+    (eosTokenId : tokenizer.TokenId)
     (temperature : Float)
     (topK : TopK)
     (topP : Float)
@@ -721,7 +719,7 @@ private partial def decodeLoopCached
         lastLogits
     let stepRules :=
       if state.tokenCount == 0 then
-        let forb := (rules.forbidden ++ rules.beginSuppress).push eosTokenId.toUInt32
+        let forb := (rules.forbidden ++ rules.beginSuppress).push eosTokenId
         applyInitialTimestampCap (cfg := cfg) { rules with forbidden := forb, beginSuppress := #[] }
       else
         rules
@@ -732,13 +730,12 @@ private partial def decodeLoopCached
       else
         argmaxTokenFromLogits lastLogits eosTokenId stepRules
     let tokLogprob ← tokenLogProbFromLogits distLogits nextId
-    let nextIdU64 := nextId.toUInt64
     let generated' :=
-      if nextIdU64 == eosTokenId then state.generated else state.generated.push nextId
+      if nextId == eosTokenId then state.generated else state.generated.push nextId
     let tokenCount' :=
-      if nextIdU64 == eosTokenId then state.tokenCount else state.tokenCount + 1
+      if nextId == eosTokenId then state.tokenCount else state.tokenCount + 1
     let sumLogprob' :=
-      if nextIdU64 == eosTokenId then state.sumLogprob else state.sumLogprob + tokLogprob
+      if nextId == eosTokenId then state.sumLogprob else state.sumLogprob + tokLogprob
     let state' : DecodeState := {
       allIds := state.allIds.push nextId
       generated := generated'
@@ -747,7 +744,7 @@ private partial def decodeLoopCached
       noSpeechProb := noSpeechProb
       measuredNoSpeech := true
     }
-    if nextIdU64 == eosTokenId then
+    if nextId == eosTokenId then
       pure state'
     else
       let tokenIds := buildSingleTokenOnDevice nextId lastLogits.device
@@ -788,7 +785,7 @@ private def expandBeamCached
     (crossCaches : Array (WhisperForConditionalGeneration.LayerCrossCache (device := device) (dtype := dtype) cfg 1 encSeq))
     (noSpeechTokenId : Option UInt32)
     (rules : DecodeTokenRules)
-    (eosTokenId : UInt64)
+    (eosTokenId : tokenizer.TokenId)
     (beamWidth : Nat)
     (beam : BeamState (device := device) (dtype := dtype) cfg)
     : IO (Array (BeamState (device := device) (dtype := dtype) cfg)) := do
@@ -813,25 +810,24 @@ private def expandBeamCached
       let topPairs := topKLogProbPairs logProbs kNat
       let stepRules :=
         if beam.tokenCount == 0 then
-          let forb := (rules.forbidden ++ rules.beginSuppress).push eosTokenId.toUInt32
+          let forb := (rules.forbidden ++ rules.beginSuppress).push eosTokenId
           applyInitialTimestampCap (cfg := cfg) { rules with forbidden := forb, beginSuppress := #[] }
         else
           rules
       let stepRules := applyTimestampPairMask (cfg := cfg) stepRules beam.generated eosTokenId
       let mut out : Array (BeamState (device := device) (dtype := dtype) cfg) := #[]
       for p in topPairs do
-        let nextIdU64 := p.1.toUInt64
-        let nextId := nextIdU64.toUInt32
+        let nextId := p.1.toUInt32
         if isForbiddenToken stepRules nextId then
           continue
         let lp := p.2
         let generated' :=
-          if nextIdU64 == eosTokenId then beam.generated else beam.generated.push nextId
+          if nextId == eosTokenId then beam.generated else beam.generated.push nextId
         let tokenCount' :=
-          if nextIdU64 == eosTokenId then beam.tokenCount else beam.tokenCount + 1
+          if nextId == eosTokenId then beam.tokenCount else beam.tokenCount + 1
         let sumLogprob' :=
-          if nextIdU64 == eosTokenId then beam.sumLogprob else beam.sumLogprob + lp
-        if nextIdU64 == eosTokenId then
+          if nextId == eosTokenId then beam.sumLogprob else beam.sumLogprob + lp
+        if nextId == eosTokenId then
           out := out.push {
             allIds := beam.allIds.push nextId
             generated := generated'
@@ -874,7 +870,7 @@ private partial def beamDecodeLoopCached
     (crossCaches : Array (WhisperForConditionalGeneration.LayerCrossCache (device := device) (dtype := dtype) cfg 1 encSeq))
     (noSpeechTokenId : Option UInt32)
     (rules : DecodeTokenRules)
-    (eosTokenId : UInt64)
+    (eosTokenId : tokenizer.TokenId)
     (beamWidth : Nat)
     (remaining : Nat)
     (beams : Array (BeamState (device := device) (dtype := dtype) cfg))
@@ -929,7 +925,7 @@ private def decodeBeamCached
     (promptIds : Array UInt32)
     (noSpeechTokenId : Option UInt32)
     (rules : DecodeTokenRules)
-    (eosTokenId : UInt64)
+    (eosTokenId : tokenizer.TokenId)
     (beamWidth : Nat)
     (remaining : Nat)
     (hfit : promptIds.size + remaining ≤ cfg.maxTargetPositions)
@@ -1006,7 +1002,7 @@ private def decodeAtTemperature
     (promptIds : Array UInt32) (hPrompt : promptIds.size ≤ cfg.maxTargetPositions)
     (noSpeechTokenId : Option UInt32)
     (rules : DecodeTokenRules)
-    (eosTokenId : UInt64)
+    (eosTokenId : tokenizer.TokenId)
     (maxNewTokens : Nat)
     (opts : WhisperDecodeOptions)
     (temperature : Float)
@@ -1089,7 +1085,7 @@ private partial def decodeWithFallbackLoop
     (promptIdsFallback : Array UInt32) (hFallback : promptIdsFallback.size ≤ cfg.maxTargetPositions)
     (noSpeechTokenId : Option UInt32)
     (rules : DecodeTokenRules)
-    (eosTokenId : UInt64)
+    (eosTokenId : tokenizer.TokenId)
     (maxNewTokens : Nat)
     (opts : WhisperDecodeOptions)
     (temperatures : Array Float)
@@ -1144,7 +1140,7 @@ private def decodeWithFallback
     (promptIdsFallback : Array UInt32) (hFallback : promptIdsFallback.size ≤ cfg.maxTargetPositions)
     (noSpeechTokenId : Option UInt32)
     (rules : DecodeTokenRules)
-    (eosTokenId : UInt64)
+    (eosTokenId : tokenizer.TokenId)
     (maxNewTokens : Nat)
     (opts : WhisperDecodeOptions)
     : IO (WhisperDecodeCandidate × Bool) := do
@@ -1247,9 +1243,9 @@ def loadFromPretrainedDir (modelDir : String) : IO WhisperBundle := do
   let cfg ← WhisperConfig.loadFromPretrainedDir modelDir {}
   let tok ← tokenizer.qwen3.loadTokenizer modelDir
   let preprocessor ←
-    PreprocessorConfig.loadFromPretrainedDir modelDir {
+    PreprocessorConfig.loadFromPretrainedDir modelDir (requiredSamplingRate := some 16000) {
       featureSize := cfg.numMelBins
-      samplingRate := 16000
+      featureSizePos := cfg.numMelBinsPos
       hopLength := 160
       chunkLength := 30
       nFft := 400

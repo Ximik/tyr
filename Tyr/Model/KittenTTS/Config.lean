@@ -23,16 +23,20 @@ structure AlbertConfig where
   numHiddenGroups : Nat := 1
   typeVocabSize : Nat := 2
   layerNormEps : Float := 1e-12
-  hiddenDropoutProb : Float := 0.0
-  attentionDropoutProb : Float := 0.0
   /-- Layers split evenly across a nonzero number of groups; checked when the config is built. -/
   hiddenGroupsValid : 0 < numHiddenGroups ∧ numHiddenGroups ∣ numHiddenLayers := by decide
+  /-- The hidden size splits evenly across a nonzero number of heads; checked when the config is built. -/
+  headsDivide : 0 < numAttentionHeads ∧ numAttentionHeads ∣ hiddenSize := by decide
+  /-- Token type 0 has an embedding row; checked when the config is built. -/
+  typeVocabPos : 0 < typeVocabSize := by decide
+  /-- Layer norms divide by `sqrt (var + eps)`; checked when the config is built. -/
+  layerNormEpsPos : 0 < layerNormEps := by native_decide
   deriving Repr
 
 namespace AlbertConfig
 
 def headDim (cfg : AlbertConfig) : Nat :=
-  if cfg.numAttentionHeads == 0 then 0 else cfg.hiddenSize / cfg.numAttentionHeads
+  cfg.hiddenSize / cfg.numAttentionHeads
 
 @[simp] def allHeadSize (cfg : AlbertConfig) : Nat :=
   cfg.numAttentionHeads * cfg.headDim
@@ -77,15 +81,21 @@ structure GeneratorConfig where
       checked when the config is built. -/
   resblocksValid : 0 < resblockKernelSizes.size ∧
       ∀ j, j < resblockKernelSizes.size → resblockKernelSizes.getD j 0 % 2 = 1 := by decide
+  /-- One upsample kernel per rate; checked when the config is built. -/
+  kernelsMatchRates : upsampleKernelSizes.size = upsampleRates.size := by decide
+  /-- Each residual block has three positive dilations, one per unit; checked when the config is built. -/
+  dilationsValid : resblockDilationSizes.size = resblockKernelSizes.size ∧
+      ∀ j, j < resblockDilationSizes.size → (resblockDilationSizes.getD j #[]).size = 3 ∧
+        ∀ m, m < 3 → 0 < (resblockDilationSizes.getD j #[]).getD m 0 := by decide
+  /-- Every upsample stage halves the channels and keeps at least one; checked when the config is built. -/
+  channelsValid : 2 ^ upsampleRates.size ≤ upsampleInitialChannel := by decide
+  /-- The iSTFT has a positive hop and a positive even FFT size, so its `nFft + 2` channels split
+      into two `nFft / 2 + 1` halves; checked when the config is built. -/
+  istftValid : 0 < genIstftHopSize ∧ 0 < genIstftNFft ∧ 2 ∣ genIstftNFft := by decide
   deriving Repr
 
-instance : Inhabited GeneratorConfig := ⟨{}⟩
 
 namespace GeneratorConfig
-
-private def pow2 : Nat → Nat
-  | 0 => 1
-  | n + 1 => 2 * pow2 n
 
 def rate (cfg : GeneratorConfig) (i : Nat) : Nat :=
   cfg.upsampleRates.getD i 1
@@ -112,10 +122,7 @@ def freqBins (cfg : GeneratorConfig) : Nat :=
   2 * freqBins cfg
 
 def finalChannels (cfg : GeneratorConfig) : Nat :=
-  if cfg.upsampleRates.isEmpty then
-    cfg.upsampleInitialChannel
-  else
-    cfg.upsampleInitialChannel / pow2 cfg.upsampleRates.size
+  cfg.upsampleInitialChannel / 2 ^ cfg.upsampleRates.size
 
 def prefixUpsample (cfg : GeneratorConfig) (count : Nat) : Nat :=
   (cfg.upsampleRates.toList.take count).foldl (· * ·) 1
@@ -170,20 +177,18 @@ theorem suffix_ge_two (cfg : GeneratorConfig) {s : Nat} (h : s < cfg.upsampleRat
     _ ≤ _ := Nat.le_mul_of_pos_right _ (cfg.suffix_pos _)
 
 def stageInChannels (cfg : GeneratorConfig) (idx : Nat) : Nat :=
-  cfg.upsampleInitialChannel / pow2 idx
+  cfg.upsampleInitialChannel / 2 ^ idx
 
 def stageOutChannels (cfg : GeneratorConfig) (idx : Nat) : Nat :=
-  cfg.upsampleInitialChannel / pow2 (idx + 1)
+  cfg.upsampleInitialChannel / 2 ^ (idx + 1)
 
 theorem stageInChannels_zero (cfg : GeneratorConfig) :
     cfg.stageInChannels 0 = cfg.upsampleInitialChannel := by
-  simp [stageInChannels, pow2]
+  simp [stageInChannels]
 
 theorem finalChannels_last (cfg : GeneratorConfig) {i : Nat} (h : i + 1 = cfg.upsampleRates.size) :
     cfg.finalChannels = cfg.stageOutChannels i := by
-  have hne : cfg.upsampleRates.isEmpty = false := by
-    rw [Bool.eq_false_iff]; intro hE; rw [Array.isEmpty_iff_size_eq_zero] at hE; omega
-  simp [finalChannels, stageOutChannels, hne, ← h]
+  simp [finalChannels, stageOutChannels, ← h]
 
 def stageInFrames (cfg : GeneratorConfig) (baseFrames : Nat) (idx : Nat) : Nat :=
   baseFrames * prefixUpsample cfg idx
@@ -202,6 +207,10 @@ def stageOutFrames (cfg : GeneratorConfig) (baseFrames : Nat) (idx : Nat) : Nat 
 
 def waveSamples (cfg : GeneratorConfig) (baseFrames : Nat) : Nat :=
   baseFrames * sourceUpsample cfg
+
+theorem waveSamples_pos (cfg : GeneratorConfig) {baseFrames : Nat} (hb : 0 < baseFrames) :
+    0 < cfg.waveSamples baseFrames :=
+  Nat.mul_pos hb (Nat.mul_pos (cfg.prefix_size ▸ cfg.prefix_pos _) cfg.istftValid.1)
 
 def noiseStride (cfg : GeneratorConfig) (idx : Nat) : Nat :=
   if idx + 1 < cfg.upsampleRates.size then
@@ -228,7 +237,6 @@ structure KittenTTSConfig where
   maxConvDim : Nat := 512
   maxDur : Nat := 50
   nLayer : Nat := 3
-  nMels : Nat := 80
   nToken : Nat := 178
   styleDim : Nat := 128
   textEncoderKernelSize : Nat := 5
@@ -242,13 +250,16 @@ structure KittenTTSConfig where
   /-- Text-encoder convolutions pad by half an odd kernel to keep the token count; checked when
       the config is built. -/
   textKernelOdd : textEncoderKernelSize % 2 = 1 := by decide
+  /-- Waveform phases divide by the sample rate; checked when the config is built. -/
+  sampleRatePos : 0 < sampleRate := by decide
+  /-- Durations are predicted over `maxDur` bins; checked when the config is built. -/
+  maxDurPos : 0 < maxDur := by decide
   /-- The decoder feeds the generator's first stage; checked when the config is built. -/
   decoderMatchesGenerator :
     (if decoderOutDim == 0 then generator.upsampleInitialChannel else decoderOutDim) =
       generator.upsampleInitialChannel := by decide
   deriving Repr
 
-instance : Inhabited KittenTTSConfig := ⟨{}⟩
 
 namespace KittenTTSConfig
 

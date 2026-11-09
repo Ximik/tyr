@@ -78,8 +78,8 @@ def streamFromTalkerInputs {seq : Nat}
   let onFrame : Nat → Tensor { shape := #[1, cfg.talkerConfig.numCodeGroups], dtype := .Int64, device := device } → IO Unit := fun step frame => do
     let frameRow : Tensor { shape := #[cfg.talkerConfig.numCodeGroups], dtype := .Int64, device := device } := Tensor.reshape frame #[cfg.talkerConfig.numCodeGroups]
     let rowVals ← Tensor.toUInt64Array frameRow
-    let firstTok := rowVals.getD 0 cfg.talkerConfig.codecEosTokenId
-    let keepRow := opts.emitEosFrame || firstTok != cfg.talkerConfig.codecEosTokenId
+    let firstTok := rowVals.getD 0 cfg.talkerConfig.codecEosTokenId.toUInt64
+    let keepRow := opts.emitEosFrame || firstTok != cfg.talkerConfig.codecEosTokenId.toUInt64
     if keepRow then
       codeRowsRef.modify (fun rows => rows.push rowVals)
       callbacks.onCodeFrame step rowVals
