@@ -12,8 +12,8 @@ namespace torch.RawTensor
     (input weight bias : @& RawTensor) (stride padding dilation : Array Nat) : Except String RawTensor
 @[extern "lean_torch_cat_dyn"] opaque catMany (tensors : @& Array RawTensor) (dim : @& Nat) : RawTensor
 @[extern "lean_torch_arange"] opaque arange (start stop step : @& Nat) : RawTensor
-@[extern "lean_torch_tensor_sin"] opaque sin (t : @& RawTensor) : RawTensor
-@[extern "lean_torch_tensor_cos"] opaque cos (t : @& RawTensor) : RawTensor
+@[extern "lean_torch_tensor_sin"] opaque sin! (t : @& RawTensor) : RawTensor
+@[extern "lean_torch_tensor_cos"] opaque cos! (t : @& RawTensor) : RawTensor
 @[extern "lean_torch_sdpa_gqa"] opaque attentionGQA
     (q k v : @& RawTensor) (causal gqa : Bool) : Except String RawTensor
 @[extern "lean_torch_sdpa_gqa_io"] opaque attentionGQAIO
@@ -53,12 +53,12 @@ namespace torch.RawTensor
 @[extern "lean_torch_stft_1d_checked"] opaque stftChecked (input : @& RawTensor)
     (nFft hopLength winLength : @& Nat) (window : @& RawTensor) (center normalized : Bool) :
     Except String RawTensor
-@[extern "lean_torch_tensor_log10"] opaque log10 (input : @& RawTensor) : RawTensor
+@[extern "lean_torch_tensor_log10"] opaque log10! (input : @& RawTensor) : RawTensor
 @[extern "lean_torch_save_wav"] opaque saveWav (input : @& RawTensor)
     (path : @& String) (sampleRate : @& Nat) : IO Unit
 
-@[extern "lean_torch_lt"] opaque lt (a b : @& RawTensor) : RawTensor
-@[extern "lean_torch_ge"] opaque ge (a b : @& RawTensor) : RawTensor
+@[extern "lean_torch_lt"] opaque lt! (a b : @& RawTensor) : RawTensor
+@[extern "lean_torch_ge"] opaque ge! (a b : @& RawTensor) : RawTensor
 @[extern "lean_torch_lt_scalar"] opaque ltScalar (input : @& RawTensor) (value : Float) : RawTensor
 @[extern "lean_torch_masked_fill"] opaque maskedFill (input mask : @& RawTensor) (value : Float) : RawTensor
 
@@ -75,9 +75,9 @@ namespace torch.RawTensor
 @[extern "lean_torch_sdpa_gqa_window_io"] opaque attentionWindowIO
     (q k v : @& RawTensor) (dropout : Float) (causal gqa : Bool) (window : @& Nat) : IO RawTensor
 
-@[extern "lean_torch_tensor_elu"] opaque elu (input : @& RawTensor) : RawTensor
+@[extern "lean_torch_tensor_elu"] opaque elu! (input : @& RawTensor) : RawTensor
 
-@[extern "lean_torch_tensor_log"] opaque log (input : @& RawTensor) : RawTensor
+@[extern "lean_torch_tensor_log"] opaque log! (input : @& RawTensor) : RawTensor
 
 @[extern "lean_torch_clip_grad_norm_"] opaque clipGradNorm
     (input : @& RawTensor) (maxNorm : Float) : IO Float
@@ -116,22 +116,4 @@ end torch.RawTensor
 
 namespace torch.RawTensor
 @[extern "lean_torch_cat_dyn_checked"] opaque catManyChecked (tensors : @& Array RawTensor) (dim : @& Nat) : Except String RawTensor
-end torch.RawTensor
-
-namespace torch.RawTensor
-@[extern "lean_torch_tensor_log_checked"] opaque logChecked (input : @& RawTensor) : Except String RawTensor
-
-@[extern "lean_torch_tensor_log10_checked"] opaque log10Checked (input : @& RawTensor) : Except String RawTensor
-
-@[extern "lean_torch_tensor_sin_checked"] opaque sinChecked (t : @& RawTensor) : Except String RawTensor
-
-@[extern "lean_torch_tensor_cos_checked"] opaque cosChecked (t : @& RawTensor) : Except String RawTensor
-
-@[extern "lean_torch_tensor_elu_checked"] opaque eluChecked (input : @& RawTensor) : Except String RawTensor
-end torch.RawTensor
-
-namespace torch.RawTensor
-@[extern "lean_torch_lt_checked"] opaque ltChecked (a b : @& RawTensor) : Except String RawTensor
-
-@[extern "lean_torch_ge_checked"] opaque geChecked (a b : @& RawTensor) : Except String RawTensor
 end torch.RawTensor

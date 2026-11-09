@@ -289,6 +289,12 @@ def testTypedRuntimeShapeResults : IO Unit := do
   | .ok _ => LeanTest.fail "native inferred extents must not establish a literal UInt64 extent"
   | .error _ => pure ()
 
+example (_input : Tensor ⟨#[2, 1], .Float32, .CPU⟩) (_weight : Tensor ⟨#[1], .Float32, .CPU⟩)
+    (_wide : Tensor ⟨#[3], .Float32, .CPU⟩) : True := by
+  have _ := Tensor.rmsNormWeighted _input _weight
+  fail_if_success have _ := Tensor.rmsNormWeighted _input _wide
+  trivial
+
 @[test]
 def testTypedRMSNormWeightContract : IO Unit := do
   let input := (Tensor.ones #[2, 3]).castDType .Float64
@@ -296,9 +302,6 @@ def testTypedRMSNormWeightContract : IO Unit := do
   let output : Tensor ⟨#[2, 3], .Float32, .CPU⟩ := input.rmsNormWeighted weight 0
   assertValid output "scalar RMS weight has weak Float64 precision"
   LeanTest.assertEqual (← output.toFloatArray) #[2, 2, 2, 2, 2, 2]
-  match (Tensor.ones #[2, 1]).rmsNormWeighted? (Tensor.ones #[3]) with
-  | .ok _ => LeanTest.fail "RMS weight must not expand the claimed input shape"
-  | .error message => LeanTest.assertTrue (message.containsSubstr "cannot broadcast")
 
 /-- The typed wrappers re-index the phantom dtype according to the promotion
     algebra in `Tyr.Typed.DType`. These tests run the real ops and assert the

@@ -56,7 +56,7 @@ private def assertClose (actual expected : Array Float) : IO Unit := do
   let bias ← Tensor.parameter attention.outProjBias
   let model := { attention with outProjBias := bias }
   let out ← model.forwardIO input true
-  let loss ← IO.ofExcept (Tensor.sumAll? out)
+  let loss := Tensor.sumAll out
   Tensor.backwardLoss loss
   assertClose (← (← bias.gradOf).toFloatArray) #[2, 2]
 

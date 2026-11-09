@@ -40,18 +40,18 @@ example (_x : Tensor ⟨#[2, 2], .Float8E4M3FN, .CPU⟩) : True := by
 @[test] def testComplexRowNormsAreReal : IO Unit := do
   for (complex, real) in #[(DType.Complex64, DType.Float32), (.Complex128, .Float64)] do
     let input := diagonal complex
-    let norms := Tensor.rowNorms input
+    let norms := Tensor.rowNorms! input
     LeanTest.assertEqual norms.raw.dtype real
     LeanTest.assertEqual (← norms.toFloatArray) #[3, 4]
     LeanTest.assertTrue norms.validate.toOption.isSome
     LeanTest.assertTrue (norms.raw.device == input.raw.device)
-    LeanTest.assertEqual (Tensor.frobeniusNorm input) 5
-    LeanTest.assertEqual (Tensor.maxRowNorm input) 4
+    LeanTest.assertEqual (Tensor.frobeniusNorm! input) 5
+    LeanTest.assertEqual (Tensor.maxRowNorm! input) 4
 
 @[test] def testComplexSingularValuesAreReal : IO Unit := do
   for (complex, real) in #[(DType.Complex64, DType.Float32), (.Complex128, .Float64)] do
     let input := diagonal complex
-    let values := Tensor.svdvals input
+    let values := Tensor.svdvals! input
     LeanTest.assertEqual values.raw.dtype real
     LeanTest.assertEqual (← values.toFloatArray) #[4, 3]
     LeanTest.assertTrue values.validate.toOption.isSome
@@ -68,7 +68,7 @@ example (_x : Tensor ⟨#[2, 2], .Float8E4M3FN, .CPU⟩) : True := by
     -- Singular values are converted explicitly only when reconstructing a
     -- complex matrix with the same-dtype matrix-multiplication primitive.
     let diagonalValues := (Tensor.diagflat values).castDType complex
-    let reconstructed := Tensor.mm (Tensor.mm u diagonalValues) vh
+    let reconstructed := Tensor.mm! (Tensor.mm! u diagonalValues) vh
     LeanTest.assertEqual (← reconstructed.toFloatArray) #[3, 0, 0, 4]
 
 @[test] def testRealMatrixLogRoundtrip : IO Unit := do
@@ -115,8 +115,10 @@ example (_x : Tensor ⟨#[2, 2], .Float8E4M3FN, .CPU⟩) : True := by
 
 @[test] def testDynamicComplexResultsRetainActualRealDtype : IO Unit := do
   let input := (diagonal .Complex128)
-  match Tensor.rowNorms? input, Tensor.svdvals? input, Tensor.svdReduced? input with
-  | .ok norms, .ok values, .ok (u, singular, vh) =>
+  let norms := Tensor.rowNorms input
+  let values := Tensor.svdvals input
+  match Tensor.svdReduced? input with
+  | .ok (u, singular, vh) =>
     for tensor in #[norms, values, singular] do
       LeanTest.assertEqual tensor.raw.dtype .Float64
       LeanTest.assertTrue (tensor.raw.device == input.raw.device)
@@ -125,7 +127,7 @@ example (_x : Tensor ⟨#[2, 2], .Float8E4M3FN, .CPU⟩) : True := by
     LeanTest.assertEqual (← singular.toFloatArray) #[4, 3]
     LeanTest.assertEqual u.raw.dtype .Complex128
     LeanTest.assertEqual vh.raw.dtype .Complex128
-  | _, _, _ => LeanTest.fail "Valid exact complex factorization was rejected"
+  | .error _ => LeanTest.fail "Valid exact complex factorization was rejected"
 
 @[test] def testMatrixLogRejectsInvalidRuntimeDomain : IO Unit := do
   expectError (Tensor.matrixLog? (diagonal .Complex64))
@@ -146,12 +148,6 @@ example (_x : Tensor ⟨#[2, 2], .Float8E4M3FN, .CPU⟩) : True := by
   -- CPU SVD does not implement ComplexHalf, even though its metadata and
   -- real singular-value dtype are represented by the type system.
   let halfComplex := diagonal .Complex32
-  expectError (Tensor.svdvals? halfComplex)
   expectError (Tensor.svdReduced? halfComplex)
-  let integers := diagonal .Int64
-  expectError (Tensor.rowNorms? integers)
-  expectError (Tensor.frobeniusNorm? integers)
-  expectError (Tensor.maxRowNorm? integers)
-  expectError (Tensor.l2Norm? (integers.reshape #[4]))
 
 end Tests.ComplexResults

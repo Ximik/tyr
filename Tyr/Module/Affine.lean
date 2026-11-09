@@ -25,12 +25,12 @@ instance {n m : Nat} {d : DType} {dev : Device} :
   grad a := do pure ⟨← Tensor.gradOf a.w, ← Tensor.gradOf a.b⟩
 
 /-- Apply an affine map to a batch, retaining dtype and device. -/
-def Affine.step {batch n m : Nat} {d : DType} {dev : Device} [DType.Promotes d d d]
+def Affine.step {batch n m : Nat} {d : DType} {dev : Device} [DType.FloatingOrComplex d] [DType.Promotes d d d]
     (a : @Affine n m d dev) (input : Tensor ⟨#[batch, m], d, dev⟩) :
     Tensor ⟨#[batch, n], d, dev⟩ :=
   Tensor.add (Tensor.mm input a.w) (Tensor.expand a.b #[batch, n])
 
-instance {batch n m : Nat} {d : DType} {dev : Device} [DType.Promotes d d d] :
+instance {batch n m : Nat} {d : DType} {dev : Device} [DType.FloatingOrComplex d] [DType.Promotes d d d] :
     Module (@Affine n m d dev) (Tensor ⟨#[batch, m], d, dev⟩)
       (Tensor ⟨#[batch, n], d, dev⟩) where
   forward := Affine.step

@@ -168,7 +168,7 @@ private def finalizePreparedStepWithTreeFactor
     diagnostics := {
       gradientNorm := Float.sqrt (treeDot gradient gradient)
       factorRank := rank
-      innerConditionEstimate := Tensor.spectralNorm inner * Tensor.spectralNorm innerInv
+      innerConditionEstimate := Tensor.spectralNorm! inner * Tensor.spectralNorm! innerInv
       residualNorm := Float.sqrt (treeDot residual residual)
       updateNorm := Float.sqrt (treeDot update update)
       }
@@ -307,7 +307,7 @@ def stepCrossEntropy
       diagnostics := {
         gradientNorm := Float.sqrt (treeDot paramGrad paramGrad)
         factorRank := outDim
-        innerConditionEstimate := Tensor.spectralNorm inner * Tensor.spectralNorm innerInv
+        innerConditionEstimate := Tensor.spectralNorm! inner * Tensor.spectralNorm! innerInv
         residualNorm := Float.sqrt (treeDot residual residual)
         updateNorm := Float.sqrt (treeDot update update)
       }
