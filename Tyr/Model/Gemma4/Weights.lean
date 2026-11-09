@@ -243,9 +243,9 @@ private def loadMoeBranch (src : Source) (cfg : Config) (layerIdx : Nat)
   let pre2 ← loadRMSNorm src s!"{p}.pre_feedforward_layernorm_2" cfg.hidden_size cfg.hidden_size cfg.rms_norm_eps
   pure {
     router := {
-      proj := freezeStored routerProj
-      scale := freezeStored routerScale
-      per_expert_scale := freezeStored perExpertScale
+      proj := reqGradFalse routerProj.2.toFloat32
+      scale := reqGradFalse routerScale.2.toFloat32
+      per_expert_scale := reqGradFalse perExpertScale.2.toFloat32
     }
     experts := {
       gate_up_proj := reqGradFalse (← requireDType dtype gateUp)

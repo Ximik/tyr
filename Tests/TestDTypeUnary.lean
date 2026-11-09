@@ -19,10 +19,6 @@ example (x : Tensor ⟨#[2], .Complex64, .CPU⟩) : Tensor ⟨#[2], .Complex64, 
 example (x : Tensor ⟨#[2], .Complex128, .CPU⟩) : Tensor ⟨#[2], .Complex128, .CPU⟩ :=
   Tensor.rsqrt (Tensor.tanh (Tensor.sigmoid (Tensor.pow (Tensor.log10 x) 2)))
 
-example {σ : StaticSpec} (input : Tensor σ) :
-    Except String (Tensor (σ.withDType σ.dtype.atLeastFloat)) :=
-  Tensor.Promoting.sqrt? input
-
 example (_x : Tensor ⟨#[2], .Complex64, .CPU⟩) : True := by
   fail_if_success have _ := Tensor.gelu _x
   fail_if_success have _ := Tensor.silu _x
@@ -88,42 +84,5 @@ example (_x : Tensor ⟨#[2], .Int64, .CPU⟩) : True := by
   expectError (Tensor.elu? complex)
   let shell := (Tensor.ones #[2]).castDType .Float8E4M3FN
   expectError (Tensor.sqrt? shell)
-
-@[test] def testRuntimeUnaryPromotionOfErasedIntegers : IO Unit := do
-  let input := ((Tensor.fromFloatArray #[1, 4]).castDType .Int32)
-  let cases := #[(#[1, 2], Tensor.Promoting.sqrt? input),
-    (#[0, Float.log 4], Tensor.Promoting.log? input),
-    (#[Float.cos 1, Float.cos 4], Tensor.Promoting.cos? input),
-    (#[1, 2], Tensor.Promoting.pow? input 0.5),
-    (#[Float.exp 1, Float.exp 4], Tensor.Promoting.exp? input),
-    (#[1, 0.5], Tensor.Promoting.rsqrt? input),
-    (#[Float.sin 1, Float.sin 4], Tensor.Promoting.sin? input),
-    (#[Float.atan 1, Float.atan 4], Tensor.Promoting.atan? input),
-    (#[0, Float.log 4 / Float.log 10], Tensor.Promoting.log10? input)]
-  for (expected, pending) in cases do
-    match pending with
-    | .error message => LeanTest.fail message
-    | .ok result =>
-      LeanTest.assertEqual result.raw.dtype .Float32
-      LeanTest.assertTrue (result.raw.device == input.raw.device)
-      LeanTest.assertTrue result.validate.toOption.isSome
-      let values ← result.toFloatArray
-      LeanTest.assertEqual values.size expected.size
-      for (actual, value) in values.zip expected do
-        LeanTest.assertTrue ((actual - value).abs < 1e-4)
-  LeanTest.assertEqual (Tensor.Promoting.sqrt input).raw.dtype .Float32
-  LeanTest.assertEqual input.raw.dtype .Int32
-  LeanTest.assertEqual (← input.toFloatArray) #[1, 4]
-
-@[test] def testRuntimeUnaryPromotionRetainsComplexDtype : IO Unit := do
-  let input := ((Tensor.fromFloatArray #[-1]).castDType .Complex64)
-  match Tensor.Promoting.sqrt? input with
-  | .error message => LeanTest.fail message
-  | .ok result =>
-    LeanTest.assertEqual result.raw.dtype .Complex64
-    LeanTest.assertTrue (result.raw.device == input.raw.device)
-    let magnitudes ← (Tensor.abs result).toFloatArray
-    LeanTest.assertEqual magnitudes #[1]
-  LeanTest.assertEqual (Tensor.Promoting.log input).raw.dtype .Complex64
 
 end Tests.DTypeUnary

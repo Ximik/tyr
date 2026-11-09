@@ -729,56 +729,6 @@ def findTokenPositions {n : Nat} {dev : Device}
   | .ok result => pure ⟨count, result⟩
   | .error message => throw (IO.userError s!"Tensor.findTokenPositions: {message}")
 
-namespace Promoting
-
-private def unaryNeural? {σ : StaticSpec}
-    (native : RawTensor → Except String RawTensor) (input : Tensor σ) :
-    Except String (Tensor (σ.withDType σ.dtype.atLeastFloat)) := do
-  Tensor.checkedUpdate? σ.dtype.atLeastFloat input.raw.device
-    (← native input.raw)
-
-def log? {σ : StaticSpec} (input : Tensor σ) :
-    Except String (Tensor (σ.withDType σ.dtype.atLeastFloat)) :=
-  unaryNeural? RawTensor.logChecked input
-
-def log {σ : StaticSpec} (input : Tensor σ) :
-    Tensor (σ.withDType σ.dtype.atLeastFloat) :=
-  match log? input with
-  | .ok result => result
-  | .error message => nativeInvariantFailure s!"Tensor.Promoting.log: {message}"
-
-def log10? {σ : StaticSpec} (input : Tensor σ) :
-    Except String (Tensor (σ.withDType σ.dtype.atLeastFloat)) :=
-  unaryNeural? RawTensor.log10Checked input
-
-def log10 {σ : StaticSpec} (input : Tensor σ) :
-    Tensor (σ.withDType σ.dtype.atLeastFloat) :=
-  match log10? input with
-  | .ok result => result
-  | .error message => nativeInvariantFailure s!"Tensor.Promoting.log10: {message}"
-
-def sin? {σ : StaticSpec} (input : Tensor σ) :
-    Except String (Tensor (σ.withDType σ.dtype.atLeastFloat)) :=
-  unaryNeural? RawTensor.sinChecked input
-
-def sin {σ : StaticSpec} (input : Tensor σ) :
-    Tensor (σ.withDType σ.dtype.atLeastFloat) :=
-  match sin? input with
-  | .ok result => result
-  | .error message => nativeInvariantFailure s!"Tensor.Promoting.sin: {message}"
-
-def cos? {σ : StaticSpec} (input : Tensor σ) :
-    Except String (Tensor (σ.withDType σ.dtype.atLeastFloat)) :=
-  unaryNeural? RawTensor.cosChecked input
-
-def cos {σ : StaticSpec} (input : Tensor σ) :
-    Tensor (σ.withDType σ.dtype.atLeastFloat) :=
-  match cos? input with
-  | .ok result => result
-  | .error message => nativeInvariantFailure s!"Tensor.Promoting.cos: {message}"
-
-end Promoting
-
 end torch.Tensor
 
 namespace torch.SomeDTypeTensor

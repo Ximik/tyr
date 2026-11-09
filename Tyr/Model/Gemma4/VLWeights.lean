@@ -131,7 +131,7 @@ private def loadVisionPatchEmbedder (src : Source) (cfg : VLConfig)
     src.load (← src.resolve (visionTensorNameCandidates "model.vision_tower.patch_embedder.position_embedding_table")) #[2, cfg.vision_config.position_embedding_size, cfg.vision_config.hidden_size] device
   pure ⟨inputProj.1, {
     input_proj := inputProj.2
-    position_embedding_table := freezeStored posEmbed
+    position_embedding_table := reqGradFalse posEmbed.2.toFloat32
   }⟩
 
 private def loadVisionModel (src : Source) (cfg : VLConfig) : IO (Σ dtype : RealFloatingDType, Gemma4VisionModel (device := device) cfg dtype.val) := do
@@ -147,8 +147,8 @@ private def loadVisionModel (src : Source) (cfg : VLConfig) : IO (Σ dtype : Rea
   pure ⟨RealFloatingDType.ofDType dtype, {
     patch_embedder := patchEmbedder.2
     blocks := blocks
-    std_bias := stdBias.map freezeStored
-    std_scale := stdScale.map freezeStored
+    std_bias := stdBias.map (reqGradFalse ·.2.toFloat32)
+    std_scale := stdScale.map (reqGradFalse ·.2.toFloat32)
   }⟩
 
 private def loadVisionProjector (src : Source) (cfg : VLConfig)

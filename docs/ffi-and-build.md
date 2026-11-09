@@ -255,8 +255,7 @@ results remain leaf parameters.
 including borrowed-reference preservation and cleanup on invalid input.
 
 Core arithmetic and matrix adapters use checked native exports returning
-`Except String RawTensor`. Ordinary typed arithmetic and `Tensor.Promoting`
-`?` APIs preserve those errors, including missing kernels for otherwise
+`Except String RawTensor`. Ordinary typed arithmetic `?` APIs preserve those errors, including missing kernels for otherwise
 valid promotion pairs. Fused `affine3d?` checks the actual dtype and device of
 both its weight and bias before calling the checked native kernel. Scalar
 spectral and nuclear norms also expose checked `?` variants for dtype, backend,

@@ -34,12 +34,11 @@ example (x : Tensor ⟨#[2], .Int64, .CPU⟩) (y : Tensor ⟨#[2], .Float32, .CP
 example (x : Tensor ⟨#[2], .Int64, .CPU⟩) (scalar : Tensor ⟨#[], .Float32, .CPU⟩) :
     Tensor ⟨#[2], .Float32, .CPU⟩ := branching.mulTensorScalar x scalar
 
-@[test] def testWherePromotesErasedOperands : IO Unit := do
+@[test] def testWherePromotesOperands : IO Unit := do
   let x := (Tensor.fromInt64Array #[1, 2])
   let y := (Tensor.fromFloatArray #[9.5, 8.5])
   let condition := Tensor.eqScalar (Tensor.fromInt64Array #[0, 0]) 1
-  let promoted ← checked (Tensor.Promoting.whereSelect? condition x y)
-  let result := promoted.tensor
+  let result : Tensor ⟨#[2], .Float32, .CPU⟩ := Tensor.whereSelect condition x y
   LeanTest.assertEqual result.raw.dtype .Float32
   LeanTest.assertEqual (← result.toFloatArray) #[9.5, 8.5]
 
@@ -141,16 +140,11 @@ example {d : DType} [DType.FloatingOrComplex d]
 @[test] def testMissingKernelIsRecoverable : IO Unit := do
   let x := (Tensor.ones #[2]).castDType .Complex32
   -- Promotion exists, but the pinned CPU backend lacks ComplexHalf division.
-  expectError (Tensor.Promoting.div? x x) "div"
   expectError (Tensor.div? x x) "div"
 
-@[test] def testRuntimeBroadcastPromotion : IO Unit := do
+@[test] def testTensorScalarBroadcastPromotion : IO Unit := do
   let x := Tensor.fromInt64Array #[2, 4]
   let scalar := (Tensor.fromFloatArray #[0.5]).reshape #[]
-  let result ← checked (Tensor.Promoting.mulB? x scalar #[2])
-  LeanTest.assertEqual result.dtype .Float32
-  LeanTest.assertEqual (← result.tensor.toFloatArray) #[1, 2]
-  expectError (Tensor.Promoting.mulB? x scalar #[3]) "broadcast"
   let native : Tensor ⟨#[2], .Float32, .CPU⟩ := branching.mulTensorScalar x scalar
   LeanTest.assertEqual native.raw.dtype .Float32
   LeanTest.assertEqual (← native.toFloatArray) #[1, 2]
