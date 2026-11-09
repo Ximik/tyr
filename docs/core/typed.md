@@ -339,20 +339,22 @@ a diagnostic.
 invalid labels abort. Its mask must have a real numeric or Bool
 dtype; the pure wrapper requires that domain as type-level evidence.
 
-`indexSelect?` validates vector indices before native indexing, including on
-accelerators, and preserves the data dtype and device. `TokenBytes` uses it
-through IO so invalid token IDs return errors. `sumAll?` and `item?` retain
-reduction and host-scalar conversion failures for recoverable callers.
+`indexSelect` selects vector entries by Int64 indices and preserves the data
+dtype and device. Index values are runtime data: the native call validates them
+before accelerator dispatch, and an out-of-range index aborts the process.
+`indexSelect?` returns that failure as an error instead; `TokenBytes` uses it
+so invalid token IDs are recoverable. `sumAll?` and `item?` retain reduction
+and host-scalar conversion failures for recoverable callers.
 
-`conv1d?`, `conv2dBias?`, `conv1dGroups?`, and `convTranspose1d?` check actual
-dtype and device equality across input, weight, and any bias before invoking
-checked native kernels. Convolution does not implicitly promote its operands,
-including when their dtype indices are dynamic. Invalid convolution parameters
-and unavailable kernels return `Except.error`; successful outputs are checked
-against the computed spatial shape and input dtype/device. The corresponding
-names without `?` abort with a diagnostic on failure.
-The `conv2dBias` result shape broadcasts singleton stride, padding, and dilation
-arrays across both spatial axes, matching the native operation.
+`conv1d`, `conv2dBias`, `conv1dGroups`, and `convTranspose1d` require a floating
+or complex dtype shared by input, weight, and any bias on one device; convolution
+does not promote its operands. Stride, dilation, kernel, padding, groups, and
+output padding are checked by `ConvValid`, `ConvGroups`, and `ConvTransposeValid`
+proofs. Literal parameters discharge them by `decide`; `conv_valid` and
+`conv_groups` also use hypotheses in scope and `omega`. The `!` variants skip
+these requirements and abort on a native error. `conv2dBias` takes
+`(height, width)` pairs for stride, padding, and dilation.
+Outputs are checked against the computed spatial shape and the input dtype/device.
 
 After building the dtype modules, run `bash scripts/test_dtype_promotion.sh`
 to compare all 46² promotion pairs and all four scalar/vector rank combinations
@@ -363,8 +365,12 @@ checks arithmetic result dtypes separately from unavailable kernels.
 
 Attention separates pure inference from stochastic execution. `Tensor.attention`,
 the GQA/masked/window variants, and `Tensor.flashAttention` accept no dropout
-probability and use zero dropout. Their `?` forms retain validation and native
-kernel errors. To train with dropout, bind the corresponding IO operation:
+probability and use zero dropout. They require a real floating dtype, and the
+grouped variants take an `AttentionHeads` proof: the query heads equal the K/V
+heads or, with GQA enabled, are a whole multiple of them. Literal head counts
+discharge it, and a divisibility fact gives it through `AttentionHeads.ofDvd`.
+The `!` variants skip these requirements and abort on a native error. To train
+with dropout, bind the corresponding IO operation:
 
 ```lean
 let output ← Tensor.attentionIO query key value dropout training isCausal
