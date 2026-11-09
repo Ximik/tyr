@@ -51,6 +51,15 @@ void scalarFloat8(lean_object* (*operation)(lean_object*, double)) {
   Object result(operation(input.get(), 2), lean_dec);
 }
 
+void indexSelect(Object indices) {
+  auto input = full({2}, 3.25);
+  Object result(lean_torch_index_select(input.get(), Nat(0), indices.get()), lean_dec);
+}
+
+void flash(Object q) {
+  Object result(lean_torch_tyr_flash_attn_4d(q.get(), q.get(), q.get(), lean_box(0), 0, lean_box(0), 0), lean_dec);
+}
+
 void affineDType(bool weight) {
   auto input = full({1, 2, 2}, 3);
   auto w = weight ? cast(full({2, 2}, 2).get(), tyr::lean::DType::Float64) : full({2, 2}, 2);
@@ -113,6 +122,13 @@ std::vector<AbortCase> cases() {
     auto other = cast(real.get(), tyr::lean::DType::Float64);
     Object r(lean_torch_mm(real.get(), other.get()), lean_dec);
   });
+  add("indexSelect-negative", "indexSelect index is out of range",
+      [] { indexSelect(Object(lean_torch_full_int(shape({1}), std::numeric_limits<uint64_t>::max()), lean_dec)); });
+  add("indexSelect-bounds", "indexSelect index is out of range",
+      [] { indexSelect(Object(lean_torch_full_int(shape({1}), 2), lean_dec)); });
+  add("indexSelect-float-indices", "requires Int64 or Int32 indices", [] { indexSelect(full({1}, 0)); });
+  add("flashAttention-rank", "rank-4", [] { flash(full({2, 2}, 1)); });
+  add("flashAttention-dtype", "expected scalar type Float but found Long", [] { flash(Object(lean_torch_full_int(shape({1, 1, 2, 2}), 1), lean_dec)); });
   add("affine-weight-dtype", "must have the same dtype", [] { affineDType(true); });
   add("affine-bias-dtype", "must have the same dtype", [] { affineDType(false); });
   add("spectralNorm-integral", "floating point or complex", [] {

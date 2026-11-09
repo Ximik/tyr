@@ -911,22 +911,24 @@ def eqScalar {s : Shape} {d : DType} {dev : Device} (t : Tensor ⟨s, d, dev⟩)
     Tensor ⟨s, .Bool, dev⟩ :=
   checkedResult "eqScalar" (Tensor.ofRaw (RawTensor.eqScalar t.raw scalar))
 
-/-- Checked vector indexing, preserving the actual data dtype and placement.
-Native validation checks negative and out-of-range indices before accelerator
-dispatch, synchronizing one validity bit when needed. -/
-def indexSelect? {n k : Nat} {d : DType} {dev : Device}
+def indexSelect! {n k : Nat} {d : DType} {dev : Device}
     (data : Tensor ⟨#[n], d, dev⟩) (indices : Tensor ⟨#[k], .Int64, dev⟩) :
-    Except String (Tensor ⟨#[k], d, dev⟩) := do
-  Tensor.checkSameDevice data indices
-  Tensor.checkedUpdate? data.raw.dtype data.raw.device
-    (← RawTensor.indexSelectChecked data.raw 0 indices.raw)
+    Tensor ⟨#[k], d, dev⟩ :=
+  checkedResult "indexSelect" (Tensor.ofRaw (RawTensor.indexSelect! data.raw 0 indices.raw))
 
-/-- Select entries of a 1-D tensor by Int64 indices. Use `indexSelect?` for
-recoverable bounds and native operation errors. -/
+/-- Select entries of a 1-D tensor by Int64 indices. Index values are runtime
+data: an out-of-range index aborts; `indexSelect?` returns it as an error. -/
 def indexSelect {n k : Nat} {d : DType} {dev : Device}
     (data : Tensor ⟨#[n], d, dev⟩) (indices : Tensor ⟨#[k], .Int64, dev⟩) :
     Tensor ⟨#[k], d, dev⟩ :=
-  checkedResult "indexSelect" (indexSelect? data indices)
+  indexSelect! data indices
+
+/-- `indexSelect` for untrusted index values, returning an out-of-range index
+as an error. Validation synchronizes one validity bit from the device. -/
+def indexSelect? {n k : Nat} {d : DType} {dev : Device}
+    (data : Tensor ⟨#[n], d, dev⟩) (indices : Tensor ⟨#[k], .Int64, dev⟩) :
+    Except String (Tensor ⟨#[k], d, dev⟩) := do
+  Tensor.ofRaw (← RawTensor.indexSelect? data.raw 0 indices.raw)
 
 /-- Per-element cross entropy, without precondition checks; a non-floating dtype,
 an invalid label or a backend error aborts the process. The default ignored label

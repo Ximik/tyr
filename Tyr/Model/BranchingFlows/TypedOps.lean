@@ -82,16 +82,13 @@ def affine2d {batch input output : Nat} {dev : Device} (x : Tensor { dtype := dt
 def transposeAttention {b s h d : Nat} {dev : Device} (x : Tensor { dtype := dtype, shape := #[b, s, h, d], device := dev }) : Tensor { dtype := dtype, shape := #[b, h, s, d], device := dev } :=
   x.transpose 1 2
 
-def attentionBias? {biasDType : DType} {b h s d : Nat} {dev : Device} (q k v : Tensor { dtype := dtype, shape := #[b, h, s, d], device := dev })
-    (bias : Tensor { dtype := biasDType, shape := #[b, h, s, s], device := dev }) :
-    Except String (Tensor { dtype := dtype, shape := #[b, h, s, d], device := dev }) := do
-  q.checkedReplacement? (← RawTensor.branchingAttentionBias q.raw k.raw v.raw bias.raw false)
+def attentionBias! {biasDType : DType} {b h s d : Nat} {dev : Device} (q k v : Tensor { dtype := dtype, shape := #[b, h, s, d], device := dev })
+    (bias : Tensor { dtype := biasDType, shape := #[b, h, s, s], device := dev }) : Tensor { dtype := dtype, shape := #[b, h, s, d], device := dev } :=
+  q.checkedReplacement (RawTensor.branchingAttentionBias! q.raw k.raw v.raw bias.raw false)
 
 def attentionBias {biasDType : DType} {b h s d : Nat} {dev : Device} (q k v : Tensor { dtype := dtype, shape := #[b, h, s, d], device := dev })
     (bias : Tensor { dtype := biasDType, shape := #[b, h, s, s], device := dev }) : Tensor { dtype := dtype, shape := #[b, h, s, d], device := dev } :=
-  match attentionBias? q k v bias with
-  | .ok result => result
-  | .error message => nativeInvariantFailure s!"BranchingFlows.attentionBias: {message}"
+  attentionBias! q k v bias
 
 def attentionBiasIO {biasDType : DType} {b h s d : Nat} {dev : Device} (q k v : Tensor { dtype := dtype, shape := #[b, h, s, d], device := dev })
     (bias : Tensor { dtype := biasDType, shape := #[b, h, s, s], device := dev })

@@ -7,8 +7,8 @@ namespace torch.RawTensor
 @[extern "lean_torch_mul_tensor_scalar"] opaque mulTensorScalar!
     (input scalar : @& RawTensor) : RawTensor
 @[extern "lean_torch_tensor_softplus"] opaque branchingSoftplus (input : @& RawTensor) : RawTensor
-@[extern "lean_torch_sdpa_4d_bias"] opaque branchingAttentionBias
-    (q k v bias : @& RawTensor) (causal : Bool) : Except String RawTensor
+@[extern "lean_torch_sdpa_4d_bias"] opaque branchingAttentionBias!
+    (q k v bias : @& RawTensor) (causal : Bool) : RawTensor
 @[extern "lean_torch_sdpa_4d_bias_io"] opaque branchingAttentionBiasIO
     (q k v bias : @& RawTensor) (dropout : Float) (causal : Bool) : IO RawTensor
 @[extern "lean_torch_binary_cross_entropy"] opaque branchingBCE

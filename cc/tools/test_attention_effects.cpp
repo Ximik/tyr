@@ -53,14 +53,10 @@ void seed(uint64_t value) {
   generator.set_current_seed(value);
 }
 std::vector<double> values(lean_object* result, bool io) {
-  lean_object* tensor;
+  lean_object* tensor = result;
   if (io) {
     require(lean_io_result_is_ok(result), "Expected IO.ok attention result");
     tensor = lean_io_result_get_value(result);
-  } else {
-    require(!lean_is_scalar(result) && !lean_is_external(result) && lean_obj_tag(result) == 1,
-      "Expected Except.ok attention result");
-    tensor = lean_ctor_get(result, 0);
   }
   require(!lean_is_scalar(tensor) && lean_is_external(tensor), "Attention payload is not a tensor");
   Object observed(lean_torch_tensor_to_float_array_dynamic(tensor), lean_dec);

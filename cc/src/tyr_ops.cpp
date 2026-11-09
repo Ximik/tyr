@@ -800,10 +800,8 @@ static torch::Tensor flashAttentionFromLean(
 extern "C" LEAN_EXPORT lean_object* lean_torch_tyr_flash_attn_4d(
     b_lean_obj_arg query, b_lean_obj_arg key, b_lean_obj_arg value,
     lean_obj_arg attn_mask, uint8_t is_causal, lean_obj_arg scale, uint8_t enable_gqa) {
-  return tyr::checkedCall("flashAttention", [&] {
-    return fromTorchTensor(flashAttentionFromLean(
-        query, key, value, attn_mask, 0.0, is_causal, scale, enable_gqa));
-  });
+  return fromTorchTensor(flashAttentionFromLean(
+      query, key, value, attn_mask, 0.0, is_causal, scale, enable_gqa));
 }
 
 extern "C" LEAN_EXPORT lean_object* lean_torch_tyr_flash_attn_4d_io(

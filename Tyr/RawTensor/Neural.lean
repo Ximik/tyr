@@ -14,12 +14,12 @@ namespace torch.RawTensor
 @[extern "lean_torch_arange"] opaque arange (start stop step : @& Nat) : RawTensor
 @[extern "lean_torch_tensor_sin"] opaque sin! (t : @& RawTensor) : RawTensor
 @[extern "lean_torch_tensor_cos"] opaque cos! (t : @& RawTensor) : RawTensor
-@[extern "lean_torch_sdpa_gqa"] opaque attentionGQA
-    (q k v : @& RawTensor) (causal gqa : Bool) : Except String RawTensor
+@[extern "lean_torch_sdpa_gqa"] opaque attentionGQA!
+    (q k v : @& RawTensor) (causal gqa : Bool) : RawTensor
 @[extern "lean_torch_sdpa_gqa_io"] opaque attentionGQAIO
     (q k v : @& RawTensor) (dropout : Float) (causal gqa : Bool) : IO RawTensor
-@[extern "lean_torch_sdpa_gqa_mask"] opaque attentionGQAMask
-    (q k v mask : @& RawTensor) (causal gqa : Bool) : Except String RawTensor
+@[extern "lean_torch_sdpa_gqa_mask"] opaque attentionGQAMask!
+    (q k v mask : @& RawTensor) (causal gqa : Bool) : RawTensor
 @[extern "lean_torch_sdpa_gqa_mask_io"] opaque attentionGQAMaskIO
     (q k v mask : @& RawTensor) (dropout : Float) (causal gqa : Bool) : IO RawTensor
 
@@ -30,13 +30,13 @@ namespace torch.RawTensor
 @[extern "lean_torch_masked_scatter"] opaque maskedScatter
     (input mask source : @& RawTensor) : RawTensor
 
-@[extern "lean_torch_sdpa_gqa_qkv"] opaque attentionGQAQKV
-    (q k v : @& RawTensor) (causal gqa : Bool) : Except String RawTensor
+@[extern "lean_torch_sdpa_gqa_qkv"] opaque attentionGQAQKV!
+    (q k v : @& RawTensor) (causal gqa : Bool) : RawTensor
 @[extern "lean_torch_sdpa_gqa_qkv_io"] opaque attentionGQAQKVIO
     (q k v : @& RawTensor) (dropout : Float) (causal gqa : Bool) : IO RawTensor
-@[extern "lean_torch_tyr_flash_attn_4d"] opaque flashAttention
+@[extern "lean_torch_tyr_flash_attn_4d"] opaque flashAttention!
     (q k v : @& RawTensor) (mask : Option RawTensor)
-    (causal : Bool) (scale : Option Float) (gqa : Bool) : Except String RawTensor
+    (causal : Bool) (scale : Option Float) (gqa : Bool) : RawTensor
 @[extern "lean_torch_tyr_flash_attn_4d_io"] opaque flashAttentionIO
     (q k v : @& RawTensor) (mask : Option RawTensor) (dropout : Float)
     (causal : Bool) (scale : Option Float) (gqa : Bool) : IO RawTensor
@@ -70,8 +70,8 @@ namespace torch.RawTensor
     (input weight bias : @& RawTensor) (stride padding outputPadding dilation : @& Nat) : RawTensor
 @[extern "lean_torch_conv_transpose1d_bias_checked"] opaque convTranspose1dChecked
     (input weight bias : @& RawTensor) (stride padding outputPadding dilation : @& Nat) : Except String RawTensor
-@[extern "lean_torch_sdpa_gqa_window"] opaque attentionWindow
-    (q k v : @& RawTensor) (causal gqa : Bool) (window : @& Nat) : Except String RawTensor
+@[extern "lean_torch_sdpa_gqa_window"] opaque attentionWindow!
+    (q k v : @& RawTensor) (causal gqa : Bool) (window : @& Nat) : RawTensor
 @[extern "lean_torch_sdpa_gqa_window_io"] opaque attentionWindowIO
     (q k v : @& RawTensor) (dropout : Float) (causal gqa : Bool) (window : @& Nat) : IO RawTensor
 

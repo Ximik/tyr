@@ -70,15 +70,23 @@ void checkedItem(bool invalid) {
   require(input->m_rc == 1, "Item changed borrowed references");
 }
 
-void checkedIndexSelect(int scenario) {
-  const uint64_t size = scenario == 3 ? 0 : 2;
-  const uint64_t count = scenario == 3 ? 0 : 1;
-  const uint64_t id = scenario == 1 ? UINT64_MAX : scenario == 2 ? 2 : 0;
-  Object input(lean_torch_full(shape({size}), 3.25, 0, lean_box(1)), lean_dec);
-  Object indices(lean_torch_full_int(shape({count}), id), lean_dec);
+void indexSelect(bool empty) {
+  const uint64_t count = empty ? 0 : 1;
+  Object input(lean_torch_full(shape({empty ? uint64_t{0} : uint64_t{2}}), 3.25, 0, lean_box(1)), lean_dec);
+  Object indices(lean_torch_full_int(shape({count}), 0), lean_dec);
+  Object result(lean_torch_index_select(input.get(), Nat(0), indices.get()), lean_dec);
+  values(result.get(), count, 3.25);
+  Object checked(lean_torch_index_select_checked(input.get(), Nat(0), indices.get()), lean_dec);
+  values(exceptValue(checked.get()), count, 3.25);
+  require(input->m_rc == 1 && indices->m_rc == 1,
+          "Index selection changed borrowed references");
+}
+
+void checkedIndexSelectError(uint64_t id) {
+  Object input(lean_torch_full(shape({2}), 3.25, 0, lean_box(1)), lean_dec);
+  Object indices(lean_torch_full_int(shape({1}), id), lean_dec);
   Object result(lean_torch_index_select_checked(input.get(), Nat(0), indices.get()), lean_dec);
-  if (scenario == 1 || scenario == 2) exceptError(result.get(), "indexSelect");
-  else values(exceptValue(result.get()), count, 3.25);
+  exceptError(result.get(), "indexSelect");
   require(input->m_rc == 1 && indices->m_rc == 1,
           "Index selection changed borrowed references");
 }
@@ -86,7 +94,7 @@ void checkedIndexSelect(int scenario) {
 void flashSuccess() {
   auto q = full({1, 1, 2, 2}), v = full({1, 1, 2, 2}, 7);
   auto result = flash(q.get(), q.get(), v.get());
-  values(exceptValue(result.get()), 4, 7);
+  values(result.get(), 4, 7);
   require(q->m_rc == 1 && v->m_rc == 1, "FlashAttention changed borrowed references");
 }
 void flashDropout() {
@@ -100,27 +108,18 @@ void flashDropout() {
   require(lean_io_result_is_ok(success.get()), "Valid dropout p=1 failed after errors");
   values(lean_io_result_get_value(success.get()), 4, 0);
 }
-void flashRank() {
-  auto q = full({2, 2});
-  auto result = flash(q.get(), q.get(), q.get());
-  exceptError(result.get(), "rank-4");
-}
-void flashDType() {
-  Object q(lean_torch_full_int(shape({1, 1, 2, 2}), 1), lean_dec);
-  auto result = flash(q.get(), q.get(), q.get());
-  exceptError(result.get(), "flashAttention");
-}
 void flashOptionCleanup(bool invalidCarrier, bool effectful = false) {
   auto q = full({1, 1, 2, 2}), maskTensor = full({1, 3});
   Object invalid(lean_mk_string("not a tensor"), lean_dec);
   Object mask(some(retain(maskTensor.get())), lean_dec), scale(some(lean_box_float(0.5)), lean_dec);
-  auto result = effectful
-    ? flashIO(invalidCarrier ? invalid.get() : q.get(), q.get(), q.get(), 0,
-        retain(mask.get()), retain(scale.get()))
-    : flash(invalidCarrier ? invalid.get() : q.get(), q.get(), q.get(),
-        retain(mask.get()), retain(scale.get()));
-  if (effectful) require(lean_io_result_is_error(result.get()), "Expected IO.error for invalid FlashAttention inputs");
-  else exceptError(result.get(), invalidCarrier ? "borrowTensor" : "attn_mask");
+  auto* carrier = invalidCarrier ? invalid.get() : q.get();
+  if (effectful) {
+    auto result = flashIO(carrier, q.get(), q.get(), 0, retain(mask.get()), retain(scale.get()));
+    require(lean_io_result_is_error(result.get()), "Expected IO.error for invalid FlashAttention inputs");
+  } else {
+    expectThrow([&] { return lean_torch_tyr_flash_attn_4d(
+      carrier, q.get(), q.get(), retain(mask.get()), 0, retain(scale.get()), 0); });
+  }
   require(mask->m_rc == 1 && scale->m_rc == 1, "FlashAttention leaked owned options on failure");
   require(q->m_rc == 1 && maskTensor->m_rc == 2, "FlashAttention changed borrowed tensor ownership");
 }
@@ -450,13 +449,11 @@ int main() {
   run("flash/success-carrier", flashSuccess);
   run("checked/item-success", [] { checkedItem(false); });
   run("checked/item-shape-error", [] { checkedItem(true); });
-  run("checked/indexSelect-success", [] { checkedIndexSelect(0); });
-  run("checked/indexSelect-negative-error", [] { checkedIndexSelect(1); });
-  run("checked/indexSelect-bounds-error", [] { checkedIndexSelect(2); });
-  run("checked/indexSelect-empty", [] { checkedIndexSelect(3); });
+  run("indexSelect/success", [] { indexSelect(false); });
+  run("indexSelect/empty", [] { indexSelect(true); });
+  run("checked/indexSelect-negative-error", [] { checkedIndexSelectError(UINT64_MAX); });
+  run("checked/indexSelect-bounds-error", [] { checkedIndexSelectError(2); });
   run("flash/dropout-error", flashDropout);
-  run("flash/rank-error", flashRank);
-  run("flash/dtype-error", flashDType);
   run("flash/options-early-error", [] { flashOptionCleanup(true); });
   run("flash/options-dispatch-error", [] { flashOptionCleanup(false); });
   run("flash/io-options-early-error", [] { flashOptionCleanup(true, true); });
