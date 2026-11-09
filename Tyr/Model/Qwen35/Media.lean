@@ -22,9 +22,8 @@ private def parsePatchified {patchDim : Nat} (dyn : RawTensor) : IO (Sigma (fun 
   if gotPatchDim != patchDim then
     throw <| IO.userError
       s!"Patch dim mismatch: expected {patchDim}, got {gotPatchDim}"
-  match Tensor.ofRaw (σ := ⟨#[nPatches, patchDim], .Float32, .CPU⟩) dyn with
-  | .ok tensor => pure ⟨nPatches, tensor⟩
-  | .error message => throw (IO.userError message)
+  let tensor := Tensor.ofRaw! (σ := ⟨#[nPatches, patchDim], .Float32, .CPU⟩) "parsePatchified" dyn
+  pure ⟨nPatches, tensor⟩
 
 /-- Load and patchify one image file for `cfg` (Apple-only path). -/
 def loadImagePatches (cfg : VLConfig) (path : String)

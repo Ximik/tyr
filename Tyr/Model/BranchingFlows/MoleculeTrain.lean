@@ -415,7 +415,7 @@ Apply the same first-dimension-versus-rest flattening used by the Julia Muon
 rule before Newton–Schulz orthogonalization.  This also makes vector leaves a
 valid `n × 1` matrix for the IO-backed Tyr kernel.
 -/
-private def moleculeMuonOrthogonalize {σ : StaticSpec}
+private def moleculeMuonOrthogonalize {σ : StaticSpec} [DType.RealFloating σ.dtype]
     (grad : Tensor σ) (numIters : Nat) : IO (Tensor (σ.withDType .BFloat16)) := do
   let dims := flattenedMatrixShape σ.shape
   have hDims : TensorSpec.numelOfShape #[dims.1, dims.2] = TensorSpec.numelOfShape σ.shape := by
@@ -449,7 +449,7 @@ def moleculeMuonStep [TensorStruct Params] [FloatingTensorStruct Params]
   let nesterov := FloatingTensorStruct.zipWith (fun grad mom =>
     Tensor.add (Tensor.mulScalar grad (1.0 - momentumCoeff)) (Tensor.mulScalar mom momentumCoeff))
     rawGrads momentum
-  let orth ← TensorStruct.mapM (fun {σ} grad => do
+  let orth ← FloatingTensorStruct.mapM (fun {σ} [DType.RealFloating σ.dtype] grad => do
     let direction ← moleculeMuonOrthogonalize grad numIters
     let (rows, cols) := flattenedMatrixShape σ.shape
     let aspect := Float.sqrt (max 1.0 (rows.toFloat / cols.toFloat))
@@ -491,7 +491,7 @@ def moleculeMuonStepT [TensorStruct Params] [FloatingTensorStruct Params]
   let nesterov := FloatingTensorStruct.zipWith (fun grad mom =>
     Tensor.add (Tensor.mulScalar grad (1.0 - momentumCoeff)) (Tensor.mulScalar mom momentumCoeff))
     rawGrads momentum
-  let orth ← TensorStruct.mapM (fun {σ} grad => do
+  let orth ← FloatingTensorStruct.mapM (fun {σ} [DType.RealFloating σ.dtype] grad => do
     let direction ← moleculeMuonOrthogonalize grad numIters
     let (rows, cols) := flattenedMatrixShape σ.shape
     let aspect := Float.sqrt (max 1.0 (rows.toFloat / cols.toFloat))

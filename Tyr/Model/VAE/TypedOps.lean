@@ -9,12 +9,10 @@ namespace torch.vae
 variable {device : Device} {dtype : DType}
 def groupNorm {b c h w : Nat} (x : Tensor { dtype := dtype, device := device, shape := #[b, c, h, w] })
     (groups : Nat) (weight bias : Tensor { dtype := dtype, device := device, shape := #[c] }) (eps : Float) : Tensor { dtype := dtype, device := device, shape := #[b, c, h, w] } :=
-  Tensor.checkedResult "groupNorm" (Tensor.ofRaw (RawTensor.groupNorm x.raw groups (some weight.raw) (some bias.raw) eps))
+  Tensor.ofRaw! "groupNorm" (RawTensor.groupNorm x.raw groups (some weight.raw) (some bias.raw) eps)
 
 def upsample2 {b c h w : Nat} (x : Tensor { dtype := dtype, device := device, shape := #[b, c, h, w] }) : Tensor { dtype := dtype, device := device, shape := #[b, c, h * 2, w * 2] } :=
-  match Tensor.ofRaw (RawTensor.interpolate x.raw #[h * 2, w * 2] "nearest" false) with
-  | .ok y => y
-  | .error message => nativeInvariantFailure s!"VAE upsample: {message}"
+  (Tensor.ofRaw! "upsample2" (RawTensor.interpolate x.raw #[h * 2, w * 2] "nearest" false))
 
 def bmm {b m k n : Nat} (x : Tensor { dtype := dtype, device := device, shape := #[b, m, k] }) (y : Tensor { dtype := dtype, device := device, shape := #[b, k, n] }) : Tensor { dtype := dtype, device := device, shape := #[b, m, n] } :=
   qwen35.einsumChecked "bmk,bkn->bmn" x y

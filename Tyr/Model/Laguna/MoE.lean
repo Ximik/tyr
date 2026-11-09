@@ -180,7 +180,7 @@ private def expertWeights
     let downW : Tensor { dtype := .BFloat16, device := device, shape := #[cfg.hidden_size, cfg.moe_intermediate_size] } :=
       Tensor.reshape (← dequantExpertSlice (inFeatures := cfg.moe_intermediate_size) m.experts.downPacked.2 m.experts.downScale.2 m.experts.downGlobal.2
         e) #[cfg.hidden_size, cfg.moe_intermediate_size]
-    pure (← IO.ofExcept (Tensor.ofRaw gateW.raw), ← IO.ofExcept (Tensor.ofRaw upW.raw), ← IO.ofExcept (Tensor.ofRaw downW.raw))
+    pure (← pure (Tensor.ofRaw! "expertWeights" gateW.raw), ← pure (Tensor.ofRaw! "expertWeights" upW.raw), ← pure (Tensor.ofRaw! "expertWeights" downW.raw))
 
 /-- Batched single-token decode path. For one token the k router-selected
     experts are distinct, so the k expert triples can be gathered and
@@ -225,7 +225,7 @@ private def forwardDecode1
         m.experts.upPacked.2 m.experts.upScale.2 m.experts.upGlobal.2
         m.experts.downPacked.2 m.experts.downScale.2 m.experts.downGlobal.2
         E mi h
-      IO.ofExcept (Tensor.ofRaw fused.raw)
+      pure (Tensor.ofRaw! "forwardDecode1" fused.raw)
     else do
       let hitT : Tensor { device := device, shape := #[k], dtype := .Int64 } := Tensor.reshape flatIdx #[k]
       let (gateW, upW, downW) ← do
@@ -248,7 +248,7 @@ private def forwardDecode1
           let g ← nvfp4.dequantBank gp gs gg k mi h
           let u ← nvfp4.dequantBank up us ug k mi h
           let d ← nvfp4.dequantBank dp ds dg k h mi
-          pure (← IO.ofExcept (Tensor.ofRaw g.raw), ← IO.ofExcept (Tensor.ofRaw u.raw), ← IO.ofExcept (Tensor.ofRaw d.raw))
+          pure (← pure (Tensor.ofRaw! "forwardDecode1" g.raw), ← pure (Tensor.ofRaw! "forwardDecode1" u.raw), ← pure (Tensor.ofRaw! "forwardDecode1" d.raw))
       -- Batched SwiGLU: [k,1,h] @ Wᵀ per projection.
       let x3 : Tensor { dtype := dtype, device := device, shape := #[k, 1, h] } := Tensor.reshape (Tensor.expand (Tensor.reshape x #[1, 1, h]) #[k, 1, h]) #[k, 1, h]
       let g : Tensor { dtype := dtype, device := device, shape := #[k, 1, mi] } := bmm x3 (transposeMatrixBatch gateW)
@@ -304,7 +304,7 @@ def forward2d {tokens : Nat}
         m.experts.upPacked.2 m.experts.upScale.2 m.experts.upGlobal.2
         m.experts.downPacked.2 m.experts.downScale.2 m.experts.downGlobal.2
         cfg.num_experts mi h
-      let routed : Tensor { dtype := dtype, device := device, shape := #[tokens, cfg.hidden_size] } ← IO.ofExcept (Tensor.ofRaw routedBF16.raw)
+      let routed : Tensor { dtype := dtype, device := device, shape := #[tokens, cfg.hidden_size] } ← pure (Tensor.ofRaw! "forward2d" routedBF16.raw)
       -- Dense shared expert (SwiGLU MLP, no gating score).
       let sharedH : Tensor { dtype := dtype, device := device, shape := #[tokens, cfg.shared_expert_intermediate_size] } :=
         mulSame (Tensor.silu (Tensor.linear x m.sharedGateProj)) (Tensor.linear x m.sharedUpProj)

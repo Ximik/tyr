@@ -28,10 +28,9 @@ private structure LoadedCheckpointWeights where
 private def checkedWeight {source target : Shape} {sourceDevice : Device}
     (tensor : Tensor { shape := source, dtype := .Float32, device := sourceDevice }) :
     IO (Tensor { shape := target, dtype := .Float32, device := device }) := do
-  let raw ← RawTensor.convertIO source tensor.raw device none
-  match Tensor.ofRaw raw with
-  | .ok tensor => pure tensor
-  | .error message => throw <| IO.userError s!"KittenTTS checkpoint shape: {message}"
+  if source != target then
+    throw <| IO.userError s!"KittenTTS checkpoint shape {source} does not match the model's {target}"
+  pure (Tensor.ofRaw! "checkedWeight" (← RawTensor.convertIO source tensor.raw device none))
 
 private def reqGradFalse {s : Shape} (t : Tensor { shape := s, dtype := .Float32, device := device }) : Tensor { shape := s, dtype := .Float32, device := device } :=
   Tensor.detach t

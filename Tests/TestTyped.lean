@@ -460,12 +460,6 @@ def testDevicePinnedSpec : IO Unit := do
   assertValid pinned "CPU-pinned tensor on CPU"
   assertValid pinned.relu "spec-preserving op keeps the pin"
   assertValid (Add.add pinned pinned) "homogeneous add keeps the pin"
-  -- A wrong pin is rejected before any indexed value can be constructed.
-  for device in ← Tests.acceleratorDevices do
-    match Tensor.ofRaw (σ := { shape := #[2, 2], dtype := .Float32, device })
-        (torch.RawTensor.ones #[2, 2]) with
-    | .ok _ => LeanTest.fail "Accelerator pin on a CPU tensor should fail construction"
-    | .error err => LeanTest.assertTrue (err.containsSubstr "device") s!"got: {err}"
 
 
 /-- The stack bridge consumes the temporary raw array; Lean must not release it twice. -/

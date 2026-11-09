@@ -169,6 +169,6 @@ private def writeFluxCheckpoint (path : System.FilePath) (bf16 : Bool)
   let mixedPath := dir / "mixed.safetensors"
   writeFluxCheckpoint mixedPath false "txt_in.weight"
   Tests.assertThrows (loadFluxModel mixedPath.toString cfg)
-    (some "Flux tensor 'txt_in.weight'")
+    (some "Expected dtype")
 
 end Tests.FluxTyped

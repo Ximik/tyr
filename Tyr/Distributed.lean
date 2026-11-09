@@ -75,9 +75,7 @@ private def collectiveOutput {σ : StaticSpec} (shape : Shape) (_input : Tensor 
   let _ := support.down
   let template := Tensor.zerosFor { shape, dtype := σ.dtype, device := σ.device }
   let output ← data.cloneInferenceIO template
-  match Tensor.ofRaw output.raw with
-  | .ok result => pure result
-  | .error message => throw (IO.userError s!"Collective output allocation: {message}")
+  pure (Tensor.ofRaw! "collectiveOutput" output.raw)
 
 /-- Reduce-scatter (synchronous), return-allocated: the input's leading axis is
     chunked across `worldSize` ranks, so the result spec is computed from the
@@ -138,46 +136,34 @@ def waitAll (handles : Array WorkHandle) : IO Unit := do
 
 /-! ## Polar Express Operations -/
 
-/-- Validate native results before exposing the indexed API. In particular,
-floating scalar arithmetic can promote an integer input's dtype. -/
-private def checkedResult {σ : StaticSpec} (operation : String) (dtype : DType)
-    (device : Device) (raw : RawTensor) : IO (Tensor σ) :=
-  let checked : Except String (Tensor σ) := do
-    TensorSpec.checkDType dtype raw.dtype
-    device.check raw.device
-    Tensor.ofRaw raw
-  match checked with
-  | .ok tensor => pure tensor
-  | .error message => throw (IO.userError s!"{operation}: {message}")
-
 /-- `A @ Aᵀ` for an indexed matrix: the result shape is computed from the
     input, not claimed independently. -/
-def xxt {m n : Nat} {d : DType} {dev : Device}
+def xxt {m n : Nat} {d : DType} {dev : Device} [DType.RealFloating d]
     (A : Tensor ⟨#[m, n], d, dev⟩) : IO (Tensor ⟨#[m, m], d, dev⟩) := do
-  checkedResult "xxt" A.raw.dtype A.device (← xxtImpl A.raw)
+  pure (Tensor.ofRaw! "xxt" (← xxtImpl A.raw))
 
 /-- `beta * A + alpha * (A @ Aᵀ)`, spec-preserving. -/
-def baPlusCaa {σ : StaticSpec} (A : Tensor σ) (alpha beta : Float) : IO (Tensor σ) := do
-  checkedResult "baPlusCaa" A.raw.dtype A.device (← baPlusCaaImpl A.raw alpha beta)
+def baPlusCaa {σ : StaticSpec} [DType.RealFloating σ.dtype] (A : Tensor σ) (alpha beta : Float) : IO (Tensor σ) := do
+  pure (Tensor.ofRaw! "baPlusCaa" (← baPlusCaaImpl A.raw alpha beta))
 
 /-- Single Newton-Schulz iteration step, spec-preserving. -/
-def newtonSchulzStep {σ : StaticSpec} (X : Tensor σ) (a b c : Float) : IO (Tensor σ) := do
-  checkedResult "newtonSchulzStep" X.raw.dtype X.device (← newtonSchulzStepImpl X.raw a b c)
+def newtonSchulzStep {σ : StaticSpec} [DType.RealFloating σ.dtype] (X : Tensor σ) (a b c : Float) : IO (Tensor σ) := do
+  pure (Tensor.ofRaw! "newtonSchulzStep" (← newtonSchulzStepImpl X.raw a b c))
 
 /-- Polar Express orthogonalization via Newton-Schulz iterations,
     spec-preserving. -/
-def polarExpress {σ : StaticSpec} (G : Tensor σ) (numIters : Nat := 5) : IO (Tensor σ) := do
-  checkedResult "polarExpress" G.raw.dtype G.device (← polarExpressImpl G.raw numIters)
+def polarExpress {σ : StaticSpec} [DType.RealFloating σ.dtype] (G : Tensor σ) (numIters : Nat := 5) : IO (Tensor σ) := do
+  pure (Tensor.ofRaw! "polarExpress" (← polarExpressImpl G.raw numIters))
 
 /-- Muon orthogonalization runs and returns BF16, including for Float32 inputs.
     Shape and placement are preserved; the output dtype is explicit. -/
-def muonOrthogonalize {σ : StaticSpec} (G : Tensor σ) (numIters : Nat := 5) :
+def muonOrthogonalize {σ : StaticSpec} [DType.RealFloating σ.dtype] (G : Tensor σ) (numIters : Nat := 5) :
     IO (Tensor (σ.withDType .BFloat16)) := do
-  checkedResult "muonOrthogonalize" .BFloat16 G.device (← muonOrthogonalizeImpl G.raw numIters)
+  pure (Tensor.ofRaw! "muonOrthogonalize" (← muonOrthogonalizeImpl G.raw numIters))
 
 /-- Cautious weight decay update, spec-preserving. -/
-def cautiousUpdate {σ : StaticSpec} (param update : Tensor σ) (lr wd : Float) : IO (Tensor σ) := do
-  checkedResult "cautiousUpdate" param.raw.dtype param.device (← cautiousUpdateImpl param.raw update.raw lr wd)
+def cautiousUpdate {σ : StaticSpec} [DType.RealFloating σ.dtype] (param update : Tensor σ) (lr wd : Float) : IO (Tensor σ) := do
+  pure (Tensor.ofRaw! "cautiousUpdate" (← cautiousUpdateImpl param.raw update.raw lr wd))
 
 /-! ## Helper Functions -/
 

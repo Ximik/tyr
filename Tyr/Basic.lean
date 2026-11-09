@@ -90,7 +90,7 @@ private opaque TensorCarrier (_σ : StaticSpec) : NonemptyType :=
   ⟨RawTensor, inferInstance⟩
 
 /-- Tensor indexed by a static specification. Safe code admits native handles
-through `Tensor.ofRaw`; the carrier has no constructor or structural recursor.
+through `Tensor.ofRaw!`; the carrier has no constructor or structural recursor.
 At runtime it is the native handle itself, with no additional allocation. -/
 def Tensor (σ : StaticSpec) : Type := (TensorCarrier σ).type
 
@@ -128,16 +128,18 @@ private def checkSpec (σ : StaticSpec) (raw : RawTensor) : Except String Unit :
 def validate {σ : StaticSpec} (tensor : Tensor σ) : Except String Unit :=
   checkSpec σ tensor.raw
 
-private unsafe def ofRawImpl {σ : StaticSpec} (raw : RawTensor) :
-    Except String (Tensor σ) := do
-  checkSpec σ raw
-  pure (unsafeCast raw)
+private unsafe def ofRawImpl {σ : StaticSpec} (operation : @& String) (raw : RawTensor) :
+    Tensor σ :=
+  match checkSpec σ raw with
+  | .ok () => unsafeCast raw
+  | .error message => nativeInvariantFailure s!"Tensor.{operation}: {message}"
 
-/-- The raw-to-indexed boundary. Construct a tensor only after validating every
-claim in the destination specification against native metadata. -/
+/-- The raw-to-indexed boundary for native results. Shape, dtype and placement
+are compared with `σ`; a result that contradicts its type is a binding bug and
+aborts with the operation name. -/
 @[implemented_by ofRawImpl]
-opaque ofRaw {σ : StaticSpec} (raw : RawTensor) : Except String (Tensor σ) :=
-  .error "Tensor.ofRaw requires its checked runtime implementation"
+opaque ofRaw! {σ : StaticSpec} (operation : @& String) (raw : RawTensor) : Tensor σ :=
+  Classical.choice inferInstance
 
 private unsafe def zerosForImpl (σ : StaticSpec)
     [DType.ConstantSupported σ.dtype σ.device] : Tensor σ :=

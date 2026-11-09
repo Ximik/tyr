@@ -181,7 +181,7 @@ def applyVarianceReduction {σ : StaticSpec} [DType.RealFloating σ.dtype] (grad
 
     This prevents weight decay from fighting the gradient.
 -/
-def applyCautiousWeightDecay {σ : StaticSpec} (param grad : Tensor σ) (wd : Float) :
+def applyCautiousWeightDecay {σ : StaticSpec} [DType.RealFloating σ.dtype] (param grad : Tensor σ) (wd : Float) :
     IO (Tensor σ) := do
   if wd == 0.0 then
     return grad

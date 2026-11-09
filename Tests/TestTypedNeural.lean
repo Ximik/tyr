@@ -8,9 +8,7 @@ open torch
   let σ : StaticSpec := ⟨#[1, 1, 2, 2], .Float64, .CPU⟩
   let q := Tensor.zerosFor σ
   let values := ((Tensor.fromFloatArray #[2, 4, 6, 8]).reshape #[1, 1, 2, 2]).castDType .Float64
-  let v : Tensor σ ← match Tensor.ofRaw values.raw with
-    | .ok t => pure t
-    | .error message => throw <| IO.userError message
+  let v : Tensor σ := values
   let full := Tensor.attention q q v false
   let causal := Tensor.attention q q v true
   for output in #[full, causal] do

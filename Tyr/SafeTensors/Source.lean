@@ -45,22 +45,18 @@ private def fail {α : Type} (src : Source) (name message : String) : IO α :=
   throw <| IO.userError s!"SafeTensors tensor '{name}' in {src.path}: {message}"
 
 private def read (src : Source) (name : String) (handle : SafeTensorsHandle) (entry : Entry)
-    (shape : Shape) (device : Device) : IO (SomeDTypeTensor shape device) := do
+    (shape : Shape) (device : Device) : IO (Tensor ⟨shape, entry.dtype, device⟩) := do
   if entry.shape != shape then
     src.fail name s!"Expected shape {shape}, got {entry.shape}"
   let raw ← RawTensor.safeTensorsRead handle.path (handle.dataOffset + entry.dataStart)
     (entry.dataEnd - entry.dataStart) entry.dtype entry.shape
-  let moved ← RawTensor.convertIO shape raw device none
-  match Tensor.ofRaw (σ := ⟨shape, entry.dtype, device⟩) moved with
-  | .ok tensor => return ⟨entry.dtype, tensor⟩
-  | .error message => src.fail name message
+  return Tensor.ofRaw! "SafeTensors.read" (← RawTensor.convertIO shape raw device none)
 
 /-- Load `name` with its stored dtype; `none` only when the checkpoint has no such tensor. -/
 def load? (src : Source) (name : String) (shape : Shape) (device : Device := .CPU) :
-    IO (Option (SomeDTypeTensor shape device)) :=
-  match src.entry? name with
-  | none => return none
-  | some (handle, entry) => some <$> src.read name handle entry shape device
+    IO (Option (SomeDTypeTensor shape device)) := do
+  let some (handle, entry) := src.entry? name | return none
+  return some ⟨entry.dtype, ← src.read name handle entry shape device⟩
 
 def load (src : Source) (name : String) (shape : Shape) (device : Device := .CPU) :
     IO (SomeDTypeTensor shape device) := do
@@ -71,11 +67,9 @@ def load (src : Source) (name : String) (shape : Shape) (device : Device := .CPU
 def loadAs? (src : Source) (name : String) (spec : TensorSpec) (device : Device := .CPU) :
     IO (Option (Tensor ⟨spec.shape, spec.dtype, device⟩)) := do
   let some (handle, entry) := src.entry? name | return none
-  if entry.dtype != spec.dtype then
-    src.fail name s!"Expected dtype {spec.dtype}, got {entry.dtype}"
-  match (← src.read name handle entry spec.shape device).atDType? spec.dtype with
-  | .ok tensor => return some tensor
-  | .error message => src.fail name message
+  if h : entry.dtype = spec.dtype then
+    return some (h ▸ (← src.read name handle entry spec.shape device))
+  src.fail name s!"Expected dtype {spec.dtype}, got {entry.dtype}"
 
 def loadAs (src : Source) (name : String) (spec : TensorSpec) (device : Device := .CPU) :
     IO (Tensor ⟨spec.shape, spec.dtype, device⟩) := do

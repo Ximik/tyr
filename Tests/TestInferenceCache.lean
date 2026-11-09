@@ -20,11 +20,6 @@ private def layer {n b len h d : Nat} (cache : Cache n b len h d) (i : Nat)
 private def token (x : Float) : Tensor { shape := #[1, 1, 1, 2], dtype := .BFloat16, device := .CPU } :=
   (Tensor.full #[1, 1, 1, 2] x).toBFloat16
 
-private def admit {σ : StaticSpec} (raw : RawTensor) : IO (Tensor σ) :=
-  match Tensor.ofRaw raw with
-  | .ok tensor => pure tensor
-  | .error message => throw (IO.userError message)
-
 private def rejected (action : IO α) (label : String) : IO Unit := do
   let failed ← try let _ ← action; pure false catch _ => pure true
   LeanTest.assertTrue failed label
@@ -36,13 +31,6 @@ private def rejected (action : IO α) (label : String) : IO Unit := do
   LeanTest.assertEqual (← src.toFloatArray) #[3, 3]
     "Writing an inference clone must not mutate its source"
   LeanTest.assertEqual (← copy.toFloatArray) #[7, 7]
-  LeanTest.assertTrue ((Tensor.ofRaw (σ := ⟨#[3], .Float32, .CPU⟩) src.raw).toOption.isNone)
-    "A false shape claim is rejected before inference clone admission"
-  LeanTest.assertTrue ((Tensor.ofRaw (σ := ⟨#[2], .Int64, .CPU⟩) src.raw).toOption.isNone)
-    "A false dtype claim is rejected before inference clone admission"
-  for device in ← Tests.acceleratorDevices do
-    LeanTest.assertTrue ((Tensor.ofRaw (σ := ⟨#[2], .Float32, device⟩) src.raw).toOption.isNone)
-      "A false device claim is rejected before inference clone admission"
 
 @[test] def testInferenceCacheAllocationsAreIndependent : IO Unit := do
   let initial ← Cache.init 2 1 4 1 2
@@ -71,20 +59,6 @@ private def rejected (action : IO α) (label : String) : IO Unit := do
 @[test] def testInferenceCacheRejectsInvalidWritesBeforeMutation : IO Unit := do
   rejected (Cache.init 1 1 0 1 2) "Zero capacity is rejected"
   let cache ← Cache.init 1 1 1 1 2
-  let wrongShape := (Tensor.full #[1, 1, 1, 3] 9).toBFloat16.raw
-  let rejectedPair := do
-    let value ← admit (σ := { shape := #[1, 1, 1, 2], dtype := .BFloat16, device := .CPU }) wrongShape
-    cache.appendLayer 0 (token 3) value
-  rejected rejectedPair "Invalid V shape is rejected before writing K"
-  LeanTest.assertEqual (← values (← layer cache 0).keys) #[0, 0] "Rejected pair leaves K unchanged"
-  let rejectedQuery := do
-    let query ← admit (σ := { shape := #[1, 1, 1, 2], dtype := .BFloat16, device := .CPU }) wrongShape
-    cache.attendLayer 0 query (token 3) (token 7)
-  rejected rejectedQuery "Invalid query metadata is rejected before either write"
-  LeanTest.assertEqual (← values (← layer cache 0).keys) #[0, 0]
-    "Rejected query leaves K unchanged"
-  LeanTest.assertEqual (← values (← layer cache 0).values) #[0, 0]
-    "Rejected query leaves V unchanged"
   rejected (cache.appendLayer 1 (token 3) (token 7)) "Invalid layer is rejected"
   rejected ((← layer cache 0).attentionView 2) "Views cannot exceed capacity"
   let cache ← cache.appendLayer 0 (token 3) (token 7)

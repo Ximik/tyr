@@ -50,7 +50,7 @@ structure Config where
 
     Returns: Orthogonalized gradient of the same spec
 -/
-def apply {σ : StaticSpec} (G : Tensor σ) (cfg : Config := {}) : IO (Tensor σ) := do
+def apply {σ : StaticSpec} [DType.RealFloating σ.dtype] (G : Tensor σ) (cfg : Config := {}) : IO (Tensor σ) := do
   dist.polarExpress G cfg.numIters
 
 /-- Muon-style orthogonalization that handles tall vs wide matrices.
@@ -61,7 +61,7 @@ def apply {σ : StaticSpec} (G : Tensor σ) (cfg : Config := {}) : IO (Tensor σ
 
     This ensures the orthogonalization is always applied to the "short" dimension.
 -/
-def muonOrthogonalize {σ : StaticSpec} (G : Tensor σ) (numIters : Nat := 5) :
+def muonOrthogonalize {σ : StaticSpec} [DType.RealFloating σ.dtype] (G : Tensor σ) (numIters : Nat := 5) :
     IO (Tensor (σ.withDType .BFloat16)) := do
   dist.muonOrthogonalize G numIters
 
@@ -76,7 +76,7 @@ def muonOrthogonalize {σ : StaticSpec} (G : Tensor σ) (numIters : Nat := 5) :
 
     Returns: Array of orthogonalized gradients
 -/
-def applyBatch {σ : StaticSpec} (grads : Array (Tensor σ)) (cfg : Config := {}) :
+def applyBatch {σ : StaticSpec} [DType.RealFloating σ.dtype] (grads : Array (Tensor σ)) (cfg : Config := {}) :
     IO (Array (Tensor σ)) := do
   grads.mapM (apply · cfg)
 
@@ -85,7 +85,7 @@ def applyBatch {σ : StaticSpec} (grads : Array (Tensor σ)) (cfg : Config := {}
     Note: This returns a new tensor but can be assigned back to the same variable.
     The original tensor is not modified in-place at the memory level.
 -/
-def applyInPlace {σ : StaticSpec} (G : Tensor σ) (cfg : Config := {}) : IO (Tensor σ) := do
+def applyInPlace {σ : StaticSpec} [DType.RealFloating σ.dtype] (G : Tensor σ) (cfg : Config := {}) : IO (Tensor σ) := do
   apply G cfg
 
 /-- Compute the XXT product efficiently.
@@ -93,7 +93,7 @@ def applyInPlace {σ : StaticSpec} (G : Tensor σ) (cfg : Config := {}) : IO (Te
     This is used in Newton-Schulz iterations: C = A @ A.T
     Optimized for symmetric output.
 -/
-def computeXXT {m n : Nat} {d : DType} {dev : Device}
+def computeXXT {m n : Nat} {d : DType} {dev : Device} [DType.RealFloating d]
     (A : Tensor ⟨#[m, n], d, dev⟩) : IO (Tensor ⟨#[m, m], d, dev⟩) := do
   dist.xxt A
 
@@ -101,7 +101,7 @@ def computeXXT {m n : Nat} {d : DType} {dev : Device}
 
     More efficient than separate matmul and add operations.
 -/
-def fusedBaPlusCaa {σ : StaticSpec} (A : Tensor σ) (alpha beta : Float) : IO (Tensor σ) := do
+def fusedBaPlusCaa {σ : StaticSpec} [DType.RealFloating σ.dtype] (A : Tensor σ) (alpha beta : Float) : IO (Tensor σ) := do
   dist.baPlusCaa A alpha beta
 
 end torch.Optim.PolarExpress

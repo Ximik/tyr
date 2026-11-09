@@ -43,8 +43,8 @@ be used where an acquired device is required.
 `Tensor σ` uses a private opaque carrier indexed by `StaticSpec`. It has no
 public constructor or structural recursor, and different indices are not
 definitionally interchangeable. `Tensor.raw` exposes the unindexed handle;
-`Tensor.ofRaw` admits it only after checking native shape, dtype, and concrete
-device. Every index is required and exact. Runtime-selected dtypes and devices remain in dependent
+`Tensor.ofRaw!` admits it only after checking native shape, dtype, and concrete
+device, and aborts on a mismatch. Every index is required and exact. Runtime-selected dtypes and devices remain in dependent
 packages rather than weakening the tensor contract. `zerosFor` accepts a
 specification with `DType.ConstantSupported` evidence and supplies the native
 zero factory used by the equally constrained `Inhabited` instance.
@@ -157,9 +157,8 @@ The reuse path also checks storage and version ownership and excludes views,
 autograd metadata, weak observers, foreign storage, and accelerator storage.
 Only ordinary CPU allocations satisfying these checks are reused. Other inputs
 are copied before writing. Every value update returns its resulting tensor;
-callers must retain that result. The typed adapter captures dtype and device
-before the call and validates the result with `Tensor.checkedUpdate?`, without
-keeping the original tensor as a fallback.
+callers must retain that result. The typed adapter admits the result with
+`Tensor.ofRaw!`, without keeping the original tensor as a fallback.
 
 Gradient accumulation remains explicit mutable state: backward, clipping, and
 `zeroGrad` are IO operations, and `gradOf` returns an independent snapshot in IO.

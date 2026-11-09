@@ -28,10 +28,7 @@ open torch.Log
 private def loadWeight (path : String) (names : Array String) (shape : Shape)
     (device : Device := .CPU) : IO (Tensor ⟨shape, dtype, device⟩) := do
   let some name := names[0]? | throw (IO.userError "Empty weight name")
-  let packed ← (← safetensors.Source.open path).load name shape device
-  match Tensor.ofRaw (σ := ⟨shape, dtype, device⟩) packed.2.raw with
-  | .ok tensor => pure tensor
-  | .error message => throw <| IO.userError s!"VAE tensor '{name}': {message}"
+  (← safetensors.Source.open path).loadAs name { shape, dtype } device
 
 /-- Load GroupNorm parameters -/
 def loadGroupNorm [DType.RealFloating dtype] (path : String) (name : String) (num_groups channels : Nat)

@@ -65,9 +65,9 @@ def packageWeights (tensor : FloatWeights) : SomeDTypeTensor #[2, 3] .CPU :=
 ```
 
 `packDType` packages a statically known index.
-`tensor.reifyDType` reads the native dtype and returns a checked exact package;
-`SomeDTypeTensor.ofRaw` validates the
-requested shape and device at a native boundary. These operations retain values
+`tensor.reifyDType` reads the native dtype and returns an exact package;
+`SomeDTypeTensor.ofRaw!` admits a native result whose dtype is chosen at
+runtime, checking the requested shape and device. These operations retain values
 and autograd identity without casting or cloning the tensor. The existential
 itself is an ordinary Lean wrapper.
 
@@ -391,24 +391,25 @@ reproducibility across devices or backend algorithms.
 import Tyr.Typed
 open torch
 
-def checkRaw (raw : RawTensor) : Except String (Tensor { shape := #[2, 3], dtype := .Float32, device := .CPU }) :=
-  Tensor.ofRaw raw
+def admitRaw (raw : RawTensor) : Tensor { shape := #[2, 3], dtype := .Float32, device := .CPU } :=
+  Tensor.ofRaw! "example" raw
 ```
 
-`Tensor.ofRaw` checks all claims in the destination index. `Tensor.ofTensor` and
-`ofTensor?` check a requested shape and dtype and index the result by
-`raw.device`. `Tensor.validate` audits an existing indexed
-value against its current native metadata.
+`Tensor.ofRaw!` admits a native result: it compares the handle's shape, dtype
+and device with the destination index and aborts with the operation name on a
+mismatch, which can only come from a wrong binding or shape formula. Data from
+outside the program is validated on its own metadata where it enters, with
+recoverable errors: SafeTensors header shapes and dtypes, configuration JSON,
+loaded files' dtype and device. `Tensor.ofTensor` and `ofTensor?` check a
+requested shape and dtype and index the result by `raw.device`.
+`Tensor.validate` audits an existing indexed value against its current native
+metadata.
 
 There is no public unchecked raw constructor or implicit coercion to
 `RawTensor`. The opaque carrier prevents anonymous construction, structural
 elimination, and record updates from replacing a checked handle. Native adapters use explicit
-`.raw` access and validate returned handles. `checkedReplacement?` additionally
-checks that actual dtype and device are unchanged, including when the exact
-indices were selected at runtime. Its pure `checkedReplacement` adapter retains
-the original tensor as Lean's panic fallback. The separate `checkedUpdate`
-adapter aborts with a diagnostic on failure and retains no original tensor or
-default allocation.
+`.raw` access and admit returned handles with `ofRaw!`, which retains no
+original tensor or default allocation.
 The native `zerosFor` factory bootstraps pure defaults from a requested spec
 with constant-support evidence; it accepts no foreign handle and trusts native
 allocation/casting. Native
@@ -417,8 +418,9 @@ and the generated FFI header.
 Pure factory calls may share allocations; distinct storage requires an effectful
 allocation boundary such as `data.cloneInferenceIO`.
 Model and example code should compose typed operations instead of rebuilding
-indexed tensors from their raw handles. Raw input adapters should use `ofRaw`;
-IO APIs can turn its error into a contextual `IO.userError`.
+indexed tensors from their raw handles. Input adapters check the input's
+metadata explicitly and report a mismatch as a contextual `IO.userError` before
+admitting the tensor.
 
 ## Runtime-dependent shapes
 

@@ -7,9 +7,7 @@ namespace torch.kittentts
 variable {device : Device}
 
 private def checked {s : Shape} (raw : RawTensor) : Tensor { shape := s, dtype := .Float32, device := device } :=
-  match Tensor.ofRaw raw with
-  | .ok result => result
-  | .error message => nativeInvariantFailure s!"KittenTTS tensor boundary: {message}"
+  (Tensor.ofRaw! "checked" raw)
 
 def catTo {s t : Shape} {d : DType} (x : Tensor { shape := s, dtype := d, device := device }) (y : Tensor { shape := t, dtype := d, device := device }) (dim : Nat)
     (h : TensorSpec.catCompatible s t dim = true := by cat_shape) :

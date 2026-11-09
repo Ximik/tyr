@@ -20,19 +20,13 @@ def copySliceIO {σ σsrc : StaticSpec} (dst : Tensor σ) (dim start : Nat)
       first | exact of_decide_eq_true rfl | (simp <;> fail "incompatible slice copy shapes"))
     (_bound : start + σsrc.shape.getD dim 0 ≤ σ.shape.getD dim 0 := by
       first | exact of_decide_eq_true rfl | omega | (simp <;> omega)) : IO (Tensor σ) := do
-  let dtype := dst.raw.dtype
-  let device := dst.raw.device
   let raw ← copySliceIORaw dst.raw dim start src.raw
-  match Tensor.checkedUpdate? dtype device raw with
-  | .ok result => pure result
-  | .error message => throw (IO.userError s!"copySliceIO: {message}")
+  pure (Tensor.ofRaw! "copySliceIO" raw)
 
 /-- Allocate an independent inference tensor copy, retaining the full static
 spec. The IO effect prevents Lean from merging identical allocations when
 distinct mutable buffers are required. -/
 def cloneInferenceIO {σ : StaticSpec} (src : @& Tensor σ) : IO (Tensor σ) := do
-  match Tensor.ofRaw (← cloneInferenceIORaw src.raw) with
-  | .ok tensor => pure tensor
-  | .error message => throw (IO.userError s!"cloneInferenceIO: {message}")
+  pure (Tensor.ofRaw! "cloneInferenceIO" (← cloneInferenceIORaw src.raw))
 
 end torch.data

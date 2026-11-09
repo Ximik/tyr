@@ -42,21 +42,11 @@ example (t : Tensor ⟨#[2, 2], .Float32, .CPU⟩) : True := by
   trivial
 
 @[test]
-def testRawAdmissionRejectsFalseClaims : IO Unit := do
+def testOfTensorAdmitsOnlyTheExactShapeAndDType : IO Unit := do
   let raw := (Tensor.full #[2, 3] 7).raw
-  let rejected : Array StaticSpec := #[
-    { shape := #[6], dtype := .Float32, device := .CPU },
-    { shape := #[2, 3], dtype := .Int64, device := .CPU }]
-  for device in ← Tests.acceleratorDevices do
-    LeanTest.assertTrue (Tensor.ofRaw (σ := ⟨raw.runtimeShape, raw.dtype, device⟩) raw).toOption.isNone
-      "A CPU handle cannot be admitted at an acquired accelerator placement"
-  for spec in rejected do
-    LeanTest.assertTrue ((Tensor.ofRaw (σ := spec) raw).toOption.isNone)
-      s!"Raw admission must reject {reprStr spec}"
-  match Tensor.ofRaw (σ := { shape := #[2, 3], dtype := .Float32, device := .CPU }) raw with
+  match Tensor.ofTensor (shape := #[2, 3]) .Float32 raw with
   | .error message => LeanTest.fail message
-  | .ok tensor =>
-      LeanTest.assertEqual (← tensor.toFloatArray) #[7, 7, 7, 7, 7, 7]
+  | .ok tensor => LeanTest.assertEqual (← tensor.toFloatArray) #[7, 7, 7, 7, 7, 7]
   LeanTest.assertTrue ((Tensor.ofTensor (shape := #[6]) .Float32 raw).toOption.isNone)
     "Checked raw conversion must not reshape equal-size storage"
   LeanTest.assertTrue ((Tensor.ofTensor (shape := #[2, 3]) .Int64 raw).toOption.isNone)
@@ -68,16 +58,9 @@ example (_destination : Tensor ⟨#[2], .Int64, .CPU⟩)
   trivial
 
 @[test]
-def testErasedDTypeCopyRejectsBeforeMutation : IO Unit := do
+def testCopyIntoAfterExplicitConversion : IO Unit := do
   let destination := Tensor.fullInt #[2] 9
   let source := Tensor.fromFloatArray #[1.75, 2.25]
-  match Tensor.ofRaw (σ := destination.staticSpec) source.raw with
-  | .error error =>
-    LeanTest.assertTrue (error.containsSubstr "dtype")
-      "Copy rejection must explain the dtype mismatch"
-  | .ok _ => LeanTest.fail "Raw admission must reject an implicit converting copy"
-  LeanTest.assertEqual (← destination.toFloatArray) #[9, 9]
-    "Rejected copy must leave the destination unchanged"
   let destination ← Tensor.copyInto destination source.toInt64
   LeanTest.assertEqual (← destination.toFloatArray) #[1, 2]
     "Explicit native conversion remains available"
