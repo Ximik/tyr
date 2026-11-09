@@ -25,7 +25,7 @@ def floatDynamic {s : Shape} {d : DType} {dev : Device} (x : Tensor { shape := s
 def bfloatDynamic {s : Shape} {d : DType} {dev : Device} (x : Tensor { shape := s, dtype := d, device := dev }) : Tensor { shape := s, dtype := .BFloat16, device := dev } := x.toBFloat16
 
 def logDynamic {s : Shape} {dev : Device} (x : Tensor { shape := s, dtype, device := dev }) : Tensor { shape := s, dtype, device := dev } := Tensor.log x
-def softplusDynamic {s : Shape} {dev : Device} (x : Tensor { shape := s, dtype, device := dev }) : Tensor { shape := s, dtype, device := dev } := x.checkedReplacement (RawTensor.branchingSoftplus x.raw)
+def softplusDynamic {s : Shape} {dev : Device} (x : Tensor { shape := s, dtype, device := dev }) : Tensor { shape := s, dtype, device := dev } := Tensor.checkedResult "softplusDynamic" (Tensor.ofRaw (RawTensor.branchingSoftplus x.raw))
 def powDynamic {s : Shape} {dev : Device} (x : Tensor { shape := s, dtype, device := dev }) (n : Float) : Tensor { shape := s, dtype, device := dev } := Tensor.pow x n
 
 def sliceTyped {s out : Shape} {d : DType} {dev : Device} (x : Tensor { shape := s, dtype := d, device := dev }) (dim : Nat) (start len : Nat) : Tensor { shape := out, dtype := d, device := dev } :=
@@ -84,7 +84,7 @@ def transposeAttention {b s h d : Nat} {dev : Device} (x : Tensor { dtype := dty
 
 def attentionBias! {biasDType : DType} {b h s d : Nat} {dev : Device} (q k v : Tensor { dtype := dtype, shape := #[b, h, s, d], device := dev })
     (bias : Tensor { dtype := biasDType, shape := #[b, h, s, s], device := dev }) : Tensor { dtype := dtype, shape := #[b, h, s, d], device := dev } :=
-  q.checkedReplacement (RawTensor.branchingAttentionBias! q.raw k.raw v.raw bias.raw false)
+  Tensor.checkedResult "attentionBias" (Tensor.ofRaw (RawTensor.branchingAttentionBias! q.raw k.raw v.raw bias.raw false))
 
 def attentionBias {biasDType : DType} {b h s d : Nat} {dev : Device} (q k v : Tensor { dtype := dtype, shape := #[b, h, s, d], device := dev })
     (bias : Tensor { dtype := biasDType, shape := #[b, h, s, s], device := dev }) : Tensor { dtype := dtype, shape := #[b, h, s, d], device := dev } :=
@@ -97,7 +97,7 @@ def attentionBiasIO {biasDType : DType} {b h s d : Nat} {dev : Device} (q k v : 
   let effective ← IO.ofExcept (Tensor.attentionDropout? dropout training)
   let raw ← RawTensor.branchingAttentionBiasIO q.raw k.raw v.raw bias.raw
     effective causal
-  IO.ofExcept (q.checkedReplacement? raw)
+  IO.ofExcept (Tensor.ofRaw raw)
 
 def fullDynamic (shape : Shape) (value : Float) (requiresGrad : Bool := false) (device : Device := .CPU) (noGrad : requiresGrad = false := by decide) (dtype : DType := .Float32)
     [DType.ConstantSupported dtype device] [DType.RealFloating dtype] : Tensor { dtype := dtype, shape := shape, device } :=

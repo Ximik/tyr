@@ -208,24 +208,6 @@ def checkedUpdate {σ : StaticSpec} (expectedDType : DType) (expectedDevice : De
   | .ok tensor => tensor
   | .error message => nativeInvariantFailure s!"Tensor update: {message}"
 
-/-- Check a replacement against both the static index and the original native
-dtype/device. Dynamic index components must not hide a metadata change in an
-operation that promises to preserve the tensor's specification. -/
-def checkedReplacement? {σ : StaticSpec} (original : Tensor σ) (raw : RawTensor) :
-    Except String (Tensor σ) := do
-  TensorSpec.checkDType original.raw.dtype raw.dtype
-  original.raw.device.check raw.device
-  ofRaw raw
-
-/-- Native adapter for operations whose output must preserve an existing
-specification. A metadata mismatch is a runtime error; the original tensor is
-the well-typed fallback used by Lean's panic mechanism. -/
-def checkedReplacement {σ : StaticSpec} (original : Tensor σ) (raw : RawTensor) : Tensor σ :=
-  letI : Inhabited (Tensor σ) := ⟨original⟩
-  match original.checkedReplacement? raw with
-  | .ok tensor => tensor
-  | .error message => panic! s!"Tensor replacement: {message}"
-
 def ofTensor? {shape : Shape} (dtype : DType) (raw : RawTensor) :
     Option (Tensor { shape, dtype, device := raw.device }) :=
   if raw.runtimeShape == shape && raw.dtype == dtype then

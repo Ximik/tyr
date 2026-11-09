@@ -31,7 +31,7 @@ def copySliceIO {σ σsrc : StaticSpec} (dst : Tensor σ) (dim start : Nat)
 spec. The IO effect prevents Lean from merging identical allocations when
 distinct mutable buffers are required. -/
 def cloneInferenceIO {σ : StaticSpec} (src : @& Tensor σ) : IO (Tensor σ) := do
-  match src.checkedReplacement? (← cloneInferenceIORaw src.raw) with
+  match Tensor.ofRaw (← cloneInferenceIORaw src.raw) with
   | .ok tensor => pure tensor
   | .error message => throw (IO.userError s!"cloneInferenceIO: {message}")
 

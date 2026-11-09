@@ -59,10 +59,10 @@ def fullInt (shape : Shape) (value : Int64) : Tensor { shape, dtype := .Int64, d
   checkedResult "fullInt" (Tensor.ofRaw (RawTensor.fullInt shape value))
 
 def zerosLike {σ : StaticSpec} (t : Tensor σ) : Tensor σ :=
-  t.checkedReplacement (RawTensor.zerosLike t.raw)
+  Tensor.checkedResult "zerosLike" (Tensor.ofRaw (RawTensor.zerosLike t.raw))
 
 def onesLike {σ : StaticSpec} (t : Tensor σ) : Tensor σ :=
-  t.checkedReplacement (RawTensor.onesLike t.raw)
+  Tensor.checkedResult "onesLike" (Tensor.ofRaw (RawTensor.onesLike t.raw))
 
 def randn (shape : Shape) (requiresGrad : Bool := false)
     (device : Device := Device.CPU) : IO (Tensor { shape, dtype := .Float32, device }) := do
@@ -77,7 +77,7 @@ The result starts without gradient tracking, matching the random factories. -/
 def uniformLike {σ : StaticSpec} (reference : Tensor σ) (lo : Float := 0.0)
     (hi : Float := 1.0) : IO (Tensor σ) := do
   let raw ← RawTensor.uniformLike reference.shape reference.raw lo hi
-  match reference.checkedReplacement? raw with
+  match Tensor.ofRaw raw with
   | .ok result => pure result
   | .error message => throw (IO.userError s!"uniformLike: {message}")
 
@@ -166,7 +166,7 @@ def maxRowNorm {m n : Nat} {d : DType} {dev : Device} [DType.FloatingOrComplex d
 def dropout {σ : StaticSpec} (t : Tensor σ) (p : Float) (training : Bool := true) :
     IO (Tensor σ) := do
   let raw ← RawTensor.dropout t.raw p training
-  match t.checkedReplacement? raw with
+  match Tensor.ofRaw raw with
   | .ok result => pure result
   | .error message => throw (IO.userError s!"Tensor.dropout: {message}")
 
@@ -186,7 +186,7 @@ def embedding1d {seq vocab embed : Nat} {d : DType} {dev : Device}
 /-- Matrix exponential with a checked dtype/device-preserving result. -/
 def matrixExp {n : Nat} {d : DType} {dev : Device}
     (t : Tensor ⟨#[n, n], d, dev⟩) : Tensor ⟨#[n, n], d, dev⟩ :=
-  t.checkedReplacement (RawTensor.matrixExp t.raw)
+  Tensor.checkedResult "matrixExp" (Tensor.ofRaw (RawTensor.matrixExp t.raw))
 
 /-- Checked real matrix logarithm. Dynamic dtypes are admitted only when their
 actual metadata is a standard real floating dtype. Native failures, non-real
@@ -197,7 +197,7 @@ def matrixLog? {n : Nat} {d : DType} {dev : Device}
     (t : Tensor ⟨#[n, n], d, dev⟩) : Except String (Tensor ⟨#[n, n], d, dev⟩) := do
   if !t.raw.dtype.isRealFloating then
     throw s!"matrixLog requires a standard real floating dtype, got {t.raw.dtype}"
-  t.checkedReplacement? (← RawTensor.matrixLogChecked t.raw)
+  Tensor.ofRaw (← RawTensor.matrixLogChecked t.raw)
 
 /-- Real matrix logarithm. Its static domain excludes complex and shell types;
 use `matrixLog?` for runtime-selected dtypes or recoverable numerical errors. -/
@@ -213,7 +213,7 @@ def matrixLog {n : Nat} {d : DType} {dev : Device}
 /-- Inverse of a square matrix. Native code reports singular input errors. -/
 def inv {n : Nat} {d : DType} {dev : Device}
     (t : Tensor ⟨#[n, n], d, dev⟩) : Tensor ⟨#[n, n], d, dev⟩ :=
-  t.checkedReplacement (RawTensor.inv t.raw)
+  Tensor.checkedResult "inv" (Tensor.ofRaw (RawTensor.inv t.raw))
 
 /-- Float32 identity matrix on CPU. -/
 def eye (n : Nat) : Tensor ⟨#[n, n], .Float32, .CPU⟩ :=
@@ -856,7 +856,7 @@ def grad {σ τ : StaticSpec} (y : Tensor τ) (x : Tensor σ) (dy : Tensor τ)
     (retainGraph : Option Bool := none) (createGraph : Bool := false) : IO (Tensor σ) := do
   let raw ← RawTensor.grad y.raw x.raw dy.raw
     (retainGraph.getD createGraph) createGraph
-  match x.checkedReplacement? raw with
+  match Tensor.ofRaw raw with
   | .ok gradient => pure gradient
   | .error message => throw (IO.userError s!"Tensor.grad: {message}")
 
@@ -907,11 +907,11 @@ def argmax {s : Shape} {d : DType} {dev : Device} [DType.Ordered d]
 
 /-- Top-k filter over logits (entries outside the top k become -inf), spec-preserving. -/
 def topKFilter {σ : StaticSpec} (logits : Tensor σ) (k : Nat) : Tensor σ :=
-  logits.checkedReplacement (RawTensor.topKFilter logits.raw k)
+  Tensor.checkedResult "topKFilter" (Tensor.ofRaw (RawTensor.topKFilter logits.raw k))
 
 /-- Top-p (nucleus) filter over logits, spec-preserving. -/
 def topPFilter {σ : StaticSpec} (logits : Tensor σ) (p : Float) : Tensor σ :=
-  logits.checkedReplacement (RawTensor.topPFilter logits.raw p)
+  Tensor.checkedResult "topPFilter" (Tensor.ofRaw (RawTensor.topPFilter logits.raw p))
 
 /-- Elementwise equality with a scalar: Bool tensor of the same shape. -/
 def eqScalar {s : Shape} {d : DType} {dev : Device} (t : Tensor ⟨s, d, dev⟩) (scalar : Int64) :
@@ -971,11 +971,11 @@ def whereSelect {s : Shape} {l r result : DType} {dev : Device}
 /-- Elementwise logical negation of a Bool tensor. -/
 def logicalNot {s : Shape} {dev : Device} (t : Tensor ⟨s, .Bool, dev⟩) :
     Tensor ⟨s, .Bool, dev⟩ :=
-  t.checkedReplacement (RawTensor.logicalNot t.raw)
+  Tensor.checkedResult "logicalNot" (Tensor.ofRaw (RawTensor.logicalNot t.raw))
 
 def logicalAnd! {s : Shape} {dev : Device} (a b : Tensor ⟨s, .Bool, dev⟩) :
     Tensor ⟨s, .Bool, dev⟩ :=
-  a.checkedReplacement (RawTensor.logicalAnd! a.raw b.raw)
+  Tensor.checkedResult "logicalAnd" (Tensor.ofRaw (RawTensor.logicalAnd! a.raw b.raw))
 
 /-- Elementwise logical conjunction of two Bool tensors. -/
 def logicalAnd {s : Shape} {dev : Device} (a b : Tensor ⟨s, .Bool, dev⟩) :
@@ -1017,7 +1017,7 @@ def scatter2d {batch seq k : Nat} {d : DType} {dev : Device}
     (_axis : dim = 1 ∨ (dim = 0 ∧ k ≤ seq) := by
       first | exact of_decide_eq_true rfl | (simp <;> fail "scatter axis out of range")) :
     Tensor ⟨#[batch, seq], d, dev⟩ :=
-  input.checkedReplacement (RawTensor.scatter2d input.raw dim indices.raw src.raw)
+  Tensor.checkedResult "scatter2d" (Tensor.ofRaw (RawTensor.scatter2d input.raw dim indices.raw src.raw))
 
 /-- All-close predicate over two tensors of the same spec. -/
 def allclose {σ : StaticSpec} (a b : Tensor σ) (rtol : Float := 1e-05) (atol : Float := 1e-08) :
@@ -1046,13 +1046,13 @@ def backwardLoss {d : DType} {dev : Device} (loss : Tensor ⟨#[], d, dev⟩)
 /-! ## Autograd and fused layer primitives -/
 
 def detach {σ : StaticSpec} (t : Tensor σ) : Tensor σ :=
-  t.checkedReplacement (RawTensor.detach t.raw)
+  Tensor.checkedResult "detach" (Tensor.ofRaw (RawTensor.detach t.raw))
 
 /-- Read a detached gradient snapshot that remains stable across later backward,
     clipping, and zeroing operations. Missing gradients produce zeros. -/
 def gradOf {σ : StaticSpec} (t : Tensor σ) : IO (Tensor σ) := do
   let raw ← RawTensor.gradOf t.raw
-  match t.checkedReplacement? raw with
+  match Tensor.ofRaw raw with
   | .ok gradient => pure gradient
   | .error message => throw (IO.userError s!"Tensor.gradOf: {message}")
 
@@ -1097,7 +1097,7 @@ def layerNorm {batch seq n : Nat} {d : DType} {dev : Device}
     (weight : Tensor ⟨#[n], d, dev⟩)
     (bias : Tensor ⟨#[n], d, dev⟩) (eps : Float := 1e-5) :
     Tensor ⟨#[batch, seq, n], d, dev⟩ :=
-  x.checkedReplacement (RawTensor.layerNorm x.raw weight.raw bias.raw eps)
+  Tensor.checkedResult "layerNorm" (Tensor.ofRaw (RawTensor.layerNorm x.raw weight.raw bias.raw eps))
 
 /-- Discharges `broadcastsTo` for shapes with symbolic dimensions. -/
 macro "broadcast_shape" : tactic => `(tactic| first

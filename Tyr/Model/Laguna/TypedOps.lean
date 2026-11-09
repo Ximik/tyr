@@ -16,7 +16,7 @@ def bmm {b m n k : Nat} (x : Tensor { dtype := dtype, device := device, shape :=
 
 def scatterAdd {s t : Shape} (input : Tensor { dtype := dtype, device := device, shape := s }) (dim : Nat)
     (indices : Tensor { device := device, shape := t, dtype := .Int64 }) (src : Tensor { dtype := dtype, device := device, shape := t }) : Tensor { dtype := dtype, device := device, shape := s } :=
-  input.checkedReplacement (RawTensor.lagunaScatterAdd input.raw dim indices.raw src.raw)
+  Tensor.checkedResult "scatterAdd" (Tensor.ofRaw (RawTensor.lagunaScatterAdd input.raw dim indices.raw src.raw))
 
 def transposeMatrixBatch {b m n : Nat} {d : DType}
     (x : Tensor { device := device, shape := #[b, m, n], dtype := d }) : Tensor { device := device, shape := #[b, n, m], dtype := d } := x.transpose 1 2
