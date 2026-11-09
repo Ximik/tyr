@@ -266,7 +266,7 @@ def sampleConfidence {cfg : Config} {batch : Nat}
     let probs := Tensor.softmax scaledLogits  -- [batch, seq, vocab]
 
     -- Get max probability and predicted token per position
-    let (confidences, predictedTokens) ← IO.ofExcept (Tensor.maxLast3d? probs)  -- along vocab dim
+    let (confidences, predictedTokens) := Tensor.maxLast3d! probs  -- along vocab dim
 
     if step < 3 then
       -- Debug: show first few predicted tokens and their confidences
@@ -287,7 +287,7 @@ def sampleConfidence {cfg : Config} {batch : Nat}
       -- Fallback: decode top-1 most confident masked position using scatter
       let negInf := Tensor.full #[batch, cfg.seq_len] (-1e10 : Float)
       let maskedConf := Tensor.whereSelect maskedPositions confidences negInf
-      let (_, topkIdx) ← IO.ofExcept (Tensor.topKLast2d? maskedConf 1)  -- [batch, 1]
+      let (_, topkIdx) := Tensor.topKLast2d! maskedConf 1  -- [batch, 1]
       let topkIdxLong := topkIdx
       let oneHot := Tensor.zeros #[batch, cfg.seq_len]
       let onesK := Tensor.ones #[batch, 1]
@@ -350,14 +350,14 @@ def sampleTopK {cfg : Config} {batch : Nat}
     let probs := Tensor.softmax scaledLogits
 
     -- Get max probability and predicted token per position
-    let (confidences, predictedTokens) ← IO.ofExcept (Tensor.maxLast3d? probs)
+    let (confidences, predictedTokens) := Tensor.maxLast3d! probs
 
     -- Mask out already-decoded positions (set confidence to -inf)
     let negInf := Tensor.full #[batch, cfg.seq_len] (-1e10)
     let maskedConfidences := Tensor.whereSelect maskedPositions confidences negInf
 
     -- Get top-k positions per batch (properly typed)
-    let (_, topkIndices) ← IO.ofExcept (Tensor.topKLast2d? maskedConfidences k)  -- [batch, k]
+    let (_, topkIndices) := Tensor.topKLast2d! maskedConfidences k  -- [batch, k]
 
     -- Create selection mask using scatter: scatter 1s at topk positions
     let selectMask := Tensor.zeros #[batch, cfg.seq_len]

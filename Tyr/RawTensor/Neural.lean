@@ -94,14 +94,10 @@ namespace torch.RawTensor
 @[extern "lean_torch_load_u16_bin"] opaque loadU16Bin (count : @& Nat) (path : @& String) : IO RawTensor
 
 @[extern "lean_torch_linspace"] opaque linspace (start stop : Float) (count : @& Nat) (requiresGrad : Bool) (noGrad : requiresGrad = false := by decide) : RawTensor
-@[extern "lean_torch_max_dim_3d"] opaque maxLast3d
+@[extern "lean_torch_max_dim_3d"] opaque maxLast3d!
     (input : @& RawTensor) (dim : @& Nat) : RawTensor × RawTensor
-@[extern "lean_torch_max_dim_3d_checked"] opaque maxLast3dChecked
-    (input : @& RawTensor) (dim : @& Nat) : Except String (RawTensor × RawTensor)
-@[extern "lean_torch_topk_2d"] opaque topKLast2d
+@[extern "lean_torch_topk_2d"] opaque topKLast2d!
     (input : @& RawTensor) (k dim : @& Nat) : RawTensor × RawTensor
-@[extern "lean_torch_topk_2d_checked"] opaque topKLast2dChecked
-    (input : @& RawTensor) (k dim : @& Nat) : Except String (RawTensor × RawTensor)
 
 @[extern "lean_torch_get"] opaque getOp (input : @& RawTensor) (idx : @& Nat) : RawTensor
 @[extern "lean_torch_unbind"] opaque unbind (input : @& RawTensor) (dim : @& Nat) : Array RawTensor

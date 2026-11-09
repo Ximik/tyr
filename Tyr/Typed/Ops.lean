@@ -37,14 +37,6 @@ namespace torch
 
 namespace Tensor
 
-/-- Only return native results that satisfy their complete output specification.
-A mismatch terminates at the native invariant boundary. -/
-private def checkedResult {σ : StaticSpec} (operation : String)
-    (result : Except String (Tensor σ)) : Tensor σ :=
-  match result with
-  | .ok result => result
-  | .error message => nativeInvariantFailure s!"Tensor.{operation}: {message}"
-
 /-! ## Creation
 
 The runtime defaults are Float32 for float factories and Int64 for
@@ -763,17 +755,16 @@ macro "numel_pos" : tactic => `(tactic| first
   | omega
   | (simp [Nat.pos_iff_ne_zero, Nat.mul_eq_zero] <;> omega))
 
-def maxAll? {σ : StaticSpec} (t : Tensor σ) : Except String (Tensor (σ.withShape #[])) := do
-  DType.checkOrdered t.raw.dtype
-  if TensorSpec.numelOfShape σ.shape == 0 then
-    throw "maxAll requires a nonempty tensor"
-  Tensor.ofRaw (← RawTensor.maxAllChecked t.raw)
+/-- Maximum of all elements, without precondition checks; libtorch rejects an
+empty or unordered tensor and the process aborts with its error. -/
+def maxAll! {σ : StaticSpec} (t : Tensor σ) : Tensor (σ.withShape #[]) :=
+  checkedResult "maxAll" (Tensor.ofRaw (RawTensor.maxAll! t.raw))
 
-/-- Maximum over a nonempty ordered tensor. Runtime shapes/dtypes use `maxAll?`. -/
+/-- Maximum over a nonempty ordered tensor. Runtime shapes/dtypes use `maxAll!`. -/
 def maxAll {σ : StaticSpec} [DType.Ordered σ.dtype] (t : Tensor σ)
     (_nonempty : 0 < TensorSpec.numelOfShape σ.shape := by numel_pos) :
     Tensor (σ.withShape #[]) :=
-  checkedResult "maxAll" (maxAll? t)
+  maxAll! t
 
 private def checkReductionAxis (shape : Shape) (dim : Nat) : Except String Unit :=
   if dim < max 1 shape.size then .ok ()
@@ -816,7 +807,7 @@ def reshape {σ : StaticSpec} (t : Tensor σ) (shape' : Shape)
     let targetNumel := TensorSpec.numelOfShape shape'
     if actualNumel != targetNumel then
       throw s!"reshape requires {actualNumel} elements, requested {targetNumel}"
-    let raw ← RawTensor.reshape? t.raw shape'
+    let raw := RawTensor.reshape! t.raw shape'
     TensorSpec.checkDType t.raw.dtype raw.dtype
     Device.check t.raw.device raw.device
     Tensor.ofRaw raw
@@ -925,23 +916,20 @@ def fromInt64ArrayAs? (arr : Array Int64) (shape : Shape) : Except String (Tenso
   if h : arr.size = TensorSpec.numelOfShape shape then .ok (fromInt64ArrayShaped arr shape h)
   else .error s!"expected {TensorSpec.numelOfShape shape} values for shape {shape}, got {arr.size}"
 
-/-- Argmax with recoverable domain, axis, empty-axis and native kernel errors. -/
-def argmax? {s : Shape} {d : DType} {dev : Device} (t : Tensor ⟨s, d, dev⟩) (dim : Nat) :
-    Except String (Tensor ⟨reduceShape s dim false, .Int64, dev⟩) := do
-  DType.checkOrdered t.raw.dtype
-  checkReductionAxis s dim
-  if (s[dim]?.getD 1) == 0 then
-    throw "argmax requires a nonempty reduction axis"
-  Tensor.ofRaw (← RawTensor.argmaxChecked t.raw dim)
+/-- Argmax along `dim`, without precondition checks; libtorch rejects an
+unordered dtype, an invalid axis or an empty axis and the process aborts. -/
+def argmax! {s : Shape} {d : DType} {dev : Device} (t : Tensor ⟨s, d, dev⟩) (dim : Nat) :
+    Tensor ⟨reduceShape s dim false, .Int64, dev⟩ :=
+  checkedResult "argmax" (Tensor.ofRaw (RawTensor.argmax! t.raw dim))
 
 /-- Argmax along a valid nonempty axis of an ordered tensor. Scalar input
-permits axis zero. Runtime shapes and dtypes use `argmax?`. -/
+permits axis zero. Runtime shapes and dtypes use `argmax!`. -/
 def argmax {s : Shape} {d : DType} {dev : Device} [DType.Ordered d]
     (t : Tensor ⟨s, d, dev⟩) (dim : Nat)
     (_axis : dim < max 1 s.size := by first | exact of_decide_eq_true rfl | (simp <;> fail "axis out of range"))
     (_nonempty : 0 < s[dim]?.getD 1 := by first | exact of_decide_eq_true rfl | omega | (simp <;> omega)) :
     Tensor ⟨reduceShape s dim false, .Int64, dev⟩ :=
-  checkedResult "argmax" (argmax? t dim)
+  argmax! t dim
 
 /-- Top-k filter over logits (entries outside the top k become -inf), spec-preserving. -/
 def topKFilter {σ : StaticSpec} (logits : Tensor σ) (k : Nat) : Tensor σ :=
@@ -973,21 +961,19 @@ def indexSelect {n k : Nat} {d : DType} {dev : Device}
     Tensor ⟨#[k], d, dev⟩ :=
   checkedResult "indexSelect" (indexSelect? data indices)
 
-/-- Per-element cross entropy with recoverable dtype, label, and backend errors.
-The default ignored label is -100, matching the native operation. -/
-def crossEntropyNone? {n c : Nat} {d : DType} {dev : Device}
+/-- Per-element cross entropy, without precondition checks; a non-floating dtype,
+an invalid label or a backend error aborts the process. The default ignored label
+is -100, matching the native operation. -/
+def crossEntropyNone! {n c : Nat} {d : DType} {dev : Device}
     (logits : Tensor ⟨#[n, c], d, dev⟩) (targets : Tensor ⟨#[n], .Int64, dev⟩) :
-    Except String (Tensor ⟨#[n], d, dev⟩) := do
-  if !logits.raw.dtype.isRealFloating then
-    throw "crossEntropyNone requires a standard real floating dtype"
-  Tensor.checkSameDevice logits targets
-  Tensor.ofRaw (← RawTensor.crossEntropyNoneChecked logits.raw targets.raw)
+    Tensor ⟨#[n], d, dev⟩ :=
+  checkedResult "crossEntropyNone" (Tensor.ofRaw (RawTensor.crossEntropyNone! logits.raw targets.raw))
 
 /-- Per-element cross entropy over real floating logits and Int64 targets. -/
 def crossEntropyNone {n c : Nat} {d : DType} {dev : Device} [DType.RealFloating d]
     (logits : Tensor ⟨#[n, c], d, dev⟩) (targets : Tensor ⟨#[n], .Int64, dev⟩) :
     Tensor ⟨#[n], d, dev⟩ :=
-  checkedResult "crossEntropyNone" (crossEntropyNone? logits targets)
+  crossEntropyNone! logits targets
 
 /-- Extract an Int64 scalar. -/
 def itemInt {d : DType} {dev : Device} (t : Tensor ⟨#[], d, dev⟩) : Int64 :=
@@ -1020,20 +1006,18 @@ def logicalOr {s : Shape} {dev : Device} (a b : Tensor ⟨s, .Bool, dev⟩) :
     Tensor ⟨s, .Bool, dev⟩ :=
   logicalNot (logicalAnd (logicalNot a) (logicalNot b))
 
-/-- Mean cross entropy with recoverable dtype, label, and backend errors. -/
-def crossEntropy? {n c : Nat} {d : DType} {dev : Device}
+/-- Mean cross entropy, without precondition checks; a non-floating dtype, an
+invalid label or a backend error aborts the process. -/
+def crossEntropy! {n c : Nat} {d : DType} {dev : Device}
     (logits : Tensor ⟨#[n, c], d, dev⟩) (targets : Tensor ⟨#[n], .Int64, dev⟩) :
-    Except String (Tensor ⟨#[], d, dev⟩) := do
-  if !logits.raw.dtype.isRealFloating then
-    throw "crossEntropy requires a standard real floating dtype"
-  Tensor.checkSameDevice logits targets
-  Tensor.ofRaw (← RawTensor.crossEntropyChecked logits.raw targets.raw)
+    Tensor ⟨#[], d, dev⟩ :=
+  checkedResult "crossEntropy" (Tensor.ofRaw (RawTensor.crossEntropy! logits.raw targets.raw))
 
 /-- Mean cross entropy over real floating logits and Int64 targets. -/
 def crossEntropy {n c : Nat} {d : DType} {dev : Device} [DType.RealFloating d]
     (logits : Tensor ⟨#[n, c], d, dev⟩) (targets : Tensor ⟨#[n], .Int64, dev⟩) :
     Tensor ⟨#[], d, dev⟩ :=
-  checkedResult "crossEntropy" (crossEntropy? logits targets)
+  crossEntropy! logits targets
 
 /-- Draw `numSamples` Int64 indices per row of a probability matrix. -/
 def multinomial {n v : Nat} {d : DType} {dev : Device}

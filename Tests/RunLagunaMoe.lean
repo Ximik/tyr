@@ -137,14 +137,14 @@ private def runCase (path : String) (device : Device) : IO Unit := do
   -- Router unit check: selected expert SETS match (order-insensitive via
   -- descending sort), routing-weight multisets match within tolerance.
   let (idx, w) ← block.router.route testCfg xD
-  let (sortedGot, _) := qwen35.topK2d idx 2 1
-  let (sortedExp, _) := qwen35.topK2d (idxExp.2.to device) 2 1
+  let (sortedGot, _) := Tensor.topKLast2d idx 2
+  let (sortedExp, _) := Tensor.topKLast2d! (idxExp.2.to device) 2
   let gotIds ← Tensor.toUInt64Array sortedGot.toInt64
   let expectedIds ← Tensor.toUInt64Array sortedExp.toInt64
   let idxMismatch := (gotIds.zip expectedIds).foldl (fun n (a, b) => n + if a == b then 0 else 1) (0 : Nat)
   check (idxMismatch == 0) s!"router [{lbl}] selected expert sets match (mismatches={idxMismatch})"
-  let (wGotSorted, _) := qwen35.topK2d (qwen35.floatDynamic w) 2 1
-  let (wExpSorted, _) := qwen35.topK2d (wExp.2.to device) 2 1
+  let (wGotSorted, _) := Tensor.topKLast2d (qwen35.floatDynamic w) 2
+  let (wExpSorted, _) := Tensor.topKLast2d! (wExp.2.to device) 2
   let (wAbs, wRel) ← maxErrors wGotSorted wExpSorted
   IO.println s!"  router [{lbl}]: weights maxAbs={wAbs} maxRel={wRel}"
   check (wAbs <= 0.02) s!"router [{lbl}] weights maxAbs={wAbs} <= 0.02"

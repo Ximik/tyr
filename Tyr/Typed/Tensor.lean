@@ -193,6 +193,13 @@ def checkedUpdate? {σ : StaticSpec} (expectedDType : DType) (expectedDevice : D
   expectedDevice.check raw.device
   ofRaw raw
 
+/-- Only return native results that satisfy their complete output specification.
+A mismatch terminates at the native invariant boundary. -/
+def checkedResult {α : Type} [Nonempty α] (operation : String) (result : Except String α) : α :=
+  match result with
+  | .ok result => result
+  | .error message => nativeInvariantFailure s!"Tensor.{operation}: {message}"
+
 /-- Pure value-update adapter. A violated native result contract stops execution
 without constructing a default tensor or retaining the consumed input. -/
 def checkedUpdate {σ : StaticSpec} (expectedDType : DType) (expectedDevice : Device)

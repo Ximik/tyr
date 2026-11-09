@@ -1814,7 +1814,7 @@ def reinforcementLearning (cfg : NanoChatConfig) : PipelineM Unit := do
       -- Compute per-token cross-entropy (NLL)
       let logitsFlat := logits.reshape #[256, modelCfg.vocabSize]
       let targetFlat := (target.to trainDevice).reshape #[256]
-      let nllFlat ← IO.ofExcept (Tensor.crossEntropyNone? logitsFlat targetFlat)
+      let nllFlat := Tensor.crossEntropyNone logitsFlat targetFlat
       return nllFlat.reshape #[1, 256]
 
     -- Load GSM8K prompts from HuggingFace

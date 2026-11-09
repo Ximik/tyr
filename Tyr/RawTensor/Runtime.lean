@@ -20,11 +20,6 @@ opaque mps : IO Device :=
 
 end Device
 
-/-- Test-only: raises a libtorch error that no FFI guard catches, so the process
-aborts through Tyr's terminate handler. Used only by `ffi_crash_probe`. -/
-@[extern "lean_tyr_test_uncaught_libtorch_error"]
-opaque RawTensor.throwUncaughtForTest : IO Unit
-
 /-- Check if CUDA is available -/
 @[extern "lean_torch_cuda_is_available"]
 opaque cuda_is_available : IO Bool

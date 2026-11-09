@@ -81,7 +81,7 @@ private def maxErrors {σ τ : StaticSpec} (got : Tensor σ) (expected : Tensor 
 
 /-- Sorted top-k id set per row of `[n, vocab]` logits. -/
 private def topkIdSets {n v : Nat} (logits : Tensor { shape := #[n, v], device := device, dtype := dtype }) (k : Nat) : IO (Array (Array UInt64)) := do
-  let (_, idx) := qwen35.topK2d logits k 1
+  let (_, idx) := Tensor.topKLast2d! logits k
   let flat ← Tensor.toUInt64Array (idx)
   pure (Array.ofFn (n := n) fun r =>
     (flat.extract (r.val * k) (r.val * k + k)).qsort (fun a b => a < b))
