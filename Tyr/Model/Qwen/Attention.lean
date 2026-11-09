@@ -153,7 +153,7 @@ private def sliceScatterAlong {s srcShape : Shape} {d : DType} {dev : Device}
 private def meanDimTo {s : Shape} {d : DType} {dev : Device}
     (t : Tensor ⟨s, d, dev⟩) (dim : Nat) (out : Shape) (keepdim : Bool := false)
     : Tensor ⟨out, d, dev⟩ :=
-  match Tensor.ofRaw (RawTensor.mean t.raw (some #[dim]) keepdim) with
+  match Tensor.ofRaw (RawTensor.mean! t.raw (some #[dim]) keepdim) with
   | .ok r => r
   | .error message => nativeInvariantFailure s!"QwenAttention.meanDim: {message}"
 

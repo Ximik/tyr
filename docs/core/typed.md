@@ -249,10 +249,8 @@ from acquiring a floating constraint.
 `Tensor.whereSelect` promotes its two value operands and requires a Bool
 condition. Selection does not cast the result back to the left dtype.
 
-Matrix multiplication requires operands with matching dtype and concrete device.
-The checked `matmul?`, `mm?`, `linear?`, `linear3d?`, `matmul3d?`, and `bmm4d?`
-adapters verify actual dtype and device equality before calling native code.
-Elementwise promotion never supplies an implicit matrix cast.
+Matrix multiplication requires operands with matching dtype and device in their
+types. Elementwise promotion never supplies an implicit matrix cast.
 
 `Tensor.matrixLog?` accepts standard real floating matrices, including supported
 nonsymmetric matrices and real rotations. Its eigendecomposition-based solver

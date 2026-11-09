@@ -178,19 +178,17 @@ def maskedCrossEntropy? {batch seq vocab : Nat} {d m result : DType} {dev : Devi
   let lossesFlat := Tensor.crossEntropyNone! logitsFlat targetsFlat
   -- Apply mask and compute mean over valid positions
   let maskFlat := mask.reshape #[batchSeq]
-  Tensor.checkPointwise lossesFlat maskFlat
-  let maskedLosses : Tensor ⟨#[batchSeq], DType.promote d m, dev⟩ ←
-    Tensor.ofRaw (← RawTensor.mulChecked lossesFlat.raw maskFlat.raw)
+  let maskedLosses : Tensor ⟨#[batchSeq], DType.promote d m, dev⟩ := Tensor.mul lossesFlat maskFlat
   -- Sum losses and divide by number of valid tokens
-  let totalLoss ← Tensor.sumAll? maskedLosses
-  let numValid ← Tensor.sumAll? maskFlat
+  let totalLoss := Tensor.sumAll maskedLosses
+  let numValid := Tensor.sumAll maskFlat
   -- Divide by number of valid tokens to get mean loss
   -- Use scalar multiplication with the reciprocal to avoid tensor division
   let numValidFloat ← Tensor.item? numValid
   let epsFloat : Float := 1e-8
   let floating ← DType.realFloating? (DType.promote d m).sumResult
   let _ := floating.down
-  Tensor.mulScalar? totalLoss (1.0 / (numValidFloat + epsFloat))
+  pure (Tensor.mulScalar totalLoss (1.0 / (numValidFloat + epsFloat)))
 
 /-- Pure masked loss over real floating logits. Use `maskedCrossEntropy?` to
 recover invalid target labels or unsupported native kernels. -/

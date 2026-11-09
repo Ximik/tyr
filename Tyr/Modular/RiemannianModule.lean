@@ -102,17 +102,17 @@ def pullbackParamFactor {rank inDim paramDim outDim : Nat}
 
 end LocalLinearization
 
-private def linearApplyInput {inDim outDim : Nat} {d : DType} {dev : Device}
+private def linearApplyInput {inDim outDim : Nat} {d : DType} {dev : Device} [DType.FloatingOrComplex d]
     (weight : Tensor ⟨#[outDim, inDim], d, dev⟩) (x : Tensor ⟨#[inDim], d, dev⟩) :
     Tensor ⟨#[outDim], d, dev⟩ :=
   columnToVector (Tensor.mm weight (vectorToColumn x))
 
-private def linearApplyInputAdjoint {inDim outDim : Nat} {d : DType} {dev : Device}
+private def linearApplyInputAdjoint {inDim outDim : Nat} {d : DType} {dev : Device} [DType.FloatingOrComplex d]
     (weight : Tensor ⟨#[outDim, inDim], d, dev⟩) (y : Tensor ⟨#[outDim], d, dev⟩) :
     Tensor ⟨#[inDim], d, dev⟩ :=
   columnToVector (Tensor.mm (Tensor.transpose2d weight) (vectorToColumn y))
 
-private def linearApplyParam {inDim outDim : Nat} {d : DType} {dev : Device}
+private def linearApplyParam {inDim outDim : Nat} {d : DType} {dev : Device} [DType.FloatingOrComplex d]
     [DType.Promotes d d d]
     (x : Tensor ⟨#[inDim], d, dev⟩)
     (useBias : Bool)
@@ -124,7 +124,7 @@ private def linearApplyParam {inDim outDim : Nat} {d : DType} {dev : Device}
   else
     weightPart
 
-private def linearApplyParamAdjoint {inDim outDim : Nat} {d : DType} {dev : Device}
+private def linearApplyParamAdjoint {inDim outDim : Nat} {d : DType} {dev : Device} [DType.FloatingOrComplex d]
     (x : Tensor ⟨#[inDim], d, dev⟩)
     (useBias : Bool)
     (y : Tensor ⟨#[outDim], d, dev⟩) : Tensor ⟨#[outDim * inDim + outDim], d, dev⟩ :=
@@ -163,7 +163,7 @@ def backwardLeafStep {M : Type} {inDim outDim : Nat} [RiemannianModule M inDim o
   let stats : LayerStepDiagnostics := {
     gradientNorm := Tensor.l2Norm g
     factorRank := rank
-    innerConditionEstimate := Tensor.spectralNorm inner * Tensor.spectralNorm innerInv
+    innerConditionEstimate := Tensor.spectralNorm! inner * Tensor.spectralNorm! innerInv
     residualNorm := Tensor.l2Norm residual
     updateNorm := Tensor.l2Norm update
   }

@@ -60,7 +60,7 @@ private def alignDType {shape : Shape} {device : Device}
   let left ← IO.ofExcept source.reifyDType
   let right ← IO.ofExcept source.reifyDType
   let aligned ← IO.ofExcept (alignDType left right)
-  LeanTest.assertEqual (← (Tensor.mm left.2 aligned).toFloatArray) #[7, 10, 15, 22]
+  LeanTest.assertEqual (← (Tensor.mm! left.2 aligned).toFloatArray) #[7, 10, 15, 22]
   let different ← IO.ofExcept (source.castDType .BFloat16).reifyDType
   LeanTest.assertTrue (left.sameDType? different).toOption.isNone
   LeanTest.assertTrue (left.atDType? .Int64).toOption.isNone

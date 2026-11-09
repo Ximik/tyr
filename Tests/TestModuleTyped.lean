@@ -9,9 +9,10 @@ namespace Tests.ModuleTyped
 
 open torch
 
--- Bias addition needs homogeneous promotion; integral and complex linear maps remain valid.
-example (layer : Linear 2 3 .Int32) (x : Tensor ⟨#[4, 2], .Int32, .CPU⟩) :
-    Tensor ⟨#[4, 3], .Int32, .CPU⟩ := layer.forward2d x
+-- Linear maps require floating or complex dtypes; integral data is cast explicitly.
+example (_layer : Linear 2 3 .Int32) (_x : Tensor ⟨#[4, 2], .Int32, .CPU⟩) : True := by
+  fail_if_success have _ := _layer.forward2d _x
+  trivial
 example (layer : Linear 2 3 .Complex64) (x : Tensor ⟨#[4, 2], .Complex64, .CPU⟩) :
     Tensor ⟨#[4, 3], .Complex64, .CPU⟩ := layer.forward2d x
 example (layer : @Affine 3 2 .Complex128 .CPU) (x : Tensor ⟨#[4, 2], .Complex128, .CPU⟩) :

@@ -26,8 +26,7 @@ def init (in_dim out_dim : Nat) (withBias : Bool := true) (device : Device := .C
   -- Kaiming/He initialization: std = sqrt(2 / in_dim)
   let std := Float.sqrt (2.0 / in_dim.toFloat)
   let w ← Tensor.randn #[out_dim, in_dim] (device := device)
-  let weight ← IO.ofExcept (Tensor.mulScalar? w std)
-  let weight ← Tensor.parameter weight
+  let weight ← Tensor.parameter (Tensor.mulScalar w std)
   let bias ← if withBias then do
     let b ← Tensor.parameter (Tensor.zeros #[out_dim] (device := device))
     pure (some b)
@@ -36,7 +35,7 @@ def init (in_dim out_dim : Nat) (withBias : Bool := true) (device : Device := .C
   pure { weight, bias }
 
 /-- Forward pass for 2D input [batch, in_dim] -> [batch, out_dim] -/
-def forward2d {in_dim out_dim batch : Nat} {d : DType} {dev : Device} [DType.Promotes d d d]
+def forward2d {in_dim out_dim batch : Nat} {d : DType} {dev : Device} [DType.FloatingOrComplex d] [DType.Promotes d d d]
     (lin : Linear in_dim out_dim d dev)
     (x : Tensor ⟨#[batch, in_dim], d, dev⟩) : Tensor ⟨#[batch, out_dim], d, dev⟩ :=
   let y := Tensor.linear x lin.weight
@@ -45,7 +44,7 @@ def forward2d {in_dim out_dim batch : Nat} {d : DType} {dev : Device} [DType.Pro
   | none => y
 
 /-- Forward pass for 3D input [batch, seq, in_dim] -> [batch, seq, out_dim] -/
-def forward3d {in_dim out_dim batch seq : Nat} {d : DType} {dev : Device}
+def forward3d {in_dim out_dim batch seq : Nat} {d : DType} {dev : Device} [DType.FloatingOrComplex d]
     (lin : Linear in_dim out_dim d dev)
     (x : Tensor ⟨#[batch, seq, in_dim], d, dev⟩) : Tensor ⟨#[batch, seq, out_dim], d, dev⟩ :=
   match lin.bias with
@@ -55,13 +54,13 @@ def forward3d {in_dim out_dim batch seq : Nat} {d : DType} {dev : Device}
 end Linear
 
 /-- Module instance for 2D forward pass -/
-instance {in_dim out_dim batch : Nat} {d : DType} {dev : Device} [DType.Promotes d d d] :
+instance {in_dim out_dim batch : Nat} {d : DType} {dev : Device} [DType.FloatingOrComplex d] [DType.Promotes d d d] :
     Module (Linear in_dim out_dim d dev) (Tensor ⟨#[batch, in_dim], d, dev⟩)
       (Tensor ⟨#[batch, out_dim], d, dev⟩) where
   forward := Linear.forward2d
 
 /-- Module instance for 3D forward pass -/
-instance {in_dim out_dim batch seq : Nat} {d : DType} {dev : Device} :
+instance {in_dim out_dim batch seq : Nat} {d : DType} {dev : Device} [DType.FloatingOrComplex d] :
     Module (Linear in_dim out_dim d dev) (Tensor ⟨#[batch, seq, in_dim], d, dev⟩)
       (Tensor ⟨#[batch, seq, out_dim], d, dev⟩) where
   forward := Linear.forward3d

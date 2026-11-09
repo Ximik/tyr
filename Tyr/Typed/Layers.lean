@@ -31,8 +31,7 @@ def init (inDim outDim : Nat) (withBias : Bool := true) (device : Device := .CPU
     IO (Linear inDim outDim .Float32 device) := do
   let std := Float.sqrt (2.0 / inDim.toFloat)
   let w ← Tensor.randn #[outDim, inDim] (device := device)
-  let scaled ← IO.ofExcept (Tensor.mulScalar? w std)
-  let weight ← scaled.parameter
+  let weight ← (Tensor.mulScalar w std).parameter
   let bias ←
     if withBias then
       pure (some (← (Tensor.zeros #[outDim] (device := device)).parameter))
@@ -41,7 +40,7 @@ def init (inDim outDim : Nat) (withBias : Bool := true) (device : Device := .CPU
   pure { weight, bias }
 
 /-- Forward for 2D input `[batch, inDim] → [batch, outDim]`. -/
-def forward2d {inDim outDim batch : Nat} {d : DType} {dev : Device}
+def forward2d {inDim outDim batch : Nat} {d : DType} {dev : Device} [DType.FloatingOrComplex d]
     [DType.Promotes d d d]
     (lin : Linear inDim outDim d dev) (x : Tensor ⟨#[batch, inDim], d, dev⟩) :
     Tensor ⟨#[batch, outDim], d, dev⟩ :=
@@ -51,7 +50,7 @@ def forward2d {inDim outDim batch : Nat} {d : DType} {dev : Device}
   | none => y
 
 /-- Forward for 3D input `[batch, seq, inDim] → [batch, seq, outDim]`. -/
-def forward3d {inDim outDim batch seq : Nat} {d : DType} {dev : Device}
+def forward3d {inDim outDim batch seq : Nat} {d : DType} {dev : Device} [DType.FloatingOrComplex d]
     (lin : Linear inDim outDim d dev)
     (x : Tensor ⟨#[batch, seq, inDim], d, dev⟩) :
     Tensor ⟨#[batch, seq, outDim], d, dev⟩ :=

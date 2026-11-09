@@ -32,7 +32,7 @@ The source shape is checked before conversion and never reshaped. -/
 
 @[extern "lean_torch_requires_grad"] opaque requiresGrad (t : @& RawTensor) : Bool
 
-@[extern "lean_torch_l2_norm"] opaque l2Norm (t : @& RawTensor) : Float
+@[extern "lean_torch_l2_norm"] opaque l2Norm! (t : @& RawTensor) : Float
 
 @[extern "lean_torch_item"] opaque item (t : @& RawTensor) : Float
 
@@ -41,25 +41,25 @@ The source shape is checked before conversion and never reshaped. -/
 
 @[extern "lean_torch_gt"] opaque gt (a b : @& RawTensor) : RawTensor
 
-@[extern "lean_torch_where"] opaque whereSelect (condition a b : @& RawTensor) : RawTensor
+@[extern "lean_torch_where"] opaque whereSelect! (condition a b : @& RawTensor) : RawTensor
 
-@[extern "lean_torch_tensor_relu"] opaque relu (t : @& RawTensor) : RawTensor
+@[extern "lean_torch_tensor_relu"] opaque relu! (t : @& RawTensor) : RawTensor
 
-@[extern "lean_torch_abs"] opaque abs (t : @& RawTensor) : RawTensor
+@[extern "lean_torch_abs"] opaque abs! (t : @& RawTensor) : RawTensor
 
-@[extern "lean_torch_tensor_exp"] opaque exp (t : @& RawTensor) : RawTensor
+@[extern "lean_torch_tensor_exp"] opaque exp! (t : @& RawTensor) : RawTensor
 
-@[extern "lean_torch_sqrt"] opaque sqrt (t : @& RawTensor) : RawTensor
+@[extern "lean_torch_sqrt"] opaque sqrt! (t : @& RawTensor) : RawTensor
 
-@[extern "lean_torch_rsqrt"] opaque rsqrt (t : @& RawTensor) : RawTensor
+@[extern "lean_torch_rsqrt"] opaque rsqrt! (t : @& RawTensor) : RawTensor
 
-@[extern "lean_torch_tensor_sigmoid"] opaque sigmoid (t : @& RawTensor) : RawTensor
+@[extern "lean_torch_tensor_sigmoid"] opaque sigmoid! (t : @& RawTensor) : RawTensor
 
-@[extern "lean_torch_tensor_tanh"] opaque tanh (t : @& RawTensor) : RawTensor
+@[extern "lean_torch_tensor_tanh"] opaque tanh! (t : @& RawTensor) : RawTensor
 
-@[extern "lean_torch_tensor_gelu"] opaque gelu (t : @& RawTensor) : RawTensor
+@[extern "lean_torch_tensor_gelu"] opaque gelu! (t : @& RawTensor) : RawTensor
 
-@[extern "lean_torch_tensor_silu"] opaque silu (t : @& RawTensor) : RawTensor
+@[extern "lean_torch_tensor_silu"] opaque silu! (t : @& RawTensor) : RawTensor
 
 @[extern "lean_torch_transpose_2d"] opaque transpose2d (t : @& RawTensor) : RawTensor
 
@@ -73,37 +73,39 @@ The source shape is checked before conversion and never reshaped. -/
 @[extern "lean_torch_zero_grad"] opaque zeroGrad (t : @& RawTensor)
     (setToNone : Bool) : IO Unit
 
-@[extern "lean_torch_tensor_add"] opaque add (a b : @& RawTensor) : RawTensor
+@[extern "lean_torch_tensor_add"] opaque add! (a b : @& RawTensor) : RawTensor
 
-@[extern "lean_torch_tensor_sub"] opaque sub (a b : @& RawTensor) : RawTensor
+@[extern "lean_torch_tensor_sub"] opaque sub! (a b : @& RawTensor) : RawTensor
 
-@[extern "lean_torch_tensor_mul"] opaque mul (a b : @& RawTensor) : RawTensor
+@[extern "lean_torch_tensor_mul"] opaque mul! (a b : @& RawTensor) : RawTensor
 
-@[extern "lean_torch_div"] opaque div (a b : @& RawTensor) : RawTensor
+@[extern "lean_torch_div"] opaque div! (a b : @& RawTensor) : RawTensor
 
-@[extern "lean_torch_matmul"] opaque matmul (a b : @& RawTensor) : RawTensor
+@[extern "lean_torch_maximum"] opaque maximum! (a b : @& RawTensor) : RawTensor
 
-@[extern "lean_torch_mm"] opaque mm (a b : @& RawTensor) : RawTensor
+@[extern "lean_torch_matmul"] opaque matmul! (a b : @& RawTensor) : RawTensor
 
-@[extern "lean_torch_linear"] opaque linear (a b : @& RawTensor) : RawTensor
+@[extern "lean_torch_mm"] opaque mm! (a b : @& RawTensor) : RawTensor
 
-@[extern "lean_torch_linear3d"] opaque linear3d (a b : @& RawTensor) : RawTensor
+@[extern "lean_torch_linear"] opaque linear! (a b : @& RawTensor) : RawTensor
 
-@[extern "lean_torch_matmul3d_2d"] opaque matmul3d (a b : @& RawTensor) : RawTensor
+@[extern "lean_torch_linear3d"] opaque linear3d! (a b : @& RawTensor) : RawTensor
 
-@[extern "lean_torch_bmm4d"] opaque bmm4d (a b : @& RawTensor) : RawTensor
+@[extern "lean_torch_matmul3d_2d"] opaque matmul3d! (a b : @& RawTensor) : RawTensor
 
-@[extern "lean_torch_add_scalar"] opaque addScalar (t : @& RawTensor) (value : Float) : RawTensor
+@[extern "lean_torch_bmm4d"] opaque bmm4d! (a b : @& RawTensor) : RawTensor
 
-@[extern "lean_torch_sub_scalar"] opaque subScalar (t : @& RawTensor) (value : Float) : RawTensor
+@[extern "lean_torch_add_scalar"] opaque addScalar! (t : @& RawTensor) (value : Float) : RawTensor
 
-@[extern "lean_torch_mul_scalar"] opaque mulScalar (t : @& RawTensor) (value : Float) : RawTensor
+@[extern "lean_torch_sub_scalar"] opaque subScalar! (t : @& RawTensor) (value : Float) : RawTensor
 
-@[extern "lean_torch_div_scalar"] opaque divScalar (t : @& RawTensor) (value : Float) : RawTensor
+@[extern "lean_torch_mul_scalar"] opaque mulScalar! (t : @& RawTensor) (value : Float) : RawTensor
 
-@[extern "lean_torch_pow"] opaque pow (t : @& RawTensor) (exponent : Float) : RawTensor
+@[extern "lean_torch_div_scalar"] opaque divScalar! (t : @& RawTensor) (value : Float) : RawTensor
 
-@[extern "lean_torch_tensor_softmax"] opaque softmax (t : @& RawTensor) (dim : @& Nat) : RawTensor
+@[extern "lean_torch_pow"] opaque pow! (t : @& RawTensor) (exponent : Float) : RawTensor
+
+@[extern "lean_torch_tensor_softmax"] opaque softmax! (t : @& RawTensor) (dim : @& Nat) : RawTensor
 
 @[extern "lean_torch_expand"] opaque expand (t : @& RawTensor) (target : Array Nat) : RawTensor
 
@@ -118,26 +120,14 @@ The source shape is checked before conversion and never reshaped. -/
 
 @[extern "lean_torch_cat2"] opaque cat (a b : @& RawTensor) (dim : @& Nat) : RawTensor
 
-@[extern "lean_torch_sum"] opaque sum (t : @& RawTensor) (dims : Option (Array Nat)) (keepdim : Bool) : RawTensor
+@[extern "lean_torch_sum"] opaque sum! (t : @& RawTensor) (dims : Option (Array Nat)) (keepdim : Bool) : RawTensor
 
-@[extern "lean_torch_mean"] opaque mean (t : @& RawTensor) (dims : Option (Array Nat)) (keepdim : Bool) : RawTensor
+@[extern "lean_torch_mean"] opaque mean! (t : @& RawTensor) (dims : Option (Array Nat)) (keepdim : Bool) : RawTensor
 
 /-- Return a tensor with the requested autograd flag, preserving other aliases. -/
 @[extern "lean_torch_set_requires_grad"] opaque setRequiresGrad (t : RawTensor) (requiresGrad : Bool) : IO RawTensor
 
-@[extern "lean_torch_affine3d"] opaque affine3d (x weight bias : @& RawTensor) : RawTensor
-@[extern "lean_torch_affine3d_checked"] opaque affine3dChecked
-    (x weight bias : @& RawTensor) : Except String RawTensor
-
-
-def sumAll (t : RawTensor) : RawTensor := sum t none false
-def meanAll (t : RawTensor) : RawTensor := mean t none false
-
-/-- Match the existing FP32 RMS normalization and weight promotion semantics. -/
-def rmsNormWeighted (shape _weightShape : Shape) (x weight : RawTensor) (eps : Float := 1e-6) : RawTensor :=
-  let xf := toFloat32 x
-  let variance := mean (mul xf xf) (some #[shape.size - 1]) true
-  mul (mul xf (rsqrt (addScalar variance eps))) weight
+@[extern "lean_torch_affine3d"] opaque affine3d! (x weight bias : @& RawTensor) : RawTensor
 
 @[extern "lean_torch_dropout"] opaque dropout
     (t : @& RawTensor) (p : Float) (training : Bool) : IO RawTensor
@@ -171,13 +161,13 @@ namespace torch.RawTensor
 @[extern "lean_torch_matrix_exp"] opaque matrixExp (t : @& RawTensor) : RawTensor
 @[extern "lean_torch_matrix_log"] opaque matrixLog (t : @& RawTensor) : RawTensor
 @[extern "lean_torch_inv"] opaque inv (t : @& RawTensor) : RawTensor
-@[extern "lean_torch_frobenius_norm"] opaque frobeniusNorm (t : @& RawTensor) : Float
-@[extern "lean_torch_row_norms"] opaque rowNorms (t : @& RawTensor) : RawTensor
+@[extern "lean_torch_frobenius_norm"] opaque frobeniusNorm! (t : @& RawTensor) : Float
+@[extern "lean_torch_row_norms"] opaque rowNorms! (t : @& RawTensor) : RawTensor
 
 @[extern "lean_torch_slice_along_dim"] opaque slice (t : @& RawTensor)
     (dim start len : @& Nat) : RawTensor
 
-@[extern "lean_torch_max_row_norm"] opaque maxRowNorm (t : @& RawTensor) : Float
+@[extern "lean_torch_max_row_norm"] opaque maxRowNorm! (t : @& RawTensor) : Float
 
 @[extern "lean_torch_uniform_like"] opaque uniformLike (shape : Shape) (reference : @& RawTensor)
     (lo hi : Float) : IO RawTensor
@@ -195,22 +185,18 @@ namespace torch.RawTensor
 @[extern "lean_torch_svd"] opaque svd (t : @& RawTensor) : RawTensor × RawTensor × RawTensor
 
 /-- Singular values only, as a vector of length min(m,n). -/
-@[extern "lean_torch_svdvals"] opaque svdvals (t : @& RawTensor) : RawTensor
+@[extern "lean_torch_svdvals"] opaque svdvals! (t : @& RawTensor) : RawTensor
 
 /-- Diagonal matrix from a vector. -/
 @[extern "lean_torch_diagflat"] opaque diagflat (t : @& RawTensor) : RawTensor
 
 /-- Largest singular value. -/
-@[extern "lean_torch_spectral_norm"] opaque spectralNorm (t : @& RawTensor) : Float
-@[extern "lean_torch_spectral_norm_checked"] opaque spectralNormChecked
-    (t : @& RawTensor) : Except String Float
+@[extern "lean_torch_spectral_norm"] opaque spectralNorm! (t : @& RawTensor) : Float
 
 /-- Sum of the singular values. -/
-@[extern "lean_torch_nuclear_norm"] opaque nuclearNorm (t : @& RawTensor) : Float
-@[extern "lean_torch_nuclear_norm_checked"] opaque nuclearNormChecked
-    (t : @& RawTensor) : Except String Float
+@[extern "lean_torch_nuclear_norm"] opaque nuclearNorm! (t : @& RawTensor) : Float
 
-@[extern "lean_torch_tensor_atan"] opaque atan (t : @& RawTensor) : RawTensor
+@[extern "lean_torch_tensor_atan"] opaque atan! (t : @& RawTensor) : RawTensor
 
 /-- Maximum over all elements, as a scalar handle. A native failure aborts
     through Tyr's fatal libtorch error report. -/
@@ -252,7 +238,7 @@ The effective retention flag is resolved by the typed API from `createGraph`. -/
 
 /-- Log-softmax along a dimension, spec-preserving. The native side reads no
     shape argument, so none is passed. -/
-@[extern "lean_torch_log_softmax"] opaque logSoftmax (t : @& RawTensor) (dim : @& Nat) : RawTensor
+@[extern "lean_torch_log_softmax"] opaque logSoftmax! (t : @& RawTensor) (dim : @& Nat) : RawTensor
 
 /-- Backward pass from a scalar loss (gradient = 1.0). -/
 @[extern "lean_torch_backward_loss"] opaque backwardLoss (loss : @& RawTensor)
@@ -321,99 +307,18 @@ end torch.RawTensor
 
 namespace torch.RawTensor
 /-- Recover native execution failures without unwinding across Lean frames. -/
-@[extern "lean_torch_tensor_add_checked"] opaque addChecked (a b : @& RawTensor) : Except String RawTensor
-
-@[extern "lean_torch_tensor_sub_checked"] opaque subChecked (a b : @& RawTensor) : Except String RawTensor
-
-@[extern "lean_torch_tensor_mul_checked"] opaque mulChecked (a b : @& RawTensor) : Except String RawTensor
-
-@[extern "lean_torch_div_checked"] opaque divChecked (a b : @& RawTensor) : Except String RawTensor
-
-@[extern "lean_torch_tensor_relu_checked"] opaque reluChecked (t : @& RawTensor) : Except String RawTensor
-
-@[extern "lean_torch_abs_checked"] opaque absChecked (t : @& RawTensor) : Except String RawTensor
-
 @[extern "lean_torch_expand_checked"] opaque expandChecked (t : @& RawTensor) (target : Array Nat) : Except String RawTensor
 
 /-- Native reshape behind `Tensor.reshape`, which validates the target first; use that instead.
 A native failure aborts through Tyr's fatal libtorch error report. -/
 @[extern "lean_torch_reshape_exact"] opaque reshape! (t : @& RawTensor) (target : @& Shape) : RawTensor
 
-@[extern "lean_torch_sum_checked"] opaque sumChecked (t : @& RawTensor) (dims : Option (Array Nat)) (keepdim : Bool) : Except String RawTensor
-
-@[extern "lean_torch_mean_checked"] opaque meanChecked (t : @& RawTensor) (dims : Option (Array Nat)) (keepdim : Bool) : Except String RawTensor
-
-@[extern "lean_torch_where_checked"] opaque whereSelectChecked (condition a b : @& RawTensor) : Except String RawTensor
-
-@[extern "lean_torch_matmul_checked"] opaque matmulChecked (a b : @& RawTensor) : Except String RawTensor
-
-@[extern "lean_torch_mm_checked"] opaque mmChecked (a b : @& RawTensor) : Except String RawTensor
-
-@[extern "lean_torch_linear_checked"] opaque linearChecked (a b : @& RawTensor) : Except String RawTensor
-
-@[extern "lean_torch_linear3d_checked"] opaque linear3dChecked (a b : @& RawTensor) : Except String RawTensor
-
-@[extern "lean_torch_matmul3d_2d_checked"] opaque matmul3dChecked (a b : @& RawTensor) : Except String RawTensor
-
-@[extern "lean_torch_bmm4d_checked"] opaque bmm4dChecked (a b : @& RawTensor) : Except String RawTensor
-
-@[extern "lean_torch_row_norms_checked"] opaque rowNormsChecked (t : @& RawTensor) : Except String RawTensor
-
 @[extern "lean_torch_svd_checked"] opaque svdChecked (t : @& RawTensor) : Except String (RawTensor × RawTensor × RawTensor)
 
-@[extern "lean_torch_svdvals_checked"] opaque svdvalsChecked (t : @& RawTensor) : Except String RawTensor
-
-@[extern "lean_torch_add_scalar_checked"] opaque addScalarChecked (t : @& RawTensor) (value : Float) : Except String RawTensor
-
-@[extern "lean_torch_sub_scalar_checked"] opaque subScalarChecked (t : @& RawTensor) (value : Float) : Except String RawTensor
-
-@[extern "lean_torch_mul_scalar_checked"] opaque mulScalarChecked (t : @& RawTensor) (value : Float) : Except String RawTensor
-
-@[extern "lean_torch_div_scalar_checked"] opaque divScalarChecked (t : @& RawTensor) (value : Float) : Except String RawTensor
-
-@[extern "lean_torch_l2_norm_checked"] opaque l2NormChecked (t : @& RawTensor) : Except String Float
-
-@[extern "lean_torch_frobenius_norm_checked"] opaque frobeniusNormChecked (t : @& RawTensor) : Except String Float
-
-@[extern "lean_torch_max_row_norm_checked"] opaque maxRowNormChecked (t : @& RawTensor) : Except String Float
-
-@[extern "lean_torch_rms_norm_weighted_checked"] opaque rmsNormWeightedChecked
-    (x weight : @& RawTensor) (eps : Float := 1e-6) : Except String RawTensor
+@[extern "lean_torch_rms_norm_weighted"] opaque rmsNormWeighted!
+    (x weight : @& RawTensor) (eps : Float := 1e-6) : RawTensor
 
 @[extern "lean_torch_matrix_log_checked"] opaque matrixLogChecked (t : @& RawTensor) : Except String RawTensor
-
-def sumAllChecked (t : RawTensor) : Except String RawTensor := sumChecked t none false
-
-def meanAllChecked (t : RawTensor) : Except String RawTensor := meanChecked t none false
-end torch.RawTensor
-
-namespace torch.RawTensor
-@[extern "lean_torch_tensor_exp_checked"] opaque expChecked (t : @& RawTensor) : Except String RawTensor
-
-@[extern "lean_torch_sqrt_checked"] opaque sqrtChecked (t : @& RawTensor) : Except String RawTensor
-
-@[extern "lean_torch_rsqrt_checked"] opaque rsqrtChecked (t : @& RawTensor) : Except String RawTensor
-
-@[extern "lean_torch_tensor_sigmoid_checked"] opaque sigmoidChecked (t : @& RawTensor) : Except String RawTensor
-
-@[extern "lean_torch_tensor_tanh_checked"] opaque tanhChecked (t : @& RawTensor) : Except String RawTensor
-
-@[extern "lean_torch_tensor_gelu_checked"] opaque geluChecked (t : @& RawTensor) : Except String RawTensor
-
-@[extern "lean_torch_tensor_silu_checked"] opaque siluChecked (t : @& RawTensor) : Except String RawTensor
-
-@[extern "lean_torch_pow_checked"] opaque powChecked (t : @& RawTensor) (exponent : Float) : Except String RawTensor
-
-@[extern "lean_torch_tensor_atan_checked"] opaque atanChecked (t : @& RawTensor) : Except String RawTensor
-
-@[extern "lean_torch_tensor_softmax_checked"] opaque softmaxChecked (t : @& RawTensor) (dim : @& Nat) : Except String RawTensor
-
-@[extern "lean_torch_log_softmax_checked"] opaque logSoftmaxChecked (t : @& RawTensor) (dim : @& Nat) : Except String RawTensor
-end torch.RawTensor
-
-namespace torch.RawTensor
-@[extern "lean_torch_maximum_checked"] opaque maximumChecked
-    (a b : @& RawTensor) : Except String RawTensor
 end torch.RawTensor
 
 namespace torch.RawTensor

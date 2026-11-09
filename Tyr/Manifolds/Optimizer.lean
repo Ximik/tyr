@@ -118,7 +118,7 @@ instance stiefelDualMapGeometry (m n : Nat) [DType.RealFloating d] :
     DualMapGeometry (Stiefel m n d dev) where
   tangentNorm := fun {x} (v : StiefelTangent m n d dev) =>
     let _ := x
-    Tensor.spectralNorm v.vec
+    Tensor.spectralNorm! v.vec
   cotangentNorm := fun {x} (g : StiefelTangent m n d dev) =>
     let _ := x
     Tensor.nuclearNorm g.vec
@@ -134,7 +134,7 @@ Uses ambient spectral/nuclear norms and normalizes the skew parameterization.
 instance orthogonalDualMapGeometry [DType.ConstantSupported d dev] (n : Nat) [DType.RealFloating d] :
     DualMapGeometry (Orthogonal n d dev) where
   tangentNorm := fun {x} (v : OrthogonalTangent n d dev) =>
-    Tensor.spectralNorm (OrthogonalTangent.toAmbient x v)
+    Tensor.spectralNorm! (OrthogonalTangent.toAmbient x v)
   cotangentNorm := fun {x} (g : OrthogonalTangent n d dev) =>
     Tensor.nuclearNorm (OrthogonalTangent.toAmbient x g)
   dualMap := fun {x} (g : OrthogonalTangent n d dev) =>
@@ -151,7 +151,7 @@ instance grassmannDualMapGeometry (n p : Nat) [DType.RealFloating d] :
     DualMapGeometry (Grassmann n p d dev) where
   tangentNorm := fun {x} (v : GrassmannTangent n p d dev) =>
     let _ := x
-    Tensor.spectralNorm v.vec
+    Tensor.spectralNorm! v.vec
   cotangentNorm := fun {x} (g : GrassmannTangent n p d dev) =>
     let _ := x
     Tensor.nuclearNorm g.vec

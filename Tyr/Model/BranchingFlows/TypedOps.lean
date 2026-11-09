@@ -57,6 +57,13 @@ def copyIntoChecked {σ τ : StaticSpec} (dst : Tensor σ) (src : Tensor τ) : I
 
 def touchTensor {σ : StaticSpec} (t : Tensor σ) : IO Unit := RawTensor.touch t.raw
 
+def mulTensorScalar! {σ : StaticSpec} {d result : DType} {scalarDevice : Device}
+    [TensorSpec.Promotes σ.toTensorSpec ⟨#[], d⟩ result]
+    (x : Tensor σ) (scalar : Tensor { shape := #[], dtype := d, device := scalarDevice }) :
+    Tensor ⟨σ.shape, result, σ.pointwiseDevice ⟨#[], d, scalarDevice⟩⟩ :=
+  Tensor.checkedResult "BranchingFlows.mulTensorScalar"
+    (Tensor.ofRaw (RawTensor.mulTensorScalar! x.raw scalar.raw))
+
 /-- A tensor learning rate follows rank-aware PyTorch promotion, including
 weak scalar precision. The result is never restored to the input dtype. -/
 def mulTensorScalar {σ : StaticSpec} {d result : DType} {scalarDevice : Device}
@@ -64,12 +71,7 @@ def mulTensorScalar {σ : StaticSpec} {d result : DType} {scalarDevice : Device}
     [Device.PointwiseCompatible σ ⟨#[], d, scalarDevice⟩]
     (x : Tensor σ) (scalar : Tensor { shape := #[], dtype := d, device := scalarDevice }) :
     Tensor ⟨σ.shape, result, σ.pointwiseDevice ⟨#[], d, scalarDevice⟩⟩ :=
-  let result := do
-    Tensor.checkPointwise x scalar
-    Tensor.ofRaw (← RawTensor.mulTensorScalarChecked x.raw scalar.raw)
-  match result with
-  | .ok tensor => tensor
-  | .error message => nativeInvariantFailure s!"BranchingFlows.mulTensorScalar: {message}"
+  mulTensorScalar! x scalar
 
 def cosDynamic {s : Shape} {dev : Device} (x : Tensor { dtype := dtype, shape := s, device := dev }) : Tensor { dtype := dtype, shape := s, device := dev } := Tensor.cos x
 

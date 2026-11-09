@@ -32,7 +32,7 @@ Input sensitivity ν = ||W||_σ since ||Wx||₂ ≤ ||W||_σ ||x||₂.
 instance (in_dim out_dim : Nat) {d : DType} {dev : Device} [DType.FloatingOrComplex d] :
     NormedModule (torch.Linear in_dim out_dim d dev) where
   norm m :=
-    let weightNorm := Tensor.spectralNorm m.weight
+    let weightNorm := Tensor.spectralNorm! m.weight
     match m.bias with
     | some b => floatMax weightNorm (Tensor.l2Norm b)
     | none => weightNorm
@@ -43,12 +43,12 @@ instance (in_dim out_dim : Nat) {d : DType} {dev : Device} [DType.FloatingOrComp
     | some b => weightDual + Tensor.l2Norm b
     | none => weightDual
 
-  nu m := Tensor.spectralNorm m.weight
+  nu m := Tensor.spectralNorm! m.weight
 
   mu _ := 1.0  -- For well-normed modules
 
   normalize m :=
-    let σ := Tensor.spectralNorm m.weight
+    let σ := Tensor.spectralNorm! m.weight
     if σ == 0.0 then m else
     let normalizedWeight := Tensor.mulScalar m.weight (1.0 / σ)
     match m.bias with
@@ -162,19 +162,19 @@ def forward {vocabSize dim batch seq : Nat}
 end Embedding
 
 instance (vocabSize dim : Nat) [DType.FloatingOrComplex dtype] : NormedModule (Embedding vocabSize dim dtype device) where
-  norm m := torch.Tensor.maxRowNorm m.weight
+  norm m := torch.Tensor.maxRowNorm! m.weight
 
   dualNorm m :=
     -- Sum of row norms
     let norms := torch.Tensor.rowNorms m.weight
     torch.Tensor.item (torch.Tensor.sumAll norms)
 
-  nu m := torch.Tensor.maxRowNorm m.weight
+  nu m := torch.Tensor.maxRowNorm! m.weight
 
   mu _ := 1.0
 
   normalize m :=
-    let n := torch.Tensor.maxRowNorm m.weight
+    let n := torch.Tensor.maxRowNorm! m.weight
     if n == 0.0 then m else
     { weight := torch.Tensor.mulScalar m.weight (1.0 / n) }
 

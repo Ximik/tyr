@@ -254,29 +254,15 @@ results remain leaf parameters.
 `scripts/test_native_tensor_errors.sh` exercises success and failure carriers,
 including borrowed-reference preservation and cleanup on invalid input.
 
-Core arithmetic and matrix adapters use checked native exports returning
-`Except String RawTensor`. Ordinary typed arithmetic `?` APIs preserve those errors, including missing kernels for otherwise
-valid promotion pairs. Fused `affine3d?` checks the actual dtype and device of
-both its weight and bias before calling the checked native kernel. Scalar
-spectral and nuclear norms also expose checked `?` variants for dtype, backend,
-and factorization failures. The checked expansion, concatenation, and reduction
-families follow the same result-carrier contract. Tensor-result conveniences
-using `checkedResult` or `checkedUpdate` abort with a diagnostic after receiving
-an error. Scalar norm conveniences retain Lean's panic mechanism. Use the corresponding `?` APIs for recoverable errors.
-
-Selection has separate static and runtime entry points. `argmax`, `maxLast3d`,
-and `topKLast2d` require ordered dtypes and the appropriate axis, nonempty-axis,
-or top-k bound proofs. Their `?` variants check actual metadata and retain native
-errors; the `*Checked` conveniences perform those checks and abort with a
-diagnostic on failure.
-`crossEntropy` and `crossEntropyNone` require real floating logits and Int64
-targets. Their `?` variants use checked native exports that validate target
-labels against the class range, allowing the default ignored label `-100`,
-before dispatching the loss kernel. Dynamic logits can use the corresponding
-`*Checked` conveniences. The four convolution adapters `conv1d?`, `conv2dBias?`,
-`conv1dGroups?`, and `convTranspose1d?` validate actual dtype/device equality,
-retain native argument and kernel errors, and check successful result metadata.
-These contracts do not extend to every raw selection, loss, or convolution export.
+Typed operations take their preconditions in their types and call unguarded
+native exports through `!` variants; a libtorch error aborts through Tyr's fatal
+error report. Each typed result is still admitted against its full
+specification. `svdReduced?` returns dtype, backend, and factorization failures as
+errors. `crossEntropy` and `crossEntropyNone` validate
+target labels in the native call against the class range, allowing the default
+ignored label `-100`, before dispatching the loss kernel. The four convolution
+adapters `conv1d?`, `conv2dBias?`, `conv1dGroups?`, and `convTranspose1d?`
+retain native argument and kernel errors.
 
 Checked vector indexing validates index bounds before accelerator dispatch,
 so invalid token IDs do not reach a device-side indexing assertion. Token-byte

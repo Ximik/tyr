@@ -23,8 +23,13 @@ example (_complex : Tensor ⟨#[2], .Complex64, .CPU⟩)
     (_integer : Tensor ⟨#[2], .Int64, .CPU⟩) : True := by
   fail_if_success have _ := Tensor.relu _complex
   fail_if_success have _ := Tensor.maxAll _empty
+  have _ := Tensor.sumDim _vector 0
   fail_if_success have _ := Tensor.sumDim _vector 1
+  have _ := Tensor.meanAll _vector
   fail_if_success have _ := Tensor.meanAll _integer
+  have _ := Tensor.meanDim _vector 0
+  fail_if_success have _ := Tensor.meanDim _vector 1
+  fail_if_success have _ := Tensor.meanDim _integer 0
   trivial
 
 example (x : Tensor ⟨#[2], .Int64, .CPU⟩) (y : Tensor ⟨#[2], .Float32, .CPU⟩)
@@ -61,20 +66,15 @@ example (_empty : Tensor ⟨#[0], .Float32, .CPU⟩) (_complex : Tensor ⟨#[2],
   expectError (Tensor.expand? x #[3]) "expand"
   expectError (Tensor.catMany? #[x.packShape, x.packShape] 9 #[4]) "Dimension"
   expectError (Tensor.catMany? (d := .Float32) (dev := .CPU) #[] 0 #[0]) "at least one"
-  expectError (Tensor.sumDim? x 1) "axis"
   let expanded ← checked (Tensor.expand? (Tensor.ones #[1]) #[3])
   LeanTest.assertEqual (← expanded.toFloatArray) #[1, 1, 1]
   let concatenated ← checked (Tensor.catMany? #[x.packShape, x.packShape] 0 #[4])
   LeanTest.assertEqual (← concatenated.toFloatArray) #[1, 1, 1, 1]
-  let summed ← checked (Tensor.sumDim? x 0)
+  let summed := Tensor.sumDim x 0
   LeanTest.assertEqual (← summed.toFloatArray) #[2]
 
 @[test] def testCheckedOperatorDomains : IO Unit := do
   let complex := (Tensor.fromFloatArray #[2, 4]).castDType .Complex64
-  expectError (Tensor.relu? complex) "real numeric"
-  let integer := (Tensor.fromInt64Array #[2, 4])
-  expectError (Tensor.meanDim? integer 0) "floating or complex"
-  expectError (Tensor.meanAll? integer) "floating or complex"
   let mean := Tensor.meanAll complex
   LeanTest.assertEqual mean.raw.dtype .Complex64
   LeanTest.assertEqual (← mean.toFloat32.toFloatArray) #[3]
@@ -86,16 +86,17 @@ example (_left : Tensor ⟨#[2, 2], .BFloat16, .CPU⟩)
     (_input : Tensor ⟨#[1, 2, 2], .Float32, .CPU⟩)
     (_bias : Tensor ⟨#[2], .Float32, .CPU⟩)
     (_otherBias : Tensor ⟨#[2], .Float64, .CPU⟩) : True := by
-  fail_if_success have _ := Tensor.mm? _left _right
-  fail_if_success have _ := Tensor.matmul? _left _right
-  fail_if_success have _ := Tensor.linear? _left _right
-  fail_if_success have _ := Tensor.affine3d? _input _left _bias
-  fail_if_success have _ := Tensor.affine3d? _input _right _otherBias
+  have _ := Tensor.mm _right _right
+  fail_if_success have _ := Tensor.mm _left _right
+  fail_if_success have _ := Tensor.linear _left _right
+  have _ := Tensor.affine3d _input _right _bias
+  fail_if_success have _ := Tensor.affine3d _input _left _bias
+  fail_if_success have _ := Tensor.affine3d _input _right _otherBias
   trivial
 
 @[test] def testMatrixActualDTypeEquality : IO Unit := do
   let left := (Tensor.ones #[2, 2]).toBFloat16
-  let product ← checked (Tensor.mm? left left)
+  let product := Tensor.mm left left
   LeanTest.assertEqual product.raw.dtype .BFloat16
   LeanTest.assertEqual (← product.toFloatArray) #[2, 2, 2, 2]
 
@@ -103,19 +104,16 @@ example (_left : Tensor ⟨#[2, 2], .BFloat16, .CPU⟩)
   let input := (Tensor.full #[1, 2, 2] 3)
   let weight := (Tensor.full #[2, 2] 2)
   let bias := (Tensor.ones #[2])
-  let result ← checked (Tensor.affine3d? input weight bias)
+  let result := Tensor.affine3d input weight bias
   LeanTest.assertEqual result.raw.dtype .Float32
   LeanTest.assertEqual (← result.toFloatArray) #[13, 13, 13, 13]
 
-@[test] def testAffineMissingKernelIsRecoverable : IO Unit := do
-  let input := (Tensor.ones #[1, 2, 2]).castDType .Bool
-  let weight := (Tensor.ones #[2, 2]).castDType .Bool
-  let bias := (Tensor.ones #[2]).castDType .Bool
-  expectError (Tensor.affine3d? input weight bias) "affine3d"
-
-example (_input : Tensor ⟨#[2, 2], .Int64, .CPU⟩) : True := by
+example (_input : Tensor ⟨#[2, 2], .Int64, .CPU⟩) (_empty : Tensor ⟨#[0, 2], .Float32, .CPU⟩) :
+    True := by
   fail_if_success have _ := Tensor.spectralNorm _input
   fail_if_success have _ := Tensor.nuclearNorm _input
+  fail_if_success have _ := Tensor.spectralNorm _empty
+  have _ := Tensor.nuclearNorm _empty
   trivial
 
 example {d : DType} [DType.FloatingOrComplex d]
@@ -126,21 +124,9 @@ example {d : DType} [DType.FloatingOrComplex d]
   let real := (Tensor.fromFloatArray #[3, 0, 0, 4]).reshape #[2, 2]
   for dtype in #[DType.Float32, .Float64, .Complex64, .Complex128] do
     let input := real.castDType dtype
-    LeanTest.assertEqual (← checked (Tensor.spectralNorm? input)) 4
-    LeanTest.assertEqual (← checked (Tensor.nuclearNorm? input)) 7
-  let integers := (real.castDType .Int64)
-  expectError (Tensor.spectralNorm? integers) "floating or complex"
-  expectError (Tensor.nuclearNorm? integers) "floating or complex"
-  let halfComplex := real.castDType .Complex32
-  expectError (Tensor.spectralNorm? halfComplex) "spectralNorm"
-  expectError (Tensor.nuclearNorm? halfComplex) "nuclearNorm"
-  expectError (Tensor.spectralNorm? (Tensor.zeros #[0, 2])) "nonempty"
-  LeanTest.assertEqual (← checked (Tensor.nuclearNorm? (Tensor.zeros #[0, 2]))) 0
-
-@[test] def testMissingKernelIsRecoverable : IO Unit := do
-  let x := (Tensor.ones #[2]).castDType .Complex32
-  -- Promotion exists, but the pinned CPU backend lacks ComplexHalf division.
-  expectError (Tensor.div? x x) "div"
+    LeanTest.assertEqual (Tensor.spectralNorm! input) 4
+    LeanTest.assertEqual (Tensor.nuclearNorm! input) 7
+  LeanTest.assertEqual (Tensor.nuclearNorm (Tensor.zeros #[0, 2])) 0
 
 @[test] def testTensorScalarBroadcastPromotion : IO Unit := do
   let x := Tensor.fromInt64Array #[2, 4]

@@ -83,16 +83,15 @@ example (_float8 : Tensor ⟨#[1], .Float8E4M3FN, .CPU⟩) (_floats : Tensor ⟨
 @[test] def testFloatingArithmeticRetainsResultDTypeAndValues : IO Unit := do
   let lhs := (Tensor.fromFloatArray #[6, 12])
   let rhs := (Tensor.fromFloatArray #[2, 3])
-  let cases : Array (Array Float × Except String (Tensor { shape := #[2], dtype := .Float32, device := .CPU })) := #[
-    (#[8, 15], Tensor.add? lhs rhs),
-    (#[4, 9], Tensor.sub? lhs rhs),
-    (#[12, 36], Tensor.mul? lhs rhs),
-    (#[3, 4], Tensor.div? lhs rhs),
-    (#[8, 14], Tensor.addScalar? lhs 2),
-    (#[12, 24], Tensor.mulScalar? lhs 2),
-    (#[3, 6], Tensor.divScalar? lhs 2)]
-  for (expected, result) in cases do
-    let output ← checked result
+  let cases : Array (Array Float × Tensor { shape := #[2], dtype := .Float32, device := .CPU }) := #[
+    (#[8, 15], Tensor.add lhs rhs),
+    (#[4, 9], Tensor.sub lhs rhs),
+    (#[12, 36], Tensor.mul lhs rhs),
+    (#[3, 4], Tensor.div lhs rhs),
+    (#[8, 14], Tensor.addScalar lhs 2),
+    (#[12, 24], Tensor.mulScalar lhs 2),
+    (#[3, 6], Tensor.divScalar lhs 2)]
+  for (expected, output) in cases do
     LeanTest.assertEqual output.raw.dtype .Float32
     LeanTest.assertTrue output.validate.toOption.isSome
     LeanTest.assertEqual (← output.toFloatArray) expected
