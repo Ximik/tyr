@@ -417,8 +417,6 @@ namespace torch.RawTensor
 end torch.RawTensor
 
 namespace torch.RawTensor
-@[extern "lean_torch_gt_checked"] opaque gtChecked (a b : @& RawTensor) : Except String RawTensor
-
 @[extern "lean_torch_logical_and_checked"] opaque logicalAndChecked (a b : @& RawTensor) : Except String RawTensor
 
 @[extern "lean_torch_cat2_checked"] opaque catChecked (a b : @& RawTensor) (dim : @& Nat) : Except String RawTensor

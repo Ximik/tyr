@@ -255,7 +255,7 @@ private def forwardDecode1
       let u : Tensor { dtype := dtype, device := device, shape := #[k, 1, mi] } := bmm x3 (transposeMatrixBatch upW)
       let hid : Tensor { dtype := dtype, device := device, shape := #[k, 1, mi] } := mulSame (Tensor.silu g) u
       let o : Tensor { dtype := dtype, device := device, shape := #[k, 1, h] } := bmm hid (transposeMatrixBatch downW)
-      let ow : Tensor { dtype := dtype, device := device, shape := #[k, 1, h] } := mulBroadcast (Tensor.reshape flatW #[k, 1, 1]) o
+      let ow : Tensor { dtype := dtype, device := device, shape := #[k, 1, h] } := Tensor.mul (Tensor.expand (Tensor.reshape flatW #[k, 1, 1]) #[k, 1, h]) o
       pure (show Tensor ⟨#[1, h], dtype, device⟩ from by
         simpa using (Tensor.reshape (Tensor.sumDim ow 0 false) #[1, h]))
   -- Dense shared expert (SwiGLU MLP, no gating score).
@@ -343,7 +343,7 @@ def forward2d {tokens : Nat}
         let outE : Tensor { dtype := dtype, device := device, shape := #[nE, cfg.hidden_size] } := Tensor.linear hid downW
         -- Routing weights multiply the expert OUTPUT (moe_apply_router_weight_on_input=false).
         let wCol := wE.reshape #[nE, 1]
-        let outEW : Tensor { dtype := dtype, device := device, shape := #[nE, cfg.hidden_size] } := mulBroadcast wCol outE
+        let outEW : Tensor { dtype := dtype, device := device, shape := #[nE, cfg.hidden_size] } := Tensor.mul (Tensor.expand wCol #[nE, cfg.hidden_size]) outE
         let idxRows : Tensor { device := device, shape := #[nE, cfg.hidden_size], dtype := .Int64 } :=
           Tensor.reshape (Tensor.expand (Tensor.reshape tokE #[nE, 1]) #[nE, cfg.hidden_size]) #[nE, cfg.hidden_size]
         acc := scatterAdd acc 0 idxRows outEW

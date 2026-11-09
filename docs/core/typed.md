@@ -238,7 +238,7 @@ a floating instance. Model loaders validate compute dtypes when loading and
 return `RealFloatingDType` indices. Unpacking the loaded package automatically
 supplies `DType.RealFloating dtype.val`; forward code does not repeat admission
 checks. Independent storage roles retain their own exact dtype indices.
-Use the promoting API when changing dtype is intended.
+Use an explicit cast when changing dtype is intended.
 
 The SafeTensors type provider emits concrete shape/dtype indices and derives
 structural and constrained traversals for its generated records. Loading checks
@@ -246,27 +246,8 @@ the actual tensors against that schema. A floating subtree can then be passed
 to typed arithmetic directly, while an integer leaf prevents the whole tree
 from acquiring a floating constraint.
 
-Use `Tensor.Promoting.add?`, `sub?`, `mul?`, and `div?` when input dtype indices
-are dynamic and the operation should follow native promotion. They inspect the
-actual operand dtypes, construct a promotion witness, and validate the result
-at its computed dtype. The returned `Promoted` package exposes `dtype`,
-`witness`, and `tensor`; division additionally applies its integer-to-floating
-result rule. Host-scalar variants such as `mulScalar?` return `ScalarPromoted`
-with a `ScalarPromotes` witness. No input cast is needed, and the result's dtype
-remains part of its tensor index. For example, BF16 activations multiplied by
-Float32 routing weights produce Float32, while BF16 activations multiplied by an
-Int64 mask remain BF16.
-The `?` arithmetic variants report unsupported promotion, placement mismatches,
-and native kernel failures. A valid promotion witness still does not guarantee
-that a kernel exists.
-
-Runtime broadcasting uses `Tensor.Promoting.addB?`, `subB?`, `mulB?`, and `divB?`.
-They take an explicit output shape and check it against the broadcast result
-before native execution. Their `PointwisePromoted` package carries
-`TensorSpec.Promotes` evidence tied to the operands' actual ranks and dtypes.
 `Tensor.whereSelect` promotes its two value operands and requires a Bool
-condition; `Tensor.Promoting.whereSelect?` provides the corresponding checked
-runtime witness. Selection does not cast the result back to the left dtype.
+condition. Selection does not cast the result back to the left dtype.
 
 Matrix multiplication requires operands with matching dtype and concrete device.
 The checked `matmul?`, `mm?`, `linear?`, `linear3d?`, `matmul3d?`, and `bmm4d?`

@@ -26,7 +26,7 @@ private def weight (s : Shape) (offset : Float := 0.0) (dtype : DType := .Float3
   ((Tensor.fromFloatArray vals).reshape s).castDType dtype
 
 private def norm (n : Nat) (dtype : DType := .Float32) : Gemma4RMSNorm (device := .CPU) n :=
-  { weight := packExactTensor ((Tensor.ones #[n]).castDType dtype) }
+  { weight := ⟨dtype, (Tensor.ones #[n]).castDType dtype⟩ }
 
 private def textModel (c : Config) (dtype : DType := .Float32) : Gemma4ForCausalLM (device := .CPU) c dtype := Id.run do
   let mut layers := #[]
@@ -140,15 +140,15 @@ private def roundTrip {α : Type} [TensorStruct α] (params : α) (dir : String)
 @[test] def testGemma4BFloat16Router : IO Unit := do
   let c := { cfg with num_experts := 3, top_k_experts := 2 }
   let router : Gemma4TextRouter c := {
-    proj := packExactTensor (weight #[3, 8] 0.3 .BFloat16)
-    scale := packExactTensor (weight #[8] 0.5 .BFloat16)
-    per_expert_scale := packExactTensor ((Tensor.ones #[3]).toBFloat16) }
+    proj := weight #[3, 8] 0.3
+    scale := weight #[8] 0.5
+    per_expert_scale := Tensor.ones #[3] }
   let x := (weight #[2, 8] 0.7).toBFloat16
   let (probs, weights, indices) := router.forward c x
   LeanTest.assertEqual probs.actualSpec.dtype .Float32
-  LeanTest.assertEqual weights.1 .Float32
+  LeanTest.assertEqual weights.actualSpec.dtype .Float32
   LeanTest.assertEqual indices.actualSpec.dtype .Int64
-  for v in (← weights.2.toFloatArray) do LeanTest.assertTrue v.isFinite
+  for v in (← weights.toFloatArray) do LeanTest.assertTrue v.isFinite
   let rows ← probs.toFloatArray
   for row in [:2] do
     let total := rows[row * 3]! + rows[row * 3 + 1]! + rows[row * 3 + 2]!
@@ -198,7 +198,7 @@ private def multimodalModel (dtype : DType := .Float32) : Gemma4ForConditionalGe
   vision_tower := {
     patch_embedder := {
       input_proj := visionLinear 8 12 0.2 dtype
-      position_embedding_table := packExactTensor (weight #[2, 8, 8] 0.3 dtype) }
+      position_embedding_table := weight #[2, 8, 8] 0.3 }
     blocks := #[{
       input_layernorm := norm 8 dtype, post_attention_layernorm := norm 8 dtype
       pre_feedforward_layernorm := norm 8 dtype, post_feedforward_layernorm := norm 8 dtype
@@ -209,8 +209,8 @@ private def multimodalModel (dtype : DType := .Float32) : Gemma4ForConditionalGe
       mlp := {
         gate_proj := visionLinear 12 8 0.9 dtype, up_proj := visionLinear 12 8 1.0 dtype
         down_proj := visionLinear 8 12 1.1 dtype } }]
-    std_bias := some (packExactTensor (weight #[8] 1.2 dtype))
-    std_scale := some (packExactTensor ((Tensor.ones #[8]).castDType dtype)) } }
+    std_bias := some (weight #[8] 1.2)
+    std_scale := some (Tensor.ones #[8]) } }
 
 @[test] def testGemma4VisionClippingAndFeatureBatching : IO Unit := do
   let clipped : Gemma4VisionLinear 2 2 := {
@@ -262,28 +262,12 @@ private def multimodalModel (dtype : DType := .Float32) : Gemma4ForConditionalGe
     Tests.assertThrows (media.loadImagePatchGrid vlCfg path.toString) (some "requires macOS")
 
 
-@[test] def testGemma4RouterRetainsFloat64Scale : IO Unit := do
-  let c := { cfg with num_experts := 3, top_k_experts := 2 }
-  let router : Gemma4TextRouter c := {
-    proj := packExactTensor (weight #[3, 8] 0.3 .BFloat16)
-    scale := packExactTensor (weight #[8] 0.5 .Float32)
-    per_expert_scale := packExactTensor ((Tensor.ones #[3]).castDType .Float64) }
-  let (probs, selected, _) := router.forward c (weight #[2, 8] 0.7 .BFloat16)
-  LeanTest.assertEqual probs.actualSpec.dtype .Float32
-  LeanTest.assertEqual selected.1 .Float64
-  LeanTest.assertTrue ((← selected.2.toFloatArray).all Float.isFinite)
-
-@[test] def testGemma4VisionRetainsPromotedResidualDType : IO Unit := do
-  let base := multimodalModel .BFloat16
-  let vision := { base.vision_tower with
-    patch_embedder := { base.vision_tower.patch_embedder with
-      position_embedding_table := packExactTensor (weight #[2, 8, 8] 0.3 .Float32) }
-    std_bias := some (packExactTensor (weight #[8] 1.2 .Float32))
-    std_scale := some (packExactTensor (Tensor.ones #[8])) }
+@[test] def testGemma4VisionResidualIsFloat32 : IO Unit := do
+  let vision := (multimodalModel .BFloat16).vision_tower
   let features := vision.forward vlCfg (weight #[4, 4, 12] 0.1)
-  LeanTest.assertEqual features.1 .Float32
+  LeanTest.assertEqual features.actualSpec.dtype .Float32
   LeanTest.assertEqual vision.patch_embedder.input_proj.weight.actualSpec.dtype .BFloat16
-  LeanTest.assertTrue ((← features.2.toFloatArray).all Float.isFinite)
+  LeanTest.assertTrue ((← features.toFloatArray).all Float.isFinite)
 
 private def writeTensorEntries (directory : System.FilePath)
     (entries : Array (String × Shape × Bool)) (sharded : Bool) : IO Unit := do

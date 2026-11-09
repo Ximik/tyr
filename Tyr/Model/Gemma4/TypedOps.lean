@@ -10,18 +10,6 @@ private def checked {σ : StaticSpec} (raw : RawTensor) : Tensor σ :=
   | .ok result => result
   | .error message => nativeInvariantFailure s!"Gemma4 tensor boundary: {message}"
 
-def packExactTensor {σ : StaticSpec} (tensor : Tensor σ) : SomeDTypeTensor σ.shape σ.device :=
-  match tensor.reifyDType with
-  | .ok result => result
-  | .error message => nativeInvariantFailure s!"Gemma4 exact tensor: {message}"
-
-def promotedSub {shape : Shape} {leftDType rightDType : DType}
-    (left : Tensor ⟨shape, leftDType, device⟩)
-    (right : Tensor ⟨shape, rightDType, device⟩) : SomeDTypeTensor shape device :=
-  match Tensor.Promoting.sub? left right with
-  | .ok result => packExactTensor result.tensor
-  | .error message => nativeInvariantFailure s!"Gemma4 mixed subtraction: {message}"
-
 def sliceTyped {s : Shape} {d : DType} (x : Tensor { device := device, shape := s, dtype := d })
     (dim : Nat) (start len : Nat) : Tensor { device := device, shape := (s.set! dim len), dtype := d } :=
   x.sliceChecked dim start len (s.set! dim len)

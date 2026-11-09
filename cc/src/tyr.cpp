@@ -4312,10 +4312,6 @@ lean_object* lean_torch_maximum_checked(b_lean_obj_arg a, b_lean_obj_arg b) {
   });
 }
 
-lean_object* lean_torch_gt_checked(b_lean_obj_arg a, b_lean_obj_arg b) {
-  return tyr::checkedCall("gt", [&] { return lean_torch_gt(a, b); });
-}
-
 lean_object* lean_torch_logical_and_checked(b_lean_obj_arg a, b_lean_obj_arg b) {
   return tyr::checkedCall("logicalAnd", [&] { return lean_torch_logical_and(a, b); });
 }

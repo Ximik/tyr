@@ -47,11 +47,9 @@ private def applyMaskToPaddingStates {batch seq hidden : Nat}
     match attentionMask with
     | none => x
     | some m =>
-      -- Keep the integer mask: native promotion with floating activations
-      -- retains their dtype instead of introducing an unnecessary Float32 value.
       let me : Tensor { device := device, shape := #[batch, seq, hidden], dtype := .Int64 } :=
         Tensor.expand (Tensor.reshape m #[batch, seq, 1]) #[batch, seq, hidden]
-      Tensor.castLike x (promotedMul x me).2
+      Tensor.mul x (me.castDType dtype)
 
 /-- Qwen3.5 RMSNorm with `(1 + weight)` scaling. -/
 structure Qwen35RMSNorm (dim : Nat) where
@@ -203,17 +201,17 @@ def init (cfg : Config) (device : Device := .CPU) (dtype : DType := .Float32) : 
   let down ← initDynamicWeight (dtype := dtype) (device := device) #[cfg.num_experts, cfg.hidden_size, cfg.moe_intermediate_size] cfg.moe_intermediate_size
   pure { gate_up_proj := gu, down_proj := down }
 
-def forward2d {tokens : Nat} {routingDType : DType}
+def forward2d {tokens : Nat}
     (cfg : Config)
     (m : Qwen35MoeExperts (dtype := dtype) (device := device) cfg)
     (hidden : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype })
-    (topVals : Tensor { device := device, shape := #[tokens, cfg.num_experts_per_tok], dtype := routingDType })
+    (topVals : Tensor { device := device, shape := #[tokens, cfg.num_experts_per_tok], dtype := .Float32 })
     (topIdx : Tensor { device := device, shape := #[tokens, cfg.num_experts_per_tok], dtype := .Int64 })
     : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype } :=
   Id.run do
     let device := hidden.device
-    let mut acc : SomeDTypeTensor #[tokens, cfg.hidden_size] device :=
-      ⟨.Float32, Tensor.zeros #[tokens, cfg.hidden_size] (device := device)⟩
+    let mut acc : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := .Float32 } :=
+      Tensor.zeros #[tokens, cfg.hidden_size] (device := device)
 
     for slot in [:cfg.num_experts_per_tok] do
       -- Gather ONLY the routed expert's weights per token (an embedding row
@@ -246,12 +244,12 @@ def forward2d {tokens : Nat} {routingDType : DType}
       let outDyn : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype } := einsumChecked "thi,ti->th" tokDown inter
       let out : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype } := Tensor.reshape outDyn #[tokens, cfg.hidden_size]
 
-      let w2d : Tensor { device := device, shape := #[tokens, 1], dtype := routingDType } := typedSlice topVals 1 slot 1
-      let w : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := routingDType } := Tensor.expand w2d #[tokens, cfg.hidden_size]
-      acc := promotedAdd acc.2 (promotedMul out w).2
+      let w2d : Tensor { device := device, shape := #[tokens, 1], dtype := .Float32 } := typedSlice topVals 1 slot 1
+      let w : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := .Float32 } := Tensor.expand w2d #[tokens, cfg.hidden_size]
+      acc := Tensor.add acc (Tensor.mul (floatDynamic out) w)
 
     -- Restore the model dtype so downstream layers see consistent dtypes.
-    return Tensor.castLike hidden acc.2
+    return Tensor.castLike hidden acc
 
 end Qwen35MoeExperts
 
@@ -287,7 +285,7 @@ def forward {batch seq : Nat}
 
   let (_routerProbs, topVals, topIdx) := m.router.forward cfg hidden2d
   let expertOut : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype } :=
-    m.experts.forward2d cfg hidden2d topVals topIdx
+    m.experts.forward2d cfg hidden2d (floatDynamic topVals) topIdx
 
   let sharedOut : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype } :=
     m.shared_expert.forward2d hidden2d
@@ -563,8 +561,8 @@ structure Qwen35GatedDeltaNet (cfg : Config) (dtype : DType := .Float32) where
   conv1d_weight : Tensor { device := device, shape := #[Config.linearConvDim cfg, 1, cfg.linear_conv_kernel_dim], dtype := dtype }
   conv1d_bias : Tensor { device := device, shape := #[Config.linearConvDim cfg], dtype := dtype }
 
-  dt_bias : SomeDTypeTensor #[cfg.linear_num_value_heads] device
-  a_log : SomeDTypeTensor #[cfg.linear_num_value_heads] device
+  dt_bias : Tensor { device := device, shape := #[cfg.linear_num_value_heads], dtype := .Float32 }
+  a_log : Tensor { device := device, shape := #[cfg.linear_num_value_heads], dtype := .Float32 }
 
   norm : Qwen35RMSNormGated (device := device) cfg.linear_value_head_dim
   out_proj : Tensor { device := device, shape := #[cfg.hidden_size, Config.linearValueDim cfg], dtype := dtype }
@@ -595,8 +593,8 @@ def init (cfg : Config) (device : Device := .CPU) (dtype : DType := .Float32) : 
     in_proj_a := inA
     conv1d_weight := convW
     conv1d_bias := convB
-    dt_bias := ⟨.Float32, dtBias⟩
-    a_log := ⟨.Float32, aLog⟩
+    dt_bias := dtBias
+    a_log := aLog
     norm := (← Qwen35RMSNormGated.init (device := device) cfg.linear_value_head_dim cfg.rms_norm_eps)
     out_proj := outProj
   }
@@ -699,11 +697,11 @@ def forward {batch seq : Nat}
 
   let beta : Tensor { device := device, shape := #[batch, seq, cfg.linear_num_value_heads], dtype := dtype } := Tensor.sigmoid b
 
-  let dt : Tensor { device := device, shape := #[batch, seq, cfg.linear_num_value_heads], dtype := m.dt_bias.1 } :=
-    Tensor.expand (Tensor.reshape m.dt_bias.2 #[1, 1, cfg.linear_num_value_heads]) #[batch, seq, cfg.linear_num_value_heads]
+  let dt : Tensor { device := device, shape := #[batch, seq, cfg.linear_num_value_heads], dtype := .Float32 } :=
+    Tensor.expand (Tensor.reshape m.dt_bias #[1, 1, cfg.linear_num_value_heads]) #[batch, seq, cfg.linear_num_value_heads]
   let aExp : Tensor { device := device, shape := #[batch, seq, cfg.linear_num_value_heads], dtype := .Float32 } :=
-    Tensor.expand (Tensor.reshape (Tensor.exp (floatDynamic m.a_log.2)) #[1, 1, cfg.linear_num_value_heads]) #[batch, seq, cfg.linear_num_value_heads]
-  let gPos : Tensor { device := device, shape := #[batch, seq, cfg.linear_num_value_heads], dtype := .Float32 } := softplusDynamic (floatDynamic (promotedAdd a dt).2)
+    Tensor.expand (Tensor.reshape (Tensor.exp m.a_log) #[1, 1, cfg.linear_num_value_heads]) #[batch, seq, cfg.linear_num_value_heads]
+  let gPos : Tensor { device := device, shape := #[batch, seq, cfg.linear_num_value_heads], dtype := .Float32 } := softplusDynamic (Tensor.add (floatDynamic a) dt)
   let g : Tensor { device := device, shape := #[batch, seq, cfg.linear_num_value_heads], dtype := .Float32 } := Tensor.mulScalar (Tensor.mul gPos aExp) (-1.0)
 
   let rep := Config.linearKVRepeat cfg

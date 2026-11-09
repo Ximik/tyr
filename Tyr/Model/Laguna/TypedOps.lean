@@ -10,11 +10,6 @@ private def checked {σ : StaticSpec} (raw : RawTensor) : Tensor σ :=
   | .ok tensor => tensor
   | .error message => nativeInvariantFailure s!"Laguna tensor boundary: {message}"
 
-def mulBroadcast {s t out : Shape} (a : Tensor { dtype := dtype, device := device, shape := s }) (b : Tensor { dtype := dtype, device := device, shape := t }) : Tensor { dtype := dtype, device := device, shape := out } :=
-  match Tensor.Promoting.mulB? a b out with
-  | .ok result => checked result.tensor.raw
-  | .error message => nativeInvariantFailure s!"Laguna.mulBroadcast: {message}"
-
 def bmm {b m n k : Nat} (x : Tensor { dtype := dtype, device := device, shape := #[b, m, k] }) (y : Tensor { dtype := dtype, device := device, shape := #[b, k, n] }) :
     Tensor { dtype := dtype, device := device, shape := #[b, m, n] } :=
   checked (RawTensor.lagunaBmm x.raw y.raw)

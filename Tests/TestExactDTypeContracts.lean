@@ -14,13 +14,12 @@ example : True := by
     have _ : StaticSpec := { shape := #[2], device := .CPU }
   trivial
 
-@[test] def testRuntimePromotionRetainsItsResultIndex : IO Unit := do
+@[test] def testPromotionRetainsItsResultIndex : IO Unit := do
   let left := Tensor.ones #[2]
   let right := (Tensor.ones #[2]).castDType .Float64
-  let result ← IO.ofExcept (Tensor.Promoting.add? left right)
-  LeanTest.assertEqual result.dtype .Float64
-  LeanTest.assertEqual result.tensor.raw.dtype result.dtype
-  LeanTest.assertEqual (← result.tensor.toFloatArray) #[2.0, 2.0]
+  let result : Tensor ⟨#[2], .Float64, .CPU⟩ := Tensor.add left right
+  LeanTest.assertEqual result.raw.dtype .Float64
+  LeanTest.assertEqual (← result.toFloatArray) #[2.0, 2.0]
 
 @[test] def testFileLoadingRetainsItsDTypeWitness : IO Unit := do
   IO.FS.withTempDir fun directory => do

@@ -71,10 +71,6 @@ def mulTensorScalar {σ : StaticSpec} {d result : DType} {scalarDevice : Device}
   | .ok tensor => tensor
   | .error message => nativeInvariantFailure s!"BranchingFlows.mulTensorScalar: {message}"
 
-def mulTensorScalar? {σ : StaticSpec} {d : DType} {scalarDevice : Device}
-    (x : Tensor σ) (scalar : Tensor { shape := #[], dtype := d, device := scalarDevice }) :=
-  Tensor.Promoting.mulB? x scalar σ.shape
-
 def cosDynamic {s : Shape} {dev : Device} (x : Tensor { dtype := dtype, shape := s, device := dev }) : Tensor { dtype := dtype, shape := s, device := dev } := Tensor.cos x
 
 def affine2d {batch input output : Nat} {dev : Device} (x : Tensor { dtype := dtype, shape := #[batch, input], device := dev })

@@ -365,12 +365,7 @@ private def applyRepetitionPenalty {batch vocab histLen : Nat}
     let penalizedNeg := Tensor.mulScalar gathered penalty
     let penalizedPos := Tensor.divScalar gathered penalty
     let penalized : Tensor { shape := #[batch, histLen], dtype := dtype.val, device := device } :=
-      match Tensor.Promoting.whereSelect? negMask penalizedNeg penalizedPos with
-      | .error message => nativeInvariantFailure s!"Qwen3TTS repetition penalty: {message}"
-      | .ok promoted =>
-        match Tensor.ofRaw promoted.tensor.raw with
-        | .ok result => result
-        | .error message => nativeInvariantFailure s!"Qwen3TTS repetition penalty: {message}"
+      Tensor.whereSelect negMask penalizedNeg penalizedPos
     Tensor.scatter2d logits 1 history penalized
 
 /-- Sample a full codec frame from the current talker hidden state `[batch,1,hidden]`. -/
