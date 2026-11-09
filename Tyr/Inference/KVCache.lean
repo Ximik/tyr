@@ -222,25 +222,25 @@ def Cache.appendLayer (cache : Cache numLayers batch maxSeqLen numKvHeads headDi
     decode-eligible (head_dim ∈ {64, 128, 256}, qSeq==1, BF16, GQA-valid),
     and falls back to PyTorch SDPA otherwise.
 
-    Rejects invalid head counts, layer indices, capacity and (at runtime, for
+    Rejects zero head counts, layer indices, capacity and (at runtime, for
     dynamically-graded specs) query device/dtype mismatches before writing;
     native shapes are revalidated before either cache buffer is written.
 
     Does NOT advance `seqLens` — call `cache.incrementSeqLens` once per
     generated token after all layers have been processed for the step. -/
 def Cache.attendLayer
-    {numQHeads : Nat}
+    {numQHeads : Nat} [DType.RealFloating dtype]
     (cache : Cache numLayers batch maxSeqLen numKvHeads headDim dtype device)
     (layerIdx : Nat)
     (newQ : Tensor ⟨#[batch, numQHeads, 1, headDim], dtype, device⟩)
     (newK newV : Tensor ⟨#[batch, numKvHeads, 1, headDim], dtype, device⟩)
     (enableGqa : Bool := false)
+    (_heads : Tensor.AttentionHeads numQHeads numKvHeads enableGqa := by attention_heads)
     : IO (Cache numLayers batch maxSeqLen numKvHeads headDim dtype device
       × Tensor ⟨#[batch, numQHeads, 1, headDim], dtype, device⟩) := do
   let some lc := cache.layers[layerIdx]?
     | throw <| IO.userError "KV cache layer index out of range"
   if numQHeads == 0 || numKvHeads == 0 ||
-      (if enableGqa then numQHeads % numKvHeads != 0 else numQHeads != numKvHeads) ||
       newQ.raw.device != lc.keys.raw.device || newQ.raw.dtype != lc.keys.raw.dtype then
     throw <| IO.userError "KV cache query heads, device or dtype mismatch"
   match newQ.validate with
@@ -251,7 +251,7 @@ def Cache.attendLayer
   let some updatedLayer := cache'.layers[layerIdx]?
     | throw <| IO.userError "KV cache layer index out of range after append"
   let (kView, vView) ← updatedLayer.attentionView validLen
-  let output := Tensor.flashAttention (Tensor.detach newQ) kView vView enableGqa
+  let output := Tensor.flashAttention (Tensor.detach newQ) kView vView enableGqa (_heads := _heads)
   return (cache', output)
 
 /-- TensorStruct instance for LayerCache -/

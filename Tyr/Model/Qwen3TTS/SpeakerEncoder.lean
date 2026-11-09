@@ -87,7 +87,7 @@ def forward {batch frames inChannels outChannels kernelSize dilation : Nat}
     rw [hm]
     omega
   let y : Tensor { shape := #[batch, outChannels, frames], dtype := dtype.val, device := device } :=
-    Tensor.reshape (Tensor.conv1d x m.weight 1 (samePadding kernelSize dilation) dilation)
+    Tensor.reshape (Tensor.conv1d! x m.weight 1 (samePadding kernelSize dilation) dilation)
       #[batch, outChannels, frames] (by rw [hlen])
   Tensor.relu (addBias3d y m.bias)
 

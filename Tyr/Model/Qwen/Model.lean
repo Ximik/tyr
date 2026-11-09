@@ -72,7 +72,7 @@ def forwardWithHiddenStates {batch seq : Nat} (cfg : QwenConfig)
   let (finalH, hiddenStates) := model.layers.foldl
     (fun (acc : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } × Array (Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })) layer =>
       let (h, states) := acc
-      let h' := layer.forward h cos sin true
+      let h' := layer.forward cfg.headsValid.2.2 h cos sin true
       (h', states.push h'))
     (hidden, #[])
   -- Add final normalized state
@@ -93,7 +93,7 @@ def forwardWithHiddenStatesMasked {batch seq : Nat} (cfg : QwenConfig)
   let (finalH, hiddenStates) := model.layers.foldl
     (fun (acc : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } × Array (Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })) layer =>
       let (h, states) := acc
-      let h' := layer.forwardMasked h cos sin attn_mask true
+      let h' := layer.forwardMasked cfg.headsValid.2.2 h cos sin attn_mask true
       (h', states.push h'))
     (hidden, #[])
   -- Add final normalized state
@@ -114,7 +114,7 @@ def forward {batch seq : Nat} (cfg : QwenConfig)
   let hidden := Tensor.embedding input_ids model.embed_tokens
   -- Process each layer using fold
   let finalH := model.layers.foldl
-    (fun h layer => layer.forward h cos sin true)
+    (fun h layer => layer.forward cfg.headsValid.2.2 h cos sin true)
     hidden
   -- Final normalization
   model.norm.forward3dPreserving finalH
@@ -131,7 +131,7 @@ def forwardMasked {batch seq : Nat} (cfg : QwenConfig)
   let hidden := Tensor.embedding input_ids model.embed_tokens
   -- Process each layer using fold
   let finalH := model.layers.foldl
-    (fun h layer => layer.forwardMasked h cos sin attn_mask true)
+    (fun h layer => layer.forwardMasked cfg.headsValid.2.2 h cos sin attn_mask true)
     hidden
   -- Final normalization
   model.norm.forward3dPreserving finalH

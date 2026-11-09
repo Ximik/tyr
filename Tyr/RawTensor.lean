@@ -107,7 +107,7 @@ The source shape is checked before conversion and never reshaped. -/
 
 @[extern "lean_torch_tensor_softmax"] opaque softmax! (t : @& RawTensor) (dim : @& Nat) : RawTensor
 
-@[extern "lean_torch_expand"] opaque expand (t : @& RawTensor) (target : Array Nat) : RawTensor
+@[extern "lean_torch_expand"] opaque expand! (t : @& RawTensor) (target : Array Nat) : RawTensor
 
 @[extern "lean_torch_permute"] opaque permute (t : @& RawTensor) (permutation : Array Nat) : RawTensor
 
@@ -118,7 +118,7 @@ The source shape is checked before conversion and never reshaped. -/
 
 @[extern "lean_torch_squeeze"] opaque squeeze (t : @& RawTensor) (dim : @& Nat) : RawTensor
 
-@[extern "lean_torch_cat2"] opaque cat (a b : @& RawTensor) (dim : @& Nat) : RawTensor
+@[extern "lean_torch_cat2"] opaque cat! (a b : @& RawTensor) (dim : @& Nat) : RawTensor
 
 @[extern "lean_torch_sum"] opaque sum! (t : @& RawTensor) (dims : Option (Array Nat)) (keepdim : Bool) : RawTensor
 
@@ -275,19 +275,17 @@ An invalid label or a native failure aborts through Tyr's fatal libtorch error r
 @[extern "lean_torch_cross_entropy_none"] opaque crossEntropyNone!
     (logits : @& RawTensor) (targets : @& RawTensor) : RawTensor
 
-/-- Extract an Int64 scalar. The shape argument is unread natively. -/
+/-- Extract an Int64 scalar. -/
 @[extern "lean_torch_item_int"] opaque itemInt (t : @& RawTensor) : Int64
 
-/-- Elementwise logical negation of a Bool tensor. The shape argument is unread natively. -/
+/-- Elementwise logical negation of a Bool tensor. -/
 @[extern "lean_torch_logical_not"] opaque logicalNot (t : @& RawTensor) : RawTensor
 
-/-- Elementwise logical conjunction of two Bool tensors. The shape argument is unread natively. -/
-@[extern "lean_torch_logical_and"] opaque logicalAnd (a b : @& RawTensor) : RawTensor
+/-- Elementwise logical conjunction of two Bool tensors. -/
+@[extern "lean_torch_logical_and"] opaque logicalAnd! (a b : @& RawTensor) : RawTensor
 
-@[extern "lean_torch_conv1d"] opaque conv1d
+@[extern "lean_torch_conv1d"] opaque conv1d!
     (input weight : @& RawTensor) (stride padding dilation : @& Nat) : RawTensor
-@[extern "lean_torch_conv1d_checked"] opaque conv1dChecked
-    (input weight : @& RawTensor) (stride padding dilation : @& Nat) : Except String RawTensor
 @[extern "lean_torch_tensor_to_float_array_dynamic"] opaque toFloatArray
     (t : @& RawTensor) : IO (Array Float)
 @[extern "lean_torch_any"] opaque any (t : @& RawTensor) : Bool
@@ -320,10 +318,4 @@ A native failure aborts through Tyr's fatal libtorch error report. -/
     (x weight : @& RawTensor) (eps : Float := 1e-6) : RawTensor
 
 @[extern "lean_torch_matrix_log_checked"] opaque matrixLogChecked (t : @& RawTensor) : Except String RawTensor
-end torch.RawTensor
-
-namespace torch.RawTensor
-@[extern "lean_torch_logical_and_checked"] opaque logicalAndChecked (a b : @& RawTensor) : Except String RawTensor
-
-@[extern "lean_torch_cat2_checked"] opaque catChecked (a b : @& RawTensor) (dim : @& Nat) : Except String RawTensor
 end torch.RawTensor

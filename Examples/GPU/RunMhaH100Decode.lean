@@ -40,6 +40,7 @@ structure DecodeShape where
   /-- Relative tolerance. -/
   rtol : Float := 2.5e-2
   dimsPos : 0 < batch ∧ 0 < qHeads ∧ 0 < kvHeads ∧ 0 < kvSeq ∧ 0 < headDim := by decide
+  kvHeadsDivide : kvHeads ∣ qHeads := by decide
 
 /-- Decode-shape coverage exercised by this harness. -/
 def decodeShapes : Array DecodeShape := #[
@@ -99,7 +100,7 @@ def generateDecodeFixturesFor (shape : DecodeShape) : IO Unit := do
   let k32 := k.toFloat32
   let v32 := v.toFloat32
   let expected32 := Tensor.attentionGQAQKV
-                      q32 k32 v32 false true
+                      q32 k32 v32 false true (_heads := .ofDvd shape.kvHeadsDivide)
   let expected := expected32.toBFloat16
 
   Tensor.saveTensor q (decodeFixtureFile shape "q").toString
@@ -129,7 +130,7 @@ def runDecodeOnceFor (shape : DecodeShape) : IO Bool := do
   -- Route through the production op. select_route picks tkMhaH100Decode[64]
   -- when shape is eligible; else falls back to SDPA.
   let actual : Tensor { shape := (shapeQ shape), dtype := .BFloat16, device := device } :=
-    Tensor.flashAttention q k v true
+    Tensor.flashAttention q k v true (_heads := .ofDvd shape.kvHeadsDivide)
   let _ ← torch.cuda_synchronize
 
   let ok := Tensor.allclose expected actual shape.atol shape.rtol

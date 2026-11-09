@@ -369,7 +369,7 @@ private def attentionSlidingPrefillWithMask {batch seq cap : Nat}
   let kh : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, seq, cfg.head_dim], dtype := dtype } := transposeAttention k2
   let vh : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, seq, cfg.head_dim], dtype := dtype } := transposeAttention v2
   let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, seq, cfg.head_dim], dtype := dtype } :=
-    maskedAttention qh kh vh attnMask true
+    maskedAttention qh kh vh attnMask true (_heads := .ofDvd cfg.slidingKVHeadsDivide)
   let out : Tensor { device := device, shape := #[batch, seq, cfg.num_attention_heads * cfg.head_dim], dtype := dtype } :=
     Tensor.reshape (transposeAttention attn) #[batch, seq, cfg.num_attention_heads * cfg.head_dim]
   let paddedK : Tensor { device := device, shape := #[batch, Config.maxKVHeads cfg, seq, Config.maxHeadDim cfg], dtype := dtype } := padSlidingKVForCache cfg kh
@@ -414,7 +414,7 @@ private def attentionFullPrefillWithMask {batch seq cap : Nat}
   let kh : Tensor { device := device, shape := #[batch, Config.fullNumKVHeads cfg, seq, Config.fullHeadDim cfg], dtype := dtype } := transposeAttention k2
   let vh : Tensor { device := device, shape := #[batch, Config.fullNumKVHeads cfg, seq, Config.fullHeadDim cfg], dtype := dtype } := transposeAttention v2
   let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, seq, Config.fullHeadDim cfg], dtype := dtype } :=
-    maskedAttention qh kh vh attnMask true
+    maskedAttention qh kh vh attnMask true (_heads := .ofDvd cfg.fullKVHeadsDivide)
   let out : Tensor { device := device, shape := #[batch, seq, cfg.num_attention_heads * Config.fullHeadDim cfg], dtype := dtype } :=
     Tensor.reshape (transposeAttention attn) #[batch, seq, cfg.num_attention_heads * Config.fullHeadDim cfg]
   let paddedK : Tensor { device := device, shape := #[batch, Config.maxKVHeads cfg, seq, Config.maxHeadDim cfg], dtype := dtype } := padFullKVForCache cfg kh
@@ -452,7 +452,7 @@ private def attentionSlidingNoCache {batch seq : Nat}
   let kh : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, seq, cfg.head_dim], dtype := dtype } := transposeAttention k2
   let vh : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, seq, cfg.head_dim], dtype := dtype } := transposeAttention v2
   let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, seq, cfg.head_dim], dtype := dtype } :=
-    Tensor.attentionWindow qh kh vh true true cfg.sliding_window
+    Tensor.attentionWindow qh kh vh true true cfg.sliding_window (_heads := .ofDvd cfg.slidingKVHeadsDivide)
   let out : Tensor { device := device, shape := #[batch, seq, cfg.num_attention_heads * cfg.head_dim], dtype := dtype } :=
     Tensor.reshape (transposeAttention attn) #[batch, seq, cfg.num_attention_heads * cfg.head_dim]
   oProjSliding cfg m out
@@ -481,7 +481,7 @@ private def attentionFullNoCache {batch seq : Nat}
   let kh : Tensor { device := device, shape := #[batch, Config.fullNumKVHeads cfg, seq, Config.fullHeadDim cfg], dtype := dtype } := transposeAttention k2
   let vh : Tensor { device := device, shape := #[batch, Config.fullNumKVHeads cfg, seq, Config.fullHeadDim cfg], dtype := dtype } := transposeAttention v2
   let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, seq, Config.fullHeadDim cfg], dtype := dtype } :=
-    Tensor.attentionGQA qh kh vh true true
+    Tensor.attentionGQA qh kh vh true true (_heads := .ofDvd cfg.fullKVHeadsDivide)
   let out : Tensor { device := device, shape := #[batch, seq, cfg.num_attention_heads * Config.fullHeadDim cfg], dtype := dtype } :=
     Tensor.reshape (transposeAttention attn) #[batch, seq, cfg.num_attention_heads * Config.fullHeadDim cfg]
   oProjFull cfg m out
@@ -505,7 +505,7 @@ private def attentionSlidingWithCache {batch seq cap : Nat}
   | some src =>
     let (kAll0, vAll0) := cacheSliceSliding (kvLen := seq) cfg src hfit
     let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, seq, cfg.head_dim], dtype := dtype } :=
-      Tensor.attentionWindow qh kAll0 vAll0 true true cfg.sliding_window
+      Tensor.attentionWindow qh kAll0 vAll0 true true cfg.sliding_window (_heads := .ofDvd cfg.slidingKVHeadsDivide)
     let out : Tensor { device := device, shape := #[batch, seq, cfg.num_attention_heads * cfg.head_dim], dtype := dtype } :=
       Tensor.reshape (transposeAttention attn) #[batch, seq, cfg.num_attention_heads * cfg.head_dim]
     (oProjSliding cfg m out, cache)
@@ -531,7 +531,7 @@ private def attentionSlidingWithCache {batch seq cap : Nat}
       vStore := vStore'
     }
     let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, seq, cfg.head_dim], dtype := dtype } :=
-      Tensor.attentionWindow qh kh vh true true cfg.sliding_window
+      Tensor.attentionWindow qh kh vh true true cfg.sliding_window (_heads := .ofDvd cfg.slidingKVHeadsDivide)
     let out : Tensor { device := device, shape := #[batch, seq, cfg.num_attention_heads * cfg.head_dim], dtype := dtype } :=
       Tensor.reshape (transposeAttention attn) #[batch, seq, cfg.num_attention_heads * cfg.head_dim]
     (oProjSliding cfg m out, cache')
@@ -555,7 +555,7 @@ private def attentionFullWithCache {batch seq cap : Nat}
   | some src =>
     let (kAll, vAll) := cacheSliceFull (kvLen := seq) cfg src hfit
     let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, seq, Config.fullHeadDim cfg], dtype := dtype } :=
-      Tensor.attentionGQA qh kAll vAll true true
+      Tensor.attentionGQA qh kAll vAll true true (_heads := .ofDvd cfg.fullKVHeadsDivide)
     let out : Tensor { device := device, shape := #[batch, seq, cfg.num_attention_heads * Config.fullHeadDim cfg], dtype := dtype } :=
       Tensor.reshape (transposeAttention attn) #[batch, seq, cfg.num_attention_heads * Config.fullHeadDim cfg]
     (oProjFull cfg m out, cache)
@@ -585,7 +585,7 @@ private def attentionFullWithCache {batch seq cap : Nat}
       vStore := vStore'
     }
     let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, seq, Config.fullHeadDim cfg], dtype := dtype } :=
-      Tensor.attentionGQA qh kh vh true true
+      Tensor.attentionGQA qh kh vh true true (_heads := .ofDvd cfg.fullKVHeadsDivide)
     let out : Tensor { device := device, shape := #[batch, seq, cfg.num_attention_heads * Config.fullHeadDim cfg], dtype := dtype } :=
       Tensor.reshape (transposeAttention attn) #[batch, seq, cfg.num_attention_heads * Config.fullHeadDim cfg]
     (oProjFull cfg m out, cache')
@@ -616,7 +616,7 @@ private def attentionSlidingStep {batch cap : Nat}
     let kAll : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, useLen, cfg.head_dim], dtype := dtype } := kAll0.slice 2 start useLen
     let vAll : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, useLen, cfg.head_dim], dtype := dtype } := vAll0.slice 2 start useLen
     let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, 1, cfg.head_dim], dtype := dtype } :=
-      Tensor.attentionGQAQKV qh kAll vAll false true
+      Tensor.attentionGQAQKV qh kAll vAll false true (_heads := .ofDvd cfg.slidingKVHeadsDivide)
     let out : Tensor { device := device, shape := #[batch, 1, cfg.num_attention_heads * cfg.head_dim], dtype := dtype } :=
       Tensor.reshape (transposeAttention attn) #[batch, 1, cfg.num_attention_heads * cfg.head_dim]
     (oProjSliding cfg m out, cache)
@@ -647,7 +647,7 @@ private def attentionSlidingStep {batch cap : Nat}
     let kAll : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, useLen, cfg.head_dim], dtype := dtype } := kAll0.slice 2 start useLen
     let vAll : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, useLen, cfg.head_dim], dtype := dtype } := vAll0.slice 2 start useLen
     let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, 1, cfg.head_dim], dtype := dtype } :=
-      Tensor.attentionGQAQKV qh kAll vAll false true
+      Tensor.attentionGQAQKV qh kAll vAll false true (_heads := .ofDvd cfg.slidingKVHeadsDivide)
     let out : Tensor { device := device, shape := #[batch, 1, cfg.num_attention_heads * cfg.head_dim], dtype := dtype } :=
       Tensor.reshape (transposeAttention attn) #[batch, 1, cfg.num_attention_heads * cfg.head_dim]
     let cache' : KVCache (dtype := dtype) (device := device) cfg batch cap := {
@@ -678,7 +678,7 @@ private def attentionFullStep {batch cap : Nat}
     let kvLen := pos + 1
     let (kAll, vAll) := cacheSliceFull (kvLen := kvLen) cfg src hpos
     let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, 1, Config.fullHeadDim cfg], dtype := dtype } :=
-      Tensor.attentionGQAQKV qh kAll vAll false true
+      Tensor.attentionGQAQKV qh kAll vAll false true (_heads := .ofDvd cfg.fullKVHeadsDivide)
     let out : Tensor { device := device, shape := #[batch, 1, cfg.num_attention_heads * Config.fullHeadDim cfg], dtype := dtype } :=
       Tensor.reshape (transposeAttention attn) #[batch, 1, cfg.num_attention_heads * Config.fullHeadDim cfg]
     (oProjFull cfg m out, cache)
@@ -708,7 +708,7 @@ private def attentionFullStep {batch cap : Nat}
     let vAll : Tensor { device := device, shape := #[batch, Config.fullNumKVHeads cfg, kvLen, Config.fullHeadDim cfg], dtype := dtype } :=
       (cacheSliceFull (kvLen := kvLen) cfg { cache with kStore := kStore', vStore := vStore' } hpos) |>.2
     let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, 1, Config.fullHeadDim cfg], dtype := dtype } :=
-      Tensor.attentionGQAQKV qh kAll vAll false true
+      Tensor.attentionGQAQKV qh kAll vAll false true (_heads := .ofDvd cfg.fullKVHeadsDivide)
     let out : Tensor { device := device, shape := #[batch, 1, cfg.num_attention_heads * Config.fullHeadDim cfg], dtype := dtype } :=
       Tensor.reshape (transposeAttention attn) #[batch, 1, cfg.num_attention_heads * Config.fullHeadDim cfg]
     let cache' : KVCache (dtype := dtype) (device := device) cfg batch cap := {

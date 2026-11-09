@@ -597,12 +597,12 @@ private def sdpaGqaRef
     (qBase : Tensor { shape := #[batch, qHeads, seq, headDim], dtype := .BFloat16, device := device })
     (kBase vBase : Tensor { shape := #[batch, kvHeads, seq, headDim], dtype := .BFloat16, device := device })
     (dOBase : Tensor { shape := #[batch, qHeads, seq, headDim], dtype := .BFloat16, device := device })
-    (isCausal : Bool)
+    (isCausal : Bool) (hHeads : kvHeads ∣ qHeads)
     : IO (Tensor { shape := #[batch, qHeads, seq, headDim], dtype := .BFloat16, device := device } × Tensor { shape := #[batch, qHeads, seq, headDim], dtype := .Float32, device := device } × Tensor { shape := #[batch, kvHeads, seq, headDim], dtype := .Float32, device := device } × Tensor { shape := #[batch, kvHeads, seq, headDim], dtype := .Float32, device := device }) := do
   let q ← makeLeaf qBase
   let k ← makeLeaf kBase
   let v ← makeLeaf vBase
-  let out := Tensor.attentionGQAQKV q k v isCausal true
+  let out := Tensor.attentionGQAQKV q k v isCausal true (_heads := .ofDvd hHeads)
   backwardWithCotangent out dOBase
   let _ ← torch.cuda_synchronize
   pure (out, (← Tensor.gradOf q).toFloat32, (← Tensor.gradOf k).toFloat32, (← Tensor.gradOf v).toFloat32)
@@ -625,12 +625,12 @@ private def tyrGqaOnce
     (qBase : Tensor { shape := #[batch, qHeads, seq, headDim], dtype := .BFloat16, device := device })
     (kBase vBase : Tensor { shape := #[batch, kvHeads, seq, headDim], dtype := .BFloat16, device := device })
     (dOBase : Tensor { shape := #[batch, qHeads, seq, headDim], dtype := .BFloat16, device := device })
-    (isCausal : Bool)
+    (isCausal : Bool) (hHeads : kvHeads ∣ qHeads)
     : IO (DispatchRoute × Tensor { shape := #[batch, qHeads, seq, headDim], dtype := .BFloat16, device := device } × Tensor { shape := #[batch, qHeads, seq, headDim], dtype := .Float32, device := device } × Tensor { shape := #[batch, kvHeads, seq, headDim], dtype := .Float32, device := device } × Tensor { shape := #[batch, kvHeads, seq, headDim], dtype := .Float32, device := device }) := do
   let q ← makeLeaf qBase
   let k ← makeLeaf kBase
   let v ← makeLeaf vBase
-  let (route, out) := flashAttnWithRoute q k v none isCausal none true
+  let (route, out) := flashAttnWithRoute q k v none isCausal none true (_heads := .ofDvd hHeads)
   backwardWithCotangent out dOBase
   let _ ← torch.cuda_synchronize
   pure (route, out, (← Tensor.gradOf q).toFloat32, (← Tensor.gradOf k).toFloat32, (← Tensor.gradOf v).toFloat32)
@@ -770,6 +770,7 @@ private def runGqaFwdBwd
     (jsonlOut? : Option System.FilePath)
     (emitJsonlStdout : Bool)
     (_hDims : 0 < batch ∧ 0 < qHeads ∧ 0 < kvHeads ∧ 0 < seq ∧ 0 < headDim := by decide)
+    (hHeads : kvHeads ∣ qHeads := by decide)
     : IO SummaryRow := do
   let device ← Device.cuda 0
   let qBase := (← Tensor.randn #[batch, qHeads, seq, headDim] false device).toBFloat16
@@ -777,7 +778,7 @@ private def runGqaFwdBwd
   let vBase := (← Tensor.randn #[batch, kvHeads, seq, headDim] false device).toBFloat16
   let dOBase := (← Tensor.randn #[batch, qHeads, seq, headDim] false device).toBFloat16
 
-  let (outRef, dqRef, dkRef, dvRef) ← sdpaGqaRef qBase kBase vBase dOBase c.isCausal
+  let (outRef, dqRef, dkRef, dvRef) ← sdpaGqaRef qBase kBase vBase dOBase c.isCausal hHeads
 
   match backend with
   | .flashAttention =>
@@ -807,7 +808,7 @@ private def runGqaFwdBwd
         let q ← makeLeaf qBase
         let k ← makeLeaf kBase
         let v ← makeLeaf vBase
-        let out := Tensor.attentionGQAQKV q k v c.isCausal true
+        let out := Tensor.attentionGQAQKV q k v c.isCausal true (_heads := .ofDvd hHeads)
         backwardWithCotangent out dOBase
         let _ ← torch.cuda_synchronize
       let latencies ← benchmarkAction runMeta.warmupIters runMeta.timedIters runMeta.repeats action
@@ -824,7 +825,7 @@ private def runGqaFwdBwd
         })
       pure <| makeSummary runMeta c backend "torch_sdpa" "reference" latencies corr
   | .tyrRuntime =>
-      let (route, out, dq, dk, dv) ← tyrGqaOnce qBase kBase vBase dOBase c.isCausal
+      let (route, out, dq, dk, dv) ← tyrGqaOnce qBase kBase vBase dOBase c.isCausal hHeads
       let routeActual := routeName route
       let routeOk := routeActual == c.expectedTyrRoute
       let outOk := Tensor.allclose outRef out 1e-5 1e-5
