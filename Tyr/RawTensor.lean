@@ -137,8 +137,8 @@ The source shape is checked before conversion and never reshaped. -/
     (x : @& RawTensor) : RawTensor
 @[extern "lean_torch_transpose_from_attention"] opaque joinHeads
     (x : @& RawTensor) : RawTensor
-@[extern "lean_torch_sdpa_4d"] opaque attention
-    (q k v : @& RawTensor) (causal : Bool := true) : Except String RawTensor
+@[extern "lean_torch_sdpa_4d"] opaque attention!
+    (q k v : @& RawTensor) (causal : Bool := true) : RawTensor
 @[extern "lean_torch_sdpa_4d_io"] opaque attentionIO
     (q k v : @& RawTensor) (dropout : Float) (causal : Bool := true) : IO RawTensor
 @[extern "lean_torch_embedding"] opaque embedding
@@ -260,14 +260,15 @@ Tyr's fatal libtorch error report. -/
 /-- 1-D Int64 tensor from a host array. -/
 @[extern "lean_torch_from_int64_array"] opaque fromInt64Array (arr : @& Array Int64) : RawTensor
 
-/-- Select entries along `dim` at `indices`. -/
-@[extern "lean_torch_index_select"] opaque indexSelect (data : @& RawTensor)
+/-- Select entries along `dim` at Int64/Int32 `indices`. Index values are
+validated before device indexing, so an invalid accelerator index aborts
+instead of triggering a device assertion. -/
+@[extern "lean_torch_index_select"] opaque indexSelect! (data : @& RawTensor)
     (dim : @& Nat) (indices : @& RawTensor) : RawTensor
 
-/-- Checked vector indexing. Bounds are validated before device indexing so
-invalid accelerator indices cannot trigger a device assertion. -/
-@[extern "lean_torch_index_select_checked"] opaque indexSelectChecked
-    (data : @& RawTensor) (dim : @& Nat) (indices : @& RawTensor) : Except String RawTensor
+/-- `indexSelect!` returning its validation and native errors. -/
+@[extern "lean_torch_index_select_checked"] opaque indexSelect? (data : @& RawTensor)
+    (dim : @& Nat) (indices : @& RawTensor) : Except String RawTensor
 
 /-- Per-element cross entropy (no reduction): logits [n, c], Int64 targets [n].
 An invalid label or a native failure aborts through Tyr's fatal libtorch error report. -/

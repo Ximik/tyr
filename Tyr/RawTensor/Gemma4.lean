@@ -7,8 +7,8 @@ opaque gemma4TextExperts (tokens numExperts topK inter hidden : @& Nat)
     (hiddenStates gateUpProj downProj topVals topIdx : @& RawTensor) : RawTensor
 
 @[extern "lean_torch_sdpa_gqa_mask_qkv"]
-opaque gemma4MaskedAttention
-    (query key value mask : @& RawTensor) (gqa : Bool) : Except String RawTensor
+opaque gemma4MaskedAttention!
+    (query key value mask : @& RawTensor) (gqa : Bool) : RawTensor
 @[extern "lean_torch_sdpa_gqa_mask_qkv_io"]
 opaque gemma4MaskedAttentionIO
     (query key value mask : @& RawTensor) (dropout : Float) (gqa : Bool) : IO RawTensor
