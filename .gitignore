@@ -1,39 +1,31 @@
 external/
 .lake/
 docbuild/
-BranchingFlows.jl/
-diffrax/
 *.o
 *.a
 build/
-bak/
 out/
-*produced.out
-.ninja_log
 .DS_Store
-.jj/
 cc/src/generated/
 checkpoints/
-dummy_path.ckpt/
 .pipeline_checkpoint.json
 weights/
 output/
 tmp/
-orb.db/
-output.png
 output.ppm
 
 # Python
 .mypy_cache/
 .venv*/
 __pycache__/
-scripts/__pycache__/
 
-# NanoChat/Tyr runtime artifacts
-.nanochat_*/
+# Runtime artifacts (training logs, datasets, HF model cache, RunPod state)
 logs/
 data/
 .model-cache/
+.runpod-state/
+
+# Editor and agent tooling
+.vscode/
 .claude/
 .codex/
-.runpod-state/
