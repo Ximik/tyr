@@ -11,8 +11,8 @@ example (x : Tensor ⟨#[2], .Complex64, .CPU⟩) : Tensor ⟨#[2], .Float32, .C
   Tensor.abs x
 example (x : Tensor ⟨#[2], .Int32, .CPU⟩) : Tensor ⟨#[2], .Float32, .CPU⟩ :=
   Tensor.clampFloat x 0 1
-example (x : Tensor ⟨#[2], .Int32, .CPU⟩) :
-    Except String (Tensor ⟨#[2], .Float32, .CPU⟩) := Tensor.mulScalar? x 2
+example (x : Tensor ⟨#[2], .Int32, .CPU⟩) : Tensor ⟨#[2], .Float32, .CPU⟩ :=
+  Tensor.mulScalar x 2
 
 -- Generic floating code uses the same operations and erased index equalities.
 example {σ : StaticSpec} [DType.RealFloating σ.dtype] (x y : Tensor σ) : Tensor σ :=
@@ -57,7 +57,7 @@ example {s : Shape} {dtype : DType} {device : Device}
     (x : Tensor ⟨s, dtype, device⟩) : Except String (Tensor ⟨s, dtype, device⟩) := do
   let support ← DType.realFloating? dtype
   let _ := support.down
-  Tensor.mulScalar? x 2
+  pure (Tensor.mulScalar x 2)
 
 -- Loaded compute-dtype packages retain their proof when the dtype is hidden.
 example (selected : RealFloatingDType) {s : Shape} {device : Device}

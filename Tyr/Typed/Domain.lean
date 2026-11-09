@@ -51,16 +51,4 @@ instance {dtype : DType} [h : RealFloating dtype] : Mean dtype := by
   constructor
   cases dtype <;> first | rfl | cases h.valid
 
-def checkRelu (dtype : DType) : Except String Unit :=
-  if dtype.reluDomain then .ok ()
-  else .error s!"relu requires a real numeric dtype, got {dtype}"
-
-def checkOrdered (dtype : DType) : Except String Unit :=
-  if dtype.orderedDomain then .ok ()
-  else .error s!"ordered reduction requires a real or Bool dtype, got {dtype}"
-
-def checkMean (dtype : DType) : Except String Unit :=
-  if dtype.meanDomain then .ok ()
-  else .error s!"mean requires a floating or complex dtype, got {dtype}"
-
 end torch.DType

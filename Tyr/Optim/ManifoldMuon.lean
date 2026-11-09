@@ -150,9 +150,7 @@ private def dualObjectiveEstimate {m n : Nat} (W G : Tensor ⟨#[m, n], d, dev�
     (lambda : Tensor ⟨#[n, n], d, dev⟩) : IO Float := do
   let lambdaPlus := Tensor.add lambda (Tensor.transpose2d lambda)
   let adjusted := Tensor.add G (Tensor.mulScalar (Tensor.mm W lambdaPlus) 2.0)
-  match Tensor.nuclearNorm? adjusted with
-  | .ok norm => pure (0.0 - norm)
-  | .error message => throw (IO.userError s!"ManifoldMuon dual objective: {message}")
+  pure (0.0 - Tensor.nuclearNorm adjusted)
 
 /--
 Run lightweight dual ascent and return matrix-sign direction plus updated dual var.

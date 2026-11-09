@@ -5,11 +5,6 @@ namespace Tests.DTypeUnary
 
 open torch
 
-private def expectError {α : Type} (result : Except String α) : IO Unit :=
-  match result with
-  | .ok _ => LeanTest.fail "Expected a checked unary-operation rejection"
-  | .error _ => pure ()
-
 private def magnitude (t : Tensor ⟨#[1], .Complex64, .CPU⟩) : Float :=
   (Tensor.maxAll (Tensor.abs t)).item
 
@@ -19,16 +14,31 @@ example (x : Tensor ⟨#[2], .Complex64, .CPU⟩) : Tensor ⟨#[2], .Complex64, 
 example (x : Tensor ⟨#[2], .Complex128, .CPU⟩) : Tensor ⟨#[2], .Complex128, .CPU⟩ :=
   Tensor.rsqrt (Tensor.tanh (Tensor.sigmoid (Tensor.pow (Tensor.log10 x) 2)))
 
+example (x : Tensor ⟨#[2], .Float32, .CPU⟩) : Tensor ⟨#[2], .Float32, .CPU⟩ :=
+  Tensor.elu (Tensor.gelu (Tensor.silu x))
+
 example (_x : Tensor ⟨#[2], .Complex64, .CPU⟩) : True := by
   fail_if_success have _ := Tensor.gelu _x
   fail_if_success have _ := Tensor.silu _x
+  fail_if_success have _ := Tensor.elu _x
   fail_if_success have _ := Tensor.softmax _x
   trivial
 
 example (_x : Tensor ⟨#[2], .Int64, .CPU⟩) : True := by
   fail_if_success have _ := Tensor.exp _x
   fail_if_success have _ := Tensor.sqrt _x
+  fail_if_success have _ := Tensor.rsqrt _x
+  fail_if_success have _ := Tensor.sigmoid _x
+  fail_if_success have _ := Tensor.tanh _x
+  fail_if_success have _ := Tensor.atan _x
+  fail_if_success have _ := Tensor.pow _x 2
+  fail_if_success have _ := Tensor.gelu _x
+  fail_if_success have _ := Tensor.silu _x
+  fail_if_success have _ := Tensor.elu _x
   fail_if_success have _ := Tensor.log _x
+  fail_if_success have _ := Tensor.log10 _x
+  fail_if_success have _ := Tensor.sin _x
+  fail_if_success have _ := Tensor.cos _x
   trivial
 
 @[test] def testComplexSquareRootAndLogarithmBranches : IO Unit := do
@@ -63,26 +73,5 @@ example (_x : Tensor ⟨#[2], .Int64, .CPU⟩) : True := by
   LeanTest.assertTrue ((magnitude (Tensor.tanh imaginary) - Float.tan 1).abs < 1e-5)
   LeanTest.assertTrue
     ((magnitude (Tensor.atan (Tensor.mulScalar imaginary 0.5)) - Float.log 3 / 2).abs < 1e-5)
-
-@[test] def testCheckedUnaryRejectsUnsupportedIntegralDomain : IO Unit := do
-  let input := ((Tensor.fromFloatArray #[1, 4]).castDType .Int64)
-  for result in #[Tensor.exp? input, Tensor.sqrt? input,
-      Tensor.rsqrt? input, Tensor.log? input,
-      Tensor.log10? input, Tensor.sin? input,
-      Tensor.cos? input, Tensor.atan? input,
-      Tensor.sigmoid? input, Tensor.tanh? input,
-      Tensor.pow? input 0.5, Tensor.gelu? input,
-      Tensor.silu? input, Tensor.elu? input] do
-    expectError result
-  LeanTest.assertEqual input.raw.dtype .Int64
-  LeanTest.assertEqual (← input.toFloatArray) #[1, 4]
-
-@[test] def testUnaryBackendAndDomainErrorsAreRecoverable : IO Unit := do
-  let complex := ((Tensor.ones #[2]).castDType .Complex64)
-  expectError (Tensor.gelu? complex)
-  expectError (Tensor.silu? complex)
-  expectError (Tensor.elu? complex)
-  let shell := (Tensor.ones #[2]).castDType .Float8E4M3FN
-  expectError (Tensor.sqrt? shell)
 
 end Tests.DTypeUnary

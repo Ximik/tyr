@@ -283,7 +283,7 @@ instance {P : StaticSpec → Prop} [VectorManifoldCarrier V device] (n : Nat)
 instance [MatrixManifoldCarrier M device] (in_dim out_dim : Nat) :
     NormedModule (ManifoldLinear (device := device) M in_dim out_dim) where
   norm lin :=
-    let weightNorm := Tensor.spectralNorm (MatrixManifoldCarrier.toMatrix (device := device) lin.weight)
+    let weightNorm := Tensor.spectralNorm! (MatrixManifoldCarrier.toMatrix (device := device) lin.weight)
     match lin.bias with
     | some b => floatMax weightNorm (Tensor.l2Norm b)
     | none => weightNorm
@@ -292,11 +292,11 @@ instance [MatrixManifoldCarrier M device] (in_dim out_dim : Nat) :
     match lin.bias with
     | some b => weightDual + Tensor.l2Norm b
     | none => weightDual
-  nu lin := Tensor.spectralNorm (MatrixManifoldCarrier.toMatrix (device := device) lin.weight)
+  nu lin := Tensor.spectralNorm! (MatrixManifoldCarrier.toMatrix (device := device) lin.weight)
   mu _ := 1.0
   normalize lin :=
     let w := MatrixManifoldCarrier.toMatrix (device := device) lin.weight
-    let sNorm := Tensor.spectralNorm w
+    let sNorm := Tensor.spectralNorm! w
     let w' := if sNorm == 0.0 then w else Tensor.mulScalar w (1.0 / sNorm)
     let weight := MatrixManifoldCarrier.projectLike (device := device) lin.weight w'
     let bias :=
