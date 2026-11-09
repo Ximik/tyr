@@ -16,11 +16,29 @@ fi
 # regressions are reported without terminating a shared Lean test process.
 native_test_exception_smoke
 
-"${CXX:-c++}" "${native_cxx_flags[@]}" \
-  -I"$repo_root/cc/src" -I"$lean_dir/include" \
-  -I"$torch_dir/include" -I"$torch_dir/include/torch/csrc/api/include" \
-  "$repo_root/cc/tools/test_tensor_errors.cpp" \
-  "${native_link_flags[@]}" \
-  -o "$test_dir/test_tensor_errors"
+for test in test_tensor_errors test_tensor_aborts; do
+  "${CXX:-c++}" "${native_cxx_flags[@]}" \
+    -I"$repo_root/cc/src" -I"$lean_dir/include" \
+    -I"$torch_dir/include" -I"$torch_dir/include/torch/csrc/api/include" \
+    "$repo_root/cc/tools/$test.cpp" \
+    "${native_link_flags[@]}" \
+    -o "$test_dir/$test"
+done
 native_test_run "$test_dir/test_tensor_errors"
+
+# Each invalid call to an unguarded export must abort through Tyr's terminate handler.
+aborts=0
+while IFS=$'\t' read -r name fragment; do
+  status=0
+  output=$("$test_dir/test_tensor_aborts" --abort-case "$name" 2>&1) || status=$?
+  if [[ $status -ne 134 || $output != *"[tyr] fatal:"* || ( -n $fragment && $output != *"$fragment"* ) ]]; then
+    echo "FAIL abort/$name (status $status)"
+    echo "$output"
+    aborts=$((aborts + 1))
+  else
+    echo "PASS abort/$name"
+  fi
+done < <("$test_dir/test_tensor_aborts")
+echo "$aborts native abort failures"
+[[ $aborts -eq 0 ]]
 native_test_complete=1
