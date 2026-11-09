@@ -397,11 +397,9 @@ end LagunaAttention
 
 /-! ## KV cache -/
 
-/-- Full-model KV cache: one static KV cache of capacity `cap` per decoder layer.
-    `position` counts the tokens written so far, for every layer. -/
+/-- Full-model KV cache: one static KV cache of capacity `cap` per decoder layer. -/
 structure LagunaCache (cfg : Config) (batch cap : Nat) (dtype : DType := .Float32) where
   kvCaches : Array (LagunaAttention.KVCache (device := device) (dtype := dtype) cfg batch cap)
-  position : Nat := 0
 
 /-- Session storage: sliding layers reserve one window, so each layer carries its
     own capacity. Ring writes take it modulo, and the session's `maxLen` bounds
@@ -735,7 +733,7 @@ def forwardWithCache {batch seq cap : Nat}
     let (hNext, cNext) ← layer.forwardWithCache cfg h tables c i hfit
     h := hNext
     c := cNext
-  return (rmsNormWeighted3d m.norm h cfg.rms_norm_eps, { c with position := seq })
+  return (rmsNormWeighted3d m.norm h cfg.rms_norm_eps, c)
 
 /-- Single-token decode step over one token embedding at absolute `position`. -/
 def forwardStep {batch cap : Nat}
@@ -756,7 +754,7 @@ def forwardStep {batch cap : Nat}
     let (hNext, cNext) ← layer.forwardStep cfg h tables position hpos c i
     h := hNext
     c := cNext
-  return (rmsNormWeighted3d m.norm h cfg.rms_norm_eps, { c with position := position + 1 })
+  return (rmsNormWeighted3d m.norm h cfg.rms_norm_eps, c)
 
 /-- Allocate an owned inference session. Full layers reserve `maxLen`; sliding
 layers reserve `min maxLen sliding_window`. No cache tensor is publicly exposed. -/
