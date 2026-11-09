@@ -114,11 +114,12 @@ example changes are included in the workflow path filters. Local GPU runs
 without strict mode retain optional skips and print executed/skipped counts.
 
 There is also `lean_exe ffi_crash_probe` (root
-`Tests/FfiCrashProbe.lean`): a manual probe that intentionally triggers a
-libtorch CUDA error to check the process dies with an intelligible `c10::Error`
-message instead of a bare SIGABRT. It is deliberately not part of any suite;
-the Linux CI job runs it and fails unless it aborts (SIGABRT) with the
-libtorch error message.
+`Tests/FfiCrashProbe.lean`), a probe of Tyr's fatal failure paths selected by
+its argument: `libtorch` triggers a libtorch error in an unguarded native call,
+`admission` passes `Tensor.ofRaw!` a handle that contradicts its spec, and
+`admission-ok` admits a matching one. It is deliberately not part of any suite;
+`.github/scripts/check_ffi_crash_probe.sh`, run by the Linux CI job, requires the
+first two to abort (SIGABRT) with Tyr's report and the third to exit normally.
 
 ### Fixtures
 
