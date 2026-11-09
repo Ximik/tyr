@@ -495,9 +495,11 @@ def moleculeMuonStepT [TensorStruct Params] [FloatingTensorStruct Params]
     let direction ← moleculeMuonOrthogonalize grad numIters
     let (rows, cols) := flattenedMatrixShape σ.shape
     let aspect := Float.sqrt (max 1.0 (rows.toFloat / cols.toFloat))
-    let promoted ← IO.ofExcept (mulTensorScalar? (Tensor.mulScalar direction aspect) lrT)
-    let scaled ← IO.ofExcept (Tensor.castLike? grad promoted.tensor)
-    IO.ofExcept (Tensor.ofRaw scaled.raw)) nesterov
+    let scaled := Tensor.mulScalar direction aspect
+    let lr : Tensor (σ.withDType .Float32) := Tensor.expand (lrT.to grad.device) σ.shape
+    let product : Tensor (σ.withDType .BFloat16) :=
+      (Tensor.mul (floatDynamic scaled) lr).castDType .BFloat16
+    pure (Tensor.castLike (σ := σ.withDType .BFloat16) (τ := σ) grad product)) nesterov
   let params' := TensorStructFor.zipWith
       (P := fun σ => σ.dtype = .Float32 ∧ σ.device = device)
       (fun {σ} proof param direction => by

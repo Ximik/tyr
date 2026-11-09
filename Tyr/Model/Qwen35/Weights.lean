@@ -22,7 +22,7 @@ open torch.safetensors (pushUnique Source)
 private def freezeStored {shape : Shape} (tensor : SomeDTypeTensor shape device) :
     SomeDTypeTensor shape device := ⟨tensor.1, tensor.2.detach⟩
 
-/-- Equality admission only: loading never changes a checkpoint tensor's dtype. -/
+/-- Equality admission only: never changes the tensor's dtype. -/
 private def requireDType {shape : Shape} (dtype : DType)
     (tensor : SomeDTypeTensor shape device) : IO (Tensor ⟨shape, dtype, device⟩) :=
   IO.ofExcept (tensor.atDType? dtype)
@@ -163,8 +163,8 @@ private def loadLinearMixer (src : Source) (cfg : Config) (layerIdx : Nat)
     in_proj_a := reqGradFalse (← requireDType dtype inA)
     conv1d_weight := reqGradFalse (← requireDType dtype convW)
     conv1d_bias := reqGradFalse (← requireDType dtype convB)
-    dt_bias := freezeStored dtBias
-    a_log := freezeStored aLog
+    dt_bias := reqGradFalse dtBias.2.toFloat32
+    a_log := reqGradFalse aLog.2.toFloat32
     norm := norm
     out_proj := reqGradFalse (← requireDType dtype outProj)
   }

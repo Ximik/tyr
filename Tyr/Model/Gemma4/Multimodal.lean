@@ -148,7 +148,7 @@ end Gemma4VisionLinear
 
 structure Gemma4VisionPatchEmbedder (cfg : VLConfig) (dtype : DType := .Float32) where
   input_proj : Gemma4VisionLinear (dtype := dtype) (device := device) cfg.vision_config.hidden_size (VisionConfig.patchDim cfg.vision_config)
-  position_embedding_table : SomeDTypeTensor #[2, cfg.vision_config.position_embedding_size, cfg.vision_config.hidden_size] device
+  position_embedding_table : Tensor { device := device, shape := #[2, cfg.vision_config.position_embedding_size, cfg.vision_config.hidden_size], dtype := .Float32 }
   deriving TensorStruct
 
 namespace Gemma4VisionPatchEmbedder
@@ -157,24 +157,24 @@ def forward {patchRows patchCols : Nat}
     (cfg : VLConfig)
     (m : Gemma4VisionPatchEmbedder (dtype := dtype) (device := device) cfg)
     (patchGrid : Tensor { device := device, shape := #[patchRows, patchCols, VisionConfig.patchDim cfg.vision_config], dtype := inputDType })
-    : SomeDTypeTensor #[patchRows * patchCols, cfg.vision_config.hidden_size] device :=
+    : Tensor { device := device, shape := #[patchRows * patchCols, cfg.vision_config.hidden_size], dtype := .Float32 } :=
   let tokens := patchRows * patchCols
   let flat : Tensor { device := device, shape := #[tokens, VisionConfig.patchDim cfg.vision_config], dtype := inputDType } :=
     Tensor.reshape patchGrid #[tokens, VisionConfig.patchDim cfg.vision_config]
   let flat := Tensor.mulScalar (Tensor.addScalar flat (-0.5)) 2.0
   let hidden : Tensor { device := device, shape := #[tokens, cfg.vision_config.hidden_size], dtype := dtype } := m.input_proj.forward2d flat
-  let xTable : Tensor { device := device, shape := #[cfg.vision_config.position_embedding_size, cfg.vision_config.hidden_size], dtype := m.position_embedding_table.1 } :=
-    Tensor.reshape (sliceTyped m.position_embedding_table.2 0 0 1)
+  let xTable : Tensor { device := device, shape := #[cfg.vision_config.position_embedding_size, cfg.vision_config.hidden_size], dtype := .Float32 } :=
+    Tensor.reshape (sliceTyped m.position_embedding_table 0 0 1)
       #[cfg.vision_config.position_embedding_size, cfg.vision_config.hidden_size]
-  let yTable : Tensor { device := device, shape := #[cfg.vision_config.position_embedding_size, cfg.vision_config.hidden_size], dtype := m.position_embedding_table.1 } :=
-    Tensor.reshape (sliceTyped m.position_embedding_table.2 0 1 1)
+  let yTable : Tensor { device := device, shape := #[cfg.vision_config.position_embedding_size, cfg.vision_config.hidden_size], dtype := .Float32 } :=
+    Tensor.reshape (sliceTyped m.position_embedding_table 0 1 1)
       #[cfg.vision_config.position_embedding_size, cfg.vision_config.hidden_size]
   let (xIdsCpu, yIdsCpu) := positionIds patchRows patchCols
   let xIds : Tensor { device := device, shape := #[tokens], dtype := .Int64 } := xIdsCpu.to hidden.device
   let yIds : Tensor { device := device, shape := #[tokens], dtype := .Int64 } := yIdsCpu.to hidden.device
-  let xPos : Tensor { device := device, shape := #[tokens, cfg.vision_config.hidden_size], dtype := m.position_embedding_table.1 } := Tensor.embedding1d xIds xTable
-  let yPos : Tensor { device := device, shape := #[tokens, cfg.vision_config.hidden_size], dtype := m.position_embedding_table.1 } := Tensor.embedding1d yIds yTable
-  promotedAdd (promotedAdd hidden xPos).2 yPos
+  let xPos : Tensor { device := device, shape := #[tokens, cfg.vision_config.hidden_size], dtype := .Float32 } := Tensor.embedding1d xIds xTable
+  let yPos : Tensor { device := device, shape := #[tokens, cfg.vision_config.hidden_size], dtype := .Float32 } := Tensor.embedding1d yIds yTable
+  Tensor.add (Tensor.add (floatDynamic hidden) xPos) yPos
 
 end Gemma4VisionPatchEmbedder
 
@@ -260,72 +260,68 @@ namespace Gemma4VisionBlock
 def forward {patchRows patchCols : Nat}
     (cfg : VisionConfig)
     (m : Gemma4VisionBlock (dtype := dtype) (device := device) cfg)
-    (x : Tensor { device := device, shape := #[patchRows * patchCols, cfg.hidden_size], dtype := inputDType })
-    : SomeDTypeTensor #[patchRows * patchCols, cfg.hidden_size] device :=
-  let residual1 := x
+    (x : Tensor { device := device, shape := #[patchRows * patchCols, cfg.hidden_size], dtype := .Float32 })
+    : Tensor { device := device, shape := #[patchRows * patchCols, cfg.hidden_size], dtype := .Float32 } :=
   let h1 := m.input_layernorm.forward2d x
   let attn := m.self_attn.forward (patchRows := patchRows) (patchCols := patchCols) cfg h1
-  let h2 := promotedAdd residual1 (m.post_attention_layernorm.forward2d attn)
-  let residual2 := h2.2
-  let h3 := m.pre_feedforward_layernorm.forward2d h2.2
+  let h2 := Tensor.add x (floatDynamic (m.post_attention_layernorm.forward2d attn))
+  let h3 := m.pre_feedforward_layernorm.forward2d h2
   let mlp := m.mlp.forward cfg h3
-  promotedAdd residual2 (m.post_feedforward_layernorm.forward2d mlp)
+  Tensor.add h2 (floatDynamic (m.post_feedforward_layernorm.forward2d mlp))
 
 end Gemma4VisionBlock
 
 structure Gemma4VisionModel (cfg : VLConfig) (dtype : DType := .Float32) where
   patch_embedder : Gemma4VisionPatchEmbedder (dtype := dtype) (device := device) cfg
   blocks : Array (Gemma4VisionBlock (dtype := dtype) (device := device) cfg.vision_config)
-  std_bias : Option (SomeDTypeTensor #[cfg.vision_config.hidden_size] device) := none
-  std_scale : Option (SomeDTypeTensor #[cfg.vision_config.hidden_size] device) := none
+  std_bias : Option (Tensor { device := device, shape := #[cfg.vision_config.hidden_size], dtype := .Float32 }) := none
+  std_scale : Option (Tensor { device := device, shape := #[cfg.vision_config.hidden_size], dtype := .Float32 }) := none
   deriving TensorStruct
 
 namespace Gemma4VisionModel
 
 private def poolFeatures {patchRows patchCols : Nat}
     (cfg : VLConfig)
-    (x : Tensor { device := device, shape := #[patchRows * patchCols, cfg.vision_config.hidden_size], dtype := dtype })
-    : SomeDTypeTensor #[(patchRows / cfg.vision_config.pooling_kernel_size) * (patchCols / cfg.vision_config.pooling_kernel_size),
-        cfg.vision_config.hidden_size] device :=
+    (x : Tensor { device := device, shape := #[patchRows * patchCols, cfg.vision_config.hidden_size], dtype := .Float32 })
+    : Tensor { device := device, shape := #[(patchRows / cfg.vision_config.pooling_kernel_size) * (patchCols / cfg.vision_config.pooling_kernel_size),
+        cfg.vision_config.hidden_size], dtype := .Float32 } :=
   let pool := cfg.vision_config.pooling_kernel_size
   let pooledRows := patchRows / pool
   let pooledCols := patchCols / pool
-  let xGrid : Tensor { device := device, shape := #[1, patchRows, patchCols, cfg.vision_config.hidden_size], dtype := dtype } :=
+  let xGrid : Tensor { device := device, shape := #[1, patchRows, patchCols, cfg.vision_config.hidden_size], dtype := .Float32 } :=
     Tensor.reshape x #[1, patchRows, patchCols, cfg.vision_config.hidden_size]
-  let xNchw : Tensor { device := device, shape := #[1, cfg.vision_config.hidden_size, patchRows, patchCols], dtype := dtype } := (Tensor.permute xGrid #[0, 3, 1, 2]).reshape #[1, cfg.vision_config.hidden_size, patchRows, patchCols]
-  let pooled : Tensor { device := device, shape := #[1, cfg.vision_config.hidden_size, pooledRows, pooledCols], dtype := dtype } :=
+  let xNchw : Tensor { device := device, shape := #[1, cfg.vision_config.hidden_size, patchRows, patchCols], dtype := .Float32 } := (Tensor.permute xGrid #[0, 3, 1, 2]).reshape #[1, cfg.vision_config.hidden_size, patchRows, patchCols]
+  let pooled : Tensor { device := device, shape := #[1, cfg.vision_config.hidden_size, pooledRows, pooledCols], dtype := .Float32 } :=
     avgPool2d xNchw pool
-  let pooledNhwc : Tensor { device := device, shape := #[1, pooledRows, pooledCols, cfg.vision_config.hidden_size], dtype := dtype } :=
+  let pooledNhwc : Tensor { device := device, shape := #[1, pooledRows, pooledCols, cfg.vision_config.hidden_size], dtype := .Float32 } :=
     (Tensor.permute pooled #[0, 2, 3, 1]).reshape #[1, pooledRows, pooledCols, cfg.vision_config.hidden_size]
-  match Tensor.Promoting.mulScalar?
-      (Tensor.reshape pooledNhwc #[pooledRows * pooledCols, cfg.vision_config.hidden_size])
-      (Float.sqrt cfg.vision_config.hidden_size.toFloat) with
-  | .ok result => packExactTensor result.tensor
-  | .error message => nativeInvariantFailure s!"Gemma4 vision pooling: {message}"
+  Tensor.mulScalar
+    (Tensor.reshape pooledNhwc #[pooledRows * pooledCols, cfg.vision_config.hidden_size])
+    (Float.sqrt cfg.vision_config.hidden_size.toFloat)
 
 def forward {patchRows patchCols : Nat}
     (cfg : VLConfig)
     (m : Gemma4VisionModel (dtype := dtype) (device := device) cfg)
     (patchGrid : Tensor { device := device, shape := #[patchRows, patchCols, VisionConfig.patchDim cfg.vision_config], dtype := inputDType })
-    : SomeDTypeTensor #[(patchRows / cfg.vision_config.pooling_kernel_size) * (patchCols / cfg.vision_config.pooling_kernel_size),
-        cfg.vision_config.hidden_size] device :=
+    : Tensor { device := device, shape := #[(patchRows / cfg.vision_config.pooling_kernel_size) * (patchCols / cfg.vision_config.pooling_kernel_size),
+        cfg.vision_config.hidden_size], dtype := .Float32 } :=
   Id.run do
     let mut hidden := m.patch_embedder.forward cfg patchGrid
     for i in [:m.blocks.size] do
       match m.blocks[i]? with
       | some blk =>
-        hidden := blk.forward (patchRows := patchRows) (patchCols := patchCols) cfg.vision_config hidden.2
+        hidden := blk.forward (patchRows := patchRows) (patchCols := patchCols) cfg.vision_config hidden
       | none =>
         pure ()
-    let pooled := poolFeatures cfg hidden.2
+    let pooled := poolFeatures cfg hidden
     match m.std_bias, m.std_scale with
     | some bias, some scale =>
       let nTok := (patchRows / cfg.vision_config.pooling_kernel_size) * (patchCols / cfg.vision_config.pooling_kernel_size)
-      let bias : Tensor { device := device, shape := #[nTok, cfg.vision_config.hidden_size], dtype := bias.1 } :=
-        Tensor.expand (Tensor.reshape bias.2 #[1, cfg.vision_config.hidden_size]) #[nTok, cfg.vision_config.hidden_size]
-      let scale : Tensor { device := device, shape := #[nTok, cfg.vision_config.hidden_size], dtype := scale.1 } :=
-        Tensor.expand (Tensor.reshape scale.2 #[1, cfg.vision_config.hidden_size]) #[nTok, cfg.vision_config.hidden_size]
-      promotedMul (promotedSub pooled.2 bias).2 scale
+      let bias : Tensor { device := device, shape := #[nTok, cfg.vision_config.hidden_size], dtype := .Float32 } :=
+        Tensor.expand (Tensor.reshape bias #[1, cfg.vision_config.hidden_size]) #[nTok, cfg.vision_config.hidden_size]
+      let scale : Tensor { device := device, shape := #[nTok, cfg.vision_config.hidden_size], dtype := .Float32 } :=
+        Tensor.expand (Tensor.reshape scale #[1, cfg.vision_config.hidden_size]) #[nTok, cfg.vision_config.hidden_size]
+      Tensor.mul (Tensor.sub pooled bias) scale
     | _, _ =>
       pooled
 
@@ -343,11 +339,7 @@ def forward {tokens : Nat}
     (inputsEmbeds : Tensor { device := device, shape := #[tokens, cfg.vision_config.hidden_size], dtype := inputDType })
     : Tensor { device := device, shape := #[tokens, cfg.text_config.hidden_size], dtype := dtype } :=
   let normalized := rmsNormNoScale2d inputsEmbeds cfg.text_config.rms_norm_eps
-  let admitted : Tensor ⟨#[tokens, cfg.vision_config.hidden_size], dtype, device⟩ :=
-    match Tensor.ofRaw normalized.raw with
-    | .ok tensor => tensor
-    | .error message => nativeInvariantFailure s!"Gemma4 projector dtype: {message}"
-  linear2d admitted m.embedding_projection
+  linear2d (normalized.castDType dtype) m.embedding_projection
 
 end Gemma4MultimodalEmbedder
 
@@ -367,7 +359,7 @@ def getImageFeatures {patchRows patchCols : Nat}
     : Tensor { device := device, shape := #[(patchRows / cfg.vision_config.pooling_kernel_size) * (patchCols / cfg.vision_config.pooling_kernel_size),
         cfg.text_config.hidden_size], dtype := projectorDType } :=
   let visionFeatures := m.vision_tower.forward cfg patchGrid
-  m.embed_vision.forward cfg visionFeatures.2
+  m.embed_vision.forward cfg visionFeatures
 
 def getImageFeaturesMany
     (cfg : VLConfig)

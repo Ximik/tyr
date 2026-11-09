@@ -111,13 +111,7 @@ parameter tree. Model loaders validate compute dtypes and retain the evidence
 in `RealFloatingDType`; generated SafeTensors records retain concrete indices
 and derived tree constraints. There are no same-dtype adapters that reject promotion and
 return an input as a fallback.
-Deliberate mixed-precision computation needs explicit input conversions or a
-witnessed promoting operation.
-`Tensor.Promoting` provides the latter when dtypes are known only at runtime:
-its checked binary and host-scalar variants return the computed dtype with a
-promotion witness. Its unary convenience wrappers express their computed dtype
-directly in the result index. These operations preserve the promoted native
-dtype without coercing it to an input's dtype.
+Deliberate mixed-precision computation uses explicit input conversions.
 The arithmetic `?` variants also return native kernel failures through `Except`.
 The checked matrix, expansion, concatenation, and reduction APIs provide
 recoverable errors for their respective checks and native calls; this does not

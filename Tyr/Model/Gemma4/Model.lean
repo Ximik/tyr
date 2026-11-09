@@ -97,7 +97,7 @@ private def rmsNormWeighted4dSlice {a b c dim maxDim : Nat} {weightDType : DType
   let inv : Tensor { device := device, shape := #[a * b * c, 1], dtype := dtype } := rsqrtDynamic (Tensor.addScalar var eps)
   let inv : Tensor { device := device, shape := #[a * b * c, dim], dtype := dtype } := Tensor.expand inv #[a * b * c, dim]
   let scale : Tensor { device := device, shape := #[a * b * c, dim], dtype := .Float32 } := Tensor.expand (Tensor.reshape (floatDynamic w) #[1, dim]) #[a * b * c, dim]
-  Tensor.castLike x (Tensor.reshape ((promotedMul (Tensor.mul xf inv) scale).2) #[a, b, c, dim])
+  Tensor.castLike x (Tensor.reshape (Tensor.mul (floatDynamic (Tensor.mul xf inv)) scale) #[a, b, c, dim])
 
 private def rmsNormNoScale4dSlice {a b c dim : Nat}
     (x : Tensor { device := device, shape := #[a, b, c, dim], dtype := dtype })
@@ -126,9 +126,9 @@ def forward {batch seq : Nat}
 end Gemma4MLP
 
 structure Gemma4TextRouter (cfg : Config) where
-  proj : SomeDTypeTensor #[cfg.num_experts, cfg.hidden_size] device
-  scale : SomeDTypeTensor #[cfg.hidden_size] device
-  per_expert_scale : SomeDTypeTensor #[cfg.num_experts] device
+  proj : Tensor { device := device, shape := #[cfg.num_experts, cfg.hidden_size], dtype := .Float32 }
+  scale : Tensor { device := device, shape := #[cfg.hidden_size], dtype := .Float32 }
+  per_expert_scale : Tensor { device := device, shape := #[cfg.num_experts], dtype := .Float32 }
   deriving TensorStruct
 
 namespace Gemma4TextRouter
@@ -138,18 +138,15 @@ def forward {tokens : Nat}
     (m : Gemma4TextRouter (device := device) cfg)
     (hidden : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype })
     : Tensor { device := device, shape := #[tokens, cfg.num_experts], dtype := .Float32 }
-      × SomeDTypeTensor #[tokens, cfg.top_k_experts] device
+      × Tensor { device := device, shape := #[tokens, cfg.top_k_experts], dtype := .Float32 }
       × Tensor { device := device, shape := #[tokens, cfg.top_k_experts], dtype := .Int64 } :=
   let normed : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype } := rmsNormNoScale2d hidden cfg.rms_norm_eps
   let scaleRoot := 1.0 / Float.sqrt cfg.hidden_size.toFloat
   let scale : Tensor ⟨#[tokens, cfg.hidden_size], .Float32, device⟩ :=
-    Tensor.expand (Tensor.reshape (floatDynamic m.scale.2) #[1, cfg.hidden_size]) #[tokens, cfg.hidden_size]
+    Tensor.expand (Tensor.reshape m.scale #[1, cfg.hidden_size]) #[tokens, cfg.hidden_size]
   let normed : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := .Float32 } :=
-    match Tensor.ofRaw (σ := ⟨#[tokens, cfg.hidden_size], .Float32, device⟩)
-        (promotedMul normed scale).2.raw with
-    | .ok tensor => Tensor.mulScalar tensor scaleRoot
-    | .error message => nativeInvariantFailure s!"Gemma4 router computation: {message}"
-  let logitsDyn : Tensor { device := device, shape := #[tokens, cfg.num_experts], dtype := .Float32 } := einsumChecked "eh,th->te" (floatDynamic m.proj.2) normed
+    Tensor.mulScalar (Tensor.mul (floatDynamic normed) scale) scaleRoot
+  let logitsDyn : Tensor { device := device, shape := #[tokens, cfg.num_experts], dtype := .Float32 } := einsumChecked "eh,th->te" m.proj normed
   let logits : Tensor { device := device, shape := #[tokens, cfg.num_experts], dtype := .Float32 } := Tensor.reshape logitsDyn #[tokens, cfg.num_experts]
   let probs : Tensor { device := device, shape := #[tokens, cfg.num_experts], dtype := .Float32 } := Tensor.softmax logits
   let (topValsRaw, topIdx) := Tensor.topKLast2d! probs cfg.top_k_experts
@@ -157,10 +154,10 @@ def forward {tokens : Nat}
   let denom : Tensor { device := device, shape := #[tokens, cfg.top_k_experts], dtype := .Float32 } := Tensor.expand denom #[tokens, cfg.top_k_experts]
   let topVals : Tensor { device := device, shape := #[tokens, cfg.top_k_experts], dtype := .Float32 } := Tensor.div topValsRaw denom
   let flatIdx : Tensor { device := device, shape := #[tokens * cfg.top_k_experts], dtype := .Int64 } := Tensor.reshape topIdx #[tokens * cfg.top_k_experts]
-  let scalesFlat : Tensor { device := device, shape := #[tokens * cfg.top_k_experts], dtype := m.per_expert_scale.1 } :=
-    Tensor.indexSelect m.per_expert_scale.2 flatIdx
-  let scales : Tensor { device := device, shape := #[tokens, cfg.top_k_experts], dtype := m.per_expert_scale.1 } := Tensor.reshape scalesFlat #[tokens, cfg.top_k_experts]
-  (probs, promotedMul topVals scales, topIdx)
+  let scalesFlat : Tensor { device := device, shape := #[tokens * cfg.top_k_experts], dtype := .Float32 } :=
+    Tensor.indexSelect m.per_expert_scale flatIdx
+  let scales : Tensor { device := device, shape := #[tokens, cfg.top_k_experts], dtype := .Float32 } := Tensor.reshape scalesFlat #[tokens, cfg.top_k_experts]
+  (probs, Tensor.mul topVals scales, topIdx)
 
 end Gemma4TextRouter
 
@@ -853,7 +850,7 @@ def forward {batch seq : Nat}
       let (_routerProbs, topVals, topIdx) := moe.router.forward cfg routerInput
       let expertInput2d : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype } :=
         moe.pre_feedforward_layernorm_2.forward2d routerInput
-      let expert2d := moe.experts.forward2d cfg expertInput2d topVals.2 topIdx
+      let expert2d := moe.experts.forward2d cfg expertInput2d topVals topIdx
       let expert3d : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } := Tensor.reshape expert2d #[batch, seq, cfg.hidden_size]
       Tensor.add denseBranch (moe.post_feedforward_layernorm_2.forward3d expert3d)
     | none =>
@@ -906,7 +903,7 @@ def forwardWithCache {batch seq cap : Nat}
       let (_routerProbs, topVals, topIdx) := moe.router.forward cfg routerInput
       let expertInput2d : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype } :=
         moe.pre_feedforward_layernorm_2.forward2d routerInput
-      let expert2d := moe.experts.forward2d cfg expertInput2d topVals.2 topIdx
+      let expert2d := moe.experts.forward2d cfg expertInput2d topVals topIdx
       let expert3d : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } := Tensor.reshape expert2d #[batch, seq, cfg.hidden_size]
       Tensor.add denseBranch (moe.post_feedforward_layernorm_2.forward3d expert3d)
     | none =>
@@ -959,7 +956,7 @@ def forwardStep {batch cap : Nat}
       let (_routerProbs, topVals, topIdx) := moe.router.forward cfg routerInput
       let expertInput2d : Tensor { device := device, shape := #[batch, cfg.hidden_size], dtype := dtype } :=
         moe.pre_feedforward_layernorm_2.forward2d routerInput
-      let expert2d := moe.experts.forward2d cfg expertInput2d topVals.2 topIdx
+      let expert2d := moe.experts.forward2d cfg expertInput2d topVals topIdx
       let expert3d : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := dtype } := Tensor.reshape expert2d #[batch, 1, cfg.hidden_size]
       Tensor.add denseBranch (moe.post_feedforward_layernorm_2.forward3d expert3d)
     | none =>
@@ -1014,7 +1011,7 @@ def forwardPrefillWithMask {batch seq cap : Nat}
       let (_routerProbs, topVals, topIdx) := moe.router.forward cfg routerInput
       let expertInput2d : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype } :=
         moe.pre_feedforward_layernorm_2.forward2d routerInput
-      let expert2d := moe.experts.forward2d cfg expertInput2d topVals.2 topIdx
+      let expert2d := moe.experts.forward2d cfg expertInput2d topVals topIdx
       let expert3d : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } := Tensor.reshape expert2d #[batch, seq, cfg.hidden_size]
       Tensor.add denseBranch (moe.post_feedforward_layernorm_2.forward3d expert3d)
     | none =>

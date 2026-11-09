@@ -12,22 +12,6 @@ private def checked {σ : StaticSpec} (raw : RawTensor) : Tensor σ :=
   | .ok result => result
   | .error message => nativeInvariantFailure s!"Qwen35 tensor boundary: {message}"
 
-/-- Retain the selected dtype after mixed-precision arithmetic. In particular,
-expert routing multiplies before adding to its Float32 accumulator. -/
-def promotedAdd {shape : Shape} {leftDType rightDType : DType}
-    (left : Tensor ⟨shape, leftDType, device⟩)
-    (right : Tensor ⟨shape, rightDType, device⟩) : SomeDTypeTensor shape device :=
-  match Tensor.Promoting.add? left right >>= fun result => result.tensor.reifyDType with
-  | .ok result => result
-  | .error message => nativeInvariantFailure s!"Qwen35 mixed addition: {message}"
-
-def promotedMul {shape : Shape} {leftDType rightDType : DType}
-    (left : Tensor ⟨shape, leftDType, device⟩)
-    (right : Tensor ⟨shape, rightDType, device⟩) : SomeDTypeTensor shape device :=
-  match Tensor.Promoting.mul? left right >>= fun result => result.tensor.reifyDType with
-  | .ok result => result
-  | .error message => nativeInvariantFailure s!"Qwen35 mixed multiplication: {message}"
-
 def typedSlice {s out : Shape} {d : DType} (x : Tensor { device := device, shape := s, dtype := d }) (dim : Nat) (start len : Nat) : Tensor { device := device, shape := out, dtype := d } :=
   x.sliceChecked dim start len out
 
