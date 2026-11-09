@@ -81,7 +81,8 @@ private def lagunaTiny : Config := { LagunaConfig.laguna_s_2_1 with
   moe_intermediate_size := 64
   shared_expert_intermediate_size := 64
   mlp_only_layers := #[0]
-  layer_types := #[.fullAttention, .slidingAttention, .slidingAttention, .slidingAttention] }
+  layer_types := #[.fullAttention, .slidingAttention, .slidingAttention, .slidingAttention]
+  slidingWindowPos := by decide }
 
 /-- Same shape as `lagunaTiny` but all-dense FFN (num_experts = 0) — the
     fp32-friendly variant for tight-tolerance parity checks. -/

@@ -90,7 +90,10 @@ structure LagunaConfig where
   pad_token_id : Option UInt64 := some 9
   bos_token_id : Option UInt64 := some 2
   eos_token_ids : Array UInt64 := #[2, 24]
-  deriving Repr, Inhabited
+
+  /-- Sliding layers keep a ring cache of `sliding_window` tokens; checked when the config is built. -/
+  slidingWindowPos : 0 < sliding_window := by decide
+  deriving Repr
 
 namespace LagunaConfig
 

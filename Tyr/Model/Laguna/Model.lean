@@ -764,8 +764,9 @@ def initCacheSession {batch : Nat} (cfg : Config) (m : LagunaModel (device := de
     (maxLen : Nat) (device : Device) : IO (LagunaCacheSession (device := device) (dtype := dtype) cfg batch maxLen) := do
   let support ← dtype.acquireConstantSupport device
   let _ := support.down
-  let ⟨hPos⟩ ← if h : 0 < maxLen ∧ 0 < cfg.sliding_window then pure (PLift.up h) else
-    throw <| IO.userError "Laguna cache capacity and sliding window must be positive"
+  let ⟨hMax⟩ ← if h : 0 < maxLen then pure (PLift.up h) else
+    throw <| IO.userError "Laguna cache capacity must be positive"
+  have hWindow := cfg.slidingWindowPos
   if m.layers.isEmpty then
     throw <| IO.userError "Laguna cache session requires at least one layer"
   let mut caches := #[]
