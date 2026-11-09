@@ -697,13 +697,17 @@ def divB {σ₁ σ₂ : StaticSpec} {result : DType}
     Tensor (σ₁.division σ₂) :=
   divB! a b
 
+def broadcastTo! {σ : StaticSpec} (t : Tensor σ) (target : Shape) :
+    Tensor (σ.withShape target) :=
+  checkedResult "broadcastTo" (Tensor.ofRaw (RawTensor.expand! t.raw target))
+
 /-- Asymmetric broadcast: stretch `t` to `target` (a libtorch `expand` view,
     no copy). The fixed-side proof `broadcastsTo s target` rules out targets
     that would themselves be stretched. -/
 def broadcastTo {σ : StaticSpec} (t : Tensor σ) (target : Shape)
     (_h : TensorSpec.broadcastsTo σ.shape target := by rfl) :
     Tensor (σ.withShape target) :=
-  checkedResult "broadcastTo" do Tensor.ofRaw (← RawTensor.expandChecked t.raw target)
+  broadcastTo! t target
 
 /-- Metadata-checked `expand` view, for code generic over dimensions where the
     `broadcastTo` proof cannot reduce (e.g. `#[batch, outDim]` with symbolic
@@ -819,13 +823,16 @@ macro "cat_shape" : tactic => `(tactic| first
   | exact of_decide_eq_true rfl
   | (simp <;> fail "incompatible cat shapes"))
 
+def cat! {s1 s2 : Shape} {d : DType} {dev : Device}
+    (t1 : Tensor ⟨s1, d, dev⟩) (t2 : Tensor ⟨s2, d, dev⟩) (dim : Nat) :
+    Tensor ⟨TensorSpec.catShape s1 s2 dim, d, dev⟩ :=
+  checkedResult "cat" (Tensor.ofRaw (RawTensor.cat! t1.raw t2.raw dim))
+
 def cat {s1 s2 : Shape} {d : DType} {dev : Device}
     (t1 : Tensor ⟨s1, d, dev⟩) (t2 : Tensor ⟨s2, d, dev⟩) (dim : Nat)
     (_h : TensorSpec.catCompatible s1 s2 dim = true := by cat_shape) :
     Tensor ⟨TensorSpec.catShape s1 s2 dim, d, dev⟩ :=
-  checkedResult "cat" do
-    Tensor.checkSameDevice t1 t2
-    Tensor.ofRaw (← RawTensor.catChecked t1.raw t2.raw dim)
+  cat! t1 t2 dim
 
 /-- Stack a runtime list of equal vectors along a new leading axis; the result
     shape records the actual list length. -/
@@ -966,12 +973,14 @@ def logicalNot {s : Shape} {dev : Device} (t : Tensor ⟨s, .Bool, dev⟩) :
     Tensor ⟨s, .Bool, dev⟩ :=
   t.checkedReplacement (RawTensor.logicalNot t.raw)
 
+def logicalAnd! {s : Shape} {dev : Device} (a b : Tensor ⟨s, .Bool, dev⟩) :
+    Tensor ⟨s, .Bool, dev⟩ :=
+  a.checkedReplacement (RawTensor.logicalAnd! a.raw b.raw)
+
 /-- Elementwise logical conjunction of two Bool tensors. -/
 def logicalAnd {s : Shape} {dev : Device} (a b : Tensor ⟨s, .Bool, dev⟩) :
     Tensor ⟨s, .Bool, dev⟩ :=
-  checkedResult "logicalAnd" do
-    Tensor.checkPointwise a b
-    Tensor.ofRaw (← RawTensor.logicalAndChecked a.raw b.raw)
+  logicalAnd! a b
 
 /-- Elementwise logical disjunction of two Bool tensors. -/
 def logicalOr {s : Shape} {dev : Device} (a b : Tensor ⟨s, .Bool, dev⟩) :
@@ -1149,24 +1158,22 @@ end torch
 
 namespace torch.Tensor
 
-/-- One-dimensional convolution with matching input channels, dtype and device.
-The spatial result is computed using natural arithmetic and checked at the ABI
-boundary. -/
-def conv1d? {batch inChannels outChannels length kernel : Nat}
-    {d : DType} {dev : Device}
-    (input : Tensor ⟨#[batch, inChannels, length], d, dev⟩)
-    (weight : Tensor ⟨#[outChannels, inChannels, kernel], d, dev⟩)
-    (stride : Nat := 1) (padding : Nat := 0) (dilation : Nat := 1) :
-    Except String (Tensor ⟨#[batch, outChannels,
-      ((length + 2 * padding - (dilation * (kernel - 1) + 1)) /
-        stride + 1)], d, dev⟩) := do
-  checkMatrixOperands input weight
-  let raw ← RawTensor.conv1dChecked input.raw weight.raw stride padding dilation
-  DType.expectedEq input.raw.dtype raw.dtype
-  Tensor.ofRaw raw
+/-- Positive stride, dilation and kernel, with the dilated window fitting the
+padded input, as native convolution requires. -/
+def ConvValid (length kernel stride padding dilation : Nat) : Prop :=
+  0 < stride ∧ 0 < dilation ∧ 0 < kernel ∧ dilation * (kernel - 1) + 1 ≤ length + 2 * padding
 
-/-- One-dimensional convolution; use `conv1d?` for recoverable argument errors. -/
-def conv1d {batch inChannels outChannels length kernel : Nat}
+instance (length kernel stride padding dilation : Nat) :
+    Decidable (ConvValid length kernel stride padding dilation) := by
+  unfold ConvValid; infer_instance
+
+/-- Discharges `ConvValid` for literal parameters, or from facts in scope. -/
+macro "conv_valid" : tactic => `(tactic| first
+  | exact of_decide_eq_true rfl
+  | assumption
+  | (refine ⟨?_, ?_, ?_, ?_⟩ <;> omega))
+
+def conv1d! {batch inChannels outChannels length kernel : Nat}
     {d : DType} {dev : Device}
     (input : Tensor ⟨#[batch, inChannels, length], d, dev⟩)
     (weight : Tensor ⟨#[outChannels, inChannels, kernel], d, dev⟩)
@@ -1174,9 +1181,19 @@ def conv1d {batch inChannels outChannels length kernel : Nat}
     Tensor ⟨#[batch, outChannels,
       ((length + 2 * padding - (dilation * (kernel - 1) + 1)) /
         stride + 1)], d, dev⟩ :=
-  match conv1d? input weight stride padding dilation with
-  | .ok result => result
-  | .error message => nativeInvariantFailure s!"Tensor.conv1d: {message}"
+  checkedResult "conv1d" (Tensor.ofRaw (RawTensor.conv1d! input.raw weight.raw stride padding dilation))
+
+/-- One-dimensional convolution without bias. -/
+def conv1d {batch inChannels outChannels length kernel : Nat}
+    {d : DType} {dev : Device} [DType.FloatingOrComplex d]
+    (input : Tensor ⟨#[batch, inChannels, length], d, dev⟩)
+    (weight : Tensor ⟨#[outChannels, inChannels, kernel], d, dev⟩)
+    (stride : Nat := 1) (padding : Nat := 0) (dilation : Nat := 1)
+    (_valid : ConvValid length kernel stride padding dilation := by conv_valid) :
+    Tensor ⟨#[batch, outChannels,
+      ((length + 2 * padding - (dilation * (kernel - 1) + 1)) /
+        stride + 1)], d, dev⟩ :=
+  conv1d! input weight stride padding dilation
 
 /-- Copy tensor values to a host Float array through the native conversion. -/
 def toFloatArray {σ : StaticSpec} (t : Tensor σ) : IO (Array Float) :=

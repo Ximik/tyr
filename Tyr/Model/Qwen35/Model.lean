@@ -392,7 +392,7 @@ def forward {batch seq : Nat}
   let vh : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, seq, cfg.head_dim], dtype := dtype } := Tensor.splitHeads v
 
   let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, seq, cfg.head_dim], dtype := dtype } :=
-    Tensor.attentionGQA qh kh vh is_causal true
+    Tensor.attentionGQA qh kh vh is_causal true (_heads := .ofDvd cfg.kvHeadsDivide)
 
   let attn : Tensor { device := device, shape := #[batch, seq, cfg.num_attention_heads, cfg.head_dim], dtype := dtype } := Tensor.joinHeads attn
   let attnFlat : Tensor { device := device, shape := #[batch, seq, qLen], dtype := dtype } := Tensor.reshape attn #[batch, seq, qLen]
@@ -447,7 +447,7 @@ def forwardWithCache {batch seq cap : Nat}
   let kh : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, seq, cfg.head_dim], dtype := dtype } := kStore'.slice 2 0 seq
   let vh : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, seq, cfg.head_dim], dtype := dtype } := vStore'.slice 2 0 seq
   let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, seq, cfg.head_dim], dtype := dtype } :=
-    Tensor.attentionGQA qh kh vh true true
+    Tensor.attentionGQA qh kh vh true true (_heads := .ofDvd cfg.kvHeadsDivide)
 
   let attn : Tensor { device := device, shape := #[batch, seq, cfg.num_attention_heads, cfg.head_dim], dtype := dtype } := Tensor.joinHeads attn
   let attnFlat : Tensor { device := device, shape := #[batch, seq, qLen], dtype := dtype } := Tensor.reshape attn #[batch, seq, qLen]
@@ -486,7 +486,7 @@ def forwardMasked {batch seq : Nat}
   let vh : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, seq, cfg.head_dim], dtype := dtype } := Tensor.splitHeads v
 
   let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, seq, cfg.head_dim], dtype := dtype } :=
-    Tensor.attentionGQAMask qh kh vh attn_mask is_causal true
+    Tensor.attentionGQAMask qh kh vh attn_mask is_causal true (_heads := .ofDvd cfg.kvHeadsDivide)
 
   let attn : Tensor { device := device, shape := #[batch, seq, cfg.num_attention_heads, cfg.head_dim], dtype := dtype } := Tensor.joinHeads attn
   let attnFlat : Tensor { device := device, shape := #[batch, seq, qLen], dtype := dtype } := Tensor.reshape attn #[batch, seq, qLen]
@@ -537,7 +537,7 @@ def forwardStep {batch cap : Nat}
   let kAll : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, kvLen, cfg.head_dim], dtype := dtype } := kStore'.slice 2 0 kvLen
   let vAll : Tensor { device := device, shape := #[batch, cfg.num_key_value_heads, kvLen, cfg.head_dim], dtype := dtype } := vStore'.slice 2 0 kvLen
   let attn : Tensor { device := device, shape := #[batch, cfg.num_attention_heads, 1, cfg.head_dim], dtype := dtype } :=
-    Tensor.attentionGQAQKV qh kAll vAll false true
+    Tensor.attentionGQAQKV qh kAll vAll false true (_heads := .ofDvd cfg.kvHeadsDivide)
   let attn : Tensor { device := device, shape := #[batch, 1, cfg.num_attention_heads, cfg.head_dim], dtype := dtype } := Tensor.joinHeads attn
   let attnFlat : Tensor { device := device, shape := #[batch, 1, qLen], dtype := dtype } := Tensor.reshape attn #[batch, 1, qLen]
   let gated : Tensor { device := device, shape := #[batch, 1, qLen], dtype := dtype } := Tensor.mul attnFlat (Tensor.sigmoid gateFlat)

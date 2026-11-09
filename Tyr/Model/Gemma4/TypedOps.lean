@@ -34,9 +34,10 @@ def maskedAttention! {b h kh qs ks d : Nat} {dm : DType}
   q.checkedReplacement (RawTensor.gemma4MaskedAttention! q.raw k.raw v.raw mask.raw gqa)
 
 /-- Deterministic inference attention; dropout is available only through IO. -/
-def maskedAttention {b h kh qs ks d : Nat} {dm : DType}
+def maskedAttention {b h kh qs ks d : Nat} {dm : DType} [DType.RealFloating dtype]
     (q : Tensor { device := device, shape := #[b, h, qs, d], dtype := dtype }) (k v : Tensor { device := device, shape := #[b, kh, ks, d], dtype := dtype })
-    (mask : Tensor { device := device, shape := #[b, qs, ks], dtype := dm }) (gqa : Bool := false) :
+    (mask : Tensor { device := device, shape := #[b, qs, ks], dtype := dm }) (gqa : Bool := false)
+    (_heads : Tensor.AttentionHeads h kh gqa := by attention_heads) :
     Tensor { device := device, shape := #[b, h, qs, d], dtype := dtype } :=
   maskedAttention! q k v mask gqa
 

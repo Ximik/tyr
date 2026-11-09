@@ -185,11 +185,11 @@ def forwardEmbeds {batch seq : Nat}
   let hidden := match attnMask with
     | some mask =>
       m.textModel.layers.foldl
-        (fun h layer => layer.forwardMasked h cos sin mask true)
+        (fun h layer => layer.forwardMasked cfg.textConfig.headsValid.2.2 h cos sin mask true)
         inputsEmbeds
     | none =>
       m.textModel.layers.foldl
-        (fun h layer => layer.forward h cos sin true)
+        (fun h layer => layer.forward cfg.textConfig.headsValid.2.2 h cos sin true)
         inputsEmbeds
   let hidden := m.textModel.norm.forward3dPreserving hidden
   Tensor.linear3d hidden m.lmHead
@@ -222,7 +222,7 @@ private def forwardEmbedsMaskedWithPositionRows {batch seq : Nat}
       let maskB : Tensor { device := device, shape := #[1, seq], dtype := .Int64 } := Tensor.sliceChecked attnMask 0 b 1 #[1, seq]
       let hiddenB :=
         m.textModel.layers.foldl
-          (fun h layer => layer.forwardMasked h cosB sinB maskB true)
+          (fun h layer => layer.forwardMasked cfg.textConfig.headsValid.2.2 h cosB sinB maskB true)
           embB
       let hiddenB := m.textModel.norm.forward3dPreserving hiddenB
       perBatchHidden := perBatchHidden.push (Tensor.packShape hiddenB)
@@ -473,7 +473,7 @@ private def decodeStepFromEmbedWithCache {batch maxLen : Nat}
       match nextCaches[i]? with
       | some c => pure c
       | none => throw <| IO.userError s!"missing thinker KV cache at index {i}"
-    let (hNext, cNext) := layer.forwardStep hidden cos sin cache position hpos
+    let (hNext, cNext) := layer.forwardStep cfg.textConfig.headsValid.2.2 hidden cos sin cache position hpos
     hidden := hNext
     nextCaches := nextCaches.set! i cNext
 

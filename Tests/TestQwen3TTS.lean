@@ -118,14 +118,14 @@ def testQwen3TTSBFloat16IncrementalCache : IO Unit := do
       self_attn := TensorStruct.scale raw.self_attn 0.25
       mlp := TensorStruct.scale raw.mlp 0.25 }
     let x := inputs.castDType dtype
-    let full := layer.forward x cos sin
+    let full := layer.forward (by decide) x cos sin
     LeanTest.assertEqual full.actualSpec.dtype x.actualSpec.dtype "Full Qwen layer retains model dtype"
     let fresh : qwen.QwenAttention.KVCache 1 1 4 5 dtype := qwen.QwenAttention.initKVCache 5 (dtype := dtype)
     let mut cache := fresh
     -- Three prompt tokens followed by two decode tokens exercise the Talker cache path.
     let mut outputs : Array (Sigma (fun shape => Tensor { shape := shape, dtype, device := .CPU })) := #[]
     for hp : pos in [:3] do
-      let (out, next) := layer.forwardStep (Tensor.sliceChecked x 1 pos 1 #[1, 1, 8])
+      let (out, next) := layer.forwardStep (by decide) (Tensor.sliceChecked x 1 pos 1 #[1, 1, 8])
         (Tensor.sliceChecked cos 0 pos 1 #[1, 2]) (Tensor.sliceChecked sin 0 pos 1 #[1, 2]) cache
         pos (by have := hp.upper; simp at this; omega)
       LeanTest.assertEqual out.actualSpec.dtype x.actualSpec.dtype "Prefill step retains model dtype"
@@ -135,7 +135,7 @@ def testQwen3TTSBFloat16IncrementalCache : IO Unit := do
     let prefixK ← Tensor.toFloatArray prefixCache.kStore
     let prefixV ← Tensor.toFloatArray prefixCache.vStore
     for hp : pos in [3:5] do
-      let (out, next) := layer.forwardStep (Tensor.sliceChecked x 1 pos 1 #[1, 1, 8])
+      let (out, next) := layer.forwardStep (by decide) (Tensor.sliceChecked x 1 pos 1 #[1, 1, 8])
         (Tensor.sliceChecked cos 0 pos 1 #[1, 2]) (Tensor.sliceChecked sin 0 pos 1 #[1, 2]) cache
         pos (by have := hp.upper; simp at this; omega)
       LeanTest.assertEqual out.actualSpec.dtype x.actualSpec.dtype "Decode step retains model dtype"

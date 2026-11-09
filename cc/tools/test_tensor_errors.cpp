@@ -381,21 +381,18 @@ void comparison(Binary operation, double expected) {
   require(a->m_rc == 1 && b->m_rc == 1, "comparison ownership imbalance");
 }
 
-void checkedComparison(Binary operation, const char* context, bool invalid) {
-  auto a = full({2}, 6), b = full({invalid ? 3u : 2u}, 2);
-  Object result(operation(a.get(), b.get()), lean_dec);
-  if (invalid) exceptError(result.get(), context);
-  else values(exceptValue(result.get()), 2, std::string(context) == "lt" ? 0 : 1);
-  require(a->m_rc == 1 && b->m_rc == 1, "Checked comparison ownership imbalance");
+void logicalAnd() {
+  auto a = full({2}, 6), b = full({2}, 2);
+  Object result(lean_torch_logical_and(a.get(), b.get()), lean_dec);
+  values(result.get(), 2, 1);
+  require(a->m_rc == 1 && b->m_rc == 1, "logicalAnd ownership imbalance");
 }
 
-void checkedCatPair(bool invalid) {
-  auto a = full({2, 2}, 3), b = full({invalid ? 3u : 2u, 2}, 3);
-  Object result(CHECKED(lean_torch_cat2)(a.get(), b.get(), Nat(1)), lean_dec);
-  if (invalid) exceptError(result.get(), "cat");
-  else values(exceptValue(result.get()), 8, 3);
-  require(a->m_rc == 1 && b->m_rc == 1,
-    "Checked pair concatenation ownership imbalance");
+void catPair() {
+  auto a = full({2, 2}, 3), b = full({2, 2}, 3);
+  Object result(lean_torch_cat2(a.get(), b.get(), Nat(1)), lean_dec);
+  values(result.get(), 8, 3);
+  require(a->m_rc == 1 && b->m_rc == 1, "Pair concatenation ownership imbalance");
 }
 
 void rms() {
@@ -480,10 +477,8 @@ int main() {
   run("checked/owned-arguments-early-error", checkedEarlyFailure);
   run("checked/exception-kinds", checkedExceptionKinds);
   run("checked/IO-exception-kinds", checkedIoExceptionKinds);
-  for (bool invalid : {false, true}) {
-    run(invalid ? "checked/logicalAnd-error" : "checked/logicalAnd-success", [&] { checkedComparison(CHECKED(lean_torch_logical_and), "logicalAnd", invalid); });
-    run(invalid ? "checked/cat-pair-error" : "checked/cat-pair-success", [&] { checkedCatPair(invalid); });
-  }
+  run("logicalAnd/success", logicalAnd);
+  run("cat-pair/success", catPair);
 #ifndef TYR_CHECKED_BASELINE
   run("checked/linalg-errors", checkedLinalgFailures);
 #endif

@@ -58,6 +58,7 @@ structure DecodeBenchCase where
   headDim : Nat
   expectedTyrRoute : String := "tkKernel"
   dimsPos : 0 < batch ∧ 0 < qHeads ∧ 0 < kvHeads ∧ 0 < kvSeq ∧ 0 < headDim := by decide
+  kvHeadsDivide : kvHeads ∣ qHeads := by decide
   deriving Repr
 
 /-- Mirrors `Examples/GPU/RunMhaH100Decode.lean :: decodeShapes` plus a couple
@@ -197,7 +198,7 @@ private def runOne (runId : String) (warmup iters repeats : Nat)
   -- SDPA reference output (BF16 in / BF16 out, same as kernel) for parity.
   let outRef : Tensor { shape := #[c.batch, c.qHeads, 1, c.headDim], dtype := .BFloat16, device := device } :=
     Tensor.attentionGQAQKV
-      (q.toFloat32) (k.toFloat32) (v.toFloat32) false true
+      (q.toFloat32) (k.toFloat32) (v.toFloat32) false true (_heads := .ofDvd c.kvHeadsDivide)
       |> Tensor.toBFloat16
 
   match backend with
@@ -205,7 +206,7 @@ private def runOne (runId : String) (warmup iters repeats : Nat)
       let sink : Tensor { shape := #[c.batch, c.qHeads, 1, c.headDim], dtype := .BFloat16, device := device } ← Tensor.uniformLike q 0 0
       let sinkRef ← IO.mkRef (some sink)
       let action : IO Unit := do
-        let out := Tensor.attentionGQAQKV q k v false true
+        let out := Tensor.attentionGQAQKV q k v false true (_heads := .ofDvd c.kvHeadsDivide)
         let some destination ← sinkRef.swap none
           | throw (IO.userError "Decode benchmark destination is unavailable")
         let updated ← Tensor.copyInto destination out
@@ -226,7 +227,7 @@ private def runOne (runId : String) (warmup iters repeats : Nat)
       let routeActual := expectedRouteFor c
       -- Correctness once before timing.
       let outActual : Tensor { shape := #[c.batch, c.qHeads, 1, c.headDim], dtype := .BFloat16, device := device } :=
-        Tensor.flashAttention q k v true
+        Tensor.flashAttention q k v true (_heads := .ofDvd c.kvHeadsDivide)
       let _ ← torch.cuda_synchronize
       let outMae := Tensor.item (Tensor.meanAll (Tensor.abs (outActual - outRef)))
       let outMax := Tensor.item (Tensor.maxAll (Tensor.abs (outActual - outRef)))
@@ -235,7 +236,7 @@ private def runOne (runId : String) (warmup iters repeats : Nat)
       let sink : Tensor { shape := #[c.batch, c.qHeads, 1, c.headDim], dtype := .BFloat16, device := device } ← Tensor.uniformLike q 0 0
       let sinkRef ← IO.mkRef (some sink)
       let action : IO Unit := do
-        let out := Tensor.flashAttention q k v true
+        let out := Tensor.flashAttention q k v true (_heads := .ofDvd c.kvHeadsDivide)
         let some destination ← sinkRef.swap none
           | throw (IO.userError "Decode benchmark destination is unavailable")
         let updated ← Tensor.copyInto destination out

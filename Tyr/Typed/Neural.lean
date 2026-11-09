@@ -141,50 +141,32 @@ theorem convExtent_same {n kernel padding : Nat} (hn : 0 < n) (hk : 2 * padding 
     convExtent n kernel 1 padding 1 = n := by
   unfold convExtent; omega
 
-/-- Project a spatial parameter, repeating singleton arrays as native conv2d does.
-Only lengths one and two are valid; the native operation still receives the
-original array and rejects invalid lengths. The zero for a missing entry only
-makes the result index total and is never supplied as a native default. -/
-@[simp] def conv2dParam (values : Array Nat) (axis : Nat) : Nat :=
-  values.getD (if values.size == 1 then 0 else axis) 0
-
-private def checkConvolutionOperands {σ τ υ : StaticSpec}
-    (input : Tensor σ) (weight : Tensor τ) (bias : Tensor υ) : Except String Unit := do
-  DType.expectedEq input.raw.dtype weight.raw.dtype
-  DType.expectedEq input.raw.dtype bias.raw.dtype
-  Tensor.checkSameDevice input weight
-  Tensor.checkSameDevice input bias
-
-/-- Checked convolution, including actual dtype equality for dynamic operands.
-Native stride, padding and dilation errors remain recoverable. -/
-def conv2dBias? {batch cin cout height width kh kw : Nat} {d : DType} {dev : Device}
+def conv2dBias! {batch cin cout height width kh kw : Nat} {d : DType} {dev : Device}
     (input : Tensor ⟨#[batch, cin, height, width], d, dev⟩)
     (weight : Tensor ⟨#[cout, cin, kh, kw], d, dev⟩)
     (bias : Tensor ⟨#[cout], d, dev⟩)
-    (stride : Array Nat := #[1, 1]) (padding : Array Nat := #[0, 0])
-    (dilation : Array Nat := #[1, 1]) :
-    Except String (Tensor ⟨#[batch, cout,
-      convExtent height kh (conv2dParam stride 0) (conv2dParam padding 0) (conv2dParam dilation 0),
-      convExtent width kw (conv2dParam stride 1) (conv2dParam padding 1) (conv2dParam dilation 1)], d, dev⟩) := do
-  checkConvolutionOperands input weight bias
-  let raw ← RawTensor.conv2dBiasChecked
-    input.raw weight.raw bias.raw stride padding dilation
-  DType.expectedEq input.raw.dtype raw.dtype
-  Tensor.ofRaw raw
-
-/-- Biased two-dimensional convolution; `conv2dBias?` returns argument errors. -/
-def conv2dBias {batch cin cout height width kh kw : Nat} {d : DType} {dev : Device}
-    (input : Tensor ⟨#[batch, cin, height, width], d, dev⟩)
-    (weight : Tensor ⟨#[cout, cin, kh, kw], d, dev⟩)
-    (bias : Tensor ⟨#[cout], d, dev⟩)
-    (stride : Array Nat := #[1, 1]) (padding : Array Nat := #[0, 0])
-    (dilation : Array Nat := #[1, 1]) :
+    (stride : Nat × Nat := (1, 1)) (padding : Nat × Nat := (0, 0))
+    (dilation : Nat × Nat := (1, 1)) :
     Tensor ⟨#[batch, cout,
-      convExtent height kh (conv2dParam stride 0) (conv2dParam padding 0) (conv2dParam dilation 0),
-      convExtent width kw (conv2dParam stride 1) (conv2dParam padding 1) (conv2dParam dilation 1)], d, dev⟩ :=
-  match conv2dBias? input weight bias stride padding dilation with
-  | .ok result => result
-  | .error message => nativeInvariantFailure s!"Tensor.conv2dBias: {message}"
+      convExtent height kh stride.1 padding.1 dilation.1,
+      convExtent width kw stride.2 padding.2 dilation.2], d, dev⟩ :=
+  checkedNeuralResult "conv2dBias" (RawTensor.conv2dBias! input.raw weight.raw bias.raw
+    #[stride.1, stride.2] #[padding.1, padding.2] #[dilation.1, dilation.2])
+
+/-- Biased two-dimensional convolution; parameters are (height, width) pairs. -/
+def conv2dBias {batch cin cout height width kh kw : Nat} {d : DType} {dev : Device}
+    [DType.FloatingOrComplex d]
+    (input : Tensor ⟨#[batch, cin, height, width], d, dev⟩)
+    (weight : Tensor ⟨#[cout, cin, kh, kw], d, dev⟩)
+    (bias : Tensor ⟨#[cout], d, dev⟩)
+    (stride : Nat × Nat := (1, 1)) (padding : Nat × Nat := (0, 0))
+    (dilation : Nat × Nat := (1, 1))
+    (_height : ConvValid height kh stride.1 padding.1 dilation.1 := by conv_valid)
+    (_width : ConvValid width kw stride.2 padding.2 dilation.2 := by conv_valid) :
+    Tensor ⟨#[batch, cout,
+      convExtent height kh stride.1 padding.1 dilation.1,
+      convExtent width kw stride.2 padding.2 dilation.2], d, dev⟩ :=
+  conv2dBias! input weight bias stride padding dilation
 
 def splitHeads {batch seq heads dim : Nat} {d : DType} {dev : Device}
     (t : Tensor ⟨#[batch, seq, heads, dim], d, dev⟩) : Tensor ⟨#[batch, heads, seq, dim], d, dev⟩ :=
@@ -215,13 +197,30 @@ def attentionDropout? (dropout : Float) (training : Bool) : Except String Float 
     throw "attention dropout must be finite and in [0, 1]"
   pure (if training then dropout else 0.0)
 
+/-- Query heads either equal the K/V heads, or form whole groups of them under GQA. -/
+def AttentionHeads (heads kvHeads : Nat) (gqa : Bool) : Prop :=
+  kvHeads = heads ∨ (gqa = true ∧ kvHeads ∣ heads)
+
+instance (heads kvHeads : Nat) (gqa : Bool) : Decidable (AttentionHeads heads kvHeads gqa) := by
+  unfold AttentionHeads; infer_instance
+
+theorem AttentionHeads.ofDvd {heads kvHeads : Nat} (h : kvHeads ∣ heads) :
+    AttentionHeads heads kvHeads true :=
+  Or.inr ⟨rfl, h⟩
+
+/-- Discharges `AttentionHeads` for equal heads, literal heads, or a divisibility fact in scope. -/
+macro "attention_heads" : tactic => `(tactic| first
+  | exact Or.inl rfl
+  | exact of_decide_eq_true rfl
+  | exact Or.inr ⟨rfl, by assumption⟩)
+
 def attention! {batch heads seq dim : Nat} {d : DType} {dev : Device}
     (q k v : Tensor ⟨#[batch, heads, seq, dim], d, dev⟩)
     (causal : Bool := true) : Tensor ⟨#[batch, heads, seq, dim], d, dev⟩ :=
   q.checkedReplacement (RawTensor.attention! q.raw k.raw v.raw causal)
 
 /-- Zero-dropout attention. -/
-def attention {batch heads seq dim : Nat} {d : DType} {dev : Device}
+def attention {batch heads seq dim : Nat} {d : DType} {dev : Device} [DType.RealFloating d]
     (q k v : Tensor ⟨#[batch, heads, seq, dim], d, dev⟩)
     (causal : Bool := true) : Tensor ⟨#[batch, heads, seq, dim], d, dev⟩ :=
   attention! q k v causal
@@ -243,10 +242,11 @@ def attentionGQA! {batch heads kvHeads seq dim : Nat} {d : DType} {dev : Device}
   q.checkedReplacement (RawTensor.attentionGQA! q.raw k.raw v.raw causal gqa)
 
 /-- Zero-dropout grouped-query attention. -/
-def attentionGQA {batch heads kvHeads seq dim : Nat} {d : DType} {dev : Device}
+def attentionGQA {batch heads kvHeads seq dim : Nat} {d : DType} {dev : Device} [DType.RealFloating d]
     (q : Tensor ⟨#[batch, heads, seq, dim], d, dev⟩)
     (k v : Tensor ⟨#[batch, kvHeads, seq, dim], d, dev⟩)
-    (causal : Bool := true) (gqa : Bool := false) :
+    (causal : Bool := true) (gqa : Bool := false)
+    (_heads : AttentionHeads heads kvHeads gqa := by attention_heads) :
     Tensor ⟨#[batch, heads, seq, dim], d, dev⟩ :=
   attentionGQA! q k v causal gqa
 
@@ -269,11 +269,12 @@ def attentionGQAMask! {batch heads kvHeads seq dim : Nat} {d dm : DType} {dev : 
   q.checkedReplacement (RawTensor.attentionGQAMask! q.raw k.raw v.raw mask.raw causal gqa)
 
 /-- Zero-dropout grouped-query attention with a key padding mask. -/
-def attentionGQAMask {batch heads kvHeads seq dim : Nat} {d dm : DType} {dev : Device}
+def attentionGQAMask {batch heads kvHeads seq dim : Nat} {d dm : DType} {dev : Device} [DType.RealFloating d]
     (q : Tensor ⟨#[batch, heads, seq, dim], d, dev⟩)
     (k v : Tensor ⟨#[batch, kvHeads, seq, dim], d, dev⟩)
     (mask : Tensor ⟨#[batch, seq], dm, dev⟩)
-    (causal : Bool := true) (gqa : Bool := false) :
+    (causal : Bool := true) (gqa : Bool := false)
+    (_heads : AttentionHeads heads kvHeads gqa := by attention_heads) :
     Tensor ⟨#[batch, heads, seq, dim], d, dev⟩ :=
   attentionGQAMask! q k v mask causal gqa
 
@@ -322,10 +323,11 @@ def attentionGQAQKV! {batch heads kvHeads qSeq kvSeq dim : Nat} {d : DType} {dev
   q.checkedReplacement (RawTensor.attentionGQAQKV! q.raw k.raw v.raw causal gqa)
 
 /-- Zero-dropout grouped-query attention with separate query and key/value lengths. -/
-def attentionGQAQKV {batch heads kvHeads qSeq kvSeq dim : Nat} {d : DType} {dev : Device}
+def attentionGQAQKV {batch heads kvHeads qSeq kvSeq dim : Nat} {d : DType} {dev : Device} [DType.RealFloating d]
     (q : Tensor ⟨#[batch, heads, qSeq, dim], d, dev⟩)
     (k v : Tensor ⟨#[batch, kvHeads, kvSeq, dim], d, dev⟩)
-    (causal : Bool := false) (gqa : Bool := false) :
+    (causal : Bool := false) (gqa : Bool := false)
+    (_heads : AttentionHeads heads kvHeads gqa := by attention_heads) :
     Tensor ⟨#[batch, heads, qSeq, dim], d, dev⟩ :=
   attentionGQAQKV! q k v causal gqa
 
@@ -350,11 +352,12 @@ def flashAttention! {batch heads kvHeads qSeq kvSeq dim : Nat} {d : DType} {dev 
     q.raw k.raw v.raw (mask.map (fun packed => packed.2.raw)) causal scale gqa)
 
 /-- Zero-dropout FlashAttention. -/
-def flashAttention {batch heads kvHeads qSeq kvSeq dim : Nat} {d : DType} {dev : Device}
+def flashAttention {batch heads kvHeads qSeq kvSeq dim : Nat} {d : DType} {dev : Device} [DType.RealFloating d]
     (q : Tensor ⟨#[batch, heads, qSeq, dim], d, dev⟩)
     (k v : Tensor ⟨#[batch, kvHeads, kvSeq, dim], d, dev⟩) (gqa : Bool := false)
     (mask : Option (SomeDTypeTensor #[batch, kvSeq] dev) := none)
-    (causal : Bool := false) (scale : Option Float := none) :
+    (causal : Bool := false) (scale : Option Float := none)
+    (_heads : AttentionHeads heads kvHeads gqa := by attention_heads) :
     Tensor ⟨#[batch, heads, qSeq, dim], d, dev⟩ :=
   flashAttention! q k v gqa mask causal scale
 
@@ -450,51 +453,68 @@ def maskedFill {s : Shape} {d : DType} {dev : Device}
     (input : Tensor ⟨s, d, dev⟩) (mask : Tensor ⟨s, .Bool, dev⟩) (value : Float) : Tensor ⟨s, d, dev⟩ :=
   input.checkedReplacement (RawTensor.maskedFill input.raw mask.raw value)
 
-/-- Grouped convolution checks channel grouping at the native boundary. -/
-def conv1dGroups? {batch cin cout cinPerGroup length kernel : Nat} {d : DType} {dev : Device}
-    (input : Tensor ⟨#[batch, cin, length], d, dev⟩)
-    (weight : Tensor ⟨#[cout, cinPerGroup, kernel], d, dev⟩) (bias : Tensor ⟨#[cout], d, dev⟩)
-    (stride : Nat := 1) (padding : Nat := 0) (dilation : Nat := 1) (groups : Nat := 1) :
-    Except String (Tensor ⟨#[batch, cout, convExtent length kernel stride padding dilation], d, dev⟩) := do
-  checkConvolutionOperands input weight bias
-  let raw ← RawTensor.conv1dGroupsChecked
-    input.raw weight.raw bias.raw stride padding dilation groups
-  DType.expectedEq input.raw.dtype raw.dtype
-  Tensor.ofRaw raw
+/-- Input channels split into `groups` equal groups, and output channels divide among them. -/
+def ConvGroups (cin cinPerGroup cout groups : Nat) : Prop :=
+  0 < groups ∧ cin = cinPerGroup * groups ∧ groups ∣ cout
 
-/-- Grouped convolution; use `conv1dGroups?` for recoverable argument errors. -/
-def conv1dGroups {batch cin cout cinPerGroup length kernel : Nat} {d : DType} {dev : Device}
+instance (cin cinPerGroup cout groups : Nat) : Decidable (ConvGroups cin cinPerGroup cout groups) := by
+  unfold ConvGroups; infer_instance
+
+/-- Discharges `ConvGroups` for literal parameters, or from facts in scope. -/
+macro "conv_groups" : tactic => `(tactic| first
+  | exact of_decide_eq_true rfl
+  | (refine ⟨?_, ?_, ?_⟩ <;> first | omega | assumption))
+
+def conv1dGroups! {batch cin cout cinPerGroup length kernel : Nat} {d : DType} {dev : Device}
     (input : Tensor ⟨#[batch, cin, length], d, dev⟩)
     (weight : Tensor ⟨#[cout, cinPerGroup, kernel], d, dev⟩) (bias : Tensor ⟨#[cout], d, dev⟩)
     (stride : Nat := 1) (padding : Nat := 0) (dilation : Nat := 1) (groups : Nat := 1) :
     Tensor ⟨#[batch, cout, convExtent length kernel stride padding dilation], d, dev⟩ :=
-  match conv1dGroups? input weight bias stride padding dilation groups with
-  | .ok result => result
-  | .error message => nativeInvariantFailure s!"Tensor.conv1dGroups: {message}"
+  checkedNeuralResult "conv1dGroups" (RawTensor.conv1dGroups! input.raw weight.raw bias.raw
+    stride padding dilation groups)
 
-/-- Checked transposed convolution, including native output-padding validation. -/
-def convTranspose1d? {batch cin cout length kernel : Nat} {d : DType} {dev : Device}
+/-- Grouped biased one-dimensional convolution. -/
+def conv1dGroups {batch cin cout cinPerGroup length kernel : Nat} {d : DType} {dev : Device}
+    [DType.FloatingOrComplex d]
     (input : Tensor ⟨#[batch, cin, length], d, dev⟩)
-    (weight : Tensor ⟨#[cin, cout, kernel], d, dev⟩) (bias : Tensor ⟨#[cout], d, dev⟩)
-    (stride : Nat := 1) (padding : Nat := 0) (outputPadding : Nat := 0) (dilation : Nat := 1) :
-    Except String (Tensor ⟨#[batch, cout, ((length - 1) * stride + dilation * (kernel - 1)
-      + outputPadding + 1 - 2 * padding)], d, dev⟩) := do
-  checkConvolutionOperands input weight bias
-  let raw ← RawTensor.convTranspose1dChecked
-    input.raw weight.raw bias.raw stride padding outputPadding dilation
-  DType.expectedEq input.raw.dtype raw.dtype
-  Tensor.ofRaw raw
+    (weight : Tensor ⟨#[cout, cinPerGroup, kernel], d, dev⟩) (bias : Tensor ⟨#[cout], d, dev⟩)
+    (stride : Nat := 1) (padding : Nat := 0) (dilation : Nat := 1) (groups : Nat := 1)
+    (_valid : ConvValid length kernel stride padding dilation := by conv_valid)
+    (_groups : ConvGroups cin cinPerGroup cout groups := by conv_groups) :
+    Tensor ⟨#[batch, cout, convExtent length kernel stride padding dilation], d, dev⟩ :=
+  conv1dGroups! input weight bias stride padding dilation groups
 
-/-- Transposed convolution; `convTranspose1d?` returns argument errors. -/
-def convTranspose1d {batch cin cout length kernel : Nat} {d : DType} {dev : Device}
+/-- Positive stride, dilation, kernel and input length; output padding below the
+stride or dilation; and padding that leaves a nonempty output. -/
+def ConvTransposeValid (length kernel stride padding outputPadding dilation : Nat) : Prop :=
+  0 < stride ∧ 0 < dilation ∧ 0 < kernel ∧ 0 < length ∧
+  (outputPadding < stride ∨ outputPadding < dilation) ∧
+  2 * padding ≤ (length - 1) * stride + dilation * (kernel - 1) + outputPadding
+
+instance (length kernel stride padding outputPadding dilation : Nat) :
+    Decidable (ConvTransposeValid length kernel stride padding outputPadding dilation) := by
+  unfold ConvTransposeValid; infer_instance
+
+def convTranspose1d! {batch cin cout length kernel : Nat} {d : DType} {dev : Device}
     (input : Tensor ⟨#[batch, cin, length], d, dev⟩)
     (weight : Tensor ⟨#[cin, cout, kernel], d, dev⟩) (bias : Tensor ⟨#[cout], d, dev⟩)
     (stride : Nat := 1) (padding : Nat := 0) (outputPadding : Nat := 0) (dilation : Nat := 1) :
     Tensor ⟨#[batch, cout, ((length - 1) * stride + dilation * (kernel - 1)
       + outputPadding + 1 - 2 * padding)], d, dev⟩ :=
-  match convTranspose1d? input weight bias stride padding outputPadding dilation with
-  | .ok result => result
-  | .error message => nativeInvariantFailure s!"Tensor.convTranspose1d: {message}"
+  checkedNeuralResult "convTranspose1d" (RawTensor.convTranspose1d! input.raw weight.raw bias.raw
+    stride padding outputPadding dilation)
+
+/-- Biased one-dimensional transposed convolution. -/
+def convTranspose1d {batch cin cout length kernel : Nat} {d : DType} {dev : Device}
+    [DType.FloatingOrComplex d]
+    (input : Tensor ⟨#[batch, cin, length], d, dev⟩)
+    (weight : Tensor ⟨#[cin, cout, kernel], d, dev⟩) (bias : Tensor ⟨#[cout], d, dev⟩)
+    (stride : Nat := 1) (padding : Nat := 0) (outputPadding : Nat := 0) (dilation : Nat := 1)
+    (_valid : ConvTransposeValid length kernel stride padding outputPadding dilation := by
+      exact of_decide_eq_true rfl) :
+    Tensor ⟨#[batch, cout, ((length - 1) * stride + dilation * (kernel - 1)
+      + outputPadding + 1 - 2 * padding)], d, dev⟩ :=
+  convTranspose1d! input weight bias stride padding outputPadding dilation
 
 def attentionWindow! {batch heads kvHeads seq dim : Nat} {d : DType} {dev : Device}
     (q : Tensor ⟨#[batch, heads, seq, dim], d, dev⟩)
@@ -503,10 +523,12 @@ def attentionWindow! {batch heads kvHeads seq dim : Nat} {d : DType} {dev : Devi
   q.checkedReplacement (RawTensor.attentionWindow! q.raw k.raw v.raw causal gqa window)
 
 /-- Zero-dropout sliding-window attention. -/
-def attentionWindow {batch heads kvHeads seq dim : Nat} {d : DType} {dev : Device}
+def attentionWindow {batch heads kvHeads seq dim : Nat} {d : DType} {dev : Device} [DType.RealFloating d]
     (q : Tensor ⟨#[batch, heads, seq, dim], d, dev⟩)
     (k v : Tensor ⟨#[batch, kvHeads, seq, dim], d, dev⟩)
-    (causal : Bool := true) (gqa : Bool := false) (window : Nat := 0) : Tensor ⟨#[batch, heads, seq, dim], d, dev⟩ :=
+    (causal : Bool := true) (gqa : Bool := false) (window : Nat := 0)
+    (_heads : AttentionHeads heads kvHeads gqa := by attention_heads) :
+    Tensor ⟨#[batch, heads, seq, dim], d, dev⟩ :=
   attentionWindow! q k v causal gqa window
 
 /-- Attention with explicit training-mode dropout, sequenced through native IO. -/
