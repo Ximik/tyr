@@ -88,13 +88,7 @@ example (_input : Tensor ⟨#[2, 2], .Int32, .CPU⟩) : True := by
   trivial
 
 @[test]
-def testReplacementChecksExactDType : IO Unit := do
-  let original := (Tensor.fullInt #[2] 9)
-  LeanTest.assertTrue ((original.checkedReplacement? (Tensor.ones #[2]).raw).toOption.isNone)
-    "A preserving adapter must reject dtype drift"
-  match original.checkedReplacement? (Tensor.fullInt #[2] 4).raw with
-  | .error message => LeanTest.fail message
-  | .ok replacement => LeanTest.assertEqual (← replacement.toFloatArray) #[4, 4]
+def testSumDimAccumulatesSmallIntsAsInt64 : IO Unit := do
   let smallInts := ((Tensor.ones #[2, 2]).castDType .Int32)
   let reduced := Tensor.sumDim smallInts 0
   LeanTest.assertEqual reduced.raw.dtype .Int64

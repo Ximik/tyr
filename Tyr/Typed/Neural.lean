@@ -72,7 +72,7 @@ def rmsNormPreserving {σ : StaticSpec} {w : Shape}
     (x : Tensor σ) (weight : Tensor (σ.withShape w)) (eps : Float := 1e-6) : Tensor σ :=
   -- HF checkpoints round the normalized activation before multiplying weights.
   let restored := Tensor.castLike x (rmsNorm x eps)
-  x.checkedReplacement (RawTensor.mul! restored.raw weight.raw)
+  Tensor.checkedResult "rmsNormPreserving" (Tensor.ofRaw (RawTensor.mul! restored.raw weight.raw))
 
 /-- Package a tensor's shape existentially; this does not erase its shape claim. -/
 def packShape {s : Shape} {d : DType} {dev : Device} (t : Tensor ⟨s, d, dev⟩) :
@@ -217,7 +217,7 @@ macro "attention_heads" : tactic => `(tactic| first
 def attention! {batch heads seq dim : Nat} {d : DType} {dev : Device}
     (q k v : Tensor ⟨#[batch, heads, seq, dim], d, dev⟩)
     (causal : Bool := true) : Tensor ⟨#[batch, heads, seq, dim], d, dev⟩ :=
-  q.checkedReplacement (RawTensor.attention! q.raw k.raw v.raw causal)
+  Tensor.checkedResult "attention" (Tensor.ofRaw (RawTensor.attention! q.raw k.raw v.raw causal))
 
 /-- Zero-dropout attention. -/
 def attention {batch heads seq dim : Nat} {d : DType} {dev : Device} [DType.RealFloating d]
@@ -233,13 +233,13 @@ def attentionIO {batch heads seq dim : Nat} {d : DType} {dev : Device}
   attentionCheckIO "attentionIO" (checkAttentionOperands q k v)
   let raw ← RawTensor.attentionIO
     q.raw k.raw v.raw effective causal
-  attentionCheckIO "attentionIO" (q.checkedReplacement? raw)
+  attentionCheckIO "attentionIO" (Tensor.ofRaw raw)
 
 def attentionGQA! {batch heads kvHeads seq dim : Nat} {d : DType} {dev : Device}
     (q : Tensor ⟨#[batch, heads, seq, dim], d, dev⟩)
     (k v : Tensor ⟨#[batch, kvHeads, seq, dim], d, dev⟩)
     (causal : Bool := true) (gqa : Bool := false) : Tensor ⟨#[batch, heads, seq, dim], d, dev⟩ :=
-  q.checkedReplacement (RawTensor.attentionGQA! q.raw k.raw v.raw causal gqa)
+  Tensor.checkedResult "attentionGQA" (Tensor.ofRaw (RawTensor.attentionGQA! q.raw k.raw v.raw causal gqa))
 
 /-- Zero-dropout grouped-query attention. -/
 def attentionGQA {batch heads kvHeads seq dim : Nat} {d : DType} {dev : Device} [DType.RealFloating d]
@@ -259,14 +259,14 @@ def attentionGQAIO {batch heads kvHeads seq dim : Nat} {d : DType} {dev : Device
   attentionCheckIO "attentionGQAIO" (checkAttentionOperands q k v)
   let raw ← RawTensor.attentionGQAIO
     q.raw k.raw v.raw effective causal gqa
-  attentionCheckIO "attentionGQAIO" (q.checkedReplacement? raw)
+  attentionCheckIO "attentionGQAIO" (Tensor.ofRaw raw)
 
 def attentionGQAMask! {batch heads kvHeads seq dim : Nat} {d dm : DType} {dev : Device}
     (q : Tensor ⟨#[batch, heads, seq, dim], d, dev⟩)
     (k v : Tensor ⟨#[batch, kvHeads, seq, dim], d, dev⟩)
     (mask : Tensor ⟨#[batch, seq], dm, dev⟩)
     (causal : Bool := true) (gqa : Bool := false) : Tensor ⟨#[batch, heads, seq, dim], d, dev⟩ :=
-  q.checkedReplacement (RawTensor.attentionGQAMask! q.raw k.raw v.raw mask.raw causal gqa)
+  Tensor.checkedResult "attentionGQAMask" (Tensor.ofRaw (RawTensor.attentionGQAMask! q.raw k.raw v.raw mask.raw causal gqa))
 
 /-- Zero-dropout grouped-query attention with a key padding mask. -/
 def attentionGQAMask {batch heads kvHeads seq dim : Nat} {d dm : DType} {dev : Device} [DType.RealFloating d]
@@ -288,7 +288,7 @@ def attentionGQAMaskIO {batch heads kvHeads seq dim : Nat} {d dm : DType} {dev :
   attentionCheckIO "attentionGQAMaskIO" (checkAttentionOperands q k v)
   let raw ← RawTensor.attentionGQAMaskIO
     q.raw k.raw v.raw mask.raw effective causal gqa
-  attentionCheckIO "attentionGQAMaskIO" (q.checkedReplacement? raw)
+  attentionCheckIO "attentionGQAMaskIO" (Tensor.ofRaw raw)
 
 /-- Gather has the index tensor's shape, and the source tensor's dtype. -/
 def gather {s indicesShape : Shape} {d : DType} {dev : Device}
@@ -314,13 +314,13 @@ def maskedSelect {s : Shape} {d : DType} {dev : Device}
 def maskedScatter {s sourceShape : Shape} {d : DType} {dev : Device}
     (input : Tensor ⟨s, d, dev⟩) (mask : Tensor ⟨s, .Bool, dev⟩)
     (source : Tensor ⟨sourceShape, d, dev⟩) : Tensor ⟨s, d, dev⟩ :=
-  input.checkedReplacement (RawTensor.maskedScatter input.raw mask.raw source.raw)
+  Tensor.checkedResult "maskedScatter" (Tensor.ofRaw (RawTensor.maskedScatter input.raw mask.raw source.raw))
 
 def attentionGQAQKV! {batch heads kvHeads qSeq kvSeq dim : Nat} {d : DType} {dev : Device}
     (q : Tensor ⟨#[batch, heads, qSeq, dim], d, dev⟩)
     (k v : Tensor ⟨#[batch, kvHeads, kvSeq, dim], d, dev⟩)
     (causal : Bool := false) (gqa : Bool := false) : Tensor ⟨#[batch, heads, qSeq, dim], d, dev⟩ :=
-  q.checkedReplacement (RawTensor.attentionGQAQKV! q.raw k.raw v.raw causal gqa)
+  Tensor.checkedResult "attentionGQAQKV" (Tensor.ofRaw (RawTensor.attentionGQAQKV! q.raw k.raw v.raw causal gqa))
 
 /-- Zero-dropout grouped-query attention with separate query and key/value lengths. -/
 def attentionGQAQKV {batch heads kvHeads qSeq kvSeq dim : Nat} {d : DType} {dev : Device} [DType.RealFloating d]
@@ -340,7 +340,7 @@ def attentionGQAQKVIO {batch heads kvHeads qSeq kvSeq dim : Nat} {d : DType} {de
   attentionCheckIO "attentionGQAQKVIO" (checkAttentionOperands q k v)
   let raw ← RawTensor.attentionGQAQKVIO
     q.raw k.raw v.raw effective causal gqa
-  attentionCheckIO "attentionGQAQKVIO" (q.checkedReplacement? raw)
+  attentionCheckIO "attentionGQAQKVIO" (Tensor.ofRaw raw)
 
 def flashAttention! {batch heads kvHeads qSeq kvSeq dim : Nat} {d : DType} {dev : Device}
     (q : Tensor ⟨#[batch, heads, qSeq, dim], d, dev⟩)
@@ -348,8 +348,8 @@ def flashAttention! {batch heads kvHeads qSeq kvSeq dim : Nat} {d : DType} {dev 
     (mask : Option (SomeDTypeTensor #[batch, kvSeq] dev) := none)
     (causal : Bool := false) (scale : Option Float := none) :
     Tensor ⟨#[batch, heads, qSeq, dim], d, dev⟩ :=
-  q.checkedReplacement (RawTensor.flashAttention!
-    q.raw k.raw v.raw (mask.map (fun packed => packed.2.raw)) causal scale gqa)
+  Tensor.checkedResult "flashAttention" (Tensor.ofRaw (RawTensor.flashAttention!
+    q.raw k.raw v.raw (mask.map (fun packed => packed.2.raw)) causal scale gqa))
 
 /-- Zero-dropout FlashAttention. -/
 def flashAttention {batch heads kvHeads qSeq kvSeq dim : Nat} {d : DType} {dev : Device} [DType.RealFloating d]
@@ -374,7 +374,7 @@ def flashAttentionIO {batch heads kvHeads qSeq kvSeq dim : Nat} {d : DType} {dev
   attentionCheckIO "flashAttentionIO" (checkAttentionOperands q k v)
   let raw ← RawTensor.flashAttentionIO
     q.raw k.raw v.raw (mask.map (fun packed => packed.2.raw)) effective causal scale gqa
-  attentionCheckIO "flashAttentionIO" (q.checkedReplacement? raw)
+  attentionCheckIO "flashAttentionIO" (Tensor.ofRaw raw)
 
 def sliceScatter {s sourceShape : Shape} {d : DType} {dev : Device}
     (input : Tensor ⟨s, d, dev⟩) (dim start : Nat)
@@ -391,8 +391,8 @@ def sliceScatter {s sourceShape : Shape} {d : DType} {dev : Device}
 
 def applyRotary {batch seq heads dim : Nat} {d dc : DType} {dev : Device}
     (input : Tensor ⟨#[batch, seq, heads, dim], d, dev⟩)
-    (cos sin : Tensor ⟨#[seq, dim / 2], dc, dev⟩) :=
-  input.checkedReplacement (RawTensor.applyRotary input.raw cos.raw sin.raw)
+    (cos sin : Tensor ⟨#[seq, dim / 2], dc, dev⟩) : Tensor ⟨#[batch, seq, heads, dim], d, dev⟩ :=
+  Tensor.checkedResult "applyRotary" (Tensor.ofRaw (RawTensor.applyRotary input.raw cos.raw sin.raw))
 
 def rotaryFreqs (seq dim : Nat) (base : Float := 10000.0) (device : Device := .CPU) :
     Tensor { shape := #[seq, dim / 2], dtype := .Float32, device } × Tensor { shape := #[seq, dim / 2], dtype := .Float32, device } :=
@@ -451,7 +451,7 @@ def ltScalar {s : Shape} {d : DType} {dev : Device} (input : Tensor ⟨s, d, dev
     Tensor ⟨s, .Bool, dev⟩ := checkedNeuralResult "ltScalar" (RawTensor.ltScalar input.raw value)
 def maskedFill {s : Shape} {d : DType} {dev : Device}
     (input : Tensor ⟨s, d, dev⟩) (mask : Tensor ⟨s, .Bool, dev⟩) (value : Float) : Tensor ⟨s, d, dev⟩ :=
-  input.checkedReplacement (RawTensor.maskedFill input.raw mask.raw value)
+  Tensor.checkedResult "maskedFill" (Tensor.ofRaw (RawTensor.maskedFill input.raw mask.raw value))
 
 /-- Input channels split into `groups` equal groups, and output channels divide among them. -/
 def ConvGroups (cin cinPerGroup cout groups : Nat) : Prop :=
@@ -520,7 +520,7 @@ def attentionWindow! {batch heads kvHeads seq dim : Nat} {d : DType} {dev : Devi
     (q : Tensor ⟨#[batch, heads, seq, dim], d, dev⟩)
     (k v : Tensor ⟨#[batch, kvHeads, seq, dim], d, dev⟩)
     (causal : Bool := true) (gqa : Bool := false) (window : Nat := 0) : Tensor ⟨#[batch, heads, seq, dim], d, dev⟩ :=
-  q.checkedReplacement (RawTensor.attentionWindow! q.raw k.raw v.raw causal gqa window)
+  Tensor.checkedResult "attentionWindow" (Tensor.ofRaw (RawTensor.attentionWindow! q.raw k.raw v.raw causal gqa window))
 
 /-- Zero-dropout sliding-window attention. -/
 def attentionWindow {batch heads kvHeads seq dim : Nat} {d : DType} {dev : Device} [DType.RealFloating d]
@@ -540,7 +540,7 @@ def attentionWindowIO {batch heads kvHeads seq dim : Nat} {d : DType} {dev : Dev
   attentionCheckIO "attentionWindowIO" (checkAttentionOperands q k v)
   let raw ← RawTensor.attentionWindowIO
     q.raw k.raw v.raw effective causal gqa window
-  attentionCheckIO "attentionWindowIO" (q.checkedReplacement? raw)
+  attentionCheckIO "attentionWindowIO" (Tensor.ofRaw raw)
 
 def log! {σ : StaticSpec} (input : Tensor σ) : Tensor σ :=
   checkedNeuralResult "log" (RawTensor.log! input.raw)
