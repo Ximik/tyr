@@ -316,7 +316,7 @@ def alignFromLogits {batch seq vocab : Nat} {dtype : DType}
     (timestampTokenId : UInt64)
     (timestampSegmentTime : Float := 1.0)
     : IO (Array ForcedAlignResult) := do
-  let indices ← IO.ofExcept (Tensor.argmax? logits 2)
+  let indices := Tensor.argmax! logits 2
   alignFromOutputIds inputIds (indices.reshape #[batch, seq]) wordLists timestampTokenId timestampSegmentTime
 
 end torch.qwen3asr

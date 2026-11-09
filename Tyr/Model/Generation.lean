@@ -41,8 +41,9 @@ def sampleFromLogits {batch vocab : Nat}
     : IO (Tensor { device := device, shape := #[batch], dtype := .Int64 }) := do
   match strategy with
   | .greedy =>
-    let indices ← IO.ofExcept (Tensor.argmax? logits 1)
-    pure (indices.reshape #[batch])
+    let ⟨_hVocab⟩ ← if h : 0 < vocab then pure (PLift.up h) else
+      throw <| IO.userError "greedy sampling requires a nonempty vocabulary"
+    pure ((Tensor.argmax logits 1).reshape #[batch])
   | .multinomial temperature topK topP =>
     if temperature <= 0.0 then
       throw <| IO.userError s!"multinomial sampling requires temperature > 0, got {temperature}"

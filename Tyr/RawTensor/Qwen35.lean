@@ -10,8 +10,6 @@ namespace torch.RawTensor
     (query key value g beta state : @& RawTensor) : RawTensor × RawTensor
 @[extern "lean_torch_einsum2"] opaque einsum2
     (equation : String) (a b : @& RawTensor) : RawTensor
-@[extern "lean_torch_topk_2d"] opaque topK2d
-    (input : @& RawTensor) (k dim : @& Nat) : RawTensor × RawTensor
 @[extern "lean_torch_tensor_softplus"] opaque softplus (input : @& RawTensor) : RawTensor
 
 @[extern "lean_torch_media_load_image_patchified"] opaque loadImagePatchified

@@ -40,11 +40,6 @@ def transposeSeq {batch seq dim : Nat} {d : DType} (x : Tensor { device := devic
 def einsumChecked {s t out : Shape} (equation : String) (x : Tensor { device := device, shape := s, dtype := dtype }) (y : Tensor { device := device, shape := t, dtype := dtype }) : Tensor { device := device, shape := out, dtype := dtype } :=
   checked (RawTensor.einsum2 equation x.raw y.raw)
 
-def topK2d {rows cols : Nat} (x : Tensor { device := device, shape := #[rows, cols], dtype := dtype }) (k dim : Nat) :
-    Tensor { device := device, shape := #[rows, k], dtype := dtype } × Tensor { device := device, shape := #[rows, k], dtype := .Int64 } :=
-  let (values, indices) := RawTensor.topK2d x.raw k dim
-  (checked values, checked indices)
-
 def rsqrtDynamic {s : Shape} (x : Tensor { device := device, shape := s, dtype := dtype }) : Tensor { device := device, shape := s, dtype := dtype } :=
   Tensor.rsqrt x
 def logDynamic {s : Shape} (x : Tensor { device := device, shape := s, dtype := dtype }) : Tensor { device := device, shape := s, dtype := dtype } :=

@@ -7,9 +7,7 @@ namespace torch.Tensor
 /-- Validate a native neural result before assigning its static specification. -/
 private def checkedNeuralResult {σ : StaticSpec} (operation : String)
     (raw : RawTensor) : Tensor σ :=
-  match Tensor.ofRaw raw with
-  | .ok result => result
-  | .error message => nativeInvariantFailure s!"Tensor.{operation}: {message}"
+  checkedResult operation (Tensor.ofRaw raw)
 
 /-- Return a copy of the source in the destination's placement, reusing the
 destination storage only when it has no observable aliases.
@@ -645,43 +643,38 @@ def loadU16Bin (count : Nat) (path : String) : IO (Tensor { shape := #[count], d
 def linspace (start stop : Float) (count : Nat) : Tensor { shape := #[count], dtype := .Float32, device := .CPU } :=
   checkedNeuralResult "linspace" (RawTensor.linspace start stop count false)
 
-/-- Reduce the last axis with recoverable ordered-domain, empty-axis and
-native kernel failures. Values preserve the actual input dtype. -/
-def maxLast3d? {batch seq vocab : Nat} {d : DType} {dev : Device}
+/-- Reduce the last axis, preserving the actual input dtype, without precondition
+checks; libtorch rejects an unordered dtype or an empty axis and the process aborts. -/
+def maxLast3d! {batch seq vocab : Nat} {d : DType} {dev : Device}
     (input : Tensor ⟨#[batch, seq, vocab], d, dev⟩) :
-    Except String (Tensor ⟨#[batch, seq], d, dev⟩ × Tensor ⟨#[batch, seq], .Int64, dev⟩) := do
-  DType.checkOrdered input.raw.dtype
-  if vocab == 0 then throw "maxLast3d requires a nonempty reduction axis"
-  let (values, indices) ← RawTensor.maxLast3dChecked input.raw 2
-  return (← Tensor.checkedUpdate? input.raw.dtype input.raw.device values, ← Tensor.ofRaw indices)
+    Tensor ⟨#[batch, seq], d, dev⟩ × Tensor ⟨#[batch, seq], .Int64, dev⟩ :=
+  let (values, indices) := RawTensor.maxLast3d! input.raw 2
+  checkedResult "maxLast3d" do
+    return (← Tensor.checkedUpdate? input.raw.dtype input.raw.device values, ← Tensor.ofRaw indices)
 
 /-- Reduce a nonempty last axis of an ordered tensor. -/
 def maxLast3d {batch seq vocab : Nat} {d : DType} {dev : Device} [DType.Ordered d]
     (input : Tensor ⟨#[batch, seq, vocab], d, dev⟩)
     (_nonempty : 0 < vocab := by first | exact of_decide_eq_true rfl | omega | (simp <;> omega)) :
     Tensor ⟨#[batch, seq], d, dev⟩ × Tensor ⟨#[batch, seq], .Int64, dev⟩ :=
-  match maxLast3d? input with
-  | .ok result => result
-  | .error message => nativeInvariantFailure s!"Tensor.maxLast3d: {message}"
+  maxLast3d! input
 
-/-- Select the largest `k` entries per row, preserving the actual input dtype.
-Runtime dtype/range and native kernel failures are recoverable. -/
-def topKLast2d? {rows cols : Nat} {d : DType} {dev : Device}
+/-- Select the largest `k` entries per row, preserving the actual input dtype,
+without precondition checks; libtorch rejects an unordered dtype or `k` above the
+row width and the process aborts. -/
+def topKLast2d! {rows cols : Nat} {d : DType} {dev : Device}
     (input : Tensor ⟨#[rows, cols], d, dev⟩) (k : Nat) :
-    Except String (Tensor ⟨#[rows, k], d, dev⟩ × Tensor ⟨#[rows, k], .Int64, dev⟩) := do
-  DType.checkOrdered input.raw.dtype
-  if k > cols then throw s!"topKLast2d k={k} exceeds the row width {cols}"
-  let (values, indices) ← RawTensor.topKLast2dChecked input.raw k 1
-  return (← Tensor.checkedUpdate? input.raw.dtype input.raw.device values, ← Tensor.ofRaw indices)
+    Tensor ⟨#[rows, k], d, dev⟩ × Tensor ⟨#[rows, k], .Int64, dev⟩ :=
+  let (values, indices) := RawTensor.topKLast2d! input.raw k 1
+  checkedResult "topKLast2d" do
+    return (← Tensor.checkedUpdate? input.raw.dtype input.raw.device values, ← Tensor.ofRaw indices)
 
 /-- Select the largest `k` entries of ordered rows with sufficient width. -/
 def topKLast2d {rows cols : Nat} {d : DType} {dev : Device} [DType.Ordered d]
     (input : Tensor ⟨#[rows, cols], d, dev⟩) (k : Nat)
     (_range : k ≤ cols := by first | exact of_decide_eq_true rfl | omega | (simp <;> omega)) :
     Tensor ⟨#[rows, k], d, dev⟩ × Tensor ⟨#[rows, k], .Int64, dev⟩ :=
-  match topKLast2d? input k with
-  | .ok result => result
-  | .error message => nativeInvariantFailure s!"Tensor.topKLast2d: {message}"
+  topKLast2d! input k
 
 /-- End-exclusive integer range, with overflow-safe length computation. -/
 def rangeLength (start stop step : Nat) : Nat :=

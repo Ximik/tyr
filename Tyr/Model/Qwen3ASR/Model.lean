@@ -519,7 +519,7 @@ private partial def greedyLoopCached {batch maxLen : Nat}
   let ⟨hr⟩ ← if h : remaining ≠ 0 then pure (PLift.up h) else
     return ⟨curSeq, curIds⟩
 
-  let indices ← IO.ofExcept (Tensor.argmax? lastLogits 1)
+  let indices := Tensor.argmax! lastLogits 1
   let nextTokRaw : Tensor { device := device, shape := #[batch], dtype := .Int64 } ← pure (indices.reshape #[batch])
   let nextTok : Tensor { device := device, shape := #[batch], dtype := .Int64 } :=
     match eosVector, finished with
@@ -749,7 +749,7 @@ private partial def greedyLoopUncached {batch : Nat}
   let last3 : Tensor { dtype := dtype, device := device, shape := #[batch, 1, ThinkerLmVocabSize cfg] } :=
     Tensor.reshape (Tensor.sliceChecked logits 1 lastPos 1 #[batch, 1, ThinkerLmVocabSize cfg]) #[batch, 1, ThinkerLmVocabSize cfg]
   let last2 : Tensor { dtype := dtype, device := device, shape := #[batch, ThinkerLmVocabSize cfg] } := Tensor.reshape last3 #[batch, ThinkerLmVocabSize cfg]
-  let indices ← IO.ofExcept (Tensor.argmax? last2 1)
+  let indices := Tensor.argmax! last2 1
   let nextTokRaw : Tensor { device := device, shape := #[batch], dtype := .Int64 } ← pure (indices.reshape #[batch])
   let nextTok : Tensor { device := device, shape := #[batch], dtype := .Int64 } :=
     match eosVector, finished with

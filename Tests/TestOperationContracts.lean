@@ -50,13 +50,19 @@ example (x : Tensor ⟨#[2], .Int64, .CPU⟩) (scalar : Tensor ⟨#[], .Float32,
   LeanTest.assertEqual result.raw.dtype .Float32
   LeanTest.assertEqual (← result.toFloatArray) #[1, 2]
 
+example (_empty : Tensor ⟨#[0], .Float32, .CPU⟩) (_complex : Tensor ⟨#[2], .Complex64, .CPU⟩)
+    (_values : Tensor ⟨#[2], .Float32, .CPU⟩) : True := by
+  have _ := Tensor.maxAll _values
+  fail_if_success have _ := Tensor.maxAll _empty
+  fail_if_success have _ := Tensor.maxAll _complex
+  trivial
+
 @[test] def testCheckedShapeErrorsAreRecoverable : IO Unit := do
   let x := Tensor.ones #[2]
   expectError (Tensor.expand? x #[3]) "expand"
   expectError (Tensor.catMany? #[x.packShape, x.packShape] 9 #[4]) "Dimension"
   expectError (Tensor.catMany? (d := .Float32) (dev := .CPU) #[] 0 #[0]) "at least one"
   expectError (Tensor.sumDim? x 1) "axis"
-  expectError (Tensor.maxAll? (Tensor.zeros #[0])) "nonempty"
   let expanded ← checked (Tensor.expand? (Tensor.ones #[1]) #[3])
   LeanTest.assertEqual (← expanded.toFloatArray) #[1, 1, 1]
   let concatenated ← checked (Tensor.catMany? #[x.packShape, x.packShape] 0 #[4])
@@ -67,14 +73,13 @@ example (x : Tensor ⟨#[2], .Int64, .CPU⟩) (scalar : Tensor ⟨#[], .Float32,
 @[test] def testCheckedOperatorDomains : IO Unit := do
   let complex := (Tensor.fromFloatArray #[2, 4]).castDType .Complex64
   expectError (Tensor.relu? complex) "real numeric"
-  expectError (Tensor.maxAll? complex) "real or Bool"
   let integer := (Tensor.fromInt64Array #[2, 4])
   expectError (Tensor.meanDim? integer 0) "floating or complex"
   expectError (Tensor.meanAll? integer) "floating or complex"
   let mean := Tensor.meanAll complex
   LeanTest.assertEqual mean.raw.dtype .Complex64
   LeanTest.assertEqual (← mean.toFloat32.toFloatArray) #[3]
-  let maximum ← checked (Tensor.maxAll? (Tensor.fromInt64Array #[2, 4]))
+  let maximum := Tensor.maxAll (Tensor.fromInt64Array #[2, 4])
   LeanTest.assertEqual maximum.itemInt 4
 
 example (_left : Tensor ⟨#[2, 2], .BFloat16, .CPU⟩)

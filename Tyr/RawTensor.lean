@@ -157,10 +157,10 @@ def rmsNormWeighted (shape _weightShape : Shape) (x weight : RawTensor) (eps : F
 @[extern "lean_torch_embedding_1d"] opaque embedding1d
     (idx weight : @& RawTensor) (paddingIdx : Option Nat := none)
     (scaleGradByFreq : Bool := false) (sparse : Bool := false) : RawTensor
-@[extern "lean_torch_cross_entropy_2d"] opaque crossEntropy
+/-- Mean cross entropy. An invalid label or a native failure aborts through
+Tyr's fatal libtorch error report. -/
+@[extern "lean_torch_cross_entropy_2d"] opaque crossEntropy!
     (logits targets : @& RawTensor) : RawTensor
-@[extern "lean_torch_cross_entropy_2d_checked"] opaque crossEntropyChecked
-    (logits targets : @& RawTensor) : Except String RawTensor
 
 end torch.RawTensor
 
@@ -212,9 +212,9 @@ namespace torch.RawTensor
 
 @[extern "lean_torch_tensor_atan"] opaque atan (t : @& RawTensor) : RawTensor
 
-/-- Maximum over all elements, as a scalar handle. The native side reads no
-    shape argument, so none is passed. -/
-@[extern "lean_torch_max_all"] opaque maxAll (t : @& RawTensor) : RawTensor
+/-- Maximum over all elements, as a scalar handle. A native failure aborts
+    through Tyr's fatal libtorch error report. -/
+@[extern "lean_torch_max_all"] opaque maxAll! (t : @& RawTensor) : RawTensor
 
 /-- Stack a runtime list of equal vectors along a new leading axis.
     The native bridge consumes the array (but retains shared tensor handles). -/
@@ -258,12 +258,9 @@ The effective retention flag is resolved by the typed API from `createGraph`. -/
 @[extern "lean_torch_backward_loss"] opaque backwardLoss (loss : @& RawTensor)
     (retainGraph createGraph : Bool) : IO Unit
 
-/-- Argmax along a dimension (Int64 indices). The shape argument is unread natively. -/
-@[extern "lean_torch_argmax"] opaque argmax (t : @& RawTensor) (dim : @& Nat) : RawTensor
-
-/-- Recoverable argmax, including dtype, empty-axis and kernel failures. -/
-@[extern "lean_torch_argmax_checked"] opaque argmaxChecked
-    (t : @& RawTensor) (dim : @& Nat) : Except String RawTensor
+/-- Argmax along a dimension (Int64 indices). A native failure aborts through
+Tyr's fatal libtorch error report. -/
+@[extern "lean_torch_argmax"] opaque argmax! (t : @& RawTensor) (dim : @& Nat) : RawTensor
 
 /-- Top-k logit filter (entries outside the top k become -inf), shape-preserving. -/
 @[extern "lean_torch_topk_filter"] opaque topKFilter (logits : @& RawTensor) (k : @& Nat) : RawTensor
@@ -286,11 +283,10 @@ invalid accelerator indices cannot trigger a device assertion. -/
 @[extern "lean_torch_index_select_checked"] opaque indexSelectChecked
     (data : @& RawTensor) (dim : @& Nat) (indices : @& RawTensor) : Except String RawTensor
 
-/-- Per-element cross entropy (no reduction): logits [n, c], Int64 targets [n]. -/
-@[extern "lean_torch_cross_entropy_none"] opaque crossEntropyNone
+/-- Per-element cross entropy (no reduction): logits [n, c], Int64 targets [n].
+An invalid label or a native failure aborts through Tyr's fatal libtorch error report. -/
+@[extern "lean_torch_cross_entropy_none"] opaque crossEntropyNone!
     (logits : @& RawTensor) (targets : @& RawTensor) : RawTensor
-@[extern "lean_torch_cross_entropy_none_checked"] opaque crossEntropyNoneChecked
-    (logits targets : @& RawTensor) : Except String RawTensor
 
 /-- Extract an Int64 scalar. The shape argument is unread natively. -/
 @[extern "lean_torch_item_int"] opaque itemInt (t : @& RawTensor) : Int64
@@ -339,14 +335,13 @@ namespace torch.RawTensor
 
 @[extern "lean_torch_expand_checked"] opaque expandChecked (t : @& RawTensor) (target : Array Nat) : Except String RawTensor
 
-/-- Native reshape behind `Tensor.reshape`, which validates the target first; use that instead. -/
-@[extern "lean_torch_reshape_exact_checked"] opaque reshape? (t : @& RawTensor) (target : @& Shape) : Except String RawTensor
+/-- Native reshape behind `Tensor.reshape`, which validates the target first; use that instead.
+A native failure aborts through Tyr's fatal libtorch error report. -/
+@[extern "lean_torch_reshape_exact"] opaque reshape! (t : @& RawTensor) (target : @& Shape) : RawTensor
 
 @[extern "lean_torch_sum_checked"] opaque sumChecked (t : @& RawTensor) (dims : Option (Array Nat)) (keepdim : Bool) : Except String RawTensor
 
 @[extern "lean_torch_mean_checked"] opaque meanChecked (t : @& RawTensor) (dims : Option (Array Nat)) (keepdim : Bool) : Except String RawTensor
-
-@[extern "lean_torch_max_all_checked"] opaque maxAllChecked (t : @& RawTensor) : Except String RawTensor
 
 @[extern "lean_torch_where_checked"] opaque whereSelectChecked (condition a b : @& RawTensor) : Except String RawTensor
 
