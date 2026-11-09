@@ -656,7 +656,7 @@ def testQwen3ASRForwardFromMel : IO Unit := do
   let s := Tensor.item (Tensor.sumAll logits)
   LeanTest.assertTrue (Float.isFinite s) "logit sum should be finite"
 
-  let idxs ← IO.ofExcept (Tensor.argmax? logits 2)
+  let idxs := Tensor.argmax! logits 2
   let flat : Tensor { shape := #[batch * outSeq], dtype := .Int64, device := .CPU } := Tensor.reshape idxs #[batch * outSeq]
   let toks ← Tensor.toUInt64Array flat
   LeanTest.assertEqual toks.size (batch * outSeq) "flattened argmax token count should match output length"
@@ -730,7 +730,7 @@ def testQwen3ASRForwardFromOutputWav : IO Unit := do
   let s := Tensor.item (Tensor.sumAll logits)
   LeanTest.assertTrue (Float.isFinite s) "logit sum from WAV-derived mel should be finite"
 
-  let idxs ← IO.ofExcept (Tensor.argmax? logits 2)
+  let idxs := Tensor.argmax! logits 2
   let flat : Tensor { shape := #[batch * outSeq], dtype := .Int64, device := .CPU } := idxs.reshape #[batch * outSeq]
   let toks ← Tensor.toUInt64Array flat
   LeanTest.assertEqual toks.size (batch * outSeq) "flattened argmax token count should match output length"
@@ -815,7 +815,7 @@ def testQwen3ASRForwardForcedAlignerHead : IO Unit := do
   let s := Tensor.item (Tensor.sumAll logits)
   LeanTest.assertTrue (Float.isFinite s) "forced-aligner logits should be finite"
 
-  let idxs ← IO.ofExcept (Tensor.argmax? logits 2)
+  let idxs := Tensor.argmax! logits 2
   let flat : Tensor { shape := #[batch * seq], dtype := .Int64, device := .CPU } := Tensor.reshape idxs #[batch * seq]
   let ids ← Tensor.toUInt64Array flat
   LeanTest.assertTrue (ids.all (fun i => i.toNat < cfg.thinkerConfig.classifyNum))

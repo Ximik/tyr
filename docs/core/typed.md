@@ -325,8 +325,10 @@ do not allocate accelerator tensors or establish hardware qualification.
 ## Operator checks and failures
 
 Static promotion, domain, and shape evidence is separate from backend kernel
-availability. `relu?`, `maxAll?`, `sumDim?`, and `meanAll?` check their supported
-domains, including nonempty maximum inputs and valid reduction axes. `expand?`
+availability. `relu?`, `sumDim?`, and `meanAll?` check their supported
+domains and valid reduction axes. `maxAll` requires an ordered dtype and a
+nonempty shape; `maxAll!` skips both checks, so libtorch rejects a violation and
+the process aborts through Tyr's fatal error report. `expand?`
 checks the requested broadcast, while `cat?` and `catMany?` validate placement
 and the returned shape. These APIs and the arithmetic/matrix `?` families return
 native operation failures through `Except String`. Their pure convenience
@@ -341,18 +343,21 @@ implementation correct.
 `argmax` also requires a valid, nonempty reduction axis; scalar input permits
 axis zero. `maxLast3d` requires a nonempty last axis, while `topKLast2d` requires
 `k ≤ cols` and permits `k = 0`. Concrete dimensions usually discharge these
-proofs automatically. For runtime dimensions or dynamic dtypes, the matching
-`?` variants return domain, range, and native errors through `Except String`.
+proofs automatically, as do positivity hypotheses in scope (`numel_pos`). For
+runtime dimensions or dynamic dtypes, the matching `!` variants skip these checks:
+libtorch rejects a violation and the process aborts through Tyr's fatal error report.
 Selected values retain the actual input dtype; indices have dtype Int64.
 
 `crossEntropy` and `crossEntropyNone` require `DType.RealFloating` for logits
 of shape `[N, C]` and Int64 targets of shape `[N]` on the same device.
 The first returns a scalar mean loss; the second returns one loss per row.
-Their checked native boundary validates labels before loss dispatch: each label
+The native call validates labels before loss dispatch: each label
 must be in `[0, C)` or equal the default ignored label `-100`.
-`crossEntropy?` and `crossEntropyNone?` recover dtype, label, and native failures.
-`ChatSFT.maskedCrossEntropy?` retains errors through reshaping, mask arithmetic,
-reduction, and scalar extraction. Its mask must have a real numeric or Bool
+`crossEntropy!` and `crossEntropyNone!` skip the dtype requirement. The native
+call validates labels in every variant; an invalid label aborts the process with
+a diagnostic.
+`ChatSFT.maskedCrossEntropy?` returns mask and arithmetic errors through `Except`;
+invalid labels abort. Its mask must have a real numeric or Bool
 dtype; the pure wrapper requires that domain as type-level evidence.
 
 `indexSelect?` validates vector indices before native indexing, including on

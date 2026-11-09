@@ -232,7 +232,7 @@ private def prepareCrossEntropyStep
     Tensor.reshape predictionReq #[batch * seq, vocab]
   let targetsFlat : Tensor { shape := #[batch * seq], dtype := .Int64, device := device } :=
     Tensor.reshape targets #[batch * seq]
-  let lossT ← IO.ofExcept (Tensor.crossEntropy? logitsFlat targetsFlat)
+  let lossT := Tensor.crossEntropy logitsFlat targetsFlat
   let outputCotangent ← Tensor.grad lossT predictionReq (Tensor.onesLike lossT)
   pure (paramsReq, predictionReq, lossT, Tensor.detach outputCotangent)
 

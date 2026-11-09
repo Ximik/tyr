@@ -14,7 +14,7 @@ native_test_exception_smoke
 cp "$repo_root/cc/tools/FunctionalGradCallback.lean" "$test_dir/FunctionalGradCallback.lean"
 "$lean_dir/bin/lean" --root="$test_dir" -c "$test_dir/callback.c" "$test_dir/FunctionalGradCallback.lean"
 "${CC:-cc}" -std=c11 -I"$lean_dir/include" -c "$test_dir/callback.c" -o "$test_dir/callback.o"
-"${CXX:-c++}" "${native_cxx_flags[@]}" -I"$repo_root/cc/src" -I"$lean_dir/include" -I"$torch_dir/include" \
+"${CXX:-c++}" "${native_cxx_flags[@]}" -I"$repo_root/cc/src" -I"$lean_dir/include" \
   "$repo_root/cc/tools/test_functional_grad_callback.cpp" "$test_dir/callback.o" \
   "${native_link_flags[@]}" \
   -o "$test_dir/callback-test"
@@ -30,7 +30,7 @@ for mode in ("success", "setup-error", "result-error", "callback-error"):
     if mode == "callback-error":
         assert result.returncode == -signal.SIGABRT, (mode, result.returncode, result.stdout, result.stderr)
         assert "unrecoverable native exception in pure Lean callback" in result.stderr, result.stderr
-        assert "deliberate libtorch error from the callback test" in result.stderr, result.stderr
+        assert "shape" in result.stderr, result.stderr
         print("callback-error terminated with the expected diagnostic")
     else:
         assert result.returncode == 0, (mode, result.returncode, result.stdout, result.stderr)

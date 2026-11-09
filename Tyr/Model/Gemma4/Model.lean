@@ -152,7 +152,7 @@ def forward {tokens : Nat}
   let logitsDyn : Tensor { device := device, shape := #[tokens, cfg.num_experts], dtype := .Float32 } := einsumChecked "eh,th->te" (floatDynamic m.proj.2) normed
   let logits : Tensor { device := device, shape := #[tokens, cfg.num_experts], dtype := .Float32 } := Tensor.reshape logitsDyn #[tokens, cfg.num_experts]
   let probs : Tensor { device := device, shape := #[tokens, cfg.num_experts], dtype := .Float32 } := Tensor.softmax logits
-  let (topValsRaw, topIdx) := topK2d probs cfg.top_k_experts 1
+  let (topValsRaw, topIdx) := Tensor.topKLast2d! probs cfg.top_k_experts
   let denom : Tensor { device := device, shape := #[tokens, 1], dtype := .Float32 } := Tensor.sumDim topValsRaw 1 true
   let denom : Tensor { device := device, shape := #[tokens, cfg.top_k_experts], dtype := .Float32 } := Tensor.expand denom #[tokens, cfg.top_k_experts]
   let topVals : Tensor { device := device, shape := #[tokens, cfg.top_k_experts], dtype := .Float32 } := Tensor.div topValsRaw denom

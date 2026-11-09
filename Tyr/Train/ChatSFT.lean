@@ -175,7 +175,7 @@ def maskedCrossEntropy? {batch seq vocab : Nat} {d m result : DType} {dev : Devi
   let logitsFlat := logits.reshape #[batchSeq, vocab]
   let targetsFlat := targets.reshape #[batchSeq]
   -- Compute per-element loss
-  let lossesFlat ← Tensor.crossEntropyNone? logitsFlat targetsFlat
+  let lossesFlat := Tensor.crossEntropyNone! logitsFlat targetsFlat
   -- Apply mask and compute mean over valid positions
   let maskFlat := mask.reshape #[batchSeq]
   Tensor.checkPointwise lossesFlat maskFlat

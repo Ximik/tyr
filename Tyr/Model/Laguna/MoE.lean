@@ -82,7 +82,7 @@ def route {tokens : Nat}
   let selectionScores := match r.eScoreCorrectionBias with
     | some bias => Tensor.add scores (Tensor.expand (floatDynamic bias.2) #[tokens, cfg.num_experts])
     | none => scores
-  let (_, topIdx) := topK2d selectionScores cfg.num_experts_per_tok 1
+  let (_, topIdx) := Tensor.topKLast2d! selectionScores cfg.num_experts_per_tok
   let weights := Tensor.gather scores 1 topIdx
   let weights := if cfg.norm_topk_prob then
       Tensor.div weights (Tensor.expand (Tensor.sumDim weights 1 true) #[tokens, cfg.num_experts_per_tok])

@@ -51,13 +51,6 @@ FIXED_ERROR_STUBS = {
     ("cc/src/apple_vl_processor.mm", "lean_torch_media_load_video_patchified"),
     ("cc/src/tyr_laguna_moe.cu", "lean_torch_laguna_moe_fp4_forward"),
 }
-# The crash probe's hook must stay unguarded so its error reaches Tyr's terminate
-# handler. Only this symbol with exactly this body is exempt.
-DELIBERATE_UNCAUGHT = ("cc/src/tyr.cpp", "lean_tyr_test_uncaught_libtorch_error")
-DELIBERATE_UNCAUGHT_BODY = [
-    "TORCH_CHECK", "(", "false", ",", "<string>", ")", ";",
-    "return", "lean_io_result_mk_ok", "(", "lean_box", "(", "0", ")", ")", ";",
-]
 FIXED_IO_ERROR = [
     "return", "lean_io_result_mk_error", "(", "lean_mk_io_user_error", "(",
     "lean_mk_string", "(", "<string>", ")", ")", ")", ";",
@@ -319,10 +312,6 @@ def audit(root: Path) -> tuple[list[str], Counter]:
             if (export.carrier == "IO" and (definition.path, symbol) in FIXED_ERROR_STUBS
                     and [t.text for t in definition.body] == FIXED_IO_ERROR):
                 counts["fixed-error stubs"] += 1
-                continue
-            if (export.carrier == "IO" and (definition.path, symbol) == DELIBERATE_UNCAUGHT
-                    and [t.text for t in definition.body] == DELIBERATE_UNCAUGHT_BODY):
-                counts["deliberate uncaught probes"] += 1
                 continue
             wrapper = "checkedIoCall" if export.carrier == "IO" else "checkedCall"
             errors.append(

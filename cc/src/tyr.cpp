@@ -382,13 +382,6 @@ const bool g_tyr_terminate_handler_installed = [] {
 
 extern "C" {
 
-// Test-only: raises a libtorch error with no FFI guard, so it reaches
-// `tyrTerminateHandler`. Used only by `Tests/FfiCrashProbe.lean`.
-lean_object* lean_tyr_test_uncaught_libtorch_error() {
-  TORCH_CHECK(false, "deliberate uncaught libtorch error from ffi_crash_probe");
-  return lean_io_result_mk_ok(lean_box(0));
-}
-
 lean_object* lean_torch_get_live_tensors() {
   return tyr::checkedIoCall("get_live_tensors", [&] {
     return lean_io_result_mk_ok(lean_box_uint64(static_cast<uint64_t>(g_live_lean_tensors.load())));
@@ -720,7 +713,7 @@ uint8_t lean_torch_requires_grad(b_lean_obj_arg x) {
 
 //
 
-static lean_object* reshapeExact(b_lean_obj_arg self, b_lean_obj_arg shape) {
+lean_object* lean_torch_reshape_exact(b_lean_obj_arg self, b_lean_obj_arg shape) {
   return fromTorchTensor(borrowTensor(self).reshape(getShape(shape)));
 }
 
@@ -1005,19 +998,12 @@ static void validateCrossEntropyTargets(b_lean_obj_arg logits, b_lean_obj_arg ta
 }
 
 lean_object* lean_torch_cross_entropy_none(b_lean_obj_arg logits, b_lean_obj_arg targets) {
+  validateCrossEntropyTargets(logits, targets);
   auto logits_ = borrowTensor(logits);
   auto targets_ = borrowTensor(targets);
   auto options = torch::nn::functional::CrossEntropyFuncOptions().reduction(torch::kNone);
   auto result_ = torch::nn::functional::cross_entropy(logits_, targets_, options);
   return fromTorchTensor(result_);
-}
-
-lean_object* lean_torch_cross_entropy_none_checked(
-    b_lean_obj_arg logits, b_lean_obj_arg targets) {
-  return tyr::checkedCall("crossEntropyNone", [&] {
-    validateCrossEntropyTargets(logits, targets);
-    return lean_torch_cross_entropy_none(logits, targets);
-  });
 }
 
 lean_object *lean_torch_to_string(b_lean_obj_arg t) {
@@ -1744,15 +1730,6 @@ lean_object* lean_torch_argmax(b_lean_obj_arg input, b_lean_obj_arg dim_obj) {
   return fromTorchTensor(result_);
 }
 
-lean_object* lean_torch_argmax_checked(b_lean_obj_arg input, b_lean_obj_arg dim_obj) {
-  return tyr::checkedCall("argmax", [&] {
-  const uint64_t dim = tyr::natTo<int64_t>(dim_obj, "dim");
-    TORCH_CHECK(dim <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max()),
-      "argmax axis is not representable as a nonnegative signed 64-bit integer");
-    return fromTorchTensor(torch::argmax(borrowTensor(input), static_cast<int64_t>(dim)));
-  });
-}
-
 // Create tensor from Array Int64
 // Array Int64 is a regular array (not scalar array) where each element is a boxed Int64
 // Int64 is stored as a ctor with the uint64 value at scalar offset 0
@@ -2178,6 +2155,7 @@ lean_object* lean_torch_cross_entropy_2d(
   b_lean_obj_arg logits,
   b_lean_obj_arg targets
 ) {
+  validateCrossEntropyTargets(logits, targets);
   auto logits_ = borrowTensor(logits);
   auto targets_ = borrowTensor(targets);
   auto result_ = torch::nn::functional::cross_entropy(logits_, targets_);
@@ -2185,14 +2163,6 @@ lean_object* lean_torch_cross_entropy_2d(
 }
 
 // Scaled dot-product attention for 4D tensors
-lean_object* lean_torch_cross_entropy_2d_checked(
-    b_lean_obj_arg logits, b_lean_obj_arg targets) {
-  return tyr::checkedCall("crossEntropy", [&] {
-    validateCrossEntropyTargets(logits, targets);
-    return lean_torch_cross_entropy_2d(logits, targets);
-  });
-}
-
 // Shared implementations for the pure zero-dropout and effectful IO exports.
 // All callers enter a checked boundary before borrowing tensors or validating.
 static void checkAttentionInputs(const torch::Tensor& q, const torch::Tensor& k,
@@ -3425,22 +3395,6 @@ lean_object* lean_torch_max_dim_3d(
   return result;
 }
 
-lean_object* lean_torch_max_dim_3d_checked(
-    b_lean_obj_arg input, b_lean_obj_arg dim_obj) {
-  return tyr::checkedCall("maxLast3d", [&] {
-  const uint64_t dim = tyr::natTo<int64_t>(dim_obj, "dim");
-    TORCH_CHECK(dim <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max()),
-      "maxLast3d axis is not representable as a nonnegative signed 64-bit integer");
-    auto [values, indices] = torch::max(borrowTensor(input), static_cast<int64_t>(dim));
-    OwnedLeanObject values_owner(fromTorchTensor(values), lean_dec);
-    OwnedLeanObject indices_owner(fromTorchTensor(indices), lean_dec);
-    auto* result = lean_alloc_ctor(0, 2, 0);
-    lean_ctor_set(result, 0, values_owner.release());
-    lean_ctor_set(result, 1, indices_owner.release());
-    return result;
-  });
-}
-
 // Boolean any (returns true if any element is true)
 uint8_t lean_torch_any(b_lean_obj_arg input) {
   auto input_ = borrowTensor(input);
@@ -3496,25 +3450,6 @@ lean_object* lean_torch_topk_2d(
   lean_ctor_set(result, 0, fromTorchTensor(values));
   lean_ctor_set(result, 1, fromTorchTensor(indices));
   return result;
-}
-
-lean_object* lean_torch_topk_2d_checked(
-    b_lean_obj_arg input, b_lean_obj_arg k_obj, b_lean_obj_arg dim_obj) {
-  return tyr::checkedCall("topKLast2d", [&] {
-  const uint64_t k = tyr::natTo<int64_t>(k_obj, "k");
-  const uint64_t dim = tyr::natTo<int64_t>(dim_obj, "dim");
-    TORCH_CHECK(k <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) &&
-      dim <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max()),
-      "topKLast2d k and axis must be nonnegative signed 64-bit integers");
-    auto [values, indices] = torch::topk(borrowTensor(input), static_cast<int64_t>(k),
-      static_cast<int64_t>(dim));
-    OwnedLeanObject values_owner(fromTorchTensor(values), lean_dec);
-    OwnedLeanObject indices_owner(fromTorchTensor(indices), lean_dec);
-    auto* result = lean_alloc_ctor(0, 2, 0);
-    lean_ctor_set(result, 0, values_owner.release());
-    lean_ctor_set(result, 1, indices_owner.release());
-    return result;
-  });
 }
 
 // ============================================================================
@@ -4152,9 +4087,6 @@ lean_object* lean_torch_expand_checked(b_lean_obj_arg t, lean_obj_arg target) {
   return tyr::checkedCall("expand", [&] { return lean_torch_expand(t, target); });
 }
 
-lean_object* lean_torch_reshape_exact_checked(b_lean_obj_arg t, b_lean_obj_arg target) {
-  return tyr::checkedCall("reshape", [&] { return reshapeExact(t, target); });
-}
 
 lean_object* lean_torch_sum_checked(b_lean_obj_arg t, lean_obj_arg dims, uint8_t keepdim) {
   return tyr::checkedCall("sum", [&] { return lean_torch_sum(t, dims, keepdim); });
@@ -4162,10 +4094,6 @@ lean_object* lean_torch_sum_checked(b_lean_obj_arg t, lean_obj_arg dims, uint8_t
 
 lean_object* lean_torch_mean_checked(b_lean_obj_arg t, lean_obj_arg dims, uint8_t keepdim) {
   return tyr::checkedCall("mean", [&] { return lean_torch_mean(t, dims, keepdim); });
-}
-
-lean_object* lean_torch_max_all_checked(b_lean_obj_arg t) {
-  return tyr::checkedCall("maxAll", [&] { return lean_torch_max_all(t); });
 }
 
 lean_object* lean_torch_where_checked(b_lean_obj_arg condition, b_lean_obj_arg a, b_lean_obj_arg b) {
