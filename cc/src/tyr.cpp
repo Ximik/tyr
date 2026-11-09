@@ -1913,40 +1913,29 @@ lean_object* lean_torch_index_select(
   b_lean_obj_arg dim_obj,
   b_lean_obj_arg indices
 ) {
-  const auto dim = static_cast<int64_t>(tyr::natTo<int64_t>(dim_obj, "dim"));
-  auto input_ = borrowTensor(input);
-  auto indices_ = borrowTensor(indices);
-  // Ensure indices are int64 (index_select requires int32 or int64)
-  if (indices_.dtype() != torch::kInt64 && indices_.dtype() != torch::kInt32) {
-    indices_ = indices_.to(torch::kInt64);
+  auto data = borrowTensor(input);
+  auto index = borrowTensor(indices);
+  const auto dim = tyr::natTo<int64_t>(dim_obj, "dim");
+  TORCH_CHECK(dim < data.dim(), "indexSelect axis is out of range for rank ", data.dim());
+  TORCH_CHECK(index.dim() == 1, "indexSelect requires vector indices");
+  TORCH_CHECK(index.scalar_type() == torch::kInt64 || index.scalar_type() == torch::kInt32,
+    "indexSelect requires Int64 or Int32 indices");
+  TORCH_CHECK(data.device() == index.device(), "indexSelect requires matching devices");
+  // Validate before launching device indexing: CUDA out-of-bounds indexing
+  // may assert asynchronously and poison the context instead of throwing.
+  // Device-local comparisons copy only one validity bit back to the host.
+  const auto limit = data.size(dim);
+  if (index.numel() > 0) {
+    TORCH_CHECK((index.ge(0) & index.lt(limit)).all().item<bool>(),
+      "indexSelect index is out of range for length ", limit);
   }
-  auto result_ = torch::index_select(input_, dim, indices_);
-  return fromTorchTensor(result_);
+  return fromTorchTensor(torch::index_select(data, dim, index));
 }
 
 lean_object* lean_torch_index_select_checked(b_lean_obj_arg input,
     b_lean_obj_arg dim_obj, b_lean_obj_arg indices) {
   return tyr::checkedCall("indexSelect", [&] {
-    auto data = borrowTensor(input);
-    auto index = borrowTensor(indices);
-    const auto dim = tyr::natTo<int64_t>(dim_obj, "dim");
-    TORCH_CHECK(data.dim() == 1 && index.dim() == 1,
-      "indexSelect requires vector data and indices");
-    TORCH_CHECK(dim == 0, "indexSelect vector axis must be zero");
-    TORCH_CHECK(index.scalar_type() == torch::kInt64 || index.scalar_type() == torch::kInt32,
-      "indexSelect requires Int64 or Int32 indices");
-    TORCH_CHECK(data.device() == index.device(), "indexSelect requires matching devices");
-    // Validate before launching device indexing: CUDA out-of-bounds indexing
-    // may assert asynchronously and poison the context instead of throwing.
-    // Device-local comparisons copy only one validity bit back to the host.
-    // If a backend lacks those kernels, the checked boundary returns an error
-    // before it can launch indexing with unvalidated values.
-    const auto limit = data.size(0);
-    if (index.numel() > 0) {
-      TORCH_CHECK((index.ge(0) & index.lt(limit)).all().item<bool>(),
-        "indexSelect index is out of range for length ", limit);
-    }
-    return fromTorchTensor(torch::index_select(data, 0, index));
+    return lean_torch_index_select(input, dim_obj, indices);
   });
 }
 
@@ -2219,9 +2208,7 @@ lean_object* lean_torch_sdpa_4d(
     b_lean_obj_arg key,
     b_lean_obj_arg value,
     uint8_t is_causal) {
-  return tyr::checkedCall("attention", [&] {
-    return fromTorchTensor(attentionFromLean(query, key, value, nullptr, 0.0, is_causal != 0));
-  });
+  return fromTorchTensor(attentionFromLean(query, key, value, nullptr, 0.0, is_causal != 0));
 }
 
 lean_object* lean_torch_sdpa_4d_io(
@@ -2244,9 +2231,7 @@ lean_object* lean_torch_sdpa_4d_bias(
     b_lean_obj_arg value,
     b_lean_obj_arg bias,
     uint8_t is_causal) {
-  return tyr::checkedCall("branchingAttentionBias", [&] {
-    return fromTorchTensor(attentionFromLean(query, key, value, bias, 0.0, is_causal != 0));
-  });
+  return fromTorchTensor(attentionFromLean(query, key, value, bias, 0.0, is_causal != 0));
 }
 
 lean_object* lean_torch_sdpa_4d_bias_io(
@@ -3201,9 +3186,7 @@ lean_object* lean_torch_sdpa_gqa(
     b_lean_obj_arg value,
     uint8_t is_causal,
     uint8_t enable_gqa) {
-  return tyr::checkedCall("attentionGQA", [&] {
-    return fromTorchTensor(groupedAttentionFromLean(query, key, value, nullptr, 0.0, is_causal != 0, enable_gqa != 0));
-  });
+  return fromTorchTensor(groupedAttentionFromLean(query, key, value, nullptr, 0.0, is_causal != 0, enable_gqa != 0));
 }
 
 lean_object* lean_torch_sdpa_gqa_io(
@@ -3227,10 +3210,8 @@ lean_object* lean_torch_sdpa_gqa_window(
     uint8_t is_causal,
     uint8_t enable_gqa,
     b_lean_obj_arg window_size_obj) {
-  return tyr::checkedCall("attentionWindow", [&] {
   const uint64_t window_size = tyr::natTo<uint64_t>(window_size_obj, "window_size");
-    return fromTorchTensor(groupedAttentionFromLean(query, key, value, nullptr, 0.0, is_causal != 0, enable_gqa != 0, tyr_ops::AttentionMaskKind::Padding, window_size));
-  });
+  return fromTorchTensor(groupedAttentionFromLean(query, key, value, nullptr, 0.0, is_causal != 0, enable_gqa != 0, tyr_ops::AttentionMaskKind::Padding, window_size));
 }
 
 lean_object* lean_torch_sdpa_gqa_window_io(
@@ -3258,9 +3239,7 @@ lean_object* lean_torch_sdpa_gqa_mask(
     b_lean_obj_arg mask,
     uint8_t is_causal,
     uint8_t enable_gqa) {
-  return tyr::checkedCall("attentionGQAMask", [&] {
-    return fromTorchTensor(groupedAttentionFromLean(query, key, value, mask, 0.0, is_causal != 0, enable_gqa != 0));
-  });
+  return fromTorchTensor(groupedAttentionFromLean(query, key, value, mask, 0.0, is_causal != 0, enable_gqa != 0));
 }
 
 lean_object* lean_torch_sdpa_gqa_mask_io(
@@ -3286,9 +3265,7 @@ lean_object* lean_torch_sdpa_gqa_mask_qkv(
     b_lean_obj_arg value,
     b_lean_obj_arg mask,
     uint8_t enable_gqa) {
-  return tyr::checkedCall("gemma4MaskedAttention", [&] {
-    return fromTorchTensor(groupedAttentionFromLean(query, key, value, mask, 0.0, false, enable_gqa != 0, tyr_ops::AttentionMaskKind::Edges));
-  });
+  return fromTorchTensor(groupedAttentionFromLean(query, key, value, mask, 0.0, false, enable_gqa != 0, tyr_ops::AttentionMaskKind::Edges));
 }
 
 lean_object* lean_torch_sdpa_gqa_mask_qkv_io(
@@ -3312,9 +3289,7 @@ lean_object* lean_torch_sdpa_gqa_qkv(
     b_lean_obj_arg value,
     uint8_t is_causal,
     uint8_t enable_gqa) {
-  return tyr::checkedCall("attentionGQAQKV", [&] {
-    return fromTorchTensor(groupedAttentionFromLean(query, key, value, nullptr, 0.0, is_causal != 0, enable_gqa != 0));
-  });
+  return fromTorchTensor(groupedAttentionFromLean(query, key, value, nullptr, 0.0, is_causal != 0, enable_gqa != 0));
 }
 
 lean_object* lean_torch_sdpa_gqa_qkv_io(

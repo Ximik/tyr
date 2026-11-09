@@ -47,6 +47,16 @@ lean_object* exceptValue(lean_object* result) {
   require(!lean_is_scalar(value) && lean_is_external(value), "Except.ok payload is not RawTensor");
   return value;
 }
+// Unguarded exports throw in this harness; from Lean the same failure aborts.
+template <typename Action>
+void expectThrow(Action action) {
+  try {
+    Object unexpected(action(), lean_dec);
+  } catch (const std::exception&) {
+    return;
+  }
+  throw std::runtime_error("Expected native rejection");
+}
 Object cast(lean_object* input, tyr::lean::DType dtype) {
   Object dims(lean_torch_get_shape(input), lean_dec);
   Object result(lean_torch_cast_dtype_checked(retain(dims.get()), input,

@@ -49,7 +49,7 @@ private abbrev AttentionTensor := Tensor ⟨#[1, 1, 16, 4], .Float32, .CPU⟩
   manualSeed 42
   let expectedNext ← Tensor.randn #[8]
   manualSeed 42
-  let pureOutput ← IO.ofExcept (Tensor.attention? q q v false)
+  let pureOutput := Tensor.attention q q v false
   let outputs ← #[
     Tensor.attentionIO q q v 1 false false,
     Tensor.attentionGQAIO q q v 1 false false,

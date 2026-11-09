@@ -27,20 +27,18 @@ def routedTextExpertsForward {tokens numExperts topK inter hidden : Nat} {routin
   x.checkedReplacement (RawTensor.gemma4TextExperts tokens numExperts topK inter hidden
     x.raw gateUp.raw down.raw weights.raw indices.raw)
 
-def maskedAttention? {b h kh qs ks d : Nat} {dm : DType}
+def maskedAttention! {b h kh qs ks d : Nat} {dm : DType}
     (q : Tensor { device := device, shape := #[b, h, qs, d], dtype := dtype }) (k v : Tensor { device := device, shape := #[b, kh, ks, d], dtype := dtype })
     (mask : Tensor { device := device, shape := #[b, qs, ks], dtype := dm }) (gqa : Bool := false) :
-    Except String (Tensor { device := device, shape := #[b, h, qs, d], dtype := dtype }) := do
-  q.checkedReplacement? (← RawTensor.gemma4MaskedAttention q.raw k.raw v.raw mask.raw gqa)
+    Tensor { device := device, shape := #[b, h, qs, d], dtype := dtype } :=
+  q.checkedReplacement (RawTensor.gemma4MaskedAttention! q.raw k.raw v.raw mask.raw gqa)
 
 /-- Deterministic inference attention; dropout is available only through IO. -/
 def maskedAttention {b h kh qs ks d : Nat} {dm : DType}
     (q : Tensor { device := device, shape := #[b, h, qs, d], dtype := dtype }) (k v : Tensor { device := device, shape := #[b, kh, ks, d], dtype := dtype })
     (mask : Tensor { device := device, shape := #[b, qs, ks], dtype := dm }) (gqa : Bool := false) :
     Tensor { device := device, shape := #[b, h, qs, d], dtype := dtype } :=
-  match maskedAttention? q k v mask gqa with
-  | .ok result => result
-  | .error message => nativeInvariantFailure s!"Gemma4.maskedAttention: {message}"
+  maskedAttention! q k v mask gqa
 
 def maskedAttentionIO {b h kh qs ks d : Nat} {dm : DType}
     (q : Tensor { device := device, shape := #[b, h, qs, d], dtype := dtype }) (k v : Tensor { device := device, shape := #[b, kh, ks, d], dtype := dtype })

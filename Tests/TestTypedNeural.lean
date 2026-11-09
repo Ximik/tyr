@@ -52,12 +52,10 @@ open torch
   LeanTest.assertEqual (← sampled.toFloatArray) (Array.replicate 16 (-7.0))
     "Lean Int64 bounds cross the C ABI with their signed bit pattern intact"
 
-@[test] def testTypedFlashAttentionCheckedErrors : IO Unit := do
+@[test] def testTypedFlashAttentionValuesAndDropoutErrors : IO Unit := do
   let q := Tensor.zeros #[1, 1, 2, 2]
   let v := (Tensor.fromFloatArray #[2, 4, 6, 8]).reshape #[1, 1, 2, 2]
-  let result ← match Tensor.flashAttention? q q v with
-    | .ok result => pure result
-    | .error message => LeanTest.fail message
+  let result := Tensor.flashAttention q q v
   LeanTest.assertEqual (← result.toFloatArray) #[4, 6, 4, 6]
   LeanTest.assertTrue (result.actualSpec == q.actualSpec)
   for dropout in #[-0.5, 1.5] do
@@ -68,10 +66,6 @@ open torch
       LeanTest.assertTrue (!error.toString.isEmpty)
       pure true
     LeanTest.assertTrue rejected "Invalid FlashAttention dropout must return IO.error"
-  let ints := q.castDType .Int64
-  match Tensor.flashAttention? ints ints ints with
-  | .ok _ => LeanTest.fail "Integer FlashAttention must return an error"
-  | .error message => LeanTest.assertTrue (!message.isEmpty)
 
 @[test] def testTypedRandintRecoverableErrors : IO Unit := do
   for (low, high, device) in #[(3, 3, Device.CPU), (4, 3, Device.CPU)] do

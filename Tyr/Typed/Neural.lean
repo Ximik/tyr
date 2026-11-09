@@ -202,13 +202,6 @@ private def checkAttentionOperands {sq sk sv : StaticSpec}
   Device.check q.raw.device k.raw.device
   Device.check q.raw.device v.raw.device
 
-private def attentionResult {σ : StaticSpec} (operation : String) (q : Tensor σ)
-    (result : Except String (Tensor σ)) : Tensor σ :=
-  letI : Inhabited (Tensor σ) := ⟨q⟩
-  match result with
-  | .ok value => value
-  | .error message => nativeInvariantFailure s!"Tensor.{operation}: {message}"
-
 private def attentionCheckIO {α : Type} (operation : String)
     (result : Except String α) : IO α :=
   match result with
@@ -222,20 +215,16 @@ def attentionDropout? (dropout : Float) (training : Bool) : Except String Float 
     throw "attention dropout must be finite and in [0, 1]"
   pure (if training then dropout else 0.0)
 
-/-- Zero-dropout attention with recoverable native errors. -/
-def attention? {batch heads seq dim : Nat} {d : DType} {dev : Device}
+def attention! {batch heads seq dim : Nat} {d : DType} {dev : Device}
     (q k v : Tensor ⟨#[batch, heads, seq, dim], d, dev⟩)
-    (causal : Bool := true) : Except String (Tensor ⟨#[batch, heads, seq, dim], d, dev⟩) := do
-  checkAttentionOperands q k v
-  let raw ← RawTensor.attention
-    q.raw k.raw v.raw causal
-  q.checkedReplacement? raw
+    (causal : Bool := true) : Tensor ⟨#[batch, heads, seq, dim], d, dev⟩ :=
+  q.checkedReplacement (RawTensor.attention! q.raw k.raw v.raw causal)
 
-/-- Deterministic attention; `attention?` exposes validation and kernel errors. -/
+/-- Zero-dropout attention. -/
 def attention {batch heads seq dim : Nat} {d : DType} {dev : Device}
     (q k v : Tensor ⟨#[batch, heads, seq, dim], d, dev⟩)
     (causal : Bool := true) : Tensor ⟨#[batch, heads, seq, dim], d, dev⟩ :=
-  attentionResult "attention" q (attention? q k v causal)
+  attention! q k v causal
 
 /-- Attention with explicit training-mode dropout, sequenced through native IO. -/
 def attentionIO {batch heads seq dim : Nat} {d : DType} {dev : Device}
@@ -247,22 +236,19 @@ def attentionIO {batch heads seq dim : Nat} {d : DType} {dev : Device}
     q.raw k.raw v.raw effective causal
   attentionCheckIO "attentionIO" (q.checkedReplacement? raw)
 
-/-- Zero-dropout attention with recoverable native errors. -/
-def attentionGQA? {batch heads kvHeads seq dim : Nat} {d : DType} {dev : Device}
-    (q : Tensor ⟨#[batch, heads, seq, dim], d, dev⟩)
-    (k v : Tensor ⟨#[batch, kvHeads, seq, dim], d, dev⟩)
-    (causal : Bool := true) (gqa : Bool := false) : Except String (Tensor ⟨#[batch, heads, seq, dim], d, dev⟩) := do
-  checkAttentionOperands q k v
-  let raw ← RawTensor.attentionGQA
-    q.raw k.raw v.raw causal gqa
-  q.checkedReplacement? raw
-
-/-- Deterministic attention; `attentionGQA?` exposes validation and kernel errors. -/
-def attentionGQA {batch heads kvHeads seq dim : Nat} {d : DType} {dev : Device}
+def attentionGQA! {batch heads kvHeads seq dim : Nat} {d : DType} {dev : Device}
     (q : Tensor ⟨#[batch, heads, seq, dim], d, dev⟩)
     (k v : Tensor ⟨#[batch, kvHeads, seq, dim], d, dev⟩)
     (causal : Bool := true) (gqa : Bool := false) : Tensor ⟨#[batch, heads, seq, dim], d, dev⟩ :=
-  attentionResult "attentionGQA" q (attentionGQA? q k v causal gqa)
+  q.checkedReplacement (RawTensor.attentionGQA! q.raw k.raw v.raw causal gqa)
+
+/-- Zero-dropout grouped-query attention. -/
+def attentionGQA {batch heads kvHeads seq dim : Nat} {d : DType} {dev : Device}
+    (q : Tensor ⟨#[batch, heads, seq, dim], d, dev⟩)
+    (k v : Tensor ⟨#[batch, kvHeads, seq, dim], d, dev⟩)
+    (causal : Bool := true) (gqa : Bool := false) :
+    Tensor ⟨#[batch, heads, seq, dim], d, dev⟩ :=
+  attentionGQA! q k v causal gqa
 
 /-- Attention with explicit training-mode dropout, sequenced through native IO. -/
 def attentionGQAIO {batch heads kvHeads seq dim : Nat} {d : DType} {dev : Device}
@@ -275,24 +261,21 @@ def attentionGQAIO {batch heads kvHeads seq dim : Nat} {d : DType} {dev : Device
     q.raw k.raw v.raw effective causal gqa
   attentionCheckIO "attentionGQAIO" (q.checkedReplacement? raw)
 
-/-- Zero-dropout attention with recoverable native errors. -/
-def attentionGQAMask? {batch heads kvHeads seq dim : Nat} {d dm : DType} {dev : Device}
-    (q : Tensor ⟨#[batch, heads, seq, dim], d, dev⟩)
-    (k v : Tensor ⟨#[batch, kvHeads, seq, dim], d, dev⟩)
-    (mask : Tensor ⟨#[batch, seq], dm, dev⟩)
-    (causal : Bool := true) (gqa : Bool := false) : Except String (Tensor ⟨#[batch, heads, seq, dim], d, dev⟩) := do
-  checkAttentionOperands q k v
-  let raw ← RawTensor.attentionGQAMask
-    q.raw k.raw v.raw mask.raw causal gqa
-  q.checkedReplacement? raw
-
-/-- Deterministic attention; `attentionGQAMask?` exposes validation and kernel errors. -/
-def attentionGQAMask {batch heads kvHeads seq dim : Nat} {d dm : DType} {dev : Device}
+def attentionGQAMask! {batch heads kvHeads seq dim : Nat} {d dm : DType} {dev : Device}
     (q : Tensor ⟨#[batch, heads, seq, dim], d, dev⟩)
     (k v : Tensor ⟨#[batch, kvHeads, seq, dim], d, dev⟩)
     (mask : Tensor ⟨#[batch, seq], dm, dev⟩)
     (causal : Bool := true) (gqa : Bool := false) : Tensor ⟨#[batch, heads, seq, dim], d, dev⟩ :=
-  attentionResult "attentionGQAMask" q (attentionGQAMask? q k v mask causal gqa)
+  q.checkedReplacement (RawTensor.attentionGQAMask! q.raw k.raw v.raw mask.raw causal gqa)
+
+/-- Zero-dropout grouped-query attention with a key padding mask. -/
+def attentionGQAMask {batch heads kvHeads seq dim : Nat} {d dm : DType} {dev : Device}
+    (q : Tensor ⟨#[batch, heads, seq, dim], d, dev⟩)
+    (k v : Tensor ⟨#[batch, kvHeads, seq, dim], d, dev⟩)
+    (mask : Tensor ⟨#[batch, seq], dm, dev⟩)
+    (causal : Bool := true) (gqa : Bool := false) :
+    Tensor ⟨#[batch, heads, seq, dim], d, dev⟩ :=
+  attentionGQAMask! q k v mask causal gqa
 
 /-- Attention with explicit training-mode dropout, sequenced through native IO. -/
 def attentionGQAMaskIO {batch heads kvHeads seq dim : Nat} {d dm : DType} {dev : Device}
@@ -332,22 +315,19 @@ def maskedScatter {s sourceShape : Shape} {d : DType} {dev : Device}
     (source : Tensor ⟨sourceShape, d, dev⟩) : Tensor ⟨s, d, dev⟩ :=
   input.checkedReplacement (RawTensor.maskedScatter input.raw mask.raw source.raw)
 
-/-- Zero-dropout attention with recoverable native errors. -/
-def attentionGQAQKV? {batch heads kvHeads qSeq kvSeq dim : Nat} {d : DType} {dev : Device}
-    (q : Tensor ⟨#[batch, heads, qSeq, dim], d, dev⟩)
-    (k v : Tensor ⟨#[batch, kvHeads, kvSeq, dim], d, dev⟩)
-    (causal : Bool := false) (gqa : Bool := false) : Except String (Tensor ⟨#[batch, heads, qSeq, dim], d, dev⟩) := do
-  checkAttentionOperands q k v
-  let raw ← RawTensor.attentionGQAQKV
-    q.raw k.raw v.raw causal gqa
-  q.checkedReplacement? raw
-
-/-- Deterministic attention; `attentionGQAQKV?` exposes validation and kernel errors. -/
-def attentionGQAQKV {batch heads kvHeads qSeq kvSeq dim : Nat} {d : DType} {dev : Device}
+def attentionGQAQKV! {batch heads kvHeads qSeq kvSeq dim : Nat} {d : DType} {dev : Device}
     (q : Tensor ⟨#[batch, heads, qSeq, dim], d, dev⟩)
     (k v : Tensor ⟨#[batch, kvHeads, kvSeq, dim], d, dev⟩)
     (causal : Bool := false) (gqa : Bool := false) : Tensor ⟨#[batch, heads, qSeq, dim], d, dev⟩ :=
-  attentionResult "attentionGQAQKV" q (attentionGQAQKV? q k v causal gqa)
+  q.checkedReplacement (RawTensor.attentionGQAQKV! q.raw k.raw v.raw causal gqa)
+
+/-- Zero-dropout grouped-query attention with separate query and key/value lengths. -/
+def attentionGQAQKV {batch heads kvHeads qSeq kvSeq dim : Nat} {d : DType} {dev : Device}
+    (q : Tensor ⟨#[batch, heads, qSeq, dim], d, dev⟩)
+    (k v : Tensor ⟨#[batch, kvHeads, kvSeq, dim], d, dev⟩)
+    (causal : Bool := false) (gqa : Bool := false) :
+    Tensor ⟨#[batch, heads, qSeq, dim], d, dev⟩ :=
+  attentionGQAQKV! q k v causal gqa
 
 /-- Attention with explicit training-mode dropout, sequenced through native IO. -/
 def attentionGQAQKVIO {batch heads kvHeads qSeq kvSeq dim : Nat} {d : DType} {dev : Device}
@@ -360,26 +340,23 @@ def attentionGQAQKVIO {batch heads kvHeads qSeq kvSeq dim : Nat} {d : DType} {de
     q.raw k.raw v.raw effective causal gqa
   attentionCheckIO "attentionGQAQKVIO" (q.checkedReplacement? raw)
 
-/-- Zero-dropout native FlashAttention dispatch with checked metadata and errors. -/
-def flashAttention? {batch heads kvHeads qSeq kvSeq dim : Nat} {d : DType} {dev : Device}
+def flashAttention! {batch heads kvHeads qSeq kvSeq dim : Nat} {d : DType} {dev : Device}
     (q : Tensor ⟨#[batch, heads, qSeq, dim], d, dev⟩)
     (k v : Tensor ⟨#[batch, kvHeads, kvSeq, dim], d, dev⟩) (gqa : Bool := false)
     (mask : Option (SomeDTypeTensor #[batch, kvSeq] dev) := none)
     (causal : Bool := false) (scale : Option Float := none) :
-    Except String (Tensor ⟨#[batch, heads, qSeq, dim], d, dev⟩) := do
-  checkAttentionOperands q k v
-  let raw ← RawTensor.flashAttention
-    q.raw k.raw v.raw (mask.map (fun packed => packed.2.raw)) causal scale gqa
-  q.checkedReplacement? raw
+    Tensor ⟨#[batch, heads, qSeq, dim], d, dev⟩ :=
+  q.checkedReplacement (RawTensor.flashAttention!
+    q.raw k.raw v.raw (mask.map (fun packed => packed.2.raw)) causal scale gqa)
 
-/-- Zero-dropout FlashAttention. Use `flashAttention?` to handle native errors. -/
+/-- Zero-dropout FlashAttention. -/
 def flashAttention {batch heads kvHeads qSeq kvSeq dim : Nat} {d : DType} {dev : Device}
     (q : Tensor ⟨#[batch, heads, qSeq, dim], d, dev⟩)
     (k v : Tensor ⟨#[batch, kvHeads, kvSeq, dim], d, dev⟩) (gqa : Bool := false)
     (mask : Option (SomeDTypeTensor #[batch, kvSeq] dev) := none)
     (causal : Bool := false) (scale : Option Float := none) :
     Tensor ⟨#[batch, heads, qSeq, dim], d, dev⟩ :=
-  attentionResult "flashAttention" q (flashAttention? q k v gqa mask causal scale)
+  flashAttention! q k v gqa mask causal scale
 
 /-- FlashAttention with explicit training-mode dropout through native IO.
 Evaluation uses zero dropout, independently of the configured probability. -/
@@ -519,22 +496,18 @@ def convTranspose1d {batch cin cout length kernel : Nat} {d : DType} {dev : Devi
   | .ok result => result
   | .error message => nativeInvariantFailure s!"Tensor.convTranspose1d: {message}"
 
-/-- Zero-dropout attention with recoverable native errors. -/
-def attentionWindow? {batch heads kvHeads seq dim : Nat} {d : DType} {dev : Device}
+def attentionWindow! {batch heads kvHeads seq dim : Nat} {d : DType} {dev : Device}
     (q : Tensor ⟨#[batch, heads, seq, dim], d, dev⟩)
     (k v : Tensor ⟨#[batch, kvHeads, seq, dim], d, dev⟩)
-    (causal : Bool := true) (gqa : Bool := false) (window : Nat := 0) : Except String (Tensor ⟨#[batch, heads, seq, dim], d, dev⟩) := do
-  checkAttentionOperands q k v
-  let raw ← RawTensor.attentionWindow
-    q.raw k.raw v.raw causal gqa window
-  q.checkedReplacement? raw
+    (causal : Bool := true) (gqa : Bool := false) (window : Nat := 0) : Tensor ⟨#[batch, heads, seq, dim], d, dev⟩ :=
+  q.checkedReplacement (RawTensor.attentionWindow! q.raw k.raw v.raw causal gqa window)
 
-/-- Deterministic attention; `attentionWindow?` exposes validation and kernel errors. -/
+/-- Zero-dropout sliding-window attention. -/
 def attentionWindow {batch heads kvHeads seq dim : Nat} {d : DType} {dev : Device}
     (q : Tensor ⟨#[batch, heads, seq, dim], d, dev⟩)
     (k v : Tensor ⟨#[batch, kvHeads, seq, dim], d, dev⟩)
     (causal : Bool := true) (gqa : Bool := false) (window : Nat := 0) : Tensor ⟨#[batch, heads, seq, dim], d, dev⟩ :=
-  attentionResult "attentionWindow" q (attentionWindow? q k v causal gqa window)
+  attentionWindow! q k v causal gqa window
 
 /-- Attention with explicit training-mode dropout, sequenced through native IO. -/
 def attentionWindowIO {batch heads kvHeads seq dim : Nat} {d : DType} {dev : Device}

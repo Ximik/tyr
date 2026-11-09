@@ -171,15 +171,15 @@ void testNativeFailureCleanup(lean_object* tensor) {
 
   for (bool effectful : {false, true}) {
     ObservedArg mask(some(retain(tensor))), scale(some(lean_box_float(0.5)));
-    auto* result = effectful
-      ? lean_torch_tyr_flash_attn_4d_io(
-          invalid.get(), tensor, tensor, mask.transfer(), 0, 0, scale.transfer(), 0)
-      : lean_torch_tyr_flash_attn_4d(
-          invalid.get(), tensor, tensor, mask.transfer(), 0, scale.transfer(), 0);
-    if (effectful) require(lean_io_result_is_error(result), "Expected FlashAttention IO.error");
-    else require(!lean_is_scalar(result) && !lean_is_external(result) && lean_obj_tag(result) == 0,
-                 "Expected FlashAttention Except.error");
-    lean_dec(result);
+    if (effectful) {
+      auto* result = lean_torch_tyr_flash_attn_4d_io(
+        invalid.get(), tensor, tensor, mask.transfer(), 0, 0, scale.transfer(), 0);
+      require(lean_io_result_is_error(result), "Expected FlashAttention IO.error");
+      lean_dec(result);
+    } else {
+      expectThrow([&] { return lean_torch_tyr_flash_attn_4d(
+        invalid.get(), tensor, tensor, mask.transfer(), 0, scale.transfer(), 0); });
+    }
     mask.consumed("flash attention early failure mask");
     scale.consumed("flash attention early failure scale");
   }
