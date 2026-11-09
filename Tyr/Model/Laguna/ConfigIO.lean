@@ -99,7 +99,7 @@ private def ropeNatField? (j : Json) (sec fieldKey : String) : Option Nat :=
     >>= fun rp => getObjVal? rp sec
     >>= fun nested => getObjVal? nested fieldKey >>= getNat?
 
-def Config.parseJson (j : Json) (d : Config := Config.laguna_s_2_1) : Config :=
+def Config.parseJson (j : Json) (d : Config := Config.laguna_s_2_1) : Except String Config :=
   let layerTypes :=
     match parseLayerTypes j "layer_types" with
     | some xs => xs
@@ -141,7 +141,10 @@ def Config.parseJson (j : Json) (d : Config := Config.laguna_s_2_1) : Config :=
     | some _ => (getOptTokenIdField j "eos_token_id").map (fun e => #[e]) |>.getD d.eos_token_ids
     | none => d.eos_token_ids
 
-  {
+  let slidingWindow := getNatFieldD j "sliding_window" d.sliding_window
+  if hWindow : ¬ 0 < slidingWindow then
+    .error "Invalid Laguna config: sliding_window must be positive"
+  else .ok {
     vocab_size := getNatFieldD j "vocab_size" d.vocab_size
     hidden_size := getNatFieldD j "hidden_size" d.hidden_size
     intermediate_size := getNatFieldD j "intermediate_size" d.intermediate_size
@@ -153,7 +156,7 @@ def Config.parseJson (j : Json) (d : Config := Config.laguna_s_2_1) : Config :=
 
     rms_norm_eps := getFloatFieldD j "rms_norm_eps" d.rms_norm_eps
     max_position_embeddings := getNatFieldD j "max_position_embeddings" d.max_position_embeddings
-    sliding_window := getNatFieldD j "sliding_window" d.sliding_window
+    sliding_window := slidingWindow
 
     rope_theta_sliding := ropeThetaSliding
     partial_rotary_sliding := partialSliding
@@ -193,12 +196,13 @@ def Config.parseJson (j : Json) (d : Config := Config.laguna_s_2_1) : Config :=
     pad_token_id := getOptTokenIdField j "pad_token_id" <|> d.pad_token_id
     bos_token_id := getOptTokenIdField j "bos_token_id" <|> d.bos_token_id
     eos_token_ids := eosIds
+    slidingWindowPos := Decidable.of_not_not hWindow
   }
 
 /-- Load and normalize a Laguna config from a JSON file path. -/
 def Config.loadFromFile (path : String) (defaults : Config := Config.laguna_s_2_1) : IO Config := do
   let j ← parseJsonFile path
-  pure (Config.normalize (Config.parseJson j defaults))
+  pure (Config.normalize (← IO.ofExcept (Config.parseJson j defaults)))
 
 /-- Load and normalize a Laguna config from a pretrained model directory. -/
 def Config.loadFromPretrainedDir (modelDir : String) (defaults : Config := Config.laguna_s_2_1) : IO Config :=
