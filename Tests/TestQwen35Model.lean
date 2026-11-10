@@ -502,9 +502,10 @@ private def writeQwen35Fixture (dir : System.FilePath) (cfg : Config)
             LeanTest.assertEqual model.model.embed_tokens.actualSpec.dtype dtype
             LeanTest.assertEqual model.lmHead.actualSpec.dtype dtype
             LeanTest.assertEqual model.tieWordEmbeddings (!optionalWeights)
-            for layer in model.model.layers do
-              if let some linear := layer.linear_attn then
-                LeanTest.assertEqual linear.conv1d_bias.actualSpec.dtype dtype
+            model.model.layers.foldlM (fun _ i layer =>
+              match cfg.isFullAttentionLayer i, layer.mixer with
+              | false, .linear linear => LeanTest.assertEqual linear.conv1d_bias.actualSpec.dtype dtype
+              | true, .full _ => pure ()) ()
             let ids := (Tensor.fromInt64Array #[1, 2, 3]).reshape #[1, 3]
             let logits := model.forward cfg ids
             LeanTest.assertEqual logits.actualSpec.dtype dtype

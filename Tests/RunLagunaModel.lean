@@ -268,14 +268,14 @@ private def baseIds : Array Int64 :=
 selected set even when differently sized BF16 matmuls perturb the scores.
 Only selection is stabilized: the distinct expert weights and input-dependent
 routing weights still participate in every cache comparison. -/
-private def mapMoeM {m : Type → Type} [Monad m] {cfg : Config} {b : Bool}
+private def mapMoeM {m : Type → Type} [Monad m] {cfg : Config}
     (f : LagunaSparseMoeBlock (device := device) (dtype := dtype) cfg → m (LagunaSparseMoeBlock (device := device) (dtype := dtype) cfg)) :
-    LagunaFfn (device := device) cfg dtype b → m (LagunaFfn (device := device) cfg dtype b)
-  | .moe block => .moe <$> f block
-  | .dense mlp => pure (.dense mlp)
+    {b : Bool} → LagunaFfn (device := device) cfg dtype b → m (LagunaFfn (device := device) cfg dtype b)
+  | true, .moe block => .moe <$> f block
+  | false, .dense mlp => pure (.dense mlp)
 
 private def withStableRoutes (cfg : Config) (m : LagunaForCausalLM (device := device) cfg dtype) : LagunaForCausalLM (device := device) cfg dtype :=
-  { m with model := { m.model with layers := m.model.layers.map fun layer =>
+  { m with model := { m.model with layers := m.model.layers.map fun _ layer =>
       { layer with ffn := Id.run <| mapMoeM (m := Id) (fun moe =>
           let bias : Tensor { shape := #[cfg.num_experts], device := device, dtype := .Float32 } := Tensor.reshape
             (Tensor.mulScalar (floatDynamic ((Tensor.arange cfg.num_experts).to moe.router.weight.2.device)) 2.0)
@@ -287,7 +287,7 @@ rounding, then upcast the entire model. The oracle exercises the same MoE
 weights and routing, including the single-token expert dispatch path. -/
 private def floatReference (cfg : Config) (m : LagunaForCausalLM (device := device) cfg dtype) : IO (LagunaForCausalLM (device := device) cfg .Float32) := do
   let m ← TensorStruct.castTo (LagunaForCausalLM (device := device) cfg .Float32) m
-  let layers ← m.model.layers.mapM fun layer => do
+  let layers ← m.model.layers.mapM fun _ layer => do
     let ffn ← layer.ffn |> mapMoeM fun moe => do
       let p := moe.experts
       let gateProj ← nvfp4.dequantBank p.gatePacked.2 p.gateScale.2 p.gateGlobal.2
@@ -408,33 +408,26 @@ private def runBf16LayerCacheParity (cfg : Config) (device : Device) (lbl : Stri
   let _ := support.down
   let ids : Tensor { shape := #[1, 20], dtype := .Int64, device := device } := mkIds baseIds device
   let tables ← precomputeRotaryTables cfg 20 device
-  let mut inputs : Tensor { shape := #[1, 20, cfg.hidden_size], device := device, dtype := .BFloat16 } := model.embedTokens ids
-  let mut violations : Nat := 0
-  let mut undetected : Nat := 0
+  let inputs0 : Tensor { shape := #[1, 20, cfg.hidden_size], device := device, dtype := .BFloat16 } := model.embedTokens ids
   let fresh := model.model.initCache (batch := 1) cfg 20 device
-  for layerIdx in [:model.model.layers.size] do
-    let some layer := model.model.layers[layerIdx]? |
-      throw <| IO.userError "Missing layer in BF16 cache reference"
+  let (_, violations, undetected) ← model.model.layers.foldlM (fun (inputs, violations, undetected) layerIdx layer => do
     let normalized : Tensor { shape := #[1, 20, cfg.hidden_size], device := device, dtype := .BFloat16 } :=
       ((Tensor.rmsNorm inputs cfg.rms_norm_eps *
         Tensor.broadcastTo layer.input_layernorm.2.toFloat32 #[1, 20, cfg.hidden_size]).toBFloat16)
     let some kv := fresh.kvCaches[layerIdx]? |
       throw <| IO.userError "Missing layer cache in BF16 attention reference"
-    let (count, missed) ← match layer.attnFull, layer.attnSliding with
-      | some attention, _ =>
+    let (count, missed) ← match cfg.isFullAttentionLayer layerIdx, layer.attn with
+      | true, .full attention =>
         let cos : Tensor { shape := #[20, cfg.rotaryDimFull / 2], dtype := .Float32, device := device } := sliceRotaryRows tables.fullCos 0 20
         let sin : Tensor { shape := #[20, cfg.rotaryDimFull / 2], dtype := .Float32, device := device } := sliceRotaryRows tables.fullSin 0 20
         runBf16AttentionCacheParity (rotaryDim := cfg.rotaryDimFull) cfg
           s!"{lbl} layer {layerIdx} full" attention cfg.kvHeadsDivideFull normalized cos sin none kv
-      | _, some attention =>
+      | false, .sliding attention =>
         let cos : Tensor { shape := #[20, cfg.rotaryDimSliding / 2], dtype := .Float32, device := device } := sliceRotaryRows tables.slidingCos 0 20
         let sin : Tensor { shape := #[20, cfg.rotaryDimSliding / 2], dtype := .Float32, device := device } := sliceRotaryRows tables.slidingSin 0 20
         runBf16AttentionCacheParity (rotaryDim := cfg.rotaryDimSliding) cfg
           s!"{lbl} layer {layerIdx} sliding" attention cfg.kvHeadsDivideSliding normalized cos sin (some cfg.sliding_window) kv
-      | _, _ => throw <| IO.userError "Missing attention in BF16 cache reference"
-    violations := violations + count
-    undetected := undetected + missed
-    inputs ← layer.forward cfg inputs tables
+    pure (← layer.forward cfg inputs tables, violations + count, undetected + missed)) (inputs0, 0, 0)
   check (undetected == 0) s!"(a) [{lbl}] every attention layer rejects erased cached history"
   check (violations == 0) s!"(a) [{lbl}] every attention cache output satisfies the BF16 mixed bound ({violations} violations)"
 
@@ -592,21 +585,6 @@ private def runOwnedCacheCheck (device : Device) (bf16 : Bool := false) : IO Uni
     check (maxDiff ≤ tol) s!"(d) [{lbl}] ring decode matches functional cache"
   expectRejected (model.model.initCacheSession (batch := 1) cfg 0 device)
     "session rejects zero capacity"
-
-  -- The first layer successfully writes K/V before this second-layer IO error.
-  -- A failure after mutation must invalidate the session rather than expose
-  -- partially advanced buffers or change the caller's input trainability.
-  let some second := model.model.layers[1]? | throw <| IO.userError "missing second test layer"
-  let broken := { model with model := { model.model with
-    layers := model.model.layers.set! 1 { second with attnFull := none, attnSliding := none } } }
-  let prompt : Tensor { shape := #[1, 5], dtype := .Int64, device := device } := sliceTyped ids 1 0 5
-  let input ← Tensor.parameter (broken.embedTokens prompt)
-  let session ← broken.model.initCacheSession (batch := 1) cfg 20 device
-  expectRejected (broken.prefillSession cfg tables input session)
-    s!"(d) [{lbl}] malformed second layer fails after an earlier cache write"
-  check input.requiresGrad s!"(d) [{lbl}] failed inference preserves caller input trainability"
-  expectRejected session.capacities "partially updated session cannot expose capacities"
-  expectRejected session.fork "partially updated session cannot be forked"
 
 /-- Opt-in timing of identical eight-token decode workloads. Allocation and
 prefill are outside the timer; CUDA is synchronized at both boundaries. -/

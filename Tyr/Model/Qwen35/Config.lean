@@ -232,6 +232,12 @@ def qwen36_35B_A3B : Config := Qwen35Config.qwen36_35B_A3B
 
 def isMoE (cfg : Config) : Bool := Qwen35Config.isMoE cfg
 
+/-- Whether layer `i` uses full attention (otherwise linear attention). -/
+def isFullAttentionLayer (cfg : Config) (i : Nat) : Bool :=
+  match cfg.layer_types.getD i .linearAttention with
+  | .fullAttention => true
+  | .linearAttention => false
+
 def rotaryDim (cfg : Config) : Nat := Qwen35Config.rotaryDim cfg
 
 def rotaryHalfDim (cfg : Config) : Nat := Qwen35Config.rotaryHalfDim cfg
