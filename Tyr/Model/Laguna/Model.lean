@@ -54,6 +54,7 @@ import Tyr.Inference.OwnedKV
 import Std.Sync.Mutex
 import Tyr.TensorStruct
 import Tyr.TensorStruct.DeriveCast
+import Tyr.TensorStruct.Indexed
 import Tyr.Module.Derive
 import Tyr.Model.Qwen.Attention
 import Tyr.Model.Laguna.Config
@@ -442,92 +443,52 @@ end LagunaCacheSession
 
 /-! ## Decoder layer -/
 
-/-- A layer's feed-forward block. A sparse MoE block exists only when the
-    configuration has experts (`cfg.isMoE`); the layers listed in
-    `mlp_only_layers` are dense either way. -/
-inductive LagunaFfn (cfg : Config) (dtype : DType := .Float32) : Bool → Type where
-  | dense {moe : Bool} : LagunaMLP (device := device) (dtype := dtype) cfg → LagunaFfn cfg dtype moe
-  | moe : LagunaSparseMoeBlock (device := device) (dtype := dtype) cfg → LagunaFfn cfg dtype true
+/-- A layer's feed-forward block: the sparse MoE block on MoE layers
+    (`Config.isMoELayer`), the dense MLP otherwise. -/
+abbrev LagunaFfn (cfg : Config) (dtype : DType := .Float32) :=
+  Select (LagunaMLP (device := device) (dtype := dtype) cfg)
+    (LagunaSparseMoeBlock (device := device) (dtype := dtype) cfg)
 
-namespace LagunaFfn
+/-- A layer's attention: full attention on full-attention layers
+    (`Config.isFullAttentionLayer`), sliding-window attention otherwise. -/
+abbrev LagunaMixer (cfg : Config) (dtype : DType := .Float32) :=
+  Select (LagunaAttention (device := device) (dtype := dtype) cfg cfg.num_attention_heads_sliding)
+    (LagunaAttention (device := device) (dtype := dtype) cfg cfg.num_attention_heads)
 
-instance {device : Device} {cfg : Config} {dtype : DType} {b : Bool} :
-    TensorStruct (LagunaFfn (device := device) cfg dtype b) where
-  map f
-    | .dense m => .dense (TensorStruct.map f m)
-    | .moe m => .moe (TensorStruct.map f m)
-  mapM f
-    | .dense m => return .dense (← TensorStruct.mapM f m)
-    | .moe m => return .moe (← TensorStruct.mapM f m)
-  zipWith f
-    | .dense x, .dense y => .dense (TensorStruct.zipWith f x y)
-    | .moe x, .moe y => .moe (TensorStruct.zipWith f x y)
-    | x, _ => x
-  fold f init
-    | .dense m => TensorStruct.fold f init m
-    | .moe m => TensorStruct.fold f init m
+@[match_pattern] abbrev LagunaFfn.dense {device : Device} {cfg : Config} {dtype : DType}
+    (mlp : LagunaMLP (device := device) (dtype := dtype) cfg) : LagunaFfn (device := device) cfg dtype false :=
+  .ofFalse mlp
 
-instance {P : StaticSpec → Prop} {device : Device} {cfg : Config} {dtype : DType} {b : Bool}
-    [TensorStructFor P (LagunaMLP (device := device) (dtype := dtype) cfg)]
-    [TensorStructFor P (LagunaSparseMoeBlock (device := device) (dtype := dtype) cfg)] :
-    TensorStructFor P (LagunaFfn (device := device) cfg dtype b) where
-  map f
-    | .dense m => .dense (TensorStructFor.map f m)
-    | .moe m => .moe (TensorStructFor.map f m)
-  mapM f
-    | .dense m => return .dense (← TensorStructFor.mapM f m)
-    | .moe m => return .moe (← TensorStructFor.mapM f m)
-  zipWith f
-    | .dense x, .dense y => .dense (TensorStructFor.zipWith f x y)
-    | .moe x, .moe y => .moe (TensorStructFor.zipWith f x y)
-    | x, _ => x
-  fold f init
-    | .dense m => TensorStructFor.fold f init m
-    | .moe m => TensorStructFor.fold f init m
+@[match_pattern] abbrev LagunaFfn.moe {device : Device} {cfg : Config} {dtype : DType}
+    (moe : LagunaSparseMoeBlock (device := device) (dtype := dtype) cfg) : LagunaFfn (device := device) cfg dtype true :=
+  .ofTrue moe
 
-instance {sourceDevice targetDevice : Device} {cfg : Config} {sourceDType targetDType : DType} {b : Bool}
-    [TensorTreeCast
-      (LagunaMLP (device := sourceDevice) (dtype := sourceDType) cfg)
-      (LagunaMLP (device := targetDevice) (dtype := targetDType) cfg)]
-    [TensorTreeCast
-      (LagunaSparseMoeBlock (device := sourceDevice) (dtype := sourceDType) cfg)
-      (LagunaSparseMoeBlock (device := targetDevice) (dtype := targetDType) cfg)] :
-    TensorTreeCast (LagunaFfn (device := sourceDevice) cfg sourceDType b)
-      (LagunaFfn (device := targetDevice) cfg targetDType b) where
-  castAt path
-    | .dense m => return .dense (← TensorTreeCast.castAt path m)
-    | .moe m => return .moe (← TensorTreeCast.castAt path m)
+@[match_pattern] abbrev LagunaMixer.sliding {device : Device} {cfg : Config} {dtype : DType}
+    (a : LagunaAttention (device := device) (dtype := dtype) cfg cfg.num_attention_heads_sliding) :
+    LagunaMixer (device := device) cfg dtype false :=
+  .ofFalse a
 
-/-- Run the action for the block this layer gets: the MoE block when the
-    configuration has experts and the layer is not dense-only. -/
-def build {m : Type → Type} [Monad m] (cfg : Config) (denseOnly : Bool)
-    (dense : m (LagunaMLP (device := device) (dtype := dtype) cfg))
-    (moe : m (LagunaSparseMoeBlock (device := device) (dtype := dtype) cfg)) :
-    m (LagunaFfn (device := device) cfg dtype cfg.isMoE) :=
-  match cfg.isMoE, denseOnly with
-  | true, false => .moe <$> moe
-  | _, _ => .dense <$> dense
+@[match_pattern] abbrev LagunaMixer.full {device : Device} {cfg : Config} {dtype : DType}
+    (a : LagunaAttention (device := device) (dtype := dtype) cfg cfg.num_attention_heads) :
+    LagunaMixer (device := device) cfg dtype true :=
+  .ofTrue a
 
-def forward {batch seq : Nat}
-    (cfg : Config)
-    (ffn : LagunaFfn (device := device) cfg dtype cfg.isMoE)
+def LagunaFfn.forward {batch seq : Nat}
+    (cfg : Config) (layerIdx : Nat)
+    (ffn : LagunaFfn (device := device) cfg dtype (cfg.isMoELayer layerIdx))
     (h : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] })
     : IO (Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] }) :=
-  match hMoE : cfg.isMoE, ffn with
-  | _, .dense m => pure (m.forward h)
-  | true, .moe m => m.forward3d cfg hMoE h
+  match hMoE : cfg.isMoELayer layerIdx, ffn with
+  | false, .dense mlp => pure (mlp.forward h)
+  | true, .moe block => block.forward3d cfg ((Bool.and_eq_true _ _).mp hMoE).1 h
 
-end LagunaFfn
-
-/-- One Laguna decoder layer: RMSNorm → attention → residual → RMSNorm →
-    FFN (dense SwiGLU or sparse MoE) → residual.  Exactly one attention
-    variant (`attnFull`/`attnSliding`) is set per layer. -/
-structure LagunaLayer (cfg : Config) (dtype : DType := .Float32) where
+/-- Laguna decoder layer `layerIdx`: RMSNorm → attention → residual → RMSNorm →
+    FFN → residual. The configuration selects its attention and FFN variants. -/
+structure LagunaLayer (cfg : Config) (dtype : DType := .Float32) (layerIdx : Nat) where
   input_layernorm : SomeDTypeTensor #[cfg.hidden_size] device
-  attnFull : Option (LagunaAttention (device := device) (dtype := dtype) cfg cfg.num_attention_heads) := none
-  attnSliding : Option (LagunaAttention (device := device) (dtype := dtype) cfg cfg.num_attention_heads_sliding) := none
+  attn : LagunaMixer (device := device) cfg dtype (cfg.isFullAttentionLayer layerIdx)
   post_attention_layernorm : SomeDTypeTensor #[cfg.hidden_size] device
-  ffn : LagunaFfn (device := device) cfg dtype cfg.isMoE
+  ffn : LagunaFfn (device := device) cfg dtype (cfg.isMoELayer layerIdx)
   deriving TensorStruct
 
 
@@ -579,136 +540,125 @@ def initSparseMoeBlock (cfg : Config) (device : Device := .CPU) (dtype : DType :
     sharedDownProj := sharedDown
   }
 
-def init (cfg : Config) (layerIdx : Nat) (device : Device := .CPU) (dtype : DType := .Float32) : IO (LagunaLayer (device := device) (dtype := dtype) cfg) := do
+def init (cfg : Config) (layerIdx : Nat) (device : Device := .CPU) (dtype : DType := .Float32) : IO (LagunaLayer (device := device) cfg dtype layerIdx) := do
   let inputNorm ← Tensor.parameter (onesDynamic (device := device) #[cfg.hidden_size])
   let postNorm ← Tensor.parameter (onesDynamic (device := device) #[cfg.hidden_size])
-  let attnFull ←
-    match cfg.layerType layerIdx with
-    | .fullAttention =>
-      let m ← LagunaAttention.init (device := device) (dtype := dtype) cfg cfg.num_attention_heads
-      pure (some m)
-    | .slidingAttention => pure none
-  let attnSliding ←
-    match cfg.layerType layerIdx with
-    | .slidingAttention =>
-      let m ← LagunaAttention.init (device := device) (dtype := dtype) cfg cfg.num_attention_heads_sliding
-      pure (some m)
-    | .fullAttention => pure none
-  let ffn ← LagunaFfn.build cfg (cfg.isDenseMlpLayer layerIdx)
+  let attn ← Select.build (cfg.isFullAttentionLayer layerIdx)
+    (LagunaAttention.init (device := device) (dtype := dtype) cfg cfg.num_attention_heads_sliding)
+    (LagunaAttention.init (device := device) (dtype := dtype) cfg cfg.num_attention_heads)
+  let ffn ← Select.build (cfg.isMoELayer layerIdx)
     (LagunaMLP.init (device := device) (dtype := dtype) cfg)
     (initSparseMoeBlock (device := device) (dtype := dtype) cfg)
   pure {
     input_layernorm := inputNorm.packDType
-    attnFull := attnFull
-    attnSliding := attnSliding
+    attn := attn
     post_attention_layernorm := postNorm.packDType
     ffn := ffn
   }
 
 /-- Uncached full-sequence layer forward. -/
-def forward {batch seq : Nat}
+def forward {batch seq layerIdx : Nat}
     (cfg : Config)
-    (layer : LagunaLayer (device := device) (dtype := dtype) cfg)
+    (layer : LagunaLayer (device := device) cfg dtype layerIdx)
     (x : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] })
     (tables : (LagunaRotaryTables (device := device)))
     : IO (Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] }) := do
   let h1 := rmsNormWeighted3d layer.input_layernorm x cfg.rms_norm_eps
-  let mixed ←
-    match layer.attnFull, layer.attnSliding with
-    | some a, _ =>
+  let mixed :=
+    match cfg.isFullAttentionLayer layerIdx, layer.attn with
+    | true, .full a =>
       let cos : Tensor { device := device, shape := #[seq, cfg.rotaryDimFull / 2], dtype := .Float32 } := sliceRotaryRows tables.fullCos 0 seq
       let sin : Tensor { device := device, shape := #[seq, cfg.rotaryDimFull / 2], dtype := .Float32 } := sliceRotaryRows tables.fullSin 0 seq
-      pure (a.forward (rotaryDim := cfg.rotaryDimFull) cfg cfg.kvHeadsDivideFull h1 cos sin none)
-    | _, some a =>
+      a.forward (rotaryDim := cfg.rotaryDimFull) cfg cfg.kvHeadsDivideFull h1 cos sin none
+    | false, .sliding a =>
       let cos : Tensor { device := device, shape := #[seq, cfg.rotaryDimSliding / 2], dtype := .Float32 } := sliceRotaryRows tables.slidingCos 0 seq
       let sin : Tensor { device := device, shape := #[seq, cfg.rotaryDimSliding / 2], dtype := .Float32 } := sliceRotaryRows tables.slidingSin 0 seq
-      pure (a.forward (rotaryDim := cfg.rotaryDimSliding) cfg cfg.kvHeadsDivideSliding h1 cos sin (some cfg.sliding_window))
-    | _, _ => pure h1
+      a.forward (rotaryDim := cfg.rotaryDimSliding) cfg cfg.kvHeadsDivideSliding h1 cos sin (some cfg.sliding_window)
   let h2 := Tensor.add x mixed
   let h3 := rmsNormWeighted3d layer.post_attention_layernorm h2 cfg.rms_norm_eps
-  let ffn ← layer.ffn.forward cfg h3
+  let ffn ← LagunaFfn.forward cfg layerIdx layer.ffn h3
   pure (Tensor.add h2 ffn)
 
 /-- Batch prefill with KV-cache update (fresh cache; see
     `LagunaAttention.forwardWithCache`). -/
-def forwardWithCache {batch seq cap : Nat}
+def forwardWithCache {batch seq cap layerIdx : Nat}
     (cfg : Config)
-    (layer : LagunaLayer (device := device) (dtype := dtype) cfg)
+    (layer : LagunaLayer (device := device) cfg dtype layerIdx)
     (x : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] })
     (tables : (LagunaRotaryTables (device := device)))
     (cache : LagunaCache (device := device) (dtype := dtype) cfg batch cap)
-    (layerIdx : Nat) (hfit : seq ≤ cap)
+    (hfit : seq ≤ cap)
     : IO (Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] } × LagunaCache (device := device) (dtype := dtype) cfg batch cap) := do
   let h1 := rmsNormWeighted3d layer.input_layernorm x cfg.rms_norm_eps
-  let (mixed, cache') ←
-    match layer.attnFull, layer.attnSliding, cache.kvCaches[layerIdx]? with
-    | some a, _, some kv => do
-      let cos : Tensor { device := device, shape := #[seq, cfg.rotaryDimFull / 2], dtype := .Float32 } := sliceRotaryRows tables.fullCos 0 seq
-      let sin : Tensor { device := device, shape := #[seq, cfg.rotaryDimFull / 2], dtype := .Float32 } := sliceRotaryRows tables.fullSin 0 seq
-      let (out, kv') := a.forwardWithCache (rotaryDim := cfg.rotaryDimFull) cfg cfg.kvHeadsDivideFull h1 cos sin none kv hfit
-      pure (out, { cache with kvCaches := cache.kvCaches.set! layerIdx kv' })
-    | _, some a, some kv => do
-      let cos : Tensor { device := device, shape := #[seq, cfg.rotaryDimSliding / 2], dtype := .Float32 } := sliceRotaryRows tables.slidingCos 0 seq
-      let sin : Tensor { device := device, shape := #[seq, cfg.rotaryDimSliding / 2], dtype := .Float32 } := sliceRotaryRows tables.slidingSin 0 seq
+  let (mixed, cache') :=
+    match cache.kvCaches[layerIdx]? with
+    | none => (h1, cache)
+    | some kv =>
       let (out, kv') :=
-        a.forwardWithCache (rotaryDim := cfg.rotaryDimSliding) cfg cfg.kvHeadsDivideSliding h1 cos sin (some cfg.sliding_window) kv hfit
-      pure (out, { cache with kvCaches := cache.kvCaches.set! layerIdx kv' })
-    | _, _, _ => pure (h1, cache)
+        match cfg.isFullAttentionLayer layerIdx, layer.attn with
+        | true, .full a =>
+          let cos : Tensor { device := device, shape := #[seq, cfg.rotaryDimFull / 2], dtype := .Float32 } := sliceRotaryRows tables.fullCos 0 seq
+          let sin : Tensor { device := device, shape := #[seq, cfg.rotaryDimFull / 2], dtype := .Float32 } := sliceRotaryRows tables.fullSin 0 seq
+          a.forwardWithCache (rotaryDim := cfg.rotaryDimFull) cfg cfg.kvHeadsDivideFull h1 cos sin none kv hfit
+        | false, .sliding a =>
+          let cos : Tensor { device := device, shape := #[seq, cfg.rotaryDimSliding / 2], dtype := .Float32 } := sliceRotaryRows tables.slidingCos 0 seq
+          let sin : Tensor { device := device, shape := #[seq, cfg.rotaryDimSliding / 2], dtype := .Float32 } := sliceRotaryRows tables.slidingSin 0 seq
+          a.forwardWithCache (rotaryDim := cfg.rotaryDimSliding) cfg cfg.kvHeadsDivideSliding h1 cos sin (some cfg.sliding_window) kv hfit
+      (out, { cache with kvCaches := cache.kvCaches.set! layerIdx kv' })
   let h2 := Tensor.add x mixed
   let h3 := rmsNormWeighted3d layer.post_attention_layernorm h2 cfg.rms_norm_eps
-  let ffn ← layer.ffn.forward cfg h3
+  let ffn ← LagunaFfn.forward cfg layerIdx layer.ffn h3
   pure (Tensor.add h2 ffn, cache')
 
 /-- Single-token decode step with KV-cache update. -/
-def forwardStep {batch cap : Nat}
+def forwardStep {batch cap layerIdx : Nat}
     (cfg : Config)
-    (layer : LagunaLayer (device := device) (dtype := dtype) cfg)
+    (layer : LagunaLayer (device := device) cfg dtype layerIdx)
     (x : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.hidden_size] })
     (tables : (LagunaRotaryTables (device := device)))
     (position : Nat) (hpos : position < cap)
     (cache : LagunaCache (device := device) (dtype := dtype) cfg batch cap)
-    (layerIdx : Nat)
     : IO (Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.hidden_size] } × LagunaCache (device := device) (dtype := dtype) cfg batch cap) := do
   let h1 := rmsNormWeighted3d layer.input_layernorm x cfg.rms_norm_eps
-  let (mixed, cache') ←
-    match layer.attnFull, layer.attnSliding, cache.kvCaches[layerIdx]? with
-    | some a, _, some kv => do
-      let cos : Tensor { device := device, shape := #[1, cfg.rotaryDimFull / 2], dtype := .Float32 } := sliceRotaryRows tables.fullCos position 1
-      let sin : Tensor { device := device, shape := #[1, cfg.rotaryDimFull / 2], dtype := .Float32 } := sliceRotaryRows tables.fullSin position 1
-      let (out, kv') := a.forwardStep (rotaryDim := cfg.rotaryDimFull) cfg cfg.kvHeadsDivideFull h1 cos sin none kv position hpos
-      pure (out, { cache with kvCaches := cache.kvCaches.set! layerIdx kv' })
-    | _, some a, some kv => do
-      let cos : Tensor { device := device, shape := #[1, cfg.rotaryDimSliding / 2], dtype := .Float32 } := sliceRotaryRows tables.slidingCos position 1
-      let sin : Tensor { device := device, shape := #[1, cfg.rotaryDimSliding / 2], dtype := .Float32 } := sliceRotaryRows tables.slidingSin position 1
+  let (mixed, cache') :=
+    match cache.kvCaches[layerIdx]? with
+    | none => (h1, cache)
+    | some kv =>
       let (out, kv') :=
-        a.forwardStep (rotaryDim := cfg.rotaryDimSliding) cfg cfg.kvHeadsDivideSliding h1 cos sin (some cfg.sliding_window) kv position hpos
-      pure (out, { cache with kvCaches := cache.kvCaches.set! layerIdx kv' })
-    | _, _, _ => pure (h1, cache)
+        match cfg.isFullAttentionLayer layerIdx, layer.attn with
+        | true, .full a =>
+          let cos : Tensor { device := device, shape := #[1, cfg.rotaryDimFull / 2], dtype := .Float32 } := sliceRotaryRows tables.fullCos position 1
+          let sin : Tensor { device := device, shape := #[1, cfg.rotaryDimFull / 2], dtype := .Float32 } := sliceRotaryRows tables.fullSin position 1
+          a.forwardStep (rotaryDim := cfg.rotaryDimFull) cfg cfg.kvHeadsDivideFull h1 cos sin none kv position hpos
+        | false, .sliding a =>
+          let cos : Tensor { device := device, shape := #[1, cfg.rotaryDimSliding / 2], dtype := .Float32 } := sliceRotaryRows tables.slidingCos position 1
+          let sin : Tensor { device := device, shape := #[1, cfg.rotaryDimSliding / 2], dtype := .Float32 } := sliceRotaryRows tables.slidingSin position 1
+          a.forwardStep (rotaryDim := cfg.rotaryDimSliding) cfg cfg.kvHeadsDivideSliding h1 cos sin (some cfg.sliding_window) kv position hpos
+      (out, { cache with kvCaches := cache.kvCaches.set! layerIdx kv' })
   let h2 := Tensor.add x mixed
   let h3 := rmsNormWeighted3d layer.post_attention_layernorm h2 cfg.rms_norm_eps
-  let ffn ← layer.ffn.forward cfg h3
+  let ffn ← LagunaFfn.forward cfg layerIdx layer.ffn h3
   pure (Tensor.add h2 ffn, cache')
 
-private def forwardOwned {batch seq cap : Nat}
-    (cfg : Config) (layer : LagunaLayer (device := device) (dtype := dtype) cfg)
+private def forwardOwned {batch seq cap layerIdx : Nat}
+    (cfg : Config) (layer : LagunaLayer (device := device) cfg dtype layerIdx)
     (x : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] }) (tables : (LagunaRotaryTables (device := device)))
     (position : Nat) (prefill : Bool) (hDecode : prefill = false → seq = 1) (kv : LagunaAttention.KVCache (device := device) (dtype := dtype) cfg batch cap)
     : IO (Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] } × LagunaAttention.KVCache (device := device) (dtype := dtype) cfg batch cap) := do
   let h1 := rmsNormWeighted3d layer.input_layernorm x cfg.rms_norm_eps
-  let (mixed, kv') ← match layer.attnFull, layer.attnSliding with
-    | some a, _ =>
+  let (mixed, kv') ← match cfg.isFullAttentionLayer layerIdx, layer.attn with
+    | true, .full a =>
       let cos : Tensor { device := device, shape := #[seq, cfg.rotaryDimFull / 2], dtype := .Float32 } := sliceRotaryRows tables.fullCos position seq
       let sin : Tensor { device := device, shape := #[seq, cfg.rotaryDimFull / 2], dtype := .Float32 } := sliceRotaryRows tables.fullSin position seq
       a.forwardOwned (rotaryDim := cfg.rotaryDimFull) cfg cfg.kvHeadsDivideFull h1 cos sin none prefill position hDecode kv
-    | _, some a =>
+    | false, .sliding a =>
       let cos : Tensor { device := device, shape := #[seq, cfg.rotaryDimSliding / 2], dtype := .Float32 } := sliceRotaryRows tables.slidingCos position seq
       let sin : Tensor { device := device, shape := #[seq, cfg.rotaryDimSliding / 2], dtype := .Float32 } := sliceRotaryRows tables.slidingSin position seq
       a.forwardOwned (rotaryDim := cfg.rotaryDimSliding) cfg cfg.kvHeadsDivideSliding h1 cos sin
         (some cfg.sliding_window) prefill position hDecode kv
-    | _, _ => throw <| IO.userError "Laguna cache session requires attention in every layer"
   let h2 := Tensor.add x mixed
   let h3 := rmsNormWeighted3d layer.post_attention_layernorm h2 cfg.rms_norm_eps
-  let ffn ← layer.ffn.forward cfg h3
+  let ffn ← LagunaFfn.forward cfg layerIdx layer.ffn h3
   return (Tensor.add h2 ffn, kv')
 
 end LagunaLayer
@@ -719,7 +669,7 @@ end LagunaLayer
     final RMSNorm. -/
 structure LagunaModel (cfg : Config) (dtype : DType := .Float32) where
   embed_tokens : Tensor { dtype := dtype, device := device, shape := #[cfg.vocab_size, cfg.hidden_size] }
-  layers : Array (LagunaLayer (device := device) (dtype := dtype) cfg)
+  layers : IndexedList (LagunaLayer (device := device) cfg dtype) 0 cfg.num_hidden_layers
   norm : SomeDTypeTensor #[cfg.hidden_size] device
   deriving TensorStruct
 
@@ -731,24 +681,22 @@ def init (cfg : Config) (device : Device := .CPU) (dtype : DType := .Float32) : 
   let _ := floating.down
   let embRaw ← randnDynamic (device := device) (dtype := dtype) #[cfg.vocab_size, cfg.hidden_size]
   let embedTokens ← Tensor.parameter (Tensor.mulScalar embRaw 0.02)
-  let mut layers : Array (LagunaLayer (device := device) (dtype := dtype) cfg) := Array.mkEmpty cfg.num_hidden_layers
-  for i in [:cfg.num_hidden_layers] do
-    layers := layers.push (← LagunaLayer.init (device := device) (dtype := dtype) cfg i)
+  let layers ← IndexedList.ofFnM (fun i => LagunaLayer.init (device := device) (dtype := dtype) cfg i) 0 cfg.num_hidden_layers
   let norm ← Tensor.parameter (onesDynamic (device := device) #[cfg.hidden_size])
   pure { embed_tokens := embedTokens, layers := layers, norm := norm.packDType }
 
 /-- Allocate a fresh per-layer KV cache with capacity `maxLen` on `device`. -/
 def initCache {batch : Nat}
     (cfg : Config)
-    (m : LagunaModel (device := device) (dtype := dtype) cfg)
+    (_m : LagunaModel (device := device) (dtype := dtype) cfg)
     (maxLen : Nat)
     (device : Device)
     [DType.ConstantSupported dtype device]
     (h : 0 < maxLen := by omega)
     : LagunaCache (device := device) (dtype := dtype) cfg batch maxLen :=
   Id.run do
-    let mut caches : Array (LagunaAttention.KVCache (device := device) (dtype := dtype) cfg batch maxLen) := Array.mkEmpty m.layers.size
-    for _ in [:m.layers.size] do
+    let mut caches : Array (LagunaAttention.KVCache (device := device) (dtype := dtype) cfg batch maxLen) := Array.mkEmpty cfg.num_hidden_layers
+    for _ in [:cfg.num_hidden_layers] do
       caches := caches.push (qwen.QwenAttention.initKVCache
         maxLen
         (batch := batch)
@@ -766,9 +714,7 @@ def forward {batch seq : Nat}
     : IO (Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] }) := do
   let x0 : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] } := Tensor.embedding inputIds m.embed_tokens
   let tables ← precomputeRotaryTables cfg seq x0.device
-  let mut h := x0
-  for layer in m.layers do
-    h ← layer.forward cfg h tables
+  let h ← m.layers.foldlM (fun h _ layer => layer.forward cfg h tables) x0
   pure (rmsNormWeighted3d m.norm h cfg.rms_norm_eps)
 
 /-- Batch prefill over embeddings with KV-cache update (fresh cache).
@@ -781,16 +727,7 @@ def forwardWithCache {batch seq cap : Nat}
     (cache : LagunaCache (device := device) (dtype := dtype) cfg batch cap)
     (hfit : seq ≤ cap)
     : IO (Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] } × LagunaCache (device := device) (dtype := dtype) cfg batch cap) := do
-  let mut h := x0
-  let mut c := cache
-  for i in [:m.layers.size] do
-    let layer ←
-      match m.layers[i]? with
-      | some l => pure l
-      | none => throw <| IO.userError s!"missing Laguna layer at index {i}"
-    let (hNext, cNext) ← layer.forwardWithCache cfg h tables c i hfit
-    h := hNext
-    c := cNext
+  let (h, c) ← m.layers.foldlM (fun (h, c) _ layer => layer.forwardWithCache cfg h tables c hfit) (x0, cache)
   return (rmsNormWeighted3d m.norm h cfg.rms_norm_eps, c)
 
 /-- Single-token decode step over one token embedding at absolute `position`. -/
@@ -802,32 +739,23 @@ def forwardStep {batch cap : Nat}
     (position : Nat) (hpos : position < cap)
     (cache : LagunaCache (device := device) (dtype := dtype) cfg batch cap)
     : IO (Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.hidden_size] } × LagunaCache (device := device) (dtype := dtype) cfg batch cap) := do
-  let mut h := tokenEmbed
-  let mut c := cache
-  for i in [:m.layers.size] do
-    let layer ←
-      match m.layers[i]? with
-      | some l => pure l
-      | none => throw <| IO.userError s!"missing Laguna layer at index {i}"
-    let (hNext, cNext) ← layer.forwardStep cfg h tables position hpos c i
-    h := hNext
-    c := cNext
+  let (h, c) ← m.layers.foldlM (fun (h, c) _ layer => layer.forwardStep cfg h tables position hpos c) (tokenEmbed, cache)
   return (rmsNormWeighted3d m.norm h cfg.rms_norm_eps, c)
 
 /-- Allocate an owned inference session. Full layers reserve `maxLen`; sliding
 layers reserve `min maxLen sliding_window`. No cache tensor is publicly exposed. -/
-def initCacheSession {batch : Nat} (cfg : Config) (m : LagunaModel (device := device) (dtype := dtype) cfg)
+def initCacheSession {batch : Nat} (cfg : Config) (_m : LagunaModel (device := device) (dtype := dtype) cfg)
     (maxLen : Nat) (device : Device) : IO (LagunaCacheSession (device := device) (dtype := dtype) cfg batch maxLen) := do
   let support ← dtype.acquireConstantSupport device
   let _ := support.down
   let ⟨hMax⟩ ← if h : 0 < maxLen then pure (PLift.up h) else
     throw <| IO.userError "Laguna cache capacity must be positive"
   have hWindow := cfg.slidingWindowPos
-  if m.layers.isEmpty then
+  if cfg.num_hidden_layers == 0 then
     throw <| IO.userError "Laguna cache session requires at least one layer"
   let mut caches := #[]
-  for layer in m.layers do
-    let capacity := if layer.attnFull.isSome then maxLen else min maxLen cfg.sliding_window
+  for i in [:cfg.num_hidden_layers] do
+    let capacity := if cfg.isFullAttentionLayer i then maxLen else min maxLen cfg.sliding_window
     -- Pure zero/clone calls can be commoned by Lean. Allocate both mutable
     -- buffers through IO, even when they have identical shape and contents.
     have hCapacity : 0 < capacity := by
@@ -857,7 +785,7 @@ private def forwardSession {batch seq maxLen : Nat} (cfg : Config) (m : LagunaMo
     if shape.size != 2 || shape.getD 0 0 < position + seq || shape.getD 1 0 != dim ||
         table.2.device != x.device then
       throw <| IO.userError "Laguna cache rotary table shape, coverage or device mismatch"
-  if cache.kvCaches.size != m.layers.size then
+  if cache.kvCaches.size != cfg.num_hidden_layers then
     throw <| IO.userError "Laguna cache layer count mismatch"
   let ⟨hDecode⟩ ← if h : (prefill = true → position = 0) ∧ (prefill = false → seq = 1) then pure (PLift.up h.2) else
     throw <| IO.userError "Laguna cache expects fresh prefill or single-token decode"
@@ -869,14 +797,10 @@ private def forwardSession {batch seq maxLen : Nat} (cfg : Config) (m : LagunaMo
   let (hidden, updated) ← do
     let m := TensorStruct.detach m
     let tables := tables.detach
-    let mut h := x.detach
-    let mut caches := cache.kvCaches
-    for i in [:m.layers.size] do
-      let some layer := m.layers[i]? | throw <| IO.userError "missing Laguna layer"
+    let (h, caches) ← m.layers.foldlM (fun (h, caches) i layer => do
       let some ⟨n, cached⟩ := caches[i]? | throw <| IO.userError "missing Laguna cache"
       let (next, kv) ← layer.forwardOwned cfg h tables position prefill hDecode cached
-      h := next
-      caches := caches.set! i ⟨n, kv⟩
+      pure (next, caches.set! i ⟨n, kv⟩)) (x.detach, cache.kvCaches)
     pure (rmsNormWeighted3d m.norm h cfg.rms_norm_eps, { kvCaches := caches, position := position + seq : LagunaSessionCache (device := device) (dtype := dtype) cfg batch })
   set (some updated)
   return hidden
