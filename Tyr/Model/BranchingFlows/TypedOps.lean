@@ -25,7 +25,7 @@ def floatDynamic {s : Shape} {d : DType} {dev : Device} (x : Tensor { shape := s
 def bfloatDynamic {s : Shape} {d : DType} {dev : Device} (x : Tensor { shape := s, dtype := d, device := dev }) : Tensor { shape := s, dtype := .BFloat16, device := dev } := x.toBFloat16
 
 def logDynamic {s : Shape} {dev : Device} (x : Tensor { shape := s, dtype, device := dev }) : Tensor { shape := s, dtype, device := dev } := Tensor.log x
-def softplusDynamic {s : Shape} {dev : Device} (x : Tensor { shape := s, dtype, device := dev }) : Tensor { shape := s, dtype, device := dev } := Tensor.ofRaw! "softplusDynamic" (RawTensor.branchingSoftplus x.raw)
+def softplusDynamic {s : Shape} {dev : Device} (x : Tensor { shape := s, dtype, device := dev }) : Tensor { shape := s, dtype, device := dev } := Tensor.ofRaw! (RawTensor.branchingSoftplus x.raw)
 def powDynamic {s : Shape} {dev : Device} (x : Tensor { shape := s, dtype, device := dev }) (n : Float) : Tensor { shape := s, dtype, device := dev } := Tensor.pow x n
 
 def touchTensor {σ : StaticSpec} (t : Tensor σ) : IO Unit := RawTensor.touch t.raw
@@ -34,7 +34,7 @@ def mulTensorScalar! {σ : StaticSpec} {d result : DType} {scalarDevice : Device
     [TensorSpec.Promotes σ.toTensorSpec ⟨#[], d⟩ result]
     (x : Tensor σ) (scalar : Tensor { shape := #[], dtype := d, device := scalarDevice }) :
     Tensor ⟨σ.shape, result, σ.pointwiseDevice ⟨#[], d, scalarDevice⟩⟩ :=
-  Tensor.ofRaw! "BranchingFlows.mulTensorScalar" (RawTensor.mulTensorScalar! x.raw scalar.raw)
+  Tensor.ofRaw! (RawTensor.mulTensorScalar! x.raw scalar.raw)
 
 /-- A tensor learning rate follows rank-aware PyTorch promotion, including
 weak scalar precision. The result is never restored to the input dtype. -/
@@ -56,7 +56,7 @@ def transposeAttention {b s h d : Nat} {dev : Device} (x : Tensor { dtype := dty
 
 def attentionBias! {biasDType : DType} {b h s d : Nat} {dev : Device} (q k v : Tensor { dtype := dtype, shape := #[b, h, s, d], device := dev })
     (bias : Tensor { dtype := biasDType, shape := #[b, h, s, s], device := dev }) : Tensor { dtype := dtype, shape := #[b, h, s, d], device := dev } :=
-  Tensor.ofRaw! "attentionBias" (RawTensor.branchingAttentionBias! q.raw k.raw v.raw bias.raw false)
+  Tensor.ofRaw! (RawTensor.branchingAttentionBias! q.raw k.raw v.raw bias.raw false)
 
 def attentionBias {biasDType : DType} {b h s d : Nat} {dev : Device} (q k v : Tensor { dtype := dtype, shape := #[b, h, s, d], device := dev })
     (bias : Tensor { dtype := biasDType, shape := #[b, h, s, s], device := dev }) : Tensor { dtype := dtype, shape := #[b, h, s, d], device := dev } :=
@@ -69,13 +69,13 @@ def attentionBiasIO {biasDType : DType} {b h s d : Nat} {dev : Device} (q k v : 
   let effective ← IO.ofExcept (Tensor.attentionDropout? dropout training)
   let raw ← RawTensor.branchingAttentionBiasIO q.raw k.raw v.raw bias.raw
     effective causal
-  pure (Tensor.ofRaw! "attentionBiasIO" raw)
+  pure (Tensor.ofRaw! raw)
 
 def fullDynamic (shape : Shape) (value : Float) (requiresGrad : Bool := false) (device : Device := .CPU) (noGrad : requiresGrad = false := by decide) (dtype : DType := .Float32)
     [DType.ConstantSupported dtype device] [DType.RealFloating dtype] : Tensor { dtype := dtype, shape := shape, device } :=
   Tensor.addScalar (zerosDynamic shape requiresGrad device noGrad dtype) value
 
 def binaryCrossEntropySum {s : Shape} {dev : Device} (input target weight : Tensor { dtype := dtype, shape := s, device := dev }) : Tensor { dtype := dtype, shape := #[], device := dev } :=
-  (Tensor.ofRaw! "binaryCrossEntropySum" (RawTensor.branchingBCE input.raw target.raw (some weight.raw) "sum"))
+  (Tensor.ofRaw! (RawTensor.branchingBCE input.raw target.raw (some weight.raw) "sum"))
 
 end torch.branching

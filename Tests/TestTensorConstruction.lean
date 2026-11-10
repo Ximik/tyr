@@ -58,7 +58,7 @@ def privateImplementationBypass (σ : StaticSpec)
 def testAdmissionAndOpaqueAccessors : IO Unit := do
   let raw := RawTensor.zeros #[2] false .CPU
   let spec : StaticSpec := { shape := #[2], dtype := .Float32, device := .CPU }
-  let tensor : Tensor spec := Tensor.ofRaw! "test" raw
+  let tensor : Tensor spec := Tensor.ofRaw! raw
   LeanTest.assertEqual tensor.raw.runtimeShape #[2]
   LeanTest.assertEqual tensor.raw.dtype .Float32
   LeanTest.assertTrue (tensor.raw.device == .CPU)

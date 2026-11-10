@@ -22,7 +22,7 @@ def timestepEmbedding {batch : Nat}
     (t : Tensor { device := device, shape := #[batch], dtype := .Float32 }) (dim : Nat)
     (max_period : Float := 10000.0) (time_factor : Float := 1000.0)
     : Tensor { device := device, shape := #[batch, dim], dtype := .Float32 } :=
-  (Tensor.ofRaw! "timestepEmbedding" (RawTensor.timestepEmbedding t.raw dim max_period time_factor))
+  (Tensor.ofRaw! (RawTensor.timestepEmbedding t.raw dim max_period time_factor))
 
 /-- Modulation output: shift, scale, gate triplets.
     For double blocks: 6 values (2 triplets for img and txt)

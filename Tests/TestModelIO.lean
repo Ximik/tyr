@@ -116,7 +116,7 @@ def testStateDictSimulation : IO Unit := do
         if s' != σ then
           throw $ IO.userError s!"State tensor spec {reprStr s'} does not match the model's {reprStr σ}"
         ref.set rest
-        pure (Tensor.ofRaw! "restore" t.raw)
+        pure (Tensor.ofRaw! t.raw)
     ) model
 
   let loadedParams ← loadFromList stateList params

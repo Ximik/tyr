@@ -90,9 +90,9 @@ namespace SomeDTypeTensor
 
 /-- Admit a native result whose dtype is chosen at runtime: the index takes the
 result's own dtype, and shape and placement must match. -/
-def ofRaw! {shape : Shape} {device : Device} (operation : String) (raw : RawTensor) :
-    SomeDTypeTensor shape device :=
-  ⟨raw.dtype, Tensor.ofRaw! (σ := ⟨shape, raw.dtype, device⟩) operation raw⟩
+def ofRaw! {shape : Shape} {device : Device} (raw : RawTensor)
+    (operation : Lean.Name := by exact decl_name%) : SomeDTypeTensor shape device :=
+  ⟨raw.dtype, Tensor.ofRaw! (σ := ⟨shape, raw.dtype, device⟩) raw operation⟩
 
 /-- Compare exact existential indices before using an operation that requires
 one shared dtype. This returns equality evidence, never a dtype conversion. -/
@@ -184,7 +184,7 @@ def actualSpec {σ : StaticSpec} (t : Tensor σ) : TensorSpec :=
 def ofTensor? {shape : Shape} (dtype : DType) (raw : RawTensor) :
     Option (Tensor { shape, dtype, device := raw.device }) :=
   if raw.runtimeShape == shape && raw.dtype == dtype then
-    some (ofRaw! "ofTensor" raw)
+    some (ofRaw! raw)
   else
     none
 
@@ -192,7 +192,7 @@ def ofTensor {shape : Shape} (dtype : DType) (raw : RawTensor) :
     Except String (Tensor { shape, dtype, device := raw.device }) := do
   TensorSpec.checkShape shape raw.runtimeShape
   TensorSpec.checkDType dtype raw.dtype
-  pure (ofRaw! "ofTensor" raw)
+  pure (ofRaw! raw)
 
 /-- Package a tensor with its full static specification, preserving actual placement. -/
 def toSome {σ : StaticSpec} (tensor : Tensor σ) : Sigma Tensor :=

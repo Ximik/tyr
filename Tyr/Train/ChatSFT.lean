@@ -201,7 +201,7 @@ def maskedCrossEntropy {batch seq vocab : Nat} {d m result : DType} {dev : Devic
     Tensor ⟨#[], (DType.promote d m).sumResult, dev⟩ :=
   match maskedCrossEntropy? logits targets mask with
   | .ok loss => loss
-  | .error message => nativeInvariantFailure s!"maskedCrossEntropy: {message}"
+  | .error message => nativeInvariantFailure s!"{decl_name%}: {message}"
 
 /-! ## Data Preparation -/
 

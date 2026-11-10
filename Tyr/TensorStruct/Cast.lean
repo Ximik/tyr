@@ -51,7 +51,7 @@ private def castTensorAt {σ τ : StaticSpec} (path : String)
     let raw ← if requestedDType.isNone && targetDevice == tensor.raw.device then
         pure tensor.raw
       else RawTensor.convertIO σ.shape tensor.raw targetDevice requestedDType
-    pure (Tensor.ofRaw! "castTo" raw)
+    pure (Tensor.ofRaw! raw)
   catch error =>
     throw <| IO.userError s!"TensorStruct.castTo at {renderPath path}: {error}"
 

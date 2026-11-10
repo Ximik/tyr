@@ -1118,7 +1118,7 @@ private def tensorFloatChild {σ : StaticSpec} (path : VirtualBrownianTree (Tens
     the packed handle (a mismatch panics). -/
 private def tensorPackLike {σ : StaticSpec} (vals : Array Float)
     (h : vals.size = TensorSpec.numelOfShape σ.shape) : Tensor σ :=
-  Tensor.ofRaw! "tensorPackLike" (Tensor.fromFloatArrayShaped vals σ.shape h).raw
+  Tensor.ofRaw! (Tensor.fromFloatArrayShaped vals σ.shape h).raw
 
 instance {σ : StaticSpec} : VirtualBrownianTreeOps (Tensor σ) where
   increment path t0 t1 :=

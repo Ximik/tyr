@@ -237,11 +237,11 @@ private def parseQKVDyn (qDyn kDyn vDyn : RawTensor) : IO (PackedQKV (device := 
   if !(kDyn.device == device && vDyn.device == device) then
     throw <| IO.userError "flashAttnDyn: query, key and value must share a device"
   let q : Tensor { shape := #[batch, nHead, qSeq, headDim], dtype := dtype, device := device } :=
-    Tensor.ofRaw! "flashAttnDyn" qDyn
+    Tensor.ofRaw! qDyn
   let k : Tensor { shape := #[batch, nKvHead, kvSeq, headDim], dtype := dtype, device := device } :=
-    Tensor.ofRaw! "flashAttnDyn" kDyn
+    Tensor.ofRaw! kDyn
   let v : Tensor { shape := #[batch, nKvHead, kvSeq, headDim], dtype := dtype, device := device } :=
-    Tensor.ofRaw! "flashAttnDyn" vDyn
+    Tensor.ofRaw! vDyn
   pure {
     batch := batch
     nHead := nHead
@@ -272,7 +272,7 @@ private def parseMaskDyn
           s!"flashAttnDyn: attn_mask shape mismatch expected=[{batch},{kvSeq}] got=[{gotBatch},{gotKvSeq}]"
       if maskDyn.device != device then
         throw <| IO.userError "flashAttnDyn: attn_mask must share the query's device"
-      pure (some (SomeDTypeTensor.ofRaw! "flashAttnDyn" maskDyn))
+      pure (some (SomeDTypeTensor.ofRaw! maskDyn))
 
 /-- Fully general existential adapter:
     accepts shape-erased 4D raw tensors, validates runtime shapes, dispatches through the

@@ -28,7 +28,7 @@ private structure LoadedCheckpointWeights where
 private def onDevice {s : Shape} {sourceDevice : Device}
     (tensor : Tensor { shape := s, dtype := .Float32, device := sourceDevice }) :
     IO (Tensor { shape := s, dtype := .Float32, device := device }) := do
-  pure (Tensor.ofRaw! "onDevice" (← RawTensor.convertIO s tensor.raw device none))
+  pure (Tensor.ofRaw! (← RawTensor.convertIO s tensor.raw device none))
 
 /-- The configuration of the Kokoro v1 checkpoint (`kokoro_v1.schema.json`). The
     decoder blocks are 1024 channels wide, independent of `max_conv_dim`. -/
