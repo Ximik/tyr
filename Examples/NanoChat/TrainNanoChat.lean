@@ -200,6 +200,7 @@ def runTraining (args : Args) (env : TrainEnvState) : IO Unit := do
         halfHeadDim := 32
         maxSeqLen := 512
         blockSize := 64
+        maxSeqLenPos := by decide
       }
     else
       Config.default

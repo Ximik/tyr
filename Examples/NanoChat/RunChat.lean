@@ -218,6 +218,7 @@ private def buildModelConfig (args : Args) : Except String Config := do
   pure {
     vocabSize := args.vocabSize
     vocabPos := hVocab
+    maxSeqLenPos := by decide
     nLayer := args.modelDepth
     nHead := 16
     halfHeadDim := 32
@@ -226,24 +227,24 @@ private def buildModelConfig (args : Args) : Except String Config := do
     ropeBase := 10000.0
   }
 
+/-- Sample the next token from the last `maxSeqLen` tokens of the context. -/
 private def sampleNextToken {cfg : Config}
     (params : ModdedGPTParams (device := device) cfg)
     (yarn : YarnRotary (device := device) cfg.halfHeadDim cfg.maxSeqLen)
     (temperature : Float)
     (topK : TopK)
-    (context : Array UInt64)
+    (context : Array UInt64) (hContext : 0 < context.size)
     : IO UInt64 := do
-  let ⟨hContext⟩ ← if h : 0 < context.size then pure (PLift.up h) else
-    throw <| IO.userError "Cannot decode from an empty prompt."
-
-  let inputTensor := Tensor.fromInt64Array (context.map (·.toInt64))
-  let inputReshaped := (inputTensor.reshape #[1, context.size]).to device
-  let ⟨hseq⟩ ← if h : context.size ≤ cfg.maxSeqLen then pure (PLift.up h) else
-    throw <| IO.userError s!"context of {context.size} tokens exceeds maxSeqLen {cfg.maxSeqLen}"
+  let window := context.extract (context.size - cfg.maxSeqLen) context.size
+  have hWindow : window.size = min context.size cfg.maxSeqLen := by simp [window]; omega
+  have hseq : window.size ≤ cfg.maxSeqLen := by omega
+  have hWindowPos : 0 < window.size := by have := cfg.maxSeqLenPos; omega
+  let inputTensor := Tensor.fromInt64Array (window.map (·.toInt64))
+  let inputReshaped := (inputTensor.reshape #[1, window.size]).to device
   let logits ← moddedGpt.forward params yarn inputReshaped hseq false
 
   -- Keep the final time step, then view its logits as one sampling row.
-  let lastLogits := Tensor.slice logits 1 (context.size - 1) 1
+  let lastLogits := Tensor.slice logits 1 (window.size - 1) 1
   let rowLogits := lastLogits.reshape #[1, cfg.vocabSize]
   let scaled :=
     if temperature == 1.0 then rowLogits
@@ -259,17 +260,17 @@ private def promptWithMarkers (markers : ChatMarkerIds) (base : Array UInt64) (p
     #[markers.userStart] ++ prompt ++ #[markers.userEnd, markers.assistantStart]
 
 private def generateTokens
-    (promptTokens : Array UInt64)
-    (nextTokenFn : Array UInt64 → IO UInt64)
+    (promptTokens : Array UInt64) (hPrompt : 0 < promptTokens.size)
+    (nextTokenFn : (context : Array UInt64) → 0 < context.size → IO UInt64)
     (maxNewTokens : Nat)
     (eosToken : UInt64)
     : IO (Array UInt64) := do
-  let mut full := promptTokens
+  let mut full : { context : Array UInt64 // 0 < context.size } := ⟨promptTokens, hPrompt⟩
   let mut generated : Array UInt64 := #[]
   for _ in [:maxNewTokens] do
-    let tok ← nextTokenFn full
+    let tok ← nextTokenFn full.1 full.2
     generated := generated.push tok
-    full := full.push tok
+    full := ⟨full.1.push tok, by simp⟩
     if tok == eosToken then
       break
   pure generated
@@ -321,9 +322,9 @@ unsafe def main (rawArgs : List String) : IO UInt32 := do
         promptWithMarkers markers baseCtx promptBody
       else
         promptBody
-    if promptTokens.isEmpty then
+    let ⟨hPrompt⟩ ← if h : 0 < promptTokens.size then pure (PLift.up h) else
       throw <| IO.userError "Prompt encoded to zero tokens."
-    let generated ← generateTokens promptTokens nextTokenFn args.maxNewTokens eosToken
+    let generated ← generateTokens promptTokens hPrompt nextTokenFn args.maxNewTokens eosToken
     let response := decodeFn generated
     if args.showTokens then
       IO.println s!"generated_tokens={generated}"

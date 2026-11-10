@@ -53,6 +53,8 @@ structure Config where
   windowPattern : String := "L"
   /-- Greedy decoding and evaluation pick among `vocabSize` logits; checked when the config is built. -/
   vocabPos : 0 < vocabSize := by decide
+  /-- Generation decodes from the last `maxSeqLen` tokens; checked when the config is built. -/
+  maxSeqLenPos : 0 < maxSeqLen := by decide
   deriving Repr
 
 instance : Lean.ToJson Config where
@@ -68,18 +70,22 @@ instance : Lean.FromJson Config where
     let vocabSize ← j.getObjValAs? Nat "vocabSize"
     let ⟨hVocab⟩ ← if h : 0 < vocabSize then pure (PLift.up h) else
       throw "Invalid model config: vocabSize must be positive"
+    let maxSeqLen ← j.getObjValAs? Nat "maxSeqLen"
+    let ⟨hSeq⟩ ← if h : 0 < maxSeqLen then pure (PLift.up h) else
+      throw "Invalid model config: maxSeqLen must be positive"
     pure {
       vocabSize
       nLayer := ← j.getObjValAs? Nat "nLayer"
       nHead := ← j.getObjValAs? Nat "nHead"
       halfHeadDim := ← j.getObjValAs? Nat "halfHeadDim"
-      maxSeqLen := ← j.getObjValAs? Nat "maxSeqLen"
+      maxSeqLen
       blockSize := ← j.getObjValAs? Nat "blockSize"
       ropeBase := ← j.getObjValAs? Float "ropeBase"
       numValueEmbeds := ← j.getObjValAs? Nat "numValueEmbeds"
       softcapValue := ← j.getObjValAs? Float "softcapValue"
       windowPattern := ← j.getObjValAs? String "windowPattern"
       vocabPos := hVocab
+      maxSeqLenPos := hSeq
     }
 
 /-- Head dimension -/
