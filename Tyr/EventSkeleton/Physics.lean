@@ -112,11 +112,6 @@ def solveLinear? (a : Array (Array Float)) (b : Array Float) :
     out := out.push (((aug[i]!).getD n 0.0) / diag)
   pure out
 
-def solveUnchecked (a : Array (Array Float)) (b : Array Float) : Array Float :=
-  match solveLinear? a b with
-  | .ok x => x
-  | .error _ => Array.replicate b.size 0.0
-
 end DenseLinearAlgebra
 
 /-!

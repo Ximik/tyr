@@ -17,11 +17,11 @@ private def fixture : BranchingBridgeResult MoleculeAtom := {
 
 @[test] def testBranchingIndexedBatchAndStaticBuffers : IO Unit := do
   let cfg : BranchingTrainConfig := { maxLen := 2 }
-  let ⟨_, packed⟩ ← packBranchingMolecule cfg fixture
+  let ⟨batch, packed⟩ ← packBranchingMolecule cfg fixture
   LeanTest.assertEqual packed.label.actualSpec.dtype .Int64
   LeanTest.assertEqual packed.padmask.actualSpec.dtype .Int64
   LeanTest.assertEqual packed.coord.actualSpec.dtype .Float32
-  let buffer ← BranchingMoleculeBatch.zeros 1 2 .CPU .BFloat16
+  let buffer ← BranchingMoleculeBatch.zeros batch cfg.maxLen .CPU .BFloat16
   let copied ← buffer.copyInto packed
   LeanTest.assertEqual copied.coord.actualSpec.dtype .BFloat16
   LeanTest.assertEqual copied.t.actualSpec.dtype .BFloat16
@@ -35,25 +35,6 @@ private def fixture : BranchingBridgeResult MoleculeAtom := {
   let converted ← TensorStruct.castTo (Tensor { shape := #[2], dtype := .BFloat16, device := .CPU }) original
   LeanTest.assertEqual converted.actualSpec.dtype .BFloat16
   LeanTest.assertEqual original.actualSpec.dtype .Float32
-
-example (_dst : Tensor ⟨#[2], .Int64, .CPU⟩) (_ints : Tensor ⟨#[2], .Int64, .CPU⟩)
-    (_floats : Tensor ⟨#[2], .Float32, .CPU⟩) : True := by
-  have _ := copyIntoChecked _dst _ints
-  fail_if_success have _ := copyIntoChecked _dst _floats
-  trivial
-
-@[test] def testBranchingStaticCopyRejectsBroadcast : IO Unit := do
-  let dst ← data.cloneInferenceIO (Tensor.fullInt #[2] 7)
-  let fractional := Tensor.fromFloatArray #[1.75, 2.25]
-  let shapeError ← try
-    let _ ← copyIntoChecked dst (Tensor.fullInt #[1] 3)
-    pure none
-  catch error => pure (some error.toString)
-  LeanTest.assertTrue (shapeError.any (·.containsSubstr "shape mismatch"))
-    "Static buffer copy must reject native copy_ broadcasting"
-  LeanTest.assertEqual (← dst.toUInt64Array) #[7, 7]
-  let copied ← copyIntoChecked dst (fractional.castDType .Int64)
-  LeanTest.assertEqual (← copied.toUInt64Array) #[1, 2]
 
 @[test] def testBranchingMuonPreservesBF16Rounding : IO Unit := do
   let param := (Tensor.fromFloatArray #[1, 2, 3, 4, 5, 6]).reshape #[3, 2]

@@ -290,7 +290,7 @@ int main(int argc, char** argv) {
     require(c64 == static_cast<unsigned>(tyr::lean::DType::Complex64), "ComplexFloat metadata must report Complex64");
     require(c128 == static_cast<unsigned>(tyr::lean::DType::Complex128), "ComplexDouble metadata must report Complex128");
     require(c64 != c128, "Different complex widths must remain distinguishable");
-    phase("checked dtype and device conversions");
+    phase("dtype and device conversions");
     testCombinedConversion(argv[1]);
     std::cout << "Native tensor metadata checks passed (device bounds/platform, Meta rejection, RawTensor dtype and conversion ABI).\n";
     return 0;

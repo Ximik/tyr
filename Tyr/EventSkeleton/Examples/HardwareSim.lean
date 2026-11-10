@@ -970,7 +970,7 @@ private def runWsgPhysics?
   let x0 ← wsgInitialState? scenario directive
   let primitive ←
     (wsgFullPhysicsPrimitiveProvider
-      "hardware_sim Demo WSG full physics provider").primitivesCheckedAt? x0
+      "hardware_sim Demo WSG full physics provider").validPrimitivesAt? x0
   let plantStep := hardwareWsgPlantStep scenario directive x0
   let primitivePlant : FullPlantPrimitivePhysics := {
     step := plantStep
@@ -1006,7 +1006,7 @@ private def runPepperTablePhysics?
   let x0 ← pepperTableInitialState? scenario
   let primitives ←
     (pepperTableFullPhysicsPrimitiveProvider
-      "hardware_sim Demo bell pepper table full physics provider").primitivesCheckedAt? x0
+      "hardware_sim Demo bell pepper table full physics provider").validPrimitivesAt? x0
   let plantStep := pepperTablePlantStep scenario x0
   let primitivePlant : FullPlantPrimitivePhysics := {
     step := plantStep

@@ -273,9 +273,9 @@ def testBushingFullPhysicsProviderRecomputesFromCurrentState : IO Unit := do
     qBdot := 0.25
   }
 
-  let primitive0 ← assertOk (provider.primitivesCheckedAt? x0)
+  let primitive0 ← assertOk (provider.validPrimitivesAt? x0)
     "four-bar bushing provider at default state"
-  let primitive1 ← assertOk (provider.primitivesCheckedAt? x1)
+  let primitive1 ← assertOk (provider.validPrimitivesAt? x1)
     "four-bar bushing provider at perturbed state"
   let result0 ← assertOk (provider.solveAt? x0 5456)
     "four-bar bushing provider solve at default state"

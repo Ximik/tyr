@@ -350,7 +350,7 @@ def testFullPhysicsPrimitiveProviderRecomputesModeAndMotorInput :
   let constraintsSnapshot := physicsState params 3.0
   let constraintsStep := constraintsSnapshot.step
   let constraintsPrimitives ← assertOk
-    (provider.primitivesCheckedAt? constraintsSnapshot)
+    (provider.validPrimitivesAt? constraintsSnapshot)
     "Strandbeest constraints provider primitives"
   LeanTest.assertTrue
     (approx constraintsStep.actuation[0]! ((params.motor).torque 3.0) 1.0e-9)
@@ -365,7 +365,7 @@ def testFullPhysicsPrimitiveProviderRecomputesModeAndMotorInput :
   LeanTest.assertEqual constraintsPrimitives.generalizedForceContributions.size 0
     "Constraints mode provider should not emit bushing generalized-force contributions"
   let defaultPrimitives ← assertOk
-    (provider.primitivesCheckedAt? (physicsState params 0.0))
+    (provider.validPrimitivesAt? (physicsState params 0.0))
     "Strandbeest default motor provider primitives"
   LeanTest.assertTrue
     (Float.abs
@@ -411,7 +411,7 @@ def testFullPhysicsPrimitiveProviderRecomputesModeAndMotorInput :
     "Bushing provider solve should expose the summed loop-closure force"
 
   let badMsg ← assertError
-    (provider.primitivesCheckedAt? (physicsState params (0.0 / 0.0)))
+    (provider.validPrimitivesAt? (physicsState params (0.0 / 0.0)))
     "Strandbeest provider malformed measured velocity"
   LeanTest.assertTrue (badMsg.contains "measured motor velocity")
     s!"Malformed measured motor velocity should fail at provider validation, got {badMsg}"

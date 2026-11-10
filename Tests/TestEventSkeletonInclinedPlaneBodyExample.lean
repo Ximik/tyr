@@ -192,10 +192,10 @@ def testFullPhysicsPrimitiveProviderRecomputesDynamicSupportAndBodyType :
   let contact := impactingSphereState params
 
   let airbornePrimitive ← assertOk
-    (provider.primitivesCheckedAt? airborne)
+    (provider.validPrimitivesAt? airborne)
     "inclined plane provider primitive at airborne state"
   let contactPrimitive ← assertOk
-    (provider.primitivesCheckedAt? contact)
+    (provider.validPrimitivesAt? contact)
     "inclined plane provider primitive at contact state"
   let airborneSupport ← assertOk
     (provider.supportAt? airborne)
@@ -234,7 +234,7 @@ def testFullPhysicsPrimitiveProviderRecomputesDynamicSupportAndBodyType :
     "inclined plane block provider recompute test"
   let blockState := blockFirstCornerContactState blockParams
   let blockPrimitive ← assertOk
-    (blockProvider.primitivesCheckedAt? blockState)
+    (blockProvider.validPrimitivesAt? blockState)
     "inclined plane provider primitive for block body"
   let blockSupport ← assertOk
     (blockProvider.supportAt? blockState)
@@ -253,7 +253,7 @@ def testFullPhysicsPrimitiveProviderRecomputesDynamicSupportAndBodyType :
 
   let badState := { contact with wx := 1.0 / 0.0 }
   let msg ← assertError
-    (provider.primitivesCheckedAt? badState)
+    (provider.validPrimitivesAt? badState)
     "inclined plane provider malformed state"
   LeanTest.assertTrue (msg.contains "state")
     s!"Malformed inclined-plane state should fail at provider validation, got {msg}"

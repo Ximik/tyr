@@ -162,17 +162,17 @@ private def scalarData : SaltationData := {
   let largeReset := { scalarData with resetJac := #[#[1.0e308]], a := #[0.0] }
   assertRejected (largeReset.reverseState? #[2.0]) "Overflowing reset contraction"
 
-@[test] def testSaltationCheckedFieldsAndOptionalZeros : IO Unit := do
+@[test] def testSaltationValidatedFieldsAndOptionalZeros : IO Unit := do
   assertRejected
     (SaltationData.mkFromFields? #[#[1.0]] #[1.0] #[1.0, 0.0] #[1.0])
-    "Checked fields reject truncated pre-event vector field"
+    "Validated fields reject truncated pre-event vector field"
   assertRejected
     (SaltationData.mkFromFields? #[#[1.0]] #[1.0] #[1.0] #[1.0, 0.0])
-    "Checked fields reject extra post-event vector field entries"
+    "Validated fields reject extra post-event vector field entries"
   assertRejected
     (SaltationData.mkFromFields? #[#[1.0]] #[1.0] #[1.0] #[1.0]
       (resetTime := #[0.0, 0.0]))
-    "Checked fields reject mismatched reset time derivative"
+    "Validated fields reject mismatched reset time derivative"
   let data : SaltationData := {
     resetJac := #[#[2.0], #[3.0]], guardGrad := #[1.0], a := #[1.0, 0.0], gamma := 1.0,
     costThetaGrad := #[2.0, 3.0]
@@ -183,9 +183,9 @@ private def scalarData : SaltationData := {
       assertArrayApprox theta #[2.0, 3.0] 1e-12 "Omitted parameter terms are zeros"
   | _, _ => LeanTest.fail "Valid rectangular resets and optional zeros should be accepted"
   match SaltationData.mkFromFields? #[#[2.0]] #[1.0] #[1.0] #[3.0] with
-  | .error msg => LeanTest.fail s!"Valid checked fields rejected: {msg}"
-  | .ok checked =>
-      assertArrayApprox checked.a #[1.0] 1e-12 "Checked field flow correction"
-      LeanTest.assertTrue (approx checked.gamma 1.0 1e-12) "Checked field gamma"
+  | .error msg => LeanTest.fail s!"Valid fields rejected: {msg}"
+  | .ok validated =>
+      assertArrayApprox validated.a #[1.0] 1e-12 "Validated field flow correction"
+      LeanTest.assertTrue (approx validated.gamma 1.0 1e-12) "Validated field gamma"
 
 end Tests.EventSkeletonSaltation

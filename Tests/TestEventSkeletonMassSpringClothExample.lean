@@ -332,9 +332,9 @@ def testFullPhysicsPrimitiveProviderRecomputesClothState : IO Unit := do
       4 #[0.2, -0.1, 0.3]
   let x1 : ClothState := { q := saggedQ, v := movingV }
 
-  let primitive0 ← assertOk (provider.primitivesCheckedAt? x0)
+  let primitive0 ← assertOk (provider.validPrimitivesAt? x0)
     "cloth provider primitive at rest"
-  let primitive1 ← assertOk (provider.primitivesCheckedAt? x1)
+  let primitive1 ← assertOk (provider.validPrimitivesAt? x1)
     "cloth provider primitive after sagging center particle"
   let result1 ← assertOk (provider.solveAt? x1 4905)
     "cloth provider solve after sagging center particle"

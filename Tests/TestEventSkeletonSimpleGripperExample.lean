@@ -254,10 +254,10 @@ def testSimpleGripperProvidersRecomputeContactsAndTimedActuation : IO Unit := do
     "simple gripper timed full physics provider test"
 
   let rawInitial ← assertOk
-    (rawProvider.candidatesCheckedAt? x0 (some 3))
+    (rawProvider.validCandidatesAt? x0 (some 3))
     "raw simple gripper candidates at initial state"
   let rawClosing ← assertOk
-    (rawProvider.candidatesCheckedAt? closing (some 3))
+    (rawProvider.validCandidatesAt? closing (some 3))
     "raw simple gripper candidates at closing state"
   LeanTest.assertEqual rawInitial.candidates.size 16
     "Raw provider should expose one candidate per generated ring pad"
@@ -277,7 +277,7 @@ def testSimpleGripperProvidersRecomputeContactsAndTimedActuation : IO Unit := do
     s!"Closing provider state should produce penetrating candidates, got {closingMin}"
 
   let reducedInitial ← assertOk
-    (reducedProvider.candidatesCheckedAt? x0 (some 2))
+    (reducedProvider.validCandidatesAt? x0 (some 2))
     "coupler-reduced candidates at initial state"
   let reducedSupport ← assertOk
     (reducedProvider.supportAt? closing (.threshold p.penetrationAllowance)
@@ -291,10 +291,10 @@ def testSimpleGripperProvidersRecomputeContactsAndTimedActuation : IO Unit := do
 
   let quarterPeriod := 1.0 / (4.0 * p.frequency)
   let primitive0 ← assertOk
-    (fullProvider.primitivesCheckedAt? (timedState p x0 0.0))
+    (fullProvider.validPrimitivesAt? (timedState p x0 0.0))
     "timed full-physics provider at t=0"
   let primitiveQuarter ← assertOk
-    (fullProvider.primitivesCheckedAt? (timedState p x0 quarterPeriod))
+    (fullProvider.validPrimitivesAt? (timedState p x0 quarterPeriod))
     "timed full-physics provider at quarter period"
   assertArrayNear primitive0.actuationForces
     #[0.0, (gripperCoupler p).gearRatio * gripActuationForce p] 1.0e-12

@@ -530,10 +530,10 @@ def testFullPhysicsPrimitiveProviderRecomputesStateAndInput : IO Unit := do
   let u1 : AcrobotInput := { tau := 1.7 }
 
   let primitive0 ← assertOk
-    (provider.primitivesCheckedAt? (physicsState x0 u0))
+    (provider.validPrimitivesAt? (physicsState x0 u0))
     "acrobot provider primitive at default state and input"
   let primitive1 ← assertOk
-    (provider.primitivesCheckedAt? (physicsState x1 u1))
+    (provider.validPrimitivesAt? (physicsState x1 u1))
     "acrobot provider primitive at moved state and input"
   let result1 ← assertOk
     (provider.solveAt? (physicsState x1 u1) 5258)
@@ -561,7 +561,7 @@ def testFullPhysicsPrimitiveProviderRecomputesStateAndInput : IO Unit := do
 
   let badState : AcrobotState := { x1 with theta2dot := 1.0 / 0.0 }
   let msg ← assertError
-    (provider.primitivesCheckedAt? (physicsState badState u1))
+    (provider.validPrimitivesAt? (physicsState badState u1))
     "acrobot provider malformed state"
   LeanTest.assertTrue (msg.contains "state")
     s!"Malformed Acrobot state should fail at provider validation, got {msg}"

@@ -80,26 +80,23 @@ def zeros (batch maxLen : Nat) (device : Device) (dtype : DType := .Float32) :
   pure b
 
 /-- Return a buffer batch containing the freshly packed batch. Retained
-destination aliases preserve their values. The batch
-    and maxLen indices may differ at the type level (the packed batch carries
-    existentials / structure projections); runtime shapes must match. Float
-    fields are explicitly cast to the buffer dtype for BF16 staging; integral
-    fields must already match the destination dtype. -/
-def copyInto {source : DType} {b1 b2 m1 m2 : Nat}
-    (dst : BranchingMoleculeBatch (dtype := dtype) (device := device) b1 m1)
-    (src : BranchingMoleculeBatch (dtype := source) (device := device) b2 m2) :
-    IO (BranchingMoleculeBatch (dtype := dtype) (device := device) b1 m1) := do
+destination aliases preserve their values. Float fields are explicitly cast to
+the buffer dtype for BF16 staging; integral fields already match. -/
+def copyInto {source : DType} {batch maxLen : Nat}
+    (dst : BranchingMoleculeBatch (dtype := dtype) (device := device) batch maxLen)
+    (src : BranchingMoleculeBatch (dtype := source) (device := device) batch maxLen) :
+    IO (BranchingMoleculeBatch (dtype := dtype) (device := device) batch maxLen) := do
   return {
-    t := ← copyIntoChecked dst.t (Tensor.castDType src.t dtype)
-    coord := ← copyIntoChecked dst.coord (Tensor.castDType src.coord dtype)
-    coordAnchor := ← copyIntoChecked dst.coordAnchor (Tensor.castDType src.coordAnchor dtype)
-    label := ← copyIntoChecked dst.label src.label
-    labelAnchor := ← copyIntoChecked dst.labelAnchor src.labelAnchor
-    labelLossScale := ← copyIntoChecked dst.labelLossScale (Tensor.castDType src.labelLossScale dtype)
-    padmask := ← copyIntoChecked dst.padmask src.padmask
-    flowmask := ← copyIntoChecked dst.flowmask src.flowmask
-    splitsTarget := ← copyIntoChecked dst.splitsTarget (Tensor.castDType src.splitsTarget dtype)
-    delTarget := ← copyIntoChecked dst.delTarget (Tensor.castDType src.delTarget dtype) }
+    t := ← Tensor.copyInto dst.t (Tensor.castDType src.t dtype)
+    coord := ← Tensor.copyInto dst.coord (Tensor.castDType src.coord dtype)
+    coordAnchor := ← Tensor.copyInto dst.coordAnchor (Tensor.castDType src.coordAnchor dtype)
+    label := ← Tensor.copyInto dst.label src.label
+    labelAnchor := ← Tensor.copyInto dst.labelAnchor src.labelAnchor
+    labelLossScale := ← Tensor.copyInto dst.labelLossScale (Tensor.castDType src.labelLossScale dtype)
+    padmask := ← Tensor.copyInto dst.padmask src.padmask
+    flowmask := ← Tensor.copyInto dst.flowmask src.flowmask
+    splitsTarget := ← Tensor.copyInto dst.splitsTarget (Tensor.castDType src.splitsTarget dtype)
+    delTarget := ← Tensor.copyInto dst.delTarget (Tensor.castDType src.delTarget dtype) }
 
 /-- Force every constructed field eagerly (see `touchTensor`). -/
 def eval {batch maxLen : Nat}
