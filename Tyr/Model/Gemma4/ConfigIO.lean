@@ -38,31 +38,37 @@ def Config.parseJson (j : Json) (d : Config := Config.gemma4_E4B) : Except Strin
   let hidden ← fieldD? textCfg "hidden_size" d.hidden_size
   let heads ← fieldD? textCfg "num_attention_heads" d.num_attention_heads
   let kvHeads ← fieldD? textCfg "num_key_value_heads" d.num_key_value_heads
-  let globalKVHeads ← fieldD? textCfg "num_global_key_value_heads" d.num_global_key_value_heads
+  let globalKVHeads : FullSize ← match ← field? textCfg "num_global_key_value_heads" with
+    | none => pure d.num_global_key_value_heads
+    | some n => pure (if h : 0 < n then .distinct ⟨n, h⟩ else .same)
   let ⟨hHeads⟩ ← if h : 0 < heads ∧ 0 < kvHeads then pure (PLift.up h) else
     throw s!"Invalid Gemma4 config: num_attention_heads={heads} and num_key_value_heads={kvHeads} must be positive"
   let ⟨hSliding⟩ ← if h : kvHeads ∣ heads then pure (PLift.up h) else
     throw s!"Invalid Gemma4 config: num_attention_heads ({heads}) must be divisible by num_key_value_heads ({kvHeads})"
-  let ⟨hFull⟩ ← if h : (if globalKVHeads == 0 then kvHeads else globalKVHeads) ∣ heads then pure (PLift.up h) else
-    throw s!"Invalid Gemma4 config: num_attention_heads ({heads}) must be divisible by num_global_key_value_heads ({globalKVHeads})"
+  let ⟨hFull⟩ ← if h : globalKVHeads.value kvHeads ∣ heads then pure (PLift.up h) else
+    throw s!"Invalid Gemma4 config: num_attention_heads ({heads}) must be divisible by num_global_key_value_heads ({globalKVHeads.value kvHeads})"
   let headDim ← match ← field? textCfg "head_dim" with
     | some headDim => pure headDim
     | none =>
       if heads ∣ hidden then pure (hidden / heads)
       else throw s!"Invalid Gemma4 config: without head_dim, num_attention_heads={heads} must divide hidden_size={hidden}"
-  let globalHeadDim ← fieldD? textCfg "global_head_dim" (2 * d.global_half_head_dim)
-  let fullHeadDim := if globalHeadDim == 0 then headDim else globalHeadDim
-  let ⟨hHeadDims⟩ ← if h : 0 < headDim ∧ 2 ∣ headDim ∧ 2 ∣ (if globalHeadDim == 0 then headDim else globalHeadDim) then
-      pure (PLift.up h)
-    else
-      throw s!"Invalid Gemma4 config: head_dim={headDim} must be positive and even, and global_head_dim={globalHeadDim} even"
+  let ⟨hHeadDims⟩ ← if h : 0 < headDim ∧ 2 ∣ headDim then pure (PLift.up h) else
+    throw s!"Invalid Gemma4 config: head_dim={headDim} must be positive and even"
+  let globalHalfHeadDim : FullSize ← match ← field? textCfg "global_head_dim" with
+    | none => pure d.global_half_head_dim
+    | some globalHeadDim =>
+      if hPos : 0 < globalHeadDim then
+        if hEven : globalHeadDim % 2 = 0 then pure (.distinct ⟨globalHeadDim / 2, by omega⟩)
+        else throw s!"Invalid Gemma4 config: global_head_dim={globalHeadDim} must be even"
+      else pure .same
+  let fullHeadDim := 2 * globalHalfHeadDim.value (headDim / 2)
   let factor ← ropeFieldD? textCfg "full_attention" "partial_rotary_factor"
     ((Gemma4Config.fullRotaryDim d).toFloat / (Config.fullHeadDim d).toFloat)
   let fullRotaryDim := (fullHeadDim.toFloat * factor).round.toUInt64.toNat
   unless fullRotaryDim.toFloat == fullHeadDim.toFloat * factor do
     throw s!"Invalid Gemma4 config: partial_rotary_factor={factor} does not select a whole number of the {fullHeadDim} full-layer head channels"
   let ⟨hRotary⟩ ← if h : 0 < fullRotaryDim ∧ 2 ∣ fullRotaryDim ∧
-      fullRotaryDim ≤ (if globalHeadDim == 0 then headDim else globalHeadDim) then pure (PLift.up h) else
+      fullRotaryDim ≤ fullHeadDim then pure (PLift.up h) else
     throw s!"Invalid Gemma4 config: full-layer rotary dim {fullRotaryDim} must be positive, even and at most {fullHeadDim}"
   let slidingWindow ← fieldD? textCfg "sliding_window" d.sliding_window
   let ⟨hWindow⟩ ← if h : 0 < slidingWindow then pure (PLift.up h) else
@@ -130,7 +136,7 @@ def Config.parseJson (j : Json) (d : Config := Config.gemma4_E4B) : Except Strin
     num_key_value_heads := kvHeads
     num_global_key_value_heads := globalKVHeads
     half_head_dim := headDim / 2
-    global_half_head_dim := globalHeadDim / 2
+    global_half_head_dim := globalHalfHeadDim
     sliding_window := slidingWindow
     sliding_rope_theta := slidingTheta
     full_rope_theta := fullTheta
@@ -157,16 +163,8 @@ def Config.parseJson (j : Json) (d : Config := Config.gemma4_E4B) : Except Strin
     headsPos := hHeads
     headDimPos := by omega
     fullRotaryValid := by
-      obtain ⟨_, _, hFullEven⟩ := hHeadDims
       obtain ⟨_, _, hLe⟩ := hRotary
-      constructor
-      · omega
-      · by_cases hg : globalHeadDim = 0
-        · simp [hg] at hLe ⊢; omega
-        · have hg2 : globalHeadDim / 2 ≠ 0 := by
-            have : 2 ∣ globalHeadDim := by simpa [hg] using hFullEven
-            omega
-          simp [hg, hg2] at hLe ⊢; omega
+      exact ⟨by omega, by omega⟩
     slidingWindowPos := hWindow
     layerTypesValid := hLayers
     kvSharing := hSharing
