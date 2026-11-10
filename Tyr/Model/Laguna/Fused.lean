@@ -110,6 +110,6 @@ def lagunaMoeFp4Forward
     upPacked.raw upScale.raw upGlobal.raw
     downPacked.raw downScale.raw downGlobal.raw
     numExperts moeInt hidden
-  pure (Tensor.ofRaw! "lagunaMoeFp4Forward" raw)
+  pure (Tensor.ofRaw! raw)
 
 end torch.laguna

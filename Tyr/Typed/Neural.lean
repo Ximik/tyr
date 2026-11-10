@@ -15,10 +15,10 @@ def copyInto {s : Shape} {d : DType} {dstDevice srcDevice : Device}
   | .error message => throw (IO.userError s!"Tensor.copyInto: {message}")
   | .ok () => pure ()
   let raw ← RawTensor.copyInto dst.raw src.raw
-  pure (Tensor.ofRaw! "copyInto" raw)
+  pure (Tensor.ofRaw! raw)
 
 def castDType! {σ : StaticSpec} (t : Tensor σ) (dtype : DType) : Tensor (σ.withDType dtype) :=
-  Tensor.ofRaw! "castDType" (RawTensor.castDType t.raw dtype)
+  Tensor.ofRaw! (RawTensor.castDType t.raw dtype)
 
 /-- Cast to `dtype`. A conversion the backend does not implement aborts; no value
 can make a supported conversion fail. -/
@@ -39,14 +39,14 @@ def rmsNorm {σ : StaticSpec} (x : Tensor σ) (eps : Float := 1e-6) : Tensor (σ
   let xf := RawTensor.toFloat32 x.raw
   let variance := RawTensor.mean! (RawTensor.mul! xf xf)
     (some #[(σ.shape.size - 1)]) true
-  (Tensor.ofRaw! "rmsNorm" (RawTensor.mul! xf (RawTensor.rsqrt! (RawTensor.addScalar! variance eps))))
+  (Tensor.ofRaw! (RawTensor.mul! xf (RawTensor.rsqrt! (RawTensor.addScalar! variance eps))))
 
 /-- RMS normalization with Float32 accumulation and explicit restoration of the input dtype. -/
 def rmsNormPreserving {σ : StaticSpec} {w : Shape}
     (x : Tensor σ) (weight : Tensor (σ.withShape w)) (eps : Float := 1e-6) : Tensor σ :=
   -- HF checkpoints round the normalized activation before multiplying weights.
   let restored := Tensor.castLike x (rmsNorm x eps)
-  Tensor.ofRaw! "rmsNormPreserving" (RawTensor.mul! restored.raw weight.raw)
+  Tensor.ofRaw! (RawTensor.mul! restored.raw weight.raw)
 
 /-- Package a tensor's shape existentially; this does not erase its shape claim. -/
 def packShape {s : Shape} {d : DType} {dev : Device} (t : Tensor ⟨s, d, dev⟩) :
@@ -58,33 +58,33 @@ the result is admitted at the requested `shape`. -/
 def catMany? {d : DType} {dev : Device}
     (tensors : Array (Sigma (fun shape => Tensor ⟨shape, d, dev⟩)))
     (dim : Nat) (shape : Shape) : Except String (Tensor ⟨shape, d, dev⟩) := do
-  pure (Tensor.ofRaw! "catMany" (← RawTensor.catMany? (tensors.map fun t => t.2.raw) dim))
+  pure (Tensor.ofRaw! (← RawTensor.catMany? (tensors.map fun t => t.2.raw) dim))
 
 /-- `catMany?` without its checks; invalid inputs abort natively. -/
 def catMany! {d : DType} {dev : Device}
     (tensors : Array (Sigma (fun shape => Tensor ⟨shape, d, dev⟩)))
     (dim : Nat) (shape : Shape) : Tensor ⟨shape, d, dev⟩ :=
-  Tensor.ofRaw! "catMany" (RawTensor.catMany! (tensors.map fun t => t.2.raw) dim)
+  Tensor.ofRaw! (RawTensor.catMany! (tensors.map fun t => t.2.raw) dim)
 
 def arange (stop : Nat) : Tensor { shape := #[stop], dtype := .Int64, device := .CPU } :=
-  Tensor.ofRaw! "arange" (RawTensor.arange 0 stop 1)
+  Tensor.ofRaw! (RawTensor.arange 0 stop 1)
 
 def sin! {σ : StaticSpec} (t : Tensor σ) : Tensor σ :=
-  Tensor.ofRaw! "sin" (RawTensor.sin! t.raw)
+  Tensor.ofRaw! (RawTensor.sin! t.raw)
 
 def sin {σ : StaticSpec} (t : Tensor σ)
     (_domain : σ.dtype.isInexact = true := by first | rfl | exact DType.isInexact_of_realFloating | decide) : Tensor σ :=
   sin! t
 
 def cos! {σ : StaticSpec} (t : Tensor σ) : Tensor σ :=
-  Tensor.ofRaw! "cos" (RawTensor.cos! t.raw)
+  Tensor.ofRaw! (RawTensor.cos! t.raw)
 
 def cos {σ : StaticSpec} (t : Tensor σ)
     (_domain : σ.dtype.isInexact = true := by first | rfl | exact DType.isInexact_of_realFloating | decide) : Tensor σ :=
   cos! t
 
 def elu! {σ : StaticSpec} (t : Tensor σ) : Tensor σ :=
-  Tensor.ofRaw! "elu" (RawTensor.elu! t.raw)
+  Tensor.ofRaw! (RawTensor.elu! t.raw)
 
 def elu {σ : StaticSpec} (t : Tensor σ)
     (_domain : σ.dtype.isRealFloating = true := by first | rfl | exact DType.isRealFloating_of_realFloating | decide) : Tensor σ :=
@@ -95,7 +95,7 @@ def elu {σ : StaticSpec} (t : Tensor σ)
 inputs and missing kernels are recoverable errors. -/
 def meanDim! {σ : StaticSpec} (t : Tensor σ) (dim : Nat) (keepdim : Bool := false) :
     Tensor (σ.withShape (reduceShape σ.shape dim keepdim)) :=
-  Tensor.ofRaw! "meanDim" (RawTensor.mean! t.raw (some #[dim]) keepdim)
+  Tensor.ofRaw! (RawTensor.mean! t.raw (some #[dim]) keepdim)
 
 def meanDim {σ : StaticSpec} [DType.Mean σ.dtype] (t : Tensor σ) (dim : Nat) (keepdim : Bool := false)
     (_axis : dim < max 1 σ.shape.size := by first | exact of_decide_eq_true rfl | (simp <;> fail "axis out of range")) :
@@ -121,7 +121,7 @@ def conv2dBias! {batch cin cout height width kh kw : Nat} {d : DType} {dev : Dev
     Tensor ⟨#[batch, cout,
       convExtent height kh stride.1 padding.1 dilation.1,
       convExtent width kw stride.2 padding.2 dilation.2], d, dev⟩ :=
-  Tensor.ofRaw! "conv2dBias" (RawTensor.conv2dBias! input.raw weight.raw bias.raw
+  Tensor.ofRaw! (RawTensor.conv2dBias! input.raw weight.raw bias.raw
     #[stride.1, stride.2] #[padding.1, padding.2] #[dilation.1, dilation.2])
 
 /-- Biased two-dimensional convolution; parameters are (height, width) pairs. -/
@@ -141,11 +141,11 @@ def conv2dBias {batch cin cout height width kh kw : Nat} {d : DType} {dev : Devi
 
 def splitHeads {batch seq heads dim : Nat} {d : DType} {dev : Device}
     (t : Tensor ⟨#[batch, seq, heads, dim], d, dev⟩) : Tensor ⟨#[batch, heads, seq, dim], d, dev⟩ :=
-  Tensor.ofRaw! "splitHeads" (RawTensor.splitHeads t.raw)
+  Tensor.ofRaw! (RawTensor.splitHeads t.raw)
 
 def joinHeads {batch heads seq dim : Nat} {d : DType} {dev : Device}
     (t : Tensor ⟨#[batch, heads, seq, dim], d, dev⟩) : Tensor ⟨#[batch, seq, heads, dim], d, dev⟩ :=
-  Tensor.ofRaw! "joinHeads" (RawTensor.joinHeads t.raw)
+  Tensor.ofRaw! (RawTensor.joinHeads t.raw)
 
 private def attentionCheckIO {α : Type} (operation : String)
     (result : Except String α) : IO α :=
@@ -180,7 +180,7 @@ macro "attention_heads" : tactic => `(tactic| first
 def attention! {batch heads seq dim : Nat} {d : DType} {dev : Device}
     (q k v : Tensor ⟨#[batch, heads, seq, dim], d, dev⟩)
     (causal : Bool := true) : Tensor ⟨#[batch, heads, seq, dim], d, dev⟩ :=
-  Tensor.ofRaw! "attention" (RawTensor.attention! q.raw k.raw v.raw causal)
+  Tensor.ofRaw! (RawTensor.attention! q.raw k.raw v.raw causal)
 
 /-- Zero-dropout attention. -/
 def attention {batch heads seq dim : Nat} {d : DType} {dev : Device} [DType.RealFloating d]
@@ -195,13 +195,13 @@ def attentionIO {batch heads seq dim : Nat} {d : DType} {dev : Device}
   let effective ← attentionCheckIO "attentionIO" (attentionDropout? dropout training)
   let raw ← RawTensor.attentionIO
     q.raw k.raw v.raw effective causal
-  pure (Tensor.ofRaw! "attentionIO" raw)
+  pure (Tensor.ofRaw! raw)
 
 def attentionGQA! {batch heads kvHeads seq dim : Nat} {d : DType} {dev : Device}
     (q : Tensor ⟨#[batch, heads, seq, dim], d, dev⟩)
     (k v : Tensor ⟨#[batch, kvHeads, seq, dim], d, dev⟩)
     (causal : Bool := true) (gqa : Bool := false) : Tensor ⟨#[batch, heads, seq, dim], d, dev⟩ :=
-  Tensor.ofRaw! "attentionGQA" (RawTensor.attentionGQA! q.raw k.raw v.raw causal gqa)
+  Tensor.ofRaw! (RawTensor.attentionGQA! q.raw k.raw v.raw causal gqa)
 
 /-- Zero-dropout grouped-query attention. -/
 def attentionGQA {batch heads kvHeads seq dim : Nat} {d : DType} {dev : Device} [DType.RealFloating d]
@@ -220,14 +220,14 @@ def attentionGQAIO {batch heads kvHeads seq dim : Nat} {d : DType} {dev : Device
   let effective ← attentionCheckIO "attentionGQAIO" (attentionDropout? dropout training)
   let raw ← RawTensor.attentionGQAIO
     q.raw k.raw v.raw effective causal gqa
-  pure (Tensor.ofRaw! "attentionGQAIO" raw)
+  pure (Tensor.ofRaw! raw)
 
 def attentionGQAMask! {batch heads kvHeads seq dim : Nat} {d dm : DType} {dev : Device}
     (q : Tensor ⟨#[batch, heads, seq, dim], d, dev⟩)
     (k v : Tensor ⟨#[batch, kvHeads, seq, dim], d, dev⟩)
     (mask : Tensor ⟨#[batch, seq], dm, dev⟩)
     (causal : Bool := true) (gqa : Bool := false) : Tensor ⟨#[batch, heads, seq, dim], d, dev⟩ :=
-  Tensor.ofRaw! "attentionGQAMask" (RawTensor.attentionGQAMask! q.raw k.raw v.raw mask.raw causal gqa)
+  Tensor.ofRaw! (RawTensor.attentionGQAMask! q.raw k.raw v.raw mask.raw causal gqa)
 
 /-- Zero-dropout grouped-query attention with a key padding mask. -/
 def attentionGQAMask {batch heads kvHeads seq dim : Nat} {d dm : DType} {dev : Device} [DType.RealFloating d]
@@ -248,7 +248,7 @@ def attentionGQAMaskIO {batch heads kvHeads seq dim : Nat} {d dm : DType} {dev :
   let effective ← attentionCheckIO "attentionGQAMaskIO" (attentionDropout? dropout training)
   let raw ← RawTensor.attentionGQAMaskIO
     q.raw k.raw v.raw mask.raw effective causal gqa
-  pure (Tensor.ofRaw! "attentionGQAMaskIO" raw)
+  pure (Tensor.ofRaw! raw)
 
 /-- Gather has the index tensor's shape, and the source tensor's dtype. -/
 def gather {s indicesShape : Shape} {d : DType} {dev : Device}
@@ -257,7 +257,7 @@ def gather {s indicesShape : Shape} {d : DType} {dev : Device}
     (_h : TensorSpec.gatherCompatible s indicesShape dim = true := by
       first | exact of_decide_eq_true rfl | (simp <;> fail "incompatible gather shapes")) :
     Tensor ⟨indicesShape, d, dev⟩ :=
-  (Tensor.ofRaw! "gather" (RawTensor.gather input.raw dim indices.raw))
+  (Tensor.ofRaw! (RawTensor.gather input.raw dim indices.raw))
 
 /-- Masked selection returns an existential vector length, checked against the native result. -/
 def maskedSelect {s : Shape} {d : DType} {dev : Device}
@@ -265,19 +265,19 @@ def maskedSelect {s : Shape} {d : DType} {dev : Device}
     Sigma (fun n => Tensor ⟨#[n], d, dev⟩) :=
   let raw := RawTensor.maskedSelect input.raw mask.raw
   let n := raw.runtimeShape.getD 0 0
-  let result := Tensor.ofRaw! (σ := ⟨#[n], d, dev⟩) "maskedSelect" raw
+  let result := Tensor.ofRaw! (σ := ⟨#[n], d, dev⟩) raw
   ⟨n, result⟩
 
 def maskedScatter {s sourceShape : Shape} {d : DType} {dev : Device}
     (input : Tensor ⟨s, d, dev⟩) (mask : Tensor ⟨s, .Bool, dev⟩)
     (source : Tensor ⟨sourceShape, d, dev⟩) : Tensor ⟨s, d, dev⟩ :=
-  Tensor.ofRaw! "maskedScatter" (RawTensor.maskedScatter input.raw mask.raw source.raw)
+  Tensor.ofRaw! (RawTensor.maskedScatter input.raw mask.raw source.raw)
 
 def attentionGQAQKV! {batch heads kvHeads qSeq kvSeq dim : Nat} {d : DType} {dev : Device}
     (q : Tensor ⟨#[batch, heads, qSeq, dim], d, dev⟩)
     (k v : Tensor ⟨#[batch, kvHeads, kvSeq, dim], d, dev⟩)
     (causal : Bool := false) (gqa : Bool := false) : Tensor ⟨#[batch, heads, qSeq, dim], d, dev⟩ :=
-  Tensor.ofRaw! "attentionGQAQKV" (RawTensor.attentionGQAQKV! q.raw k.raw v.raw causal gqa)
+  Tensor.ofRaw! (RawTensor.attentionGQAQKV! q.raw k.raw v.raw causal gqa)
 
 /-- Zero-dropout grouped-query attention with separate query and key/value lengths. -/
 def attentionGQAQKV {batch heads kvHeads qSeq kvSeq dim : Nat} {d : DType} {dev : Device} [DType.RealFloating d]
@@ -296,7 +296,7 @@ def attentionGQAQKVIO {batch heads kvHeads qSeq kvSeq dim : Nat} {d : DType} {de
   let effective ← attentionCheckIO "attentionGQAQKVIO" (attentionDropout? dropout training)
   let raw ← RawTensor.attentionGQAQKVIO
     q.raw k.raw v.raw effective causal gqa
-  pure (Tensor.ofRaw! "attentionGQAQKVIO" raw)
+  pure (Tensor.ofRaw! raw)
 
 def flashAttention! {batch heads kvHeads qSeq kvSeq dim : Nat} {d : DType} {dev : Device}
     (q : Tensor ⟨#[batch, heads, qSeq, dim], d, dev⟩)
@@ -304,7 +304,7 @@ def flashAttention! {batch heads kvHeads qSeq kvSeq dim : Nat} {d : DType} {dev 
     (mask : Option (SomeDTypeTensor #[batch, kvSeq] dev) := none)
     (causal : Bool := false) (scale : Option Float := none) :
     Tensor ⟨#[batch, heads, qSeq, dim], d, dev⟩ :=
-  Tensor.ofRaw! "flashAttention" (RawTensor.flashAttention!
+  Tensor.ofRaw! (RawTensor.flashAttention!
     q.raw k.raw v.raw (mask.map (fun packed => packed.2.raw)) causal scale gqa)
 
 /-- Zero-dropout FlashAttention. -/
@@ -329,7 +329,7 @@ def flashAttentionIO {batch heads kvHeads qSeq kvSeq dim : Nat} {d : DType} {dev
   let effective ← attentionCheckIO "flashAttentionIO" (attentionDropout? dropout training)
   let raw ← RawTensor.flashAttentionIO
     q.raw k.raw v.raw (mask.map (fun packed => packed.2.raw)) effective causal scale gqa
-  pure (Tensor.ofRaw! "flashAttentionIO" raw)
+  pure (Tensor.ofRaw! raw)
 
 def sliceScatter {s sourceShape : Shape} {d : DType} {dev : Device}
     (input : Tensor ⟨s, d, dev⟩) (dim start : Nat)
@@ -339,22 +339,22 @@ def sliceScatter {s sourceShape : Shape} {d : DType} {dev : Device}
     (_bound : start + sourceShape.getD dim 0 ≤ s.getD dim 0 := by
       first | exact of_decide_eq_true rfl | omega | (simp <;> omega)) :
     Tensor ⟨s, d, dev⟩ :=
-  Tensor.ofRaw! "sliceScatter" (RawTensor.sliceScatter input.raw dim start source.raw)
+  Tensor.ofRaw! (RawTensor.sliceScatter input.raw dim start source.raw)
 
 /-- Rotate-half RoPE: the two halves of the last axis are rotated by `cos`/`sin`. -/
 def applyRotary {batch seq heads half : Nat} {d dc : DType} {dev : Device}
     (input : Tensor ⟨#[batch, seq, heads, 2 * half], d, dev⟩)
     (cos sin : Tensor ⟨#[seq, half], dc, dev⟩) : Tensor ⟨#[batch, seq, heads, 2 * half], d, dev⟩ :=
-  Tensor.ofRaw! "applyRotary" (RawTensor.applyRotary input.raw cos.raw sin.raw)
+  Tensor.ofRaw! (RawTensor.applyRotary input.raw cos.raw sin.raw)
 
 /-- Rotary cos/sin tables `[seq, half]` for a rotated width of `2 * half`. -/
 def rotaryFreqs (seq half : Nat) (base : Float := 10000.0) (device : Device := .CPU) :
     Tensor { shape := #[seq, half], dtype := .Float32, device } × Tensor { shape := #[seq, half], dtype := .Float32, device } :=
   let (cos, sin) := RawTensor.rotaryFreqs seq (2 * half) base device
-  (Tensor.ofRaw! "rotaryFreqs" cos, Tensor.ofRaw! "rotaryFreqs" sin)
+  (Tensor.ofRaw! cos, Tensor.ofRaw! sin)
 
 def hannWindow (n : Nat) : Tensor { shape := #[n], dtype := .Float32, device := .CPU } :=
-  (Tensor.ofRaw! "hannWindow" (RawTensor.hannWindow n))
+  (Tensor.ofRaw! (RawTensor.hannWindow n))
 
 /-- Frames of `stft` over `n` samples; `center` reflect-pads `nFft / 2` on each side. -/
 def stftFrames (n nFft hopLength : Nat) (center : Bool) : Nat :=
@@ -373,7 +373,7 @@ instance (n nFft hopLength winLength : Nat) (center : Bool) :
 def stft! {n winLength : Nat} {dev : Device} (input : Tensor { shape := #[n], dtype := .Float32, device := dev }) (nFft hopLength : Nat)
     (window : Tensor { shape := #[winLength], dtype := .Float32, device := dev }) (center : Bool := true) (normalized : Bool := false) :
     Tensor { shape := #[nFft / 2 + 1, stftFrames n nFft hopLength center, 2], dtype := .Float32, device := dev } :=
-  Tensor.ofRaw! "stft" (RawTensor.stft input.raw nFft hopLength winLength window.raw center normalized)
+  Tensor.ofRaw! (RawTensor.stft input.raw nFft hopLength winLength window.raw center normalized)
 
 /-- One-sided STFT with real and imaginary parts packed in the last axis. -/
 def stft {n winLength : Nat} {dev : Device} (input : Tensor { shape := #[n], dtype := .Float32, device := dev }) (nFft hopLength : Nat)
@@ -384,7 +384,7 @@ def stft {n winLength : Nat} {dev : Device} (input : Tensor { shape := #[n], dty
   stft! input nFft hopLength window center normalized
 
 def log10! {σ : StaticSpec} (input : Tensor σ) : Tensor σ :=
-  Tensor.ofRaw! "log10" (RawTensor.log10! input.raw)
+  Tensor.ofRaw! (RawTensor.log10! input.raw)
 
 def log10 {σ : StaticSpec} (input : Tensor σ)
     (_inexact : σ.dtype.isInexact = true := by first | rfl | exact DType.isInexact_of_realFloating | decide) : Tensor σ :=
@@ -396,7 +396,7 @@ def saveWav {σ : StaticSpec} (input : Tensor σ) (path : String) (sampleRate : 
 
 def lt! {s : Shape} {d : DType} {dev : Device} (a b : Tensor ⟨s, d, dev⟩) :
     Tensor ⟨s, .Bool, dev⟩ :=
-  Tensor.ofRaw! "lt" (RawTensor.lt! a.raw b.raw)
+  Tensor.ofRaw! (RawTensor.lt! a.raw b.raw)
 
 def lt {s : Shape} {d : DType} {dev : Device} [DType.Ordered d] (a b : Tensor ⟨s, d, dev⟩) :
     Tensor ⟨s, .Bool, dev⟩ :=
@@ -404,16 +404,16 @@ def lt {s : Shape} {d : DType} {dev : Device} [DType.Ordered d] (a b : Tensor �
 
 def ge! {s : Shape} {d : DType} {dev : Device} (a b : Tensor ⟨s, d, dev⟩) :
     Tensor ⟨s, .Bool, dev⟩ :=
-  Tensor.ofRaw! "ge" (RawTensor.ge! a.raw b.raw)
+  Tensor.ofRaw! (RawTensor.ge! a.raw b.raw)
 
 def ge {s : Shape} {d : DType} {dev : Device} [DType.Ordered d] (a b : Tensor ⟨s, d, dev⟩) :
     Tensor ⟨s, .Bool, dev⟩ :=
   ge! a b
 def ltScalar {s : Shape} {d : DType} {dev : Device} (input : Tensor ⟨s, d, dev⟩) (value : Float) :
-    Tensor ⟨s, .Bool, dev⟩ := Tensor.ofRaw! "ltScalar" (RawTensor.ltScalar input.raw value)
+    Tensor ⟨s, .Bool, dev⟩ := Tensor.ofRaw! (RawTensor.ltScalar input.raw value)
 def maskedFill {s : Shape} {d : DType} {dev : Device}
     (input : Tensor ⟨s, d, dev⟩) (mask : Tensor ⟨s, .Bool, dev⟩) (value : Float) : Tensor ⟨s, d, dev⟩ :=
-  Tensor.ofRaw! "maskedFill" (RawTensor.maskedFill input.raw mask.raw value)
+  Tensor.ofRaw! (RawTensor.maskedFill input.raw mask.raw value)
 
 /-- Input channels split into `groups` equal groups, and output channels divide among them. -/
 def ConvGroups (cin cinPerGroup cout groups : Nat) : Prop :=
@@ -432,7 +432,7 @@ def conv1dGroups! {batch cin cout cinPerGroup length kernel : Nat} {d : DType} {
     (weight : Tensor ⟨#[cout, cinPerGroup, kernel], d, dev⟩) (bias : Tensor ⟨#[cout], d, dev⟩)
     (stride : Nat := 1) (padding : Nat := 0) (dilation : Nat := 1) (groups : Nat := 1) :
     Tensor ⟨#[batch, cout, convExtent length kernel stride padding dilation], d, dev⟩ :=
-  Tensor.ofRaw! "conv1dGroups" (RawTensor.conv1dGroups! input.raw weight.raw bias.raw
+  Tensor.ofRaw! (RawTensor.conv1dGroups! input.raw weight.raw bias.raw
     stride padding dilation groups)
 
 /-- Grouped biased one-dimensional convolution. -/
@@ -463,7 +463,7 @@ def convTranspose1d! {batch cin cout length kernel : Nat} {d : DType} {dev : Dev
     (stride : Nat := 1) (padding : Nat := 0) (outputPadding : Nat := 0) (dilation : Nat := 1) :
     Tensor ⟨#[batch, cout, ((length - 1) * stride + dilation * (kernel - 1)
       + outputPadding + 1 - 2 * padding)], d, dev⟩ :=
-  Tensor.ofRaw! "convTranspose1d" (RawTensor.convTranspose1d! input.raw weight.raw bias.raw
+  Tensor.ofRaw! (RawTensor.convTranspose1d! input.raw weight.raw bias.raw
     stride padding outputPadding dilation)
 
 /-- Biased one-dimensional transposed convolution. -/
@@ -482,7 +482,7 @@ def attentionWindow! {batch heads kvHeads seq dim : Nat} {d : DType} {dev : Devi
     (q : Tensor ⟨#[batch, heads, seq, dim], d, dev⟩)
     (k v : Tensor ⟨#[batch, kvHeads, seq, dim], d, dev⟩)
     (causal : Bool := true) (gqa : Bool := false) (window : Nat := 0) : Tensor ⟨#[batch, heads, seq, dim], d, dev⟩ :=
-  Tensor.ofRaw! "attentionWindow" (RawTensor.attentionWindow! q.raw k.raw v.raw causal gqa window)
+  Tensor.ofRaw! (RawTensor.attentionWindow! q.raw k.raw v.raw causal gqa window)
 
 /-- Zero-dropout sliding-window attention. -/
 def attentionWindow {batch heads kvHeads seq dim : Nat} {d : DType} {dev : Device} [DType.RealFloating d]
@@ -501,10 +501,10 @@ def attentionWindowIO {batch heads kvHeads seq dim : Nat} {d : DType} {dev : Dev
   let effective ← attentionCheckIO "attentionWindowIO" (attentionDropout? dropout training)
   let raw ← RawTensor.attentionWindowIO
     q.raw k.raw v.raw effective causal gqa window
-  pure (Tensor.ofRaw! "attentionWindowIO" raw)
+  pure (Tensor.ofRaw! raw)
 
 def log! {σ : StaticSpec} (input : Tensor σ) : Tensor σ :=
-  Tensor.ofRaw! "log" (RawTensor.log! input.raw)
+  Tensor.ofRaw! (RawTensor.log! input.raw)
 
 def log {σ : StaticSpec} (input : Tensor σ)
     (_inexact : σ.dtype.isInexact = true := by first | rfl | exact DType.isInexact_of_realFloating | decide) : Tensor σ :=
@@ -528,7 +528,7 @@ def loadTensorExact (σ : StaticSpec) (path : String) : IO (Tensor σ) := do
     throw (IO.userError s!"Tensor.loadTensorExact {path}: stored dtype {raw.dtype}, expected {σ.dtype}")
   if raw.device != σ.device then
     throw (IO.userError s!"Tensor.loadTensorExact {path}: stored on another device than requested")
-  pure (Tensor.ofRaw! "loadTensorExact" raw)
+  pure (Tensor.ofRaw! raw)
 
 /-- Load the exact stored shape and dtype, moving only its placement to `σ.device`.
 The stored dtype is checked before conversion; loading never silently casts it. -/
@@ -536,7 +536,7 @@ def loadTensorOn (σ : StaticSpec) (path : String) : IO (Tensor σ) := do
   let raw ← RawTensor.loadTensorExact σ.shape path
   if raw.dtype != σ.dtype then
     throw (IO.userError s!"Tensor.loadTensorOn {path}: stored dtype {raw.dtype}, expected {σ.dtype}")
-  pure (Tensor.ofRaw! "loadTensorOn" (← RawTensor.convertIO σ.shape raw σ.device none))
+  pure (Tensor.ofRaw! (← RawTensor.convertIO σ.shape raw σ.device none))
 
 /-- Start a mono streaming WAV file with a placeholder header. -/
 def wavBegin (path : String) (sampleRate : Nat := 24000) : IO Unit :=
@@ -552,10 +552,10 @@ def wavFinalize (path : String) : IO Unit := RawTensor.wavFinalize path
 /-- Load UInt16 token data as an indexed Int64 tensor, validating native metadata. -/
 def loadU16Bin (count : Nat) (path : String) : IO (Tensor { shape := #[count], dtype := .Int64, device := .CPU }) := do
   let raw ← RawTensor.loadU16Bin count path
-  pure (Tensor.ofRaw! "loadU16Bin" raw)
+  pure (Tensor.ofRaw! raw)
 
 def linspace (start stop : Float) (count : Nat) : Tensor { shape := #[count], dtype := .Float32, device := .CPU } :=
-  Tensor.ofRaw! "linspace" (RawTensor.linspace start stop count false)
+  Tensor.ofRaw! (RawTensor.linspace start stop count false)
 
 /-- Reduce the last axis, preserving the actual input dtype, without precondition
 checks; libtorch rejects an unordered dtype or an empty axis and the process aborts. -/
@@ -563,7 +563,7 @@ def maxLast3d! {batch seq vocab : Nat} {d : DType} {dev : Device}
     (input : Tensor ⟨#[batch, seq, vocab], d, dev⟩) :
     Tensor ⟨#[batch, seq], d, dev⟩ × Tensor ⟨#[batch, seq], .Int64, dev⟩ :=
   let (values, indices) := RawTensor.maxLast3d! input.raw 2
-  (Tensor.ofRaw! "maxLast3d" values, Tensor.ofRaw! "maxLast3d" indices)
+  (Tensor.ofRaw! values, Tensor.ofRaw! indices)
 
 /-- Reduce a nonempty last axis of an ordered tensor. -/
 def maxLast3d {batch seq vocab : Nat} {d : DType} {dev : Device} [DType.Ordered d]
@@ -579,7 +579,7 @@ def topKLast2d! {rows cols : Nat} {d : DType} {dev : Device}
     (input : Tensor ⟨#[rows, cols], d, dev⟩) (k : Nat) :
     Tensor ⟨#[rows, k], d, dev⟩ × Tensor ⟨#[rows, k], .Int64, dev⟩ :=
   let (values, indices) := RawTensor.topKLast2d! input.raw k 1
-  (Tensor.ofRaw! "topKLast2d" values, Tensor.ofRaw! "topKLast2d" indices)
+  (Tensor.ofRaw! values, Tensor.ofRaw! indices)
 
 /-- Select the largest `k` entries of ordered rows with sufficient width. -/
 def topKLast2d {rows cols : Nat} {d : DType} {dev : Device} [DType.Ordered d]
@@ -595,24 +595,24 @@ def rangeLength (start stop step : Nat) : Nat :=
 
 def arangeFrom (start stop : Nat) (step : Nat := 1) :
     Tensor { shape := #[rangeLength start stop step], dtype := .Int64, device := .CPU } :=
-  (Tensor.ofRaw! "arangeFrom" (RawTensor.arange start stop step))
+  (Tensor.ofRaw! (RawTensor.arange start stop step))
 
 /-- Select entry `idx` of the leading axis; a scalar has no leading axis. -/
 def getOp {σ : StaticSpec} (input : Tensor σ) (idx : Nat)
     (_bound : idx < σ.shape[0]?.getD 0 := by
       first | exact of_decide_eq_true rfl | (simp <;> fail "index out of range")) :
     Tensor (σ.withShape (σ.shape.extract 1 σ.shape.size)) :=
-  (Tensor.ofRaw! "getOp" (RawTensor.getOp input.raw idx))
+  (Tensor.ofRaw! (RawTensor.getOp input.raw idx))
 
 def unbind {σ : StaticSpec} (input : Tensor σ) (dim : Nat := 0)
     (h : dim < σ.shape.size := by first | exact of_decide_eq_true rfl | (simp <;> fail "axis out of range")) :
     Array (Tensor (σ.withShape (unbindShape σ.shape dim h))) :=
   (RawTensor.unbind input.raw dim).map fun raw =>
-    (Tensor.ofRaw! "unbind" raw)
+    (Tensor.ofRaw! raw)
 
 def logspace (start stop : Float) (steps : Nat) (base : Float := 10.0) :
     Tensor { shape := #[steps], dtype := .Float32, device := .CPU } :=
-  (Tensor.ofRaw! "logspace" (RawTensor.logspace start stop steps base false))
+  (Tensor.ofRaw! (RawTensor.logspace start stop steps base false))
 
 /-- Backpropagate an explicit cotangent. Saved intermediates are released by
 default; omitted retention follows `createGraph`, as in PyTorch. -/
@@ -629,7 +629,7 @@ def findTokenPositions {n : Nat} {dev : Device}
     IO (Sigma fun count => Tensor ⟨#[count], .Int64, dev⟩) := do
   let raw ← RawTensor.findTokenPositions tokens.raw token
   let count := raw.runtimeShape.getD 0 0
-  let result := Tensor.ofRaw! (σ := ⟨#[count], .Int64, dev⟩) "findTokenPositions" raw
+  let result := Tensor.ofRaw! (σ := ⟨#[count], .Int64, dev⟩) raw
   pure ⟨count, result⟩
 
 end torch.Tensor
@@ -643,6 +643,6 @@ def loadTensorExact (shape : Shape) (device : Device) (path : String) :
   let raw ← RawTensor.loadTensorExact shape path
   if raw.device != device then
     throw (IO.userError s!"SomeDTypeTensor.loadTensorExact {path}: stored on another device than requested")
-  pure (SomeDTypeTensor.ofRaw! "loadTensorExact" raw)
+  pure (SomeDTypeTensor.ofRaw! raw)
 
 end torch.SomeDTypeTensor

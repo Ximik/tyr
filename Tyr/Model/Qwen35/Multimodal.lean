@@ -66,7 +66,7 @@ def forward2d {tokens dim : Nat}
     (x : Tensor { device := device, shape := #[tokens, dim], dtype := dtype })
     : Tensor { device := device, shape := #[tokens, dim], dtype := dtype } :=
   let x3 : Tensor { device := device, shape := #[1, tokens, dim], dtype := dtype } := Tensor.reshape x #[1, tokens, dim]
-  let y3 : Tensor { device := device, shape := #[1, tokens, dim], dtype := dtype } := Tensor.ofRaw! "forward2d" (RawTensor.layerNorm x3.raw m.weight.2.raw m.bias.2.raw m.eps)
+  let y3 : Tensor { device := device, shape := #[1, tokens, dim], dtype := dtype } := Tensor.ofRaw! (RawTensor.layerNorm x3.raw m.weight.2.raw m.bias.2.raw m.eps)
   Tensor.reshape y3 #[tokens, dim]
 
 end Qwen35VisionLayerNorm

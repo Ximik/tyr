@@ -120,18 +120,22 @@ private def checkSpec (σ : StaticSpec) (raw : RawTensor) : Except String Unit :
   if raw.device != σ.device then
     throw s!"Expected device {renderDevice σ.device}, got {renderDevice raw.device}"
 
-private unsafe def ofRawImpl {σ : StaticSpec} (operation : @& String) (raw : RawTensor) :
+private unsafe def ofRawImpl {σ : StaticSpec} (raw : RawTensor) (operation : @& Lean.Name) :
     Tensor σ :=
   match checkSpec σ raw with
   | .ok () => unsafeCast raw
-  | .error message => nativeInvariantFailure s!"Tensor.{operation}: {message}"
+  | .error message => nativeInvariantFailure s!"{operation}: {message}"
+
+@[implemented_by ofRawImpl]
+private opaque ofRawCore {σ : StaticSpec} (raw : RawTensor) (operation : @& Lean.Name) : Tensor σ :=
+  Classical.choice inferInstance
 
 /-- The raw-to-indexed boundary for native results. Shape, dtype and placement
 are compared with `σ`; a result that contradicts its type is a binding bug and
-aborts with the operation name. -/
-@[implemented_by ofRawImpl]
-opaque ofRaw! {σ : StaticSpec} (operation : @& String) (raw : RawTensor) : Tensor σ :=
-  Classical.choice inferInstance
+aborts naming `operation`, by default the calling declaration. -/
+@[inline] def ofRaw! {σ : StaticSpec} (raw : RawTensor) (operation : Lean.Name := by exact decl_name%) :
+    Tensor σ :=
+  ofRawCore raw operation
 
 private unsafe def zerosForImpl (σ : StaticSpec)
     [DType.ConstantSupported σ.dtype σ.device] : Tensor σ :=

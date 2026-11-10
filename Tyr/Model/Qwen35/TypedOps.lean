@@ -15,7 +15,7 @@ def rsqrtDynamic {s : Shape} (x : Tensor { device := device, shape := s, dtype :
 def logDynamic {s : Shape} (x : Tensor { device := device, shape := s, dtype := dtype }) : Tensor { device := device, shape := s, dtype := dtype } :=
   Tensor.log x
 def softplusDynamic {s : Shape} (x : Tensor { device := device, shape := s, dtype := dtype }) : Tensor { device := device, shape := s, dtype := dtype } :=
-  Tensor.ofRaw! "softplusDynamic" (RawTensor.softplus x.raw)
+  Tensor.ofRaw! (RawTensor.softplus x.raw)
 def floatDynamic {s : Shape} {d : DType} (x : Tensor { device := device, shape := s, dtype := d }) : Tensor { device := device, shape := s, dtype := .Float32 } := x.toFloat32
 
 /-- Explicit-dtype constants for shape-parametric model code. -/
@@ -55,7 +55,7 @@ def chunkGatedDeltaRule {batch seq n_head kdim vdim : Nat}
     (beta : Tensor { device := device, shape := #[batch, seq, n_head], dtype := dtype }) :
     Tensor { device := device, shape := #[batch, seq, n_head, vdim], dtype := dtype } × Tensor { device := device, shape := #[batch, n_head, kdim, vdim], dtype := .Float32 } :=
   let (out, state) := RawTensor.qwen35Chunk query.raw key.raw value.raw g.raw beta.raw
-  (Tensor.ofRaw! "chunkGatedDeltaRule" out, Tensor.ofRaw! "chunkGatedDeltaRule" state)
+  (Tensor.ofRaw! out, Tensor.ofRaw! state)
 
 def recurrentGatedDeltaRule {batch seq n_head kdim vdim : Nat}
     (query key : Tensor { device := device, shape := #[batch, seq, n_head, kdim], dtype := dtype })
@@ -66,6 +66,6 @@ def recurrentGatedDeltaRule {batch seq n_head kdim vdim : Nat}
     Tensor { device := device, shape := #[batch, seq, n_head, vdim], dtype := dtype } × Tensor { device := device, shape := #[batch, n_head, kdim, vdim], dtype := .Float32 } :=
   let (out, state) := RawTensor.qwen35Recurrent
     query.raw key.raw value.raw g.raw beta.raw initialState.raw
-  (Tensor.ofRaw! "recurrentGatedDeltaRule" out, Tensor.ofRaw! "recurrentGatedDeltaRule" state)
+  (Tensor.ofRaw! out, Tensor.ofRaw! state)
 
 end torch.qwen35
