@@ -5,10 +5,6 @@ namespace torch.laguna
 
 variable {device : Device} {dtype : DType}
 variable [DType.RealFloating dtype]
-def bmm {b m n k : Nat} (x : Tensor { dtype := dtype, device := device, shape := #[b, m, k] }) (y : Tensor { dtype := dtype, device := device, shape := #[b, k, n] }) :
-    Tensor { dtype := dtype, device := device, shape := #[b, m, n] } :=
-  Tensor.ofRaw! "bmm" (RawTensor.lagunaBmm x.raw y.raw)
-
 def scatterAdd {s t : Shape} (input : Tensor { dtype := dtype, device := device, shape := s }) (dim : Nat)
     (indices : Tensor { device := device, shape := t, dtype := .Int64 }) (src : Tensor { dtype := dtype, device := device, shape := t }) : Tensor { dtype := dtype, device := device, shape := s } :=
   Tensor.ofRaw! "scatterAdd" (RawTensor.lagunaScatterAdd input.raw dim indices.raw src.raw)

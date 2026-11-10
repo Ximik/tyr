@@ -62,6 +62,11 @@ private def deviceLabel (device : Device) : String :=
   | .MPS => "mps"
 
 /-- Deterministic int64 token-id tensor `[1, seq]` on `device`. -/
+private def moeBlock? {cfg : Config} {b : Bool} :
+    LagunaFfn (device := device) cfg dtype b → Option (LagunaSparseMoeBlock (device := device) (dtype := dtype) cfg)
+  | .moe block => some block
+  | .dense _ => none
+
 private def mkIds (vals : Array Int64) (device : Device) : Tensor { shape := #[1, vals.size], dtype := .Int64, device := device } :=
   Tensor.reshape ((Tensor.fromInt64Array vals).to device) #[1, vals.size]
 
@@ -140,9 +145,9 @@ private def runFixture (device : Device) : IO Unit := do
     match modelB16.model.layers[1]? with
     | some l => pure l
     | none => throw (IO.userError s!"[{lbl}] missing layer 1")
-  check layer0b.denseMlp.isSome s!"[{lbl}] layer 0 loaded as dense MLP"
+  check (moeBlock? layer0b.ffn).isNone s!"[{lbl}] layer 0 loaded as dense MLP"
   let moe1b ←
-    match layer1b.sparseMoe with
+    match moeBlock? layer1b.ffn with
     | some m => pure m
     | none => throw (IO.userError s!"[{lbl}] layer 1 missing sparse MoE block")
   check moe1b.denseExperts.isSome s!"[{lbl}] layer 1 uses dense BF16 expert banks"
@@ -261,7 +266,7 @@ private def runRealSmoke (modelDir : String) (numLayers : Nat) (device : Device)
     match model.model.layers[0]? with
     | some l => pure l
     | none => throw (IO.userError "missing layer 0")
-  check layer0.denseMlp.isSome "layer 0 loaded as dense MLP"
+  check (moeBlock? layer0.ffn).isNone "layer 0 loaded as dense MLP"
   check layer0.attnFull.isSome "layer 0 loaded as full attention"
   if numLayers ≥ 2 then
     let layer1 ←
@@ -269,7 +274,7 @@ private def runRealSmoke (modelDir : String) (numLayers : Nat) (device : Device)
       | some l => pure l
       | none => throw (IO.userError "missing layer 1")
     check layer1.attnSliding.isSome "layer 1 loaded as sliding attention"
-    match layer1.sparseMoe with
+    match moeBlock? layer1.ffn with
     | some moe =>
       check moe.denseExperts.isNone "layer 1 uses NVFP4-packed expert banks"
       check (moe.router.eScoreCorrectionBias.isSome)

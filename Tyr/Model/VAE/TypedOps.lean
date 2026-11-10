@@ -1,7 +1,6 @@
 import Tyr.Typed.Neural
 import Tyr.RawTensor.VAE
 import Tyr.RawTensor.KittenTTS
-import Tyr.Model.Qwen35.TypedOps
 import Tyr.TensorStruct.DeriveCast
 
 namespace torch.vae
@@ -13,8 +12,5 @@ def groupNorm {b c h w : Nat} (x : Tensor { dtype := dtype, device := device, sh
 
 def upsample2 {b c h w : Nat} (x : Tensor { dtype := dtype, device := device, shape := #[b, c, h, w] }) : Tensor { dtype := dtype, device := device, shape := #[b, c, h * 2, w * 2] } :=
   (Tensor.ofRaw! "upsample2" (RawTensor.interpolate x.raw #[h * 2, w * 2] "nearest" false))
-
-def bmm {b m k n : Nat} (x : Tensor { dtype := dtype, device := device, shape := #[b, m, k] }) (y : Tensor { dtype := dtype, device := device, shape := #[b, k, n] }) : Tensor { dtype := dtype, device := device, shape := #[b, m, n] } :=
-  qwen35.einsum! "bmk,bkn->bmn" x y
 
 end torch.vae
