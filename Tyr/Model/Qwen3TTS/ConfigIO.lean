@@ -160,12 +160,12 @@ private def parseSpeakerEncoderConfig (j : Json) (d : SpeakerEncoderConfig := {}
     else
       throw s!"Invalid speaker encoder config: enc_channels, enc_kernel_sizes and enc_dilations need one entry per TDNN block (5), got {encChannels}, {encKernelSizes} and {encDilations}"
   let ⟨hPadding⟩ ← if h :
-      2 ∣ encDilations.getD 0 1 * (encKernelSizes.getD 0 5 - 1) ∧
-      2 ∣ encDilations.getD 1 2 * (encKernelSizes.getD 1 3 - 1) ∧
-      2 ∣ encDilations.getD 2 3 * (encKernelSizes.getD 2 3 - 1) ∧
-      2 ∣ encDilations.getD 3 4 * (encKernelSizes.getD 3 3 - 1) ∧
-      2 ∣ encDilations.getD 4 1 * (encKernelSizes.getD 4 1 - 1) then pure (PLift.up h) else
-    throw s!"Invalid speaker encoder config: dilation * (kernel - 1) must be even for every TDNN block, got kernels {encKernelSizes} and dilations {encDilations}"
+      SameConv (encKernelSizes.getD 0 5) (encDilations.getD 0 1) ∧
+      SameConv (encKernelSizes.getD 1 3) (encDilations.getD 1 2) ∧
+      SameConv (encKernelSizes.getD 2 3) (encDilations.getD 2 3) ∧
+      SameConv (encKernelSizes.getD 3 3) (encDilations.getD 3 4) ∧
+      SameConv (encKernelSizes.getD 4 1) (encDilations.getD 4 1) then pure (PLift.up h) else
+    throw s!"Invalid speaker encoder config: every TDNN block needs a positive kernel and dilation with dilation * (kernel - 1) even, got kernels {encKernelSizes} and dilations {encDilations}"
   let ⟨hResidual⟩ ← if h :
       encChannels.getD 0 512 = encChannels.getD 1 512 ∧
       encChannels.getD 1 512 = encChannels.getD 2 512 ∧
@@ -190,7 +190,7 @@ private def parseSpeakerEncoderConfig (j : Json) (d : SpeakerEncoderConfig := {}
     encRes2NetScale
     encSeChannels := ← fieldD? j "enc_se_channels" d.encSeChannels
     sampleRate
-    samePaddingEven := hPadding
+    sameConvs := hPadding
     residualChannels := hResidual
     blockArrays := hArrays
     res2NetScale := hScale

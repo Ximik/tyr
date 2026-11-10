@@ -257,6 +257,7 @@ def generateFLMWithSolver {seq vocab batch : Nat} {Params : Type}
     (timeMap : (TimeMap (device := device)))
     (model : FlowDenoiser (device := device) seq vocab Params)
     (params : Params)
+    (hVocab : 0 < vocab)
     (steps : Nat)
     (solver : DiffEq.AbstractSolver
       (DiffEq.ODETerm (Tensor { device := device, shape := #[batch, seq, vocab], dtype := .Float32 }) Unit)
@@ -301,7 +302,7 @@ def generateFLMWithSolver {seq vocab batch : Nat} {Params : Type}
       | none =>
           throw (IO.userError "generateFLM solve did not save a terminal state")
   let dataPred := finalFlowProjection cfg timeMap forwardPure params tFinalModel zBeforeFinal
-  let indices := Tensor.argmax! dataPred 2
+  let indices := Tensor.argmax dataPred 2 (_nonempty := by simpa using hVocab)
   pure (indices.reshape #[batch, seq])
 
 /-- Generate tokens through DiffEq Euler from Gaussian noise to one-hot data. -/
@@ -310,6 +311,7 @@ def generateFLM {seq vocab batch : Nat} {Params : Type}
     (timeMap : (TimeMap (device := device)))
     (model : FlowDenoiser (device := device) seq vocab Params)
     (params : Params)
+    (hVocab : 0 < vocab)
     (steps : Nat)
     : IO (Tensor { device := device, shape := #[batch, seq], dtype := .Int64 }) := do
   let solver :=
@@ -318,7 +320,7 @@ def generateFLM {seq vocab batch : Nat} {Params : Type}
       (Y := Tensor { device := device, shape := #[batch, seq, vocab], dtype := .Float32 })
       (VF := Tensor { device := device, shape := #[batch, seq, vocab], dtype := .Float32 })
       (Args := Unit)
-  generateFLMWithSolver cfg timeMap model params steps solver
+  generateFLMWithSolver cfg timeMap model params hVocab steps solver
 
 /-- Interpolate from a source state toward a predicted data point. -/
 def flowInterpolate {batch seq vocab : Nat}

@@ -192,12 +192,12 @@ private def loadCodePredictorSharded (modelDir : String) (cfg : TalkerConfig)
   let cp := cfg.codePredictorConfig
   let nCodebooks := cfg.numCodeGroups - 1
 
-  let mut inputEmbeddings : Array (Tensor { shape := #[cp.vocabSize, cfg.hiddenSize], dtype := dtype.val, device := device }) := #[]
-  for i in [:nCodebooks] do
+  let codebooks : Vector nCodebooks Nat := ⟨Array.range nCodebooks, Array.size_range⟩
+  let inputEmbeddings ← codebooks.mapM fun i => do
     let emb ← loadTensorShardedTarget modelDir
       s!"talker.code_predictor.model.codec_embedding.{i}.weight"
       #[cp.vocabSize, cfg.hiddenSize]
-    inputEmbeddings := inputEmbeddings.push (reqGradFalse emb)
+    pure (reqGradFalse emb)
 
   let (inputProjection, inputProjectionBias) ← loadCodePredictorProjectionSharded modelDir cfg
 
@@ -208,12 +208,11 @@ private def loadCodePredictorSharded (modelDir : String) (cfg : TalkerConfig)
 
   let norm ← loadRMSNormSharded modelDir "talker.code_predictor.model.norm" cp.hiddenSize cp.rmsNormEps
 
-  let mut lmHeads : Array (Tensor { shape := #[cp.vocabSize, cp.hiddenSize], dtype := dtype.val, device := device }) := #[]
-  for i in [:nCodebooks] do
+  let lmHeads ← codebooks.mapM fun i => do
     let head ← loadTensorShardedTarget modelDir
       s!"talker.code_predictor.lm_head.{i}.weight"
       #[cp.vocabSize, cp.hiddenSize]
-    lmHeads := lmHeads.push (reqGradFalse head)
+    pure (reqGradFalse head)
 
   pure { inputEmbeddings, inputProjection, inputProjectionBias, layers, norm, lmHeads }
 
@@ -259,13 +258,11 @@ private def loadSqueezeExcitationBlockSharded (modelDir : String) (namePrefix : 
 private def loadRes2NetBlockSharded (modelDir : String) (namePrefix : String)
     (channels scale kernelSize dilation : Nat)
     : IO (Res2NetBlock (device := device) (dtype := dtype) channels scale kernelSize dilation) := do
-  let nBlocks := if scale <= 1 then 0 else scale - 1
-  let mut blocks : Array (TimeDelayNetBlock (device := device) (dtype := dtype) (channels / scale) (channels / scale) kernelSize dilation) := #[]
-  for i in [:nBlocks] do
-    let block ← loadTimeDelayNetBlockSharded modelDir
+  let indices : Vector (scale - 1) Nat := ⟨Array.range (scale - 1), Array.size_range⟩
+  let blocks ← indices.mapM fun i =>
+    loadTimeDelayNetBlockSharded modelDir
       s!"{namePrefix}.blocks.{i}"
       (channels / scale) (channels / scale) kernelSize dilation
-    blocks := blocks.push block
   pure { blocks }
 
 private def loadSqueezeExcitationRes2NetBlockSharded (modelDir : String) (namePrefix : String)

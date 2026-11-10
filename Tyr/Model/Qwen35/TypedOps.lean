@@ -45,12 +45,6 @@ def initDynamicWeight (shape : Shape) (fanIn : Nat) (device : Device := .CPU)
 def initDynamicBias (shape : Shape) (device : Device := .CPU) (dtype : DType := .Float32) :
     IO (Tensor { device, shape, dtype }) := Model.initBias shape dtype device
 
-def convGroups {batch cin cout cinGroup length kernel : Nat} {out : Shape}
-    (input : Tensor { device := device, shape := #[batch, cin, length], dtype := dtype }) (weight : Tensor { device := device, shape := #[cout, cinGroup, kernel], dtype := dtype })
-    (bias : Tensor { device := device, shape := #[cout], dtype := dtype }) (stride padding dilation groups : Nat) : Tensor { device := device, shape := out, dtype := dtype } :=
-  Tensor.ofRaw! "convGroups" (RawTensor.conv1dGroups! input.raw weight.raw bias.raw
-    stride padding dilation groups)
-
 def falseMaskTyped {n : Nat} (device : Device) : Tensor { device := device, shape := #[n], dtype := .Bool } :=
   Tensor.eqScalar ((Tensor.fullInt #[n] 0).to device) 1
 
