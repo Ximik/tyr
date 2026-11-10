@@ -36,7 +36,7 @@ The source shape is checked before conversion and never reshaped. -/
 
 @[extern "lean_torch_item"] opaque item (t : @& RawTensor) : Float
 
-@[extern "lean_torch_item_checked"] opaque itemChecked
+@[extern "lean_torch_item_try"] opaque item?
     (t : @& RawTensor) : Except String Float
 
 @[extern "lean_torch_gt"] opaque gt (a b : @& RawTensor) : RawTensor
@@ -269,7 +269,7 @@ instead of triggering a device assertion. -/
     (dim : @& Nat) (indices : @& RawTensor) : RawTensor
 
 /-- `indexSelect!` returning its validation and native errors. -/
-@[extern "lean_torch_index_select_checked"] opaque indexSelect? (data : @& RawTensor)
+@[extern "lean_torch_index_select_try"] opaque indexSelect? (data : @& RawTensor)
     (dim : @& Nat) (indices : @& RawTensor) : Except String RawTensor
 
 /-- Per-element cross entropy (no reduction): logits [n, c], Int64 targets [n].
@@ -311,10 +311,10 @@ namespace torch.RawTensor
 fatal libtorch error report. -/
 @[extern "lean_torch_reshape_exact"] opaque reshape! (t : @& RawTensor) (target : @& Shape) : RawTensor
 
-@[extern "lean_torch_svd_checked"] opaque svd? (t : @& RawTensor) : Except String (RawTensor × RawTensor × RawTensor)
+@[extern "lean_torch_svd_try"] opaque svd? (t : @& RawTensor) : Except String (RawTensor × RawTensor × RawTensor)
 
 @[extern "lean_torch_rms_norm_weighted"] opaque rmsNormWeighted!
     (x weight : @& RawTensor) (eps : Float := 1e-6) : RawTensor
 
-@[extern "lean_torch_matrix_log_checked"] opaque matrixLog? (t : @& RawTensor) : Except String RawTensor
+@[extern "lean_torch_matrix_log_try"] opaque matrixLog? (t : @& RawTensor) : Except String RawTensor
 end torch.RawTensor

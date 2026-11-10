@@ -1,7 +1,7 @@
 #pragma once
 
 #include "generated/tyr_ffi.h"
-#include "tyr_checked_result.h"
+#include "tyr_try_result.h"
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -59,7 +59,7 @@ void expectThrow(Action action) {
 }
 Object cast(lean_object* input, tyr::lean::DType dtype) {
   Object dims(lean_torch_get_shape(input), lean_dec);
-  Object result(lean_torch_cast_dtype_checked(retain(dims.get()), input,
+  Object result(lean_torch_cast_dtype_try(retain(dims.get()), input,
                                               static_cast<uint8_t>(dtype)), lean_dec);
   return Object(retain(exceptValue(result.get())), lean_dec);
 }

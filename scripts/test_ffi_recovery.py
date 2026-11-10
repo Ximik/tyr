@@ -18,7 +18,7 @@ class RecoveryTests(unittest.TestCase):
         self.write("Tyr/Basic.lean", "")
         self.write("Tyr/ConstantSupport.lean", "")
         self.declare()
-        self.native('return tyr::checkedIoCall("example", [&] { return run(); });')
+        self.native('return tyr::ioCall("example", [&] { return run(); });')
 
     def write(self, path, source):
         (self.root / path).write_text(source)
@@ -36,12 +36,12 @@ class RecoveryTests(unittest.TestCase):
     def test_guarded_io_and_except_exports(self):
         self.assertEqual(self.errors(), [])
         self.declare("Except String (Array RawTensor)")
-        self.native('return tyr::checkedCall("example", [&] { return run(); });')
+        self.native('return tyr::catchAllCall("example", [&] { return run(); });')
         self.assertEqual(self.errors(), [])
 
     def test_data_checked_guard_is_except_only(self):
         self.declare("Except String RawTensor")
-        self.native('return tyr::dataCheckedCall("example", [&] { return run(); });')
+        self.native('return tyr::tryCall("example", [&] { return run(); });')
         self.assertEqual(self.errors(), [])
         self.declare("IO RawTensor")
         self.assertTrue(self.errors())
@@ -85,7 +85,7 @@ class RecoveryTests(unittest.TestCase):
 @[extern "lean_torch_xxt"] opaque xxt (t : @& RawTensor) : IO RawTensor
 @[extern "lean_torch_dist_future"] opaque future : IO Unit
 ''')
-        self.native('std::lock_guard lock(mutex); return tyr::checkedIoCall("rank", [&] { return rank(); });',
+        self.native('std::lock_guard lock(mutex); return tyr::ioCall("rank", [&] { return rank(); });',
                     "cc/src/tyr_distributed.cpp", "lean_torch_dist_get_rank")
         self.native('return xxt();', "cc/src/tyr_polar.cpp", "lean_torch_xxt")
         errors = self.errors()
@@ -98,8 +98,8 @@ class RecoveryTests(unittest.TestCase):
         symbol = "lean_parquet_get_metadata"
         self.write("Tyr/RawTensor/Parquet.lean",
                    f'@[extern "{symbol}"] opaque metadata : IO ParquetMetadata\n')
-        guarded = 'return tyr::checkedIoCall("metadata", [&] { return read_metadata(); });'
-        unavailable = 'return tyr::checkedIoCall("metadata", [&] { return parquet_unavailable(); });'
+        guarded = 'return tyr::ioCall("metadata", [&] { return read_metadata(); });'
+        unavailable = 'return tyr::ioCall("metadata", [&] { return parquet_unavailable(); });'
 
         def variants(enabled, disabled):
             self.write("cc/src/tyr_parquet.cpp",
@@ -177,8 +177,8 @@ opaque nativeInvariantFailure {α : Type} [Nonempty α] (message : @& String) : 
         for result in ["Except UInt64 RawTensor", "Except String.Custom RawTensor"]:
             with self.subTest(result=result):
                 self.declare(result)
-                self.native('return tyr::checkedCall("example", [&] { return run(); });')
-                self.assertTrue(any("checkedCall constructs Except String" in error
+                self.native('return tyr::catchAllCall("example", [&] { return run(); });')
+                self.assertTrue(any("catchAllCall constructs Except String" in error
                                     for error in self.errors()))
 
     def test_qualified_result_alias_cannot_look_like_pure_constructor(self):
@@ -190,30 +190,30 @@ opaque nativeInvariantFailure {α : Type} [Nonempty α] (message : @& String) : 
         for prelude in ['auto tensor = borrowTensor(x);', 'lean_dec(x);',
                         'try { return run(); } catch (...) { return error(); }']:
             with self.subTest(prelude=prelude):
-                self.native(prelude + '\nreturn tyr::checkedIoCall("x", [&] { return run(); });')
+                self.native(prelude + '\nreturn tyr::ioCall("x", [&] { return run(); });')
                 self.assertTrue(any("no work before the guard" in error for error in self.errors()))
 
     def test_pre_call_argument_evaluation_is_rejected(self):
         for body in [
-            'return tyr::checkedIoCall(makeContext(), [&] { return run(); });',
-            'return tyr::checkedIoCall("x", [value = allocate()] { return run(value); });',
-            'return tyr::checkedIoCall("x", callable());',
+            'return tyr::ioCall(makeContext(), [&] { return run(); });',
+            'return tyr::ioCall("x", [value = allocate()] { return run(value); });',
+            'return tyr::ioCall("x", callable());',
         ]:
             with self.subTest(body=body):
                 self.native(body)
                 self.assertTrue(self.errors())
 
     def test_wrong_carrier_and_trailing_work_are_rejected(self):
-        self.native('return tyr::checkedCall("x", [&] { return run(); });')
-        self.assertTrue(any("checkedIoCall" in error for error in self.errors()))
-        self.native('return tyr::checkedIoCall("x", [&] { return run(); }); other();')
+        self.native('return tyr::catchAllCall("x", [&] { return run(); });')
+        self.assertTrue(any("ioCall" in error for error in self.errors()))
+        self.native('return tyr::ioCall("x", [&] { return run(); }); other();')
         self.assertTrue(self.errors())
 
     def test_every_conditional_definition_is_checked(self):
         self.write("cc/src/example.cpp", '''
 #if GPU
 lean_object* lean_torch_example(b_lean_obj_arg x) {
-  return tyr::checkedIoCall("x", [&] { return run(); });
+  return tyr::ioCall("x", [&] { return run(); });
 }
 #else
 lean_object* lean_torch_example(b_lean_obj_arg x) { return unguarded(); }
@@ -231,7 +231,7 @@ lean_object* lean_torch_example(b_lean_obj_arg x) { return unguarded(); }
             'lean_object* lean_torch_example() [[gnu::cold]]',
             'lean_object* lean_torch_example() __attribute__((cold))',
         ]
-        good = 'return tyr::checkedIoCall("x", [&] { return run(); });'
+        good = 'return tyr::ioCall("x", [&] { return run(); });'
         for header in headers:
             with self.subTest(header=header):
                 # The recognized good branch must not mask a missed bad branch.
@@ -246,7 +246,7 @@ lean_object* lean_torch_example(b_lean_obj_arg x) { return unguarded(); }
 
     def test_unsupported_platform_declarator_or_macro_fails_closed(self):
         good = ('#if GPU\nlean_object* lean_torch_example() { '
-                'return tyr::checkedIoCall("x", [&] { return run(); }); }\n#else\n')
+                'return tyr::ioCall("x", [&] { return run(); }); }\n#else\n')
         for other in ['lean_object* lean_torch_example() CUSTOM_ATTRIBUTE { return run(); }',
                       'DEFINE_EXPORT(lean_torch_example)']:
             with self.subTest(other=other):
@@ -260,7 +260,7 @@ lean_object* lean_torch_example(b_lean_obj_arg x) { return unguarded(); }
     def test_literals_comments_and_nested_blocks_do_not_confuse_braces(self):
         self.native('''
 // braces and a fake return } return unguarded();
-return tyr::checkedIoCall("x", [&] {
+return tyr::ioCall("x", [&] {
   const char* a = "} /* not a comment */";
   const char* b = R"tag({"quoted"})tag";
   const char c = '}';

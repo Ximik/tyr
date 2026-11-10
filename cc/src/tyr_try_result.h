@@ -9,7 +9,7 @@ namespace tyr {
 
 // Build errors with the Lean allocator, avoiding a second C++ allocation while
 // handling an exception. Lean's allocator retains its ordinary fatal OOM policy.
-inline lean_object* checkedError(const char* context, const char* message) noexcept {
+inline lean_object* errorResult(const char* context, const char* message) noexcept {
   auto* separator = lean_mk_string(": ");
   auto* prefix = lean_string_append(lean_mk_string(context), separator);
   lean_dec(separator);
@@ -25,24 +25,24 @@ inline lean_object* checkedError(const char* context, const char* message) noexc
 // ownership guards) executes inside this firewall, never across a Lean frame.
 // The noexcept boundary also covers exceptions not derived from std::exception.
 template <typename F>
-lean_object* checkedCall(const char* context, F&& operation) noexcept {
+lean_object* catchAllCall(const char* context, F&& operation) noexcept {
   try {
     auto* payload = std::forward<F>(operation)();
     auto* result = lean_alloc_ctor(1, 1, 0);
     lean_ctor_set(result, 0, payload);
     return result;
   } catch (const c10::Error& error) {
-    return checkedError(context, error.what_without_backtrace());
+    return errorResult(context, error.what_without_backtrace());
   } catch (const std::exception& error) {
-    return checkedError(context, error.what());
+    return errorResult(context, error.what());
   } catch (...) {
-    return checkedError(context, "unknown native exception");
+    return errorResult(context, "unknown native exception");
   }
 }
 
 // A failure that depends on the values of the inputs (no real logarithm, a
 // factorization that does not converge), as opposed to a contract violation or
-// a missing kernel. Only `dataCheckedCall` turns it into an error.
+// a missing kernel. Only `tryCall` turns it into an error.
 struct DataError : std::runtime_error {
   using std::runtime_error::runtime_error;
 };
@@ -54,20 +54,20 @@ struct DataError : std::runtime_error {
 // non-convergence (`c10::LinAlgError`), become `Except.error`. Every other
 // exception propagates to Tyr's terminate handler and aborts.
 template <typename F>
-lean_object* dataCheckedCall(const char* context, F&& operation) {
+lean_object* tryCall(const char* context, F&& operation) {
   try {
     auto* payload = std::forward<F>(operation)();
     auto* result = lean_alloc_ctor(1, 1, 0);
     lean_ctor_set(result, 0, payload);
     return result;
   } catch (const DataError& error) {
-    return checkedError(context, error.what());
+    return errorResult(context, error.what());
   } catch (const c10::LinAlgError& error) {
-    return checkedError(context, error.what_without_backtrace());
+    return errorResult(context, error.what_without_backtrace());
   }
 }
 
-inline lean_object* checkedIoError(const char* context, const char* message) noexcept {
+inline lean_object* ioErrorResult(const char* context, const char* message) noexcept {
   auto* separator = lean_mk_string(": ");
   auto* prefix = lean_string_append(lean_mk_string(context), separator);
   lean_dec(separator);
@@ -80,15 +80,15 @@ inline lean_object* checkedIoError(const char* context, const char* message) noe
 // The callable already returns IO.Result, including ordinary validation errors.
 // Keep every C++ allocation and native operation inside the recovery boundary.
 template <typename F>
-lean_object* checkedIoCall(const char* context, F&& operation) noexcept {
+lean_object* ioCall(const char* context, F&& operation) noexcept {
   try {
     return std::forward<F>(operation)();
   } catch (const c10::Error& error) {
-    return checkedIoError(context, error.what_without_backtrace());
+    return ioErrorResult(context, error.what_without_backtrace());
   } catch (const std::exception& error) {
-    return checkedIoError(context, error.what());
+    return ioErrorResult(context, error.what());
   } catch (...) {
-    return checkedIoError(context, "unknown native exception");
+    return ioErrorResult(context, "unknown native exception");
   }
 }
 

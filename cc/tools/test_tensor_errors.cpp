@@ -5,12 +5,12 @@
 #include <iostream>
 #include <limits>
 
-// Tests-first mode applies the checked contract to the previous raw boundary.
+// Tests-first mode applies the try contract to the plain export.
 // It must fail: native errors escape and successful results lack Except.ok.
-#ifdef TYR_CHECKED_BASELINE
-#define CHECKED(F) F
+#ifdef TYR_TRY_BASELINE
+#define TRY(F) F
 #else
-#define CHECKED(F) F##_checked
+#define TRY(F) F##_try
 #endif
 
 namespace {
@@ -54,11 +54,11 @@ void crossEntropy(bool unreduced) {
             "Incorrect cross entropy value");
   require(logits->m_rc == 1 && labels->m_rc == 1, "Cross entropy changed borrowed references");
 }
-void checkedItem(bool invalid) {
+void tryItem(bool invalid) {
   Object input(lean_torch_full(shape(invalid ? std::initializer_list<uint64_t>{2}
                                           : std::initializer_list<uint64_t>{}),
                              3.25, 0, lean_box(1)), lean_dec);
-  Object result(lean_torch_item_checked(input.get()), lean_dec);
+  Object result(lean_torch_item_try(input.get()), lean_dec);
   if (invalid) {
     exceptError(result.get(), "item");
   } else {
@@ -76,16 +76,16 @@ void indexSelect(bool empty) {
   Object indices(lean_torch_full_int(shape({count}), 0), lean_dec);
   Object result(lean_torch_index_select(input.get(), Nat(0), indices.get()), lean_dec);
   values(result.get(), count, 3.25);
-  Object checked(lean_torch_index_select_checked(input.get(), Nat(0), indices.get()), lean_dec);
+  Object checked(lean_torch_index_select_try(input.get(), Nat(0), indices.get()), lean_dec);
   values(exceptValue(checked.get()), count, 3.25);
   require(input->m_rc == 1 && indices->m_rc == 1,
           "Index selection changed borrowed references");
 }
 
-void checkedIndexSelectError(uint64_t id) {
+void tryIndexSelectError(uint64_t id) {
   Object input(lean_torch_full(shape({2}), 3.25, 0, lean_box(1)), lean_dec);
   Object indices(lean_torch_full_int(shape({1}), id), lean_dec);
-  Object result(lean_torch_index_select_checked(input.get(), Nat(0), indices.get()), lean_dec);
+  Object result(lean_torch_index_select_try(input.get(), Nat(0), indices.get()), lean_dec);
   exceptError(result.get(), "indexSelect");
   require(input->m_rc == 1 && indices->m_rc == 1,
           "Index selection changed borrowed references");
@@ -206,12 +206,12 @@ void transposeScalar() {
   values(result.get(), 1, 5);
 }
 
-void checkedCat(bool invalid) {
+void tryCat(bool invalid) {
   auto first = full({2, 2}, 3), second = full({invalid ? 3u : 2u, 2}, 3);
   Object tensors(lean_alloc_array(2, 2), lean_dec);
   lean_array_set_core(tensors.get(), 0, retain(first.get()));
   lean_array_set_core(tensors.get(), 1, retain(second.get()));
-  Object result(CHECKED(lean_torch_cat_dyn)(tensors.get(), lean_int64_to_int(1)), lean_dec);
+  Object result(TRY(lean_torch_cat_dyn)(tensors.get(), lean_int64_to_int(1)), lean_dec);
   if (invalid) exceptError(result.get(), "catMany");
   else values(exceptValue(result.get()), 8, 3);
   require(tensors->m_rc == 1 && first->m_rc == 2 && second->m_rc == 2,
@@ -270,21 +270,21 @@ void matrix(Binary operation) {
   require(input->m_rc == 1, "matrix operation changed borrowed tensor ownership");
 }
 
-void checkedEarlyFailure() {
+void tryEarlyFailure() {
   Object invalid(lean_mk_string("not a tensor"), lean_dec);
   Object target(shape({2}), lean_dec);
-  Object cast(lean_torch_cast_dtype_checked(retain(target.get()), invalid.get(),
+  Object cast(lean_torch_cast_dtype_try(retain(target.get()), invalid.get(),
     static_cast<uint8_t>(tyr::lean::DType::Float64)), lean_dec);
   exceptError(cast.get(), "borrowTensor");
   require(invalid->m_rc == 1 && target->m_rc == 1,
     "checked early failure leaked owned parameters or changed borrowed argument");
 }
 
-void checkedExceptionKinds() {
-  static_assert(noexcept(tyr::checkedCall("test", []() -> lean_object* { return lean_box(0); })));
+void tryExceptionKinds() {
+  static_assert(noexcept(tyr::catchAllCall("test", []() -> lean_object* { return lean_box(0); })));
   Object owned(shape({2}), lean_dec);
   auto check = [&](int kind) {
-    Object result(tyr::checkedCall("firewall", [&]() -> lean_object* {
+    Object result(tyr::catchAllCall("firewall", [&]() -> lean_object* {
       Object transferred(retain(owned.get()), lean_dec);
       if (kind == 0) TORCH_CHECK(false, "libtorch test error");
       if (kind == 1) throw std::runtime_error("standard test error");
@@ -297,13 +297,13 @@ void checkedExceptionKinds() {
   for (int kind : {0, 1, 2}) check(kind);
 }
 
-void checkedIoExceptionKinds() {
-  static_assert(noexcept(tyr::checkedIoCall("test", []() -> lean_object* {
+void tryIoExceptionKinds() {
+  static_assert(noexcept(tyr::ioCall("test", []() -> lean_object* {
     return lean_io_result_mk_ok(lean_box(0));
   })));
   Object owned(shape({2}), lean_dec);
   for (int kind : {0, 1, 2}) {
-    Object result(tyr::checkedIoCall("IO firewall", [&]() -> lean_object* {
+    Object result(tyr::ioCall("IO firewall", [&]() -> lean_object* {
       Object transferred(retain(owned.get()), lean_dec);
       if (kind == 0) TORCH_CHECK(false, "libtorch test error");
       if (kind == 1) throw std::runtime_error("standard test error");
@@ -312,7 +312,7 @@ void checkedIoExceptionKinds() {
     require(lean_io_result_is_error(result.get()), "IO firewall did not return IO.error");
     require(owned->m_rc == 1, "IO firewall failed to unwind native ownership guards");
   }
-  Object success(tyr::checkedIoCall("IO firewall", [] {
+  Object success(tyr::ioCall("IO firewall", [] {
     return lean_io_result_mk_ok(lean_box(23));
   }), lean_dec);
   require(lean_io_result_is_ok(success.get()) &&
@@ -388,10 +388,10 @@ void rms() {
   require(input->m_rc == 1 && weight->m_rc == 1, "weighted RMS ownership imbalance");
 }
 
-#ifndef TYR_CHECKED_BASELINE
-void checkedLinalgFailures() {
+#ifndef TYR_TRY_BASELINE
+void tryLinalgFailures() {
   auto singular = full({2, 2}, 0);
-  Object log(lean_torch_matrix_log_checked(singular.get()), lean_dec);
+  Object log(lean_torch_matrix_log_try(singular.get()), lean_dec);
   exceptError(log.get(), "matrixLog");
 }
 #endif
@@ -427,12 +427,12 @@ int main() {
     }
   };
   run("flash/success-carrier", flashSuccess);
-  run("checked/item-success", [] { checkedItem(false); });
-  run("checked/item-shape-error", [] { checkedItem(true); });
+  run("try/item-success", [] { tryItem(false); });
+  run("try/item-shape-error", [] { tryItem(true); });
   run("indexSelect/success", [] { indexSelect(false); });
   run("indexSelect/empty", [] { indexSelect(true); });
-  run("checked/indexSelect-negative-error", [] { checkedIndexSelectError(UINT64_MAX); });
-  run("checked/indexSelect-bounds-error", [] { checkedIndexSelectError(2); });
+  run("try/indexSelect-negative-error", [] { tryIndexSelectError(UINT64_MAX); });
+  run("try/indexSelect-bounds-error", [] { tryIndexSelectError(2); });
   run("flash/dropout-error", flashDropout);
   run("flash/options-early-error", [] { flashOptionCleanup(true); });
   run("flash/options-dispatch-error", [] { flashOptionCleanup(false); });
@@ -451,15 +451,15 @@ int main() {
   run("dropout/success", dropoutSuccess);
   run("transpose/success", transpose);
   run("transpose/scalar-success", transposeScalar);
-  run("checked/cat-error", [] { checkedCat(true); });
-  run("checked/cat-success", [] { checkedCat(false); });
-  run("checked/owned-arguments-early-error", checkedEarlyFailure);
-  run("checked/exception-kinds", checkedExceptionKinds);
-  run("checked/IO-exception-kinds", checkedIoExceptionKinds);
+  run("try/cat-error", [] { tryCat(true); });
+  run("try/cat-success", [] { tryCat(false); });
+  run("try/owned-arguments-early-error", tryEarlyFailure);
+  run("try/exception-kinds", tryExceptionKinds);
+  run("try/IO-exception-kinds", tryIoExceptionKinds);
   run("logicalAnd/success", logicalAnd);
   run("cat-pair/success", catPair);
-#ifndef TYR_CHECKED_BASELINE
-  run("checked/linalg-errors", checkedLinalgFailures);
+#ifndef TYR_TRY_BASELINE
+  run("try/linalg-errors", tryLinalgFailures);
 #endif
   run("crossEntropy-success", [] { crossEntropy(false); });
   run("crossEntropyNone-success", [] { crossEntropy(true); });
