@@ -28,9 +28,6 @@ def logDynamic {s : Shape} {dev : Device} (x : Tensor { shape := s, dtype, devic
 def softplusDynamic {s : Shape} {dev : Device} (x : Tensor { shape := s, dtype, device := dev }) : Tensor { shape := s, dtype, device := dev } := Tensor.ofRaw! "softplusDynamic" (RawTensor.branchingSoftplus x.raw)
 def powDynamic {s : Shape} {dev : Device} (x : Tensor { shape := s, dtype, device := dev }) (n : Float) : Tensor { shape := s, dtype, device := dev } := Tensor.pow x n
 
-def sliceTyped {s out : Shape} {d : DType} {dev : Device} (x : Tensor { shape := s, dtype := d, device := dev }) (dim : Nat) (start len : Nat) : Tensor { shape := out, dtype := d, device := dev } :=
-  x.sliceAs! dim start len out
-
 /-- Return an updated destination holding `src`. The source shares the
 destination's dtype and device; its shape index may differ, so a runtime shape
 mismatch raises an IO error instead of broadcasting. Retained aliases keep

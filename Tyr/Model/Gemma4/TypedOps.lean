@@ -5,10 +5,6 @@ namespace torch.gemma4
 
 variable {device : Device} {dtype : DType}
 
-def sliceTyped {s : Shape} {d : DType} (x : Tensor { device := device, shape := s, dtype := d })
-    (dim : Nat) (start len : Nat) : Tensor { device := device, shape := (s.set! dim len), dtype := d } :=
-  x.slice! dim start len
-
 def transposeAttention {b s h d : Nat} {dt : DType}
     (x : Tensor { device := device, shape := #[b, s, h, d], dtype := dt }) : Tensor { device := device, shape := #[b, h, s, d], dtype := dt } := x.transpose 1 2
 

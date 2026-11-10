@@ -223,8 +223,8 @@ private def loadSparseMoe (src : Source) (cfg : Config) (layerIdx : Nat)
     | some gu => do
       -- Layout A: fused dense banks; dim-1 first half gate, second half up.
       let down ← src.loadAs (← src.resolve (nameCandidates s!"{p}.experts.down_proj")) ⟨#[e, h, mi], dtype⟩ device
-      let gate3 : Tensor { device := device, dtype := dtype, shape := #[e, mi, h] } := Tensor.reshape (sliceTyped gu 1 0 mi) #[e, mi, h]
-      let up3 : Tensor { device := device, dtype := dtype, shape := #[e, mi, h] } := Tensor.reshape (sliceTyped gu 1 mi mi) #[e, mi, h]
+      let gate3 : Tensor { device := device, dtype := dtype, shape := #[e, mi, h] } := Tensor.reshape (Tensor.slice gu 1 0 mi) #[e, mi, h]
+      let up3 : Tensor { device := device, dtype := dtype, shape := #[e, mi, h] } := Tensor.reshape (Tensor.slice gu 1 mi mi) #[e, mi, h]
       let dense : LagunaDenseExperts (device := device) cfg dtype := {
         gateProj := reqGradFalse gate3
         upProj := reqGradFalse up3
