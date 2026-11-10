@@ -280,7 +280,8 @@ private def forwardBlock {seq : Nat}
 
 private def encodeMelChunk {melFrames : Nat}
     (m : (SpeechTokenizer25HzEncoder (device := device) (dtype := dtype)))
-    (mel : Tensor { shape := #[128, melFrames], dtype := dtype.val, device := device }) : Tensor { shape := #[vqFrames melFrames], dtype := .Int64, device := device } :=
+    (mel : Tensor { shape := #[128, melFrames], dtype := dtype.val, device := device })
+    (hMel : conv2Frames melFrames ≤ 1500) : Tensor { shape := #[vqFrames melFrames], dtype := .Int64, device := device } :=
   let c2Frames : Nat := conv2Frames melFrames
   let qFrames : Nat := vqFrames melFrames
   if hShort : melFrames < 2 ∨ qFrames = 0 then
@@ -305,7 +306,7 @@ private def encodeMelChunk {melFrames : Nat}
               rw [this]))
 
       let xSeq0 : Tensor { shape := #[1, c2Frames, 1280], dtype := dtype.val, device := device } := Tensor.reshape (Tensor.transpose h2 1 2) #[1, c2Frames, 1280]
-      let pos : Tensor { shape := #[c2Frames, 1280], dtype := dtype.val, device := device } := Tensor.slice! m.positionalEmbedding 0 0 c2Frames
+      let pos : Tensor { shape := #[c2Frames, 1280], dtype := dtype.val, device := device } := Tensor.slice m.positionalEmbedding 0 0 c2Frames
       let pos3 : Tensor { shape := #[1, c2Frames, 1280], dtype := dtype.val, device := device } := Tensor.reshape pos #[1, c2Frames, 1280]
       let mut xSeq : Tensor { shape := #[1, c2Frames, 1280], dtype := dtype.val, device := device } := Tensor.add xSeq0 pos3
 
@@ -365,15 +366,20 @@ def encodeWaveToCodes
   let mut start : Nat := 0
   let mut outVals : Array UInt64 := #[]
   while start < melFrames do
-    let remaining := melFrames - start
-    let cur := if remaining < chunkMel then remaining else chunkMel
-    if cur >= 2 then
-      let melChunk3 : Tensor { shape := #[1, 128, cur], dtype := dtype.val, device := device } := Tensor.slice! feats 2 start cur
-      let melChunk : Tensor { shape := #[128, cur], dtype := dtype.val, device := device } := Tensor.reshape melChunk3 #[128, cur] (by simp)
-      let idx : Tensor { shape := #[vqFrames cur], dtype := .Int64, device := device } := encodeMelChunk m melChunk
-      let vals ← Tensor.toUInt64Array idx
-      outVals := appendAll outVals vals
-    start := start + cur
+    if hStart : start < melFrames then
+      let remaining := melFrames - start
+      let cur := if remaining < chunkMel then remaining else chunkMel
+      if cur >= 2 then
+        let melChunk3 : Tensor { shape := #[1, 128, cur], dtype := dtype.val, device := device } := Tensor.slice feats 2 start cur
+          (_bounds := by simp only [cur, remaining]; split <;> simp <;> omega)
+        let melChunk : Tensor { shape := #[128, cur], dtype := dtype.val, device := device } := Tensor.reshape melChunk3 #[128, cur] (by simp)
+        let idx : Tensor { shape := #[vqFrames cur], dtype := .Int64, device := device } := encodeMelChunk m melChunk
+          (by simp only [conv2Frames, cur, remaining, chunkMel]; split <;> omega)
+        let vals ← Tensor.toUInt64Array idx
+        outVals := appendAll outVals vals
+      start := start + cur
+    else
+      break
 
   pure (1, outVals)
 

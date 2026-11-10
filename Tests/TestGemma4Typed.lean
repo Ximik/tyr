@@ -29,28 +29,27 @@ private def norm (n : Nat) (dtype : DType := .Float32) : Gemma4RMSNorm (device :
   { weight := ⟨dtype, (Tensor.ones #[n]).castDType dtype⟩ }
 
 private def textModel (c : Config) (dtype : DType := .Float32) : Gemma4ForCausalLM (device := .CPU) c dtype := Id.run do
-  let mut layers := #[]
-  for i in [:c.num_hidden_layers] do
-    let layer : Gemma4Layer c dtype := {
-      layerIdx := i, layerType := Config.layerTypeAt c i
-      self_attn := {
-        q_proj := weight #[Config.maxAttentionDim c, c.hidden_size] 0.1 dtype
-        k_proj := weight #[Config.maxKVProjDim c, c.hidden_size] 0.3 dtype
-        v_proj := weight #[Config.maxKVProjDim c, c.hidden_size] 0.5 dtype
-        o_proj := weight #[c.hidden_size, Config.maxAttentionDim c] 0.7 dtype
-        q_norm := norm (Config.maxHeadDim c) dtype, k_norm := norm (Config.maxHeadDim c) dtype }
-      mlp := {
-        gate_proj := weight #[Config.maxIntermediateSize c, c.hidden_size] 0.2 dtype
-        up_proj := weight #[Config.maxIntermediateSize c, c.hidden_size] 0.4 dtype
-        down_proj := weight #[c.hidden_size, Config.maxIntermediateSize c] 0.6 dtype }
-      input_layernorm := norm c.hidden_size dtype, post_attention_layernorm := norm c.hidden_size dtype
-      pre_feedforward_layernorm := norm c.hidden_size dtype, post_feedforward_layernorm := norm c.hidden_size dtype
-      layer_scalar := (Tensor.ones #[1]).castDType dtype
-      per_layer_input := some {
-        per_layer_input_gate := weight #[c.hidden_size_per_layer_input, c.hidden_size] 0.8 dtype
-        per_layer_projection := weight #[c.hidden_size, c.hidden_size_per_layer_input] 0.9 dtype
-        post_per_layer_input_norm := norm c.hidden_size dtype } }
-    layers := layers.push layer
+  let layer (i : Nat) : Gemma4Layer c dtype := {
+    layerIdx := i, layerType := Config.layerTypeAt c i
+    self_attn := {
+      q_proj := weight #[Config.maxAttentionDim c, c.hidden_size] 0.1 dtype
+      k_proj := weight #[Config.maxKVProjDim c, c.hidden_size] 0.3 dtype
+      v_proj := weight #[Config.maxKVProjDim c, c.hidden_size] 0.5 dtype
+      o_proj := weight #[c.hidden_size, Config.maxAttentionDim c] 0.7 dtype
+      q_norm := norm (Config.maxHeadDim c) dtype, k_norm := norm (Config.maxHeadDim c) dtype }
+    mlp := {
+      gate_proj := weight #[Config.maxIntermediateSize c, c.hidden_size] 0.2 dtype
+      up_proj := weight #[Config.maxIntermediateSize c, c.hidden_size] 0.4 dtype
+      down_proj := weight #[c.hidden_size, Config.maxIntermediateSize c] 0.6 dtype }
+    input_layernorm := norm c.hidden_size dtype, post_attention_layernorm := norm c.hidden_size dtype
+    pre_feedforward_layernorm := norm c.hidden_size dtype, post_feedforward_layernorm := norm c.hidden_size dtype
+    layer_scalar := (Tensor.ones #[1]).castDType dtype
+    per_layer_input := some {
+      per_layer_input_gate := weight #[c.hidden_size_per_layer_input, c.hidden_size] 0.8 dtype
+      per_layer_projection := weight #[c.hidden_size, c.hidden_size_per_layer_input] 0.9 dtype
+      post_per_layer_input_norm := norm c.hidden_size dtype } }
+  let layers : Vector c.num_hidden_layers (Gemma4Layer c dtype) :=
+    ⟨(Array.range c.num_hidden_layers).map layer, by simp⟩
   return {
     model := {
       embed_tokens := weight #[c.vocab_size, c.hidden_size] 1.0 dtype

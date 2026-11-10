@@ -517,8 +517,10 @@ def generateFrame {batch seq : Nat} (cfg : TalkerConfig)
     (subtalkerTopKsByGroup : Option (Array TopK) := none)
     (subtalkerTopPsByGroup : Option (Array Float) := none)
     : IO (FrameGenerationOutput (dtype := dtype) (device := device) batch cfg.numCodeGroups cfg.hiddenSize) := do
+  let ⟨hSeq⟩ ← if h : 0 < seq then pure (PLift.up h) else
+    throw <| IO.userError "generateFrame requires non-empty talker inputs"
   let hidden := TalkerModel.forwardEmbeds cfg m.model talkerInputs attnMask
-  let lastHidden := Tensor.slice! hidden 1 (seq - 1) 1
+  let lastHidden := Tensor.slice hidden 1 (seq - 1) 1
   generateFrameFromLastHidden cfg m lastHidden historyFirstCodes allowEos
     temperature topK topP repetitionPenalty suppressTail
     subtalkerTemperature subtalkerTopK subtalkerTopP
@@ -634,9 +636,9 @@ def streamCodes {batch seq : Nat} (cfg : TalkerConfig)
     let mut lastHidden : Tensor { shape := #[batch, 1, cfg.hiddenSize], dtype := dtype.val, device := device } :=
       (Tensor.zerosFor { shape := #[batch, 1, cfg.hiddenSize], dtype := dtype.val, device := cacheDevice })
     for hpos : pos in [:seq] do
-      let xIn : Tensor { shape := #[batch, 1, cfg.hiddenSize], dtype := dtype.val, device := device } := Tensor.slice! talkerInputs 1 pos 1
-      let cos : Tensor { shape := #[1, cfg.halfHeadDim], dtype := .Float32, device := device } := Tensor.slice! cosAll 0 pos 1
-      let sin : Tensor { shape := #[1, cfg.halfHeadDim], dtype := .Float32, device := device } := Tensor.slice! sinAll 0 pos 1
+      let xIn : Tensor { shape := #[batch, 1, cfg.hiddenSize], dtype := dtype.val, device := device } := Tensor.slice talkerInputs 1 pos 1 (_bounds := by have := hpos.upper; simp at this ⊢; omega)
+      let cos : Tensor { shape := #[1, cfg.halfHeadDim], dtype := .Float32, device := device } := Tensor.slice cosAll 0 pos 1 (_bounds := by have := hpos.upper; simp at this ⊢; omega)
+      let sin : Tensor { shape := #[1, cfg.halfHeadDim], dtype := .Float32, device := device } := Tensor.slice sinAll 0 pos 1 (_bounds := by have := hpos.upper; simp at this ⊢; omega)
       let mut h : Tensor { shape := #[batch, 1, cfg.hiddenSize], dtype := dtype.val, device := device } := xIn
       for i in [:m.model.layers.size] do
         let layer : TalkerLayer (dtype := dtype) (device := device) cfg ←
@@ -688,7 +690,7 @@ def streamCodes {batch seq : Nat} (cfg : TalkerConfig)
       let frame := frameOut.codes
       onFrame step frame
 
-      let firstCode : Tensor { shape := #[batch, 1], dtype := .Int64, device := device } := Tensor.slice! frame 1 0 1
+      let firstCode : Tensor { shape := #[batch, 1], dtype := .Int64, device := device } := Tensor.slice frame 1 0 1 (_bounds := by have := cfg.residualCodeGroups; simp; omega)
       historyCols := historyCols.push firstCode
       let firstCode1d : Tensor { shape := #[batch], dtype := .Int64, device := device } := Tensor.reshape firstCode #[batch]
       let firstCodes ← Tensor.toUInt64Array firstCode1d
@@ -702,15 +704,15 @@ def streamCodes {batch seq : Nat} (cfg : TalkerConfig)
       let trailingAdd : Tensor { shape := #[batch, 1, cfg.hiddenSize], dtype := dtype.val, device := device } :=
         match trailingTextHidden with
         | some ⟨trailingSeq, trailing⟩ =>
-            if step < trailingSeq then
-              Tensor.slice! trailing 1 step 1
+            if hs : step < trailingSeq then
+              Tensor.slice trailing 1 step 1
             else
               padEmbed
         | none => padEmbed
       let nextEmb : Tensor { shape := #[batch, 1, cfg.hiddenSize], dtype := dtype.val, device := device } := Tensor.add frameOut.summedEmbedding trailingAdd
       let nextPos : Nat := seq + step
-      let cos : Tensor { shape := #[1, cfg.halfHeadDim], dtype := .Float32, device := device } := Tensor.slice! cosAll 0 nextPos 1
-      let sin : Tensor { shape := #[1, cfg.halfHeadDim], dtype := .Float32, device := device } := Tensor.slice! sinAll 0 nextPos 1
+      let cos : Tensor { shape := #[1, cfg.halfHeadDim], dtype := .Float32, device := device } := Tensor.slice cosAll 0 nextPos 1 (_bounds := by have := hstep.upper; simp [nextPos] at this ⊢; omega)
+      let sin : Tensor { shape := #[1, cfg.halfHeadDim], dtype := .Float32, device := device } := Tensor.slice sinAll 0 nextPos 1 (_bounds := by have := hstep.upper; simp [nextPos] at this ⊢; omega)
       let mut h : Tensor { shape := #[batch, 1, cfg.hiddenSize], dtype := dtype.val, device := device } := nextEmb
       for i in [:m.model.layers.size] do
         let layer : TalkerLayer (dtype := dtype) (device := device) cfg ←

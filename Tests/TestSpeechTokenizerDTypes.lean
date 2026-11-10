@@ -5,10 +5,10 @@ import Tests.Assertions
 namespace Tests.SpeechTokenizerDTypes
 open torch torch.qwen3tts
 
-example (_rvq : RVQDecode (device := .CPU))
+example (_rvq : RVQDecode (device := .CPU) (count := 1))
     (_weight : Tensor ⟨#[512, 256, 1], .Float64, .CPU⟩) : True := by
   fail_if_success
-    have _ : RVQDecode (device := .CPU) := { _rvq with outputProj := _weight }
+    have _ : RVQDecode (device := .CPU) (count := 1) := { _rvq with outputProj := _weight }
   trivial
 
 private abbrev bf16 : RealFloatingDType := ⟨.BFloat16, by decide⟩
@@ -17,8 +17,8 @@ example (_layout : SpeechTokenizerDTypes)
     (_codebook : QuantizerCodebook (device := .CPU) _layout)
     (_projection : Tensor ⟨#[512, 256, 1], .Float32, .CPU⟩) : True := by
   fail_if_success
-    have _ : RVQDecode (device := .CPU) _layout :=
-      { outputProj := _projection, codebooks := #[] }
+    have _ : RVQDecode (device := .CPU) _layout (count := 0) :=
+      { outputProj := _projection, codebooks := Vector.empty }
   fail_if_success
     have _ : QuantizerCodebook (device := .CPU) float32SpeechTokenizerDTypes := _codebook
   trivial

@@ -58,7 +58,9 @@ def getBatch {n : Nat} (trainData : Tokens #[n]) (batchSize seqLen : Nat)
   let totalTokens := required
   let startTensor ← Tensor.randint 0 (n - totalTokens + 1).toInt64 #[]
   let start := startTensor.itemInt.toInt.toNat
-  return (trainData.slice! 0 start totalTokens).reshape #[batchSize, seqLen]
+  let ⟨hStart⟩ ← if h : start + totalTokens ≤ n then pure (PLift.up h) else
+    throw <| IO.userError s!"Diffusion batch start {start} exceeds {n - totalTokens}"
+  return (trainData.slice 0 start totalTokens).reshape #[batchSize, seqLen]
 
 /-- Clip gradients for a diffusion transformer block. -/
 def clipBlockGrads {n_head half n_kv_head : Nat}
@@ -86,7 +88,7 @@ def trainStep {modelCfg : Config} {batch seq num_timesteps : Nat}
     (optState : Optim.AdamWState (DiffusionParams modelCfg))
     (schedule : MaskedDiffusionSchedule num_timesteps)
     (x_0 : Tokens #[batch, seq])  -- Clean tokens
-    (rotaryCache : RotaryCache rotaryLen modelCfg.half_head_dim)
+    (rotaryCache : RotaryCache seq modelCfg.half_head_dim)
     (lr : Float)
     : IO (DiffusionParams modelCfg × Optim.AdamWState (DiffusionParams modelCfg) × Float) := do
   -- Zero gradients BEFORE forward/backward
@@ -130,7 +132,7 @@ def evalLoss {modelCfg : Config} {num_timesteps : Nat}
     (schedule : MaskedDiffusionSchedule num_timesteps)
     (valData : Tokens #[n])
     (batchSize seqLen : Nat)
-    (rotaryCache : RotaryCache rotaryLen modelCfg.half_head_dim)
+    (rotaryCache : RotaryCache seqLen modelCfg.half_head_dim)
     (numBatches : Nat)
     : IO Float := do
   let params := TensorStruct.detach params
@@ -154,7 +156,7 @@ def trainLoop {modelCfg : Config} {num_timesteps : Nat}
     (schedule : MaskedDiffusionSchedule num_timesteps)
     (trainData : Tokens #[nTrain])
     (valData : Tokens #[nVal])
-    (rotaryCache : RotaryCache rotaryLen modelCfg.half_head_dim)
+    (rotaryCache : RotaryCache modelCfg.seq_len modelCfg.half_head_dim)
     (evalBatches : Nat := 10)
     : IO (DiffusionParams modelCfg × Float) := do
   let mut params := initParams

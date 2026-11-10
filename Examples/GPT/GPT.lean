@@ -259,10 +259,9 @@ def generate {cfg : Config}
     -- Forward pass to get logits [1, seq, vocab] (training=false disables dropout)
     let logits ← forward params inputTensor false
 
-    -- Get logits for last position: logits[:, -1, :] -> [1, vocab]
-    -- Reshape to [1 * seq * vocab] then slice last vocab elements
-    let flat := logits.reshape #[seq * cfg.vocab_size]
-    let lastLogits := (flat.slice! 0 ((seq - 1) * cfg.vocab_size) cfg.vocab_size).reshape #[1, cfg.vocab_size]
+    let ⟨hSeq⟩ ← if h : 0 < seq then pure (PLift.up h) else
+      throw <| IO.userError "GPT generation requires a non-empty context"
+    let lastLogits := (logits.slice 1 (seq - 1) 1).reshape #[1, cfg.vocab_size]
 
     -- Apply temperature and convert to probabilities
     let scaledLogits := lastLogits / temperature

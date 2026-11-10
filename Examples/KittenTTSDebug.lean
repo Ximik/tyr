@@ -106,7 +106,7 @@ def main (args : List String) : IO UInt32 := do
   torch.manualSeed seed
   let out ← bundle.debugPhonemes phonemes voice speed
   let refStyle ← bundle.loadVoiceStyle voice phonemes.toList.length
-  let decoderStyle : Tensor { shape := #[1, bundle.cfg.styleDim], dtype := .Float32, device := modelDevice } := sliceTensor refStyle 1 0 bundle.cfg.styleDim
+  let decoderStyle : Tensor { shape := #[1, bundle.cfg.styleDim], dtype := .Float32, device := modelDevice } := Tensor.slice refStyle 1 0 bundle.cfg.styleDim (_bounds := by simp [KittenTTSConfig.fullStyleDim]; omega)
   let ids := bundle.inputIdsFromPhonemes phonemes
   let seq := ids.size
   let ⟨hSeq⟩ ← if h : 0 < seq then pure (PLift.up h) else

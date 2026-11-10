@@ -544,7 +544,7 @@ private def runOwnedCacheCheck (device : Device) (bf16 : Bool := false) : IO Uni
     expectRejected (model.prefillSession cfg shortTables embeds session)
       "session rejects short rotary tables without damaging state"
     let functional0 := model.model.initCache cfg 20 device
-    let (expected, functional) ← model.prefill cfg tables embeds functional0 (by simp at hp; omega)
+    let (expected, functional) ← model.prefill cfg tables embeds functional0 (by simp at hp; omega) (by simp at hp; omega)
     let actual ← model.prefillSession cfg tables embeds session
     let prefillDiff ← maxAbsDiff (actual) (expected)
     check (prefillDiff == 0.0) s!"(d) [{lbl}] owned prefill {promptLen} matches functional exactly"
@@ -604,7 +604,7 @@ private def runCacheBenchmark (device : Device) : IO Unit := do
     let mut ownedCapacity : Nat := 0
     for _ in [:3] do
       let (_, initial) ← model.prefill cfg tables (model.embedTokens prompt)
-        (model.model.initCache cfg capacity device (by simp at hc; omega)) (by simp at hc; omega)
+        (model.model.initCache cfg capacity device (by simp at hc; omega)) (by simp at hc; omega) (by decide)
       let mut cache := initial
       synchronize
       let start ← IO.monoMsNow

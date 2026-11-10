@@ -214,12 +214,12 @@ private def forwardEmbedsMaskedWithPositionRows {batch seq : Nat}
     pure (Tensor.zerosFor { shape := #[batch, seq, ThinkerLmVocabSize cfg], dtype, device })
   else
     let mut perBatchHidden : Array (Sigma (fun shape => Tensor { dtype := dtype, device := device, shape := shape })) := #[]
-    for b in [:batch] do
+    for hb : b in [:batch] do
       let row := rows.getD b (Array.replicate seq 0)
       let cosB : Tensor { device := device, shape := #[seq, half], dtype := .Float32 } := gatherRowsByPositions baseCos row
       let sinB : Tensor { device := device, shape := #[seq, half], dtype := .Float32 } := gatherRowsByPositions baseSin row
-      let embB : Tensor { dtype := dtype, device := device, shape := #[1, seq, cfg.textConfig.hiddenSize] } := Tensor.slice! inputsEmbeds 0 b 1
-      let maskB : Tensor { device := device, shape := #[1, seq], dtype := .Int64 } := Tensor.slice! attnMask 0 b 1
+      let embB : Tensor { dtype := dtype, device := device, shape := #[1, seq, cfg.textConfig.hiddenSize] } := Tensor.slice inputsEmbeds 0 b 1 (_bounds := by have := hb.upper; simp at this ⊢; omega)
+      let maskB : Tensor { device := device, shape := #[1, seq], dtype := .Int64 } := Tensor.slice attnMask 0 b 1 (_bounds := by have := hb.upper; simp at this ⊢; omega)
       let hiddenB :=
         m.textModel.layers.foldl
           (fun h layer => layer.forwardMasked cfg.textConfig.headsValid.2.2 h cosB sinB maskB true)
@@ -725,7 +725,7 @@ private partial def greedyLoopUncached {batch : Nat}
     : IO (Sigma (fun outSeq => Tensor { device := device, shape := #[batch, outSeq], dtype := .Int64 })) := do
   if remaining == 0 then
     return ⟨curSeq, curIds⟩
-  if curSeq == 0 then
+  let ⟨hSeq⟩ ← if h : 0 < curSeq then pure (PLift.up h) else
     throw <| IO.userError "generateGreedy requires non-empty prompt sequence"
   let ⟨hPrompt⟩ ← if h : promptSeq ≤ curSeq then pure (PLift.up h) else
     throw <| IO.userError
@@ -744,7 +744,7 @@ private partial def greedyLoopUncached {batch : Nat}
   let logits := m.forwardEmbeds inputsEmbeds none
   let lastPos := curSeq - 1
   let last3 : Tensor { dtype := dtype, device := device, shape := #[batch, 1, ThinkerLmVocabSize cfg] } :=
-    Tensor.reshape (Tensor.slice! logits 1 lastPos 1) #[batch, 1, ThinkerLmVocabSize cfg]
+    Tensor.reshape (Tensor.slice logits 1 lastPos 1) #[batch, 1, ThinkerLmVocabSize cfg]
   let last2 : Tensor { dtype := dtype, device := device, shape := #[batch, ThinkerLmVocabSize cfg] } := Tensor.reshape last3 #[batch, ThinkerLmVocabSize cfg]
   let indices := Tensor.argmax! last2 1
   let nextTokRaw : Tensor { device := device, shape := #[batch], dtype := .Int64 } ← pure (indices.reshape #[batch])

@@ -553,12 +553,12 @@ partial def generateUncached {batch seq : Nat}
       | none, none =>
         pure (m.language_model.forward cfg.text_config cur none)
 
-    if curSeq == 0 then
+    let ⟨hSeq⟩ ← if h : 0 < curSeq then pure (PLift.up h) else
       throw <| IO.userError "generateUncached requires non-empty prompt sequence"
 
     let lastPos := curSeq - 1
     let last3 : Tensor { device := device, shape := #[batch, 1, cfg.text_config.vocab_size], dtype := dtype } :=
-      Tensor.slice! logits 1 lastPos 1
+      Tensor.slice logits 1 lastPos 1
     let last2 : Tensor { device := device, shape := #[batch, cfg.text_config.vocab_size], dtype := dtype } := Tensor.reshape last3 #[batch, cfg.text_config.vocab_size]
     let nextTok ← sampleFromLogits last2.toFloat32 strategy
 

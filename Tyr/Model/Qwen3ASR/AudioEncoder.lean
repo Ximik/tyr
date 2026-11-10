@@ -418,9 +418,9 @@ private def runLayersChunkLocalWith {M : Type → Type} [Monad M] {seq : Nat}
   let mut parts : Array (Sigma (fun shape => Tensor { dtype := dtype, device := device, shape := shape })) := #[]
   let mut start : Nat := 0
   for len in chunkLens do
-    if len != 0 then
+    if h : len != 0 ∧ start + len ≤ seq then
       let seg : Tensor { dtype := dtype, device := device, shape := #[1, len, cfg.dModel] } :=
-        Tensor.slice! hidden 1 start len
+        Tensor.slice hidden 1 start len
       let segOut ← m.layers.foldlM (fun h layer => layerForward layer h none) seg
       parts := parts.push (Tensor.packShape segOut)
       start := start + len
@@ -455,15 +455,17 @@ private def encodeOneSampleVarLenWith {M : Type → Type} [Monad M] {frames : Na
       let mut start : Nat := 0
       for i in [:chunkLens.size] do
         let len := chunkLens.getD i 0
-        if len != 0 then
+        if h : len != 0 ∧ start + len ≤ frames then
           let desiredLen := chunkLensAfterCnn.getD i 0
-          let chunk : Tensor { dtype := dtype, device := device, shape := #[1, cfg.numMelBins, len] } := Tensor.slice! sample 2 start len
+          let chunk : Tensor { dtype := dtype, device := device, shape := #[1, cfg.numMelBins, len] } :=
+            Tensor.slice sample 2 start len
           let padded : Tensor { dtype := dtype, device := device, shape := #[1, cfg.numMelBins, maxChunkLen] } :=
             padRightFrames (cfg := cfg) (frames := len) (maxFrames := maxChunkLen) chunk
           let emb : Tensor { dtype := dtype, device := device, shape := #[1, tChunk, cfg.dModel] } := encodePaddedChunk m padded hT
           let embPos := Tensor.add emb (Tensor.castLike emb posBatch)
           let availLen := if desiredLen <= tChunk then desiredLen else tChunk
-          let seg0 : Tensor { dtype := dtype, device := device, shape := #[1, availLen, cfg.dModel] } := Tensor.slice! embPos 1 0 availLen
+          let seg0 : Tensor { dtype := dtype, device := device, shape := #[1, availLen, cfg.dModel] } := Tensor.slice embPos 1 0 availLen
+            (_bounds := by simp only [availLen]; split <;> simp <;> omega)
           let segDyn : Sigma (fun shape => Tensor { dtype := dtype, device := device, shape := shape }) :=
             if hFits : desiredLen <= availLen then
               Tensor.packShape seg0
@@ -513,9 +515,9 @@ private def forwardVarLenWith {M : Type → Type} [Monad M] {batch frames : Nat}
   if batch == 0 then
     return Tensor.castLike inputFeatures ((Tensor.zeros #[batch, outSeq, cfg.outputDim] false inputFeatures.device))
   let mut rows : Array (Sigma (fun shape => Tensor { dtype := dtype, device := device, shape := shape })) := #[]
-  for b in [:batch] do
+  for hb : b in [:batch] do
     let sample : Tensor { dtype := dtype, device := device, shape := #[1, cfg.numMelBins, frames] } :=
-      Tensor.slice! inputFeatures 0 b 1
+      Tensor.slice inputFeatures 0 b 1 (_bounds := by have := hb.upper; simp at this ⊢; omega)
     let len := featureLens.getD b frames
     let row ← encodeOneSampleVarLenWith layerForward m sample len
     rows := rows.push (Tensor.packShape row)

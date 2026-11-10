@@ -4,8 +4,9 @@ namespace torch.flux
 
 variable {device : Device} {dtype : DType}
 variable [DType.RealFloating dtype]
-private def axisIds {batch seq : Nat} (ids : Tensor { device := device, shape := #[batch, seq, 4], dtype := .Int64 }) (axis : Nat) : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 } :=
-  (Tensor.slice! ids 2 axis 1).reshape #[batch, seq]
+private def axisIds {batch seq : Nat} (ids : Tensor { device := device, shape := #[batch, seq, 4], dtype := .Int64 }) (axis : Nat)
+    (_hAxis : axis < 4 := by decide) : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 } :=
+  (Tensor.slice ids 2 axis 1).reshape #[batch, seq]
 
 private def ropeAxis {batch seq : Nat}
     (ids : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 }) (half theta : Nat)

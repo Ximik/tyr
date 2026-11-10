@@ -566,7 +566,7 @@ def forward {batch seq layerIdx : Nat}
     (cfg : Config)
     (layer : LagunaLayer (device := device) cfg dtype layerIdx)
     (x : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] })
-    {tableLen : Nat} (tables : LagunaRotaryTables (device := device) cfg tableLen)
+    (tables : LagunaRotaryTables (device := device) cfg seq)
     : IO (Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] }) := do
   let h1 := rmsNormWeighted3d layer.input_layernorm x cfg.rms_norm_eps
   let mixed :=
@@ -590,7 +590,7 @@ def forwardWithCache {batch seq cap layerIdx : Nat}
     (cfg : Config)
     (layer : LagunaLayer (device := device) cfg dtype layerIdx)
     (x : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] })
-    {tableLen : Nat} (tables : LagunaRotaryTables (device := device) cfg tableLen)
+    (tables : LagunaRotaryTables (device := device) cfg cap)
     (cache : LagunaCache (device := device) (dtype := dtype) cfg batch cap)
     (hfit : seq ≤ cap)
     : IO (Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] } × LagunaCache (device := device) (dtype := dtype) cfg batch cap) := do
@@ -620,7 +620,7 @@ def forwardStep {batch cap layerIdx : Nat}
     (cfg : Config)
     (layer : LagunaLayer (device := device) cfg dtype layerIdx)
     (x : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.hidden_size] })
-    {tableLen : Nat} (tables : LagunaRotaryTables (device := device) cfg tableLen)
+    (tables : LagunaRotaryTables (device := device) cfg cap)
     (position : Nat) (hpos : position < cap)
     (cache : LagunaCache (device := device) (dtype := dtype) cfg batch cap)
     : IO (Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.hidden_size] } × LagunaCache (device := device) (dtype := dtype) cfg batch cap) := do
@@ -649,6 +649,7 @@ private def forwardOwned {batch seq cap layerIdx : Nat}
     (cfg : Config) (layer : LagunaLayer (device := device) cfg dtype layerIdx)
     (x : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] }) {tableLen : Nat} (tables : LagunaRotaryTables (device := device) cfg tableLen)
     (position : Nat) (prefill : Bool) (hDecode : prefill = false → seq = 1) (kv : LagunaAttention.KVCache (device := device) (dtype := dtype) cfg batch cap)
+    (hcover : position + seq ≤ tableLen)
     : IO (Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] } × LagunaAttention.KVCache (device := device) (dtype := dtype) cfg batch cap) := do
   let h1 := rmsNormWeighted3d layer.input_layernorm x cfg.rms_norm_eps
   let (mixed, kv') ← match cfg.isFullAttentionLayer layerIdx, layer.attn with
@@ -728,7 +729,7 @@ def forwardWithCache {batch seq cap : Nat}
     (cfg : Config)
     (m : LagunaModel (device := device) (dtype := dtype) cfg)
     (x0 : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] })
-    {tableLen : Nat} (tables : LagunaRotaryTables (device := device) cfg tableLen)
+    (tables : LagunaRotaryTables (device := device) cfg cap)
     (cache : LagunaCache (device := device) (dtype := dtype) cfg batch cap)
     (hfit : seq ≤ cap)
     : IO (Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] } × LagunaCache (device := device) (dtype := dtype) cfg batch cap) := do
@@ -740,7 +741,7 @@ def forwardStep {batch cap : Nat}
     (cfg : Config)
     (m : LagunaModel (device := device) (dtype := dtype) cfg)
     (tokenEmbed : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.hidden_size] })
-    {tableLen : Nat} (tables : LagunaRotaryTables (device := device) cfg tableLen)
+    (tables : LagunaRotaryTables (device := device) cfg cap)
     (position : Nat) (hpos : position < cap)
     (cache : LagunaCache (device := device) (dtype := dtype) cfg batch cap)
     : IO (Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.hidden_size] } × LagunaCache (device := device) (dtype := dtype) cfg batch cap) := do
@@ -783,7 +784,7 @@ private def forwardSession {batch seq maxLen : Nat} (cfg : Config) (m : LagunaMo
   let some cache ← get | throw <| IO.userError "Laguna cache session is invalid"
   if x.runtimeShape != #[batch, seq, cfg.hidden_size] then
     throw <| IO.userError "Laguna cache input shape mismatch"
-  if tableLen < position + seq then
+  let ⟨hcover⟩ ← if h : position + seq ≤ tableLen then pure (PLift.up h) else
     throw <| IO.userError "Laguna cache rotary tables do not cover the requested positions"
   for tableDevice in #[tables.fullCos.device, tables.fullSin.device, tables.slidingCos.device,
       tables.slidingSin.device] do
@@ -803,7 +804,7 @@ private def forwardSession {batch seq maxLen : Nat} (cfg : Config) (m : LagunaMo
     let tables := tables.detach
     let (h, caches) ← m.layers.foldlM (fun (h, caches) i layer => do
       let some ⟨n, cached⟩ := caches[i]? | throw <| IO.userError "missing Laguna cache"
-      let (next, kv) ← layer.forwardOwned cfg h tables position prefill hDecode cached
+      let (next, kv) ← layer.forwardOwned cfg h tables position prefill hDecode cached hcover
       pure (next, caches.set! i ⟨n, kv⟩)) (x.detach, cache.kvCaches)
     pure (rmsNormWeighted3d m.norm h cfg.rms_norm_eps, { kvCaches := caches, position := position + seq : LagunaSessionCache (device := device) (dtype := dtype) cfg batch })
   set (some updated)
@@ -851,13 +852,14 @@ def forward {batch seq : Nat}
 def prefill {batch seq cap : Nat}
     (cfg : Config)
     (m : LagunaForCausalLM (device := device) (dtype := dtype) cfg)
-    {tableLen : Nat} (tables : LagunaRotaryTables (device := device) cfg tableLen)
+    (tables : LagunaRotaryTables (device := device) cfg cap)
     (inputsEmbeds : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] })
     (cache : LagunaCache (device := device) (dtype := dtype) cfg batch cap)
-    (hfit : seq ≤ cap)
+    (hfit : seq ≤ cap) (hseq : 0 < seq)
     : IO (Tensor { dtype := dtype, device := device, shape := #[batch, cfg.vocab_size] } × LagunaCache (device := device) (dtype := dtype) cfg batch cap) := do
   let (hidden, cache') ← LagunaModel.forwardWithCache cfg m.model inputsEmbeds tables cache hfit
-  let lastHidden : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.hidden_size] } := Tensor.slice! hidden 1 (seq - 1) 1
+  let lastHidden : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.hidden_size] } :=
+    Tensor.slice hidden 1 (seq - 1) 1
   let logits3 : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.vocab_size] } := Tensor.linear3d lastHidden m.lmHead
   pure (Tensor.reshape logits3 #[batch, cfg.vocab_size], cache')
 
@@ -865,7 +867,7 @@ def prefill {batch seq cap : Nat}
 def decodeStep {batch cap : Nat}
     (cfg : Config)
     (m : LagunaForCausalLM (device := device) (dtype := dtype) cfg)
-    {tableLen : Nat} (tables : LagunaRotaryTables (device := device) cfg tableLen)
+    (tables : LagunaRotaryTables (device := device) cfg cap)
     (tokenEmbed : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.hidden_size] })
     (position : Nat) (hpos : position < cap)
     (cache : LagunaCache (device := device) (dtype := dtype) cfg batch cap)

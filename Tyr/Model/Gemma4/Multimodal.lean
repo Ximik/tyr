@@ -436,8 +436,9 @@ private def buildVisionBidirectionalPrefillMasks {batch seq : Nat}
   let mut slidingFlat : Array Int64 := #[]
   let mut fullFlat : Array Int64 := #[]
 
-  for b in [:batch] do
-    let row2 : Tensor { device := device, shape := #[1, seq], dtype := .Int64 } := Tensor.slice! inputIds 0 b 1
+  for hb : b in [:batch] do
+    let row2 : Tensor { device := device, shape := #[1, seq], dtype := .Int64 } :=
+      Tensor.slice inputIds 0 b 1 (_bounds := by have := hb.upper; simp at this ⊢; omega)
     let row1 : Tensor { device := device, shape := #[seq], dtype := .Int64 } := Tensor.reshape (Tensor.toInt64 row2) #[seq]
     let ids ← Tensor.toUInt64Array row1
     let mut groupIds : Array Int64 := Array.replicate ids.size (-1)

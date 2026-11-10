@@ -1791,9 +1791,9 @@ def reinforcementLearning (cfg : NanoChatConfig) : PipelineM Unit := do
       let inputReshaped := (inputTensor.reshape #[1, context.size]).to trainDevice
       let logits ← moddedGpt.forward params yarn inputReshaped
       -- Flatten logits and extract last position's vocab slice
-      let logitsFlat := logits.reshape #[context.size * modelCfg.vocabSize]
-      let startIdx := (context.size - 1) * modelCfg.vocabSize
-      let lastLogits := logitsFlat.slice! 0 startIdx modelCfg.vocabSize
+      let ⟨hCtx⟩ ← if h : 0 < context.size then pure (PLift.up h) else
+        throw <| IO.userError "generation requires a non-empty context"
+      let lastLogits := logits.slice 1 (context.size - 1) 1
       let rowLogits := lastLogits.reshape #[1, modelCfg.vocabSize]
       let scaled := if grpoCfg.temperature == 1.0 then rowLogits
                     else Tensor.mulScalar rowLogits (1.0 / grpoCfg.temperature)

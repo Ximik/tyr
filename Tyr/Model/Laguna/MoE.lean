@@ -143,12 +143,12 @@ namespace LagunaSparseMoeBlock
 private def dequantExpertSlice {numExperts outFeatures inFeatures : Nat} {pd sd gd : DType}
     (bankPacked : Tensor { dtype := pd, device := device, shape := #[numExperts, outFeatures, inFeatures / 2] })
     (bankScales : Tensor { dtype := sd, device := device, shape := #[numExperts, outFeatures, inFeatures / 16] })
-    (bankGlobal : Tensor { dtype := gd, device := device, shape := #[numExperts] }) (e : Nat)
+    (bankGlobal : Tensor { dtype := gd, device := device, shape := #[numExperts] }) (e : Fin numExperts)
     : IO (Tensor { dtype := .BFloat16, device := device, shape := #[outFeatures, inFeatures] }) := do
   let out ← nvfp4.dequantMatrix
-    ((bankPacked.slice! 0 e 1).reshape #[outFeatures, inFeatures / 2])
-    ((bankScales.slice! 0 e 1).reshape #[outFeatures, inFeatures / 16])
-    (bankGlobal.slice! 0 e 1) outFeatures inFeatures
+    ((bankPacked.slice 0 e 1).reshape #[outFeatures, inFeatures / 2])
+    ((bankScales.slice 0 e 1).reshape #[outFeatures, inFeatures / 16])
+    (bankGlobal.slice 0 e 1) outFeatures inFeatures
   pure out
 
 /-- Fetch one expert's three SwiGLU matrices in BF16: slices of the dense
@@ -157,7 +157,7 @@ private def dequantExpertSlice {numExperts outFeatures inFeatures : Nat} {pd sd 
 private def expertWeights
     (cfg : Config)
     (m : LagunaSparseMoeBlock (device := device) (dtype := dtype) cfg)
-    (e : Nat)
+    (e : Fin cfg.num_experts)
     : IO (Tensor { dtype := dtype, device := device, shape := #[cfg.moe_intermediate_size, cfg.hidden_size] }
         × Tensor { dtype := dtype, device := device, shape := #[cfg.moe_intermediate_size, cfg.hidden_size] }
         × Tensor { dtype := dtype, device := device, shape := #[cfg.hidden_size, cfg.moe_intermediate_size] }) := do
@@ -167,9 +167,9 @@ private def expertWeights
     let up3 := de.upProj
     let down3 := de.downProj
     pure (
-      Tensor.reshape (Tensor.slice! gate3 0 e 1) #[cfg.moe_intermediate_size, cfg.hidden_size],
-      Tensor.reshape (Tensor.slice! up3 0 e 1) #[cfg.moe_intermediate_size, cfg.hidden_size],
-      Tensor.reshape (Tensor.slice! down3 0 e 1) #[cfg.hidden_size, cfg.moe_intermediate_size])
+      Tensor.reshape (Tensor.slice gate3 0 e 1) #[cfg.moe_intermediate_size, cfg.hidden_size],
+      Tensor.reshape (Tensor.slice up3 0 e 1) #[cfg.moe_intermediate_size, cfg.hidden_size],
+      Tensor.reshape (Tensor.slice down3 0 e 1) #[cfg.hidden_size, cfg.moe_intermediate_size])
   | none =>
     let gateW : Tensor { dtype := .BFloat16, device := device, shape := #[cfg.moe_intermediate_size, cfg.hidden_size] } :=
       Tensor.reshape (← dequantExpertSlice (inFeatures := cfg.hidden_size) m.experts.gatePacked.2 m.experts.gateScale.2 m.experts.gateGlobal.2
@@ -335,7 +335,9 @@ def forward2d {tokens : Nat}
         let ⟨nE, pairsE⟩ := Tensor.maskedSelect pairIds (Tensor.eqScalar flatIdx eU.toInt64)
         let tokE := Tensor.indexSelect! tokIdsFlat pairsE
         let wE := Tensor.indexSelect! flatW pairsE
-        let (gateW, upW, downW) ← expertWeights cfg m eU
+        let ⟨hE⟩ ← if h : eU < cfg.num_experts then pure (PLift.up h) else
+          throw <| IO.userError s!"router selected expert {eU} outside {cfg.num_experts} experts"
+        let (gateW, upW, downW) ← expertWeights cfg m ⟨eU, hE⟩
         -- SwiGLU expert MLP in BF16.
         let xE : Tensor { dtype := dtype, device := device, shape := #[nE, cfg.hidden_size] } := Tensor.embedding1d tokE x
         let hid : Tensor { dtype := dtype, device := device, shape := #[nE, cfg.moe_intermediate_size] } :=

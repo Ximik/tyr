@@ -98,7 +98,7 @@ def DiffusionParams.init (cfg : Config) : IO (DiffusionParams cfg) := do
 def bidirectionalAttentionForward {batch seq n_head half : Nat}
     (params : AttentionParams n_head half n_head)
     (x : Activation #[batch, seq, n_head * (2 * half)])
-    (rotaryCache : RotaryCache rotaryLen half)
+    (rotaryCache : RotaryCache seq half)
     : Activation #[batch, seq, n_head * (2 * half)] :=
   let head_dim := 2 * half
 
@@ -112,9 +112,8 @@ def bidirectionalAttentionForward {batch seq n_head half : Nat}
   let k := Tensor.reshape k #[batch, seq, n_head, head_dim]
   let v := Tensor.reshape v #[batch, seq, n_head, head_dim]
 
-  -- Apply rotary embeddings (use full cache - no slicing needed when rotaryLen == seq)
-  let cos := rotaryCache.cos.slice! 0 0 seq
-  let sin := rotaryCache.sin.slice! 0 0 seq
+  let cos := rotaryCache.cos
+  let sin := rotaryCache.sin
   let q := Tensor.applyRotary q cos sin
   let k := Tensor.applyRotary k cos sin
 
@@ -150,7 +149,7 @@ def mlpForward {batch seq n_embd : Nat}
 def blockForward {batch seq n_head half : Nat}
     (params : BlockParams n_head half n_head)
     (x : Activation #[batch, seq, n_head * (2 * half)])
-    (rotaryCache : RotaryCache rotaryLen half)
+    (rotaryCache : RotaryCache seq half)
     : Activation #[batch, seq, n_head * (2 * half)] :=
   -- Attention with residual (pre-norm)
   let x := x + bidirectionalAttentionForward params.attn (norm x) rotaryCache
@@ -162,7 +161,7 @@ def forward {cfg : Config} {batch seq : Nat}
     (params : DiffusionParams cfg)
     (x_t : Tokens #[batch, seq])              -- Noisy tokens (with masks)
     (t : Tokens #[batch])                     -- Timestep indices
-    (rotaryCache : RotaryCache rotaryLen cfg.half_head_dim)
+    (rotaryCache : RotaryCache seq cfg.half_head_dim)
     : Activation #[batch, seq, cfg.vocab_size] :=
   -- Token embedding
   let x := Tensor.embedding x_t params.token_emb  -- [batch, seq, n_embd]
@@ -220,7 +219,7 @@ private def validateSampling (cfg : Config) (batch : Nat) (temperature : Float) 
 -/
 def sampleConfidence {cfg : Config} {batch : Nat}
     (params : DiffusionParams cfg)
-    (rotaryCache : RotaryCache rotaryLen cfg.half_head_dim)
+    (rotaryCache : RotaryCache cfg.seq_len cfg.half_head_dim)
     (confidenceThreshold : Float := 0.5)
     (temperature : Float := 1.0)
     (maxSteps : Nat := 256)
@@ -270,10 +269,10 @@ def sampleConfidence {cfg : Config} {batch : Nat}
     -- Get max probability and predicted token per position
     let (confidences, predictedTokens) := Tensor.maxLast3d! probs  -- along vocab dim
 
-    if step < 3 then
+    if h : step < 3 ∧ 0 < batch * cfg.seq_len then
       -- Debug: show first few predicted tokens and their confidences
-      let conf0 := (confidences.reshape #[batch * cfg.seq_len]).slice! 0 0 1 |>.reshape #[]
-      let tok0 := (predictedTokens.reshape #[batch * cfg.seq_len]).slice! 0 0 1 |>.reshape #[]
+      let conf0 := (confidences.reshape #[batch * cfg.seq_len]).slice 0 0 1 |>.reshape #[]
+      let tok0 := (predictedTokens.reshape #[batch * cfg.seq_len]).slice 0 0 1 |>.reshape #[]
       IO.println s!"  step {step}: conf[0]={Tensor.item conf0}, tok[0]={Tensor.itemInt tok0}"
 
     -- Select positions above threshold AND still masked
@@ -310,7 +309,7 @@ def sampleConfidence {cfg : Config} {batch : Nat}
 -/
 def sampleTopK {cfg : Config} {batch : Nat}
     (params : DiffusionParams cfg)
-    (rotaryCache : RotaryCache rotaryLen cfg.half_head_dim)
+    (rotaryCache : RotaryCache cfg.seq_len cfg.half_head_dim)
     (k : Nat)
     (temperature : Float := 1.0)
     (maxSteps : Nat := 256)
@@ -386,7 +385,7 @@ def sampleTopK {cfg : Config} {batch : Nat}
 -/
 def sampleMultiple {cfg : Config} (numBlocks : Nat)
     (params : DiffusionParams cfg)
-    (rotaryCache : RotaryCache rotaryLen cfg.half_head_dim)
+    (rotaryCache : RotaryCache cfg.seq_len cfg.half_head_dim)
     (k : Nat)
     (temperature : Float := 1.0)
     (maxSteps : Nat := 256)
@@ -400,7 +399,7 @@ def sampleMultiple {cfg : Config} (numBlocks : Nat)
 -/
 def sampleMultipleWithContext {cfg : Config} (numBlocks : Nat)
     (params : DiffusionParams cfg)
-    (rotaryCache : RotaryCache rotaryLen cfg.half_head_dim)
+    (rotaryCache : RotaryCache cfg.seq_len cfg.half_head_dim)
     (contextTokens : Tokens #[numBlocks, cfg.context_len])
     (k : Nat)
     (temperature : Float := 1.0)
@@ -414,7 +413,7 @@ def sampleMultipleWithContext {cfg : Config} (numBlocks : Nat)
 -/
 def sampleMultipleWithPrompt {cfg : Config} (numBlocks : Nat)
     (params : DiffusionParams cfg)
-    (rotaryCache : RotaryCache rotaryLen cfg.half_head_dim)
+    (rotaryCache : RotaryCache cfg.seq_len cfg.half_head_dim)
     (prompt : Tokens #[cfg.context_len])
     (k : Nat)
     (temperature : Float := 1.0)

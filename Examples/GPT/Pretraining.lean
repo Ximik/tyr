@@ -175,8 +175,10 @@ def runPretraining (cfg : PretrainingConfig)
 
     -- Get batch: x = tokens[start:start+seq], y = tokens[start+1:start+seq+1]
     let batchLen := cfg.deviceBatchSize * cfg.seqLen
-    let xFlat : Tokens (device := .CPU) #[batchLen] := trainData.slice! 0 startIdx batchLen
-    let yFlat : Tokens (device := .CPU) #[batchLen] := trainData.slice! 0 (startIdx + 1) batchLen
+    let ⟨hStart⟩ ← if h : startIdx + batchLen + 1 ≤ numTokens then pure (PLift.up h) else
+      throw <| IO.userError s!"GPT pretraining batch start {startIdx} exceeds {maxStart}"
+    let xFlat : Tokens (device := .CPU) #[batchLen] := trainData.slice 0 startIdx batchLen
+    let yFlat : Tokens (device := .CPU) #[batchLen] := trainData.slice 0 (startIdx + 1) batchLen
 
     let x := (Tensor.reshape xFlat #[cfg.deviceBatchSize, cfg.seqLen]).to device
     let y := (Tensor.reshape yFlat #[cfg.deviceBatchSize, cfg.seqLen]).to device

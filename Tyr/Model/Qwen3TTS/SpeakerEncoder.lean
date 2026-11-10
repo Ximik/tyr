@@ -151,9 +151,14 @@ def forward {batch frames channels scale kernelSize dilation : Nat}
     Id.run do
       let partChannels := channels / scale
       let mut parts : Array (Tensor { shape := #[batch, partChannels, frames], dtype := dtype.val, device := device }) := #[]
-      for i in [:scale] do
+      for h : i in [:scale] do
         let start := i * partChannels
-        let part : Tensor { shape := #[batch, partChannels, frames], dtype := dtype.val, device := device } := Tensor.slice! x 1 start partChannels
+        have hFit : start + partChannels ≤ channels := by
+          have hi : i + 1 ≤ scale := by have := h.upper; simp at this; omega
+          have := Nat.le_trans (Nat.mul_le_mul_left partChannels hi) (Nat.div_mul_le_self channels scale)
+          simpa [start, Nat.mul_succ, Nat.mul_comm] using this
+        let part : Tensor { shape := #[batch, partChannels, frames], dtype := dtype.val, device := device } :=
+          Tensor.slice x 1 start partChannels
         parts := parts.push part
 
       let mut outputs : Array (Tensor { shape := #[batch, partChannels, frames], dtype := dtype.val, device := device }) := #[]

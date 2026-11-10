@@ -45,9 +45,6 @@ def istftTensor {s : Shape} (input : Tensor { shape := s, dtype := .Float32, dev
     Tensor { shape := #[length], dtype := .Float32, device := device } :=
   Tensor.ofRaw! "istftTensor" (RawTensor.istft input.raw nFft hopLength winLength window.raw center normalized length)
 
-def sliceTensor {s : Shape} {d : DType} (x : Tensor { shape := s, dtype := d, device := device }) (dim : Nat) (start len : Nat) :
-    Tensor { shape := (s.set! dim len), dtype := d, device := device } := x.slice! dim start len
-
 def stftTensor {n winLength : Nat} {out : Shape} (input : Tensor { shape := #[n], dtype := .Float32, device := device })
     (nFft hopLength : Nat) (window : Tensor { shape := #[winLength], dtype := .Float32, device := device })
     (center normalized : Bool) : Tensor { shape := out, dtype := .Float32, device := device } :=

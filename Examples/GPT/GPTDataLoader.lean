@@ -88,11 +88,11 @@ def SequentialLoader.reset {n : Nat} (loader : SequentialLoader n) : SequentialL
 def SequentialLoader.getBatch {n : Nat} (loader : SequentialLoader n)
     (batchSize seqLen : Nat) : Option (Tensor { shape := #[batchSize, seqLen + 1], dtype := .Int64, device := .CPU } × SequentialLoader n) :=
   let required := batchSize * (seqLen + 1)
-  if batchSize == 0 || seqLen == 0 || loader.currentPos + required > n then
+  if h : batchSize == 0 || seqLen == 0 || loader.currentPos + required > n then
     none
   else
     let requiredLen := required
-    let batch := (loader.tokens.slice! 0 loader.currentPos requiredLen).reshape
+    let batch := (loader.tokens.slice 0 loader.currentPos requiredLen (_bounds := by simp at h; simp [requiredLen]; omega)).reshape
       #[batchSize, seqLen + 1]
     let newLoader := { loader with currentPos := loader.currentPos + requiredLen }
     some (batch, newLoader)
@@ -107,7 +107,9 @@ def SequentialLoader.sampleRandomBatch {n : Nat} (loader : SequentialLoader n)
     throw <| IO.userError "SequentialLoader: random range exceeds Int64 capacity"
   let startIdx ← Tensor.randint 0 (Int64.ofNat choices) #[]
   let startPos := startIdx.itemInt.toInt.toNat
-  let sliced := loader.tokens.slice! 0 startPos requiredLen
+  let ⟨hStart⟩ ← if h : startPos + requiredLen ≤ n then pure (PLift.up h) else
+    throw <| IO.userError "SequentialLoader: random start exceeds available tokens"
+  let sliced := loader.tokens.slice 0 startPos requiredLen
   let batch := sliced.reshape #[batchSize, blockSize + 1] (by simp [hRequired])
   let input := batch.slice 1 0 blockSize
   let target := batch.slice 1 1 blockSize

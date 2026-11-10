@@ -390,6 +390,18 @@ theorem fullHeadDim_le_max (cfg : Config) : fullHeadDim cfg ≤ maxHeadDim cfg :
   unfold Gemma4Config.maxHeadDim; split <;> omega
 def maxAttentionDim (cfg : Config) : Nat := Gemma4Config.maxAttentionDim cfg
 def maxKVProjDim (cfg : Config) : Nat := Gemma4Config.maxKVProjDim cfg
+
+theorem qSliding_le (cfg : Config) : cfg.num_attention_heads * cfg.head_dim ≤ maxAttentionDim cfg :=
+  Nat.mul_le_mul_left _ cfg.headDim_le_max
+
+theorem qFull_le (cfg : Config) : cfg.num_attention_heads * fullHeadDim cfg ≤ maxAttentionDim cfg :=
+  Nat.mul_le_mul_left _ cfg.fullHeadDim_le_max
+
+theorem kvSliding_le (cfg : Config) : cfg.num_key_value_heads * cfg.head_dim ≤ maxKVProjDim cfg :=
+  Nat.mul_le_mul cfg.kvHeads_le_max cfg.headDim_le_max
+
+theorem kvFull_le (cfg : Config) : fullNumKVHeads cfg * fullHeadDim cfg ≤ maxKVProjDim cfg :=
+  Nat.mul_le_mul cfg.fullKVHeads_le_max cfg.fullHeadDim_le_max
 def fullRotaryDim (cfg : Config) : Nat := Gemma4Config.fullRotaryDim cfg
 def fullRotaryHalfDim (cfg : Config) : Nat := Gemma4Config.fullRotaryHalfDim cfg
 def maxIntermediateSize (cfg : Config) : Nat := Gemma4Config.maxIntermediateSize cfg
