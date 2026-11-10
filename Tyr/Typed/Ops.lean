@@ -94,7 +94,7 @@ def requiresGrad {σ : StaticSpec} (t : Tensor σ) : Bool :=
 
 /-- Read a scalar as a host Float. Nonscalar inputs do not typecheck. -/
 def item? {d : DType} {dev : Device} (t : Tensor ⟨#[], d, dev⟩) : Except String Float :=
-  RawTensor.itemChecked t.raw
+  RawTensor.item? t.raw
 
 /-- Read a scalar as a host Float; use `item?` to recover conversion failures. -/
 def item {d : DType} {dev : Device} (t : Tensor ⟨#[], d, dev⟩) : Float :=
