@@ -1,7 +1,6 @@
 import LeanTest
 import Tyr.Typed.Neural
 import Tyr.Inference.OwnedKV
-import Tyr.Model.BranchingFlows.TypedOps
 
 namespace Tests.TensorValueUpdates
 
@@ -45,13 +44,6 @@ open torch
   LeanTest.assertEqual (← view.toFloatArray) #[3, 3]
     "Functional slice updates must preserve retained storage views"
   LeanTest.assertEqual (← updated.toFloatArray) #[3, 7, 7, 3]
-
-@[test] def testBranchingCopyPreservesDestinationAlias : IO Unit := do
-  let original := Tensor.full #[2] 3
-  let updated ← branching.copyIntoChecked original (Tensor.full #[2] 7)
-  LeanTest.assertEqual (← original.toFloatArray) #[3, 3]
-    "Branching copy must preserve retained destination aliases"
-  LeanTest.assertEqual (← updated.toFloatArray) #[7, 7]
 
 @[test] def testDynamicCopyPreservesDTypeAndRejectsImplicitCast : IO Unit := do
   let original := (Tensor.fullInt #[2] 3)

@@ -55,7 +55,7 @@ def privateImplementationBypass (σ : StaticSpec)
   (tensorPrivateImplementation% torch.Tensor.zerosForImpl) σ
 
 @[test]
-def testCheckedAdmissionAndOpaqueAccessors : IO Unit := do
+def testAdmissionAndOpaqueAccessors : IO Unit := do
   let raw := RawTensor.zeros #[2] false .CPU
   let spec : StaticSpec := { shape := #[2], dtype := .Float32, device := .CPU }
   let tensor : Tensor spec := Tensor.ofRaw! "test" raw

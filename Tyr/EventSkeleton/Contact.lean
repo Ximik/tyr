@@ -706,12 +706,18 @@ def totalCandidates (batch : PackedContactCandidateBatch) : Nat :=
   | some n => n
   | none => batch.size
 
+/-- The columns every candidate reads have one entry per id. -/
+structure RequiredColumns (batch : PackedContactCandidateBatch) : Prop where
+  signedDistance : batch.signedDistance.size = batch.size
+  normalJacobian : batch.normalJacobian.size = batch.size
+  tangentJacobian : batch.tangentJacobian.size = batch.size
+
 private def validateRequiredColumn?
     (batch : PackedContactCandidateBatch)
     (field : String)
-    (actual : Nat) : Except String Unit :=
-  if actual == batch.size then
-    .ok ()
+    (actual : Nat) : Except String (PLift (actual = batch.size)) :=
+  if h : actual = batch.size then
+    .ok ⟨h⟩
   else
     .error s!"packed contact batch {batch.label}: {field} size {actual} != ids size {batch.size}"
 
@@ -742,10 +748,11 @@ def validateSourceCandidateCount? (batch : PackedContactCandidateBatch) :
       else
         pure ()
 
-def validate? (batch : PackedContactCandidateBatch) : Except String Unit := do
-  batch.validateRequiredColumn? "signedDistance" batch.signedDistance.size
-  batch.validateRequiredColumn? "normalJacobian" batch.normalJacobian.size
-  batch.validateRequiredColumn? "tangentJacobian" batch.tangentJacobian.size
+def validate? (batch : PackedContactCandidateBatch) :
+    Except String (PLift batch.RequiredColumns) := do
+  let ⟨hDistance⟩ ← batch.validateRequiredColumn? "signedDistance" batch.signedDistance.size
+  let ⟨hNormal⟩ ← batch.validateRequiredColumn? "normalJacobian" batch.normalJacobian.size
+  let ⟨hTangent⟩ ← batch.validateRequiredColumn? "tangentJacobian" batch.tangentJacobian.size
   batch.validateOptionalColumn? "bodyA" batch.bodyA.size
   batch.validateOptionalColumn? "bodyB" batch.bodyB.size
   batch.validateOptionalColumn? "point_W" batch.point_W.size
@@ -760,40 +767,38 @@ def validate? (batch : PackedContactCandidateBatch) : Except String Unit := do
   batch.validateFiniteColumn? "normalVelocity" batch.normalVelocity
   batch.validateFiniteColumn? "tangentVelocity" batch.tangentVelocity
   batch.validateFiniteColumn? "tangentVelocity2" batch.tangentVelocity2
+  pure ⟨⟨hDistance, hNormal, hTangent⟩⟩
 
-private def stringColumnValue (values : Array String) (i : Nat) : String :=
-  if values.isEmpty then "" else values[i]!
+/-- An absent optional column (empty) reads as the default; `validate?` rejects
+    a present column without one entry per id. -/
+private def optionalColumnValue [Inhabited α] (values : Array α) (i : Nat) : α :=
+  values[i]?.getD default
 
-private def floatColumnValue (values : Array Float) (i : Nat) : Float :=
-  if values.isEmpty then 0.0 else values[i]!
-
-private def arrayColumnValue (values : Array (Array Float)) (i : Nat) : Array Float :=
-  if values.isEmpty then #[] else values[i]!
-
-private def candidateAtUnchecked
+private def candidateAt
     (batch : PackedContactCandidateBatch)
-    (i : Nat) : ContactCandidate :=
+    (columns : batch.RequiredColumns)
+    (i : Fin batch.size) : ContactCandidate :=
   {
-    id := batch.ids[i]!
-    bodyA := stringColumnValue batch.bodyA i
-    bodyB := stringColumnValue batch.bodyB i
-    point_W := arrayColumnValue batch.point_W i
-    normal_W := arrayColumnValue batch.normal_W i
-    signedDistance := batch.signedDistance[i]!
-    normalVelocity := floatColumnValue batch.normalVelocity i
-    tangentVelocity := floatColumnValue batch.tangentVelocity i
-    tangentVelocity2 := floatColumnValue batch.tangentVelocity2 i
-    normalJacobian := batch.normalJacobian[i]!
-    tangentJacobian := batch.tangentJacobian[i]!
-    tangentJacobian2 := arrayColumnValue batch.tangentJacobian2 i
-    label := stringColumnValue batch.labels i
+    id := batch.ids[i.val]'i.isLt
+    bodyA := optionalColumnValue batch.bodyA i
+    bodyB := optionalColumnValue batch.bodyB i
+    point_W := optionalColumnValue batch.point_W i
+    normal_W := optionalColumnValue batch.normal_W i
+    signedDistance := batch.signedDistance[i.val]'(columns.signedDistance.symm ▸ i.isLt)
+    normalVelocity := optionalColumnValue batch.normalVelocity i
+    tangentVelocity := optionalColumnValue batch.tangentVelocity i
+    tangentVelocity2 := optionalColumnValue batch.tangentVelocity2 i
+    normalJacobian := batch.normalJacobian[i.val]'(columns.normalJacobian.symm ▸ i.isLt)
+    tangentJacobian := batch.tangentJacobian[i.val]'(columns.tangentJacobian.symm ▸ i.isLt)
+    tangentJacobian2 := optionalColumnValue batch.tangentJacobian2 i
+    label := optionalColumnValue batch.labels i
   }
 
 def candidateAt? (batch : PackedContactCandidateBatch) (i : Nat) :
     Except String ContactCandidate := do
-  batch.validate?
-  if i < batch.size then
-    pure (batch.candidateAtUnchecked i)
+  let ⟨columns⟩ ← batch.validate?
+  if h : i < batch.size then
+    pure (batch.candidateAt columns ⟨i, h⟩)
   else
     .error s!"packed contact batch {batch.label}: candidate index {i} out of bounds for {batch.size}"
 
@@ -801,11 +806,11 @@ private def materializeIndices?
     (batch : PackedContactCandidateBatch)
     (indices : Array Nat)
     (label : String) : Except String ContactCandidateSet := do
-  batch.validate?
+  let ⟨columns⟩ ← batch.validate?
   let mut candidates : Array ContactCandidate := #[]
   for i in indices do
-    if i < batch.size then
-      candidates := candidates.push (batch.candidateAtUnchecked i)
+    if h : i < batch.size then
+      candidates := candidates.push (batch.candidateAt columns ⟨i, h⟩)
     else
       .error s!"packed contact batch {batch.label}: retained index {i} out of bounds for {batch.size}"
   let set : ContactCandidateSet := {
@@ -828,7 +833,7 @@ def toCandidateSet? (batch : PackedContactCandidateBatch) (label : String := "")
 
 def minimumSignedDistance? (batch : PackedContactCandidateBatch) :
     Except String (Option Float) := do
-  batch.validate?
+  let _ ← batch.validate?
   pure <|
     batch.signedDistance.foldl
       (fun acc d =>
@@ -842,7 +847,7 @@ def retainedByDistance?
     (distanceTol : Float)
     (label : String := "") :
     Except String ContactCandidateSet := do
-  batch.validate?
+  let _ ← batch.validate?
   let mut indices : Array Nat := #[]
   for i in [:batch.size] do
     if batch.signedDistance[i]! <= distanceTol then
@@ -878,7 +883,7 @@ def retainedClosestK?
     (k : Nat)
     (label : String := "") :
     Except String ContactCandidateSet := do
-  batch.validate?
+  let _ ← batch.validate?
   let mut indices : Array Nat := #[]
   for i in [:batch.size] do
     indices := insertClosestIndex batch k i indices
@@ -905,7 +910,7 @@ namespace ContactCandidateProvider
 private def resolvedLabel (providerLabel label : String) : String :=
   if label.isEmpty then providerLabel else label
 
-def candidatesCheckedAt? {State : Type}
+def validCandidatesAt? {State : Type}
     (provider : ContactCandidateProvider State)
     (state : State)
     (jacobianWidth? : Option Nat := none) :
@@ -923,7 +928,7 @@ def supportAt? {State : Type}
     (jacobianWidth? : Option Nat := none)
     (label : String := "") :
     Except String ContactSupport := do
-  let set ← provider.candidatesCheckedAt? state jacobianWidth?
+  let set ← provider.validCandidatesAt? state jacobianWidth?
   pure <|
     (set.selectWithPolicy policy (resolvedLabel provider.label label))
       |>.classifyCandidates distanceTol tangentVelocityTol
@@ -959,7 +964,7 @@ def minimumSignedDistanceAt? {State : Type}
     (state : State)
     (jacobianWidth? : Option Nat := none) :
     Except String (Option Float) := do
-  let set ← provider.candidatesCheckedAt? state jacobianWidth?
+  let set ← provider.validCandidatesAt? state jacobianWidth?
   pure set.minimumSignedDistance?
 
 end ContactCandidateProvider

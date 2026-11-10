@@ -273,19 +273,17 @@ def legA (p : CompassParams) : Float :=
 def legB (p : CompassParams) : Float :=
   p.centerOfMassLeg
 
-def massMatrix (p : CompassParams) (x : CompassState) : Array (Array Float) :=
+def massMatrix (p : CompassParams) (x : CompassState) : (Float × Float) × (Float × Float) :=
   let m := p.massLeg
   let mh := p.massHip
   let a := legA p
   let b := legB p
   let l := p.lengthLeg
   let c := Float.cos (x.swing - x.stance)
-  #[
-    #[mh * l * l + m * (l * l + a * a), -m * l * b * c],
-    #[-m * l * b * c, m * b * b]
-  ]
+  ((mh * l * l + m * (l * l + a * a), -m * l * b * c),
+    (-m * l * b * c, m * b * b))
 
-def dynamicsBiasTerm (p : CompassParams) (x : CompassState) : Array Float :=
+def dynamicsBiasTerm (p : CompassParams) (x : CompassState) : Float × Float :=
   let m := p.massLeg
   let mh := p.massHip
   let a := legA p
@@ -295,23 +293,25 @@ def dynamicsBiasTerm (p : CompassParams) (x : CompassState) : Array Float :=
   let s := Float.sin (x.stance - x.swing)
   let vst := x.stanceDot
   let vsw := x.swingDot
-  #[
-    -m * l * b * vsw * vsw * s - (mh * l + m * (a + l)) * g * Float.sin x.stance,
-    m * l * b * vst * vst * s + m * b * g * Float.sin x.swing
-  ]
+  (-m * l * b * vsw * vsw * s - (mh * l + m * (a + l)) * g * Float.sin x.stance,
+    m * l * b * vst * vst * s + m * b * g * Float.sin x.swing)
 
-def acceleration (p : CompassParams) (torque : Float) (x : CompassState) : Array Float :=
-  let bias := dynamicsBiasTerm p x
-  let rhs := #[-torque - bias.getD 0 0.0, torque - bias.getD 1 0.0]
-  DenseLinearAlgebra.solveUnchecked (massMatrix p x) rhs
+/-- Solve the 2×2 mass-matrix system by Cramer's rule. -/
+def acceleration (p : CompassParams) (torque : Float) (x : CompassState) : Float × Float :=
+  let (b0, b1) := dynamicsBiasTerm p x
+  let ((m00, m01), (m10, m11)) := massMatrix p x
+  let r0 := -torque - b0
+  let r1 := torque - b1
+  let det := m00 * m11 - m01 * m10
+  ((r0 * m11 - m01 * r1) / det, (m00 * r1 - m10 * r0) / det)
 
 def derivative (p : CompassParams) (torque : Float) (x : CompassState) : CompassState :=
-  let vdot := acceleration p torque x
+  let (stanceDdot, swingDdot) := acceleration p torque x
   {
     stance := x.stanceDot
     swing := x.swingDot
-    stanceDot := vdot.getD 0 0.0
-    swingDot := vdot.getD 1 0.0
+    stanceDot := stanceDdot
+    swingDot := swingDdot
   }
 
 def vectorFieldArray (p : CompassParams) (torque : Float) (x : CompassState) : Array Float :=

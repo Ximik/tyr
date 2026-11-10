@@ -48,7 +48,7 @@ structure Config where
 
 /-- Validate the batch token count before it reaches native code.
     `extra` is used for the additional GPT target token in each row. -/
-def checkedBatchTokens (batchSize seqLen : Nat) (extra : Nat := 0) :
+def batchTokenCount (batchSize seqLen : Nat) (extra : Nat := 0) :
     IO { count : Nat // count = batchSize * (seqLen + extra) } := do
   if batchSize == 0 || seqLen == 0 then
     throw <| IO.userError "Batch size and sequence length must be positive"
@@ -190,7 +190,7 @@ def BOSFinder.take {n : Nat} (finder : BOSFinder n) (tokens : Tensor { shape := 
 def BOSFinder.getBatch {n : Nat} (finder : BOSFinder n) (tokens : Tensor { shape := #[n], dtype := .Int64, device := device })
     (batchSize seqLen : Nat)
     : IO (Option (Tensor { shape := #[batchSize, seqLen], dtype := .Int64, device := device }) × BOSFinder n) := do
-  let ⟨requiredLen, hRequired⟩ ← checkedBatchTokens batchSize seqLen
+  let ⟨requiredLen, hRequired⟩ ← batchTokenCount batchSize seqLen
   if finder.currentPos > n then
     throw <| IO.userError "Data cursor position exceeds shard length"
   if hFits : requiredLen ≤ n - finder.currentPos then
@@ -493,7 +493,7 @@ def DistributedDataGenerator.nextTokens (gen : DistributedDataGenerator) (count 
 def DistributedDataGenerator.nextBatch (gen : DistributedDataGenerator) (batchSize seqLen : Nat)
     : IO (Option (Tensor { shape := #[batchSize, seqLen], dtype := .Int64, device := .CPU }) ×
           DistributedDataGenerator) := do
-  let ⟨count, hCount⟩ ← checkedBatchTokens batchSize seqLen
+  let ⟨count, hCount⟩ ← batchTokenCount batchSize seqLen
   let (tokens, gen') ← gen.nextTokens count
   return (some (tokens.reshape #[batchSize, seqLen] (by simp [hCount])), gen')
 

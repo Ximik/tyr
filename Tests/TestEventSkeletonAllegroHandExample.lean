@@ -480,7 +480,7 @@ def testJointControlPrimitiveProviderRecomputesLatchedCommandAndPlantState :
     allegroJointControlPhysicsState jointControlParams step commanded
   let controllerOutput ← assertOk snapshot.controllerOutput?
     "Allegro dynamic provider controller output"
-  let primitives ← assertOk (provider.primitivesCheckedAt? snapshot)
+  let primitives ← assertOk (provider.validPrimitivesAt? snapshot)
     "Allegro dynamic provider primitives"
   let actuatedStep := { step with actuation := controllerOutput.feedback }
   let directPrimitives ← assertOk
@@ -525,7 +525,7 @@ def testJointControlPrimitiveProviderRecomputesLatchedCommandAndPlantState :
     "Provider solve should use the current Allegro mass primitive"
 
   let badMsg ← assertError
-    (provider.primitivesCheckedAt?
+    (provider.validPrimitivesAt?
       { snapshot with
         commanded :=
           { commanded with commandedPosition := #[1.0] } })

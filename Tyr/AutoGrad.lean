@@ -759,7 +759,7 @@ def getExplicitParamCount (fn : Lean.Name) : Lean.CoreM Nat := do
           count := count + 1
       return count
 
-def parseStaticIndicesChecked (fn : Lean.Name) (staticIndices : Array Nat) : Lean.CoreM (Array ParamKind) := do
+def staticParamKinds (fn : Lean.Name) (staticIndices : Array Nat) : Lean.CoreM (Array ParamKind) := do
   let numParams ← getExplicitParamCount fn
   for idx in staticIndices do
     if idx >= numParams then
@@ -812,7 +812,7 @@ initialize
       | `(attr| jvp $id, static := [$indices,*]) =>
         let primalFn ← resolvePrimalNameForAttr declName id.getId
         let staticIndices := indices.getElems.map fun n => n.getNat
-        let paramKinds ← parseStaticIndicesChecked primalFn staticIndices
+        let paramKinds ← staticParamKinds primalFn staticIndices
         registerLeanJVPRuleWithKinds primalFn declName paramKinds
       | _ => throwError "invalid jvp attribute with static"
   }
@@ -826,7 +826,7 @@ initialize
       | `(attr| vjp $id, static := [$indices,*]) =>
         let primalFn ← resolvePrimalNameForAttr declName id.getId
         let staticIndices := indices.getElems.map fun n => n.getNat
-        let paramKinds ← parseStaticIndicesChecked primalFn staticIndices
+        let paramKinds ← staticParamKinds primalFn staticIndices
         registerLeanVJPRuleWithKinds primalFn declName paramKinds
       | _ => throwError "invalid vjp attribute with static"
   }
@@ -854,7 +854,7 @@ initialize
       match stx with
       | `(attr| autodiff, static := [$indices,*]) =>
         let staticIndices := indices.getElems.map fun n => n.getNat
-        let paramKinds ← parseStaticIndicesChecked declName staticIndices
+        let paramKinds ← staticParamKinds declName staticIndices
         deriveAndRegisterADRules declName paramKinds
       | _ => throwError "invalid autodiff attribute with static"
   }

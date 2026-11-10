@@ -143,11 +143,11 @@ std::vector<AbortCase> cases() {
     auto input = full({2, 3}, 4);
     Object r(lean_torch_transpose(input.get(), Nat(0), Nat(std::numeric_limits<uint64_t>::max())), lean_dec);
   });
-  add("svd-checked-integral", "floating point or complex", [] {
+  add("svd-try-integral", "floating point or complex", [] {
     Object input(lean_torch_full_int(shape({2, 2}), 3), lean_dec);
     Object r(lean_torch_svd_try(input.get()), lean_dec);
   });
-  add("svd-checked-missing-kernel", "not implemented for", [] {
+  add("svd-try-missing-kernel", "not implemented for", [] {
     auto input = cast(full({2, 2}, 1).get(), tyr::lean::DType::Complex32);
     Object r(lean_torch_svd_try(input.get()), lean_dec);
   });

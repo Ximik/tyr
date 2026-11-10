@@ -22,7 +22,7 @@ open torch
 -/
 def BatchIterator.nextGPT (iter : BatchIterator) (batchSize seqLen : Nat)
     : IO (Option (Tensor { shape := #[batchSize, seqLen], dtype := .Int64, device := .CPU } × Tensor { shape := #[batchSize, seqLen], dtype := .Int64, device := .CPU }) × BatchIterator) := do
-  let _ ← checkedBatchTokens batchSize seqLen 1
+  let _ ← batchTokenCount batchSize seqLen 1
   -- We need seqLen + 1 to split into input and target
   let (maybeBatch, newBosFinder) ← iter.shard.bosFinder.getBatch
     iter.shard.tokens batchSize (seqLen + 1)
@@ -46,7 +46,7 @@ def BatchIterator.nextGPT (iter : BatchIterator) (batchSize seqLen : Nat)
 /-- Get the next batch for GPT training. -/
 def DistributedDataGenerator.nextBatchGPT (gen : DistributedDataGenerator) (b s : Nat)
     : IO (Option (Tensor { shape := #[b, s], dtype := .Int64, device := .CPU } × Tensor { shape := #[b, s], dtype := .Int64, device := .CPU }) × DistributedDataGenerator) := do
-  let ⟨count, hCount⟩ ← checkedBatchTokens b s 1
+  let ⟨count, hCount⟩ ← batchTokenCount b s 1
   let (tokens, gen') ← gen.nextTokens count
   let batch := tokens.reshape #[b, s + 1] (by simp [hCount])
   let input := batch.slice 1 0 s
@@ -99,7 +99,7 @@ def SequentialLoader.getBatch {n : Nat} (loader : SequentialLoader n)
 
 def SequentialLoader.sampleRandomBatch {n : Nat} (loader : SequentialLoader n)
     (batchSize blockSize : Nat) : IO (Tensor { shape := #[batchSize, blockSize], dtype := .Int64, device := .CPU } × Tensor { shape := #[batchSize, blockSize], dtype := .Int64, device := .CPU }) := do
-  let ⟨requiredLen, hRequired⟩ ← checkedBatchTokens batchSize blockSize 1
+  let ⟨requiredLen, hRequired⟩ ← batchTokenCount batchSize blockSize 1
   if requiredLen > n then
     throw <| IO.userError "SequentialLoader: batch exceeds available tokens"
   let choices := n - requiredLen + 1

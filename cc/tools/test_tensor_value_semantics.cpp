@@ -62,11 +62,10 @@ Object ioTensor(lean_object* result) {
   require(!lean_is_scalar(value) && lean_is_external(value), "IO update did not return RawTensor");
   return Object(retain(value), lean_dec);
 }
-enum class Update { Copy, Branching, CacheSlice, PureSlice };
+enum class Update { Copy, CacheSlice, PureSlice };
 const char* name(Update update) {
   switch (update) {
     case Update::Copy: return "copyInto";
-    case Update::Branching: return "copyInplace";
     case Update::CacheSlice: return "copySliceIO";
     case Update::PureSlice: return "sliceScatter";
   }
@@ -76,7 +75,6 @@ bool sliced(Update update) { return update == Update::CacheSlice || update == Up
 Object apply(Update update, lean_object* destination, lean_object* source) {
   lean_object* result;
   if (update == Update::Copy) result = lean_torch_copy_(destination, source);
-  else if (update == Update::Branching) result = lean_torch_copy_inplace(destination, source);
   else if (update == Update::CacheSlice) result = lean_torch_copy_slice_io(destination, Nat(0), Nat(0), source);
   else result = lean_torch_slice_scatter_along_dim(destination, Nat(0), Nat(0), source);
 #ifdef TYR_LEGACY_VALUE_UPDATES
@@ -342,7 +340,7 @@ int main() {
       ++failed; std::cout << "FAIL " << label << ": " << error.what() << '\n';
     }
   };
-  for (auto update : {Update::Copy, Update::Branching, Update::CacheSlice, Update::PureSlice}) {
+  for (auto update : {Update::Copy, Update::CacheSlice, Update::PureSlice}) {
     auto prefix = std::string(name(update)) + "/";
     run(prefix + "shared-Lean", [&] { sharedLean(update); });
     run(prefix + "native-alias", [&] { nativeAlias(update); });

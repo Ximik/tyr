@@ -6,7 +6,7 @@ namespace Tests.OperationContracts
 
 open torch
 
-private def checked {α : Type} (result : Except String α) : IO α :=
+private def expectOk {α : Type} (result : Except String α) : IO α :=
   match result with
   | .ok value => pure value
   | .error message => throw (IO.userError message)
@@ -64,16 +64,16 @@ example (_empty : Tensor ⟨#[0], .Float32, .CPU⟩) (_complex : Tensor ⟨#[2],
   fail_if_success have _ := Tensor.maxAll _complex
   trivial
 
-@[test] def testCheckedShapeErrorsAreRecoverable : IO Unit := do
+@[test] def testShapeErrorsAreRecoverable : IO Unit := do
   let x := Tensor.ones #[2]
   expectError (Tensor.catMany? #[x.packShape, x.packShape] 9 #[4]) "axis"
   expectError (Tensor.catMany? (d := .Float32) (dev := .CPU) #[] 0 #[0]) "at least one"
-  let concatenated ← checked (Tensor.catMany? #[x.packShape, x.packShape] 0 #[4])
+  let concatenated ← expectOk (Tensor.catMany? #[x.packShape, x.packShape] 0 #[4])
   LeanTest.assertEqual (← concatenated.toFloatArray) #[1, 1, 1, 1]
   let summed := Tensor.sumDim x 0
   LeanTest.assertEqual (← summed.toFloatArray) #[2]
 
-@[test] def testCheckedOperatorDomains : IO Unit := do
+@[test] def testOperatorDomains : IO Unit := do
   let complex := (Tensor.fromFloatArray #[2, 4]).castDType .Complex64
   let mean := Tensor.meanAll complex
   LeanTest.assertEqual mean.raw.dtype .Complex64

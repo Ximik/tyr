@@ -198,7 +198,7 @@ def testAtlasContactSupportRecomputesFromPelvisHeight : IO Unit := do
   let provider :=
     atlasPassiveFullPhysicsPrimitiveProvider "raised Atlas primitive provider"
   let primitives ← assertOk
-    (provider.primitivesCheckedAt? raisedStep)
+    (provider.validPrimitivesAt? raisedStep)
     "raised Atlas primitive provider"
   LeanTest.assertEqual primitives.contactCandidates.size 4
     "Raised Atlas still exposes candidate views from the provider"
@@ -224,7 +224,7 @@ def testAtlasFullPhysicsPrimitiveProviderRecomputesStepStateAndActuation :
   let movingV := setAtD zeroVelocities pelvisVzIndex (-0.25)
   let drivenU := setAtD zeroActuation 0 12.0
   let movingStep := { atlasPlantStep with v0 := movingV, actuation := drivenU }
-  let primitives ← assertOk (provider.primitivesCheckedAt? movingStep)
+  let primitives ← assertOk (provider.validPrimitivesAt? movingStep)
     "Atlas dynamic provider primitives"
   LeanTest.assertTrue
     (approx (primitives.qdot.getD pelvisVzIndex 0.0) (-0.25) 1.0e-12)
@@ -240,7 +240,7 @@ def testAtlasFullPhysicsPrimitiveProviderRecomputesStepStateAndActuation :
   LeanTest.assertEqual support.selectedLocalIndices #[0, 1, 2, 3]
     "Atlas provider should still select all feet at the default pelvis height"
   let badMsg ← assertError
-    (provider.primitivesCheckedAt? { atlasPlantStep with ground? := none })
+    (provider.validPrimitivesAt? { atlasPlantStep with ground? := none })
     "Atlas provider missing ground"
   LeanTest.assertTrue (badMsg.contains "ground half-space")
     s!"Malformed Atlas step should fail at provider validation, got {badMsg}"

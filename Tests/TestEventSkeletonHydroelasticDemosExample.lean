@@ -236,7 +236,7 @@ def testHydroelasticFullPhysicsPrimitiveProvidersRecomputeStateAndTime :
     "contact ball-paddle selected ids"
   LeanTest.assertEqual ballContactIds #[2000]
     "Contact ball-paddle state should retain the ball-paddle patch"
-  let ballPrimitives ← assertOk (ballProvider.primitivesCheckedAt? ballContact)
+  let ballPrimitives ← assertOk (ballProvider.validPrimitivesAt? ballContact)
     "ball-paddle provider primitives"
   LeanTest.assertTrue (approx (ballPrimitives.qdot.getD 5 0.0) (-0.7) 1.0e-12)
     s!"Ball-paddle provider should preserve current vertical qdot, got {ballPrimitives.qdot}"
@@ -284,12 +284,12 @@ def testHydroelasticFullPhysicsPrimitiveProvidersRecomputeStateAndTime :
     spatulaSlipFullPhysicsPrimitiveProvider
       "spatula hydroelastic dynamic provider test"
   let highPrimitives ← assertOk
-    (spatulaProvider.primitivesCheckedAt? (spatulaSlipPhysicsState spatulaSlipParams 0.0))
+    (spatulaProvider.validPrimitivesAt? (spatulaSlipPhysicsState spatulaSlipParams 0.0))
     "spatula high-phase primitives"
   LeanTest.assertEqual highPrimitives.actuationForces #[6.5, -6.5, 0.0]
     "Spatula provider should recompute high-phase square-wave actuation"
   let lowPrimitives ← assertOk
-    (spatulaProvider.primitivesCheckedAt? (spatulaSlipPhysicsState spatulaSlipParams 1.5))
+    (spatulaProvider.validPrimitivesAt? (spatulaSlipPhysicsState spatulaSlipParams 1.5))
     "spatula low-phase primitives"
   LeanTest.assertEqual lowPrimitives.actuationForces #[1.5, -1.5, 0.0]
     "Spatula provider should recompute low-phase square-wave actuation"
@@ -303,7 +303,7 @@ def testHydroelasticFullPhysicsPrimitiveProvidersRecomputeStateAndTime :
     s!"Spatula provider should preserve current slip qdot, got {slipResult.derivative.qdot}"
 
   let badBallMsg ← assertError
-    (ballProvider.primitivesCheckedAt?
+    (ballProvider.validPrimitivesAt?
       (ballPaddlePhysicsState ballPaddleParams { z := 0.015 } #[0.0]))
     "bad ball-paddle velocity"
   LeanTest.assertTrue (badBallMsg.contains "velocity size")

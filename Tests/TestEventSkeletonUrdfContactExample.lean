@@ -112,7 +112,7 @@ def testUrdfFullPhysicsProviderRecomputesPrimitivesFromState : IO Unit := do
     velocity := -0.2
   }
   let penetratingSet ← assertOk
-    (contactCandidateProvider.candidatesCheckedAt? penetrating (some 1))
+    (contactCandidateProvider.validCandidatesAt? penetrating (some 1))
     "penetrating URDF contact candidate set"
   LeanTest.assertEqual penetratingSet.candidates.size 1
     "URDF provider should expose one dynamic collision candidate"

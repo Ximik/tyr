@@ -439,7 +439,7 @@ def solveAtlasPrimitivePhysics?
     (label : String := "atlas passive initial primitive provider") :
     Except String AtlasPrimitivePhysics := do
   let provider := atlasPassiveFullPhysicsPrimitiveProvider label
-  let primitives ← provider.primitivesCheckedAt? step
+  let primitives ← provider.validPrimitivesAt? step
   let primitivePlant : FullPlantPrimitivePhysics := {
     step := step
     primitives := primitives

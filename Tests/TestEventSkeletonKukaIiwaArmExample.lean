@@ -416,7 +416,7 @@ def testFullPhysicsPrimitiveProviderRecomputesControllerAndPlantPrimitives :
     torqueControlPhysicsState dynamicProvider estimated desired commandedTorque
   let controller ← assertOk (snapshot.controllerOutput? torqueControlledGains)
     "dynamic Iiwa torque-control snapshot"
-  let primitives ← assertOk (provider.primitivesCheckedAt? snapshot)
+  let primitives ← assertOk (provider.validPrimitivesAt? snapshot)
     "dynamic Iiwa full physics provider"
   let directPrimitives ← assertOk
     (fullPhysicsPrimitivesFromController? dynamicProvider estimated controller)
@@ -452,7 +452,7 @@ def testFullPhysicsPrimitiveProviderRecomputesControllerAndPlantPrimitives :
     "Provider solve should use the current mass primitive"
 
   let badMsg ← assertError
-    (provider.primitivesCheckedAt? { snapshot with commandedTorque := #[1.0] })
+    (provider.validPrimitivesAt? { snapshot with commandedTorque := #[1.0] })
     "Iiwa provider malformed commanded torque"
   LeanTest.assertTrue (badMsg.contains "commandedTorque")
     s!"Malformed commanded torque should fail at provider validation, got {badMsg}"

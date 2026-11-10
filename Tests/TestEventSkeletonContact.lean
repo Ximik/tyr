@@ -192,7 +192,7 @@ def testContactCandidateProviderRecomputesDynamicViewsAndSupport :
     tangentVelocity := 0.1
   }
   let activeSet ← assertOk
-    (dynamicCandidateProvider.candidatesCheckedAt? active (some 3))
+    (dynamicCandidateProvider.validCandidatesAt? active (some 3))
     "active contact provider"
   LeanTest.assertEqual activeSet.totalCandidates 8
     "Provider diagnostics should preserve the broadphase source count"
@@ -241,7 +241,7 @@ def testContactCandidateProviderRecomputesDynamicViewsAndSupport :
       }
   }
   let msg ← assertError
-    (badProvider.candidatesCheckedAt? active (some 3))
+    (badProvider.validCandidatesAt? active (some 3))
     "bad provider validation"
   LeanTest.assertTrue (msg.contains "tangent Jacobian width")
     s!"Expected provider boundary validation to catch bad Jacobian width, got {msg}"

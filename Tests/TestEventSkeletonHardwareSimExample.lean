@@ -465,9 +465,9 @@ def testPrimitiveProvidersRecomputeWsgAndPepperState : IO Unit := do
     leftV := 0.5
     rightV := -0.25
   }
-  let heldPrimitive ← assertOk (wsgProvider.primitivesCheckedAt? held)
+  let heldPrimitive ← assertOk (wsgProvider.validPrimitivesAt? held)
     "held WSG provider primitive"
-  let movingPrimitive ← assertOk (wsgProvider.primitivesCheckedAt? moving)
+  let movingPrimitive ← assertOk (wsgProvider.validPrimitivesAt? moving)
     "moving WSG provider primitive"
   LeanTest.assertTrue (maxAbsDiff heldPrimitive.actuationForces #[0.0, 0.0] < 1.0e-12)
     s!"Held WSG state should require no motor force, got {reprStr heldPrimitive.actuationForces}"
@@ -489,9 +489,9 @@ def testPrimitiveProvidersRecomputeWsgAndPepperState : IO Unit := do
       "hardware_sim pepper dynamic provider test"
   let airborne : PepperTableState := { bottomZ := 0.20, vz := -0.5 }
   let resting : PepperTableState := { bottomZ := 0.0 }
-  let airbornePrimitive ← assertOk (pepperProvider.primitivesCheckedAt? airborne)
+  let airbornePrimitive ← assertOk (pepperProvider.validPrimitivesAt? airborne)
     "airborne pepper provider primitive"
-  let restingPrimitive ← assertOk (pepperProvider.primitivesCheckedAt? resting)
+  let restingPrimitive ← assertOk (pepperProvider.validPrimitivesAt? resting)
     "resting pepper provider primitive"
   LeanTest.assertTrue (maxAbsDiff airbornePrimitive.qdot #[0.0, 0.0, -0.5] < 1.0e-12)
     s!"Pepper provider qdot should come from current free-body velocity, got {reprStr airbornePrimitive.qdot}"
@@ -517,12 +517,12 @@ def testPrimitiveProvidersRecomputeWsgAndPepperState : IO Unit := do
     s!"Resting pepper provider should balance gravity through contact, got {reprStr restingFull.derivative.vdot}"
 
   let badWsg : WsgPrimitiveState := { leftQ := (0.0 / 0.0) }
-  let wsgMsg ← assertError (wsgProvider.primitivesCheckedAt? badWsg)
+  let wsgMsg ← assertError (wsgProvider.validPrimitivesAt? badWsg)
     "malformed WSG provider state"
   LeanTest.assertTrue (wsgMsg.contains "WSG state entry")
     s!"Malformed WSG state should fail at provider validation, got {wsgMsg}"
   let badPepper : PepperTableState := { bottomZ := (0.0 / 0.0) }
-  let pepperMsg ← assertError (pepperProvider.primitivesCheckedAt? badPepper)
+  let pepperMsg ← assertError (pepperProvider.validPrimitivesAt? badPepper)
     "malformed pepper provider state"
   LeanTest.assertTrue (pepperMsg.contains "pepper-table state entry")
     s!"Malformed pepper state should fail at provider validation, got {pepperMsg}"

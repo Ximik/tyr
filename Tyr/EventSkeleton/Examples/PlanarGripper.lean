@@ -1843,7 +1843,7 @@ def solvePlanarGripperSimulationFullPhysics?
   let state : PlanarGripperSimulationState := { q := q, v := v }
   state.validate? config
   let provider := planarGripperSimulationPrimitiveProvider config label
-  let primitive ← provider.primitivesCheckedAt? state
+  let primitive ← provider.validPrimitivesAt? state
   let (_, controllerOutput?) ← planarGripperSimulationActuation? config q v
   let primitivePlant : FullPlantPrimitivePhysics := {
     step := plantStep

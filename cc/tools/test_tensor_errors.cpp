@@ -60,8 +60,8 @@ void indexSelect(bool empty) {
   Object indices(lean_torch_full_int(shape({count}), 0), lean_dec);
   Object result(lean_torch_index_select(input.get(), Nat(0), indices.get()), lean_dec);
   values(result.get(), count, 3.25);
-  Object checked(lean_torch_index_select_try(input.get(), Nat(0), indices.get()), lean_dec);
-  values(exceptValue(checked.get()), count, 3.25);
+  Object tried(lean_torch_index_select_try(input.get(), Nat(0), indices.get()), lean_dec);
+  values(exceptValue(tried.get()), count, 3.25);
   require(input->m_rc == 1 && indices->m_rc == 1,
           "Index selection changed borrowed references");
 }
@@ -199,7 +199,7 @@ void tryCat(bool invalid) {
   if (invalid) exceptError(result.get(), "catMany");
   else values(exceptValue(result.get()), 8, 3);
   require(tensors->m_rc == 1 && first->m_rc == 2 && second->m_rc == 2,
-    "checked cat changed borrowed array ownership");
+    "try cat changed borrowed array ownership");
 }
 
 using Reduction = lean_object* (*)(lean_object*, lean_object*, uint8_t);

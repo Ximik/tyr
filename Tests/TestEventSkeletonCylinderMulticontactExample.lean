@@ -198,7 +198,7 @@ def testFullPhysicsPrimitiveProviderRecomputesPackedDynamicSupport :
     "cylinder all-active provider recompute test"
 
   let budgetedPrimitive ← assertOk
-    (budgetedProvider.primitivesCheckedAt? x)
+    (budgetedProvider.validPrimitivesAt? x)
     "cylinder budgeted provider primitive at first contact"
   let budgetedSupport ← assertOk
     (budgetedProvider.supportAt? x)
@@ -231,7 +231,7 @@ def testFullPhysicsPrimitiveProviderRecomputesPackedDynamicSupport :
     "Provider solve should match direct budgeted full physics"
 
   let airbornePrimitive ← assertOk
-    (allActiveProvider.primitivesCheckedAt? initialState)
+    (allActiveProvider.validPrimitivesAt? initialState)
     "cylinder all-active provider primitive before contact"
   let airborneSupport ← assertOk
     (allActiveProvider.supportAt? initialState)
@@ -246,7 +246,7 @@ def testFullPhysicsPrimitiveProviderRecomputesPackedDynamicSupport :
     "All-active provider should not synthesize force scalars before impact"
 
   let restingPrimitive ← assertOk
-    (allActiveProvider.primitivesCheckedAt? (restingState params))
+    (allActiveProvider.validPrimitivesAt? (restingState params))
     "cylinder all-active provider primitive at rest"
   let restingSupport ← assertOk
     (allActiveProvider.supportAt? (restingState params))
@@ -261,7 +261,7 @@ def testFullPhysicsPrimitiveProviderRecomputesPackedDynamicSupport :
 
   let badState := { x with vz := 1.0 / 0.0 }
   let msg ← assertError
-    (budgetedProvider.primitivesCheckedAt? badState)
+    (budgetedProvider.validPrimitivesAt? badState)
     "cylinder provider malformed state"
   LeanTest.assertTrue (msg.contains "state")
     s!"Malformed cylinder state should fail at provider validation, got {msg}"

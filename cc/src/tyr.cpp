@@ -967,7 +967,7 @@ uint8_t lean_torch_has_grad_fn(b_lean_obj_arg x) {
 }
 
 // Matches the typed `dim < max 1 rank` contract: a scalar accepts axis zero.
-static int64_t checkedSoftmaxAxis(const torch::Tensor& input, b_lean_obj_arg dim_obj) {
+static int64_t softmaxAxis(const torch::Tensor& input, b_lean_obj_arg dim_obj) {
   const uint64_t dim = tyr::natTo<int64_t>(dim_obj, "dim");
   TORCH_CHECK(dim < static_cast<uint64_t>(std::max<int64_t>(1, input.dim())), "dimension out of range");
   return static_cast<int64_t>(dim);
@@ -975,7 +975,7 @@ static int64_t checkedSoftmaxAxis(const torch::Tensor& input, b_lean_obj_arg dim
 
 lean_object* lean_torch_tensor_softmax(b_lean_obj_arg a, b_lean_obj_arg dim_obj) {
   auto a_ = borrowTensor(a);
-  auto c_ = torch::softmax(a_, checkedSoftmaxAxis(a_, dim_obj));
+  auto c_ = torch::softmax(a_, softmaxAxis(a_, dim_obj));
   return fromTorchTensor(c_);
 }
 
@@ -1162,7 +1162,7 @@ lean_object* lean_torch_dropout(b_lean_obj_arg input, double p, uint8_t training
 
 lean_object* lean_torch_log_softmax(b_lean_obj_arg input, b_lean_obj_arg dim_obj) {
   auto input_ = borrowTensor(input);
-  auto output_ = torch::nn::functional::log_softmax(input_, torch::nn::functional::LogSoftmaxFuncOptions(checkedSoftmaxAxis(input_, dim_obj)));
+  auto output_ = torch::nn::functional::log_softmax(input_, torch::nn::functional::LogSoftmaxFuncOptions(softmaxAxis(input_, dim_obj)));
   return fromTorchTensor(output_);
 }
 
@@ -1530,8 +1530,8 @@ lean_object* lean_torch_gemma4_text_experts_forward(
   const uint64_t top_k = tyr::natTo<int64_t>(top_k_obj, "top_k");
   const uint64_t inter_dim = tyr::natTo<int64_t>(inter_dim_obj, "inter_dim");
   const uint64_t hidden_size = tyr::natTo<int64_t>(hidden_size_obj, "hidden_size");
-  tyr::checkedProduct<int64_t>(tokens, top_k, "tokens * top_k");
-  tyr::checkedProduct<int64_t>(2, inter_dim, "2 * inter_dim");
+  tyr::productTo<int64_t>(tokens, top_k, "tokens * top_k");
+  tyr::productTo<int64_t>(2, inter_dim, "2 * inter_dim");
   auto hidden_ = borrowTensor(hidden);
   auto gate_up_proj_ = borrowTensor(gate_up_proj);
   auto down_proj_ = borrowTensor(down_proj);
@@ -2212,31 +2212,6 @@ lean_object* lean_torch_sdpa_4d_bias_io(
     uint8_t is_causal) {
   return tyr::ioCall("branchingAttentionBiasIO", [&] {
     return lean_io_result_mk_ok(fromTorchTensor(attentionFromLean(query, key, value, bias, dropout_p, is_causal != 0)));
-  });
-}
-
-// Whole-tensor copy with matching shape/dtype and destination placement.
-// Explicit optimizer/state value update. The destination is consumed and the
-// updated tensor is returned; aliases observe the previous value.
-lean_object* lean_torch_copy_inplace(
-  lean_obj_arg dst,
-  b_lean_obj_arg src
-) {
-  return tyr::ioCall("copyInplace", [&] {
-  OwnedLeanObject destination_owner(dst, lean_dec);
-  try {
-    torch::NoGradGuard guard;
-    auto source = borrowTensor(src);
-    auto destination = takeTensor(destination_owner.release());
-    checkCopyMetadata(destination, source);
-    auto result = tensorForNoGradValueUpdate(std::move(destination));
-    result.copy_(source);
-    return lean_io_result_mk_ok(fromTorchTensor(std::move(result)));
-  } catch (const c10::Error& e) {
-    return mkC10IoError("copyInplace", e);
-  } catch (const std::exception& e) {
-    return mkStdIoError("copyInplace", e);
-  }
   });
 }
 

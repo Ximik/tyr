@@ -65,7 +65,7 @@ private def converterScriptPath : IO String := do
   | none =>
     throw <| IO.userError "Could not locate Tyr repo root from current working directory."
 
-private def runProcessChecked (cmd : String) (args : Array String) : IO Unit := do
+private def runProcess (cmd : String) (args : Array String) : IO Unit := do
   let out ← IO.Process.output { cmd, args }
   if out.exitCode != 0 then
     throw <| IO.userError s!"Command failed: {cmd} {String.intercalate " " args.toList}\n{out.stderr}"
@@ -76,7 +76,7 @@ private def ensureConvertedCheckpoint (modelDir rawPath : String) : IO Unit := d
     pure ()
   else
     let script ← converterScriptPath
-    runProcessChecked "uv"
+    runProcess "uv"
       #[
         "run", "--with", "torch", "--with", "safetensors",
         "python", script,
@@ -94,7 +94,7 @@ private def ensureConvertedVoice (voicePtPath : String) : IO String := do
     pure voiceStPath
   else
     let script ← converterScriptPath
-    runProcessChecked "uv"
+    runProcess "uv"
       #[
         "run", "--with", "torch", "--with", "safetensors",
         "python", script,

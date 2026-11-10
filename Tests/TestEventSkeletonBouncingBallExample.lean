@@ -129,9 +129,9 @@ def testFullPhysicsPrimitiveProviderRecomputesState : IO Unit := do
   let x0 : BallState := { height := 3.0, velocity := -1.25 }
   let x1 : BallState := { height := 0.25, velocity := 2.75 }
 
-  let primitive0 ← assertOk (provider.primitivesCheckedAt? x0)
+  let primitive0 ← assertOk (provider.validPrimitivesAt? x0)
     "BouncingBall provider primitive at falling state"
-  let primitive1 ← assertOk (provider.primitivesCheckedAt? x1)
+  let primitive1 ← assertOk (provider.validPrimitivesAt? x1)
     "BouncingBall provider primitive at rising state"
   let support1 ← assertOk (provider.supportAt? x1)
     "BouncingBall provider support at rising state"
@@ -155,7 +155,7 @@ def testFullPhysicsPrimitiveProviderRecomputesState : IO Unit := do
     "Provider solve should target the supplied interval vertex"
 
   let badState : BallState := { height := 1.0 / 0.0, velocity := 0.0 }
-  let msg ← assertError (provider.primitivesCheckedAt? badState)
+  let msg ← assertError (provider.validPrimitivesAt? badState)
     "BouncingBall provider malformed state"
   LeanTest.assertTrue (msg.contains "state")
     s!"Malformed BouncingBall state should fail at provider validation, got {msg}"
