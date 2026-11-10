@@ -3860,24 +3860,41 @@ lean_object* lean_torch_matrix_log(
     b_lean_obj_arg A_obj
 ) {
   auto A = borrowTensor(A_obj);
-  // Compute eigendecomposition: A = V @ diag(L) @ V^{-1}
+  TORCH_CHECK(at::isFloatingType(A.scalar_type()), "matrixLog requires a real floating dtype");
+  TYR_DATA_CHECK(torch::isfinite(A).all().item<bool>(), "matrixLog requires finite input");
+  // Eigendecomposition: A = V @ diag(L) @ V^{-1}, so log(A) = V @ diag(log L) @ V^{-1}.
   auto eig_result = torch::linalg_eig(A);
-  auto L = std::get<0>(eig_result);  // eigenvalues (complex)
-  auto V = std::get<1>(eig_result);  // eigenvectors (complex)
-  // Take log of eigenvalues
-  auto log_L = torch::log(L);
-  // Reconstruct: log(A) = V @ diag(log_L) @ V^{-1}
-  auto V_inv = torch::linalg_inv(V);
-  auto result = torch::matmul(torch::matmul(V, torch::diag_embed(log_L)), V_inv);
-  auto imag_abs_max = torch::imag(result).abs().max().item<double>();
-  auto real_result = torch::real(result);
-  if (imag_abs_max > 1e-6) {
-    std::cerr << "WARNING: matrix_log produced non-negligible imaginary component (max="
-              << imag_abs_max << "); returning NaN tensor." << std::endl;
-    auto nan_result = torch::full_like(real_result, std::numeric_limits<double>::quiet_NaN());
-    return fromTorchTensor(nan_result);
-  }
-  return fromTorchTensor(real_result);
+  auto L = std::get<0>(eig_result);
+  auto V = std::get<1>(eig_result);
+  auto result = torch::matmul(torch::matmul(V, torch::diag_embed(torch::log(L))), torch::linalg_inv(V));
+  TYR_DATA_CHECK(torch::imag(result).abs().max().item<double>() <= 1e-6,
+    "matrix logarithm has no real result");
+  auto logarithm = torch::real(result).contiguous();
+  TYR_DATA_CHECK(torch::isfinite(logarithm).all().item<bool>(),
+    "matrix logarithm has no finite real result");
+  // Eigenvector reconstruction is not reliable for defective or sufficiently
+  // ill-conditioned matrices. A finite result alone is not evidence of a
+  // logarithm: e.g. a Jordan block can silently produce the zero matrix.
+  // Check a scale-invariant reconstruction residual without retaining an
+  // additional autograd graph or changing the returned logarithm's graph.
+  auto reference = A.detach();
+  auto reconstructed = torch::linalg_matrix_exp(logarithm.detach());
+  TYR_DATA_CHECK(torch::isfinite(reconstructed).all().item<bool>(),
+    "matrix logarithm reconstruction is nonfinite");
+  const double scale = reference.abs().max().item<double>();
+  TYR_DATA_CHECK(scale > 0, "matrix logarithm requires a nonzero input");
+  // Normalize before subtraction, so tiny matrices do not pass an absolute
+  // tolerance and large matrices do not overflow while forming the residual.
+  const double residual = ((reconstructed / scale) - (reference / scale))
+    .abs().max().item<double>();
+  const double epsilon = A.scalar_type() == torch::kFloat64
+    ? std::numeric_limits<double>::epsilon()
+    : std::numeric_limits<float>::epsilon();
+  const double tolerance = 64.0 * std::max<int64_t>(1, A.size(0)) * epsilon;
+  TYR_DATA_CHECK(std::isfinite(residual) && residual <= tolerance,
+    "eigendecomposition cannot reliably compute this matrix logarithm: "
+    "scaled reconstruction residual ", residual, " exceeds ", tolerance);
+  return fromTorchTensor(logarithm);
 }
 
 // Matrix inverse for square matrices: inv(A)
@@ -3997,13 +4014,8 @@ double lean_torch_frobenius_norm(
 
 // Checked native entry points. Legacy pure implementations above are called
 // entirely inside the native firewall; they never unwind through Lean code.
-lean_object* lean_torch_expand_checked(b_lean_obj_arg t, lean_obj_arg target) {
-  return tyr::checkedCall("expand", [&] { return lean_torch_expand(t, target); });
-}
-
-
 lean_object* lean_torch_svd_checked(b_lean_obj_arg t) {
-  return tyr::checkedCall("svd", [&] { return lean_torch_svd(t); });
+  return tyr::dataCheckedCall("svd", [&] { return lean_torch_svd(t); });
 }
 
 lean_object* lean_torch_cat_dyn_checked(b_lean_obj_arg tensors, b_lean_obj_arg dim) {
@@ -4026,39 +4038,7 @@ lean_object* lean_torch_rms_norm_weighted(
 }
 
 lean_object* lean_torch_matrix_log_checked(b_lean_obj_arg input) {
-  return tyr::checkedCall("matrixLog", [&] {
-    auto tensor = borrowTensor(input);
-    TORCH_CHECK(at::isFloatingType(tensor.scalar_type()), "requires a real floating dtype");
-    TORCH_CHECK(torch::isfinite(tensor).all().item<bool>(), "requires finite input");
-    auto result = lean_torch_matrix_log(input);
-    OwnedLeanObject owner(result, lean_dec);
-    auto logarithm = borrowTensor(result);
-    TORCH_CHECK(torch::isfinite(logarithm).all().item<bool>(),
-      "matrix logarithm has no finite real result");
-    // Eigenvector reconstruction is not reliable for defective or sufficiently
-    // ill-conditioned matrices. A finite result alone is not evidence of a
-    // logarithm: e.g. a Jordan block can silently produce the zero matrix.
-    // Check a scale-invariant reconstruction residual without retaining an
-    // additional autograd graph or changing the returned logarithm's graph.
-    auto reference = tensor.detach();
-    auto reconstructed = torch::linalg_matrix_exp(logarithm.detach());
-    TORCH_CHECK(torch::isfinite(reconstructed).all().item<bool>(),
-      "matrix logarithm reconstruction is nonfinite");
-    const double scale = reference.abs().max().item<double>();
-    TORCH_CHECK(scale > 0, "matrix logarithm requires a nonzero input");
-    // Normalize before subtraction, so tiny matrices do not pass an absolute
-    // tolerance and large matrices do not overflow while forming the residual.
-    const double residual = ((reconstructed / scale) - (reference / scale))
-      .abs().max().item<double>();
-    const double epsilon = tensor.scalar_type() == torch::kFloat64
-      ? std::numeric_limits<double>::epsilon()
-      : std::numeric_limits<float>::epsilon();
-    const double tolerance = 64.0 * std::max<int64_t>(1, tensor.size(0)) * epsilon;
-    TORCH_CHECK(std::isfinite(residual) && residual <= tolerance,
-      "eigendecomposition cannot reliably compute this matrix logarithm: "
-      "scaled reconstruction residual ", residual, " exceeds ", tolerance);
-    return owner.release();
-  });
+  return tyr::dataCheckedCall("matrixLog", [&] { return lean_torch_matrix_log(input); });
 }
 
 lean_object* lean_torch_maximum(b_lean_obj_arg a, b_lean_obj_arg b) {

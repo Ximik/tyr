@@ -214,7 +214,7 @@ def testIndexedSPDMatrixFunctions : IO Unit := do
   let inverseProduct := Tensor.mm (Tensor.inv x.matrix) x.matrix
   LeanTest.assertTrue (Tensor.frobeniusNorm (Sub.sub inverseProduct identity) < 1e-10)
     "Typed inverse should recover the identity"
-  let roundtrip := Tensor.matrixExp (Tensor.matrixLog x.matrix)
+  let roundtrip := Tensor.matrixExp (Tensor.matrixLog! x.matrix)
   LeanTest.assertTrue (Tensor.frobeniusNorm (Sub.sub roundtrip x.matrix) < 1e-10)
     "Real SPD logarithm/exponential should roundtrip"
   LeanTest.assertTrue (SymmetricPositiveDefinite.distance x x < 1e-10)

@@ -133,7 +133,7 @@ def log (X Y : Grassmann n p d dev) : GrassmannTangent n p d dev :=
   let invXtY := Tensor.inv XtY
   let proj := Tensor.sub Y.matrix (Tensor.mm X.matrix XtY)              -- (I - X Xᵀ) Y
   let A := Tensor.mm proj invXtY                                     -- [n, p]
-  let (U, S, Vh) := Tensor.svdReduced A X.tall                       -- U [n,p], S [p], Vh [p,p]
+  let (U, S, Vh) := Tensor.svdReduced! A                       -- U [n,p], S [p], Vh [p,p]
   let theta := Tensor.atan S
   let Theta := Tensor.castLike U (Tensor.diagflat theta)
   ⟨Tensor.mm (Tensor.mm U Theta) Vh⟩

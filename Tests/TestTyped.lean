@@ -276,11 +276,6 @@ def testTypedRuntimeShapeResults : IO Unit := do
     "logSoftmax defaults to the last axis"
   LeanTest.assertEqual (← (matrix.cat matrix 1).toFloatArray) #[1, 2, 3, 1, 2, 3, 4, 5, 6, 4, 5, 6]
   LeanTest.assertEqual (← (matrix.permute #[1, 0]).toFloatArray) #[1, 4, 2, 5, 3, 6]
-  -- Exercise the same checked paths as the pure conveniences, with errors
-  -- available explicitly without invoking the pure panic fallback.
-  match matrix.expand? #[2, 18446744073709551615] with
-  | .ok _ => LeanTest.fail "native inferred extents must not establish a literal UInt64 extent"
-  | .error _ => pure ()
 
 example (_input : Tensor ⟨#[2, 1], .Float32, .CPU⟩) (_weight : Tensor ⟨#[1], .Float32, .CPU⟩)
     (_wide : Tensor ⟨#[3], .Float32, .CPU⟩) : True := by

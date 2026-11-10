@@ -159,7 +159,9 @@ namespace torch.RawTensor
 @[extern "lean_torch_clamp_float"] opaque clampFloat (t : @& RawTensor) (lo hi : Float) : RawTensor
 @[extern "lean_torch_diag"] opaque diag (t : @& RawTensor) : RawTensor
 @[extern "lean_torch_matrix_exp"] opaque matrixExp (t : @& RawTensor) : RawTensor
-@[extern "lean_torch_matrix_log"] opaque matrixLog (t : @& RawTensor) : RawTensor
+/-- Real matrix logarithm. Native code rejects non-finite input, a matrix with no
+real logarithm and an unreliable reconstruction; a rejection aborts. -/
+@[extern "lean_torch_matrix_log"] opaque matrixLog! (t : @& RawTensor) : RawTensor
 @[extern "lean_torch_inv"] opaque inv (t : @& RawTensor) : RawTensor
 @[extern "lean_torch_frobenius_norm"] opaque frobeniusNorm! (t : @& RawTensor) : Float
 @[extern "lean_torch_row_norms"] opaque rowNorms! (t : @& RawTensor) : RawTensor
@@ -182,7 +184,7 @@ namespace torch.RawTensor
 
 /-- Reduced SVD: returns (U, (S, Vh)) with U m×min(m,n), S of length min(m,n)
     and Vh min(m,n)×n. -/
-@[extern "lean_torch_svd"] opaque svd (t : @& RawTensor) : RawTensor × RawTensor × RawTensor
+@[extern "lean_torch_svd"] opaque svd! (t : @& RawTensor) : RawTensor × RawTensor × RawTensor
 
 /-- Singular values only, as a vector of length min(m,n). -/
 @[extern "lean_torch_svdvals"] opaque svdvals! (t : @& RawTensor) : RawTensor
@@ -305,17 +307,14 @@ cannot export the temporary leaves; only detached derivatives are returned. -/
 end torch.RawTensor
 
 namespace torch.RawTensor
-/-- Recover native execution failures without unwinding across Lean frames. -/
-@[extern "lean_torch_expand_checked"] opaque expandChecked (t : @& RawTensor) (target : Array Nat) : Except String RawTensor
-
-/-- Native reshape behind `Tensor.reshape`, which validates the target first; use that instead.
-A native failure aborts through Tyr's fatal libtorch error report. -/
+/-- Native reshape behind `Tensor.reshape!`. A native failure aborts through Tyr's
+fatal libtorch error report. -/
 @[extern "lean_torch_reshape_exact"] opaque reshape! (t : @& RawTensor) (target : @& Shape) : RawTensor
 
-@[extern "lean_torch_svd_checked"] opaque svdChecked (t : @& RawTensor) : Except String (RawTensor × RawTensor × RawTensor)
+@[extern "lean_torch_svd_checked"] opaque svd? (t : @& RawTensor) : Except String (RawTensor × RawTensor × RawTensor)
 
 @[extern "lean_torch_rms_norm_weighted"] opaque rmsNormWeighted!
     (x weight : @& RawTensor) (eps : Float := 1e-6) : RawTensor
 
-@[extern "lean_torch_matrix_log_checked"] opaque matrixLogChecked (t : @& RawTensor) : Except String RawTensor
+@[extern "lean_torch_matrix_log_checked"] opaque matrixLog? (t : @& RawTensor) : Except String RawTensor
 end torch.RawTensor
