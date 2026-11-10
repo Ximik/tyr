@@ -13,8 +13,8 @@ namespace Tests.Gemma4Typed
 private def cfg : Config := {
   vocab_size := 16, hidden_size := 8, intermediate_size := 12
   num_hidden_layers := 4, num_attention_heads := 2, num_key_value_heads := 1
-  head_dim := 4, global_head_dim := 8, num_global_key_value_heads := 1
-  sliding_window := 3, full_rotary_dim := 8
+  half_head_dim := 2, global_half_head_dim := 4, num_global_key_value_heads := 1
+  sliding_window := 3, half_full_rotary_dim := 4
   num_kv_shared_layers := 2
   layer_types := #[.fullAttention, .slidingAttention, .slidingAttention, .fullAttention]
   hidden_size_per_layer_input := 2, vocab_size_per_layer_input := 16
@@ -78,8 +78,8 @@ private def close {σ τ : StaticSpec} (x : Tensor σ) (y : Tensor τ) (tol : Fl
   let expected := m.model.forward cfg ids
   let perLayer := m.model.computePerLayerInputs cfg ids (m.embedTokens cfg ids)
   LeanTest.assertTrue perLayer.isSome
-  let (sc, ss) := Tensor.rotaryFreqs 7 cfg.head_dim cfg.sliding_rope_theta
-  let (fc, fs) := Tensor.rotaryFreqs 7 (Config.fullHeadDim cfg) cfg.full_rope_theta
+  let (sc, ss) := Tensor.rotaryFreqs 7 cfg.half_head_dim cfg.sliding_rope_theta
+  let (fc, fs) := Tensor.rotaryFreqs 7 (Config.fullHalfHeadDim cfg) cfg.full_rope_theta
   let cache := m.model.initCache cfg 7 .CPU
   let (prefill, initial) := m.model.forwardWithCache cfg (ids.slice 1 0 3) cache (by decide) sc ss fc fs
   close prefill (expected.slice 1 0 3)
@@ -183,7 +183,7 @@ private def vlCfg : VLConfig := {
   text_config := { cfg with use_bidirectional_attention := "vision", bidirectionalSupported := (by decide) }
   vision_config := {
     hidden_size := 8, intermediate_size := 12, num_hidden_layers := 1
-    num_attention_heads := 2, num_key_value_heads := 2, head_dim := 4
+    num_attention_heads := 2, num_key_value_heads := 2, quarter_head_dim := 1
     patch_size := 2, pooling_kernel_size := 2, position_embedding_size := 8 }
   image_processor := { patch_size := 2, pooling_kernel_size := 2, max_soft_tokens := 4 }
   boi_token_id := 12, image_token_id := 15, eoi_token_id := 13, video_token_id := 14, audio_token_id := 11 }

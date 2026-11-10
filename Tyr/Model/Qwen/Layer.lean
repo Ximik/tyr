@@ -52,12 +52,12 @@ def init (hidden_size num_heads num_kv_heads head_dim intermediate_size : Nat)
     Output: [batch, seq, hidden_size]
 
     Pre-norm: x + attn(norm1(x)) + mlp(norm2(x + attn(...))) -/
-def forward {batch seq hidden_size num_heads num_kv_heads head_dim intermediate_size : Nat}
-    (layer : QwenLayer (device := device) hidden_size num_heads num_kv_heads head_dim intermediate_size dtype)
+def forward {batch seq hidden_size num_heads num_kv_heads half intermediate_size : Nat}
+    (layer : QwenLayer (device := device) hidden_size num_heads num_kv_heads (2 * half) intermediate_size dtype)
     (hkv : num_kv_heads ∣ num_heads)
     (x : Tensor { device := device, shape := #[batch, seq, hidden_size], dtype := dtype })
-    (cos : Tensor { device := device, shape := #[seq, head_dim / 2], dtype := .Float32 })
-    (sin : Tensor { device := device, shape := #[seq, head_dim / 2], dtype := .Float32 })
+    (cos : Tensor { device := device, shape := #[seq, half], dtype := .Float32 })
+    (sin : Tensor { device := device, shape := #[seq, half], dtype := .Float32 })
     (is_causal : Bool := true)
     : Tensor { device := device, shape := #[batch, seq, hidden_size], dtype := dtype } :=
   -- Pre-norm attention
@@ -74,15 +74,15 @@ def forward {batch seq hidden_size num_heads num_kv_heads head_dim intermediate_
 
 /-- Incremental one-token transformer layer step with attention KV cache.
     Input/output: `[batch, 1, hidden_size]`. -/
-def forwardStep {batch hidden_size num_heads num_kv_heads head_dim intermediate_size cap : Nat}
-    (layer : QwenLayer (device := device) hidden_size num_heads num_kv_heads head_dim intermediate_size dtype)
+def forwardStep {batch hidden_size num_heads num_kv_heads half intermediate_size cap : Nat}
+    (layer : QwenLayer (device := device) hidden_size num_heads num_kv_heads (2 * half) intermediate_size dtype)
     (hkv : num_kv_heads ∣ num_heads)
     (x : Tensor { device := device, shape := #[batch, 1, hidden_size], dtype := dtype })
-    (cos : Tensor { device := device, shape := #[1, head_dim / 2], dtype := .Float32 })
-    (sin : Tensor { device := device, shape := #[1, head_dim / 2], dtype := .Float32 })
-    (cache : QwenAttention.KVCache (device := device) batch num_kv_heads head_dim cap dtype)
+    (cos : Tensor { device := device, shape := #[1, half], dtype := .Float32 })
+    (sin : Tensor { device := device, shape := #[1, half], dtype := .Float32 })
+    (cache : QwenAttention.KVCache (device := device) batch num_kv_heads (2 * half) cap dtype)
     (pos : Nat) (hpos : pos < cap)
-    : Tensor { device := device, shape := #[batch, 1, hidden_size], dtype := dtype } × QwenAttention.KVCache (device := device) batch num_kv_heads head_dim cap dtype :=
+    : Tensor { device := device, shape := #[batch, 1, hidden_size], dtype := dtype } × QwenAttention.KVCache (device := device) batch num_kv_heads (2 * half) cap dtype :=
   -- Pre-norm attention.
   let residual1 := x
   let x1 : Tensor { device := device, shape := #[batch, 1, hidden_size], dtype := dtype } := layer.input_layernorm.forward3dPreserving x
@@ -95,13 +95,13 @@ def forwardStep {batch hidden_size num_heads num_kv_heads head_dim intermediate_
   let h3 := layer.mlp.forward h2
   (Tensor.add residual2 h3, cache')
 
-def forwardMasked {batch seq hidden_size num_heads num_kv_heads head_dim intermediate_size : Nat}
+def forwardMasked {batch seq hidden_size num_heads num_kv_heads half intermediate_size : Nat}
     {maskDtype : DType}
-    (layer : QwenLayer (device := device) hidden_size num_heads num_kv_heads head_dim intermediate_size dtype)
+    (layer : QwenLayer (device := device) hidden_size num_heads num_kv_heads (2 * half) intermediate_size dtype)
     (hkv : num_kv_heads ∣ num_heads)
     (x : Tensor { device := device, shape := #[batch, seq, hidden_size], dtype := dtype })
-    (cos : Tensor { device := device, shape := #[seq, head_dim / 2], dtype := .Float32 })
-    (sin : Tensor { device := device, shape := #[seq, head_dim / 2], dtype := .Float32 })
+    (cos : Tensor { device := device, shape := #[seq, half], dtype := .Float32 })
+    (sin : Tensor { device := device, shape := #[seq, half], dtype := .Float32 })
     (attn_mask : Tensor ⟨#[batch, seq], maskDtype, device⟩)
     (is_causal : Bool := true)
     : Tensor { device := device, shape := #[batch, seq, hidden_size], dtype := dtype } :=

@@ -91,13 +91,14 @@ structure TextConfig where
   numHiddenLayers : Nat := 32
   numAttentionHeads : Nat := 32
   numKeyValueHeads : Nat := 32
-  headDim : Nat := 128
+  /-- Half the head dimension; each head has `2 * halfHeadDim` channels. -/
+  halfHeadDim : Nat := 64
   rmsNormEps : Float := 1e-6
   ropeTheta : Float := 5000000.0
   /-- Query heads form whole groups over a nonzero number of K/V heads; checked when the config is built. -/
   headsValid : 0 < numAttentionHeads ∧ 0 < numKeyValueHeads ∧ numKeyValueHeads ∣ numAttentionHeads := by decide
-  /-- Rotary embeddings rotate `headDim / 2` pairs; checked when the config is built. -/
-  headDimEven : 0 < headDim ∧ 2 ∣ headDim := by decide
+  /-- Heads are nonempty; checked when the config is built. -/
+  halfHeadDimPos : 0 < halfHeadDim := by decide
   /-- Greedy decoding picks among `vocabSize` logits; checked when the config is built. -/
   vocabPos : 0 < vocabSize := by decide
   /-- RoPE frequencies and RMSNorm divide by these; checked when the config is built. -/
@@ -107,6 +108,9 @@ structure TextConfig where
 
 namespace TextConfig
 
+/-- Channels per attention head. -/
+def headDim (cfg : TextConfig) : Nat := 2 * cfg.halfHeadDim
+
 def toQwenConfig (cfg : TextConfig) : qwen.QwenConfig := {
   vocab_size := cfg.vocabSize
   hidden_size := cfg.hiddenSize
@@ -114,11 +118,11 @@ def toQwenConfig (cfg : TextConfig) : qwen.QwenConfig := {
   num_hidden_layers := cfg.numHiddenLayers
   num_attention_heads := cfg.numAttentionHeads
   num_key_value_heads := cfg.numKeyValueHeads
-  head_dim := cfg.headDim
+  half_head_dim := cfg.halfHeadDim
   rope_theta := cfg.ropeTheta
   rms_norm_eps := cfg.rmsNormEps
   headsValid := cfg.headsValid
-  headDimEven := cfg.headDimEven
+  halfHeadDimPos := cfg.halfHeadDimPos
   vocabPos := cfg.vocabPos
   ropeThetaPos := cfg.ropeThetaPos
   rmsNormEpsPos := cfg.rmsNormEpsPos

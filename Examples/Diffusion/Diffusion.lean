@@ -31,25 +31,28 @@ structure Config where
   mask_token_id : UInt64 := 0     -- NUL character as mask token
   n_layer : Nat := 4           -- transformer blocks (smaller for testing)
   n_head : Nat := 4            -- attention heads
-  n_embd : Nat := 256          -- embedding dimension (smaller for testing)
+  half_head_dim : Nat := 32    -- half the per-head dimension (smaller for testing)
   diffusion_steps : Nat := 64  -- timesteps for diffusion (smaller for testing)
   context_len : Nat := 16      -- prefix tokens never masked
   deriving Repr, Inhabited
 
-/-- Compute head dimension from config -/
-def Config.headDim (cfg : Config) : Nat := cfg.n_embd / cfg.n_head
+/-- Head dimension -/
+def Config.headDim (cfg : Config) : Nat := 2 * cfg.half_head_dim
+
+/-- Embedding dimension: `n_head` heads of `headDim` channels -/
+def Config.n_embd (cfg : Config) : Nat := cfg.n_head * (2 * cfg.half_head_dim)
 
 /-- Tiny config for unit tests -/
 def Config.tiny : Config :=
-  { seq_len := 64, vocab_size := 128, n_layer := 2, n_head := 2, n_embd := 64, diffusion_steps := 16 }
+  { seq_len := 64, vocab_size := 128, n_layer := 2, n_head := 2, half_head_dim := 16, diffusion_steps := 16 }
 
 /-- Small config for testing (no context for simpler sampling) -/
 def Config.small : Config :=
-  { seq_len := 128, vocab_size := 128, n_layer := 4, n_head := 4, n_embd := 256, diffusion_steps := 64, context_len := 0 }
+  { seq_len := 128, vocab_size := 128, n_layer := 4, n_head := 4, half_head_dim := 32, diffusion_steps := 64, context_len := 0 }
 
 /-- Full config matching tiny-diffusion paper -/
 def Config.full : Config :=
-  { seq_len := 256, vocab_size := 128, n_layer := 6, n_head := 6, n_embd := 384, diffusion_steps := 128 }
+  { seq_len := 256, vocab_size := 128, n_layer := 6, n_head := 6, half_head_dim := 32, diffusion_steps := 128 }
 
 /-- Full diffusion model parameters -/
 structure DiffusionParams (cfg : Config) where
@@ -58,7 +61,7 @@ structure DiffusionParams (cfg : Config) where
   -- Time embedding for timesteps
   time_emb : Activation #[cfg.diffusion_steps, cfg.n_embd]
   -- Transformer blocks with equal query and KV head counts.
-  blocks : Array (BlockParams cfg.n_embd cfg.n_head cfg.n_head)
+  blocks : Array (BlockParams cfg.n_head cfg.half_head_dim cfg.n_head)
   -- Output head (NOT tied to token_emb)
   output_head : Activation #[cfg.vocab_size, cfg.n_embd]
 
@@ -66,8 +69,7 @@ structure DiffusionParams (cfg : Config) where
 
 /-- Initialize diffusion model parameters -/
 def DiffusionParams.init (cfg : Config) : IO (DiffusionParams cfg) := do
-  if cfg.n_head == 0 || cfg.n_embd == 0 || cfg.n_embd % cfg.n_head != 0 ||
-      cfg.headDim % 2 != 0 || cfg.seq_len == 0 || cfg.diffusion_steps == 0 ||
+  if cfg.n_head == 0 || cfg.half_head_dim == 0 || cfg.seq_len == 0 || cfg.diffusion_steps == 0 ||
       cfg.context_len > cfg.seq_len || cfg.mask_token_id.toNat >= cfg.vocab_size then
     throw <| IO.userError "Invalid diffusion dimensions, rotary head width, context, or mask token"
   let scale := 1.0 / Float.sqrt cfg.n_embd.toFloat
@@ -79,7 +81,7 @@ def DiffusionParams.init (cfg : Config) : IO (DiffusionParams cfg) := do
   -- Transformer blocks
   let mut blocks := #[]
   for _ in [:cfg.n_layer] do
-    let block ← BlockParams.init cfg.n_embd cfg.n_head cfg.n_head
+    let block ← BlockParams.init cfg.n_head cfg.half_head_dim cfg.n_head
     blocks := blocks.push block
 
   -- Output head (zero-initialized like tiny-diffusion)
@@ -93,12 +95,12 @@ def DiffusionParams.init (cfg : Config) : IO (DiffusionParams cfg) := do
   }
 
 /-- Bidirectional attention forward pass (is_causal=false) -/
-def bidirectionalAttentionForward {batch seq n_embd n_head : Nat}
-    (params : AttentionParams n_embd n_head n_head)
-    (x : Activation #[batch, seq, n_embd])
-    (rotaryCache : RotaryCache rotaryLen (n_embd / n_head))
-    : Activation #[batch, seq, n_embd] :=
-  let head_dim := n_embd / n_head
+def bidirectionalAttentionForward {batch seq n_head half : Nat}
+    (params : AttentionParams n_head half n_head)
+    (x : Activation #[batch, seq, n_head * (2 * half)])
+    (rotaryCache : RotaryCache rotaryLen half)
+    : Activation #[batch, seq, n_head * (2 * half)] :=
+  let head_dim := 2 * half
 
   -- Project to Q, K, V (no bias)
   let q := Tensor.linear3d x params.c_q
@@ -145,11 +147,11 @@ def mlpForward {batch seq n_embd : Nat}
   Tensor.linear3d h params.c_proj             -- Project back
 
 /-- Block forward pass (pre-norm with bidirectional attention) -/
-def blockForward {batch seq n_embd n_head : Nat}
-    (params : BlockParams n_embd n_head n_head)
-    (x : Activation #[batch, seq, n_embd])
-    (rotaryCache : RotaryCache rotaryLen (n_embd / n_head))
-    : Activation #[batch, seq, n_embd] :=
+def blockForward {batch seq n_head half : Nat}
+    (params : BlockParams n_head half n_head)
+    (x : Activation #[batch, seq, n_head * (2 * half)])
+    (rotaryCache : RotaryCache rotaryLen half)
+    : Activation #[batch, seq, n_head * (2 * half)] :=
   -- Attention with residual (pre-norm)
   let x := x + bidirectionalAttentionForward params.attn (norm x) rotaryCache
   -- MLP with residual (pre-norm)
@@ -160,7 +162,7 @@ def forward {cfg : Config} {batch seq : Nat}
     (params : DiffusionParams cfg)
     (x_t : Tokens #[batch, seq])              -- Noisy tokens (with masks)
     (t : Tokens #[batch])                     -- Timestep indices
-    (rotaryCache : RotaryCache rotaryLen cfg.headDim)
+    (rotaryCache : RotaryCache rotaryLen cfg.half_head_dim)
     : Activation #[batch, seq, cfg.vocab_size] :=
   -- Token embedding
   let x := Tensor.embedding x_t params.token_emb  -- [batch, seq, n_embd]
@@ -218,7 +220,7 @@ private def validateSampling (cfg : Config) (batch : Nat) (temperature : Float) 
 -/
 def sampleConfidence {cfg : Config} {batch : Nat}
     (params : DiffusionParams cfg)
-    (rotaryCache : RotaryCache rotaryLen cfg.headDim)
+    (rotaryCache : RotaryCache rotaryLen cfg.half_head_dim)
     (confidenceThreshold : Float := 0.5)
     (temperature : Float := 1.0)
     (maxSteps : Nat := 256)
@@ -308,7 +310,7 @@ def sampleConfidence {cfg : Config} {batch : Nat}
 -/
 def sampleTopK {cfg : Config} {batch : Nat}
     (params : DiffusionParams cfg)
-    (rotaryCache : RotaryCache rotaryLen cfg.headDim)
+    (rotaryCache : RotaryCache rotaryLen cfg.half_head_dim)
     (k : Nat)
     (temperature : Float := 1.0)
     (maxSteps : Nat := 256)
@@ -384,7 +386,7 @@ def sampleTopK {cfg : Config} {batch : Nat}
 -/
 def sampleMultiple {cfg : Config} (numBlocks : Nat)
     (params : DiffusionParams cfg)
-    (rotaryCache : RotaryCache rotaryLen cfg.headDim)
+    (rotaryCache : RotaryCache rotaryLen cfg.half_head_dim)
     (k : Nat)
     (temperature : Float := 1.0)
     (maxSteps : Nat := 256)
@@ -398,7 +400,7 @@ def sampleMultiple {cfg : Config} (numBlocks : Nat)
 -/
 def sampleMultipleWithContext {cfg : Config} (numBlocks : Nat)
     (params : DiffusionParams cfg)
-    (rotaryCache : RotaryCache rotaryLen cfg.headDim)
+    (rotaryCache : RotaryCache rotaryLen cfg.half_head_dim)
     (contextTokens : Tokens #[numBlocks, cfg.context_len])
     (k : Nat)
     (temperature : Float := 1.0)
@@ -412,7 +414,7 @@ def sampleMultipleWithContext {cfg : Config} (numBlocks : Nat)
 -/
 def sampleMultipleWithPrompt {cfg : Config} (numBlocks : Nat)
     (params : DiffusionParams cfg)
-    (rotaryCache : RotaryCache rotaryLen cfg.headDim)
+    (rotaryCache : RotaryCache rotaryLen cfg.half_head_dim)
     (prompt : Tokens #[cfg.context_len])
     (k : Nat)
     (temperature : Float := 1.0)

@@ -300,7 +300,7 @@ structure StepResult where
 -/
 def trainStep {cfg : moddedGpt.Config} {batch seq : Nat}
     (params : ModdedGPTParams (device := device) cfg)
-    (yarn : YarnRotary (device := device) cfg.headDim cfg.maxSeqLen)
+    (yarn : YarnRotary (device := device) cfg.halfHeadDim cfg.maxSeqLen)
     (input : Tensor { shape := #[batch, seq], dtype := .Int64, device := device })
     (target : Tensor { shape := #[batch, seq], dtype := .Int64, device := device })
     (optState : OptimizerState (device := device) cfg)
@@ -380,7 +380,7 @@ def trainStep {cfg : moddedGpt.Config} {batch seq : Nat}
 /-- Accumulate gradients over multiple micro-batches -/
 def accumulateGradients {cfg : moddedGpt.Config} {batch seq : Nat}
     (params : ModdedGPTParams (device := device) cfg)
-    (yarn : YarnRotary (device := device) cfg.headDim cfg.maxSeqLen)
+    (yarn : YarnRotary (device := device) cfg.halfHeadDim cfg.maxSeqLen)
     (batches : Array (Tensor { shape := #[batch, seq], dtype := .Int64, device := device } × Tensor { shape := #[batch, seq], dtype := .Int64, device := device }))
     : IO Float := do
   let mut totalLoss := 0.0
@@ -410,7 +410,7 @@ structure ValidationResult where
 /-- Run validation on held-out data -/
 def validate {cfg : moddedGpt.Config}
     (params : ModdedGPTParams (device := device) cfg)
-    (yarn : YarnRotary (device := device) cfg.headDim cfg.maxSeqLen)
+    (yarn : YarnRotary (device := device) cfg.halfHeadDim cfg.maxSeqLen)
     (valData : Σ n, DataShard n)
     (batchSize seqLen : Nat)
     (numBatches : Nat := 10)
@@ -873,7 +873,7 @@ structure TrainState (cfg : moddedGpt.Config) where
   /-- Model parameters -/
   params : ModdedGPTParams (device := device) cfg
   /-- YaRN rotary embeddings -/
-  yarn : YarnRotary (device := device) cfg.headDim cfg.maxSeqLen
+  yarn : YarnRotary (device := device) cfg.halfHeadDim cfg.maxSeqLen
   /-- Optimizer state -/
   optState : OptimizerState (device := device) cfg
   /-- Data generator -/
@@ -896,7 +896,7 @@ def TrainState.init (cfg : moddedGpt.Config) (dataConfig : DataLoader.Config)
     (lr : Float := 0.023) (weightDecay : Float := 0.0)
     : IO (TrainState (device := device) cfg) := do
   let params ← ModdedGPTParams.init cfg (device := device)
-  let yarn ← YarnRotary.init cfg.headDim cfg.maxSeqLen cfg.ropeBase (device := device)
+  let yarn ← YarnRotary.init cfg.halfHeadDim cfg.maxSeqLen cfg.ropeBase (device := device)
 
   -- Initialize optimizer state from moved parameters so moment buffers match device
   let optState := OptimizerState.init cfg params lr weightDecay
@@ -964,7 +964,7 @@ def runValidation (state : TrainState (device := device) cfg) (hp : Hyperparamet
 /-- Distributed training step with gradient accumulation over micro-batches. -/
 def trainStepDistributedAccum {cfg : moddedGpt.Config} {batch seq : Nat}
     (params : ModdedGPTParams (device := device) cfg)
-    (yarn : YarnRotary (device := device) cfg.headDim cfg.maxSeqLen)
+    (yarn : YarnRotary (device := device) cfg.halfHeadDim cfg.maxSeqLen)
     (microBatches : Array (Tensor { shape := #[batch, seq], dtype := .Int64, device := device } × Tensor { shape := #[batch, seq], dtype := .Int64, device := device }))
     (optState : OptimizerState (device := device) cfg)
     (hp : Hyperparameters)
@@ -1346,7 +1346,7 @@ private def clipGradientValue {σ : StaticSpec} [DType.RealFloating σ.dtype] (g
 -/
 def trainStepDistributed {cfg : moddedGpt.Config} {batch seq : Nat}
     (params : ModdedGPTParams (device := device) cfg)
-    (yarn : YarnRotary (device := device) cfg.headDim cfg.maxSeqLen)
+    (yarn : YarnRotary (device := device) cfg.halfHeadDim cfg.maxSeqLen)
     (input : Tensor { shape := #[batch, seq], dtype := .Int64, device := device })
     (target : Tensor { shape := #[batch, seq], dtype := .Int64, device := device })
     (optState : OptimizerState (device := device) cfg)
@@ -1431,7 +1431,7 @@ def DistributedTrainState.init (cfg : moddedGpt.Config) (dataConfig : DataLoader
 
   -- Initialize base training state
   let params ← ModdedGPTParams.init cfg (device := device)
-  let yarn ← YarnRotary.init cfg.headDim cfg.maxSeqLen cfg.ropeBase (device := device)
+  let yarn ← YarnRotary.init cfg.halfHeadDim cfg.maxSeqLen cfg.ropeBase (device := device)
 
   -- Initialize optimizer state from moved parameters so moment buffers match device
   let optState := OptimizerState.init cfg params lr weightDecay
@@ -1689,7 +1689,7 @@ abbrev GPTBatchProvider (batch seq : Nat) :=
 /-- Distributed streaming training state (no shard-backed data generator). -/
 structure StreamTrainState (cfg : moddedGpt.Config) where
   params : ModdedGPTParams (device := device) cfg
-  yarn : YarnRotary (device := device) cfg.headDim cfg.maxSeqLen
+  yarn : YarnRotary (device := device) cfg.halfHeadDim cfg.maxSeqLen
   optState : OptimizerState (device := device) cfg
   step : Nat := 0
   bestValLoss : Float := 1e30
@@ -1719,7 +1719,7 @@ private def initStreamTrainState (cfg : moddedGpt.Config) (device : Device)
       pure (0, 1)
 
   let params ← ModdedGPTParams.init cfg (device := device)
-  let yarn ← YarnRotary.init cfg.headDim cfg.maxSeqLen cfg.ropeBase (device := device)
+  let yarn ← YarnRotary.init cfg.halfHeadDim cfg.maxSeqLen cfg.ropeBase (device := device)
   let optState := OptimizerState.init cfg params lr weightDecay
   let startTime ← IO.monoMsNow
 
@@ -1749,7 +1749,7 @@ private def collectMicroBatches {batch seq : Nat}
 
 private def validateWithProvider {cfg : moddedGpt.Config} {batch seq : Nat}
     (params : ModdedGPTParams (device := device) cfg)
-    (yarn : YarnRotary (device := device) cfg.headDim cfg.maxSeqLen)
+    (yarn : YarnRotary (device := device) cfg.halfHeadDim cfg.maxSeqLen)
     (provider : GPTBatchProvider batch seq)
     (numBatches : Nat)
     : IO (Option Float) := do

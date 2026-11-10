@@ -12,7 +12,7 @@ private def tinyCfg : Config := {
   num_hidden_layers := 2
   num_attention_heads := 4
   num_key_value_heads := 2
-  head_dim := 8
+  half_head_dim := 4
   rope_theta := 10000.0
   rms_norm_eps := 1e-6
 }

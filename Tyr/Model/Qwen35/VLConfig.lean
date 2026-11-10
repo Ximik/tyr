@@ -14,17 +14,18 @@ structure Qwen35VisionConfig where
   hidden_act : String := "gelu_pytorch_tanh"
   intermediate_size : Nat := 4304
   num_heads : Nat := 16
+  /-- Half the per-head channel count (`hidden_size / num_heads / 2`). -/
+  half_head_dim : Nat := 36
   in_channels : Nat := 3
   patch_size : Nat := 16
   spatial_merge_size : Nat := 2
   temporal_patch_size : Nat := 2
   out_hidden_size : Nat := 3584
   num_position_embeddings : Nat := 2304
-  /-- Attention splits `hidden_size` into a nonzero number of equal heads; checked when the config is built. -/
-  headsDivide : num_heads ∣ hidden_size := by decide
+  /-- Attention splits `hidden_size` into a nonzero number of equal heads of an even
+      size; checked when the config is built. -/
+  headsSplit : num_heads * (2 * half_head_dim) = hidden_size := by decide
   headsPos : 0 < num_heads := by decide
-  /-- Vision RoPE rotates head-channel pairs; checked when the config is built. -/
-  headDimEven : 2 ∣ hidden_size / num_heads := by decide
   /-- Patches merge in nonempty `spatial_merge_size²` groups; checked when the config is built. -/
   mergePos : 0 < spatial_merge_size := by decide
   deriving Repr
@@ -38,6 +39,7 @@ def qwen35_0_8B : Qwen35VisionConfig := {
   hidden_act := "gelu_pytorch_tanh"
   intermediate_size := 3072
   num_heads := 12
+  half_head_dim := 32
   in_channels := 3
   patch_size := 16
   spatial_merge_size := 2
@@ -53,6 +55,7 @@ def qwen36_35B_A3B : Qwen35VisionConfig := {
   hidden_act := "gelu_pytorch_tanh"
   intermediate_size := 4304
   num_heads := 16
+  half_head_dim := 36
   in_channels := 3
   patch_size := 16
   spatial_merge_size := 2
@@ -68,10 +71,10 @@ def qwen36_35B_A3B : Qwen35VisionConfig := {
   cfg.spatial_merge_size * cfg.spatial_merge_size
 
 def headDim (cfg : Qwen35VisionConfig) : Nat :=
-  cfg.hidden_size / cfg.num_heads
+  2 * cfg.half_head_dim
 
 theorem heads_mul_headDim (cfg : Qwen35VisionConfig) : cfg.num_heads * cfg.headDim = cfg.hidden_size :=
-  Nat.mul_div_cancel' cfg.headsDivide
+  cfg.headsSplit
 
 def mergedTokenCount (cfg : Qwen35VisionConfig) (nPatches : Nat) : Nat :=
   nPatches / mergeUnit cfg

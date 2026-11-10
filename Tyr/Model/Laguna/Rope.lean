@@ -36,10 +36,10 @@
   ## Usage (for the Model.lean author)
 
     let tables ← precomputeRotaryTables cfg maxLen device
-    -- sliding layers (full rotary, rotaryDim = headDim = 128):
+    -- sliding layers (full rotary, rotary width = headDim = 128):
     let cos : Tensor { shape := #[seq, 64], dtype := .Float32 } := sliceRotaryRows tables.slidingCos 0 seq
-    let q' := Tensor.applyRotary q cos sin            -- q : Tensor { shape := #[b, seq, h, 128] }
-    -- full layers (partial rotary 0.5, rotaryDim = 64):
+    let q' := Tensor.applyRotary q cos sin        -- q : Tensor { shape := #[b, seq, h, 128] }
+    -- full layers (partial rotary 0.5, rotary width = 64):
     let cos : Tensor { shape := #[seq, 32], dtype := .Float32 } := sliceRotaryRows tables.fullCos position 1
     let q' := applyRotaryPartial q cos sin               -- q : Tensor { shape := #[b, 1, h, 128] }
 -/
@@ -54,13 +54,13 @@ variable {device : Device}
     positions `[0, len)`. -/
 structure LagunaRotaryTables (cfg : Config) (len : Nat) where
   /-- cos table for sliding-window layers (plain rope, theta = `rope_theta_sliding`). -/
-  slidingCos : Tensor { device := device, shape := #[len, cfg.rotaryDimSliding / 2], dtype := .Float32 }
+  slidingCos : Tensor { device := device, shape := #[len, cfg.half_rotary_dim_sliding], dtype := .Float32 }
   /-- sin table for sliding-window layers (plain rope, theta = `rope_theta_sliding`). -/
-  slidingSin : Tensor { device := device, shape := #[len, cfg.rotaryDimSliding / 2], dtype := .Float32 }
+  slidingSin : Tensor { device := device, shape := #[len, cfg.half_rotary_dim_sliding], dtype := .Float32 }
   /-- cos table for full-attention layers (YaRN, scaled by `yarn_attention_factor`). -/
-  fullCos : Tensor { device := device, shape := #[len, cfg.rotaryDimFull / 2], dtype := .Float32 }
+  fullCos : Tensor { device := device, shape := #[len, cfg.half_rotary_dim_full], dtype := .Float32 }
   /-- sin table for full-attention layers (YaRN, scaled by `yarn_attention_factor`). -/
-  fullSin : Tensor { device := device, shape := #[len, cfg.rotaryDimFull / 2], dtype := .Float32 }
+  fullSin : Tensor { device := device, shape := #[len, cfg.half_rotary_dim_full], dtype := .Float32 }
 
 /-- Inference view of all rotary tables, without changing their values. -/
 def LagunaRotaryTables.detach {cfg : Config} {len : Nat} (tables : LagunaRotaryTables (device := device) cfg len) :
@@ -77,9 +77,9 @@ private def twoPi : Float := 6.283185307179586
     `j ∈ [0, dim/2)`, computed in double precision.
     Matches HF `compute_default_rope_parameters` and the C++
     `compute_rotary_freqs_impl` formula. -/
-def plainInvFreq (rotaryDim : Nat) (base : Float) : Array Float :=
-  let dim := rotaryDim.toFloat
-  Array.ofFn (n := rotaryDim / 2) fun j =>
+def plainInvFreq (half : Nat) (base : Float) : Array Float :=
+  let dim := (2 * half).toFloat
+  Array.ofFn (n := half) fun j =>
     Float.pow base (-(2.0 * j.val.toFloat / dim))
 
 /-- YaRN correction-dimension helper (HF `find_correction_dim`):
@@ -114,7 +114,7 @@ def yarnInvFreq (cfg : Config) : Array Float :=
   let dim := cfg.rotaryDimFull
   let (low, high) := yarnCorrectionRange cfg
   let denom := max (high.toFloat - low.toFloat) 1.0
-  Array.ofFn (n := dim / 2) fun j =>
+  Array.ofFn (n := cfg.half_rotary_dim_full) fun j =>
     let posFreq := Float.pow cfg.rope_theta_full (2.0 * j.val.toFloat / dim.toFloat)
     let invInterp := 1.0 / (cfg.yarn_factor * posFreq)
     let invExtrap := 1.0 / posFreq
@@ -153,7 +153,7 @@ def buildCosSinTables (invFreq : Array Float) (maxLen : Nat) (scale : Float := 1
 def precomputeRotaryTables (cfg : Config) (maxLen : Nat) (device : Device)
     : IO (LagunaRotaryTables (device := device) cfg maxLen) := do
   let (slidingCos, slidingSin) :=
-    buildCosSinTables (plainInvFreq cfg.rotaryDimSliding cfg.rope_theta_sliding)
+    buildCosSinTables (plainInvFreq cfg.half_rotary_dim_sliding cfg.rope_theta_sliding)
       maxLen 1.0 device
   let (fullCos, fullSin) :=
     buildCosSinTables (yarnInvFreq cfg) maxLen cfg.yarn_attention_factor device
@@ -189,14 +189,14 @@ def sliceRotaryRowsPair {rows half : Nat}
     * Sliding-window layers (`rotary_dim = head_dim = 128`) can equally call
       `Tensor.applyRotary` directly on the full head; this helper handles
       that case too (the pass-through slice is then empty). -/
-def applyRotaryPartial {batch seq n_head head_dim rotary_dim : Nat} {d dc : DType}
+def applyRotaryPartial {batch seq n_head head_dim half : Nat} {d dc : DType}
     (x : Tensor { device := device, shape := #[batch, seq, n_head, head_dim], dtype := d })
-    (cos : Tensor { device := device, shape := #[seq, rotary_dim / 2], dtype := dc })
-    (sin : Tensor { device := device, shape := #[seq, rotary_dim / 2], dtype := dc })
-    (hrot : rotary_dim ≤ head_dim := by omega)
+    (cos : Tensor { device := device, shape := #[seq, half], dtype := dc })
+    (sin : Tensor { device := device, shape := #[seq, half], dtype := dc })
+    (hrot : 2 * half ≤ head_dim := by omega)
     : Tensor { device := device, shape := #[batch, seq, n_head, head_dim], dtype := d } :=
-  let xRot := Tensor.applyRotary (x.slice 3 0 rotary_dim) cos sin
-  let xPass := x.slice 3 rotary_dim (head_dim - rotary_dim)
+  let xRot := Tensor.applyRotary (x.slice 3 0 (2 * half)) cos sin
+  let xPass := x.slice 3 (2 * half) (head_dim - 2 * half)
   (Tensor.cat xRot xPass 3).reshape #[batch, seq, n_head, head_dim] (by simp [Nat.add_sub_cancel' hrot])
 
 end torch.laguna

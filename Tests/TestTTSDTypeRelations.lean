@@ -37,9 +37,9 @@ private def tinyConfig : Qwen3TTSConfig := {
   talkerConfig := {
     codePredictorConfig := {
       vocabSize := 16, hiddenSize := 8, intermediateSize := 16,
-      numHiddenLayers := 1, numAttentionHeads := 2, numKeyValueHeads := 1, headDim := 4 }
+      numHiddenLayers := 1, numAttentionHeads := 2, numKeyValueHeads := 1, halfHeadDim := 2 }
     vocabSize := 32, hiddenSize := 8, intermediateSize := 16,
-    numHiddenLayers := 1, numAttentionHeads := 2, numKeyValueHeads := 1, headDim := 4,
+    numHiddenLayers := 1, numAttentionHeads := 2, numKeyValueHeads := 1, halfHeadDim := 2,
     numCodeGroups := 3, textHiddenSize := 8, textVocabSize := 32,
     codecPadId := 0, codecBosId := 3, codecEosTokenId := 7,
     codecThinkId := 8, codecNoThinkId := 9, codecThinkBosId := 10, codecThinkEosId := 11 }
@@ -90,7 +90,7 @@ private def tinyConfig : Qwen3TTSConfig := {
   let model ← TalkerModel.init cfg (dtype := bf16)
   let model := TensorStruct.detach model
   let input := TalkerModel.embedCodec model (Tensor.fullInt #[1, 1] 1)
-  let (cos, sin) := Tensor.rotaryFreqs 1 cfg.headDim cfg.ropeTheta
+  let (cos, sin) := Tensor.rotaryFreqs 1 cfg.halfHeadDim cfg.ropeTheta
   let cache : qwen.QwenAttention.KVCache (device := .CPU) 1 cfg.numKeyValueHeads cfg.headDim 3 .BFloat16 :=
     qwen.QwenAttention.initKVCache 3 (dtype := .BFloat16)
   let some layer := model.layers[0]? | throw (IO.userError "Expected one test layer")

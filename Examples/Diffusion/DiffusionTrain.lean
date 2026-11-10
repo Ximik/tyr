@@ -61,8 +61,8 @@ def getBatch {n : Nat} (trainData : Tokens #[n]) (batchSize seqLen : Nat)
   return (trainData.slice! 0 start totalTokens).reshape #[batchSize, seqLen]
 
 /-- Clip gradients for a diffusion transformer block. -/
-def clipBlockGrads {n_embd n_head n_kv_head : Nat}
-    (params : BlockParams n_embd n_head n_kv_head)
+def clipBlockGrads {n_head half n_kv_head : Nat}
+    (params : BlockParams n_head half n_kv_head)
     (maxNorm : Float) : IO Unit := do
   let _ ← Tensor.clipGradNorm params.attn.c_q maxNorm
   let _ ← Tensor.clipGradNorm params.attn.c_k maxNorm
@@ -86,7 +86,7 @@ def trainStep {modelCfg : Config} {batch seq num_timesteps : Nat}
     (optState : Optim.AdamWState (DiffusionParams modelCfg))
     (schedule : MaskedDiffusionSchedule num_timesteps)
     (x_0 : Tokens #[batch, seq])  -- Clean tokens
-    (rotaryCache : RotaryCache rotaryLen modelCfg.headDim)
+    (rotaryCache : RotaryCache rotaryLen modelCfg.half_head_dim)
     (lr : Float)
     : IO (DiffusionParams modelCfg × Optim.AdamWState (DiffusionParams modelCfg) × Float) := do
   -- Zero gradients BEFORE forward/backward
@@ -130,7 +130,7 @@ def evalLoss {modelCfg : Config} {num_timesteps : Nat}
     (schedule : MaskedDiffusionSchedule num_timesteps)
     (valData : Tokens #[n])
     (batchSize seqLen : Nat)
-    (rotaryCache : RotaryCache rotaryLen modelCfg.headDim)
+    (rotaryCache : RotaryCache rotaryLen modelCfg.half_head_dim)
     (numBatches : Nat)
     : IO Float := do
   let params := TensorStruct.detach params
@@ -154,7 +154,7 @@ def trainLoop {modelCfg : Config} {num_timesteps : Nat}
     (schedule : MaskedDiffusionSchedule num_timesteps)
     (trainData : Tokens #[nTrain])
     (valData : Tokens #[nVal])
-    (rotaryCache : RotaryCache rotaryLen modelCfg.headDim)
+    (rotaryCache : RotaryCache rotaryLen modelCfg.half_head_dim)
     (evalBatches : Nat := 10)
     : IO (DiffusionParams modelCfg × Float) := do
   let mut params := initParams

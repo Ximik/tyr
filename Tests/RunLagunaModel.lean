@@ -357,20 +357,20 @@ private def runCacheParityModel {dtype : DType} [DType.RealFloating dtype]
 normalization and RoPE rows are shared between all three operation shapes.
 Return numeric violations and undetected erased-history controls separately;
 the caller reports every layer before asserting their aggregate counts. -/
-private def runBf16AttentionCacheParity {numHeads rotaryDim cap : Nat}
+private def runBf16AttentionCacheParity {numHeads rotaryHalf cap : Nat}
     (cfg : Config) (lbl : String) (attention : LagunaAttention (device := device) cfg numHeads .BFloat16)
-    (hkv : cfg.num_key_value_heads ∣ numHeads) (hrot : rotaryDim ≤ cfg.head_dim)
+    (hkv : cfg.num_key_value_heads ∣ numHeads) (hrot : 2 * rotaryHalf ≤ cfg.head_dim)
     (inputs : Tensor { shape := #[1, 20, cfg.hidden_size], device := device, dtype := .BFloat16 })
-    (cos sin : Tensor { shape := #[20, rotaryDim / 2], dtype := .Float32, device := device }) (window : Option Nat)
+    (cos sin : Tensor { shape := #[20, rotaryHalf], dtype := .Float32, device := device }) (window : Option Nat)
     (fresh : LagunaAttention.KVCache (device := device) cfg 1 cap .BFloat16) : IO (Nat × Nat) := do
-  let fullOutput : Tensor { shape := #[1, 20, cfg.hidden_size], device := device, dtype := .BFloat16 } := attention.forward (rotaryDim := rotaryDim) cfg hkv hrot inputs cos sin window
+  let fullOutput : Tensor { shape := #[1, 20, cfg.hidden_size], device := device, dtype := .BFloat16 } := attention.forward (rotaryHalf := rotaryHalf) cfg hkv hrot inputs cos sin window
   let inputsPre : Tensor { shape := #[1, 12, cfg.hidden_size], device := device, dtype := .BFloat16 } := Tensor.slice inputs 1 0 12
-  let cosPre : Tensor { shape := #[12, rotaryDim / 2], dtype := .Float32, device := device } := Tensor.slice cos 0 0 12
-  let sinPre : Tensor { shape := #[12, rotaryDim / 2], dtype := .Float32, device := device } := Tensor.slice sin 0 0 12
+  let cosPre : Tensor { shape := #[12, rotaryHalf], dtype := .Float32, device := device } := Tensor.slice cos 0 0 12
+  let sinPre : Tensor { shape := #[12, rotaryHalf], dtype := .Float32, device := device } := Tensor.slice sin 0 0 12
   let ⟨hfit⟩ ← if h : 12 ≤ cap then pure (PLift.up h) else
     throw <| IO.userError s!"attention cache capacity {cap} cannot hold the 12-token prefix"
   let (prefill, initialCache) := attention.forwardWithCache
-    (rotaryDim := rotaryDim) cfg hkv hrot inputsPre cosPre sinPre window fresh hfit
+    (rotaryHalf := rotaryHalf) cfg hkv hrot inputsPre cosPre sinPre window fresh hfit
   let expectedPre : Tensor { shape := #[1, 12, cfg.hidden_size], device := device, dtype := .BFloat16 } := Tensor.slice fullOutput 1 0 12
   let preStats ← mixedErrorStats (prefill) (expectedPre)
   reportMixedErrors preStats s!"(a) [{lbl}] attention prefill"
@@ -380,19 +380,19 @@ private def runBf16AttentionCacheParity {numHeads rotaryDim cap : Nat}
   for pos in [12:20] do
     let input : Tensor { shape := #[1, 1, cfg.hidden_size], device := device, dtype := .BFloat16 } := Tensor.slice! inputs 1 pos 1
     let expected : Tensor { shape := #[1, 1, cfg.hidden_size], device := device, dtype := .BFloat16 } := Tensor.slice! fullOutput 1 pos 1
-    let cosStep : Tensor { shape := #[1, rotaryDim / 2], dtype := .Float32, device := device } := Tensor.slice! cos 0 pos 1
-    let sinStep : Tensor { shape := #[1, rotaryDim / 2], dtype := .Float32, device := device } := Tensor.slice! sin 0 pos 1
+    let cosStep : Tensor { shape := #[1, rotaryHalf], dtype := .Float32, device := device } := Tensor.slice! cos 0 pos 1
+    let sinStep : Tensor { shape := #[1, rotaryHalf], dtype := .Float32, device := device } := Tensor.slice! sin 0 pos 1
     let ⟨hpos⟩ ← if h : pos < cap then pure (PLift.up h) else
       throw <| IO.userError s!"attention cache capacity {cap} cannot hold position {pos}"
     if pos == 12 then
       let erased := { cache with vStore := Tensor.zerosLike cache.vStore }
       let (bad, _) := attention.forwardStep
-        (rotaryDim := rotaryDim) cfg hkv hrot input cosStep sinStep window erased pos hpos
+        (rotaryHalf := rotaryHalf) cfg hkv hrot input cosStep sinStep window erased pos hpos
       let badStats ← mixedErrorStats (bad) (expected)
       IO.println s!"  (a) [{lbl}] erased cached history: violations={badStats.violations} (must be positive)"
       if badStats.violations == 0 then undetected := undetected + 1
     let (out, next) := attention.forwardStep
-      (rotaryDim := rotaryDim) cfg hkv hrot input cosStep sinStep window cache pos hpos
+      (rotaryHalf := rotaryHalf) cfg hkv hrot input cosStep sinStep window cache pos hpos
     cache := next
     stepStats := stepStats.merge (← mixedErrorStats (out) (expected))
   reportMixedErrors stepStats s!"(a) [{lbl}] attention decode positions 12..19"
@@ -418,14 +418,14 @@ private def runBf16LayerCacheParity (cfg : Config) (device : Device) (lbl : Stri
       throw <| IO.userError "Missing layer cache in BF16 attention reference"
     let (count, missed) ← match cfg.isFullAttentionLayer layerIdx, layer.attn with
       | true, .full attention =>
-        let cos : Tensor { shape := #[20, cfg.rotaryDimFull / 2], dtype := .Float32, device := device } := sliceRotaryRows tables.fullCos 0 20
-        let sin : Tensor { shape := #[20, cfg.rotaryDimFull / 2], dtype := .Float32, device := device } := sliceRotaryRows tables.fullSin 0 20
-        runBf16AttentionCacheParity (rotaryDim := cfg.rotaryDimFull) cfg
+        let cos : Tensor { shape := #[20, cfg.half_rotary_dim_full], dtype := .Float32, device := device } := sliceRotaryRows tables.fullCos 0 20
+        let sin : Tensor { shape := #[20, cfg.half_rotary_dim_full], dtype := .Float32, device := device } := sliceRotaryRows tables.fullSin 0 20
+        runBf16AttentionCacheParity (rotaryHalf := cfg.half_rotary_dim_full) cfg
           s!"{lbl} layer {layerIdx} full" attention cfg.kvHeadsDivideFull cfg.rotaryDimFull_le normalized cos sin none kv
       | false, .sliding attention =>
-        let cos : Tensor { shape := #[20, cfg.rotaryDimSliding / 2], dtype := .Float32, device := device } := sliceRotaryRows tables.slidingCos 0 20
-        let sin : Tensor { shape := #[20, cfg.rotaryDimSliding / 2], dtype := .Float32, device := device } := sliceRotaryRows tables.slidingSin 0 20
-        runBf16AttentionCacheParity (rotaryDim := cfg.rotaryDimSliding) cfg
+        let cos : Tensor { shape := #[20, cfg.half_rotary_dim_sliding], dtype := .Float32, device := device } := sliceRotaryRows tables.slidingCos 0 20
+        let sin : Tensor { shape := #[20, cfg.half_rotary_dim_sliding], dtype := .Float32, device := device } := sliceRotaryRows tables.slidingSin 0 20
+        runBf16AttentionCacheParity (rotaryHalf := cfg.half_rotary_dim_sliding) cfg
           s!"{lbl} layer {layerIdx} sliding" attention cfg.kvHeadsDivideSliding cfg.rotaryDimSliding_le normalized cos sin (some cfg.sliding_window) kv
     pure (← layer.forward cfg inputs tables, violations + count, undetected + missed)) (inputs0, 0, 0)
   check (undetected == 0) s!"(a) [{lbl}] every attention layer rejects erased cached history"

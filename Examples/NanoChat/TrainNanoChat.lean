@@ -197,8 +197,7 @@ def runTraining (args : Args) (env : TrainEnvState) : IO Unit := do
       { Config.default with
         nLayer := 4
         nHead := 4
-        headDim := 64
-        modelDim := 256
+        halfHeadDim := 32
         maxSeqLen := 512
         blockSize := 64
       }

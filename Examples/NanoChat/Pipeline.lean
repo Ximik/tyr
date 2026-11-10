@@ -209,33 +209,29 @@ structure NanoChatConfig extends PipelineConfig where
   envState : NanoChatEnvState := {}
   deriving Repr
 
-/-- Pick a head count that divides `modelDim`, closest to `targetHeadDim`. -/
-private def findNumHeads (modelDim targetHeadDim : Nat) : Nat := Id.run do
-  if modelDim == 0 then
-    return 1
-  let target := max 1 targetHeadDim
-  let ideal := max 1 ((modelDim + target / 2) / target)
-  for off in [:modelDim + 1] do
-    let up := ideal + off
-    if up > 0 && modelDim % up == 0 then
-      return up
-    if ideal > off then
-      let down := ideal - off
-      if down > 0 && modelDim % down == 0 then
-        return down
-  return 1
+/-- Split `modelDim` into heads of even width: `(nHead, halfHeadDim)` with
+    `nHead * (2 * halfHeadDim) = modelDim` and head width closest to `targetHeadDim`. -/
+private def findHeads? (modelDim targetHeadDim : Nat) : Option (Nat × Nat) := Id.run do
+  let distance (a b : Nat) : Nat := max a b - min a b
+  let mut best : Option (Nat × Nat) := none
+  for half in [1:modelDim / 2 + 1] do
+    if modelDim % (2 * half) == 0 then
+      let better : Bool := match best with
+        | some (_, current) => decide (distance (2 * half) targetHeadDim < distance (2 * current) targetHeadDim)
+        | none => true
+      if better then best := some (modelDim / (2 * half), half)
+  return best
 
 /-- Convert to model config -/
-def NanoChatConfig.toModelConfig (cfg : NanoChatConfig) : moddedGpt.Config :=
-  let modelDimNat := max 1 (cfg.modelDepth * cfg.modelAspectRatio)
-  let nHeadNat := findNumHeads modelDimNat cfg.targetHeadDim
-  let headDimNat := max 1 (modelDimNat / nHeadNat)
-  {
+def NanoChatConfig.toModelConfig? (cfg : NanoChatConfig) : Except String moddedGpt.Config := do
+  let modelDim := cfg.modelDepth * cfg.modelAspectRatio
+  let some (nHead, halfHeadDim) := findHeads? modelDim cfg.targetHeadDim
+    | throw s!"model dim {modelDim} (depth {cfg.modelDepth} * aspect ratio {cfg.modelAspectRatio}) does not split into heads of even width"
+  pure {
     vocabSize := cfg.vocabSize
     nLayer := cfg.modelDepth
-    nHead := nHeadNat
-    headDim := headDimNat
-    modelDim := modelDimNat
+    nHead
+    halfHeadDim
     maxSeqLen := cfg.maxSeqLen
     blockSize := 128
     ropeBase := cfg.ropeBase
@@ -993,7 +989,7 @@ def pretrainBaseModel (cfg : NanoChatConfig) : PipelineM Unit := do
   log s!"Pretraining d{cfg.modelDepth} model..."
 
   let checkpointDir ← cfg.getCheckpointDir "base"
-  let modelCfg ← resolveModelConfigFromCheckpoint (cfg.toModelConfig) checkpointDir "pretrain"
+  let modelCfg ← resolveModelConfigFromCheckpoint (← IO.ofExcept cfg.toModelConfig?) checkpointDir "pretrain"
   let pretrainEnv := cfg.envState.pretrain
   let defaultHp := Hyperparameters.default
   let numIterations := pretrainEnv.numIterations
@@ -1130,7 +1126,7 @@ def evalBaseModel (cfg : NanoChatConfig) : PipelineM Unit := runOnMaster do
   log "Evaluating base model on CORE tasks..."
 
   let checkpointDir ← cfg.getCheckpointDir "base"
-  let modelCfg ← resolveModelConfigFromCheckpoint (cfg.toModelConfig) checkpointDir "base-eval"
+  let modelCfg ← resolveModelConfigFromCheckpoint (← IO.ofExcept cfg.toModelConfig?) checkpointDir "base-eval"
   let tokenizerPath ← cfg.getTokenizerPath
   let tokenizerFile := s!"{tokenizerPath}/tokenizer.bin"
 
@@ -1155,7 +1151,7 @@ def evalBaseModel (cfg : NanoChatConfig) : PipelineM Unit := runOnMaster do
       (tokenizer.encodeWithSpecials tok text).map (·.toUInt64)
 
     -- Initialize YaRN rotary embeddings for evaluation
-    let yarn ← YarnRotary.init modelCfg.headDim modelCfg.maxSeqLen modelCfg.ropeBase (device := evalDevice)
+    let yarn ← YarnRotary.init modelCfg.halfHeadDim modelCfg.maxSeqLen modelCfg.ropeBase (device := evalDevice)
 
     -- Create model forward function for evaluation
     let runModel : ModelRunner (device := evalDevice) modelCfg.vocabSize := fun {batch seq} input => do
@@ -1349,11 +1345,11 @@ def midtrain (cfg : NanoChatConfig) : PipelineM Unit := do
 
   let modelCfg ←
     if hasMid then
-      resolveModelConfigFromCheckpoint (cfg.toModelConfig) midCheckpointDir "midtrain"
+      resolveModelConfigFromCheckpoint (← IO.ofExcept cfg.toModelConfig?) midCheckpointDir "midtrain"
     else if hasBase then
-      resolveModelConfigFromCheckpoint (cfg.toModelConfig) baseCheckpointDir "midtrain"
+      resolveModelConfigFromCheckpoint (← IO.ofExcept cfg.toModelConfig?) baseCheckpointDir "midtrain"
     else
-      pure (cfg.toModelConfig)
+      pure (← IO.ofExcept cfg.toModelConfig?)
 
   -- Midtraining defaults aligned to nanochat speedrun/checkpoints.
   let midDefaultHp : Hyperparameters := {
@@ -1497,7 +1493,7 @@ def evalChat (cfg : NanoChatConfig) (checkpoint : String) : PipelineM Unit := ru
   log s!"Evaluating chat model ({checkpoint})..."
 
   let checkpointDir ← cfg.getCheckpointDir checkpoint
-  let modelCfg ← resolveModelConfigFromCheckpoint (cfg.toModelConfig) checkpointDir s!"eval-{checkpoint}"
+  let modelCfg ← resolveModelConfigFromCheckpoint (← IO.ofExcept cfg.toModelConfig?) checkpointDir s!"eval-{checkpoint}"
   let tokenizerPath ← cfg.getTokenizerPath
   let tokenizerFile := s!"{tokenizerPath}/tokenizer.bin"
 
@@ -1522,7 +1518,7 @@ def evalChat (cfg : NanoChatConfig) (checkpoint : String) : PipelineM Unit := ru
       (tokenizer.encodeWithSpecials tok text).map (·.toUInt64)
 
     -- Initialize model inference components
-    let yarn ← YarnRotary.init modelCfg.headDim modelCfg.maxSeqLen modelCfg.ropeBase (device := evalDevice)
+    let yarn ← YarnRotary.init modelCfg.halfHeadDim modelCfg.maxSeqLen modelCfg.ropeBase (device := evalDevice)
 
     -- Create model forward function for evaluation
     let runModel : ModelRunner (device := evalDevice) modelCfg.vocabSize := fun {batch seq} input => do
@@ -1579,7 +1575,7 @@ def supervisedFineTune (cfg : NanoChatConfig) : PipelineM Unit := do
   let sftEnv := cfg.envState.sft
 
   let midCheckpointDir ← cfg.getCheckpointDir "mid"
-  let modelCfg ← resolveModelConfigFromCheckpoint (cfg.toModelConfig) midCheckpointDir "sft"
+  let modelCfg ← resolveModelConfigFromCheckpoint (← IO.ofExcept cfg.toModelConfig?) midCheckpointDir "sft"
   let sftCheckpointDir ← cfg.getCheckpointDir "sft"
   IO.FS.createDirAll ⟨sftCheckpointDir⟩
   let isDistributed ← dist.isInitialized
@@ -1623,7 +1619,7 @@ def supervisedFineTune (cfg : NanoChatConfig) : PipelineM Unit := do
     let paramsOnDevice ← TensorStruct.makeLeafParams midCkpt.params
 
     -- Initialize YaRN rotary embeddings
-    let yarn ← YarnRotary.init modelCfg.headDim modelCfg.maxSeqLen modelCfg.ropeBase (device := trainDevice)
+    let yarn ← YarnRotary.init modelCfg.halfHeadDim modelCfg.maxSeqLen modelCfg.ropeBase (device := trainDevice)
 
     -- Keep batch and sequence indices across the SFT callback boundary.
     let forwardFn : ModdedGPTParams (device := trainDevice) modelCfg → {batch seq : Nat} →
@@ -1723,7 +1719,7 @@ def reinforcementLearning (cfg : NanoChatConfig) : PipelineM Unit := do
   let rlEnv := cfg.envState.rl
 
   let sftCheckpointDir ← cfg.getCheckpointDir "sft"
-  let modelCfg ← resolveModelConfigFromCheckpoint (cfg.toModelConfig) sftCheckpointDir "grpo"
+  let modelCfg ← resolveModelConfigFromCheckpoint (← IO.ofExcept cfg.toModelConfig?) sftCheckpointDir "grpo"
   let rlCheckpointDir ← cfg.getCheckpointDir "rl"
   let tokenizerPath ← cfg.getTokenizerPath
   let tokenizerFile := s!"{tokenizerPath}/tokenizer.bin"
@@ -1783,7 +1779,7 @@ def reinforcementLearning (cfg : NanoChatConfig) : PipelineM Unit := do
     let adamStateOnDevice := sftCkpt.optState.adamState
 
     -- Initialize model components
-    let yarn ← YarnRotary.init modelCfg.headDim modelCfg.maxSeqLen modelCfg.ropeBase (device := trainDevice)
+    let yarn ← YarnRotary.init modelCfg.halfHeadDim modelCfg.maxSeqLen modelCfg.ropeBase (device := trainDevice)
 
     -- Create decode function
     let decodeFn := fun (tokens : Array UInt64) =>
@@ -2071,7 +2067,7 @@ def main : IO Unit := do
   IO.println "╔════════════════════════════════════════╗"
   IO.println "║           NanoChat Pipeline            ║"
   IO.println "╚════════════════════════════════════════╝"
-  let modelCfg := cfg.toModelConfig
+  let modelCfg ← IO.ofExcept cfg.toModelConfig?
   IO.println s!"Configuration:"
   IO.println s!"  Model depth: {cfg.modelDepth}"
   IO.println s!"  Model dim: {modelCfg.modelDim} (heads={modelCfg.nHead}, head_dim={modelCfg.headDim})"
