@@ -324,20 +324,18 @@ def forward2d {tokens : Nat}
       -- instead of scanning all num_experts with a GPU mask + host sync per
       -- expert (that is ~256 syncs/layer, fatal at decode). Iteration stays in
       -- ascending expert order, matching the HF `expert_hit` accumulation order.
-      let flatIdxHost ← Tensor.toUInt64Array (Tensor.reshape (Tensor.toInt64 flatIdx) #[tokens * k])
-      let hitExperts : Array Nat := Id.run do
-        let mut seen : Array Nat := #[]
+      let flatIdxHost ← Tensor.toFinArray cfg.num_experts (Tensor.reshape (Tensor.toInt64 flatIdx) #[tokens * k])
+      let hitExperts : Array (Fin cfg.num_experts) := Id.run do
+        let mut seen : Array (Fin cfg.num_experts) := #[]
         for id in flatIdxHost do
-          if !(seen.contains id.toNat) then
-            seen := seen.push id.toNat
+          if !(seen.contains id) then
+            seen := seen.push id
         pure (seen.qsort (· < ·))
-      for eU in hitExperts do
-        let ⟨nE, pairsE⟩ := Tensor.maskedSelect pairIds (Tensor.eqScalar flatIdx eU.toInt64)
+      for e in hitExperts do
+        let ⟨nE, pairsE⟩ := Tensor.maskedSelect pairIds (Tensor.eqScalar flatIdx e.val.toInt64)
         let tokE := Tensor.indexSelect! tokIdsFlat pairsE
         let wE := Tensor.indexSelect! flatW pairsE
-        let ⟨hE⟩ ← if h : eU < cfg.num_experts then pure (PLift.up h) else
-          throw <| IO.userError s!"router selected expert {eU} outside {cfg.num_experts} experts"
-        let (gateW, upW, downW) ← expertWeights cfg m ⟨eU, hE⟩
+        let (gateW, upW, downW) ← expertWeights cfg m e
         -- SwiGLU expert MLP in BF16.
         let xE : Tensor { dtype := dtype, device := device, shape := #[nE, cfg.hidden_size] } := Tensor.embedding1d tokE x
         let hid : Tensor { dtype := dtype, device := device, shape := #[nE, cfg.moe_intermediate_size] } :=

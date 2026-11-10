@@ -246,7 +246,7 @@ def testModdedGPTForward : IO Unit := do
   let input ← Tensor.randint 0 cfg.vocabSize.toInt64 #[batchSize, seqLen]
 
   -- Forward pass (window pattern is in cfg)
-  let logits ← forward params yarn input
+  let logits ← forward params yarn input (by decide)
 
   -- Check output
   let logitsMean := Tensor.item (Tensor.meanAll logits)
@@ -281,7 +281,7 @@ def testLoss : IO Unit := do
   let targets ← Tensor.randint 0 cfg.vocabSize.toInt64 #[batchSize, seqLen]
 
   -- Compute loss (window pattern is now in cfg)
-  let lossT ← moddedGpt.loss params yarn input targets
+  let lossT ← moddedGpt.loss params yarn input targets (by decide)
   let lossVal := Tensor.item lossT
 
   LeanTest.assertTrue (isFiniteFloat lossVal) "Loss should be finite"
