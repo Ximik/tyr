@@ -329,9 +329,9 @@ def testSceneGraphFullPhysicsPrimitiveProviderRecomputesBallState :
     bouncingBallScenePhysicsState p 1 { z := 0.30, zdot := 0.1 }
   let contact :=
     bouncingBallScenePhysicsState p 1 { z := 0.03, zdot := -0.1 }
-  let airbornePrimitives ← assertOk (provider.primitivesCheckedAt? airborne)
+  let airbornePrimitives ← assertOk (provider.validPrimitivesAt? airborne)
     "airborne SceneGraph provider primitives"
-  let contactPrimitives ← assertOk (provider.primitivesCheckedAt? contact)
+  let contactPrimitives ← assertOk (provider.validPrimitivesAt? contact)
     "contact SceneGraph provider primitives"
   LeanTest.assertEqual airbornePrimitives.contactCandidates.size 1
     "SceneGraph provider should expose the current dynamic candidate view"
@@ -358,12 +358,12 @@ def testSceneGraphFullPhysicsPrimitiveProviderRecomputesBallState :
     "Provider solve should expose the standard full-physics interval move"
 
   assertError
-    (provider.primitivesCheckedAt?
+    (provider.validPrimitivesAt?
       { params := p, ballIndex := 3, state := contact.state })
     "ballIndex 1 or 2"
     "invalid SceneGraph provider ball index"
   assertError
-    (provider.primitivesCheckedAt?
+    (provider.validPrimitivesAt?
       (bouncingBallScenePhysicsState p 1 { z := (0.0 / 0.0), zdot := 0.0 }))
     "state must be finite"
     "invalid SceneGraph provider state"

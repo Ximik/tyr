@@ -601,9 +601,9 @@ lean_object* lean_torch_media_load_image_patchified(
   const uint64_t in_channels = tyr::natTo<int>(in_channels_obj, "in_channels");
   const uint64_t patch_size = tyr::natTo<int>(patch_size_obj, "patch_size");
   const uint64_t temporal_patch_size = tyr::natTo<int>(temporal_patch_size_obj, "temporal_patch_size");
-  tyr::checkedProduct<int64_t>(
-      tyr::checkedProduct<int64_t>(in_channels, temporal_patch_size, "in_channels * temporal_patch_size"),
-      tyr::checkedProduct<int64_t>(patch_size, patch_size, "patch_size * patch_size"), "patch_dim");
+  tyr::productTo<int64_t>(
+      tyr::productTo<int64_t>(in_channels, temporal_patch_size, "in_channels * temporal_patch_size"),
+      tyr::productTo<int64_t>(patch_size, patch_size, "patch_size * patch_size"), "patch_dim");
   const char* path_c = lean_string_cstr(path_obj);
   std::string path(path_c);
 
@@ -646,9 +646,9 @@ lean_object* lean_torch_media_load_video_patchified(
   const uint64_t in_channels = tyr::natTo<int>(in_channels_obj, "in_channels");
   const uint64_t patch_size = tyr::natTo<int>(patch_size_obj, "patch_size");
   const uint64_t temporal_patch_size = tyr::natTo<int>(temporal_patch_size_obj, "temporal_patch_size");
-  tyr::checkedProduct<int64_t>(
-      tyr::checkedProduct<int64_t>(in_channels, temporal_patch_size, "in_channels * temporal_patch_size"),
-      tyr::checkedProduct<int64_t>(patch_size, patch_size, "patch_size * patch_size"), "patch_dim");
+  tyr::productTo<int64_t>(
+      tyr::productTo<int64_t>(in_channels, temporal_patch_size, "in_channels * temporal_patch_size"),
+      tyr::productTo<int64_t>(patch_size, patch_size, "patch_size * patch_size"), "patch_dim");
   const uint64_t max_frames = tyr::natTo<int>(max_frames_obj, "max_frames");
   const uint64_t frame_stride = tyr::natTo<int>(frame_stride_obj, "frame_stride");
   const char* path_c = lean_string_cstr(path_obj);
@@ -682,10 +682,10 @@ LEAN_EXPORT lean_object* lean_torch_media_load_image_patch_grid_gemma4(
   const uint64_t patch_size = tyr::natTo<int>(patch_size_obj, "patch_size");
   const uint64_t pooling_kernel_size = tyr::natTo<int>(pooling_kernel_size_obj, "pooling_kernel_size");
   const uint64_t max_soft_tokens = tyr::natTo<int>(max_soft_tokens_obj, "max_soft_tokens");
-  tyr::checkedProduct<int>(max_soft_tokens,
-      tyr::checkedProduct<int>(pooling_kernel_size, patch_size, "pooling_kernel_size * patch_size"),
+  tyr::productTo<int>(max_soft_tokens,
+      tyr::productTo<int>(pooling_kernel_size, patch_size, "pooling_kernel_size * patch_size"),
       "max_soft_tokens * pooling_kernel_size * patch_size");
-  tyr::checkedProduct<int64_t>(3, tyr::checkedProduct<int64_t>(patch_size, patch_size, "patch_size * patch_size"),
+  tyr::productTo<int64_t>(3, tyr::productTo<int64_t>(patch_size, patch_size, "patch_size * patch_size"),
       "patch_dim");
   const char* path_c = lean_string_cstr(path_obj);
   std::string path(path_c);

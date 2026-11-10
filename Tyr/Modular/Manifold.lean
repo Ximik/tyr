@@ -104,8 +104,9 @@ class VectorManifoldCarrier (V : Nat → Type)
   project : (n : Nat) → AmbientVector (device := device) (ambientDim n) → V n
   /-- Convert manifold value to ambient coordinates. -/
   toVector : {n : Nat} → V n → AmbientVector (device := device) (ambientDim n)
-  /-- Wrap already-valid ambient coordinates without re-projecting. -/
-  fromAmbientUnchecked : {n : Nat} → AmbientVector (device := device) (ambientDim n) → V n
+  /-- Replace the ambient contents of an existing manifold value. Does not
+      re-project; the caller asserts validity. -/
+  reAmbient : {n : Nat} → V n → AmbientVector (device := device) (ambientDim n) → V n
   /-- Take one geometry-aware step on the manifold. -/
   dualMapStep : {n : Nat} → V n → AmbientVector (device := device) (ambientDim n) → Float → V n
 
@@ -113,7 +114,7 @@ instance : VectorManifoldCarrier (fun n => Hyperbolic n .Float32 device) device 
   ambientDim n := n + 1
   project := Hyperbolic.project
   toVector := fun x => x.coords
-  fromAmbientUnchecked := fun x => ⟨x⟩
+  reAmbient := fun _ x => ⟨x⟩
   dualMapStep := fun x g lr =>
     DualMapGeometry.dualMapStep x (HyperbolicTangent.project x g) lr
 
@@ -184,7 +185,7 @@ namespace ManifoldVectorParam
 private def makeLeafValue [VectorManifoldCarrier V device] {n : Nat}
     (v : V n) : IO (V n) := do
   let leaf ← Tensor.parameter (VectorManifoldCarrier.toVector (device := device) v)
-  pure (VectorManifoldCarrier.fromAmbientUnchecked (device := device) leaf)
+  pure (VectorManifoldCarrier.reAmbient (device := device) v leaf)
 
 /-- Initialize from random ambient coordinates projected to manifold. -/
 def init [VectorManifoldCarrier V device] (n : Nat) : IO (ManifoldVectorParam (device := device) V n) := do
@@ -226,14 +227,14 @@ instance [MatrixManifoldCarrier M device] (in_dim out_dim : Nat) :
 
 instance [VectorManifoldCarrier V device] (n : Nat) : TensorStruct (ManifoldVectorParam (device := device) V n) where
   map f p := {
-    value := VectorManifoldCarrier.fromAmbientUnchecked (device := device)
+    value := VectorManifoldCarrier.reAmbient (device := device) p.value
       (TensorStruct.map f (VectorManifoldCarrier.toVector (device := device) p.value))
   }
   mapM f p := do
     let v ← TensorStruct.mapM f (VectorManifoldCarrier.toVector (device := device) p.value)
-    pure { value := VectorManifoldCarrier.fromAmbientUnchecked (device := device) v }
+    pure { value := VectorManifoldCarrier.reAmbient (device := device) p.value v }
   zipWith f a b := {
-    value := VectorManifoldCarrier.fromAmbientUnchecked (device := device)
+    value := VectorManifoldCarrier.reAmbient (device := device) a.value
       (TensorStruct.zipWith f (VectorManifoldCarrier.toVector (device := device) a.value)
         (VectorManifoldCarrier.toVector (device := device) b.value))
   }
@@ -267,14 +268,14 @@ instance {P : StaticSpec → Prop} [VectorManifoldCarrier V device] (n : Nat)
       (P ⟨#[VectorManifoldCarrier.ambientDim (device := device) (V := V) n], .Float32, device⟩)] :
     TensorStructFor P (ManifoldVectorParam (device := device) V n) where
   map f p := {
-    value := VectorManifoldCarrier.fromAmbientUnchecked (device := device)
+    value := VectorManifoldCarrier.reAmbient (device := device) p.value
       (TensorStructFor.map f (VectorManifoldCarrier.toVector (device := device) p.value))
   }
   mapM f p := do
     let v ← TensorStructFor.mapM f (VectorManifoldCarrier.toVector (device := device) p.value)
-    pure { value := VectorManifoldCarrier.fromAmbientUnchecked (device := device) v }
+    pure { value := VectorManifoldCarrier.reAmbient (device := device) p.value v }
   zipWith f a b := {
-    value := VectorManifoldCarrier.fromAmbientUnchecked (device := device)
+    value := VectorManifoldCarrier.reAmbient (device := device) a.value
       (TensorStructFor.zipWith f (VectorManifoldCarrier.toVector (device := device) a.value)
         (VectorManifoldCarrier.toVector (device := device) b.value))
   }

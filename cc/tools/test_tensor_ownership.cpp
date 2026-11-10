@@ -106,7 +106,6 @@ void testShapesAndMetadata(lean_object* tensor) {
   lean_dec(lean_torch_tensor_add(tensor, tensor));
   lean_dec(lean_torch_tensor_softmax(tensor, Nat(1)));
   lean_dec(lean_torch_copy_(retain(tensor), tensor));
-  lean_dec(lean_torch_copy_inplace(retain(tensor), tensor));
   lean_dec(lean_torch_transpose(tensor, Nat(0), Nat(1)));
   checkBorrowedTensor(tensor);
 }

@@ -135,7 +135,7 @@ private def assertValid {σ : StaticSpec}
   LeanTest.assertTrue (t.actualSpec == σ.toTensorSpec && t.runtimeDevice == σ.device) label
 
 @[test]
-def testTypedCheckedShapeBoundary : IO Unit := do
+def testTypedShapeBoundary : IO Unit := do
   let raw := torch.RawTensor.ones #[2]
   LeanTest.assertTrue (Tensor.ofTensor? (shape := #[99]) .Float32 raw).isNone
     "a native handle cannot establish the typed shape invariant"
@@ -143,7 +143,7 @@ def testTypedCheckedShapeBoundary : IO Unit := do
   | .ok _ => LeanTest.fail "a mismatched runtime shape must be rejected"
   | .error error => LeanTest.assertTrue (error.containsSubstr "Expected shape")
   match Tensor.ofTensor (shape := #[2]) .Float32 raw with
-  | .ok tensor => assertValid tensor "checked constructor"
+  | .ok tensor => assertValid tensor "constructor"
   | .error error => LeanTest.fail error
   assertValid ((Tensor.ones #[1]).reshape #[]) "scalar reshape"
   assertValid ((Tensor.ones #[]).reshape #[1, 1]) "reshape from scalar"

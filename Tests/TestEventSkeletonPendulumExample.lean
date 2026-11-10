@@ -299,10 +299,10 @@ def testFullPhysicsPrimitiveProviderRecomputesStateAndInput : IO Unit := do
   let u1 : PendulumInput := { tau := 3.0 }
 
   let primitive0 ← assertOk
-    (provider.primitivesCheckedAt? (physicsState x0 u0))
+    (provider.validPrimitivesAt? (physicsState x0 u0))
     "pendulum provider primitive at default state and input"
   let primitive1 ← assertOk
-    (provider.primitivesCheckedAt? (physicsState x1 u1))
+    (provider.validPrimitivesAt? (physicsState x1 u1))
     "pendulum provider primitive at moved state and input"
   let result1 ← assertOk
     (provider.solveAt? (physicsState x1 u1) 5155)
@@ -327,7 +327,7 @@ def testFullPhysicsPrimitiveProviderRecomputesStateAndInput : IO Unit := do
 
   let badInput : PendulumInput := { tau := 1.0 / 0.0 }
   assertError
-    (provider.primitivesCheckedAt? (physicsState x1 badInput))
+    (provider.validPrimitivesAt? (physicsState x1 badInput))
     "pendulum provider malformed input"
 
 @[test]

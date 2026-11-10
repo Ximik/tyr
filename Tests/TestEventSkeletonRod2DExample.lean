@@ -318,13 +318,13 @@ def testRod2dFullPhysicsPrimitiveProviderRecomputesContactSupportAndInput :
   let applied : SpatialForce2D := { fx := 3.0, fy := -4.0, tau := 1.5 }
 
   let separatedPrimitive ← assertOk
-    (provider.primitivesCheckedAt? (physicsState separated))
+    (provider.validPrimitivesAt? (physicsState separated))
     "rod2d provider primitive at separated state"
   let separatedSupport ← assertOk
     (provider.supportAt? (physicsState separated))
     "rod2d provider support at separated state"
   let penetratingPrimitive ← assertOk
-    (provider.primitivesCheckedAt? (physicsState penetrating applied))
+    (provider.validPrimitivesAt? (physicsState penetrating applied))
     "rod2d provider primitive at penetrating state"
   let penetratingSupport ← assertOk
     (provider.supportAt? (physicsState penetrating applied))
@@ -368,13 +368,13 @@ def testRod2dFullPhysicsPrimitiveProviderRecomputesContactSupportAndInput :
 
   let badState := { penetrating with ydot := 1.0 / 0.0 }
   let msg ← assertError
-    (provider.primitivesCheckedAt? (physicsState badState applied))
+    (provider.validPrimitivesAt? (physicsState badState applied))
     "rod2d provider malformed state"
   LeanTest.assertTrue (msg.contains "state")
     s!"Malformed Rod2D state should fail at provider validation, got {msg}"
   let badApplied : SpatialForce2D := { applied with fx := 1.0 / 0.0 }
   let msg ← assertError
-    (provider.primitivesCheckedAt? (physicsState penetrating badApplied))
+    (provider.validPrimitivesAt? (physicsState penetrating badApplied))
     "rod2d provider malformed applied force"
   LeanTest.assertTrue (msg.contains "applied force")
     s!"Malformed Rod2D applied force should fail at provider validation, got {msg}"

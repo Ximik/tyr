@@ -134,7 +134,7 @@ def testWarehouseContactCandidateProviderUsesCurrentState : IO Unit := do
   let x := mkState 0.0 (-0.25) (-1.4) 0.0 0.0 0.0
     0.1 0.0 (-0.3) 0.0 0.0 0.0
   let set ← assertOk
-    (warehouseContactCandidateProvider.candidatesCheckedAt? x (some 6))
+    (warehouseContactCandidateProvider.validCandidatesAt? x (some 6))
     "warehouse contact candidates"
   LeanTest.assertEqual set.totalCandidates 8
     "Warehouse provider should preserve the SDF obstacle count"
@@ -309,10 +309,10 @@ def testFullPhysicsPrimitiveProviderRecomputesStateAndInput : IO Unit := do
   let u1 : QuadrotorInput := #[1.1, 1.4, 1.2, 1.3]
 
   let primitive0 ← assertOk
-    (provider.primitivesCheckedAt? (physicsState x0 u0))
+    (provider.validPrimitivesAt? (physicsState x0 u0))
     "quadrotor provider primitive at default state and input"
   let primitive1 ← assertOk
-    (provider.primitivesCheckedAt? (physicsState x1 u1))
+    (provider.validPrimitivesAt? (physicsState x1 u1))
     "quadrotor provider primitive at moved state and input"
   let result1 ← assertOk
     (provider.solveAt? (physicsState x1 u1) 5311)
@@ -341,7 +341,7 @@ def testFullPhysicsPrimitiveProviderRecomputesStateAndInput : IO Unit := do
   LeanTest.assertEqual result1.move.targets #[5311]
     "Provider solve should use the supplied interval vertex"
 
-  match provider.primitivesCheckedAt? (physicsState x1 #[1.0, 2.0]) with
+  match provider.validPrimitivesAt? (physicsState x1 #[1.0, 2.0]) with
   | .ok _ => LeanTest.fail "Quadrotor provider should reject malformed rotor input"
   | .error _ => pure ()
 

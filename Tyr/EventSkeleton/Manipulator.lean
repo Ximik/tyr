@@ -509,11 +509,6 @@ def reflectedInertia? (model : JointActuatorModel) : Except String Float := do
   model.validate?
   pure (model.rotorInertia * model.gearRatio * model.gearRatio)
 
-def reflectedInertiaUnchecked (model : JointActuatorModel) : Float :=
-  match model.reflectedInertia? with
-  | .ok inertia => inertia
-  | .error _ => 0.0
-
 end JointActuatorModel
 
 namespace JointTorqueControllerGains
@@ -766,18 +761,6 @@ def solve? (eq : ManipulatorEquation) : Except String ManipulatorDerivative := d
     massMatrix := eq.massMatrix
     label := eq.label
   }
-
-def solveUnchecked (eq : ManipulatorEquation) : ManipulatorDerivative :=
-  match eq.solve? with
-  | .ok d => d
-  | .error _ =>
-      {
-        qdot := eq.qdot
-        vdot := Array.replicate eq.qdot.size 0.0
-        rhs := Array.replicate eq.qdot.size 0.0
-        massMatrix := eq.massMatrix
-        label := eq.label
-      }
 
 end ManipulatorEquation
 
@@ -1324,7 +1307,7 @@ structure FullPhysicsPrimitiveProvider (State : Type) where
 
 namespace FullPhysicsPrimitiveProvider
 
-def primitivesCheckedAt?
+def validPrimitivesAt?
     (provider : FullPhysicsPrimitiveProvider State)
     (state : State) : Except String FullPhysicsPrimitives := do
   let primitives ← provider.primitivesAt? state

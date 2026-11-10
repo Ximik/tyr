@@ -271,10 +271,10 @@ def testFullPhysicsPrimitiveProviderRecomputesDynamicContactSupport :
   let separatedState := { activeState with z := params.radius + 0.25 }
 
   let activePrimitive ← assertOk
-    (provider.primitivesCheckedAt? activeState)
+    (provider.validPrimitivesAt? activeState)
     "rolling sphere provider primitive at active state"
   let separatedPrimitive ← assertOk
-    (provider.primitivesCheckedAt? separatedState)
+    (provider.validPrimitivesAt? separatedState)
     "rolling sphere provider primitive at separated state"
   let separatedSupport ← assertOk
     (provider.supportAt? separatedState)
@@ -318,7 +318,7 @@ def testFullPhysicsPrimitiveProviderRecomputesDynamicContactSupport :
       vx := -1.0
     }
   let wallPrimitive ← assertOk
-    (wallProvider.primitivesCheckedAt? wallHitState)
+    (wallProvider.validPrimitivesAt? wallHitState)
     "rolling sphere provider primitive at wall-hit state"
   let wallSupport ← assertOk
     (wallProvider.supportAt? wallHitState)
@@ -338,7 +338,7 @@ def testFullPhysicsPrimitiveProviderRecomputesDynamicContactSupport :
 
   let badState := { activeState with vz := 1.0 / 0.0 }
   let msg ← assertError
-    (provider.primitivesCheckedAt? badState)
+    (provider.validPrimitivesAt? badState)
     "rolling sphere provider malformed state"
   LeanTest.assertTrue (msg.contains "state")
     s!"Malformed rolling sphere state should fail at provider validation, got {msg}"

@@ -36,7 +36,7 @@ struct OwnedArg {
 
 // `a * b` when it does not exceed the maximum of `T`.
 template <typename T>
-uint64_t checkedProduct(uint64_t a, uint64_t b, const char* name) {
+uint64_t productTo(uint64_t a, uint64_t b, const char* name) {
   constexpr auto max = static_cast<uint64_t>(std::numeric_limits<T>::max());
   uint64_t product = 0;
   if (__builtin_mul_overflow(a, b, &product) || product > max) {
