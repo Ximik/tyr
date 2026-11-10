@@ -105,9 +105,10 @@ private def conv1dWithBias {batch inC outC inFrames kernel : Nat}
     (x : Tensor { shape := #[batch, inC, inFrames], dtype := dtype.val, device := device })
     (w : Tensor { shape := #[outC, inC, kernel], dtype := dtype.val, device := device })
     (b : Tensor { shape := #[outC], dtype := dtype.val, device := device })
-    (stride pad dilation : Nat) :
+    (stride pad dilation : Nat)
+    (valid : Tensor.ConvValid inFrames kernel stride pad dilation := by conv_valid) :
     Tensor { shape := #[batch, outC, (inFrames + 2 * pad - (dilation * (kernel - 1) + 1)) / stride + 1], dtype := dtype.val, device := device } :=
-  addBias3d (Tensor.conv1d! x w stride pad dilation) b
+  addBias3d (Tensor.conv1d x w stride pad dilation valid) b
 
 private def affine3d {batch seq inDim outDim : Nat}
     (x : Tensor { shape := #[batch, seq, inDim], dtype := dtype.val, device := device })
@@ -314,6 +315,7 @@ private def encodeMelChunk {melFrames : Nat}
         xSeq := forwardBlock blk xSeq
 
       let vqIn : Tensor { shape := #[1, 1280, c2Frames], dtype := dtype.val, device := device } := Tensor.reshape (Tensor.transpose xSeq 1 2) #[1, 1280, c2Frames]
+      have hc2 : 2 ≤ c2Frames := by simp only [qFrames, c2Frames, vqFrames, conv2Frames] at hq ⊢; omega
       let vqDown : Tensor { shape := #[1, 1280, qFrames], dtype := dtype.val, device := device } :=
         Tensor.reshape (conv1dWithBias vqIn m.vqDownWeight m.vqDownBias 2 0 1) #[1, 1280, qFrames]
           (by have : (c2Frames + 2 * 0 - (1 * (2 - 1) + 1)) / 2 + 1 = qFrames := by

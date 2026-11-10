@@ -309,14 +309,15 @@ def alignFromOutputIds {batch seq : Nat}
     out := out.push (Qwen3ForceAlignProcessor.parseTimestamp words ts)
   pure out
 
-def alignFromLogits {batch seq vocab : Nat} {dtype : DType}
+def alignFromLogits {batch seq vocab : Nat} {dtype : DType} [DType.Ordered dtype]
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (logits : Tensor { device := device, shape := #[batch, seq, vocab], dtype := dtype })
+    (hVocab : 0 < vocab)
     (wordLists : Array (Array String))
     (timestampTokenId : tokenizer.TokenId)
     (timestampSegmentTime : Float := 1.0)
     : IO (Array ForcedAlignResult) := do
-  let indices := Tensor.argmax! logits 2
+  let indices := Tensor.argmax logits 2 (_nonempty := by simpa using hVocab)
   alignFromOutputIds inputIds (indices.reshape #[batch, seq]) wordLists timestampTokenId timestampSegmentTime
 
 end torch.qwen3asr

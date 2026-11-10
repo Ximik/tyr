@@ -626,6 +626,25 @@ private def repeatHeads {batch seq n_head head_dim rep : Nat}
     let x5 : Tensor { device := device, shape := #[batch, seq, n_head, rep, head_dim], dtype := dtype } := Tensor.broadcastTo x5 #[batch, seq, n_head, rep, head_dim]
     Tensor.reshape x5 #[batch, seq, n_head * rep, head_dim]
 
+/-- Causal depthwise conv over the sequence: pad by `K - 1` on both sides and
+    keep the first `seq` outputs. Only an empty sequence with a one-tap kernel has
+    no valid convolution; its output is empty. -/
+private def causalDepthwiseConv {batch seq : Nat} (cfg : Config)
+    (x : Tensor { device := device, shape := #[batch, Config.linearConvDim cfg, seq], dtype := dtype })
+    (weight : Tensor { device := device, shape := #[Config.linearConvDim cfg, 1, cfg.linear_conv_kernel_dim], dtype := dtype })
+    (bias : Tensor { device := device, shape := #[Config.linearConvDim cfg], dtype := dtype })
+    : Tensor { device := device, shape := #[batch, Config.linearConvDim cfg, seq], dtype := dtype } :=
+  have hK := cfg.convKernelPos
+  if hv : Tensor.ConvValid seq cfg.linear_conv_kernel_dim 1 (cfg.linear_conv_kernel_dim - 1) 1 then
+    let raw := Tensor.conv1dGroups x weight bias 1 (cfg.linear_conv_kernel_dim - 1) 1
+      (Config.linearConvDim cfg) hv
+      ⟨Qwen35Config.linearConvDim_pos cfg, (Nat.one_mul _).symm, Nat.dvd_refl _⟩
+    Tensor.slice raw 2 0 seq (_bounds := by simp [Tensor.convExtent]; omega)
+  else
+    have hSeq : seq = 0 := by unfold Tensor.ConvValid at hv; omega
+    hSeq ▸ (zerosDynamicOn device dtype :
+      Tensor { device := device, shape := #[batch, Config.linearConvDim cfg, 0], dtype := dtype })
+
 /-- Run linear token mixer. If `cacheConv`/`cacheRec` are provided and
     `usePrecomputedState=true`, performs incremental one-step update. -/
 def forward {batch seq : Nat}
@@ -664,16 +683,21 @@ def forward {batch seq : Nat}
           Tensor.castLike m.conv1d_weight catIn
         let stNext : Tensor { device := device, shape := #[batch, Config.linearConvDim cfg, cfg.linear_conv_kernel_dim], dtype := dtype } :=
           Tensor.slice catIn 2 1 cfg.linear_conv_kernel_dim
+        have hK := cfg.convKernelPos
+        have hExtent : Tensor.convExtent (cfg.linear_conv_kernel_dim + 1) cfg.linear_conv_kernel_dim 1 0 1 = 2 := by
+          simp [Tensor.convExtent]; omega
         let raw : Tensor { device := device, shape := #[batch, Config.linearConvDim cfg, 2], dtype := dtype } :=
-          convGroups convIn m.conv1d_weight m.conv1d_bias 1 0 1 (Config.linearConvDim cfg)
+          (Tensor.conv1dGroups convIn m.conv1d_weight m.conv1d_bias 1 0 1 (Config.linearConvDim cfg)
+            ⟨by decide, by decide, hK, by omega⟩
+            ⟨Qwen35Config.linearConvDim_pos cfg, (Nat.one_mul _).symm, Nat.dvd_refl _⟩).reshape
+            #[batch, Config.linearConvDim cfg, 2] (by rw [hExtent])
         let y : Tensor { device := device, shape := #[batch, Config.linearConvDim cfg, 1], dtype := dtype } := Tensor.slice raw 2 1 1
         ((Tensor.silu y).reshape #[batch, Config.linearConvDim cfg, seq] (by simp [hStep.2]), some stNext)
       | none =>
         let convIn : Tensor { device := device, shape := #[batch, Config.linearConvDim cfg, seq], dtype := dtype } :=
           Tensor.castLike m.conv1d_weight mixedQKVc
-        let raw : Tensor { device := device, shape := #[batch, Config.linearConvDim cfg, seq + cfg.linear_conv_kernel_dim - 1], dtype := dtype } :=
-          convGroups convIn m.conv1d_weight m.conv1d_bias 1 (cfg.linear_conv_kernel_dim - 1) 1 (Config.linearConvDim cfg)
-        let y : Tensor { device := device, shape := #[batch, Config.linearConvDim cfg, seq], dtype := dtype } := Tensor.slice raw 2 0 seq (_bounds := by have := cfg.convKernelPos; simp; omega)
+        let y : Tensor { device := device, shape := #[batch, Config.linearConvDim cfg, seq], dtype := dtype } :=
+          causalDepthwiseConv cfg convIn m.conv1d_weight m.conv1d_bias
         let nextState :=
           if hge : seq >= cfg.linear_conv_kernel_dim then
             some (Tensor.slice mixedQKVc 2 (seq - cfg.linear_conv_kernel_dim) cfg.linear_conv_kernel_dim)
@@ -686,9 +710,8 @@ def forward {batch seq : Nat}
     else
       let convIn : Tensor { device := device, shape := #[batch, Config.linearConvDim cfg, seq], dtype := dtype } :=
         Tensor.castLike m.conv1d_weight mixedQKVc
-      let raw : Tensor { device := device, shape := #[batch, Config.linearConvDim cfg, seq + cfg.linear_conv_kernel_dim - 1], dtype := dtype } :=
-        convGroups convIn m.conv1d_weight m.conv1d_bias 1 (cfg.linear_conv_kernel_dim - 1) 1 (Config.linearConvDim cfg)
-      let y : Tensor { device := device, shape := #[batch, Config.linearConvDim cfg, seq], dtype := dtype } := Tensor.slice raw 2 0 seq (_bounds := by have := cfg.convKernelPos; simp; omega)
+      let y : Tensor { device := device, shape := #[batch, Config.linearConvDim cfg, seq], dtype := dtype } :=
+        causalDepthwiseConv cfg convIn m.conv1d_weight m.conv1d_bias
       let nextState :=
         if hge : seq >= cfg.linear_conv_kernel_dim then
           some (Tensor.slice mixedQKVc 2 (seq - cfg.linear_conv_kernel_dim) cfg.linear_conv_kernel_dim)

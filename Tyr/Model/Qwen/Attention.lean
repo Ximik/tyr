@@ -153,12 +153,6 @@ private def sliceScatterAlong {s srcShape : Shape} {d : DType} {dev : Device}
     Tensor ⟨s, d, dev⟩ :=
   Tensor.sliceScatter input dim start src h bound
 
-/-- Mean over one axis with the result shape validated at runtime. -/
-private def meanDimTo {s : Shape} {d : DType} {dev : Device}
-    (t : Tensor ⟨s, d, dev⟩) (dim : Nat) (out : Shape) (keepdim : Bool := false)
-    : Tensor ⟨out, d, dev⟩ :=
-  (Tensor.ofRaw! "meanDimTo" (RawTensor.mean! t.raw (some #[dim]) keepdim))
-
 /-- Apply RMS normalization along the last dimension (per-head norm).
     Input: [batch, seq, n_heads, head_dim], norm: [head_dim]
     Broadcasts norm across all heads. -/

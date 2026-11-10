@@ -327,6 +327,7 @@ def evaluateMC {batch seq vocab : Nat}
     3. Return correct=true if all predictions match -/
 def evaluateLM {seq vocab : Nat}
     (logits : Tensor { shape := #[1, seq, vocab], dtype := .Float32, device := device })
+    (hVocab : 0 < vocab)
     (targetIds : Tensor { shape := #[1, seq], dtype := .Int64, device := device })
     (batchInfo : BatchInfo) : IO EvalResult := do
   let startIdx := batchInfo.startIndices[0]!
@@ -337,7 +338,7 @@ def evaluateLM {seq vocab : Nat}
 
   -- Get argmax predictions at each position: [1, seq]
   -- predictions[i] is the predicted token for position i+1
-  let predictions := Tensor.argmax! logits 2
+  let predictions := Tensor.argmax logits 2 (_nonempty := by simpa using hVocab)
 
   -- Flatten to 1D for easier slicing
   let predsFlat := Tensor.reshape predictions #[seq]
@@ -392,6 +393,7 @@ def evaluateSingleExample {vocab : Nat}
     (taskMeta : TaskMeta)
     (tokenize : String → Array UInt64)
     (runModel : ModelRunner (device := device) vocab)
+    (hVocab : 0 < vocab)
     (config : EvalConfig)
     : IO (Option Bool) := do
   unless config.device == device do
@@ -436,7 +438,7 @@ def evaluateSingleExample {vocab : Nat}
     | .multipleChoice | .schema => evaluateMC logits targetReshaped batchInfo goldIdx
     | .languageModeling =>
       if h : batchSize = 1 then
-        evaluateLM (seq := seqLen) (by simpa only [h] using logits) (by simpa only [h] using targetReshaped) batchInfo
+        evaluateLM (seq := seqLen) (by simpa only [h] using logits) hVocab (by simpa only [h] using targetReshaped) batchInfo
       else
         throw <| IO.userError "Language-model evaluation requires exactly one sequence"
 
@@ -455,6 +457,7 @@ def evaluateTask {vocab : Nat}
     (taskMeta : TaskMeta)
     (tokenize : String → Array UInt64)
     (runModel : ModelRunner (device := device) vocab)
+    (hVocab : 0 < vocab)
     (config : EvalConfig)
     : IO Float := do
   if examples.isEmpty then return 0.0
@@ -474,7 +477,7 @@ def evaluateTask {vocab : Nat}
     -- Skip if not assigned to this rank
     if idx % worldSize == rank then
       let item := examples[idx]!
-      let maybeCorrect ← evaluateSingleExample item taskMeta tokenize runModel config
+      let maybeCorrect ← evaluateSingleExample item taskMeta tokenize runModel hVocab config
       match maybeCorrect with
       | none => pure ()  -- Skip invalid examples
       | some isCorrect =>

@@ -51,7 +51,36 @@ structure Config where
       Pattern is tiled across layers. Final layer always gets L.
       Examples: "L"=all full context, "SL"=alternating, "LSS"=one long then two short -/
   windowPattern : String := "L"
-  deriving Repr, Inhabited, Lean.ToJson, Lean.FromJson
+  /-- Greedy decoding and evaluation pick among `vocabSize` logits; checked when the config is built. -/
+  vocabPos : 0 < vocabSize := by decide
+  deriving Repr
+
+instance : Lean.ToJson Config where
+  toJson cfg := Lean.Json.mkObj [
+    ("vocabSize", Lean.toJson cfg.vocabSize), ("nLayer", Lean.toJson cfg.nLayer),
+    ("nHead", Lean.toJson cfg.nHead), ("halfHeadDim", Lean.toJson cfg.halfHeadDim),
+    ("maxSeqLen", Lean.toJson cfg.maxSeqLen), ("blockSize", Lean.toJson cfg.blockSize),
+    ("ropeBase", Lean.toJson cfg.ropeBase), ("numValueEmbeds", Lean.toJson cfg.numValueEmbeds),
+    ("softcapValue", Lean.toJson cfg.softcapValue), ("windowPattern", Lean.toJson cfg.windowPattern)]
+
+instance : Lean.FromJson Config where
+  fromJson? j := do
+    let vocabSize ← j.getObjValAs? Nat "vocabSize"
+    let ⟨hVocab⟩ ← if h : 0 < vocabSize then pure (PLift.up h) else
+      throw "Invalid model config: vocabSize must be positive"
+    pure {
+      vocabSize
+      nLayer := ← j.getObjValAs? Nat "nLayer"
+      nHead := ← j.getObjValAs? Nat "nHead"
+      halfHeadDim := ← j.getObjValAs? Nat "halfHeadDim"
+      maxSeqLen := ← j.getObjValAs? Nat "maxSeqLen"
+      blockSize := ← j.getObjValAs? Nat "blockSize"
+      ropeBase := ← j.getObjValAs? Float "ropeBase"
+      numValueEmbeds := ← j.getObjValAs? Nat "numValueEmbeds"
+      softcapValue := ← j.getObjValAs? Float "softcapValue"
+      windowPattern := ← j.getObjValAs? String "windowPattern"
+      vocabPos := hVocab
+    }
 
 /-- Head dimension -/
 def Config.headDim (cfg : Config) : Nat := 2 * cfg.halfHeadDim

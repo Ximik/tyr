@@ -95,113 +95,6 @@ def ansiSaveCursor : String := "\x1b[s"
 /-- Restore cursor position -/
 def ansiRestoreCursor : String := "\x1b[u"
 
-/-- Animated sampling with optional prompt conditioning -/
-def sampleAnimated {cfg : Config}
-    (params : DiffusionParams cfg)
-    (rotaryCache : RotaryCache cfg.seq_len cfg.half_head_dim)
-    (k : Nat)
-    (temperature : Float := 0.8)
-    (frameDelay : Nat := 100)
-    (prompt : String := "")
-    (displayWidth : Nat := 70)  -- Keep narrow to avoid wrapping
-    : IO (Tokens #[1, cfg.seq_len]) := do
-
-  -- Calculate display dimensions
-  let textLen := min cfg.seq_len displayWidth
-  let numTextLines := (textLen + displayWidth - 1) / displayWidth  -- ceiling division
-  let totalLines := 1 + numTextLines  -- header + text lines
-
-  -- Reserve space by printing blank lines
-  for _ in [:totalLines] do
-    IO.println ""
-
-  IO.print ansiHideCursor
-  (← IO.getStdout).flush
-
-  -- Start with all masks
-  let mut x := Tensor.fullInt #[1, cfg.seq_len] cfg.mask_token_id.toInt64
-
-  -- Set prompt tokens at the beginning (these won't be masked)
-  let promptTokens := asciiEncode prompt
-  let promptLen := min promptTokens.size cfg.seq_len
-  for i in [:promptLen] do
-    let promptTensor := Tensor.fullInt #[1, cfg.seq_len] (promptTokens[i]!)
-    let positions := Tensor.arange cfg.seq_len
-    let posMask := Tensor.eqScalar positions i.toInt64
-    let posMaskBatch := Tensor.broadcastTo (Tensor.unsqueeze posMask 0) #[1, cfg.seq_len]
-    x := Tensor.whereSelect posMaskBatch promptTensor x
-
-  let mut maskedPositions := getMaskedPositions' x cfg.mask_token_id
-
-  for step in [:cfg.diffusion_steps] do
-    if !(Tensor.any maskedPositions) then break
-
-    let tVal := (cfg.diffusion_steps - 1 - step).max 0
-    let t := Tensor.fullInt #[1] tVal.toUInt64.toInt64
-
-    let logits := forward params x t rotaryCache
-    let probs := Tensor.softmax (logits / temperature)
-    let (confidences, predictedTokens) := Tensor.maxLast3d! probs
-
-    -- Extract arrays for display
-    let tokensArr ← tensorToArray (Tensor.reshape x #[cfg.seq_len])
-    let confArr ← tensorToFloatArray (Tensor.reshape confidences #[cfg.seq_len])
-
-    -- Build display text with colors
-    let remaining := tokensArr.foldl (fun acc t =>
-      if t == cfg.mask_token_id.toInt64 then acc + 1 else acc) 0
-
-    let mut textChars := ""
-    for i in [:textLen] do
-      let tok := tokensArr[i]!
-      let conf := confArr[i]!
-      if tok == cfg.mask_token_id.toInt64 then
-        textChars := textChars ++ renderMask conf
-      else
-        let c := Char.ofNat tok.toUInt64.toNat
-        -- Show printable chars, replace control chars with dot
-        if c.toNat >= 32 && c.toNat < 127 then
-          textChars := textChars ++ renderChar c conf
-        else if c.toNat == 10 then  -- newline
-          textChars := textChars ++ s!"{ansiDim}↵{ansiReset}"
-        else
-          textChars := textChars ++ s!"{ansiDim}·{ansiReset}"
-
-    -- Move up to start of our reserved area and render
-    IO.print (ansiMoveUp totalLines)
-
-    -- Header line
-    let header := s!"{ansiClearLine}Step {step}/{cfg.diffusion_steps}  " ++
-                  progressBar step cfg.diffusion_steps 20 ++
-                  s!"  {remaining} remaining"
-    IO.println header
-
-    -- Text line(s)
-    IO.print ansiClearLine
-    IO.println textChars
-
-    -- Fill remaining reserved lines if any
-    for _ in [:totalLines - 2] do
-      IO.print ansiClearLine
-      IO.println ""
-
-    (← IO.getStdout).flush
-    IO.sleep frameDelay.toUInt32
-
-    -- Update tokens (top-k decoding)
-    let negInf := Tensor.full #[1, cfg.seq_len] (-1e10)
-    let maskedConf := Tensor.whereSelect maskedPositions confidences negInf
-    let (_, topkIdx) := Tensor.topKLast2d! maskedConf k
-    let selectMask := Tensor.scatter2d (Tensor.zeros #[1, cfg.seq_len]) 1
-                        (topkIdx) (Tensor.ones #[1, k])
-    let finalMask := Tensor.logicalAnd (Tensor.lt (Tensor.zeros #[1, cfg.seq_len]) selectMask) maskedPositions
-    x := Tensor.whereSelect finalMask (predictedTokens) x
-    maskedPositions := getMaskedPositions' x cfg.mask_token_id
-
-  IO.print ansiShowCursor
-  (← IO.getStdout).flush
-  return x
-
 /-- Animated generation of multiple blocks in sequence with continuity.
     Each block uses the last `overlap` tokens from the previous block as context,
     creating a continuous stream of text across blocks.
@@ -211,6 +104,7 @@ def sampleAnimatedMultiple {cfg : Config}
     (rotaryCache : RotaryCache cfg.seq_len cfg.half_head_dim)
     (numBlocks : Nat)
     (k : Nat)
+    (hk : k ≤ cfg.seq_len)
     (temperature : Float := 0.8)
     (frameDelay : Nat := 100)
     (prompt : String := "")
@@ -271,7 +165,7 @@ def sampleAnimatedMultiple {cfg : Config}
 
       let logits := forward params x t rotaryCache
       let probs := Tensor.softmax (logits / temperature)
-      let (confidences, predictedTokens) := Tensor.maxLast3d! probs
+      let (confidences, predictedTokens) := Tensor.maxLast3d probs cfg.vocabPos
 
       -- Extract arrays for display
       let tokensArr ← tensorToArray (Tensor.reshape x #[cfg.seq_len])
@@ -321,7 +215,7 @@ def sampleAnimatedMultiple {cfg : Config}
       -- Update tokens
       let negInf := Tensor.full #[1, cfg.seq_len] (-1e10)
       let maskedConf := Tensor.whereSelect maskedPositions confidences negInf
-      let (_, topkIdx) := Tensor.topKLast2d! maskedConf k
+      let (_, topkIdx) := Tensor.topKLast2d maskedConf k hk
       let selectMask := Tensor.scatter2d (Tensor.zeros #[1, cfg.seq_len]) 1
                           (topkIdx) (Tensor.ones #[1, k])
       let finalMask := Tensor.logicalAnd (Tensor.lt (Tensor.zeros #[1, cfg.seq_len]) selectMask) maskedPositions
@@ -479,8 +373,10 @@ def runGeneration (modelCfg : Config) (params : DiffusionParams modelCfg)
   if prompt != "" then
     IO.println s!"Starting prompt: \"{prompt}\""
 
+  let ⟨hk⟩ ← if h : 4 ≤ modelCfg.seq_len then pure (PLift.up h) else
+    throw <| IO.userError s!"Generation decodes 4 positions per step; seq_len={modelCfg.seq_len} is shorter"
   let blocks ← sampleAnimatedMultiple params rotaryCache
-      (numBlocks := numBlocks) (k := 4) (temperature := temperature) (frameDelay := 60)
+      (numBlocks := numBlocks) (k := 4) (hk := hk) (temperature := temperature) (frameDelay := 60)
       (prompt := prompt) (displayWidth := 80) (overlap := 32)
 
   -- Show continuous joined text
