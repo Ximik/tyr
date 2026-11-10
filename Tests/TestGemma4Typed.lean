@@ -13,7 +13,7 @@ namespace Tests.Gemma4Typed
 private def cfg : Config := {
   vocab_size := 16, hidden_size := 8, intermediate_size := 12
   num_hidden_layers := 4, num_attention_heads := 2, num_key_value_heads := 1
-  half_head_dim := 2, global_half_head_dim := 4, num_global_key_value_heads := 1
+  half_head_dim := 2, global_half_head_dim := .distinct 4, num_global_key_value_heads := .distinct 1
   sliding_window := 3, half_full_rotary_dim := 4
   num_kv_shared_layers := 2
   layer_types := #[.fullAttention, .slidingAttention, .slidingAttention, .fullAttention]
@@ -72,8 +72,8 @@ private def close {σ τ : StaticSpec} (x : Tensor σ) (y : Tensor τ) (tol : Fl
 
 @[test] def testGemma4SharedCacheAndPerLayerInputs : IO Unit := do
   let m := textModel cfg
-  LeanTest.assertEqual (Config.sharedSourceLayer? cfg 2) (some 1)
-  LeanTest.assertEqual (Config.sharedSourceLayer? cfg 3) (some 0)
+  LeanTest.assertEqual ((Config.sharedSourceLayer? cfg 2).map (·.val)) (some 1)
+  LeanTest.assertEqual ((Config.sharedSourceLayer? cfg 3).map (·.val)) (some 0)
   let expected := m.model.forward cfg ids
   let perLayer := m.model.computePerLayerInputs cfg ids (m.embedTokens cfg ids)
   LeanTest.assertTrue perLayer.isSome

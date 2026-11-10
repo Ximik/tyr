@@ -821,7 +821,7 @@ structure Gemma4Layer (cfg : Config) (dtype : DType := .Float32) where
   deriving TensorStruct
 
 structure Gemma4Cache (cfg : Config) (batch cap : Nat) (dtype : DType := .Float32) where
-  attnCaches : Array (Gemma4Attention.KVCache (dtype := dtype) (device := device) cfg batch cap)
+  attnCaches : Vector cfg.num_hidden_layers (Gemma4Attention.KVCache (dtype := dtype) (device := device) cfg batch cap)
 
 namespace Gemma4Layer
 
@@ -1134,20 +1134,17 @@ def initCache {batch : Nat}
     [DType.ConstantSupported dtype cacheDevice]
     (h : 0 < maxLen := by omega)
     : Gemma4Cache (dtype := dtype) (device := cacheDevice) cfg batch maxLen :=
-  Id.run do
-    let mut caches : Array (Gemma4Attention.KVCache (dtype := dtype) (device := cacheDevice) cfg batch maxLen) := #[]
-    for _ in [:cfg.num_hidden_layers] do
+  let layers : Vector cfg.num_hidden_layers Nat := ⟨Array.range cfg.num_hidden_layers, Array.size_range⟩
+  { attnCaches := layers.map fun _ =>
       let kv := qwen.QwenAttention.initKVCache
         maxLen
         (batch := batch)
         (num_kv_heads := Config.maxKVHeads cfg)
         (head_dim := Config.maxHeadDim cfg)
         cacheDevice dtype (h := h)
-      let kv := { kv with
+      { kv with
         kStore := Tensor.castLike m.embed_tokens kv.kStore
-        vStore := Tensor.castLike m.embed_tokens kv.vStore }
-      caches := caches.push kv
-    return { attnCaches := caches }
+        vStore := Tensor.castLike m.embed_tokens kv.vStore } }
 
 /-- Full-sequence evaluation keeps temporary per-layer K/V when the configured
 architecture shares them. This gives uncached evaluation the same layer inputs
@@ -1161,19 +1158,19 @@ private def forwardEmbedsCore {batch seq : Nat}
   let (fullCos, fullSin) := precomputeFullRotary cfg inputsEmbeds.device
   -- An empty sequence has no K/V to share, and runs every layer uncached.
   let mut caches := if h : cfg.num_kv_shared_layers > 0 ∧ 0 < seq then
-      (initCache cfg m seq inputsEmbeds.device h.2).attnCaches else #[]
+      some (initCache cfg m seq inputsEmbeds.device h.2).attnCaches else none
   let mut hidden := inputsEmbeds
   for hL : i in [:cfg.num_hidden_layers] do
     have hi : i < cfg.num_hidden_layers := by have := hL.upper; simpa using this
     let layer := m.layers.get ⟨i, hi⟩
     let perLayer := extractPerLayerInput? cfg perLayerInputs ⟨i, hi⟩
-    match caches[i]? with
-    | some layerCache =>
-      let sharedSource := (Config.sharedSourceLayer? cfg i).bind fun src => caches[src]?
+    match caches with
+    | some layerCaches =>
+      let sharedSource := (Config.sharedSourceLayer? cfg i).map layerCaches.get
       let (next, nextCache) := Gemma4Layer.forwardWithCache cfg layer hidden
-        slidingCos slidingSin fullCos fullSin layerCache (Nat.le_refl _) sharedSource perLayer
+        slidingCos slidingSin fullCos fullSin (layerCaches.get ⟨i, hi⟩) (Nat.le_refl _) sharedSource perLayer
       hidden := next
-      if sharedSource.isNone then caches := caches.set! i nextCache
+      if sharedSource.isNone then caches := some (layerCaches.set ⟨i, hi⟩ nextCache)
     | none =>
       hidden := Gemma4Layer.forward cfg layer hidden slidingCos slidingSin fullCos fullSin perLayer
   return m.norm.forward3d hidden
@@ -1221,30 +1218,26 @@ def forwardWithCache {batch seq maxLen : Nat}
     for hL : i in [:cfg.num_hidden_layers] do
       have hi : i < cfg.num_hidden_layers := by have := hL.upper; simpa using this
       let layer := m.layers.get ⟨i, hi⟩
-      match cache'.attnCaches[i]? with
-      | some layerCache =>
-        let perLayer := extractPerLayerInput? cfg perLayerInputs ⟨i, hi⟩
-        let sharedSource :=
-          match Config.sharedSourceLayer? cfg i with
-          | some src => cache'.attnCaches[src]?
-          | none => none
-        let (hiddenNext, layerCacheNext) :=
-          Gemma4Layer.forwardWithCache
-            cfg
-            layer
-            hidden
-            slidingCos
-            slidingSin
-            fullCos
-            fullSin
-            layerCache
-            hfit
-            sharedSource
-            perLayer
-        hidden := hiddenNext
-        if sharedSource.isNone then
-          cache' := { cache' with attnCaches := cache'.attnCaches.set! i layerCacheNext }
-      | none => pure ()
+      let layerCache := cache'.attnCaches.get ⟨i, hi⟩
+      let perLayer := extractPerLayerInput? cfg perLayerInputs ⟨i, hi⟩
+      let sharedSource :=
+        (Config.sharedSourceLayer? cfg i).map cache'.attnCaches.get
+      let (hiddenNext, layerCacheNext) :=
+        Gemma4Layer.forwardWithCache
+          cfg
+          layer
+          hidden
+          slidingCos
+          slidingSin
+          fullCos
+          fullSin
+          layerCache
+          hfit
+          sharedSource
+          perLayer
+      hidden := hiddenNext
+      if sharedSource.isNone then
+        cache' := { cache' with attnCaches := cache'.attnCaches.set ⟨i, hi⟩ layerCacheNext }
     return (m.norm.forward3d hidden, cache')
 
 def forwardWithCacheEmbeds {batch seq maxLen : Nat}
@@ -1270,30 +1263,26 @@ def forwardWithCacheEmbeds {batch seq maxLen : Nat}
     for hL : i in [:cfg.num_hidden_layers] do
       have hi : i < cfg.num_hidden_layers := by have := hL.upper; simpa using this
       let layer := m.layers.get ⟨i, hi⟩
-      match cache'.attnCaches[i]? with
-      | some layerCache =>
-        let perLayer := extractPerLayerInput? cfg perLayerInputs ⟨i, hi⟩
-        let sharedSource :=
-          match Config.sharedSourceLayer? cfg i with
-          | some src => cache'.attnCaches[src]?
-          | none => none
-        let (hiddenNext, layerCacheNext) :=
-          Gemma4Layer.forwardWithCache
-            cfg
-            layer
-            hidden
-            slidingCos
-            slidingSin
-            fullCos
-            fullSin
-            layerCache
-            hfit
-            sharedSource
-            perLayer
-        hidden := hiddenNext
-        if sharedSource.isNone then
-          cache' := { cache' with attnCaches := cache'.attnCaches.set! i layerCacheNext }
-      | none => pure ()
+      let layerCache := cache'.attnCaches.get ⟨i, hi⟩
+      let perLayer := extractPerLayerInput? cfg perLayerInputs ⟨i, hi⟩
+      let sharedSource :=
+        (Config.sharedSourceLayer? cfg i).map cache'.attnCaches.get
+      let (hiddenNext, layerCacheNext) :=
+        Gemma4Layer.forwardWithCache
+          cfg
+          layer
+          hidden
+          slidingCos
+          slidingSin
+          fullCos
+          fullSin
+          layerCache
+          hfit
+          sharedSource
+          perLayer
+      hidden := hiddenNext
+      if sharedSource.isNone then
+        cache' := { cache' with attnCaches := cache'.attnCaches.set ⟨i, hi⟩ layerCacheNext }
     return (m.norm.forward3d hidden, cache')
 
 def forwardWithCacheEmbedsWithPerLayerInputs {batch seq maxLen : Nat}
@@ -1320,30 +1309,26 @@ def forwardWithCacheEmbedsWithPerLayerInputs {batch seq maxLen : Nat}
     for hL : i in [:cfg.num_hidden_layers] do
       have hi : i < cfg.num_hidden_layers := by have := hL.upper; simpa using this
       let layer := m.layers.get ⟨i, hi⟩
-      match cache'.attnCaches[i]? with
-      | some layerCache =>
-        let perLayer := extractPerLayerInput? cfg perLayerInputs ⟨i, hi⟩
-        let sharedSource :=
-          match Config.sharedSourceLayer? cfg i with
-          | some src => cache'.attnCaches[src]?
-          | none => none
-        let (hiddenNext, layerCacheNext) :=
-          Gemma4Layer.forwardWithCache
-            cfg
-            layer
-            hidden
-            slidingCos
-            slidingSin
-            fullCos
-            fullSin
-            layerCache
-            hfit
-            sharedSource
-            perLayer
-        hidden := hiddenNext
-        if sharedSource.isNone then
-          cache' := { cache' with attnCaches := cache'.attnCaches.set! i layerCacheNext }
-      | none => pure ()
+      let layerCache := cache'.attnCaches.get ⟨i, hi⟩
+      let perLayer := extractPerLayerInput? cfg perLayerInputs ⟨i, hi⟩
+      let sharedSource :=
+        (Config.sharedSourceLayer? cfg i).map cache'.attnCaches.get
+      let (hiddenNext, layerCacheNext) :=
+        Gemma4Layer.forwardWithCache
+          cfg
+          layer
+          hidden
+          slidingCos
+          slidingSin
+          fullCos
+          fullSin
+          layerCache
+          hfit
+          sharedSource
+          perLayer
+      hidden := hiddenNext
+      if sharedSource.isNone then
+        cache' := { cache' with attnCaches := cache'.attnCaches.set ⟨i, hi⟩ layerCacheNext }
     return (m.norm.forward3d hidden, cache')
 
 def forwardWithCacheEmbedsWithPerLayerInputsBidirectionalVision {batch seq maxLen : Nat}
@@ -1372,26 +1357,24 @@ def forwardWithCacheEmbedsWithPerLayerInputsBidirectionalVision {batch seq maxLe
     for hL : i in [:cfg.num_hidden_layers] do
       have hi : i < cfg.num_hidden_layers := by have := hL.upper; simpa using this
       let layer := m.layers.get ⟨i, hi⟩
-      match cache'.attnCaches[i]? with
-      | some layerCache =>
-        let perLayer := extractPerLayerInput? cfg perLayerInputs ⟨i, hi⟩
-        let (hiddenNext, layerCacheNext) :=
-          Gemma4Layer.forwardPrefillWithMask
-            cfg
-            layer
-            hidden
-            slidingCos
-            slidingSin
-            fullCos
-            fullSin
-            slidingAttnMask
-            fullAttnMask
-            layerCache
-            hfit
-            perLayer
-        hidden := hiddenNext
-        cache' := { cache' with attnCaches := cache'.attnCaches.set! i layerCacheNext }
-      | none => pure ()
+      let layerCache := cache'.attnCaches.get ⟨i, hi⟩
+      let perLayer := extractPerLayerInput? cfg perLayerInputs ⟨i, hi⟩
+      let (hiddenNext, layerCacheNext) :=
+        Gemma4Layer.forwardPrefillWithMask
+          cfg
+          layer
+          hidden
+          slidingCos
+          slidingSin
+          fullCos
+          fullSin
+          slidingAttnMask
+          fullAttnMask
+          layerCache
+          hfit
+          perLayer
+      hidden := hiddenNext
+      cache' := { cache' with attnCaches := cache'.attnCaches.set ⟨i, hi⟩ layerCacheNext }
     return (m.norm.forward3d hidden, cache')
 
 def forwardStep {batch cap : Nat}
@@ -1417,36 +1400,32 @@ def forwardStep {batch cap : Nat}
     for hL : i in [:cfg.num_hidden_layers] do
       have hi : i < cfg.num_hidden_layers := by have := hL.upper; simpa using this
       let layer := m.layers.get ⟨i, hi⟩
-      match cache'.attnCaches[i]? with
-      | some layerCache =>
-        let perLayer :=
-          match perLayerInputs with
-          | some p =>
-            let one : Tensor { device := device, shape := #[batch, 1, 1, cfg.hidden_size_per_layer_input], dtype := dtype } := Tensor.slice p 2 i 1
-            some (Tensor.reshape one #[batch, 1, cfg.hidden_size_per_layer_input])
-          | none => none
-        let sharedSource :=
-          match Config.sharedSourceLayer? cfg i with
-          | some src => cache'.attnCaches[src]?
-          | none => none
-        let (hiddenNext, layerCacheNext) :=
-          Gemma4Layer.forwardStep
-            cfg
-            layer
-            hidden
-            slidingCos
-            slidingSin
-            fullCos
-            fullSin
-            layerCache
-            position
-            hpos
-            sharedSource
-            perLayer
-        hidden := hiddenNext
-        if sharedSource.isNone then
-          cache' := { cache' with attnCaches := cache'.attnCaches.set! i layerCacheNext }
-      | none => pure ()
+      let layerCache := cache'.attnCaches.get ⟨i, hi⟩
+      let perLayer :=
+        match perLayerInputs with
+        | some p =>
+          let one : Tensor { device := device, shape := #[batch, 1, 1, cfg.hidden_size_per_layer_input], dtype := dtype } := Tensor.slice p 2 i 1
+          some (Tensor.reshape one #[batch, 1, cfg.hidden_size_per_layer_input])
+        | none => none
+      let sharedSource :=
+        (Config.sharedSourceLayer? cfg i).map cache'.attnCaches.get
+      let (hiddenNext, layerCacheNext) :=
+        Gemma4Layer.forwardStep
+          cfg
+          layer
+          hidden
+          slidingCos
+          slidingSin
+          fullCos
+          fullSin
+          layerCache
+          position
+          hpos
+          sharedSource
+          perLayer
+      hidden := hiddenNext
+      if sharedSource.isNone then
+        cache' := { cache' with attnCaches := cache'.attnCaches.set ⟨i, hi⟩ layerCacheNext }
     return (m.norm.forward3d hidden, cache')
 
 end Gemma4Model

@@ -232,6 +232,9 @@ def foldl {n : Nat} (f : β → α → β) (init : β) (v : Vector n α) : β :=
   v.data.foldl f init
 
 /-- Create vector by replicating a value -/
+def set {n : Nat} (v : Vector n α) (i : Fin n) (a : α) : Vector n α :=
+  ⟨v.data.set i.val a (by rw [v.size_eq]; exact i.isLt), by rw [Array.size_set]; exact v.size_eq⟩
+
 def replicate (n : Nat) (a : α) : Vector n α :=
   ⟨Array.replicate n a, Array.size_replicate ..⟩
 
