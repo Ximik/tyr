@@ -84,6 +84,9 @@ def Config.parseJson (j : Json) (d : Config := Config.qwen35_9B) : Except String
   let convKernel ← fieldD? textCfg "linear_conv_kernel_dim" d.linear_conv_kernel_dim
   let ⟨hConv⟩ ← if h : 0 < convKernel then pure (PLift.up h) else
     throw "Invalid Qwen3.5 config: linear_conv_kernel_dim must be positive"
+  let keyHeadDim ← fieldD? textCfg "linear_key_head_dim" d.linear_key_head_dim
+  let ⟨hKeyHeadDim⟩ ← if h : 0 < keyHeadDim then pure (PLift.up h) else
+    throw "Invalid Qwen3.5 config: linear_key_head_dim must be positive"
   let numExperts ← fieldD? textCfg "num_experts" d.num_experts
   let perTok ← fieldD? textCfg "num_experts_per_tok" d.num_experts_per_tok
   let ⟨hExperts⟩ ← if h : 0 < numExperts → 0 < perTok ∧ perTok ≤ numExperts then pure (PLift.up h) else
@@ -108,7 +111,7 @@ def Config.parseJson (j : Json) (d : Config := Config.qwen35_9B) : Except String
     half_rotary_dim := rotaryDim / 2
     rms_norm_eps := eps
     linear_conv_kernel_dim := convKernel
-    linear_key_head_dim := ← fieldD? textCfg "linear_key_head_dim" d.linear_key_head_dim
+    linear_key_head_dim := keyHeadDim
     linear_value_head_dim := ← fieldD? textCfg "linear_value_head_dim" d.linear_value_head_dim
     linear_num_key_heads := linearKeyHeads
     linear_num_value_heads := linearValueHeads
@@ -126,6 +129,7 @@ def Config.parseJson (j : Json) (d : Config := Config.qwen35_9B) : Except String
     rotaryValid := by obtain ⟨_, _, _⟩ := hRotary; omega
     layerTypesSize := hLayers
     convKernelPos := hConv
+    linearKeyHeadDimPos := hKeyHeadDim
     expertsValid := hExperts
     ropeThetaPos := hTheta
     rmsNormEpsPos := hEps

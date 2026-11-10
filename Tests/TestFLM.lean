@@ -66,6 +66,6 @@ def testFMLMPsdLossFinite : IO Unit := do
 def testFLMGenerateFiniteTokens : IO Unit := do
   let cfg : FlowConfig := {}
   let out ← generateFLM (seq := 3) (vocab := 5) (batch := 2)
-    cfg TimeMap.identity identityDenoiser () 2
+    cfg TimeMap.identity identityDenoiser () (by decide) 2
   let total := Tensor.item (Tensor.sumAll (Tensor.toFloat32 out))
   LeanTest.assertTrue (total.isFinite) "generated token ids should be numeric"

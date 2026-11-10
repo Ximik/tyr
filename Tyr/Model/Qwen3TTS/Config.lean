@@ -12,6 +12,14 @@ import Tyr.Tokenizer.Types
 
 namespace torch.qwen3tts
 
+/-- A "same"-padded convolution: a positive kernel and dilation, with
+    `dilation * (kernel - 1)` even so that half of it pads each side. -/
+def SameConv (kernel dilation : Nat) : Prop :=
+  0 < kernel ∧ 0 < dilation ∧ 2 ∣ dilation * (kernel - 1)
+
+instance (kernel dilation : Nat) : Decidable (SameConv kernel dilation) := by
+  unfold SameConv; infer_instance
+
 /-- Speaker encoder config (ECAPA-TDNN style). -/
 structure SpeakerEncoderConfig where
   melDim : Nat := 128
@@ -23,14 +31,14 @@ structure SpeakerEncoderConfig where
   encRes2NetScale : Nat := 8
   encSeChannels : Nat := 128
   sampleRate : Nat := 24000
-  /-- Each "same"-padded TDNN conv keeps its length only when `dilation * (kernel - 1)` is even;
-      the index defaults match the encoder's own lookups. Checked when the config is built. -/
-  samePaddingEven :
-      2 ∣ encDilations.getD 0 1 * (encKernelSizes.getD 0 5 - 1) ∧
-      2 ∣ encDilations.getD 1 2 * (encKernelSizes.getD 1 3 - 1) ∧
-      2 ∣ encDilations.getD 2 3 * (encKernelSizes.getD 2 3 - 1) ∧
-      2 ∣ encDilations.getD 3 4 * (encKernelSizes.getD 3 3 - 1) ∧
-      2 ∣ encDilations.getD 4 1 * (encKernelSizes.getD 4 1 - 1) := by decide
+  /-- Each TDNN conv is "same"-padded, so it keeps its length; the index defaults match the
+      encoder's own lookups. Checked when the config is built. -/
+  sameConvs :
+      SameConv (encKernelSizes.getD 0 5) (encDilations.getD 0 1) ∧
+      SameConv (encKernelSizes.getD 1 3) (encDilations.getD 1 2) ∧
+      SameConv (encKernelSizes.getD 2 3) (encDilations.getD 2 3) ∧
+      SameConv (encKernelSizes.getD 3 3) (encDilations.getD 3 4) ∧
+      SameConv (encKernelSizes.getD 4 1) (encDilations.getD 4 1) := by decide
   /-- The SE-Res2Net blocks add their input as the residual, so their channels must match. -/
   residualChannels :
       encChannels.getD 0 512 = encChannels.getD 1 512 ∧

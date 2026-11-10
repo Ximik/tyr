@@ -227,8 +227,11 @@ def NanoChatConfig.toModelConfig? (cfg : NanoChatConfig) : Except String moddedG
   let modelDim := cfg.modelDepth * cfg.modelAspectRatio
   let some (nHead, halfHeadDim) := findHeads? modelDim cfg.targetHeadDim
     | throw s!"model dim {modelDim} (depth {cfg.modelDepth} * aspect ratio {cfg.modelAspectRatio}) does not split into heads of even width"
+  let ⟨hVocab⟩ ← if h : 0 < cfg.vocabSize then pure (PLift.up h) else
+    throw "VOCAB_SIZE must be positive"
   pure {
     vocabSize := cfg.vocabSize
+    vocabPos := hVocab
     nLayer := cfg.modelDepth
     nHead
     halfHeadDim
@@ -1184,7 +1187,7 @@ def evalBaseModel (cfg : NanoChatConfig) : PipelineM Unit := runOnMaster do
         | some tc => loadCORETaskData evalBundleDir tc
         | none => pure #[]
       let examples := capArray examplesRaw evalCap
-      let score ← evaluateTask examples taskMeta tokenizeFn runModel evalConfig
+      let score ← evaluateTask examples taskMeta tokenizeFn runModel modelCfg.vocabPos evalConfig
       taskResults := taskResults.push (taskMeta.taskName, score)
 
     let coreScore := computeCOREScore taskResults
@@ -1562,7 +1565,7 @@ def evalChat (cfg : NanoChatConfig) (checkpoint : String) : PipelineM Unit := ru
         | some tc => loadCORETaskData evalBundleDir tc
         | none => pure #[]
       let examples := capArray examplesRaw evalCap
-      let score ← evaluateTask examples taskMeta tokenizeFn runModel evalConfig
+      let score ← evaluateTask examples taskMeta tokenizeFn runModel modelCfg.vocabPos evalConfig
       results := results.push (taskMeta.taskName, score)
 
     -- Compute aggregate ChatCORE score

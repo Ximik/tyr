@@ -92,6 +92,9 @@ structure Qwen35Config where
   layerTypesSize : layer_types.size = num_hidden_layers := by simp
   /-- The causal depthwise conv has a kernel; checked when the config is built. -/
   convKernelPos : 0 < linear_conv_kernel_dim := by decide
+  /-- The depthwise conv has one group per channel, so its channel count is positive; checked
+      when the config is built. -/
+  linearKeyHeadDimPos : 0 < linear_key_head_dim := by decide
   /-- MoE routes each token to between one and `num_experts` experts; checked when the config is built. -/
   expertsValid : 0 < num_experts → 0 < num_experts_per_tok ∧ num_experts_per_tok ≤ num_experts := by decide
   /-- RoPE frequencies and RMSNorm divide by these; checked when the config is built. -/
@@ -191,6 +194,10 @@ def qwen35_0_8B : Qwen35Config := {
 /-- Depthwise-conv channel count for linear-attention fused QKV path. -/
 @[simp] def linearConvDim (cfg : Qwen35Config) : Nat :=
   (linearKeyDim cfg) * 2 + (linearValueDim cfg)
+
+theorem linearConvDim_pos (cfg : Qwen35Config) : 0 < linearConvDim cfg := by
+  have := Nat.mul_pos cfg.headsPos.2.2 cfg.linearKeyHeadDimPos
+  simp only [linearConvDim, linearKeyDim]; omega
 
 /-- Repeat factor to broadcast linear K/Q heads to V heads. -/
 def linearKVRepeat (cfg : Qwen35Config) : Nat :=

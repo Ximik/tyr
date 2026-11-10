@@ -166,6 +166,12 @@ def isForcedAligner (cfg : ThinkerConfig) : Bool :=
 def lmHeadOutDim (cfg : ThinkerConfig) : Nat :=
   if isForcedAligner cfg then cfg.classifyNum else cfg.textConfig.vocabSize
 
+theorem lmHeadOutDim_pos (cfg : ThinkerConfig) : 0 < lmHeadOutDim cfg := by
+  unfold lmHeadOutDim isForcedAligner
+  split
+  · exact cfg.alignerClasses ‹_›
+  · exact cfg.textConfig.vocabPos
+
 end ThinkerConfig
 
 def defaultSupportedLanguages : Array String :=

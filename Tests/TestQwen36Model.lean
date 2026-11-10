@@ -18,6 +18,7 @@ private def tinyCfg : Config := {
   linear_num_key_heads := 2
   linear_num_value_heads := 4
   linearKeyHeadsDivide := by decide
+  linearKeyHeadDimPos := by decide
   kvHeadsDivide := by decide
   layer_types := #[.linearAttention, .fullAttention]
   moe_intermediate_size := 8

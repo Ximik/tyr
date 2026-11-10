@@ -624,6 +624,7 @@ private def filteredSamplingLogits {vocab : Nat}
 
 private def argmaxTokenFromLogits {vocab : Nat}
     (logits : Tensor { dtype := dtype, device := device, shape := #[1, vocab] })
+    (hVocab : 0 < vocab)
     (fallback : tokenizer.TokenId)
     (rules : DecodeTokenRules := {})
     : IO UInt32 := do
@@ -634,13 +635,14 @@ private def argmaxTokenFromLogits {vocab : Nat}
     let id := p.1.toUInt32
     if !(isForbiddenToken rules id) then
       return id
-  let indices := Tensor.argmax! logits 1
+  let indices := Tensor.argmax logits 1 (_nonempty := by simpa using hVocab)
   let nextTokRaw : Tensor { device := device, shape := #[1], dtype := .Int64 } := indices.reshape #[1]
   let nextVals ← Tensor.toUInt64Array nextTokRaw
   pure (nextVals[0]?.map (·.toUInt32) |>.getD fallback)
 
 private def sampleTokenFromLogits {vocab : Nat}
     (logits : Tensor { dtype := dtype, device := device, shape := #[1, vocab] })
+    (hVocab : 0 < vocab)
     (rules : DecodeTokenRules := {})
     (fallback : tokenizer.TokenId := 0)
     : IO UInt32 := do
@@ -656,7 +658,7 @@ private def sampleTokenFromLogits {vocab : Nat}
     if !isForbiddenToken rules id then
       return id
     tries := tries + 1
-  argmaxTokenFromLogits logits fallback rules
+  argmaxTokenFromLogits logits hVocab fallback rules
 
 private def prefillPromptCaches
     {cfg : WhisperConfig}
@@ -726,9 +728,9 @@ private partial def decodeLoopCached
     let stepRules := applyTimestampPairMask (cfg := cfg) stepRules state.generated eosTokenId
     let nextId ←
       if sample then
-        sampleTokenFromLogits distLogits stepRules eosTokenId
+        sampleTokenFromLogits distLogits cfg.vocabSizePos stepRules eosTokenId
       else
-        argmaxTokenFromLogits lastLogits eosTokenId stepRules
+        argmaxTokenFromLogits lastLogits cfg.vocabSizePos eosTokenId stepRules
     let tokLogprob ← tokenLogProbFromLogits distLogits nextId
     let generated' :=
       if nextId == eosTokenId then state.generated else state.generated.push nextId

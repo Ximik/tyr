@@ -34,7 +34,13 @@ structure Config where
   half_head_dim : Nat := 32    -- half the per-head dimension (smaller for testing)
   diffusion_steps : Nat := 64  -- timesteps for diffusion (smaller for testing)
   context_len : Nat := 16      -- prefix tokens never masked
-  deriving Repr, Inhabited
+  /-- Sampling reads a maximum over `vocab_size` and decodes at least one of
+      `seq_len` positions per step; the context prefix fits the sequence. -/
+  vocabPos : 0 < vocab_size := by decide
+  seqPos : 0 < seq_len := by decide
+  stepsPos : 0 < diffusion_steps := by decide
+  contextFits : context_len ≤ seq_len := by decide
+  deriving Repr
 
 /-- Head dimension -/
 def Config.headDim (cfg : Config) : Nat := 2 * cfg.half_head_dim
@@ -205,13 +211,9 @@ private def samplingMask {batch seq : Nat} (x : Tokens #[batch, seq])
     |>.reshape #[1, seq] |>.broadcastTo #[batch, seq]
   Tensor.logicalAnd (getMaskedPositions' x maskToken) protectedMask.logicalNot
 
-private def validateSampling (cfg : Config) (batch : Nat) (temperature : Float) :
-    IO (PLift (cfg.context_len ≤ cfg.seq_len)) := do
-  if batch == 0 || cfg.seq_len == 0 || cfg.diffusion_steps == 0 || cfg.context_len > cfg.seq_len ||
-      temperature <= 0 || !temperature.isFinite then
-    throw <| IO.userError "Diffusion sampling requires valid dimensions and finite positive temperature"
-  if h : cfg.context_len ≤ cfg.seq_len then pure ⟨h⟩ else
-    throw <| IO.userError "Diffusion sampling requires valid dimensions and finite positive temperature"
+private def validateSampling (batch : Nat) (temperature : Float) : IO Unit := do
+  if batch == 0 || temperature <= 0 || !temperature.isFinite then
+    throw <| IO.userError "Diffusion sampling requires a nonempty batch and finite positive temperature"
 
 /-- Sample using confidence-aware parallel decoding.
     At each step, decode all tokens whose confidence exceeds a threshold.
@@ -225,7 +227,8 @@ def sampleConfidence {cfg : Config} {batch : Nat}
     (maxSteps : Nat := 256)
     (contextTokens : Option (Tokens #[batch, cfg.context_len]) := none)
     : IO (Tokens #[batch, cfg.seq_len]) := do
-  let ⟨hCtx⟩ ← validateSampling cfg batch temperature
+  validateSampling batch temperature
+  have hCtx := cfg.contextFits
   -- Start with all mask tokens
   let mut x := Tensor.fullInt #[batch, cfg.seq_len] cfg.mask_token_id.toInt64
 
@@ -267,7 +270,7 @@ def sampleConfidence {cfg : Config} {batch : Nat}
     let probs := Tensor.softmax scaledLogits  -- [batch, seq, vocab]
 
     -- Get max probability and predicted token per position
-    let (confidences, predictedTokens) := Tensor.maxLast3d! probs  -- along vocab dim
+    let (confidences, predictedTokens) := Tensor.maxLast3d probs cfg.vocabPos  -- along vocab dim
 
     if h : step < 3 ∧ 0 < batch * cfg.seq_len then
       -- Debug: show first few predicted tokens and their confidences
@@ -288,7 +291,7 @@ def sampleConfidence {cfg : Config} {batch : Nat}
       -- Fallback: decode top-1 most confident masked position using scatter
       let negInf := Tensor.full #[batch, cfg.seq_len] (-1e10 : Float)
       let maskedConf := Tensor.whereSelect maskedPositions confidences negInf
-      let (_, topkIdx) := Tensor.topKLast2d! maskedConf 1  -- [batch, 1]
+      let (_, topkIdx) := Tensor.topKLast2d maskedConf 1 cfg.seqPos  -- [batch, 1]
       let topkIdxLong := topkIdx
       let oneHot := Tensor.zeros #[batch, cfg.seq_len]
       let onesK := Tensor.ones #[batch, 1]
@@ -315,8 +318,9 @@ def sampleTopK {cfg : Config} {batch : Nat}
     (maxSteps : Nat := 256)
     (contextTokens : Option (Tokens #[batch, cfg.context_len]) := none)
     : IO (Tokens #[batch, cfg.seq_len]) := do
-  let ⟨hCtx⟩ ← validateSampling cfg batch temperature
-  if k == 0 || k > cfg.seq_len then
+  validateSampling batch temperature
+  have hCtx := cfg.contextFits
+  let ⟨hk⟩ ← if h : 0 < k ∧ k ≤ cfg.seq_len then pure (PLift.up h) else
     throw <| IO.userError "Diffusion top-k must lie between 1 and sequence length"
   -- Start with all mask tokens
   let mut x := Tensor.fullInt #[batch, cfg.seq_len] cfg.mask_token_id.toInt64
@@ -351,14 +355,14 @@ def sampleTopK {cfg : Config} {batch : Nat}
     let probs := Tensor.softmax scaledLogits
 
     -- Get max probability and predicted token per position
-    let (confidences, predictedTokens) := Tensor.maxLast3d! probs
+    let (confidences, predictedTokens) := Tensor.maxLast3d probs cfg.vocabPos
 
     -- Mask out already-decoded positions (set confidence to -inf)
     let negInf := Tensor.full #[batch, cfg.seq_len] (-1e10)
     let maskedConfidences := Tensor.whereSelect maskedPositions confidences negInf
 
     -- Get top-k positions per batch (properly typed)
-    let (_, topkIndices) := Tensor.topKLast2d! maskedConfidences k  -- [batch, k]
+    let (_, topkIndices) := Tensor.topKLast2d maskedConfidences k hk.2  -- [batch, k]
 
     -- Create selection mask using scatter: scatter 1s at topk positions
     let selectMask := Tensor.zeros #[batch, cfg.seq_len]

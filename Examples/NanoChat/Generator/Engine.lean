@@ -54,15 +54,6 @@ def applyTemperature {s : Shape} (logits : Tensor { shape := s, dtype := .Float3
   if temp == 1.0 then logits
   else Tensor.mulScalar logits (1.0 / temp)
 
-/-- Sample from logits using argmax (greedy).
-    Returns array of token IDs, one per batch element. -/
-def sampleGreedy {batch vocabSize : Nat} (logits : Tensor { shape := #[batch, vocabSize], dtype := .Float32, device := device })
-    : IO (Array TokenId) := do
-  -- Get argmax along vocab dimension - returns [batch] tensor of indices
-  let indices := Tensor.argmax! logits (1 : Nat)
-  -- Convert tensor to array of token IDs (use dynamic version since shape is computed)
-  indices.toUInt64Array
-
 /-- Apply top-p (nucleus) filtering to logits.
     Sets logits outside the nucleus (cumulative prob > p) to -infinity. -/
 def applyTopP {s : Shape} (logits : Tensor { shape := s, dtype := .Float32, device := device }) (p : Float) : Tensor { shape := s, dtype := .Float32, device := device } :=

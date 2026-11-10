@@ -196,84 +196,14 @@ def init (inC outC kernel : Nat)
 def forward {batch frames inC outC kernel stride padding dilation : Nat}
     (m : Conv1dParams (device := device) inC outC kernel stride padding dilation)
     (x : Tensor { shape := #[batch, inC, frames], dtype := .Float32, device := device })
+    (valid : Tensor.ConvValid frames kernel stride padding dilation := by conv_valid)
     : Tensor { shape := #[batch, outC, convOutputSize frames kernel stride padding dilation], dtype := .Float32, device := device } :=
   let y0 : Tensor { shape := #[batch, outC, convOutputSize frames kernel stride padding dilation], dtype := .Float32, device := device } :=
-    Tensor.reshape (Tensor.conv1d! x m.weight stride padding dilation) #[batch, outC, convOutputSize frames kernel stride padding dilation]
+    Tensor.reshape (Tensor.conv1d x m.weight stride padding dilation valid) #[batch, outC, convOutputSize frames kernel stride padding dilation]
       (by simp)
   addBias3d y0 m.bias
 
 end Conv1dParams
-
-structure DepthwiseConv1dParams
-    (channels kernel : Nat)
-    (stride : Nat := 1)
-    (padding : Nat := 0)
-    (dilation : Nat := 1) where
-  weight : Tensor { shape := #[channels, 1, kernel], dtype := .Float32, device := device }
-  bias : Tensor { shape := #[channels], dtype := .Float32, device := device }
-  deriving TensorStruct, Inhabited
-
-namespace DepthwiseConv1dParams
-
-def init (channels kernel : Nat)
-    (stride : Nat := 1)
-    (padding : Nat := 0)
-    (dilation : Nat := 1) (device : Device := .CPU)
-    : IO (DepthwiseConv1dParams (device := device) channels kernel stride padding dilation) := do
-  let weight ← initWeight (device := device) #[channels, 1, kernel] kernel
-  let bias ← initBias (device := device) #[channels]
-  pure { weight, bias }
-
-def forward {batch frames channels kernel stride padding dilation : Nat}
-    (m : DepthwiseConv1dParams (device := device) channels kernel stride padding dilation)
-    (x : Tensor { shape := #[batch, channels, frames], dtype := .Float32, device := device })
-    : Tensor { shape := #[batch, channels, convOutputSize frames kernel stride padding dilation], dtype := .Float32, device := device } :=
-  Tensor.reshape
-    (Tensor.conv1dGroups! x m.weight m.bias stride padding dilation channels)
-    #[batch, channels, convOutputSize frames kernel stride padding dilation]
-    (by simp [Tensor.convExtent])
-
-end DepthwiseConv1dParams
-
-structure DepthwiseTransConv1dParams
-    (channels kernel : Nat)
-    (stride : Nat := 2)
-    (padding : Nat := 1)
-    (outputPadding : Nat := 1)
-    (dilation : Nat := 1) where
-  weight : Tensor { shape := #[channels, 1, kernel], dtype := .Float32, device := device }
-  bias : Tensor { shape := #[channels], dtype := .Float32, device := device }
-  deriving TensorStruct, Inhabited
-
-namespace DepthwiseTransConv1dParams
-
-def init (channels kernel : Nat)
-    (stride : Nat := 2)
-    (padding : Nat := 1)
-    (outputPadding : Nat := 1)
-    (dilation : Nat := 1) (device : Device := .CPU)
-    : IO (DepthwiseTransConv1dParams (device := device) channels kernel stride padding outputPadding dilation) := do
-  let weight ← initWeight (device := device) #[channels, 1, kernel] kernel
-  let bias ← initBias (device := device) #[channels]
-  pure { weight, bias }
-
-def forward {batch frames channels kernel stride padding outputPadding dilation : Nat}
-    (m : DepthwiseTransConv1dParams (device := device) channels kernel stride padding outputPadding dilation)
-    (x : Tensor { shape := #[batch, channels, frames], dtype := .Float32, device := device })
-    : Tensor { shape := #[batch, channels, convTransposeOutputSize frames kernel stride padding outputPadding dilation], dtype := .Float32, device := device } := Id.run do
-  let outFrames := convTransposeOutputSize frames kernel stride padding outputPadding dilation
-  let mut parts : Array (ShapePackedTensor .Float32 device) := #[]
-  for hc : ci in [:channels] do
-    let xc : Tensor { shape := #[batch, 1, frames], dtype := .Float32, device := device } := Tensor.slice x 1 ci 1 (_bounds := by have := hc.upper; simp at this ⊢; omega)
-    let wc : Tensor { shape := #[1, 1, kernel], dtype := .Float32, device := device } := Tensor.slice m.weight 0 ci 1 (_bounds := by have := hc.upper; simp at this ⊢; omega)
-    let bc : Tensor { shape := #[1], dtype := .Float32, device := device } := Tensor.slice m.bias 0 ci 1 (_bounds := by have := hc.upper; simp at this ⊢; omega)
-    let yc : Tensor { shape := #[batch, 1, outFrames], dtype := .Float32, device := device } :=
-      Tensor.reshape (Tensor.convTranspose1d! xc wc bc stride padding outputPadding dilation) #[batch, 1, outFrames]
-        (by simp [outFrames])
-    parts := parts.push (Tensor.packShape yc)
-  Tensor.catMany! parts 1 #[batch, channels, outFrames]
-
-end DepthwiseTransConv1dParams
 
 private def normDim0_3d {d0 d1 d2 : Nat}
     (x : Tensor { shape := #[d0, d1, d2], dtype := .Float32, device := device })
@@ -328,10 +258,11 @@ def init (inC outC kernel : Nat)
 def forward {batch frames inC outC kernel stride padding dilation : Nat}
     (m : WNConv1dParams (device := device) inC outC kernel stride padding dilation)
     (x : Tensor { shape := #[batch, inC, frames], dtype := .Float32, device := device })
+    (valid : Tensor.ConvValid frames kernel stride padding dilation := by conv_valid)
     : Tensor { shape := #[batch, outC, convOutputSize frames kernel stride padding dilation], dtype := .Float32, device := device } :=
   let weight := applyWeightNormConv1d m.weightV m.weightG
   let y0 : Tensor { shape := #[batch, outC, convOutputSize frames kernel stride padding dilation], dtype := .Float32, device := device } :=
-    Tensor.reshape (Tensor.conv1d! x weight stride padding dilation) #[batch, outC, convOutputSize frames kernel stride padding dilation]
+    Tensor.reshape (Tensor.conv1d x weight stride padding dilation valid) #[batch, outC, convOutputSize frames kernel stride padding dilation]
       (by simp)
   addBias3d y0 m.bias
 
@@ -364,10 +295,12 @@ def init (inC outC kernel : Nat)
 def forward {batch frames inC outC kernel stride padding outputPadding dilation : Nat}
     (m : WNConvTranspose1dParams (device := device) inC outC kernel stride padding outputPadding dilation)
     (x : Tensor { shape := #[batch, inC, frames], dtype := .Float32, device := device })
+    (valid : Tensor.ConvTransposeValid frames kernel stride padding outputPadding dilation :=
+      by first | exact of_decide_eq_true rfl | (refine ⟨?_, ?_, ?_, ?_, ?_, ?_⟩ <;> omega))
     : Tensor { shape := #[batch, outC, convTransposeOutputSize frames kernel stride padding outputPadding dilation], dtype := .Float32, device := device } :=
   let weight := applyWeightNormTransConv1d m.weightV m.weightG
   Tensor.reshape
-    (Tensor.convTranspose1d! x weight m.bias stride padding outputPadding dilation)
+    (Tensor.convTranspose1d x weight m.bias stride padding outputPadding dilation valid)
     #[batch, outC, convTransposeOutputSize frames kernel stride padding outputPadding dilation]
     (by simp)
 
@@ -400,6 +333,8 @@ def init (channels kernel : Nat)
 def forward {batch frames channels kernel stride padding outputPadding dilation : Nat}
     (m : WNDepthwiseTransConv1dParams (device := device) channels kernel stride padding outputPadding dilation)
     (x : Tensor { shape := #[batch, channels, frames], dtype := .Float32, device := device })
+    (valid : Tensor.ConvTransposeValid frames kernel stride padding outputPadding dilation :=
+      by first | exact of_decide_eq_true rfl | (refine ⟨?_, ?_, ?_, ?_, ?_, ?_⟩ <;> omega))
     : Tensor { shape := #[batch, channels, convTransposeOutputSize frames kernel stride padding outputPadding dilation], dtype := .Float32, device := device } := Id.run do
   let outFrames := convTransposeOutputSize frames kernel stride padding outputPadding dilation
   let weight : Tensor { shape := #[channels, 1, kernel], dtype := .Float32, device := device } := applyWeightNormTransConv1d m.weightV m.weightG
@@ -409,7 +344,7 @@ def forward {batch frames channels kernel stride padding outputPadding dilation 
     let wc : Tensor { shape := #[1, 1, kernel], dtype := .Float32, device := device } := Tensor.slice weight 0 ci 1 (_bounds := by have := hc.upper; simp at this ⊢; omega)
     let bc : Tensor { shape := #[1], dtype := .Float32, device := device } := Tensor.slice m.bias 0 ci 1 (_bounds := by have := hc.upper; simp at this ⊢; omega)
     let yc : Tensor { shape := #[batch, 1, outFrames], dtype := .Float32, device := device } :=
-      Tensor.reshape (Tensor.convTranspose1d! xc wc bc stride padding outputPadding dilation) #[batch, 1, outFrames]
+      Tensor.reshape (Tensor.convTranspose1d xc wc bc stride padding outputPadding dilation valid) #[batch, 1, outFrames]
         (by simp [outFrames])
     parts := parts.push (Tensor.packShape yc)
   Tensor.catMany! parts 1 #[batch, channels, outFrames]
@@ -710,6 +645,7 @@ def forward {seq : Nat}
     (x : Tensor { shape := #[1, cfg.hiddenDim, seq], dtype := .Float32, device := device })
     (hs : 0 < seq)
     : Tensor { shape := #[1, cfg.hiddenDim, seq], dtype := .Float32, device := device } :=
+  have := cfg.textKernelOdd
   let y : Tensor { shape := #[1, cfg.hiddenDim, seq], dtype := .Float32, device := device } :=
     (m.conv.forward x).reshape #[1, cfg.hiddenDim, seq]
       (by rw [convOutputSize_same hs (by have := cfg.textKernelOdd; omega)])
@@ -1099,6 +1035,34 @@ theorem noise_frames (g : GeneratorConfig) {b : Nat} (hb : 0 < b) (i : Nat) :
   · simp only [noiseKernel, noiseStride, noisePadding, stageOutFrames, harFrames, if_neg h]
     simp only [convOutputSize]; omega
 
+theorem noise_valid (g : GeneratorConfig) {b : Nat} (hb : 0 < b) (i : Nat) :
+    Tensor.ConvValid (g.harFrames b) (g.noiseKernel i) (g.noiseStride i) (g.noisePadding i) 1 := by
+  unfold Tensor.ConvValid
+  by_cases h : i + 1 < g.upsampleRates.size
+  · have hs := g.suffix_pos (i + 1)
+    have hle : g.suffixUpsample (i + 1) ≤ g.totalUpsample * b := by
+      rw [← g.prefix_mul_suffix (i + 1)]
+      exact Nat.le_trans (Nat.le_mul_of_pos_left _ (g.prefix_pos (i + 1))) (Nat.le_mul_of_pos_right _ hb)
+    simp only [noiseKernel, noiseStride, noisePadding, harFrames, if_pos h]
+    omega
+  · simp only [noiseKernel, noiseStride, noisePadding, harFrames, if_neg h]
+    omega
+
+theorem resDilations_pos (g : GeneratorConfig) {j : Nat} (hj : j < g.resblockKernelSizes.size) :
+    0 < g.resDilation j 0 ∧ 0 < g.resDilation j 1 ∧ 0 < g.resDilation j 2 := by
+  have hv := (g.dilationsValid.2 j (by rw [g.dilationsValid.1]; exact hj)).2
+  exact ⟨hv 0 (by decide), hv 1 (by decide), hv 2 (by decide)⟩
+
+theorem up_valid (g : GeneratorConfig) {b : Nat} (hb : 0 < b) {i : Nat}
+    (hi : i < g.upsampleRates.size) :
+    Tensor.ConvTransposeValid (g.stageInFrames b i) (g.upKernel i) (g.rate i)
+      ((g.upKernel i - g.rate i) / 2) 0 1 := by
+  have hv := g.stagesValid.2 i hi
+  have hf := g.stageInFrames_pos hb i
+  unfold upKernel rate
+  unfold Tensor.ConvTransposeValid
+  omega
+
 /-- The upsampling transposed convolution multiplies the frame count by the stage rate. -/
 theorem up_frames (g : GeneratorConfig) {b : Nat} (hb : 0 < b) {i : Nat}
     (hi : i < g.upsampleRates.size) :
@@ -1149,8 +1113,9 @@ def forward {frames styleDim channels kernel dilation : Nat}
     (m : GenResUnit (device := device) styleDim channels kernel dilation)
     (x : Tensor { shape := #[1, channels, frames], dtype := .Float32, device := device })
     (style : Tensor { shape := #[1, styleDim], dtype := .Float32, device := device })
-    (hf : 0 < frames) (hk : kernel % 2 = 1)
+    (hf : 0 < frames) (hk : kernel % 2 = 1) (hd : 0 < dilation)
     : Tensor { shape := #[1, channels, frames], dtype := .Float32, device := device } :=
+  have hPad := dilated_same_pad (d := dilation) hk
   let h2 := snake1d (m.norm1.forward x style) m.alpha1
   let h3 : Tensor { shape := #[1, channels, frames], dtype := .Float32, device := device } :=
     (m.conv1.forward h2).reshape #[1, channels, frames]
@@ -1184,9 +1149,9 @@ def forward {frames styleDim channels kernel d0 d1 d2 : Nat}
     (m : GeneratorAdaINResBlock (device := device) styleDim channels kernel d0 d1 d2)
     (x : Tensor { shape := #[1, channels, frames], dtype := .Float32, device := device })
     (style : Tensor { shape := #[1, styleDim], dtype := .Float32, device := device })
-    (hf : 0 < frames) (hk : kernel % 2 = 1)
+    (hf : 0 < frames) (hk : kernel % 2 = 1) (hd : 0 < d0 ∧ 0 < d1 ∧ 0 < d2)
     : Tensor { shape := #[1, channels, frames], dtype := .Float32, device := device } :=
-  m.u2.forward (m.u1.forward (m.u0.forward x style hf hk) style hf hk) style hf hk
+  m.u2.forward (m.u1.forward (m.u0.forward x style hf hk hd.1) style hf hk hd.2.1) style hf hk hd.2.2
 
 end GeneratorAdaINResBlock
 
@@ -1253,8 +1218,9 @@ private def accumulate {frames : Nat}
     (acc : Tensor { shape := #[1, channels, frames], dtype := .Float32, device := device }) (count : Nat) :
     {j : Nat} → StageResBlocks (device := device) g styleDim channels j →
       Tensor { shape := #[1, channels, frames], dtype := .Float32, device := device } × Nat
-  | _, .last hj b => (acc + b.forward x style hf (g.resblocksValid.2 _ hj), count + 1)
-  | _, .cons hj b r => accumulate x style hf (acc + b.forward x style hf (g.resblocksValid.2 _ hj)) (count + 1) r
+  | _, .last hj b => (acc + b.forward x style hf (g.resblocksValid.2 _ hj) (g.resDilations_pos hj), count + 1)
+  | _, .cons hj b r =>
+    accumulate x style hf (acc + b.forward x style hf (g.resblocksValid.2 _ hj) (g.resDilations_pos hj)) (count + 1) r
 
 /-- Mean of the block outputs, summed left to right. -/
 def forwardMean {frames j : Nat}
@@ -1265,8 +1231,9 @@ def forwardMean {frames j : Nat}
     : Tensor { shape := #[1, channels, frames], dtype := .Float32, device := device } :=
   let (sum, count) :=
     match blocks with
-    | .last hj b => (b.forward x style hf (g.resblocksValid.2 _ hj), 1)
-    | .cons hj b r => accumulate x style hf (b.forward x style hf (g.resblocksValid.2 _ hj)) 1 r
+    | .last hj b => (b.forward x style hf (g.resblocksValid.2 _ hj) (g.resDilations_pos hj), 1)
+    | .cons hj b r =>
+      accumulate x style hf (b.forward x style hf (g.resblocksValid.2 _ hj) (g.resDilations_pos hj)) 1 r
   sum / count.toFloat
 
 end StageResBlocks
@@ -1408,9 +1375,11 @@ def forward {i baseFrames : Nat}
   have hOut : 0 < outFrames := cfg.generator.stageOutFrames_pos hb i
   let xAct := leakyRelu x 0.1
   let xSource1 : Tensor { shape := #[1, outC, outFrames], dtype := .Float32, device := device } :=
-    (st.noiseConv.forward har).reshape #[1, outC, outFrames] (by rw [cfg.generator.noise_frames hb i])
+    (st.noiseConv.forward har (cfg.generator.noise_valid hb i)).reshape #[1, outC, outFrames]
+      (by rw [cfg.generator.noise_frames hb i])
   let xSource := st.noiseRes.forward xSource1 style hOut (cfg.generator.noiseResKernel_odd i)
-  let xUp0 := st.up.forward xAct
+    ⟨by decide, by decide, by decide⟩
+  let xUp0 := st.up.forward xAct (cfg.generator.up_valid hb hi)
   let xUp : Tensor { shape := #[1, outC, outFrames], dtype := .Float32, device := device } :=
     if hMid : i + 1 < cfg.generator.upsampleRates.size then
       xUp0.reshape #[1, outC, outFrames]

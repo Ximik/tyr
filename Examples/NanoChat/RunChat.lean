@@ -212,15 +212,19 @@ private def resolveChatMarkers (tok : BPETokenizer) : IO ChatMarkerIds := do
   let assistantEnd ← requireSpecialId tok "assistant_end" #["<|assistant_end|>", "<|eot|>"]
   pure { bos, userStart, userEnd, assistantStart, assistantEnd }
 
-private def buildModelConfig (args : Args) : Config := {
-  vocabSize := args.vocabSize
-  nLayer := args.modelDepth
-  nHead := 16
-  halfHeadDim := 32
-  maxSeqLen := 2048
-  blockSize := 128
-  ropeBase := 10000.0
-}
+private def buildModelConfig (args : Args) : Except String Config := do
+  let ⟨hVocab⟩ ← if h : 0 < args.vocabSize then pure (PLift.up h) else
+    throw "--vocab-size must be positive"
+  pure {
+    vocabSize := args.vocabSize
+    vocabPos := hVocab
+    nLayer := args.modelDepth
+    nHead := 16
+    halfHeadDim := 32
+    maxSeqLen := 2048
+    blockSize := 128
+    ropeBase := 10000.0
+  }
 
 private def sampleNextToken {cfg : Config}
     (params : ModdedGPTParams (device := device) cfg)
@@ -281,7 +285,7 @@ unsafe def main (rawArgs : List String) : IO UInt32 := do
 
   let checkpointPath ← resolveCheckpointPath args
   let tokenizerPath ← resolveTokenizerPath args
-  let cfg := buildModelConfig args
+  let cfg ← IO.ofExcept (buildModelConfig args)
   let device ← resolveDevice envState
   let tok ← tokenizer.load tokenizerPath
   let markers ← resolveChatMarkers tok

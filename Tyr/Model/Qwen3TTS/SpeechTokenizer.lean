@@ -175,8 +175,7 @@ structure UpsampleStage (dtypes : SpeechTokenizerDTypes := float32SpeechTokenize
   convNeXt : (UpsampleConvNeXtBlock (device := device) (dtypes := dtypes))
   deriving TensorStruct
 
-structure DecoderResidualUnit (dim : Nat) (dtypes : SpeechTokenizerDTypes := float32SpeechTokenizerDTypes) where
-  conv1Dilation : Nat := 1
+structure DecoderResidualUnit (dim dilation : Nat) (dtypes : SpeechTokenizerDTypes := float32SpeechTokenizerDTypes) where
   act1Alpha : Tensor { shape := #[dim], dtype := dtypes.compute.val, device := device }
   act1Beta : Tensor { shape := #[dim], dtype := dtypes.compute.val, device := device }
   conv1Weight : Tensor { shape := #[dim, dim, 7], dtype := dtypes.compute.val, device := device }
@@ -192,9 +191,9 @@ structure DecoderBlock (inDim outDim upRate : Nat) (dtypes : SpeechTokenizerDTyp
   snakeBeta : Tensor { shape := #[inDim], dtype := dtypes.compute.val, device := device }
   transWeight : Tensor { shape := #[inDim, outDim, 2 * upRate], dtype := dtypes.compute.val, device := device }
   transBias : Tensor { shape := #[outDim], dtype := dtypes.compute.val, device := device }
-  res1 : DecoderResidualUnit (device := device) (dtypes := dtypes) outDim
-  res2 : DecoderResidualUnit (device := device) (dtypes := dtypes) outDim
-  res3 : DecoderResidualUnit (device := device) (dtypes := dtypes) outDim
+  res1 : DecoderResidualUnit (device := device) (dtypes := dtypes) outDim 1
+  res2 : DecoderResidualUnit (device := device) (dtypes := dtypes) outDim 3
+  res3 : DecoderResidualUnit (device := device) (dtypes := dtypes) outDim 9
   deriving TensorStruct
 
 structure SpeechTokenizer12HzDecoder (dtypes : SpeechTokenizerDTypes := float32SpeechTokenizerDTypes) where
@@ -301,8 +300,8 @@ private def loadUpsampleStage (weightsPath : String) (idx : Nat) : IO (UpsampleS
   let convNeXt ← loadUpsampleConvNeXt weightsPath s!"{p}.1"
   pure { transConvWeight, transConvBias, convNeXt }
 
-private def loadResidualUnit (weightsPath : String) (namePrefix : String) (dim : Nat) (dilation : Nat)
-    : IO (DecoderResidualUnit (device := device) (dtypes := dtypes) dim) := do
+private def loadResidualUnit (weightsPath : String) (namePrefix : String) (dim dilation : Nat)
+    : IO (DecoderResidualUnit (device := device) (dtypes := dtypes) dim dilation) := do
   let act1Alpha ← loadFrozen (dtype := dtypes.compute.val) weightsPath s!"{namePrefix}.act1.alpha" #[dim]
   let act1Beta ← loadFrozen (dtype := dtypes.compute.val) weightsPath s!"{namePrefix}.act1.beta" #[dim]
   let conv1Weight ← loadFrozen (dtype := dtypes.compute.val) weightsPath s!"{namePrefix}.conv1.conv.weight" #[dim, dim, 7]
@@ -312,7 +311,6 @@ private def loadResidualUnit (weightsPath : String) (namePrefix : String) (dim :
   let conv2Weight ← loadFrozen (dtype := dtypes.compute.val) weightsPath s!"{namePrefix}.conv2.conv.weight" #[dim, dim, 1]
   let conv2Bias ← loadFrozen (dtype := dtypes.compute.val) weightsPath s!"{namePrefix}.conv2.conv.bias" #[dim]
   pure {
-    conv1Dilation := dilation
     act1Alpha
     act1Beta
     conv1Weight
@@ -449,13 +447,15 @@ private def causalConv1d {batch inC outC frames kernel : Nat}
     (weight : Tensor { shape := #[outC, inC, kernel], dtype := dtypes.compute.val, device := device })
     (bias : Tensor { shape := #[outC], dtype := dtypes.compute.val, device := device })
     (dilation : Nat := 1)
+    (hConv : 0 < kernel ∧ 0 < dilation := by decide)
     : Tensor { shape := #[batch, outC, frames], dtype := dtypes.compute.val, device := device } :=
   let leftPad : Nat := dilation * (kernel - 1)
   let left : Tensor { shape := #[batch, inC, leftPad], dtype := dtypes.compute.val, device := device } := Tensor.castLike x (Tensor.zeros #[batch, inC, leftPad] false x.device)
   let xPad : Tensor { shape := #[batch, inC, frames + leftPad], dtype := dtypes.compute.val, device := device } :=
     Tensor.reshape (Tensor.cat left x 2) #[batch, inC, frames + leftPad] (by simp [Nat.add_comm])
   let y0 : Tensor { shape := #[batch, outC, frames], dtype := dtypes.compute.val, device := device } :=
-    Tensor.reshape (Tensor.conv1d! xPad weight 1 0 dilation) #[batch, outC, frames]
+    Tensor.reshape (Tensor.conv1d xPad weight 1 0 dilation
+        ⟨by decide, hConv.2, hConv.1, by simp only [leftPad]; omega⟩) #[batch, outC, frames]
       (by simp only [leftPad]; congr 2; simp; omega)
   addBias3d y0 bias
 
@@ -464,25 +464,28 @@ private def causalDepthwiseConv1d {batch channels frames : Nat}
     (hf : 0 < frames)
     (weight : Tensor { shape := #[channels, 1, 7], dtype := dtypes.compute.val, device := device })
     (bias : Tensor { shape := #[channels], dtype := dtypes.compute.val, device := device })
+    (hc : 0 < channels := by decide)
     : Tensor { shape := #[batch, channels, frames], dtype := dtypes.compute.val, device := device } :=
   let left : Tensor { shape := #[batch, channels, 6], dtype := dtypes.compute.val, device := device } := Tensor.castLike x (Tensor.zeros #[batch, channels, 6] false x.device)
   let xPad : Tensor { shape := #[batch, channels, frames + 6], dtype := dtypes.compute.val, device := device } :=
     Tensor.reshape (Tensor.cat left x 2) #[batch, channels, frames + 6] (by simp [Nat.add_comm])
   let y : Tensor { shape := #[batch, channels, frames], dtype := dtypes.compute.val, device := device } :=
-    Tensor.reshape (Tensor.conv1dGroups! xPad weight bias 1 0 1 channels) #[batch, channels, frames]
+    Tensor.reshape (Tensor.conv1dGroups xPad weight bias 1 0 1 channels (by conv_valid)
+        ⟨hc, (Nat.one_mul _).symm, Nat.dvd_refl _⟩) #[batch, channels, frames]
       (by simp [Tensor.convExtent, Nat.sub_add_cancel hf])
   y
 
 private def causalTransConv1d {batch inC outC frames kernel stride rightPad : Nat}
     (x : Tensor { shape := #[batch, inC, frames], dtype := dtypes.compute.val, device := device })
-    (hk : 0 < kernel)
+    (hValid : 0 < kernel ∧ 0 < stride ∧ 0 < frames)
     (weight : Tensor { shape := #[inC, outC, kernel], dtype := dtypes.compute.val, device := device })
     (bias : Tensor { shape := #[outC], dtype := dtypes.compute.val, device := device })
     : Tensor { shape := #[batch, outC, ((frames - 1) * stride + kernel) - rightPad], dtype := dtypes.compute.val, device := device } :=
   let outLen : Nat := (frames - 1) * stride + kernel
   let y0 : Tensor { shape := #[batch, outC, outLen], dtype := dtypes.compute.val, device := device } :=
-    Tensor.reshape (Tensor.convTranspose1d! x weight bias stride 0 0 1) #[batch, outC, outLen]
-      (by simp only [outLen]; simp [Nat.add_assoc, Nat.sub_add_cancel hk])
+    Tensor.reshape (Tensor.convTranspose1d x weight bias stride 0 0 1
+        ⟨hValid.2.1, by decide, hValid.1, hValid.2.2, Or.inl hValid.2.1, by omega⟩) #[batch, outC, outLen]
+      (by simp only [outLen]; simp [Nat.add_assoc, Nat.sub_add_cancel hValid.1])
   Tensor.slice y0 2 0 (outLen - rightPad)
 
 private def snakeBeta {batch channels frames : Nat}
@@ -577,13 +580,14 @@ private def forwardPreTransformer {batch frames : Nat}
     let hOut : Tensor { shape := #[batch, frames, 1024], dtype := dtypes.compute.val, device := device } := Tensor.affine3d hNorm m.preTransformerOutputProj m.preTransformerOutputBias
     Tensor.reshape (Tensor.transpose hOut 1 2) #[batch, 1024, frames]
 
-private def forwardResidualUnit {batch frames dim : Nat}
-    (u : DecoderResidualUnit (device := device) (dtypes := dtypes) dim)
+private def forwardResidualUnit {batch frames dim dilation : Nat}
+    (u : DecoderResidualUnit (device := device) (dtypes := dtypes) dim dilation)
     (x : Tensor { shape := #[batch, dim, frames], dtype := dtypes.compute.val, device := device })
-    (hf : 0 < frames) : Tensor { shape := #[batch, dim, frames], dtype := dtypes.compute.val, device := device } :=
+    (hf : 0 < frames) (hd : 0 < dilation := by decide) :
+    Tensor { shape := #[batch, dim, frames], dtype := dtypes.compute.val, device := device } :=
   let residual := x
   let h1 := snakeBeta x u.act1Alpha u.act1Beta
-  let h2 := causalConv1d h1 hf u.conv1Weight u.conv1Bias u.conv1Dilation
+  let h2 := causalConv1d h1 hf u.conv1Weight u.conv1Bias dilation ⟨by decide, hd⟩
   let h3 := snakeBeta h2 u.act2Alpha u.act2Beta
   let h4 := causalConv1d h3 hf u.conv2Weight u.conv2Bias
   Tensor.add residual h4
@@ -596,7 +600,7 @@ private def forwardDecoderBlock {batch frames inDim outDim upRate : Nat}
   let h1 : Tensor { shape := #[batch, outDim, frames * upRate], dtype := dtypes.compute.val, device := device } :=
     Tensor.reshape (causalTransConv1d (batch := batch) (inC := inDim) (outC := outDim)
       (frames := frames) (kernel := 2 * upRate) (stride := upRate) (rightPad := upRate)
-      h0 (by omega) blk.transWeight blk.transBias) #[batch, outDim, frames * upRate]
+      h0 ⟨by omega, hu, hf⟩ blk.transWeight blk.transBias) #[batch, outDim, frames * upRate]
       (by congr 2; obtain ⟨g, rfl⟩ : ∃ g, frames = g + 1 := ⟨frames - 1, by omega⟩; simp [Nat.add_mul]; omega)
   have hOut : 0 < frames * upRate := Nat.mul_pos hf hu
   let h2 := forwardResidualUnit blk.res1 h1 hOut
@@ -610,7 +614,7 @@ private def forwardUpsampleStage {batch frames : Nat}
   let h0 : Tensor { shape := #[batch, 1024, frames * 2], dtype := dtypes.compute.val, device := device } :=
     Tensor.reshape (causalTransConv1d (batch := batch) (inC := 1024) (outC := 1024)
       (frames := frames) (kernel := 2) (stride := 2) (rightPad := 0)
-      x (by decide) stage.transConvWeight stage.transConvBias) #[batch, 1024, frames * 2]
+      x ⟨by decide, by decide, hf⟩ stage.transConvWeight stage.transConvBias) #[batch, 1024, frames * 2]
       (by simp; rw [show (frames - 1) * 2 + 2 = frames * 2 by omega])
   forwardConvNeXt stage.convNeXt h0 (by omega)
 

@@ -33,14 +33,6 @@ abbrev TalkerLayer (cfg : TalkerConfig) (dtype : RealFloatingDType := float32DTy
 abbrev CodePredictorLayer (cfg : TalkerCodePredictorConfig) (dtype : RealFloatingDType := float32DType) :=
   qwen.QwenLayer (device := device) cfg.hiddenSize cfg.numAttentionHeads cfg.numKeyValueHeads cfg.headDim cfg.intermediateSize dtype.val
 
-private def getOrFirst! [Nonempty α] (xs : Array α) (i : Nat) : α :=
-  match xs[i]? with
-  | some x => x
-  | none =>
-    match xs[0]? with
-    | some x => x
-    | none => nativeInvariantFailure "Qwen3TTS talker: empty array"
-
 private def optAtOr (vals : Option (Array α)) (idx : Nat) (fallback : α) : α :=
   (vals >>= fun xs => xs[idx]?).getD fallback
 
@@ -159,12 +151,12 @@ end TalkerModel
 
 /-- Sub-talker model that predicts residual codec groups. -/
 structure TalkerCodePredictor (cfg : TalkerConfig) (dtype : RealFloatingDType := float32DType) where
-  inputEmbeddings : Array (Tensor { shape := #[cfg.codePredictorConfig.vocabSize, cfg.hiddenSize], dtype := dtype.val, device := device })
+  inputEmbeddings : Vector (cfg.numCodeGroups - 1) (Tensor { shape := #[cfg.codePredictorConfig.vocabSize, cfg.hiddenSize], dtype := dtype.val, device := device })
   inputProjection : Tensor { shape := #[cfg.codePredictorConfig.hiddenSize, cfg.hiddenSize], dtype := dtype.val, device := device }
   inputProjectionBias : Tensor { shape := #[cfg.codePredictorConfig.hiddenSize], dtype := dtype.val, device := device }
   layers : Array (CodePredictorLayer (dtype := dtype) (device := device) cfg.codePredictorConfig)
   norm : RMSNorm (device := device) cfg.codePredictorConfig.hiddenSize dtype.val
-  lmHeads : Array (Tensor { shape := #[cfg.codePredictorConfig.vocabSize, cfg.codePredictorConfig.hiddenSize], dtype := dtype.val, device := device })
+  lmHeads : Vector (cfg.numCodeGroups - 1) (Tensor { shape := #[cfg.codePredictorConfig.vocabSize, cfg.codePredictorConfig.hiddenSize], dtype := dtype.val, device := device })
   deriving TensorStruct
 
 namespace TalkerCodePredictor
@@ -172,10 +164,9 @@ namespace TalkerCodePredictor
 def init (cfg : TalkerConfig) (device : Device := .CPU) (dtype : RealFloatingDType := float32DType) : IO (TalkerCodePredictor (dtype := dtype) (device := device) cfg) := do
   let numCodebooks := cfg.numCodeGroups - 1
 
-  let mut inputEmbeddings : Array (Tensor { shape := #[cfg.codePredictorConfig.vocabSize, cfg.hiddenSize], dtype := dtype.val, device := device }) := #[]
-  for _ in [:numCodebooks] do
-    let emb ← initWeight (device := device) #[cfg.codePredictorConfig.vocabSize, cfg.hiddenSize] cfg.hiddenSize
-    inputEmbeddings := inputEmbeddings.push emb
+  let codebooks : Vector numCodebooks Nat := ⟨Array.range numCodebooks, Array.size_range⟩
+  let inputEmbeddings ← codebooks.mapM fun _ =>
+    initWeight (device := device) #[cfg.codePredictorConfig.vocabSize, cfg.hiddenSize] cfg.hiddenSize
 
   let inputProjection ← initWeight (device := device)
     #[cfg.codePredictorConfig.hiddenSize, cfg.hiddenSize]
@@ -195,12 +186,10 @@ def init (cfg : TalkerConfig) (device : Device := .CPU) (dtype : RealFloatingDTy
 
   let norm ← RMSNorm.init (device := device) cfg.codePredictorConfig.hiddenSize cfg.codePredictorConfig.rmsNormEps dtype.val
 
-  let mut lmHeads : Array (Tensor { shape := #[cfg.codePredictorConfig.vocabSize, cfg.codePredictorConfig.hiddenSize], dtype := dtype.val, device := device }) := #[]
-  for _ in [:numCodebooks] do
-    let head ← initWeight (device := device)
+  let lmHeads ← codebooks.mapM fun _ =>
+    initWeight (device := device)
       #[cfg.codePredictorConfig.vocabSize, cfg.codePredictorConfig.hiddenSize]
       cfg.codePredictorConfig.hiddenSize
-    lmHeads := lmHeads.push head
 
   pure {
     inputEmbeddings
@@ -213,8 +202,8 @@ def init (cfg : TalkerConfig) (device : Device := .CPU) (dtype : RealFloatingDTy
 
 /-- Embed tokens for a specific residual codebook group. -/
 def embedGroupTokens {batch seq : Nat} (m : TalkerCodePredictor (dtype := dtype) (device := device) cfg)
-    (groupIdx : Nat) (tokenIds : Tensor { shape := #[batch, seq], dtype := .Int64, device := device }) : Tensor { shape := #[batch, seq, cfg.hiddenSize], dtype := dtype.val, device := device } :=
-  let emb := getOrFirst! m.inputEmbeddings groupIdx
+    (groupIdx : Fin (cfg.numCodeGroups - 1)) (tokenIds : Tensor { shape := #[batch, seq], dtype := .Int64, device := device }) : Tensor { shape := #[batch, seq, cfg.hiddenSize], dtype := dtype.val, device := device } :=
+  let emb := m.inputEmbeddings.get groupIdx
   Tensor.embedding tokenIds emb
 
 /-- Project talker hidden state to sub-talker hidden size. -/
@@ -249,10 +238,10 @@ def forwardHidden {batch seq : Nat} (cfg : TalkerConfig)
 
 /-- Compute logits for one residual codebook group. -/
 def logitsForGroup {batch seq : Nat} (m : TalkerCodePredictor (dtype := dtype) (device := device) cfg)
-    (groupIdx : Nat)
+    (groupIdx : Fin (cfg.numCodeGroups - 1))
     (hidden : Tensor { shape := #[batch, seq, cfg.codePredictorConfig.hiddenSize], dtype := dtype.val, device := device })
     : Tensor { shape := #[batch, seq, cfg.codePredictorConfig.vocabSize], dtype := dtype.val, device := device } :=
-  let head := getOrFirst! m.lmHeads groupIdx
+  let head := m.lmHeads.get groupIdx
   Tensor.linear3d hidden head
 
 end TalkerCodePredictor
@@ -471,7 +460,7 @@ private def generateFrameFromLastHidden {batch : Nat} (cfg : TalkerConfig)
     let mut cpCaches := cpCaches1
 
     for hg : g in [:residualGroups] do
-      let cpLogits3 := TalkerCodePredictor.logitsForGroup m.codePredictor g cpHiddenCur
+      let cpLogits3 := TalkerCodePredictor.logitsForGroup m.codePredictor ⟨g, hg.upper⟩ cpHiddenCur
       let cpLogits : Tensor { shape := #[batch, cpCfg.vocabSize], dtype := dtype.val, device := device } := Tensor.reshape cpLogits3 #[batch, cpCfg.vocabSize]
 
       let gTemp : Float := optAtOr subtalkerTemperaturesByGroup g subtalkerTemperature
@@ -481,7 +470,7 @@ private def generateFrameFromLastHidden {batch : Nat} (cfg : TalkerConfig)
       let nextCode2d : Tensor { shape := #[batch, 1], dtype := .Int64, device := device } := Tensor.reshape nextCode #[batch, 1]
       tokenCols := tokenCols.push nextCode2d
 
-      let nextEmb := TalkerCodePredictor.embedGroupTokens m.codePredictor g nextCode2d
+      let nextEmb := TalkerCodePredictor.embedGroupTokens m.codePredictor ⟨g, hg.upper⟩ nextCode2d
       summedEmb := Tensor.add summedEmb nextEmb
 
       if g + 1 < residualGroups then

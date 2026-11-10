@@ -180,7 +180,7 @@ private def expertWeights
     let downW : Tensor { dtype := .BFloat16, device := device, shape := #[cfg.hidden_size, cfg.moe_intermediate_size] } :=
       Tensor.reshape (← dequantExpertSlice (inFeatures := cfg.moe_intermediate_size) m.experts.downPacked.2 m.experts.downScale.2 m.experts.downGlobal.2
         e) #[cfg.hidden_size, cfg.moe_intermediate_size]
-    pure (Tensor.ofRaw! "expertWeights" gateW.raw, Tensor.ofRaw! "expertWeights" upW.raw, Tensor.ofRaw! "expertWeights" downW.raw)
+    pure (gateW.castDType dtype, upW.castDType dtype, downW.castDType dtype)
 
 /-- Batched single-token decode path. For one token the k router-selected
     experts are distinct, so the k expert triples can be gathered and
@@ -209,7 +209,7 @@ private def forwardDecode1
   let useFusedKernel : Bool :=
     useFused && m.denseExperts.isNone && h % 32 == 0 && mi % 32 == 0 &&
     (match x.device.kind with | .CUDA _ => true | _ => false) &&
-    x.actualSpec.dtype == .BFloat16 &&
+    dtype == .BFloat16 &&
     -- Only real NVFP4 storage uses the fused path. Random-init stand-ins
     -- retain their independent Int64 bytes and Float32 scale indices.
     m.experts.gatePacked.2.actualSpec.dtype == .UInt8 && m.experts.upPacked.2.actualSpec.dtype == .UInt8 &&
@@ -225,7 +225,7 @@ private def forwardDecode1
         m.experts.upPacked.2 m.experts.upScale.2 m.experts.upGlobal.2
         m.experts.downPacked.2 m.experts.downScale.2 m.experts.downGlobal.2
         E mi h
-      pure (Tensor.ofRaw! "forwardDecode1" fused.raw)
+      pure (fused.castDType dtype)
     else do
       let hitT : Tensor { device := device, shape := #[k], dtype := .Int64 } := Tensor.reshape flatIdx #[k]
       let (gateW, upW, downW) ← do
@@ -248,7 +248,7 @@ private def forwardDecode1
           let g ← nvfp4.dequantBank gp gs gg k mi h
           let u ← nvfp4.dequantBank up us ug k mi h
           let d ← nvfp4.dequantBank dp ds dg k h mi
-          pure (Tensor.ofRaw! "forwardDecode1" g.raw, Tensor.ofRaw! "forwardDecode1" u.raw, Tensor.ofRaw! "forwardDecode1" d.raw)
+          pure (g.castDType dtype, u.castDType dtype, d.castDType dtype)
       -- Batched SwiGLU: [k,1,h] @ Wᵀ per projection.
       let x3 : Tensor { dtype := dtype, device := device, shape := #[k, 1, h] } := Tensor.reshape (Tensor.broadcastTo (Tensor.reshape x #[1, 1, h]) #[k, 1, h]) #[k, 1, h]
       let g : Tensor { dtype := dtype, device := device, shape := #[k, 1, mi] } := Tensor.bmm x3 (transposeMatrixBatch gateW)
@@ -291,7 +291,7 @@ def forward2d {tokens : Nat}
     let fusedAvailable : Bool :=
       useFused && m.denseExperts.isNone && h % 32 == 0 && mi % 32 == 0 &&
       (match device.kind with | .CUDA _ => true | _ => false) &&
-      x.actualSpec.dtype == .BFloat16 &&
+      dtype == .BFloat16 &&
       m.experts.gatePacked.2.actualSpec.dtype == .UInt8 && m.experts.upPacked.2.actualSpec.dtype == .UInt8 &&
       m.experts.downPacked.2.actualSpec.dtype == .UInt8
     if fusedAvailable then do
@@ -304,7 +304,7 @@ def forward2d {tokens : Nat}
         m.experts.upPacked.2 m.experts.upScale.2 m.experts.upGlobal.2
         m.experts.downPacked.2 m.experts.downScale.2 m.experts.downGlobal.2
         cfg.num_experts mi h
-      let routed : Tensor { dtype := dtype, device := device, shape := #[tokens, cfg.hidden_size] } := Tensor.ofRaw! "forward2d" routedBF16.raw
+      let routed : Tensor { dtype := dtype, device := device, shape := #[tokens, cfg.hidden_size] } := routedBF16.castDType dtype
       -- Dense shared expert (SwiGLU MLP, no gating score).
       let sharedH : Tensor { dtype := dtype, device := device, shape := #[tokens, cfg.shared_expert_intermediate_size] } :=
         mulSame (Tensor.silu (Tensor.linear x m.sharedGateProj)) (Tensor.linear x m.sharedUpProj)
