@@ -3650,18 +3650,6 @@ lean_object* lean_torch_scatter_2d(
   return fromTorchTensor(result_);
 }
 
-// Einsum with 2 tensors (common case)
-lean_object* lean_torch_einsum2(
-    lean_obj_arg equation, b_lean_obj_arg a, b_lean_obj_arg b) {
-  OwnedLeanObject equation_owner(equation, lean_dec);
-  auto eq_str = std::string(lean_string_cstr(equation));
-  equation_owner.reset();
-  auto a_ = borrowTensor(a);
-  auto b_ = borrowTensor(b);
-  auto result_ = torch::einsum(eq_str, {a_, b_});
-  return fromTorchTensor(result_);
-}
-
 // Interpolate to target size
 lean_object* lean_torch_interpolate(b_lean_obj_arg input,
     lean_obj_arg size, lean_obj_arg mode, uint8_t align_corners) {

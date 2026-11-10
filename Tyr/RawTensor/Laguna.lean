@@ -12,8 +12,6 @@ opaque lagunaMoeFp4Forward
     (downPacked : @& RawTensor) (downScale : @& RawTensor) (downGlobal : @& RawTensor)
     (numExperts : @& Nat) (moeInt : @& Nat) (hidden : @& Nat) : IO RawTensor
 
-@[extern "lean_torch_bmm"] opaque lagunaBmm
-    (input mat2 : @& RawTensor) : RawTensor
 @[extern "lean_torch_scatter_add"] opaque lagunaScatterAdd
     (input : @& RawTensor) (dim : @& Nat) (indices src : @& RawTensor) : RawTensor
 

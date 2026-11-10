@@ -34,9 +34,7 @@ private def linear2d {tokens in_dim out_dim : Nat}
     (w : Tensor { device := device, shape := #[out_dim, in_dim], dtype := dtype })
     (b : Tensor { device := device, shape := #[out_dim], dtype := dtype })
     : Tensor { device := device, shape := #[tokens, out_dim], dtype := dtype } :=
-  let yDyn : Tensor { device := device, shape := #[tokens, out_dim], dtype := dtype } := einsum! "oh,th->to" w x
-  let y : Tensor { device := device, shape := #[tokens, out_dim], dtype := dtype } := Tensor.reshape yDyn #[tokens, out_dim]
-  addBias2d y b
+  addBias2d (Tensor.linear x w) b
 
 private def allInSet (xs : Array UInt64) (allow : Array tokenizer.TokenId) : Bool :=
   xs.all (fun x => allow.any (·.toUInt64 == x))

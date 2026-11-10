@@ -134,7 +134,7 @@ private def runCase (path : String) (device : Device) : IO Unit := do
 
   -- Router unit check: selected expert SETS match (order-insensitive via
   -- descending sort), routing-weight multisets match within tolerance.
-  let (idx, w) ← block.router.route testCfg xD
+  let (idx, w) ← block.router.route testCfg (by decide) xD
   let (sortedGot, _) := Tensor.topKLast2d idx 2
   let (sortedExp, _) := Tensor.topKLast2d! (idxExp.2.to device) 2
   let gotIds ← Tensor.toUInt64Array sortedGot.toInt64
@@ -148,7 +148,7 @@ private def runCase (path : String) (device : Device) : IO Unit := do
   check (wAbs <= 0.02) s!"router [{lbl}] weights maxAbs={wAbs} <= 0.02"
 
   -- Full MoE block forward: eager path (strict vs fixture, same op order),
-  let y ← block.forward2d testCfg xD false
+  let y ← block.forward2d testCfg (by decide) xD false
   let (maxAbs, maxRel) ← maxErrors y (yExp.2.to device)
   let viol ← countViolations y (yExp.2.to device) 0.02 0.05
   IO.println s!"  forward2d(eager) [{lbl}]: maxAbs={maxAbs} maxRel={maxRel} violations={viol}"
@@ -157,7 +157,7 @@ private def runCase (path : String) (device : Device) : IO Unit := do
   -- rounding; kernel-validated tolerance, see Tests/RunLagunaFused.lean).
   let onCuda := match device.kind with | .CUDA _ => true | _ => false
   if onCuda then do
-    let yF ← block.forward2d testCfg xD
+    let yF ← block.forward2d testCfg (by decide) xD
     let (fAbs, _) ← maxErrors yF (yExp.2.to device)
     let violF ← countViolations yF (yExp.2.to device) 0.02 0.5
     IO.println s!"  forward2d(fused) [{lbl}]: maxAbs={fAbs} violations={violF}"

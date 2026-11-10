@@ -152,9 +152,8 @@ def forward {tokens : Nat}
     Tensor.broadcastTo (Tensor.reshape m.scale #[1, cfg.hidden_size]) #[tokens, cfg.hidden_size]
   let normed : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := .Float32 } :=
     Tensor.mulScalar (Tensor.mul (floatDynamic normed) scale) scaleRoot
-  let logitsDyn : Tensor { device := device, shape := #[tokens, cfg.num_experts], dtype := .Float32 } := einsum! "eh,th->te" m.proj normed
-  let logits : Tensor { device := device, shape := #[tokens, cfg.num_experts], dtype := .Float32 } := Tensor.reshape logitsDyn #[tokens, cfg.num_experts]
-  let probs : Tensor { device := device, shape := #[tokens, cfg.num_experts], dtype := .Float32 } := Tensor.softmax logits
+  let probs : Tensor { device := device, shape := #[tokens, cfg.num_experts], dtype := .Float32 } :=
+    Tensor.softmax (Tensor.linear normed m.proj)
   let (topValsRaw, topIdx) := Tensor.topKLast2d probs cfg.top_k_experts cfg.topKValid
   let denom : Tensor { device := device, shape := #[tokens, 1], dtype := .Float32 } := Tensor.sumDim topValsRaw 1 true
   let denom : Tensor { device := device, shape := #[tokens, cfg.top_k_experts], dtype := .Float32 } := Tensor.broadcastTo denom #[tokens, cfg.top_k_experts]

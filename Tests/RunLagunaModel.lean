@@ -268,13 +268,19 @@ private def baseIds : Array Int64 :=
 selected set even when differently sized BF16 matmuls perturb the scores.
 Only selection is stabilized: the distinct expert weights and input-dependent
 routing weights still participate in every cache comparison. -/
+private def mapMoeM {m : Type → Type} [Monad m] {cfg : Config} {b : Bool}
+    (f : LagunaSparseMoeBlock (device := device) (dtype := dtype) cfg → m (LagunaSparseMoeBlock (device := device) (dtype := dtype) cfg)) :
+    LagunaFfn (device := device) cfg dtype b → m (LagunaFfn (device := device) cfg dtype b)
+  | .moe block => .moe <$> f block
+  | .dense mlp => pure (.dense mlp)
+
 private def withStableRoutes (cfg : Config) (m : LagunaForCausalLM (device := device) cfg dtype) : LagunaForCausalLM (device := device) cfg dtype :=
   { m with model := { m.model with layers := m.model.layers.map fun layer =>
-      { layer with sparseMoe := layer.sparseMoe.map fun moe =>
+      { layer with ffn := Id.run <| mapMoeM (m := Id) (fun moe =>
           let bias : Tensor { shape := #[cfg.num_experts], device := device, dtype := .Float32 } := Tensor.reshape
             (Tensor.mulScalar (floatDynamic ((Tensor.arange cfg.num_experts).to moe.router.weight.2.device)) 2.0)
             #[cfg.num_experts]
-          { moe with router := { moe.router with eScoreCorrectionBias := some (bias.packDType) } } } } }
+          { moe with router := { moe.router with eScoreCorrectionBias := some (bias.packDType) } }) layer.ffn } } }
 
 /-- Materialize the original NVFP4 weights once, preserving their BF16
 rounding, then upcast the entire model. The oracle exercises the same MoE
@@ -282,7 +288,7 @@ weights and routing, including the single-token expert dispatch path. -/
 private def floatReference (cfg : Config) (m : LagunaForCausalLM (device := device) cfg dtype) : IO (LagunaForCausalLM (device := device) cfg .Float32) := do
   let m ← TensorStruct.castTo (LagunaForCausalLM (device := device) cfg .Float32) m
   let layers ← m.model.layers.mapM fun layer => do
-    let sparseMoe ← layer.sparseMoe.mapM fun moe => do
+    let ffn ← layer.ffn |> mapMoeM fun moe => do
       let p := moe.experts
       let gateProj ← nvfp4.dequantBank p.gatePacked.2 p.gateScale.2 p.gateGlobal.2
         cfg.num_experts cfg.moe_intermediate_size cfg.hidden_size
@@ -291,7 +297,7 @@ private def floatReference (cfg : Config) (m : LagunaForCausalLM (device := devi
       let downProj ← nvfp4.dequantBank p.downPacked.2 p.downScale.2 p.downGlobal.2
         cfg.num_experts cfg.hidden_size cfg.moe_intermediate_size
       pure { moe with denseExperts := some { gateProj := gateProj.toFloat32, upProj := upProj.toFloat32, downProj := downProj.toFloat32 } }
-    pure { layer with sparseMoe }
+    pure { layer with ffn }
   pure { m with model := { m.model with layers } }
 
 private def runCacheParityModel {dtype : DType} [DType.RealFloating dtype]

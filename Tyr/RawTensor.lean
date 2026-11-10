@@ -90,6 +90,8 @@ The source shape is checked before conversion and never reshaped. -/
 
 @[extern "lean_torch_matmul3d_2d"] opaque matmul3d! (a b : @& RawTensor) : RawTensor
 
+@[extern "lean_torch_bmm"] opaque bmm! (a b : @& RawTensor) : RawTensor
+
 @[extern "lean_torch_bmm4d"] opaque bmm4d! (a b : @& RawTensor) : RawTensor
 
 @[extern "lean_torch_add_scalar"] opaque addScalar! (t : @& RawTensor) (value : Float) : RawTensor

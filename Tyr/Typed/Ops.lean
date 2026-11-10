@@ -595,6 +595,16 @@ def matmul3d {batch seq k n : Nat} {d : DType} {dev : Device} [DType.FloatingOrC
     Tensor ⟨#[batch, seq, n], d, dev⟩ :=
   matmul3d! a b
 
+def bmm! {b m k n : Nat} {d : DType} {dev : Device}
+    (a : Tensor ⟨#[b, m, k], d, dev⟩) (x : Tensor ⟨#[b, k, n], d, dev⟩) :
+    Tensor ⟨#[b, m, n], d, dev⟩ :=
+  Tensor.ofRaw! "bmm" (RawTensor.bmm! a.raw x.raw)
+
+def bmm {b m k n : Nat} {d : DType} {dev : Device} [DType.FloatingOrComplex d]
+    (a : Tensor ⟨#[b, m, k], d, dev⟩) (x : Tensor ⟨#[b, k, n], d, dev⟩) :
+    Tensor ⟨#[b, m, n], d, dev⟩ :=
+  bmm! a x
+
 def bmm4d! {b h m k n : Nat} {d : DType} {dev : Device}
     (a : Tensor ⟨#[b, h, m, k], d, dev⟩) (x : Tensor ⟨#[b, h, k, n], d, dev⟩) :
     Tensor ⟨#[b, h, m, n], d, dev⟩ :=
