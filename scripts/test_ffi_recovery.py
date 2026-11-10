@@ -39,6 +39,13 @@ class RecoveryTests(unittest.TestCase):
         self.native('return tyr::checkedCall("example", [&] { return run(); });')
         self.assertEqual(self.errors(), [])
 
+    def test_data_checked_guard_is_except_only(self):
+        self.declare("Except String RawTensor")
+        self.native('return tyr::dataCheckedCall("example", [&] { return run(); });')
+        self.assertEqual(self.errors(), [])
+        self.declare("IO RawTensor")
+        self.assertTrue(self.errors())
+
     def test_new_declaration_is_not_silently_omitted(self):
         self.write("Tyr/RawTensor/New.lean",
                    '@[extern "new_export"] private opaque fresh : IO Unit\n')

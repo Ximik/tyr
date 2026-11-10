@@ -257,7 +257,8 @@ rejects non-real or nonfinite outputs and checks that exponentiating the result
 reconstructs the input with a dtype-scaled relative tolerance. Defective or
 numerically unstable inputs can return an error even when a real logarithm
 exists; this is a solver limitation, not a restriction to positive definite
-matrices. Use the checked variant when those numerical failures must be handled.
+matrices. Because success depends on the values, there is no plain `matrixLog`;
+`matrixLog!` aborts on these failures.
 
 ## Device compatibility
 
@@ -306,8 +307,7 @@ Static promotion, domain, and shape evidence is separate from backend kernel
 availability. `relu?`, `sumDim?`, and `meanAll?` check their supported
 domains and valid reduction axes. `maxAll` requires an ordered dtype and a
 nonempty shape; `maxAll!` skips both checks, so libtorch rejects a violation and
-the process aborts through Tyr's fatal error report. `expand?`
-checks the requested broadcast, while `cat?` and `catMany?` validate placement
+the process aborts through Tyr's fatal error report. `cat?` and `catMany?` validate placement
 and the returned shape. These APIs and the arithmetic/matrix `?` families return
 native operation failures through `Except String`. Their pure convenience
 wrappers call `nativeInvariantFailure` on error: the native boundary prints a

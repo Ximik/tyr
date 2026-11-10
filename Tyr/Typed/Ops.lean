@@ -178,27 +178,18 @@ def matrixExp {n : Nat} {d : DType} {dev : Device}
     (t : Tensor ⟨#[n, n], d, dev⟩) : Tensor ⟨#[n, n], d, dev⟩ :=
   Tensor.ofRaw! "matrixExp" (RawTensor.matrixExp t.raw)
 
-/-- Checked real matrix logarithm. Dynamic dtypes are admitted only when their
-actual metadata is a standard real floating dtype. Native failures, non-real
-logarithms, and nonfinite results are reported as errors. The eigendecomposition
-solver also rejects results that fail exponential reconstruction, including
-unsupported defective or numerically unstable cases. -/
-def matrixLog? {n : Nat} {d : DType} {dev : Device}
-    (t : Tensor ⟨#[n, n], d, dev⟩) : Except String (Tensor ⟨#[n, n], d, dev⟩) := do
-  if !t.raw.dtype.isRealFloating then
-    throw s!"matrixLog requires a standard real floating dtype, got {t.raw.dtype}"
-  pure (Tensor.ofRaw! "matrixLog" (← RawTensor.matrixLogChecked t.raw))
-
-/-- Real matrix logarithm. Its static domain excludes complex and shell types;
-use `matrixLog?` for runtime-selected dtypes or recoverable numerical errors. -/
-def matrixLog {n : Nat} {d : DType} {dev : Device}
-    [DType.RealFloating d]
+/-- Real matrix logarithm without checks; a matrix that has none, or whose
+eigendecomposition does not reconstruct it, aborts. -/
+def matrixLog! {n : Nat} {d : DType} {dev : Device}
     (t : Tensor ⟨#[n, n], d, dev⟩) : Tensor ⟨#[n, n], d, dev⟩ :=
-  match matrixLog? t with
-  | .ok result => result
-  | .error message =>
-      letI : Inhabited (Tensor ⟨#[n, n], d, dev⟩) := ⟨t⟩
-      panic! s!"Tensor.matrixLog: {message}"
+  Tensor.ofRaw! "matrixLog" (RawTensor.matrixLog! t.raw)
+
+/-- Real matrix logarithm. Whether it exists depends on the values, so there is
+no plain variant: non-finite input, a matrix with no real logarithm, and a
+defective or ill-conditioned matrix are returned as errors. -/
+def matrixLog? {n : Nat} {d : DType} {dev : Device} [DType.RealFloating d]
+    (t : Tensor ⟨#[n, n], d, dev⟩) : Except String (Tensor ⟨#[n, n], d, dev⟩) := do
+  pure (Tensor.ofRaw! "matrixLog" (← RawTensor.matrixLog? t.raw))
 
 /-- Inverse of a square matrix. Native code reports singular input errors. -/
 def inv {n : Nat} {d : DType} {dev : Device}
@@ -235,22 +226,22 @@ def qrReduced {m n : Nat} {d : DType} {dev : Device}
   let (q, r) := RawTensor.qrReduced t.raw
   (Tensor.ofRaw! "qr.Q" q, Tensor.ofRaw! "qr.R" r)
 
+def svdReduced! {m n : Nat} {d : DType} {dev : Device}
+    (t : Tensor ⟨#[m, n], d, dev⟩) :
+    Tensor ⟨#[m, n], d, dev⟩ × Tensor ⟨#[n], d.realResult, dev⟩ × Tensor ⟨#[n, n], d, dev⟩ :=
+  let (u, s, vh) := RawTensor.svd! t.raw
+  (Tensor.ofRaw! "svdReduced" u, Tensor.ofRaw! "svdReduced" s, Tensor.ofRaw! "svdReduced" vh)
+
 /-- Reduced SVD of a tall or square matrix (`n ≤ m`). Singular values have
-the real component dtype; `U` and `Vh` retain the input dtype. Native dtype,
-backend, and factorization failures are recoverable. -/
-def svdReduced? {m n : Nat} {d : DType} {dev : Device}
+the real component dtype; `U` and `Vh` retain the input dtype. Convergence
+depends on the values, so there is no plain variant: a factorization that does
+not converge is returned as an error. -/
+def svdReduced? {m n : Nat} {d : DType} {dev : Device} [DType.FloatingOrComplex d]
     (t : Tensor ⟨#[m, n], d, dev⟩) (_tall : n ≤ m := by first | exact of_decide_eq_true rfl | omega | (simp <;> omega)) :
     Except String (Tensor ⟨#[m, n], d, dev⟩ × Tensor ⟨#[n], d.realResult, dev⟩ ×
       Tensor ⟨#[n, n], d, dev⟩) := do
-  let (u, s, vh) ← RawTensor.svdChecked t.raw
+  let (u, s, vh) ← RawTensor.svd? t.raw
   return (Tensor.ofRaw! "svdReduced" u, Tensor.ofRaw! "svdReduced" s, Tensor.ofRaw! "svdReduced" vh)
-
-def svdReduced {m n : Nat} {d : DType} {dev : Device}
-    (t : Tensor ⟨#[m, n], d, dev⟩) (_tall : n ≤ m := by first | exact of_decide_eq_true rfl | omega | (simp <;> omega)) :
-    Tensor ⟨#[m, n], d, dev⟩ × Tensor ⟨#[n], d.realResult, dev⟩ × Tensor ⟨#[n, n], d, dev⟩ :=
-  match svdReduced? t _tall with
-  | .ok result => result
-  | .error message => nativeInvariantFailure s!"Tensor.svdReduced: {message}"
 
 def svdvals! {n : Nat} {d : DType} {dev : Device}
     (t : Tensor ⟨#[n, n], d, dev⟩) : Tensor ⟨#[n], d.realResult, dev⟩ :=
@@ -701,15 +692,6 @@ def broadcastTo {σ : StaticSpec} (t : Tensor σ) (target : Shape)
     (_h : TensorSpec.broadcastsTo σ.shape target := by broadcast_shape) :
     Tensor (σ.withShape target) :=
   broadcastTo! t target
-
-/-- Metadata-checked `expand` view, for code generic over dimensions where the
-    `broadcastTo` proof cannot reduce (e.g. `#[batch, outDim]` with symbolic
-    dims). libtorch still validates the expansion at runtime. -/
-def expand? {σ : StaticSpec} (t : Tensor σ) (target : Shape) :
-    Except String (Tensor (σ.withShape target)) := do
-  if TensorSpec.broadcastShapes? σ.shape target != some target then
-    throw s!"Cannot expand shape {σ.shape} to {target}"
-  pure (Tensor.ofRaw! "expand" (← RawTensor.expandChecked t.raw target))
 
 /-! ## Reductions -/
 

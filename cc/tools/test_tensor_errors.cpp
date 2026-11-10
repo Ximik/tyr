@@ -206,16 +206,6 @@ void transposeScalar() {
   values(result.get(), 1, 5);
 }
 
-void checkedExpand(bool invalid) {
-  auto input = full({2}, 3);
-  Object target(shape({invalid ? 3u : 2u}), lean_dec);
-  Object result(CHECKED(lean_torch_expand)(input.get(), retain(target.get())), lean_dec);
-  if (invalid) exceptError(result.get(), "expand");
-  else values(exceptValue(result.get()), 2, 3);
-  require(target->m_rc == 1 && input->m_rc == 1,
-    "checked expand ownership imbalance");
-}
-
 void checkedCat(bool invalid) {
   auto first = full({2, 2}, 3), second = full({invalid ? 3u : 2u, 2}, 3);
   Object tensors(lean_alloc_array(2, 2), lean_dec);
@@ -283,8 +273,9 @@ void matrix(Binary operation) {
 void checkedEarlyFailure() {
   Object invalid(lean_mk_string("not a tensor"), lean_dec);
   Object target(shape({2}), lean_dec);
-  Object expanded(CHECKED(lean_torch_expand)(invalid.get(), retain(target.get())), lean_dec);
-  exceptError(expanded.get(), "borrowTensor");
+  Object cast(lean_torch_cast_dtype_checked(retain(target.get()), invalid.get(),
+    static_cast<uint8_t>(tyr::lean::DType::Float64)), lean_dec);
+  exceptError(cast.get(), "borrowTensor");
   require(invalid->m_rc == 1 && target->m_rc == 1,
     "checked early failure leaked owned parameters or changed borrowed argument");
 }
@@ -399,9 +390,6 @@ void rms() {
 
 #ifndef TYR_CHECKED_BASELINE
 void checkedLinalgFailures() {
-  Object input(lean_torch_full_int(shape({2, 2}), 3), lean_dec);
-  Object svd(lean_torch_svd_checked(input.get()), lean_dec);
-  exceptError(svd.get(), "svd");
   auto singular = full({2, 2}, 0);
   Object log(lean_torch_matrix_log_checked(singular.get()), lean_dec);
   exceptError(log.get(), "matrixLog");
@@ -463,8 +451,6 @@ int main() {
   run("dropout/success", dropoutSuccess);
   run("transpose/success", transpose);
   run("transpose/scalar-success", transposeScalar);
-  run("checked/expand-error", [] { checkedExpand(true); });
-  run("checked/expand-success", [] { checkedExpand(false); });
   run("checked/cat-error", [] { checkedCat(true); });
   run("checked/cat-success", [] { checkedCat(false); });
   run("checked/owned-arguments-early-error", checkedEarlyFailure);
