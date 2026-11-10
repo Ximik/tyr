@@ -97,10 +97,6 @@ def getBatchSize (step : Nat) : Nat :=
   else if step < 1000 then 16
   else 24
 
-/-- Get tokens per batch for a given iteration -/
-def getTokensPerBatch (step : Nat) (seqLen gradAccum worldSize : Nat) : Nat :=
-  getBatchSize step * seqLen * gradAccum * worldSize
-
 /-! ## Window Size Schedule -/
 
 /-- Get window sizes (short, long) for a given iteration.
@@ -117,11 +113,6 @@ def getWindowSizes (step : Nat) (_blockSize : Nat := 128) : (Nat × Nat) :=
   if step < 200 then (3, 3)
   else if step < 1000 then (3, 7)
   else (3, 11)
-
-/-- Get sequence length for a given iteration -/
-def getSeqLen (step : Nat) (blockSize : Nat := 128) : Nat :=
-  let (_, wsLong) := getWindowSizes step blockSize
-  wsLong * blockSize
 
 /-! ## Learning Rate Schedule -/
 
@@ -270,10 +261,6 @@ def OptimizerState.init (cfg : moddedGpt.Config) (params : ModdedGPTParams (devi
     weightDecay := weightDecay
   }
 
-/-- Get current learning rate from schedule -/
-def OptimizerState.currentLr (state : OptimizerState (device := device) cfg) (hp : Hyperparameters) : Float :=
-  getLearningRate state.step hp state.baseLr
-
 /-! ## Training Step -/
 
 /-- Result of a single training step -/
@@ -375,27 +362,6 @@ def trainStep {cfg : moddedGpt.Config} {batch seq : Nat}
   }
 
   return (newParams, newOptState, result)
-
-/-! ## Gradient Accumulation -/
-
-/-- Accumulate gradients over multiple micro-batches -/
-def accumulateGradients {cfg : moddedGpt.Config} {batch seq : Nat}
-    (params : ModdedGPTParams (device := device) cfg)
-    (yarn : YarnRotary (device := device) cfg.halfHeadDim cfg.maxSeqLen)
-    (hseq : seq ≤ cfg.maxSeqLen)
-    (batches : Array (Tensor { shape := #[batch, seq], dtype := .Int64, device := device } × Tensor { shape := #[batch, seq], dtype := .Int64, device := device }))
-    : IO Float := do
-  let mut totalLoss := 0.0
-  let numBatches := batches.size
-
-  for (input, target) in batches do
-    let lossT ← moddedGpt.loss params yarn input target hseq true
-    -- Scale loss for accumulation
-    let scaledLoss := Tensor.divScalar lossT numBatches.toFloat
-    Tensor.backwardLoss scaledLoss
-    totalLoss := totalLoss + Tensor.item lossT
-
-  return totalLoss / numBatches.toFloat
 
 /-! ## Validation -/
 
@@ -892,44 +858,6 @@ structure TrainState (cfg : moddedGpt.Config) where
   /-- Training start time -/
   startTime : UInt64
 
-/-- Initialize training state -/
-def TrainState.init (cfg : moddedGpt.Config) (dataConfig : DataLoader.Config)
-    (_distributed : Bool) (_worldSize : Nat)
-    (device : Device := Device.CPU)
-    (lr : Float := 0.023) (weightDecay : Float := 0.0)
-    : IO (TrainState (device := device) cfg) := do
-  let params ← ModdedGPTParams.init cfg (device := device)
-  let yarn ← YarnRotary.init cfg.halfHeadDim cfg.maxSeqLen cfg.ropeBase (device := device)
-
-  -- Initialize optimizer state from moved parameters so moment buffers match device
-  let optState := OptimizerState.init cfg params lr weightDecay
-
-  let dataGen ← DistributedDataGenerator.init dataConfig
-  let valData ←
-    match dataConfig.valPath with
-    | none => pure none
-    | some valPath =>
-      try
-        let shard ← loadValidationData valPath cfg.maxSeqLen dataConfig.bosToken
-        pure (some shard)
-      catch e =>
-        IO.eprintln s!"Warning: failed to load validation data from {valPath}: {e}"
-        pure none
-
-  let startTime ← IO.monoMsNow
-
-  return {
-    params := params
-    yarn := yarn
-    optState := optState
-    dataGen := dataGen
-    valData := valData
-    step := 0
-    bestValLoss := 1e30  -- Very large number instead of inf
-    totalTokens := 0
-    startTime := startTime.toUInt64
-  }
-
 /-- Log training progress -/
 def logProgress (state : TrainState (device := device) cfg) (result : StepResult)
     (hp : Hyperparameters) : IO Unit := do
@@ -1323,98 +1251,6 @@ def syncParameters {cfg : moddedGpt.Config} (params : ModdedGPTParams (device :=
     TensorStruct.makeLeafParams syncedParams
   else
     TensorStruct.makeLeafParams params
-
-/-- Read gradient snapshots and average them across initialized ranks.
-    The returned tree is passed directly to clipping and the optimizer. -/
-def syncGradients {cfg : moddedGpt.Config} (params : ModdedGPTParams (device := device) cfg) :
-    IO (ModdedGPTParams (device := device) cfg) := do
-  let grads ← TensorStruct.grads params
-  let isDistributed ← dist.isInitialized
-  if isDistributed then dist.allReduceGrads grads .avg else pure grads
-
-/-- Clip a gradient value without modifying its parameter's gradient accumulator. -/
-private def clipGradientValue {σ : StaticSpec} [DType.RealFloating σ.dtype] (gradient : Tensor σ) (maxNorm : Float) :
-    Tensor σ :=
-  let values := gradient.toFloat32
-  let norm := Float.sqrt (Tensor.sumAll (values * values)).item
-  if norm > maxNorm then
-    Tensor.mulScalar gradient (maxNorm / norm)
-  else gradient
-
-/-- Distributed training step with gradient synchronization.
-
-    This is the key integration point for multi-GPU training:
-    1. Each rank computes loss and gradients on its local batch
-    2. Gradients are all-reduced (averaged) across ranks
-    3. Each rank applies the same optimizer update
-    4. All ranks end up with identical parameters
-
-    This pattern is called Data Parallel (DP) training.
--/
-def trainStepDistributed {cfg : moddedGpt.Config} {batch seq : Nat}
-    (params : ModdedGPTParams (device := device) cfg)
-    (yarn : YarnRotary (device := device) cfg.halfHeadDim cfg.maxSeqLen)
-    (hseq : seq ≤ cfg.maxSeqLen)
-    (input : Tensor { shape := #[batch, seq], dtype := .Int64, device := device })
-    (target : Tensor { shape := #[batch, seq], dtype := .Int64, device := device })
-    (optState : OptimizerState (device := device) cfg)
-    (hp : Hyperparameters)
-    (gradClip : Float := 0.0)
-    : IO (ModdedGPTParams (device := device) cfg × OptimizerState (device := device) cfg × StepResult) := do
-  let startTime ← IO.monoMsNow
-
-  -- Check if distributed
-  let isDistributed ← dist.isInitialized
-  let worldSize ← if isDistributed then dist.getWorldSize else pure 1
-
-  -- Ensure parameters are trainable leaves before backprop.
-  let params ← TensorStruct.makeLeafParams params
-  TensorStruct.zeroGrads params
-
-  -- Forward pass (window pattern is in cfg)
-  let lossT ← moddedGpt.loss params yarn input target hseq true
-
-  -- Backward pass
-  Tensor.backwardLoss lossT
-
-  -- Get loss value for logging (before sync to avoid extra comm)
-  let lossVal := Tensor.item lossT
-
-  -- Synchronize the snapshots once and clip those exact values before updating.
-  let grads ← syncGradients params
-  let grads := if gradClip > 0 then
-    FloatingTensorStruct.map (fun gradient => clipGradientValue gradient gradClip) grads
-  else grads
-
-  -- Get current learning rate from schedule
-  let lr := getLearningRate optState.step hp optState.baseLr
-
-  -- Create optimizer with current LR
-  let opt := Optim.adamw (lr := lr) (weight_decay := optState.weightDecay)
-
-  -- Apply optimizer step
-  let (newParams, newAdamState) ← Optim.step opt params grads optState.adamState
-
-  let endTime ← IO.monoMsNow
-  let timeMs := (endTime - startTime).toFloat
-
-  -- Tokens processed = local batch * worldSize
-  let result : StepResult := {
-    loss := lossVal
-    gradNorm := 0.0  -- Could compute from grads if needed
-    tokensProcessed := batch * seq * worldSize
-    timeMs := timeMs
-  }
-
-  let newOptState : OptimizerState (device := device) cfg := {
-    adamState := newAdamState
-    dualState := optState.dualState
-    step := optState.step + 1
-    baseLr := optState.baseLr
-    weightDecay := optState.weightDecay
-  }
-
-  return (newParams, newOptState, result)
 
 /-- Distributed training state with sampler -/
 structure DistributedTrainState (cfg : moddedGpt.Config) extends TrainState (device := device) cfg where
