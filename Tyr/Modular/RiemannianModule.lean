@@ -61,8 +61,8 @@ private def splitLinearUpdate {inDim outDim : Nat} {d : DType} {dev : Device}
 namespace LocalLinearization
 
 private def rowAt {rows cols : Nat} {d : DType} {dev : Device}
-    (matrix : Tensor ⟨#[rows, cols], d, dev⟩) (idx : Nat) : Tensor ⟨#[cols], d, dev⟩ :=
-  Tensor.reshape (Tensor.slice! matrix 0 idx 1) #[cols]
+    (matrix : Tensor ⟨#[rows, cols], d, dev⟩) (idx : Fin rows) : Tensor ⟨#[cols], d, dev⟩ :=
+  Tensor.reshape (Tensor.slice matrix 0 idx 1) #[cols]
 
 private def mapRows {rows inDim outDim : Nat} {d : DType} {dev : Device}
     (matrix : Tensor ⟨#[rows, inDim], d, dev⟩)
@@ -70,8 +70,8 @@ private def mapRows {rows inDim outDim : Nat} {d : DType} {dev : Device}
     Tensor ⟨#[rows, outDim], d, dev⟩ :=
   let mapped : Array (Tensor ⟨#[outDim], d, dev⟩) := Id.run do
     let mut acc : Array (Tensor ⟨#[outDim], d, dev⟩) := #[]
-    for i in [:rows] do
-      acc := acc.push (f (rowAt matrix i))
+    for h : i in [:rows] do
+      acc := acc.push (f (rowAt matrix ⟨i, h.upper⟩))
     pure acc
   let stacked := Tensor.stack1d mapped
   Tensor.reshape stacked #[rows, outDim]

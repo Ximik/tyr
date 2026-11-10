@@ -138,9 +138,9 @@ structure QuantizerCodebook (dtypes : SpeechTokenizerDTypes := float32SpeechToke
   embeddingSum : Tensor { shape := #[2048, 256], dtype := dtypes.sum, device := device }
   deriving TensorStruct
 
-structure RVQDecode (dtypes : SpeechTokenizerDTypes := float32SpeechTokenizerDTypes) where
+structure RVQDecode (dtypes : SpeechTokenizerDTypes := float32SpeechTokenizerDTypes) (count : Nat) where
   outputProj : Tensor { shape := #[512, 256, 1], dtype := dtypes.compute.val, device := device }
-  codebooks : Array (QuantizerCodebook (device := device) (dtypes := dtypes))
+  codebooks : Vector count (QuantizerCodebook (device := device) (dtypes := dtypes))
   deriving TensorStruct
 
 structure DecoderTransformerLayer (dtypes : SpeechTokenizerDTypes := float32SpeechTokenizerDTypes) where
@@ -198,8 +198,8 @@ structure DecoderBlock (inDim outDim upRate : Nat) (dtypes : SpeechTokenizerDTyp
   deriving TensorStruct
 
 structure SpeechTokenizer12HzDecoder (dtypes : SpeechTokenizerDTypes := float32SpeechTokenizerDTypes) where
-  rvqFirst : (RVQDecode (device := device) (dtypes := dtypes))
-  rvqRest : (RVQDecode (device := device) (dtypes := dtypes))
+  rvqFirst : RVQDecode (device := device) (dtypes := dtypes) (count := 1)
+  rvqRest : RVQDecode (device := device) (dtypes := dtypes) (count := 15)
 
   preConvWeight : Tensor { shape := #[1024, 512, 3], dtype := dtypes.compute.val, device := device }
   preConvBias : Tensor { shape := #[1024], dtype := dtypes.compute.val, device := device }
@@ -238,12 +238,11 @@ private def loadCodebook (weightsPath : String) (namePrefix : String) : IO (Quan
   let embeddingSum ← loadFrozen (dtype := dtypes.sum) weightsPath s!"{namePrefix}.embedding_sum" #[2048, 256]
   pure { clusterUsage, embeddingSum }
 
-private def loadRVQ (weightsPath : String) (namePrefix : String) (nCodebooks : Nat) : IO (RVQDecode (device := device) (dtypes := dtypes)) := do
+private def loadRVQ (weightsPath : String) (namePrefix : String) (nCodebooks : Nat) : IO (RVQDecode (device := device) (dtypes := dtypes) (count := nCodebooks)) := do
   let outputProj ← loadFrozen (dtype := dtypes.compute.val) weightsPath s!"{namePrefix}.output_proj.weight" #[512, 256, 1]
-  let mut codebooks : Array (QuantizerCodebook (device := device) (dtypes := dtypes)) := #[]
-  for i in [:nCodebooks] do
-    let cb ← loadCodebook weightsPath s!"{namePrefix}.vq.layers.{i}._codebook"
-    codebooks := codebooks.push cb
+  let indices : Vector nCodebooks Nat := ⟨Array.range nCodebooks, Array.size_range⟩
+  let codebooks ← indices.mapM fun i =>
+    loadCodebook (device := device) (dtypes := dtypes) weightsPath s!"{namePrefix}.vq.layers.{i}._codebook"
   pure { outputProj, codebooks }
 
 private def loadTransformerLayer (weightsPath : String) (i : Nat) : IO (DecoderTransformerLayer (device := device) (dtypes := dtypes)) := do
@@ -418,21 +417,19 @@ private def decodeCodebook {batch frames : Nat}
   let q : Tensor { shape := #[batch, frames, 256], dtype := dtypes.compute.val, device := device } := Tensor.embedding codes embedding
   Tensor.reshape (Tensor.transpose q 1 2) #[batch, 256, frames]
 
-private def decodeRVQSlice {batch groups frames : Nat}
-    (rvq : (RVQDecode (device := device) (dtypes := dtypes)))
+private def decodeRVQSlice {batch groups frames count : Nat}
+    (rvq : RVQDecode (device := device) (dtypes := dtypes) (count := count))
     (codes : Tensor { shape := #[batch, groups, frames], dtype := .Int64, device := device })
-    (start : Nat) (hf : 0 < frames)
+    (start : Nat) (hf : 0 < frames) (hfit : start + count ≤ groups := by omega)
     : Tensor { shape := #[batch, 512, frames], dtype := dtypes.compute.val, device := device } :=
   Id.run do
     let mut quantized : Tensor { shape := #[batch, 256, frames], dtype := dtypes.compute.val, device := device } := Tensor.castLike rvq.outputProj (Tensor.zeros #[batch, 256, frames] false codes.device)
-    let mut off : Nat := 0
-    for cb in rvq.codebooks do
-      let idx := start + off
-      let code3 : Tensor { shape := #[batch, 1, frames], dtype := .Int64, device := device } := Tensor.slice! codes 1 idx 1
+    for h : k in [:count] do
+      let code3 : Tensor { shape := #[batch, 1, frames], dtype := .Int64, device := device } :=
+        Tensor.slice codes 1 (start + k) 1 (_bounds := by have := h.upper; simp at this ⊢; omega)
       let code2 : Tensor { shape := #[batch, frames], dtype := .Int64, device := device } := Tensor.reshape code3 #[batch, frames]
-      let q := decodeCodebook cb code2
+      let q := decodeCodebook (rvq.codebooks.get ⟨k, by have := h.upper; simpa using this⟩) code2
       quantized := Tensor.add quantized q
-      off := off + 1
     let out : Tensor { shape := #[batch, 512, frames], dtype := dtypes.compute.val, device := device } :=
       Tensor.reshape (Tensor.conv1d quantized rvq.outputProj 1 0 1) #[batch, 512, frames]
         (by simp [Nat.sub_add_cancel hf])
@@ -664,22 +661,26 @@ def decodeChunked {batch frames : Nat}
       let mut start : Nat := 0
       let mut chunks : Array (Sigma (fun shape => Tensor { shape := shape, dtype := dtypes.compute.val, device := device })) := #[]
       while start < frames do
-        let remaining := frames - start
-        let curChunk := if remaining < chunkSize then remaining else chunkSize
-        let context := if start < leftContextSize then start else leftContextSize
-        let chunkStart := start - context
-        let chunkFrames := context + curChunk
-        let codesChunk : Tensor { shape := #[batch, 16, chunkFrames], dtype := .Int64, device := device } := Tensor.slice! codes 2 chunkStart chunkFrames
-        -- `start < frames` and `chunkSize > 0` make the chunk nonempty.
-        if hChunk : 0 < chunkFrames then
-          let wavChunk : Tensor { shape := #[batch, 1, chunkFrames * 1920], dtype := dtypes.compute.val, device := device } := decode m codesChunk hChunk
-          let keepStart : Nat := context * 1920
-          let keepSamples : Nat := curChunk * 1920
-          let wavKeep : Tensor { shape := #[batch, 1, keepSamples], dtype := dtypes.compute.val, device := device } := Tensor.slice wavChunk 2 keepStart keepSamples
-          chunks := chunks.push wavKeep.packShape
-          start := start + curChunk
+        if hStart : start < frames then
+          let remaining := frames - start
+          let curChunk := if remaining < chunkSize then remaining else chunkSize
+          let context := if start < leftContextSize then start else leftContextSize
+          let chunkStart := start - context
+          let chunkFrames := context + curChunk
+          let codesChunk : Tensor { shape := #[batch, 16, chunkFrames], dtype := .Int64, device := device } := Tensor.slice codes 2 chunkStart chunkFrames
+            (_bounds := by simp only [chunkFrames, chunkStart, context, curChunk, remaining]; split <;> split <;> simp <;> omega)
+          -- `start < frames` and `chunkSize > 0` make the chunk nonempty.
+          if hChunk : 0 < chunkFrames then
+            let wavChunk : Tensor { shape := #[batch, 1, chunkFrames * 1920], dtype := dtypes.compute.val, device := device } := decode m codesChunk hChunk
+            let keepStart : Nat := context * 1920
+            let keepSamples : Nat := curChunk * 1920
+            let wavKeep : Tensor { shape := #[batch, 1, keepSamples], dtype := dtypes.compute.val, device := device } := Tensor.slice wavChunk 2 keepStart keepSamples
+            chunks := chunks.push wavKeep.packShape
+            start := start + curChunk
+          else
+            start := frames
         else
-          start := frames
+          break
       let wavDyn := Tensor.catMany! chunks 2 #[batch, 1, frames * 1920]
       Tensor.reshape wavDyn #[batch, 1, frames * 1920]
 
@@ -713,7 +714,7 @@ private def decodeOneStreamingChunk {batch : Nat}
     (force : Bool := false)
     : DecodeStreamState (device := device) batch × Option (Sigma fun samples => Tensor { shape := #[batch, 1, samples], dtype := dtypes.compute.val, device := device }) :=
   let remaining := st.totalFrames - st.emittedFrames
-  if remaining == 0 then
+  if hRem : remaining = 0 then
     (st, none)
   else if !force && remaining < st.chunkSize then
     (st, none)
@@ -724,7 +725,8 @@ private def decodeOneStreamingChunk {batch : Nat}
     let chunkStart := start - context
     let chunkFrames := context + curChunk
     let allCodes : Tensor { shape := #[batch, 16, st.totalFrames], dtype := .Int64, device := device } := Tensor.reshape st.codesDyn #[batch, 16, st.totalFrames]
-    let codesChunk : Tensor { shape := #[batch, 16, chunkFrames], dtype := .Int64, device := device } := Tensor.slice! allCodes 2 chunkStart chunkFrames
+    let codesChunk : Tensor { shape := #[batch, 16, chunkFrames], dtype := .Int64, device := device } := Tensor.slice allCodes 2 chunkStart chunkFrames
+      (_bounds := by simp only [chunkFrames, chunkStart, context, curChunk, start, remaining] at hRem ⊢; split <;> split <;> simp <;> omega)
     if hChunk : 0 < chunkFrames then
       let wavChunk : Tensor { shape := #[batch, 1, chunkFrames * 1920], dtype := dtypes.compute.val, device := device } := decode m codesChunk hChunk
       let keepStart : Nat := context * 1920

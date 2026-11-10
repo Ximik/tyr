@@ -83,9 +83,9 @@ private def documentTokens : Array UInt64 :=
 @[test] def testShuffleDeterminism : IO Unit := do
   let tokens : Tensor { shape := #[documentTokens.size], dtype := .Int64, device := .CPU } := (Tensor.fromInt64Array (documentTokens.map UInt64.toInt64)).reshape #[documentTokens.size]
   let finder ← BOSFinder.init tokens 0
-  let (a, _) ← (finder.shuffle 42).take tokens finder.dataLen
-  let (b, _) ← (finder.shuffle 42).take tokens finder.dataLen
-  let (c, _) ← (finder.shuffle 43).take tokens finder.dataLen
+  let (a, _) ← (finder.shuffle 42).take tokens documentTokens.size
+  let (b, _) ← (finder.shuffle 42).take tokens documentTokens.size
+  let (c, _) ← (finder.shuffle 43).take tokens documentTokens.size
   LeanTest.assertEqual (← readTokens a) (← readTokens b) "Same seed reproduces actual batches"
   LeanTest.assertTrue ((← readTokens a) != (← readTokens c)) "Different seeds change actual token order"
 

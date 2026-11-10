@@ -39,20 +39,6 @@ def init (max_seq half : Nat) (theta : Float := 10000.0) (device : Device := .CP
 
 end RoPECache
 
-/-- Apply rotary position embeddings to query/key tensors.
-    x: [batch, seq, n_head, 2 * half]
-    Returns: [batch, seq, n_head, 2 * half] with positions encoded -/
-def applyRoPE {batch seq n_head half max_seq : Nat}
-    (x : Tensor { device := device, shape := #[batch, seq, n_head, 2 * half], dtype := .Float32 })
-    (cache : RoPECache (device := device) max_seq half)
-    (start_pos : Nat := 0)
-    : Tensor { device := device, shape := #[batch, seq, n_head, 2 * half], dtype := .Float32 } :=
-  -- Slice cos/sin to current sequence length (runtime bounds, validated)
-  let cos := cache.cos.slice! 0 start_pos seq
-  let sin := cache.sin.slice! 0 start_pos seq
-  -- Apply rotation
-  applyRotaryEmb x cos sin
-
 /-- Pure typed frequency table used by full and cached decoding. -/
 def computeFreqsOnDevice (seq half : Nat) (theta : Float := 10000.0)
     (device : Device := .CPU) :

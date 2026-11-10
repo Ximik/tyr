@@ -537,24 +537,26 @@ private def clampUpper? (cap? : Option Float) (x : Float) : Float :=
   | none => x
 
 private def scalar3d {maxLen channels : Nat}
-    (x : Tensor { dtype, device := device, shape := #[1, maxLen, channels] }) (j k : Nat) : Float :=
-  let row : Tensor { dtype, device := device, shape := #[1, 1, channels] } := Tensor.slice! x 1 j 1
-  let cell : Tensor { dtype, device := device, shape := #[1, 1, 1] } := Tensor.slice! row 2 k 1
+    (x : Tensor { dtype, device := device, shape := #[1, maxLen, channels] }) (j : Fin maxLen) (k : Fin channels) : Float :=
+  let row : Tensor { dtype, device := device, shape := #[1, 1, channels] } :=
+    Tensor.slice x 1 j 1
+  let cell : Tensor { dtype, device := device, shape := #[1, 1, 1] } :=
+    Tensor.slice row 2 k 1
   Tensor.item (Tensor.reshape cell #[])
 
 private def scalar2d {maxLen : Nat}
-    (x : Tensor { dtype, device := device, shape := #[1, maxLen] }) (j : Nat) : Float :=
-  let cell : Tensor { dtype, device := device, shape := #[1, 1] } := Tensor.slice! x 1 j 1
+    (x : Tensor { dtype, device := device, shape := #[1, maxLen] }) (j : Fin maxLen) : Float :=
+  let cell : Tensor { dtype, device := device, shape := #[1, 1] } :=
+    Tensor.slice x 1 j 1
   Tensor.item (Tensor.reshape cell #[])
 
 private def packMoleculeStateForTransformer {maxLen vocab : Nat}
     (padToken : Int64)
     (t : Float)
     (state : BranchingState MoleculeAtom)
+    (_hn : state.state.size ≤ maxLen)
     (device : Device := Device.CPU) :
     IO (Tensor { dtype := .Float32, device := device, shape := #[1, maxLen, 3] } × Tensor { device := device, shape := #[1, maxLen], dtype := .Int64 } × Tensor { dtype := .Float32, device := device, shape := #[1] } × Tensor { device := device, shape := #[1, maxLen], dtype := .Int64 }) := do
-  if state.state.size > maxLen then
-    throw (IO.userError s!"molecule state length {state.state.size} exceeds transformer maxLen {maxLen}")
   let maxLenNat := maxLen
   let mut coordArr : Array Float := Array.replicate (maxLenNat * 3) 0.0
   let mut labelArr : Array Int64 := Array.replicate maxLenNat padToken
@@ -576,17 +578,14 @@ private def packMoleculeStateForTransformer {maxLen vocab : Nat}
   pure (coord.to device, label.to device, time.to device, padmask.to device)
 
 private def tensorVec3 {maxLen : Nat}
-    (coordPred : Tensor { dtype, device := device, shape := #[1, maxLen, 3] }) (j : Nat) : Vec3 :=
+    (coordPred : Tensor { dtype, device := device, shape := #[1, maxLen, 3] }) (j : Fin maxLen) : Vec3 :=
   { x := scalar3d coordPred j 0,
     y := scalar3d coordPred j 1,
     z := scalar3d coordPred j 2 }
 
 private def tensorLabelLogits {maxLen vocab : Nat}
-    (labelLogits : Tensor { dtype, device := device, shape := #[1, maxLen, vocab] }) (j : Nat) : Array Float := Id.run do
-  let mut out : Array Float := #[]
-  for k in [:vocab] do
-    out := out.push (scalar3d labelLogits j k)
-  out
+    (labelLogits : Tensor { dtype, device := device, shape := #[1, maxLen, vocab] }) (j : Fin maxLen) : Array Float :=
+  Array.ofFn (n := vocab) (scalar3d labelLogits j)
 
 def moleculeTransformerPrediction {maxLen vocab heads headDim mlp : Nat}
     (padToken : Int64)
@@ -598,17 +597,20 @@ def moleculeTransformerPrediction {maxLen vocab heads headDim mlp : Nat}
     :
     IO MoleculeModelPrediction := do
   let params := TensorStruct.detach params
+  let ⟨hn⟩ ← if h : state.state.size ≤ maxLen then pure (PLift.up h) else
+    throw (IO.userError s!"molecule state length {state.state.size} exceeds transformer maxLen {maxLen}")
   let (coord, label, time, padmask) ←
-    packMoleculeStateForTransformer (maxLen := maxLen) (vocab := vocab) padToken t state device
+    packMoleculeStateForTransformer (maxLen := maxLen) (vocab := vocab) padToken t state hn device
   let (coordPred, labelLogits, splitLogits, delLogits) ←
     MoleculeTransformerParams.forward (batch := 1) params (Tensor.castLike params.coordW coord) label (Tensor.castLike params.timeW time) padmask coordTargetCap?
   let n := state.state.size
   let canSplit := n < maxLen
-  let coordTargets := (Array.range n).map (fun j => tensorVec3 coordPred j)
-  let labelTargets := (Array.range n).map (fun j => tensorLabelLogits labelLogits j)
-  let splitTargets := (Array.range n).map (fun j =>
-    if canSplit then clampUpper? splitLogitCap? (scalar2d splitLogits j) else -100.0)
-  let delTargets := (Array.range n).map (fun j => scalar2d delLogits j)
+  let atom (j : Fin n) : Fin maxLen := ⟨j, Nat.lt_of_lt_of_le j.isLt hn⟩
+  let coordTargets := Array.ofFn (n := n) fun j => tensorVec3 coordPred (atom j)
+  let labelTargets := Array.ofFn (n := n) fun j => tensorLabelLogits labelLogits (atom j)
+  let splitTargets := Array.ofFn (n := n) fun j =>
+    if canSplit then clampUpper? splitLogitCap? (scalar2d splitLogits (atom j)) else -100.0
+  let delTargets := Array.ofFn (n := n) fun j => scalar2d delLogits (atom j)
   pure {
     coordTargets
     labelLogits := labelTargets
@@ -641,18 +643,21 @@ def fullMoleculeTransformerPrediction
     :
     IO MoleculeModelPrediction := do
   let params := TensorStruct.detach params
+  let ⟨hn⟩ ← if h : state.state.size ≤ maxLen then pure (PLift.up h) else
+    throw (IO.userError s!"molecule state length {state.state.size} exceeds transformer maxLen {maxLen}")
   let (coord, label, time, padmask) ←
-    packMoleculeStateForTransformer (maxLen := maxLen) (vocab := vocab) padToken t state device
+    packMoleculeStateForTransformer (maxLen := maxLen) (vocab := vocab) padToken t state hn device
   let (coordPred, labelLogits, splitLogits, delLogits) ←
     FullMoleculeTransformerParams.forward (batch := 1) params (Tensor.castLike params.coordRffW coord) label (Tensor.castLike params.timeW time) padmask
       (coordUpdateLayers := coordUpdateLayers) (coordTargetCap? := coordTargetCap?)
   let n := state.state.size
   let canSplit := n < maxLen
-  let coordTargets := (Array.range n).map (fun j => tensorVec3 coordPred j)
-  let labelTargets := (Array.range n).map (fun j => tensorLabelLogits labelLogits j)
-  let splitTargets := (Array.range n).map (fun j =>
-    if canSplit then clampUpper? splitLogitCap? (scalar2d splitLogits j) else -100.0)
-  let delTargets := (Array.range n).map (fun j => scalar2d delLogits j)
+  let atom (j : Fin n) : Fin maxLen := ⟨j, Nat.lt_of_lt_of_le j.isLt hn⟩
+  let coordTargets := Array.ofFn (n := n) fun j => tensorVec3 coordPred (atom j)
+  let labelTargets := Array.ofFn (n := n) fun j => tensorLabelLogits labelLogits (atom j)
+  let splitTargets := Array.ofFn (n := n) fun j =>
+    if canSplit then clampUpper? splitLogitCap? (scalar2d splitLogits (atom j)) else -100.0
+  let delTargets := Array.ofFn (n := n) fun j => scalar2d delLogits (atom j)
   pure {
     coordTargets
     labelLogits := labelTargets

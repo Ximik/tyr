@@ -120,11 +120,11 @@ def resolveShardPaths (pathSpec : String) (kind : ShardKind) : IO (Array String)
 
 /-! ## BOS Finder -/
 
-structure BOSFinder where
+/-- Document boundaries over a stream of `n` tokens. -/
+structure BOSFinder (n : Nat) where
   bosToken : UInt64
   bosPositions : Array Nat
   currentPos : Nat
-  dataLen : Nat
   /-- Source document starts in stream order; empty means source order. -/
   orderedStarts : Array Nat := #[]
   /-- Exclusive cumulative document ends in the reordered stream. -/
@@ -132,8 +132,7 @@ structure BOSFinder where
   deriving Repr
 
 def BOSFinder.init {n : Nat} (tokens : Tensor { shape := #[n], dtype := .Int64, device := device }) (bosToken : UInt64)
-    : IO BOSFinder := do
-  let dataLen := n
+    : IO (BOSFinder n) := do
   let ⟨_, positionsTensor⟩ ← Tensor.findTokenPositions tokens bosToken.toInt64
   let positions := (← positionsTensor.toUInt64Array).map (·.toNat)
   -- Preserve a prefix before the first BOS as a document fragment. Rank
@@ -143,26 +142,25 @@ def BOSFinder.init {n : Nat} (tokens : Tensor { shape := #[n], dtype := .Int64, 
     bosToken := bosToken
     bosPositions := positions
     currentPos := 0
-    dataLen := dataLen
   }
 
-def BOSFinder.findNextValidStart (finder : BOSFinder) (after : Nat) : Option Nat :=
+def BOSFinder.findNextValidStart {n : Nat} (finder : BOSFinder n) (after : Nat) : Option Nat :=
   finder.bosPositions.find? (· >= after)
 
 /-- Consume up to `count` real tokens in document order. Documents are packed
     across batch boundaries, never padded or repeated inside a shard.
     The result holds exactly `min count (remaining)` Int64 tokens. -/
-def BOSFinder.take (finder : BOSFinder) {n : Nat} (tokens : Tensor { shape := #[n], dtype := .Int64, device := device })
+def BOSFinder.take {n : Nat} (finder : BOSFinder n) (tokens : Tensor { shape := #[n], dtype := .Int64, device := device })
     (count : Nat)
-    : IO (Tensor { shape := #[min count (finder.dataLen - finder.currentPos)], dtype := .Int64, device := device } × BOSFinder) := do
-  if finder.currentPos > finder.dataLen then
+    : IO (Tensor { shape := #[min count (n - finder.currentPos)], dtype := .Int64, device := device } × BOSFinder n) := do
+  let ⟨hPos⟩ ← if h : finder.currentPos ≤ n then pure (PLift.up h) else
     throw <| IO.userError "Data cursor position exceeds shard length"
-  let count := min count (finder.dataLen - finder.currentPos)
+  let count := min count (n - finder.currentPos)
   if h : count = 0 then
-    return (tokens.slice! 0 0 0 |>.reshape #[count] (by simp [h]), finder)
+    return (tokens.slice 0 0 0 |>.reshape #[count] (by simp [h]), finder)
   let endPos := finder.currentPos + count
   if finder.orderedStarts.isEmpty then
-    return (tokens.slice! 0 finder.currentPos count,
+    return (tokens.slice 0 finder.currentPos count,
       { finder with currentPos := endPos })
   -- Binary search avoids rescanning every earlier document for each batch.
   let mut lo := 0
@@ -178,7 +176,9 @@ def BOSFinder.take (finder : BOSFinder) {n : Nat} (tokens : Tensor { shape := #[
     let docStart := if doc == 0 then 0 else finder.orderedEnds[doc - 1]!
     let sourceStart := finder.orderedStarts[doc]! + (pos - docStart)
     let len := min (endPos - pos) (docEnd - pos)
-    chunks := chunks.push (Tensor.packShape (tokens.slice! 0 sourceStart len))
+    let ⟨hSrc⟩ ← if h : sourceStart + len ≤ n then pure (PLift.up h) else
+      throw <| IO.userError s!"BOS document slice {sourceStart}+{len} exceeds shard length {n}"
+    chunks := chunks.push (Tensor.packShape (tokens.slice 0 sourceStart len))
     pos := pos + len
     doc := doc + 1
   -- Concatenating the document slices yields exactly `count` tokens.
@@ -187,19 +187,19 @@ def BOSFinder.take (finder : BOSFinder) {n : Nat} (tokens : Tensor { shape := #[
     | .error message => throw <| IO.userError s!"BOS document batch: {message}"
   return (chunk, { finder with currentPos := endPos })
 
-def BOSFinder.getBatch (finder : BOSFinder) {n : Nat} (tokens : Tensor { shape := #[n], dtype := .Int64, device := device })
+def BOSFinder.getBatch {n : Nat} (finder : BOSFinder n) (tokens : Tensor { shape := #[n], dtype := .Int64, device := device })
     (batchSize seqLen : Nat)
-    : IO (Option (Tensor { shape := #[batchSize, seqLen], dtype := .Int64, device := device }) × BOSFinder) := do
+    : IO (Option (Tensor { shape := #[batchSize, seqLen], dtype := .Int64, device := device }) × BOSFinder n) := do
   let ⟨requiredLen, hRequired⟩ ← checkedBatchTokens batchSize seqLen
-  if finder.currentPos > finder.dataLen then
+  if finder.currentPos > n then
     throw <| IO.userError "Data cursor position exceeds shard length"
-  if hFits : requiredLen ≤ finder.dataLen - finder.currentPos then
+  if hFits : requiredLen ≤ n - finder.currentPos then
     let (batch, finder) ← finder.take tokens requiredLen
     return (some (batch.reshape #[batchSize, seqLen] (by rw [Nat.min_eq_left hFits, hRequired]; simp)), finder)
   else
     return (none, finder)
 
-def BOSFinder.reset (finder : BOSFinder) : BOSFinder :=
+def BOSFinder.reset {n : Nat} (finder : BOSFinder n) : BOSFinder n :=
   { finder with currentPos := 0 }
 
 /-! ## Randomization Utilities -/
@@ -220,7 +220,7 @@ private def fisherYatesShuffle (arr : Array Nat) (seed : UInt64) : Array Nat := 
     result := result.set! j tmp
   return result
 
-def BOSFinder.shuffle (finder : BOSFinder) (seed : UInt64) : BOSFinder :=
+def BOSFinder.shuffle {n : Nat} (finder : BOSFinder n) (seed : UInt64) : BOSFinder n :=
   Id.run do
     let order := fisherYatesShuffle (List.range finder.bosPositions.size).toArray seed
     let mut starts := #[]
@@ -228,7 +228,7 @@ def BOSFinder.shuffle (finder : BOSFinder) (seed : UInt64) : BOSFinder :=
     let mut total := 0
     for idx in order do
       let start := finder.bosPositions[idx]!
-      let stop := finder.bosPositions.getD (idx + 1) finder.dataLen
+      let stop := finder.bosPositions.getD (idx + 1) n
       starts := starts.push start
       total := total + (stop - start)
       ends := ends.push total
@@ -240,7 +240,7 @@ def defaultShardSize : Nat := 1000000
 
 structure DataShard (n : Nat := defaultShardSize) where
   tokens : Tensor { shape := #[n], dtype := .Int64, device := .CPU }
-  bosFinder : BOSFinder
+  bosFinder : BOSFinder n
   shardIdx : Nat
   numShards : Nat
   deriving Repr
@@ -268,10 +268,9 @@ structure FinewebHeader where
 /-- Parse the leading modded-nanogpt header values (magic, version, tokenCount). -/
 def parseFinewebHeader? {n : Nat} (tokens : Tensor { shape := #[n], dtype := .Int64, device := device })
     : IO (Option FinewebHeader) := do
-  if n < 6 then
-    return none
+  let ⟨h6⟩ ← if h : 6 ≤ n then pure (PLift.up h) else return none
 
-  let hdr6 : Tensor { shape := #[6], dtype := .Int64, device := device } := tokens.slice! 0 0 6
+  let hdr6 : Tensor { shape := #[6], dtype := .Int64, device := device } := tokens.slice 0 0 6
   let vals ← hdr6.toUInt64Array
   if vals.size < 6 then
     return none
@@ -284,8 +283,7 @@ def parseFinewebHeader? {n : Nat} (tokens : Tensor { shape := #[n], dtype := .In
 /-- Split a tensor loaded from .bin into payload tokens, parsing fineweb header when present. -/
 def splitFinewebPayload {n : Nat} (tokens : Tensor { shape := #[n], dtype := .Int64, device := device })
     : IO (Σ m, Tensor { shape := #[m], dtype := .Int64, device := device }) := do
-  if n < finewebHeaderU16Words then
-    return ⟨n, tokens⟩
+  let ⟨hHeader⟩ ← if h : finewebHeaderU16Words ≤ n then pure (PLift.up h) else return ⟨n, tokens⟩
 
   let some header ← parseFinewebHeader? tokens
     | return ⟨n, tokens⟩
@@ -306,12 +304,13 @@ def splitFinewebPayload {n : Nat} (tokens : Tensor { shape := #[n], dtype := .In
     else
       min header.tokenCount payloadWords
 
-  let payload := tokens.slice! 0 finewebHeaderU16Words payloadCount
+  let payload := tokens.slice 0 finewebHeaderU16Words payloadCount
+    (_bounds := by simp only [payloadCount, payloadWords]; split <;> simp <;> omega)
   return ⟨payloadCount, payload⟩
 
 def DataShard.loadFromFile (path : String) (shardIdx numShards : Nat)
     (bosToken : UInt64) : IO (Σ n, DataShard n) := do
-  if numShards == 0 || shardIdx >= numShards then
+  let ⟨hIdx⟩ ← if h : shardIdx < numShards then pure (PLift.up h) else
     throw <| IO.userError "Invalid data-loader rank/world size"
   let rawTokensCount ← data.binFileTokenCount path
   let allTokens ← Tensor.loadU16Bin rawTokensCount path
@@ -320,7 +319,15 @@ def DataShard.loadFromFile (path : String) (shardIdx numShards : Nat)
   let startToken := tokensPerShard * shardIdx
   let endToken := if shardIdx == numShards - 1 then totalTokens else startToken + tokensPerShard
   let shardSize := endToken - startToken
-  let shardTokens := allTokens.slice! 0 startToken shardSize
+  have hFit : startToken + shardSize ≤ totalTokens := by
+    have hNext : totalTokens / numShards * (shardIdx + 1) ≤ totalTokens :=
+      Nat.le_trans (Nat.mul_le_mul_left _ hIdx) (Nat.div_mul_le_self totalTokens numShards)
+    rw [Nat.mul_succ] at hNext
+    simp only [shardSize, endToken, startToken, tokensPerShard]
+    generalize totalTokens / numShards * shardIdx = s at *
+    generalize totalTokens / numShards = q at *
+    split <;> omega
+  let shardTokens := allTokens.slice 0 startToken shardSize
   let bosFinder ← BOSFinder.init shardTokens bosToken
   return ⟨shardSize, { tokens := shardTokens, bosFinder, shardIdx, numShards }⟩
 
@@ -452,7 +459,7 @@ def DistributedDataGenerator.nextTokens (gen : DistributedDataGenerator) (count 
   let mut emptyFiles := 0
   while remaining > 0 do
     let iter := gen.iterator
-    let available := iter.shard.bosFinder.dataLen - iter.shard.bosFinder.currentPos
+    let available := iter.numTokens - iter.shard.bosFinder.currentPos
     let len := min remaining available
     if len > 0 then
       let (chunk, finder) ← iter.shard.bosFinder.take iter.shard.tokens len

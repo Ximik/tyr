@@ -14,8 +14,8 @@
   allocation dtype); the runtime-selected `Device` is retained in the result
   type. Appends and views share the cache's spec statically, and still
   re-check physical device/dtype at native boundaries. The sequence dimension of an attention view stays runtime
-  (`validLen` is a value, not a constant), so views are produced by
-  `Tensor.slice!`, whose result is admitted against its computed spec.
+  (`validLen` is a value, not a constant) and is checked against the capacity
+  before slicing.
 
   Appends return an updated cache in IO. Retaining an earlier cache or view
   preserves its values; callers thread the returned cache forward to observe
@@ -157,8 +157,7 @@ def LayerCache.append (lc : LayerCache batch maxSeqLen numKvHeads headDim dtype 
 /-- Slice the cache K and V tensors to cover positions `[0, validLen)`.
 
     Returns `(K_view, V_view)` of shape `[batch, numKvHeads, validLen, headDim]`,
-    with the runtime `validLen` recorded in the spec (produced by
-    `Tensor.slice!`), suitable to
+    with the runtime `validLen` recorded in the spec, suitable to
     pass directly to `tkMhaH100DecodeFwd` (which expects contiguous
     `[batch, numKvHeads, kv_seq, headDim]` and handles the tail mask when
     `validLen` is not a multiple of 64). -/
@@ -166,9 +165,10 @@ def LayerCache.attentionView (lc : LayerCache batch maxSeqLen numKvHeads headDim
     (validLen : Nat)
     : IO (Tensor ⟨#[batch, numKvHeads, validLen, headDim], dtype, device⟩
       × Tensor ⟨#[batch, numKvHeads, validLen, headDim], dtype, device⟩) := do
-  if validLen > maxSeqLen then throw <| IO.userError "KV cache view exceeds capacity"
-  return (Tensor.slice! lc.keys 2 0 validLen,
-    Tensor.slice! lc.values 2 0 validLen)
+  let ⟨hv⟩ ← if h : validLen ≤ maxSeqLen then pure (PLift.up h) else
+    throw <| IO.userError "KV cache view exceeds capacity"
+  return (Tensor.slice lc.keys 2 0 validLen,
+    Tensor.slice lc.values 2 0 validLen)
 
 /-- Remove a layer before updating it, using constant-time swaps and a pop. -/
 @[noinline] private def takeLayerForUpdate

@@ -46,6 +46,7 @@ def main (args : List String) : IO UInt32 := do
     let bundle ← Model.loadFromPretrained source (log := log)
     let ids := bundle.inputIdsFromPhonemes phonemes
     let seq := ids.size
+    let ⟨_hSeq⟩ ← if h : 0 < seq then pure (PLift.up h) else throw (IO.userError "no input ids")
     let modelDevice := bundle.model.bert.embeddings.wordEmbeddings.device
     let inputIdsCpu : Tensor { shape := #[1, seq], dtype := .Int64, device := .CPU } := Tensor.reshape (Tensor.fromInt64Array (ids.map (·.toInt64))) #[1, seq]
     let inputIds : Tensor { shape := #[1, seq], dtype := .Int64, device := modelDevice } := inputIdsCpu.to modelDevice
@@ -60,7 +61,7 @@ def main (args : List String) : IO UInt32 := do
     let dEn : Tensor { shape := #[1, bundle.cfg.hiddenDim, seq], dtype := .Float32, device := modelDevice } := Tensor.reshape (Tensor.transpose dEnSeq 1 2) #[1, bundle.cfg.hiddenDim, seq]
     IO.println s!"d_en_cf_shape={dEn.runtimeShape}"
     let predictorStyle : Tensor { shape := #[1, bundle.cfg.styleDim], dtype := .Float32, device := modelDevice } :=
-      sliceTensor refStyle 1 bundle.cfg.styleDim bundle.cfg.styleDim
+      Tensor.slice refStyle 1 bundle.cfg.styleDim bundle.cfg.styleDim (_bounds := by simp [KittenTTSConfig.fullStyleDim]; omega)
     let durEnc : Tensor { shape := #[1, bundle.cfg.hiddenDim + bundle.cfg.styleDim, seq], dtype := .Float32, device := modelDevice } :=
       bundle.model.predictor.durationEncoding dEn predictorStyle
     IO.println s!"duration_encoder_shape={durEnc.runtimeShape}"

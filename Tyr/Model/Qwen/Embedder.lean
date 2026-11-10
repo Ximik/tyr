@@ -71,10 +71,11 @@ private def catAlong {s : Shape} {d : DType} {dev : Device}
 def encode {batch seq : Nat} (cfg : QwenConfig) (max_seq : Nat)
     (embedder : QwenFluxEmbedder (device := device) cfg max_seq)
     (input_ids : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
+    (hseq : seq ≤ max_seq := by omega)
     : Tensor { device := device, shape := #[batch, seq, embedder.outputLayers.size * cfg.hidden_size], dtype := .Float32 } :=
   -- Slice RoPE cache to current sequence length
-  let cos := embedder.ropeCache.cos.slice! 0 0 seq
-  let sin := embedder.ropeCache.sin.slice! 0 0 seq
+  let cos := embedder.ropeCache.cos.slice 0 0 seq
+  let sin := embedder.ropeCache.sin.slice 0 0 seq
 
   -- Get hidden states from all layers
   let allHiddenStates := embedder.model.forwardWithHiddenStates cfg input_ids cos sin
@@ -99,10 +100,11 @@ def encodeMasked {batch seq : Nat} (cfg : QwenConfig) (max_seq : Nat)
     (embedder : QwenFluxEmbedder (device := device) cfg max_seq)
     (input_ids : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     (attn_mask : Tensor ⟨#[batch, seq], maskDtype, device⟩)
+    (hseq : seq ≤ max_seq := by omega)
     : Tensor { device := device, shape := #[batch, seq, embedder.outputLayers.size * cfg.hidden_size], dtype := .Float32 } :=
   -- Slice RoPE cache to current sequence length
-  let cos := embedder.ropeCache.cos.slice! 0 0 seq
-  let sin := embedder.ropeCache.sin.slice! 0 0 seq
+  let cos := embedder.ropeCache.cos.slice 0 0 seq
+  let sin := embedder.ropeCache.sin.slice 0 0 seq
 
   -- Get hidden states from all layers
   let allHiddenStates := embedder.model.forwardWithHiddenStatesMasked cfg input_ids cos sin attn_mask
