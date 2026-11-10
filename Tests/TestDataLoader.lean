@@ -64,7 +64,7 @@ private def documentTokens : Array UInt64 :=
 @[test] def testBosFinderInit : IO Unit := do
   let tokens : Tensor { shape := #[documentTokens.size], dtype := .Int64, device := .CPU } := (Tensor.fromInt64Array (documentTokens.map UInt64.toInt64)).reshape #[documentTokens.size]
   let finder ← BOSFinder.init tokens 0
-  LeanTest.assertEqual finder.bosPositions #[0, 2, 5, 9, 12, 15]
+  LeanTest.assertEqual (finder.bosPositions.map (·.val)) #[0, 2, 5, 9, 12, 15]
     "BOS boundaries include the initial partition fragment"
 
 @[test] def testDocumentAwareLoader : IO Unit := do

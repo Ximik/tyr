@@ -234,7 +234,9 @@ private def sampleNextToken {cfg : Config}
 
   let inputTensor := Tensor.fromInt64Array (context.map (·.toInt64))
   let inputReshaped := (inputTensor.reshape #[1, context.size]).to device
-  let logits ← moddedGpt.forward params yarn inputReshaped false
+  let ⟨hseq⟩ ← if h : context.size ≤ cfg.maxSeqLen then pure (PLift.up h) else
+    throw <| IO.userError s!"context of {context.size} tokens exceeds maxSeqLen {cfg.maxSeqLen}"
+  let logits ← moddedGpt.forward params yarn inputReshaped hseq false
 
   -- Keep the final time step, then view its logits as one sampling row.
   let lastLogits := Tensor.slice logits 1 (context.size - 1) 1

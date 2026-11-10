@@ -123,10 +123,10 @@ def resolveShardPaths (pathSpec : String) (kind : ShardKind) : IO (Array String)
 /-- Document boundaries over a stream of `n` tokens. -/
 structure BOSFinder (n : Nat) where
   bosToken : UInt64
-  bosPositions : Array Nat
+  bosPositions : Array (Fin n)
   currentPos : Nat
-  /-- Source document starts in stream order; empty means source order. -/
-  orderedStarts : Array Nat := #[]
+  /-- Source document spans (start, length) in stream order; empty means source order. -/
+  orderedDocs : Array { span : Nat × Nat // span.1 + span.2 ≤ n } := #[]
   /-- Exclusive cumulative document ends in the reordered stream. -/
   orderedEnds : Array Nat := #[]
   deriving Repr
@@ -134,10 +134,12 @@ structure BOSFinder (n : Nat) where
 def BOSFinder.init {n : Nat} (tokens : Tensor { shape := #[n], dtype := .Int64, device := device }) (bosToken : UInt64)
     : IO (BOSFinder n) := do
   let ⟨_, positionsTensor⟩ ← Tensor.findTokenPositions tokens bosToken.toInt64
-  let positions := (← positionsTensor.toUInt64Array).map (·.toNat)
+  let positions ← positionsTensor.toFinArray n
   -- Preserve a prefix before the first BOS as a document fragment. Rank
   -- partitions may begin inside a document; no tokens are discarded.
-  let positions := if positions[0]? == some 0 then positions else #[0] ++ positions
+  let positions :=
+    if positions[0]?.map (·.val) == some 0 then positions
+    else if h : 0 < n then #[⟨0, h⟩] ++ positions else positions
   return {
     bosToken := bosToken
     bosPositions := positions
@@ -145,7 +147,7 @@ def BOSFinder.init {n : Nat} (tokens : Tensor { shape := #[n], dtype := .Int64, 
   }
 
 def BOSFinder.findNextValidStart {n : Nat} (finder : BOSFinder n) (after : Nat) : Option Nat :=
-  finder.bosPositions.find? (· >= after)
+  (finder.bosPositions.find? (·.val >= after)).map (·.val)
 
 /-- Consume up to `count` real tokens in document order. Documents are packed
     across batch boundaries, never padded or repeated inside a shard.
@@ -159,7 +161,7 @@ def BOSFinder.take {n : Nat} (finder : BOSFinder n) (tokens : Tensor { shape := 
   if h : count = 0 then
     return (tokens.slice 0 0 0 |>.reshape #[count] (by simp [h]), finder)
   let endPos := finder.currentPos + count
-  if finder.orderedStarts.isEmpty then
+  if finder.orderedDocs.isEmpty then
     return (tokens.slice 0 finder.currentPos count,
       { finder with currentPos := endPos })
   -- Binary search avoids rescanning every earlier document for each batch.
@@ -172,13 +174,11 @@ def BOSFinder.take {n : Nat} (finder : BOSFinder n) (tokens : Tensor { shape := 
   let mut pos := finder.currentPos
   let mut chunks : Array (Sigma fun shape => Tensor { shape := shape, dtype := .Int64, device := device }) := #[]
   while pos < endPos do
-    let docEnd := finder.orderedEnds[doc]!
+    let some ⟨(start, docLen), hSpan⟩ := finder.orderedDocs[doc]? | break
     let docStart := if doc == 0 then 0 else finder.orderedEnds[doc - 1]!
-    let sourceStart := finder.orderedStarts[doc]! + (pos - docStart)
-    let len := min (endPos - pos) (docEnd - pos)
-    let ⟨hSrc⟩ ← if h : sourceStart + len ≤ n then pure (PLift.up h) else
-      throw <| IO.userError s!"BOS document slice {sourceStart}+{len} exceeds shard length {n}"
-    chunks := chunks.push (Tensor.packShape (tokens.slice 0 sourceStart len))
+    let offset := min (pos - docStart) docLen
+    let len := min (endPos - pos) (docLen - offset)
+    chunks := chunks.push (Tensor.packShape (tokens.slice 0 (start + offset) len))
     pos := pos + len
     doc := doc + 1
   -- Concatenating the document slices yields exactly `count` tokens.
@@ -223,16 +223,19 @@ private def fisherYatesShuffle (arr : Array Nat) (seed : UInt64) : Array Nat := 
 def BOSFinder.shuffle {n : Nat} (finder : BOSFinder n) (seed : UInt64) : BOSFinder n :=
   Id.run do
     let order := fisherYatesShuffle (List.range finder.bosPositions.size).toArray seed
-    let mut starts := #[]
+    let mut docs := #[]
     let mut ends := #[]
     let mut total := 0
     for idx in order do
-      let start := finder.bosPositions[idx]!
-      let stop := finder.bosPositions.getD (idx + 1) n
-      starts := starts.push start
-      total := total + (stop - start)
+      let some start := finder.bosPositions[idx]? | continue
+      let stop : Fin (n + 1) := match finder.bosPositions[idx + 1]? with
+        | some next => next.castSucc
+        | none => Fin.last n
+      let docLen := stop.val - start.val
+      docs := docs.push ⟨(start.val, docLen), by have := start.isLt; have := stop.isLt; omega⟩
+      total := total + docLen
       ends := ends.push total
-    return { finder with currentPos := 0, orderedStarts := starts, orderedEnds := ends }
+    return { finder with currentPos := 0, orderedDocs := docs, orderedEnds := ends }
 
 /-! ## Data Shard -/
 

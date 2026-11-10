@@ -1155,8 +1155,10 @@ def evalBaseModel (cfg : NanoChatConfig) : PipelineM Unit := runOnMaster do
 
     -- Create model forward function for evaluation
     let runModel : ModelRunner (device := evalDevice) modelCfg.vocabSize := fun {batch seq} input => do
+      let ⟨hseq⟩ ← if h : seq ≤ modelCfg.maxSeqLen then pure (PLift.up h) else
+        throw <| IO.userError s!"sequence of {seq} tokens exceeds maxSeqLen {modelCfg.maxSeqLen}"
       let inputTyped := input.to evalDevice
-      let logits ← moddedGpt.forward (batch := batch) (seq := seq) ckpt.params yarn inputTyped
+      let logits ← moddedGpt.forward (batch := batch) (seq := seq) ckpt.params yarn inputTyped hseq
       pure logits
 
     -- Evaluate on CORE tasks
@@ -1522,8 +1524,10 @@ def evalChat (cfg : NanoChatConfig) (checkpoint : String) : PipelineM Unit := ru
 
     -- Create model forward function for evaluation
     let runModel : ModelRunner (device := evalDevice) modelCfg.vocabSize := fun {batch seq} input => do
+      let ⟨hseq⟩ ← if h : seq ≤ modelCfg.maxSeqLen then pure (PLift.up h) else
+        throw <| IO.userError s!"sequence of {seq} tokens exceeds maxSeqLen {modelCfg.maxSeqLen}"
       let inputTyped := input.to evalDevice
-      let logits ← moddedGpt.forward (batch := batch) (seq := seq) ckpt.params yarn inputTyped
+      let logits ← moddedGpt.forward (batch := batch) (seq := seq) ckpt.params yarn inputTyped hseq
       pure logits
 
     -- Evaluate on multiple task categories
@@ -1625,7 +1629,9 @@ def supervisedFineTune (cfg : NanoChatConfig) : PipelineM Unit := do
     let forwardFn : ModdedGPTParams (device := trainDevice) modelCfg → {batch seq : Nat} →
         Tensor { shape := #[batch, seq], dtype := .Int64, device := trainDevice } → IO (Σ vocab : Nat, Tensor { shape := #[batch, seq, vocab], dtype := .Float32, device := trainDevice }) :=
       fun params {batch seq} input => do
-        let logits ← moddedGpt.forward (batch := batch) (seq := seq) params yarn (input.to trainDevice)
+        let ⟨hseq⟩ ← if h : seq ≤ modelCfg.maxSeqLen then pure (PLift.up h) else
+          throw <| IO.userError s!"sequence of {seq} tokens exceeds maxSeqLen {modelCfg.maxSeqLen}"
+        let logits ← moddedGpt.forward (batch := batch) (seq := seq) params yarn (input.to trainDevice) hseq
         pure ⟨modelCfg.vocabSize, logits⟩
 
     let lossFn : {batch seq vocab : Nat} → Tensor { shape := #[batch, seq, vocab], dtype := .Float32, device := trainDevice } →
@@ -1789,8 +1795,9 @@ def reinforcementLearning (cfg : NanoChatConfig) : PipelineM Unit := do
     let generateOneFn := fun (params : ModdedGPTParams (device := trainDevice) modelCfg) (context : Array UInt64) => do
       let inputTensor := Tensor.fromInt64Array (context.map (·.toInt64))
       let inputReshaped := (inputTensor.reshape #[1, context.size]).to trainDevice
-      let logits ← moddedGpt.forward params yarn inputReshaped
-      -- Flatten logits and extract last position's vocab slice
+      let ⟨hseq⟩ ← if h : context.size ≤ modelCfg.maxSeqLen then pure (PLift.up h) else
+        throw <| IO.userError s!"context of {context.size} tokens exceeds maxSeqLen {modelCfg.maxSeqLen}"
+      let logits ← moddedGpt.forward params yarn inputReshaped hseq
       let ⟨hCtx⟩ ← if h : 0 < context.size then pure (PLift.up h) else
         throw <| IO.userError "generation requires a non-empty context"
       let lastLogits := logits.slice 1 (context.size - 1) 1
@@ -1806,7 +1813,9 @@ def reinforcementLearning (cfg : NanoChatConfig) : PipelineM Unit := do
     -- Create forward function for policy gradient
     -- Returns per-token NLL: (input, target) → nll_per_token
     let forwardFn := fun (params : ModdedGPTParams (device := trainDevice) modelCfg) (input : Tensor { shape := #[1, 256], dtype := .Int64, device := trainDevice }) (target : Tensor { shape := #[1, 256], dtype := .Int64, device := trainDevice }) => do
-      let logits ← moddedGpt.forward params yarn (input.to trainDevice)
+      let ⟨hseq⟩ ← if h : 256 ≤ modelCfg.maxSeqLen then pure (PLift.up h) else
+        throw <| IO.userError s!"policy sequence of 256 tokens exceeds maxSeqLen {modelCfg.maxSeqLen}"
+      let logits ← moddedGpt.forward params yarn (input.to trainDevice) hseq
       -- Compute per-token cross-entropy (NLL)
       let logitsFlat := logits.reshape #[256, modelCfg.vocabSize]
       let targetFlat := (target.to trainDevice).reshape #[256]

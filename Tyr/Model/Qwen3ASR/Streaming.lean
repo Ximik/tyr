@@ -877,6 +877,8 @@ def decodeStreamingChunkWithModelStateCached
       let frontendOut := frontendPack.2
       let validFramesTensor := Tensor.sumAll frontendOut.featureAttentionMask
       let validFrames := (Tensor.itemInt validFramesTensor).toInt.toNat
+      let ⟨hValid⟩ ← if h : validFrames ≤ frames then pure (PLift.up h) else
+        throw <| IO.userError s!"feature attention mask counts {validFrames} valid frames of {frames}"
       let audioLenRaw := AudioEncoderConfig.featExtractOutputLength validFrames
       let audioLenCap :=
         AudioEncoderConfig.framesAfterConv3
@@ -1026,9 +1028,11 @@ def decodeStreamingChunkWithModelStateCached
                   none
               pure (audioValid, nextAudioCache)
             else
-              if hReuse : ¬ reuseFeatureLen ≤ frames then
-                throw <| IO.userError s!"reused feature length {reuseFeatureLen} exceeds {frames} frames"
-              else
+              have hReuse : reuseFeatureLen ≤ frames := by
+                have hBase := minU64_le_right prevFull curFull
+                have hCur : curFull ≤ validFrames := Nat.div_mul_le_self _ _
+                simp only [reuseFeatureLen, reuseBase]
+                split <;> omega
               let tailFrames := frames - reuseFeatureLen
               let tailInput : Tensor { device := device, shape := #[1, preprocessor.featureSize, tailFrames], dtype := .Float32 } :=
                 Tensor.slice inputFeaturesDev 2 reuseFeatureLen tailFrames

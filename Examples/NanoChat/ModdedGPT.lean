@@ -518,12 +518,11 @@ def forward {cfg : Config} {batch seq : Nat}
     (params : ModdedGPTParams (device := device) cfg)
     (yarn : YarnRotary (device := device) cfg.halfHeadDim cfg.maxSeqLen)
     (inputSeq : Tensor { shape := #[batch, seq], dtype := .Int64, device := device })
+    (hseq : seq ≤ cfg.maxSeqLen)
     (_training : Bool := true)
     : IO (Tensor { shape := #[batch, seq, cfg.vocabSize], dtype := .Float32, device := device }) := do
   let ⟨hDim⟩ ← if h : 12 ≤ cfg.modelDim then pure (PLift.up h) else
     throw (IO.userError "ModdedGPT requires modelDim >= 12 for the smear gate")
-  let ⟨hSeq⟩ ← if h : seq ≤ cfg.maxSeqLen then pure (PLift.up h) else
-    throw (IO.userError s!"ModdedGPT sequence {seq} exceeds maxSeqLen {cfg.maxSeqLen}")
   have hHeads : cfg.modelDim = cfg.nHead * cfg.headDim := rfl
   -- 1) Token embedding + lightweight smear-style modulation.
   let tokEmb := Tensor.embedding inputSeq params.embed
@@ -567,7 +566,7 @@ def forward {cfg : Config} {batch seq : Nat}
       let layerVE := (layerValueEmbed (cfg := cfg) valueEmbeds i).map
         (fun t => t.reshape #[batch, seq, cfg.nHead * cfg.headDim] (by simp [hHeads]))
       -- Apply attention with rotary embeddings/window and optional value embedding.
-      let attnOut := attn.forward xNormed yarn hSeq windowSize layerVE valueMix
+      let attnOut := attn.forward xNormed yarn hseq windowSize layerVE valueMix
       -- Residual connection
       let x' := xIn + scaleByScalar attnOut lamAttn
       -- Pre-norm before MLP
@@ -606,9 +605,10 @@ def loss {cfg : Config} {batch seq : Nat}
     (yarn : YarnRotary (device := device) cfg.halfHeadDim cfg.maxSeqLen)
     (inputSeq : Tensor { shape := #[batch, seq], dtype := .Int64, device := device })
     (targets : Tensor { shape := #[batch, seq], dtype := .Int64, device := device })
+    (hseq : seq ≤ cfg.maxSeqLen)
     (training : Bool := true)
     : IO (Tensor { shape := #[], dtype := .Float32, device := device }) := do
-  let logits ← forward params yarn inputSeq training
+  let logits ← forward params yarn inputSeq hseq training
   -- Reshape for cross-entropy: (batch*seq, vocab) vs (batch*seq,)
   let logitsFlat := Tensor.reshape logits #[batch * seq, cfg.vocabSize]
   let targetsFlat := Tensor.reshape targets #[batch * seq]

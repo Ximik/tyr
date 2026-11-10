@@ -199,7 +199,7 @@ private def metadata (tokens : Nat) : CheckpointMetadata := {
   let input := (Tensor.fromInt64Array #[0, 1, 2, 3]).reshape #[1, 4]
   let target := (Tensor.fromInt64Array #[1, 2, 3, 4]).reshape #[1, 4]
   let opt := OptimizerState.init tinyConfig params
-  let (updated, nextOpt, result) ← trainStep params yarn input target opt
+  let (updated, nextOpt, result) ← trainStep params yarn (by decide) input target opt
     { numIterations := 10 } 1.0
   assertTrue result.loss.isFinite "Indexed NanoChat forward/backward produces a finite loss"
   assertEqual result.tokensProcessed 4
