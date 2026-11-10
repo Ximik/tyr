@@ -59,13 +59,6 @@ private def clampRange {s : Shape}
   | some hi => clampMax x1 hi
   | none => x1
 
-private def linear2d {tokens inDim outDim : Nat}
-    (x : Tensor { device := device, shape := #[tokens, inDim], dtype := dtype })
-    (w : Tensor { device := device, shape := #[outDim, inDim], dtype := dtype })
-    : Tensor { device := device, shape := #[tokens, outDim], dtype := dtype } :=
-  let yDyn : Tensor { device := device, shape := #[tokens, outDim], dtype := dtype } := einsum! "oh,th->to" w x
-  Tensor.reshape yDyn #[tokens, outDim]
-
 private def countMask2d {batch seq : Nat} (mask : Tensor { device := device, shape := #[batch, seq], dtype := .Bool }) : IO Nat := do
   let row : Tensor { device := device, shape := #[batch], dtype := .Int64 } := Tensor.reshape (Tensor.sumDim (Tensor.toInt64 mask) 1 false) #[batch]
   let counts ← Tensor.toUInt64Array row
@@ -141,7 +134,7 @@ def forward2d {tokens outDim inDim : Nat}
     (x : Tensor { device := device, shape := #[tokens, inDim], dtype := inputDType })
     : Tensor { device := device, shape := #[tokens, outDim], dtype := dtype } :=
   let x' := clampRange (Tensor.castLike m.weight x) m.input_min m.input_max
-  let y := linear2d x' m.weight
+  let y := Tensor.linear x' m.weight
   clampRange y m.output_min m.output_max
 
 end Gemma4VisionLinear
@@ -339,7 +332,7 @@ def forward {tokens : Nat}
     (inputsEmbeds : Tensor { device := device, shape := #[tokens, cfg.vision_config.hidden_size], dtype := inputDType })
     : Tensor { device := device, shape := #[tokens, cfg.text_config.hidden_size], dtype := dtype } :=
   let normalized := rmsNormNoScale2d inputsEmbeds cfg.text_config.rms_norm_eps
-  linear2d (normalized.castDType dtype) m.embedding_projection
+  Tensor.linear (normalized.castDType dtype) m.embedding_projection
 
 end Gemma4MultimodalEmbedder
 

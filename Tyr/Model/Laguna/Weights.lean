@@ -268,26 +268,16 @@ private def loadLayer (src : Source) (cfg : Config) (layerIdx : Nat)
       pure (some a)
     | .fullAttention => pure none
 
-  let denseMlp ←
-    if cfg.isDenseMlpLayer layerIdx || !cfg.isMoE then
-      let m ← loadDenseMLP src cfg layerIdx device dtype
-      pure (some m)
-    else
-      pure none
-  let sparseMoe ←
-    if cfg.isDenseMlpLayer layerIdx || !cfg.isMoE then
-      pure none
-    else
-      let m ← loadSparseMoe src cfg layerIdx device dtype
-      pure (some m)
+  let ffn ← LagunaFfn.build cfg (cfg.isDenseMlpLayer layerIdx)
+    (loadDenseMLP src cfg layerIdx device dtype)
+    (loadSparseMoe src cfg layerIdx device dtype)
 
   pure {
     input_layernorm := freezeStored inputNorm
     attnFull := attnFull
     attnSliding := attnSliding
     post_attention_layernorm := freezeStored postNorm
-    denseMlp := denseMlp
-    sparseMoe := sparseMoe
+    ffn := ffn
   }
 
 /-- Shared loader core over an abstract weight source. -/

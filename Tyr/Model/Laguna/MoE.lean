@@ -69,10 +69,10 @@ namespace LagunaTopKRouter
     Returns `(selectedExperts, routingWeights)`, both `[tokens, num_experts_per_tok]`;
     `selectedExperts` is int64, `routingWeights` has `x`'s dtype. -/
 def route {tokens : Nat}
-    (cfg : Config) (r : LagunaTopKRouter (device := device) cfg) (x : Tensor { dtype := dtype, device := device, shape := #[tokens, cfg.hidden_size] })
+    (cfg : Config) (hMoE : cfg.isMoE) (r : LagunaTopKRouter (device := device) cfg) (x : Tensor { dtype := dtype, device := device, shape := #[tokens, cfg.hidden_size] })
     : IO (Tensor { device := device, shape := #[tokens, cfg.num_experts_per_tok], dtype := .Int64 } × Tensor { dtype := dtype, device := device, shape := #[tokens, cfg.num_experts_per_tok] }) := do
   let logits0 : Tensor { dtype := .Float32, device := device, shape := #[tokens, cfg.num_experts] } :=
-    einsum! "eh,th->te" (floatDynamic r.weight.2) (floatDynamic x)
+    Tensor.linear (floatDynamic x) (floatDynamic r.weight.2)
   let logits :=
     if cfg.moe_router_logit_softcapping > 0.0 then
       let c := cfg.moe_router_logit_softcapping
@@ -82,7 +82,7 @@ def route {tokens : Nat}
   let selectionScores := match r.eScoreCorrectionBias with
     | some bias => Tensor.add scores (Tensor.broadcastTo (floatDynamic bias.2) #[tokens, cfg.num_experts])
     | none => scores
-  let (_, topIdx) := Tensor.topKLast2d! selectionScores cfg.num_experts_per_tok
+  let (_, topIdx) := Tensor.topKLast2d selectionScores cfg.num_experts_per_tok (cfg.expertsValid (of_decide_eq_true hMoE)).2
   let weights := Tensor.gather scores 1 topIdx
   let weights := if cfg.norm_topk_prob then
       Tensor.div weights (Tensor.broadcastTo (Tensor.sumDim weights 1 true) #[tokens, cfg.num_experts_per_tok])
@@ -251,10 +251,10 @@ private def forwardDecode1
           pure (Tensor.ofRaw! "forwardDecode1" g.raw, Tensor.ofRaw! "forwardDecode1" u.raw, Tensor.ofRaw! "forwardDecode1" d.raw)
       -- Batched SwiGLU: [k,1,h] @ Wᵀ per projection.
       let x3 : Tensor { dtype := dtype, device := device, shape := #[k, 1, h] } := Tensor.reshape (Tensor.broadcastTo (Tensor.reshape x #[1, 1, h]) #[k, 1, h]) #[k, 1, h]
-      let g : Tensor { dtype := dtype, device := device, shape := #[k, 1, mi] } := bmm x3 (transposeMatrixBatch gateW)
-      let u : Tensor { dtype := dtype, device := device, shape := #[k, 1, mi] } := bmm x3 (transposeMatrixBatch upW)
+      let g : Tensor { dtype := dtype, device := device, shape := #[k, 1, mi] } := Tensor.bmm x3 (transposeMatrixBatch gateW)
+      let u : Tensor { dtype := dtype, device := device, shape := #[k, 1, mi] } := Tensor.bmm x3 (transposeMatrixBatch upW)
       let hid : Tensor { dtype := dtype, device := device, shape := #[k, 1, mi] } := mulSame (Tensor.silu g) u
-      let o : Tensor { dtype := dtype, device := device, shape := #[k, 1, h] } := bmm hid (transposeMatrixBatch downW)
+      let o : Tensor { dtype := dtype, device := device, shape := #[k, 1, h] } := Tensor.bmm hid (transposeMatrixBatch downW)
       let ow : Tensor { dtype := dtype, device := device, shape := #[k, 1, h] } := Tensor.mul (Tensor.broadcastTo (Tensor.reshape flatW #[k, 1, 1]) #[k, 1, h]) o
       pure (show Tensor ⟨#[1, h], dtype, device⟩ from by
         simpa using (Tensor.reshape (Tensor.sumDim ow 0 false) #[1, h]))
@@ -269,13 +269,13 @@ private def forwardDecode1
     in `x`'s dtype. Single-token decode on CUDA uses the fused NVFP4 kernel
     for the packed-bank path unless `useFused` is false. -/
 def forward2d {tokens : Nat}
-    (cfg : Config)
+    (cfg : Config) (hMoE : cfg.isMoE)
     (m : LagunaSparseMoeBlock (device := device) (dtype := dtype) cfg)
     (x : Tensor { dtype := dtype, device := device, shape := #[tokens, cfg.hidden_size] })
     (useFused : Bool := true)
     : IO (Tensor { dtype := dtype, device := device, shape := #[tokens, cfg.hidden_size] }) := do
   let k := cfg.num_experts_per_tok
-  let (topIdx, weights) ← m.router.route cfg x
+  let (topIdx, weights) ← m.router.route cfg hMoE x
   -- Flattened dispatch views: pair p = token * k + slot.
   let flatIdx : Tensor { device := device, shape := #[tokens * k], dtype := .Int64 } := Tensor.reshape topIdx #[tokens * k]
   let flatW : Tensor { dtype := dtype, device := device, shape := #[tokens * k] } := Tensor.reshape weights #[tokens * k]

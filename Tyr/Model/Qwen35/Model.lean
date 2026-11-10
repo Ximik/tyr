@@ -145,13 +145,9 @@ def forward2d {tokens hidden inter : Nat}
     (m : Qwen35MLP (dtype := dtype) (device := device) hidden inter)
     (x : Tensor { device := device, shape := #[tokens, hidden], dtype := dtype })
     : Tensor { device := device, shape := #[tokens, hidden], dtype := dtype } :=
-  let gateDyn : Tensor { device := device, shape := #[tokens, inter], dtype := dtype } := einsum! "oh,th->to" m.gate_proj x
-  let upDyn : Tensor { device := device, shape := #[tokens, inter], dtype := dtype } := einsum! "oh,th->to" m.up_proj x
-  let gate : Tensor { device := device, shape := #[tokens, inter], dtype := dtype } := Tensor.reshape gateDyn #[tokens, inter]
-  let up : Tensor { device := device, shape := #[tokens, inter], dtype := dtype } := Tensor.reshape upDyn #[tokens, inter]
-  let hid : Tensor { device := device, shape := #[tokens, inter], dtype := dtype } := Tensor.mul (Tensor.silu gate) up
-  let outDyn : Tensor { device := device, shape := #[tokens, hidden], dtype := dtype } := einsum! "ho,to->th" m.down_proj hid
-  Tensor.reshape outDyn #[tokens, hidden]
+  let hid : Tensor { device := device, shape := #[tokens, inter], dtype := dtype } :=
+    Tensor.mul (Tensor.silu (Tensor.linear x m.gate_proj)) (Tensor.linear x m.up_proj)
+  Tensor.linear hid m.down_proj
 
 def forward {batch seq hidden inter : Nat}
     (m : Qwen35MLP (dtype := dtype) (device := device) hidden inter)
@@ -173,14 +169,13 @@ def init (cfg : Config) (device : Device := .CPU) (dtype : DType := .Float32) : 
   pure { weight := w }
 
 def forward {tokens : Nat}
-    (cfg : Config)
+    (cfg : Config) (hMoE : cfg.isMoE)
     (m : Qwen35TopKRouter (dtype := dtype) (device := device) cfg)
     (hidden : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype })
     : Tensor { device := device, shape := #[tokens, cfg.num_experts], dtype := dtype } × Tensor { device := device, shape := #[tokens, cfg.num_experts_per_tok], dtype := dtype } × Tensor { device := device, shape := #[tokens, cfg.num_experts_per_tok], dtype := .Int64 } :=
-  let logitsDyn : Tensor { device := device, shape := #[tokens, cfg.num_experts], dtype := dtype } := einsum! "eh,th->te" m.weight hidden
-  let logits : Tensor { device := device, shape := #[tokens, cfg.num_experts], dtype := dtype } := Tensor.reshape logitsDyn #[tokens, cfg.num_experts]
-  let probs : Tensor { device := device, shape := #[tokens, cfg.num_experts], dtype := dtype } := Tensor.softmax logits
-  let (topValsRaw, topIdx) := Tensor.topKLast2d! probs cfg.num_experts_per_tok
+  let probs : Tensor { device := device, shape := #[tokens, cfg.num_experts], dtype := dtype } :=
+    Tensor.softmax (Tensor.linear hidden m.weight)
+  let (topValsRaw, topIdx) := Tensor.topKLast2d probs cfg.num_experts_per_tok (cfg.expertsValid (of_decide_eq_true hMoE)).2
   let denom : Tensor { device := device, shape := #[tokens, 1], dtype := dtype } := by simpa using Tensor.sumDim topValsRaw 1 true
   let denom : Tensor { device := device, shape := #[tokens, cfg.num_experts_per_tok], dtype := dtype } := Tensor.broadcastTo denom #[tokens, cfg.num_experts_per_tok]
   let topVals : Tensor { device := device, shape := #[tokens, cfg.num_experts_per_tok], dtype := dtype } := by simpa using Tensor.div topValsRaw denom
@@ -226,8 +221,8 @@ def forward2d {tokens : Nat}
       let tokGateUp : Tensor { device := device, shape := #[tokens, 2 * cfg.moe_intermediate_size, cfg.hidden_size], dtype := dtype } :=
         Tensor.reshape tokGateUpE #[tokens, 2 * cfg.moe_intermediate_size, cfg.hidden_size]
 
-      let guDyn : Tensor { device := device, shape := #[tokens, 2 * cfg.moe_intermediate_size], dtype := dtype } := einsum! "tih,th->ti" tokGateUp hidden
-      let gu : Tensor { device := device, shape := #[tokens, 2 * cfg.moe_intermediate_size], dtype := dtype } := Tensor.reshape guDyn #[tokens, 2 * cfg.moe_intermediate_size]
+      let gu : Tensor { device := device, shape := #[tokens, 2 * cfg.moe_intermediate_size], dtype := dtype } :=
+        Tensor.reshape (Tensor.bmm tokGateUp (Tensor.reshape hidden #[tokens, cfg.hidden_size, 1])) #[tokens, 2 * cfg.moe_intermediate_size]
 
       let gate : Tensor { device := device, shape := #[tokens, cfg.moe_intermediate_size], dtype := dtype } := typedSlice gu 1 0 cfg.moe_intermediate_size
       let up : Tensor { device := device, shape := #[tokens, cfg.moe_intermediate_size], dtype := dtype } :=
@@ -241,8 +236,8 @@ def forward2d {tokens : Nat}
       let tokDown : Tensor { device := device, shape := #[tokens, cfg.hidden_size, cfg.moe_intermediate_size], dtype := dtype } :=
         Tensor.reshape tokDownE #[tokens, cfg.hidden_size, cfg.moe_intermediate_size]
 
-      let outDyn : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype } := einsum! "thi,ti->th" tokDown inter
-      let out : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype } := Tensor.reshape outDyn #[tokens, cfg.hidden_size]
+      let out : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype } :=
+        Tensor.reshape (Tensor.bmm tokDown (Tensor.reshape inter #[tokens, cfg.moe_intermediate_size, 1])) #[tokens, cfg.hidden_size]
 
       let w2d : Tensor { device := device, shape := #[tokens, 1], dtype := .Float32 } := typedSlice topVals 1 slot 1
       let w : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := .Float32 } := Tensor.broadcastTo w2d #[tokens, cfg.hidden_size]
@@ -276,28 +271,100 @@ def init (cfg : Config) (device : Device := .CPU) (dtype : DType := .Float32) : 
   }
 
 def forward {batch seq : Nat}
-    (cfg : Config)
+    (cfg : Config) (hMoE : cfg.isMoE)
     (m : Qwen35SparseMoeBlock (dtype := dtype) (device := device) cfg)
     (hidden : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
     : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } :=
   let tokens := batch * seq
   let hidden2d : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype } := Tensor.reshape hidden #[tokens, cfg.hidden_size]
 
-  let (_routerProbs, topVals, topIdx) := m.router.forward cfg hidden2d
+  let (_routerProbs, topVals, topIdx) := m.router.forward cfg hMoE hidden2d
   let expertOut : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype } :=
     m.experts.forward2d cfg hidden2d (floatDynamic topVals) topIdx
 
   let sharedOut : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype } :=
     m.shared_expert.forward2d hidden2d
 
-  let gateDyn : Tensor { device := device, shape := #[tokens, 1], dtype := dtype } := einsum! "oh,th->to" m.shared_expert_gate hidden2d
-  let gate1 : Tensor { device := device, shape := #[tokens, 1], dtype := dtype } := Tensor.reshape gateDyn #[tokens, 1]
   let gate : Tensor { device := device, shape := #[tokens, cfg.hidden_size], dtype := dtype } :=
-    Tensor.broadcastTo (Tensor.sigmoid gate1) #[tokens, cfg.hidden_size]
+    Tensor.broadcastTo (Tensor.sigmoid (Tensor.linear hidden2d m.shared_expert_gate)) #[tokens, cfg.hidden_size]
 
   Tensor.reshape (Tensor.add expertOut (Tensor.mul sharedOut gate)) #[batch, seq, cfg.hidden_size]
 
 end Qwen35SparseMoeBlock
+
+/-- A layer's feed-forward block: a sparse MoE block when the configuration has
+    experts (`cfg.isMoE`), a dense MLP otherwise. -/
+inductive Qwen35Ffn (cfg : Config) (dtype : DType := .Float32) : Bool → Type where
+  | dense : Qwen35MLP (dtype := dtype) (device := device) cfg.hidden_size cfg.intermediate_size →
+      Qwen35Ffn cfg dtype false
+  | moe : Qwen35SparseMoeBlock (dtype := dtype) (device := device) cfg → Qwen35Ffn cfg dtype true
+
+namespace Qwen35Ffn
+
+instance {device : Device} {cfg : Config} {dtype : DType} {b : Bool} :
+    TensorStruct (Qwen35Ffn (device := device) cfg dtype b) where
+  map f
+    | .dense m => .dense (TensorStruct.map f m)
+    | .moe m => .moe (TensorStruct.map f m)
+  mapM f
+    | .dense m => return .dense (← TensorStruct.mapM f m)
+    | .moe m => return .moe (← TensorStruct.mapM f m)
+  zipWith f
+    | .dense x, .dense y => .dense (TensorStruct.zipWith f x y)
+    | .moe x, .moe y => .moe (TensorStruct.zipWith f x y)
+  fold f init
+    | .dense m => TensorStruct.fold f init m
+    | .moe m => TensorStruct.fold f init m
+
+instance {P : StaticSpec → Prop} {device : Device} {cfg : Config} {dtype : DType} {b : Bool}
+    [TensorStructFor P (Qwen35MLP (dtype := dtype) (device := device) cfg.hidden_size cfg.intermediate_size)]
+    [TensorStructFor P (Qwen35SparseMoeBlock (dtype := dtype) (device := device) cfg)] :
+    TensorStructFor P (Qwen35Ffn (device := device) cfg dtype b) where
+  map f
+    | .dense m => .dense (TensorStructFor.map f m)
+    | .moe m => .moe (TensorStructFor.map f m)
+  mapM f
+    | .dense m => return .dense (← TensorStructFor.mapM f m)
+    | .moe m => return .moe (← TensorStructFor.mapM f m)
+  zipWith f
+    | .dense x, .dense y => .dense (TensorStructFor.zipWith f x y)
+    | .moe x, .moe y => .moe (TensorStructFor.zipWith f x y)
+  fold f init
+    | .dense m => TensorStructFor.fold f init m
+    | .moe m => TensorStructFor.fold f init m
+
+instance {sourceDevice targetDevice : Device} {cfg : Config} {sourceDType targetDType : DType} {b : Bool}
+    [TensorTreeCast
+      (Qwen35MLP (dtype := sourceDType) (device := sourceDevice) cfg.hidden_size cfg.intermediate_size)
+      (Qwen35MLP (dtype := targetDType) (device := targetDevice) cfg.hidden_size cfg.intermediate_size)]
+    [TensorTreeCast
+      (Qwen35SparseMoeBlock (dtype := sourceDType) (device := sourceDevice) cfg)
+      (Qwen35SparseMoeBlock (dtype := targetDType) (device := targetDevice) cfg)] :
+    TensorTreeCast (Qwen35Ffn (device := sourceDevice) cfg sourceDType b)
+      (Qwen35Ffn (device := targetDevice) cfg targetDType b) where
+  castAt path
+    | .dense m => return .dense (← TensorTreeCast.castAt path m)
+    | .moe m => return .moe (← TensorTreeCast.castAt path m)
+
+/-- Run the action for the block that `cfg.isMoE` selects. -/
+def build {m : Type → Type} [Monad m] (cfg : Config)
+    (dense : m (Qwen35MLP (dtype := dtype) (device := device) cfg.hidden_size cfg.intermediate_size))
+    (moe : m (Qwen35SparseMoeBlock (dtype := dtype) (device := device) cfg)) :
+    m (Qwen35Ffn (device := device) cfg dtype cfg.isMoE) :=
+  match cfg.isMoE with
+  | true => .moe <$> moe
+  | false => .dense <$> dense
+
+def forward {batch seq : Nat}
+    (cfg : Config)
+    (ffn : Qwen35Ffn (device := device) cfg dtype cfg.isMoE)
+    (x : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
+    : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } :=
+  match hMoE : cfg.isMoE, ffn with
+  | false, .dense m => m.forward x
+  | true, .moe m => m.forward cfg hMoE x
+
+end Qwen35Ffn
 
 /-- Full-attention token mixer for Qwen3.5 (Q-gate + Q/K RMSNorm + partial RoPE). -/
 structure Qwen35Attention (cfg : Config) (dtype : DType := .Float32) where
@@ -760,8 +827,7 @@ structure Qwen35Layer (cfg : Config) (dtype : DType := .Float32) where
   full_attn : Option (Qwen35Attention (dtype := dtype) (device := device) cfg) := none
   linear_attn : Option (Qwen35GatedDeltaNet (dtype := dtype) (device := device) cfg) := none
   post_attention_layernorm : Qwen35RMSNorm (device := device) cfg.hidden_size
-  dense_mlp : Option (Qwen35MLP (dtype := dtype) (device := device) cfg.hidden_size cfg.intermediate_size) := none
-  sparse_moe : Option (Qwen35SparseMoeBlock (dtype := dtype) (device := device) cfg) := none
+  ffn : Qwen35Ffn (device := device) cfg dtype cfg.isMoE
   deriving TensorStruct
 
 namespace Qwen35Layer
@@ -784,19 +850,9 @@ def init (cfg : Config) (layerType : LayerType) (device : Device := .CPU) (dtype
       pure (some m)
     | .fullAttention => pure none
 
-  let denseMlp ←
-    if Config.isMoE cfg then
-      pure none
-    else
-      let m ← Qwen35MLP.init (dtype := dtype) (device := device) cfg.hidden_size cfg.intermediate_size
-      pure (some m)
-
-  let sparseMoe ←
-    if Config.isMoE cfg then
-      let m ← Qwen35SparseMoeBlock.init (dtype := dtype) (device := device) cfg
-      pure (some m)
-    else
-      pure none
+  let ffn ← Qwen35Ffn.build cfg
+    (Qwen35MLP.init (dtype := dtype) (device := device) cfg.hidden_size cfg.intermediate_size)
+    (Qwen35SparseMoeBlock.init (dtype := dtype) (device := device) cfg)
 
   pure {
     layerType := layerType
@@ -804,8 +860,7 @@ def init (cfg : Config) (layerType : LayerType) (device : Device := .CPU) (dtype
     full_attn := fullAttn
     linear_attn := linearAttn
     post_attention_layernorm := postNorm
-    dense_mlp := denseMlp
-    sparse_moe := sparseMoe
+    ffn := ffn
   }
 
 def forward {batch seq : Nat}
@@ -830,11 +885,7 @@ def forward {batch seq : Nat}
 
   let residual2 := h2
   let h3 := layer.post_attention_layernorm.forward3d h2
-  let ffn :=
-    match layer.dense_mlp, layer.sparse_moe with
-    | some mlp, _ => mlp.forward h3
-    | _, some moe => moe.forward cfg h3
-    | _, _ => h3
+  let ffn := layer.ffn.forward cfg h3
   Tensor.add residual2 ffn
 
 /-- Forward pass with optional cache update (for batch prefill). -/
@@ -877,11 +928,7 @@ def forwardWithCache {batch seq cap : Nat}
   let h2 := Tensor.add residual1 mixed
   let residual2 := h2
   let h3 := layer.post_attention_layernorm.forward3d h2
-  let ffn :=
-    match layer.dense_mlp, layer.sparse_moe with
-    | some mlp, _ => mlp.forward h3
-    | _, some moe => moe.forward cfg h3
-    | _, _ => h3
+  let ffn := layer.ffn.forward cfg h3
   (Tensor.add residual2 ffn, cache')
 
 def forwardStep {batch cap : Nat}
@@ -925,11 +972,7 @@ def forwardStep {batch cap : Nat}
   let h2 := Tensor.add residual1 mixed
   let residual2 := h2
   let h3 := layer.post_attention_layernorm.forward3d h2
-  let ffn :=
-    match layer.dense_mlp, layer.sparse_moe with
-    | some mlp, _ => mlp.forward h3
-    | _, some moe => moe.forward cfg h3
-    | _, _ => h3
+  let ffn := layer.ffn.forward cfg h3
   (Tensor.add residual2 ffn, cache1)
 
 end Qwen35Layer

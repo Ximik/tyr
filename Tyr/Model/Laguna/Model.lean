@@ -135,12 +135,12 @@ end LagunaMLP
 
 /-- 3D convenience wrapper around the wave-1 `LagunaSparseMoeBlock.forward2d`. -/
 def LagunaSparseMoeBlock.forward3d {batch seq : Nat}
-    (cfg : Config)
+    (cfg : Config) (hMoE : cfg.isMoE)
     (m : LagunaSparseMoeBlock (device := device) (dtype := dtype) cfg)
     (x : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] })
     : IO (Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] }) := do
   let flat : Tensor { dtype := dtype, device := device, shape := #[batch * seq, cfg.hidden_size] } := Tensor.reshape x #[batch * seq, cfg.hidden_size]
-  let out ← m.forward2d cfg flat
+  let out ← m.forward2d cfg hMoE flat
   pure (Tensor.reshape out #[batch, seq, cfg.hidden_size])
 
 /-! ## Attention -/
@@ -442,17 +442,92 @@ end LagunaCacheSession
 
 /-! ## Decoder layer -/
 
+/-- A layer's feed-forward block. A sparse MoE block exists only when the
+    configuration has experts (`cfg.isMoE`); the layers listed in
+    `mlp_only_layers` are dense either way. -/
+inductive LagunaFfn (cfg : Config) (dtype : DType := .Float32) : Bool → Type where
+  | dense {moe : Bool} : LagunaMLP (device := device) (dtype := dtype) cfg → LagunaFfn cfg dtype moe
+  | moe : LagunaSparseMoeBlock (device := device) (dtype := dtype) cfg → LagunaFfn cfg dtype true
+
+namespace LagunaFfn
+
+instance {device : Device} {cfg : Config} {dtype : DType} {b : Bool} :
+    TensorStruct (LagunaFfn (device := device) cfg dtype b) where
+  map f
+    | .dense m => .dense (TensorStruct.map f m)
+    | .moe m => .moe (TensorStruct.map f m)
+  mapM f
+    | .dense m => return .dense (← TensorStruct.mapM f m)
+    | .moe m => return .moe (← TensorStruct.mapM f m)
+  zipWith f
+    | .dense x, .dense y => .dense (TensorStruct.zipWith f x y)
+    | .moe x, .moe y => .moe (TensorStruct.zipWith f x y)
+    | x, _ => x
+  fold f init
+    | .dense m => TensorStruct.fold f init m
+    | .moe m => TensorStruct.fold f init m
+
+instance {P : StaticSpec → Prop} {device : Device} {cfg : Config} {dtype : DType} {b : Bool}
+    [TensorStructFor P (LagunaMLP (device := device) (dtype := dtype) cfg)]
+    [TensorStructFor P (LagunaSparseMoeBlock (device := device) (dtype := dtype) cfg)] :
+    TensorStructFor P (LagunaFfn (device := device) cfg dtype b) where
+  map f
+    | .dense m => .dense (TensorStructFor.map f m)
+    | .moe m => .moe (TensorStructFor.map f m)
+  mapM f
+    | .dense m => return .dense (← TensorStructFor.mapM f m)
+    | .moe m => return .moe (← TensorStructFor.mapM f m)
+  zipWith f
+    | .dense x, .dense y => .dense (TensorStructFor.zipWith f x y)
+    | .moe x, .moe y => .moe (TensorStructFor.zipWith f x y)
+    | x, _ => x
+  fold f init
+    | .dense m => TensorStructFor.fold f init m
+    | .moe m => TensorStructFor.fold f init m
+
+instance {sourceDevice targetDevice : Device} {cfg : Config} {sourceDType targetDType : DType} {b : Bool}
+    [TensorTreeCast
+      (LagunaMLP (device := sourceDevice) (dtype := sourceDType) cfg)
+      (LagunaMLP (device := targetDevice) (dtype := targetDType) cfg)]
+    [TensorTreeCast
+      (LagunaSparseMoeBlock (device := sourceDevice) (dtype := sourceDType) cfg)
+      (LagunaSparseMoeBlock (device := targetDevice) (dtype := targetDType) cfg)] :
+    TensorTreeCast (LagunaFfn (device := sourceDevice) cfg sourceDType b)
+      (LagunaFfn (device := targetDevice) cfg targetDType b) where
+  castAt path
+    | .dense m => return .dense (← TensorTreeCast.castAt path m)
+    | .moe m => return .moe (← TensorTreeCast.castAt path m)
+
+/-- Run the action for the block this layer gets: the MoE block when the
+    configuration has experts and the layer is not dense-only. -/
+def build {m : Type → Type} [Monad m] (cfg : Config) (denseOnly : Bool)
+    (dense : m (LagunaMLP (device := device) (dtype := dtype) cfg))
+    (moe : m (LagunaSparseMoeBlock (device := device) (dtype := dtype) cfg)) :
+    m (LagunaFfn (device := device) cfg dtype cfg.isMoE) :=
+  match cfg.isMoE, denseOnly with
+  | true, false => .moe <$> moe
+  | _, _ => .dense <$> dense
+
+def forward {batch seq : Nat}
+    (cfg : Config)
+    (ffn : LagunaFfn (device := device) cfg dtype cfg.isMoE)
+    (h : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] })
+    : IO (Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] }) :=
+  match hMoE : cfg.isMoE, ffn with
+  | _, .dense m => pure (m.forward h)
+  | true, .moe m => m.forward3d cfg hMoE h
+
+end LagunaFfn
+
 /-- One Laguna decoder layer: RMSNorm → attention → residual → RMSNorm →
     FFN (dense SwiGLU or sparse MoE) → residual.  Exactly one attention
-    variant (`attnFull`/`attnSliding`) and one FFN variant
-    (`denseMlp`/`sparseMoe`) is set per layer. -/
+    variant (`attnFull`/`attnSliding`) is set per layer. -/
 structure LagunaLayer (cfg : Config) (dtype : DType := .Float32) where
   input_layernorm : SomeDTypeTensor #[cfg.hidden_size] device
   attnFull : Option (LagunaAttention (device := device) (dtype := dtype) cfg cfg.num_attention_heads) := none
   attnSliding : Option (LagunaAttention (device := device) (dtype := dtype) cfg cfg.num_attention_heads_sliding) := none
   post_attention_layernorm : SomeDTypeTensor #[cfg.hidden_size] device
-  denseMlp : Option (LagunaMLP (device := device) (dtype := dtype) cfg) := none
-  sparseMoe : Option (LagunaSparseMoeBlock (device := device) (dtype := dtype) cfg) := none
+  ffn : LagunaFfn (device := device) cfg dtype cfg.isMoE
   deriving TensorStruct
 
 
@@ -519,37 +594,16 @@ def init (cfg : Config) (layerIdx : Nat) (device : Device := .CPU) (dtype : DTyp
       let m ← LagunaAttention.init (device := device) (dtype := dtype) cfg cfg.num_attention_heads_sliding
       pure (some m)
     | .fullAttention => pure none
-  let denseMlp ←
-    if cfg.isDenseMlpLayer layerIdx || !cfg.isMoE then
-      let m ← LagunaMLP.init (device := device) (dtype := dtype) cfg
-      pure (some m)
-    else
-      pure none
-  let sparseMoe ←
-    if cfg.isDenseMlpLayer layerIdx || !cfg.isMoE then
-      pure none
-    else
-      let m ← initSparseMoeBlock (device := device) (dtype := dtype) cfg
-      pure (some m)
+  let ffn ← LagunaFfn.build cfg (cfg.isDenseMlpLayer layerIdx)
+    (LagunaMLP.init (device := device) (dtype := dtype) cfg)
+    (initSparseMoeBlock (device := device) (dtype := dtype) cfg)
   pure {
     input_layernorm := inputNorm.packDType
     attnFull := attnFull
     attnSliding := attnSliding
     post_attention_layernorm := postNorm.packDType
-    denseMlp := denseMlp
-    sparseMoe := sparseMoe
+    ffn := ffn
   }
-
-/-- FFN dispatch shared by all three layer entry points. -/
-private def ffnForward {batch seq : Nat}
-    (cfg : Config)
-    (layer : LagunaLayer (device := device) (dtype := dtype) cfg)
-    (h : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] })
-    : IO (Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] }) := do
-  match layer.denseMlp, layer.sparseMoe with
-  | some mlp, _ => pure (mlp.forward h)
-  | _, some moe => moe.forward3d cfg h
-  | _, _ => pure h
 
 /-- Uncached full-sequence layer forward. -/
 def forward {batch seq : Nat}
@@ -572,7 +626,7 @@ def forward {batch seq : Nat}
     | _, _ => pure h1
   let h2 := Tensor.add x mixed
   let h3 := rmsNormWeighted3d layer.post_attention_layernorm h2 cfg.rms_norm_eps
-  let ffn ← ffnForward cfg layer h3
+  let ffn ← layer.ffn.forward cfg h3
   pure (Tensor.add h2 ffn)
 
 /-- Batch prefill with KV-cache update (fresh cache; see
@@ -602,7 +656,7 @@ def forwardWithCache {batch seq cap : Nat}
     | _, _, _ => pure (h1, cache)
   let h2 := Tensor.add x mixed
   let h3 := rmsNormWeighted3d layer.post_attention_layernorm h2 cfg.rms_norm_eps
-  let ffn ← ffnForward cfg layer h3
+  let ffn ← layer.ffn.forward cfg h3
   pure (Tensor.add h2 ffn, cache')
 
 /-- Single-token decode step with KV-cache update. -/
@@ -632,7 +686,7 @@ def forwardStep {batch cap : Nat}
     | _, _, _ => pure (h1, cache)
   let h2 := Tensor.add x mixed
   let h3 := rmsNormWeighted3d layer.post_attention_layernorm h2 cfg.rms_norm_eps
-  let ffn ← ffnForward cfg layer h3
+  let ffn ← layer.ffn.forward cfg h3
   pure (Tensor.add h2 ffn, cache')
 
 private def forwardOwned {batch seq cap : Nat}
@@ -654,7 +708,7 @@ private def forwardOwned {batch seq cap : Nat}
     | _, _ => throw <| IO.userError "Laguna cache session requires attention in every layer"
   let h2 := Tensor.add x mixed
   let h3 := rmsNormWeighted3d layer.post_attention_layernorm h2 cfg.rms_norm_eps
-  let ffn ← ffnForward cfg layer h3
+  let ffn ← layer.ffn.forward cfg h3
   return (Tensor.add h2 ffn, kv')
 
 end LagunaLayer

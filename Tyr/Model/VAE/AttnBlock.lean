@@ -69,14 +69,14 @@ def forward {batch channels height width : Nat}
   -- Qᵀ K: [batch, spatial, spatial]
   let q_t := Tensor.transpose q 1 2  -- [batch, spatial, channels]
   let scale := Float.sqrt channels.toFloat
-  let attn_weights := bmm q_t k  -- [batch, spatial, spatial]
+  let attn_weights := Tensor.bmm q_t k  -- [batch, spatial, spatial]
   let attn_weights := Tensor.divScalar attn_weights scale
   let attn_weights := Tensor.softmax attn_weights
 
   -- V: [batch, channels, spatial]
   -- attn_weights @ Vᵀ = [batch, spatial, spatial] @ [batch, spatial, channels]
   let v_t := Tensor.transpose v 1 2  -- [batch, spatial, channels]
-  let out := bmm attn_weights v_t  -- [batch, spatial, channels]
+  let out := Tensor.bmm attn_weights v_t  -- [batch, spatial, channels]
   let out := Tensor.transpose out 1 2  -- [batch, channels, spatial]
 
   -- Reshape back to spatial

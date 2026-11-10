@@ -250,19 +250,9 @@ private def loadLayer (src : Source) (cfg : Config) (layerIdx : Nat)
       pure (some l)
     | .fullAttention => pure none
 
-  let denseMlp ←
-    if Config.isMoE cfg then
-      pure none
-    else
-      let m ← loadDenseMLP src cfg layerIdx device dtype
-      pure (some m)
-
-  let sparseMoe ←
-    if Config.isMoE cfg then
-      let m ← loadSparseMoe src cfg layerIdx device dtype
-      pure (some m)
-    else
-      pure none
+  let ffn ← Qwen35Ffn.build cfg
+    (loadDenseMLP src cfg layerIdx device dtype)
+    (loadSparseMoe src cfg layerIdx device dtype)
 
   pure {
     layerType := lt
@@ -270,8 +260,7 @@ private def loadLayer (src : Source) (cfg : Config) (layerIdx : Nat)
     full_attn := fullAttn
     linear_attn := linearAttn
     post_attention_layernorm := postNorm
-    dense_mlp := denseMlp
-    sparse_moe := sparseMoe
+    ffn := ffn
   }
 
 namespace Qwen35ForCausalLM

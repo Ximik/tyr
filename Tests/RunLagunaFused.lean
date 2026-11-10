@@ -298,8 +298,8 @@ private def runCorrectness (path : String) (device : Device) : IO Unit := do
   let mut worst := 0.0
   for i in [:5] do
     let x1 : Tensor { shape := #[1, 64], device := device, dtype := .BFloat16 } := Tensor.reshape (sliceTyped xD 0 i 1) #[1, 64]
-    let yFused ← block.forward2d testCfg x1
-    let yEager ← block.forward2d testCfg x1 false
+    let yFused ← block.forward2d testCfg (by decide) x1
+    let yEager ← block.forward2d testCfg (by decide) x1 false
     let (maxAbs, maxRel) ← maxErrors yFused yEager
     let yExpRow : Tensor { shape := #[1, 64], device := device, dtype := .BFloat16 } := Tensor.reshape (sliceTyped yExpD 0 i 1) #[1, 64]
     let (refAbs, _) ← maxErrors yFused yExpRow
@@ -332,8 +332,8 @@ private def runNativeCorrectness (path : String) (device : Device) : IO Unit := 
   IO.println "-- correctness: native SM12x W4A4 prefill vs eager W4A16"
   let block ← synthNativeBlock path device
   let x : Tensor { shape := #[16, 128], device := device, dtype := .BFloat16 } := bfloatDynamic (← Tensor.randn #[16, 128] false device)
-  let yNative ← block.forward2d nativeCfg x
-  let yEager ← block.forward2d nativeCfg x false
+  let yNative ← block.forward2d nativeCfg (by decide) x
+  let yEager ← block.forward2d nativeCfg (by decide) x false
   let (maxAbs, maxRel) ← maxErrors yNative yEager
   let (rmse, refRms, nrmse) ← normalizedRmse yNative yEager
   IO.println s!"  balanced: maxAbs={maxAbs} maxRel={maxRel} rmse={rmse} refRms={refRms} nrmse={nrmse}"
@@ -350,8 +350,8 @@ private def runNativeCorrectness (path : String) (device : Device) : IO Unit := 
       eScoreCorrectionBias := none } }
   let xSkew : Tensor { shape := #[17, 128], device := device, dtype := .BFloat16 } :=
     bfloatDynamic (← Tensor.randn #[17, 128] false device)
-  let ySkewNative ← skewed.forward2d nativeCfg xSkew
-  let ySkewEager ← skewed.forward2d nativeCfg xSkew false
+  let ySkewNative ← skewed.forward2d nativeCfg (by decide) xSkew
+  let ySkewEager ← skewed.forward2d nativeCfg (by decide) xSkew false
   let (skewAbs, skewRel) ← maxErrors ySkewNative ySkewEager
   let (skewRmse, skewRefRms, skewNrmse) ←
     normalizedRmse ySkewNative ySkewEager
@@ -363,7 +363,7 @@ private def runBenchmark (path : String) (device : Device) : IO Unit := do
   IO.println "-- micro-benchmark: production-sized banks (hidden=3072, E=256, k=10, moeInt=1024)"
   let block ← synthBigBlock path device
   let x1 : Tensor { shape := #[1, 3072], device := device, dtype := .BFloat16 } := bfloatDynamic (← Tensor.randn #[1, 3072] false device)
-  let (topIdx, topW) ← block.router.route bigCfg x1
+  let (topIdx, topW) ← block.router.route bigCfg (by decide) x1
   let k := bigCfg.num_experts_per_tok
   let h := bigCfg.hidden_size
   let mi := bigCfg.moe_intermediate_size
@@ -389,7 +389,7 @@ private def runBenchmark (path : String) (device : Device) : IO Unit := do
   -- without paying the full model's checkpoint-load cost on every kernel
   -- tuning iteration.
   let x56 : Tensor { shape := #[56, 3072], device := device, dtype := .BFloat16 } := bfloatDynamic (← Tensor.randn #[56, 3072] false device)
-  let (topIdx56, topW56) ← block.router.route bigCfg x56
+  let (topIdx56, topW56) ← block.router.route bigCfg (by decide) x56
   let (evP, wallP) ← timeCuda 3 20 (do
     _ ← lagunaMoeFp4Forward x56 topIdx56 topW56
       block.experts.gatePacked.2 block.experts.gateScale.2 block.experts.gateGlobal.2
@@ -400,10 +400,10 @@ private def runBenchmark (path : String) (device : Device) : IO Unit := do
 
   -- b) full MoE block decode, fused vs eager.
   let (evF, wallF) ← timeCuda 10 100 (do
-    _ ← block.forward2d bigCfg x1)
+    _ ← block.forward2d bigCfg (by decide) x1)
   IO.println s!"  block fused:    {evF} ms/event {wallF} ms/wall per token"
   let (evE, wallE) ← timeCuda 3 20 (do
-    _ ← block.forward2d bigCfg x1 false)
+    _ ← block.forward2d bigCfg (by decide) x1 false)
   IO.println s!"  block eager:    {evE} ms/event {wallE} ms/wall per token"
   IO.println s!"  speedup (wall): {wallE / wallF}x"
 
