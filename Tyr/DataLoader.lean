@@ -124,7 +124,7 @@ def resolveShardPaths (pathSpec : String) (kind : ShardKind) : IO (Array String)
 structure BOSFinder (n : Nat) where
   bosToken : UInt64
   bosPositions : Array (Fin n)
-  currentPos : Nat
+  currentPos : Fin (n + 1)
   /-- Source document spans (start, length) in stream order; empty means source order. -/
   orderedDocs : Array { span : Nat × Nat // span.1 + span.2 ≤ n } := #[]
   /-- Exclusive cumulative document ends in the reordered stream. -/
@@ -154,30 +154,29 @@ def BOSFinder.findNextValidStart {n : Nat} (finder : BOSFinder n) (after : Nat) 
     The result holds exactly `min count (remaining)` Int64 tokens. -/
 def BOSFinder.take {n : Nat} (finder : BOSFinder n) (tokens : Tensor { shape := #[n], dtype := .Int64, device := device })
     (count : Nat)
-    : IO (Tensor { shape := #[min count (n - finder.currentPos)], dtype := .Int64, device := device } × BOSFinder n) := do
-  let ⟨hPos⟩ ← if h : finder.currentPos ≤ n then pure (PLift.up h) else
-    throw <| IO.userError "Data cursor position exceeds shard length"
-  let count := min count (n - finder.currentPos)
+    : IO (Tensor { shape := #[min count (n - finder.currentPos.val)], dtype := .Int64, device := device } × BOSFinder n) := do
+  have hPos := finder.currentPos.isLt
+  let count := min count (n - finder.currentPos.val)
   if h : count = 0 then
     return (tokens.slice 0 0 0 |>.reshape #[count] (by simp [h]), finder)
-  let endPos := finder.currentPos + count
+  let endPos : Fin (n + 1) := ⟨finder.currentPos.val + count, by omega⟩
   if finder.orderedDocs.isEmpty then
-    return (tokens.slice 0 finder.currentPos count,
+    return (tokens.slice 0 finder.currentPos.val count,
       { finder with currentPos := endPos })
   -- Binary search avoids rescanning every earlier document for each batch.
   let mut lo := 0
   let mut hi := finder.orderedEnds.size
   while lo < hi do
     let mid := (lo + hi) / 2
-    if finder.orderedEnds[mid]! <= finder.currentPos then lo := mid + 1 else hi := mid
+    if finder.orderedEnds[mid]! <= finder.currentPos.val then lo := mid + 1 else hi := mid
   let mut doc := lo
-  let mut pos := finder.currentPos
+  let mut pos := finder.currentPos.val
   let mut chunks : Array (Sigma fun shape => Tensor { shape := shape, dtype := .Int64, device := device }) := #[]
-  while pos < endPos do
+  while pos < endPos.val do
     let some ⟨(start, docLen), hSpan⟩ := finder.orderedDocs[doc]? | break
     let docStart := if doc == 0 then 0 else finder.orderedEnds[doc - 1]!
     let offset := min (pos - docStart) docLen
-    let len := min (endPos - pos) (docLen - offset)
+    let len := min (endPos.val - pos) (docLen - offset)
     chunks := chunks.push (Tensor.packShape (tokens.slice 0 (start + offset) len))
     pos := pos + len
     doc := doc + 1
@@ -191,9 +190,7 @@ def BOSFinder.getBatch {n : Nat} (finder : BOSFinder n) (tokens : Tensor { shape
     (batchSize seqLen : Nat)
     : IO (Option (Tensor { shape := #[batchSize, seqLen], dtype := .Int64, device := device }) × BOSFinder n) := do
   let ⟨requiredLen, hRequired⟩ ← batchTokenCount batchSize seqLen
-  if finder.currentPos > n then
-    throw <| IO.userError "Data cursor position exceeds shard length"
-  if hFits : requiredLen ≤ n - finder.currentPos then
+  if hFits : requiredLen ≤ n - finder.currentPos.val then
     let (batch, finder) ← finder.take tokens requiredLen
     return (some (batch.reshape #[batchSize, seqLen] (by rw [Nat.min_eq_left hFits, hRequired]; simp)), finder)
   else
@@ -425,7 +422,7 @@ def DistributedDataGenerator.cursor (gen : DistributedDataGenerator) : StreamCur
   seed := gen.config.seed, shuffle := gen.config.shuffle, bosToken := gen.config.bosToken
   rank := gen.rank, worldSize := gen.worldSize, trainPaths := gen.trainPaths
   trainPathIdx := gen.trainPathIdx, shardLength := gen.iterator.numTokens
-  position := gen.iterator.shard.bosFinder.currentPos, epoch := gen.iterator.epoch
+  position := gen.iterator.shard.bosFinder.currentPos.val, epoch := gen.iterator.epoch
   globalStep := gen.globalStep, batchCount := gen.iterator.batchCount }
 
 /-- Restore only an identical stream configuration. The ordered document
@@ -439,11 +436,11 @@ def DistributedDataGenerator.restoreCursor (gen : DistributedDataGenerator) (cur
   if cursor.trainPathIdx >= gen.trainPaths.size then
     throw <| IO.userError "Data cursor shard index out of bounds"
   let ⟨n, shard⟩ ← DataShard.load gen.trainPaths[cursor.trainPathIdx]! gen.rank gen.worldSize gen.config.bosToken
-  if n != cursor.shardLength || cursor.position > n then
+  let ⟨hPosition⟩ ← if h : n = cursor.shardLength ∧ cursor.position ≤ n then pure (PLift.up h) else
     throw <| IO.userError "Data cursor shard length or position mismatch"
   let iterator := BatchIterator.new shard
     (streamSeed gen.config gen.rank cursor.trainPathIdx) cursor.epoch
-  let finder := { iterator.shard.bosFinder with currentPos := cursor.position }
+  let finder := { iterator.shard.bosFinder with currentPos := ⟨cursor.position, show cursor.position < n + 1 by omega⟩ }
   let iterator := { iterator with
     shard := { iterator.shard with bosFinder := finder }
     batchCount := cursor.batchCount }
