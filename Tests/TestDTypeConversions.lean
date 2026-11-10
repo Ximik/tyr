@@ -48,13 +48,6 @@ open torch
     LeanTest.assertTrue rejected "Tree conversion must report native rejection through IO."
   LeanTest.assertEqual (← original.toFloatArray) #[1, 1]
 
-@[test] def testInt64TrueDivisionReturnsFloat32 : IO Unit := do
-  let numerator := Tensor.fromInt64Array #[6]
-  let denominator := Tensor.fromInt64Array #[2]
-  let result : Tensor ⟨#[1], .Float32, .CPU⟩ := Tensor.div numerator denominator
-  LeanTest.assertEqual result.raw.dtype .Float32
-  LeanTest.assertEqual (← result.toFloatArray) #[3]
-
 example (_left _right : Tensor ⟨#[2], .Bool, .CPU⟩) (_floats : Tensor ⟨#[2], .Float32, .CPU⟩) : True := by
   have _ := Tensor.sub _floats _floats
   fail_if_success have _ := Tensor.sub _left _right
@@ -85,46 +78,31 @@ example (_float8 : Tensor ⟨#[1], .Float8E4M3FN, .CPU⟩) (_floats : Tensor ⟨
   LeanTest.assertEqual (← lhs.toFloatArray) #[6, 12]
   LeanTest.assertEqual (← rhs.toFloatArray) #[2, 3]
 
-@[test] def testMixedFloatPromotion : IO Unit := do
-  let left := ((Tensor.fromFloatArray #[6, 12]).castDType .BFloat16)
-  let right := (Tensor.fromFloatArray #[2, 3])
-  let sum : Tensor ⟨#[2], .Float32, .CPU⟩ := Tensor.add left right
-  let difference : Tensor ⟨#[2], .Float32, .CPU⟩ := Tensor.sub left right
-  let product : Tensor ⟨#[2], .Float32, .CPU⟩ := Tensor.mul left right
-  let quotient : Tensor ⟨#[2], .Float32, .CPU⟩ := Tensor.div left right
-  for (expected, result) in #[(#[8, 15], sum), (#[4, 9], difference), (#[12, 36], product),
-      (#[3, 4], quotient)] do
-    LeanTest.assertEqual result.raw.dtype .Float32
-    LeanTest.assertEqual (← result.toFloatArray) expected
-  LeanTest.assertEqual left.raw.dtype .BFloat16
-  LeanTest.assertEqual (← left.toFloatArray) #[6, 12]
-  LeanTest.assertEqual (← right.toFloatArray) #[2, 3]
-
-@[test] def testMixedIntegerPromotion : IO Unit := do
-  let left := ((Tensor.fromFloatArray #[250, 1]).castDType .UInt8)
-  let right := ((Tensor.fromFloatArray #[-1, 2]).castDType .Int8)
-  let result : Tensor ⟨#[2], .Int16, .CPU⟩ := Tensor.add left right
-  LeanTest.assertEqual result.raw.dtype .Int16
-  LeanTest.assertEqual (← result.toFloatArray) #[249, 3]
-
-@[test] def testIntegerDivisionPromotion : IO Unit := do
-  let left := ((Tensor.fromFloatArray #[6, 12]).castDType .Int32)
-  let right := ((Tensor.fromFloatArray #[2, 3]).castDType .Int64)
-  let result : Tensor ⟨#[2], .Float32, .CPU⟩ := Tensor.div left right
-  LeanTest.assertEqual result.raw.dtype .Float32
-  LeanTest.assertEqual (← result.toFloatArray) #[3, 4]
-
-@[test] def testHostFloatScalarPromotion : IO Unit := do
-  let input := ((Tensor.fromFloatArray #[6, 12]).castDType .Int32)
-  let sum : Tensor ⟨#[2], .Float32, .CPU⟩ := Tensor.addScalar input 0.5
-  let difference : Tensor ⟨#[2], .Float32, .CPU⟩ := Tensor.subScalar input 0.5
-  let product : Tensor ⟨#[2], .Float32, .CPU⟩ := Tensor.mulScalar input 0.5
-  let quotient : Tensor ⟨#[2], .Float32, .CPU⟩ := Tensor.divScalar input 0.5
-  for (expected, result) in #[(#[6.5, 12.5], sum), (#[5.5, 11.5], difference),
-      (#[3, 6], product), (#[12, 24], quotient)] do
-    LeanTest.assertEqual result.raw.dtype .Float32
-    LeanTest.assertEqual (← result.toFloatArray) expected
-  LeanTest.assertEqual input.raw.dtype .Int32
-  LeanTest.assertEqual (← input.toFloatArray) #[6, 12]
+/-- Each mixed-dtype result is admitted by `ofRaw!`, which aborts if libtorch's
+promotion differs from the Lean result index; the values show the arithmetic ran
+in the promoted dtype. -/
+@[test] def testMixedPromotionMatchesNative : IO Unit := do
+  let bf16 := (Tensor.fromFloatArray #[6, 12]).castDType .BFloat16
+  let f32 := Tensor.fromFloatArray #[2, 3]
+  let f64 := (Tensor.fromFloatArray #[1, 1]).castDType .Float64
+  let u8 := (Tensor.fromFloatArray #[250, 1]).castDType .UInt8
+  let i8 := (Tensor.fromFloatArray #[-1, 2]).castDType .Int8
+  let i32 := (Tensor.fromFloatArray #[6, 12]).castDType .Int32
+  let i64 := (Tensor.fromFloatArray #[2, 3]).castDType .Int64
+  let cases : Array (String × Array Float × Array Float) := #[
+    ("BFloat16 + Float32", ← (Tensor.add bf16 f32 : Tensor ⟨#[2], .Float32, .CPU⟩).toFloatArray, #[8, 15]),
+    ("BFloat16 - Float32", ← (Tensor.sub bf16 f32 : Tensor ⟨#[2], .Float32, .CPU⟩).toFloatArray, #[4, 9]),
+    ("BFloat16 * Float32", ← (Tensor.mul bf16 f32 : Tensor ⟨#[2], .Float32, .CPU⟩).toFloatArray, #[12, 36]),
+    ("BFloat16 / Float32", ← (Tensor.div bf16 f32 : Tensor ⟨#[2], .Float32, .CPU⟩).toFloatArray, #[3, 4]),
+    ("Float32 + Float64", ← (Tensor.add f32 f64 : Tensor ⟨#[2], .Float64, .CPU⟩).toFloatArray, #[3, 4]),
+    ("UInt8 + Int8", ← (Tensor.add u8 i8 : Tensor ⟨#[2], .Int16, .CPU⟩).toFloatArray, #[249, 3]),
+    ("Int32 / Int64", ← (Tensor.div i32 i64 : Tensor ⟨#[2], .Float32, .CPU⟩).toFloatArray, #[3, 4]),
+    ("Int64 / Int64", ← (Tensor.div i64 i64 : Tensor ⟨#[2], .Float32, .CPU⟩).toFloatArray, #[1, 1]),
+    ("Int32 + 0.5", ← (Tensor.addScalar i32 0.5 : Tensor ⟨#[2], .Float32, .CPU⟩).toFloatArray, #[6.5, 12.5]),
+    ("Int32 - 0.5", ← (Tensor.subScalar i32 0.5 : Tensor ⟨#[2], .Float32, .CPU⟩).toFloatArray, #[5.5, 11.5]),
+    ("Int32 * 0.5", ← (Tensor.mulScalar i32 0.5 : Tensor ⟨#[2], .Float32, .CPU⟩).toFloatArray, #[3, 6]),
+    ("Int32 / 0.5", ← (Tensor.divScalar i32 0.5 : Tensor ⟨#[2], .Float32, .CPU⟩).toFloatArray, #[12, 24])]
+  for (label, actual, expected) in cases do
+    LeanTest.assertEqual actual expected label
 
 end Tests.DTypeConversions

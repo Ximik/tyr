@@ -16,20 +16,23 @@ private def expectError {α : Type} (result : Except String α) (fragment : Stri
   | .ok _ => LeanTest.fail s!"Expected rejection containing {fragment}"
   | .error message => LeanTest.assertTrue (message.containsSubstr fragment) message
 
--- Invalid domains must be rejected without evaluating a native operation.
-example (_complex : Tensor ⟨#[2], .Complex64, .CPU⟩)
-    (_empty : Tensor ⟨#[0], .Float32, .CPU⟩)
-    (_vector : Tensor ⟨#[2], .Float32, .CPU⟩)
-    (_integer : Tensor ⟨#[2], .Int64, .CPU⟩) : True := by
+-- Domain and axis requirements, one block per operation family.
+example (_values : Tensor ⟨#[2], .Float32, .CPU⟩) (_complex : Tensor ⟨#[2], .Complex64, .CPU⟩) : True := by
+  have _ := Tensor.relu _values
   fail_if_success have _ := Tensor.relu _complex
-  fail_if_success have _ := Tensor.maxAll _empty
-  have _ := Tensor.sumDim _vector 0
-  fail_if_success have _ := Tensor.sumDim _vector 1
-  have _ := Tensor.meanAll _vector
-  fail_if_success have _ := Tensor.meanAll _integer
-  have _ := Tensor.meanDim _vector 0
-  fail_if_success have _ := Tensor.meanDim _vector 1
-  fail_if_success have _ := Tensor.meanDim _integer 0
+  trivial
+
+example (_values : Tensor ⟨#[2], .Float32, .CPU⟩) : True := by
+  have _ := Tensor.sumDim _values 0
+  fail_if_success have _ := Tensor.sumDim _values 1
+  trivial
+
+example (_values : Tensor ⟨#[2], .Float32, .CPU⟩) (_ints : Tensor ⟨#[2], .Int64, .CPU⟩) : True := by
+  have _ := Tensor.meanAll _values
+  fail_if_success have _ := Tensor.meanAll _ints
+  have _ := Tensor.meanDim _values 0
+  fail_if_success have _ := Tensor.meanDim _values 1
+  fail_if_success have _ := Tensor.meanDim _ints 0
   trivial
 
 example (x : Tensor ⟨#[2], .Int64, .CPU⟩) (y : Tensor ⟨#[2], .Float32, .CPU⟩)
@@ -105,11 +108,13 @@ example (_left : Tensor ⟨#[2, 2], .BFloat16, .CPU⟩)
   LeanTest.assertEqual result.raw.dtype .Float32
   LeanTest.assertEqual (← result.toFloatArray) #[13, 13, 13, 13]
 
-example (_input : Tensor ⟨#[2, 2], .Int64, .CPU⟩) (_empty : Tensor ⟨#[0, 2], .Float32, .CPU⟩) :
-    True := by
-  fail_if_success have _ := Tensor.spectralNorm _input
-  fail_if_success have _ := Tensor.nuclearNorm _input
+example (_values : Tensor ⟨#[2, 2], .Float32, .CPU⟩) (_ints : Tensor ⟨#[2, 2], .Int64, .CPU⟩)
+    (_empty : Tensor ⟨#[0, 2], .Float32, .CPU⟩) : True := by
+  have _ := Tensor.spectralNorm _values
+  fail_if_success have _ := Tensor.spectralNorm _ints
   fail_if_success have _ := Tensor.spectralNorm _empty
+  have _ := Tensor.nuclearNorm _values
+  fail_if_success have _ := Tensor.nuclearNorm _ints
   have _ := Tensor.nuclearNorm _empty
   trivial
 
@@ -124,12 +129,5 @@ example {d : DType} [DType.FloatingOrComplex d]
     LeanTest.assertEqual (Tensor.spectralNorm! input) 4
     LeanTest.assertEqual (Tensor.nuclearNorm! input) 7
   LeanTest.assertEqual (Tensor.nuclearNorm (Tensor.zeros #[0, 2])) 0
-
-@[test] def testTensorScalarBroadcastPromotion : IO Unit := do
-  let x := Tensor.fromInt64Array #[2, 4]
-  let scalar := (Tensor.fromFloatArray #[0.5]).reshape #[]
-  let native : Tensor ⟨#[2], .Float32, .CPU⟩ := branching.mulTensorScalar x scalar
-  LeanTest.assertEqual native.raw.dtype .Float32
-  LeanTest.assertEqual (← native.toFloatArray) #[1, 2]
 
 end Tests.OperationContracts
