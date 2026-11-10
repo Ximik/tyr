@@ -60,7 +60,7 @@ def init (in_ch out_ch kernel_size : Nat) (padding : Nat := 0) (device : Device 
   let _ := support.down
   let std := Float.sqrt (2.0 / (in_ch * kernel_size * kernel_size).toFloat)
   let w ← Tensor.randn (device := device) #[out_ch, in_ch, kernel_size, kernel_size]
-  let w ← IO.ofExcept (w.castDType? dtype)
+  let w := w.castDType dtype
   let b := Tensor.zerosFor { shape := #[out_ch], dtype, device }
   pure {
     weight := (← Tensor.parameter (Tensor.mulScalar w std))

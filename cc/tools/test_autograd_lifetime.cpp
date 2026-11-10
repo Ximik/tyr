@@ -225,8 +225,7 @@ void functionalGradPreservesCapturedGraph(bool independent) {
     lean_inc(captured.get());
     lean_closure_set(closure, 0, captured.get());
     Object result(lean_torch_functional_grad(inputs.get(), closure), lean_dec);
-    require(lean_obj_tag(result.get()) == 1, "functionalGrad failed with captured graph");
-    auto gradients = lean_ctor_get(result.get(), 0);
+    auto gradients = result.get();
     auto gradient = native(lean_array_get_core(gradients, 0));
     require(gradient.equal(independent ? torch::zeros({2}) : torch::tensor({4.0f, 9.0f})),
             "Wrong gradient with captured graph");

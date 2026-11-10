@@ -254,7 +254,7 @@ def computeLosses {batch seq vocab : Nat} (logits : Tensor { shape := #[batch, s
   let batchSeq := batch * seq
   let logitsFlat := Tensor.reshape logits #[batchSeq, vocab]
   let targetsFlat := Tensor.reshape targetIds #[batchSeq]
-  let lossesFlat := Tensor.crossEntropyNone logitsFlat targetsFlat
+  let lossesFlat := Tensor.crossEntropyNone! logitsFlat targetsFlat
   Tensor.reshape lossesFlat #[batch, seq]
 
 /-- Evaluate multiple choice example.

@@ -194,7 +194,9 @@ private def computeSpeakerMelFromWave
   let wav : Tensor { shape := #[paddedLen], dtype := .Float32, device := .CPU } := Tensor.reshape (Tensor.fromFloatArray padded) #[paddedLen]
 
   let window : Tensor { shape := #[winSize], dtype := .Float32, device := .CPU } := Tensor.hannWindow winSize
-  let spec ← Tensor.stft wav nFft hopSize window false false
+  let ⟨hStft⟩ ← if h : Tensor.StftValid paddedLen nFft hopSize winSize false then pure (PLift.up h) else
+    throw <| IO.userError s!"STFT parameters n_fft={nFft} hop={hopSize} win={winSize} do not fit {paddedLen} samples"
+  let spec := Tensor.stft wav nFft hopSize window false false hStft
   let freqBins : Nat := nFft / 2 + 1
   let frames : Nat := Tensor.stftFrames paddedLen nFft hopSize false
   if spec.runtimeShape != #[freqBins, frames, 2] then

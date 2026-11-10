@@ -888,37 +888,35 @@ static lean_object* applyPureAutogradCallback(lean_obj_arg callback,
 // A pure differentiation boundary. Temporary leaf identities cannot escape:
 // the callback returns only a scalar loss, and results are detached gradients.
 lean_object* lean_torch_functional_grad(b_lean_obj_arg inputs, lean_obj_arg f) {
-  return tyr::catchAllCall("functionalGrad", [&] {
-    OwnedLeanObject callback(f, lean_dec);
-    torch::AutoGradMode enable_grad(true);
-    std::vector<torch::Tensor> leaves;
-    const size_t size = lean_array_size(inputs);
-    leaves.reserve(size);
-    OwnedLeanObject arguments(lean_mk_empty_array(), lean_dec);
-    for (size_t i = 0; i < size; ++i) {
-      auto leaf = borrowTensor(lean_array_get_core(inputs, i)).detach().clone();
-      leaf.requires_grad_(true);
-      leaves.push_back(leaf);
-      arguments.reset(lean_array_push(arguments.release(), fromTorchTensor(leaf)));
-    }
-    OwnedLeanObject loss_object(applyPureAutogradCallback(callback.release(), arguments.release()), lean_dec);
-    auto loss = borrowTensor(loss_object.get());
-    TORCH_CHECK(loss.numel() == 1, "functionalGrad: expected scalar output");
-    std::vector<torch::Tensor> gradients(size);
-    if (size != 0 && loss.requires_grad()) {
-      // Only nodes on paths to these fresh leaves execute. Captured older graph
-      // branches cannot depend on the leaves and remain outside this traversal.
-      gradients = torch::autograd::grad({loss}, leaves, {}, /*retain_graph=*/false,
-                                        /*create_graph=*/false, /*allow_unused=*/true);
-    }
-    OwnedLeanObject result(lean_mk_empty_array(), lean_dec);
-    for (size_t i = 0; i < size; ++i) {
-      auto gradient = gradients[i].defined() ? gradients[i].detach().clone()
-                                            : torch::zeros_like(leaves[i]);
-      result.reset(lean_array_push(result.release(), fromTorchTensor(std::move(gradient))));
-    }
-    return result.release();
-  });
+  OwnedLeanObject callback(f, lean_dec);
+  torch::AutoGradMode enable_grad(true);
+  std::vector<torch::Tensor> leaves;
+  const size_t size = lean_array_size(inputs);
+  leaves.reserve(size);
+  OwnedLeanObject arguments(lean_mk_empty_array(), lean_dec);
+  for (size_t i = 0; i < size; ++i) {
+    auto leaf = borrowTensor(lean_array_get_core(inputs, i)).detach().clone();
+    leaf.requires_grad_(true);
+    leaves.push_back(leaf);
+    arguments.reset(lean_array_push(arguments.release(), fromTorchTensor(leaf)));
+  }
+  OwnedLeanObject loss_object(applyPureAutogradCallback(callback.release(), arguments.release()), lean_dec);
+  auto loss = borrowTensor(loss_object.get());
+  TORCH_CHECK(loss.numel() == 1, "functionalGrad: expected scalar output");
+  std::vector<torch::Tensor> gradients(size);
+  if (size != 0 && loss.requires_grad()) {
+    // Only nodes on paths to these fresh leaves execute. Captured older graph
+    // branches cannot depend on the leaves and remain outside this traversal.
+    gradients = torch::autograd::grad({loss}, leaves, {}, /*retain_graph=*/false,
+                                      /*create_graph=*/false, /*allow_unused=*/true);
+  }
+  OwnedLeanObject result(lean_mk_empty_array(), lean_dec);
+  for (size_t i = 0; i < size; ++i) {
+    auto gradient = gradients[i].defined() ? gradients[i].detach().clone()
+                                          : torch::zeros_like(leaves[i]);
+    result.reset(lean_array_push(result.release(), fromTorchTensor(std::move(gradient))));
+  }
+  return result.release();
 }
 
 // Parameter identity is effectful. Consume the Lean reference before the native
@@ -993,7 +991,7 @@ static void validateCrossEntropyTargets(b_lean_obj_arg logits, b_lean_obj_arg ta
   TORCH_CHECK(input.device() == labels.device(), "cross entropy requires matching devices");
   // Validate before dispatch so invalid labels do not cause an asynchronous
   // device-side assertion. Preserve PyTorch's default ignore_index = -100.
-  TORCH_CHECK(((labels == -100) | ((labels >= 0) & (labels < input.size(1)))).all().item<bool>(),
+  TYR_DATA_CHECK(((labels == -100) | ((labels >= 0) & (labels < input.size(1)))).all().item<bool>(),
               "cross entropy target is outside the class range (except ignore_index -100)");
 }
 
@@ -1376,17 +1374,22 @@ lean_object* lean_torch_cat2(
 
 lean_object* lean_torch_cat_dyn(b_lean_obj_arg tensors, b_lean_obj_arg dim_obj) {
   const auto dim = static_cast<int64_t>(tyr::natTo<int64_t>(dim_obj, "dim"));
-  if (!lean_is_array(tensors)) {
-    lean_internal_panic("lean_torch_cat_dyn: expected array");
+  std::vector<torch::Tensor> inputs;
+  for (size_t i = 0; i < lean_array_size(tensors); ++i)
+    inputs.push_back(borrowTensor(lean_array_get_core(tensors, i)));
+  TYR_DATA_CHECK(!inputs.empty(), "catMany requires at least one tensor");
+  const auto& first = inputs.front();
+  TYR_DATA_CHECK(dim < first.dim(), "catMany axis ", dim, " is out of range for rank ", first.dim());
+  for (const auto& input : inputs) {
+    TORCH_CHECK(input.scalar_type() == first.scalar_type(), "catMany requires one dtype");
+    TORCH_CHECK(input.device() == first.device(), "catMany requires one device");
+    TYR_DATA_CHECK(input.dim() == first.dim(), "catMany requires equal ranks, got ",
+      first.dim(), " and ", input.dim());
+    for (int64_t axis = 0; axis < first.dim(); ++axis)
+      TYR_DATA_CHECK(axis == dim || input.size(axis) == first.size(axis),
+        "catMany sizes differ on axis ", axis, ": ", first.sizes(), " and ", input.sizes());
   }
-  std::vector<torch::Tensor> tensor_list;
-  size_t arr_size = lean_array_size(tensors);
-  for (size_t i = 0; i < arr_size; i++) {
-    auto tensor_obj = lean_array_get_core(tensors, i);
-    tensor_list.push_back(borrowTensor(tensor_obj));
-  }
-  auto result_ = torch::cat(tensor_list, dim);
-  return fromTorchTensor(result_);
+  return fromTorchTensor(torch::cat(inputs, dim));
 }
 
 // Cumulative sum along a dimension.
@@ -1680,12 +1683,6 @@ double lean_torch_item(b_lean_obj_arg input) {
   return result;
 }
 
-lean_object* lean_torch_item_try(b_lean_obj_arg input) {
-  return tyr::catchAllCall("item", [&] {
-    return lean_box_float(borrowTensor(input).item<double>());
-  });
-}
-
 // Item extraction as int64
 uint64_t lean_torch_item_int(b_lean_obj_arg input) {
   auto input_ = borrowTensor(input);
@@ -1898,7 +1895,7 @@ lean_object* lean_torch_index_select(
   // Device-local comparisons copy only one validity bit back to the host.
   const auto limit = data.size(dim);
   if (index.numel() > 0) {
-    TORCH_CHECK((index.ge(0) & index.lt(limit)).all().item<bool>(),
+    TYR_DATA_CHECK((index.ge(0) & index.lt(limit)).all().item<bool>(),
       "indexSelect index is out of range for length ", limit);
   }
   return fromTorchTensor(torch::index_select(data, dim, index));
@@ -1906,7 +1903,7 @@ lean_object* lean_torch_index_select(
 
 lean_object* lean_torch_index_select_try(b_lean_obj_arg input,
     b_lean_obj_arg dim_obj, b_lean_obj_arg indices) {
-  return tyr::catchAllCall("indexSelect", [&] {
+  return tyr::tryCall("indexSelect", [&] {
     return lean_torch_index_select(input, dim_obj, indices);
   });
 }
@@ -2706,16 +2703,6 @@ extern "C" LEAN_EXPORT lean_object* lean_torch_cast_dtype(b_lean_obj_arg tensor,
   return fromTorchTensor(borrowTensor(tensor).to(scalarTypeOfLeanDType(dtype)));
 }
 
-extern "C" LEAN_EXPORT lean_object* lean_torch_cast_dtype_try(
-    lean_obj_arg shape, b_lean_obj_arg tensor, uint8_t dtype) {
-  return tyr::catchAllCall("castDType", [&] {
-    OwnedLeanObject shape_owner(shape, lean_dec);
-    auto source = borrowTensor(tensor);
-    TORCH_CHECK(source.sizes().vec() == getShape(shape), "source tensor shape mismatch");
-    return fromTorchTensor(source.to(scalarTypeOfLeanDType(dtype)));
-  });
-}
-
 extern "C" LEAN_EXPORT lean_object* lean_torch_convert_tensor(
     lean_obj_arg shape, b_lean_obj_arg tensor, b_lean_obj_arg device,
     b_lean_obj_arg dtype_option) {
@@ -2960,21 +2947,6 @@ lean_object* lean_torch_stft_1d(
       true);
   auto packed_ = torch::view_as_real(complex_);
   return fromTorchTensor(packed_);
-}
-
-lean_object* lean_torch_stft_1d_try(
-    b_lean_obj_arg input,
-    b_lean_obj_arg n_fft_obj,
-    b_lean_obj_arg hop_length_obj,
-    b_lean_obj_arg win_length_obj,
-    b_lean_obj_arg window,
-    uint8_t center,
-    uint8_t normalized
-) {
-  return tyr::catchAllCall("stft", [&] {
-    return lean_torch_stft_1d(input, n_fft_obj, hop_length_obj, win_length_obj,
-                             window, center, normalized);
-  });
 }
 
 // 1D inverse STFT from real/imag packed input.
@@ -4019,14 +3991,7 @@ lean_object* lean_torch_svd_try(b_lean_obj_arg t) {
 }
 
 lean_object* lean_torch_cat_dyn_try(b_lean_obj_arg tensors, b_lean_obj_arg dim) {
-  return tyr::catchAllCall("catMany", [&] {
-    TORCH_CHECK(lean_is_array(tensors), "expected array");
-    const auto axis = static_cast<int64_t>(tyr::natTo<int64_t>(dim, "dim"));
-    std::vector<torch::Tensor> inputs;
-    for (size_t i = 0; i < lean_array_size(tensors); ++i)
-      inputs.push_back(borrowTensor(lean_array_get_core(tensors, i)));
-    return fromTorchTensor(torch::cat(inputs, axis));
-  });
+  return tyr::tryCall("catMany", [&] { return lean_torch_cat_dyn(tensors, dim); });
 }
 
 lean_object* lean_torch_rms_norm_weighted(

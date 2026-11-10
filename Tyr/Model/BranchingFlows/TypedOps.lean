@@ -17,7 +17,7 @@ def onesDynamic (shape : Shape) (device : Device := .CPU) (dtype : DType := .Flo
     Tensor { shape, dtype, device } := Tensor.onesFor { shape, dtype, device }
 def randnDynamic (shape : Shape) (device : Device := .CPU) (dtype : DType := .Float32) :
     IO (Tensor { shape, dtype, device }) := do
-  IO.ofExcept ((← Tensor.randn shape false device).castDType? dtype)
+  pure ((← Tensor.randn shape false device).castDType dtype)
 def floatsDynamic (values : Array Float) : Tensor { shape := #[values.size], dtype := .Float32, device := .CPU } :=
   Tensor.fromFloatArray values
 def floatDynamic {s : Shape} {d : DType} {dev : Device} (x : Tensor { shape := s, dtype := d, device := dev }) : Tensor { shape := s, dtype := .Float32, device := dev } :=

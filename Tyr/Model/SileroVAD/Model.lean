@@ -53,7 +53,7 @@ private def loadWeight (path name : String) (shape : Shape) (device : Device := 
     let stored ← (← safetensors.Source.open path).load name shape device
     -- The checkpoint retains its exact dtype until this model's explicit
     -- Float32 inference policy is applied through the checked conversion.
-    IO.ofExcept (stored.2.castDType? .Float32)
+    pure (stored.2.castDType .Float32)
   catch error =>
     throw <| IO.userError s!"SileroVAD tensor '{name}': {error}"
 

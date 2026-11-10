@@ -21,25 +21,6 @@ inline lean_object* errorResult(const char* context, const char* message) noexce
   return result;
 }
 
-// The callable returns an owned Lean payload. All native work (including
-// ownership guards) executes inside this firewall, never across a Lean frame.
-// The noexcept boundary also covers exceptions not derived from std::exception.
-template <typename F>
-lean_object* catchAllCall(const char* context, F&& operation) noexcept {
-  try {
-    auto* payload = std::forward<F>(operation)();
-    auto* result = lean_alloc_ctor(1, 1, 0);
-    lean_ctor_set(result, 0, payload);
-    return result;
-  } catch (const c10::Error& error) {
-    return errorResult(context, error.what_without_backtrace());
-  } catch (const std::exception& error) {
-    return errorResult(context, error.what());
-  } catch (...) {
-    return errorResult(context, "unknown native exception");
-  }
-}
-
 // A failure that depends on the values of the inputs (no real logarithm, a
 // factorization that does not converge), as opposed to a contract violation or
 // a missing kernel. Only `tryCall` turns it into an error.

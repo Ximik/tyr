@@ -8,23 +8,16 @@ namespace Tests.DTypeConversions
 
 open torch
 
-private def checked {α : Type} (result : Except String α) : IO α :=
-  match result with
-  | .ok value => pure value
-  | .error message => throw (IO.userError message)
-
-@[test] def testCheckedComplexConversionRoundtrip : IO Unit := do
+@[test] def testComplexConversionRoundtrip : IO Unit := do
   let original := Tensor.fromFloatArray #[1.25, -2.5]
-  let complex64 ← checked (original.castDType? .Complex64)
-  let complex128 ← checked (complex64.castDType? .Complex128)
-  let restored ← checked (complex128.castDType? .Float32)
+  let complex64 := original.castDType .Complex64
+  let complex128 := complex64.castDType .Complex128
+  let restored := complex128.castDType .Float32
   LeanTest.assertEqual complex64.raw.dtype .Complex64
   LeanTest.assertEqual complex128.raw.dtype .Complex128
   LeanTest.assertEqual (← restored.toFloatArray) (← original.toFloatArray)
   LeanTest.assertEqual original.raw.dtype .Float32
   LeanTest.assertTrue (complex128.raw.device == original.raw.device)
-  -- The ordinary convenience uses the same checked native conversion.
-  LeanTest.assertEqual (original.castDType .Complex64).raw.dtype .Complex64
 
 @[test] def testTreeComplexConversionRoundtrip : IO Unit := do
   let original := Tensor.fromFloatArray #[1.25, -2.5]
@@ -40,15 +33,12 @@ private def checked {α : Type} (result : Except String α) : IO α :=
     Tensor.eyeFor (n := 2) .Complex64 (.CPU)
   LeanTest.assertEqual identity.raw.dtype .Complex64
   LeanTest.assertTrue (identity.raw.device == .CPU)
-  let restored ← checked (identity.castDType? .Float32)
+  let restored := identity.castDType .Float32
   LeanTest.assertEqual (← restored.toFloatArray) #[1, 0, 0, 1]
 
-@[test] def testUnsupportedKnownConversionsAreRecoverable : IO Unit := do
+@[test] def testUnsupportedTreeConversionsReportIOErrors : IO Unit := do
   let original := Tensor.ones #[2]
   for dtype in #[DType.QInt8, DType.Bits1x8] do
-    match original.castDType? dtype with
-    | .ok _ => LeanTest.fail s!"Expected unsupported native conversion to {dtype}"
-    | .error message => LeanTest.assertTrue (message.containsSubstr "castDType:")
     let rejected ← try
         let _ ← TensorStruct.castTo (Tensor { shape := #[2], dtype, device := .CPU }) original
         pure false

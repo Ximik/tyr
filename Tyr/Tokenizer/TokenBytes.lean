@@ -67,7 +67,7 @@ def TokenBytes.totalBytes (tb : TokenBytes) (tokenIds : Array UInt32) : IO UInt6
   -- Use index_select to get byte counts for each token
   let bytesPerToken ← indexSelect1d tb.bytes idxTensor
   -- Sum all bytes
-  let totalFloat ← IO.ofExcept (Tensor.item? (Tensor.sumAll bytesPerToken))
+  let totalFloat := Tensor.item (Tensor.sumAll bytesPerToken)
   return totalFloat.toUInt64
 
 /-- Compute total bytes for a 1D tensor of token IDs.
@@ -77,7 +77,7 @@ def TokenBytes.totalBytesFromTensor (tb : TokenBytes) (tokenIds : Tensor { shape
   -- Index into bytes to get byte counts per token
   let bytesPerToken ← indexSelect1d (← bytesAt tb device) tokenIds
   -- Sum all bytes
-  let totalFloat ← IO.ofExcept (Tensor.item? (Tensor.sumAll bytesPerToken))
+  let totalFloat := Tensor.item (Tensor.sumAll bytesPerToken)
   return totalFloat.toUInt64
 
 /-- Compute total bytes with a loss mask.
@@ -96,8 +96,8 @@ def TokenBytes.totalBytesWithMask (tb : TokenBytes)
   let bytesPerToken ← indexSelect1d (← bytesAt tb device) flatIds
 
   -- Multiply by mask and sum (mask is Float32, so cast the counts)
-  let bytesFloat ← IO.ofExcept (bytesPerToken.castDType? .Float32)
-  let total ← IO.ofExcept (Tensor.item? (Tensor.sumAll (Tensor.mul bytesFloat flatMask)))
+  let bytesFloat := bytesPerToken.castDType .Float32
+  let total := Tensor.item (Tensor.sumAll (Tensor.mul bytesFloat flatMask))
   return total.toUInt64
 
 /-- Compute total bytes with a loss mask, with the batch and sequence

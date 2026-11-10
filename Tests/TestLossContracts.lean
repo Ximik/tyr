@@ -14,17 +14,6 @@ private def expectError {α : Type} (result : Except String α) : IO Unit :=
   | .error _ => pure ()
   | .ok _ => LeanTest.fail "Invalid cross entropy input was accepted"
 
-example (_logits : Tensor ⟨#[2, 3], .Int64, .CPU⟩)
-    (_boolLogits : Tensor ⟨#[2, 3], .Bool, .CPU⟩)
-    (_complexLogits : Tensor ⟨#[2, 3], .Complex64, .CPU⟩)
-    (_targets : Tensor ⟨#[2], .Int64, .CPU⟩) : True := by
-  fail_if_success have _ := Tensor.crossEntropy _logits _targets
-  fail_if_success have _ := Tensor.crossEntropyNone _logits _targets
-  fail_if_success have _ := Tensor.crossEntropy _boolLogits _targets
-  fail_if_success have _ := Tensor.crossEntropyNone _complexLogits _targets
-  have _ := Tensor.crossEntropy (Tensor.zeros #[2, 3]) _targets
-  trivial
-
 example (_logits : Tensor ⟨#[1, 2, 2], .Float32, .CPU⟩)
     (_targets : Tensor ⟨#[1, 2], .Int64, .CPU⟩)
     (_mask : Tensor ⟨#[1, 2], .Complex64, .CPU⟩) : True := by
@@ -40,7 +29,7 @@ example (_logits : Tensor ⟨#[1, 2, 2], .Float32, .CPU⟩)
     let losses := Tensor.crossEntropyNone! input targets
     LeanTest.assertEqual mean.raw.dtype dtype
     LeanTest.assertEqual losses.raw.dtype dtype
-    LeanTest.assertTrue (Float.abs (mean.item - Float.log 2) < 1e-6)
+    LeanTest.assertTrue (Float.abs (mean.item! - Float.log 2) < 1e-6)
     let values ← losses.toFloatArray
     LeanTest.assertEqual values.size 2
     for value in values do
@@ -49,10 +38,10 @@ example (_logits : Tensor ⟨#[1, 2, 2], .Float32, .CPU⟩)
 @[test] def testCrossEntropyIgnoreIndexAndGradient : IO Unit := do
   let logits ← (Tensor.zeros #[2, 2]).parameter
   let targets := Tensor.fromInt64Array #[-100, 1]
-  let losses := Tensor.crossEntropyNone logits targets
+  let losses := Tensor.crossEntropyNone! logits targets
   let values ← losses.toFloatArray
   LeanTest.assertEqual values[0]! 0
-  let mean := Tensor.crossEntropy logits targets
+  let mean := Tensor.crossEntropy! logits targets
   LeanTest.assertTrue (Float.abs (mean.item - Float.log 2) < 1e-6)
   Tensor.backwardLoss mean
   LeanTest.assertEqual (← (← logits.gradOf).toFloatArray) #[0, 0, 0.5, -0.5]

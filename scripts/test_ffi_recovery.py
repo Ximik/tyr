@@ -36,7 +36,7 @@ class RecoveryTests(unittest.TestCase):
     def test_guarded_io_and_except_exports(self):
         self.assertEqual(self.errors(), [])
         self.declare("Except String (Array RawTensor)")
-        self.native('return tyr::catchAllCall("example", [&] { return run(); });')
+        self.native('return tyr::tryCall("example", [&] { return run(); });')
         self.assertEqual(self.errors(), [])
 
     def test_data_checked_guard_is_except_only(self):
@@ -177,8 +177,8 @@ opaque nativeInvariantFailure {α : Type} [Nonempty α] (message : @& String) : 
         for result in ["Except UInt64 RawTensor", "Except String.Custom RawTensor"]:
             with self.subTest(result=result):
                 self.declare(result)
-                self.native('return tyr::catchAllCall("example", [&] { return run(); });')
-                self.assertTrue(any("catchAllCall constructs Except String" in error
+                self.native('return tyr::tryCall("example", [&] { return run(); });')
+                self.assertTrue(any("tryCall constructs Except String" in error
                                     for error in self.errors()))
 
     def test_qualified_result_alias_cannot_look_like_pure_constructor(self):
@@ -204,7 +204,7 @@ opaque nativeInvariantFailure {α : Type} [Nonempty α] (message : @& String) : 
                 self.assertTrue(self.errors())
 
     def test_wrong_carrier_and_trailing_work_are_rejected(self):
-        self.native('return tyr::catchAllCall("x", [&] { return run(); });')
+        self.native('return tyr::tryCall("x", [&] { return run(); });')
         self.assertTrue(any("ioCall" in error for error in self.errors()))
         self.native('return tyr::ioCall("x", [&] { return run(); }); other();')
         self.assertTrue(self.errors())

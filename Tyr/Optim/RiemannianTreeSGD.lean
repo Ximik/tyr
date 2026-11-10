@@ -29,7 +29,7 @@ private abbrev shapeNumel (s : Shape) : Nat :=
 
 private def treeDot [TensorStruct α] [FloatingTensorStruct α] (x y : α) : Float :=
   let prod := FloatingTensorStruct.zipWith Tensor.mul x y
-  TensorStruct.fold (fun t acc => acc + Tensor.item (Tensor.sumAll t)) 0.0 prod
+  TensorStruct.fold (fun t acc => acc + Tensor.item! (Tensor.sumAll t)) 0.0 prod
 
 private def clipScale [TensorStruct α] [FloatingTensorStruct α] (x : α) (maxNorm : Float) : α :=
   let sqNorm := treeDot x x
@@ -232,7 +232,7 @@ private def prepareCrossEntropyStep
     Tensor.reshape predictionReq #[batch * seq, vocab]
   let targetsFlat : Tensor { shape := #[batch * seq], dtype := .Int64, device := device } :=
     Tensor.reshape targets #[batch * seq]
-  let lossT := Tensor.crossEntropy logitsFlat targetsFlat
+  let lossT := Tensor.crossEntropy! logitsFlat targetsFlat
   let outputCotangent ← Tensor.grad lossT predictionReq (Tensor.onesLike lossT)
   pure (paramsReq, predictionReq, lossT, Tensor.detach outputCotangent)
 

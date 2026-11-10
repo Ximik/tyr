@@ -668,14 +668,17 @@ def grad {σ : StaticSpec} [TensorStruct α]
     Fresh differentiation variables live entirely inside the native callback;
     only detached gradients escape. Identical input values in different leaves
     remain independent variables. No parameter gradient buffers are mutated. -/
-def functionalGrad {device : Device} [TensorStruct α]
+def functionalGrad! {device : Device} [TensorStruct α]
     (f : α → Tensor { shape := #[], dtype := .Float32, device })
     (inputs : α) : α :=
-  let gradients := match RawTensor.functionalGrad (rawLeaves inputs)
-      (fun leaves => (f (withRawLeaves inputs leaves)).raw) with
-    | .ok gradients => gradients
-    | .error message => panic! message
-  withRawLeaves inputs gradients
+  withRawLeaves inputs (RawTensor.functionalGrad! (rawLeaves inputs)
+    (fun leaves => (f (withRawLeaves inputs leaves)).raw))
+
+/-- `functionalGrad!` over floating leaves, the only dtypes that take gradients. -/
+def functionalGrad {device : Device} [TensorStruct α] [FloatingTensorStruct α]
+    (f : α → Tensor { shape := #[], dtype := .Float32, device })
+    (inputs : α) : α :=
+  functionalGrad! f inputs
 
 /-- Apply a scalar multiplication to all tensors -/
 def scale [FloatingTensorStruct α] (model : α) (s : Float) : α :=

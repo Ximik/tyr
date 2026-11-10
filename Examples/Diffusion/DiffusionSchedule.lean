@@ -45,7 +45,7 @@ def MaskedDiffusionSchedule.addMasks {num_timesteps batch seq : Nat}
   -- Get mask probability for each sample based on timestep
   -- mask_probs[t] gives the probability of masking at timestep t
   -- Higher t = more masking (linear schedule from 1/T to 1.0)
-  let maskProbPerSample : Activation #[batch] := Tensor.indexSelect schedule.mask_probs t  -- [batch]
+  let maskProbPerSample : Activation #[batch] := Tensor.indexSelect! schedule.mask_probs t  -- [batch]
 
   -- Expand to [batch, seq] for comparison
   let maskProbExpanded := Tensor.unsqueeze maskProbPerSample 1  -- [batch, 1]
@@ -97,7 +97,7 @@ def maskedCrossEntropyLoss {batch seq vocab : Nat}
   let targetsFlat := Tensor.reshape targets #[batch * seq]
 
   -- Compute per-token loss (reduction=none)
-  let lossPerToken := Tensor.crossEntropyNone logitsFlat targetsFlat
+  let lossPerToken := Tensor.crossEntropyNone! logitsFlat targetsFlat
 
   -- Get mask of which positions were masked
   let mask := Tensor.eqScalar x_t mask_token_id.toInt64  -- [batch, seq]
