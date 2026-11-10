@@ -182,6 +182,16 @@ def rotaryDimFull (cfg : Config) : Nat := LagunaConfig.rotaryDimFull cfg
 
 def rotaryDimSliding (cfg : Config) : Nat := LagunaConfig.rotaryDimSliding cfg
 
+/-- Whether layer `i` uses full attention (otherwise sliding-window attention). -/
+def isFullAttentionLayer (cfg : Config) (i : Nat) : Bool :=
+  match cfg.layerType i with
+  | .fullAttention => true
+  | .slidingAttention => false
+
+/-- Whether layer `i` has a sparse MoE block (otherwise a dense MLP). -/
+def isMoELayer (cfg : Config) (i : Nat) : Bool :=
+  cfg.isMoE && !cfg.isDenseMlpLayer i
+
 end Config
 
 end torch.laguna

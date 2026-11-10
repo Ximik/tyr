@@ -228,37 +228,23 @@ private def loadSparseMoe (src : Source) (cfg : Config) (layerIdx : Nat)
 
 private def loadLayer (src : Source) (cfg : Config) (layerIdx : Nat)
     (device : Device := Device.CPU) (dtype : DType)
-    : IO (Qwen35Layer (dtype := dtype) (device := device) cfg) := do
+    : IO (Qwen35Layer (device := device) cfg dtype layerIdx) := do
   let p := s!"model.layers.{layerIdx}"
-  let layerTypes := cfg.layer_types
-  let lt := layerTypes.getD layerIdx .linearAttention
 
   let inputNorm ← loadRMSNorm src s!"{p}.input_layernorm" cfg.hidden_size device
   let postNorm ← loadRMSNorm src s!"{p}.post_attention_layernorm" cfg.hidden_size device
 
-  let fullAttn ←
-    match lt with
-    | .fullAttention =>
-      let a ← loadAttention src cfg layerIdx device dtype
-      pure (some a)
-    | .linearAttention => pure none
+  let mixer ← Select.build (cfg.isFullAttentionLayer layerIdx)
+    (loadLinearMixer src cfg layerIdx device dtype)
+    (loadAttention src cfg layerIdx device dtype)
 
-  let linearAttn ←
-    match lt with
-    | .linearAttention =>
-      let l ← loadLinearMixer src cfg layerIdx device dtype
-      pure (some l)
-    | .fullAttention => pure none
-
-  let ffn ← Qwen35Ffn.build cfg
+  let ffn ← Select.build cfg.isMoE
     (loadDenseMLP src cfg layerIdx device dtype)
     (loadSparseMoe src cfg layerIdx device dtype)
 
   pure {
-    layerType := lt
     input_layernorm := inputNorm
-    full_attn := fullAttn
-    linear_attn := linearAttn
+    mixer := mixer
     post_attention_layernorm := postNorm
     ffn := ffn
   }
@@ -278,12 +264,11 @@ def load (path : String) (cfg : Config := Config.qwen35_9B)
   let floating ← IO.ofExcept dtype.realFloating?
   let _ := floating.down
 
-  let mut layers : Array (Qwen35Layer (dtype := dtype) (device := device) cfg) := #[]
-  for i in [:cfg.num_hidden_layers] do
+  let layers ← IndexedList.ofFnM (α := Qwen35Layer (device := device) cfg dtype) (fun i => do
     let layer ← loadLayer src cfg i device dtype
-    layers := layers.push layer
     if (i + 1) % 8 == 0 || i + 1 == cfg.num_hidden_layers then
       log.onInfo s!"  loaded layers {i + 1}/{cfg.num_hidden_layers}"
+    pure layer) 0 cfg.num_hidden_layers
 
   let norm ← loadRMSNorm src "model.norm" cfg.hidden_size device
 

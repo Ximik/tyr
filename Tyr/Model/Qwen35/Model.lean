@@ -11,6 +11,7 @@
 -/
 import Tyr.Model.Qwen35.TypedOps
 import Tyr.TensorStruct
+import Tyr.TensorStruct.Indexed
 import Tyr.Module.Core
 import Tyr.Module.Derive
 import Tyr.Model.Qwen.Attention
@@ -292,79 +293,29 @@ def forward {batch seq : Nat}
 
 end Qwen35SparseMoeBlock
 
-/-- A layer's feed-forward block: a sparse MoE block when the configuration has
-    experts (`cfg.isMoE`), a dense MLP otherwise. -/
-inductive Qwen35Ffn (cfg : Config) (dtype : DType := .Float32) : Bool → Type where
-  | dense : Qwen35MLP (dtype := dtype) (device := device) cfg.hidden_size cfg.intermediate_size →
-      Qwen35Ffn cfg dtype false
-  | moe : Qwen35SparseMoeBlock (dtype := dtype) (device := device) cfg → Qwen35Ffn cfg dtype true
+/-- A layer's feed-forward block: the sparse MoE block when the configuration
+    has experts (`cfg.isMoE`), the dense MLP otherwise. -/
+abbrev Qwen35Ffn (cfg : Config) (dtype : DType := .Float32) :=
+  Select (Qwen35MLP (dtype := dtype) (device := device) cfg.hidden_size cfg.intermediate_size)
+    (Qwen35SparseMoeBlock (dtype := dtype) (device := device) cfg)
 
-namespace Qwen35Ffn
+@[match_pattern] abbrev Qwen35Ffn.dense {device : Device} {cfg : Config} {dtype : DType}
+    (mlp : Qwen35MLP (dtype := dtype) (device := device) cfg.hidden_size cfg.intermediate_size) :
+    Qwen35Ffn (device := device) cfg dtype false :=
+  .ofFalse mlp
 
-instance {device : Device} {cfg : Config} {dtype : DType} {b : Bool} :
-    TensorStruct (Qwen35Ffn (device := device) cfg dtype b) where
-  map f
-    | .dense m => .dense (TensorStruct.map f m)
-    | .moe m => .moe (TensorStruct.map f m)
-  mapM f
-    | .dense m => return .dense (← TensorStruct.mapM f m)
-    | .moe m => return .moe (← TensorStruct.mapM f m)
-  zipWith f
-    | .dense x, .dense y => .dense (TensorStruct.zipWith f x y)
-    | .moe x, .moe y => .moe (TensorStruct.zipWith f x y)
-  fold f init
-    | .dense m => TensorStruct.fold f init m
-    | .moe m => TensorStruct.fold f init m
+@[match_pattern] abbrev Qwen35Ffn.moe {device : Device} {cfg : Config} {dtype : DType}
+    (moe : Qwen35SparseMoeBlock (dtype := dtype) (device := device) cfg) : Qwen35Ffn (device := device) cfg dtype true :=
+  .ofTrue moe
 
-instance {P : StaticSpec → Prop} {device : Device} {cfg : Config} {dtype : DType} {b : Bool}
-    [TensorStructFor P (Qwen35MLP (dtype := dtype) (device := device) cfg.hidden_size cfg.intermediate_size)]
-    [TensorStructFor P (Qwen35SparseMoeBlock (dtype := dtype) (device := device) cfg)] :
-    TensorStructFor P (Qwen35Ffn (device := device) cfg dtype b) where
-  map f
-    | .dense m => .dense (TensorStructFor.map f m)
-    | .moe m => .moe (TensorStructFor.map f m)
-  mapM f
-    | .dense m => return .dense (← TensorStructFor.mapM f m)
-    | .moe m => return .moe (← TensorStructFor.mapM f m)
-  zipWith f
-    | .dense x, .dense y => .dense (TensorStructFor.zipWith f x y)
-    | .moe x, .moe y => .moe (TensorStructFor.zipWith f x y)
-  fold f init
-    | .dense m => TensorStructFor.fold f init m
-    | .moe m => TensorStructFor.fold f init m
-
-instance {sourceDevice targetDevice : Device} {cfg : Config} {sourceDType targetDType : DType} {b : Bool}
-    [TensorTreeCast
-      (Qwen35MLP (dtype := sourceDType) (device := sourceDevice) cfg.hidden_size cfg.intermediate_size)
-      (Qwen35MLP (dtype := targetDType) (device := targetDevice) cfg.hidden_size cfg.intermediate_size)]
-    [TensorTreeCast
-      (Qwen35SparseMoeBlock (dtype := sourceDType) (device := sourceDevice) cfg)
-      (Qwen35SparseMoeBlock (dtype := targetDType) (device := targetDevice) cfg)] :
-    TensorTreeCast (Qwen35Ffn (device := sourceDevice) cfg sourceDType b)
-      (Qwen35Ffn (device := targetDevice) cfg targetDType b) where
-  castAt path
-    | .dense m => return .dense (← TensorTreeCast.castAt path m)
-    | .moe m => return .moe (← TensorTreeCast.castAt path m)
-
-/-- Run the action for the block that `cfg.isMoE` selects. -/
-def build {m : Type → Type} [Monad m] (cfg : Config)
-    (dense : m (Qwen35MLP (dtype := dtype) (device := device) cfg.hidden_size cfg.intermediate_size))
-    (moe : m (Qwen35SparseMoeBlock (dtype := dtype) (device := device) cfg)) :
-    m (Qwen35Ffn (device := device) cfg dtype cfg.isMoE) :=
-  match cfg.isMoE with
-  | true => .moe <$> moe
-  | false => .dense <$> dense
-
-def forward {batch seq : Nat}
+def Qwen35Ffn.forward {batch seq : Nat}
     (cfg : Config)
     (ffn : Qwen35Ffn (device := device) cfg dtype cfg.isMoE)
     (x : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
     : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } :=
   match hMoE : cfg.isMoE, ffn with
-  | false, .dense m => m.forward x
-  | true, .moe m => m.forward cfg hMoE x
-
-end Qwen35Ffn
+  | false, .dense mlp => mlp.forward x
+  | true, .moe block => block.forward cfg hMoE x
 
 /-- Full-attention token mixer for Qwen3.5 (Q-gate + Q/K RMSNorm + partial RoPE). -/
 structure Qwen35Attention (cfg : Config) (dtype : DType := .Float32) where
@@ -820,52 +771,53 @@ def hasPreviousState (c : HybridCache (dtype := dtype) (device := device) cfg ba
 
 end HybridCache
 
-/-- One Qwen3.5 decoder layer (hybrid token mixer + dense/MoE FFN). -/
-structure Qwen35Layer (cfg : Config) (dtype : DType := .Float32) where
-  layerType : LayerType
+/-- A layer's token mixer: full attention on full-attention layers
+    (`Config.isFullAttentionLayer`), gated delta-net linear attention otherwise. -/
+abbrev Qwen35Mixer (cfg : Config) (dtype : DType := .Float32) :=
+  Select (Qwen35GatedDeltaNet (dtype := dtype) (device := device) cfg)
+    (Qwen35Attention (dtype := dtype) (device := device) cfg)
+
+@[match_pattern] abbrev Qwen35Mixer.linear {device : Device} {cfg : Config} {dtype : DType}
+    (l : Qwen35GatedDeltaNet (dtype := dtype) (device := device) cfg) : Qwen35Mixer (device := device) cfg dtype false :=
+  .ofFalse l
+
+@[match_pattern] abbrev Qwen35Mixer.full {device : Device} {cfg : Config} {dtype : DType}
+    (a : Qwen35Attention (dtype := dtype) (device := device) cfg) : Qwen35Mixer (device := device) cfg dtype true :=
+  .ofTrue a
+
+/-- Qwen3.5 decoder layer `layerIdx` (token mixer + dense/MoE FFN). The
+    configuration selects its mixer and FFN variants. -/
+structure Qwen35Layer (cfg : Config) (dtype : DType := .Float32) (layerIdx : Nat) where
   input_layernorm : Qwen35RMSNorm (device := device) cfg.hidden_size
-  full_attn : Option (Qwen35Attention (dtype := dtype) (device := device) cfg) := none
-  linear_attn : Option (Qwen35GatedDeltaNet (dtype := dtype) (device := device) cfg) := none
+  mixer : Qwen35Mixer (device := device) cfg dtype (cfg.isFullAttentionLayer layerIdx)
   post_attention_layernorm : Qwen35RMSNorm (device := device) cfg.hidden_size
   ffn : Qwen35Ffn (device := device) cfg dtype cfg.isMoE
   deriving TensorStruct
 
 namespace Qwen35Layer
 
-def init (cfg : Config) (layerType : LayerType) (device : Device := .CPU) (dtype : DType := .Float32) : IO (Qwen35Layer (dtype := dtype) (device := device) cfg) := do
+def init (cfg : Config) (layerIdx : Nat) (device : Device := .CPU) (dtype : DType := .Float32) : IO (Qwen35Layer (device := device) cfg dtype layerIdx) := do
   let inputNorm ← Qwen35RMSNorm.initZeroCentered (device := device) cfg.hidden_size cfg.rms_norm_eps
   let postNorm ← Qwen35RMSNorm.initZeroCentered (device := device) cfg.hidden_size cfg.rms_norm_eps
 
-  let fullAttn ←
-    match layerType with
-    | .fullAttention =>
-      let m ← Qwen35Attention.init (dtype := dtype) (device := device) cfg
-      pure (some m)
-    | .linearAttention => pure none
+  let mixer ← Select.build (cfg.isFullAttentionLayer layerIdx)
+    (Qwen35GatedDeltaNet.init (dtype := dtype) (device := device) cfg)
+    (Qwen35Attention.init (dtype := dtype) (device := device) cfg)
 
-  let linearAttn ←
-    match layerType with
-    | .linearAttention =>
-      let m ← Qwen35GatedDeltaNet.init (dtype := dtype) (device := device) cfg
-      pure (some m)
-    | .fullAttention => pure none
-
-  let ffn ← Qwen35Ffn.build cfg
+  let ffn ← Select.build cfg.isMoE
     (Qwen35MLP.init (dtype := dtype) (device := device) cfg.hidden_size cfg.intermediate_size)
     (Qwen35SparseMoeBlock.init (dtype := dtype) (device := device) cfg)
 
   pure {
-    layerType := layerType
     input_layernorm := inputNorm
-    full_attn := fullAttn
-    linear_attn := linearAttn
+    mixer := mixer
     post_attention_layernorm := postNorm
     ffn := ffn
   }
 
-def forward {batch seq : Nat}
+def forward {batch seq layerIdx : Nat}
     (cfg : Config)
-    (layer : Qwen35Layer (dtype := dtype) (device := device) cfg)
+    (layer : Qwen35Layer (device := device) cfg dtype layerIdx)
     (x : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
     (cos : Tensor { device := device, shape := #[seq, Config.rotaryHalfDim cfg], dtype := .Float32 })
     (sin : Tensor { device := device, shape := #[seq, Config.rotaryHalfDim cfg], dtype := .Float32 })
@@ -874,13 +826,12 @@ def forward {batch seq : Nat}
   let residual1 := x
   let h1 := layer.input_layernorm.forward3d x
   let mixed :=
-    match layer.layerType, layer.full_attn, layer.linear_attn, attnMask with
-    | .fullAttention, some a, _, some m => a.forwardMasked cfg h1 cos sin m true
-    | .fullAttention, some a, _, none => a.forward cfg h1 cos sin true
-    | .linearAttention, _, some l, _ =>
+    match cfg.isFullAttentionLayer layerIdx, layer.mixer, attnMask with
+    | true, .full a, some m => a.forwardMasked cfg h1 cos sin m true
+    | true, .full a, none => a.forward cfg h1 cos sin true
+    | false, .linear l, _ =>
       let (y, _, _) := l.forward cfg h1 attnMask none none false
       y
-    | _, _, _, _ => h1
   let h2 := Tensor.add residual1 mixed
 
   let residual2 := h2
@@ -889,41 +840,37 @@ def forward {batch seq : Nat}
   Tensor.add residual2 ffn
 
 /-- Forward pass with optional cache update (for batch prefill). -/
-def forwardWithCache {batch seq cap : Nat}
+def forwardWithCache {batch seq cap layerIdx : Nat}
     (cfg : Config)
-    (layer : Qwen35Layer (dtype := dtype) (device := device) cfg)
+    (layer : Qwen35Layer (device := device) cfg dtype layerIdx)
     (x : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
     (cos : Tensor { device := device, shape := #[seq, Config.rotaryHalfDim cfg], dtype := .Float32 })
     (sin : Tensor { device := device, shape := #[seq, Config.rotaryHalfDim cfg], dtype := .Float32 })
     (cache : HybridCache (dtype := dtype) (device := device) cfg batch cap)
-    (layerIdx : Nat)
     (hfit : seq ≤ cap)
     : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } × HybridCache (dtype := dtype) (device := device) cfg batch cap :=
   let residual1 := x
   let h1 := layer.input_layernorm.forward3d x
 
   let (mixed, cache') :=
-    match layer.layerType with
-    | .fullAttention =>
-      match layer.full_attn, cache.attnCaches[layerIdx]? with
-      | some a, some (some kv) =>
+    match cfg.isFullAttentionLayer layerIdx, layer.mixer with
+    | true, .full a =>
+      match cache.attnCaches[layerIdx]? with
+      | some (some kv) =>
         let (out, kv') := a.forwardWithCache cfg h1 cos sin kv hfit
         let c' := { cache with attnCaches := cache.attnCaches.modify layerIdx (fun _ => some kv') }
         (out, c')
-      | _, _ => (h1, cache)
-    | .linearAttention =>
-      match layer.linear_attn with
-      | some l =>
-        let convOpt := (cache.convStates[layerIdx]?).bind id
-        let recOpt := (cache.recurrentStates[layerIdx]?).bind id
-        -- Batch prefill for linear attention just uses standard forward and updates state
-        let (out, conv', rec') := l.forward cfg h1 none convOpt recOpt false
-        let c' := { cache with
-          convStates := cache.convStates.modify layerIdx (fun _ => conv')
-          recurrentStates := cache.recurrentStates.modify layerIdx (fun _ => rec')
-        }
-        (out, c')
-      | none => (h1, cache)
+      | _ => (h1, cache)
+    | false, .linear l =>
+      let convOpt := (cache.convStates[layerIdx]?).bind id
+      let recOpt := (cache.recurrentStates[layerIdx]?).bind id
+      -- Batch prefill for linear attention just uses standard forward and updates state
+      let (out, conv', rec') := l.forward cfg h1 none convOpt recOpt false
+      let c' := { cache with
+        convStates := cache.convStates.modify layerIdx (fun _ => conv')
+        recurrentStates := cache.recurrentStates.modify layerIdx (fun _ => rec')
+      }
+      (out, c')
 
   let h2 := Tensor.add residual1 mixed
   let residual2 := h2
@@ -931,43 +878,39 @@ def forwardWithCache {batch seq cap : Nat}
   let ffn := layer.ffn.forward cfg h3
   (Tensor.add residual2 ffn, cache')
 
-def forwardStep {batch cap : Nat}
+def forwardStep {batch cap layerIdx : Nat}
     (cfg : Config)
-    (layer : Qwen35Layer (dtype := dtype) (device := device) cfg)
+    (layer : Qwen35Layer (device := device) cfg dtype layerIdx)
     (x : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := dtype })
     (cos : Tensor { device := device, shape := #[1, Config.rotaryHalfDim cfg], dtype := .Float32 })
     (sin : Tensor { device := device, shape := #[1, Config.rotaryHalfDim cfg], dtype := .Float32 })
     (cache : HybridCache (dtype := dtype) (device := device) cfg batch cap)
-    (layerIdx : Nat)
     (pos : Nat) (hpos : pos < cap)
     : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := dtype } × HybridCache (dtype := dtype) (device := device) cfg batch cap :=
   let residual1 := x
   let h1 := layer.input_layernorm.forward3d x
 
   let (mixed, cache1) :=
-    match layer.layerType with
-    | .fullAttention =>
-      match layer.full_attn, cache.attnCaches[layerIdx]? with
-      | some a, some (some kv) =>
+    match cfg.isFullAttentionLayer layerIdx, layer.mixer with
+    | true, .full a =>
+      match cache.attnCaches[layerIdx]? with
+      | some (some kv) =>
         let (out, kv') := a.forwardStep cfg h1 cos sin kv pos hpos
         let c' := { cache with attnCaches := cache.attnCaches.set! layerIdx (some kv') }
         (out, c')
-      | _, _ =>
+      | _ =>
         (h1, cache)
-    | .linearAttention =>
-      match layer.linear_attn with
-      | some l =>
-        let convOpt := cache.convStates[layerIdx]?.getD none
-        let recOpt := cache.recurrentStates[layerIdx]?.getD none
-        let usePrev := cache.hasPreviousState && convOpt.isSome && recOpt.isSome
-        let (out, conv', rec') := l.forward cfg h1 none convOpt recOpt usePrev
-        let c' := {
-          cache with
-          convStates := cache.convStates.set! layerIdx conv'
-          recurrentStates := cache.recurrentStates.set! layerIdx rec'
-        }
-        (out, c')
-      | none => (h1, cache)
+    | false, .linear l =>
+      let convOpt := cache.convStates[layerIdx]?.getD none
+      let recOpt := cache.recurrentStates[layerIdx]?.getD none
+      let usePrev := cache.hasPreviousState && convOpt.isSome && recOpt.isSome
+      let (out, conv', rec') := l.forward cfg h1 none convOpt recOpt usePrev
+      let c' := {
+        cache with
+        convStates := cache.convStates.set! layerIdx conv'
+        recurrentStates := cache.recurrentStates.set! layerIdx rec'
+      }
+      (out, c')
 
   let h2 := Tensor.add residual1 mixed
   let residual2 := h2
@@ -980,7 +923,7 @@ end Qwen35Layer
 /-- Text-only Qwen3.5 base model. -/
 structure Qwen35Model (cfg : Config) (dtype : DType := .Float32) where
   embed_tokens : Tensor { device := device, shape := #[cfg.vocab_size, cfg.hidden_size], dtype := dtype }
-  layers : Array (Qwen35Layer (dtype := dtype) (device := device) cfg)
+  layers : IndexedList (Qwen35Layer (device := device) cfg dtype) 0 cfg.num_hidden_layers
   norm : Qwen35RMSNorm (device := device) cfg.hidden_size
   deriving TensorStruct
 
@@ -990,19 +933,14 @@ def init (cfg : Config) (device : Device := .CPU) (dtype : DType := .Float32) : 
   let embRaw ← Tensor.randn (device := device) #[cfg.vocab_size, cfg.hidden_size]
   let embedTokens ← Tensor.parameter ((Tensor.mulScalar embRaw 0.02).castDType dtype)
 
-  let layerTypes := cfg.layer_types
-  let mut layers : Array (Qwen35Layer (dtype := dtype) (device := device) cfg) := #[]
-  for i in [:cfg.num_hidden_layers] do
-    let lt := layerTypes.getD i .linearAttention
-    let l ← Qwen35Layer.init (dtype := dtype) (device := device) cfg lt
-    layers := layers.push l
+  let layers ← IndexedList.ofFnM (fun i => Qwen35Layer.init (dtype := dtype) (device := device) cfg i) 0 cfg.num_hidden_layers
 
   let norm ← Qwen35RMSNorm.initZeroCentered (device := device) cfg.hidden_size cfg.rms_norm_eps
   pure { embed_tokens := embedTokens, layers := layers, norm := norm }
 
 def initCache {batch : Nat}
     (cfg : Config)
-    (m : Qwen35Model (dtype := dtype) (device := device) cfg)
+    (_m : Qwen35Model (dtype := dtype) (device := device) cfg)
     (maxLen : Nat)
     (cacheDevice : Device)
     [DType.ConstantSupported dtype cacheDevice]
@@ -1015,7 +953,7 @@ def initCache {batch : Nat}
     let mut recStates : Array (Option (Tensor { device := cacheDevice, shape := #[batch, cfg.linear_num_value_heads, cfg.linear_key_head_dim, cfg.linear_value_head_dim], dtype := .Float32 })) := #[]
     let mut lastLinear : Option Nat := none
 
-    for i in [:m.layers.size] do
+    for i in [:cfg.num_hidden_layers] do
       let lt := layerTypes.getD i .linearAttention
       match lt with
       | .fullAttention =>
@@ -1051,7 +989,7 @@ def forward {batch seq : Nat}
   let (cos, sin) := Tensor.rotaryFreqs seq (Config.rotaryDim cfg) cfg.rope_theta x0.device
   let h :=
     m.layers.foldl
-      (fun h layer => layer.forward cfg h cos sin attnMask)
+      (fun h _ layer => layer.forward cfg h cos sin attnMask)
       x0
   m.norm.forward3d h
 
@@ -1064,15 +1002,7 @@ def forwardWithCache {batch seq cap : Nat}
     (cache : HybridCache (dtype := dtype) (device := device) cfg batch cap)
     (hfit : seq ≤ cap)
     : IO (Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } × HybridCache (dtype := dtype) (device := device) cfg batch cap) := do
-  let mut h := x0
-  let mut c := cache
-  for i in [:m.layers.size] do
-    let layer ← match m.layers[i]? with
-      | some l => pure l
-      | none => throw <| IO.userError s!"missing layer at index {i}"
-    let (hNext, cNext) := layer.forwardWithCache cfg h cos sin c i hfit
-    h := hNext
-    c := cNext
+  let (h, c) := m.layers.foldl (fun (h, c) _ layer => layer.forwardWithCache cfg h cos sin c hfit) (x0, cache)
   return (m.norm.forward3d h, c)
 
 
@@ -1113,7 +1043,7 @@ def forwardEmbeds {batch seq : Nat}
     (attnMask : Option (Tensor { device := device, shape := #[batch, seq], dtype := .Int64 }) := none)
     : Tensor { device := device, shape := #[batch, seq, cfg.vocab_size], dtype := dtype } :=
   let (cos, sin) := Tensor.rotaryFreqs seq (Config.rotaryDim cfg) cfg.rope_theta inputsEmbeds.device
-  let hidden := m.model.layers.foldl (fun h layer => layer.forward cfg h cos sin attnMask) inputsEmbeds
+  let hidden := m.model.layers.foldl (fun h _ layer => layer.forward cfg h cos sin attnMask) inputsEmbeds
   let hidden := m.model.norm.forward3d hidden
   Tensor.linear3d hidden m.lmHead
 
@@ -1168,17 +1098,8 @@ private def decodeStepFromEmbedWithCache {batch maxLen : Nat}
   let cos : Tensor { device := device, shape := #[1, Config.rotaryHalfDim cfg], dtype := .Float32 } := typedSlice cosAll 0 position 1
   let sin : Tensor { device := device, shape := #[1, Config.rotaryHalfDim cfg], dtype := .Float32 } := typedSlice sinAll 0 position 1
 
-  let mut hidden : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := dtype } := tokenEmbed
-  let mut cache' := cache
-
-  for i in [:m.model.layers.size] do
-    let layer ←
-      match m.model.layers[i]? with
-      | some l => pure l
-      | none => throw <| IO.userError s!"missing Qwen35 layer at index {i}"
-    let (hNext, cNext) := layer.forwardStep cfg hidden cos sin cache' i position hpos
-    hidden := hNext
-    cache' := cNext
+  let (hidden, cache') := m.model.layers.foldl
+    (fun (hidden, cache') _ layer => layer.forwardStep cfg hidden cos sin cache' position hpos) (tokenEmbed, cache)
 
   let hiddenNorm := m.model.norm.forward3d hidden
   let logits3 : Tensor { device := device, shape := #[batch, 1, cfg.vocab_size], dtype := dtype } := Tensor.linear3d hiddenNorm m.lmHead

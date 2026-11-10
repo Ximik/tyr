@@ -245,37 +245,26 @@ private def loadSparseMoe (src : Source) (cfg : Config) (layerIdx : Nat)
     sharedDownProj := reqGradFalse sharedDown
   }
 
-/-- Load one decoder layer: exactly one attention variant (by
-    `Config.layerType`) and one FFN variant (by `Config.isDenseMlpLayer`). -/
+/-- Load decoder layer `layerIdx`, with the attention and FFN variants its
+    type selects. -/
 private def loadLayer (src : Source) (cfg : Config) (layerIdx : Nat)
-    (device : Device) (dtype : DType) : IO (LagunaLayer (device := device) cfg dtype) := do
+    (device : Device) (dtype : DType) : IO (LagunaLayer (device := device) cfg dtype layerIdx) := do
   let p := s!"model.layers.{layerIdx}"
   let inputNorm ← src.load (← src.resolve (nameCandidates s!"{p}.input_layernorm.weight"))
     #[cfg.hidden_size] device
   let postNorm ← src.load (← src.resolve (nameCandidates s!"{p}.post_attention_layernorm.weight"))
     #[cfg.hidden_size] device
 
-  let attnFull ←
-    match cfg.layerType layerIdx with
-    | .fullAttention =>
-      let a ← loadAttention src cfg layerIdx cfg.num_attention_heads device dtype
-      pure (some a)
-    | .slidingAttention => pure none
-  let attnSliding ←
-    match cfg.layerType layerIdx with
-    | .slidingAttention =>
-      let a ← loadAttention src cfg layerIdx cfg.num_attention_heads_sliding device dtype
-      pure (some a)
-    | .fullAttention => pure none
-
-  let ffn ← LagunaFfn.build cfg (cfg.isDenseMlpLayer layerIdx)
+  let attn ← Select.build (cfg.isFullAttentionLayer layerIdx)
+    (loadAttention src cfg layerIdx cfg.num_attention_heads_sliding device dtype)
+    (loadAttention src cfg layerIdx cfg.num_attention_heads device dtype)
+  let ffn ← Select.build (cfg.isMoELayer layerIdx)
     (loadDenseMLP src cfg layerIdx device dtype)
     (loadSparseMoe src cfg layerIdx device dtype)
 
   pure {
     input_layernorm := freezeStored inputNorm
-    attnFull := attnFull
-    attnSliding := attnSliding
+    attn := attn
     post_attention_layernorm := freezeStored postNorm
     ffn := ffn
   }
@@ -290,12 +279,11 @@ private def loadCore (src : Source) (desc : String) (cfg : Config)
 
   let dtype := embedTokens.1
   let floating ← IO.ofExcept (DType.realFloating? dtype)
-  let mut layers : Array (LagunaLayer (device := device) cfg dtype) := Array.mkEmpty cfg.num_hidden_layers
-  for i in [:cfg.num_hidden_layers] do
+  let layers ← IndexedList.ofFnM (α := LagunaLayer (device := device) cfg dtype) (fun i => do
     let layer ← loadLayer src cfg i device dtype
-    layers := layers.push layer
     if (i + 1) % 4 == 0 || i + 1 == cfg.num_hidden_layers then
       log.onInfo s!"  loaded layers {i + 1}/{cfg.num_hidden_layers}"
+    pure layer) 0 cfg.num_hidden_layers
 
   let normW ← src.load (← src.resolve (nameCandidates "model.norm.weight")) #[cfg.hidden_size] device
 

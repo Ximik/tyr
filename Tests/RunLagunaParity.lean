@@ -61,12 +61,17 @@ private def deviceLabel (device : Device) : String :=
   | .CUDA i => s!"cuda:{i}"
   | .MPS => "mps"
 
-/-- Deterministic int64 token-id tensor `[1, seq]` on `device`. -/
-private def moeBlock? {cfg : Config} {b : Bool} :
-    LagunaFfn (device := device) cfg dtype b → Option (LagunaSparseMoeBlock (device := device) (dtype := dtype) cfg)
-  | .moe block => some block
-  | .dense _ => none
+private def moeBlock? {cfg : Config} :
+    {b : Bool} → LagunaFfn (device := device) cfg dtype b → Option (LagunaSparseMoeBlock (device := device) (dtype := dtype) cfg)
+  | true, .moe block => some block
+  | false, .dense _ => none
 
+private def layerAt {cfg : Config} (m : LagunaModel (device := device) cfg dtype) (i : Nat) :
+    IO (LagunaLayer (device := device) cfg dtype i) :=
+  if h : i < cfg.num_hidden_layers then pure (Nat.zero_add i ▸ m.layers.get i h)
+  else throw (IO.userError s!"missing layer {i}")
+
+/-- Deterministic int64 token-id tensor `[1, seq]` on `device`. -/
 private def mkIds (vals : Array Int64) (device : Device) : Tensor { shape := #[1, vals.size], dtype := .Int64, device := device } :=
   Tensor.reshape ((Tensor.fromInt64Array vals).to device) #[1, vals.size]
 
@@ -137,15 +142,8 @@ private def runFixture (device : Device) : IO Unit := do
   let log : torch.Log.Handlers := { onInfo := fun m => IO.println s!"  {m}" }
   let modelB16 ← LagunaForCausalLM.load s!"{fixtureDir}/model.safetensors" cfg device log
   let modelB16 := modelB16.2
-  let layer0b ←
-    match modelB16.model.layers[0]? with
-    | some l => pure l
-    | none => throw (IO.userError s!"[{lbl}] missing layer 0")
-  let layer1b ←
-    match modelB16.model.layers[1]? with
-    | some l => pure l
-    | none => throw (IO.userError s!"[{lbl}] missing layer 1")
-  check (moeBlock? layer0b.ffn).isNone s!"[{lbl}] layer 0 loaded as dense MLP"
+  let layer1b ← layerAt modelB16.model 1
+  check (!cfg.isMoELayer 0) s!"[{lbl}] layer 0 is a dense MLP layer"
   let moe1b ←
     match moeBlock? layer1b.ffn with
     | some m => pure m
@@ -162,10 +160,7 @@ private def runFixture (device : Device) : IO Unit := do
   -- FP32 compute tests the math itself (which is what parity means here);
   -- the BF16 pass below is informational.
   let model : LagunaForCausalLM (device := device) cfg ← TensorStruct.castTo (LagunaForCausalLM (device := device) cfg .Float32) modelB16
-  let layer0 ←
-    match model.model.layers[0]? with
-    | some l => pure l
-    | none => throw (IO.userError s!"[{lbl}] missing layer 0 (fp32)")
+  let layer0 ← layerAt model.model 0
 
   -- References (fp32, CPU) moved to the comparison device.
   let refPath := s!"{fixtureDir}/reference.safetensors"
@@ -262,18 +257,11 @@ private def runRealSmoke (modelDir : String) (numLayers : Nat) (device : Device)
   let t1 ← IO.monoMsNow
   IO.println s!"  loaded {numLayers}/{cfg0.num_hidden_layers} layers in {t1 - t0} ms"
 
-  let layer0 ←
-    match model.model.layers[0]? with
-    | some l => pure l
-    | none => throw (IO.userError "missing layer 0")
-  check (moeBlock? layer0.ffn).isNone "layer 0 loaded as dense MLP"
-  check layer0.attnFull.isSome "layer 0 loaded as full attention"
+  check (!cfg.isMoELayer 0) "layer 0 is a dense MLP layer"
+  check (cfg.isFullAttentionLayer 0) "layer 0 is a full-attention layer"
   if numLayers ≥ 2 then
-    let layer1 ←
-      match model.model.layers[1]? with
-      | some l => pure l
-      | none => throw (IO.userError "missing layer 1")
-    check layer1.attnSliding.isSome "layer 1 loaded as sliding attention"
+    let layer1 ← layerAt model.model 1
+    check (!cfg.isFullAttentionLayer 1) "layer 1 is a sliding-attention layer"
     match moeBlock? layer1.ffn with
     | some moe =>
       check moe.denseExperts.isNone "layer 1 uses NVFP4-packed expert banks"

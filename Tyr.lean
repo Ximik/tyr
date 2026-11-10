@@ -7,6 +7,7 @@ import Tyr.SafeTensors
 import Tyr.TensorStruct
 import Tyr.TensorStruct.Cast
 import Tyr.TensorStruct.DeriveCast
+import Tyr.TensorStruct.Indexed
 import Tyr.Mctx
 import Tyr.MctxDag
 
@@ -83,6 +84,8 @@ This root module re-exports the core, general-purpose surface area:
 - `Tyr.TensorStruct`: generic traversal/mapping over tensor-containing structures.
 - `Tyr.TensorStruct.Cast`: conversion to a destination tree of tensor types,
   with per-leaf dtype/device specifications and no allocated destination template.
+- `Tyr.TensorStruct.Indexed`: `Select`, a value whose type is chosen by a `Bool` index, and
+  `IndexedList`, a sequence whose element types depend on the position.
 - `Tyr.Mctx`: Monte Carlo tree search infrastructure.
 - `Tyr.MctxDag`: DAG-oriented counterpart to `Tyr.Mctx` with sharing semantics.
 - `Tyr.AutoGrad`: JAX-style automatic differentiation over Tyr IR.
