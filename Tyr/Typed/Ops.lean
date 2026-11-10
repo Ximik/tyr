@@ -1142,6 +1142,13 @@ def any {s : Shape} {dev : Device} (t : Tensor ⟨s, .Bool, dev⟩) : Bool :=
 def toUInt64Array {s : Shape} {dev : Device}
     (t : Tensor ⟨s, .Int64, dev⟩) : IO (Array UInt64) :=
   RawTensor.toUInt64Array t.raw
+/-- Copy integral tensor values to host indices below `bound`; throws on a value
+outside `[0, bound)`. -/
+def toFinArray {s : Shape} {dev : Device} (bound : Nat)
+    (t : Tensor ⟨s, .Int64, dev⟩) : IO (Array (Fin bound)) := do
+  (← toUInt64Array t).mapM fun v =>
+    if h : v.toNat < bound then pure ⟨v.toNat, h⟩ else
+      throw <| IO.userError s!"index {v.toInt64} outside [0, {bound})"
 /-- Uniform integral samples in the half-open interval `[low, high)`. -/
 def randint (low high : Int64) (shape : Shape) (device : Device := .CPU) :
     IO (Tensor { shape := shape, dtype := .Int64, device }) := do

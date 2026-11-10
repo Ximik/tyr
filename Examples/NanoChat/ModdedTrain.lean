@@ -301,6 +301,7 @@ structure StepResult where
 def trainStep {cfg : moddedGpt.Config} {batch seq : Nat}
     (params : ModdedGPTParams (device := device) cfg)
     (yarn : YarnRotary (device := device) cfg.halfHeadDim cfg.maxSeqLen)
+    (hseq : seq ≤ cfg.maxSeqLen)
     (input : Tensor { shape := #[batch, seq], dtype := .Int64, device := device })
     (target : Tensor { shape := #[batch, seq], dtype := .Int64, device := device })
     (optState : OptimizerState (device := device) cfg)
@@ -314,7 +315,7 @@ def trainStep {cfg : moddedGpt.Config} {batch seq : Nat}
   TensorStruct.zeroGrads params
 
   -- Forward pass (window pattern is in cfg)
-  let lossT ← moddedGpt.loss params yarn input target true
+  let lossT ← moddedGpt.loss params yarn input target hseq true
 
   -- Backward pass
   Tensor.backwardLoss lossT
@@ -381,13 +382,14 @@ def trainStep {cfg : moddedGpt.Config} {batch seq : Nat}
 def accumulateGradients {cfg : moddedGpt.Config} {batch seq : Nat}
     (params : ModdedGPTParams (device := device) cfg)
     (yarn : YarnRotary (device := device) cfg.halfHeadDim cfg.maxSeqLen)
+    (hseq : seq ≤ cfg.maxSeqLen)
     (batches : Array (Tensor { shape := #[batch, seq], dtype := .Int64, device := device } × Tensor { shape := #[batch, seq], dtype := .Int64, device := device }))
     : IO Float := do
   let mut totalLoss := 0.0
   let numBatches := batches.size
 
   for (input, target) in batches do
-    let lossT ← moddedGpt.loss params yarn input target true
+    let lossT ← moddedGpt.loss params yarn input target hseq true
     -- Scale loss for accumulation
     let scaledLoss := Tensor.divScalar lossT numBatches.toFloat
     Tensor.backwardLoss scaledLoss
@@ -413,6 +415,7 @@ def validate {cfg : moddedGpt.Config}
     (yarn : YarnRotary (device := device) cfg.halfHeadDim cfg.maxSeqLen)
     (valData : Σ n, DataShard n)
     (batchSize seqLen : Nat)
+    (hseq : seqLen ≤ cfg.maxSeqLen)
     (numBatches : Nat := 10)
     : IO ValidationResult := do
   let startTime ← IO.monoMsNow
@@ -429,7 +432,7 @@ def validate {cfg : moddedGpt.Config}
     | some (input, target) =>
       let input := input.to device
       let target := target.to device
-      let lossT ← moddedGpt.loss params yarn input target false
+      let lossT ← moddedGpt.loss params yarn input target hseq false
       totalLoss := totalLoss + Tensor.item lossT
       numValid := numValid + 1
     | none => break
@@ -943,13 +946,14 @@ def logProgress (state : TrainState (device := device) cfg) (result : StepResult
 
 /-- Run validation and log results -/
 def runValidation (state : TrainState (device := device) cfg) (hp : Hyperparameters)
+    (hseq : hp.maxSeqLen ≤ cfg.maxSeqLen)
     : IO (TrainState (device := device) cfg) := do
   match state.valData with
   | none => return state
   | some valData =>
     let batchSize := hp.deviceBatchSize
     let seqLen := hp.maxSeqLen
-    let valResult ← validate state.params state.yarn valData batchSize seqLen
+    let valResult ← validate state.params state.yarn valData batchSize seqLen hseq
 
     IO.println s!"Validation: loss={valResult.loss} time={valResult.timeMs}ms"
 
@@ -965,6 +969,7 @@ def runValidation (state : TrainState (device := device) cfg) (hp : Hyperparamet
 def trainStepDistributedAccum {cfg : moddedGpt.Config} {batch seq : Nat}
     (params : ModdedGPTParams (device := device) cfg)
     (yarn : YarnRotary (device := device) cfg.halfHeadDim cfg.maxSeqLen)
+    (hseq : seq ≤ cfg.maxSeqLen)
     (microBatches : Array (Tensor { shape := #[batch, seq], dtype := .Int64, device := device } × Tensor { shape := #[batch, seq], dtype := .Int64, device := device }))
     (optState : OptimizerState (device := device) cfg)
     (hp : Hyperparameters)
@@ -980,7 +985,7 @@ def trainStepDistributedAccum {cfg : moddedGpt.Config} {batch seq : Nat}
   let microCount := microBatches.size
   let mut totalLoss := 0.0
   for (input, target) in microBatches do
-    let lossT ← moddedGpt.loss params yarn input target true
+    let lossT ← moddedGpt.loss params yarn input target hseq true
     let scaledLoss := Tensor.divScalar lossT microCount.toFloat
     Tensor.backwardLoss scaledLoss
     totalLoss := totalLoss + Tensor.item lossT
@@ -1240,6 +1245,8 @@ def trainLoop (cfg : moddedGpt.Config) (hp : Hyperparameters)
     (state : TrainState (device := device) cfg) (checkpointDir : String := "checkpoints/modded")
     : IO (TrainState (device := device) cfg) := do
   let totalSteps := hp.numIterations + hp.extensionIterations
+  let ⟨hseq⟩ ← if h : hp.maxSeqLen ≤ cfg.maxSeqLen then pure (PLift.up h) else
+    throw <| IO.userError s!"max_seq_len {hp.maxSeqLen} exceeds the model's {cfg.maxSeqLen}"
   let mut state := state
   let startStep := state.optState.step
 
@@ -1268,7 +1275,7 @@ def trainLoop (cfg : moddedGpt.Config) (hp : Hyperparameters)
     if microBatches.isEmpty then
       state := { state with dataGen := newDataGen }
       continue
-    let (newParams, newOptState, result) ← trainStepDistributedAccum state.params state.yarn
+    let (newParams, newOptState, result) ← trainStepDistributedAccum state.params state.yarn hseq
       microBatches state.optState hp
     state := { state with
       params := newParams
@@ -1279,7 +1286,7 @@ def trainLoop (cfg : moddedGpt.Config) (hp : Hyperparameters)
     }
     logProgress state result hp
     if hp.valInterval.fires step && step > 0 then
-      state ← runValidation state hp
+      state ← runValidation state hp hseq
     if hp.checkpointInterval.fires step && step > 0 then
       let ckpt : Checkpoint (device := device) cfg := {
         params := state.params
@@ -1347,6 +1354,7 @@ private def clipGradientValue {σ : StaticSpec} [DType.RealFloating σ.dtype] (g
 def trainStepDistributed {cfg : moddedGpt.Config} {batch seq : Nat}
     (params : ModdedGPTParams (device := device) cfg)
     (yarn : YarnRotary (device := device) cfg.halfHeadDim cfg.maxSeqLen)
+    (hseq : seq ≤ cfg.maxSeqLen)
     (input : Tensor { shape := #[batch, seq], dtype := .Int64, device := device })
     (target : Tensor { shape := #[batch, seq], dtype := .Int64, device := device })
     (optState : OptimizerState (device := device) cfg)
@@ -1364,7 +1372,7 @@ def trainStepDistributed {cfg : moddedGpt.Config} {batch seq : Nat}
   TensorStruct.zeroGrads params
 
   -- Forward pass (window pattern is in cfg)
-  let lossT ← moddedGpt.loss params yarn input target true
+  let lossT ← moddedGpt.loss params yarn input target hseq true
 
   -- Backward pass
   Tensor.backwardLoss lossT
@@ -1482,6 +1490,8 @@ def trainLoopDistributed (cfg : moddedGpt.Config) (hp : Hyperparameters)
     (state : DistributedTrainState (device := device) cfg) (checkpointDir : String := "checkpoints/modded")
     : IO (DistributedTrainState (device := device) cfg) := do
   let totalSteps := hp.numIterations + hp.extensionIterations
+  let ⟨hseq⟩ ← if h : hp.maxSeqLen ≤ cfg.maxSeqLen then pure (PLift.up h) else
+    throw <| IO.userError s!"max_seq_len {hp.maxSeqLen} exceeds the model's {cfg.maxSeqLen}"
   let mut state := state
   let isMaster := state.rank == 0
   let startStep := state.optState.step
@@ -1513,7 +1523,7 @@ def trainLoopDistributed (cfg : moddedGpt.Config) (hp : Hyperparameters)
     if microBatches.isEmpty then
       state := { state with dataGen := newDataGen }
       continue
-    let (newParams, newOptState, result) ← trainStepDistributedAccum state.params state.yarn
+    let (newParams, newOptState, result) ← trainStepDistributedAccum state.params state.yarn hseq
       microBatches state.optState hp
     state := { state with
       params := newParams
@@ -1525,7 +1535,7 @@ def trainLoopDistributed (cfg : moddedGpt.Config) (hp : Hyperparameters)
     if isMaster then
       logProgress state.toTrainState result hp
     if hp.valInterval.fires step && step > 0 && isMaster then
-      let baseState ← runValidation state.toTrainState hp
+      let baseState ← runValidation state.toTrainState hp hseq
       state := { state with
         bestValLoss := baseState.bestValLoss
         valData := baseState.valData
@@ -1750,6 +1760,7 @@ private def collectMicroBatches {batch seq : Nat}
 private def validateWithProvider {cfg : moddedGpt.Config} {batch seq : Nat}
     (params : ModdedGPTParams (device := device) cfg)
     (yarn : YarnRotary (device := device) cfg.halfHeadDim cfg.maxSeqLen)
+    (hseq : seq ≤ cfg.maxSeqLen)
     (provider : GPTBatchProvider batch seq)
     (numBatches : Nat)
     : IO (Option Float) := do
@@ -1765,7 +1776,7 @@ private def validateWithProvider {cfg : moddedGpt.Config} {batch seq : Nat}
     | some (input, target) =>
       let input := input.to device
       let target := target.to device
-      let lossT ← moddedGpt.loss params yarn input target false
+      let lossT ← moddedGpt.loss params yarn input target hseq false
       totalLoss := totalLoss + Tensor.item lossT
       seen := seen + 1
 
@@ -1826,6 +1837,8 @@ private def trainLoopDistributedStream (cfg : moddedGpt.Config) (hp : Hyperparam
     (saveStreamCursor? : Option (String → IO Unit) := none)
     : IO (StreamTrainState (device := device) cfg) := do
   let totalSteps := hp.numIterations + hp.extensionIterations
+  let ⟨hseq⟩ ← if h : hp.maxSeqLen ≤ cfg.maxSeqLen then pure (PLift.up h) else
+    throw <| IO.userError s!"max_seq_len {hp.maxSeqLen} exceeds the model's {cfg.maxSeqLen}"
   let mut state := state
   let isMaster := state.rank == 0
   let latestPath := s!"{checkpointDir}/latest.ckpt"
@@ -1853,7 +1866,7 @@ private def trainLoopDistributedStream (cfg : moddedGpt.Config) (hp : Hyperparam
         IO.println "No micro-batches available; ending stream training early."
       break
 
-    let (newParams, newOptState, result) ← trainStepDistributedAccum state.params state.yarn
+    let (newParams, newOptState, result) ← trainStepDistributedAccum state.params state.yarn hseq
       microBatches state.optState hp
 
     state := { state with
@@ -1872,7 +1885,7 @@ private def trainLoopDistributedStream (cfg : moddedGpt.Config) (hp : Hyperparam
       | some valProvider =>
         match ← validateWithProvider
             (cfg := cfg) (batch := batchSize) (seq := seqLen)
-            state.params state.yarn valProvider valBatches with
+            state.params state.yarn hseq valProvider valBatches with
         | none => pure ()
         | some valLoss =>
           IO.println s!"Validation: loss={valLoss}"
