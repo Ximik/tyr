@@ -150,29 +150,27 @@ def init (cfg : FluxConfig) (device : Device := .CPU) (dtype : DType := .Float32
     txt_ids: [batch, txt_seq, 4] - text position IDs for RoPE
     Returns: [batch, img_seq, in_channels] - predicted noise -/
 -- Helper to process double blocks using fold (avoids Id.run array iteration bug)
-private def processDoubleBlocks {batch img_seq txt_seq hidden_size num_heads head_dim mlp_hidden : Nat}
-    (blocks : Array (DoubleStreamBlock (device := device) (dtype := dtype) hidden_size num_heads head_dim mlp_hidden))
-    (heven : 2 ∣ head_dim)
+private def processDoubleBlocks {batch img_seq txt_seq hidden_size num_heads half mlp_hidden : Nat}
+    (blocks : Array (DoubleStreamBlock (device := device) (dtype := dtype) hidden_size num_heads (2 * half) mlp_hidden))
     (img : Tensor { dtype := dtype, device := device, shape := #[batch, img_seq, hidden_size] })
     (txt : Tensor { dtype := dtype, device := device, shape := #[batch, txt_seq, hidden_size] })
-    (img_pe : Tensor { device := device, shape := #[batch, 1, img_seq, head_dim / 2, 2, 2], dtype := .Float32 })
-    (txt_pe : Tensor { device := device, shape := #[batch, 1, txt_seq, head_dim / 2, 2, 2], dtype := .Float32 })
+    (img_pe : Tensor { device := device, shape := #[batch, 1, img_seq, half, 2, 2], dtype := .Float32 })
+    (txt_pe : Tensor { device := device, shape := #[batch, 1, txt_seq, half, 2, 2], dtype := .Float32 })
     (mod_img : Tensor { dtype := dtype, device := device, shape := #[batch, 6, hidden_size] })
     (mod_txt : Tensor { dtype := dtype, device := device, shape := #[batch, 6, hidden_size] })
     : Tensor { dtype := dtype, device := device, shape := #[batch, img_seq, hidden_size] } × Tensor { dtype := dtype, device := device, shape := #[batch, txt_seq, hidden_size] } :=
   blocks.foldl (init := (img, txt)) fun (img, txt) block =>
-    block.forward heven img txt img_pe txt_pe mod_img mod_txt
+    block.forward img txt img_pe txt_pe mod_img mod_txt
 
 -- Helper to process single blocks using fold
-private def processSingleBlocks {batch seq hidden_size num_heads head_dim mlp_hidden : Nat}
-    (blocks : Array (SingleStreamBlock (device := device) (dtype := dtype) hidden_size num_heads head_dim mlp_hidden))
-    (heven : 2 ∣ head_dim)
+private def processSingleBlocks {batch seq hidden_size num_heads half mlp_hidden : Nat}
+    (blocks : Array (SingleStreamBlock (device := device) (dtype := dtype) hidden_size num_heads (2 * half) mlp_hidden))
     (x : Tensor { dtype := dtype, device := device, shape := #[batch, seq, hidden_size] })
-    (pe : Tensor { device := device, shape := #[batch, 1, seq, head_dim / 2, 2, 2], dtype := .Float32 })
+    (pe : Tensor { device := device, shape := #[batch, 1, seq, half, 2, 2], dtype := .Float32 })
     (mod : Tensor { dtype := dtype, device := device, shape := #[batch, 3, hidden_size] })
     : Tensor { dtype := dtype, device := device, shape := #[batch, seq, hidden_size] } :=
   blocks.foldl (init := x) fun x block =>
-    block.forward heven x pe mod
+    block.forward x pe mod
 
 def forward {batch img_seq txt_seq : Nat} (cfg : FluxConfig)
     (model : FluxModel (device := device) (dtype := dtype) cfg)
@@ -194,21 +192,21 @@ def forward {batch img_seq txt_seq : Nat} (cfg : FluxConfig)
   let txt := Tensor.linear3d txt model.txt_in  -- [batch, txt_seq, hidden_size]
 
   -- Compute RoPE embeddings
-  let img_pe := flux.ropeEmbed (head_dim := cfg.head_dim) img_ids cfg.axes_dims cfg.axesValid cfg.theta cfg.thetaPos
-  let txt_pe := flux.ropeEmbed (head_dim := cfg.head_dim) txt_ids cfg.axes_dims cfg.axesValid cfg.theta cfg.thetaPos
+  let img_pe := flux.ropeEmbed (half_head_dim := cfg.half_head_dim) img_ids cfg.half_axes_dims cfg.axesValid cfg.theta cfg.thetaPos
+  let txt_pe := flux.ropeEmbed (half_head_dim := cfg.half_head_dim) txt_ids cfg.half_axes_dims cfg.axesValid cfg.theta cfg.thetaPos
 
   -- Double-stream blocks (using fold to avoid Id.run bug)
-  let (img, txt) := processDoubleBlocks model.double_blocks cfg.headDimEven img txt img_pe txt_pe mod_img mod_txt
+  let (img, txt) := processDoubleBlocks model.double_blocks img txt img_pe txt_pe mod_img mod_txt
 
   -- Concatenate for single-stream
   let x : Tensor { dtype := dtype, device := device, shape := #[batch, txt_seq + img_seq, cfg.hidden_size] } := Tensor.cat txt img 1  -- [batch, txt_seq + img_seq, hidden_size]
 
   -- Compute combined RoPE for concatenated img+txt sequence
   let combined_ids : Tensor { device := device, shape := #[batch, txt_seq + img_seq, 4], dtype := .Int64 } := Tensor.cat txt_ids img_ids 1
-  let combined_pe := flux.ropeEmbed (head_dim := cfg.head_dim) combined_ids cfg.axes_dims cfg.axesValid cfg.theta cfg.thetaPos
+  let combined_pe := flux.ropeEmbed (half_head_dim := cfg.half_head_dim) combined_ids cfg.half_axes_dims cfg.axesValid cfg.theta cfg.thetaPos
 
   -- Single-stream blocks (using fold to avoid Id.run bug)
-  let x := processSingleBlocks model.single_blocks cfg.headDimEven x combined_pe mod_single
+  let x := processSingleBlocks model.single_blocks x combined_pe mod_single
 
   -- Extract image tokens
   let img_slice := Tensor.slice x 1 txt_seq img_seq

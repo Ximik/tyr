@@ -63,9 +63,9 @@ def Config.parseJson (j : Json) (d : Config := Config.laguna_s_2_1) : Except Str
     throw "Invalid Laguna config: sliding_window must be positive"
   let headDim ← fieldD? j "head_dim" d.head_dim
   let fullFactor := (← ropeField? j "full_attention" "partial_rotary_factor").getD
-    (d.rotary_dim_full.toFloat / d.head_dim.toFloat)
+    (d.rotaryDimFull.toFloat / d.head_dim.toFloat)
   let slidingFactor := (← ropeField? j "sliding_attention" "partial_rotary_factor").getD
-    (d.rotary_dim_sliding.toFloat / d.head_dim.toFloat)
+    (d.rotaryDimSliding.toFloat / d.head_dim.toFloat)
   let rotaryFull ← rotaryDim? headDim fullFactor "full_attention"
   let rotarySliding ← rotaryDim? headDim slidingFactor "sliding_attention"
   let ⟨hRotary⟩ ← if h : 0 < rotaryFull ∧ 2 ∣ rotaryFull ∧ rotaryFull ≤ headDim ∧
@@ -109,9 +109,9 @@ def Config.parseJson (j : Json) (d : Config := Config.laguna_s_2_1) : Except Str
     rms_norm_eps := eps
     sliding_window := slidingWindow
     rope_theta_sliding := thetaSliding
-    rotary_dim_sliding := rotarySliding
+    half_rotary_dim_sliding := rotarySliding / 2
     rope_theta_full := thetaFull
-    rotary_dim_full := rotaryFull
+    half_rotary_dim_full := rotaryFull / 2
     yarn_factor := yarnFactor
     yarn_original_max_position_embeddings := yarnContext
     yarn_beta_fast := (← ropeField? j "full_attention" "beta_fast").getD d.yarn_beta_fast
@@ -131,7 +131,7 @@ def Config.parseJson (j : Json) (d : Config := Config.laguna_s_2_1) : Except Str
     kvHeadsDivideFull := hFull
     kvHeadsDivideSliding := hSliding
     headsPos := hHeads
-    rotaryValid := hRotary
+    rotaryValid := by obtain ⟨_, _, _, _, _, _⟩ := hRotary; omega
     layerTypesSize := hLayers
     mlpOnlyLayersValid := hMlpOnly
     expertsValid := hExperts

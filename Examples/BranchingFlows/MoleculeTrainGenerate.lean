@@ -731,21 +731,23 @@ private def runAt (dtype : DType) [DType.RealFloating dtype]
 
   torch.manualSeed opts.seed
   if opts.fullArchitecture then
+    -- The even check above makes `opts.headDim = 2 * half`.
+    let half := opts.headDim / 2
     let model :=
       fullMoleculeTransformerModel (dtype := dtype) (device := opts.device) (maxLen := opts.maxLen) (vocab := vocab)
-        (hidden := opts.hiddenDim) (heads := opts.heads) (headDim := opts.headDim)
+        (hidden := opts.hiddenDim) (heads := opts.heads) (half := half)
         (mlp := opts.mlp) (rff := opts.rffDim) (layers := opts.layers)
         (coordUpdateLayers := opts.coordUpdateLayers)
         (coordTargetCap? := opts.coordTargetCap?)
     let initParams ←
-      FullMoleculeTransformerParams.init vocab opts.hiddenDim opts.heads opts.headDim
+      FullMoleculeTransformerParams.init vocab opts.hiddenDim opts.heads (2 * half)
         opts.mlp opts.rffDim opts.layers (device := opts.device)
     let initParams ← TensorStruct.castTo
-      (FullMoleculeTransformerParams (device := opts.device) vocab opts.hiddenDim opts.heads opts.headDim
+      (FullMoleculeTransformerParams (device := opts.device) vocab opts.hiddenDim opts.heads (2 * half)
         opts.mlp opts.rffDim opts.layers dtype) initParams
     let makeLearnedModel := fun params =>
       fullMoleculeTransformerIOModel (maxLen := opts.maxLen) (vocab := vocab)
-        (hidden := opts.hiddenDim) (heads := opts.heads) (headDim := opts.headDim)
+        (hidden := opts.hiddenDim) (heads := opts.heads) (half := half)
         (mlp := opts.mlp) (rff := opts.rffDim) (layers := opts.layers)
         trainCfg.padToken params (coordUpdateLayers := opts.coordUpdateLayers)
         (splitLogitCap? := opts.splitLogitCap?)

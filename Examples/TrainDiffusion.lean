@@ -57,10 +57,9 @@ def tensorToFloatArray {n : Nat} (t : Activation #[n]) : IO (Array Float) :=
 def decodeMultipleBlocks {numBlocks seqLen : Nat}
     (tensor : Tokens #[numBlocks, seqLen]) : IO (Array String) := do
   let mut results := #[]
-  for i in [:numBlocks] do
+  for h : i in [:numBlocks] do
     -- Extract row i: slice along batch dimension
-    let start := i
-    let row : Tokens #[1, seqLen] := tensor.slice 0 start 1
+    let row : Tokens #[1, seqLen] := tensor.slice 0 i 1 (_bounds := by have := h.upper; simp at this ⊢; omega)
     let rowFlat := Tensor.reshape row #[seqLen]
     let arr ← tensorToArray rowFlat
     results := results.push (asciiDecode arr)
@@ -99,7 +98,7 @@ def ansiRestoreCursor : String := "\x1b[u"
 /-- Animated sampling with optional prompt conditioning -/
 def sampleAnimated {cfg : Config}
     (params : DiffusionParams cfg)
-    (rotaryCache : RotaryCache cfg.seq_len cfg.headDim)
+    (rotaryCache : RotaryCache cfg.seq_len cfg.half_head_dim)
     (k : Nat)
     (temperature : Float := 0.8)
     (frameDelay : Nat := 100)
@@ -209,7 +208,7 @@ def sampleAnimated {cfg : Config}
 -/
 def sampleAnimatedMultiple {cfg : Config}
     (params : DiffusionParams cfg)
-    (rotaryCache : RotaryCache cfg.seq_len cfg.headDim)
+    (rotaryCache : RotaryCache cfg.seq_len cfg.half_head_dim)
     (numBlocks : Nat)
     (k : Nat)
     (temperature : Float := 0.8)
@@ -377,7 +376,7 @@ def runTrainingWithVal {nTrain nVal : Nat}
   let schedule := MaskedDiffusionSchedule.init modelCfg.diffusion_steps modelCfg.mask_token_id modelCfg.context_len
 
   -- Initialize rotary cache (exact seq_len to avoid slice2d issues)
-  let rotaryCache ← RotaryCache.init modelCfg.seq_len modelCfg.headDim
+  let rotaryCache ← RotaryCache.init modelCfg.seq_len modelCfg.half_head_dim
 
   IO.println s!"Model initialized with {modelCfg.n_layer} layers, {modelCfg.n_embd} embedding dim"
   IO.println s!"Diffusion steps: {modelCfg.diffusion_steps}, context_len: {modelCfg.context_len}"
@@ -472,7 +471,7 @@ def printUsage : IO Unit := do
 def runGeneration (modelCfg : Config) (params : DiffusionParams modelCfg)
     (prompt : String) (numBlocks : Nat) (temperature : Float) : IO Unit := do
   -- Initialize rotary cache for generation
-  let rotaryCache ← RotaryCache.init modelCfg.seq_len modelCfg.headDim
+  let rotaryCache ← RotaryCache.init modelCfg.seq_len modelCfg.half_head_dim
 
   -- Generate multiple blocks with continuity
   IO.println ""

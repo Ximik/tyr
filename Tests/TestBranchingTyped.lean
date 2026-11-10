@@ -125,12 +125,12 @@ private def checkBranchingTypedTraining (dtype : DType) [DType.RealFloating dtyp
 private def checkBranchingFullTransformer (dtype : DType) [DType.RealFloating dtype]
     [DType.Promotes dtype .Float32 .Float32] [DType.Promotes .Float32 dtype .Float32]
     [DType.NonBool dtype] : IO Unit := do
-  let initial ← FullMoleculeTransformerParams.init 2 4 1 4 4 2 2
-  let params ← TensorStruct.castTo (FullMoleculeTransformerParams (device := .CPU) 2 4 1 4 4 2 2 dtype) initial
+  let initial ← FullMoleculeTransformerParams.init 2 4 1 (2 * 2) 4 2 2
+  let params ← TensorStruct.castTo (FullMoleculeTransformerParams (device := .CPU) 2 4 1 (2 * 2) 4 2 2 dtype) initial
   let ⟨_, packed0⟩ ← packBranchingMolecule { maxLen := 2 } fixture
   let packed ← packed0.castDType dtype
   let (a, _, _, _) ← params.forward packed.coord packed.label packed.t packed.padmask
-  let (cos, sin) := Tensor.rotaryFreqs 2 4
+  let (cos, sin) := Tensor.rotaryFreqs 2 2
   let (b, _, _, _) ← params.forwardFreqs packed.coord packed.label packed.t packed.padmask cos sin
   LeanTest.assertEqual (← a.toFloatArray) (← b.toFloatArray)
   LeanTest.assertEqual a.actualSpec.dtype dtype

@@ -32,9 +32,9 @@ private def parseVisionConfig (j : Json) (d : VisionConfig := {}) : Except Strin
     temporal_patch_size := ← fieldD? j "temporal_patch_size" d.temporal_patch_size
     out_hidden_size := ← fieldD? j "out_hidden_size" d.out_hidden_size
     num_position_embeddings := ← fieldD? j "num_position_embeddings" d.num_position_embeddings
-    headsDivide := hHeads.2
+    half_head_dim := hidden_size / num_heads / 2
+    headsSplit := by rw [Nat.mul_div_cancel' hEven, Nat.mul_div_cancel' hHeads.2]
     headsPos := hHeads.1
-    headDimEven := hEven
     mergePos := hMerge
   }
 

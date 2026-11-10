@@ -7,7 +7,7 @@ namespace Tests.NanoChatCheckpoint
 open torch torch.ModdedTrain LeanTest
 
 private def tinyConfig : moddedGpt.Config := {
-  vocabSize := 16, nLayer := 7, nHead := 1, headDim := 12, modelDim := 12,
+  vocabSize := 16, nLayer := 7, nHead := 1, halfHeadDim := 6,
   maxSeqLen := 8, blockSize := 8, numValueEmbeds := 1
 }
 
@@ -195,7 +195,7 @@ private def metadata (tokens : Nat) : CheckpointMetadata := {
 
 @[test] def testNanoChatIndexedTrainingStep : IO Unit := do
   let params ← moddedGpt.ModdedGPTParams.init tinyConfig
-  let yarn ← moddedGpt.YarnRotary.init tinyConfig.headDim tinyConfig.maxSeqLen
+  let yarn ← moddedGpt.YarnRotary.init tinyConfig.halfHeadDim tinyConfig.maxSeqLen
   let input := (Tensor.fromInt64Array #[0, 1, 2, 3]).reshape #[1, 4]
   let target := (Tensor.fromInt64Array #[1, 2, 3, 4]).reshape #[1, 4]
   let opt := OptimizerState.init tinyConfig params

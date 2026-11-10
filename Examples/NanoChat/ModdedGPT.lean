@@ -34,10 +34,8 @@ structure Config where
   nLayer : Nat := 11
   /-- Number of attention heads -/
   nHead : Nat := 6
-  /-- Head dimension -/
-  headDim : Nat := 128
-  /-- Model dimension (nHead * headDim) -/
-  modelDim : Nat := 768
+  /-- Half the head dimension; each head has `2 * halfHeadDim` channels -/
+  halfHeadDim : Nat := 64
   /-- Maximum sequence length -/
   maxSeqLen : Nat := 2048
   /-- Block size for attention windowing -/
@@ -54,6 +52,12 @@ structure Config where
       Examples: "L"=all full context, "SL"=alternating, "LSS"=one long then two short -/
   windowPattern : String := "L"
   deriving Repr, Inhabited, Lean.ToJson, Lean.FromJson
+
+/-- Head dimension -/
+def Config.headDim (cfg : Config) : Nat := 2 * cfg.halfHeadDim
+
+/-- Model dimension: `nHead` heads of `headDim` channels -/
+def Config.modelDim (cfg : Config) : Nat := cfg.nHead * (2 * cfg.halfHeadDim)
 
 /-- Default modded-nanogpt configuration -/
 def Config.default : Config := {}
@@ -103,23 +107,22 @@ def computeWindowSizes (cfg : Config) : Array (Option Nat) := Id.run do
     by interpolating rotary frequencies. We use half-truncated RoPE
     where only the first half of head dimensions get rotation.
 -/
-structure YarnRotary (headDim maxSeqLen : Nat) where
-  /-- Cosine frequencies [maxSeqLen, headDim/2] for half-truncated RoPE -/
-  cos : Tensor { shape := #[maxSeqLen, headDim / 2], dtype := .Float32, device := device }
-  /-- Sine frequencies [maxSeqLen, headDim/2] for half-truncated RoPE -/
-  sin : Tensor { shape := #[maxSeqLen, headDim / 2], dtype := .Float32, device := device }
-  /-- Base angular frequencies [headDim/2] -/
-  angularFreq : Tensor { shape := #[headDim / 2], dtype := .Float32, device := device }
+structure YarnRotary (half maxSeqLen : Nat) where
+  /-- Cosine frequencies [maxSeqLen, half] for half-truncated RoPE -/
+  cos : Tensor { shape := #[maxSeqLen, half], dtype := .Float32, device := device }
+  /-- Sine frequencies [maxSeqLen, half] for half-truncated RoPE -/
+  sin : Tensor { shape := #[maxSeqLen, half], dtype := .Float32, device := device }
+  /-- Base angular frequencies [half] -/
+  angularFreq : Tensor { shape := #[half], dtype := .Float32, device := device }
   /-- Attention scale factor -/
   attnScale : Float := 0.1
   deriving Repr
 
 /-- Initialize YaRN rotary embeddings -/
-def YarnRotary.init (headDim maxSeqLen : Nat) (base : Float := 500000.0) (device : Device := .CPU)
-    : IO (YarnRotary (device := device) headDim maxSeqLen) := do
-  -- computeFreqs returns [maxSeqLen, headDim/2]
-  let (cosHalf, sinHalf) := Tensor.rotaryFreqs maxSeqLen headDim base
-  let angularFreq := Tensor.zeros (device := device) #[headDim / 2]
+def YarnRotary.init (half maxSeqLen : Nat) (base : Float := 500000.0) (device : Device := .CPU)
+    : IO (YarnRotary (device := device) half maxSeqLen) := do
+  let (cosHalf, sinHalf) := Tensor.rotaryFreqs maxSeqLen half base
+  let angularFreq := Tensor.zeros (device := device) #[half]
   return {
     cos := cosHalf.to device
     sin := sinHalf.to device
@@ -132,8 +135,8 @@ def YarnRotary.init (headDim maxSeqLen : Nat) (base : Float := 500000.0) (device
     When extending to longer sequences, we interpolate the
     rotary frequencies to maintain position information.
 -/
-def YarnRotary.applyExtension (yarn : YarnRotary (device := device) headDim maxSeqLen)
-    (_oldWindow _newWindow : Nat) : YarnRotary (device := device) headDim maxSeqLen :=
+def YarnRotary.applyExtension (yarn : YarnRotary (device := device) half maxSeqLen)
+    (_oldWindow _newWindow : Nat) : YarnRotary (device := device) half maxSeqLen :=
   -- YaRN frequency interpolation would go here
   -- For now, return unchanged
   yarn
@@ -245,12 +248,12 @@ def rmsNorm3d {batch seq dim : Nat} (x : Tensor { shape := #[batch, seq, dim], d
 /-- Forward pass for attention with rotary embeddings and QK norm.
     x: [batch, seq, dim]
     Returns: [batch, seq, dim] -/
-def CausalSelfAttention.forward {batch seq dim headDim numHeads rotaryLen : Nat}
-    (attn : CausalSelfAttention (device := device) dim headDim numHeads)
+def CausalSelfAttention.forward {batch seq dim half numHeads rotaryLen : Nat}
+    (attn : CausalSelfAttention (device := device) dim (2 * half) numHeads)
     (x : Tensor { shape := #[batch, seq, dim], dtype := .Float32, device := device })
-    (yarn : YarnRotary (device := device) headDim rotaryLen)
+    (yarn : YarnRotary (device := device) half rotaryLen)
     (windowSize : Option Nat := none)
-    (valueEmbed : Option (Tensor { shape := #[batch, seq, numHeads * headDim], dtype := .Float32, device := device }) := none)
+    (valueEmbed : Option (Tensor { shape := #[batch, seq, numHeads * (2 * half)], dtype := .Float32, device := device }) := none)
     (valueMix : Tensor { shape := #[], dtype := .Float32, device := device } := Tensor.zeros (device := device) #[])
     : Tensor { shape := #[batch, seq, dim], dtype := .Float32, device := device } :=
   -- Project to Q, K, V: [batch, seq, numHeads * headDim]
@@ -264,16 +267,16 @@ def CausalSelfAttention.forward {batch seq dim headDim numHeads rotaryLen : Nat}
       let mix := Tensor.sigmoid valueMix
       let one : Tensor { shape := #[], dtype := .Float32, device := device } := (Tensor.ones (device := device) #[]).to mix.device
       let oneMinus := one - mix
-      let mixExpanded := Tensor.broadcastTo mix #[batch, seq, numHeads * headDim]
-      let oneMinusExpanded := Tensor.broadcastTo oneMinus #[batch, seq, numHeads * headDim]
+      let mixExpanded := Tensor.broadcastTo mix #[batch, seq, numHeads * (2 * half)]
+      let oneMinusExpanded := Tensor.broadcastTo oneMinus #[batch, seq, numHeads * (2 * half)]
       (vBase * oneMinusExpanded) + (ve * mixExpanded)
     | none =>
       vBase
 
   -- Reshape to [batch, seq, numHeads, headDim] for rotary/attention
-  let q := Tensor.reshape q #[batch, seq, numHeads, headDim]
-  let k := Tensor.reshape k #[batch, seq, numHeads, headDim]
-  let v := Tensor.reshape v #[batch, seq, numHeads, headDim]
+  let q := Tensor.reshape q #[batch, seq, numHeads, 2 * half]
+  let k := Tensor.reshape k #[batch, seq, numHeads, 2 * half]
+  let v := Tensor.reshape v #[batch, seq, numHeads, 2 * half]
 
   -- Slice rotary embeddings to seq length (cos/sin are [rotaryLen, headDim])
   let cos := Tensor.slice! yarn.cos 0 0 seq
@@ -302,7 +305,7 @@ def CausalSelfAttention.forward {batch seq dim headDim numHeads rotaryLen : Nat}
   let attnOut := Tensor.joinHeads attnOut
 
   -- Reshape to [batch, seq, numHeads * headDim] and project
-  let attnOut := Tensor.reshape attnOut #[batch, seq, numHeads * headDim]
+  let attnOut := Tensor.reshape attnOut #[batch, seq, numHeads * (2 * half)]
   let output := Tensor.linear3d attnOut attn.wO
 
   output
@@ -512,14 +515,13 @@ def ModdedGPTParams.init (cfg : Config) (device : Device := .CPU) : IO (ModdedGP
 -/
 def forward {cfg : Config} {batch seq : Nat}
     (params : ModdedGPTParams (device := device) cfg)
-    (yarn : YarnRotary (device := device) cfg.headDim cfg.maxSeqLen)
+    (yarn : YarnRotary (device := device) cfg.halfHeadDim cfg.maxSeqLen)
     (inputSeq : Tensor { shape := #[batch, seq], dtype := .Int64, device := device })
     (_training : Bool := true)
     : IO (Tensor { shape := #[batch, seq, cfg.vocabSize], dtype := .Float32, device := device }) := do
   if cfg.modelDim < 12 then
     throw (IO.userError "ModdedGPT requires modelDim >= 12 for the smear gate")
-  let ⟨hHeads⟩ ← if h : cfg.modelDim = cfg.nHead * cfg.headDim then pure (PLift.up h) else
-    throw (IO.userError s!"ModdedGPT requires modelDim = nHead * headDim, got {cfg.modelDim} vs {cfg.nHead} * {cfg.headDim}")
+  have hHeads : cfg.modelDim = cfg.nHead * cfg.headDim := rfl
   -- 1) Token embedding + lightweight smear-style modulation.
   let tokEmb := Tensor.embedding inputSeq params.embed
   let smearIn : Tensor { shape := #[batch, seq, 12], dtype := .Float32, device := device } := Tensor.slice! tokEmb 2 0 12
@@ -599,7 +601,7 @@ def forward {cfg : Config} {batch seq : Nat}
 /-- Compute cross-entropy loss -/
 def loss {cfg : Config} {batch seq : Nat}
     (params : ModdedGPTParams (device := device) cfg)
-    (yarn : YarnRotary (device := device) cfg.headDim cfg.maxSeqLen)
+    (yarn : YarnRotary (device := device) cfg.halfHeadDim cfg.maxSeqLen)
     (inputSeq : Tensor { shape := #[batch, seq], dtype := .Int64, device := device })
     (targets : Tensor { shape := #[batch, seq], dtype := .Int64, device := device })
     (training : Bool := true)
@@ -613,8 +615,8 @@ def loss {cfg : Config} {batch seq : Nat}
 
 /-! Device transfers are type-directed across every model leaf. -/
 
-derive_tensor_tree_cast {source target : Device} {headDim maxSeqLen : Nat} :
-  YarnRotary (device := source) headDim maxSeqLen => YarnRotary (device := target) headDim maxSeqLen
+derive_tensor_tree_cast {source target : Device} {half maxSeqLen : Nat} :
+  YarnRotary (device := source) half maxSeqLen => YarnRotary (device := target) half maxSeqLen
 
 derive_tensor_tree_cast {source target : Device} {batch maxSeq nHead headDim : Nat} :
   AttnArgs (device := source) batch maxSeq nHead headDim => AttnArgs (device := target) batch maxSeq nHead headDim

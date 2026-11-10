@@ -216,8 +216,7 @@ private def buildModelConfig (args : Args) : Config := {
   vocabSize := args.vocabSize
   nLayer := args.modelDepth
   nHead := 16
-  headDim := 64
-  modelDim := 1024
+  halfHeadDim := 32
   maxSeqLen := 2048
   blockSize := 128
   ropeBase := 10000.0
@@ -225,7 +224,7 @@ private def buildModelConfig (args : Args) : Config := {
 
 private def sampleNextToken {cfg : Config}
     (params : ModdedGPTParams (device := device) cfg)
-    (yarn : YarnRotary (device := device) cfg.headDim cfg.maxSeqLen)
+    (yarn : YarnRotary (device := device) cfg.halfHeadDim cfg.maxSeqLen)
     (temperature : Float)
     (topK : TopK)
     (context : Array UInt64)
@@ -303,7 +302,7 @@ unsafe def main (rawArgs : List String) : IO UInt32 := do
 
   let paramsOnDevice ← TensorStruct.makeLeafParams ckpt.params
 
-  let yarn ← YarnRotary.init cfg.headDim cfg.maxSeqLen cfg.ropeBase (device := device)
+  let yarn ← YarnRotary.init cfg.halfHeadDim cfg.maxSeqLen cfg.ropeBase (device := device)
 
   let encodeFn := fun (text : String) => (tokenizer.encodeWithSpecials tok text).map (·.toUInt64)
   let decodeFn := fun (tokens : Array UInt64) => tokenizer.decode tok (tokens.map (·.toUInt32))

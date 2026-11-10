@@ -353,14 +353,14 @@ private def applyHeadNorm {batch seq n_heads head_dim : Nat}
   let flat : Tensor { device := device, shape := #[batch * seq * n_heads, head_dim], dtype := dtype } := Tensor.reshape x #[batch * seq * n_heads, head_dim]
   Tensor.reshape (norm.forward2d flat) #[batch, seq, n_heads, head_dim]
 
-private def applyRotaryPartial {batch seq n_head head_dim rotary_dim : Nat}
+private def applyRotaryPartial {batch seq n_head head_dim half : Nat}
     (x : Tensor { device := device, shape := #[batch, seq, n_head, head_dim], dtype := dtype })
-    (cos : Tensor { device := device, shape := #[seq, rotary_dim / 2], dtype := .Float32 })
-    (sin : Tensor { device := device, shape := #[seq, rotary_dim / 2], dtype := .Float32 })
-    (hrot : rotary_dim ≤ head_dim)
+    (cos : Tensor { device := device, shape := #[seq, half], dtype := .Float32 })
+    (sin : Tensor { device := device, shape := #[seq, half], dtype := .Float32 })
+    (hrot : 2 * half ≤ head_dim)
     : Tensor { device := device, shape := #[batch, seq, n_head, head_dim], dtype := dtype } :=
-  let xRot := Tensor.applyRotary (Tensor.slice x 3 0 rotary_dim) cos sin
-  let xPass := Tensor.slice x 3 rotary_dim (head_dim - rotary_dim)
+  let xRot := Tensor.applyRotary (Tensor.slice x 3 0 (2 * half)) cos sin
+  let xPass := Tensor.slice x 3 (2 * half) (head_dim - 2 * half)
   (Tensor.cat xRot xPass 3).reshape #[batch, seq, n_head, head_dim] (by simp [Nat.add_sub_cancel' hrot])
 
 private def splitQProjAndGate {batch seq : Nat}
@@ -988,7 +988,7 @@ def forward {batch seq : Nat}
     (attnMask : Option (Tensor { device := device, shape := #[batch, seq], dtype := .Int64 }) := none)
     : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } :=
   let x0 : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype } := Tensor.embedding inputIds m.embed_tokens
-  let (cos, sin) := Tensor.rotaryFreqs seq (Config.rotaryDim cfg) cfg.rope_theta x0.device
+  let (cos, sin) := Tensor.rotaryFreqs seq (Config.rotaryHalfDim cfg) cfg.rope_theta x0.device
   let h :=
     m.layers.foldl
       (fun h _ layer => layer.forward cfg h cos sin attnMask)
@@ -1044,7 +1044,7 @@ def forwardEmbeds {batch seq : Nat}
     (inputsEmbeds : Tensor { device := device, shape := #[batch, seq, cfg.hidden_size], dtype := dtype })
     (attnMask : Option (Tensor { device := device, shape := #[batch, seq], dtype := .Int64 }) := none)
     : Tensor { device := device, shape := #[batch, seq, cfg.vocab_size], dtype := dtype } :=
-  let (cos, sin) := Tensor.rotaryFreqs seq (Config.rotaryDim cfg) cfg.rope_theta inputsEmbeds.device
+  let (cos, sin) := Tensor.rotaryFreqs seq (Config.rotaryHalfDim cfg) cfg.rope_theta inputsEmbeds.device
   let hidden := m.model.layers.foldl (fun h _ layer => layer.forward cfg h cos sin attnMask) inputsEmbeds
   let hidden := m.model.norm.forward3d hidden
   Tensor.linear3d hidden m.lmHead
@@ -1064,7 +1064,7 @@ private def precomputeDecodeRotary {maxLen : Nat}
     : Tensor { device := device, shape := #[maxLen, Config.rotaryHalfDim cfg], dtype := .Float32 } × Tensor { device := device, shape := #[maxLen, Config.rotaryHalfDim cfg], dtype := .Float32 } :=
   Tensor.rotaryFreqs
     maxLen
-    (Config.rotaryDim cfg)
+    (Config.rotaryHalfDim cfg)
     cfg.rope_theta
     device
 
@@ -1288,7 +1288,7 @@ private def generateFromEmbedsCore {batch seq : Nat}
     return ⟨seq, inputIds⟩
 
   let maxLen := seq + maxNewTokens
-  let (cosAll, sinAll) := Tensor.rotaryFreqs maxLen (Config.rotaryDim cfg) cfg.rope_theta inputsEmbeds.device
+  let (cosAll, sinAll) := Tensor.rotaryFreqs maxLen (Config.rotaryHalfDim cfg) cfg.rope_theta inputsEmbeds.device
   let cache := Qwen35Model.initCache cfg m.model maxLen inputsEmbeds.device (h := Nat.lt_of_lt_of_le hSeq (Nat.le_add_right _ _))
 
   -- 1) Prefill caches and get last prompt logits

@@ -31,7 +31,7 @@ structure QwenFluxEmbedder (cfg : QwenConfig) (max_seq : Nat) where
   /-- The Qwen3 model -/
   model : Qwen3Model (device := device) cfg
   /-- RoPE cache for position embeddings -/
-  ropeCache : RoPECache (device := device) max_seq cfg.head_dim
+  ropeCache : RoPECache (device := device) max_seq cfg.half_head_dim
   /-- Which layers to extract -/
   outputLayers : Array Nat
 
@@ -45,7 +45,7 @@ def outputDim (cfg : QwenConfig) (numLayers : Nat) : Nat :=
 def fromModel (cfg : QwenConfig) (max_seq : Nat) (model : Qwen3Model (device := device) cfg)
     (outputLayers : Array Nat := #[8, 17, 26])
     : IO (QwenFluxEmbedder (device := device) cfg max_seq) := do
-  let ropeCache ← RoPECache.init (device := device) max_seq cfg.head_dim cfg.rope_theta
+  let ropeCache ← RoPECache.init (device := device) max_seq cfg.half_head_dim cfg.rope_theta
   pure { model, ropeCache, outputLayers }
 
 /-- Concatenate equal-spec tensors along `dim`, validating the runtime

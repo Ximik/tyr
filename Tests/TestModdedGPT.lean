@@ -199,8 +199,7 @@ def testModdedGPTInit : IO Unit := do
     vocabSize := 1000
     nLayer := 2
     nHead := 2
-    headDim := 32
-    modelDim := 64
+    halfHeadDim := 16
     maxSeqLen := 128
     blockSize := 32
     numValueEmbeds := 2
@@ -214,10 +213,10 @@ def testModdedGPTInit : IO Unit := do
 
 @[test]
 def testYarnRotary : IO Unit := do
-  let headDim : Nat := 64
+  let half : Nat := 32
   let maxSeqLen : Nat := 128
 
-  let yarn ← YarnRotary.init headDim maxSeqLen
+  let yarn ← YarnRotary.init half maxSeqLen
 
   -- Check cos/sin are non-zero
   let cosNorm := Tensor.item (Tensor.meanAll (Tensor.abs yarn.cos))
@@ -231,8 +230,7 @@ def testModdedGPTForward : IO Unit := do
     vocabSize := 1000
     nLayer := 2
     nHead := 2
-    headDim := 32
-    modelDim := 64
+    halfHeadDim := 16
     maxSeqLen := 128
     blockSize := 32
     numValueEmbeds := 2
@@ -240,7 +238,7 @@ def testModdedGPTForward : IO Unit := do
   }
 
   let params ← ModdedGPTParams.init cfg
-  let yarn ← YarnRotary.init cfg.headDim cfg.maxSeqLen
+  let yarn ← YarnRotary.init cfg.halfHeadDim cfg.maxSeqLen
 
   -- Create input
   let batchSize : Nat := 2
@@ -267,15 +265,14 @@ def testLoss : IO Unit := do
     vocabSize := 1000
     nLayer := 2
     nHead := 2
-    headDim := 32
-    modelDim := 64
+    halfHeadDim := 16
     maxSeqLen := 128
     blockSize := 32
     numValueEmbeds := 2
   }
 
   let params ← ModdedGPTParams.init cfg
-  let yarn ← YarnRotary.init cfg.headDim cfg.maxSeqLen
+  let yarn ← YarnRotary.init cfg.halfHeadDim cfg.maxSeqLen
 
   -- Create input and targets
   let batchSize : Nat := 2

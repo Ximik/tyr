@@ -51,14 +51,14 @@ def main : IO Unit := do
 
   -- YaRN (full-attention) rope parameters from the NVFP4 checkpoint.
   check (cfg.rope_theta_full == 500000.0) s!"rope_theta_full={cfg.rope_theta_full}"
-  check (cfg.rotary_dim_full == 64) s!"rotary_dim_full={cfg.rotary_dim_full}"
+  check (cfg.half_rotary_dim_full == 32) s!"half_rotary_dim_full={cfg.half_rotary_dim_full}"
   check (cfg.yarn_factor == 32.0) s!"yarn_factor={cfg.yarn_factor}"
   check (cfg.yarn_original_max_position_embeddings == 8192) s!"yarn_orig={cfg.yarn_original_max_position_embeddings}"
   check (cfg.yarn_beta_fast == 32.0) s!"yarn_beta_fast={cfg.yarn_beta_fast}"
   check (cfg.yarn_beta_slow == 1.0) s!"yarn_beta_slow={cfg.yarn_beta_slow}"
   check ((cfg.yarn_attention_factor - 1.3465735902799727).abs < 1e-9) s!"yarn_attention_factor={cfg.yarn_attention_factor}"
   check (cfg.rope_theta_sliding == 10000.0) s!"rope_theta_sliding={cfg.rope_theta_sliding}"
-  check (cfg.rotary_dim_sliding == 128) s!"rotary_dim_sliding={cfg.rotary_dim_sliding}"
+  check (cfg.half_rotary_dim_sliding == 64) s!"half_rotary_dim_sliding={cfg.half_rotary_dim_sliding}"
 
   -- Layer schedule: full at i%4==0 (12 layers), sliding elsewhere (36).
   let lts := cfg.layer_types

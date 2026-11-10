@@ -179,7 +179,7 @@ def forwardEmbeds {batch seq : Nat}
   let (cos, sin) :=
     qwen.computeFreqsOnDevice
       seq
-      cfg.textConfig.headDim
+      cfg.textConfig.halfHeadDim
       cfg.textConfig.ropeTheta
       inputsEmbeds.device
   let hidden := match attnMask with
@@ -199,11 +199,11 @@ private def forwardEmbedsMaskedWithPositionRows {batch seq : Nat}
     (inputsEmbeds : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.textConfig.hiddenSize] })
     (attnMask : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     : IO (Tensor { dtype := dtype, device := device, shape := #[batch, seq, ThinkerLmVocabSize cfg] }) := do
-  let half := cfg.textConfig.headDim / 2
+  let half := cfg.textConfig.halfHeadDim
   let (baseCos, baseSin) :=
     qwen.computeFreqsOnDevice
       seq
-      cfg.textConfig.headDim
+      cfg.textConfig.halfHeadDim
       cfg.textConfig.ropeTheta
       inputsEmbeds.device
   let rows ← positionRowsFromMask attnMask
@@ -443,23 +443,23 @@ private def initLayerKVCaches {batch : Nat}
 private def precomputeDecodeRotary {maxLen : Nat}
     (_m : Qwen3ASRThinkerForConditionalGeneration (device := device) (dtype := dtype) cfg)
     (device : Device)
-    : Tensor { device := device, shape := #[maxLen, cfg.textConfig.headDim / 2], dtype := .Float32 } × Tensor { device := device, shape := #[maxLen, cfg.textConfig.headDim / 2], dtype := .Float32 } :=
+    : Tensor { device := device, shape := #[maxLen, cfg.textConfig.halfHeadDim], dtype := .Float32 } × Tensor { device := device, shape := #[maxLen, cfg.textConfig.halfHeadDim], dtype := .Float32 } :=
   qwen.computeFreqsOnDevice
     maxLen
-    cfg.textConfig.headDim
+    cfg.textConfig.halfHeadDim
     cfg.textConfig.ropeTheta
     device
 
 private def decodeStepFromEmbedWithCache {batch maxLen : Nat}
     (m : Qwen3ASRThinkerForConditionalGeneration (device := device) (dtype := dtype) cfg)
-    (cosAll : Tensor { device := device, shape := #[maxLen, cfg.textConfig.headDim / 2], dtype := .Float32 })
-    (sinAll : Tensor { device := device, shape := #[maxLen, cfg.textConfig.headDim / 2], dtype := .Float32 })
+    (cosAll : Tensor { device := device, shape := #[maxLen, cfg.textConfig.halfHeadDim], dtype := .Float32 })
+    (sinAll : Tensor { device := device, shape := #[maxLen, cfg.textConfig.halfHeadDim], dtype := .Float32 })
     (tokenEmbed : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.textConfig.hiddenSize] })
     (position : Nat) (hpos : position < maxLen)
     (caches : Array (LayerKVCache (device := device) (dtype := dtype) cfg batch maxLen))
     : IO (Tensor { dtype := dtype, device := device, shape := #[batch, ThinkerLmVocabSize cfg] } × Array (LayerKVCache (device := device) (dtype := dtype) cfg batch maxLen)) := do
-  let cos : Tensor { device := device, shape := #[1, cfg.textConfig.headDim / 2], dtype := .Float32 } := Tensor.slice cosAll 0 position 1
-  let sin : Tensor { device := device, shape := #[1, cfg.textConfig.headDim / 2], dtype := .Float32 } := Tensor.slice sinAll 0 position 1
+  let cos : Tensor { device := device, shape := #[1, cfg.textConfig.halfHeadDim], dtype := .Float32 } := Tensor.slice cosAll 0 position 1
+  let sin : Tensor { device := device, shape := #[1, cfg.textConfig.halfHeadDim], dtype := .Float32 } := Tensor.slice sinAll 0 position 1
 
   let mut hidden : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.textConfig.hiddenSize] } := tokenEmbed
   let mut nextCaches := caches
@@ -484,8 +484,8 @@ private def decodeStepFromEmbedWithCache {batch maxLen : Nat}
 
 private partial def prefillCachesFromEmbeds {batch seq maxLen : Nat}
     (m : Qwen3ASRThinkerForConditionalGeneration (device := device) (dtype := dtype) cfg)
-    (cosAll : Tensor { device := device, shape := #[maxLen, cfg.textConfig.headDim / 2], dtype := .Float32 })
-    (sinAll : Tensor { device := device, shape := #[maxLen, cfg.textConfig.headDim / 2], dtype := .Float32 })
+    (cosAll : Tensor { device := device, shape := #[maxLen, cfg.textConfig.halfHeadDim], dtype := .Float32 })
+    (sinAll : Tensor { device := device, shape := #[maxLen, cfg.textConfig.halfHeadDim], dtype := .Float32 })
     (inputsEmbeds : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.textConfig.hiddenSize] })
     (caches : Array (LayerKVCache (device := device) (dtype := dtype) cfg batch maxLen))
     (position : Nat)
@@ -501,8 +501,8 @@ private partial def prefillCachesFromEmbeds {batch seq maxLen : Nat}
 
 private partial def greedyLoopCached {batch maxLen : Nat}
     (m : Qwen3ASRThinkerForConditionalGeneration (device := device) (dtype := dtype) cfg)
-    (cosAll : Tensor { device := device, shape := #[maxLen, cfg.textConfig.headDim / 2], dtype := .Float32 })
-    (sinAll : Tensor { device := device, shape := #[maxLen, cfg.textConfig.headDim / 2], dtype := .Float32 })
+    (cosAll : Tensor { device := device, shape := #[maxLen, cfg.textConfig.halfHeadDim], dtype := .Float32 })
+    (sinAll : Tensor { device := device, shape := #[maxLen, cfg.textConfig.halfHeadDim], dtype := .Float32 })
     (eosTokenIds : Array tokenizer.TokenId)
     (eosVector : Option (Tensor { device := device, shape := #[batch], dtype := .Int64 }))
     (remaining : Nat)
@@ -566,8 +566,8 @@ structure StreamingPromptCache (cfg : ThinkerConfig) (dtype : DType := .Float32)
   maxLen : Nat
   promptTokenIds : Array UInt32 := #[]
   promptEmbeds : Tensor { dtype := dtype, device := device, shape := #[1, seq, cfg.textConfig.hiddenSize] }
-  cosAll : Tensor { device := device, shape := #[maxLen, cfg.textConfig.headDim / 2], dtype := .Float32 }
-  sinAll : Tensor { device := device, shape := #[maxLen, cfg.textConfig.headDim / 2], dtype := .Float32 }
+  cosAll : Tensor { device := device, shape := #[maxLen, cfg.textConfig.halfHeadDim], dtype := .Float32 }
+  sinAll : Tensor { device := device, shape := #[maxLen, cfg.textConfig.halfHeadDim], dtype := .Float32 }
   kvCaches : Array (LayerKVCache (device := device) (dtype := dtype) cfg 1 maxLen)
   lastLogits : Tensor { dtype := dtype, device := device, shape := #[1, ThinkerLmVocabSize cfg] }
 

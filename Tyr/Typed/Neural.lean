@@ -341,14 +341,16 @@ def sliceScatter {s sourceShape : Shape} {d : DType} {dev : Device}
     Tensor ⟨s, d, dev⟩ :=
   Tensor.ofRaw! "sliceScatter" (RawTensor.sliceScatter input.raw dim start source.raw)
 
-def applyRotary {batch seq heads dim : Nat} {d dc : DType} {dev : Device}
-    (input : Tensor ⟨#[batch, seq, heads, dim], d, dev⟩)
-    (cos sin : Tensor ⟨#[seq, dim / 2], dc, dev⟩) : Tensor ⟨#[batch, seq, heads, dim], d, dev⟩ :=
+/-- Rotate-half RoPE: the two halves of the last axis are rotated by `cos`/`sin`. -/
+def applyRotary {batch seq heads half : Nat} {d dc : DType} {dev : Device}
+    (input : Tensor ⟨#[batch, seq, heads, 2 * half], d, dev⟩)
+    (cos sin : Tensor ⟨#[seq, half], dc, dev⟩) : Tensor ⟨#[batch, seq, heads, 2 * half], d, dev⟩ :=
   Tensor.ofRaw! "applyRotary" (RawTensor.applyRotary input.raw cos.raw sin.raw)
 
-def rotaryFreqs (seq dim : Nat) (base : Float := 10000.0) (device : Device := .CPU) :
-    Tensor { shape := #[seq, dim / 2], dtype := .Float32, device } × Tensor { shape := #[seq, dim / 2], dtype := .Float32, device } :=
-  let (cos, sin) := RawTensor.rotaryFreqs seq dim base device
+/-- Rotary cos/sin tables `[seq, half]` for a rotated width of `2 * half`. -/
+def rotaryFreqs (seq half : Nat) (base : Float := 10000.0) (device : Device := .CPU) :
+    Tensor { shape := #[seq, half], dtype := .Float32, device } × Tensor { shape := #[seq, half], dtype := .Float32, device } :=
+  let (cos, sin) := RawTensor.rotaryFreqs seq (2 * half) base device
   (Tensor.ofRaw! "rotaryFreqs" cos, Tensor.ofRaw! "rotaryFreqs" sin)
 
 def hannWindow (n : Nat) : Tensor { shape := #[n], dtype := .Float32, device := .CPU } :=

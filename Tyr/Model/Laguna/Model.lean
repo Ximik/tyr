@@ -190,16 +190,16 @@ def init (cfg : Config) (numHeads : Nat) (device : Device := .CPU) (dtype : DTyp
   }
 
 /-- QKV projection + per-head Q/K RMSNorm + (partial) RoPE.
-    `rotaryDim` is `cfg.rotaryDimFull` (64, YaRN) on full-attention layers and
-    `cfg.rotaryDimSliding` (128, plain) on sliding-window layers; cos/sin are
+    `rotaryHalf` is `cfg.half_rotary_dim_full` (32, YaRN) on full-attention layers and
+    `cfg.half_rotary_dim_sliding` (64, plain) on sliding-window layers; cos/sin are
     the matching rows sliced from `LagunaRotaryTables`. -/
-private def qkvRope {batch seq rotaryDim numHeads : Nat}
+private def qkvRope {batch seq rotaryHalf numHeads : Nat}
     (cfg : Config)
     (m : LagunaAttention (device := device) (dtype := dtype) cfg numHeads)
-    (hrot : rotaryDim ≤ cfg.head_dim)
+    (hrot : 2 * rotaryHalf ≤ cfg.head_dim)
     (x : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] })
-    (cos : Tensor { device := device, shape := #[seq, rotaryDim / 2], dtype := .Float32 })
-    (sin : Tensor { device := device, shape := #[seq, rotaryDim / 2], dtype := .Float32 })
+    (cos : Tensor { device := device, shape := #[seq, rotaryHalf], dtype := .Float32 })
+    (sin : Tensor { device := device, shape := #[seq, rotaryHalf], dtype := .Float32 })
     : Tensor { dtype := dtype, device := device, shape := #[batch, seq, numHeads, cfg.head_dim] }
       × Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.num_key_value_heads, cfg.head_dim] }
       × Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.num_key_value_heads, cfg.head_dim] } :=
@@ -216,10 +216,10 @@ private def qkvRope {batch seq rotaryDim numHeads : Nat}
   let q := applyHeadNorm m.q_norm q cfg.rms_norm_eps
   let k := applyHeadNorm m.k_norm k cfg.rms_norm_eps
   -- GLM-style rotate-half RoPE; `applyRotaryPartial` passes the tail through
-  -- untouched when `rotaryDim < cfg.head_dim` and degenerates to full-width
-  -- rotary when `rotaryDim == cfg.head_dim` (sliding layers).
-  let q := applyRotaryPartial (rotary_dim := rotaryDim) q cos sin hrot
-  let k := applyRotaryPartial (rotary_dim := rotaryDim) k cos sin hrot
+  -- untouched when `2 * rotaryHalf < cfg.head_dim` and degenerates to full-width
+  -- rotary when `2 * rotaryHalf == cfg.head_dim` (sliding layers).
+  let q := applyRotaryPartial (half := rotaryHalf) q cos sin hrot
+  let k := applyRotaryPartial (half := rotaryHalf) k cos sin hrot
   (q, k, v)
 
 /-- Per-head softplus output gate + o_proj:
@@ -240,14 +240,14 @@ private def gateAndOut {batch seq numHeads : Nat}
 
 /-- Uncached full-sequence forward: implicit causal attention for full layers,
     bounded window attention for sliding layers. -/
-def forward {batch seq rotaryDim numHeads : Nat}
+def forward {batch seq rotaryHalf numHeads : Nat}
     (cfg : Config)
     (m : LagunaAttention (device := device) (dtype := dtype) cfg numHeads)
     (hkv : cfg.num_key_value_heads ∣ numHeads)
-    (hrot : rotaryDim ≤ cfg.head_dim)
+    (hrot : 2 * rotaryHalf ≤ cfg.head_dim)
     (x : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] })
-    (cos : Tensor { device := device, shape := #[seq, rotaryDim / 2], dtype := .Float32 })
-    (sin : Tensor { device := device, shape := #[seq, rotaryDim / 2], dtype := .Float32 })
+    (cos : Tensor { device := device, shape := #[seq, rotaryHalf], dtype := .Float32 })
+    (sin : Tensor { device := device, shape := #[seq, rotaryHalf], dtype := .Float32 })
     (window : Option Nat := none)
     : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] } :=
   let (q, k, v) := qkvRope cfg m hrot x cos sin
@@ -263,14 +263,14 @@ def forward {batch seq rotaryDim numHeads : Nat}
 
 /-- Batch prefill with KV-cache update. Writes K/V at cache offset 0 — call
     this on a FRESH cache (chunked prefill is not supported). Sliding layers attend with the window SDPA over the fresh K/V. -/
-def forwardWithCache {batch seq rotaryDim numHeads cap : Nat}
+def forwardWithCache {batch seq rotaryHalf numHeads cap : Nat}
     (cfg : Config)
     (m : LagunaAttention (device := device) (dtype := dtype) cfg numHeads)
     (hkv : cfg.num_key_value_heads ∣ numHeads)
-    (hrot : rotaryDim ≤ cfg.head_dim)
+    (hrot : 2 * rotaryHalf ≤ cfg.head_dim)
     (x : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] })
-    (cos : Tensor { device := device, shape := #[seq, rotaryDim / 2], dtype := .Float32 })
-    (sin : Tensor { device := device, shape := #[seq, rotaryDim / 2], dtype := .Float32 })
+    (cos : Tensor { device := device, shape := #[seq, rotaryHalf], dtype := .Float32 })
+    (sin : Tensor { device := device, shape := #[seq, rotaryHalf], dtype := .Float32 })
     (window : Option Nat)
     (cache : KVCache (device := device) (dtype := dtype) cfg batch cap)
     (hfit : seq ≤ cap)
@@ -301,14 +301,14 @@ def forwardWithCache {batch seq rotaryDim numHeads cap : Nat}
     truncate the cache READ to the last `min(kvLen, window)` entries
     (Gemma4 pattern) — every entry in the truncated span is attendable, so a
     plain non-causal GQA decode is exact. -/
-def forwardStep {batch rotaryDim numHeads cap : Nat}
+def forwardStep {batch rotaryHalf numHeads cap : Nat}
     (cfg : Config)
     (m : LagunaAttention (device := device) (dtype := dtype) cfg numHeads)
     (hkv : cfg.num_key_value_heads ∣ numHeads)
-    (hrot : rotaryDim ≤ cfg.head_dim)
+    (hrot : 2 * rotaryHalf ≤ cfg.head_dim)
     (x : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.hidden_size] })
-    (cos : Tensor { device := device, shape := #[1, rotaryDim / 2], dtype := .Float32 })
-    (sin : Tensor { device := device, shape := #[1, rotaryDim / 2], dtype := .Float32 })
+    (cos : Tensor { device := device, shape := #[1, rotaryHalf], dtype := .Float32 })
+    (sin : Tensor { device := device, shape := #[1, rotaryHalf], dtype := .Float32 })
     (window : Option Nat)
     (cache : KVCache (device := device) (dtype := dtype) cfg batch cap)
     (pos : Nat) (hpos : pos < cap)
@@ -350,12 +350,12 @@ def forwardStep {batch rotaryDim numHeads cap : Nat}
 /-- Internal effectful path. Cache tensors never escape the owning session.
 Sliding stores use absolute-position modulo capacity; paired K/V order is
 irrelevant to single-query attention after RoPE has been applied. -/
-private def forwardOwned {batch seq rotaryDim numHeads cap : Nat}
+private def forwardOwned {batch seq rotaryHalf numHeads cap : Nat}
     (cfg : Config) (m : LagunaAttention (device := device) (dtype := dtype) cfg numHeads)
     (hkv : cfg.num_key_value_heads ∣ numHeads)
-    (hrot : rotaryDim ≤ cfg.head_dim)
+    (hrot : 2 * rotaryHalf ≤ cfg.head_dim)
     (x : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] })
-    (cos : Tensor { device := device, shape := #[seq, rotaryDim / 2], dtype := .Float32 }) (sin : Tensor { device := device, shape := #[seq, rotaryDim / 2], dtype := .Float32 })
+    (cos : Tensor { device := device, shape := #[seq, rotaryHalf], dtype := .Float32 }) (sin : Tensor { device := device, shape := #[seq, rotaryHalf], dtype := .Float32 })
     (window : Option Nat) (prefill : Bool) (position : Nat) (hDecode : prefill = false → seq = 1)
     (cache : KVCache (device := device) (dtype := dtype) cfg batch cap)
     : IO (Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.hidden_size] } × KVCache (device := device) (dtype := dtype) cfg batch cap) := do
@@ -572,13 +572,13 @@ def forward {batch seq layerIdx : Nat}
   let mixed :=
     match cfg.isFullAttentionLayer layerIdx, layer.attn with
     | true, .full a =>
-      let cos : Tensor { device := device, shape := #[seq, cfg.rotaryDimFull / 2], dtype := .Float32 } := sliceRotaryRows tables.fullCos 0 seq
-      let sin : Tensor { device := device, shape := #[seq, cfg.rotaryDimFull / 2], dtype := .Float32 } := sliceRotaryRows tables.fullSin 0 seq
-      a.forward (rotaryDim := cfg.rotaryDimFull) cfg cfg.kvHeadsDivideFull cfg.rotaryDimFull_le h1 cos sin none
+      let cos : Tensor { device := device, shape := #[seq, cfg.half_rotary_dim_full], dtype := .Float32 } := sliceRotaryRows tables.fullCos 0 seq
+      let sin : Tensor { device := device, shape := #[seq, cfg.half_rotary_dim_full], dtype := .Float32 } := sliceRotaryRows tables.fullSin 0 seq
+      a.forward (rotaryHalf := cfg.half_rotary_dim_full) cfg cfg.kvHeadsDivideFull cfg.rotaryDimFull_le h1 cos sin none
     | false, .sliding a =>
-      let cos : Tensor { device := device, shape := #[seq, cfg.rotaryDimSliding / 2], dtype := .Float32 } := sliceRotaryRows tables.slidingCos 0 seq
-      let sin : Tensor { device := device, shape := #[seq, cfg.rotaryDimSliding / 2], dtype := .Float32 } := sliceRotaryRows tables.slidingSin 0 seq
-      a.forward (rotaryDim := cfg.rotaryDimSliding) cfg cfg.kvHeadsDivideSliding cfg.rotaryDimSliding_le h1 cos sin (some cfg.sliding_window)
+      let cos : Tensor { device := device, shape := #[seq, cfg.half_rotary_dim_sliding], dtype := .Float32 } := sliceRotaryRows tables.slidingCos 0 seq
+      let sin : Tensor { device := device, shape := #[seq, cfg.half_rotary_dim_sliding], dtype := .Float32 } := sliceRotaryRows tables.slidingSin 0 seq
+      a.forward (rotaryHalf := cfg.half_rotary_dim_sliding) cfg cfg.kvHeadsDivideSliding cfg.rotaryDimSliding_le h1 cos sin (some cfg.sliding_window)
   let h2 := Tensor.add x mixed
   let h3 := rmsNormWeighted3d layer.post_attention_layernorm h2 cfg.rms_norm_eps
   let ffn ← LagunaFfn.forward cfg layerIdx layer.ffn h3
@@ -602,13 +602,13 @@ def forwardWithCache {batch seq cap layerIdx : Nat}
       let (out, kv') :=
         match cfg.isFullAttentionLayer layerIdx, layer.attn with
         | true, .full a =>
-          let cos : Tensor { device := device, shape := #[seq, cfg.rotaryDimFull / 2], dtype := .Float32 } := sliceRotaryRows tables.fullCos 0 seq
-          let sin : Tensor { device := device, shape := #[seq, cfg.rotaryDimFull / 2], dtype := .Float32 } := sliceRotaryRows tables.fullSin 0 seq
-          a.forwardWithCache (rotaryDim := cfg.rotaryDimFull) cfg cfg.kvHeadsDivideFull cfg.rotaryDimFull_le h1 cos sin none kv hfit
+          let cos : Tensor { device := device, shape := #[seq, cfg.half_rotary_dim_full], dtype := .Float32 } := sliceRotaryRows tables.fullCos 0 seq
+          let sin : Tensor { device := device, shape := #[seq, cfg.half_rotary_dim_full], dtype := .Float32 } := sliceRotaryRows tables.fullSin 0 seq
+          a.forwardWithCache (rotaryHalf := cfg.half_rotary_dim_full) cfg cfg.kvHeadsDivideFull cfg.rotaryDimFull_le h1 cos sin none kv hfit
         | false, .sliding a =>
-          let cos : Tensor { device := device, shape := #[seq, cfg.rotaryDimSliding / 2], dtype := .Float32 } := sliceRotaryRows tables.slidingCos 0 seq
-          let sin : Tensor { device := device, shape := #[seq, cfg.rotaryDimSliding / 2], dtype := .Float32 } := sliceRotaryRows tables.slidingSin 0 seq
-          a.forwardWithCache (rotaryDim := cfg.rotaryDimSliding) cfg cfg.kvHeadsDivideSliding cfg.rotaryDimSliding_le h1 cos sin (some cfg.sliding_window) kv hfit
+          let cos : Tensor { device := device, shape := #[seq, cfg.half_rotary_dim_sliding], dtype := .Float32 } := sliceRotaryRows tables.slidingCos 0 seq
+          let sin : Tensor { device := device, shape := #[seq, cfg.half_rotary_dim_sliding], dtype := .Float32 } := sliceRotaryRows tables.slidingSin 0 seq
+          a.forwardWithCache (rotaryHalf := cfg.half_rotary_dim_sliding) cfg cfg.kvHeadsDivideSliding cfg.rotaryDimSliding_le h1 cos sin (some cfg.sliding_window) kv hfit
       (out, { cache with kvCaches := cache.kvCaches.set! layerIdx kv' })
   let h2 := Tensor.add x mixed
   let h3 := rmsNormWeighted3d layer.post_attention_layernorm h2 cfg.rms_norm_eps
@@ -632,13 +632,13 @@ def forwardStep {batch cap layerIdx : Nat}
       let (out, kv') :=
         match cfg.isFullAttentionLayer layerIdx, layer.attn with
         | true, .full a =>
-          let cos : Tensor { device := device, shape := #[1, cfg.rotaryDimFull / 2], dtype := .Float32 } := sliceRotaryRows tables.fullCos position 1
-          let sin : Tensor { device := device, shape := #[1, cfg.rotaryDimFull / 2], dtype := .Float32 } := sliceRotaryRows tables.fullSin position 1
-          a.forwardStep (rotaryDim := cfg.rotaryDimFull) cfg cfg.kvHeadsDivideFull cfg.rotaryDimFull_le h1 cos sin none kv position hpos
+          let cos : Tensor { device := device, shape := #[1, cfg.half_rotary_dim_full], dtype := .Float32 } := sliceRotaryRows tables.fullCos position 1
+          let sin : Tensor { device := device, shape := #[1, cfg.half_rotary_dim_full], dtype := .Float32 } := sliceRotaryRows tables.fullSin position 1
+          a.forwardStep (rotaryHalf := cfg.half_rotary_dim_full) cfg cfg.kvHeadsDivideFull cfg.rotaryDimFull_le h1 cos sin none kv position hpos
         | false, .sliding a =>
-          let cos : Tensor { device := device, shape := #[1, cfg.rotaryDimSliding / 2], dtype := .Float32 } := sliceRotaryRows tables.slidingCos position 1
-          let sin : Tensor { device := device, shape := #[1, cfg.rotaryDimSliding / 2], dtype := .Float32 } := sliceRotaryRows tables.slidingSin position 1
-          a.forwardStep (rotaryDim := cfg.rotaryDimSliding) cfg cfg.kvHeadsDivideSliding cfg.rotaryDimSliding_le h1 cos sin (some cfg.sliding_window) kv position hpos
+          let cos : Tensor { device := device, shape := #[1, cfg.half_rotary_dim_sliding], dtype := .Float32 } := sliceRotaryRows tables.slidingCos position 1
+          let sin : Tensor { device := device, shape := #[1, cfg.half_rotary_dim_sliding], dtype := .Float32 } := sliceRotaryRows tables.slidingSin position 1
+          a.forwardStep (rotaryHalf := cfg.half_rotary_dim_sliding) cfg cfg.kvHeadsDivideSliding cfg.rotaryDimSliding_le h1 cos sin (some cfg.sliding_window) kv position hpos
       (out, { cache with kvCaches := cache.kvCaches.set! layerIdx kv' })
   let h2 := Tensor.add x mixed
   let h3 := rmsNormWeighted3d layer.post_attention_layernorm h2 cfg.rms_norm_eps
@@ -653,13 +653,13 @@ private def forwardOwned {batch seq cap layerIdx : Nat}
   let h1 := rmsNormWeighted3d layer.input_layernorm x cfg.rms_norm_eps
   let (mixed, kv') ← match cfg.isFullAttentionLayer layerIdx, layer.attn with
     | true, .full a =>
-      let cos : Tensor { device := device, shape := #[seq, cfg.rotaryDimFull / 2], dtype := .Float32 } := sliceRotaryRows tables.fullCos position seq
-      let sin : Tensor { device := device, shape := #[seq, cfg.rotaryDimFull / 2], dtype := .Float32 } := sliceRotaryRows tables.fullSin position seq
-      a.forwardOwned (rotaryDim := cfg.rotaryDimFull) cfg cfg.kvHeadsDivideFull cfg.rotaryDimFull_le h1 cos sin none prefill position hDecode kv
+      let cos : Tensor { device := device, shape := #[seq, cfg.half_rotary_dim_full], dtype := .Float32 } := sliceRotaryRows tables.fullCos position seq
+      let sin : Tensor { device := device, shape := #[seq, cfg.half_rotary_dim_full], dtype := .Float32 } := sliceRotaryRows tables.fullSin position seq
+      a.forwardOwned (rotaryHalf := cfg.half_rotary_dim_full) cfg cfg.kvHeadsDivideFull cfg.rotaryDimFull_le h1 cos sin none prefill position hDecode kv
     | false, .sliding a =>
-      let cos : Tensor { device := device, shape := #[seq, cfg.rotaryDimSliding / 2], dtype := .Float32 } := sliceRotaryRows tables.slidingCos position seq
-      let sin : Tensor { device := device, shape := #[seq, cfg.rotaryDimSliding / 2], dtype := .Float32 } := sliceRotaryRows tables.slidingSin position seq
-      a.forwardOwned (rotaryDim := cfg.rotaryDimSliding) cfg cfg.kvHeadsDivideSliding cfg.rotaryDimSliding_le h1 cos sin
+      let cos : Tensor { device := device, shape := #[seq, cfg.half_rotary_dim_sliding], dtype := .Float32 } := sliceRotaryRows tables.slidingCos position seq
+      let sin : Tensor { device := device, shape := #[seq, cfg.half_rotary_dim_sliding], dtype := .Float32 } := sliceRotaryRows tables.slidingSin position seq
+      a.forwardOwned (rotaryHalf := cfg.half_rotary_dim_sliding) cfg cfg.kvHeadsDivideSliding cfg.rotaryDimSliding_le h1 cos sin
         (some cfg.sliding_window) prefill position hDecode kv
   let h2 := Tensor.add x mixed
   let h3 := rmsNormWeighted3d layer.post_attention_layernorm h2 cfg.rms_norm_eps

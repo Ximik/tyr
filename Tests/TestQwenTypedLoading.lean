@@ -8,7 +8,7 @@ open torch Lean
 private def cfg : qwen3.Config := {
   vocab_size := 8, hidden_size := 8, intermediate_size := 16,
   num_hidden_layers := 1, num_attention_heads := 2, num_key_value_heads := 1,
-  head_dim := 4
+  half_head_dim := 2
 }
 
 /-- Generate actual SafeTensors bytes, without Python or downloaded weights. -/

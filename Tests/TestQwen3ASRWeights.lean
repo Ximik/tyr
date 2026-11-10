@@ -15,7 +15,7 @@ private def cfg : Qwen3ASRConfig := {
     textConfig := {
       vocabSize := 16, hiddenSize := 8, intermediateSize := 12,
       numHiddenLayers := 1, numAttentionHeads := 2, numKeyValueHeads := 1,
-      headDim := 4 }
+      halfHeadDim := 2 }
     audioTokenId := 3 } }
 
 private def entries : Array (String × Array Nat) := Id.run do

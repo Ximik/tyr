@@ -14,7 +14,9 @@ structure Gemma4VisionConfig where
   num_hidden_layers : Nat := 16
   num_attention_heads : Nat := 12
   num_key_value_heads : Nat := 12
-  head_dim : Nat := 64
+  /-- A quarter of the head dimension: 2-D RoPE rotates each head's two axis halves in
+      channel pairs, so heads have `4 * quarter_head_dim` channels. -/
+  quarter_head_dim : Nat := 16
   patch_size : Nat := 16
   pooling_kernel_size : Nat := 3
   position_embedding_size : Nat := 10240
@@ -23,13 +25,12 @@ structure Gemma4VisionConfig where
   standardize : Bool := false
   use_clipped_linears : Bool := false
   /-- The `hidden_size` projections split into query and key/value heads; checked when the config is built. -/
-  queryHeadsSplit : num_attention_heads * head_dim = hidden_size := by decide
-  keyValueHeadsSplit : num_key_value_heads * head_dim = hidden_size := by decide
+  queryHeadsSplit : num_attention_heads * (4 * quarter_head_dim) = hidden_size := by decide
+  keyValueHeadsSplit : num_key_value_heads * (4 * quarter_head_dim) = hidden_size := by decide
   /-- Query heads are whole multiples of K/V heads; checked when the config is built. -/
   kvHeadsDivide : num_key_value_heads ∣ num_attention_heads := by decide
-  /-- 2-D RoPE rotates half of each head per spatial axis in channel pairs; checked when the
-      config is built. -/
-  headDimValid : 0 < head_dim ∧ 4 ∣ head_dim := by decide
+  /-- Heads are nonempty; checked when the config is built. -/
+  headDimPos : 0 < quarter_head_dim := by decide
   /-- Patches and pooling windows are nonempty; checked when the config is built. -/
   patchPoolPos : 0 < patch_size ∧ 0 < pooling_kernel_size := by decide
   /-- RoPE frequencies and RMSNorm divide by these; checked when the config is built. -/
@@ -38,6 +39,9 @@ structure Gemma4VisionConfig where
 
 
 namespace Gemma4VisionConfig
+
+/-- Channels per attention head. -/
+def head_dim (cfg : Gemma4VisionConfig) : Nat := 4 * cfg.quarter_head_dim
 
 @[simp] def in_channels (_cfg : Gemma4VisionConfig) : Nat := 3
 
