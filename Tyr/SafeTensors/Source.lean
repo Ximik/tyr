@@ -50,7 +50,7 @@ private def read (src : Source) (name : String) (handle : SafeTensorsHandle) (en
     src.fail name s!"Expected shape {shape}, got {entry.shape}"
   let raw ← RawTensor.safeTensorsRead handle.path (handle.dataOffset + entry.dataStart)
     (entry.dataEnd - entry.dataStart) entry.dtype entry.shape
-  return Tensor.ofRaw! "SafeTensors.read" (← RawTensor.convertIO shape raw device none)
+  return Tensor.ofRaw! (← RawTensor.convertIO shape raw device none)
 
 /-- Load `name` with its stored dtype; `none` only when the checkpoint has no such tensor. -/
 def load? (src : Source) (name : String) (shape : Shape) (device : Device := .CPU) :

@@ -28,6 +28,6 @@ expect() {
 }
 
 expect libtorch 134 "[tyr] fatal: uncaught libtorch error"
-expect admission 134 "[tyr] native tensor contract violation: Tensor.probe: Expected shape #[3], got #[2, 2]"
+expect admission 134 "[tyr] native tensor contract violation: Tests.FfiCrashProbe.wrongShapeBinding: Expected shape #[3], got #[2, 2]"
 expect admission-ok 0 "admitted: #[1.000000, 1.000000, 1.000000, 1.000000]"
 exit "${status}"

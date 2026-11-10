@@ -234,7 +234,7 @@ private def expectLeaf
     throw s!"Tensor leaf dtype mismatch at {renderPath path}: expected {σ.dtype}, got {leafSpec.dtype}."
   if leafSpec.device != σ.device then
     throw s!"Tensor leaf device mismatch at {renderPath path}."
-  pure (Tensor.ofRaw! "TensorStructSchema leaf" leafTensor.raw)
+  pure (Tensor.ofRaw! leafTensor.raw)
 
 instance {σ : StaticSpec} : ToTensorStructSchema (Tensor σ) where
   describeLeaves _ path := #[{

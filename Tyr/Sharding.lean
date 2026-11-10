@@ -140,7 +140,7 @@ def ShardedTensor.fromFull {σ : StaticSpec} {rank worldSize : Nat}
     | none => full.raw
 
   let shard : Tensor (σ.withShape shardShape) :=
-    (Tensor.ofRaw! "fromFull" shardedRaw)
+    (Tensor.ofRaw! shardedRaw)
 
   { shard := shard
     cachedFull := some full
@@ -189,7 +189,7 @@ def ShardedTensor.gather {σ : StaticSpec} {rank worldSize : Nat} {sd : ShardDim
   let full ← match sd.resolve? σ.shape.size with
     | none =>
       -- Not actually sharded: the shard is a full replica
-      pure (Tensor.ofRaw! (σ := σ) "gather" sharded.shard.raw)
+      pure (Tensor.ofRaw! (σ := σ) sharded.shard.raw)
     | some d =>
       let fullDim := σ.shape.getD d 0
       if fullDim % worldSize != 0 then
@@ -198,14 +198,14 @@ def ShardedTensor.gather {σ : StaticSpec} {rank worldSize : Nat} {sd : ShardDim
       if d = 0 then
         -- allGather concatenates along dimension 0
         let gathered ← dist.allGather worldSize sharded.shard
-        pure (Tensor.ofRaw! (σ := σ) "gather" gathered.raw)
+        pure (Tensor.ofRaw! (σ := σ) gathered.raw)
       else
         -- Move the sharded axis to the front, gather, then move it back
         let toFront := moveAxisToFrontPerm σ.shape.size d
         let fromFront := moveFrontToAxisPerm σ.shape.size d
         let gathered ← dist.allGather worldSize (← permuteRuntime sharded.shard toFront)
         let unpermuted ← permuteRuntime gathered fromFront
-        pure (Tensor.ofRaw! (σ := σ) "gather" unpermuted.raw)
+        pure (Tensor.ofRaw! (σ := σ) unpermuted.raw)
 
   let newSharded := { sharded with
     cachedFull := some full
@@ -225,7 +225,7 @@ def ShardedTensor.scatterGrad {σ : StaticSpec} {rank worldSize : Nat} {sd : Sha
     (_sharded : ShardedTensor σ rank worldSize sd)
     (fullGrad : Tensor σ) : IO (Tensor (σ.withShape (shardedShape σ.shape ⟨sd, worldSize, rank⟩))) := do
   let localRaw := (← dist.reduceScatter worldSize fullGrad .sum).raw
-  pure (Tensor.ofRaw! "scatterGrad" localRaw)
+  pure (Tensor.ofRaw! localRaw)
 
 /-- Update the local shard and mark cache as stale.
 

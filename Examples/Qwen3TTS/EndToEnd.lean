@@ -371,7 +371,7 @@ private def loadSpeakerEmbedding? (cfg : Qwen3TTSConfig) (dtype : RealFloatingDT
       let converted ← RawTensor.convertIO #[cfg.speakerEncoderConfig.encDim] stored.2.raw
         device (some dtype.val)
       let emb : Tensor ⟨#[cfg.speakerEncoderConfig.encDim], dtype.val, device⟩ :=
-        Tensor.ofRaw! "loadSpeakerEmbedding" converted
+        Tensor.ofRaw! converted
       pure (some (Tensor.reshape emb #[1, 1, cfg.talkerConfig.hiddenSize] (by simp [hDim])))
 
 private def buildTalkerInputsEquivalent
