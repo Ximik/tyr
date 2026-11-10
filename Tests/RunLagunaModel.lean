@@ -411,7 +411,7 @@ private def runBf16LayerCacheParity (cfg : Config) (device : Device) (lbl : Stri
       throw <| IO.userError "Missing layer in BF16 cache reference"
     let normalized : Tensor { shape := #[1, 20, cfg.hidden_size], device := device, dtype := .BFloat16 } :=
       ((Tensor.rmsNorm inputs cfg.rms_norm_eps *
-        Tensor.expand layer.input_layernorm.2.toFloat32 #[1, 20, cfg.hidden_size]).toBFloat16)
+        Tensor.broadcastTo layer.input_layernorm.2.toFloat32 #[1, 20, cfg.hidden_size]).toBFloat16)
     let some kv := fresh.kvCaches[layerIdx]? |
       throw <| IO.userError "Missing layer cache in BF16 attention reference"
     let (count, missed) ← match layer.attnFull, layer.attnSliding with

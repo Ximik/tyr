@@ -36,11 +36,11 @@ def runDecodeCacheParity (device : Device) : IO Bool := do
   for i in [:totalLen] do
     let pos : Nat := i
     let qStep : Tensor { shape := #[batch, qHeads, 1, headDim], dtype := .BFloat16, device := device } :=
-      Tensor.sliceChecked qAll 2 pos 1 #[batch, qHeads, 1, headDim]
+      Tensor.slice! qAll 2 pos 1
     let kStep : Tensor { shape := #[batch, kvHeads, 1, headDim], dtype := .BFloat16, device := device } :=
-      Tensor.sliceChecked kAll 2 pos 1 #[batch, kvHeads, 1, headDim]
+      Tensor.slice! kAll 2 pos 1
     let vStep : Tensor { shape := #[batch, kvHeads, 1, headDim], dtype := .BFloat16, device := device } :=
-      Tensor.sliceChecked vAll 2 pos 1 #[batch, kvHeads, 1, headDim]
+      Tensor.slice! vAll 2 pos 1
     let (cache', out) ← cache.attendLayer (numQHeads := qHeads)
         0 qStep kStep vStep (enableGqa := true) (_heads := by decide)
     cache ← cache'.incrementSeqLens
@@ -56,7 +56,7 @@ def runDecodeCacheParity (device : Device) : IO Bool := do
   for i in [:totalLen] do
     let pos : Nat := i
     let refStep : Tensor { shape := #[batch, qHeads, 1, headDim], dtype := .BFloat16, device := device } :=
-      Tensor.sliceChecked refAll 2 pos 1 #[batch, qHeads, 1, headDim]
+      Tensor.slice! refAll 2 pos 1
     let some cachedStep := acc[i]? |
       throw <| IO.userError s!"Missing cached decode output at step {i}"
     let diff := Tensor.abs (cachedStep - refStep)

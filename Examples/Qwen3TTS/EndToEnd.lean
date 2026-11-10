@@ -461,7 +461,7 @@ private def buildTalkerInputsEquivalent
 
   let ⟨codecInputLen, codecInput⟩ := codecInputResult
   let codecPrefix : Tensor { shape := #[1, codecInputLen - 1, hidden], dtype := dtypes.talker.val, device := device } := qwen35.typedSlice codecInput 1 0 (codecInputLen - 1)
-  let padScaffold : Tensor { shape := #[1, codecInputLen - 2, hidden], dtype := dtypes.talker.val, device := device } := Tensor.expand ttsPadEmbed #[1, codecInputLen - 2, hidden]
+  let padScaffold : Tensor { shape := #[1, codecInputLen - 2, hidden], dtype := dtypes.talker.val, device := device } := Tensor.broadcastTo ttsPadEmbed #[1, codecInputLen - 2, hidden]
   let scaffold0 : Tensor { shape := #[1, codecInputLen - 1, hidden], dtype := dtypes.talker.val, device := device } :=
     qwen35.typedCat padScaffold ttsBosEmbed 1
   let scaffold : Tensor { shape := #[1, codecInputLen - 1, hidden], dtype := dtypes.talker.val, device := device } := Tensor.add scaffold0 codecPrefix

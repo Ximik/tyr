@@ -61,9 +61,9 @@ private def materializeWeightNormConv1d {outC inC kernel : Nat}
     (weightG : Tensor { shape := #[outC], dtype := .Float32, device := device })
     : Tensor { shape := #[outC, inC, kernel], dtype := .Float32, device := device } :=
   let denom : Tensor { shape := #[outC, 1, 1], dtype := .Float32, device := device } := Tensor.reshape (normDim0_3d weightV) #[outC, 1, 1]
-  let denomE : Tensor { shape := #[outC, inC, kernel], dtype := .Float32, device := device } := Tensor.expand denom #[outC, inC, kernel]
+  let denomE : Tensor { shape := #[outC, inC, kernel], dtype := .Float32, device := device } := Tensor.broadcastTo denom #[outC, inC, kernel]
   let gain : Tensor { shape := #[outC, 1, 1], dtype := .Float32, device := device } := Tensor.reshape weightG #[outC, 1, 1]
-  let gainE : Tensor { shape := #[outC, inC, kernel], dtype := .Float32, device := device } := Tensor.expand gain #[outC, inC, kernel]
+  let gainE : Tensor { shape := #[outC, inC, kernel], dtype := .Float32, device := device } := Tensor.broadcastTo gain #[outC, inC, kernel]
   Tensor.div (weightV * gainE) denomE
 
 private def linearFromTensors {inDim outDim : Nat}

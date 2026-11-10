@@ -88,7 +88,7 @@ private def maskedMSE {batch maxLen : Nat}
 
 private def maskedMSE3d {batch maxLen dim : Nat}
     (pred target : Tensor { dtype := .Float32, device := device, shape := #[batch, maxLen, dim] }) (mask : Tensor { dtype := .Float32, device := device, shape := #[batch, maxLen] }) : Tensor { dtype := .Float32, device := device, shape := #[] } :=
-  let mask3 := Tensor.expand (Tensor.unsqueeze mask 2) #[batch, maxLen, dim]
+  let mask3 := Tensor.broadcastTo (Tensor.unsqueeze mask 2) #[batch, maxLen, dim]
   let diff := Tensor.sub pred target
   let sq := Tensor.mul diff diff
   let masked := Tensor.mul sq mask3
@@ -184,7 +184,7 @@ private def stack1dDyn {dim : Nat} (tensors : Array (Tensor { dtype := .Float32,
     Tensor.reshape (zerosDynamic (device := device) #[0, dim]) #[tensors.size, dim] (by simp [h])
   else
     let unsq := tensors.map (fun t => Tensor.unsqueeze t 0) -- [1, dim]
-    Tensor.catManyChecked (unsq.map Tensor.packShape) 0 #[tensors.size, dim]
+    Tensor.catMany! (unsq.map Tensor.packShape) 0 #[tensors.size, dim]
 
 private def stackBatch2d {maxLen dim : Nat} (tensors : Array (Tensor { dtype := .Float32, device := device, shape := #[maxLen, dim] })) :
     Tensor { dtype := .Float32, device := device, shape := #[tensors.size, maxLen, dim] } :=
@@ -192,7 +192,7 @@ private def stackBatch2d {maxLen dim : Nat} (tensors : Array (Tensor { dtype := 
     Tensor.reshape (zerosDynamic (device := device) #[0, maxLen, dim]) #[tensors.size, maxLen, dim] (by simp [h])
   else
     let unsq := tensors.map (fun t => Tensor.unsqueeze t 0) -- [1, maxLen, dim]
-    Tensor.catManyChecked (unsq.map Tensor.packShape) 0 #[tensors.size, maxLen, dim]
+    Tensor.catMany! (unsq.map Tensor.packShape) 0 #[tensors.size, maxLen, dim]
 
 def packBranchingTensor {dim : Nat} (cfg : BranchingTrainConfig)
     (result : BranchingBridgeResult (Tensor { dtype := .Float32, device := device, shape := #[dim] }))

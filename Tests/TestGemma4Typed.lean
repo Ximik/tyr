@@ -81,13 +81,13 @@ private def close {σ τ : StaticSpec} (x : Tensor σ) (y : Tensor τ) (tol : Fl
   let (sc, ss) := Tensor.rotaryFreqs 7 cfg.head_dim cfg.sliding_rope_theta
   let (fc, fs) := Tensor.rotaryFreqs 7 (Config.fullHeadDim cfg) cfg.full_rope_theta
   let cache := m.model.initCache cfg 7 .CPU
-  let (prefill, initial) := m.model.forwardWithCache cfg (ids.sliceChecked 1 0 3 #[1, 3]) cache (by decide) sc ss fc fs
-  close prefill (expected.sliceChecked 1 0 3 #[1, 3, cfg.hidden_size])
+  let (prefill, initial) := m.model.forwardWithCache cfg (ids.slice 1 0 3) cache (by decide) sc ss fc fs
+  close prefill (expected.slice 1 0 3)
   let mut cache := initial
   for hp : pos in [3:7] do
-    let (out, next) := m.model.forwardStep cfg (ids.sliceChecked 1 pos 1 #[1, 1]) pos
+    let (out, next) := m.model.forwardStep cfg (ids.slice! 1 pos 1) pos
       (by have := hp.upper; simp at this; omega) cache sc ss fc fs
-    close out (expected.sliceChecked 1 pos 1 #[1, 1, cfg.hidden_size])
+    close out (expected.slice! 1 pos 1)
     cache := next
 
 @[test] def testGemma4GenerationDTypesAndStreaming : IO Unit := do
@@ -165,14 +165,14 @@ private def roundTrip {α : Type} [TensorStruct α] (params : α) (dir : String)
   let expertIds ← indices.toUInt64Array
   let scales ← weights.toFloatArray
   for ht : token in [:2] do
-    let row := x.sliceChecked 0 token 1 #[1, 4]
+    let row := x.slice! 0 token 1
     let mut sum := qwen35.zerosDynamic #[1, 4]
     for slot in [:2] do
       let e := expertIds[token * 2 + slot]!.toNat
-      let gu := (gate.sliceChecked 0 e 1 #[1, 12, 4]).reshape #[12, 4]
-      let g := Tensor.linear row (gu.sliceChecked 0 0 6 #[6, 4])
-      let u := Tensor.linear row (gu.sliceChecked 0 6 6 #[6, 4])
-      let dw := (down.sliceChecked 0 e 1 #[1, 4, 6]).reshape #[4, 6]
+      let gu := (gate.slice! 0 e 1).reshape #[12, 4]
+      let g := Tensor.linear row (gu.slice! 0 0 6)
+      let u := Tensor.linear row (gu.slice! 0 6 6)
+      let dw := (down.slice! 0 e 1).reshape #[4, 6]
       sum := Tensor.add sum (Tensor.mulScalar
         (Tensor.linear (Tensor.mul (Tensor.gelu g) u) dw) scales[token * 2 + slot]!)
     expected := Tensor.sliceScatter expected 0 token sum
@@ -242,7 +242,7 @@ private def multimodalModel (dtype : DType := .Float32) : Gemma4ForConditionalGe
     let out ← m.forwardWithImageFeatures vlCfg prompt features
     LeanTest.assertEqual out.runtimeShape #[1, 7, 16]
     for value in (← out.toFloatArray) do LeanTest.assertTrue value.isFinite
-    let wrong := features.sliceChecked 0 0 3 #[3, 8]
+    let wrong := features.slice 0 0 3
     Tests.assertThrows (m.forwardWithImageFeatures vlCfg prompt wrong) (some "placeholder token count mismatch")
     let generated ← m.generate vlCfg prompt 2 .greedy #[] (some ⟨4, features⟩)
     LeanTest.assertEqual generated.1 9

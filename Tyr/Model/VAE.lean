@@ -46,8 +46,8 @@ def invNormalize (ae : (AutoEncoder (device := device) dtypes)) (z : Tensor { dt
   let scale := Tensor.reshape scale #[1, 128, 1, 1]
   let mean := Tensor.reshape ae.bn_running_mean #[1, 128, 1, 1]
   -- Expand channel statistics over the spatial dimensions.
-  let scale := Tensor.expand scale #[1, 128, 16, 16]
-  let mean := Tensor.expand mean #[1, 128, 16, 16]
+  let scale := Tensor.broadcastTo scale #[1, 128, 16, 16]
+  let mean := Tensor.broadcastTo mean #[1, 128, 16, 16]
   letI := dtypes.scalePromotion
   letI := dtypes.offsetPromotion
   Tensor.add (Tensor.mul z scale) mean

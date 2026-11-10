@@ -90,16 +90,16 @@ def copyInto {source : DType} {b1 b2 m1 m2 : Nat}
     (src : BranchingMoleculeBatch (dtype := source) (device := device) b2 m2) :
     IO (BranchingMoleculeBatch (dtype := dtype) (device := device) b1 m1) := do
   return {
-    t := ← copyIntoChecked dst.t (Tensor.castLike dst.t src.t)
-    coord := ← copyIntoChecked dst.coord (Tensor.castLike dst.coord src.coord)
-    coordAnchor := ← copyIntoChecked dst.coordAnchor (Tensor.castLike dst.coordAnchor src.coordAnchor)
+    t := ← copyIntoChecked dst.t (Tensor.castDType src.t dtype)
+    coord := ← copyIntoChecked dst.coord (Tensor.castDType src.coord dtype)
+    coordAnchor := ← copyIntoChecked dst.coordAnchor (Tensor.castDType src.coordAnchor dtype)
     label := ← copyIntoChecked dst.label src.label
     labelAnchor := ← copyIntoChecked dst.labelAnchor src.labelAnchor
-    labelLossScale := ← copyIntoChecked dst.labelLossScale (Tensor.castLike dst.labelLossScale src.labelLossScale)
+    labelLossScale := ← copyIntoChecked dst.labelLossScale (Tensor.castDType src.labelLossScale dtype)
     padmask := ← copyIntoChecked dst.padmask src.padmask
     flowmask := ← copyIntoChecked dst.flowmask src.flowmask
-    splitsTarget := ← copyIntoChecked dst.splitsTarget (Tensor.castLike dst.splitsTarget src.splitsTarget)
-    delTarget := ← copyIntoChecked dst.delTarget (Tensor.castLike dst.delTarget src.delTarget) }
+    splitsTarget := ← copyIntoChecked dst.splitsTarget (Tensor.castDType src.splitsTarget dtype)
+    delTarget := ← copyIntoChecked dst.delTarget (Tensor.castDType src.delTarget dtype) }
 
 /-- Force every constructed field eagerly (see `touchTensor`). -/
 def eval {batch maxLen : Nat}
@@ -254,14 +254,14 @@ private def moleculeFlowLossScale {batch maxLen : Nat}
     (t : Tensor { dtype := dtype, device := device, shape := #[batch] }) : Tensor { dtype := dtype, device := device, shape := #[batch, maxLen] } :=
   let remaining : Tensor { dtype := dtype, device := device, shape := #[batch] } := Tensor.addScalar (Tensor.mulScalar t (-1.0)) 1.2
   let scale : Tensor { dtype := dtype, device := device, shape := #[batch] } := powDynamic remaining (-1.0)
-  Tensor.expand (Tensor.unsqueeze scale 1) #[batch, maxLen]
+  Tensor.broadcastTo (Tensor.unsqueeze scale 1) #[batch, maxLen]
 
 private def moleculeMaskedWeightedMSE3d {batch maxLen dim : Nat}
     (pred target : Tensor { dtype := dtype, device := device, shape := #[batch, maxLen, dim] })
     (mask : Tensor { dtype := .Float32, device := device, shape := #[batch, maxLen] })
     (weights : Tensor { dtype := dtype, device := device, shape := #[batch, maxLen] }) : Tensor { dtype := .Float32, device := device, shape := #[] } :=
-  let mask3 := Tensor.expand (Tensor.unsqueeze mask 2) #[batch, maxLen, dim]
-  let weights3 := Tensor.expand (Tensor.unsqueeze weights 2) #[batch, maxLen, dim]
+  let mask3 := Tensor.broadcastTo (Tensor.unsqueeze mask 2) #[batch, maxLen, dim]
+  let weights3 := Tensor.broadcastTo (Tensor.unsqueeze weights 2) #[batch, maxLen, dim]
   let diff := Tensor.sub pred target
   let sq := Tensor.mul diff diff
   let masked := Tensor.mul (Tensor.mul sq mask3) weights3
@@ -496,7 +496,7 @@ def moleculeMuonStepT [TensorStruct Params] [FloatingTensorStruct Params]
     let (rows, cols) := flattenedMatrixShape σ.shape
     let aspect := Float.sqrt (max 1.0 (rows.toFloat / cols.toFloat))
     let scaled := Tensor.mulScalar direction aspect
-    let lr : Tensor (σ.withDType .Float32) := Tensor.expand (lrT.to grad.device) σ.shape
+    let lr : Tensor (σ.withDType .Float32) := Tensor.broadcastTo (lrT.to grad.device) σ.shape
     let product : Tensor (σ.withDType .BFloat16) :=
       (Tensor.mul (floatDynamic scaled) lr).castDType .BFloat16
     pure (Tensor.castLike (σ := σ.withDType .BFloat16) (τ := σ) grad product)) nesterov

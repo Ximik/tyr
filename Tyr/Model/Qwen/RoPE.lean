@@ -48,8 +48,8 @@ def applyRoPE {batch seq n_head head_dim max_seq : Nat}
     (start_pos : Nat := 0)
     : Tensor { device := device, shape := #[batch, seq, n_head, head_dim], dtype := .Float32 } :=
   -- Slice cos/sin to current sequence length (runtime bounds, validated)
-  let cos := cache.cos.sliceChecked 0 start_pos seq #[seq, head_dim / 2]
-  let sin := cache.sin.sliceChecked 0 start_pos seq #[seq, head_dim / 2]
+  let cos := cache.cos.slice! 0 start_pos seq
+  let sin := cache.sin.slice! 0 start_pos seq
   -- Apply rotation
   applyRotaryEmb x cos sin
 

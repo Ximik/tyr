@@ -15,8 +15,7 @@
   type. Appends and views share the cache's spec statically, and still
   re-check physical device/dtype at native boundaries. The sequence dimension of an attention view stays runtime
   (`validLen` is a value, not a constant), so views are produced by
-  `Tensor.sliceChecked`, which validates the claimed spec against the native
-  handle.
+  `Tensor.slice!`, whose result is admitted against its computed spec.
 
   Appends return an updated cache in IO. Retaining an earlier cache or view
   preserves its values; callers thread the returned cache forward to observe
@@ -159,7 +158,7 @@ def LayerCache.append (lc : LayerCache batch maxSeqLen numKvHeads headDim dtype 
 
     Returns `(K_view, V_view)` of shape `[batch, numKvHeads, validLen, headDim]`,
     with the runtime `validLen` recorded in the spec (produced by
-    `Tensor.sliceChecked`, which validates the native handle), suitable to
+    `Tensor.slice!`), suitable to
     pass directly to `tkMhaH100DecodeFwd` (which expects contiguous
     `[batch, numKvHeads, kv_seq, headDim]` and handles the tail mask when
     `validLen` is not a multiple of 64). -/
@@ -168,8 +167,8 @@ def LayerCache.attentionView (lc : LayerCache batch maxSeqLen numKvHeads headDim
     : IO (Tensor ⟨#[batch, numKvHeads, validLen, headDim], dtype, device⟩
       × Tensor ⟨#[batch, numKvHeads, validLen, headDim], dtype, device⟩) := do
   if validLen > maxSeqLen then throw <| IO.userError "KV cache view exceeds capacity"
-  return (Tensor.sliceChecked lc.keys 2 0 validLen #[batch, numKvHeads, validLen, headDim],
-    Tensor.sliceChecked lc.values 2 0 validLen #[batch, numKvHeads, validLen, headDim])
+  return (Tensor.slice! lc.keys 2 0 validLen,
+    Tensor.slice! lc.values 2 0 validLen)
 
 /-- Remove a layer before updating it, using constant-time swaps and a pop. -/
 @[noinline] private def takeLayerForUpdate

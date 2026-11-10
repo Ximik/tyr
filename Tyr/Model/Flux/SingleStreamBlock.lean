@@ -129,7 +129,7 @@ def forward {batch seq hidden_size num_heads head_dim mlp_hidden : Nat}
 
   -- Apply gate and residual
   let mod_gate := Tensor.unsqueeze mod_gate 1
-  let mod_gate := Tensor.expand mod_gate #[batch, seq, hidden_size]
+  let mod_gate := Tensor.broadcastTo mod_gate #[batch, seq, hidden_size]
   Tensor.add x (Tensor.mul mod_gate out)
 
 end SingleStreamBlock

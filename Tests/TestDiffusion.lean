@@ -18,8 +18,8 @@ open torch.diffusion
 def testMaskSchedule : IO Unit := do
   let schedule := MaskedDiffusionSchedule.init 64 0 16
   -- Verify mask_probs goes from 1/64 to ~1.0
-  let firstProb := (schedule.mask_probs.sliceChecked 0 0 1 #[1] |>.reshape #[]).item
-  let lastProb := (schedule.mask_probs.sliceChecked 0 63 1 #[1] |>.reshape #[]).item
+  let firstProb := (schedule.mask_probs.slice 0 0 1 |>.reshape #[]).item
+  let lastProb := (schedule.mask_probs.slice 0 63 1 |>.reshape #[]).item
   LeanTest.assertTrue (firstProb > 0.01) "First prob > 0.01"
   LeanTest.assertTrue (firstProb < 0.05) "First prob < 0.05"
   LeanTest.assertTrue (lastProb > 0.95) "Last prob > 0.95"
@@ -37,8 +37,8 @@ def testMaskPreservesContext : IO Unit := do
   -- With context_len=16 and seq=128, we have 112 non-context positions per sample
   -- At timestep 63 with linear schedule, mask_prob ~= 1.0, so most should be masked
   LeanTest.assertTrue (numMasked > 50) "Many positions are masked"
-  let originalContext := x_0.sliceChecked 1 0 16 #[2, 16]
-  let maskedContext := x_t.sliceChecked 1 0 16 #[2, 16]
+  let originalContext := x_0.slice 1 0 16
+  let maskedContext := x_t.slice 1 0 16
   LeanTest.assertTrue (Tensor.allclose originalContext maskedContext 0.0 0.0)
     "Every context token is preserved"
 

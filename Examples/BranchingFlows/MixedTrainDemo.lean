@@ -163,7 +163,7 @@ private def maskedMSE {batch maxLen : Nat}
 
 private def maskedMSE3d {batch maxLen dim : Nat}
     (pred target : Tensor { dtype := .Float32, shape := #[batch, maxLen, dim], device := .CPU }) (mask : Tensor { dtype := .Float32, shape := #[batch, maxLen], device := .CPU }) : Tensor { dtype := .Float32, shape := #[], device := .CPU } :=
-  let mask3 := Tensor.expand (Tensor.unsqueeze mask 2) #[batch, maxLen, dim]
+  let mask3 := Tensor.broadcastTo (Tensor.unsqueeze mask 2) #[batch, maxLen, dim]
   let diff := Tensor.sub pred target
   let sq := Tensor.mul diff diff
   let masked := Tensor.mul sq mask3
@@ -242,7 +242,7 @@ def runDemo : IO Unit := do
     let discEmb := Tensor.embedding (batch := batchU) (seq := maxLen) (vocab := vocab) (embed := hidden) packedDisc.state paramsTrain.embed
     let t1 := Tensor.unsqueeze t 1
     let t2 := Tensor.unsqueeze t1 1
-    let tExp : Tensor ⟨#[batchU, maxLen, 1], .Float32, .CPU⟩ := Tensor.expand t2 #[batchU, maxLen, 1]
+    let tExp : Tensor ⟨#[batchU, maxLen, 1], .Float32, .CPU⟩ := Tensor.broadcastTo t2 #[batchU, maxLen, 1]
     let timeEmb := Tensor.affine3d tExp paramsTrain.timeW paramsTrain.timeB
     let hiddenState := Tensor.tanh (Tensor.add (Tensor.add contEmb discEmb) timeEmb)
 
@@ -295,7 +295,7 @@ def runDemo : IO Unit := do
   let discEmb := Tensor.embedding (batch := batchU) (seq := maxLen) (vocab := vocab) (embed := hidden) packedDisc.state params.embed
   let t1 := Tensor.unsqueeze packedDisc.t 1
   let t2 := Tensor.unsqueeze t1 1
-  let tExp : Tensor ⟨#[batchU, maxLen, 1], .Float32, .CPU⟩ := Tensor.expand t2 #[batchU, maxLen, 1]
+  let tExp : Tensor ⟨#[batchU, maxLen, 1], .Float32, .CPU⟩ := Tensor.broadcastTo t2 #[batchU, maxLen, 1]
   let timeEmb := Tensor.affine3d tExp params.timeW params.timeB
   let hiddenState := Tensor.tanh (Tensor.add (Tensor.add contEmb discEmb) timeEmb)
   let predLoc := Tensor.affine3d hiddenState params.locW params.locB

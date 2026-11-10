@@ -29,23 +29,17 @@ def softplusDynamic {s : Shape} {dev : Device} (x : Tensor { shape := s, dtype, 
 def powDynamic {s : Shape} {dev : Device} (x : Tensor { shape := s, dtype, device := dev }) (n : Float) : Tensor { shape := s, dtype, device := dev } := Tensor.pow x n
 
 def sliceTyped {s out : Shape} {d : DType} {dev : Device} (x : Tensor { shape := s, dtype := d, device := dev }) (dim : Nat) (start len : Nat) : Tensor { shape := out, dtype := d, device := dev } :=
-  x.sliceChecked dim start len out
+  x.sliceAs! dim start len out
 
-/-- Return an updated destination after checking native shapes and dtypes.
-Retained aliases keep their values. Invalid metadata raises an IO error; this
-operation never broadcasts or implicitly casts the source. -/
-def copyIntoChecked? {σ τ : StaticSpec} (dst : Tensor σ) (src : Tensor τ) :
-    IO (Tensor σ) := do
-  if dst.runtimeShape != src.runtimeShape then
-    throw (IO.userError s!"BranchingFlows static buffer shape mismatch: {dst.runtimeShape} vs {src.runtimeShape}")
-  if dst.actualSpec.dtype != src.actualSpec.dtype then
-    throw (IO.userError s!"BranchingFlows static buffer dtype mismatch: {dst.actualSpec.dtype} vs {src.actualSpec.dtype}; cast the source explicitly before copying")
-  let raw ← RawTensor.copyInplace dst.raw src.raw
-  pure (Tensor.ofRaw! "BranchingFlows" raw)
-
-/-- Checked returned-value copy. Errors are reported through IO. -/
-def copyIntoChecked {σ τ : StaticSpec} (dst : Tensor σ) (src : Tensor τ) : IO (Tensor σ) :=
-  copyIntoChecked? dst src
+/-- Return an updated destination holding `src`. The source shares the
+destination's dtype and device; its shape index may differ, so a runtime shape
+mismatch raises an IO error instead of broadcasting. Retained aliases keep
+their values. -/
+def copyIntoChecked {σ : StaticSpec} {s : Shape} (dst : Tensor σ)
+    (src : Tensor ⟨s, σ.dtype, σ.device⟩) : IO (Tensor σ) := do
+  if σ.shape != s then
+    throw (IO.userError s!"BranchingFlows static buffer shape mismatch: {σ.shape} vs {s}")
+  pure (Tensor.ofRaw! "copyIntoChecked" (← RawTensor.copyInplace dst.raw src.raw))
 
 def touchTensor {σ : StaticSpec} (t : Tensor σ) : IO Unit := RawTensor.touch t.raw
 
@@ -68,7 +62,7 @@ def cosDynamic {s : Shape} {dev : Device} (x : Tensor { dtype := dtype, shape :=
 
 def affine2d {batch input output : Nat} {dev : Device} (x : Tensor { dtype := dtype, shape := #[batch, input], device := dev })
     (w : Tensor { dtype := dtype, shape := #[output, input], device := dev }) (bias : Tensor { dtype := dtype, shape := #[output], device := dev }) : Tensor { dtype := dtype, shape := #[batch, output], device := dev } :=
-  Tensor.add (Tensor.linear x w) ((bias.reshape #[1, output]).expand #[batch, output])
+  Tensor.add (Tensor.linear x w) ((bias.reshape #[1, output]).broadcastTo #[batch, output])
 
 def transposeAttention {b s h d : Nat} {dev : Device} (x : Tensor { dtype := dtype, shape := #[b, s, h, d], device := dev }) : Tensor { dtype := dtype, shape := #[b, h, s, d], device := dev } :=
   x.transpose 1 2

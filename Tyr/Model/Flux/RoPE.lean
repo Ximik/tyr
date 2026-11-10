@@ -12,8 +12,8 @@ private def ropeAxis {batch seq : Nat}
     : Tensor { device := device, shape := #[batch, seq, dim / 2, 2, 2], dtype := .Float32 } :=
   let scale := Tensor.mulScalar ((Tensor.arange (dim / 2)).toFloat32.to ids.device) (2.0 / dim.toFloat)
   let omega := Tensor.exp (Tensor.mulScalar scale (-Float.log theta.toFloat))
-  let pos := Tensor.expand (ids.toFloat32.reshape #[batch, seq, 1]) #[batch, seq, dim / 2]
-  let omega := Tensor.expand (omega.reshape #[1, 1, dim / 2]) #[batch, seq, dim / 2]
+  let pos := Tensor.broadcastTo (ids.toFloat32.reshape #[batch, seq, 1]) #[batch, seq, dim / 2]
+  let omega := Tensor.broadcastTo (omega.reshape #[1, 1, dim / 2]) #[batch, seq, dim / 2]
   let angle := pos * omega
   let cos := Tensor.cos angle
   let sin := Tensor.sin angle
@@ -38,7 +38,7 @@ def ropeEmbed {batch seq head_dim : Nat}
   let r1 := ropeAxis (axisIds ids 1) d1 theta
   let r2 := ropeAxis (axisIds ids 2) d2 theta
   let r3 := ropeAxis (axisIds ids 3) d3 theta
-  let joined := Tensor.catManyChecked #[r0.packShape, r1.packShape, r2.packShape, r3.packShape] 2 #[batch, seq, head_dim / 2, 2, 2]
+  let joined := Tensor.catMany! #[r0.packShape, r1.packShape, r2.packShape, r3.packShape] 2 #[batch, seq, head_dim / 2, 2, 2]
   joined.reshape #[batch, 1, seq, head_dim / 2, 2, 2]
 
 /-- Apply rotary matrices in Float32 and restore the activation dtype. -/
@@ -49,10 +49,10 @@ def applyRope {batch seq n_head head_dim : Nat}
     : Tensor { dtype := dtype, device := device, shape := #[batch, seq, n_head, head_dim] } :=
   let xf := (transposeAttention x).toFloat32.reshape #[batch, n_head, seq, head_dim / 2, 1, 2]
     (by simp [Nat.mul_assoc, Nat.div_mul_cancel heven])
-  let x0 := Tensor.expand ((sliceTyped xf 5 0 1).reshape #[batch, n_head, seq, head_dim / 2, 1]) #[batch, n_head, seq, head_dim / 2, 2]
-  let x1 := Tensor.expand ((sliceTyped xf 5 1 1).reshape #[batch, n_head, seq, head_dim / 2, 1]) #[batch, n_head, seq, head_dim / 2, 2]
-  let p0 := Tensor.expand ((sliceTyped pe 5 0 1).reshape #[batch, 1, seq, head_dim / 2, 2]) #[batch, n_head, seq, head_dim / 2, 2]
-  let p1 := Tensor.expand ((sliceTyped pe 5 1 1).reshape #[batch, 1, seq, head_dim / 2, 2]) #[batch, n_head, seq, head_dim / 2, 2]
+  let x0 := Tensor.broadcastTo ((sliceTyped xf 5 0 1).reshape #[batch, n_head, seq, head_dim / 2, 1]) #[batch, n_head, seq, head_dim / 2, 2]
+  let x1 := Tensor.broadcastTo ((sliceTyped xf 5 1 1).reshape #[batch, n_head, seq, head_dim / 2, 1]) #[batch, n_head, seq, head_dim / 2, 2]
+  let p0 := Tensor.broadcastTo ((sliceTyped pe 5 0 1).reshape #[batch, 1, seq, head_dim / 2, 2]) #[batch, n_head, seq, head_dim / 2, 2]
+  let p1 := Tensor.broadcastTo ((sliceTyped pe 5 1 1).reshape #[batch, 1, seq, head_dim / 2, 2]) #[batch, n_head, seq, head_dim / 2, 2]
   let out := (p0 * x0 + p1 * x1).reshape #[batch, n_head, seq, head_dim]
     (by simp [Nat.mul_assoc, Nat.div_mul_cancel heven])
   Tensor.castLike x (fromAttention out)

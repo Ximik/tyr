@@ -63,7 +63,7 @@ private def linear2d {tokens inDim outDim : Nat}
     (x : Tensor { device := device, shape := #[tokens, inDim], dtype := dtype })
     (w : Tensor { device := device, shape := #[outDim, inDim], dtype := dtype })
     : Tensor { device := device, shape := #[tokens, outDim], dtype := dtype } :=
-  let yDyn : Tensor { device := device, shape := #[tokens, outDim], dtype := dtype } := einsumChecked "oh,th->to" w x
+  let yDyn : Tensor { device := device, shape := #[tokens, outDim], dtype := dtype } := einsum! "oh,th->to" w x
   Tensor.reshape yDyn #[tokens, outDim]
 
 private def countMask2d {batch seq : Nat} (mask : Tensor { device := device, shape := #[batch, seq], dtype := .Bool }) : IO Nat := do
@@ -85,7 +85,7 @@ private def rmsNormNoScale2d {n dim : Nat}
   let xf : Tensor { device := device, shape := #[n, dim], dtype := .Float32 } := floatDynamic x
   let var : Tensor { device := device, shape := #[n, 1], dtype := .Float32 } := Tensor.meanDim (Tensor.mul xf xf) 1 true
   let inv : Tensor { device := device, shape := #[n, 1], dtype := .Float32 } := rsqrtDynamic (Tensor.addScalar var eps)
-  let inv : Tensor { device := device, shape := #[n, dim], dtype := .Float32 } := Tensor.expand inv #[n, dim]
+  let inv : Tensor { device := device, shape := #[n, dim], dtype := .Float32 } := Tensor.broadcastTo inv #[n, dim]
   Tensor.castLike x (Tensor.mul xf inv)
 
 private def rmsNormNoScale4d {a b c dim : Nat}
@@ -318,9 +318,9 @@ def forward {patchRows patchCols : Nat}
     | some bias, some scale =>
       let nTok := (patchRows / cfg.vision_config.pooling_kernel_size) * (patchCols / cfg.vision_config.pooling_kernel_size)
       let bias : Tensor { device := device, shape := #[nTok, cfg.vision_config.hidden_size], dtype := .Float32 } :=
-        Tensor.expand (Tensor.reshape bias #[1, cfg.vision_config.hidden_size]) #[nTok, cfg.vision_config.hidden_size]
+        Tensor.broadcastTo (Tensor.reshape bias #[1, cfg.vision_config.hidden_size]) #[nTok, cfg.vision_config.hidden_size]
       let scale : Tensor { device := device, shape := #[nTok, cfg.vision_config.hidden_size], dtype := .Float32 } :=
-        Tensor.expand (Tensor.reshape scale #[1, cfg.vision_config.hidden_size]) #[nTok, cfg.vision_config.hidden_size]
+        Tensor.broadcastTo (Tensor.reshape scale #[1, cfg.vision_config.hidden_size]) #[nTok, cfg.vision_config.hidden_size]
       Tensor.mul (Tensor.sub pooled bias) scale
     | _, _ =>
       pooled
@@ -387,7 +387,7 @@ def repeatFeaturesForBatch {batch tokens : Nat}
   Id.run do
     if batch <= 1 then
       return ⟨tokens, features⟩
-    let repeated := Tensor.expand (features.reshape #[1, tokens, cfg.text_config.hidden_size])
+    let repeated := Tensor.broadcastTo (features.reshape #[1, tokens, cfg.text_config.hidden_size])
       #[batch, tokens, cfg.text_config.hidden_size]
     return ⟨batch * tokens, repeated.reshape #[batch * tokens, cfg.text_config.hidden_size]⟩
 
@@ -403,7 +403,7 @@ private def scatterFeaturesIntoToken {batch seq hidden featTokens : Nat}
     throw <| IO.userError
       s!"Gemma4 placeholder token count mismatch for token={tokenId}: ids={nTokens} features={featTokens}"
   let tokenMask : Tensor { device := device, shape := #[batch, seq, hidden], dtype := .Bool } :=
-    Tensor.expand (Tensor.reshape tokenMask2d #[batch, seq, 1]) #[batch, seq, hidden]
+    Tensor.broadcastTo (Tensor.reshape tokenMask2d #[batch, seq, 1]) #[batch, seq, hidden]
   let flat := Tensor.reshape features #[featTokens * hidden]
   if h : projectorDType = dtype then
     pure (Tensor.maskedScatter inputsEmbeds tokenMask (h ▸ flat))

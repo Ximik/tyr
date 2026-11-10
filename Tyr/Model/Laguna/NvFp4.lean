@@ -73,14 +73,14 @@ private def dequantCore {pd sd : DType}
   let idx := (packed.reshape #[numPacked]).toInt64
   let lo := (Tensor.embedding1d idx lutLo).reshape #[numPacked, 1]
   let hi := (Tensor.embedding1d idx lutHi).reshape #[numPacked, 1]
-  let pairs := Tensor.catManyChecked #[lo.packShape, hi.packShape] 1 #[numPacked, 2]
+  let pairs := Tensor.catMany! #[lo.packShape, hi.packShape] 1 #[numPacked, 2]
   let vals4 := pairs.reshape #[lead, outFeatures, numGroups, 16]
     (by simp +zetaDelta [Nat.mul_assoc, Nat.div_mul_cancel h2, Nat.div_mul_cancel h16])
   let scalesF := scales.toFloat32.reshape #[lead, outFeatures, numGroups, 1]
   -- Preserve reference rounding: divide in F32, multiply in F32, then cast once.
-  let globalExpanded := Tensor.expand globalB #[lead, outFeatures, numGroups, 1]
+  let globalExpanded := Tensor.broadcastTo globalB #[lead, outFeatures, numGroups, 1]
   let scaleDiv := scalesF / globalExpanded
-  let prod4 := (Tensor.expand scaleDiv #[lead, outFeatures, numGroups, 16]) * vals4
+  let prod4 := (Tensor.broadcastTo scaleDiv #[lead, outFeatures, numGroups, 16]) * vals4
   pure (prod4.reshape #[lead, outFeatures, inFeatures]
     (by simp +zetaDelta [Nat.mul_assoc, Nat.div_mul_cancel h16])).toBFloat16
 

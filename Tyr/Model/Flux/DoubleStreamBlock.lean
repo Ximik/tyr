@@ -211,9 +211,9 @@ def forward {batch img_seq txt_seq hidden_size num_heads head_dim mlp_hidden : N
 
   -- Apply gates
   let img_mod1_gate := Tensor.unsqueeze img_mod1_gate 1
-  let img_mod1_gate := Tensor.expand img_mod1_gate #[batch, img_seq, hidden_size]
+  let img_mod1_gate := Tensor.broadcastTo! img_mod1_gate #[batch, img_seq, hidden_size]
   let txt_mod1_gate := Tensor.unsqueeze txt_mod1_gate 1
-  let txt_mod1_gate := Tensor.expand txt_mod1_gate #[batch, txt_seq, hidden_size]
+  let txt_mod1_gate := Tensor.broadcastTo! txt_mod1_gate #[batch, txt_seq, hidden_size]
 
   -- Residual + gated attention
   let img := Tensor.add img (Tensor.mul img_mod1_gate img_attn)
@@ -229,7 +229,7 @@ def forward {batch img_seq txt_seq hidden_size num_heads head_dim mlp_hidden : N
   let img_mlp_out := Tensor.mul (Tensor.silu img_gate) img_up
   let img_mlp_out := Tensor.linear3d img_mlp_out block.img_mlp.w2
   let img_mod2_gate := Tensor.unsqueeze img_mod2_gate 1
-  let img_mod2_gate := Tensor.expand img_mod2_gate #[batch, img_seq, hidden_size]
+  let img_mod2_gate := Tensor.broadcastTo! img_mod2_gate #[batch, img_seq, hidden_size]
   let img := Tensor.add img (Tensor.mul img_mod2_gate img_mlp_out)
 
   let txt_mlp_in := block.txt_norm2.forward3d txt
@@ -241,7 +241,7 @@ def forward {batch img_seq txt_seq hidden_size num_heads head_dim mlp_hidden : N
   let txt_mlp_out := Tensor.mul (Tensor.silu txt_gate) txt_up
   let txt_mlp_out := Tensor.linear3d txt_mlp_out block.txt_mlp.w2
   let txt_mod2_gate := Tensor.unsqueeze txt_mod2_gate 1
-  let txt_mod2_gate := Tensor.expand txt_mod2_gate #[batch, txt_seq, hidden_size]
+  let txt_mod2_gate := Tensor.broadcastTo! txt_mod2_gate #[batch, txt_seq, hidden_size]
   let txt := Tensor.add txt (Tensor.mul txt_mod2_gate txt_mlp_out)
 
   (img, txt)

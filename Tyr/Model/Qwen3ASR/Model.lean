@@ -102,7 +102,7 @@ private def gatherRowsByPositions {seq half : Nat}
   let idxVals : Array Int64 := Array.ofFn (n := seq) fun i => Int64.ofNat (clipTo (positions.getD i.val 0) seq)
   let idxCpu : Tensor { device := .CPU, shape := #[seq], dtype := .Int64 } := Tensor.fromInt64ArrayShaped idxVals #[seq] (by simp [idxVals])
   let idx : Tensor { device := device, shape := #[seq], dtype := .Int64 } := idxCpu.to table.device
-  let idx2d : Tensor { device := device, shape := #[seq, half], dtype := .Int64 } := Tensor.expand (Tensor.reshape idx #[seq, 1]) #[seq, half]
+  let idx2d : Tensor { device := device, shape := #[seq, half], dtype := .Int64 } := Tensor.broadcastTo (Tensor.reshape idx #[seq, 1]) #[seq, half]
   Tensor.reshape (Tensor.gather table 0 idx2d) #[seq, half]
 
 /-- Output container mirroring `...CausalLMOutputWithPast` fields that are
@@ -218,8 +218,8 @@ private def forwardEmbedsMaskedWithPositionRows {batch seq : Nat}
       let row := rows.getD b (Array.replicate seq 0)
       let cosB : Tensor { device := device, shape := #[seq, half], dtype := .Float32 } := gatherRowsByPositions baseCos row
       let sinB : Tensor { device := device, shape := #[seq, half], dtype := .Float32 } := gatherRowsByPositions baseSin row
-      let embB : Tensor { dtype := dtype, device := device, shape := #[1, seq, cfg.textConfig.hiddenSize] } := Tensor.sliceChecked inputsEmbeds 0 b 1 #[1, seq, cfg.textConfig.hiddenSize]
-      let maskB : Tensor { device := device, shape := #[1, seq], dtype := .Int64 } := Tensor.sliceChecked attnMask 0 b 1 #[1, seq]
+      let embB : Tensor { dtype := dtype, device := device, shape := #[1, seq, cfg.textConfig.hiddenSize] } := Tensor.slice! inputsEmbeds 0 b 1
+      let maskB : Tensor { device := device, shape := #[1, seq], dtype := .Int64 } := Tensor.slice! attnMask 0 b 1
       let hiddenB :=
         m.textModel.layers.foldl
           (fun h layer => layer.forwardMasked cfg.textConfig.headsValid.2.2 h cosB sinB maskB true)
@@ -227,7 +227,7 @@ private def forwardEmbedsMaskedWithPositionRows {batch seq : Nat}
       let hiddenB := m.textModel.norm.forward3dPreserving hiddenB
       perBatchHidden := perBatchHidden.push (Tensor.packShape hiddenB)
 
-    let hidden := Tensor.catManyChecked perBatchHidden 0 #[batch, seq, cfg.textConfig.hiddenSize]
+    let hidden := Tensor.catMany! perBatchHidden 0 #[batch, seq, cfg.textConfig.hiddenSize]
     pure (Tensor.linear3d hidden m.lmHead)
 
 def forwardText {batch textSeq : Nat}
@@ -296,7 +296,7 @@ private def getPlaceholderMask (cfg : ThinkerConfig) {batch seq : Nat}
     (inputIds : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 })
     : Tensor { device := device, shape := #[batch, seq, cfg.textConfig.hiddenSize], dtype := .Bool } :=
   let mask2d := getPlaceholderMask2d cfg inputIds
-  Tensor.expand (Tensor.reshape mask2d #[batch, seq, 1]) #[batch, seq, cfg.textConfig.hiddenSize]
+  Tensor.broadcastTo (Tensor.reshape mask2d #[batch, seq, 1]) #[batch, seq, cfg.textConfig.hiddenSize]
 
 private def audioValidMaskFromFeatureMask (cfg : ThinkerConfig) {batch featureSeq audioSeq : Nat}
     (featureAttentionMask : Tensor { device := device, shape := #[batch, featureSeq], dtype := .Int64 })
@@ -305,7 +305,7 @@ private def audioValidMaskFromFeatureMask (cfg : ThinkerConfig) {batch featureSe
   let audioLens := AudioEncoderConfig.featExtractOutputLengths featureLens
   let valid2d : Tensor { device := device, shape := #[batch, audioSeq], dtype := .Int64 } := buildLengthMask audioLens
   let valid2dBool : Tensor { device := device, shape := #[batch, audioSeq], dtype := .Bool } := Tensor.eqScalar valid2d 1
-  pure <| Tensor.expand (Tensor.reshape valid2dBool #[batch, audioSeq, 1]) #[batch, audioSeq, cfg.textConfig.hiddenSize]
+  pure <| Tensor.broadcastTo (Tensor.reshape valid2dBool #[batch, audioSeq, 1]) #[batch, audioSeq, cfg.textConfig.hiddenSize]
 
 private def audioAttentionMaskFromFeatureMask (cfg : ThinkerConfig) {batch featureSeq audioSeq : Nat}
     (featureAttentionMask : Tensor { device := device, shape := #[batch, featureSeq], dtype := .Int64 })
@@ -458,8 +458,8 @@ private def decodeStepFromEmbedWithCache {batch maxLen : Nat}
     (position : Nat) (hpos : position < maxLen)
     (caches : Array (LayerKVCache (device := device) (dtype := dtype) cfg batch maxLen))
     : IO (Tensor { dtype := dtype, device := device, shape := #[batch, ThinkerLmVocabSize cfg] } × Array (LayerKVCache (device := device) (dtype := dtype) cfg batch maxLen)) := do
-  let cos : Tensor { device := device, shape := #[1, cfg.textConfig.headDim / 2], dtype := .Float32 } := Tensor.sliceChecked cosAll 0 position 1 #[1, cfg.textConfig.headDim / 2]
-  let sin : Tensor { device := device, shape := #[1, cfg.textConfig.headDim / 2], dtype := .Float32 } := Tensor.sliceChecked sinAll 0 position 1 #[1, cfg.textConfig.headDim / 2]
+  let cos : Tensor { device := device, shape := #[1, cfg.textConfig.headDim / 2], dtype := .Float32 } := Tensor.slice cosAll 0 position 1
+  let sin : Tensor { device := device, shape := #[1, cfg.textConfig.headDim / 2], dtype := .Float32 } := Tensor.slice sinAll 0 position 1
 
   let mut hidden : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.textConfig.hiddenSize] } := tokenEmbed
   let mut nextCaches := caches
@@ -495,7 +495,7 @@ private partial def prefillCachesFromEmbeds {batch seq maxLen : Nat}
   if hp : seq ≤ position then
     pure (lastLogits, caches)
   else
-    let tok : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.textConfig.hiddenSize] } := Tensor.sliceChecked inputsEmbeds 1 position 1 #[batch, 1, cfg.textConfig.hiddenSize]
+    let tok : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.textConfig.hiddenSize] } := Tensor.slice inputsEmbeds 1 position 1
     let (logits, caches') ← decodeStepFromEmbedWithCache m cosAll sinAll tok position (by omega) caches
     prefillCachesFromEmbeds m cosAll sinAll inputsEmbeds caches' (position + 1) logits hfit
 
@@ -586,7 +586,7 @@ private def buildStreamingPromptCacheFromEmbeds {seq : Nat}
   let support ← dtype.acquireConstantSupport cacheDevice
   let _ := support.down
   let caches0 := initLayerKVCaches m maxLen cacheDevice (h := Nat.lt_of_lt_of_le hSeq (Nat.le_add_right _ _))
-  let tok0 : Tensor { dtype := dtype, device := device, shape := #[1, 1, cfg.textConfig.hiddenSize] } := Tensor.sliceChecked inputsEmbeds 1 0 1 #[1, 1, cfg.textConfig.hiddenSize]
+  let tok0 : Tensor { dtype := dtype, device := device, shape := #[1, 1, cfg.textConfig.hiddenSize] } := Tensor.slice inputsEmbeds 1 0 1
   let (logits0, caches1) ← decodeStepFromEmbedWithCache m cosAll sinAll tok0 0 (Nat.lt_of_lt_of_le hSeq (Nat.le_add_right _ _)) caches0
   let (lastLogits, cachesPrefill) ←
     prefillCachesFromEmbeds m cosAll sinAll inputsEmbeds caches1 1 logits0 (Nat.le_add_right _ _)
@@ -736,7 +736,7 @@ private partial def greedyLoopUncached {batch : Nat}
       by simpa [h] using promptEmbeds
     else
       let suffixSeq := curSeq - promptSeq
-      let suffixIds : Tensor { device := device, shape := #[batch, suffixSeq], dtype := .Int64 } := Tensor.sliceChecked curIds 1 promptSeq suffixSeq #[batch, suffixSeq]
+      let suffixIds : Tensor { device := device, shape := #[batch, suffixSeq], dtype := .Int64 } := Tensor.slice curIds 1 promptSeq suffixSeq
       let suffixEmbeds : Tensor { dtype := dtype, device := device, shape := #[batch, suffixSeq, cfg.textConfig.hiddenSize] } := m.embedText suffixIds
       (Tensor.cat promptEmbeds suffixEmbeds 1).reshape #[batch, curSeq, cfg.textConfig.hiddenSize]
         (by have : promptSeq + suffixSeq = curSeq := by omega
@@ -744,7 +744,7 @@ private partial def greedyLoopUncached {batch : Nat}
   let logits := m.forwardEmbeds inputsEmbeds none
   let lastPos := curSeq - 1
   let last3 : Tensor { dtype := dtype, device := device, shape := #[batch, 1, ThinkerLmVocabSize cfg] } :=
-    Tensor.reshape (Tensor.sliceChecked logits 1 lastPos 1 #[batch, 1, ThinkerLmVocabSize cfg]) #[batch, 1, ThinkerLmVocabSize cfg]
+    Tensor.reshape (Tensor.slice! logits 1 lastPos 1) #[batch, 1, ThinkerLmVocabSize cfg]
   let last2 : Tensor { dtype := dtype, device := device, shape := #[batch, ThinkerLmVocabSize cfg] } := Tensor.reshape last3 #[batch, ThinkerLmVocabSize cfg]
   let indices := Tensor.argmax! last2 1
   let nextTokRaw : Tensor { device := device, shape := #[batch], dtype := .Int64 } ← pure (indices.reshape #[batch])
@@ -829,7 +829,7 @@ def generateGreedy {batch seq frames : Nat}
   let support ← dtype.acquireConstantSupport cacheDevice
   let _ := support.down
   let caches0 := initLayerKVCaches m cacheMaxLen cacheDevice (h := Nat.lt_of_lt_of_le hSeq (Nat.le_add_right _ _))
-  let tok0 : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.textConfig.hiddenSize] } := Tensor.sliceChecked inputsEmbeds 1 0 1 #[batch, 1, cfg.textConfig.hiddenSize]
+  let tok0 : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.textConfig.hiddenSize] } := Tensor.slice inputsEmbeds 1 0 1
   let (logits0, caches1) ← decodeStepFromEmbedWithCache m cosAll sinAll tok0 0 (Nat.lt_of_lt_of_le hSeq (Nat.le_add_right _ _)) caches0
   let (lastLogits, cachesPrefill) ←
     prefillCachesFromEmbeds m cosAll sinAll inputsEmbeds caches1 1 logits0 (Nat.le_add_right _ _)

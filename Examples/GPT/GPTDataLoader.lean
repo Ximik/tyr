@@ -34,8 +34,8 @@ def BatchIterator.nextGPT (iter : BatchIterator) (batchSize seqLen : Nat)
       iter.shuffleSeed (iter.epoch + 1)
     return (none, newIter)
   | some batch =>
-    let input := batch.sliceChecked 1 0 seqLen #[batchSize, seqLen]
-    let target := batch.sliceChecked 1 1 seqLen #[batchSize, seqLen]
+    let input := batch.slice 1 0 seqLen
+    let target := batch.slice 1 1 seqLen
     let newShard := { iter.shard with bosFinder := newBosFinder }
     let newIter := { iter with
       shard := newShard
@@ -49,8 +49,8 @@ def DistributedDataGenerator.nextBatchGPT (gen : DistributedDataGenerator) (b s 
   let ⟨count, hCount⟩ ← checkedBatchTokens b s 1
   let (tokens, gen') ← gen.nextTokens count
   let batch := tokens.reshape #[b, s + 1] (by simp [hCount])
-  let input := batch.sliceChecked 1 0 s #[b, s]
-  let target := batch.sliceChecked 1 1 s #[b, s]
+  let input := batch.slice 1 0 s
+  let target := batch.slice 1 1 s
   return (some (input, target), gen')
 
 /-! ## Utility Functions -/
@@ -92,7 +92,7 @@ def SequentialLoader.getBatch {n : Nat} (loader : SequentialLoader n)
     none
   else
     let requiredLen := required
-    let batch := (loader.tokens.sliceChecked 0 loader.currentPos requiredLen #[requiredLen]).reshape
+    let batch := (loader.tokens.slice! 0 loader.currentPos requiredLen).reshape
       #[batchSize, seqLen + 1]
     let newLoader := { loader with currentPos := loader.currentPos + requiredLen }
     some (batch, newLoader)
@@ -107,10 +107,10 @@ def SequentialLoader.sampleRandomBatch {n : Nat} (loader : SequentialLoader n)
     throw <| IO.userError "SequentialLoader: random range exceeds Int64 capacity"
   let startIdx ← Tensor.randint 0 (Int64.ofNat choices) #[]
   let startPos := startIdx.itemInt.toInt.toNat
-  let sliced := loader.tokens.sliceChecked 0 startPos requiredLen #[requiredLen]
+  let sliced := loader.tokens.slice! 0 startPos requiredLen
   let batch := sliced.reshape #[batchSize, blockSize + 1] (by simp [hRequired])
-  let input := batch.sliceChecked 1 0 blockSize #[batchSize, blockSize]
-  let target := batch.sliceChecked 1 1 blockSize #[batchSize, blockSize]
+  let input := batch.slice 1 0 blockSize
+  let target := batch.slice 1 1 blockSize
   return (input, target)
 
 structure SequentialBatchIterator (n b s : Nat) where
@@ -138,8 +138,8 @@ def SequentialBatchIterator.next {n b s : Nat} (iter : SequentialBatchIterator n
     }
     (none, newIter)
   | some (batch, newLoader) =>
-    let input := batch.sliceChecked 1 0 s #[b, s]
-    let target := batch.sliceChecked 1 1 s #[b, s]
+    let input := batch.slice 1 0 s
+    let target := batch.slice 1 1 s
     let newIter := { iter with
       loader := newLoader
       batchCount := iter.batchCount + 1

@@ -159,10 +159,10 @@ def BOSFinder.take (finder : BOSFinder) {n : Nat} (tokens : Tensor { shape := #[
     throw <| IO.userError "Data cursor position exceeds shard length"
   let count := min count (finder.dataLen - finder.currentPos)
   if count == 0 then
-    return (tokens.sliceChecked 0 0 0 #[count], finder)
+    return (tokens.sliceAs! 0 0 0 #[count], finder)
   let endPos := finder.currentPos + count
   if finder.orderedStarts.isEmpty then
-    return (tokens.sliceChecked 0 finder.currentPos count #[count],
+    return (tokens.slice! 0 finder.currentPos count,
       { finder with currentPos := endPos })
   -- Binary search avoids rescanning every earlier document for each batch.
   let mut lo := 0
@@ -178,7 +178,7 @@ def BOSFinder.take (finder : BOSFinder) {n : Nat} (tokens : Tensor { shape := #[
     let docStart := if doc == 0 then 0 else finder.orderedEnds[doc - 1]!
     let sourceStart := finder.orderedStarts[doc]! + (pos - docStart)
     let len := min (endPos - pos) (docEnd - pos)
-    chunks := chunks.push (Tensor.packShape (tokens.sliceChecked 0 sourceStart len #[len]))
+    chunks := chunks.push (Tensor.packShape (tokens.slice! 0 sourceStart len))
     pos := pos + len
     doc := doc + 1
   -- Concatenating the document slices yields exactly `count` tokens.
@@ -271,7 +271,7 @@ def parseFinewebHeader? {n : Nat} (tokens : Tensor { shape := #[n], dtype := .In
   if n < 6 then
     return none
 
-  let hdr6 : Tensor { shape := #[6], dtype := .Int64, device := device } := tokens.sliceChecked 0 0 6 #[6]
+  let hdr6 : Tensor { shape := #[6], dtype := .Int64, device := device } := tokens.slice! 0 0 6
   let vals ← hdr6.toUInt64Array
   if vals.size < 6 then
     return none
@@ -306,7 +306,7 @@ def splitFinewebPayload {n : Nat} (tokens : Tensor { shape := #[n], dtype := .In
     else
       min header.tokenCount payloadWords
 
-  let payload := tokens.sliceChecked 0 finewebHeaderU16Words payloadCount #[payloadCount]
+  let payload := tokens.slice! 0 finewebHeaderU16Words payloadCount
   return ⟨payloadCount, payload⟩
 
 def DataShard.loadFromFile (path : String) (shardIdx numShards : Nat)
@@ -320,7 +320,7 @@ def DataShard.loadFromFile (path : String) (shardIdx numShards : Nat)
   let startToken := tokensPerShard * shardIdx
   let endToken := if shardIdx == numShards - 1 then totalTokens else startToken + tokensPerShard
   let shardSize := endToken - startToken
-  let shardTokens := allTokens.sliceChecked 0 startToken shardSize #[shardSize]
+  let shardTokens := allTokens.slice! 0 startToken shardSize
   let bosFinder ← BOSFinder.init shardTokens bosToken
   return ⟨shardSize, { tokens := shardTokens, bosFinder, shardIdx, numShards }⟩
 

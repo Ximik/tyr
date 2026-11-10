@@ -190,7 +190,7 @@ def forward {cfg : Config} {batch seq : Nat}
   let positions := (Tensor.arange seq).to params.wpe.device
   let pos_emb := TensorOps.embedding1d positions params.wpe
   -- Expand pos_emb to match batch: [seq, n_embd] -> [batch, seq, n_embd]
-  let pos_emb_expanded := Tensor.expand pos_emb #[batch, seq, cfg.n_embd]
+  let pos_emb_expanded := Tensor.broadcastTo pos_emb #[batch, seq, cfg.n_embd]
   -- Combine embeddings + dropout: [batch, seq, n_embd]
   let x : Activation (device := device) #[batch, seq, cfg.n_embd] := Tensor.add tok_emb pos_emb_expanded
   let x ← TensorOps.dropout x cfg.dropout training
@@ -262,7 +262,7 @@ def generate {cfg : Config}
     -- Get logits for last position: logits[:, -1, :] -> [1, vocab]
     -- Reshape to [1 * seq * vocab] then slice last vocab elements
     let flat := logits.reshape #[seq * cfg.vocab_size]
-    let lastLogits := (flat.sliceChecked 0 ((seq - 1) * cfg.vocab_size) cfg.vocab_size #[cfg.vocab_size]).reshape #[1, cfg.vocab_size]
+    let lastLogits := (flat.slice! 0 ((seq - 1) * cfg.vocab_size) cfg.vocab_size).reshape #[1, cfg.vocab_size]
 
     -- Apply temperature and convert to probabilities
     let scaledLogits := lastLogits / temperature

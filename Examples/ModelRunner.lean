@@ -126,7 +126,7 @@ def generatedIdsFromBatch
     : IO (Array (Array UInt64)) := do
   let mut out : Array (Array UInt64) := #[]
   for i in [:batch] do
-    let row2 : Tensor { shape := #[1, outSeq], dtype := .Int64, device := device } := ids.sliceChecked 0 i 1 #[1, outSeq]
+    let row2 : Tensor { shape := #[1, outSeq], dtype := .Int64, device := device } := ids.slice 0 i 1
     let row1 : Tensor { shape := #[outSeq], dtype := .Int64, device := device } := Tensor.reshape row2 #[outSeq]
     let vals ← Tensor.toUInt64Array row1
     let promptLen := promptLens.getD i 0

@@ -72,7 +72,7 @@ def route {tokens : Nat}
     (cfg : Config) (r : LagunaTopKRouter (device := device) cfg) (x : Tensor { dtype := dtype, device := device, shape := #[tokens, cfg.hidden_size] })
     : IO (Tensor { device := device, shape := #[tokens, cfg.num_experts_per_tok], dtype := .Int64 } × Tensor { dtype := dtype, device := device, shape := #[tokens, cfg.num_experts_per_tok] }) := do
   let logits0 : Tensor { dtype := .Float32, device := device, shape := #[tokens, cfg.num_experts] } :=
-    einsumChecked "eh,th->te" (floatDynamic r.weight.2) (floatDynamic x)
+    einsum! "eh,th->te" (floatDynamic r.weight.2) (floatDynamic x)
   let logits :=
     if cfg.moe_router_logit_softcapping > 0.0 then
       let c := cfg.moe_router_logit_softcapping
@@ -80,12 +80,12 @@ def route {tokens : Nat}
     else logits0
   let scores := Tensor.sigmoid logits
   let selectionScores := match r.eScoreCorrectionBias with
-    | some bias => Tensor.add scores (Tensor.expand (floatDynamic bias.2) #[tokens, cfg.num_experts])
+    | some bias => Tensor.add scores (Tensor.broadcastTo (floatDynamic bias.2) #[tokens, cfg.num_experts])
     | none => scores
   let (_, topIdx) := Tensor.topKLast2d! selectionScores cfg.num_experts_per_tok
   let weights := Tensor.gather scores 1 topIdx
   let weights := if cfg.norm_topk_prob then
-      Tensor.div weights (Tensor.expand (Tensor.sumDim weights 1 true) #[tokens, cfg.num_experts_per_tok])
+      Tensor.div weights (Tensor.broadcastTo (Tensor.sumDim weights 1 true) #[tokens, cfg.num_experts_per_tok])
     else weights
   pure (topIdx, Tensor.castLike x weights)
 
@@ -146,9 +146,9 @@ private def dequantExpertSlice {numExperts outFeatures inFeatures : Nat} {pd sd 
     (bankGlobal : Tensor { dtype := gd, device := device, shape := #[numExperts] }) (e : Nat)
     : IO (Tensor { dtype := .BFloat16, device := device, shape := #[outFeatures, inFeatures] }) := do
   let out ← nvfp4.dequantMatrix
-    ((bankPacked.sliceChecked 0 e 1 #[1, outFeatures, inFeatures / 2]).reshape #[outFeatures, inFeatures / 2])
-    ((bankScales.sliceChecked 0 e 1 #[1, outFeatures, inFeatures / 16]).reshape #[outFeatures, inFeatures / 16])
-    (bankGlobal.sliceChecked 0 e 1 #[1]) outFeatures inFeatures
+    ((bankPacked.slice! 0 e 1).reshape #[outFeatures, inFeatures / 2])
+    ((bankScales.slice! 0 e 1).reshape #[outFeatures, inFeatures / 16])
+    (bankGlobal.slice! 0 e 1) outFeatures inFeatures
   pure out
 
 /-- Fetch one expert's three SwiGLU matrices in BF16: slices of the dense
@@ -250,12 +250,12 @@ private def forwardDecode1
           let d ← nvfp4.dequantBank dp ds dg k h mi
           pure (Tensor.ofRaw! "forwardDecode1" g.raw, Tensor.ofRaw! "forwardDecode1" u.raw, Tensor.ofRaw! "forwardDecode1" d.raw)
       -- Batched SwiGLU: [k,1,h] @ Wᵀ per projection.
-      let x3 : Tensor { dtype := dtype, device := device, shape := #[k, 1, h] } := Tensor.reshape (Tensor.expand (Tensor.reshape x #[1, 1, h]) #[k, 1, h]) #[k, 1, h]
+      let x3 : Tensor { dtype := dtype, device := device, shape := #[k, 1, h] } := Tensor.reshape (Tensor.broadcastTo (Tensor.reshape x #[1, 1, h]) #[k, 1, h]) #[k, 1, h]
       let g : Tensor { dtype := dtype, device := device, shape := #[k, 1, mi] } := bmm x3 (transposeMatrixBatch gateW)
       let u : Tensor { dtype := dtype, device := device, shape := #[k, 1, mi] } := bmm x3 (transposeMatrixBatch upW)
       let hid : Tensor { dtype := dtype, device := device, shape := #[k, 1, mi] } := mulSame (Tensor.silu g) u
       let o : Tensor { dtype := dtype, device := device, shape := #[k, 1, h] } := bmm hid (transposeMatrixBatch downW)
-      let ow : Tensor { dtype := dtype, device := device, shape := #[k, 1, h] } := Tensor.mul (Tensor.expand (Tensor.reshape flatW #[k, 1, 1]) #[k, 1, h]) o
+      let ow : Tensor { dtype := dtype, device := device, shape := #[k, 1, h] } := Tensor.mul (Tensor.broadcastTo (Tensor.reshape flatW #[k, 1, 1]) #[k, 1, h]) o
       pure (show Tensor ⟨#[1, h], dtype, device⟩ from by
         simpa using (Tensor.reshape (Tensor.sumDim ow 0 false) #[1, h]))
   -- Dense shared expert (SwiGLU MLP, no gating score).
@@ -315,7 +315,7 @@ def forward2d {tokens : Nat}
       -- NOTE: `arange` always allocates on CPU; move to the model device so
       -- `masked_select`/`embedding1d` see input and mask/index on one device.
       let tokIdsFlat :=
-        Tensor.reshape (Tensor.expand (Tensor.reshape ((Tensor.arange tokens).to device) #[tokens, 1]) #[tokens, k]) #[tokens * k]
+        Tensor.reshape (Tensor.broadcastTo (Tensor.reshape ((Tensor.arange tokens).to device) #[tokens, 1]) #[tokens, k]) #[tokens * k]
       let pairIds := (Tensor.arange (tokens * k)).to device
       -- Accumulator in the model dtype (HF: torch.zeros_like(hidden_states)).
       let mut acc : Tensor { dtype := dtype, device := device, shape := #[tokens, cfg.hidden_size] } := Tensor.castLike x (zerosDynamic #[tokens, cfg.hidden_size] false device)
@@ -343,9 +343,9 @@ def forward2d {tokens : Nat}
         let outE : Tensor { dtype := dtype, device := device, shape := #[nE, cfg.hidden_size] } := Tensor.linear hid downW
         -- Routing weights multiply the expert OUTPUT (moe_apply_router_weight_on_input=false).
         let wCol := wE.reshape #[nE, 1]
-        let outEW : Tensor { dtype := dtype, device := device, shape := #[nE, cfg.hidden_size] } := Tensor.mul (Tensor.expand wCol #[nE, cfg.hidden_size]) outE
+        let outEW : Tensor { dtype := dtype, device := device, shape := #[nE, cfg.hidden_size] } := Tensor.mul (Tensor.broadcastTo wCol #[nE, cfg.hidden_size]) outE
         let idxRows : Tensor { device := device, shape := #[nE, cfg.hidden_size], dtype := .Int64 } :=
-          Tensor.reshape (Tensor.expand (Tensor.reshape tokE #[nE, 1]) #[nE, cfg.hidden_size]) #[nE, cfg.hidden_size]
+          Tensor.reshape (Tensor.broadcastTo (Tensor.reshape tokE #[nE, 1]) #[nE, cfg.hidden_size]) #[nE, cfg.hidden_size]
         acc := scatterAdd acc 0 idxRows outEW
       -- Dense shared expert (SwiGLU MLP, no gating score).
       let sharedH : Tensor { dtype := dtype, device := device, shape := #[tokens, cfg.shared_expert_intermediate_size] } :=

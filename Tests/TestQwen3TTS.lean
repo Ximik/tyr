@@ -84,7 +84,7 @@ def testQwen3TTSRMSNormModelDType : IO Unit := do
     let expected : Tensor { shape := #[2, 3, 4], dtype, device := .CPU } :=
       Tensor.mul
         (normalized.castDType dtype)
-        (w.expand #[2, 3, 4])
+        (w.broadcastTo #[2, 3, 4])
     let actual := norm.forward3d x
     LeanTest.assertEqual actual.actualSpec.dtype x.actualSpec.dtype "RMSNorm preserves matching FP32/BF16 model dtype"
     LeanTest.assertEqual (Tensor.item (Tensor.maxAll (Tensor.abs (Tensor.sub actual.toFloat32 expected.toFloat32)))) 0.0
@@ -125,8 +125,8 @@ def testQwen3TTSBFloat16IncrementalCache : IO Unit := do
     -- Three prompt tokens followed by two decode tokens exercise the Talker cache path.
     let mut outputs : Array (Sigma (fun shape => Tensor { shape := shape, dtype, device := .CPU })) := #[]
     for hp : pos in [:3] do
-      let (out, next) := layer.forwardStep (by decide) (Tensor.sliceChecked x 1 pos 1 #[1, 1, 8])
-        (Tensor.sliceChecked cos 0 pos 1 #[1, 2]) (Tensor.sliceChecked sin 0 pos 1 #[1, 2]) cache
+      let (out, next) := layer.forwardStep (by decide) (Tensor.slice! x 1 pos 1)
+        (Tensor.slice! cos 0 pos 1) (Tensor.slice! sin 0 pos 1) cache
         pos (by have := hp.upper; simp at this; omega)
       LeanTest.assertEqual out.actualSpec.dtype x.actualSpec.dtype "Prefill step retains model dtype"
       cache := next
@@ -135,8 +135,8 @@ def testQwen3TTSBFloat16IncrementalCache : IO Unit := do
     let prefixK ← Tensor.toFloatArray prefixCache.kStore
     let prefixV ← Tensor.toFloatArray prefixCache.vStore
     for hp : pos in [3:5] do
-      let (out, next) := layer.forwardStep (by decide) (Tensor.sliceChecked x 1 pos 1 #[1, 1, 8])
-        (Tensor.sliceChecked cos 0 pos 1 #[1, 2]) (Tensor.sliceChecked sin 0 pos 1 #[1, 2]) cache
+      let (out, next) := layer.forwardStep (by decide) (Tensor.slice! x 1 pos 1)
+        (Tensor.slice! cos 0 pos 1) (Tensor.slice! sin 0 pos 1) cache
         pos (by have := hp.upper; simp at this; omega)
       LeanTest.assertEqual out.actualSpec.dtype x.actualSpec.dtype "Decode step retains model dtype"
       cache := next
@@ -149,7 +149,7 @@ def testQwen3TTSBFloat16IncrementalCache : IO Unit := do
       "Later decode leaves the functional V snapshot unchanged"
     LeanTest.assertEqual (Tensor.item (Tensor.sumAll fresh.kStore)) 0.0 "Fresh K snapshot remains empty"
     LeanTest.assertEqual (Tensor.item (Tensor.sumAll fresh.vStore)) 0.0 "Fresh V snapshot remains empty"
-    let stepped : Tensor { shape := #[1, 5, 8], dtype, device := .CPU } := Tensor.catManyChecked outputs 1 #[1, 5, 8]
+    let stepped : Tensor { shape := #[1, 5, 8], dtype, device := .CPU } := Tensor.catMany! outputs 1 #[1, 5, 8]
     let error := Tensor.item (Tensor.maxAll (Tensor.abs (Tensor.sub (Tensor.toFloat32 stepped) (Tensor.toFloat32 full))))
     let tolerance := if bf16 then 0.0078125 else 0.00001
     LeanTest.assertTrue (Float.isFinite error && error <= tolerance)
@@ -204,7 +204,7 @@ def testQwen3TTSGenerateFromText : IO Unit := do
   LeanTest.assertEqual out.lengths.size batch "lengths should have one value per batch row"
 
   -- Verify padded output shape by materializing first codebook and flattening.
-  let firstBook3 : Tensor { shape := #[batch, maxFrames, 1], dtype := .Int64, device := .CPU } := Tensor.sliceChecked out.codes 2 0 1 #[batch, maxFrames, 1]
+  let firstBook3 : Tensor { shape := #[batch, maxFrames, 1], dtype := .Int64, device := .CPU } := Tensor.slice out.codes 2 0 1
   let firstBook2 : Tensor { shape := #[batch, maxFrames], dtype := .Int64, device := .CPU } := Tensor.reshape firstBook3 #[batch, maxFrames]
   let flat : Tensor { shape := #[batch * maxFrames], dtype := .Int64, device := .CPU } := Tensor.reshape firstBook2 #[batch * maxFrames]
   let toks ← Tensor.toUInt64Array flat
@@ -229,7 +229,7 @@ def testQwen3TTSGenerateFromInstructText : IO Unit := do
 
   LeanTest.assertEqual out.lengths.size batch "lengths should have one value per batch row"
 
-  let firstBook3 : Tensor { shape := #[batch, maxFrames, 1], dtype := .Int64, device := .CPU } := Tensor.sliceChecked out.codes 2 0 1 #[batch, maxFrames, 1]
+  let firstBook3 : Tensor { shape := #[batch, maxFrames, 1], dtype := .Int64, device := .CPU } := Tensor.slice out.codes 2 0 1
   let firstBook2 : Tensor { shape := #[batch, maxFrames], dtype := .Int64, device := .CPU } := Tensor.reshape firstBook3 #[batch, maxFrames]
   let flat : Tensor { shape := #[batch * maxFrames], dtype := .Int64, device := .CPU } := Tensor.reshape firstBook2 #[batch * maxFrames]
   let toks ← Tensor.toUInt64Array flat

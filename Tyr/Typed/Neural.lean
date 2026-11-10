@@ -71,14 +71,13 @@ def catMany? {d : DType} {dev : Device}
   let some first := tensors[0]? | throw "catMany requires at least one tensor"
   for t in tensors do
     Tensor.checkSameDevice first.2 t.2
-  pure (Tensor.ofRaw! "catMany" (← RawTensor.catManyChecked (tensors.map fun t => t.2.raw) dim))
+  pure (Tensor.ofRaw! "catMany" (← RawTensor.catMany? (tensors.map fun t => t.2.raw) dim))
 
-def catManyChecked {d : DType} {dev : Device}
+/-- `catMany?` without its checks; invalid inputs abort natively. -/
+def catMany! {d : DType} {dev : Device}
     (tensors : Array (Sigma (fun shape => Tensor ⟨shape, d, dev⟩)))
     (dim : Nat) (shape : Shape) : Tensor ⟨shape, d, dev⟩ :=
-  match catMany? tensors dim shape with
-  | .ok result => result
-  | .error message => nativeInvariantFailure s!"Tensor.catManyChecked: {message}"
+  Tensor.ofRaw! "catMany" (RawTensor.catMany! (tensors.map fun t => t.2.raw) dim)
 
 def arange (stop : Nat) : Tensor { shape := #[stop], dtype := .Int64, device := .CPU } :=
   Tensor.ofRaw! "arange" (RawTensor.arange 0 stop 1)

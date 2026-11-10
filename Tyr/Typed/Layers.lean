@@ -46,7 +46,7 @@ def forward2d {inDim outDim batch : Nat} {d : DType} {dev : Device} [DType.Float
     Tensor ⟨#[batch, outDim], d, dev⟩ :=
   let y := Tensor.linear x lin.weight
   match lin.bias with
-  | some b => Tensor.add y (b.expand #[batch, outDim])
+  | some b => Tensor.add y (b.broadcastTo #[batch, outDim])
   | none => y
 
 /-- Forward for 3D input `[batch, seq, inDim] → [batch, seq, outDim]`. -/

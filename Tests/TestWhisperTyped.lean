@@ -41,9 +41,9 @@ private def close {σ τ : StaticSpec} (x : Tensor σ) (y : Tensor τ) (tol : Fl
     let initial := model.initLayerKVCaches (batch := 1) 4 .CPU
     let mut caches := initial
     for h : pos in [:4] do
-      let tok := tokens.sliceChecked 1 pos 1 #[1, 1]
+      let tok := tokens.slice! 1 pos 1
       let (actual, next) ← model.decodeStepWithCache (encSeq := 3) tok pos h.upper (by decide) cross caches
-      close actual ((expected.sliceChecked 1 pos 1 #[1, 1, 16]).reshape #[1, 16]) (if bf16 then 0.08 else 1e-4)
+      close actual ((expected.slice! 1 pos 1).reshape #[1, 16]) (if bf16 then 0.08 else 1e-4)
       LeanTest.assertEqual actual.actualSpec.dtype expected.actualSpec.dtype
       caches := next
     LeanTest.assertEqual caches.position 4 "every decoded token advances the cache position"
@@ -51,15 +51,15 @@ private def close {σ τ : StaticSpec} (x : Tensor σ) (y : Tensor τ) (tol : Fl
     let some untouched := initial.layers[0]? | throw (IO.userError "missing initial cache")
     let stored ← untouched.kStore.toFloatArray
     LeanTest.assertTrue (stored.all (· == 0)) "incremental updates must preserve the input cache snapshot"
-    let (again, _) ← model.decodeStepWithCache (encSeq := 3) (tokens.sliceChecked 1 0 1 #[1, 1]) 0 (by decide) (by decide) cross initial
-    close again ((expected.sliceChecked 1 0 1 #[1, 1, 16]).reshape #[1, 16]) (if bf16 then 0.08 else 1e-4)
+    let (again, _) ← model.decodeStepWithCache (encSeq := 3) (tokens.slice 1 0 1) 0 (by decide) (by decide) cross initial
+    close again ((expected.slice 1 0 1).reshape #[1, 16]) (if bf16 then 0.08 else 1e-4)
 
 @[test] def testWhisperCachePositionErrors : IO Unit := do
   let model ← WhisperForConditionalGeneration.init cfg
   let encoded ← model.encode features (by decide)
   let cross ← model.precomputeCrossCaches encoded
   let caches := model.initLayerKVCaches (batch := 1) 2 .CPU
-  let tok := tokens.sliceChecked 1 0 1 #[1, 1]
+  let tok := tokens.slice 1 0 1
   let positionRejected ← try
     let _ ← model.decodeStepWithCache (encSeq := 3) tok 1 (by decide) (by decide) cross caches
     pure false

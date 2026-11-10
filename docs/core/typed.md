@@ -440,12 +440,10 @@ packages and validates a requested result shape. `Tensor.toSome` instead returns
 `Sigma Tensor`, retaining the complete specification as an existential witness.
 A scalar is `#[]`; it is never a substitute for an unknown shape.
 
-`reshape` requires a proof of equal element counts, and also checks the runtime
-element count and rejects wrapped negative extents before invoking the native
-reshape. `castDType?` and `castLike?` perform real dtype conversions and validate
+`reshape` requires a proof of equal element counts; native code rejects extents
+that do not fit a signed 64-bit integer. `castDType?` and `castLike?` perform real dtype conversions and validate
 the result, returning native conversion failures through `Except`. Their pure
-convenience wrappers, along with `sliceChecked`, abort with a diagnostic on
-failure; use the `Except` variants when an
+convenience wrappers abort with a diagnostic on failure; use the `Except` variants when an
 error must be handled. Exact file loading checks the stored layout
 before returning a tensor; it does not repair a mismatch by reshaping.
 

@@ -155,8 +155,8 @@ private def decodeStepFromEmbedWithCache {batch maxLen : Nat}
     (position : Nat) (hpos : position < maxLen)
     (caches : Array (LayerKVCache (device := device) cfg batch maxLen))
     : IO (Tensor { device := device, shape := #[batch, cfg.vocab_size], dtype := .Float32 } × Array (LayerKVCache (device := device) cfg batch maxLen)) := do
-  let cos : Tensor { device := device, shape := #[1, cfg.head_dim / 2], dtype := .Float32 } := Tensor.sliceChecked cosAll 0 position 1 #[1, cfg.head_dim / 2]
-  let sin : Tensor { device := device, shape := #[1, cfg.head_dim / 2], dtype := .Float32 } := Tensor.sliceChecked sinAll 0 position 1 #[1, cfg.head_dim / 2]
+  let cos : Tensor { device := device, shape := #[1, cfg.head_dim / 2], dtype := .Float32 } := Tensor.slice cosAll 0 position 1
+  let sin : Tensor { device := device, shape := #[1, cfg.head_dim / 2], dtype := .Float32 } := Tensor.slice sinAll 0 position 1
 
   let mut hidden : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := .Float32 } := tokenEmbed
   let mut nextCaches := caches
@@ -192,7 +192,7 @@ private partial def prefillCachesFromEmbeds {batch seq maxLen : Nat}
   if hp : seq ≤ position then
     pure (lastLogits, caches)
   else
-    let tok : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := .Float32 } := Tensor.sliceChecked inputsEmbeds 1 position 1 #[batch, 1, cfg.hidden_size]
+    let tok : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := .Float32 } := Tensor.slice inputsEmbeds 1 position 1
     let (logits, caches') ← decodeStepFromEmbedWithCache m cosAll sinAll tok position (by omega) caches
     prefillCachesFromEmbeds m cosAll sinAll inputsEmbeds caches' (position + 1) logits hfit
 
@@ -260,7 +260,7 @@ private partial def greedyLoopUncached {batch : Nat}
   let logits := m.forward curIds none
   let lastPos := curSeq - 1
   let last3 : Tensor { device := device, shape := #[batch, 1, cfg.vocab_size], dtype := .Float32 } :=
-    Tensor.reshape (Tensor.sliceChecked logits 1 lastPos 1 #[batch, 1, cfg.vocab_size]) #[batch, 1, cfg.vocab_size]
+    Tensor.reshape (Tensor.slice! logits 1 lastPos 1) #[batch, 1, cfg.vocab_size]
   let last2 : Tensor { device := device, shape := #[batch, cfg.vocab_size], dtype := .Float32 } := Tensor.reshape last3 #[batch, cfg.vocab_size]
   let indices := Tensor.argmax! last2 1
   let nextTokRaw : Tensor { device := device, shape := #[batch], dtype := .Int64 } := indices.reshape #[batch]
@@ -306,7 +306,7 @@ def generateGreedy {batch seq : Nat}
   let eosVector := eosVectorOnDevice (batch := batch) eosTokenIds cacheDevice
   let (cosAll, sinAll) := precomputeDecodeRotary (maxLen := cacheMaxLen) m cacheDevice
   let caches0 := initLayerKVCaches m cacheMaxLen cacheDevice (h := Nat.lt_of_lt_of_le hSeq (Nat.le_add_right _ _))
-  let tok0 : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := .Float32 } := Tensor.sliceChecked inputsEmbeds 1 0 1 #[batch, 1, cfg.hidden_size]
+  let tok0 : Tensor { device := device, shape := #[batch, 1, cfg.hidden_size], dtype := .Float32 } := Tensor.slice inputsEmbeds 1 0 1
   let (logits0, caches1) ← decodeStepFromEmbedWithCache m cosAll sinAll tok0 0 (Nat.lt_of_lt_of_le hSeq (Nat.le_add_right _ _)) caches0
   let (lastLogits, cachesPrefill) ←
     prefillCachesFromEmbeds m cosAll sinAll inputsEmbeds caches1 1 logits0 (Nat.le_add_right _ _)

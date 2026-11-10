@@ -111,8 +111,8 @@ def bidirectionalAttentionForward {batch seq n_embd n_head : Nat}
   let v := Tensor.reshape v #[batch, seq, n_head, head_dim]
 
   -- Apply rotary embeddings (use full cache - no slicing needed when rotaryLen == seq)
-  let cos := rotaryCache.cos.sliceChecked 0 0 seq #[seq, head_dim / 2]
-  let sin := rotaryCache.sin.sliceChecked 0 0 seq #[seq, head_dim / 2]
+  let cos := rotaryCache.cos.slice! 0 0 seq
+  let sin := rotaryCache.sin.slice! 0 0 seq
   let q := Tensor.applyRotary q cos sin
   let k := Tensor.applyRotary k cos sin
 
@@ -168,7 +168,7 @@ def forward {cfg : Config} {batch seq : Nat}
   -- Time embedding: lookup and broadcast to all positions
   let t_emb := Tensor.embedding1d t params.time_emb  -- [batch, n_embd]
   let t_emb := Tensor.unsqueeze t_emb 1              -- [batch, 1, n_embd]
-  let t_emb := Tensor.expand t_emb #[batch, seq, cfg.n_embd]  -- [batch, seq, n_embd]
+  let t_emb := Tensor.broadcastTo t_emb #[batch, seq, cfg.n_embd]  -- [batch, seq, n_embd]
   let x := x + t_emb
   -- Norm after combining embeddings (matching tiny-diffusion)
   let x := norm x
@@ -201,7 +201,7 @@ def getMaskedPositions' {batch seq : Nat}
 private def samplingMask {batch seq : Nat} (x : Tokens #[batch, seq])
     (maskToken : UInt64) (protectedPrefix : Nat) : Mask #[batch, seq] :=
   let protectedMask := ((Tensor.arange seq).to x.device).ltScalar protectedPrefix.toFloat
-    |>.reshape #[1, seq] |>.expand #[batch, seq]
+    |>.reshape #[1, seq] |>.broadcastTo #[batch, seq]
   Tensor.logicalAnd (getMaskedPositions' x maskToken) protectedMask.logicalNot
 
 private def validateSampling (cfg : Config) (batch : Nat) (temperature : Float) :
@@ -233,7 +233,7 @@ def sampleConfidence {cfg : Config} {batch : Nat}
     -- Create position mask: true for positions < context_len
     let positions := Tensor.arange cfg.seq_len
     let contextMask := Tensor.ltScalar positions cfg.context_len.toFloat
-    let contextMaskBatch := Tensor.expand (Tensor.unsqueeze contextMask 0) #[batch, cfg.seq_len]
+    let contextMaskBatch := Tensor.broadcastTo (Tensor.unsqueeze contextMask 0) #[batch, cfg.seq_len]
     -- Pad ctx to full seq_len with mask tokens
     let padding := Tensor.fullInt #[batch, cfg.seq_len - cfg.context_len] cfg.mask_token_id.toInt64
     let ctxPadded := (Tensor.cat ctx padding 1).reshape #[batch, cfg.seq_len]
@@ -270,8 +270,8 @@ def sampleConfidence {cfg : Config} {batch : Nat}
 
     if step < 3 then
       -- Debug: show first few predicted tokens and their confidences
-      let conf0 := (confidences.reshape #[batch * cfg.seq_len]).sliceChecked 0 0 1 #[1] |>.reshape #[]
-      let tok0 := (predictedTokens.reshape #[batch * cfg.seq_len]).sliceChecked 0 0 1 #[1] |>.reshape #[]
+      let conf0 := (confidences.reshape #[batch * cfg.seq_len]).slice! 0 0 1 |>.reshape #[]
+      let tok0 := (predictedTokens.reshape #[batch * cfg.seq_len]).slice! 0 0 1 |>.reshape #[]
       IO.println s!"  step {step}: conf[0]={Tensor.item conf0}, tok[0]={Tensor.itemInt tok0}"
 
     -- Select positions above threshold AND still masked
@@ -324,7 +324,7 @@ def sampleTopK {cfg : Config} {batch : Nat}
   if let some ctx := contextTokens then
     let positions := Tensor.arange cfg.seq_len
     let contextMask := Tensor.ltScalar positions cfg.context_len.toFloat
-    let contextMaskBatch := Tensor.expand (Tensor.unsqueeze contextMask 0) #[batch, cfg.seq_len]
+    let contextMaskBatch := Tensor.broadcastTo (Tensor.unsqueeze contextMask 0) #[batch, cfg.seq_len]
     let padding := Tensor.fullInt #[batch, cfg.seq_len - cfg.context_len] cfg.mask_token_id.toInt64
     let ctxPadded := (Tensor.cat ctx padding 1).reshape #[batch, cfg.seq_len]
       (by simp [Nat.add_sub_cancel' hCtx])
@@ -419,7 +419,7 @@ def sampleMultipleWithPrompt {cfg : Config} (numBlocks : Nat)
     (maxSteps : Nat := 256)
     : IO (Tokens #[numBlocks, cfg.seq_len]) := do
   -- Replicate prompt across all blocks: [context_len] -> [numBlocks, context_len]
-  let promptExpanded := Tensor.expand (Tensor.unsqueeze prompt 0) #[numBlocks, cfg.context_len]
+  let promptExpanded := Tensor.broadcastTo (Tensor.unsqueeze prompt 0) #[numBlocks, cfg.context_len]
   sampleTopK (batch := numBlocks) params rotaryCache k temperature maxSteps (some promptExpanded)
 
 end torch.diffusion

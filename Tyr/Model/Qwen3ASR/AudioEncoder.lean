@@ -420,14 +420,14 @@ private def runLayersChunkLocalWith {M : Type → Type} [Monad M] {seq : Nat}
   for len in chunkLens do
     if len != 0 then
       let seg : Tensor { dtype := dtype, device := device, shape := #[1, len, cfg.dModel] } :=
-        Tensor.sliceChecked hidden 1 start len #[1, len, cfg.dModel]
+        Tensor.slice! hidden 1 start len
       let segOut ← m.layers.foldlM (fun h layer => layerForward layer h none) seg
       parts := parts.push (Tensor.packShape segOut)
       start := start + len
   return if parts.isEmpty then
     Tensor.castLike hidden ((Tensor.zeros #[1, seq, cfg.dModel] false hidden.device))
   else
-    Tensor.catManyChecked parts 1 #[1, seq, cfg.dModel]
+    Tensor.catMany! parts 1 #[1, seq, cfg.dModel]
 
 private def encodeOneSampleVarLenWith {M : Type → Type} [Monad M] {frames : Nat}
     (layerForward : LayerForward M cfg device dtype)
@@ -457,13 +457,13 @@ private def encodeOneSampleVarLenWith {M : Type → Type} [Monad M] {frames : Na
         let len := chunkLens.getD i 0
         if len != 0 then
           let desiredLen := chunkLensAfterCnn.getD i 0
-          let chunk : Tensor { dtype := dtype, device := device, shape := #[1, cfg.numMelBins, len] } := Tensor.sliceChecked sample 2 start len #[1, cfg.numMelBins, len]
+          let chunk : Tensor { dtype := dtype, device := device, shape := #[1, cfg.numMelBins, len] } := Tensor.slice! sample 2 start len
           let padded : Tensor { dtype := dtype, device := device, shape := #[1, cfg.numMelBins, maxChunkLen] } :=
             padRightFrames (cfg := cfg) (frames := len) (maxFrames := maxChunkLen) chunk
           let emb : Tensor { dtype := dtype, device := device, shape := #[1, tChunk, cfg.dModel] } := encodePaddedChunk m padded hT
           let embPos := Tensor.add emb (Tensor.castLike emb posBatch)
           let availLen := if desiredLen <= tChunk then desiredLen else tChunk
-          let seg0 : Tensor { dtype := dtype, device := device, shape := #[1, availLen, cfg.dModel] } := Tensor.sliceChecked embPos 1 0 availLen #[1, availLen, cfg.dModel]
+          let seg0 : Tensor { dtype := dtype, device := device, shape := #[1, availLen, cfg.dModel] } := Tensor.slice! embPos 1 0 availLen
           let segDyn : Sigma (fun shape => Tensor { dtype := dtype, device := device, shape := shape }) :=
             if hFits : desiredLen <= availLen then
               Tensor.packShape seg0
@@ -482,7 +482,7 @@ private def encodeOneSampleVarLenWith {M : Type → Type} [Monad M] {frames : Na
       if hiddenParts.isEmpty then
         Tensor.castLike sample ((Tensor.zeros #[1, totalValid, cfg.dModel] false sample.device))
       else
-        Tensor.catManyChecked hiddenParts 1 #[1, totalValid, cfg.dModel]
+        Tensor.catMany! hiddenParts 1 #[1, totalValid, cfg.dModel]
 
     let cuCumsum := buildCuChunkLensCumsum cfg #[totalValid] maxChunkAfterCnn
     let attnChunkLens := chunkLensFromCumsum cuCumsum
@@ -494,7 +494,7 @@ private def encodeOneSampleVarLenWith {M : Type → Type} [Monad M] {frames : Na
     let hidden : Tensor { dtype := dtype, device := device, shape := #[1, totalValid, cfg.outputDim] } := Tensor.affine3d hidden m.proj2Weight m.proj2Bias
 
     return if hCover : totalValid >= outSeq then
-      hidden.sliceChecked 1 0 outSeq #[1, outSeq, cfg.outputDim]
+      hidden.slice 1 0 outSeq
     else
       let padLen := outSeq - totalValid
       let pad : Tensor { dtype := dtype, device := device, shape := #[1, padLen, cfg.outputDim] } :=
@@ -515,11 +515,11 @@ private def forwardVarLenWith {M : Type → Type} [Monad M] {batch frames : Nat}
   let mut rows : Array (Sigma (fun shape => Tensor { dtype := dtype, device := device, shape := shape })) := #[]
   for b in [:batch] do
     let sample : Tensor { dtype := dtype, device := device, shape := #[1, cfg.numMelBins, frames] } :=
-      Tensor.sliceChecked inputFeatures 0 b 1 #[1, cfg.numMelBins, frames]
+      Tensor.slice! inputFeatures 0 b 1
     let len := featureLens.getD b frames
     let row ← encodeOneSampleVarLenWith layerForward m sample len
     rows := rows.push (Tensor.packShape row)
-  return Tensor.catManyChecked rows 0 #[batch, outSeq, cfg.outputDim]
+  return Tensor.catMany! rows 0 #[batch, outSeq, cfg.outputDim]
 
 /-- Deterministic chunk-local inference, re-padded to the fixed output width. -/
 def forwardVarLenInference {batch frames : Nat}
@@ -582,7 +582,7 @@ private def forwardWith {M : Type → Type} [Monad M] {batch frames : Nat}
   let xEmb : Tensor { dtype := dtype, device := device, shape := #[batch, t3, cfg.dModel] } := Tensor.linear3d xFlat m.convOutWeight
 
   let pos : Tensor { dtype := .Float32, device := device, shape := #[t3, cfg.dModel] } := sinusoidPosition (seq := t3) (dim := cfg.dModel) cfg.dModelEven (device := xEmb.device)
-  let posBatch : Tensor { dtype := .Float32, device := device, shape := #[batch, t3, cfg.dModel] } := Tensor.expand (Tensor.reshape pos #[1, t3, cfg.dModel]) #[batch, t3, cfg.dModel]
+  let posBatch : Tensor { dtype := .Float32, device := device, shape := #[batch, t3, cfg.dModel] } := Tensor.broadcastTo (Tensor.reshape pos #[1, t3, cfg.dModel]) #[batch, t3, cfg.dModel]
   let hidden0 := Tensor.add xEmb (Tensor.castLike xEmb posBatch)
 
   let hidden ← m.layers.foldlM (fun h layer => layerForward layer h attnMask) hidden0

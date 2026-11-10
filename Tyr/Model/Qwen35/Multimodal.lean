@@ -27,14 +27,14 @@ private def addBias2d {n d : Nat}
     (x : Tensor { device := device, shape := #[n, d], dtype := dtype })
     (b : Tensor { device := device, shape := #[d], dtype := dtype })
     : Tensor { device := device, shape := #[n, d], dtype := dtype } :=
-  Tensor.add x (Tensor.expand (Tensor.reshape b #[1, d]) #[n, d])
+  Tensor.add x (Tensor.broadcastTo (Tensor.reshape b #[1, d]) #[n, d])
 
 private def linear2d {tokens in_dim out_dim : Nat}
     (x : Tensor { device := device, shape := #[tokens, in_dim], dtype := dtype })
     (w : Tensor { device := device, shape := #[out_dim, in_dim], dtype := dtype })
     (b : Tensor { device := device, shape := #[out_dim], dtype := dtype })
     : Tensor { device := device, shape := #[tokens, out_dim], dtype := dtype } :=
-  let yDyn : Tensor { device := device, shape := #[tokens, out_dim], dtype := dtype } := einsumChecked "oh,th->to" w x
+  let yDyn : Tensor { device := device, shape := #[tokens, out_dim], dtype := dtype } := einsum! "oh,th->to" w x
   let y : Tensor { device := device, shape := #[tokens, out_dim], dtype := dtype } := Tensor.reshape yDyn #[tokens, out_dim]
   addBias2d y b
 
@@ -362,7 +362,7 @@ private def scatterFeaturesIntoToken {batch seq hidden featTokens featDim : Nat}
       s!"placeholder token count mismatch for token={tokenId}: ids={nTokens} features={featTokens}"
 
   let tokenMask : Tensor { device := device, shape := #[batch, seq, hidden], dtype := .Bool } :=
-    Tensor.expand (Tensor.reshape tokenMask2d #[batch, seq, 1]) #[batch, seq, hidden]
+    Tensor.broadcastTo (Tensor.reshape tokenMask2d #[batch, seq, 1]) #[batch, seq, hidden]
   let flat := Tensor.reshape features #[featTokens * featDim]
   if h : featureDType = dtype then
     pure (Tensor.maskedScatter inputsEmbeds tokenMask (h ▸ flat))

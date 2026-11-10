@@ -101,7 +101,7 @@ def computeAdvantages (rewards : Array Float) : Array Float :=
 /-- Compute advantages from a tensor of rewards -/
 def computeAdvantagesTensor (rewards : Tensor { shape := #[b], dtype := .Float32, device := device }) : Tensor { shape := #[b], dtype := .Float32, device := device } :=
   let mu := Tensor.meanAll rewards
-  let muExpanded := Tensor.expand mu #[b]
+  let muExpanded := Tensor.broadcastTo mu #[b]
   rewards - muExpanded
 
 /-! ## Reward Functions -/
@@ -191,7 +191,7 @@ def computePGLoss
 
   -- Expand advantages to [B, T] for broadcasting
   let advExpanded := Tensor.unsqueeze advantages 1  -- [B, 1]
-  let advExpanded := Tensor.expand advExpanded #[b, t]  -- [B, T]
+  let advExpanded := Tensor.broadcastTo advExpanded #[b, t]  -- [B, T]
 
   -- Compute per-token policy gradient: logp * A
   let perTokenPG := logProbs * advExpanded  -- [B, T]
