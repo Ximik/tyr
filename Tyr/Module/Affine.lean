@@ -28,7 +28,7 @@ instance {n m : Nat} {d : DType} {dev : Device} :
 def Affine.step {batch n m : Nat} {d : DType} {dev : Device} [DType.FloatingOrComplex d] [DType.Promotes d d d]
     (a : @Affine n m d dev) (input : Tensor ⟨#[batch, m], d, dev⟩) :
     Tensor ⟨#[batch, n], d, dev⟩ :=
-  Tensor.add (Tensor.mm input a.w) (Tensor.expand a.b #[batch, n])
+  Tensor.add (Tensor.mm input a.w) (Tensor.broadcastTo a.b #[batch, n])
 
 instance {batch n m : Nat} {d : DType} {dev : Device} [DType.FloatingOrComplex d] [DType.Promotes d d d] :
     Module (@Affine n m d dev) (Tensor ⟨#[batch, m], d, dev⟩)

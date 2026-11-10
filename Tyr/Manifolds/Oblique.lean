@@ -19,7 +19,7 @@ private def normalizeColumns {m n : Nat} (A : Tensor ⟨#[m, n], d, dev⟩) : Te
   let colNorms := Tensor.sqrt (Tensor.diag AtA)
   let safeNorms := Tensor.addScalar colNorms 1e-12
   let rowNorms : Tensor ⟨#[1, n], d, dev⟩ := Tensor.reshape safeNorms #[1, n] (by simp [TensorSpec.numelOfShape])
-  let expanded : Tensor ⟨#[m, n], d, dev⟩ := Tensor.expand rowNorms #[m, n]
+  let expanded : Tensor ⟨#[m, n], d, dev⟩ := Tensor.broadcastTo rowNorms #[m, n]
   by simpa using Tensor.div A expanded
 
 /-- Project ambient matrix to the oblique manifold by column normalization. -/
@@ -44,7 +44,7 @@ namespace ObliqueTangent
 def project (X : Oblique m n d dev) (V : Tensor ⟨#[m, n], d, dev⟩) : ObliqueTangent m n d dev :=
   let colDotsRow : Tensor ⟨#[1, n], d, dev⟩ :=
     by simpa using Tensor.sumDim (Tensor.mul X.matrix V) 0 true
-  let colDots : Tensor ⟨#[m, n], d, dev⟩ := Tensor.expand colDotsRow #[m, n]
+  let colDots : Tensor ⟨#[m, n], d, dev⟩ := Tensor.broadcastTo colDotsRow #[m, n]
   ⟨Tensor.sub V (Tensor.mul X.matrix colDots)⟩
 
 /-- Zero tangent vector. -/

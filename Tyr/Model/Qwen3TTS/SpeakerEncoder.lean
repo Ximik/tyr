@@ -52,7 +52,7 @@ private def addBias3d {batch channels frames : Nat}
     (x : Tensor { shape := #[batch, channels, frames], dtype := dtype.val, device := device })
     (bias : Tensor { shape := #[channels], dtype := dtype.val, device := device }) : Tensor { shape := #[batch, channels, frames], dtype := dtype.val, device := device } :=
   let b : Tensor { shape := #[1, channels, 1], dtype := dtype.val, device := device } := Tensor.reshape bias #[1, channels, 1]
-  let be : Tensor { shape := #[batch, channels, frames], dtype := dtype.val, device := device } := Tensor.expand b #[batch, channels, frames]
+  let be : Tensor { shape := #[batch, channels, frames], dtype := dtype.val, device := device } := Tensor.broadcastTo b #[batch, channels, frames]
   Tensor.add x be
 
 private def getOrFirst! [Nonempty α] (xs : Array α) (i : Nat) : α :=
@@ -120,7 +120,7 @@ def forward {batch frames channels seChannels : Nat}
   let h2 : Tensor { shape := #[batch, channels, 1], dtype := dtype.val, device := device } :=
     Tensor.reshape (Tensor.conv1d h1 m.conv2Weight 1 0 1) #[batch, channels, 1]
   let gate1 := Tensor.sigmoid (addBias3d h2 m.conv2Bias)
-  let gate : Tensor { shape := #[batch, channels, frames], dtype := dtype.val, device := device } := Tensor.expand gate1 #[batch, channels, frames]
+  let gate : Tensor { shape := #[batch, channels, frames], dtype := dtype.val, device := device } := Tensor.broadcastTo gate1 #[batch, channels, frames]
   Tensor.mul x gate
 
 end SqueezeExcitationBlock
@@ -153,7 +153,7 @@ def forward {batch frames channels scale kernelSize dilation : Nat}
       let mut parts : Array (Tensor { shape := #[batch, partChannels, frames], dtype := dtype.val, device := device }) := #[]
       for i in [:scale] do
         let start := i * partChannels
-        let part : Tensor { shape := #[batch, partChannels, frames], dtype := dtype.val, device := device } := Tensor.sliceChecked x 1 start partChannels #[batch, partChannels, frames]
+        let part : Tensor { shape := #[batch, partChannels, frames], dtype := dtype.val, device := device } := Tensor.slice! x 1 start partChannels
         parts := parts.push part
 
       let mut outputs : Array (Tensor { shape := #[batch, partChannels, frames], dtype := dtype.val, device := device }) := #[]
@@ -169,7 +169,7 @@ def forward {batch frames channels scale kernelSize dilation : Nat}
         outputs := outputs.push out
         prev := out
 
-      let merged : Tensor { shape := #[batch, channels, frames], dtype := dtype.val, device := device } := Tensor.catManyChecked (outputs.map Tensor.packShape) 1 #[batch, channels, frames]
+      let merged : Tensor { shape := #[batch, channels, frames], dtype := dtype.val, device := device } := Tensor.catMany! (outputs.map Tensor.packShape) 1 #[batch, channels, frames]
       merged
 
 end Res2NetBlock
@@ -230,13 +230,13 @@ def forward {batch frames channels attentionChannels : Nat}
     (x : Tensor { shape := #[batch, channels, frames], dtype := dtype.val, device := device }) : Tensor { shape := #[batch, channels * 2, 1], dtype := dtype.val, device := device } :=
   let mean : Tensor { shape := #[batch, channels], dtype := dtype.val, device := device } := Tensor.reshape (Tensor.meanDim x 2 false) #[batch, channels]
   let mean1 : Tensor { shape := #[batch, channels, 1], dtype := dtype.val, device := device } := Tensor.reshape mean #[batch, channels, 1]
-  let meanRep : Tensor { shape := #[batch, channels, frames], dtype := dtype.val, device := device } := Tensor.expand mean1 #[batch, channels, frames]
+  let meanRep : Tensor { shape := #[batch, channels, frames], dtype := dtype.val, device := device } := Tensor.broadcastTo mean1 #[batch, channels, frames]
 
   let diff := Tensor.sub x meanRep
   let var : Tensor { shape := #[batch, channels], dtype := dtype.val, device := device } := Tensor.reshape (Tensor.meanDim (Tensor.mul diff diff) 2 false) #[batch, channels]
   let std : Tensor { shape := #[batch, channels], dtype := dtype.val, device := device } := Tensor.sqrt (Tensor.addScalar var m.eps)
   let std1 : Tensor { shape := #[batch, channels, 1], dtype := dtype.val, device := device } := Tensor.reshape std #[batch, channels, 1]
-  let stdRep : Tensor { shape := #[batch, channels, frames], dtype := dtype.val, device := device } := Tensor.expand std1 #[batch, channels, frames]
+  let stdRep : Tensor { shape := #[batch, channels, frames], dtype := dtype.val, device := device } := Tensor.broadcastTo std1 #[batch, channels, frames]
 
   let attIn12 : Tensor { shape := #[batch, channels + channels, frames], dtype := dtype.val, device := device } := Tensor.reshape (Tensor.cat x meanRep 1) #[batch, channels + channels, frames]
   let attIn : Tensor { shape := #[batch, channels * 3, frames], dtype := dtype.val, device := device } := Tensor.reshape (Tensor.cat attIn12 stdRep 1) #[batch, channels * 3, frames]
@@ -253,7 +253,7 @@ def forward {batch frames channels attentionChannels : Nat}
 
   let weightedMean : Tensor { shape := #[batch, channels], dtype := dtype.val, device := device } := by simpa using (Tensor.reshape (Tensor.sumDim (Tensor.mul attention x) 2 false) #[batch, channels])
   let weightedMean1 : Tensor { shape := #[batch, channels, 1], dtype := dtype.val, device := device } := Tensor.reshape weightedMean #[batch, channels, 1]
-  let weightedMeanRep : Tensor { shape := #[batch, channels, frames], dtype := dtype.val, device := device } := Tensor.expand weightedMean1 #[batch, channels, frames]
+  let weightedMeanRep : Tensor { shape := #[batch, channels, frames], dtype := dtype.val, device := device } := Tensor.broadcastTo weightedMean1 #[batch, channels, frames]
 
   let centered := Tensor.sub x weightedMeanRep
   let weightedVar : Tensor { shape := #[batch, channels], dtype := dtype.val, device := device } := by simpa using (Tensor.reshape (Tensor.sumDim (Tensor.mul attention (Tensor.mul centered centered)) 2 false) #[batch, channels])

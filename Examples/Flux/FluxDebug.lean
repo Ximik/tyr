@@ -278,9 +278,9 @@ def runDebug (cfg : DebugConfig) (prompt : String) : IO Unit := do
       saveDebug cfg.debugDir "txt_attn_proj" txt_attn
 
       let img_mod1_gate := Tensor.unsqueeze img_mod1_gate 1
-      let img_mod1_gate := Tensor.expand img_mod1_gate #[1, imgSeq, fluxCfg.hidden_size]
+      let img_mod1_gate := Tensor.broadcastTo img_mod1_gate #[1, imgSeq, fluxCfg.hidden_size]
       let txt_mod1_gate := Tensor.unsqueeze txt_mod1_gate 1
-      let txt_mod1_gate := Tensor.expand txt_mod1_gate #[1, txtSeq, fluxCfg.hidden_size]
+      let txt_mod1_gate := Tensor.broadcastTo txt_mod1_gate #[1, txtSeq, fluxCfg.hidden_size]
 
       let img_mid := Tensor.add img_cur (Tensor.mul img_mod1_gate img_attn)
       let txt_mid := Tensor.add txt_cur (Tensor.mul txt_mod1_gate txt_attn)
@@ -306,9 +306,9 @@ def runDebug (cfg : DebugConfig) (prompt : String) : IO Unit := do
       saveDebug cfg.debugDir "txt_mlp_out" txt_mlp_out
 
       let img_mod2_gate := Tensor.unsqueeze img_mod2_gate 1
-      let img_mod2_gate := Tensor.expand img_mod2_gate #[1, imgSeq, fluxCfg.hidden_size]
+      let img_mod2_gate := Tensor.broadcastTo img_mod2_gate #[1, imgSeq, fluxCfg.hidden_size]
       let txt_mod2_gate := Tensor.unsqueeze txt_mod2_gate 1
-      let txt_mod2_gate := Tensor.expand txt_mod2_gate #[1, txtSeq, fluxCfg.hidden_size]
+      let txt_mod2_gate := Tensor.broadcastTo txt_mod2_gate #[1, txtSeq, fluxCfg.hidden_size]
 
       let img_next := Tensor.add img_mid (Tensor.mul img_mod2_gate img_mlp_out)
       let txt_next := Tensor.add txt_mid (Tensor.mul txt_mod2_gate txt_mlp_out)

@@ -58,8 +58,8 @@ private def close {σ τ : StaticSpec} (x : Tensor σ) (y : Tensor τ) (tol : Fl
   let initial := TensorStruct.detach initial
   let imageIds ← computeImagePositionIds 2 3
   let textIds ← computeTextPositionIds 3
-  let imageIds := Tensor.expand imageIds #[2, 6, 4]
-  let textIds := Tensor.expand textIds #[2, 3, 4]
+  let imageIds := Tensor.broadcastTo imageIds #[2, 6, 4]
+  let textIds := Tensor.broadcastTo textIds #[2, 3, 4]
   let image ← randomWeight #[2, 6, 4]
   let image := image.detach
   let text ← randomWeight #[2, 3, 6]

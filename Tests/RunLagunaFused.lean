@@ -148,9 +148,9 @@ private def tileToShape {s : Shape} {source : Device} (src : SomeDTypeTensor s s
   let mut cur : ShapePackedTensor src.1 device := (srcD.reshape #[n0] (by simp [n0])).packShape
   let mut n := n0
   while n < numel do
-    cur := (Tensor.catManyChecked #[cur, cur] 0 #[n * 2]).packShape
+    cur := (Tensor.catMany! #[cur, cur] 0 #[n * 2]).packShape
     n := n * 2
-  let clipped := cur.2.sliceChecked 0 0 numel #[numel]
+  let clipped := cur.2.sliceAs! 0 0 numel #[numel]
   pure ⟨src.1, clipped.reshape shape⟩
 
 private def bfloatDynamic {σ : StaticSpec} (t : Tensor σ) : Tensor {σ with dtype := .BFloat16} :=

@@ -37,7 +37,7 @@ open torch
   let result := Tensor.conv2dBias x kernel (Tensor.full #[1] 0.5)
   LeanTest.assertEqual result.runtimeShape #[1, 1, 2, 2]
   LeanTest.assertEqual (← result.toFloatArray) #[12.5, 16.5, 24.5, 28.5]
-  let joined := Tensor.catManyChecked
+  let joined := Tensor.catMany!
     #[(Tensor.fromFloatArray #[1, 2]).packShape, (Tensor.fromFloatArray #[3]).packShape] 0 #[3]
   LeanTest.assertEqual (← joined.toFloatArray) #[1, 2, 3]
 
@@ -98,7 +98,7 @@ example (_matrix : Tensor ⟨#[2, 3], .Float32, .CPU⟩) : True := by
     let w := weights.castDType dtype
     let norm : RMSNorm 4 dtype := { weight := w, eps := ⟨0.01⟩ }
     let normalized := Tensor.rmsNormWeighted x.toFloat32 (Tensor.ones #[4]) 0.01
-    let expected := Tensor.mul (Tensor.castLike x normalized) (w.expand #[1, 2, 4])
+    let expected := Tensor.mul (Tensor.castLike x normalized) (w.broadcastTo #[1, 2, 4])
     let outputs := #[norm.forward3d x,
       (norm.forward2d (x.reshape #[2, 4])).reshape #[1, 2, 4],
       (norm.forward4d (x.reshape #[1, 1, 2, 4])).reshape #[1, 2, 4],

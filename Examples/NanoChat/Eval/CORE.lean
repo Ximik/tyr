@@ -298,7 +298,7 @@ def evaluateMC {batch seq vocab : Nat}
       let numTokens := endLossIdx - startLossIdx
 
       if numTokens > 0 then
-        let segmentLosses := Tensor.sliceChecked lossesFlat 0 startIdx numTokens #[numTokens]
+        let segmentLosses := Tensor.slice! lossesFlat 0 startIdx numTokens
         let meanLoss := Tensor.item (Tensor.meanAll segmentLosses)
         meanLosses := meanLosses.push meanLoss
       else
@@ -350,8 +350,8 @@ def evaluateLM {seq vocab : Nat}
   if numTokens == 0 then
     return { correct := false, losses := #[], prediction := 0 }
 
-  let predSlice := Tensor.sliceChecked predsFlat 0 predStartIdx numTokens #[numTokens]
-  let targetSlice := Tensor.sliceChecked targetFlat 0 startIdx numTokens #[numTokens]
+  let predSlice := Tensor.slice! predsFlat 0 predStartIdx numTokens
+  let targetSlice := Tensor.slice! targetFlat 0 startIdx numTokens
   let allCorrect := (← predSlice.toUInt64Array) == (← targetSlice.toUInt64Array)
 
   return { correct := allCorrect

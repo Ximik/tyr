@@ -238,7 +238,7 @@ private def sampleNextToken {cfg : Config}
   let logits ← moddedGpt.forward params yarn inputReshaped false
 
   -- Keep the final time step, then view its logits as one sampling row.
-  let lastLogits := Tensor.sliceChecked logits 1 (context.size - 1) 1
+  let lastLogits := Tensor.sliceAs! logits 1 (context.size - 1) 1
     #[1, 1, cfg.vocabSize]
   let rowLogits := lastLogits.reshape #[1, cfg.vocabSize]
   let scaled :=

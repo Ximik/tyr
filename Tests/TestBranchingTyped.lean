@@ -36,24 +36,23 @@ private def fixture : BranchingBridgeResult MoleculeAtom := {
   LeanTest.assertEqual converted.actualSpec.dtype .BFloat16
   LeanTest.assertEqual original.actualSpec.dtype .Float32
 
-@[test] def testBranchingStaticCopyRejectsImplicitCastAndBroadcast : IO Unit := do
+example (_dst : Tensor ⟨#[2], .Int64, .CPU⟩) (_ints : Tensor ⟨#[2], .Int64, .CPU⟩)
+    (_floats : Tensor ⟨#[2], .Float32, .CPU⟩) : True := by
+  have _ := copyIntoChecked _dst _ints
+  fail_if_success have _ := copyIntoChecked _dst _floats
+  trivial
+
+@[test] def testBranchingStaticCopyRejectsBroadcast : IO Unit := do
   let dst ← data.cloneInferenceIO (Tensor.fullInt #[2] 7)
   let fractional := Tensor.fromFloatArray #[1.75, 2.25]
-  let dtypeError ← try
-    let _ ← copyIntoChecked? dst fractional
-    pure none
-  catch error => pure (some error.toString)
-  LeanTest.assertTrue (dtypeError.any (·.containsSubstr "dtype mismatch"))
-    "Static buffer copy must reject an implicit Float32-to-Int64 cast"
-  LeanTest.assertEqual (← dst.toUInt64Array) #[7, 7]
   let shapeError ← try
-    let _ ← copyIntoChecked? dst (Tensor.fullInt #[1] 3)
+    let _ ← copyIntoChecked dst (Tensor.fullInt #[1] 3)
     pure none
   catch error => pure (some error.toString)
   LeanTest.assertTrue (shapeError.any (·.containsSubstr "shape mismatch"))
     "Static buffer copy must reject native copy_ broadcasting"
   LeanTest.assertEqual (← dst.toUInt64Array) #[7, 7]
-  let copied ← copyIntoChecked? dst (Tensor.castLike dst fractional)
+  let copied ← copyIntoChecked dst (fractional.castDType .Int64)
   LeanTest.assertEqual (← copied.toUInt64Array) #[1, 2]
 
 @[test] def testBranchingMuonPreservesBF16Rounding : IO Unit := do

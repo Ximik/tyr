@@ -234,7 +234,7 @@ private def decodeGeneratedText
     pure ""
   else
     let newSeq := outSeq - seq
-    let newOnly : Tensor { device := device, shape := #[1, newSeq], dtype := .Int64 } := Tensor.sliceChecked outIds 1 seq newSeq #[1, newSeq]
+    let newOnly : Tensor { device := device, shape := #[1, newSeq], dtype := .Int64 } := Tensor.slice! outIds 1 seq newSeq
     let flat : Tensor { device := device, shape := #[newSeq], dtype := .Int64 } := Tensor.reshape newOnly #[newSeq]
     let idsU64 ← Tensor.toUInt64Array flat
     let ids := idsU64.map (fun x => x.toUInt32)
@@ -252,7 +252,7 @@ private def decodeGeneratedTextsBatch
     pure (Array.replicate batch "")
   else
     let newSeq := outSeq - seq
-    let newOnly : Tensor { device := device, shape := #[batch, newSeq], dtype := .Int64 } := Tensor.sliceChecked outIds 1 seq newSeq #[batch, newSeq]
+    let newOnly : Tensor { device := device, shape := #[batch, newSeq], dtype := .Int64 } := Tensor.slice! outIds 1 seq newSeq
     let flat : Tensor { device := device, shape := #[batch * newSeq], dtype := .Int64 } := Tensor.reshape newOnly #[batch * newSeq]
     let idsU64 ← Tensor.toUInt64Array flat
     let rowWidth := newSeq
@@ -618,11 +618,11 @@ private def tryTranscribeWaveformsBatchedChunk
       let inputRows := bucket.rows.map (fun r => r.inputIdsRow.packShape)
       let featRows := bucket.rows.map (fun r => r.inputFeaturesRow.packShape)
       let fmaskRows := bucket.rows.map (fun r => r.featureAttentionMaskRow.packShape)
-      let inputIdsCpu : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 } := Tensor.catManyChecked inputRows 0 #[batch, seq]
+      let inputIdsCpu : Tensor { device := device, shape := #[batch, seq], dtype := .Int64 } := Tensor.catMany! inputRows 0 #[batch, seq]
       let inputFeaturesCpu : Tensor { device := device, shape := #[batch, preprocessor.featureSize, frames], dtype := .Float32 } :=
-        Tensor.catManyChecked featRows 0 #[batch, preprocessor.featureSize, frames]
+        Tensor.catMany! featRows 0 #[batch, preprocessor.featureSize, frames]
       let featureAttentionMaskCpu : Tensor { device := device, shape := #[batch, frames], dtype := .Int64 } :=
-        Tensor.catManyChecked fmaskRows 0 #[batch, frames]
+        Tensor.catMany! fmaskRows 0 #[batch, frames]
       let generated ←
         do
           model.generateGreedy

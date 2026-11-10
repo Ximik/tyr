@@ -60,7 +60,7 @@ def decodeMultipleBlocks {numBlocks seqLen : Nat}
   for i in [:numBlocks] do
     -- Extract row i: slice along batch dimension
     let start := i
-    let row : Tokens #[1, seqLen] := tensor.sliceChecked 0 start 1 #[1, seqLen]
+    let row : Tokens #[1, seqLen] := tensor.slice 0 start 1
     let rowFlat := Tensor.reshape row #[seqLen]
     let arr ← tensorToArray rowFlat
     results := results.push (asciiDecode arr)
@@ -129,7 +129,7 @@ def sampleAnimated {cfg : Config}
     let promptTensor := Tensor.fullInt #[1, cfg.seq_len] (promptTokens[i]!)
     let positions := Tensor.arange cfg.seq_len
     let posMask := Tensor.eqScalar positions i.toInt64
-    let posMaskBatch := Tensor.expand (Tensor.unsqueeze posMask 0) #[1, cfg.seq_len]
+    let posMaskBatch := Tensor.broadcastTo (Tensor.unsqueeze posMask 0) #[1, cfg.seq_len]
     x := Tensor.whereSelect posMaskBatch promptTensor x
 
   let mut maskedPositions := getMaskedPositions' x cfg.mask_token_id
@@ -259,7 +259,7 @@ def sampleAnimatedMultiple {cfg : Config}
       let tokenTensor := Tensor.fullInt #[1, cfg.seq_len] (contextTokens[i]!)
       let positions := Tensor.arange cfg.seq_len
       let posMask := Tensor.eqScalar positions i.toInt64
-      let posMaskBatch := Tensor.expand (Tensor.unsqueeze posMask 0) #[1, cfg.seq_len]
+      let posMaskBatch := Tensor.broadcastTo (Tensor.unsqueeze posMask 0) #[1, cfg.seq_len]
       x := Tensor.whereSelect posMaskBatch tokenTensor x
 
     let mut maskedPositions := getMaskedPositions' x cfg.mask_token_id

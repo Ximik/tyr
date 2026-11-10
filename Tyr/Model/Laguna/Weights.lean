@@ -129,15 +129,15 @@ private def placeholderPackedExperts (cfg : Config) (device : Device) : LagunaPa
   -- Broadcast views keep the unused placeholders small while retaining true shapes.
   let z := qwen35.zerosDynamic #[] false device
   {
-    gatePacked := ⟨.Float32, Tensor.expand z #[e, mi, h / 2]⟩
-    gateScale := ⟨.Float32, Tensor.expand z #[e, mi, h / 16]⟩
-    gateGlobal := ⟨.Float32, Tensor.expand z #[e]⟩
-    upPacked := ⟨.Float32, Tensor.expand z #[e, mi, h / 2]⟩
-    upScale := ⟨.Float32, Tensor.expand z #[e, mi, h / 16]⟩
-    upGlobal := ⟨.Float32, Tensor.expand z #[e]⟩
-    downPacked := ⟨.Float32, Tensor.expand z #[e, h, mi / 2]⟩
-    downScale := ⟨.Float32, Tensor.expand z #[e, h, mi / 16]⟩
-    downGlobal := ⟨.Float32, Tensor.expand z #[e]⟩
+    gatePacked := ⟨.Float32, Tensor.broadcastTo z #[e, mi, h / 2]⟩
+    gateScale := ⟨.Float32, Tensor.broadcastTo z #[e, mi, h / 16]⟩
+    gateGlobal := ⟨.Float32, Tensor.broadcastTo z #[e]⟩
+    upPacked := ⟨.Float32, Tensor.broadcastTo z #[e, mi, h / 2]⟩
+    upScale := ⟨.Float32, Tensor.broadcastTo z #[e, mi, h / 16]⟩
+    upGlobal := ⟨.Float32, Tensor.broadcastTo z #[e]⟩
+    downPacked := ⟨.Float32, Tensor.broadcastTo z #[e, h, mi / 2]⟩
+    downScale := ⟨.Float32, Tensor.broadcastTo z #[e, h, mi / 16]⟩
+    downGlobal := ⟨.Float32, Tensor.broadcastTo z #[e]⟩
   }
 
 /-- Load and stack the per-expert NVFP4-packed banks of one MoE layer

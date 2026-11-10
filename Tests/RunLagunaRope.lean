@@ -145,7 +145,7 @@ def main : IO Unit := do
   -- Decode step: single row at position 5 through the partial YaRN path.
   let cos1 : Tensor { shape := #[1, 32], dtype := .Float32, device := .CPU } := sliceRotaryRows cpuTables.fullCos 5 1
   let sin1 : Tensor { shape := #[1, 32], dtype := .Float32, device := .CPU } := sliceRotaryRows cpuTables.fullSin 5 1
-  let q5 := q.sliceChecked 1 5 1 #[1, 1, 4, 128]
+  let q5 := q.slice 1 5 1
   let qPos5 := applyRotaryPartial (rotary_dim := 64) q5 cos1 sin1
   let refQPos5 ← src.load "q_out_full_yarn_pos5" #[1, 1, 4, 128]
   let refQPos5 := refQPos5.2

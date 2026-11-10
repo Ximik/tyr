@@ -363,7 +363,7 @@ def encode {batch frames : Nat} {featureDType : DType}
   let x2t : Tensor { dtype := dtype, device := device, shape := #[batch, outSeq, cfg.dModel] } := (Tensor.permute x2 #[0, 2, 1]).reshape #[batch, outSeq, cfg.dModel]
   let pos : Tensor { dtype := dtype, device := device, shape := #[outSeq, cfg.dModel] } := sliceTyped m.encoderPositionalEmbedding 0 0 outSeq
   let posB : Tensor { dtype := dtype, device := device, shape := #[batch, outSeq, cfg.dModel] } :=
-    Tensor.expand (Tensor.reshape pos #[1, outSeq, cfg.dModel]) #[batch, outSeq, cfg.dModel]
+    Tensor.broadcastTo (Tensor.reshape pos #[1, outSeq, cfg.dModel]) #[batch, outSeq, cfg.dModel]
   let mut h : Tensor { dtype := dtype, device := device, shape := #[batch, outSeq, cfg.dModel] } := Tensor.add x2t posB
   for layer in m.encoderLayers do
     h := layer.forward h
@@ -380,7 +380,7 @@ def decode {batch seq encSeq : Nat}
   let tokEmb : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.dModel] } := Tensor.embedding inputIds m.decoderTokenEmbedding
   let pos : Tensor { dtype := dtype, device := device, shape := #[seq, cfg.dModel] } := sliceTyped m.decoderPositionalEmbedding 0 0 seq
   let posB : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.dModel] } :=
-    Tensor.expand (Tensor.reshape pos #[1, seq, cfg.dModel]) #[batch, seq, cfg.dModel]
+    Tensor.broadcastTo (Tensor.reshape pos #[1, seq, cfg.dModel]) #[batch, seq, cfg.dModel]
   let mut h : Tensor { dtype := dtype, device := device, shape := #[batch, seq, cfg.dModel] } := Tensor.add tokEmb posB
   for layer in m.decoderLayers do
     h := layer.forward h encoderHidden
@@ -470,7 +470,7 @@ def decodeStepWithCache {batch encSeq cap : Nat}
   let pos : Tensor { dtype := dtype, device := device, shape := #[1, cfg.dModel] } :=
     m.model.decoderPositionalEmbedding.slice 0 position 1 (by simp) (by simp; omega)
   let posB : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.dModel] } :=
-    Tensor.expand (Tensor.reshape pos #[1, 1, cfg.dModel]) #[batch, 1, cfg.dModel]
+    Tensor.broadcastTo (Tensor.reshape pos #[1, 1, cfg.dModel]) #[batch, 1, cfg.dModel]
   let mut h : Tensor { dtype := dtype, device := device, shape := #[batch, 1, cfg.dModel] } := Tensor.add tokEmb posB
   if selfCaches.position != position then
     throw <| IO.userError s!"Whisper cache position {selfCaches.position} does not match decode position {position}"

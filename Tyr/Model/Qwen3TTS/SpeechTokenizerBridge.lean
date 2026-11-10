@@ -202,8 +202,8 @@ private def computeSpeakerMelFromWave
   if frames == 0 then
     throw <| IO.userError "Speaker mel extraction produced zero frames."
 
-  let re3 : Tensor { shape := #[freqBins, frames, 1], dtype := .Float32, device := .CPU } := Tensor.sliceChecked spec 2 0 1 #[freqBins, frames, 1]
-  let im3 : Tensor { shape := #[freqBins, frames, 1], dtype := .Float32, device := .CPU } := Tensor.sliceChecked spec 2 1 1 #[freqBins, frames, 1]
+  let re3 : Tensor { shape := #[freqBins, frames, 1], dtype := .Float32, device := .CPU } := Tensor.slice spec 2 0 1
+  let im3 : Tensor { shape := #[freqBins, frames, 1], dtype := .Float32, device := .CPU } := Tensor.slice spec 2 1 1
   let re : Tensor { shape := #[freqBins, frames], dtype := .Float32, device := .CPU } := Tensor.reshape re3 #[freqBins, frames]
   let im : Tensor { shape := #[freqBins, frames], dtype := .Float32, device := .CPU } := Tensor.reshape im3 #[freqBins, frames]
   let mag : Tensor { shape := #[freqBins, frames], dtype := .Float32, device := .CPU } := Tensor.sqrt ((re * re) + (im * im) + (1e-9 : Float))

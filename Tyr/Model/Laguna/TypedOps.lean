@@ -24,7 +24,7 @@ def transposeAttention {b s h d : Nat} {dt : DType}
 
 def sliceTyped {s : Shape} {d : DType} (x : Tensor { device := device, shape := s, dtype := d })
     (dim : Nat) (start len : Nat) : Tensor { device := device, shape := (s.set! dim len), dtype := d } :=
-  x.sliceChecked dim start len (s.set! dim len)
+  x.slice! dim start len
 
 def randnDynamic (shape : Shape) (device : Device := .CPU) (dtype : DType := .Float32) : IO (Tensor { dtype := dtype, device := device, shape := shape }) := do
   IO.ofExcept ((← Tensor.randn (device := device) shape).castDType? dtype)

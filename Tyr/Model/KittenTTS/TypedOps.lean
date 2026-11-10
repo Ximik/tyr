@@ -13,7 +13,7 @@ def catTo {s t : Shape} {d : DType} (x : Tensor { shape := s, dtype := d, device
 def affine2d {batch input output : Nat}
     (x : Tensor { shape := #[batch, input], dtype := .Float32, device := device }) (w : Tensor { shape := #[output, input], dtype := .Float32, device := device })
     (bias : Tensor { shape := #[output], dtype := .Float32, device := device }) : Tensor { shape := #[batch, output], dtype := .Float32, device := device } :=
-  Tensor.linear x w + (bias.reshape #[1, output]).expand #[batch, output]
+  Tensor.linear x w + (bias.reshape #[1, output]).broadcastTo #[batch, output]
 
 def bmm {batch rows inner cols : Nat} (a : Tensor { shape := #[batch, rows, inner], dtype := .Float32, device := device })
     (b : Tensor { shape := #[batch, inner, cols], dtype := .Float32, device := device }) : Tensor { shape := #[batch, rows, cols], dtype := .Float32, device := device } :=
@@ -46,7 +46,7 @@ def istftTensor {s : Shape} (input : Tensor { shape := s, dtype := .Float32, dev
   Tensor.ofRaw! "istftTensor" (RawTensor.istft input.raw nFft hopLength winLength window.raw center normalized length)
 
 def sliceTensor {s : Shape} {d : DType} (x : Tensor { shape := s, dtype := d, device := device }) (dim : Nat) (start len : Nat) :
-    Tensor { shape := (s.set! dim len), dtype := d, device := device } := x.sliceChecked dim start len (s.set! dim len)
+    Tensor { shape := (s.set! dim len), dtype := d, device := device } := x.slice! dim start len
 
 def stftTensor {n winLength : Nat} {out : Shape} (input : Tensor { shape := #[n], dtype := .Float32, device := device })
     (nFft hopLength : Nat) (window : Tensor { shape := #[winLength], dtype := .Float32, device := device })

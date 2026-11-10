@@ -8,7 +8,7 @@ namespace torch.RawTensor
 
 @[extern "lean_torch_conv2d_bias"] opaque conv2dBias!
     (input weight bias : @& RawTensor) (stride padding dilation : Array Nat) : RawTensor
-@[extern "lean_torch_cat_dyn"] opaque catMany (tensors : @& Array RawTensor) (dim : @& Nat) : RawTensor
+@[extern "lean_torch_cat_dyn"] opaque catMany! (tensors : @& Array RawTensor) (dim : @& Nat) : RawTensor
 @[extern "lean_torch_arange"] opaque arange (start stop step : @& Nat) : RawTensor
 @[extern "lean_torch_tensor_sin"] opaque sin! (t : @& RawTensor) : RawTensor
 @[extern "lean_torch_tensor_cos"] opaque cos! (t : @& RawTensor) : RawTensor
@@ -109,5 +109,5 @@ namespace torch.RawTensor
 end torch.RawTensor
 
 namespace torch.RawTensor
-@[extern "lean_torch_cat_dyn_checked"] opaque catManyChecked (tensors : @& Array RawTensor) (dim : @& Nat) : Except String RawTensor
+@[extern "lean_torch_cat_dyn_checked"] opaque catMany? (tensors : @& Array RawTensor) (dim : @& Nat) : Except String RawTensor
 end torch.RawTensor

@@ -1797,7 +1797,7 @@ def reinforcementLearning (cfg : NanoChatConfig) : PipelineM Unit := do
       -- Flatten logits and extract last position's vocab slice
       let logitsFlat := logits.reshape #[context.size * modelCfg.vocabSize]
       let startIdx := (context.size - 1) * modelCfg.vocabSize
-      let lastLogits := logitsFlat.sliceChecked 0 startIdx modelCfg.vocabSize #[modelCfg.vocabSize]
+      let lastLogits := logitsFlat.slice! 0 startIdx modelCfg.vocabSize
       let rowLogits := lastLogits.reshape #[1, modelCfg.vocabSize]
       let scaled := if grpoCfg.temperature == 1.0 then rowLogits
                     else Tensor.mulScalar rowLogits (1.0 / grpoCfg.temperature)

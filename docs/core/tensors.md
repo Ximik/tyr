@@ -92,13 +92,14 @@ Selection has its own scalar relocation rule; see
 
 `reshape` takes a proof that the element counts are equal; its default tactic
 finds it for most shapes. When the counts only agree under a runtime condition,
-check it with `if h : … then t.reshape s h else throw …`. `#[]` means a scalar. `sliceChecked` validates the
-claimed result of a runtime slice. Other transforms include `transpose`,
+check it with `if h : … then t.reshape s h else throw …`. `#[]` means a scalar. `slice` computes
+its result shape and requires axis and bound proofs; `slice!` skips the proofs,
+and `sliceAs!` admits the result at a shape the caller claims. Other transforms include `transpose`,
 `permute`, `unsqueeze`, `squeeze`, and `unbind`.
 
 Use `Tensor.packShape` to package a runtime-dependent shape existentially.
-`catMany?` accepts indexed existential tensors and checks the requested output
-specification; `catManyChecked` prints a diagnostic and aborts on mismatch.
+`catMany?` accepts indexed existential tensors and returns invalid inputs as
+errors; `catMany!` aborts on them.
 A dynamic shape does not require pretending that a tensor is a scalar.
 
 Reduction indices follow native accumulation rules. For example, integer sums
