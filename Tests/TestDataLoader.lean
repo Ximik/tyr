@@ -78,7 +78,7 @@ private def documentTokens : Array UInt64 :=
   for pair in #[(91, 92), (101, 102), (201, 202), (202, 203), (301, 302), (401, 402), (501, 502)] do
     let i := values.toList.idxOf pair.1
     LeanTest.assertEqual (values[i + 1]?) (some pair.2) "Document-internal order is preserved"
-  LeanTest.assertEqual next.currentPos documentTokens.size
+  LeanTest.assertEqual next.currentPos.val documentTokens.size
 
 @[test] def testShuffleDeterminism : IO Unit := do
   let tokens : Tensor { shape := #[documentTokens.size], dtype := .Int64, device := .CPU } := (Tensor.fromInt64Array (documentTokens.map UInt64.toInt64)).reshape #[documentTokens.size]
@@ -129,7 +129,7 @@ private def documentTokens : Array UInt64 :=
     let (tail, gen) ← gen.nextTokens 6
     LeanTest.assertEqual (← readTokens tail) (Array.replicate 6 (if rank == 0 then 101 else 201))
       "Tokens beyond the former one-million limit are consumed"
-    LeanTest.assertEqual gen.iterator.shard.bosFinder.currentPos partition
+    LeanTest.assertEqual gen.iterator.shard.bosFinder.currentPos.val partition
 
 @[test] def testDataLoaderRankPartitionsCoverUnequalFiles : IO Unit := IO.FS.withTempDir fun dir => do
   let path := dir / "tokens.bin"

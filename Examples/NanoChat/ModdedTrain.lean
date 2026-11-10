@@ -659,7 +659,7 @@ private def captureDataCursor (gen : DistributedDataGenerator) : DataCursor := {
   globalStep := gen.globalStep
   epoch := gen.iterator.epoch
   batchCount := gen.iterator.batchCount
-  bosCurrentPos := gen.iterator.shard.bosFinder.currentPos
+  bosCurrentPos := gen.iterator.shard.bosFinder.currentPos.val
   streamCursor? := some gen.cursor
 }
 

@@ -229,9 +229,12 @@ def NanoChatConfig.toModelConfig? (cfg : NanoChatConfig) : Except String moddedG
     | throw s!"model dim {modelDim} (depth {cfg.modelDepth} * aspect ratio {cfg.modelAspectRatio}) does not split into heads of even width"
   let ⟨hVocab⟩ ← if h : 0 < cfg.vocabSize then pure (PLift.up h) else
     throw "VOCAB_SIZE must be positive"
+  let ⟨hSeq⟩ ← if h : 0 < cfg.maxSeqLen then pure (PLift.up h) else
+    throw "MAX_SEQ_LEN must be positive"
   pure {
     vocabSize := cfg.vocabSize
     vocabPos := hVocab
+    maxSeqLenPos := hSeq
     nLayer := cfg.modelDepth
     nHead
     halfHeadDim
